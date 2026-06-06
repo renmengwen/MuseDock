@@ -15,6 +15,7 @@ app.use('/api/douyin', require('./routes/douyin'));
 app.use('/api/xhs', require('./routes/xhs'));
 app.use('/api/history', require('./routes/history'));
 app.use('/api/media', require('./routes/media'));
+app.use('/api/agents', require('./routes/agents'));
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();

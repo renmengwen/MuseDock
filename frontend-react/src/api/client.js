@@ -79,4 +79,17 @@ export const api = {
   transcribeDouyinMedia(awemeId) {
     return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/transcribe`, { method: 'POST' });
   },
+  createDouyinAgentRun(awemeId, template = 'viral_rewrite') {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template }),
+    });
+  },
+  listDouyinAgentRuns(awemeId) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`);
+  },
+  getDouyinAgentRun(awemeId, runId) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}`);
+  },
 };
