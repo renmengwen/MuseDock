@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Status } from '../components/Status.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { getAgentResultSections, getAgentStepLabel, getRunDisplayTime } from '../utils/agentRuns.js';
+import { getAwemeIdFromSearch } from '../utils/workspaceParams.js';
 
 function ResultSection({ section }) {
   const items = Array.isArray(section.items) ? section.items.filter(Boolean) : [];
@@ -34,7 +36,9 @@ function StepStatus({ label, done, detail }) {
 }
 
 export function AiWorkspace() {
-  const [awemeId, setAwemeId] = useState('');
+  const location = useLocation();
+  const initialAwemeId = useMemo(() => getAwemeIdFromSearch(location.search), [location.search]);
+  const [awemeId, setAwemeId] = useState(initialAwemeId);
   const [mediaStatus, setMediaStatus] = useState(null);
   const [runs, setRuns] = useState([]);
   const [activeRun, setActiveRun] = useState(null);
@@ -66,8 +70,15 @@ export function AiWorkspace() {
   const mediaReady = videoReady && audioReady;
   const selectedAwemeId = mediaStatus?.aweme_id || awemeId.trim();
 
-  async function loadWorkspace() {
-    const value = awemeId.trim();
+  useEffect(() => {
+    const nextAwemeId = getAwemeIdFromSearch(location.search);
+    if (!nextAwemeId) return;
+    setAwemeId(nextAwemeId);
+    loadWorkspace(nextAwemeId).catch(() => {});
+  }, [location.search]);
+
+  async function loadWorkspace(explicitAwemeId = '') {
+    const value = (explicitAwemeId || awemeId).trim();
     if (!value) {
       setStatus({ type: 'error', message: '请输入抖音视频 aweme_id' });
       return;
@@ -93,7 +104,7 @@ export function AiWorkspace() {
   }
 
   async function runAgent() {
-    const value = awemeId.trim();
+    const value = selectedAwemeId.trim();
     if (!value) {
       setStatus({ type: 'error', message: '请输入抖音视频 aweme_id' });
       return;

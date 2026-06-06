@@ -1,4 +1,5 @@
 const fsp = require('fs/promises');
+const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const aiModelConfig = require('./aiModelConfig');
@@ -9,9 +10,21 @@ const DEFAULT_MIMO_ASR_MODEL = 'mimo-v2.5-asr';
 const MIMO_MAX_BASE64_AUDIO_BYTES = 10 * 1024 * 1024;
 const DEFAULT_ASR_SEGMENT_SECONDS = 180;
 const FFMPEG_INSTALLER_PACKAGE = '@ffmpeg-installer/ffmpeg';
+const AWEME_ID_PATTERN = /^\d{5,32}$/;
 
 function getMediaDir(awemeId, rootDir = DEFAULT_ROOT) {
-  return path.join(rootDir, String(awemeId));
+  const id = String(awemeId || '');
+  if (!AWEME_ID_PATTERN.test(id)) {
+    throw new Error('Invalid aweme_id');
+  }
+
+  const rootPath = path.resolve(rootDir);
+  const dir = path.resolve(rootPath, id);
+  const relative = path.relative(rootPath, dir);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('aweme_id resolves outside media root');
+  }
+  return dir;
 }
 
 function getMediaPaths(awemeId, rootDir = DEFAULT_ROOT) {
@@ -35,6 +48,22 @@ async function fileExists(filePath) {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function getFileInfo(filePath) {
+  if (!filePath) return null;
+  try {
+    const stats = await fsp.stat(filePath);
+    if (!stats.isFile()) return null;
+    return {
+      path: filePath,
+      name: path.basename(filePath),
+      bytes: stats.size,
+      updated_at: stats.mtime.toISOString(),
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -481,11 +510,11 @@ async function extractFrames(videoPath, framesDir, options = {}) {
   if (!result.ok) {
     return { status: 'failed', error: result.error || result.stderr || `ffmpeg exited ${result.code}` };
   }
-  const frames = await listFrames(framesDir);
+  const frames = await listFramePaths(framesDir);
   return { status: 'done', path: framesDir, count: frames.length, frames };
 }
 
-async function listFrames(framesDir) {
+async function listFramePaths(framesDir) {
   try {
     const names = await fsp.readdir(framesDir);
     return names
@@ -497,8 +526,24 @@ async function listFrames(framesDir) {
   }
 }
 
+async function listFrameAssets(framesDir, awemeId = '') {
+  const framePaths = await listFramePaths(framesDir);
+  const frames = [];
+  for (const framePath of framePaths) {
+    const info = await getFileInfo(framePath);
+    if (!info) continue;
+    frames.push({
+      ...info,
+      preview_url: awemeId
+        ? `/api/media/douyin/${encodeURIComponent(String(awemeId))}/files/frames/${encodeURIComponent(info.name)}`
+        : '',
+    });
+  }
+  return frames;
+}
+
 async function buildAnalysisInput(awemeId, paths, metadata, steps) {
-  const frames = await listFrames(paths.framesDir);
+  const frames = await listFramePaths(paths.framesDir);
   const transcript = await readJsonIfExists(paths.transcript);
   const transcriptStep = transcript
     ? { status: transcript.status || (transcript.success ? 'done' : 'failed'), path: paths.transcript, message: transcript.message || '' }
@@ -569,7 +614,7 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
 
   const hasVideo = await fileExists(paths.video);
   const hasAudio = await fileExists(paths.audio);
-  const existingFrames = await listFrames(paths.framesDir);
+  const existingFrames = await listFramePaths(paths.framesDir);
   if (!hasVideo) {
     steps.audio = { status: 'skipped', message: 'video.mp4 is not available' };
     steps.frames = { status: 'skipped', message: 'video.mp4 is not available' };
@@ -607,9 +652,13 @@ async function getStatus(awemeId, options = {}) {
   const metadata = await readJsonIfExists(paths.metadata);
   const analysisInput = await readJsonIfExists(paths.analysisInput);
   const transcript = await readJsonIfExists(paths.transcript);
-  const frames = await listFrames(paths.framesDir);
-  const videoExists = await fileExists(paths.video);
-  const audioExists = await fileExists(paths.audio);
+  const frames = await listFrameAssets(paths.framesDir, awemeId);
+  const metadataInfo = await getFileInfo(paths.metadata);
+  const videoInfo = await getFileInfo(paths.video);
+  const audioInfo = await getFileInfo(paths.audio);
+  const transcriptInfo = await getFileInfo(paths.transcript);
+  const videoExists = !!videoInfo;
+  const audioExists = !!audioInfo;
 
   return {
     success: true,
@@ -620,6 +669,14 @@ async function getStatus(awemeId, options = {}) {
     analysis_input: analysisInput,
     transcript,
     frames,
+    assets: {
+      dir: { path: paths.dir, exists: fs.existsSync(paths.dir) },
+      metadata: metadataInfo,
+      video: videoInfo,
+      audio: audioInfo,
+      transcript: transcriptInfo,
+      frames_dir: { path: paths.framesDir, exists: fs.existsSync(paths.framesDir), count: frames.length },
+    },
     steps: {
       metadata: metadata ? { status: 'done', path: paths.metadata } : { status: 'missing' },
       video: videoExists ? { status: 'done', path: paths.video } : { status: 'missing' },
@@ -628,6 +685,100 @@ async function getStatus(awemeId, options = {}) {
       transcript: transcript ? { status: 'done', path: paths.transcript } : { status: 'not_requested' },
     },
   };
+}
+
+function resolveMediaOpenTarget(awemeId, target = 'dir', options = {}) {
+  const paths = getMediaPaths(awemeId, options.rootDir);
+  const targetMap = {
+    dir: paths.dir,
+    metadata: paths.metadata,
+    video: paths.video,
+    audio: paths.audio,
+    frames: paths.framesDir,
+    transcript: paths.transcript,
+  };
+  const targetPath = targetMap[target];
+  if (!targetPath) {
+    throw new Error('Unsupported media target');
+  }
+
+  const rootPath = path.resolve(paths.dir);
+  const resolvedTarget = path.resolve(targetPath);
+  const relative = path.relative(rootPath, resolvedTarget);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Media target is outside asset directory');
+  }
+  return resolvedTarget;
+}
+
+async function openInExplorer(awemeId, target = 'dir', options = {}) {
+  const targetPath = resolveMediaOpenTarget(awemeId, target, options);
+  const stats = await fsp.stat(targetPath);
+  const command = process.platform === 'win32' ? 'cmd.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = process.platform === 'win32'
+    ? [
+      '/c',
+      'start',
+      '',
+      'explorer.exe',
+      stats.isDirectory() ? targetPath : `/select,${targetPath}`,
+    ]
+    : [stats.isDirectory() ? targetPath : path.dirname(targetPath)];
+
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.unref();
+      resolve();
+    }, 250);
+    child.once('error', error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0 || process.platform === 'win32') {
+        resolve();
+        return;
+      }
+      reject(new Error(`Open command exited with code ${code}`));
+    });
+  });
+  return { success: true, path: targetPath };
+}
+
+function resolveFrameFile(awemeId, frameName, options = {}) {
+  const paths = getMediaPaths(awemeId, options.rootDir);
+  const name = String(frameName || '');
+  if (!name || path.basename(name) !== name) {
+    throw new Error('Invalid frame name');
+  }
+  const targetPath = path.resolve(paths.framesDir, name);
+  const framesRoot = path.resolve(paths.framesDir);
+  const relative = path.relative(framesRoot, targetPath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Frame file is outside frames directory');
+  }
+  const allowedFrames = fs.existsSync(paths.framesDir)
+    ? fs.readdirSync(paths.framesDir)
+      .filter(item => /\.(jpg|jpeg|png)$/i.test(item))
+      .map(item => path.basename(item))
+    : [];
+  if (!allowedFrames.includes(name)) {
+    throw new Error('Frame file is not available');
+  }
+  const stats = fs.statSync(targetPath);
+  if (!stats.isFile()) {
+    throw new Error('Frame file is not available');
+  }
+  return targetPath;
 }
 
 async function transcribeAudio(awemeId, options = {}) {
@@ -700,6 +851,9 @@ module.exports = {
   DEFAULT_ROOT,
   getMediaDir,
   getMediaPaths,
+  resolveMediaOpenTarget,
+  openInExplorer,
+  resolveFrameFile,
   prepareDouyinMedia,
   getStatus,
   transcribeAudio,

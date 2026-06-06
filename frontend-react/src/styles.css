@@ -73,6 +73,13 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .tableScroll { max-height: 62vh; overflow: auto; border-radius: 8px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .tableScroll table { box-shadow: none; border-radius: 0; min-width: 980px; }
 .tableScroll th { position: sticky; top: 0; z-index: 10; }
+.titleClamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
 .titleCell { max-width: 430px; word-break: break-word; }
 .cover { width: 80px; height: 60px; object-fit: cover; border-radius: 4px; }
 .statusPill { display: inline-flex; align-items: center; justify-content: center; min-width: 64px; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -125,12 +132,15 @@ a { color: #fe2c55; text-decoration: none; }
 .workspaceIntro h2 { margin: 0 0 6px; font-size: 20px; }
 .workspaceIntro p { margin: 0; color: #69717e; font-size: 13px; }
 .mediaPanel { background: #fff; border: 1px solid #e7e9ee; border-radius: 8px; padding: 20px; }
-.mediaHeader { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+.mediaHeader { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 12px; }
 .mediaHeader h2 { margin: 0 0 6px; font-size: 18px; line-height: 1.35; }
 .mediaHeader p { margin: 0; color: #69717e; font-size: 13px; }
-.mediaActions { display: flex; gap: 10px; flex-wrap: wrap; }
+.mediaActions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.primaryActionGroup .btn { min-width: 112px; }
+.mediaUtilityBar { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; padding: 10px 0 14px; border-bottom: 1px solid #edf0f4; margin-bottom: 4px; }
+.mediaUtilityBar .btn { min-height: 32px; padding: 7px 12px; font-size: 13px; }
 .assetGrid { display: grid; gap: 10px; }
-.assetRow { display: grid; grid-template-columns: 88px 112px 1fr; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid #edf0f4; }
+.assetRow { display: grid; grid-template-columns: 88px 112px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid #edf0f4; }
 .assetLabel { color: #5f6876; font-size: 13px; font-weight: 600; }
 .assetDetail { color: #69717e; font-size: 12px; word-break: break-all; }
 .stepBadge { display: inline-flex; justify-content: center; min-width: 78px; border-radius: 999px; padding: 4px 10px; font-size: 12px; background: #eef0f4; color: #30343b; }
@@ -142,9 +152,24 @@ a { color: #fe2c55; text-decoration: none; }
 .transcriptHeader span { color: #858d9a; font-size: 12px; }
 .transcriptBlock pre { max-height: 360px; overflow: auto; margin: 0; padding: 12px; color: #30343b; font-family: inherit; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
 .pathBlock { margin-top: 18px; padding: 12px; background: #fafbfc; border: 1px solid #edf0f4; border-radius: 8px; }
+.pathHeader, .framesHeader, .previewHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .pathBlock code, .workspaceIntro code { display: block; margin-top: 6px; color: #30343b; word-break: break-all; }
 .framesStrip { margin-top: 16px; display: grid; gap: 8px; }
-.framePath { padding: 8px 10px; background: #fafbfc; border: 1px solid #edf0f4; border-radius: 6px; color: #69717e; font-size: 12px; word-break: break-all; }
+.framesHeader span { color: #69717e; font-size: 13px; }
+.framesGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.frameCard { appearance: none; border: 1px solid #edf0f4; border-radius: 8px; background: #fff; padding: 8px; text-align: left; cursor: pointer; display: grid; gap: 6px; min-width: 0; }
+.frameCard:hover { border-color: #2563eb; box-shadow: 0 8px 24px rgba(37,99,235,.12); }
+.frameCard img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: #f3f5f8; }
+.frameName { font-size: 13px; font-weight: 700; color: #30343b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frameMeta { color: #69717e; font-size: 12px; }
+.framePath { color: #69717e; font-size: 12px; word-break: break-all; max-height: 34px; overflow: hidden; }
+.frameCard:hover .framePath { color: #1d4ed8; background: #eff6ff; border-radius: 4px; padding: 2px 4px; max-height: none; }
+.imagePreviewModal { width: min(920px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; background: #fff; border-radius: 8px; padding: 14px; box-shadow: 0 20px 60px rgba(15,23,42,.25); display: grid; gap: 12px; }
+.imagePreviewModal img { width: 100%; max-height: 70vh; object-fit: contain; background: #0f172a; border-radius: 6px; }
+.imagePreviewModal code { color: #30343b; word-break: break-all; font-size: 12px; }
+.previewHeader div { display: grid; gap: 2px; }
+.previewHeader span { color: #69717e; font-size: 12px; }
+.btn.tiny { min-height: 28px; padding: 5px 9px; font-size: 12px; }
 .placeholderPanel { background: #fff; border: 1px solid #e7e9ee; border-radius: 8px; padding: 22px; }
 .placeholderPanel h2 { margin: 0 0 10px; font-size: 20px; }
 .placeholderPanel p { margin: 8px 0 0; color: #69717e; font-size: 14px; }

@@ -79,6 +79,13 @@ export const api = {
   transcribeDouyinMedia(awemeId) {
     return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/transcribe`, { method: 'POST' });
   },
+  openDouyinMediaTarget(awemeId, target = 'dir') {
+    return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/open`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target }),
+    });
+  },
   createDouyinAgentRun(awemeId, template = 'viral_rewrite') {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',

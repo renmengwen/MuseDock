@@ -44,7 +44,7 @@ export function ConfigurableTable({
         >
           {columns.map(column => {
             const checked = isColumnVisible(column.id);
-            const disableHide = checked && visibleIds.length <= 1;
+            const disableHide = column.alwaysVisible || (checked && visibleIds.length <= 1);
             return (
               <DropdownMenuCheckboxItem
                 key={column.id}

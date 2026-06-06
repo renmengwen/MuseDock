@@ -55,8 +55,10 @@ export function useDouyinComments() {
         loading: false,
         loadingText: '',
       });
+      return json;
     } catch (error) {
       setCommentsState(prev => ({ ...prev, hint: error.message, loading: false, loadingText: '' }));
+      throw error;
     }
   }
 

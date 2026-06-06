@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
 import { useDouyinComments } from '../hooks/useDouyinComments.js';
 import { setSelectedMediaItem } from '../state/mediaSelection.js';
+import { getCommentCacheFromResponse, updateCommentCacheForAweme } from '../utils/commentCache.js';
 import { filterByTitle } from '../utils/content.js';
 import { getDouyinAwemeId } from '../utils/format.js';
 
@@ -50,6 +51,16 @@ export function RecordsPage() {
     navigate(`/media/douyin/${awemeId}`);
   }
 
+  async function refreshLatestComments() {
+    const json = await comments.refreshLatestComments();
+    const awemeId = comments.commentsState.awemeId;
+    setResults(current => updateCommentCacheForAweme(
+      current,
+      awemeId,
+      getCommentCacheFromResponse(json),
+    ));
+  }
+
   return (
     <main className="container">
       <PlatformTabs base="records" />
@@ -79,7 +90,7 @@ export function RecordsPage() {
         open={comments.commentOpen}
         commentsState={comments.commentsState}
         onClose={() => comments.setCommentOpen(false)}
-        onRefreshLatest={comments.refreshLatestComments}
+        onRefreshLatest={refreshLatestComments}
       />
     </main>
   );

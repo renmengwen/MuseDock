@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button.jsx';
 import { ConfigurableTable } from './data-table/ConfigurableTable.jsx';
 import { formatTime, getDouyinAwemeId, getDouyinUrl } from '../utils/format.js';
 import { formatDuration, getContentTypeLabel } from '../utils/content.js';
+import { createIndexColumn, getTitleText } from '../utils/tableColumns.js';
 
 function getAuthorName(item = {}) {
   if (item.author && typeof item.author === 'object') {
@@ -18,7 +19,16 @@ function StatusPill({ ok, okText, pendingText, error }) {
 
 function createDouyinColumns(onComments, onPrepareMedia) {
   return [
-    { id: 'title', label: '标题', className: 'min-w-[260px] max-w-[430px] break-words', render: item => item.title || item.description || '-' },
+    createIndexColumn(),
+    {
+      id: 'title',
+      label: '标题',
+      className: 'min-w-[260px] max-w-[430px]',
+      render: item => {
+        const title = getTitleText(item);
+        return <span className="titleClamp" title={title}>{title}</span>;
+      },
+    },
     { id: 'type', label: '类型', className: 'min-w-[88px]', render: item => getContentTypeLabel(item, 'douyin') },
     { id: 'duration', label: '视频时长', className: 'min-w-[96px]', render: item => formatDuration(item) },
     { id: 'author', label: '作者', className: 'min-w-[120px]', render: item => getAuthorName(item) },
@@ -87,8 +97,17 @@ function createDouyinColumns(onComments, onPrepareMedia) {
 
 function createXhsColumns() {
   return [
+    createIndexColumn(),
     { id: 'cover', label: '封面', className: 'min-w-[96px]', render: item => (item.cover_url ? <img className="cover" src={item.cover_url} alt="" /> : '-') },
-    { id: 'title', label: '标题', className: 'min-w-[260px] max-w-[430px] break-words', render: item => item.title || item.description || '-' },
+    {
+      id: 'title',
+      label: '标题',
+      className: 'min-w-[260px] max-w-[430px]',
+      render: item => {
+        const title = getTitleText(item);
+        return <span className="titleClamp" title={title}>{title}</span>;
+      },
+    },
     { id: 'type', label: '类型', className: 'min-w-[88px]', render: item => getContentTypeLabel(item, 'xhs') },
     { id: 'duration', label: '视频时长', className: 'min-w-[96px]', render: item => formatDuration(item) },
     { id: 'createdAt', label: '发布日期', className: 'min-w-[136px]', render: item => formatTime(item.publish_time || item.create_time || item.last_update_time) },

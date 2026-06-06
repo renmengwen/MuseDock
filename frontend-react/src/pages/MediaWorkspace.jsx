@@ -33,6 +33,7 @@ export function MediaWorkspace() {
   const [status, setStatus] = useState(null);
   const [preparing, setPreparing] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [openingTarget, setOpeningTarget] = useState('');
   const [prepareProgress, setPrepareProgress] = useState(0);
   const [transcribeProgress, setTranscribeProgress] = useState(0);
 
@@ -166,6 +167,33 @@ export function MediaWorkspace() {
     }
   }
 
+  async function openMediaTarget(target = 'dir') {
+    if (openingTarget) return;
+    if (!selectedAwemeId) {
+      setStatus({ type: 'error', message: '请先选择或准备一个抖音视频素材' });
+      return;
+    }
+
+    setOpeningTarget(target);
+    setStatus({ type: 'loading', message: '正在打开本地资源管理器...' });
+    try {
+      await api.openDouyinMediaTarget(selectedAwemeId, target);
+      setStatus({ type: 'success', message: '已请求打开本地资源管理器' });
+    } catch (error) {
+      setStatus({ type: 'error', message: `打开资源管理器失败：${error.message}` });
+    } finally {
+      setOpeningTarget('');
+    }
+  }
+
+  function goToAiWorkspace() {
+    if (!selectedAwemeId) {
+      setStatus({ type: 'error', message: '请先选择或准备一个抖音视频素材' });
+      return;
+    }
+    navigate(`/ai?aweme_id=${encodeURIComponent(selectedAwemeId)}`);
+  }
+
   function selectAwemeId() {
     const awemeId = awemeIdInput.trim();
     if (!awemeId) {
@@ -232,6 +260,9 @@ export function MediaWorkspace() {
         onPrepare={() => prepareMedia(false)}
         onForcePrepare={() => prepareMedia(true)}
         onTranscribe={transcribeMedia}
+        onOpenTarget={openMediaTarget}
+        openingTarget={openingTarget}
+        onGoToAiWorkspace={goToAiWorkspace}
       />
     </main>
   );

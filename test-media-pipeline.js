@@ -54,6 +54,68 @@ async function run() {
   assert.strictEqual(status.steps.audio.status, 'missing');
   assert.strictEqual(status.steps.frames.status, 'missing');
 
+  const assetPaths = mediaPipeline.getMediaPaths('1234567890', rootDir);
+  fs.mkdirSync(assetPaths.framesDir, { recursive: true });
+  fs.writeFileSync(assetPaths.metadata, JSON.stringify({ aweme_id: '1234567890', title: 'A test video' }));
+  fs.writeFileSync(assetPaths.video, Buffer.alloc(10, 1));
+  fs.writeFileSync(assetPaths.audio, Buffer.alloc(8, 2));
+  fs.writeFileSync(path.join(assetPaths.framesDir, 'frame-0001.jpg'), Buffer.alloc(5, 3));
+  fs.writeFileSync(path.join(assetPaths.framesDir, 'frame-0002.jpg'), Buffer.alloc(7, 4));
+
+  const statusWithAssets = await mediaPipeline.getStatus('1234567890', { rootDir });
+  assert.strictEqual(statusWithAssets.assets.dir.path, assetPaths.dir);
+  assert.strictEqual(statusWithAssets.assets.video.bytes, 10);
+  assert.strictEqual(statusWithAssets.assets.audio.bytes, 8);
+  assert.strictEqual(statusWithAssets.frames.length, 2);
+  assert.deepStrictEqual(
+    statusWithAssets.frames.map(frame => ({
+      name: frame.name,
+      bytes: frame.bytes,
+      preview_url: frame.preview_url,
+    })),
+    [
+      {
+        name: 'frame-0001.jpg',
+        bytes: 5,
+        preview_url: '/api/media/douyin/1234567890/files/frames/frame-0001.jpg',
+      },
+      {
+        name: 'frame-0002.jpg',
+        bytes: 7,
+        preview_url: '/api/media/douyin/1234567890/files/frames/frame-0002.jpg',
+      },
+    ],
+  );
+  assert.strictEqual(
+    mediaPipeline.resolveMediaOpenTarget('1234567890', 'video', { rootDir }),
+    assetPaths.video,
+  );
+  assert.throws(
+    () => mediaPipeline.resolveMediaOpenTarget('..\\..\\outside', 'dir', { rootDir }),
+    /Invalid aweme_id|outside media root/,
+  );
+  assert.throws(
+    () => mediaPipeline.resolveMediaOpenTarget('../outside', 'dir', { rootDir }),
+    /Invalid aweme_id|outside media root/,
+  );
+  assert.throws(
+    () => mediaPipeline.resolveMediaOpenTarget('1234567890', '..\\..\\Windows', { rootDir }),
+    /Unsupported media target/,
+  );
+  assert.strictEqual(
+    mediaPipeline.resolveFrameFile('1234567890', 'frame-0001.jpg', { rootDir }),
+    path.join(assetPaths.framesDir, 'frame-0001.jpg'),
+  );
+  fs.writeFileSync(path.join(assetPaths.framesDir, 'note.txt'), 'not a frame');
+  assert.throws(
+    () => mediaPipeline.resolveFrameFile('1234567890', 'note.txt', { rootDir }),
+    /Frame file is not available/,
+  );
+  assert.throws(
+    () => mediaPipeline.resolveFrameFile('..\\..\\outside', 'frame-0001.jpg', { rootDir }),
+    /Invalid aweme_id|outside media root/,
+  );
+
   const transcribe = await mediaPipeline.transcribeAudio('1234567890', {
     rootDir,
     env: {

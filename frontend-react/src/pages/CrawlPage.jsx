@@ -12,6 +12,7 @@ import { Select } from '@/components/ui/select.jsx';
 import { useDouyinComments } from '../hooks/useDouyinComments.js';
 import { useDouyinLogin } from '../hooks/useDouyinLogin.js';
 import { setSelectedMediaItem } from '../state/mediaSelection.js';
+import { getCommentCacheFromResponse, updateCommentCacheForAweme } from '../utils/commentCache.js';
 import { filterByTitle, withCrawlTimestamp } from '../utils/content.js';
 import { getDouyinAwemeId } from '../utils/format.js';
 
@@ -125,6 +126,16 @@ export function CrawlPage() {
     navigate(`/media/douyin/${awemeId}`);
   }
 
+  async function refreshLatestComments() {
+    const json = await comments.refreshLatestComments();
+    const awemeId = comments.commentsState.awemeId;
+    setResults(current => updateCommentCacheForAweme(
+      current,
+      awemeId,
+      getCommentCacheFromResponse(json),
+    ));
+  }
+
   return (
     <main className="container">
       <PlatformTabs base="crawl" />
@@ -180,7 +191,7 @@ export function CrawlPage() {
         open={comments.commentOpen}
         commentsState={comments.commentsState}
         onClose={() => comments.setCommentOpen(false)}
-        onRefreshLatest={comments.refreshLatestComments}
+        onRefreshLatest={refreshLatestComments}
       />
     </main>
   );

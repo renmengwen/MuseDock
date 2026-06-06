@@ -51,6 +51,25 @@ router.get('/douyin/:aweme_id/status', async (req, res) => {
   }
 });
 
+router.post('/douyin/:aweme_id/open', async (req, res) => {
+  try {
+    const target = req.body?.target || req.query.target || 'dir';
+    const result = await mediaPipeline.openInExplorer(req.params.aweme_id, target);
+    return res.json({ ...result, target });
+  } catch (error) {
+    return res.status(400).json({ success: false, aweme_id: req.params.aweme_id, error: error.message });
+  }
+});
+
+router.get('/douyin/:aweme_id/files/frames/:frame_name', async (req, res) => {
+  try {
+    const framePath = mediaPipeline.resolveFrameFile(req.params.aweme_id, req.params.frame_name);
+    return res.sendFile(framePath);
+  } catch (error) {
+    return res.status(400).json({ success: false, aweme_id: req.params.aweme_id, error: error.message });
+  }
+});
+
 router.post('/douyin/:aweme_id/transcribe', async (req, res) => {
   try {
     const result = await mediaPipeline.transcribeAudio(req.params.aweme_id);

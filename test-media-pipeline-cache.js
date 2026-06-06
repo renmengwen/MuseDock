@@ -10,7 +10,7 @@ const {
 
 (async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mediacrawler-media-'));
-  const awemeId = 'v1';
+  const awemeId = '12345678901';
   const paths = getMediaPaths(awemeId, rootDir);
   await fsp.mkdir(paths.framesDir, { recursive: true });
   await fsp.writeFile(paths.video, 'video');
@@ -20,7 +20,7 @@ const {
   const result = await prepareDouyinMedia(awemeId, {
     aweme_id: awemeId,
     title: 'cached',
-    aweme_url: 'https://www.douyin.com/video/v1',
+    aweme_url: `https://www.douyin.com/video/${awemeId}`,
     video_download_url: '',
   }, {
     rootDir,

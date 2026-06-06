@@ -7,11 +7,13 @@ function getDefaultVisibleIds(columns) {
 
 function normalizeVisibleIds(value, columns) {
   const validIds = new Set(columns.map(column => column.id));
+  const requiredIds = columns.filter(column => column.alwaysVisible).map(column => column.id);
   const normalized = Array.isArray(value)
     ? value.filter(id => typeof id === 'string' && validIds.has(id))
     : [];
 
-  return normalized.length ? normalized : getDefaultVisibleIds(columns);
+  const visibleIds = normalized.length ? normalized : getDefaultVisibleIds(columns);
+  return Array.from(new Set([...requiredIds, ...visibleIds]));
 }
 
 function areSameIds(a, b) {

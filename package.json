@@ -17,7 +17,7 @@
     "dev": "node server/index.js",
     "dev:frontend": "vite --config frontend-react/vite.config.js",
     "build:frontend": "vite build --config frontend-react/vite.config.js",
-    "test": "node test-ai-text-model.js && node test-agent-runs.js && node test-agent-run-utils.mjs && node test-media-pipeline.js && node test-media-pipeline-cache.js && node test-content-utils.mjs",
+    "test": "node test-ai-text-model.js && node test-agent-runs.js && node test-agent-run-utils.mjs && node test-media-pipeline.js && node test-media-pipeline-cache.js && node test-content-utils.mjs && node test-media-assets-utils.mjs && node test-table-utils.mjs && node test-workspace-params.mjs && node test-comment-cache-utils.mjs",
     "test:ai-text": "node test-ai-text-model.js",
     "test:agent": "node test-ai-text-model.js && node test-agent-runs.js",
     "test:agent-utils": "node test-agent-run-utils.mjs"
