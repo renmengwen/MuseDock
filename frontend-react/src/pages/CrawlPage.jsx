@@ -46,6 +46,10 @@ export function CrawlPage() {
   const filteredResults = useMemo(() => filterByTitle(results, titleQuery), [results, titleQuery]);
 
   useEffect(() => {
+    setTitleQuery('');
+  }, [platform]);
+
+  useEffect(() => {
     if (platform === 'xhs' && crawlMode !== 'keyword') {
       setCrawlMode('keyword');
       setInputValue('');
@@ -89,17 +93,20 @@ export function CrawlPage() {
 
       if (json.needLogin) {
         setResults([]);
+        setTitleQuery('');
         setStatus({ type: 'info', message: json.message || '需要先登录' });
         return;
       }
       if (json.needVerify) {
         setResults(json.data || []);
+        setTitleQuery('');
         setStatus({ type: 'info', message: json.message || '需要完成验证码' });
         return;
       }
 
       const data = json.data || [];
       setResults(data);
+      setTitleQuery('');
       setStatus({
         type: data.length ? 'success' : 'error',
         message: data.length ? `抓取完成，共 ${data.length} 条` : `未获取到数据（耗时 ${json.elapsed || '?'}）`,

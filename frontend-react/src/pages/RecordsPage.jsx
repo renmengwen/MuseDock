@@ -34,6 +34,7 @@ export function RecordsPage() {
     try {
       const json = await api.getHistory(platform);
       setResults(json.data || []);
+      setTitleQuery('');
       setStatus({ type: 'success', message: `已加载 ${json.count || 0} 条历史记录` });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
