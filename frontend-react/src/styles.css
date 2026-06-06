@@ -61,6 +61,10 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .legacyTable { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .legacyTable th, .legacyTable td { padding: 12px 14px; border-bottom: 1px solid #edf0f4; font-size: 13px; text-align: left; vertical-align: top; }
 .legacyTable th { background: #fafbfc; color: #5f6876; }
+.tableShell { width: 100%; }
+.tableScroll { max-height: 62vh; overflow: auto; border-radius: 8px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.tableScroll table { box-shadow: none; border-radius: 0; min-width: 980px; }
+.tableScroll th { position: sticky; top: 0; z-index: 10; }
 .titleCell { max-width: 430px; word-break: break-word; }
 .cover { width: 80px; height: 60px; object-fit: cover; border-radius: 4px; }
 a { color: #fe2c55; text-decoration: none; }
