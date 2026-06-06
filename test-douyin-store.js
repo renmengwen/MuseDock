@@ -25,6 +25,8 @@ saveDouyinVideos([
     url: 'https://www.douyin.com/video/v1',
     cover_url: 'cover',
     keyword: 'codex',
+    duration_ms: 18000,
+    aweme_type: 0,
   },
 ], db);
 
@@ -38,6 +40,8 @@ saveDouyinVideos([
     url: 'https://www.douyin.com/video/v1',
     cover_url: 'cover2',
     keyword: 'codex',
+    video: { duration: 22000 },
+    aweme_type: 0,
   },
 ], db);
 
@@ -47,6 +51,8 @@ assert.equal(video.nickname, 'Alice 2');
 assert.equal(video.liked_count, 20);
 assert.equal(video.comment_count, 5);
 assert.equal(video.source_keyword, 'codex');
+assert.equal(video.duration_ms, 22000);
+assert.equal(video.aweme_type, '0');
 
 saveDouyinComments('v1', [
   {

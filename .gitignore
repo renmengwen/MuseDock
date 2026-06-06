@@ -13,6 +13,7 @@ data/*.db-*
 data/crawler.db
 data/mediacrawler.db
 data/media/
+data/config/
 browser_data/
 chrome-user-data/
 douyin-cookies.json

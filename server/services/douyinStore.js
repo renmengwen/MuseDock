@@ -5,6 +5,13 @@ function toInt(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function toDurationMs(item = {}) {
+  const value = item.duration_ms ?? item.video_duration_ms ?? item.duration ?? item.video?.duration ?? item.raw?.video?.duration;
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return parsed < 1000 ? parsed * 1000 : parsed;
+}
+
 function normalizeVideo(item = {}) {
   const statistics = item.statistics || {};
   const author = item.author && typeof item.author === 'object'
@@ -32,6 +39,7 @@ function normalizeVideo(item = {}) {
     aweme_url: item.aweme_url || item.url || (item.aweme_id ? `https://www.douyin.com/video/${item.aweme_id}` : ''),
     cover_url: item.cover_url || '',
     video_download_url: item.video_download_url || '',
+    duration_ms: toDurationMs(item),
     music_download_url: item.music_download_url || '',
     note_download_url: Array.isArray(item.note_download_url) ? item.note_download_url.join(',') : (item.note_download_url || ''),
     source_keyword: item.source_keyword || item.keyword || '',
@@ -44,13 +52,13 @@ function saveDouyinVideos(items = [], db = defaultDb) {
       aweme_id, aweme_type, title, description, create_time,
       user_id, sec_uid, short_user_id, user_unique_id, user_signature,
       nickname, avatar, liked_count, collected_count, comment_count, share_count,
-      ip_location, aweme_url, cover_url, video_download_url, music_download_url,
+      ip_location, aweme_url, cover_url, video_download_url, duration_ms, music_download_url,
       note_download_url, source_keyword, crawled_at
     ) VALUES (
       @aweme_id, @aweme_type, @title, @description, @create_time,
       @user_id, @sec_uid, @short_user_id, @user_unique_id, @user_signature,
       @nickname, @avatar, @liked_count, @collected_count, @comment_count, @share_count,
-      @ip_location, @aweme_url, @cover_url, @video_download_url, @music_download_url,
+      @ip_location, @aweme_url, @cover_url, @video_download_url, @duration_ms, @music_download_url,
       @note_download_url, @source_keyword, strftime('%s','now')
     )
     ON CONFLICT(aweme_id) DO UPDATE SET
@@ -73,6 +81,7 @@ function saveDouyinVideos(items = [], db = defaultDb) {
       aweme_url=excluded.aweme_url,
       cover_url=excluded.cover_url,
       video_download_url=COALESCE(NULLIF(excluded.video_download_url, ''), video_download_url),
+      duration_ms=COALESCE(NULLIF(excluded.duration_ms, 0), duration_ms),
       music_download_url=COALESCE(NULLIF(excluded.music_download_url, ''), music_download_url),
       note_download_url=COALESCE(NULLIF(excluded.note_download_url, ''), note_download_url),
       source_keyword=COALESCE(NULLIF(excluded.source_keyword, ''), source_keyword),
