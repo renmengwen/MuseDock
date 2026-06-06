@@ -18,7 +18,8 @@
     "dev:frontend": "vite --config frontend-react/vite.config.js",
     "build:frontend": "vite build --config frontend-react/vite.config.js",
     "test:ai-text": "node test-ai-text-model.js",
-    "test:agent": "node test-ai-text-model.js && node test-agent-runs.js"
+    "test:agent": "node test-ai-text-model.js && node test-agent-runs.js",
+    "test:agent-utils": "node test-agent-run-utils.mjs"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
