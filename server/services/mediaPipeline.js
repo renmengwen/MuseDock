@@ -2,8 +2,12 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
+const aiModelConfig = require('./aiModelConfig');
 
 const DEFAULT_ROOT = path.join(__dirname, '../../data/media/douyin');
+const DEFAULT_MIMO_BASE_URL = 'https://api.xiaomimimo.com/v1';
+const DEFAULT_MIMO_ASR_MODEL = 'mimo-v2.5-asr';
+const MIMO_MAX_BASE64_AUDIO_BYTES = 10 * 1024 * 1024;
 
 function getMediaDir(awemeId, rootDir = DEFAULT_ROOT) {
   return path.join(rootDir, String(awemeId));
@@ -48,6 +52,125 @@ function stripRawMetadata(metadata) {
 async function writeJson(filePath, data) {
   await fsp.mkdir(path.dirname(filePath), { recursive: true });
   await fsp.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function getAudioMimeType(audioPath) {
+  const ext = path.extname(audioPath).toLowerCase();
+  if (ext === '.wav') return 'audio/wav';
+  if (ext === '.mp3') return 'audio/mpeg';
+  return 'application/octet-stream';
+}
+
+function normalizeProvider(value) {
+  return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+async function resolveAsrRuntime(options = {}) {
+  const env = options.env || process.env;
+  const storedConfig = options.asrConfig || await aiModelConfig.getRuntimeConfig('asr', {
+    configPath: options.configPath,
+  });
+  const storedEnabled = storedConfig?.enabled === true && !!storedConfig.apiKey;
+  const provider = normalizeProvider(env.ASR_PROVIDER || env.MIMO_PROVIDER || (storedEnabled ? storedConfig.provider : ''));
+  const isMimo = provider === 'mimo' || provider === 'xiaomi' || provider === 'xiaomimimo';
+
+  if (isMimo) {
+    return {
+      configured: !!(env.MIMO_API_KEY || env.ASR_API_KEY || (storedEnabled ? storedConfig.apiKey : '')),
+      provider: 'mimo',
+      apiKey: env.MIMO_API_KEY || env.ASR_API_KEY || (storedEnabled ? storedConfig.apiKey : ''),
+      baseUrl: (env.MIMO_BASE_URL || env.ASR_BASE_URL || storedConfig?.baseUrl || DEFAULT_MIMO_BASE_URL).replace(/\/+$/, ''),
+      modelId: env.MIMO_ASR_MODEL || env.ASR_MODEL || storedConfig?.modelId || DEFAULT_MIMO_ASR_MODEL,
+      language: env.ASR_LANGUAGE || env.MIMO_ASR_LANGUAGE || 'auto',
+    };
+  }
+
+  const legacyApiKey = env.OPENAI_API_KEY || env.ASR_API_KEY || (storedEnabled ? storedConfig.apiKey : '');
+  return {
+    configured: !!legacyApiKey,
+    provider: provider || normalizeProvider(storedConfig?.provider) || '',
+    apiKey: legacyApiKey,
+    baseUrl: env.ASR_BASE_URL || storedConfig?.baseUrl || '',
+    modelId: env.ASR_MODEL || storedConfig?.modelId || '',
+    language: env.ASR_LANGUAGE || 'auto',
+  };
+}
+
+async function transcribeWithMimo(audioPath, config, options = {}) {
+  const fetchImpl = options.fetchImpl || fetch;
+  const audioBuffer = await fsp.readFile(audioPath);
+  const audioBase64 = audioBuffer.toString('base64');
+  const maxBase64AudioBytes = options.maxBase64AudioBytes || MIMO_MAX_BASE64_AUDIO_BYTES;
+
+  if (Buffer.byteLength(audioBase64, 'utf-8') > maxBase64AudioBytes) {
+    return {
+      success: false,
+      status: 'audio_too_large',
+      message: '音频文件过大，MiMo ASR 要求 base64 编码后的音频不超过 10MB，请先压缩或切片后重试。',
+    };
+  }
+
+  const response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': config.apiKey,
+    },
+    body: JSON.stringify({
+      model: config.modelId || DEFAULT_MIMO_ASR_MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_audio',
+              input_audio: {
+                data: `data:${getAudioMimeType(audioPath)};base64,${audioBase64}`,
+              },
+            },
+          ],
+        },
+      ],
+      asr_options: {
+        language: config.language || 'auto',
+      },
+    }),
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const detail = payload?.error?.message || payload?.message || `HTTP ${response.status}`;
+    return {
+      success: false,
+      status: 'failed',
+      message: `音频转写失败：${detail}`,
+      raw_response: payload,
+    };
+  }
+
+  const text = payload?.choices?.[0]?.message?.content;
+  if (!text || typeof text !== 'string') {
+    return {
+      success: false,
+      status: 'failed',
+      message: '音频转写失败：MiMo ASR 未返回有效文本。',
+      raw_response: payload,
+    };
+  }
+
+  return {
+    success: true,
+    status: 'done',
+    message: '音频转写完成。',
+    text,
+    raw_response: payload,
+  };
 }
 
 function runCommand(command, args, options = {}) {
@@ -269,10 +392,9 @@ async function getStatus(awemeId, options = {}) {
 }
 
 async function transcribeAudio(awemeId, options = {}) {
-  const env = options.env || process.env;
   const paths = getMediaPaths(awemeId, options.rootDir);
-  const apiKey = env.OPENAI_API_KEY || env.ASR_API_KEY;
-  if (!apiKey) {
+  const asrConfig = await resolveAsrRuntime(options);
+  if (!asrConfig.configured) {
     const result = {
       success: false,
       configured: false,
@@ -298,11 +420,29 @@ async function transcribeAudio(awemeId, options = {}) {
     };
   }
 
+  if (asrConfig.provider === 'mimo') {
+    const providerResult = await transcribeWithMimo(paths.audio, asrConfig, options);
+    const result = {
+      ...providerResult,
+      configured: true,
+      provider: 'mimo',
+      model: asrConfig.modelId || DEFAULT_MIMO_ASR_MODEL,
+      aweme_id: String(awemeId),
+      transcript_path: paths.transcript,
+    };
+    await writeJson(paths.transcript, {
+      ...result,
+      audio_path: paths.audio,
+      updated_at: new Date().toISOString(),
+    });
+    return result;
+  }
+
   const result = {
     success: false,
     configured: true,
     aweme_id: String(awemeId),
-    message: 'ASR provider is configured, but the concrete transcription call is not implemented in this MVP.',
+    message: 'ASR provider is configured, but only MiMo ASR is implemented now. Set ASR_PROVIDER=mimo or configure provider as mimo.',
     transcript_path: paths.transcript,
   };
   await writeJson(paths.transcript, {

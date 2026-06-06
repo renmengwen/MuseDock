@@ -80,8 +80,13 @@ npm run dev:frontend
 | `MEDIACRAWLER_DB_PATH` | SQLite 数据库路径 | `data/mediacrawler.db` |
 | `OPENAI_API_KEY` | ASR 或后续 AI 能力可用的 API Key | 空 |
 | `ASR_API_KEY` | ASR 服务 API Key | 空 |
+| `ASR_PROVIDER` | ASR 服务提供商；接入小米 MiMo 时填写 `mimo` | 空 |
+| `MIMO_API_KEY` | 小米 MiMo API Key；未设置时会回退读取 `ASR_API_KEY` | 空 |
+| `MIMO_BASE_URL` | 小米 MiMo API Base URL | `https://api.xiaomimimo.com/v1` |
+| `MIMO_ASR_MODEL` | 小米 MiMo ASR 模型 ID | `mimo-v2.5-asr` |
+| `ASR_LANGUAGE` | MiMo ASR 识别语言，支持 `auto`、`zh`、`en` | `auto` |
 
-当前 ASR 接口仍是 MVP 骨架：检测到 `OPENAI_API_KEY` 或 `ASR_API_KEY` 后会识别为已配置，但具体转写调用还需要继续实现。
+当前 ASR 已接入小米 MiMo。也可以在“设置”页的 ASR 转写模型中配置：供应商填写 `mimo`，Base URL 填写 `https://api.xiaomimimo.com/v1`，模型 ID 填写 `mimo-v2.5-asr`，API Key 填写 MiMo 控制台密钥。MiMo 要求 base64 编码后的音频不超过 10MB，较长视频请先压缩或切片。
 
 ## 目录结构
 

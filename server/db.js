@@ -29,12 +29,18 @@ function initializeSchema(db) {
       aweme_url TEXT,
       cover_url TEXT,
       video_download_url TEXT,
+      duration_ms INTEGER,
       music_download_url TEXT,
       note_download_url TEXT,
       source_keyword TEXT,
       crawled_at INTEGER DEFAULT (strftime('%s','now'))
     )
   `);
+
+  const douyinColumns = db.prepare('PRAGMA table_info(douyin_videos)').all().map(column => column.name);
+  if (!douyinColumns.includes('duration_ms')) {
+    db.exec('ALTER TABLE douyin_videos ADD COLUMN duration_ms INTEGER');
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS douyin_comments (

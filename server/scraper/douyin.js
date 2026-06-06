@@ -385,6 +385,8 @@ function parseDouyinSearchResponse(response, keyword, maxCount = 20) {
       comment_count: statistics.comment_count || 0,
       url: `https://www.douyin.com/video/${aweme.aweme_id}`,
       cover_url: pickUrl(cover),
+      aweme_type: aweme.aweme_type ?? '',
+      duration_ms: aweme.video?.duration || 0,
       keyword,
     });
 
@@ -575,7 +577,14 @@ async function fetchDouyinSearchByApi(context, page, keyword, maxCount, diagnost
     await new Promise(resolve => setTimeout(resolve, 800));
   }
 
-  return { needVerify: false, data: all };
+  const data = await enrichDouyinItemsWithDetails(all, {
+    context,
+    page,
+    diagnostic,
+    nowSeconds: Math.floor(Date.now() / 1000),
+  });
+
+  return { needVerify: false, data };
 }
 
 async function fetchJsonWithDouyinEnv(context, page, uri, params, referer, diagnosticKey, diagnostic) {
@@ -637,6 +646,7 @@ function parseDouyinVideoDetail(response) {
     aweme_id: String(aweme.aweme_id),
     title,
     description: aweme.desc || '',
+    aweme_type: aweme.aweme_type ?? '',
     create_time: aweme.create_time || 0,
     author: {
       nickname: author.nickname || '',
@@ -645,6 +655,7 @@ function parseDouyinVideoDetail(response) {
     },
     statistics: aweme.statistics || {},
     cover_url: pickUrl(aweme.video?.cover) || pickUrl(aweme.video?.origin_cover) || pickUrl(aweme.video?.dynamic_cover),
+    duration_ms: aweme.video?.duration || 0,
     video_download_url: extractDouyinVideoDownloadUrl(aweme),
     music_download_url: extractDouyinMusicDownloadUrl(aweme),
     aweme_url: `https://www.douyin.com/video/${aweme.aweme_id}`,
@@ -700,6 +711,70 @@ function parseDouyinAwemeList(response, sourceKeyword = '', maxCount = 20) {
     .map(row => ({ ...parseDouyinVideoDetail(row), keyword: sourceKeyword }))
     .filter(item => item.aweme_id)
     .slice(0, maxCount);
+}
+
+function needsDouyinDetailEnrichment(item = {}) {
+  return (!item.aweme_type && item.aweme_type !== 0) || !item.duration_ms || !item.video_download_url;
+}
+
+async function getVideoDetailWithPage(context, page, awemeId, diagnostic = {}) {
+  const env = await getDouyinRequestEnv(page, context);
+  const params = {
+    ...buildDouyinSearchParams('', 1, '', 0, env),
+    aweme_id: awemeId,
+  };
+  delete params.keyword;
+  delete params.search_channel;
+  delete params.search_source;
+  delete params.query_correct_type;
+  delete params.is_filter_search;
+  delete params.from_group_id;
+  delete params.need_filter_settings;
+  delete params.list_type;
+  delete params.search_id;
+
+  const json = await fetchJsonWithDouyinEnv(
+    context,
+    page,
+    '/aweme/v1/web/aweme/detail/',
+    params,
+    `https://www.douyin.com/video/${awemeId}`,
+    'detailApi',
+    diagnostic,
+  );
+  return parseDouyinVideoDetail(json);
+}
+
+async function enrichDouyinItemsWithDetails(items = [], options = {}) {
+  const nowSeconds = options.nowSeconds || Math.floor(Date.now() / 1000);
+  const enriched = [];
+
+  for (const item of items) {
+    const base = { ...item, crawled_at: item.crawled_at || nowSeconds };
+    if (!base.aweme_id || !needsDouyinDetailEnrichment(base)) {
+      enriched.push(base);
+      continue;
+    }
+
+    try {
+      let detailResult = null;
+      if (options.getDetail) {
+        detailResult = await options.getDetail(base.aweme_id);
+      } else if (options.context && options.page) {
+        detailResult = {
+          success: true,
+          data: await getVideoDetailWithPage(options.context, options.page, base.aweme_id, options.diagnostic || {}),
+        };
+      }
+      const detail = detailResult?.success ? detailResult.data : null;
+      enriched.push(detail ? { ...base, ...detail, crawled_at: base.crawled_at } : base);
+    } catch (error) {
+      console.warn(`[Douyin] enrich detail failed for ${base.aweme_id}:`, error.message);
+      enriched.push(base);
+    }
+  }
+
+  return enriched;
 }
 
 async function createDouyinApiPage(diagnostic) {
@@ -1521,6 +1596,7 @@ module.exports = {
   parseDouyinComment,
   parseDouyinSearchResponse,
   parseDouyinVideoDetail,
+  enrichDouyinItemsWithDetails,
   getVideoDetail,
   getVideosByIds,
   getCreatorVideos,

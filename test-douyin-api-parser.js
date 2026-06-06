@@ -6,6 +6,7 @@ const {
   shouldSignDouyinApi,
   isDouyinCaptchaTitle,
   parseDouyinComment,
+  enrichDouyinItemsWithDetails,
   parseDouyinSearchResponse,
 } = require('./server/scraper/douyin');
 
@@ -53,7 +54,8 @@ function testParsesAwemeSearchData() {
           create_time: 1780000100,
           author: { nickname: 'Alice' },
           statistics: { digg_count: 123, comment_count: 45 },
-          video: { cover: { url_list: ['https://example.test/cover.jpg'] } },
+          aweme_type: 0,
+          video: { duration: 61000, cover: { url_list: ['https://example.test/cover.jpg'] } },
         },
       },
       {
@@ -84,6 +86,8 @@ function testParsesAwemeSearchData() {
       comment_count: 45,
       url: 'https://www.douyin.com/video/7420001',
       cover_url: 'https://example.test/cover.jpg',
+      aweme_type: 0,
+      duration_ms: 61000,
       keyword: 'codex',
     },
     {
@@ -95,9 +99,51 @@ function testParsesAwemeSearchData() {
       comment_count: 0,
       url: 'https://www.douyin.com/video/7420002',
       cover_url: '',
+      aweme_type: '',
+      duration_ms: 0,
       keyword: 'codex',
     },
   ]);
+}
+
+async function testEnrichesSearchDataWithDetailsAndCrawlTime() {
+  const now = 1780734200;
+  const items = [
+    {
+      aweme_id: '7420001',
+      title: 'missing metadata',
+      url: 'https://www.douyin.com/video/7420001',
+    },
+  ];
+
+  const enriched = await enrichDouyinItemsWithDetails(items, {
+    nowSeconds: now,
+    getDetail: async (awemeId) => ({
+      success: true,
+      data: {
+        aweme_id: awemeId,
+        aweme_type: 0,
+        duration_ms: 125000,
+        video_download_url: 'https://cdn.test/video.mp4',
+      },
+    }),
+  });
+
+  assert.equal(enriched[0].aweme_type, 0);
+  assert.equal(enriched[0].duration_ms, 125000);
+  assert.equal(enriched[0].video_download_url, 'https://cdn.test/video.mp4');
+  assert.equal(enriched[0].crawled_at, now);
+}
+
+async function testKeepsSearchDataWhenDetailFails() {
+  const items = [{ aweme_id: '7420002', title: 'fallback' }];
+  const enriched = await enrichDouyinItemsWithDetails(items, {
+    nowSeconds: 1780734300,
+    getDetail: async () => ({ success: false, error: 'detail failed' }),
+  });
+
+  assert.equal(enriched[0].title, 'fallback');
+  assert.equal(enriched[0].crawled_at, 1780734300);
 }
 
 function testParsesCommentWithReplies() {
@@ -146,11 +192,20 @@ function testParsesCommentWithReplies() {
   });
 }
 
-testBuildsSearchParams();
-testDetectsCaptchaTitle();
-testRejectsCaptchaPageAsUsableLogin();
-testSignsCommentApisButNotSearch();
-testGeneratesABogusForComments();
-testParsesAwemeSearchData();
-testParsesCommentWithReplies();
-console.log('douyin api parser tests passed');
+async function run() {
+  testBuildsSearchParams();
+  testDetectsCaptchaTitle();
+  testRejectsCaptchaPageAsUsableLogin();
+  testSignsCommentApisButNotSearch();
+  testGeneratesABogusForComments();
+  testParsesAwemeSearchData();
+  await testEnrichesSearchDataWithDetailsAndCrawlTime();
+  await testKeepsSearchDataWhenDetailFails();
+  testParsesCommentWithReplies();
+  console.log('douyin api parser tests passed');
+}
+
+run().catch(error => {
+  console.error(error);
+  process.exit(1);
+});
