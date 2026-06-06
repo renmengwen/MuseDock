@@ -18,11 +18,27 @@ function createRunId(template = TEMPLATE_VIRAL_REWRITE) {
   return `${stamp}-${random}-${template}`;
 }
 
+function isSafeId(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text || text !== path.basename(text)) return false;
+  if (text.includes('..') || text.includes('/') || text.includes('\\')) return false;
+  return /^[A-Za-z0-9_.-]+$/.test(text);
+}
+
 function isSafeRunId(runId) {
-  const value = typeof runId === 'string' ? runId : '';
+  const value = typeof runId === 'string' ? runId.trim() : '';
   if (!value || value !== path.basename(value)) return false;
   if (value.includes('..') || value.includes('/') || value.includes('\\')) return false;
   return /^[A-Za-z0-9_.-]+$/.test(value);
+}
+
+function createInvalidAwemeResult(awemeId) {
+  return {
+    success: false,
+    status: 'failed',
+    aweme_id: String(awemeId || ''),
+    message: '非法或无效的视频素材 ID',
+  };
 }
 
 function getAgentRunsDir(awemeId, rootDir) {
@@ -199,6 +215,10 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   const rootDir = options.rootDir;
   const steps = [];
 
+  if (!isSafeId(awemeId)) {
+    return createInvalidAwemeResult(awemeId);
+  }
+
   if (template !== TEMPLATE_VIRAL_REWRITE) {
     return createFailureRun(awemeId, template, '暂不支持该 Agent 模板。', {
       rootDir,
@@ -326,6 +346,13 @@ async function createDouyinAgentRun(awemeId, options = {}) {
 }
 
 async function listDouyinAgentRuns(awemeId, options = {}) {
+  if (!isSafeId(awemeId)) {
+    return {
+      ...createInvalidAwemeResult(awemeId),
+      data: [],
+    };
+  }
+
   const dir = getAgentRunsDir(awemeId, options.rootDir);
   let names;
   try {
@@ -352,6 +379,10 @@ async function listDouyinAgentRuns(awemeId, options = {}) {
 }
 
 async function getDouyinAgentRun(awemeId, runId, options = {}) {
+  if (!isSafeId(awemeId)) {
+    return createInvalidAwemeResult(awemeId);
+  }
+
   if (!isSafeRunId(runId)) {
     return {
       success: false,

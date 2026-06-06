@@ -15,6 +15,58 @@ async function run() {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-runs-test-'));
   const awemeId = '1234567890';
   const paths = mediaPipeline.getMediaPaths(awemeId, rootDir);
+  const illegalAwemeId = '..\\agent-runs-escape';
+  const escapedDir = path.resolve(rootDir, '..', 'agent-runs-escape');
+  const escapedRunsDir = path.join(escapedDir, 'agent_runs');
+  const escapedRunPath = path.join(escapedRunsDir, '20260607-000000-000Z-abcdef-viral_rewrite.json');
+
+  await writeJson(path.join(escapedDir, 'metadata.json'), {
+    aweme_id: 'escape',
+    title: '不应读取的素材',
+  });
+  await writeJson(path.join(escapedDir, 'analysis_input.json'), {
+    aweme_id: 'escape',
+    video: { title: '不应读取的素材', author: {}, statistics: {} },
+    steps: {},
+  });
+  await writeJson(path.join(escapedDir, 'transcript.json'), {
+    success: true,
+    status: 'done',
+    text: '不应进入模型调用的转写文本',
+  });
+  await writeJson(escapedRunPath, {
+    success: true,
+    run_id: '20260607-000000-000Z-abcdef-viral_rewrite',
+    template: 'viral_rewrite',
+    result: { summary: '不应读回' },
+  });
+  const escapedRunCountBefore = fs.readdirSync(escapedRunsDir).length;
+
+  let illegalCreateModelCalled = false;
+  const illegalCreate = await agentRuns.createDouyinAgentRun(illegalAwemeId, {
+    rootDir,
+    template: 'viral_rewrite',
+    aiTextModel: {
+      callTextModel: async () => {
+        illegalCreateModelCalled = true;
+        return { success: true, text: '{}' };
+      },
+    },
+    getLocalComments: () => ({ success: true, count: 0, data: [] }),
+  });
+  assert.strictEqual(illegalCreate.success, false);
+  assert.strictEqual(illegalCreate.status, 'failed');
+  assert.match(illegalCreate.message, /非法|无效/);
+  assert.strictEqual(illegalCreateModelCalled, false);
+  assert.strictEqual(fs.readdirSync(escapedRunsDir).length, escapedRunCountBefore);
+
+  const illegalList = await agentRuns.listDouyinAgentRuns(illegalAwemeId, { rootDir });
+  assert.strictEqual(illegalList.success, false);
+  assert.match(illegalList.message, /非法|无效/);
+
+  const illegalGet = await agentRuns.getDouyinAgentRun(illegalAwemeId, '20260607-000000-000Z-abcdef-viral_rewrite', { rootDir });
+  assert.strictEqual(illegalGet.success, false);
+  assert.match(illegalGet.message, /非法|无效/);
 
   const missing = await agentRuns.createDouyinAgentRun(awemeId, {
     rootDir,
