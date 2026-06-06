@@ -9,7 +9,7 @@ router.post('/douyin/:aweme_id/runs', async (req, res) => {
     const result = await agentRuns.createDouyinAgentRun(req.params.aweme_id, {
       template: req.body?.template || TEMPLATE_VIRAL_REWRITE,
     });
-    return res.status(result.success ? 200 : 400).json(result);
+    return res.json(result);
   } catch (error) {
     return res.status(500).json({
       success: false,

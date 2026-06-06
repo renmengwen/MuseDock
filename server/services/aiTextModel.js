@@ -62,9 +62,10 @@ async function callTextModel(options = {}) {
     configPath,
     fetchImpl = global.fetch,
     temperature = 0.4,
+    textConfig,
   } = options;
 
-  const config = await aiModelConfig.getRuntimeConfig('text', { configPath });
+  const config = textConfig || await aiModelConfig.getRuntimeConfig('text', { configPath });
   const provider = normalizeString(config && config.provider);
   const apiKey = normalizeString(config && config.apiKey);
   const baseUrl = normalizeBaseUrl(config && config.baseUrl);

@@ -61,6 +61,35 @@ async function run() {
   assert.strictEqual(body.model, 'gpt-test');
   assert.deepStrictEqual(body.messages, [{ role: 'user', content: '生成 JSON' }]);
 
+  let injectedRequestOptions = null;
+  const injected = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'injected config' }],
+    textConfig: {
+      enabled: true,
+      provider: 'InjectedProvider',
+      apiKey: 'sk-injected',
+      baseUrl: 'https://injected.example.com/v1/',
+      modelId: 'injected-model',
+    },
+    fetchImpl: async (url, options) => {
+      assert.strictEqual(url, 'https://injected.example.com/v1/chat/completions');
+      injectedRequestOptions = options;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: 'injected ok' } }],
+        }),
+      };
+    },
+  });
+  assert.strictEqual(injected.success, true);
+  assert.strictEqual(injected.text, 'injected ok');
+  assert.strictEqual(injected.model.provider, 'InjectedProvider');
+  assert.strictEqual(injected.model.model_id, 'injected-model');
+  assert.strictEqual(injectedRequestOptions.headers.Authorization, 'Bearer sk-injected');
+  assert.strictEqual(JSON.parse(injectedRequestOptions.body).model, 'injected-model');
+
   const failed = await aiTextModel.callTextModel({
     messages: [{ role: 'user', content: 'fail' }],
     configPath,

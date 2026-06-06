@@ -1,14 +1,55 @@
 const assert = require('assert');
+const express = require('express');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const http = require('http');
 
 const agentRuns = require('./server/services/agentRuns');
+const agentsRouter = require('./server/routes/agents');
 const mediaPipeline = require('./server/services/mediaPipeline');
 
 async function writeJson(filePath, data) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+async function requestJson(server, method, pathName, body) {
+  const { port } = server.address();
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathName,
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }, res => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => {
+        text += chunk;
+      });
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode,
+          body: text ? JSON.parse(text) : null,
+        });
+      });
+    });
+    req.on('error', reject);
+    if (body !== undefined) {
+      req.write(JSON.stringify(body));
+    }
+    req.end();
+  });
+}
+
+async function listen(app) {
+  return new Promise(resolve => {
+    const server = app.listen(0, '127.0.0.1', () => resolve(server));
+  });
 }
 
 async function run() {
@@ -281,6 +322,32 @@ async function run() {
   assert.strictEqual(raw.result.summary, '');
   assert.match(raw.message, /未能解析为结构化结果/);
   assert.strictEqual(raw.steps.find(step => step.id === 'comments').message, '暂无本地评论缓存');
+
+  const originalCreateDouyinAgentRun = agentRuns.createDouyinAgentRun;
+  agentRuns.createDouyinAgentRun = async () => ({
+    success: false,
+    status: 'failed',
+    aweme_id: awemeId,
+    run_id: 'failed-run',
+    steps: [{ id: 'generate', status: 'failed' }],
+    message: '模型调用失败',
+  });
+  const app = express();
+  app.use(express.json());
+  app.use('/api/agents', agentsRouter);
+  const server = await listen(app);
+  try {
+    const response = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs`, {
+      template: 'viral_rewrite',
+    });
+    assert.strictEqual(response.statusCode, 200);
+    assert.strictEqual(response.body.success, false);
+    assert.strictEqual(response.body.status, 'failed');
+    assert.deepStrictEqual(response.body.steps, [{ id: 'generate', status: 'failed' }]);
+  } finally {
+    agentRuns.createDouyinAgentRun = originalCreateDouyinAgentRun;
+    await new Promise(resolve => server.close(resolve));
+  }
 }
 
 run().then(() => {
