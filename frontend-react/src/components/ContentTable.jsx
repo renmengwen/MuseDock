@@ -1,33 +1,7 @@
 import { Button } from '@/components/ui/button.jsx';
 import { ConfigurableTable } from './data-table/ConfigurableTable.jsx';
 import { formatTime, getDouyinAwemeId, getDouyinUrl } from '../utils/format.js';
-
-function formatDuration(item = {}) {
-  const value = item.duration || item.video_duration || item.video?.duration || item.note_card?.video?.duration;
-  const seconds = Number(value || 0);
-
-  if (!seconds) return '-';
-
-  const normalizedSeconds = seconds > 1000 ? Math.round(seconds / 1000) : Math.round(seconds);
-  const minutes = Math.floor(normalizedSeconds / 60);
-  const restSeconds = normalizedSeconds % 60;
-
-  return `${minutes}:${String(restSeconds).padStart(2, '0')}`;
-}
-
-function getContentTypeLabel(item = {}, platform) {
-  const type = item.type || item.content_type || item.note_type || item.aweme_type;
-
-  if (platform === 'xhs') {
-    if (type === 'video' || item.video_url || item.video_duration) return '视频';
-    if (type === 'normal' || type === 'image' || item.image_list?.length) return '图文';
-    return '-';
-  }
-
-  if (type === 'video' || type === 0 || item.video_duration || item.duration) return '视频';
-  if (type === 'image' || type === 'images' || item.images?.length) return '图文';
-  return '-';
-}
+import { formatDuration, getContentTypeLabel } from '../utils/content.js';
 
 function createDouyinColumns(onComments, onPrepareMedia) {
   return [
