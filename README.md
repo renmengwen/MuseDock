@@ -6,17 +6,20 @@ MuseDock 是一个本地优先的内容采集与创作素材工作台。它把�
 
 ## 功能特性
 
-- **内容采集**：支持抖音关键词搜索、指定视频 ID/链接抓取、作者主页视频抓取。
-- **评论采集**：支持抖音一级评论和二级评论抓取，并保存到本地数据库。
-- **小红书入口**：支持小红书关键词搜索与笔记详情接口。
-- **本地记录**：使用 SQLite 保存抓取过的视频、笔记和评论，便于回看。
-- **素材工作台**：支持为抖音视频准备本地素材，包括视频下载、音频抽取、关键帧抽取和素材状态查看。
-- **AI 配置骨架**：提供 ASR、文字模型、图片生成、视频生成和多模态模型配置入口。
+- **内容采集**：支持抖音关键词搜索、指定视频 ID/链接抓取、作者主页视频抓取；小红书支持关键词搜索和笔记详情入口。
+- **评论采集与缓存**：支持抖音一级评论和二级评论抓取，并写入 SQLite；抓取记录页会显示“评论是否缓存”和缓存条数。
+- **抓取记录状态看板**：抖音记录列表会展示“素材是否就绪”“音频是否转写”“评论是否缓存”，便于判断下一步工作。
+- **素材工作台**：支持抖音视频下载、音频抽取、关键帧抽取、本地素材状态查看；从抓取记录点击“准备 AI 素材”会自动跳转并开始准备。
+- **音频转写**：已接入小米 MiMo ASR；支持大音频自动压缩，压缩后仍超限时自动切片并合并转写结果。
+- **转写结果展示**：素材工作台会展示转写状态和转写文本，重新进入已转写素材时会读取本地 `transcript.json`。
+- **长任务反馈**：素材准备和音频转写期间会显示 loading、按钮禁用态和预计进度，避免重复触发。
+- **AI 配置**：设置页提供 ASR、文字模型、图片生成、视频生成和多模态模型配置入口。
 - **本地 Web GUI**：React + Vite 前端，Express 后端，默认运行在 `http://localhost:3000`。
 
 ## 技术栈
 
 - 前端：React、React Router、Vite
+- UI：Tailwind CSS、本地 shadcn 风格组件、lucide-react、class-variance-authority、clsx、tailwind-merge
 - 后端：Node.js、Express
 - 浏览器自动化：Playwright、Chrome CDP
 - 数据库：SQLite、better-sqlite3
@@ -29,7 +32,7 @@ MuseDock 是一个本地优先的内容采集与创作素材工作台。它把�
 - Node.js 22
 - npm
 - Google Chrome
-- ffmpeg，素材准备功能需要
+- ffmpeg 可选。项目已依赖 `@ffmpeg-installer/ffmpeg`，会优先使用 `FFMPEG_PATH`，其次使用依赖内置 ffmpeg，最后尝试系统 `PATH` 中的 `ffmpeg`
 
 > 如果使用其他 Node.js 大版本，`better-sqlite3` 可能出现 ABI 不匹配。建议优先使用 Node.js 22。
 
@@ -70,8 +73,9 @@ npm run dev:frontend
 3. 抖音链路建议先完成扫码登录，MuseDock 会通过 Chrome CDP 复用本地浏览器登录态。
 4. 输入关键词、视频 ID、视频链接或作者主页信息并开始抓取。
 5. 在“抓取记录”页查看本地保存的数据。
-6. 在“素材工作台”中选择抖音视频，准备视频、音频、关键帧等本地素材。
-7. 在“设置”页配置后续 AI 工作流所需的模型信息。
+6. 在“抓取记录”页查看素材、转写和评论缓存状态；点击“准备 AI 素材”会跳转到素材工作台并自动开始准备。
+7. 在“素材工作台”中查看视频、音频、关键帧和转写状态；点击“请求转写”可调用 MiMo ASR。
+8. 在“设置”页配置后续 AI 工作流所需的模型信息。
 
 ## 环境变量
 
@@ -85,8 +89,9 @@ npm run dev:frontend
 | `MIMO_BASE_URL` | 小米 MiMo API Base URL | `https://api.xiaomimimo.com/v1` |
 | `MIMO_ASR_MODEL` | 小米 MiMo ASR 模型 ID | `mimo-v2.5-asr` |
 | `ASR_LANGUAGE` | MiMo ASR 识别语言，支持 `auto`、`zh`、`en` | `auto` |
+| `FFMPEG_PATH` | 可选，手动指定 ffmpeg 可执行文件路径 | 空 |
 
-当前 ASR 已接入小米 MiMo。也可以在“设置”页的 ASR 转写模型中配置：供应商填写 `mimo`，Base URL 填写 `https://api.xiaomimimo.com/v1`，模型 ID 填写 `mimo-v2.5-asr`，API Key 填写 MiMo 控制台密钥。MiMo 要求 base64 编码后的音频不超过 10MB，较长视频请先压缩或切片。
+当前 ASR 已接入小米 MiMo。也可以在“设置”页的 ASR 转写模型中配置：供应商填写 `mimo`，Base URL 填写 `https://api.xiaomimimo.com/v1`，模型 ID 填写 `mimo-v2.5-asr`，API Key 填写 MiMo 控制台密钥。MiMo 要求 base64 编码后的单段音频不超过 10MB；请求转写时如果音频过大，后端会先自动生成低码率 `audio.asr.mp3`，压缩后仍超限则自动切片并按顺序合并转写文本。自动压缩会优先使用 `FFMPEG_PATH` 指定的 ffmpeg，其次使用项目依赖内置的 ffmpeg，最后尝试系统 `PATH` 中的 `ffmpeg`。
 
 ## 目录结构
 
@@ -120,6 +125,10 @@ npm run build:frontend
 # 检查后端文件语法
 node --check server/app.js
 node --check server/index.js
+
+# 媒体流水线回归测试
+node test-media-pipeline.js
+node test-media-pipeline-cache.js
 ```
 
 ## API 概览
@@ -148,7 +157,7 @@ node --check server/index.js
 
 ### 配置与历史
 
-- `GET /api/history/douyin`：读取抖音抓取记录
+- `GET /api/history/douyin`：读取抖音抓取记录，并附带素材就绪、音频转写和评论缓存状态
 - `GET /api/history/xhs`：读取小红书抓取记录
 - `GET /api/config/ai-models`：读取 AI 模型配置
 - `POST /api/config/ai-models`：保存 AI 模型配置
@@ -159,6 +168,9 @@ MuseDock 会在本地生成运行数据：
 
 - `data/mediacrawler.db`：SQLite 数据库
 - `data/media/douyin/<aweme_id>/`：抖音视频素材目录
+- `data/media/douyin/<aweme_id>/audio.asr.mp3`：大音频转写时生成的低码率音频
+- `data/media/douyin/<aweme_id>/asr_segments/`：压缩后仍超限时生成的 ASR 切片
+- `data/media/douyin/<aweme_id>/transcript.json`：音频转写结果
 - `chrome-user-data/`：Chrome CDP 使用的本地浏览器数据
 - `douyin-cookies.json`：抖音 Cookie 持久化文件
 
@@ -166,10 +178,9 @@ MuseDock 会在本地生成运行数据：
 
 ## 开源路线图
 
-- 完善 ASR 转写的真实服务调用。
+- 增加真实任务队列和后端进度推送，替代当前前端预计进度。
 - 增强 AI 分析、改编、脚本和分镜生成链路。
 - 补齐小红书抓取、评论和素材准备能力。
-- 增加任务队列，避免长时间媒体处理阻塞请求。
 - 增加系统化测试、端到端测试和 CI。
 - 提供更清晰的配置文件与部署文档。
 

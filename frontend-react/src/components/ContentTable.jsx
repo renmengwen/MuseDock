@@ -10,12 +10,59 @@ function getAuthorName(item = {}) {
   return item.author || item.nickname || '-';
 }
 
+function StatusPill({ ok, okText, pendingText, error }) {
+  const label = error ? '状态异常' : (ok ? okText : pendingText);
+  const className = error ? 'statusPill error' : (ok ? 'statusPill ok' : 'statusPill pending');
+  return <span className={className} title={error || label}>{label}</span>;
+}
+
 function createDouyinColumns(onComments, onPrepareMedia) {
   return [
     { id: 'title', label: '标题', className: 'min-w-[260px] max-w-[430px] break-words', render: item => item.title || item.description || '-' },
     { id: 'type', label: '类型', className: 'min-w-[88px]', render: item => getContentTypeLabel(item, 'douyin') },
     { id: 'duration', label: '视频时长', className: 'min-w-[96px]', render: item => formatDuration(item) },
     { id: 'author', label: '作者', className: 'min-w-[120px]', render: item => getAuthorName(item) },
+    {
+      id: 'mediaReady',
+      label: '素材是否就绪',
+      className: 'min-w-[116px]',
+      render: item => (
+        <StatusPill
+          ok={item.media_status?.ready}
+          okText="已就绪"
+          pendingText="未就绪"
+          error={item.media_status?.error}
+        />
+      ),
+    },
+    {
+      id: 'transcriptReady',
+      label: '音频是否转写',
+      className: 'min-w-[116px]',
+      render: item => (
+        <StatusPill
+          ok={item.media_status?.transcript_done}
+          okText="已转写"
+          pendingText="未转写"
+          error={item.media_status?.error}
+        />
+      ),
+    },
+    {
+      id: 'commentCached',
+      label: '评论是否缓存',
+      className: 'min-w-[116px]',
+      render: item => {
+        const count = item.comment_cache?.count || 0;
+        return (
+          <StatusPill
+            ok={item.comment_cache?.cached}
+            okText={count ? `已缓存 ${count}` : '已缓存'}
+            pendingText="未缓存"
+          />
+        );
+      },
+    },
     { id: 'createdAt', label: '发布日期', className: 'min-w-[136px]', render: item => formatTime(item.create_time) },
     { id: 'crawledAt', label: '抓取日期', className: 'min-w-[136px]', render: item => formatTime(item.crawled_at) },
     { id: 'likes', label: '点赞', className: 'min-w-[80px]', render: item => item.likes || item.liked_count || item.statistics?.digg_count || 0 },

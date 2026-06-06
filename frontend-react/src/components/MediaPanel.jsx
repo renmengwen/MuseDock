@@ -45,6 +45,7 @@ export function MediaPanel({
   const steps = status.steps || {};
   const frames = status.frames || status.analysis_input?.local_assets?.frames || [];
   const transcript = status.transcript || {};
+  const transcriptText = typeof transcript.text === 'string' ? transcript.text.trim() : '';
 
   return (
     <section className="mediaPanel">
@@ -75,6 +76,16 @@ export function MediaPanel({
         <AssetRow label="关键帧" step={steps.frames} detail={frames.length ? `${frames.length} 张` : ''} />
         <AssetRow label="转写" step={steps.transcript} detail={transcript.message || ''} />
       </div>
+
+      {transcriptText ? (
+        <div className="transcriptBlock">
+          <div className="transcriptHeader">
+            <div className="assetLabel">转写文本</div>
+            <span>{transcriptText.length} 字</span>
+          </div>
+          <pre>{transcriptText}</pre>
+        </div>
+      ) : null}
 
       <div className="pathBlock">
         <div className="assetLabel">本地素材目录</div>

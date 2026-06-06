@@ -19,6 +19,7 @@
     "build:frontend": "vite build --config frontend-react/vite.config.js"
   },
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@vitejs/plugin-react": "^6.0.2",
     "better-sqlite3": "^11.1.2",
     "class-variance-authority": "^0.7.1",

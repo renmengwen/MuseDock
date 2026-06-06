@@ -33,6 +33,34 @@ export function MediaWorkspace() {
   const [status, setStatus] = useState(null);
   const [preparing, setPreparing] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  const [prepareProgress, setPrepareProgress] = useState(0);
+  const [transcribeProgress, setTranscribeProgress] = useState(0);
+
+  useEffect(() => {
+    if (!preparing) return undefined;
+    const timer = window.setInterval(() => {
+      setPrepareProgress(prev => {
+        if (prev < 30) return Math.min(prev + 5, 30);
+        if (prev < 68) return Math.min(prev + 3, 68);
+        if (prev < 92) return Math.min(prev + 1, 92);
+        return prev;
+      });
+    }, 1400);
+    return () => window.clearInterval(timer);
+  }, [preparing]);
+
+  useEffect(() => {
+    if (!transcribing) return undefined;
+    const timer = window.setInterval(() => {
+      setTranscribeProgress(prev => {
+        if (prev < 35) return Math.min(prev + 4, 35);
+        if (prev < 70) return Math.min(prev + 2, 70);
+        if (prev < 90) return Math.min(prev + 1, 90);
+        return prev;
+      });
+    }, 1600);
+    return () => window.clearInterval(timer);
+  }, [transcribing]);
 
   useEffect(() => {
     if (!routeAwemeId) return;
@@ -46,15 +74,15 @@ export function MediaWorkspace() {
     refreshMediaStatus(routeAwemeId).catch(() => {});
   }, [routeAwemeId]);
 
-  async function refreshMediaStatus(nextAwemeId = selectedAwemeId) {
+  async function refreshMediaStatus(nextAwemeId = selectedAwemeId, options = {}) {
     if (!nextAwemeId) return;
-    setStatus({ type: 'loading', message: '正在刷新素材状态...' });
+    if (!options.silent) setStatus({ type: 'loading', message: '正在刷新素材状态...' });
     try {
       const json = await api.getDouyinMediaStatus(nextAwemeId);
       setMediaStatus(json);
-      setStatus({ type: 'success', message: '素材状态已刷新' });
+      if (!options.silent) setStatus({ type: 'success', message: '素材状态已刷新' });
     } catch (error) {
-      setStatus({ type: 'error', message: error.message });
+      if (!options.silent) setStatus({ type: 'error', message: error.message });
     }
   }
 
@@ -68,9 +96,12 @@ export function MediaWorkspace() {
     setSelectedAwemeId(awemeId);
     setAwemeIdInput(awemeId);
     setPreparing(true);
+    setPrepareProgress(6);
     setStatus({
       type: 'loading',
-      message: force ? '正在重新生成素材...' : '正在准备素材，优先复用本地缓存...',
+      message: force
+        ? '正在重新生成素材，可能需要下载视频、抽取音频和关键帧...'
+        : '正在准备 AI 素材，优先复用本地缓存，必要时会下载视频、抽取音频和关键帧...',
     });
     setMediaStatus(prev => prev?.aweme_id === awemeId ? prev : buildInitialStatus(null, awemeId));
 
@@ -83,13 +114,14 @@ export function MediaWorkspace() {
         metadata: json.analysis_input?.video || json.metadata || {},
         analysis_input: json.analysis_input,
         frames: json.analysis_input?.local_assets?.frames || [],
-        steps: json.steps || {},
+        steps: json.analysis_input?.steps || json.steps || {},
       });
+      setPrepareProgress(100);
       setStatus({ type: 'success', message: force ? '素材已重新生成' : '素材准备完成，已复用可用缓存' });
       if (routeAwemeId !== awemeId) navigate(`/media/douyin/${awemeId}`, { replace: true });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
-      await refreshMediaStatus(awemeId).catch(() => {});
+      await refreshMediaStatus(awemeId, { silent: true }).catch(() => {});
     } finally {
       setPreparing(false);
     }
@@ -102,14 +134,31 @@ export function MediaWorkspace() {
     }
 
     setTranscribing(true);
-    setStatus({ type: 'loading', message: '正在请求音频转写...' });
+    setTranscribeProgress(8);
+    setStatus({ type: 'loading', message: '正在压缩或切片音频，并请求音频转写，较长视频可能需要几分钟...' });
     try {
       const json = await api.transcribeDouyinMedia(selectedAwemeId);
+      setTranscribeProgress(100);
+      setMediaStatus(prev => {
+        const nextSteps = {
+          ...(prev?.steps || {}),
+          transcript: {
+            status: json.status || (json.success ? 'done' : 'failed'),
+            path: json.transcript_path || prev?.steps?.transcript?.path || '',
+            message: json.message || '',
+          },
+        };
+        return {
+          ...(prev || buildInitialStatus(null, selectedAwemeId)),
+          transcript: json,
+          steps: nextSteps,
+        };
+      });
       setStatus({
         type: json.configured === false ? 'info' : (json.success ? 'success' : 'error'),
         message: json.message || '转写接口已返回',
       });
-      await refreshMediaStatus(selectedAwemeId);
+      await refreshMediaStatus(selectedAwemeId, { silent: true });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
     } finally {
@@ -150,7 +199,30 @@ export function MediaWorkspace() {
       </div>
 
       <Status status={status} />
-      {(preparing || transcribing) ? <div className="pageLoading">接口处理中，请稍候...</div> : null}
+      {preparing ? (
+        <div className="progressLoading" aria-live="polite">
+          <div className="progressHeader">
+            <span>准备 AI 素材预计进度</span>
+            <strong>{prepareProgress}%</strong>
+          </div>
+          <div className="progressTrack" role="progressbar" aria-valuenow={prepareProgress} aria-valuemin="0" aria-valuemax="100">
+            <div className="progressFill" style={{ width: `${prepareProgress}%` }} />
+          </div>
+          <div className="progressHint">正在下载视频、抽取音频和关键帧，素材较大或网络较慢时可能需要几分钟。</div>
+        </div>
+      ) : null}
+      {transcribing ? (
+        <div className="progressLoading" aria-live="polite">
+          <div className="progressHeader">
+            <span>预计进度</span>
+            <strong>{transcribeProgress}%</strong>
+          </div>
+          <div className="progressTrack" role="progressbar" aria-valuenow={transcribeProgress} aria-valuemin="0" aria-valuemax="100">
+            <div className="progressFill" style={{ width: `${transcribeProgress}%` }} />
+          </div>
+          <div className="progressHint">正在处理音频并调用 MiMo ASR，压缩、切片和分段转写期间请不要重复点击。</div>
+        </div>
+      ) : null}
 
       <MediaPanel
         status={mediaStatus}

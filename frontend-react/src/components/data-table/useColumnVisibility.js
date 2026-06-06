@@ -20,15 +20,21 @@ function areSameIds(a, b) {
 }
 
 function readVisibleIds(storageKey, columns) {
+  const defaultIds = getDefaultVisibleIds(columns);
   if (!storageKey || typeof window === 'undefined') {
-    return getDefaultVisibleIds(columns);
+    return defaultIds;
   }
 
   try {
     const raw = window.localStorage.getItem(storageKey);
-    return normalizeVisibleIds(raw ? JSON.parse(raw) : null, columns);
+    if (!raw) return defaultIds;
+    const parsedIds = JSON.parse(raw);
+    const savedIds = normalizeVisibleIds(parsedIds, columns);
+    const knownIds = new Set(Array.isArray(parsedIds) ? parsedIds.filter(id => typeof id === 'string') : []);
+    const addedDefaultIds = defaultIds.filter(id => !knownIds.has(id));
+    return Array.from(new Set([...savedIds, ...addedDefaultIds]));
   } catch {
-    return getDefaultVisibleIds(columns);
+    return defaultIds;
   }
 }
 

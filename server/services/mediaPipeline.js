@@ -1,4 +1,3 @@
-const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -8,6 +7,8 @@ const DEFAULT_ROOT = path.join(__dirname, '../../data/media/douyin');
 const DEFAULT_MIMO_BASE_URL = 'https://api.xiaomimimo.com/v1';
 const DEFAULT_MIMO_ASR_MODEL = 'mimo-v2.5-asr';
 const MIMO_MAX_BASE64_AUDIO_BYTES = 10 * 1024 * 1024;
+const DEFAULT_ASR_SEGMENT_SECONDS = 180;
+const FFMPEG_INSTALLER_PACKAGE = '@ffmpeg-installer/ffmpeg';
 
 function getMediaDir(awemeId, rootDir = DEFAULT_ROOT) {
   return path.join(rootDir, String(awemeId));
@@ -20,6 +21,8 @@ function getMediaPaths(awemeId, rootDir = DEFAULT_ROOT) {
     metadata: path.join(dir, 'metadata.json'),
     video: path.join(dir, 'video.mp4'),
     audio: path.join(dir, 'audio.mp3'),
+    asrAudio: path.join(dir, 'audio.asr.mp3'),
+    asrSegmentsDir: path.join(dir, 'asr_segments'),
     framesDir: path.join(dir, 'frames'),
     analysisInput: path.join(dir, 'analysis_input.json'),
     transcript: path.join(dir, 'transcript.json'),
@@ -61,8 +64,44 @@ function getAudioMimeType(audioPath) {
   return 'application/octet-stream';
 }
 
+async function getBase64AudioBytes(audioPath) {
+  const audioBuffer = await fsp.readFile(audioPath);
+  const audioBase64 = audioBuffer.toString('base64');
+  return {
+    audioBase64,
+    base64Bytes: Buffer.byteLength(audioBase64, 'utf-8'),
+    fileBytes: audioBuffer.length,
+  };
+}
+
 function normalizeProvider(value) {
   return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+async function getExistingExecutable(filePath) {
+  if (!filePath) return '';
+  try {
+    const stats = await fsp.stat(filePath);
+    return stats.isFile() && stats.size > 0 ? filePath : '';
+  } catch {
+    return '';
+  }
+}
+
+async function resolveFfmpegPath(options = {}) {
+  const explicitPath = options.ffmpegPath || process.env.FFMPEG_PATH;
+  const resolvedExplicitPath = await getExistingExecutable(explicitPath);
+  if (resolvedExplicitPath) return resolvedExplicitPath;
+
+  try {
+    const installer = require(FFMPEG_INSTALLER_PACKAGE);
+    const bundledPath = await getExistingExecutable(installer.path);
+    if (bundledPath) return bundledPath;
+  } catch {
+    // Optional dependency fallback. If it is not installed, use PATH lookup below.
+  }
+
+  return 'ffmpeg';
 }
 
 async function resolveAsrRuntime(options = {}) {
@@ -96,20 +135,9 @@ async function resolveAsrRuntime(options = {}) {
   };
 }
 
-async function transcribeWithMimo(audioPath, config, options = {}) {
+async function sendMimoAudio(audioPath, config, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
-  const audioBuffer = await fsp.readFile(audioPath);
-  const audioBase64 = audioBuffer.toString('base64');
-  const maxBase64AudioBytes = options.maxBase64AudioBytes || MIMO_MAX_BASE64_AUDIO_BYTES;
-
-  if (Buffer.byteLength(audioBase64, 'utf-8') > maxBase64AudioBytes) {
-    return {
-      success: false,
-      status: 'audio_too_large',
-      message: '音频文件过大，MiMo ASR 要求 base64 编码后的音频不超过 10MB，请先压缩或切片后重试。',
-    };
-  }
-
+  const { audioBase64 } = await getBase64AudioBytes(audioPath);
   const response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -189,8 +217,210 @@ function runCommand(command, args, options = {}) {
   });
 }
 
+async function compressAudioForAsr(audioPath, targetPath, options = {}) {
+  const runCommandImpl = options.runCommandImpl || runCommand;
+  const ffmpegPath = await resolveFfmpegPath(options);
+  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+  const result = await runCommandImpl(ffmpegPath, [
+    '-y',
+    '-i', audioPath,
+    '-vn',
+    '-ac', '1',
+    '-ar', '16000',
+    '-b:a', '32k',
+    targetPath,
+  ]);
+
+  if (!result.ok) {
+    return {
+      success: false,
+      status: 'compress_failed',
+      message: `音频过大，自动压缩失败：${result.error || result.stderr || `ffmpeg exited ${result.code}`}`,
+    };
+  }
+
+  return { success: true, status: 'compressed', path: targetPath };
+}
+
+async function listAsrSegments(segmentDir) {
+  try {
+    const names = await fsp.readdir(segmentDir);
+    return names
+      .filter(name => /^segment-\d+\.mp3$/i.test(name))
+      .sort()
+      .map(name => path.join(segmentDir, name));
+  } catch {
+    return [];
+  }
+}
+
+async function segmentAudioForAsr(audioPath, segmentDir, options = {}) {
+  const runCommandImpl = options.runCommandImpl || runCommand;
+  const ffmpegPath = await resolveFfmpegPath(options);
+  await fsp.rm(segmentDir, { recursive: true, force: true });
+  await fsp.mkdir(segmentDir, { recursive: true });
+  const segmentPattern = path.join(segmentDir, 'segment-%03d.mp3');
+  const result = await runCommandImpl(ffmpegPath, [
+    '-y',
+    '-i', audioPath,
+    '-vn',
+    '-ac', '1',
+    '-ar', '16000',
+    '-b:a', '32k',
+    '-f', 'segment',
+    '-segment_time', String(options.asrSegmentSeconds || DEFAULT_ASR_SEGMENT_SECONDS),
+    '-segment_format', 'mp3',
+    segmentPattern,
+  ]);
+
+  if (!result.ok) {
+    return {
+      success: false,
+      status: 'segment_failed',
+      message: `音频压缩后仍过大，自动切片失败：${result.error || result.stderr || `ffmpeg exited ${result.code}`}`,
+    };
+  }
+
+  const segments = await listAsrSegments(segmentDir);
+  if (!segments.length) {
+    return {
+      success: false,
+      status: 'segment_failed',
+      message: '音频压缩后仍过大，自动切片失败：未生成可转写的音频片段。',
+    };
+  }
+
+  const maxBase64AudioBytes = options.maxBase64AudioBytes || MIMO_MAX_BASE64_AUDIO_BYTES;
+  const oversizedSegments = [];
+  for (const segmentPath of segments) {
+    const { base64Bytes } = await getBase64AudioBytes(segmentPath);
+    if (base64Bytes > maxBase64AudioBytes) {
+      oversizedSegments.push({ path: segmentPath, base64Bytes });
+    }
+  }
+
+  if (oversizedSegments.length > 0) {
+    return {
+      success: false,
+      status: 'audio_too_large',
+      message: '音频已自动压缩并切片，但仍有片段超过 MiMo ASR 的 10MB 限制，请手动缩短音频后重试。',
+      oversized_segments: oversizedSegments,
+    };
+  }
+
+  return { success: true, status: 'segmented', dir: segmentDir, segments };
+}
+
+async function transcribeMimoSegments(segmentPaths, config, options = {}) {
+  const texts = [];
+  const segmentResults = [];
+
+  for (let index = 0; index < segmentPaths.length; index += 1) {
+    const segmentPath = segmentPaths[index];
+    const result = await sendMimoAudio(segmentPath, config, options);
+    segmentResults.push({
+      index: index + 1,
+      path: segmentPath,
+      status: result.status,
+      success: result.success,
+      text: result.text || '',
+      message: result.message || '',
+    });
+
+    if (!result.success) {
+      return {
+        ...result,
+        message: `第 ${index + 1} 段音频转写失败：${result.message || 'MiMo ASR 未返回成功结果。'}`,
+        segments: segmentResults,
+      };
+    }
+
+    texts.push(result.text.trim());
+  }
+
+  return {
+    success: true,
+    status: 'done',
+    message: '音频较大，已自动压缩并分段转写完成。',
+    text: texts.filter(Boolean).join('\n'),
+    segments: segmentResults,
+  };
+}
+
+async function transcribeWithMimo(audioPath, config, options = {}) {
+  const maxBase64AudioBytes = options.maxBase64AudioBytes || MIMO_MAX_BASE64_AUDIO_BYTES;
+  const paths = options.paths || {};
+  const asrAudioPath = paths.asrAudio || path.join(path.dirname(audioPath), 'audio.asr.mp3');
+  const asrSegmentsDir = paths.asrSegmentsDir || path.join(path.dirname(audioPath), 'asr_segments');
+  const audioInfo = await getBase64AudioBytes(audioPath);
+
+  if (audioInfo.base64Bytes <= maxBase64AudioBytes) {
+    return sendMimoAudio(audioPath, config, options);
+  }
+
+  const compressed = await compressAudioForAsr(audioPath, asrAudioPath, options);
+  if (!compressed.success) {
+    return {
+      ...compressed,
+      preprocess: {
+        status: 'compress_failed',
+        source_path: audioPath,
+        source_base64_bytes: audioInfo.base64Bytes,
+      },
+    };
+  }
+
+  const compressedInfo = await getBase64AudioBytes(asrAudioPath);
+  if (compressedInfo.base64Bytes <= maxBase64AudioBytes) {
+    const result = await sendMimoAudio(asrAudioPath, config, options);
+    return {
+      ...result,
+      message: result.success ? '音频较大，已自动压缩后转写完成。' : result.message,
+      preprocess: {
+        status: 'compressed',
+        source_path: audioPath,
+        source_base64_bytes: audioInfo.base64Bytes,
+        audio_path: asrAudioPath,
+        base64_bytes: compressedInfo.base64Bytes,
+      },
+    };
+  }
+
+  const segmented = await segmentAudioForAsr(asrAudioPath, asrSegmentsDir, {
+    ...options,
+    maxBase64AudioBytes,
+  });
+  if (!segmented.success) {
+    return {
+      ...segmented,
+      preprocess: {
+        status: segmented.status,
+        source_path: audioPath,
+        source_base64_bytes: audioInfo.base64Bytes,
+        compressed_path: asrAudioPath,
+        compressed_base64_bytes: compressedInfo.base64Bytes,
+      },
+    };
+  }
+
+  const result = await transcribeMimoSegments(segmented.segments, config, options);
+  return {
+    ...result,
+    preprocess: {
+      status: 'segmented',
+      source_path: audioPath,
+      source_base64_bytes: audioInfo.base64Bytes,
+      compressed_path: asrAudioPath,
+      compressed_base64_bytes: compressedInfo.base64Bytes,
+      segments_dir: asrSegmentsDir,
+      segment_count: segmented.segments.length,
+    },
+  };
+}
+
 async function checkFfmpeg() {
-  const result = await runCommand('ffmpeg', ['-version']);
+  const ffmpegPath = await resolveFfmpegPath();
+  const result = await runCommand(ffmpegPath, ['-version']);
   return {
     available: result.ok,
     error: result.ok ? '' : (result.error || result.stderr || 'ffmpeg is not available'),
@@ -221,8 +451,9 @@ async function downloadFile(url, targetPath, options = {}) {
   return { status: 'done', path: targetPath, bytes: buffer.length };
 }
 
-async function extractAudio(videoPath, audioPath) {
-  const result = await runCommand('ffmpeg', [
+async function extractAudio(videoPath, audioPath, options = {}) {
+  const ffmpegPath = await resolveFfmpegPath(options);
+  const result = await runCommand(ffmpegPath, [
     '-y',
     '-i', videoPath,
     '-vn',
@@ -236,10 +467,11 @@ async function extractAudio(videoPath, audioPath) {
   return { status: 'done', path: audioPath };
 }
 
-async function extractFrames(videoPath, framesDir) {
+async function extractFrames(videoPath, framesDir, options = {}) {
   await fsp.mkdir(framesDir, { recursive: true });
   const framePattern = path.join(framesDir, 'frame-%04d.jpg');
-  const result = await runCommand('ffmpeg', [
+  const ffmpegPath = await resolveFfmpegPath(options);
+  const result = await runCommand(ffmpegPath, [
     '-y',
     '-i', videoPath,
     '-vf', 'fps=1/5',
@@ -267,6 +499,10 @@ async function listFrames(framesDir) {
 
 async function buildAnalysisInput(awemeId, paths, metadata, steps) {
   const frames = await listFrames(paths.framesDir);
+  const transcript = await readJsonIfExists(paths.transcript);
+  const transcriptStep = transcript
+    ? { status: transcript.status || (transcript.success ? 'done' : 'failed'), path: paths.transcript, message: transcript.message || '' }
+    : (steps.transcript || { status: 'not_requested' });
   return {
     aweme_id: String(awemeId),
     video: {
@@ -288,10 +524,13 @@ async function buildAnalysisInput(awemeId, paths, metadata, steps) {
       message: 'Comment analysis is not connected yet.',
     },
     transcript: {
-      status: steps.transcript?.status || 'not_requested',
+      status: transcriptStep.status || 'not_requested',
       path: await fileExists(paths.transcript) ? paths.transcript : '',
     },
-    steps,
+    steps: {
+      ...steps,
+      transcript: transcriptStep,
+    },
     updated_at: new Date().toISOString(),
   };
 }
@@ -347,8 +586,8 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
       if (!canUseCachedAudio) steps.audio = { status: 'skipped', message: 'ffmpeg is not available' };
       if (!canUseCachedFrames) steps.frames = { status: 'skipped', message: 'ffmpeg is not available' };
     } else {
-      if (!canUseCachedAudio) steps.audio = await extractAudio(paths.video, paths.audio);
-      if (!canUseCachedFrames) steps.frames = await extractFrames(paths.video, paths.framesDir);
+      if (!canUseCachedAudio) steps.audio = await extractAudio(paths.video, paths.audio, options);
+      if (!canUseCachedFrames) steps.frames = await extractFrames(paths.video, paths.framesDir, options);
     }
   }
 
@@ -358,7 +597,7 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
     success: true,
     aweme_id: String(awemeId),
     dir: paths.dir,
-    steps,
+    steps: analysisInput.steps,
     analysis_input: analysisInput,
   };
 }
@@ -399,7 +638,7 @@ async function transcribeAudio(awemeId, options = {}) {
       success: false,
       configured: false,
       aweme_id: String(awemeId),
-      message: 'Transcription is not configured. Set OPENAI_API_KEY or ASR_API_KEY to enable ASR.',
+      message: '音频转写未配置。请设置 OPENAI_API_KEY 或 ASR_API_KEY 后再启用 ASR。',
       transcript_path: paths.transcript,
     };
     await writeJson(paths.transcript, {
@@ -415,13 +654,16 @@ async function transcribeAudio(awemeId, options = {}) {
       success: false,
       configured: true,
       aweme_id: String(awemeId),
-      message: 'audio.mp3 is not available. Run prepare first.',
+      message: 'audio.mp3 不存在，请先准备素材。',
       transcript_path: paths.transcript,
     };
   }
 
   if (asrConfig.provider === 'mimo') {
-    const providerResult = await transcribeWithMimo(paths.audio, asrConfig, options);
+    const providerResult = await transcribeWithMimo(paths.audio, asrConfig, {
+      ...options,
+      paths,
+    });
     const result = {
       ...providerResult,
       configured: true,
@@ -442,7 +684,7 @@ async function transcribeAudio(awemeId, options = {}) {
     success: false,
     configured: true,
     aweme_id: String(awemeId),
-    message: 'ASR provider is configured, but only MiMo ASR is implemented now. Set ASR_PROVIDER=mimo or configure provider as mimo.',
+    message: 'ASR 服务已配置，但当前只实现了 MiMo ASR。请将 ASR_PROVIDER 设置为 mimo，或在设置页将供应商配置为 mimo。',
     transcript_path: paths.transcript,
   };
   await writeJson(paths.transcript, {

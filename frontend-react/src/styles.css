@@ -38,7 +38,7 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .subTabs { display: flex; gap: 8px; margin-bottom: 18px; }
 .subTabs a { display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border: 1px solid #d9dde5; border-radius: 8px; color: #606774; background: #fff; }
 .subTabs a.active { color: #fe2c55; border-color: #fe2c55; background: #fff5f7; font-weight: 600; }
-.container { max-width: 1220px; margin: 0 auto; padding: 24px; }
+.container { width: 100%; max-width: none; margin: 0; padding: 24px 32px; }
 .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
 .toolbar input { height: 40px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 12px; font-size: 14px; }
 .toolbar input:first-child { flex: 1; }
@@ -60,6 +60,12 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .status.error { background: #fde8e8; color: #c62828; }
 .status.info { background: #fff3e0; color: #e65100; }
 .pageLoading { padding: 10px 14px; margin-bottom: 16px; border: 1px solid #dbeafe; border-radius: 8px; background: #eff6ff; color: #1d4ed8; font-size: 13px; font-weight: 600; }
+.progressLoading { padding: 12px 14px; margin-bottom: 16px; border: 1px solid #dbeafe; border-radius: 8px; background: #eff6ff; color: #1d4ed8; }
+.progressHeader { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
+.progressHeader strong { font-size: 14px; }
+.progressTrack { width: 100%; height: 8px; overflow: hidden; border-radius: 999px; background: #dbeafe; }
+.progressFill { height: 100%; border-radius: inherit; background: #fe2c55; transition: width .35s ease; }
+.progressHint { margin-top: 8px; color: #315c9d; font-size: 12px; line-height: 1.5; }
 .legacyTable { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .legacyTable th, .legacyTable td { padding: 12px 14px; border-bottom: 1px solid #edf0f4; font-size: 13px; text-align: left; vertical-align: top; }
 .legacyTable th { background: #fafbfc; color: #5f6876; }
@@ -69,6 +75,10 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .tableScroll th { position: sticky; top: 0; z-index: 10; }
 .titleCell { max-width: 430px; word-break: break-word; }
 .cover { width: 80px; height: 60px; object-fit: cover; border-radius: 4px; }
+.statusPill { display: inline-flex; align-items: center; justify-content: center; min-width: 64px; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.statusPill.ok { background: #e8f5e9; color: #2e7d32; }
+.statusPill.pending { background: #fff3e0; color: #e65100; }
+.statusPill.error { background: #fde8e8; color: #c62828; }
 a { color: #fe2c55; text-decoration: none; }
 .empty { text-align: center; color: #969da8; padding: 64px 20px; }
 .empty.small { padding: 24px; }
@@ -127,6 +137,10 @@ a { color: #fe2c55; text-decoration: none; }
 .stepBadge.done, .stepBadge.exists, .stepBadge.available { background: #e8f5e9; color: #2e7d32; }
 .stepBadge.failed, .stepBadge.unavailable { background: #fde8e8; color: #c62828; }
 .stepBadge.skipped, .stepBadge.not_requested, .stepBadge.not_configured { background: #fff3e0; color: #e65100; }
+.transcriptBlock { margin-top: 18px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; overflow: hidden; }
+.transcriptHeader { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #edf0f4; background: #fff; }
+.transcriptHeader span { color: #858d9a; font-size: 12px; }
+.transcriptBlock pre { max-height: 360px; overflow: auto; margin: 0; padding: 12px; color: #30343b; font-family: inherit; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
 .pathBlock { margin-top: 18px; padding: 12px; background: #fafbfc; border: 1px solid #edf0f4; border-radius: 8px; }
 .pathBlock code, .workspaceIntro code { display: block; margin-top: 6px; color: #30343b; word-break: break-all; }
 .framesStrip { margin-top: 16px; display: grid; gap: 8px; }
@@ -162,6 +176,7 @@ a { color: #fe2c55; text-decoration: none; }
 .settingsFormGrid input { width: 100%; height: 38px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 10px; background: #fff; color: #30343b; font-size: 13px; }
 .settingsWideField { grid-column: 1 / -1; }
 @media (max-width: 760px) {
+  .container { padding: 18px 16px; }
   .toolbar, .mediaHeader, .workspaceIntro, .settingsPanelHeader, .modelConfigHeader { flex-direction: column; align-items: stretch; }
   .tabs { overflow-x: auto; }
   .tabs a { white-space: nowrap; padding: 0 16px; }
