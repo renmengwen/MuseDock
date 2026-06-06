@@ -71,6 +71,51 @@ async function run() {
   assert.strictEqual(failed.success, false);
   assert.strictEqual(failed.configured, true);
   assert.match(failed.message, /rate limited/);
+
+  const networkFailed = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'network fail' }],
+    configPath,
+    fetchImpl: async () => {
+      throw new Error('connect ECONNRESET sk-test');
+    },
+  });
+  assert.strictEqual(networkFailed.success, false);
+  assert.strictEqual(networkFailed.configured, true);
+  assert.strictEqual(networkFailed.model.provider, 'OpenAI');
+  assert.strictEqual(networkFailed.model.model_id, 'gpt-test');
+  assert.match(networkFailed.message, /文本模型调用失败/);
+  assert.match(networkFailed.message, /connect ECONNRESET/);
+  assert.doesNotMatch(networkFailed.message, /sk-test/);
+
+  const invalidJson = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'invalid json' }],
+    configPath,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error('bad json sk-test');
+      },
+    }),
+  });
+  assert.strictEqual(invalidJson.success, false);
+  assert.strictEqual(invalidJson.configured, true);
+  assert.match(invalidJson.message, /缺少文本内容/);
+  assert.doesNotMatch(invalidJson.message, /sk-test/);
+
+  const missingText = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'missing text' }],
+    configPath,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: {} }] }),
+    }),
+  });
+  assert.strictEqual(missingText.success, false);
+  assert.strictEqual(missingText.configured, true);
+  assert.match(missingText.message, /缺少文本内容/);
+  assert.doesNotMatch(missingText.message, /sk-test/);
 }
 
 run().then(() => {

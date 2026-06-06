@@ -25,6 +25,19 @@ function getProviderError(rawResponse) {
   return '';
 }
 
+function sanitizeErrorDetail(detail, apiKey) {
+  const text = normalizeString(detail);
+  if (!text) return '';
+  return apiKey ? text.split(apiKey).join('[已隐藏]') : text;
+}
+
+function toModelInfo(provider, modelId) {
+  return {
+    provider,
+    model_id: modelId,
+  };
+}
+
 async function callTextModel(options = {}) {
   const {
     messages = [],
@@ -52,30 +65,43 @@ async function callTextModel(options = {}) {
       success: false,
       configured: true,
       message: '文本模型请求失败：当前运行环境缺少 fetch 实现。',
+      model: toModelInfo(provider, modelId),
     };
   }
 
-  const response = await fetchImpl(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: modelId,
-      messages,
-      temperature,
-    }),
-  });
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: modelId,
+        messages,
+        temperature,
+      }),
+    });
+  } catch (error) {
+    const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
+    return {
+      success: false,
+      configured: true,
+      message: `文本模型调用失败：${detail}`,
+      model: toModelInfo(provider, modelId),
+    };
+  }
 
   const rawResponse = await readJsonResponse(response);
 
   if (!response.ok) {
-    const detail = getProviderError(rawResponse) || `HTTP ${response.status}`;
+    const detail = sanitizeErrorDetail(getProviderError(rawResponse), apiKey) || `HTTP ${response.status}`;
     return {
       success: false,
       configured: true,
       message: `${provider || '文本模型'} 调用失败：${detail}`,
+      model: toModelInfo(provider, modelId),
       raw_response: rawResponse,
     };
   }
@@ -88,6 +114,7 @@ async function callTextModel(options = {}) {
       success: false,
       configured: true,
       message: `${provider || '文本模型'} 返回结果缺少文本内容。`,
+      model: toModelInfo(provider, modelId),
       raw_response: rawResponse,
     };
   }
@@ -96,10 +123,7 @@ async function callTextModel(options = {}) {
     success: true,
     configured: true,
     text,
-    model: {
-      provider,
-      model_id: modelId,
-    },
+    model: toModelInfo(provider, modelId),
     raw_response: rawResponse,
   };
 }
