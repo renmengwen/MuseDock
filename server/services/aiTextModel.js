@@ -31,6 +31,24 @@ function sanitizeErrorDetail(detail, apiKey) {
   return apiKey ? text.split(apiKey).join('[已隐藏]') : text;
 }
 
+function sanitizeRawResponse(value, apiKey) {
+  if (!apiKey || value == null) return value;
+  if (typeof value === 'string') {
+    return sanitizeErrorDetail(value, apiKey);
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => sanitizeRawResponse(item, apiKey));
+  }
+  if (typeof value === 'object') {
+    const sanitized = {};
+    for (const [key, item] of Object.entries(value)) {
+      sanitized[key] = sanitizeRawResponse(item, apiKey);
+    }
+    return sanitized;
+  }
+  return value;
+}
+
 function toModelInfo(provider, modelId) {
   return {
     provider,
@@ -93,7 +111,7 @@ async function callTextModel(options = {}) {
     };
   }
 
-  const rawResponse = await readJsonResponse(response);
+  const rawResponse = sanitizeRawResponse(await readJsonResponse(response), apiKey);
 
   if (!response.ok) {
     const detail = sanitizeErrorDetail(getProviderError(rawResponse), apiKey) || `HTTP ${response.status}`;

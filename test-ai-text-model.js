@@ -44,6 +44,7 @@ async function run() {
         status: 200,
         json: async () => ({
           choices: [{ message: { content: '{"summary":"ok"}' } }],
+          debug: { request: { authorization: 'Bearer sk-test' } },
         }),
       };
     },
@@ -53,6 +54,7 @@ async function run() {
   assert.strictEqual(ok.text, '{"summary":"ok"}');
   assert.strictEqual(ok.model.provider, 'OpenAI');
   assert.strictEqual(ok.model.model_id, 'gpt-test');
+  assert.doesNotMatch(JSON.stringify(ok.raw_response), /sk-test/);
   assert.strictEqual(requestedUrl, 'https://api.example.com/v1/chat/completions');
   assert.strictEqual(requestedOptions.headers.Authorization, 'Bearer sk-test');
   const body = JSON.parse(requestedOptions.body);
@@ -65,12 +67,23 @@ async function run() {
     fetchImpl: async () => ({
       ok: false,
       status: 429,
-      json: async () => ({ error: { message: 'rate limited' } }),
+      json: async () => ({
+        error: {
+          message: 'rate limited sk-test',
+          details: {
+            headers: {
+              authorization: 'Bearer sk-test',
+            },
+          },
+        },
+      }),
     }),
   });
   assert.strictEqual(failed.success, false);
   assert.strictEqual(failed.configured, true);
   assert.match(failed.message, /rate limited/);
+  assert.doesNotMatch(failed.message, /sk-test/);
+  assert.doesNotMatch(JSON.stringify(failed.raw_response), /sk-test/);
 
   const networkFailed = await aiTextModel.callTextModel({
     messages: [{ role: 'user', content: 'network fail' }],
