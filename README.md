@@ -12,6 +12,7 @@ MuseDock 是一个本地优先的内容采集与创作素材工作台。它把�
 - **素材工作台**：支持抖音视频下载、音频抽取、关键帧抽取、本地素材状态查看；从抓取记录点击“准备 AI 素材”会自动跳转并开始准备。
 - **音频转写**：已接入小米 MiMo ASR；支持大音频自动压缩，压缩后仍超限时自动切片并合并转写结果。
 - **转写结果展示**：素材工作台会展示转写状态和转写文本，重新进入已转写素材时会读取本地 `transcript.json`。
+- **AI 任务流 Agent**：AI 工作台提供“爆款拆解 + 改写脚本”受控 Agent，读取本地素材、转写和评论缓存，生成结构化创作结果并保存到素材目录。
 - **长任务反馈**：素材准备和音频转写期间会显示 loading、按钮禁用态和预计进度，避免重复触发。
 - **AI 配置**：设置页提供 ASR、文字模型、图片生成、视频生成和多模态模型配置入口。
 - **本地 Web GUI**：React + Vite 前端，Express 后端，默认运行在 `http://localhost:3000`。
@@ -122,6 +123,9 @@ npm run dev:frontend
 # 构建前端
 npm run build:frontend
 
+# 运行统一测试
+npm test
+
 # 检查后端文件语法
 node --check server/app.js
 node --check server/index.js
@@ -155,6 +159,12 @@ node test-media-pipeline-cache.js
 - `GET /api/media/douyin/:aweme_id/status`：查看素材状态
 - `POST /api/media/douyin/:aweme_id/transcribe`：触发音频转写
 
+### AI Agent
+
+- `POST /api/agents/douyin/:aweme_id/runs`：执行抖音素材的 Agent 任务。
+- `GET /api/agents/douyin/:aweme_id/runs`：读取该素材的 Agent 运行记录。
+- `GET /api/agents/douyin/:aweme_id/runs/:run_id`：读取单次 Agent 运行详情。
+
 ### 配置与历史
 
 - `GET /api/history/douyin`：读取抖音抓取记录，并附带素材就绪、音频转写和评论缓存状态
@@ -171,6 +181,7 @@ MuseDock 会在本地生成运行数据：
 - `data/media/douyin/<aweme_id>/audio.asr.mp3`：大音频转写时生成的低码率音频
 - `data/media/douyin/<aweme_id>/asr_segments/`：压缩后仍超限时生成的 ASR 切片
 - `data/media/douyin/<aweme_id>/transcript.json`：音频转写结果
+- `data/media/douyin/<aweme_id>/agent_runs/`：AI 任务流 Agent 的本地运行结果。
 - `chrome-user-data/`：Chrome CDP 使用的本地浏览器数据
 - `douyin-cookies.json`：抖音 Cookie 持久化文件
 
