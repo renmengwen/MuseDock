@@ -122,6 +122,90 @@ async function run() {
   assert.strictEqual(missingDetail.success, false);
   assert.match(missingDetail.message, /未找到该 Agent 运行记录/);
 
+  const traversalDetail = await agentRuns.getDouyinAgentRun(awemeId, '../metadata', { rootDir });
+  assert.strictEqual(traversalDetail.success, false);
+  assert.match(traversalDetail.message, /非法|未找到/);
+
+  let failedModelCalled = false;
+  const failedModel = await agentRuns.createDouyinAgentRun(awemeId, {
+    rootDir,
+    template: 'viral_rewrite',
+    aiTextModel: {
+      callTextModel: async () => {
+        failedModelCalled = true;
+        return {
+          success: false,
+          model: { provider: 'OpenAI', model_id: 'gpt-test' },
+          message: '模型超时',
+          raw_response: { error: { message: 'timeout detail' } },
+        };
+      },
+    },
+    getLocalComments: () => ({ success: true, count: 0, data: [] }),
+  });
+  assert.strictEqual(failedModelCalled, true);
+  assert.strictEqual(failedModel.success, false);
+  assert.strictEqual(failedModel.status, 'failed');
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(failedModel, 'raw_response'), false);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(JSON.parse(fs.readFileSync(failedModel.path, 'utf-8')), 'raw_response'), false);
+
+  const longText = `${'长转写'.repeat(3000)}TAIL_SHOULD_NOT_APPEAR`;
+  await writeJson(paths.transcript, {
+    success: true,
+    status: 'done',
+    text: longText,
+  });
+
+  const longRun = await agentRuns.createDouyinAgentRun(awemeId, {
+    rootDir,
+    template: 'viral_rewrite',
+    aiTextModel: {
+      callTextModel: async ({ messages }) => {
+        assert.match(messages[1].content, /8000/);
+        assert.doesNotMatch(messages[1].content, /TAIL_SHOULD_NOT_APPEAR/);
+        return {
+          success: true,
+          model: { provider: 'OpenAI', model_id: 'gpt-test' },
+          text: JSON.stringify({ summary: '长转写摘要' }),
+        };
+      },
+    },
+    getLocalComments: () => ({
+      success: true,
+      count: 80,
+      data: Array.from({ length: 80 }, (_, index) => ({
+        content: `评论${index}`,
+        like_count: index,
+        replies: Array.from({ length: 6 }, (__, replyIndex) => ({ content: `回复${index}-${replyIndex}` })),
+      })),
+    }),
+  });
+  assert.strictEqual(longRun.success, true);
+  assert.strictEqual(longRun.input_summary.transcript_truncated, true);
+  assert.ok(longRun.run_id.endsWith('-viral_rewrite'));
+  assert.match(longRun.run_id, /-\d{3}Z-[a-f0-9]{6}-viral_rewrite$/);
+
+  const sameTimeRuns = await Promise.all(Array.from({ length: 5 }, () => agentRuns.createDouyinAgentRun(awemeId, {
+    rootDir,
+    template: 'viral_rewrite',
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        model: { provider: 'OpenAI', model_id: 'gpt-test' },
+        text: JSON.stringify({ summary: '并发摘要' }),
+      }),
+    },
+    getLocalComments: () => ({ success: true, count: 0, data: [] }),
+  })));
+  assert.strictEqual(new Set(sameTimeRuns.map(item => item.run_id)).size, sameTimeRuns.length);
+  assert.strictEqual(new Set(sameTimeRuns.map(item => item.path)).size, sameTimeRuns.length);
+
+  await writeJson(paths.transcript, {
+    success: true,
+    status: 'done',
+    text: '这是一个关于本地创作工作流的视频。',
+  });
+
   const raw = await agentRuns.createDouyinAgentRun(awemeId, {
     rootDir,
     template: 'viral_rewrite',

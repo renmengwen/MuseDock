@@ -1,21 +1,28 @@
 const fsp = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 const mediaPipeline = require('./mediaPipeline');
 const defaultAiTextModel = require('./aiTextModel');
 const douyinStore = require('./douyinStore');
 
 const TEMPLATE_VIRAL_REWRITE = 'viral_rewrite';
-
-let runSequence = 0;
+const MAX_TRANSCRIPT_CHARS = 8000;
+const MAX_COMMENTS_CHARS = 4000;
 
 function createRunId(template = TEMPLATE_VIRAL_REWRITE) {
-  runSequence = (runSequence + 1) % 10000;
   const stamp = new Date().toISOString()
-    .replace(/[:]/g, '')
-    .replace(/\.\d{3}Z$/, '')
+    .replace(/[-:]/g, '')
+    .replace('.', '-')
     .replace('T', '-');
-  const suffix = String(runSequence).padStart(4, '0');
-  return `${stamp}-${suffix}-${template}`;
+  const random = crypto.randomBytes(3).toString('hex');
+  return `${stamp}-${random}-${template}`;
+}
+
+function isSafeRunId(runId) {
+  const value = typeof runId === 'string' ? runId : '';
+  if (!value || value !== path.basename(value)) return false;
+  if (value.includes('..') || value.includes('/') || value.includes('\\')) return false;
+  return /^[A-Za-z0-9_.-]+$/.test(value);
 }
 
 function getAgentRunsDir(awemeId, rootDir) {
@@ -95,12 +102,23 @@ function summarizeComments(comments = []) {
       }
     }
   }
-  return lines.join('\n');
+  const text = lines.join('\n');
+  return text.length > MAX_COMMENTS_CHARS
+    ? `${text.slice(0, MAX_COMMENTS_CHARS)}\n（评论摘要已截断，仅保留前 ${MAX_COMMENTS_CHARS} 字）`
+    : text;
 }
 
 function buildPrompt({ analysisInput = {}, transcript = {}, commentsText = '', commentCount = 0 } = {}) {
   const video = analysisInput.video || {};
   const statistics = video.statistics || {};
+  const transcriptText = typeof transcript.text === 'string' ? transcript.text : '';
+  const transcriptTruncated = transcriptText.length > MAX_TRANSCRIPT_CHARS;
+  const promptTranscript = transcriptTruncated
+    ? transcriptText.slice(0, MAX_TRANSCRIPT_CHARS)
+    : transcriptText;
+  const transcriptNote = transcriptTruncated
+    ? `转写文本已截断，仅保留前 ${MAX_TRANSCRIPT_CHARS} 字。`
+    : '转写文本未截断。';
   const commentsNote = commentCount > 0
     ? `本地评论缓存共 ${commentCount} 条，以下是抽样评论：\n${commentsText}`
     : '暂无本地评论缓存。评论洞察需要基于视频内容谨慎推断，并在结果中说明依据不足。';
@@ -125,7 +143,8 @@ function buildPrompt({ analysisInput = {}, transcript = {}, commentsText = '', c
         `统计：点赞 ${statistics.digg_count || statistics.liked_count || 0}，评论 ${statistics.comment_count || 0}，分享 ${statistics.share_count || 0}`,
         '',
         '转写文本：',
-        transcript.text || '',
+        transcriptNote,
+        promptTranscript,
         '',
         '评论信息：',
         commentsNote,
@@ -140,6 +159,7 @@ function createInputSummary({ analysisInput, transcript, comments }) {
     author: analysisInput?.video?.author?.nickname || '',
     has_transcript: !!(transcript && transcript.text),
     transcript_chars: transcript?.text ? transcript.text.length : 0,
+    transcript_truncated: !!(transcript?.text && transcript.text.length > MAX_TRANSCRIPT_CHARS),
     comment_count: Array.isArray(comments) ? comments.length : 0,
   };
 }
@@ -332,6 +352,13 @@ async function listDouyinAgentRuns(awemeId, options = {}) {
 }
 
 async function getDouyinAgentRun(awemeId, runId, options = {}) {
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
   const filePath = getRunPath(awemeId, runId, options.rootDir);
   const data = await readJsonIfExists(filePath);
   if (!data) {
