@@ -34,7 +34,6 @@ Thumbs.db
 .vscode/
 
 # Internal handoff notes
-agent.md
 docs/handoff-*.md
 
 # Local debug files that may contain account cookies or temporary code
