@@ -3,12 +3,19 @@ import { ConfigurableTable } from './data-table/ConfigurableTable.jsx';
 import { formatTime, getDouyinAwemeId, getDouyinUrl } from '../utils/format.js';
 import { formatDuration, getContentTypeLabel } from '../utils/content.js';
 
+function getAuthorName(item = {}) {
+  if (item.author && typeof item.author === 'object') {
+    return item.author.nickname || item.author.name || item.nickname || '-';
+  }
+  return item.author || item.nickname || '-';
+}
+
 function createDouyinColumns(onComments, onPrepareMedia) {
   return [
     { id: 'title', label: '标题', className: 'min-w-[260px] max-w-[430px] break-words', render: item => item.title || item.description || '-' },
     { id: 'type', label: '类型', className: 'min-w-[88px]', render: item => getContentTypeLabel(item, 'douyin') },
     { id: 'duration', label: '视频时长', className: 'min-w-[96px]', render: item => formatDuration(item) },
-    { id: 'author', label: '作者', className: 'min-w-[120px]', render: item => item.author || item.nickname || item.author?.nickname || '-' },
+    { id: 'author', label: '作者', className: 'min-w-[120px]', render: item => getAuthorName(item) },
     { id: 'createdAt', label: '发布日期', className: 'min-w-[136px]', render: item => formatTime(item.create_time) },
     { id: 'crawledAt', label: '抓取日期', className: 'min-w-[136px]', render: item => formatTime(item.crawled_at) },
     { id: 'likes', label: '点赞', className: 'min-w-[80px]', render: item => item.likes || item.liked_count || item.statistics?.digg_count || 0 },
