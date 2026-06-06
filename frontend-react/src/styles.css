@@ -1,3 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 20% 97%;
+    --foreground: 220 12% 19%;
+    --card: 0 0% 100%;
+    --card-foreground: 220 12% 19%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 12% 19%;
+    --primary: 347 99% 58%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 16% 95%;
+    --secondary-foreground: 220 12% 21%;
+    --muted: 210 25% 98%;
+    --muted-foreground: 219 10% 42%;
+    --accent: 347 100% 98%;
+    --accent-foreground: 347 99% 58%;
+    --destructive: 0 68% 47%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 18% 90%;
+    --input: 220 18% 90%;
+    --ring: 347 99% 58%;
+    --radius: 8px;
+  }
+}
+
 * { box-sizing: border-box; }
 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #2b2f36; }
 .header { background: linear-gradient(135deg, #fe2c55, #25f4ee); color: #fff; padding: 20px 32px; }
@@ -29,9 +58,13 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .status.error { background: #fde8e8; color: #c62828; }
 .status.info { background: #fff3e0; color: #e65100; }
 .pageLoading { padding: 10px 14px; margin-bottom: 16px; border: 1px solid #dbeafe; border-radius: 8px; background: #eff6ff; color: #1d4ed8; font-size: 13px; font-weight: 600; }
-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-th, td { padding: 12px 14px; border-bottom: 1px solid #edf0f4; font-size: 13px; text-align: left; vertical-align: top; }
-th { background: #fafbfc; color: #5f6876; }
+.legacyTable { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.legacyTable th, .legacyTable td { padding: 12px 14px; border-bottom: 1px solid #edf0f4; font-size: 13px; text-align: left; vertical-align: top; }
+.legacyTable th { background: #fafbfc; color: #5f6876; }
+.tableShell { width: 100%; }
+.tableScroll { max-height: 62vh; overflow: auto; border-radius: 8px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.tableScroll table { box-shadow: none; border-radius: 0; min-width: 980px; }
+.tableScroll th { position: sticky; top: 0; z-index: 10; }
 .titleCell { max-width: 430px; word-break: break-word; }
 .cover { width: 80px; height: 60px; object-fit: cover; border-radius: 4px; }
 a { color: #fe2c55; text-decoration: none; }
