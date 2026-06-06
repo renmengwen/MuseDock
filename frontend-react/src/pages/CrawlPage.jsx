@@ -6,9 +6,13 @@ import { ContentTable } from '../components/ContentTable.jsx';
 import { LoginModal } from '../components/LoginModal.jsx';
 import { PlatformTabs } from '../components/PlatformTabs.jsx';
 import { Status } from '../components/Status.jsx';
+import { Button } from '@/components/ui/button.jsx';
+import { Input } from '@/components/ui/input.jsx';
+import { Select } from '@/components/ui/select.jsx';
 import { useDouyinComments } from '../hooks/useDouyinComments.js';
 import { useDouyinLogin } from '../hooks/useDouyinLogin.js';
 import { setSelectedMediaItem } from '../state/mediaSelection.js';
+import { filterByTitle } from '../utils/content.js';
 import { getDouyinAwemeId } from '../utils/format.js';
 
 const CRAWL_MODES = [
@@ -32,12 +36,14 @@ export function CrawlPage() {
   const [inputValue, setInputValue] = useState('codex');
   const [max, setMax] = useState(20);
   const [results, setResults] = useState([]);
+  const [titleQuery, setTitleQuery] = useState('');
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const login = useDouyinLogin();
   const comments = useDouyinComments();
   const canRunCrawl = inputValue.trim().length > 0 && !loading;
+  const filteredResults = useMemo(() => filterByTitle(results, titleQuery), [results, titleQuery]);
 
   useEffect(() => {
     if (platform === 'xhs' && crawlMode !== 'keyword') {
@@ -116,13 +122,13 @@ export function CrawlPage() {
     <main className="container">
       <PlatformTabs base="crawl" />
       <div className="toolbar">
-        <input
+        <Input
           value={inputValue}
           onChange={event => setInputValue(event.target.value)}
           onKeyDown={event => event.key === 'Enter' && runCrawl()}
           placeholder={MODE_PLACEHOLDER[crawlMode]}
         />
-        <input
+        <Input
           className="countInput"
           type="number"
           min="1"
@@ -130,8 +136,7 @@ export function CrawlPage() {
           value={max}
           onChange={event => setMax(event.target.value)}
         />
-        <select
-          className="modeSelect"
+        <Select
           value={crawlMode}
           onChange={handleModeChange}
           disabled={loading || platform === 'xhs'}
@@ -139,18 +144,28 @@ export function CrawlPage() {
           {CRAWL_MODES.map(mode => (
             <option key={mode.value} value={mode.value}>{mode.label}</option>
           ))}
-        </select>
-        <button className="btn primary" disabled={!canRunCrawl} onClick={runCrawl}>{getActionLabel()}</button>
-        {platform === 'douyin' ? <button className="btn login" onClick={login.startLogin}>扫码登录</button> : null}
+        </Select>
+        <Button disabled={!canRunCrawl} onClick={runCrawl}>{getActionLabel()}</Button>
+        {platform === 'douyin' ? <Button variant="login" onClick={login.startLogin}>扫码登录</Button> : null}
+      </div>
+
+      <div className="toolbar">
+        <Input
+          value={titleQuery}
+          onChange={event => setTitleQuery(event.target.value)}
+          placeholder="按标题搜索"
+          aria-label="按标题搜索"
+        />
       </div>
 
       <Status status={status} />
       {loading ? <div className="pageLoading">接口处理中，请稍候...</div> : null}
       <ContentTable
         platform={platform}
-        data={results}
+        data={filteredResults}
         onComments={comments.loadComments}
         onPrepareMedia={prepareMedia}
+        storageKey={`musedock:table-columns:crawl:${platform}`}
       />
 
       <LoginModal open={login.loginOpen} state={login.loginState} onClose={() => login.setLoginOpen(false)} />
