@@ -5,7 +5,7 @@ export function ContentTable({ platform, data, onComments, onPrepareMedia }) {
 
   if (platform === 'douyin') {
     return (
-      <table>
+      <table className="legacyTable">
         <thead>
           <tr>
             <th>标题</th>
@@ -43,7 +43,7 @@ export function ContentTable({ platform, data, onComments, onPrepareMedia }) {
   }
 
   return (
-    <table>
+    <table className="legacyTable">
       <thead>
         <tr>
           <th>封面</th>

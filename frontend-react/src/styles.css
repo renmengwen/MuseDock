@@ -58,9 +58,9 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .status.error { background: #fde8e8; color: #c62828; }
 .status.info { background: #fff3e0; color: #e65100; }
 .pageLoading { padding: 10px 14px; margin-bottom: 16px; border: 1px solid #dbeafe; border-radius: 8px; background: #eff6ff; color: #1d4ed8; font-size: 13px; font-weight: 600; }
-table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-th, td { padding: 12px 14px; border-bottom: 1px solid #edf0f4; font-size: 13px; text-align: left; vertical-align: top; }
-th { background: #fafbfc; color: #5f6876; }
+.legacyTable { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.legacyTable th, .legacyTable td { padding: 12px 14px; border-bottom: 1px solid #edf0f4; font-size: 13px; text-align: left; vertical-align: top; }
+.legacyTable th { background: #fafbfc; color: #5f6876; }
 .titleCell { max-width: 430px; word-break: break-word; }
 .cover { width: 80px; height: 60px; object-fit: cover; border-radius: 4px; }
 a { color: #fe2c55; text-decoration: none; }
