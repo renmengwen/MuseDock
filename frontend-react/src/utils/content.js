@@ -17,7 +17,14 @@ export function withCrawlTimestamp(data = [], nowSeconds = Math.floor(Date.now()
 
 function readDurationMs(value) {
   if (value && typeof value === 'object') {
-    return readDurationMs(value.duration_ms ?? value.video_duration_ms ?? value.duration ?? value.video?.duration);
+    return readDurationMs(
+      value.duration_ms
+      ?? value.video_duration_ms
+      ?? value.video_duration
+      ?? value.duration
+      ?? value.video?.duration
+      ?? value.note_card?.video?.duration
+    );
   }
   const num = Number(value || 0);
   if (!Number.isFinite(num) || num <= 0) return 0;
