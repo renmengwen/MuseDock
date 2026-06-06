@@ -61,9 +61,9 @@ export function AiWorkspace() {
   }, [activeRun]);
 
   const transcriptReady = mediaStatus?.steps?.transcript?.status === 'done' || mediaStatus?.transcript?.status === 'done';
-  const videoReady = mediaStatus?.steps?.video?.status === 'done' || mediaStatus?.video?.status === 'done';
-  const audioReady = mediaStatus?.steps?.audio?.status === 'done' || mediaStatus?.audio?.status === 'done';
-  const mediaReady = videoReady || audioReady;
+  const videoReady = mediaStatus?.steps?.video?.status === 'done';
+  const audioReady = mediaStatus?.steps?.audio?.status === 'done';
+  const mediaReady = videoReady && audioReady;
   const selectedAwemeId = mediaStatus?.aweme_id || awemeId.trim();
 
   async function loadWorkspace() {
@@ -80,10 +80,10 @@ export function AiWorkspace() {
         api.getDouyinMediaStatus(value),
         api.listDouyinAgentRuns(value),
       ]);
-      const nextRuns = Array.isArray(runsJson?.runs) ? runsJson.runs : [];
+      const runList = runsJson.data || [];
       setMediaStatus(mediaJson);
-      setRuns(nextRuns);
-      setActiveRun(nextRuns[0] || null);
+      setRuns(runList);
+      setActiveRun(runList[0] || null);
       setStatus({ type: 'success', message: `已加载素材 ${value}` });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
@@ -105,9 +105,9 @@ export function AiWorkspace() {
       const json = await api.createDouyinAgentRun(value, 'viral_rewrite');
       setActiveRun(json.run || json);
       const runsJson = await api.listDouyinAgentRuns(value);
-      const nextRuns = Array.isArray(runsJson?.runs) ? runsJson.runs : [];
-      setRuns(nextRuns);
-      if (nextRuns.length > 0) setActiveRun(nextRuns[0]);
+      const runList = runsJson.data || [];
+      setRuns(runList);
+      if (runList.length > 0) setActiveRun(runList[0]);
       setStatus({
         type: json.success ? 'success' : 'error',
         message: json.message || (json.success ? 'Agent 执行完成' : 'Agent 执行失败'),
@@ -162,7 +162,7 @@ export function AiWorkspace() {
 
           <h3>素材状态</h3>
           <ul className="agentStatusList">
-            <StepStatus label="视频或音频" done={mediaReady} detail="Agent 至少需要可用的视频或音频素材" />
+            <StepStatus label="视频和音频" done={mediaReady} detail="Agent 需要视频和音频素材都已准备完成" />
             <StepStatus label="音频转写" done={transcriptReady} detail="建议先完成转写，结果会更稳定" />
           </ul>
         </div>
