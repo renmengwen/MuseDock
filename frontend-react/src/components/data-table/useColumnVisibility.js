@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 function getDefaultVisibleIds(columns) {
   const defaults = columns.filter(column => column.defaultVisible !== false).map(column => column.id);
@@ -12,6 +12,11 @@ function normalizeVisibleIds(value, columns) {
     : [];
 
   return normalized.length ? normalized : getDefaultVisibleIds(columns);
+}
+
+function areSameIds(a, b) {
+  if (a.length !== b.length) return false;
+  return a.every((id, index) => id === b[index]);
 }
 
 function readVisibleIds(storageKey, columns) {
@@ -28,21 +33,47 @@ function readVisibleIds(storageKey, columns) {
 }
 
 export function useColumnVisibility(columns, storageKey) {
-  const columnIds = useMemo(() => columns.map(column => column.id).join('|'), [columns]);
+  const columnSignature = useMemo(
+    () => columns.map(column => `${column.id}:${column.defaultVisible === false ? '0' : '1'}`).join('|'),
+    [columns],
+  );
+  const stateScopeRef = useRef({ storageKey, columnSignature });
+  const pendingScopeRef = useRef(null);
   const [visibleIds, setVisibleIds] = useState(() => readVisibleIds(storageKey, columns));
 
   useEffect(() => {
-    setVisibleIds(current => normalizeVisibleIds(current, columns));
-  }, [columnIds, columns]);
+    const next = readVisibleIds(storageKey, columns);
+    pendingScopeRef.current = { storageKey, columnSignature, visibleIds: next };
+    setVisibleIds(current => {
+      return areSameIds(current, next) ? current : next;
+    });
+  }, [storageKey, columnSignature]);
 
   useEffect(() => {
     if (!storageKey || typeof window === 'undefined') return;
+
+    const scope = stateScopeRef.current;
+    if (!scope || scope.storageKey !== storageKey || scope.columnSignature !== columnSignature) {
+      const pendingScope = pendingScopeRef.current;
+      if (
+        !pendingScope
+        || pendingScope.storageKey !== storageKey
+        || pendingScope.columnSignature !== columnSignature
+        || !areSameIds(visibleIds, pendingScope.visibleIds)
+      ) {
+        return;
+      }
+
+      stateScopeRef.current = { storageKey, columnSignature };
+      pendingScopeRef.current = null;
+    }
+
     try {
       window.localStorage.setItem(storageKey, JSON.stringify(visibleIds));
     } catch {
       // localStorage may be unavailable in private or restricted browser contexts.
     }
-  }, [storageKey, visibleIds]);
+  }, [storageKey, columnSignature, visibleIds]);
 
   const visibleColumns = useMemo(
     () => columns.filter(column => visibleIds.includes(column.id)),
@@ -54,8 +85,9 @@ export function useColumnVisibility(columns, storageKey) {
       const next = visible
         ? Array.from(new Set([...current, columnId]))
         : current.filter(id => id !== columnId);
+      const normalized = normalizeVisibleIds(next, columns);
 
-      return normalizeVisibleIds(next, columns);
+      return areSameIds(current, normalized) ? current : normalized;
     });
   }
 
