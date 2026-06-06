@@ -12,7 +12,7 @@ import { Select } from '@/components/ui/select.jsx';
 import { useDouyinComments } from '../hooks/useDouyinComments.js';
 import { useDouyinLogin } from '../hooks/useDouyinLogin.js';
 import { setSelectedMediaItem } from '../state/mediaSelection.js';
-import { filterByTitle } from '../utils/content.js';
+import { filterByTitle, withCrawlTimestamp } from '../utils/content.js';
 import { getDouyinAwemeId } from '../utils/format.js';
 
 const CRAWL_MODES = [
@@ -104,7 +104,7 @@ export function CrawlPage() {
         return;
       }
 
-      const data = json.data || [];
+      const data = withCrawlTimestamp(json.data || []);
       setResults(data);
       setTitleQuery('');
       setStatus({
