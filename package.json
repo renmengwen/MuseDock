@@ -1,0 +1,32 @@
+{
+  "name": "musedock",
+  "version": "1.0.0",
+  "description": "抖音/小红书内容抓取工具 - Web GUI",
+  "main": "server/index.js",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/renmengwen/MuseDock.git"
+  },
+  "bugs": {
+    "url": "https://github.com/renmengwen/MuseDock/issues"
+  },
+  "homepage": "https://github.com/renmengwen/MuseDock#readme",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "dev:frontend": "vite --config frontend-react/vite.config.js",
+    "build:frontend": "vite build --config frontend-react/vite.config.js"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "better-sqlite3": "^11.1.2",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "playwright": "^1.51.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.17.0",
+    "vite": "^8.0.16"
+  }
+}

@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+frontend-dist/
+dist/
+build/
+
+# Local runtime data
+data/*.db
+data/*.db-*
+data/crawler.db
+data/mediacrawler.db
+data/media/
+browser_data/
+chrome-user-data/
+douyin-cookies.json
+
+# Logs
+*.log
+server.out.log
+server.err.log
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Internal handoff notes
+agent.md
+docs/handoff-*.md
+
+# Local debug files that may contain account cookies or temporary code
+test-douyin.js
+server/scraper/*.backup
