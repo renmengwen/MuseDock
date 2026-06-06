@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 .worktrees/
+.superpowers/
 
 # Build output
 frontend-dist/
