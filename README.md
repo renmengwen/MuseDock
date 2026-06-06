@@ -1,8 +1,8 @@
 # MuseDock
 
-MuseDock 是一个本地优先的内容采集与创作素材工作台。它把抖音、小红书等平台的内容抓取、评论采集、素材落盘、音视频处理和 AI 工作流放在同一个 Web GUI 里，帮助创作者、运营和研究者更快地整理可复用的内容素材。
+MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作台。它把抖音、小红书等平台的内容抓取、评论采集、素材落盘、音视频处理、音频转写和受控 AI Agent 放在同一个 Web GUI 里，帮助创作者、运营和研究者把分散的平台内容整理成可复用的分析、脚本和选题素材。
 
-> 当前项目处于早期开发阶段，功能以抖音链路为主，小红书能力仍在补齐中。
+> 当前项目以抖音链路为主，已经跑通“抓取 - 评论 - 素材准备 - ASR 转写 - AI 任务流 Agent”的本地闭环；小红书能力仍在补齐中。
 
 ## 功能特性
 
@@ -12,7 +12,7 @@ MuseDock 是一个本地优先的内容采集与创作素材工作台。它把�
 - **素材工作台**：支持抖音视频下载、音频抽取、关键帧抽取、本地素材状态查看；从抓取记录点击“准备 AI 素材”会自动跳转并开始准备。
 - **音频转写**：已接入小米 MiMo ASR；支持大音频自动压缩，压缩后仍超限时自动切片并合并转写结果。
 - **转写结果展示**：素材工作台会展示转写状态和转写文本，重新进入已转写素材时会读取本地 `transcript.json`。
-- **AI 任务流 Agent**：AI 工作台提供“爆款拆解 + 改写脚本”受控 Agent，读取本地素材、转写和评论缓存，生成结构化创作结果并保存到素材目录。
+- **AI 任务流 Agent**：AI 工作台提供“爆款拆解 + 改写脚本”受控 Agent，读取本地素材、转写和评论缓存，生成内容摘要、爆点拆解、受众画像、评论洞察、选题方向、改写脚本和标题建议，并保存到素材目录。
 - **长任务反馈**：素材准备和音频转写期间会显示 loading、按钮禁用态和预计进度，避免重复触发。
 - **AI 配置**：设置页提供 ASR、文字模型、图片生成、视频生成和多模态模型配置入口。
 - **本地 Web GUI**：React + Vite 前端，Express 后端，默认运行在 `http://localhost:3000`。
@@ -76,7 +76,9 @@ npm run dev:frontend
 5. 在“抓取记录”页查看本地保存的数据。
 6. 在“抓取记录”页查看素材、转写和评论缓存状态；点击“准备 AI 素材”会跳转到素材工作台并自动开始准备。
 7. 在“素材工作台”中查看视频、音频、关键帧和转写状态；点击“请求转写”可调用 MiMo ASR。
-8. 在“设置”页配置后续 AI 工作流所需的模型信息。
+8. 在“设置”页配置 ASR 和文字模型。AI 工作台的“爆款拆解 + 改写脚本”需要启用文字模型，并填写 OpenAI-compatible 的 Base URL、模型 ID 和 API Key。
+9. 在“AI 工作台”输入已准备素材的抖音视频 ID，点击“加载工作台”查看素材状态和历史运行记录。
+10. 点击“执行爆款拆解”，MuseDock 会读取本地素材、转写文本和评论缓存，生成结构化创作结果并写入 `agent_runs`。
 
 ## 环境变量
 
@@ -94,6 +96,8 @@ npm run dev:frontend
 
 当前 ASR 已接入小米 MiMo。也可以在“设置”页的 ASR 转写模型中配置：供应商填写 `mimo`，Base URL 填写 `https://api.xiaomimimo.com/v1`，模型 ID 填写 `mimo-v2.5-asr`，API Key 填写 MiMo 控制台密钥。MiMo 要求 base64 编码后的单段音频不超过 10MB；请求转写时如果音频过大，后端会先自动生成低码率 `audio.asr.mp3`，压缩后仍超限则自动切片并按顺序合并转写文本。自动压缩会优先使用 `FFMPEG_PATH` 指定的 ffmpeg，其次使用项目依赖内置的 ffmpeg，最后尝试系统 `PATH` 中的 `ffmpeg`。
 
+AI 工作台当前使用“设置”页中的文字模型配置，按 OpenAI-compatible `POST /chat/completions` 调用。DeepSeek、OpenAI 或自定义兼容服务都可以通过供应商、Base URL、模型 ID 和 API Key 接入。未配置文字模型时，Agent 会返回明确的未配置状态，不会阻塞素材和转写流程。
+
 ## 目录结构
 
 ```text
@@ -104,7 +108,7 @@ npm run dev:frontend
 +-- server/              # Express 服务、路由、抓取器和业务服务
 |   +-- routes/          # API 路由
 |   +-- scraper/         # 抖音、小红书抓取逻辑
-|   +-- services/        # 数据存储、媒体处理、AI 配置服务
+|   +-- services/        # 数据存储、媒体处理、AI 配置和 Agent 服务
 |   +-- state/           # 运行时 Cookie 状态
 +-- data/                # SQLite 数据库和本地媒体素材
 +-- docs/                # 项目文档和交接记录
@@ -133,6 +137,11 @@ node --check server/index.js
 # 媒体流水线回归测试
 node test-media-pipeline.js
 node test-media-pipeline-cache.js
+
+# AI Agent 相关回归测试
+node test-ai-text-model.js
+node test-agent-runs.js
+node test-agent-run-utils.mjs
 ```
 
 ## API 概览
@@ -161,7 +170,7 @@ node test-media-pipeline-cache.js
 
 ### AI Agent
 
-- `POST /api/agents/douyin/:aweme_id/runs`：执行抖音素材的 Agent 任务。
+- `POST /api/agents/douyin/:aweme_id/runs`：执行抖音素材的 Agent 任务。当前支持 `viral_rewrite`，即“爆款拆解 + 改写脚本”。
 - `GET /api/agents/douyin/:aweme_id/runs`：读取该素材的 Agent 运行记录。
 - `GET /api/agents/douyin/:aweme_id/runs/:run_id`：读取单次 Agent 运行详情。
 
@@ -181,7 +190,7 @@ MuseDock 会在本地生成运行数据：
 - `data/media/douyin/<aweme_id>/audio.asr.mp3`：大音频转写时生成的低码率音频
 - `data/media/douyin/<aweme_id>/asr_segments/`：压缩后仍超限时生成的 ASR 切片
 - `data/media/douyin/<aweme_id>/transcript.json`：音频转写结果
-- `data/media/douyin/<aweme_id>/agent_runs/`：AI 任务流 Agent 的本地运行结果。
+- `data/media/douyin/<aweme_id>/agent_runs/`：AI 任务流 Agent 的本地运行结果，包含执行步骤、输入摘要、模型信息、结构化结果和原始返回兜底文本
 - `chrome-user-data/`：Chrome CDP 使用的本地浏览器数据
 - `douyin-cookies.json`：抖音 Cookie 持久化文件
 
@@ -190,7 +199,7 @@ MuseDock 会在本地生成运行数据：
 ## 开源路线图
 
 - 增加真实任务队列和后端进度推送，替代当前前端预计进度。
-- 增强 AI 分析、改编、脚本和分镜生成链路。
+- 增加更多受控 Agent 模板，例如评论洞察、选题生成、小红书改写、分镜脚本和素材复盘。
 - 补齐小红书抓取、评论和素材准备能力。
 - 增加系统化测试、端到端测试和 CI。
 - 提供更清晰的配置文件与部署文档。
