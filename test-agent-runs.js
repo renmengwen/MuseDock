@@ -163,15 +163,20 @@ async function run() {
 
   const listed = await agentRuns.listDouyinAgentRuns(awemeId, { rootDir });
   assert.strictEqual(listed.success, true);
+  assert.strictEqual(listed.count, 2);
   assert.strictEqual(listed.data.length, 2);
   assert.strictEqual(listed.data[0].run_id, generated.run_id);
 
   const detail = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
   assert.strictEqual(detail.success, true);
+  assert.strictEqual(detail.aweme_id, awemeId);
+  assert.strictEqual(detail.run_id, generated.run_id);
   assert.strictEqual(detail.data.result.rewrite_script, '改写脚本');
 
   const missingDetail = await agentRuns.getDouyinAgentRun(awemeId, 'missing-run', { rootDir });
   assert.strictEqual(missingDetail.success, false);
+  assert.strictEqual(missingDetail.aweme_id, awemeId);
+  assert.strictEqual(missingDetail.run_id, 'missing-run');
   assert.match(missingDetail.message, /未找到该 Agent 运行记录/);
 
   const traversalDetail = await agentRuns.getDouyinAgentRun(awemeId, '../metadata', { rootDir });

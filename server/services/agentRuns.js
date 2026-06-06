@@ -349,6 +349,7 @@ async function listDouyinAgentRuns(awemeId, options = {}) {
   if (!isSafeId(awemeId)) {
     return {
       ...createInvalidAwemeResult(awemeId),
+      count: 0,
       data: [],
     };
   }
@@ -361,6 +362,7 @@ async function listDouyinAgentRuns(awemeId, options = {}) {
     return {
       success: true,
       aweme_id: String(awemeId),
+      count: 0,
       data: [],
     };
   }
@@ -374,6 +376,7 @@ async function listDouyinAgentRuns(awemeId, options = {}) {
   return {
     success: true,
     aweme_id: String(awemeId),
+    count: data.length,
     data,
   };
 }
@@ -395,12 +398,16 @@ async function getDouyinAgentRun(awemeId, runId, options = {}) {
   if (!data) {
     return {
       success: false,
+      aweme_id: String(awemeId),
+      run_id: runId,
       message: '未找到该 Agent 运行记录',
     };
   }
 
   return {
     success: true,
+    aweme_id: String(awemeId),
+    run_id: runId,
     data,
   };
 }
