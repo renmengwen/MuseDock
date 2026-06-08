@@ -639,7 +639,8 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
 
   const projectService = options.hyperframesProject || defaultHyperframesProject;
   const projectDir = getHyperframesProjectDir(awemeId, runId, options.rootDir);
-  const result = await projectService.createOriginalCaptionProject({ run, projectDir });
+  const renderOptions = defaultHyperframesProject.normalizeRenderOptions(options.renderOptions || run.video?.render_options || {});
+  const result = await projectService.createOriginalCaptionProject({ run, projectDir, renderOptions });
 
   if (!result.success) {
     const video = {
@@ -661,6 +662,7 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
     captions_path: result.captions_path,
     project_json_path: result.project_json_path,
     duration: result.duration,
+    render_options: result.render_options || renderOptions,
     message: result.message || '视频工程已生成。',
     updated_at: new Date().toISOString(),
   };

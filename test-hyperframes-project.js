@@ -81,6 +81,35 @@ async function run() {
   assert.match(html, /assets\/narration.wav/);
   assert.doesNotMatch(html, /video\.mp4|frame-0001|frames\//);
 
+  const customProjectDir = path.join(root, 'custom-project');
+  const customResult = await hyperframesProject.createOriginalCaptionProject({
+    run: runData,
+    projectDir: customProjectDir,
+    renderOptions: {
+      resolution: '720x1280',
+      fps: '30',
+      captionSize: 'large',
+      motionLevel: 'low',
+      showCaptionBar: false,
+      showSceneNumber: false,
+      quality: 'high',
+    },
+  });
+
+  assert.equal(customResult.success, true);
+  assert.equal(customResult.render_options.resolution, '720x1280');
+
+  const indexHtml = fs.readFileSync(path.join(customProjectDir, 'index.html'), 'utf-8');
+  assert.match(indexHtml, /data-width="720"/);
+  assert.match(indexHtml, /data-height="1280"/);
+  assert.match(indexHtml, /--caption-font-size: 40px/);
+  assert.doesNotMatch(indexHtml, /class="caption-bar"/);
+  assert.doesNotMatch(indexHtml, /class="scene-number"/);
+
+  const projectJson = JSON.parse(fs.readFileSync(path.join(customProjectDir, 'project.json'), 'utf-8'));
+  assert.equal(projectJson.render_options.quality, 'high');
+  assert.equal(projectJson.render_options.motionLevel, 'low');
+
   const missingTts = await hyperframesProject.createOriginalCaptionProject({
     run: { run_id: 'missing-tts', tts: {}, storyboard: runData.storyboard },
     projectDir: path.join(root, 'missing'),

@@ -4,6 +4,55 @@ const path = require('path');
 
 const TEMPLATE_AI_STORYBOARD_CARDS = 'ai_storyboard_cards';
 
+const RENDER_DEFAULTS = {
+  resolution: '1080x1920',
+  fps: '30',
+  captionSize: 'medium',
+  motionLevel: 'medium',
+  showCaptionBar: true,
+  showSceneNumber: true,
+  quality: 'standard',
+};
+
+function pickAllowed(value, allowed, fallback) {
+  return allowed.includes(value) ? value : fallback;
+}
+
+function normalizeBoolean(value, fallback) {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function normalizeRenderOptions(value = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    resolution: pickAllowed(source.resolution, ['1080x1920', '720x1280'], RENDER_DEFAULTS.resolution),
+    fps: pickAllowed(String(source.fps || ''), ['24', '30', '60'], RENDER_DEFAULTS.fps),
+    captionSize: pickAllowed(source.captionSize, ['small', 'medium', 'large'], RENDER_DEFAULTS.captionSize),
+    motionLevel: pickAllowed(source.motionLevel, ['low', 'medium', 'high'], RENDER_DEFAULTS.motionLevel),
+    showCaptionBar: normalizeBoolean(source.showCaptionBar, RENDER_DEFAULTS.showCaptionBar),
+    showSceneNumber: normalizeBoolean(source.showSceneNumber, RENDER_DEFAULTS.showSceneNumber),
+    quality: pickAllowed(source.quality, ['standard', 'high'], RENDER_DEFAULTS.quality),
+  };
+}
+
+function getRenderSize(options) {
+  return options.resolution === '720x1280'
+    ? { width: 720, height: 1280 }
+    : { width: 1080, height: 1920 };
+}
+
+function getCaptionFontSize(options) {
+  if (options.captionSize === 'small') return 28;
+  if (options.captionSize === 'large') return 40;
+  return 34;
+}
+
+function getMotionScale(options) {
+  if (options.motionLevel === 'low') return 0.55;
+  if (options.motionLevel === 'high') return 1.25;
+  return 1;
+}
+
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -36,7 +85,11 @@ function getSceneTone(scene, index, storyboard) {
   };
 }
 
-function buildTimelineScript(scenes, duration) {
+function scaleDuration(value, motionScale) {
+  return Math.max(0.08, Number(value || 0) * motionScale);
+}
+
+function buildTimelineScript(scenes, duration, motionScale = 1) {
   const lines = [
     '    const tl = gsap.timeline({ paused: true });',
     `    tl.to({}, { duration: ${duration} }, 0);`,
@@ -46,8 +99,8 @@ function buildTimelineScript(scenes, duration) {
     const sceneId = `#scene-${index + 1}`;
     const start = Number(scene.start || 0);
     const sceneDuration = Math.max(0.2, Number(scene.duration || 0.2));
-    const enterDuration = Math.min(0.45, sceneDuration * 0.28);
-    const exitDuration = Math.min(0.32, Math.max(0.12, sceneDuration * 0.18));
+    const enterDuration = scaleDuration(Math.min(0.45, sceneDuration * 0.28), motionScale);
+    const exitDuration = scaleDuration(Math.min(0.32, Math.max(0.12, sceneDuration * 0.18)), motionScale);
     const exitStart = Math.max(start + enterDuration, start + sceneDuration - exitDuration);
     lines.push(`    tl.fromTo("${sceneId}", { autoAlpha: 0 }, { autoAlpha: 1, duration: ${enterDuration.toFixed(3)}, ease: "power2.out" }, ${start.toFixed(3)});`);
     lines.push(`    tl.fromTo("${sceneId} .visual-field", { y: 56, scale: 0.96, filter: "blur(10px)" }, { y: 0, scale: 1, filter: "blur(0px)", duration: ${enterDuration.toFixed(3)}, ease: "power3.out" }, ${start.toFixed(3)});`);
@@ -61,7 +114,11 @@ function buildTimelineScript(scenes, duration) {
   return lines.join('\n');
 }
 
-function buildIndexHtml({ storyboard, captions, duration }) {
+function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) {
+  const options = normalizeRenderOptions(renderOptions);
+  const size = getRenderSize(options);
+  const captionFontSize = getCaptionFontSize(options);
+  const motionScale = getMotionScale(options);
   const sceneHtml = storyboard.scenes.map((scene, index) => {
     const tone = getSceneTone(scene, index, storyboard);
     const captionText = Array.isArray(scene.captions)
@@ -73,16 +130,16 @@ function buildIndexHtml({ storyboard, captions, duration }) {
       : `<span>${escapeHtml(scene.headline || captionText)}</span>`;
     return [
       `<section id="scene-${index + 1}" class="scene clip ${escapeHtml(scene.layout)}" data-start="${scene.start}" data-duration="${scene.duration}" data-track-index="${index + 1}" style="--bg:${tone.bg};--accent:${tone.accent};--secondary:${tone.secondary};">`,
-      `  <div class="scene-number">${String(scene.index || index + 1).padStart(2, '0')}</div>`,
+      options.showSceneNumber ? `  <div class="scene-number">${String(scene.index || index + 1).padStart(2, '0')}</div>` : '',
       '  <div class="visual-field">',
       `    <div class="visual-type">${escapeHtml(scene.visual_type || 'text_card')}</div>`,
       `    <h1>${escapeHtml(scene.headline)}</h1>`,
       `    <p>${escapeHtml(captionText)}</p>`,
       `    <div class="emphasis">${wordHtml}</div>`,
       '  </div>',
-      `  <div class="caption-bar">${escapeHtml(captionText)}</div>`,
+      options.showCaptionBar ? `  <div class="caption-bar">${escapeHtml(captionText)}</div>` : '',
       '</section>',
-    ].join('\n');
+    ].filter(line => line !== '').join('\n');
   }).join('\n');
 
   return `<!doctype html>
@@ -94,7 +151,7 @@ function buildIndexHtml({ storyboard, captions, duration }) {
   <title>MuseDock AI 分镜成片</title>
   <style>
     html, body { margin: 0; width: 100%; height: 100%; background: #0f1115; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: #0f1115; }
+    #stage { position: relative; width: ${size.width}px; height: ${size.height}px; overflow: hidden; background: #0f1115; --caption-font-size: ${captionFontSize}px; }
     .scene { position: absolute; inset: 0; display: grid; place-items: center; padding: 120px 82px 220px; box-sizing: border-box; background:
       linear-gradient(150deg, color-mix(in srgb, var(--accent) 22%, transparent), transparent 28%),
       radial-gradient(circle at 78% 18%, color-mix(in srgb, var(--secondary) 24%, transparent), transparent 30%),
@@ -107,17 +164,17 @@ function buildIndexHtml({ storyboard, captions, duration }) {
     p { margin: 0; color: rgba(255,255,255,.78); font-size: 36px; line-height: 1.55; font-weight: 650; letter-spacing: 0; }
     .emphasis { display: flex; flex-wrap: wrap; gap: 12px; }
     .emphasis span { padding: 9px 14px; border: 1px solid color-mix(in srgb, var(--accent) 72%, #fff); border-radius: 8px; color: var(--accent); font-size: 28px; font-weight: 800; }
-    .caption-bar { position: absolute; left: 64px; right: 64px; bottom: 94px; padding: 24px 28px; border-radius: 8px; background: rgba(0,0,0,.58); color: #fff; font-size: 34px; line-height: 1.42; text-align: center; }
+    .caption-bar { position: absolute; left: 64px; right: 64px; bottom: 94px; padding: 24px 28px; border-radius: 8px; background: rgba(0,0,0,.58); color: #fff; font-size: var(--caption-font-size); line-height: 1.42; text-align: center; }
   </style>
 </head>
 <body>
-  <div id="stage" data-composition-id="ai-storyboard-cards" data-start="0" data-duration="${duration}" data-width="1080" data-height="1920">
+  <div id="stage" data-composition-id="ai-storyboard-cards" data-start="0" data-duration="${duration}" data-width="${size.width}" data-height="${size.height}">
     <audio id="narration-audio" data-start="0" data-duration="${duration}" data-track-index="0" src="assets/narration.wav"></audio>
 ${sceneHtml}
   </div>
   <script>
     window.__timelines = window.__timelines || {};
-${buildTimelineScript(storyboard.scenes, duration)}
+${buildTimelineScript(storyboard.scenes, duration, motionScale)}
     window.__timelines['ai-storyboard-cards'] = tl;
   </script>
 </body>
@@ -125,7 +182,8 @@ ${buildTimelineScript(storyboard.scenes, duration)}
 `;
 }
 
-async function createOriginalCaptionProject({ run, projectDir } = {}) {
+async function createOriginalCaptionProject({ run, projectDir, renderOptions = {} } = {}) {
+  const normalizedRenderOptions = normalizeRenderOptions(renderOptions || run?.video?.render_options || {});
   const captions = Array.isArray(run?.tts?.captions)
     ? run.tts.captions.map(normalizeCaption).filter(item => item.text && item.end > item.start)
     : [];
@@ -174,9 +232,10 @@ async function createOriginalCaptionProject({ run, projectDir } = {}) {
     run_id: run.run_id || '',
     aweme_id: run.aweme_id || '',
     duration,
+    render_options: normalizedRenderOptions,
     created_at: new Date().toISOString(),
   }, null, 2), 'utf-8');
-  await fsp.writeFile(indexPath, buildIndexHtml({ storyboard, captions, duration }), 'utf-8');
+  await fsp.writeFile(indexPath, buildIndexHtml({ storyboard, captions, duration, renderOptions: normalizedRenderOptions }), 'utf-8');
 
   return {
     success: true,
@@ -187,6 +246,7 @@ async function createOriginalCaptionProject({ run, projectDir } = {}) {
     captions_path: captionsPath,
     project_json_path: projectJsonPath,
     duration,
+    render_options: normalizedRenderOptions,
     message: '视频工程已生成。',
   };
 }
@@ -195,4 +255,5 @@ module.exports = {
   TEMPLATE_AI_STORYBOARD_CARDS,
   createOriginalCaptionProject,
   buildIndexHtml,
+  normalizeRenderOptions,
 };

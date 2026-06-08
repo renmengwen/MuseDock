@@ -351,11 +351,23 @@ async function run() {
 
   const projectResult = await agentRuns.createDouyinRunHyperframesProject(awemeId, generated.run_id, {
     rootDir,
+    renderOptions: {
+      resolution: '720x1280',
+      fps: '60',
+      captionSize: 'large',
+      motionLevel: 'low',
+      showCaptionBar: false,
+      showSceneNumber: false,
+      quality: 'high',
+    },
     hyperframesProject: {
-      createOriginalCaptionProject: async ({ run, projectDir }) => {
+      createOriginalCaptionProject: async ({ run, projectDir, renderOptions }) => {
         assert.equal(run.run_id, generated.run_id);
         assert.ok(run.tts.captions.length > 0);
         assert.ok(run.storyboard.scenes.length > 0);
+        assert.equal(renderOptions.resolution, '720x1280');
+        assert.equal(renderOptions.fps, '60');
+        assert.equal(renderOptions.showCaptionBar, false);
         fs.mkdirSync(projectDir, { recursive: true });
         const indexPath = path.join(projectDir, 'index.html');
         fs.writeFileSync(indexPath, '<html>project</html>');
@@ -365,6 +377,7 @@ async function run() {
           project_dir: projectDir,
           index_path: indexPath,
           duration: 1.25,
+          render_options: renderOptions,
           message: '视频工程已生成。',
         };
       },
@@ -373,6 +386,8 @@ async function run() {
   assert.equal(projectResult.success, true);
   assert.equal(projectResult.video.status, 'project_ready');
   assert.equal(projectResult.video.template, 'ai_storyboard_cards');
+  assert.equal(projectResult.video.render_options.resolution, '720x1280');
+  assert.equal(projectResult.video.render_options.quality, 'high');
   assert.ok(projectResult.video.project_dir.includes(`${generated.run_id}-hyperframes`));
 
   const renderResult = await agentRuns.renderDouyinRunHyperframesVideo(awemeId, generated.run_id, {
