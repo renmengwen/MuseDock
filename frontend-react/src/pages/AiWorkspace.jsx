@@ -5,6 +5,7 @@ import { Status } from '../components/Status.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
 import { getAgentResultSections, getAgentStepLabel, getRunDisplayTime } from '../utils/agentRuns.js';
+import { DEFAULT_PROMPT_OPTIONS, DEFAULT_STORYBOARD_OPTIONS } from '../utils/aiWorkspaceDefaults.js';
 import { getAwemeIdFromSearch } from '../utils/workspaceParams.js';
 
 const AGENT_TEMPLATES = [
@@ -96,25 +97,8 @@ export function AiWorkspace() {
   const [ttsVoice, setTtsVoice] = useState('mimo_default');
   const [ttsStylePrompt, setTtsStylePrompt] = useState(DEFAULT_TTS_STYLE);
   const [selectedTemplate, setSelectedTemplate] = useState('viral_rewrite');
-  const [promptOptions, setPromptOptions] = useState({
-    goal: '',
-    audience: '',
-    accountPositioning: '',
-    rewriteStyle: '',
-    focus: '',
-    replyTone: '',
-    forbidden: '',
-    extraRequirements: '',
-  });
-  const [storyboardOptions, setStoryboardOptions] = useState({
-    visualStyle: '',
-    pacing: '',
-    captionStyle: '',
-    backgroundDirection: '',
-    primaryColor: '',
-    forbidden: '',
-    extraRequirements: '',
-  });
+  const [promptOptions, setPromptOptions] = useState(DEFAULT_PROMPT_OPTIONS);
+  const [storyboardOptions, setStoryboardOptions] = useState(DEFAULT_STORYBOARD_OPTIONS);
   const [renderOptions, setRenderOptions] = useState({
     resolution: '1080x1920',
     fps: '30',
