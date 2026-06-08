@@ -57,4 +57,41 @@ assert.match(prompt[0].content, /summary, pain_points, questions, sentiment, con
 assert.match(prompt[1].content, /评论洞察/);
 assert.match(prompt[1].content, /太需要教程了/);
 
+const customPrompt = viral.buildPrompt({
+  analysisInput: {
+    video: {
+      title: '测试视频',
+      author: { nickname: '作者A' },
+      statistics: { digg_count: 12, comment_count: 3, share_count: 1 },
+    },
+  },
+  transcript: { text: '原始转写文本' },
+  commentsText: '评论样本',
+  commentCount: 1,
+  promptOptions: {
+    goal: '引流到私域',
+    audience: '本地生活商家老板',
+    accountPositioning: '短视频获客顾问',
+    rewriteStyle: '专业可信，开头要有冲突感',
+    forbidden: '不要承诺收益，不要夸大效果',
+    extraRequirements: '脚本要适合 60 秒口播',
+  },
+});
+
+assert.match(customPrompt[1].content, /用户补充创作 brief/);
+assert.match(customPrompt[1].content, /引流到私域/);
+assert.match(customPrompt[1].content, /本地生活商家老板/);
+assert.match(customPrompt[1].content, /不要承诺收益/);
+assert.match(customPrompt[0].content, /summary, viral_points, audience, comment_insights, topics, rewrite_script, titles/);
+
+const cleanPrompt = viral.buildPrompt({
+  promptOptions: {
+    goal: 'x'.repeat(500),
+    audience: '',
+    forbidden: ['bad'],
+  },
+});
+assert.ok(cleanPrompt[1].content.length < 12000);
+assert.doesNotMatch(cleanPrompt[1].content, /bad/);
+
 console.log('agent template tests passed');
