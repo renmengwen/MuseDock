@@ -29,7 +29,7 @@ function runCommand(command, args, options = {}) {
   });
 }
 
-async function renderHyperframesProject({ projectDir, runCommand: runCommandImpl = runCommand } = {}) {
+async function renderHyperframesProject({ projectDir, renderOptions = {}, runCommand: runCommandImpl = runCommand } = {}) {
   if (!projectDir || !fs.existsSync(path.join(projectDir, 'index.html'))) {
     return {
       success: false,
@@ -38,8 +38,12 @@ async function renderHyperframesProject({ projectDir, runCommand: runCommandImpl
   }
 
   let result;
+  const args = ['hyperframes', 'render'];
+  if (renderOptions.fps) {
+    args.push('--fps', String(renderOptions.fps));
+  }
   try {
-    result = await runCommandImpl(getNpxCommand(), ['hyperframes', 'render'], {
+    result = await runCommandImpl(getNpxCommand(), args, {
       cwd: projectDir,
     });
   } catch (error) {

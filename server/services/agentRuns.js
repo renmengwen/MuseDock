@@ -694,12 +694,14 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
 
   const projectDir = run.video?.project_dir || getHyperframesProjectDir(awemeId, runId, options.rootDir);
   const renderer = options.hyperframesRenderer || defaultHyperframesRenderer;
-  const result = await renderer.renderHyperframesProject({ projectDir });
+  const renderOptions = defaultHyperframesProject.normalizeRenderOptions(run.video?.render_options || {});
+  const result = await renderer.renderHyperframesProject({ projectDir, renderOptions });
 
   if (!result.success) {
     const video = {
       ...(run.video || {}),
       status: 'failed',
+      render_options: renderOptions,
       message: result.message || '视频渲染失败。',
       updated_at: new Date().toISOString(),
     };
@@ -714,6 +716,7 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
     project_dir: projectDir,
     output_path: result.output_path,
     output_url: getHyperframesFileUrl(awemeId, runId, 'output.mp4'),
+    render_options: renderOptions,
     message: result.message || '视频渲染完成。',
     updated_at: new Date().toISOString(),
   };

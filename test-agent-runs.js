@@ -393,7 +393,9 @@ async function run() {
   const renderResult = await agentRuns.renderDouyinRunHyperframesVideo(awemeId, generated.run_id, {
     rootDir,
     hyperframesRenderer: {
-      renderHyperframesProject: async ({ projectDir }) => {
+      renderHyperframesProject: async ({ projectDir, renderOptions }) => {
+        assert.equal(renderOptions.fps, '60');
+        assert.equal(renderOptions.quality, 'high');
         const outputPath = path.join(projectDir, 'output.mp4');
         fs.writeFileSync(outputPath, 'fake mp4');
         return { success: true, output_path: outputPath, message: '视频渲染完成。' };
@@ -402,6 +404,8 @@ async function run() {
   });
   assert.equal(renderResult.success, true);
   assert.equal(renderResult.video.status, 'rendered');
+  assert.equal(renderResult.video.render_options.fps, '60');
+  assert.equal(renderResult.video.render_options.quality, 'high');
   assert.ok(renderResult.video.output_url.includes(`/api/agents/douyin/${awemeId}/runs/${generated.run_id}/hyperframes/files/output.mp4`));
   assert.equal(fs.readFileSync(renderResult.video.output_path, 'utf-8'), 'fake mp4');
 
