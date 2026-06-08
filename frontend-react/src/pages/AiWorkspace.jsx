@@ -106,6 +106,15 @@ export function AiWorkspace() {
     forbidden: '',
     extraRequirements: '',
   });
+  const [storyboardOptions, setStoryboardOptions] = useState({
+    visualStyle: '',
+    pacing: '',
+    captionStyle: '',
+    backgroundDirection: '',
+    primaryColor: '',
+    forbidden: '',
+    extraRequirements: '',
+  });
   const [resultTab, setResultTab] = useState('workflow');
 
   const sortedRuns = useMemo(() => {
@@ -213,6 +222,10 @@ export function AiWorkspace() {
     setPromptOptions(prev => ({ ...prev, [key]: value }));
   }
 
+  function updateStoryboardOption(key, value) {
+    setStoryboardOptions(prev => ({ ...prev, [key]: value }));
+  }
+
   function selectRun(run) {
     setActiveRun(run);
     if (run.template) setSelectedTemplate(run.template);
@@ -266,9 +279,10 @@ export function AiWorkspace() {
     setStoryboardRunning(true);
     setStatus({ type: 'loading', message: '正在生成 AI 分镜...' });
     try {
-      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id);
+      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id, storyboardOptions);
       setActiveRun(prev => prev ? {
         ...prev,
+        storyboard_options: json.storyboard_options,
         storyboard_raw: json.storyboard_raw,
         storyboard: json.storyboard,
         storyboard_model: json.storyboard_model,
@@ -277,6 +291,7 @@ export function AiWorkspace() {
       setRuns(prev => prev.map(run => (
         run.run_id === activeRun.run_id ? {
           ...run,
+          storyboard_options: json.storyboard_options,
           storyboard_raw: json.storyboard_raw,
           storyboard: json.storyboard,
           storyboard_model: json.storyboard_model,
@@ -624,6 +639,52 @@ export function AiWorkspace() {
                 <section className="agentResultSection ttsPlayback">
                   <h4>AI 分镜与成片</h4>
                   <div className="videoProjectPanel">
+                    <div className="agentOptionGroup">
+                      <h4>AI 分镜视觉 brief</h4>
+                      <Input
+                        value={storyboardOptions.visualStyle}
+                        onChange={event => updateStoryboardOption('visualStyle', event.target.value)}
+                        placeholder="视频视觉风格，例如：商业质感、知识科普、情绪冲击"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <Input
+                        value={storyboardOptions.pacing}
+                        onChange={event => updateStoryboardOption('pacing', event.target.value)}
+                        placeholder="画面节奏，例如：快节奏、标准、稳重"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <Input
+                        value={storyboardOptions.captionStyle}
+                        onChange={event => updateStoryboardOption('captionStyle', event.target.value)}
+                        placeholder="字幕呈现，例如：大字报、卡片式、引语式"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <Input
+                        value={storyboardOptions.backgroundDirection}
+                        onChange={event => updateStoryboardOption('backgroundDirection', event.target.value)}
+                        placeholder="背景方向，例如：数据感抽象背景"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <Input
+                        value={storyboardOptions.primaryColor}
+                        onChange={event => updateStoryboardOption('primaryColor', event.target.value)}
+                        placeholder="主色调，例如：#fe2c55"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <Input
+                        value={storyboardOptions.forbidden}
+                        onChange={event => updateStoryboardOption('forbidden', event.target.value)}
+                        placeholder="禁用方向，例如：不要真人，不要原视频画面"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <textarea
+                        value={storyboardOptions.extraRequirements}
+                        onChange={event => updateStoryboardOption('extraRequirements', event.target.value)}
+                        placeholder="额外视觉要求，例如：每个分镜标题要短"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        maxLength={500}
+                      />
+                    </div>
                     <div className="videoProjectActions">
                       <Button
                         size="sm"
