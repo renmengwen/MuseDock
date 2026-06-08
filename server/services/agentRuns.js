@@ -168,6 +168,7 @@ function getTemplateOrFallback(template) {
 
 async function createFailureRun(awemeId, template, message, options = {}) {
   const templateDefinition = getTemplateOrFallback(template);
+  const promptOptions = agentTemplates.normalizePromptOptions(options.promptOptions || {});
   const run = {
     success: false,
     run_id: createRunId(template),
@@ -177,6 +178,7 @@ async function createFailureRun(awemeId, template, message, options = {}) {
     model: options.model || {},
     steps: options.steps || [],
     input_summary: options.input_summary || {},
+    prompt_options: promptOptions,
     result: templateDefinition.normalizeResult({}),
     raw_text: '',
     message,
@@ -199,6 +201,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   const template = options.template || TEMPLATE_VIRAL_REWRITE;
   const templateDefinition = agentTemplates.getAgentTemplate(template);
   const rootDir = options.rootDir;
+  const promptOptions = agentTemplates.normalizePromptOptions(options.promptOptions || {});
   const steps = [];
 
   if (!isSafeId(awemeId)) {
@@ -208,6 +211,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   if (!templateDefinition) {
     return createFailureRun(awemeId, template, '暂不支持该 Agent 模板。', {
       rootDir,
+      promptOptions,
       persist: false,
     });
   }
@@ -220,6 +224,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     return createFailureRun(awemeId, template, '未找到该视频素材，请先准备该视频的本地素材。', {
       rootDir,
       steps,
+      promptOptions,
       persist: false,
     });
   }
@@ -236,6 +241,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     return createFailureRun(awemeId, template, '未找到素材上下文，请先重新准备 AI 素材。', {
       rootDir,
       steps,
+      promptOptions,
     });
   }
 
@@ -252,6 +258,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
       rootDir,
       steps,
       input_summary: createInputSummary({ analysisInput, transcript, comments: [] }),
+      promptOptions,
     });
   }
 
@@ -274,6 +281,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
       rootDir,
       steps,
       input_summary: inputSummary,
+      promptOptions,
     });
   }
 
@@ -283,6 +291,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     transcript,
     commentsText,
     commentCount: comments.length,
+    promptOptions,
   });
 
   const modelService = options.aiTextModel || defaultAiTextModel;
@@ -309,6 +318,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
       steps,
       input_summary: inputSummary,
       model: modelResult.model || {},
+      promptOptions,
     });
   }
 
@@ -330,6 +340,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     model: modelResult.model || {},
     steps,
     input_summary: inputSummary,
+    prompt_options: promptOptions,
     result: parsed.result,
     raw_text: parsed.raw_text,
     message: parsed.parsed ? 'Agent 运行完成' : '模型返回未能解析为结构化结果，已保留原始文本。',

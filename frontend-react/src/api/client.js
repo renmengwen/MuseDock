@@ -101,11 +101,11 @@ export const api = {
       body: JSON.stringify({ target }),
     });
   },
-  createDouyinAgentRun(awemeId, template = 'viral_rewrite') {
+  createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ template }),
+      body: JSON.stringify({ template, promptOptions }),
     });
   },
   listDouyinAgentRuns(awemeId) {

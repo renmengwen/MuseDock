@@ -202,11 +202,47 @@ async function run() {
   assert.ok(generated.run_id.endsWith('-viral_rewrite'));
   assert.ok(fs.existsSync(generated.path));
 
+  const runWithPromptOptions = await agentRuns.createDouyinAgentRun(awemeId, {
+    rootDir,
+    template: 'viral_rewrite',
+    promptOptions: {
+      goal: '涨粉',
+      audience: '健身新手',
+      rewriteStyle: '强情绪开头',
+      forbidden: '不要医疗承诺',
+    },
+    aiTextModel: {
+      callTextModel: async ({ messages }) => {
+        assert.match(messages[1].content, /涨粉/);
+        assert.match(messages[1].content, /健身新手/);
+        assert.match(messages[1].content, /不要医疗承诺/);
+        return {
+          success: true,
+          text: JSON.stringify({
+            summary: '摘要',
+            viral_points: ['冲突'],
+            audience: '健身新手',
+            comment_insights: [],
+            topics: ['选题'],
+            rewrite_script: '脚本',
+            titles: ['标题'],
+          }),
+          model: { provider: 'mock' },
+        };
+      },
+    },
+    getLocalComments: () => ({ success: true, count: 0, data: [] }),
+  });
+  assert.equal(runWithPromptOptions.success, true);
+  assert.equal(runWithPromptOptions.prompt_options.goal, '涨粉');
+  assert.equal(runWithPromptOptions.prompt_options.audience, '健身新手');
+  assert.equal(runWithPromptOptions.prompt_options.rewriteStyle, '强情绪开头');
+
   const listed = await agentRuns.listDouyinAgentRuns(awemeId, { rootDir });
   assert.strictEqual(listed.success, true);
-  assert.strictEqual(listed.count, 2);
-  assert.strictEqual(listed.data.length, 2);
-  assert.strictEqual(listed.data[0].run_id, generated.run_id);
+  assert.strictEqual(listed.count, 3);
+  assert.strictEqual(listed.data.length, 3);
+  assert.strictEqual(listed.data[0].run_id, runWithPromptOptions.run_id);
 
   const detail = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
   assert.strictEqual(detail.success, true);
