@@ -121,11 +121,11 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  createDouyinRunStoryboard(awemeId, runId) {
+  createDouyinRunStoryboard(awemeId, runId, storyboardOptions = {}) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/storyboard`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ storyboardOptions }),
     });
   },
   createDouyinRunHyperframesProject(awemeId, runId) {

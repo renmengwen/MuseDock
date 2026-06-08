@@ -81,7 +81,9 @@ router.get('/douyin/:aweme_id/runs/:run_id/tts/:file_name', (req, res) => {
 
 router.post('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
   try {
-    const result = await agentRuns.createDouyinRunStoryboard(req.params.aweme_id, req.params.run_id);
+    const result = await agentRuns.createDouyinRunStoryboard(req.params.aweme_id, req.params.run_id, {
+      storyboardOptions: req.body?.storyboardOptions || {},
+    });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
     return res.status(500).json({

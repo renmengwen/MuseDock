@@ -573,9 +573,11 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
   }
 
   const agent = options.storyboardAgent || defaultStoryboardAgent;
+  const storyboardOptions = defaultStoryboardAgent.normalizeStoryboardOptions(options.storyboardOptions || run.storyboard_options || {});
   const result = await agent.createStoryboard({
     rewriteScript,
     captions,
+    storyboardOptions,
     aiTextModel: options.aiTextModel,
     configPath: options.configPath,
     textConfig: options.textConfig,
@@ -584,6 +586,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
 
   const updatedRun = {
     ...run,
+    storyboard_options: storyboardOptions,
     storyboard_raw: result.raw || {},
     storyboard: result.storyboard,
     storyboard_model: result.model || {},
@@ -597,6 +600,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     aweme_id: String(awemeId),
     run_id: String(runId),
     message: result.message || (result.success ? 'AI 分镜已生成。' : 'AI 分镜生成失败。'),
+    storyboard_options: updatedRun.storyboard_options,
     storyboard_raw: updatedRun.storyboard_raw,
     storyboard: updatedRun.storyboard,
     storyboard_model: updatedRun.storyboard_model,

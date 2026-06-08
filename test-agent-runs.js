@@ -299,10 +299,17 @@ async function run() {
 
   const storyboardResult = await agentRuns.createDouyinRunStoryboard(awemeId, generated.run_id, {
     rootDir,
+    storyboardOptions: {
+      visualStyle: '商业质感',
+      pacing: '快节奏',
+      forbidden: '不要真人',
+    },
     storyboardAgent: {
-      createStoryboard: async ({ rewriteScript, captions }) => {
+      createStoryboard: async ({ rewriteScript, captions, storyboardOptions }) => {
         assert.equal(rewriteScript, generated.result.rewrite_script);
         assert.ok(captions.length > 0);
+        assert.equal(storyboardOptions.visualStyle, '商业质感');
+        assert.equal(storyboardOptions.forbidden, '不要真人');
         return {
           success: true,
           message: 'AI 分镜已生成。',
@@ -337,6 +344,8 @@ async function run() {
     },
   });
   assert.equal(storyboardResult.success, true);
+  assert.equal(storyboardResult.storyboard_options.visualStyle, '商业质感');
+  assert.equal(storyboardResult.storyboard_options.pacing, '快节奏');
   assert.equal(storyboardResult.storyboard.scenes[0].start, 0);
   assert.equal(storyboardResult.storyboard_raw.scenes[0].start, 999);
 
