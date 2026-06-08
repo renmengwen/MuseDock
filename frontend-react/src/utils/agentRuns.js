@@ -2,7 +2,18 @@ function asArray(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
-export function getAgentResultSections(result = {}) {
+export function getAgentResultSections(result = {}, template = 'viral_rewrite') {
+  if (template === 'comment_insights') {
+    return [
+      { key: 'summary', title: '洞察摘要', text: result.summary || '', items: [] },
+      { key: 'pain_points', title: '用户痛点', text: '', items: asArray(result.pain_points) },
+      { key: 'questions', title: '高频问题', text: '', items: asArray(result.questions) },
+      { key: 'sentiment', title: '情绪倾向', text: result.sentiment || '', items: [] },
+      { key: 'content_opportunities', title: '内容机会', text: '', items: asArray(result.content_opportunities) },
+      { key: 'reply_suggestions', title: '回复建议', text: '', items: asArray(result.reply_suggestions) },
+    ];
+  }
+
   return [
     { key: 'summary', title: '内容摘要', text: result.summary || '', items: [] },
     { key: 'viral_points', title: '爆点拆解', text: '', items: asArray(result.viral_points) },

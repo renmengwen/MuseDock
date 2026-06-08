@@ -12,6 +12,7 @@ import { setSelectedMediaItem } from '../state/mediaSelection.js';
 import { getCommentCacheFromResponse, updateCommentCacheForAweme } from '../utils/commentCache.js';
 import { filterByTitle } from '../utils/content.js';
 import { getDouyinAwemeId } from '../utils/format.js';
+import { shouldAutoPrepareMedia } from '../utils/mediaStatus.js';
 
 export function RecordsPage() {
   const params = useParams();
@@ -47,7 +48,7 @@ export function RecordsPage() {
   function prepareMedia(item) {
     const awemeId = getDouyinAwemeId(item);
     if (!awemeId) return;
-    setSelectedMediaItem(item, { autoPrepare: true });
+    setSelectedMediaItem(item, { autoPrepare: shouldAutoPrepareMedia(item) });
     navigate(`/media/douyin/${awemeId}`);
   }
 

@@ -9,6 +9,7 @@ const MODEL_TYPES = [
   'image',
   'video',
   'multimodal',
+  'tts',
 ];
 
 function emptyModelConfig() {

@@ -47,4 +47,35 @@ router.get('/douyin/:aweme_id/runs/:run_id', async (req, res) => {
   }
 });
 
+router.post('/douyin/:aweme_id/runs/:run_id/tts', async (req, res) => {
+  try {
+    const result = await agentRuns.synthesizeDouyinRunTts(req.params.aweme_id, req.params.run_id, {
+      voice: req.body?.voice,
+      stylePrompt: req.body?.stylePrompt,
+    });
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: 'TTS 合成接口异常，请稍后重试。',
+    });
+  }
+});
+
+router.get('/douyin/:aweme_id/runs/:run_id/tts/:file_name', (req, res) => {
+  try {
+    const filePath = agentRuns.resolveDouyinRunTtsFile(req.params.aweme_id, req.params.run_id, req.params.file_name);
+    return res.sendFile(filePath);
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '未找到或非法的 TTS 音频文件。',
+    });
+  }
+});
+
 module.exports = router;

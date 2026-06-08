@@ -35,6 +35,21 @@ assert.equal(sections[0].text, '这是一段内容摘要');
 assert.equal(sections[2].text, '新手创作者');
 assert.equal(sections[5].text, '大家好，今天聊聊...');
 
+const commentSections = getAgentResultSections({
+  summary: '评论集中关注教程',
+  pain_points: ['配置门槛高'],
+  questions: ['是否支持导出？'],
+  sentiment: '期待但担心门槛',
+  content_opportunities: ['做一条配置教程'],
+  reply_suggestions: ['补充教程链接'],
+}, 'comment_insights');
+assert.deepEqual(
+  commentSections.map((section) => section.title),
+  ['洞察摘要', '用户痛点', '高频问题', '情绪倾向', '内容机会', '回复建议'],
+);
+assert.deepEqual(commentSections[1].items, ['配置门槛高']);
+assert.equal(commentSections[3].text, '期待但担心门槛');
+
 const emptySections = getAgentResultSections();
 assert.equal(emptySections.length, 7);
 assert.deepEqual(emptySections.map((section) => section.items), [[], [], [], [], [], [], []]);

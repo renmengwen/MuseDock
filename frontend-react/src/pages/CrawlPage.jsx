@@ -15,6 +15,7 @@ import { setSelectedMediaItem } from '../state/mediaSelection.js';
 import { getCommentCacheFromResponse, updateCommentCacheForAweme } from '../utils/commentCache.js';
 import { filterByTitle, withCrawlTimestamp } from '../utils/content.js';
 import { getDouyinAwemeId } from '../utils/format.js';
+import { shouldAutoPrepareMedia } from '../utils/mediaStatus.js';
 
 const CRAWL_MODES = [
   { value: 'keyword', label: '根据关键词抓取' },
@@ -122,7 +123,7 @@ export function CrawlPage() {
   function prepareMedia(item) {
     const awemeId = getDouyinAwemeId(item);
     if (!awemeId) return;
-    setSelectedMediaItem(item, { autoPrepare: true });
+    setSelectedMediaItem(item, { autoPrepare: shouldAutoPrepareMedia(item) });
     navigate(`/media/douyin/${awemeId}`);
   }
 

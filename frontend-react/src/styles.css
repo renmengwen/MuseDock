@@ -178,6 +178,7 @@ a { color: #fe2c55; text-decoration: none; }
 .agentPanel h3 { margin: 0 0 12px; font-size: 16px; color: #30343b; }
 .agentPanel h3:not(:first-child) { margin-top: 22px; }
 .agentTemplate { display: grid; gap: 10px; padding: 14px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
+.agentTemplate.active { border-color: #fe2c55; background: #fff5f7; box-shadow: 0 0 0 1px #fe2c55 inset; }
 .agentTemplate strong { color: #fe2c55; font-size: 15px; }
 .agentTemplate p { margin: 0; color: #69717e; font-size: 13px; line-height: 1.6; }
 .agentStatusList { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
@@ -196,10 +197,19 @@ a { color: #fe2c55; text-decoration: none; }
 .agentResultPanel { max-height: calc(100vh - 180px); overflow: auto; }
 .agentRunMeta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; color: #69717e; font-size: 12px; }
 .agentResultSection { padding: 14px 0; border-top: 1px solid #edf0f4; }
-.agentResultSection h4 { margin: 0 0 8px; font-size: 14px; color: #30343b; }
+.agentResultSectionHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.agentResultSection h4 { margin: 0; font-size: 14px; color: #30343b; }
 .agentResultSection p { margin: 0; color: #4b5563; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
 .agentResultSection ul { display: grid; gap: 8px; margin: 0; padding-left: 18px; color: #4b5563; font-size: 13px; line-height: 1.65; }
 .agentResultSection pre { max-height: 300px; overflow: auto; margin: 0; padding: 12px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; color: #30343b; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.ttsInlineControls { display: grid; grid-template-columns: 116px minmax(180px, 1fr) auto; gap: 8px; align-items: center; width: min(100%, 560px); }
+.ttsInlineControls select, .ttsInlineControls input { min-width: 0; height: 34px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 10px; background: #fff; color: #30343b; font-size: 13px; }
+.ttsPlayback { display: grid; gap: 8px; }
+.ttsPlayback audio { width: 100%; min-height: 40px; }
+.ttsCaptionList { display: grid; gap: 8px; margin-top: 8px; }
+.ttsCaptionItem { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 10px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
+.ttsCaptionItem code { color: #69717e; font-size: 12px; white-space: nowrap; }
+.ttsCaptionItem span { color: #30343b; font-size: 13px; line-height: 1.6; word-break: break-word; }
 .mutedText { margin: 0; color: #858d9a; font-size: 13px; line-height: 1.6; }
 .settingsSummary { min-width: 92px; padding: 10px 14px; border: 1px solid #e7e9ee; border-radius: 8px; background: #fff; text-align: center; }
 .settingsSummary strong { display: block; font-size: 20px; color: #fe2c55; line-height: 1.1; }
@@ -238,6 +248,9 @@ a { color: #fe2c55; text-decoration: none; }
   .actionCell { flex-direction: column; min-width: 0; }
   .modelConfigGrid, .settingsFormGrid { grid-template-columns: 1fr; }
   .settingsActions { flex-direction: column; }
+  .agentResultSectionHeader { flex-direction: column; align-items: stretch; }
+  .ttsInlineControls { grid-template-columns: 1fr; width: 100%; }
+  .ttsCaptionItem { grid-template-columns: 1fr; }
 }
 @media (max-width: 1100px) {
   .agentWorkbench { grid-template-columns: 1fr; }

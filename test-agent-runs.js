@@ -214,6 +214,53 @@ async function run() {
   assert.strictEqual(detail.run_id, generated.run_id);
   assert.strictEqual(detail.data.result.rewrite_script, '改写脚本');
 
+  const ttsInputs = [];
+  const segmentDurations = [1.25];
+  const ttsResult = await agentRuns.synthesizeDouyinRunTts(awemeId, generated.run_id, {
+    rootDir,
+    voice: 'Mia',
+    stylePrompt: 'warm natural delivery',
+    ttsModel: {
+      callTtsModel: async options => {
+        ttsInputs.push(options);
+        return {
+          success: true,
+          status: 'done',
+          message: 'TTS ok',
+          audioBuffer: Buffer.from(`fake wav data ${ttsInputs.length}`),
+          format: 'wav',
+          voice: options.voice,
+          model: { provider: 'mimo', model_id: 'mimo-v2.5-tts' },
+        };
+      },
+    },
+    readAudioDuration: async () => segmentDurations.shift(),
+    concatenateAudio: async ({ targetPath }) => {
+      fs.writeFileSync(targetPath, 'combined wav data');
+      return { success: true, path: targetPath };
+    },
+  });
+  assert.strictEqual(ttsResult.success, true);
+  assert.deepStrictEqual(ttsInputs.map(item => item.text), ['改写脚本']);
+  assert.strictEqual(ttsInputs[0].voice, 'Mia');
+  assert.strictEqual(ttsInputs[0].stylePrompt, 'warm natural delivery');
+  assert.strictEqual(ttsResult.tts.voice, 'Mia');
+  assert.strictEqual(ttsResult.tts.format, 'wav');
+  assert.ok(ttsResult.tts.url.includes(`/api/agents/douyin/${awemeId}/runs/${generated.run_id}/tts/`));
+  assert.strictEqual(fs.readFileSync(ttsResult.tts.path, 'utf-8'), 'combined wav data');
+  assert.deepStrictEqual(ttsResult.tts.captions, [
+    { index: 1, start: 0, end: 1.25, duration: 1.25, text: '改写脚本' },
+  ]);
+  assert.strictEqual(ttsResult.tts.duration, 1.25);
+  assert.strictEqual(ttsResult.tts.segments.length, 1);
+  assert.ok(fs.existsSync(ttsResult.tts.segments[0].path));
+
+  const detailAfterTts = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
+  assert.strictEqual(detailAfterTts.data.tts.voice, 'Mia');
+  assert.strictEqual(detailAfterTts.data.tts.status, 'done');
+
+  assert.deepStrictEqual(detailAfterTts.data.tts.captions, ttsResult.tts.captions);
+
   const missingDetail = await agentRuns.getDouyinAgentRun(awemeId, 'missing-run', { rootDir });
   assert.strictEqual(missingDetail.success, false);
   assert.strictEqual(missingDetail.aweme_id, awemeId);
@@ -323,7 +370,65 @@ async function run() {
   assert.match(raw.message, /未能解析为结构化结果/);
   assert.strictEqual(raw.steps.find(step => step.id === 'comments').message, '暂无本地评论缓存');
 
+  fs.rmSync(paths.transcript, { force: true });
+  const commentInsights = await agentRuns.createDouyinAgentRun(awemeId, {
+    rootDir,
+    template: 'comment_insights',
+    aiTextModel: {
+      callTextModel: async ({ messages }) => {
+        assert.match(messages[0].content, /summary, pain_points, questions, sentiment, content_opportunities, reply_suggestions/);
+        assert.match(messages[1].content, /评论洞察/);
+        assert.match(messages[1].content, /太需要教程了/);
+        return {
+          success: true,
+          model: { provider: 'OpenAI', model_id: 'gpt-test' },
+          text: JSON.stringify({
+            summary: '评论集中关注教程和配置',
+            pain_points: ['API 配置门槛高'],
+            questions: ['是否支持导出？'],
+            sentiment: '期待但担心门槛',
+            content_opportunities: ['做一条配置教程'],
+            reply_suggestions: ['感谢反馈，我们会补充教程'],
+          }),
+        };
+      },
+    },
+    getLocalComments: () => ({
+      success: true,
+      count: 2,
+      data: [
+        { content: '太需要教程了', like_count: 12 },
+        { content: 'API 怎么配置？', like_count: 5 },
+      ],
+    }),
+  });
+  assert.strictEqual(commentInsights.success, true);
+  assert.strictEqual(commentInsights.template, 'comment_insights');
+  assert.strictEqual(commentInsights.result.summary, '评论集中关注教程和配置');
+  assert.deepStrictEqual(commentInsights.result.pain_points, ['API 配置门槛高']);
+  assert.strictEqual(commentInsights.input_summary.has_transcript, false);
+  assert.strictEqual(commentInsights.input_summary.comment_count, 2);
+  assert.ok(commentInsights.run_id.endsWith('-comment_insights'));
+
+  let emptyCommentModelCalled = false;
+  const emptyCommentInsights = await agentRuns.createDouyinAgentRun(awemeId, {
+    rootDir,
+    template: 'comment_insights',
+    aiTextModel: {
+      callTextModel: async () => {
+        emptyCommentModelCalled = true;
+        return { success: true, text: '{}' };
+      },
+    },
+    getLocalComments: () => ({ success: true, count: 0, data: [] }),
+  });
+  assert.strictEqual(emptyCommentInsights.success, false);
+  assert.strictEqual(emptyCommentInsights.status, 'failed');
+  assert.match(emptyCommentInsights.message, /评论缓存/);
+  assert.strictEqual(emptyCommentModelCalled, false);
+
   const originalCreateDouyinAgentRun = agentRuns.createDouyinAgentRun;
+  const originalSynthesizeDouyinRunTts = agentRuns.synthesizeDouyinRunTts;
   agentRuns.createDouyinAgentRun = async () => ({
     success: false,
     status: 'failed',
@@ -331,6 +436,17 @@ async function run() {
     run_id: 'failed-run',
     steps: [{ id: 'generate', status: 'failed' }],
     message: '模型调用失败',
+  });
+  agentRuns.synthesizeDouyinRunTts = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'ok-run',
+    message: 'TTS ok',
+    tts: {
+      status: 'done',
+      voice: 'Mia',
+      url: `/api/agents/douyin/${awemeId}/runs/ok-run/tts/ok-run-tts.wav`,
+    },
   });
   const app = express();
   app.use(express.json());
@@ -344,8 +460,17 @@ async function run() {
     assert.strictEqual(response.body.success, false);
     assert.strictEqual(response.body.status, 'failed');
     assert.deepStrictEqual(response.body.steps, [{ id: 'generate', status: 'failed' }]);
+
+    const ttsResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/tts`, {
+      voice: 'Mia',
+      stylePrompt: 'warm delivery',
+    });
+    assert.strictEqual(ttsResponse.statusCode, 200);
+    assert.strictEqual(ttsResponse.body.success, true);
+    assert.strictEqual(ttsResponse.body.tts.voice, 'Mia');
   } finally {
     agentRuns.createDouyinAgentRun = originalCreateDouyinAgentRun;
+    agentRuns.synthesizeDouyinRunTts = originalSynthesizeDouyinRunTts;
     await new Promise(resolve => server.close(resolve));
   }
 }

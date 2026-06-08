@@ -84,10 +84,13 @@ function createDouyinColumns(onComments, onPrepareMedia) {
       className: 'min-w-[168px]',
       render: item => {
         const awemeId = getDouyinAwemeId(item);
+        const mediaReady = item.media_status?.ready === true;
         return (
           <div className="actionCell">
             <Button variant="secondary" size="sm" disabled={!awemeId} onClick={() => onComments(awemeId)}>评论</Button>
-            <Button size="sm" disabled={!awemeId} onClick={() => onPrepareMedia(item)}>准备 AI 素材</Button>
+            <Button size="sm" disabled={!awemeId} onClick={() => onPrepareMedia(item)}>
+              {mediaReady ? '查看 AI 素材' : '准备 AI 素材'}
+            </Button>
           </div>
         );
       },

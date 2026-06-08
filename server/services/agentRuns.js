@@ -3,11 +3,12 @@ const path = require('path');
 const crypto = require('crypto');
 const mediaPipeline = require('./mediaPipeline');
 const defaultAiTextModel = require('./aiTextModel');
-const douyinStore = require('./douyinStore');
+const defaultAiTtsModel = require('./aiTtsModel');
+const agentTemplates = require('./agentTemplates');
+const ttsTimeline = require('./ttsTimeline');
 
 const TEMPLATE_VIRAL_REWRITE = 'viral_rewrite';
-const MAX_TRANSCRIPT_CHARS = 8000;
-const MAX_COMMENTS_CHARS = 4000;
+const MAX_COMMENTS_CHARS = agentTemplates.MAX_COMMENTS_CHARS;
 
 function createRunId(template = TEMPLATE_VIRAL_REWRITE) {
   const stamp = new Date().toISOString()
@@ -49,6 +50,28 @@ function getRunPath(awemeId, runId, rootDir) {
   return path.join(getAgentRunsDir(awemeId, rootDir), `${runId}.json`);
 }
 
+function getTtsFileName(runId, format = 'wav') {
+  const safeFormat = String(format || 'wav').replace(/[^A-Za-z0-9]/g, '') || 'wav';
+  return `${runId}-tts.${safeFormat}`;
+}
+
+function getTtsPath(awemeId, runId, format, rootDir) {
+  return path.join(getAgentRunsDir(awemeId, rootDir), getTtsFileName(runId, format));
+}
+
+function getTtsSegmentsDir(awemeId, runId, rootDir) {
+  return path.join(getAgentRunsDir(awemeId, rootDir), `${runId}-tts-segments`);
+}
+
+function getTtsSegmentFileName(index, format = 'wav') {
+  const safeFormat = String(format || 'wav').replace(/[^A-Za-z0-9]/g, '') || 'wav';
+  return `segment-${String(index).padStart(3, '0')}.${safeFormat}`;
+}
+
+function getTtsUrl(awemeId, runId, fileName) {
+  return `/api/agents/douyin/${encodeURIComponent(String(awemeId))}/runs/${encodeURIComponent(String(runId))}/tts/${encodeURIComponent(fileName)}`;
+}
+
 async function readJsonIfExists(filePath) {
   try {
     return JSON.parse(await fsp.readFile(filePath, 'utf-8'));
@@ -62,40 +85,26 @@ async function writeJson(filePath, data) {
   await fsp.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
+async function writeBinary(filePath, data) {
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
+  await fsp.writeFile(filePath, data);
+}
+
 function makeStep(id, label, status, message = '') {
   return { id, label, status, message };
 }
 
-function normalizeStringArray(value) {
-  return Array.isArray(value)
-    ? value.filter(item => typeof item === 'string' && item.trim()).map(item => item.trim())
-    : [];
-}
-
-function normalizeResult(value = {}) {
-  const result = value && typeof value === 'object' ? value : {};
-  return {
-    summary: typeof result.summary === 'string' ? result.summary : '',
-    viral_points: normalizeStringArray(result.viral_points),
-    audience: typeof result.audience === 'string' ? result.audience : '',
-    comment_insights: normalizeStringArray(result.comment_insights),
-    topics: normalizeStringArray(result.topics),
-    rewrite_script: typeof result.rewrite_script === 'string' ? result.rewrite_script : '',
-    titles: normalizeStringArray(result.titles),
-  };
-}
-
-function parseModelText(text) {
+function parseModelText(text, templateDefinition) {
   try {
     return {
       parsed: true,
-      result: normalizeResult(JSON.parse(text)),
+      result: templateDefinition.normalizeResult(JSON.parse(text)),
       raw_text: '',
     };
   } catch {
     return {
       parsed: false,
-      result: normalizeResult({}),
+      result: templateDefinition.normalizeResult({}),
       raw_text: typeof text === 'string' ? text : '',
     };
   }
@@ -124,58 +133,13 @@ function summarizeComments(comments = []) {
     : text;
 }
 
-function buildPrompt({ analysisInput = {}, transcript = {}, commentsText = '', commentCount = 0 } = {}) {
-  const video = analysisInput.video || {};
-  const statistics = video.statistics || {};
-  const transcriptText = typeof transcript.text === 'string' ? transcript.text : '';
-  const transcriptTruncated = transcriptText.length > MAX_TRANSCRIPT_CHARS;
-  const promptTranscript = transcriptTruncated
-    ? transcriptText.slice(0, MAX_TRANSCRIPT_CHARS)
-    : transcriptText;
-  const transcriptNote = transcriptTruncated
-    ? `转写文本已截断，仅保留前 ${MAX_TRANSCRIPT_CHARS} 字。`
-    : '转写文本未截断。';
-  const commentsNote = commentCount > 0
-    ? `本地评论缓存共 ${commentCount} 条，以下是抽样评论：\n${commentsText}`
-    : '暂无本地评论缓存。评论洞察需要基于视频内容谨慎推断，并在结果中说明依据不足。';
-
-  return [
-    {
-      role: 'system',
-      content: [
-        '你是 MuseDock 的受控内容创作 Agent。',
-        '请只输出 JSON，不要输出 Markdown、解释或代码块。',
-        'JSON 字段必须包含 summary, viral_points, audience, comment_insights, topics, rewrite_script, titles。',
-        'viral_points, comment_insights, topics, titles 必须是字符串数组。',
-      ].join('\n'),
-    },
-    {
-      role: 'user',
-      content: [
-        '任务：爆款拆解 + 改写脚本。',
-        `视频标题：${video.title || ''}`,
-        `作者：${video.author?.nickname || ''}`,
-        `链接：${video.aweme_url || ''}`,
-        `统计：点赞 ${statistics.digg_count || statistics.liked_count || 0}，评论 ${statistics.comment_count || 0}，分享 ${statistics.share_count || 0}`,
-        '',
-        '转写文本：',
-        transcriptNote,
-        promptTranscript,
-        '',
-        '评论信息：',
-        commentsNote,
-      ].join('\n'),
-    },
-  ];
-}
-
 function createInputSummary({ analysisInput, transcript, comments }) {
   return {
     title: analysisInput?.video?.title || '',
     author: analysisInput?.video?.author?.nickname || '',
     has_transcript: !!(transcript && transcript.text),
     transcript_chars: transcript?.text ? transcript.text.length : 0,
-    transcript_truncated: !!(transcript?.text && transcript.text.length > MAX_TRANSCRIPT_CHARS),
+    transcript_truncated: !!(transcript?.text && transcript.text.length > agentTemplates.MAX_TRANSCRIPT_CHARS),
     comment_count: Array.isArray(comments) ? comments.length : 0,
   };
 }
@@ -187,7 +151,12 @@ async function persistRun(awemeId, run, rootDir) {
   return data;
 }
 
+function getTemplateOrFallback(template) {
+  return agentTemplates.getAgentTemplate(template) || agentTemplates.getAgentTemplate(TEMPLATE_VIRAL_REWRITE);
+}
+
 async function createFailureRun(awemeId, template, message, options = {}) {
+  const templateDefinition = getTemplateOrFallback(template);
   const run = {
     success: false,
     run_id: createRunId(template),
@@ -197,7 +166,7 @@ async function createFailureRun(awemeId, template, message, options = {}) {
     model: options.model || {},
     steps: options.steps || [],
     input_summary: options.input_summary || {},
-    result: normalizeResult({}),
+    result: templateDefinition.normalizeResult({}),
     raw_text: '',
     message,
     created_at: new Date().toISOString(),
@@ -210,8 +179,14 @@ async function createFailureRun(awemeId, template, message, options = {}) {
   return persistRun(awemeId, run, options.rootDir);
 }
 
+async function defaultGetLocalComments(awemeId, options) {
+  const douyinStore = require('./douyinStore');
+  return douyinStore.getLocalDouyinComments(awemeId, options);
+}
+
 async function createDouyinAgentRun(awemeId, options = {}) {
   const template = options.template || TEMPLATE_VIRAL_REWRITE;
+  const templateDefinition = agentTemplates.getAgentTemplate(template);
   const rootDir = options.rootDir;
   const steps = [];
 
@@ -219,7 +194,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     return createInvalidAwemeResult(awemeId);
   }
 
-  if (template !== TEMPLATE_VIRAL_REWRITE) {
+  if (!templateDefinition) {
     return createFailureRun(awemeId, template, '暂不支持该 Agent 模板。', {
       rootDir,
       persist: false,
@@ -257,11 +232,11 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   steps.push(makeStep(
     'transcript',
     '读取转写文本',
-    transcript?.text ? 'done' : 'failed',
-    transcript?.text ? '' : '未找到转写文本',
+    transcript?.text ? 'done' : (templateDefinition.requireTranscript ? 'failed' : 'skipped'),
+    transcript?.text ? '' : (templateDefinition.requireTranscript ? '未找到转写文本' : '该模板不强制要求转写文本'),
   ));
 
-  if (!transcript?.text) {
+  if (templateDefinition.requireTranscript && !transcript?.text) {
     return createFailureRun(awemeId, template, '未找到转写文本，请先完成该视频的音频转写。', {
       rootDir,
       steps,
@@ -269,7 +244,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     });
   }
 
-  const getLocalComments = options.getLocalComments || douyinStore.getLocalDouyinComments;
+  const getLocalComments = options.getLocalComments || defaultGetLocalComments;
   let commentsResult;
   try {
     commentsResult = await getLocalComments(awemeId, { max: 50, maxReplies: 5 });
@@ -282,9 +257,17 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     : '暂无本地评论缓存';
   steps.push(makeStep('comments', '读取本地评论缓存', 'done', commentsMessage));
 
-  const commentsText = summarizeComments(comments);
   const inputSummary = createInputSummary({ analysisInput, transcript, comments });
-  const messages = buildPrompt({
+  if (templateDefinition.requireComments && comments.length === 0) {
+    return createFailureRun(awemeId, template, '未找到本地评论缓存，请先在抓取记录中加载并缓存评论。', {
+      rootDir,
+      steps,
+      input_summary: inputSummary,
+    });
+  }
+
+  const commentsText = summarizeComments(comments);
+  const messages = templateDefinition.buildPrompt({
     analysisInput,
     transcript,
     commentsText,
@@ -318,7 +301,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     });
   }
 
-  const parsed = parseModelText(modelResult.text);
+  const parsed = parseModelText(modelResult.text, templateDefinition);
   steps.push(makeStep('generate', '请求文本模型', 'done'));
   steps.push(makeStep(
     'parse',
@@ -412,11 +395,294 @@ async function getDouyinAgentRun(awemeId, runId, options = {}) {
   };
 }
 
+async function synthesizeDouyinRunTtsLegacy(awemeId, runId, options = {}) {
+  if (!isSafeId(awemeId)) {
+    return createInvalidAwemeResult(awemeId);
+  }
+
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      aweme_id: String(awemeId || ''),
+      run_id: String(runId || ''),
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  const run = await readJsonIfExists(runPath);
+  if (!run) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '未找到该 Agent 运行记录',
+    };
+  }
+
+  const rewriteScript = typeof run?.result?.rewrite_script === 'string' ? run.result.rewrite_script.trim() : '';
+  if (!rewriteScript) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '当前运行结果没有可用于 TTS 合成的改写脚本。',
+    };
+  }
+
+  const ttsModel = options.ttsModel || defaultAiTtsModel;
+  const modelResult = await ttsModel.callTtsModel({
+    text: rewriteScript,
+    voice: options.voice,
+    stylePrompt: options.stylePrompt,
+    format: options.format,
+    configPath: options.configPath,
+    ttsConfig: options.ttsConfig,
+    fetchImpl: options.fetchImpl,
+  });
+
+  if (!modelResult.success) {
+    const failedTts = {
+      status: modelResult.status || 'failed',
+      voice: options.voice || '',
+      style_prompt: options.stylePrompt || '',
+      message: modelResult.message || 'TTS 合成失败',
+      model: modelResult.model || {},
+      updated_at: new Date().toISOString(),
+    };
+    const updatedRun = { ...run, tts: failedTts, updated_at: new Date().toISOString() };
+    await writeJson(runPath, updatedRun);
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: failedTts.message,
+      tts: failedTts,
+    };
+  }
+
+  const format = modelResult.format || options.format || 'wav';
+  const fileName = getTtsFileName(runId, format);
+  const filePath = getTtsPath(awemeId, runId, format, options.rootDir);
+  await writeBinary(filePath, modelResult.audioBuffer);
+
+  const tts = {
+    status: 'done',
+    voice: modelResult.voice || options.voice || '',
+    style_prompt: options.stylePrompt || '',
+    format,
+    path: filePath,
+    url: getTtsUrl(awemeId, runId, fileName),
+    model: modelResult.model || {},
+    message: modelResult.message || 'TTS 语音合成完成。',
+    updated_at: new Date().toISOString(),
+  };
+  const updatedRun = { ...run, tts, updated_at: new Date().toISOString() };
+  await writeJson(runPath, updatedRun);
+
+  return {
+    success: true,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message: tts.message,
+    tts,
+  };
+}
+
+function resolveDouyinRunTtsFile(awemeId, runId, fileName, options = {}) {
+  if (!isSafeId(awemeId) || !isSafeRunId(runId)) {
+    throw new Error('Invalid Agent TTS file request');
+  }
+
+  const name = String(fileName || '');
+  if (!name || path.basename(name) !== name || !name.startsWith(`${runId}-tts.`)) {
+    throw new Error('Invalid Agent TTS file request');
+  }
+
+  const runsDir = path.resolve(getAgentRunsDir(awemeId, options.rootDir));
+  const targetPath = path.resolve(runsDir, name);
+  const relative = path.relative(runsDir, targetPath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Agent TTS file is outside run directory');
+  }
+
+  return targetPath;
+}
+
+async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
+  if (!isSafeId(awemeId)) {
+    return createInvalidAwemeResult(awemeId);
+  }
+
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      aweme_id: String(awemeId || ''),
+      run_id: String(runId || ''),
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  const run = await readJsonIfExists(runPath);
+  if (!run) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '未找到该 Agent 运行记录',
+    };
+  }
+
+  const rewriteScript = typeof run?.result?.rewrite_script === 'string' ? run.result.rewrite_script.trim() : '';
+  if (!rewriteScript) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '当前运行结果没有可用于 TTS 合成的改写脚本。',
+    };
+  }
+
+  const sentences = ttsTimeline.splitScriptIntoSentences(rewriteScript);
+  if (!sentences.length) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '当前运行结果没有可用于 TTS 合成的有效句子。',
+    };
+  }
+
+  const ttsModel = options.ttsModel || defaultAiTtsModel;
+  const readAudioDuration = options.readAudioDuration || (async filePath => {
+    const result = await ttsTimeline.readAudioDuration(filePath, options);
+    if (!result.success) throw new Error(result.message);
+    return result.duration;
+  });
+  const concatenateAudio = options.concatenateAudio || ttsTimeline.concatenateAudioFiles;
+  const requestedFormat = options.format || 'wav';
+  const segmentsDir = getTtsSegmentsDir(awemeId, runId, options.rootDir);
+  await fsp.rm(segmentsDir, { recursive: true, force: true });
+  await fsp.mkdir(segmentsDir, { recursive: true });
+
+  const segments = [];
+  let model = {};
+  let format = requestedFormat;
+  let resolvedVoice = options.voice || '';
+
+  for (let index = 0; index < sentences.length; index += 1) {
+    const sentence = sentences[index];
+    const modelResult = await ttsModel.callTtsModel({
+      text: sentence,
+      voice: options.voice,
+      stylePrompt: options.stylePrompt,
+      format: requestedFormat,
+      configPath: options.configPath,
+      ttsConfig: options.ttsConfig,
+      fetchImpl: options.fetchImpl,
+    });
+
+    if (!modelResult.success) {
+      const failedTts = {
+        status: modelResult.status || 'failed',
+        voice: options.voice || '',
+        style_prompt: options.stylePrompt || '',
+        message: modelResult.message || `第 ${index + 1} 句 TTS 合成失败`,
+        model: modelResult.model || {},
+        updated_at: new Date().toISOString(),
+      };
+      const updatedRun = { ...run, tts: failedTts, updated_at: new Date().toISOString() };
+      await writeJson(runPath, updatedRun);
+      return {
+        success: false,
+        aweme_id: String(awemeId),
+        run_id: String(runId),
+        message: failedTts.message,
+        tts: failedTts,
+      };
+    }
+
+    format = modelResult.format || format;
+    resolvedVoice = modelResult.voice || resolvedVoice;
+    model = modelResult.model || model;
+    const segmentFileName = getTtsSegmentFileName(index + 1, format);
+    const segmentPath = path.join(segmentsDir, segmentFileName);
+    await writeBinary(segmentPath, modelResult.audioBuffer);
+    const duration = await readAudioDuration(segmentPath);
+    segments.push({
+      index: index + 1,
+      text: sentence,
+      duration,
+      path: segmentPath,
+    });
+  }
+
+  const fileName = getTtsFileName(runId, format);
+  const filePath = getTtsPath(awemeId, runId, format, options.rootDir);
+  const concatResult = await concatenateAudio({
+    inputPaths: segments.map(segment => segment.path),
+    targetPath: filePath,
+    options,
+  });
+
+  if (concatResult && concatResult.success === false) {
+    const failedTts = {
+      status: 'failed',
+      voice: resolvedVoice,
+      style_prompt: options.stylePrompt || '',
+      message: concatResult.message || '拼接 TTS 分段音频失败',
+      model,
+      segments,
+      updated_at: new Date().toISOString(),
+    };
+    const updatedRun = { ...run, tts: failedTts, updated_at: new Date().toISOString() };
+    await writeJson(runPath, updatedRun);
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: failedTts.message,
+      tts: failedTts,
+    };
+  }
+
+  const captions = ttsTimeline.buildCaptionsFromSegments(segments);
+  const totalDuration = captions.length ? captions[captions.length - 1].end : 0;
+  const tts = {
+    status: 'done',
+    voice: resolvedVoice,
+    style_prompt: options.stylePrompt || '',
+    format,
+    path: filePath,
+    url: getTtsUrl(awemeId, runId, fileName),
+    duration: totalDuration,
+    segments,
+    captions,
+    model,
+    message: 'TTS 语音合成完成。',
+    updated_at: new Date().toISOString(),
+  };
+  const updatedRun = { ...run, tts, updated_at: new Date().toISOString() };
+  await writeJson(runPath, updatedRun);
+
+  return {
+    success: true,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message: tts.message,
+    tts,
+  };
+}
+
 module.exports = {
   TEMPLATE_VIRAL_REWRITE,
   createDouyinAgentRun,
   listDouyinAgentRuns,
   getDouyinAgentRun,
+  synthesizeDouyinRunTts,
+  resolveDouyinRunTtsFile,
+  listAgentTemplates: agentTemplates.listAgentTemplates,
   summarizeComments,
-  buildPrompt,
+  buildPrompt: agentTemplates.getAgentTemplate(TEMPLATE_VIRAL_REWRITE).buildPrompt,
 };

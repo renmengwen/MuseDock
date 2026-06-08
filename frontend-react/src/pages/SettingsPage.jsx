@@ -33,6 +33,12 @@ const MODEL_TYPES = [
     description: '用于理解图片、视频帧、文本和评论等混合素材。',
     modelPlaceholder: 'gpt-4o / qwen-vl',
   },
+  {
+    key: 'tts',
+    title: 'TTS 语音合成模型',
+    description: '用于把 AI 工作台生成的改写脚本合成为口播音频，当前支持 MiMo TTS v2.5。',
+    modelPlaceholder: 'mimo-v2.5-tts',
+  },
 ];
 
 const DEFAULT_MODEL = {

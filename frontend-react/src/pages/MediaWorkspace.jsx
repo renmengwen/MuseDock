@@ -36,6 +36,7 @@ export function MediaWorkspace() {
   const [openingTarget, setOpeningTarget] = useState('');
   const [prepareProgress, setPrepareProgress] = useState(0);
   const [transcribeProgress, setTranscribeProgress] = useState(0);
+  const [activeTask, setActiveTask] = useState(null);
 
   useEffect(() => {
     if (!preparing) return undefined;
@@ -62,6 +63,69 @@ export function MediaWorkspace() {
     }, 1600);
     return () => window.clearInterval(timer);
   }, [transcribing]);
+
+  useEffect(() => {
+    if (!activeTask?.task_id || !activeTask?.aweme_id) return undefined;
+    let cancelled = false;
+
+    async function pollTask() {
+      try {
+        const json = await api.getDouyinMediaTask(activeTask.aweme_id, activeTask.task_id);
+        if (cancelled) return;
+        const task = json.task;
+        if (!task) return;
+
+        setActiveTask(task);
+        if (task.type === 'prepare') setPrepareProgress(task.progress || 0);
+        if (task.type === 'transcribe') setTranscribeProgress(task.progress || 0);
+
+        if (task.status === 'queued' || task.status === 'running') {
+          setStatus({ type: 'loading', message: task.message || '正在执行媒体任务...' });
+          return;
+        }
+
+        if (task.status === 'done') {
+          setStatus({ type: 'success', message: task.message || '任务已完成' });
+          setPreparing(false);
+          setTranscribing(false);
+          setActiveTask(null);
+          if (task.result && task.type === 'prepare') {
+            setMediaStatus({
+              success: true,
+              aweme_id: task.aweme_id,
+              dir: task.result.dir,
+              metadata: task.result.analysis_input?.video || task.result.metadata || {},
+              analysis_input: task.result.analysis_input,
+              frames: task.result.analysis_input?.local_assets?.frames || [],
+              steps: task.result.analysis_input?.steps || task.result.steps || {},
+            });
+          }
+          await refreshMediaStatus(task.aweme_id, { silent: true });
+          if (task.type === 'prepare' && routeAwemeId !== task.aweme_id) {
+            navigate(`/media/douyin/${task.aweme_id}`, { replace: true });
+          }
+          return;
+        }
+
+        if (task.status === 'failed') {
+          setStatus({ type: 'error', message: task.message || task.error || '媒体任务执行失败' });
+          setPreparing(false);
+          setTranscribing(false);
+          setActiveTask(null);
+          await refreshMediaStatus(task.aweme_id, { silent: true }).catch(() => {});
+        }
+      } catch (error) {
+        if (!cancelled) setStatus({ type: 'error', message: error.message });
+      }
+    }
+
+    pollTask();
+    const timer = window.setInterval(pollTask, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeTask?.task_id, activeTask?.aweme_id, routeAwemeId, navigate]);
 
   useEffect(() => {
     if (!routeAwemeId) return;
@@ -107,24 +171,13 @@ export function MediaWorkspace() {
     setMediaStatus(prev => prev?.aweme_id === awemeId ? prev : buildInitialStatus(null, awemeId));
 
     try {
-      const json = await api.prepareDouyinMedia(awemeId, force);
-      setMediaStatus({
-        success: true,
-        aweme_id: awemeId,
-        dir: json.dir,
-        metadata: json.analysis_input?.video || json.metadata || {},
-        analysis_input: json.analysis_input,
-        frames: json.analysis_input?.local_assets?.frames || [],
-        steps: json.analysis_input?.steps || json.steps || {},
-      });
-      setPrepareProgress(100);
-      setStatus({ type: 'success', message: force ? '素材已重新生成' : '素材准备完成，已复用可用缓存' });
-      if (routeAwemeId !== awemeId) navigate(`/media/douyin/${awemeId}`, { replace: true });
+      const json = await api.startDouyinMediaPrepareTask(awemeId, force);
+      setActiveTask(json.task);
+      setStatus({ type: 'loading', message: json.task?.message || '已创建素材准备任务，正在等待执行...' });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
-      await refreshMediaStatus(awemeId, { silent: true }).catch(() => {});
-    } finally {
       setPreparing(false);
+      await refreshMediaStatus(awemeId, { silent: true }).catch(() => {});
     }
   }
 
@@ -138,31 +191,11 @@ export function MediaWorkspace() {
     setTranscribeProgress(8);
     setStatus({ type: 'loading', message: '正在压缩或切片音频，并请求音频转写，较长视频可能需要几分钟...' });
     try {
-      const json = await api.transcribeDouyinMedia(selectedAwemeId);
-      setTranscribeProgress(100);
-      setMediaStatus(prev => {
-        const nextSteps = {
-          ...(prev?.steps || {}),
-          transcript: {
-            status: json.status || (json.success ? 'done' : 'failed'),
-            path: json.transcript_path || prev?.steps?.transcript?.path || '',
-            message: json.message || '',
-          },
-        };
-        return {
-          ...(prev || buildInitialStatus(null, selectedAwemeId)),
-          transcript: json,
-          steps: nextSteps,
-        };
-      });
-      setStatus({
-        type: json.configured === false ? 'info' : (json.success ? 'success' : 'error'),
-        message: json.message || '转写接口已返回',
-      });
-      await refreshMediaStatus(selectedAwemeId, { silent: true });
+      const json = await api.startDouyinTranscribeTask(selectedAwemeId);
+      setActiveTask(json.task);
+      setStatus({ type: 'loading', message: json.task?.message || '已创建音频转写任务，正在等待执行...' });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
-    } finally {
       setTranscribing(false);
     }
   }

@@ -73,11 +73,26 @@ export const api = {
     const params = force ? '?force=true' : '';
     return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/prepare${params}`, { method: 'POST' });
   },
+  startDouyinMediaPrepareTask(awemeId, force = false) {
+    const params = new URLSearchParams({ async: 'true' });
+    if (force) params.set('force', 'true');
+    return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/prepare?${params.toString()}`, { method: 'POST' });
+  },
   getDouyinMediaStatus(awemeId) {
     return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/status`);
   },
   transcribeDouyinMedia(awemeId) {
     return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/transcribe`, { method: 'POST' });
+  },
+  startDouyinTranscribeTask(awemeId) {
+    return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/transcribe?async=true`, { method: 'POST' });
+  },
+  getDouyinMediaTask(awemeId, taskId) {
+    return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/tasks/${encodeURIComponent(taskId)}`);
+  },
+  listDouyinMediaTasks(awemeId, type = '') {
+    const suffix = type ? `?type=${encodeURIComponent(type)}` : '';
+    return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/tasks${suffix}`);
   },
   openDouyinMediaTarget(awemeId, target = 'dir') {
     return requestJson(`/api/media/douyin/${encodeURIComponent(awemeId)}/open`, {
@@ -98,5 +113,12 @@ export const api = {
   },
   getDouyinAgentRun(awemeId, runId) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}`);
+  },
+  synthesizeDouyinRunTts(awemeId, runId, payload = {}) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
   },
 };

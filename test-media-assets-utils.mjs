@@ -5,6 +5,7 @@ import {
   getFramePreviewUrl,
   normalizeFrameAsset,
 } from './frontend-react/src/utils/mediaAssets.js';
+import { shouldAutoPrepareMedia } from './frontend-react/src/utils/mediaStatus.js';
 
 assert.equal(formatBytes(0), '0 B');
 assert.equal(formatBytes(512), '512 B');
@@ -78,5 +79,9 @@ assert.equal(
   })[0].name,
   'frame-0004.jpg',
 );
+
+assert.equal(shouldAutoPrepareMedia({ media_status: { ready: true } }), false);
+assert.equal(shouldAutoPrepareMedia({ media_status: { ready: false } }), true);
+assert.equal(shouldAutoPrepareMedia({}), true);
 
 console.log('media assets utils tests passed');

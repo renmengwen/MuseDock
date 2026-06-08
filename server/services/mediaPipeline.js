@@ -582,8 +582,10 @@ async function buildAnalysisInput(awemeId, paths, metadata, steps) {
 
 async function prepareDouyinMedia(awemeId, metadata, options = {}) {
   const paths = getMediaPaths(awemeId, options.rootDir);
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
   await fsp.mkdir(paths.framesDir, { recursive: true });
   await writeJson(paths.metadata, metadata);
+  onProgress({ progress: 18, step: 'metadata', message: '正在写入视频元数据...' });
   const force = !!options.force;
 
   const steps = {
@@ -596,6 +598,7 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
   };
 
   try {
+    onProgress({ progress: 32, step: 'video', message: '正在下载或复用视频文件...' });
     steps.video = await downloadFile(metadata.video_download_url, paths.video, {
       referer: metadata.aweme_url,
       userAgent: options.userAgent,
@@ -611,6 +614,7 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
   steps.ffmpeg = ffmpeg.available
     ? { status: 'available' }
     : { status: 'unavailable', error: ffmpeg.error };
+  onProgress({ progress: 48, step: 'ffmpeg', message: ffmpeg.available ? 'ffmpeg 可用，正在处理音频和关键帧...' : 'ffmpeg 不可用，正在检查可复用缓存...' });
 
   const hasVideo = await fileExists(paths.video);
   const hasAudio = await fileExists(paths.audio);
@@ -631,11 +635,14 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
       if (!canUseCachedAudio) steps.audio = { status: 'skipped', message: 'ffmpeg is not available' };
       if (!canUseCachedFrames) steps.frames = { status: 'skipped', message: 'ffmpeg is not available' };
     } else {
+      onProgress({ progress: 62, step: 'audio', message: '正在抽取音频...' });
       if (!canUseCachedAudio) steps.audio = await extractAudio(paths.video, paths.audio, options);
+      onProgress({ progress: 78, step: 'frames', message: '正在抽取关键帧...' });
       if (!canUseCachedFrames) steps.frames = await extractFrames(paths.video, paths.framesDir, options);
     }
   }
 
+  onProgress({ progress: 92, step: 'analysis_input', message: '正在生成 AI 分析输入...' });
   const analysisInput = await buildAnalysisInput(awemeId, paths, metadata, steps);
   await writeJson(paths.analysisInput, analysisInput);
   return {
@@ -783,6 +790,8 @@ function resolveFrameFile(awemeId, frameName, options = {}) {
 
 async function transcribeAudio(awemeId, options = {}) {
   const paths = getMediaPaths(awemeId, options.rootDir);
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
+  onProgress({ progress: 12, step: 'config', message: '正在检查 ASR 配置...' });
   const asrConfig = await resolveAsrRuntime(options);
   if (!asrConfig.configured) {
     const result = {
@@ -811,6 +820,7 @@ async function transcribeAudio(awemeId, options = {}) {
   }
 
   if (asrConfig.provider === 'mimo') {
+    onProgress({ progress: 35, step: 'preprocess', message: '正在压缩或切片音频...' });
     const providerResult = await transcribeWithMimo(paths.audio, asrConfig, {
       ...options,
       paths,
@@ -823,6 +833,7 @@ async function transcribeAudio(awemeId, options = {}) {
       aweme_id: String(awemeId),
       transcript_path: paths.transcript,
     };
+    onProgress({ progress: 88, step: 'save', message: '正在保存转写结果...' });
     await writeJson(paths.transcript, {
       ...result,
       audio_path: paths.audio,

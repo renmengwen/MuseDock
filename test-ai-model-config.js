@@ -9,11 +9,12 @@ async function run() {
   const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-config-test-')), 'ai-models.json');
 
   const initial = await aiModelConfig.getPublicConfig({ configPath });
-  assert.deepStrictEqual(Object.keys(initial.models), ['asr', 'text', 'image', 'video', 'multimodal']);
+  assert.deepStrictEqual(Object.keys(initial.models), ['asr', 'text', 'image', 'video', 'multimodal', 'tts']);
   assert.strictEqual(initial.models.asr.enabled, false);
   assert.strictEqual(initial.models.text.provider, '');
   assert.strictEqual(initial.models.image.apiKeyMasked, '');
   assert.strictEqual(initial.models.video.hasApiKey, false);
+  assert.strictEqual(initial.models.tts.modelId, '');
 
   const saved = await aiModelConfig.saveConfig({
     models: {
@@ -46,6 +47,7 @@ async function run() {
   assert.strictEqual(saved.models.asr.apiKeyMasked, 'sk-****1234');
   assert.strictEqual(saved.models.text.apiKeyMasked, '****cret');
   assert.strictEqual(saved.models.multimodal.enabled, false);
+  assert.strictEqual(saved.models.tts.enabled, false);
   assert.strictEqual(saved.models.unknown, undefined);
 
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
