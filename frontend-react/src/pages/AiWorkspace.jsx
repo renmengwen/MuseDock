@@ -96,6 +96,16 @@ export function AiWorkspace() {
   const [ttsVoice, setTtsVoice] = useState('mimo_default');
   const [ttsStylePrompt, setTtsStylePrompt] = useState(DEFAULT_TTS_STYLE);
   const [selectedTemplate, setSelectedTemplate] = useState('viral_rewrite');
+  const [promptOptions, setPromptOptions] = useState({
+    goal: '',
+    audience: '',
+    accountPositioning: '',
+    rewriteStyle: '',
+    focus: '',
+    replyTone: '',
+    forbidden: '',
+    extraRequirements: '',
+  });
   const [resultTab, setResultTab] = useState('workflow');
 
   const sortedRuns = useMemo(() => {
@@ -182,7 +192,7 @@ export function AiWorkspace() {
     const templateMeta = getTemplateMeta(selectedTemplate);
     setStatus({ type: 'loading', message: `正在执行${templateMeta.label}，正在读取素材上下文并请求文本模型...` });
     try {
-      const json = await api.createDouyinAgentRun(value, selectedTemplate);
+      const json = await api.createDouyinAgentRun(value, selectedTemplate, promptOptions);
       setActiveRun(json.run || json);
       const runsJson = await api.listDouyinAgentRuns(value);
       const runList = runsJson.data || [];
@@ -197,6 +207,10 @@ export function AiWorkspace() {
     } finally {
       setRunning(false);
     }
+  }
+
+  function updatePromptOption(key, value) {
+    setPromptOptions(prev => ({ ...prev, [key]: value }));
   }
 
   function selectRun(run) {
@@ -381,6 +395,58 @@ export function AiWorkspace() {
               </Button>
             </div>
           ))}
+          <div className="agentOptionGroup">
+            <h4>创作 brief</h4>
+            <Input
+              value={promptOptions.goal}
+              onChange={event => updatePromptOption('goal', event.target.value)}
+              placeholder="创作目标，例如：涨粉、引流、带货"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.audience}
+              onChange={event => updatePromptOption('audience', event.target.value)}
+              placeholder="目标受众，例如：健身新手、本地商家老板"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.accountPositioning}
+              onChange={event => updatePromptOption('accountPositioning', event.target.value)}
+              placeholder="账号定位，例如：短视频获客顾问"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.rewriteStyle}
+              onChange={event => updatePromptOption('rewriteStyle', event.target.value)}
+              placeholder="改写风格，例如：专业可信，开头有冲突感"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.focus}
+              onChange={event => updatePromptOption('focus', event.target.value)}
+              placeholder="关注重点，例如：突出省时、低门槛、真实案例"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.replyTone}
+              onChange={event => updatePromptOption('replyTone', event.target.value)}
+              placeholder="运营回复语气，例如：真诚、克制、专业"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.forbidden}
+              onChange={event => updatePromptOption('forbidden', event.target.value)}
+              placeholder="禁用内容，例如：不要夸大效果"
+              disabled={loading || running}
+            />
+            <textarea
+              value={promptOptions.extraRequirements}
+              onChange={event => updatePromptOption('extraRequirements', event.target.value)}
+              placeholder="额外要求，例如：适合 60 秒口播"
+              disabled={loading || running}
+              maxLength={500}
+            />
+          </div>
           <Button disabled={loading || running} onClick={runAgent}>
             {running ? '执行中...' : getTemplateMeta(selectedTemplate).actionLabel}
           </Button>

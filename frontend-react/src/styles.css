@@ -181,6 +181,10 @@ a { color: #fe2c55; text-decoration: none; }
 .agentTemplate.active { border-color: #fe2c55; background: #fff5f7; box-shadow: 0 0 0 1px #fe2c55 inset; }
 .agentTemplate strong { color: #fe2c55; font-size: 15px; }
 .agentTemplate p { margin: 0; color: #69717e; font-size: 13px; line-height: 1.6; }
+.agentOptionGroup { display: grid; gap: 8px; margin: 12px 0; padding: 12px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
+.agentOptionGroup h4 { margin: 0; color: #30343b; font-size: 14px; }
+.agentOptionGroup textarea { min-height: 78px; resize: vertical; border: 1px solid #d7dce3; border-radius: 8px; padding: 9px 10px; font: inherit; line-height: 1.5; color: #30343b; background: #fff; }
+.agentOptionGroup textarea:disabled { color: #8a93a2; background: #f4f6f8; }
 .agentStatusList { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .agentStatusList li { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #edf0f4; }
 .agentStatusList span, .agentStep span { min-width: 0; color: #30343b; font-size: 13px; font-weight: 600; word-break: break-word; }
