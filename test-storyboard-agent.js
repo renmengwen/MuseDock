@@ -2,6 +2,25 @@ const assert = require('assert');
 const storyboardAgent = require('./server/services/storyboardAgent');
 
 async function run() {
+  const messages = storyboardAgent.buildStoryboardMessages({
+    rewriteScript: '测试脚本',
+    captions: [{ index: 1, start: 0, end: 2, text: '第一句' }],
+    storyboardOptions: {
+      visualStyle: '商业质感',
+      pacing: '快节奏',
+      captionStyle: '大字报',
+      backgroundDirection: '数据感抽象背景',
+      primaryColor: '#fe2c55',
+      forbidden: '不要真人，不要原视频画面',
+      extraRequirements: '每个分镜标题要短',
+    },
+  });
+  assert.match(messages[1].content, /AI 分镜视觉 brief/);
+  assert.match(messages[1].content, /商业质感/);
+  assert.match(messages[1].content, /数据感抽象背景/);
+  assert.match(messages[1].content, /不要真人/);
+  assert.match(messages[0].content, /不要引用原视频/);
+
   const calls = [];
   const result = await storyboardAgent.createStoryboard({
     rewriteScript: '第一句。第二句。',

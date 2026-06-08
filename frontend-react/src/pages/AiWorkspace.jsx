@@ -96,6 +96,34 @@ export function AiWorkspace() {
   const [ttsVoice, setTtsVoice] = useState('mimo_default');
   const [ttsStylePrompt, setTtsStylePrompt] = useState(DEFAULT_TTS_STYLE);
   const [selectedTemplate, setSelectedTemplate] = useState('viral_rewrite');
+  const [promptOptions, setPromptOptions] = useState({
+    goal: '',
+    audience: '',
+    accountPositioning: '',
+    rewriteStyle: '',
+    focus: '',
+    replyTone: '',
+    forbidden: '',
+    extraRequirements: '',
+  });
+  const [storyboardOptions, setStoryboardOptions] = useState({
+    visualStyle: '',
+    pacing: '',
+    captionStyle: '',
+    backgroundDirection: '',
+    primaryColor: '',
+    forbidden: '',
+    extraRequirements: '',
+  });
+  const [renderOptions, setRenderOptions] = useState({
+    resolution: '1080x1920',
+    fps: '30',
+    captionSize: 'medium',
+    motionLevel: 'medium',
+    showCaptionBar: true,
+    showSceneNumber: true,
+    quality: 'standard',
+  });
   const [resultTab, setResultTab] = useState('workflow');
 
   const sortedRuns = useMemo(() => {
@@ -182,7 +210,7 @@ export function AiWorkspace() {
     const templateMeta = getTemplateMeta(selectedTemplate);
     setStatus({ type: 'loading', message: `正在执行${templateMeta.label}，正在读取素材上下文并请求文本模型...` });
     try {
-      const json = await api.createDouyinAgentRun(value, selectedTemplate);
+      const json = await api.createDouyinAgentRun(value, selectedTemplate, promptOptions);
       setActiveRun(json.run || json);
       const runsJson = await api.listDouyinAgentRuns(value);
       const runList = runsJson.data || [];
@@ -197,6 +225,18 @@ export function AiWorkspace() {
     } finally {
       setRunning(false);
     }
+  }
+
+  function updatePromptOption(key, value) {
+    setPromptOptions(prev => ({ ...prev, [key]: value }));
+  }
+
+  function updateStoryboardOption(key, value) {
+    setStoryboardOptions(prev => ({ ...prev, [key]: value }));
+  }
+
+  function updateRenderOption(key, value) {
+    setRenderOptions(prev => ({ ...prev, [key]: value }));
   }
 
   function selectRun(run) {
@@ -252,9 +292,10 @@ export function AiWorkspace() {
     setStoryboardRunning(true);
     setStatus({ type: 'loading', message: '正在生成 AI 分镜...' });
     try {
-      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id);
+      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id, storyboardOptions);
       setActiveRun(prev => prev ? {
         ...prev,
+        storyboard_options: json.storyboard_options,
         storyboard_raw: json.storyboard_raw,
         storyboard: json.storyboard,
         storyboard_model: json.storyboard_model,
@@ -263,6 +304,7 @@ export function AiWorkspace() {
       setRuns(prev => prev.map(run => (
         run.run_id === activeRun.run_id ? {
           ...run,
+          storyboard_options: json.storyboard_options,
           storyboard_raw: json.storyboard_raw,
           storyboard: json.storyboard,
           storyboard_model: json.storyboard_model,
@@ -294,7 +336,7 @@ export function AiWorkspace() {
     setVideoGenerating(true);
     setStatus({ type: 'loading', message: '正在生成 HyperFrames 视频工程...' });
     try {
-      const json = await api.createDouyinRunHyperframesProject(value, activeRun.run_id);
+      const json = await api.createDouyinRunHyperframesProject(value, activeRun.run_id, renderOptions);
       setActiveRun(prev => prev ? { ...prev, video: json.video, updated_at: new Date().toISOString() } : prev);
       setRuns(prev => prev.map(run => (
         run.run_id === activeRun.run_id ? { ...run, video: json.video, updated_at: new Date().toISOString() } : run
@@ -381,6 +423,58 @@ export function AiWorkspace() {
               </Button>
             </div>
           ))}
+          <div className="agentOptionGroup">
+            <h4>创作 brief</h4>
+            <Input
+              value={promptOptions.goal}
+              onChange={event => updatePromptOption('goal', event.target.value)}
+              placeholder="创作目标，例如：涨粉、引流、带货"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.audience}
+              onChange={event => updatePromptOption('audience', event.target.value)}
+              placeholder="目标受众，例如：健身新手、本地商家老板"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.accountPositioning}
+              onChange={event => updatePromptOption('accountPositioning', event.target.value)}
+              placeholder="账号定位，例如：短视频获客顾问"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.rewriteStyle}
+              onChange={event => updatePromptOption('rewriteStyle', event.target.value)}
+              placeholder="改写风格，例如：专业可信，开头有冲突感"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.focus}
+              onChange={event => updatePromptOption('focus', event.target.value)}
+              placeholder="关注重点，例如：突出省时、低门槛、真实案例"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.replyTone}
+              onChange={event => updatePromptOption('replyTone', event.target.value)}
+              placeholder="运营回复语气，例如：真诚、克制、专业"
+              disabled={loading || running}
+            />
+            <Input
+              value={promptOptions.forbidden}
+              onChange={event => updatePromptOption('forbidden', event.target.value)}
+              placeholder="禁用内容，例如：不要夸大效果"
+              disabled={loading || running}
+            />
+            <textarea
+              value={promptOptions.extraRequirements}
+              onChange={event => updatePromptOption('extraRequirements', event.target.value)}
+              placeholder="额外要求，例如：适合 60 秒口播"
+              disabled={loading || running}
+              maxLength={500}
+            />
+          </div>
           <Button disabled={loading || running} onClick={runAgent}>
             {running ? '执行中...' : getTemplateMeta(selectedTemplate).actionLabel}
           </Button>
@@ -558,6 +652,116 @@ export function AiWorkspace() {
                 <section className="agentResultSection ttsPlayback">
                   <h4>AI 分镜与成片</h4>
                   <div className="videoProjectPanel">
+                    <div className="agentOptionGroup">
+                      <h4>AI 分镜视觉 brief</h4>
+                      <Input
+                        value={storyboardOptions.visualStyle}
+                        onChange={event => updateStoryboardOption('visualStyle', event.target.value)}
+                        placeholder="视频视觉风格，例如：商业质感、知识科普、情绪冲击"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <Input
+                        value={storyboardOptions.pacing}
+                        onChange={event => updateStoryboardOption('pacing', event.target.value)}
+                        placeholder="画面节奏，例如：快节奏、标准、稳重"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <Input
+                        value={storyboardOptions.captionStyle}
+                        onChange={event => updateStoryboardOption('captionStyle', event.target.value)}
+                        placeholder="字幕呈现，例如：大字报、卡片式、引语式"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <Input
+                        value={storyboardOptions.backgroundDirection}
+                        onChange={event => updateStoryboardOption('backgroundDirection', event.target.value)}
+                        placeholder="背景方向，例如：数据感抽象背景"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <Input
+                        value={storyboardOptions.primaryColor}
+                        onChange={event => updateStoryboardOption('primaryColor', event.target.value)}
+                        placeholder="主色调，例如：#fe2c55"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <Input
+                        value={storyboardOptions.forbidden}
+                        onChange={event => updateStoryboardOption('forbidden', event.target.value)}
+                        placeholder="禁用方向，例如：不要真人，不要原视频画面"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      />
+                      <textarea
+                        value={storyboardOptions.extraRequirements}
+                        onChange={event => updateStoryboardOption('extraRequirements', event.target.value)}
+                        placeholder="额外视觉要求，例如：每个分镜标题要短"
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        maxLength={500}
+                      />
+                    </div>
+                    <div className="agentOptionGroup">
+                      <h4>视频渲染参数</h4>
+                      <select
+                        value={renderOptions.resolution}
+                        onChange={event => updateRenderOption('resolution', event.target.value)}
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      >
+                        <option value="1080x1920">1080x1920</option>
+                        <option value="720x1280">720x1280</option>
+                      </select>
+                      <select
+                        value={renderOptions.fps}
+                        onChange={event => updateRenderOption('fps', event.target.value)}
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      >
+                        <option value="24">24fps</option>
+                        <option value="30">30fps</option>
+                        <option value="60">60fps</option>
+                      </select>
+                      <select
+                        value={renderOptions.captionSize}
+                        onChange={event => updateRenderOption('captionSize', event.target.value)}
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      >
+                        <option value="small">字幕小</option>
+                        <option value="medium">字幕中</option>
+                        <option value="large">字幕大</option>
+                      </select>
+                      <select
+                        value={renderOptions.motionLevel}
+                        onChange={event => updateRenderOption('motionLevel', event.target.value)}
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      >
+                        <option value="low">动效弱</option>
+                        <option value="medium">动效中</option>
+                        <option value="high">动效强</option>
+                      </select>
+                      <label className="inlineCheck">
+                        <input
+                          type="checkbox"
+                          checked={renderOptions.showCaptionBar}
+                          onChange={event => updateRenderOption('showCaptionBar', event.target.checked)}
+                          disabled={storyboardRunning || videoGenerating || videoRendering}
+                        />
+                        显示字幕条
+                      </label>
+                      <label className="inlineCheck">
+                        <input
+                          type="checkbox"
+                          checked={renderOptions.showSceneNumber}
+                          onChange={event => updateRenderOption('showSceneNumber', event.target.checked)}
+                          disabled={storyboardRunning || videoGenerating || videoRendering}
+                        />
+                        显示分镜编号
+                      </label>
+                      <select
+                        value={renderOptions.quality}
+                        onChange={event => updateRenderOption('quality', event.target.value)}
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      >
+                        <option value="standard">标准质量</option>
+                        <option value="high">高清质量</option>
+                      </select>
+                    </div>
                     <div className="videoProjectActions">
                       <Button
                         size="sm"

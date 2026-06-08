@@ -8,6 +8,7 @@ router.post('/douyin/:aweme_id/runs', async (req, res) => {
   try {
     const result = await agentRuns.createDouyinAgentRun(req.params.aweme_id, {
       template: req.body?.template || TEMPLATE_VIRAL_REWRITE,
+      promptOptions: req.body?.promptOptions || {},
     });
     return res.json(result);
   } catch (error) {
@@ -80,7 +81,9 @@ router.get('/douyin/:aweme_id/runs/:run_id/tts/:file_name', (req, res) => {
 
 router.post('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
   try {
-    const result = await agentRuns.createDouyinRunStoryboard(req.params.aweme_id, req.params.run_id);
+    const result = await agentRuns.createDouyinRunStoryboard(req.params.aweme_id, req.params.run_id, {
+      storyboardOptions: req.body?.storyboardOptions || {},
+    });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
     return res.status(500).json({
@@ -94,7 +97,9 @@ router.post('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
 
 router.post('/douyin/:aweme_id/runs/:run_id/hyperframes/project', async (req, res) => {
   try {
-    const result = await agentRuns.createDouyinRunHyperframesProject(req.params.aweme_id, req.params.run_id);
+    const result = await agentRuns.createDouyinRunHyperframesProject(req.params.aweme_id, req.params.run_id, {
+      renderOptions: req.body?.renderOptions || {},
+    });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
     return res.status(500).json({

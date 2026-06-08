@@ -11,9 +11,10 @@ MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作�
 - **素材工作台**：支持抖音视频下载、音频抽取、关键帧抽取、本地素材状态查看，并可从抓取记录跳转自动准备 AI 素材。
 - **音频转写**：接入小米 MiMo ASR，支持大音频自动压缩；压缩后仍超限时会自动切片并合并转写结果。
 - **AI 工作台**：读取本地素材、转写文本和评论缓存，执行可控 Agent，当前支持爆款拆解 + 改写脚本、评论洞察等模板。
+- **受控创作 brief**：脚本生成、评论洞察和 AI 分镜支持固定输入框补充目标、受众、风格、禁用方向等参数；后端会清洗并注入固定 prompt，不提供完整 prompt 编辑器。
 - **TTS 口播与字幕时间轴**：基于 MiMo TTS，把改写脚本按句切分、逐句合成、用 `ffprobe` 读取每段真实时长，并保存可复用的 `tts.captions`。
 - **AI 分镜**：文字大模型只生成原创视觉分镜结构和 `caption_indexes`，不决定最终时间轴；后端根据 `tts.captions` 计算每个 scene 的 `start/end/duration`。
-- **HyperFrames 成片**：根据规范化分镜和 TTS 音频生成原创 HTML/CSS/GSAP 视频工程，并调用 `npx hyperframes render` 输出 `output.mp4`。
+- **HyperFrames 成片**：根据规范化分镜、TTS 音频和固定渲染参数生成原创 HTML/CSS/GSAP 视频工程，并调用 `npx hyperframes render` 输出 `output.mp4`。
 - **模型配置**：设置页支持 ASR、文字模型、TTS、图片生成、视频生成和多模态模型配置。
 - **本地 Web GUI**：React + Vite 前端，Express 后端，默认运行在 `http://localhost:3000`。
 
@@ -23,10 +24,11 @@ MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作�
 2. 在抓取记录或素材工作台中点击“准备素材”，生成本地视频、音频、关键帧和分析输入。
 3. 在素材工作台执行音频转写，得到 `transcript.json`。
 4. 进入 AI 工作台，执行“爆款拆解 + 改写脚本”。
-5. 在“配音”页签点击 `TTS 合成`，生成口播音频和 `tts.captions`。
-6. 在“成片”页签点击 `生成 AI 分镜`。
-7. 点击 `生成视频工程`，生成 HyperFrames 工程目录。
-8. 点击 `渲染 MP4`，得到最终 `output.mp4` 并在页面预览。
+5. 按需填写“创作 brief”，通过固定字段控制创作目标、受众、风格和禁用内容。
+6. 在“配音”页签点击 `TTS 合成`，生成口播音频和 `tts.captions`。
+7. 在“成片”页签填写“AI 分镜视觉 brief”，点击 `生成 AI 分镜`。
+8. 选择“视频渲染参数”，点击 `生成视频工程`，生成 HyperFrames 工程目录。
+9. 点击 `渲染 MP4`，得到最终 `output.mp4` 并在页面预览。
 
 最终视频路径类似：
 
@@ -37,8 +39,10 @@ data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/output.mp4
 ## 关键原则
 
 - 最终视频不使用原视频、原视频帧、关键帧截图或原视频背景。
+- 用户只能通过固定 brief 和固定渲染参数影响生成结果，不能编辑 system prompt、JSON schema 或渲染流程。
 - AI 只负责原创视觉分镜，不负责最终时间轴。
 - 最终时间轴只由 `tts.captions` 计算。
+- `渲染 MP4` 不走 AI prompt，只使用已保存的 `video.render_options` 控制渲染流程。
 - 如果 AI 分镜输出无效、漏字幕或引用不存在的 caption index，后端会 normalize/fallback，保证所有字幕都被覆盖。
 
 ## 技术栈
@@ -128,6 +132,23 @@ AI 运行结果保存在：
 data/media/douyin/<aweme_id>/agent_runs/<run_id>.json
 ```
 
+Agent 执行时会保存受控创作 brief：
+
+```json
+{
+  "prompt_options": {
+    "goal": "引流到私域",
+    "audience": "本地生活商家老板",
+    "accountPositioning": "短视频获客顾问",
+    "rewriteStyle": "专业可信，开头有冲突感",
+    "focus": "突出真实案例",
+    "replyTone": "真诚、克制、专业",
+    "forbidden": "不要承诺收益，不要夸大效果",
+    "extraRequirements": "脚本适合 60 秒口播"
+  }
+}
+```
+
 TTS 成功后写入：
 
 ```json
@@ -162,6 +183,15 @@ AI 分镜成功后写入：
 
 ```json
 {
+  "storyboard_options": {
+    "visualStyle": "商业质感",
+    "pacing": "快节奏",
+    "captionStyle": "大字报",
+    "backgroundDirection": "数据感抽象背景",
+    "primaryColor": "#fe2c55",
+    "forbidden": "不要真人，不要原视频画面",
+    "extraRequirements": "每个分镜标题要短"
+  },
   "storyboard_raw": {},
   "storyboard": {
     "status": "done",
@@ -205,7 +235,16 @@ HyperFrames 工程和渲染成功后写入：
     "captions_path": "data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/captions.json",
     "project_json_path": "data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/project.json",
     "output_path": "data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/output.mp4",
-    "output_url": "/api/agents/douyin/<aweme_id>/runs/<run_id>/hyperframes/files/output.mp4"
+    "output_url": "/api/agents/douyin/<aweme_id>/runs/<run_id>/hyperframes/files/output.mp4",
+    "render_options": {
+      "resolution": "1080x1920",
+      "fps": "30",
+      "captionSize": "medium",
+      "motionLevel": "medium",
+      "showCaptionBar": true,
+      "showSceneNumber": true,
+      "quality": "standard"
+    }
   }
 }
 ```
@@ -264,16 +303,29 @@ data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/
 
 ### AI Agent
 
-- `GET /api/agents/templates`：读取可用 Agent 模板
-- `POST /api/agents/douyin/:aweme_id/runs`：执行抖音素材的 Agent 任务
+- `POST /api/agents/douyin/:aweme_id/runs`：执行抖音素材的 Agent 任务，可传 `template` 和 `promptOptions`
 - `GET /api/agents/douyin/:aweme_id/runs`：读取素材的 Agent 运行记录
 - `GET /api/agents/douyin/:aweme_id/runs/:run_id`：读取单次 Agent 运行详情
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/tts`：为改写脚本生成 TTS 音频和字幕时间轴
 - `GET /api/agents/douyin/:aweme_id/runs/:run_id/tts/:file_name`：读取生成的 TTS 音频
-- `POST /api/agents/douyin/:aweme_id/runs/:run_id/storyboard`：生成 AI 分镜
-- `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/project`：生成 HyperFrames 视频工程
+- `POST /api/agents/douyin/:aweme_id/runs/:run_id/storyboard`：生成 AI 分镜，可传 `storyboardOptions`
+- `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/project`：生成 HyperFrames 视频工程，可传 `renderOptions`
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/render`：渲染 MP4
 - `GET /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/files/:file_name`：读取生成的 MP4
+
+`promptOptions`、`storyboardOptions` 和 `renderOptions` 都会在后端做白名单清洗。`renderOptions` 的当前字段为：
+
+```json
+{
+  "resolution": "1080x1920",
+  "fps": "30",
+  "captionSize": "medium",
+  "motionLevel": "medium",
+  "showCaptionBar": true,
+  "showSceneNumber": true,
+  "quality": "standard"
+}
+```
 
 ### 配置与历史
 

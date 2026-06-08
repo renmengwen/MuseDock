@@ -168,6 +168,7 @@ function getTemplateOrFallback(template) {
 
 async function createFailureRun(awemeId, template, message, options = {}) {
   const templateDefinition = getTemplateOrFallback(template);
+  const promptOptions = agentTemplates.normalizePromptOptions(options.promptOptions || {});
   const run = {
     success: false,
     run_id: createRunId(template),
@@ -177,6 +178,7 @@ async function createFailureRun(awemeId, template, message, options = {}) {
     model: options.model || {},
     steps: options.steps || [],
     input_summary: options.input_summary || {},
+    prompt_options: promptOptions,
     result: templateDefinition.normalizeResult({}),
     raw_text: '',
     message,
@@ -199,6 +201,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   const template = options.template || TEMPLATE_VIRAL_REWRITE;
   const templateDefinition = agentTemplates.getAgentTemplate(template);
   const rootDir = options.rootDir;
+  const promptOptions = agentTemplates.normalizePromptOptions(options.promptOptions || {});
   const steps = [];
 
   if (!isSafeId(awemeId)) {
@@ -208,6 +211,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   if (!templateDefinition) {
     return createFailureRun(awemeId, template, '暂不支持该 Agent 模板。', {
       rootDir,
+      promptOptions,
       persist: false,
     });
   }
@@ -220,6 +224,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     return createFailureRun(awemeId, template, '未找到该视频素材，请先准备该视频的本地素材。', {
       rootDir,
       steps,
+      promptOptions,
       persist: false,
     });
   }
@@ -236,6 +241,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     return createFailureRun(awemeId, template, '未找到素材上下文，请先重新准备 AI 素材。', {
       rootDir,
       steps,
+      promptOptions,
     });
   }
 
@@ -252,6 +258,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
       rootDir,
       steps,
       input_summary: createInputSummary({ analysisInput, transcript, comments: [] }),
+      promptOptions,
     });
   }
 
@@ -274,6 +281,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
       rootDir,
       steps,
       input_summary: inputSummary,
+      promptOptions,
     });
   }
 
@@ -283,6 +291,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     transcript,
     commentsText,
     commentCount: comments.length,
+    promptOptions,
   });
 
   const modelService = options.aiTextModel || defaultAiTextModel;
@@ -309,6 +318,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
       steps,
       input_summary: inputSummary,
       model: modelResult.model || {},
+      promptOptions,
     });
   }
 
@@ -330,6 +340,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     model: modelResult.model || {},
     steps,
     input_summary: inputSummary,
+    prompt_options: promptOptions,
     result: parsed.result,
     raw_text: parsed.raw_text,
     message: parsed.parsed ? 'Agent 运行完成' : '模型返回未能解析为结构化结果，已保留原始文本。',
@@ -562,9 +573,11 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
   }
 
   const agent = options.storyboardAgent || defaultStoryboardAgent;
+  const storyboardOptions = defaultStoryboardAgent.normalizeStoryboardOptions(options.storyboardOptions || run.storyboard_options || {});
   const result = await agent.createStoryboard({
     rewriteScript,
     captions,
+    storyboardOptions,
     aiTextModel: options.aiTextModel,
     configPath: options.configPath,
     textConfig: options.textConfig,
@@ -573,6 +586,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
 
   const updatedRun = {
     ...run,
+    storyboard_options: storyboardOptions,
     storyboard_raw: result.raw || {},
     storyboard: result.storyboard,
     storyboard_model: result.model || {},
@@ -586,6 +600,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     aweme_id: String(awemeId),
     run_id: String(runId),
     message: result.message || (result.success ? 'AI 分镜已生成。' : 'AI 分镜生成失败。'),
+    storyboard_options: updatedRun.storyboard_options,
     storyboard_raw: updatedRun.storyboard_raw,
     storyboard: updatedRun.storyboard,
     storyboard_model: updatedRun.storyboard_model,
@@ -624,7 +639,8 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
 
   const projectService = options.hyperframesProject || defaultHyperframesProject;
   const projectDir = getHyperframesProjectDir(awemeId, runId, options.rootDir);
-  const result = await projectService.createOriginalCaptionProject({ run, projectDir });
+  const renderOptions = defaultHyperframesProject.normalizeRenderOptions(options.renderOptions || run.video?.render_options || {});
+  const result = await projectService.createOriginalCaptionProject({ run, projectDir, renderOptions });
 
   if (!result.success) {
     const video = {
@@ -646,6 +662,7 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
     captions_path: result.captions_path,
     project_json_path: result.project_json_path,
     duration: result.duration,
+    render_options: result.render_options || renderOptions,
     message: result.message || '视频工程已生成。',
     updated_at: new Date().toISOString(),
   };
@@ -677,12 +694,14 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
 
   const projectDir = run.video?.project_dir || getHyperframesProjectDir(awemeId, runId, options.rootDir);
   const renderer = options.hyperframesRenderer || defaultHyperframesRenderer;
-  const result = await renderer.renderHyperframesProject({ projectDir });
+  const renderOptions = defaultHyperframesProject.normalizeRenderOptions(run.video?.render_options || {});
+  const result = await renderer.renderHyperframesProject({ projectDir, renderOptions });
 
   if (!result.success) {
     const video = {
       ...(run.video || {}),
       status: 'failed',
+      render_options: renderOptions,
       message: result.message || '视频渲染失败。',
       updated_at: new Date().toISOString(),
     };
@@ -697,6 +716,7 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
     project_dir: projectDir,
     output_path: result.output_path,
     output_url: getHyperframesFileUrl(awemeId, runId, 'output.mp4'),
+    render_options: renderOptions,
     message: result.message || '视频渲染完成。',
     updated_at: new Date().toISOString(),
   };

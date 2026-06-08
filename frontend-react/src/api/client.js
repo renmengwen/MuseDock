@@ -101,11 +101,11 @@ export const api = {
       body: JSON.stringify({ target }),
     });
   },
-  createDouyinAgentRun(awemeId, template = 'viral_rewrite') {
+  createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ template }),
+      body: JSON.stringify({ template, promptOptions }),
     });
   },
   listDouyinAgentRuns(awemeId) {
@@ -121,18 +121,18 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  createDouyinRunStoryboard(awemeId, runId) {
+  createDouyinRunStoryboard(awemeId, runId, storyboardOptions = {}) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/storyboard`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ storyboardOptions }),
     });
   },
-  createDouyinRunHyperframesProject(awemeId, runId) {
+  createDouyinRunHyperframesProject(awemeId, runId, renderOptions = {}) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes/project`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ renderOptions }),
     });
   },
   renderDouyinRunHyperframesVideo(awemeId, runId) {

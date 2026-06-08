@@ -12,6 +12,7 @@ async function run() {
   const calls = [];
   const result = await renderer.renderHyperframesProject({
     projectDir,
+    renderOptions: { fps: '60', quality: 'high' },
     runCommand: async (command, args, options) => {
       calls.push({ command, args, cwd: options.cwd });
       const rendersDir = path.join(projectDir, 'renders');
@@ -26,7 +27,7 @@ async function run() {
   assert.equal(fs.readFileSync(result.output_path, 'utf-8'), 'fake mp4');
   assert.equal(calls.length, 1);
   assert.match(calls[0].command, /npx/);
-  assert.deepStrictEqual(calls[0].args, ['hyperframes', 'render']);
+  assert.deepStrictEqual(calls[0].args, ['hyperframes', 'render', '--fps', '60']);
   assert.equal(calls[0].cwd, projectDir);
 
   const failed = await renderer.renderHyperframesProject({

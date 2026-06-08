@@ -202,11 +202,47 @@ async function run() {
   assert.ok(generated.run_id.endsWith('-viral_rewrite'));
   assert.ok(fs.existsSync(generated.path));
 
+  const runWithPromptOptions = await agentRuns.createDouyinAgentRun(awemeId, {
+    rootDir,
+    template: 'viral_rewrite',
+    promptOptions: {
+      goal: '涨粉',
+      audience: '健身新手',
+      rewriteStyle: '强情绪开头',
+      forbidden: '不要医疗承诺',
+    },
+    aiTextModel: {
+      callTextModel: async ({ messages }) => {
+        assert.match(messages[1].content, /涨粉/);
+        assert.match(messages[1].content, /健身新手/);
+        assert.match(messages[1].content, /不要医疗承诺/);
+        return {
+          success: true,
+          text: JSON.stringify({
+            summary: '摘要',
+            viral_points: ['冲突'],
+            audience: '健身新手',
+            comment_insights: [],
+            topics: ['选题'],
+            rewrite_script: '脚本',
+            titles: ['标题'],
+          }),
+          model: { provider: 'mock' },
+        };
+      },
+    },
+    getLocalComments: () => ({ success: true, count: 0, data: [] }),
+  });
+  assert.equal(runWithPromptOptions.success, true);
+  assert.equal(runWithPromptOptions.prompt_options.goal, '涨粉');
+  assert.equal(runWithPromptOptions.prompt_options.audience, '健身新手');
+  assert.equal(runWithPromptOptions.prompt_options.rewriteStyle, '强情绪开头');
+
   const listed = await agentRuns.listDouyinAgentRuns(awemeId, { rootDir });
   assert.strictEqual(listed.success, true);
-  assert.strictEqual(listed.count, 2);
-  assert.strictEqual(listed.data.length, 2);
-  assert.strictEqual(listed.data[0].run_id, generated.run_id);
+  assert.strictEqual(listed.count, 3);
+  assert.strictEqual(listed.data.length, 3);
+  assert.strictEqual(listed.data[0].run_id, runWithPromptOptions.run_id);
 
   const detail = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
   assert.strictEqual(detail.success, true);
@@ -263,10 +299,17 @@ async function run() {
 
   const storyboardResult = await agentRuns.createDouyinRunStoryboard(awemeId, generated.run_id, {
     rootDir,
+    storyboardOptions: {
+      visualStyle: '商业质感',
+      pacing: '快节奏',
+      forbidden: '不要真人',
+    },
     storyboardAgent: {
-      createStoryboard: async ({ rewriteScript, captions }) => {
+      createStoryboard: async ({ rewriteScript, captions, storyboardOptions }) => {
         assert.equal(rewriteScript, generated.result.rewrite_script);
         assert.ok(captions.length > 0);
+        assert.equal(storyboardOptions.visualStyle, '商业质感');
+        assert.equal(storyboardOptions.forbidden, '不要真人');
         return {
           success: true,
           message: 'AI 分镜已生成。',
@@ -301,16 +344,30 @@ async function run() {
     },
   });
   assert.equal(storyboardResult.success, true);
+  assert.equal(storyboardResult.storyboard_options.visualStyle, '商业质感');
+  assert.equal(storyboardResult.storyboard_options.pacing, '快节奏');
   assert.equal(storyboardResult.storyboard.scenes[0].start, 0);
   assert.equal(storyboardResult.storyboard_raw.scenes[0].start, 999);
 
   const projectResult = await agentRuns.createDouyinRunHyperframesProject(awemeId, generated.run_id, {
     rootDir,
+    renderOptions: {
+      resolution: '720x1280',
+      fps: '60',
+      captionSize: 'large',
+      motionLevel: 'low',
+      showCaptionBar: false,
+      showSceneNumber: false,
+      quality: 'high',
+    },
     hyperframesProject: {
-      createOriginalCaptionProject: async ({ run, projectDir }) => {
+      createOriginalCaptionProject: async ({ run, projectDir, renderOptions }) => {
         assert.equal(run.run_id, generated.run_id);
         assert.ok(run.tts.captions.length > 0);
         assert.ok(run.storyboard.scenes.length > 0);
+        assert.equal(renderOptions.resolution, '720x1280');
+        assert.equal(renderOptions.fps, '60');
+        assert.equal(renderOptions.showCaptionBar, false);
         fs.mkdirSync(projectDir, { recursive: true });
         const indexPath = path.join(projectDir, 'index.html');
         fs.writeFileSync(indexPath, '<html>project</html>');
@@ -320,6 +377,7 @@ async function run() {
           project_dir: projectDir,
           index_path: indexPath,
           duration: 1.25,
+          render_options: renderOptions,
           message: '视频工程已生成。',
         };
       },
@@ -328,12 +386,16 @@ async function run() {
   assert.equal(projectResult.success, true);
   assert.equal(projectResult.video.status, 'project_ready');
   assert.equal(projectResult.video.template, 'ai_storyboard_cards');
+  assert.equal(projectResult.video.render_options.resolution, '720x1280');
+  assert.equal(projectResult.video.render_options.quality, 'high');
   assert.ok(projectResult.video.project_dir.includes(`${generated.run_id}-hyperframes`));
 
   const renderResult = await agentRuns.renderDouyinRunHyperframesVideo(awemeId, generated.run_id, {
     rootDir,
     hyperframesRenderer: {
-      renderHyperframesProject: async ({ projectDir }) => {
+      renderHyperframesProject: async ({ projectDir, renderOptions }) => {
+        assert.equal(renderOptions.fps, '60');
+        assert.equal(renderOptions.quality, 'high');
         const outputPath = path.join(projectDir, 'output.mp4');
         fs.writeFileSync(outputPath, 'fake mp4');
         return { success: true, output_path: outputPath, message: '视频渲染完成。' };
@@ -342,6 +404,8 @@ async function run() {
   });
   assert.equal(renderResult.success, true);
   assert.equal(renderResult.video.status, 'rendered');
+  assert.equal(renderResult.video.render_options.fps, '60');
+  assert.equal(renderResult.video.render_options.quality, 'high');
   assert.ok(renderResult.video.output_url.includes(`/api/agents/douyin/${awemeId}/runs/${generated.run_id}/hyperframes/files/output.mp4`));
   assert.equal(fs.readFileSync(renderResult.video.output_path, 'utf-8'), 'fake mp4');
 
