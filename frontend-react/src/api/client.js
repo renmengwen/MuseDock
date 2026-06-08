@@ -128,11 +128,11 @@ export const api = {
       body: JSON.stringify({ storyboardOptions }),
     });
   },
-  createDouyinRunHyperframesProject(awemeId, runId) {
+  createDouyinRunHyperframesProject(awemeId, runId, renderOptions = {}) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes/project`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ renderOptions }),
     });
   },
   renderDouyinRunHyperframesVideo(awemeId, runId) {

@@ -115,6 +115,15 @@ export function AiWorkspace() {
     forbidden: '',
     extraRequirements: '',
   });
+  const [renderOptions, setRenderOptions] = useState({
+    resolution: '1080x1920',
+    fps: '30',
+    captionSize: 'medium',
+    motionLevel: 'medium',
+    showCaptionBar: true,
+    showSceneNumber: true,
+    quality: 'standard',
+  });
   const [resultTab, setResultTab] = useState('workflow');
 
   const sortedRuns = useMemo(() => {
@@ -226,6 +235,10 @@ export function AiWorkspace() {
     setStoryboardOptions(prev => ({ ...prev, [key]: value }));
   }
 
+  function updateRenderOption(key, value) {
+    setRenderOptions(prev => ({ ...prev, [key]: value }));
+  }
+
   function selectRun(run) {
     setActiveRun(run);
     if (run.template) setSelectedTemplate(run.template);
@@ -323,7 +336,7 @@ export function AiWorkspace() {
     setVideoGenerating(true);
     setStatus({ type: 'loading', message: '正在生成 HyperFrames 视频工程...' });
     try {
-      const json = await api.createDouyinRunHyperframesProject(value, activeRun.run_id);
+      const json = await api.createDouyinRunHyperframesProject(value, activeRun.run_id, renderOptions);
       setActiveRun(prev => prev ? { ...prev, video: json.video, updated_at: new Date().toISOString() } : prev);
       setRuns(prev => prev.map(run => (
         run.run_id === activeRun.run_id ? { ...run, video: json.video, updated_at: new Date().toISOString() } : run
@@ -684,6 +697,70 @@ export function AiWorkspace() {
                         disabled={storyboardRunning || videoGenerating || videoRendering}
                         maxLength={500}
                       />
+                    </div>
+                    <div className="agentOptionGroup">
+                      <h4>视频渲染参数</h4>
+                      <select
+                        value={renderOptions.resolution}
+                        onChange={event => updateRenderOption('resolution', event.target.value)}
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      >
+                        <option value="1080x1920">1080x1920</option>
+                        <option value="720x1280">720x1280</option>
+                      </select>
+                      <select
+                        value={renderOptions.fps}
+                        onChange={event => updateRenderOption('fps', event.target.value)}
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      >
+                        <option value="24">24fps</option>
+                        <option value="30">30fps</option>
+                        <option value="60">60fps</option>
+                      </select>
+                      <select
+                        value={renderOptions.captionSize}
+                        onChange={event => updateRenderOption('captionSize', event.target.value)}
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      >
+                        <option value="small">字幕小</option>
+                        <option value="medium">字幕中</option>
+                        <option value="large">字幕大</option>
+                      </select>
+                      <select
+                        value={renderOptions.motionLevel}
+                        onChange={event => updateRenderOption('motionLevel', event.target.value)}
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      >
+                        <option value="low">动效弱</option>
+                        <option value="medium">动效中</option>
+                        <option value="high">动效强</option>
+                      </select>
+                      <label className="inlineCheck">
+                        <input
+                          type="checkbox"
+                          checked={renderOptions.showCaptionBar}
+                          onChange={event => updateRenderOption('showCaptionBar', event.target.checked)}
+                          disabled={storyboardRunning || videoGenerating || videoRendering}
+                        />
+                        显示字幕条
+                      </label>
+                      <label className="inlineCheck">
+                        <input
+                          type="checkbox"
+                          checked={renderOptions.showSceneNumber}
+                          onChange={event => updateRenderOption('showSceneNumber', event.target.checked)}
+                          disabled={storyboardRunning || videoGenerating || videoRendering}
+                        />
+                        显示分镜编号
+                      </label>
+                      <select
+                        value={renderOptions.quality}
+                        onChange={event => updateRenderOption('quality', event.target.value)}
+                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                      >
+                        <option value="standard">标准质量</option>
+                        <option value="high">高清质量</option>
+                      </select>
                     </div>
                     <div className="videoProjectActions">
                       <Button

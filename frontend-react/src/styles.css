@@ -185,6 +185,10 @@ a { color: #fe2c55; text-decoration: none; }
 .agentOptionGroup h4 { margin: 0; color: #30343b; font-size: 14px; }
 .agentOptionGroup textarea { min-height: 78px; resize: vertical; border: 1px solid #d7dce3; border-radius: 8px; padding: 9px 10px; font: inherit; line-height: 1.5; color: #30343b; background: #fff; }
 .agentOptionGroup textarea:disabled { color: #8a93a2; background: #f4f6f8; }
+.agentOptionGroup select { width: 100%; border: 1px solid #d7dce3; border-radius: 8px; padding: 9px 10px; font: inherit; color: #30343b; background: #fff; }
+.agentOptionGroup select:disabled { color: #8a93a2; background: #f4f6f8; }
+.inlineCheck { display: flex; align-items: center; gap: 8px; color: #30343b; font-size: 13px; }
+.inlineCheck input { width: 16px; height: 16px; }
 .agentStatusList { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .agentStatusList li { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid #edf0f4; }
 .agentStatusList span, .agentStep span { min-width: 0; color: #30343b; font-size: 13px; font-weight: 600; word-break: break-word; }

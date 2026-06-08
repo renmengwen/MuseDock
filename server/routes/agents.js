@@ -97,7 +97,9 @@ router.post('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
 
 router.post('/douyin/:aweme_id/runs/:run_id/hyperframes/project', async (req, res) => {
   try {
-    const result = await agentRuns.createDouyinRunHyperframesProject(req.params.aweme_id, req.params.run_id);
+    const result = await agentRuns.createDouyinRunHyperframesProject(req.params.aweme_id, req.params.run_id, {
+      renderOptions: req.body?.renderOptions || {},
+    });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
     return res.status(500).json({
