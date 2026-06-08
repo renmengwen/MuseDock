@@ -51,6 +51,13 @@ function formatStoryboardOptionsForPrompt(options = {}) {
 }
 
 function buildStoryboardMessages({ rewriteScript, captions, storyboardOptions = {} }) {
+  const captionIndexes = Array.isArray(captions)
+    ? captions.map(caption => ({
+      index: caption.index,
+      text: typeof caption.text === 'string' ? caption.text : '',
+    }))
+    : [];
+
   return [
     {
       role: 'system',
@@ -72,14 +79,17 @@ function buildStoryboardMessages({ rewriteScript, captions, storyboardOptions = 
         '改写脚本：',
         rewriteScript || '',
         '',
-        '字幕时间轴：',
-        JSON.stringify(captions, null, 2),
+        '字幕索引：',
+        JSON.stringify(captionIndexes, null, 2),
+        '',
+        '[AI_STORYBOARD_MAX_SCENES=12]',
+        '[AI_STORYBOARD_BACKEND_FILL=true]',
         '',
         '要求：',
         '- caption_indexes 必须引用现有字幕 index。',
         '- 每个字幕 index 最多被一个 scene 使用。',
-        '- 优先每 1 条字幕生成 1 个分镜；只有语义强绑定的短句才允许 2 条字幕合并。',
-        '- 分镜节奏要密，避免 1 个 scene 覆盖过多内容。',
+        '- 最多生成 12 个关键分镜，优先覆盖开头、转折、核心观点和结尾。',
+        '- 未覆盖字幕会由后端自动补齐为默认分镜，不需要为每条字幕都生成 scene。',
         '- 每个 scene 最多覆盖 2 条连续字幕。',
         '- visual_type 优先使用 text_card、quote_card、step_card、contrast_card。',
         '- background_prompt 必须描述原创抽象/图文背景，不得描述原视频画面。',
@@ -122,6 +132,8 @@ async function createStoryboard(options = {}) {
       configPath: options.configPath,
       textConfig: options.textConfig,
       fetchImpl: options.fetchImpl,
+      maxRetries: options.maxRetries,
+      retryDelayMs: options.retryDelayMs,
     });
   } catch (error) {
     modelResult = { success: false, message: error.message || 'AI 分镜模型调用失败。' };

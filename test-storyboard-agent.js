@@ -3,30 +3,37 @@ const storyboardAgent = require('./server/services/storyboardAgent');
 
 async function run() {
   const messages = storyboardAgent.buildStoryboardMessages({
-    rewriteScript: '测试脚本',
-    captions: [{ index: 1, start: 0, end: 2, text: '第一句' }],
+    rewriteScript: 'test script',
+    captions: [{ index: 1, start: 0, end: 2, duration: 2, text: 'first line' }],
     storyboardOptions: {
-      visualStyle: '商业质感',
-      pacing: '快节奏',
-      captionStyle: '大字报',
-      backgroundDirection: '数据感抽象背景',
+      visualStyle: 'business style',
+      pacing: 'fast',
+      captionStyle: 'large captions',
+      backgroundDirection: 'abstract data background',
       primaryColor: '#fe2c55',
-      forbidden: '不要真人，不要原视频画面',
-      extraRequirements: '每个分镜标题要短',
+      forbidden: 'no real people, no original video frames',
+      extraRequirements: 'short headlines',
     },
   });
-  assert.match(messages[1].content, /AI 分镜视觉 brief/);
-  assert.match(messages[1].content, /商业质感/);
-  assert.match(messages[1].content, /数据感抽象背景/);
-  assert.match(messages[1].content, /不要真人/);
-  assert.match(messages[0].content, /不要引用原视频/);
+
+  assert.match(messages[1].content, /AI_STORYBOARD_MAX_SCENES=12/);
+  assert.match(messages[1].content, /AI_STORYBOARD_BACKEND_FILL=true/);
+  assert.match(messages[1].content, /business style/);
+  assert.match(messages[1].content, /abstract data background/);
+  assert.match(messages[1].content, /no real people/);
+  assert.match(messages[1].content, /"index": 1/);
+  assert.match(messages[1].content, /"text": "first line"/);
+  assert.doesNotMatch(messages[1].content, /"start"/);
+  assert.doesNotMatch(messages[1].content, /"end"/);
+  assert.doesNotMatch(messages[1].content, /"duration"/);
+  assert.match(messages[0].content, /start/);
 
   const calls = [];
   const result = await storyboardAgent.createStoryboard({
-    rewriteScript: '第一句。第二句。',
+    rewriteScript: 'first line. second line.',
     captions: [
-      { index: 1, start: 0, end: 1.25, duration: 1.25, text: '第一句。' },
-      { index: 2, start: 1.25, end: 3.75, duration: 2.5, text: '第二句。' },
+      { index: 1, start: 0, end: 1.25, duration: 1.25, text: 'first line.' },
+      { index: 2, start: 1.25, end: 3.75, duration: 2.5, text: 'second line.' },
     ],
     aiTextModel: {
       callTextModel: async options => {
@@ -36,15 +43,15 @@ async function run() {
           model: { provider: 'OpenAI', model_id: 'gpt-test' },
           text: JSON.stringify({
             template: 'ai_storyboard_cards',
-            style: { visual_tone: '专业' },
+            style: { visual_tone: 'professional' },
             scenes: [
               {
                 caption_indexes: [1, 2],
-                headline: '核心观点',
+                headline: 'Core idea',
                 visual_type: 'text_card',
                 layout: 'center_focus',
-                background_prompt: '原创抽象背景',
-                emphasis_words: ['观点'],
+                background_prompt: 'original abstract background',
+                emphasis_words: ['idea'],
                 start: 999,
               },
             ],
@@ -59,15 +66,15 @@ async function run() {
   assert.equal(result.storyboard.scenes[0].start, 0);
   assert.equal(result.storyboard.scenes[0].end, 3.75);
   assert.equal(result.raw.scenes.length, 1);
-  assert.match(calls[0].messages[0].content, /不要输出 start/);
-  assert.match(calls[0].messages[0].content, /不要引用原视频/);
-  assert.match(calls[0].messages[1].content, /优先每 1 条字幕生成 1 个分镜/);
+  assert.match(calls[0].messages[0].content, /start/);
+  assert.match(calls[0].messages[1].content, /AI_STORYBOARD_MAX_SCENES=12/);
+  assert.match(calls[0].messages[1].content, /AI_STORYBOARD_BACKEND_FILL=true/);
 
   const malformed = await storyboardAgent.createStoryboard({
-    rewriteScript: '第一句。第二句。',
+    rewriteScript: 'first line. second line.',
     captions: [
-      { index: 1, start: 0, end: 1, duration: 1, text: '第一句。' },
-      { index: 2, start: 1, end: 2, duration: 1, text: '第二句。' },
+      { index: 1, start: 0, end: 1, duration: 1, text: 'first line.' },
+      { index: 2, start: 1, end: 2, duration: 1, text: 'second line.' },
     ],
     aiTextModel: {
       callTextModel: async () => ({ success: true, text: 'not json' }),

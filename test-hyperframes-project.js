@@ -44,6 +44,21 @@ async function run() {
             { index: 2, start: 1.25, end: 3.75, text: '第二句。' },
           ],
         },
+        {
+          index: 2,
+          caption_indexes: [2],
+          start: 1.25,
+          end: 3.75,
+          duration: 2.5,
+          headline: '传统 vs Vibe Coding',
+          visual_type: 'contrast_card',
+          layout: 'split_compare',
+          background_prompt: '原创对比背景',
+          emphasis_words: ['传统', 'Vibe Coding'],
+          captions: [
+            { index: 2, start: 1.25, end: 3.75, text: '第二句。' },
+          ],
+        },
       ],
     },
   };
@@ -74,7 +89,7 @@ async function run() {
   assert.match(html, /<audio id="narration-audio"/);
   assert.match(html, /class="scene clip/);
   assert.match(html, /tl\.fromTo\("#scene-1"/);
-  assert.match(html, /tl\.fromTo\("#scene-1 \.visual-field"/);
+  assert.match(html, /tl\.fromTo\("#scene-1 \.scene-content"/);
   assert.match(html, /tl\.from\("#scene-1 \.emphasis span"/);
   assert.match(html, /tl\.to\("#scene-1"/);
   assert.match(html, /核心观点/);
@@ -93,6 +108,9 @@ async function run() {
       showCaptionBar: false,
       showSceneNumber: false,
       quality: 'high',
+      frameStyle: 'tech_neon',
+      transitionStyle: 'glitch',
+      captionMode: 'kinetic',
     },
   });
 
@@ -103,12 +121,22 @@ async function run() {
   assert.match(indexHtml, /data-width="720"/);
   assert.match(indexHtml, /data-height="1280"/);
   assert.match(indexHtml, /--caption-font-size: 40px/);
+  assert.match(indexHtml, /data-frame-profile="tech_neon"/);
+  assert.match(indexHtml, /class="frame-bg-layer neon-grid"/);
+  assert.match(indexHtml, /class="frame-bg-layer scanline"/);
+  assert.match(indexHtml, /class="scene-content scene-content--text-card"/);
+  assert.match(indexHtml, /class="scene-content scene-content--contrast-card"/);
+  assert.match(indexHtml, /class="transition-layer"/);
+  assert.match(indexHtml, /data-transition-style="glitch"/);
+  assert.match(indexHtml, /kinetic-caption/);
   assert.doesNotMatch(indexHtml, /class="caption-bar"/);
   assert.doesNotMatch(indexHtml, /class="scene-number"/);
 
   const projectJson = JSON.parse(fs.readFileSync(path.join(customProjectDir, 'project.json'), 'utf-8'));
   assert.equal(projectJson.render_options.quality, 'high');
   assert.equal(projectJson.render_options.motionLevel, 'low');
+  assert.equal(projectJson.frame_options.frameStyle, 'tech_neon');
+  assert.equal(projectJson.frame_options.captionMode, 'kinetic');
 
   const missingTts = await hyperframesProject.createOriginalCaptionProject({
     run: { run_id: 'missing-tts', tts: {}, storyboard: runData.storyboard },
