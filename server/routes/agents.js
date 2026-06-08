@@ -78,4 +78,60 @@ router.get('/douyin/:aweme_id/runs/:run_id/tts/:file_name', (req, res) => {
   }
 });
 
+router.post('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
+  try {
+    const result = await agentRuns.createDouyinRunStoryboard(req.params.aweme_id, req.params.run_id);
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: 'AI 分镜生成接口异常，请稍后重试。',
+    });
+  }
+});
+
+router.post('/douyin/:aweme_id/runs/:run_id/hyperframes/project', async (req, res) => {
+  try {
+    const result = await agentRuns.createDouyinRunHyperframesProject(req.params.aweme_id, req.params.run_id);
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '视频工程生成接口异常，请稍后重试。',
+    });
+  }
+});
+
+router.post('/douyin/:aweme_id/runs/:run_id/hyperframes/render', async (req, res) => {
+  try {
+    const result = await agentRuns.renderDouyinRunHyperframesVideo(req.params.aweme_id, req.params.run_id);
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '视频渲染接口异常，请稍后重试。',
+    });
+  }
+});
+
+router.get('/douyin/:aweme_id/runs/:run_id/hyperframes/files/:file_name', (req, res) => {
+  try {
+    const filePath = agentRuns.resolveDouyinRunHyperframesFile(req.params.aweme_id, req.params.run_id, req.params.file_name);
+    return res.sendFile(filePath);
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '未找到或非法的视频文件。',
+    });
+  }
+});
+
 module.exports = router;

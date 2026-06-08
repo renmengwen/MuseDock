@@ -195,17 +195,40 @@ a { color: #fe2c55; text-decoration: none; }
 .agentRunItem strong { font-size: 13px; }
 .agentRunItem span { color: #69717e; font-size: 12px; }
 .agentResultPanel { max-height: calc(100vh - 180px); overflow: auto; }
+.agentResultTitleRow { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 10px; }
+.agentResultTitleRow h3 { margin: 0; }
+.agentResultTitleRow span { min-width: 0; color: #858d9a; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agentResultTabs { position: sticky; top: -18px; z-index: 4; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 8px 0 10px; background: #fff; border-bottom: 1px solid #edf0f4; }
+.agentResultTab { min-width: 0; height: 32px; border: 1px solid #d9dde5; border-radius: 8px; background: #fff; color: #5f6876; font-size: 13px; font-weight: 700; cursor: pointer; }
+.agentResultTab:hover { border-color: #fe8aa1; color: #fe2c55; }
+.agentResultTab.active { border-color: #fe2c55; background: #fff5f7; color: #fe2c55; box-shadow: 0 0 0 1px #fe2c55 inset; }
 .agentRunMeta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; color: #69717e; font-size: 12px; }
 .agentResultSection { padding: 14px 0; border-top: 1px solid #edf0f4; }
+.agentResultTabs + .agentResultSection, .agentResultTabs + .agentResultSection + .agentResultSection { border-top: 0; }
+.agentSteps.compact { max-height: none; }
+.compactWorkflow { padding-top: 12px; }
 .agentResultSectionHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
 .agentResultSection h4 { margin: 0; font-size: 14px; color: #30343b; }
 .agentResultSection p { margin: 0; color: #4b5563; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
 .agentResultSection ul { display: grid; gap: 8px; margin: 0; padding-left: 18px; color: #4b5563; font-size: 13px; line-height: 1.65; }
 .agentResultSection pre { max-height: 300px; overflow: auto; margin: 0; padding: 12px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; color: #30343b; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .ttsInlineControls { display: grid; grid-template-columns: 116px minmax(180px, 1fr) auto; gap: 8px; align-items: center; width: min(100%, 560px); }
+.ttsInlineControls.standalone { width: 100%; margin-bottom: 10px; }
 .ttsInlineControls select, .ttsInlineControls input { min-width: 0; height: 34px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 10px; background: #fff; color: #30343b; font-size: 13px; }
 .ttsPlayback { display: grid; gap: 8px; }
 .ttsPlayback audio { width: 100%; min-height: 40px; }
+.videoProjectPanel { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border: 1px solid #edf0f4; border-radius: 8px; background: #fff; }
+.videoProjectActions { display: flex; gap: 8px; flex-wrap: wrap; }
+.storyboardList { display: grid; gap: 8px; }
+.storyboardItem { display: grid; gap: 6px; padding: 10px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
+.storyboardItem div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.storyboardItem strong { color: #30343b; font-size: 13px; }
+.storyboardItem code { color: #69717e; font-size: 12px; white-space: nowrap; }
+.storyboardItem p { margin: 0; color: #30343b; font-size: 13px; font-weight: 700; line-height: 1.5; }
+.storyboardItem span { color: #69717e; font-size: 12px; }
+.videoProjectMeta { display: grid; gap: 8px; color: #69717e; font-size: 12px; }
+.videoProjectMeta code { display: block; padding: 8px; border-radius: 8px; background: #fafbfc; color: #30343b; word-break: break-all; }
+.videoProjectMeta video { width: 100%; max-height: 360px; background: #0f1115; border-radius: 8px; }
 .ttsCaptionList { display: grid; gap: 8px; margin-top: 8px; }
 .ttsCaptionItem { display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 10px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
 .ttsCaptionItem code { color: #69717e; font-size: 12px; white-space: nowrap; }

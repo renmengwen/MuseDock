@@ -261,6 +261,93 @@ async function run() {
 
   assert.deepStrictEqual(detailAfterTts.data.tts.captions, ttsResult.tts.captions);
 
+  const storyboardResult = await agentRuns.createDouyinRunStoryboard(awemeId, generated.run_id, {
+    rootDir,
+    storyboardAgent: {
+      createStoryboard: async ({ rewriteScript, captions }) => {
+        assert.equal(rewriteScript, generated.result.rewrite_script);
+        assert.ok(captions.length > 0);
+        return {
+          success: true,
+          message: 'AI 分镜已生成。',
+          model: { provider: 'OpenAI', model_id: 'gpt-test' },
+          raw: {
+            scenes: [
+              {
+                caption_indexes: [1],
+                headline: '核心观点',
+                start: 999,
+                end: 1000,
+              },
+            ],
+          },
+          storyboard: {
+            status: 'done',
+            template: 'ai_storyboard_cards',
+            scenes: [
+              {
+                index: 1,
+                caption_indexes: [1],
+                start: 0,
+                end: 1.25,
+                duration: 1.25,
+                headline: '核心观点',
+                captions,
+              },
+            ],
+          },
+        };
+      },
+    },
+  });
+  assert.equal(storyboardResult.success, true);
+  assert.equal(storyboardResult.storyboard.scenes[0].start, 0);
+  assert.equal(storyboardResult.storyboard_raw.scenes[0].start, 999);
+
+  const projectResult = await agentRuns.createDouyinRunHyperframesProject(awemeId, generated.run_id, {
+    rootDir,
+    hyperframesProject: {
+      createOriginalCaptionProject: async ({ run, projectDir }) => {
+        assert.equal(run.run_id, generated.run_id);
+        assert.ok(run.tts.captions.length > 0);
+        assert.ok(run.storyboard.scenes.length > 0);
+        fs.mkdirSync(projectDir, { recursive: true });
+        const indexPath = path.join(projectDir, 'index.html');
+        fs.writeFileSync(indexPath, '<html>project</html>');
+        return {
+          success: true,
+          template: 'ai_storyboard_cards',
+          project_dir: projectDir,
+          index_path: indexPath,
+          duration: 1.25,
+          message: '视频工程已生成。',
+        };
+      },
+    },
+  });
+  assert.equal(projectResult.success, true);
+  assert.equal(projectResult.video.status, 'project_ready');
+  assert.equal(projectResult.video.template, 'ai_storyboard_cards');
+  assert.ok(projectResult.video.project_dir.includes(`${generated.run_id}-hyperframes`));
+
+  const renderResult = await agentRuns.renderDouyinRunHyperframesVideo(awemeId, generated.run_id, {
+    rootDir,
+    hyperframesRenderer: {
+      renderHyperframesProject: async ({ projectDir }) => {
+        const outputPath = path.join(projectDir, 'output.mp4');
+        fs.writeFileSync(outputPath, 'fake mp4');
+        return { success: true, output_path: outputPath, message: '视频渲染完成。' };
+      },
+    },
+  });
+  assert.equal(renderResult.success, true);
+  assert.equal(renderResult.video.status, 'rendered');
+  assert.ok(renderResult.video.output_url.includes(`/api/agents/douyin/${awemeId}/runs/${generated.run_id}/hyperframes/files/output.mp4`));
+  assert.equal(fs.readFileSync(renderResult.video.output_path, 'utf-8'), 'fake mp4');
+
+  const detailAfterVideo = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
+  assert.equal(detailAfterVideo.data.video.status, 'rendered');
+
   const missingDetail = await agentRuns.getDouyinAgentRun(awemeId, 'missing-run', { rootDir });
   assert.strictEqual(missingDetail.success, false);
   assert.strictEqual(missingDetail.aweme_id, awemeId);
@@ -429,6 +516,9 @@ async function run() {
 
   const originalCreateDouyinAgentRun = agentRuns.createDouyinAgentRun;
   const originalSynthesizeDouyinRunTts = agentRuns.synthesizeDouyinRunTts;
+  const originalCreateDouyinRunStoryboard = agentRuns.createDouyinRunStoryboard;
+  const originalCreateDouyinRunHyperframesProject = agentRuns.createDouyinRunHyperframesProject;
+  const originalRenderDouyinRunHyperframesVideo = agentRuns.renderDouyinRunHyperframesVideo;
   agentRuns.createDouyinAgentRun = async () => ({
     success: false,
     status: 'failed',
@@ -447,6 +537,27 @@ async function run() {
       voice: 'Mia',
       url: `/api/agents/douyin/${awemeId}/runs/ok-run/tts/ok-run-tts.wav`,
     },
+  });
+  agentRuns.createDouyinRunStoryboard = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'ok-run',
+    message: 'AI 分镜已生成。',
+    storyboard: { status: 'done', scenes: [{ index: 1, caption_indexes: [1], start: 0, end: 1 }] },
+  });
+  agentRuns.createDouyinRunHyperframesProject = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'ok-run',
+    message: '视频工程已生成。',
+    video: { status: 'project_ready', template: 'ai_storyboard_cards' },
+  });
+  agentRuns.renderDouyinRunHyperframesVideo = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'ok-run',
+    message: '视频渲染完成。',
+    video: { status: 'rendered', output_url: `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes/files/output.mp4` },
   });
   const app = express();
   app.use(express.json());
@@ -468,9 +579,27 @@ async function run() {
     assert.strictEqual(ttsResponse.statusCode, 200);
     assert.strictEqual(ttsResponse.body.success, true);
     assert.strictEqual(ttsResponse.body.tts.voice, 'Mia');
+
+    const storyboardResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/storyboard`, {});
+    assert.strictEqual(storyboardResponse.statusCode, 200);
+    assert.strictEqual(storyboardResponse.body.success, true);
+    assert.strictEqual(storyboardResponse.body.storyboard.status, 'done');
+
+    const projectResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes/project`, {});
+    assert.strictEqual(projectResponse.statusCode, 200);
+    assert.strictEqual(projectResponse.body.success, true);
+    assert.strictEqual(projectResponse.body.video.status, 'project_ready');
+
+    const renderResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes/render`, {});
+    assert.strictEqual(renderResponse.statusCode, 200);
+    assert.strictEqual(renderResponse.body.success, true);
+    assert.strictEqual(renderResponse.body.video.status, 'rendered');
   } finally {
     agentRuns.createDouyinAgentRun = originalCreateDouyinAgentRun;
     agentRuns.synthesizeDouyinRunTts = originalSynthesizeDouyinRunTts;
+    agentRuns.createDouyinRunStoryboard = originalCreateDouyinRunStoryboard;
+    agentRuns.createDouyinRunHyperframesProject = originalCreateDouyinRunHyperframesProject;
+    agentRuns.renderDouyinRunHyperframesVideo = originalRenderDouyinRunHyperframesVideo;
     await new Promise(resolve => server.close(resolve));
   }
 }

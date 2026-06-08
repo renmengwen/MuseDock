@@ -6,6 +6,9 @@ const defaultAiTextModel = require('./aiTextModel');
 const defaultAiTtsModel = require('./aiTtsModel');
 const agentTemplates = require('./agentTemplates');
 const ttsTimeline = require('./ttsTimeline');
+const defaultStoryboardAgent = require('./storyboardAgent');
+const defaultHyperframesProject = require('./hyperframesProject');
+const defaultHyperframesRenderer = require('./hyperframesRenderer');
 
 const TEMPLATE_VIRAL_REWRITE = 'viral_rewrite';
 const MAX_COMMENTS_CHARS = agentTemplates.MAX_COMMENTS_CHARS;
@@ -70,6 +73,14 @@ function getTtsSegmentFileName(index, format = 'wav') {
 
 function getTtsUrl(awemeId, runId, fileName) {
   return `/api/agents/douyin/${encodeURIComponent(String(awemeId))}/runs/${encodeURIComponent(String(runId))}/tts/${encodeURIComponent(fileName)}`;
+}
+
+function getHyperframesProjectDir(awemeId, runId, rootDir) {
+  return path.join(getAgentRunsDir(awemeId, rootDir), `${runId}-hyperframes`);
+}
+
+function getHyperframesFileUrl(awemeId, runId, fileName) {
+  return `/api/agents/douyin/${encodeURIComponent(String(awemeId))}/runs/${encodeURIComponent(String(runId))}/hyperframes/files/${encodeURIComponent(fileName)}`;
 }
 
 async function readJsonIfExists(filePath) {
@@ -509,6 +520,210 @@ function resolveDouyinRunTtsFile(awemeId, runId, fileName, options = {}) {
   return targetPath;
 }
 
+async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
+  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      aweme_id: String(awemeId || ''),
+      run_id: String(runId || ''),
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  const run = await readJsonIfExists(runPath);
+  if (!run) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '未找到该 Agent 运行记录',
+    };
+  }
+
+  const rewriteScript = typeof run?.result?.rewrite_script === 'string' ? run.result.rewrite_script.trim() : '';
+  const captions = Array.isArray(run?.tts?.captions) ? run.tts.captions : [];
+  if (!rewriteScript) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '当前运行结果没有可用于 AI 分镜的改写脚本。',
+    };
+  }
+  if (!captions.length) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '请先完成 TTS 合成并生成字幕时间轴。',
+    };
+  }
+
+  const agent = options.storyboardAgent || defaultStoryboardAgent;
+  const result = await agent.createStoryboard({
+    rewriteScript,
+    captions,
+    aiTextModel: options.aiTextModel,
+    configPath: options.configPath,
+    textConfig: options.textConfig,
+    fetchImpl: options.fetchImpl,
+  });
+
+  const updatedRun = {
+    ...run,
+    storyboard_raw: result.raw || {},
+    storyboard: result.storyboard,
+    storyboard_model: result.model || {},
+    storyboard_raw_parse_failed: !!result.raw_parse_failed,
+    updated_at: new Date().toISOString(),
+  };
+  await writeJson(runPath, updatedRun);
+
+  return {
+    success: !!result.success,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message: result.message || (result.success ? 'AI 分镜已生成。' : 'AI 分镜生成失败。'),
+    storyboard_raw: updatedRun.storyboard_raw,
+    storyboard: updatedRun.storyboard,
+    storyboard_model: updatedRun.storyboard_model,
+  };
+}
+
+async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
+  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      aweme_id: String(awemeId || ''),
+      run_id: String(runId || ''),
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  const run = await readJsonIfExists(runPath);
+  if (!run) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '未找到该 Agent 运行记录',
+    };
+  }
+  if (!Array.isArray(run?.storyboard?.scenes) || run.storyboard.scenes.length === 0) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '请先生成 AI 分镜。',
+    };
+  }
+
+  const projectService = options.hyperframesProject || defaultHyperframesProject;
+  const projectDir = getHyperframesProjectDir(awemeId, runId, options.rootDir);
+  const result = await projectService.createOriginalCaptionProject({ run, projectDir });
+
+  if (!result.success) {
+    const video = {
+      status: 'failed',
+      template: 'ai_storyboard_cards',
+      message: result.message || '视频工程生成失败。',
+      updated_at: new Date().toISOString(),
+    };
+    await writeJson(runPath, { ...run, video, updated_at: new Date().toISOString() });
+    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
+  }
+
+  const video = {
+    status: 'project_ready',
+    template: result.template,
+    project_dir: result.project_dir,
+    index_path: result.index_path,
+    storyboard_path: result.storyboard_path,
+    captions_path: result.captions_path,
+    project_json_path: result.project_json_path,
+    duration: result.duration,
+    message: result.message || '视频工程已生成。',
+    updated_at: new Date().toISOString(),
+  };
+  await writeJson(runPath, { ...run, video, updated_at: new Date().toISOString() });
+  return { success: true, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
+}
+
+async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
+  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      aweme_id: String(awemeId || ''),
+      run_id: String(runId || ''),
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  const run = await readJsonIfExists(runPath);
+  if (!run) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '未找到该 Agent 运行记录',
+    };
+  }
+
+  const projectDir = run.video?.project_dir || getHyperframesProjectDir(awemeId, runId, options.rootDir);
+  const renderer = options.hyperframesRenderer || defaultHyperframesRenderer;
+  const result = await renderer.renderHyperframesProject({ projectDir });
+
+  if (!result.success) {
+    const video = {
+      ...(run.video || {}),
+      status: 'failed',
+      message: result.message || '视频渲染失败。',
+      updated_at: new Date().toISOString(),
+    };
+    await writeJson(runPath, { ...run, video, updated_at: new Date().toISOString() });
+    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
+  }
+
+  const video = {
+    ...(run.video || {}),
+    status: 'rendered',
+    template: run.video?.template || 'ai_storyboard_cards',
+    project_dir: projectDir,
+    output_path: result.output_path,
+    output_url: getHyperframesFileUrl(awemeId, runId, 'output.mp4'),
+    message: result.message || '视频渲染完成。',
+    updated_at: new Date().toISOString(),
+  };
+  await writeJson(runPath, { ...run, video, updated_at: new Date().toISOString() });
+  return { success: true, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
+}
+
+function resolveDouyinRunHyperframesFile(awemeId, runId, fileName, options = {}) {
+  if (!isSafeId(awemeId) || !isSafeRunId(runId)) {
+    throw new Error('Invalid HyperFrames file request');
+  }
+
+  const name = String(fileName || '');
+  if (!name || path.basename(name) !== name || name !== 'output.mp4') {
+    throw new Error('Invalid HyperFrames file request');
+  }
+
+  const projectDir = path.resolve(getHyperframesProjectDir(awemeId, runId, options.rootDir));
+  const targetPath = path.resolve(projectDir, name);
+  const relative = path.relative(projectDir, targetPath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('HyperFrames file is outside project directory');
+  }
+
+  return targetPath;
+}
+
 async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
   if (!isSafeId(awemeId)) {
     return createInvalidAwemeResult(awemeId);
@@ -682,6 +897,10 @@ module.exports = {
   getDouyinAgentRun,
   synthesizeDouyinRunTts,
   resolveDouyinRunTtsFile,
+  createDouyinRunStoryboard,
+  createDouyinRunHyperframesProject,
+  renderDouyinRunHyperframesVideo,
+  resolveDouyinRunHyperframesFile,
   listAgentTemplates: agentTemplates.listAgentTemplates,
   summarizeComments,
   buildPrompt: agentTemplates.getAgentTemplate(TEMPLATE_VIRAL_REWRITE).buildPrompt,

@@ -1,19 +1,45 @@
 # MuseDock
 
-MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作台。项目当前以抖音链路为主，把内容抓取、评论缓存、本地素材准备、音频转写、AI Agent 创作、TTS 口播音频和字幕时间轴串在同一个 Web GUI 里，适合创作者、运营和研究者把分散的平台内容整理成可复用的分析、脚本和选题素材。
+MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作台。当前主流程面向抖音内容：从抓取视频、缓存评论、准备本地素材、音频转写，到 AI 爆款拆解、改写脚本、TTS 口播、AI 分镜、HyperFrames 渲染 MP4，都可以在同一个 Web GUI 中完成。
 
-> 小红书能力目前保留搜索和详情入口，完整素材工作流仍以抖音为主。
+> 小红书能力目前保留搜索和详情入口；完整素材和成片工作流仍以抖音为主。
 
 ## 主要能力
 
 - **内容抓取**：支持抖音关键词搜索、视频 ID/链接抓取、作者主页视频抓取；支持小红书关键词搜索和笔记详情读取。
 - **评论采集与缓存**：支持抖音一级评论和二级评论抓取，并写入本地 SQLite，抓取记录页会展示评论缓存状态和数量。
-- **素材工作台**：支持抖音视频下载、音频抽取、关键帧抽取、本地素材状态查看；可从抓取记录跳转并自动准备 AI 素材。
+- **素材工作台**：支持抖音视频下载、音频抽取、关键帧抽取、本地素材状态查看，并可从抓取记录跳转自动准备 AI 素材。
 - **音频转写**：接入小米 MiMo ASR，支持大音频自动压缩；压缩后仍超限时会自动切片并合并转写结果。
-- **AI 工作台**：读取本地素材、转写文本和评论缓存，执行可控 Agent，当前支持爆款拆解、改写脚本和评论洞察等模板。
-- **TTS 口播与字幕时间轴**：基于 MiMo TTS，把改写脚本按句切分、逐句合成、用 `ffprobe` 读取每段时长，并保存可复用的 `captions` 字幕时间轴。
-- **AI 模型配置**：设置页支持 ASR、文字模型、TTS、图片生成、视频生成和多模态模型配置。
+- **AI 工作台**：读取本地素材、转写文本和评论缓存，执行可控 Agent，当前支持爆款拆解 + 改写脚本、评论洞察等模板。
+- **TTS 口播与字幕时间轴**：基于 MiMo TTS，把改写脚本按句切分、逐句合成、用 `ffprobe` 读取每段真实时长，并保存可复用的 `tts.captions`。
+- **AI 分镜**：文字大模型只生成原创视觉分镜结构和 `caption_indexes`，不决定最终时间轴；后端根据 `tts.captions` 计算每个 scene 的 `start/end/duration`。
+- **HyperFrames 成片**：根据规范化分镜和 TTS 音频生成原创 HTML/CSS/GSAP 视频工程，并调用 `npx hyperframes render` 输出 `output.mp4`。
+- **模型配置**：设置页支持 ASR、文字模型、TTS、图片生成、视频生成和多模态模型配置。
 - **本地 Web GUI**：React + Vite 前端，Express 后端，默认运行在 `http://localhost:3000`。
+
+## 工作流示例
+
+1. 打开 MuseDock，抓取或载入一个抖音视频。
+2. 在抓取记录或素材工作台中点击“准备素材”，生成本地视频、音频、关键帧和分析输入。
+3. 在素材工作台执行音频转写，得到 `transcript.json`。
+4. 进入 AI 工作台，执行“爆款拆解 + 改写脚本”。
+5. 在“配音”页签点击 `TTS 合成`，生成口播音频和 `tts.captions`。
+6. 在“成片”页签点击 `生成 AI 分镜`。
+7. 点击 `生成视频工程`，生成 HyperFrames 工程目录。
+8. 点击 `渲染 MP4`，得到最终 `output.mp4` 并在页面预览。
+
+最终视频路径类似：
+
+```text
+data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/output.mp4
+```
+
+## 关键原则
+
+- 最终视频不使用原视频、原视频帧、关键帧截图或原视频背景。
+- AI 只负责原创视觉分镜，不负责最终时间轴。
+- 最终时间轴只由 `tts.captions` 计算。
+- 如果 AI 分镜输出无效、漏字幕或引用不存在的 caption index，后端会 normalize/fallback，保证所有字幕都被覆盖。
 
 ## 技术栈
 
@@ -24,10 +50,9 @@ MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作�
 - 浏览器自动化：Playwright、Chrome CDP
 - 媒体处理：ffmpeg、ffprobe、`@ffmpeg-installer/ffmpeg`
 - AI 能力：OpenAI-compatible 文字模型、小米 MiMo ASR/TTS
+- 视频渲染：HyperFrames CLI、GSAP、HTML/CSS
 
-## 快速开始
-
-### 环境要求
+## 环境要求
 
 - Node.js 22
 - npm
@@ -35,7 +60,13 @@ MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作�
 - ffmpeg
 - ffprobe
 
-项目包含 `.nvmrc` 和 `package.json#engines`，建议使用 Node.js 22。切换 Node 版本后请重新执行 `npm install`；如果 `better-sqlite3` 出现 ABI 不匹配，可执行：
+项目包含 `package.json#engines`，建议使用 Node.js 22。切换 Node 版本后请重新执行：
+
+```powershell
+npm install
+```
+
+如果 `better-sqlite3` 出现 ABI 不匹配，可执行：
 
 ```powershell
 npm rebuild better-sqlite3
@@ -43,21 +74,11 @@ npm rebuild better-sqlite3
 
 `ffmpeg` 会优先使用 `FFMPEG_PATH`，其次使用项目依赖内置路径，最后尝试系统 `PATH`。`ffprobe` 用于读取 TTS 分段音频时长，建议安装到系统 `PATH`，或通过 `FFPROBE_PATH` 指定。
 
-### 安装依赖
+## 安装与启动
 
 ```powershell
 npm install
-```
-
-### 构建前端
-
-```powershell
 npm run build:frontend
-```
-
-### 启动服务
-
-```powershell
 npm run start
 ```
 
@@ -73,20 +94,33 @@ http://localhost:3000
 npm run dev:frontend
 ```
 
-## 使用流程
+## 常用命令
 
-1. 打开 MuseDock Web GUI。
-2. 在“内容抓取”页选择平台并抓取内容。
-3. 抖音链路建议先完成扫码登录，MuseDock 会通过 Chrome CDP 复用本地浏览器登录态。
-4. 在“抓取记录”页查看本地保存的数据、素材状态、转写状态和评论缓存状态。
-5. 点击“准备 AI 素材”，进入素材工作台并自动准备视频、音频和关键帧。
-6. 在素材工作台中查看视频、音频、关键帧和转写状态，点击转写可调用 MiMo ASR。
-7. 在“设置”页配置 ASR、文字模型和 TTS 模型。AI 工作台需要启用文字模型；TTS 需要配置 MiMo TTS。
-8. 在“AI 工作台”输入已准备素材的抖音视频 ID，加载素材状态和历史运行记录。
-9. 选择 Agent 模板并执行，结果会保存到本地 `agent_runs` 目录。
-10. 对包含改写脚本的运行记录点击 TTS 合成，系统会生成最终口播音频、分段音频和字幕时间轴。
+```powershell
+# 启动后端和静态前端
+npm run start
 
-## AI 与 TTS 数据结构
+# 开发前端
+npm run dev:frontend
+
+# 构建前端
+npm run build:frontend
+
+# 运行完整测试
+npm test
+
+# AI 与视频链路相关测试
+node test-ai-text-model.js
+node test-ai-tts-model.js
+node test-tts-timeline.js
+node test-storyboard-schema.js
+node test-storyboard-agent.js
+node test-hyperframes-project.js
+node test-hyperframes-renderer.js
+node test-agent-runs.js
+```
+
+## 数据结构
 
 AI 运行结果保存在：
 
@@ -94,15 +128,12 @@ AI 运行结果保存在：
 data/media/douyin/<aweme_id>/agent_runs/<run_id>.json
 ```
 
-TTS 成功后会在同一份运行记录里写入 `tts` 字段：
+TTS 成功后写入：
 
 ```json
 {
   "tts": {
     "status": "done",
-    "voice": "Mia",
-    "style_prompt": "请使用自然、清晰、适合短视频口播的语气。",
-    "format": "wav",
     "path": "data/media/douyin/<aweme_id>/agent_runs/<run_id>-tts.wav",
     "url": "/api/agents/douyin/<aweme_id>/runs/<run_id>/tts/<run_id>-tts.wav",
     "duration": 3.75,
@@ -122,16 +153,77 @@ TTS 成功后会在同一份运行记录里写入 `tts` 字段：
         "duration": 1.25,
         "text": "第一句。"
       }
-    ],
-    "model": {
-      "provider": "mimo",
-      "model_id": "mimo-v2.5-tts"
-    }
+    ]
   }
 }
 ```
 
-字幕时间轴由真实分段音频时长累计生成，不按字数估算，后续可供 HyperFrames 或其他视频渲染流程复用。
+AI 分镜成功后写入：
+
+```json
+{
+  "storyboard_raw": {},
+  "storyboard": {
+    "status": "done",
+    "template": "ai_storyboard_cards",
+    "style": {
+      "visual_tone": "清晰、原创、适合短视频口播",
+      "palette": ["#101216", "#fe2c55", "#25f4ee"],
+      "motion": "轻微推进、重点词弹出"
+    },
+    "scenes": [
+      {
+        "index": 1,
+        "caption_indexes": [1],
+        "start": 0,
+        "end": 1.25,
+        "duration": 1.25,
+        "headline": "核心观点",
+        "visual_type": "text_card",
+        "layout": "center_focus",
+        "background_prompt": "原创抽象动态图文背景，不包含原视频画面",
+        "emphasis_words": ["观点"],
+        "captions": []
+      }
+    ]
+  },
+  "storyboard_model": {},
+  "storyboard_raw_parse_failed": false
+}
+```
+
+HyperFrames 工程和渲染成功后写入：
+
+```json
+{
+  "video": {
+    "status": "rendered",
+    "template": "ai_storyboard_cards",
+    "project_dir": "data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes",
+    "index_path": "data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/index.html",
+    "storyboard_path": "data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/storyboard.json",
+    "captions_path": "data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/captions.json",
+    "project_json_path": "data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/project.json",
+    "output_path": "data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/output.mp4",
+    "output_url": "/api/agents/douyin/<aweme_id>/runs/<run_id>/hyperframes/files/output.mp4"
+  }
+}
+```
+
+生成目录结构：
+
+```text
+data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/
+  index.html
+  storyboard.json
+  captions.json
+  project.json
+  output.mp4
+  assets/
+    narration.wav
+  renders/
+    project_*.mp4
+```
 
 ## 环境变量
 
@@ -141,7 +233,7 @@ TTS 成功后会在同一份运行记录里写入 `tts` 字段：
 | `OPENAI_API_KEY` | OpenAI-compatible 服务 API Key | 空 |
 | `ASR_API_KEY` | ASR 服务 API Key | 空 |
 | `ASR_PROVIDER` | ASR 服务提供商，MiMo 填 `mimo` | 空 |
-| `MIMO_API_KEY` | 小米 MiMo API Key；未配置时可回退读取 `ASR_API_KEY` | 空 |
+| `MIMO_API_KEY` | 小米 MiMo API Key，未配置时可回退读取 `ASR_API_KEY` | 空 |
 | `MIMO_BASE_URL` | 小米 MiMo API Base URL | `https://api.xiaomimimo.com/v1` |
 | `MIMO_ASR_MODEL` | 小米 MiMo ASR 模型 ID | `mimo-v2.5-asr` |
 | `MIMO_TTS_MODEL` | 小米 MiMo TTS 模型 ID | `mimo-v2.5-tts` |
@@ -150,46 +242,6 @@ TTS 成功后会在同一份运行记录里写入 `tts` 字段：
 | `FFPROBE_PATH` | 手动指定 ffprobe 可执行文件路径 | 空 |
 
 也可以在设置页配置 AI 模型。文字模型按 OpenAI-compatible `POST /chat/completions` 调用，DeepSeek、OpenAI 或自定义兼容服务都可通过供应商、Base URL、模型 ID 和 API Key 接入。
-
-## 目录结构
-
-```text
-.
-+-- frontend-react/      # React + Vite 前端源码
-+-- frontend-dist/       # 前端构建产物
-+-- server/              # Express 服务、路由、抓取器和业务服务
-|   +-- routes/          # API 路由
-|   +-- scraper/         # 抖音、小红书抓取逻辑
-|   +-- services/        # 数据存储、媒体处理、AI 配置和 Agent 服务
-|   +-- state/           # 运行时 Cookie 状态
-+-- data/                # SQLite 数据库和本地媒体素材
-+-- docs/                # 项目文档、计划和交接记录
-+-- test-*.js            # 回归测试脚本
-```
-
-## 常用命令
-
-```powershell
-# 启动后端和静态前端
-npm run start
-
-# 开发前端
-npm run dev:frontend
-
-# 构建前端
-npm run build:frontend
-
-# 运行完整测试
-npm test
-
-# AI Agent 相关测试
-node test-ai-text-model.js
-node test-ai-tts-model.js
-node test-tts-timeline.js
-node test-agent-templates.js
-node test-agent-runs.js
-node test-agent-run-utils.mjs
-```
 
 ## API 概览
 
@@ -203,11 +255,6 @@ node test-agent-run-utils.mjs
 - `GET /api/douyin/creator?sec_uid=...&max=20`：抓取作者主页视频
 - `GET /api/douyin/comments?aweme_id=...`：抓取评论和二级评论
 - `GET /api/douyin/comments/local?aweme_id=...`：读取本地评论缓存
-
-### 小红书
-
-- `GET /api/xhs/search?keyword=...&max=20`：关键词搜索
-- `GET /api/xhs/detail?note_id=...`：读取笔记详情
 
 ### 素材
 
@@ -223,6 +270,10 @@ node test-agent-run-utils.mjs
 - `GET /api/agents/douyin/:aweme_id/runs/:run_id`：读取单次 Agent 运行详情
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/tts`：为改写脚本生成 TTS 音频和字幕时间轴
 - `GET /api/agents/douyin/:aweme_id/runs/:run_id/tts/:file_name`：读取生成的 TTS 音频
+- `POST /api/agents/douyin/:aweme_id/runs/:run_id/storyboard`：生成 AI 分镜
+- `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/project`：生成 HyperFrames 视频工程
+- `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/render`：渲染 MP4
+- `GET /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/files/:file_name`：读取生成的 MP4
 
 ### 配置与历史
 
@@ -231,37 +282,28 @@ node test-agent-run-utils.mjs
 - `GET /api/config/ai-models`：读取 AI 模型配置
 - `POST /api/config/ai-models`：保存 AI 模型配置
 
-## 本地数据
+## 目录结构
 
-MuseDock 会在本地生成运行数据：
-
-- `data/mediacrawler.db`：SQLite 数据库
-- `data/media/douyin/<aweme_id>/`：抖音视频素材目录
-- `data/media/douyin/<aweme_id>/audio.asr.mp3`：大音频转写时生成的低码率音频
-- `data/media/douyin/<aweme_id>/asr_segments/`：ASR 自动切片目录
-- `data/media/douyin/<aweme_id>/transcript.json`：音频转写结果
-- `data/media/douyin/<aweme_id>/agent_runs/`：AI Agent 运行结果、TTS 音频、TTS 分段音频和字幕时间轴
-- `chrome-user-data/`：Chrome CDP 使用的本地浏览器数据
-- `douyin-cookies.json`：抖音 Cookie 持久化文件
-
-这些文件通常不适合提交到公开仓库。开源或协作前请确认 `.gitignore` 已排除本地数据库、浏览器缓存、Cookie 和媒体文件。
+```text
+.
++-- frontend-react/      # React + Vite 前端源码
++-- frontend-dist/       # 前端构建产物
++-- server/              # Express 服务、路由、抓取器和业务服务
+|   +-- routes/          # API 路由
+|   +-- scraper/         # 抖音、小红书抓取逻辑
+|   +-- services/        # 数据存储、媒体处理、AI 配置、Agent、分镜和视频工程服务
+|   +-- state/           # 运行时 Cookie 状态
++-- data/                # SQLite 数据库和本地媒体素材
++-- docs/                # 项目文档、计划和交接记录
++-- test-*.js            # 回归测试脚本
+```
 
 ## 测试与验证
 
-本项目使用脚本化回归测试覆盖核心服务：
+完整回归测试：
 
 ```powershell
 npm test
-```
-
-常见专项验证：
-
-```powershell
-node test-media-pipeline.js
-node test-media-pipeline-cache.js
-node test-ai-tts-model.js
-node test-tts-timeline.js
-node test-agent-runs.js
 ```
 
 前端发布前请运行：
@@ -270,23 +312,36 @@ node test-agent-runs.js
 npm run build:frontend
 ```
 
+关键链路专项测试：
+
+```powershell
+node test-storyboard-schema.js
+node test-storyboard-agent.js
+node test-hyperframes-project.js
+node test-hyperframes-renderer.js
+node test-agent-runs.js
+```
+
+## 本地数据
+
+MuseDock 会在本地生成运行数据：
+
+- `data/mediacrawler.db`：SQLite 数据库
+- `data/media/douyin/<aweme_id>/`：抖音视频素材目录
+- `data/media/douyin/<aweme_id>/transcript.json`：音频转写结果
+- `data/media/douyin/<aweme_id>/agent_runs/`：AI Agent 运行结果、TTS 音频、字幕时间轴、HyperFrames 工程和 MP4
+- `chrome-user-data/`：Chrome CDP 使用的本地浏览器数据
+- `douyin-cookies.json`：抖音 Cookie 持久化文件
+
+这些文件通常不适合提交到公开仓库。开源或协作前请确认 `.gitignore` 已排除本地数据库、浏览器缓存、Cookie 和媒体文件。
+
 ## 路线图
 
 - 增加真实任务队列和后端进度推送，替代前端估算进度。
 - 扩展更多 Agent 模板，例如选题生成、小红书改写、分镜脚本和素材复盘。
 - 补齐小红书评论、素材准备和 AI 工作流。
-- 将 TTS 字幕时间轴接入 HyperFrames 或其他视频渲染流程。
+- 引入图片生成或原创视觉素材生成，但继续避免复用原视频画面。
 - 增加端到端测试、CI 和更清晰的部署文档。
-
-## 贡献
-
-欢迎提交 Issue 和 Pull Request。建议贡献前先说明想解决的问题、复现方式或功能目标，并尽量附上验证命令或截图。
-
-提交代码时请尽量包含：
-
-- 清晰的问题描述或功能说明
-- 必要的验证命令
-- 对数据结构、接口或配置变更的说明
 
 ## 免责声明
 

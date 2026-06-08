@@ -90,9 +90,13 @@ export function AiWorkspace() {
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [ttsRunning, setTtsRunning] = useState(false);
+  const [storyboardRunning, setStoryboardRunning] = useState(false);
+  const [videoGenerating, setVideoGenerating] = useState(false);
+  const [videoRendering, setVideoRendering] = useState(false);
   const [ttsVoice, setTtsVoice] = useState('mimo_default');
   const [ttsStylePrompt, setTtsStylePrompt] = useState(DEFAULT_TTS_STYLE);
   const [selectedTemplate, setSelectedTemplate] = useState('viral_rewrite');
+  const [resultTab, setResultTab] = useState('workflow');
 
   const sortedRuns = useMemo(() => {
     return [...runs].sort((a, b) => {
@@ -118,6 +122,21 @@ export function AiWorkspace() {
   const mediaReady = videoReady && audioReady;
   const selectedAwemeId = mediaStatus?.aweme_id || awemeId.trim();
   const hasRewriteScript = !!(activeRun?.result?.rewrite_script && activeRun.result.rewrite_script.trim());
+  const hasTtsCaptions = Array.isArray(activeRun?.tts?.captions) && activeRun.tts.captions.length > 0;
+  const hasStoryboardScenes = Array.isArray(activeRun?.storyboard?.scenes) && activeRun.storyboard.scenes.length > 0;
+
+  useEffect(() => {
+    if (!activeRun) return;
+    if (activeRun.video?.output_url || activeRun.video?.project_dir || hasStoryboardScenes) {
+      setResultTab('video');
+      return;
+    }
+    if (activeRun.tts?.url || hasRewriteScript) {
+      setResultTab('tts');
+      return;
+    }
+    setResultTab('result');
+  }, [activeRun?.run_id, activeRun?.tts?.url, activeRun?.video?.project_dir, activeRun?.video?.output_url, hasRewriteScript, hasStoryboardScenes]);
 
   useEffect(() => {
     const nextAwemeId = getAwemeIdFromSearch(location.search);
@@ -219,6 +238,108 @@ export function AiWorkspace() {
     }
   }
 
+  async function createStoryboard() {
+    const value = selectedAwemeId.trim();
+    if (!value || !activeRun?.run_id) {
+      setStatus({ type: 'error', message: '请先选择一条已完成 TTS 合成的运行记录。' });
+      return;
+    }
+    if (!hasTtsCaptions) {
+      setStatus({ type: 'error', message: '请先完成 TTS 合成并生成字幕时间轴。' });
+      return;
+    }
+
+    setStoryboardRunning(true);
+    setStatus({ type: 'loading', message: '正在生成 AI 分镜...' });
+    try {
+      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id);
+      setActiveRun(prev => prev ? {
+        ...prev,
+        storyboard_raw: json.storyboard_raw,
+        storyboard: json.storyboard,
+        storyboard_model: json.storyboard_model,
+        updated_at: new Date().toISOString(),
+      } : prev);
+      setRuns(prev => prev.map(run => (
+        run.run_id === activeRun.run_id ? {
+          ...run,
+          storyboard_raw: json.storyboard_raw,
+          storyboard: json.storyboard,
+          storyboard_model: json.storyboard_model,
+          updated_at: new Date().toISOString(),
+        } : run
+      )));
+      setStatus({
+        type: json.success ? 'success' : 'error',
+        message: json.message || (json.success ? 'AI 分镜已生成。' : 'AI 分镜生成失败。'),
+      });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message });
+    } finally {
+      setStoryboardRunning(false);
+    }
+  }
+
+  async function createVideoProject() {
+    const value = selectedAwemeId.trim();
+    if (!value || !activeRun?.run_id) {
+      setStatus({ type: 'error', message: '请先选择一条已生成 AI 分镜的运行记录。' });
+      return;
+    }
+    if (!hasStoryboardScenes) {
+      setStatus({ type: 'error', message: '请先生成 AI 分镜。' });
+      return;
+    }
+
+    setVideoGenerating(true);
+    setStatus({ type: 'loading', message: '正在生成 HyperFrames 视频工程...' });
+    try {
+      const json = await api.createDouyinRunHyperframesProject(value, activeRun.run_id);
+      setActiveRun(prev => prev ? { ...prev, video: json.video, updated_at: new Date().toISOString() } : prev);
+      setRuns(prev => prev.map(run => (
+        run.run_id === activeRun.run_id ? { ...run, video: json.video, updated_at: new Date().toISOString() } : run
+      )));
+      setStatus({
+        type: json.success ? 'success' : 'error',
+        message: json.message || (json.success ? '视频工程已生成。' : '视频工程生成失败。'),
+      });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message });
+    } finally {
+      setVideoGenerating(false);
+    }
+  }
+
+  async function renderVideo() {
+    const value = selectedAwemeId.trim();
+    if (!value || !activeRun?.run_id) {
+      setStatus({ type: 'error', message: '请先选择一条已生成视频工程的运行记录。' });
+      return;
+    }
+    if (!activeRun.video?.project_dir) {
+      setStatus({ type: 'error', message: '请先生成视频工程。' });
+      return;
+    }
+
+    setVideoRendering(true);
+    setStatus({ type: 'loading', message: '正在调用 HyperFrames 渲染 MP4...' });
+    try {
+      const json = await api.renderDouyinRunHyperframesVideo(value, activeRun.run_id);
+      setActiveRun(prev => prev ? { ...prev, video: json.video, updated_at: new Date().toISOString() } : prev);
+      setRuns(prev => prev.map(run => (
+        run.run_id === activeRun.run_id ? { ...run, video: json.video, updated_at: new Date().toISOString() } : run
+      )));
+      setStatus({
+        type: json.success ? 'success' : 'error',
+        message: json.message || (json.success ? '视频渲染完成。' : '视频渲染失败。'),
+      });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message });
+    } finally {
+      setVideoRendering(false);
+    }
+  }
+
   return (
     <main className="container">
       <div className="workspaceIntro">
@@ -300,7 +421,10 @@ export function AiWorkspace() {
         </div>
 
         <div className="agentPanel agentResultPanel">
-          <h3>生成结果</h3>
+          <div className="agentResultTitleRow">
+            <h3>生成结果</h3>
+            {activeRun ? <span>{activeRun.run_id}</span> : null}
+          </div>
           {activeRun ? (
             <>
               <div className="agentRunMeta">
@@ -308,12 +432,84 @@ export function AiWorkspace() {
                 <strong className={`stepBadge ${activeRun.status || 'pending'}`}>{getAgentStepLabel(activeRun.status)}</strong>
                 <span>{getRunDisplayTime(activeRun.created_at || activeRun.updated_at)}</span>
               </div>
-              {resultSections.map(section => (
-                <ResultSection
-                  key={section.key}
-                  section={section}
-                  ttsControls={section.key === 'rewrite_script' && hasRewriteScript ? (
-                    <div className="ttsInlineControls">
+              <div className="agentResultTabs" role="tablist" aria-label="生成结果视图">
+                {[
+                  ['workflow', '流程'],
+                  ['result', '文案'],
+                  ['tts', '配音'],
+                  ['video', '成片'],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`agentResultTab ${resultTab === id ? 'active' : ''}`}
+                    onClick={() => setResultTab(id)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {resultTab === 'workflow' ? (
+                <section className="agentResultSection compactWorkflow">
+                  <h4>执行步骤</h4>
+                  <div className="agentSteps compact">
+                    {agentSteps.length > 0 ? agentSteps.map(([key, step]) => (
+                      <div className="agentStep" key={key}>
+                        <span>{step?.label || key}</span>
+                        <strong className={`stepBadge ${step?.status || 'pending'}`}>{getAgentStepLabel(step?.status)}</strong>
+                        {step?.message ? <small>{step.message}</small> : null}
+                      </div>
+                    )) : <p className="mutedText">暂无执行步骤</p>}
+                  </div>
+                </section>
+              ) : null}
+
+              {resultTab === 'result' ? (
+                <>
+                  {resultSections.map(section => (
+                    <ResultSection
+                      key={section.key}
+                      section={section}
+                      ttsControls={section.key === 'rewrite_script' && hasRewriteScript ? (
+                        <div className="ttsInlineControls">
+                          <select
+                            value={ttsVoice}
+                            onChange={event => setTtsVoice(event.target.value)}
+                            disabled={ttsRunning}
+                            aria-label="TTS 音色"
+                          >
+                            {TTS_VOICES.map(voice => (
+                              <option key={voice.value} value={voice.value}>{voice.label}</option>
+                            ))}
+                          </select>
+                          <Input
+                            value={ttsStylePrompt}
+                            onChange={event => setTtsStylePrompt(event.target.value)}
+                            disabled={ttsRunning}
+                            placeholder="输入语气、情绪、节奏或音频标签"
+                          />
+                          <Button size="sm" disabled={ttsRunning} onClick={synthesizeTts}>
+                            {ttsRunning ? '合成中...' : 'TTS 合成'}
+                          </Button>
+                        </div>
+                      ) : null}
+                    />
+                  ))}
+                  {activeRun.raw_text ? (
+                    <section className="agentResultSection">
+                      <h4>原始返回</h4>
+                      <pre>{activeRun.raw_text}</pre>
+                    </section>
+                  ) : null}
+                </>
+              ) : null}
+
+              {resultTab === 'tts' ? (
+                <section className="agentResultSection ttsPlayback">
+                  <h4>TTS 音频</h4>
+                  {hasRewriteScript ? (
+                    <div className="ttsInlineControls standalone">
                       <select
                         value={ttsVoice}
                         onChange={event => setTtsVoice(event.target.value)}
@@ -334,34 +530,84 @@ export function AiWorkspace() {
                         {ttsRunning ? '合成中...' : 'TTS 合成'}
                       </Button>
                     </div>
-                  ) : null}
-                />
-              ))}
-              {activeRun.tts?.url ? (
-                <section className="agentResultSection ttsPlayback">
-                  <h4>TTS 音频</h4>
-                  <audio controls src={activeRun.tts.url} />
-                  <div className="agentRunMeta">
-                    <span>{activeRun.tts.voice || '未记录音色'}</span>
-                    <span>{activeRun.tts.model?.model_id || '未记录模型'}</span>
-                    <span>{getRunDisplayTime(activeRun.tts.updated_at)}</span>
-                  </div>
-                  {Array.isArray(activeRun.tts.captions) && activeRun.tts.captions.length > 0 ? (
-                    <div className="ttsCaptionList">
-                      {activeRun.tts.captions.map(caption => (
-                        <div className="ttsCaptionItem" key={caption.index}>
-                          <code>{formatCaptionTime(caption.start)} - {formatCaptionTime(caption.end)}</code>
-                          <span>{caption.text}</span>
+                  ) : <p className="mutedText">当前运行记录没有可用于 TTS 的改写脚本。</p>}
+                  {activeRun.tts?.url ? (
+                    <>
+                      <audio controls src={activeRun.tts.url} />
+                      <div className="agentRunMeta">
+                        <span>{activeRun.tts.voice || '未记录音色'}</span>
+                        <span>{activeRun.tts.model?.model_id || '未记录模型'}</span>
+                        <span>{getRunDisplayTime(activeRun.tts.updated_at)}</span>
+                      </div>
+                      {hasTtsCaptions ? (
+                        <div className="ttsCaptionList">
+                          {activeRun.tts.captions.map(caption => (
+                            <div className="ttsCaptionItem" key={caption.index}>
+                              <code>{formatCaptionTime(caption.start)} - {formatCaptionTime(caption.end)}</code>
+                              <span>{caption.text}</span>
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
+                      ) : null}
+                    </>
                   ) : null}
                 </section>
               ) : null}
-              {activeRun.raw_text ? (
-                <section className="agentResultSection">
-                  <h4>原始返回</h4>
-                  <pre>{activeRun.raw_text}</pre>
+
+              {resultTab === 'video' ? (
+                <section className="agentResultSection ttsPlayback">
+                  <h4>AI 分镜与成片</h4>
+                  <div className="videoProjectPanel">
+                    <div className="videoProjectActions">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={storyboardRunning || videoGenerating || videoRendering || !hasTtsCaptions}
+                        onClick={createStoryboard}
+                      >
+                        {storyboardRunning ? '生成中...' : '生成 AI 分镜'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={storyboardRunning || videoGenerating || videoRendering || !hasStoryboardScenes}
+                        onClick={createVideoProject}
+                      >
+                        {videoGenerating ? '生成中...' : '生成视频工程'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={storyboardRunning || videoGenerating || videoRendering || !activeRun.video?.project_dir}
+                        onClick={renderVideo}
+                      >
+                        {videoRendering ? '渲染中...' : '渲染 MP4'}
+                      </Button>
+                    </div>
+                    {!hasTtsCaptions ? <p className="mutedText">请先在“配音”页签完成 TTS 合成并生成字幕时间轴。</p> : null}
+                    {hasStoryboardScenes ? (
+                      <div className="storyboardList">
+                        {activeRun.storyboard.scenes.map(scene => (
+                          <div className="storyboardItem" key={scene.index}>
+                            <div>
+                              <strong>分镜 {String(scene.index).padStart(2, '0')}</strong>
+                              <code>{formatCaptionTime(scene.start)} - {formatCaptionTime(scene.end)}</code>
+                            </div>
+                            <p>{scene.headline}</p>
+                            <span>字幕 {scene.caption_indexes?.join(', ') || '-'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {activeRun.video ? (
+                      <div className="videoProjectMeta">
+                        <span>{activeRun.video.message || '视频状态已更新。'}</span>
+                        {activeRun.video.project_dir ? <code>{activeRun.video.project_dir}</code> : null}
+                        {activeRun.video.output_url ? (
+                          <video controls src={activeRun.video.output_url} />
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 </section>
               ) : null}
             </>

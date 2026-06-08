@@ -1,0 +1,119 @@
+const DEFAULT_TEMPLATE = 'ai_storyboard_cards';
+const DEFAULT_STYLE = {
+  visual_tone: '清晰、原创、适合短视频口播',
+  palette: ['#101216', '#fe2c55', '#25f4ee'],
+  motion: '轻微推进、重点词弹出',
+};
+
+function roundTime(value) {
+  return Math.round(Number(value || 0) * 1000) / 1000;
+}
+
+function asArray(value) {
+  return Array.isArray(value) ? value.filter(item => item !== undefined && item !== null) : [];
+}
+
+function sanitizeText(value, fallback = '') {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function normalizeCaption(caption) {
+  const start = roundTime(caption?.start);
+  const end = roundTime(caption?.end);
+  return {
+    index: Number(caption?.index),
+    start,
+    end,
+    duration: roundTime(caption?.duration || end - start),
+    text: sanitizeText(caption?.text),
+  };
+}
+
+function normalizeCaptions(captions) {
+  return asArray(captions)
+    .map(normalizeCaption)
+    .filter(item => Number.isFinite(item.index) && item.text && item.end > item.start)
+    .sort((left, right) => left.index - right.index);
+}
+
+function makeFallbackScenes(captions) {
+  const scenes = [];
+  for (let index = 0; index < captions.length; index += 1) {
+    const group = captions.slice(index, index + 1);
+    scenes.push({
+      index: scenes.length + 1,
+      caption_indexes: group.map(item => item.index),
+      headline: group[0]?.text || `第 ${scenes.length + 1} 镜`,
+      visual_type: 'text_card',
+      layout: scenes.length % 2 === 0 ? 'center_focus' : 'split_emphasis',
+      background_prompt: '原创抽象动态图文背景，不包含原视频画面',
+      emphasis_words: [],
+    });
+  }
+  return scenes;
+}
+
+function buildScene(source, sceneCaptions, sceneIndex) {
+  const start = sceneCaptions[0].start;
+  const end = sceneCaptions[sceneCaptions.length - 1].end;
+  return {
+    index: sceneIndex,
+    caption_indexes: sceneCaptions.map(item => item.index),
+    start,
+    end,
+    duration: roundTime(end - start),
+    headline: sanitizeText(source.headline, sceneCaptions[0].text),
+    visual_type: sanitizeText(source.visual_type, 'text_card'),
+    layout: sanitizeText(source.layout, sceneIndex % 2 === 1 ? 'center_focus' : 'split_emphasis'),
+    background_prompt: sanitizeText(source.background_prompt, '原创抽象动态图文背景，不包含原视频画面'),
+    emphasis_words: asArray(source.emphasis_words).map(item => String(item).trim()).filter(Boolean).slice(0, 6),
+    captions: sceneCaptions,
+  };
+}
+
+function normalizeStoryboard({ storyboard = {}, captions = [] } = {}) {
+  const normalizedCaptions = normalizeCaptions(captions);
+  const captionByIndex = new Map(normalizedCaptions.map(item => [item.index, item]));
+  const used = new Set();
+  const sourceScenes = asArray(storyboard.scenes).length
+    ? asArray(storyboard.scenes)
+    : makeFallbackScenes(normalizedCaptions);
+  const scenes = [];
+
+  for (const source of sourceScenes) {
+    const indexes = asArray(source.caption_indexes)
+      .map(item => Number(item))
+      .filter(index => captionByIndex.has(index) && !used.has(index))
+      .sort((left, right) => left - right);
+    if (!indexes.length) continue;
+    indexes.forEach(index => used.add(index));
+    scenes.push(buildScene(source, indexes.map(index => captionByIndex.get(index)), scenes.length + 1));
+  }
+
+  const uncovered = normalizedCaptions.filter(caption => !used.has(caption.index));
+  for (const fallback of makeFallbackScenes(uncovered)) {
+    const sceneCaptions = fallback.caption_indexes.map(index => captionByIndex.get(index)).filter(Boolean);
+    if (sceneCaptions.length) {
+      scenes.push(buildScene(fallback, sceneCaptions, scenes.length + 1));
+    }
+  }
+
+  return {
+    status: scenes.length ? 'done' : 'failed',
+    template: sanitizeText(storyboard.template, DEFAULT_TEMPLATE),
+    style: {
+      ...DEFAULT_STYLE,
+      ...(storyboard.style && typeof storyboard.style === 'object' ? storyboard.style : {}),
+    },
+    scenes,
+    message: scenes.length ? 'AI 分镜已生成。' : '分镜生成失败：没有可用字幕。',
+    updated_at: new Date().toISOString(),
+  };
+}
+
+module.exports = {
+  DEFAULT_TEMPLATE,
+  DEFAULT_STYLE,
+  normalizeStoryboard,
+  makeFallbackScenes,
+};
