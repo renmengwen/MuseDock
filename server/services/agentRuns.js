@@ -689,6 +689,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
   }
 
   const agent = options.storyboardAgent || defaultStoryboardAgent;
+  const videoBrief = run?.result?.video_brief || {};
   const storyboardOptions = defaultStoryboardAgent.normalizeStoryboardOptions(options.storyboardOptions || run.storyboard_options || {});
   const storyboardConfig = await agentTemplateOverrides.resolveStoryboardAgentConfig({
     rootDir: options.rootDir,
@@ -705,6 +706,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
   const result = await agent.createStoryboard({
     rewriteScript,
     captions,
+    videoBrief,
     storyboardOptions,
     editableConfig: storyboardConfig,
     aiTextModel: options.aiTextModel,

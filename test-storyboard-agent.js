@@ -5,6 +5,15 @@ async function run() {
   const messages = storyboardAgent.buildStoryboardMessages({
     rewriteScript: 'test script',
     captions: [{ index: 1, start: 0, end: 2, duration: 2, text: 'first line' }],
+    videoBrief: {
+      target_duration_sec: 60,
+      target_word_count: 220,
+      tone: '知识科普',
+      hook: '先拆误解',
+      beats: [
+        { purpose: 'hook', summary: '开场问题', duration_sec: 5, visual_intent: '强对比' },
+      ],
+    },
     storyboardOptions: {
       visualStyle: 'business style',
       pacing: 'fast',
@@ -16,8 +25,23 @@ async function run() {
     },
   });
 
+  assert.match(messages[0].content, /HyperFrames/);
+  assert.match(messages[0].content, /DOM\/CSS\/GSAP/);
+  assert.match(messages[0].content, /不是图片生成模型/);
   assert.match(messages[1].content, /AI_STORYBOARD_TARGET=hyperframes/);
   assert.match(messages[1].content, /AI_STORYBOARD_COVER_ALL_CAPTIONS=true/);
+  assert.match(messages[1].content, /visual_scene/);
+  assert.match(messages[1].content, /workflow/);
+  assert.match(messages[1].content, /code_panel/);
+  assert.match(messages[1].content, /ui_mockup/);
+  assert.match(messages[1].content, /split_compare/);
+  assert.match(messages[1].content, /concept_map/);
+  assert.match(messages[1].content, /timeline/);
+  assert.match(messages[1].content, /quote_burst/);
+  assert.match(messages[1].content, /自动选择 visual_type/);
+  assert.match(messages[1].content, /视频结构 brief/);
+  assert.match(messages[1].content, /target_duration_sec/);
+  assert.match(messages[1].content, /开场问题/);
   assert.match(messages[1].content, /headline[\s\S]*完整字幕/);
   assert.match(messages[1].content, /emphasis_words[\s\S]*短语卡片/);
   assert.match(messages[1].content, /contrast_card[\s\S]*真实对比/);
@@ -97,6 +121,13 @@ async function run() {
       { index: 1, start: 0, end: 1.25, duration: 1.25, text: 'first line.' },
       { index: 2, start: 1.25, end: 3.75, duration: 2.5, text: 'second line.' },
     ],
+    videoBrief: {
+      target_duration_sec: 60,
+      target_word_count: 220,
+      tone: '教程感',
+      hook: '一句话解释',
+      beats: [{ purpose: 'explain', summary: '定义', duration_sec: 8, visual_intent: '概念图' }],
+    },
     aiTextModel: {
       callTextModel: async options => {
         calls.push(options);
@@ -133,6 +164,8 @@ async function run() {
   assert.match(calls[0].messages[1].content, /AI_STORYBOARD_TARGET=hyperframes/);
   assert.match(calls[0].messages[1].content, /AI_STORYBOARD_COVER_ALL_CAPTIONS=true/);
   assert.match(calls[0].messages[1].content, /Frame Profile：tech_neon/);
+  assert.match(calls[0].messages[1].content, /教程感/);
+  assert.match(calls[0].messages[1].content, /概念图/);
 
   const malformed = await storyboardAgent.createStoryboard({
     rewriteScript: 'first line. second line.',
