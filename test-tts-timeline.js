@@ -12,6 +12,11 @@ function run() {
     ['开头没有标点', '还有一句。'],
   );
 
+  assert.deepStrictEqual(
+    timeline.splitScriptIntoSentences('开头：\n如果你最近总听到 Vibe Coding。\n\n第一部分：这个词从哪来？\n正文：以前写代码，你要先懂语法、懂框架。'),
+    ['如果你最近总听到 Vibe Coding。', '以前写代码，你要先懂语法、懂框架。'],
+  );
+
   const captions = timeline.buildCaptionsFromSegments([
     { index: 1, text: '第一句。', duration: 1.25, path: 'segment-001.wav' },
     { index: 2, text: '第二句！', duration: 2.5, path: 'segment-002.wav' },

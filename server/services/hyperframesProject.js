@@ -109,12 +109,13 @@ function getSceneClass(visualType) {
 function renderEmphasis(words = []) {
   const safeWords = Array.isArray(words) ? words.filter(Boolean) : [];
   return safeWords.length
-    ? safeWords.map(word => `<span>${escapeHtml(word)}</span>`).join('')
+    ? safeWords.map((word, index) => `<span data-card-index="${index}">${escapeHtml(word)}</span>`).join('')
     : '';
 }
 
 function renderSceneContent({ scene, index, captionText, wordHtml }) {
   const sceneClass = getSceneClass(scene.visual_type);
+  const emphasisClass = 'emphasis timed-cards';
   if (sceneClass === 'contrast-card') {
     const parts = String(scene.headline || '').split(/\s+vs\.?\s+/i);
     return [
@@ -124,8 +125,7 @@ function renderSceneContent({ scene, index, captionText, wordHtml }) {
       '    <div class="compare-vs">VS</div>',
       `    <div class="compare-side compare-side--new"><span>现在</span><strong>${escapeHtml(parts[1] || scene.headline || '新方法')}</strong></div>`,
       '  </div>',
-      `  <p>${escapeHtml(captionText)}</p>`,
-      `  <div class="emphasis">${wordHtml}</div>`,
+      `  <div class="${emphasisClass}">${wordHtml}</div>`,
       '</div>',
     ].join('\n');
   }
@@ -134,9 +134,8 @@ function renderSceneContent({ scene, index, captionText, wordHtml }) {
       `<div class="scene-content scene-content--step-card" data-visual-type="${escapeHtml(scene.visual_type || 'step_card')}">`,
       `  <div class="step-orbit"><span>${String(scene.index || index + 1).padStart(2, '0')}</span></div>`,
       `  <h1>${escapeHtml(scene.headline)}</h1>`,
-      `  <p>${escapeHtml(captionText)}</p>`,
       `  <div class="step-line"><i></i><i></i><i></i></div>`,
-      `  <div class="emphasis">${wordHtml}</div>`,
+      `  <div class="${emphasisClass}">${wordHtml}</div>`,
       '</div>',
     ].join('\n');
   }
@@ -145,8 +144,7 @@ function renderSceneContent({ scene, index, captionText, wordHtml }) {
       `<div class="scene-content scene-content--quote-card" data-visual-type="${escapeHtml(scene.visual_type || 'quote_card')}">`,
       '  <div class="quote-mark">“</div>',
       `  <h1>${escapeHtml(scene.headline)}</h1>`,
-      `  <p>${escapeHtml(captionText)}</p>`,
-      `  <div class="emphasis">${wordHtml}</div>`,
+      `  <div class="${emphasisClass}">${wordHtml}</div>`,
       '</div>',
     ].join('\n');
   }
@@ -154,10 +152,34 @@ function renderSceneContent({ scene, index, captionText, wordHtml }) {
     `<div class="scene-content scene-content--text-card" data-visual-type="${escapeHtml(scene.visual_type || 'text_card')}">`,
     `  <div class="visual-type">${escapeHtml(scene.visual_type || 'text_card')}</div>`,
     `  <h1>${escapeHtml(scene.headline)}</h1>`,
-    `  <p>${escapeHtml(captionText)}</p>`,
-    `  <div class="emphasis">${wordHtml}</div>`,
+    `  <div class="${emphasisClass}">${wordHtml}</div>`,
     '</div>',
   ].join('\n');
+}
+
+function hasReplacementGlyph(value) {
+  if (value === undefined || value === null) return false;
+  return String(value).includes('\uFFFD');
+}
+
+function validateStoryboardText(storyboard = {}) {
+  const errors = [];
+  const scenes = Array.isArray(storyboard.scenes) ? storyboard.scenes : [];
+  scenes.forEach((scene, index) => {
+    const label = `分镜 ${index + 1}`;
+    const fields = ['headline', 'layout', 'background_prompt'];
+    fields.forEach(field => {
+      if (hasReplacementGlyph(scene?.[field])) errors.push(`${label} 的 ${field} 包含乱码。`);
+    });
+    const words = Array.isArray(scene?.emphasis_words) ? scene.emphasis_words : [];
+    words.forEach((word, wordIndex) => {
+      if (hasReplacementGlyph(word)) errors.push(`${label} 的强调词 ${wordIndex + 1} 包含乱码。`);
+    });
+  });
+  return {
+    success: errors.length === 0,
+    errors,
+  };
 }
 
 function buildBackgroundLayers(profile) {
@@ -193,7 +215,11 @@ function buildTimelineScript(scenes, duration, motionScale = 1, frameOptions = {
     lines.push(`    tl.fromTo("${sceneId}", { autoAlpha: 0 }, { autoAlpha: 1, duration: ${enterDuration.toFixed(3)}, ease: "power2.out" }, ${start.toFixed(3)});`);
     lines.push(`    tl.fromTo("${sceneId} .scene-content", { y: 64, scale: 0.94, rotateX: 8, filter: "blur(14px)" }, { y: 0, scale: 1, rotateX: 0, filter: "blur(0px)", duration: ${enterDuration.toFixed(3)}, ease: "power3.out" }, ${start.toFixed(3)});`);
     lines.push(`    tl.fromTo("${sceneId} h1", { y: 28, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: ${Math.min(0.38, enterDuration).toFixed(3)}, ease: "back.out(1.45)" }, ${(start + 0.08).toFixed(3)});`);
-    lines.push(`    tl.from("${sceneId} .emphasis span", { y: 18, scale: 0.72, autoAlpha: 0, duration: 0.22, stagger: 0.055, ease: "back.out(1.8)" }, ${(start + enterDuration * 0.65).toFixed(3)});`);
+    const words = Array.isArray(scene.emphasis_words) ? scene.emphasis_words.filter(Boolean) : [];
+    words.forEach((_, wordIndex) => {
+      const cardStart = start + Math.min(sceneDuration - 0.18, enterDuration + ((sceneDuration - enterDuration - exitDuration) * (wordIndex / Math.max(words.length, 1))));
+      lines.push(`    tl.fromTo("${sceneId} .emphasis span:nth-child(${wordIndex + 1})", { x: 34, y: 14, scale: 0.82, autoAlpha: 0 }, { x: 0, y: 0, scale: 1, autoAlpha: 1, duration: 0.28, ease: "back.out(1.7)" }, ${cardStart.toFixed(3)});`);
+    });
     lines.push(`    tl.fromTo("${sceneId} .caption-bar", { y: 18, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.24, ease: "power2.out" }, ${(start + 0.12).toFixed(3)});`);
     lines.push(`    tl.from("${sceneId} .kinetic-caption span", { y: 14, autoAlpha: 0, duration: 0.16, stagger: 0.018, ease: "power2.out" }, ${(start + 0.16).toFixed(3)});`);
     lines.push(`    tl.to("${sceneId} .scene-content", { y: -20, scale: 1.03, duration: ${Math.max(0.2, sceneDuration - exitDuration).toFixed(3)}, ease: "none" }, ${start.toFixed(3)});`);
@@ -223,8 +249,8 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
       : '';
     const words = Array.isArray(scene.emphasis_words) ? scene.emphasis_words : [];
     const wordHtml = words.length
-      ? words.map(word => `<span>${escapeHtml(word)}</span>`).join('')
-      : `<span>${escapeHtml(scene.headline || captionText)}</span>`;
+      ? renderEmphasis(words)
+      : renderEmphasis([scene.headline || captionText]);
     const kineticCaption = captionText.split(/\s+/).filter(Boolean)
       .map(word => `<span>${escapeHtml(word)}</span>`)
       .join('');
@@ -327,6 +353,14 @@ async function createOriginalCaptionProject({ run, projectDir, renderOptions = {
       message: '生成视频工程失败：请先生成 AI 分镜。',
     };
   }
+  const textValidation = validateStoryboardText(run.storyboard);
+  if (!textValidation.success) {
+    return {
+      success: false,
+      message: `生成视频工程失败：分镜包含乱码，请重新生成或手动修正。${textValidation.errors.join('')}`,
+      storyboard_text_validation: textValidation,
+    };
+  }
   if (!fs.existsSync(audioPath)) {
     return {
       success: false,
@@ -383,4 +417,5 @@ module.exports = {
   createOriginalCaptionProject,
   buildIndexHtml,
   normalizeRenderOptions,
+  validateStoryboardText,
 };

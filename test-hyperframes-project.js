@@ -90,10 +90,12 @@ async function run() {
   assert.match(html, /class="scene clip/);
   assert.match(html, /tl\.fromTo\("#scene-1"/);
   assert.match(html, /tl\.fromTo\("#scene-1 \.scene-content"/);
-  assert.match(html, /tl\.from\("#scene-1 \.emphasis span"/);
+  assert.doesNotMatch(html, /tl\.from\("#scene-1 \.emphasis span"/);
+  assert.match(html, /#scene-1 \.emphasis span:nth-child\(1\)/);
   assert.match(html, /tl\.to\("#scene-1"/);
   assert.match(html, /核心观点/);
   assert.match(html, /assets\/narration.wav/);
+  assert.doesNotMatch(html, /<p>第一句。 第二句。<\/p>/);
   assert.doesNotMatch(html, /video\.mp4|frame-0001|frames\//);
 
   const customProjectDir = path.join(root, 'custom-project');
@@ -144,6 +146,56 @@ async function run() {
   });
   assert.equal(missingTts.success, false);
   assert.match(missingTts.message, /TTS|字幕/);
+
+  const badStoryboard = await hyperframesProject.createOriginalCaptionProject({
+    run: {
+      ...runData,
+      storyboard: {
+        ...runData.storyboard,
+        scenes: [
+          {
+            ...runData.storyboard.scenes[0],
+            emphasis_words: ['������'],
+          },
+        ],
+      },
+    },
+    projectDir: path.join(root, 'bad-storyboard'),
+  });
+  assert.equal(badStoryboard.success, false);
+  assert.match(badStoryboard.message, /乱码|分镜/);
+
+  const listHtml = hyperframesProject.buildIndexHtml({
+    duration: 6,
+    captions: [
+      { index: 1, start: 0, end: 6, duration: 6, text: '以前写代码，你要先懂语法、懂框架、懂前端后端、懂报错、懂部署。' },
+    ],
+    storyboard: {
+      template: 'ai_storyboard_cards',
+      scenes: [
+        {
+          index: 1,
+          caption_indexes: [1],
+          start: 0,
+          end: 6,
+          duration: 6,
+          headline: '从学会代码，到学会对 AI 说清楚',
+          visual_type: 'text_card',
+          layout: 'center_focus',
+          background_prompt: '原创抽象背景',
+          emphasis_words: ['语法', '框架', '前端后端', '报错', '部署'],
+          captions: [
+            { index: 1, start: 0, end: 6, duration: 6, text: '以前写代码，你要先懂语法、懂框架、懂前端后端、懂报错、懂部署。' },
+          ],
+        },
+      ],
+    },
+  });
+  assert.match(listHtml, /class="emphasis timed-cards"/);
+  assert.match(listHtml, /data-card-index="0"/);
+  assert.match(listHtml, /<span data-card-index="4">部署<\/span>/);
+  assert.match(listHtml, /#scene-1 \.emphasis span:nth-child\(5\)/);
+  assert.doesNotMatch(listHtml, /<p>以前写代码，你要先懂语法、懂框架、懂前端后端、懂报错、懂部署。<\/p>/);
 }
 
 run().then(() => {

@@ -7,12 +7,34 @@ function roundTime(value) {
   return Math.round(Number(value || 0) * 1000) / 1000;
 }
 
+function stripNarrationLabel(line) {
+  const text = String(line || '').trim();
+  if (!text) return '';
+
+  if (/^(开头|片头|引子|导语|正文|主体|结尾|片尾|总结)\s*[:：]\s*$/.test(text)) {
+    return '';
+  }
+  if (/^第[一二三四五六七八九十\d]+部分\s*[:：]/.test(text)) {
+    return '';
+  }
+
+  return text.replace(/^(开头|片头|引子|导语|正文|主体|结尾|片尾|总结)\s*[:：]\s*/, '').trim();
+}
+
+function normalizeNarrationScript(text) {
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .map(stripNarrationLabel)
+    .filter(Boolean)
+    .join('\n');
+}
+
 function splitScriptIntoSentences(text) {
-  const input = typeof text === 'string' ? text.trim() : '';
+  const input = normalizeNarrationScript(text).trim();
   if (!input) return [];
 
   const normalized = input
-    .replace(/\r\n/g, '\n')
     .replace(/[ \t]+/g, ' ')
     .trim();
 
@@ -176,6 +198,7 @@ async function concatenateAudioFiles({ inputPaths, targetPath, options = {} }) {
 }
 
 module.exports = {
+  normalizeNarrationScript,
   splitScriptIntoSentences,
   buildCaptionsFromSegments,
   resolveFfprobePath,
