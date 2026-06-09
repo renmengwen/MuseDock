@@ -13,7 +13,7 @@
 ## 目标
 
 - 默认任务 Agent 能产出更短、更适合视频渲染的口播脚本，并附带结构化 `video_brief`。
-- 分镜 Agent 输出稳定的 `visual_scene` DSL，用于描述可执行视觉对象和动效。
+- 分镜 Agent 以“HyperFrames 视觉导演 / HyperFrames 专家”为定位，自动选择受控白名单内的 `visual_type`，并输出稳定的 `visual_scene` DSL，用于描述可执行视觉对象和动效。
 - HyperFrames 渲染器消费 `visual_scene`，渲染流程图、代码面板、UI 示意、对比图、概念图、时间线和金句爆点等多种画面。
 - 保留旧分镜兼容：没有 `visual_scene` 的历史 run 仍可用旧卡片路径渲染。
 - 所有用户可见文案保持中文。
@@ -138,6 +138,9 @@ flowchart TD
 
 分镜 Agent 要明确知道：
 
+- 你是 MuseDock 的 HyperFrames 视觉导演 Agent，也是一名熟悉 DOM/CSS/GSAP 动效编排的 HyperFrames 专家。你不是图片生成模型，不输出摄影幻想描述；你要把口播脚本转成可由 HyperFrames 渲染的结构化视觉分镜。
+- `visual_type` 必须由 AI 根据字幕语义、`video_brief.beats` 和画面节奏自动选择。用户不需要指定类型；如果用户在高级编辑里手动覆盖，后端仍要校验白名单。
+- `visual_type` 只能来自受控白名单：`workflow`、`code_panel`、`ui_mockup`、`split_compare`、`concept_map`、`timeline`、`quote_burst`、`text_card`、`quote_card`、`step_card`、`contrast_card`。
 - `background_prompt` 是补充说明，`visual_scene` 才是渲染主契约。
 - 每个 scene 必须优先输出可以被 DOM/CSS/GSAP 表达的对象，不写不可执行的摄影描述。
 - `objects` 文案必须短，避免按钮、节点和标签溢出。
@@ -200,7 +203,7 @@ flowchart TD
 - 旧 run 的 `storyboard.scenes` 不修改。
 - 新渲染器遇到旧字段时自动生成 fallback `visual_scene`。
 - `project.json` 增加 `visual_dsl_version: 1`。
-- 前端分镜编辑器第一阶段可以继续编辑旧字段；`visual_scene` 先作为高级字段隐藏或只读展示。
+- 前端分镜编辑器第一阶段可以继续编辑旧字段；`visual_type` 和 `visual_scene` 作为高级字段折叠展示，默认由 AI 自动决策。
 - 如果用户手动编辑旧字段，后端重新生成 fallback `visual_scene`。
 
 ## 错误处理
@@ -220,6 +223,7 @@ flowchart TD
   - `normalizeViralRewriteResult` 保留并清洗 `video_brief`。
 - `test-storyboard-agent.js`
   - 分镜 prompt 包含 `visual_scene` DSL 要求。
+  - 分镜 system prompt 包含 HyperFrames 专家定位，并要求 AI 自动选择 `visual_type`。
   - `video_brief` 会进入分镜 messages。
 - `test-storyboard-schema.js`
   - 合法 `visual_scene` 保留。
