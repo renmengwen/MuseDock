@@ -19,6 +19,39 @@ function makeScene(visualType, objects = [], extra = {}) {
 
 function run() {
   assert.equal(renderers.escapeHtml('<b>"&\'</b>'), '&lt;b&gt;&quot;&amp;&#39;&lt;/b&gt;');
+  assert.doesNotThrow(() => renderers.renderSceneContent({ scene: null, wordHtml: '' }));
+  assert.doesNotThrow(() => renderers.renderWorkflowScene());
+  assert.doesNotThrow(() => renderers.renderCodePanelScene());
+  assert.doesNotThrow(() => renderers.renderUiMockupScene());
+  assert.doesNotThrow(() => renderers.renderSplitCompareScene());
+  assert.doesNotThrow(() => renderers.renderConceptMapScene());
+  assert.doesNotThrow(() => renderers.renderTimelineScene());
+  assert.doesNotThrow(() => renderers.renderQuoteBurstScene({ scene: null, wordHtml: '' }));
+
+  const noDsl = renderers.renderSceneContent({
+    scene: { headline: '无 DSL', visual_type: 'workflow' },
+    wordHtml: '',
+  });
+  assert.match(noDsl, /关键步骤|scene-content--workflow/);
+
+  const injected = renderers.renderSceneContent({
+    scene: {
+      headline: '<标题>',
+      visual_type: 'workflow',
+      prepared_visual_scene: {
+        visualType: 'workflow',
+        objects: [
+          { id: 'x" onclick="alert(1)', type: 'node', text: '<节点>' },
+          { id: 'line-1', type: 'connector', from: 'a" bad="1', to: 'b" bad="2' },
+        ],
+      },
+    },
+    wordHtml: '',
+  });
+  assert.doesNotMatch(injected, /onclick=/);
+  assert.doesNotMatch(injected, /bad="1/);
+  assert.match(injected, /&lt;标题&gt;/);
+  assert.match(injected, /&lt;节点&gt;/);
 
   const workflowHtml = renderers.renderSceneContent({
     scene: makeScene('workflow', [
