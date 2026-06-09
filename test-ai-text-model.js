@@ -7,20 +7,15 @@ const aiModelConfig = require('./server/services/aiModelConfig');
 const aiTextModel = require('./server/services/aiTextModel');
 
 function makeStreamResponse(chunks) {
-  const encoder = new TextEncoder();
-  return {
-    getReader() {
-      let index = 0;
-      return {
-        async read() {
-          if (index >= chunks.length) return { done: true };
-          const value = encoder.encode(chunks[index]);
-          index += 1;
-          return { done: false, value };
-        },
-      };
+  return new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
     },
-  };
+  });
 }
 
 async function run() {
@@ -166,18 +161,17 @@ async function run() {
     fetchImpl: async (url, options) => {
       assert.strictEqual(url, 'https://api.example.com/v1/chat/completions');
       streamRequestBody = JSON.parse(options.body);
-      return {
-        ok: true,
-        status: 200,
-        headers: {
-          get: name => (name.toLowerCase() === 'content-type' ? 'text/event-stream' : null),
-        },
-        body: makeStreamResponse([
+      return new Response(
+        makeStreamResponse([
           'data: {"choices":[{"delta":{"content":"{\\"summary\\":"}}]}\n\n',
           'data: {"choices":[{"delta":{"content":"\\"stream ok\\"}"}}]}\n\n',
           'data: [DONE]\n\n',
         ]),
-      };
+        {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        },
+      );
     },
   });
   assert.strictEqual(streamed.success, true);

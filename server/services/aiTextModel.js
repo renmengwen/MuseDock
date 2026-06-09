@@ -225,10 +225,9 @@ async function callTextModel(options = {}) {
     attempt += 1;
   }
 
-  const parsedResponse = await readJsonResponse(response, apiKey);
-  const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
-
   if (!response.ok) {
+    const parsedResponse = await readJsonResponse(response, apiKey);
+    const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
     const detail = sanitizeErrorDetail(getProviderError(rawResponse), apiKey) || `HTTP ${response.status}`;
     return {
       success: false,
@@ -267,6 +266,9 @@ async function callTextModel(options = {}) {
       raw_response: streamResult.raw_response,
     };
   }
+
+  const parsedResponse = await readJsonResponse(response, apiKey);
+  const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
 
   if (parsedResponse.parseError && parsedResponse.rawText) {
     return {
