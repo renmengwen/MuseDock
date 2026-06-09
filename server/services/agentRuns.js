@@ -5,6 +5,7 @@ const mediaPipeline = require('./mediaPipeline');
 const defaultAiTextModel = require('./aiTextModel');
 const defaultAiTtsModel = require('./aiTtsModel');
 const agentTemplates = require('./agentTemplates');
+const agentTemplateOverrides = require('./agentTemplateOverrides');
 const ttsTimeline = require('./ttsTimeline');
 const defaultStoryboardAgent = require('./storyboardAgent');
 const defaultHyperframesProject = require('./hyperframesProject');
@@ -109,14 +110,20 @@ function parseModelText(text, templateDefinition) {
   try {
     return {
       parsed: true,
+      parse: { success: true, error: '' },
+      schema_validation: { success: true, errors: [] },
       result: templateDefinition.normalizeResult(JSON.parse(text)),
       raw_text: '',
+      raw_output: typeof text === 'string' ? text : '',
     };
-  } catch {
+  } catch (error) {
     return {
       parsed: false,
+      parse: { success: false, error: `模型返回不是有效 JSON：${error.message}` },
+      schema_validation: { success: false, errors: ['模型返回不是有效 JSON，无法完成结构化校验。'] },
       result: templateDefinition.normalizeResult({}),
       raw_text: typeof text === 'string' ? text : '',
+      raw_output: typeof text === 'string' ? text : '',
     };
   }
 }
@@ -155,6 +162,35 @@ function createInputSummary({ analysisInput, transcript, comments }) {
   };
 }
 
+function createTaskTemplateValues({ analysisInput, transcript, commentsText, comments, promptOptions }) {
+  const video = analysisInput.video || {};
+  const statistics = video.statistics || {};
+  const transcriptText = typeof transcript?.text === 'string' ? transcript.text : '';
+  const transcriptTruncated = transcriptText.length > agentTemplates.MAX_TRANSCRIPT_CHARS;
+  const promptTranscript = transcriptTruncated
+    ? transcriptText.slice(0, agentTemplates.MAX_TRANSCRIPT_CHARS)
+    : transcriptText;
+
+  return {
+    videoTitle: video.title || '',
+    authorName: video.author?.nickname || '',
+    awemeUrl: video.aweme_url || '',
+    likeCount: statistics.digg_count || statistics.liked_count || 0,
+    commentCount: statistics.comment_count || 0,
+    shareCount: statistics.share_count || 0,
+    localCommentCount: Array.isArray(comments) ? comments.length : 0,
+    transcriptNote: transcriptTruncated
+      ? `转写文本已截断，仅保留前 ${agentTemplates.MAX_TRANSCRIPT_CHARS} 字。`
+      : '转写文本未截断。',
+    transcriptText: promptTranscript,
+    commentsNote: Array.isArray(comments) && comments.length > 0
+      ? `本地评论缓存共 ${comments.length} 条，以下是抽样评论：`
+      : '暂无本地评论缓存。',
+    commentsText,
+    promptOptionsText: agentTemplates.formatPromptOptionsForPrompt(promptOptions),
+  };
+}
+
 async function persistRun(awemeId, run, rootDir) {
   const filePath = getRunPath(awemeId, run.run_id, rootDir);
   const data = { ...run, path: filePath };
@@ -180,6 +216,11 @@ async function createFailureRun(awemeId, template, message, options = {}) {
     input_summary: options.input_summary || {},
     prompt_options: promptOptions,
     result: templateDefinition.normalizeResult({}),
+    agent_config_snapshot: options.agent_config_snapshot,
+    messages: options.messages || [],
+    raw_output: options.raw_output || '',
+    parse: options.parse || { success: false, error: '' },
+    schema_validation: options.schema_validation || { success: false, errors: [] },
     raw_text: '',
     message,
     created_at: new Date().toISOString(),
@@ -286,23 +327,38 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   }
 
   const commentsText = summarizeComments(comments);
-  const messages = templateDefinition.buildPrompt({
+  const agentConfig = await agentTemplateOverrides.resolveTaskAgentConfig(template, {
+    rootDir,
+    agentConfigOverride: options.agentConfigOverride,
+  });
+  const templateValues = createTaskTemplateValues({
     analysisInput,
     transcript,
     commentsText,
-    commentCount: comments.length,
+    comments,
     promptOptions,
   });
+  const messages = agentTemplateOverrides.buildMessagesFromTemplate(agentConfig, templateValues);
+  const agentConfigSnapshot = {
+    templateId: template,
+    source: agentConfig.source,
+    systemPrompt: agentConfig.systemPrompt,
+    userPromptTemplate: agentConfig.userPromptTemplate,
+    resultSchema: agentConfig.resultSchema || {},
+    modelOptions: agentConfig.modelOptions,
+  };
 
   const modelService = options.aiTextModel || defaultAiTextModel;
   let modelResult;
   try {
     modelResult = await modelService.callTextModel({
       messages,
-      temperature: 0.4,
+      temperature: agentConfig.modelOptions.temperature,
       configPath: options.configPath,
       textConfig: options.textConfig,
       fetchImpl: options.fetchImpl,
+      maxRetries: agentConfig.modelOptions.maxRetries,
+      stream: agentConfig.modelOptions.stream,
     });
   } catch (error) {
     modelResult = {
@@ -319,6 +375,8 @@ async function createDouyinAgentRun(awemeId, options = {}) {
       input_summary: inputSummary,
       model: modelResult.model || {},
       promptOptions,
+      agent_config_snapshot: agentConfigSnapshot,
+      messages,
     });
   }
 
@@ -341,6 +399,11 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     steps,
     input_summary: inputSummary,
     prompt_options: promptOptions,
+    agent_config_snapshot: agentConfigSnapshot,
+    messages,
+    raw_output: parsed.raw_output,
+    parse: parsed.parse,
+    schema_validation: parsed.schema_validation,
     result: parsed.result,
     raw_text: parsed.raw_text,
     message: parsed.parsed ? 'Agent 运行完成' : '模型返回未能解析为结构化结果，已保留原始文本。',

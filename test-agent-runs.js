@@ -202,6 +202,47 @@ async function run() {
   assert.ok(generated.run_id.endsWith('-viral_rewrite'));
   assert.ok(fs.existsSync(generated.path));
 
+  const generatedWithOverride = await agentRuns.createDouyinAgentRun(awemeId, {
+    rootDir,
+    template: 'viral_rewrite',
+    agentConfigOverride: {
+      systemPrompt: '临时系统',
+      userPromptTemplate: '标题：{{videoTitle}}\n转写：{{transcriptText}}\n{{promptOptionsText}}',
+      modelOptions: { temperature: 0.6, stream: false, maxRetries: 2 },
+    },
+    aiTextModel: {
+      callTextModel: async ({ messages, temperature, stream, maxRetries }) => {
+        assert.equal(temperature, 0.6);
+        assert.equal(stream, false);
+        assert.equal(maxRetries, 2);
+        assert.equal(messages[0].content, '临时系统');
+        assert.match(messages[1].content, /测试视频/);
+        return {
+          success: true,
+          model: { provider: 'OpenAI', model_id: 'gpt-test' },
+          text: JSON.stringify({
+            summary: '覆盖摘要',
+            viral_points: ['临时 prompt'],
+            audience: '创作者',
+            comment_insights: [],
+            topics: ['配置'],
+            rewrite_script: '覆盖脚本',
+            titles: ['覆盖标题'],
+          }),
+        };
+      },
+    },
+    getLocalComments: () => ({ success: true, count: 0, data: [] }),
+  });
+  assert.equal(generatedWithOverride.agent_config_snapshot.source, 'request');
+  assert.equal(generatedWithOverride.agent_config_snapshot.systemPrompt, '临时系统');
+  assert.ok(Array.isArray(generatedWithOverride.messages));
+  assert.equal(generatedWithOverride.messages[0].content, '临时系统');
+  assert.match(generatedWithOverride.messages[1].content, /测试视频/);
+  assert.equal(generatedWithOverride.raw_output.includes('"summary"'), true);
+  assert.deepEqual(generatedWithOverride.parse, { success: true, error: '' });
+  assert.deepEqual(generatedWithOverride.schema_validation, { success: true, errors: [] });
+
   const runWithPromptOptions = await agentRuns.createDouyinAgentRun(awemeId, {
     rootDir,
     template: 'viral_rewrite',
@@ -240,8 +281,8 @@ async function run() {
 
   const listed = await agentRuns.listDouyinAgentRuns(awemeId, { rootDir });
   assert.strictEqual(listed.success, true);
-  assert.strictEqual(listed.count, 3);
-  assert.strictEqual(listed.data.length, 3);
+  assert.strictEqual(listed.count, 4);
+  assert.strictEqual(listed.data.length, 4);
   assert.strictEqual(listed.data[0].run_id, runWithPromptOptions.run_id);
 
   const detail = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
@@ -552,6 +593,10 @@ async function run() {
   assert.strictEqual(raw.result.summary, '');
   assert.match(raw.message, /未能解析为结构化结果/);
   assert.strictEqual(raw.steps.find(step => step.id === 'comments').message, '暂无本地评论缓存');
+  assert.equal(raw.parse.success, false);
+  assert.match(raw.parse.error, /JSON/);
+  assert.equal(raw.schema_validation.success, false);
+  assert.ok(raw.raw_output);
 
   fs.rmSync(paths.transcript, { force: true });
   const commentInsights = await agentRuns.createDouyinAgentRun(awemeId, {
