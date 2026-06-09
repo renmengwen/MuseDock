@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import {
+  getAgentConfigSourceLabel,
   getAgentResultSections,
   getAgentStepLabel,
+  getDebugSections,
   getRunDisplayTime,
+  getValidationSummary,
 } from './frontend-react/src/utils/agentRuns.js';
 
 const sections = getAgentResultSections({
@@ -67,5 +70,24 @@ assert.equal(
   getRunDisplayTime('2026-06-07T08:09:10+08:00'),
   new Date('2026-06-07T08:09:10+08:00').toLocaleString('zh-CN', { hour12: false }),
 );
+
+assert.equal(getAgentConfigSourceLabel('default'), '默认模板');
+assert.equal(getAgentConfigSourceLabel('override'), '已保存自定义');
+assert.equal(getAgentConfigSourceLabel('request'), '本次临时编辑');
+
+assert.deepEqual(getValidationSummary({ success: false, errors: ['字段缺失'] }), {
+  type: 'error',
+  message: '字段缺失',
+});
+
+const debugSections = getDebugSections({
+  messages: [{ role: 'system', content: '系统' }],
+  raw_output: '{"summary":"ok"}',
+  parse: { success: true, error: '' },
+  schema_validation: { success: true, errors: [] },
+  result: { summary: 'ok' },
+});
+assert.equal(debugSections.length, 5);
+assert.equal(debugSections[0].title, '最终 messages');
 
 console.log('agent run utils tests passed');
