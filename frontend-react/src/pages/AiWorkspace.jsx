@@ -114,8 +114,11 @@ export function AiWorkspace() {
   const [agentTemplates, setAgentTemplates] = useState(AGENT_TEMPLATES);
   const [agentConfig, setAgentConfig] = useState(null);
   const [agentConfigDraft, setAgentConfigDraft] = useState(null);
+  const [agentResultSchemaText, setAgentResultSchemaText] = useState('{}');
+  const [agentMessagesPreview, setAgentMessagesPreview] = useState(null);
   const [agentConfigOpen, setAgentConfigOpen] = useState(false);
   const [agentConfigSaving, setAgentConfigSaving] = useState(false);
+  const [agentConfigPreviewing, setAgentConfigPreviewing] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState('viral_rewrite');
   const [promptOptions, setPromptOptions] = useState(DEFAULT_PROMPT_OPTIONS);
   const [storyboardOptions, setStoryboardOptions] = useState(DEFAULT_STORYBOARD_OPTIONS);
@@ -221,6 +224,8 @@ export function AiWorkspace() {
     const detailJson = await api.getAgentTemplate(nextTemplate);
     setAgentConfig(detailJson.data);
     setAgentConfigDraft(detailJson.data);
+    setAgentResultSchemaText(JSON.stringify(detailJson.data?.resultSchema || {}, null, 2));
+    setAgentMessagesPreview(null);
     const storyboardTemplateJson = await api.getStoryboardTemplate();
     setStoryboardConfig(storyboardTemplateJson.data);
     setStoryboardConfigDraft(storyboardTemplateJson.data);
@@ -285,6 +290,8 @@ export function AiWorkspace() {
       const detailJson = await api.getAgentTemplate(template.id);
       setAgentConfig(detailJson.data);
       setAgentConfigDraft(detailJson.data);
+      setAgentResultSchemaText(JSON.stringify(detailJson.data?.resultSchema || {}, null, 2));
+      setAgentMessagesPreview(null);
       setStatus({ type: 'success', message: 'Agent 模板配置已加载。' });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
@@ -296,13 +303,14 @@ export function AiWorkspace() {
     setAgentConfigSaving(true);
     setStatus({ type: 'loading', message: '正在保存 Agent 模板配置...' });
     try {
-      const json = await api.saveAgentTemplate(agentConfigDraft.id, agentConfigDraft);
+      const resultSchema = JSON.parse(agentResultSchemaText || '{}');
+      const json = await api.saveAgentTemplate(agentConfigDraft.id, { ...agentConfigDraft, resultSchema });
       setAgentConfig(json.data);
       setAgentConfigDraft(json.data);
       await loadAgentTemplates(agentConfigDraft.id);
       setStatus({ type: 'success', message: json.message || 'Agent 模板配置已保存。' });
     } catch (error) {
-      setStatus({ type: 'error', message: error.message });
+      setStatus({ type: 'error', message: error instanceof SyntaxError ? '输出字段说明必须是有效 JSON。' : error.message });
     } finally {
       setAgentConfigSaving(false);
     }
@@ -320,6 +328,33 @@ export function AiWorkspace() {
       setStatus({ type: 'error', message: error.message });
     } finally {
       setAgentConfigSaving(false);
+    }
+  }
+
+  async function previewAgentMessages() {
+    setAgentConfigPreviewing(true);
+    setStatus({ type: 'loading', message: '正在预览 messages...' });
+    try {
+      const resultSchema = JSON.parse(agentResultSchemaText || '{}');
+      const json = await api.previewAgentMessages({
+        ...agentConfigDraft,
+        resultSchema,
+      }, {
+        videoTitle: mediaStatus?.video?.title || activeRun?.input_summary?.title || '示例标题',
+        authorName: mediaStatus?.video?.author?.nickname || activeRun?.input_summary?.author || '示例作者',
+        awemeUrl: selectedAwemeId,
+        transcriptText: '示例转写文本',
+        transcriptNote: '预览时使用示例转写文本。',
+        commentsText: '示例评论',
+        commentsNote: '预览时使用示例评论。',
+        promptOptionsText: '预览时使用当前模板和示例素材变量。',
+      });
+      setAgentMessagesPreview(json.messages || []);
+      setStatus({ type: 'success', message: json.message || 'messages 已生成。' });
+    } catch (error) {
+      setStatus({ type: 'error', message: error instanceof SyntaxError ? '输出字段说明必须是有效 JSON。' : error.message });
+    } finally {
+      setAgentConfigPreviewing(false);
     }
   }
 
@@ -665,6 +700,15 @@ export function AiWorkspace() {
                   />
                 </label>
                 <label>
+                  <span>输出字段说明 JSON</span>
+                  <textarea
+                    value={agentResultSchemaText}
+                    onChange={event => setAgentResultSchemaText(event.target.value)}
+                    disabled={loading || running || agentConfigSaving || agentConfigPreviewing}
+                    placeholder='例如：{"summary":"string"}'
+                  />
+                </label>
+                <label>
                   <span>temperature</span>
                   <Input
                     type="number"
@@ -698,9 +742,15 @@ export function AiWorkspace() {
                   />
                 </label>
                 <div className="videoProjectActions">
-                  <Button size="sm" variant="secondary" disabled={agentConfigSaving} onClick={restoreAgentConfig}>恢复默认</Button>
-                  <Button size="sm" disabled={agentConfigSaving} onClick={saveAgentConfig}>保存为当前模板配置</Button>
+                  <Button size="sm" variant="secondary" disabled={loading || running || agentConfigSaving || agentConfigPreviewing} onClick={restoreAgentConfig}>恢复默认</Button>
+                  <Button size="sm" variant="secondary" disabled={loading || running || agentConfigSaving || agentConfigPreviewing} onClick={previewAgentMessages}>
+                    {agentConfigPreviewing ? '预览中...' : '预览 messages'}
+                  </Button>
+                  <Button size="sm" disabled={loading || running || agentConfigSaving || agentConfigPreviewing} onClick={saveAgentConfig}>保存为当前模板配置</Button>
                 </div>
+                {agentMessagesPreview ? (
+                  <pre>{JSON.stringify(agentMessagesPreview, null, 2)}</pre>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -790,6 +840,10 @@ export function AiWorkspace() {
               >
                 <strong>{run.template || 'viral_rewrite'}</strong>
                 <span>{getRunDisplayTime(run.created_at || run.updated_at)}</span>
+                {!run.parse?.success ? <span className="runIssueBadge">解析失败</span> : null}
+                {run.schema_validation && !run.schema_validation.success ? <span className="runIssueBadge">校验失败</span> : null}
+                {run.storyboard_parse && !run.storyboard_parse.success ? <span className="runIssueBadge">分镜解析失败</span> : null}
+                {run.storyboard_schema_validation && !run.storyboard_schema_validation.success ? <span className="runIssueBadge">分镜校验失败</span> : null}
               </button>
             )) : <p className="mutedText">暂无历史运行</p>}
           </div>
@@ -1002,8 +1056,8 @@ export function AiWorkspace() {
                             流式调用
                           </label>
                           <div className="videoProjectActions">
-                            <Button size="sm" variant="secondary" disabled={storyboardConfigSaving} onClick={restoreStoryboardConfig}>恢复默认</Button>
-                            <Button size="sm" disabled={storyboardConfigSaving} onClick={saveStoryboardConfig}>保存分镜 Agent 配置</Button>
+                            <Button size="sm" variant="secondary" disabled={storyboardConfigSaving || storyboardRunning || videoBusy} onClick={restoreStoryboardConfig}>恢复默认</Button>
+                            <Button size="sm" disabled={storyboardConfigSaving || storyboardRunning || videoBusy} onClick={saveStoryboardConfig}>保存分镜 Agent 配置</Button>
                           </div>
                         </div>
                       ) : null}

@@ -47,6 +47,17 @@ const overrides = require('./server/services/agentTemplateOverrides');
   assert.equal(mergedRequest.modelOptions.temperature, 0.7);
   assert.equal(mergedRequest.modelOptions.stream, false);
 
+  const invalidRequest = await overrides.resolveTaskAgentConfig('viral_rewrite', {
+    agentConfigOverride: {
+      systemPrompt: '',
+      userPromptTemplate: '临时 {{videoTitle}}',
+      modelOptions: { temperature: 'bad' },
+    },
+    rootDir,
+  });
+  assert.equal(invalidRequest.success, false);
+  assert.match(invalidRequest.message, /system prompt|temperature/);
+
   const messages = overrides.buildMessagesFromTemplate({
     systemPrompt: '系统',
     userPromptTemplate: '标题：{{videoTitle}}\n未知：{{missing}}\n{{promptOptionsText}}',
@@ -78,6 +89,17 @@ const overrides = require('./server/services/agentTemplateOverrides');
   assert.equal(savedStoryboard.success, true);
   assert.equal(savedStoryboard.data.source, 'override');
   assert.equal(savedStoryboard.data.useFrameProfile, false);
+
+  const invalidStoryboardRequest = await overrides.resolveStoryboardAgentConfig({
+    storyboardConfigOverride: {
+      systemPrompt: '分镜系统',
+      userPromptTemplate: '',
+      modelOptions: { maxRetries: 99 },
+    },
+    rootDir,
+  });
+  assert.equal(invalidStoryboardRequest.success, false);
+  assert.match(invalidStoryboardRequest.message, /user prompt|maxRetries/);
 
   console.log('agent template override tests passed');
 })();

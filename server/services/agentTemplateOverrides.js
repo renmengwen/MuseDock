@@ -38,12 +38,48 @@ function normalizeModelOptions(value = {}, fallback = {}) {
   };
 }
 
-function validateEditableConfig(config) {
+function validateModelOptions(value = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const errors = [];
+
+  if ('temperature' in source) {
+    const temperature = Number(source.temperature);
+    if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+      errors.push('temperature 必须是 0 到 2 之间的数字。');
+    }
+  }
+  if ('stream' in source && typeof source.stream !== 'boolean') {
+    errors.push('stream 必须是布尔值。');
+  }
+  if ('maxRetries' in source) {
+    const maxRetries = Number(source.maxRetries);
+    if (!Number.isFinite(maxRetries) || maxRetries < 0 || maxRetries > 5 || !Number.isInteger(maxRetries)) {
+      errors.push('maxRetries 必须是 0 到 5 之间的整数。');
+    }
+  }
+
+  return { success: errors.length === 0, errors };
+}
+
+function validateEditableConfig(config, options = {}) {
   if (!sanitizeText(config.systemPrompt)) {
     return { success: false, message: 'system prompt 不能为空。' };
   }
   if (!sanitizeText(config.userPromptTemplate)) {
     return { success: false, message: 'user prompt 模板不能为空。' };
+  }
+  const modelValidation = validateModelOptions(config.modelOptions || {});
+  if (!modelValidation.success) {
+    return {
+      success: false,
+      message: modelValidation.errors.join(' '),
+      errors: modelValidation.errors,
+    };
+  }
+  if (options.requireResultSchema && config.resultSchema !== undefined) {
+    if (!config.resultSchema || typeof config.resultSchema !== 'object' || Array.isArray(config.resultSchema)) {
+      return { success: false, message: '输出字段说明必须是 JSON 对象。' };
+    }
   }
   return { success: true, message: '' };
 }
@@ -85,6 +121,16 @@ function buildMessagesFromTemplate(config, values = {}) {
     { role: 'system', content: sanitizeText(config.systemPrompt, 20000) },
     { role: 'user', content: replaceTemplateVars(config.userPromptTemplate, values) },
   ];
+}
+
+function createPreviewMessages(config, values = {}) {
+  const validation = validateEditableConfig(config || {});
+  if (!validation.success) return validation;
+  return {
+    success: true,
+    message: 'messages 已生成。',
+    messages: buildMessagesFromTemplate(config, values),
+  };
 }
 
 async function listTaskAgentConfigs(options = {}) {
@@ -143,6 +189,8 @@ async function resolveTaskAgentConfig(id, options = {}) {
     ? options.agentConfigOverride
     : null;
   if (!requestOverride) return detail.data;
+  const validation = validateEditableConfig(requestOverride, { requireResultSchema: true });
+  if (!validation.success) return validation;
   const merged = normalizeTaskConfig(requestOverride, detail.data);
   return { ...merged, source: 'request', hasOverride: detail.data.hasOverride };
 }
@@ -189,6 +237,8 @@ async function resolveStoryboardAgentConfig(options = {}) {
     ? options.storyboardConfigOverride
     : null;
   if (!requestOverride) return detail.data;
+  const validation = validateEditableConfig(requestOverride);
+  if (!validation.success) return validation;
   const merged = normalizeStoryboardConfig(requestOverride, detail.data);
   return { ...merged, source: 'request', hasOverride: detail.data.hasOverride };
 }
@@ -205,6 +255,8 @@ module.exports = {
   clearStoryboardAgentOverride,
   resolveStoryboardAgentConfig,
   normalizeModelOptions,
+  validateEditableConfig,
+  createPreviewMessages,
   buildMessagesFromTemplate,
   replaceTemplateVars,
 };

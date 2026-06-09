@@ -203,6 +203,7 @@ a { color: #fe2c55; text-decoration: none; }
 .agentRunItem.active { border-color: #fe2c55; background: #fff5f7; box-shadow: 0 0 0 1px #fe2c55 inset; }
 .agentRunItem strong { font-size: 13px; }
 .agentRunItem span { color: #69717e; font-size: 12px; }
+.runIssueBadge { display: inline-flex; width: fit-content; align-items: center; padding: 2px 6px; border-radius: 999px; background: #fff1f2; color: #c41f3e !important; font-size: 11px !important; font-weight: 700; }
 .agentResultPanel { max-height: calc(100vh - 180px); overflow: auto; }
 .agentResultTitleRow { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 10px; }
 .agentResultTitleRow h3 { margin: 0; }

@@ -109,11 +109,13 @@ function makeStep(id, label, status, message = '') {
 
 function parseModelText(text, templateDefinition) {
   try {
+    const rawValue = JSON.parse(text);
+    const schemaValidation = validateTaskAgentResult(rawValue, templateDefinition);
     return {
       parsed: true,
       parse: { success: true, error: '' },
-      schema_validation: { success: true, errors: [] },
-      result: templateDefinition.normalizeResult(JSON.parse(text)),
+      schema_validation: schemaValidation,
+      result: templateDefinition.normalizeResult(rawValue),
       raw_text: '',
       raw_output: typeof text === 'string' ? text : '',
     };
@@ -127,6 +129,39 @@ function parseModelText(text, templateDefinition) {
       raw_output: typeof text === 'string' ? text : '',
     };
   }
+}
+
+function validateTaskAgentResult(value, templateDefinition) {
+  const result = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  const errors = [];
+
+  if (!result) {
+    return { success: false, errors: ['模型返回 JSON 必须是对象。'] };
+  }
+
+  const stringFieldsByTemplate = {
+    viral_rewrite: ['summary', 'audience', 'rewrite_script'],
+    comment_insights: ['summary', 'sentiment'],
+  };
+  const arrayFieldsByTemplate = {
+    viral_rewrite: ['viral_points', 'comment_insights', 'topics', 'titles'],
+    comment_insights: ['pain_points', 'questions', 'content_opportunities', 'reply_suggestions'],
+  };
+  const stringFields = stringFieldsByTemplate[templateDefinition.id] || [];
+  const arrayFields = arrayFieldsByTemplate[templateDefinition.id] || [];
+
+  for (const field of stringFields) {
+    if (typeof result[field] !== 'string' || !result[field].trim()) {
+      errors.push(`${field} 必须是非空字符串。`);
+    }
+  }
+  for (const field of arrayFields) {
+    if (!Array.isArray(result[field]) || result[field].some(item => typeof item !== 'string')) {
+      errors.push(`${field} 必须是字符串数组。`);
+    }
+  }
+
+  return { success: errors.length === 0, errors };
 }
 
 function summarizeComments(comments = []) {
@@ -332,6 +367,15 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     rootDir,
     agentConfigOverride: options.agentConfigOverride,
   });
+  if (!agentConfig || agentConfig.success === false) {
+    steps.push(makeStep('config', '校验 Agent 配置', 'failed', agentConfig?.message || 'Agent 配置校验失败'));
+    return createFailureRun(awemeId, template, agentConfig?.message || 'Agent 配置校验失败。', {
+      rootDir,
+      steps,
+      input_summary: inputSummary,
+      promptOptions,
+    });
+  }
   const templateValues = createTaskTemplateValues({
     analysisInput,
     transcript,
@@ -642,6 +686,14 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     rootDir: options.rootDir,
     storyboardConfigOverride: options.storyboardConfigOverride,
   });
+  if (!storyboardConfig || storyboardConfig.success === false) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: storyboardConfig?.message || '分镜 Agent 配置校验失败。',
+    };
+  }
   const result = await agent.createStoryboard({
     rewriteScript,
     captions,
@@ -810,7 +862,7 @@ async function updateDouyinRunStoryboard(awemeId, runId, storyboard, options = {
     ...run,
     storyboard: normalized,
     storyboard_schema_validation: { success: true, errors: [] },
-    video: run.video?.status === 'rendering' ? run.video : null,
+    video: null,
     updated_at: new Date().toISOString(),
   };
   await writeJson(runPath, updatedRun);

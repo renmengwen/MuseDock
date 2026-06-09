@@ -143,6 +143,27 @@ async function run() {
   assert.equal(malformed.success, true);
   assert.equal(malformed.storyboard.scenes.length, 2);
   assert.equal(malformed.raw_parse_failed, true);
+
+  const invalidRawScene = await storyboardAgent.createStoryboard({
+    rewriteScript: 'first line. second line.',
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: 'first line.' },
+      { index: 2, start: 1, end: 2, duration: 1, text: 'second line.' },
+    ],
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        text: JSON.stringify({
+          template: 'ai_storyboard_cards',
+          scenes: [{ caption_indexes: [999] }],
+        }),
+      }),
+    },
+  });
+  assert.equal(invalidRawScene.success, true);
+  assert.equal(invalidRawScene.storyboard.status, 'done');
+  assert.equal(invalidRawScene.schema_validation.success, false);
+  assert.ok(invalidRawScene.schema_validation.errors.some(item => item.includes('不存在')));
 }
 
 run().then(() => {

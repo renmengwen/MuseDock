@@ -40,6 +40,11 @@ router.delete('/storyboard-template/override', async (req, res) => {
   return res.json(result);
 });
 
+router.post('/messages/preview', async (req, res) => {
+  const result = agentTemplateOverrides.createPreviewMessages(req.body?.config || {}, req.body?.values || {});
+  return res.status(result.success ? 200 : 400).json(result);
+});
+
 router.post('/douyin/:aweme_id/runs', async (req, res) => {
   try {
     const result = await agentRuns.createDouyinAgentRun(req.params.aweme_id, {

@@ -282,6 +282,9 @@ async function createStoryboard(options = {}) {
   }
 
   const parsed = parseJson(modelResult.text);
+  const schemaValidation = parsed.parsed
+    ? storyboardSchema.validateStoryboardEditableInput({ storyboard: parsed.value, captions })
+    : { success: false, errors: ['AI 分镜返回不是有效 JSON，无法完成结构化校验。'] };
   const storyboard = storyboardSchema.normalizeStoryboard({
     storyboard: parsed.value,
     captions,
@@ -298,9 +301,7 @@ async function createStoryboard(options = {}) {
     parse: parsed.parsed
       ? { success: true, error: '' }
       : { success: false, error: 'AI 分镜返回不是有效 JSON。' },
-    schema_validation: storyboard.status === 'done'
-      ? { success: true, errors: [] }
-      : { success: false, errors: [storyboard.message || '分镜生成失败。'] },
+    schema_validation: schemaValidation,
     raw: parsed.value,
     raw_parse_failed: !parsed.parsed,
   };

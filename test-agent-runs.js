@@ -243,6 +243,45 @@ async function run() {
   assert.deepEqual(generatedWithOverride.parse, { success: true, error: '' });
   assert.deepEqual(generatedWithOverride.schema_validation, { success: true, errors: [] });
 
+  const invalidShapeRun = await agentRuns.createDouyinAgentRun(awemeId, {
+    rootDir,
+    template: 'viral_rewrite',
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        model: { provider: 'OpenAI', model_id: 'gpt-test' },
+        text: JSON.stringify({
+          summary: 123,
+          viral_points: '不是数组',
+        }),
+      }),
+    },
+    getLocalComments: () => ({ success: true, count: 0, data: [] }),
+  });
+  assert.equal(invalidShapeRun.success, true);
+  assert.equal(invalidShapeRun.parse.success, true);
+  assert.equal(invalidShapeRun.schema_validation.success, false);
+  assert.ok(invalidShapeRun.schema_validation.errors.some(item => item.includes('summary')));
+  assert.ok(invalidShapeRun.schema_validation.errors.some(item => item.includes('rewrite_script')));
+
+  const invalidOverrideRun = await agentRuns.createDouyinAgentRun(awemeId, {
+    rootDir,
+    template: 'viral_rewrite',
+    agentConfigOverride: {
+      systemPrompt: '',
+      userPromptTemplate: '标题：{{videoTitle}}',
+      modelOptions: { temperature: 'bad' },
+    },
+    aiTextModel: {
+      callTextModel: async () => {
+        throw new Error('不应调用模型');
+      },
+    },
+    getLocalComments: () => ({ success: true, count: 0, data: [] }),
+  });
+  assert.equal(invalidOverrideRun.success, false);
+  assert.match(invalidOverrideRun.message, /system prompt|temperature/);
+
   const runWithPromptOptions = await agentRuns.createDouyinAgentRun(awemeId, {
     rootDir,
     template: 'viral_rewrite',
@@ -281,8 +320,8 @@ async function run() {
 
   const listed = await agentRuns.listDouyinAgentRuns(awemeId, { rootDir });
   assert.strictEqual(listed.success, true);
-  assert.strictEqual(listed.count, 4);
-  assert.strictEqual(listed.data.length, 4);
+  assert.strictEqual(listed.count, 6);
+  assert.strictEqual(listed.data.length, 6);
   assert.strictEqual(listed.data[0].run_id, runWithPromptOptions.run_id);
 
   const detail = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
@@ -413,6 +452,45 @@ async function run() {
   assert.equal(storyboardResult.storyboard_parse.success, true);
   assert.equal(storyboardResult.storyboard_schema_validation.success, true);
 
+  const invalidStoryboardSchemaResult = await agentRuns.createDouyinRunStoryboard(awemeId, generated.run_id, {
+    rootDir,
+    storyboardAgent: {
+      createStoryboard: async ({ captions }) => ({
+        success: true,
+        message: 'AI 分镜已生成。',
+        model: { provider: 'OpenAI', model_id: 'gpt-test' },
+        config_snapshot: { source: 'default' },
+        messages: [],
+        raw_output: '{"template":"ai_storyboard_cards","scenes":[{"caption_indexes":[999]}]}',
+        parse: { success: true, error: '' },
+        schema_validation: {
+          success: false,
+          errors: ['分镜 1 引用了不存在的字幕 999。', '分镜 1 标题不能为空。'],
+        },
+        raw: { template: 'ai_storyboard_cards', scenes: [{ caption_indexes: [999] }] },
+        storyboard: {
+          status: 'done',
+          template: 'ai_storyboard_cards',
+          scenes: [
+            {
+              index: 1,
+              caption_indexes: [1],
+              start: 0,
+              end: 1.25,
+              duration: 1.25,
+              headline: 'fallback',
+              captions,
+            },
+          ],
+        },
+      }),
+    },
+  });
+  assert.equal(invalidStoryboardSchemaResult.success, true);
+  assert.equal(invalidStoryboardSchemaResult.storyboard.status, 'done');
+  assert.equal(invalidStoryboardSchemaResult.storyboard_schema_validation.success, false);
+  assert.ok(invalidStoryboardSchemaResult.storyboard_schema_validation.errors.some(item => item.includes('不存在')));
+
   const invalidStoryboardUpdate = await agentRuns.updateDouyinRunStoryboard(awemeId, generated.run_id, {
     template: 'ai_storyboard_cards',
     scenes: [
@@ -519,6 +597,23 @@ async function run() {
 
   const detailAfterVideo = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
   assert.equal(detailAfterVideo.data.video.status, 'rendered');
+
+  const savedAfterRenderedVideo = await agentRuns.updateDouyinRunStoryboard(awemeId, generated.run_id, {
+    template: 'ai_storyboard_cards',
+    scenes: [
+      {
+        caption_indexes: [1],
+        headline: '再次编辑',
+        visual_type: 'text_card',
+        layout: 'center_focus',
+        background_prompt: '再次编辑背景',
+        emphasis_words: [],
+      },
+    ],
+  }, { rootDir });
+  assert.equal(savedAfterRenderedVideo.success, true);
+  const detailAfterStoryboardEdit = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
+  assert.equal(detailAfterStoryboardEdit.data.video, null);
 
   const renderingGuardResult = await agentRuns.renderDouyinRunHyperframesVideo(awemeId, generated.run_id, {
     rootDir,
@@ -815,6 +910,21 @@ async function run() {
     assert.strictEqual(deleteStoryboardTemplateResponse.statusCode, 200);
     assert.strictEqual(deleteStoryboardTemplateResponse.body.success, true);
     assert.match(deleteStoryboardTemplateResponse.body.message, /恢复默认/);
+
+    const previewResponse = await requestJson(server, 'POST', '/api/agents/messages/preview', {
+      config: {
+        systemPrompt: '预览系统',
+        userPromptTemplate: '标题：{{videoTitle}}',
+      },
+      values: { videoTitle: '预览标题' },
+    });
+    assert.strictEqual(previewResponse.statusCode, 200);
+    assert.strictEqual(previewResponse.body.success, true);
+    assert.deepStrictEqual(previewResponse.body.messages, [
+      { role: 'system', content: '预览系统' },
+      { role: 'user', content: '标题：预览标题' },
+    ]);
+    assert.match(previewResponse.body.message, /messages/);
 
     const response = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs`, {
       template: 'viral_rewrite',
