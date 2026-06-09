@@ -4,7 +4,13 @@ import { api } from '../api/client.js';
 import { Status } from '../components/Status.jsx';
 import { Button } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
-import { getAgentResultSections, getAgentStepLabel, getRunDisplayTime } from '../utils/agentRuns.js';
+import {
+  getAgentConfigSourceLabel,
+  getAgentResultSections,
+  getAgentStepLabel,
+  getDebugSections,
+  getRunDisplayTime,
+} from '../utils/agentRuns.js';
 import { DEFAULT_PROMPT_OPTIONS, DEFAULT_STORYBOARD_OPTIONS } from '../utils/aiWorkspaceDefaults.js';
 import { getAwemeIdFromSearch } from '../utils/workspaceParams.js';
 
@@ -37,8 +43,10 @@ const TTS_VOICES = [
 
 const DEFAULT_TTS_STYLE = '请使用自然、清晰、适合短视频口播的语气。';
 
-function getTemplateMeta(templateId) {
-  return AGENT_TEMPLATES.find(template => template.id === templateId) || AGENT_TEMPLATES[0];
+function getTemplateMeta(templateId, templates = AGENT_TEMPLATES) {
+  return templates.find(template => template.id === templateId)
+    || AGENT_TEMPLATES.find(template => template.id === templateId)
+    || AGENT_TEMPLATES[0];
 }
 
 function formatCaptionTime(value) {
@@ -96,6 +104,11 @@ export function AiWorkspace() {
   const [videoRendering, setVideoRendering] = useState(false);
   const [ttsVoice, setTtsVoice] = useState('mimo_default');
   const [ttsStylePrompt, setTtsStylePrompt] = useState(DEFAULT_TTS_STYLE);
+  const [agentTemplates, setAgentTemplates] = useState(AGENT_TEMPLATES);
+  const [agentConfig, setAgentConfig] = useState(null);
+  const [agentConfigDraft, setAgentConfigDraft] = useState(null);
+  const [agentConfigOpen, setAgentConfigOpen] = useState(false);
+  const [agentConfigSaving, setAgentConfigSaving] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState('viral_rewrite');
   const [promptOptions, setPromptOptions] = useState(DEFAULT_PROMPT_OPTIONS);
   const [storyboardOptions, setStoryboardOptions] = useState(DEFAULT_STORYBOARD_OPTIONS);
@@ -172,6 +185,7 @@ export function AiWorkspace() {
       const [mediaJson, runsJson] = await Promise.all([
         api.getDouyinMediaStatus(value),
         api.listDouyinAgentRuns(value),
+        loadAgentTemplates(selectedTemplate),
       ]);
       const runList = runsJson.data || [];
       setMediaStatus(mediaJson);
@@ -185,6 +199,15 @@ export function AiWorkspace() {
     }
   }
 
+  async function loadAgentTemplates(nextTemplate = selectedTemplate) {
+    const listJson = await api.listAgentTemplates();
+    const nextTemplates = listJson.data || [];
+    setAgentTemplates(nextTemplates.length ? nextTemplates : AGENT_TEMPLATES);
+    const detailJson = await api.getAgentTemplate(nextTemplate);
+    setAgentConfig(detailJson.data);
+    setAgentConfigDraft(detailJson.data);
+  }
+
   async function runAgent() {
     const value = selectedAwemeId.trim();
     if (!value) {
@@ -193,10 +216,16 @@ export function AiWorkspace() {
     }
 
     setRunning(true);
-    const templateMeta = getTemplateMeta(selectedTemplate);
-    setStatus({ type: 'loading', message: `正在执行${templateMeta.label}，正在读取素材上下文并请求文本模型...` });
+    const templateMeta = getTemplateMeta(selectedTemplate, agentTemplates);
+    const override = agentConfigDraft ? {
+      systemPrompt: agentConfigDraft.systemPrompt,
+      userPromptTemplate: agentConfigDraft.userPromptTemplate,
+      resultSchema: agentConfigDraft.resultSchema || {},
+      modelOptions: agentConfigDraft.modelOptions || {},
+    } : null;
+    setStatus({ type: 'loading', message: `正在运行当前 Agent：${templateMeta.label}...` });
     try {
-      const json = await api.createDouyinAgentRun(value, selectedTemplate, promptOptions);
+      const json = await api.createDouyinAgentRun(value, selectedTemplate, promptOptions, override);
       setActiveRun(json.run || json);
       const runsJson = await api.listDouyinAgentRuns(value);
       const runList = runsJson.data || [];
@@ -215,6 +244,65 @@ export function AiWorkspace() {
 
   function updatePromptOption(key, value) {
     setPromptOptions(prev => ({ ...prev, [key]: value }));
+  }
+
+  function updateAgentConfigDraft(key, value) {
+    setAgentConfigDraft(prev => ({ ...(prev || {}), [key]: value }));
+  }
+
+  function updateAgentModelOption(key, value) {
+    setAgentConfigDraft(prev => ({
+      ...(prev || {}),
+      modelOptions: {
+        ...((prev && prev.modelOptions) || {}),
+        [key]: key === 'stream' ? Boolean(value) : value,
+      },
+    }));
+  }
+
+  async function selectTemplate(template) {
+    setSelectedTemplate(template.id);
+    setStatus({ type: 'loading', message: '正在加载 Agent 模板配置...' });
+    try {
+      const detailJson = await api.getAgentTemplate(template.id);
+      setAgentConfig(detailJson.data);
+      setAgentConfigDraft(detailJson.data);
+      setStatus({ type: 'success', message: 'Agent 模板配置已加载。' });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message });
+    }
+  }
+
+  async function saveAgentConfig() {
+    if (!agentConfigDraft?.id) return;
+    setAgentConfigSaving(true);
+    setStatus({ type: 'loading', message: '正在保存 Agent 模板配置...' });
+    try {
+      const json = await api.saveAgentTemplate(agentConfigDraft.id, agentConfigDraft);
+      setAgentConfig(json.data);
+      setAgentConfigDraft(json.data);
+      await loadAgentTemplates(agentConfigDraft.id);
+      setStatus({ type: 'success', message: json.message || 'Agent 模板配置已保存。' });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message });
+    } finally {
+      setAgentConfigSaving(false);
+    }
+  }
+
+  async function restoreAgentConfig() {
+    if (!selectedTemplate) return;
+    setAgentConfigSaving(true);
+    setStatus({ type: 'loading', message: '正在恢复默认 Agent 模板配置...' });
+    try {
+      const json = await api.restoreAgentTemplate(selectedTemplate);
+      await loadAgentTemplates(selectedTemplate);
+      setStatus({ type: 'success', message: json.message || '已恢复默认 Agent 模板配置。' });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message });
+    } finally {
+      setAgentConfigSaving(false);
+    }
   }
 
   function updateStoryboardOption(key, value) {
@@ -387,7 +475,7 @@ export function AiWorkspace() {
           disabled={loading || running}
         />
         <Button variant="secondary" disabled={loading || running} onClick={loadWorkspace}>加载工作台</Button>
-        <Button disabled={loading || running} onClick={runAgent}>执行爆款拆解</Button>
+        <Button disabled={loading || running} onClick={runAgent}>运行当前 Agent</Button>
       </div>
 
       <Status status={status} />
@@ -395,20 +483,86 @@ export function AiWorkspace() {
 
       <section className="agentWorkbench">
         <div className="agentPanel">
-          <h3>任务模板</h3>
-          {AGENT_TEMPLATES.map(template => (
+          <h3>Agent 配置</h3>
+          {agentTemplates.map(template => (
             <div className={`agentTemplate ${selectedTemplate === template.id ? 'active' : ''}`} key={template.id}>
               <strong>{template.label}</strong>
               <p>{template.description}</p>
+              <span className="configSource">{getAgentConfigSourceLabel(template.source)}</span>
               <Button
                 variant={selectedTemplate === template.id ? 'default' : 'secondary'}
                 disabled={loading || running}
-                onClick={() => setSelectedTemplate(template.id)}
+                onClick={() => selectTemplate(template)}
               >
                 {selectedTemplate === template.id ? '已选择' : '选择模板'}
               </Button>
             </div>
           ))}
+          <div className="agentOptionGroup">
+            <div className="agentResultSectionHeader">
+              <h4>高级编辑</h4>
+              <Button size="sm" variant="secondary" onClick={() => setAgentConfigOpen(value => !value)}>
+                {agentConfigOpen ? '收起' : '展开'}
+              </Button>
+            </div>
+            {agentConfigOpen && agentConfigDraft ? (
+              <div className="promptEditor">
+                <label>
+                  <span>system prompt</span>
+                  <textarea
+                    value={agentConfigDraft.systemPrompt || ''}
+                    onChange={event => updateAgentConfigDraft('systemPrompt', event.target.value)}
+                    disabled={loading || running || agentConfigSaving}
+                  />
+                </label>
+                <label>
+                  <span>user prompt 模板</span>
+                  <textarea
+                    value={agentConfigDraft.userPromptTemplate || ''}
+                    onChange={event => updateAgentConfigDraft('userPromptTemplate', event.target.value)}
+                    disabled={loading || running || agentConfigSaving}
+                  />
+                </label>
+                <label>
+                  <span>temperature</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="2"
+                    step="0.1"
+                    value={agentConfigDraft.modelOptions?.temperature ?? 0.4}
+                    onChange={event => updateAgentModelOption('temperature', Number(event.target.value))}
+                    disabled={loading || running || agentConfigSaving}
+                  />
+                </label>
+                <label className="inlineCheck">
+                  <input
+                    type="checkbox"
+                    checked={agentConfigDraft.modelOptions?.stream !== false}
+                    onChange={event => updateAgentModelOption('stream', event.target.checked)}
+                    disabled={loading || running || agentConfigSaving}
+                  />
+                  流式调用
+                </label>
+                <label>
+                  <span>maxRetries</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="5"
+                    step="1"
+                    value={agentConfigDraft.modelOptions?.maxRetries ?? 1}
+                    onChange={event => updateAgentModelOption('maxRetries', Number(event.target.value))}
+                    disabled={loading || running || agentConfigSaving}
+                  />
+                </label>
+                <div className="videoProjectActions">
+                  <Button size="sm" variant="secondary" disabled={agentConfigSaving} onClick={restoreAgentConfig}>恢复默认</Button>
+                  <Button size="sm" disabled={agentConfigSaving} onClick={saveAgentConfig}>保存为当前模板配置</Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
           <div className="agentOptionGroup">
             <h4>创作 brief</h4>
             <Input
@@ -462,7 +616,7 @@ export function AiWorkspace() {
             />
           </div>
           <Button disabled={loading || running} onClick={runAgent}>
-            {running ? '执行中...' : getTemplateMeta(selectedTemplate).actionLabel}
+            {running ? '执行中...' : getTemplateMeta(selectedTemplate, agentTemplates).actionLabel || '运行当前 Agent'}
           </Button>
 
           <h3>素材状态</h3>
@@ -509,6 +663,7 @@ export function AiWorkspace() {
             <>
               <div className="agentRunMeta">
                 <span>{activeRun.template || 'viral_rewrite'}</span>
+                <span>{getAgentConfigSourceLabel(activeRun.agent_config_snapshot?.source)}</span>
                 <strong className={`stepBadge ${activeRun.status || 'pending'}`}>{getAgentStepLabel(activeRun.status)}</strong>
                 <span>{getRunDisplayTime(activeRun.created_at || activeRun.updated_at)}</span>
               </div>
@@ -518,6 +673,7 @@ export function AiWorkspace() {
                   ['result', '文案'],
                   ['tts', '配音'],
                   ['video', '成片'],
+                  ['debug', '调试'],
                 ].map(([id, label]) => (
                   <button
                     key={id}
@@ -632,6 +788,17 @@ export function AiWorkspace() {
                     </>
                   ) : null}
                 </section>
+              ) : null}
+
+              {resultTab === 'debug' ? (
+                <>
+                  {getDebugSections(activeRun).map(section => (
+                    <section className="agentResultSection" key={section.key}>
+                      <h4>{section.title}</h4>
+                      <pre>{section.text || '暂无内容'}</pre>
+                    </section>
+                  ))}
+                </>
               ) : null}
 
               {resultTab === 'video' ? (

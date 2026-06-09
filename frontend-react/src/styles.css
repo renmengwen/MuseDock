@@ -181,6 +181,7 @@ a { color: #fe2c55; text-decoration: none; }
 .agentTemplate.active { border-color: #fe2c55; background: #fff5f7; box-shadow: 0 0 0 1px #fe2c55 inset; }
 .agentTemplate strong { color: #fe2c55; font-size: 15px; }
 .agentTemplate p { margin: 0; color: #69717e; font-size: 13px; line-height: 1.6; }
+.configSource { color: #69717e; font-size: 12px; font-weight: 700; }
 .agentOptionGroup { display: grid; gap: 8px; margin: 12px 0; padding: 12px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
 .agentOptionGroup h4 { margin: 0; color: #30343b; font-size: 14px; }
 .agentOptionGroup textarea { min-height: 78px; resize: vertical; border: 1px solid #d7dce3; border-radius: 8px; padding: 9px 10px; font: inherit; line-height: 1.5; color: #30343b; background: #fff; }
@@ -206,7 +207,7 @@ a { color: #fe2c55; text-decoration: none; }
 .agentResultTitleRow { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 10px; }
 .agentResultTitleRow h3 { margin: 0; }
 .agentResultTitleRow span { min-width: 0; color: #858d9a; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agentResultTabs { position: sticky; top: -18px; z-index: 4; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 8px 0 10px; background: #fff; border-bottom: 1px solid #edf0f4; }
+.agentResultTabs { position: sticky; top: -18px; z-index: 4; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 8px 0 10px; background: #fff; border-bottom: 1px solid #edf0f4; }
 .agentResultTab { min-width: 0; height: 32px; border: 1px solid #d9dde5; border-radius: 8px; background: #fff; color: #5f6876; font-size: 13px; font-weight: 700; cursor: pointer; }
 .agentResultTab:hover { border-color: #fe8aa1; color: #fe2c55; }
 .agentResultTab.active { border-color: #fe2c55; background: #fff5f7; color: #fe2c55; box-shadow: 0 0 0 1px #fe2c55 inset; }
@@ -227,6 +228,11 @@ a { color: #fe2c55; text-decoration: none; }
 .ttsPlayback audio { width: 100%; min-height: 40px; }
 .videoProjectPanel { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border: 1px solid #edf0f4; border-radius: 8px; background: #fff; }
 .videoProjectActions { display: flex; gap: 8px; flex-wrap: wrap; }
+.promptEditor { display: grid; gap: 12px; }
+.promptEditor label { display: grid; gap: 6px; color: #30343b; font-size: 13px; font-weight: 700; }
+.promptEditor label span { color: #69717e; font-size: 12px; }
+.promptEditor textarea { min-height: 160px; resize: vertical; border: 1px solid #d7dce3; border-radius: 8px; padding: 10px; font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; color: #30343b; background: #fff; }
+.promptEditor textarea:disabled { color: #8a93a2; background: #f4f6f8; }
 .storyboardList { display: grid; gap: 8px; }
 .storyboardItem { display: grid; gap: 6px; padding: 10px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
 .storyboardItem div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
