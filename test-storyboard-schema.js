@@ -87,6 +87,104 @@ function run() {
   assert.equal(visualDsl.scenes[0].visual_scene.motion[0].effect, 'stagger_reveal');
   assert.equal(visualDsl.scenes[0].visual_scene.focus.text, '流程太重');
 
+  const objectsKeptWhenMotionFallback = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: 'keep objects',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: 'abstract background',
+          emphasis_words: ['fallback word'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ id: 'node-keep', type: 'node', text: 'Keep Node' }],
+            motion: [{ target: 'node-keep', effect: 'unknown_effect', delay: 0.1 }],
+          },
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(objectsKeptWhenMotionFallback.scenes[0].visual_scene.objects.length, 1);
+  assert.equal(objectsKeptWhenMotionFallback.scenes[0].visual_scene.objects[0].id, 'node-keep');
+  assert.equal(objectsKeptWhenMotionFallback.scenes[0].visual_scene.motion.length, 2);
+  assert.equal(objectsKeptWhenMotionFallback.scenes[0].visual_scene.motion[0].effect, 'stagger_reveal');
+
+  const objectsKeptWhenMotionEmpty = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: 'empty motion',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: 'abstract background',
+          emphasis_words: ['fallback word'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ id: 'node-empty-motion', type: 'node', text: 'Still Keep' }],
+            motion: [],
+          },
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(objectsKeptWhenMotionEmpty.scenes[0].visual_scene.objects.length, 1);
+  assert.equal(objectsKeptWhenMotionEmpty.scenes[0].visual_scene.objects[0].id, 'node-empty-motion');
+  assert.equal(objectsKeptWhenMotionEmpty.scenes[0].visual_scene.motion[0].effect, 'stagger_reveal');
+
+  const motionKeptWhenObjectsFallback = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: 'keep motion',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: 'abstract background',
+          emphasis_words: ['fallback word'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ id: 'bad-object', type: 'unknown', text: 'Drop Object' }],
+            motion: [{ target: 'focus', effect: 'pulse', delay: 0.4 }],
+          },
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(motionKeptWhenObjectsFallback.scenes[0].visual_scene.objects[0].type, 'keyword');
+  assert.equal(motionKeptWhenObjectsFallback.scenes[0].visual_scene.motion.length, 1);
+  assert.equal(motionKeptWhenObjectsFallback.scenes[0].visual_scene.motion[0].effect, 'pulse');
+  assert.equal(motionKeptWhenObjectsFallback.scenes[0].visual_scene.motion[0].delay, 0.4);
+
+  const motionKeptWhenObjectsEmpty = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: 'empty objects',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: 'abstract background',
+          emphasis_words: ['fallback word'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [],
+            motion: [{ target: 'focus', effect: 'pulse', delay: 0.4 }],
+          },
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(motionKeptWhenObjectsEmpty.scenes[0].visual_scene.objects[0].type, 'keyword');
+  assert.equal(motionKeptWhenObjectsEmpty.scenes[0].visual_scene.motion.length, 1);
+  assert.equal(motionKeptWhenObjectsEmpty.scenes[0].visual_scene.motion[0].effect, 'pulse');
+
   const fallbackVisual = schema.normalizeStoryboard({
     storyboard: {
       scenes: [

@@ -158,13 +158,13 @@ function normalizeVisualScene(scene = {}) {
   const focusSource = source.focus && typeof source.focus === 'object' && !Array.isArray(source.focus)
     ? source.focus
     : {};
-
-  if (!objects.length || !motion.length) return fallback;
+  const safeObjects = objects.length ? objects : fallback.objects;
+  const safeMotion = motion.length ? motion : fallback.motion;
 
   return {
     composition: sanitizeShortText(source.composition, fallback.composition, 48),
-    objects,
-    motion,
+    objects: safeObjects,
+    motion: safeMotion,
     focus: {
       text: sanitizeShortText(focusSource.text, fallback.focus.text, 18),
       style: sanitizeShortText(focusSource.style, fallback.focus.style, 48),
