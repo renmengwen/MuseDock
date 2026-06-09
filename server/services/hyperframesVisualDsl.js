@@ -1,10 +1,11 @@
 const storyboardSchema = require('./storyboardSchema');
 
 function prepareSceneDsl(scene = {}) {
+  const source = scene && typeof scene === 'object' && !Array.isArray(scene) ? scene : {};
   const normalizedScene = {
-    ...scene,
-    visual_type: storyboardSchema.VISUAL_TYPE_ALLOWED.includes(scene.visual_type)
-      ? scene.visual_type
+    ...source,
+    visual_type: storyboardSchema.VISUAL_TYPE_ALLOWED.includes(source.visual_type)
+      ? source.visual_type
       : 'quote_burst',
   };
   const visualScene = storyboardSchema.normalizeVisualScene(normalizedScene);
@@ -19,7 +20,10 @@ function prepareSceneDsl(scene = {}) {
 
 function prepareScenes(scenes = []) {
   return Array.isArray(scenes)
-    ? scenes.map(scene => ({ ...scene, prepared_visual_scene: prepareSceneDsl(scene) }))
+    ? scenes.map(scene => {
+      const source = scene && typeof scene === 'object' && !Array.isArray(scene) ? scene : {};
+      return { ...source, prepared_visual_scene: prepareSceneDsl(source) };
+    })
     : [];
 }
 

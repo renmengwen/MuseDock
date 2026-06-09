@@ -34,6 +34,16 @@ function run() {
   assert.equal(fallback.visualType, 'quote_burst');
   assert.equal(fallback.objects[0].type, 'keyword');
   assert.equal(fallback.objects[0].text, '自然语言');
+  assert.doesNotThrow(() => visualDsl.prepareSceneDsl(null));
+  assert.doesNotThrow(() => visualDsl.prepareSceneDsl('bad'));
+  assert.deepStrictEqual(visualDsl.prepareScenes(null), []);
+  assert.deepStrictEqual(visualDsl.prepareScenes({}), []);
+  assert.equal(visualDsl.prepareScenes([null]).length, 1);
+  const original = { headline: '原始', visual_type: 'quote_burst', emphasis_words: ['一'] };
+  const snapshot = JSON.parse(JSON.stringify(original));
+  const prepared = visualDsl.prepareScenes([original]);
+  assert.deepStrictEqual(original, snapshot);
+  assert.ok(prepared[0].prepared_visual_scene);
 }
 
 try {
