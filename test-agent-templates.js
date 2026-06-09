@@ -110,6 +110,15 @@ const normalizedViral = viral.normalizeResult({
 assert.equal(normalizedViral.video_brief.target_duration_sec, 90);
 assert.equal(normalizedViral.video_brief.target_word_count, 400);
 assert.equal(normalizedViral.video_brief.beats[0].purpose, 'hook');
+
+const normalizedLongVideoBrief = viral.normalizeResult({
+  video_brief: {
+    tone: 'x'.repeat(500),
+    hook: 'y'.repeat(500),
+  },
+});
+assert.equal(normalizedLongVideoBrief.video_brief.tone.length, 120);
+assert.equal(normalizedLongVideoBrief.video_brief.hook.length, 160);
 assert.equal(normalizedViral.video_brief.beats[0].visual_intent, '强对比开场');
 
 const emptyViral = viral.normalizeResult({});
