@@ -23,6 +23,12 @@ function emptyModelConfig() {
   };
 }
 
+function normalizeInteger(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(number)));
+}
+
 function normalizeString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -51,7 +57,7 @@ function normalizeStoredConfig(input = {}, previous = {}) {
     const old = previousModels[type] && typeof previousModels[type] === 'object' ? previousModels[type] : {};
     const apiKey = normalizeString(current.apiKey);
 
-    models[type] = {
+    const normalizedModel = {
       ...emptyModelConfig(),
       enabled: current.enabled === true,
       provider: normalizeString(current.provider),
@@ -60,6 +66,13 @@ function normalizeStoredConfig(input = {}, previous = {}) {
       modelId: normalizeString(current.modelId),
       note: normalizeString(current.note),
     };
+
+    if (type === 'tts') {
+      normalizedModel.ttsConcurrency = normalizeInteger(current.ttsConcurrency ?? old.ttsConcurrency, 1, 1, 5);
+      normalizedModel.ttsQueueIntervalMs = normalizeInteger(current.ttsQueueIntervalMs ?? old.ttsQueueIntervalMs, 1800, 0, 10000);
+    }
+
+    models[type] = normalizedModel;
   }
 
   return { models };
@@ -80,6 +93,10 @@ function toPublicConfig(stored = {}) {
       hasApiKey: !!model.apiKey,
       apiKeyMasked: maskApiKey(model.apiKey),
     };
+    if (type === 'tts') {
+      models[type].ttsConcurrency = model.ttsConcurrency;
+      models[type].ttsQueueIntervalMs = model.ttsQueueIntervalMs;
+    }
   }
 
   return { models };

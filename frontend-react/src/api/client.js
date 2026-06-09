@@ -137,6 +137,13 @@ export const api = {
       body: JSON.stringify({ config, values }),
     });
   },
+  previewStoryboardMessages(config, values = {}) {
+    return requestJson('/api/agents/storyboard-messages/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config, values }),
+    });
+  },
   createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}, agentConfigOverride = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',

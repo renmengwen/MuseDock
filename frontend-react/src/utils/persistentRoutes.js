@@ -1,0 +1,63 @@
+const DEFAULT_STATE = {
+  crawlPlatform: 'douyin',
+  recordsPlatform: 'douyin',
+  mediaPlatform: '',
+  mediaId: '',
+  aiSearch: '',
+  activePage: 'crawl',
+};
+
+function splitPath(pathname = '') {
+  return String(pathname || '')
+    .replace(/^\/+|\/+$/g, '')
+    .split('/')
+    .filter(Boolean);
+}
+
+function normalizePlatform(value) {
+  return value === 'xhs' ? 'xhs' : 'douyin';
+}
+
+export function getPersistentRouteState(previous = DEFAULT_STATE, pathname = '/', search = '') {
+  const state = { ...DEFAULT_STATE, ...(previous || {}) };
+  const parts = splitPath(pathname);
+  const section = parts[0] || 'crawl';
+
+  if (section === 'records') {
+    return {
+      ...state,
+      recordsPlatform: normalizePlatform(parts[1]),
+      activePage: 'records',
+    };
+  }
+
+  if (section === 'media') {
+    return {
+      ...state,
+      mediaPlatform: parts[1] || state.mediaPlatform,
+      mediaId: parts[2] || state.mediaId,
+      activePage: 'media',
+    };
+  }
+
+  if (section === 'ai') {
+    return {
+      ...state,
+      aiSearch: search || state.aiSearch,
+      activePage: 'ai',
+    };
+  }
+
+  if (section === 'settings') {
+    return {
+      ...state,
+      activePage: 'settings',
+    };
+  }
+
+  return {
+    ...state,
+    crawlPlatform: normalizePlatform(parts[1]),
+    activePage: 'crawl',
+  };
+}

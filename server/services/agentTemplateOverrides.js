@@ -133,6 +133,16 @@ function createPreviewMessages(config, values = {}) {
   };
 }
 
+function createStoryboardPreviewMessages(config, values = {}) {
+  const validation = validateEditableConfig(config || {});
+  if (!validation.success) return validation;
+  return {
+    success: true,
+    message: '分镜 messages 已生成。',
+    messages: storyboardAgent.buildStoryboardMessagesFromEditableConfig(config, values),
+  };
+}
+
 async function listTaskAgentConfigs(options = {}) {
   const config = await readConfig(options.rootDir);
   const data = agentTemplates.listEditableAgentTemplates().map(defaultConfig => {
@@ -257,6 +267,7 @@ module.exports = {
   normalizeModelOptions,
   validateEditableConfig,
   createPreviewMessages,
+  createStoryboardPreviewMessages,
   buildMessagesFromTemplate,
   replaceTemplateVars,
 };

@@ -20,12 +20,12 @@ function buildInitialStatus(item, awemeId) {
   };
 }
 
-export function MediaWorkspace() {
+export function MediaWorkspace({ routeAwemeId = '' } = {}) {
   const params = useParams();
   const navigate = useNavigate();
-  const routeAwemeId = params.id || '';
+  const currentRouteAwemeId = routeAwemeId || params.id || '';
   const selectedItem = useMemo(() => getSelectedMediaItem(), []);
-  const initialAwemeId = routeAwemeId || getDouyinAwemeId(selectedItem);
+  const initialAwemeId = currentRouteAwemeId || getDouyinAwemeId(selectedItem);
 
   const [awemeIdInput, setAwemeIdInput] = useState(initialAwemeId);
   const [selectedAwemeId, setSelectedAwemeId] = useState(initialAwemeId);
@@ -101,7 +101,7 @@ export function MediaWorkspace() {
             });
           }
           await refreshMediaStatus(task.aweme_id, { silent: true });
-          if (task.type === 'prepare' && routeAwemeId !== task.aweme_id) {
+          if (task.type === 'prepare' && currentRouteAwemeId !== task.aweme_id) {
             navigate(`/media/douyin/${task.aweme_id}`, { replace: true });
           }
           return;
@@ -125,19 +125,19 @@ export function MediaWorkspace() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [activeTask?.task_id, activeTask?.aweme_id, routeAwemeId, navigate]);
+  }, [activeTask?.task_id, activeTask?.aweme_id, currentRouteAwemeId, navigate]);
 
   useEffect(() => {
-    if (!routeAwemeId) return;
-    setSelectedAwemeId(routeAwemeId);
-    setAwemeIdInput(routeAwemeId);
-    setMediaStatus(prev => prev?.aweme_id === routeAwemeId ? prev : buildInitialStatus(null, routeAwemeId));
+    if (!currentRouteAwemeId) return;
+    setSelectedAwemeId(currentRouteAwemeId);
+    setAwemeIdInput(currentRouteAwemeId);
+    setMediaStatus(prev => prev?.aweme_id === currentRouteAwemeId ? prev : buildInitialStatus(null, currentRouteAwemeId));
     if (consumeAutoPrepareFlag()) {
-      prepareMedia(false, routeAwemeId).catch(() => {});
+      prepareMedia(false, currentRouteAwemeId).catch(() => {});
       return;
     }
-    refreshMediaStatus(routeAwemeId).catch(() => {});
-  }, [routeAwemeId]);
+    refreshMediaStatus(currentRouteAwemeId).catch(() => {});
+  }, [currentRouteAwemeId]);
 
   async function refreshMediaStatus(nextAwemeId = selectedAwemeId, options = {}) {
     if (!nextAwemeId) return;

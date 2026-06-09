@@ -143,6 +143,8 @@ function getViralRewriteSystemPrompt() {
     '请只输出 JSON，不要输出 Markdown、解释或代码块。',
     'JSON 字段必须包含 summary, viral_points, audience, comment_insights, topics, rewrite_script, titles。',
     'viral_points, comment_insights, topics, titles 必须是字符串数组。',
+    '禁止出现乱码文字。',
+    '输出的rewrite_script最终目的是给hyperframes渲染动画，尽量贴合它，但只需要输出可以TTS合成的内容。',
   ].join('\n');
 }
 

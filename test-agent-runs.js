@@ -926,6 +926,26 @@ async function run() {
     ]);
     assert.match(previewResponse.body.message, /messages/);
 
+    const storyboardPreviewResponse = await requestJson(server, 'POST', '/api/agents/storyboard-messages/preview', {
+      config: {
+        systemPrompt: '分镜预览系统',
+        userPromptTemplate: '脚本：{{rewriteScript}}\n字幕：{{captionIndexesJson}}\n文档：{{frameProfileBrief}}\n参数：{{storyboardOptionsText}}',
+        useFrameProfile: true,
+      },
+      values: {
+        rewriteScript: '分镜示例脚本',
+        captionIndexesJson: '[{"index":0,"text":"示例字幕"}]',
+        frameProfileBrief: '示例 Frame Profile',
+        storyboardOptionsText: '示例分镜参数',
+      },
+    });
+    assert.strictEqual(storyboardPreviewResponse.statusCode, 200);
+    assert.strictEqual(storyboardPreviewResponse.body.success, true);
+    assert.deepStrictEqual(storyboardPreviewResponse.body.messages, [
+      { role: 'system', content: '分镜预览系统' },
+      { role: 'user', content: '脚本：分镜示例脚本\n字幕：[{"index":0,"text":"示例字幕"}]\n文档：示例 Frame Profile\n参数：示例分镜参数' },
+    ]);
+
     const response = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs`, {
       template: 'viral_rewrite',
       agentConfigOverride: {

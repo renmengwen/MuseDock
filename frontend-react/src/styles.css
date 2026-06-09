@@ -93,6 +93,7 @@ a { color: #fe2c55; text-decoration: none; }
 .modal { position: relative; width: min(92vw, 480px); background: #fff; border-radius: 12px; padding: 28px; text-align: center; box-shadow: 0 16px 50px rgba(0,0,0,.22); }
 .modal.wide { width: min(92vw, 780px); }
 .modal h3 { margin: 0 0 10px; }
+.messagesPreviewModal { text-align: left; max-height: min(86vh, 820px); display: grid; gap: 14px; }
 .hint { color: #69717e; font-size: 13px; }
 .qrImage { max-width: 280px; width: 100%; border: 1px solid #eee; border-radius: 8px; }
 .waiting { color: #e65100; margin: 14px 0; }
@@ -103,6 +104,17 @@ a { color: #fe2c55; text-decoration: none; }
 .commentItem.reply { border-bottom: 0; padding: 8px 0; }
 .commentMeta { color: #858d9a; font-size: 12px; margin-top: 4px; }
 .replyList { margin: 8px 0 0 18px; padding-left: 12px; border-left: 2px solid #edf0f4; }
+.jsonViewer { max-height: 68vh; overflow: auto; border: 1px solid #d7dce3; border-radius: 8px; background: #0f172a; color: #e5e7eb; padding: 14px; font: 12px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.jsonBlock { display: grid; gap: 2px; }
+.jsonChildren { display: grid; gap: 2px; margin-left: 18px; }
+.jsonLine { display: flex; align-items: flex-start; gap: 8px; min-width: max-content; }
+.jsonIndex { color: #94a3b8; min-width: 24px; text-align: right; }
+.jsonKey { color: #93c5fd; white-space: nowrap; }
+.jsonString { color: #86efac; white-space: pre-wrap; word-break: break-word; }
+.jsonNumber { color: #facc15; }
+.jsonBoolean { color: #f9a8d4; }
+.jsonNull { color: #cbd5e1; }
+.jsonPunctuation { color: #e5e7eb; }
 .modalLoadingOverlay {
   position: absolute;
   inset: 0;

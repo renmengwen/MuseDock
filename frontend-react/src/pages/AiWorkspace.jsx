@@ -91,9 +91,67 @@ function StepStatus({ label, done, detail }) {
   );
 }
 
-export function AiWorkspace() {
+function JsonValue({ value }) {
+  if (Array.isArray(value)) {
+    return (
+      <div className="jsonBlock">
+        <span className="jsonPunctuation">[</span>
+        <div className="jsonChildren">
+          {value.map((item, index) => (
+            <div className="jsonLine" key={index}>
+              <span className="jsonIndex">{index}</span>
+              <JsonValue value={item} />
+            </div>
+          ))}
+        </div>
+        <span className="jsonPunctuation">]</span>
+      </div>
+    );
+  }
+  if (value && typeof value === 'object') {
+    return (
+      <div className="jsonBlock">
+        <span className="jsonPunctuation">{'{'}</span>
+        <div className="jsonChildren">
+          {Object.entries(value).map(([key, item]) => (
+            <div className="jsonLine" key={key}>
+              <span className="jsonKey">"{key}"</span>
+              <span className="jsonPunctuation">:</span>
+              <JsonValue value={item} />
+            </div>
+          ))}
+        </div>
+        <span className="jsonPunctuation">{'}'}</span>
+      </div>
+    );
+  }
+  if (typeof value === 'string') return <span className="jsonString">{JSON.stringify(value)}</span>;
+  if (typeof value === 'number') return <span className="jsonNumber">{value}</span>;
+  if (typeof value === 'boolean') return <span className="jsonBoolean">{String(value)}</span>;
+  return <span className="jsonNull">null</span>;
+}
+
+function MessagesPreviewModal({ preview, onClose }) {
+  if (!preview) return null;
+  return (
+    <div className="modalOverlay">
+      <div className="modal wide messagesPreviewModal">
+        <div className="mediaHeader">
+          <h3>{preview.title || 'messages 预览'}</h3>
+          <button className="btn secondary compact" onClick={onClose}>关闭</button>
+        </div>
+        <div className="jsonViewer" aria-label="messages JSON 预览">
+          <JsonValue value={preview.messages || []} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function AiWorkspace({ routeSearch = '' } = {}) {
   const location = useLocation();
-  const initialAwemeId = useMemo(() => getAwemeIdFromSearch(location.search), [location.search]);
+  const activeSearch = routeSearch || location.search;
+  const initialAwemeId = useMemo(() => getAwemeIdFromSearch(activeSearch), [activeSearch]);
   const [awemeId, setAwemeId] = useState(initialAwemeId);
   const [mediaStatus, setMediaStatus] = useState(null);
   const [runs, setRuns] = useState([]);
@@ -119,13 +177,12 @@ export function AiWorkspace() {
   const [agentConfig, setAgentConfig] = useState(null);
   const [agentConfigDraft, setAgentConfigDraft] = useState(null);
   const [agentResultSchemaText, setAgentResultSchemaText] = useState('{}');
-  const [agentMessagesPreview, setAgentMessagesPreview] = useState(null);
+  const [messagesPreview, setMessagesPreview] = useState(null);
   const [agentConfigOpen, setAgentConfigOpen] = useState(false);
   const [agentConfigSaving, setAgentConfigSaving] = useState(false);
   const [agentConfigPreviewing, setAgentConfigPreviewing] = useState(false);
+  const [storyboardConfigPreviewing, setStoryboardConfigPreviewing] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState('viral_rewrite');
-  const [promptOptions, setPromptOptions] = useState(DEFAULT_PROMPT_OPTIONS);
-  const [storyboardOptions, setStoryboardOptions] = useState(DEFAULT_STORYBOARD_OPTIONS);
   const [renderOptions, setRenderOptions] = useState({
     resolution: '1080x1920',
     fps: '30',
@@ -202,11 +259,11 @@ export function AiWorkspace() {
   }, [storyboardSceneIssues]);
 
   useEffect(() => {
-    const nextAwemeId = getAwemeIdFromSearch(location.search);
+    const nextAwemeId = getAwemeIdFromSearch(activeSearch);
     if (!nextAwemeId) return;
     setAwemeId(nextAwemeId);
     loadWorkspace(nextAwemeId).catch(() => {});
-  }, [location.search]);
+  }, [activeSearch]);
 
   async function loadWorkspace(explicitAwemeId = '') {
     const value = (explicitAwemeId || awemeId).trim();
@@ -266,7 +323,7 @@ export function AiWorkspace() {
     } : null;
     setStatus({ type: 'loading', message: `正在运行当前 Agent：${templateMeta.label}...` });
     try {
-      const json = await api.createDouyinAgentRun(value, selectedTemplate, promptOptions, override);
+      const json = await api.createDouyinAgentRun(value, selectedTemplate, DEFAULT_PROMPT_OPTIONS, override);
       setActiveRun(json.run || json);
       const runsJson = await api.listDouyinAgentRuns(value);
       const runList = runsJson.data || [];
@@ -281,10 +338,6 @@ export function AiWorkspace() {
     } finally {
       setRunning(false);
     }
-  }
-
-  function updatePromptOption(key, value) {
-    setPromptOptions(prev => ({ ...prev, [key]: value }));
   }
 
   function updateAgentConfigDraft(key, value) {
@@ -367,17 +420,16 @@ export function AiWorkspace() {
         commentsNote: '预览时使用示例评论。',
         promptOptionsText: '预览时使用当前模板和示例素材变量。',
       });
-      setAgentMessagesPreview(json.messages || []);
+      setMessagesPreview({
+        title: `${getTemplateMeta(selectedTemplate, agentTemplates).label} messages 预览`,
+        messages: json.messages || [],
+      });
       setStatus({ type: 'success', message: json.message || 'messages 已生成。' });
     } catch (error) {
       setStatus({ type: 'error', message: error instanceof SyntaxError ? '输出字段说明必须是有效 JSON。' : error.message });
     } finally {
       setAgentConfigPreviewing(false);
     }
-  }
-
-  function updateStoryboardOption(key, value) {
-    setStoryboardOptions(prev => ({ ...prev, [key]: value }));
   }
 
   function updateStoryboardConfigDraft(key, value) {
@@ -392,6 +444,37 @@ export function AiWorkspace() {
         [key]: key === 'stream' ? Boolean(value) : value,
       },
     }));
+  }
+
+  async function previewStoryboardMessages() {
+    setStoryboardConfigPreviewing(true);
+    setStatus({ type: 'loading', message: '正在预览分镜 messages...' });
+    try {
+      const captions = Array.isArray(activeRun?.tts?.captions) && activeRun.tts.captions.length > 0
+        ? activeRun.tts.captions.map(caption => ({
+          index: caption.index,
+          text: typeof caption.text === 'string' ? caption.text : '',
+        }))
+        : [
+          { index: 0, text: '示例字幕一' },
+          { index: 1, text: '示例字幕二' },
+        ];
+      const json = await api.previewStoryboardMessages(storyboardConfigDraft, {
+        rewriteScript: activeRun?.result?.rewrite_script || '预览时使用示例改写脚本。',
+        captionIndexesJson: JSON.stringify(captions, null, 2),
+        frameProfileBrief: storyboardConfigDraft?.useFrameProfile === false ? '' : '预览时使用示例 Frame Profile 文档摘要。',
+        storyboardOptionsText: '预览时使用当前分镜模板和示例素材变量。',
+      });
+      setMessagesPreview({
+        title: '分镜 Agent messages 预览',
+        messages: json.messages || [],
+      });
+      setStatus({ type: 'success', message: json.message || '分镜 messages 已生成。' });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message });
+    } finally {
+      setStoryboardConfigPreviewing(false);
+    }
   }
 
   async function saveStoryboardConfig() {
@@ -568,7 +651,7 @@ export function AiWorkspace() {
         useFrameProfile: storyboardConfigDraft.useFrameProfile !== false,
         modelOptions: storyboardConfigDraft.modelOptions || {},
       } : null;
-      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id, storyboardOptions, storyboardOverride);
+      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id, DEFAULT_STORYBOARD_OPTIONS, storyboardOverride);
       setActiveRun(prev => prev ? {
         ...prev,
         storyboard_options: json.storyboard_options,
@@ -692,6 +775,7 @@ export function AiWorkspace() {
 
       <Status status={status} />
       {loading ? <div className="pageLoading">正在加载素材状态和历史 Agent 运行记录...</div> : null}
+      <MessagesPreviewModal preview={messagesPreview} onClose={() => setMessagesPreview(null)} />
 
       <section className="agentWorkbench">
         <div className="agentPanel">
@@ -784,63 +868,8 @@ export function AiWorkspace() {
                   </Button>
                   <Button size="sm" disabled={loading || running || agentConfigSaving || agentConfigPreviewing} onClick={saveAgentConfig}>保存为当前模板配置</Button>
                 </div>
-                {agentMessagesPreview ? (
-                  <pre>{JSON.stringify(agentMessagesPreview, null, 2)}</pre>
-                ) : null}
               </div>
             ) : null}
-          </div>
-          <div className="agentOptionGroup">
-            <h4>创作 brief</h4>
-            <Input
-              value={promptOptions.goal}
-              onChange={event => updatePromptOption('goal', event.target.value)}
-              placeholder="创作目标，例如：涨粉、引流、带货"
-              disabled={loading || running}
-            />
-            <Input
-              value={promptOptions.audience}
-              onChange={event => updatePromptOption('audience', event.target.value)}
-              placeholder="目标受众，例如：健身新手、本地商家老板"
-              disabled={loading || running}
-            />
-            <Input
-              value={promptOptions.accountPositioning}
-              onChange={event => updatePromptOption('accountPositioning', event.target.value)}
-              placeholder="账号定位，例如：短视频获客顾问"
-              disabled={loading || running}
-            />
-            <Input
-              value={promptOptions.rewriteStyle}
-              onChange={event => updatePromptOption('rewriteStyle', event.target.value)}
-              placeholder="改写风格，例如：专业可信，开头有冲突感"
-              disabled={loading || running}
-            />
-            <Input
-              value={promptOptions.focus}
-              onChange={event => updatePromptOption('focus', event.target.value)}
-              placeholder="关注重点，例如：突出省时、低门槛、真实案例"
-              disabled={loading || running}
-            />
-            <Input
-              value={promptOptions.replyTone}
-              onChange={event => updatePromptOption('replyTone', event.target.value)}
-              placeholder="运营回复语气，例如：真诚、克制、专业"
-              disabled={loading || running}
-            />
-            <Input
-              value={promptOptions.forbidden}
-              onChange={event => updatePromptOption('forbidden', event.target.value)}
-              placeholder="禁用内容，例如：不要夸大效果"
-              disabled={loading || running}
-            />
-            <textarea
-              value={promptOptions.extraRequirements}
-              onChange={event => updatePromptOption('extraRequirements', event.target.value)}
-              placeholder="额外要求，例如：适合 60 秒口播"
-              disabled={loading || running}
-              maxLength={500}
-            />
           </div>
           <Button disabled={loading || running} onClick={runAgent}>
             {running ? '执行中...' : getTemplateMeta(selectedTemplate, agentTemplates).actionLabel || '运行当前 Agent'}
@@ -1139,57 +1168,14 @@ export function AiWorkspace() {
                             流式调用
                           </label>
                           <div className="videoProjectActions">
-                            <Button size="sm" variant="secondary" disabled={storyboardConfigSaving || storyboardRunning || videoBusy} onClick={restoreStoryboardConfig}>恢复默认</Button>
-                            <Button size="sm" disabled={storyboardConfigSaving || storyboardRunning || videoBusy} onClick={saveStoryboardConfig}>保存分镜 Agent 配置</Button>
+                            <Button size="sm" variant="secondary" disabled={storyboardConfigSaving || storyboardRunning || videoBusy || storyboardConfigPreviewing} onClick={restoreStoryboardConfig}>恢复默认</Button>
+                            <Button size="sm" variant="secondary" disabled={storyboardConfigSaving || storyboardRunning || videoBusy || storyboardConfigPreviewing} onClick={previewStoryboardMessages}>
+                              {storyboardConfigPreviewing ? '预览中...' : '预览 messages'}
+                            </Button>
+                            <Button size="sm" disabled={storyboardConfigSaving || storyboardRunning || videoBusy || storyboardConfigPreviewing} onClick={saveStoryboardConfig}>保存分镜 Agent 配置</Button>
                           </div>
                         </div>
                       ) : null}
-                    </div>
-                    <div className="agentOptionGroup">
-                      <h4>AI 分镜视觉 brief</h4>
-                      <Input
-                        value={storyboardOptions.visualStyle}
-                        onChange={event => updateStoryboardOption('visualStyle', event.target.value)}
-                        placeholder="视频视觉风格，例如：商业质感、知识科普、情绪冲击"
-                        disabled={storyboardRunning || videoBusy}
-                      />
-                      <Input
-                        value={storyboardOptions.pacing}
-                        onChange={event => updateStoryboardOption('pacing', event.target.value)}
-                        placeholder="画面节奏，例如：快节奏、标准、稳重"
-                        disabled={storyboardRunning || videoBusy}
-                      />
-                      <Input
-                        value={storyboardOptions.captionStyle}
-                        onChange={event => updateStoryboardOption('captionStyle', event.target.value)}
-                        placeholder="字幕呈现，例如：大字报、卡片式、引语式"
-                        disabled={storyboardRunning || videoBusy}
-                      />
-                      <Input
-                        value={storyboardOptions.backgroundDirection}
-                        onChange={event => updateStoryboardOption('backgroundDirection', event.target.value)}
-                        placeholder="背景方向，例如：数据感抽象背景"
-                        disabled={storyboardRunning || videoBusy}
-                      />
-                      <Input
-                        value={storyboardOptions.primaryColor}
-                        onChange={event => updateStoryboardOption('primaryColor', event.target.value)}
-                        placeholder="主色调，例如：#fe2c55"
-                        disabled={storyboardRunning || videoBusy}
-                      />
-                      <Input
-                        value={storyboardOptions.forbidden}
-                        onChange={event => updateStoryboardOption('forbidden', event.target.value)}
-                        placeholder="禁用方向，例如：不要真人，不要原视频画面"
-                        disabled={storyboardRunning || videoBusy}
-                      />
-                      <textarea
-                        value={storyboardOptions.extraRequirements}
-                        onChange={event => updateStoryboardOption('extraRequirements', event.target.value)}
-                        placeholder="额外视觉要求，例如：每个分镜标题要短"
-                        disabled={storyboardRunning || videoBusy}
-                        maxLength={500}
-                      />
                     </div>
                     <div className="agentOptionGroup">
                       <h4>视频渲染参数</h4>

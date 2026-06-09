@@ -183,7 +183,6 @@ function renderSceneContent({ scene, index, captionText, wordHtml }) {
     if (!hasRealContrast) {
       return [
         `<div class="scene-content scene-content--text-card" data-visual-type="text_card">`,
-        `  <div class="visual-type">text_card</div>`,
         `  <h1>${escapeHtml(scene.headline)}</h1>`,
         `  <div class="${emphasisClass}">${wordHtml}</div>`,
         '</div>',
@@ -221,7 +220,6 @@ function renderSceneContent({ scene, index, captionText, wordHtml }) {
   }
   return [
     `<div class="scene-content scene-content--text-card" data-visual-type="${escapeHtml(scene.visual_type || 'text_card')}">`,
-    `  <div class="visual-type">${escapeHtml(scene.visual_type || 'text_card')}</div>`,
     `  <h1>${escapeHtml(scene.headline)}</h1>`,
     `  <div class="${emphasisClass}">${wordHtml}</div>`,
     '</div>',
@@ -384,7 +382,6 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
     .step-orbit span { color: var(--accent); font-size: 42px; font-weight: 900; }
     .step-line { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .step-line i { display: block; height: 8px; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--frame-hot)); }
-    .visual-type { width: max-content; max-width: 100%; padding: 9px 14px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 28%, rgba(255,255,255,.1)); color: #fff; font-size: 24px; font-weight: 700; }
     h1 { margin: 0; color: #fff; font-size: 68px; line-height: 1.18; font-weight: 900; letter-spacing: 0; }
     p { margin: 0; color: rgba(255,255,255,.78); font-size: 36px; line-height: 1.55; font-weight: 650; letter-spacing: 0; }
     .emphasis { display: flex; flex-wrap: wrap; gap: 12px; }

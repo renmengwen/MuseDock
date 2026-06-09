@@ -29,10 +29,10 @@ const MODE_PLACEHOLDER = {
   creator: '输入作者 sec_uid 或作者主页链接',
 };
 
-export function CrawlPage() {
+export function CrawlPage({ routePlatform = '' } = {}) {
   const params = useParams();
   const navigate = useNavigate();
-  const platform = useMemo(() => (params.platform === 'xhs' ? 'xhs' : 'douyin'), [params.platform]);
+  const platform = useMemo(() => ((routePlatform || params.platform) === 'xhs' ? 'xhs' : 'douyin'), [routePlatform, params.platform]);
 
   const [crawlMode, setCrawlMode] = useState('keyword');
   const [inputValue, setInputValue] = useState('codex');

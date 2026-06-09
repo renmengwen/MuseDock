@@ -94,6 +94,8 @@ async function run() {
   assert.match(html, /#scene-1 \.emphasis span:nth-child\(1\)/);
   assert.match(html, /tl\.to\("#scene-1"/);
   assert.match(html, /核心观点/);
+  assert.doesNotMatch(html, /class="visual-type"/);
+  assert.doesNotMatch(html, />text_card<\/div>/);
   assert.match(html, /assets\/narration.wav/);
   assert.doesNotMatch(html, /<p>第一句。 第二句。<\/p>/);
   assert.doesNotMatch(html, /video\.mp4|frame-0001|frames\//);

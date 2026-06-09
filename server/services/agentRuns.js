@@ -1047,6 +1047,11 @@ async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
       configPath: options.configPath,
       ttsConfig: options.ttsConfig,
       fetchImpl: options.fetchImpl,
+      waitImpl: options.waitImpl,
+      maxRetries: options.maxRetries,
+      retryDelayMs: options.retryDelayMs,
+      ttsConcurrency: options.ttsConcurrency,
+      ttsQueueIntervalMs: options.ttsQueueIntervalMs,
     });
 
     if (!modelResult.success) {

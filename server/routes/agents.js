@@ -45,6 +45,11 @@ router.post('/messages/preview', async (req, res) => {
   return res.status(result.success ? 200 : 400).json(result);
 });
 
+router.post('/storyboard-messages/preview', async (req, res) => {
+  const result = agentTemplateOverrides.createStoryboardPreviewMessages(req.body?.config || {}, req.body?.values || {});
+  return res.status(result.success ? 200 : 400).json(result);
+});
+
 router.post('/douyin/:aweme_id/runs', async (req, res) => {
   try {
     const result = await agentRuns.createDouyinAgentRun(req.params.aweme_id, {
@@ -95,6 +100,10 @@ router.post('/douyin/:aweme_id/runs/:run_id/tts', async (req, res) => {
     const result = await agentRuns.synthesizeDouyinRunTts(req.params.aweme_id, req.params.run_id, {
       voice: req.body?.voice,
       stylePrompt: req.body?.stylePrompt,
+      maxRetries: req.body?.maxRetries,
+      retryDelayMs: req.body?.retryDelayMs,
+      ttsConcurrency: req.body?.ttsConcurrency,
+      ttsQueueIntervalMs: req.body?.ttsQueueIntervalMs,
     });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {

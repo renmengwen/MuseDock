@@ -33,6 +33,15 @@ async function run() {
         baseUrl: 'https://api.deepseek.com',
         modelId: 'deepseek-chat',
       },
+      tts: {
+        enabled: true,
+        provider: 'mimo',
+        apiKey: 'mimo-secret',
+        baseUrl: 'https://api.xiaomimimo.com/v1',
+        modelId: 'mimo-v2.5-tts',
+        ttsConcurrency: 2,
+        ttsQueueIntervalMs: 3000,
+      },
       unknown: {
         enabled: true,
         apiKey: 'ignored',
@@ -47,7 +56,9 @@ async function run() {
   assert.strictEqual(saved.models.asr.apiKeyMasked, 'sk-****1234');
   assert.strictEqual(saved.models.text.apiKeyMasked, '****cret');
   assert.strictEqual(saved.models.multimodal.enabled, false);
-  assert.strictEqual(saved.models.tts.enabled, false);
+  assert.strictEqual(saved.models.tts.enabled, true);
+  assert.strictEqual(saved.models.tts.ttsConcurrency, 2);
+  assert.strictEqual(saved.models.tts.ttsQueueIntervalMs, 3000);
   assert.strictEqual(saved.models.unknown, undefined);
 
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -76,6 +87,10 @@ async function run() {
   const runtime = await aiModelConfig.getRuntimeConfig('asr', { configPath });
   assert.strictEqual(runtime.apiKey, 'sk-asr-secret-1234');
   assert.strictEqual(runtime.modelId, 'gpt-4o-transcribe');
+
+  const ttsRuntime = await aiModelConfig.getRuntimeConfig('tts', { configPath });
+  assert.strictEqual(ttsRuntime.ttsConcurrency, 2);
+  assert.strictEqual(ttsRuntime.ttsQueueIntervalMs, 3000);
 }
 
 run().then(() => {

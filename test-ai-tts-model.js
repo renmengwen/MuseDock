@@ -91,6 +91,133 @@ async function run() {
   });
   assert.strictEqual(failed.success, false);
   assert.match(failed.message, /bad voice/);
+
+  let retryAttempts = 0;
+  let waitedMs = 0;
+  const retried = await aiTtsModel.callTtsModel({
+    text: '闄愭祦閲嶈瘯娴嬭瘯',
+    ttsConfig: {
+      enabled: true,
+      provider: 'mimo',
+      apiKey: 'mimo-secret',
+      baseUrl: 'https://api.xiaomimimo.com/v1',
+      modelId: 'mimo-v2.5-tts',
+    },
+    maxRetries: 1,
+    retryDelayMs: 25,
+    ttsQueueIntervalMs: 0,
+    waitImpl: async ms => {
+      waitedMs += ms;
+    },
+    fetchImpl: async () => {
+      retryAttempts += 1;
+      if (retryAttempts === 1) {
+        return {
+          ok: false,
+          status: 429,
+          json: async () => ({ error: { message: 'Too many requests' } }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                audio: {
+                  data: Buffer.from('retry wav data').toString('base64'),
+                },
+              },
+            },
+          ],
+        }),
+      };
+    },
+  });
+  assert.strictEqual(retried.success, true);
+  assert.strictEqual(retried.audioBuffer.toString(), 'retry wav data');
+  assert.strictEqual(retryAttempts, 2);
+  assert.strictEqual(waitedMs, 25);
+
+  const queueEvents = [];
+  let queueWaitedMs = 0;
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const queuedCalls = ['first', 'second'].map(label => aiTtsModel.callTtsModel({
+    text: label,
+    ttsConfig: {
+      enabled: true,
+      provider: 'mimo',
+      apiKey: 'mimo-secret',
+      baseUrl: 'https://api.xiaomimimo.com/v1',
+      modelId: 'mimo-v2.5-tts',
+    },
+    ttsQueueIntervalMs: 100,
+    waitImpl: async ms => {
+      queueWaitedMs += ms;
+    },
+    fetchImpl: async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      queueEvents.push(`start:${label}`);
+      await Promise.resolve();
+      queueEvents.push(`end:${label}`);
+      inFlight -= 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: Buffer.from(`queued ${label}`).toString('base64') }),
+      };
+    },
+  }));
+  const queuedResults = await Promise.all(queuedCalls);
+  assert.deepStrictEqual(queuedResults.map(item => item.audioBuffer.toString()), ['queued first', 'queued second']);
+  assert.strictEqual(maxInFlight, 1);
+  assert.deepStrictEqual(queueEvents, ['start:first', 'end:first', 'start:second', 'end:second']);
+  assert.ok(queueWaitedMs >= 100);
+
+  let concurrencyInFlight = 0;
+  let concurrencyMaxInFlight = 0;
+  let releaseConcurrentFetches;
+  const concurrentGate = new Promise(resolve => {
+    releaseConcurrentFetches = resolve;
+  });
+  let concurrentStarted = 0;
+  const concurrentCalls = ['one', 'two', 'three'].map(label => aiTtsModel.callTtsModel({
+    text: label,
+    ttsConfig: {
+      enabled: true,
+      provider: 'mimo',
+      apiKey: 'mimo-secret',
+      baseUrl: 'https://api.xiaomimimo.com/v1',
+      modelId: 'mimo-v2.5-tts',
+      ttsConcurrency: 2,
+      ttsQueueIntervalMs: 0,
+    },
+    fetchImpl: async () => {
+      concurrencyInFlight += 1;
+      concurrentStarted += 1;
+      concurrencyMaxInFlight = Math.max(concurrencyMaxInFlight, concurrencyInFlight);
+      if (concurrentStarted === 2) {
+        releaseConcurrentFetches();
+      }
+      await concurrentGate;
+      concurrencyInFlight -= 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: Buffer.from(`concurrent ${label}`).toString('base64') }),
+      };
+    },
+  }));
+  const concurrentResults = await Promise.all(concurrentCalls);
+  assert.deepStrictEqual(concurrentResults.map(item => item.audioBuffer.toString()), [
+    'concurrent one',
+    'concurrent two',
+    'concurrent three',
+  ]);
+  assert.strictEqual(concurrencyMaxInFlight, 2);
 }
 
 run().then(() => {
