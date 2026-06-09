@@ -97,6 +97,12 @@ async function run() {
   assert.match(html, /assets\/narration.wav/);
   assert.doesNotMatch(html, /<p>第一句。 第二句。<\/p>/);
   assert.doesNotMatch(html, /video\.mp4|frame-0001|frames\//);
+  assert.match(html, /class="caption-bar"/);
+  assert.match(html, /class="caption-line"/);
+  assert.match(html, /data-caption-index="1"/);
+  assert.match(html, /data-caption-index="2"/);
+  assert.match(html, /#scene-1 \.caption-line:nth-child\(1\)/);
+  assert.match(html, /#scene-1 \.caption-line:nth-child\(2\)/);
 
   const customProjectDir = path.join(root, 'custom-project');
   const customResult = await hyperframesProject.createOriginalCaptionProject({
@@ -230,6 +236,36 @@ async function run() {
   assert.match(fallbackWordHtml, /<span data-card-index="4">部署<\/span>/);
   assert.doesNotMatch(fallbackWordHtml, /<span data-card-index="0">从学会代码，到学会对 AI 说清楚<\/span>/);
   assert.doesNotMatch(fallbackWordHtml, /<span data-card-index="0">以前写代码，你要先懂语法、框架、前端后端、报错、部署。<\/span>/);
+
+  const weakContrastHtml = hyperframesProject.buildIndexHtml({
+    duration: 4,
+    captions: [
+      { index: 1, start: 0, end: 4, duration: 4, text: '你会发现，一个小功能背后，其实是一整套团队协作。' },
+    ],
+    storyboard: {
+      template: 'ai_storyboard_cards',
+      scenes: [
+        {
+          index: 1,
+          caption_indexes: [1],
+          start: 0,
+          end: 4,
+          duration: 4,
+          headline: '一人指挥 AI',
+          visual_type: 'contrast_card',
+          layout: 'split_compare',
+          background_prompt: '原创对比背景',
+          emphasis_words: ['团队协作', '需求讲清楚'],
+          captions: [
+            { index: 1, start: 0, end: 4, duration: 4, text: '你会发现，一个小功能背后，其实是一整套团队协作。' },
+          ],
+        },
+      ],
+    },
+  });
+  assert.doesNotMatch(weakContrastHtml, /<div class="compare-side compare-side--old"/);
+  assert.doesNotMatch(weakContrastHtml, /<div class="compare-side compare-side--new"/);
+  assert.match(weakContrastHtml, /scene-content--text-card/);
 }
 
 run().then(() => {

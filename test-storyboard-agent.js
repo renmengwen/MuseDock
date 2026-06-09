@@ -20,6 +20,8 @@ async function run() {
   assert.match(messages[1].content, /AI_STORYBOARD_COVER_ALL_CAPTIONS=true/);
   assert.match(messages[1].content, /headline[\s\S]*完整字幕/);
   assert.match(messages[1].content, /emphasis_words[\s\S]*短语卡片/);
+  assert.match(messages[1].content, /contrast_card[\s\S]*真实对比/);
+  assert.match(messages[1].content, /A vs B/);
   assert.match(messages[1].content, /Frame Profile：tech_neon/);
   assert.match(messages[1].content, /完整 Frame\.md 参考/);
   assert.match(messages[1].content, /不要让连续场景全部使用同一种居中卡片结构/);

@@ -113,6 +113,28 @@ function renderEmphasis(words = []) {
     : '';
 }
 
+function renderCaptionText(text, frameOptions) {
+  if (frameOptions.captionMode !== 'kinetic') return escapeHtml(text);
+  const words = String(text || '').split(/\s+/).filter(Boolean);
+  if (!words.length) return escapeHtml(text);
+  return words.map(word => `<span>${escapeHtml(word)}</span>`).join('');
+}
+
+function renderCaptionBar(scene, frameOptions) {
+  const captions = Array.isArray(scene.captions) ? scene.captions.filter(caption => caption?.text) : [];
+  const lines = captions.length
+    ? captions
+    : [{ index: 1, start: scene.start, end: scene.end, text: '' }];
+  const lineHtml = lines
+    .map((caption, index) => [
+      `<div class="caption-line${frameOptions.captionMode === 'kinetic' ? ' kinetic-caption' : ''}" data-caption-index="${escapeHtml(caption.index || index + 1)}" data-start="${Number(caption.start || scene.start || 0)}" data-end="${Number(caption.end || scene.end || 0)}">`,
+      renderCaptionText(caption.text || '', frameOptions),
+      '</div>',
+    ].join(''))
+    .join('');
+  return `<div class="caption-bar">${lineHtml}</div>`;
+}
+
 function cleanCaptionText(value) {
   return String(value || '')
     .replace(/^(开头|片头|引子|导语|正文|主体|结尾|片尾|总结)\s*[:：]\s*/g, '')
@@ -156,12 +178,23 @@ function renderSceneContent({ scene, index, captionText, wordHtml }) {
   const emphasisClass = 'emphasis timed-cards';
   if (sceneClass === 'contrast-card') {
     const parts = String(scene.headline || '').split(/\s+vs\.?\s+/i);
+    const [oldText, newText] = parts.map(part => String(part || '').trim());
+    const hasRealContrast = parts.length >= 2 && oldText && newText && oldText !== newText;
+    if (!hasRealContrast) {
+      return [
+        `<div class="scene-content scene-content--text-card" data-visual-type="text_card">`,
+        `  <div class="visual-type">text_card</div>`,
+        `  <h1>${escapeHtml(scene.headline)}</h1>`,
+        `  <div class="${emphasisClass}">${wordHtml}</div>`,
+        '</div>',
+      ].join('\n');
+    }
     return [
       `<div class="scene-content scene-content--contrast-card" data-visual-type="${escapeHtml(scene.visual_type || 'contrast_card')}">`,
       '  <div class="compare-grid">',
-      `    <div class="compare-side compare-side--old"><span>传统</span><strong>${escapeHtml(parts[0] || '过去')}</strong></div>`,
+      `    <div class="compare-side compare-side--old"><span>传统</span><strong>${escapeHtml(oldText)}</strong></div>`,
       '    <div class="compare-vs">VS</div>',
-      `    <div class="compare-side compare-side--new"><span>现在</span><strong>${escapeHtml(parts[1] || scene.headline || '新方法')}</strong></div>`,
+      `    <div class="compare-side compare-side--new"><span>现在</span><strong>${escapeHtml(newText)}</strong></div>`,
       '  </div>',
       `  <div class="${emphasisClass}">${wordHtml}</div>`,
       '</div>',
@@ -259,7 +292,18 @@ function buildTimelineScript(scenes, duration, motionScale = 1, frameOptions = {
       lines.push(`    tl.fromTo("${sceneId} .emphasis span:nth-child(${wordIndex + 1})", { x: 34, y: 14, scale: 0.82, autoAlpha: 0 }, { x: 0, y: 0, scale: 1, autoAlpha: 1, duration: 0.28, ease: "back.out(1.7)" }, ${cardStart.toFixed(3)});`);
     });
     lines.push(`    tl.fromTo("${sceneId} .caption-bar", { y: 18, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.24, ease: "power2.out" }, ${(start + 0.12).toFixed(3)});`);
-    lines.push(`    tl.from("${sceneId} .kinetic-caption span", { y: 14, autoAlpha: 0, duration: 0.16, stagger: 0.018, ease: "power2.out" }, ${(start + 0.16).toFixed(3)});`);
+    lines.push(`    tl.set("${sceneId} .caption-line", { autoAlpha: 0 }, ${start.toFixed(3)});`);
+    const captionLines = Array.isArray(scene.captions) && scene.captions.length
+      ? scene.captions
+      : [{ start, end: start + sceneDuration }];
+    captionLines.forEach((caption, captionIndex) => {
+      const captionStart = Math.max(start, Number(caption.start || start));
+      const captionEnd = Math.min(start + sceneDuration, Number(caption.end || captionStart + 0.8));
+      const lineSelector = `${sceneId} .caption-line:nth-child(${captionIndex + 1})`;
+      lines.push(`    tl.fromTo("${lineSelector}", { y: 10, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: 0.18, ease: "power2.out" }, ${captionStart.toFixed(3)});`);
+      lines.push(`    tl.to("${lineSelector}", { y: -8, autoAlpha: 0, duration: 0.16, ease: "power1.in" }, ${Math.max(captionStart + 0.18, captionEnd - 0.16).toFixed(3)});`);
+      lines.push(`    tl.from("${lineSelector} span", { y: 14, autoAlpha: 0, duration: 0.16, stagger: 0.018, ease: "power2.out" }, ${(captionStart + 0.04).toFixed(3)});`);
+    });
     lines.push(`    tl.to("${sceneId} .scene-content", { y: -20, scale: 1.03, duration: ${Math.max(0.2, sceneDuration - exitDuration).toFixed(3)}, ease: "none" }, ${start.toFixed(3)});`);
     lines.push(`    tl.to("${sceneId}", { autoAlpha: 0, duration: ${exitDuration.toFixed(3)}, ease: "power1.in" }, ${exitStart.toFixed(3)});`);
   });
@@ -295,14 +339,11 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
       ? scene.captions.map(caption => caption.text).filter(Boolean).join(' ')
       : '';
     const wordHtml = renderEmphasis(scene.emphasis_words);
-    const kineticCaption = captionText.split(/\s+/).filter(Boolean)
-      .map(word => `<span>${escapeHtml(word)}</span>`)
-      .join('');
     return [
       `<section id="scene-${index + 1}" class="scene clip ${escapeHtml(scene.layout)}" data-start="${scene.start}" data-duration="${scene.duration}" data-track-index="${index + 1}" style="--bg:${tone.bg};--accent:${tone.accent};--secondary:${tone.secondary};">`,
       options.showSceneNumber ? `  <div class="scene-number">${String(scene.index || index + 1).padStart(2, '0')}</div>` : '',
       renderSceneContent({ scene, index, captionText, wordHtml }),
-      options.showCaptionBar ? `  <div class="caption-bar ${frameOptions.captionMode === 'kinetic' ? 'kinetic-caption' : ''}">${frameOptions.captionMode === 'kinetic' ? kineticCaption : escapeHtml(captionText)}</div>` : '',
+      options.showCaptionBar ? `  ${renderCaptionBar(scene, frameOptions)}` : '',
       '</section>',
     ].filter(line => line !== '').join('\n');
   }).join('\n');
@@ -348,7 +389,8 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
     p { margin: 0; color: rgba(255,255,255,.78); font-size: 36px; line-height: 1.55; font-weight: 650; letter-spacing: 0; }
     .emphasis { display: flex; flex-wrap: wrap; gap: 12px; }
     .emphasis span { padding: 9px 14px; border: 1px solid color-mix(in srgb, var(--accent) 72%, #fff); border-radius: 8px; color: var(--accent); font-size: 28px; font-weight: 800; }
-    .caption-bar { position: absolute; z-index: 5; left: 64px; right: 64px; bottom: 94px; padding: 24px 28px; border-radius: 8px; background: rgba(0,0,0,.58); color: #fff; font-size: var(--caption-font-size); line-height: 1.42; text-align: center; }
+    .caption-bar { position: absolute; z-index: 5; left: 64px; right: 64px; bottom: 94px; min-height: calc(var(--caption-font-size) * 2.1); display: grid; place-items: center; padding: 24px 28px; border-radius: 8px; background: rgba(0,0,0,.58); color: #fff; font-size: var(--caption-font-size); line-height: 1.42; text-align: center; }
+    .caption-line { grid-area: 1 / 1; width: 100%; opacity: 0; }
     .kinetic-caption { display: flex; flex-wrap: wrap; justify-content: center; gap: .35em; }
     .kinetic-caption span { display: inline-block; }
   </style>
