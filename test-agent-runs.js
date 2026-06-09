@@ -412,6 +412,38 @@ async function run() {
   const detailAfterVideo = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
   assert.equal(detailAfterVideo.data.video.status, 'rendered');
 
+  const renderingGuardResult = await agentRuns.renderDouyinRunHyperframesVideo(awemeId, generated.run_id, {
+    rootDir,
+    hyperframesRenderer: {
+      renderHyperframesProject: async ({ projectDir }) => {
+        const detailWhileRendering = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
+        assert.equal(detailWhileRendering.data.video.status, 'rendering');
+        assert.match(detailWhileRendering.data.video.message, /渲染/);
+
+        let projectServiceCalled = false;
+        const recreateWhileRendering = await agentRuns.createDouyinRunHyperframesProject(awemeId, generated.run_id, {
+          rootDir,
+          hyperframesProject: {
+            createOriginalCaptionProject: async () => {
+              projectServiceCalled = true;
+              return { success: true };
+            },
+          },
+        });
+        assert.equal(recreateWhileRendering.success, false);
+        assert.equal(recreateWhileRendering.video.status, 'rendering');
+        assert.match(recreateWhileRendering.message, /渲染中/);
+        assert.equal(projectServiceCalled, false);
+
+        const outputPath = path.join(projectDir, 'output.mp4');
+        fs.writeFileSync(outputPath, 'fake mp4 after guarded render');
+        return { success: true, output_path: outputPath, message: '视频渲染完成。' };
+      },
+    },
+  });
+  assert.equal(renderingGuardResult.success, true);
+  assert.equal(renderingGuardResult.video.status, 'rendered');
+
   const missingDetail = await agentRuns.getDouyinAgentRun(awemeId, 'missing-run', { rootDir });
   assert.strictEqual(missingDetail.success, false);
   assert.strictEqual(missingDetail.aweme_id, awemeId);

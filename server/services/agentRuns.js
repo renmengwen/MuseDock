@@ -636,6 +636,19 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
       message: '请先生成 AI 分镜。',
     };
   }
+  if (run.video?.status === 'rendering') {
+    const video = {
+      ...run.video,
+      message: run.video.message || '视频正在渲染中，请等待当前任务完成后再重新生成视频工程。',
+    };
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: video.message,
+      video,
+    };
+  }
 
   const projectService = options.hyperframesProject || defaultHyperframesProject;
   const projectDir = getHyperframesProjectDir(awemeId, runId, options.rootDir);
@@ -691,15 +704,39 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
       message: '未找到该 Agent 运行记录',
     };
   }
+  if (run.video?.status === 'rendering') {
+    const video = {
+      ...run.video,
+      message: run.video.message || '视频正在渲染中，请等待当前任务完成。',
+    };
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: video.message,
+      video,
+    };
+  }
 
   const projectDir = run.video?.project_dir || getHyperframesProjectDir(awemeId, runId, options.rootDir);
   const renderer = options.hyperframesRenderer || defaultHyperframesRenderer;
   const renderOptions = defaultHyperframesProject.normalizeRenderOptions(run.video?.render_options || {});
+  const renderingVideo = {
+    ...(run.video || {}),
+    status: 'rendering',
+    template: run.video?.template || 'ai_storyboard_cards',
+    project_dir: projectDir,
+    render_options: renderOptions,
+    message: '视频正在渲染中，请勿刷新后重复生成视频工程。',
+    updated_at: new Date().toISOString(),
+  };
+  await writeJson(runPath, { ...run, video: renderingVideo, updated_at: new Date().toISOString() });
+
   const result = await renderer.renderHyperframesProject({ projectDir, renderOptions });
 
   if (!result.success) {
     const video = {
-      ...(run.video || {}),
+      ...renderingVideo,
       status: 'failed',
       render_options: renderOptions,
       message: result.message || '视频渲染失败。',
@@ -710,7 +747,7 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
   }
 
   const video = {
-    ...(run.video || {}),
+    ...renderingVideo,
     status: 'rendered',
     template: run.video?.template || 'ai_storyboard_cards',
     project_dir: projectDir,

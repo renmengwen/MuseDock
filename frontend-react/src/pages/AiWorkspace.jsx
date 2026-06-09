@@ -136,6 +136,8 @@ export function AiWorkspace() {
   const hasRewriteScript = !!(activeRun?.result?.rewrite_script && activeRun.result.rewrite_script.trim());
   const hasTtsCaptions = Array.isArray(activeRun?.tts?.captions) && activeRun.tts.captions.length > 0;
   const hasStoryboardScenes = Array.isArray(activeRun?.storyboard?.scenes) && activeRun.storyboard.scenes.length > 0;
+  const persistedVideoRendering = activeRun?.video?.status === 'rendering';
+  const videoBusy = videoGenerating || videoRendering || persistedVideoRendering;
 
   useEffect(() => {
     if (!activeRun) return;
@@ -642,43 +644,43 @@ export function AiWorkspace() {
                         value={storyboardOptions.visualStyle}
                         onChange={event => updateStoryboardOption('visualStyle', event.target.value)}
                         placeholder="视频视觉风格，例如：商业质感、知识科普、情绪冲击"
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       />
                       <Input
                         value={storyboardOptions.pacing}
                         onChange={event => updateStoryboardOption('pacing', event.target.value)}
                         placeholder="画面节奏，例如：快节奏、标准、稳重"
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       />
                       <Input
                         value={storyboardOptions.captionStyle}
                         onChange={event => updateStoryboardOption('captionStyle', event.target.value)}
                         placeholder="字幕呈现，例如：大字报、卡片式、引语式"
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       />
                       <Input
                         value={storyboardOptions.backgroundDirection}
                         onChange={event => updateStoryboardOption('backgroundDirection', event.target.value)}
                         placeholder="背景方向，例如：数据感抽象背景"
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       />
                       <Input
                         value={storyboardOptions.primaryColor}
                         onChange={event => updateStoryboardOption('primaryColor', event.target.value)}
                         placeholder="主色调，例如：#fe2c55"
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       />
                       <Input
                         value={storyboardOptions.forbidden}
                         onChange={event => updateStoryboardOption('forbidden', event.target.value)}
                         placeholder="禁用方向，例如：不要真人，不要原视频画面"
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       />
                       <textarea
                         value={storyboardOptions.extraRequirements}
                         onChange={event => updateStoryboardOption('extraRequirements', event.target.value)}
                         placeholder="额外视觉要求，例如：每个分镜标题要短"
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                         maxLength={500}
                       />
                     </div>
@@ -687,7 +689,7 @@ export function AiWorkspace() {
                       <select
                         value={renderOptions.resolution}
                         onChange={event => updateRenderOption('resolution', event.target.value)}
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       >
                         <option value="1080x1920">1080x1920</option>
                         <option value="720x1280">720x1280</option>
@@ -695,7 +697,7 @@ export function AiWorkspace() {
                       <select
                         value={renderOptions.fps}
                         onChange={event => updateRenderOption('fps', event.target.value)}
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       >
                         <option value="24">24fps</option>
                         <option value="30">30fps</option>
@@ -704,7 +706,7 @@ export function AiWorkspace() {
                       <select
                         value={renderOptions.captionSize}
                         onChange={event => updateRenderOption('captionSize', event.target.value)}
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       >
                         <option value="small">字幕小</option>
                         <option value="medium">字幕中</option>
@@ -713,7 +715,7 @@ export function AiWorkspace() {
                       <select
                         value={renderOptions.motionLevel}
                         onChange={event => updateRenderOption('motionLevel', event.target.value)}
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       >
                         <option value="low">动效弱</option>
                         <option value="medium">动效中</option>
@@ -724,7 +726,7 @@ export function AiWorkspace() {
                           type="checkbox"
                           checked={renderOptions.showCaptionBar}
                           onChange={event => updateRenderOption('showCaptionBar', event.target.checked)}
-                          disabled={storyboardRunning || videoGenerating || videoRendering}
+                          disabled={storyboardRunning || videoBusy}
                         />
                         显示字幕条
                       </label>
@@ -733,14 +735,14 @@ export function AiWorkspace() {
                           type="checkbox"
                           checked={renderOptions.showSceneNumber}
                           onChange={event => updateRenderOption('showSceneNumber', event.target.checked)}
-                          disabled={storyboardRunning || videoGenerating || videoRendering}
+                          disabled={storyboardRunning || videoBusy}
                         />
                         显示分镜编号
                       </label>
                       <select
                         value={renderOptions.quality}
                         onChange={event => updateRenderOption('quality', event.target.value)}
-                        disabled={storyboardRunning || videoGenerating || videoRendering}
+                        disabled={storyboardRunning || videoBusy}
                       >
                         <option value="standard">标准质量</option>
                         <option value="high">高清质量</option>
@@ -750,7 +752,7 @@ export function AiWorkspace() {
                       <Button
                         size="sm"
                         variant="secondary"
-                        disabled={storyboardRunning || videoGenerating || videoRendering || !hasTtsCaptions}
+                        disabled={storyboardRunning || videoBusy || !hasTtsCaptions}
                         onClick={createStoryboard}
                       >
                         {storyboardRunning ? '生成中...' : '生成 AI 分镜'}
@@ -758,17 +760,17 @@ export function AiWorkspace() {
                       <Button
                         size="sm"
                         variant="secondary"
-                        disabled={storyboardRunning || videoGenerating || videoRendering || !hasStoryboardScenes}
+                        disabled={storyboardRunning || videoBusy || !hasStoryboardScenes}
                         onClick={createVideoProject}
                       >
                         {videoGenerating ? '生成中...' : '生成视频工程'}
                       </Button>
                       <Button
                         size="sm"
-                        disabled={storyboardRunning || videoGenerating || videoRendering || !activeRun.video?.project_dir}
+                        disabled={storyboardRunning || videoBusy || !activeRun.video?.project_dir}
                         onClick={renderVideo}
                       >
-                        {videoRendering ? '渲染中...' : '渲染 MP4'}
+                        {videoRendering || persistedVideoRendering ? '渲染中...' : '渲染 MP4'}
                       </Button>
                     </div>
                     {!hasTtsCaptions ? <p className="mutedText">请先在“配音”页签完成 TTS 合成并生成字幕时间轴。</p> : null}
