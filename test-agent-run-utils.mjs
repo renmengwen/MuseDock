@@ -5,7 +5,9 @@ import {
   getAgentStepLabel,
   getDebugSections,
   getRunDisplayTime,
+  getStoryboardSceneIssues,
   getValidationSummary,
+  sanitizeStoryboardSceneText,
 } from './frontend-react/src/utils/agentRuns.js';
 
 const sections = getAgentResultSections({
@@ -89,5 +91,41 @@ const debugSections = getDebugSections({
 });
 assert.equal(debugSections.length, 5);
 assert.equal(debugSections[0].title, '最终 messages');
+
+const storyboardIssues = getStoryboardSceneIssues({
+  scenes: [
+    {
+      index: 1,
+      headline: 'Vibe Coding',
+      layout: '中心标题 ������',
+      background_prompt: '������ 深色科技背景',
+      emphasis_words: ['语法', '框架'],
+    },
+    {
+      index: 2,
+      headline: '流程',
+      layout: 'center_focus',
+      background_prompt: '干净背景',
+      emphasis_words: ['正常', '������'],
+    },
+  ],
+});
+assert.deepEqual(storyboardIssues, {
+  1: ['layout 包含乱码', 'background_prompt 包含乱码'],
+  2: ['emphasis_words 2 包含乱码'],
+});
+
+assert.deepEqual(
+  sanitizeStoryboardSceneText({
+    layout: '中心标题 ������',
+    background_prompt: '������ 深色科技背景',
+    emphasis_words: ['语法', '������', '框架'],
+  }),
+  {
+    layout: 'center_focus',
+    background_prompt: '深色科技背景',
+    emphasis_words: ['语法', '框架'],
+  },
+);
 
 console.log('agent run utils tests passed');

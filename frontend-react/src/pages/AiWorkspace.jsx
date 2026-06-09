@@ -11,6 +11,8 @@ import {
   getDebugSections,
   getRunDisplayTime,
   getStoryboardDebugSections,
+  getStoryboardSceneIssues,
+  sanitizeStoryboardSceneText,
 } from '../utils/agentRuns.js';
 import { DEFAULT_PROMPT_OPTIONS, DEFAULT_STORYBOARD_OPTIONS } from '../utils/aiWorkspaceDefaults.js';
 import { getAwemeIdFromSearch } from '../utils/workspaceParams.js';
@@ -104,6 +106,8 @@ export function AiWorkspace() {
   const [storyboardConfig, setStoryboardConfig] = useState(null);
   const [storyboardConfigDraft, setStoryboardConfigDraft] = useState(null);
   const [storyboardConfigOpen, setStoryboardConfigOpen] = useState(false);
+  const [storyboardDebugOpen, setStoryboardDebugOpen] = useState(false);
+  const [expandedStoryboardScenes, setExpandedStoryboardScenes] = useState({});
   const [storyboardConfigSaving, setStoryboardConfigSaving] = useState(false);
   const [storyboardDraft, setStoryboardDraft] = useState(null);
   const [storyboardSaving, setStoryboardSaving] = useState(false);
@@ -161,6 +165,8 @@ export function AiWorkspace() {
   const hasStoryboardScenes = Array.isArray(activeRun?.storyboard?.scenes) && activeRun.storyboard.scenes.length > 0;
   const persistedVideoRendering = activeRun?.video?.status === 'rendering';
   const videoBusy = videoGenerating || videoRendering || persistedVideoRendering;
+  const storyboardSceneIssues = useMemo(() => getStoryboardSceneIssues(storyboardDraft || {}), [storyboardDraft]);
+  const storyboardIssueCount = Object.keys(storyboardSceneIssues).length;
 
   useEffect(() => {
     if (!activeRun) return;
@@ -182,6 +188,18 @@ export function AiWorkspace() {
       setStoryboardDraft(null);
     }
   }, [activeRun?.run_id, activeRun?.storyboard?.updated_at]);
+
+  useEffect(() => {
+    const issueSceneIndexes = Object.keys(storyboardSceneIssues);
+    if (!issueSceneIndexes.length) return;
+    setExpandedStoryboardScenes(prev => {
+      const next = { ...prev };
+      issueSceneIndexes.forEach(index => {
+        next[index] = true;
+      });
+      return next;
+    });
+  }, [storyboardSceneIssues]);
 
   useEffect(() => {
     const nextAwemeId = getAwemeIdFromSearch(location.search);
@@ -417,6 +435,24 @@ export function AiWorkspace() {
         )),
       };
     });
+  }
+
+  function toggleStoryboardScene(index) {
+    setExpandedStoryboardScenes(prev => ({ ...prev, [index]: !prev[index] }));
+  }
+
+  function cleanStoryboardScene(index) {
+    setStoryboardDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        scenes: prev.scenes.map(scene => (
+          scene.index === index ? { ...scene, ...sanitizeStoryboardSceneText(scene) } : scene
+        )),
+      };
+    });
+    setExpandedStoryboardScenes(prev => ({ ...prev, [index]: true }));
+    setStatus({ type: 'info', message: `已清理分镜 ${index} 的乱码字段，请保存分镜修改后再生成视频工程。` });
   }
 
   function updateStoryboardSceneIndexes(index, value) {
@@ -1000,6 +1036,53 @@ export function AiWorkspace() {
                 <section className="agentResultSection ttsPlayback">
                   <h4>AI 分镜与成片</h4>
                   <div className="videoProjectPanel">
+                    <div className="videoProjectToolbar">
+                      <div>
+                        <strong>成片操作</strong>
+                        <span>
+                          {storyboardDraft?.scenes?.length ? `${storyboardDraft.scenes.length} 个分镜` : '暂无分镜'}
+                          {storyboardIssueCount ? `，${storyboardIssueCount} 个分镜需处理` : ''}
+                        </span>
+                      </div>
+                      <div className="videoProjectActions">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={storyboardSaving || videoBusy || !storyboardDraft?.scenes?.length}
+                          onClick={saveStoryboardDraft}
+                        >
+                          {storyboardSaving ? '保存中...' : '保存分镜修改'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={storyboardRunning || videoBusy || !hasTtsCaptions}
+                          onClick={createStoryboard}
+                        >
+                          {storyboardRunning ? '生成中...' : '生成 AI 分镜'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={storyboardRunning || videoBusy || !hasStoryboardScenes}
+                          onClick={createVideoProject}
+                        >
+                          {videoGenerating ? '生成中...' : '生成视频工程'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={storyboardRunning || videoBusy || !activeRun.video?.project_dir}
+                          onClick={renderVideo}
+                        >
+                          {videoRendering || persistedVideoRendering ? '渲染中...' : '渲染 MP4'}
+                        </Button>
+                      </div>
+                    </div>
+                    {storyboardIssueCount ? (
+                      <div className="storyboardIssueSummary">
+                        分镜中仍有乱码字段，请展开标红分镜清理并点击“保存分镜修改”。
+                      </div>
+                    ) : null}
                     <div className="agentOptionGroup">
                       <div className="agentResultSectionHeader">
                         <h4>分镜 Agent 高级编辑</h4>
@@ -1172,91 +1255,89 @@ export function AiWorkspace() {
                         <option value="high">高清质量</option>
                       </select>
                     </div>
-                    <div className="videoProjectActions">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={storyboardRunning || videoBusy || !hasTtsCaptions}
-                        onClick={createStoryboard}
-                      >
-                        {storyboardRunning ? '生成中...' : '生成 AI 分镜'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={storyboardRunning || videoBusy || !hasStoryboardScenes}
-                        onClick={createVideoProject}
-                      >
-                        {videoGenerating ? '生成中...' : '生成视频工程'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        disabled={storyboardRunning || videoBusy || !activeRun.video?.project_dir}
-                        onClick={renderVideo}
-                      >
-                        {videoRendering || persistedVideoRendering ? '渲染中...' : '渲染 MP4'}
-                      </Button>
-                    </div>
                     {!hasTtsCaptions ? <p className="mutedText">请先在“配音”页签完成 TTS 合成并生成字幕时间轴。</p> : null}
                     {storyboardDraft?.scenes?.length ? (
                       <div className="storyboardList sceneEditorList">
-                        {storyboardDraft.scenes.map(scene => (
-                          <div className="storyboardItem sceneEditorItem" key={scene.index}>
-                            <div>
-                              <strong>分镜 {String(scene.index).padStart(2, '0')}</strong>
-                              <code>{formatCaptionTime(scene.start)} - {formatCaptionTime(scene.end)}</code>
-                            </div>
-                            <Input
-                              value={scene.headline || ''}
-                              onChange={event => updateStoryboardScene(scene.index, 'headline', event.target.value)}
-                              disabled={storyboardSaving || videoBusy}
-                              placeholder="分镜标题"
-                            />
-                            <Input
-                              value={(scene.caption_indexes || []).join(', ')}
-                              onChange={event => updateStoryboardSceneIndexes(scene.index, event.target.value)}
-                              disabled={storyboardSaving || videoBusy}
-                              placeholder="字幕索引，例如 1, 2"
-                            />
-                            <select
-                              value={scene.visual_type || 'text_card'}
-                              onChange={event => updateStoryboardScene(scene.index, 'visual_type', event.target.value)}
-                              disabled={storyboardSaving || videoBusy}
+                        {storyboardDraft.scenes.map(scene => {
+                          const issues = storyboardSceneIssues[scene.index] || [];
+                          const expanded = !!expandedStoryboardScenes[scene.index] || issues.length > 0;
+                          return (
+                            <details
+                              className={`storyboardItem sceneEditorItem ${issues.length ? 'hasIssue' : ''}`}
+                              key={scene.index}
+                              open={expanded}
+                              onToggle={event => {
+                                if (event.currentTarget.open !== expanded) toggleStoryboardScene(scene.index);
+                              }}
                             >
-                              <option value="text_card">text_card</option>
-                              <option value="quote_card">quote_card</option>
-                              <option value="step_card">step_card</option>
-                              <option value="contrast_card">contrast_card</option>
-                            </select>
-                            <select
-                              value={scene.layout || 'center_focus'}
-                              onChange={event => updateStoryboardScene(scene.index, 'layout', event.target.value)}
-                              disabled={storyboardSaving || videoBusy}
-                            >
-                              <option value="center_focus">center_focus</option>
-                              <option value="split_emphasis">split_emphasis</option>
-                              <option value="stacked_steps">stacked_steps</option>
-                              <option value="compare_grid">compare_grid</option>
-                            </select>
-                            <textarea
-                              value={scene.background_prompt || ''}
-                              onChange={event => updateStoryboardScene(scene.index, 'background_prompt', event.target.value)}
-                              disabled={storyboardSaving || videoBusy}
-                              placeholder="原创背景提示"
-                            />
-                            <Input
-                              value={(scene.emphasis_words || []).join(', ')}
-                              onChange={event => updateStoryboardSceneEmphasis(scene.index, event.target.value)}
-                              disabled={storyboardSaving || videoBusy}
-                              placeholder="强调词，用英文逗号或中文逗号分隔"
-                            />
-                          </div>
-                        ))}
-                        <div className="videoProjectActions">
-                          <Button size="sm" variant="secondary" disabled={storyboardSaving || videoBusy} onClick={saveStoryboardDraft}>
-                            {storyboardSaving ? '保存中...' : '保存分镜修改'}
-                          </Button>
-                        </div>
+                              <summary className="sceneEditorSummary">
+                                <div>
+                                  <strong>分镜 {String(scene.index).padStart(2, '0')}</strong>
+                                  <code>{formatCaptionTime(scene.start)} - {formatCaptionTime(scene.end)}</code>
+                                </div>
+                                <span>{scene.headline || '未填写标题'}</span>
+                                {issues.length ? <em>{issues.join('，')}</em> : null}
+                              </summary>
+                              {issues.length ? (
+                                <div className="sceneIssueActions">
+                                  <span>{issues.join('，')}</span>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={storyboardSaving || videoBusy}
+                                    onClick={() => cleanStoryboardScene(scene.index)}
+                                  >
+                                    清理乱码字段
+                                  </Button>
+                                </div>
+                              ) : null}
+                              <Input
+                                value={scene.headline || ''}
+                                onChange={event => updateStoryboardScene(scene.index, 'headline', event.target.value)}
+                                disabled={storyboardSaving || videoBusy}
+                                placeholder="分镜标题"
+                              />
+                              <Input
+                                value={(scene.caption_indexes || []).join(', ')}
+                                onChange={event => updateStoryboardSceneIndexes(scene.index, event.target.value)}
+                                disabled={storyboardSaving || videoBusy}
+                                placeholder="字幕索引，例如 1, 2"
+                              />
+                              <select
+                                value={scene.visual_type || 'text_card'}
+                                onChange={event => updateStoryboardScene(scene.index, 'visual_type', event.target.value)}
+                                disabled={storyboardSaving || videoBusy}
+                              >
+                                <option value="text_card">text_card</option>
+                                <option value="quote_card">quote_card</option>
+                                <option value="step_card">step_card</option>
+                                <option value="contrast_card">contrast_card</option>
+                              </select>
+                              <select
+                                value={['center_focus', 'split_emphasis', 'stacked_steps', 'compare_grid'].includes(scene.layout) ? scene.layout : 'center_focus'}
+                                onChange={event => updateStoryboardScene(scene.index, 'layout', event.target.value)}
+                                disabled={storyboardSaving || videoBusy}
+                              >
+                                <option value="center_focus">center_focus</option>
+                                <option value="split_emphasis">split_emphasis</option>
+                                <option value="stacked_steps">stacked_steps</option>
+                                <option value="compare_grid">compare_grid</option>
+                              </select>
+                              <textarea
+                                value={scene.background_prompt || ''}
+                                onChange={event => updateStoryboardScene(scene.index, 'background_prompt', event.target.value)}
+                                disabled={storyboardSaving || videoBusy}
+                                placeholder="原创背景提示"
+                              />
+                              <Input
+                                value={(scene.emphasis_words || []).join(', ')}
+                                onChange={event => updateStoryboardSceneEmphasis(scene.index, event.target.value)}
+                                disabled={storyboardSaving || videoBusy}
+                                placeholder="强调词，用英文逗号或中文逗号分隔"
+                              />
+                            </details>
+                          );
+                        })}
                       </div>
                     ) : null}
                     {activeRun.video ? (
@@ -1268,12 +1349,17 @@ export function AiWorkspace() {
                         ) : null}
                       </div>
                     ) : null}
-                    {getStoryboardDebugSections(activeRun).map(section => (
-                      <section className="agentResultSection" key={section.key}>
-                        <h4>{section.title}</h4>
-                        <pre>{section.text || '暂无内容'}</pre>
-                      </section>
-                    ))}
+                    <div className="storyboardDebugPanel">
+                      <Button size="sm" variant="secondary" onClick={() => setStoryboardDebugOpen(value => !value)}>
+                        {storyboardDebugOpen ? '收起调试信息' : '展开调试信息'}
+                      </Button>
+                      {storyboardDebugOpen ? getStoryboardDebugSections(activeRun).map(section => (
+                        <section className="agentResultSection" key={section.key}>
+                          <h4>{section.title}</h4>
+                          <pre>{section.text || '暂无内容'}</pre>
+                        </section>
+                      )) : null}
+                    </div>
                   </div>
                 </section>
               ) : null}

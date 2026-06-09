@@ -71,6 +71,57 @@ function stringifyDebug(value) {
   return JSON.stringify(value || {}, null, 2);
 }
 
+function hasReplacementGlyph(value) {
+  return String(value || '').includes('\uFFFD');
+}
+
+function stripReplacementGlyphText(value) {
+  return String(value || '')
+    .replace(/\uFFFD+/g, ' ')
+    .replace(/^[\s:：,，;；、。.-]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function getStoryboardSceneIssues(storyboard = {}) {
+  const scenes = Array.isArray(storyboard.scenes) ? storyboard.scenes : [];
+  return scenes.reduce((result, scene, sceneIndex) => {
+    const sceneNumber = Number(scene?.index || sceneIndex + 1);
+    const issues = [];
+    ['headline', 'layout', 'background_prompt'].forEach(field => {
+      if (hasReplacementGlyph(scene?.[field])) issues.push(`${field} 包含乱码`);
+    });
+    const words = Array.isArray(scene?.emphasis_words) ? scene.emphasis_words : [];
+    words.forEach((word, wordIndex) => {
+      if (hasReplacementGlyph(word)) issues.push(`emphasis_words ${wordIndex + 1} 包含乱码`);
+    });
+    if (issues.length) result[sceneNumber] = issues;
+    return result;
+  }, {});
+}
+
+export function sanitizeStoryboardSceneText(scene = {}) {
+  const cleaned = {};
+  if (hasReplacementGlyph(scene.layout)) {
+    cleaned.layout = 'center_focus';
+  }
+  if (hasReplacementGlyph(scene.background_prompt)) {
+    cleaned.background_prompt = stripReplacementGlyphText(scene.background_prompt);
+  }
+  if (hasReplacementGlyph(scene.headline)) {
+    cleaned.headline = stripReplacementGlyphText(scene.headline);
+  }
+  if (Array.isArray(scene.emphasis_words)) {
+    const words = scene.emphasis_words
+      .map(word => stripReplacementGlyphText(word))
+      .filter(Boolean);
+    if (words.length !== scene.emphasis_words.length || scene.emphasis_words.some(hasReplacementGlyph)) {
+      cleaned.emphasis_words = words;
+    }
+  }
+  return cleaned;
+}
+
 export function getDebugSections(run = {}) {
   return [
     { key: 'messages', title: '最终 messages', text: stringifyDebug(run.messages || []) },
