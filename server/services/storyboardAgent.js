@@ -182,6 +182,7 @@ async function createStoryboard(options = {}) {
       fetchImpl: options.fetchImpl,
       maxRetries: options.maxRetries,
       retryDelayMs: options.retryDelayMs,
+      stream: options.stream !== false,
     });
   } catch (error) {
     modelResult = { success: false, message: error.message || 'AI 分镜模型调用失败。' };

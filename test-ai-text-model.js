@@ -6,6 +6,23 @@ const path = require('path');
 const aiModelConfig = require('./server/services/aiModelConfig');
 const aiTextModel = require('./server/services/aiTextModel');
 
+function makeStreamResponse(chunks) {
+  const encoder = new TextEncoder();
+  return {
+    getReader() {
+      let index = 0;
+      return {
+        async read() {
+          if (index >= chunks.length) return { done: true };
+          const value = encoder.encode(chunks[index]);
+          index += 1;
+          return { done: false, value };
+        },
+      };
+    },
+  };
+}
+
 async function run() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-text-model-test-'));
   const configPath = path.join(root, 'ai-models.json');
@@ -140,6 +157,32 @@ async function run() {
   assert.strictEqual(retried.success, true);
   assert.strictEqual(retried.text, 'retry ok');
   assert.strictEqual(retryCalls, 2);
+
+  let streamRequestBody = null;
+  const streamed = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'stream json' }],
+    configPath,
+    stream: true,
+    fetchImpl: async (url, options) => {
+      assert.strictEqual(url, 'https://api.example.com/v1/chat/completions');
+      streamRequestBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: name => (name.toLowerCase() === 'content-type' ? 'text/event-stream' : null),
+        },
+        body: makeStreamResponse([
+          'data: {"choices":[{"delta":{"content":"{\\"summary\\":"}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":"\\"stream ok\\"}"}}]}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+      };
+    },
+  });
+  assert.strictEqual(streamed.success, true);
+  assert.strictEqual(streamed.text, '{"summary":"stream ok"}');
+  assert.strictEqual(streamRequestBody.stream, true);
 
   const networkFailed = await aiTextModel.callTextModel({
     messages: [{ role: 'user', content: 'network fail' }],

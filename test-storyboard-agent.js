@@ -47,6 +47,7 @@ async function run() {
     aiTextModel: {
       callTextModel: async options => {
         calls.push(options);
+        assert.equal(options.stream, true);
         return {
           success: true,
           model: { provider: 'OpenAI', model_id: 'gpt-test' },

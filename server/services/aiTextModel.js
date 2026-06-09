@@ -49,6 +49,66 @@ async function readJsonResponse(response, apiKey) {
   }
 }
 
+function decodeChunk(value) {
+  if (typeof value === 'string') return value;
+  return new TextDecoder().decode(value);
+}
+
+async function readStreamResponse(response, apiKey) {
+  if (!response?.body || typeof response.body.getReader !== 'function') {
+    return {
+      success: false,
+      text: '',
+      raw_response: { message: '流式响应缺少可读取的 body。' },
+    };
+  }
+
+  const reader = response.body.getReader();
+  let buffer = '';
+  let text = '';
+  const events = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decodeChunk(value);
+    const parts = buffer.split(/\r?\n\r?\n/);
+    buffer = parts.pop() || '';
+
+    for (const part of parts) {
+      const lines = part.split(/\r?\n/).map(line => line.trim());
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(data);
+        } catch (error) {
+          return {
+            success: false,
+            text,
+            raw_response: {
+              message: '流式响应包含无效 JSON 片段。',
+              parse_error: sanitizeErrorDetail(error?.message, apiKey),
+              preview: sanitizeErrorDetail(data.slice(0, 500), apiKey),
+            },
+          };
+        }
+        events.push(sanitizeRawResponse(parsed, apiKey));
+        const delta = parsed?.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string') text += delta;
+      }
+    }
+  }
+
+  return {
+    success: true,
+    text,
+    raw_response: { stream: true, chunks: events },
+  };
+}
+
 function getProviderError(rawResponse) {
   if (!rawResponse || typeof rawResponse !== 'object') return '';
   const error = rawResponse.error;
@@ -106,6 +166,7 @@ async function callTextModel(options = {}) {
     textConfig,
     maxRetries = 1,
     retryDelayMs = 1200,
+    stream = false,
   } = options;
 
   const config = textConfig || await aiModelConfig.getRuntimeConfig('text', { configPath });
@@ -146,6 +207,7 @@ async function callTextModel(options = {}) {
           model: modelId,
           messages,
           temperature,
+          ...(stream ? { stream: true } : {}),
         }),
       });
     } catch (error) {
@@ -174,6 +236,35 @@ async function callTextModel(options = {}) {
       message: `${provider || '文本模型'} 调用失败：${detail}`,
       model: toModelInfo(provider, modelId),
       raw_response: rawResponse,
+    };
+  }
+
+  if (stream) {
+    const streamResult = await readStreamResponse(response, apiKey);
+    if (!streamResult.success) {
+      return {
+        success: false,
+        configured: true,
+        message: `${provider || '文本模型'} 流式响应解析失败：${getProviderError(streamResult.raw_response) || '响应格式无效'}`,
+        model: toModelInfo(provider, modelId),
+        raw_response: streamResult.raw_response,
+      };
+    }
+    if (!streamResult.text) {
+      return {
+        success: false,
+        configured: true,
+        message: `${provider || '文本模型'} 流式返回结果缺少文本内容。`,
+        model: toModelInfo(provider, modelId),
+        raw_response: streamResult.raw_response,
+      };
+    }
+    return {
+      success: true,
+      configured: true,
+      text: streamResult.text,
+      model: toModelInfo(provider, modelId),
+      raw_response: streamResult.raw_response,
     };
   }
 
