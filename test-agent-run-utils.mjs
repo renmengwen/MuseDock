@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
 import {
+  getAgentConfigSourceLabel,
   getAgentResultSections,
   getAgentStepLabel,
+  getDebugSections,
   getRunDisplayTime,
+  getStoryboardSceneIssues,
+  getValidationSummary,
+  sanitizeStoryboardSceneText,
 } from './frontend-react/src/utils/agentRuns.js';
 
 const sections = getAgentResultSections({
@@ -66,6 +71,61 @@ assert.equal(getRunDisplayTime('not-a-date'), 'not-a-date');
 assert.equal(
   getRunDisplayTime('2026-06-07T08:09:10+08:00'),
   new Date('2026-06-07T08:09:10+08:00').toLocaleString('zh-CN', { hour12: false }),
+);
+
+assert.equal(getAgentConfigSourceLabel('default'), '默认模板');
+assert.equal(getAgentConfigSourceLabel('override'), '已保存自定义');
+assert.equal(getAgentConfigSourceLabel('request'), '本次临时编辑');
+
+assert.deepEqual(getValidationSummary({ success: false, errors: ['字段缺失'] }), {
+  type: 'error',
+  message: '字段缺失',
+});
+
+const debugSections = getDebugSections({
+  messages: [{ role: 'system', content: '系统' }],
+  raw_output: '{"summary":"ok"}',
+  parse: { success: true, error: '' },
+  schema_validation: { success: true, errors: [] },
+  result: { summary: 'ok' },
+});
+assert.equal(debugSections.length, 5);
+assert.equal(debugSections[0].title, '最终 messages');
+
+const storyboardIssues = getStoryboardSceneIssues({
+  scenes: [
+    {
+      index: 1,
+      headline: 'Vibe Coding',
+      layout: '中心标题 ������',
+      background_prompt: '������ 深色科技背景',
+      emphasis_words: ['语法', '框架'],
+    },
+    {
+      index: 2,
+      headline: '流程',
+      layout: 'center_focus',
+      background_prompt: '干净背景',
+      emphasis_words: ['正常', '������'],
+    },
+  ],
+});
+assert.deepEqual(storyboardIssues, {
+  1: ['layout 包含乱码', 'background_prompt 包含乱码'],
+  2: ['emphasis_words 2 包含乱码'],
+});
+
+assert.deepEqual(
+  sanitizeStoryboardSceneText({
+    layout: '中心标题 ������',
+    background_prompt: '������ 深色科技背景',
+    emphasis_words: ['语法', '������', '框架'],
+  }),
+  {
+    layout: 'center_focus',
+    background_prompt: '深色科技背景',
+    emphasis_words: ['语法', '框架'],
+  },
 );
 
 console.log('agent run utils tests passed');

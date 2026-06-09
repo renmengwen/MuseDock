@@ -50,6 +50,8 @@ const DEFAULT_MODEL = {
   baseUrl: '',
   modelId: '',
   note: '',
+  ttsConcurrency: 1,
+  ttsQueueIntervalMs: 1800,
 };
 
 function createEmptyForm() {
@@ -124,6 +126,10 @@ export function SettingsPage() {
             modelId: model.modelId,
             note: model.note,
           };
+          if (item.key === 'tts') {
+            acc[item.key].ttsConcurrency = Number(model.ttsConcurrency) || 1;
+            acc[item.key].ttsQueueIntervalMs = Number(model.ttsQueueIntervalMs) || 0;
+          }
           return acc;
         }, {}),
       };
@@ -231,6 +237,34 @@ export function SettingsPage() {
                       placeholder="例如：用于本地素材分析 / 高质量生成 / 备用通道"
                     />
                   </label>
+                  {item.key === 'tts' ? (
+                    <>
+                      <label>
+                        <span>TTS 并发数</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="5"
+                          step="1"
+                          value={model.ttsConcurrency}
+                          onChange={event => updateModel(item.key, 'ttsConcurrency', event.target.value)}
+                          placeholder="1"
+                        />
+                      </label>
+                      <label>
+                        <span>TTS 请求间隔（毫秒）</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="10000"
+                          step="100"
+                          value={model.ttsQueueIntervalMs}
+                          onChange={event => updateModel(item.key, 'ttsQueueIntervalMs', event.target.value)}
+                          placeholder="1800"
+                        />
+                      </label>
+                    </>
+                  ) : null}
                 </div>
               </article>
             );

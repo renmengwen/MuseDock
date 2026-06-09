@@ -1,6 +1,12 @@
 const MAX_TRANSCRIPT_CHARS = 8000;
 const MAX_COMMENTS_CHARS = 4000;
 
+const DEFAULT_MODEL_OPTIONS = {
+  temperature: 0.4,
+  stream: true,
+  maxRetries: 1,
+};
+
 function normalizeStringArray(value) {
   return Array.isArray(value)
     ? value.filter(item => typeof item === 'string' && item.trim()).map(item => item.trim())
@@ -131,6 +137,37 @@ function buildViralRewritePrompt({ analysisInput = {}, transcript = {}, comments
   ];
 }
 
+function getViralRewriteSystemPrompt() {
+  return [
+    '你是 MuseDock 的受控内容创作 Agent。',
+    '请只输出 JSON，不要输出 Markdown、解释或代码块。',
+    'JSON 字段必须包含 summary, viral_points, audience, comment_insights, topics, rewrite_script, titles。',
+    'viral_points, comment_insights, topics, titles 必须是字符串数组。',
+    '禁止出现乱码文字。',
+    '输出的rewrite_script最终目的是给hyperframes渲染动画，尽量贴合它，但只需要输出可以TTS合成的内容。',
+  ].join('\n');
+}
+
+function getViralRewriteUserPromptTemplate() {
+  return [
+    '任务：爆款拆解 + 改写脚本。',
+    '视频标题：{{videoTitle}}',
+    '作者：{{authorName}}',
+    '链接：{{awemeUrl}}',
+    '统计：点赞 {{likeCount}}，评论 {{commentCount}}，分享 {{shareCount}}',
+    '',
+    '转写文本：',
+    '{{transcriptNote}}',
+    '{{transcriptText}}',
+    '',
+    '评论信息：',
+    '{{commentsNote}}',
+    '{{commentsText}}',
+    '',
+    '{{promptOptionsText}}',
+  ].join('\n');
+}
+
 function buildCommentInsightsPrompt({ analysisInput = {}, commentsText = '', commentCount = 0, promptOptions = {} } = {}) {
   const video = analysisInput.video || {};
   const statistics = video.statistics || {};
@@ -161,6 +198,31 @@ function buildCommentInsightsPrompt({ analysisInput = {}, commentsText = '', com
       ].join('\n'),
     },
   ];
+}
+
+function getCommentInsightsSystemPrompt() {
+  return [
+    '你是 MuseDock 的评论研究 Agent。',
+    '请只输出 JSON，不要输出 Markdown、解释或代码块。',
+    'JSON 字段必须包含 summary, pain_points, questions, sentiment, content_opportunities, reply_suggestions。',
+    'pain_points, questions, content_opportunities, reply_suggestions 必须是字符串数组。',
+  ].join('\n');
+}
+
+function getCommentInsightsUserPromptTemplate() {
+  return [
+    '任务：评论洞察。',
+    '视频标题：{{videoTitle}}',
+    '作者：{{authorName}}',
+    '统计：评论 {{commentCount}}，点赞 {{likeCount}}',
+    '',
+    '本地评论缓存共 {{localCommentCount}} 条。请从评论里提炼用户痛点、高频问题、整体情绪、可转化为内容的机会，以及适合运营回复的建议。',
+    '',
+    '评论样本：',
+    '{{commentsText}}',
+    '',
+    '{{promptOptionsText}}',
+  ].join('\n');
 }
 
 const templates = [
@@ -202,11 +264,45 @@ function listAgentTemplates() {
   }));
 }
 
+function getEditableAgentTemplate(id) {
+  const template = getAgentTemplate(id);
+  if (!template) return null;
+  const editable = {
+    id: template.id,
+    label: template.label,
+    description: template.description,
+    requireTranscript: template.requireTranscript,
+    requireComments: template.requireComments,
+    resultFields: [...template.resultFields],
+    modelOptions: { ...DEFAULT_MODEL_OPTIONS },
+  };
+
+  if (template.id === 'comment_insights') {
+    return {
+      ...editable,
+      systemPrompt: getCommentInsightsSystemPrompt(),
+      userPromptTemplate: getCommentInsightsUserPromptTemplate(),
+    };
+  }
+
+  return {
+    ...editable,
+    systemPrompt: getViralRewriteSystemPrompt(),
+    userPromptTemplate: getViralRewriteUserPromptTemplate(),
+  };
+}
+
+function listEditableAgentTemplates() {
+  return templates.map(template => getEditableAgentTemplate(template.id));
+}
+
 module.exports = {
   MAX_TRANSCRIPT_CHARS,
   MAX_COMMENTS_CHARS,
   getAgentTemplate,
   listAgentTemplates,
+  getEditableAgentTemplate,
+  listEditableAgentTemplates,
   normalizeStringArray,
   normalizePromptOptions,
   formatPromptOptionsForPrompt,

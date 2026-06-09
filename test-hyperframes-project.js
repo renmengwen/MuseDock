@@ -44,6 +44,21 @@ async function run() {
             { index: 2, start: 1.25, end: 3.75, text: '第二句。' },
           ],
         },
+        {
+          index: 2,
+          caption_indexes: [2],
+          start: 1.25,
+          end: 3.75,
+          duration: 2.5,
+          headline: '传统 vs Vibe Coding',
+          visual_type: 'contrast_card',
+          layout: 'split_compare',
+          background_prompt: '原创对比背景',
+          emphasis_words: ['传统', 'Vibe Coding'],
+          captions: [
+            { index: 2, start: 1.25, end: 3.75, text: '第二句。' },
+          ],
+        },
       ],
     },
   };
@@ -74,12 +89,22 @@ async function run() {
   assert.match(html, /<audio id="narration-audio"/);
   assert.match(html, /class="scene clip/);
   assert.match(html, /tl\.fromTo\("#scene-1"/);
-  assert.match(html, /tl\.fromTo\("#scene-1 \.visual-field"/);
-  assert.match(html, /tl\.from\("#scene-1 \.emphasis span"/);
+  assert.match(html, /tl\.fromTo\("#scene-1 \.scene-content"/);
+  assert.doesNotMatch(html, /tl\.from\("#scene-1 \.emphasis span"/);
+  assert.match(html, /#scene-1 \.emphasis span:nth-child\(1\)/);
   assert.match(html, /tl\.to\("#scene-1"/);
   assert.match(html, /核心观点/);
+  assert.doesNotMatch(html, /class="visual-type"/);
+  assert.doesNotMatch(html, />text_card<\/div>/);
   assert.match(html, /assets\/narration.wav/);
+  assert.doesNotMatch(html, /<p>第一句。 第二句。<\/p>/);
   assert.doesNotMatch(html, /video\.mp4|frame-0001|frames\//);
+  assert.match(html, /class="caption-bar"/);
+  assert.match(html, /class="caption-line"/);
+  assert.match(html, /data-caption-index="1"/);
+  assert.match(html, /data-caption-index="2"/);
+  assert.match(html, /#scene-1 \.caption-line:nth-child\(1\)/);
+  assert.match(html, /#scene-1 \.caption-line:nth-child\(2\)/);
 
   const customProjectDir = path.join(root, 'custom-project');
   const customResult = await hyperframesProject.createOriginalCaptionProject({
@@ -93,6 +118,9 @@ async function run() {
       showCaptionBar: false,
       showSceneNumber: false,
       quality: 'high',
+      frameStyle: 'tech_neon',
+      transitionStyle: 'glitch',
+      captionMode: 'kinetic',
     },
   });
 
@@ -103,12 +131,22 @@ async function run() {
   assert.match(indexHtml, /data-width="720"/);
   assert.match(indexHtml, /data-height="1280"/);
   assert.match(indexHtml, /--caption-font-size: 40px/);
+  assert.match(indexHtml, /data-frame-profile="tech_neon"/);
+  assert.match(indexHtml, /class="frame-bg-layer neon-grid"/);
+  assert.match(indexHtml, /class="frame-bg-layer scanline"/);
+  assert.match(indexHtml, /class="scene-content scene-content--text-card"/);
+  assert.match(indexHtml, /class="scene-content scene-content--contrast-card"/);
+  assert.match(indexHtml, /class="transition-layer"/);
+  assert.match(indexHtml, /data-transition-style="glitch"/);
+  assert.match(indexHtml, /kinetic-caption/);
   assert.doesNotMatch(indexHtml, /class="caption-bar"/);
   assert.doesNotMatch(indexHtml, /class="scene-number"/);
 
   const projectJson = JSON.parse(fs.readFileSync(path.join(customProjectDir, 'project.json'), 'utf-8'));
   assert.equal(projectJson.render_options.quality, 'high');
   assert.equal(projectJson.render_options.motionLevel, 'low');
+  assert.equal(projectJson.frame_options.frameStyle, 'tech_neon');
+  assert.equal(projectJson.frame_options.captionMode, 'kinetic');
 
   const missingTts = await hyperframesProject.createOriginalCaptionProject({
     run: { run_id: 'missing-tts', tts: {}, storyboard: runData.storyboard },
@@ -116,6 +154,120 @@ async function run() {
   });
   assert.equal(missingTts.success, false);
   assert.match(missingTts.message, /TTS|字幕/);
+
+  const badStoryboard = await hyperframesProject.createOriginalCaptionProject({
+    run: {
+      ...runData,
+      storyboard: {
+        ...runData.storyboard,
+        scenes: [
+          {
+            ...runData.storyboard.scenes[0],
+            emphasis_words: ['������'],
+          },
+        ],
+      },
+    },
+    projectDir: path.join(root, 'bad-storyboard'),
+  });
+  assert.equal(badStoryboard.success, false);
+  assert.match(badStoryboard.message, /乱码|分镜/);
+
+  const listHtml = hyperframesProject.buildIndexHtml({
+    duration: 6,
+    captions: [
+      { index: 1, start: 0, end: 6, duration: 6, text: '以前写代码，你要先懂语法、懂框架、懂前端后端、懂报错、懂部署。' },
+    ],
+    storyboard: {
+      template: 'ai_storyboard_cards',
+      scenes: [
+        {
+          index: 1,
+          caption_indexes: [1],
+          start: 0,
+          end: 6,
+          duration: 6,
+          headline: '从学会代码，到学会对 AI 说清楚',
+          visual_type: 'text_card',
+          layout: 'center_focus',
+          background_prompt: '原创抽象背景',
+          emphasis_words: ['语法', '框架', '前端后端', '报错', '部署'],
+          captions: [
+            { index: 1, start: 0, end: 6, duration: 6, text: '以前写代码，你要先懂语法、懂框架、懂前端后端、懂报错、懂部署。' },
+          ],
+        },
+      ],
+    },
+  });
+  assert.match(listHtml, /class="emphasis timed-cards"/);
+  assert.match(listHtml, /data-card-index="0"/);
+  assert.match(listHtml, /<span data-card-index="4">部署<\/span>/);
+  assert.match(listHtml, /#scene-1 \.emphasis span:nth-child\(5\)/);
+  assert.doesNotMatch(listHtml, /<p>以前写代码，你要先懂语法、懂框架、懂前端后端、懂报错、懂部署。<\/p>/);
+
+  const fallbackWordHtml = hyperframesProject.buildIndexHtml({
+    duration: 6,
+    captions: [
+      { index: 1, start: 0, end: 6, duration: 6, text: '以前写代码，你要先懂语法、框架、前端后端、报错、部署。' },
+    ],
+    storyboard: {
+      template: 'ai_storyboard_cards',
+      scenes: [
+        {
+          index: 1,
+          caption_indexes: [1],
+          start: 0,
+          end: 6,
+          duration: 6,
+          headline: '从学会代码，到学会对 AI 说清楚',
+          visual_type: 'text_card',
+          layout: 'center_focus',
+          background_prompt: '原创抽象背景',
+          emphasis_words: [],
+          captions: [
+            { index: 1, start: 0, end: 6, duration: 6, text: '以前写代码，你要先懂语法、框架、前端后端、报错、部署。' },
+          ],
+        },
+      ],
+    },
+  });
+  assert.match(fallbackWordHtml, /<span data-card-index="0">语法<\/span>/);
+  assert.match(fallbackWordHtml, /<span data-card-index="1">框架<\/span>/);
+  assert.match(fallbackWordHtml, /<span data-card-index="2">前端后端<\/span>/);
+  assert.match(fallbackWordHtml, /<span data-card-index="3">报错<\/span>/);
+  assert.match(fallbackWordHtml, /<span data-card-index="4">部署<\/span>/);
+  assert.doesNotMatch(fallbackWordHtml, /<span data-card-index="0">从学会代码，到学会对 AI 说清楚<\/span>/);
+  assert.doesNotMatch(fallbackWordHtml, /<span data-card-index="0">以前写代码，你要先懂语法、框架、前端后端、报错、部署。<\/span>/);
+
+  const weakContrastHtml = hyperframesProject.buildIndexHtml({
+    duration: 4,
+    captions: [
+      { index: 1, start: 0, end: 4, duration: 4, text: '你会发现，一个小功能背后，其实是一整套团队协作。' },
+    ],
+    storyboard: {
+      template: 'ai_storyboard_cards',
+      scenes: [
+        {
+          index: 1,
+          caption_indexes: [1],
+          start: 0,
+          end: 4,
+          duration: 4,
+          headline: '一人指挥 AI',
+          visual_type: 'contrast_card',
+          layout: 'split_compare',
+          background_prompt: '原创对比背景',
+          emphasis_words: ['团队协作', '需求讲清楚'],
+          captions: [
+            { index: 1, start: 0, end: 4, duration: 4, text: '你会发现，一个小功能背后，其实是一整套团队协作。' },
+          ],
+        },
+      ],
+    },
+  });
+  assert.doesNotMatch(weakContrastHtml, /<div class="compare-side compare-side--old"/);
+  assert.doesNotMatch(weakContrastHtml, /<div class="compare-side compare-side--new"/);
+  assert.match(weakContrastHtml, /scene-content--text-card/);
 }
 
 run().then(() => {

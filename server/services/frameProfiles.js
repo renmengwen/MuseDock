@@ -1,0 +1,63 @@
+const FRAME_DEFAULTS = {
+  frameStyle: 'tech_neon',
+  energy: 'medium',
+  density: 'balanced',
+  transitionStyle: 'auto',
+  captionMode: 'standard',
+};
+
+const FRAME_ALLOWED = {
+  frameStyle: ['tech_neon'],
+  energy: ['low', 'medium', 'high'],
+  density: ['clean', 'balanced', 'rich'],
+  transitionStyle: ['auto', 'wipe', 'glitch', 'zoom'],
+  captionMode: ['standard', 'kinetic'],
+};
+
+const TECH_NEON_PROFILE = {
+  id: 'tech_neon',
+  name: '科技霓虹',
+  stage: {
+    aspectRatio: '9:16',
+    compositionId: 'ai-storyboard-cards',
+  },
+  cssVars: {
+    '--frame-bg': '#05070b',
+    '--frame-panel': 'rgba(14, 18, 24, .78)',
+    '--frame-accent': '#25f4ee',
+    '--frame-hot': '#fe2c55',
+    '--frame-gold': '#ffd166',
+    '--frame-text': '#f7fbff',
+    '--frame-muted': 'rgba(247, 251, 255, .72)',
+  },
+  backgroundLayers: ['neon-grid', 'scanline', 'radial-energy'],
+  sceneRenderers: ['text_card', 'quote_card', 'contrast_card', 'step_card'],
+  transitions: ['glitch-wipe', 'zoom-burst', 'soft-wipe'],
+};
+
+function pickAllowed(value, allowed, fallback) {
+  return allowed.includes(value) ? value : fallback;
+}
+
+function normalizeFrameOptions(value = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    frameStyle: pickAllowed(source.frameStyle, FRAME_ALLOWED.frameStyle, FRAME_DEFAULTS.frameStyle),
+    energy: pickAllowed(source.energy, FRAME_ALLOWED.energy, FRAME_DEFAULTS.energy),
+    density: pickAllowed(source.density, FRAME_ALLOWED.density, FRAME_DEFAULTS.density),
+    transitionStyle: pickAllowed(source.transitionStyle, FRAME_ALLOWED.transitionStyle, FRAME_DEFAULTS.transitionStyle),
+    captionMode: pickAllowed(source.captionMode, FRAME_ALLOWED.captionMode, FRAME_DEFAULTS.captionMode),
+  };
+}
+
+function getFrameProfile(id = FRAME_DEFAULTS.frameStyle) {
+  const value = typeof id === 'string' ? id.trim() : '';
+  if (value === TECH_NEON_PROFILE.id) return TECH_NEON_PROFILE;
+  return TECH_NEON_PROFILE;
+}
+
+module.exports = {
+  FRAME_DEFAULTS,
+  normalizeFrameOptions,
+  getFrameProfile,
+};

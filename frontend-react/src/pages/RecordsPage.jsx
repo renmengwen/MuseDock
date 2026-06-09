@@ -14,10 +14,10 @@ import { filterByTitle } from '../utils/content.js';
 import { getDouyinAwemeId } from '../utils/format.js';
 import { shouldAutoPrepareMedia } from '../utils/mediaStatus.js';
 
-export function RecordsPage() {
+export function RecordsPage({ routePlatform = '' } = {}) {
   const params = useParams();
   const navigate = useNavigate();
-  const platform = useMemo(() => (params.platform === 'xhs' ? 'xhs' : 'douyin'), [params.platform]);
+  const platform = useMemo(() => ((routePlatform || params.platform) === 'xhs' ? 'xhs' : 'douyin'), [routePlatform, params.platform]);
 
   const [results, setResults] = useState([]);
   const [titleQuery, setTitleQuery] = useState('');

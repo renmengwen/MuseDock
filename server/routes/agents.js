@@ -1,14 +1,61 @@
 const express = require('express');
 const agentRuns = require('../services/agentRuns');
+const agentTemplateOverrides = require('../services/agentTemplateOverrides');
 
 const router = express.Router();
 const { TEMPLATE_VIRAL_REWRITE } = agentRuns;
+
+router.get('/templates', async (req, res) => {
+  const result = await agentTemplateOverrides.listTaskAgentConfigs();
+  return res.json(result);
+});
+
+router.get('/templates/:id', async (req, res) => {
+  const result = await agentTemplateOverrides.getTaskAgentConfig(req.params.id);
+  return res.status(result.success ? 200 : 404).json(result);
+});
+
+router.put('/templates/:id', async (req, res) => {
+  const result = await agentTemplateOverrides.saveTaskAgentConfig(req.params.id, req.body || {});
+  return res.status(result.success ? 200 : 400).json(result);
+});
+
+router.delete('/templates/:id/override', async (req, res) => {
+  const result = await agentTemplateOverrides.clearTaskAgentOverride(req.params.id);
+  return res.json(result);
+});
+
+router.get('/storyboard-template', async (req, res) => {
+  const result = await agentTemplateOverrides.getStoryboardAgentConfig();
+  return res.json(result);
+});
+
+router.put('/storyboard-template', async (req, res) => {
+  const result = await agentTemplateOverrides.saveStoryboardAgentConfig(req.body || {});
+  return res.status(result.success ? 200 : 400).json(result);
+});
+
+router.delete('/storyboard-template/override', async (req, res) => {
+  const result = await agentTemplateOverrides.clearStoryboardAgentOverride();
+  return res.json(result);
+});
+
+router.post('/messages/preview', async (req, res) => {
+  const result = agentTemplateOverrides.createPreviewMessages(req.body?.config || {}, req.body?.values || {});
+  return res.status(result.success ? 200 : 400).json(result);
+});
+
+router.post('/storyboard-messages/preview', async (req, res) => {
+  const result = agentTemplateOverrides.createStoryboardPreviewMessages(req.body?.config || {}, req.body?.values || {});
+  return res.status(result.success ? 200 : 400).json(result);
+});
 
 router.post('/douyin/:aweme_id/runs', async (req, res) => {
   try {
     const result = await agentRuns.createDouyinAgentRun(req.params.aweme_id, {
       template: req.body?.template || TEMPLATE_VIRAL_REWRITE,
       promptOptions: req.body?.promptOptions || {},
+      agentConfigOverride: req.body?.agentConfigOverride || null,
     });
     return res.json(result);
   } catch (error) {
@@ -53,6 +100,10 @@ router.post('/douyin/:aweme_id/runs/:run_id/tts', async (req, res) => {
     const result = await agentRuns.synthesizeDouyinRunTts(req.params.aweme_id, req.params.run_id, {
       voice: req.body?.voice,
       stylePrompt: req.body?.stylePrompt,
+      maxRetries: req.body?.maxRetries,
+      retryDelayMs: req.body?.retryDelayMs,
+      ttsConcurrency: req.body?.ttsConcurrency,
+      ttsQueueIntervalMs: req.body?.ttsQueueIntervalMs,
     });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
@@ -83,6 +134,7 @@ router.post('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
   try {
     const result = await agentRuns.createDouyinRunStoryboard(req.params.aweme_id, req.params.run_id, {
       storyboardOptions: req.body?.storyboardOptions || {},
+      storyboardConfigOverride: req.body?.storyboardConfigOverride || null,
     });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
@@ -91,6 +143,24 @@ router.post('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
       aweme_id: req.params.aweme_id,
       run_id: req.params.run_id,
       message: 'AI 分镜生成接口异常，请稍后重试。',
+    });
+  }
+});
+
+router.put('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
+  try {
+    const result = await agentRuns.updateDouyinRunStoryboard(
+      req.params.aweme_id,
+      req.params.run_id,
+      req.body?.storyboard || {},
+    );
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '保存 AI 分镜接口异常，请稍后重试。',
     });
   }
 });

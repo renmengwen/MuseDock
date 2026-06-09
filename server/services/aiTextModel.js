@@ -8,12 +8,105 @@ function normalizeString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-async function readJsonResponse(response) {
-  try {
-    return await response.json();
-  } catch {
-    return null;
+async function readJsonResponse(response, apiKey) {
+  if (response && typeof response.text === 'function') {
+    try {
+      const text = await response.text();
+      try {
+        return {
+          data: JSON.parse(text),
+          parseError: '',
+          rawText: '',
+          contentType: response.headers?.get?.('content-type') || '',
+        };
+      } catch (error) {
+        return {
+          data: null,
+          parseError: error?.message || '响应不是有效 JSON',
+          rawText: sanitizeErrorDetail(text, apiKey),
+          contentType: response.headers?.get?.('content-type') || '',
+        };
+      }
+    } catch {
+      // Fall through to response.json() for fetch-compatible test doubles.
+    }
   }
+
+  try {
+    return {
+      data: await response.json(),
+      parseError: '',
+      rawText: '',
+      contentType: response?.headers?.get?.('content-type') || '',
+    };
+  } catch (error) {
+    return {
+      data: null,
+      parseError: error?.message || '响应不是有效 JSON',
+      rawText: '',
+      contentType: response?.headers?.get?.('content-type') || '',
+    };
+  }
+}
+
+function decodeChunk(value) {
+  if (typeof value === 'string') return value;
+  return new TextDecoder().decode(value);
+}
+
+async function readStreamResponse(response, apiKey) {
+  if (!response?.body || typeof response.body.getReader !== 'function') {
+    return {
+      success: false,
+      text: '',
+      raw_response: { message: '流式响应缺少可读取的 body。' },
+    };
+  }
+
+  const reader = response.body.getReader();
+  let buffer = '';
+  let text = '';
+  const events = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decodeChunk(value);
+    const parts = buffer.split(/\r?\n\r?\n/);
+    buffer = parts.pop() || '';
+
+    for (const part of parts) {
+      const lines = part.split(/\r?\n/).map(line => line.trim());
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === '[DONE]') continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(data);
+        } catch (error) {
+          return {
+            success: false,
+            text,
+            raw_response: {
+              message: '流式响应包含无效 JSON 片段。',
+              parse_error: sanitizeErrorDetail(error?.message, apiKey),
+              preview: sanitizeErrorDetail(data.slice(0, 500), apiKey),
+            },
+          };
+        }
+        events.push(sanitizeRawResponse(parsed, apiKey));
+        const delta = parsed?.choices?.[0]?.delta?.content;
+        if (typeof delta === 'string') text += delta;
+      }
+    }
+  }
+
+  return {
+    success: true,
+    text,
+    raw_response: { stream: true, chunks: events },
+  };
 }
 
 function getProviderError(rawResponse) {
@@ -56,6 +149,14 @@ function toModelInfo(provider, modelId) {
   };
 }
 
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function shouldRetryStatus(status) {
+  return [502, 503, 504].includes(Number(status));
+}
+
 async function callTextModel(options = {}) {
   const {
     messages = [],
@@ -63,6 +164,9 @@ async function callTextModel(options = {}) {
     fetchImpl = global.fetch,
     temperature = 0.4,
     textConfig,
+    maxRetries = 1,
+    retryDelayMs = 1200,
+    stream = false,
   } = options;
 
   const config = textConfig || await aiModelConfig.getRuntimeConfig('text', { configPath });
@@ -89,32 +193,41 @@ async function callTextModel(options = {}) {
   }
 
   let response;
-  try {
-    response = await fetchImpl(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: modelId,
-        messages,
-        temperature,
-      }),
-    });
-  } catch (error) {
-    const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
-    return {
-      success: false,
-      configured: true,
-      message: `文本模型调用失败：${detail}`,
-      model: toModelInfo(provider, modelId),
-    };
+  let attempt = 0;
+  const retryLimit = Math.max(0, Number(maxRetries) || 0);
+  while (attempt <= retryLimit) {
+    try {
+      response = await fetchImpl(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages,
+          temperature,
+          ...(stream ? { stream: true } : {}),
+        }),
+      });
+    } catch (error) {
+      const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
+      return {
+        success: false,
+        configured: true,
+        message: `文本模型调用失败：${detail}`,
+        model: toModelInfo(provider, modelId),
+      };
+    }
+
+    if (!shouldRetryStatus(response.status) || attempt >= retryLimit) break;
+    await wait(retryDelayMs * (attempt + 1));
+    attempt += 1;
   }
 
-  const rawResponse = sanitizeRawResponse(await readJsonResponse(response), apiKey);
-
   if (!response.ok) {
+    const parsedResponse = await readJsonResponse(response, apiKey);
+    const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
     const detail = sanitizeErrorDetail(getProviderError(rawResponse), apiKey) || `HTTP ${response.status}`;
     return {
       success: false,
@@ -122,6 +235,52 @@ async function callTextModel(options = {}) {
       message: `${provider || '文本模型'} 调用失败：${detail}`,
       model: toModelInfo(provider, modelId),
       raw_response: rawResponse,
+    };
+  }
+
+  if (stream) {
+    const streamResult = await readStreamResponse(response, apiKey);
+    if (!streamResult.success) {
+      return {
+        success: false,
+        configured: true,
+        message: `${provider || '文本模型'} 流式响应解析失败：${getProviderError(streamResult.raw_response) || '响应格式无效'}`,
+        model: toModelInfo(provider, modelId),
+        raw_response: streamResult.raw_response,
+      };
+    }
+    if (!streamResult.text) {
+      return {
+        success: false,
+        configured: true,
+        message: `${provider || '文本模型'} 流式返回结果缺少文本内容。`,
+        model: toModelInfo(provider, modelId),
+        raw_response: streamResult.raw_response,
+      };
+    }
+    return {
+      success: true,
+      configured: true,
+      text: streamResult.text,
+      model: toModelInfo(provider, modelId),
+      raw_response: streamResult.raw_response,
+    };
+  }
+
+  const parsedResponse = await readJsonResponse(response, apiKey);
+  const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
+
+  if (parsedResponse.parseError && parsedResponse.rawText) {
+    return {
+      success: false,
+      configured: true,
+      message: `${provider || '文本模型'} 返回了非 JSON 响应，请检查 Base URL 是否指向兼容接口地址。`,
+      model: toModelInfo(provider, modelId),
+      raw_response: {
+        content_type: parsedResponse.contentType,
+        parse_error: sanitizeErrorDetail(parsedResponse.parseError, apiKey),
+        preview: parsedResponse.rawText.slice(0, 500),
+      },
     };
   }
 

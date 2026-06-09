@@ -94,4 +94,30 @@ const cleanPrompt = viral.buildPrompt({
 assert.ok(cleanPrompt[1].content.length < 12000);
 assert.doesNotMatch(cleanPrompt[1].content, /bad/);
 
+const editableTemplates = templates.listEditableAgentTemplates();
+assert.ok(Array.isArray(editableTemplates));
+assert.ok(editableTemplates.length >= 2);
+
+const editableViral = templates.getEditableAgentTemplate('viral_rewrite');
+assert.equal(editableViral.id, 'viral_rewrite');
+assert.equal(editableViral.label, '爆款拆解 + 改写脚本');
+assert.ok(editableViral.systemPrompt.includes('MuseDock'));
+assert.ok(editableViral.userPromptTemplate.includes('{{transcriptText}}'));
+assert.deepEqual(editableViral.resultFields, [
+  'summary',
+  'viral_points',
+  'audience',
+  'comment_insights',
+  'topics',
+  'rewrite_script',
+  'titles',
+]);
+assert.equal(editableViral.modelOptions.temperature, 0.4);
+assert.equal(editableViral.modelOptions.stream, true);
+
+const editableComment = templates.getEditableAgentTemplate('comment_insights');
+assert.equal(editableComment.id, 'comment_insights');
+assert.ok(editableComment.userPromptTemplate.includes('{{commentsText}}'));
+assert.equal(templates.getEditableAgentTemplate('missing'), null);
+
 console.log('agent template tests passed');

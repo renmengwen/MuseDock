@@ -3,48 +3,118 @@ const storyboardAgent = require('./server/services/storyboardAgent');
 
 async function run() {
   const messages = storyboardAgent.buildStoryboardMessages({
-    rewriteScript: '测试脚本',
-    captions: [{ index: 1, start: 0, end: 2, text: '第一句' }],
+    rewriteScript: 'test script',
+    captions: [{ index: 1, start: 0, end: 2, duration: 2, text: 'first line' }],
     storyboardOptions: {
-      visualStyle: '商业质感',
-      pacing: '快节奏',
-      captionStyle: '大字报',
-      backgroundDirection: '数据感抽象背景',
+      visualStyle: 'business style',
+      pacing: 'fast',
+      captionStyle: 'large captions',
+      backgroundDirection: 'abstract data background',
       primaryColor: '#fe2c55',
-      forbidden: '不要真人，不要原视频画面',
-      extraRequirements: '每个分镜标题要短',
+      forbidden: 'no real people, no original video frames',
+      extraRequirements: 'short headlines',
     },
   });
-  assert.match(messages[1].content, /AI 分镜视觉 brief/);
-  assert.match(messages[1].content, /商业质感/);
-  assert.match(messages[1].content, /数据感抽象背景/);
-  assert.match(messages[1].content, /不要真人/);
-  assert.match(messages[0].content, /不要引用原视频/);
+
+  assert.match(messages[1].content, /AI_STORYBOARD_TARGET=hyperframes/);
+  assert.match(messages[1].content, /AI_STORYBOARD_COVER_ALL_CAPTIONS=true/);
+  assert.match(messages[1].content, /headline[\s\S]*完整字幕/);
+  assert.match(messages[1].content, /emphasis_words[\s\S]*短语卡片/);
+  assert.match(messages[1].content, /contrast_card[\s\S]*真实对比/);
+  assert.match(messages[1].content, /A vs B/);
+  assert.match(messages[1].content, /Frame Profile：tech_neon/);
+  assert.match(messages[1].content, /完整 Frame\.md 参考/);
+  assert.match(messages[1].content, /不要让连续场景全部使用同一种居中卡片结构/);
+  assert.match(messages[1].content, /text_card.*核心观点/);
+  assert.match(messages[1].content, /contrast_card.*对比/);
+  assert.match(messages[1].content, /不要输出像网页按钮或后台卡片一样的 UI/);
+  assert.match(messages[1].content, /所有 timeline 必须是 paused GSAP timeline/);
+  assert.match(messages[1].content, /showCaptionBar=false/);
+  assert.match(messages[1].content, /Frame\.md 只能作为视觉设计参考/);
+  assert.match(messages[1].content, /business style/);
+  assert.match(messages[1].content, /abstract data background/);
+  assert.match(messages[1].content, /no real people/);
+  assert.match(messages[1].content, /"index": 1/);
+  assert.match(messages[1].content, /"text": "first line"/);
+  assert.doesNotMatch(messages[1].content, /"start"/);
+  assert.doesNotMatch(messages[1].content, /"end"/);
+  assert.doesNotMatch(messages[1].content, /"duration"/);
+  assert.match(messages[0].content, /start/);
+
+  const editableStoryboard = storyboardAgent.getEditableStoryboardTemplate();
+  assert.ok(editableStoryboard.systemPrompt.includes('MuseDock'));
+  assert.ok(editableStoryboard.userPromptTemplate.includes('{{rewriteScript}}'));
+  assert.equal(editableStoryboard.useFrameProfile, true);
+  assert.equal(editableStoryboard.modelOptions.temperature, 0.35);
+
+  const customResult = await storyboardAgent.createStoryboard({
+    rewriteScript: '第一句。第二句。',
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '第一句。' },
+      { index: 2, start: 1, end: 2, duration: 1, text: '第二句。' },
+    ],
+    editableConfig: {
+      source: 'request',
+      systemPrompt: '自定义分镜系统',
+      userPromptTemplate: '脚本：{{rewriteScript}}\n字幕：{{captionIndexesJson}}',
+      useFrameProfile: false,
+      modelOptions: { temperature: 0.9, stream: false, maxRetries: 2 },
+    },
+    aiTextModel: {
+      async callTextModel(payload) {
+        assert.equal(payload.messages[0].content, '自定义分镜系统');
+        assert.equal(payload.temperature, 0.9);
+        assert.equal(payload.stream, false);
+        return {
+          success: true,
+          text: JSON.stringify({
+            template: 'ai_storyboard_cards',
+            scenes: [
+              {
+                caption_indexes: [1],
+                headline: '开头',
+                visual_type: 'text_card',
+                layout: 'center_focus',
+                background_prompt: '抽象背景',
+                emphasis_words: ['开头'],
+              },
+            ],
+          }),
+          model: { model_id: 'fake' },
+        };
+      },
+    },
+  });
+  assert.equal(customResult.config_snapshot.source, 'request');
+  assert.equal(customResult.messages[0].content, '自定义分镜系统');
+  assert.equal(customResult.raw_output.includes('ai_storyboard_cards'), true);
+  assert.equal(customResult.parse.success, true);
 
   const calls = [];
   const result = await storyboardAgent.createStoryboard({
-    rewriteScript: '第一句。第二句。',
+    rewriteScript: 'first line. second line.',
     captions: [
-      { index: 1, start: 0, end: 1.25, duration: 1.25, text: '第一句。' },
-      { index: 2, start: 1.25, end: 3.75, duration: 2.5, text: '第二句。' },
+      { index: 1, start: 0, end: 1.25, duration: 1.25, text: 'first line.' },
+      { index: 2, start: 1.25, end: 3.75, duration: 2.5, text: 'second line.' },
     ],
     aiTextModel: {
       callTextModel: async options => {
         calls.push(options);
+        assert.equal(options.stream, true);
         return {
           success: true,
           model: { provider: 'OpenAI', model_id: 'gpt-test' },
           text: JSON.stringify({
             template: 'ai_storyboard_cards',
-            style: { visual_tone: '专业' },
+            style: { visual_tone: 'professional' },
             scenes: [
               {
                 caption_indexes: [1, 2],
-                headline: '核心观点',
+                headline: 'Core idea',
                 visual_type: 'text_card',
                 layout: 'center_focus',
-                background_prompt: '原创抽象背景',
-                emphasis_words: ['观点'],
+                background_prompt: 'original abstract background',
+                emphasis_words: ['idea'],
                 start: 999,
               },
             ],
@@ -59,15 +129,16 @@ async function run() {
   assert.equal(result.storyboard.scenes[0].start, 0);
   assert.equal(result.storyboard.scenes[0].end, 3.75);
   assert.equal(result.raw.scenes.length, 1);
-  assert.match(calls[0].messages[0].content, /不要输出 start/);
-  assert.match(calls[0].messages[0].content, /不要引用原视频/);
-  assert.match(calls[0].messages[1].content, /优先每 1 条字幕生成 1 个分镜/);
+  assert.match(calls[0].messages[0].content, /start/);
+  assert.match(calls[0].messages[1].content, /AI_STORYBOARD_TARGET=hyperframes/);
+  assert.match(calls[0].messages[1].content, /AI_STORYBOARD_COVER_ALL_CAPTIONS=true/);
+  assert.match(calls[0].messages[1].content, /Frame Profile：tech_neon/);
 
   const malformed = await storyboardAgent.createStoryboard({
-    rewriteScript: '第一句。第二句。',
+    rewriteScript: 'first line. second line.',
     captions: [
-      { index: 1, start: 0, end: 1, duration: 1, text: '第一句。' },
-      { index: 2, start: 1, end: 2, duration: 1, text: '第二句。' },
+      { index: 1, start: 0, end: 1, duration: 1, text: 'first line.' },
+      { index: 2, start: 1, end: 2, duration: 1, text: 'second line.' },
     ],
     aiTextModel: {
       callTextModel: async () => ({ success: true, text: 'not json' }),
@@ -76,6 +147,27 @@ async function run() {
   assert.equal(malformed.success, true);
   assert.equal(malformed.storyboard.scenes.length, 2);
   assert.equal(malformed.raw_parse_failed, true);
+
+  const invalidRawScene = await storyboardAgent.createStoryboard({
+    rewriteScript: 'first line. second line.',
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: 'first line.' },
+      { index: 2, start: 1, end: 2, duration: 1, text: 'second line.' },
+    ],
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        text: JSON.stringify({
+          template: 'ai_storyboard_cards',
+          scenes: [{ caption_indexes: [999] }],
+        }),
+      }),
+    },
+  });
+  assert.equal(invalidRawScene.success, true);
+  assert.equal(invalidRawScene.storyboard.status, 'done');
+  assert.equal(invalidRawScene.schema_validation.success, false);
+  assert.ok(invalidRawScene.schema_validation.errors.some(item => item.includes('不存在')));
 }
 
 run().then(() => {

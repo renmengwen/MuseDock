@@ -44,3 +44,100 @@ export function getRunDisplayTime(value) {
 
   return date.toLocaleString('zh-CN', { hour12: false });
 }
+
+export function getAgentConfigSourceLabel(source) {
+  const labels = {
+    default: '默认模板',
+    override: '已保存自定义',
+    request: '本次临时编辑',
+  };
+  return labels[source] || '未知来源';
+}
+
+export function getValidationSummary(validation = {}) {
+  if (validation.success) {
+    return { type: 'success', message: '校验通过' };
+  }
+
+  const errors = Array.isArray(validation.errors) ? validation.errors.filter(Boolean) : [];
+  return {
+    type: 'error',
+    message: errors[0] || validation.error || '校验失败',
+  };
+}
+
+function stringifyDebug(value) {
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value || {}, null, 2);
+}
+
+function hasReplacementGlyph(value) {
+  return String(value || '').includes('\uFFFD');
+}
+
+function stripReplacementGlyphText(value) {
+  return String(value || '')
+    .replace(/\uFFFD+/g, ' ')
+    .replace(/^[\s:：,，;；、。.-]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function getStoryboardSceneIssues(storyboard = {}) {
+  const scenes = Array.isArray(storyboard.scenes) ? storyboard.scenes : [];
+  return scenes.reduce((result, scene, sceneIndex) => {
+    const sceneNumber = Number(scene?.index || sceneIndex + 1);
+    const issues = [];
+    ['headline', 'layout', 'background_prompt'].forEach(field => {
+      if (hasReplacementGlyph(scene?.[field])) issues.push(`${field} 包含乱码`);
+    });
+    const words = Array.isArray(scene?.emphasis_words) ? scene.emphasis_words : [];
+    words.forEach((word, wordIndex) => {
+      if (hasReplacementGlyph(word)) issues.push(`emphasis_words ${wordIndex + 1} 包含乱码`);
+    });
+    if (issues.length) result[sceneNumber] = issues;
+    return result;
+  }, {});
+}
+
+export function sanitizeStoryboardSceneText(scene = {}) {
+  const cleaned = {};
+  if (hasReplacementGlyph(scene.layout)) {
+    cleaned.layout = 'center_focus';
+  }
+  if (hasReplacementGlyph(scene.background_prompt)) {
+    cleaned.background_prompt = stripReplacementGlyphText(scene.background_prompt);
+  }
+  if (hasReplacementGlyph(scene.headline)) {
+    cleaned.headline = stripReplacementGlyphText(scene.headline);
+  }
+  if (Array.isArray(scene.emphasis_words)) {
+    const words = scene.emphasis_words
+      .map(word => stripReplacementGlyphText(word))
+      .filter(Boolean);
+    if (words.length !== scene.emphasis_words.length || scene.emphasis_words.some(hasReplacementGlyph)) {
+      cleaned.emphasis_words = words;
+    }
+  }
+  return cleaned;
+}
+
+export function getDebugSections(run = {}) {
+  return [
+    { key: 'messages', title: '最终 messages', text: stringifyDebug(run.messages || []) },
+    { key: 'raw_output', title: '模型原始输出', text: run.raw_output || run.raw_text || '' },
+    { key: 'parse', title: 'JSON 解析状态', text: stringifyDebug(run.parse || {}) },
+    { key: 'schema_validation', title: 'schema 校验结果', text: stringifyDebug(run.schema_validation || {}) },
+    { key: 'normalized_result', title: '归一化结果', text: stringifyDebug(run.result || {}) },
+  ];
+}
+
+export function getStoryboardDebugSections(run = {}) {
+  return [
+    { key: 'storyboard_messages', title: '分镜 messages', text: stringifyDebug(run.storyboard_messages || []) },
+    { key: 'storyboard_raw_output', title: '分镜原始输出', text: run.storyboard_raw_output || '' },
+    { key: 'storyboard_parse', title: '分镜 JSON 解析状态', text: stringifyDebug(run.storyboard_parse || {}) },
+    { key: 'storyboard_schema_validation', title: '分镜 schema 校验结果', text: stringifyDebug(run.storyboard_schema_validation || {}) },
+    { key: 'storyboard', title: '归一化分镜', text: stringifyDebug(run.storyboard || {}) },
+  ];
+}

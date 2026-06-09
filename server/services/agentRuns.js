@@ -5,8 +5,10 @@ const mediaPipeline = require('./mediaPipeline');
 const defaultAiTextModel = require('./aiTextModel');
 const defaultAiTtsModel = require('./aiTtsModel');
 const agentTemplates = require('./agentTemplates');
+const agentTemplateOverrides = require('./agentTemplateOverrides');
 const ttsTimeline = require('./ttsTimeline');
 const defaultStoryboardAgent = require('./storyboardAgent');
+const storyboardSchema = require('./storyboardSchema');
 const defaultHyperframesProject = require('./hyperframesProject');
 const defaultHyperframesRenderer = require('./hyperframesRenderer');
 
@@ -107,18 +109,59 @@ function makeStep(id, label, status, message = '') {
 
 function parseModelText(text, templateDefinition) {
   try {
+    const rawValue = JSON.parse(text);
+    const schemaValidation = validateTaskAgentResult(rawValue, templateDefinition);
     return {
       parsed: true,
-      result: templateDefinition.normalizeResult(JSON.parse(text)),
+      parse: { success: true, error: '' },
+      schema_validation: schemaValidation,
+      result: templateDefinition.normalizeResult(rawValue),
       raw_text: '',
+      raw_output: typeof text === 'string' ? text : '',
     };
-  } catch {
+  } catch (error) {
     return {
       parsed: false,
+      parse: { success: false, error: `模型返回不是有效 JSON：${error.message}` },
+      schema_validation: { success: false, errors: ['模型返回不是有效 JSON，无法完成结构化校验。'] },
       result: templateDefinition.normalizeResult({}),
       raw_text: typeof text === 'string' ? text : '',
+      raw_output: typeof text === 'string' ? text : '',
     };
   }
+}
+
+function validateTaskAgentResult(value, templateDefinition) {
+  const result = value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  const errors = [];
+
+  if (!result) {
+    return { success: false, errors: ['模型返回 JSON 必须是对象。'] };
+  }
+
+  const stringFieldsByTemplate = {
+    viral_rewrite: ['summary', 'audience', 'rewrite_script'],
+    comment_insights: ['summary', 'sentiment'],
+  };
+  const arrayFieldsByTemplate = {
+    viral_rewrite: ['viral_points', 'comment_insights', 'topics', 'titles'],
+    comment_insights: ['pain_points', 'questions', 'content_opportunities', 'reply_suggestions'],
+  };
+  const stringFields = stringFieldsByTemplate[templateDefinition.id] || [];
+  const arrayFields = arrayFieldsByTemplate[templateDefinition.id] || [];
+
+  for (const field of stringFields) {
+    if (typeof result[field] !== 'string' || !result[field].trim()) {
+      errors.push(`${field} 必须是非空字符串。`);
+    }
+  }
+  for (const field of arrayFields) {
+    if (!Array.isArray(result[field]) || result[field].some(item => typeof item !== 'string')) {
+      errors.push(`${field} 必须是字符串数组。`);
+    }
+  }
+
+  return { success: errors.length === 0, errors };
 }
 
 function summarizeComments(comments = []) {
@@ -155,6 +198,35 @@ function createInputSummary({ analysisInput, transcript, comments }) {
   };
 }
 
+function createTaskTemplateValues({ analysisInput, transcript, commentsText, comments, promptOptions }) {
+  const video = analysisInput.video || {};
+  const statistics = video.statistics || {};
+  const transcriptText = typeof transcript?.text === 'string' ? transcript.text : '';
+  const transcriptTruncated = transcriptText.length > agentTemplates.MAX_TRANSCRIPT_CHARS;
+  const promptTranscript = transcriptTruncated
+    ? transcriptText.slice(0, agentTemplates.MAX_TRANSCRIPT_CHARS)
+    : transcriptText;
+
+  return {
+    videoTitle: video.title || '',
+    authorName: video.author?.nickname || '',
+    awemeUrl: video.aweme_url || '',
+    likeCount: statistics.digg_count || statistics.liked_count || 0,
+    commentCount: statistics.comment_count || 0,
+    shareCount: statistics.share_count || 0,
+    localCommentCount: Array.isArray(comments) ? comments.length : 0,
+    transcriptNote: transcriptTruncated
+      ? `转写文本已截断，仅保留前 ${agentTemplates.MAX_TRANSCRIPT_CHARS} 字。`
+      : '转写文本未截断。',
+    transcriptText: promptTranscript,
+    commentsNote: Array.isArray(comments) && comments.length > 0
+      ? `本地评论缓存共 ${comments.length} 条，以下是抽样评论：`
+      : '暂无本地评论缓存。',
+    commentsText,
+    promptOptionsText: agentTemplates.formatPromptOptionsForPrompt(promptOptions),
+  };
+}
+
 async function persistRun(awemeId, run, rootDir) {
   const filePath = getRunPath(awemeId, run.run_id, rootDir);
   const data = { ...run, path: filePath };
@@ -180,6 +252,11 @@ async function createFailureRun(awemeId, template, message, options = {}) {
     input_summary: options.input_summary || {},
     prompt_options: promptOptions,
     result: templateDefinition.normalizeResult({}),
+    agent_config_snapshot: options.agent_config_snapshot,
+    messages: options.messages || [],
+    raw_output: options.raw_output || '',
+    parse: options.parse || { success: false, error: '' },
+    schema_validation: options.schema_validation || { success: false, errors: [] },
     raw_text: '',
     message,
     created_at: new Date().toISOString(),
@@ -286,23 +363,47 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   }
 
   const commentsText = summarizeComments(comments);
-  const messages = templateDefinition.buildPrompt({
+  const agentConfig = await agentTemplateOverrides.resolveTaskAgentConfig(template, {
+    rootDir,
+    agentConfigOverride: options.agentConfigOverride,
+  });
+  if (!agentConfig || agentConfig.success === false) {
+    steps.push(makeStep('config', '校验 Agent 配置', 'failed', agentConfig?.message || 'Agent 配置校验失败'));
+    return createFailureRun(awemeId, template, agentConfig?.message || 'Agent 配置校验失败。', {
+      rootDir,
+      steps,
+      input_summary: inputSummary,
+      promptOptions,
+    });
+  }
+  const templateValues = createTaskTemplateValues({
     analysisInput,
     transcript,
     commentsText,
-    commentCount: comments.length,
+    comments,
     promptOptions,
   });
+  const messages = agentTemplateOverrides.buildMessagesFromTemplate(agentConfig, templateValues);
+  const agentConfigSnapshot = {
+    templateId: template,
+    source: agentConfig.source,
+    systemPrompt: agentConfig.systemPrompt,
+    userPromptTemplate: agentConfig.userPromptTemplate,
+    resultSchema: agentConfig.resultSchema || {},
+    modelOptions: agentConfig.modelOptions,
+  };
 
   const modelService = options.aiTextModel || defaultAiTextModel;
   let modelResult;
   try {
     modelResult = await modelService.callTextModel({
       messages,
-      temperature: 0.4,
+      temperature: agentConfig.modelOptions.temperature,
       configPath: options.configPath,
       textConfig: options.textConfig,
       fetchImpl: options.fetchImpl,
+      maxRetries: agentConfig.modelOptions.maxRetries,
+      stream: agentConfig.modelOptions.stream,
     });
   } catch (error) {
     modelResult = {
@@ -319,6 +420,8 @@ async function createDouyinAgentRun(awemeId, options = {}) {
       input_summary: inputSummary,
       model: modelResult.model || {},
       promptOptions,
+      agent_config_snapshot: agentConfigSnapshot,
+      messages,
     });
   }
 
@@ -341,6 +444,11 @@ async function createDouyinAgentRun(awemeId, options = {}) {
     steps,
     input_summary: inputSummary,
     prompt_options: promptOptions,
+    agent_config_snapshot: agentConfigSnapshot,
+    messages,
+    raw_output: parsed.raw_output,
+    parse: parsed.parse,
+    schema_validation: parsed.schema_validation,
     result: parsed.result,
     raw_text: parsed.raw_text,
     message: parsed.parsed ? 'Agent 运行完成' : '模型返回未能解析为结构化结果，已保留原始文本。',
@@ -574,10 +682,23 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
 
   const agent = options.storyboardAgent || defaultStoryboardAgent;
   const storyboardOptions = defaultStoryboardAgent.normalizeStoryboardOptions(options.storyboardOptions || run.storyboard_options || {});
+  const storyboardConfig = await agentTemplateOverrides.resolveStoryboardAgentConfig({
+    rootDir: options.rootDir,
+    storyboardConfigOverride: options.storyboardConfigOverride,
+  });
+  if (!storyboardConfig || storyboardConfig.success === false) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: storyboardConfig?.message || '分镜 Agent 配置校验失败。',
+    };
+  }
   const result = await agent.createStoryboard({
     rewriteScript,
     captions,
     storyboardOptions,
+    editableConfig: storyboardConfig,
     aiTextModel: options.aiTextModel,
     configPath: options.configPath,
     textConfig: options.textConfig,
@@ -591,6 +712,11 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     storyboard: result.storyboard,
     storyboard_model: result.model || {},
     storyboard_raw_parse_failed: !!result.raw_parse_failed,
+    storyboard_config_snapshot: result.config_snapshot,
+    storyboard_messages: result.messages || [],
+    storyboard_raw_output: result.raw_output || '',
+    storyboard_parse: result.parse || { success: true, error: '' },
+    storyboard_schema_validation: result.schema_validation || { success: true, errors: [] },
     updated_at: new Date().toISOString(),
   };
   await writeJson(runPath, updatedRun);
@@ -604,6 +730,11 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     storyboard_raw: updatedRun.storyboard_raw,
     storyboard: updatedRun.storyboard,
     storyboard_model: updatedRun.storyboard_model,
+    storyboard_config_snapshot: updatedRun.storyboard_config_snapshot,
+    storyboard_messages: updatedRun.storyboard_messages,
+    storyboard_raw_output: updatedRun.storyboard_raw_output,
+    storyboard_parse: updatedRun.storyboard_parse,
+    storyboard_schema_validation: updatedRun.storyboard_schema_validation,
   };
 }
 
@@ -634,6 +765,19 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
       aweme_id: String(awemeId),
       run_id: String(runId),
       message: '请先生成 AI 分镜。',
+    };
+  }
+  if (run.video?.status === 'rendering') {
+    const video = {
+      ...run.video,
+      message: run.video.message || '视频正在渲染中，请等待当前任务完成后再重新生成视频工程。',
+    };
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: video.message,
+      video,
     };
   }
 
@@ -670,7 +814,7 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
   return { success: true, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
 }
 
-async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
+async function updateDouyinRunStoryboard(awemeId, runId, storyboard, options = {}) {
   if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
   if (!isSafeRunId(runId)) {
     return {
@@ -692,14 +836,101 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
     };
   }
 
+  const captions = Array.isArray(run?.tts?.captions) ? run.tts.captions : [];
+  if (!captions.length) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '请先完成 TTS 合成并生成字幕时间轴。',
+    };
+  }
+
+  const validation = storyboardSchema.validateStoryboardEditableInput({ storyboard, captions });
+  if (!validation.success) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '分镜校验失败，请修正后再保存。',
+      storyboard_schema_validation: validation,
+    };
+  }
+
+  const normalized = storyboardSchema.normalizeStoryboard({ storyboard, captions });
+  const updatedRun = {
+    ...run,
+    storyboard: normalized,
+    storyboard_schema_validation: { success: true, errors: [] },
+    video: null,
+    updated_at: new Date().toISOString(),
+  };
+  await writeJson(runPath, updatedRun);
+
+  return {
+    success: true,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message: '分镜已保存，请重新生成视频工程。',
+    storyboard: normalized,
+    storyboard_schema_validation: updatedRun.storyboard_schema_validation,
+  };
+}
+
+async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
+  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      aweme_id: String(awemeId || ''),
+      run_id: String(runId || ''),
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  const run = await readJsonIfExists(runPath);
+  if (!run) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '未找到该 Agent 运行记录',
+    };
+  }
+  if (run.video?.status === 'rendering') {
+    const video = {
+      ...run.video,
+      message: run.video.message || '视频正在渲染中，请等待当前任务完成。',
+    };
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: video.message,
+      video,
+    };
+  }
+
   const projectDir = run.video?.project_dir || getHyperframesProjectDir(awemeId, runId, options.rootDir);
   const renderer = options.hyperframesRenderer || defaultHyperframesRenderer;
   const renderOptions = defaultHyperframesProject.normalizeRenderOptions(run.video?.render_options || {});
+  const renderingVideo = {
+    ...(run.video || {}),
+    status: 'rendering',
+    template: run.video?.template || 'ai_storyboard_cards',
+    project_dir: projectDir,
+    render_options: renderOptions,
+    message: '视频正在渲染中，请勿刷新后重复生成视频工程。',
+    updated_at: new Date().toISOString(),
+  };
+  await writeJson(runPath, { ...run, video: renderingVideo, updated_at: new Date().toISOString() });
+
   const result = await renderer.renderHyperframesProject({ projectDir, renderOptions });
 
   if (!result.success) {
     const video = {
-      ...(run.video || {}),
+      ...renderingVideo,
       status: 'failed',
       render_options: renderOptions,
       message: result.message || '视频渲染失败。',
@@ -710,7 +941,7 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
   }
 
   const video = {
-    ...(run.video || {}),
+    ...renderingVideo,
     status: 'rendered',
     template: run.video?.template || 'ai_storyboard_cards',
     project_dir: projectDir,
@@ -816,6 +1047,11 @@ async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
       configPath: options.configPath,
       ttsConfig: options.ttsConfig,
       fetchImpl: options.fetchImpl,
+      waitImpl: options.waitImpl,
+      maxRetries: options.maxRetries,
+      retryDelayMs: options.retryDelayMs,
+      ttsConcurrency: options.ttsConcurrency,
+      ttsQueueIntervalMs: options.ttsQueueIntervalMs,
     });
 
     if (!modelResult.success) {
@@ -918,6 +1154,7 @@ module.exports = {
   synthesizeDouyinRunTts,
   resolveDouyinRunTtsFile,
   createDouyinRunStoryboard,
+  updateDouyinRunStoryboard,
   createDouyinRunHyperframesProject,
   renderDouyinRunHyperframesVideo,
   resolveDouyinRunHyperframesFile,

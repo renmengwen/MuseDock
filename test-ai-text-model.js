@@ -6,6 +6,18 @@ const path = require('path');
 const aiModelConfig = require('./server/services/aiModelConfig');
 const aiTextModel = require('./server/services/aiTextModel');
 
+function makeStreamResponse(chunks) {
+  return new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk));
+      }
+      controller.close();
+    },
+  });
+}
+
 async function run() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-text-model-test-'));
   const configPath = path.join(root, 'ai-models.json');
@@ -114,6 +126,58 @@ async function run() {
   assert.doesNotMatch(failed.message, /sk-test/);
   assert.doesNotMatch(JSON.stringify(failed.raw_response), /sk-test/);
 
+  let retryCalls = 0;
+  const retried = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'retry timeout' }],
+    configPath,
+    retryDelayMs: 1,
+    fetchImpl: async () => {
+      retryCalls += 1;
+      if (retryCalls === 1) {
+        return {
+          ok: false,
+          status: 504,
+          json: async () => ({}),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: 'retry ok' } }],
+        }),
+      };
+    },
+  });
+  assert.strictEqual(retried.success, true);
+  assert.strictEqual(retried.text, 'retry ok');
+  assert.strictEqual(retryCalls, 2);
+
+  let streamRequestBody = null;
+  const streamed = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'stream json' }],
+    configPath,
+    stream: true,
+    fetchImpl: async (url, options) => {
+      assert.strictEqual(url, 'https://api.example.com/v1/chat/completions');
+      streamRequestBody = JSON.parse(options.body);
+      return new Response(
+        makeStreamResponse([
+          'data: {"choices":[{"delta":{"content":"{\\"summary\\":"}}]}\n\n',
+          'data: {"choices":[{"delta":{"content":"\\"stream ok\\"}"}}]}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+        {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        },
+      );
+    },
+  });
+  assert.strictEqual(streamed.success, true);
+  assert.strictEqual(streamed.text, '{"summary":"stream ok"}');
+  assert.strictEqual(streamRequestBody.stream, true);
+
   const networkFailed = await aiTextModel.callTextModel({
     messages: [{ role: 'user', content: 'network fail' }],
     configPath,
@@ -144,6 +208,29 @@ async function run() {
   assert.strictEqual(invalidJson.configured, true);
   assert.match(invalidJson.message, /缺少文本内容/);
   assert.doesNotMatch(invalidJson.message, /sk-test/);
+
+  const htmlResponse = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'html response' }],
+    configPath,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: {
+        get: name => (name.toLowerCase() === 'content-type' ? 'text/html; charset=utf-8' : null),
+      },
+      json: async () => {
+        throw new Error('Unexpected token < in JSON');
+      },
+      text: async () => '<!doctype html><html><title>PipeApi - AI API Gateway</title></html>',
+    }),
+  });
+  assert.strictEqual(htmlResponse.success, false);
+  assert.strictEqual(htmlResponse.configured, true);
+  assert.match(htmlResponse.message, /返回了非 JSON 响应/);
+  assert.match(htmlResponse.message, /Base URL/);
+  assert.match(htmlResponse.raw_response.preview, /PipeApi/);
+  assert.doesNotMatch(htmlResponse.message, /sk-test/);
+  assert.doesNotMatch(JSON.stringify(htmlResponse.raw_response), /sk-test/);
 
   const missingText = await aiTextModel.callTextModel({
     messages: [{ role: 'user', content: 'missing text' }],
