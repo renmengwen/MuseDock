@@ -161,6 +161,14 @@ function validateTaskAgentResult(value, templateDefinition) {
     }
   }
 
+  if (templateDefinition.id === TEMPLATE_VIRAL_REWRITE) {
+    if (!result.video_brief || typeof result.video_brief !== 'object' || Array.isArray(result.video_brief)) {
+      errors.push('video_brief 必须是对象。');
+    } else if (!Array.isArray(result.video_brief.beats)) {
+      errors.push('video_brief.beats 必须是数组。');
+    }
+  }
+
   return { success: errors.length === 0, errors };
 }
 

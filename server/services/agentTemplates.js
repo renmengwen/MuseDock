@@ -13,6 +13,12 @@ function normalizeStringArray(value) {
     : [];
 }
 
+function normalizeNumber(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(Math.max(number, min), max);
+}
+
 const PROMPT_OPTION_LIMITS = {
   goal: 120,
   audience: 160,
@@ -40,6 +46,28 @@ function normalizePromptOptions(value = {}) {
     replyTone: sanitizeOptionText(source.replyTone, PROMPT_OPTION_LIMITS.replyTone),
     forbidden: sanitizeOptionText(source.forbidden, PROMPT_OPTION_LIMITS.forbidden),
     extraRequirements: sanitizeOptionText(source.extraRequirements, PROMPT_OPTION_LIMITS.extraRequirements),
+  };
+}
+
+function normalizeVideoBrief(value = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const beats = Array.isArray(source.beats)
+    ? source.beats
+      .filter(beat => beat && typeof beat === 'object' && !Array.isArray(beat))
+      .map(beat => ({
+        purpose: typeof beat.purpose === 'string' ? beat.purpose.trim() : '',
+        summary: typeof beat.summary === 'string' ? beat.summary.trim() : '',
+        duration_sec: normalizeNumber(beat.duration_sec, 0, 0, 300),
+        visual_intent: typeof beat.visual_intent === 'string' ? beat.visual_intent.trim() : '',
+      }))
+    : [];
+
+  return {
+    target_duration_sec: normalizeNumber(source.target_duration_sec, 60, 1, 600),
+    target_word_count: normalizeNumber(source.target_word_count, 220, 1, 5000),
+    tone: typeof source.tone === 'string' ? source.tone.trim() : '',
+    hook: typeof source.hook === 'string' ? source.hook.trim() : '',
+    beats,
   };
 }
 
@@ -75,6 +103,7 @@ function normalizeViralRewriteResult(value = {}) {
     topics: normalizeStringArray(result.topics),
     rewrite_script: typeof result.rewrite_script === 'string' ? result.rewrite_script : '',
     titles: normalizeStringArray(result.titles),
+    video_brief: normalizeVideoBrief(result.video_brief),
   };
 }
 
@@ -113,6 +142,10 @@ function buildViralRewritePrompt({ analysisInput = {}, transcript = {}, comments
         '请只输出 JSON，不要输出 Markdown、解释或代码块。',
         'JSON 字段必须包含 summary, viral_points, audience, comment_insights, topics, rewrite_script, titles。',
         'viral_points, comment_insights, topics, titles 必须是字符串数组。',
+        'JSON 字段必须包含 video_brief；video_brief 必须包含 target_duration_sec, target_word_count, tone, hook, beats。',
+        'video_brief 默认按 45-75 秒短视频节奏规划，target_duration_sec 建议 60，target_word_count 建议 220。',
+        'beats 必须是数组，每项包含 purpose, summary, duration_sec, visual_intent，用短句描述每个节奏段。',
+        'rewrite_script 使用短句，围绕 video_brief 节奏推进，不要为了凑字数无限拉长脚本。',
       ].join('\n'),
     },
     {
@@ -143,6 +176,10 @@ function getViralRewriteSystemPrompt() {
     '请只输出 JSON，不要输出 Markdown、解释或代码块。',
     'JSON 字段必须包含 summary, viral_points, audience, comment_insights, topics, rewrite_script, titles。',
     'viral_points, comment_insights, topics, titles 必须是字符串数组。',
+    'JSON 字段必须包含 video_brief；video_brief 必须包含 target_duration_sec, target_word_count, tone, hook, beats。',
+    'video_brief 默认按 45-75 秒短视频节奏规划，target_duration_sec 建议 60，target_word_count 建议 220。',
+    'beats 必须是数组，每项包含 purpose, summary, duration_sec, visual_intent，用短句描述每个节奏段。',
+    'rewrite_script 使用短句，围绕 video_brief 节奏推进，不要为了凑字数无限拉长脚本。',
     '禁止出现乱码文字。',
     '输出的rewrite_script最终目的是给hyperframes渲染动画，尽量贴合它，但只需要输出可以TTS合成的内容。',
   ].join('\n');
@@ -232,7 +269,7 @@ const templates = [
     description: '基于素材、转写和评论生成爆点拆解、受众画像、改写脚本和标题建议。',
     requireTranscript: true,
     requireComments: false,
-    resultFields: ['summary', 'viral_points', 'audience', 'comment_insights', 'topics', 'rewrite_script', 'titles'],
+    resultFields: ['summary', 'viral_points', 'audience', 'comment_insights', 'topics', 'rewrite_script', 'titles', 'video_brief'],
     normalizeResult: normalizeViralRewriteResult,
     buildPrompt: buildViralRewritePrompt,
   },
@@ -304,6 +341,8 @@ module.exports = {
   getEditableAgentTemplate,
   listEditableAgentTemplates,
   normalizeStringArray,
+  normalizeNumber,
+  normalizeVideoBrief,
   normalizePromptOptions,
   formatPromptOptionsForPrompt,
 };
