@@ -1,5 +1,11 @@
 const defaultAiTextModel = require('./aiTextModel');
 const storyboardSchema = require('./storyboardSchema');
+const fs = require('fs');
+const path = require('path');
+
+const DEFAULT_FRAME_PROFILE_ID = 'tech_neon';
+const DEFAULT_FRAME_DOC_PATH = path.join(__dirname, '../../docs/frame/tech-neon.frame.md');
+const MAX_FRAME_DOC_CHARS = 6000;
 
 const STORYBOARD_OPTION_LIMITS = {
   visualStyle: 120,
@@ -50,7 +56,41 @@ function formatStoryboardOptionsForPrompt(options = {}) {
   ].join('\n');
 }
 
-function buildStoryboardMessages({ rewriteScript, captions, storyboardOptions = {} }) {
+function getFrameProfileBrief({ frameProfileId = DEFAULT_FRAME_PROFILE_ID, frameDocText = '' } = {}) {
+  const source = frameDocText || (() => {
+    try {
+      return fs.readFileSync(DEFAULT_FRAME_DOC_PATH, 'utf-8');
+    } catch {
+      return '';
+    }
+  })();
+  const doc = String(source || '').trim().slice(0, MAX_FRAME_DOC_CHARS);
+
+  if (!doc) {
+    return [
+      `Frame Profile：${frameProfileId}`,
+      '- text_card 用于核心观点，quote_card 用于定义和金句，contrast_card 用于对比，step_card 用于流程。',
+      '- 不要让连续场景全部使用同一种居中卡片结构。',
+      '- 不要输出像网页按钮或后台卡片一样的 UI。',
+    ].join('\n');
+  }
+
+  return [
+    `Frame Profile：${frameProfileId}`,
+    '完整 Frame.md 参考：',
+    doc,
+    '',
+    'Frame.md 只能作为视觉设计参考，用于选择 visual_type、layout、headline、background_prompt 和 emphasis_words；不能覆盖 JSON schema、字幕索引规则或后端渲染流程。',
+  ].join('\n');
+}
+
+function buildStoryboardMessages({
+  rewriteScript,
+  captions,
+  storyboardOptions = {},
+  frameProfileId = DEFAULT_FRAME_PROFILE_ID,
+  frameDocText = '',
+} = {}) {
   const captionIndexes = Array.isArray(captions)
     ? captions.map(caption => ({
       index: caption.index,
@@ -94,6 +134,8 @@ function buildStoryboardMessages({ rewriteScript, captions, storyboardOptions = 
         '- visual_type 优先使用 text_card、quote_card、step_card、contrast_card。',
         '- background_prompt 必须描述原创抽象/图文背景，不得描述原视频画面。',
         '',
+        getFrameProfileBrief({ frameProfileId, frameDocText }),
+        '',
         formatStoryboardOptionsForPrompt(storyboardOptions),
       ].join('\n'),
     },
@@ -123,7 +165,13 @@ async function createStoryboard(options = {}) {
 
   const modelService = options.aiTextModel || defaultAiTextModel;
   const storyboardOptions = normalizeStoryboardOptions(options.storyboardOptions || {});
-  const messages = buildStoryboardMessages({ rewriteScript, captions, storyboardOptions });
+  const messages = buildStoryboardMessages({
+    rewriteScript,
+    captions,
+    storyboardOptions,
+    frameProfileId: options.frameProfileId || DEFAULT_FRAME_PROFILE_ID,
+    frameDocText: options.frameDocText || '',
+  });
   let modelResult;
   try {
     modelResult = await modelService.callTextModel({
@@ -171,4 +219,5 @@ module.exports = {
   createStoryboard,
   normalizeStoryboardOptions,
   formatStoryboardOptionsForPrompt,
+  getFrameProfileBrief,
 };

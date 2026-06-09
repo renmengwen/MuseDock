@@ -18,6 +18,15 @@ async function run() {
 
   assert.match(messages[1].content, /AI_STORYBOARD_MAX_SCENES=12/);
   assert.match(messages[1].content, /AI_STORYBOARD_BACKEND_FILL=true/);
+  assert.match(messages[1].content, /Frame Profile：tech_neon/);
+  assert.match(messages[1].content, /完整 Frame\.md 参考/);
+  assert.match(messages[1].content, /不要让连续场景全部使用同一种居中卡片结构/);
+  assert.match(messages[1].content, /text_card.*核心观点/);
+  assert.match(messages[1].content, /contrast_card.*对比/);
+  assert.match(messages[1].content, /不要输出像网页按钮或后台卡片一样的 UI/);
+  assert.match(messages[1].content, /所有 timeline 必须是 paused GSAP timeline/);
+  assert.match(messages[1].content, /showCaptionBar=false/);
+  assert.match(messages[1].content, /Frame\.md 只能作为视觉设计参考/);
   assert.match(messages[1].content, /business style/);
   assert.match(messages[1].content, /abstract data background/);
   assert.match(messages[1].content, /no real people/);
@@ -69,6 +78,7 @@ async function run() {
   assert.match(calls[0].messages[0].content, /start/);
   assert.match(calls[0].messages[1].content, /AI_STORYBOARD_MAX_SCENES=12/);
   assert.match(calls[0].messages[1].content, /AI_STORYBOARD_BACKEND_FILL=true/);
+  assert.match(calls[0].messages[1].content, /Frame Profile：tech_neon/);
 
   const malformed = await storyboardAgent.createStoryboard({
     rewriteScript: 'first line. second line.',
