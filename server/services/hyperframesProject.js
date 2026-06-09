@@ -113,6 +113,44 @@ function renderEmphasis(words = []) {
     : '';
 }
 
+function cleanCaptionText(value) {
+  return String(value || '')
+    .replace(/^(开头|片头|引子|导语|正文|主体|结尾|片尾|总结)\s*[:：]\s*/g, '')
+    .replace(/^第[一二三四五六七八九十\d]+部分\s*[:：]\s*/g, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
+function makeFallbackEmphasisWords(text, headline) {
+  const seen = new Set();
+  const words = [];
+  const add = value => {
+    const clean = cleanCaptionText(value)
+      .replace(/^(你要先懂|要先懂|先懂|懂|比如|例如)/, '')
+      .slice(0, 12);
+    if (/^(以前|过去|现在).{0,6}(写代码|做项目|开发)$/.test(clean)) return;
+    if (!clean || clean === headline || clean.length < 2 || seen.has(clean)) return;
+    seen.add(clean);
+    words.push(clean);
+  };
+  const units = cleanCaptionText(text)
+    .split(/[，,、；;：:。“”"「」『』（）()【】\[\]\s]+/g)
+    .map(item => item.trim())
+    .filter(Boolean);
+  const exampleIndex = units.findIndex(item => /^(比如|例如|你要先懂|要先懂|先懂|懂)/.test(item));
+  if (exampleIndex >= 0) units.slice(exampleIndex).forEach(add);
+  units.forEach(add);
+  if (words.length < 3) cleanCaptionText(text).split(/[、，,]/g).forEach(add);
+  return words.slice(0, 6);
+}
+
+function getSceneEmphasisWords(scene, captionText) {
+  const words = Array.isArray(scene.emphasis_words)
+    ? scene.emphasis_words.map(word => String(word || '').trim()).filter(Boolean)
+    : [];
+  return words.length ? words : makeFallbackEmphasisWords(captionText, scene.headline);
+}
+
 function renderSceneContent({ scene, index, captionText, wordHtml }) {
   const sceneClass = getSceneClass(scene.visual_type);
   const emphasisClass = 'emphasis timed-cards';
@@ -242,15 +280,21 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
   const size = getRenderSize(options);
   const captionFontSize = getCaptionFontSize(options);
   const motionScale = getMotionScale(options);
-  const sceneHtml = storyboard.scenes.map((scene, index) => {
+  const renderScenes = storyboard.scenes.map(scene => {
+    const captionText = Array.isArray(scene.captions)
+      ? scene.captions.map(caption => caption.text).filter(Boolean).join(' ')
+      : '';
+    return {
+      ...scene,
+      emphasis_words: getSceneEmphasisWords(scene, captionText),
+    };
+  });
+  const sceneHtml = renderScenes.map((scene, index) => {
     const tone = getSceneTone(scene, index, storyboard);
     const captionText = Array.isArray(scene.captions)
       ? scene.captions.map(caption => caption.text).filter(Boolean).join(' ')
       : '';
-    const words = Array.isArray(scene.emphasis_words) ? scene.emphasis_words : [];
-    const wordHtml = words.length
-      ? renderEmphasis(words)
-      : renderEmphasis([scene.headline || captionText]);
+    const wordHtml = renderEmphasis(scene.emphasis_words);
     const kineticCaption = captionText.split(/\s+/).filter(Boolean)
       .map(word => `<span>${escapeHtml(word)}</span>`)
       .join('');
@@ -318,7 +362,7 @@ ${sceneHtml}
   </div>
   <script>
     window.__timelines = window.__timelines || {};
-${buildTimelineScript(storyboard.scenes, duration, motionScale, frameOptions)}
+    ${buildTimelineScript(renderScenes, duration, motionScale, frameOptions)}
     window.__timelines['ai-storyboard-cards'] = tl;
   </script>
 </body>

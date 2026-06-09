@@ -16,8 +16,10 @@ async function run() {
     },
   });
 
-  assert.match(messages[1].content, /AI_STORYBOARD_MAX_SCENES=12/);
-  assert.match(messages[1].content, /AI_STORYBOARD_BACKEND_FILL=true/);
+  assert.match(messages[1].content, /AI_STORYBOARD_TARGET=hyperframes/);
+  assert.match(messages[1].content, /AI_STORYBOARD_COVER_ALL_CAPTIONS=true/);
+  assert.match(messages[1].content, /headline[\s\S]*完整字幕/);
+  assert.match(messages[1].content, /emphasis_words[\s\S]*短语卡片/);
   assert.match(messages[1].content, /Frame Profile：tech_neon/);
   assert.match(messages[1].content, /完整 Frame\.md 参考/);
   assert.match(messages[1].content, /不要让连续场景全部使用同一种居中卡片结构/);
@@ -126,8 +128,8 @@ async function run() {
   assert.equal(result.storyboard.scenes[0].end, 3.75);
   assert.equal(result.raw.scenes.length, 1);
   assert.match(calls[0].messages[0].content, /start/);
-  assert.match(calls[0].messages[1].content, /AI_STORYBOARD_MAX_SCENES=12/);
-  assert.match(calls[0].messages[1].content, /AI_STORYBOARD_BACKEND_FILL=true/);
+  assert.match(calls[0].messages[1].content, /AI_STORYBOARD_TARGET=hyperframes/);
+  assert.match(calls[0].messages[1].content, /AI_STORYBOARD_COVER_ALL_CAPTIONS=true/);
   assert.match(calls[0].messages[1].content, /Frame Profile：tech_neon/);
 
   const malformed = await storyboardAgent.createStoryboard({

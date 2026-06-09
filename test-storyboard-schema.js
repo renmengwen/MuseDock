@@ -52,13 +52,46 @@ function run() {
 
   const fallback = schema.normalizeStoryboard({
     storyboard: { scenes: [] },
-    captions,
+    captions: [
+      ...captions,
+      {
+        index: 4,
+        start: 5,
+        end: 17,
+        duration: 12,
+        text: '你可以不懂代码开始，但如果你想真正上线、处理用户数据、保证安全和稳定，还是需要理解一些基础概念，比如数据库、部署、权限、接口、测试。',
+      },
+    ],
   });
   assert.equal(fallback.status, 'done');
-  assert.equal(fallback.scenes.length, 3);
+  assert.equal(fallback.scenes.length, 4);
   assert.deepStrictEqual(fallback.scenes[0].caption_indexes, [1]);
   assert.deepStrictEqual(fallback.scenes[1].caption_indexes, [2]);
   assert.deepStrictEqual(fallback.scenes[2].caption_indexes, [3]);
+  assert.deepStrictEqual(fallback.scenes[3].caption_indexes, [4]);
+  assert.notEqual(fallback.scenes[3].headline, fallback.scenes[3].captions[0].text);
+  assert.ok(fallback.scenes[3].headline.length <= 18);
+  assert.ok(fallback.scenes[3].emphasis_words.length >= 3);
+  assert.ok(fallback.scenes[3].emphasis_words.includes('数据库'));
+  assert.ok(fallback.scenes[3].emphasis_words.includes('部署'));
+  assert.ok(fallback.scenes[3].emphasis_words.includes('权限'));
+
+  const listFallback = schema.normalizeStoryboard({
+    storyboard: { scenes: [] },
+    captions: [
+      {
+        index: 1,
+        start: 0,
+        end: 6,
+        duration: 6,
+        text: '以前写代码，你要先懂语法、懂框架、懂前端后端、懂报错、懂部署。',
+      },
+    ],
+  });
+  assert.deepStrictEqual(listFallback.scenes[0].emphasis_words.slice(0, 5), ['语法', '框架', '前端后端', '报错', '部署']);
+  assert.ok(!listFallback.scenes[0].emphasis_words.includes('以前写代码'));
+  assert.ok(!listFallback.scenes[0].emphasis_words.includes('你要先懂语法'));
+  assert.ok(!listFallback.scenes[0].emphasis_words.includes('懂框架'));
 
   const validation = schema.validateStoryboardEditableInput({
     storyboard: {

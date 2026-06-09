@@ -196,6 +196,40 @@ async function run() {
   assert.match(listHtml, /<span data-card-index="4">部署<\/span>/);
   assert.match(listHtml, /#scene-1 \.emphasis span:nth-child\(5\)/);
   assert.doesNotMatch(listHtml, /<p>以前写代码，你要先懂语法、懂框架、懂前端后端、懂报错、懂部署。<\/p>/);
+
+  const fallbackWordHtml = hyperframesProject.buildIndexHtml({
+    duration: 6,
+    captions: [
+      { index: 1, start: 0, end: 6, duration: 6, text: '以前写代码，你要先懂语法、框架、前端后端、报错、部署。' },
+    ],
+    storyboard: {
+      template: 'ai_storyboard_cards',
+      scenes: [
+        {
+          index: 1,
+          caption_indexes: [1],
+          start: 0,
+          end: 6,
+          duration: 6,
+          headline: '从学会代码，到学会对 AI 说清楚',
+          visual_type: 'text_card',
+          layout: 'center_focus',
+          background_prompt: '原创抽象背景',
+          emphasis_words: [],
+          captions: [
+            { index: 1, start: 0, end: 6, duration: 6, text: '以前写代码，你要先懂语法、框架、前端后端、报错、部署。' },
+          ],
+        },
+      ],
+    },
+  });
+  assert.match(fallbackWordHtml, /<span data-card-index="0">语法<\/span>/);
+  assert.match(fallbackWordHtml, /<span data-card-index="1">框架<\/span>/);
+  assert.match(fallbackWordHtml, /<span data-card-index="2">前端后端<\/span>/);
+  assert.match(fallbackWordHtml, /<span data-card-index="3">报错<\/span>/);
+  assert.match(fallbackWordHtml, /<span data-card-index="4">部署<\/span>/);
+  assert.doesNotMatch(fallbackWordHtml, /<span data-card-index="0">从学会代码，到学会对 AI 说清楚<\/span>/);
+  assert.doesNotMatch(fallbackWordHtml, /<span data-card-index="0">以前写代码，你要先懂语法、框架、前端后端、报错、部署。<\/span>/);
 }
 
 run().then(() => {
