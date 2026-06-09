@@ -345,16 +345,35 @@ async function run() {
       pacing: '快节奏',
       forbidden: '不要真人',
     },
+    storyboardConfigOverride: {
+      systemPrompt: '临时分镜系统',
+      userPromptTemplate: '脚本：{{rewriteScript}}\n字幕：{{captionIndexesJson}}',
+      useFrameProfile: false,
+      modelOptions: { temperature: 0.8, stream: false, maxRetries: 2 },
+    },
     storyboardAgent: {
-      createStoryboard: async ({ rewriteScript, captions, storyboardOptions }) => {
+      createStoryboard: async ({ rewriteScript, captions, storyboardOptions, editableConfig }) => {
         assert.equal(rewriteScript, generated.result.rewrite_script);
         assert.ok(captions.length > 0);
         assert.equal(storyboardOptions.visualStyle, '商业质感');
         assert.equal(storyboardOptions.forbidden, '不要真人');
+        assert.equal(editableConfig.source, 'request');
+        assert.equal(editableConfig.systemPrompt, '临时分镜系统');
         return {
           success: true,
           message: 'AI 分镜已生成。',
           model: { provider: 'OpenAI', model_id: 'gpt-test' },
+          config_snapshot: {
+            source: editableConfig.source,
+            systemPrompt: editableConfig.systemPrompt,
+            userPromptTemplate: editableConfig.userPromptTemplate,
+            useFrameProfile: editableConfig.useFrameProfile,
+            modelOptions: editableConfig.modelOptions,
+          },
+          messages: [{ role: 'system', content: editableConfig.systemPrompt }],
+          raw_output: '{"template":"ai_storyboard_cards"}',
+          parse: { success: true, error: '' },
+          schema_validation: { success: true, errors: [] },
           raw: {
             scenes: [
               {
@@ -389,6 +408,10 @@ async function run() {
   assert.equal(storyboardResult.storyboard_options.pacing, '快节奏');
   assert.equal(storyboardResult.storyboard.scenes[0].start, 0);
   assert.equal(storyboardResult.storyboard_raw.scenes[0].start, 999);
+  assert.equal(storyboardResult.storyboard_config_snapshot.source, 'request');
+  assert.equal(storyboardResult.storyboard_messages[0].content, '临时分镜系统');
+  assert.equal(storyboardResult.storyboard_parse.success, true);
+  assert.equal(storyboardResult.storyboard_schema_validation.success, true);
 
   const projectResult = await agentRuns.createDouyinRunHyperframesProject(awemeId, generated.run_id, {
     rootDir,

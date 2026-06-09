@@ -637,10 +637,15 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
 
   const agent = options.storyboardAgent || defaultStoryboardAgent;
   const storyboardOptions = defaultStoryboardAgent.normalizeStoryboardOptions(options.storyboardOptions || run.storyboard_options || {});
+  const storyboardConfig = await agentTemplateOverrides.resolveStoryboardAgentConfig({
+    rootDir: options.rootDir,
+    storyboardConfigOverride: options.storyboardConfigOverride,
+  });
   const result = await agent.createStoryboard({
     rewriteScript,
     captions,
     storyboardOptions,
+    editableConfig: storyboardConfig,
     aiTextModel: options.aiTextModel,
     configPath: options.configPath,
     textConfig: options.textConfig,
@@ -654,6 +659,11 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     storyboard: result.storyboard,
     storyboard_model: result.model || {},
     storyboard_raw_parse_failed: !!result.raw_parse_failed,
+    storyboard_config_snapshot: result.config_snapshot,
+    storyboard_messages: result.messages || [],
+    storyboard_raw_output: result.raw_output || '',
+    storyboard_parse: result.parse || { success: true, error: '' },
+    storyboard_schema_validation: result.schema_validation || { success: true, errors: [] },
     updated_at: new Date().toISOString(),
   };
   await writeJson(runPath, updatedRun);
@@ -667,6 +677,11 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     storyboard_raw: updatedRun.storyboard_raw,
     storyboard: updatedRun.storyboard,
     storyboard_model: updatedRun.storyboard_model,
+    storyboard_config_snapshot: updatedRun.storyboard_config_snapshot,
+    storyboard_messages: updatedRun.storyboard_messages,
+    storyboard_raw_output: updatedRun.storyboard_raw_output,
+    storyboard_parse: updatedRun.storyboard_parse,
+    storyboard_schema_validation: updatedRun.storyboard_schema_validation,
   };
 }
 

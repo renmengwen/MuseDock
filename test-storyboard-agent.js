@@ -37,6 +37,55 @@ async function run() {
   assert.doesNotMatch(messages[1].content, /"duration"/);
   assert.match(messages[0].content, /start/);
 
+  const editableStoryboard = storyboardAgent.getEditableStoryboardTemplate();
+  assert.ok(editableStoryboard.systemPrompt.includes('MuseDock'));
+  assert.ok(editableStoryboard.userPromptTemplate.includes('{{rewriteScript}}'));
+  assert.equal(editableStoryboard.useFrameProfile, true);
+  assert.equal(editableStoryboard.modelOptions.temperature, 0.35);
+
+  const customResult = await storyboardAgent.createStoryboard({
+    rewriteScript: '第一句。第二句。',
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '第一句。' },
+      { index: 2, start: 1, end: 2, duration: 1, text: '第二句。' },
+    ],
+    editableConfig: {
+      source: 'request',
+      systemPrompt: '自定义分镜系统',
+      userPromptTemplate: '脚本：{{rewriteScript}}\n字幕：{{captionIndexesJson}}',
+      useFrameProfile: false,
+      modelOptions: { temperature: 0.9, stream: false, maxRetries: 2 },
+    },
+    aiTextModel: {
+      async callTextModel(payload) {
+        assert.equal(payload.messages[0].content, '自定义分镜系统');
+        assert.equal(payload.temperature, 0.9);
+        assert.equal(payload.stream, false);
+        return {
+          success: true,
+          text: JSON.stringify({
+            template: 'ai_storyboard_cards',
+            scenes: [
+              {
+                caption_indexes: [1],
+                headline: '开头',
+                visual_type: 'text_card',
+                layout: 'center_focus',
+                background_prompt: '抽象背景',
+                emphasis_words: ['开头'],
+              },
+            ],
+          }),
+          model: { model_id: 'fake' },
+        };
+      },
+    },
+  });
+  assert.equal(customResult.config_snapshot.source, 'request');
+  assert.equal(customResult.messages[0].content, '自定义分镜系统');
+  assert.equal(customResult.raw_output.includes('ai_storyboard_cards'), true);
+  assert.equal(customResult.parse.success, true);
+
   const calls = [];
   const result = await storyboardAgent.createStoryboard({
     rewriteScript: 'first line. second line.',
