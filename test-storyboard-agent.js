@@ -65,6 +65,20 @@ async function run() {
   assert.doesNotMatch(messages[1].content, /"duration"/);
   assert.match(messages[0].content, /start/);
 
+  const dirtyBriefText = storyboardAgent.formatVideoBriefForPrompt({
+    target_duration_sec: 'abc',
+    target_word_count: 'bad',
+    tone: 123,
+    hook: null,
+    beats: [null, 'x', { purpose: 12, summary: null, duration_sec: 'bad', visual_intent: 34 }],
+  });
+  assert.doesNotMatch(dirtyBriefText, /NaN/);
+  assert.doesNotMatch(dirtyBriefText, /null/);
+  assert.match(dirtyBriefText, /目标时长 target_duration_sec：60 秒/);
+  assert.match(dirtyBriefText, /目标字数 target_word_count：220 字/);
+  assert.match(dirtyBriefText, /"purpose": "12"/);
+  assert.match(dirtyBriefText, /"visual_intent": "34"/);
+
   const editableStoryboard = storyboardAgent.getEditableStoryboardTemplate();
   assert.ok(editableStoryboard.systemPrompt.includes('MuseDock'));
   assert.ok(editableStoryboard.userPromptTemplate.includes('{{rewriteScript}}'));

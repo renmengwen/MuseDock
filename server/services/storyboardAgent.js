@@ -56,23 +56,36 @@ function formatStoryboardOptionsForPrompt(options = {}) {
   ].join('\n');
 }
 
+function safeNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function safePromptText(value) {
+  if (value === undefined || value === null) return '';
+  return typeof value === 'string' ? value : String(value);
+}
+
 function formatVideoBriefForPrompt(videoBrief = {}) {
   const source = videoBrief && typeof videoBrief === 'object' && !Array.isArray(videoBrief) ? videoBrief : {};
   const beats = Array.isArray(source.beats) ? source.beats.slice(0, 12) : [];
   return [
     '视频结构 brief：',
-    `- 目标时长 target_duration_sec：${Number(source.target_duration_sec || 60)} 秒`,
-    `- 目标字数 target_word_count：${Number(source.target_word_count || 220)} 字`,
-    `- 语气风格：${source.tone || '未指定'}`,
-    `- 开场钩子：${source.hook || '未指定'}`,
+    `- 目标时长 target_duration_sec：${safeNumber(source.target_duration_sec, 60)} 秒`,
+    `- 目标字数 target_word_count：${safeNumber(source.target_word_count, 220)} 字`,
+    `- 语气风格：${safePromptText(source.tone) || '未指定'}`,
+    `- 开场钩子：${safePromptText(source.hook) || '未指定'}`,
     '- 节奏段落：',
     beats.length
-      ? JSON.stringify(beats.map(beat => ({
-        purpose: beat.purpose || '',
-        summary: beat.summary || '',
-        duration_sec: Number(beat.duration_sec || 0),
-        visual_intent: beat.visual_intent || '',
-      })), null, 2)
+      ? JSON.stringify(beats.map(beat => {
+        const item = beat && typeof beat === 'object' && !Array.isArray(beat) ? beat : {};
+        return {
+          purpose: safePromptText(item.purpose),
+          summary: safePromptText(item.summary),
+          duration_sec: safeNumber(item.duration_sec, 0),
+          visual_intent: safePromptText(item.visual_intent),
+        };
+      }), null, 2)
       : '[]',
   ].join('\n');
 }
