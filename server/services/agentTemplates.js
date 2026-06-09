@@ -16,7 +16,7 @@ function normalizeStringArray(value) {
 function normalizeNumber(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
-  return Math.min(Math.max(number, min), max);
+  return Math.min(max, Math.max(min, Math.round(number)));
 }
 
 const PROMPT_OPTION_LIMITS = {
@@ -55,16 +55,18 @@ function normalizeVideoBrief(value = {}) {
     ? source.beats
       .filter(beat => beat && typeof beat === 'object' && !Array.isArray(beat))
       .map(beat => ({
-        purpose: typeof beat.purpose === 'string' ? beat.purpose.trim() : '',
-        summary: typeof beat.summary === 'string' ? beat.summary.trim() : '',
-        duration_sec: normalizeNumber(beat.duration_sec, 0, 0, 300),
-        visual_intent: typeof beat.visual_intent === 'string' ? beat.visual_intent.trim() : '',
+        purpose: typeof beat.purpose === 'string' ? beat.purpose.trim().slice(0, 40) : '',
+        summary: typeof beat.summary === 'string' ? beat.summary.trim().slice(0, 120) : '',
+        duration_sec: normalizeNumber(beat.duration_sec, 6, 2, 20),
+        visual_intent: typeof beat.visual_intent === 'string' ? beat.visual_intent.trim().slice(0, 160) : '',
       }))
+      .filter(item => item.purpose || item.summary || item.visual_intent)
+      .slice(0, 12)
     : [];
 
   return {
-    target_duration_sec: normalizeNumber(source.target_duration_sec, 60, 1, 600),
-    target_word_count: normalizeNumber(source.target_word_count, 220, 1, 5000),
+    target_duration_sec: normalizeNumber(source.target_duration_sec, 60, 15, 180),
+    target_word_count: normalizeNumber(source.target_word_count, 220, 60, 900),
     tone: typeof source.tone === 'string' ? source.tone.trim() : '',
     hook: typeof source.hook === 'string' ? source.hook.trim() : '',
     beats,
