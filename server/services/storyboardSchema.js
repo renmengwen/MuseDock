@@ -5,6 +5,10 @@ const DEFAULT_STYLE = {
   motion: '轻微推进、重点词弹出',
 };
 
+const VISUAL_TYPE_ALLOWED = ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst', 'text_card', 'quote_card', 'step_card', 'contrast_card'];
+const VISUAL_OBJECT_ALLOWED = ['node', 'connector', 'code', 'terminal', 'panel', 'button', 'field', 'metric', 'column', 'branch', 'milestone', 'badge', 'keyword'];
+const VISUAL_MOTION_ALLOWED = ['stagger_reveal', 'draw_line', 'type_in', 'scan', 'pulse', 'slide_in', 'zoom_focus', 'highlight', 'float'];
+
 function roundTime(value) {
   return Math.round(Number(value || 0) * 1000) / 1000;
 }
@@ -15,6 +19,20 @@ function asArray(value) {
 
 function sanitizeText(value, fallback = '') {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function pickAllowed(value, allowed, fallback) {
+  return allowed.includes(value) ? value : fallback;
+}
+
+function sanitizeShortText(value, fallback = '', maxLength = 18) {
+  return sanitizeText(value, fallback).slice(0, maxLength);
+}
+
+function clampNumber(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
 }
 
 function cleanCaptionText(value) {
@@ -66,6 +84,94 @@ function makeFallbackEmphasisWords(text, headline) {
   return words.slice(0, 6);
 }
 
+function normalizeVisualObject(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const type = pickAllowed(source.type, VISUAL_OBJECT_ALLOWED, null);
+  if (!type) return null;
+
+  const object = { type };
+  const id = sanitizeShortText(source.id, '', 48);
+  const text = sanitizeShortText(source.text, '', 18);
+  const role = sanitizeShortText(source.role, '', 32);
+  const style = sanitizeShortText(source.style, '', 48);
+  const from = sanitizeShortText(source.from, '', 48);
+  const to = sanitizeShortText(source.to, '', 48);
+  const code = sanitizeShortText(source.code, '', 160);
+
+  if (id) object.id = id;
+  if (text) object.text = text;
+  if (role) object.role = role;
+  if (style) object.style = style;
+  if (from) object.from = from;
+  if (to) object.to = to;
+  if (code) object.code = code;
+
+  return object;
+}
+
+function normalizeVisualMotion(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const effect = pickAllowed(source.effect, VISUAL_MOTION_ALLOWED, null);
+  if (!effect) return null;
+
+  return {
+    target: sanitizeShortText(source.target, '', 48),
+    effect,
+    delay: clampNumber(source.delay, 0, 0, 3),
+  };
+}
+
+function makeFallbackVisualScene(scene = {}) {
+  const emphasisWords = asArray(scene.emphasis_words)
+    .map(item => sanitizeShortText(item, '', 18))
+    .filter(Boolean);
+  const headline = sanitizeShortText(scene.headline, '重点', 18);
+  const words = emphasisWords.length ? emphasisWords : [headline];
+  const objects = words.slice(0, 8).map((word, index) => ({
+    id: `keyword-${index + 1}`,
+    type: 'keyword',
+    text: word,
+    role: index === 0 ? 'primary' : 'supporting',
+  }));
+
+  return {
+    composition: 'burst_center',
+    objects,
+    motion: [
+      { target: 'keyword', effect: 'stagger_reveal', delay: 0 },
+      { target: 'focus', effect: 'pulse', delay: 0.2 },
+    ],
+    focus: {
+      text: headline,
+      style: 'accent_pulse',
+    },
+  };
+}
+
+function normalizeVisualScene(scene = {}) {
+  const fallback = makeFallbackVisualScene(scene);
+  const source = scene.visual_scene && typeof scene.visual_scene === 'object' && !Array.isArray(scene.visual_scene)
+    ? scene.visual_scene
+    : {};
+  const objects = asArray(source.objects).map(normalizeVisualObject).filter(Boolean).slice(0, 8);
+  const motion = asArray(source.motion).map(normalizeVisualMotion).filter(Boolean).slice(0, 8);
+  const focusSource = source.focus && typeof source.focus === 'object' && !Array.isArray(source.focus)
+    ? source.focus
+    : {};
+
+  if (!objects.length || !motion.length) return fallback;
+
+  return {
+    composition: sanitizeShortText(source.composition, fallback.composition, 48),
+    objects,
+    motion,
+    focus: {
+      text: sanitizeShortText(focusSource.text, fallback.focus.text, 18),
+      style: sanitizeShortText(focusSource.style, fallback.focus.style, 48),
+    },
+  };
+}
+
 function normalizeCaption(caption) {
   const start = roundTime(caption?.start);
   const end = roundTime(caption?.end);
@@ -107,6 +213,7 @@ function makeFallbackScenes(captions) {
 function buildScene(source, sceneCaptions, sceneIndex) {
   const start = sceneCaptions[0].start;
   const end = sceneCaptions[sceneCaptions.length - 1].end;
+  const visualType = pickAllowed(source.visual_type, VISUAL_TYPE_ALLOWED, 'quote_burst');
   return {
     index: sceneIndex,
     caption_indexes: sceneCaptions.map(item => item.index),
@@ -114,11 +221,17 @@ function buildScene(source, sceneCaptions, sceneIndex) {
     end,
     duration: roundTime(end - start),
     headline: sanitizeText(source.headline, sceneCaptions[0].text),
-    visual_type: sanitizeText(source.visual_type, 'text_card'),
+    visual_type: visualType,
     layout: sanitizeText(source.layout, sceneIndex % 2 === 1 ? 'center_focus' : 'split_emphasis'),
     background_prompt: sanitizeText(source.background_prompt, '原创抽象动态图文背景，不包含原视频画面'),
     emphasis_words: asArray(source.emphasis_words).map(item => String(item).trim()).filter(Boolean).slice(0, 6),
     captions: sceneCaptions,
+    visual_scene: normalizeVisualScene({
+      ...source,
+      headline: sanitizeText(source.headline, sceneCaptions[0].text),
+      visual_type: visualType,
+      emphasis_words: asArray(source.emphasis_words).map(item => String(item).trim()).filter(Boolean).slice(0, 6),
+    }),
   };
 }
 
@@ -197,6 +310,15 @@ function validateStoryboardEditableInput({ storyboard = {}, captions = [] } = {}
 module.exports = {
   DEFAULT_TEMPLATE,
   DEFAULT_STYLE,
+  VISUAL_TYPE_ALLOWED,
+  VISUAL_OBJECT_ALLOWED,
+  VISUAL_MOTION_ALLOWED,
+  pickAllowed,
+  sanitizeShortText,
+  normalizeVisualObject,
+  normalizeVisualMotion,
+  makeFallbackVisualScene,
+  normalizeVisualScene,
   normalizeStoryboard,
   validateStoryboardEditableInput,
   makeFallbackScenes,

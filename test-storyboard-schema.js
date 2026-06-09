@@ -50,6 +50,62 @@ function run() {
   assert.equal(normalized.scenes[1].start, 3.75);
   assert.equal(normalized.scenes[1].end, 5);
 
+  const visualDsl = schema.normalizeStoryboard({
+    storyboard: {
+      template: 'ai_storyboard_cards',
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '传统开发链路',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创流程背景',
+          emphasis_words: ['产品需求'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [
+              { id: 'node-1', type: 'node', text: '产品需求', role: 'primary' },
+              { id: 'node-2', type: 'node', text: '设计界面', role: 'primary' },
+              { id: 'bad', type: 'unknown', text: '应该被丢弃' },
+            ],
+            motion: [
+              { target: 'node', effect: 'stagger_reveal', delay: 0.1 },
+              { target: 'bad', effect: 'explode', delay: 999 },
+            ],
+            focus: { text: '流程太重', style: 'warning_pulse' },
+          },
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(visualDsl.scenes[0].visual_type, 'workflow');
+  assert.equal(visualDsl.scenes[0].visual_scene.composition, 'vertical_flow');
+  assert.equal(visualDsl.scenes[0].visual_scene.objects.length, 2);
+  assert.equal(visualDsl.scenes[0].visual_scene.objects[0].type, 'node');
+  assert.equal(visualDsl.scenes[0].visual_scene.motion.length, 1);
+  assert.equal(visualDsl.scenes[0].visual_scene.motion[0].effect, 'stagger_reveal');
+  assert.equal(visualDsl.scenes[0].visual_scene.focus.text, '流程太重');
+
+  const fallbackVisual = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '未知类型',
+          visual_type: 'imaginary_camera_scene',
+          layout: 'center_focus',
+          background_prompt: '原创背景',
+          emphasis_words: ['重点一', '重点二'],
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(fallbackVisual.scenes[0].visual_type, 'quote_burst');
+  assert.equal(fallbackVisual.scenes[0].visual_scene.composition, 'burst_center');
+  assert.ok(fallbackVisual.scenes[0].visual_scene.objects.length >= 2);
+
   const fallback = schema.normalizeStoryboard({
     storyboard: { scenes: [] },
     captions: [
@@ -139,6 +195,30 @@ function run() {
     ],
   });
   assert.equal(valid.success, true);
+
+  const visualValidation = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '视觉 DSL',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创背景',
+          emphasis_words: ['重点'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ type: 'node', text: '节点' }],
+            motion: [{ target: 'node', effect: 'stagger_reveal' }],
+          },
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(visualValidation.success, true);
 }
 
 try {
