@@ -101,11 +101,47 @@ export const api = {
       body: JSON.stringify({ target }),
     });
   },
-  createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}) {
+  listAgentTemplates() {
+    return requestJson('/api/agents/templates');
+  },
+  getAgentTemplate(id) {
+    return requestJson(`/api/agents/templates/${encodeURIComponent(id)}`);
+  },
+  saveAgentTemplate(id, payload) {
+    return requestJson(`/api/agents/templates/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+  restoreAgentTemplate(id) {
+    return requestJson(`/api/agents/templates/${encodeURIComponent(id)}/override`, { method: 'DELETE' });
+  },
+  getStoryboardTemplate() {
+    return requestJson('/api/agents/storyboard-template');
+  },
+  saveStoryboardTemplate(payload) {
+    return requestJson('/api/agents/storyboard-template', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+  restoreStoryboardTemplate() {
+    return requestJson('/api/agents/storyboard-template/override', { method: 'DELETE' });
+  },
+  previewAgentMessages(config, values = {}) {
+    return requestJson('/api/agents/messages/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config, values }),
+    });
+  },
+  createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}, agentConfigOverride = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ template, promptOptions }),
+      body: JSON.stringify({ template, promptOptions, agentConfigOverride }),
     });
   },
   listDouyinAgentRuns(awemeId) {
@@ -121,11 +157,11 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  createDouyinRunStoryboard(awemeId, runId, storyboardOptions = {}) {
+  createDouyinRunStoryboard(awemeId, runId, storyboardOptions = {}, storyboardConfigOverride = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/storyboard`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ storyboardOptions }),
+      body: JSON.stringify({ storyboardOptions, storyboardConfigOverride }),
     });
   },
   createDouyinRunHyperframesProject(awemeId, runId, renderOptions = {}) {

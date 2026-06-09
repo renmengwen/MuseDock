@@ -705,8 +705,56 @@ async function run() {
   app.use('/api/agents', agentsRouter);
   const server = await listen(app);
   try {
+    const templatesResponse = await requestJson(server, 'GET', '/api/agents/templates');
+    assert.strictEqual(templatesResponse.statusCode, 200);
+    assert.strictEqual(templatesResponse.body.success, true);
+    assert.ok(templatesResponse.body.data.some(item => item.id === 'viral_rewrite'));
+
+    const templateDetailResponse = await requestJson(server, 'GET', '/api/agents/templates/viral_rewrite');
+    assert.strictEqual(templateDetailResponse.statusCode, 200);
+    assert.strictEqual(templateDetailResponse.body.success, true);
+    assert.strictEqual(templateDetailResponse.body.data.id, 'viral_rewrite');
+
+    const saveTemplateResponse = await requestJson(server, 'PUT', '/api/agents/templates/viral_rewrite', {
+      systemPrompt: '接口系统',
+      userPromptTemplate: '接口标题：{{videoTitle}}',
+      modelOptions: { temperature: 0.2, stream: false, maxRetries: 2 },
+    });
+    assert.strictEqual(saveTemplateResponse.statusCode, 200);
+    assert.strictEqual(saveTemplateResponse.body.success, true);
+    assert.match(saveTemplateResponse.body.message, /已保存|保存/);
+
+    const deleteTemplateResponse = await requestJson(server, 'DELETE', '/api/agents/templates/viral_rewrite/override');
+    assert.strictEqual(deleteTemplateResponse.statusCode, 200);
+    assert.strictEqual(deleteTemplateResponse.body.success, true);
+    assert.match(deleteTemplateResponse.body.message, /恢复默认/);
+
+    const storyboardTemplateResponse = await requestJson(server, 'GET', '/api/agents/storyboard-template');
+    assert.strictEqual(storyboardTemplateResponse.statusCode, 200);
+    assert.strictEqual(storyboardTemplateResponse.body.success, true);
+    assert.ok(storyboardTemplateResponse.body.data.systemPrompt.includes('MuseDock'));
+
+    const saveStoryboardTemplateResponse = await requestJson(server, 'PUT', '/api/agents/storyboard-template', {
+      systemPrompt: '分镜接口系统',
+      userPromptTemplate: '脚本：{{rewriteScript}}',
+      useFrameProfile: false,
+      modelOptions: { temperature: 0.3, stream: true, maxRetries: 1 },
+    });
+    assert.strictEqual(saveStoryboardTemplateResponse.statusCode, 200);
+    assert.strictEqual(saveStoryboardTemplateResponse.body.success, true);
+    assert.match(saveStoryboardTemplateResponse.body.message, /已保存|保存/);
+
+    const deleteStoryboardTemplateResponse = await requestJson(server, 'DELETE', '/api/agents/storyboard-template/override');
+    assert.strictEqual(deleteStoryboardTemplateResponse.statusCode, 200);
+    assert.strictEqual(deleteStoryboardTemplateResponse.body.success, true);
+    assert.match(deleteStoryboardTemplateResponse.body.message, /恢复默认/);
+
     const response = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs`, {
       template: 'viral_rewrite',
+      agentConfigOverride: {
+        systemPrompt: '路由临时系统',
+        userPromptTemplate: '路由临时标题：{{videoTitle}}',
+      },
     });
     assert.strictEqual(response.statusCode, 200);
     assert.strictEqual(response.body.success, false);
