@@ -240,6 +240,15 @@ a { color: #fe2c55; text-decoration: none; }
 .storyboardItem code { color: #69717e; font-size: 12px; white-space: nowrap; }
 .storyboardItem p { margin: 0; color: #30343b; font-size: 13px; font-weight: 700; line-height: 1.5; }
 .storyboardItem span { color: #69717e; font-size: 12px; }
+.sceneEditorList { gap: 12px; }
+.sceneEditorItem { display: grid; gap: 10px; }
+.sceneEditorItem input,
+.sceneEditorItem select,
+.sceneEditorItem textarea { width: 100%; border: 1px solid #d7dce3; border-radius: 8px; padding: 9px 10px; font: inherit; color: #30343b; background: #fff; }
+.sceneEditorItem textarea { min-height: 74px; resize: vertical; line-height: 1.5; }
+.sceneEditorItem input:disabled,
+.sceneEditorItem select:disabled,
+.sceneEditorItem textarea:disabled { color: #8a93a2; background: #f4f6f8; }
 .videoProjectMeta { display: grid; gap: 8px; color: #69717e; font-size: 12px; }
 .videoProjectMeta code { display: block; padding: 8px; border-radius: 8px; background: #fafbfc; color: #30343b; word-break: break-all; }
 .videoProjectMeta video { width: 100%; max-height: 360px; background: #0f1115; border-radius: 8px; }

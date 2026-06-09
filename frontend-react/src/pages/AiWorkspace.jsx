@@ -10,6 +10,7 @@ import {
   getAgentStepLabel,
   getDebugSections,
   getRunDisplayTime,
+  getStoryboardDebugSections,
 } from '../utils/agentRuns.js';
 import { DEFAULT_PROMPT_OPTIONS, DEFAULT_STORYBOARD_OPTIONS } from '../utils/aiWorkspaceDefaults.js';
 import { getAwemeIdFromSearch } from '../utils/workspaceParams.js';
@@ -100,6 +101,12 @@ export function AiWorkspace() {
   const [running, setRunning] = useState(false);
   const [ttsRunning, setTtsRunning] = useState(false);
   const [storyboardRunning, setStoryboardRunning] = useState(false);
+  const [storyboardConfig, setStoryboardConfig] = useState(null);
+  const [storyboardConfigDraft, setStoryboardConfigDraft] = useState(null);
+  const [storyboardConfigOpen, setStoryboardConfigOpen] = useState(false);
+  const [storyboardConfigSaving, setStoryboardConfigSaving] = useState(false);
+  const [storyboardDraft, setStoryboardDraft] = useState(null);
+  const [storyboardSaving, setStoryboardSaving] = useState(false);
   const [videoGenerating, setVideoGenerating] = useState(false);
   const [videoRendering, setVideoRendering] = useState(false);
   const [ttsVoice, setTtsVoice] = useState('mimo_default');
@@ -166,6 +173,14 @@ export function AiWorkspace() {
   }, [activeRun?.run_id, activeRun?.tts?.url, activeRun?.video?.project_dir, activeRun?.video?.output_url, hasRewriteScript, hasStoryboardScenes]);
 
   useEffect(() => {
+    if (activeRun?.storyboard) {
+      setStoryboardDraft(JSON.parse(JSON.stringify(activeRun.storyboard)));
+    } else {
+      setStoryboardDraft(null);
+    }
+  }, [activeRun?.run_id, activeRun?.storyboard?.updated_at]);
+
+  useEffect(() => {
     const nextAwemeId = getAwemeIdFromSearch(location.search);
     if (!nextAwemeId) return;
     setAwemeId(nextAwemeId);
@@ -206,6 +221,9 @@ export function AiWorkspace() {
     const detailJson = await api.getAgentTemplate(nextTemplate);
     setAgentConfig(detailJson.data);
     setAgentConfigDraft(detailJson.data);
+    const storyboardTemplateJson = await api.getStoryboardTemplate();
+    setStoryboardConfig(storyboardTemplateJson.data);
+    setStoryboardConfigDraft(storyboardTemplateJson.data);
   }
 
   async function runAgent() {
@@ -309,6 +327,113 @@ export function AiWorkspace() {
     setStoryboardOptions(prev => ({ ...prev, [key]: value }));
   }
 
+  function updateStoryboardConfigDraft(key, value) {
+    setStoryboardConfigDraft(prev => ({ ...(prev || {}), [key]: value }));
+  }
+
+  function updateStoryboardModelOption(key, value) {
+    setStoryboardConfigDraft(prev => ({
+      ...(prev || {}),
+      modelOptions: {
+        ...((prev && prev.modelOptions) || {}),
+        [key]: key === 'stream' ? Boolean(value) : value,
+      },
+    }));
+  }
+
+  async function saveStoryboardConfig() {
+    setStoryboardConfigSaving(true);
+    setStatus({ type: 'loading', message: '正在保存分镜 Agent 配置...' });
+    try {
+      const json = await api.saveStoryboardTemplate(storyboardConfigDraft);
+      setStoryboardConfig(json.data);
+      setStoryboardConfigDraft(json.data);
+      setStatus({ type: 'success', message: json.message || '分镜 Agent 配置已保存。' });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message });
+    } finally {
+      setStoryboardConfigSaving(false);
+    }
+  }
+
+  async function restoreStoryboardConfig() {
+    setStoryboardConfigSaving(true);
+    setStatus({ type: 'loading', message: '正在恢复默认分镜 Agent 配置...' });
+    try {
+      const json = await api.restoreStoryboardTemplate();
+      const detail = await api.getStoryboardTemplate();
+      setStoryboardConfig(detail.data);
+      setStoryboardConfigDraft(detail.data);
+      setStatus({ type: 'success', message: json.message || '已恢复默认分镜 Agent 配置。' });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message });
+    } finally {
+      setStoryboardConfigSaving(false);
+    }
+  }
+
+  function updateStoryboardScene(index, key, value) {
+    setStoryboardDraft(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        scenes: prev.scenes.map(scene => (
+          scene.index === index ? { ...scene, [key]: value } : scene
+        )),
+      };
+    });
+  }
+
+  function updateStoryboardSceneIndexes(index, value) {
+    const indexes = String(value || '')
+      .split(/[,，]/)
+      .map(item => Number(item.trim()))
+      .filter(Number.isFinite);
+    updateStoryboardScene(index, 'caption_indexes', indexes);
+  }
+
+  function updateStoryboardSceneEmphasis(index, value) {
+    const words = String(value || '')
+      .split(/[,，]/)
+      .map(item => item.trim())
+      .filter(Boolean);
+    updateStoryboardScene(index, 'emphasis_words', words);
+  }
+
+  async function saveStoryboardDraft() {
+    const value = selectedAwemeId.trim();
+    if (!value || !activeRun?.run_id || !storyboardDraft) {
+      setStatus({ type: 'error', message: '请先选择一条包含分镜的运行记录。' });
+      return;
+    }
+    setStoryboardSaving(true);
+    setStatus({ type: 'loading', message: '正在校验并保存 AI 分镜...' });
+    try {
+      const json = await api.saveDouyinRunStoryboard(value, activeRun.run_id, storyboardDraft);
+      setActiveRun(prev => prev ? {
+        ...prev,
+        storyboard: json.storyboard,
+        storyboard_schema_validation: json.storyboard_schema_validation,
+        video: null,
+        updated_at: new Date().toISOString(),
+      } : prev);
+      setRuns(prev => prev.map(run => (
+        run.run_id === activeRun.run_id ? {
+          ...run,
+          storyboard: json.storyboard,
+          storyboard_schema_validation: json.storyboard_schema_validation,
+          video: null,
+          updated_at: new Date().toISOString(),
+        } : run
+      )));
+      setStatus({ type: 'success', message: json.message || '分镜已保存。' });
+    } catch (error) {
+      setStatus({ type: 'error', message: error.message });
+    } finally {
+      setStoryboardSaving(false);
+    }
+  }
+
   function updateRenderOption(key, value) {
     setRenderOptions(prev => ({ ...prev, [key]: value }));
   }
@@ -366,13 +491,24 @@ export function AiWorkspace() {
     setStoryboardRunning(true);
     setStatus({ type: 'loading', message: '正在生成 AI 分镜...' });
     try {
-      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id, storyboardOptions);
+      const storyboardOverride = storyboardConfigDraft ? {
+        systemPrompt: storyboardConfigDraft.systemPrompt,
+        userPromptTemplate: storyboardConfigDraft.userPromptTemplate,
+        useFrameProfile: storyboardConfigDraft.useFrameProfile !== false,
+        modelOptions: storyboardConfigDraft.modelOptions || {},
+      } : null;
+      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id, storyboardOptions, storyboardOverride);
       setActiveRun(prev => prev ? {
         ...prev,
         storyboard_options: json.storyboard_options,
         storyboard_raw: json.storyboard_raw,
         storyboard: json.storyboard,
         storyboard_model: json.storyboard_model,
+        storyboard_config_snapshot: json.storyboard_config_snapshot,
+        storyboard_messages: json.storyboard_messages,
+        storyboard_raw_output: json.storyboard_raw_output,
+        storyboard_parse: json.storyboard_parse,
+        storyboard_schema_validation: json.storyboard_schema_validation,
         updated_at: new Date().toISOString(),
       } : prev);
       setRuns(prev => prev.map(run => (
@@ -382,6 +518,11 @@ export function AiWorkspace() {
           storyboard_raw: json.storyboard_raw,
           storyboard: json.storyboard,
           storyboard_model: json.storyboard_model,
+          storyboard_config_snapshot: json.storyboard_config_snapshot,
+          storyboard_messages: json.storyboard_messages,
+          storyboard_raw_output: json.storyboard_raw_output,
+          storyboard_parse: json.storyboard_parse,
+          storyboard_schema_validation: json.storyboard_schema_validation,
           updated_at: new Date().toISOString(),
         } : run
       )));
@@ -806,6 +947,68 @@ export function AiWorkspace() {
                   <h4>AI 分镜与成片</h4>
                   <div className="videoProjectPanel">
                     <div className="agentOptionGroup">
+                      <div className="agentResultSectionHeader">
+                        <h4>分镜 Agent 高级编辑</h4>
+                        <Button size="sm" variant="secondary" onClick={() => setStoryboardConfigOpen(value => !value)}>
+                          {storyboardConfigOpen ? '收起' : '展开'}
+                        </Button>
+                      </div>
+                      {storyboardConfigOpen && storyboardConfigDraft ? (
+                        <div className="promptEditor">
+                          <label>
+                            <span>system prompt</span>
+                            <textarea
+                              value={storyboardConfigDraft.systemPrompt || ''}
+                              onChange={event => updateStoryboardConfigDraft('systemPrompt', event.target.value)}
+                              disabled={storyboardConfigSaving || storyboardRunning || videoBusy}
+                            />
+                          </label>
+                          <label>
+                            <span>user prompt 模板</span>
+                            <textarea
+                              value={storyboardConfigDraft.userPromptTemplate || ''}
+                              onChange={event => updateStoryboardConfigDraft('userPromptTemplate', event.target.value)}
+                              disabled={storyboardConfigSaving || storyboardRunning || videoBusy}
+                            />
+                          </label>
+                          <label className="inlineCheck">
+                            <input
+                              type="checkbox"
+                              checked={storyboardConfigDraft.useFrameProfile !== false}
+                              onChange={event => updateStoryboardConfigDraft('useFrameProfile', event.target.checked)}
+                              disabled={storyboardConfigSaving || storyboardRunning || videoBusy}
+                            />
+                            引用 Frame Profile 文档
+                          </label>
+                          <label>
+                            <span>temperature</span>
+                            <Input
+                              type="number"
+                              min="0"
+                              max="2"
+                              step="0.1"
+                              value={storyboardConfigDraft.modelOptions?.temperature ?? 0.35}
+                              onChange={event => updateStoryboardModelOption('temperature', Number(event.target.value))}
+                              disabled={storyboardConfigSaving || storyboardRunning || videoBusy}
+                            />
+                          </label>
+                          <label className="inlineCheck">
+                            <input
+                              type="checkbox"
+                              checked={storyboardConfigDraft.modelOptions?.stream !== false}
+                              onChange={event => updateStoryboardModelOption('stream', event.target.checked)}
+                              disabled={storyboardConfigSaving || storyboardRunning || videoBusy}
+                            />
+                            流式调用
+                          </label>
+                          <div className="videoProjectActions">
+                            <Button size="sm" variant="secondary" disabled={storyboardConfigSaving} onClick={restoreStoryboardConfig}>恢复默认</Button>
+                            <Button size="sm" disabled={storyboardConfigSaving} onClick={saveStoryboardConfig}>保存分镜 Agent 配置</Button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="agentOptionGroup">
                       <h4>AI 分镜视觉 brief</h4>
                       <Input
                         value={storyboardOptions.visualStyle}
@@ -941,18 +1144,65 @@ export function AiWorkspace() {
                       </Button>
                     </div>
                     {!hasTtsCaptions ? <p className="mutedText">请先在“配音”页签完成 TTS 合成并生成字幕时间轴。</p> : null}
-                    {hasStoryboardScenes ? (
-                      <div className="storyboardList">
-                        {activeRun.storyboard.scenes.map(scene => (
-                          <div className="storyboardItem" key={scene.index}>
+                    {storyboardDraft?.scenes?.length ? (
+                      <div className="storyboardList sceneEditorList">
+                        {storyboardDraft.scenes.map(scene => (
+                          <div className="storyboardItem sceneEditorItem" key={scene.index}>
                             <div>
                               <strong>分镜 {String(scene.index).padStart(2, '0')}</strong>
                               <code>{formatCaptionTime(scene.start)} - {formatCaptionTime(scene.end)}</code>
                             </div>
-                            <p>{scene.headline}</p>
-                            <span>字幕 {scene.caption_indexes?.join(', ') || '-'}</span>
+                            <Input
+                              value={scene.headline || ''}
+                              onChange={event => updateStoryboardScene(scene.index, 'headline', event.target.value)}
+                              disabled={storyboardSaving || videoBusy}
+                              placeholder="分镜标题"
+                            />
+                            <Input
+                              value={(scene.caption_indexes || []).join(', ')}
+                              onChange={event => updateStoryboardSceneIndexes(scene.index, event.target.value)}
+                              disabled={storyboardSaving || videoBusy}
+                              placeholder="字幕索引，例如 1, 2"
+                            />
+                            <select
+                              value={scene.visual_type || 'text_card'}
+                              onChange={event => updateStoryboardScene(scene.index, 'visual_type', event.target.value)}
+                              disabled={storyboardSaving || videoBusy}
+                            >
+                              <option value="text_card">text_card</option>
+                              <option value="quote_card">quote_card</option>
+                              <option value="step_card">step_card</option>
+                              <option value="contrast_card">contrast_card</option>
+                            </select>
+                            <select
+                              value={scene.layout || 'center_focus'}
+                              onChange={event => updateStoryboardScene(scene.index, 'layout', event.target.value)}
+                              disabled={storyboardSaving || videoBusy}
+                            >
+                              <option value="center_focus">center_focus</option>
+                              <option value="split_emphasis">split_emphasis</option>
+                              <option value="stacked_steps">stacked_steps</option>
+                              <option value="compare_grid">compare_grid</option>
+                            </select>
+                            <textarea
+                              value={scene.background_prompt || ''}
+                              onChange={event => updateStoryboardScene(scene.index, 'background_prompt', event.target.value)}
+                              disabled={storyboardSaving || videoBusy}
+                              placeholder="原创背景提示"
+                            />
+                            <Input
+                              value={(scene.emphasis_words || []).join(', ')}
+                              onChange={event => updateStoryboardSceneEmphasis(scene.index, event.target.value)}
+                              disabled={storyboardSaving || videoBusy}
+                              placeholder="强调词，用英文逗号或中文逗号分隔"
+                            />
                           </div>
                         ))}
+                        <div className="videoProjectActions">
+                          <Button size="sm" variant="secondary" disabled={storyboardSaving || videoBusy} onClick={saveStoryboardDraft}>
+                            {storyboardSaving ? '保存中...' : '保存分镜修改'}
+                          </Button>
+                        </div>
                       </div>
                     ) : null}
                     {activeRun.video ? (
@@ -964,6 +1214,12 @@ export function AiWorkspace() {
                         ) : null}
                       </div>
                     ) : null}
+                    {getStoryboardDebugSections(activeRun).map(section => (
+                      <section className="agentResultSection" key={section.key}>
+                        <h4>{section.title}</h4>
+                        <pre>{section.text || '暂无内容'}</pre>
+                      </section>
+                    ))}
                   </div>
                 </section>
               ) : null}
