@@ -413,6 +413,50 @@ async function run() {
   assert.equal(storyboardResult.storyboard_parse.success, true);
   assert.equal(storyboardResult.storyboard_schema_validation.success, true);
 
+  const invalidStoryboardUpdate = await agentRuns.updateDouyinRunStoryboard(awemeId, generated.run_id, {
+    template: 'ai_storyboard_cards',
+    scenes: [
+      {
+        caption_indexes: [1],
+        headline: '重复一',
+        visual_type: 'text_card',
+        layout: 'center_focus',
+        background_prompt: '原创背景',
+        emphasis_words: [],
+      },
+      {
+        caption_indexes: [1],
+        headline: '重复二',
+        visual_type: 'text_card',
+        layout: 'center_focus',
+        background_prompt: '原创背景',
+        emphasis_words: [],
+      },
+    ],
+  }, { rootDir });
+  assert.equal(invalidStoryboardUpdate.success, false);
+  assert.match(invalidStoryboardUpdate.message, /分镜校验失败/);
+  assert.ok(invalidStoryboardUpdate.storyboard_schema_validation.errors.some(item => item.includes('重复')));
+
+  const savedStoryboardUpdate = await agentRuns.updateDouyinRunStoryboard(awemeId, generated.run_id, {
+    template: 'ai_storyboard_cards',
+    scenes: [
+      {
+        caption_indexes: [1],
+        headline: '编辑后的标题',
+        visual_type: 'quote_card',
+        layout: 'split_emphasis',
+        background_prompt: '编辑后的原创背景',
+        emphasis_words: ['编辑'],
+        start: 999,
+      },
+    ],
+  }, { rootDir });
+  assert.equal(savedStoryboardUpdate.success, true);
+  assert.equal(savedStoryboardUpdate.storyboard.scenes[0].headline, '编辑后的标题');
+  assert.equal(savedStoryboardUpdate.storyboard.scenes[0].start, 0);
+  assert.equal(savedStoryboardUpdate.storyboard_schema_validation.success, true);
+
   const projectResult = await agentRuns.createDouyinRunHyperframesProject(awemeId, generated.run_id, {
     rootDir,
     renderOptions: {
@@ -796,6 +840,23 @@ async function run() {
     assert.strictEqual(storyboardResponse.statusCode, 200);
     assert.strictEqual(storyboardResponse.body.success, true);
     assert.strictEqual(storyboardResponse.body.storyboard.status, 'done');
+
+    const originalUpdateDouyinRunStoryboard = agentRuns.updateDouyinRunStoryboard;
+    agentRuns.updateDouyinRunStoryboard = async () => ({
+      success: true,
+      aweme_id: awemeId,
+      run_id: 'ok-run',
+      message: '分镜已保存，请重新生成视频工程。',
+      storyboard: { status: 'done', scenes: [{ index: 1, caption_indexes: [1], start: 0, end: 1 }] },
+      storyboard_schema_validation: { success: true, errors: [] },
+    });
+    const saveStoryboardResponse = await requestJson(server, 'PUT', `/api/agents/douyin/${awemeId}/runs/ok-run/storyboard`, {
+      storyboard: { scenes: [{ caption_indexes: [1], headline: '保存' }] },
+    });
+    agentRuns.updateDouyinRunStoryboard = originalUpdateDouyinRunStoryboard;
+    assert.strictEqual(saveStoryboardResponse.statusCode, 200);
+    assert.strictEqual(saveStoryboardResponse.body.success, true);
+    assert.match(saveStoryboardResponse.body.message, /分镜已保存/);
 
     const projectResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes/project`, {});
     assert.strictEqual(projectResponse.statusCode, 200);

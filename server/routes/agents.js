@@ -133,6 +133,24 @@ router.post('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
   }
 });
 
+router.put('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
+  try {
+    const result = await agentRuns.updateDouyinRunStoryboard(
+      req.params.aweme_id,
+      req.params.run_id,
+      req.body?.storyboard || {},
+    );
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '保存 AI 分镜接口异常，请稍后重试。',
+    });
+  }
+});
+
 router.post('/douyin/:aweme_id/runs/:run_id/hyperframes/project', async (req, res) => {
   try {
     const result = await agentRuns.createDouyinRunHyperframesProject(req.params.aweme_id, req.params.run_id, {

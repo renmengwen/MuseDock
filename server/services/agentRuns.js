@@ -8,6 +8,7 @@ const agentTemplates = require('./agentTemplates');
 const agentTemplateOverrides = require('./agentTemplateOverrides');
 const ttsTimeline = require('./ttsTimeline');
 const defaultStoryboardAgent = require('./storyboardAgent');
+const storyboardSchema = require('./storyboardSchema');
 const defaultHyperframesProject = require('./hyperframesProject');
 const defaultHyperframesRenderer = require('./hyperframesRenderer');
 
@@ -761,6 +762,69 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
   return { success: true, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
 }
 
+async function updateDouyinRunStoryboard(awemeId, runId, storyboard, options = {}) {
+  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      aweme_id: String(awemeId || ''),
+      run_id: String(runId || ''),
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  const run = await readJsonIfExists(runPath);
+  if (!run) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '未找到该 Agent 运行记录',
+    };
+  }
+
+  const captions = Array.isArray(run?.tts?.captions) ? run.tts.captions : [];
+  if (!captions.length) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '请先完成 TTS 合成并生成字幕时间轴。',
+    };
+  }
+
+  const validation = storyboardSchema.validateStoryboardEditableInput({ storyboard, captions });
+  if (!validation.success) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '分镜校验失败，请修正后再保存。',
+      storyboard_schema_validation: validation,
+    };
+  }
+
+  const normalized = storyboardSchema.normalizeStoryboard({ storyboard, captions });
+  const updatedRun = {
+    ...run,
+    storyboard: normalized,
+    storyboard_schema_validation: { success: true, errors: [] },
+    video: run.video?.status === 'rendering' ? run.video : null,
+    updated_at: new Date().toISOString(),
+  };
+  await writeJson(runPath, updatedRun);
+
+  return {
+    success: true,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message: '分镜已保存，请重新生成视频工程。',
+    storyboard: normalized,
+    storyboard_schema_validation: updatedRun.storyboard_schema_validation,
+  };
+}
+
 async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
   if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
   if (!isSafeRunId(runId)) {
@@ -1033,6 +1097,7 @@ module.exports = {
   synthesizeDouyinRunTts,
   resolveDouyinRunTtsFile,
   createDouyinRunStoryboard,
+  updateDouyinRunStoryboard,
   createDouyinRunHyperframesProject,
   renderDouyinRunHyperframesVideo,
   resolveDouyinRunHyperframesFile,

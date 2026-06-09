@@ -59,6 +59,53 @@ function run() {
   assert.deepStrictEqual(fallback.scenes[0].caption_indexes, [1]);
   assert.deepStrictEqual(fallback.scenes[1].caption_indexes, [2]);
   assert.deepStrictEqual(fallback.scenes[2].caption_indexes, [3]);
+
+  const validation = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '第一屏',
+          visual_type: 'text_card',
+          layout: 'center_focus',
+          background_prompt: '原创背景',
+          emphasis_words: ['重点'],
+        },
+        {
+          caption_indexes: [1],
+          headline: '重复',
+          visual_type: 'text_card',
+          layout: 'center_focus',
+          background_prompt: '原创背景',
+          emphasis_words: [],
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(validation.success, false);
+  assert.ok(validation.errors.some(item => item.includes('重复')));
+
+  const valid = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '第一屏',
+          visual_type: 'text_card',
+          layout: 'center_focus',
+          background_prompt: '原创背景',
+          emphasis_words: ['重点'],
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(valid.success, true);
 }
 
 try {

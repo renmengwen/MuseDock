@@ -111,9 +111,42 @@ function normalizeStoryboard({ storyboard = {}, captions = [] } = {}) {
   };
 }
 
+function validateStoryboardEditableInput({ storyboard = {}, captions = [] } = {}) {
+  const normalizedCaptions = normalizeCaptions(captions);
+  const captionIndexes = new Set(normalizedCaptions.map(item => item.index));
+  const used = new Set();
+  const errors = [];
+  const scenes = asArray(storyboard.scenes);
+
+  if (!scenes.length) errors.push('分镜不能为空。');
+
+  scenes.forEach((scene, sceneIndex) => {
+    const label = `分镜 ${sceneIndex + 1}`;
+    const indexes = asArray(scene.caption_indexes).map(item => Number(item)).filter(Number.isFinite);
+
+    if (!indexes.length) errors.push(`${label} 必须至少引用一条字幕。`);
+    indexes.forEach(index => {
+      if (!captionIndexes.has(index)) errors.push(`${label} 引用了不存在的字幕 ${index}。`);
+      if (used.has(index)) errors.push(`${label} 重复使用了字幕 ${index}。`);
+      used.add(index);
+    });
+
+    if (!sanitizeText(scene.headline)) errors.push(`${label} 标题不能为空。`);
+    if (!sanitizeText(scene.visual_type)) errors.push(`${label} 画面类型不能为空。`);
+    if (!sanitizeText(scene.layout)) errors.push(`${label} 布局不能为空。`);
+    if (!sanitizeText(scene.background_prompt)) errors.push(`${label} 背景提示不能为空。`);
+  });
+
+  return {
+    success: errors.length === 0,
+    errors,
+  };
+}
+
 module.exports = {
   DEFAULT_TEMPLATE,
   DEFAULT_STYLE,
   normalizeStoryboard,
+  validateStoryboardEditableInput,
   makeFallbackScenes,
 };

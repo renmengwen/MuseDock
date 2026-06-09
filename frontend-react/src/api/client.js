@@ -164,6 +164,13 @@ export const api = {
       body: JSON.stringify({ storyboardOptions, storyboardConfigOverride }),
     });
   },
+  saveDouyinRunStoryboard(awemeId, runId, storyboard = {}) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/storyboard`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storyboard }),
+    });
+  },
   createDouyinRunHyperframesProject(awemeId, runId, renderOptions = {}) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes/project`, {
       method: 'POST',
