@@ -142,6 +142,53 @@ function buildStoryboardMessages({
   ];
 }
 
+function getEditableStoryboardTemplate() {
+  const defaultMessages = buildStoryboardMessages({
+    rewriteScript: '{{rewriteScript}}',
+    captions: [],
+    storyboardOptions: {},
+    frameDocText: '{{frameProfileBrief}}',
+  });
+
+  return {
+    id: 'storyboard_agent',
+    label: 'AI 分镜 Agent',
+    description: '根据改写脚本、字幕索引和 Frame Profile 生成原创短视频分镜。',
+    systemPrompt: defaultMessages[0].content,
+    userPromptTemplate: [
+      '任务：根据改写脚本和字幕索引生成原创分镜。',
+      '',
+      '改写脚本：',
+      '{{rewriteScript}}',
+      '',
+      '字幕索引：',
+      '{{captionIndexesJson}}',
+      '',
+      '[AI_STORYBOARD_MAX_SCENES=12]',
+      '[AI_STORYBOARD_BACKEND_FILL=true]',
+      '',
+      '要求：',
+      '- caption_indexes 必须引用现有字幕 index。',
+      '- 每个字幕 index 最多被一个 scene 使用。',
+      '- 最多生成 12 个关键分镜，优先覆盖开头、转折、核心观点和结尾。',
+      '- 未覆盖字幕会由后端自动补齐为默认分镜，不需要为每条字幕都生成 scene。',
+      '- 每个 scene 最多覆盖 2 条连续字幕。',
+      '- visual_type 优先使用 text_card、quote_card、step_card、contrast_card。',
+      '- background_prompt 必须描述原创抽象/图文背景，不得描述原视频画面。',
+      '',
+      '{{frameProfileBrief}}',
+      '',
+      '{{storyboardOptionsText}}',
+    ].join('\n'),
+    useFrameProfile: true,
+    modelOptions: {
+      temperature: 0.35,
+      stream: true,
+      maxRetries: 1,
+    },
+  };
+}
+
 function parseJson(text) {
   try {
     return { parsed: true, value: JSON.parse(text) };
@@ -218,6 +265,7 @@ async function createStoryboard(options = {}) {
 module.exports = {
   buildStoryboardMessages,
   createStoryboard,
+  getEditableStoryboardTemplate,
   normalizeStoryboardOptions,
   formatStoryboardOptionsForPrompt,
   getFrameProfileBrief,
