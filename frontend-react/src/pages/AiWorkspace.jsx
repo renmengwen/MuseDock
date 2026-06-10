@@ -697,7 +697,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
       <div className="workspaceIntro">
         <div>
           <h2>AI 任务流工作台</h2>
-          <p>输入抖音视频 aweme_id，读取素材状态和历史运行记录，然后执行爆款拆解与改写 Agent。</p>
+          <p>输入抖音视频 aweme_id，读取素材状态和历史运行记录，然后按顺序生成导演分镜、分段配音、视觉分镜、视频工程和 MP4。</p>
         </div>
         {selectedAwemeId ? <code>{selectedAwemeId}</code> : null}
       </div>
@@ -1328,7 +1328,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
               ) : null}
             </>
           ) : (
-            <p className="mutedText">请选择历史运行，或先执行一次爆款拆解 Agent。</p>
+            <p className="mutedText">请选择历史运行，或先生成导演分镜创建新的成片流程记录。</p>
           )}
         </div>
       </section>
