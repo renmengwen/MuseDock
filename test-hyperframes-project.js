@@ -59,6 +59,30 @@ async function run() {
             { index: 2, start: 1.25, end: 3.75, text: '第二句。' },
           ],
         },
+        {
+          index: 3,
+          caption_indexes: [1],
+          start: 0,
+          end: 1.25,
+          duration: 1.25,
+          headline: '鑷姩鐢熸垚娴佺▼',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '鍘熷垱娴佺▼鑳屾櫙',
+          emphasis_words: ['闇€姹?', '椤甸潰'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [
+              { id: 'node-1', type: 'node', text: '闇€姹?' },
+              { id: 'node-2', type: 'node', text: '椤甸潰' },
+              { id: 'line-1', type: 'connector', from: 'node-1', to: 'node-2' },
+            ],
+            motion: [{ target: 'node', effect: 'stagger_reveal', delay: 0.1 }],
+          },
+          captions: [
+            { index: 1, start: 0, end: 1.25, text: '绗竴鍙ャ€?' },
+          ],
+        },
       ],
     },
   };
@@ -105,6 +129,12 @@ async function run() {
   assert.match(html, /data-caption-index="2"/);
   assert.match(html, /#scene-1 \.caption-line:nth-child\(1\)/);
   assert.match(html, /#scene-1 \.caption-line:nth-child\(2\)/);
+  assert.match(html, /scene-content--workflow/);
+  assert.match(html, /visual-node/);
+  assert.match(html, /visual-connector/);
+  assert.match(html, /prepared_visual_scene/);
+  assert.match(html, /tl\.set\("#scene-1"/);
+  assert.match(html, /autoAlpha: 1/);
 
   const customProjectDir = path.join(root, 'custom-project');
   const customResult = await hyperframesProject.createOriginalCaptionProject({
@@ -134,7 +164,7 @@ async function run() {
   assert.match(indexHtml, /data-frame-profile="tech_neon"/);
   assert.match(indexHtml, /class="frame-bg-layer neon-grid"/);
   assert.match(indexHtml, /class="frame-bg-layer scanline"/);
-  assert.match(indexHtml, /class="scene-content scene-content--text-card"/);
+  assert.match(indexHtml, /scene-content--workflow|scene-content--quote-burst|scene-content--text-card/);
   assert.match(indexHtml, /class="scene-content scene-content--contrast-card"/);
   assert.match(indexHtml, /class="transition-layer"/);
   assert.match(indexHtml, /data-transition-style="glitch"/);
@@ -143,6 +173,7 @@ async function run() {
   assert.doesNotMatch(indexHtml, /class="scene-number"/);
 
   const projectJson = JSON.parse(fs.readFileSync(path.join(customProjectDir, 'project.json'), 'utf-8'));
+  assert.equal(projectJson.visual_dsl_version, 1);
   assert.equal(projectJson.render_options.quality, 'high');
   assert.equal(projectJson.render_options.motionLevel, 'low');
   assert.equal(projectJson.frame_options.frameStyle, 'tech_neon');
