@@ -178,6 +178,45 @@ async function run() {
   assert.strictEqual(streamed.text, '{"summary":"stream ok"}');
   assert.strictEqual(streamRequestBody.stream, true);
 
+  const fallbackBodies = [];
+  const streamFallback = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'stream fallback' }],
+    configPath,
+    stream: true,
+    maxRetries: 1,
+    retryDelayMs: 1,
+    fallbackToNonStreamOnGatewayTimeout: true,
+    fetchImpl: async (url, options) => {
+      assert.strictEqual(url, 'https://api.example.com/v1/chat/completions');
+      const requestBody = JSON.parse(options.body);
+      fallbackBodies.push(requestBody);
+      if (fallbackBodies.length <= 2) {
+        return {
+          ok: false,
+          status: 504,
+          json: async () => ({}),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: 'non-stream fallback ok' } }],
+        }),
+      };
+    },
+  });
+  assert.strictEqual(streamFallback.success, true);
+  assert.strictEqual(streamFallback.text, 'non-stream fallback ok');
+  assert.strictEqual(fallbackBodies.length, 3);
+  assert.strictEqual(fallbackBodies[0].stream, true);
+  assert.strictEqual(fallbackBodies[1].stream, true);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(fallbackBodies[2], 'stream'), false);
+  assert.deepStrictEqual(streamFallback.fallback, {
+    from_stream: true,
+    reason: 'gateway_timeout',
+  });
+
   const networkFailed = await aiTextModel.callTextModel({
     messages: [{ role: 'user', content: 'network fail' }],
     configPath,

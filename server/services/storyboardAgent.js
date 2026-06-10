@@ -240,7 +240,7 @@ function getEditableStoryboardTemplate() {
     modelOptions: {
       temperature: 0.35,
       stream: true,
-      maxRetries: 1,
+      maxRetries: 3,
     },
   };
 }
@@ -316,6 +316,7 @@ async function createStoryboard(options = {}) {
       maxRetries: editableConfig.modelOptions?.maxRetries,
       retryDelayMs: options.retryDelayMs,
       stream: editableConfig.modelOptions?.stream !== false,
+      fallbackToNonStreamOnGatewayTimeout: editableConfig.modelOptions?.stream !== false,
     });
   } catch (error) {
     modelResult = { success: false, message: error.message || 'AI 分镜模型调用失败。' };

@@ -84,6 +84,7 @@ async function run() {
   assert.ok(editableStoryboard.userPromptTemplate.includes('{{rewriteScript}}'));
   assert.equal(editableStoryboard.useFrameProfile, true);
   assert.equal(editableStoryboard.modelOptions.temperature, 0.35);
+  assert.equal(editableStoryboard.modelOptions.maxRetries, 3);
 
   const customResult = await storyboardAgent.createStoryboard({
     rewriteScript: '第一句。第二句。',
@@ -146,6 +147,8 @@ async function run() {
       callTextModel: async options => {
         calls.push(options);
         assert.equal(options.stream, true);
+        assert.equal(options.maxRetries, 3);
+        assert.equal(options.fallbackToNonStreamOnGatewayTimeout, true);
         return {
           success: true,
           model: { provider: 'OpenAI', model_id: 'gpt-test' },

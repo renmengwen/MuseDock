@@ -157,6 +157,26 @@ function shouldRetryStatus(status) {
   return [502, 503, 504].includes(Number(status));
 }
 
+function buildChatCompletionsBody({ modelId, messages, temperature, stream }) {
+  return JSON.stringify({
+    model: modelId,
+    messages,
+    temperature,
+    ...(stream ? { stream: true } : {}),
+  });
+}
+
+async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl }) {
+  return fetchImpl(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: buildChatCompletionsBody({ modelId, messages, temperature, stream }),
+  });
+}
+
 async function callTextModel(options = {}) {
   const {
     messages = [],
@@ -167,6 +187,7 @@ async function callTextModel(options = {}) {
     maxRetries = 1,
     retryDelayMs = 1200,
     stream = false,
+    fallbackToNonStreamOnGatewayTimeout = false,
   } = options;
 
   const config = textConfig || await aiModelConfig.getRuntimeConfig('text', { configPath });
@@ -197,18 +218,14 @@ async function callTextModel(options = {}) {
   const retryLimit = Math.max(0, Number(maxRetries) || 0);
   while (attempt <= retryLimit) {
     try {
-      response = await fetchImpl(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: modelId,
-          messages,
-          temperature,
-          ...(stream ? { stream: true } : {}),
-        }),
+      response = await postChatCompletions({
+        baseUrl,
+        apiKey,
+        modelId,
+        messages,
+        temperature,
+        stream,
+        fetchImpl,
       });
     } catch (error) {
       const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
@@ -223,6 +240,53 @@ async function callTextModel(options = {}) {
     if (!shouldRetryStatus(response.status) || attempt >= retryLimit) break;
     await wait(retryDelayMs * (attempt + 1));
     attempt += 1;
+  }
+
+  const canFallbackToNonStream = stream && fallbackToNonStreamOnGatewayTimeout && shouldRetryStatus(response?.status);
+  if (canFallbackToNonStream) {
+    await wait(retryDelayMs * (attempt + 1));
+    try {
+      response = await postChatCompletions({
+        baseUrl,
+        apiKey,
+        modelId,
+        messages,
+        temperature,
+        stream: false,
+        fetchImpl,
+      });
+    } catch (error) {
+      const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
+      return {
+        success: false,
+        configured: true,
+        message: `文本模型调用失败：${detail}`,
+        model: toModelInfo(provider, modelId),
+        fallback: {
+          from_stream: true,
+          reason: 'gateway_timeout',
+        },
+      };
+    }
+    if (response.ok) {
+      const parsedResponse = await readJsonResponse(response, apiKey);
+      const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
+      const text = rawResponse && rawResponse.choices && rawResponse.choices[0]
+        && rawResponse.choices[0].message && rawResponse.choices[0].message.content;
+      if (typeof text === 'string') {
+        return {
+          success: true,
+          configured: true,
+          text,
+          model: toModelInfo(provider, modelId),
+          raw_response: rawResponse,
+          fallback: {
+            from_stream: true,
+            reason: 'gateway_timeout',
+          },
+        };
+      }
+    }
   }
 
   if (!response.ok) {
