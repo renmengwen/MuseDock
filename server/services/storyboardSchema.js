@@ -8,6 +8,7 @@ const DEFAULT_STYLE = {
 const VISUAL_TYPE_ALLOWED = ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst', 'text_card', 'quote_card', 'step_card', 'contrast_card'];
 const VISUAL_OBJECT_ALLOWED = ['node', 'connector', 'code', 'terminal', 'panel', 'button', 'field', 'metric', 'column', 'branch', 'milestone', 'badge', 'keyword', 'center', 'step'];
 const VISUAL_MOTION_ALLOWED = ['stagger_reveal', 'draw_line', 'type_in', 'scan', 'pulse', 'slide_in', 'zoom_focus', 'highlight', 'float'];
+const VISUAL_BEAT_EFFECT_ALLOWED = ['slide_up_reveal', 'draw_line', 'type_in', 'scan', 'pulse', 'slide_in', 'zoom_focus', 'highlight', 'float', 'glow_focus', 'check_on', 'progress_fill', 'caption_highlight'];
 const VISUAL_DSL_TYPES = ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst'];
 
 function roundTime(value) {
@@ -95,6 +96,8 @@ function normalizeVisualObject(value) {
   const text = sanitizeShortText(source.text, '', 18);
   const role = sanitizeShortText(source.role, '', 32);
   const style = sanitizeShortText(source.style, '', 48);
+  const stage = sanitizeShortText(source.stage, '', 24);
+  const accent = sanitizeShortText(source.accent, '', 24);
   const from = sanitizeShortText(source.from, '', 48);
   const to = sanitizeShortText(source.to, '', 48);
   const code = sanitizeShortText(source.code, '', 160);
@@ -103,11 +106,39 @@ function normalizeVisualObject(value) {
   if (text) object.text = text;
   if (role) object.role = role;
   if (style) object.style = style;
+  if (stage) object.stage = stage;
+  if (accent) object.accent = accent;
   if (from) object.from = from;
   if (to) object.to = to;
   if (code) object.code = code;
 
   return object;
+}
+
+function normalizeVisualBeat(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const effect = pickAllowed(source.effect, VISUAL_BEAT_EFFECT_ALLOWED, null);
+  if (!effect) return null;
+
+  return {
+    at: clampNumber(source.at, 0, 0, 8),
+    duration: clampNumber(source.duration, 0.32, 0.08, 3),
+    target: sanitizeShortText(source.target, '', 48),
+    effect,
+    emphasis: sanitizeShortText(source.emphasis, '', 24),
+  };
+}
+
+function normalizeCaptionSync(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const captionIndex = Number(source.caption_index);
+  if (!Number.isFinite(captionIndex)) return null;
+  const effect = pickAllowed(source.effect, VISUAL_BEAT_EFFECT_ALLOWED, 'caption_highlight');
+  return {
+    caption_index: captionIndex,
+    target: sanitizeShortText(source.target, '', 48),
+    effect,
+  };
 }
 
 function normalizeVisualMotion(value) {
@@ -142,6 +173,11 @@ function makeFallbackVisualScene(scene = {}) {
       { target: 'keyword', effect: 'stagger_reveal', delay: 0 },
       { target: 'focus', effect: 'pulse', delay: 0.2 },
     ],
+    beats: [
+      { at: 0.12, duration: 0.36, target: 'focus', effect: 'zoom_focus', emphasis: 'primary' },
+      { at: 0.42, duration: 0.32, target: 'keyword', effect: 'slide_up_reveal', emphasis: 'supporting' },
+    ],
+    caption_sync: [],
     focus: {
       text: headline,
       style: 'accent_pulse',
@@ -156,16 +192,21 @@ function normalizeVisualScene(scene = {}) {
     : {};
   const objects = asArray(source.objects).map(normalizeVisualObject).filter(Boolean).slice(0, 8);
   const motion = asArray(source.motion).map(normalizeVisualMotion).filter(Boolean).slice(0, 8);
+  const beats = asArray(source.beats).map(normalizeVisualBeat).filter(Boolean).slice(0, 12);
+  const captionSync = asArray(source.caption_sync).map(normalizeCaptionSync).filter(Boolean).slice(0, 12);
   const focusSource = source.focus && typeof source.focus === 'object' && !Array.isArray(source.focus)
     ? source.focus
     : {};
   const safeObjects = objects.length ? objects : fallback.objects;
   const safeMotion = motion.length ? motion : fallback.motion;
+  const safeBeats = beats.length ? beats : fallback.beats;
 
   return {
     composition: sanitizeShortText(source.composition, fallback.composition, 48),
     objects: safeObjects,
     motion: safeMotion,
+    beats: safeBeats,
+    caption_sync: captionSync.length ? captionSync : fallback.caption_sync,
     focus: {
       text: sanitizeShortText(focusSource.text, fallback.focus.text, 18),
       style: sanitizeShortText(focusSource.style, fallback.focus.style, 48),
@@ -306,6 +347,13 @@ function validateRawVisualDsl(scene, label, errors) {
   })) {
     errors.push(`${label} visual_scene.motion 包含不受支持的动效。`);
   }
+
+  if (Array.isArray(visualScene.beats) && visualScene.beats.some(item => {
+    const effect = item && typeof item === 'object' && !Array.isArray(item) ? item.effect : null;
+    return !VISUAL_BEAT_EFFECT_ALLOWED.includes(effect);
+  })) {
+    errors.push(`${label} visual_scene.beats 包含不受支持的编排动效。`);
+  }
 }
 
 function validateStoryboardEditableInput({ storyboard = {}, captions = [] } = {}) {
@@ -347,10 +395,13 @@ module.exports = {
   VISUAL_TYPE_ALLOWED,
   VISUAL_OBJECT_ALLOWED,
   VISUAL_MOTION_ALLOWED,
+  VISUAL_BEAT_EFFECT_ALLOWED,
   pickAllowed,
   sanitizeShortText,
   normalizeVisualObject,
   normalizeVisualMotion,
+  normalizeVisualBeat,
+  normalizeCaptionSync,
   makeFallbackVisualScene,
   normalizeVisualScene,
   normalizeStoryboard,

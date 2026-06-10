@@ -7,7 +7,7 @@ const FRAME_DEFAULTS = {
 };
 
 const FRAME_ALLOWED = {
-  frameStyle: ['tech_neon'],
+  frameStyle: ['tech_neon', 'creative_brutalist'],
   energy: ['low', 'medium', 'high'],
   density: ['clean', 'balanced', 'rich'],
   transitionStyle: ['auto', 'wipe', 'glitch', 'zoom'],
@@ -35,6 +35,28 @@ const TECH_NEON_PROFILE = {
   transitions: ['glitch-wipe', 'zoom-burst', 'soft-wipe'],
 };
 
+const CREATIVE_BRUTALIST_PROFILE = {
+  id: 'creative_brutalist',
+  name: 'Creative Brutalist',
+  stage: {
+    aspectRatio: '9:16',
+    compositionId: 'ai-storyboard-cards',
+  },
+  cssVars: {
+    '--frame-bg': '#EFE9D9',
+    '--frame-panel': '#E4DCC4',
+    '--frame-ink': '#0F0F0F',
+    '--frame-accent': '#1F8A4C',
+    '--frame-hot': '#F06CA8',
+    '--frame-gold': '#F5C518',
+    '--frame-text': '#0F0F0F',
+    '--frame-muted': 'rgba(15, 15, 15, .68)',
+  },
+  backgroundLayers: ['paper-grain', 'ink-grid'],
+  sceneRenderers: TECH_NEON_PROFILE.sceneRenderers,
+  transitions: ['hard-wipe', 'stamp-pop', 'soft-wipe'],
+};
+
 function pickAllowed(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
 }
@@ -53,6 +75,7 @@ function normalizeFrameOptions(value = {}) {
 function getFrameProfile(id = FRAME_DEFAULTS.frameStyle) {
   const value = typeof id === 'string' ? id.trim() : '';
   if (value === TECH_NEON_PROFILE.id) return TECH_NEON_PROFILE;
+  if (value === CREATIVE_BRUTALIST_PROFILE.id) return CREATIVE_BRUTALIST_PROFILE;
   return TECH_NEON_PROFILE;
 }
 

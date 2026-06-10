@@ -47,6 +47,82 @@ function sceneComposition(scene = {}) {
   return escapeAttribute(getPreparedScene(scene).composition || 'freeform_layers');
 }
 
+function rawComposition(scene = {}) {
+  return String(getPreparedScene(scene).composition || 'freeform_layers').trim();
+}
+
+function compositionClassName(value = '') {
+  return String(value || 'freeform_layers').replace(/_/g, '-').replace(/[^a-z0-9-]/gi, '').toLowerCase();
+}
+
+function renderFormulaBuildScene(scene = {}) {
+  const safeScene = toSafeScene(scene);
+  const objects = getObjects(safeScene).filter(object => ['keyword', 'node', 'step', 'metric'].includes(object.type));
+  const tokens = objects.length ? objects : [
+    { id: 'formula-left', type: 'keyword', text: safeScene.headline || 'HTML' },
+    { id: 'formula-plus', type: 'keyword', text: '+' },
+    { id: 'formula-right', type: 'keyword', text: 'CSS' },
+    { id: 'formula-eq', type: 'keyword', text: '=' },
+    { id: 'formula-result', type: 'keyword', text: 'Video' },
+  ];
+  return [
+    '<div class="scene-content scene-content--formula-build" data-visual-type="workflow" data-composition="formula_build">',
+    `  <h1>${escapeHtml(safeScene.headline)}</h1>`,
+    '  <div class="visual-formula">',
+    tokens.map((token, index) => (
+      `<div class="visual-formula-token" data-visual-object="${objectId(token, index)}" data-visual-role="${escapeAttribute(token.role || '')}" data-visual-accent="${escapeAttribute(token.accent || '')}">${objectText(token)}</div>`
+    )).join(''),
+    '  </div>',
+    '</div>',
+  ].join('\n');
+}
+
+function renderChecklistPipelineScene(scene = {}) {
+  const safeScene = toSafeScene(scene);
+  const steps = getObjects(safeScene).filter(object => ['step', 'node', 'keyword', 'milestone'].includes(object.type));
+  const renderSteps = steps.length ? steps : [
+    { id: 'check-1', type: 'step', text: 'lint' },
+    { id: 'check-2', type: 'step', text: 'validate' },
+    { id: 'check-3', type: 'step', text: 'render' },
+  ];
+  return [
+    '<div class="scene-content scene-content--checklist-pipeline" data-visual-type="workflow" data-composition="checklist_pipeline">',
+    `  <h1>${escapeHtml(safeScene.headline)}</h1>`,
+    '  <div class="visual-checklist">',
+    renderSteps.map((step, index) => (
+      `<div class="visual-check-item" data-visual-object="${objectId(step, index)}"><span>${String(index + 1).padStart(2, '0')}</span><strong>${objectText(step)}</strong><i></i></div>`
+    )).join(''),
+    '  </div>',
+    '</div>',
+  ].join('\n');
+}
+
+function renderTimelineSyncScene(scene = {}) {
+  const safeScene = toSafeScene(scene);
+  const milestones = getObjects(safeScene).filter(object => ['milestone', 'node', 'keyword', 'step'].includes(object.type));
+  const renderMilestones = milestones.length ? milestones : [
+    { id: 'sync-1', type: 'milestone', text: safeScene.headline || 'caption' },
+  ];
+  return [
+    '<div class="scene-content scene-content--timeline-sync" data-visual-type="timeline" data-composition="timeline_sync">',
+    `  <h1>${escapeHtml(safeScene.headline)}</h1>`,
+    '  <div class="visual-sync-track" data-visual-object="sync-progress"><i></i></div>',
+    `  <div class="visual-timeline">${renderMilestones.map((item, index) => `<div class="visual-milestone" data-visual-object="${objectId(item, index)}"><span>${index + 1}</span><strong>${objectText(item)}</strong></div>`).join('')}</div>`,
+    '</div>',
+  ].join('\n');
+}
+
+function renderCodeWalkthroughScene(scene = {}) {
+  const safeScene = toSafeScene(scene);
+  return renderCodePanelScene({
+    ...safeScene,
+    prepared_visual_scene: {
+      ...getPreparedScene(safeScene),
+      composition: 'code_panel_base',
+    },
+  }).replace('scene-content--code-panel" data-visual-type="code_panel" data-composition="code_panel_base"', 'scene-content--code-walkthrough" data-visual-type="code_panel" data-composition="code_walkthrough"');
+}
+
 function renderDslLayerScene(scene = {}) {
   const safeScene = toSafeScene(scene);
   const prepared = getPreparedScene(safeScene);
@@ -69,6 +145,11 @@ function renderDslLayerScene(scene = {}) {
 
 function renderWorkflowScene(scene = {}) {
   const safeScene = toSafeScene(scene);
+  const composition = rawComposition(safeScene);
+  if (composition === 'formula_build') return renderFormulaBuildScene(safeScene);
+  if (composition === 'checklist_pipeline') return renderChecklistPipelineScene(safeScene);
+  if (composition === 'timeline_sync') return renderTimelineSyncScene(safeScene);
+  if (composition === 'code_walkthrough') return renderCodeWalkthroughScene(safeScene);
   const objects = getObjects(safeScene);
   const nodes = objects.filter(object => ['node', 'step', 'keyword', 'metric'].includes(object.type));
   const connectors = objects.filter(object => object.type === 'connector');
@@ -77,7 +158,7 @@ function renderWorkflowScene(scene = {}) {
   ];
 
   return [
-    '<div class="scene-content scene-content--workflow" data-visual-type="workflow">',
+    `<div class="scene-content scene-content--workflow scene-content--${compositionClassName(composition)}" data-visual-type="workflow" data-composition="${sceneComposition(safeScene)}">`,
     `  <h1>${escapeHtml(safeScene.headline)}</h1>`,
     '  <div class="visual-flow">',
     renderNodes.map((node, index) => (
@@ -93,13 +174,14 @@ function renderWorkflowScene(scene = {}) {
 
 function renderCodePanelScene(scene = {}) {
   const safeScene = toSafeScene(scene);
+  if (rawComposition(safeScene) === 'code_walkthrough') return renderCodeWalkthroughScene(safeScene);
   const objects = getObjects(safeScene);
   const code = objects.find(object => object.type === 'code') || {};
   const terminal = objects.find(object => object.type === 'terminal') || { id: 'terminal-1', text: '运行中...' };
   const codeText = code.code || code.text || 'const idea = await ai.build();';
 
   return [
-    '<div class="scene-content scene-content--code-panel" data-visual-type="code_panel">',
+    `<div class="scene-content scene-content--code-panel" data-visual-type="code_panel" data-composition="${sceneComposition(safeScene)}">`,
     `  <h1>${escapeHtml(safeScene.headline)}</h1>`,
     '  <div class="visual-code-window" data-visual-object="code-window">',
     '    <div class="visual-window-dots"><i></i><i></i><i></i></div>',
@@ -163,13 +245,14 @@ function renderConceptMapScene(scene = {}) {
 
 function renderTimelineScene(scene = {}) {
   const safeScene = toSafeScene(scene);
+  if (rawComposition(safeScene) === 'timeline_sync') return renderTimelineSyncScene(safeScene);
   const milestones = getObjects(safeScene).filter(object => ['milestone', 'node', 'keyword', 'step'].includes(object.type));
   const renderMilestones = milestones.length ? milestones : [
     { id: 'milestone-1', text: safeScene.headline || '关键节点' },
   ];
 
   return [
-    '<div class="scene-content scene-content--timeline" data-visual-type="timeline">',
+    `<div class="scene-content scene-content--timeline" data-visual-type="timeline" data-composition="${sceneComposition(safeScene)}">`,
     `  <h1>${escapeHtml(safeScene.headline)}</h1>`,
     `  <div class="visual-timeline">${renderMilestones.map((item, index) => `<div class="visual-milestone" data-visual-object="${objectId(item, index)}"><span>${index + 1}</span><strong>${objectText(item)}</strong></div>`).join('')}</div>`,
     '</div>',
@@ -213,6 +296,10 @@ module.exports = {
   renderSplitCompareScene,
   renderConceptMapScene,
   renderTimelineScene,
+  renderFormulaBuildScene,
+  renderChecklistPipelineScene,
+  renderTimelineSyncScene,
+  renderCodeWalkthroughScene,
   renderQuoteBurstScene,
   renderDslLayerScene,
 };

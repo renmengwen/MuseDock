@@ -36,6 +36,26 @@ function buildSceneAnimation(scene, index, motionScale = 1, frameOptions = {}) {
     const cardStart = start + Math.min(sceneDuration - 0.18, enterDuration + ((sceneDuration - enterDuration - exitDuration) * (wordIndex / Math.max(words.length, 1))));
     lines.push(`    tl.fromTo("${sceneId} .emphasis span:nth-child(${wordIndex + 1})", { x: 34, y: 14, scale: 0.82, autoAlpha: 0 }, { x: 0, y: 0, scale: 1, autoAlpha: 1, duration: 0.28, ease: "back.out(1.7)" }, ${cardStart.toFixed(3)});`);
   });
+  const beats = Array.isArray(scene.prepared_visual_scene?.beats) ? scene.prepared_visual_scene.beats : [];
+  beats.forEach(beat => {
+    const target = String(beat?.target || '').replace(/['"\\[\]]/g, '').trim();
+    if (!target) return;
+    const selector = `${sceneId} [data-visual-object='${target}']`;
+    const beatStart = start + Math.min(sceneDuration - 0.08, Math.max(0, Number(beat.at || 0)));
+    const beatDuration = Math.max(0.08, Number(beat.duration || 0.28) * motionScale);
+    const effect = String(beat.effect || '');
+    if (effect === 'draw_line' || effect === 'progress_fill') {
+      lines.push(`    tl.fromTo("${selector} i, ${selector}.visual-connector, ${selector}", { scaleX: 0, autoAlpha: 0 }, { scaleX: 1, autoAlpha: 1, duration: ${beatDuration.toFixed(3)}, ease: "power2.out" }, ${beatStart.toFixed(3)});`);
+    } else if (effect === 'type_in' || effect === 'scan') {
+      lines.push(`    tl.fromTo("${selector}", { clipPath: "inset(0 100% 0 0)", autoAlpha: 1 }, { clipPath: "inset(0 0% 0 0)", duration: ${beatDuration.toFixed(3)}, ease: "power1.out" }, ${beatStart.toFixed(3)});`);
+    } else if (effect === 'pulse' || effect === 'glow_focus' || effect === 'caption_highlight' || effect === 'highlight' || effect === 'check_on') {
+      lines.push(`    tl.to("${selector}", { scale: 1.06, boxShadow: "0 0 42px var(--accent)", duration: ${beatDuration.toFixed(3)}, yoyo: true, repeat: 1, ease: "sine.inOut" }, ${beatStart.toFixed(3)});`);
+    } else if (effect === 'zoom_focus') {
+      lines.push(`    tl.fromTo("${selector}", { scale: 0.82, autoAlpha: 0 }, { scale: 1, autoAlpha: 1, duration: ${beatDuration.toFixed(3)}, ease: "back.out(1.6)" }, ${beatStart.toFixed(3)});`);
+    } else {
+      lines.push(`    tl.fromTo("${selector}", { y: 24, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: ${beatDuration.toFixed(3)}, ease: "power3.out" }, ${beatStart.toFixed(3)});`);
+    }
+  });
   lines.push(`    tl.to("${sceneId} .scene-content", { y: -16, scale: 1.02, duration: ${Math.max(0.2, sceneDuration - exitDuration).toFixed(3)}, ease: "none" }, ${start.toFixed(3)});`);
 
   return lines.join('\n');

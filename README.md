@@ -126,15 +126,15 @@ npm run build:frontend
 npm test
 
 # Agent 与成片链路常用专项测试
-node test-agent-template-overrides.js
-node test-agent-runs.js
-node test-ai-tts-model.js
-node test-storyboard-schema.js
-node test-storyboard-agent.js
-node test-hyperframes-visual-dsl.js
-node test-hyperframes-scene-renderers.js
-node test-hyperframes-project.js
-node test-hyperframes-renderer.js
+node tests/test-agent-template-overrides.js
+node tests/test-agent-runs.js
+node tests/test-ai-tts-model.js
+node tests/test-storyboard-schema.js
+node tests/test-storyboard-agent.js
+node tests/test-hyperframes-visual-dsl.js
+node tests/test-hyperframes-scene-renderers.js
+node tests/test-hyperframes-project.js
+node tests/test-hyperframes-renderer.js
 ```
 
 ## 环境变量
@@ -264,14 +264,14 @@ npm run build:frontend
 关键链路专项测试：
 
 ```powershell
-node test-agent-template-overrides.js
-node test-agent-runs.js
-node test-storyboard-schema.js
-node test-storyboard-agent.js
-node test-hyperframes-visual-dsl.js
-node test-hyperframes-scene-renderers.js
-node test-hyperframes-project.js
-node test-hyperframes-renderer.js
+node tests/test-agent-template-overrides.js
+node tests/test-agent-runs.js
+node tests/test-storyboard-schema.js
+node tests/test-storyboard-agent.js
+node tests/test-hyperframes-visual-dsl.js
+node tests/test-hyperframes-scene-renderers.js
+node tests/test-hyperframes-project.js
+node tests/test-hyperframes-renderer.js
 ```
 
 ## 路线图

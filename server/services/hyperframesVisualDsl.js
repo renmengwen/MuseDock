@@ -14,6 +14,8 @@ function prepareSceneDsl(scene = {}) {
     composition: visualScene.composition,
     objects: visualScene.objects,
     motion: visualScene.motion,
+    beats: visualScene.beats,
+    caption_sync: visualScene.caption_sync,
     focus: visualScene.focus,
   };
 }
