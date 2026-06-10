@@ -112,13 +112,17 @@ async function run() {
   assert.match(html, /window\.__timelines/);
   assert.match(html, /<audio id="narration-audio"/);
   assert.match(html, /class="scene clip/);
-  assert.match(html, /tl\.set\("\.scene", \{ autoAlpha: 0 \}, 0\)/);
-  assert.match(html, /tl\.set\("#scene-1", \{ autoAlpha: 1 \}, 0\.000\)/);
+  assert.doesNotMatch(html, /tl\.set\("\.scene", \{ autoAlpha: 0 \}, 0\)/);
+  assert.doesNotMatch(html, /tl\.set\("#scene-\d+", \{ autoAlpha: 0 \}/);
+  assert.doesNotMatch(html, /tl\.set\("#scene-\d+", \{ autoAlpha: 1 \}/);
   assert.doesNotMatch(html, /tl\.fromTo\("#scene-1", \{ autoAlpha: 1 \}/);
   assert.match(html, /tl\.fromTo\("#scene-1 \.scene-content"/);
+  assert.match(html, /tl\.fromTo\("#scene-1 h1", \{ y: 18, autoAlpha: 1 \}/);
+  assert.match(html, /tl\.fromTo\("#scene-1 \[data-visual-object\]", \{ y: 20, autoAlpha: 1/);
+  assert.match(html, /tl\.fromTo\("#scene-2 h1", \{ y: 18, autoAlpha: 0 \}/);
   assert.doesNotMatch(html, /tl\.from\("#scene-1 \.emphasis span"/);
   assert.match(html, /#scene-1 \.emphasis span:nth-child\(1\)/);
-  assert.match(html, /tl\.to\("#scene-1"/);
+  assert.doesNotMatch(html, /tl\.to\("#scene-\d+"/);
   assert.match(html, /核心观点/);
   assert.doesNotMatch(html, /class="visual-type"/);
   assert.doesNotMatch(html, />text_card<\/div>/);
@@ -135,7 +139,7 @@ async function run() {
   assert.match(html, /visual-node/);
   assert.match(html, /visual-connector/);
   assert.match(html, /prepared_visual_scene/);
-  assert.match(html, /tl\.set\("#scene-1"/);
+  assert.doesNotMatch(html, /tl\.to\("#scene-\d+", \{ autoAlpha: 0/);
   assert.match(html, /autoAlpha: 1/);
 
   const customProjectDir = path.join(root, 'custom-project');
@@ -167,7 +171,7 @@ async function run() {
   assert.match(indexHtml, /class="frame-bg-layer neon-grid"/);
   assert.match(indexHtml, /class="frame-bg-layer scanline"/);
   assert.match(indexHtml, /scene-content--workflow|scene-content--quote-burst|scene-content--text-card/);
-  assert.match(indexHtml, /class="scene-content scene-content--contrast-card"/);
+  assert.match(indexHtml, /class="scene-content scene-content--dsl-layer"/);
   assert.match(indexHtml, /class="transition-layer"/);
   assert.match(indexHtml, /data-transition-style="glitch"/);
   assert.match(indexHtml, /kinetic-caption/);
@@ -232,10 +236,11 @@ async function run() {
       ],
     },
   });
-  assert.match(listHtml, /class="emphasis timed-cards"/);
-  assert.match(listHtml, /data-card-index="0"/);
-  assert.match(listHtml, /<span data-card-index="4">部署<\/span>/);
-  assert.match(listHtml, /#scene-1 \.emphasis span:nth-child\(5\)/);
+  assert.match(listHtml, /class="visual-layer-item"/);
+  assert.match(listHtml, /data-visual-object="keyword-1"/);
+  assert.match(listHtml, /data-visual-object="keyword-5"/);
+  assert.match(listHtml, />部署<\/div>/);
+  assert.match(listHtml, /#scene-1 \[data-visual-object\]/);
   assert.doesNotMatch(listHtml, /<p>以前写代码，你要先懂语法、懂框架、懂前端后端、懂报错、懂部署。<\/p>/);
 
   const fallbackWordHtml = hyperframesProject.buildIndexHtml({
@@ -264,13 +269,13 @@ async function run() {
       ],
     },
   });
-  assert.match(fallbackWordHtml, /<span data-card-index="0">语法<\/span>/);
-  assert.match(fallbackWordHtml, /<span data-card-index="1">框架<\/span>/);
-  assert.match(fallbackWordHtml, /<span data-card-index="2">前端后端<\/span>/);
-  assert.match(fallbackWordHtml, /<span data-card-index="3">报错<\/span>/);
-  assert.match(fallbackWordHtml, /<span data-card-index="4">部署<\/span>/);
-  assert.doesNotMatch(fallbackWordHtml, /<span data-card-index="0">从学会代码，到学会对 AI 说清楚<\/span>/);
-  assert.doesNotMatch(fallbackWordHtml, /<span data-card-index="0">以前写代码，你要先懂语法、框架、前端后端、报错、部署。<\/span>/);
+  assert.match(fallbackWordHtml, /data-visual-object="keyword-1"[^>]*>语法<\/div>/);
+  assert.match(fallbackWordHtml, /data-visual-object="keyword-2"[^>]*>框架<\/div>/);
+  assert.match(fallbackWordHtml, /data-visual-object="keyword-3"[^>]*>前端后端<\/div>/);
+  assert.match(fallbackWordHtml, /data-visual-object="keyword-4"[^>]*>报错<\/div>/);
+  assert.match(fallbackWordHtml, /data-visual-object="keyword-5"[^>]*>部署<\/div>/);
+  assert.doesNotMatch(fallbackWordHtml, /data-visual-object="keyword-1"[^>]*>从学会代码，到学会对 AI 说清楚<\/div>/);
+  assert.doesNotMatch(fallbackWordHtml, /data-visual-object="keyword-1"[^>]*>以前写代码，你要先懂语法、框架、前端后端、报错、部署。<\/div>/);
 
   const weakContrastHtml = hyperframesProject.buildIndexHtml({
     duration: 4,
@@ -301,6 +306,43 @@ async function run() {
   assert.doesNotMatch(weakContrastHtml, /<div class="compare-side compare-side--old"/);
   assert.doesNotMatch(weakContrastHtml, /<div class="compare-side compare-side--new"/);
   assert.match(weakContrastHtml, /scene-content--text-card/);
+
+  const dslAwareLegacyHtml = hyperframesProject.buildIndexHtml({
+    duration: 4,
+    captions: [
+      { index: 1, start: 0, end: 4, duration: 4, text: '用一句话讲清楚这个判断。' },
+    ],
+    storyboard: {
+      template: 'ai_storyboard_cards',
+      scenes: [
+        {
+          index: 1,
+          caption_indexes: [1],
+          start: 0,
+          end: 4,
+          duration: 4,
+          headline: '先判断再行动',
+          visual_type: 'quote_card',
+          layout: 'burst_center',
+          background_prompt: '原创抽象背景',
+          emphasis_words: ['判断', '行动'],
+          visual_scene: {
+            composition: 'center_burst',
+            objects: [
+              { id: 'idea-1', type: 'keyword', text: '判断', role: 'primary', style: 'neon' },
+              { id: 'idea-2', type: 'keyword', text: '行动', role: 'supporting', style: 'outline' },
+            ],
+            motion: [{ target: 'keyword', effect: 'stagger_reveal', delay: 0 }],
+            focus: { text: '先判断', style: 'accent_pulse' },
+          },
+        },
+      ],
+    },
+  });
+  assert.match(dslAwareLegacyHtml, /data-visual-object="idea-1"/);
+  assert.match(dslAwareLegacyHtml, /data-visual-role="primary"/);
+  assert.match(dslAwareLegacyHtml, /data-composition="center_burst"/);
+  assert.doesNotMatch(dslAwareLegacyHtml, /class="scene-content scene-content--quote-card"/);
 }
 
 run().then(() => {

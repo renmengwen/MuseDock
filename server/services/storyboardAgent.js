@@ -103,6 +103,8 @@ function getFrameProfileBrief({ frameProfileId = DEFAULT_FRAME_PROFILE_ID, frame
   if (!doc) {
     return [
       `Frame Profile：${frameProfileId}`,
+      '- AI 必须根据每个 scene 的语义任务自动抉择 visual_type，不要按固定优先级选择 visual_type。',
+      '- workflow 用于流程和步骤关系，ui_mockup 用于产品/工具界面示意，concept_map 用于概念关系，timeline 用于时间推进，quote_burst 用于节奏爆点。',
       '- text_card 用于核心观点，quote_card 用于定义和金句，contrast_card 用于对比，step_card 用于流程。',
       '- 不要让连续场景全部使用同一种居中卡片结构。',
       '- 不要输出像网页按钮或后台卡片一样的 UI。',
@@ -175,7 +177,9 @@ function buildStoryboardMessages({
         '- visual_type 只能使用 workflow、code_panel、ui_mockup、split_compare、concept_map、timeline、quote_burst、text_card、quote_card、step_card、contrast_card。',
         '- 每个 scene 必须输出 visual_scene，包含 composition、objects、motion；objects 必须能用 DOM/CSS/GSAP 表达。',
         '- 不要输出真实摄影、人物镜头、复杂 3D 城市、无法由 DOM/CSS/GSAP 稳定实现的描述。',
-        '- visual_type 优先使用 text_card、quote_card、step_card、contrast_card。',
+        '- AI 必须根据每个 scene 的语义任务自动抉择 visual_type，不要按固定优先级选择 visual_type；选择理由应体现在 visual_scene.composition 和 objects 中。',
+        '- 选择参考：workflow=流程/步骤关系，code_panel=代码或命令感，ui_mockup=工具/产品界面示意，split_compare=双栏差异，concept_map=概念关系，timeline=时间推进，quote_burst=节奏爆点，text_card=核心观点，quote_card=定义/金句，step_card=明确步骤，contrast_card=真实 A vs B 对比。',
+        '- 不要为了省事连续使用同一种卡片外观；如果语义连续相近，也要通过 composition、objects、layout 做出可见差异。',
         '- contrast_card 只用于真实对比、前后变化或旧方法 vs 新方法；headline 必须写成 A vs B，左右两侧不能表达同一个意思，否则改用 text_card 或 step_card。',
         '- background_prompt 必须描述原创抽象/图文背景，不得描述原视频画面。',
         '',
@@ -228,7 +232,9 @@ function getEditableStoryboardTemplate() {
       '- visual_type 只能使用 workflow、code_panel、ui_mockup、split_compare、concept_map、timeline、quote_burst、text_card、quote_card、step_card、contrast_card。',
       '- 每个 scene 必须输出 visual_scene，包含 composition、objects、motion；objects 必须能用 DOM/CSS/GSAP 表达。',
       '- 不要输出真实摄影、人物镜头、复杂 3D 城市、无法由 DOM/CSS/GSAP 稳定实现的描述。',
-      '- visual_type 优先使用 text_card、quote_card、step_card、contrast_card。',
+      '- AI 必须根据每个 scene 的语义任务自动抉择 visual_type，不要按固定优先级选择 visual_type；选择理由应体现在 visual_scene.composition 和 objects 中。',
+      '- 选择参考：workflow=流程/步骤关系，code_panel=代码或命令感，ui_mockup=工具/产品界面示意，split_compare=双栏差异，concept_map=概念关系，timeline=时间推进，quote_burst=节奏爆点，text_card=核心观点，quote_card=定义/金句，step_card=明确步骤，contrast_card=真实 A vs B 对比。',
+      '- 不要为了省事连续使用同一种卡片外观；如果语义连续相近，也要通过 composition、objects、layout 做出可见差异。',
       '- contrast_card 只用于真实对比、前后变化或旧方法 vs 新方法；headline 必须写成 A vs B，左右两侧不能表达同一个意思，否则改用 text_card 或 step_card。',
       '- background_prompt 必须描述原创抽象/图文背景，不得描述原视频画面。',
       '',
@@ -240,7 +246,7 @@ function getEditableStoryboardTemplate() {
     modelOptions: {
       temperature: 0.35,
       stream: true,
-      maxRetries: 1,
+      maxRetries: 3,
     },
   };
 }
@@ -316,6 +322,7 @@ async function createStoryboard(options = {}) {
       maxRetries: editableConfig.modelOptions?.maxRetries,
       retryDelayMs: options.retryDelayMs,
       stream: editableConfig.modelOptions?.stream !== false,
+      fallbackToNonStreamOnGatewayTimeout: editableConfig.modelOptions?.stream !== false,
     });
   } catch (error) {
     modelResult = { success: false, message: error.message || 'AI 分镜模型调用失败。' };
