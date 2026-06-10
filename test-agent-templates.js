@@ -15,7 +15,7 @@ const viral = templates.getAgentTemplate('viral_rewrite');
 assert.equal(viral.id, 'viral_rewrite');
 assert.equal(viral.requireTranscript, true);
 assert.equal(viral.requireComments, false);
-assert.deepEqual(viral.resultFields, ['summary', 'viral_points', 'audience', 'comment_insights', 'topics', 'rewrite_script', 'titles']);
+assert.deepEqual(viral.resultFields, ['summary', 'viral_points', 'audience', 'comment_insights', 'topics', 'rewrite_script', 'titles', 'video_brief']);
 
 const commentInsights = templates.getAgentTemplate('comment_insights');
 assert.equal(commentInsights.id, 'comment_insights');
@@ -83,6 +83,52 @@ assert.match(customPrompt[1].content, /引流到私域/);
 assert.match(customPrompt[1].content, /本地生活商家老板/);
 assert.match(customPrompt[1].content, /不要承诺收益/);
 assert.match(customPrompt[0].content, /summary, viral_points, audience, comment_insights, topics, rewrite_script, titles/);
+assert.match(customPrompt[0].content, /video_brief/);
+assert.match(customPrompt[0].content, /target_duration_sec/);
+assert.match(customPrompt[0].content, /beats/);
+assert.match(customPrompt[0].content, /45-75/);
+assert.match(customPrompt[0].content, /rewrite_script/);
+
+const normalizedViral = viral.normalizeResult({
+  summary: '摘要',
+  viral_points: ['爆点'],
+  audience: '普通用户',
+  comment_insights: ['想看教程'],
+  topics: ['主题'],
+  rewrite_script: '第一句。第二句。',
+  titles: ['标题'],
+  video_brief: {
+    target_duration_sec: 90,
+    target_word_count: 400,
+    tone: '知识科普',
+    hook: '先抛误解',
+    beats: [
+      { purpose: 'hook', summary: '拆误解', duration_sec: 6, visual_intent: '强对比开场' },
+    ],
+  },
+});
+assert.equal(normalizedViral.video_brief.target_duration_sec, 90);
+assert.equal(normalizedViral.video_brief.target_word_count, 400);
+assert.equal(normalizedViral.video_brief.beats[0].purpose, 'hook');
+
+const normalizedLongVideoBrief = viral.normalizeResult({
+  video_brief: {
+    tone: 'x'.repeat(500),
+    hook: 'y'.repeat(500),
+  },
+});
+assert.equal(normalizedLongVideoBrief.video_brief.tone.length, 120);
+assert.equal(normalizedLongVideoBrief.video_brief.hook.length, 160);
+assert.equal(normalizedViral.video_brief.beats[0].visual_intent, '强对比开场');
+
+const emptyViral = viral.normalizeResult({});
+assert.deepStrictEqual(emptyViral.video_brief, {
+  target_duration_sec: 60,
+  target_word_count: 220,
+  tone: '',
+  hook: '',
+  beats: [],
+});
 
 const cleanPrompt = viral.buildPrompt({
   promptOptions: {
@@ -102,7 +148,10 @@ const editableViral = templates.getEditableAgentTemplate('viral_rewrite');
 assert.equal(editableViral.id, 'viral_rewrite');
 assert.equal(editableViral.label, '爆款拆解 + 改写脚本');
 assert.ok(editableViral.systemPrompt.includes('MuseDock'));
+assert.ok(editableViral.systemPrompt.includes('video_brief'));
+assert.ok(editableViral.systemPrompt.includes('45-75'));
 assert.ok(editableViral.userPromptTemplate.includes('{{transcriptText}}'));
+assert.ok(editableViral.userPromptTemplate.includes('{{promptOptionsText}}'));
 assert.deepEqual(editableViral.resultFields, [
   'summary',
   'viral_points',
@@ -111,6 +160,7 @@ assert.deepEqual(editableViral.resultFields, [
   'topics',
   'rewrite_script',
   'titles',
+  'video_brief',
 ]);
 assert.equal(editableViral.modelOptions.temperature, 0.4);
 assert.equal(editableViral.modelOptions.stream, true);

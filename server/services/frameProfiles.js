@@ -31,7 +31,7 @@ const TECH_NEON_PROFILE = {
     '--frame-muted': 'rgba(247, 251, 255, .72)',
   },
   backgroundLayers: ['neon-grid', 'scanline', 'radial-energy'],
-  sceneRenderers: ['text_card', 'quote_card', 'contrast_card', 'step_card'],
+  sceneRenderers: ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst', 'text_card', 'quote_card', 'contrast_card', 'step_card'],
   transitions: ['glitch-wipe', 'zoom-burst', 'soft-wipe'],
 };
 

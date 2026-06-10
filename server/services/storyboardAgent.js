@@ -56,6 +56,40 @@ function formatStoryboardOptionsForPrompt(options = {}) {
   ].join('\n');
 }
 
+function safeNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function safePromptText(value) {
+  if (value === undefined || value === null) return '';
+  return typeof value === 'string' ? value : String(value);
+}
+
+function formatVideoBriefForPrompt(videoBrief = {}) {
+  const source = videoBrief && typeof videoBrief === 'object' && !Array.isArray(videoBrief) ? videoBrief : {};
+  const beats = Array.isArray(source.beats) ? source.beats.slice(0, 12) : [];
+  return [
+    '视频结构 brief：',
+    `- 目标时长 target_duration_sec：${safeNumber(source.target_duration_sec, 60)} 秒`,
+    `- 目标字数 target_word_count：${safeNumber(source.target_word_count, 220)} 字`,
+    `- 语气风格：${safePromptText(source.tone) || '未指定'}`,
+    `- 开场钩子：${safePromptText(source.hook) || '未指定'}`,
+    '- 节奏段落：',
+    beats.length
+      ? JSON.stringify(beats.map(beat => {
+        const item = beat && typeof beat === 'object' && !Array.isArray(beat) ? beat : {};
+        return {
+          purpose: safePromptText(item.purpose),
+          summary: safePromptText(item.summary),
+          duration_sec: safeNumber(item.duration_sec, 0),
+          visual_intent: safePromptText(item.visual_intent),
+        };
+      }), null, 2)
+      : '[]',
+  ].join('\n');
+}
+
 function getFrameProfileBrief({ frameProfileId = DEFAULT_FRAME_PROFILE_ID, frameDocText = '' } = {}) {
   const source = frameDocText || (() => {
     try {
@@ -87,6 +121,7 @@ function getFrameProfileBrief({ frameProfileId = DEFAULT_FRAME_PROFILE_ID, frame
 function buildStoryboardMessages({
   rewriteScript,
   captions,
+  videoBrief = {},
   storyboardOptions = {},
   frameProfileId = DEFAULT_FRAME_PROFILE_ID,
   frameDocText = '',
@@ -102,9 +137,10 @@ function buildStoryboardMessages({
     {
       role: 'system',
       content: [
-        '你是 MuseDock 的原创短视频分镜 Agent。',
-        '只输出 JSON，不要输出 Markdown、解释或代码块。',
-        '你只负责决定原创视觉分镜结构、标题、布局、强调词和原创视觉提示。',
+        '你是 MuseDock 的 HyperFrames 视觉导演 Agent，也是一名熟悉 DOM/CSS/GSAP 动效编排的 HyperFrames 专家。',
+        '你不是图片生成模型，不输出摄影幻想描述；你要把口播脚本转成可由 HyperFrames 渲染的结构化视觉分镜。',
+        '请只输出 JSON，不要输出 Markdown、解释或代码块。',
+        '你只负责决定原创视觉分镜结构、标题、布局、强调词、visual_type 和 visual_scene。',
         '不要输出 start、end、duration，最终时间轴由后端根据 tts.captions 计算。',
         '不要引用原视频、原视频帧、截图、原作者画面或搬运素材。',
         'JSON 必须包含 template、style、scenes。',
@@ -118,6 +154,8 @@ function buildStoryboardMessages({
         '',
         '改写脚本：',
         rewriteScript || '',
+        '',
+        formatVideoBriefForPrompt(videoBrief),
         '',
         '字幕索引：',
         JSON.stringify(captionIndexes, null, 2),
@@ -133,6 +171,10 @@ function buildStoryboardMessages({
         '- 每个 scene 最多覆盖 2 条连续字幕。',
         '- headline 是画面标题，不是字幕复读；禁止把完整字幕复制成 headline，建议 6-18 个汉字。',
         '- emphasis_words 是逐个入场的短语卡片；必须提供 2-6 个短词/短语，遇到顿号、枚举、并列概念必须拆成多个卡片。',
+        '- visual_type 必须由你根据字幕语义、视频结构 brief 和画面节奏自动选择，用户不需要指定；也就是自动选择 visual_type。',
+        '- visual_type 只能使用 workflow、code_panel、ui_mockup、split_compare、concept_map、timeline、quote_burst、text_card、quote_card、step_card、contrast_card。',
+        '- 每个 scene 必须输出 visual_scene，包含 composition、objects、motion；objects 必须能用 DOM/CSS/GSAP 表达。',
+        '- 不要输出真实摄影、人物镜头、复杂 3D 城市、无法由 DOM/CSS/GSAP 稳定实现的描述。',
         '- visual_type 优先使用 text_card、quote_card、step_card、contrast_card。',
         '- contrast_card 只用于真实对比、前后变化或旧方法 vs 新方法；headline 必须写成 A vs B，左右两侧不能表达同一个意思，否则改用 text_card 或 step_card。',
         '- background_prompt 必须描述原创抽象/图文背景，不得描述原视频画面。',
@@ -151,9 +193,10 @@ function getEditableStoryboardTemplate() {
     label: 'AI 分镜 Agent',
     description: '根据改写脚本和 TTS 字幕生成原创分镜。',
     systemPrompt: [
-      '你是 MuseDock 的原创短视频分镜 Agent。',
-      '只输出 JSON，不要输出 Markdown、解释或代码块。',
-      '你只负责决定原创视觉分镜结构、标题、布局、强调词和原创视觉提示。',
+      '你是 MuseDock 的 HyperFrames 视觉导演 Agent，也是一名熟悉 DOM/CSS/GSAP 动效编排的 HyperFrames 专家。',
+      '你不是图片生成模型，不输出摄影幻想描述；你要把口播脚本转成可由 HyperFrames 渲染的结构化视觉分镜。',
+      '请只输出 JSON，不要输出 Markdown、解释或代码块。',
+      '你只负责决定原创视觉分镜结构、标题、布局、强调词、visual_type 和 visual_scene。',
       '不要输出 start、end、duration，最终时间轴由后端根据 tts.captions 计算。',
       '不要引用原视频、原视频帧、截图、原作者画面或搬运素材。',
       'JSON 必须包含 template、style、scenes。',
@@ -164,6 +207,8 @@ function getEditableStoryboardTemplate() {
       '',
       '改写脚本：',
       '{{rewriteScript}}',
+      '',
+      '{{videoBriefText}}',
       '',
       '字幕索引：',
       '{{captionIndexesJson}}',
@@ -179,6 +224,10 @@ function getEditableStoryboardTemplate() {
       '- 每个 scene 最多覆盖 2 条连续字幕。',
       '- headline 是画面标题，不是字幕复读；禁止把完整字幕复制成 headline，建议 6-18 个汉字。',
       '- emphasis_words 是逐个入场的短语卡片；必须提供 2-6 个短词/短语，遇到顿号、枚举、并列概念必须拆成多个卡片。',
+      '- visual_type 必须由你根据字幕语义、视频结构 brief 和画面节奏自动选择，用户不需要指定；也就是自动选择 visual_type。',
+      '- visual_type 只能使用 workflow、code_panel、ui_mockup、split_compare、concept_map、timeline、quote_burst、text_card、quote_card、step_card、contrast_card。',
+      '- 每个 scene 必须输出 visual_scene，包含 composition、objects、motion；objects 必须能用 DOM/CSS/GSAP 表达。',
+      '- 不要输出真实摄影、人物镜头、复杂 3D 城市、无法由 DOM/CSS/GSAP 稳定实现的描述。',
       '- visual_type 优先使用 text_card、quote_card、step_card、contrast_card。',
       '- contrast_card 只用于真实对比、前后变化或旧方法 vs 新方法；headline 必须写成 A vs B，左右两侧不能表达同一个意思，否则改用 text_card 或 step_card。',
       '- background_prompt 必须描述原创抽象/图文背景，不得描述原视频画面。',
@@ -241,6 +290,7 @@ async function createStoryboard(options = {}) {
   const editableConfig = options.editableConfig || getEditableStoryboardTemplate();
   const messages = buildStoryboardMessagesFromEditableConfig(editableConfig, {
     rewriteScript,
+    videoBriefText: formatVideoBriefForPrompt(options.videoBrief || {}),
     captionIndexesJson: JSON.stringify(captionIndexes, null, 2),
     frameProfileBrief: editableConfig.useFrameProfile === false ? '' : getFrameProfileBrief({
       frameProfileId: options.frameProfileId || DEFAULT_FRAME_PROFILE_ID,
@@ -320,5 +370,6 @@ module.exports = {
   getEditableStoryboardTemplate,
   normalizeStoryboardOptions,
   formatStoryboardOptionsForPrompt,
+  formatVideoBriefForPrompt,
   getFrameProfileBrief,
 };

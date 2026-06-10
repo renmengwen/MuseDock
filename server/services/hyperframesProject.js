@@ -2,6 +2,9 @@ const fsp = require('fs/promises');
 const fs = require('fs');
 const path = require('path');
 const frameProfiles = require('./frameProfiles');
+const visualDsl = require('./hyperframesVisualDsl');
+const sceneRenderers = require('./hyperframesSceneRenderers');
+const animations = require('./hyperframesAnimations');
 
 const TEMPLATE_AI_STORYBOARD_CARDS = 'ai_storyboard_cards';
 
@@ -173,7 +176,7 @@ function getSceneEmphasisWords(scene, captionText) {
   return words.length ? words : makeFallbackEmphasisWords(captionText, scene.headline);
 }
 
-function renderSceneContent({ scene, index, captionText, wordHtml }) {
+function renderLegacySceneContent({ scene, index, captionText, wordHtml }) {
   const sceneClass = getSceneClass(scene.visual_type);
   const emphasisClass = 'emphasis timed-cards';
   if (sceneClass === 'contrast-card') {
@@ -224,6 +227,15 @@ function renderSceneContent({ scene, index, captionText, wordHtml }) {
     `  <div class="${emphasisClass}">${wordHtml}</div>`,
     '</div>',
   ].join('\n');
+}
+
+function renderProjectSceneContent({ scene, index, captionText, wordHtml }) {
+  const preparedType = scene.prepared_visual_scene?.visualType || scene.visual_type;
+  const legacyTypes = ['text_card', 'quote_card', 'contrast_card', 'step_card'];
+  if (legacyTypes.includes(preparedType)) {
+    return renderLegacySceneContent({ scene, index, captionText, wordHtml });
+  }
+  return sceneRenderers.renderSceneContent({ scene, index, captionText, wordHtml });
 }
 
 function hasReplacementGlyph(value) {
@@ -322,7 +334,7 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
   const size = getRenderSize(options);
   const captionFontSize = getCaptionFontSize(options);
   const motionScale = getMotionScale(options);
-  const renderScenes = storyboard.scenes.map(scene => {
+  const renderScenes = visualDsl.prepareScenes(storyboard.scenes).map(scene => {
     const captionText = Array.isArray(scene.captions)
       ? scene.captions.map(caption => caption.text).filter(Boolean).join(' ')
       : '';
@@ -338,9 +350,9 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
       : '';
     const wordHtml = renderEmphasis(scene.emphasis_words);
     return [
-      `<section id="scene-${index + 1}" class="scene clip ${escapeHtml(scene.layout)}" data-start="${scene.start}" data-duration="${scene.duration}" data-track-index="${index + 1}" style="--bg:${tone.bg};--accent:${tone.accent};--secondary:${tone.secondary};">`,
+      `<section id="scene-${index + 1}" class="scene clip ${escapeHtml(scene.layout)}" data-start="${scene.start}" data-duration="${scene.duration}" data-track-index="${index + 1}" data-prepared_visual_scene="1" style="--bg:${tone.bg};--accent:${tone.accent};--secondary:${tone.secondary};">`,
       options.showSceneNumber ? `  <div class="scene-number">${String(scene.index || index + 1).padStart(2, '0')}</div>` : '',
-      renderSceneContent({ scene, index, captionText, wordHtml }),
+      renderProjectSceneContent({ scene, index, captionText, wordHtml }),
       options.showCaptionBar ? `  ${renderCaptionBar(scene, frameOptions)}` : '',
       '</section>',
     ].filter(line => line !== '').join('\n');
@@ -382,6 +394,28 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
     .step-orbit span { color: var(--accent); font-size: 42px; font-weight: 900; }
     .step-line { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .step-line i { display: block; height: 8px; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--frame-hot)); }
+    .scene-content--workflow, .scene-content--code-panel, .scene-content--ui-mockup, .scene-content--split-compare, .scene-content--concept-map, .scene-content--timeline, .scene-content--quote-burst { border-left: 0; overflow: hidden; }
+    .visual-flow, .visual-timeline, .visual-concept-branches { display: grid; gap: 18px; }
+    .visual-flow { grid-template-columns: 1fr; }
+    .visual-node, .visual-milestone, .visual-pill, .visual-ui-item, .visual-branch { border: 1px solid color-mix(in srgb, var(--accent) 58%, transparent); background: rgba(255,255,255,.065); padding: 16px 18px; border-radius: 8px; color: #fff; font-weight: 800; overflow-wrap: anywhere; }
+    .visual-node { display: flex; align-items: center; gap: 12px; min-height: 72px; }
+    .visual-node span, .visual-milestone span { color: var(--accent); margin-right: 12px; font-weight: 900; }
+    .visual-connector { height: 4px; width: 100%; transform-origin: left center; background: linear-gradient(90deg, var(--accent), var(--frame-hot)); border-radius: 999px; }
+    .visual-code-window, .visual-ui-panel { border: 1px solid color-mix(in srgb, var(--accent) 48%, transparent); background: rgba(0,0,0,.34); border-radius: 8px; padding: 22px; box-shadow: inset 0 0 40px rgba(37,244,238,.08); }
+    .visual-window-dots { display: flex; gap: 8px; margin-bottom: 16px; }
+    .visual-window-dots i { width: 12px; height: 12px; border-radius: 999px; background: var(--accent); display: block; }
+    .visual-code-line { white-space: pre-wrap; color: #dff; font-size: 26px; line-height: 1.45; margin: 0; overflow-wrap: anywhere; }
+    .visual-terminal { margin-top: 16px; color: var(--frame-gold); font-size: 24px; }
+    .visual-ui-panel { display: grid; gap: 14px; }
+    .visual-ui-button { justify-self: start; margin-top: 18px; padding: 12px 18px; border-radius: 8px; background: var(--accent); color: #001014; font-weight: 900; }
+    .visual-compare-grid { display: grid; grid-template-columns: 1fr 82px 1fr; gap: 16px; align-items: stretch; }
+    .visual-compare-column { min-height: 210px; display: grid; align-content: center; gap: 12px; padding: 22px; border: 1px solid var(--accent); background: rgba(255,255,255,.06); border-radius: 8px; overflow-wrap: anywhere; }
+    .visual-compare-column span { color: var(--frame-muted); font-size: 24px; font-weight: 800; }
+    .visual-compare-column strong { font-size: 40px; line-height: 1.18; }
+    .visual-compare-vs { display: grid; place-items: center; color: var(--frame-hot); font-size: 34px; font-weight: 900; }
+    .visual-concept-center { width: 160px; height: 160px; display: grid; place-items: center; border-radius: 999px; background: var(--accent); color: #001014; font-weight: 900; justify-self: center; text-align: center; }
+    .visual-concept-branches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .visual-timeline { position: relative; }
     h1 { margin: 0; color: #fff; font-size: 68px; line-height: 1.18; font-weight: 900; letter-spacing: 0; }
     p { margin: 0; color: rgba(255,255,255,.78); font-size: 36px; line-height: 1.55; font-weight: 650; letter-spacing: 0; }
     .emphasis { display: flex; flex-wrap: wrap; gap: 12px; }
@@ -401,7 +435,7 @@ ${sceneHtml}
   </div>
   <script>
     window.__timelines = window.__timelines || {};
-    ${buildTimelineScript(renderScenes, duration, motionScale, frameOptions)}
+    ${animations.buildTimelineScript(renderScenes, duration, motionScale, frameOptions)}
     window.__timelines['ai-storyboard-cards'] = tl;
   </script>
 </body>
@@ -471,6 +505,7 @@ async function createOriginalCaptionProject({ run, projectDir, renderOptions = {
   await fsp.writeFile(captionsPath, JSON.stringify({ duration, captions }, null, 2), 'utf-8');
   await fsp.writeFile(projectJsonPath, JSON.stringify({
     template: TEMPLATE_AI_STORYBOARD_CARDS,
+    visual_dsl_version: 1,
     run_id: run.run_id || '',
     aweme_id: run.aweme_id || '',
     duration,
