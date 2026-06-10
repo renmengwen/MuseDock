@@ -54,17 +54,22 @@ async function run() {
   assert.match(messages[1].content, /emphasis_words[\s\S]*短语卡片/);
   assert.match(messages[1].content, /contrast_card[\s\S]*真实对比/);
   assert.match(messages[1].content, /A vs B/);
-  assert.match(messages[1].content, /Frame Profile：tech_neon/);
+  assert.match(messages[1].content, /Frame Profile：creative_brutalist/);
+  assert.doesNotMatch(messages[1].content, /tech_neon/);
   assert.match(messages[1].content, /完整 Frame\.md 参考/);
-  assert.match(messages[1].content, /不要让连续场景全部使用同一种居中卡片结构/);
+  assert.match(messages[1].content, /Creative Mode/);
+  assert.match(messages[1].content, /warm cream canvas/);
+  assert.match(messages[1].content, /4px ink/);
+  assert.match(messages[1].content, /hard offset shadows/);
+  assert.match(messages[1].content, /Motion is out of scope/);
   assert.match(messages[1].content, /text_card.*核心观点/);
   assert.match(messages[1].content, /contrast_card.*对比/);
   assert.match(messages[1].content, /AI 必须根据每个 scene 的语义任务自动抉择 visual_type/);
   assert.match(messages[1].content, /不要按固定优先级选择 visual_type/);
   assert.doesNotMatch(messages[1].content, /visual_type 优先/);
-  assert.match(messages[1].content, /不要输出像网页按钮或后台卡片一样的 UI/);
-  assert.match(messages[1].content, /所有 timeline 必须是 paused GSAP timeline/);
-  assert.match(messages[1].content, /showCaptionBar=false/);
+  assert.match(messages[1].content, /no blur/);
+  assert.match(messages[1].content, /rounded: "0"/);
+  assert.match(messages[1].content, /DOM\/CSS\/GSAP/);
   assert.match(messages[1].content, /Frame\.md 只能作为视觉设计参考/);
   assert.match(messages[1].content, /business style/);
   assert.match(messages[1].content, /abstract data background/);
@@ -191,7 +196,7 @@ async function run() {
   assert.match(calls[0].messages[0].content, /start/);
   assert.match(calls[0].messages[1].content, /AI_STORYBOARD_TARGET=hyperframes/);
   assert.match(calls[0].messages[1].content, /AI_STORYBOARD_COVER_ALL_CAPTIONS=true/);
-  assert.match(calls[0].messages[1].content, /Frame Profile：tech_neon/);
+  assert.match(calls[0].messages[1].content, /Frame Profile：creative_brutalist/);
   assert.match(calls[0].messages[1].content, /教程感/);
   assert.match(calls[0].messages[1].content, /概念图/);
 

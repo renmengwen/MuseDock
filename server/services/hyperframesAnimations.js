@@ -66,8 +66,8 @@ function buildTimelineScript(scenes, duration, motionScale = 1, frameOptions = {
   const lines = [
     '    const tl = gsap.timeline({ paused: true });',
     `    tl.to({}, { duration: ${safeDuration} }, 0);`,
-    '    tl.to(".neon-grid", { backgroundPosition: "140px 220px", duration: Math.max(8, ' + safeDuration + '), ease: "none" }, 0);',
-    '    tl.to(".radial-energy", { rotate: 16, scale: 1.08, duration: Math.max(8, ' + safeDuration + '), ease: "sine.inOut" }, 0);',
+    '    tl.to(".paper-grain", { backgroundPosition: "0 28px, 34px 0", duration: Math.max(8, ' + safeDuration + '), ease: "none" }, 0);',
+    '    tl.to(".ink-grid", { backgroundPosition: "36px 36px", duration: Math.max(10, ' + safeDuration + '), ease: "none" }, 0);',
   ];
   scenes.forEach((scene, index) => lines.push(buildSceneAnimation(scene, index, motionScale, frameOptions)));
   return lines.join('\n');

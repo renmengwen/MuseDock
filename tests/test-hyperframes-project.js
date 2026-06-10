@@ -168,9 +168,10 @@ async function run() {
   assert.match(indexHtml, /data-width="720"/);
   assert.match(indexHtml, /data-height="1280"/);
   assert.match(indexHtml, /--caption-font-size: 40px/);
-  assert.match(indexHtml, /data-frame-profile="tech_neon"/);
-  assert.match(indexHtml, /class="frame-bg-layer neon-grid"/);
-  assert.match(indexHtml, /class="frame-bg-layer scanline"/);
+  assert.match(indexHtml, /data-frame-profile="creative_brutalist"/);
+  assert.match(indexHtml, /class="frame-bg-layer paper-grain"/);
+  assert.doesNotMatch(indexHtml, /neon-grid/);
+  assert.doesNotMatch(indexHtml, /radial-energy/);
   assert.match(indexHtml, /scene-content--workflow|scene-content--quote-burst|scene-content--text-card/);
   assert.match(indexHtml, /class="scene-content scene-content--dsl-layer"/);
   assert.match(indexHtml, /data-visual-object="node-1"/);
@@ -185,7 +186,7 @@ async function run() {
   assert.equal(projectJson.visual_dsl_version, 1);
   assert.equal(projectJson.render_options.quality, 'high');
   assert.equal(projectJson.render_options.motionLevel, 'low');
-  assert.equal(projectJson.frame_options.frameStyle, 'tech_neon');
+  assert.equal(projectJson.frame_options.frameStyle, 'creative_brutalist');
   assert.equal(projectJson.frame_options.captionMode, 'kinetic');
 
   const creativeHtml = hyperframesProject.buildIndexHtml({
@@ -199,6 +200,13 @@ async function run() {
   assert.match(creativeHtml, /data-frame-profile="creative_brutalist"/);
   assert.match(creativeHtml, /class="frame-bg-layer paper-grain"/);
   assert.match(creativeHtml, /--frame-ink: #0F0F0F/);
+  assert.match(creativeHtml, /html, body \{[^}]*background: var\(--frame-bg, #EFE9D9\)/);
+  assert.match(creativeHtml, /\.scene \{[^}]*background: var\(--frame-bg\)/);
+  assert.match(creativeHtml, /h1 \{[^}]*color: var\(--frame-text\)/);
+  assert.match(creativeHtml, /\[data-frame-profile="creative_brutalist"\] \.caption-bar \{[^}]*background: var\(--frame-ink\)/);
+  assert.match(creativeHtml, /\[data-frame-profile="creative_brutalist"\] \.scene \{[^}]*background: var\(--frame-bg\)/);
+  assert.doesNotMatch(creativeHtml, /neon-grid/);
+  assert.doesNotMatch(creativeHtml, /radial-energy/);
 
   const missingTts = await hyperframesProject.createOriginalCaptionProject({
     run: { run_id: 'missing-tts', tts: {}, storyboard: runData.storyboard },

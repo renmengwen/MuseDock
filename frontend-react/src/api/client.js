@@ -164,11 +164,11 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  createDouyinRunStoryboard(awemeId, runId, storyboardOptions = {}, storyboardConfigOverride = null) {
+  createDouyinRunStoryboard(awemeId, runId, storyboardOptions = {}, storyboardConfigOverride = null, frameProfileId = '') {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/storyboard`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ storyboardOptions, storyboardConfigOverride }),
+      body: JSON.stringify({ storyboardOptions, storyboardConfigOverride, frameProfileId }),
     });
   },
   saveDouyinRunStoryboard(awemeId, runId, storyboard = {}) {

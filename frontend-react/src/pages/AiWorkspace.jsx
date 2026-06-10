@@ -191,6 +191,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
     showCaptionBar: true,
     showSceneNumber: true,
     quality: 'standard',
+    frameStyle: 'creative_brutalist',
   });
   const [resultTab, setResultTab] = useState('workflow');
 
@@ -651,7 +652,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
         useFrameProfile: storyboardConfigDraft.useFrameProfile !== false,
         modelOptions: storyboardConfigDraft.modelOptions || {},
       } : null;
-      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id, DEFAULT_STORYBOARD_OPTIONS, storyboardOverride);
+      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id, DEFAULT_STORYBOARD_OPTIONS, storyboardOverride, renderOptions.frameStyle);
       setActiveRun(prev => prev ? {
         ...prev,
         storyboard_options: json.storyboard_options,

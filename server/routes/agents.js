@@ -135,6 +135,7 @@ router.post('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
     const result = await agentRuns.createDouyinRunStoryboard(req.params.aweme_id, req.params.run_id, {
       storyboardOptions: req.body?.storyboardOptions || {},
       storyboardConfigOverride: req.body?.storyboardConfigOverride || null,
+      frameProfileId: req.body?.frameProfileId || '',
     });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {

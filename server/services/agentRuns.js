@@ -709,6 +709,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     videoBrief,
     storyboardOptions,
     editableConfig: storyboardConfig,
+    frameProfileId: options.frameProfileId,
     aiTextModel: options.aiTextModel,
     configPath: options.configPath,
     textConfig: options.textConfig,

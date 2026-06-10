@@ -1,5 +1,5 @@
 const FRAME_DEFAULTS = {
-  frameStyle: 'tech_neon',
+  frameStyle: 'creative_brutalist',
   energy: 'medium',
   density: 'balanced',
   transitionStyle: 'auto',
@@ -7,32 +7,11 @@ const FRAME_DEFAULTS = {
 };
 
 const FRAME_ALLOWED = {
-  frameStyle: ['tech_neon', 'creative_brutalist'],
+  frameStyle: ['creative_brutalist'],
   energy: ['low', 'medium', 'high'],
   density: ['clean', 'balanced', 'rich'],
   transitionStyle: ['auto', 'wipe', 'glitch', 'zoom'],
   captionMode: ['standard', 'kinetic'],
-};
-
-const TECH_NEON_PROFILE = {
-  id: 'tech_neon',
-  name: '科技霓虹',
-  stage: {
-    aspectRatio: '9:16',
-    compositionId: 'ai-storyboard-cards',
-  },
-  cssVars: {
-    '--frame-bg': '#05070b',
-    '--frame-panel': 'rgba(14, 18, 24, .78)',
-    '--frame-accent': '#25f4ee',
-    '--frame-hot': '#fe2c55',
-    '--frame-gold': '#ffd166',
-    '--frame-text': '#f7fbff',
-    '--frame-muted': 'rgba(247, 251, 255, .72)',
-  },
-  backgroundLayers: ['neon-grid', 'scanline', 'radial-energy'],
-  sceneRenderers: ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst', 'text_card', 'quote_card', 'contrast_card', 'step_card'],
-  transitions: ['glitch-wipe', 'zoom-burst', 'soft-wipe'],
 };
 
 const CREATIVE_BRUTALIST_PROFILE = {
@@ -53,7 +32,7 @@ const CREATIVE_BRUTALIST_PROFILE = {
     '--frame-muted': 'rgba(15, 15, 15, .68)',
   },
   backgroundLayers: ['paper-grain', 'ink-grid'],
-  sceneRenderers: TECH_NEON_PROFILE.sceneRenderers,
+  sceneRenderers: ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst', 'text_card', 'quote_card', 'contrast_card', 'step_card'],
   transitions: ['hard-wipe', 'stamp-pop', 'soft-wipe'],
 };
 
@@ -72,11 +51,8 @@ function normalizeFrameOptions(value = {}) {
   };
 }
 
-function getFrameProfile(id = FRAME_DEFAULTS.frameStyle) {
-  const value = typeof id === 'string' ? id.trim() : '';
-  if (value === TECH_NEON_PROFILE.id) return TECH_NEON_PROFILE;
-  if (value === CREATIVE_BRUTALIST_PROFILE.id) return CREATIVE_BRUTALIST_PROFILE;
-  return TECH_NEON_PROFILE;
+function getFrameProfile() {
+  return CREATIVE_BRUTALIST_PROFILE;
 }
 
 module.exports = {

@@ -402,14 +402,16 @@ async function run() {
       useFrameProfile: false,
       modelOptions: { temperature: 0.8, stream: false, maxRetries: 2 },
     },
+    frameProfileId: 'creative_brutalist',
     storyboardAgent: {
-      createStoryboard: async ({ rewriteScript, captions, storyboardOptions, editableConfig }) => {
+      createStoryboard: async ({ rewriteScript, captions, storyboardOptions, editableConfig, frameProfileId }) => {
         assert.equal(rewriteScript, generated.result.rewrite_script);
         assert.ok(captions.length > 0);
         assert.equal(storyboardOptions.visualStyle, '商业质感');
         assert.equal(storyboardOptions.forbidden, '不要真人');
         assert.equal(editableConfig.source, 'request');
         assert.equal(editableConfig.systemPrompt, '临时分镜系统');
+        assert.equal(frameProfileId, 'creative_brutalist');
         return {
           success: true,
           message: 'AI 分镜已生成。',
