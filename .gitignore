@@ -23,6 +23,7 @@ douyin-cookies.json
 *.log
 server.out.log
 server.err.log
+.codex-logs/
 
 # Local configuration and secrets
 .env

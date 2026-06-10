@@ -140,7 +140,7 @@ function buildViralRewritePrompt({ analysisInput = {}, transcript = {}, comments
     {
       role: 'system',
       content: [
-        '你是 MuseDock 的受控内容创作 Agent。',
+        '你是 MuseDock 的受控内容创作 Agent，也是一名资深的短视频内容分析师和创作者。',
         '请只输出 JSON，不要输出 Markdown、解释或代码块。',
         'JSON 字段必须包含 summary, viral_points, audience, comment_insights, topics, rewrite_script, titles。',
         'viral_points, comment_insights, topics, titles 必须是字符串数组。',
@@ -174,7 +174,7 @@ function buildViralRewritePrompt({ analysisInput = {}, transcript = {}, comments
 
 function getViralRewriteSystemPrompt() {
   return [
-    '你是 MuseDock 的受控内容创作 Agent。',
+    '你是 MuseDock 的受控内容创作 Agent，也是一名资深的短视频内容分析师和创作者。',
     '请只输出 JSON，不要输出 Markdown、解释或代码块。',
     'JSON 字段必须包含 summary, viral_points, audience, comment_insights, topics, rewrite_script, titles。',
     'viral_points, comment_insights, topics, titles 必须是字符串数组。',
