@@ -90,6 +90,31 @@ function formatVideoBriefForPrompt(videoBrief = {}) {
   ].join('\n');
 }
 
+function formatQualityFeedbackForPrompt(qualityFeedback = {}) {
+  const source = qualityFeedback && typeof qualityFeedback === 'object' && !Array.isArray(qualityFeedback) ? qualityFeedback : {};
+  const issues = Array.isArray(source.issues)
+    ? source.issues
+      .filter(issue => issue && typeof issue === 'object' && !Array.isArray(issue))
+      .slice(0, 6)
+      .map(issue => ({
+        code: safePromptText(issue.code).slice(0, 80),
+        severity: safePromptText(issue.severity).slice(0, 20),
+        message: safePromptText(issue.message).slice(0, 240),
+      }))
+    : [];
+  if (!issues.length && source.pass !== false) return '';
+  return [
+    '上一次视频工程质量未通过，请针对下面问题重新生成分镜 DSL：',
+    `- 质量评分：${safeNumber(source.score, 0)}`,
+    `- 视觉对象：${safeNumber(source.bound_visual_object_count, 0)} / ${safeNumber(source.visual_object_count, 0)} 已绑定，未绑定 ${safeNumber(source.unbound_visual_object_count, 0)} 个`,
+    '- 质量问题：',
+    JSON.stringify(issues, null, 2),
+    '- 修复重点：每个 visual_scene.objects[].id 都应该至少被一个 beats[].target 精确引用。',
+    '- 每个 beats[].caption_block_id 必须是当前 scene 内有效 caption_block_id，来自当前 scene caption_indexes 对应的短语字幕块，不要引用其他分镜或不存在的 id。',
+    '- 对枚举、列表、步骤、代码行、终端结果等对象逐项安排 beat，确保对象在对应口播短语开始时出现。',
+  ].join('\n');
+}
+
 function getFrameProfileBrief({ frameProfileId = DEFAULT_FRAME_PROFILE_ID, frameDocText = '' } = {}) {
   const source = frameDocText || (() => {
     try {
@@ -128,6 +153,7 @@ function buildStoryboardMessages({
   storyboardOptions = {},
   frameProfileId = DEFAULT_FRAME_PROFILE_ID,
   frameDocText = '',
+  qualityFeedback = {},
 } = {}) {
   const captionIndexes = Array.isArray(captions)
     ? captions.map(caption => ({
@@ -168,6 +194,8 @@ function buildStoryboardMessages({
         rewriteScript || '',
         '',
         formatVideoBriefForPrompt(videoBrief),
+        '',
+        formatQualityFeedbackForPrompt(qualityFeedback),
         '',
         '字幕索引：',
         JSON.stringify(captionIndexes, null, 2),
@@ -232,6 +260,8 @@ function getEditableStoryboardTemplate() {
       '{{rewriteScript}}',
       '',
       '{{videoBriefText}}',
+      '',
+      '{{qualityFeedbackText}}',
       '',
       '字幕索引：',
       '{{captionIndexesJson}}',
@@ -326,6 +356,7 @@ async function createStoryboard(options = {}) {
   const messages = buildStoryboardMessagesFromEditableConfig(editableConfig, {
     rewriteScript,
     videoBriefText: formatVideoBriefForPrompt(options.videoBrief || {}),
+    qualityFeedbackText: formatQualityFeedbackForPrompt(options.qualityFeedback || {}),
     captionIndexesJson: JSON.stringify(captionIndexes, null, 2),
     phraseCaptionsJson: JSON.stringify(phraseCaptions.map(block => ({
       id: block.id,
@@ -415,5 +446,6 @@ module.exports = {
   normalizeStoryboardOptions,
   formatStoryboardOptionsForPrompt,
   formatVideoBriefForPrompt,
+  formatQualityFeedbackForPrompt,
   getFrameProfileBrief,
 };

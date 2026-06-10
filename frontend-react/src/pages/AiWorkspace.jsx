@@ -214,6 +214,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
   const hasStoryboardScenes = Array.isArray(activeRun?.storyboard?.scenes) && activeRun.storyboard.scenes.length > 0;
   const persistedVideoRendering = activeRun?.video?.status === 'rendering';
   const videoBusy = videoGenerating || videoRendering || persistedVideoRendering;
+  const hasFailedQualityReport = activeRun?.video?.video_quality_report?.pass === false;
   const storyboardSceneIssues = useMemo(() => getStoryboardSceneIssues(storyboardDraft || {}), [storyboardDraft]);
   const storyboardIssueCount = Object.keys(storyboardSceneIssues).length;
 
@@ -623,7 +624,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
     }
   }
 
-  async function createStoryboard() {
+  async function createStoryboard({ qualityFeedback = null } = {}) {
     const value = selectedAwemeId.trim();
     if (!value || !activeRun?.run_id) {
       setStatus({ type: 'error', message: '请先选择一条已完成 TTS 合成的运行记录。' });
@@ -635,7 +636,10 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
     }
 
     setStoryboardRunning(true);
-    setStatus({ type: 'loading', message: '正在生成 AI 分镜...' });
+    setStatus({
+      type: 'loading',
+      message: qualityFeedback ? '正在带着质量问题重新生成 AI 分镜...' : '正在生成 AI 分镜...',
+    });
     try {
       const storyboardOverride = storyboardConfigDraft ? {
         systemPrompt: storyboardConfigDraft.systemPrompt,
@@ -643,7 +647,14 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
         useFrameProfile: storyboardConfigDraft.useFrameProfile !== false,
         modelOptions: storyboardConfigDraft.modelOptions || {},
       } : null;
-      const json = await api.createDouyinRunStoryboard(value, activeRun.run_id, DEFAULT_STORYBOARD_OPTIONS, storyboardOverride, renderOptions.frameStyle);
+      const json = await api.createDouyinRunStoryboard(
+        value,
+        activeRun.run_id,
+        DEFAULT_STORYBOARD_OPTIONS,
+        storyboardOverride,
+        renderOptions.frameStyle,
+        qualityFeedback,
+      );
       setActiveRun(prev => prev ? {
         ...prev,
         storyboard_options: json.storyboard_options,
@@ -655,6 +666,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
         storyboard_raw_output: json.storyboard_raw_output,
         storyboard_parse: json.storyboard_parse,
         storyboard_schema_validation: json.storyboard_schema_validation,
+        video: json.video || null,
         updated_at: new Date().toISOString(),
       } : prev);
       setRuns(prev => prev.map(run => (
@@ -669,6 +681,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
           storyboard_raw_output: json.storyboard_raw_output,
           storyboard_parse: json.storyboard_parse,
           storyboard_schema_validation: json.storyboard_schema_validation,
+          video: json.video || null,
           updated_at: new Date().toISOString(),
         } : run
       )));
@@ -1343,6 +1356,16 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                             {activeRun.video.video_quality_report.issues?.map(issue => (
                               <p key={issue.code}>{issue.message}</p>
                             ))}
+                            {hasFailedQualityReport ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                disabled={storyboardRunning || videoBusy || !hasTtsCaptions}
+                                onClick={() => createStoryboard({ qualityFeedback: activeRun.video.video_quality_report })}
+                              >
+                                {storyboardRunning ? '重新生成中...' : '带问题重新生成分镜'}
+                              </Button>
+                            ) : null}
                           </div>
                         ) : null}
                         {activeRun.video.output_url ? (

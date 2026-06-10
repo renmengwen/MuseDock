@@ -136,6 +136,7 @@ router.post('/douyin/:aweme_id/runs/:run_id/storyboard', async (req, res) => {
       storyboardOptions: req.body?.storyboardOptions || {},
       storyboardConfigOverride: req.body?.storyboardConfigOverride || null,
       frameProfileId: req.body?.frameProfileId || '',
+      qualityFeedback: req.body?.qualityFeedback || null,
     });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {

@@ -66,8 +66,19 @@ export const api = {
     });
     return requestJson(`/api/douyin/comments/local?${params.toString()}`);
   },
-  getHistory(platform) {
-    return requestJson(`/api/history/${platform}`);
+  getHistory(platform, keyword = '') {
+    const suffix = keyword ? `?keyword=${encodeURIComponent(keyword)}` : '';
+    return requestJson(`/api/history/${platform}${suffix}`);
+  },
+  getCrawlKeywords(platform) {
+    return requestJson(`/api/history/${platform}/keywords`);
+  },
+  deleteHistory(platform, ids) {
+    return requestJson(`/api/history/${platform}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
   },
   prepareDouyinMedia(awemeId, force = false) {
     const params = force ? '?force=true' : '';
@@ -164,11 +175,11 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  createDouyinRunStoryboard(awemeId, runId, storyboardOptions = {}, storyboardConfigOverride = null, frameProfileId = '') {
+  createDouyinRunStoryboard(awemeId, runId, storyboardOptions = {}, storyboardConfigOverride = null, frameProfileId = '', qualityFeedback = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/storyboard`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ storyboardOptions, storyboardConfigOverride, frameProfileId }),
+      body: JSON.stringify({ storyboardOptions, storyboardConfigOverride, frameProfileId, qualityFeedback }),
     });
   },
   saveDouyinRunStoryboard(awemeId, runId, storyboard = {}) {

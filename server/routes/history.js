@@ -1,6 +1,8 @@
 const express = require('express');
 const db = require('../db');
 const mediaPipeline = require('../services/mediaPipeline');
+const { deleteHistoryItems } = require('../services/historyCleanup');
+const { listCrawlKeywords } = require('../services/crawlKeywords');
 
 const router = express.Router();
 
@@ -75,6 +77,34 @@ router.get('/xhs', (req, res) => {
     ? db.prepare('SELECT * FROM xhs_notes WHERE source_keyword = ? ORDER BY crawled_at DESC LIMIT 200').all(keyword)
     : db.prepare('SELECT * FROM xhs_notes ORDER BY crawled_at DESC LIMIT 200').all();
   res.json({ success: true, count: rows.length, data: rows });
+});
+
+router.get('/:platform/keywords', (req, res) => {
+  const platform = req.params.platform === 'xhs' ? 'xhs' : 'douyin';
+  const data = listCrawlKeywords(platform);
+  res.json({ success: true, platform, count: data.length, data });
+});
+
+router.delete('/:platform', async (req, res) => {
+  const platform = req.params.platform === 'xhs' ? 'xhs' : 'douyin';
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  try {
+    const result = await deleteHistoryItems(platform, ids);
+    if (!result.success) {
+      return res.status(400).json(result);
+    }
+    return res.json({
+      ...result,
+      message: `已删除 ${result.deleted_ids.length} 条抓取记录及本地产物。`,
+    });
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      platform,
+      message: `删除失败：${error.message}`,
+      error: error.message,
+    });
+  }
 });
 
 module.exports = router;

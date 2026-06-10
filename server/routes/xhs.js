@@ -1,6 +1,8 @@
 const express = require('express');
 const { searchNotes: searchXhsNotes, getNoteDetail } = require('../scraper/xhs');
 const storedCookies = require('../state/cookies');
+const { saveCrawlKeyword } = require('../services/crawlKeywords');
+const { saveXhsNotes } = require('../services/xhsStore');
 
 const router = express.Router();
 
@@ -11,7 +13,11 @@ router.get('/search', async (req, res) => {
   console.log(`[API] XHS search: ${keyword}`);
   try {
     const results = await searchXhsNotes(keyword, parseInt(max, 10), storedCookies.xhs);
-    return res.json({ success: true, count: results.length, data: results });
+    const store = saveXhsNotes(results);
+    if (store.saved > 0) {
+      saveCrawlKeyword('xhs', keyword);
+    }
+    return res.json({ success: true, count: results.length, data: results, store });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, error: err.message });
