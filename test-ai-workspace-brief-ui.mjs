@@ -9,5 +9,6 @@ const source = fs.readFileSync(aiWorkspacePath, 'utf-8');
 
 assert.ok(!source.includes('<h4>创作 brief</h4>'));
 assert.ok(!source.includes('<h4>AI 分镜视觉 brief</h4>'));
+assert.ok(!source.includes('setAgentMessagesPreview'));
 
-console.log('AI 工作台不再展示 brief 输入区。');
+console.log('AI 工作台不再展示 brief 输入区，且 messages 预览状态引用有效。');

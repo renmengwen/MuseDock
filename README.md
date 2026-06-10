@@ -1,21 +1,21 @@
 # MuseDock
 
-MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作台。它把抖音内容抓取、评论缓存、素材准备、音频转写、AI 拆解改写、TTS 口播、AI 分镜、分镜人工校正和 HyperFrames MP4 渲染串在同一个 Web GUI 里，适合把短视频素材沉淀为可复用的本地创作资产。
+MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作台。它把抖音内容采集、评论缓存、素材准备、音频转写、AI 拆解改写、TTS 口播、AI 分镜、人工校正和 HyperFrames MP4 渲染串在同一个 Web GUI 里，适合把短视频素材沉淀为可复用的本地创作资产。
 
-当前完整工作流以抖音为主；小红书保留搜索、详情和历史入口，后续再补齐评论、素材与成片链路。
+当前主链路以抖音为主；小红书保留搜索、详情和历史入口，后续再补齐评论、素材与成片链路。
 
 ## 当前能力
 
 - **内容采集**：支持抖音扫码登录、关键词搜索、视频 ID/链接抓取、作者主页视频抓取；支持小红书关键词搜索和笔记详情读取。
 - **评论缓存**：支持抖音一级评论和二级评论抓取，结果写入本地 SQLite，并在抓取记录里展示缓存状态和数量。
 - **素材工作台**：支持抖音视频下载、音频抽取、关键帧抽取、素材状态查看，可从记录页跳转并自动准备 AI 所需素材。
-- **音频转写**：接入小米 MiMo ASR，支持大音频压缩；压缩后仍超限时自动切片、逐段转写并合并结果。
+- **音频转写**：接入小米 MiMo ASR，支持大音频压缩；压缩后仍超限时会自动切片、逐段转写并合并结果。
 - **AI 工作台**：基于本地素材、转写文本和评论缓存执行 Agent，目前内置“爆款拆解 + 改写脚本”和“评论洞察”两类任务。
-- **可编辑 Agent 模板**：AI 工作台支持编辑任务 Agent 与分镜 Agent 的 `system prompt`、`user prompt` 模板、模型参数，支持预览 messages、保存本地覆盖配置、恢复默认配置。
+- **可编辑 Agent 模板**：支持编辑任务 Agent 与分镜 Agent 的 `system prompt`、`user prompt` 模板和模型参数，支持预览 messages、保存本地覆盖配置、恢复默认配置。
 - **运行记录与调试信息**：Agent 运行会保存模板快照、最终 messages、原始模型输出、解析状态和校验结果，便于复盘和排错。
 - **TTS 口播与字幕时间轴**：基于 MiMo TTS 按句合成口播音频，使用 `ffprobe` 读取真实分段时长，并保存可复用的 `tts.captions`。
 - **AI 分镜与人工校正**：文字模型生成原创视觉分镜和 `caption_indexes`，后端根据 `tts.captions` 计算最终时间轴；页面支持编辑分镜标题、字幕索引、视觉类型、布局、背景提示和强调词。
-- **HyperFrames 成片**：根据规范化分镜、TTS 音频和渲染参数生成 HTML/CSS/GSAP 视频工程，并调用 HyperFrames CLI 渲染 `output.mp4`。
+- **HyperFrames 三层成片链路**：任务 Agent 生成 `video_brief`，分镜 Agent 作为 HyperFrames 视觉导演自动选择 `visual_type` 并输出 `visual_scene` DSL，渲染层消费 DSL 生成 HTML/CSS/GSAP 视频工程和 MP4。
 - **模型配置**：设置页支持 ASR、文字模型、TTS、图片生成、视频生成和多模态模型配置。
 - **持久化页面状态**：主要页面在路由切换时保留工作区状态，减少来回查看素材、AI 运行和设置时的重复加载。
 
@@ -26,10 +26,10 @@ MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作�
 3. 在“记录”页查看抓取结果、缓存评论，并跳转到素材工作台。
 4. 在“素材”页准备本地视频、音频、关键帧和分析输入。
 5. 执行音频转写，生成 `transcript.json`。
-6. 在“AI 工作台”载入 `aweme_id`，选择任务 Agent。
-7. 按需编辑 Agent 模板或直接运行“爆款拆解 + 改写脚本”“评论洞察”。
-8. 在“配音”页签选择音色和语气，执行 TTS 合成并生成字幕时间轴。
-9. 在“成片”页签生成 AI 分镜，必要时展开分镜列表进行人工校正。
+6. 在“AI 工作台”加载 `aweme_id`，选择任务 Agent。
+7. 按需编辑 Agent 模板，或直接运行“爆款拆解 + 改写脚本”“评论洞察”。
+8. 在“配音”页选择音色和语气，执行 TTS 合成并生成字幕时间轴。
+9. 在“成片”页生成 AI 分镜，必要时展开分镜列表进行人工校正。
 10. 选择渲染参数，生成 HyperFrames 视频工程并渲染 MP4。
 
 最终视频通常生成在：
@@ -38,9 +38,19 @@ MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作�
 data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/output.mp4
 ```
 
+## HyperFrames 成片设计
+
+MuseDock 的成片链路不是简单字幕卡片拼接，而是分为三层：
+
+- **任务 Agent 层**：把素材、评论和转写结果整理成脚本，同时生成 `video_brief`，约束目标时长、目标字数、叙事节奏、hook 和段落 beats。
+- **分镜 Agent 层**：以“HyperFrames 视觉导演 / DOM/CSS/GSAP 专家”为角色，依据脚本、字幕索引和 `video_brief` 自动选择 `visual_type`，并输出结构化 `visual_scene` DSL。
+- **渲染层**：后端规范化分镜，生成 HyperFrames HTML/CSS/GSAP 工程，支持 workflow、code_panel、ui_mockup、split_compare、concept_map、timeline、quote_burst 以及旧版卡片类型的兼容渲染。
+
+`visual_type` 默认由 AI 自动抉择，用户不需要手动指定。后端会对白名单、字幕索引、场景结构和 DSL 做校验与 fallback，尽量保证最终画面可渲染、字幕完整覆盖。
+
 ## 关键约束
 
-- 最终成片默认生成原创图文/动效画面，不直接复用原视频、原视频帧、关键帧截图或原视频背景。
+- 最终成片默认生成原创图文 + 动效画面，不直接复用原视频、原视频帧、关键帧截图或原视频背景。
 - Agent 输出必须经过后端解析、规范化和校验；前端可编辑配置，但运行记录会保存实际使用的配置快照。
 - AI 分镜只负责视觉结构和字幕引用，不直接决定最终时间轴。
 - 最终时间轴以 `tts.captions` 为准，由后端统一计算 `start`、`end` 和 `duration`。
@@ -119,7 +129,10 @@ npm test
 node test-agent-template-overrides.js
 node test-agent-runs.js
 node test-ai-tts-model.js
+node test-storyboard-schema.js
 node test-storyboard-agent.js
+node test-hyperframes-visual-dsl.js
+node test-hyperframes-scene-renderers.js
 node test-hyperframes-project.js
 node test-hyperframes-renderer.js
 ```
@@ -255,6 +268,8 @@ node test-agent-template-overrides.js
 node test-agent-runs.js
 node test-storyboard-schema.js
 node test-storyboard-agent.js
+node test-hyperframes-visual-dsl.js
+node test-hyperframes-scene-renderers.js
 node test-hyperframes-project.js
 node test-hyperframes-renderer.js
 ```

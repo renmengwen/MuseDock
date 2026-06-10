@@ -56,6 +56,15 @@ async function run() {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-runs-test-'));
   const awemeId = '1234567890';
   const paths = mediaPipeline.getMediaPaths(awemeId, rootDir);
+  const validVideoBrief = {
+    target_duration_sec: 60,
+    target_word_count: 220,
+    tone: '知识科普',
+    hook: '开场钩子',
+    beats: [
+      { purpose: 'hook', summary: '开场', duration_sec: 5, visual_intent: '关键词爆点' },
+    ],
+  };
   const illegalAwemeId = '..\\agent-runs-escape';
   const escapedDir = path.resolve(rootDir, '..', 'agent-runs-escape');
   const escapedRunsDir = path.join(escapedDir, 'agent_runs');
@@ -180,6 +189,7 @@ async function run() {
             topics: ['本地素材管理'],
             rewrite_script: '改写脚本',
             titles: ['标题一'],
+            video_brief: validVideoBrief,
           }),
         };
       },
@@ -228,6 +238,7 @@ async function run() {
             topics: ['配置'],
             rewrite_script: '覆盖脚本',
             titles: ['覆盖标题'],
+            video_brief: validVideoBrief,
           }),
         };
       },
@@ -306,6 +317,7 @@ async function run() {
             topics: ['选题'],
             rewrite_script: '脚本',
             titles: ['标题'],
+            video_brief: validVideoBrief,
           }),
           model: { provider: 'mock' },
         };
@@ -697,7 +709,7 @@ async function run() {
         return {
           success: true,
           model: { provider: 'OpenAI', model_id: 'gpt-test' },
-          text: JSON.stringify({ summary: '长转写摘要' }),
+          text: JSON.stringify({ summary: '长转写摘要', video_brief: validVideoBrief }),
         };
       },
     },
@@ -723,7 +735,7 @@ async function run() {
       callTextModel: async () => ({
         success: true,
         model: { provider: 'OpenAI', model_id: 'gpt-test' },
-        text: JSON.stringify({ summary: '并发摘要' }),
+        text: JSON.stringify({ summary: '并发摘要', video_brief: validVideoBrief }),
       }),
     },
     getLocalComments: () => ({ success: true, count: 0, data: [] }),

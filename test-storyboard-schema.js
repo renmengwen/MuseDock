@@ -50,6 +50,183 @@ function run() {
   assert.equal(normalized.scenes[1].start, 3.75);
   assert.equal(normalized.scenes[1].end, 5);
 
+  const visualDsl = schema.normalizeStoryboard({
+    storyboard: {
+      template: 'ai_storyboard_cards',
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '传统开发链路',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创流程背景',
+          emphasis_words: ['产品需求'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [
+              { id: 'node-1', type: 'node', text: '产品需求', role: 'primary' },
+              { id: 'node-2', type: 'node', text: '设计界面', role: 'primary' },
+              { id: 'bad', type: 'unknown', text: '应该被丢弃' },
+            ],
+            motion: [
+              { target: 'node', effect: 'stagger_reveal', delay: 0.1 },
+              { target: 'bad', effect: 'explode', delay: 999 },
+            ],
+            focus: { text: '流程太重', style: 'warning_pulse' },
+          },
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(visualDsl.scenes[0].visual_type, 'workflow');
+  assert.equal(visualDsl.scenes[0].visual_scene.composition, 'vertical_flow');
+  assert.equal(visualDsl.scenes[0].visual_scene.objects.length, 2);
+  assert.equal(visualDsl.scenes[0].visual_scene.objects[0].type, 'node');
+  assert.equal(visualDsl.scenes[0].visual_scene.motion.length, 1);
+  assert.equal(visualDsl.scenes[0].visual_scene.motion[0].effect, 'stagger_reveal');
+  assert.equal(visualDsl.scenes[0].visual_scene.focus.text, '流程太重');
+
+  const semanticObjects = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [{
+        caption_indexes: [1],
+        headline: '概念路径',
+        visual_type: 'concept_map',
+        layout: 'map',
+        background_prompt: '原创背景',
+        emphasis_words: ['核心'],
+        visual_scene: {
+          composition: 'radial_map',
+          objects: [
+            { id: 'center-1', type: 'center', text: '核心概念' },
+            { id: 'step-1', type: 'step', text: '第一步' },
+          ],
+          motion: [{ target: 'center', effect: 'pulse', delay: 0.1 }],
+        },
+      }],
+    },
+    captions,
+  });
+  assert.deepStrictEqual(semanticObjects.scenes[0].visual_scene.objects.map(item => item.type), ['center', 'step']);
+
+  const objectsKeptWhenMotionFallback = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: 'keep objects',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: 'abstract background',
+          emphasis_words: ['fallback word'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ id: 'node-keep', type: 'node', text: 'Keep Node' }],
+            motion: [{ target: 'node-keep', effect: 'unknown_effect', delay: 0.1 }],
+          },
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(objectsKeptWhenMotionFallback.scenes[0].visual_scene.objects.length, 1);
+  assert.equal(objectsKeptWhenMotionFallback.scenes[0].visual_scene.objects[0].id, 'node-keep');
+  assert.equal(objectsKeptWhenMotionFallback.scenes[0].visual_scene.motion.length, 2);
+  assert.equal(objectsKeptWhenMotionFallback.scenes[0].visual_scene.motion[0].effect, 'stagger_reveal');
+
+  const objectsKeptWhenMotionEmpty = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: 'empty motion',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: 'abstract background',
+          emphasis_words: ['fallback word'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ id: 'node-empty-motion', type: 'node', text: 'Still Keep' }],
+            motion: [],
+          },
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(objectsKeptWhenMotionEmpty.scenes[0].visual_scene.objects.length, 1);
+  assert.equal(objectsKeptWhenMotionEmpty.scenes[0].visual_scene.objects[0].id, 'node-empty-motion');
+  assert.equal(objectsKeptWhenMotionEmpty.scenes[0].visual_scene.motion[0].effect, 'stagger_reveal');
+
+  const motionKeptWhenObjectsFallback = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: 'keep motion',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: 'abstract background',
+          emphasis_words: ['fallback word'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ id: 'bad-object', type: 'unknown', text: 'Drop Object' }],
+            motion: [{ target: 'focus', effect: 'pulse', delay: 0.4 }],
+          },
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(motionKeptWhenObjectsFallback.scenes[0].visual_scene.objects[0].type, 'keyword');
+  assert.equal(motionKeptWhenObjectsFallback.scenes[0].visual_scene.motion.length, 1);
+  assert.equal(motionKeptWhenObjectsFallback.scenes[0].visual_scene.motion[0].effect, 'pulse');
+  assert.equal(motionKeptWhenObjectsFallback.scenes[0].visual_scene.motion[0].delay, 0.4);
+
+  const motionKeptWhenObjectsEmpty = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: 'empty objects',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: 'abstract background',
+          emphasis_words: ['fallback word'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [],
+            motion: [{ target: 'focus', effect: 'pulse', delay: 0.4 }],
+          },
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(motionKeptWhenObjectsEmpty.scenes[0].visual_scene.objects[0].type, 'keyword');
+  assert.equal(motionKeptWhenObjectsEmpty.scenes[0].visual_scene.motion.length, 1);
+  assert.equal(motionKeptWhenObjectsEmpty.scenes[0].visual_scene.motion[0].effect, 'pulse');
+
+  const fallbackVisual = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '未知类型',
+          visual_type: 'imaginary_camera_scene',
+          layout: 'center_focus',
+          background_prompt: '原创背景',
+          emphasis_words: ['重点一', '重点二'],
+        },
+      ],
+    },
+    captions,
+  });
+  assert.equal(fallbackVisual.scenes[0].visual_type, 'quote_burst');
+  assert.equal(fallbackVisual.scenes[0].visual_scene.composition, 'burst_center');
+  assert.ok(fallbackVisual.scenes[0].visual_scene.objects.length >= 2);
+
   const fallback = schema.normalizeStoryboard({
     storyboard: { scenes: [] },
     captions: [
@@ -139,6 +316,133 @@ function run() {
     ],
   });
   assert.equal(valid.success, true);
+
+  const visualValidation = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '视觉 DSL',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创背景',
+          emphasis_words: ['重点'],
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ type: 'node', text: '节点' }],
+            motion: [{ target: 'node', effect: 'stagger_reveal' }],
+          },
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(visualValidation.success, true);
+
+  const invalidVisualType = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '非法类型',
+          visual_type: 'camera_flythrough',
+          layout: 'center_focus',
+          background_prompt: '原创背景',
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(invalidVisualType.success, false);
+  assert.ok(invalidVisualType.errors.some(item => item.includes('画面类型不受支持')));
+
+  const missingVisualScene = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '缺少 DSL',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创背景',
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(missingVisualScene.success, false);
+
+  const unknownObjectType = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '未知对象',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创背景',
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ type: 'unknown_object', text: '未知' }],
+            motion: [{ target: 'node', effect: 'stagger_reveal' }],
+          },
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(unknownObjectType.success, false);
+  assert.ok(unknownObjectType.errors.some(item => item.includes('visual_scene.objects 包含不受支持的对象类型')));
+
+  const unknownMotionEffect = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '未知动效',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创背景',
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ type: 'node', text: '节点' }],
+            motion: [{ target: 'node', effect: 'explode' }],
+          },
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(unknownMotionEffect.success, false);
+  assert.ok(unknownMotionEffect.errors.some(item => item.includes('visual_scene.motion 包含不受支持的动效')));
+
+  const legacyTextCardWithoutVisualScene = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '旧卡片',
+          visual_type: 'text_card',
+          layout: 'center_focus',
+          background_prompt: '原创背景',
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(legacyTextCardWithoutVisualScene.success, true);
 }
 
 try {

@@ -161,6 +161,14 @@ function validateTaskAgentResult(value, templateDefinition) {
     }
   }
 
+  if (templateDefinition.id === TEMPLATE_VIRAL_REWRITE) {
+    if (!result.video_brief || typeof result.video_brief !== 'object' || Array.isArray(result.video_brief)) {
+      errors.push('video_brief 必须是对象。');
+    } else if (!Array.isArray(result.video_brief.beats)) {
+      errors.push('video_brief.beats 必须是数组。');
+    }
+  }
+
   return { success: errors.length === 0, errors };
 }
 
@@ -681,6 +689,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
   }
 
   const agent = options.storyboardAgent || defaultStoryboardAgent;
+  const videoBrief = run?.result?.video_brief || {};
   const storyboardOptions = defaultStoryboardAgent.normalizeStoryboardOptions(options.storyboardOptions || run.storyboard_options || {});
   const storyboardConfig = await agentTemplateOverrides.resolveStoryboardAgentConfig({
     rootDir: options.rootDir,
@@ -697,6 +706,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
   const result = await agent.createStoryboard({
     rewriteScript,
     captions,
+    videoBrief,
     storyboardOptions,
     editableConfig: storyboardConfig,
     aiTextModel: options.aiTextModel,

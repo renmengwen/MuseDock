@@ -300,7 +300,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
     setAgentConfig(detailJson.data);
     setAgentConfigDraft(detailJson.data);
     setAgentResultSchemaText(JSON.stringify(detailJson.data?.resultSchema || {}, null, 2));
-    setAgentMessagesPreview(null);
+    setMessagesPreview(null);
     const storyboardTemplateJson = await api.getStoryboardTemplate();
     setStoryboardConfig(storyboardTemplateJson.data);
     setStoryboardConfigDraft(storyboardTemplateJson.data);
@@ -362,7 +362,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
       setAgentConfig(detailJson.data);
       setAgentConfigDraft(detailJson.data);
       setAgentResultSchemaText(JSON.stringify(detailJson.data?.resultSchema || {}, null, 2));
-      setAgentMessagesPreview(null);
+      setMessagesPreview(null);
       setStatus({ type: 'success', message: 'Agent 模板配置已加载。' });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
