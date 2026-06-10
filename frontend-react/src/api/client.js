@@ -162,11 +162,21 @@ export const api = {
       body: JSON.stringify({ template, promptOptions, agentConfigOverride }),
     });
   },
+  createDouyinStoryboardPlanRun(awemeId, promptOptions = {}) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/storyboard-plan-runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptOptions }),
+    });
+  },
   listDouyinAgentRuns(awemeId) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`);
   },
   getDouyinAgentRun(awemeId, runId) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}`);
+  },
+  getDouyinRunNextAction(awemeId, runId) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/next-action`);
   },
   synthesizeDouyinRunTts(awemeId, runId, payload = {}) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/tts`, {
@@ -175,8 +185,22 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  synthesizeDouyinRunSceneTts(awemeId, runId, payload = {}) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/scene-tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
   createDouyinRunStoryboard(awemeId, runId, storyboardOptions = {}, storyboardConfigOverride = null, frameProfileId = '', qualityFeedback = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/storyboard`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ storyboardOptions, storyboardConfigOverride, frameProfileId, qualityFeedback }),
+    });
+  },
+  createDouyinRunVisualStoryboard(awemeId, runId, storyboardOptions = {}, storyboardConfigOverride = null, frameProfileId = '', qualityFeedback = null) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/visual-storyboard`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ storyboardOptions, storyboardConfigOverride, frameProfileId, qualityFeedback }),

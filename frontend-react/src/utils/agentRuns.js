@@ -36,6 +36,47 @@ export function getAgentStepLabel(status) {
   return labels[status] || '未知';
 }
 
+export function getWorkflowStageLabel(stage) {
+  const labels = {
+    empty: '未开始',
+    storyboard_plan: '导演分镜',
+    storyboard_plan_ready: '导演分镜已完成',
+    scene_tts: '分段配音',
+    tts_ready: '分段配音已完成',
+    visual_storyboard: '视觉分镜',
+    storyboard_ready: '视觉分镜已完成',
+    visual_storyboard_failed: '视觉分镜失败',
+    video_project: '视频工程',
+    video_project_ready: '视频工程已完成',
+    needs_script_repair: '需要修复脚本',
+    needs_visual_repair: '需要修复视觉分镜',
+    needs_storyboard_repair: '需要修复视觉分镜',
+    done: '已完成',
+  };
+
+  return labels[stage] || '未知阶段';
+}
+
+export function getWorkflowActionLabel(action) {
+  const labels = {
+    generate_storyboard_plan: '生成导演分镜',
+    synthesize_scene_tts: '生成分段配音',
+    retry_scene_tts: '重新生成分段配音',
+    generate_visual_storyboard: '生成视觉分镜',
+    repair_visual_storyboard: '修复视觉分镜',
+    generate_video_project: '生成视频工程',
+    render_video: '渲染视频',
+    compress_scene_narration: '压缩超时分镜并重新配音',
+    done: '已完成',
+  };
+
+  return labels[action] || '继续处理';
+}
+
+export function isLegacyAgentRun(run) {
+  return !!(run?.result?.rewrite_script && !run?.storyboard_plan);
+}
+
 export function getRunDisplayTime(value) {
   if (!value) return '-';
 

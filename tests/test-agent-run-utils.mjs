@@ -7,6 +7,9 @@ import {
   getRunDisplayTime,
   getStoryboardSceneIssues,
   getValidationSummary,
+  getWorkflowActionLabel,
+  getWorkflowStageLabel,
+  isLegacyAgentRun,
   sanitizeStoryboardSceneText,
 } from '../frontend-react/src/utils/agentRuns.js';
 
@@ -64,6 +67,13 @@ assert.equal(getAgentStepLabel('failed'), '失败');
 assert.equal(getAgentStepLabel('running'), '执行中');
 assert.equal(getAgentStepLabel('pending'), '等待中');
 assert.equal(getAgentStepLabel('paused'), '未知');
+
+assert.equal(getWorkflowStageLabel('storyboard_plan'), '导演分镜');
+assert.equal(getWorkflowStageLabel('scene_tts'), '分段配音');
+assert.equal(getWorkflowActionLabel('synthesize_scene_tts'), '生成分段配音');
+assert.equal(getWorkflowActionLabel('compress_scene_narration'), '压缩超时分镜并重新配音');
+assert.equal(isLegacyAgentRun({ result: { rewrite_script: '旧脚本' }, storyboard_plan: null }), true);
+assert.equal(isLegacyAgentRun({ storyboard_plan: { status: 'planned' } }), false);
 
 assert.equal(getRunDisplayTime(), '-');
 assert.equal(getRunDisplayTime(''), '-');
