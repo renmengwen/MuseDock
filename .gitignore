@@ -41,5 +41,5 @@ Thumbs.db
 docs/handoff-*.md
 
 # Local debug files that may contain account cookies or temporary code
-test-douyin.js
+scripts/debug/test-douyin.js
 server/scraper/*.backup

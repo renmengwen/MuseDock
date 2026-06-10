@@ -39,7 +39,7 @@ function normalizeRenderOptions(value = {}) {
     showCaptionBar: normalizeBoolean(source.showCaptionBar, RENDER_DEFAULTS.showCaptionBar),
     showSceneNumber: normalizeBoolean(source.showSceneNumber, RENDER_DEFAULTS.showSceneNumber),
     quality: pickAllowed(source.quality, ['standard', 'high'], RENDER_DEFAULTS.quality),
-    frameStyle: pickAllowed(source.frameStyle, ['tech_neon'], RENDER_DEFAULTS.frameStyle),
+    frameStyle: pickAllowed(source.frameStyle, ['tech_neon', 'creative_brutalist'], RENDER_DEFAULTS.frameStyle),
     transitionStyle: pickAllowed(source.transitionStyle, ['auto', 'wipe', 'glitch', 'zoom'], RENDER_DEFAULTS.transitionStyle),
     captionMode: pickAllowed(source.captionMode, ['standard', 'kinetic'], RENDER_DEFAULTS.captionMode),
   };
@@ -374,6 +374,8 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
     .neon-grid { background-image: linear-gradient(rgba(37,244,238,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(37,244,238,.1) 1px, transparent 1px); background-size: 52px 52px; mask-image: radial-gradient(circle at 50% 38%, #000 0 58%, transparent 78%); }
     .scanline { background: repeating-linear-gradient(180deg, rgba(255,255,255,.035) 0 1px, transparent 1px 7px); mix-blend-mode: screen; opacity: .55; }
     .radial-energy { background: radial-gradient(circle at 16% 14%, rgba(37,244,238,.32), transparent 28%), radial-gradient(circle at 82% 20%, rgba(254,44,85,.26), transparent 30%), radial-gradient(circle at 50% 86%, rgba(255,209,102,.12), transparent 34%); filter: blur(1px); }
+    .paper-grain { background-image: repeating-linear-gradient(0deg, rgba(15,15,15,.035) 0 1px, transparent 1px 5px), repeating-linear-gradient(90deg, rgba(15,15,15,.025) 0 1px, transparent 1px 7px); opacity: .72; }
+    .ink-grid { background-image: linear-gradient(rgba(15,15,15,.1) 2px, transparent 2px), linear-gradient(90deg, rgba(15,15,15,.1) 2px, transparent 2px); background-size: 78px 78px; opacity: .32; }
     .transition-layer { position: absolute; inset: -12% -28%; z-index: 40; pointer-events: none; background: linear-gradient(90deg, transparent, rgba(37,244,238,.18), rgba(254,44,85,.75), transparent); transform: skewX(-14deg); opacity: 0; }
     .scene { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; padding: 120px 82px 220px; box-sizing: border-box; background:
       linear-gradient(150deg, color-mix(in srgb, var(--accent) 22%, transparent), transparent 28%),
@@ -397,7 +399,7 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
     .step-orbit span { color: var(--accent); font-size: 42px; font-weight: 900; }
     .step-line { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .step-line i { display: block; height: 8px; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--frame-hot)); }
-    .scene-content--workflow, .scene-content--code-panel, .scene-content--ui-mockup, .scene-content--split-compare, .scene-content--concept-map, .scene-content--timeline, .scene-content--quote-burst, .scene-content--dsl-layer { border-left: 0; overflow: visible; }
+    .scene-content--workflow, .scene-content--code-panel, .scene-content--code-walkthrough, .scene-content--ui-mockup, .scene-content--split-compare, .scene-content--concept-map, .scene-content--timeline, .scene-content--timeline-sync, .scene-content--formula-build, .scene-content--checklist-pipeline, .scene-content--quote-burst, .scene-content--dsl-layer { border-left: 0; overflow: visible; }
     .visual-flow, .visual-timeline, .visual-concept-branches { display: grid; gap: 18px; }
     .visual-flow { grid-template-columns: 1fr; }
     .visual-node, .visual-milestone, .visual-pill, .visual-ui-item, .visual-branch { border: 1px solid color-mix(in srgb, var(--accent) 58%, transparent); background: rgba(255,255,255,.065); padding: 16px 18px; border-radius: 8px; color: #fff; font-weight: 800; overflow-wrap: anywhere; }
@@ -419,6 +421,15 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
     .visual-concept-center { width: 160px; height: 160px; display: grid; place-items: center; border-radius: 999px; background: var(--accent); color: #001014; font-weight: 900; justify-self: center; text-align: center; }
     .visual-concept-branches { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .visual-timeline { position: relative; }
+    .visual-formula { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 16px; }
+    .visual-formula-token { min-width: 118px; padding: 18px 20px; border: 1px solid color-mix(in srgb, var(--accent) 68%, transparent); border-radius: 8px; background: rgba(255,255,255,.075); color: #fff; font-size: 38px; font-weight: 900; text-align: center; box-shadow: 0 0 34px color-mix(in srgb, var(--accent) 18%, transparent); overflow-wrap: anywhere; }
+    .visual-checklist { display: grid; gap: 14px; }
+    .visual-check-item { display: grid; grid-template-columns: 54px 1fr 34px; align-items: center; gap: 12px; min-height: 72px; padding: 16px 18px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--accent) 58%, transparent); background: rgba(255,255,255,.065); color: #fff; }
+    .visual-check-item span { color: var(--accent); font-weight: 900; }
+    .visual-check-item strong { font-size: 30px; overflow-wrap: anywhere; }
+    .visual-check-item i { width: 28px; height: 28px; border-radius: 999px; border: 2px solid var(--accent); box-shadow: inset 0 0 0 0 var(--accent); }
+    .visual-sync-track { position: relative; height: 10px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+    .visual-sync-track i { display: block; width: 100%; height: 100%; transform: scaleX(0); transform-origin: left center; background: linear-gradient(90deg, var(--accent), var(--frame-hot)); }
     .scene-content--dsl-layer { min-height: 860px; align-items: center; text-align: center; isolation: isolate; }
     .visual-focus { width: 220px; height: 220px; display: grid; place-items: center; border-radius: 999px; background: radial-gradient(circle, color-mix(in srgb, var(--accent) 72%, #fff), color-mix(in srgb, var(--accent) 22%, transparent)); color: #061014; font-size: 34px; font-weight: 900; box-shadow: 0 0 70px color-mix(in srgb, var(--accent) 42%, transparent); }
     .visual-layer-cloud { width: 100%; min-height: 360px; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 22px; }
