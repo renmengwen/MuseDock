@@ -87,6 +87,29 @@ function run() {
   assert.equal(visualDsl.scenes[0].visual_scene.motion[0].effect, 'stagger_reveal');
   assert.equal(visualDsl.scenes[0].visual_scene.focus.text, '流程太重');
 
+  const semanticObjects = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [{
+        caption_indexes: [1],
+        headline: '概念路径',
+        visual_type: 'concept_map',
+        layout: 'map',
+        background_prompt: '原创背景',
+        emphasis_words: ['核心'],
+        visual_scene: {
+          composition: 'radial_map',
+          objects: [
+            { id: 'center-1', type: 'center', text: '核心概念' },
+            { id: 'step-1', type: 'step', text: '第一步' },
+          ],
+          motion: [{ target: 'center', effect: 'pulse', delay: 0.1 }],
+        },
+      }],
+    },
+    captions,
+  });
+  assert.deepStrictEqual(semanticObjects.scenes[0].visual_scene.objects.map(item => item.type), ['center', 'step']);
+
   const objectsKeptWhenMotionFallback = schema.normalizeStoryboard({
     storyboard: {
       scenes: [
@@ -317,6 +340,109 @@ function run() {
     ],
   });
   assert.equal(visualValidation.success, true);
+
+  const invalidVisualType = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '非法类型',
+          visual_type: 'camera_flythrough',
+          layout: 'center_focus',
+          background_prompt: '原创背景',
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(invalidVisualType.success, false);
+  assert.ok(invalidVisualType.errors.some(item => item.includes('画面类型不受支持')));
+
+  const missingVisualScene = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '缺少 DSL',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创背景',
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(missingVisualScene.success, false);
+
+  const unknownObjectType = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '未知对象',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创背景',
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ type: 'unknown_object', text: '未知' }],
+            motion: [{ target: 'node', effect: 'stagger_reveal' }],
+          },
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(unknownObjectType.success, false);
+  assert.ok(unknownObjectType.errors.some(item => item.includes('visual_scene.objects 包含不受支持的对象类型')));
+
+  const unknownMotionEffect = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '未知动效',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创背景',
+          visual_scene: {
+            composition: 'vertical_flow',
+            objects: [{ type: 'node', text: '节点' }],
+            motion: [{ target: 'node', effect: 'explode' }],
+          },
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(unknownMotionEffect.success, false);
+  assert.ok(unknownMotionEffect.errors.some(item => item.includes('visual_scene.motion 包含不受支持的动效')));
+
+  const legacyTextCardWithoutVisualScene = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '旧卡片',
+          visual_type: 'text_card',
+          layout: 'center_focus',
+          background_prompt: '原创背景',
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(legacyTextCardWithoutVisualScene.success, true);
 }
 
 try {

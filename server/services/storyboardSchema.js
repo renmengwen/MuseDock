@@ -6,8 +6,9 @@ const DEFAULT_STYLE = {
 };
 
 const VISUAL_TYPE_ALLOWED = ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst', 'text_card', 'quote_card', 'step_card', 'contrast_card'];
-const VISUAL_OBJECT_ALLOWED = ['node', 'connector', 'code', 'terminal', 'panel', 'button', 'field', 'metric', 'column', 'branch', 'milestone', 'badge', 'keyword'];
+const VISUAL_OBJECT_ALLOWED = ['node', 'connector', 'code', 'terminal', 'panel', 'button', 'field', 'metric', 'column', 'branch', 'milestone', 'badge', 'keyword', 'center', 'step'];
 const VISUAL_MOTION_ALLOWED = ['stagger_reveal', 'draw_line', 'type_in', 'scan', 'pulse', 'slide_in', 'zoom_focus', 'highlight', 'float'];
+const VISUAL_DSL_TYPES = ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst'];
 
 function roundTime(value) {
   return Math.round(Number(value || 0) * 1000) / 1000;
@@ -275,6 +276,38 @@ function normalizeStoryboard({ storyboard = {}, captions = [] } = {}) {
   };
 }
 
+function validateRawVisualDsl(scene, label, errors) {
+  const visualType = sanitizeText(scene.visual_type);
+  if (visualType && !VISUAL_TYPE_ALLOWED.includes(visualType)) errors.push(`${label} 画面类型不受支持。`);
+  if (!VISUAL_DSL_TYPES.includes(visualType)) return;
+
+  const visualScene = scene.visual_scene;
+  const hasVisualScene = visualScene && typeof visualScene === 'object' && !Array.isArray(visualScene);
+  if (!hasVisualScene) {
+    errors.push(`${label} visual_scene 必须是对象。`);
+    return;
+  }
+
+  if (!sanitizeText(visualScene.composition)) errors.push(`${label} visual_scene.composition 不能为空。`);
+  if (!Array.isArray(visualScene.objects) || visualScene.objects.length === 0) {
+    errors.push(`${label} visual_scene.objects 不能为空。`);
+  } else if (visualScene.objects.some(item => {
+    const type = item && typeof item === 'object' && !Array.isArray(item) ? item.type : null;
+    return !VISUAL_OBJECT_ALLOWED.includes(type);
+  })) {
+    errors.push(`${label} visual_scene.objects 包含不受支持的对象类型。`);
+  }
+
+  if (!Array.isArray(visualScene.motion) || visualScene.motion.length === 0) {
+    errors.push(`${label} visual_scene.motion 不能为空。`);
+  } else if (visualScene.motion.some(item => {
+    const effect = item && typeof item === 'object' && !Array.isArray(item) ? item.effect : null;
+    return !VISUAL_MOTION_ALLOWED.includes(effect);
+  })) {
+    errors.push(`${label} visual_scene.motion 包含不受支持的动效。`);
+  }
+}
+
 function validateStoryboardEditableInput({ storyboard = {}, captions = [] } = {}) {
   const normalizedCaptions = normalizeCaptions(captions);
   const captionIndexes = new Set(normalizedCaptions.map(item => item.index));
@@ -287,6 +320,7 @@ function validateStoryboardEditableInput({ storyboard = {}, captions = [] } = {}
   scenes.forEach((scene, sceneIndex) => {
     const label = `分镜 ${sceneIndex + 1}`;
     const indexes = asArray(scene.caption_indexes).map(item => Number(item)).filter(Number.isFinite);
+    validateRawVisualDsl(scene, label, errors);
 
     if (!indexes.length) errors.push(`${label} 必须至少引用一条字幕。`);
     indexes.forEach(index => {
