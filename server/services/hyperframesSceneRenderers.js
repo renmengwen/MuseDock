@@ -39,8 +39,32 @@ function objectText(object = {}) {
 
 function renderObjectList(objects = [], className = 'visual-pill') {
   return objects.map((object, index) => (
-      `<div class="${escapeAttribute(className)}" data-visual-object="${objectId(object, index)}">${objectText(object)}</div>`
+      `<div class="${escapeAttribute(className)}" data-visual-object="${objectId(object, index)}" data-visual-role="${escapeAttribute(object.role || '')}" data-visual-style="${escapeAttribute(object.style || '')}">${objectText(object)}</div>`
   )).join('');
+}
+
+function sceneComposition(scene = {}) {
+  return escapeAttribute(getPreparedScene(scene).composition || 'freeform_layers');
+}
+
+function renderDslLayerScene(scene = {}) {
+  const safeScene = toSafeScene(scene);
+  const prepared = getPreparedScene(safeScene);
+  const objects = getObjects(safeScene);
+  const renderObjects = objects.length ? objects : [
+    { id: 'focus-1', type: 'center', text: safeScene.headline || prepared.focus?.text || '' },
+  ];
+  const focus = prepared.focus && typeof prepared.focus === 'object' ? prepared.focus : {};
+
+  return [
+    `<div class="scene-content scene-content--dsl-layer" data-visual-type="${escapeAttribute(prepared.visualType || safeScene.visual_type || 'dsl_layer')}" data-composition="${sceneComposition(safeScene)}">`,
+    `  <div class="visual-focus" data-visual-object="focus" data-visual-style="${escapeAttribute(focus.style || '')}">${escapeHtml(focus.text || safeScene.headline || '')}</div>`,
+    `  <h1>${escapeHtml(safeScene.headline)}</h1>`,
+    '  <div class="visual-layer-cloud">',
+    renderObjectList(renderObjects, 'visual-layer-item'),
+    '  </div>',
+    '</div>',
+  ].join('\n');
 }
 
 function renderWorkflowScene(scene = {}) {
@@ -168,6 +192,9 @@ function renderSceneContent({ scene = {}, index = 0, captionText = '', wordHtml 
   const safeScene = toSafeScene(scene);
   const prepared = getPreparedScene(safeScene);
   const type = prepared.visualType || safeScene.visual_type || 'quote_burst';
+  if (['text_card', 'quote_card', 'step_card', 'contrast_card'].includes(type) && getObjects(safeScene).length) {
+    return renderDslLayerScene(safeScene, index);
+  }
   if (type === 'workflow') return renderWorkflowScene(safeScene, index);
   if (type === 'code_panel') return renderCodePanelScene(safeScene, index);
   if (type === 'ui_mockup') return renderUiMockupScene(safeScene, index);
@@ -187,4 +214,5 @@ module.exports = {
   renderConceptMapScene,
   renderTimelineScene,
   renderQuoteBurstScene,
+  renderDslLayerScene,
 };

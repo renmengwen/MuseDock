@@ -51,6 +51,9 @@ async function run() {
   assert.match(messages[1].content, /不要让连续场景全部使用同一种居中卡片结构/);
   assert.match(messages[1].content, /text_card.*核心观点/);
   assert.match(messages[1].content, /contrast_card.*对比/);
+  assert.match(messages[1].content, /AI 必须根据每个 scene 的语义任务自动抉择 visual_type/);
+  assert.match(messages[1].content, /不要按固定优先级选择 visual_type/);
+  assert.doesNotMatch(messages[1].content, /visual_type 优先/);
   assert.match(messages[1].content, /不要输出像网页按钮或后台卡片一样的 UI/);
   assert.match(messages[1].content, /所有 timeline 必须是 paused GSAP timeline/);
   assert.match(messages[1].content, /showCaptionBar=false/);
