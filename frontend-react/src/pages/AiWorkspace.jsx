@@ -12,6 +12,9 @@ import {
   getRunDisplayTime,
   getStoryboardDebugSections,
   getStoryboardSceneIssues,
+  getWorkflowActionLabel,
+  getWorkflowStageLabel,
+  isLegacyAgentRun,
   sanitizeStoryboardSceneText,
 } from '../utils/agentRuns.js';
 import { DEFAULT_PROMPT_OPTIONS, DEFAULT_RENDER_OPTIONS, DEFAULT_STORYBOARD_OPTIONS } from '../utils/aiWorkspaceDefaults.js';
@@ -158,9 +161,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
   const [activeRun, setActiveRun] = useState(null);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [ttsRunning, setTtsRunning] = useState(false);
-  const [storyboardRunning, setStoryboardRunning] = useState(false);
+  const [workflowRunning, setWorkflowRunning] = useState(false);
   const [storyboardConfig, setStoryboardConfig] = useState(null);
   const [storyboardConfigDraft, setStoryboardConfigDraft] = useState(null);
   const [storyboardConfigOpen, setStoryboardConfigOpen] = useState(false);
@@ -214,6 +215,10 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
   const hasStoryboardScenes = Array.isArray(activeRun?.storyboard?.scenes) && activeRun.storyboard.scenes.length > 0;
   const persistedVideoRendering = activeRun?.video?.status === 'rendering';
   const videoBusy = videoGenerating || videoRendering || persistedVideoRendering;
+  const workflow = activeRun?.workflow || {};
+  const nextAction = workflow.next_action || (activeRun ? 'generate_storyboard_plan' : '');
+  const legacyRun = isLegacyAgentRun(activeRun);
+  const workflowBusy = workflowRunning || videoBusy;
   const hasFailedQualityReport = activeRun?.video?.video_quality_report?.pass === false;
   const storyboardSceneIssues = useMemo(() => getStoryboardSceneIssues(storyboardDraft || {}), [storyboardDraft]);
   const storyboardIssueCount = Object.keys(storyboardSceneIssues).length;
@@ -297,40 +302,6 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
     const storyboardTemplateJson = await api.getStoryboardTemplate();
     setStoryboardConfig(storyboardTemplateJson.data);
     setStoryboardConfigDraft(storyboardTemplateJson.data);
-  }
-
-  async function runAgent() {
-    const value = selectedAwemeId.trim();
-    if (!value) {
-      setStatus({ type: 'error', message: '请输入抖音视频 aweme_id' });
-      return;
-    }
-
-    setRunning(true);
-    const templateMeta = getTemplateMeta(selectedTemplate, agentTemplates);
-    const override = agentConfigDraft ? {
-      systemPrompt: agentConfigDraft.systemPrompt,
-      userPromptTemplate: agentConfigDraft.userPromptTemplate,
-      resultSchema: agentConfigDraft.resultSchema || {},
-      modelOptions: agentConfigDraft.modelOptions || {},
-    } : null;
-    setStatus({ type: 'loading', message: `正在运行当前 Agent：${templateMeta.label}...` });
-    try {
-      const json = await api.createDouyinAgentRun(value, selectedTemplate, DEFAULT_PROMPT_OPTIONS, override);
-      setActiveRun(json.run || json);
-      const runsJson = await api.listDouyinAgentRuns(value);
-      const runList = runsJson.data || [];
-      setRuns(runList);
-      if (runList.length > 0) setActiveRun(runList[0]);
-      setStatus({
-        type: json.success ? 'success' : 'error',
-        message: json.message || (json.success ? 'Agent 执行完成' : 'Agent 执行失败'),
-      });
-    } catch (error) {
-      setStatus({ type: 'error', message: error.message });
-    } finally {
-      setRunning(false);
-    }
   }
 
   function updateAgentConfigDraft(key, value) {
@@ -591,108 +562,73 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
     setStatus({ type: 'success', message: `已切换到运行记录 ${run.run_id}` });
   }
 
-  async function synthesizeTts() {
+  async function runNextWorkflowAction() {
     const value = selectedAwemeId.trim();
-    if (!value || !activeRun?.run_id) {
-      setStatus({ type: 'error', message: '请先选择一条包含改写脚本的运行记录。' });
+    if (!value) {
+      setStatus({ type: 'error', message: '请输入抖音视频 aweme_id' });
       return;
     }
-    if (!hasRewriteScript) {
-      setStatus({ type: 'error', message: '当前运行结果没有可用于 TTS 合成的改写脚本。' });
+    if (legacyRun) {
+      setStatus({ type: 'info', message: '旧流程记录不能继续使用新流程，请从生成导演分镜开始创建新记录。' });
+      return;
+    }
+    const workflowAction = nextAction || 'generate_storyboard_plan';
+    if (workflowAction !== 'generate_storyboard_plan' && !activeRun?.run_id) {
+      setStatus({ type: 'error', message: '请先选择一条运行记录。' });
       return;
     }
 
-    setTtsRunning(true);
-    setStatus({ type: 'loading', message: '正在请求 TTS 模型合成语音...' });
+    const actionLabel = getWorkflowActionLabel(workflowAction);
+    setWorkflowRunning(true);
+    setStatus({ type: 'loading', message: `正在${actionLabel}...` });
     try {
-      const json = await api.synthesizeDouyinRunTts(value, activeRun.run_id, {
-        voice: ttsVoice,
-        stylePrompt: ttsStylePrompt,
-      });
-      setActiveRun(prev => prev ? { ...prev, tts: json.tts, updated_at: new Date().toISOString() } : prev);
-      setRuns(prev => prev.map(run => (
-        run.run_id === activeRun.run_id ? { ...run, tts: json.tts, updated_at: new Date().toISOString() } : run
-      )));
-      setStatus({
-        type: json.success ? 'success' : 'error',
-        message: json.message || (json.success ? 'TTS 语音合成完成' : 'TTS 语音合成失败'),
-      });
+      if (workflowAction === 'generate_video_project') {
+        await createVideoProject();
+        return;
+      }
+      if (workflowAction === 'render_video') {
+        await renderVideo();
+        return;
+      }
+
+      let json = null;
+      if (workflowAction === 'generate_storyboard_plan') {
+        json = await api.createDouyinStoryboardPlanRun(value, DEFAULT_PROMPT_OPTIONS);
+      } else if (workflowAction === 'synthesize_scene_tts' || workflowAction === 'retry_scene_tts') {
+        json = await api.synthesizeDouyinRunSceneTts(value, activeRun.run_id, {
+          voice: ttsVoice,
+          stylePrompt: ttsStylePrompt,
+        });
+      } else if (workflowAction === 'generate_visual_storyboard' || workflowAction === 'repair_visual_storyboard') {
+        const storyboardOverride = storyboardConfigDraft ? {
+          systemPrompt: storyboardConfigDraft.systemPrompt,
+          userPromptTemplate: storyboardConfigDraft.userPromptTemplate,
+          useFrameProfile: storyboardConfigDraft.useFrameProfile !== false,
+          modelOptions: storyboardConfigDraft.modelOptions || {},
+        } : null;
+        json = await api.createDouyinRunVisualStoryboard(
+          value,
+          activeRun.run_id,
+          DEFAULT_STORYBOARD_OPTIONS,
+          storyboardOverride,
+          renderOptions.frameStyle,
+          activeRun?.video?.video_quality_report || null,
+        );
+      } else {
+        setStatus({ type: 'info', message: `${getWorkflowActionLabel(workflowAction)} 暂时不需要在此处手动触发。` });
+        return;
+      }
+
+      const runsJson = await api.listDouyinAgentRuns(value);
+      const runList = runsJson.data || [];
+      setRuns(runList);
+      const currentRun = runList.find(run => run.run_id === (json?.run?.run_id || json?.run_id || activeRun?.run_id)) || runList[0] || json?.run || json || null;
+      setActiveRun(currentRun);
+      setStatus({ type: json?.success === false ? 'error' : 'success', message: json?.message || `${actionLabel}已完成。` });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
     } finally {
-      setTtsRunning(false);
-    }
-  }
-
-  async function createStoryboard({ qualityFeedback = null } = {}) {
-    const value = selectedAwemeId.trim();
-    if (!value || !activeRun?.run_id) {
-      setStatus({ type: 'error', message: '请先选择一条已完成 TTS 合成的运行记录。' });
-      return;
-    }
-    if (!hasTtsCaptions) {
-      setStatus({ type: 'error', message: '请先完成 TTS 合成并生成字幕时间轴。' });
-      return;
-    }
-
-    setStoryboardRunning(true);
-    setStatus({
-      type: 'loading',
-      message: qualityFeedback ? '正在带着质量问题重新生成 AI 分镜...' : '正在生成 AI 分镜...',
-    });
-    try {
-      const storyboardOverride = storyboardConfigDraft ? {
-        systemPrompt: storyboardConfigDraft.systemPrompt,
-        userPromptTemplate: storyboardConfigDraft.userPromptTemplate,
-        useFrameProfile: storyboardConfigDraft.useFrameProfile !== false,
-        modelOptions: storyboardConfigDraft.modelOptions || {},
-      } : null;
-      const json = await api.createDouyinRunStoryboard(
-        value,
-        activeRun.run_id,
-        DEFAULT_STORYBOARD_OPTIONS,
-        storyboardOverride,
-        renderOptions.frameStyle,
-        qualityFeedback,
-      );
-      setActiveRun(prev => prev ? {
-        ...prev,
-        storyboard_options: json.storyboard_options,
-        storyboard_raw: json.storyboard_raw,
-        storyboard: json.storyboard,
-        storyboard_model: json.storyboard_model,
-        storyboard_config_snapshot: json.storyboard_config_snapshot,
-        storyboard_messages: json.storyboard_messages,
-        storyboard_raw_output: json.storyboard_raw_output,
-        storyboard_parse: json.storyboard_parse,
-        storyboard_schema_validation: json.storyboard_schema_validation,
-        video: json.video || null,
-        updated_at: new Date().toISOString(),
-      } : prev);
-      setRuns(prev => prev.map(run => (
-        run.run_id === activeRun.run_id ? {
-          ...run,
-          storyboard_options: json.storyboard_options,
-          storyboard_raw: json.storyboard_raw,
-          storyboard: json.storyboard,
-          storyboard_model: json.storyboard_model,
-          storyboard_config_snapshot: json.storyboard_config_snapshot,
-          storyboard_messages: json.storyboard_messages,
-          storyboard_raw_output: json.storyboard_raw_output,
-          storyboard_parse: json.storyboard_parse,
-          storyboard_schema_validation: json.storyboard_schema_validation,
-          video: json.video || null,
-          updated_at: new Date().toISOString(),
-        } : run
-      )));
-      setStatus({
-        type: json.success ? 'success' : 'error',
-        message: json.message || (json.success ? 'AI 分镜已生成。' : 'AI 分镜生成失败。'),
-      });
-    } catch (error) {
-      setStatus({ type: 'error', message: error.message });
-    } finally {
-      setStoryboardRunning(false);
+      setWorkflowRunning(false);
     }
   }
 
@@ -772,10 +708,12 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
           onChange={event => setAwemeId(event.target.value)}
           onKeyDown={event => event.key === 'Enter' && !loading && loadWorkspace()}
           placeholder="输入抖音视频 aweme_id"
-          disabled={loading || running}
+          disabled={loading || workflowBusy}
         />
-        <Button variant="secondary" disabled={loading || running} onClick={loadWorkspace}>加载工作台</Button>
-        <Button disabled={loading || running} onClick={runAgent}>运行当前 Agent</Button>
+        <Button variant="secondary" disabled={loading || workflowBusy} onClick={loadWorkspace}>加载工作台</Button>
+        <Button disabled={loading || workflowBusy || legacyRun} onClick={runNextWorkflowAction}>
+          {workflowRunning ? '处理中...' : getWorkflowActionLabel(nextAction || 'generate_storyboard_plan')}
+        </Button>
       </div>
 
       <Status status={status} />
@@ -792,7 +730,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
               <span className="configSource">{getAgentConfigSourceLabel(template.source)}</span>
               <Button
                 variant={selectedTemplate === template.id ? 'default' : 'secondary'}
-                disabled={loading || running}
+                disabled={loading || workflowBusy}
                 onClick={() => selectTemplate(template)}
               >
                 {selectedTemplate === template.id ? '已选择' : '选择模板'}
@@ -813,7 +751,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                   <textarea
                     value={agentConfigDraft.systemPrompt || ''}
                     onChange={event => updateAgentConfigDraft('systemPrompt', event.target.value)}
-                    disabled={loading || running || agentConfigSaving}
+                    disabled={loading || workflowBusy || agentConfigSaving}
                   />
                 </label>
                 <label>
@@ -821,7 +759,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                   <textarea
                     value={agentConfigDraft.userPromptTemplate || ''}
                     onChange={event => updateAgentConfigDraft('userPromptTemplate', event.target.value)}
-                    disabled={loading || running || agentConfigSaving}
+                    disabled={loading || workflowBusy || agentConfigSaving}
                   />
                 </label>
                 <label>
@@ -829,7 +767,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                   <textarea
                     value={agentResultSchemaText}
                     onChange={event => setAgentResultSchemaText(event.target.value)}
-                    disabled={loading || running || agentConfigSaving || agentConfigPreviewing}
+                    disabled={loading || workflowBusy || agentConfigSaving || agentConfigPreviewing}
                     placeholder='例如：{"summary":"string"}'
                   />
                 </label>
@@ -842,7 +780,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                     step="0.1"
                     value={agentConfigDraft.modelOptions?.temperature ?? 0.4}
                     onChange={event => updateAgentModelOption('temperature', Number(event.target.value))}
-                    disabled={loading || running || agentConfigSaving}
+                    disabled={loading || workflowBusy || agentConfigSaving}
                   />
                 </label>
                 <label className="inlineCheck">
@@ -850,7 +788,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                     type="checkbox"
                     checked={agentConfigDraft.modelOptions?.stream !== false}
                     onChange={event => updateAgentModelOption('stream', event.target.checked)}
-                    disabled={loading || running || agentConfigSaving}
+                    disabled={loading || workflowBusy || agentConfigSaving}
                   />
                   流式调用
                 </label>
@@ -863,23 +801,19 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                     step="1"
                     value={agentConfigDraft.modelOptions?.maxRetries ?? 1}
                     onChange={event => updateAgentModelOption('maxRetries', Number(event.target.value))}
-                    disabled={loading || running || agentConfigSaving}
+                    disabled={loading || workflowBusy || agentConfigSaving}
                   />
                 </label>
                 <div className="videoProjectActions">
-                  <Button size="sm" variant="secondary" disabled={loading || running || agentConfigSaving || agentConfigPreviewing} onClick={restoreAgentConfig}>恢复默认</Button>
-                  <Button size="sm" variant="secondary" disabled={loading || running || agentConfigSaving || agentConfigPreviewing} onClick={previewAgentMessages}>
+                  <Button size="sm" variant="secondary" disabled={loading || workflowBusy || agentConfigSaving || agentConfigPreviewing} onClick={restoreAgentConfig}>恢复默认</Button>
+                  <Button size="sm" variant="secondary" disabled={loading || workflowBusy || agentConfigSaving || agentConfigPreviewing} onClick={previewAgentMessages}>
                     {agentConfigPreviewing ? '预览中...' : '预览 messages'}
                   </Button>
-                  <Button size="sm" disabled={loading || running || agentConfigSaving || agentConfigPreviewing} onClick={saveAgentConfig}>保存为当前模板配置</Button>
+                  <Button size="sm" disabled={loading || workflowBusy || agentConfigSaving || agentConfigPreviewing} onClick={saveAgentConfig}>保存为当前模板配置</Button>
                 </div>
               </div>
             ) : null}
           </div>
-          <Button disabled={loading || running} onClick={runAgent}>
-            {running ? '执行中...' : getTemplateMeta(selectedTemplate, agentTemplates).actionLabel || '运行当前 Agent'}
-          </Button>
-
           <h3>素材状态</h3>
           <ul className="agentStatusList">
             <StepStatus label="视频和音频" done={mediaReady} detail="Agent 需要视频和音频素材都已准备完成" />
@@ -953,7 +887,21 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
 
               {resultTab === 'workflow' ? (
                 <section className="agentResultSection compactWorkflow">
-                  <h4>执行步骤</h4>
+                  <div className="agentResultSectionHeader">
+                    <h4>AI 工作流</h4>
+                    <strong className="stepBadge pending">{getWorkflowStageLabel(workflow.stage || 'empty')}</strong>
+                  </div>
+                  {legacyRun ? (
+                    <p className="mutedText">旧流程记录仅用于查看历史结果，不能继续接入分镜优先链路。请从“生成导演分镜”创建新的流程记录。</p>
+                  ) : (
+                    <>
+                      <p className="mutedText">下一步：{getWorkflowActionLabel(nextAction || 'generate_storyboard_plan')}</p>
+                      <p className="mutedText">流程：生成导演分镜 → 生成分段配音 → 生成视觉分镜 → 生成视频工程 → 渲染视频</p>
+                      <Button disabled={loading || workflowBusy} onClick={runNextWorkflowAction}>
+                        {workflowRunning ? '处理中...' : getWorkflowActionLabel(nextAction || 'generate_storyboard_plan')}
+                      </Button>
+                    </>
+                  )}
                   <div className="agentSteps compact">
                     {agentSteps.length > 0 ? agentSteps.map(([key, step]) => (
                       <div className="agentStep" key={key}>
@@ -977,7 +925,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                           <select
                             value={ttsVoice}
                             onChange={event => setTtsVoice(event.target.value)}
-                            disabled={ttsRunning}
+                            disabled={workflowBusy}
                             aria-label="TTS 音色"
                           >
                             {TTS_VOICES.map(voice => (
@@ -987,12 +935,10 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                           <Input
                             value={ttsStylePrompt}
                             onChange={event => setTtsStylePrompt(event.target.value)}
-                            disabled={ttsRunning}
+                            disabled={workflowBusy}
                             placeholder="输入语气、情绪、节奏或音频标签"
                           />
-                          <Button size="sm" disabled={ttsRunning} onClick={synthesizeTts}>
-                            {ttsRunning ? '合成中...' : 'TTS 合成'}
-                          </Button>
+                          <span className="mutedText">分段配音请使用工作流主按钮。</span>
                         </div>
                       ) : null}
                     />
@@ -1014,7 +960,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                       <select
                         value={ttsVoice}
                         onChange={event => setTtsVoice(event.target.value)}
-                        disabled={ttsRunning}
+                        disabled={workflowBusy}
                         aria-label="TTS 音色"
                       >
                         {TTS_VOICES.map(voice => (
@@ -1024,12 +970,10 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                       <Input
                         value={ttsStylePrompt}
                         onChange={event => setTtsStylePrompt(event.target.value)}
-                        disabled={ttsRunning}
+                        disabled={workflowBusy}
                         placeholder="输入语气、情绪、节奏或音频标签"
                       />
-                      <Button size="sm" disabled={ttsRunning} onClick={synthesizeTts}>
-                        {ttsRunning ? '合成中...' : 'TTS 合成'}
-                      </Button>
+                      <span className="mutedText">分段配音请使用工作流主按钮。</span>
                     </div>
                   ) : <p className="mutedText">当前运行记录没有可用于 TTS 的改写脚本。</p>}
                   {activeRun.tts?.url ? (
@@ -1090,22 +1034,22 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                         <Button
                           size="sm"
                           variant="secondary"
-                          disabled={storyboardRunning || videoBusy || !hasTtsCaptions}
-                          onClick={createStoryboard}
+                          disabled={loading || workflowBusy || legacyRun}
+                          onClick={runNextWorkflowAction}
                         >
-                          {storyboardRunning ? '生成中...' : '生成 AI 分镜'}
+                          {workflowRunning ? '处理中...' : getWorkflowActionLabel(nextAction || 'generate_storyboard_plan')}
                         </Button>
                         <Button
                           size="sm"
                           variant="secondary"
-                          disabled={storyboardRunning || videoBusy || !hasStoryboardScenes}
+                          disabled={workflowBusy || !hasStoryboardScenes}
                           onClick={createVideoProject}
                         >
                           {videoGenerating ? '生成中...' : '生成视频工程'}
                         </Button>
                         <Button
                           size="sm"
-                          disabled={storyboardRunning || videoBusy || !activeRun.video?.project_dir}
+                          disabled={workflowBusy || !activeRun.video?.project_dir}
                           onClick={renderVideo}
                         >
                           {videoRendering || persistedVideoRendering ? '渲染中...' : '渲染 MP4'}
@@ -1131,7 +1075,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                             <textarea
                               value={storyboardConfigDraft.systemPrompt || ''}
                               onChange={event => updateStoryboardConfigDraft('systemPrompt', event.target.value)}
-                              disabled={storyboardConfigSaving || storyboardRunning || videoBusy}
+                              disabled={storyboardConfigSaving || workflowBusy}
                             />
                           </label>
                           <label>
@@ -1139,7 +1083,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                             <textarea
                               value={storyboardConfigDraft.userPromptTemplate || ''}
                               onChange={event => updateStoryboardConfigDraft('userPromptTemplate', event.target.value)}
-                              disabled={storyboardConfigSaving || storyboardRunning || videoBusy}
+                              disabled={storyboardConfigSaving || workflowBusy}
                             />
                           </label>
                           <label className="inlineCheck">
@@ -1147,7 +1091,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                               type="checkbox"
                               checked={storyboardConfigDraft.useFrameProfile !== false}
                               onChange={event => updateStoryboardConfigDraft('useFrameProfile', event.target.checked)}
-                              disabled={storyboardConfigSaving || storyboardRunning || videoBusy}
+                              disabled={storyboardConfigSaving || workflowBusy}
                             />
                             引用 Frame Profile 文档
                           </label>
@@ -1160,7 +1104,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                               step="0.1"
                               value={storyboardConfigDraft.modelOptions?.temperature ?? 0.35}
                               onChange={event => updateStoryboardModelOption('temperature', Number(event.target.value))}
-                              disabled={storyboardConfigSaving || storyboardRunning || videoBusy}
+                              disabled={storyboardConfigSaving || workflowBusy}
                             />
                           </label>
                           <label className="inlineCheck">
@@ -1168,16 +1112,16 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                               type="checkbox"
                               checked={storyboardConfigDraft.modelOptions?.stream !== false}
                               onChange={event => updateStoryboardModelOption('stream', event.target.checked)}
-                              disabled={storyboardConfigSaving || storyboardRunning || videoBusy}
+                              disabled={storyboardConfigSaving || workflowBusy}
                             />
                             流式调用
                           </label>
                           <div className="videoProjectActions">
-                            <Button size="sm" variant="secondary" disabled={storyboardConfigSaving || storyboardRunning || videoBusy || storyboardConfigPreviewing} onClick={restoreStoryboardConfig}>恢复默认</Button>
-                            <Button size="sm" variant="secondary" disabled={storyboardConfigSaving || storyboardRunning || videoBusy || storyboardConfigPreviewing} onClick={previewStoryboardMessages}>
+                            <Button size="sm" variant="secondary" disabled={storyboardConfigSaving || workflowBusy || storyboardConfigPreviewing} onClick={restoreStoryboardConfig}>恢复默认</Button>
+                            <Button size="sm" variant="secondary" disabled={storyboardConfigSaving || workflowBusy || storyboardConfigPreviewing} onClick={previewStoryboardMessages}>
                               {storyboardConfigPreviewing ? '预览中...' : '预览 messages'}
                             </Button>
-                            <Button size="sm" disabled={storyboardConfigSaving || storyboardRunning || videoBusy || storyboardConfigPreviewing} onClick={saveStoryboardConfig}>保存分镜 Agent 配置</Button>
+                            <Button size="sm" disabled={storyboardConfigSaving || workflowBusy || storyboardConfigPreviewing} onClick={saveStoryboardConfig}>保存分镜 Agent 配置</Button>
                           </div>
                         </div>
                       ) : null}
@@ -1187,7 +1131,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                       <select
                         value={renderOptions.resolution}
                         onChange={event => updateRenderOption('resolution', event.target.value)}
-                        disabled={storyboardRunning || videoBusy}
+                        disabled={workflowBusy}
                       >
                         <option value="1080x1920">1080x1920</option>
                         <option value="720x1280">720x1280</option>
@@ -1195,7 +1139,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                       <select
                         value={renderOptions.fps}
                         onChange={event => updateRenderOption('fps', event.target.value)}
-                        disabled={storyboardRunning || videoBusy}
+                        disabled={workflowBusy}
                       >
                         <option value="24">24fps</option>
                         <option value="30">30fps</option>
@@ -1204,7 +1148,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                       <select
                         value={renderOptions.captionSize}
                         onChange={event => updateRenderOption('captionSize', event.target.value)}
-                        disabled={storyboardRunning || videoBusy}
+                        disabled={workflowBusy}
                       >
                         <option value="small">字幕小</option>
                         <option value="medium">字幕中</option>
@@ -1213,7 +1157,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                       <select
                         value={renderOptions.captionMode}
                         onChange={event => updateRenderOption('captionMode', event.target.value)}
-                        disabled={storyboardRunning || videoBusy}
+                        disabled={workflowBusy}
                       >
                         <option value="phrase_kinetic">短语动效</option>
                         <option value="standard">标准字幕</option>
@@ -1222,7 +1166,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                       <select
                         value={renderOptions.motionLevel}
                         onChange={event => updateRenderOption('motionLevel', event.target.value)}
-                        disabled={storyboardRunning || videoBusy}
+                        disabled={workflowBusy}
                       >
                         <option value="low">动效弱</option>
                         <option value="medium">动效中</option>
@@ -1233,7 +1177,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                           type="checkbox"
                           checked={renderOptions.showCaptionBar}
                           onChange={event => updateRenderOption('showCaptionBar', event.target.checked)}
-                          disabled={storyboardRunning || videoBusy}
+                          disabled={workflowBusy}
                         />
                         显示字幕条
                       </label>
@@ -1242,14 +1186,14 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                           type="checkbox"
                           checked={renderOptions.showSceneNumber}
                           onChange={event => updateRenderOption('showSceneNumber', event.target.checked)}
-                          disabled={storyboardRunning || videoBusy}
+                          disabled={workflowBusy}
                         />
                         显示分镜编号
                       </label>
                       <select
                         value={renderOptions.quality}
                         onChange={event => updateRenderOption('quality', event.target.value)}
-                        disabled={storyboardRunning || videoBusy}
+                        disabled={workflowBusy}
                       >
                         <option value="standard">标准质量</option>
                         <option value="high">高清质量</option>
@@ -1357,14 +1301,9 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                               <p key={issue.code}>{issue.message}</p>
                             ))}
                             {hasFailedQualityReport ? (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                disabled={storyboardRunning || videoBusy || !hasTtsCaptions}
-                                onClick={() => createStoryboard({ qualityFeedback: activeRun.video.video_quality_report })}
-                              >
-                                {storyboardRunning ? '重新生成中...' : '带问题重新生成分镜'}
-                              </Button>
+                              <p className="mutedText">
+                                请按工作流执行“{getWorkflowActionLabel(nextAction || 'compress_scene_narration')}”，先压缩超时分镜或重新配音，再继续生成成片。
+                              </p>
                             ) : null}
                           </div>
                         ) : null}
