@@ -68,6 +68,22 @@ router.post('/douyin/:aweme_id/runs', async (req, res) => {
   }
 });
 
+router.post('/douyin/:aweme_id/storyboard-plan-runs', async (req, res) => {
+  try {
+    const result = await agentRuns.createDouyinStoryboardPlanRun(req.params.aweme_id, {
+      promptOptions: req.body?.promptOptions || {},
+    });
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      status: 'failed',
+      message: '导演分镜生成接口异常，请稍后重试。',
+    });
+  }
+});
+
 router.get('/douyin/:aweme_id/runs', async (req, res) => {
   try {
     const result = await agentRuns.listDouyinAgentRuns(req.params.aweme_id);
@@ -95,6 +111,28 @@ router.get('/douyin/:aweme_id/runs/:run_id', async (req, res) => {
   }
 });
 
+router.get('/douyin/:aweme_id/runs/:run_id/next-action', async (req, res) => {
+  try {
+    const result = await agentRuns.getDouyinAgentRun(req.params.aweme_id, req.params.run_id);
+    if (!result.success) {
+      return res.status(404).json(result);
+    }
+    return res.json({
+      success: true,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      workflow: agentRuns.decideNextAction(result.data),
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '读取下一步动作失败，请稍后重试。',
+    });
+  }
+});
+
 router.post('/douyin/:aweme_id/runs/:run_id/tts', async (req, res) => {
   try {
     const result = await agentRuns.synthesizeDouyinRunTts(req.params.aweme_id, req.params.run_id, {
@@ -116,6 +154,24 @@ router.post('/douyin/:aweme_id/runs/:run_id/tts', async (req, res) => {
   }
 });
 
+router.post('/douyin/:aweme_id/runs/:run_id/scene-tts', async (req, res) => {
+  try {
+    const result = await agentRuns.synthesizeDouyinRunSceneTts(
+      req.params.aweme_id,
+      req.params.run_id,
+      req.body || {},
+    );
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '分段配音接口异常，请稍后重试。',
+    });
+  }
+});
+
 router.get('/douyin/:aweme_id/runs/:run_id/tts/:file_name', (req, res) => {
   try {
     const filePath = agentRuns.resolveDouyinRunTtsFile(req.params.aweme_id, req.params.run_id, req.params.file_name);
@@ -126,6 +182,25 @@ router.get('/douyin/:aweme_id/runs/:run_id/tts/:file_name', (req, res) => {
       aweme_id: req.params.aweme_id,
       run_id: req.params.run_id,
       message: '未找到或非法的 TTS 音频文件。',
+    });
+  }
+});
+
+router.post('/douyin/:aweme_id/runs/:run_id/visual-storyboard', async (req, res) => {
+  try {
+    const result = await agentRuns.createDouyinRunVisualStoryboard(req.params.aweme_id, req.params.run_id, {
+      storyboardOptions: req.body?.storyboardOptions || {},
+      storyboardConfigOverride: req.body?.storyboardConfigOverride || null,
+      frameProfileId: req.body?.frameProfileId || '',
+      qualityFeedback: req.body?.qualityFeedback || null,
+    });
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '视觉分镜生成接口异常，请稍后重试。',
     });
   }
 });

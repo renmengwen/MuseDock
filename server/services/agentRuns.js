@@ -9,6 +9,10 @@ const agentTemplateOverrides = require('./agentTemplateOverrides');
 const ttsTimeline = require('./ttsTimeline');
 const phraseTimeline = require('./phraseTimeline');
 const defaultStoryboardAgent = require('./storyboardAgent');
+const defaultStoryboardPlanAgent = require('./storyboardPlanAgent');
+const defaultSceneTts = require('./sceneTts');
+const storyboardTiming = require('./storyboardTiming');
+const workflowDecision = require('./agentWorkflowDecision');
 const storyboardSchema = require('./storyboardSchema');
 const defaultHyperframesProject = require('./hyperframesProject');
 const defaultHyperframesRenderer = require('./hyperframesRenderer');
@@ -566,6 +570,340 @@ async function getDouyinAgentRun(awemeId, runId, options = {}) {
   };
 }
 
+async function createDouyinStoryboardPlanRun(awemeId, options = {}) {
+  const rootDir = options.rootDir;
+  const promptOptions = options.promptOptions || {};
+  const steps = [];
+
+  if (!isSafeId(awemeId)) {
+    return createInvalidAwemeResult(awemeId);
+  }
+
+  const paths = mediaPipeline.getMediaPaths(awemeId, rootDir);
+  const status = await mediaPipeline.getStatus(awemeId, { rootDir });
+  steps.push(makeStep('media', '检查视频素材', status.exists ? 'done' : 'failed'));
+
+  if (!status.exists) {
+    return createFailureRun(awemeId, 'storyboard_plan', '未找到该视频素材，请先准备该视频的本地素材。', {
+      rootDir,
+      steps,
+      promptOptions,
+      persist: false,
+    });
+  }
+
+  const analysisInput = await readJsonIfExists(paths.analysisInput);
+  steps.push(makeStep(
+    'analysis_input',
+    '读取素材上下文',
+    analysisInput ? 'done' : 'failed',
+    analysisInput ? '' : '未找到 analysis_input.json',
+  ));
+  if (!analysisInput) {
+    return createFailureRun(awemeId, 'storyboard_plan', '未找到素材上下文，请先重新准备 AI 素材。', {
+      rootDir,
+      steps,
+      promptOptions,
+    });
+  }
+
+  const transcript = await readJsonIfExists(paths.transcript);
+  steps.push(makeStep(
+    'transcript',
+    '读取转写文本',
+    transcript?.text ? 'done' : 'failed',
+    transcript?.text ? '' : '未找到转写文本',
+  ));
+  if (!transcript?.text) {
+    return createFailureRun(awemeId, 'storyboard_plan', '未找到转写文本，请先完成该视频的音频转写。', {
+      rootDir,
+      steps,
+      input_summary: createInputSummary({ analysisInput, transcript, comments: [] }),
+      promptOptions,
+    });
+  }
+
+  const getLocalComments = options.getLocalComments || defaultGetLocalComments;
+  let commentsResult;
+  try {
+    commentsResult = await getLocalComments(awemeId, { max: 50, maxReplies: 5 });
+  } catch (error) {
+    commentsResult = { success: false, count: 0, data: [], message: error.message };
+  }
+  const comments = Array.isArray(commentsResult?.data) ? commentsResult.data : [];
+  steps.push(makeStep(
+    'comments',
+    '读取本地评论缓存',
+    'done',
+    comments.length > 0 ? `已读取本地评论缓存 ${comments.length} 条` : '暂无本地评论缓存',
+  ));
+
+  const inputSummary = createInputSummary({ analysisInput, transcript, comments });
+  const commentsText = summarizeComments(comments);
+  const storyboardPlanAgent = options.storyboardPlanAgent || defaultStoryboardPlanAgent;
+  let result;
+  try {
+    result = await storyboardPlanAgent.createStoryboardPlan({
+      transcriptText: transcript.text,
+      commentsText,
+      promptOptions,
+      aiTextModel: options.aiTextModel,
+      configPath: options.configPath,
+      textConfig: options.textConfig,
+      fetchImpl: options.fetchImpl,
+    });
+  } catch (error) {
+    result = {
+      success: false,
+      message: error.message || '导演分镜规划生成失败。',
+      storyboard_plan: { status: 'failed', scenes: [], message: error.message || '导演分镜规划生成失败。' },
+      model: {},
+      messages: [],
+      raw_output: '',
+      parse: { success: false, error: error.message || '导演分镜规划生成失败。' },
+      raw: {},
+    };
+  }
+
+  steps.push(makeStep(
+    'storyboard_plan',
+    '生成导演分镜规划',
+    result.success ? 'done' : 'failed',
+    result.message || '',
+  ));
+  const run = {
+    success: !!result.success,
+    run_id: createRunId('storyboard_plan'),
+    template: 'storyboard_plan',
+    aweme_id: String(awemeId),
+    status: result.success ? 'done' : 'failed',
+    model: result.model || {},
+    steps,
+    input_summary: inputSummary,
+    prompt_options: promptOptions,
+    storyboard_plan: result.storyboard_plan || { status: 'failed', scenes: [] },
+    storyboard_plan_raw: result.raw || {},
+    storyboard_plan_model: result.model || {},
+    messages: result.messages || [],
+    raw_output: result.raw_output || '',
+    parse: result.parse || { success: !!result.success, error: '' },
+    message: result.message || (result.success ? '导演分镜规划已生成。' : '导演分镜规划生成失败。'),
+    created_at: new Date().toISOString(),
+  };
+  run.workflow = workflowDecision.decideNextAction(run);
+  return persistRun(awemeId, run, rootDir);
+}
+
+async function synthesizeDouyinRunSceneTts(awemeId, runId, options = {}) {
+  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      aweme_id: String(awemeId || ''),
+      run_id: String(runId || ''),
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  const run = await readJsonIfExists(runPath);
+  if (!run) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '未找到该 Agent 运行记录',
+    };
+  }
+
+  const scenes = Array.isArray(run?.storyboard_plan?.scenes) ? run.storyboard_plan.scenes : [];
+  if (!scenes.length) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '当前运行记录没有可用于分段配音的导演分镜规划。',
+    };
+  }
+
+  const sceneTtsService = options.sceneTtsService || defaultSceneTts;
+  const result = await sceneTtsService.synthesizeSceneTts({
+    scenes,
+    outputDir: getAgentRunsDir(awemeId, options.rootDir),
+    runId,
+    voice: options.voice,
+    stylePrompt: options.stylePrompt,
+    format: options.format || 'wav',
+    ttsModel: options.ttsModel,
+    readAudioDuration: options.readAudioDuration,
+    concatenateAudioFiles: options.concatenateAudioFiles,
+    configPath: options.configPath,
+    ttsConfig: options.ttsConfig,
+    fetchImpl: options.fetchImpl,
+    waitImpl: options.waitImpl,
+    maxRetries: options.maxRetries,
+    retryDelayMs: options.retryDelayMs,
+    ttsConcurrency: options.ttsConcurrency,
+    ttsQueueIntervalMs: options.ttsQueueIntervalMs,
+  });
+  const sceneTtsValue = {
+    ...(result.scene_tts || {}),
+    status: result.success ? (result.scene_tts?.status || 'done') : (result.scene_tts?.status || 'failed'),
+    message: result.message || result.scene_tts?.message || (result.success ? '分段配音已生成。' : '分段配音生成失败。'),
+    updated_at: new Date().toISOString(),
+  };
+  if (result.success) {
+    sceneTtsValue.timed_storyboard_plan = storyboardTiming.buildTimedStoryboardPlan({
+      storyboardPlan: run.storyboard_plan,
+      sceneTts: sceneTtsValue,
+    });
+  }
+
+  const timedPlan = sceneTtsValue.timed_storyboard_plan || {};
+  const fileName = sceneTtsValue.file_name || (sceneTtsValue.path ? path.basename(sceneTtsValue.path) : getTtsFileName(runId, sceneTtsValue.format || options.format || 'wav'));
+  const tts = {
+    status: result.success ? 'done' : 'failed',
+    voice: sceneTtsValue.voice || options.voice || '',
+    style_prompt: sceneTtsValue.style_prompt || options.stylePrompt || '',
+    format: sceneTtsValue.format || options.format || 'wav',
+    path: sceneTtsValue.path || '',
+    file_name: fileName,
+    url: fileName ? getTtsUrl(awemeId, runId, fileName) : '',
+    duration: Number(sceneTtsValue.duration ?? timedPlan.duration ?? 0),
+    captions: Array.isArray(timedPlan.captions) ? timedPlan.captions : [],
+    phrase_captions: Array.isArray(timedPlan.phrase_captions) ? timedPlan.phrase_captions : [],
+    segments: Array.isArray(sceneTtsValue.scenes) ? sceneTtsValue.scenes : [],
+    model: sceneTtsValue.model || result.model || {},
+    message: sceneTtsValue.message,
+    updated_at: sceneTtsValue.updated_at,
+  };
+  const updatedRun = {
+    ...run,
+    scene_tts: sceneTtsValue,
+    tts,
+    video: null,
+    updated_at: new Date().toISOString(),
+  };
+  updatedRun.workflow = workflowDecision.decideNextAction(updatedRun);
+  await writeJson(runPath, updatedRun);
+
+  return {
+    success: !!result.success,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message: sceneTtsValue.message,
+    scene_tts: sceneTtsValue,
+    tts,
+    workflow: updatedRun.workflow,
+  };
+}
+
+async function createDouyinRunVisualStoryboard(awemeId, runId, options = {}) {
+  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      aweme_id: String(awemeId || ''),
+      run_id: String(runId || ''),
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  const run = await readJsonIfExists(runPath);
+  if (!run) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '未找到该 Agent 运行记录',
+    };
+  }
+
+  const timedPlan = run?.scene_tts?.timed_storyboard_plan || {};
+  const captions = Array.isArray(timedPlan.captions) ? timedPlan.captions : [];
+  const phraseCaptions = Array.isArray(timedPlan.phrase_captions) ? timedPlan.phrase_captions : [];
+  if (!captions.length) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '请先完成分段配音并生成分镜时间轴。',
+    };
+  }
+
+  const rewriteScript = (Array.isArray(run?.storyboard_plan?.scenes) ? run.storyboard_plan.scenes : [])
+    .map(scene => String(scene?.narration_text || '').trim())
+    .filter(Boolean)
+    .join('\n');
+  if (!rewriteScript) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '当前导演分镜规划没有可用于视觉分镜的旁白文本。',
+    };
+  }
+
+  const storyboardOptions = defaultStoryboardAgent.normalizeStoryboardOptions(options.storyboardOptions || run.storyboard_options || {});
+  const storyboardConfig = await agentTemplateOverrides.resolveStoryboardAgentConfig({
+    rootDir: options.rootDir,
+    storyboardConfigOverride: options.storyboardConfigOverride,
+  });
+  if (!storyboardConfig || storyboardConfig.success === false) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: storyboardConfig?.message || '视觉分镜 Agent 配置校验失败。',
+    };
+  }
+
+  const agent = options.storyboardAgent || defaultStoryboardAgent;
+  const result = await agent.createStoryboard({
+    rewriteScript,
+    captions,
+    phraseCaptions,
+    videoBrief: { target_duration_sec: run.storyboard_plan?.target_duration_sec || 60 },
+    storyboardOptions,
+    editableConfig: storyboardConfig,
+    frameProfileId: options.frameProfileId,
+    qualityFeedback: options.qualityFeedback || null,
+    aiTextModel: options.aiTextModel,
+    configPath: options.configPath,
+    textConfig: options.textConfig,
+    fetchImpl: options.fetchImpl,
+  });
+
+  const updatedRun = {
+    ...run,
+    storyboard_options: storyboardOptions,
+    storyboard_raw: result.raw || {},
+    storyboard: result.storyboard,
+    storyboard_model: result.model || {},
+    storyboard_raw_parse_failed: !!result.raw_parse_failed,
+    storyboard_config_snapshot: result.config_snapshot,
+    storyboard_messages: result.messages || [],
+    storyboard_raw_output: result.raw_output || '',
+    storyboard_parse: result.parse || { success: !!result.success, error: '' },
+    storyboard_schema_validation: result.schema_validation || { success: !!result.success, errors: [] },
+    video: null,
+    updated_at: new Date().toISOString(),
+  };
+  updatedRun.workflow = workflowDecision.decideNextAction(updatedRun);
+  await writeJson(runPath, updatedRun);
+
+  return {
+    success: !!result.success,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message: result.message || (result.success ? '视觉分镜已生成。' : '视觉分镜生成失败。'),
+    storyboard: updatedRun.storyboard,
+    storyboard_schema_validation: updatedRun.storyboard_schema_validation,
+    workflow: updatedRun.workflow,
+  };
+}
+
 async function synthesizeDouyinRunTtsLegacy(awemeId, runId, options = {}) {
   if (!isSafeId(awemeId)) {
     return createInvalidAwemeResult(awemeId);
@@ -863,8 +1201,10 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
       message: result.message || '视频工程生成失败。',
       updated_at: new Date().toISOString(),
     };
-    await writeJson(runPath, { ...run, video, updated_at: new Date().toISOString() });
-    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
+    const nextRun = { ...run, video, updated_at: new Date().toISOString() };
+    nextRun.workflow = workflowDecision.decideNextAction(nextRun);
+    await writeJson(runPath, nextRun);
+    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video, workflow: nextRun.workflow };
   }
 
   const video = {
@@ -881,8 +1221,10 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
     message: result.message || '视频工程已生成。',
     updated_at: new Date().toISOString(),
   };
-  await writeJson(runPath, { ...run, video, updated_at: new Date().toISOString() });
-  return { success: true, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
+  const nextRun = { ...run, video, updated_at: new Date().toISOString() };
+  nextRun.workflow = workflowDecision.decideNextAction(nextRun);
+  await writeJson(runPath, nextRun);
+  return { success: true, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video, workflow: nextRun.workflow };
 }
 
 async function updateDouyinRunStoryboard(awemeId, runId, storyboard, options = {}) {
@@ -1008,8 +1350,10 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
         : '视频质量未通过，请先重新生成分镜或调整视频工程。',
       updated_at: new Date().toISOString(),
     };
-    await writeJson(runPath, { ...run, video, updated_at: new Date().toISOString() });
-    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
+    const nextRun = { ...run, video, updated_at: new Date().toISOString() };
+    nextRun.workflow = workflowDecision.decideNextAction(nextRun);
+    await writeJson(runPath, nextRun);
+    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video, workflow: nextRun.workflow };
   }
   const renderingVideo = {
     ...(run.video || {}),
@@ -1020,7 +1364,9 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
     message: '视频正在渲染中，请勿刷新后重复生成视频工程。',
     updated_at: new Date().toISOString(),
   };
-  await writeJson(runPath, { ...run, video: renderingVideo, updated_at: new Date().toISOString() });
+  const renderingRun = { ...run, video: renderingVideo, updated_at: new Date().toISOString() };
+  renderingRun.workflow = workflowDecision.decideNextAction(renderingRun);
+  await writeJson(runPath, renderingRun);
 
   const result = await renderer.renderHyperframesProject({ projectDir, renderOptions });
 
@@ -1032,8 +1378,10 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
       message: result.message || '视频渲染失败。',
       updated_at: new Date().toISOString(),
     };
-    await writeJson(runPath, { ...run, video, updated_at: new Date().toISOString() });
-    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
+    const nextRun = { ...run, video, updated_at: new Date().toISOString() };
+    nextRun.workflow = workflowDecision.decideNextAction(nextRun);
+    await writeJson(runPath, nextRun);
+    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video, workflow: nextRun.workflow };
   }
 
   const video = {
@@ -1047,8 +1395,10 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
     message: result.message || '视频渲染完成。',
     updated_at: new Date().toISOString(),
   };
-  await writeJson(runPath, { ...run, video, updated_at: new Date().toISOString() });
-  return { success: true, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
+  const nextRun = { ...run, video, updated_at: new Date().toISOString() };
+  nextRun.workflow = workflowDecision.decideNextAction(nextRun);
+  await writeJson(runPath, nextRun);
+  return { success: true, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video, workflow: nextRun.workflow };
 }
 
 function resolveDouyinRunHyperframesFile(awemeId, runId, fileName, options = {}) {
@@ -1262,15 +1612,19 @@ async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
 module.exports = {
   TEMPLATE_VIRAL_REWRITE,
   createDouyinAgentRun,
+  createDouyinStoryboardPlanRun,
   listDouyinAgentRuns,
   getDouyinAgentRun,
   synthesizeDouyinRunTts,
+  synthesizeDouyinRunSceneTts,
   resolveDouyinRunTtsFile,
   createDouyinRunStoryboard,
+  createDouyinRunVisualStoryboard,
   updateDouyinRunStoryboard,
   createDouyinRunHyperframesProject,
   renderDouyinRunHyperframesVideo,
   resolveDouyinRunHyperframesFile,
+  decideNextAction: workflowDecision.decideNextAction,
   listAgentTemplates: agentTemplates.listAgentTemplates,
   summarizeComments,
   buildPrompt: agentTemplates.getAgentTemplate(TEMPLATE_VIRAL_REWRITE).buildPrompt,

@@ -220,6 +220,144 @@ async function run() {
   assert.ok(generated.run_id.endsWith('-viral_rewrite'));
   assert.ok(fs.existsSync(generated.path));
 
+  const storyboardPlanRun = await agentRuns.createDouyinStoryboardPlanRun(awemeId, {
+    rootDir,
+    promptOptions: { targetDurationSec: 42 },
+    storyboardPlanAgent: {
+      createStoryboardPlan: async ({ transcriptText, commentsText, promptOptions }) => {
+        assert.match(transcriptText, /本地创作工作流/);
+        assert.match(commentsText, /提升效率/);
+        assert.equal(promptOptions.targetDurationSec, 42);
+        return {
+          success: true,
+          message: '导演分镜规划已生成。',
+          model: { provider: 'mock', model_id: 'plan-test' },
+          messages: [{ role: 'system', content: 'plan system' }],
+          raw_output: '{"storyboard_plan":{"scenes":[]}}',
+          parse: { success: true, error: '' },
+          raw: { storyboard_plan: { scenes: [] } },
+          storyboard_plan: {
+            status: 'planned',
+            message: '导演分镜规划已生成。',
+            target_duration_sec: 42,
+            scenes: [
+              {
+                index: 1,
+                target_duration_sec: 2,
+                narration_text: '第一幕旁白',
+                headline: '第一幕',
+                visual_intent: '展示输入',
+                visual_type_hint: 'text_card',
+              },
+            ],
+          },
+        };
+      },
+    },
+    getLocalComments: () => ({
+      success: true,
+      count: 1,
+      data: [
+        { content: '这个工具提升效率', like_count: 9 },
+      ],
+    }),
+  });
+  assert.equal(storyboardPlanRun.success, true);
+  assert.equal(storyboardPlanRun.storyboard_plan.status, 'planned');
+  assert.equal(storyboardPlanRun.workflow.next_action, 'synthesize_scene_tts');
+
+  const sceneTtsRun = await agentRuns.synthesizeDouyinRunSceneTts(awemeId, storyboardPlanRun.run_id, {
+    rootDir,
+    voice: 'Mia',
+    stylePrompt: 'warm',
+    sceneTtsService: {
+      synthesizeSceneTts: async ({ scenes, outputDir, runId, voice, stylePrompt, format }) => {
+        assert.deepStrictEqual(scenes.map(scene => scene.narration_text), ['第一幕旁白']);
+        assert.ok(outputDir.endsWith('agent_runs'));
+        assert.equal(runId, storyboardPlanRun.run_id);
+        assert.equal(voice, 'Mia');
+        assert.equal(stylePrompt, 'warm');
+        assert.equal(format, 'wav');
+        return {
+          success: true,
+          message: '分段配音已生成。',
+          scene_tts: {
+            status: 'done',
+            voice,
+            style_prompt: stylePrompt,
+            format,
+            path: path.join(outputDir, `${runId}-tts.wav`),
+            file_name: `${runId}-tts.wav`,
+            duration: 2,
+            scenes: [
+              {
+                index: 1,
+                duration: 2,
+                actual_duration_sec: 2,
+                path: path.join(outputDir, 'scene-001.wav'),
+                file_name: 'scene-001.wav',
+                captions: [
+                  { index: 1, start: 0, end: 2, duration: 2, text: '第一幕旁白' },
+                ],
+                phrase_captions: [
+                  { id: 'cap-1-p1', caption_index: 1, phrase_index: 1, start: 0, end: 2, duration: 2, text: '第一幕旁白' },
+                ],
+              },
+            ],
+            model: { provider: 'mock', model_id: 'tts-test' },
+            message: '分段配音已生成。',
+          },
+        };
+      },
+    },
+  });
+  assert.equal(sceneTtsRun.success, true);
+  assert.equal(sceneTtsRun.scene_tts.timed_storyboard_plan.status, 'timed');
+  assert.equal(sceneTtsRun.workflow.next_action, 'generate_visual_storyboard');
+
+  const visualStoryboardRun = await agentRuns.createDouyinRunVisualStoryboard(awemeId, storyboardPlanRun.run_id, {
+    rootDir,
+    storyboardAgent: {
+      createStoryboard: async ({ rewriteScript, captions, phraseCaptions, videoBrief }) => {
+        assert.equal(rewriteScript, '第一幕旁白');
+        assert.deepStrictEqual(captions.map(caption => caption.text), ['第一幕旁白']);
+        assert.deepStrictEqual(phraseCaptions.map(caption => caption.text), ['第一幕旁白']);
+        assert.equal(videoBrief.target_duration_sec, 42);
+        return {
+          success: true,
+          message: 'AI 分镜已生成。',
+          model: { provider: 'mock', model_id: 'storyboard-test' },
+          raw: {
+            scenes: [
+              {
+                caption_indexes: [1],
+                headline: '第一幕',
+                visual_type: 'text_card',
+                layout: 'center_focus',
+                background_prompt: '简洁背景',
+                emphasis_words: [],
+              },
+            ],
+          },
+          storyboard: {
+            status: 'done',
+            template: 'ai_storyboard_cards',
+            scenes: [
+              { index: 1, caption_indexes: [1], start: 0, end: 2, duration: 2, headline: '第一幕' },
+            ],
+          },
+          config_snapshot: { source: 'default' },
+          messages: [{ role: 'system', content: 'storyboard system' }],
+          raw_output: '{"template":"ai_storyboard_cards"}',
+          parse: { success: true, error: '' },
+          schema_validation: { success: true, errors: [] },
+        };
+      },
+    },
+  });
+  assert.equal(visualStoryboardRun.success, true);
+  assert.equal(visualStoryboardRun.workflow.next_action, 'generate_video_project');
+
   const generatedWithOverride = await agentRuns.createDouyinAgentRun(awemeId, {
     rootDir,
     template: 'viral_rewrite',
@@ -340,8 +478,8 @@ async function run() {
 
   const listed = await agentRuns.listDouyinAgentRuns(awemeId, { rootDir });
   assert.strictEqual(listed.success, true);
-  assert.strictEqual(listed.count, 6);
-  assert.strictEqual(listed.data.length, 6);
+  assert.strictEqual(listed.count, 7);
+  assert.strictEqual(listed.data.length, 7);
   assert.strictEqual(listed.data[0].run_id, runWithPromptOptions.run_id);
 
   const detail = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
@@ -977,10 +1115,15 @@ async function run() {
   assert.strictEqual(emptyCommentModelCalled, false);
 
   const originalCreateDouyinAgentRun = agentRuns.createDouyinAgentRun;
+  const originalCreateDouyinStoryboardPlanRun = agentRuns.createDouyinStoryboardPlanRun;
   const originalSynthesizeDouyinRunTts = agentRuns.synthesizeDouyinRunTts;
+  const originalSynthesizeDouyinRunSceneTts = agentRuns.synthesizeDouyinRunSceneTts;
   const originalCreateDouyinRunStoryboard = agentRuns.createDouyinRunStoryboard;
+  const originalCreateDouyinRunVisualStoryboard = agentRuns.createDouyinRunVisualStoryboard;
   const originalCreateDouyinRunHyperframesProject = agentRuns.createDouyinRunHyperframesProject;
   const originalRenderDouyinRunHyperframesVideo = agentRuns.renderDouyinRunHyperframesVideo;
+  const originalGetDouyinAgentRun = agentRuns.getDouyinAgentRun;
+  const originalDecideNextAction = agentRuns.decideNextAction;
   agentRuns.createDouyinAgentRun = async () => ({
     success: false,
     status: 'failed',
@@ -1000,12 +1143,36 @@ async function run() {
       url: `/api/agents/douyin/${awemeId}/runs/ok-run/tts/ok-run-tts.wav`,
     },
   });
+  agentRuns.createDouyinStoryboardPlanRun = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'plan-run',
+    message: '导演分镜规划已生成。',
+    storyboard_plan: { status: 'planned', scenes: [{ index: 1, narration_text: '第一幕旁白' }] },
+    workflow: { next_action: 'synthesize_scene_tts' },
+  });
+  agentRuns.synthesizeDouyinRunSceneTts = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'ok-run',
+    message: '分段配音已生成。',
+    scene_tts: { status: 'done', timed_storyboard_plan: { status: 'timed', captions: [{ index: 1 }] } },
+    workflow: { next_action: 'generate_visual_storyboard' },
+  });
   agentRuns.createDouyinRunStoryboard = async () => ({
     success: true,
     aweme_id: awemeId,
     run_id: 'ok-run',
     message: 'AI 分镜已生成。',
     storyboard: { status: 'done', scenes: [{ index: 1, caption_indexes: [1], start: 0, end: 1 }] },
+  });
+  agentRuns.createDouyinRunVisualStoryboard = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'ok-run',
+    message: '视觉分镜已生成。',
+    storyboard: { status: 'done', scenes: [{ index: 1, caption_indexes: [1], start: 0, end: 1 }] },
+    workflow: { next_action: 'generate_video_project' },
   });
   agentRuns.createDouyinRunHyperframesProject = async () => ({
     success: true,
@@ -1021,6 +1188,13 @@ async function run() {
     message: '视频渲染完成。',
     video: { status: 'rendered', output_url: `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes/files/output.mp4` },
   });
+  agentRuns.getDouyinAgentRun = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'ok-run',
+    data: { storyboard_plan: { status: 'planned', scenes: [{ index: 1 }] } },
+  });
+  agentRuns.decideNextAction = () => ({ next_action: 'synthesize_scene_tts' });
   const app = express();
   app.use(express.json());
   app.use('/api/agents', agentsRouter);
@@ -1117,6 +1291,18 @@ async function run() {
     assert.strictEqual(response.body.status, 'failed');
     assert.deepStrictEqual(response.body.steps, [{ id: 'generate', status: 'failed' }]);
 
+    const storyboardPlanResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/storyboard-plan-runs`, {
+      promptOptions: { targetDurationSec: 42 },
+    });
+    assert.strictEqual(storyboardPlanResponse.statusCode, 200);
+    assert.strictEqual(storyboardPlanResponse.body.success, true);
+    assert.strictEqual(storyboardPlanResponse.body.workflow.next_action, 'synthesize_scene_tts');
+
+    const nextActionResponse = await requestJson(server, 'GET', `/api/agents/douyin/${awemeId}/runs/ok-run/next-action`);
+    assert.strictEqual(nextActionResponse.statusCode, 200);
+    assert.strictEqual(nextActionResponse.body.success, true);
+    assert.strictEqual(nextActionResponse.body.workflow.next_action, 'synthesize_scene_tts');
+
     const ttsResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/tts`, {
       voice: 'Mia',
       stylePrompt: 'warm delivery',
@@ -1124,6 +1310,19 @@ async function run() {
     assert.strictEqual(ttsResponse.statusCode, 200);
     assert.strictEqual(ttsResponse.body.success, true);
     assert.strictEqual(ttsResponse.body.tts.voice, 'Mia');
+
+    const sceneTtsResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/scene-tts`, {
+      voice: 'Mia',
+      stylePrompt: 'warm delivery',
+    });
+    assert.strictEqual(sceneTtsResponse.statusCode, 200);
+    assert.strictEqual(sceneTtsResponse.body.success, true);
+    assert.strictEqual(sceneTtsResponse.body.workflow.next_action, 'generate_visual_storyboard');
+
+    const visualStoryboardResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/visual-storyboard`, {});
+    assert.strictEqual(visualStoryboardResponse.statusCode, 200);
+    assert.strictEqual(visualStoryboardResponse.body.success, true);
+    assert.strictEqual(visualStoryboardResponse.body.workflow.next_action, 'generate_video_project');
 
     const storyboardResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/storyboard`, {});
     assert.strictEqual(storyboardResponse.statusCode, 200);
@@ -1158,10 +1357,15 @@ async function run() {
     assert.strictEqual(renderResponse.body.video.status, 'rendered');
   } finally {
     agentRuns.createDouyinAgentRun = originalCreateDouyinAgentRun;
+    agentRuns.createDouyinStoryboardPlanRun = originalCreateDouyinStoryboardPlanRun;
     agentRuns.synthesizeDouyinRunTts = originalSynthesizeDouyinRunTts;
+    agentRuns.synthesizeDouyinRunSceneTts = originalSynthesizeDouyinRunSceneTts;
     agentRuns.createDouyinRunStoryboard = originalCreateDouyinRunStoryboard;
+    agentRuns.createDouyinRunVisualStoryboard = originalCreateDouyinRunVisualStoryboard;
     agentRuns.createDouyinRunHyperframesProject = originalCreateDouyinRunHyperframesProject;
     agentRuns.renderDouyinRunHyperframesVideo = originalRenderDouyinRunHyperframesVideo;
+    agentRuns.getDouyinAgentRun = originalGetDouyinAgentRun;
+    agentRuns.decideNextAction = originalDecideNextAction;
     await new Promise(resolve => server.close(resolve));
   }
 }
