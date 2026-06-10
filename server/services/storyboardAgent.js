@@ -123,6 +123,7 @@ function getFrameProfileBrief({ frameProfileId = DEFAULT_FRAME_PROFILE_ID, frame
 function buildStoryboardMessages({
   rewriteScript,
   captions,
+  phraseCaptions = [],
   videoBrief = {},
   storyboardOptions = {},
   frameProfileId = DEFAULT_FRAME_PROFILE_ID,
@@ -132,6 +133,15 @@ function buildStoryboardMessages({
     ? captions.map(caption => ({
       index: caption.index,
       text: typeof caption.text === 'string' ? caption.text : '',
+    }))
+    : [];
+  const phraseBlocks = Array.isArray(phraseCaptions)
+    ? phraseCaptions.map(block => ({
+      id: block.id,
+      caption_index: block.caption_index,
+      text: typeof block.text === 'string' ? block.text : '',
+      from_sec: block.start,
+      to_sec: block.end,
     }))
     : [];
 
@@ -162,6 +172,9 @@ function buildStoryboardMessages({
         '字幕索引：',
         JSON.stringify(captionIndexes, null, 2),
         '',
+        '短语字幕块：',
+        JSON.stringify(phraseBlocks, null, 2),
+        '',
         '[AI_STORYBOARD_TARGET=hyperframes]',
         '[AI_STORYBOARD_COVER_ALL_CAPTIONS=true]',
         '',
@@ -184,8 +197,11 @@ function buildStoryboardMessages({
         '- 选择参考：workflow=流程/步骤关系，code_panel=代码或命令感，ui_mockup=工具/产品界面示意，split_compare=双栏差异，concept_map=概念关系，timeline=时间推进，quote_burst=节奏爆点，text_card=核心观点，quote_card=定义/金句，step_card=明确步骤，contrast_card=真实 A vs B 对比。',
         '- 不要为了省事连续使用同一种卡片外观；如果语义连续相近，也要通过 composition、objects、layout 做出可见差异。',
         '- contrast_card 只用于真实对比、前后变化或旧方法 vs 新方法；headline 必须写成 A vs B，左右两侧不能表达同一个意思，否则改用 text_card 或 step_card。',
+        '- 只要字幕语义涉及代码、报错、运行、修复、需求让 AI 生成工具或“能跑的版本”，优先使用 code_panel 或 code_walkthrough；objects 必须包含至少一个 type=code 的代码/伪代码示例，以及一个 type=terminal 的运行结果或报错，不要只用普通 panel/badge 代替代码示例。',
         '- background_prompt 必须描述原创抽象/图文背景，不得描述原视频画面。',
         '',
+        '- visual_scene.beats 必须使用 caption_block_id 引用短语字幕块 id，覆盖率不得低于 60%，不得输出空字符串。',
+        '- 枚举、顿号和列表内容必须拆成多个 beat，不要一次性显示整句。',
         getFrameProfileBrief({ frameProfileId, frameDocText }),
         '',
         formatStoryboardOptionsForPrompt(storyboardOptions),
@@ -220,6 +236,9 @@ function getEditableStoryboardTemplate() {
       '字幕索引：',
       '{{captionIndexesJson}}',
       '',
+      '短语字幕块：',
+      '{{phraseCaptionsJson}}',
+      '',
       '[AI_STORYBOARD_TARGET=hyperframes]',
       '[AI_STORYBOARD_COVER_ALL_CAPTIONS=true]',
       '',
@@ -242,8 +261,11 @@ function getEditableStoryboardTemplate() {
       '- 选择参考：workflow=流程/步骤关系，code_panel=代码或命令感，ui_mockup=工具/产品界面示意，split_compare=双栏差异，concept_map=概念关系，timeline=时间推进，quote_burst=节奏爆点，text_card=核心观点，quote_card=定义/金句，step_card=明确步骤，contrast_card=真实 A vs B 对比。',
       '- 不要为了省事连续使用同一种卡片外观；如果语义连续相近，也要通过 composition、objects、layout 做出可见差异。',
       '- contrast_card 只用于真实对比、前后变化或旧方法 vs 新方法；headline 必须写成 A vs B，左右两侧不能表达同一个意思，否则改用 text_card 或 step_card。',
+      '- 只要字幕语义涉及代码、报错、运行、修复、需求让 AI 生成工具或“能跑的版本”，优先使用 code_panel 或 code_walkthrough；objects 必须包含至少一个 type=code 的代码/伪代码示例，以及一个 type=terminal 的运行结果或报错，不要只用普通 panel/badge 代替代码示例。',
       '- background_prompt 必须描述原创抽象/图文背景，不得描述原视频画面。',
       '',
+      '- visual_scene.beats 必须使用 caption_block_id 引用短语字幕块 id，覆盖率不得低于 60%，不得输出空字符串。',
+      '- 枚举、顿号和列表内容必须拆成多个 beat，不要一次性显示整句。',
       '{{frameProfileBrief}}',
       '',
       '{{storyboardOptionsText}}',
@@ -282,12 +304,13 @@ function parseJson(text) {
 
 async function createStoryboard(options = {}) {
   const captions = Array.isArray(options.captions) ? options.captions : [];
+  const phraseCaptions = Array.isArray(options.phraseCaptions) ? options.phraseCaptions : [];
   const rewriteScript = typeof options.rewriteScript === 'string' ? options.rewriteScript : '';
   if (!captions.length) {
     return {
       success: false,
       message: '生成 AI 分镜失败：请先完成 TTS 合成并生成字幕时间轴。',
-      storyboard: storyboardSchema.normalizeStoryboard({ storyboard: {}, captions }),
+      storyboard: storyboardSchema.normalizeStoryboard({ storyboard: {}, captions, phraseCaptions }),
       raw: {},
       raw_parse_failed: false,
     };
@@ -304,6 +327,13 @@ async function createStoryboard(options = {}) {
     rewriteScript,
     videoBriefText: formatVideoBriefForPrompt(options.videoBrief || {}),
     captionIndexesJson: JSON.stringify(captionIndexes, null, 2),
+    phraseCaptionsJson: JSON.stringify(phraseCaptions.map(block => ({
+      id: block.id,
+      caption_index: block.caption_index,
+      text: typeof block.text === 'string' ? block.text : '',
+      from_sec: block.start,
+      to_sec: block.end,
+    })), null, 2),
     frameProfileBrief: editableConfig.useFrameProfile === false ? '' : getFrameProfileBrief({
       frameProfileId: options.frameProfileId || DEFAULT_FRAME_PROFILE_ID,
       frameDocText: options.frameDocText || '',
@@ -339,7 +369,7 @@ async function createStoryboard(options = {}) {
       success: false,
       message: modelResult.message || '生成 AI 分镜失败。',
       model: modelResult.model || {},
-      storyboard: storyboardSchema.normalizeStoryboard({ storyboard: {}, captions }),
+      storyboard: storyboardSchema.normalizeStoryboard({ storyboard: {}, captions, phraseCaptions }),
       config_snapshot: configSnapshot,
       messages,
       raw_output: '',
@@ -357,6 +387,7 @@ async function createStoryboard(options = {}) {
   const storyboard = storyboardSchema.normalizeStoryboard({
     storyboard: parsed.value,
     captions,
+    phraseCaptions,
   });
 
   return {

@@ -7,6 +7,7 @@ const defaultAiTtsModel = require('./aiTtsModel');
 const agentTemplates = require('./agentTemplates');
 const agentTemplateOverrides = require('./agentTemplateOverrides');
 const ttsTimeline = require('./ttsTimeline');
+const phraseTimeline = require('./phraseTimeline');
 const defaultStoryboardAgent = require('./storyboardAgent');
 const storyboardSchema = require('./storyboardSchema');
 const defaultHyperframesProject = require('./hyperframesProject');
@@ -14,6 +15,8 @@ const defaultHyperframesRenderer = require('./hyperframesRenderer');
 
 const TEMPLATE_VIRAL_REWRITE = 'viral_rewrite';
 const MAX_COMMENTS_CHARS = agentTemplates.MAX_COMMENTS_CHARS;
+const TTS_TARGET_DURATION_TOLERANCE = 1.25;
+const CHINESE_TTS_CHARS_PER_SECOND = 5.4;
 
 function createRunId(template = TEMPLATE_VIRAL_REWRITE) {
   const stamp = new Date().toISOString()
@@ -105,6 +108,36 @@ async function writeBinary(filePath, data) {
 
 function makeStep(id, label, status, message = '') {
   return { id, label, status, message };
+}
+
+function countSpeakableCharacters(text) {
+  return [...String(text || '').replace(/\s+/g, '')]
+    .filter(char => !/[，。！？、；：,.!?;:"'“”‘’（）()《》【】[\]{}-]/.test(char))
+    .length;
+}
+
+function estimateChineseTtsDurationSec(text) {
+  return Math.round((countSpeakableCharacters(text) / CHINESE_TTS_CHARS_PER_SECOND) * 10) / 10;
+}
+
+function getTargetDurationSec(run, fallback = 60) {
+  const target = Number(run?.result?.video_brief?.target_duration_sec || fallback);
+  return Number.isFinite(target) && target > 0 ? target : fallback;
+}
+
+function createTooLongTtsResult(run, estimatedDuration, targetDuration) {
+  const limit = Math.round(targetDuration * TTS_TARGET_DURATION_TOLERANCE * 10) / 10;
+  return {
+    status: 'failed',
+    voice: '',
+    style_prompt: '',
+    message: `口播脚本预计 ${estimatedDuration} 秒，超过目标时长 ${targetDuration} 秒的允许上限 ${limit} 秒。请先压缩脚本或重新生成更短口播后再合成 TTS。`,
+    estimated_duration: estimatedDuration,
+    target_duration_sec: targetDuration,
+    max_allowed_duration_sec: limit,
+    model: {},
+    updated_at: new Date().toISOString(),
+  };
 }
 
 function parseModelText(text, templateDefinition) {
@@ -568,6 +601,21 @@ async function synthesizeDouyinRunTtsLegacy(awemeId, runId, options = {}) {
     };
   }
 
+  const targetDuration = getTargetDurationSec(run);
+  const estimatedDuration = estimateChineseTtsDurationSec(rewriteScript);
+  if (estimatedDuration > targetDuration * TTS_TARGET_DURATION_TOLERANCE) {
+    const failedTts = createTooLongTtsResult(run, estimatedDuration, targetDuration);
+    const updatedRun = { ...run, tts: failedTts, updated_at: new Date().toISOString() };
+    await writeJson(runPath, updatedRun);
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: failedTts.message,
+      tts: failedTts,
+    };
+  }
+
   const ttsModel = options.ttsModel || defaultAiTtsModel;
   const modelResult = await ttsModel.callTtsModel({
     text: rewriteScript,
@@ -671,6 +719,9 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
 
   const rewriteScript = typeof run?.result?.rewrite_script === 'string' ? run.result.rewrite_script.trim() : '';
   const captions = Array.isArray(run?.tts?.captions) ? run.tts.captions : [];
+  const phraseCaptions = Array.isArray(run?.tts?.phrase_captions) && run.tts.phrase_captions.length
+    ? run.tts.phrase_captions
+    : phraseTimeline.buildPhraseBlocksFromCaptions(captions);
   if (!rewriteScript) {
     return {
       success: false,
@@ -706,6 +757,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
   const result = await agent.createStoryboard({
     rewriteScript,
     captions,
+    phraseCaptions,
     videoBrief,
     storyboardOptions,
     editableConfig: storyboardConfig,
@@ -719,6 +771,10 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
   const updatedRun = {
     ...run,
     storyboard_options: storyboardOptions,
+    tts: {
+      ...(run.tts || {}),
+      phrase_captions: phraseCaptions,
+    },
     storyboard_raw: result.raw || {},
     storyboard: result.storyboard,
     storyboard_model: result.model || {},
@@ -818,6 +874,7 @@ async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
     project_json_path: result.project_json_path,
     duration: result.duration,
     render_options: result.render_options || renderOptions,
+    video_quality_report: result.video_quality_report || result.project?.video_quality_report || null,
     message: result.message || '视频工程已生成。',
     updated_at: new Date().toISOString(),
   };
@@ -926,6 +983,31 @@ async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
   const projectDir = run.video?.project_dir || getHyperframesProjectDir(awemeId, runId, options.rootDir);
   const renderer = options.hyperframesRenderer || defaultHyperframesRenderer;
   const renderOptions = defaultHyperframesProject.normalizeRenderOptions(run.video?.render_options || {});
+  const runQualityReport = run.video?.video_quality_report || null;
+  const projectJsonPath = run.video?.project_json_path || path.join(projectDir, 'project.json');
+  const projectJson = await readJsonIfExists(projectJsonPath);
+  const diskQualityReport = projectJson?.video_quality_report || null;
+  const qualityReport = [runQualityReport, diskQualityReport].find(report => report?.pass === false)
+    || runQualityReport
+    || diskQualityReport
+    || null;
+  if (qualityReport && qualityReport.pass === false) {
+    const firstError = Array.isArray(qualityReport.issues)
+      ? qualityReport.issues.find(issue => issue?.severity === 'error') || qualityReport.issues[0]
+      : null;
+    const video = {
+      ...(run.video || {}),
+      status: 'failed',
+      render_options: renderOptions,
+      video_quality_report: qualityReport,
+      message: firstError?.message
+        ? `视频质量未通过：${firstError.message}`
+        : '视频质量未通过，请先重新生成分镜或调整视频工程。',
+      updated_at: new Date().toISOString(),
+    };
+    await writeJson(runPath, { ...run, video, updated_at: new Date().toISOString() });
+    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video };
+  }
   const renderingVideo = {
     ...(run.video || {}),
     status: 'rendering',
@@ -1031,6 +1113,21 @@ async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
     };
   }
 
+  const targetDuration = getTargetDurationSec(run);
+  const estimatedDuration = estimateChineseTtsDurationSec(sentences.join(''));
+  if (estimatedDuration > targetDuration * TTS_TARGET_DURATION_TOLERANCE) {
+    const failedTts = createTooLongTtsResult(run, estimatedDuration, targetDuration);
+    const updatedRun = { ...run, tts: failedTts, updated_at: new Date().toISOString() };
+    await writeJson(runPath, updatedRun);
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: failedTts.message,
+      tts: failedTts,
+    };
+  }
+
   const ttsModel = options.ttsModel || defaultAiTtsModel;
   const readAudioDuration = options.readAudioDuration || (async filePath => {
     const result = await ttsTimeline.readAudioDuration(filePath, options);
@@ -1130,6 +1227,7 @@ async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
   }
 
   const captions = ttsTimeline.buildCaptionsFromSegments(segments);
+  const phraseCaptions = phraseTimeline.buildPhraseBlocksFromCaptions(captions);
   const totalDuration = captions.length ? captions[captions.length - 1].end : 0;
   const tts = {
     status: 'done',
@@ -1141,6 +1239,7 @@ async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
     duration: totalDuration,
     segments,
     captions,
+    phrase_captions: phraseCaptions,
     model,
     message: 'TTS 语音合成完成。',
     updated_at: new Date().toISOString(),

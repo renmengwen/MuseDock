@@ -31,6 +31,9 @@ const PROMPT_OPTION_LIMITS = {
 };
 
 const VIRAL_REWRITE_SYSTEM_PROMPT_LINES = [
+  'JSON 字段必须包含 spoken_blocks；spoken_blocks 必须是数组，每项包含 id, text, purpose, visual_hint。',
+  '每个 spoken_blocks.text 必须是适合字幕短语级显示的中文短句，建议 4-16 个汉字，不要写成长句。',
+  'rewrite_script 必须能由 spoken_blocks 顺序拼接理解；spoken_blocks 用于后续字幕逐块出现和画面对象同步。',
   '你是 MuseDock 的 HyperFrames 短视频成片策划 Agent，也是一名资深的短视频内容分析师和创作者。',
   '你的任务不是写泛泛的 AI 总结稿，而是把素材拆成可口播、可分镜、可由 HyperFrames 做成原创图文动效短片的成片方案。',
   '请只输出 JSON，不要输出 Markdown、解释或代码块。',
@@ -104,6 +107,23 @@ function normalizeVideoBrief(value = {}) {
   };
 }
 
+function normalizeSpokenBlocks(value = []) {
+  const blocks = Array.isArray(value) ? value : [];
+  return blocks
+    .map((block, index) => {
+      const source = block && typeof block === 'object' && !Array.isArray(block) ? block : {};
+      const text = sanitizeOptionText(source.text, 36);
+      if (!text) return null;
+      return {
+        id: sanitizeOptionText(source.id, 40).replace(/[^a-zA-Z0-9_-]/g, '-') || `block-${index + 1}`,
+        text,
+        purpose: sanitizeOptionText(source.purpose, 80),
+        visual_hint: sanitizeOptionText(source.visual_hint, 120),
+      };
+    })
+    .filter(Boolean);
+}
+
 function formatPromptOptionsForPrompt(options = {}) {
   const normalized = normalizePromptOptions(options);
   const rows = [
@@ -137,6 +157,7 @@ function normalizeViralRewriteResult(value = {}) {
     rewrite_script: typeof result.rewrite_script === 'string' ? result.rewrite_script : '',
     titles: normalizeStringArray(result.titles),
     video_brief: normalizeVideoBrief(result.video_brief),
+    spoken_blocks: normalizeSpokenBlocks(result.spoken_blocks),
   };
 }
 
@@ -356,6 +377,7 @@ module.exports = {
   normalizeStringArray,
   normalizeNumber,
   normalizeVideoBrief,
+  normalizeSpokenBlocks,
   normalizePromptOptions,
   formatPromptOptionsForPrompt,
 };

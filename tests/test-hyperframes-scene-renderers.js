@@ -176,6 +176,27 @@ function run() {
   });
   assert.match(checklistHtml, /scene-content--checklist-pipeline/);
   assert.match(checklistHtml, /visual-check-item/);
+
+  const brandCloseHtml = renderers.renderSceneContent({
+    scene: makeScene('text_card', [], {
+      headline: '打开电脑试一次',
+      prepared_visual_scene: {
+        visualType: 'text_card',
+        composition: 'brand_close',
+        objects: [
+          { id: 'action-card', type: 'keyword', text: '试一次', role: 'primary' },
+          { id: 'comment-input', type: 'field', text: '最小需求' },
+        ],
+        beats: [{ at: 0.2, duration: 0.3, target: 'action-card', effect: 'zoom_focus', caption_block_id: 'cap-1-p1' }],
+      },
+    }),
+    wordHtml: '',
+  });
+  assert.match(brandCloseHtml, /scene-content--brand-close/);
+  assert.match(brandCloseHtml, /visual-brand-action/);
+  assert.match(brandCloseHtml, /data-visual-object="action-card"/);
+  assert.doesNotMatch(brandCloseHtml, /scene-content--dsl-layer/);
+  assert.doesNotMatch(brandCloseHtml, /visual-layer-item/);
 }
 
 try {

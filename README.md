@@ -13,9 +13,9 @@ MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作�
 - **AI 工作台**：基于本地素材、转写文本和评论缓存执行 Agent，目前内置“爆款拆解 + 改写脚本”和“评论洞察”两类任务。
 - **可编辑 Agent 模板**：支持编辑任务 Agent 与分镜 Agent 的 `system prompt`、`user prompt` 模板和模型参数，支持预览 messages、保存本地覆盖配置、恢复默认配置。
 - **运行记录与调试信息**：Agent 运行会保存模板快照、最终 messages、原始模型输出、解析状态和校验结果，便于复盘和排错。
-- **TTS 口播与字幕时间轴**：基于 MiMo TTS 按句合成口播音频，使用 `ffprobe` 读取真实分段时长，并保存可复用的 `tts.captions`。
-- **AI 分镜与人工校正**：文字模型生成原创视觉分镜和 `caption_indexes`，后端根据 `tts.captions` 计算最终时间轴；页面支持编辑分镜标题、字幕索引、视觉类型、布局、背景提示和强调词。
-- **HyperFrames 三层成片链路**：任务 Agent 生成 `video_brief`，分镜 Agent 作为 HyperFrames 视觉导演自动选择 `visual_type` 并输出 `visual_scene` DSL，渲染层消费 DSL 生成 HTML/CSS/GSAP 视频工程和 MP4。
+- **TTS 口播与短语字幕时间轴**：基于 MiMo TTS 按句合成口播音频，使用 `ffprobe` 读取真实分段时长，并保存 `tts.captions` 与 `tts.phrase_captions`，用于“读到哪一块就显示哪一块”的短语级动效。
+- **AI 分镜与人工校正**：文字模型生成原创视觉分镜、`caption_indexes`、`visual_scene` DSL 和 `caption_block_id` 绑定，后端根据 TTS 时间轴计算最终分镜时间；页面支持编辑分镜标题、字幕索引、视觉类型、布局、背景提示和强调词。
+- **HyperFrames 三层成片链路**：任务 Agent 生成 `video_brief`，分镜 Agent 作为 HyperFrames 视觉导演自动选择 `visual_type` 并输出 `visual_scene` DSL，渲染层消费 DSL 生成 HTML/CSS/GSAP 视频工程和 MP4，并写入 `video_quality_report` 作为渲染前质量门禁。
 - **模型配置**：设置页支持 ASR、文字模型、TTS、图片生成、视频生成和多模态模型配置。
 - **持久化页面状态**：主要页面在路由切换时保留工作区状态，减少来回查看素材、AI 运行和设置时的重复加载。
 
@@ -28,9 +28,9 @@ MuseDock 是一个本地优先的内容采集、素材整理和 AI 创作工作�
 5. 执行音频转写，生成 `transcript.json`。
 6. 在“AI 工作台”加载 `aweme_id`，选择任务 Agent。
 7. 按需编辑 Agent 模板，或直接运行“爆款拆解 + 改写脚本”“评论洞察”。
-8. 在“配音”页选择音色和语气，执行 TTS 合成并生成字幕时间轴。
+8. 在“配音”页选择音色和语气，执行 TTS 合成并生成句级字幕与短语级字幕时间轴。
 9. 在“成片”页生成 AI 分镜，必要时展开分镜列表进行人工校正。
-10. 选择渲染参数，生成 HyperFrames 视频工程并渲染 MP4。
+10. 选择渲染参数，生成 HyperFrames 视频工程；质量报告通过后再渲染 MP4。
 
 最终视频通常生成在：
 
@@ -43,19 +43,21 @@ data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes/output.mp4
 MuseDock 的成片链路不是简单字幕卡片拼接，而是分为三层：
 
 - **任务 Agent 层**：把素材、评论和转写结果整理成脚本，同时生成 `video_brief`，约束目标时长、目标字数、叙事节奏、hook 和段落 beats。
-- **分镜 Agent 层**：以“HyperFrames 视觉导演 / DOM/CSS/GSAP 专家”为角色，依据脚本、字幕索引和 `video_brief` 自动选择 `visual_type`，并输出结构化 `visual_scene` DSL。
-- **渲染层**：后端规范化分镜，生成 HyperFrames HTML/CSS/GSAP 工程，支持 workflow、code_panel、ui_mockup、split_compare、concept_map、timeline、quote_burst 以及旧版卡片类型的兼容渲染。
+- **分镜 Agent 层**：以“HyperFrames 视觉导演 / DOM/CSS/GSAP 专家”为角色，依据脚本、字幕索引、短语字幕和 `video_brief` 自动选择 `visual_type`，并输出结构化 `visual_scene` DSL。涉及代码、报错、运行结果或修复过程时，会优先生成 `code_panel` / `code_walkthrough` 这类代码与终端画面。
+- **渲染层**：后端规范化分镜，生成 HyperFrames HTML/CSS/GSAP 工程，支持 workflow、code_panel、ui_mockup、split_compare、concept_map、timeline、quote_burst 以及旧版卡片类型的兼容渲染。`phrase_kinetic` 模式会用 `caption_block_id` 把视觉 beat 对齐到短语字幕起点，而不是把列表和枚举内容一次性铺满。
+- **质量门禁层**：生成工程后会分析 `project.json`、`storyboard.json`、`captions.json` 和最终 HTML，检查时长、视觉类型丰富度、短语字幕同步、无效 `caption_block_id`、未绑定视觉对象、卡片化布局过度等问题；报告未通过时渲染 MP4 会被阻断。
 
-`visual_type` 默认由 AI 自动抉择，用户不需要手动指定。后端会对白名单、字幕索引、场景结构和 DSL 做校验与 fallback，尽量保证最终画面可渲染、字幕完整覆盖。
+`visual_type` 默认由 AI 自动抉择，用户不需要手动指定。后端会对白名单、字幕索引、短语字幕引用、场景结构和 DSL 做校验与 fallback，尽量保证最终画面可渲染、字幕完整覆盖，并减少“PPT 卡片轮播”的成片感。
 
 ## 关键约束
 
 - 最终成片默认生成原创图文 + 动效画面，不直接复用原视频、原视频帧、关键帧截图或原视频背景。
 - Agent 输出必须经过后端解析、规范化和校验；前端可编辑配置，但运行记录会保存实际使用的配置快照。
 - AI 分镜只负责视觉结构和字幕引用，不直接决定最终时间轴。
-- 最终时间轴以 `tts.captions` 为准，由后端统一计算 `start`、`end` 和 `duration`。
+- 最终时间轴以 `tts.captions` 和 `tts.phrase_captions` 为准，由后端统一计算 `start`、`end` 和 `duration`。
 - `渲染 MP4` 不重新请求大模型，只使用已保存的分镜、字幕、音频和 `video.render_options`。
 - 如果 AI 分镜输出无效、遗漏字幕或引用不存在的字幕索引，后端会 normalize/fallback，尽量保证字幕完整覆盖。
+- 如果 `video_quality_report.pass` 为 `false`，后端会拒绝进入 MP4 渲染，要求先重新生成分镜或调整视频工程。
 
 ## 技术栈
 
@@ -129,12 +131,17 @@ npm test
 node tests/test-agent-template-overrides.js
 node tests/test-agent-runs.js
 node tests/test-ai-tts-model.js
+node tests/test-phrase-timeline.js
+node tests/test-video-quality-report.js
 node tests/test-storyboard-schema.js
 node tests/test-storyboard-agent.js
 node tests/test-hyperframes-visual-dsl.js
 node tests/test-hyperframes-scene-renderers.js
 node tests/test-hyperframes-project.js
 node tests/test-hyperframes-renderer.js
+
+# 分析已生成的 HyperFrames 工程质量报告
+node scripts/analyze-video-quality.js data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes
 ```
 
 ## 环境变量
@@ -162,7 +169,7 @@ MuseDock 会在本地生成运行数据：
 - `data/mediacrawler.db`：SQLite 数据库
 - `data/media/douyin/<aweme_id>/`：抖音视频素材目录
 - `data/media/douyin/<aweme_id>/transcript.json`：音频转写结果
-- `data/media/douyin/<aweme_id>/agent_runs/`：Agent 运行结果、TTS 音频、字幕时间轴、HyperFrames 工程和 MP4
+- `data/media/douyin/<aweme_id>/agent_runs/`：Agent 运行结果、TTS 音频、字幕时间轴、HyperFrames 工程、`project.json` 质量报告和 MP4
 - `data/config/agent_templates.json`：本地保存的 Agent 模板覆盖配置
 - `chrome-user-data/`：Chrome CDP 使用的本地浏览器数据
 - `douyin-cookies.json`：抖音 Cookie 持久化文件
@@ -266,6 +273,8 @@ npm run build:frontend
 ```powershell
 node tests/test-agent-template-overrides.js
 node tests/test-agent-runs.js
+node tests/test-phrase-timeline.js
+node tests/test-video-quality-report.js
 node tests/test-storyboard-schema.js
 node tests/test-storyboard-agent.js
 node tests/test-hyperframes-visual-dsl.js

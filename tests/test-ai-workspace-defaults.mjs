@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   DEFAULT_PROMPT_OPTIONS,
+  DEFAULT_RENDER_OPTIONS,
   DEFAULT_STORYBOARD_OPTIONS,
 } from '../frontend-react/src/utils/aiWorkspaceDefaults.js';
 
@@ -13,5 +14,7 @@ assert.equal(DEFAULT_PROMPT_OPTIONS.accountPositioning, 'AI科普账号');
 
 assert.equal(DEFAULT_STORYBOARD_OPTIONS.visualStyle, '知识科普、情绪冲击');
 assert.equal(DEFAULT_STORYBOARD_OPTIONS.pacing, '具有强烈的视觉冲击但动画不夸张');
+
+assert.equal(DEFAULT_RENDER_OPTIONS.captionMode, 'phrase_kinetic');
 
 console.log('ai workspace defaults tests passed');

@@ -23,6 +23,10 @@ async function run() {
         { index: 1, start: 0, end: 1.25, duration: 1.25, text: '第一句。' },
         { index: 2, start: 1.25, end: 3.75, duration: 2.5, text: '第二句。' },
       ],
+      phrase_captions: [
+        { id: 'cap-1-p1', caption_index: 1, phrase_index: 1, start: 0, end: 0.625, duration: 0.625, text: '输入是什么' },
+        { id: 'cap-1-p2', caption_index: 1, phrase_index: 2, start: 0.625, end: 1.25, duration: 0.625, text: '输出是什么' },
+      ],
     },
     storyboard: {
       template: 'ai_storyboard_cards',
@@ -78,7 +82,7 @@ async function run() {
               { id: 'line-1', type: 'connector', from: 'node-1', to: 'node-2' },
             ],
             motion: [{ target: 'node', effect: 'stagger_reveal', delay: 0.1 }],
-            beats: [{ at: 0.2, duration: 0.4, target: 'node-1', effect: 'slide_up_reveal' }],
+            beats: [{ at: 0.2, duration: 0.4, target: 'node-1', effect: 'slide_up_reveal', caption_block_id: 'cap-1-p1' }],
           },
           captions: [
             { index: 1, start: 0, end: 1.25, text: '绗竴鍙ャ€?' },
@@ -188,6 +192,30 @@ async function run() {
   assert.equal(projectJson.render_options.motionLevel, 'low');
   assert.equal(projectJson.frame_options.frameStyle, 'creative_brutalist');
   assert.equal(projectJson.frame_options.captionMode, 'kinetic');
+  assert.ok(projectJson.video_quality_report);
+  assert.equal(typeof projectJson.video_quality_report.score, 'number');
+  assert.ok(Array.isArray(projectJson.video_quality_report.issues));
+
+  const phraseProjectDir = path.join(root, 'phrase-project');
+  const phraseResult = await hyperframesProject.createOriginalCaptionProject({
+    run: runData,
+    projectDir: phraseProjectDir,
+    renderOptions: {
+      captionMode: 'phrase_kinetic',
+    },
+  });
+  assert.equal(phraseResult.success, true);
+  const phraseHtml = fs.readFileSync(path.join(phraseProjectDir, 'index.html'), 'utf-8');
+  assert.match(phraseHtml, /captionMode": "phrase_kinetic"/);
+  assert.match(phraseHtml, /class="phrase-caption"/);
+  assert.match(phraseHtml, /data-caption-block-id="cap-1-p1"/);
+  assert.match(phraseHtml, /is-active/);
+  assert.match(phraseHtml, /\[data-caption-block-id='cap-1-p1'\]/);
+  assert.match(phraseHtml, /\.caption-bar--phrase \{[^}]*background: transparent/);
+  assert.match(phraseHtml, /\[data-frame-profile="creative_brutalist"\] \.caption-bar--phrase \{[^}]*background: transparent/);
+  const phraseProjectJson = JSON.parse(fs.readFileSync(path.join(phraseProjectDir, 'project.json'), 'utf-8'));
+  assert.equal(phraseProjectJson.frame_options.captionMode, 'phrase_kinetic');
+  assert.ok(Array.isArray(phraseProjectJson.phrase_captions));
 
   const creativeHtml = hyperframesProject.buildIndexHtml({
     storyboard,

@@ -187,9 +187,13 @@ async function run() {
             audience: '创作者',
             comment_insights: ['评论关注效率'],
             topics: ['本地素材管理'],
-            rewrite_script: '改写脚本',
+            rewrite_script: '输入是什么，输出是什么，规则是什么。',
             titles: ['标题一'],
             video_brief: validVideoBrief,
+            spoken_blocks: [
+              { id: 'b1', text: '输入是什么', purpose: 'define_input', visual_hint: 'field_highlight' },
+              { id: 'b2', text: '输出是什么', purpose: 'define_output', visual_hint: 'field_highlight' },
+            ],
           }),
         };
       },
@@ -206,7 +210,11 @@ async function run() {
   assert.strictEqual(generated.success, true);
   assert.strictEqual(generated.status, 'done');
   assert.strictEqual(generated.result.summary, '摘要');
-  assert.strictEqual(generated.result.rewrite_script, '改写脚本');
+  assert.strictEqual(generated.result.rewrite_script, '输入是什么，输出是什么，规则是什么。');
+  assert.deepStrictEqual(generated.result.spoken_blocks.map(item => item.text), [
+    '输入是什么',
+    '输出是什么',
+  ]);
   assert.strictEqual(generated.input_summary.comment_count, 1);
   assert.strictEqual(generated.input_summary.has_transcript, true);
   assert.ok(generated.run_id.endsWith('-viral_rewrite'));
@@ -340,7 +348,7 @@ async function run() {
   assert.strictEqual(detail.success, true);
   assert.strictEqual(detail.aweme_id, awemeId);
   assert.strictEqual(detail.run_id, generated.run_id);
-  assert.strictEqual(detail.data.result.rewrite_script, '改写脚本');
+  assert.strictEqual(detail.data.result.rewrite_script, '输入是什么，输出是什么，规则是什么。');
 
   const ttsInputs = [];
   const segmentDurations = [1.25];
@@ -369,7 +377,7 @@ async function run() {
     },
   });
   assert.strictEqual(ttsResult.success, true);
-  assert.deepStrictEqual(ttsInputs.map(item => item.text), ['改写脚本']);
+  assert.deepStrictEqual(ttsInputs.map(item => item.text), ['输入是什么，输出是什么，规则是什么。']);
   assert.strictEqual(ttsInputs[0].voice, 'Mia');
   assert.strictEqual(ttsInputs[0].stylePrompt, 'warm natural delivery');
   assert.strictEqual(ttsResult.tts.voice, 'Mia');
@@ -377,8 +385,11 @@ async function run() {
   assert.ok(ttsResult.tts.url.includes(`/api/agents/douyin/${awemeId}/runs/${generated.run_id}/tts/`));
   assert.strictEqual(fs.readFileSync(ttsResult.tts.path, 'utf-8'), 'combined wav data');
   assert.deepStrictEqual(ttsResult.tts.captions, [
-    { index: 1, start: 0, end: 1.25, duration: 1.25, text: '改写脚本' },
+    { index: 1, start: 0, end: 1.25, duration: 1.25, text: '输入是什么，输出是什么，规则是什么。' },
   ]);
+  assert.ok(Array.isArray(ttsResult.tts.phrase_captions));
+  assert.ok(ttsResult.tts.phrase_captions.length > ttsResult.tts.captions.length);
+  assert.ok(ttsResult.tts.phrase_captions[0].id.startsWith('cap-'));
   assert.strictEqual(ttsResult.tts.duration, 1.25);
   assert.strictEqual(ttsResult.tts.segments.length, 1);
   assert.ok(fs.existsSync(ttsResult.tts.segments[0].path));
@@ -388,6 +399,34 @@ async function run() {
   assert.strictEqual(detailAfterTts.data.tts.status, 'done');
 
   assert.deepStrictEqual(detailAfterTts.data.tts.captions, ttsResult.tts.captions);
+
+  const tooLongRunPath = path.join(paths.dir, 'agent_runs', 'too-long-run.json');
+  await writeJson(tooLongRunPath, {
+    success: true,
+    run_id: 'too-long-run',
+    template: 'viral_rewrite',
+    result: {
+      rewrite_script: '这是一段明显超出目标时长的口播。'.repeat(140),
+      video_brief: { ...validVideoBrief, target_duration_sec: 60 },
+    },
+  });
+  let tooLongTtsCalled = false;
+  const tooLongTtsResult = await agentRuns.synthesizeDouyinRunTts(awemeId, 'too-long-run', {
+    rootDir,
+    ttsModel: {
+      callTtsModel: async () => {
+        tooLongTtsCalled = true;
+        return { success: true, audioBuffer: Buffer.from('too long') };
+      },
+    },
+  });
+  assert.strictEqual(tooLongTtsResult.success, false);
+  assert.strictEqual(tooLongTtsCalled, false);
+  assert.match(tooLongTtsResult.message, /目标时长|压缩|过长/);
+
+  const legacyRunWithoutPhraseCaptions = JSON.parse(fs.readFileSync(generated.path, 'utf-8'));
+  delete legacyRunWithoutPhraseCaptions.tts.phrase_captions;
+  await writeJson(generated.path, legacyRunWithoutPhraseCaptions);
 
   const storyboardResult = await agentRuns.createDouyinRunStoryboard(awemeId, generated.run_id, {
     rootDir,
@@ -404,9 +443,10 @@ async function run() {
     },
     frameProfileId: 'creative_brutalist',
     storyboardAgent: {
-      createStoryboard: async ({ rewriteScript, captions, storyboardOptions, editableConfig, frameProfileId }) => {
+      createStoryboard: async ({ rewriteScript, captions, phraseCaptions, storyboardOptions, editableConfig, frameProfileId }) => {
         assert.equal(rewriteScript, generated.result.rewrite_script);
         assert.ok(captions.length > 0);
+        assert.ok(phraseCaptions.length > captions.length);
         assert.equal(storyboardOptions.visualStyle, '商业质感');
         assert.equal(storyboardOptions.forbidden, '不要真人');
         assert.equal(editableConfig.source, 'request');
@@ -589,6 +629,111 @@ async function run() {
   assert.equal(projectResult.video.render_options.resolution, '720x1280');
   assert.equal(projectResult.video.render_options.quality, 'high');
   assert.ok(projectResult.video.project_dir.includes(`${generated.run_id}-hyperframes`));
+
+  const failedQualityRunId = `${generated.run_id}-quality-failed`;
+  const failedQualityPath = path.join(rootDir, awemeId, 'agent_runs', `${failedQualityRunId}.json`);
+  await writeJson(failedQualityPath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: failedQualityRunId,
+    video: {
+      status: 'project_ready',
+      project_dir: projectResult.video.project_dir,
+      render_options: projectResult.video.render_options,
+      video_quality_report: {
+        pass: false,
+        score: 68,
+        issues: [{ code: 'card_like_layout_overuse', severity: 'error', message: '卡片化过高' }],
+      },
+    },
+  });
+  let blockedRenderCalled = false;
+  const blockedRender = await agentRuns.renderDouyinRunHyperframesVideo(awemeId, failedQualityRunId, {
+    rootDir,
+    hyperframesRenderer: {
+      renderHyperframesProject: async () => {
+        blockedRenderCalled = true;
+        return { success: true };
+      },
+    },
+  });
+  assert.equal(blockedRender.success, false);
+  assert.equal(blockedRenderCalled, false);
+  assert.match(blockedRender.message, /质量|卡片化|未通过/);
+
+  const diskFailedProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}-disk-failed-hyperframes`);
+  fs.mkdirSync(diskFailedProjectDir, { recursive: true });
+  fs.writeFileSync(path.join(diskFailedProjectDir, 'project.json'), JSON.stringify({
+    video_quality_report: {
+      pass: false,
+      score: 68,
+      issues: [{ code: 'card_like_layout_overuse', severity: 'error', message: '磁盘工程质量未通过' }],
+    },
+  }, null, 2));
+  const diskFailedRunId = `${generated.run_id}-disk-quality-failed`;
+  const diskFailedPath = path.join(rootDir, awemeId, 'agent_runs', `${diskFailedRunId}.json`);
+  await writeJson(diskFailedPath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: diskFailedRunId,
+    video: {
+      status: 'project_ready',
+      project_dir: diskFailedProjectDir,
+      project_json_path: path.join(diskFailedProjectDir, 'project.json'),
+      render_options: projectResult.video.render_options,
+    },
+  });
+  let diskBlockedRenderCalled = false;
+  const diskBlockedRender = await agentRuns.renderDouyinRunHyperframesVideo(awemeId, diskFailedRunId, {
+    rootDir,
+    hyperframesRenderer: {
+      renderHyperframesProject: async () => {
+        diskBlockedRenderCalled = true;
+        return { success: true };
+      },
+    },
+  });
+  assert.equal(diskBlockedRender.success, false);
+  assert.equal(diskBlockedRenderCalled, false);
+  assert.match(diskBlockedRender.message, /磁盘工程质量未通过|质量|未通过/);
+
+  const stalePassProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}-stale-pass-hyperframes`);
+  fs.mkdirSync(stalePassProjectDir, { recursive: true });
+  fs.writeFileSync(path.join(stalePassProjectDir, 'project.json'), JSON.stringify({
+    video_quality_report: {
+      pass: false,
+      score: 62,
+      issues: [{ code: 'invalid_caption_sync', severity: 'error', message: 'disk project quality failed' }],
+    },
+  }, null, 2));
+  const stalePassRunId = `${generated.run_id}-stale-pass-quality`;
+  const stalePassPath = path.join(rootDir, awemeId, 'agent_runs', `${stalePassRunId}.json`);
+  await writeJson(stalePassPath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: stalePassRunId,
+    video: {
+      status: 'project_ready',
+      project_dir: stalePassProjectDir,
+      project_json_path: path.join(stalePassProjectDir, 'project.json'),
+      render_options: projectResult.video.render_options,
+      video_quality_report: {
+        pass: true,
+        score: 100,
+        issues: [],
+      },
+    },
+  });
+  let stalePassRenderCalled = false;
+  const stalePassBlockedRender = await agentRuns.renderDouyinRunHyperframesVideo(awemeId, stalePassRunId, {
+    rootDir,
+    hyperframesRenderer: {
+      renderHyperframesProject: async () => {
+        stalePassRenderCalled = true;
+        return { success: true };
+      },
+    },
+  });
+  assert.equal(stalePassBlockedRender.success, false);
+  assert.equal(stalePassRenderCalled, false);
+  assert.match(stalePassBlockedRender.message, /disk project quality failed|璐ㄩ噺|鏈€氳繃/);
 
   const renderResult = await agentRuns.renderDouyinRunHyperframesVideo(awemeId, generated.run_id, {
     rootDir,

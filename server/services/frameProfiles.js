@@ -11,7 +11,7 @@ const FRAME_ALLOWED = {
   energy: ['low', 'medium', 'high'],
   density: ['clean', 'balanced', 'rich'],
   transitionStyle: ['auto', 'wipe', 'glitch', 'zoom'],
-  captionMode: ['standard', 'kinetic'],
+  captionMode: ['standard', 'kinetic', 'phrase_kinetic'],
 };
 
 const CREATIVE_BRUTALIST_PROFILE = {
