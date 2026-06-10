@@ -12,8 +12,8 @@ function buildSceneAnimation(scene, index, motionScale = 1, frameOptions = {}) {
 
   lines.push(`    tl.set(".transition-layer", { attr: { "data-transition": "${transitionName}" } }, ${start.toFixed(3)});`);
   lines.push(`    tl.fromTo(".transition-layer", { xPercent: -120, autoAlpha: 0.92 }, { xPercent: 120, autoAlpha: 0, duration: ${Math.min(0.38, enterDuration + 0.12).toFixed(3)}, ease: "power4.out" }, ${start.toFixed(3)});`);
+  lines.push(`    tl.set("${sceneId}", { autoAlpha: 0 }, ${Math.max(0, start - 0.001).toFixed(3)});`);
   lines.push(`    tl.set("${sceneId}", { autoAlpha: 1 }, ${start.toFixed(3)});`);
-  lines.push(`    tl.fromTo("${sceneId}", { autoAlpha: 1 }, { autoAlpha: 1, duration: ${enterDuration.toFixed(3)}, ease: "none" }, ${start.toFixed(3)});`);
   lines.push(`    tl.fromTo("${sceneId} .scene-content", { y: 42, scale: 0.96, filter: "blur(10px)" }, { y: 0, scale: 1, filter: "blur(0px)", duration: ${enterDuration.toFixed(3)}, ease: "power3.out" }, ${start.toFixed(3)});`);
   lines.push(`    tl.fromTo("${sceneId} h1", { y: 18, autoAlpha: 0 }, { y: 0, autoAlpha: 1, duration: ${Math.min(0.28, enterDuration).toFixed(3)}, ease: "power2.out" }, ${(start + 0.03).toFixed(3)});`);
   lines.push(`    tl.fromTo("${sceneId} [data-visual-object]", { y: 20, autoAlpha: 0, scale: 0.92 }, { y: 0, autoAlpha: 1, scale: 1, duration: 0.28, stagger: 0.08, ease: "back.out(1.5)" }, ${(start + 0.12).toFixed(3)});`);
@@ -46,6 +46,7 @@ function buildTimelineScript(scenes, duration, motionScale = 1, frameOptions = {
   const safeDuration = Number(duration || 0);
   const lines = [
     '    const tl = gsap.timeline({ paused: true });',
+    '    tl.set(".scene", { autoAlpha: 0 }, 0);',
     `    tl.to({}, { duration: ${safeDuration} }, 0);`,
     '    tl.to(".neon-grid", { backgroundPosition: "140px 220px", duration: Math.max(8, ' + safeDuration + '), ease: "none" }, 0);',
     '    tl.to(".radial-energy", { rotate: 16, scale: 1.08, duration: Math.max(8, ' + safeDuration + '), ease: "sine.inOut" }, 0);',

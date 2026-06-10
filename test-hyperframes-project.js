@@ -112,7 +112,9 @@ async function run() {
   assert.match(html, /window\.__timelines/);
   assert.match(html, /<audio id="narration-audio"/);
   assert.match(html, /class="scene clip/);
-  assert.match(html, /tl\.fromTo\("#scene-1"/);
+  assert.match(html, /tl\.set\("\.scene", \{ autoAlpha: 0 \}, 0\)/);
+  assert.match(html, /tl\.set\("#scene-1", \{ autoAlpha: 1 \}, 0\.000\)/);
+  assert.doesNotMatch(html, /tl\.fromTo\("#scene-1", \{ autoAlpha: 1 \}/);
   assert.match(html, /tl\.fromTo\("#scene-1 \.scene-content"/);
   assert.doesNotMatch(html, /tl\.from\("#scene-1 \.emphasis span"/);
   assert.match(html, /#scene-1 \.emphasis span:nth-child\(1\)/);
