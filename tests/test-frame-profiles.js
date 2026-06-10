@@ -28,6 +28,9 @@ assert.deepStrictEqual(normalized, {
   captionMode: 'kinetic',
 });
 
+const phraseOptions = frameProfiles.normalizeFrameOptions({ captionMode: 'phrase_kinetic' });
+assert.equal(phraseOptions.captionMode, 'phrase_kinetic');
+
 const safe = frameProfiles.normalizeFrameOptions({
   frameStyle: 'unknown',
   energy: 'extreme',

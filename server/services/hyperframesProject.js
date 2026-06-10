@@ -5,6 +5,8 @@ const frameProfiles = require('./frameProfiles');
 const visualDsl = require('./hyperframesVisualDsl');
 const sceneRenderers = require('./hyperframesSceneRenderers');
 const animations = require('./hyperframesAnimations');
+const phraseTimeline = require('./phraseTimeline');
+const videoQualityReport = require('./videoQualityReport');
 
 const TEMPLATE_AI_STORYBOARD_CARDS = 'ai_storyboard_cards';
 
@@ -41,7 +43,7 @@ function normalizeRenderOptions(value = {}) {
     quality: pickAllowed(source.quality, ['standard', 'high'], RENDER_DEFAULTS.quality),
     frameStyle: pickAllowed(source.frameStyle, ['creative_brutalist'], RENDER_DEFAULTS.frameStyle),
     transitionStyle: pickAllowed(source.transitionStyle, ['auto', 'wipe', 'glitch', 'zoom'], RENDER_DEFAULTS.transitionStyle),
-    captionMode: pickAllowed(source.captionMode, ['standard', 'kinetic'], RENDER_DEFAULTS.captionMode),
+    captionMode: pickAllowed(source.captionMode, ['standard', 'kinetic', 'phrase_kinetic'], RENDER_DEFAULTS.captionMode),
   };
 }
 
@@ -139,7 +141,24 @@ function renderCaptionText(text, frameOptions) {
   return words.map(word => `<span>${escapeHtml(word)}</span>`).join('');
 }
 
+function getScenePhraseCaptions(scene, frameOptions) {
+  if (frameOptions.captionMode !== 'phrase_kinetic') return [];
+  if (Array.isArray(scene.phrase_captions) && scene.phrase_captions.length) {
+    return scene.phrase_captions;
+  }
+  return phraseTimeline.buildPhraseBlocksFromCaptions(Array.isArray(scene.captions) ? scene.captions : []);
+}
+
 function renderCaptionBar(scene, frameOptions) {
+  const phraseCaptions = getScenePhraseCaptions(scene, frameOptions);
+  if (frameOptions.captionMode === 'phrase_kinetic' && phraseCaptions.length) {
+    const phraseHtml = phraseCaptions.map(block => [
+      `<span class="phrase-caption" data-caption-block-id="${escapeHtml(block.id)}" data-caption-index="${escapeHtml(block.caption_index)}" data-start="${Number(block.start || 0)}" data-end="${Number(block.end || 0)}">`,
+      escapeHtml(block.text || ''),
+      '</span>',
+    ].join('')).join('');
+    return `<div class="caption-bar caption-bar--phrase" data-caption-mode="phrase_kinetic"><div class="caption-line phrase-kinetic-caption">${phraseHtml}</div></div>`;
+  }
   const captions = Array.isArray(scene.captions) ? scene.captions.filter(caption => caption?.text) : [];
   const lines = captions.length
     ? captions
@@ -351,13 +370,20 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
   const size = getRenderSize(options);
   const captionFontSize = getCaptionFontSize(options);
   const motionScale = getMotionScale(options);
+  const allPhraseCaptions = Array.isArray(storyboard.phrase_captions)
+    ? storyboard.phrase_captions
+    : phraseTimeline.buildPhraseBlocksFromCaptions(Array.isArray(captions?.captions) ? captions.captions : captions);
   const scenesWithFallbackWords = (Array.isArray(storyboard.scenes) ? storyboard.scenes : []).map(scene => {
     const captionText = Array.isArray(scene.captions)
       ? scene.captions.map(caption => caption.text).filter(Boolean).join(' ')
       : '';
+    const sceneCaptionIndexes = new Set((Array.isArray(scene.captions) ? scene.captions : [])
+      .map(caption => Number(caption.index))
+      .filter(Number.isFinite));
     return {
       ...scene,
       emphasis_words: getSceneEmphasisWords(scene, captionText),
+      phrase_captions: allPhraseCaptions.filter(block => sceneCaptionIndexes.has(Number(block.caption_index))),
     };
   });
   const renderScenes = visualDsl.prepareScenes(scenesWithFallbackWords);
@@ -412,7 +438,7 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
     .step-orbit span { color: var(--accent); font-size: 42px; font-weight: 900; }
     .step-line { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
     .step-line i { display: block; height: 8px; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--frame-hot)); }
-    .scene-content--workflow, .scene-content--code-panel, .scene-content--code-walkthrough, .scene-content--ui-mockup, .scene-content--split-compare, .scene-content--concept-map, .scene-content--timeline, .scene-content--timeline-sync, .scene-content--formula-build, .scene-content--checklist-pipeline, .scene-content--quote-burst, .scene-content--dsl-layer { border-left: 0; overflow: visible; }
+    .scene-content--workflow, .scene-content--code-panel, .scene-content--code-walkthrough, .scene-content--ui-mockup, .scene-content--split-compare, .scene-content--concept-map, .scene-content--timeline, .scene-content--timeline-sync, .scene-content--formula-build, .scene-content--checklist-pipeline, .scene-content--quote-burst, .scene-content--brand-close, .scene-content--center-burst, .scene-content--dsl-layer { border-left: 0; overflow: visible; }
     .visual-flow, .visual-timeline, .visual-concept-branches { display: grid; gap: 18px; }
     .visual-flow { grid-template-columns: 1fr; }
     .visual-node, .visual-milestone, .visual-pill, .visual-ui-item, .visual-branch { border: 1px solid color-mix(in srgb, var(--accent) 58%, transparent); background: color-mix(in srgb, var(--frame-panel) 72%, transparent); padding: 16px 18px; border-radius: 8px; color: var(--frame-text); font-weight: 800; overflow-wrap: anywhere; }
@@ -443,6 +469,14 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
     .visual-check-item i { width: 28px; height: 28px; border-radius: 999px; border: 2px solid var(--accent); box-shadow: inset 0 0 0 0 var(--accent); }
     .visual-sync-track { position: relative; height: 10px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
     .visual-sync-track i { display: block; width: 100%; height: 100%; transform: scaleX(0); transform-origin: left center; background: linear-gradient(90deg, var(--accent), var(--frame-hot)); }
+    .visual-brand-panel { display: grid; gap: 26px; align-content: center; min-height: 620px; padding: 46px; border: 4px solid var(--frame-ink); background: var(--frame-panel); box-shadow: 18px 18px 0 var(--frame-hot), 18px 18px 0 4px var(--frame-ink); }
+    .visual-brand-action { justify-self: start; max-width: 760px; padding: 22px 28px; border: 4px solid var(--frame-ink); background: var(--accent); color: #001014; font-size: 54px; line-height: 1.12; font-weight: 900; box-shadow: 10px 10px 0 var(--frame-gold), 10px 10px 0 4px var(--frame-ink); overflow-wrap: anywhere; }
+    .visual-brand-notes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .visual-brand-note { min-height: 74px; display: grid; place-items: center start; padding: 14px 18px; border: 4px solid var(--frame-ink); background: var(--frame-bg); color: var(--frame-text); font-size: 28px; font-weight: 850; overflow-wrap: anywhere; }
+    .visual-burst-shell { position: relative; min-height: 680px; display: grid; place-items: center; gap: 18px; }
+    .visual-burst-main { position: relative; z-index: 2; max-width: 820px; padding: 28px 34px; border: 4px solid var(--frame-ink); background: var(--frame-hot); color: var(--frame-ink); font-size: 62px; line-height: 1.08; font-weight: 900; text-align: center; box-shadow: 16px 16px 0 var(--frame-gold), 16px 16px 0 4px var(--frame-ink); overflow-wrap: anywhere; }
+    .visual-burst-tags { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .visual-burst-tag { padding: 13px 16px; border: 4px solid var(--frame-ink); background: var(--frame-panel); color: var(--frame-text); font-size: 27px; font-weight: 850; overflow-wrap: anywhere; }
     .scene-content--dsl-layer { min-height: 860px; align-items: center; text-align: center; isolation: isolate; }
     .visual-focus { width: 220px; height: 220px; display: grid; place-items: center; border-radius: 999px; background: radial-gradient(circle, color-mix(in srgb, var(--accent) 72%, #fff), color-mix(in srgb, var(--accent) 22%, transparent)); color: #061014; font-size: 34px; font-weight: 900; box-shadow: 0 0 70px color-mix(in srgb, var(--accent) 42%, transparent); }
     .visual-layer-cloud { width: 100%; min-height: 360px; display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 22px; }
@@ -453,6 +487,7 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
     .emphasis { display: flex; flex-wrap: wrap; gap: 12px; }
     .emphasis span { padding: 9px 14px; border: 1px solid color-mix(in srgb, var(--accent) 72%, #fff); border-radius: 8px; color: var(--accent); font-size: 28px; font-weight: 800; }
     .caption-bar { position: absolute; z-index: 5; left: 64px; right: 64px; bottom: 94px; min-height: calc(var(--caption-font-size) * 2.1); display: grid; place-items: center; padding: 24px 28px; border-radius: 8px; background: rgba(0,0,0,.58); color: #fff; font-size: var(--caption-font-size); line-height: 1.42; text-align: center; }
+    .caption-bar--phrase { background: transparent; color: var(--frame-ink); padding: 0 28px; border: 0; min-height: calc(var(--caption-font-size) * 1.6); }
     [data-frame-profile="creative_brutalist"] .scene { background: var(--frame-bg); color: var(--frame-text); }
     [data-frame-profile="creative_brutalist"] .scene::before { background-image: linear-gradient(rgba(15,15,15,.08) 2px, transparent 2px), linear-gradient(90deg, rgba(15,15,15,.08) 2px, transparent 2px); background-size: 72px 72px; mask-image: none; }
     [data-frame-profile="creative_brutalist"] .scene-content--text-card,
@@ -469,11 +504,15 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
     [data-frame-profile="creative_brutalist"] .visual-code-window,
     [data-frame-profile="creative_brutalist"] .visual-ui-panel { border: 4px solid var(--frame-ink); border-radius: 0; background: var(--frame-panel); color: var(--frame-text); box-shadow: 14px 14px 0 var(--frame-hot), 14px 14px 0 4px var(--frame-ink); backdrop-filter: none; }
     [data-frame-profile="creative_brutalist"] .caption-bar { border-radius: 0; background: var(--frame-ink); color: var(--frame-bg); border: 4px solid var(--frame-ink); }
+    [data-frame-profile="creative_brutalist"] .caption-bar--phrase { background: transparent; color: var(--frame-ink); border: 0; }
     [data-frame-profile="creative_brutalist"] .scene-number,
     [data-frame-profile="creative_brutalist"] .emphasis span { color: var(--frame-ink); border-color: var(--frame-ink); background: var(--frame-gold); border-radius: 0; }
     .caption-line { grid-area: 1 / 1; width: 100%; opacity: 0; }
     .kinetic-caption { display: flex; flex-wrap: wrap; justify-content: center; gap: .35em; }
     .kinetic-caption span { display: inline-block; }
+    .phrase-kinetic-caption { display: flex; flex-wrap: wrap; justify-content: center; gap: .35em; opacity: 1; }
+    .phrase-caption { display: inline-block; padding: .08em .22em; border-radius: 6px; opacity: 0; transform: translateY(10px); transition: color .12s ease, background .12s ease; }
+    .phrase-caption.is-active { background: var(--frame-gold); color: var(--frame-ink); }
   </style>
 </head>
 <body>
@@ -485,6 +524,7 @@ ${sceneHtml}
   </div>
   <script>
     window.__timelines = window.__timelines || {};
+    window.__renderOptions = ${JSON.stringify({ captionMode: frameOptions.captionMode }, null, 6)};
     ${animations.buildTimelineScript(renderScenes, duration, motionScale, frameOptions)}
     window.__timelines['ai-storyboard-cards'] = tl;
   </script>
@@ -505,6 +545,9 @@ async function createOriginalCaptionProject({ run, projectDir, renderOptions = {
   const captions = Array.isArray(run?.tts?.captions)
     ? run.tts.captions.map(normalizeCaption).filter(item => item.text && item.end > item.start)
     : [];
+  const phraseCaptions = Array.isArray(run?.tts?.phrase_captions) && run.tts.phrase_captions.length
+    ? run.tts.phrase_captions
+    : phraseTimeline.buildPhraseBlocksFromCaptions(captions);
   const audioPath = typeof run?.tts?.path === 'string' ? run.tts.path : '';
   const scenes = Array.isArray(run?.storyboard?.scenes) ? run.storyboard.scenes : [];
 
@@ -539,6 +582,7 @@ async function createOriginalCaptionProject({ run, projectDir, renderOptions = {
   const storyboard = {
     ...run.storyboard,
     template: run.storyboard.template || TEMPLATE_AI_STORYBOARD_CARDS,
+    phrase_captions: phraseCaptions,
     scenes,
   };
   const assetsDir = path.join(projectDir, 'assets');
@@ -550,6 +594,18 @@ async function createOriginalCaptionProject({ run, projectDir, renderOptions = {
   const captionsPath = path.join(projectDir, 'captions.json');
   const projectJsonPath = path.join(projectDir, 'project.json');
   const indexPath = path.join(projectDir, 'index.html');
+  const indexHtml = buildIndexHtml({ storyboard, captions, duration, renderOptions: normalizedRenderOptions });
+  const qualityReport = videoQualityReport.buildVideoQualityReport({
+    project: {
+      duration,
+      render_options: normalizedRenderOptions,
+    },
+    storyboard,
+    captions,
+    phraseCaptions,
+    html: indexHtml,
+    targetDurationSec: run?.result?.video_brief?.target_duration_sec || 60,
+  });
 
   await fsp.writeFile(storyboardPath, JSON.stringify(storyboard, null, 2), 'utf-8');
   await fsp.writeFile(captionsPath, JSON.stringify({ duration, captions }, null, 2), 'utf-8');
@@ -559,11 +615,13 @@ async function createOriginalCaptionProject({ run, projectDir, renderOptions = {
     run_id: run.run_id || '',
     aweme_id: run.aweme_id || '',
     duration,
+    phrase_captions: phraseCaptions,
     render_options: normalizedRenderOptions,
     frame_options: frameOptions,
+    video_quality_report: qualityReport,
     created_at: new Date().toISOString(),
   }, null, 2), 'utf-8');
-  await fsp.writeFile(indexPath, buildIndexHtml({ storyboard, captions, duration, renderOptions: normalizedRenderOptions }), 'utf-8');
+  await fsp.writeFile(indexPath, indexHtml, 'utf-8');
 
   return {
     success: true,
@@ -576,6 +634,7 @@ async function createOriginalCaptionProject({ run, projectDir, renderOptions = {
     duration,
     render_options: normalizedRenderOptions,
     frame_options: frameOptions,
+    video_quality_report: qualityReport,
     message: '视频工程已生成。',
   };
 }

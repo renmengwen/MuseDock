@@ -18,3 +18,16 @@ export const DEFAULT_STORYBOARD_OPTIONS = {
   forbidden: '',
   extraRequirements: '',
 };
+
+export const DEFAULT_RENDER_OPTIONS = {
+  resolution: '1080x1920',
+  fps: '30',
+  captionSize: 'medium',
+  motionLevel: 'medium',
+  showCaptionBar: true,
+  showSceneNumber: true,
+  quality: 'standard',
+  frameStyle: 'creative_brutalist',
+  transitionStyle: 'auto',
+  captionMode: 'phrase_kinetic',
+};

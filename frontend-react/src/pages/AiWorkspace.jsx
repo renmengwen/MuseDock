@@ -14,7 +14,7 @@ import {
   getStoryboardSceneIssues,
   sanitizeStoryboardSceneText,
 } from '../utils/agentRuns.js';
-import { DEFAULT_PROMPT_OPTIONS, DEFAULT_STORYBOARD_OPTIONS } from '../utils/aiWorkspaceDefaults.js';
+import { DEFAULT_PROMPT_OPTIONS, DEFAULT_RENDER_OPTIONS, DEFAULT_STORYBOARD_OPTIONS } from '../utils/aiWorkspaceDefaults.js';
 import { getAwemeIdFromSearch } from '../utils/workspaceParams.js';
 
 const AGENT_TEMPLATES = [
@@ -183,16 +183,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
   const [agentConfigPreviewing, setAgentConfigPreviewing] = useState(false);
   const [storyboardConfigPreviewing, setStoryboardConfigPreviewing] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState('viral_rewrite');
-  const [renderOptions, setRenderOptions] = useState({
-    resolution: '1080x1920',
-    fps: '30',
-    captionSize: 'medium',
-    motionLevel: 'medium',
-    showCaptionBar: true,
-    showSceneNumber: true,
-    quality: 'standard',
-    frameStyle: 'creative_brutalist',
-  });
+  const [renderOptions, setRenderOptions] = useState(DEFAULT_RENDER_OPTIONS);
   const [resultTab, setResultTab] = useState('workflow');
 
   const sortedRuns = useMemo(() => {
@@ -1207,6 +1198,15 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                         <option value="large">字幕大</option>
                       </select>
                       <select
+                        value={renderOptions.captionMode}
+                        onChange={event => updateRenderOption('captionMode', event.target.value)}
+                        disabled={storyboardRunning || videoBusy}
+                      >
+                        <option value="phrase_kinetic">短语动效</option>
+                        <option value="standard">标准字幕</option>
+                        <option value="kinetic">逐词动效</option>
+                      </select>
+                      <select
                         value={renderOptions.motionLevel}
                         onChange={event => updateRenderOption('motionLevel', event.target.value)}
                         disabled={storyboardRunning || videoBusy}
@@ -1331,6 +1331,20 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                       <div className="videoProjectMeta">
                         <span>{activeRun.video.message || '视频状态已更新。'}</span>
                         {activeRun.video.project_dir ? <code>{activeRun.video.project_dir}</code> : null}
+                        {activeRun.video.video_quality_report ? (
+                          <div className="qualityReportPanel">
+                            <strong>质量评分：{activeRun.video.video_quality_report.score}</strong>
+                            <span>目标时长：{activeRun.video.video_quality_report.target_duration_sec} 秒</span>
+                            <span>
+                              实际时长：
+                              {activeRun.video.video_quality_report.duration?.toFixed?.(1) || activeRun.video.video_quality_report.duration}
+                              {' '}秒
+                            </span>
+                            {activeRun.video.video_quality_report.issues?.map(issue => (
+                              <p key={issue.code}>{issue.message}</p>
+                            ))}
+                          </div>
+                        ) : null}
                         {activeRun.video.output_url ? (
                           <video controls src={activeRun.video.output_url} />
                         ) : null}

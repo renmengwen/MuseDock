@@ -10,6 +10,48 @@ const VISUAL_OBJECT_ALLOWED = ['node', 'connector', 'code', 'terminal', 'panel',
 const VISUAL_MOTION_ALLOWED = ['stagger_reveal', 'draw_line', 'type_in', 'scan', 'pulse', 'slide_in', 'zoom_focus', 'highlight', 'float'];
 const VISUAL_BEAT_EFFECT_ALLOWED = ['slide_up_reveal', 'draw_line', 'type_in', 'scan', 'pulse', 'slide_in', 'zoom_focus', 'highlight', 'float', 'glow_focus', 'check_on', 'progress_fill', 'caption_highlight'];
 const VISUAL_DSL_TYPES = ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst'];
+const VISUAL_OBJECT_TYPE_ALIASES = {
+  badge_rotated: 'badge',
+  browser_mockup: 'panel',
+  chat_bubble: 'panel',
+  circular_arrow: 'connector',
+  code_panel: 'code',
+  comparison_column: 'column',
+  comparison_panel: 'panel',
+  component_stack: 'panel',
+  concept_node: 'node',
+  connector_line: 'connector',
+  diagonal_strike: 'connector',
+  drop_zone: 'field',
+  file_card: 'panel',
+  file_chip: 'keyword',
+  form_field: 'field',
+  keyword_card: 'keyword',
+  large_frame: 'panel',
+  marker_block: 'badge',
+  marker_strip: 'badge',
+  mono_kicker: 'badge',
+  mono_topbar: 'panel',
+  pill_badge: 'badge',
+  progress_bar: 'metric',
+  quote_card: 'keyword',
+  small_label: 'badge',
+  spreadsheet_card: 'panel',
+  stacked_cards: 'panel',
+  stamp: 'badge',
+  step_card: 'step',
+  step_chain: 'step',
+  thick_arrow: 'connector',
+  timeline_node: 'milestone',
+  timeline_row: 'milestone',
+  tool_dashboard: 'panel',
+  tool_panel: 'panel',
+  typed_prompt: 'code',
+  ui_box: 'panel',
+  ui_form: 'panel',
+  ui_panel: 'panel',
+  vertical_rule: 'connector',
+};
 
 function roundTime(value) {
   return Math.round(Number(value || 0) * 1000) / 1000;
@@ -25,6 +67,16 @@ function sanitizeText(value, fallback = '') {
 
 function pickAllowed(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
+}
+
+function normalizeVisualObjectType(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return VISUAL_OBJECT_TYPE_ALIASES[text] || text;
+}
+
+function isKnownVisualObjectType(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return VISUAL_OBJECT_ALLOWED.includes(text) || Object.prototype.hasOwnProperty.call(VISUAL_OBJECT_TYPE_ALIASES, text);
 }
 
 function sanitizeShortText(value, fallback = '', maxLength = 18) {
@@ -88,7 +140,7 @@ function makeFallbackEmphasisWords(text, headline) {
 
 function normalizeVisualObject(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const type = pickAllowed(source.type, VISUAL_OBJECT_ALLOWED, null);
+  const type = pickAllowed(normalizeVisualObjectType(source.type), VISUAL_OBJECT_ALLOWED, null);
   if (!type) return null;
 
   const object = { type };
@@ -126,6 +178,7 @@ function normalizeVisualBeat(value) {
     target: sanitizeShortText(source.target, '', 48),
     effect,
     emphasis: sanitizeShortText(source.emphasis, '', 24),
+    caption_block_id: sanitizeShortText(source.caption_block_id, '', 80),
   };
 }
 
@@ -136,6 +189,7 @@ function normalizeCaptionSync(value) {
   const effect = pickAllowed(source.effect, VISUAL_BEAT_EFFECT_ALLOWED, 'caption_highlight');
   return {
     caption_index: captionIndex,
+    caption_block_id: sanitizeShortText(source.caption_block_id, '', 80),
     target: sanitizeShortText(source.target, '', 48),
     effect,
   };
@@ -185,6 +239,42 @@ function makeFallbackVisualScene(scene = {}) {
   };
 }
 
+function getScenePhraseBlocks(scene = {}) {
+  const captionIndexes = new Set(asArray(scene.caption_indexes).map(item => Number(item)).filter(Number.isFinite));
+  const phraseBlocks = asArray(scene.phrase_captions).filter(block => captionIndexes.has(Number(block?.caption_index)));
+  return phraseBlocks;
+}
+
+function applyCaptionBlockFallback(visualScene, scene = {}) {
+  const phraseBlocks = getScenePhraseBlocks(scene);
+  if (!phraseBlocks.length || !Array.isArray(visualScene.beats)) return visualScene;
+  let blockIndex = 0;
+  const beats = visualScene.beats.map(beat => {
+    if (beat.caption_block_id) return beat;
+    const block = phraseBlocks[blockIndex % phraseBlocks.length];
+    blockIndex += 1;
+    return {
+      ...beat,
+      caption_block_id: sanitizeShortText(block?.id, '', 80),
+    };
+  });
+  const caption_sync = Array.isArray(visualScene.caption_sync)
+    ? visualScene.caption_sync.map((sync, index) => {
+      if (sync.caption_block_id) return sync;
+      const block = phraseBlocks[index % phraseBlocks.length];
+      return {
+        ...sync,
+        caption_block_id: sanitizeShortText(block?.id, '', 80),
+      };
+    })
+    : visualScene.caption_sync;
+  return {
+    ...visualScene,
+    beats,
+    caption_sync,
+  };
+}
+
 function normalizeVisualScene(scene = {}) {
   const fallback = makeFallbackVisualScene(scene);
   const source = scene.visual_scene && typeof scene.visual_scene === 'object' && !Array.isArray(scene.visual_scene)
@@ -201,7 +291,7 @@ function normalizeVisualScene(scene = {}) {
   const safeMotion = motion.length ? motion : fallback.motion;
   const safeBeats = beats.length ? beats : fallback.beats;
 
-  return {
+  return applyCaptionBlockFallback({
     composition: sanitizeShortText(source.composition, fallback.composition, 48),
     objects: safeObjects,
     motion: safeMotion,
@@ -211,7 +301,7 @@ function normalizeVisualScene(scene = {}) {
       text: sanitizeShortText(focusSource.text, fallback.focus.text, 18),
       style: sanitizeShortText(focusSource.style, fallback.focus.style, 48),
     },
-  };
+  }, scene);
 }
 
 function normalizeCaption(caption) {
@@ -252,7 +342,7 @@ function makeFallbackScenes(captions) {
   return scenes;
 }
 
-function buildScene(source, sceneCaptions, sceneIndex) {
+function buildScene(source, sceneCaptions, sceneIndex, phraseCaptions = []) {
   const start = sceneCaptions[0].start;
   const end = sceneCaptions[sceneCaptions.length - 1].end;
   const visualType = pickAllowed(source.visual_type, VISUAL_TYPE_ALLOWED, 'quote_burst');
@@ -270,6 +360,8 @@ function buildScene(source, sceneCaptions, sceneIndex) {
     captions: sceneCaptions,
     visual_scene: normalizeVisualScene({
       ...source,
+      caption_indexes: sceneCaptions.map(item => item.index),
+      phrase_captions: phraseCaptions,
       headline: sanitizeText(source.headline, sceneCaptions[0].text),
       visual_type: visualType,
       emphasis_words: asArray(source.emphasis_words).map(item => String(item).trim()).filter(Boolean).slice(0, 6),
@@ -277,7 +369,7 @@ function buildScene(source, sceneCaptions, sceneIndex) {
   };
 }
 
-function normalizeStoryboard({ storyboard = {}, captions = [] } = {}) {
+function normalizeStoryboard({ storyboard = {}, captions = [], phraseCaptions = [] } = {}) {
   const normalizedCaptions = normalizeCaptions(captions);
   const captionByIndex = new Map(normalizedCaptions.map(item => [item.index, item]));
   const used = new Set();
@@ -293,14 +385,14 @@ function normalizeStoryboard({ storyboard = {}, captions = [] } = {}) {
       .sort((left, right) => left - right);
     if (!indexes.length) continue;
     indexes.forEach(index => used.add(index));
-    scenes.push(buildScene(source, indexes.map(index => captionByIndex.get(index)), scenes.length + 1));
+    scenes.push(buildScene(source, indexes.map(index => captionByIndex.get(index)), scenes.length + 1, phraseCaptions));
   }
 
   const uncovered = normalizedCaptions.filter(caption => !used.has(caption.index));
   for (const fallback of makeFallbackScenes(uncovered)) {
     const sceneCaptions = fallback.caption_indexes.map(index => captionByIndex.get(index)).filter(Boolean);
     if (sceneCaptions.length) {
-      scenes.push(buildScene(fallback, sceneCaptions, scenes.length + 1));
+      scenes.push(buildScene(fallback, sceneCaptions, scenes.length + 1, phraseCaptions));
     }
   }
 
@@ -330,18 +422,19 @@ function validateRawVisualDsl(scene, label, errors) {
   }
 
   if (!sanitizeText(visualScene.composition)) errors.push(`${label} visual_scene.composition 不能为空。`);
-  if (!Array.isArray(visualScene.objects) || visualScene.objects.length === 0) {
+  const normalizedVisualScene = normalizeVisualScene(scene);
+  if (!Array.isArray(normalizedVisualScene.objects) || normalizedVisualScene.objects.length === 0) {
     errors.push(`${label} visual_scene.objects 不能为空。`);
   } else if (visualScene.objects.some(item => {
     const type = item && typeof item === 'object' && !Array.isArray(item) ? item.type : null;
-    return !VISUAL_OBJECT_ALLOWED.includes(type);
+    return !isKnownVisualObjectType(type);
   })) {
     errors.push(`${label} visual_scene.objects 包含不受支持的对象类型。`);
   }
 
-  if (!Array.isArray(visualScene.motion) || visualScene.motion.length === 0) {
+  if (!Array.isArray(normalizedVisualScene.motion) || normalizedVisualScene.motion.length === 0) {
     errors.push(`${label} visual_scene.motion 不能为空。`);
-  } else if (visualScene.motion.some(item => {
+  } else if (Array.isArray(visualScene.motion) && visualScene.motion.length > 0 && visualScene.motion.some(item => {
     const effect = item && typeof item === 'object' && !Array.isArray(item) ? item.effect : null;
     return !VISUAL_MOTION_ALLOWED.includes(effect);
   })) {

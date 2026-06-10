@@ -5,6 +5,10 @@ async function run() {
   const messages = storyboardAgent.buildStoryboardMessages({
     rewriteScript: 'test script',
     captions: [{ index: 1, start: 0, end: 2, duration: 2, text: 'first line' }],
+    phraseCaptions: [
+      { id: 'cap-1-p1', caption_index: 1, text: '输入是什么', start: 0, end: 1 },
+      { id: 'cap-1-p2', caption_index: 1, text: '输出是什么', start: 1, end: 2 },
+    ],
     videoBrief: {
       target_duration_sec: 60,
       target_word_count: 220,
@@ -33,6 +37,9 @@ async function run() {
   assert.match(messages[1].content, /visual_scene/);
   assert.match(messages[1].content, /visual_scene\.beats/);
   assert.match(messages[1].content, /caption_sync/);
+  assert.match(messages[1].content, /短语字幕块/);
+  assert.match(messages[1].content, /cap-1-p1/);
+  assert.match(messages[1].content, /caption_block_id/);
   assert.match(messages[1].content, /formula_build/);
   assert.match(messages[1].content, /process_flow/);
   assert.match(messages[1].content, /code_walkthrough/);

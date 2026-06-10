@@ -143,6 +143,56 @@ function renderDslLayerScene(scene = {}) {
   ].join('\n');
 }
 
+function renderBrandCloseScene(scene = {}) {
+  const safeScene = toSafeScene(scene);
+  const objects = getObjects(safeScene);
+  const primary = objects.find(object => object.role === 'primary') || objects[0] || {
+    id: 'action-card',
+    type: 'keyword',
+    text: safeScene.headline || '开始',
+  };
+  const supporting = objects.filter(object => object !== primary).slice(0, 4);
+
+  return [
+    '<div class="scene-content scene-content--brand-close" data-visual-type="text_card" data-composition="brand_close">',
+    '  <div class="visual-brand-panel" data-visual-object="brand-panel">',
+    `    <h1>${escapeHtml(safeScene.headline)}</h1>`,
+    `    <div class="visual-brand-action" data-visual-object="${objectId(primary, 0)}">${objectText(primary)}</div>`,
+    '    <div class="visual-brand-notes">',
+    supporting.map((item, index) => (
+      `<div class="visual-brand-note" data-visual-object="${objectId(item, index + 1)}">${objectText(item)}</div>`
+    )).join(''),
+    '    </div>',
+    '  </div>',
+    '</div>',
+  ].join('\n');
+}
+
+function renderCenterBurstScene(scene = {}) {
+  const safeScene = toSafeScene(scene);
+  const objects = getObjects(safeScene);
+  const primary = objects.find(object => object.role === 'primary') || objects[0] || {
+    id: 'burst-main',
+    type: 'keyword',
+    text: safeScene.headline || '重点',
+  };
+  const satellites = objects.filter(object => object !== primary).slice(0, 6);
+
+  return [
+    '<div class="scene-content scene-content--center-burst" data-visual-type="quote_burst" data-composition="center_burst">',
+    '  <div class="visual-burst-shell">',
+    `    <div class="visual-burst-main" data-visual-object="${objectId(primary, 0)}">${objectText(primary)}</div>`,
+    `    <h1>${escapeHtml(safeScene.headline)}</h1>`,
+    '    <div class="visual-burst-tags">',
+    satellites.map((item, index) => (
+      `<div class="visual-burst-tag" data-visual-object="${objectId(item, index + 1)}">${objectText(item)}</div>`
+    )).join(''),
+    '    </div>',
+    '  </div>',
+    '</div>',
+  ].join('\n');
+}
+
 function renderWorkflowScene(scene = {}) {
   const safeScene = toSafeScene(scene);
   const composition = rawComposition(safeScene);
@@ -275,6 +325,21 @@ function renderSceneContent({ scene = {}, index = 0, captionText = '', wordHtml 
   const safeScene = toSafeScene(scene);
   const prepared = getPreparedScene(safeScene);
   const type = prepared.visualType || safeScene.visual_type || 'quote_burst';
+  const composition = rawComposition(safeScene);
+  if (composition === 'brand_close') return renderBrandCloseScene(safeScene, index);
+  if (composition === 'center_burst') return renderCenterBurstScene(safeScene, index);
+  if (composition === 'formula_build') return renderFormulaBuildScene(safeScene, index);
+  if (composition === 'process_flow') return renderWorkflowScene({
+    ...safeScene,
+    visual_type: 'workflow',
+    prepared_visual_scene: {
+      ...prepared,
+      visualType: 'workflow',
+    },
+  }, index);
+  if (composition === 'checklist_pipeline') return renderChecklistPipelineScene(safeScene, index);
+  if (composition === 'timeline_sync') return renderTimelineSyncScene(safeScene, index);
+  if (composition === 'code_walkthrough') return renderCodeWalkthroughScene(safeScene, index);
   if (['text_card', 'quote_card', 'step_card', 'contrast_card'].includes(type) && getObjects(safeScene).length) {
     return renderDslLayerScene(safeScene, index);
   }
@@ -302,4 +367,6 @@ module.exports = {
   renderCodeWalkthroughScene,
   renderQuoteBurstScene,
   renderDslLayerScene,
+  renderBrandCloseScene,
+  renderCenterBurstScene,
 };

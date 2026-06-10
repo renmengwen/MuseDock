@@ -73,11 +73,11 @@ function run() {
               { target: 'bad', effect: 'explode', delay: 999 },
             ],
             beats: [
-              { at: 0.15, duration: 0.45, target: 'node-1', effect: 'slide_up_reveal', emphasis: 'primary' },
+              { at: 0.15, duration: 0.45, target: 'node-1', effect: 'slide_up_reveal', emphasis: 'primary', caption_block_id: 'cap-1-p1' },
               { at: 1.1, duration: 0.3, target: 'node-2', effect: 'glow_focus', emphasis: 'supporting' },
               { at: 9, duration: 5, target: 'bad', effect: 'explode' },
             ],
-            caption_sync: [{ caption_index: 1, target: 'node-1', effect: 'highlight' }],
+            caption_sync: [{ caption_index: 1, caption_block_id: 'cap-1-p1', target: 'node-1', effect: 'highlight' }],
             focus: { text: '流程太重', style: 'warning_pulse' },
           },
         },
@@ -95,8 +95,10 @@ function run() {
   assert.equal(visualDsl.scenes[0].visual_scene.motion[0].effect, 'stagger_reveal');
   assert.equal(visualDsl.scenes[0].visual_scene.beats.length, 2);
   assert.equal(visualDsl.scenes[0].visual_scene.beats[0].effect, 'slide_up_reveal');
+  assert.equal(visualDsl.scenes[0].visual_scene.beats[0].caption_block_id, 'cap-1-p1');
   assert.equal(visualDsl.scenes[0].visual_scene.beats[1].duration, 0.3);
   assert.equal(visualDsl.scenes[0].visual_scene.caption_sync[0].caption_index, 1);
+  assert.equal(visualDsl.scenes[0].visual_scene.caption_sync[0].caption_block_id, 'cap-1-p1');
   assert.equal(visualDsl.scenes[0].visual_scene.focus.text, '流程太重');
 
   const semanticObjects = schema.normalizeStoryboard({
@@ -353,6 +355,34 @@ function run() {
     ],
   });
   assert.equal(visualValidation.success, true);
+
+  const aliasedVisualValidation = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '别名对象',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创背景',
+          visual_scene: {
+            composition: 'process_flow',
+            objects: [
+              { id: 'keyword-card-1', type: 'keyword_card', text: '关键词' },
+              { id: 'connector-line-1', type: 'connector_line', from: 'keyword-card-1', to: 'typed-prompt-1' },
+              { id: 'typed-prompt-1', type: 'typed_prompt', text: '输入提示' },
+            ],
+            motion: [],
+            beats: [{ target: 'keyword-card-1', effect: 'highlight', caption_block_id: 'cap-1-p1' }],
+          },
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '字幕一' },
+    ],
+  });
+  assert.equal(aliasedVisualValidation.success, true);
 
   const invalidVisualType = schema.validateStoryboardEditableInput({
     storyboard: {
