@@ -52,7 +52,7 @@ export function ConfigurableTable({
                 disabled={disableHide}
                 onCheckedChange={checkedValue => setColumnVisible(column.id, checkedValue)}
               >
-                {column.label}
+                {column.settingsLabel || column.label}
               </DropdownMenuCheckboxItem>
             );
           })}
@@ -65,7 +65,7 @@ export function ConfigurableTable({
             <TableRow>
               {visibleColumns.map(column => (
                 <TableHead key={column.id} className={column.headerClassName || column.className}>
-                  {column.label}
+                  {column.header || column.label}
                 </TableHead>
               ))}
             </TableRow>

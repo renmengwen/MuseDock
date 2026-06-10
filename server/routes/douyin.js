@@ -10,6 +10,7 @@ const {
 } = require('../scraper/douyin');
 const storedCookies = require('../state/cookies');
 const { getLocalDouyinComments, saveDouyinVideos, saveDouyinComments } = require('../services/douyinStore');
+const { saveCrawlKeyword } = require('../services/crawlKeywords');
 
 const router = express.Router();
 
@@ -51,6 +52,9 @@ function sendCrawlResult(res, result, fallbackMessage, storeLabel) {
   }
 
   const store = saveVideosSafely(result.data || [], storeLabel);
+  if (storeLabel === 'Douyin search' && store.saved > 0) {
+    saveCrawlKeyword('douyin', result.data?.[0]?.source_keyword || result.data?.[0]?.keyword);
+  }
   return res.json({
     success: true,
     count: result.count || (result.data || []).length,

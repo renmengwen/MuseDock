@@ -40,6 +40,31 @@ async function run() {
   assert.match(messages[1].content, /短语字幕块/);
   assert.match(messages[1].content, /cap-1-p1/);
   assert.match(messages[1].content, /caption_block_id/);
+  const feedbackMessages = storyboardAgent.buildStoryboardMessages({
+    rewriteScript: 'test script',
+    captions: [{ index: 1, start: 0, end: 2, duration: 2, text: 'first line' }],
+    phraseCaptions: [
+      { id: 'cap-1-p1', caption_index: 1, text: '输入是什么', start: 0, end: 1 },
+    ],
+    qualityFeedback: {
+      score: 48,
+      issues: [
+        {
+          code: 'unbound_visual_objects',
+          severity: 'error',
+          message: '有 12 个视觉对象没有绑定到有效字幕 beat，列表项可能在口播前提前出现。',
+        },
+      ],
+      visual_object_count: 20,
+      bound_visual_object_count: 8,
+      unbound_visual_object_count: 12,
+    },
+  });
+  assert.match(feedbackMessages[1].content, /上一次视频工程质量未通过/);
+  assert.match(feedbackMessages[1].content, /unbound_visual_objects/);
+  assert.match(feedbackMessages[1].content, /每个 visual_scene\.objects\[\]\.id/);
+  assert.match(feedbackMessages[1].content, /beats\[\]\.target/);
+  assert.match(feedbackMessages[1].content, /当前 scene 内有效 caption_block_id/);
   assert.match(messages[1].content, /formula_build/);
   assert.match(messages[1].content, /process_flow/);
   assert.match(messages[1].content, /code_walkthrough/);

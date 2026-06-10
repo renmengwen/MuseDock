@@ -762,6 +762,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     storyboardOptions,
     editableConfig: storyboardConfig,
     frameProfileId: options.frameProfileId,
+    qualityFeedback: options.qualityFeedback || null,
     aiTextModel: options.aiTextModel,
     configPath: options.configPath,
     textConfig: options.textConfig,
@@ -784,6 +785,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     storyboard_raw_output: result.raw_output || '',
     storyboard_parse: result.parse || { success: true, error: '' },
     storyboard_schema_validation: result.schema_validation || { success: true, errors: [] },
+    video: null,
     updated_at: new Date().toISOString(),
   };
   await writeJson(runPath, updatedRun);
@@ -802,6 +804,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     storyboard_raw_output: updatedRun.storyboard_raw_output,
     storyboard_parse: updatedRun.storyboard_parse,
     storyboard_schema_validation: updatedRun.storyboard_schema_validation,
+    video: updatedRun.video,
   };
 }
 

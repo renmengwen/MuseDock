@@ -19,6 +19,10 @@ assert.match(source, /短语动效/);
 assert.match(source, /质量评分/);
 assert.match(source, /实际时长/);
 assert.match(source, /目标时长/);
-assert.ok(source.includes('createDouyinRunStoryboard(value, activeRun.run_id, DEFAULT_STORYBOARD_OPTIONS, storyboardOverride, renderOptions.frameStyle)'));
+assert.match(source, /createDouyinRunStoryboard\(\s*value,\s*activeRun\.run_id,\s*DEFAULT_STORYBOARD_OPTIONS,\s*storyboardOverride,\s*renderOptions\.frameStyle,\s*qualityFeedback,\s*\)/);
+assert.match(source, /带问题重新生成分镜/);
+assert.match(source, /qualityFeedback/);
+assert.match(source, /createStoryboard\(\{ qualityFeedback/);
+assert.match(source, /正在带着质量问题重新生成 AI 分镜/);
 
 console.log('AI 工作台不再展示 brief 输入区，且 messages 预览状态引用有效。');

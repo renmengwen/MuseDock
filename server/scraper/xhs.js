@@ -87,6 +87,7 @@ async function searchNotes(keyword, maxCount = 20, cookieStr = '') {
           title: link.text || '',
           cover_url: '',
           note_url: link.href,
+          keyword,
         });
       }
     }

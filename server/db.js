@@ -8,6 +8,15 @@ function initializeSchema(db) {
   db.pragma('foreign_keys = ON');
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS crawl_keywords (
+      platform TEXT NOT NULL,
+      keyword TEXT NOT NULL,
+      crawled_at INTEGER DEFAULT (strftime('%s','now')),
+      PRIMARY KEY (platform, keyword)
+    )
+  `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS douyin_videos (
       aweme_id TEXT PRIMARY KEY,
       aweme_type TEXT,

@@ -384,6 +384,42 @@ function run() {
   });
   assert.equal(aliasedVisualValidation.success, true);
 
+  const normalizedWithObjectBeatFallback = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '补齐对象',
+          visual_type: 'workflow',
+          layout: 'vertical_flow',
+          background_prompt: '原创背景',
+          visual_scene: {
+            composition: 'process_flow',
+            objects: [
+              { id: 'step-1', type: 'step', text: '第一步' },
+              { id: 'step-2', type: 'step', text: '第二步' },
+              { id: 'step-3', type: 'step', text: '第三步' },
+            ],
+            motion: [{ target: 'step-1', effect: 'stagger_reveal' }],
+            beats: [{ target: 'step-1', effect: 'slide_up_reveal', caption_block_id: 'cap-1-p1' }],
+          },
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 3, duration: 3, text: '第一步，第二步，第三步。' },
+    ],
+    phraseCaptions: [
+      { id: 'cap-1-p1', caption_index: 1, start: 0, end: 1, text: '第一步' },
+      { id: 'cap-1-p2', caption_index: 1, start: 1, end: 2, text: '第二步' },
+      { id: 'cap-1-p3', caption_index: 1, start: 2, end: 3, text: '第三步' },
+    ],
+  });
+  const fallbackBeats = normalizedWithObjectBeatFallback.scenes[0].visual_scene.beats;
+  assert.ok(fallbackBeats.some(beat => beat.target === 'step-2' && beat.caption_block_id === 'cap-1-p2'));
+  assert.ok(fallbackBeats.some(beat => beat.target === 'step-3' && beat.caption_block_id === 'cap-1-p3'));
+  assert.equal(new Set(fallbackBeats.map(beat => beat.target)).has('step-1'), true);
+
   const invalidVisualType = schema.validateStoryboardEditableInput({
     storyboard: {
       scenes: [

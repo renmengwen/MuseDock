@@ -10,6 +10,7 @@ const VISUAL_OBJECT_ALLOWED = ['node', 'connector', 'code', 'terminal', 'panel',
 const VISUAL_MOTION_ALLOWED = ['stagger_reveal', 'draw_line', 'type_in', 'scan', 'pulse', 'slide_in', 'zoom_focus', 'highlight', 'float'];
 const VISUAL_BEAT_EFFECT_ALLOWED = ['slide_up_reveal', 'draw_line', 'type_in', 'scan', 'pulse', 'slide_in', 'zoom_focus', 'highlight', 'float', 'glow_focus', 'check_on', 'progress_fill', 'caption_highlight'];
 const VISUAL_DSL_TYPES = ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst'];
+const VISUAL_OBJECT_BEAT_FALLBACK_EXCLUDED_TYPES = new Set(['connector']);
 const VISUAL_OBJECT_TYPE_ALIASES = {
   badge_rotated: 'badge',
   browser_mockup: 'panel',
@@ -275,6 +276,44 @@ function applyCaptionBlockFallback(visualScene, scene = {}) {
   };
 }
 
+function applyObjectBeatFallback(visualScene, scene = {}) {
+  const phraseBlocks = getScenePhraseBlocks(scene);
+  const objects = asArray(visualScene.objects);
+  const beats = asArray(visualScene.beats);
+  if (!phraseBlocks.length || !objects.length) return visualScene;
+
+  const validPhraseIds = new Set(phraseBlocks.map(block => sanitizeShortText(block?.id, '', 80)).filter(Boolean));
+  const boundTargets = new Set(beats
+    .filter(beat => validPhraseIds.has(sanitizeShortText(beat?.caption_block_id, '', 80)))
+    .map(beat => sanitizeShortText(beat?.target, '', 48))
+    .filter(Boolean));
+  const nextBeats = [...beats];
+  const firstAt = clampNumber(beats[0]?.at, 0.12, 0, 8);
+
+  objects.forEach((object, index) => {
+    const target = sanitizeShortText(object?.id || `${object?.type || 'object'}-${index + 1}`, '', 48);
+    const type = sanitizeShortText(object?.type, '', 32);
+    if (!target || boundTargets.has(target) || VISUAL_OBJECT_BEAT_FALLBACK_EXCLUDED_TYPES.has(type)) return;
+    const block = phraseBlocks[index % phraseBlocks.length];
+    const captionBlockId = sanitizeShortText(block?.id, '', 80);
+    if (!captionBlockId) return;
+    nextBeats.push({
+      at: firstAt + Math.min(1.8, index * 0.18),
+      duration: 0.32,
+      target,
+      effect: type === 'code' ? 'type_in' : (type === 'terminal' ? 'scan' : 'slide_up_reveal'),
+      emphasis: object?.role === 'primary' ? 'primary' : 'supporting',
+      caption_block_id: captionBlockId,
+    });
+    boundTargets.add(target);
+  });
+
+  return {
+    ...visualScene,
+    beats: nextBeats.slice(0, 16),
+  };
+}
+
 function normalizeVisualScene(scene = {}) {
   const fallback = makeFallbackVisualScene(scene);
   const source = scene.visual_scene && typeof scene.visual_scene === 'object' && !Array.isArray(scene.visual_scene)
@@ -291,7 +330,7 @@ function normalizeVisualScene(scene = {}) {
   const safeMotion = motion.length ? motion : fallback.motion;
   const safeBeats = beats.length ? beats : fallback.beats;
 
-  return applyCaptionBlockFallback({
+  const withCaptionFallback = applyCaptionBlockFallback({
     composition: sanitizeShortText(source.composition, fallback.composition, 48),
     objects: safeObjects,
     motion: safeMotion,
@@ -302,6 +341,7 @@ function normalizeVisualScene(scene = {}) {
       style: sanitizeShortText(focusSource.style, fallback.focus.style, 48),
     },
   }, scene);
+  return applyObjectBeatFallback(withCaptionFallback, scene);
 }
 
 function normalizeCaption(caption) {
