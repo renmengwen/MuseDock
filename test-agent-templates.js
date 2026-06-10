@@ -88,6 +88,17 @@ assert.match(customPrompt[0].content, /target_duration_sec/);
 assert.match(customPrompt[0].content, /beats/);
 assert.match(customPrompt[0].content, /45-75/);
 assert.match(customPrompt[0].content, /rewrite_script/);
+assert.match(customPrompt[0].content, /HyperFrames 短视频成片策划 Agent/);
+assert.match(customPrompt[0].content, /去除 AI 味/);
+assert.match(customPrompt[0].content, /不要输出 visual_type/);
+assert.match(customPrompt[0].content, /不要输出 visual_scene/);
+assert.match(customPrompt[0].content, /第一句话直接进入冲突/);
+assert.match(customPrompt[0].content, /不要写成公众号摘要/);
+assert.match(customPrompt[0].content, /赋能、闭环、沉淀/);
+assert.match(customPrompt[1].content, /不是复述原视频/);
+assert.match(customPrompt[1].content, /不是做知识总结/);
+assert.match(customPrompt[1].content, /原创图文动效短片/);
+assert.match(customPrompt[1].content, /可 DOM\/GSAP 表达/);
 
 const normalizedViral = viral.normalizeResult({
   summary: '摘要',
@@ -150,8 +161,13 @@ assert.equal(editableViral.label, '爆款拆解 + 改写脚本');
 assert.ok(editableViral.systemPrompt.includes('MuseDock'));
 assert.ok(editableViral.systemPrompt.includes('video_brief'));
 assert.ok(editableViral.systemPrompt.includes('45-75'));
+assert.ok(editableViral.systemPrompt.includes('HyperFrames 短视频成片策划 Agent'));
+assert.ok(editableViral.systemPrompt.includes('去除 AI 味'));
+assert.ok(editableViral.systemPrompt.includes('不要输出 visual_type'));
+assert.ok(editableViral.systemPrompt.includes('不要输出 visual_scene'));
 assert.ok(editableViral.userPromptTemplate.includes('{{transcriptText}}'));
 assert.ok(editableViral.userPromptTemplate.includes('{{promptOptionsText}}'));
+assert.ok(editableViral.userPromptTemplate.includes('原创图文动效短片'));
 assert.deepEqual(editableViral.resultFields, [
   'summary',
   'viral_points',
