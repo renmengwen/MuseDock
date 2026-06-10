@@ -36,6 +36,8 @@ async function run() {
   assert.match(messages[1].content, /AI_STORYBOARD_COVER_ALL_CAPTIONS=true/);
   assert.match(messages[1].content, /visual_scene/);
   assert.match(messages[1].content, /visual_scene\.beats/);
+  assert.match(messages[1].content, /visual_scene\.objects\[\]\.type 只能使用 node、connector、code、terminal、panel、button、field、metric、column、branch、milestone、badge、keyword、center、step/);
+  assert.match(messages[1].content, /不要使用 card、chip、line_arrow、bubble、icon 等自造类型/);
   assert.match(messages[1].content, /caption_sync/);
   assert.match(messages[1].content, /短语字幕块/);
   assert.match(messages[1].content, /cap-1-p1/);
@@ -242,7 +244,7 @@ async function run() {
       callTextModel: async () => ({ success: true, text: 'not json' }),
     },
   });
-  assert.equal(malformed.success, true);
+  assert.equal(malformed.success, false);
   assert.equal(malformed.storyboard.scenes.length, 2);
   assert.equal(malformed.raw_parse_failed, true);
 
@@ -262,7 +264,7 @@ async function run() {
       }),
     },
   });
-  assert.equal(invalidRawScene.success, true);
+  assert.equal(invalidRawScene.success, false);
   assert.equal(invalidRawScene.storyboard.status, 'done');
   assert.equal(invalidRawScene.schema_validation.success, false);
   assert.ok(invalidRawScene.schema_validation.errors.some(item => item.includes('不存在')));

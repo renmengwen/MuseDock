@@ -123,6 +123,9 @@ function run() {
     captions,
   });
   assert.deepStrictEqual(semanticObjects.scenes[0].visual_scene.objects.map(item => item.type), ['center', 'step']);
+  assert.equal(schema.normalizeVisualObject({ id: 'x1', type: 'card', text: '卡片' }).type, 'panel');
+  assert.equal(schema.normalizeVisualObject({ id: 'x2', type: 'chip', text: '标签' }).type, 'badge');
+  assert.equal(schema.normalizeVisualObject({ id: 'x3', type: 'line_arrow', text: '连接' }).type, 'connector');
 
   const objectsKeptWhenMotionFallback = schema.normalizeStoryboard({
     storyboard: {

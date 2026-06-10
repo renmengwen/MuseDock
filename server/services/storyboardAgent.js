@@ -217,6 +217,7 @@ function buildStoryboardMessages({
         '- visual_type 必须由你根据字幕语义、视频结构 brief 和画面节奏自动选择，用户不需要指定；也就是自动选择 visual_type。',
         '- visual_type 只能使用 workflow、code_panel、ui_mockup、split_compare、concept_map、timeline、quote_burst、text_card、quote_card、step_card、contrast_card。',
         '- 每个 scene 必须输出 visual_scene，包含 composition、objects、motion、visual_scene.beats、caption_sync；objects 必须能用 DOM/CSS/GSAP 表达。',
+        '- visual_scene.objects[].type 只能使用 node、connector、code、terminal、panel、button、field、metric、column、branch、milestone、badge、keyword、center、step；不要使用 card、chip、line_arrow、bubble、icon 等自造类型。',
         '- visual_scene.composition 必须体现画面如何逐步构建，优先使用语义明确的 composition：formula_build、process_flow、code_walkthrough、timeline_sync、checklist_pipeline、concept_map、brand_close、center_burst。',
         '- visual_scene.beats 必须描述段内对象出现顺序和节奏，每条包含 at、duration、target、effect、emphasis；effect 只能使用 slide_up_reveal、draw_line、type_in、scan、pulse、slide_in、zoom_focus、highlight、float、glow_focus、check_on、progress_fill、caption_highlight。',
         '- caption_sync 用于把字幕 index 与画面对象联动高亮；例如 caption_index=3、target=node-2、effect=caption_highlight。',
@@ -283,6 +284,7 @@ function getEditableStoryboardTemplate() {
       '- visual_type 必须由你根据字幕语义、视频结构 brief 和画面节奏自动选择，用户不需要指定；也就是自动选择 visual_type。',
       '- visual_type 只能使用 workflow、code_panel、ui_mockup、split_compare、concept_map、timeline、quote_burst、text_card、quote_card、step_card、contrast_card。',
       '- 每个 scene 必须输出 visual_scene，包含 composition、objects、motion、visual_scene.beats、caption_sync；objects 必须能用 DOM/CSS/GSAP 表达。',
+      '- visual_scene.objects[].type 只能使用 node、connector、code、terminal、panel、button、field、metric、column、branch、milestone、badge、keyword、center、step；不要使用 card、chip、line_arrow、bubble、icon 等自造类型。',
       '- visual_scene.composition 必须体现画面如何逐步构建，优先使用语义明确的 composition：formula_build、process_flow、code_walkthrough、timeline_sync、checklist_pipeline、concept_map、brand_close、center_burst。',
       '- visual_scene.beats 必须描述段内对象出现顺序和节奏，每条包含 at、duration、target、effect、emphasis；effect 只能使用 slide_up_reveal、draw_line、type_in、scan、pulse、slide_in、zoom_focus、highlight、float、glow_focus、check_on、progress_fill、caption_highlight。',
       '- caption_sync 用于把字幕 index 与画面对象联动高亮；例如 caption_index=3、target=node-2、effect=caption_highlight。',
@@ -420,10 +422,16 @@ async function createStoryboard(options = {}) {
     captions,
     phraseCaptions,
   });
+  const success = parsed.parsed && schemaValidation.success;
+  const message = success
+    ? 'AI 分镜已生成。'
+    : (parsed.parsed
+      ? 'AI 分镜结构校验失败，请查看调试信息或重新生成。'
+      : 'AI 分镜返回不是有效 JSON，无法生成可用分镜。');
 
   return {
-    success: true,
-    message: parsed.parsed ? 'AI 分镜已生成。' : 'AI 分镜返回不是有效 JSON，已使用默认分镜。',
+    success,
+    message,
     model: modelResult.model || {},
     storyboard,
     config_snapshot: configSnapshot,
