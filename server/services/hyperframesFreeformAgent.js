@@ -1,12 +1,30 @@
+const MAX_JSON_CHARS = 12000;
+
+const ALLOWED_PROJECT_FILES = new Set([
+  'index.html',
+  'design.md',
+  'hyperframes.json',
+  'package.json',
+  'meta.json',
+]);
+
 function stripCodeFence(text = '') {
   let value = String(text || '').trim();
-  value = value.replace(/^```(?:json)?\s*/i, '');
+  value = value.replace(/^```\s*(?:json)?\s*/i, '');
   value = value.replace(/\s*```$/i, '');
   return value.trim();
 }
 
-function safeJson(value) {
-  return JSON.stringify(value || {}, null, 2).slice(0, 12000);
+function safeJson(value, maxChars = MAX_JSON_CHARS) {
+  const json = JSON.stringify(value || {}, null, 2);
+  if (json.length <= maxChars) return json;
+
+  const previewLimit = Math.max(200, maxChars - 2000);
+  return JSON.stringify({
+    truncated: true,
+    original_length: json.length,
+    preview: json.slice(0, previewLimit),
+  }, null, 2);
 }
 
 function getOptionSummary(options = {}) {
@@ -107,10 +125,12 @@ function buildFreeformProjectMessages({ run = {}, brief = {}, skillContext = '',
         '',
         '输出要求：',
         '1. 只返回 JSON 对象。',
-        '2. files 必须包含 index.html。',
-        '3. files 建议包含 design.md、hyperframes.json、package.json。',
-        '4. index.html 应是完整 HTML，可以直接作为 HyperFrames 工程入口。',
-        '5. design.md 记录视觉设计、动效、验证和渲染说明。',
+        '2. files 必须包含非空字符串 index.html。',
+        '3. files 只允许包含 index.html、design.md、hyperframes.json、package.json、meta.json。',
+        '4. 不要输出 output.mp4、contact_sheet.jpg 或任何二进制产物文件。',
+        '5. 所有 files 内容必须是字符串。',
+        '6. index.html 应是完整 HTML，可以直接作为 HyperFrames 工程入口。',
+        '7. design.md 记录视觉设计、动效、验证和渲染说明。',
         '',
         '输出示例：',
         safeJson({
@@ -135,6 +155,29 @@ function parseJsonObject(text = '') {
   return value;
 }
 
+function validateProjectFiles(files) {
+  if (!files || typeof files !== 'object' || Array.isArray(files)) {
+    throw new Error('files 必须是 JSON 对象');
+  }
+
+  const validatedFiles = {};
+  for (const [fileName, content] of Object.entries(files)) {
+    if (!ALLOWED_PROJECT_FILES.has(fileName)) {
+      throw new Error(`不支持的工程文件：${fileName}`);
+    }
+    if (typeof content !== 'string') {
+      throw new Error(`工程文件 ${fileName} 的内容必须是字符串`);
+    }
+    validatedFiles[fileName] = content;
+  }
+
+  if (typeof validatedFiles['index.html'] !== 'string' || !validatedFiles['index.html'].trim()) {
+    throw new Error('缺少非空 index.html 文件');
+  }
+
+  return validatedFiles;
+}
+
 function parseFreeformBriefResponse(text = '') {
   try {
     return {
@@ -152,16 +195,10 @@ function parseFreeformBriefResponse(text = '') {
 function parseFreeformProjectResponse(text = '') {
   try {
     const value = parseJsonObject(text);
-    const files = value.files && typeof value.files === 'object' && !Array.isArray(value.files)
-      ? value.files
-      : {};
-    if (!files['index.html']) {
-      throw new Error('缺少 index.html 文件');
-    }
     return {
       success: true,
       summary: value.summary || '',
-      files,
+      files: validateProjectFiles(value.files),
     };
   } catch (error) {
     return {

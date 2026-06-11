@@ -2,6 +2,12 @@ const assert = require('assert');
 
 const agent = require('../server/services/hyperframesFreeformAgent');
 
+function assertProjectParseFails(response, messagePattern = /解析|不支持/) {
+  const result = agent.parseFreeformProjectResponse(JSON.stringify(response));
+  assert.equal(result.success, false);
+  assert.match(result.message, messagePattern);
+}
+
 async function run() {
   const messages = agent.buildFreeformProjectMessages({
     run: {
@@ -29,18 +35,53 @@ async function run() {
       'design.md': '# Design',
       'hyperframes.json': '{}',
       'package.json': '{"private":true}',
+      'meta.json': '{}',
     },
     summary: '工程已生成',
   }));
   assert.equal(parsed.success, true);
   assert.equal(parsed.files['index.html'], '<html></html>');
+  assert.deepEqual(Object.keys(parsed.files).sort(), [
+    'design.md',
+    'hyperframes.json',
+    'index.html',
+    'meta.json',
+    'package.json',
+  ]);
 
   const markdownParsed = agent.parseFreeformProjectResponse('```json\n{"files":{"index.html":"<html></html>"}}\n```');
   assert.equal(markdownParsed.success, true);
 
+  const spacedFenceParsed = agent.parseFreeformProjectResponse('``` json\n{"files":{"index.html":"<html></html>"}}\n```');
+  assert.equal(spacedFenceParsed.success, true);
+
   const failed = agent.parseFreeformProjectResponse('not json');
   assert.equal(failed.success, false);
   assert.match(failed.message, /解析/);
+
+  assertProjectParseFails({ files: null });
+  assertProjectParseFails({ files: [] });
+  assertProjectParseFails({ files: { 'index.html': {} } });
+  assertProjectParseFails({ files: { 'index.html': 123 } });
+  assertProjectParseFails({ files: { 'index.html': '' } });
+  assertProjectParseFails({ files: { 'index.html': '   ' } });
+  assertProjectParseFails({ files: { 'index.html': '<html></html>', 'evil.txt': 'x' } });
+  assertProjectParseFails({ files: { 'index.html': '<html></html>', '../evil.txt': 'x' } });
+  assertProjectParseFails({ files: { 'index.html': '<html></html>', 'output.mp4': 'x' } });
+  assertProjectParseFails({ files: { 'index.html': '<html></html>', 'contact_sheet.jpg': 'x' } });
+
+  const longMessages = agent.buildFreeformProjectMessages({
+    run: { huge: 'a'.repeat(30000) },
+    brief: { title: '超长简报', design_md: 'b'.repeat(30000) },
+  });
+  const truncatedBlocks = longMessages[1].content.match(/\{\n  "truncated": true,[\s\S]*?\n\}/g) || [];
+  assert.ok(truncatedBlocks.length >= 2);
+  for (const block of truncatedBlocks) {
+    const value = JSON.parse(block);
+    assert.equal(value.truncated, true);
+    assert.equal(typeof value.preview, 'string');
+    assert.ok(value.preview.length < 12000);
+  }
 }
 
 run().then(() => {
