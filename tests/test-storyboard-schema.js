@@ -550,6 +550,55 @@ function run() {
     ],
   });
   assert.equal(legacyTextCardWithoutVisualScene.success, true);
+
+  const normalizedBrandClose = schema.normalizeStoryboard({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '关注交付',
+          visual_type: 'brand_close',
+          layout: 'center_focus',
+          background_prompt: '原创收束背景',
+          emphasis_words: ['关注', '交付'],
+          visual_scene: {
+            composition: 'brand_close',
+            objects: [{ id: 'cta', type: 'badge', text: '关注' }],
+            motion: [{ target: 'cta', effect: 'pulse' }],
+            beats: [{ target: 'cta', effect: 'slide_up_reveal', caption_block_id: 'cap-1-p1' }],
+          },
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '下期交付真实项目。' },
+    ],
+  });
+  assert.equal(normalizedBrandClose.scenes[0].visual_type, 'quote_burst');
+  const brandCloseValidation = schema.validateStoryboardEditableInput({
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '关注交付',
+          visual_type: 'brand_close',
+          layout: 'center_focus',
+          background_prompt: '原创收束背景',
+          emphasis_words: ['关注', '交付'],
+          visual_scene: {
+            composition: 'brand_close',
+            objects: [{ id: 'cta', type: 'badge', text: '关注' }],
+            motion: [{ target: 'cta', effect: 'pulse' }],
+            beats: [{ target: 'cta', effect: 'slide_up_reveal', caption_block_id: 'cap-1-p1' }],
+          },
+        },
+      ],
+    },
+    captions: [
+      { index: 1, start: 0, end: 1, duration: 1, text: '下期交付真实项目。' },
+    ],
+  });
+  assert.equal(brandCloseValidation.success, true);
 }
 
 try {

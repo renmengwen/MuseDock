@@ -172,6 +172,24 @@ router.post('/douyin/:aweme_id/runs/:run_id/scene-tts', async (req, res) => {
   }
 });
 
+router.post('/douyin/:aweme_id/runs/:run_id/compress-narration', async (req, res) => {
+  try {
+    const result = await agentRuns.compressDouyinRunSceneNarration(
+      req.params.aweme_id,
+      req.params.run_id,
+      req.body || {},
+    );
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '压缩分镜口播接口异常，请稍后重试。',
+    });
+  }
+});
+
 router.get('/douyin/:aweme_id/runs/:run_id/tts/:file_name', (req, res) => {
   try {
     const filePath = agentRuns.resolveDouyinRunTtsFile(req.params.aweme_id, req.params.run_id, req.params.file_name);

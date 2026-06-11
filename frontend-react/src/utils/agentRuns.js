@@ -2,7 +2,61 @@ function asArray(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [];
 }
 
-export function getAgentResultSections(result = {}, template = 'viral_rewrite') {
+function formatPlanDuration(value) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number) || number <= 0) return '';
+  return `${Math.round(number * 10) / 10}秒`;
+}
+
+export function getAgentResultSections(result = {}, template = 'viral_rewrite', run = {}) {
+  if (template === 'storyboard_plan') {
+    const plan = run?.storyboard_plan && typeof run.storyboard_plan === 'object' ? run.storyboard_plan : {};
+    const scenes = Array.isArray(plan.scenes) ? plan.scenes : [];
+    const budget = plan.narration_budget && typeof plan.narration_budget === 'object' ? plan.narration_budget : {};
+    const budgetScenes = Array.isArray(budget.scenes) ? budget.scenes : [];
+    const budgetByIndex = new Map(budgetScenes.map(item => [Number(item.index), item]));
+    return [
+      {
+        key: 'storyboard_plan_summary',
+        title: '导演分镜规划',
+        text: [
+          `目标时长：${Number(plan.target_duration_sec || 0) || 0} 秒`,
+          `分镜数量：${scenes.length} 个`,
+          budget.status ? `口播预算：${budget.status === 'too_long' ? '超时' : budget.status === 'warning' ? '接近上限' : '正常'}` : '',
+          budget.estimated_total_duration_sec ? `预计口播：${budget.estimated_total_duration_sec} 秒 / 建议 ${budget.max_recommended_chars || 0} 字内` : '',
+        ].join('\n'),
+        items: [],
+      },
+      {
+        key: 'storyboard_plan_narration',
+        title: '分镜口播',
+        text: '',
+        items: scenes.map((scene, index) => {
+          const sceneNumber = String(scene?.index || index + 1).padStart(2, '0');
+          const duration = formatPlanDuration(scene?.target_duration_sec) || '未设时长';
+          const headline = scene?.headline || '未命名分镜';
+          const narration = scene?.narration_text || '暂无口播';
+          const sceneBudget = budgetByIndex.get(Number(scene?.index || index + 1)) || {};
+          const budgetText = sceneBudget.status
+            ? `｜预算 ${sceneBudget.estimated_duration_sec || 0}s/${sceneBudget.target_duration_sec || 0}s，${sceneBudget.narration_char_count || 0}/${sceneBudget.max_recommended_chars || 0} 字，${sceneBudget.status === 'too_long' ? '超时' : sceneBudget.status === 'warning' ? '接近上限' : '正常'}`
+            : '';
+          return `${sceneNumber}｜${duration}｜${headline}${budgetText}｜${narration}`;
+        }),
+      },
+      {
+        key: 'storyboard_plan_visual',
+        title: '画面意图',
+        text: '',
+        items: scenes.map((scene, index) => {
+          const sceneNumber = String(scene?.index || index + 1).padStart(2, '0');
+          const visualType = scene?.visual_type_hint || 'text_card';
+          const intent = scene?.visual_intent || '暂无画面意图';
+          return `${sceneNumber}｜${visualType}｜${intent}`;
+        }),
+      },
+    ];
+  }
+
   if (template === 'comment_insights') {
     return [
       { key: 'summary', title: '洞察摘要', text: result.summary || '', items: [] },

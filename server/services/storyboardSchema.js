@@ -6,6 +6,15 @@ const DEFAULT_STYLE = {
 };
 
 const VISUAL_TYPE_ALLOWED = ['workflow', 'code_panel', 'ui_mockup', 'split_compare', 'concept_map', 'timeline', 'quote_burst', 'text_card', 'quote_card', 'step_card', 'contrast_card'];
+const VISUAL_TYPE_ALIASES = {
+  brand_close: 'quote_burst',
+  center_burst: 'quote_burst',
+  formula_build: 'workflow',
+  process_flow: 'workflow',
+  checklist_pipeline: 'workflow',
+  code_walkthrough: 'code_panel',
+  timeline_sync: 'timeline',
+};
 const VISUAL_OBJECT_ALLOWED = ['node', 'connector', 'code', 'terminal', 'panel', 'button', 'field', 'metric', 'column', 'branch', 'milestone', 'badge', 'keyword', 'center', 'step'];
 const VISUAL_MOTION_ALLOWED = ['stagger_reveal', 'draw_line', 'type_in', 'scan', 'pulse', 'slide_in', 'zoom_focus', 'highlight', 'float'];
 const VISUAL_BEAT_EFFECT_ALLOWED = ['slide_up_reveal', 'draw_line', 'type_in', 'scan', 'pulse', 'slide_in', 'zoom_focus', 'highlight', 'float', 'glow_focus', 'check_on', 'progress_fill', 'caption_highlight'];
@@ -85,6 +94,11 @@ function sanitizeText(value, fallback = '') {
 
 function pickAllowed(value, allowed, fallback) {
   return allowed.includes(value) ? value : fallback;
+}
+
+function normalizeVisualType(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return VISUAL_TYPE_ALIASES[text] || text;
 }
 
 function normalizeVisualObjectType(value) {
@@ -402,7 +416,7 @@ function makeFallbackScenes(captions) {
 function buildScene(source, sceneCaptions, sceneIndex, phraseCaptions = []) {
   const start = sceneCaptions[0].start;
   const end = sceneCaptions[sceneCaptions.length - 1].end;
-  const visualType = pickAllowed(source.visual_type, VISUAL_TYPE_ALLOWED, 'quote_burst');
+  const visualType = pickAllowed(normalizeVisualType(source.visual_type), VISUAL_TYPE_ALLOWED, 'quote_burst');
   return {
     index: sceneIndex,
     caption_indexes: sceneCaptions.map(item => item.index),
@@ -467,7 +481,7 @@ function normalizeStoryboard({ storyboard = {}, captions = [], phraseCaptions = 
 }
 
 function validateRawVisualDsl(scene, label, errors) {
-  const visualType = sanitizeText(scene.visual_type);
+  const visualType = normalizeVisualType(sanitizeText(scene.visual_type));
   if (visualType && !VISUAL_TYPE_ALLOWED.includes(visualType)) errors.push(`${label} 画面类型不受支持。`);
   if (!VISUAL_DSL_TYPES.includes(visualType)) return;
 

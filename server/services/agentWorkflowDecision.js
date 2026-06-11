@@ -75,6 +75,9 @@ function decideNextAction(run = {}) {
 
   const storyboardPlan = run.storyboard_plan || {};
   if (storyboardPlan.status === 'planned' && hasItems(storyboardPlan.scenes)) {
+    if (storyboardPlan.narration_budget?.status === 'too_long') {
+      return makeWorkflow('needs_script_repair', 'compress_scene_narration', '口播文本超出目标时长，需要先压缩分镜口播再生成配音。');
+    }
     return makeWorkflow('storyboard_plan_ready', 'synthesize_scene_tts', '故事板计划已完成，下一步合成场景配音。');
   }
 

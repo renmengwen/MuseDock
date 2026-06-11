@@ -264,7 +264,36 @@ async function run() {
   });
   assert.equal(storyboardPlanRun.success, true);
   assert.equal(storyboardPlanRun.storyboard_plan.status, 'planned');
+  assert.equal(storyboardPlanRun.storyboard_plan.narration_budget.status, 'ok');
   assert.equal(storyboardPlanRun.workflow.next_action, 'synthesize_scene_tts');
+
+  const longStoryboardPlanRunId = '20260607-020202-000Z-long-storyboard_plan';
+  await writeJson(path.join(paths.dir, 'agent_runs', `${longStoryboardPlanRunId}.json`), {
+    success: true,
+    run_id: longStoryboardPlanRunId,
+    template: 'storyboard_plan',
+    aweme_id: awemeId,
+    status: 'done',
+    storyboard_plan: {
+      status: 'planned',
+      target_duration_sec: 4,
+      scenes: [
+        {
+          index: 1,
+          target_duration_sec: 2,
+          narration_text: '第一句先讲背景。第二句继续解释细节。第三句给出行动建议。',
+          headline: '压缩测试',
+          visual_intent: '测试压缩',
+          visual_type_hint: 'text_card',
+        },
+      ],
+    },
+  });
+  const compressedPlan = await agentRuns.compressDouyinRunSceneNarration(awemeId, longStoryboardPlanRunId, { rootDir });
+  assert.equal(compressedPlan.success, true);
+  assert.equal(compressedPlan.storyboard_plan.narration_budget.status, 'ok');
+  assert.ok(compressedPlan.storyboard_plan.scenes[0].narration_text.length <= 9);
+  assert.equal(compressedPlan.workflow.next_action, 'synthesize_scene_tts');
 
   const sceneTtsRun = await agentRuns.synthesizeDouyinRunSceneTts(awemeId, storyboardPlanRun.run_id, {
     rootDir,
@@ -357,6 +386,75 @@ async function run() {
   });
   assert.equal(visualStoryboardRun.success, true);
   assert.equal(visualStoryboardRun.workflow.next_action, 'generate_video_project');
+
+  const savedWorkflowStoryboard = {
+    template: 'ai_storyboard_cards',
+    scenes: [
+      {
+        caption_indexes: [1],
+        headline: '保存后继续',
+        visual_type: 'text_card',
+        layout: 'center_focus',
+        background_prompt: '原创抽象背景',
+        emphasis_words: ['保存'],
+      },
+    ],
+  };
+  const savedWorkflowResult = await agentRuns.updateDouyinRunStoryboard(awemeId, storyboardPlanRun.run_id, savedWorkflowStoryboard, {
+    rootDir,
+  });
+  assert.equal(savedWorkflowResult.success, true);
+  assert.equal(savedWorkflowResult.workflow.next_action, 'generate_video_project');
+  const savedWorkflowRun = JSON.parse(fs.readFileSync(path.join(paths.dir, 'agent_runs', `${storyboardPlanRun.run_id}.json`), 'utf-8'));
+  assert.equal(savedWorkflowRun.workflow.next_action, 'generate_video_project');
+
+  const staleValidationRunId = '20260607-010101-000Z-stale-storyboard_plan';
+  await writeJson(path.join(paths.dir, 'agent_runs', `${staleValidationRunId}.json`), {
+    success: true,
+    run_id: staleValidationRunId,
+    template: 'storyboard_plan',
+    aweme_id: awemeId,
+    status: 'done',
+    tts: {
+      captions: [{ index: 1, start: 0, end: 1, duration: 1, text: '下期交付真实项目。' }],
+    },
+    storyboard: {
+      scenes: [
+        {
+          caption_indexes: [1],
+          headline: '关注交付',
+          visual_type: 'brand_close',
+          layout: 'center_focus',
+          background_prompt: '原创收束背景',
+          emphasis_words: ['关注', '交付'],
+          visual_scene: {
+            composition: 'brand_close',
+            objects: [{ id: 'cta', type: 'badge', text: '关注' }],
+            motion: [{ target: 'cta', effect: 'pulse' }],
+            beats: [{ target: 'cta', effect: 'slide_up_reveal', caption_block_id: 'cap-1-p1' }],
+          },
+        },
+      ],
+    },
+    storyboard_schema_validation: {
+      success: false,
+      errors: ['分镜 1 画面类型不受支持。'],
+    },
+    workflow: {
+      stage: 'needs_storyboard_repair',
+      next_action: 'repair_visual_storyboard',
+      message: '分镜结构校验失败，需要修复视觉分镜。',
+    },
+  });
+  const healedDetail = await agentRuns.getDouyinAgentRun(awemeId, staleValidationRunId, { rootDir });
+  assert.equal(healedDetail.data.storyboard_schema_validation.success, true);
+  assert.deepEqual(healedDetail.data.storyboard_schema_validation.errors, []);
+  assert.equal(healedDetail.data.storyboard.scenes[0].visual_type, 'quote_burst');
+  assert.equal(healedDetail.data.workflow.next_action, 'generate_video_project');
+  const healedList = await agentRuns.listDouyinAgentRuns(awemeId, { rootDir });
+  const healedListedRun = healedList.data.find(item => item.run_id === staleValidationRunId);
+  assert.equal(healedListedRun.storyboard_schema_validation.success, true);
+  assert.equal(healedListedRun.workflow.next_action, 'generate_video_project');
 
   const generatedWithOverride = await agentRuns.createDouyinAgentRun(awemeId, {
     rootDir,
@@ -478,8 +576,8 @@ async function run() {
 
   const listed = await agentRuns.listDouyinAgentRuns(awemeId, { rootDir });
   assert.strictEqual(listed.success, true);
-  assert.strictEqual(listed.count, 7);
-  assert.strictEqual(listed.data.length, 7);
+  assert.strictEqual(listed.count, 9);
+  assert.strictEqual(listed.data.length, 9);
   assert.strictEqual(listed.data[0].run_id, runWithPromptOptions.run_id);
 
   const detail = await agentRuns.getDouyinAgentRun(awemeId, generated.run_id, { rootDir });
@@ -1124,6 +1222,7 @@ async function run() {
   const originalRenderDouyinRunHyperframesVideo = agentRuns.renderDouyinRunHyperframesVideo;
   const originalGetDouyinAgentRun = agentRuns.getDouyinAgentRun;
   const originalDecideNextAction = agentRuns.decideNextAction;
+  const originalCompressDouyinRunSceneNarration = agentRuns.compressDouyinRunSceneNarration;
   agentRuns.createDouyinAgentRun = async () => ({
     success: false,
     status: 'failed',
@@ -1158,6 +1257,18 @@ async function run() {
     message: '分段配音已生成。',
     scene_tts: { status: 'done', timed_storyboard_plan: { status: 'timed', captions: [{ index: 1 }] } },
     workflow: { next_action: 'generate_visual_storyboard' },
+  });
+  agentRuns.compressDouyinRunSceneNarration = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'ok-run',
+    message: '超时口播已自动压缩，请继续生成分段配音。',
+    storyboard_plan: {
+      status: 'planned',
+      narration_budget: { status: 'ok' },
+      scenes: [{ index: 1, narration_text: '压缩后' }],
+    },
+    workflow: { next_action: 'synthesize_scene_tts' },
   });
   agentRuns.createDouyinRunStoryboard = async () => ({
     success: true,
@@ -1319,6 +1430,12 @@ async function run() {
     assert.strictEqual(sceneTtsResponse.body.success, true);
     assert.strictEqual(sceneTtsResponse.body.workflow.next_action, 'generate_visual_storyboard');
 
+    const compressNarrationResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/compress-narration`, {});
+    assert.strictEqual(compressNarrationResponse.statusCode, 200);
+    assert.strictEqual(compressNarrationResponse.body.success, true);
+    assert.strictEqual(compressNarrationResponse.body.storyboard_plan.narration_budget.status, 'ok');
+    assert.strictEqual(compressNarrationResponse.body.workflow.next_action, 'synthesize_scene_tts');
+
     const visualStoryboardResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/visual-storyboard`, {});
     assert.strictEqual(visualStoryboardResponse.statusCode, 200);
     assert.strictEqual(visualStoryboardResponse.body.success, true);
@@ -1366,6 +1483,7 @@ async function run() {
     agentRuns.renderDouyinRunHyperframesVideo = originalRenderDouyinRunHyperframesVideo;
     agentRuns.getDouyinAgentRun = originalGetDouyinAgentRun;
     agentRuns.decideNextAction = originalDecideNextAction;
+    agentRuns.compressDouyinRunSceneNarration = originalCompressDouyinRunSceneNarration;
     await new Promise(resolve => server.close(resolve));
   }
 }

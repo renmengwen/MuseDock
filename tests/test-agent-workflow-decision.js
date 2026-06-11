@@ -8,6 +8,17 @@ function run() {
     storyboard_plan: { status: 'planned', scenes: [{ index: 1, narration_text: '测试' }] },
   }).next_action, 'synthesize_scene_tts');
 
+  const overBudgetPlan = decision.decideNextAction({
+    storyboard_plan: {
+      status: 'planned',
+      scenes: [{ index: 1, narration_text: '这是一段太长的口播' }],
+      narration_budget: { status: 'too_long', over_budget_sec: 4.2 },
+    },
+  });
+  assert.equal(overBudgetPlan.next_action, 'compress_scene_narration');
+  assert.equal(overBudgetPlan.stage, 'needs_script_repair');
+  assert.match(overBudgetPlan.message, /压缩|口播/);
+
   assert.equal(decision.decideNextAction({
     storyboard_plan: { status: 'planned', scenes: [{ index: 1, narration_text: '测试' }] },
     scene_tts: {

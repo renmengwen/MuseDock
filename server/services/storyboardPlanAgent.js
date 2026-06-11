@@ -1,4 +1,5 @@
 const defaultAiTextModel = require('./aiTextModel');
+const narrationBudget = require('./storyboardNarrationBudget');
 
 const VISUAL_TYPE_HINT_ALLOWED = [
   'workflow',
@@ -57,6 +58,9 @@ function buildStoryboardPlanMessages({
         `visual_type_hint 只能使用：${allowedHints}。`,
         '不要输出 HyperFrames DSL、visual_scene、start、end、duration。',
         'narration_text 必须保留可直接配音的中文口播，不要写成镜头说明。',
+        '口播预算按 4.5 字/秒估算；每个 scene 的 narration_text 必须贴合 target_duration_sec。',
+        '单段口播字数上限 = target_duration_sec * 4.5；总口播字数上限 = target_duration_sec * 4.5。',
+        '如果素材信息过多，优先删铺垫、删重复解释，保留结论、步骤和行动指令。',
       ].join('\n'),
     },
     {
@@ -119,12 +123,16 @@ function normalizeStoryboardPlan(input = {}) {
     .filter(scene => scene.narration_text);
 
   const hasScenes = scenes.length > 0;
-  return {
+  const plan = {
     status: hasScenes ? 'planned' : 'failed',
     message: hasScenes ? '导演分镜规划已生成。' : '导演分镜规划失败：未生成有效场景。',
     target_duration_sec: safeNumber(source.target_duration_sec, 60),
     scenes,
     updated_at: new Date().toISOString(),
+  };
+  return {
+    ...plan,
+    narration_budget: narrationBudget.buildNarrationBudget(plan),
   };
 }
 

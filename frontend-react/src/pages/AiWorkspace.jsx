@@ -50,9 +50,13 @@ const TTS_VOICES = [
 const DEFAULT_TTS_STYLE = '请使用自然、清晰、适合短视频口播的语气。';
 
 function getTemplateMeta(templateId, templates = AGENT_TEMPLATES) {
-  return templates.find(template => template.id === templateId)
-    || AGENT_TEMPLATES.find(template => template.id === templateId)
-    || AGENT_TEMPLATES[0];
+  const template = templates.find(item => item.id === templateId);
+  const fallback = AGENT_TEMPLATES.find(item => item.id === templateId) || AGENT_TEMPLATES[0];
+  return {
+    ...fallback,
+    ...(template || {}),
+    actionLabel: template?.actionLabel || fallback?.actionLabel || '执行 Agent',
+  };
 }
 
 function formatCaptionTime(value) {
@@ -151,6 +155,26 @@ function MessagesPreviewModal({ preview, onClose }) {
   );
 }
 
+const WORKFLOW_ERROR_RUN_FIELDS = [
+  'storyboard',
+  'storyboard_raw',
+  'storyboard_model',
+  'storyboard_config_snapshot',
+  'storyboard_messages',
+  'storyboard_raw_output',
+  'storyboard_parse',
+  'storyboard_schema_validation',
+  'workflow',
+  'video',
+];
+
+function pickWorkflowErrorRunFields(data = {}) {
+  return WORKFLOW_ERROR_RUN_FIELDS.reduce((picked, key) => {
+    if (Object.prototype.hasOwnProperty.call(data, key)) picked[key] = data[key];
+    return picked;
+  }, {});
+}
+
 export function AiWorkspace({ routeSearch = '' } = {}) {
   const location = useLocation();
   const activeSearch = routeSearch || location.search;
@@ -196,7 +220,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
   }, [runs]);
 
   const resultSections = useMemo(() => {
-    return getAgentResultSections(activeRun?.result || {}, activeRun?.template || selectedTemplate);
+    return getAgentResultSections(activeRun?.result || {}, activeRun?.template || selectedTemplate, activeRun || {});
   }, [activeRun, selectedTemplate]);
 
   const agentSteps = useMemo(() => {
@@ -219,6 +243,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
   const nextAction = workflow.next_action || (activeRun ? 'generate_storyboard_plan' : '');
   const legacyRun = isLegacyAgentRun(activeRun);
   const workflowBusy = workflowRunning || videoBusy;
+  const workflowStartDisabled = loading || workflowBusy;
   const hasFailedQualityReport = activeRun?.video?.video_quality_report?.pass === false;
   const storyboardSceneIssues = useMemo(() => getStoryboardSceneIssues(storyboardDraft || {}), [storyboardDraft]);
   const storyboardIssueCount = Object.keys(storyboardSceneIssues).length;
@@ -330,6 +355,41 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
       setStatus({ type: 'success', message: 'Agent 模板配置已加载。' });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
+    }
+  }
+
+  async function runAgentTemplate(template) {
+    const value = selectedAwemeId.trim();
+    const actionLabel = getTemplateMeta(template.id, agentTemplates).actionLabel || '执行 Agent';
+    if (!value) {
+      setStatus({ type: 'error', message: '请输入抖音视频 aweme_id' });
+      return;
+    }
+    setSelectedTemplate(template.id);
+    setWorkflowRunning(true);
+    setStatus({ type: 'loading', message: `正在${actionLabel}...` });
+    try {
+      const agentOverride = agentConfigDraft?.id === template.id ? {
+        systemPrompt: agentConfigDraft.systemPrompt,
+        userPromptTemplate: agentConfigDraft.userPromptTemplate,
+        resultSchema: JSON.parse(agentResultSchemaText || '{}'),
+        modelOptions: agentConfigDraft.modelOptions || {},
+      } : null;
+      const json = await api.createDouyinAgentRun(value, template.id, DEFAULT_PROMPT_OPTIONS, agentOverride);
+      const runsJson = await api.listDouyinAgentRuns(value);
+      const runList = runsJson.data || [];
+      setRuns(runList);
+      const currentRun = runList.find(run => run.run_id === (json?.run?.run_id || json?.run_id))
+        || json?.run
+        || runList[0]
+        || null;
+      setActiveRun(currentRun);
+      setResultTab('result');
+      setStatus({ type: json?.success === false ? 'error' : 'success', message: json?.message || `${actionLabel}已完成。` });
+    } catch (error) {
+      setStatus({ type: 'error', message: error instanceof SyntaxError ? '输出字段说明必须是有效 JSON。' : error.message });
+    } finally {
+      setWorkflowRunning(false);
     }
   }
 
@@ -532,6 +592,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
         ...prev,
         storyboard: json.storyboard,
         storyboard_schema_validation: json.storyboard_schema_validation,
+        workflow: json.workflow || prev.workflow,
         video: null,
         updated_at: new Date().toISOString(),
       } : prev);
@@ -540,6 +601,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
           ...run,
           storyboard: json.storyboard,
           storyboard_schema_validation: json.storyboard_schema_validation,
+          workflow: json.workflow || run.workflow,
           video: null,
           updated_at: new Date().toISOString(),
         } : run
@@ -566,10 +628,6 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
     const value = selectedAwemeId.trim();
     if (!value) {
       setStatus({ type: 'error', message: '请输入抖音视频 aweme_id' });
-      return;
-    }
-    if (legacyRun) {
-      setStatus({ type: 'info', message: '旧流程记录不能继续使用新流程，请从生成导演分镜开始创建新记录。' });
       return;
     }
     const workflowAction = nextAction || 'generate_storyboard_plan';
@@ -599,6 +657,8 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
           voice: ttsVoice,
           stylePrompt: ttsStylePrompt,
         });
+      } else if (workflowAction === 'compress_scene_narration') {
+        json = await api.compressDouyinRunSceneNarration(value, activeRun.run_id);
       } else if (workflowAction === 'generate_visual_storyboard' || workflowAction === 'repair_visual_storyboard') {
         const storyboardOverride = storyboardConfigDraft ? {
           systemPrompt: storyboardConfigDraft.systemPrompt,
@@ -626,6 +686,24 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
       setActiveRun(currentRun);
       setStatus({ type: json?.success === false ? 'error' : 'success', message: json?.message || `${actionLabel}已完成。` });
     } catch (error) {
+      const errorRunFields = pickWorkflowErrorRunFields(error.data || {});
+      if (Object.keys(errorRunFields).length > 0) {
+        setActiveRun(prev => prev ? {
+          ...prev,
+          ...errorRunFields,
+          updated_at: new Date().toISOString(),
+        } : prev);
+        setRuns(prev => prev.map(run => (
+          run.run_id === activeRun?.run_id ? {
+            ...run,
+            ...errorRunFields,
+            updated_at: new Date().toISOString(),
+          } : run
+        )));
+        if (errorRunFields.storyboard_raw_output || errorRunFields.storyboard_parse || errorRunFields.storyboard_schema_validation) {
+          setResultTab('debug');
+        }
+      }
       setStatus({ type: 'error', message: error.message });
     } finally {
       setWorkflowRunning(false);
@@ -647,9 +725,9 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
     setStatus({ type: 'loading', message: '正在生成 HyperFrames 视频工程...' });
     try {
       const json = await api.createDouyinRunHyperframesProject(value, activeRun.run_id, renderOptions);
-      setActiveRun(prev => prev ? { ...prev, video: json.video, updated_at: new Date().toISOString() } : prev);
+      setActiveRun(prev => prev ? { ...prev, video: json.video, workflow: json.workflow || prev.workflow, updated_at: new Date().toISOString() } : prev);
       setRuns(prev => prev.map(run => (
-        run.run_id === activeRun.run_id ? { ...run, video: json.video, updated_at: new Date().toISOString() } : run
+        run.run_id === activeRun.run_id ? { ...run, video: json.video, workflow: json.workflow || run.workflow, updated_at: new Date().toISOString() } : run
       )));
       setStatus({
         type: json.success ? 'success' : 'error',
@@ -677,9 +755,9 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
     setStatus({ type: 'loading', message: '正在调用 HyperFrames 渲染 MP4...' });
     try {
       const json = await api.renderDouyinRunHyperframesVideo(value, activeRun.run_id);
-      setActiveRun(prev => prev ? { ...prev, video: json.video, updated_at: new Date().toISOString() } : prev);
+      setActiveRun(prev => prev ? { ...prev, video: json.video, workflow: json.workflow || prev.workflow, updated_at: new Date().toISOString() } : prev);
       setRuns(prev => prev.map(run => (
-        run.run_id === activeRun.run_id ? { ...run, video: json.video, updated_at: new Date().toISOString() } : run
+        run.run_id === activeRun.run_id ? { ...run, video: json.video, workflow: json.workflow || run.workflow, updated_at: new Date().toISOString() } : run
       )));
       setStatus({
         type: json.success ? 'success' : 'error',
@@ -710,8 +788,8 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
           placeholder="输入抖音视频 aweme_id"
           disabled={loading || workflowBusy}
         />
-        <Button variant="secondary" disabled={loading || workflowBusy} onClick={loadWorkspace}>加载工作台</Button>
-        <Button disabled={loading || workflowBusy || legacyRun} onClick={runNextWorkflowAction}>
+        <Button variant="secondary" disabled={workflowStartDisabled} onClick={loadWorkspace}>加载工作台</Button>
+        <Button disabled={workflowStartDisabled} onClick={runNextWorkflowAction}>
           {workflowRunning ? '处理中...' : getWorkflowActionLabel(nextAction || 'generate_storyboard_plan')}
         </Button>
       </div>
@@ -734,6 +812,15 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                 onClick={() => selectTemplate(template)}
               >
                 {selectedTemplate === template.id ? '已选择' : '选择模板'}
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={loading || workflowBusy}
+                onClick={() => runAgentTemplate(template)}
+              >
+                {workflowRunning && selectedTemplate === template.id
+                  ? '执行中...'
+                  : activeRun?.template === template.id ? '重新执行当前模板' : getTemplateMeta(template.id, agentTemplates).actionLabel}
               </Button>
             </div>
           ))}
@@ -892,12 +979,17 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                     <strong className="stepBadge pending">{getWorkflowStageLabel(workflow.stage || 'empty')}</strong>
                   </div>
                   {legacyRun ? (
-                    <p className="mutedText">旧流程记录仅用于查看历史结果，不能继续接入分镜优先链路。请从“生成导演分镜”创建新的流程记录。</p>
+                    <>
+                      <p className="mutedText">旧流程记录仅用于查看历史结果；可以点击“生成导演分镜”创建新的分镜优先流程记录。</p>
+                      <Button disabled={workflowStartDisabled} onClick={runNextWorkflowAction}>
+                        {workflowRunning ? '处理中...' : getWorkflowActionLabel('generate_storyboard_plan')}
+                      </Button>
+                    </>
                   ) : (
                     <>
                       <p className="mutedText">下一步：{getWorkflowActionLabel(nextAction || 'generate_storyboard_plan')}</p>
                       <p className="mutedText">流程：生成导演分镜 → 生成分段配音 → 生成视觉分镜 → 生成视频工程 → 渲染视频</p>
-                      <Button disabled={loading || workflowBusy} onClick={runNextWorkflowAction}>
+                      <Button disabled={workflowStartDisabled} onClick={runNextWorkflowAction}>
                         {workflowRunning ? '处理中...' : getWorkflowActionLabel(nextAction || 'generate_storyboard_plan')}
                       </Button>
                     </>
@@ -1034,7 +1126,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                         <Button
                           size="sm"
                           variant="secondary"
-                          disabled={loading || workflowBusy || legacyRun}
+                          disabled={workflowStartDisabled}
                           onClick={runNextWorkflowAction}
                         >
                           {workflowRunning ? '处理中...' : getWorkflowActionLabel(nextAction || 'generate_storyboard_plan')}

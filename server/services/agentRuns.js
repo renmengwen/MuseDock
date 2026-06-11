@@ -14,6 +14,7 @@ const defaultSceneTts = require('./sceneTts');
 const storyboardTiming = require('./storyboardTiming');
 const workflowDecision = require('./agentWorkflowDecision');
 const storyboardSchema = require('./storyboardSchema');
+const narrationBudget = require('./storyboardNarrationBudget');
 const defaultHyperframesProject = require('./hyperframesProject');
 const defaultHyperframesRenderer = require('./hyperframesRenderer');
 
@@ -232,6 +233,19 @@ function summarizeComments(comments = []) {
     : text;
 }
 
+function trimNarrationToBudget(text, maxChars) {
+  const limit = Math.max(1, Number(maxChars || 0));
+  const compact = String(text || '').replace(/\s+/g, '').trim();
+  if (compact.length <= limit) return compact;
+  const sentences = compact.split(/(?<=[。！？!?])/).filter(Boolean);
+  let output = '';
+  for (const sentence of sentences) {
+    if ((output + sentence).length > limit) break;
+    output += sentence;
+  }
+  return (output || compact).slice(0, limit);
+}
+
 function createInputSummary({ analysisInput, transcript, comments }) {
   return {
     title: analysisInput?.video?.title || '',
@@ -277,6 +291,31 @@ async function persistRun(awemeId, run, rootDir) {
   const data = { ...run, path: filePath };
   await writeJson(filePath, data);
   return data;
+}
+
+async function refreshStoryboardValidationIfNeeded(run, filePath = '') {
+  const scenes = Array.isArray(run?.storyboard?.scenes) ? run.storyboard.scenes : [];
+  if (!scenes.length || run?.storyboard_schema_validation?.success !== false) return run;
+
+  const captions = Array.isArray(run?.tts?.captions) ? run.tts.captions : [];
+  if (!captions.length) return run;
+
+  const validation = storyboardSchema.validateStoryboardEditableInput({ storyboard: run.storyboard, captions });
+  if (!validation.success) return run;
+
+  const updatedRun = {
+    ...run,
+    storyboard: storyboardSchema.normalizeStoryboard({
+      storyboard: run.storyboard,
+      captions,
+      phraseCaptions: Array.isArray(run?.tts?.phrase_captions) ? run.tts.phrase_captions : [],
+    }),
+    storyboard_schema_validation: { success: true, errors: [] },
+    updated_at: new Date().toISOString(),
+  };
+  updatedRun.workflow = workflowDecision.decideNextAction(updatedRun);
+  if (filePath) await writeJson(filePath, updatedRun);
+  return updatedRun;
 }
 
 function getTemplateOrFallback(template) {
@@ -527,8 +566,9 @@ async function listDouyinAgentRuns(awemeId, options = {}) {
 
   const data = [];
   for (const name of names.filter(item => item.endsWith('.json')).sort().reverse()) {
-    const item = await readJsonIfExists(path.join(dir, name));
-    if (item) data.push(item);
+    const itemPath = path.join(dir, name);
+    const item = await readJsonIfExists(itemPath);
+    if (item) data.push(await refreshStoryboardValidationIfNeeded(item, itemPath));
   }
 
   return {
@@ -552,7 +592,7 @@ async function getDouyinAgentRun(awemeId, runId, options = {}) {
   }
 
   const filePath = getRunPath(awemeId, runId, options.rootDir);
-  const data = await readJsonIfExists(filePath);
+  const data = await refreshStoryboardValidationIfNeeded(await readJsonIfExists(filePath), filePath);
   if (!data) {
     return {
       success: false,
@@ -671,6 +711,7 @@ async function createDouyinStoryboardPlanRun(awemeId, options = {}) {
     result.success ? 'done' : 'failed',
     result.message || '',
   ));
+  const storyboardPlan = result.storyboard_plan || { status: 'failed', scenes: [] };
   const run = {
     success: !!result.success,
     run_id: createRunId('storyboard_plan'),
@@ -681,7 +722,10 @@ async function createDouyinStoryboardPlanRun(awemeId, options = {}) {
     steps,
     input_summary: inputSummary,
     prompt_options: promptOptions,
-    storyboard_plan: result.storyboard_plan || { status: 'failed', scenes: [] },
+    storyboard_plan: {
+      ...storyboardPlan,
+      narration_budget: storyboardPlan.narration_budget || narrationBudget.buildNarrationBudget(storyboardPlan),
+    },
     storyboard_plan_raw: result.raw || {},
     storyboard_plan_model: result.model || {},
     messages: result.messages || [],
@@ -794,6 +838,71 @@ async function synthesizeDouyinRunSceneTts(awemeId, runId, options = {}) {
     message: sceneTtsValue.message,
     scene_tts: sceneTtsValue,
     tts,
+    workflow: updatedRun.workflow,
+  };
+}
+
+async function compressDouyinRunSceneNarration(awemeId, runId, options = {}) {
+  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
+  if (!isSafeRunId(runId)) {
+    return {
+      success: false,
+      aweme_id: String(awemeId || ''),
+      run_id: String(runId || ''),
+      message: '未找到或非法的 Agent 运行记录',
+    };
+  }
+
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  const run = await readJsonIfExists(runPath);
+  if (!run) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '未找到该 Agent 运行记录',
+    };
+  }
+
+  const storyboardPlan = run.storyboard_plan || {};
+  const currentBudget = storyboardPlan.narration_budget || narrationBudget.buildNarrationBudget(storyboardPlan);
+  const sceneBudgets = new Map((currentBudget.scenes || []).map(item => [Number(item.index), item]));
+  const scenes = (Array.isArray(storyboardPlan.scenes) ? storyboardPlan.scenes : []).map((scene, index) => {
+    const sceneIndex = Number(scene.index || index + 1);
+    const sceneBudget = sceneBudgets.get(sceneIndex) || {};
+    const fallbackMaxChars = Math.floor(Number(scene.target_duration_sec || 1) * narrationBudget.DEFAULT_CHARS_PER_SECOND);
+    return {
+      ...scene,
+      narration_text: trimNarrationToBudget(scene.narration_text, sceneBudget.max_recommended_chars || fallbackMaxChars),
+    };
+  });
+  const updatedPlanBase = {
+    ...storyboardPlan,
+    scenes,
+    updated_at: new Date().toISOString(),
+  };
+  const updatedPlan = {
+    ...updatedPlanBase,
+    narration_budget: narrationBudget.buildNarrationBudget(updatedPlanBase),
+  };
+  const updatedRun = {
+    ...run,
+    storyboard_plan: updatedPlan,
+    scene_tts: null,
+    tts: null,
+    storyboard: null,
+    video: null,
+    updated_at: new Date().toISOString(),
+  };
+  updatedRun.workflow = workflowDecision.decideNextAction(updatedRun);
+  await writeJson(runPath, updatedRun);
+
+  return {
+    success: true,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message: '超时口播已自动压缩，请继续生成分段配音。',
+    storyboard_plan: updatedPlan,
     workflow: updatedRun.workflow,
   };
 }
@@ -1126,6 +1235,7 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
     video: null,
     updated_at: new Date().toISOString(),
   };
+  updatedRun.workflow = workflowDecision.decideNextAction(updatedRun);
   await writeJson(runPath, updatedRun);
 
   return {
@@ -1278,6 +1388,7 @@ async function updateDouyinRunStoryboard(awemeId, runId, storyboard, options = {
     video: null,
     updated_at: new Date().toISOString(),
   };
+  updatedRun.workflow = workflowDecision.decideNextAction(updatedRun);
   await writeJson(runPath, updatedRun);
 
   return {
@@ -1287,6 +1398,7 @@ async function updateDouyinRunStoryboard(awemeId, runId, storyboard, options = {
     message: '分镜已保存，请重新生成视频工程。',
     storyboard: normalized,
     storyboard_schema_validation: updatedRun.storyboard_schema_validation,
+    workflow: updatedRun.workflow,
   };
 }
 
@@ -1617,6 +1729,7 @@ module.exports = {
   getDouyinAgentRun,
   synthesizeDouyinRunTts,
   synthesizeDouyinRunSceneTts,
+  compressDouyinRunSceneNarration,
   resolveDouyinRunTtsFile,
   createDouyinRunStoryboard,
   createDouyinRunVisualStoryboard,

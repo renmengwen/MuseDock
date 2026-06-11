@@ -59,8 +59,29 @@ assert.deepEqual(commentSections[1].items, ['配置门槛高']);
 assert.equal(commentSections[3].text, '期待但担心门槛');
 
 const emptySections = getAgentResultSections();
+const storyboardPlanSections = getAgentResultSections({}, 'storyboard_plan', {
+  storyboard_plan: {
+    target_duration_sec: 60,
+    scenes: [
+      {
+        index: 1,
+        target_duration_sec: 5,
+        narration_text: '先学 Codex，因为它能替你干活。',
+        headline: '先学 Codex',
+        visual_intent: '用左右对比表现聊天和执行任务的区别',
+        visual_type_hint: 'contrast_card',
+      },
+    ],
+  },
+});
 assert.equal(emptySections.length, 7);
 assert.deepEqual(emptySections.map((section) => section.items), [[], [], [], [], [], [], []]);
+assert.equal(storyboardPlanSections[0].key, 'storyboard_plan_summary');
+assert.match(storyboardPlanSections[0].text, /目标时长：60 秒/);
+assert.deepEqual(storyboardPlanSections[1].items, [
+  '01｜5秒｜先学 Codex｜先学 Codex，因为它能替你干活。',
+]);
+assert.match(storyboardPlanSections[2].items[0], /contrast_card/);
 
 assert.equal(getAgentStepLabel('done'), '已完成');
 assert.equal(getAgentStepLabel('failed'), '失败');
