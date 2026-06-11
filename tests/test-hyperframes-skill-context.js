@@ -5,6 +5,19 @@ const path = require('path');
 
 const skillContext = require('../server/services/hyperframesSkillContext');
 
+function tryCreateDirectoryLink(sourceDir, linkDir) {
+  try {
+    fs.symlinkSync(sourceDir, linkDir, 'junction');
+    return true;
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) {
+      console.warn(`skip symlink path boundary test: ${error.code}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
 async function run() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hf-skill-context-'));
   const skillDir = path.join(root, 'hyperframes');
@@ -64,23 +77,28 @@ async function run() {
   }
 
   const linkedProjectDir = path.join(root, 'linked-project');
-  try {
-    fs.symlinkSync(skillDir, linkedProjectDir, 'junction');
-  } catch (error) {
-    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) {
-      console.warn(`skip symlink path boundary test: ${error.code}`);
-      return;
-    }
-    throw error;
+  if (tryCreateDirectoryLink(skillDir, linkedProjectDir)) {
+    const unsafeLinkedCopy = await skillContext.copySkillSnapshot({
+      sourceDir: skillDir,
+      projectDir: linkedProjectDir,
+    });
+    assert.equal(unsafeLinkedCopy.success, false);
+    assert.match(unsafeLinkedCopy.message, /不能复制到 HyperFrames skill 源目录内部/);
+    assert.equal(fs.existsSync(path.join(skillDir, '.agents')), false);
   }
 
-  const unsafeLinkedCopy = await skillContext.copySkillSnapshot({
-    sourceDir: skillDir,
-    projectDir: linkedProjectDir,
-  });
-  assert.equal(unsafeLinkedCopy.success, false);
-  assert.match(unsafeLinkedCopy.message, /不能复制到 HyperFrames skill 源目录内部/);
-  assert.equal(fs.existsSync(path.join(skillDir, '.agents')), false);
+  const projectWithLinkedTarget = path.join(root, 'project-with-linked-target');
+  const linkedTargetDir = path.join(projectWithLinkedTarget, '.agents', 'skills', 'hyperframes');
+  fs.mkdirSync(path.dirname(linkedTargetDir), { recursive: true });
+  if (tryCreateDirectoryLink(skillDir, linkedTargetDir)) {
+    const unsafeLinkedTargetCopy = await skillContext.copySkillSnapshot({
+      sourceDir: skillDir,
+      projectDir: projectWithLinkedTarget,
+    });
+    assert.equal(unsafeLinkedTargetCopy.success, false);
+    assert.match(unsafeLinkedTargetCopy.message, /不能复制到 HyperFrames skill 源目录内部/);
+    assert.equal(fs.existsSync(path.join(skillDir, '.agents')), false);
+  }
 }
 
 run().then(() => {

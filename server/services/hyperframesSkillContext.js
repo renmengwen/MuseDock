@@ -74,9 +74,8 @@ function resolveSnapshotPaths(sourceDir, projectDir) {
   const targetRoot = path.resolve(projectRoot, '.agents', 'skills', 'hyperframes');
   const realSourceRoot = realpathIfExists(sourceRoot);
   const realProjectRoot = realpathIfExists(projectRoot);
-  const realTargetRoot = realProjectRoot
-    ? path.resolve(realProjectRoot, '.agents', 'skills', 'hyperframes')
-    : '';
+  const realTargetRoot = realpathIfExists(targetRoot)
+    || (realProjectRoot ? path.resolve(realProjectRoot, '.agents', 'skills', 'hyperframes') : '');
 
   return {
     sourceRoot,
