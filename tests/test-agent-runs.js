@@ -2092,6 +2092,11 @@ async function run() {
   const originalCreateDouyinRunVisualStoryboard = agentRuns.createDouyinRunVisualStoryboard;
   const originalCreateDouyinRunHyperframesProject = agentRuns.createDouyinRunHyperframesProject;
   const originalRenderDouyinRunHyperframesVideo = agentRuns.renderDouyinRunHyperframesVideo;
+  const originalGenerateDouyinRunHyperframesFreeformBrief = agentRuns.generateDouyinRunHyperframesFreeformBrief;
+  const originalGenerateDouyinRunHyperframesFreeformProject = agentRuns.generateDouyinRunHyperframesFreeformProject;
+  const originalCheckDouyinRunHyperframesFreeformProject = agentRuns.checkDouyinRunHyperframesFreeformProject;
+  const originalRenderDouyinRunHyperframesFreeformVideo = agentRuns.renderDouyinRunHyperframesFreeformVideo;
+  const originalInspectDouyinRunHyperframesFreeformVideo = agentRuns.inspectDouyinRunHyperframesFreeformVideo;
   const originalGetDouyinAgentRun = agentRuns.getDouyinAgentRun;
   const originalDecideNextAction = agentRuns.decideNextAction;
   const originalCompressDouyinRunSceneNarration = agentRuns.compressDouyinRunSceneNarration;
@@ -2170,6 +2175,56 @@ async function run() {
     run_id: 'ok-run',
     message: '视频渲染完成。',
     video: { status: 'rendered', output_url: `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes/files/output.mp4` },
+  });
+  agentRuns.generateDouyinRunHyperframesFreeformBrief = async (routeAwemeId, routeRunId, options = {}) => {
+    assert.strictEqual(routeAwemeId, awemeId);
+    assert.strictEqual(routeRunId, 'ok-run');
+    assert.deepStrictEqual(options.briefOptions, { tone: 'route brief' });
+    return {
+      success: true,
+      aweme_id: routeAwemeId,
+      run_id: routeRunId,
+      message: '自由工程导演策划已生成。',
+      hyperframes_freeform: { brief: { status: 'ready' } },
+    };
+  };
+  agentRuns.generateDouyinRunHyperframesFreeformProject = async (routeAwemeId, routeRunId, options = {}) => {
+    assert.strictEqual(routeAwemeId, awemeId);
+    assert.strictEqual(routeRunId, 'ok-run');
+    assert.deepStrictEqual(options.projectOptions, { theme: 'route project' });
+    return {
+      success: true,
+      aweme_id: routeAwemeId,
+      run_id: routeRunId,
+      message: '自由工程已生成。',
+      hyperframes_freeform: { project: { status: 'ready' } },
+    };
+  };
+  agentRuns.checkDouyinRunHyperframesFreeformProject = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'ok-run',
+    message: '自由工程校验通过。',
+    hyperframes_freeform: { checks: { status: 'passed' } },
+  });
+  agentRuns.renderDouyinRunHyperframesFreeformVideo = async (routeAwemeId, routeRunId, options = {}) => {
+    assert.strictEqual(routeAwemeId, awemeId);
+    assert.strictEqual(routeRunId, 'ok-run');
+    assert.deepStrictEqual(options.renderOptions, { fps: 30 });
+    return {
+      success: true,
+      aweme_id: routeAwemeId,
+      run_id: routeRunId,
+      message: '自由视频渲染完成。',
+      hyperframes_freeform: { render: { status: 'rendered' } },
+    };
+  };
+  agentRuns.inspectDouyinRunHyperframesFreeformVideo = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'ok-run',
+    message: '自由视频巡检通过。',
+    hyperframes_freeform: { visual_inspect: { status: 'passed' } },
   });
   agentRuns.getDouyinAgentRun = async () => ({
     success: true,
@@ -2344,6 +2399,49 @@ async function run() {
     assert.strictEqual(renderResponse.statusCode, 200);
     assert.strictEqual(renderResponse.body.success, true);
     assert.strictEqual(renderResponse.body.video.status, 'rendered');
+
+    const freeformBriefResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/brief`, {
+      tone: 'route brief',
+    });
+    assert.strictEqual(freeformBriefResponse.statusCode, 200);
+    assert.strictEqual(freeformBriefResponse.body.success, true);
+    assert.strictEqual(freeformBriefResponse.body.hyperframes_freeform.brief.status, 'ready');
+
+    const freeformProjectResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/project`, {
+      theme: 'route project',
+    });
+    assert.strictEqual(freeformProjectResponse.statusCode, 200);
+    assert.strictEqual(freeformProjectResponse.body.success, true);
+    assert.strictEqual(freeformProjectResponse.body.hyperframes_freeform.project.status, 'ready');
+
+    const freeformCheckResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/check`, {});
+    assert.strictEqual(freeformCheckResponse.statusCode, 200);
+    assert.strictEqual(freeformCheckResponse.body.success, true);
+    assert.strictEqual(freeformCheckResponse.body.hyperframes_freeform.checks.status, 'passed');
+
+    const freeformRenderResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/render`, {
+      fps: 30,
+    });
+    assert.strictEqual(freeformRenderResponse.statusCode, 200);
+    assert.strictEqual(freeformRenderResponse.body.success, true);
+    assert.strictEqual(freeformRenderResponse.body.hyperframes_freeform.render.status, 'rendered');
+
+    const freeformInspectResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/inspect`, {});
+    assert.strictEqual(freeformInspectResponse.statusCode, 200);
+    assert.strictEqual(freeformInspectResponse.body.success, true);
+    assert.strictEqual(freeformInspectResponse.body.hyperframes_freeform.visual_inspect.status, 'passed');
+
+    const freeformFileResponse = await requestJson(server, 'GET', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/files/index.html`);
+    assert.strictEqual(freeformFileResponse.statusCode, 501);
+    assert.strictEqual(freeformFileResponse.body.success, false);
+    assert.match(freeformFileResponse.body.message, /尚未实现|不可用/);
+
+    const saveFreeformFileResponse = await requestJson(server, 'PUT', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/files/index.html`, {
+      content: '<html></html>',
+    });
+    assert.strictEqual(saveFreeformFileResponse.statusCode, 501);
+    assert.strictEqual(saveFreeformFileResponse.body.success, false);
+    assert.match(saveFreeformFileResponse.body.message, /尚未实现|不可用/);
   } finally {
     agentRuns.createDouyinAgentRun = originalCreateDouyinAgentRun;
     agentRuns.createDouyinStoryboardPlanRun = originalCreateDouyinStoryboardPlanRun;
@@ -2353,6 +2451,11 @@ async function run() {
     agentRuns.createDouyinRunVisualStoryboard = originalCreateDouyinRunVisualStoryboard;
     agentRuns.createDouyinRunHyperframesProject = originalCreateDouyinRunHyperframesProject;
     agentRuns.renderDouyinRunHyperframesVideo = originalRenderDouyinRunHyperframesVideo;
+    agentRuns.generateDouyinRunHyperframesFreeformBrief = originalGenerateDouyinRunHyperframesFreeformBrief;
+    agentRuns.generateDouyinRunHyperframesFreeformProject = originalGenerateDouyinRunHyperframesFreeformProject;
+    agentRuns.checkDouyinRunHyperframesFreeformProject = originalCheckDouyinRunHyperframesFreeformProject;
+    agentRuns.renderDouyinRunHyperframesFreeformVideo = originalRenderDouyinRunHyperframesFreeformVideo;
+    agentRuns.inspectDouyinRunHyperframesFreeformVideo = originalInspectDouyinRunHyperframesFreeformVideo;
     agentRuns.getDouyinAgentRun = originalGetDouyinAgentRun;
     agentRuns.decideNextAction = originalDecideNextAction;
     agentRuns.compressDouyinRunSceneNarration = originalCompressDouyinRunSceneNarration;

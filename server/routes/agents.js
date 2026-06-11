@@ -290,6 +290,137 @@ router.post('/douyin/:aweme_id/runs/:run_id/hyperframes/render', async (req, res
   }
 });
 
+router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/brief', async (req, res) => {
+  try {
+    const result = await agentRuns.generateDouyinRunHyperframesFreeformBrief(req.params.aweme_id, req.params.run_id, {
+      briefOptions: req.body || {},
+    });
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: 'HyperFrames 自由导演策划接口异常，请稍后重试。',
+    });
+  }
+});
+
+router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/project', async (req, res) => {
+  try {
+    const result = await agentRuns.generateDouyinRunHyperframesFreeformProject(req.params.aweme_id, req.params.run_id, {
+      projectOptions: req.body || {},
+    });
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: 'HyperFrames 自由工程生成接口异常，请稍后重试。',
+    });
+  }
+});
+
+router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/check', async (req, res) => {
+  try {
+    const result = await agentRuns.checkDouyinRunHyperframesFreeformProject(req.params.aweme_id, req.params.run_id);
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: 'HyperFrames 自由工程校验接口异常，请稍后重试。',
+    });
+  }
+});
+
+router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/render', async (req, res) => {
+  try {
+    const result = await agentRuns.renderDouyinRunHyperframesFreeformVideo(req.params.aweme_id, req.params.run_id, {
+      renderOptions: req.body || {},
+    });
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: 'HyperFrames 自由视频渲染接口异常，请稍后重试。',
+    });
+  }
+});
+
+router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/inspect', async (req, res) => {
+  try {
+    const result = await agentRuns.inspectDouyinRunHyperframesFreeformVideo(req.params.aweme_id, req.params.run_id);
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: 'HyperFrames 自由视频巡检接口异常，请稍后重试。',
+    });
+  }
+});
+
+router.get('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/files/:file_name', (req, res) => {
+  if (typeof agentRuns.resolveDouyinRunHyperframesFreeformFile !== 'function') {
+    return res.status(501).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: 'HyperFrames 自由工程文件读取接口尚未实现。',
+    });
+  }
+
+  try {
+    const filePath = agentRuns.resolveDouyinRunHyperframesFreeformFile(
+      req.params.aweme_id,
+      req.params.run_id,
+      req.params.file_name,
+    );
+    return res.sendFile(filePath);
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '未找到或非法的 HyperFrames 自由工程文件。',
+    });
+  }
+});
+
+router.put('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/files/:file_name', async (req, res) => {
+  if (typeof agentRuns.saveDouyinRunHyperframesFreeformFile !== 'function') {
+    return res.status(501).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: 'HyperFrames 自由工程文件保存接口尚未实现。',
+    });
+  }
+
+  try {
+    const result = await agentRuns.saveDouyinRunHyperframesFreeformFile(
+      req.params.aweme_id,
+      req.params.run_id,
+      req.params.file_name,
+      req.body || {},
+    );
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: 'HyperFrames 自由工程文件保存接口异常，请稍后重试。',
+    });
+  }
+});
+
 router.get('/douyin/:aweme_id/runs/:run_id/hyperframes/files/:file_name', (req, res) => {
   try {
     const filePath = agentRuns.resolveDouyinRunHyperframesFile(req.params.aweme_id, req.params.run_id, req.params.file_name);
