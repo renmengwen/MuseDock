@@ -4,6 +4,8 @@ const DEFAULT_STATE = {
   mediaPlatform: '',
   mediaId: '',
   aiSearch: '',
+  studioAwemeId: '',
+  studioRunId: '',
   activePage: 'crawl',
 };
 
@@ -52,6 +54,15 @@ export function getPersistentRouteState(previous = DEFAULT_STATE, pathname = '/'
     return {
       ...state,
       activePage: 'settings',
+    };
+  }
+
+  if (section === 'hyperframes-freeform') {
+    return {
+      ...state,
+      studioAwemeId: parts[1] || state.studioAwemeId,
+      studioRunId: parts[2] || state.studioRunId,
+      activePage: 'hyperframes-freeform',
     };
   }
 

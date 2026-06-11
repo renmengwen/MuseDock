@@ -17,6 +17,7 @@ export function AppShell() {
         <NavLink className={navClass} to="/records/douyin">抓取记录</NavLink>
         <NavLink className={navClass} to="/media">素材工作台</NavLink>
         <NavLink className={navClass} to="/ai">AI 工作台</NavLink>
+        <NavLink className={navClass} to="/hyperframes-freeform">高级成片</NavLink>
         <NavLink className={navClass} to="/settings">设置</NavLink>
       </nav>
 

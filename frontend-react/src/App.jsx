@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AppShell } from './components/AppShell.jsx';
 import { AiWorkspace } from './pages/AiWorkspace.jsx';
 import { CrawlPage } from './pages/CrawlPage.jsx';
+import { HyperframesStudioPage } from './pages/HyperframesStudioPage.jsx';
 import { MediaWorkspace } from './pages/MediaWorkspace.jsx';
 import { RecordsPage } from './pages/RecordsPage.jsx';
 import { SettingsPage } from './pages/SettingsPage.jsx';
@@ -30,6 +31,9 @@ function PersistentPages() {
       </div>
       <div hidden={!isActive('ai')}>
         <AiWorkspace routeSearch={routeState.aiSearch} />
+      </div>
+      <div hidden={!isActive('hyperframes-freeform')}>
+        <HyperframesStudioPage awemeId={routeState.studioAwemeId} runId={routeState.studioRunId} />
       </div>
       <div hidden={!isActive('settings')}>
         <SettingsPage />
