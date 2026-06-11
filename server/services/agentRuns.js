@@ -1525,14 +1525,31 @@ async function inspectDouyinRunHyperframesFreeformVideo(awemeId, runId, options 
     : Array.isArray(result?.issues)
       ? result.issues
       : [];
-  const message = result?.message || (success ? '视频抽帧质检通过。' : '视频抽帧质检失败。');
+  let normalizedSuccess = success;
+  let contactSheetPath = result?.contact_sheet_path || '';
+  let message = result?.message || (success ? '视频抽帧质检通过。' : '视频抽帧质检失败。');
+  if (success) {
+    const rootContactSheetPath = path.join(currentState.project_dir, 'contact_sheet.jpg');
+    if (contactSheetPath && path.resolve(contactSheetPath) !== path.resolve(rootContactSheetPath)) {
+      try {
+        await fsp.mkdir(path.dirname(rootContactSheetPath), { recursive: true });
+        await fsp.copyFile(contactSheetPath, rootContactSheetPath);
+        contactSheetPath = rootContactSheetPath;
+      } catch (error) {
+        normalizedSuccess = false;
+        message = `联系表预览文件准备失败：${error.message || '未知错误'}`;
+      }
+    } else if (!contactSheetPath && await pathExists(rootContactSheetPath)) {
+      contactSheetPath = rootContactSheetPath;
+    }
+  }
   const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
     visual_inspect: {
       ...current.visual_inspect,
-      status: success ? 'passed' : 'failed',
+      status: normalizedSuccess ? 'passed' : 'failed',
       output_path: outputPath,
-      contact_sheet_path: success ? result.contact_sheet_path || current.visual_inspect.contact_sheet_path || '' : current.visual_inspect.contact_sheet_path || '',
-      contact_sheet_url: success ? defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'contact_sheet.jpg') : current.visual_inspect.contact_sheet_url || '',
+      contact_sheet_path: normalizedSuccess ? contactSheetPath || current.visual_inspect.contact_sheet_path || '' : current.visual_inspect.contact_sheet_path || '',
+      contact_sheet_url: normalizedSuccess ? defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'contact_sheet.jpg') : current.visual_inspect.contact_sheet_url || '',
       report,
       issues,
       message,
@@ -1540,7 +1557,7 @@ async function inspectDouyinRunHyperframesFreeformVideo(awemeId, runId, options 
   }), options);
 
   return {
-    success,
+    success: normalizedSuccess,
     aweme_id: String(awemeId),
     run_id: String(runId),
     message,

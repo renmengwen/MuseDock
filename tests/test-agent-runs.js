@@ -1421,6 +1421,11 @@ async function run() {
   });
   assert.equal(freeformInspect.success, true);
   assert.equal(freeformInspect.hyperframes_freeform.visual_inspect.status, 'passed');
+  const freeformContactSheetRootPath = path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}-hyperframes-freeform`, 'contact_sheet.jpg');
+  assert.equal(freeformInspect.hyperframes_freeform.visual_inspect.contact_sheet_path, freeformContactSheetRootPath);
+  assert.equal(fs.existsSync(freeformContactSheetRootPath), true);
+  assert.equal(fs.readFileSync(freeformContactSheetRootPath, 'utf-8'), 'fake sheet');
+  assert.match(freeformInspect.hyperframes_freeform.visual_inspect.contact_sheet_url, /hyperframes-freeform\/files\/contact_sheet\.jpg/);
 
   const freeformInspectMissingOutputRunId = `${generated.run_id}-freeform-inspect-missing-output`;
   const freeformInspectMissingOutputProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${freeformInspectMissingOutputRunId}-hyperframes-freeform`);
