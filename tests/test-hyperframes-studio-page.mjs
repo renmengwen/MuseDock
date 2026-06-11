@@ -35,4 +35,31 @@ for (const component of [
   assert.match(source, new RegExp(`export function ${component}\\s*\\(`), `${component}.jsx should export function ${component}`);
 }
 
+const projectPanelPath = path.join(componentsDir, 'ProjectPanel.jsx');
+const projectPanel = fs.readFileSync(projectPanelPath, 'utf-8');
+assert.match(
+  projectPanel,
+  /loadedFileName/,
+  'ProjectPanel should track which file content is loaded before saving',
+);
+assert.match(
+  projectPanel,
+  /setFileContent\(\s*['"]{2}\s*\)/,
+  'ProjectPanel should clear stale file content when switching files',
+);
+assert.match(
+  projectPanel,
+  /loadFile\(\s*nextFile\s*\)/,
+  'ProjectPanel should load the newly selected file when switching files',
+);
+assert.match(
+  projectPanel,
+  /selectedFile\s*===\s*loadedFileName/,
+  'ProjectPanel should only allow saving the currently loaded file',
+);
+assert.ok(
+  projectPanel.includes('请先加载当前文件'),
+  'ProjectPanel should show a clear disabled save prompt before the current file is loaded',
+);
+
 console.log('hyperframes studio page tests passed');

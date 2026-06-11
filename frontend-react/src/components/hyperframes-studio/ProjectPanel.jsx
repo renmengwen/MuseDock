@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 function getProjectFiles(files) {
   if (Array.isArray(files)) {
     return files.map((file) => (typeof file === 'string' ? file : file?.name)).filter(Boolean);
@@ -37,9 +39,29 @@ export function ProjectPanel({
   loadFile,
   saveFile,
 }) {
+  const [loadedFileName, setLoadedFileName] = useState('');
   const busy = Boolean(busyAction);
   const files = getProjectFiles(freeform?.project?.files);
   const canUseFile = canUseWorkflow && !busy && Boolean(selectedFile);
+  const currentFileLoaded = Boolean(selectedFile) && selectedFile === loadedFileName;
+  const canSaveFile = canUseFile && currentFileLoaded;
+  const handleFileChange = (event) => {
+    const nextFile = event.target.value;
+    setSelectedFile(nextFile);
+    setLoadedFileName('');
+    setFileContent('');
+    runSafely(async () => {
+      await loadFile(nextFile);
+      setLoadedFileName(nextFile);
+    });
+  };
+  const handleLoadFile = () => {
+    setLoadedFileName('');
+    runSafely(async () => {
+      await loadFile(selectedFile);
+      setLoadedFileName(selectedFile);
+    });
+  };
 
   return (
     <section className="agentPanel agentResultPanel">
@@ -54,7 +76,7 @@ export function ProjectPanel({
             <strong>当前文件</strong>
             <select
               value={selectedFile}
-              onChange={(event) => setSelectedFile(event.target.value)}
+              onChange={handleFileChange}
               disabled={busy}
             >
               {files.map((file) => (
@@ -69,17 +91,17 @@ export function ProjectPanel({
               className="btn secondary"
               type="button"
               disabled={!canUseFile}
-              onClick={() => runSafely(() => loadFile(selectedFile))}
+              onClick={handleLoadFile}
             >
               {busyAction === 'loadFile' ? '正在加载文件...' : '加载文件'}
             </button>
             <button
               className="btn primary"
               type="button"
-              disabled={!canUseFile}
+              disabled={!canSaveFile}
               onClick={() => runSafely(() => saveFile())}
             >
-              {busyAction === 'saveFile' ? '正在保存文件...' : '保存文件'}
+              {busyAction === 'saveFile' ? '正在保存文件...' : currentFileLoaded ? '保存文件' : '请先加载当前文件'}
             </button>
           </div>
         </div>
