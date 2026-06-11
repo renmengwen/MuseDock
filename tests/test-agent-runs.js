@@ -1348,6 +1348,109 @@ async function run() {
   assert.equal(freeformProject.hyperframes_freeform.project.status, 'ready');
   assert.ok(fs.existsSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}-hyperframes-freeform`, 'index.html')));
 
+  const freeformCheck = await agentRuns.checkDouyinRunHyperframesFreeformProject(awemeId, generated.run_id, {
+    rootDir,
+    hyperframesFreeformQuality: {
+      checkFreeformProject: async ({ projectDir }) => {
+        assert.ok(projectDir.endsWith(`${generated.run_id}-hyperframes-freeform`));
+        return { success: true, lint: 'passed', validate: 'passed', inspect: 'passed', message: '检查通过' };
+      },
+    },
+  });
+  assert.equal(freeformCheck.success, true);
+  assert.equal(freeformCheck.hyperframes_freeform.checks.status, 'passed');
+
+  const freeformCheckThrowRunId = `${generated.run_id}-freeform-check-throw`;
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${freeformCheckThrowRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: freeformCheckThrowRunId,
+  });
+  const freeformCheckThrow = await agentRuns.checkDouyinRunHyperframesFreeformProject(awemeId, freeformCheckThrowRunId, {
+    rootDir,
+    hyperframesFreeformQuality: {
+      checkFreeformProject: async () => {
+        throw new Error('check exploded');
+      },
+    },
+  });
+  assert.equal(freeformCheckThrow.success, false);
+  assert.equal(freeformCheckThrow.hyperframes_freeform.checks.status, 'failed');
+  assert.match(freeformCheckThrow.hyperframes_freeform.checks.message, /check exploded|校验失败/);
+
+  const freeformRender = await agentRuns.renderDouyinRunHyperframesFreeformVideo(awemeId, generated.run_id, {
+    rootDir,
+    hyperframesRenderer: {
+      renderHyperframesProject: async ({ projectDir }) => {
+        const outputPath = path.join(projectDir, 'output.mp4');
+        fs.writeFileSync(outputPath, 'fake freeform mp4');
+        return { success: true, output_path: outputPath, message: '渲染完成' };
+      },
+    },
+  });
+  assert.equal(freeformRender.success, true);
+  assert.equal(freeformRender.hyperframes_freeform.render.status, 'rendered');
+  assert.match(freeformRender.hyperframes_freeform.render.output_url, /hyperframes-freeform\/files\/output\.mp4/);
+
+  const freeformRenderThrowRunId = `${generated.run_id}-freeform-render-throw`;
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${freeformRenderThrowRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: freeformRenderThrowRunId,
+  });
+  const freeformRenderThrow = await agentRuns.renderDouyinRunHyperframesFreeformVideo(awemeId, freeformRenderThrowRunId, {
+    rootDir,
+    hyperframesRenderer: {
+      renderHyperframesProject: async () => {
+        throw new Error('render exploded');
+      },
+    },
+  });
+  assert.equal(freeformRenderThrow.success, false);
+  assert.equal(freeformRenderThrow.hyperframes_freeform.render.status, 'failed');
+  assert.match(freeformRenderThrow.hyperframes_freeform.render.message, /render exploded|渲染失败/);
+
+  const freeformInspect = await agentRuns.inspectDouyinRunHyperframesFreeformVideo(awemeId, generated.run_id, {
+    rootDir,
+    hyperframesFreeformQuality: {
+      inspectRenderedVideo: async ({ projectDir }) => {
+        const sheetPath = path.join(projectDir, 'inspect', 'contact_sheet.jpg');
+        fs.mkdirSync(path.dirname(sheetPath), { recursive: true });
+        fs.writeFileSync(sheetPath, 'fake sheet');
+        return { success: true, contact_sheet_path: sheetPath, report: { success: true, issues: [] }, message: '抽帧完成' };
+      },
+    },
+  });
+  assert.equal(freeformInspect.success, true);
+  assert.equal(freeformInspect.hyperframes_freeform.visual_inspect.status, 'passed');
+
+  const freeformInspectMissingOutputRunId = `${generated.run_id}-freeform-inspect-missing-output`;
+  const freeformInspectMissingOutputProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${freeformInspectMissingOutputRunId}-hyperframes-freeform`);
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${freeformInspectMissingOutputRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: freeformInspectMissingOutputRunId,
+    hyperframes_freeform: {
+      ...freeformInspect.hyperframes_freeform,
+      project_dir: freeformInspectMissingOutputProjectDir,
+      render: {
+        ...freeformInspect.hyperframes_freeform.render,
+        output_path: '',
+      },
+    },
+  });
+  fs.mkdirSync(freeformInspectMissingOutputProjectDir, { recursive: true });
+  let freeformInspectMissingOutputCalled = false;
+  const freeformInspectMissingOutput = await agentRuns.inspectDouyinRunHyperframesFreeformVideo(awemeId, freeformInspectMissingOutputRunId, {
+    rootDir,
+    hyperframesFreeformQuality: {
+      inspectRenderedVideo: async () => {
+        freeformInspectMissingOutputCalled = true;
+        return { success: true };
+      },
+    },
+  });
+  assert.equal(freeformInspectMissingOutput.success, false);
+  assert.equal(freeformInspectMissingOutputCalled, false);
+  assert.equal(freeformInspectMissingOutput.hyperframes_freeform.visual_inspect.status, 'failed');
+
   const failedQualityRunId = `${generated.run_id}-quality-failed`;
   const failedQualityPath = path.join(rootDir, awemeId, 'agent_runs', `${failedQualityRunId}.json`);
   await writeJson(failedQualityPath, {

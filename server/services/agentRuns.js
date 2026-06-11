@@ -1356,6 +1356,198 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   };
 }
 
+async function failHyperframesFreeformSection(awemeId, runId, section, message, options = {}, extraPatch = {}) {
+  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    [section]: {
+      ...current[section],
+      ...extraPatch,
+      status: 'failed',
+      message,
+    },
+  }), options);
+  return createFreeformFailureResponse(
+    awemeId,
+    runId,
+    updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
+    updated.message || message,
+  );
+}
+
+async function checkDouyinRunHyperframesFreeformProject(awemeId, runId, options = {}) {
+  const detail = await getDouyinAgentRun(awemeId, runId, options);
+  if (!detail.success) return detail;
+
+  const currentState = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
+  if (!currentState.project_dir) {
+    return failHyperframesFreeformSection(awemeId, runId, 'checks', '请先生成 HyperFrames 自由工程。', options);
+  }
+
+  await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    checks: {
+      ...current.checks,
+      status: 'checking',
+      message: '正在校验动画工程...',
+    },
+  }), options);
+
+  const quality = options.hyperframesFreeformQuality || defaultHyperframesFreeformQuality;
+  let result;
+  try {
+    result = await quality.checkFreeformProject({ projectDir: currentState.project_dir });
+  } catch (error) {
+    result = {
+      success: false,
+      message: `动画工程校验失败：${error.message || '未知错误'}`,
+    };
+  }
+
+  const success = !!result?.success;
+  const message = result?.message || (success ? '动画工程校验通过。' : '动画工程校验失败。');
+  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    checks: {
+      ...current.checks,
+      status: success ? 'passed' : 'failed',
+      lint: result?.lint || '',
+      validate: result?.validate || '',
+      inspect: result?.inspect || '',
+      report: result?.report || null,
+      message,
+    },
+  }), options);
+
+  return {
+    success,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message,
+    hyperframes_freeform: updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
+  };
+}
+
+async function renderDouyinRunHyperframesFreeformVideo(awemeId, runId, options = {}) {
+  const detail = await getDouyinAgentRun(awemeId, runId, options);
+  if (!detail.success) return detail;
+
+  const currentState = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
+  if (!currentState.project_dir) {
+    return failHyperframesFreeformSection(awemeId, runId, 'render', '请先生成 HyperFrames 自由工程。', options);
+  }
+
+  const renderOptions = options.renderOptions || {};
+  await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    render: {
+      ...current.render,
+      status: 'rendering',
+      render_options: renderOptions,
+      message: '正在渲染视频...',
+    },
+  }), options);
+
+  const renderer = options.hyperframesRenderer || defaultHyperframesRenderer;
+  let result;
+  try {
+    result = await renderer.renderHyperframesProject({
+      projectDir: currentState.project_dir,
+      renderOptions,
+    });
+  } catch (error) {
+    result = {
+      success: false,
+      message: `视频渲染失败：${error.message || '未知错误'}`,
+    };
+  }
+
+  const success = !!result?.success;
+  const message = result?.message || (success ? '视频渲染完成。' : '视频渲染失败。');
+  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    render: {
+      ...current.render,
+      status: success ? 'rendered' : 'failed',
+      output_path: success ? result.output_path : current.render.output_path || '',
+      output_url: success ? defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'output.mp4') : current.render.output_url || '',
+      render_options: renderOptions,
+      message,
+    },
+  }), options);
+
+  return {
+    success,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message,
+    hyperframes_freeform: updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
+  };
+}
+
+async function inspectDouyinRunHyperframesFreeformVideo(awemeId, runId, options = {}) {
+  const detail = await getDouyinAgentRun(awemeId, runId, options);
+  if (!detail.success) return detail;
+
+  const currentState = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
+  if (!currentState.project_dir) {
+    return failHyperframesFreeformSection(awemeId, runId, 'visual_inspect', '请先生成 HyperFrames 自由工程。', options);
+  }
+
+  const outputPath = currentState.render?.output_path || path.join(currentState.project_dir, 'output.mp4');
+  if (!(await pathExists(outputPath))) {
+    return failHyperframesFreeformSection(awemeId, runId, 'visual_inspect', '请先渲染 HyperFrames 自由视频。', options, {
+      output_path: outputPath,
+    });
+  }
+
+  await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    visual_inspect: {
+      ...current.visual_inspect,
+      status: 'inspecting',
+      output_path: outputPath,
+      message: '正在抽帧质检...',
+    },
+  }), options);
+
+  const quality = options.hyperframesFreeformQuality || defaultHyperframesFreeformQuality;
+  let result;
+  try {
+    result = await quality.inspectRenderedVideo({
+      projectDir: currentState.project_dir,
+      outputPath,
+    });
+  } catch (error) {
+    result = {
+      success: false,
+      message: `视频抽帧质检失败：${error.message || '未知错误'}`,
+    };
+  }
+
+  const success = !!result?.success;
+  const report = result?.report || null;
+  const issues = Array.isArray(report?.issues)
+    ? report.issues
+    : Array.isArray(result?.issues)
+      ? result.issues
+      : [];
+  const message = result?.message || (success ? '视频抽帧质检通过。' : '视频抽帧质检失败。');
+  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    visual_inspect: {
+      ...current.visual_inspect,
+      status: success ? 'passed' : 'failed',
+      output_path: outputPath,
+      contact_sheet_path: success ? result.contact_sheet_path || current.visual_inspect.contact_sheet_path || '' : current.visual_inspect.contact_sheet_path || '',
+      contact_sheet_url: success ? defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'contact_sheet.jpg') : current.visual_inspect.contact_sheet_url || '',
+      report,
+      issues,
+      message,
+    },
+  }), options);
+
+  return {
+    success,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message,
+    hyperframes_freeform: updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
+  };
+}
+
 async function createDouyinStoryboardPlanRun(awemeId, options = {}) {
   const rootDir = options.rootDir;
   const promptOptions = options.promptOptions || {};
@@ -2479,6 +2671,9 @@ module.exports = {
   updateRunHyperframesFreeform,
   generateDouyinRunHyperframesFreeformBrief,
   generateDouyinRunHyperframesFreeformProject,
+  checkDouyinRunHyperframesFreeformProject,
+  renderDouyinRunHyperframesFreeformVideo,
+  inspectDouyinRunHyperframesFreeformVideo,
   synthesizeDouyinRunTts,
   synthesizeDouyinRunSceneTts,
   compressDouyinRunSceneNarration,
