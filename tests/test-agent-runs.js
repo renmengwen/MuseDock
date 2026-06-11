@@ -876,6 +876,56 @@ async function run() {
   assert.equal(initialFreeform.hyperframes_freeform.render.status, 'idle');
   assert.equal(initialFreeform.hyperframes_freeform.visual_inspect.status, 'idle');
 
+  const freeformBrief = await agentRuns.generateDouyinRunHyperframesFreeformBrief(awemeId, generated.run_id, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+    },
+    aiTextModel: {
+      callTextModel: async ({ messages }) => {
+        assert.match(messages[1].content, /skill context/);
+        return {
+          success: true,
+          text: JSON.stringify({
+            title: '高级测试片',
+            summary: '自由工程 brief',
+            design_md: '# Design',
+            narration: '旁白',
+            storyboard: [],
+          }),
+        };
+      },
+    },
+  });
+  assert.equal(freeformBrief.success, true);
+  assert.equal(freeformBrief.hyperframes_freeform.brief.status, 'ready');
+  assert.match(freeformBrief.hyperframes_freeform.brief.summary, /自由工程 brief/);
+
+  const freeformProject = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, generated.run_id, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+      copySkillSnapshot: async () => ({ success: true }),
+    },
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        text: JSON.stringify({
+          summary: '工程生成',
+          files: {
+            'index.html': '<html></html>',
+            'design.md': '# Design',
+            'hyperframes.json': '{}',
+            'package.json': '{"private":true}',
+          },
+        }),
+      }),
+    },
+  });
+  assert.equal(freeformProject.success, true);
+  assert.equal(freeformProject.hyperframes_freeform.project.status, 'ready');
+  assert.ok(fs.existsSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}-hyperframes-freeform`, 'index.html')));
+
   const failedQualityRunId = `${generated.run_id}-quality-failed`;
   const failedQualityPath = path.join(rootDir, awemeId, 'agent_runs', `${failedQualityRunId}.json`);
   await writeJson(failedQualityPath, {
