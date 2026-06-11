@@ -94,9 +94,20 @@ async function writeVisualReport(reportPath, report) {
 async function inspectRenderedVideo({ projectDir, outputPath, runCommand = defaultRunCommand } = {}) {
   const videoPath = outputPath || (projectDir ? path.join(projectDir, 'output.mp4') : '');
   if (!projectDir || !videoPath || !fs.existsSync(videoPath)) {
+    if (projectDir) {
+      const checksDir = path.join(projectDir, 'checks');
+      const reportPath = path.join(checksDir, 'visual_report.json');
+      await fsp.mkdir(checksDir, { recursive: true });
+      const report = {
+        success: false,
+        message: '质检失败：未找到 output.mp4。',
+        issues: ['output_missing'],
+      };
+      return writeVisualReport(reportPath, report);
+    }
     return {
       success: false,
-      message: '质检失败：未找到渲染视频 output.mp4。',
+      message: '质检失败：未找到 output.mp4。',
     };
   }
 
@@ -132,6 +143,7 @@ async function inspectRenderedVideo({ projectDir, outputPath, runCommand = defau
     return writeVisualReport(reportPath, report);
   }
 
+  await fsp.rm(contactSheetPath, { force: true });
   const sheetResult = await runFfmpeg(ffmpeg, [
     '-y',
     '-framerate',

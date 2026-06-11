@@ -78,6 +78,18 @@ async function run() {
   assert.equal(throwInspect.success, false);
   assert.equal(fs.existsSync(path.join(throwProjectDir, 'checks', 'visual_report.json')), true);
 
+  const missingOutputProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hf-freeform-quality-missing-output-'));
+  const missingOutputInspect = await quality.inspectRenderedVideo({
+    projectDir: missingOutputProjectDir,
+    outputPath: path.join(missingOutputProjectDir, 'missing.mp4'),
+  });
+  const missingOutputReportPath = path.join(missingOutputProjectDir, 'checks', 'visual_report.json');
+  const missingOutputReport = JSON.parse(fs.readFileSync(missingOutputReportPath, 'utf8'));
+
+  assert.equal(missingOutputInspect.success, false);
+  assert.equal(fs.existsSync(missingOutputReportPath), true);
+  assert.ok(missingOutputReport.issues.includes('output_missing') || /未找到 output\.mp4/.test(missingOutputReport.message));
+
   const missingSheetProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hf-freeform-quality-sheet-'));
   const missingSheetOutputPath = path.join(missingSheetProjectDir, 'output.mp4');
   fs.writeFileSync(missingSheetOutputPath, 'fake mp4');
@@ -96,6 +108,28 @@ async function run() {
 
   assert.equal(missingSheetInspect.success, false);
   assert.ok(missingSheetInspect.issues.includes('contact_sheet_failed'));
+
+  const staleSheetProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hf-freeform-quality-stale-sheet-'));
+  const staleSheetOutputPath = path.join(staleSheetProjectDir, 'output.mp4');
+  const staleSheetPath = path.join(staleSheetProjectDir, 'inspect', 'contact_sheet.jpg');
+  fs.mkdirSync(path.dirname(staleSheetPath), { recursive: true });
+  fs.writeFileSync(staleSheetOutputPath, 'fake mp4');
+  fs.writeFileSync(staleSheetPath, 'old sheet');
+  const staleSheetInspect = await quality.inspectRenderedVideo({
+    projectDir: staleSheetProjectDir,
+    outputPath: staleSheetOutputPath,
+    runCommand: async (_command, args) => {
+      if (args.some(arg => String(arg).includes('fps=10/3'))) {
+        const framesDir = path.join(staleSheetProjectDir, 'inspect', 'frames');
+        fs.mkdirSync(framesDir, { recursive: true });
+        fs.writeFileSync(path.join(framesDir, 'frame_0001.jpg'), 'fake jpg');
+      }
+      return { ok: true, code: 0, stdout: 'ok', stderr: '' };
+    },
+  });
+
+  assert.equal(staleSheetInspect.success, false);
+  assert.equal(fs.existsSync(staleSheetPath), false);
 
   const staleProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hf-freeform-quality-stale-'));
   const staleOutputPath = path.join(staleProjectDir, 'output.mp4');
