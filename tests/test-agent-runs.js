@@ -876,6 +876,57 @@ async function run() {
   assert.equal(initialFreeform.hyperframes_freeform.render.status, 'idle');
   assert.equal(initialFreeform.hyperframes_freeform.visual_inspect.status, 'idle');
 
+  const noBriefRunId = `${generated.run_id}-no-brief`;
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${noBriefRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(generated.path, 'utf-8')),
+    run_id: noBriefRunId,
+    hyperframes_freeform: undefined,
+  });
+  let noBriefModelCalled = false;
+  let noBriefProjectCalled = false;
+  const noBriefProject = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, noBriefRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+    },
+    aiTextModel: {
+      callTextModel: async () => {
+        noBriefModelCalled = true;
+        return { success: true, text: '{}' };
+      },
+    },
+    hyperframesFreeformProject: {
+      createFreeformProject: async () => {
+        noBriefProjectCalled = true;
+        return { success: true };
+      },
+    },
+  });
+  assert.equal(noBriefProject.success, false);
+  assert.equal(noBriefModelCalled, false);
+  assert.equal(noBriefProjectCalled, false);
+  assert.equal(noBriefProject.hyperframes_freeform.project.status, 'failed');
+  assert.match(noBriefProject.hyperframes_freeform.project.message, /导演策划/);
+
+  const briefContextThrowRunId = `${generated.run_id}-brief-context-throw`;
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${briefContextThrowRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(generated.path, 'utf-8')),
+    run_id: briefContextThrowRunId,
+    hyperframes_freeform: undefined,
+  });
+  const briefContextThrow = await agentRuns.generateDouyinRunHyperframesFreeformBrief(awemeId, briefContextThrowRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => {
+        throw new Error('context exploded');
+      },
+    },
+  });
+  assert.equal(briefContextThrow.success, false);
+  assert.equal(briefContextThrow.hyperframes_freeform.status, 'failed');
+  assert.equal(briefContextThrow.hyperframes_freeform.brief.status, 'failed');
+  assert.match(briefContextThrow.hyperframes_freeform.brief.message, /上下文|skill/i);
+
   const freeformBrief = await agentRuns.generateDouyinRunHyperframesFreeformBrief(awemeId, generated.run_id, {
     rootDir,
     skillContext: {
@@ -900,6 +951,74 @@ async function run() {
   assert.equal(freeformBrief.success, true);
   assert.equal(freeformBrief.hyperframes_freeform.brief.status, 'ready');
   assert.match(freeformBrief.hyperframes_freeform.brief.summary, /自由工程 brief/);
+
+  const shallowMergeCheck = await agentRuns.updateRunHyperframesFreeform(awemeId, generated.run_id, {
+    brief: { status: 'generating' },
+  }, { rootDir });
+  assert.equal(shallowMergeCheck.success, true);
+  assert.equal(shallowMergeCheck.data.hyperframes_freeform.brief.status, 'generating');
+  assert.equal(shallowMergeCheck.data.hyperframes_freeform.brief.data.summary, '自由工程 brief');
+  await agentRuns.updateRunHyperframesFreeform(awemeId, generated.run_id, {
+    brief: { status: 'ready' },
+  }, { rootDir });
+
+  const projectCreateThrowRunId = `${generated.run_id}-project-create-throw`;
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${projectCreateThrowRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: projectCreateThrowRunId,
+  });
+  const projectCreateThrow = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, projectCreateThrowRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+    },
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        text: JSON.stringify({
+          summary: '工程生成',
+          files: { 'index.html': '<html></html>' },
+        }),
+      }),
+    },
+    hyperframesFreeformProject: {
+      createFreeformProject: async () => {
+        throw new Error('create exploded');
+      },
+    },
+  });
+  assert.equal(projectCreateThrow.success, false);
+  assert.equal(projectCreateThrow.hyperframes_freeform.status, 'failed');
+  assert.equal(projectCreateThrow.hyperframes_freeform.project.status, 'failed');
+  assert.match(projectCreateThrow.hyperframes_freeform.project.message, /工程|写入|生成/);
+
+  const snapshotThrowRunId = `${generated.run_id}-snapshot-throw`;
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${snapshotThrowRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: snapshotThrowRunId,
+  });
+  const snapshotThrow = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, snapshotThrowRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: 'skill-source' }),
+      copySkillSnapshot: async () => {
+        throw new Error('snapshot exploded');
+      },
+    },
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        text: JSON.stringify({
+          summary: '工程生成',
+          files: { 'index.html': '<html></html>' },
+        }),
+      }),
+    },
+  });
+  assert.equal(snapshotThrow.success, true);
+  assert.equal(snapshotThrow.hyperframes_freeform.status, 'ready');
+  assert.equal(snapshotThrow.hyperframes_freeform.project.status, 'ready');
+  assert.match(snapshotThrow.message, /快照|skill/i);
 
   const freeformProject = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, generated.run_id, {
     rootDir,

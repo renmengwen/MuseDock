@@ -670,6 +670,19 @@ function normalizeHyperframesFreeformState(value = {}) {
   };
 }
 
+function mergeHyperframesFreeformPatch(current, patch) {
+  const safePatch = patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {};
+  return {
+    ...current,
+    ...safePatch,
+    brief: { ...current.brief, ...(safePatch.brief || {}) },
+    project: { ...current.project, ...(safePatch.project || {}) },
+    checks: { ...current.checks, ...(safePatch.checks || {}) },
+    render: { ...current.render, ...(safePatch.render || {}) },
+    visual_inspect: { ...current.visual_inspect, ...(safePatch.visual_inspect || {}) },
+  };
+}
+
 async function getDouyinRunHyperframesFreeformState(awemeId, runId, options = {}) {
   const detail = await getDouyinAgentRun(awemeId, runId, options);
   if (!detail.success) return detail;
@@ -687,10 +700,7 @@ async function updateRunHyperframesFreeform(awemeId, runId, updater, options = {
 
   const current = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
   const patch = typeof updater === 'function' ? updater(current, detail.data) : updater;
-  const nextState = normalizeHyperframesFreeformState({
-    ...current,
-    ...(patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {}),
-  });
+  const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, patch));
   const updatedRun = {
     ...detail.data,
     hyperframes_freeform: nextState,
@@ -755,11 +765,19 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
   if (!detail.success) return detail;
 
   const skillContext = options.skillContext || defaultHyperframesSkillContext;
-  const context = await skillContext.loadHyperframesSkillContext({
-    skillRoot: options.skillRoot,
-    maxChars: options.skillContextMaxChars,
-    env: options.env,
-  });
+  let context;
+  try {
+    context = await skillContext.loadHyperframesSkillContext({
+      skillRoot: options.skillRoot,
+      maxChars: options.skillContextMaxChars,
+      env: options.env,
+    });
+  } catch (error) {
+    context = {
+      success: false,
+      message: `读取 HyperFrames skill 上下文失败：${error.message || '未知错误'}`,
+    };
+  }
   if (!context.success) {
     const message = context.message || '读取 HyperFrames skill 上下文失败。';
     return markFreeformBriefFailed(awemeId, runId, message, options);
@@ -836,12 +854,29 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   if (!detail.success) return detail;
 
   const currentState = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
+  if (
+    currentState.brief.status !== 'ready'
+    || !currentState.brief.data
+    || typeof currentState.brief.data !== 'object'
+    || Array.isArray(currentState.brief.data)
+  ) {
+    return markFreeformProjectFailed(awemeId, runId, '请先生成导演策划。', options);
+  }
+
   const skillContext = options.skillContext || defaultHyperframesSkillContext;
-  const context = await skillContext.loadHyperframesSkillContext({
-    skillRoot: options.skillRoot,
-    maxChars: options.skillContextMaxChars,
-    env: options.env,
-  });
+  let context;
+  try {
+    context = await skillContext.loadHyperframesSkillContext({
+      skillRoot: options.skillRoot,
+      maxChars: options.skillContextMaxChars,
+      env: options.env,
+    });
+  } catch (error) {
+    context = {
+      success: false,
+      message: `读取 HyperFrames skill 上下文失败：${error.message || '未知错误'}`,
+    };
+  }
   if (!context.success) {
     const message = context.message || '读取 HyperFrames skill 上下文失败。';
     return markFreeformProjectFailed(awemeId, runId, message, options);
@@ -894,12 +929,20 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   }
 
   const projectService = options.hyperframesFreeformProject || defaultHyperframesFreeformProject;
-  const created = await projectService.createFreeformProject({
-    awemeId,
-    runId,
-    rootDir: options.rootDir,
-    files: parsed.files,
-  });
+  let created;
+  try {
+    created = await projectService.createFreeformProject({
+      awemeId,
+      runId,
+      rootDir: options.rootDir,
+      files: parsed.files,
+    });
+  } catch (error) {
+    created = {
+      success: false,
+      message: `HyperFrames 工程写入失败：${error.message || '未知错误'}`,
+    };
+  }
   if (!created.success) {
     const message = created.message || 'HyperFrames 工程写入失败。';
     return markFreeformProjectFailed(awemeId, runId, message, options);
@@ -907,10 +950,18 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
 
   let snapshotMessage = '';
   if (context.source_dir && typeof skillContext.copySkillSnapshot === 'function') {
-    const snapshot = await skillContext.copySkillSnapshot({
-      sourceDir: context.source_dir,
-      projectDir: created.project_dir || created.projectDir,
-    });
+    let snapshot;
+    try {
+      snapshot = await skillContext.copySkillSnapshot({
+        sourceDir: context.source_dir,
+        projectDir: created.project_dir || created.projectDir,
+      });
+    } catch (error) {
+      snapshot = {
+        success: false,
+        message: `HyperFrames skill 快照保存失败：${error.message || '未知错误'}`,
+      };
+    }
     if (snapshot && !snapshot.success) {
       snapshotMessage = snapshot.message || 'HyperFrames skill 快照保存失败。';
     }
