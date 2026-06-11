@@ -312,6 +312,203 @@ a { color: #fe2c55; text-decoration: none; }
 .settingsFormGrid span { color: #5f6876; font-size: 12px; font-weight: 600; }
 .settingsFormGrid input { width: 100%; height: 38px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 10px; background: #fff; color: #30343b; font-size: 13px; }
 .settingsWideField { grid-column: 1 / -1; }
+
+.container:has(> .workspaceIntro + .status + .agentWorkbench) {
+  padding-block: 22px 32px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.74), rgba(246,247,249,0) 220px),
+    #f6f7f9;
+}
+.container:has(> .workspaceIntro + .status + .agentWorkbench) > .workspaceIntro {
+  align-items: center;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e7e9ee;
+}
+.container:has(> .workspaceIntro + .status + .agentWorkbench) > .workspaceIntro h2 {
+  font-size: 22px;
+  letter-spacing: 0;
+}
+.container:has(> .workspaceIntro + .status + .agentWorkbench) > .workspaceIntro p {
+  max-width: 680px;
+  line-height: 1.65;
+}
+.container:has(> .workspaceIntro + .status + .agentWorkbench) > .workspaceIntro .settingsSummary {
+  min-width: 220px;
+  max-width: 360px;
+  text-align: left;
+}
+.container:has(> .workspaceIntro + .status + .agentWorkbench) > .workspaceIntro .settingsSummary strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.container:has(> .workspaceIntro + .status + .agentWorkbench) > .status {
+  margin-bottom: 14px;
+  border: 1px solid transparent;
+}
+.container:has(> .workspaceIntro + .status + .agentWorkbench) > .status.idle {
+  border-color: #e7e9ee;
+  background: #fff;
+  color: #5f6876;
+}
+.container:has(> .workspaceIntro + .status + .agentWorkbench) > .status.loading {
+  border-color: #bfdbfe;
+}
+.container:has(> .workspaceIntro + .status + .agentWorkbench) > .status.success {
+  border-color: #bbf7d0;
+}
+.container:has(> .workspaceIntro + .status + .agentWorkbench) > .status.error {
+  border-color: #fecaca;
+}
+.workspaceIntro + .status + .agentWorkbench {
+  grid-template-columns: minmax(250px, .82fr) minmax(300px, 1fr) minmax(420px, 1.42fr) minmax(280px, .9fr);
+  gap: 14px;
+}
+.workspaceIntro + .status + .agentWorkbench > .agentPanel {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-height: 0;
+  border-color: #dde2ea;
+  box-shadow: 0 10px 28px rgba(15,23,42,.06);
+}
+.workspaceIntro + .status + .agentWorkbench > .agentPanel h3 {
+  margin-bottom: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #edf0f4;
+}
+.workspaceIntro + .status + .agentWorkbench .agentOptionGroup {
+  margin: 0;
+  gap: 10px;
+  background: #fbfcfd;
+}
+.workspaceIntro + .status + .agentWorkbench .agentOptionGroup label,
+.workspaceIntro + .status + .agentWorkbench .promptEditor label {
+  display: grid;
+  gap: 6px;
+}
+.workspaceIntro + .status + .agentWorkbench .agentOptionGroup label > span,
+.workspaceIntro + .status + .agentWorkbench .promptEditor label > span {
+  color: #5f6876;
+  font-size: 12px;
+  font-weight: 700;
+}
+.workspaceIntro + .status + .agentWorkbench .agentOptionGroup input,
+.workspaceIntro + .status + .agentWorkbench .videoProjectToolbar select {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  border: 1px solid #d7dce3;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #fff;
+  color: #30343b;
+  font-size: 13px;
+}
+.workspaceIntro + .status + .agentWorkbench .agentOptionGroup input:disabled,
+.workspaceIntro + .status + .agentWorkbench .videoProjectToolbar select:disabled {
+  color: #8a93a2;
+  background: #f4f6f8;
+}
+.workspaceIntro + .status + .agentWorkbench .primaryActionGroup {
+  grid-template-columns: 1fr;
+}
+.workspaceIntro + .status + .agentWorkbench .primaryActionGroup .btn,
+.workspaceIntro + .status + .agentWorkbench .videoProjectActions .btn {
+  width: 100%;
+  min-width: 0;
+}
+.workspaceIntro + .status + .agentWorkbench .agentResultPanel {
+  max-height: calc(100vh - 190px);
+}
+.workspaceIntro + .status + .agentWorkbench .agentResultTitleRow {
+  margin-bottom: 0;
+}
+.workspaceIntro + .status + .agentWorkbench .agentResultTitleRow span {
+  max-width: 54%;
+}
+.workspaceIntro + .status + .agentWorkbench .videoProjectToolbar {
+  position: sticky;
+  top: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  padding: 12px;
+  border-color: #dfe4ec;
+  box-shadow: 0 8px 20px rgba(15,23,42,.08);
+}
+.workspaceIntro + .status + .agentWorkbench .videoProjectToolbar > div:first-child {
+  gap: 7px;
+}
+.workspaceIntro + .status + .agentWorkbench .videoProjectActions {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+.workspaceIntro + .status + .agentWorkbench .promptEditor {
+  gap: 10px;
+}
+.workspaceIntro + .status + .agentWorkbench .promptEditor textarea {
+  min-height: clamp(260px, 50vh, 620px);
+  overflow: auto;
+  tab-size: 2;
+}
+.workspaceIntro + .status + .agentWorkbench .jsonViewer {
+  max-height: calc(100vh - 260px);
+  min-height: 260px;
+  border-color: #1e293b;
+  background: #111827;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.workspaceIntro + .status + .agentWorkbench .agentSteps.compact {
+  gap: 10px;
+}
+.workspaceIntro + .status + .agentWorkbench .videoProjectMeta {
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+.workspaceIntro + .status + .agentWorkbench .videoProjectMeta video {
+  aspect-ratio: 16 / 9;
+  max-height: 42vh;
+  object-fit: contain;
+}
+.workspaceIntro + .status + .agentWorkbench .videoProjectMeta .btn {
+  width: fit-content;
+  justify-self: start;
+}
+.workspaceIntro + .status + .agentWorkbench .framesStrip {
+  margin-top: 0;
+  padding: 12px;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+.workspaceIntro + .status + .agentWorkbench .framesHeader {
+  align-items: center;
+}
+.workspaceIntro + .status + .agentWorkbench .framesHeader a {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.workspaceIntro + .status + .agentWorkbench .framesStrip .cover {
+  width: 100%;
+  height: auto;
+  max-height: 46vh;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  border: 1px solid #d7dce3;
+  border-radius: 8px;
+  background: #0f1115;
+}
+.workspaceIntro + .status + .agentWorkbench .empty.small {
+  border: 1px dashed #d7dce3;
+  border-radius: 8px;
+  background: #fafbfc;
+}
 @media (max-width: 760px) {
   .container { padding: 18px 16px; }
   .toolbar, .mediaHeader, .workspaceIntro, .settingsPanelHeader, .modelConfigHeader { flex-direction: column; align-items: stretch; }
@@ -327,8 +524,55 @@ a { color: #fe2c55; text-decoration: none; }
   .sceneEditorSummary { grid-template-columns: 1fr; }
   .ttsInlineControls { grid-template-columns: 1fr; width: 100%; }
   .ttsCaptionItem { grid-template-columns: 1fr; }
+  .container:has(> .workspaceIntro + .status + .agentWorkbench) > .workspaceIntro .settingsSummary {
+    max-width: none;
+    width: 100%;
+  }
+  .workspaceIntro + .status + .agentWorkbench .videoProjectActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .workspaceIntro + .status + .agentWorkbench .agentResultTitleRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .workspaceIntro + .status + .agentWorkbench .agentResultTitleRow span {
+    max-width: none;
+    white-space: normal;
+  }
+  .workspaceIntro + .status + .agentWorkbench .promptEditor textarea {
+    min-height: 280px;
+  }
 }
 @media (max-width: 1100px) {
   .agentWorkbench { grid-template-columns: 1fr; }
   .agentResultPanel { max-height: none; }
+}
+@media (max-width: 1380px) and (min-width: 1101px) {
+  .workspaceIntro + .status + .agentWorkbench {
+    grid-template-columns: minmax(260px, .84fr) minmax(420px, 1.28fr);
+  }
+  .workspaceIntro + .status + .agentWorkbench > .agentPanel:nth-child(2),
+  .workspaceIntro + .status + .agentWorkbench > .agentPanel:nth-child(4) {
+    min-height: 360px;
+  }
+}
+@media (max-width: 1100px) {
+  .workspaceIntro + .status + .agentWorkbench {
+    grid-template-columns: 1fr;
+  }
+  .workspaceIntro + .status + .agentWorkbench .agentResultPanel,
+  .workspaceIntro + .status + .agentWorkbench .jsonViewer {
+    max-height: none;
+  }
+  .workspaceIntro + .status + .agentWorkbench .videoProjectToolbar {
+    position: static;
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+  .workspaceIntro + .status + .agentWorkbench .videoProjectMeta video,
+  .workspaceIntro + .status + .agentWorkbench .framesStrip .cover {
+    max-height: none;
+  }
 }
