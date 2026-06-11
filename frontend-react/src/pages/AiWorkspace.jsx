@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Status } from '../components/Status.jsx';
-import { Button } from '../components/ui/button.jsx';
+import { Button, buttonVariants } from '../components/ui/button.jsx';
 import { Input } from '../components/ui/input.jsx';
 import {
   getAgentConfigSourceLabel,
@@ -244,6 +244,14 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
   const legacyRun = isLegacyAgentRun(activeRun);
   const workflowBusy = workflowRunning || videoBusy;
   const workflowStartDisabled = loading || workflowBusy;
+  const hyperframesFreeformHref = activeRun?.run_id && selectedAwemeId
+    ? `/hyperframes-freeform/${encodeURIComponent(selectedAwemeId)}/${encodeURIComponent(activeRun.run_id)}`
+    : '';
+  const hyperframesFreeformLink = hyperframesFreeformHref ? (
+    <a className={buttonVariants({ variant: 'secondary', size: 'sm' })} href={hyperframesFreeformHref}>
+      打开高级成片工作台
+    </a>
+  ) : null;
   const hasFailedQualityReport = activeRun?.video?.video_quality_report?.pass === false;
   const storyboardSceneIssues = useMemo(() => getStoryboardSceneIssues(storyboardDraft || {}), [storyboardDraft]);
   const storyboardIssueCount = Object.keys(storyboardSceneIssues).length;
@@ -984,6 +992,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                       <Button disabled={workflowStartDisabled} onClick={runNextWorkflowAction}>
                         {workflowRunning ? '处理中...' : getWorkflowActionLabel('generate_storyboard_plan')}
                       </Button>
+                      {hyperframesFreeformLink}
                     </>
                   ) : (
                     <>
@@ -992,6 +1001,7 @@ export function AiWorkspace({ routeSearch = '' } = {}) {
                       <Button disabled={workflowStartDisabled} onClick={runNextWorkflowAction}>
                         {workflowRunning ? '处理中...' : getWorkflowActionLabel(nextAction || 'generate_storyboard_plan')}
                       </Button>
+                      {hyperframesFreeformLink}
                     </>
                   )}
                   <div className="agentSteps compact">
