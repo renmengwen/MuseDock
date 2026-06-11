@@ -610,6 +610,73 @@ async function getDouyinAgentRun(awemeId, runId, options = {}) {
   };
 }
 
+function createDefaultHyperframesFreeformState(overrides = {}) {
+  return {
+    mode: 'builtin_skill_context',
+    agent_runtime: null,
+    status: 'idle',
+    project_dir: '',
+    brief: {
+      status: 'idle',
+      design_path: '',
+      summary: '',
+      message: '',
+    },
+    project: {
+      status: 'idle',
+      index_path: '',
+      files: [],
+      message: '',
+    },
+    checks: {
+      status: 'idle',
+      lint: 'pending',
+      validate: 'pending',
+      inspect: 'pending',
+      message: '',
+    },
+    render: {
+      status: 'idle',
+      output_path: '',
+      output_url: '',
+      message: '',
+    },
+    visual_inspect: {
+      status: 'idle',
+      contact_sheet_path: '',
+      contact_sheet_url: '',
+      issues: [],
+      message: '',
+    },
+    ...overrides,
+  };
+}
+
+function normalizeHyperframesFreeformState(value = {}) {
+  const current = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const defaults = createDefaultHyperframesFreeformState();
+  return {
+    ...defaults,
+    ...current,
+    brief: { ...defaults.brief, ...(current.brief || {}) },
+    project: { ...defaults.project, ...(current.project || {}) },
+    checks: { ...defaults.checks, ...(current.checks || {}) },
+    render: { ...defaults.render, ...(current.render || {}) },
+    visual_inspect: { ...defaults.visual_inspect, ...(current.visual_inspect || {}) },
+  };
+}
+
+async function getDouyinRunHyperframesFreeformState(awemeId, runId, options = {}) {
+  const detail = await getDouyinAgentRun(awemeId, runId, options);
+  if (!detail.success) return detail;
+  return {
+    success: true,
+    aweme_id: awemeId,
+    run_id: runId,
+    hyperframes_freeform: normalizeHyperframesFreeformState(detail.data.hyperframes_freeform),
+  };
+}
+
 async function createDouyinStoryboardPlanRun(awemeId, options = {}) {
   const rootDir = options.rootDir;
   const promptOptions = options.promptOptions || {};
@@ -1727,6 +1794,9 @@ module.exports = {
   createDouyinStoryboardPlanRun,
   listDouyinAgentRuns,
   getDouyinAgentRun,
+  createDefaultHyperframesFreeformState,
+  normalizeHyperframesFreeformState,
+  getDouyinRunHyperframesFreeformState,
   synthesizeDouyinRunTts,
   synthesizeDouyinRunSceneTts,
   compressDouyinRunSceneNarration,

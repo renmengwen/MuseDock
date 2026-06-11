@@ -866,6 +866,16 @@ async function run() {
   assert.equal(projectResult.video.render_options.quality, 'high');
   assert.ok(projectResult.video.project_dir.includes(`${generated.run_id}-hyperframes`));
 
+  const initialFreeform = await agentRuns.getDouyinRunHyperframesFreeformState(awemeId, generated.run_id, { rootDir });
+  assert.equal(initialFreeform.success, true);
+  assert.equal(initialFreeform.hyperframes_freeform.mode, 'builtin_skill_context');
+  assert.equal(initialFreeform.hyperframes_freeform.status, 'idle');
+  assert.equal(initialFreeform.hyperframes_freeform.brief.status, 'idle');
+  assert.equal(initialFreeform.hyperframes_freeform.project.status, 'idle');
+  assert.equal(initialFreeform.hyperframes_freeform.checks.status, 'idle');
+  assert.equal(initialFreeform.hyperframes_freeform.render.status, 'idle');
+  assert.equal(initialFreeform.hyperframes_freeform.visual_inspect.status, 'idle');
+
   const failedQualityRunId = `${generated.run_id}-quality-failed`;
   const failedQualityPath = path.join(rootDir, awemeId, 'agent_runs', `${failedQualityRunId}.json`);
   await writeJson(failedQualityPath, {
