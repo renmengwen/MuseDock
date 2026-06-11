@@ -61,6 +61,33 @@ function isSameOrInside(parentPath, childPath) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
+function realpathIfExists(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return '';
+  }
+  return fs.realpathSync.native(filePath);
+}
+
+function resolveSnapshotPaths(sourceDir, projectDir) {
+  const sourceRoot = path.resolve(sourceDir);
+  const projectRoot = path.resolve(projectDir);
+  const targetRoot = path.resolve(projectRoot, '.agents', 'skills', 'hyperframes');
+  const realSourceRoot = realpathIfExists(sourceRoot);
+  const realProjectRoot = realpathIfExists(projectRoot);
+  const realTargetRoot = realProjectRoot
+    ? path.resolve(realProjectRoot, '.agents', 'skills', 'hyperframes')
+    : '';
+
+  return {
+    sourceRoot,
+    projectRoot,
+    targetRoot,
+    realSourceRoot,
+    realProjectRoot,
+    realTargetRoot,
+  };
+}
+
 async function loadHyperframesSkillContext({
   skillRoot = '',
   maxChars = 12000,
@@ -134,24 +161,29 @@ async function copySkillSnapshot({ sourceDir, projectDir } = {}) {
     };
   }
 
-  const sourceRoot = path.resolve(normalizedSource);
-  const targetRoot = path.resolve(
-    path.join(normalizedProject, '.agents', 'skills', 'hyperframes'),
-  );
-  if (isSameOrInside(sourceRoot, targetRoot)) {
+  const paths = resolveSnapshotPaths(normalizedSource, normalizedProject);
+  const lexicalTargetInsideSource = isSameOrInside(paths.sourceRoot, paths.targetRoot);
+  const realProjectInsideSource = paths.realSourceRoot
+    && paths.realProjectRoot
+    && isSameOrInside(paths.realSourceRoot, paths.realProjectRoot);
+  const realTargetInsideSource = paths.realSourceRoot
+    && paths.realTargetRoot
+    && isSameOrInside(paths.realSourceRoot, paths.realTargetRoot);
+
+  if (lexicalTargetInsideSource || realProjectInsideSource || realTargetInsideSource) {
     return {
       success: false,
       message: '不能复制到 HyperFrames skill 源目录内部，请选择其他项目目录。',
-      target_dir: targetRoot,
+      target_dir: paths.targetRoot,
     };
   }
 
-  copyDirLimited(sourceRoot, targetRoot);
+  copyDirLimited(paths.sourceRoot, paths.targetRoot);
 
   return {
     success: true,
     message: 'HyperFrames skill 快照已保存。',
-    target_dir: targetRoot,
+    target_dir: paths.targetRoot,
   };
 }
 

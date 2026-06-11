@@ -43,7 +43,7 @@ async function run() {
   const originalReaddirSync = fs.readdirSync;
   let copyAttempted = false;
   fs.readdirSync = function readdirSyncGuarded(targetPath, options) {
-    if (targetPath === path.resolve(skillDir)) {
+    if (path.resolve(targetPath) === path.resolve(skillDir)) {
       copyAttempted = true;
       throw new Error('copy should be rejected before reading source');
     }
@@ -62,6 +62,25 @@ async function run() {
   } finally {
     fs.readdirSync = originalReaddirSync;
   }
+
+  const linkedProjectDir = path.join(root, 'linked-project');
+  try {
+    fs.symlinkSync(skillDir, linkedProjectDir, 'junction');
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'ENOSYS'].includes(error.code)) {
+      console.warn(`skip symlink path boundary test: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  const unsafeLinkedCopy = await skillContext.copySkillSnapshot({
+    sourceDir: skillDir,
+    projectDir: linkedProjectDir,
+  });
+  assert.equal(unsafeLinkedCopy.success, false);
+  assert.match(unsafeLinkedCopy.message, /不能复制到 HyperFrames skill 源目录内部/);
+  assert.equal(fs.existsSync(path.join(skillDir, '.agents')), false);
 }
 
 run().then(() => {
