@@ -2561,6 +2561,37 @@ function resolveDouyinRunHyperframesFile(awemeId, runId, fileName, options = {})
   return targetPath;
 }
 
+function resolveDouyinRunHyperframesFreeformFile(awemeId, runId, fileName, options = {}) {
+  if (!isSafeId(awemeId) || !isSafeRunId(runId)) {
+    throw new Error('非法的 HyperFrames 自由工程文件请求。');
+  }
+
+  const projectDir = defaultHyperframesFreeformProject.getFreeformProjectDir(awemeId, runId, options.rootDir);
+  return defaultHyperframesFreeformProject.resolveFreeformFile(projectDir, fileName);
+}
+
+async function saveDouyinRunHyperframesFreeformFile(awemeId, runId, fileName, content, options = {}) {
+  if (!isSafeId(awemeId) || !isSafeRunId(runId)) {
+    throw new Error('非法的 HyperFrames 自由工程文件请求。');
+  }
+
+  const projectDir = defaultHyperframesFreeformProject.getFreeformProjectDir(awemeId, runId, options.rootDir);
+  const nextContent = content && typeof content === 'object' && Object.prototype.hasOwnProperty.call(content, 'content')
+    ? content.content
+    : content;
+  const result = await defaultHyperframesFreeformProject.writeFreeformFile({
+    projectDir,
+    fileName,
+    content: nextContent,
+  });
+
+  return {
+    ...result,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+  };
+}
+
 async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
   if (!isSafeId(awemeId)) {
     return createInvalidAwemeResult(awemeId);
@@ -2774,6 +2805,8 @@ module.exports = {
   createDouyinRunHyperframesProject,
   renderDouyinRunHyperframesVideo,
   resolveDouyinRunHyperframesFile,
+  resolveDouyinRunHyperframesFreeformFile,
+  saveDouyinRunHyperframesFreeformFile,
   decideNextAction: workflowDecision.decideNextAction,
   listAgentTemplates: agentTemplates.listAgentTemplates,
   summarizeComments,

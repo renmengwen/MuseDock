@@ -46,6 +46,39 @@ async function requestJson(server, method, pathName, body) {
   });
 }
 
+async function requestText(server, method, pathName, body) {
+  const { port } = server.address();
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathName,
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }, res => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => {
+        text += chunk;
+      });
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode,
+          body: text,
+          headers: res.headers,
+        });
+      });
+    });
+    req.on('error', reject);
+    if (body !== undefined) {
+      req.write(JSON.stringify(body));
+    }
+    req.end();
+  });
+}
+
 async function listen(app) {
   return new Promise(resolve => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server));
@@ -1348,6 +1381,27 @@ async function run() {
   assert.equal(freeformProject.hyperframes_freeform.project.status, 'ready');
   assert.ok(fs.existsSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}-hyperframes-freeform`, 'index.html')));
 
+  const freeformIndexPath = agentRuns.resolveDouyinRunHyperframesFreeformFile(awemeId, generated.run_id, 'index.html', { rootDir });
+  assert.ok(freeformIndexPath.endsWith('index.html'));
+
+  assert.throws(
+    () => agentRuns.resolveDouyinRunHyperframesFreeformFile(awemeId, generated.run_id, '../secret.txt', { rootDir }),
+    /非法|不支持/,
+  );
+
+  const saveFreeformDesign = await agentRuns.saveDouyinRunHyperframesFreeformFile(
+    awemeId,
+    generated.run_id,
+    'design.md',
+    '# Edited',
+    { rootDir },
+  );
+  assert.equal(saveFreeformDesign.success, true);
+  assert.equal(
+    fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}-hyperframes-freeform`, 'design.md'), 'utf-8'),
+    '# Edited',
+  );
+
   const freeformCheck = await agentRuns.checkDouyinRunHyperframesFreeformProject(awemeId, generated.run_id, {
     rootDir,
     hyperframesFreeformQuality: {
@@ -2097,6 +2151,8 @@ async function run() {
   const originalCheckDouyinRunHyperframesFreeformProject = agentRuns.checkDouyinRunHyperframesFreeformProject;
   const originalRenderDouyinRunHyperframesFreeformVideo = agentRuns.renderDouyinRunHyperframesFreeformVideo;
   const originalInspectDouyinRunHyperframesFreeformVideo = agentRuns.inspectDouyinRunHyperframesFreeformVideo;
+  const originalResolveDouyinRunHyperframesFreeformFile = agentRuns.resolveDouyinRunHyperframesFreeformFile;
+  const originalSaveDouyinRunHyperframesFreeformFile = agentRuns.saveDouyinRunHyperframesFreeformFile;
   const originalGetDouyinAgentRun = agentRuns.getDouyinAgentRun;
   const originalDecideNextAction = agentRuns.decideNextAction;
   const originalCompressDouyinRunSceneNarration = agentRuns.compressDouyinRunSceneNarration;
@@ -2226,6 +2282,26 @@ async function run() {
     message: '自由视频巡检通过。',
     hyperframes_freeform: { visual_inspect: { status: 'passed' } },
   });
+  agentRuns.resolveDouyinRunHyperframesFreeformFile = (routeAwemeId, routeRunId, fileName) => {
+    assert.strictEqual(routeAwemeId, awemeId);
+    assert.strictEqual(routeRunId, 'ok-run');
+    assert.strictEqual(fileName, 'index.html');
+    const projectDir = path.join(rootDir, awemeId, 'agent_runs', 'ok-run-hyperframes-freeform');
+    fs.mkdirSync(projectDir, { recursive: true });
+    const filePath = path.join(projectDir, 'index.html');
+    fs.writeFileSync(filePath, '<html>route freeform</html>', 'utf-8');
+    return filePath;
+  };
+  agentRuns.saveDouyinRunHyperframesFreeformFile = async (routeAwemeId, routeRunId, fileName, body) => {
+    assert.strictEqual(routeAwemeId, awemeId);
+    assert.strictEqual(routeRunId, 'ok-run');
+    assert.strictEqual(fileName, 'index.html');
+    assert.strictEqual(body.content, '<html>saved route freeform</html>');
+    const filePath = path.join(rootDir, awemeId, 'agent_runs', 'ok-run-hyperframes-freeform', 'index.html');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, body.content, 'utf-8');
+    return { success: true, aweme_id: routeAwemeId, run_id: routeRunId, name: fileName, path: filePath };
+  };
   agentRuns.getDouyinAgentRun = async () => ({
     success: true,
     aweme_id: awemeId,
@@ -2431,17 +2507,19 @@ async function run() {
     assert.strictEqual(freeformInspectResponse.body.success, true);
     assert.strictEqual(freeformInspectResponse.body.hyperframes_freeform.visual_inspect.status, 'passed');
 
-    const freeformFileResponse = await requestJson(server, 'GET', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/files/index.html`);
-    assert.strictEqual(freeformFileResponse.statusCode, 501);
-    assert.strictEqual(freeformFileResponse.body.success, false);
-    assert.match(freeformFileResponse.body.message, /尚未实现|不可用/);
+    const freeformFileResponse = await requestText(server, 'GET', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/files/index.html`);
+    assert.strictEqual(freeformFileResponse.statusCode, 200);
+    assert.strictEqual(freeformFileResponse.body, '<html>route freeform</html>');
 
     const saveFreeformFileResponse = await requestJson(server, 'PUT', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/files/index.html`, {
-      content: '<html></html>',
+      content: '<html>saved route freeform</html>',
     });
-    assert.strictEqual(saveFreeformFileResponse.statusCode, 501);
-    assert.strictEqual(saveFreeformFileResponse.body.success, false);
-    assert.match(saveFreeformFileResponse.body.message, /尚未实现|不可用/);
+    assert.strictEqual(saveFreeformFileResponse.statusCode, 200);
+    assert.strictEqual(saveFreeformFileResponse.body.success, true);
+    assert.strictEqual(
+      fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', 'ok-run-hyperframes-freeform', 'index.html'), 'utf-8'),
+      '<html>saved route freeform</html>',
+    );
   } finally {
     agentRuns.createDouyinAgentRun = originalCreateDouyinAgentRun;
     agentRuns.createDouyinStoryboardPlanRun = originalCreateDouyinStoryboardPlanRun;
@@ -2456,6 +2534,8 @@ async function run() {
     agentRuns.checkDouyinRunHyperframesFreeformProject = originalCheckDouyinRunHyperframesFreeformProject;
     agentRuns.renderDouyinRunHyperframesFreeformVideo = originalRenderDouyinRunHyperframesFreeformVideo;
     agentRuns.inspectDouyinRunHyperframesFreeformVideo = originalInspectDouyinRunHyperframesFreeformVideo;
+    agentRuns.resolveDouyinRunHyperframesFreeformFile = originalResolveDouyinRunHyperframesFreeformFile;
+    agentRuns.saveDouyinRunHyperframesFreeformFile = originalSaveDouyinRunHyperframesFreeformFile;
     agentRuns.getDouyinAgentRun = originalGetDouyinAgentRun;
     agentRuns.decideNextAction = originalDecideNextAction;
     agentRuns.compressDouyinRunSceneNarration = originalCompressDouyinRunSceneNarration;
