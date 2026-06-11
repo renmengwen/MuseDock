@@ -1373,6 +1373,26 @@ async function failHyperframesFreeformSection(awemeId, runId, section, message, 
   );
 }
 
+function isHyperframesFreeformSectionSuccessful(section, state) {
+  const status = state?.[section]?.status || '';
+  if (section === 'checks') return status === 'passed';
+  if (section === 'render') return status === 'rendered';
+  if (section === 'visual_inspect') return status === 'passed';
+  return status === 'ready' || status === 'done' || status === 'passed';
+}
+
+function createHyperframesFreeformOperationResponse(awemeId, runId, section, updated, fallbackSuccess, fallbackMessage) {
+  const state = updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null;
+  const sectionState = state?.[section] || {};
+  return {
+    success: updated.stale ? isHyperframesFreeformSectionSuccessful(section, state) : fallbackSuccess,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    message: updated.stale ? (sectionState.message || updated.message || fallbackMessage) : fallbackMessage,
+    hyperframes_freeform: state,
+  };
+}
+
 async function checkDouyinRunHyperframesFreeformProject(awemeId, runId, options = {}) {
   const detail = await getDouyinAgentRun(awemeId, runId, options);
   if (!detail.success) return detail;
@@ -1382,9 +1402,11 @@ async function checkDouyinRunHyperframesFreeformProject(awemeId, runId, options 
     return failHyperframesFreeformSection(awemeId, runId, 'checks', '请先生成 HyperFrames 自由工程。', options);
   }
 
+  const operationId = createFreeformOperationId('checks');
   await updateRunHyperframesFreeform(awemeId, runId, current => ({
     checks: {
       ...current.checks,
+      operation_id: operationId,
       status: 'checking',
       message: '正在校验动画工程...',
     },
@@ -1403,7 +1425,7 @@ async function checkDouyinRunHyperframesFreeformProject(awemeId, runId, options 
 
   const success = !!result?.success;
   const message = result?.message || (success ? '动画工程校验通过。' : '动画工程校验失败。');
-  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+  const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'checks', operationId, current => ({
     checks: {
       ...current.checks,
       status: success ? 'passed' : 'failed',
@@ -1415,13 +1437,7 @@ async function checkDouyinRunHyperframesFreeformProject(awemeId, runId, options 
     },
   }), options);
 
-  return {
-    success,
-    aweme_id: String(awemeId),
-    run_id: String(runId),
-    message,
-    hyperframes_freeform: updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
-  };
+  return createHyperframesFreeformOperationResponse(awemeId, runId, 'checks', updated, success, message);
 }
 
 async function renderDouyinRunHyperframesFreeformVideo(awemeId, runId, options = {}) {
@@ -1434,9 +1450,11 @@ async function renderDouyinRunHyperframesFreeformVideo(awemeId, runId, options =
   }
 
   const renderOptions = options.renderOptions || {};
+  const operationId = createFreeformOperationId('render');
   await updateRunHyperframesFreeform(awemeId, runId, current => ({
     render: {
       ...current.render,
+      operation_id: operationId,
       status: 'rendering',
       render_options: renderOptions,
       message: '正在渲染视频...',
@@ -1459,7 +1477,7 @@ async function renderDouyinRunHyperframesFreeformVideo(awemeId, runId, options =
 
   const success = !!result?.success;
   const message = result?.message || (success ? '视频渲染完成。' : '视频渲染失败。');
-  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+  const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'render', operationId, current => ({
     render: {
       ...current.render,
       status: success ? 'rendered' : 'failed',
@@ -1470,13 +1488,7 @@ async function renderDouyinRunHyperframesFreeformVideo(awemeId, runId, options =
     },
   }), options);
 
-  return {
-    success,
-    aweme_id: String(awemeId),
-    run_id: String(runId),
-    message,
-    hyperframes_freeform: updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
-  };
+  return createHyperframesFreeformOperationResponse(awemeId, runId, 'render', updated, success, message);
 }
 
 async function inspectDouyinRunHyperframesFreeformVideo(awemeId, runId, options = {}) {
@@ -1495,9 +1507,11 @@ async function inspectDouyinRunHyperframesFreeformVideo(awemeId, runId, options 
     });
   }
 
+  const operationId = createFreeformOperationId('inspect');
   await updateRunHyperframesFreeform(awemeId, runId, current => ({
     visual_inspect: {
       ...current.visual_inspect,
+      operation_id: operationId,
       status: 'inspecting',
       output_path: outputPath,
       message: '正在抽帧质检...',
@@ -1528,8 +1542,8 @@ async function inspectDouyinRunHyperframesFreeformVideo(awemeId, runId, options 
   let normalizedSuccess = success;
   let contactSheetPath = result?.contact_sheet_path || '';
   let message = result?.message || (success ? '视频抽帧质检通过。' : '视频抽帧质检失败。');
+  const rootContactSheetPath = path.join(currentState.project_dir, 'contact_sheet.jpg');
   if (success) {
-    const rootContactSheetPath = path.join(currentState.project_dir, 'contact_sheet.jpg');
     if (contactSheetPath && path.resolve(contactSheetPath) !== path.resolve(rootContactSheetPath)) {
       try {
         await fsp.mkdir(path.dirname(rootContactSheetPath), { recursive: true });
@@ -1542,27 +1556,28 @@ async function inspectDouyinRunHyperframesFreeformVideo(awemeId, runId, options 
     } else if (!contactSheetPath && await pathExists(rootContactSheetPath)) {
       contactSheetPath = rootContactSheetPath;
     }
+    if (normalizedSuccess && !(await pathExists(rootContactSheetPath))) {
+      normalizedSuccess = false;
+      contactSheetPath = '';
+      message = '联系表文件不存在，无法生成预览。';
+    } else if (normalizedSuccess) {
+      contactSheetPath = rootContactSheetPath;
+    }
   }
-  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+  const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'visual_inspect', operationId, current => ({
     visual_inspect: {
       ...current.visual_inspect,
       status: normalizedSuccess ? 'passed' : 'failed',
       output_path: outputPath,
-      contact_sheet_path: normalizedSuccess ? contactSheetPath || current.visual_inspect.contact_sheet_path || '' : current.visual_inspect.contact_sheet_path || '',
-      contact_sheet_url: normalizedSuccess ? defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'contact_sheet.jpg') : current.visual_inspect.contact_sheet_url || '',
+      contact_sheet_path: normalizedSuccess ? contactSheetPath : '',
+      contact_sheet_url: normalizedSuccess ? defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'contact_sheet.jpg') : '',
       report,
       issues,
       message,
     },
   }), options);
 
-  return {
-    success: normalizedSuccess,
-    aweme_id: String(awemeId),
-    run_id: String(runId),
-    message,
-    hyperframes_freeform: updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
-  };
+  return createHyperframesFreeformOperationResponse(awemeId, runId, 'visual_inspect', updated, normalizedSuccess, message);
 }
 
 async function createDouyinStoryboardPlanRun(awemeId, options = {}) {
