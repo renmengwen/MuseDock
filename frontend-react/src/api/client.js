@@ -10,6 +10,19 @@ async function requestJson(url, options) {
   return data;
 }
 
+async function requestRaw(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    const data = await response.clone().json().catch(() => ({}));
+    const text = data.message || data.error ? '' : await response.text().catch(() => '');
+    const message = data.message || data.error || text || `Request failed: ${response.status}`;
+    const error = new Error(message);
+    error.data = data;
+    throw error;
+  }
+  return response;
+}
+
 export const api = {
   getCookies() {
     return requestJson('/api/config/cookies');
@@ -232,6 +245,53 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
+    });
+  },
+  generateHyperframesFreeformBrief(awemeId, runId, payload = {}) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes-freeform/brief`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+  generateHyperframesFreeformProject(awemeId, runId, payload = {}) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes-freeform/project`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+  checkHyperframesFreeformProject(awemeId, runId) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes-freeform/check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+  },
+  renderHyperframesFreeformProject(awemeId, runId, payload = {}) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes-freeform/render`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+  inspectHyperframesFreeformVideo(awemeId, runId) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes-freeform/inspect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+  },
+  getHyperframesFreeformFile(awemeId, runId, fileName) {
+    return requestRaw(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes-freeform/files/${encodeURIComponent(fileName)}`, {
+      method: 'GET',
+    });
+  },
+  saveHyperframesFreeformFile(awemeId, runId, fileName, content) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes-freeform/files/${encodeURIComponent(fileName)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
     });
   },
 };
