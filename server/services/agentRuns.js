@@ -1420,11 +1420,14 @@ function isHyperframesFreeformSectionSuccessful(section, state) {
 function createHyperframesFreeformOperationResponse(awemeId, runId, section, updated, fallbackSuccess, fallbackMessage) {
   const state = updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null;
   const sectionState = state?.[section] || {};
+  const finalMessage = sectionState.message || (updated.stale ? updated.message : '') || fallbackMessage;
   return {
-    success: updated.stale ? isHyperframesFreeformSectionSuccessful(section, state) : fallbackSuccess,
+    success: updated.success || updated.stale
+      ? isHyperframesFreeformSectionSuccessful(section, state)
+      : fallbackSuccess,
     aweme_id: String(awemeId),
     run_id: String(runId),
-    message: updated.stale ? (sectionState.message || updated.message || fallbackMessage) : fallbackMessage,
+    message: finalMessage,
     hyperframes_freeform: state,
   };
 }

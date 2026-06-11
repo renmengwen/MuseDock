@@ -1610,6 +1610,67 @@ async function run() {
   assert.equal(sheetRaceDisk.hyperframes_freeform.visual_inspect.contact_sheet_url, '/new-contact-sheet.jpg');
   assert.equal(fs.readFileSync(sheetRaceRootContactSheetPath, 'utf-8'), 'new sheet');
 
+  const freeformInspectPublishFailRunId = `${generated.run_id}-freeform-inspect-publish-fail`;
+  const freeformInspectPublishFailProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${freeformInspectPublishFailRunId}-hyperframes-freeform`);
+  fs.mkdirSync(freeformInspectPublishFailProjectDir, { recursive: true });
+  const freeformInspectPublishFailOutputPath = path.join(freeformInspectPublishFailProjectDir, 'output.mp4');
+  const freeformInspectPublishFailSheetPath = path.join(freeformInspectPublishFailProjectDir, 'inspect', 'contact_sheet.jpg');
+  fs.writeFileSync(freeformInspectPublishFailOutputPath, 'fake freeform mp4');
+  fs.mkdirSync(path.dirname(freeformInspectPublishFailSheetPath), { recursive: true });
+  fs.writeFileSync(freeformInspectPublishFailSheetPath, 'candidate sheet');
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${freeformInspectPublishFailRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: freeformInspectPublishFailRunId,
+    hyperframes_freeform: {
+      ...freeformInspect.hyperframes_freeform,
+      project_dir: freeformInspectPublishFailProjectDir,
+      render: {
+        ...freeformInspect.hyperframes_freeform.render,
+        output_path: freeformInspectPublishFailOutputPath,
+      },
+      visual_inspect: {
+        ...freeformInspect.hyperframes_freeform.visual_inspect,
+        contact_sheet_path: '/stale/contact_sheet.jpg',
+        contact_sheet_url: '/stale/contact_sheet.jpg',
+      },
+    },
+  });
+  const originalCopyFile = fs.promises.copyFile;
+  let copyFilePatched = false;
+  let freeformInspectPublishFail;
+  try {
+    fs.promises.copyFile = async (source, target) => {
+      if (source === freeformInspectPublishFailSheetPath && target === path.join(freeformInspectPublishFailProjectDir, 'contact_sheet.jpg')) {
+        copyFilePatched = true;
+        throw new Error('copy failed during publish');
+      }
+      return originalCopyFile(source, target);
+    };
+    freeformInspectPublishFail = await agentRuns.inspectDouyinRunHyperframesFreeformVideo(awemeId, freeformInspectPublishFailRunId, {
+      rootDir,
+      hyperframesFreeformQuality: {
+        inspectRenderedVideo: async () => ({
+          success: true,
+          contact_sheet_path: freeformInspectPublishFailSheetPath,
+          report: { success: true, issues: [] },
+          message: '抽帧完成',
+        }),
+      },
+    });
+  } finally {
+    fs.promises.copyFile = originalCopyFile;
+  }
+  assert.equal(copyFilePatched, true);
+  assert.equal(freeformInspectPublishFail.success, false);
+  assert.match(freeformInspectPublishFail.message, /联系表预览文件准备失败|copy failed during publish/);
+  assert.equal(freeformInspectPublishFail.hyperframes_freeform.visual_inspect.status, 'failed');
+  assert.equal(freeformInspectPublishFail.hyperframes_freeform.visual_inspect.contact_sheet_path, '');
+  assert.equal(freeformInspectPublishFail.hyperframes_freeform.visual_inspect.contact_sheet_url, '');
+  const freeformInspectPublishFailDisk = JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${freeformInspectPublishFailRunId}.json`), 'utf-8'));
+  assert.equal(freeformInspectPublishFailDisk.hyperframes_freeform.visual_inspect.status, 'failed');
+  assert.equal(freeformInspectPublishFailDisk.hyperframes_freeform.visual_inspect.contact_sheet_path, '');
+  assert.equal(freeformInspectPublishFailDisk.hyperframes_freeform.visual_inspect.contact_sheet_url, '');
+
   const freeformInspectMissingSheetRunId = `${generated.run_id}-freeform-inspect-missing-sheet`;
   const freeformInspectMissingSheetProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${freeformInspectMissingSheetRunId}-hyperframes-freeform`);
   fs.mkdirSync(freeformInspectMissingSheetProjectDir, { recursive: true });
