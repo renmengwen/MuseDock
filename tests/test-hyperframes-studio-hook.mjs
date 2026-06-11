@@ -8,6 +8,11 @@ const hookPath = path.join(__dirname, '../frontend-react/src/hooks/useHyperframe
 const source = fs.readFileSync(hookPath, 'utf-8');
 
 assert.match(source, /export function useHyperframesStudio\s*\(/, 'missing useHyperframesStudio export');
+assert.match(
+  source,
+  /export function useHyperframesStudio\s*\(\s*\{\s*initialAwemeId\s*=\s*['"]{2}\s*,\s*initialRunId\s*=\s*['"]{2}\s*\}\s*=\s*\{\s*\}\s*\)/,
+  'useHyperframesStudio should accept an options object with default initialAwemeId and initialRunId',
+);
 
 for (const action of [
   'generateBrief',

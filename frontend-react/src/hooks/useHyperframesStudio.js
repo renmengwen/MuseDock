@@ -19,7 +19,7 @@ function normalizeRunList(json) {
   return Array.isArray(json?.data) ? json.data : [];
 }
 
-export function useHyperframesStudio(initialAwemeId = '', initialRunId = '') {
+export function useHyperframesStudio({ initialAwemeId = '', initialRunId = '' } = {}) {
   const [awemeId, setAwemeId] = useState(initialAwemeId);
   const [runId, setRunId] = useState(initialRunId);
   const [runs, setRuns] = useState([]);
