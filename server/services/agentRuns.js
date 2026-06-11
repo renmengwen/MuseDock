@@ -776,15 +776,57 @@ async function removePathBestEffort(targetPath) {
   }
 }
 
-async function publishFreeformProjectDirectory({ tempDir, finalDir }) {
-  await fsp.rm(finalDir, { recursive: true, force: true });
-  await fsp.mkdir(path.dirname(finalDir), { recursive: true });
+async function pathExists(targetPath) {
   try {
+    await fsp.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function publishFreeformProjectDirectory({ tempDir, finalDir, operationId }) {
+  const backupDir = `${finalDir}.backup-${operationId || crypto.randomBytes(3).toString('hex')}`;
+  let hasBackup = false;
+  await fsp.mkdir(path.dirname(finalDir), { recursive: true });
+
+  try {
+    await fsp.rm(backupDir, { recursive: true, force: true });
+    if (await pathExists(finalDir)) {
+      await fsp.rename(finalDir, backupDir);
+      hasBackup = true;
+    }
     await fsp.rename(tempDir, finalDir);
+    if (hasBackup) await removePathBestEffort(backupDir);
   } catch (error) {
-    if (error && error.code !== 'EXDEV') throw error;
-    await fsp.cp(tempDir, finalDir, { recursive: true });
-    await removePathBestEffort(tempDir);
+    if (!error || error.code !== 'EXDEV') {
+      try {
+        if (!(await pathExists(finalDir)) && hasBackup && await pathExists(backupDir)) {
+          await fsp.rename(backupDir, finalDir);
+          hasBackup = false;
+        }
+      } catch {
+        // Restore is best-effort; the thrown publish error below remains the actionable failure.
+      }
+      throw new Error(`HyperFrames 工程发布失败：${error?.message || '无法替换正式工程目录'}`);
+    }
+
+    try {
+      await fsp.cp(tempDir, finalDir, { recursive: true });
+      await removePathBestEffort(tempDir);
+      if (hasBackup) await removePathBestEffort(backupDir);
+    } catch (copyError) {
+      try {
+        await removePathBestEffort(finalDir);
+        if (hasBackup && await pathExists(backupDir)) {
+          await fsp.rename(backupDir, finalDir);
+          hasBackup = false;
+        }
+      } catch {
+        // Restore is best-effort; report the original copy failure clearly.
+      }
+      throw new Error(`HyperFrames 工程发布失败：${copyError.message || '无法复制正式工程目录'}`);
+    }
   }
 }
 
@@ -1172,7 +1214,7 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
         };
       }
 
-      await publishFreeformProjectDirectory({ tempDir: tempProjectDir, finalDir: projectDir });
+      await publishFreeformProjectDirectory({ tempDir: tempProjectDir, finalDir: projectDir, operationId });
       const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, {
         status: 'ready',
         project_dir: projectDir,

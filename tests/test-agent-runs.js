@@ -1214,6 +1214,63 @@ async function run() {
   assert.equal(fs.readFileSync(path.join(staleProjectDir, 'index.html'), 'utf-8'), 'new');
   assert.equal(fs.existsSync(path.join(rootDir, awemeId, 'agent_runs', `${staleProjectTempRunId}-hyperframes-freeform`)), false);
 
+  const publishFailRunId = `${generated.run_id}-publish-fail`;
+  const publishFailRunPath = path.join(rootDir, awemeId, 'agent_runs', `${publishFailRunId}.json`);
+  const publishFailDir = path.join(rootDir, awemeId, 'agent_runs', `${publishFailRunId}-hyperframes-freeform`);
+  await writeJson(publishFailRunPath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: publishFailRunId,
+    hyperframes_freeform: {
+      ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')).hyperframes_freeform,
+      project_dir: publishFailDir,
+      project: {
+        status: 'ready',
+        index_path: path.join(publishFailDir, 'index.html'),
+        files: [{ name: 'index.html', path: path.join(publishFailDir, 'index.html') }],
+        message: '上一版工程可用',
+      },
+    },
+  });
+  fs.mkdirSync(publishFailDir, { recursive: true });
+  fs.writeFileSync(path.join(publishFailDir, 'index.html'), 'old-working', 'utf-8');
+  const publishFail = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, publishFailRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+    },
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        text: JSON.stringify({
+          summary: '新工程',
+          files: { 'index.html': 'new-broken' },
+        }),
+      }),
+    },
+    hyperframesFreeformProject: {
+      createFreeformProject: async ({ runId }) => {
+        const tempDir = path.join(rootDir, awemeId, 'agent_runs', `${runId}-hyperframes-freeform`);
+        fs.mkdirSync(tempDir, { recursive: true });
+        fs.writeFileSync(path.join(tempDir, 'index.html'), 'new-broken', 'utf-8');
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        return {
+          success: true,
+          projectDir: tempDir,
+          files: [{ name: 'index.html', path: path.join(tempDir, 'index.html') }],
+          message: '新工程临时目录已损坏',
+        };
+      },
+    },
+  });
+  assert.equal(publishFail.success, false);
+  assert.match(publishFail.message, /发布失败/);
+  assert.equal(fs.readFileSync(path.join(publishFailDir, 'index.html'), 'utf-8'), 'old-working');
+  const publishFailDisk = JSON.parse(fs.readFileSync(publishFailRunPath, 'utf-8'));
+  assert.equal(publishFailDisk.hyperframes_freeform.status, 'failed');
+  assert.equal(publishFailDisk.hyperframes_freeform.project.status, 'failed');
+  assert.equal(publishFailDisk.hyperframes_freeform.project_dir, publishFailDir);
+  assert.equal(publishFailDisk.hyperframes_freeform.project.index_path, path.join(publishFailDir, 'index.html'));
+
   const freeformProject = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, generated.run_id, {
     rootDir,
     skillContext: {
