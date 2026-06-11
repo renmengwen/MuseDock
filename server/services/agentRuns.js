@@ -767,6 +767,42 @@ async function updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, se
   });
 }
 
+async function updateRunHyperframesFreeformIfOperationCurrentAnd(awemeId, runId, section, operationId, predicate, updater, options = {}) {
+  return withRunUpdateQueue(awemeId, runId, options, async () => {
+    const detail = await getDouyinAgentRun(awemeId, runId, options);
+    if (!detail.success) return detail;
+
+    const current = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
+    if (current?.[section]?.operation_id !== operationId || !predicate(current, detail.data)) {
+      return {
+        success: false,
+        stale: true,
+        aweme_id: String(awemeId),
+        run_id: String(runId),
+        message: '已有更新的生成任务完成，已忽略旧结果。',
+        run: detail.data,
+        hyperframes_freeform: current,
+      };
+    }
+
+    const patch = typeof updater === 'function' ? updater(current, detail.data) : updater;
+    const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, patch));
+    const updatedRun = {
+      ...detail.data,
+      hyperframes_freeform: nextState,
+      updated_at: new Date().toISOString(),
+    };
+    const runPath = getRunPath(awemeId, runId, options.rootDir);
+    await writeJson(runPath, updatedRun);
+    return {
+      success: true,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      data: updatedRun,
+    };
+  });
+}
+
 async function removePathBestEffort(targetPath) {
   if (!targetPath) return;
   try {
@@ -1393,6 +1429,10 @@ function createHyperframesFreeformOperationResponse(awemeId, runId, section, upd
   };
 }
 
+function areSameResolvedPath(left, right) {
+  return path.resolve(String(left || '')) === path.resolve(String(right || ''));
+}
+
 async function checkDouyinRunHyperframesFreeformProject(awemeId, runId, options = {}) {
   const detail = await getDouyinAgentRun(awemeId, runId, options);
   if (!detail.success) return detail;
@@ -1564,18 +1604,26 @@ async function inspectDouyinRunHyperframesFreeformVideo(awemeId, runId, options 
       contactSheetPath = rootContactSheetPath;
     }
   }
-  const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'visual_inspect', operationId, current => ({
-    visual_inspect: {
-      ...current.visual_inspect,
-      status: normalizedSuccess ? 'passed' : 'failed',
-      output_path: outputPath,
-      contact_sheet_path: normalizedSuccess ? contactSheetPath : '',
-      contact_sheet_url: normalizedSuccess ? defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'contact_sheet.jpg') : '',
-      report,
-      issues,
-      message,
-    },
-  }), options);
+  const updated = await updateRunHyperframesFreeformIfOperationCurrentAnd(
+    awemeId,
+    runId,
+    'visual_inspect',
+    operationId,
+    current => areSameResolvedPath(current.render?.output_path || path.join(current.project_dir, 'output.mp4'), outputPath),
+    current => ({
+      visual_inspect: {
+        ...current.visual_inspect,
+        status: normalizedSuccess ? 'passed' : 'failed',
+        output_path: outputPath,
+        contact_sheet_path: normalizedSuccess ? contactSheetPath : '',
+        contact_sheet_url: normalizedSuccess ? defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'contact_sheet.jpg') : '',
+        report,
+        issues,
+        message,
+      },
+    }),
+    options,
+  );
 
   return createHyperframesFreeformOperationResponse(awemeId, runId, 'visual_inspect', updated, normalizedSuccess, message);
 }
