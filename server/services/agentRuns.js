@@ -749,7 +749,7 @@ async function updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, se
       };
     }
 
-    const patch = typeof updater === 'function' ? updater(current, detail.data) : updater;
+    const patch = typeof updater === 'function' ? await updater(current, detail.data) : updater;
     const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, patch));
     const updatedRun = {
       ...detail.data,
@@ -785,7 +785,7 @@ async function updateRunHyperframesFreeformIfOperationCurrentAnd(awemeId, runId,
       };
     }
 
-    const patch = typeof updater === 'function' ? updater(current, detail.data) : updater;
+    const patch = typeof updater === 'function' ? await updater(current, detail.data) : updater;
     const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, patch));
     const updatedRun = {
       ...detail.data,
@@ -1580,28 +1580,16 @@ async function inspectDouyinRunHyperframesFreeformVideo(awemeId, runId, options 
       ? result.issues
       : [];
   let normalizedSuccess = success;
-  let contactSheetPath = result?.contact_sheet_path || '';
+  const candidateContactSheetPath = result?.contact_sheet_path || '';
   let message = result?.message || (success ? '视频抽帧质检通过。' : '视频抽帧质检失败。');
   const rootContactSheetPath = path.join(currentState.project_dir, 'contact_sheet.jpg');
   if (success) {
-    if (contactSheetPath && path.resolve(contactSheetPath) !== path.resolve(rootContactSheetPath)) {
-      try {
-        await fsp.mkdir(path.dirname(rootContactSheetPath), { recursive: true });
-        await fsp.copyFile(contactSheetPath, rootContactSheetPath);
-        contactSheetPath = rootContactSheetPath;
-      } catch (error) {
-        normalizedSuccess = false;
-        message = `联系表预览文件准备失败：${error.message || '未知错误'}`;
-      }
-    } else if (!contactSheetPath && await pathExists(rootContactSheetPath)) {
-      contactSheetPath = rootContactSheetPath;
-    }
-    if (normalizedSuccess && !(await pathExists(rootContactSheetPath))) {
+    const hasCandidateContactSheet = candidateContactSheetPath
+      ? await pathExists(candidateContactSheetPath)
+      : await pathExists(rootContactSheetPath);
+    if (!hasCandidateContactSheet) {
       normalizedSuccess = false;
-      contactSheetPath = '';
       message = '联系表文件不存在，无法生成预览。';
-    } else if (normalizedSuccess) {
-      contactSheetPath = rootContactSheetPath;
     }
   }
   const updated = await updateRunHyperframesFreeformIfOperationCurrentAnd(
@@ -1610,18 +1598,37 @@ async function inspectDouyinRunHyperframesFreeformVideo(awemeId, runId, options 
     'visual_inspect',
     operationId,
     current => areSameResolvedPath(current.render?.output_path || path.join(current.project_dir, 'output.mp4'), outputPath),
-    current => ({
-      visual_inspect: {
-        ...current.visual_inspect,
-        status: normalizedSuccess ? 'passed' : 'failed',
-        output_path: outputPath,
-        contact_sheet_path: normalizedSuccess ? contactSheetPath : '',
-        contact_sheet_url: normalizedSuccess ? defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'contact_sheet.jpg') : '',
-        report,
-        issues,
-        message,
-      },
-    }),
+    async current => {
+      let finalSuccess = normalizedSuccess;
+      let finalMessage = message;
+      if (finalSuccess) {
+        try {
+          await fsp.mkdir(path.dirname(rootContactSheetPath), { recursive: true });
+          if (candidateContactSheetPath && !areSameResolvedPath(candidateContactSheetPath, rootContactSheetPath)) {
+            await fsp.copyFile(candidateContactSheetPath, rootContactSheetPath);
+          }
+          if (!(await pathExists(rootContactSheetPath))) {
+            finalSuccess = false;
+            finalMessage = '联系表文件不存在，无法生成预览。';
+          }
+        } catch (error) {
+          finalSuccess = false;
+          finalMessage = `联系表预览文件准备失败：${error.message || '未知错误'}`;
+        }
+      }
+      return {
+        visual_inspect: {
+          ...current.visual_inspect,
+          status: finalSuccess ? 'passed' : 'failed',
+          output_path: outputPath,
+          contact_sheet_path: finalSuccess ? rootContactSheetPath : '',
+          contact_sheet_url: finalSuccess ? defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'contact_sheet.jpg') : '',
+          report,
+          issues,
+          message: finalMessage,
+        },
+      };
+    },
     options,
   );
 

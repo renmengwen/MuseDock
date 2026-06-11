@@ -1540,6 +1540,76 @@ async function run() {
   assert.notEqual(staleInspectDisk.hyperframes_freeform.visual_inspect.output_path, oldInspectOutputPath);
   assert.equal(staleInspectDisk.hyperframes_freeform.visual_inspect.contact_sheet_url, '');
 
+  const freeformInspectSheetRaceRunId = `${generated.run_id}-freeform-inspect-sheet-race`;
+  const freeformInspectSheetRacePath = path.join(rootDir, awemeId, 'agent_runs', `${freeformInspectSheetRaceRunId}.json`);
+  const freeformInspectSheetRaceProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${freeformInspectSheetRaceRunId}-hyperframes-freeform`);
+  fs.mkdirSync(freeformInspectSheetRaceProjectDir, { recursive: true });
+  const sheetRaceOldOutputPath = path.join(freeformInspectSheetRaceProjectDir, 'old-output.mp4');
+  const sheetRaceNewOutputPath = path.join(freeformInspectSheetRaceProjectDir, 'new-output.mp4');
+  const sheetRaceRootContactSheetPath = path.join(freeformInspectSheetRaceProjectDir, 'contact_sheet.jpg');
+  fs.writeFileSync(sheetRaceOldOutputPath, 'old freeform mp4');
+  fs.writeFileSync(sheetRaceNewOutputPath, 'new freeform mp4');
+  fs.writeFileSync(sheetRaceRootContactSheetPath, 'new sheet');
+  await writeJson(freeformInspectSheetRacePath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: freeformInspectSheetRaceRunId,
+    hyperframes_freeform: {
+      ...freeformInspect.hyperframes_freeform,
+      project_dir: freeformInspectSheetRaceProjectDir,
+      render: {
+        ...freeformInspect.hyperframes_freeform.render,
+        operation_id: '',
+        status: 'rendered',
+        output_path: sheetRaceOldOutputPath,
+        output_url: '/old-output.mp4',
+      },
+      visual_inspect: {
+        ...freeformInspect.hyperframes_freeform.visual_inspect,
+        operation_id: '',
+        status: 'idle',
+        output_path: '',
+        contact_sheet_path: '',
+        contact_sheet_url: '',
+        message: '',
+      },
+    },
+  });
+  const sheetRaceResult = await agentRuns.inspectDouyinRunHyperframesFreeformVideo(awemeId, freeformInspectSheetRaceRunId, {
+    rootDir,
+    hyperframesFreeformQuality: {
+      inspectRenderedVideo: async ({ projectDir }) => {
+        const staleRun = JSON.parse(fs.readFileSync(freeformInspectSheetRacePath, 'utf-8'));
+        staleRun.hyperframes_freeform.render.operation_id = 'newer-render-before-old-inspect-finished';
+        staleRun.hyperframes_freeform.render.status = 'rendered';
+        staleRun.hyperframes_freeform.render.output_path = sheetRaceNewOutputPath;
+        staleRun.hyperframes_freeform.render.output_url = '/new-output.mp4';
+        staleRun.hyperframes_freeform.visual_inspect.operation_id = 'newer-inspect-operation';
+        staleRun.hyperframes_freeform.visual_inspect.status = 'passed';
+        staleRun.hyperframes_freeform.visual_inspect.output_path = sheetRaceNewOutputPath;
+        staleRun.hyperframes_freeform.visual_inspect.contact_sheet_path = sheetRaceRootContactSheetPath;
+        staleRun.hyperframes_freeform.visual_inspect.contact_sheet_url = '/new-contact-sheet.jpg';
+        staleRun.hyperframes_freeform.visual_inspect.message = '新视频质检通过';
+        await writeJson(freeformInspectSheetRacePath, staleRun);
+        const oldSheetPath = path.join(projectDir, 'inspect-old-race', 'contact_sheet.jpg');
+        fs.mkdirSync(path.dirname(oldSheetPath), { recursive: true });
+        fs.writeFileSync(oldSheetPath, 'old sheet');
+        return { success: true, contact_sheet_path: oldSheetPath, report: { success: true, issues: [] }, message: '旧视频抽帧完成' };
+      },
+    },
+  });
+  assert.equal(sheetRaceResult.success, true);
+  assert.equal(fs.readFileSync(sheetRaceRootContactSheetPath, 'utf-8'), 'new sheet');
+  assert.equal(sheetRaceResult.hyperframes_freeform.visual_inspect.status, 'passed');
+  assert.equal(sheetRaceResult.hyperframes_freeform.visual_inspect.output_path, sheetRaceNewOutputPath);
+  assert.equal(sheetRaceResult.hyperframes_freeform.visual_inspect.contact_sheet_path, sheetRaceRootContactSheetPath);
+  assert.equal(sheetRaceResult.hyperframes_freeform.visual_inspect.contact_sheet_url, '/new-contact-sheet.jpg');
+  const sheetRaceDisk = JSON.parse(fs.readFileSync(freeformInspectSheetRacePath, 'utf-8'));
+  assert.equal(sheetRaceDisk.hyperframes_freeform.render.output_path, sheetRaceNewOutputPath);
+  assert.equal(sheetRaceDisk.hyperframes_freeform.visual_inspect.status, 'passed');
+  assert.equal(sheetRaceDisk.hyperframes_freeform.visual_inspect.output_path, sheetRaceNewOutputPath);
+  assert.equal(sheetRaceDisk.hyperframes_freeform.visual_inspect.contact_sheet_url, '/new-contact-sheet.jpg');
+  assert.equal(fs.readFileSync(sheetRaceRootContactSheetPath, 'utf-8'), 'new sheet');
+
   const freeformInspectMissingSheetRunId = `${generated.run_id}-freeform-inspect-missing-sheet`;
   const freeformInspectMissingSheetProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${freeformInspectMissingSheetRunId}-hyperframes-freeform`);
   fs.mkdirSync(freeformInspectMissingSheetProjectDir, { recursive: true });
