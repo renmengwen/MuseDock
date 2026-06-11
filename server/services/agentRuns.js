@@ -776,6 +776,48 @@ async function removePathBestEffort(targetPath) {
   }
 }
 
+function getAgentRunsRootDir(awemeId, rootDir) {
+  return path.resolve(getAgentRunsDir(awemeId, rootDir));
+}
+
+function isPathInside(parentPath, childPath) {
+  const parent = path.resolve(parentPath);
+  const child = path.resolve(childPath);
+  const relative = path.relative(parent, child);
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
+function validateFreeformTempProjectDir({ tempDir, finalDir, awemeId, rootDir, tempRunId, operationId }) {
+  const tempPath = path.resolve(String(tempDir || ''));
+  const finalPath = path.resolve(String(finalDir || ''));
+  if (!tempPath || tempPath === finalPath) {
+    throw new Error('HyperFrames 临时工程目录不安全：不能使用正式工程目录。');
+  }
+
+  const agentRunsRoot = getAgentRunsRootDir(awemeId, rootDir);
+  if (!isPathInside(agentRunsRoot, tempPath)) {
+    throw new Error('HyperFrames 临时工程目录不安全：目录不在当前运行目录内。');
+  }
+
+  const baseName = path.basename(tempPath);
+  if (!baseName.includes(String(tempRunId || '')) || !baseName.includes(String(operationId || ''))) {
+    throw new Error('HyperFrames 临时工程目录不安全：目录不属于当前生成任务。');
+  }
+
+  return tempPath;
+}
+
+async function cleanupFreeformTempProjectDir(context) {
+  let tempPath;
+  try {
+    tempPath = validateFreeformTempProjectDir(context);
+  } catch {
+    return false;
+  }
+  await removePathBestEffort(tempPath);
+  return true;
+}
+
 async function pathExists(targetPath) {
   try {
     await fsp.access(targetPath);
@@ -785,7 +827,8 @@ async function pathExists(targetPath) {
   }
 }
 
-async function publishFreeformProjectDirectory({ tempDir, finalDir, operationId }) {
+async function publishFreeformProjectDirectory({ tempDir, finalDir, operationId, awemeId, rootDir, tempRunId }) {
+  const safeTempDir = validateFreeformTempProjectDir({ tempDir, finalDir, awemeId, rootDir, tempRunId, operationId });
   const backupDir = `${finalDir}.backup-${operationId || crypto.randomBytes(3).toString('hex')}`;
   let hasBackup = false;
   await fsp.mkdir(path.dirname(finalDir), { recursive: true });
@@ -796,7 +839,7 @@ async function publishFreeformProjectDirectory({ tempDir, finalDir, operationId 
       await fsp.rename(finalDir, backupDir);
       hasBackup = true;
     }
-    await fsp.rename(tempDir, finalDir);
+    await fsp.rename(safeTempDir, finalDir);
     if (hasBackup) await removePathBestEffort(backupDir);
   } catch (error) {
     if (!error || error.code !== 'EXDEV') {
@@ -812,8 +855,8 @@ async function publishFreeformProjectDirectory({ tempDir, finalDir, operationId 
     }
 
     try {
-      await fsp.cp(tempDir, finalDir, { recursive: true });
-      await removePathBestEffort(tempDir);
+      await fsp.cp(safeTempDir, finalDir, { recursive: true });
+      await cleanupFreeformTempProjectDir({ tempDir: safeTempDir, finalDir, awemeId, rootDir, tempRunId, operationId });
       if (hasBackup) await removePathBestEffort(backupDir);
     } catch (copyError) {
       try {
@@ -1173,6 +1216,25 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   }
 
   const tempProjectDir = created.project_dir || created.projectDir;
+  try {
+    validateFreeformTempProjectDir({
+      tempDir: tempProjectDir,
+      finalDir: defaultHyperframesFreeformProject.getFreeformProjectDir(awemeId, runId, options.rootDir),
+      awemeId,
+      rootDir: options.rootDir,
+      tempRunId,
+      operationId,
+    });
+  } catch (error) {
+    return markFreeformProjectFailed(
+      awemeId,
+      runId,
+      error.message || 'HyperFrames 临时工程目录不安全。',
+      options,
+      operationId,
+    );
+  }
+
   let snapshotMessage = '';
   if (context.source_dir && typeof skillContext.copySkillSnapshot === 'function') {
     let snapshot;
@@ -1214,7 +1276,14 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
         };
       }
 
-      await publishFreeformProjectDirectory({ tempDir: tempProjectDir, finalDir: projectDir, operationId });
+      await publishFreeformProjectDirectory({
+        tempDir: tempProjectDir,
+        finalDir: projectDir,
+        operationId,
+        awemeId,
+        rootDir: options.rootDir,
+        tempRunId,
+      });
       const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, {
         status: 'ready',
         project_dir: projectDir,
@@ -1241,7 +1310,14 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
       };
     });
   } catch (error) {
-    await removePathBestEffort(tempProjectDir);
+    await cleanupFreeformTempProjectDir({
+      tempDir: tempProjectDir,
+      finalDir: projectDir,
+      awemeId,
+      rootDir: options.rootDir,
+      tempRunId,
+      operationId,
+    });
     return markFreeformProjectFailed(
       awemeId,
       runId,
@@ -1252,7 +1328,16 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   }
 
   if (!updated.success) {
-    if (updated.stale) await removePathBestEffort(tempProjectDir);
+    if (updated.stale) {
+      await cleanupFreeformTempProjectDir({
+        tempDir: tempProjectDir,
+        finalDir: projectDir,
+        awemeId,
+        rootDir: options.rootDir,
+        tempRunId,
+        operationId,
+      });
+    }
     return {
       success: false,
       aweme_id: String(awemeId),

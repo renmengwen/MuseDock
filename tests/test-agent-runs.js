@@ -1271,6 +1271,58 @@ async function run() {
   assert.equal(publishFailDisk.hyperframes_freeform.project_dir, publishFailDir);
   assert.equal(publishFailDisk.hyperframes_freeform.project.index_path, path.join(publishFailDir, 'index.html'));
 
+  const unsafeTempRunId = `${generated.run_id}-unsafe-temp`;
+  const unsafeTempRunPath = path.join(rootDir, awemeId, 'agent_runs', `${unsafeTempRunId}.json`);
+  const unsafeTempDir = path.join(rootDir, awemeId, 'agent_runs', `${unsafeTempRunId}-hyperframes-freeform`);
+  await writeJson(unsafeTempRunPath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: unsafeTempRunId,
+    hyperframes_freeform: {
+      ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')).hyperframes_freeform,
+      project_dir: unsafeTempDir,
+      project: {
+        status: 'ready',
+        index_path: path.join(unsafeTempDir, 'index.html'),
+        files: [{ name: 'index.html', path: path.join(unsafeTempDir, 'index.html') }],
+        message: '上一版工程可用',
+      },
+    },
+  });
+  fs.mkdirSync(unsafeTempDir, { recursive: true });
+  fs.writeFileSync(path.join(unsafeTempDir, 'index.html'), 'old-safe', 'utf-8');
+  const unsafeTempResult = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, unsafeTempRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+    },
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        text: JSON.stringify({
+          summary: '错误临时目录',
+          files: { 'index.html': 'should-not-delete-final' },
+        }),
+      }),
+    },
+    hyperframesFreeformProject: {
+      createFreeformProject: async () => {
+        const run = JSON.parse(fs.readFileSync(unsafeTempRunPath, 'utf-8'));
+        run.hyperframes_freeform.project.operation_id = 'newer-unsafe-temp-operation';
+        run.hyperframes_freeform.project.message = '较新的工程仍然可用';
+        await writeJson(unsafeTempRunPath, run);
+        return {
+          success: true,
+          projectDir: unsafeTempDir,
+          files: [{ name: 'index.html', path: path.join(unsafeTempDir, 'index.html') }],
+          message: '错误返回正式目录',
+        };
+      },
+    },
+  });
+  assert.equal(unsafeTempResult.success, false);
+  assert.match(unsafeTempResult.message, /忽略旧结果|临时目录/);
+  assert.equal(fs.readFileSync(path.join(unsafeTempDir, 'index.html'), 'utf-8'), 'old-safe');
+
   const freeformProject = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, generated.run_id, {
     rootDir,
     skillContext: {
