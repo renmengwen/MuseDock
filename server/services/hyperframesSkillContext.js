@@ -1,0 +1,144 @@
+const fs = require('fs');
+const path = require('path');
+
+const INCLUDED_REFERENCE_FILES = [
+  'captions.md',
+  'typography.md',
+  'motion-principles.md',
+  'video-composition.md',
+  'transitions.md',
+];
+
+function safeString(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  return String(value).replace(/\r\n?/g, '\n').trim();
+}
+
+function hasSkillFile(dir) {
+  return Boolean(dir) && fs.existsSync(path.join(dir, 'SKILL.md'));
+}
+
+function resolveHyperframesSkillDir({ skillRoot = '', env = process.env } = {}) {
+  const candidates = [
+    skillRoot,
+    env.HYPERFRAMES_SKILL_ROOT,
+    path.join(process.cwd(), 'server', 'resources', 'hyperframes-skills'),
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = safeString(candidate);
+    if (!normalized) {
+      continue;
+    }
+
+    const resolved = path.resolve(normalized);
+    if (hasSkillFile(resolved)) {
+      return resolved;
+    }
+
+    const nested = path.join(resolved, 'hyperframes');
+    if (hasSkillFile(nested)) {
+      return nested;
+    }
+  }
+
+  return '';
+}
+
+function readIfExists(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return '';
+  }
+  return fs.readFileSync(filePath, 'utf-8');
+}
+
+async function loadHyperframesSkillContext({
+  skillRoot = '',
+  maxChars = 12000,
+  env = process.env,
+} = {}) {
+  const sourceDir = resolveHyperframesSkillDir({ skillRoot, env });
+  if (!sourceDir) {
+    return {
+      success: false,
+      message: '未找到 HyperFrames skill，请在设置中配置 skill 目录，或使用项目内置模板。',
+      source_dir: '',
+      prompt_context: '',
+    };
+  }
+
+  const chunks = [];
+  const skillText = safeString(readIfExists(path.join(sourceDir, 'SKILL.md')));
+  if (skillText) {
+    chunks.push(`# SKILL.md\n\n${skillText}`);
+  }
+
+  const referencesDir = path.join(sourceDir, 'references');
+  const referenceFiles = [...INCLUDED_REFERENCE_FILES].sort();
+  for (const fileName of referenceFiles) {
+    const referenceText = safeString(readIfExists(path.join(referencesDir, fileName)));
+    if (referenceText) {
+      chunks.push(`## references/${fileName}\n\n${referenceText}`);
+    }
+  }
+
+  const limit = Number.isFinite(Number(maxChars)) && Number(maxChars) > 0
+    ? Number(maxChars)
+    : 12000;
+  const promptContext = safeString(chunks.join('\n\n')).slice(0, limit);
+
+  return {
+    success: true,
+    message: 'HyperFrames skill 上下文已读取。',
+    source_dir: sourceDir,
+    prompt_context: promptContext,
+  };
+}
+
+function copyDirLimited(source, target) {
+  fs.mkdirSync(target, { recursive: true });
+  const entries = fs.readdirSync(source, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (entry.name === 'node_modules' || entry.name === '.git') {
+      continue;
+    }
+
+    const sourcePath = path.join(source, entry.name);
+    const targetPath = path.join(target, entry.name);
+    if (entry.isDirectory()) {
+      copyDirLimited(sourcePath, targetPath);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(sourcePath, targetPath);
+    }
+  }
+}
+
+async function copySkillSnapshot({ sourceDir, projectDir } = {}) {
+  const normalizedSource = safeString(sourceDir);
+  const normalizedProject = safeString(projectDir);
+  if (!normalizedSource || !normalizedProject || !hasSkillFile(normalizedSource)) {
+    return {
+      success: false,
+      message: '未找到可复制的 HyperFrames skill。',
+      target_dir: '',
+    };
+  }
+
+  const targetDir = path.join(path.resolve(normalizedProject), '.agents', 'skills', 'hyperframes');
+  copyDirLimited(path.resolve(normalizedSource), targetDir);
+
+  return {
+    success: true,
+    message: 'HyperFrames skill 快照已保存。',
+    target_dir: targetDir,
+  };
+}
+
+module.exports = {
+  resolveHyperframesSkillDir,
+  loadHyperframesSkillContext,
+  copySkillSnapshot,
+};
