@@ -99,6 +99,19 @@ async function run() {
     assert.match(unsafeLinkedTargetCopy.message, /不能复制到 HyperFrames skill 源目录内部/);
     assert.equal(fs.existsSync(path.join(skillDir, '.agents')), false);
   }
+
+  const projectWithLinkedAgents = path.join(root, 'project-with-linked-agents');
+  const linkedAgentsDir = path.join(projectWithLinkedAgents, '.agents');
+  fs.mkdirSync(projectWithLinkedAgents, { recursive: true });
+  if (tryCreateDirectoryLink(skillDir, linkedAgentsDir)) {
+    const unsafeLinkedParentCopy = await skillContext.copySkillSnapshot({
+      sourceDir: skillDir,
+      projectDir: projectWithLinkedAgents,
+    });
+    assert.equal(unsafeLinkedParentCopy.success, false);
+    assert.match(unsafeLinkedParentCopy.message, /不能复制到 HyperFrames skill 源目录内部/);
+    assert.equal(fs.existsSync(path.join(skillDir, 'skills')), false);
+  }
 }
 
 run().then(() => {

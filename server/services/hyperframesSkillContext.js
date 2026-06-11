@@ -68,14 +68,33 @@ function realpathIfExists(filePath) {
   return fs.realpathSync.native(filePath);
 }
 
+function resolveRealIntendedPath(filePath) {
+  const resolved = path.resolve(filePath);
+  if (fs.existsSync(resolved)) {
+    return fs.realpathSync.native(resolved);
+  }
+
+  const missingParts = [];
+  let current = resolved;
+  while (!fs.existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return resolved;
+    }
+    missingParts.unshift(path.basename(current));
+    current = parent;
+  }
+
+  return path.resolve(fs.realpathSync.native(current), ...missingParts);
+}
+
 function resolveSnapshotPaths(sourceDir, projectDir) {
   const sourceRoot = path.resolve(sourceDir);
   const projectRoot = path.resolve(projectDir);
   const targetRoot = path.resolve(projectRoot, '.agents', 'skills', 'hyperframes');
   const realSourceRoot = realpathIfExists(sourceRoot);
   const realProjectRoot = realpathIfExists(projectRoot);
-  const realTargetRoot = realpathIfExists(targetRoot)
-    || (realProjectRoot ? path.resolve(realProjectRoot, '.agents', 'skills', 'hyperframes') : '');
+  const realTargetRoot = resolveRealIntendedPath(targetRoot);
 
   return {
     sourceRoot,
