@@ -24,7 +24,7 @@ function resolveHyperframesSkillDir({ skillRoot = '', env = process.env } = {}) 
   const candidates = [
     skillRoot,
     env.HYPERFRAMES_SKILL_ROOT,
-    path.join(process.cwd(), 'server', 'resources', 'hyperframes-skills'),
+    path.resolve(__dirname, '..', 'resources', 'hyperframes-skills'),
   ];
 
   for (const candidate of candidates) {
@@ -52,6 +52,13 @@ function readIfExists(filePath) {
     return '';
   }
   return fs.readFileSync(filePath, 'utf-8');
+}
+
+function isSameOrInside(parentPath, childPath) {
+  const parent = path.resolve(parentPath);
+  const child = path.resolve(childPath);
+  const relative = path.relative(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 async function loadHyperframesSkillContext({
@@ -127,13 +134,24 @@ async function copySkillSnapshot({ sourceDir, projectDir } = {}) {
     };
   }
 
-  const targetDir = path.join(path.resolve(normalizedProject), '.agents', 'skills', 'hyperframes');
-  copyDirLimited(path.resolve(normalizedSource), targetDir);
+  const sourceRoot = path.resolve(normalizedSource);
+  const targetRoot = path.resolve(
+    path.join(normalizedProject, '.agents', 'skills', 'hyperframes'),
+  );
+  if (isSameOrInside(sourceRoot, targetRoot)) {
+    return {
+      success: false,
+      message: '不能复制到 HyperFrames skill 源目录内部，请选择其他项目目录。',
+      target_dir: targetRoot,
+    };
+  }
+
+  copyDirLimited(sourceRoot, targetRoot);
 
   return {
     success: true,
     message: 'HyperFrames skill 快照已保存。',
-    target_dir: targetDir,
+    target_dir: targetRoot,
   };
 }
 

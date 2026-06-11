@@ -27,6 +27,7 @@ async function run() {
 
   const missing = await skillContext.loadHyperframesSkillContext({
     skillRoot: path.join(root, 'missing'),
+    env: {},
   });
   assert.equal(missing.success, false);
   assert.match(missing.message, /未找到 HyperFrames skill/);
@@ -37,6 +38,30 @@ async function run() {
     projectDir,
   });
   assert.equal(fs.existsSync(path.join(projectDir, '.agents', 'skills', 'hyperframes', 'SKILL.md')), true);
+
+  const unsafeProjectDir = path.join(skillDir, 'nested-project');
+  const originalReaddirSync = fs.readdirSync;
+  let copyAttempted = false;
+  fs.readdirSync = function readdirSyncGuarded(targetPath, options) {
+    if (targetPath === path.resolve(skillDir)) {
+      copyAttempted = true;
+      throw new Error('copy should be rejected before reading source');
+    }
+    return originalReaddirSync.call(fs, targetPath, options);
+  };
+
+  try {
+    const unsafeCopy = await skillContext.copySkillSnapshot({
+      sourceDir: skillDir,
+      projectDir: unsafeProjectDir,
+    });
+    assert.equal(unsafeCopy.success, false);
+    assert.match(unsafeCopy.message, /不能复制到 HyperFrames skill 源目录内部/);
+    assert.equal(copyAttempted, false);
+    assert.equal(fs.existsSync(path.join(unsafeProjectDir, '.agents')), false);
+  } finally {
+    fs.readdirSync = originalReaddirSync;
+  }
 }
 
 run().then(() => {
