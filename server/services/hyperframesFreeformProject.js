@@ -13,12 +13,41 @@ const ALLOWED_FILES = new Set([
   'contact_sheet.jpg',
 ]);
 
+const TEXT_FILES = new Set([
+  'index.html',
+  'design.md',
+  'hyperframes.json',
+  'package.json',
+  'meta.json',
+]);
+
+const RUN_ID_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
+function normalizeRunId(runId) {
+  const safeRunId = String(runId || '');
+  if (
+    !safeRunId
+    || safeRunId.includes('..')
+    || safeRunId.includes('/')
+    || safeRunId.includes('\\')
+    || path.basename(safeRunId) !== safeRunId
+    || !RUN_ID_PATTERN.test(safeRunId)
+  ) {
+    throw new Error('非法的运行记录 ID。');
+  }
+  return safeRunId;
+}
+
 function getFreeformProjectDir(awemeId, runId, rootDir) {
-  return path.join(
-    mediaPipeline.getMediaDir(awemeId, rootDir),
-    'agent_runs',
-    `${runId}-hyperframes-freeform`,
-  );
+  const safeRunId = normalizeRunId(runId);
+  const mediaDir = mediaPipeline.getMediaDir(awemeId, rootDir);
+  const agentRunsDir = path.resolve(mediaDir, 'agent_runs');
+  const projectDir = path.resolve(agentRunsDir, `${safeRunId}-hyperframes-freeform`);
+  const relative = path.relative(agentRunsDir, projectDir);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('非法的运行记录 ID。');
+  }
+  return projectDir;
 }
 
 function resolveFreeformFile(projectDir, fileName) {
@@ -42,8 +71,17 @@ function resolveFreeformFile(projectDir, fileName) {
   return filePath;
 }
 
+function assertTextFileName(fileName) {
+  const normalizedName = String(fileName || '').replace(/\\/g, '/');
+  const basename = path.posix.basename(normalizedName);
+  if (!TEXT_FILES.has(basename)) {
+    throw new Error('不支持以文本方式访问该工程文件。');
+  }
+}
+
 async function writeFreeformFile({ projectDir, fileName, content = '' }) {
   const filePath = resolveFreeformFile(projectDir, fileName);
+  assertTextFileName(fileName);
   await fsp.mkdir(projectDir, { recursive: true });
   await fsp.writeFile(filePath, String(content), 'utf-8');
   return {
@@ -56,6 +94,7 @@ async function writeFreeformFile({ projectDir, fileName, content = '' }) {
 
 async function readFreeformFile({ projectDir, fileName }) {
   const filePath = resolveFreeformFile(projectDir, fileName);
+  assertTextFileName(fileName);
   if (!fs.existsSync(filePath)) {
     return {
       success: false,
@@ -87,7 +126,7 @@ async function listFreeformFiles(projectDir) {
         updated_at: stats.mtime.toISOString(),
       });
     } catch {
-      // Missing allowed files are simply omitted from the project listing.
+      // Missing allowed files are omitted from the project listing.
     }
   }
   return files;
@@ -127,6 +166,7 @@ function buildFreeformFileUrl(awemeId, runId, fileName) {
 
 module.exports = {
   ALLOWED_FILES,
+  TEXT_FILES,
   getFreeformProjectDir,
   resolveFreeformFile,
   writeFreeformFile,
