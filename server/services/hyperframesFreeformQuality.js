@@ -72,6 +72,25 @@ function getFfmpegCommand() {
   return process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
 }
 
+async function runFfmpeg(command, args, options, runCommand) {
+  try {
+    return await runCommand(command, args, options);
+  } catch (error) {
+    return { ok: false, code: null, error: error.message, stdout: '', stderr: '' };
+  }
+}
+
+async function writeVisualReport(reportPath, report) {
+  await fsp.writeFile(reportPath, JSON.stringify(report, null, 2), 'utf8');
+  return {
+    success: report.success,
+    message: report.message,
+    report,
+    issues: report.issues,
+    contact_sheet_path: report.contact_sheet_path,
+  };
+}
+
 async function inspectRenderedVideo({ projectDir, outputPath, runCommand = defaultRunCommand } = {}) {
   const videoPath = outputPath || (projectDir ? path.join(projectDir, 'output.mp4') : '');
   if (!projectDir || !videoPath || !fs.existsSync(videoPath)) {
@@ -86,19 +105,20 @@ async function inspectRenderedVideo({ projectDir, outputPath, runCommand = defau
   const checksDir = path.join(projectDir, 'checks');
   const reportPath = path.join(checksDir, 'visual_report.json');
   const contactSheetPath = path.join(inspectDir, 'contact_sheet.jpg');
+  await fsp.rm(framesDir, { recursive: true, force: true });
   await fsp.mkdir(framesDir, { recursive: true });
   await fsp.mkdir(checksDir, { recursive: true });
 
   const ffmpeg = getFfmpegCommand();
   const framePattern = path.join(framesDir, 'frame_%04d.jpg');
-  const extractResult = await runCommand(ffmpeg, [
+  const extractResult = await runFfmpeg(ffmpeg, [
     '-y',
     '-i',
     videoPath,
     '-vf',
     'fps=10/3,scale=320:-1',
     framePattern,
-  ], { cwd: projectDir });
+  ], { cwd: projectDir }, runCommand);
 
   if (!extractResult.ok) {
     const report = {
@@ -109,11 +129,10 @@ async function inspectRenderedVideo({ projectDir, outputPath, runCommand = defau
       stderr: extractResult.stderr,
       error: extractResult.error,
     };
-    await fsp.writeFile(reportPath, JSON.stringify(report, null, 2), 'utf8');
-    return report;
+    return writeVisualReport(reportPath, report);
   }
 
-  const sheetResult = await runCommand(ffmpeg, [
+  const sheetResult = await runFfmpeg(ffmpeg, [
     '-y',
     '-framerate',
     '10/3',
@@ -124,19 +143,20 @@ async function inspectRenderedVideo({ projectDir, outputPath, runCommand = defau
     '-frames:v',
     '1',
     contactSheetPath,
-  ], { cwd: projectDir });
+  ], { cwd: projectDir }, runCommand);
+  const hasContactSheet = fs.existsSync(contactSheetPath);
+  const success = sheetResult.ok && hasContactSheet;
 
   const report = {
-    success: sheetResult.ok,
-    message: sheetResult.ok ? '抽帧质检完成。' : '接触表生成失败。',
-    contact_sheet_path: sheetResult.ok ? contactSheetPath : '',
-    issues: sheetResult.ok ? [] : ['contact_sheet_failed'],
+    success,
+    message: success ? '抽帧质检完成。' : '接触表生成失败：未生成 inspect/contact_sheet.jpg。',
+    contact_sheet_path: success ? contactSheetPath : '',
+    issues: success ? [] : ['contact_sheet_failed'],
     stdout: sheetResult.stdout,
     stderr: sheetResult.stderr,
     error: sheetResult.error,
   };
-  await fsp.writeFile(reportPath, JSON.stringify(report, null, 2), 'utf8');
-  return report;
+  return writeVisualReport(reportPath, report);
 }
 
 module.exports = {
