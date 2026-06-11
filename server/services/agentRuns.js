@@ -26,6 +26,7 @@ const TEMPLATE_VIRAL_REWRITE = 'viral_rewrite';
 const MAX_COMMENTS_CHARS = agentTemplates.MAX_COMMENTS_CHARS;
 const TTS_TARGET_DURATION_TOLERANCE = 1.25;
 const CHINESE_TTS_CHARS_PER_SECOND = 5.4;
+const runUpdateQueues = new Map();
 
 function createRunId(template = TEMPLATE_VIRAL_REWRITE) {
   const stamp = new Date().toISOString()
@@ -692,7 +693,32 @@ function mergeHyperframesFreeformPatch(current, patch) {
 }
 
 function createFreeformOperationId(prefix = 'op') {
-  return `${prefix}-${new Date().toISOString()}-${crypto.randomBytes(3).toString('hex')}`;
+  const stamp = new Date().toISOString().replace(/[^A-Za-z0-9_.-]/g, '-');
+  return `${prefix}-${stamp}-${crypto.randomBytes(3).toString('hex')}`;
+}
+
+function getRunUpdateQueueKey(awemeId, runId, rootDir) {
+  return `${rootDir || ''}:${String(awemeId)}:${String(runId)}`;
+}
+
+async function withRunUpdateQueue(awemeId, runId, options, task) {
+  const key = getRunUpdateQueueKey(awemeId, runId, options.rootDir);
+  const previous = runUpdateQueues.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise(resolve => {
+    release = resolve;
+  });
+  const queued = previous.then(() => current, () => current);
+  runUpdateQueues.set(key, queued);
+  try {
+    await previous.catch(() => {});
+    return await task();
+  } finally {
+    release();
+    if (runUpdateQueues.get(key) === queued) {
+      runUpdateQueues.delete(key);
+    }
+  }
 }
 
 async function getCurrentHyperframesFreeformState(awemeId, runId, options = {}) {
@@ -706,37 +732,69 @@ async function getCurrentHyperframesFreeformState(awemeId, runId, options = {}) 
 }
 
 async function updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, section, operationId, updater, options = {}) {
-  const detail = await getDouyinAgentRun(awemeId, runId, options);
-  if (!detail.success) return detail;
+  return withRunUpdateQueue(awemeId, runId, options, async () => {
+    const detail = await getDouyinAgentRun(awemeId, runId, options);
+    if (!detail.success) return detail;
 
-  const current = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
-  if (current?.[section]?.operation_id !== operationId) {
+    const current = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
+    if (current?.[section]?.operation_id !== operationId) {
+      return {
+        success: false,
+        stale: true,
+        aweme_id: String(awemeId),
+        run_id: String(runId),
+        message: '已有更新的生成任务完成，已忽略旧结果。',
+        run: detail.data,
+        hyperframes_freeform: current,
+      };
+    }
+
+    const patch = typeof updater === 'function' ? updater(current, detail.data) : updater;
+    const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, patch));
+    const updatedRun = {
+      ...detail.data,
+      hyperframes_freeform: nextState,
+      updated_at: new Date().toISOString(),
+    };
+    const runPath = getRunPath(awemeId, runId, options.rootDir);
+    await writeJson(runPath, updatedRun);
     return {
-      success: false,
-      stale: true,
+      success: true,
       aweme_id: String(awemeId),
       run_id: String(runId),
-      message: '已有更新的生成任务完成，已忽略旧结果。',
-      run: detail.data,
-      hyperframes_freeform: current,
+      data: updatedRun,
     };
-  }
+  });
+}
 
-  const patch = typeof updater === 'function' ? updater(current, detail.data) : updater;
-  const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, patch));
-  const updatedRun = {
-    ...detail.data,
-    hyperframes_freeform: nextState,
-    updated_at: new Date().toISOString(),
-  };
-  const runPath = getRunPath(awemeId, runId, options.rootDir);
-  await writeJson(runPath, updatedRun);
-  return {
-    success: true,
-    aweme_id: String(awemeId),
-    run_id: String(runId),
-    data: updatedRun,
-  };
+async function removePathBestEffort(targetPath) {
+  if (!targetPath) return;
+  try {
+    await fsp.rm(targetPath, { recursive: true, force: true });
+  } catch {
+    // Best-effort cleanup should not mask the main generation result.
+  }
+}
+
+async function publishFreeformProjectDirectory({ tempDir, finalDir }) {
+  await fsp.rm(finalDir, { recursive: true, force: true });
+  await fsp.mkdir(path.dirname(finalDir), { recursive: true });
+  try {
+    await fsp.rename(tempDir, finalDir);
+  } catch (error) {
+    if (error && error.code !== 'EXDEV') throw error;
+    await fsp.cp(tempDir, finalDir, { recursive: true });
+    await removePathBestEffort(tempDir);
+  }
+}
+
+function mapFreeformProjectFilesToDir(files = [], projectDir) {
+  return Array.isArray(files)
+    ? files.map(file => ({
+      ...file,
+      path: file?.name ? path.join(projectDir, file.name) : file?.path,
+    }))
+    : [];
 }
 
 async function getDouyinRunHyperframesFreeformState(awemeId, runId, options = {}) {
@@ -751,25 +809,27 @@ async function getDouyinRunHyperframesFreeformState(awemeId, runId, options = {}
 }
 
 async function updateRunHyperframesFreeform(awemeId, runId, updater, options = {}) {
-  const detail = await getDouyinAgentRun(awemeId, runId, options);
-  if (!detail.success) return detail;
+  return withRunUpdateQueue(awemeId, runId, options, async () => {
+    const detail = await getDouyinAgentRun(awemeId, runId, options);
+    if (!detail.success) return detail;
 
-  const current = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
-  const patch = typeof updater === 'function' ? updater(current, detail.data) : updater;
-  const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, patch));
-  const updatedRun = {
-    ...detail.data,
-    hyperframes_freeform: nextState,
-    updated_at: new Date().toISOString(),
-  };
-  const runPath = getRunPath(awemeId, runId, options.rootDir);
-  await writeJson(runPath, updatedRun);
-  return {
-    success: true,
-    aweme_id: String(awemeId),
-    run_id: String(runId),
-    data: updatedRun,
-  };
+    const current = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
+    const patch = typeof updater === 'function' ? updater(current, detail.data) : updater;
+    const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, patch));
+    const updatedRun = {
+      ...detail.data,
+      hyperframes_freeform: nextState,
+      updated_at: new Date().toISOString(),
+    };
+    const runPath = getRunPath(awemeId, runId, options.rootDir);
+    await writeJson(runPath, updatedRun);
+    return {
+      success: true,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      data: updatedRun,
+    };
+  });
 }
 
 function createFreeformFailureResponse(awemeId, runId, state, message) {
@@ -1050,11 +1110,12 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   }
 
   const projectService = options.hyperframesFreeformProject || defaultHyperframesFreeformProject;
+  const tempRunId = `${runId}-${operationId}`;
   let created;
   try {
     created = await projectService.createFreeformProject({
       awemeId,
-      runId,
+      runId: tempRunId,
       rootDir: options.rootDir,
       files: parsed.files,
     });
@@ -1069,13 +1130,14 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
     return markFreeformProjectFailed(awemeId, runId, message, options, operationId);
   }
 
+  const tempProjectDir = created.project_dir || created.projectDir;
   let snapshotMessage = '';
   if (context.source_dir && typeof skillContext.copySkillSnapshot === 'function') {
     let snapshot;
     try {
       snapshot = await skillContext.copySkillSnapshot({
         sourceDir: context.source_dir,
-        projectDir: created.project_dir || created.projectDir,
+        projectDir: tempProjectDir,
       });
     } catch (error) {
       snapshot = {
@@ -1088,23 +1150,67 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
     }
   }
 
-  const projectDir = created.project_dir || created.projectDir;
-  const indexPath = created.index_path || path.join(projectDir, 'index.html');
+  const projectDir = defaultHyperframesFreeformProject.getFreeformProjectDir(awemeId, runId, options.rootDir);
+  const indexPath = path.join(projectDir, 'index.html');
   const message = snapshotMessage || parsed.summary || created.message || 'HyperFrames 工程已生成。';
-  const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'project', operationId, current => ({
-    status: 'ready',
-    project_dir: projectDir,
-    project: {
-      ...current.project,
-      status: 'ready',
-      operation_id: operationId,
-      index_path: indexPath,
-      files: created.files || [],
-      message,
-    },
-  }), options);
+  const files = mapFreeformProjectFilesToDir(created.files || [], projectDir);
+  let updated;
+  try {
+    updated = await withRunUpdateQueue(awemeId, runId, options, async () => {
+      const latest = await getDouyinAgentRun(awemeId, runId, options);
+      if (!latest.success) return latest;
+      const current = normalizeHyperframesFreeformState(latest.data.hyperframes_freeform);
+      if (current.project.operation_id !== operationId) {
+        return {
+          success: false,
+          stale: true,
+          aweme_id: String(awemeId),
+          run_id: String(runId),
+          message: '已有更新的生成任务完成，已忽略旧结果。',
+          run: latest.data,
+          hyperframes_freeform: current,
+        };
+      }
+
+      await publishFreeformProjectDirectory({ tempDir: tempProjectDir, finalDir: projectDir });
+      const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, {
+        status: 'ready',
+        project_dir: projectDir,
+        project: {
+          ...current.project,
+          status: 'ready',
+          operation_id: operationId,
+          index_path: indexPath,
+          files,
+          message,
+        },
+      }));
+      const updatedRun = {
+        ...latest.data,
+        hyperframes_freeform: nextState,
+        updated_at: new Date().toISOString(),
+      };
+      await writeJson(getRunPath(awemeId, runId, options.rootDir), updatedRun);
+      return {
+        success: true,
+        aweme_id: String(awemeId),
+        run_id: String(runId),
+        data: updatedRun,
+      };
+    });
+  } catch (error) {
+    await removePathBestEffort(tempProjectDir);
+    return markFreeformProjectFailed(
+      awemeId,
+      runId,
+      `HyperFrames 工程发布失败：${error.message || '未知错误'}`,
+      options,
+      operationId,
+    );
+  }
 
   if (!updated.success) {
+    if (updated.stale) await removePathBestEffort(tempProjectDir);
     return {
       success: false,
       aweme_id: String(awemeId),

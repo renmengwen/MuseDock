@@ -1160,6 +1160,60 @@ async function run() {
   assert.equal(snapshotThrow.hyperframes_freeform.project.status, 'ready');
   assert.match(snapshotThrow.message, /快照|skill/i);
 
+  const staleProjectRunId = `${generated.run_id}-stale-project`;
+  const staleProjectRunPath = path.join(rootDir, awemeId, 'agent_runs', `${staleProjectRunId}.json`);
+  const staleProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${staleProjectRunId}-hyperframes-freeform`);
+  await writeJson(staleProjectRunPath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: staleProjectRunId,
+  });
+  fs.mkdirSync(staleProjectDir, { recursive: true });
+  fs.writeFileSync(path.join(staleProjectDir, 'index.html'), 'new', 'utf-8');
+  let staleProjectTempRunId = '';
+  const staleProject = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, staleProjectRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+    },
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        text: JSON.stringify({
+          summary: '旧工程',
+          files: { 'index.html': 'old' },
+        }),
+      }),
+    },
+    hyperframesFreeformProject: {
+      createFreeformProject: async ({ runId }) => {
+        staleProjectTempRunId = runId;
+        assert.notEqual(runId, staleProjectRunId);
+        const tempDir = path.join(rootDir, awemeId, 'agent_runs', `${runId}-hyperframes-freeform`);
+        fs.mkdirSync(tempDir, { recursive: true });
+        fs.writeFileSync(path.join(tempDir, 'index.html'), 'old', 'utf-8');
+        const run = JSON.parse(fs.readFileSync(staleProjectRunPath, 'utf-8'));
+        run.hyperframes_freeform.status = 'ready';
+        run.hyperframes_freeform.project.status = 'ready';
+        run.hyperframes_freeform.project.operation_id = 'newer-project-operation';
+        run.hyperframes_freeform.project.index_path = path.join(staleProjectDir, 'index.html');
+        run.hyperframes_freeform.project.message = '较新的工程已生成';
+        run.hyperframes_freeform.project_dir = staleProjectDir;
+        await writeJson(staleProjectRunPath, run);
+        return {
+          success: true,
+          projectDir: tempDir,
+          files: [{ name: 'index.html', path: path.join(tempDir, 'index.html') }],
+          message: '旧工程已写入临时目录',
+        };
+      },
+    },
+  });
+  assert.equal(staleProject.success, false);
+  assert.match(staleProject.message, /忽略旧结果/);
+  assert.match(staleProjectTempRunId, new RegExp(`^${generated.run_id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-stale-project-project-`));
+  assert.equal(fs.readFileSync(path.join(staleProjectDir, 'index.html'), 'utf-8'), 'new');
+  assert.equal(fs.existsSync(path.join(rootDir, awemeId, 'agent_runs', `${staleProjectTempRunId}-hyperframes-freeform`)), false);
+
   const freeformProject = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, generated.run_id, {
     rootDir,
     skillContext: {
