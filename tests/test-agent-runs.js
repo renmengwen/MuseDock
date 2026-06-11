@@ -987,6 +987,44 @@ async function run() {
   assert.equal(staleBriefDisk.hyperframes_freeform.brief.operation_id, 'newer-brief-operation');
   assert.notEqual(staleBriefDisk.hyperframes_freeform.brief.summary, '旧请求 brief');
 
+  const staleBriefContextRunId = `${generated.run_id}-stale-brief-context`;
+  const staleBriefContextPath = path.join(rootDir, awemeId, 'agent_runs', `${staleBriefContextRunId}.json`);
+  await writeJson(staleBriefContextPath, {
+    ...JSON.parse(fs.readFileSync(generated.path, 'utf-8')),
+    run_id: staleBriefContextRunId,
+    hyperframes_freeform: undefined,
+  });
+  const staleBriefContext = await agentRuns.generateDouyinRunHyperframesFreeformBrief(awemeId, staleBriefContextRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => {
+        const run = JSON.parse(fs.readFileSync(staleBriefContextPath, 'utf-8'));
+        assert.equal(run.hyperframes_freeform.brief.status, 'generating');
+        assert.ok(run.hyperframes_freeform.brief.operation_id);
+        run.hyperframes_freeform.status = 'ready';
+        run.hyperframes_freeform.brief.status = 'ready';
+        run.hyperframes_freeform.brief.operation_id = 'newer-context-operation';
+        run.hyperframes_freeform.brief.summary = '较新的导演策划';
+        run.hyperframes_freeform.brief.data = {
+          title: '较新请求',
+          summary: '较新的导演策划',
+          storyboard: [{ headline: 'newer' }],
+        };
+        run.hyperframes_freeform.brief.message = '较新的导演策划已完成';
+        await writeJson(staleBriefContextPath, run);
+        throw new Error('old context failed');
+      },
+    },
+  });
+  assert.equal(staleBriefContext.success, false);
+  assert.match(staleBriefContext.message, /忽略旧结果/);
+  const staleBriefContextDisk = JSON.parse(fs.readFileSync(staleBriefContextPath, 'utf-8'));
+  assert.equal(staleBriefContextDisk.hyperframes_freeform.status, 'ready');
+  assert.equal(staleBriefContextDisk.hyperframes_freeform.brief.status, 'ready');
+  assert.equal(staleBriefContextDisk.hyperframes_freeform.brief.operation_id, 'newer-context-operation');
+  assert.equal(staleBriefContextDisk.hyperframes_freeform.brief.summary, '较新的导演策划');
+  assert.equal(staleBriefContextDisk.hyperframes_freeform.brief.message, '较新的导演策划已完成');
+
   const freeformBrief = await agentRuns.generateDouyinRunHyperframesFreeformBrief(awemeId, generated.run_id, {
     rootDir,
     skillContext: {
@@ -1025,8 +1063,18 @@ async function run() {
   assert.equal(deepMergeCheck.data.hyperframes_freeform.brief.data.title, '更新标题');
   assert.equal(deepMergeCheck.data.hyperframes_freeform.brief.data.summary, '自由工程 brief');
   assert.deepEqual(deepMergeCheck.data.hyperframes_freeform.brief.data.storyboard, []);
+  const pollutedBefore = {}.polluted;
+  const pollutionCheck = await agentRuns.updateRunHyperframesFreeform(awemeId, generated.run_id, JSON.parse('{"brief":{"data":{"__proto__":{"polluted":"yes"},"constructor":{"polluted":"yes"},"prototype":{"polluted":"yes"},"summary":"防污染"}}}'), { rootDir });
+  assert.equal(pollutionCheck.success, true);
+  assert.equal({}.polluted, pollutedBefore);
+  assert.equal(pollutionCheck.data.hyperframes_freeform.brief.data.__proto__.polluted, undefined);
+  assert.equal(Object.prototype.polluted, undefined);
+  assert.equal(Object.prototype.hasOwnProperty.call(pollutionCheck.data.hyperframes_freeform.brief.data, 'constructor'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(pollutionCheck.data.hyperframes_freeform.brief.data, 'prototype'), false);
+  assert.equal(pollutionCheck.data.hyperframes_freeform.brief.data.summary, '防污染');
+  assert.deepEqual(pollutionCheck.data.hyperframes_freeform.brief.data.storyboard, []);
   await agentRuns.updateRunHyperframesFreeform(awemeId, generated.run_id, {
-    brief: { status: 'ready', data: { title: '高级测试片' } },
+    brief: { status: 'ready', data: { title: '高级测试片', summary: '自由工程 brief' } },
   }, { rootDir });
 
   const projectCreateThrowRunId = `${generated.run_id}-project-create-throw`;

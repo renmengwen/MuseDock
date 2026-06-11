@@ -678,6 +678,7 @@ function deepMergePlainObject(base, patch) {
   if (!isPlainObject(base) || !isPlainObject(patch)) return patch;
   const merged = { ...base };
   for (const [key, value] of Object.entries(patch)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
     merged[key] = isPlainObject(value) && isPlainObject(base[key])
       ? deepMergePlainObject(base[key], value)
       : value;
@@ -705,18 +706,37 @@ async function getCurrentHyperframesFreeformState(awemeId, runId, options = {}) 
 }
 
 async function updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, section, operationId, updater, options = {}) {
-  const current = await getCurrentHyperframesFreeformState(awemeId, runId, options);
-  if (!current.success) return current;
-  if (current.hyperframes_freeform?.[section]?.operation_id !== operationId) {
+  const detail = await getDouyinAgentRun(awemeId, runId, options);
+  if (!detail.success) return detail;
+
+  const current = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
+  if (current?.[section]?.operation_id !== operationId) {
     return {
       success: false,
+      stale: true,
       aweme_id: String(awemeId),
       run_id: String(runId),
       message: '已有更新的生成任务完成，已忽略旧结果。',
-      hyperframes_freeform: current.hyperframes_freeform,
+      run: detail.data,
+      hyperframes_freeform: current,
     };
   }
-  return updateRunHyperframesFreeform(awemeId, runId, updater, options);
+
+  const patch = typeof updater === 'function' ? updater(current, detail.data) : updater;
+  const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, patch));
+  const updatedRun = {
+    ...detail.data,
+    hyperframes_freeform: nextState,
+    updated_at: new Date().toISOString(),
+  };
+  const runPath = getRunPath(awemeId, runId, options.rootDir);
+  await writeJson(runPath, updatedRun);
+  return {
+    success: true,
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    data: updatedRun,
+  };
 }
 
 async function getDouyinRunHyperframesFreeformState(awemeId, runId, options = {}) {
@@ -806,6 +826,17 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
   const detail = await getDouyinAgentRun(awemeId, runId, options);
   if (!detail.success) return detail;
 
+  const operationId = createFreeformOperationId('brief');
+  await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    status: 'generating',
+    brief: {
+      ...current.brief,
+      status: 'generating',
+      operation_id: operationId,
+      message: '正在生成导演策划...',
+    },
+  }), options);
+
   const skillContext = options.skillContext || defaultHyperframesSkillContext;
   let context;
   try {
@@ -822,19 +853,8 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
   }
   if (!context.success) {
     const message = context.message || '读取 HyperFrames skill 上下文失败。';
-    return markFreeformBriefFailed(awemeId, runId, message, options);
+    return markFreeformBriefFailed(awemeId, runId, message, options, operationId);
   }
-
-  const operationId = createFreeformOperationId('brief');
-  await updateRunHyperframesFreeform(awemeId, runId, current => ({
-    status: 'generating',
-    brief: {
-      ...current.brief,
-      status: 'generating',
-      operation_id: operationId,
-      message: '正在生成导演策划...',
-    },
-  }), options);
 
   const freeformAgent = options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent;
   let messages;
@@ -940,6 +960,17 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
     return markFreeformProjectFailed(awemeId, runId, '请先生成导演策划。', options);
   }
 
+  const operationId = createFreeformOperationId('project');
+  await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    status: 'generating',
+    project: {
+      ...current.project,
+      status: 'generating',
+      operation_id: operationId,
+      message: '正在生成 HyperFrames 工程...',
+    },
+  }), options);
+
   const skillContext = options.skillContext || defaultHyperframesSkillContext;
   let context;
   try {
@@ -956,19 +987,8 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   }
   if (!context.success) {
     const message = context.message || '读取 HyperFrames skill 上下文失败。';
-    return markFreeformProjectFailed(awemeId, runId, message, options);
+    return markFreeformProjectFailed(awemeId, runId, message, options, operationId);
   }
-
-  const operationId = createFreeformOperationId('project');
-  await updateRunHyperframesFreeform(awemeId, runId, current => ({
-    status: 'generating',
-    project: {
-      ...current.project,
-      status: 'generating',
-      operation_id: operationId,
-      message: '正在生成 HyperFrames 工程...',
-    },
-  }), options);
 
   const freeformAgent = options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent;
   let messages;
