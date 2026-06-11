@@ -927,6 +927,66 @@ async function run() {
   assert.equal(briefContextThrow.hyperframes_freeform.brief.status, 'failed');
   assert.match(briefContextThrow.hyperframes_freeform.brief.message, /上下文|skill/i);
 
+  const briefBuildThrowRunId = `${generated.run_id}-brief-build-throw`;
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${briefBuildThrowRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(generated.path, 'utf-8')),
+    run_id: briefBuildThrowRunId,
+    hyperframes_freeform: undefined,
+  });
+  const briefBuildThrow = await agentRuns.generateDouyinRunHyperframesFreeformBrief(awemeId, briefBuildThrowRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+    },
+    hyperframesFreeformAgent: {
+      buildFreeformBriefMessages: () => {
+        throw new Error('build exploded');
+      },
+      parseFreeformBriefResponse: () => ({ success: true, brief: {} }),
+    },
+  });
+  assert.equal(briefBuildThrow.success, false);
+  assert.equal(briefBuildThrow.hyperframes_freeform.status, 'failed');
+  assert.equal(briefBuildThrow.hyperframes_freeform.brief.status, 'failed');
+  assert.match(briefBuildThrow.message, /导演策划生成失败/);
+
+  const staleBriefRunId = `${generated.run_id}-stale-brief`;
+  const staleBriefPath = path.join(rootDir, awemeId, 'agent_runs', `${staleBriefRunId}.json`);
+  await writeJson(staleBriefPath, {
+    ...JSON.parse(fs.readFileSync(generated.path, 'utf-8')),
+    run_id: staleBriefRunId,
+    hyperframes_freeform: undefined,
+  });
+  const staleBrief = await agentRuns.generateDouyinRunHyperframesFreeformBrief(awemeId, staleBriefRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+    },
+    aiTextModel: {
+      callTextModel: async () => {
+        const run = JSON.parse(fs.readFileSync(staleBriefPath, 'utf-8'));
+        run.hyperframes_freeform.brief.operation_id = 'newer-brief-operation';
+        run.hyperframes_freeform.brief.message = '较新的导演策划任务正在处理';
+        await writeJson(staleBriefPath, run);
+        return {
+          success: true,
+          text: JSON.stringify({
+            title: '旧请求',
+            summary: '旧请求 brief',
+            design_md: '# Old',
+            narration: '旧旁白',
+            storyboard: [],
+          }),
+        };
+      },
+    },
+  });
+  assert.equal(staleBrief.success, false);
+  assert.match(staleBrief.message, /忽略旧结果/);
+  const staleBriefDisk = JSON.parse(fs.readFileSync(staleBriefPath, 'utf-8'));
+  assert.equal(staleBriefDisk.hyperframes_freeform.brief.operation_id, 'newer-brief-operation');
+  assert.notEqual(staleBriefDisk.hyperframes_freeform.brief.summary, '旧请求 brief');
+
   const freeformBrief = await agentRuns.generateDouyinRunHyperframesFreeformBrief(awemeId, generated.run_id, {
     rootDir,
     skillContext: {
@@ -958,8 +1018,15 @@ async function run() {
   assert.equal(shallowMergeCheck.success, true);
   assert.equal(shallowMergeCheck.data.hyperframes_freeform.brief.status, 'generating');
   assert.equal(shallowMergeCheck.data.hyperframes_freeform.brief.data.summary, '自由工程 brief');
+  const deepMergeCheck = await agentRuns.updateRunHyperframesFreeform(awemeId, generated.run_id, {
+    brief: { data: { title: '更新标题' } },
+  }, { rootDir });
+  assert.equal(deepMergeCheck.success, true);
+  assert.equal(deepMergeCheck.data.hyperframes_freeform.brief.data.title, '更新标题');
+  assert.equal(deepMergeCheck.data.hyperframes_freeform.brief.data.summary, '自由工程 brief');
+  assert.deepEqual(deepMergeCheck.data.hyperframes_freeform.brief.data.storyboard, []);
   await agentRuns.updateRunHyperframesFreeform(awemeId, generated.run_id, {
-    brief: { status: 'ready' },
+    brief: { status: 'ready', data: { title: '高级测试片' } },
   }, { rootDir });
 
   const projectCreateThrowRunId = `${generated.run_id}-project-create-throw`;
@@ -991,6 +1058,31 @@ async function run() {
   assert.equal(projectCreateThrow.hyperframes_freeform.status, 'failed');
   assert.equal(projectCreateThrow.hyperframes_freeform.project.status, 'failed');
   assert.match(projectCreateThrow.hyperframes_freeform.project.message, /工程|写入|生成/);
+
+  const projectParseThrowRunId = `${generated.run_id}-project-parse-throw`;
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${projectParseThrowRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: projectParseThrowRunId,
+  });
+  const projectParseThrow = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, projectParseThrowRunId, {
+    rootDir,
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+    },
+    aiTextModel: {
+      callTextModel: async () => ({ success: true, text: '{}' }),
+    },
+    hyperframesFreeformAgent: {
+      buildFreeformProjectMessages: () => [{ role: 'user', content: 'project' }],
+      parseFreeformProjectResponse: () => {
+        throw new Error('parse exploded');
+      },
+    },
+  });
+  assert.equal(projectParseThrow.success, false);
+  assert.equal(projectParseThrow.hyperframes_freeform.status, 'failed');
+  assert.equal(projectParseThrow.hyperframes_freeform.project.status, 'failed');
+  assert.match(projectParseThrow.message, /解析失败|工程生成失败/);
 
   const snapshotThrowRunId = `${generated.run_id}-snapshot-throw`;
   await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${snapshotThrowRunId}.json`), {

@@ -670,17 +670,53 @@ function normalizeHyperframesFreeformState(value = {}) {
   };
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function deepMergePlainObject(base, patch) {
+  if (!isPlainObject(base) || !isPlainObject(patch)) return patch;
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    merged[key] = isPlainObject(value) && isPlainObject(base[key])
+      ? deepMergePlainObject(base[key], value)
+      : value;
+  }
+  return merged;
+}
+
 function mergeHyperframesFreeformPatch(current, patch) {
-  const safePatch = patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : {};
+  const safePatch = isPlainObject(patch) ? patch : {};
+  return deepMergePlainObject(current, safePatch);
+}
+
+function createFreeformOperationId(prefix = 'op') {
+  return `${prefix}-${new Date().toISOString()}-${crypto.randomBytes(3).toString('hex')}`;
+}
+
+async function getCurrentHyperframesFreeformState(awemeId, runId, options = {}) {
+  const detail = await getDouyinAgentRun(awemeId, runId, options);
+  if (!detail.success) return detail;
   return {
-    ...current,
-    ...safePatch,
-    brief: { ...current.brief, ...(safePatch.brief || {}) },
-    project: { ...current.project, ...(safePatch.project || {}) },
-    checks: { ...current.checks, ...(safePatch.checks || {}) },
-    render: { ...current.render, ...(safePatch.render || {}) },
-    visual_inspect: { ...current.visual_inspect, ...(safePatch.visual_inspect || {}) },
+    success: true,
+    data: detail.data,
+    hyperframes_freeform: normalizeHyperframesFreeformState(detail.data.hyperframes_freeform),
   };
+}
+
+async function updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, section, operationId, updater, options = {}) {
+  const current = await getCurrentHyperframesFreeformState(awemeId, runId, options);
+  if (!current.success) return current;
+  if (current.hyperframes_freeform?.[section]?.operation_id !== operationId) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: '已有更新的生成任务完成，已忽略旧结果。',
+      hyperframes_freeform: current.hyperframes_freeform,
+    };
+  }
+  return updateRunHyperframesFreeform(awemeId, runId, updater, options);
 }
 
 async function getDouyinRunHyperframesFreeformState(awemeId, runId, options = {}) {
@@ -726,8 +762,11 @@ function createFreeformFailureResponse(awemeId, runId, state, message) {
   };
 }
 
-async function markFreeformBriefFailed(awemeId, runId, message, options = {}) {
-  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+async function markFreeformBriefFailed(awemeId, runId, message, options = {}, operationId = '') {
+  const update = operationId
+    ? updater => updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'brief', operationId, updater, options)
+    : updater => updateRunHyperframesFreeform(awemeId, runId, updater, options);
+  const updated = await update(current => ({
     status: 'failed',
     brief: {
       ...current.brief,
@@ -738,13 +777,16 @@ async function markFreeformBriefFailed(awemeId, runId, message, options = {}) {
   return createFreeformFailureResponse(
     awemeId,
     runId,
-    updated.success ? updated.data.hyperframes_freeform : null,
-    message,
+    updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
+    updated.message || message,
   );
 }
 
-async function markFreeformProjectFailed(awemeId, runId, message, options = {}) {
-  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+async function markFreeformProjectFailed(awemeId, runId, message, options = {}, operationId = '') {
+  const update = operationId
+    ? updater => updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'project', operationId, updater, options)
+    : updater => updateRunHyperframesFreeform(awemeId, runId, updater, options);
+  const updated = await update(current => ({
     status: 'failed',
     project: {
       ...current.project,
@@ -755,8 +797,8 @@ async function markFreeformProjectFailed(awemeId, runId, message, options = {}) 
   return createFreeformFailureResponse(
     awemeId,
     runId,
-    updated.success ? updated.data.hyperframes_freeform : null,
-    message,
+    updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
+    updated.message || message,
   );
 }
 
@@ -783,21 +825,34 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
     return markFreeformBriefFailed(awemeId, runId, message, options);
   }
 
+  const operationId = createFreeformOperationId('brief');
   await updateRunHyperframesFreeform(awemeId, runId, current => ({
     status: 'generating',
     brief: {
       ...current.brief,
       status: 'generating',
+      operation_id: operationId,
       message: '正在生成导演策划...',
     },
   }), options);
 
   const freeformAgent = options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent;
-  const messages = freeformAgent.buildFreeformBriefMessages({
-    run: detail.data,
-    skillContext: context.prompt_context,
-    options: options.briefOptions || {},
-  });
+  let messages;
+  try {
+    messages = freeformAgent.buildFreeformBriefMessages({
+      run: detail.data,
+      skillContext: context.prompt_context,
+      options: options.briefOptions || {},
+    });
+  } catch (error) {
+    return markFreeformBriefFailed(
+      awemeId,
+      runId,
+      `导演策划生成失败：${error.message || '构建提示失败'}`,
+      options,
+      operationId,
+    );
+  }
   const modelService = options.aiTextModel || defaultAiTextModel;
   let modelResult;
   try {
@@ -819,26 +874,48 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
 
   if (!modelResult.success) {
     const message = modelResult.message || '导演策划生成失败。';
-    return markFreeformBriefFailed(awemeId, runId, message, options);
+    return markFreeformBriefFailed(awemeId, runId, message, options, operationId);
   }
 
-  const parsed = freeformAgent.parseFreeformBriefResponse(modelResult.text || modelResult.raw_output || '');
+  let parsed;
+  try {
+    parsed = freeformAgent.parseFreeformBriefResponse(modelResult.text || modelResult.raw_output || '');
+  } catch (error) {
+    return markFreeformBriefFailed(
+      awemeId,
+      runId,
+      `导演策划解析失败：${error.message || '解析失败'}`,
+      options,
+      operationId,
+    );
+  }
   if (!parsed.success) {
     const message = parsed.message || '解析导演策划失败。';
-    return markFreeformBriefFailed(awemeId, runId, message, options);
+    return markFreeformBriefFailed(awemeId, runId, message, options, operationId);
   }
 
   const summary = parsed.brief.summary || parsed.brief.title || '导演策划已生成。';
-  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+  const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'brief', operationId, current => ({
     status: 'ready',
     brief: {
       ...current.brief,
       status: 'ready',
+      operation_id: operationId,
       summary,
       data: parsed.brief,
       message: '导演策划已生成。',
     },
   }), options);
+
+  if (!updated.success) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: updated.message || '已有更新的生成任务完成，已忽略旧结果。',
+      hyperframes_freeform: updated.hyperframes_freeform,
+    };
+  }
 
   return {
     success: true,
@@ -882,22 +959,35 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
     return markFreeformProjectFailed(awemeId, runId, message, options);
   }
 
+  const operationId = createFreeformOperationId('project');
   await updateRunHyperframesFreeform(awemeId, runId, current => ({
     status: 'generating',
     project: {
       ...current.project,
       status: 'generating',
+      operation_id: operationId,
       message: '正在生成 HyperFrames 工程...',
     },
   }), options);
 
   const freeformAgent = options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent;
-  const messages = freeformAgent.buildFreeformProjectMessages({
-    run: detail.data,
-    brief: currentState.brief.data || {},
-    skillContext: context.prompt_context,
-    options: options.projectOptions || {},
-  });
+  let messages;
+  try {
+    messages = freeformAgent.buildFreeformProjectMessages({
+      run: detail.data,
+      brief: currentState.brief.data || {},
+      skillContext: context.prompt_context,
+      options: options.projectOptions || {},
+    });
+  } catch (error) {
+    return markFreeformProjectFailed(
+      awemeId,
+      runId,
+      `HyperFrames 工程生成失败：${error.message || '构建提示失败'}`,
+      options,
+      operationId,
+    );
+  }
   const modelService = options.aiTextModel || defaultAiTextModel;
   let modelResult;
   try {
@@ -919,13 +1009,24 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
 
   if (!modelResult.success) {
     const message = modelResult.message || 'HyperFrames 工程生成失败。';
-    return markFreeformProjectFailed(awemeId, runId, message, options);
+    return markFreeformProjectFailed(awemeId, runId, message, options, operationId);
   }
 
-  const parsed = freeformAgent.parseFreeformProjectResponse(modelResult.text || modelResult.raw_output || '');
+  let parsed;
+  try {
+    parsed = freeformAgent.parseFreeformProjectResponse(modelResult.text || modelResult.raw_output || '');
+  } catch (error) {
+    return markFreeformProjectFailed(
+      awemeId,
+      runId,
+      `HyperFrames 工程解析失败：${error.message || '解析失败'}`,
+      options,
+      operationId,
+    );
+  }
   if (!parsed.success) {
     const message = parsed.message || '解析 HyperFrames 工程失败。';
-    return markFreeformProjectFailed(awemeId, runId, message, options);
+    return markFreeformProjectFailed(awemeId, runId, message, options, operationId);
   }
 
   const projectService = options.hyperframesFreeformProject || defaultHyperframesFreeformProject;
@@ -945,7 +1046,7 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   }
   if (!created.success) {
     const message = created.message || 'HyperFrames 工程写入失败。';
-    return markFreeformProjectFailed(awemeId, runId, message, options);
+    return markFreeformProjectFailed(awemeId, runId, message, options, operationId);
   }
 
   let snapshotMessage = '';
@@ -970,17 +1071,28 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   const projectDir = created.project_dir || created.projectDir;
   const indexPath = created.index_path || path.join(projectDir, 'index.html');
   const message = snapshotMessage || parsed.summary || created.message || 'HyperFrames 工程已生成。';
-  const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+  const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'project', operationId, current => ({
     status: 'ready',
     project_dir: projectDir,
     project: {
       ...current.project,
       status: 'ready',
+      operation_id: operationId,
       index_path: indexPath,
       files: created.files || [],
       message,
     },
   }), options);
+
+  if (!updated.success) {
+    return {
+      success: false,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: updated.message || '已有更新的生成任务完成，已忽略旧结果。',
+      hyperframes_freeform: updated.hyperframes_freeform,
+    };
+  }
 
   return {
     success: true,
