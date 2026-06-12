@@ -16,6 +16,7 @@ app.use('/api/xhs', require('./routes/xhs'));
 app.use('/api/history', require('./routes/history'));
 app.use('/api/media', require('./routes/media'));
 app.use('/api/agents', require('./routes/agents'));
+app.use('/api/creative-workflows', require('./routes/creativeWorkflows'));
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
