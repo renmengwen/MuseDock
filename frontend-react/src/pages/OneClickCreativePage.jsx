@@ -110,15 +110,23 @@ function upsertTask(tasks, task) {
   return next.slice(0, 30);
 }
 
-function CreativeTaskSidebar({ tasks, selectedWorkflowId, onNewTask, onSelectTask }) {
+function CreativeTaskSidebar({ tasks, selectedWorkflowId, sidebarCollapsed, onToggleSidebar, onNewTask, onSelectTask }) {
   return (
-    <aside className="creativeTaskSidebar">
+    <aside className={`creativeTaskSidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
       <div className="creativeSidebarBrand">
         <div className="creativeBrandMark"><Sparkles size={18} /></div>
         <strong>一键创作</strong>
         <div className="creativeSidebarTools">
           <Search size={17} aria-hidden="true" />
-          <PanelLeft size={17} aria-hidden="true" />
+          <button
+            className="creativeSidebarToggle"
+            type="button"
+            aria-label={sidebarCollapsed ? '展开任务列表' : '收起任务列表'}
+            aria-pressed={sidebarCollapsed}
+            onClick={onToggleSidebar}
+          >
+            <PanelLeft size={17} aria-hidden="true" />
+          </button>
         </div>
       </div>
 
@@ -163,7 +171,8 @@ function CreativeHeroHeader({ mode }) {
 
 function CreativeModeSwitch({ mode, setMode, disabled }) {
   return (
-    <div className="creativeModeSwitch" role="tablist" aria-label="创作模式">
+    <div className="creativeModeSwitch" role="tablist" aria-label="创作模式" data-mode={mode}>
+      <span className="creativeModeThumb" aria-hidden="true" />
       <button
         type="button"
         className={mode === 'quick' ? 'active' : ''}
@@ -323,6 +332,7 @@ export function OneClickCreativePage() {
   const [workflow, setWorkflow] = useState(null);
   const [workflowId, setWorkflowId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [tasks, setTasks] = useState(() => loadStoredTasks());
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
@@ -466,10 +476,12 @@ export function OneClickCreativePage() {
   }, [status, workflowId]);
 
   return (
-    <main className="creativeChatShell">
+    <main className={`creativeChatShell ${sidebarCollapsed ? 'sidebarCollapsed' : ''}`}>
       <CreativeTaskSidebar
         tasks={tasks}
         selectedWorkflowId={selectedWorkflowId}
+        sidebarCollapsed={sidebarCollapsed}
+        onToggleSidebar={() => setSidebarCollapsed(value => !value)}
         onNewTask={startNewTask}
         onSelectTask={selectTask}
       />

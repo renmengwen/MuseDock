@@ -113,14 +113,23 @@ assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInte
 assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');
 assert.match(page, /window\.localStorage\.setItem/, 'OneClickCreativePage should save submitted tasks to localStorage');
 assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should automatically enter the created task detail');
+assert.match(page, /sidebarCollapsed/, 'OneClickCreativePage should track collapsed task sidebar state');
+assert.match(page, /setSidebarCollapsed/, 'OneClickCreativePage should toggle the task sidebar');
+assert.ok(page.includes('className="creativeSidebarToggle"'), 'Task sidebar collapse control should be a real button');
+assert.ok(page.includes('className="creativeModeThumb"'), 'Mode switch should use an animated thumb instead of button borders');
+assert.ok(page.includes('data-mode={mode}'), 'Mode switch should expose mode state for thumb animation');
 assert.match(page, /assetIds:\s*\[\]/, 'OneClickCreativePage payload should preserve empty assetIds');
 assert.match(page, /disabled=\{isBusy\}/, 'OneClickCreativePage should disable submit while busy');
-assert.ok(page.includes('className="creativeChatShell"'), 'OneClickCreativePage should use a dedicated chat shell');
-assert.ok(page.includes('className="creativeTaskSidebar"'), 'OneClickCreativePage should render a left task sidebar');
+assert.match(page, /creativeChatShell/, 'OneClickCreativePage should use a dedicated chat shell');
+assert.match(page, /creativeTaskSidebar/, 'OneClickCreativePage should render a left task sidebar');
 assert.ok(page.includes('className="creativePromptComposer"'), 'OneClickCreativePage should render a central prompt composer');
 assert.ok(styles.includes('.creativeChatShell'), 'styles.css should define the creative chat shell layout');
 assert.ok(styles.includes('.creativeTaskSidebar'), 'styles.css should define the creative task sidebar');
 assert.ok(styles.includes('.creativePromptComposer'), 'styles.css should define the creative prompt composer');
+assert.ok(styles.includes('.creativeModeThumb'), 'styles.css should define the animated mode switch thumb');
+assert.ok(styles.includes('transition: transform'), 'styles.css should animate mode switch movement');
+assert.ok(styles.includes('.creativeChatShell.sidebarCollapsed'), 'styles.css should define collapsed sidebar layout');
+assert.ok(styles.includes('.creativeTaskSidebar.collapsed'), 'styles.css should style the collapsed sidebar');
 assert.ok(!page.includes('<div className="agentStatusList">'), 'WorkflowStatusPanel should not render li elements inside a div.agentStatusList');
 assert.ok(page.includes('<ul className="agentStatusList">'), 'WorkflowStatusPanel should render status items inside ul.agentStatusList');
 
