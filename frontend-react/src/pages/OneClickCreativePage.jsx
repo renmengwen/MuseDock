@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   ArrowUp,
   Bot,
@@ -9,6 +10,7 @@ import {
   PanelLeft,
   Paperclip,
   Search,
+  Settings2,
   Shield,
   Sparkles,
   Zap,
@@ -122,13 +124,25 @@ function CreativeTaskSidebar({ tasks, selectedWorkflowId, sidebarCollapsed, onTo
             className="creativeSidebarToggle"
             type="button"
             aria-label={sidebarCollapsed ? '展开任务列表' : '收起任务列表'}
+            aria-hidden={sidebarCollapsed}
             aria-pressed={sidebarCollapsed}
+            tabIndex={sidebarCollapsed ? -1 : 0}
             onClick={onToggleSidebar}
           >
             <PanelLeft size={17} aria-hidden="true" />
           </button>
         </div>
       </div>
+      {sidebarCollapsed ? (
+        <button
+          className="creativeFloatingExpand"
+          type="button"
+          aria-label="展开任务列表"
+          onClick={onToggleSidebar}
+        >
+          <PanelLeft size={17} aria-hidden="true" />
+        </button>
+      ) : null}
 
       <button className="creativeNewTaskButton" type="button" onClick={onNewTask}>
         <CirclePlus size={16} />
@@ -211,10 +225,15 @@ function CreativePromptComposer({
   useResearch,
   setUseResearch,
   isBusy,
+  submitDisabled,
   onSubmit,
 }) {
   return (
     <form className="creativePromptComposer" onSubmit={onSubmit}>
+      <Link className="creativeHeaderSettings" to="/settings" aria-label="打开设置">
+        <Settings2 size={18} />
+        <span>设置</span>
+      </Link>
       <label className="creativePromptLabel" htmlFor="creative-input">
         输入视频方向、抖音 ID 或抖音链接
       </label>
@@ -231,7 +250,7 @@ function CreativePromptComposer({
         <div className="creativeQuickActions">
           <button
             type="button"
-            className={useResearch ? 'active' : ''}
+            className={`creativeResearchToggle ${useResearch ? 'active' : ''}`}
             disabled={isBusy}
             onClick={() => setUseResearch(!useResearch)}
           >
@@ -244,12 +263,19 @@ function CreativePromptComposer({
           </button>
         </div>
 
-        <button className="creativeSubmitButton" type="submit" disabled={isBusy} aria-label="一键生成视频">
+        <button className="creativeSubmitButton" type="submit" disabled={submitDisabled} aria-label="一键生成视频">
           {isBusy ? <Loader2 size={18} className="spinIcon" /> : <ArrowUp size={19} />}
         </button>
       </div>
 
-      {mode === 'expert' ? <AssetContextNotice /> : null}
+      <div className="creativeExpertSlot">
+        {mode === 'expert' ? (
+          <>
+            <div className="creativeExpertHint">专家模式正在开发中，请先使用快速模式创建任务。</div>
+            <AssetContextNotice />
+          </>
+        ) : null}
+      </div>
       <input type="hidden" value={mode} readOnly />
     </form>
   );
@@ -337,6 +363,7 @@ export function OneClickCreativePage() {
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
   const isBusy = status === 'creating' || status === 'polling';
+  const submitDisabled = isBusy || mode === 'expert';
 
   function persistTasks(updater) {
     setTasks(prev => {
@@ -367,7 +394,13 @@ export function OneClickCreativePage() {
 
   async function submitCreativeWorkflow(event) {
     event.preventDefault();
-    if (isBusy) return;
+    if (submitDisabled) {
+      if (mode === 'expert') {
+        setStatus('idle');
+        setMessage('专家模式正在开发中，请先使用快速模式创建任务。');
+      }
+      return;
+    }
 
     const trimmed = input.trim();
     if (!trimmed) {
@@ -497,6 +530,7 @@ export function OneClickCreativePage() {
             useResearch={useResearch}
             setUseResearch={setUseResearch}
             isBusy={isBusy}
+            submitDisabled={submitDisabled}
             onSubmit={submitCreativeWorkflow}
           />
           <CreativeTaskDetail status={status} message={message} workflowId={selectedWorkflowId} workflow={workflow} />

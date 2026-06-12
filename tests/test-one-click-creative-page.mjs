@@ -19,6 +19,8 @@ const zh = {
   taskList: textFromCodePoints([0x521b, 0x4f5c, 0x4efb, 0x52a1]),
   quickMode: textFromCodePoints([0x5feb, 0x901f, 0x6a21, 0x5f0f]),
   expertMode: textFromCodePoints([0x4e13, 0x5bb6, 0x6a21, 0x5f0f]),
+  settings: textFromCodePoints([0x8bbe, 0x7f6e]),
+  expertDeveloping: textFromCodePoints([0x4e13, 0x5bb6, 0x6a21, 0x5f0f, 0x6b63, 0x5728, 0x5f00, 0x53d1, 0x4e2d]),
   taskDetail: textFromCodePoints([0x4efb, 0x52a1, 0x8be6, 0x60c5]),
   currentTask: textFromCodePoints([0x5f53, 0x524d, 0x4efb, 0x52a1]),
   inputLabel: textFromCodePoints([0x8f93, 0x5165, 0x89c6, 0x9891, 0x65b9, 0x5411, 0x3001, 0x6296, 0x97f3, 0x20, 0x49, 0x44, 0x20, 0x6216, 0x6296, 0x97f3, 0x94fe, 0x63a5]),
@@ -57,6 +59,8 @@ for (const text of [
   zh.taskList,
   zh.quickMode,
   zh.expertMode,
+  zh.settings,
+  zh.expertDeveloping,
   zh.taskDetail,
   zh.currentTask,
   zh.inputLabel,
@@ -116,8 +120,19 @@ assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should
 assert.match(page, /sidebarCollapsed/, 'OneClickCreativePage should track collapsed task sidebar state');
 assert.match(page, /setSidebarCollapsed/, 'OneClickCreativePage should toggle the task sidebar');
 assert.ok(page.includes('className="creativeSidebarToggle"'), 'Task sidebar collapse control should be a real button');
+assert.ok(page.includes('aria-hidden={sidebarCollapsed}'), 'Collapsed inline sidebar toggle should leave the accessible tree');
+assert.ok(page.includes('tabIndex={sidebarCollapsed ? -1 : 0}'), 'Collapsed inline sidebar toggle should not remain keyboard-focusable');
 assert.ok(page.includes('className="creativeModeThumb"'), 'Mode switch should use an animated thumb instead of button borders');
 assert.ok(page.includes('data-mode={mode}'), 'Mode switch should expose mode state for thumb animation');
+assert.match(page, /to="\/settings"/, 'OneClickCreativePage should expose settings entry inside the creative header card');
+assert.match(page, /<form className="creativePromptComposer"[\s\S]*className="creativeHeaderSettings"[\s\S]*<\/form>/, 'Settings entry should live inside the top prompt card');
+assert.match(page, /Settings2/, 'Settings entry should include a settings icon');
+assert.match(page, /const submitDisabled = isBusy \|\| mode === 'expert'/, 'Expert mode should contribute to submit disabled state');
+assert.match(page, /disabled=\{submitDisabled\}/, 'Submit button should use the combined disabled state');
+assert.match(page, /creativeExpertHint/, 'Expert mode should show a developing hint');
+assert.ok(page.includes(zh.expertDeveloping), 'Expert mode developing hint should use Chinese copy');
+assert.match(page, /className=\{`creativeResearchToggle \$\{useResearch \? 'active' : ''\}`\}/, 'Research button should have an explicit inactive state');
+assert.ok(page.includes('<div className="creativeExpertSlot">'), 'Expert-only notice should live in a stable reserved slot');
 assert.match(page, /assetIds:\s*\[\]/, 'OneClickCreativePage payload should preserve empty assetIds');
 assert.match(page, /disabled=\{isBusy\}/, 'OneClickCreativePage should disable submit while busy');
 assert.match(page, /creativeChatShell/, 'OneClickCreativePage should use a dedicated chat shell');
@@ -130,14 +145,22 @@ assert.ok(styles.includes('.creativeModeThumb'), 'styles.css should define the a
 assert.ok(styles.includes('transition: transform'), 'styles.css should animate mode switch movement');
 assert.ok(styles.includes('.creativeChatShell.sidebarCollapsed'), 'styles.css should define collapsed sidebar layout');
 assert.ok(styles.includes('.creativeTaskSidebar.collapsed'), 'styles.css should style the collapsed sidebar');
+assert.ok(styles.includes('.creativeHeaderSettings'), 'styles.css should define the settings button in the header card');
+assert.ok(styles.includes('.creativeResearchToggle:not(.active)'), 'styles.css should make default research state look off');
+assert.ok(styles.includes('.creativeExpertSlot'), 'styles.css should reserve space for expert notice');
+assert.ok(styles.includes('min-height: 72px'), 'styles.css should reserve stable height for expert notice');
+assert.ok(styles.includes('.creativeFloatingExpand'), 'styles.css should keep collapsed sidebar expand button visible');
 assert.ok(!page.includes('<div className="agentStatusList">'), 'WorkflowStatusPanel should not render li elements inside a div.agentStatusList');
 assert.ok(page.includes('<ul className="agentStatusList">'), 'WorkflowStatusPanel should render status items inside ul.agentStatusList');
 
 assert.match(app, /OneClickCreativePage/, 'App.jsx should import and render OneClickCreativePage');
 assert.match(app, /<Navigate\s+to="\/creative"\s+replace\s+\/>/, 'App.jsx index route should navigate to /creative');
 
-assert.match(shell, /to="\/creative"/, 'AppShell should include a creative nav item');
-assert.ok(shell.includes(zh.creativeTitle), 'AppShell should render the new creative nav text in normal Chinese');
+assert.ok(shell.includes('{/* <nav className="tabs">'), 'AppShell should comment out the top tab markup without deleting it');
+assert.ok(shell.includes('</nav> */}'), 'AppShell should keep the top tab markup commented out');
+assert.ok(!shell.includes('\n      <nav className="tabs">'), 'AppShell should not render top tabs outside the comment block');
+assert.match(shell, /to="\/creative"/, 'AppShell should keep a creative nav item in the commented tab markup');
+assert.ok(shell.includes(zh.creativeTitle), 'AppShell should keep creative nav text in commented tab markup');
 for (const route of ['/crawl/douyin', '/records/douyin', '/media', '/hyperframes-freeform', '/settings']) {
   assert.ok(shell.includes(`to="${route}"`), `AppShell should preserve nav route: ${route}`);
 }
