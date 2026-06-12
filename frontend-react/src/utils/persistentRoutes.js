@@ -6,7 +6,7 @@ const DEFAULT_STATE = {
   aiSearch: '',
   studioAwemeId: '',
   studioRunId: '',
-  activePage: 'crawl',
+  activePage: 'creative',
 };
 
 function splitPath(pathname = '') {
@@ -23,7 +23,14 @@ function normalizePlatform(value) {
 export function getPersistentRouteState(previous = DEFAULT_STATE, pathname = '/', search = '') {
   const state = { ...DEFAULT_STATE, ...(previous || {}) };
   const parts = splitPath(pathname);
-  const section = parts[0] || 'crawl';
+  const section = parts[0] || 'creative';
+
+  if (section === 'creative') {
+    return {
+      ...state,
+      activePage: 'creative',
+    };
+  }
 
   if (section === 'records') {
     return {

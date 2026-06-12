@@ -5,6 +5,7 @@ import { AiWorkspace } from './pages/AiWorkspace.jsx';
 import { CrawlPage } from './pages/CrawlPage.jsx';
 import { HyperframesStudioPage } from './pages/HyperframesStudioPage.jsx';
 import { MediaWorkspace } from './pages/MediaWorkspace.jsx';
+import { OneClickCreativePage } from './pages/OneClickCreativePage.jsx';
 import { RecordsPage } from './pages/RecordsPage.jsx';
 import { SettingsPage } from './pages/SettingsPage.jsx';
 import { getPersistentRouteState } from './utils/persistentRoutes.js';
@@ -20,6 +21,9 @@ function PersistentPages() {
 
   return (
     <>
+      <div hidden={!isActive('creative')}>
+        <OneClickCreativePage />
+      </div>
       <div hidden={!isActive('crawl')}>
         <CrawlPage routePlatform={routeState.crawlPlatform} />
       </div>
@@ -46,7 +50,7 @@ export function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
-        <Route index element={<Navigate to="/crawl/douyin" replace />} />
+        <Route index element={<Navigate to="/creative" replace />} />
         <Route path="crawl" element={<Navigate to="/crawl/douyin" replace />} />
         <Route path="records" element={<Navigate to="/records/douyin" replace />} />
         <Route path="*" element={<PersistentPages />} />

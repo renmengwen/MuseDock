@@ -13,6 +13,7 @@ export function AppShell() {
       </header>
 
       <nav className="tabs">
+        <NavLink className={navClass} to="/creative">一键创作</NavLink>
         <NavLink className={navClass} to="/crawl/douyin">内容抓取</NavLink>
         <NavLink className={navClass} to="/records/douyin">抓取记录</NavLink>
         <NavLink className={navClass} to="/media">素材工作台</NavLink>
