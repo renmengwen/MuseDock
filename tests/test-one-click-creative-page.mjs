@@ -7,6 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pagePath = path.join(__dirname, '../frontend-react/src/pages/OneClickCreativePage.jsx');
 const appPath = path.join(__dirname, '../frontend-react/src/App.jsx');
 const shellPath = path.join(__dirname, '../frontend-react/src/components/AppShell.jsx');
+const stylesPath = path.join(__dirname, '../frontend-react/src/styles.css');
 
 function textFromCodePoints(points) {
   return String.fromCodePoint(...points);
@@ -42,6 +43,7 @@ assert.ok(fs.existsSync(pagePath), 'missing page frontend-react/src/pages/OneCli
 const page = fs.readFileSync(pagePath, 'utf-8');
 const app = fs.readFileSync(appPath, 'utf-8');
 const shell = fs.readFileSync(shellPath, 'utf-8');
+const styles = fs.readFileSync(stylesPath, 'utf-8');
 
 for (const text of [
   zh.creativeTitle,
@@ -93,6 +95,10 @@ assert.match(page, /getCreativeWorkflow/, 'OneClickCreativePage should poll crea
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');
 assert.match(page, /assetIds:\s*\[\]/, 'OneClickCreativePage payload should preserve empty assetIds');
 assert.match(page, /disabled=\{isBusy\}/, 'OneClickCreativePage should disable submit while busy');
+assert.ok(page.includes('className="agentWorkbench oneClickCreativeWorkbench"'), 'OneClickCreativePage should use a dedicated four-panel workbench class');
+assert.ok(styles.includes('.oneClickCreativeWorkbench'), 'styles.css should define the dedicated one click creative workbench layout');
+assert.ok(!page.includes('<div className="agentStatusList">'), 'WorkflowStatusPanel should not render li elements inside a div.agentStatusList');
+assert.ok(page.includes('<ul className="agentStatusList">'), 'WorkflowStatusPanel should render status items inside ul.agentStatusList');
 
 assert.match(app, /OneClickCreativePage/, 'App.jsx should import and render OneClickCreativePage');
 assert.match(app, /<Navigate\s+to="\/creative"\s+replace\s+\/>/, 'App.jsx index route should navigate to /creative');

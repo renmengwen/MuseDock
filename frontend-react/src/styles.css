@@ -186,6 +186,7 @@ a { color: #fe2c55; text-decoration: none; }
 .placeholderPanel h2 { margin: 0 0 10px; font-size: 20px; }
 .placeholderPanel p { margin: 8px 0 0; color: #69717e; font-size: 14px; }
 .agentWorkbench { display: grid; grid-template-columns: minmax(240px, .85fr) minmax(280px, 1fr) minmax(360px, 1.25fr); gap: 16px; align-items: start; }
+.oneClickCreativeWorkbench { grid-template-columns: minmax(260px, .95fr) minmax(240px, .8fr) minmax(240px, .8fr) minmax(320px, 1.15fr); }
 .agentPanel { min-width: 0; background: #fff; border: 1px solid #e7e9ee; border-radius: 8px; padding: 18px; }
 .agentPanel h3 { margin: 0 0 12px; font-size: 16px; color: #30343b; }
 .agentPanel h3:not(:first-child) { margin-top: 22px; }
@@ -547,6 +548,11 @@ a { color: #fe2c55; text-decoration: none; }
 @media (max-width: 1100px) {
   .agentWorkbench { grid-template-columns: 1fr; }
   .agentResultPanel { max-height: none; }
+}
+@media (max-width: 1280px) and (min-width: 1101px) {
+  .oneClickCreativeWorkbench {
+    grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.1fr);
+  }
 }
 @media (max-width: 1380px) and (min-width: 1101px) {
   .workspaceIntro + .status + .agentWorkbench {

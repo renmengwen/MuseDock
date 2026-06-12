@@ -102,13 +102,13 @@ function WorkflowStatusPanel({ status, message, workflowId, workflow }) {
       <div className={`status ${statusClass}`} aria-live="polite">
         {message || '填写方向或抖音来源后，即可创建视频生成任务。'}
       </div>
-      <div className="agentStatusList">
+      <ul className="agentStatusList">
         <li>
           <span>任务状态</span>
           <strong className={`stepBadge ${getStatusClass(workflow?.status)}`}>{workflowStatus}</strong>
           {workflowId ? <small>任务 ID：{workflowId}</small> : <small>尚未创建创作任务</small>}
         </li>
-      </div>
+      </ul>
     </section>
   );
 }
@@ -257,7 +257,7 @@ export function OneClickCreativePage() {
         </div>
       </div>
 
-      <div className="agentWorkbench">
+      <div className="agentWorkbench oneClickCreativeWorkbench">
         <CreativeInputForm
           input={input}
           setInput={setInput}
