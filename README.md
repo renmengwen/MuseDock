@@ -1,5 +1,7 @@
 # MuseDock
 
+![MuseDock 高级成片页面](docs/assets/musedock-hyperframes-studio.png)
+
 MuseDock 是一个本地优先的短视频素材采集与 AI 成片工作台。它把抖音内容采集、评论缓存、素材准备、音频转写、Agent 脚本生成、TTS 口播、HyperFrames 工程生成、人工编辑、工程校验、MP4 渲染和抽帧质检放在同一个 Web GUI 里，目标是把零散短视频素材沉淀为可复用、可检查、可继续打磨的本地创作资产。
 
 当前项目的主体验是 **高级成片页面**：用户可以从一个抖音 `aweme_id` 创建 HyperFrames 自由成片记录，生成导演策划和可运行的视频工程，直接在页面里编辑 `index.html`、`design.md`、`hyperframes.json` 等工程文件，再执行校验、渲染和抽帧质检。
