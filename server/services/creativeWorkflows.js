@@ -184,6 +184,7 @@ function resolveServices(options = {}) {
   return {
     ...services,
     researchService: services.researchService || defaultResearchService,
+    mediaPipeline: services.mediaPipeline || mediaPipeline,
     agentRuns: services.agentRuns || defaultAgentRuns,
   };
 }
@@ -327,15 +328,189 @@ async function writeSyntheticTextWorkspace(record, mediaRoot, now) {
   };
 }
 
-async function prepareSource(record, mediaRoot, now) {
+function hasPreparedLocalMedia(analysisInput = {}, status = {}) {
+  if (status && Object.prototype.hasOwnProperty.call(status, 'assets')) {
+    const localAssets = analysisInput.local_assets || {};
+    const localVideo = safeString(localAssets.video);
+    const statusVideo = safeString(status.assets?.video?.path);
+    const analysisFrames = Array.isArray(localAssets.frames) ? localAssets.frames : [];
+    const statusFramePaths = new Set(
+      (Array.isArray(status.frames) ? status.frames : [])
+        .map(frame => safeString(frame?.path))
+        .filter(Boolean)
+        .map(framePath => path.resolve(framePath)),
+    );
+    const hasMatchingFrame = analysisFrames.some(framePath => (
+      statusFramePaths.has(path.resolve(safeString(framePath)))
+    ));
+    return !!(
+      (localVideo && statusVideo && path.resolve(localVideo) === path.resolve(statusVideo))
+      || hasMatchingFrame
+    );
+  }
+
+  const localAssets = analysisInput.local_assets || {};
+  const analysisFrames = Array.isArray(localAssets.frames) ? localAssets.frames : [];
+  return !!(
+    safeString(localAssets.video)
+    || analysisFrames.length > 0
+  );
+}
+
+function hasReusableDouyinSource(status) {
+  return !!(
+    status
+    && status.success !== false
+    && status.exists
+    && status.analysis_input
+    && hasPreparedLocalMedia(status.analysis_input, status)
+  );
+}
+
+function createDouyinDetailFailureMessage(detail = {}) {
+  if (detail.needLogin) {
+    return '需要先登录抖音后才能获取视频资料，请扫码登录后重试。';
+  }
+  if (detail.needVerify) {
+    return '抖音需要完成验证后才能获取视频资料，请完成验证后重试。';
+  }
+  const detailMessage = safeString(detail.message || detail.error);
+  return detailMessage
+    ? `获取抖音视频资料失败：${detailMessage}`
+    : '获取抖音视频资料失败，请稍后重试。';
+}
+
+function resolveDouyinDetailGetter(services = {}) {
+  if (typeof services.getVideoDetail === 'function') {
+    return services.getVideoDetail;
+  }
+  if (typeof services.douyinDetailService?.getVideoDetail === 'function') {
+    return services.douyinDetailService.getVideoDetail.bind(services.douyinDetailService);
+  }
+  return require('../scraper/douyin').getVideoDetail;
+}
+
+function updatePreparedDouyinSourceContext(record, metadata = {}, result = {}, now) {
+  const analysisInput = result.analysis_input || {};
+  const video = analysisInput.video || {};
+  const title = safeString(metadata.title || video.title);
+  const description = safeString(metadata.description || video.description);
+  const sourceContext = {
+    ...(record.source_context || {}),
+    ...(record.creative_context?.source_context || {}),
+    status: 'ready',
+    kind: 'douyin',
+    summary: title || description || `抖音视频 ${record.aweme_id}`,
+    transcript: safeString(record.creative_context?.source_context?.transcript),
+    comments_summary: safeString(record.creative_context?.source_context?.comments_summary),
+    douyin_metadata: {
+      ...(record.creative_context?.source_context?.douyin_metadata || {}),
+      ...metadata,
+      aweme_id: safeString(metadata.aweme_id || record.aweme_id),
+      title,
+      description,
+    },
+    diagnostics: {
+      ...(record.creative_context?.source_context?.diagnostics || {}),
+      source_type: 'douyin',
+      prepared_at: now,
+      cache: result.cache || null,
+      steps: result.steps || {},
+    },
+  };
+
+  record.source_context = sourceContext;
+  record.creative_context = {
+    ...record.creative_context,
+    source_context: sourceContext,
+  };
+  return sourceContext;
+}
+
+async function prepareDouyinSource(record, mediaRoot, now, services = {}) {
+  const pipeline = services.mediaPipeline || mediaPipeline;
+  const awemeId = safeString(record.aweme_id);
+  const status = await pipeline.getStatus(awemeId, { rootDir: mediaRoot });
+
+  if (hasReusableDouyinSource(status)) {
+    updatePreparedDouyinSourceContext(record, status.metadata || {}, {
+      analysis_input: status.analysis_input,
+      cache: { metadata: 'local', force: false },
+      steps: status.steps || {},
+    }, now);
+    return {
+      success: true,
+      message: '已复用本地抖音素材。',
+      status,
+    };
+  }
+
+  let metadata = status?.metadata?.aweme_id ? status.metadata : null;
+  let detail = null;
+
+  if (!metadata) {
+    const getVideoDetail = resolveDouyinDetailGetter(services);
+    detail = await getVideoDetail(awemeId);
+    if (!detail || detail.success === false || detail.needLogin || detail.needVerify) {
+      return {
+        success: false,
+        message: createDouyinDetailFailureMessage(detail || {}),
+        detail_diagnostic: detail?.diagnostic,
+      };
+    }
+    metadata = detail.data;
+  }
+
+  if (!metadata?.aweme_id) {
+    return {
+      success: false,
+      aweme_id: awemeId,
+      message: '抖音视频资料缺少 aweme_id，无法准备本地素材。',
+      detail_diagnostic: detail?.diagnostic,
+    };
+  }
+
+  const prepared = await pipeline.prepareDouyinMedia(awemeId, metadata, {
+    rootDir: mediaRoot,
+    force: false,
+  });
+  if (!prepared || prepared.success === false) {
+    return {
+      success: false,
+      message: safeString(prepared?.message || prepared?.error) || '抖音素材准备失败，请稍后重试。',
+      result: prepared,
+    };
+  }
+
+  const preparedStatus = await pipeline.getStatus(awemeId, { rootDir: mediaRoot });
+  if (!hasReusableDouyinSource(preparedStatus)) {
+    return {
+      success: false,
+      message: '抖音素材准备失败：未生成可用的本地视频或关键帧。',
+      result: prepared,
+      status: preparedStatus,
+    };
+  }
+
+  updatePreparedDouyinSourceContext(record, preparedStatus.metadata || metadata, {
+    ...preparedStatus,
+    cache: prepared.cache || { metadata: detail ? 'remote' : 'local', force: false },
+  }, now);
+  return {
+    ...prepared,
+    success: true,
+    message: detail ? '抖音来源资料已获取并准备完成。' : '已复用本地抖音元数据并准备素材。',
+    detail_diagnostic: detail?.diagnostic,
+    elapsed: detail?.elapsed,
+  };
+}
+
+async function prepareSource(record, mediaRoot, now, services = {}) {
   if (record.creative_context?.input?.mode === 'text') {
     return writeSyntheticTextWorkspace(record, mediaRoot, now);
   }
 
-  return {
-    success: true,
-    message: '抖音来源已标记为可复用素材，当前阶段不执行下载。',
-  };
+  return prepareDouyinSource(record, mediaRoot, now, services);
 }
 
 function ensureSuccess(result, fallbackMessage) {
@@ -416,7 +591,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
   };
 
   if (failIfNull(await runStage(record, 'source', rootDir, async () => (
-    ensureSuccess(await prepareSource(record, mediaRoot, getNow(services)), '来源资料准备失败。')
+    ensureSuccess(await prepareSource(record, mediaRoot, getNow(services), services), '来源资料准备失败。')
   ), services))) {
     return createWorkflowSummary(record);
   }

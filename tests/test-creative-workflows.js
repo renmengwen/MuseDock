@@ -162,6 +162,502 @@ async function testCreatesDouyinWorkflowWithOriginalAwemeId() {
   assert.equal(created.creative_context.source_context.douyin_metadata.aweme_id, '7345678901234567890');
 }
 
+async function testPreparesDouyinSourceBeforeAgentRun() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const events = [];
+  let prepared = false;
+  const { services } = createFakeServices({
+    agentRuns: {
+      createDouyinHyperframesFreeformRun: async (awemeId, options) => {
+        events.push(['createRun', awemeId, options.rootDir]);
+        if (!prepared) {
+          return { success: false, message: 'source not prepared' };
+        }
+        return { success: true, status: 'done', run_id: 'run-1', message: 'created' };
+      },
+    },
+    services: {
+      mediaPipeline: {
+        getStatus: async (awemeId, options) => {
+          events.push(['getStatus', awemeId, options.rootDir]);
+          if (prepared) {
+            return {
+              success: true,
+              exists: true,
+              metadata: {
+                aweme_id: awemeId,
+                title: 'Douyin source title',
+                description: 'Douyin source description',
+              },
+              analysis_input: {
+                aweme_id: awemeId,
+                local_assets: {
+                  video: path.join(mediaRoot, awemeId, 'video.mp4'),
+                  frames: [],
+                },
+              },
+              assets: {
+                video: { path: path.join(mediaRoot, awemeId, 'video.mp4') },
+                frames_dir: { count: 0 },
+              },
+            };
+          }
+          return { success: true, exists: false, metadata: null, analysis_input: null };
+        },
+        prepareDouyinMedia: async (awemeId, metadata, options) => {
+          events.push(['prepareMedia', awemeId, options.rootDir, metadata.aweme_id]);
+          prepared = true;
+          return {
+            success: true,
+            message: 'source prepared',
+            analysis_input: {
+              aweme_id: awemeId,
+              local_assets: {
+                video: path.join(mediaRoot, awemeId, 'video.mp4'),
+                frames: [],
+              },
+              video: {
+                title: metadata.title,
+                description: metadata.description,
+              },
+            },
+            steps: {
+              metadata: { status: 'done' },
+              analysis_input: { status: 'done' },
+            },
+          };
+        },
+      },
+      getVideoDetail: async awemeId => {
+        events.push(['getVideoDetail', awemeId]);
+        return {
+          success: true,
+          data: {
+            aweme_id: awemeId,
+            title: 'Douyin source title',
+            description: 'Douyin source description',
+            aweme_url: `https://www.douyin.com/video/${awemeId}`,
+            video_download_url: 'https://example.test/video.mp4',
+          },
+        };
+      },
+    },
+  });
+
+  await createCreativeWorkflow({
+    input: 'https://www.douyin.com/video/7345678901234567890',
+  }, { rootDir, mediaRoot, services });
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+  assert.deepEqual(events.slice(0, 5), [
+    ['getStatus', '7345678901234567890', mediaRoot],
+    ['getVideoDetail', '7345678901234567890'],
+    ['prepareMedia', '7345678901234567890', mediaRoot, '7345678901234567890'],
+    ['getStatus', '7345678901234567890', mediaRoot],
+    ['createRun', '7345678901234567890', mediaRoot],
+  ]);
+  assert.equal(run.creative_context.source_context.status, 'ready');
+  assert.equal(run.creative_context.source_context.summary, 'Douyin source title');
+  assert.equal(run.creative_context.source_context.douyin_metadata.title, 'Douyin source title');
+}
+
+async function testFailsDouyinSourceWhenPreparedMediaIsMissing() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices({
+    services: {
+      mediaPipeline: {
+        getStatus: async () => ({ success: true, exists: false, metadata: null, analysis_input: null }),
+        prepareDouyinMedia: async (awemeId, metadata) => ({
+          success: true,
+          analysis_input: {
+            aweme_id: awemeId,
+            video: {
+              title: metadata.title,
+              description: metadata.description,
+            },
+            local_assets: {
+              video: '',
+              frames: [],
+            },
+          },
+          steps: {
+            video: { status: 'failed', error: 'download failed' },
+            frames: { status: 'skipped' },
+          },
+        }),
+      },
+      getVideoDetail: async awemeId => ({
+        success: true,
+        data: {
+          aweme_id: awemeId,
+          title: 'Douyin source title',
+          description: 'Douyin source description',
+          aweme_url: `https://www.douyin.com/video/${awemeId}`,
+          video_download_url: '',
+        },
+      }),
+    },
+  });
+
+  await createCreativeWorkflow({ input: '7345678901234567890' }, { rootDir, mediaRoot, services });
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, false);
+  assert.equal(run.error.stage, 'source');
+  assert.match(run.error.message, /抖音素材准备失败/);
+  assert.equal(run.stages.find(stage => stage.id === 'source').status, 'failed');
+}
+
+async function testFailsDouyinSourceWhenPreparedPathDoesNotExist() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices({
+    services: {
+      mediaPipeline: {
+        getStatus: async () => ({ success: true, exists: false, metadata: null, analysis_input: null }),
+        prepareDouyinMedia: async (awemeId, metadata) => ({
+          success: true,
+          analysis_input: {
+            aweme_id: awemeId,
+            video: {
+              title: metadata.title,
+            },
+            local_assets: {
+              video: path.join(mediaRoot, awemeId, 'missing-video.mp4'),
+              frames: [],
+            },
+          },
+          steps: {
+            video: { status: 'done' },
+          },
+        }),
+      },
+      getVideoDetail: async awemeId => ({
+        success: true,
+        data: {
+          aweme_id: awemeId,
+          title: 'Douyin source title',
+          aweme_url: `https://www.douyin.com/video/${awemeId}`,
+          video_download_url: 'https://example.test/video.mp4',
+        },
+      }),
+    },
+  });
+
+  await createCreativeWorkflow({ input: '7345678901234567890' }, { rootDir, mediaRoot, services });
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, false);
+  assert.equal(run.error.stage, 'source');
+  assert.match(run.error.message, /未生成可用的本地视频或关键帧/);
+}
+
+async function testRepreparesStaleDouyinAnalysisInputWithoutLocalMedia() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const events = [];
+  let prepared = false;
+  const { services } = createFakeServices({
+    agentRuns: {
+      createDouyinHyperframesFreeformRun: async () => {
+        events.push(['createRun']);
+        return prepared
+          ? { success: true, status: 'done', run_id: 'run-1', message: 'created' }
+          : { success: false, message: 'source not prepared' };
+      },
+    },
+    services: {
+      mediaPipeline: {
+        getStatus: async (awemeId, options) => {
+          events.push(['getStatus', options.rootDir]);
+          if (prepared) {
+            return {
+              success: true,
+              exists: true,
+              metadata: {
+                aweme_id: awemeId,
+                title: 'Cached title',
+                description: 'Cached description',
+                aweme_url: `https://www.douyin.com/video/${awemeId}`,
+                video_download_url: 'https://example.test/video.mp4',
+              },
+              analysis_input: {
+                aweme_id: awemeId,
+                local_assets: {
+                  video: path.join(mediaRoot, awemeId, 'video.mp4'),
+                  frames: [],
+                },
+              },
+              assets: {
+                video: { path: path.join(mediaRoot, awemeId, 'video.mp4') },
+                frames_dir: { count: 0 },
+              },
+            };
+          }
+          return {
+            success: true,
+            exists: true,
+            metadata: {
+              aweme_id: awemeId,
+              title: 'Cached title',
+              description: 'Cached description',
+              aweme_url: `https://www.douyin.com/video/${awemeId}`,
+              video_download_url: 'https://example.test/video.mp4',
+            },
+            analysis_input: {
+              aweme_id: awemeId,
+              local_assets: {
+                video: path.join(mediaRoot, awemeId, 'missing-video.mp4'),
+                frames: [],
+              },
+            },
+            assets: {
+              video: null,
+              frames_dir: { count: 0 },
+            },
+          };
+        },
+        prepareDouyinMedia: async (awemeId, metadata, options) => {
+          events.push(['prepareMedia', options.rootDir, metadata.title]);
+          prepared = true;
+          return {
+            success: true,
+            analysis_input: {
+              aweme_id: awemeId,
+              local_assets: {
+                video: path.join(mediaRoot, awemeId, 'video.mp4'),
+                frames: [],
+              },
+            },
+            steps: {
+              video: { status: 'done' },
+            },
+          };
+        },
+      },
+    },
+  });
+
+  await createCreativeWorkflow({ input: '7345678901234567890' }, { rootDir, mediaRoot, services });
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+  assert.deepEqual(events.slice(0, 4), [
+    ['getStatus', mediaRoot],
+    ['prepareMedia', mediaRoot, 'Cached title'],
+    ['getStatus', mediaRoot],
+    ['createRun'],
+  ]);
+}
+
+async function testRepreparesWhenAnalysisInputDoesNotReferenceCurrentMedia() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const events = [];
+  let prepared = false;
+  const currentVideo = path.join(mediaRoot, '7345678901234567890', 'video.mp4');
+  const { services } = createFakeServices({
+    agentRuns: {
+      createDouyinHyperframesFreeformRun: async () => {
+        events.push(['createRun']);
+        return prepared
+          ? { success: true, status: 'done', run_id: 'run-1', message: 'created' }
+          : { success: false, message: 'source not prepared' };
+      },
+    },
+    services: {
+      mediaPipeline: {
+        getStatus: async (awemeId, options) => {
+          events.push(['getStatus', options.rootDir]);
+          if (prepared) {
+            return {
+              success: true,
+              exists: true,
+              metadata: {
+                aweme_id: awemeId,
+                title: 'Cached title',
+                description: 'Cached description',
+                aweme_url: `https://www.douyin.com/video/${awemeId}`,
+                video_download_url: 'https://example.test/video.mp4',
+              },
+              analysis_input: {
+                aweme_id: awemeId,
+                local_assets: {
+                  video: currentVideo,
+                  frames: [],
+                },
+              },
+              assets: {
+                video: { path: currentVideo },
+                frames_dir: { count: 0 },
+              },
+            };
+          }
+          return {
+            success: true,
+            exists: true,
+            metadata: {
+              aweme_id: awemeId,
+              title: 'Cached title',
+              description: 'Cached description',
+              aweme_url: `https://www.douyin.com/video/${awemeId}`,
+              video_download_url: 'https://example.test/video.mp4',
+            },
+            analysis_input: {
+              aweme_id: awemeId,
+              local_assets: {
+                video: '',
+                frames: [],
+              },
+            },
+            assets: {
+              video: { path: currentVideo },
+              frames_dir: { count: 0 },
+            },
+          };
+        },
+        prepareDouyinMedia: async (awemeId, metadata, options) => {
+          events.push(['prepareMedia', options.rootDir, metadata.title]);
+          prepared = true;
+          return {
+            success: true,
+            analysis_input: {
+              aweme_id: awemeId,
+              local_assets: {
+                video: currentVideo,
+                frames: [],
+              },
+            },
+            steps: {
+              video: { status: 'done' },
+            },
+          };
+        },
+      },
+    },
+  });
+
+  await createCreativeWorkflow({ input: '7345678901234567890' }, { rootDir, mediaRoot, services });
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+  assert.deepEqual(events.slice(0, 4), [
+    ['getStatus', mediaRoot],
+    ['prepareMedia', mediaRoot, 'Cached title'],
+    ['getStatus', mediaRoot],
+    ['createRun'],
+  ]);
+}
+
+async function testRepreparesWhenAnalysisInputFramesAreStale() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const events = [];
+  let prepared = false;
+  const framesDir = path.join(mediaRoot, '7345678901234567890', 'frames');
+  const currentFrame = path.join(framesDir, 'frame-0001.jpg');
+  const staleFrame = path.join(mediaRoot, '7345678901234567890', 'old-frames', 'frame-0001.jpg');
+  const { services } = createFakeServices({
+    agentRuns: {
+      createDouyinHyperframesFreeformRun: async () => {
+        events.push(['createRun']);
+        return prepared
+          ? { success: true, status: 'done', run_id: 'run-1', message: 'created' }
+          : { success: false, message: 'source not prepared' };
+      },
+    },
+    services: {
+      mediaPipeline: {
+        getStatus: async (awemeId, options) => {
+          events.push(['getStatus', options.rootDir]);
+          return {
+            success: true,
+            exists: true,
+            metadata: {
+              aweme_id: awemeId,
+              title: 'Cached title',
+              description: 'Cached description',
+              aweme_url: `https://www.douyin.com/video/${awemeId}`,
+              video_download_url: 'https://example.test/video.mp4',
+            },
+            analysis_input: {
+              aweme_id: awemeId,
+              local_assets: {
+                video: '',
+                frames: prepared ? [currentFrame] : [staleFrame],
+              },
+            },
+            frames: [{ path: currentFrame, name: 'frame-0001.jpg' }],
+            assets: {
+              video: null,
+              frames_dir: { path: framesDir, count: 1 },
+            },
+          };
+        },
+        prepareDouyinMedia: async (awemeId, metadata, options) => {
+          events.push(['prepareMedia', options.rootDir, metadata.title]);
+          prepared = true;
+          return {
+            success: true,
+            analysis_input: {
+              aweme_id: awemeId,
+              local_assets: {
+                video: '',
+                frames: [currentFrame],
+              },
+            },
+            steps: {
+              frames: { status: 'done' },
+            },
+          };
+        },
+      },
+    },
+  });
+
+  await createCreativeWorkflow({ input: '7345678901234567890' }, { rootDir, mediaRoot, services });
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+  assert.deepEqual(events.slice(0, 4), [
+    ['getStatus', mediaRoot],
+    ['prepareMedia', mediaRoot, 'Cached title'],
+    ['getStatus', mediaRoot],
+    ['createRun'],
+  ]);
+}
+
+async function testDouyinLoginRequirementUsesChineseMessage() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices({
+    services: {
+      mediaPipeline: {
+        getStatus: async () => ({ success: true, exists: false, metadata: null, analysis_input: null }),
+        prepareDouyinMedia: async () => {
+          throw new Error('prepare should not run');
+        },
+      },
+      getVideoDetail: async () => ({
+        success: true,
+        needLogin: true,
+        message: 'Login required',
+      }),
+    },
+  });
+
+  await createCreativeWorkflow({ input: '7345678901234567890' }, { rootDir, mediaRoot, services });
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, false);
+  assert.equal(run.error.stage, 'source');
+  assert.match(run.error.message, /登录抖音/);
+  assert.doesNotMatch(run.error.message, /Login required/);
+}
+
 async function testPersistsFailureFromBriefStage() {
   const { rootDir, mediaRoot } = createTempDirs();
   const { services } = createFakeServices({
@@ -203,6 +699,13 @@ async function run() {
   await testCreatesAndRunsTextWorkflow();
   await testRejectsEmptyInput();
   await testCreatesDouyinWorkflowWithOriginalAwemeId();
+  await testPreparesDouyinSourceBeforeAgentRun();
+  await testFailsDouyinSourceWhenPreparedMediaIsMissing();
+  await testFailsDouyinSourceWhenPreparedPathDoesNotExist();
+  await testRepreparesStaleDouyinAnalysisInputWithoutLocalMedia();
+  await testRepreparesWhenAnalysisInputDoesNotReferenceCurrentMedia();
+  await testRepreparesWhenAnalysisInputFramesAreStale();
+  await testDouyinLoginRequirementUsesChineseMessage();
   await testPersistsFailureFromBriefStage();
   await testMissingWorkflowReturnsChineseMessage();
   console.log('creative workflow tests passed');
