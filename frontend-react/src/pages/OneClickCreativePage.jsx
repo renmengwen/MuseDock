@@ -1,5 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
+import {
+  ArrowUp,
+  Bot,
+  CirclePlus,
+  FileText,
+  Globe2,
+  Loader2,
+  PanelLeft,
+  Paperclip,
+  Search,
+  Shield,
+  Sparkles,
+  Zap,
+} from 'lucide-react';
 import { api } from '../api/client.js';
+
+const CREATIVE_TASKS_STORAGE_KEY = 'musedock.creative.tasks.v1';
 
 const STAGE_LABELS = {
   source: '准备来源资料',
@@ -56,40 +72,182 @@ function getErrorMessage(error, fallback) {
   return error?.data?.message || error?.message || fallback;
 }
 
-function CreativeInputForm({ input, setInput, useResearch, setUseResearch, isBusy, onSubmit }) {
+function getTaskTitle(input) {
+  const trimmed = String(input || '').trim();
+  if (!trimmed) return '未命名创作任务';
+  return trimmed.length > 22 ? `${trimmed.slice(0, 22)}...` : trimmed;
+}
+
+function getTaskTimeLabel(value) {
+  if (!value) return '刚刚';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '刚刚';
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function loadStoredTasks() {
+  if (typeof window === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(CREATIVE_TASKS_STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.filter(task => task?.workflow_id).slice(0, 30) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveStoredTasks(tasks) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(CREATIVE_TASKS_STORAGE_KEY, JSON.stringify(tasks.slice(0, 30)));
+}
+
+function upsertTask(tasks, task) {
+  const next = [task, ...tasks.filter(item => item.workflow_id !== task.workflow_id)];
+  return next.slice(0, 30);
+}
+
+function CreativeTaskSidebar({ tasks, selectedWorkflowId, onNewTask, onSelectTask }) {
   return (
-    <section className="agentPanel">
-      <h3>一键创作</h3>
-      <form className="agentOptionGroup" onSubmit={onSubmit}>
-        <label>
-          <span>输入视频方向、抖音 ID 或抖音链接</span>
-          <textarea
-            value={input}
-            onChange={event => setInput(event.target.value)}
-            disabled={isBusy}
-            placeholder="例如：做一期关于 AI 视频生产效率的知识科普，或粘贴抖音视频链接"
-          />
-        </label>
+    <aside className="creativeTaskSidebar">
+      <div className="creativeSidebarBrand">
+        <div className="creativeBrandMark"><Sparkles size={18} /></div>
+        <strong>一键创作</strong>
+        <div className="creativeSidebarTools">
+          <Search size={17} aria-hidden="true" />
+          <PanelLeft size={17} aria-hidden="true" />
+        </div>
+      </div>
 
-        <label className="switchControl">
-          <input
-            type="checkbox"
-            checked={useResearch}
-            onChange={event => setUseResearch(event.target.checked)}
-            disabled={isBusy}
-          />
-          <span className="switchTrack"><span className="switchThumb" /></span>
-          <span className="switchText">联网获取最新资料</span>
-        </label>
+      <button className="creativeNewTaskButton" type="button" onClick={onNewTask}>
+        <CirclePlus size={16} />
+        <span>开启新创作</span>
+      </button>
 
-        <div className="primaryActionGroup">
-          <button className="btn primary" type="submit" disabled={isBusy}>
-            {isBusy ? '创作任务处理中...' : '一键生成视频'}
+      <div className="creativeTaskListHeader">创作任务</div>
+      <div className="creativeTaskList" aria-label="创作任务列表">
+        {tasks.length ? tasks.map(task => (
+          <button
+            type="button"
+            className={`creativeTaskItem ${task.workflow_id === selectedWorkflowId ? 'active' : ''}`}
+            key={task.workflow_id}
+            onClick={() => onSelectTask(task)}
+          >
+            <span>{task.title}</span>
+            <small>{STATUS_TEXT[task.status] || task.status || '等待中'} · {getTaskTimeLabel(task.updated_at || task.created_at)}</small>
+          </button>
+        )) : (
+          <div className="creativeTaskEmpty">
+            <FileText size={18} />
+            <span>提交后，任务会出现在这里。</span>
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function CreativeHeroHeader({ mode }) {
+  return (
+    <div className="creativeHeroHeader">
+      <div className="creativeHeroTitle">
+        <Sparkles size={30} />
+        <h1>使用{mode === 'expert' ? '专家模式' : '快速模式'}开始对话</h1>
+      </div>
+    </div>
+  );
+}
+
+function CreativeModeSwitch({ mode, setMode, disabled }) {
+  return (
+    <div className="creativeModeSwitch" role="tablist" aria-label="创作模式">
+      <button
+        type="button"
+        className={mode === 'quick' ? 'active' : ''}
+        disabled={disabled}
+        onClick={() => setMode('quick')}
+      >
+        <Zap size={15} />
+        <span>快速模式</span>
+      </button>
+      <button
+        type="button"
+        className={mode === 'expert' ? 'active' : ''}
+        disabled={disabled}
+        onClick={() => setMode('expert')}
+      >
+        <Shield size={15} />
+        <span>专家模式</span>
+      </button>
+    </div>
+  );
+}
+
+function AssetContextNotice() {
+  return (
+    <div className="creativeAssetNotice">
+      <Paperclip size={15} />
+      <span>图片素材将在下一阶段开放；本阶段会保留 asset_context 和空 assetIds 结构。</span>
+    </div>
+  );
+}
+
+function CreativePromptComposer({
+  input,
+  setInput,
+  mode,
+  useResearch,
+  setUseResearch,
+  isBusy,
+  onSubmit,
+}) {
+  return (
+    <form className="creativePromptComposer" onSubmit={onSubmit}>
+      <label className="creativePromptLabel" htmlFor="creative-input">
+        输入视频方向、抖音 ID 或抖音链接
+      </label>
+      <textarea
+        id="creative-input"
+        value={input}
+        onChange={event => setInput(event.target.value)}
+        disabled={isBusy}
+        placeholder="给一键创作发送消息"
+        rows={4}
+      />
+
+      <div className="creativeComposerFooter">
+        <div className="creativeQuickActions">
+          <button
+            type="button"
+            className={useResearch ? 'active' : ''}
+            disabled={isBusy}
+            onClick={() => setUseResearch(!useResearch)}
+          >
+            <Globe2 size={15} />
+            <span>联网获取最新资料</span>
+          </button>
+          <button type="button" disabled={isBusy}>
+            <Bot size={15} />
+            <span>智能成片</span>
           </button>
         </div>
-      </form>
-    </section>
+
+        <button className="creativeSubmitButton" type="submit" disabled={isBusy} aria-label="一键生成视频">
+          {isBusy ? <Loader2 size={18} className="spinIcon" /> : <ArrowUp size={19} />}
+        </button>
+      </div>
+
+      {mode === 'expert' ? <AssetContextNotice /> : null}
+      <input type="hidden" value={mode} readOnly />
+    </form>
   );
+}
+
+function CreativeInputForm(props) {
+  return <CreativePromptComposer {...props} />;
 }
 
 function WorkflowStatusPanel({ status, message, workflowId, workflow }) {
@@ -97,8 +255,11 @@ function WorkflowStatusPanel({ status, message, workflowId, workflow }) {
   const workflowStatus = workflow?.status ? (STATUS_TEXT[workflow.status] || workflow.status) : '等待输入';
 
   return (
-    <section className="agentPanel">
-      <h3>创作状态</h3>
+    <section className="creativeDetailCard">
+      <div className="creativeDetailCardHeader">
+        <h3>当前任务</h3>
+        <strong className={`stepBadge ${getStatusClass(workflow?.status)}`}>{workflowStatus}</strong>
+      </div>
       <div className={`status ${statusClass}`} aria-live="polite">
         {message || '填写方向或抖音来源后，即可创建视频生成任务。'}
       </div>
@@ -109,18 +270,6 @@ function WorkflowStatusPanel({ status, message, workflowId, workflow }) {
           {workflowId ? <small>任务 ID：{workflowId}</small> : <small>尚未创建创作任务</small>}
         </li>
       </ul>
-    </section>
-  );
-}
-
-function AssetContextNotice() {
-  return (
-    <section className="agentPanel">
-      <h3>素材上下文</h3>
-      <div className="agentOptionGroup">
-        <h4>图片素材将在下一阶段开放</h4>
-        <p className="mutedText">本阶段保留素材上下文结构，但暂不上传或分析图片素材；提交任务时会携带空的 assetIds 列表。</p>
-      </div>
     </section>
   );
 }
@@ -136,8 +285,11 @@ function WorkflowStageList({ workflow }) {
   }, [workflow]);
 
   return (
-    <section className="agentPanel agentResultPanel">
-      <h3>生成进度</h3>
+    <section className="creativeDetailCard creativeStagePanel">
+      <div className="creativeDetailCardHeader">
+        <h3>生成进度</h3>
+        <span>任务详情</span>
+      </div>
       <div className="agentSteps compact">
         {stages.map(stage => (
           <div className="agentStep" key={stage.id || stage.label}>
@@ -153,14 +305,55 @@ function WorkflowStageList({ workflow }) {
   );
 }
 
+function CreativeTaskDetail({ status, message, workflowId, workflow }) {
+  if (!workflowId && !workflow) return null;
+
+  return (
+    <div className="creativeTaskDetail">
+      <WorkflowStatusPanel status={status} message={message} workflowId={workflowId} workflow={workflow} />
+      <WorkflowStageList workflow={workflow} />
+    </div>
+  );
+}
+
 export function OneClickCreativePage() {
   const [input, setInput] = useState('');
+  const [mode, setMode] = useState('quick');
   const [useResearch, setUseResearch] = useState(false);
   const [workflow, setWorkflow] = useState(null);
   const [workflowId, setWorkflowId] = useState('');
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
+  const [tasks, setTasks] = useState(() => loadStoredTasks());
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
   const isBusy = status === 'creating' || status === 'polling';
+
+  function persistTasks(updater) {
+    setTasks(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveStoredTasks(next);
+      return next;
+    });
+  }
+
+  function startNewTask() {
+    setInput('');
+    setMode('quick');
+    setUseResearch(false);
+    setWorkflow(null);
+    setWorkflowId('');
+    setSelectedWorkflowId('');
+    setStatus('idle');
+    setMessage('');
+  }
+
+  function selectTask(task) {
+    setWorkflowId(task.workflow_id);
+    setSelectedWorkflowId(task.workflow_id);
+    setWorkflow(task.workflow || null);
+    setStatus(task.status === 'done' ? 'done' : 'polling');
+    setMessage(task.message || '正在打开任务详情...');
+  }
 
   async function submitCreativeWorkflow(event) {
     event.preventDefault();
@@ -181,7 +374,7 @@ export function OneClickCreativePage() {
     try {
       const json = await api.createCreativeWorkflow({
         input: trimmed,
-        useResearch,
+        useResearch: mode === 'expert' ? useResearch : false,
         assetIds: [],
         renderOptions: {},
         workflowOptions: {},
@@ -194,9 +387,22 @@ export function OneClickCreativePage() {
         setMessage('创作任务已创建，但未返回任务 ID，请稍后在后端日志中检查。');
         return;
       }
+
+      const task = {
+        workflow_id: nextWorkflowId,
+        title: getTaskTitle(trimmed),
+        input: trimmed,
+        status: nextWorkflow?.status || json?.status || 'queued',
+        message: json?.message || nextWorkflow?.message || '创作任务已创建，正在生成视频...',
+        workflow: nextWorkflow,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      persistTasks(prev => upsertTask(prev, task));
       setWorkflowId(nextWorkflowId);
+      setSelectedWorkflowId(nextWorkflowId);
       setStatus('polling');
-      setMessage(json?.message || nextWorkflow?.message || '创作任务已创建，正在生成视频...');
+      setMessage(task.message);
     } catch (error) {
       setStatus('failed');
       setMessage(getErrorMessage(error, '创建创作任务失败，请稍后重试。'));
@@ -214,6 +420,21 @@ export function OneClickCreativePage() {
 
         const nextWorkflow = getWorkflowPayload(json);
         setWorkflow(nextWorkflow);
+        const nextStatus = nextWorkflow?.status || (json?.success === false ? 'failed' : 'running');
+        const nextMessage = nextWorkflow?.error?.message
+          || nextWorkflow?.message
+          || json?.message
+          || '创作任务已创建，正在生成视频...';
+
+        persistTasks(prev => upsertTask(prev, {
+          workflow_id: workflowId,
+          title: prev.find(task => task.workflow_id === workflowId)?.title || getTaskTitle(nextWorkflow?.creative_context?.input?.raw_text),
+          status: nextStatus,
+          message: nextMessage,
+          workflow: nextWorkflow,
+          created_at: prev.find(task => task.workflow_id === workflowId)?.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }));
 
         if (nextWorkflow?.status === 'done') {
           setStatus('done');
@@ -223,11 +444,11 @@ export function OneClickCreativePage() {
 
         if (nextWorkflow?.status === 'failed' || json?.success === false) {
           setStatus('failed');
-          setMessage(nextWorkflow?.error?.message || nextWorkflow?.message || json?.message || '视频生成失败，请查看任务详情。');
+          setMessage(nextMessage || '视频生成失败，请查看任务详情。');
           return;
         }
 
-        setMessage(nextWorkflow?.message || json?.message || '创作任务已创建，正在生成视频...');
+        setMessage(nextMessage);
       } catch (error) {
         if (!cancelled) {
           setStatus('failed');
@@ -245,31 +466,30 @@ export function OneClickCreativePage() {
   }, [status, workflowId]);
 
   return (
-    <main className="container">
-      <div className="workspaceIntro">
-        <div>
-          <h2>一键创作</h2>
-          <p>输入视频方向、抖音 ID 或抖音链接，创建从资料准备到视频渲染的一键生成流程。</p>
-        </div>
-        <div className="settingsSummary">
-          <strong>{workflowId || '等待创建'}</strong>
-          <span>{workflow?.status ? (STATUS_TEXT[workflow.status] || workflow.status) : '尚未开始'}</span>
-        </div>
-      </div>
+    <main className="creativeChatShell">
+      <CreativeTaskSidebar
+        tasks={tasks}
+        selectedWorkflowId={selectedWorkflowId}
+        onNewTask={startNewTask}
+        onSelectTask={selectTask}
+      />
 
-      <div className="agentWorkbench oneClickCreativeWorkbench">
-        <CreativeInputForm
-          input={input}
-          setInput={setInput}
-          useResearch={useResearch}
-          setUseResearch={setUseResearch}
-          isBusy={isBusy}
-          onSubmit={submitCreativeWorkflow}
-        />
-        <WorkflowStatusPanel status={status} message={message} workflowId={workflowId} workflow={workflow} />
-        <AssetContextNotice />
-        <WorkflowStageList workflow={workflow} />
-      </div>
+      <section className="creativeChatMain">
+        <div className={`creativeChatCenter ${selectedWorkflowId ? 'hasDetail' : ''}`}>
+          <CreativeHeroHeader mode={mode} />
+          <CreativeModeSwitch mode={mode} setMode={setMode} disabled={isBusy} />
+          <CreativeInputForm
+            input={input}
+            setInput={setInput}
+            mode={mode}
+            useResearch={useResearch}
+            setUseResearch={setUseResearch}
+            isBusy={isBusy}
+            onSubmit={submitCreativeWorkflow}
+          />
+          <CreativeTaskDetail status={status} message={message} workflowId={selectedWorkflowId} workflow={workflow} />
+        </div>
+      </section>
     </main>
   );
 }

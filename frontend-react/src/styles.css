@@ -314,6 +314,343 @@ a { color: #fe2c55; text-decoration: none; }
 .settingsFormGrid input { width: 100%; height: 38px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 10px; background: #fff; color: #30343b; font-size: 13px; }
 .settingsWideField { grid-column: 1 / -1; }
 
+.creativeChatShell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: calc(100vh - 92px);
+  background: #fff;
+}
+.creativeTaskSidebar {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 18px;
+  min-width: 0;
+  padding: 20px 12px 16px;
+  border-right: 1px solid #eef1f5;
+  background: #f8fafc;
+}
+.creativeSidebarBrand {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: #2563eb;
+}
+.creativeBrandMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: #eef4ff;
+}
+.creativeSidebarBrand strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 20px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.creativeSidebarTools {
+  display: inline-flex;
+  gap: 12px;
+  color: #667085;
+}
+.creativeNewTaskButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 8px 22px rgba(15,23,42,.06);
+}
+.creativeNewTaskButton:hover {
+  border-color: #bfdbfe;
+  color: #2563eb;
+}
+.creativeTaskListHeader {
+  padding: 0 10px;
+  color: #98a2b3;
+  font-size: 12px;
+  font-weight: 700;
+}
+.creativeTaskList {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+}
+.creativeTaskItem {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #1f2937;
+  text-align: left;
+  cursor: pointer;
+}
+.creativeTaskItem:hover {
+  background: #fff;
+  border-color: #e5e7eb;
+}
+.creativeTaskItem.active {
+  background: #eef4ff;
+  border-color: #bfdbfe;
+  color: #1d4ed8;
+}
+.creativeTaskItem span {
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.creativeTaskItem small {
+  overflow: hidden;
+  color: #8a93a2;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.creativeTaskEmpty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 16px 10px;
+  color: #98a2b3;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.creativeChatMain {
+  min-width: 0;
+  overflow: auto;
+  background: #fff;
+}
+.creativeChatCenter {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 22px;
+  width: min(100%, 920px);
+  min-height: calc(100vh - 92px);
+  margin: 0 auto;
+  padding: 56px 32px;
+}
+.creativeChatCenter.hasDetail {
+  align-content: start;
+  padding-top: 72px;
+}
+.creativeHeroHeader {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+}
+.creativeHeroTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #2563eb;
+}
+.creativeHeroTitle h1 {
+  margin: 0;
+  color: #111827;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+.creativeModeSwitch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 286px);
+  min-height: 40px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #fff;
+}
+.creativeModeSwitch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: #111827;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.creativeModeSwitch button.active {
+  background: #eef4ff;
+  color: #2563eb;
+  box-shadow: inset 0 0 0 1px #bcd0ff;
+}
+.creativeModeSwitch button:disabled {
+  cursor: not-allowed;
+  opacity: .64;
+}
+.creativePromptComposer {
+  display: grid;
+  gap: 10px;
+  width: min(100%, 776px);
+  min-height: 124px;
+  padding: 17px 12px 10px;
+  border: 1px solid #dfe3ea;
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 16px 38px rgba(15,23,42,.07);
+}
+.creativePromptLabel {
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.creativePromptComposer textarea {
+  width: 100%;
+  min-height: 58px;
+  max-height: 220px;
+  resize: vertical;
+  border: 0;
+  outline: 0;
+  padding: 0 4px;
+  color: #111827;
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.55;
+}
+.creativePromptComposer textarea::placeholder {
+  color: #a4acb8;
+}
+.creativePromptComposer textarea:disabled {
+  color: #8a93a2;
+}
+.creativeComposerFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.creativeQuickActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.creativeQuickActions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  border: 1px solid #bcd0ff;
+  border-radius: 999px;
+  background: #f4f7ff;
+  color: #2563eb;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.creativeQuickActions button.active {
+  background: #e6efff;
+  box-shadow: inset 0 0 0 1px #8fb0ff;
+}
+.creativeQuickActions button:disabled {
+  cursor: not-allowed;
+  opacity: .62;
+}
+.creativeSubmitButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border: 0;
+  border-radius: 50%;
+  background: #a9bbff;
+  color: #fff;
+  cursor: pointer;
+}
+.creativeSubmitButton:hover:not(:disabled) {
+  background: #2563eb;
+}
+.creativeSubmitButton:disabled {
+  cursor: not-allowed;
+  opacity: .64;
+}
+.spinIcon {
+  animation: spin .8s linear infinite;
+}
+.creativeAssetNotice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.creativeTaskDetail {
+  display: grid;
+  grid-template-columns: minmax(260px, .8fr) minmax(340px, 1fr);
+  gap: 14px;
+  width: min(100%, 820px);
+}
+.creativeDetailCard {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15,23,42,.05);
+}
+.creativeDetailCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.creativeDetailCardHeader h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 15px;
+}
+.creativeDetailCardHeader span {
+  color: #8a93a2;
+  font-size: 12px;
+}
+.creativeDetailCard .status {
+  margin-bottom: 12px;
+}
+.creativeStagePanel {
+  max-height: min(58vh, 520px);
+  overflow: auto;
+}
+
 .container:has(> .workspaceIntro + .status + .agentWorkbench) {
   padding-block: 22px 32px;
   background:
@@ -512,6 +849,37 @@ a { color: #fe2c55; text-decoration: none; }
 }
 @media (max-width: 760px) {
   .container { padding: 18px 16px; }
+  .creativeChatShell {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+  .creativeTaskSidebar {
+    max-height: 280px;
+    border-right: 0;
+    border-bottom: 1px solid #eef1f5;
+  }
+  .creativeChatCenter,
+  .creativeChatCenter.hasDetail {
+    width: 100%;
+    min-height: auto;
+    padding: 36px 16px;
+  }
+  .creativeHeroTitle {
+    align-items: flex-start;
+  }
+  .creativeHeroTitle h1 {
+    font-size: 21px;
+  }
+  .creativePromptComposer {
+    width: 100%;
+  }
+  .creativeComposerFooter {
+    align-items: flex-end;
+  }
+  .creativeTaskDetail {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
   .toolbar, .mediaHeader, .workspaceIntro, .settingsPanelHeader, .modelConfigHeader { flex-direction: column; align-items: stretch; }
   .tabs { overflow-x: auto; }
   .tabs a { white-space: nowrap; padding: 0 16px; }

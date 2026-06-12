@@ -15,6 +15,12 @@ function textFromCodePoints(points) {
 
 const zh = {
   creativeTitle: textFromCodePoints([0x4e00, 0x952e, 0x521b, 0x4f5c]),
+  newTask: textFromCodePoints([0x5f00, 0x542f, 0x65b0, 0x521b, 0x4f5c]),
+  taskList: textFromCodePoints([0x521b, 0x4f5c, 0x4efb, 0x52a1]),
+  quickMode: textFromCodePoints([0x5feb, 0x901f, 0x6a21, 0x5f0f]),
+  expertMode: textFromCodePoints([0x4e13, 0x5bb6, 0x6a21, 0x5f0f]),
+  taskDetail: textFromCodePoints([0x4efb, 0x52a1, 0x8be6, 0x60c5]),
+  currentTask: textFromCodePoints([0x5f53, 0x524d, 0x4efb, 0x52a1]),
   inputLabel: textFromCodePoints([0x8f93, 0x5165, 0x89c6, 0x9891, 0x65b9, 0x5411, 0x3001, 0x6296, 0x97f3, 0x20, 0x49, 0x44, 0x20, 0x6216, 0x6296, 0x97f3, 0x94fe, 0x63a5]),
   researchToggle: textFromCodePoints([0x8054, 0x7f51, 0x83b7, 0x53d6, 0x6700, 0x65b0, 0x8d44, 0x6599]),
   assetNotice: textFromCodePoints([0x56fe, 0x7247, 0x7d20, 0x6750, 0x5c06, 0x5728, 0x4e0b, 0x4e00, 0x9636, 0x6bb5, 0x5f00, 0x653e]),
@@ -47,6 +53,12 @@ const styles = fs.readFileSync(stylesPath, 'utf-8');
 
 for (const text of [
   zh.creativeTitle,
+  zh.newTask,
+  zh.taskList,
+  zh.quickMode,
+  zh.expertMode,
+  zh.taskDetail,
+  zh.currentTask,
   zh.inputLabel,
   zh.researchToggle,
   zh.assetNotice,
@@ -82,6 +94,11 @@ for (const mojibake of ['涓€閿', '鑱旂綉', '鍥剧墖', '姝ｅ湪', '璇
 }
 
 for (const symbol of [
+  'CreativeTaskSidebar',
+  'CreativeHeroHeader',
+  'CreativeModeSwitch',
+  'CreativePromptComposer',
+  'CreativeTaskDetail',
   'CreativeInputForm',
   'WorkflowStageList',
   'WorkflowStatusPanel',
@@ -93,10 +110,17 @@ for (const symbol of [
 assert.match(page, /createCreativeWorkflow/, 'OneClickCreativePage should create creative workflows');
 assert.match(page, /getCreativeWorkflow/, 'OneClickCreativePage should poll creative workflows');
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');
+assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');
+assert.match(page, /window\.localStorage\.setItem/, 'OneClickCreativePage should save submitted tasks to localStorage');
+assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should automatically enter the created task detail');
 assert.match(page, /assetIds:\s*\[\]/, 'OneClickCreativePage payload should preserve empty assetIds');
 assert.match(page, /disabled=\{isBusy\}/, 'OneClickCreativePage should disable submit while busy');
-assert.ok(page.includes('className="agentWorkbench oneClickCreativeWorkbench"'), 'OneClickCreativePage should use a dedicated four-panel workbench class');
-assert.ok(styles.includes('.oneClickCreativeWorkbench'), 'styles.css should define the dedicated one click creative workbench layout');
+assert.ok(page.includes('className="creativeChatShell"'), 'OneClickCreativePage should use a dedicated chat shell');
+assert.ok(page.includes('className="creativeTaskSidebar"'), 'OneClickCreativePage should render a left task sidebar');
+assert.ok(page.includes('className="creativePromptComposer"'), 'OneClickCreativePage should render a central prompt composer');
+assert.ok(styles.includes('.creativeChatShell'), 'styles.css should define the creative chat shell layout');
+assert.ok(styles.includes('.creativeTaskSidebar'), 'styles.css should define the creative task sidebar');
+assert.ok(styles.includes('.creativePromptComposer'), 'styles.css should define the creative prompt composer');
 assert.ok(!page.includes('<div className="agentStatusList">'), 'WorkflowStatusPanel should not render li elements inside a div.agentStatusList');
 assert.ok(page.includes('<ul className="agentStatusList">'), 'WorkflowStatusPanel should render status items inside ul.agentStatusList');
 
