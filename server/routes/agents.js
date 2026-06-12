@@ -84,6 +84,20 @@ router.post('/douyin/:aweme_id/storyboard-plan-runs', async (req, res) => {
   }
 });
 
+router.post('/douyin/:aweme_id/hyperframes-freeform-runs', async (req, res) => {
+  try {
+    const result = await agentRuns.createDouyinHyperframesFreeformRun(req.params.aweme_id);
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      status: 'failed',
+      message: '高级成片记录创建接口异常，请稍后重试。',
+    });
+  }
+});
+
 router.get('/douyin/:aweme_id/runs', async (req, res) => {
   try {
     const result = await agentRuns.listDouyinAgentRuns(req.params.aweme_id);
@@ -294,6 +308,7 @@ router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/brief', async (
   try {
     const result = await agentRuns.generateDouyinRunHyperframesFreeformBrief(req.params.aweme_id, req.params.run_id, {
       briefOptions: req.body || {},
+      logger: console,
     });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {

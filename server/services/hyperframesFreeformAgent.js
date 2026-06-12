@@ -131,6 +131,8 @@ function buildFreeformProjectMessages({ run = {}, brief = {}, skillContext = '',
         '5. 所有 files 内容必须是字符串。',
         '6. index.html 应是完整 HTML，可以直接作为 HyperFrames 工程入口。',
         '7. design.md 记录视觉设计、动效、验证和渲染说明。',
+        '8. index.html 的根合成元素必须包含 data-composition-id="main" 和 data-duration="<总秒数>"；如果使用 CSS/WAAPI/requestAnimationFrame 动画，不要省略 data-duration。',
+        '9. CSS font-family 只能使用 HyperFrames 可映射字体，例如 inter、jetbrains-mono、montserrat、noto-sans、open-sans；不要使用 Microsoft YaHei、PingFang SC、SFMono-Regular 等系统字体名。',
         '',
         '输出示例：',
         safeJson({

@@ -37,6 +37,10 @@ for (const component of [
 
 const projectPanelPath = path.join(componentsDir, 'ProjectPanel.jsx');
 const projectPanel = fs.readFileSync(projectPanelPath, 'utf-8');
+const sidebarPath = path.join(componentsDir, 'StudioSidebar.jsx');
+const sidebar = fs.readFileSync(sidebarPath, 'utf-8');
+assert.match(sidebar, /createFreeformRun/, 'StudioSidebar should accept a callback for creating a new advanced video run');
+assert.ok(sidebar.includes('新建成片记录'), 'StudioSidebar should render a clear create-run button');
 assert.match(
   projectPanel,
   /loadedFileName/,

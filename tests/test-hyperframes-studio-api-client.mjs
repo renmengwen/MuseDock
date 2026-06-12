@@ -8,6 +8,7 @@ const clientPath = path.join(__dirname, '../frontend-react/src/api/client.js');
 const source = fs.readFileSync(clientPath, 'utf-8');
 
 const expectedMethods = [
+  'createDouyinHyperframesFreeformRun',
   'generateHyperframesFreeformBrief',
   'generateHyperframesFreeformProject',
   'checkHyperframesFreeformProject',
@@ -22,6 +23,7 @@ for (const method of expectedMethods) {
 }
 
 for (const segment of [
+  'hyperframes-freeform-runs',
   'hyperframes-freeform/brief',
   'hyperframes-freeform/project',
   'hyperframes-freeform/check',
@@ -33,6 +35,7 @@ for (const segment of [
 }
 
 assert.match(source, /generateHyperframesFreeformBrief\(awemeId,\s*runId,\s*payload\s*=\s*\{\}/);
+assert.match(source, /createDouyinHyperframesFreeformRun\(awemeId\)/);
 assert.match(source, /generateHyperframesFreeformProject\(awemeId,\s*runId,\s*payload\s*=\s*\{\}/);
 assert.match(source, /renderHyperframesFreeformProject\(awemeId,\s*runId,\s*payload\s*=\s*\{\}/);
 assert.match(source, /saveHyperframesFreeformFile\(awemeId,\s*runId,\s*fileName,\s*content\)/);

@@ -227,6 +227,14 @@ export function MediaWorkspace({ routeAwemeId = '' } = {}) {
     navigate(`/ai?aweme_id=${encodeURIComponent(selectedAwemeId)}`);
   }
 
+  function goToHyperframesStudio() {
+    if (!selectedAwemeId) {
+      setStatus({ type: 'error', message: '请先选择或准备一个抖音视频素材' });
+      return;
+    }
+    navigate(`/hyperframes-freeform/${encodeURIComponent(selectedAwemeId)}`);
+  }
+
   function selectAwemeId() {
     const awemeId = awemeIdInput.trim();
     if (!awemeId) {
@@ -296,6 +304,7 @@ export function MediaWorkspace({ routeAwemeId = '' } = {}) {
         onOpenTarget={openMediaTarget}
         openingTarget={openingTarget}
         onGoToAiWorkspace={goToAiWorkspace}
+        onGoToHyperframesStudio={goToHyperframesStudio}
       />
     </main>
   );

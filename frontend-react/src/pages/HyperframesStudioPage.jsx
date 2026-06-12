@@ -34,6 +34,7 @@ export function HyperframesStudioPage({ awemeId = '', runId = '' }) {
           busyAction={studio.busyAction}
           canUseWorkflow={studio.canUseRun}
           refreshRuns={studio.refreshRuns}
+          createFreeformRun={studio.createFreeformRun}
           generateBrief={studio.generateBrief}
           generateProject={studio.generateProject}
           checkProject={studio.checkProject}

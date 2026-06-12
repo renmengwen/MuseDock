@@ -45,6 +45,14 @@ async function run() {
   assert.equal(missing.success, false);
   assert.match(missing.message, /未找到 HyperFrames skill/);
 
+  const builtin = await skillContext.loadHyperframesSkillContext({
+    env: {},
+    maxChars: 500,
+  });
+  assert.equal(builtin.success, true);
+  assert.match(builtin.source_dir, /server[\\/]resources[\\/]hyperframes-skills-official$/);
+  assert.match(builtin.prompt_context, /HyperFrames/);
+
   const projectDir = path.join(root, 'project');
   await skillContext.copySkillSnapshot({
     sourceDir: skillDir,

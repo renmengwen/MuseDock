@@ -27,6 +27,25 @@ const MAX_COMMENTS_CHARS = agentTemplates.MAX_COMMENTS_CHARS;
 const TTS_TARGET_DURATION_TOLERANCE = 1.25;
 const CHINESE_TTS_CHARS_PER_SECOND = 5.4;
 const runUpdateQueues = new Map();
+const noopLogger = {
+  info() {},
+  warn() {},
+  error() {},
+};
+
+function getLogger(options = {}) {
+  return options.logger || noopLogger;
+}
+
+function logEvent(logger, level, event) {
+  const target = logger && typeof logger[level] === 'function' ? logger[level] : null;
+  if (!target) return;
+  try {
+    target.call(logger, event);
+  } catch {
+    // Logging must never interrupt the media workflow.
+  }
+}
 
 function createRunId(template = TEMPLATE_VIRAL_REWRITE) {
   const stamp = new Date().toISOString()
@@ -547,6 +566,82 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   return persistRun(awemeId, run, rootDir);
 }
 
+async function createDouyinHyperframesFreeformRun(awemeId, options = {}) {
+  const rootDir = options.rootDir;
+  const steps = [];
+
+  if (!isSafeId(awemeId)) {
+    return createInvalidAwemeResult(awemeId);
+  }
+
+  const paths = mediaPipeline.getMediaPaths(awemeId, rootDir);
+  const status = await mediaPipeline.getStatus(awemeId, { rootDir });
+  steps.push(makeStep('media', '检查视频素材', status.exists ? 'done' : 'failed'));
+  if (!status.exists) {
+    return createFailureRun(awemeId, 'hyperframes_freeform', '未找到该视频素材，请先准备该视频的本地素材。', {
+      rootDir,
+      steps,
+      persist: false,
+    });
+  }
+
+  const analysisInput = await readJsonIfExists(paths.analysisInput);
+  steps.push(makeStep(
+    'analysis_input',
+    '读取素材上下文',
+    analysisInput ? 'done' : 'failed',
+    analysisInput ? '' : '未找到 analysis_input.json',
+  ));
+  if (!analysisInput) {
+    return createFailureRun(awemeId, 'hyperframes_freeform', '未找到素材上下文，请先重新准备 AI 素材。', {
+      rootDir,
+      steps,
+    });
+  }
+
+  const transcript = await readJsonIfExists(paths.transcript);
+  steps.push(makeStep(
+    'transcript',
+    '读取转写文本',
+    transcript?.text ? 'done' : 'skipped',
+    transcript?.text ? '' : '未找到转写文本，导演策划会仅基于素材上下文生成。',
+  ));
+
+  const now = new Date().toISOString();
+  const run = {
+    success: true,
+    run_id: createRunId('hyperframes_freeform'),
+    template: 'hyperframes_freeform',
+    aweme_id: String(awemeId),
+    status: 'ready',
+    steps,
+    input_summary: createInputSummary({ analysisInput, transcript, comments: [] }),
+    result: {
+      summary: '',
+      rewrite_script: transcript?.text || '',
+      video_brief: {
+        title: analysisInput?.video?.title || '',
+        target_duration_sec: 60,
+        beats: [],
+      },
+    },
+    hyperframes_freeform: createDefaultHyperframesFreeformState(),
+    message: '已新建高级成片记录，可以开始生成导演策划。',
+    created_at: now,
+    updated_at: now,
+  };
+
+  const persisted = await persistRun(awemeId, run, rootDir);
+  return {
+    ...persisted,
+    success: true,
+    aweme_id: String(awemeId),
+    run_id: persisted.run_id,
+    run: persisted,
+    message: persisted.message,
+  };
+}
+
 async function listDouyinAgentRuns(awemeId, options = {}) {
   if (!isSafeId(awemeId)) {
     return {
@@ -963,7 +1058,7 @@ function createFreeformFailureResponse(awemeId, runId, state, message) {
   };
 }
 
-async function markFreeformBriefFailed(awemeId, runId, message, options = {}, operationId = '') {
+async function markFreeformBriefFailed(awemeId, runId, message, options = {}, operationId = '', logMeta = {}) {
   const update = operationId
     ? updater => updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'brief', operationId, updater, options)
     : updater => updateRunHyperframesFreeform(awemeId, runId, updater, options);
@@ -975,6 +1070,15 @@ async function markFreeformBriefFailed(awemeId, runId, message, options = {}, op
       message,
     },
   }), options);
+  logEvent(getLogger(options), 'warn', {
+    event: 'hyperframes_freeform_brief',
+    stage: 'failed',
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    operation_id: operationId,
+    message: updated.message || message,
+    ...logMeta,
+  });
   return createFreeformFailureResponse(
     awemeId,
     runId,
@@ -1008,6 +1112,16 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
   if (!detail.success) return detail;
 
   const operationId = createFreeformOperationId('brief');
+  const logger = getLogger(options);
+  const startedAt = Date.now();
+  const baseLog = {
+    event: 'hyperframes_freeform_brief',
+    aweme_id: String(awemeId),
+    run_id: String(runId),
+    operation_id: operationId,
+  };
+  const elapsedMeta = () => ({ elapsed_ms: Date.now() - startedAt });
+  logEvent(logger, 'info', { ...baseLog, stage: 'started' });
   await updateRunHyperframesFreeform(awemeId, runId, current => ({
     status: 'generating',
     brief: {
@@ -1034,8 +1148,16 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
   }
   if (!context.success) {
     const message = context.message || '读取 HyperFrames skill 上下文失败。';
-    return markFreeformBriefFailed(awemeId, runId, message, options, operationId);
+    logEvent(logger, 'warn', { ...baseLog, stage: 'skill_context_failed', message, ...elapsedMeta() });
+    return markFreeformBriefFailed(awemeId, runId, message, options, operationId, elapsedMeta());
   }
+  logEvent(logger, 'info', {
+    ...baseLog,
+    stage: 'skill_context_loaded',
+    source_dir: context.source_dir || '',
+    prompt_context_chars: String(context.prompt_context || '').length,
+    ...elapsedMeta(),
+  });
 
   const freeformAgent = options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent;
   let messages;
@@ -1046,17 +1168,22 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
       options: options.briefOptions || {},
     });
   } catch (error) {
+    const message = `导演策划生成失败：${error.message || '构建提示失败'}`;
+    logEvent(logger, 'error', { ...baseLog, stage: 'build_messages_failed', message, ...elapsedMeta() });
     return markFreeformBriefFailed(
       awemeId,
       runId,
-      `导演策划生成失败：${error.message || '构建提示失败'}`,
+      message,
       options,
       operationId,
+      elapsedMeta(),
     );
   }
+  logEvent(logger, 'info', { ...baseLog, stage: 'messages_built', message_count: messages.length, ...elapsedMeta() });
   const modelService = options.aiTextModel || defaultAiTextModel;
   let modelResult;
   try {
+    logEvent(logger, 'info', { ...baseLog, stage: 'model_request_started', stream: true, temperature: 0.35, ...elapsedMeta() });
     modelResult = await modelService.callTextModel({
       messages,
       temperature: 0.35,
@@ -1067,6 +1194,7 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
       maxRetries: options.maxRetries,
     });
   } catch (error) {
+    logEvent(logger, 'error', { ...baseLog, stage: 'model_request_threw', message: error.message || '模型调用失败', ...elapsedMeta() });
     modelResult = {
       success: false,
       message: error.message || '模型调用失败',
@@ -1075,25 +1203,51 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
 
   if (!modelResult.success) {
     const message = modelResult.message || '导演策划生成失败。';
-    return markFreeformBriefFailed(awemeId, runId, message, options, operationId);
+    logEvent(logger, 'warn', {
+      ...baseLog,
+      stage: 'model_failed',
+      message,
+      configured: modelResult.configured,
+      model: modelResult.model,
+      ...elapsedMeta(),
+    });
+    return markFreeformBriefFailed(awemeId, runId, message, options, operationId, elapsedMeta());
   }
+  logEvent(logger, 'info', {
+    ...baseLog,
+    stage: 'model_succeeded',
+    text_chars: String(modelResult.text || modelResult.raw_output || '').length,
+    model: modelResult.model,
+    ...elapsedMeta(),
+  });
 
   let parsed;
   try {
     parsed = freeformAgent.parseFreeformBriefResponse(modelResult.text || modelResult.raw_output || '');
   } catch (error) {
+    const message = `导演策划解析失败：${error.message || '解析失败'}`;
+    logEvent(logger, 'error', { ...baseLog, stage: 'parse_threw', message, ...elapsedMeta() });
     return markFreeformBriefFailed(
       awemeId,
       runId,
-      `导演策划解析失败：${error.message || '解析失败'}`,
+      message,
       options,
       operationId,
+      elapsedMeta(),
     );
   }
   if (!parsed.success) {
     const message = parsed.message || '解析导演策划失败。';
-    return markFreeformBriefFailed(awemeId, runId, message, options, operationId);
+    logEvent(logger, 'warn', { ...baseLog, stage: 'parse_failed', message, ...elapsedMeta() });
+    return markFreeformBriefFailed(awemeId, runId, message, options, operationId, elapsedMeta());
   }
+  logEvent(logger, 'info', {
+    ...baseLog,
+    stage: 'parsed',
+    title: parsed.brief.title || '',
+    has_design_md: typeof parsed.brief.design_md === 'string' && parsed.brief.design_md.trim().length > 0,
+    ...elapsedMeta(),
+  });
 
   const summary = parsed.brief.summary || parsed.brief.title || '导演策划已生成。';
   const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'brief', operationId, current => ({
@@ -1109,6 +1263,12 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
   }), options);
 
   if (!updated.success) {
+    logEvent(logger, 'warn', {
+      ...baseLog,
+      stage: 'stale_result',
+      message: updated.message || '已有更新的生成任务完成，已忽略旧结果。',
+      ...elapsedMeta(),
+    });
     return {
       success: false,
       aweme_id: String(awemeId),
@@ -1117,6 +1277,13 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
       hyperframes_freeform: updated.hyperframes_freeform,
     };
   }
+
+  logEvent(logger, 'info', {
+    ...baseLog,
+    stage: 'completed',
+    summary,
+    ...elapsedMeta(),
+  });
 
   return {
     success: true,
@@ -2783,6 +2950,7 @@ async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
 module.exports = {
   TEMPLATE_VIRAL_REWRITE,
   createDouyinAgentRun,
+  createDouyinHyperframesFreeformRun,
   createDouyinStoryboardPlanRun,
   listDouyinAgentRuns,
   getDouyinAgentRun,

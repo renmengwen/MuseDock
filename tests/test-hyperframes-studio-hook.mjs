@@ -16,6 +16,7 @@ assert.match(
 
 for (const action of [
   'generateBrief',
+  'createFreeformRun',
   'generateProject',
   'checkProject',
   'renderVideo',
@@ -50,6 +51,13 @@ for (const stateName of [
 
 assert.match(source, /\bmakeStatus\b/, 'missing makeStatus helper');
 assert.match(source, /const\s+\[busyAction,\s*setBusyAction\]\s*=\s*useState/, 'missing busyAction state');
+assert.match(source, /autoRefreshKeyRef\s*=\s*useRef\(['"]{2}\)/, 'auto run loading should be de-duplicated');
+assert.match(source, /if\s*\(!initialAwemeId\)\s*return/, 'auto run loading should require an initial aweme_id');
+assert.match(
+  source,
+  /refreshRuns\(initialAwemeId,\s*initialRunId\)\.catch\(\(\)\s*=>\s*\{\}\)/,
+  'useHyperframesStudio should automatically load runs when opened with an initial aweme_id',
+);
 
 for (const method of [
   'api.generateHyperframesFreeformBrief',
@@ -60,6 +68,7 @@ for (const method of [
   'api.getHyperframesFreeformFile',
   'api.saveHyperframesFreeformFile',
   'api.listDouyinAgentRuns',
+  'api.createDouyinHyperframesFreeformRun',
   'api.getDouyinAgentRun',
 ]) {
   assert.ok(source.includes(method), `missing API call ${method}`);

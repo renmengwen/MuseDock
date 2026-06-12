@@ -182,6 +182,13 @@ export const api = {
       body: JSON.stringify({ promptOptions }),
     });
   },
+  createDouyinHyperframesFreeformRun(awemeId) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/hyperframes-freeform-runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+  },
   listDouyinAgentRuns(awemeId) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`);
   },

@@ -23,6 +23,7 @@ export function StudioSidebar({
   busyAction = '',
   canUseWorkflow = false,
   refreshRuns,
+  createFreeformRun,
   generateBrief,
   generateProject,
   checkProject,
@@ -64,6 +65,14 @@ export function StudioSidebar({
           onClick={() => runSafely(() => refreshRuns())}
         >
           {busyAction === 'refreshRuns' ? '正在读取运行记录...' : '读取运行记录'}
+        </button>
+        <button
+          className="btn primary"
+          type="button"
+          disabled={!canReadRuns}
+          onClick={() => runSafely(() => createFreeformRun())}
+        >
+          {busyAction === 'createFreeformRun' ? '正在新建成片记录...' : '新建成片记录'}
         </button>
       </div>
 

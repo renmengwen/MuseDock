@@ -21,11 +21,14 @@ function hasSkillFile(dir) {
 }
 
 function resolveHyperframesSkillDir({ skillRoot = '', env = process.env } = {}) {
-  const candidates = [
-    skillRoot,
-    env.HYPERFRAMES_SKILL_ROOT,
-    path.resolve(__dirname, '..', 'resources', 'hyperframes-skills'),
-  ];
+  const explicitSkillRoot = safeString(skillRoot);
+  const candidates = explicitSkillRoot
+    ? [explicitSkillRoot]
+      : [
+          env.HYPERFRAMES_SKILL_ROOT,
+          path.resolve(__dirname, '..', 'resources', 'hyperframes-skills-official'),
+          path.resolve(__dirname, '..', 'resources', 'hyperframes-skills'),
+        ];
 
   for (const candidate of candidates) {
     const normalized = safeString(candidate);

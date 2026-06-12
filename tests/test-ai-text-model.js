@@ -11,7 +11,7 @@ function makeStreamResponse(chunks) {
     start(controller) {
       const encoder = new TextEncoder();
       for (const chunk of chunks) {
-        controller.enqueue(encoder.encode(chunk));
+        controller.enqueue(chunk instanceof Uint8Array ? chunk : encoder.encode(chunk));
       }
       controller.close();
     },
@@ -177,6 +177,29 @@ async function run() {
   assert.strictEqual(streamed.success, true);
   assert.strictEqual(streamed.text, '{"summary":"stream ok"}');
   assert.strictEqual(streamRequestBody.stream, true);
+
+  const encoder = new TextEncoder();
+  const splitChineseBytes = encoder.encode('data: {"choices":[{"delta":{"content":"中文正常"}}]}\n\n');
+  const splitPoint = 'data: {"choices":[{"delta":{"content":"'.length + 1;
+  const streamedSplitUtf8 = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'stream split utf8' }],
+    configPath,
+    stream: true,
+    fetchImpl: async () => new Response(
+      makeStreamResponse([
+        splitChineseBytes.slice(0, splitPoint),
+        splitChineseBytes.slice(splitPoint),
+        'data: [DONE]\n\n',
+      ]),
+      {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      },
+    ),
+  });
+  assert.strictEqual(streamedSplitUtf8.success, true);
+  assert.strictEqual(streamedSplitUtf8.text, '中文正常');
+  assert.doesNotMatch(streamedSplitUtf8.text, /\uFFFD/);
 
   const fallbackBodies = [];
   const streamFallback = await aiTextModel.callTextModel({

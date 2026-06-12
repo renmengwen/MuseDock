@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client.js';
 
 const DEFAULT_FILE = 'index.html';
@@ -28,6 +28,7 @@ export function useHyperframesStudio({ initialAwemeId = '', initialRunId = '' } 
   const [fileContent, setFileContent] = useState('');
   const [status, setStatus] = useState(makeStatus('idle', '等待选择素材和运行记录。'));
   const [busyAction, setBusyAction] = useState('');
+  const autoRefreshKeyRef = useRef('');
 
   const isBusy = Boolean(busyAction);
   const trimmedAwemeId = awemeId.trim();
@@ -90,6 +91,15 @@ export function useHyperframesStudio({ initialAwemeId = '', initialRunId = '' } 
     }
   }, [busyAction, runs, trimmedAwemeId, trimmedRunId]);
 
+  useEffect(() => {
+    if (!initialAwemeId) return;
+    const autoRefreshKey = `${initialAwemeId}::${initialRunId}`;
+    if (autoRefreshKeyRef.current === autoRefreshKey) return;
+
+    autoRefreshKeyRef.current = autoRefreshKey;
+    refreshRuns(initialAwemeId, initialRunId).catch(() => {});
+  }, [initialAwemeId, initialRunId, refreshRuns]);
+
   const refreshActiveRun = useCallback(async (nextRunId = trimmedRunId) => {
     if (!trimmedAwemeId || !nextRunId) return null;
     const json = await api.getDouyinAgentRun(trimmedAwemeId, nextRunId);
@@ -97,6 +107,30 @@ export function useHyperframesStudio({ initialAwemeId = '', initialRunId = '' } 
     mergeRun(nextRun);
     return nextRun;
   }, [mergeRun, trimmedAwemeId, trimmedRunId]);
+
+  const createFreeformRun = useCallback(async () => {
+    if (busyAction) return null;
+    if (!trimmedAwemeId) {
+      setStatus(makeStatus('error', '请输入抖音视频 aweme_id。'));
+      return null;
+    }
+
+    setBusyAction('createFreeformRun');
+    setStatus(makeStatus('loading', '正在新建高级成片记录...'));
+    try {
+      const json = await api.createDouyinHyperframesFreeformRun(trimmedAwemeId);
+      const nextRun = json?.run || json?.data || json;
+      mergeRun(nextRun);
+      await refreshRuns(trimmedAwemeId, getRunId(nextRun));
+      setStatus(makeStatus(json?.success === false ? 'error' : 'success', json?.message || '高级成片记录已新建。'));
+      return json;
+    } catch (error) {
+      setStatus(makeStatus('error', getErrorMessage(error, '高级成片记录创建失败。')));
+      throw error;
+    } finally {
+      setBusyAction('');
+    }
+  }, [busyAction, mergeRun, refreshRuns, trimmedAwemeId]);
 
   const runStudioAction = useCallback(async ({
     action,
@@ -233,6 +267,7 @@ export function useHyperframesStudio({ initialAwemeId = '', initialRunId = '' } 
     selectRun,
     refreshRuns,
     refreshActiveRun,
+    createFreeformRun,
     generateBrief,
     generateProject,
     checkProject,

@@ -28,6 +28,9 @@ async function run() {
   assert.match(messages[1].content, /Use HyperFrames/);
   assert.match(messages[1].content, /index.html/);
   assert.match(messages[1].content, /design.md/);
+  assert.match(messages[1].content, /data-duration/);
+  assert.match(messages[1].content, /Microsoft YaHei/);
+  assert.match(messages[1].content, /inter/);
 
   const parsed = agent.parseFreeformProjectResponse(JSON.stringify({
     files: {

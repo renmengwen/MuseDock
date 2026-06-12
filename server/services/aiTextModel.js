@@ -49,9 +49,9 @@ async function readJsonResponse(response, apiKey) {
   }
 }
 
-function decodeChunk(value) {
+function decodeChunk(value, decoder = new TextDecoder(), options = {}) {
   if (typeof value === 'string') return value;
-  return new TextDecoder().decode(value);
+  return decoder.decode(value, options);
 }
 
 async function readStreamResponse(response, apiKey) {
@@ -64,6 +64,7 @@ async function readStreamResponse(response, apiKey) {
   }
 
   const reader = response.body.getReader();
+  const decoder = new TextDecoder();
   let buffer = '';
   let text = '';
   const events = [];
@@ -71,7 +72,7 @@ async function readStreamResponse(response, apiKey) {
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    buffer += decodeChunk(value);
+    buffer += decodeChunk(value, decoder, { stream: true });
     const parts = buffer.split(/\r?\n\r?\n/);
     buffer = parts.pop() || '';
 
@@ -101,6 +102,7 @@ async function readStreamResponse(response, apiKey) {
       }
     }
   }
+  buffer += decoder.decode();
 
   return {
     success: true,

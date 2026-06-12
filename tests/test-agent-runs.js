@@ -909,6 +909,14 @@ async function run() {
   assert.equal(initialFreeform.hyperframes_freeform.render.status, 'idle');
   assert.equal(initialFreeform.hyperframes_freeform.visual_inspect.status, 'idle');
 
+  const emptyFreeformRun = await agentRuns.createDouyinHyperframesFreeformRun(awemeId, { rootDir });
+  assert.equal(emptyFreeformRun.success, true);
+  assert.equal(emptyFreeformRun.template, 'hyperframes_freeform');
+  assert.equal(emptyFreeformRun.status, 'ready');
+  assert.ok(emptyFreeformRun.run_id.endsWith('-hyperframes_freeform'));
+  assert.equal(emptyFreeformRun.hyperframes_freeform.status, 'idle');
+  assert.ok(fs.existsSync(path.join(rootDir, awemeId, 'agent_runs', `${emptyFreeformRun.run_id}.json`)));
+
   const noBriefRunId = `${generated.run_id}-no-brief`;
   await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${noBriefRunId}.json`), {
     ...JSON.parse(fs.readFileSync(generated.path, 'utf-8')),
@@ -1082,6 +1090,40 @@ async function run() {
   assert.equal(freeformBrief.success, true);
   assert.equal(freeformBrief.hyperframes_freeform.brief.status, 'ready');
   assert.match(freeformBrief.hyperframes_freeform.brief.summary, /自由工程 brief/);
+
+  const loggedBriefFailureRunId = `${generated.run_id}-logged-brief-failure`;
+  const loggedBriefEvents = [];
+  await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${loggedBriefFailureRunId}.json`), {
+    ...JSON.parse(fs.readFileSync(generated.path, 'utf-8')),
+    run_id: loggedBriefFailureRunId,
+    hyperframes_freeform: undefined,
+  });
+  const loggedBriefFailure = await agentRuns.generateDouyinRunHyperframesFreeformBrief(awemeId, loggedBriefFailureRunId, {
+    rootDir,
+    logger: {
+      info: event => loggedBriefEvents.push({ level: 'info', event }),
+      warn: event => loggedBriefEvents.push({ level: 'warn', event }),
+      error: event => loggedBriefEvents.push({ level: 'error', event }),
+    },
+    skillContext: {
+      loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
+    },
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: false,
+        message: 'terminated',
+      }),
+    },
+  });
+  assert.equal(loggedBriefFailure.success, false);
+  assert.ok(loggedBriefEvents.some(entry => entry.event.stage === 'started'));
+  assert.ok(loggedBriefEvents.some(entry => entry.level === 'warn' && entry.event.stage === 'model_failed'));
+  assert.ok(loggedBriefEvents.some(entry => entry.level === 'warn' && entry.event.stage === 'failed'));
+  assert.ok(loggedBriefEvents.every(entry => entry.event.event === 'hyperframes_freeform_brief'));
+  assert.ok(loggedBriefEvents.every(entry => entry.event.aweme_id === awemeId));
+  assert.ok(loggedBriefEvents.every(entry => entry.event.run_id === loggedBriefFailureRunId));
+  assert.ok(loggedBriefEvents.some(entry => entry.event.message === 'terminated'));
+  assert.ok(loggedBriefEvents.some(entry => typeof entry.event.elapsed_ms === 'number'));
 
   const shallowMergeCheck = await agentRuns.updateRunHyperframesFreeform(awemeId, generated.run_id, {
     brief: { status: 'generating' },
@@ -2140,6 +2182,7 @@ async function run() {
 
   const originalCreateDouyinAgentRun = agentRuns.createDouyinAgentRun;
   const originalCreateDouyinStoryboardPlanRun = agentRuns.createDouyinStoryboardPlanRun;
+  const originalCreateDouyinHyperframesFreeformRun = agentRuns.createDouyinHyperframesFreeformRun;
   const originalSynthesizeDouyinRunTts = agentRuns.synthesizeDouyinRunTts;
   const originalSynthesizeDouyinRunSceneTts = agentRuns.synthesizeDouyinRunSceneTts;
   const originalCreateDouyinRunStoryboard = agentRuns.createDouyinRunStoryboard;
@@ -2182,6 +2225,15 @@ async function run() {
     message: '导演分镜规划已生成。',
     storyboard_plan: { status: 'planned', scenes: [{ index: 1, narration_text: '第一幕旁白' }] },
     workflow: { next_action: 'synthesize_scene_tts' },
+  });
+  agentRuns.createDouyinHyperframesFreeformRun = async () => ({
+    success: true,
+    aweme_id: awemeId,
+    run_id: 'freeform-run',
+    template: 'hyperframes_freeform',
+    status: 'ready',
+    hyperframes_freeform: { status: 'idle' },
+    message: '已新建高级成片记录，可以开始生成导演策划。',
   });
   agentRuns.synthesizeDouyinRunSceneTts = async () => ({
     success: true,
@@ -2412,6 +2464,11 @@ async function run() {
     assert.strictEqual(storyboardPlanResponse.body.success, true);
     assert.strictEqual(storyboardPlanResponse.body.workflow.next_action, 'synthesize_scene_tts');
 
+    const freeformRunResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/hyperframes-freeform-runs`, {});
+    assert.strictEqual(freeformRunResponse.statusCode, 200);
+    assert.strictEqual(freeformRunResponse.body.success, true);
+    assert.strictEqual(freeformRunResponse.body.template, 'hyperframes_freeform');
+
     const nextActionResponse = await requestJson(server, 'GET', `/api/agents/douyin/${awemeId}/runs/ok-run/next-action`);
     assert.strictEqual(nextActionResponse.statusCode, 200);
     assert.strictEqual(nextActionResponse.body.success, true);
@@ -2523,6 +2580,7 @@ async function run() {
   } finally {
     agentRuns.createDouyinAgentRun = originalCreateDouyinAgentRun;
     agentRuns.createDouyinStoryboardPlanRun = originalCreateDouyinStoryboardPlanRun;
+    agentRuns.createDouyinHyperframesFreeformRun = originalCreateDouyinHyperframesFreeformRun;
     agentRuns.synthesizeDouyinRunTts = originalSynthesizeDouyinRunTts;
     agentRuns.synthesizeDouyinRunSceneTts = originalSynthesizeDouyinRunSceneTts;
     agentRuns.createDouyinRunStoryboard = originalCreateDouyinRunStoryboard;

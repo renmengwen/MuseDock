@@ -32,6 +32,73 @@ async function run() {
   assert.equal(fs.existsSync(path.join(projectDir, 'design.md')), true);
   assert.deepEqual(created.files.map(file => file.name).sort(), ['design.md', 'hyperframes.json', 'index.html', 'package.json']);
 
+  const repaired = await freeformProject.createFreeformProject({
+    awemeId,
+    runId: `${runId}-repair`,
+    rootDir,
+    files: {
+      'index.html': '<!doctype html><html><body><div id="stage" data-composition-id="main" style="font-family: Microsoft YaHei, PingFang SC, SFMono-Regular, sans-serif"></div></body></html>',
+      'meta.json': '{"duration_sec":66}',
+    },
+  });
+  const repairedHtml = fs.readFileSync(path.join(repaired.projectDir, 'index.html'), 'utf-8');
+  assert.match(repairedHtml, /data-composition-id="main"/);
+  assert.match(repairedHtml, /data-duration="66"/);
+  assert.match(repairedHtml, /data-width="1080"/);
+  assert.match(repairedHtml, /data-height="1920"/);
+  assert.match(repairedHtml, /data-start="0"/);
+  assert.doesNotMatch(repairedHtml, /Microsoft YaHei|PingFang SC|SFMono-Regular|inter|jetbrains-mono/);
+  assert.match(repairedHtml, /font-family: sans-serif, sans-serif, monospace, sans-serif/);
+
+  const timelineRepaired = await freeformProject.createFreeformProject({
+    awemeId,
+    runId: `${runId}-timeline-repair`,
+    rootDir,
+    files: {
+      'index.html': '<!doctype html><html><head></head><body><main id="root" data-composition-id="main"></main><script>function tick(){let t=((performance.now()/1000)%90);requestAnimationFrame(tick)}tick();</script></body></html>',
+      'hyperframes.json': '{"duration":90,"width":1080,"height":1920}',
+    },
+  });
+  const timelineHtml = fs.readFileSync(path.join(timelineRepaired.projectDir, 'index.html'), 'utf-8');
+  assert.match(timelineHtml, /data-composition-id="main"/);
+  assert.match(timelineHtml, /data-duration="90"/);
+  assert.match(timelineHtml, /data-width="1080"/);
+  assert.match(timelineHtml, /data-height="1920"/);
+  assert.match(timelineHtml, /data-start="0"/);
+  assert.match(timelineHtml, /window\.__timelines/);
+  assert.match(timelineHtml, /gsap\.timeline/);
+  assert.doesNotMatch(timelineHtml, /performance\.now|requestAnimationFrame/);
+
+  const lintRepaired = await freeformProject.createFreeformProject({
+    awemeId,
+    runId: `${runId}-lint-repair`,
+    rootDir,
+    files: {
+      'index.html': [
+        '<!doctype html><html lang="zh-CN" data-composition-variables=\'[{"id":"title","type":"text"}]\'>',
+        '<head><style>html,body{font-family:noto-sans, open-sans, jetbrains-mono, sans-serif}[data-composition-id="main"]{color:white}</style></head>',
+        '<body><div id="main" data-composition-id="main" data-duration="10">',
+        '<section id="s1" class="scene" data-start="0" data-duration="5"></section>',
+        '<section id="s2" class="scene" data-start="5" data-duration="5"></section>',
+        '</div>',
+        '<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>',
+        '<script>var tl = gsap.timeline(); gsap.to(".scan",{duration:6,repeat:-1}); tl.from(".scene",{y:10,opacity:0});</script>',
+        '</body></html>',
+      ].join(''),
+      'hyperframes.json': '{"duration":10,"width":1920,"height":1080}',
+    },
+  });
+  const lintHtml = fs.readFileSync(path.join(lintRepaired.projectDir, 'index.html'), 'utf-8');
+  assert.doesNotMatch(lintHtml, /data-composition-variables/);
+  assert.match(lintHtml, /<section id="s1" class="scene clip"/);
+  assert.match(lintHtml, /<section id="s2" class="scene clip"/);
+  assert.doesNotMatch(lintHtml, /repeat\s*:\s*-1|cdnjs\.cloudflare|var tl = gsap\.timeline\(\);/);
+  assert.doesNotMatch(lintHtml, /font-family:[^;]*(noto-sans|open-sans|jetbrains-mono)/);
+  assert.match(lintHtml, /window\.__timelines\["main"\] = tl/);
+  assert.match(lintHtml, /tl\.set\("#s1", \{ autoAlpha: 1 \}, 0\)/);
+  assert.match(lintHtml, /tl\.set\("#s1", \{ autoAlpha: 0 \}, 5\)/);
+  assert.match(lintHtml, /tl\.set\("#s2", \{ autoAlpha: 1 \}, 5\)/);
+
   const file = await freeformProject.readFreeformFile({ projectDir, fileName: 'design.md' });
   assert.equal(file.success, true);
   assert.equal(file.content, '# Design');
