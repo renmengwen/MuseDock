@@ -3,25 +3,47 @@ const assert = require('assert');
 const {
   AWEME_ID_PATTERN,
   normalizeCreativeInput,
+  extractAwemeId,
   createTextSourceContext,
   createDisabledResearchContext,
   createDisabledAssetContext,
   buildCreativeContext,
 } = require('../server/services/creativeContext');
 
+const TEXT_INPUT = '做一期关于本地 AI 视频工作流的科普';
+
 function testNormalizesTextInput() {
   const result = normalizeCreativeInput({
-    input: '  做一期关于本地 AI 视频工作流的科普  ',
+    input: `  ${TEXT_INPUT}  `,
     useResearch: false,
   });
 
   assert.equal(result.success, true);
   assert.equal(result.mode, 'text');
-  assert.equal(result.raw_text, '做一期关于本地 AI 视频工作流的科普');
+  assert.equal(result.raw_text, TEXT_INPUT);
   assert.equal(result.aweme_id, '');
   assert.equal(result.douyin_url, '');
   assert.equal(result.use_research, false);
   assert.deepEqual(result.asset_ids, []);
+}
+
+function testUseResearchOnlyAcceptsBooleanTrue() {
+  const stringTrue = normalizeCreativeInput({
+    input: TEXT_INPUT,
+    useResearch: 'true',
+  });
+  const numericTrue = normalizeCreativeInput({
+    input: TEXT_INPUT,
+    useResearch: 1,
+  });
+  const booleanTrue = normalizeCreativeInput({
+    input: TEXT_INPUT,
+    useResearch: true,
+  });
+
+  assert.equal(stringTrue.use_research, false);
+  assert.equal(numericTrue.use_research, false);
+  assert.equal(booleanTrue.use_research, true);
 }
 
 function testNormalizesDouyinVideoUrl() {
@@ -59,18 +81,35 @@ function testRejectsEmptyInput() {
 
 function testRejectsAssetsForPhaseOne() {
   const result = normalizeCreativeInput({
-    input: '做一期关于本地 AI 视频工作流的科普',
+    input: TEXT_INPUT,
     assetIds: ['asset-1'],
   });
 
   assert.equal(result.success, false);
   assert.match(result.message, /图片素材将在下一阶段开放/);
+  assert.deepEqual(result.asset_ids, []);
+  assert.deepEqual(result.data.asset_ids, []);
+}
+
+function testExtractsAwemeIdFromSupportedInputs() {
+  assert.equal(
+    extractAwemeId('https://www.douyin.com/video/7345678901234567890'),
+    '7345678901234567890'
+  );
+  assert.equal(
+    extractAwemeId('https://www.douyin.com/?modal_id=7345678901234567891'),
+    '7345678901234567891'
+  );
+  assert.equal(
+    extractAwemeId('https://www.douyin.com/share/video?aweme_id=7345678901234567892'),
+    '7345678901234567892'
+  );
 }
 
 function testBuildsStableCreativeContext() {
   const now = '2026-06-12T08:00:00.000Z';
   const input = normalizeCreativeInput({
-    input: '做一期关于本地 AI 视频工作流的科普',
+    input: TEXT_INPUT,
     useResearch: false,
   });
   const sourceContext = createTextSourceContext(input.raw_text);
@@ -86,13 +125,15 @@ function testBuildsStableCreativeContext() {
   });
 
   assert.deepEqual(context, {
-    created_at: now,
-    input,
+    input: {
+      ...input,
+      created_at: now,
+    },
     source_context: {
       status: 'ready',
       kind: 'text',
-      summary: '做一期关于本地 AI 视频工作流的科普',
-      transcript: '做一期关于本地 AI 视频工作流的科普',
+      summary: TEXT_INPUT,
+      transcript: TEXT_INPUT,
       comments_summary: '',
       douyin_metadata: {},
       diagnostics: {
@@ -118,17 +159,41 @@ function testBuildsStableCreativeContext() {
   assert.deepEqual(context.asset_context.assets, []);
 }
 
+function testBuildsDefaultContextsWhenMissing() {
+  const now = '2026-06-12T09:00:00.000Z';
+  const input = normalizeCreativeInput({
+    input: TEXT_INPUT,
+    useResearch: false,
+  });
+
+  const context = buildCreativeContext({ input, now });
+
+  assert.equal(Object.prototype.hasOwnProperty.call(context, 'created_at'), false);
+  assert.equal(context.input.created_at, now);
+  assert.equal(context.source_context.status, 'ready');
+  assert.equal(context.source_context.kind, 'text');
+  assert.equal(context.source_context.summary, TEXT_INPUT);
+  assert.equal(context.research_context.status, 'disabled');
+  assert.equal(context.research_context.updated_at, now);
+  assert.equal(context.asset_context.status, 'disabled');
+  assert.deepEqual(context.asset_context.assets, []);
+  assert.equal(context.asset_context.updated_at, now);
+}
+
 function run() {
   assert.equal(AWEME_ID_PATTERN.test('12345'), true);
   assert.equal(AWEME_ID_PATTERN.test('1234'), false);
   assert.equal(AWEME_ID_PATTERN.test('1'.repeat(33)), false);
 
   testNormalizesTextInput();
+  testUseResearchOnlyAcceptsBooleanTrue();
   testNormalizesDouyinVideoUrl();
   testNormalizesDouyinId();
   testRejectsEmptyInput();
   testRejectsAssetsForPhaseOne();
+  testExtractsAwemeIdFromSupportedInputs();
   testBuildsStableCreativeContext();
+  testBuildsDefaultContextsWhenMissing();
   console.log('creative context tests passed');
 }
 

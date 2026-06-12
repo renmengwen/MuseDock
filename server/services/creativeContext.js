@@ -46,14 +46,17 @@ function createBaseNormalizedInput(overrides = {}) {
 
 function normalizeCreativeInput(payload = {}) {
   const assetIds = Array.isArray(payload.assetIds) ? [...payload.assetIds] : [];
-  const useResearch = Boolean(payload.useResearch);
+  const useResearch = payload.useResearch === true;
 
   if (assetIds.length > 0) {
     return createBaseNormalizedInput({
       success: false,
       message: '图片素材将在下一阶段开放。',
       use_research: useResearch,
-      asset_ids: assetIds,
+      asset_ids: [],
+      data: {
+        asset_ids: [],
+      },
     });
   }
 
@@ -126,12 +129,17 @@ function buildCreativeContext({
   assetContext,
   now,
 } = {}) {
+  const createdAt = now || '';
+  const normalizedInput = {
+    ...(input || {}),
+    created_at: createdAt,
+  };
+
   return {
-    created_at: now || '',
-    input,
-    source_context: sourceContext,
-    research_context: researchContext,
-    asset_context: assetContext,
+    input: normalizedInput,
+    source_context: sourceContext || createTextSourceContext(normalizedInput.raw_text),
+    research_context: researchContext || createDisabledResearchContext({ now: createdAt }),
+    asset_context: assetContext || createDisabledAssetContext({ now: createdAt }),
   };
 }
 
