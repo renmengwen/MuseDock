@@ -106,8 +106,12 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.equal(created.creative_context.input.mode, 'text');
   assert.equal(created.research_context.status, 'disabled');
   assert.deepEqual(created.asset_context.assets, []);
-  assert.equal(created.stages.source.status, 'queued');
-  assert.equal(created.stages.source.label, '准备来源资料');
+  assert.equal(Array.isArray(created.stages), true);
+  assert.equal(created.stages.length, STAGE_IDS.length);
+  assert.deepEqual(created.stages.map(stage => stage.id), STAGE_IDS);
+  const createdSourceStage = created.stages.find(stage => stage.id === 'source');
+  assert.equal(createdSourceStage.status, 'queued');
+  assert.equal(createdSourceStage.label, '准备来源资料');
 
   const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
 
@@ -130,7 +134,7 @@ async function testCreatesAndRunsTextWorkflow() {
   const fetched = await getCreativeWorkflow(WORKFLOW_ID, { rootDir });
   assert.equal(fetched.success, true);
   assert.equal(fetched.data.status, 'done');
-  assert.equal(fetched.data.stages.render.status, 'done');
+  assert.equal(fetched.data.stages.find(stage => stage.id === 'render').status, 'done');
 }
 
 async function testRejectsEmptyInput() {
@@ -174,9 +178,11 @@ async function testPersistsFailureFromBriefStage() {
 
   assert.equal(run.success, false);
   assert.equal(run.status, 'failed');
-  assert.equal(run.stages.brief.status, 'failed');
+  const briefStage = run.stages.find(stage => stage.id === 'brief');
+  assert.equal(briefStage.status, 'failed');
+  assert.notEqual(briefStage.status, 'running');
   assert.equal(run.error.message, '策划失败');
-  assert.equal(run.stages.brief.message, '策划失败');
+  assert.equal(briefStage.message, '策划失败');
 
   const persisted = await getCreativeWorkflow(WORKFLOW_ID, { rootDir });
   assert.equal(persisted.data.status, 'failed');

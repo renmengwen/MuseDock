@@ -71,15 +71,51 @@ function getWorkflowPath(workflowId, rootDir = DEFAULT_ROOT) {
 }
 
 function createStages() {
-  return STAGE_IDS.reduce((stages, id) => {
-    stages[id] = {
+  return STAGE_IDS.map(id => ({
       id,
       label: STAGE_LABELS[id],
       status: 'pending',
       message: '',
-    };
-    return stages;
-  }, {});
+  }));
+}
+
+function normalizeStages(stages) {
+  if (Array.isArray(stages)) {
+    const byId = new Map(stages.map(stage => [stage && stage.id, stage]));
+    return STAGE_IDS.map(id => ({
+      id,
+      label: STAGE_LABELS[id],
+      status: 'pending',
+      message: '',
+      ...(byId.get(id) || {}),
+    }));
+  }
+
+  if (stages && typeof stages === 'object') {
+    return STAGE_IDS.map(id => ({
+      id,
+      label: STAGE_LABELS[id],
+      status: 'pending',
+      message: '',
+      ...(stages[id] || {}),
+    }));
+  }
+
+  return createStages();
+}
+
+function updateStage(record, stageId, patch = {}) {
+  record.stages = normalizeStages(record.stages);
+  record.stages = record.stages.map(stage => (
+    stage.id === stageId
+      ? {
+        ...stage,
+        id: stageId,
+        label: STAGE_LABELS[stageId],
+        ...patch,
+      }
+      : stage
+  ));
 }
 
 async function writeJson(filePath, data) {
@@ -93,11 +129,14 @@ async function readJson(filePath) {
 
 async function readWorkflow(workflowId, rootDir) {
   const filePath = getWorkflowPath(workflowId, rootDir);
-  return readJson(filePath);
+  const record = await readJson(filePath);
+  record.stages = normalizeStages(record.stages);
+  return record;
 }
 
 async function persistWorkflow(record, rootDir) {
   const filePath = getWorkflowPath(record.workflow_id, rootDir);
+  record.stages = normalizeStages(record.stages);
   const nextRecord = {
     ...record,
     path: filePath,
@@ -157,7 +196,7 @@ function createWorkflowSummary(record) {
     status: record.status,
     run_id: record.run_id || '',
     message: record.message || '',
-    stages: record.stages,
+    stages: normalizeStages(record.stages),
     creative_context: record.creative_context,
     source_context: record.source_context,
     research_context: record.research_context,
@@ -198,8 +237,9 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
     now,
   });
   const stages = createStages();
-  stages.source.status = 'queued';
-  stages.source.message = '来源资料已进入准备队列。';
+  const sourceStage = stages.find(stage => stage.id === 'source');
+  sourceStage.status = 'queued';
+  sourceStage.message = '来源资料已进入准备队列。';
 
   const record = {
     success: true,
@@ -306,13 +346,12 @@ function ensureSuccess(result, fallbackMessage) {
 }
 
 async function markStage(record, stageId, status, message, now, extra = {}) {
-  record.stages[stageId] = {
-    ...(record.stages[stageId] || { id: stageId, label: STAGE_LABELS[stageId] }),
+  updateStage(record, stageId, {
     status,
     message: safeString(message),
     updated_at: now,
     ...extra,
-  };
+  });
 }
 
 async function runStage(record, stageId, rootDir, handler, services) {
