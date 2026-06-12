@@ -172,10 +172,20 @@ function stripNonDeterministicPlayback(content) {
   return content.replace(/<script\b[^>]*>[\s\S]*?(?:performance\.now\s*\(|requestAnimationFrame\s*\()[\s\S]*?<\/script>/gi, '');
 }
 
+function hasRegisteredMainTimeline(content = '') {
+  return /window\.__timelines\s*\[\s*['"]main['"]\s*\]\s*=/.test(String(content || ''));
+}
+
+function isRegisteredMainTimelineScript(script = '') {
+  return /<script\b[^>]*>[\s\S]*window\.__timelines\s*\[\s*['"]main['"]\s*\]\s*=[\s\S]*?<\/script>/i.test(String(script || ''));
+}
+
 function stripTimelineScripts(content) {
   return content
     .replace(/<script\b[^>]*src\s*=\s*["'][^"']*gsap[^"']*["'][^>]*>\s*<\/script>/gi, '')
-    .replace(/<script\b[^>]*>[\s\S]*?(?:gsap\.timeline\s*\(|gsap\.(?:to|from|fromTo|set)\s*\(|window\.__timelines)[\s\S]*?<\/script>/gi, '');
+    .replace(/<script\b[^>]*>[\s\S]*?(?:gsap\.timeline\s*\(|gsap\.(?:to|from|fromTo|set)\s*\(|window\.__timelines)[\s\S]*?<\/script>/gi, (script) => (
+      isRegisteredMainTimelineScript(script) ? script : ''
+    ));
 }
 
 function stripInvalidCompositionVariables(content) {
@@ -217,9 +227,27 @@ function jsString(value) {
   return JSON.stringify(String(value || ''));
 }
 
+function ensureGsapDependency(content) {
+  const gsapScript = '<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>';
+  if (/src\s*=\s*["'][^"']*gsap[^"']*["']/i.test(content)) return content;
+
+  const gsapInlineScript = content.match(/<script\b[^>]*>[\s\S]*?gsap\.[\s\S]*?<\/script>/i);
+  if (gsapInlineScript) {
+    return content.replace(gsapInlineScript[0], `${gsapScript}\n${gsapInlineScript[0]}`);
+  }
+
+  if (/<\/body>/i.test(content)) {
+    return content.replace(/<\/body>/i, `${gsapScript}\n</body>`);
+  }
+  return `${content}\n${gsapScript}`;
+}
+
 function ensureTimelineRegistry(content, files = {}) {
   const duration = getProjectDuration(files);
   if (!duration) return content;
+  if (hasRegisteredMainTimeline(content)) {
+    return ensureGsapDependency(content);
+  }
   const durationText = normalizeDurationValue(duration);
   const clips = getTimedClips(content);
   const clipLines = [];

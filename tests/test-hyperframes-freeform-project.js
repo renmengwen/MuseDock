@@ -99,6 +99,37 @@ async function run() {
   assert.match(lintHtml, /tl\.set\("#s1", \{ autoAlpha: 0 \}, 5\)/);
   assert.match(lintHtml, /tl\.set\("#s2", \{ autoAlpha: 1 \}, 5\)/);
 
+  const animated = await freeformProject.createFreeformProject({
+    awemeId,
+    runId: `${runId}-registered-animation`,
+    rootDir,
+    files: {
+      'index.html': [
+        '<!doctype html><html><head></head><body>',
+        '<main id="main" data-composition-id="main" data-duration="8">',
+        '<section id="hero" class="scene" data-start="0" data-duration="4">',
+        '<h1 class="hero-title">主题标题</h1>',
+        '<span class="hero-keyword">关键词</span>',
+        '</section>',
+        '</main>',
+        '<script>',
+        'window.__timelines = window.__timelines || {};',
+        'const tl = gsap.timeline({ paused: true });',
+        'tl.from(".hero-title", { y: 44, autoAlpha: 0, duration: 0.6 }, 0);',
+        'tl.fromTo(".hero-keyword", { scale: 0.7, autoAlpha: 0 }, { scale: 1, autoAlpha: 1, duration: 0.4 }, 0.4);',
+        'window.__timelines["main"] = tl;',
+        '</script>',
+        '</body></html>',
+      ].join(''),
+      'hyperframes.json': '{"duration":8,"width":1920,"height":1080}',
+    },
+  });
+  const animatedHtml = fs.readFileSync(path.join(animated.projectDir, 'index.html'), 'utf-8');
+  assert.match(animatedHtml, /window\.__timelines\["main"\] = tl/);
+  assert.match(animatedHtml, /tl\.from\("\.hero-title"/);
+  assert.match(animatedHtml, /tl\.fromTo\("\.hero-keyword"/);
+  assert.match(animatedHtml, /<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/gsap@3\.12\.5\/dist\/gsap\.min\.js"><\/script>/);
+
   const file = await freeformProject.readFreeformFile({ projectDir, fileName: 'design.md' });
   assert.equal(file.success, true);
   assert.equal(file.content, '# Design');

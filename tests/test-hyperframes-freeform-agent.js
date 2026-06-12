@@ -31,6 +31,12 @@ async function run() {
   assert.match(messages[1].content, /data-duration/);
   assert.match(messages[1].content, /Microsoft YaHei/);
   assert.match(messages[1].content, /inter/);
+  assert.match(messages[1].content, /首屏不得一次性展示所有信息/);
+  assert.match(messages[1].content, /关键短语、能力标签、步骤标签、卖点词或主题关键词/);
+  assert.match(messages[1].content, /不要使用固定模板词/);
+  assert.match(messages[1].content, /window\.__timelines\["main"\]/);
+  assert.match(messages[1].content, /tl\.from|tl\.to|tl\.fromTo/);
+  assert.match(messages[1].content, /每个主要场景至少/);
 
   const parsed = agent.parseFreeformProjectResponse(JSON.stringify({
     files: {
