@@ -57,6 +57,20 @@ function createFailureResponse(message, overrides = {}) {
   };
 }
 
+function isDouyinLink(input) {
+  const text = safeString(input);
+  if (!/^https?:\/\//i.test(text)) {
+    return false;
+  }
+
+  try {
+    const hostname = new URL(text).hostname.toLowerCase();
+    return hostname === 'douyin.com' || hostname.endsWith('.douyin.com');
+  } catch (error) {
+    return false;
+  }
+}
+
 function normalizeCreativeInput(payload = {}) {
   const assetIds = Array.isArray(payload.assetIds) ? [...payload.assetIds] : [];
   const useResearch = payload.useResearch === true;
@@ -82,6 +96,13 @@ function normalizeCreativeInput(payload = {}) {
       mode: 'douyin',
       aweme_id: awemeId,
       douyin_url: /^https?:\/\//i.test(input) ? input : '',
+      use_research: useResearch,
+      asset_ids: assetIds,
+    });
+  }
+
+  if (isDouyinLink(input)) {
+    return createFailureResponse('暂时无法从抖音链接中识别视频 ID。', {
       use_research: useResearch,
       asset_ids: assetIds,
     });
@@ -128,6 +149,38 @@ function createDisabledAssetContext({ now } = {}) {
   };
 }
 
+function createPendingDouyinSourceContext(input = {}) {
+  return {
+    status: 'pending',
+    kind: 'douyin',
+    summary: '',
+    transcript: '',
+    comments_summary: '',
+    douyin_metadata: {
+      aweme_id: safeString(input.aweme_id),
+      douyin_url: safeString(input.douyin_url),
+    },
+    diagnostics: {},
+  };
+}
+
+function createStableCreativeInput(input = {}, now = '') {
+  return {
+    ...createNormalizedData(input || {}),
+    use_research: input && input.use_research === true,
+    asset_ids: Array.isArray(input && input.asset_ids) ? [...input.asset_ids] : [],
+    created_at: now || '',
+  };
+}
+
+function createDefaultSourceContext(input = {}) {
+  if (input.mode === 'douyin') {
+    return createPendingDouyinSourceContext(input);
+  }
+
+  return createTextSourceContext(input.raw_text);
+}
+
 function buildCreativeContext({
   input,
   sourceContext,
@@ -136,14 +189,11 @@ function buildCreativeContext({
   now,
 } = {}) {
   const createdAt = now || '';
-  const normalizedInput = {
-    ...(input || {}),
-    created_at: createdAt,
-  };
+  const normalizedInput = createStableCreativeInput(input, createdAt);
 
   return {
     input: normalizedInput,
-    source_context: sourceContext || createTextSourceContext(normalizedInput.raw_text),
+    source_context: sourceContext || createDefaultSourceContext(normalizedInput),
     research_context: researchContext || createDisabledResearchContext({ now: createdAt }),
     asset_context: assetContext || createDisabledAssetContext({ now: createdAt }),
   };

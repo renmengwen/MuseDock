@@ -83,6 +83,26 @@ function testRejectsEmptyInput() {
   assert.match(result.message, /请输入视频方向、抖音 ID 或抖音链接/);
 }
 
+function testRejectsDouyinLinksWithoutVideoId() {
+  const shortLink = normalizeCreativeInput({
+    input: 'https://v.douyin.com/abcde/',
+  });
+  const douyinLinkWithoutId = normalizeCreativeInput({
+    input: 'https://www.douyin.com/user/MS4wLjABAAAA',
+  });
+  const normalUrl = normalizeCreativeInput({
+    input: 'https://example.com/no-id',
+  });
+
+  assert.equal(shortLink.success, false);
+  assert.match(shortLink.message, /暂时无法从抖音链接中识别视频 ID/);
+  assert.equal(douyinLinkWithoutId.success, false);
+  assert.match(douyinLinkWithoutId.message, /暂时无法从抖音链接中识别视频 ID/);
+  assert.equal(normalUrl.success, true);
+  assert.equal(normalUrl.data.mode, 'text');
+  assert.equal(normalUrl.data.raw_text, 'https://example.com/no-id');
+}
+
 function testRejectsAssetsForPhaseOne() {
   const result = normalizeCreativeInput({
     input: TEXT_INPUT,
@@ -187,6 +207,59 @@ function testBuildsDefaultContextsWhenMissing() {
   assert.equal(context.asset_context.updated_at, now);
 }
 
+function testBuildsStableInputSchemaFromMissingOrPartialInput() {
+  const now = '2026-06-12T10:00:00.000Z';
+  const emptyContext = buildCreativeContext({ now });
+  const partialContext = buildCreativeContext({
+    input: {
+      mode: 'text',
+    },
+    now,
+  });
+
+  assert.deepEqual(emptyContext.input, {
+    mode: '',
+    raw_text: '',
+    aweme_id: '',
+    douyin_url: '',
+    use_research: false,
+    asset_ids: [],
+    created_at: now,
+  });
+  assert.deepEqual(partialContext.input, {
+    mode: 'text',
+    raw_text: '',
+    aweme_id: '',
+    douyin_url: '',
+    use_research: false,
+    asset_ids: [],
+    created_at: now,
+  });
+}
+
+function testBuildsPendingDouyinSourceContextWhenMissing() {
+  const now = '2026-06-12T11:00:00.000Z';
+  const url = 'https://www.douyin.com/video/7345678901234567890';
+  const input = normalizeCreativeInput({
+    input: url,
+  }).data;
+
+  const context = buildCreativeContext({ input, now });
+
+  assert.deepEqual(context.source_context, {
+    status: 'pending',
+    kind: 'douyin',
+    summary: '',
+    transcript: '',
+    comments_summary: '',
+    douyin_metadata: {
+      aweme_id: '7345678901234567890',
+      douyin_url: url,
+    },
+    diagnostics: {},
+  });
+}
+
 function run() {
   assert.equal(AWEME_ID_PATTERN.test('12345'), true);
   assert.equal(AWEME_ID_PATTERN.test('1234'), false);
@@ -197,10 +270,13 @@ function run() {
   testNormalizesDouyinVideoUrl();
   testNormalizesDouyinId();
   testRejectsEmptyInput();
+  testRejectsDouyinLinksWithoutVideoId();
   testRejectsAssetsForPhaseOne();
   testExtractsAwemeIdFromSupportedInputs();
   testBuildsStableCreativeContext();
   testBuildsDefaultContextsWhenMissing();
+  testBuildsStableInputSchemaFromMissingOrPartialInput();
+  testBuildsPendingDouyinSourceContextWhenMissing();
   console.log('creative context tests passed');
 }
 
