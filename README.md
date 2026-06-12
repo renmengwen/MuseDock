@@ -2,15 +2,16 @@
 
 ![MuseDock 高级成片页面](docs/assets/musedock-hyperframes-studio.png)
 
-MuseDock 是一个本地优先的短视频素材采集与 AI 成片工作台。它把抖音内容采集、评论缓存、素材准备、音频转写、Agent 脚本生成、TTS 口播、HyperFrames 工程生成、人工编辑、工程校验、MP4 渲染和抽帧质检放在同一个 Web GUI 里，目标是把零散短视频素材沉淀为可复用、可检查、可继续打磨的本地创作资产。
+MuseDock 是一个本地优先的短视频素材采集与高级成片工作台。它把抖音内容采集、评论缓存、素材准备、音频转写、导演策划、TTS 口播、HyperFrames 工程生成、人工编辑、工程校验、MP4 渲染和抽帧质检放在同一个 Web GUI 里，目标是把零散短视频素材沉淀为可复用、可检查、可继续打磨的本地创作资产。
 
-当前项目的主体验是 **高级成片页面**：用户可以从一个抖音 `aweme_id` 创建 HyperFrames 自由成片记录，生成导演策划和可运行的视频工程，直接在页面里编辑 `index.html`、`design.md`、`hyperframes.json` 等工程文件，再执行校验、渲染和抽帧质检。
+当前项目的主体验是 **高级成片页面**：用户可以从一个抖音 `aweme_id` 创建 HyperFrames 自由成片记录，生成导演策划、口播音频和可运行的视频工程，直接在页面里编辑 `index.html`、`design.md`、`hyperframes.json` 等工程文件，再执行校验、渲染和抽帧质检。
 
 ## 核心亮点
 
-- **高级成片工作台**：围绕 HyperFrames 自由工程组织完整流程，支持读取素材运行记录、新建成片记录、生成导演策划、生成工程、编辑工程文件、校验工程、渲染视频和抽帧质检。
-- **导演策划 Agent**：基于已有素材上下文、口播、分镜和风格要求生成结构化导演简报，沉淀成片目标、叙事结构、视觉方向和制作检查点。
-- **自由工程生成**：工程 Agent 输出完整 HyperFrames 文件集，默认包含 `index.html`、`design.md`、`hyperframes.json`、`package.json` 和 `meta.json`，后端会过滤不允许的文件和二进制产物。
+- **高级成片工作台**：围绕 HyperFrames 自由工程组织完整流程，支持读取素材运行记录、新建成片记录、生成导演策划、生成音频轨、生成工程、编辑工程文件、校验工程、渲染视频和抽帧质检。
+- **导演策划 Agent**：基于已有素材上下文、口播、分镜和风格要求生成结构化导演简报，沉淀成片目标、叙事结构、视觉方向、音频导演提示和制作检查点。
+- **高级成片音频轨**：支持使用导演策划自动生成的音频导演提示，也可以人工补充情绪、口吻、语速和停顿描述；生成后的 TTS 会作为本地 `assets/narration.wav` 注入 HyperFrames 工程，避免渲染时依赖运行期 API URL。
+- **自由工程生成**：工程 Agent 输出完整 HyperFrames 文件集，默认包含 `index.html`、`design.md`、`hyperframes.json`、`package.json` 和 `meta.json`，后端会过滤不允许的文件和二进制产物，并规范化音频、字体、时间线和合成属性。
 - **页面内工程编辑**：高级成片页面可加载和保存白名单内文本文件，便于微调 HTML/CSS/GSAP、设计说明和工程配置；保存路径经过运行 ID 与文件名校验，避免越权写入。
 - **工程校验与质量门禁**：后端可运行 `hyperframes lint`、`hyperframes validate`、`hyperframes inspect --samples 12`，并把结果写入工程 `checks/` 目录和运行记录。
 - **渲染与抽帧质检**：渲染完成后页面展示 MP4 预览和下载入口；抽帧质检会生成联系表，方便快速检查画面稳定性、字幕覆盖和整体观感。
@@ -29,8 +30,8 @@ MuseDock 是一个本地优先的短视频素材采集与 AI 成片工作台。�
 
 页面由四个区域组成：
 
-- **素材与控制**：输入 `aweme_id`，读取运行记录，新建成片记录，并依次触发导演策划、工程生成、工程校验、视频渲染和抽帧质检。
-- **导演策划**：展示 AI 生成的导演简报 JSON，帮助确认标题、摘要、旁白结构、场景规划和视觉方向。
+- **素材与控制**：输入 `aweme_id`，读取运行记录，新建成片记录，并依次触发导演策划、音频生成、工程生成、工程校验、视频渲染和抽帧质检。
+- **导演策划**：展示 AI 生成的导演简报 JSON，帮助确认标题、摘要、旁白结构、音频导演、场景规划和视觉方向。
 - **工程文件**：列出当前自由工程文件，可加载、编辑并保存白名单内文本文件。
 - **渲染预览**：展示生成的 MP4、下载入口，以及抽帧质检联系表。
 
@@ -40,11 +41,13 @@ MuseDock 是一个本地优先的短视频素材采集与 AI 成片工作台。�
 2. 从素材工作台进入“高级成片”，或手动打开 `/hyperframes-freeform/<aweme_id>`。
 3. 点击“读取运行记录”，必要时点击“新建成片记录”。
 4. 点击“生成导演策划”，确认短片目标、节奏和视觉方向。
-5. 点击“生成 HyperFrames 工程”，得到可运行的自由工程文件。
-6. 在“工程文件”区域加载并编辑 `index.html`、`design.md` 或配置文件。
-7. 点击“校验工程”，通过 lint、validate 和 inspect 后再渲染。
-8. 点击“渲染视频”，在页面内预览 MP4。
-9. 点击“抽帧质检”，查看联系表，必要时回到工程文件继续调整。
+5. 在“音频导演”区域选择使用导演策划，或手动补充情绪、口吻、语速和停顿描述。
+6. 点击“生成音频轨”，生成高级成片专用 TTS 音频。
+7. 点击“生成 HyperFrames 工程”，得到包含本地口播音频的自由工程文件。
+8. 在“工程文件”区域加载并编辑 `index.html`、`design.md` 或配置文件。
+9. 点击“校验工程”，通过 lint、validate 和 inspect 后再渲染。
+10. 点击“渲染视频”，在页面内预览 MP4。
+11. 点击“抽帧质检”，查看联系表，必要时回到工程文件继续调整。
 
 生成文件通常位于：
 
@@ -60,6 +63,7 @@ design.md
 hyperframes.json
 package.json
 meta.json
+assets/narration.wav
 output.mp4
 checks/
 inspect/contact_sheet.jpg
@@ -75,17 +79,14 @@ MuseDock 仍保留完整的素材前置链路：
 - 视频下载、音频抽取、关键帧抽取、素材状态查看。
 - 小米 MiMo ASR 音频转写，支持大音频压缩、切片转写和结果合并。
 
-### AI 工作台与传统成片链路
-
-AI 工作台仍可用于“爆款拆解 + 改写脚本”“评论洞察”、TTS 口播、AI 分镜和旧版 HyperFrames 三层成片链路。高级成片页面是在这些能力之上新增的自由工程工作台，更适合对最终画面进行人工审阅和工程级修改。
-
 ## 高级成片设计
 
 高级成片链路强调“AI 生成 + 工程可控 + 质量可查”：
 
 - **运行记录层**：每个高级成片任务以 `hyperframes_freeform` 运行记录保存状态，记录导演策划、工程文件、校验结果、渲染结果和抽帧质检结果。
 - **导演策划层**：AI 先输出导演简报，而不是直接生成最终视频，让叙事目标、视觉方向和检查要点先被固定下来。
-- **工程生成层**：AI 生成可运行的 HyperFrames 自由工程；后端只接受白名单文件，并规范化 `index.html` 中的合成属性、字体和时间线结构。
+- **音频生成层**：高级成片拥有独立音频状态，使用导演策划或人工输入的情绪、口吻、语速和停顿提示生成 TTS；工程生成时会复制为本地 `assets/narration.wav` 并注入 `<audio id="narration-audio">`。
+- **工程生成层**：AI 生成可运行的 HyperFrames 自由工程；后端只接受白名单文件，并规范化 `index.html` 中的合成属性、音频引用、字体和时间线结构。
 - **工程编辑层**：页面把工程文件暴露给用户审阅和修改，避免成片流程停留在黑盒 prompt 调参。
 - **校验层**：工程生成后需要经过 HyperFrames CLI 的 lint、validate 和 inspect 检查。
 - **渲染层**：渲染阶段使用已保存工程，不重新请求大模型，便于复现和定位问题。
@@ -98,6 +99,7 @@ AI 工作台仍可用于“爆款拆解 + 改写脚本”“评论洞察”、TT
 - AI 工程响应不允许包含 `output.mp4`、`contact_sheet.jpg` 或任何二进制产物。
 - `run_id` 和工程文件名都会做路径安全校验，禁止 `..`、路径分隔符和非白名单文件。
 - `index.html` 会被规范化，补齐 `data-composition-id`、`data-duration`、尺寸属性和可被 HyperFrames 识别的时间线结构。
+- 高级成片口播音频会统一落到工程内 `assets/narration.wav`，并使用独立音频轨，避免渲染阶段引用 `/api/.../tts/...` 这类运行期接口路径。
 - 系统字体会尽量映射为 HyperFrames 可用字体，例如 `inter`、`jetbrains-mono`、`montserrat`、`noto-sans`、`open-sans`。
 
 ## 技术栈
@@ -218,7 +220,7 @@ MuseDock 会在本地生成运行数据：
 - `data/mediacrawler.db`：SQLite 数据库
 - `data/media/douyin/<aweme_id>/`：抖音视频素材目录
 - `data/media/douyin/<aweme_id>/transcript.json`：音频转写结果
-- `data/media/douyin/<aweme_id>/agent_runs/`：Agent 运行结果、TTS 音频、字幕时间轴、HyperFrames 工程、质检报告和 MP4
+- `data/media/douyin/<aweme_id>/agent_runs/`：高级成片运行结果、TTS 音频、字幕时间轴、HyperFrames 工程、质检报告和 MP4
 - `data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes-freeform/`：高级成片自由工程目录
 - `data/config/agent_templates.json`：本地保存的 Agent 模板覆盖配置
 - `chrome-user-data/`：Chrome CDP 使用的本地浏览器数据
@@ -251,6 +253,7 @@ MuseDock 会在本地生成运行数据：
 
 - `POST /api/agents/douyin/:aweme_id/hyperframes-freeform-runs`：新建高级成片运行记录
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/brief`：生成导演策划
+- `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/audio`：生成高级成片音频轨
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/project`：生成 HyperFrames 自由工程
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/check`：校验工程
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/render`：渲染自由工程 MP4

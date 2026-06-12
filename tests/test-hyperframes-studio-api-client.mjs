@@ -10,6 +10,7 @@ const source = fs.readFileSync(clientPath, 'utf-8');
 const expectedMethods = [
   'createDouyinHyperframesFreeformRun',
   'generateHyperframesFreeformBrief',
+  'generateHyperframesFreeformAudio',
   'generateHyperframesFreeformProject',
   'checkHyperframesFreeformProject',
   'renderHyperframesFreeformProject',
@@ -25,6 +26,7 @@ for (const method of expectedMethods) {
 for (const segment of [
   'hyperframes-freeform-runs',
   'hyperframes-freeform/brief',
+  'hyperframes-freeform/audio',
   'hyperframes-freeform/project',
   'hyperframes-freeform/check',
   'hyperframes-freeform/render',
@@ -35,6 +37,7 @@ for (const segment of [
 }
 
 assert.match(source, /generateHyperframesFreeformBrief\(awemeId,\s*runId,\s*payload\s*=\s*\{\}/);
+assert.match(source, /generateHyperframesFreeformAudio\(awemeId,\s*runId,\s*payload\s*=\s*\{\}/);
 assert.match(source, /createDouyinHyperframesFreeformRun\(awemeId\)/);
 assert.match(source, /generateHyperframesFreeformProject\(awemeId,\s*runId,\s*payload\s*=\s*\{\}/);
 assert.match(source, /renderHyperframesFreeformProject\(awemeId,\s*runId,\s*payload\s*=\s*\{\}/);

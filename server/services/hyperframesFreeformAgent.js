@@ -69,18 +69,24 @@ function buildFreeformBriefMessages({ run = {}, skillContext = '', options = {} 
         '3. summary 说明成片表达目标。',
         '4. narration 保留或整理口播结构。',
         '5. storyboard 给出关键场景规划。',
-        '6. design_md 使用 Markdown 文本描述视觉方向、版式、动效和检查要点。',
+        '6. audio_direction 给出高级成片音频导演建议，必须包含 voice 和 style_prompt；style_prompt 可描述情绪、口吻、语速、停顿、吸气、笑声或哭腔，例如紧张、深呼吸、语速加快、沉默片刻、长叹一口气。',
+        '7. storyboard.scenes[].narration_text 可以在旁白中加入 MiMo TTS 可读的括号标签，例如（吸气）（轻笑）（长叹一口气）（语速加快），但不要堆砌。',
+        '8. design_md 使用 Markdown 文本描述视觉方向、版式、动效和检查要点。',
         '',
         '输出示例：',
         safeJson({
           title: '短片标题',
           summary: '成片目标说明',
           narration: '整理后的口播',
+          audio_direction: {
+            voice: 'mimo_default',
+            style_prompt: '自然清晰，带一点紧张感；开头深呼吸，关键句语速加快，结尾留出短暂停顿。',
+          },
           storyboard: {
             scenes: [
               {
                 headline: '开场',
-                narration_text: '第一段旁白',
+                narration_text: '（深呼吸）第一段旁白，语速略快。',
                 visual_direction: '画面设计说明',
               },
             ],

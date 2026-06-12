@@ -261,6 +261,13 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  generateHyperframesFreeformAudio(awemeId, runId, payload = {}) {
+    return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes-freeform/audio`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
   generateHyperframesFreeformProject(awemeId, runId, payload = {}) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs/${encodeURIComponent(runId)}/hyperframes-freeform/project`, {
       method: 'POST',

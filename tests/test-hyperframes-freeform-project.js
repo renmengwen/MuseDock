@@ -130,6 +130,56 @@ async function run() {
   assert.match(animatedHtml, /tl\.fromTo\("\.hero-keyword"/);
   assert.match(animatedHtml, /<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/gsap@3\.12\.5\/dist\/gsap\.min\.js"><\/script>/);
 
+  const audioSourcePath = path.join(rootDir, 'freeform-narration.wav');
+  fs.writeFileSync(audioSourcePath, 'fake narration audio');
+  const withAudio = await freeformProject.createFreeformProject({
+    awemeId,
+    runId: `${runId}-audio`,
+    rootDir,
+    audio: {
+      path: audioSourcePath,
+      duration: 4.25,
+      captions: [{ index: 1, start: 0, end: 4.25, text: '旁白' }],
+    },
+    files: {
+      'index.html': '<!doctype html><html><body><main id="main" data-composition-id="main"></main></body></html>',
+      'hyperframes.json': '{"width":1080,"height":1920}',
+    },
+  });
+  const audioHtml = fs.readFileSync(path.join(withAudio.projectDir, 'index.html'), 'utf-8');
+  assert.equal(fs.readFileSync(path.join(withAudio.projectDir, 'assets', 'narration.wav'), 'utf-8'), 'fake narration audio');
+  assert.match(audioHtml, /<audio id="narration-audio"[^>]*data-duration="4.25"[^>]*src="assets\/narration\.wav"/);
+  assert.match(audioHtml, /<audio id="narration-audio"[^>]*data-track-index="99"/);
+  assert.doesNotMatch(audioHtml, /<audio id="narration-audio"[^>]*class="clip"/);
+  assert.doesNotMatch(audioHtml, /#narration-audio/);
+
+  const withGeneratedApiAudio = await freeformProject.createFreeformProject({
+    awemeId,
+    runId: `${runId}-generated-api-audio`,
+    rootDir,
+    audio: {
+      path: audioSourcePath,
+      url: '/api/agents/douyin/1234567890/runs/run-1/tts/run-1-tts.wav',
+      duration: 6,
+      captions: [{ index: 1, start: 0, end: 6, text: '鏃佺櫧' }],
+    },
+    files: {
+      'index.html': [
+        '<!doctype html><html><body>',
+        '<main id="main" data-composition-id="main" data-start="0" data-duration="10" data-track-index="0">',
+        '<audio id="voiceover" data-start="0" data-track-index="10" data-volume="1" src="/api/agents/douyin/1234567890/runs/run-1/tts/run-1-tts.wav"></audio>',
+        '</main>',
+        '</body></html>',
+      ].join(''),
+      'hyperframes.json': '{"width":1080,"height":1920}',
+    },
+  });
+  const generatedApiAudioHtml = fs.readFileSync(path.join(withGeneratedApiAudio.projectDir, 'index.html'), 'utf-8');
+  assert.equal(fs.readFileSync(path.join(withGeneratedApiAudio.projectDir, 'assets', 'narration.wav'), 'utf-8'), 'fake narration audio');
+  assert.equal((generatedApiAudioHtml.match(/<audio\b/gi) || []).length, 1);
+  assert.match(generatedApiAudioHtml, /<audio id="narration-audio"[^>]*data-start="0"[^>]*data-duration="6"[^>]*data-track-index="99"[^>]*src="assets\/narration\.wav"/);
+  assert.doesNotMatch(generatedApiAudioHtml, /\/api\/agents\/douyin\/1234567890\/runs\/run-1\/tts\/run-1-tts\.wav/);
+
   const file = await freeformProject.readFreeformFile({ projectDir, fileName: 'design.md' });
   assert.equal(file.success, true);
   assert.equal(file.content, '# Design');

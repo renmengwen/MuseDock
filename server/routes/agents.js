@@ -321,6 +321,27 @@ router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/brief', async (
   }
 });
 
+router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/audio', async (req, res) => {
+  try {
+    const result = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(req.params.aweme_id, req.params.run_id, {
+      voice: req.body?.voice,
+      stylePrompt: req.body?.stylePrompt,
+      maxRetries: req.body?.maxRetries,
+      retryDelayMs: req.body?.retryDelayMs,
+      ttsConcurrency: req.body?.ttsConcurrency,
+      ttsQueueIntervalMs: req.body?.ttsQueueIntervalMs,
+    });
+    return res.status(result.success ? 200 : 400).json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      aweme_id: req.params.aweme_id,
+      run_id: req.params.run_id,
+      message: '高级成片音频生成接口异常，请稍后重试。',
+    });
+  }
+});
+
 router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/project', async (req, res) => {
   try {
     const result = await agentRuns.generateDouyinRunHyperframesFreeformProject(req.params.aweme_id, req.params.run_id, {

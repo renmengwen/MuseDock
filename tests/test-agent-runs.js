@@ -904,6 +904,7 @@ async function run() {
   assert.equal(initialFreeform.hyperframes_freeform.mode, 'builtin_skill_context');
   assert.equal(initialFreeform.hyperframes_freeform.status, 'idle');
   assert.equal(initialFreeform.hyperframes_freeform.brief.status, 'idle');
+  assert.equal(initialFreeform.hyperframes_freeform.audio.status, 'idle');
   assert.equal(initialFreeform.hyperframes_freeform.project.status, 'idle');
   assert.equal(initialFreeform.hyperframes_freeform.checks.status, 'idle');
   assert.equal(initialFreeform.hyperframes_freeform.render.status, 'idle');
@@ -1081,6 +1082,10 @@ async function run() {
             summary: '自由工程 brief',
             design_md: '# Design',
             narration: '旁白',
+            audio_direction: {
+              voice: 'Mia',
+              style_prompt: '紧张，深呼吸，语速加快，适当加入（长叹一口气）。',
+            },
             storyboard: [],
           }),
         };
@@ -1090,6 +1095,90 @@ async function run() {
   assert.equal(freeformBrief.success, true);
   assert.equal(freeformBrief.hyperframes_freeform.brief.status, 'ready');
   assert.match(freeformBrief.hyperframes_freeform.brief.summary, /自由工程 brief/);
+
+  const freeformAutoAudio = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(awemeId, generated.run_id, {
+    rootDir,
+    sceneTtsService: {
+      synthesizeSceneTts: async ({ scenes, voice, stylePrompt }) => {
+        assert.deepStrictEqual(scenes.map(scene => scene.narration_text), ['旁白']);
+        assert.equal(voice, 'Mia');
+        assert.equal(stylePrompt, '紧张，深呼吸，语速加快，适当加入（长叹一口气）。');
+        const audioPath = path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}-tts.wav`);
+        fs.writeFileSync(audioPath, 'auto freeform narration audio');
+        return {
+          success: true,
+          message: '高级成片音频已生成。',
+          scene_tts: {
+            status: 'done',
+            voice,
+            style_prompt: stylePrompt,
+            format: 'wav',
+            path: audioPath,
+            file_name: path.basename(audioPath),
+            scenes: [
+              {
+                index: 1,
+                narration_text: '旁白',
+                duration: 1.5,
+                captions: [{ index: 1, start: 0, end: 1.5, duration: 1.5, text: '旁白' }],
+                phrase_captions: [],
+              },
+            ],
+            model: { provider: 'mock' },
+            updated_at: '2026-06-12T00:00:00.000Z',
+          },
+        };
+      },
+    },
+  });
+  assert.equal(freeformAutoAudio.success, true);
+  assert.equal(freeformAutoAudio.hyperframes_freeform.audio.voice, 'Mia');
+  assert.equal(freeformAutoAudio.hyperframes_freeform.audio.style_prompt, '紧张，深呼吸，语速加快，适当加入（长叹一口气）。');
+
+  const freeformAudio = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(awemeId, generated.run_id, {
+    rootDir,
+    voice: 'Mia',
+    stylePrompt: 'warm delivery',
+    sceneTtsService: {
+      synthesizeSceneTts: async ({ scenes, outputDir, runId, voice, stylePrompt }) => {
+        assert.equal(runId, generated.run_id);
+        assert.equal(voice, 'Mia');
+        assert.equal(stylePrompt, 'warm delivery');
+        assert.deepStrictEqual(scenes.map(scene => scene.narration_text), ['旁白']);
+        const audioPath = path.join(outputDir, `${runId}-tts.wav`);
+        fs.writeFileSync(audioPath, 'freeform narration audio');
+        return {
+          success: true,
+          message: '高级成片音频已生成。',
+          scene_tts: {
+            status: 'done',
+            voice,
+            style_prompt: stylePrompt,
+            format: 'wav',
+            path: audioPath,
+            file_name: path.basename(audioPath),
+            scenes: [
+              {
+                index: 1,
+                narration_text: '旁白',
+                duration: 1.5,
+                captions: [{ index: 1, start: 0, end: 1.5, duration: 1.5, text: '旁白' }],
+                phrase_captions: [],
+              },
+            ],
+            model: { provider: 'mock' },
+            updated_at: '2026-06-12T00:00:00.000Z',
+          },
+        };
+      },
+    },
+  });
+  assert.equal(freeformAudio.success, true);
+  assert.equal(freeformAudio.hyperframes_freeform.audio.status, 'ready');
+  assert.equal(freeformAudio.hyperframes_freeform.audio.voice, 'Mia');
+  assert.equal(freeformAudio.hyperframes_freeform.audio.duration, 1.5);
+  assert.equal(freeformAudio.hyperframes_freeform.audio.captions[0].text, '旁白');
+  assert.ok(fs.existsSync(freeformAudio.hyperframes_freeform.audio.path));
 
   const loggedBriefFailureRunId = `${generated.run_id}-logged-brief-failure`;
   const loggedBriefEvents = [];
@@ -1421,7 +1510,10 @@ async function run() {
   });
   assert.equal(freeformProject.success, true);
   assert.equal(freeformProject.hyperframes_freeform.project.status, 'ready');
-  assert.ok(fs.existsSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}-hyperframes-freeform`, 'index.html')));
+  const freeformProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}-hyperframes-freeform`);
+  assert.ok(fs.existsSync(path.join(freeformProjectDir, 'index.html')));
+  assert.equal(fs.readFileSync(path.join(freeformProjectDir, 'assets', 'narration.wav'), 'utf-8'), 'freeform narration audio');
+  assert.match(fs.readFileSync(path.join(freeformProjectDir, 'index.html'), 'utf-8'), /<audio[^>]+id="narration-audio"[^>]+src="assets\/narration\.wav"/);
 
   const freeformIndexPath = agentRuns.resolveDouyinRunHyperframesFreeformFile(awemeId, generated.run_id, 'index.html', { rootDir });
   assert.ok(freeformIndexPath.endsWith('index.html'));
@@ -2190,6 +2282,7 @@ async function run() {
   const originalCreateDouyinRunHyperframesProject = agentRuns.createDouyinRunHyperframesProject;
   const originalRenderDouyinRunHyperframesVideo = agentRuns.renderDouyinRunHyperframesVideo;
   const originalGenerateDouyinRunHyperframesFreeformBrief = agentRuns.generateDouyinRunHyperframesFreeformBrief;
+  const originalSynthesizeDouyinRunHyperframesFreeformAudio = agentRuns.synthesizeDouyinRunHyperframesFreeformAudio;
   const originalGenerateDouyinRunHyperframesFreeformProject = agentRuns.generateDouyinRunHyperframesFreeformProject;
   const originalCheckDouyinRunHyperframesFreeformProject = agentRuns.checkDouyinRunHyperframesFreeformProject;
   const originalRenderDouyinRunHyperframesFreeformVideo = agentRuns.renderDouyinRunHyperframesFreeformVideo;
@@ -2294,6 +2387,19 @@ async function run() {
       run_id: routeRunId,
       message: '自由工程导演策划已生成。',
       hyperframes_freeform: { brief: { status: 'ready' } },
+    };
+  };
+  agentRuns.synthesizeDouyinRunHyperframesFreeformAudio = async (routeAwemeId, routeRunId, options = {}) => {
+    assert.strictEqual(routeAwemeId, awemeId);
+    assert.strictEqual(routeRunId, 'ok-run');
+    assert.strictEqual(options.voice, 'Mia');
+    assert.strictEqual(options.stylePrompt, 'route audio');
+    return {
+      success: true,
+      aweme_id: routeAwemeId,
+      run_id: routeRunId,
+      message: '高级成片音频已生成。',
+      hyperframes_freeform: { audio: { status: 'ready', voice: 'Mia' } },
     };
   };
   agentRuns.generateDouyinRunHyperframesFreeformProject = async (routeAwemeId, routeRunId, options = {}) => {
@@ -2540,6 +2646,14 @@ async function run() {
     assert.strictEqual(freeformBriefResponse.body.success, true);
     assert.strictEqual(freeformBriefResponse.body.hyperframes_freeform.brief.status, 'ready');
 
+    const freeformAudioResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/audio`, {
+      voice: 'Mia',
+      stylePrompt: 'route audio',
+    });
+    assert.strictEqual(freeformAudioResponse.statusCode, 200);
+    assert.strictEqual(freeformAudioResponse.body.success, true);
+    assert.strictEqual(freeformAudioResponse.body.hyperframes_freeform.audio.status, 'ready');
+
     const freeformProjectResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/project`, {
       theme: 'route project',
     });
@@ -2588,6 +2702,7 @@ async function run() {
     agentRuns.createDouyinRunHyperframesProject = originalCreateDouyinRunHyperframesProject;
     agentRuns.renderDouyinRunHyperframesVideo = originalRenderDouyinRunHyperframesVideo;
     agentRuns.generateDouyinRunHyperframesFreeformBrief = originalGenerateDouyinRunHyperframesFreeformBrief;
+    agentRuns.synthesizeDouyinRunHyperframesFreeformAudio = originalSynthesizeDouyinRunHyperframesFreeformAudio;
     agentRuns.generateDouyinRunHyperframesFreeformProject = originalGenerateDouyinRunHyperframesFreeformProject;
     agentRuns.checkDouyinRunHyperframesFreeformProject = originalCheckDouyinRunHyperframesFreeformProject;
     agentRuns.renderDouyinRunHyperframesFreeformVideo = originalRenderDouyinRunHyperframesFreeformVideo;

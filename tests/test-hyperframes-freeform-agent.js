@@ -9,6 +9,15 @@ function assertProjectParseFails(response, messagePattern = /解析|不支持/) 
 }
 
 async function run() {
+  const briefMessages = agent.buildFreeformBriefMessages({
+    run: { result: { rewrite_script: '测试口播' } },
+    skillContext: 'Use HyperFrames.',
+  });
+  assert.match(briefMessages[1].content, /audio_direction/);
+  assert.match(briefMessages[1].content, /voice/);
+  assert.match(briefMessages[1].content, /style_prompt/);
+  assert.match(briefMessages[1].content, /紧张|深呼吸|语速|停顿|长叹/);
+
   const messages = agent.buildFreeformProjectMessages({
     run: {
       rewrite_script: '这是一段口播。',

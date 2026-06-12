@@ -722,6 +722,19 @@ function createDefaultHyperframesFreeformState(overrides = {}) {
       summary: '',
       message: '',
     },
+    audio: {
+      status: 'idle',
+      path: '',
+      url: '',
+      file_name: '',
+      format: '',
+      duration: 0,
+      captions: [],
+      phrase_captions: [],
+      voice: '',
+      style_prompt: '',
+      message: '',
+    },
     project: {
       status: 'idle',
       index_path: '',
@@ -759,6 +772,7 @@ function normalizeHyperframesFreeformState(value = {}) {
     ...defaults,
     ...current,
     brief: { ...defaults.brief, ...(current.brief || {}) },
+    audio: { ...defaults.audio, ...(current.audio || {}) },
     project: { ...defaults.project, ...(current.project || {}) },
     checks: { ...defaults.checks, ...(current.checks || {}) },
     render: { ...defaults.render, ...(current.render || {}) },
@@ -1107,6 +1121,187 @@ async function markFreeformProjectFailed(awemeId, runId, message, options = {}, 
   );
 }
 
+function normalizeFreeformNarrationScenes(brief = {}) {
+  const storyboard = brief?.storyboard;
+  const rawScenes = Array.isArray(storyboard?.scenes)
+    ? storyboard.scenes
+    : (Array.isArray(storyboard) ? storyboard : []);
+  const scenes = rawScenes
+    .map((scene, index) => ({
+      ...scene,
+      index: Number(scene?.index || index + 1),
+      narration_text: String(
+        scene?.narration_text
+        || scene?.narration
+        || scene?.voiceover
+        || scene?.script
+        || '',
+      ).trim(),
+    }))
+    .filter(scene => scene.narration_text);
+
+  if (scenes.length) return scenes;
+  const narration = String(brief?.narration || '').trim();
+  return narration ? [{ index: 1, narration_text: narration }] : [];
+}
+
+function getCaptionDuration(captions = []) {
+  return captions.reduce((max, caption) => Math.max(max, Number(caption?.end || 0)), 0);
+}
+
+function createFreeformAudioValue({ sceneTtsValue = {}, timedPlan = {}, awemeId, runId, voice = '', stylePrompt = '', fallbackMessage = '' }) {
+  const fileName = sceneTtsValue.file_name || (sceneTtsValue.path ? path.basename(sceneTtsValue.path) : getTtsFileName(runId, sceneTtsValue.format || 'wav'));
+  const captions = Array.isArray(timedPlan.captions) ? timedPlan.captions : [];
+  const phraseCaptions = Array.isArray(timedPlan.phrase_captions) ? timedPlan.phrase_captions : [];
+  const duration = Number(timedPlan.duration || sceneTtsValue.duration || getCaptionDuration(captions) || 0);
+  return {
+    ...(sceneTtsValue || {}),
+    status: 'ready',
+    voice: sceneTtsValue.voice || voice || '',
+    style_prompt: sceneTtsValue.style_prompt || stylePrompt || '',
+    format: sceneTtsValue.format || 'wav',
+    path: sceneTtsValue.path || '',
+    file_name: fileName,
+    url: fileName ? getTtsUrl(awemeId, runId, fileName) : '',
+    duration,
+    captions,
+    phrase_captions: phraseCaptions,
+    segments: Array.isArray(sceneTtsValue.scenes) ? sceneTtsValue.scenes : [],
+    message: sceneTtsValue.message || fallbackMessage || '高级成片音频已生成。',
+    updated_at: sceneTtsValue.updated_at || new Date().toISOString(),
+  };
+}
+
+function getFreeformBriefAudioDirection(brief = {}) {
+  const direction = isPlainObject(brief?.audio_direction) ? brief.audio_direction : {};
+  const voice = String(
+    direction.voice
+    || brief?.voice
+    || brief?.tts_voice
+    || '',
+  ).trim();
+  const stylePrompt = String(
+    direction.style_prompt
+    || direction.stylePrompt
+    || direction.delivery_prompt
+    || direction.prompt
+    || brief?.audio_style_prompt
+    || brief?.tts_style_prompt
+    || '',
+  ).trim();
+  return { voice, stylePrompt };
+}
+
+async function synthesizeDouyinRunHyperframesFreeformAudio(awemeId, runId, options = {}) {
+  const detail = await getDouyinAgentRun(awemeId, runId, options);
+  if (!detail.success) return detail;
+
+  const currentState = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
+  if (
+    currentState.brief.status !== 'ready'
+    || !currentState.brief.data
+    || typeof currentState.brief.data !== 'object'
+    || Array.isArray(currentState.brief.data)
+  ) {
+    return failHyperframesFreeformSection(awemeId, runId, 'audio', '请先生成导演策划。', options);
+  }
+
+  const scenes = normalizeFreeformNarrationScenes(currentState.brief.data);
+  if (!scenes.length) {
+    return failHyperframesFreeformSection(awemeId, runId, 'audio', '导演策划中没有可用于配音的旁白。', options);
+  }
+
+  const operationId = createFreeformOperationId('audio');
+  await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    status: 'generating',
+    audio: {
+      ...current.audio,
+      operation_id: operationId,
+      status: 'generating',
+      voice: options.voice || current.audio.voice || '',
+      style_prompt: options.stylePrompt || options.style_prompt || current.audio.style_prompt || '',
+      message: '正在生成高级成片音频...',
+    },
+  }), options);
+
+  const sceneTtsService = options.sceneTtsService || defaultSceneTts;
+  const audioDirection = getFreeformBriefAudioDirection(currentState.brief.data);
+  const resolvedVoice = options.voice || audioDirection.voice || undefined;
+  const resolvedStylePrompt = options.stylePrompt || options.style_prompt || audioDirection.stylePrompt || undefined;
+  let result;
+  try {
+    result = await sceneTtsService.synthesizeSceneTts({
+      scenes,
+      outputDir: getAgentRunsDir(awemeId, options.rootDir),
+      runId,
+      voice: resolvedVoice,
+      stylePrompt: resolvedStylePrompt,
+      format: options.format || 'wav',
+      ttsModel: options.ttsModel,
+      readAudioDuration: options.readAudioDuration,
+      concatenateAudioFiles: options.concatenateAudioFiles,
+      configPath: options.configPath,
+      ttsConfig: options.ttsConfig,
+      fetchImpl: options.fetchImpl,
+      waitImpl: options.waitImpl,
+      maxRetries: options.maxRetries,
+      retryDelayMs: options.retryDelayMs,
+      ttsConcurrency: options.ttsConcurrency,
+      ttsQueueIntervalMs: options.ttsQueueIntervalMs,
+    });
+  } catch (error) {
+    result = {
+      success: false,
+      message: `高级成片音频生成失败：${error.message || '未知错误'}`,
+    };
+  }
+
+  if (!result?.success) {
+    return failHyperframesFreeformSection(
+      awemeId,
+      runId,
+      'audio',
+      result?.message || '高级成片音频生成失败。',
+      options,
+      { operation_id: operationId },
+    );
+  }
+
+  const sceneTtsValue = {
+    ...(result.scene_tts || {}),
+    status: result.scene_tts?.status || 'done',
+    message: result.message || result.scene_tts?.message || '高级成片音频已生成。',
+    updated_at: result.scene_tts?.updated_at || new Date().toISOString(),
+  };
+  const timedPlan = storyboardTiming.buildTimedStoryboardPlan({
+    storyboardPlan: {
+      target_duration_sec: currentState.brief.data?.target_duration_sec || currentState.brief.data?.targetDurationSec || 0,
+      scenes,
+    },
+    sceneTts: sceneTtsValue,
+  });
+  const audio = createFreeformAudioValue({
+    sceneTtsValue,
+    timedPlan,
+    awemeId,
+    runId,
+    voice: resolvedVoice,
+    stylePrompt: resolvedStylePrompt,
+    fallbackMessage: result.message,
+  });
+
+  const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'audio', operationId, current => ({
+    status: 'ready',
+    audio: {
+      ...current.audio,
+      ...audio,
+      operation_id: operationId,
+    },
+  }), options);
+
+  return createHyperframesFreeformOperationResponse(awemeId, runId, 'audio', updated, true, audio.message);
+}
+
 async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options = {}) {
   const detail = await getDouyinAgentRun(awemeId, runId, options);
   if (!detail.success) return detail;
@@ -1399,6 +1594,9 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
 
   const projectService = options.hyperframesFreeformProject || defaultHyperframesFreeformProject;
   const tempRunId = `${runId}-${operationId}`;
+  const projectAudio = currentState.audio?.status === 'ready' && currentState.audio?.path
+    ? currentState.audio
+    : null;
   let created;
   try {
     created = await projectService.createFreeformProject({
@@ -1406,6 +1604,7 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
       runId: tempRunId,
       rootDir: options.rootDir,
       files: parsed.files,
+      audio: projectAudio,
     });
   } catch (error) {
     created = {
@@ -2959,6 +3158,7 @@ module.exports = {
   getDouyinRunHyperframesFreeformState,
   updateRunHyperframesFreeform,
   generateDouyinRunHyperframesFreeformBrief,
+  synthesizeDouyinRunHyperframesFreeformAudio,
   generateDouyinRunHyperframesFreeformProject,
   checkDouyinRunHyperframesFreeformProject,
   renderDouyinRunHyperframesFreeformVideo,

@@ -84,7 +84,7 @@ export function MediaPanel({
           <button className="btn primary" disabled={preparing || transcribing} onClick={onTranscribe}>
             {transcribing ? '转写中...' : '请求转写'}
           </button>
-          <button className="btn primary" disabled={preparing || transcribing} onClick={onGoToAiWorkspace}>进入 AI 工作台</button>
+          {/* <button className="btn primary" disabled={preparing || transcribing} onClick={onGoToAiWorkspace}>进入 AI 工作台</button> */}
           <button className="btn primary" disabled={preparing || transcribing} onClick={onGoToHyperframesStudio}>打开高级成片</button>
         </div>
       </div>

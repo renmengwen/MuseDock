@@ -16,6 +16,7 @@ assert.match(
 
 for (const action of [
   'generateBrief',
+  'generateAudio',
   'createFreeformRun',
   'generateProject',
   'checkProject',
@@ -28,6 +29,7 @@ for (const action of [
 
 for (const loadingText of [
   '正在生成导演策划',
+  '正在生成高级成片音频',
   '正在生成 HyperFrames 工程',
   '正在校验动画工程',
   '正在渲染视频',
@@ -61,6 +63,7 @@ assert.match(
 
 for (const method of [
   'api.generateHyperframesFreeformBrief',
+  'api.generateHyperframesFreeformAudio',
   'api.generateHyperframesFreeformProject',
   'api.checkHyperframesFreeformProject',
   'api.renderHyperframesFreeformProject',

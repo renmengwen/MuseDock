@@ -20,6 +20,8 @@ const TEXT_FILES = new Set([
   'package.json',
   'meta.json',
 ]);
+const NARRATION_AUDIO_ASSET = 'assets/narration.wav';
+const NARRATION_AUDIO_TRACK_INDEX = '99';
 
 const RUN_ID_PATTERN = /^[A-Za-z0-9_.-]+$/;
 const FONT_ALIASES = [
@@ -111,7 +113,7 @@ function readJsonObject(value) {
   }
 }
 
-function getProjectDuration(files = {}) {
+function getProjectDuration(files = {}, options = {}) {
   const meta = readJsonObject(files['meta.json']);
   const hyperframes = readJsonObject(files['hyperframes.json']);
   const candidates = [
@@ -119,6 +121,7 @@ function getProjectDuration(files = {}) {
     meta?.duration,
     hyperframes?.duration,
     hyperframes?.duration_sec,
+    options.defaultDuration,
   ];
   const indexHtml = String(files['index.html'] || '');
   const durationMatch = indexHtml.match(/\b(?:DURATION|duration)\s*=\s*([0-9]+(?:\.[0-9]+)?)/i);
@@ -153,8 +156,8 @@ function ensureRootAttribute(tag, name, value) {
   return tag.replace(/>$/, ` ${name}="${value}">`);
 }
 
-function normalizeRootCompositionAttributes(content, files = {}) {
-  const duration = getProjectDuration(files);
+function normalizeRootCompositionAttributes(content, files = {}, options = {}) {
+  const duration = getProjectDuration(files, options);
   const durationText = duration ? normalizeDurationValue(duration) : '';
   const { width, height } = getProjectDimensions(files);
 
@@ -193,8 +196,9 @@ function stripInvalidCompositionVariables(content) {
 }
 
 function ensureClipClassOnTimedElements(content) {
-  return content.replace(/<([a-z][\w:-]*)([^>]*\sdata-start\s*=\s*['"][^'"]+['"][^>]*\sdata-duration\s*=\s*['"][^'"]+['"][^>]*)>/gi, (tag) => {
+  return content.replace(/<([a-z][\w:-]*)([^>]*\sdata-start\s*=\s*['"][^'"]+['"][^>]*\sdata-duration\s*=\s*['"][^'"]+['"][^>]*)>/gi, (tag, tagName) => {
     if (/\sdata-composition-id\s*=/.test(tag)) return tag;
+    if (/^(audio|video)$/i.test(tagName)) return tag;
     if (/\sclass\s*=/.test(tag)) {
       return tag.replace(/\sclass\s*=\s*(['"])(.*?)\1/i, (classAttr, quote, classValue) => {
         const classes = classValue.split(/\s+/).filter(Boolean);
@@ -213,6 +217,7 @@ function getTimedClips(content) {
   while ((match = tagPattern.exec(content)) !== null) {
     const tag = match[0];
     if (/\sdata-composition-id\s*=/.test(tag)) continue;
+    if (/^(audio|video)$/i.test(match[1])) continue;
     const idMatch = tag.match(/\sid\s*=\s*['"]([^'"]+)['"]/i);
     if (!idMatch) continue;
     const start = Number(match[3]);
@@ -242,8 +247,8 @@ function ensureGsapDependency(content) {
   return `${content}\n${gsapScript}`;
 }
 
-function ensureTimelineRegistry(content, files = {}) {
-  const duration = getProjectDuration(files);
+function ensureTimelineRegistry(content, files = {}, options = {}) {
+  const duration = getProjectDuration(files, options);
   if (!duration) return content;
   if (hasRegisteredMainTimeline(content)) {
     return ensureGsapDependency(content);
@@ -275,14 +280,85 @@ function ensureTimelineRegistry(content, files = {}) {
   return `${content}\n${timelineScript}`;
 }
 
-function normalizeFreeformIndexHtml(html, files = {}) {
+function getFreeformAudioDuration(audio = {}) {
+  const explicit = Number(audio?.duration);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const captions = Array.isArray(audio?.captions) ? audio.captions : [];
+  return captions.reduce((max, caption) => Math.max(max, Number(caption?.end || 0)), 0);
+}
+
+function hasNarrationAudio(content = '') {
+  return /<audio\b[^>]*\bid\s*=\s*['"]narration-audio['"][^>]*>/i.test(String(content || ''));
+}
+
+function getTagAttribute(tag = '', name = '') {
+  const pattern = new RegExp(`\\s${name}\\s*=\\s*(['"])(.*?)\\1`, 'i');
+  const match = String(tag || '').match(pattern);
+  return match ? match[2] : '';
+}
+
+function normalizeComparablePath(value = '') {
+  return String(value || '').replace(/\\/g, '/');
+}
+
+function isNarrationAudioTag(tag = '', audio = {}) {
+  const id = getTagAttribute(tag, 'id');
+  if (id === 'narration-audio') return true;
+
+  const src = normalizeComparablePath(getTagAttribute(tag, 'src'));
+  if (!src) return false;
+  if (src === NARRATION_AUDIO_ASSET) return true;
+
+  const audioUrl = normalizeComparablePath(audio?.url);
+  if (audioUrl && src === audioUrl) return true;
+
+  const fileName = normalizeComparablePath(audio?.file_name || (audio?.path ? path.basename(audio.path) : ''));
+  if (fileName && src.endsWith(`/${fileName}`)) return true;
+
+  return /^\/api\/agents\/[^?#]+\/runs\/[^?#]+\/tts\/[^?#]+/i.test(src);
+}
+
+function buildNarrationAudioTag(audio = {}) {
+  const duration = getFreeformAudioDuration(audio);
+  const durationAttr = duration ? ` data-duration="${normalizeDurationValue(duration)}"` : '';
+  const volume = Number(audio?.volume ?? 1);
+  const volumeValue = Number.isFinite(volume) && volume >= 0 ? Math.min(volume, 1) : 1;
+  return `<audio id="narration-audio" data-start="0"${durationAttr} data-track-index="${NARRATION_AUDIO_TRACK_INDEX}" src="${NARRATION_AUDIO_ASSET}" data-volume="${volumeValue}"></audio>`;
+}
+
+function ensureNarrationAudioElement(content = '', audio = {}) {
+  if (!audio?.path) return content;
+  const audioTag = buildNarrationAudioTag(audio);
+  let hasAudioTag = false;
+  const normalizedContent = String(content || '').replace(/<audio\b[^>]*>[\s\S]*?<\/audio>|<audio\b[^>]*\/>/gi, (tag) => {
+    if (!isNarrationAudioTag(tag, audio)) return tag;
+    if (hasAudioTag) return '';
+    hasAudioTag = true;
+    return audioTag;
+  });
+  if (hasAudioTag || hasNarrationAudio(normalizedContent)) return normalizedContent;
+
+  const rootPattern = /<([a-z][\w:-]*)([^>]*\sdata-composition-id\s*=\s*['"][^'"]+['"][^>]*)>/i;
+  if (rootPattern.test(normalizedContent)) {
+    return normalizedContent.replace(rootPattern, (tag) => `${tag}\n  ${audioTag}`);
+  }
+  if (/<body\b[^>]*>/i.test(normalizedContent)) {
+    return normalizedContent.replace(/<body\b[^>]*>/i, (tag) => `${tag}\n  ${audioTag}`);
+  }
+  return `${audioTag}\n${normalizedContent}`;
+}
+
+function normalizeFreeformIndexHtml(html, files = {}, options = {}) {
   let content = String(html || '');
+  const audio = options.audio || {};
+  const defaultDuration = getFreeformAudioDuration(audio);
+  const durationOptions = { defaultDuration };
   for (const [pattern, replacement] of FONT_ALIASES) {
     content = content.replace(pattern, replacement);
   }
   content = stripInvalidCompositionVariables(content);
 
-  const duration = getProjectDuration({ ...files, 'index.html': content });
+  const duration = getProjectDuration({ ...files, 'index.html': content }, durationOptions);
   const durationText = normalizeDurationValue(duration);
 
   if (!/\sdata-composition-id\s*=/.test(content) && duration) {
@@ -295,16 +371,17 @@ function normalizeFreeformIndexHtml(html, files = {}) {
 
   content = stripNonDeterministicPlayback(content);
   content = stripTimelineScripts(content);
-  content = normalizeRootCompositionAttributes(content, { ...files, 'index.html': content });
+  content = normalizeRootCompositionAttributes(content, { ...files, 'index.html': content }, durationOptions);
+  content = ensureNarrationAudioElement(content, audio);
   content = ensureClipClassOnTimedElements(content);
-  content = ensureTimelineRegistry(content, { ...files, 'index.html': content });
+  content = ensureTimelineRegistry(content, { ...files, 'index.html': content }, durationOptions);
   return content;
 }
 
-function normalizeFreeformProjectFiles(files = {}) {
+function normalizeFreeformProjectFiles(files = {}, options = {}) {
   const normalized = { ...files };
   if (typeof normalized['index.html'] === 'string') {
-    normalized['index.html'] = normalizeFreeformIndexHtml(normalized['index.html'], normalized);
+    normalized['index.html'] = normalizeFreeformIndexHtml(normalized['index.html'], normalized, options);
   }
   return normalized;
 }
@@ -349,7 +426,7 @@ async function listFreeformFiles(projectDir) {
   return files;
 }
 
-async function createFreeformProject({ awemeId, runId, rootDir, files = {} }) {
+async function createFreeformProject({ awemeId, runId, rootDir, files = {}, audio = null }) {
   const projectDir = getFreeformProjectDir(awemeId, runId, rootDir);
   await Promise.all([
     fsp.mkdir(path.join(projectDir, 'assets'), { recursive: true }),
@@ -358,9 +435,12 @@ async function createFreeformProject({ awemeId, runId, rootDir, files = {} }) {
     fsp.mkdir(path.join(projectDir, 'renders'), { recursive: true }),
   ]);
 
-  const normalizedFiles = normalizeFreeformProjectFiles(files);
+  const normalizedFiles = normalizeFreeformProjectFiles(files, { audio });
   for (const [fileName, content] of Object.entries(normalizedFiles)) {
     await writeFreeformFile({ projectDir, fileName, content });
+  }
+  if (audio?.path) {
+    await fsp.copyFile(audio.path, path.join(projectDir, NARRATION_AUDIO_ASSET));
   }
 
   return {
@@ -394,4 +474,5 @@ module.exports = {
   buildFreeformFileUrl,
   normalizeFreeformIndexHtml,
   normalizeFreeformProjectFiles,
+  ensureNarrationAudioElement,
 };

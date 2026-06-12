@@ -36,6 +36,7 @@ export function HyperframesStudioPage({ awemeId = '', runId = '' }) {
           refreshRuns={studio.refreshRuns}
           createFreeformRun={studio.createFreeformRun}
           generateBrief={studio.generateBrief}
+          generateAudio={studio.generateAudio}
           generateProject={studio.generateProject}
           checkProject={studio.checkProject}
           renderVideo={studio.renderVideo}

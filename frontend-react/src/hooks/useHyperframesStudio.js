@@ -172,6 +172,13 @@ export function useHyperframesStudio({ initialAwemeId = '', initialRunId = '' } 
     request: (nextAwemeId, nextRunId) => api.generateHyperframesFreeformBrief(nextAwemeId, nextRunId, payload),
   }), [runStudioAction]);
 
+  const generateAudio = useCallback((payload = {}) => runStudioAction({
+    action: 'generateAudio',
+    loadingMessage: '正在生成高级成片音频...',
+    successMessage: '高级成片音频已生成。',
+    request: (nextAwemeId, nextRunId) => api.generateHyperframesFreeformAudio(nextAwemeId, nextRunId, payload),
+  }), [runStudioAction]);
+
   const generateProject = useCallback((payload = {}) => runStudioAction({
     action: 'generateProject',
     loadingMessage: '正在生成 HyperFrames 工程...',
@@ -269,6 +276,7 @@ export function useHyperframesStudio({ initialAwemeId = '', initialRunId = '' } 
     refreshActiveRun,
     createFreeformRun,
     generateBrief,
+    generateAudio,
     generateProject,
     checkProject,
     renderVideo,
