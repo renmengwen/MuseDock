@@ -1,16 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
   ArrowUp,
-  Bot,
   CirclePlus,
   FileText,
   Globe2,
   Loader2,
   PanelLeft,
-  Paperclip,
   Search,
-  Settings2,
   Shield,
   Sparkles,
   Zap,
@@ -113,8 +109,24 @@ function upsertTask(tasks, task) {
 }
 
 function CreativeTaskSidebar({ tasks, selectedWorkflowId, sidebarCollapsed, onToggleSidebar, onNewTask, onSelectTask }) {
+  if (sidebarCollapsed) {
+    return (
+      <aside className="creativeTaskSidebar collapsed" aria-label="已收起的创作任务栏">
+        <button
+          className="creativeCollapsedExpand"
+          type="button"
+          aria-label="展开任务列表"
+          aria-pressed="true"
+          onClick={onToggleSidebar}
+        >
+          <PanelLeft size={17} aria-hidden="true" />
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <aside className={`creativeTaskSidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+    <aside className="creativeTaskSidebar">
       <div className="creativeSidebarBrand">
         <div className="creativeBrandMark"><Sparkles size={18} /></div>
         <strong>一键创作</strong>
@@ -123,26 +135,14 @@ function CreativeTaskSidebar({ tasks, selectedWorkflowId, sidebarCollapsed, onTo
           <button
             className="creativeSidebarToggle"
             type="button"
-            aria-label={sidebarCollapsed ? '展开任务列表' : '收起任务列表'}
-            aria-hidden={sidebarCollapsed}
-            aria-pressed={sidebarCollapsed}
-            tabIndex={sidebarCollapsed ? -1 : 0}
+            aria-label="收起任务列表"
+            aria-pressed="false"
             onClick={onToggleSidebar}
           >
             <PanelLeft size={17} aria-hidden="true" />
           </button>
         </div>
       </div>
-      {sidebarCollapsed ? (
-        <button
-          className="creativeFloatingExpand"
-          type="button"
-          aria-label="展开任务列表"
-          onClick={onToggleSidebar}
-        >
-          <PanelLeft size={17} aria-hidden="true" />
-        </button>
-      ) : null}
 
       <button className="creativeNewTaskButton" type="button" onClick={onNewTask}>
         <CirclePlus size={16} />
@@ -209,15 +209,6 @@ function CreativeModeSwitch({ mode, setMode, disabled }) {
   );
 }
 
-function AssetContextNotice() {
-  return (
-    <div className="creativeAssetNotice">
-      <Paperclip size={15} />
-      <span>图片素材将在下一阶段开放；本阶段会保留 asset_context 和空 assetIds 结构。</span>
-    </div>
-  );
-}
-
 function CreativePromptComposer({
   input,
   setInput,
@@ -230,10 +221,6 @@ function CreativePromptComposer({
 }) {
   return (
     <form className="creativePromptComposer" onSubmit={onSubmit}>
-      <Link className="creativeHeaderSettings" to="/settings" aria-label="打开设置">
-        <Settings2 size={18} />
-        <span>设置</span>
-      </Link>
       <label className="creativePromptLabel" htmlFor="creative-input">
         输入视频方向、抖音 ID 或抖音链接
       </label>
@@ -257,10 +244,6 @@ function CreativePromptComposer({
             <Globe2 size={15} />
             <span>联网获取最新资料</span>
           </button>
-          <button type="button" disabled={isBusy}>
-            <Bot size={15} />
-            <span>智能成片</span>
-          </button>
         </div>
 
         <button className="creativeSubmitButton" type="submit" disabled={submitDisabled} aria-label="一键生成视频">
@@ -268,14 +251,11 @@ function CreativePromptComposer({
         </button>
       </div>
 
-      <div className="creativeExpertSlot">
-        {mode === 'expert' ? (
-          <>
+      {mode === 'expert' ? (
+        <div className="creativeExpertSlot">
             <div className="creativeExpertHint">专家模式正在开发中，请先使用快速模式创建任务。</div>
-            <AssetContextNotice />
-          </>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       <input type="hidden" value={mode} readOnly />
     </form>
   );

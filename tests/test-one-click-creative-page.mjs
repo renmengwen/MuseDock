@@ -59,13 +59,11 @@ for (const text of [
   zh.taskList,
   zh.quickMode,
   zh.expertMode,
-  zh.settings,
   zh.expertDeveloping,
   zh.taskDetail,
   zh.currentTask,
   zh.inputLabel,
   zh.researchToggle,
-  zh.assetNotice,
   zh.submitButton,
   zh.creatingMessage,
   zh.emptyInputMessage,
@@ -106,7 +104,6 @@ for (const symbol of [
   'CreativeInputForm',
   'WorkflowStageList',
   'WorkflowStatusPanel',
-  'AssetContextNotice',
 ]) {
   assert.match(page, new RegExp(`function\\s+${symbol}\\s*\\(`), `OneClickCreativePage.jsx should define ${symbol}`);
 }
@@ -120,19 +117,27 @@ assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should
 assert.match(page, /sidebarCollapsed/, 'OneClickCreativePage should track collapsed task sidebar state');
 assert.match(page, /setSidebarCollapsed/, 'OneClickCreativePage should toggle the task sidebar');
 assert.ok(page.includes('className="creativeSidebarToggle"'), 'Task sidebar collapse control should be a real button');
-assert.ok(page.includes('aria-hidden={sidebarCollapsed}'), 'Collapsed inline sidebar toggle should leave the accessible tree');
-assert.ok(page.includes('tabIndex={sidebarCollapsed ? -1 : 0}'), 'Collapsed inline sidebar toggle should not remain keyboard-focusable');
+assert.match(page, /if \(sidebarCollapsed\) \{\s*return \(\s*<aside className="creativeTaskSidebar collapsed"/, 'Collapsed sidebar should render a minimal rail instead of compressed full sidebar content');
+assert.match(page, /className="creativeCollapsedExpand"/, 'Collapsed sidebar should expose only one top-left expand button');
+assert.ok(!page.includes('creativeFloatingExpand'), 'Collapsed sidebar should not render a floating expand pill over the rail');
 assert.ok(page.includes('className="creativeModeThumb"'), 'Mode switch should use an animated thumb instead of button borders');
 assert.ok(page.includes('data-mode={mode}'), 'Mode switch should expose mode state for thumb animation');
-assert.match(page, /to="\/settings"/, 'OneClickCreativePage should expose settings entry inside the creative header card');
-assert.match(page, /<form className="creativePromptComposer"[\s\S]*className="creativeHeaderSettings"[\s\S]*<\/form>/, 'Settings entry should live inside the top prompt card');
-assert.match(page, /Settings2/, 'Settings entry should include a settings icon');
+assert.match(shell, /to="\/settings"/, 'AppShell should expose settings entry inside the top brand card');
+assert.match(shell, /<header className="header"[\s\S]*className="creativeHeaderSettings"[\s\S]*<\/header>/, 'Settings entry should live on the right side of the top brand card');
+assert.doesNotMatch(page, /<form className="creativePromptComposer"[\s\S]*className="creativeHeaderSettings"[\s\S]*<\/form>/, 'Settings entry should not sit inside the input box');
+assert.match(shell, /Settings2/, 'Settings entry should include a settings icon');
+assert.ok(shell.includes(zh.settings), 'AppShell should render settings text in normal Chinese');
+assert.doesNotMatch(page, /<Bot\s+size=\{15\}/, 'Prompt quick actions should remove the smart video pill in every mode');
+assert.ok(!page.includes('智能成片'), 'Prompt quick actions should not render smart video copy');
 assert.match(page, /const submitDisabled = isBusy \|\| mode === 'expert'/, 'Expert mode should contribute to submit disabled state');
 assert.match(page, /disabled=\{submitDisabled\}/, 'Submit button should use the combined disabled state');
 assert.match(page, /creativeExpertHint/, 'Expert mode should show a developing hint');
 assert.ok(page.includes(zh.expertDeveloping), 'Expert mode developing hint should use Chinese copy');
+assert.ok(!page.includes(zh.assetNotice), 'Expert mode should not show the future asset-context notice copy');
+assert.doesNotMatch(page, /AssetContextNotice/, 'Expert mode should not render a second asset-context notice below the developing hint');
 assert.match(page, /className=\{`creativeResearchToggle \$\{useResearch \? 'active' : ''\}`\}/, 'Research button should have an explicit inactive state');
 assert.ok(page.includes('<div className="creativeExpertSlot">'), 'Expert-only notice should live in a stable reserved slot');
+assert.match(page, /mode === 'expert' \? \(\s*<div className="creativeExpertSlot">/, 'Expert notice slot should only render in expert mode to avoid quick-mode empty space');
 assert.match(page, /assetIds:\s*\[\]/, 'OneClickCreativePage payload should preserve empty assetIds');
 assert.match(page, /disabled=\{isBusy\}/, 'OneClickCreativePage should disable submit while busy');
 assert.match(page, /creativeChatShell/, 'OneClickCreativePage should use a dedicated chat shell');
@@ -145,11 +150,15 @@ assert.ok(styles.includes('.creativeModeThumb'), 'styles.css should define the a
 assert.ok(styles.includes('transition: transform'), 'styles.css should animate mode switch movement');
 assert.ok(styles.includes('.creativeChatShell.sidebarCollapsed'), 'styles.css should define collapsed sidebar layout');
 assert.ok(styles.includes('.creativeTaskSidebar.collapsed'), 'styles.css should style the collapsed sidebar');
+assert.match(styles, /\.creativeTaskSidebar\.collapsed\s*\{[^}]*background:\s*#fff/, 'Collapsed sidebar should share the same white background as the main container');
 assert.ok(styles.includes('.creativeHeaderSettings'), 'styles.css should define the settings button in the header card');
 assert.ok(styles.includes('.creativeResearchToggle:not(.active)'), 'styles.css should make default research state look off');
+assert.match(styles, /\.creativeQuickActions \.creativeResearchToggle\s*\{[^}]*transition:[^}]*transform/, 'research toggle should animate between off and on states');
+assert.match(styles, /\.creativeQuickActions \.creativeResearchToggle\.active\s*\{[^}]*transform:\s*translateY\(-1px\)/, 'active research toggle should have a subtle animated lift');
+assert.ok(styles.includes('padding: 0 12px'), 'quick action buttons should have horizontal padding');
 assert.ok(styles.includes('.creativeExpertSlot'), 'styles.css should reserve space for expert notice');
-assert.ok(styles.includes('min-height: 72px'), 'styles.css should reserve stable height for expert notice');
-assert.ok(styles.includes('.creativeFloatingExpand'), 'styles.css should keep collapsed sidebar expand button visible');
+assert.ok(styles.includes('.creativeExpertSlot:not(:empty)'), 'styles.css should only reserve expert notice space when notice is visible');
+assert.ok(!styles.includes('.creativeFloatingExpand'), 'styles.css should not keep a floating expand button over collapsed sidebar');
 assert.ok(!page.includes('<div className="agentStatusList">'), 'WorkflowStatusPanel should not render li elements inside a div.agentStatusList');
 assert.ok(page.includes('<ul className="agentStatusList">'), 'WorkflowStatusPanel should render status items inside ul.agentStatusList');
 

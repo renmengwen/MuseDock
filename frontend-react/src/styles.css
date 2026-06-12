@@ -29,9 +29,18 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #2b2f36; }
-.header { background: linear-gradient(135deg, #fe2c55, #25f4ee); color: #fff; padding: 20px 32px; }
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(135deg, #fe2c55, #25f4ee);
+  color: #fff;
+  padding: 20px 32px;
+}
 .header h1 { margin: 0; font-size: 22px; }
 .header p { margin: 4px 0 0; font-size: 13px; opacity: .92; }
+.headerText { min-width: 0; }
 .tabs { display: flex; background: #fff; border-bottom: 1px solid #e7e9ee; }
 .tabs a { display: inline-flex; align-items: center; min-height: 46px; padding: 0 24px; color: #606774; border-bottom: 2px solid transparent; }
 .tabs a.active { color: #fe2c55; border-bottom-color: #fe2c55; font-weight: 600; }
@@ -336,7 +345,9 @@ a { color: #fe2c55; text-decoration: none; }
   transition: padding .24s ease, background-color .24s ease;
 }
 .creativeTaskSidebar.collapsed {
-  padding-inline: 10px;
+  display: block;
+  padding: 18px 0 0 18px;
+  background: #fff;
 }
 .creativeSidebarBrand {
   display: grid;
@@ -386,53 +397,25 @@ a { color: #fe2c55; text-decoration: none; }
   background: #eef4ff;
   color: #2563eb;
 }
-.creativeTaskSidebar.collapsed .creativeSidebarBrand {
-  grid-template-columns: 1fr;
-  justify-items: center;
-}
-.creativeTaskSidebar.collapsed .creativeSidebarBrand strong,
-.creativeTaskSidebar.collapsed .creativeSidebarTools svg:first-child,
-.creativeTaskSidebar.collapsed .creativeNewTaskButton span,
-.creativeTaskSidebar.collapsed .creativeTaskListHeader,
-.creativeTaskSidebar.collapsed .creativeTaskItem span,
-.creativeTaskSidebar.collapsed .creativeTaskItem small,
-.creativeTaskSidebar.collapsed .creativeTaskEmpty span {
-  opacity: 0;
-  transform: translateX(-8px);
-  pointer-events: none;
-}
-.creativeTaskSidebar.collapsed .creativeSidebarTools {
-  justify-content: center;
-}
-.creativeTaskSidebar.collapsed .creativeSidebarToggle {
-  opacity: 0;
-  pointer-events: none;
-  transform: rotate(180deg) scale(.82);
-}
-.creativeFloatingExpand {
-  position: absolute;
-  top: 92px;
-  left: 50%;
-  z-index: 5;
+.creativeCollapsedExpand {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 72px;
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
   background: #fff;
-  color: #667085;
+  color: #1f2937;
   cursor: pointer;
-  box-shadow: 0 14px 32px rgba(15,23,42,.16);
-  transform: translateX(-50%);
-  transition: color .18s ease, border-color .18s ease, box-shadow .18s ease, transform .22s ease;
+  box-shadow: 0 8px 20px rgba(15,23,42,.08);
+  transition: background-color .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease;
 }
-.creativeFloatingExpand:hover {
+.creativeCollapsedExpand:hover {
+  background: #eef4ff;
   color: #2563eb;
-  border-color: #bfdbfe;
-  box-shadow: 0 18px 40px rgba(37,99,235,.18);
-  transform: translateX(-50%) translateY(-2px);
+  box-shadow: 0 10px 24px rgba(37,99,235,.14);
+  transform: translateY(-1px);
 }
 .creativeNewTaskButton {
   display: inline-flex;
@@ -560,27 +543,26 @@ a { color: #fe2c55; text-decoration: none; }
   letter-spacing: 0;
 }
 .creativeHeaderSettings {
-  position: absolute;
-  top: 12px;
-  right: 12px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: 0 0 auto;
   min-height: 34px;
   padding: 0 12px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid rgba(255,255,255,.42);
   border-radius: 999px;
-  background: #fff;
-  color: #667085;
+  background: rgba(255,255,255,.16);
+  color: #fff;
   font-size: 13px;
   font-weight: 700;
-  box-shadow: 0 8px 20px rgba(15,23,42,.05);
+  box-shadow: 0 8px 20px rgba(15,23,42,.10);
+  backdrop-filter: blur(10px);
   transition: color .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
 }
 .creativeHeaderSettings:hover {
-  color: #2563eb;
-  border-color: #bfdbfe;
-  box-shadow: 0 12px 28px rgba(37,99,235,.14);
+  color: #fff;
+  border-color: rgba(255,255,255,.72);
+  box-shadow: 0 12px 28px rgba(15,23,42,.16);
   transform: translateY(-2px);
 }
 .creativeModeSwitch {
@@ -633,11 +615,10 @@ a { color: #fe2c55; text-decoration: none; }
   opacity: .64;
 }
 .creativePromptComposer {
-  position: relative;
   display: grid;
   gap: 10px;
   width: min(100%, 776px);
-  min-height: 124px;
+  min-height: 0;
   padding: 17px 12px 10px;
   border: 1px solid #dfe3ea;
   border-radius: 20px;
@@ -652,12 +633,12 @@ a { color: #fe2c55; text-decoration: none; }
 }
 .creativePromptComposer textarea {
   width: 100%;
-  min-height: 58px;
+  min-height: 74px;
   max-height: 220px;
   resize: vertical;
   border: 0;
   outline: 0;
-  padding: 0 92px 0 4px;
+  padding: 0 4px;
   color: #111827;
   background: transparent;
   font: inherit;
@@ -687,6 +668,7 @@ a { color: #fe2c55; text-decoration: none; }
   align-items: center;
   gap: 5px;
   min-height: 34px;
+  padding: 0 12px;
   border: 1px solid #bcd0ff;
   border-radius: 999px;
   background: #f4f7ff;
@@ -695,10 +677,16 @@ a { color: #fe2c55; text-decoration: none; }
   font-size: 13px;
   cursor: pointer;
 }
+.creativeQuickActions .creativeResearchToggle {
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
 .creativeQuickActions .creativeResearchToggle:not(.active) {
   border-color: #e5e7eb;
   background: #fff;
   color: #667085;
+}
+.creativeQuickActions .creativeResearchToggle.active {
+  transform: translateY(-1px);
 }
 .creativeQuickActions button.active {
   background: #e6efff;
@@ -748,8 +736,11 @@ a { color: #fe2c55; text-decoration: none; }
   display: grid;
   align-content: start;
   gap: 8px;
-  min-height: 72px;
+  min-height: 0;
   overflow: hidden;
+}
+.creativeExpertSlot:not(:empty) {
+  min-height: 72px;
 }
 .creativeExpertSlot > * {
   opacity: 1;
