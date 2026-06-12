@@ -18,13 +18,17 @@ function testNormalizesTextInput() {
     useResearch: false,
   });
 
-  assert.equal(result.success, true);
-  assert.equal(result.mode, 'text');
-  assert.equal(result.raw_text, TEXT_INPUT);
-  assert.equal(result.aweme_id, '');
-  assert.equal(result.douyin_url, '');
-  assert.equal(result.use_research, false);
-  assert.deepEqual(result.asset_ids, []);
+  assert.deepEqual(result, {
+    success: true,
+    data: {
+      mode: 'text',
+      raw_text: TEXT_INPUT,
+      aweme_id: '',
+      douyin_url: '',
+      use_research: false,
+      asset_ids: [],
+    },
+  });
 }
 
 function testUseResearchOnlyAcceptsBooleanTrue() {
@@ -41,9 +45,9 @@ function testUseResearchOnlyAcceptsBooleanTrue() {
     useResearch: true,
   });
 
-  assert.equal(stringTrue.use_research, false);
-  assert.equal(numericTrue.use_research, false);
-  assert.equal(booleanTrue.use_research, true);
+  assert.equal(stringTrue.data.use_research, false);
+  assert.equal(numericTrue.data.use_research, false);
+  assert.equal(booleanTrue.data.use_research, true);
 }
 
 function testNormalizesDouyinVideoUrl() {
@@ -55,21 +59,21 @@ function testNormalizesDouyinVideoUrl() {
   });
 
   assert.equal(result.success, true);
-  assert.equal(result.mode, 'douyin');
-  assert.equal(result.raw_text, '');
-  assert.equal(result.aweme_id, '7345678901234567890');
-  assert.equal(result.douyin_url, url);
-  assert.equal(result.use_research, true);
-  assert.deepEqual(result.asset_ids, []);
+  assert.equal(result.data.mode, 'douyin');
+  assert.equal(result.data.raw_text, '');
+  assert.equal(result.data.aweme_id, '7345678901234567890');
+  assert.equal(result.data.douyin_url, url);
+  assert.equal(result.data.use_research, true);
+  assert.deepEqual(result.data.asset_ids, []);
 }
 
 function testNormalizesDouyinId() {
   const result = normalizeCreativeInput({ input: '7345678901234567890' });
 
   assert.equal(result.success, true);
-  assert.equal(result.mode, 'douyin');
-  assert.equal(result.aweme_id, '7345678901234567890');
-  assert.equal(result.douyin_url, '');
+  assert.equal(result.data.mode, 'douyin');
+  assert.equal(result.data.aweme_id, '7345678901234567890');
+  assert.equal(result.data.douyin_url, '');
 }
 
 function testRejectsEmptyInput() {
@@ -87,11 +91,14 @@ function testRejectsAssetsForPhaseOne() {
 
   assert.equal(result.success, false);
   assert.match(result.message, /图片素材将在下一阶段开放/);
-  assert.deepEqual(result.asset_ids, []);
   assert.deepEqual(result.data.asset_ids, []);
 }
 
 function testExtractsAwemeIdFromSupportedInputs() {
+  assert.equal(
+    extractAwemeId('7345678901234567890'),
+    '7345678901234567890'
+  );
   assert.equal(
     extractAwemeId('https://www.douyin.com/video/7345678901234567890'),
     '7345678901234567890'
@@ -111,7 +118,7 @@ function testBuildsStableCreativeContext() {
   const input = normalizeCreativeInput({
     input: TEXT_INPUT,
     useResearch: false,
-  });
+  }).data;
   const sourceContext = createTextSourceContext(input.raw_text);
   const researchContext = createDisabledResearchContext({ now });
   const assetContext = createDisabledAssetContext({ now });
@@ -164,7 +171,7 @@ function testBuildsDefaultContextsWhenMissing() {
   const input = normalizeCreativeInput({
     input: TEXT_INPUT,
     useResearch: false,
-  });
+  }).data;
 
   const context = buildCreativeContext({ input, now });
 

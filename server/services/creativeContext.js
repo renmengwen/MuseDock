@@ -30,10 +30,8 @@ function extractAwemeId(input) {
   return '';
 }
 
-function createBaseNormalizedInput(overrides = {}) {
+function createNormalizedData(overrides = {}) {
   return {
-    success: true,
-    message: '',
     mode: '',
     raw_text: '',
     aweme_id: '',
@@ -44,27 +42,35 @@ function createBaseNormalizedInput(overrides = {}) {
   };
 }
 
+function createSuccessResponse(overrides = {}) {
+  return {
+    success: true,
+    data: createNormalizedData(overrides),
+  };
+}
+
+function createFailureResponse(message, overrides = {}) {
+  return {
+    success: false,
+    message,
+    data: createNormalizedData(overrides),
+  };
+}
+
 function normalizeCreativeInput(payload = {}) {
   const assetIds = Array.isArray(payload.assetIds) ? [...payload.assetIds] : [];
   const useResearch = payload.useResearch === true;
 
   if (assetIds.length > 0) {
-    return createBaseNormalizedInput({
-      success: false,
-      message: '图片素材将在下一阶段开放。',
+    return createFailureResponse('图片素材将在下一阶段开放。', {
       use_research: useResearch,
       asset_ids: [],
-      data: {
-        asset_ids: [],
-      },
     });
   }
 
   const input = safeString(payload.input);
   if (!input) {
-    return createBaseNormalizedInput({
-      success: false,
-      message: '请输入视频方向、抖音 ID 或抖音链接。',
+    return createFailureResponse('请输入视频方向、抖音 ID 或抖音链接。', {
       use_research: useResearch,
       asset_ids: assetIds,
     });
@@ -72,7 +78,7 @@ function normalizeCreativeInput(payload = {}) {
 
   const awemeId = extractAwemeId(input);
   if (awemeId) {
-    return createBaseNormalizedInput({
+    return createSuccessResponse({
       mode: 'douyin',
       aweme_id: awemeId,
       douyin_url: /^https?:\/\//i.test(input) ? input : '',
@@ -81,7 +87,7 @@ function normalizeCreativeInput(payload = {}) {
     });
   }
 
-  return createBaseNormalizedInput({
+  return createSuccessResponse({
     mode: 'text',
     raw_text: input,
     use_research: useResearch,
