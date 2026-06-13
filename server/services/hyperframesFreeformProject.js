@@ -156,19 +156,77 @@ function ensureRootAttribute(tag, name, value) {
   return tag.replace(/>$/, ` ${name}="${value}">`);
 }
 
-function normalizeRootCompositionAttributes(content, files = {}, options = {}) {
-  const duration = getProjectDuration(files, options);
-  const durationText = duration ? normalizeDurationValue(duration) : '';
-  const { width, height } = getProjectDimensions(files);
+const ROOT_COMPOSITION_ATTRS = [
+  'data-composition-id',
+  'data-start',
+  'data-duration',
+  'data-width',
+  'data-height',
+];
 
-  return content.replace(/<([a-z][\w:-]*)([^>]*\sdata-composition-id\s*=\s*['"][^'"]+['"][^>]*)>/i, (tag) => {
-    let nextTag = tag;
-    if (durationText) nextTag = ensureRootAttribute(nextTag, 'data-duration', durationText);
-    nextTag = ensureRootAttribute(nextTag, 'data-width', String(width));
-    nextTag = ensureRootAttribute(nextTag, 'data-height', String(height));
-    nextTag = ensureRootAttribute(nextTag, 'data-start', '0');
-    return nextTag;
-  });
+function getTagAttribute(tag, name) {
+  const match = String(tag || '').match(new RegExp(`\\s${name}\\s*=\\s*(['"])(.*?)\\1`, 'i'));
+  return match ? match[2] : '';
+}
+
+function removeRootCompositionAttributes(tag) {
+  let nextTag = tag;
+  for (const name of ROOT_COMPOSITION_ATTRS) {
+    nextTag = nextTag.replace(new RegExp(`\\s${name}\\s*=\\s*(?:"[^"]*"|'[^']*')`, 'gi'), '');
+  }
+  return nextTag;
+}
+
+function ensureRootAttributes(tag, files = {}, options = {}, inheritedAttrs = {}) {
+  const duration = getProjectDuration(files, options);
+  const durationText = duration ? normalizeDurationValue(duration) : inheritedAttrs['data-duration'] || '';
+  const { width, height } = getProjectDimensions(files);
+  let nextTag = tag;
+  nextTag = ensureRootAttribute(nextTag, 'data-composition-id', inheritedAttrs['data-composition-id'] || 'main');
+  if (durationText) nextTag = ensureRootAttribute(nextTag, 'data-duration', durationText);
+  nextTag = ensureRootAttribute(nextTag, 'data-width', inheritedAttrs['data-width'] || String(width));
+  nextTag = ensureRootAttribute(nextTag, 'data-height', inheritedAttrs['data-height'] || String(height));
+  nextTag = ensureRootAttribute(nextTag, 'data-start', inheritedAttrs['data-start'] || '0');
+  return nextTag;
+}
+
+function moveHtmlCompositionAttributesToRoot(content, files = {}, options = {}) {
+  const htmlMatch = String(content || '').match(/<html\b[^>]*>/i);
+  if (!htmlMatch || !/\sdata-composition-id\s*=/.test(htmlMatch[0])) return content;
+
+  const inheritedAttrs = {};
+  for (const name of ROOT_COMPOSITION_ATTRS) {
+    const value = getTagAttribute(htmlMatch[0], name);
+    if (value) inheritedAttrs[name] = value;
+  }
+
+  let nextContent = content.replace(htmlMatch[0], removeRootCompositionAttributes(htmlMatch[0]));
+  const targetPatterns = [
+    /<([a-z][\w:-]*)([^>]*\bid\s*=\s*['"]stage['"][^>]*)>/i,
+    /<([a-z][\w:-]*)([^>]*\bclass\s*=\s*['"][^'"]*\bstage\b[^'"]*['"][^>]*)>/i,
+    /(<body\b[^>]*>\s*)<([a-z][\w:-]*)([^>]*)>/i,
+  ];
+
+  for (const pattern of targetPatterns) {
+    if (!pattern.test(nextContent)) continue;
+    return nextContent.replace(pattern, (...args) => {
+      if (pattern === targetPatterns[2]) {
+        const [, bodyOpen, tagName, attrs] = args;
+        if (/^(script|style)$/i.test(tagName)) return args[0];
+        return `${bodyOpen}${ensureRootAttributes(`<${tagName}${attrs}>`, files, options, inheritedAttrs)}`;
+      }
+      return ensureRootAttributes(args[0], files, options, inheritedAttrs);
+    });
+  }
+
+  return nextContent;
+}
+
+function normalizeRootCompositionAttributes(content, files = {}, options = {}) {
+  const migrated = moveHtmlCompositionAttributesToRoot(content, files, options);
+  return migrated.replace(/<([a-z][\w:-]*)([^>]*\sdata-composition-id\s*=\s*['"][^'"]+['"][^>]*)>/i, (tag) => (
+    ensureRootAttributes(tag, files, options)
+  ));
 }
 
 function stripNonDeterministicPlayback(content) {

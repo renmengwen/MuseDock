@@ -99,6 +99,28 @@ async function run() {
   assert.match(lintHtml, /tl\.set\("#s1", \{ autoAlpha: 0 \}, 5\)/);
   assert.match(lintHtml, /tl\.set\("#s2", \{ autoAlpha: 1 \}, 5\)/);
 
+  const htmlRootProject = await freeformProject.createFreeformProject({
+    awemeId,
+    runId: `${runId}-html-root-stage`,
+    rootDir,
+    files: {
+      'index.html': [
+        '<!doctype html>',
+        '<html lang="zh-CN" data-composition-id="main" data-start="0" data-duration="12" data-width="1080" data-height="1920">',
+        '<head></head>',
+        '<body><div class="stage" id="stage"><section id="s1" data-start="0" data-duration="12"></section></div></body>',
+        '</html>',
+      ].join(''),
+      'hyperframes.json': '{"duration":12,"width":1080,"height":1920}',
+    },
+  });
+  const htmlRoot = fs.readFileSync(path.join(htmlRootProject.projectDir, 'index.html'), 'utf-8');
+  assert.doesNotMatch(htmlRoot, /<html[^>]*data-composition-id=/);
+  assert.match(htmlRoot, /<div class="stage" id="stage"[^>]*data-composition-id="main"/);
+  assert.match(htmlRoot, /<div class="stage" id="stage"[^>]*data-width="1080"/);
+  assert.match(htmlRoot, /<div class="stage" id="stage"[^>]*data-height="1920"/);
+  assert.match(htmlRoot, /<div class="stage" id="stage"[^>]*data-start="0"/);
+
   const animated = await freeformProject.createFreeformProject({
     awemeId,
     runId: `${runId}-registered-animation`,
