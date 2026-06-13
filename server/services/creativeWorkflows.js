@@ -784,6 +784,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
   if (failIfNull(await runStage(record, 'project', rootDir, async () => ensureSuccess(
     await services.agentRuns.generateDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
+      useHtmlVideoLiteWorkflow: true,
       projectOptions: {
         creative_context: record.creative_context,
       },

@@ -121,6 +121,7 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project', 'check', 'render', 'inspect']);
   assert.equal(calls[1].options.briefOptions.creative_context.input.mode, 'text');
   assert.equal(calls[3].options.projectOptions.creative_context.asset_context.status, 'disabled');
+  assert.equal(calls[3].options.useHtmlVideoLiteWorkflow, true);
   assert.equal(calls[0].options.rootDir, mediaRoot);
 
   const mediaPaths = mediaPipeline.getMediaPaths(created.aweme_id, mediaRoot);
