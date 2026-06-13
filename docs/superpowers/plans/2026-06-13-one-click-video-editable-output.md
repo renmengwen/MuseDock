@@ -1,5 +1,7 @@
 # One-Click Video Editable Output Implementation Plan
 
+> **Deprecated:** This plan is superseded by `docs/superpowers/specs/2026-06-14-html-video-lite-one-click-video-redesign.md`. Do not continue implementation from this plan. The old `scene_spec -> deterministic bare HTML composer` direction produced white-background text videos and does not meet the new html-video lite architecture.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a stable one-click video pipeline that stores editable `scene_spec`, generates HyperFrames projects deterministically, and lets users edit captions, narration, visual text, scene duration/order, single-scene rewrites, and local TTS after the first black-box generation succeeds.
