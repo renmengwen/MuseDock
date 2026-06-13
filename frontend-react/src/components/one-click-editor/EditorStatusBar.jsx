@@ -12,7 +12,7 @@ export function EditorStatusBar({ status, message }) {
   };
 
   return (
-    <div className={`one-click-editor-status ${status}`}>
+    <div className={`one-click-editor-status ${status}`} role="status" aria-live="polite">
       <span>{statusText[status] || status}: </span>
       <span>{message}</span>
     </div>

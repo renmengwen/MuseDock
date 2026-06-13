@@ -15,4 +15,13 @@ assert.match(source, /headers:\s*\{\s*'Content-Type':\s*'application\/json'\s*\}
 assert.match(source, /body:\s*JSON\.stringify\(payload\)/);
 assert.match(source, /encodeURIComponent\(workflowId\)/);
 
+assert.match(source, /getCreativeWorkflowSceneSpec\s*\(/, 'client should expose getCreativeWorkflowSceneSpec');
+assert.match(source, /patchCreativeWorkflowSceneSpec\s*\(/, 'client should expose patchCreativeWorkflowSceneSpec');
+assert.match(source, /rewriteCreativeWorkflowScene\s*\(/, 'client should expose rewriteCreativeWorkflowScene');
+assert.match(source, /ttsCreativeWorkflowScene\s*\(/, 'client should expose ttsCreativeWorkflowScene');
+assert.match(source, /rerenderCreativeWorkflow\s*\(/, 'client should expose rerenderCreativeWorkflow');
+assert.ok(source.includes('/scene-spec'), 'client should call scene-spec endpoint');
+assert.ok(source.includes('/scenes/'), 'client should call scene-level endpoints');
+assert.ok(source.includes('/rerender'), 'client should call rerender endpoint');
+
 console.log('creative api client tests passed');

@@ -741,6 +741,7 @@ async function testSceneSpecOperations() {
     getCreativeWorkflowSceneSpec,
     patchCreativeWorkflowSceneSpec,
     rewriteCreativeWorkflowScene,
+    ttsCreativeWorkflowScene,
     rerenderCreativeWorkflow,
     getWorkflowPath,
   } = require('../server/services/creativeWorkflows');
@@ -753,12 +754,14 @@ async function testSceneSpecOperations() {
 
   const fakeEditor = {
     applyEditCommand: (spec, edit) => ({
+      success: true,
       scene_spec: { ...spec, title: 'edited' },
       edit_type: edit.type,
       requires_tts: false,
       requires_render: true,
     }),
     applyRewriteResult: (spec, sceneId, result) => ({
+      success: true,
       scene_spec: { ...spec, title: 'rewritten' },
       requires_tts: true,
       requires_render: true,
@@ -770,6 +773,11 @@ async function testSceneSpecOperations() {
       success: true,
       output_path: '/tmp/output.mp4',
       message: '渲染完成',
+    }),
+    rerenderSceneWithLocalTts: async () => ({
+      success: true,
+      output_path: '/tmp/output.mp4',
+      message: '配音完成',
     }),
   };
 
@@ -808,6 +816,15 @@ async function testSceneSpecOperations() {
   const rerendered = await rerenderCreativeWorkflow(WORKFLOW_ID, {}, { rootDir, creativeVideoRerender: fakeRerender });
   assert.equal(rerendered.success, true);
   assert.equal(rerendered.output_path, '/tmp/output.mp4');
+
+  const ttsResult = await ttsCreativeWorkflowScene(WORKFLOW_ID, 'scene_01', {}, { rootDir, creativeVideoRerender: fakeRerender });
+  assert.equal(ttsResult.success, true);
+  assert.equal(ttsResult.scene_id, 'scene_01');
+  assert.equal(ttsResult.output_path, '/tmp/output.mp4');
+
+  const ttsMissingScene = await ttsCreativeWorkflowScene(WORKFLOW_ID, 'nonexistent', {}, { rootDir, creativeVideoRerender: fakeRerender });
+  assert.equal(ttsMissingScene.success, false);
+  assert.match(ttsMissingScene.message, /未找到场景/);
 }
 
 async function run() {

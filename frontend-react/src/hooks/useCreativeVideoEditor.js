@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export function useCreativeVideoEditor({ workflowId, api }) {
   const [sceneSpec, setSceneSpec] = useState(null);
@@ -7,6 +7,11 @@ export function useCreativeVideoEditor({ workflowId, api }) {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const selectedScene = sceneSpec?.scenes?.find(s => s.id === selectedSceneId) || null;
 
@@ -17,23 +22,28 @@ export function useCreativeVideoEditor({ workflowId, api }) {
     setMessage('正在加载可编辑场景...');
     try {
       const result = await api.getCreativeWorkflowSceneSpec(workflowId);
+      if (!mountedRef.current) return;
       setSceneSpec(result.scene_spec);
-      if (result.scene_spec?.scenes?.length > 0 && !selectedSceneId) {
-        setSelectedSceneId(result.scene_spec.scenes[0].id);
-      }
       setStatus('ready');
       setMessage('');
     } catch (error) {
+      if (!mountedRef.current) return;
       setStatus('error');
       setMessage(error.message || '加载场景规格失败');
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
-  }, [workflowId, api, selectedSceneId]);
+  }, [workflowId, api]);
 
   useEffect(() => {
     load();
-  }, [workflowId]);
+  }, [workflowId, load]);
+
+  useEffect(() => {
+    if (sceneSpec?.scenes?.length > 0 && !selectedSceneId) {
+      setSelectedSceneId(sceneSpec.scenes[0].id);
+    }
+  }, [sceneSpec, selectedSceneId]);
 
   const selectScene = useCallback((sceneId) => {
     setSelectedSceneId(sceneId);
@@ -46,14 +56,16 @@ export function useCreativeVideoEditor({ workflowId, api }) {
     setMessage('正在保存编辑...');
     try {
       const result = await api.patchCreativeWorkflowSceneSpec(workflowId, edit);
+      if (!mountedRef.current) return;
       setSceneSpec(result.scene_spec);
       setStatus('ready');
       setMessage('编辑已保存');
     } catch (error) {
+      if (!mountedRef.current) return;
       setStatus('error');
       setMessage(error.message || '保存编辑失败');
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   }, [workflowId, api]);
 
@@ -92,14 +104,16 @@ export function useCreativeVideoEditor({ workflowId, api }) {
     setMessage('正在重写本场景...');
     try {
       const result = await api.rewriteCreativeWorkflowScene(workflowId, sceneId, payload);
+      if (!mountedRef.current) return;
       setSceneSpec(result.scene_spec);
       setStatus('ready');
       setMessage('场景已重写');
     } catch (error) {
+      if (!mountedRef.current) return;
       setStatus('error');
       setMessage(error.message || '重写场景失败');
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   }, [workflowId, api]);
 
@@ -109,14 +123,19 @@ export function useCreativeVideoEditor({ workflowId, api }) {
     setStatus('tts');
     setMessage('正在重新配音本场景...');
     try {
-      await api.ttsCreativeWorkflowScene(workflowId, sceneId, payload);
+      const result = await api.ttsCreativeWorkflowScene(workflowId, sceneId, payload);
+      if (!mountedRef.current) return;
+      if (result.scene_spec) {
+        setSceneSpec(result.scene_spec);
+      }
       setStatus('ready');
       setMessage('配音完成');
     } catch (error) {
+      if (!mountedRef.current) return;
       setStatus('error');
       setMessage(error.message || '重新配音失败');
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   }, [workflowId, api]);
 
@@ -127,13 +146,18 @@ export function useCreativeVideoEditor({ workflowId, api }) {
     setMessage('正在重新渲染成片...');
     try {
       const result = await api.rerenderCreativeWorkflow(workflowId, payload);
+      if (!mountedRef.current) return;
+      if (result.scene_spec) {
+        setSceneSpec(result.scene_spec);
+      }
       setStatus('ready');
       setMessage(result.message || '成片已重新渲染');
     } catch (error) {
+      if (!mountedRef.current) return;
       setStatus('error');
       setMessage(error.message || '重新渲染失败');
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   }, [workflowId, api]);
 

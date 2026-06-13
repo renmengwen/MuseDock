@@ -181,6 +181,98 @@ async function runRealAppMountTest() {
 async function run() {
   await runIsolatedRouterTests();
   await runRealAppMountTest();
+  await runEditorRouteTests();
+}
+
+async function runEditorRouteTests() {
+  const workflowId = '202606131200000001';
+  const sceneSpec = {
+    title: '测试',
+    scenes: [{ id: 'scene_01', duration: 5, narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }],
+  };
+
+  const fakeService = {
+    getCreativeWorkflowSceneSpec: async id => ({
+      success: true,
+      workflow_id: id,
+      scene_spec: sceneSpec,
+    }),
+    patchCreativeWorkflowSceneSpec: async (id, edit) => ({
+      success: true,
+      workflow_id: id,
+      scene_spec: { ...sceneSpec, title: 'edited' },
+      edit_type: edit.type,
+      requires_tts: false,
+      requires_render: true,
+      message: '编辑已保存。',
+    }),
+    rewriteCreativeWorkflowScene: async (id, sceneId) => ({
+      success: true,
+      workflow_id: id,
+      scene_id: sceneId,
+      scene_spec: { ...sceneSpec, title: 'rewritten' },
+      requires_tts: true,
+      requires_render: true,
+      message: '场景已重写。',
+    }),
+    ttsCreativeWorkflowScene: async (id, sceneId) => ({
+      success: true,
+      workflow_id: id,
+      scene_id: sceneId,
+      output_path: '/tmp/output.mp4',
+      message: '场景配音已更新。',
+    }),
+    rerenderCreativeWorkflow: async id => ({
+      success: true,
+      workflow_id: id,
+      output_path: '/tmp/output.mp4',
+      message: '成片已重新渲染。',
+    }),
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.locals.creativeWorkflows = fakeService;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const getRes = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/scene-spec`);
+    assert.strictEqual(getRes.statusCode, 200);
+    assert.strictEqual(getRes.body.success, true);
+    assert.strictEqual(getRes.body.scene_spec.title, '测试');
+
+    const patchRes = await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/scene-spec`, { type: 'caption_text', scene_id: 'scene_01', caption_id: 'c1', text: '新字幕' });
+    assert.strictEqual(patchRes.statusCode, 200);
+    assert.strictEqual(patchRes.body.success, true);
+    assert.strictEqual(patchRes.body.requires_render, true);
+
+    const rewriteRes = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/scenes/scene_01/rewrite`, { narration_text: '新旁白' });
+    assert.strictEqual(rewriteRes.statusCode, 200);
+    assert.strictEqual(rewriteRes.body.success, true);
+    assert.strictEqual(rewriteRes.body.requires_tts, true);
+
+    const ttsRes = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/scenes/scene_01/tts`, {});
+    assert.strictEqual(ttsRes.statusCode, 200);
+    assert.strictEqual(ttsRes.body.success, true);
+    assert.strictEqual(ttsRes.body.scene_id, 'scene_01');
+
+    const rerenderRes = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/rerender`, {});
+    assert.strictEqual(rerenderRes.statusCode, 200);
+    assert.strictEqual(rerenderRes.body.success, true);
+    assert.strictEqual(rerenderRes.body.output_path, '/tmp/output.mp4');
+
+    const invalidId = await requestJson(server, 'GET', '/api/creative-workflows/invalid!/scene-spec');
+    assert.strictEqual(invalidId.statusCode, 400);
+    assert.strictEqual(invalidId.body.success, false);
+
+    const emptyScene = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/scenes/%20/rewrite`, {});
+    assert.strictEqual(emptyScene.statusCode, 400);
+    assert.strictEqual(emptyScene.body.success, false);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
 }
 
 run().then(() => {

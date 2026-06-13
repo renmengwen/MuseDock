@@ -13,6 +13,11 @@ function getMessage(result, fallback) {
   return result?.message || result?.error || fallback;
 }
 
+function getStatusCode(result) {
+  if (result?.code === 'NOT_FOUND' || result?.code === 'NO_SCENE_SPEC') return 404;
+  return 400;
+}
+
 router.post('/', async (req, res) => {
   const service = getService(req);
 
@@ -95,7 +100,7 @@ router.get('/:workflow_id/scene-spec', async (req, res) => {
     const result = await service.getCreativeWorkflowSceneSpec(workflowId);
     if (!result || result.success === false) {
       const message = getMessage(result, '未找到场景规格。');
-      const statusCode = /未找到|不存在|尚未生成/.test(message) ? 404 : 400;
+      const statusCode = getStatusCode(result);
       return res.status(statusCode).json({
         success: false,
         workflow_id: workflowId,
@@ -137,7 +142,7 @@ router.patch('/:workflow_id/scene-spec', async (req, res) => {
     const result = await service.patchCreativeWorkflowSceneSpec(workflowId, edit);
     if (!result || result.success === false) {
       const message = getMessage(result, '编辑失败。');
-      const statusCode = /未找到|不存在|尚未生成/.test(message) ? 404 : 400;
+      const statusCode = getStatusCode(result);
       return res.status(statusCode).json({
         success: false,
         workflow_id: workflowId,
@@ -180,7 +185,7 @@ router.post('/:workflow_id/scenes/:scene_id/rewrite', async (req, res) => {
     const result = await service.rewriteCreativeWorkflowScene(workflowId, sceneId, req.body || {});
     if (!result || result.success === false) {
       const message = getMessage(result, '重写失败。');
-      const statusCode = /未找到|不存在|尚未生成/.test(message) ? 404 : 400;
+      const statusCode = getStatusCode(result);
       return res.status(statusCode).json({
         success: false,
         workflow_id: workflowId,
@@ -200,6 +205,51 @@ router.post('/:workflow_id/scenes/:scene_id/rewrite', async (req, res) => {
   }
 });
 
+router.post('/:workflow_id/scenes/:scene_id/tts', async (req, res) => {
+  const workflowId = String(req.params.workflow_id || '').trim();
+  const sceneId = String(req.params.scene_id || '').trim();
+  if (!WORKFLOW_ID_PATTERN.test(workflowId)) {
+    return res.status(400).json({
+      success: false,
+      workflow_id: workflowId,
+      message: '创作任务 ID 无效。',
+    });
+  }
+
+  if (!sceneId) {
+    return res.status(400).json({
+      success: false,
+      workflow_id: workflowId,
+      scene_id: sceneId,
+      message: '场景 ID 无效。',
+    });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.ttsCreativeWorkflowScene(workflowId, sceneId, req.body || {});
+    if (!result || result.success === false) {
+      const message = getMessage(result, '配音失败。');
+      const statusCode = getStatusCode(result);
+      return res.status(statusCode).json({
+        success: false,
+        workflow_id: workflowId,
+        scene_id: sceneId,
+        message,
+      });
+    }
+
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      scene_id: sceneId,
+      message: `配音场景失败：${error.message}`,
+    });
+  }
+});
+
 router.post('/:workflow_id/rerender', async (req, res) => {
   const workflowId = String(req.params.workflow_id || '').trim();
   if (!WORKFLOW_ID_PATTERN.test(workflowId)) {
@@ -215,7 +265,7 @@ router.post('/:workflow_id/rerender', async (req, res) => {
     const result = await service.rerenderCreativeWorkflow(workflowId, req.body || {});
     if (!result || result.success === false) {
       const message = getMessage(result, '重新渲染失败。');
-      const statusCode = /未找到|不存在|尚未生成/.test(message) ? 404 : 400;
+      const statusCode = getStatusCode(result);
       return res.status(statusCode).json({
         success: false,
         workflow_id: workflowId,

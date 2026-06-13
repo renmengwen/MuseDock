@@ -91,11 +91,12 @@ async function rerenderSceneSpecProject({
   }
 
   const totalDuration = (composed.scene_spec.scenes || []).reduce((sum, s) => sum + s.duration, 0);
+  const fps = composed.scene_spec.fps || sceneSpec?.fps || 30;
   try {
     const rendered = await renderAdapter.render({
       projectDir,
       outputPath,
-      fps: 30,
+      fps,
       duration: totalDuration,
     });
     if (!rendered.success) {
@@ -154,8 +155,9 @@ async function rerenderSceneWithLocalTts({
     };
   }
 
+  let ttsResult;
   try {
-    const ttsResult = await ttsService.synthesizeScene(scene, { workflowId, sceneSpec });
+    ttsResult = await ttsService.synthesizeScene(scene, { workflowId, sceneSpec });
     if (!ttsResult.success) {
       return {
         success: false,
@@ -173,9 +175,22 @@ async function rerenderSceneWithLocalTts({
     };
   }
 
+  // Merge TTS results back into scene spec before rerendering
+  const updatedSpec = JSON.parse(JSON.stringify(sceneSpec));
+  const updatedScene = updatedSpec.scenes.find(s => s.id === sceneId);
+  if (updatedScene) {
+    if (ttsResult.audio_path) {
+      updatedScene.audio_path = ttsResult.audio_path;
+    }
+    if (typeof ttsResult.duration === 'number' && ttsResult.duration > 0) {
+      updatedScene.duration = Math.round(ttsResult.duration * 100) / 100;
+      updatedSpec.scenes = require('./sceneSpec').retimeScenes(updatedSpec.scenes);
+    }
+  }
+
   return rerenderSceneSpecProject({
     workflowId,
-    sceneSpec,
+    sceneSpec: updatedSpec,
     outputPath,
     previousOutputPath,
     services,

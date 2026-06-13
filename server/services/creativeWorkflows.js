@@ -868,22 +868,27 @@ function extractSceneSpecFromWorkflow(record) {
   return hyperframes.project.scene_spec;
 }
 
-async function getCreativeWorkflowSceneSpec(workflowId, options = {}) {
-  const rootDir = options.rootDir || DEFAULT_ROOT;
+async function loadWorkflowWithSceneSpec(workflowId, rootDir) {
   let record;
   try {
     record = await readWorkflow(workflowId, rootDir);
   } catch {
-    return { success: false, message: '未找到创作任务。' };
+    return { record: null, sceneSpec: null, error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
   }
   if (!record) {
-    return { success: false, message: '未找到创作任务。' };
+    return { record: null, sceneSpec: null, error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
   }
-
   const sceneSpec = extractSceneSpecFromWorkflow(record);
   if (!sceneSpec) {
-    return { success: false, message: '该创作任务尚未生成场景规格。' };
+    return { record, sceneSpec: null, error: { success: false, code: 'NO_SCENE_SPEC', message: '该创作任务尚未生成场景规格。' } };
   }
+  return { record, sceneSpec, error: null };
+}
+
+async function getCreativeWorkflowSceneSpec(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
 
   return {
     success: true,
@@ -895,23 +900,14 @@ async function getCreativeWorkflowSceneSpec(workflowId, options = {}) {
 async function patchCreativeWorkflowSceneSpec(workflowId, edit, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const editor = options.creativeVideoEditor || defaultCreativeVideoEditor;
-  let record;
-  try {
-    record = await readWorkflow(workflowId, rootDir);
-  } catch {
-    return { success: false, message: '未找到创作任务。' };
-  }
-  if (!record) {
-    return { success: false, message: '未找到创作任务。' };
-  }
-
-  const sceneSpec = extractSceneSpecFromWorkflow(record);
-  if (!sceneSpec) {
-    return { success: false, message: '该创作任务尚未生成场景规格。' };
-  }
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
 
   try {
     const result = editor.applyEditCommand(sceneSpec, edit);
+    if (!result.success) {
+      return { success: false, code: 'EDIT_FAILED', message: result.message };
+    }
     const hyperframes = record.result.hyperframes_freeform;
     hyperframes.project.scene_spec = result.scene_spec;
     record.updated_at = new Date().toISOString();
@@ -927,30 +923,26 @@ async function patchCreativeWorkflowSceneSpec(workflowId, edit, options = {}) {
       message: '编辑已保存。',
     };
   } catch (error) {
-    return { success: false, message: `编辑失败：${error.message}` };
+    return { success: false, code: 'EDIT_FAILED', message: `编辑失败：${error.message}` };
   }
 }
 
 async function rewriteCreativeWorkflowScene(workflowId, sceneId, payload, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const editor = options.creativeVideoEditor || defaultCreativeVideoEditor;
-  let record;
-  try {
-    record = await readWorkflow(workflowId, rootDir);
-  } catch {
-    return { success: false, message: '未找到创作任务。' };
-  }
-  if (!record) {
-    return { success: false, message: '未找到创作任务。' };
-  }
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
 
-  const sceneSpec = extractSceneSpecFromWorkflow(record);
-  if (!sceneSpec) {
-    return { success: false, message: '该创作任务尚未生成场景规格。' };
+  const scene = (sceneSpec.scenes || []).find(s => s.id === sceneId);
+  if (!scene) {
+    return { success: false, code: 'NOT_FOUND', message: `未找到场景 ${sceneId}。` };
   }
 
   try {
     const result = editor.applyRewriteResult(sceneSpec, sceneId, payload);
+    if (!result.success) {
+      return { success: false, code: 'REWRITE_FAILED', message: result.message };
+    }
     const hyperframes = record.result.hyperframes_freeform;
     hyperframes.project.scene_spec = result.scene_spec;
     record.updated_at = new Date().toISOString();
@@ -965,27 +957,64 @@ async function rewriteCreativeWorkflowScene(workflowId, sceneId, payload, option
       message: '场景已重写。',
     };
   } catch (error) {
-    return { success: false, message: `重写失败：${error.message}` };
+    return { success: false, code: 'REWRITE_FAILED', message: `重写失败：${error.message}` };
+  }
+}
+
+async function ttsCreativeWorkflowScene(workflowId, sceneId, payload, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const rerender = options.creativeVideoRerender || defaultCreativeVideoRerender;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  const scene = (sceneSpec.scenes || []).find(s => s.id === sceneId);
+  if (!scene) {
+    return { success: false, code: 'NOT_FOUND', message: `未找到场景 ${sceneId}。` };
+  }
+
+  const hyperframes = record.result.hyperframes_freeform;
+  const previousOutputPath = hyperframes?.render?.output_path || '';
+
+  try {
+    const result = await rerender.rerenderSceneWithLocalTts({
+      workflowId,
+      sceneSpec,
+      sceneId,
+      outputPath: payload?.outputPath || previousOutputPath,
+      previousOutputPath,
+      services: options.services || {},
+    });
+
+    if (result.success) {
+      hyperframes.render = {
+        ...hyperframes.render,
+        status: 'ready',
+        output_path: result.output_path,
+        message: '场景配音已更新。',
+      };
+      record.updated_at = new Date().toISOString();
+      await persistWorkflow(record, rootDir);
+    }
+
+    return {
+      success: result.success,
+      workflow_id: workflowId,
+      scene_id: sceneId,
+      scene_spec: result.scene_spec || sceneSpec,
+      output_path: result.output_path,
+      previous_output_path: result.previous_output_path,
+      message: result.message || (result.success ? '场景配音已更新。' : '场景配音失败。'),
+    };
+  } catch (error) {
+    return { success: false, code: 'TTS_FAILED', message: `场景配音失败：${error.message}` };
   }
 }
 
 async function rerenderCreativeWorkflow(workflowId, payload, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const rerender = options.creativeVideoRerender || defaultCreativeVideoRerender;
-  let record;
-  try {
-    record = await readWorkflow(workflowId, rootDir);
-  } catch {
-    return { success: false, message: '未找到创作任务。' };
-  }
-  if (!record) {
-    return { success: false, message: '未找到创作任务。' };
-  }
-
-  const sceneSpec = extractSceneSpecFromWorkflow(record);
-  if (!sceneSpec) {
-    return { success: false, message: '该创作任务尚未生成场景规格。' };
-  }
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
 
   const hyperframes = record.result.hyperframes_freeform;
   const previousOutputPath = hyperframes?.render?.output_path || '';
@@ -1018,7 +1047,7 @@ async function rerenderCreativeWorkflow(workflowId, payload, options = {}) {
       message: result.message || (result.success ? '成片已重新渲染。' : '重新渲染失败。'),
     };
   } catch (error) {
-    return { success: false, message: `重新渲染失败：${error.message}` };
+    return { success: false, code: 'RENDER_FAILED', message: `重新渲染失败：${error.message}` };
   }
 }
 
@@ -1035,5 +1064,6 @@ module.exports = {
   getCreativeWorkflowSceneSpec,
   patchCreativeWorkflowSceneSpec,
   rewriteCreativeWorkflowScene,
+  ttsCreativeWorkflowScene,
   rerenderCreativeWorkflow,
 };

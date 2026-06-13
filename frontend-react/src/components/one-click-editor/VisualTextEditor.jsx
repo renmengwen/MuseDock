@@ -1,9 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export function VisualTextEditor({ visualText, disabled, onSave }) {
   const [headline, setHeadline] = useState(visualText?.headline || '');
   const [keywords, setKeywords] = useState((visualText?.keywords || []).join(', '));
   const [cards, setCards] = useState((visualText?.cards || []).join('\n'));
+
+  useEffect(() => {
+    setHeadline(visualText?.headline || '');
+    setKeywords((visualText?.keywords || []).join(', '));
+    setCards((visualText?.cards || []).join('\n'));
+  }, [visualText?.headline, visualText?.keywords?.join(','), visualText?.cards?.join('\n')]);
 
   const handleSave = () => {
     onSave({

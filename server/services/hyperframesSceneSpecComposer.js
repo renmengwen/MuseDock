@@ -1,5 +1,12 @@
 const sceneSpec = require('./sceneSpec');
 
+const KNOWN_ASPECT_RATIOS = {
+  '9:16': { width: 1080, height: 1920 },
+  '16:9': { width: 1920, height: 1080 },
+  '1:1': { width: 1080, height: 1080 },
+  '4:5': { width: 1080, height: 1350 },
+};
+
 function escapeHtml(text) {
   if (typeof text !== 'string') return '';
   return text
@@ -10,9 +17,22 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
+function escapeJsString(text) {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r')
+    .replace(/</g, '\\x3c')
+    .replace(/>/g, '\\x3e');
+}
+
 function buildIndexHtml(spec) {
-  const width = spec.aspect_ratio === '9:16' ? 1080 : 1920;
-  const height = spec.aspect_ratio === '9:16' ? 1920 : 1080;
+  const dimensions = KNOWN_ASPECT_RATIOS[spec.aspect_ratio];
+  const width = dimensions ? dimensions.width : 1920;
+  const height = dimensions ? dimensions.height : 1080;
   const totalDuration = spec.scenes.reduce((sum, s) => sum + s.duration, 0);
 
   const scenesHtml = spec.scenes.map(scene => {
@@ -38,10 +58,10 @@ ${cardsHtml}
 
   const timelineScenes = spec.scenes.map(scene => {
     const captionEntries = (scene.captions || []).map(cap =>
-      `      { id: '${escapeHtml(cap.id)}', start: ${cap.start}, end: ${cap.end} }`
+      `      { id: '${escapeJsString(cap.id)}', start: ${cap.start}, end: ${cap.end} }`
     ).join(',\n');
 
-    return `    { id: '${escapeHtml(scene.id)}', start: ${scene.start}, end: ${scene.start + scene.duration}, captions: [\n${captionEntries}\n    ] }`;
+    return `    { id: '${escapeJsString(scene.id)}', start: ${scene.start}, end: ${scene.start + scene.duration}, captions: [\n${captionEntries}\n    ] }`;
   }).join(',\n');
 
   return `<!DOCTYPE html>
@@ -55,8 +75,6 @@ ${cardsHtml}
 ${scenesHtml}
   </div>
   <script>
-    window.__timelines = window.__timelines || {};
-    window.__timelines["main"] = tl;
     var tl = {
       composition: "main",
       duration: ${totalDuration},
@@ -64,6 +82,8 @@ ${scenesHtml}
 ${timelineScenes}
       ]
     };
+    window.__timelines = window.__timelines || {};
+    window.__timelines["main"] = tl;
   </script>
 </body>
 </html>`;
@@ -80,6 +100,11 @@ function composeHyperframesProjectFiles(input) {
       files: {},
       diagnostics: validation.errors,
     };
+  }
+
+  const diagnostics = [];
+  if (!KNOWN_ASPECT_RATIOS[normalized.aspect_ratio]) {
+    diagnostics.push(`不支持的宽高比 "${normalized.aspect_ratio}"，已回退到 16:9`);
   }
 
   const indexHtml = buildIndexHtml(normalized);
@@ -122,7 +147,7 @@ ${normalized.scenes.map(s => `## ${s.id}\n- 时长: ${s.duration}s\n- 旁白: ${
       'design.md': designMd,
       'scene_spec.json': sceneSpecJson,
     },
-    diagnostics: [],
+    diagnostics,
   };
 }
 

@@ -117,6 +117,8 @@ for (const symbol of [
 }
 
 assert.match(page, /createCreativeWorkflow/, 'OneClickCreativePage should create creative workflows');
+assert.match(page, /CreativeVideoEditor/, 'OneClickCreativePage should import and render CreativeVideoEditor');
+assert.match(page, /editorOpen/, 'OneClickCreativePage should track editor open state');
 assert.match(page, /getCreativeWorkflow/, 'OneClickCreativePage should poll creative workflows');
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');
 assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');

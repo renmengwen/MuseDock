@@ -1,10 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CaptionEditor } from './CaptionEditor.jsx';
 import { VisualTextEditor } from './VisualTextEditor.jsx';
 
 export function SceneEditPanel({ scene, disabled, onCaptionText, onNarrationText, onVisualText, onDuration, onRewrite, onTts, onRerender }) {
-  const [narrationDraft, setNarrationDraft] = useState(scene.narration_text || '');
-  const [durationDraft, setDurationDraft] = useState(String(scene.duration || ''));
+  const [narrationDraft, setNarrationDraft] = useState(scene?.narration_text || '');
+  const [durationDraft, setDurationDraft] = useState(String(scene?.duration || ''));
+
+  useEffect(() => {
+    setNarrationDraft(scene?.narration_text || '');
+    setDurationDraft(String(scene?.duration || ''));
+  }, [scene?.narration_text, scene?.duration]);
 
   if (!scene) return null;
 
@@ -22,7 +27,10 @@ export function SceneEditPanel({ scene, disabled, onCaptionText, onNarrationText
           step="0.01"
           min="0"
         />
-        <button disabled={disabled} onClick={() => onDuration(parseFloat(durationDraft))}>
+        <button disabled={disabled} onClick={() => {
+          const val = parseFloat(durationDraft);
+          if (!isNaN(val) && val > 0) onDuration(val);
+        }}>
           保存时长
         </button>
       </div>

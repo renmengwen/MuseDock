@@ -200,6 +200,13 @@ export const api = {
       body: JSON.stringify(payload || {}),
     });
   },
+  ttsCreativeWorkflowScene(workflowId, sceneId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/scenes/${encodeURIComponent(sceneId)}/tts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
   rerenderCreativeWorkflow(workflowId, payload) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/rerender`, {
       method: 'POST',

@@ -1350,6 +1350,11 @@ a { color: #fe2c55; text-decoration: none; }
   background: hsl(var(--accent));
 }
 
+.one-click-editor-scene-list .scene-item:focus-visible {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 1px;
+}
+
 .one-click-editor-scene-list .scene-item.selected {
   background: hsl(var(--primary) / 0.15);
   font-weight: 600;
@@ -1468,6 +1473,41 @@ a { color: #fe2c55; text-decoration: none; }
   color: hsl(var(--primary-foreground));
   font-size: 13px;
   cursor: pointer;
+}
+
+.one-click-editor-error-boundary {
+  padding: 24px;
+  text-align: center;
+  color: hsl(var(--destructive));
+  background: hsl(var(--destructive) / 0.05);
+  border: 1px solid hsl(var(--destructive) / 0.2);
+  border-radius: 8px;
+  margin: 16px;
+}
+
+.one-click-editor-error-boundary h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.one-click-editor-error-boundary p {
+  margin: 0 0 16px;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.one-click-editor-error-boundary button {
+  padding: 8px 16px;
+  border: 1px solid hsl(var(--destructive) / 0.3);
+  border-radius: 6px;
+  background: hsl(var(--destructive) / 0.1);
+  color: hsl(var(--destructive));
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.one-click-editor-error-boundary button:hover {
+  background: hsl(var(--destructive) / 0.2);
 }
 
 @media (max-width: 768px) {

@@ -1,13 +1,14 @@
 function normalizeSceneSpec(input) {
+  let cumulative = 0;
   const scenes = (input.scenes || []).map((scene, index) => {
     const duration = Math.round(scene.duration * 100) / 100;
+    const start = Math.round(cumulative * 100) / 100;
+    cumulative += duration;
     return {
       ...scene,
       duration,
       order: index + 1,
-      start: index === 0 ? 0 : Math.round(
-        input.scenes.slice(0, index).reduce((sum, s) => sum + Math.round(s.duration * 100) / 100, 0) * 100
-      ) / 100,
+      start,
       editable: scene.editable || { local_tts: true },
     };
   });
@@ -23,13 +24,16 @@ function normalizeSceneSpec(input) {
 }
 
 function retimeScenes(scenes) {
-  return scenes.map((scene, index) => ({
-    ...scene,
-    order: index + 1,
-    start: index === 0 ? 0 : Math.round(
-      scenes.slice(0, index).reduce((sum, s) => sum + s.duration, 0) * 100
-    ) / 100,
-  }));
+  let cumulative = 0;
+  return scenes.map((scene, index) => {
+    const start = Math.round(cumulative * 100) / 100;
+    cumulative += scene.duration;
+    return {
+      ...scene,
+      order: index + 1,
+      start,
+    };
+  });
 }
 
 function validateSceneSpec(spec) {
@@ -97,6 +101,11 @@ function applySceneSpecEdit(spec, edit) {
     case 'reorder_scenes': {
       if (!edit.scene_ids || !Array.isArray(edit.scene_ids)) {
         throw new Error('缺少 scene_ids 数组');
+      }
+      const originalIds = new Set(cloned.scenes.map(s => s.id));
+      const newIds = new Set(edit.scene_ids);
+      if (originalIds.size !== newIds.size || ![...originalIds].every(id => newIds.has(id))) {
+        throw new Error('重排序的场景 ID 集合与原集合不一致');
       }
       const reordered = edit.scene_ids.map(id => {
         const found = cloned.scenes.find(s => s.id === id);
