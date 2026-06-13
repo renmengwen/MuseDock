@@ -1242,6 +1242,98 @@ async function run() {
     brief: { status: 'ready', data: { title: '高级测试片', summary: '自由工程 brief' } },
   }, { rootDir });
 
+  const htmlVideoLiteRunId = `${generated.run_id}-html-video-lite`;
+  const htmlVideoLiteRunPath = path.join(rootDir, awemeId, 'agent_runs', `${htmlVideoLiteRunId}.json`);
+  await writeJson(htmlVideoLiteRunPath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: htmlVideoLiteRunId,
+  });
+  const htmlVideoLite = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, htmlVideoLiteRunId, {
+    rootDir,
+    useHtmlVideoLiteWorkflow: true,
+    creativeVideoWorkflowFacade: {
+      generateCreativeVideoProject: async () => ({
+        success: true,
+        message: 'html-video lite 成片完成。',
+        project_dir: path.join(rootDir, awemeId, 'agent_runs', `${htmlVideoLiteRunId}-lite-project`),
+        files: ['index.html', 'hyperframes.json'],
+        scene_spec: { version: 1, scenes: [] },
+        frame_specs: { frames: [] },
+        audio_manifest: { scenes: [{ scene_id: 'scene_01', audio_path: 'tts/scene_01.wav' }] },
+        output_path: path.join(rootDir, awemeId, 'agent_runs', `${htmlVideoLiteRunId}-lite-output.mp4`),
+        visual_report: { success: true, issues: [], metrics: {} },
+      }),
+    },
+  });
+  assert.equal(htmlVideoLite.success, true);
+  assert.equal(htmlVideoLite.hyperframes_freeform.project.status, 'ready');
+  assert.equal(htmlVideoLite.hyperframes_freeform.audio.status, 'ready');
+  assert.equal(htmlVideoLite.hyperframes_freeform.render.status, 'rendered');
+  assert.match(htmlVideoLite.hyperframes_freeform.render.output_url, /hyperframes-freeform\/files\/output\.mp4/);
+  assert.equal(htmlVideoLite.hyperframes_freeform.render.message, '渲染完成。');
+  assert.equal(htmlVideoLite.hyperframes_freeform.visual_inspect.status, 'passed');
+  assert.equal(htmlVideoLite.hyperframes_freeform.visual_inspect.report.success, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(htmlVideoLite.hyperframes_freeform, 'inspect'), false);
+
+  const staleHtmlVideoLiteRunId = `${generated.run_id}-html-video-lite-stale`;
+  const staleHtmlVideoLiteRunPath = path.join(rootDir, awemeId, 'agent_runs', `${staleHtmlVideoLiteRunId}.json`);
+  await writeJson(staleHtmlVideoLiteRunPath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: staleHtmlVideoLiteRunId,
+  });
+  const staleHtmlVideoLite = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, staleHtmlVideoLiteRunId, {
+    rootDir,
+    useHtmlVideoLiteWorkflow: true,
+    creativeVideoWorkflowFacade: {
+      generateCreativeVideoProject: async () => {
+        const run = JSON.parse(fs.readFileSync(staleHtmlVideoLiteRunPath, 'utf-8'));
+        run.hyperframes_freeform.status = 'ready';
+        run.hyperframes_freeform.project.status = 'ready';
+        run.hyperframes_freeform.project.operation_id = 'newer-html-video-lite-operation';
+        run.hyperframes_freeform.project.project_dir = 'newer-project-dir';
+        run.hyperframes_freeform.project.message = '较新的 html-video lite 工程已完成';
+        await writeJson(staleHtmlVideoLiteRunPath, run);
+        return {
+          success: true,
+          message: '旧 html-video lite 成片完成。',
+          project_dir: 'old-project-dir',
+          files: ['index.html'],
+          scene_spec: { version: 1, scenes: [] },
+          frame_specs: { frames: [] },
+          audio_manifest: { scenes: [] },
+          output_path: 'old-output.mp4',
+          visual_report: { success: true, issues: [], metrics: {} },
+        };
+      },
+    },
+  });
+  assert.equal(staleHtmlVideoLite.success, false);
+  assert.match(staleHtmlVideoLite.message, /忽略旧结果/);
+  const staleHtmlVideoLiteDisk = JSON.parse(fs.readFileSync(staleHtmlVideoLiteRunPath, 'utf-8'));
+  assert.equal(staleHtmlVideoLiteDisk.hyperframes_freeform.project.operation_id, 'newer-html-video-lite-operation');
+  assert.equal(staleHtmlVideoLiteDisk.hyperframes_freeform.project.project_dir, 'newer-project-dir');
+  assert.notEqual(staleHtmlVideoLiteDisk.hyperframes_freeform.project.project_dir, 'old-project-dir');
+
+  const throwingHtmlVideoLiteRunId = `${generated.run_id}-html-video-lite-throw`;
+  const throwingHtmlVideoLiteRunPath = path.join(rootDir, awemeId, 'agent_runs', `${throwingHtmlVideoLiteRunId}.json`);
+  await writeJson(throwingHtmlVideoLiteRunPath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: throwingHtmlVideoLiteRunId,
+  });
+  const throwingHtmlVideoLite = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, throwingHtmlVideoLiteRunId, {
+    rootDir,
+    useHtmlVideoLiteWorkflow: true,
+    creativeVideoWorkflowFacade: {
+      generateCreativeVideoProject: async () => {
+        throw new Error('facade exploded');
+      },
+    },
+  });
+  assert.equal(throwingHtmlVideoLite.success, false);
+  assert.match(throwingHtmlVideoLite.message, /html-video lite 成片失败|facade exploded/);
+  assert.equal(throwingHtmlVideoLite.hyperframes_freeform.project.status, 'failed');
+  assert.notEqual(throwingHtmlVideoLite.hyperframes_freeform.project.status, 'generating');
+
   const projectCreateThrowRunId = `${generated.run_id}-project-create-throw`;
   await writeJson(path.join(rootDir, awemeId, 'agent_runs', `${projectCreateThrowRunId}.json`), {
     ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),

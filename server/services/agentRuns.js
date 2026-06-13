@@ -22,6 +22,7 @@ const defaultHyperframesFreeformAgent = require('./hyperframesFreeformAgent');
 const defaultHyperframesFreeformProject = require('./hyperframesFreeformProject');
 const defaultHyperframesFreeformQuality = require('./hyperframesFreeformQuality');
 const defaultHyperframesSceneSpecComposer = require('./hyperframesSceneSpecComposer');
+const defaultCreativeVideoWorkflowFacade = require('./creative-video/workflowFacade');
 
 const TEMPLATE_VIRAL_REWRITE = 'viral_rewrite';
 const MAX_COMMENTS_CHARS = agentTemplates.MAX_COMMENTS_CHARS;
@@ -1527,6 +1528,88 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
       message: '正在生成 HyperFrames 工程...',
     },
   }), options);
+
+  if (options.useLegacyFreeformProject !== true && options.useHtmlVideoLiteWorkflow === true) {
+    const facade = options.creativeVideoWorkflowFacade || defaultCreativeVideoWorkflowFacade;
+    let result;
+    try {
+      result = await facade.generateCreativeVideoProject({
+        workflowId: String(awemeId),
+        runId: String(runId),
+        creativeContext: {
+          run: detail.data,
+          brief: currentState.brief.data || {},
+          input: options.creativeContextInput || {},
+        },
+        target: options.projectOptions || {},
+        rootDir: options.rootDir,
+        services: options.creativeVideoServices || {},
+      });
+    } catch (error) {
+      result = {
+        success: false,
+        message: `html-video lite 成片失败：${error.message || '未知错误'}`,
+      };
+    }
+    if (!result.success) {
+      return markFreeformProjectFailed(awemeId, runId, result.message || 'html-video lite 成片失败。', options, operationId);
+    }
+    const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'project', operationId, current => ({
+      status: 'ready',
+      project_dir: result.project_dir,
+      project: {
+        ...current.project,
+        status: 'ready',
+        operation_id: operationId,
+        message: result.message || 'html-video lite 工程已生成。',
+        project_dir: result.project_dir,
+        files: mapFreeformProjectFilesToDir((result.files || []).map(name => ({ name })), result.project_dir),
+        scene_spec: result.scene_spec,
+        frame_specs: result.frame_specs,
+      },
+      audio: {
+        ...current.audio,
+        status: 'ready',
+        manifest: result.audio_manifest,
+      },
+      render: {
+        ...current.render,
+        status: 'rendered',
+        output_path: result.output_path,
+        output_url: defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'output.mp4'),
+        render_versions: [{
+          id: `${runId}-html-video-lite`,
+          status: 'rendered',
+          output_path: result.output_path,
+          message: '渲染完成。',
+          created_at: new Date().toISOString(),
+        }],
+        message: '渲染完成。',
+      },
+      visual_inspect: {
+        ...current.visual_inspect,
+        status: 'passed',
+        report: result.visual_report,
+        issues: result.visual_report?.issues || [],
+        message: '视觉质检通过。',
+      },
+    }), options);
+    if (!updated.success) {
+      return createFreeformFailureResponse(
+        awemeId,
+        runId,
+        updated.hyperframes_freeform || null,
+        updated.message || '已有更新的生成任务完成，已忽略旧结果。',
+      );
+    }
+    return {
+      success: true,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: result.message || 'html-video lite 成片完成。',
+      hyperframes_freeform: updated.data.hyperframes_freeform,
+    };
+  }
 
   const skillContext = options.skillContext || defaultHyperframesSkillContext;
   let context;
