@@ -454,8 +454,9 @@ a { color: #fe2c55; text-decoration: none; }
   padding-right: 2px;
 }
 .creativeTaskItem {
-  display: grid;
-  gap: 5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   width: 100%;
   min-height: 44px;
   padding: 9px 10px;
@@ -466,6 +467,34 @@ a { color: #fe2c55; text-decoration: none; }
   text-align: left;
   cursor: pointer;
   transition: background-color .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+.creativeTaskItemContent {
+  display: grid;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+}
+.creativeTaskDeleteButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #98a2b3;
+  cursor: pointer;
+  opacity: 0;
+  transition: background-color .15s ease, color .15s ease, opacity .15s ease;
+}
+.creativeTaskItem:hover .creativeTaskDeleteButton {
+  opacity: 1;
+}
+.creativeTaskDeleteButton:hover {
+  background: #fef2f2;
+  color: #ef4444;
 }
 .creativeTaskItem:hover {
   background: #fff;

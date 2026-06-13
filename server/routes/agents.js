@@ -346,6 +346,7 @@ router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/project', async
   try {
     const result = await agentRuns.generateDouyinRunHyperframesFreeformProject(req.params.aweme_id, req.params.run_id, {
       projectOptions: req.body || {},
+      logger: console,
     });
     return res.status(result.success ? 200 : 400).json(result);
   } catch (error) {

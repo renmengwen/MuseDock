@@ -1,32 +1,52 @@
-const { exec } = require('child_process');
-const path = require('path');
+const { spawn } = require('child_process');
 
-// 启动服务器
-const server = exec('node server/index.js', {
-  cwd: __dirname,
-  env: { ...process.env, NODE_ENV: 'development' }
-}, (error, stdout, stderr) => {
-  if (error) console.error('Server error:', error.message);
-  if (stdout) console.log(stdout);
-  if (stderr) console.error(stderr);
-});
+const isWindows = process.platform === 'win32';
+const frontendCommand = isWindows ? 'cmd.exe' : 'npm';
+const frontendArgs = isWindows ? ['/d', '/s', '/c', 'npm', 'run', 'dev:frontend'] : ['run', 'dev:frontend'];
+const nodeCommand = process.execPath;
+const children = [];
 
-server.stdout.on('data', (data) => {
-  process.stdout.write(data);
-});
+function startProcess(name, command, args) {
+  const child = spawn(command, args, {
+    cwd: __dirname,
+    env: { ...process.env, NODE_ENV: 'development' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: false,
+  });
 
-server.stderr.on('data', (data) => {
-  process.stderr.write(data);
-});
+  children.push(child);
 
-process.on('SIGTERM', () => {
-  server.kill();
-  process.exit(0);
-});
+  child.stdout.on('data', data => {
+    process.stdout.write(`[${name}] ${data}`);
+  });
 
-process.on('SIGINT', () => {
-  server.kill();
-  process.exit(0);
-});
+  child.stderr.on('data', data => {
+    process.stderr.write(`[${name}] ${data}`);
+  });
 
-console.log('Server process started, PID:', server.pid);
+  child.on('exit', (code, signal) => {
+    if (code === 0 || signal) return;
+    console.error(`[${name}] 进程异常退出，退出码：${code}`);
+    shutdown(code || 1);
+  });
+
+  return child;
+}
+
+function shutdown(code = 0) {
+  for (const child of children) {
+    if (!child.killed) child.kill();
+  }
+  process.exit(code);
+}
+
+startProcess('api', nodeCommand, ['--watch', 'server/index.js']);
+startProcess('web', frontendCommand, frontendArgs);
+
+console.log('开发服务已启动：');
+console.log('- 前端热更新：http://localhost:5173');
+console.log('- 后端 API：http://localhost:3000');
+console.log('提示：npm start 仍用于读取 frontend-dist 的构建产物。');
+
+process.on('SIGTERM', () => shutdown(0));
+process.on('SIGINT', () => shutdown(0));

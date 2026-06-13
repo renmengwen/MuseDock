@@ -685,6 +685,47 @@ async function testPersistsFailureFromBriefStage() {
   assert.equal(persisted.data.error.message, '策划失败');
 }
 
+async function testMarksStaleBriefStageAsFailedWhenFetched() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices({
+    services: {
+      now: () => '2026-06-12T12:20:00.000Z',
+    },
+  });
+
+  await createCreativeWorkflow({ input: '做一期关于 AI 视频生产的知识科普' }, { rootDir, mediaRoot, services });
+  const filePath = getWorkflowPath(WORKFLOW_ID, rootDir);
+  const record = readJson(filePath);
+  record.status = 'running';
+  record.updated_at = '2026-06-12T12:00:00.000Z';
+  record.run_id = 'run-1';
+  record.stages = record.stages.map(stage => (
+    stage.id === 'brief'
+      ? {
+        ...stage,
+        status: 'running',
+        message: '正在成片策划...',
+        updated_at: '2026-06-12T12:00:00.000Z',
+        started_at: '2026-06-12T12:00:00.000Z',
+      }
+      : stage
+  ));
+  fs.writeFileSync(filePath, JSON.stringify(record, null, 2), 'utf-8');
+
+  const fetched = await getCreativeWorkflow(WORKFLOW_ID, { rootDir, services });
+
+  assert.equal(fetched.success, true);
+  assert.equal(fetched.data.status, 'failed');
+  assert.equal(fetched.data.error.stage, 'brief');
+  assert.match(fetched.data.error.message, /长时间未更新/);
+  assert.match(fetched.data.error.message, /可能已中断/);
+  assert.equal(fetched.data.stages.find(stage => stage.id === 'brief').status, 'failed');
+
+  const persisted = readJson(filePath);
+  assert.equal(persisted.status, 'failed');
+  assert.match(persisted.message, /长时间未更新/);
+}
+
 async function testMissingWorkflowReturnsChineseMessage() {
   const { rootDir } = createTempDirs();
 
@@ -707,6 +748,7 @@ async function run() {
   await testRepreparesWhenAnalysisInputFramesAreStale();
   await testDouyinLoginRequirementUsesChineseMessage();
   await testPersistsFailureFromBriefStage();
+  await testMarksStaleBriefStageAsFailedWhenFetched();
   await testMissingWorkflowReturnsChineseMessage();
   console.log('creative workflow tests passed');
 }

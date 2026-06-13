@@ -1,0 +1,1 @@
+{"text":{"enabled":true,"provider":"openai","apiKey":"sk-test","baseUrl":"https://api.example.com/v1","modelId":"gpt-test"}}

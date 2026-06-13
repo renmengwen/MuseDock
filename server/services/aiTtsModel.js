@@ -6,6 +6,7 @@ const DEFAULT_MIMO_VOICE = 'mimo_default';
 const DEFAULT_AUDIO_FORMAT = 'wav';
 const DEFAULT_TTS_CONCURRENCY = 1;
 const DEFAULT_TTS_QUEUE_INTERVAL_MS = 1800;
+const DEFAULT_TTS_REQUEST_TIMEOUT_MS = 60000;
 const ttsQueues = new Map();
 
 function normalizeString(value) {
@@ -139,9 +140,13 @@ async function callTtsModel(options = {}) {
 
   let payload = null;
   let response = null;
+  const requestTimeoutMs = normalizeInteger(options.requestTimeoutMs ?? DEFAULT_TTS_REQUEST_TIMEOUT_MS, DEFAULT_TTS_REQUEST_TIMEOUT_MS, 5000, 300000);
   try {
     for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
-      response = await enqueueTtsRequest(() => fetchImpl(`${runtime.baseUrl}/chat/completions`, {
+      response = await enqueueTtsRequest(() => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+        return fetchImpl(`${runtime.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -165,7 +170,9 @@ async function callTtsModel(options = {}) {
               voice,
             },
           }),
-        }), {
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timer));
+      }, {
           waitImpl,
           concurrency: ttsConcurrency,
           intervalMs: ttsQueueIntervalMs,
@@ -188,10 +195,13 @@ async function callTtsModel(options = {}) {
       };
     }
   } catch (error) {
+    const isTimeout = error?.name === 'AbortError';
     return {
       success: false,
       status: 'failed',
-      message: `TTS 合成失败：${error.message}`,
+      message: isTimeout
+        ? `TTS 合成失败：请求超时（${requestTimeoutMs / 1000}秒），MiMo API 未响应。`
+        : `TTS 合成失败：${error.message}`,
       model,
     };
   }
@@ -226,6 +236,7 @@ module.exports = {
   DEFAULT_AUDIO_FORMAT,
   DEFAULT_TTS_CONCURRENCY,
   DEFAULT_TTS_QUEUE_INTERVAL_MS,
+  DEFAULT_TTS_REQUEST_TIMEOUT_MS,
   callTtsModel,
   enqueueTtsRequest,
   resolveTtsRuntime,

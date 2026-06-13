@@ -30,6 +30,8 @@ const zh = {
   submitButton: textFromCodePoints([0x4e00, 0x952e, 0x751f, 0x6210, 0x89c6, 0x9891]),
   creatingMessage: textFromCodePoints([0x6b63, 0x5728, 0x521b, 0x5efa, 0x521b, 0x4f5c, 0x4efb, 0x52a1, 0x2e, 0x2e, 0x2e]),
   emptyInputMessage: textFromCodePoints([0x8bf7, 0x8f93, 0x5165, 0x89c6, 0x9891, 0x65b9, 0x5411, 0x3001, 0x6296, 0x97f3, 0x20, 0x49, 0x44, 0x20, 0x6216, 0x6296, 0x97f3, 0x94fe, 0x63a5]),
+  chatGreeting: textFromCodePoints([0x563f, 0xff0c, 0x4eca, 0x5929, 0x6211, 0x4eec, 0x6765, 0x505a, 0x70b9, 0x4ec0, 0x4e48, 0xff1f]),
+  creativeInputPlaceholder: textFromCodePoints([0x5728, 0x8fd9, 0x91cc, 0x8f93, 0x5165, 0x4f60, 0x7684, 0x521b, 0x610f]),
   sourceStage: textFromCodePoints([0x51c6, 0x5907, 0x6765, 0x6e90, 0x8d44, 0x6599]),
   researchStage: textFromCodePoints([0x8054, 0x7f51, 0x7814, 0x7a76]),
   assetsStage: textFromCodePoints([0x7d20, 0x6750, 0x5206, 0x6790]),
@@ -69,6 +71,8 @@ for (const text of [
   zh.submitButton,
   zh.creatingMessage,
   zh.emptyInputMessage,
+  zh.chatGreeting,
+  zh.creativeInputPlaceholder,
 ]) {
   assert.ok(page.includes(text), `OneClickCreativePage.jsx should include normal Chinese text: ${text}`);
 }
@@ -178,6 +182,8 @@ assert.match(page, /creativeWorkflowStepper/, 'Creative task detail should rende
 assert.match(page, /creativeWorkflowStepConnector/, 'Creative workflow stepper should render connectors between steps');
 assert.match(page, /getWorkflowVideoUrl/, 'Creative task detail should resolve rendered video URL from workflow data');
 assert.match(page, /workflow\?\.stages\?\.find\(stage => stage\.id === 'render'\)\?\.result/, 'Creative task detail should read video URL from render stage result');
+assert.match(page, /getWorkflowDisplayMessage/, 'Creative task detail should derive the visible status message from workflow progress');
+assert.match(page, /find\(stage => \['running', 'queued', 'pending'\]\.includes\(stage\.status\)\)/, 'Creative task detail should surface the current active stage message while polling');
 assert.match(page, /<CreativeVideoPreview videoUrl=\{videoUrl\}/, 'Creative task detail should render video preview when a video URL is available');
 assert.match(page, /<video\s+className="creativeResultVideo"\s+src=\{videoUrl\}\s+controls/, 'Creative video preview should render a native controls video element');
 assert.match(page, /workflow\?\.status === 'done' && videoUrl/, 'Creative video preview should render after workflow is done');
