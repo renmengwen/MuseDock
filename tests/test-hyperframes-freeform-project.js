@@ -23,6 +23,7 @@ async function run() {
       'index.html': '<html><body>ok</body></html>',
       'design.md': '# Design',
       'hyperframes.json': '{}',
+      'frame_specs.json': '{"frames":[]}',
       'package.json': '{"private":true}',
     },
   });
@@ -30,7 +31,8 @@ async function run() {
   assert.equal(created.success, true);
   assert.equal(fs.existsSync(path.join(projectDir, 'index.html')), true);
   assert.equal(fs.existsSync(path.join(projectDir, 'design.md')), true);
-  assert.deepEqual(created.files.map(file => file.name).sort(), ['design.md', 'hyperframes.json', 'index.html', 'package.json']);
+  assert.equal(fs.existsSync(path.join(projectDir, 'frame_specs.json')), true);
+  assert.deepEqual(created.files.map(file => file.name).sort(), ['design.md', 'frame_specs.json', 'hyperframes.json', 'index.html', 'package.json']);
 
   const repaired = await freeformProject.createFreeformProject({
     awemeId,

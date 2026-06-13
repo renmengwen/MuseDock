@@ -83,4 +83,17 @@ assert.doesNotThrow(() => {
 assert.equal(invalidCaptionResult.success, false);
 assert.ok(invalidCaptionResult.errors.some(error => error.includes('字幕')));
 
+const outOfRangeCaption = sceneSpec.validateSceneSpec({
+  scenes: [{
+    id: 'scene_01',
+    duration: 3,
+    kind: 'text',
+    narration_text: '旁白',
+    captions: [{ id: 'cap_01_01', start: -1, end: 4, text: '越界字幕' }],
+    visual_text: { headline: '标题', keywords: [], cards: ['卡片'] },
+  }],
+});
+assert.equal(outOfRangeCaption.success, false);
+assert.ok(outOfRangeCaption.errors.some(error => error.includes('时间范围')));
+
 console.log('creative video scene spec tests passed');

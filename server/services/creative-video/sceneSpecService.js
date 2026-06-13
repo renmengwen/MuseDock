@@ -150,6 +150,9 @@ function validateSceneSpec(raw) {
       if (caption.end < caption.start) {
         errors.push(`场景 ${scene.id} 的字幕 ${caption.id} 结束时间不能早于开始时间`);
       }
+      if (caption.start < 0 || caption.end > scene.duration) {
+        errors.push(`场景 ${scene.id} 的字幕 ${caption.id} 时间范围必须落在场景时长内`);
+      }
     });
     collectTextFields(scene).forEach(field => {
       if (hasProductionWord(field.value)) {
