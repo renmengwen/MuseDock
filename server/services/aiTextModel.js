@@ -170,12 +170,14 @@ function shouldRetryStatus(status) {
   return [502, 503, 504].includes(Number(status));
 }
 
-function buildChatCompletionsBody({ modelId, messages, temperature, stream }) {
+function buildChatCompletionsBody({ modelId, messages, temperature, stream, tools, tool_choice }) {
   return JSON.stringify({
     model: modelId,
     messages,
     temperature,
     ...(stream ? { stream: true } : {}),
+    ...(tools ? { tools } : {}),
+    ...(tool_choice ? { tool_choice } : {}),
   });
 }
 
@@ -204,7 +206,7 @@ function getAbortErrorMessage(error, timeoutMs) {
   return `文本模型请求超时：${Math.round(Number(timeoutMs) / 1000)} 秒内未返回结果。`;
 }
 
-async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl, timeoutMs }) {
+async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl, timeoutMs, tools, tool_choice }) {
   const timeout = createTimeoutSignal(timeoutMs);
   try {
     const response = await fetchImpl(`${baseUrl}/chat/completions`, {
@@ -213,7 +215,7 @@ async function postChatCompletions({ baseUrl, apiKey, modelId, messages, tempera
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: buildChatCompletionsBody({ modelId, messages, temperature, stream }),
+      body: buildChatCompletionsBody({ modelId, messages, temperature, stream, tools, tool_choice }),
       signal: timeout.signal,
     });
     if (response && typeof response === 'object') {
@@ -278,6 +280,8 @@ async function callTextModel(options = {}) {
     requestTimeoutMs = 180000,
     streamChunkTimeoutMs,
     logger,
+    tools,
+    tool_choice,
   } = options;
 
   const log = logger && typeof logger === 'object' ? logger : null;
@@ -325,6 +329,8 @@ async function callTextModel(options = {}) {
         stream,
         fetchImpl,
         timeoutMs: requestTimeoutMs,
+        tools,
+        tool_choice,
       });
       lastFetchError = null;
     } catch (error) {
@@ -384,6 +390,8 @@ async function callTextModel(options = {}) {
         stream: false,
         fetchImpl,
         timeoutMs: requestTimeoutMs,
+        tools,
+        tool_choice,
       });
     } catch (error) {
       const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
@@ -466,6 +474,8 @@ async function callTextModel(options = {}) {
             stream: false,
             fetchImpl,
             timeoutMs: requestTimeoutMs,
+            tools,
+            tool_choice,
           });
           if (fallbackResponse.ok) {
             const parsedResponse = await readJsonResponse(fallbackResponse, apiKey);

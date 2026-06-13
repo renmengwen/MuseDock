@@ -9,6 +9,7 @@ const defaultAgentRuns = require('./agentRuns');
 const defaultCreativeVideoEditor = require('./creativeVideoEditor');
 const defaultCreativeVideoRerender = require('./creativeVideoRerender');
 const sceneSpecService = require('./sceneSpec');
+const aiTextModel = require('./aiTextModel');
 
 const DEFAULT_ROOT = path.join(__dirname, '../../data/creative-workflows');
 const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
@@ -183,11 +184,133 @@ function createDouyinSourceContext(input = {}) {
   };
 }
 
+async function defaultResearchProvider({ query } = {}) {
+  const messages = [
+    {
+      role: 'system',
+      content: '你是一个联网研究助手。请搜索最新资料，为用户提供准确、有帮助的信息。',
+    },
+    {
+      role: 'user',
+      content: `请搜索并研究以下主题：${query}`,
+    },
+  ];
+
+  // 获取模型配置，判断是否为mimo模型
+  const aiModelConfig = require('./aiModelConfig');
+  const config = await aiModelConfig.getRuntimeConfig('text');
+  const modelId = config?.modelId || '';
+  const isMimo = modelId.toLowerCase().startsWith('mimo');
+
+  // 根据模型类型选择工具格式
+  let tools;
+  let toolChoice;
+
+  if (isMimo) {
+    // mimo-v2.5-pro 的 web_search 工具格式
+    tools = [
+      {
+        type: 'web_search',
+        max_keyword: 3,
+        force_search: true,
+        limit: 5,
+      },
+    ];
+    toolChoice = 'auto';
+  } else {
+    // OpenAI 标准格式
+    tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'web_search',
+          description: '搜索互联网获取最新信息',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: '搜索关键词',
+              },
+            },
+            required: ['query'],
+          },
+        },
+      },
+    ];
+    toolChoice = { type: 'function', function: { name: 'web_search' } };
+  }
+
+  try {
+    const result = await aiTextModel.callTextModel({
+      messages,
+      tools,
+      tool_choice: toolChoice,
+      temperature: 0.3,
+      stream: false,
+    });
+
+    if (!result.success) {
+      throw new Error(result.message || '文本模型调用失败');
+    }
+
+    // 从响应中提取搜索结果
+    const text = result.text || '';
+    const rawResponse = result.raw_response || {};
+
+    // 尝试从raw_response中提取搜索结果
+    let sources = [];
+    if (rawResponse.choices && rawResponse.choices[0] && rawResponse.choices[0].message) {
+      const message = rawResponse.choices[0].message;
+      // mimo的搜索结果可能在message的某个字段中
+      if (message.tool_calls) {
+        // 解析tool_calls中的搜索结果
+        for (const toolCall of message.tool_calls) {
+          if (toolCall.function && toolCall.function.name === 'web_search') {
+            try {
+              const searchResult = JSON.parse(toolCall.function.arguments);
+              if (searchResult.results) {
+                sources = searchResult.results.map(item => ({
+                  title: item.title || '',
+                  url: item.url || item.link || '',
+                  summary: item.snippet || item.description || '',
+                }));
+              }
+            } catch {
+              // 解析失败，继续
+            }
+          }
+        }
+      }
+    }
+
+    // 如果没有从tool_calls中提取到，尝试从文本中提取
+    if (sources.length === 0) {
+      // 尝试从文本中提取URL和标题
+      const urlRegex = /https?:\/\/[^\s]+/g;
+      const urls = text.match(urlRegex) || [];
+      sources = urls.slice(0, 5).map(url => ({
+        title: '',
+        url: url,
+        summary: '',
+      }));
+    }
+
+    return {
+      summary: text,
+      sources: sources,
+    };
+  } catch (error) {
+    throw new Error(`联网研究失败：${error.message}`);
+  }
+}
+
 function resolveServices(options = {}) {
   const services = options.services || {};
   return {
     ...services,
     researchService: services.researchService || defaultResearchService,
+    researchProvider: services.researchProvider || defaultResearchProvider,
     mediaPipeline: services.mediaPipeline || mediaPipeline,
     agentRuns: services.agentRuns || defaultAgentRuns,
   };

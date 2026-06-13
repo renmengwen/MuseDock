@@ -475,7 +475,7 @@ export function OneClickCreativePage() {
   const isDetailRoute = Boolean(routeWorkflowId);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('quick');
-  const [useResearch, setUseResearch] = useState(false);
+  const [useResearch, setUseResearch] = useState(true);
   const [workflow, setWorkflow] = useState(null);
   const [workflowId, setWorkflowId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
@@ -484,7 +484,7 @@ export function OneClickCreativePage() {
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
   const isBusy = status === 'creating' || status === 'polling';
-  const submitDisabled = isBusy || mode === 'expert';
+  const submitDisabled = isBusy || mode === 'expert' || !input.trim();
 
   function persistTasks(updater) {
     setTasks(prev => {
@@ -557,7 +557,7 @@ export function OneClickCreativePage() {
     try {
       const json = await api.createCreativeWorkflow({
         input: trimmed,
-        useResearch: mode === 'expert' ? useResearch : false,
+        useResearch: useResearch,
         assetIds: [],
         renderOptions: {},
         workflowOptions: {},
