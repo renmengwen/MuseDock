@@ -80,6 +80,159 @@ router.get('/:workflow_id', async (req, res) => {
   }
 });
 
+router.get('/:workflow_id/scene-spec', async (req, res) => {
+  const workflowId = String(req.params.workflow_id || '').trim();
+  if (!WORKFLOW_ID_PATTERN.test(workflowId)) {
+    return res.status(400).json({
+      success: false,
+      workflow_id: workflowId,
+      message: '创作任务 ID 无效。',
+    });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.getCreativeWorkflowSceneSpec(workflowId);
+    if (!result || result.success === false) {
+      const message = getMessage(result, '未找到场景规格。');
+      const statusCode = /未找到|不存在|尚未生成/.test(message) ? 404 : 400;
+      return res.status(statusCode).json({
+        success: false,
+        workflow_id: workflowId,
+        message,
+      });
+    }
+
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `读取场景规格失败：${error.message}`,
+    });
+  }
+});
+
+router.patch('/:workflow_id/scene-spec', async (req, res) => {
+  const workflowId = String(req.params.workflow_id || '').trim();
+  if (!WORKFLOW_ID_PATTERN.test(workflowId)) {
+    return res.status(400).json({
+      success: false,
+      workflow_id: workflowId,
+      message: '创作任务 ID 无效。',
+    });
+  }
+
+  const edit = req.body;
+  if (!edit || typeof edit !== 'object' || !edit.type) {
+    return res.status(400).json({
+      success: false,
+      workflow_id: workflowId,
+      message: '编辑内容无效，缺少 type 字段。',
+    });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.patchCreativeWorkflowSceneSpec(workflowId, edit);
+    if (!result || result.success === false) {
+      const message = getMessage(result, '编辑失败。');
+      const statusCode = /未找到|不存在|尚未生成/.test(message) ? 404 : 400;
+      return res.status(statusCode).json({
+        success: false,
+        workflow_id: workflowId,
+        message,
+      });
+    }
+
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `编辑场景规格失败：${error.message}`,
+    });
+  }
+});
+
+router.post('/:workflow_id/scenes/:scene_id/rewrite', async (req, res) => {
+  const workflowId = String(req.params.workflow_id || '').trim();
+  const sceneId = String(req.params.scene_id || '').trim();
+  if (!WORKFLOW_ID_PATTERN.test(workflowId)) {
+    return res.status(400).json({
+      success: false,
+      workflow_id: workflowId,
+      message: '创作任务 ID 无效。',
+    });
+  }
+
+  if (!sceneId) {
+    return res.status(400).json({
+      success: false,
+      workflow_id: workflowId,
+      scene_id: sceneId,
+      message: '场景 ID 无效。',
+    });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.rewriteCreativeWorkflowScene(workflowId, sceneId, req.body || {});
+    if (!result || result.success === false) {
+      const message = getMessage(result, '重写失败。');
+      const statusCode = /未找到|不存在|尚未生成/.test(message) ? 404 : 400;
+      return res.status(statusCode).json({
+        success: false,
+        workflow_id: workflowId,
+        scene_id: sceneId,
+        message,
+      });
+    }
+
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      scene_id: sceneId,
+      message: `重写场景失败：${error.message}`,
+    });
+  }
+});
+
+router.post('/:workflow_id/rerender', async (req, res) => {
+  const workflowId = String(req.params.workflow_id || '').trim();
+  if (!WORKFLOW_ID_PATTERN.test(workflowId)) {
+    return res.status(400).json({
+      success: false,
+      workflow_id: workflowId,
+      message: '创作任务 ID 无效。',
+    });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.rerenderCreativeWorkflow(workflowId, req.body || {});
+    if (!result || result.success === false) {
+      const message = getMessage(result, '重新渲染失败。');
+      const statusCode = /未找到|不存在|尚未生成/.test(message) ? 404 : 400;
+      return res.status(statusCode).json({
+        success: false,
+        workflow_id: workflowId,
+        message,
+      });
+    }
+
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `重新渲染失败：${error.message}`,
+    });
+  }
+});
+
 router.delete('/:workflow_id', async (req, res) => {
   const workflowId = String(req.params.workflow_id || '').trim();
   if (!WORKFLOW_ID_PATTERN.test(workflowId)) {

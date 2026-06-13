@@ -736,6 +736,80 @@ async function testMissingWorkflowReturnsChineseMessage() {
   assert.match(missing.message, /未找到创作任务/);
 }
 
+async function testSceneSpecOperations() {
+  const {
+    getCreativeWorkflowSceneSpec,
+    patchCreativeWorkflowSceneSpec,
+    rewriteCreativeWorkflowScene,
+    rerenderCreativeWorkflow,
+    getWorkflowPath,
+  } = require('../server/services/creativeWorkflows');
+
+  const { rootDir } = createTempDirs();
+
+  const missingSceneSpec = await getCreativeWorkflowSceneSpec('99999999999999', { rootDir });
+  assert.equal(missingSceneSpec.success, false);
+  assert.match(missingSceneSpec.message, /未找到创作任务/);
+
+  const fakeEditor = {
+    applyEditCommand: (spec, edit) => ({
+      scene_spec: { ...spec, title: 'edited' },
+      edit_type: edit.type,
+      requires_tts: false,
+      requires_render: true,
+    }),
+    applyRewriteResult: (spec, sceneId, result) => ({
+      scene_spec: { ...spec, title: 'rewritten' },
+      requires_tts: true,
+      requires_render: true,
+    }),
+  };
+
+  const fakeRerender = {
+    rerenderSceneSpecProject: async () => ({
+      success: true,
+      output_path: '/tmp/output.mp4',
+      message: '渲染完成',
+    }),
+  };
+
+  const workflowPath = getWorkflowPath(WORKFLOW_ID, rootDir);
+  fs.mkdirSync(path.dirname(workflowPath), { recursive: true });
+  fs.writeFileSync(workflowPath, JSON.stringify({
+    workflow_id: WORKFLOW_ID,
+    status: 'done',
+    result: {
+      hyperframes_freeform: {
+        project: {
+          scene_spec: {
+            title: '测试',
+            scenes: [{ id: 'scene_01', duration: 5, narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }],
+          },
+        },
+        render: { output_path: '/tmp/old.mp4' },
+      },
+    },
+  }));
+
+  const gotSpec = await getCreativeWorkflowSceneSpec(WORKFLOW_ID, { rootDir });
+  assert.equal(gotSpec.success, true);
+  assert.equal(gotSpec.scene_spec.title, '测试');
+
+  const patched = await patchCreativeWorkflowSceneSpec(WORKFLOW_ID, { type: 'caption_text', scene_id: 'scene_01', caption_id: 'cap1', text: '新字幕' }, { rootDir, creativeVideoEditor: fakeEditor });
+  assert.equal(patched.success, true);
+  assert.equal(patched.scene_spec.title, 'edited');
+  assert.equal(patched.requires_render, true);
+
+  const rewritten = await rewriteCreativeWorkflowScene(WORKFLOW_ID, 'scene_01', { narration_text: '新旁白' }, { rootDir, creativeVideoEditor: fakeEditor });
+  assert.equal(rewritten.success, true);
+  assert.equal(rewritten.scene_spec.title, 'rewritten');
+  assert.equal(rewritten.requires_tts, true);
+
+  const rerendered = await rerenderCreativeWorkflow(WORKFLOW_ID, {}, { rootDir, creativeVideoRerender: fakeRerender });
+  assert.equal(rerendered.success, true);
+  assert.equal(rerendered.output_path, '/tmp/output.mp4');
+}
+
 async function run() {
   await testCreatesAndRunsTextWorkflow();
   await testRejectsEmptyInput();
@@ -750,6 +824,7 @@ async function run() {
   await testPersistsFailureFromBriefStage();
   await testMarksStaleBriefStageAsFailedWhenFetched();
   await testMissingWorkflowReturnsChineseMessage();
+  await testSceneSpecOperations();
   console.log('creative workflow tests passed');
 }
 

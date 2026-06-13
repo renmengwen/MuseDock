@@ -183,6 +183,30 @@ export const api = {
       method: 'DELETE',
     });
   },
+  getCreativeWorkflowSceneSpec(workflowId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/scene-spec`);
+  },
+  patchCreativeWorkflowSceneSpec(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/scene-spec`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  rewriteCreativeWorkflowScene(workflowId, sceneId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/scenes/${encodeURIComponent(sceneId)}/rewrite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  rerenderCreativeWorkflow(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/rerender`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
   createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}, agentConfigOverride = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',

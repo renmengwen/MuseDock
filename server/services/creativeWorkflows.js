@@ -6,6 +6,8 @@ const creativeContext = require('./creativeContext');
 const defaultResearchService = require('./researchService');
 const mediaPipeline = require('./mediaPipeline');
 const defaultAgentRuns = require('./agentRuns');
+const defaultCreativeVideoEditor = require('./creativeVideoEditor');
+const defaultCreativeVideoRerender = require('./creativeVideoRerender');
 
 const DEFAULT_ROOT = path.join(__dirname, '../../data/creative-workflows');
 const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
@@ -858,6 +860,168 @@ async function recoverStaleWorkflowsOnStartup(services = {}) {
   if (recovered > 0) console.log(`[startup] 共清理 ${recovered} 个卡死的工作流`);
 }
 
+function extractSceneSpecFromWorkflow(record) {
+  const hyperframes = record?.result?.hyperframes_freeform;
+  if (!hyperframes || !hyperframes.project || !hyperframes.project.scene_spec) {
+    return null;
+  }
+  return hyperframes.project.scene_spec;
+}
+
+async function getCreativeWorkflowSceneSpec(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  let record;
+  try {
+    record = await readWorkflow(workflowId, rootDir);
+  } catch {
+    return { success: false, message: '未找到创作任务。' };
+  }
+  if (!record) {
+    return { success: false, message: '未找到创作任务。' };
+  }
+
+  const sceneSpec = extractSceneSpecFromWorkflow(record);
+  if (!sceneSpec) {
+    return { success: false, message: '该创作任务尚未生成场景规格。' };
+  }
+
+  return {
+    success: true,
+    workflow_id: workflowId,
+    scene_spec: sceneSpec,
+  };
+}
+
+async function patchCreativeWorkflowSceneSpec(workflowId, edit, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const editor = options.creativeVideoEditor || defaultCreativeVideoEditor;
+  let record;
+  try {
+    record = await readWorkflow(workflowId, rootDir);
+  } catch {
+    return { success: false, message: '未找到创作任务。' };
+  }
+  if (!record) {
+    return { success: false, message: '未找到创作任务。' };
+  }
+
+  const sceneSpec = extractSceneSpecFromWorkflow(record);
+  if (!sceneSpec) {
+    return { success: false, message: '该创作任务尚未生成场景规格。' };
+  }
+
+  try {
+    const result = editor.applyEditCommand(sceneSpec, edit);
+    const hyperframes = record.result.hyperframes_freeform;
+    hyperframes.project.scene_spec = result.scene_spec;
+    record.updated_at = new Date().toISOString();
+    await persistWorkflow(record, rootDir);
+
+    return {
+      success: true,
+      workflow_id: workflowId,
+      scene_spec: result.scene_spec,
+      edit_type: result.edit_type,
+      requires_tts: result.requires_tts,
+      requires_render: result.requires_render,
+      message: '编辑已保存。',
+    };
+  } catch (error) {
+    return { success: false, message: `编辑失败：${error.message}` };
+  }
+}
+
+async function rewriteCreativeWorkflowScene(workflowId, sceneId, payload, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const editor = options.creativeVideoEditor || defaultCreativeVideoEditor;
+  let record;
+  try {
+    record = await readWorkflow(workflowId, rootDir);
+  } catch {
+    return { success: false, message: '未找到创作任务。' };
+  }
+  if (!record) {
+    return { success: false, message: '未找到创作任务。' };
+  }
+
+  const sceneSpec = extractSceneSpecFromWorkflow(record);
+  if (!sceneSpec) {
+    return { success: false, message: '该创作任务尚未生成场景规格。' };
+  }
+
+  try {
+    const result = editor.applyRewriteResult(sceneSpec, sceneId, payload);
+    const hyperframes = record.result.hyperframes_freeform;
+    hyperframes.project.scene_spec = result.scene_spec;
+    record.updated_at = new Date().toISOString();
+    await persistWorkflow(record, rootDir);
+
+    return {
+      success: true,
+      workflow_id: workflowId,
+      scene_spec: result.scene_spec,
+      requires_tts: result.requires_tts,
+      requires_render: result.requires_render,
+      message: '场景已重写。',
+    };
+  } catch (error) {
+    return { success: false, message: `重写失败：${error.message}` };
+  }
+}
+
+async function rerenderCreativeWorkflow(workflowId, payload, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const rerender = options.creativeVideoRerender || defaultCreativeVideoRerender;
+  let record;
+  try {
+    record = await readWorkflow(workflowId, rootDir);
+  } catch {
+    return { success: false, message: '未找到创作任务。' };
+  }
+  if (!record) {
+    return { success: false, message: '未找到创作任务。' };
+  }
+
+  const sceneSpec = extractSceneSpecFromWorkflow(record);
+  if (!sceneSpec) {
+    return { success: false, message: '该创作任务尚未生成场景规格。' };
+  }
+
+  const hyperframes = record.result.hyperframes_freeform;
+  const previousOutputPath = hyperframes?.render?.output_path || '';
+
+  try {
+    const result = await rerender.rerenderSceneSpecProject({
+      workflowId,
+      sceneSpec,
+      outputPath: payload?.outputPath || previousOutputPath,
+      previousOutputPath,
+      services: options.services || {},
+    });
+
+    if (result.success) {
+      hyperframes.render = {
+        ...hyperframes.render,
+        status: 'ready',
+        output_path: result.output_path,
+        message: '成片已重新渲染。',
+      };
+      record.updated_at = new Date().toISOString();
+      await persistWorkflow(record, rootDir);
+    }
+
+    return {
+      success: result.success,
+      workflow_id: workflowId,
+      output_path: result.output_path,
+      previous_output_path: result.previous_output_path,
+      message: result.message || (result.success ? '成片已重新渲染。' : '重新渲染失败。'),
+    };
+  } catch (error) {
+    return { success: false, message: `重新渲染失败：${error.message}` };
+  }
+}
+
 module.exports = {
   STAGE_IDS,
   STAGE_LABELS,
@@ -868,4 +1032,8 @@ module.exports = {
   getWorkflowPath,
   makeLocalCreativeAwemeId,
   recoverStaleWorkflowsOnStartup,
+  getCreativeWorkflowSceneSpec,
+  patchCreativeWorkflowSceneSpec,
+  rewriteCreativeWorkflowScene,
+  rerenderCreativeWorkflow,
 };
