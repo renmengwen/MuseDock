@@ -8,6 +8,7 @@ const pagePath = path.join(__dirname, '../frontend-react/src/pages/OneClickCreat
 const appPath = path.join(__dirname, '../frontend-react/src/App.jsx');
 const shellPath = path.join(__dirname, '../frontend-react/src/components/AppShell.jsx');
 const stylesPath = path.join(__dirname, '../frontend-react/src/styles.css');
+const persistentRoutesPath = path.join(__dirname, '../frontend-react/src/utils/persistentRoutes.js');
 
 function textFromCodePoints(points) {
   return String.fromCodePoint(...points);
@@ -52,6 +53,7 @@ const page = fs.readFileSync(pagePath, 'utf-8');
 const app = fs.readFileSync(appPath, 'utf-8');
 const shell = fs.readFileSync(shellPath, 'utf-8');
 const styles = fs.readFileSync(stylesPath, 'utf-8');
+const persistentRoutes = fs.readFileSync(persistentRoutesPath, 'utf-8');
 
 for (const text of [
   zh.creativeTitle,
@@ -104,6 +106,8 @@ for (const symbol of [
   'CreativeInputForm',
   'WorkflowStageList',
   'WorkflowStatusPanel',
+  'WorkflowStepProgress',
+  'CreativeVideoPreview',
 ]) {
   assert.match(page, new RegExp(`function\\s+${symbol}\\s*\\(`), `OneClickCreativePage.jsx should define ${symbol}`);
 }
@@ -114,6 +118,13 @@ assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInte
 assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');
 assert.match(page, /window\.localStorage\.setItem/, 'OneClickCreativePage should save submitted tasks to localStorage');
 assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should automatically enter the created task detail');
+assert.match(page, /useNavigate/, 'OneClickCreativePage should use router navigation for creative tasks');
+assert.match(page, /useParams/, 'OneClickCreativePage should read the workflow id from route params');
+assert.match(page, /navigate\(`\/creative\/\$\{encodeURIComponent\(nextWorkflowId\)\}`/, 'Submitting should route to the created workflow detail URL');
+assert.match(page, /navigate\(`\/creative\/\$\{encodeURIComponent\(task\.workflow_id\)\}`/, 'Selecting a sidebar task should route to its workflow detail URL');
+assert.match(page, /navigate\('\/creative'\)/, 'Starting a new task should route back to the creative home URL');
+assert.match(page, /const isDetailRoute = Boolean\(routeWorkflowId\)/, 'Creative detail mode should be derived from the route workflow id');
+assert.match(page, /!\s*isDetailRoute\s*&&\s*\(/, 'Creative input composer should be hidden on task detail routes');
 assert.match(page, /sidebarCollapsed/, 'OneClickCreativePage should track collapsed task sidebar state');
 assert.match(page, /setSidebarCollapsed/, 'OneClickCreativePage should toggle the task sidebar');
 assert.ok(page.includes('className="creativeSidebarToggle"'), 'Task sidebar collapse control should be a real button');
@@ -161,9 +172,26 @@ assert.ok(styles.includes('.creativeExpertSlot:not(:empty)'), 'styles.css should
 assert.ok(!styles.includes('.creativeFloatingExpand'), 'styles.css should not keep a floating expand button over collapsed sidebar');
 assert.ok(!page.includes('<div className="agentStatusList">'), 'WorkflowStatusPanel should not render li elements inside a div.agentStatusList');
 assert.ok(page.includes('<ul className="agentStatusList">'), 'WorkflowStatusPanel should render status items inside ul.agentStatusList');
+assert.doesNotMatch(page, /<WorkflowStatusPanel/, 'Creative task detail should not render the old current-task card');
+assert.match(page, /creativeDetailMeta/, 'Creative task detail should show task id and status in a compact meta row');
+assert.match(page, /creativeWorkflowStepper/, 'Creative task detail should render a horizontal workflow stepper');
+assert.match(page, /creativeWorkflowStepConnector/, 'Creative workflow stepper should render connectors between steps');
+assert.match(page, /getWorkflowVideoUrl/, 'Creative task detail should resolve rendered video URL from workflow data');
+assert.match(page, /workflow\?\.stages\?\.find\(stage => stage\.id === 'render'\)\?\.result/, 'Creative task detail should read video URL from render stage result');
+assert.match(page, /<CreativeVideoPreview videoUrl=\{videoUrl\}/, 'Creative task detail should render video preview when a video URL is available');
+assert.match(page, /<video\s+className="creativeResultVideo"\s+src=\{videoUrl\}\s+controls/, 'Creative video preview should render a native controls video element');
+assert.match(page, /workflow\?\.status === 'done' && videoUrl/, 'Creative video preview should render after workflow is done');
+assert.match(page, /<WorkflowStepProgress workflow=\{workflow\} \/>[\s\S]*workflow\?\.status === 'done' && videoUrl/, 'Creative detail should keep the progress stepper visible when showing the completed video');
+assert.match(styles, /\.creativeWorkflowStepper\s*\{[^}]*display:\s*grid/, 'workflow stepper should be a horizontal grid');
+assert.ok(styles.includes('.creativeDetailMeta'), 'styles.css should define compact task meta row');
+assert.ok(styles.includes('.creativeWorkflowStepConnector'), 'styles.css should define horizontal step connectors');
+assert.match(styles, /\.creativeVideoStage\s*\{[^}]*min-height:\s*calc\(100vh - 340px\)/, 'completed video area should fill the task detail viewport while leaving room for progress');
+assert.ok(styles.includes('.creativeResultVideo'), 'styles.css should define full-size creative result video');
 
 assert.match(app, /OneClickCreativePage/, 'App.jsx should import and render OneClickCreativePage');
 assert.match(app, /<Navigate\s+to="\/creative"\s+replace\s+\/>/, 'App.jsx index route should navigate to /creative');
+assert.match(persistentRoutes, /creativeWorkflowId/, 'persistent route state should preserve creative workflow id');
+assert.match(persistentRoutes, /creativeWorkflowId:\s*parts\[1\]/, 'persistent routes should parse /creative/:workflowId');
 
 assert.ok(shell.includes('{/* <nav className="tabs">'), 'AppShell should comment out the top tab markup without deleting it');
 assert.ok(shell.includes('</nav> */}'), 'AppShell should keep the top tab markup commented out');

@@ -1,53 +1,75 @@
 # MuseDock
 
-![MuseDock 高级成片页面](docs/assets/musedock-hyperframes-studio.png)
+MuseDock 是一个本地优先的短视频采集、素材准备与 AI 成片工作台。它把抖音/小红书内容抓取、评论缓存、媒体素材处理、音频转写、一键创作任务、导演策划、TTS 口播、HyperFrames 工程生成、工程校验、MP4 渲染和视频质检放在同一个 Web GUI 里，适合把分散的短视频素材沉淀为可复用、可检查、可继续打磨的本地创作资产。
 
-MuseDock 是一个本地优先的短视频素材采集与高级成片工作台。它把抖音内容采集、评论缓存、素材准备、音频转写、导演策划、TTS 口播、HyperFrames 工程生成、人工编辑、工程校验、MP4 渲染和抽帧质检放在同一个 Web GUI 里，目标是把零散短视频素材沉淀为可复用、可检查、可继续打磨的本地创作资产。
+当前主入口是 **一键创作**：在首页用一句话、抖音 ID 或抖音链接创建创作任务；任务创建后进入独立详情路由，页面展示任务状态、横向生成步骤条，并在视频生成完成后直接播放最终 MP4。
 
-当前项目的主体验是 **高级成片页面**：用户可以从一个抖音 `aweme_id` 创建 HyperFrames 自由成片记录，生成导演策划、口播音频和可运行的视频工程，直接在页面里编辑 `index.html`、`design.md`、`hyperframes.json` 等工程文件，再执行校验、渲染和抽帧质检。
+![MuseDock 一键创作首页](docs/assets/musedock-creative-home.png)
+
+![MuseDock 一键创作任务详情](docs/assets/musedock-creative-detail.png)
 
 ## 核心亮点
 
-- **高级成片工作台**：围绕 HyperFrames 自由工程组织完整流程，支持读取素材运行记录、新建成片记录、生成导演策划、生成音频轨、生成工程、编辑工程文件、校验工程、渲染视频和抽帧质检。
-- **导演策划 Agent**：基于已有素材上下文、口播、分镜和风格要求生成结构化导演简报，沉淀成片目标、叙事结构、视觉方向、音频导演提示和制作检查点。
-- **高级成片音频轨**：支持使用导演策划自动生成的音频导演提示，也可以人工补充情绪、口吻、语速和停顿描述；生成后的 TTS 会作为本地 `assets/narration.wav` 注入 HyperFrames 工程，避免渲染时依赖运行期 API URL。
-- **自由工程生成**：工程 Agent 输出完整 HyperFrames 文件集，默认包含 `index.html`、`design.md`、`hyperframes.json`、`package.json` 和 `meta.json`，后端会过滤不允许的文件和二进制产物，并规范化音频、字体、时间线和合成属性。
-- **页面内工程编辑**：高级成片页面可加载和保存白名单内文本文件，便于微调 HTML/CSS/GSAP、设计说明和工程配置；保存路径经过运行 ID 与文件名校验，避免越权写入。
-- **工程校验与质量门禁**：后端可运行 `hyperframes lint`、`hyperframes validate`、`hyperframes inspect --samples 12`，并把结果写入工程 `checks/` 目录和运行记录。
-- **渲染与抽帧质检**：渲染完成后页面展示 MP4 预览和下载入口；抽帧质检会生成联系表，方便快速检查画面稳定性、字幕覆盖和整体观感。
-- **本地优先数据链路**：采集记录、评论、素材、Agent 运行记录、TTS、工程文件、质检报告和渲染产物都保存在本地目录，方便复盘和二次加工。
+- **一键创作任务**：从一句创作方向、抖音 ID 或抖音链接开始，自动串联来源准备、联网研究、素材分析、导演改写、成片策划、音频生成、工程生成、校验、渲染和巡检。
+- **任务路由化**：创作任务详情使用 `/creative/:workflowId`，创建任务和点击任务列表都会跳转到对应详情页，刷新和分享任务 URL 更自然。
+- **横向进度步骤条**：任务详情页用横向步骤条展示十个生成阶段，完成态保留步骤条并在下方直接显示最终视频。
+- **本地视频预览**：渲染完成后页面直接显示 MP4 播放器，视频文件由本地 API 提供，不需要离开工作台检查产物。
+- **高级成片工作台**：仍保留 `/hyperframes-freeform/:aweme_id/:run_id` 的自由工程编辑能力，可查看导演策划、生成音频轨、编辑 HyperFrames 文件、校验工程、渲染视频和抽帧质检。
+- **素材前置链路**：支持抖音扫码登录、关键词搜索、视频 ID/链接抓取、作者主页抓取、评论和二级评论缓存、媒体下载、关键帧抽取与音频转写。
+- **本地优先数据**：采集记录、评论、素材、Agent 运行记录、TTS、工程文件、质检报告和渲染产物都保存在本地目录，便于复盘和二次加工。
 
 ## 页面与工作流
 
-### 高级成片页面
+### 一键创作
 
-高级成片页面是目前最重要的工作台，路径形态为：
+一键创作是默认首页：
+
+```text
+/creative
+/creative/:workflowId
+```
+
+推荐流程：
+
+1. 打开 `/creative`，输入视频方向、抖音 ID 或抖音链接。
+2. 选择是否“联网获取最新资料”。
+3. 提交任务后自动进入 `/creative/:workflowId`。
+4. 在任务详情页查看横向步骤条和当前状态。
+5. 渲染完成后直接在详情页播放最终视频。
+6. 左侧任务列表可重新打开历史创作任务；“开启新创作”会回到 `/creative`。
+
+一键创作阶段：
+
+| 阶段 | 说明 |
+| --- | --- |
+| 准备来源资料 | 根据文本、抖音 ID 或链接准备创作上下文 |
+| 联网研究 | 可选地补充最新资料 |
+| 素材分析 | 汇总来源素材和后续生成所需上下文 |
+| 导演改写 | 创建导演任务并重写内容方向 |
+| 成片策划 | 生成结构化成片策划 |
+| 生成音频轨 | 生成 TTS 口播音频 |
+| 生成工程 | 生成 HyperFrames 自由工程 |
+| 校验工程 | 执行 lint、validate、inspect |
+| 渲染视频 | 渲染最终 MP4 |
+| 巡检视频 | 抽帧检查最终画面 |
+
+### 高级成片
+
+高级成片工作台适合继续人工打磨工程：
 
 ```text
 /hyperframes-freeform/:aweme_id
 /hyperframes-freeform/:aweme_id/:run_id
 ```
 
-页面由四个区域组成：
+页面能力：
 
-- **素材与控制**：输入 `aweme_id`，读取运行记录，新建成片记录，并依次触发导演策划、音频生成、工程生成、工程校验、视频渲染和抽帧质检。
-- **导演策划**：展示 AI 生成的导演简报 JSON，帮助确认标题、摘要、旁白结构、音频导演、场景规划和视觉方向。
-- **工程文件**：列出当前自由工程文件，可加载、编辑并保存白名单内文本文件。
-- **渲染预览**：展示生成的 MP4、下载入口，以及抽帧质检联系表。
-
-推荐流程：
-
-1. 在“采集”或“记录”页准备抖音素材，并确保素材已进入本地媒体目录。
-2. 从素材工作台进入“高级成片”，或手动打开 `/hyperframes-freeform/<aweme_id>`。
-3. 点击“读取运行记录”，必要时点击“新建成片记录”。
-4. 点击“生成导演策划”，确认短片目标、节奏和视觉方向。
-5. 在“音频导演”区域选择使用导演策划，或手动补充情绪、口吻、语速和停顿描述。
-6. 点击“生成音频轨”，生成高级成片专用 TTS 音频。
-7. 点击“生成 HyperFrames 工程”，得到包含本地口播音频的自由工程文件。
-8. 在“工程文件”区域加载并编辑 `index.html`、`design.md` 或配置文件。
-9. 点击“校验工程”，通过 lint、validate 和 inspect 后再渲染。
-10. 点击“渲染视频”，在页面内预览 MP4。
-11. 点击“抽帧质检”，查看联系表，必要时回到工程文件继续调整。
+- 读取素材运行记录和创建 HyperFrames 自由成片记录。
+- 查看 AI 生成的导演简报 JSON。
+- 生成或复用高级成片 TTS 音频轨。
+- 加载、编辑并保存白名单内工程文件，例如 `index.html`、`design.md`、`hyperframes.json`。
+- 执行工程校验、视频渲染和抽帧质检。
+- 预览生成的 MP4 和质检联系表。
 
 生成文件通常位于：
 
@@ -69,38 +91,15 @@ checks/
 inspect/contact_sheet.jpg
 ```
 
-### 采集与素材页面
+### 采集与素材
 
-MuseDock 仍保留完整的素材前置链路：
+MuseDock 保留完整素材前置链路：
 
 - 抖音扫码登录、关键词搜索、视频 ID/链接抓取、作者主页视频抓取。
 - 小红书关键词搜索、笔记详情和历史记录入口。
 - 抖音一级评论与二级评论缓存，结果写入本地 SQLite。
 - 视频下载、音频抽取、关键帧抽取、素材状态查看。
 - 小米 MiMo ASR 音频转写，支持大音频压缩、切片转写和结果合并。
-
-## 高级成片设计
-
-高级成片链路强调“AI 生成 + 工程可控 + 质量可查”：
-
-- **运行记录层**：每个高级成片任务以 `hyperframes_freeform` 运行记录保存状态，记录导演策划、工程文件、校验结果、渲染结果和抽帧质检结果。
-- **导演策划层**：AI 先输出导演简报，而不是直接生成最终视频，让叙事目标、视觉方向和检查要点先被固定下来。
-- **音频生成层**：高级成片拥有独立音频状态，使用导演策划或人工输入的情绪、口吻、语速和停顿提示生成 TTS；工程生成时会复制为本地 `assets/narration.wav` 并注入 `<audio id="narration-audio">`。
-- **工程生成层**：AI 生成可运行的 HyperFrames 自由工程；后端只接受白名单文件，并规范化 `index.html` 中的合成属性、音频引用、字体和时间线结构。
-- **工程编辑层**：页面把工程文件暴露给用户审阅和修改，避免成片流程停留在黑盒 prompt 调参。
-- **校验层**：工程生成后需要经过 HyperFrames CLI 的 lint、validate 和 inspect 检查。
-- **渲染层**：渲染阶段使用已保存工程，不重新请求大模型，便于复现和定位问题。
-- **质检层**：抽帧生成联系表和报告，帮助在提交或发布前检查视频的关键画面。
-
-## 关键约束
-
-- 高级成片工程只允许访问白名单文件：`index.html`、`design.md`、`hyperframes.json`、`package.json`、`meta.json`、`output.mp4`、`contact_sheet.jpg`。
-- 页面只能以文本方式编辑 `index.html`、`design.md`、`hyperframes.json`、`package.json` 和 `meta.json`。
-- AI 工程响应不允许包含 `output.mp4`、`contact_sheet.jpg` 或任何二进制产物。
-- `run_id` 和工程文件名都会做路径安全校验，禁止 `..`、路径分隔符和非白名单文件。
-- `index.html` 会被规范化，补齐 `data-composition-id`、`data-duration`、尺寸属性和可被 HyperFrames 识别的时间线结构。
-- 高级成片口播音频会统一落到工程内 `assets/narration.wav`，并使用独立音频轨，避免渲染阶段引用 `/api/.../tts/...` 这类运行期接口路径。
-- 系统字体会尽量映射为 HyperFrames 可用字体，例如 `inter`、`jetbrains-mono`、`montserrat`、`noto-sans`、`open-sans`。
 
 ## 技术栈
 
@@ -155,6 +154,12 @@ http://localhost:3000
 npm run dev:frontend
 ```
 
+Vite 默认地址：
+
+```text
+http://localhost:5173
+```
+
 ## 常用命令
 
 ```powershell
@@ -169,30 +174,19 @@ npm run build:frontend
 
 # 运行完整回归测试
 npm test
+```
 
-# 高级成片相关专项测试
+常用专项测试：
+
+```powershell
+node tests/test-one-click-creative-page.mjs
+node tests/test-persistent-routes.mjs
+node tests/test-creative-workflows.js
+node tests/test-creative-workflow-routes.js
 node tests/test-hyperframes-freeform-agent.js
 node tests/test-hyperframes-freeform-project.js
 node tests/test-hyperframes-freeform-quality.js
-node tests/test-hyperframes-studio-api-client.mjs
-node tests/test-hyperframes-studio-hook.mjs
 node tests/test-hyperframes-studio-page.mjs
-node tests/test-media-workspace-navigation.mjs
-
-# 旧版 Agent 与成片链路常用专项测试
-node tests/test-agent-runs.js
-node tests/test-ai-tts-model.js
-node tests/test-phrase-timeline.js
-node tests/test-video-quality-report.js
-node tests/test-storyboard-schema.js
-node tests/test-storyboard-agent.js
-node tests/test-hyperframes-visual-dsl.js
-node tests/test-hyperframes-scene-renderers.js
-node tests/test-hyperframes-project.js
-node tests/test-hyperframes-renderer.js
-
-# 分析已生成的旧版 HyperFrames 工程质量报告
-node scripts/analyze-video-quality.js data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes
 ```
 
 ## 环境变量
@@ -218,36 +212,42 @@ node scripts/analyze-video-quality.js data/media/douyin/<aweme_id>/agent_runs/<r
 MuseDock 会在本地生成运行数据：
 
 - `data/mediacrawler.db`：SQLite 数据库
+- `data/creative-workflows/`：一键创作任务记录
 - `data/media/douyin/<aweme_id>/`：抖音视频素材目录
 - `data/media/douyin/<aweme_id>/transcript.json`：音频转写结果
 - `data/media/douyin/<aweme_id>/agent_runs/`：高级成片运行结果、TTS 音频、字幕时间轴、HyperFrames 工程、质检报告和 MP4
-- `data/media/douyin/<aweme_id>/agent_runs/<run_id>-hyperframes-freeform/`：高级成片自由工程目录
 - `data/config/agent_templates.json`：本地保存的 Agent 模板覆盖配置
+- `data/config/ai-models.json`：本地 AI 模型配置
 - `chrome-user-data/`：Chrome CDP 使用的本地浏览器数据
 - `douyin-cookies.json`：抖音 Cookie 持久化文件
 
-这些文件通常不适合提交到公开仓库。协作或开源前请确认 `.gitignore` 已排除本地数据库、浏览器缓存、Cookie 和媒体产物。
+这些文件通常不适合提交到公开仓库。协作或开源前请确认 `.gitignore` 已排除本地数据库、浏览器缓存、Cookie、媒体产物和本地任务记录。
 
 ## 目录结构
 
 ```text
 .
 +-- frontend-react/      # React + Vite 前端源码
-|   +-- src/pages/       # 页面入口，高级成片页在 HyperframesStudioPage.jsx
+|   +-- src/pages/       # 页面入口，一键创作页在 OneClickCreativePage.jsx
 |   +-- src/components/  # 通用组件和 hyperframes-studio 工作台组件
 +-- frontend-dist/       # 前端构建产物
 +-- server/              # Express 服务、路由、抓取器和业务服务
 |   +-- routes/          # API 路由
 |   +-- scraper/         # 抖音、小红书抓取逻辑
-|   +-- services/        # 数据存储、媒体处理、AI 配置、Agent、分镜和视频工程服务
+|   +-- services/        # 数据存储、媒体处理、AI 配置、Agent、创作任务和视频工程服务
 |   +-- resources/       # HyperFrames 技能与提示上下文资源
 |   +-- state/           # 运行时 Cookie 状态
-+-- data/                # SQLite 数据库、本地媒体素材和本地配置
-+-- docs/                # 项目文档、计划和交接记录
++-- data/                # SQLite 数据库、本地媒体素材、本地配置和任务记录
++-- docs/                # 项目文档、截图、计划和交接记录
 +-- tests/               # 回归测试脚本
 ```
 
 ## API 概览
+
+### 一键创作
+
+- `POST /api/creative-workflows`：创建一键创作任务
+- `GET /api/creative-workflows/:workflow_id`：读取一键创作任务状态和结果
 
 ### 高级成片
 
@@ -258,7 +258,7 @@ MuseDock 会在本地生成运行数据：
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/check`：校验工程
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/render`：渲染自由工程 MP4
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/inspect`：执行抽帧质检
-- `GET /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/files/:file_name`：读取工程文件
+- `GET /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/files/:file_name`：读取工程文件或视频产物
 - `PUT /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/files/:file_name`：保存工程文本文件
 
 ### 抖音
@@ -287,24 +287,14 @@ MuseDock 会在本地生成运行数据：
 - `GET /api/agents/templates/:id`：读取单个任务 Agent 模板
 - `PUT /api/agents/templates/:id`：保存任务 Agent 模板覆盖配置
 - `DELETE /api/agents/templates/:id/override`：恢复任务 Agent 默认配置
-- `GET /api/agents/storyboard-template`：读取分镜 Agent 配置
-- `PUT /api/agents/storyboard-template`：保存分镜 Agent 覆盖配置
-- `DELETE /api/agents/storyboard-template/override`：恢复分镜 Agent 默认配置
 - `POST /api/agents/messages/preview`：预览任务 Agent messages
-- `POST /api/agents/storyboard-messages/preview`：预览分镜 Agent messages
 - `POST /api/agents/douyin/:aweme_id/runs`：执行抖音素材的 Agent 任务
 - `GET /api/agents/douyin/:aweme_id/runs`：读取素材的 Agent 运行记录
 - `GET /api/agents/douyin/:aweme_id/runs/:run_id`：读取单次 Agent 运行详情
-- `GET /api/agents/douyin/:aweme_id/runs/:run_id/next-action`：读取推荐下一步动作
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/tts`：生成 TTS 音频和字幕时间轴
-- `POST /api/agents/douyin/:aweme_id/runs/:run_id/scene-tts`：生成场景级 TTS
-- `POST /api/agents/douyin/:aweme_id/runs/:run_id/compress-narration`：压缩旁白文本
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/storyboard`：生成 AI 分镜
-- `POST /api/agents/douyin/:aweme_id/runs/:run_id/visual-storyboard`：生成视觉分镜
-- `PUT /api/agents/douyin/:aweme_id/runs/:run_id/storyboard`：保存人工编辑后的分镜
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/project`：生成旧版 HyperFrames 视频工程
 - `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/render`：渲染旧版 MP4
-- `GET /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/files/:file_name`：读取旧版 MP4
 
 ### 配置与历史
 
@@ -331,22 +321,20 @@ npm test
 npm run build:frontend
 ```
 
-高级成片改动建议至少运行：
+一键创作和路由改动建议至少运行：
 
 ```powershell
-node tests/test-hyperframes-freeform-agent.js
-node tests/test-hyperframes-freeform-project.js
-node tests/test-hyperframes-freeform-quality.js
-node tests/test-hyperframes-studio-api-client.mjs
-node tests/test-hyperframes-studio-hook.mjs
-node tests/test-hyperframes-studio-page.mjs
-node tests/test-agent-runs.js
+node tests/test-one-click-creative-page.mjs
+node tests/test-persistent-routes.mjs
+node tests/test-creative-workflows.js
+node tests/test-creative-workflow-routes.js
 ```
 
 ## 路线图
 
-- 增强高级成片页的工程预览与差异检查能力。
+- 继续完善一键创作任务详情页的视频预览、失败诊断和任务恢复体验。
 - 增加真实任务队列和后端进度推送，替代部分前端轮询与估算状态。
+- 增强高级成片页的工程预览、差异检查和版本回退能力。
 - 扩展更多高级成片风格预设和可复用 HyperFrames 技能。
 - 补齐小红书评论、素材准备和 AI 成片工作流。
 - 增加端到端测试、CI 和更清晰的部署文档。

@@ -51,6 +51,7 @@ export function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/creative" replace />} />
+        <Route path="creative/:workflowId" element={<PersistentPages />} />
         <Route path="crawl" element={<Navigate to="/crawl/douyin" replace />} />
         <Route path="records" element={<Navigate to="/records/douyin" replace />} />
         <Route path="*" element={<PersistentPages />} />

@@ -521,7 +521,9 @@ a { color: #fe2c55; text-decoration: none; }
 }
 .creativeChatCenter.hasDetail {
   align-content: start;
-  padding-top: 72px;
+  justify-items: stretch;
+  width: min(100%, 1120px);
+  padding-top: 42px;
 }
 .creativeHeroHeader {
   display: grid;
@@ -763,9 +765,14 @@ a { color: #fe2c55; text-decoration: none; }
 }
 .creativeTaskDetail {
   display: grid;
-  grid-template-columns: minmax(260px, .8fr) minmax(340px, 1fr);
-  gap: 14px;
-  width: min(100%, 820px);
+  gap: 24px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 4px 0;
+}
+.creativeTaskDetail.hasVideo {
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: calc(100vh - 176px);
 }
 .creativeDetailCard {
   min-width: 0;
@@ -797,6 +804,162 @@ a { color: #fe2c55; text-decoration: none; }
 .creativeStagePanel {
   max-height: min(58vh, 520px);
   overflow: auto;
+}
+.creativeDetailMeta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+.creativeDetailMeta div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.creativeDetailMeta span {
+  color: #8a93a2;
+  font-size: 12px;
+  font-weight: 700;
+}
+.creativeDetailMeta strong {
+  min-width: 0;
+  color: #111827;
+  font-size: 16px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.creativeDetailMeta > .stepBadge {
+  flex: 0 0 auto;
+}
+.creativeWorkflowStepper {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(72px, 1fr));
+  gap: 0;
+  align-items: start;
+  width: 100%;
+  min-width: 0;
+  padding: 22px 4px 10px;
+}
+.creativeWorkflowStep {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #8a93a2;
+  text-align: center;
+}
+.creativeWorkflowStepConnector {
+  position: absolute;
+  top: 13px;
+  right: calc(50% + 18px);
+  width: calc(100% - 36px);
+  height: 2px;
+  border-radius: 999px;
+  background: #e4e8ef;
+}
+.creativeWorkflowStep.done .creativeWorkflowStepConnector,
+.creativeWorkflowStep.active .creativeWorkflowStepConnector,
+.creativeWorkflowStep.failed .creativeWorkflowStepConnector {
+  background: #86efac;
+}
+.creativeWorkflowStepDot {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid #d7dce3;
+  border-radius: 999px;
+  background: #fff;
+  color: #8a93a2;
+  font-size: 12px;
+  font-weight: 800;
+}
+.creativeWorkflowStep.done .creativeWorkflowStepDot {
+  border-color: #22c55e;
+  background: #22c55e;
+  color: #fff;
+}
+.creativeWorkflowStep.active .creativeWorkflowStepDot {
+  border-color: #2563eb;
+  background: #eff6ff;
+  color: #2563eb;
+  box-shadow: 0 0 0 5px rgba(37,99,235,.1);
+}
+.creativeWorkflowStep.failed .creativeWorkflowStepDot {
+  border-color: #dc2626;
+  background: #fef2f2;
+  color: #dc2626;
+}
+.creativeWorkflowStepLabel {
+  width: 100%;
+  overflow: hidden;
+  color: #30343b;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.creativeWorkflowStep small {
+  color: #8a93a2;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.creativeWorkflowStep.done small {
+  color: #15803d;
+}
+.creativeWorkflowStep.active small {
+  color: #1d4ed8;
+}
+.creativeWorkflowStep.failed small {
+  color: #b91c1c;
+}
+.creativeDetailMessage {
+  width: 100%;
+  min-height: 54px;
+  padding: 14px 16px;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  background: #fafbfc;
+  color: #4b5563;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.creativeDetailMessage.loading {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.creativeDetailMessage.success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+.creativeDetailMessage.error {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.creativeVideoStage {
+  display: grid;
+  place-items: center;
+  min-height: calc(100vh - 340px);
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #05070a;
+}
+.creativeResultVideo {
+  width: 100%;
+  height: 100%;
+  max-height: calc(100vh - 340px);
+  object-fit: contain;
+  background: #05070a;
 }
 
 .container:has(> .workspaceIntro + .status + .agentWorkbench) {
@@ -1025,8 +1188,17 @@ a { color: #fe2c55; text-decoration: none; }
     align-items: flex-end;
   }
   .creativeTaskDetail {
-    grid-template-columns: 1fr;
     width: 100%;
+    overflow-x: auto;
+  }
+  .creativeWorkflowStepper {
+    min-width: 780px;
+  }
+  .creativeDetailMeta {
+    flex-direction: column;
+  }
+  .creativeDetailMeta > .stepBadge {
+    align-self: flex-start;
   }
   .toolbar, .mediaHeader, .workspaceIntro, .settingsPanelHeader, .modelConfigHeader { flex-direction: column; align-items: stretch; }
   .tabs { overflow-x: auto; }

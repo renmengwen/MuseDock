@@ -4,6 +4,7 @@ const DEFAULT_STATE = {
   mediaPlatform: '',
   mediaId: '',
   aiSearch: '',
+  creativeWorkflowId: '',
   studioAwemeId: '',
   studioRunId: '',
   activePage: 'creative',
@@ -28,6 +29,7 @@ export function getPersistentRouteState(previous = DEFAULT_STATE, pathname = '/'
   if (section === 'creative') {
     return {
       ...state,
+      creativeWorkflowId: parts[1] || '',
       activePage: 'creative',
     };
   }

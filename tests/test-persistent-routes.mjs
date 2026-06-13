@@ -16,6 +16,7 @@ assert.deepStrictEqual(defaultState, {
   mediaPlatform: '',
   mediaId: '',
   aiSearch: '',
+  creativeWorkflowId: '',
   studioAwemeId: '',
   studioRunId: '',
   activePage: 'creative',
@@ -23,6 +24,11 @@ assert.deepStrictEqual(defaultState, {
 
 const creative = getPersistentRouteState(undefined, '/creative', '');
 assert.strictEqual(creative.activePage, 'creative');
+assert.strictEqual(creative.creativeWorkflowId, '');
+
+const creativeDetail = getPersistentRouteState(creative, '/creative/wf-123', '');
+assert.strictEqual(creativeDetail.activePage, 'creative');
+assert.strictEqual(creativeDetail.creativeWorkflowId, 'wf-123');
 
 const creativeToMedia = getPersistentRouteState(creative, '/media/douyin/12345', '');
 assert.strictEqual(creativeToMedia.mediaPlatform, 'douyin');
@@ -36,6 +42,7 @@ assert.deepStrictEqual(initial, {
   mediaPlatform: '',
   mediaId: '',
   aiSearch: '',
+  creativeWorkflowId: '',
   studioAwemeId: '',
   studioRunId: '',
   activePage: 'crawl',

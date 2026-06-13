@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowUp,
   CirclePlus,
@@ -55,6 +56,40 @@ function getStatusMessageClass(status) {
   if (status === 'done') return 'success';
   if (status === 'failed') return 'error';
   return 'info';
+}
+
+function getWorkflowStatusText(workflow, fallbackStatus = 'idle') {
+  const nextStatus = workflow?.status || fallbackStatus;
+  if (!workflow && fallbackStatus === 'idle') return '等待输入';
+  return STATUS_TEXT[nextStatus] || nextStatus || '等待中';
+}
+
+function getWorkflowVideoUrl(workflow) {
+  const renderResult = workflow?.stages?.find(stage => stage.id === 'render')?.result;
+  const candidates = [
+    workflow?.result?.video?.output_url,
+    workflow?.result?.render?.output_url,
+    workflow?.result?.hyperframes_freeform?.render?.output_url,
+    workflow?.render?.output_url,
+    workflow?.hyperframes_freeform?.render?.output_url,
+    renderResult?.video?.output_url,
+    renderResult?.render?.output_url,
+    renderResult?.hyperframes_freeform?.render?.output_url,
+    renderResult?.output_url,
+  ];
+  const directUrl = candidates.find(value => typeof value === 'string' && value.trim());
+  if (directUrl) return directUrl;
+  if (workflow?.aweme_id && workflow?.run_id) {
+    return [
+      '/api/agents/douyin',
+      encodeURIComponent(String(workflow.aweme_id)),
+      'runs',
+      encodeURIComponent(String(workflow.run_id)),
+      'hyperframes-freeform/files',
+      'output.mp4',
+    ].join('/');
+  }
+  return '';
 }
 
 function getWorkflowPayload(json) {
@@ -320,18 +355,88 @@ function WorkflowStageList({ workflow }) {
   );
 }
 
-function CreativeTaskDetail({ status, message, workflowId, workflow }) {
-  if (!workflowId && !workflow) return null;
+function getStepState(stage, index, stages) {
+  if (stage.status === 'done') return 'done';
+  if (stage.status === 'failed') return 'failed';
+  if (stage.status === 'running' || stage.status === 'queued' || stage.status === 'pending') return 'active';
+  const hasActiveBefore = stages.slice(0, index).some(item => (
+    item.status === 'running'
+    || item.status === 'queued'
+    || item.status === 'pending'
+    || item.status === 'failed'
+  ));
+  return hasActiveBefore ? 'waiting' : '';
+}
+
+function WorkflowStepProgress({ workflow }) {
+  const stages = useMemo(() => {
+    const source = Array.isArray(workflow?.stages) && workflow.stages.length ? workflow.stages : DEFAULT_STAGES;
+    return source.map(stage => ({
+      ...stage,
+      label: stage.label || STAGE_LABELS[stage.id] || stage.id || '未命名阶段',
+      status: stage.status || 'waiting',
+    }));
+  }, [workflow]);
 
   return (
-    <div className="creativeTaskDetail">
-      <WorkflowStatusPanel status={status} message={message} workflowId={workflowId} workflow={workflow} />
-      <WorkflowStageList workflow={workflow} />
+    <div className="creativeWorkflowStepper" aria-label="生成进度">
+      {stages.map((stage, index) => {
+        const stepState = getStepState(stage, index, stages);
+        return (
+          <div className={`creativeWorkflowStep ${stepState}`} key={stage.id || stage.label}>
+            {index > 0 ? <span className="creativeWorkflowStepConnector" aria-hidden="true" /> : null}
+            <span className="creativeWorkflowStepDot">{index + 1}</span>
+            <span className="creativeWorkflowStepLabel">{stage.label}</span>
+            <small>{STATUS_TEXT[stage.status] || stage.status || '等待中'}</small>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CreativeVideoPreview({ videoUrl }) {
+  return (
+    <section className="creativeVideoStage" aria-label="生成视频预览">
+      <video className="creativeResultVideo" src={videoUrl} controls playsInline preload="metadata">
+        当前浏览器不支持直接播放视频。
+      </video>
+    </section>
+  );
+}
+
+function CreativeTaskDetail({ status, message, workflowId, workflow }) {
+  if (!workflowId && !workflow) return null;
+  const videoUrl = getWorkflowVideoUrl(workflow);
+
+  return (
+    <div className={`creativeTaskDetail ${workflow?.status === 'done' && videoUrl ? 'hasVideo' : ''}`}>
+      <div className="creativeDetailMeta">
+        <div>
+          <span>任务 ID</span>
+          <strong>{workflowId || '尚未创建'}</strong>
+        </div>
+        <strong className={`stepBadge ${getStatusClass(workflow?.status)}`}>
+          {getWorkflowStatusText(workflow, status)}
+        </strong>
+      </div>
+      <WorkflowStepProgress workflow={workflow} />
+      {workflow?.status === 'done' && videoUrl ? (
+        <CreativeVideoPreview videoUrl={videoUrl} />
+      ) : (
+        <div className={`creativeDetailMessage ${getStatusMessageClass(status)}`} aria-live="polite">
+          {message || '创作任务已打开，正在获取最新进度...'}
+        </div>
+      )}
     </div>
   );
 }
 
 export function OneClickCreativePage() {
+  const navigate = useNavigate();
+  const params = useParams();
+  const routeWorkflowId = params.workflowId || '';
+  const isDetailRoute = Boolean(routeWorkflowId);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('quick');
   const [useResearch, setUseResearch] = useState(false);
@@ -354,6 +459,7 @@ export function OneClickCreativePage() {
   }
 
   function startNewTask() {
+    navigate('/creative');
     setInput('');
     setMode('quick');
     setUseResearch(false);
@@ -365,6 +471,7 @@ export function OneClickCreativePage() {
   }
 
   function selectTask(task) {
+    navigate(`/creative/${encodeURIComponent(task.workflow_id)}`);
     setWorkflowId(task.workflow_id);
     setSelectedWorkflowId(task.workflow_id);
     setWorkflow(task.workflow || null);
@@ -426,11 +533,43 @@ export function OneClickCreativePage() {
       setSelectedWorkflowId(nextWorkflowId);
       setStatus('polling');
       setMessage(task.message);
+      navigate(`/creative/${encodeURIComponent(nextWorkflowId)}`);
     } catch (error) {
       setStatus('failed');
       setMessage(getErrorMessage(error, '创建创作任务失败，请稍后重试。'));
     }
   }
+
+  useEffect(() => {
+    if (!routeWorkflowId) {
+      setSelectedWorkflowId('');
+      if (workflowId && status !== 'creating') {
+        setWorkflowId('');
+        setWorkflow(null);
+        setStatus('idle');
+        setMessage('');
+      }
+      return;
+    }
+
+    if (routeWorkflowId === selectedWorkflowId) return;
+
+    const storedTask = tasks.find(task => task.workflow_id === routeWorkflowId);
+    if (storedTask) {
+      setWorkflowId(storedTask.workflow_id);
+      setSelectedWorkflowId(storedTask.workflow_id);
+      setWorkflow(storedTask.workflow || null);
+      setStatus(storedTask.status === 'done' ? 'done' : 'polling');
+      setMessage(storedTask.message || '正在打开任务详情...');
+      return;
+    }
+
+    setWorkflowId(routeWorkflowId);
+    setSelectedWorkflowId(routeWorkflowId);
+    setWorkflow(null);
+    setStatus('polling');
+    setMessage('正在打开任务详情...');
+  }, [routeWorkflowId, selectedWorkflowId, tasks, workflowId, status]);
 
   useEffect(() => {
     if (status !== 'polling' || !workflowId) return undefined;
@@ -501,18 +640,22 @@ export function OneClickCreativePage() {
 
       <section className="creativeChatMain">
         <div className={`creativeChatCenter ${selectedWorkflowId ? 'hasDetail' : ''}`}>
-          <CreativeHeroHeader mode={mode} />
-          <CreativeModeSwitch mode={mode} setMode={setMode} disabled={isBusy} />
-          <CreativeInputForm
-            input={input}
-            setInput={setInput}
-            mode={mode}
-            useResearch={useResearch}
-            setUseResearch={setUseResearch}
-            isBusy={isBusy}
-            submitDisabled={submitDisabled}
-            onSubmit={submitCreativeWorkflow}
-          />
+          {!isDetailRoute && (
+            <>
+              <CreativeHeroHeader mode={mode} />
+              <CreativeModeSwitch mode={mode} setMode={setMode} disabled={isBusy} />
+              <CreativeInputForm
+                input={input}
+                setInput={setInput}
+                mode={mode}
+                useResearch={useResearch}
+                setUseResearch={setUseResearch}
+                isBusy={isBusy}
+                submitDisabled={submitDisabled}
+                onSubmit={submitCreativeWorkflow}
+              />
+            </>
+          )}
           <CreativeTaskDetail status={status} message={message} workflowId={selectedWorkflowId} workflow={workflow} />
         </div>
       </section>
