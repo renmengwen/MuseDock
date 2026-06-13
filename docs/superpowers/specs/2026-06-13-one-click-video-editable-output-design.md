@@ -19,7 +19,7 @@
 - 首版不做时间轴拖拽、任意 HTML 编辑或元素级可视化编辑。
 - 首版不做新增场景和删除场景，只支持已有场景的顺序调整、时长调整和单场景重写。
 - 首版不提供任意 HTML 编辑器。
-- 首版不替换现有 HyperFrames 渲染链路。
+- 首版不替换现有 HyperFrames 渲染内核，但需要抽象统一的渲染接口，当前实现仍调用现有 HyperFrames CLI。
 - 首版不引入 Remotion、Motion Canvas 或其他渲染引擎。
 
 ## 核心方案
@@ -148,6 +148,42 @@
 - 标准化字体别名。
 - 标准化 clip 的 `data-start` 和 `data-duration` 小数位。
 
+### Render Adapter
+
+新增统一渲染接口，避免 workflow、编辑服务和工程生成逻辑直接依赖 `npx hyperframes render`、`renders/*.mp4` 或固定 `output.mp4` 目录结构。
+
+首版实现：
+
+- `HyperFramesCliAdapter`
+- 内部继续调用现有 HyperFrames CLI。
+- 兼容当前工程目录、`output.mp4` 和已有前端播放路径。
+
+接口输入：
+
+- `projectDir`
+- `outputPath`
+- `fps`
+- `duration`
+- `audio`
+- `onProgress`
+
+接口输出：
+
+- `success`
+- `outputPath`
+- `stdout`
+- `stderr`
+- `diagnostics`
+- `meta`
+
+后续可以新增：
+
+- `PlaywrightHyperFramesAdapter`：参考 `html-video`，用 headless Chromium 录制 HTML，再通过 ffmpeg 编码。
+- `FrameSequenceAdapter`：逐帧渲染，再通过 ffmpeg concat 拼接。
+- `RemotionAdapter`：为数据帧或特定模板接入 React/Remotion 渲染。
+
+上层只依赖 `RenderAdapter.render()`，因此后续替换渲染内核时，不需要改一键创作 workflow、编辑服务和前端接口。
+
 ## 数据结构草案
 
 ```json
@@ -273,6 +309,7 @@
 - 支持局部重试。
 - 增加模板 manifest。
 - 将稳定 composer、AI frame composer 和未来多引擎 adapter 并存。
+- 将 `HyperFramesCliAdapter` 替换或并行为 `PlaywrightHyperFramesAdapter`，逐步学习 `html-video` 的完整渲染链路。
 
 ## 设计结论
 
