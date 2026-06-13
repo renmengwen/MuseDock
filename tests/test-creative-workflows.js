@@ -739,10 +739,13 @@ async function testMissingWorkflowReturnsChineseMessage() {
 async function testSceneSpecOperations() {
   const {
     getCreativeWorkflowSceneSpec,
+    getCreativeWorkflowVideoSpec,
     patchCreativeWorkflowSceneSpec,
+    patchCreativeWorkflowVideoSpec,
     rewriteCreativeWorkflowScene,
     ttsCreativeWorkflowScene,
     rerenderCreativeWorkflow,
+    remixCreativeWorkflow,
     getWorkflowPath,
   } = require('../server/services/creativeWorkflows');
 
@@ -793,8 +796,14 @@ async function testSceneSpecOperations() {
             title: '测试',
             scenes: [{ id: 'scene_01', duration: 5, narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }],
           },
+          frame_specs: {
+            frames: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 5, template: 'hero_title' }],
+          },
         },
-        render: { output_path: '/tmp/old.mp4' },
+        render: {
+          output_path: '/tmp/old.mp4',
+          render_versions: [{ id: 'render_001', status: 'rendered' }],
+        },
       },
     },
   }));
@@ -803,10 +812,25 @@ async function testSceneSpecOperations() {
   assert.equal(gotSpec.success, true);
   assert.equal(gotSpec.scene_spec.title, '测试');
 
+  const gotVideoSpec = await getCreativeWorkflowVideoSpec(WORKFLOW_ID, { rootDir });
+  assert.equal(gotVideoSpec.success, true);
+  assert.equal(gotVideoSpec.scene_spec.title, '测试');
+  assert.equal(gotVideoSpec.frame_specs.frames[0].id, 'frame_01_01');
+  assert.equal(gotVideoSpec.render_versions[0].id, 'render_001');
+
   const patched = await patchCreativeWorkflowSceneSpec(WORKFLOW_ID, { type: 'caption_text', scene_id: 'scene_01', caption_id: 'cap1', text: '新字幕' }, { rootDir, creativeVideoEditor: fakeEditor });
   assert.equal(patched.success, true);
   assert.equal(patched.scene_spec.title, 'edited');
   assert.equal(patched.requires_render, true);
+
+  const patchedVideoSpec = await patchCreativeWorkflowVideoSpec(WORKFLOW_ID, {
+    scene_spec: { title: '视频规格编辑后', scenes: [{ id: 'scene_01', duration: 5, narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }] },
+    frame_specs: { frames: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 4, template: 'hero_title' }] },
+  }, { rootDir });
+  assert.equal(patchedVideoSpec.success, true);
+  assert.equal(patchedVideoSpec.scene_spec.title, '视频规格编辑后');
+  assert.equal(patchedVideoSpec.frame_specs.frames[0].duration, 4);
+  assert.equal(patchedVideoSpec.requires_render, true);
 
   const rewritten = await rewriteCreativeWorkflowScene(WORKFLOW_ID, 'scene_01', { narration_text: '新旁白' }, { rootDir, creativeVideoEditor: fakeEditor });
   assert.equal(rewritten.success, true);
@@ -825,6 +849,23 @@ async function testSceneSpecOperations() {
   const ttsMissingScene = await ttsCreativeWorkflowScene(WORKFLOW_ID, 'nonexistent', {}, { rootDir, creativeVideoRerender: fakeRerender });
   assert.equal(ttsMissingScene.success, false);
   assert.match(ttsMissingScene.message, /未找到场景/);
+
+  const remixed = await remixCreativeWorkflow(WORKFLOW_ID, { input: '二创版本' }, {
+    rootDir,
+    mediaRoot: path.join(rootDir, 'media'),
+    services: {
+      now: () => NOW,
+      idFactory: () => '202606121200000002',
+      researchService: {
+        createResearchContext: async () => ({ status: 'disabled', query: '', sources: [], summary: '', updated_at: NOW }),
+      },
+    },
+  });
+  assert.equal(remixed.success, true);
+  assert.equal(remixed.source_workflow_id, WORKFLOW_ID);
+  assert.equal(remixed.workflow_id, '202606121200000002');
+  assert.equal(remixed.scene_spec.title, 'rewritten');
+  assert.equal(remixed.frame_specs.frames[0].duration, 4);
 }
 
 async function run() {

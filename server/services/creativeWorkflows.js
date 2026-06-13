@@ -992,6 +992,19 @@ function extractSceneSpecFromWorkflow(record) {
   return hyperframes.project.scene_spec;
 }
 
+function extractFrameSpecsFromWorkflow(record) {
+  const frameSpecs = record?.result?.hyperframes_freeform?.project?.frame_specs;
+  if (!frameSpecs || typeof frameSpecs !== 'object' || Array.isArray(frameSpecs)) {
+    return { frames: [] };
+  }
+  return frameSpecs;
+}
+
+function extractRenderVersionsFromWorkflow(record) {
+  const versions = record?.result?.hyperframes_freeform?.render?.render_versions;
+  return Array.isArray(versions) ? versions : [];
+}
+
 async function loadWorkflowWithSceneSpec(workflowId, rootDir) {
   let record;
   try {
@@ -1010,6 +1023,20 @@ async function loadWorkflowWithSceneSpec(workflowId, rootDir) {
   return { record, sceneSpec, error: null };
 }
 
+async function getCreativeWorkflowVideoSpec(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  return {
+    success: true,
+    workflow_id: workflowId,
+    scene_spec: sceneSpec,
+    frame_specs: extractFrameSpecsFromWorkflow(record),
+    render_versions: extractRenderVersionsFromWorkflow(record),
+  };
+}
+
 async function getCreativeWorkflowSceneSpec(workflowId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
@@ -1019,6 +1046,35 @@ async function getCreativeWorkflowSceneSpec(workflowId, options = {}) {
     success: true,
     workflow_id: workflowId,
     scene_spec: sceneSpec,
+  };
+}
+
+async function patchCreativeWorkflowVideoSpec(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  const nextSceneSpec = payload.scene_spec && typeof payload.scene_spec === 'object'
+    ? payload.scene_spec
+    : sceneSpec;
+  const nextFrameSpecs = payload.frame_specs && typeof payload.frame_specs === 'object'
+    ? payload.frame_specs
+    : extractFrameSpecsFromWorkflow(record);
+  const hyperframes = record.result.hyperframes_freeform;
+  hyperframes.project.scene_spec = nextSceneSpec;
+  hyperframes.project.frame_specs = nextFrameSpecs;
+  record.updated_at = new Date().toISOString();
+  await persistWorkflow(record, rootDir);
+
+  return {
+    success: true,
+    workflow_id: workflowId,
+    scene_spec: nextSceneSpec,
+    frame_specs: nextFrameSpecs,
+    render_versions: extractRenderVersionsFromWorkflow(record),
+    requires_tts: !!payload.requires_tts,
+    requires_render: true,
+    message: '视频规格已保存。',
   };
 }
 
@@ -1050,6 +1106,57 @@ async function patchCreativeWorkflowSceneSpec(workflowId, edit, options = {}) {
   } catch (error) {
     return { success: false, code: 'EDIT_FAILED', message: `编辑失败：${error.message}` };
   }
+}
+
+async function remixCreativeWorkflow(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  const frameSpecs = extractFrameSpecsFromWorkflow(record);
+  const sourceInput = safeString(payload.input)
+    || safeString(record.input?.raw_text)
+    || safeString(record.creative_context?.input?.raw_text)
+    || `二创 ${workflowId}`;
+  const created = await createCreativeWorkflow({
+    ...(payload || {}),
+    input: sourceInput,
+  }, {
+    rootDir,
+    mediaRoot,
+    services: options.services || {},
+  });
+  if (!created.success) return created;
+
+  const remixRecord = await readWorkflow(created.workflow_id, rootDir);
+  remixRecord.status = 'done';
+  remixRecord.success = true;
+  remixRecord.source_workflow_id = workflowId;
+  remixRecord.message = '二创任务已创建。';
+  remixRecord.result = {
+    ...(record.result || {}),
+    source_workflow_id: workflowId,
+    hyperframes_freeform: {
+      ...(record.result?.hyperframes_freeform || {}),
+      project: {
+        ...(record.result?.hyperframes_freeform?.project || {}),
+        scene_spec: sceneSpec,
+        frame_specs: frameSpecs,
+      },
+    },
+  };
+  remixRecord.updated_at = getNow(options.services || {});
+  await persistWorkflow(remixRecord, rootDir);
+
+  return {
+    success: true,
+    workflow_id: created.workflow_id,
+    source_workflow_id: workflowId,
+    scene_spec: sceneSpec,
+    frame_specs: frameSpecs,
+    message: '二创任务已创建。',
+  };
 }
 
 async function rewriteCreativeWorkflowScene(workflowId, sceneId, payload, options = {}) {
@@ -1192,9 +1299,12 @@ module.exports = {
   getWorkflowPath,
   makeLocalCreativeAwemeId,
   recoverStaleWorkflowsOnStartup,
+  getCreativeWorkflowVideoSpec,
+  patchCreativeWorkflowVideoSpec,
   getCreativeWorkflowSceneSpec,
   patchCreativeWorkflowSceneSpec,
   rewriteCreativeWorkflowScene,
   ttsCreativeWorkflowScene,
   rerenderCreativeWorkflow,
+  remixCreativeWorkflow,
 };

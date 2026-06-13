@@ -214,6 +214,30 @@ export const api = {
       body: JSON.stringify(payload || {}),
     });
   },
+  getCreativeVideoSpec(workflowId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/video-spec`);
+  },
+  patchCreativeVideoSpec(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/video-spec`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  rerenderCreativeVideo(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/rerender`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  remixCreativeVideo(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/remix`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
   createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}, agentConfigOverride = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',

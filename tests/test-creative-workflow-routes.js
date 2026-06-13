@@ -190,8 +190,27 @@ async function runEditorRouteTests() {
     title: '测试',
     scenes: [{ id: 'scene_01', duration: 5, narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }],
   };
+  const frameSpecs = {
+    frames: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 5, template: 'hero_title' }],
+  };
 
   const fakeService = {
+    getCreativeWorkflowVideoSpec: async id => ({
+      success: true,
+      workflow_id: id,
+      scene_spec: sceneSpec,
+      frame_specs: frameSpecs,
+      render_versions: [{ id: 'render_001', status: 'rendered' }],
+    }),
+    patchCreativeWorkflowVideoSpec: async (id, payload) => ({
+      success: true,
+      workflow_id: id,
+      scene_spec: payload.scene_spec || sceneSpec,
+      frame_specs: payload.frame_specs || frameSpecs,
+      requires_tts: false,
+      requires_render: true,
+      message: '视频规格已保存。',
+    }),
     getCreativeWorkflowSceneSpec: async id => ({
       success: true,
       workflow_id: id,
@@ -228,6 +247,12 @@ async function runEditorRouteTests() {
       output_path: '/tmp/output.mp4',
       message: '成片已重新渲染。',
     }),
+    remixCreativeWorkflow: async (id, payload) => ({
+      success: true,
+      source_workflow_id: id,
+      workflow_id: payload?.workflow_id || '202606131200000002',
+      message: '二创任务已创建。',
+    }),
   };
 
   const app = express();
@@ -238,6 +263,17 @@ async function runEditorRouteTests() {
   const server = await listen(app);
 
   try {
+    const getVideoSpecRes = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/video-spec`);
+    assert.strictEqual(getVideoSpecRes.statusCode, 200);
+    assert.strictEqual(getVideoSpecRes.body.success, true);
+    assert.strictEqual(getVideoSpecRes.body.scene_spec.title, '测试');
+    assert.strictEqual(getVideoSpecRes.body.frame_specs.frames[0].id, 'frame_01_01');
+
+    const patchVideoSpecRes = await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/video-spec`, { scene_spec: { ...sceneSpec, title: 'edited video' }, frame_specs: frameSpecs });
+    assert.strictEqual(patchVideoSpecRes.statusCode, 200);
+    assert.strictEqual(patchVideoSpecRes.body.success, true);
+    assert.strictEqual(patchVideoSpecRes.body.requires_render, true);
+
     const getRes = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/scene-spec`);
     assert.strictEqual(getRes.statusCode, 200);
     assert.strictEqual(getRes.body.success, true);
@@ -262,6 +298,11 @@ async function runEditorRouteTests() {
     assert.strictEqual(rerenderRes.statusCode, 200);
     assert.strictEqual(rerenderRes.body.success, true);
     assert.strictEqual(rerenderRes.body.output_path, '/tmp/output.mp4');
+
+    const remixRes = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/remix`, { workflow_id: '202606131200000099' });
+    assert.strictEqual(remixRes.statusCode, 200);
+    assert.strictEqual(remixRes.body.success, true);
+    assert.strictEqual(remixRes.body.source_workflow_id, workflowId);
 
     const invalidId = await requestJson(server, 'GET', '/api/creative-workflows/invalid!/scene-spec');
     assert.strictEqual(invalidId.statusCode, 400);

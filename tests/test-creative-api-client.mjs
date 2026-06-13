@@ -24,4 +24,11 @@ assert.ok(source.includes('/scene-spec'), 'client should call scene-spec endpoin
 assert.ok(source.includes('/scenes/'), 'client should call scene-level endpoints');
 assert.ok(source.includes('/rerender'), 'client should call rerender endpoint');
 
+assert.ok(source.includes('getCreativeVideoSpec(workflowId)'), 'client should expose getCreativeVideoSpec');
+assert.ok(source.includes('patchCreativeVideoSpec(workflowId, payload)'), 'client should expose patchCreativeVideoSpec');
+assert.ok(source.includes('rerenderCreativeVideo(workflowId, payload)'), 'client should expose rerenderCreativeVideo');
+assert.ok(source.includes('remixCreativeVideo(workflowId, payload)'), 'client should expose remixCreativeVideo');
+assert.ok(source.includes('/video-spec'), 'client should call video-spec endpoint');
+assert.ok(source.includes('/remix'), 'client should call remix endpoint');
+
 console.log('creative api client tests passed');
