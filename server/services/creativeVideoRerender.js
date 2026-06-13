@@ -1,3 +1,5 @@
+const sceneSpec = require('./sceneSpec');
+
 async function rerenderSceneSpecProject({
   workflowId,
   sceneSpec,
@@ -184,7 +186,7 @@ async function rerenderSceneWithLocalTts({
     }
     if (typeof ttsResult.duration === 'number' && ttsResult.duration > 0) {
       updatedScene.duration = Math.round(ttsResult.duration * 100) / 100;
-      updatedSpec.scenes = require('./sceneSpec').retimeScenes(updatedSpec.scenes);
+      updatedSpec.scenes = sceneSpec.retimeScenes(updatedSpec.scenes);
     }
   }
 

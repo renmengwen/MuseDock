@@ -8,6 +8,7 @@ const mediaPipeline = require('./mediaPipeline');
 const defaultAgentRuns = require('./agentRuns');
 const defaultCreativeVideoEditor = require('./creativeVideoEditor');
 const defaultCreativeVideoRerender = require('./creativeVideoRerender');
+const sceneSpecService = require('./sceneSpec');
 
 const DEFAULT_ROOT = path.join(__dirname, '../../data/creative-workflows');
 const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
@@ -878,10 +879,11 @@ async function loadWorkflowWithSceneSpec(workflowId, rootDir) {
   if (!record) {
     return { record: null, sceneSpec: null, error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
   }
-  const sceneSpec = extractSceneSpecFromWorkflow(record);
-  if (!sceneSpec) {
+  const rawSceneSpec = extractSceneSpecFromWorkflow(record);
+  if (!rawSceneSpec) {
     return { record, sceneSpec: null, error: { success: false, code: 'NO_SCENE_SPEC', message: '该创作任务尚未生成场景规格。' } };
   }
+  const sceneSpec = sceneSpecService.normalizeSceneSpec(rawSceneSpec);
   return { record, sceneSpec, error: null };
 }
 
@@ -992,6 +994,9 @@ async function ttsCreativeWorkflowScene(workflowId, sceneId, payload, options = 
         output_path: result.output_path,
         message: '场景配音已更新。',
       };
+      if (result.scene_spec) {
+        hyperframes.project.scene_spec = result.scene_spec;
+      }
       record.updated_at = new Date().toISOString();
       await persistWorkflow(record, rootDir);
     }
@@ -1035,6 +1040,9 @@ async function rerenderCreativeWorkflow(workflowId, payload, options = {}) {
         output_path: result.output_path,
         message: '成片已重新渲染。',
       };
+      if (result.scene_spec) {
+        hyperframes.project.scene_spec = result.scene_spec;
+      }
       record.updated_at = new Date().toISOString();
       await persistWorkflow(record, rootDir);
     }
