@@ -80,4 +80,31 @@ router.get('/:workflow_id', async (req, res) => {
   }
 });
 
+router.delete('/:workflow_id', async (req, res) => {
+  const workflowId = String(req.params.workflow_id || '').trim();
+  if (!WORKFLOW_ID_PATTERN.test(workflowId)) {
+    return res.status(400).json({
+      success: false,
+      workflow_id: workflowId,
+      message: '创作任务 ID 无效。',
+    });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.deleteCreativeWorkflow(workflowId);
+    const statusCode = result.success ? 200 : 404;
+    return res.status(statusCode).json({
+      workflow_id: workflowId,
+      ...result,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `删除创作任务失败：${error.message}`,
+    });
+  }
+});
+
 module.exports = router;

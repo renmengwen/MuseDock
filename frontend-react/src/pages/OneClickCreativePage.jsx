@@ -10,6 +10,7 @@ import {
   Search,
   Shield,
   Sparkles,
+  Trash2,
   Zap,
 } from 'lucide-react';
 import { api } from '../api/client.js';
@@ -62,6 +63,20 @@ function getWorkflowStatusText(workflow, fallbackStatus = 'idle') {
   const nextStatus = workflow?.status || fallbackStatus;
   if (!workflow && fallbackStatus === 'idle') return '等待输入';
   return STATUS_TEXT[nextStatus] || nextStatus || '等待中';
+}
+
+function getWorkflowDisplayMessage(workflow, fallback = '') {
+  const stages = Array.isArray(workflow?.stages) ? workflow.stages : [];
+  const failedStage = stages.find(stage => stage.status === 'failed');
+  if (failedStage?.message) return failedStage.message;
+
+  const activeStage = stages.find(stage => ['running', 'queued', 'pending'].includes(stage.status));
+  if (activeStage?.message) return activeStage.message;
+
+  return workflow?.error?.message
+    || workflow?.message
+    || fallback
+    || '创作任务已创建，正在生成视频...';
 }
 
 function getWorkflowVideoUrl(workflow) {
@@ -143,7 +158,7 @@ function upsertTask(tasks, task) {
   return next.slice(0, 30);
 }
 
-function CreativeTaskSidebar({ tasks, selectedWorkflowId, sidebarCollapsed, onToggleSidebar, onNewTask, onSelectTask }) {
+function CreativeTaskSidebar({ tasks, selectedWorkflowId, sidebarCollapsed, onToggleSidebar, onNewTask, onSelectTask, onDeleteTask }) {
   if (sidebarCollapsed) {
     return (
       <aside className="creativeTaskSidebar collapsed" aria-label="已收起的创作任务栏">
@@ -187,15 +202,28 @@ function CreativeTaskSidebar({ tasks, selectedWorkflowId, sidebarCollapsed, onTo
       <div className="creativeTaskListHeader">创作任务</div>
       <div className="creativeTaskList" aria-label="创作任务列表">
         {tasks.length ? tasks.map(task => (
-          <button
-            type="button"
+          <div
             className={`creativeTaskItem ${task.workflow_id === selectedWorkflowId ? 'active' : ''}`}
             key={task.workflow_id}
+            role="button"
+            tabIndex={0}
             onClick={() => onSelectTask(task)}
+            onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onSelectTask(task); }}
           >
-            <span>{task.title}</span>
-            <small>{STATUS_TEXT[task.status] || task.status || '等待中'} · {getTaskTimeLabel(task.updated_at || task.created_at)}</small>
-          </button>
+            <div className="creativeTaskItemContent">
+              <span>{task.title}</span>
+              <small>{STATUS_TEXT[task.status] || task.status || '等待中'} · {getTaskTimeLabel(task.updated_at || task.created_at)}</small>
+            </div>
+            <button
+              type="button"
+              className="creativeTaskDeleteButton"
+              aria-label={`删除任务 ${task.title}`}
+              title="删除任务"
+              onClick={event => { event.stopPropagation(); onDeleteTask(task); }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
         )) : (
           <div className="creativeTaskEmpty">
             <FileText size={18} />
@@ -212,7 +240,7 @@ function CreativeHeroHeader({ mode }) {
     <div className="creativeHeroHeader">
       <div className="creativeHeroTitle">
         <Sparkles size={30} />
-        <h1>使用{mode === 'expert' ? '专家模式' : '快速模式'}开始对话</h1>
+        <h1>嘿，今天我们来做点什么？</h1>
       </div>
     </div>
   );
@@ -264,7 +292,7 @@ function CreativePromptComposer({
         value={input}
         onChange={event => setInput(event.target.value)}
         disabled={isBusy}
-        placeholder="给一键创作发送消息"
+        placeholder="在这里输入你的创意"
         rows={4}
       />
 
@@ -479,6 +507,23 @@ export function OneClickCreativePage() {
     setMessage(task.message || '正在打开任务详情...');
   }
 
+  async function deleteTask(task) {
+    const confirmed = window.confirm(`确定删除任务「${task.title}」吗？此操作不可恢复。`);
+    if (!confirmed) return;
+
+    try {
+      await api.deleteCreativeWorkflow(task.workflow_id);
+    } catch {
+      // 即使后端删除失败也继续清理前端状态
+    }
+
+    persistTasks(prev => prev.filter(item => item.workflow_id !== task.workflow_id));
+
+    if (selectedWorkflowId === task.workflow_id) {
+      startNewTask();
+    }
+  }
+
   async function submitCreativeWorkflow(event) {
     event.preventDefault();
     if (submitDisabled) {
@@ -583,10 +628,7 @@ export function OneClickCreativePage() {
         const nextWorkflow = getWorkflowPayload(json);
         setWorkflow(nextWorkflow);
         const nextStatus = nextWorkflow?.status || (json?.success === false ? 'failed' : 'running');
-        const nextMessage = nextWorkflow?.error?.message
-          || nextWorkflow?.message
-          || json?.message
-          || '创作任务已创建，正在生成视频...';
+        const nextMessage = getWorkflowDisplayMessage(nextWorkflow, json?.message);
 
         persistTasks(prev => upsertTask(prev, {
           workflow_id: workflowId,
@@ -636,6 +678,7 @@ export function OneClickCreativePage() {
         onToggleSidebar={() => setSidebarCollapsed(value => !value)}
         onNewTask={startNewTask}
         onSelectTask={selectTask}
+        onDeleteTask={deleteTask}
       />
 
       <section className="creativeChatMain">

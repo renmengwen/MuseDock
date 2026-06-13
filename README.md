@@ -97,8 +97,28 @@ npm rebuild better-sqlite3
 
 ## 安装与启动
 
+日常开发使用一个命令同时启动后端和 Vite 前端：
+
 ```powershell
 npm install
+npm run dev
+```
+
+开发时打开 Vite 地址，前端会热更新，`/api` 会代理到后端：
+
+```text
+http://localhost:5173
+```
+
+其中后端 API 仍运行在：
+
+```text
+http://localhost:3000
+```
+
+发布或验证构建产物时再使用 build + start：
+
+```powershell
 npm run build:frontend
 npm run start
 ```
@@ -109,25 +129,16 @@ npm run start
 http://localhost:3000
 ```
 
-开发前端时可单独启动 Vite：
-
-```powershell
-npm run dev:frontend
-```
-
-Vite 默认地址：
-
-```text
-http://localhost:5173
-```
-
 ## 常用命令
 
 ```powershell
+# 启动开发服务：后端自动重启，前端热更新
+npm run dev
+
 # 启动 Express 服务和已构建前端
 npm run start
 
-# 启动 Vite 前端开发服务
+# 只启动 Vite 前端开发服务
 npm run dev:frontend
 
 # 构建前端

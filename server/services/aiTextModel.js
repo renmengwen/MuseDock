@@ -54,7 +54,17 @@ function decodeChunk(value, decoder = new TextDecoder(), options = {}) {
   return decoder.decode(value, options);
 }
 
-async function readStreamResponse(response, apiKey) {
+async function readWithChunkTimeout(reader, chunkTimeoutMs) {
+  if (!chunkTimeoutMs || chunkTimeoutMs <= 0) return reader.read();
+  return Promise.race([
+    reader.read(),
+    wait(chunkTimeoutMs).then(() => {
+      throw new Error(`流式响应块读取超时：${Math.round(chunkTimeoutMs / 1000)} 秒内未收到新数据。`);
+    }),
+  ]);
+}
+
+async function readStreamResponse(response, apiKey, options = {}) {
   if (!response?.body || typeof response.body.getReader !== 'function') {
     return {
       success: false,
@@ -68,9 +78,10 @@ async function readStreamResponse(response, apiKey) {
   let buffer = '';
   let text = '';
   const events = [];
+  const chunkTimeoutMs = Number(options.chunkTimeoutMs) || 0;
 
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await readWithChunkTimeout(reader, chunkTimeoutMs);
     if (done) break;
     buffer += decodeChunk(value, decoder, { stream: true });
     const parts = buffer.split(/\r?\n\r?\n/);
@@ -168,15 +179,68 @@ function buildChatCompletionsBody({ modelId, messages, temperature, stream }) {
   });
 }
 
-async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl }) {
-  return fetchImpl(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: buildChatCompletionsBody({ modelId, messages, temperature, stream }),
-  });
+function createTimeoutSignal(timeoutMs) {
+  const ms = Number(timeoutMs);
+  if (!Number.isFinite(ms) || ms <= 0 || typeof AbortController !== 'function') {
+    return { signal: undefined, cleanup: () => {} };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort(new Error(`文本模型请求超时：${Math.round(ms / 1000)} 秒内未返回结果。`));
+  }, ms);
+  if (typeof timer.unref === 'function') timer.unref();
+  return {
+    signal: controller.signal,
+    cleanup: () => clearTimeout(timer),
+  };
+}
+
+function getAbortErrorMessage(error, timeoutMs) {
+  const reasonMessage = normalizeString(error?.cause?.message || error?.message);
+  if (reasonMessage && !/^This operation was aborted$/i.test(reasonMessage)) {
+    return reasonMessage;
+  }
+  return `文本模型请求超时：${Math.round(Number(timeoutMs) / 1000)} 秒内未返回结果。`;
+}
+
+async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl, timeoutMs }) {
+  const timeout = createTimeoutSignal(timeoutMs);
+  try {
+    const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: buildChatCompletionsBody({ modelId, messages, temperature, stream }),
+      signal: timeout.signal,
+    });
+    if (response && typeof response === 'object') {
+      Object.defineProperty(response, '__cleanupTimeout', {
+        value: timeout.cleanup,
+        enumerable: false,
+        configurable: true,
+      });
+    }
+    return response;
+  } catch (error) {
+    timeout.cleanup();
+    if (error?.name === 'AbortError' || timeout.signal?.aborted) {
+      throw new Error(getAbortErrorMessage(error, timeoutMs));
+    }
+    throw error;
+  }
+}
+
+function cleanupResponseTimeout(response) {
+  if (typeof response?.__cleanupTimeout === 'function') {
+    response.__cleanupTimeout();
+  }
+}
+
+function isAbortLikeError(error) {
+  return error?.name === 'AbortError' || /abort|aborted|超时|timeout/i.test(normalizeString(error?.message));
 }
 
 async function callTextModel(options = {}) {
@@ -190,7 +254,12 @@ async function callTextModel(options = {}) {
     retryDelayMs = 1200,
     stream = false,
     fallbackToNonStreamOnGatewayTimeout = false,
+    requestTimeoutMs = 180000,
+    streamChunkTimeoutMs,
+    logger,
   } = options;
+
+  const log = logger && typeof logger === 'object' ? logger : null;
 
   const config = textConfig || await aiModelConfig.getRuntimeConfig('text', { configPath });
   const provider = normalizeString(config && config.provider);
@@ -215,9 +284,15 @@ async function callTextModel(options = {}) {
     };
   }
 
+  const totalMessageChars = messages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
+  const requestLabel = `[AI] ${provider}/${modelId} stream=${stream} msgs=${messages.length} chars=${totalMessageChars} timeout=${Math.round(requestTimeoutMs / 1000)}s`;
+  if (log) log.info(`${requestLabel} — 开始请求`);
+
   let response;
   let attempt = 0;
+  let lastFetchError = null;
   const retryLimit = Math.max(0, Number(maxRetries) || 0);
+  const t0 = Date.now();
   while (attempt <= retryLimit) {
     try {
       response = await postChatCompletions({
@@ -228,24 +303,46 @@ async function callTextModel(options = {}) {
         temperature,
         stream,
         fetchImpl,
+        timeoutMs: requestTimeoutMs,
       });
+      lastFetchError = null;
     } catch (error) {
-      const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
-      return {
-        success: false,
-        configured: true,
-        message: `文本模型调用失败：${detail}`,
-        model: toModelInfo(provider, modelId),
-      };
+      lastFetchError = error;
+      if (isAbortLikeError(error)) {
+        const elapsed = Math.round((Date.now() - t0) / 1000);
+        if (log) log.warn(`${requestLabel} — 第 ${attempt + 1} 次请求超时 (${elapsed}s)，${attempt < retryLimit ? '重试中...' : '重试已用尽'}`);
+        if (attempt < retryLimit) {
+          await wait(retryDelayMs * (attempt + 1));
+          attempt += 1;
+          continue;
+        }
+      }
+      if (!isAbortLikeError(error)) {
+        const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
+        return {
+          success: false,
+          configured: true,
+          message: `文本模型调用失败：${detail}`,
+          model: toModelInfo(provider, modelId),
+        };
+      }
+      // All retries exhausted on timeout — break to try fallback below
+      break;
     }
 
     if (!shouldRetryStatus(response.status) || attempt >= retryLimit) break;
+    if (log) log.warn(`${requestLabel} — 第 ${attempt + 1} 次请求返回 HTTP ${response.status}，重试中...`);
+    cleanupResponseTimeout(response);
     await wait(retryDelayMs * (attempt + 1));
     attempt += 1;
   }
 
-  const canFallbackToNonStream = stream && fallbackToNonStreamOnGatewayTimeout && shouldRetryStatus(response?.status);
+  const timedOut = isAbortLikeError(lastFetchError);
+  const canFallbackToNonStream = stream && fallbackToNonStreamOnGatewayTimeout
+    && (shouldRetryStatus(response?.status) || timedOut);
   if (canFallbackToNonStream) {
+    if (log) log.warn(`${requestLabel} — 流式请求失败${timedOut ? '(超时)' : '(HTTP ' + response?.status + ')'}，降级为非流式重试`);
+    if (response) cleanupResponseTimeout(response);
     await wait(retryDelayMs * (attempt + 1));
     try {
       response = await postChatCompletions({
@@ -256,6 +353,7 @@ async function callTextModel(options = {}) {
         temperature,
         stream: false,
         fetchImpl,
+        timeoutMs: requestTimeoutMs,
       });
     } catch (error) {
       const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
@@ -266,12 +364,13 @@ async function callTextModel(options = {}) {
         model: toModelInfo(provider, modelId),
         fallback: {
           from_stream: true,
-          reason: 'gateway_timeout',
+          reason: timedOut ? 'stream_timeout' : 'gateway_timeout',
         },
       };
     }
     if (response.ok) {
       const parsedResponse = await readJsonResponse(response, apiKey);
+      cleanupResponseTimeout(response);
       const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
       const text = rawResponse && rawResponse.choices && rawResponse.choices[0]
         && rawResponse.choices[0].message && rawResponse.choices[0].message.content;
@@ -284,15 +383,28 @@ async function callTextModel(options = {}) {
           raw_response: rawResponse,
           fallback: {
             from_stream: true,
-            reason: 'gateway_timeout',
+            reason: timedOut ? 'stream_timeout' : 'gateway_timeout',
           },
         };
       }
     }
   }
 
+  if (!response) {
+    const elapsed = Math.round((Date.now() - t0) / 1000);
+    if (log) log.error(`${requestLabel} — 所有请求均超时 (${elapsed}s, ${attempt + 1} 次尝试)`);
+    const detail = sanitizeErrorDetail(lastFetchError && lastFetchError.message, apiKey) || '网络请求异常';
+    return {
+      success: false,
+      configured: true,
+      message: `文本模型调用失败：${detail}`,
+      model: toModelInfo(provider, modelId),
+    };
+  }
+
   if (!response.ok) {
     const parsedResponse = await readJsonResponse(response, apiKey);
+    cleanupResponseTimeout(response);
     const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
     const detail = sanitizeErrorDetail(getProviderError(rawResponse), apiKey) || `HTTP ${response.status}`;
     return {
@@ -305,7 +417,24 @@ async function callTextModel(options = {}) {
   }
 
   if (stream) {
-    const streamResult = await readStreamResponse(response, apiKey);
+    let streamResult;
+    try {
+      streamResult = await readStreamResponse(response, apiKey, {
+        chunkTimeoutMs: streamChunkTimeoutMs,
+      });
+    } catch (error) {
+      cleanupResponseTimeout(response);
+      const detail = sanitizeErrorDetail(isAbortLikeError(error)
+        ? getAbortErrorMessage(error, requestTimeoutMs)
+        : error?.message, apiKey) || '读取流式响应失败';
+      return {
+        success: false,
+        configured: true,
+        message: `${provider || '文本模型'} 流式响应读取失败：${detail}`,
+        model: toModelInfo(provider, modelId),
+      };
+    }
+    cleanupResponseTimeout(response);
     if (!streamResult.success) {
       return {
         success: false,
@@ -324,6 +453,8 @@ async function callTextModel(options = {}) {
         raw_response: streamResult.raw_response,
       };
     }
+    const elapsed = Math.round((Date.now() - t0) / 1000);
+    if (log) log.info(`${requestLabel} — 流式请求成功 (${elapsed}s, ${streamResult.text.length} 字符)`);
     return {
       success: true,
       configured: true,
@@ -334,6 +465,7 @@ async function callTextModel(options = {}) {
   }
 
   const parsedResponse = await readJsonResponse(response, apiKey);
+  cleanupResponseTimeout(response);
   const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
 
   if (parsedResponse.parseError && parsedResponse.rawText) {
@@ -363,6 +495,8 @@ async function callTextModel(options = {}) {
     };
   }
 
+  const elapsed = Math.round((Date.now() - t0) / 1000);
+  if (log) log.info(`${requestLabel} — 非流式请求成功 (${elapsed}s, ${text.length} 字符)`);
   return {
     success: true,
     configured: true,

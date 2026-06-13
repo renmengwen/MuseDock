@@ -10,6 +10,7 @@ const defaultAgentRuns = require('./agentRuns');
 const DEFAULT_ROOT = path.join(__dirname, '../../data/creative-workflows');
 const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
 const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;
+const DEFAULT_STALE_STAGE_TIMEOUT_MS = 10 * 60 * 1000;
 
 const STAGE_IDS = ['source', 'research', 'assets', 'agent_run', 'brief', 'audio', 'project', 'check', 'render', 'inspect'];
 const STAGE_LABELS = {
@@ -707,11 +708,13 @@ async function runCreativeWorkflow(workflowId, options = {}) {
 
 async function getCreativeWorkflow(workflowId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
+  const services = resolveServices(options);
   try {
     const record = await readWorkflow(workflowId, rootDir);
+    const nextRecord = await markStaleRunningStageFailed(record, rootDir, services, options);
     return {
       success: true,
-      data: record,
+      data: nextRecord,
     };
   } catch (error) {
     return {
@@ -722,12 +725,147 @@ async function getCreativeWorkflow(workflowId, options = {}) {
   }
 }
 
+function parseDateMs(value) {
+  const time = Date.parse(safeString(value));
+  return Number.isFinite(time) ? time : 0;
+}
+
+function findStaleRunningStage(record, nowMs, timeoutMs) {
+  if (record?.status !== 'running') return null;
+  const stages = normalizeStages(record.stages);
+  return stages.find(stage => {
+    if (stage.status !== 'running') return false;
+    const stageTime = parseDateMs(stage.updated_at || stage.started_at || record.updated_at);
+    return stageTime > 0 && nowMs - stageTime > timeoutMs;
+  }) || null;
+}
+
+async function markStaleRunningStageFailed(record, rootDir, services = {}, options = {}) {
+  const timeoutMs = Number(options.staleStageTimeoutMs) || DEFAULT_STALE_STAGE_TIMEOUT_MS;
+  const now = getNow(services);
+  const nowMs = parseDateMs(now) || Date.now();
+  const stage = findStaleRunningStage(record, nowMs, timeoutMs);
+  if (!stage) return record;
+
+  const message = `${stage.label || STAGE_LABELS[stage.id] || '当前阶段'}长时间未更新，后台任务可能已中断，请重新创建任务或稍后重试。`;
+  await markStage(record, stage.id, 'failed', message, now, {
+    failed_at: now,
+    stale: true,
+  });
+  record.success = false;
+  record.status = 'failed';
+  record.message = message;
+  record.error = {
+    stage: stage.id,
+    message,
+    updated_at: now,
+    stale: true,
+  };
+  record.updated_at = now;
+  return persistWorkflow(record, rootDir);
+}
+
+async function deleteCreativeWorkflow(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
+  const id = safeString(workflowId);
+
+  if (!WORKFLOW_ID_PATTERN.test(id)) {
+    return { success: false, workflow_id: id, message: '创作任务 ID 无效。' };
+  }
+
+  const workflowPath = getWorkflowPath(id, rootDir);
+  const mediaDir = path.resolve(mediaRoot, id);
+  const deleted = { workflow: false, media: false };
+
+  try {
+    await fsp.unlink(workflowPath);
+    deleted.workflow = true;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      return { success: false, workflow_id: id, message: `删除创作任务文件失败：${error.message}` };
+    }
+  }
+
+  try {
+    await fsp.rm(mediaDir, { recursive: true, force: true });
+    deleted.media = true;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') {
+      return { success: false, workflow_id: id, message: `删除媒体文件失败：${error.message}` };
+    }
+  }
+
+  if (!deleted.workflow && !deleted.media) {
+    return { success: false, workflow_id: id, message: '未找到创作任务。' };
+  }
+
+  return { success: true, workflow_id: id, message: '创作任务已删除。' };
+}
+
+async function recoverStaleWorkflowsOnStartup(services = {}) {
+  const rootDir = DEFAULT_ROOT;
+  let files;
+  try { files = await fsp.readdir(rootDir); } catch { return; }
+  files = files.filter(f => f.endsWith('.json'));
+
+  const now = getNow(services);
+  const nowMs = parseDateMs(now) || Date.now();
+  let recovered = 0;
+
+  for (const file of files) {
+    const filePath = path.join(rootDir, file);
+    let record;
+    try { record = await readJson(filePath); } catch { continue; }
+    if (!record) continue;
+    record.stages = normalizeStages(record.stages);
+
+    // 处理 running 状态：有阶段卡在 running
+    const staleStage = findStaleRunningStage(record, nowMs, 0);
+    if (staleStage) {
+      const label = staleStage.label || STAGE_LABELS[staleStage.id] || '当前阶段';
+      const message = `服务器重启，${label}被中断，请重新创建任务。`;
+      await markStage(record, staleStage.id, 'failed', message, now, {
+        failed_at: now, stale: true,
+      });
+      record.success = false;
+      record.status = 'failed';
+      record.message = message;
+      record.error = { stage: staleStage.id, message, updated_at: now, stale: true };
+      record.updated_at = now;
+      await persistWorkflow(record, rootDir);
+      recovered++;
+      console.log(`[startup] 已清理卡死的工作流: ${record.workflow_id} (${label})`);
+      continue;
+    }
+
+    // 处理 queued 状态：工作流已创建但从未开始执行
+    if (record.status === 'queued') {
+      const createdMs = parseDateMs(record.created_at);
+      if (createdMs > 0 && nowMs - createdMs > 60_000) {
+        record.success = false;
+        record.status = 'failed';
+        record.message = '服务器重启，任务未开始执行，请重新创建。';
+        record.error = { stage: 'source', message: record.message, updated_at: now, stale: true };
+        record.updated_at = now;
+        await persistWorkflow(record, rootDir);
+        recovered++;
+        console.log(`[startup] 已清理未执行的工作流: ${record.workflow_id}`);
+      }
+    }
+  }
+
+  if (recovered > 0) console.log(`[startup] 共清理 ${recovered} 个卡死的工作流`);
+}
+
 module.exports = {
   STAGE_IDS,
   STAGE_LABELS,
   createCreativeWorkflow,
   runCreativeWorkflow,
   getCreativeWorkflow,
+  deleteCreativeWorkflow,
   getWorkflowPath,
   makeLocalCreativeAwemeId,
+  recoverStaleWorkflowsOnStartup,
 };

@@ -1383,10 +1383,14 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
       messages,
       temperature: 0.35,
       stream: true,
+      fallbackToNonStreamOnGatewayTimeout: true,
       configPath: options.configPath,
       textConfig: options.textConfig,
       fetchImpl: options.fetchImpl,
       maxRetries: options.maxRetries,
+      requestTimeoutMs: 300000,
+      streamChunkTimeoutMs: 120000,
+      logger,
     });
   } catch (error) {
     logEvent(logger, 'error', { ...baseLog, stage: 'model_request_threw', message: error.message || '模型调用失败', ...elapsedMeta() });
@@ -1504,6 +1508,7 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   }
 
   const operationId = createFreeformOperationId('project');
+  const logger = getLogger(options);
   await updateRunHyperframesFreeform(awemeId, runId, current => ({
     status: 'generating',
     project: {
@@ -1558,10 +1563,14 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
       messages,
       temperature: 0.35,
       stream: true,
+      fallbackToNonStreamOnGatewayTimeout: true,
       configPath: options.configPath,
       textConfig: options.textConfig,
       fetchImpl: options.fetchImpl,
       maxRetries: options.maxRetries,
+      requestTimeoutMs: 300000,
+      streamChunkTimeoutMs: 120000,
+      logger,
     });
   } catch (error) {
     modelResult = {

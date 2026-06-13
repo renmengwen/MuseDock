@@ -72,6 +72,8 @@ async function run() {
   const body = JSON.parse(requestedOptions.body);
   assert.strictEqual(body.model, 'gpt-test');
   assert.deepStrictEqual(body.messages, [{ role: 'user', content: '生成 JSON' }]);
+  assert.ok(requestedOptions.signal, 'text model requests should include an AbortSignal');
+  assert.strictEqual(typeof requestedOptions.signal.aborted, 'boolean');
 
   let injectedRequestOptions = null;
   const injected = await aiTextModel.callTextModel({
@@ -238,6 +240,86 @@ async function run() {
   assert.deepStrictEqual(streamFallback.fallback, {
     from_stream: true,
     reason: 'gateway_timeout',
+  });
+
+  let timeoutCalls = 0;
+  const timeoutRetry = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'timeout retry' }],
+    configPath,
+    stream: true,
+    maxRetries: 2,
+    retryDelayMs: 1,
+    requestTimeoutMs: 50,
+    fetchImpl: async () => {
+      timeoutCalls += 1;
+      if (timeoutCalls <= 2) {
+        const err = new Error('文本模型请求超时：0 秒内未返回结果。');
+        err.name = 'AbortError';
+        throw err;
+      }
+      return new Response(
+        makeStreamResponse([
+          'data: {"choices":[{"delta":{"content":"timeout retry ok"}}]}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+        { status: 200, headers: { 'content-type': 'text/event-stream' } },
+      );
+    },
+  });
+  assert.strictEqual(timeoutRetry.success, true);
+  assert.strictEqual(timeoutRetry.text, 'timeout retry ok');
+  assert.strictEqual(timeoutCalls, 3);
+
+  let timeoutExhaustedCalls = 0;
+  const timeoutExhausted = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'timeout exhausted' }],
+    configPath,
+    stream: true,
+    maxRetries: 1,
+    retryDelayMs: 1,
+    requestTimeoutMs: 50,
+    fetchImpl: async () => {
+      timeoutExhaustedCalls += 1;
+      const err = new Error('文本模型请求超时：0 秒内未返回结果。');
+      err.name = 'AbortError';
+      throw err;
+    },
+  });
+  assert.strictEqual(timeoutExhausted.success, false);
+  assert.strictEqual(timeoutExhaustedCalls, 2);
+  assert.match(timeoutExhausted.message, /超时/);
+
+  let timeoutFallbackCalls = 0;
+  const timeoutFallback = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'timeout fallback' }],
+    configPath,
+    stream: true,
+    maxRetries: 1,
+    retryDelayMs: 1,
+    requestTimeoutMs: 50,
+    fallbackToNonStreamOnGatewayTimeout: true,
+    fetchImpl: async (url, options) => {
+      timeoutFallbackCalls += 1;
+      const body = JSON.parse(options.body);
+      if (timeoutFallbackCalls <= 2 && body.stream !== false) {
+        const err = new Error('文本模型请求超时：0 秒内未返回结果。');
+        err.name = 'AbortError';
+        throw err;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: 'timeout fallback ok' } }],
+        }),
+      };
+    },
+  });
+  assert.strictEqual(timeoutFallback.success, true);
+  assert.strictEqual(timeoutFallback.text, 'timeout fallback ok');
+  assert.deepStrictEqual(timeoutFallback.fallback, {
+    from_stream: true,
+    reason: 'stream_timeout',
   });
 
   const networkFailed = await aiTextModel.callTextModel({

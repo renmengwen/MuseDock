@@ -178,6 +178,11 @@ export const api = {
   getCreativeWorkflow(workflowId) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}`);
   },
+  deleteCreativeWorkflow(workflowId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}`, {
+      method: 'DELETE',
+    });
+  },
   createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}, agentConfigOverride = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',
