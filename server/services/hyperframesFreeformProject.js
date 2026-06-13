@@ -9,6 +9,7 @@ const ALLOWED_FILES = new Set([
   'hyperframes.json',
   'package.json',
   'meta.json',
+  'scene_spec.json',
   'output.mp4',
   'contact_sheet.jpg',
 ]);
@@ -19,6 +20,7 @@ const TEXT_FILES = new Set([
   'hyperframes.json',
   'package.json',
   'meta.json',
+  'scene_spec.json',
 ]);
 const NARRATION_AUDIO_ASSET = 'assets/narration.wav';
 const NARRATION_AUDIO_TRACK_INDEX = '99';

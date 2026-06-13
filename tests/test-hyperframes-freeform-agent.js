@@ -102,7 +102,51 @@ async function run() {
   }
 }
 
-run().then(() => {
+async function testSceneSpecPath() {
+  const sceneSpecMessages = agent.buildSceneSpecMessages({
+    run: {
+      rewrite_script: '这是一段口播。',
+      storyboard_plan: { scenes: [{ headline: '开场', narration_text: '你好。' }] },
+    },
+    brief: {
+      title: '测试短片',
+      design_md: '# Design\nUse black and gold.',
+    },
+    skillContext: 'Use HyperFrames. Run lint validate inspect render.',
+    options: { aspectRatio: '9:16', targetDurationSec: 60, stylePrompt: '高级科技纪录片' },
+  });
+
+  assert.ok(sceneSpecMessages[1].content.includes('scene_spec'));
+  assert.ok(sceneSpecMessages[1].content.includes('不要输出 HTML'));
+  assert.ok(!sceneSpecMessages[1].content.includes('完整 index.html'));
+
+  const sceneSpecParsed = agent.parseSceneSpecResponse(JSON.stringify({
+    scene_spec: {
+      version: 1,
+      title: '测试',
+      aspect_ratio: '9:16',
+      scenes: [
+        {
+          id: 'scene_01',
+          duration: 5,
+          narration_text: '测试旁白',
+          captions: [{ id: 'cap_01_01', start: 0, end: 2, text: '测试字幕' }],
+          visual_text: { headline: '测试标题', keywords: [], cards: [] },
+        },
+      ],
+    },
+  }));
+  assert.equal(sceneSpecParsed.success, true);
+  assert.equal(sceneSpecParsed.scene_spec.scenes[0].id, 'scene_01');
+
+  const sceneSpecFailed = agent.parseSceneSpecResponse(JSON.stringify({ scene_spec: { scenes: [] } }));
+  assert.equal(sceneSpecFailed.success, false);
+
+  const sceneSpecMissing = agent.parseSceneSpecResponse(JSON.stringify({}));
+  assert.equal(sceneSpecMissing.success, false);
+}
+
+run().then(() => testSceneSpecPath()).then(() => {
   console.log('hyperframes freeform agent tests passed');
 }).catch(error => {
   console.error(error);

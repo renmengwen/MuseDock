@@ -928,6 +928,7 @@ async function run() {
   let noBriefProjectCalled = false;
   const noBriefProject = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, noBriefRunId, {
     rootDir,
+    useSceneSpec: false,
     skillContext: {
       loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
     },
@@ -1248,6 +1249,7 @@ async function run() {
   });
   const projectCreateThrow = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, projectCreateThrowRunId, {
     rootDir,
+    useSceneSpec: false,
     skillContext: {
       loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
     },
@@ -1278,6 +1280,7 @@ async function run() {
   });
   const projectParseThrow = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, projectParseThrowRunId, {
     rootDir,
+    useSceneSpec: false,
     skillContext: {
       loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
     },
@@ -1303,6 +1306,7 @@ async function run() {
   });
   const snapshotThrow = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, snapshotThrowRunId, {
     rootDir,
+    useSceneSpec: false,
     skillContext: {
       loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: 'skill-source' }),
       copySkillSnapshot: async () => {
@@ -1336,6 +1340,7 @@ async function run() {
   let staleProjectTempRunId = '';
   const staleProject = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, staleProjectRunId, {
     rootDir,
+    useSceneSpec: false,
     skillContext: {
       loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
     },
@@ -1399,6 +1404,7 @@ async function run() {
   fs.writeFileSync(path.join(publishFailDir, 'index.html'), 'old-working', 'utf-8');
   const publishFail = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, publishFailRunId, {
     rootDir,
+    useSceneSpec: false,
     skillContext: {
       loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
     },
@@ -1456,6 +1462,7 @@ async function run() {
   fs.writeFileSync(path.join(unsafeTempDir, 'index.html'), 'old-safe', 'utf-8');
   const unsafeTempResult = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, unsafeTempRunId, {
     rootDir,
+    useSceneSpec: false,
     skillContext: {
       loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
     },
@@ -1489,6 +1496,7 @@ async function run() {
 
   const freeformProject = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, generated.run_id, {
     rootDir,
+    useSceneSpec: false,
     skillContext: {
       loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'skill context', source_dir: '' }),
       copySkillSnapshot: async () => ({ success: true }),

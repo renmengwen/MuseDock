@@ -1,4 +1,4 @@
-﻿const MAX_JSON_CHARS = 12000;
+const MAX_JSON_CHARS = 12000;
 
 const ALLOWED_PROJECT_FILES = new Set([
   'index.html',
@@ -252,9 +252,96 @@ function parseFreeformProjectResponse(text = '') {
   }
 }
 
+function buildSceneSpecMessages({ run = {}, brief = {}, skillContext = '', options = {} } = {}) {
+  const optionSummary = getOptionSummary(options);
+  return [
+    {
+      role: 'system',
+      content: [
+        '你是 HyperFrames 场景规格 Agent。',
+        '你的任务是根据导演简报生成结构化的场景规格 scene_spec。',
+        '只输出 JSON，不要输出 HTML、CSS、JS、package.json 或完整工程 files。',
+        '根字段是 scene_spec。',
+        '每个场景必须有 stable id、duration、narration_text、captions、visual_text。',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        '请生成场景规格 scene_spec。',
+        '',
+        '目标参数：',
+        safeJson(optionSummary),
+        '',
+        '风格要求：',
+        optionSummary.style_prompt || '未指定',
+        '',
+        '技能上下文：',
+        String(skillContext || '未提供'),
+        '',
+        '导演简报：',
+        safeJson(brief),
+        '',
+        '运行摘要：',
+        safeJson(run),
+        '',
+        '输出要求：',
+        '1. 只返回 JSON 对象。',
+        '2. 根字段是 scene_spec。',
+        '3. 不要输出 HTML、CSS、JS、package.json 或完整工程 files。',
+        '4. scene_spec 必须包含 version、title、aspect_ratio、scenes。',
+        '5. 每个场景必须有 stable id、duration、narration_text、captions、visual_text。',
+        '6. captions 数组每个元素必须有 id、start、end、text。',
+        '7. visual_text 必须包含 headline、keywords、cards。',
+        '',
+        '输出示例：',
+        safeJson({
+          scene_spec: {
+            version: 1,
+            title: '短片标题',
+            aspect_ratio: '9:16',
+            scenes: [
+              {
+                id: 'scene_01',
+                duration: 5,
+                narration_text: '第一段旁白',
+                captions: [{ id: 'cap_01_01', start: 0, end: 2, text: '第一句字幕' }],
+                visual_text: { headline: '开场标题', keywords: ['关键词'], cards: ['卡片'] },
+              },
+            ],
+          },
+        }),
+      ].join('\n'),
+    },
+  ];
+}
+
+function parseSceneSpecResponse(text = '') {
+  try {
+    const value = parseJsonObject(text);
+    if (!value.scene_spec || typeof value.scene_spec !== 'object') {
+      throw new Error('缺少 scene_spec 字段');
+    }
+    if (!Array.isArray(value.scene_spec.scenes) || value.scene_spec.scenes.length === 0) {
+      throw new Error('scene_spec.scenes 不能为空');
+    }
+    return {
+      success: true,
+      scene_spec: value.scene_spec,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `解析场景规格响应失败：${error.message}`,
+    };
+  }
+}
+
 module.exports = {
   buildFreeformBriefMessages,
   buildFreeformProjectMessages,
+  buildSceneSpecMessages,
   parseFreeformBriefResponse,
   parseFreeformProjectResponse,
+  parseSceneSpecResponse,
 };

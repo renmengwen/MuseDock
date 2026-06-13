@@ -21,6 +21,7 @@ const defaultHyperframesSkillContext = require('./hyperframesSkillContext');
 const defaultHyperframesFreeformAgent = require('./hyperframesFreeformAgent');
 const defaultHyperframesFreeformProject = require('./hyperframesFreeformProject');
 const defaultHyperframesFreeformQuality = require('./hyperframesFreeformQuality');
+const defaultHyperframesSceneSpecComposer = require('./hyperframesSceneSpecComposer');
 
 const TEMPLATE_VIRAL_REWRITE = 'viral_rewrite';
 const MAX_COMMENTS_CHARS = agentTemplates.MAX_COMMENTS_CHARS;
@@ -1548,13 +1549,23 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
 
   const freeformAgent = options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent;
   let messages;
+  let useSceneSpec = options.useSceneSpec !== false;
   try {
-    messages = freeformAgent.buildFreeformProjectMessages({
-      run: detail.data,
-      brief: currentState.brief.data || {},
-      skillContext: context.prompt_context,
-      options: options.projectOptions || {},
-    });
+    if (useSceneSpec) {
+      messages = freeformAgent.buildSceneSpecMessages({
+        run: detail.data,
+        brief: currentState.brief.data || {},
+        skillContext: context.prompt_context,
+        options: options.projectOptions || {},
+      });
+    } else {
+      messages = freeformAgent.buildFreeformProjectMessages({
+        run: detail.data,
+        brief: currentState.brief.data || {},
+        skillContext: context.prompt_context,
+        options: options.projectOptions || {},
+      });
+    }
   } catch (error) {
     return markFreeformProjectFailed(
       awemeId,
@@ -1593,8 +1604,28 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   }
 
   let parsed;
+  let sceneSpec = null;
   try {
-    parsed = freeformAgent.parseFreeformProjectResponse(modelResult.text || modelResult.raw_output || '');
+    if (useSceneSpec) {
+      parsed = freeformAgent.parseSceneSpecResponse(modelResult.text || modelResult.raw_output || '');
+      if (parsed.success) {
+        sceneSpec = parsed.scene_spec;
+        const composer = options.hyperframesSceneSpecComposer || defaultHyperframesSceneSpecComposer;
+        const composed = composer.composeHyperframesProjectFiles(sceneSpec);
+        if (!composed.success) {
+          return markFreeformProjectFailed(
+            awemeId,
+            runId,
+            `场景规格工程生成失败：${composed.message || '规格验证失败'}`,
+            options,
+            operationId,
+          );
+        }
+        parsed = { success: true, summary: '工程已从场景规格生成', files: composed.files };
+      }
+    } else {
+      parsed = freeformAgent.parseFreeformProjectResponse(modelResult.text || modelResult.raw_output || '');
+    }
   } catch (error) {
     return markFreeformProjectFailed(
       awemeId,
@@ -1713,6 +1744,7 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
           index_path: indexPath,
           files,
           message,
+          scene_spec: sceneSpec || current.project.scene_spec || null,
         },
       }));
       const updatedRun = {
