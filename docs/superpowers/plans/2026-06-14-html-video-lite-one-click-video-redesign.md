@@ -33,6 +33,7 @@ Backend create:
 - `server/services/creative-video/creativeSpecAgent.js`: two-call prompt builders and parsers.
 - `server/services/creative-video/templateRegistry.js`: registered template metadata and CSS/GSAP token maps.
 - `server/services/creative-video/hyperframesTemplateRenderer.js`: `scene_spec + frame_specs -> HyperFrames files`.
+- `server/services/creative-video/ttsService.js`: scene-level narration synthesis and audio manifest generation.
 - `server/services/creative-video/renderAdapter.js`: default adapter around existing HyperFrames renderer.
 - `server/services/creative-video/visualQaService.js`: frame extraction result analysis and visual failure thresholds.
 - `server/services/creative-video/projectWriter.js`: safe project directory writing.
@@ -72,6 +73,7 @@ Tests create:
 - `tests/test-creative-spec-agent.js`
 - `tests/test-creative-template-registry.js`
 - `tests/test-hyperframes-template-renderer.js`
+- `tests/test-creative-video-tts-service.js`
 - `tests/test-creative-render-adapter.js`
 - `tests/test-visual-qa-service.js`
 - `tests/test-creative-video-project-writer.js`
@@ -485,6 +487,7 @@ assert.ok(framePrompt.includes('只输出 JSON'));
 assert.ok(framePrompt.includes('不允许改写 scene_spec 文案'));
 assert.ok(framePrompt.includes('allowed_templates'));
 assert.ok(framePrompt.includes('hero_title'));
+assert.equal(framePrompt.includes('上一次输出包含以下问题'), false);
 
 const frameParsed = agent.parseFrameSpecsResponse(JSON.stringify({
   frame_specs: [{
@@ -507,6 +510,14 @@ assert.equal(frameParsed.frame_specs.frames[0].template, 'hero_title');
 const badScene = agent.parseSceneSpecResponse('```html\n<div>bad</div>\n```');
 assert.equal(badScene.success, false);
 assert.ok(badScene.message.includes('JSON'));
+
+const retryPrompt = agent.buildFrameSpecsPrompt({
+  sceneSpec: sceneParsed.scene_spec,
+  retryCount: 1,
+  previousErrors: ['visual_text.cards 包含视觉描述'],
+});
+assert.ok(retryPrompt.includes('上一次输出包含以下问题'));
+assert.ok(retryPrompt.includes('visual_text.cards 包含视觉描述'));
 
 console.log('creative spec agent tests passed');
 ```
@@ -539,9 +550,12 @@ module.exports = {
 Required behavior:
 
 - `buildSceneSpecPrompt` contains Chinese constraints for JSON-only output and banned engineering files.
+- `buildSceneSpecPrompt` accepts `retryCount` and `previousErrors`.
 - `buildSceneSpecPrompt` explicitly bans `frame_specs`.
 - `buildFrameSpecsPrompt` includes enum lists from `specEnums`.
 - `buildFrameSpecsPrompt` includes the full validated `scene_spec`.
+- `buildFrameSpecsPrompt` accepts `retryCount` and `previousErrors`.
+- When `retryCount > 0`, append a Chinese retry section: `上一次输出包含以下问题：... 请重新生成并重点修正这些问题。`
 - `parseSceneSpecResponse` rejects Markdown fences and HTML-looking output before JSON parse.
 - `parseFrameSpecsResponse` rejects Markdown fences and HTML-looking output before JSON parse.
 - Both parsers call the relevant normalize and validate services.
@@ -591,6 +605,19 @@ const hero = registry.getTemplate('hero_title');
 assert.equal(hero.id, 'hero_title');
 assert.ok(hero.supportedKinds.includes('text'));
 assert.equal(typeof hero.renderFrame, 'function');
+const rendered = hero.renderFrame({
+  id: 'frame_01_01',
+  scene_id: 'scene_01',
+  template: 'hero_title',
+  layout: 'center_stack',
+  background: 'dark_gradient',
+  motion: 'fade_up',
+  text_layers: [{ id: 'headline', role: 'headline', text: '标题', emphasis: 'primary' }],
+  visual_layers: [],
+}, { id: 'scene_01', visual_text: { headline: '标题' } });
+assert.ok(rendered.html.includes('creative-frame'));
+assert.ok(rendered.css.includes('dark_gradient'));
+assert.ok(rendered.timeline.includes('gsap'));
 assert.ok(registry.getBackgroundCss('dark_gradient').includes('linear-gradient'));
 assert.ok(registry.getMotionSnippet('fade_up', '.target', 0).includes('fromTo'));
 assert.ok(registry.getVisualLayerRenderer('glow_panel'));
@@ -634,7 +661,10 @@ Required behavior:
 - Provide CSS for `dark_gradient`, `soft_grid`, `radial_spotlight`, `brand_blocks`, `clean_light`.
 - Provide motion snippets for `fade_up`, `slide_in`, `scale_pop`, `stagger_cards`, `glow_pulse`, `fade_out`.
 - Provide visual layer renderers for `glow_panel`, `grid_lines`, `shape_blocks`, `number_counter`, `progress_bar`, `connector_lines`.
-- Template `renderFrame(frame, scene)` returns `{ html, cssClasses, timeline }`.
+- Template `renderFrame(frame, scene)` returns `{ html, css, timeline }`.
+- `html`, `css`, and `timeline` must come from registered template functions and token maps, not AI-provided strings.
+- `hyperframesTemplateRenderer` may compose the final multi-frame `index.html`, but it must only combine registered fragments and fixed document scaffolding.
+- Templates must not return a full multi-frame `index.html`, because the final document needs one shared composition root, one shared CSS block, one shared GSAP import, and one shared `window.__timelines["main"]` registry.
 - Return Chinese errors for unknown template/background/motion/visual layer type.
 - Do not import AI, file system, routes, workflow services, or render services.
 
@@ -796,7 +826,132 @@ git commit -m "新增 HyperFrames 模板渲染器"
 
 ---
 
-### Task 6: Render Adapter And Project Writer
+### Task 6: TTS Service
+
+**Files:**
+- Create: `server/services/creative-video/ttsService.js`
+- Create: `tests/test-creative-video-tts-service.js`
+- Modify: `package.json`
+
+- [ ] **Step 1: Write TTS service tests**
+
+Create `tests/test-creative-video-tts-service.js`:
+
+```js
+const assert = require('assert');
+const fs = require('fs/promises');
+const os = require('os');
+const path = require('path');
+const tts = require('../server/services/creative-video/ttsService');
+
+(async () => {
+  const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'creative-video-tts-'));
+  const calls = [];
+  const result = await tts.synthesizeSceneNarration({
+    projectDir,
+    sceneSpec: {
+      scenes: [
+        { id: 'scene_01', narration_text: '第一段旁白' },
+        { id: 'scene_02', narration_text: '第二段旁白' },
+      ],
+    },
+    services: {
+      ttsModel: {
+        callTtsModel: async ({ text }) => {
+          calls.push(text);
+          return { success: true, audioBuffer: Buffer.from(`audio:${text}`), format: 'mp3', voice: 'test_voice', model: {} };
+        },
+      },
+      readAudioDuration: async () => 1.5,
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.audio_manifest.scenes.length, 2);
+  assert.equal(calls.length, 2);
+  assert.ok(result.audio_manifest.scenes[0].path.endsWith('scene_01.mp3'));
+  assert.equal(await fs.readFile(result.audio_manifest.scenes[0].path, 'utf8'), 'audio:第一段旁白');
+
+  const local = await tts.synthesizeSceneNarration({
+    projectDir,
+    sceneSpec: {
+      scenes: [
+        { id: 'scene_01', narration_text: '第一段旁白' },
+        { id: 'scene_02', narration_text: '第二段旁白' },
+      ],
+    },
+    sceneId: 'scene_02',
+    services: {
+      ttsModel: {
+        callTtsModel: async ({ text }) => ({ success: true, audioBuffer: Buffer.from(`local:${text}`), format: 'mp3' }),
+      },
+      readAudioDuration: async () => 2,
+    },
+  });
+  assert.equal(local.success, true);
+  assert.equal(local.audio_manifest.scenes.length, 1);
+  assert.equal(local.audio_manifest.scenes[0].scene_id, 'scene_02');
+
+  console.log('creative video tts service tests passed');
+})();
+```
+
+- [ ] **Step 2: Run failing tests**
+
+Run:
+
+```bash
+node tests/test-creative-video-tts-service.js
+```
+
+Expected: fail with missing module error.
+
+- [ ] **Step 3: Implement TTS service**
+
+Create `server/services/creative-video/ttsService.js`.
+
+Required exports:
+
+```js
+module.exports = {
+  synthesizeSceneNarration,
+};
+```
+
+Required behavior:
+
+- Accept `{ projectDir, sceneSpec, sceneId, services }`.
+- Use injected `services.ttsModel.callTtsModel` or existing `../aiTtsModel`.
+- Write scene audio files under `projectDir/tts`.
+- File names use stable scene IDs, for example `scene_01.mp3`.
+- Return `{ success, audio_manifest, message }`.
+- `audio_manifest.scenes[]` contains `scene_id`, `path`, `duration`, `format`, `voice`, and `model`.
+- If `sceneId` is provided, synthesize only that scene.
+- On TTS failure, return `success: false` and do not delete previous audio files.
+- Do not call render, routes, or React code.
+
+- [ ] **Step 4: Run passing tests and commit**
+
+Run:
+
+```bash
+node tests/test-creative-video-tts-service.js
+```
+
+Expected: pass.
+
+Modify `package.json` so this test runs after `node tests/test-hyperframes-template-renderer.js`.
+
+Commit:
+
+```bash
+git add server/services/creative-video/ttsService.js tests/test-creative-video-tts-service.js package.json
+git commit -m "新增创意视频分场景 TTS 服务"
+```
+
+---
+
+### Task 7: Render Adapter And Project Writer
 
 **Files:**
 - Create: `server/services/creative-video/renderAdapter.js`
@@ -824,7 +979,13 @@ const { HyperFramesRenderAdapter, createRenderAdapter } = require('../server/ser
     },
   });
 
-  const result = await adapter.render({ project_dir: 'D:/tmp/project', output_path: 'D:/tmp/output.mp4', fps: 30, duration: 12 });
+  const result = await adapter.render({
+    project_dir: 'D:/tmp/project',
+    output_path: 'D:/tmp/output.mp4',
+    fps: 30,
+    duration: 12,
+    audio_manifest: { scenes: [{ scene_id: 'scene_01', path: 'D:/tmp/tts/scene_01.mp3' }] },
+  });
   assert.equal(result.success, true);
   assert.equal(result.output_path, 'D:/tmp/output.mp4');
   assert.equal(result.stdout, 'ok');
@@ -902,7 +1063,9 @@ Required behavior:
 
 - Default renderer imports `../hyperframesRenderer`.
 - `render(input)` accepts snake_case input: `project_dir`, `output_path`, `fps`, `duration`, `audio`.
+- `render(input)` also accepts `audio_manifest`.
 - It calls existing renderer as `renderHyperframesProject({ projectDir, renderOptions })`.
+- If `audio_manifest` is present, pass audio paths through `renderOptions.audioManifest`. If the current renderer cannot use the manifest directly, keep the manifest in `meta.audio_manifest` so workflow code can invoke ffmpeg mixing before finalizing the render.
 - It returns snake_case output: `success`, `output_path`, `stdout`, `stderr`, `diagnostics`, `meta`, `message`.
 
 Create `server/services/creative-video/projectWriter.js`.
@@ -944,7 +1107,7 @@ git commit -m "新增创意视频渲染适配和工程写入"
 
 ---
 
-### Task 7: Visual QA Service
+### Task 8: Visual QA Service
 
 **Files:**
 - Create: `server/services/creative-video/visualQaService.js`
@@ -1026,7 +1189,10 @@ Required behavior:
   - low-information frame means `luma_stddev < 12` and `edge_score < 8` and `color_variance < 10`.
   - low-information frame ratio over `0.4` fails.
 - Return `{ success, issues, metrics, message }`.
-- `inspectRenderedVideo` may delegate frame extraction to existing `hyperframesFreeformQuality.inspectRenderedVideo`, then analyze extracted frame metrics when metrics are available. If only contact sheet exists, check file size and return a warning issue when pixel metrics were not collected.
+- `inspectRenderedVideo` must implement its own frame extraction and pixel analysis path.
+- Do not delegate the pass/fail decision to `hyperframesFreeformQuality.inspectRenderedVideo`, because that service is known to pass white-background text videos when a contact sheet exists.
+- The old quality service may be used only as a command helper fallback for extracting frames, and its success value must not decide the new QA result.
+- Pixel analysis may use `sharp`, `jimp`, or a small dependency-free JPEG/PNG metric helper if available in the project environment.
 
 - [ ] **Step 4: Run passing tests and commit**
 
@@ -1049,7 +1215,7 @@ git commit -m "新增创意视频视觉质检服务"
 
 ---
 
-### Task 8: Workflow Facade Integration
+### Task 9: Workflow Facade Integration
 
 **Files:**
 - Create: `server/services/creative-video/workflowFacade.js`
@@ -1070,6 +1236,7 @@ const facade = require('../server/services/creative-video/workflowFacade');
 
 (async () => {
   const calls = [];
+  const serviceOrder = [];
   const result = await facade.generateCreativeVideoProject({
     workflowId: '202606140000000001',
     runId: 'run_001',
@@ -1084,8 +1251,32 @@ const facade = require('../server/services/creative-video/workflowFacade');
           return { success: true, text: JSON.stringify({ frame_specs: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 8, kind: 'text', template: 'hero_title', layout: 'center_stack', background: 'dark_gradient', motion: 'fade_up', text_layers: [{ id: 'headline', role: 'headline', text: '标题', emphasis: 'primary' }], visual_layers: [{ id: 'accent', type: 'glow_panel', variant: 'cyan_pink' }] }] }) };
         },
       },
-      projectWriter: async files => ({ success: true, project_dir: 'D:/tmp/project', files: Object.keys(files) }),
-      checker: async () => ({ success: true, message: '校验通过' }),
+      projectWriter: async files => {
+        serviceOrder.push('projectWriter');
+        return { success: true, project_dir: 'D:/tmp/project', files: Object.keys(files) };
+      },
+      checker: async () => {
+        serviceOrder.push('checker');
+        return { success: true, message: '校验通过' };
+      },
+      ttsService: {
+        synthesizeSceneNarration: async () => {
+          serviceOrder.push('tts');
+          return { success: true, audio_manifest: { scenes: [] } };
+        },
+      },
+      renderAdapter: {
+        render: async () => {
+          serviceOrder.push('render');
+          return { success: true, output_path: 'D:/tmp/output.mp4', diagnostics: [] };
+        },
+      },
+      visualQaService: {
+        inspectRenderedVideo: async () => {
+          serviceOrder.push('visualQa');
+          return { success: true, issues: [], metrics: {} };
+        },
+      },
     },
   });
 
@@ -1095,6 +1286,59 @@ const facade = require('../server/services/creative-video/workflowFacade');
   assert.ok(result.frame_specs);
   assert.equal(result.project_dir, 'D:/tmp/project');
   assert.ok(result.files.includes('index.html'));
+  assert.ok(result.audio_manifest);
+  assert.equal(result.output_path, 'D:/tmp/output.mp4');
+  assert.ok(result.visual_report);
+  assert.deepEqual(serviceOrder, ['projectWriter', 'checker', 'tts', 'render', 'visualQa']);
+
+  const blockedOrder = [];
+  const blocked = await facade.generateCreativeVideoProject({
+    workflowId: '202606140000000002',
+    runId: 'run_002',
+    creativeContext: { input: { raw_text: '测试主题' } },
+    services: {
+      aiTextModel: {
+        callTextModel: async () => {
+          if (blockedOrder.filter(item => item === 'ai').length === 0) {
+            blockedOrder.push('ai');
+            return { success: true, text: JSON.stringify({ scene_spec: { title: '测试', aspect_ratio: '16:9', scenes: [{ id: 'scene_01', duration: 8, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: ['卡片'] } }] } }) };
+          }
+          blockedOrder.push('ai');
+          return { success: true, text: JSON.stringify({ frame_specs: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 8, kind: 'text', template: 'hero_title', layout: 'center_stack', background: 'dark_gradient', motion: 'fade_up', text_layers: [{ id: 'headline', role: 'headline', text: '标题', emphasis: 'primary' }], visual_layers: [] }] }) };
+        },
+      },
+      projectWriter: async files => {
+        blockedOrder.push('projectWriter');
+        return { success: true, project_dir: 'D:/tmp/project-bad', files: Object.keys(files) };
+      },
+      checker: async () => {
+        blockedOrder.push('checker');
+        return { success: false, message: '工程校验失败' };
+      },
+      ttsService: {
+        synthesizeSceneNarration: async () => {
+          blockedOrder.push('tts');
+          return { success: true, audio_manifest: { scenes: [] } };
+        },
+      },
+      renderAdapter: {
+        render: async () => {
+          blockedOrder.push('render');
+          return { success: true, output_path: 'D:/tmp/output.mp4' };
+        },
+      },
+      visualQaService: {
+        inspectRenderedVideo: async () => {
+          blockedOrder.push('visualQa');
+          return { success: true, issues: [], metrics: {} };
+        },
+      },
+    },
+  });
+  assert.equal(blocked.success, false);
+  assert.equal(blockedOrder.includes('tts'), false);
+  assert.equal(blockedOrder.includes('render'), false);
+  assert.equal(blockedOrder.includes('visualQa'), false);
 
   console.log('creative video workflow facade tests passed');
 })();
@@ -1136,7 +1380,13 @@ Required behavior:
   - render HyperFrames files
   - write project
   - check project
-- Return `scene_spec`, `frame_specs`, `project_dir`, `files`, and Chinese `message`.
+  - synthesize TTS into the project directory
+  - pass project and audio manifest to render adapter
+  - inspect rendered video through visual QA
+- check project immediately after write and before render; do not wait until render adapter to discover invalid HTML.
+- pass `audio_manifest` to render adapter during render.
+- If visual QA fails, return failure with Chinese `message`, `issues`, and diagnostics instead of marking workflow final success.
+- Return `scene_spec`, `frame_specs`, `project_dir`, `files`, `audio_manifest`, `output_path`, `visual_report`, and Chinese `message`.
 - Do not import Express routes or React code.
 - Use dependency injection for tests.
 
@@ -1180,7 +1430,7 @@ git commit -m "接入 html-video lite 成片工作流"
 
 ---
 
-### Task 9: Routes And API Client
+### Task 10: Routes And API Client
 
 **Files:**
 - Modify: `server/routes/creativeWorkflows.js`
@@ -1288,7 +1538,7 @@ git commit -m "新增创意视频规格接口"
 
 ---
 
-### Task 10: Componentized Frontend Editor
+### Task 11: Componentized Frontend Editor
 
 **Files:**
 - Create: `frontend-react/src/hooks/useCreativeVideoEditor.js`
@@ -1330,6 +1580,7 @@ assert.ok(hook.includes('rerenderCreativeVideo'));
 assert.ok(hook.includes('正在加载可编辑工程'));
 assert.ok(hook.includes('正在保存编辑'));
 assert.ok(hook.includes('正在重新渲染'));
+assert.ok(hook.includes('内容已修改，需要重新渲染'));
 assert.ok(editor.includes('SceneList'));
 assert.ok(editor.includes('FrameList'));
 assert.ok(editor.includes('EditorStatusBar'));
@@ -1377,6 +1628,7 @@ export function useCreativeVideoEditor({ workflowId, api }) {
     saveFrameEdit,
     rerender,
     remix,
+    dirtyRequiresRender,
   };
 }
 ```
@@ -1387,6 +1639,10 @@ Required behavior:
 - Use Chinese loading messages.
 - Disable repeat actions through `loading` and `saving`.
 - Update local specs from server response after save.
+- If save response returns `requires_render: true`, set `dirtyRequiresRender` to true.
+- When `dirtyRequiresRender` is true, show a Chinese prompt: `内容已修改，需要重新渲染后才会更新成片。`
+- Do not automatically rerender on every save; let the user click rerender after reviewing the edit.
+- Clear `dirtyRequiresRender` only after rerender succeeds.
 
 - [ ] **Step 4: Implement components**
 
@@ -1443,7 +1699,7 @@ git commit -m "新增组件化创意视频编辑器"
 
 ---
 
-### Task 11: Regression And Boundary Verification
+### Task 12: Regression And Boundary Verification
 
 **Files:**
 - Modify only files required by failing verification.
@@ -1459,6 +1715,7 @@ node tests/test-creative-video-frame-spec.js
 node tests/test-creative-spec-agent.js
 node tests/test-creative-template-registry.js
 node tests/test-hyperframes-template-renderer.js
+node tests/test-creative-video-tts-service.js
 node tests/test-creative-render-adapter.js
 node tests/test-creative-video-project-writer.js
 node tests/test-visual-qa-service.js

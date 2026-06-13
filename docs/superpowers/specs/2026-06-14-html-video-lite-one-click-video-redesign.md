@@ -370,7 +370,7 @@ renderer 的实现模型：
 frame_spec.template
  -> templateRegistry.getTemplate()
  -> template.renderFrame(frame_spec, scene_spec)
- -> HTML fragments + CSS classes + timeline fragments
+ -> HTML fragments + CSS fragments + timeline fragments
  -> composeDocument()
  -> index.html
 ```
@@ -384,6 +384,7 @@ renderer 不是自由生成器，只做模板查表、数据绑定和文档组�
 - 统一渲染接口。
 - 当前实现接现有 HyperFrames 渲染器。
 - 未来可新增 Playwright/逐帧/Remotion adapter。
+- 接收 TTS 服务生成的旁白音频路径，并把音频传给当前渲染链路或通过 ffmpeg 混流。
 
 输出统一为：
 
@@ -397,6 +398,21 @@ renderer 不是自由生成器，只做模板查表、数据绑定和文档组�
   "meta": {}
 }
 ```
+
+### ttsService
+
+职责：
+
+- 根据 `scene_spec.scenes[].narration_text` 生成逐场景音频。
+- 把音频写入工程目录，例如 `tts/scene_01.mp3` 或 `tts/scene_01.wav`。
+- 返回每个场景的音频路径、时长和字幕时间修正信息。
+- 局部 TTS 只重算目标 scene，不影响其他 scene 的音频文件。
+
+禁止：
+
+- 直接渲染视频。
+- 直接修改 React 状态。
+- 把 TTS 失败覆盖到上一版可播放视频。
 
 ### visualQaService
 
@@ -432,8 +448,11 @@ renderer 不是自由生成器，只做模板查表、数据绑定和文档组�
 职责：
 
 - 读取/保存 workflow
-- 调用 agent、template renderer、quality、render adapter
+- 调用 agent、template renderer、project writer、checker、TTS、render adapter、quality
 - 维护 `render_versions`
+- 顺序必须是：生成 specs -> 渲染工程文件 -> 写入工程 -> 校验工程 -> 生成 TTS -> 渲染视频 -> 视觉质检。
+- 工程校验失败时不进入 TTS 和视频渲染。
+- TTS 失败时不覆盖上一版可播放视频。
 
 禁止：
 
