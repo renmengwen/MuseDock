@@ -47,6 +47,8 @@ const zh = {
   running: textFromCodePoints([0x8fdb, 0x884c, 0x4e2d]),
   done: textFromCodePoints([0x5df2, 0x5b8c, 0x6210]),
   failed: textFromCodePoints([0x5931, 0x8d25]),
+  stopAndDelete: textFromCodePoints([0x505c, 0x6b62, 0x5e76, 0x5220, 0x9664]),
+  stoppingAndDeleting: textFromCodePoints([0x6b63, 0x5728, 0x505c, 0x6b62, 0x5e76, 0x5220, 0x9664, 0x4efb, 0x52a1, 0x2e, 0x2e, 0x2e]),
 };
 
 assert.ok(fs.existsSync(pagePath), 'missing page frontend-react/src/pages/OneClickCreativePage.jsx');
@@ -73,6 +75,8 @@ for (const text of [
   zh.emptyInputMessage,
   zh.chatGreeting,
   zh.creativeInputPlaceholder,
+  zh.stopAndDelete,
+  zh.stoppingAndDeleting,
 ]) {
   assert.ok(page.includes(text), `OneClickCreativePage.jsx should include normal Chinese text: ${text}`);
 }
@@ -120,6 +124,10 @@ assert.match(page, /createCreativeWorkflow/, 'OneClickCreativePage should create
 assert.match(page, /CreativeVideoEditor/, 'OneClickCreativePage should import and render CreativeVideoEditor');
 assert.match(page, /editorOpen/, 'OneClickCreativePage should track editor open state');
 assert.match(page, /getCreativeWorkflow/, 'OneClickCreativePage should poll creative workflows');
+assert.match(page, /stopAndDeleteTask/, 'OneClickCreativePage should expose a stop-and-delete action for the current task');
+assert.match(page, /onStopAndDelete=\{stopAndDeleteTask\}/, 'Creative task detail should receive the current task stop-and-delete handler');
+assert.match(page, /onStopAndDelete\(workflowId\)/, 'Creative task detail stop button should delete the currently opened task');
+assert.match(page, /disabled=\{deletingWorkflowId === workflowId\}/, 'Current task stop-and-delete button should be disabled while deleting');
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');
 assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');
 assert.match(page, /window\.localStorage\.setItem/, 'OneClickCreativePage should save submitted tasks to localStorage');

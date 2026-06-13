@@ -1,0 +1,10 @@
+{
+  "mode": "teaching",
+  "explainTerms": true,
+  "language": "zh-CN",
+  "userName": "Move",
+  "entryReason": "已有产品在跑，卡在商业化方向上",
+  "projectName": "MuseDock",
+  "projectDesc": "抖音/小红书内容抓取工具 + AI视频创作工作台，已开源(GitHub, Apache 2.0)",
+  "createdAt": "2026-06-14"
+}

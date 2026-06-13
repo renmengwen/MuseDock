@@ -686,6 +686,29 @@ async function testPersistsFailureFromBriefStage() {
   assert.equal(persisted.data.error.message, '策划失败');
 }
 
+async function testStopsWorkflowWhenDeletedDuringGeneration() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const filePath = getWorkflowPath(WORKFLOW_ID, rootDir);
+  const { services, calls } = createFakeServices({
+    agentRuns: {
+      generateDouyinRunHyperframesFreeformBrief: async (awemeId, runId, options) => {
+        calls.push({ name: 'briefDelete', awemeId, runId, options });
+        fs.unlinkSync(filePath);
+        return { success: true, status: 'done', message: '成片策划完成' };
+      },
+    },
+  });
+
+  await createCreativeWorkflow({ input: '做一期关于 AI 视频生产的知识科普' }, { rootDir, mediaRoot, services });
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, false);
+  assert.equal(run.status, 'deleted');
+  assert.match(run.message, /已停止并删除/);
+  assert.deepEqual(calls.map(call => call.name), ['createRun', 'briefDelete']);
+  assert.equal(fs.existsSync(filePath), false);
+}
+
 async function testMarksStaleBriefStageAsFailedWhenFetched() {
   const { rootDir, mediaRoot } = createTempDirs();
   const { services } = createFakeServices({
@@ -881,6 +904,7 @@ async function run() {
   await testRepreparesWhenAnalysisInputFramesAreStale();
   await testDouyinLoginRequirementUsesChineseMessage();
   await testPersistsFailureFromBriefStage();
+  await testStopsWorkflowWhenDeletedDuringGeneration();
   await testMarksStaleBriefStageAsFailedWhenFetched();
   await testMissingWorkflowReturnsChineseMessage();
   await testSceneSpecOperations();

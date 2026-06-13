@@ -434,10 +434,11 @@ function CreativeVideoPreview({ videoUrl }) {
   );
 }
 
-function CreativeTaskDetail({ status, message, workflowId, workflow }) {
+function CreativeTaskDetail({ status, message, workflowId, workflow, deletingWorkflowId, onStopAndDelete }) {
   const [editorOpen, setEditorOpen] = useState(false);
   if (!workflowId && !workflow) return null;
   const videoUrl = getWorkflowVideoUrl(workflow);
+  const canStopAndDelete = workflowId && workflow?.status !== 'done';
 
   return (
     <div className={`creativeTaskDetail ${workflow?.status === 'done' && videoUrl ? 'hasVideo' : ''}`}>
@@ -449,6 +450,17 @@ function CreativeTaskDetail({ status, message, workflowId, workflow }) {
         <strong className={`stepBadge ${getStatusClass(workflow?.status)}`}>
           {getWorkflowStatusText(workflow, status)}
         </strong>
+        {canStopAndDelete ? (
+          <button
+            className="creativeStopDeleteButton"
+            type="button"
+            disabled={deletingWorkflowId === workflowId}
+            onClick={() => onStopAndDelete(workflowId)}
+          >
+            {deletingWorkflowId === workflowId ? <Loader2 size={14} className="spinIcon" /> : <Trash2 size={14} />}
+            <span>{deletingWorkflowId === workflowId ? '正在删除' : '停止并删除'}</span>
+          </button>
+        ) : null}
       </div>
       <WorkflowStepProgress workflow={workflow} />
       {workflow?.status === 'done' && videoUrl ? (
@@ -483,7 +495,8 @@ export function OneClickCreativePage() {
   const [tasks, setTasks] = useState(() => loadStoredTasks());
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
-  const isBusy = status === 'creating' || status === 'polling';
+  const [deletingWorkflowId, setDeletingWorkflowId] = useState('');
+  const isBusy = status === 'creating' || status === 'polling' || status === 'deleting';
   const submitDisabled = isBusy || mode === 'expert' || !input.trim();
 
   function persistTasks(updater) {
@@ -519,15 +532,42 @@ export function OneClickCreativePage() {
     const confirmed = window.confirm(`确定删除任务「${task.title}」吗？此操作不可恢复。`);
     if (!confirmed) return;
 
+    setDeletingWorkflowId(task.workflow_id);
     try {
       await api.deleteCreativeWorkflow(task.workflow_id);
     } catch {
       // 即使后端删除失败也继续清理前端状态
+    } finally {
+      setDeletingWorkflowId('');
     }
 
     persistTasks(prev => prev.filter(item => item.workflow_id !== task.workflow_id));
 
     if (selectedWorkflowId === task.workflow_id) {
+      startNewTask();
+    }
+  }
+
+  async function stopAndDeleteTask(targetWorkflowId) {
+    const id = String(targetWorkflowId || '').trim();
+    if (!id || deletingWorkflowId) return;
+
+    const confirmed = window.confirm('确定停止并删除当前任务吗？任务记录和已生成资源都会被删除，此操作不可恢复。');
+    if (!confirmed) return;
+
+    setDeletingWorkflowId(id);
+    setStatus('deleting');
+    setMessage('正在停止并删除任务...');
+    try {
+      await api.deleteCreativeWorkflow(id);
+    } catch {
+      // 删除中的任务可能已经被后台清理，前端仍按停止删除完成处理。
+    } finally {
+      setDeletingWorkflowId('');
+    }
+
+    persistTasks(prev => prev.filter(item => item.workflow_id !== id));
+    if (selectedWorkflowId === id || workflowId === id) {
       startNewTask();
     }
   }
@@ -707,7 +747,14 @@ export function OneClickCreativePage() {
               />
             </>
           )}
-          <CreativeTaskDetail status={status} message={message} workflowId={selectedWorkflowId} workflow={workflow} />
+          <CreativeTaskDetail
+            status={status}
+            message={message}
+            workflowId={selectedWorkflowId}
+            workflow={workflow}
+            deletingWorkflowId={deletingWorkflowId}
+            onStopAndDelete={stopAndDeleteTask}
+          />
         </div>
       </section>
     </main>

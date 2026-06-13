@@ -15,6 +15,7 @@ const DEFAULT_ROOT = path.join(__dirname, '../../data/creative-workflows');
 const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
 const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;
 const DEFAULT_STALE_STAGE_TIMEOUT_MS = 10 * 60 * 1000;
+const WORKFLOW_STOPPED = Symbol('workflow-stopped');
 
 const STAGE_IDS = ['source', 'research', 'assets', 'agent_run', 'brief', 'audio', 'project', 'check', 'render', 'inspect'];
 const STAGE_LABELS = {
@@ -137,6 +138,24 @@ async function readWorkflow(workflowId, rootDir) {
   const record = await readJson(filePath);
   record.stages = normalizeStages(record.stages);
   return record;
+}
+
+async function workflowFileExists(workflowId, rootDir) {
+  try {
+    await fsp.access(getWorkflowPath(workflowId, rootDir));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createWorkflowStoppedSummary(workflowId) {
+  return {
+    success: false,
+    workflow_id: safeString(workflowId),
+    status: 'deleted',
+    message: '创作任务已停止并删除。',
+  };
 }
 
 async function persistWorkflow(record, rootDir) {
@@ -657,6 +676,10 @@ async function markStage(record, stageId, status, message, now, extra = {}) {
 }
 
 async function runStage(record, stageId, rootDir, handler, services) {
+  if (!await workflowFileExists(record.workflow_id, rootDir)) {
+    return WORKFLOW_STOPPED;
+  }
+
   const startedAt = getNow(services);
   await markStage(record, stageId, 'running', `正在${STAGE_LABELS[stageId]}...`, startedAt, {
     started_at: startedAt,
@@ -667,6 +690,10 @@ async function runStage(record, stageId, rootDir, handler, services) {
 
   try {
     const result = await handler();
+    if (!await workflowFileExists(record.workflow_id, rootDir)) {
+      return WORKFLOW_STOPPED;
+    }
+
     const completedAt = getNow(services);
     await markStage(record, stageId, 'done', result?.message || `${STAGE_LABELS[stageId]}完成。`, completedAt, {
       completed_at: completedAt,
@@ -676,6 +703,10 @@ async function runStage(record, stageId, rootDir, handler, services) {
     await persistWorkflow(record, rootDir);
     return result;
   } catch (error) {
+    if (!await workflowFileExists(record.workflow_id, rootDir)) {
+      return WORKFLOW_STOPPED;
+    }
+
     const failedAt = getNow(services);
     const message = safeString(error && error.message) || `${STAGE_LABELS[stageId]}失败。`;
     await markStage(record, stageId, 'failed', message, failedAt, {
@@ -710,20 +741,24 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     };
   }
 
-  const failIfNull = result => {
-    if (result === null) {
-      return true;
+  const failIfStoppedOrNull = result => {
+    if (result === WORKFLOW_STOPPED) {
+      return createWorkflowStoppedSummary(workflowId);
     }
-    return false;
+    if (result === null) {
+      return createWorkflowSummary(record);
+    }
+    return null;
   };
 
-  if (failIfNull(await runStage(record, 'source', rootDir, async () => (
+  let stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'source', rootDir, async () => (
     ensureSuccess(await prepareSource(record, mediaRoot, getNow(services), services), '来源资料准备失败。')
-  ), services))) {
-    return createWorkflowSummary(record);
+  ), services));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'research', rootDir, async () => {
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'research', rootDir, async () => {
     if (record.research_context?.status === 'failed') {
       throw new Error(record.research_context.summary || '联网研究失败。');
     }
@@ -734,19 +769,21 @@ async function runCreativeWorkflow(workflowId, options = {}) {
         : '联网研究资料已准备完成。',
       research_context: record.research_context,
     };
-  }, services))) {
-    return createWorkflowSummary(record);
+  }, services));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'assets', rootDir, async () => ({
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'assets', rootDir, async () => ({
     success: true,
     message: '图片素材将在下一阶段开放，当前任务继续使用来源上下文。',
     asset_context: record.asset_context,
-  }), services))) {
-    return createWorkflowSummary(record);
+  }), services));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'agent_run', rootDir, async () => {
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'agent_run', rootDir, async () => {
     const result = ensureSuccess(
       await services.agentRuns.createDouyinHyperframesFreeformRun(record.aweme_id, { rootDir: mediaRoot }),
       '导演改写任务创建失败。',
@@ -756,11 +793,12 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       throw new Error('导演改写任务未返回 run_id。');
     }
     return result;
-  }, services))) {
-    return createWorkflowSummary(record);
+  }, services));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'brief', rootDir, async () => ensureSuccess(
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'brief', rootDir, async () => ensureSuccess(
     await services.agentRuns.generateDouyinRunHyperframesFreeformBrief(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
       briefOptions: {
@@ -768,20 +806,22 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       },
     }),
     '成片策划失败。',
-  ), services))) {
-    return createWorkflowSummary(record);
+  ), services));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'audio', rootDir, async () => ensureSuccess(
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'audio', rootDir, async () => ensureSuccess(
     await services.agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
     }),
     '音频轨生成失败。',
-  ), services))) {
-    return createWorkflowSummary(record);
+  ), services));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'project', rootDir, async () => ensureSuccess(
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'project', rootDir, async () => ensureSuccess(
     await services.agentRuns.generateDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
       useHtmlVideoLiteWorkflow: true,
@@ -790,26 +830,29 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       },
     }),
     '工程生成失败。',
-  ), services))) {
-    return createWorkflowSummary(record);
+  ), services));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'check', rootDir, async () => ensureSuccess(
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'check', rootDir, async () => ensureSuccess(
     await services.agentRuns.checkDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
     }),
     '工程校验失败。',
-  ), services))) {
-    return createWorkflowSummary(record);
+  ), services));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'render', rootDir, async () => ensureSuccess(
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'render', rootDir, async () => ensureSuccess(
     await services.agentRuns.renderDouyinRunHyperframesFreeformVideo(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
     }),
     '视频渲染失败。',
-  ), services))) {
-    return createWorkflowSummary(record);
+  ), services));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
   const inspectResult = await runStage(record, 'inspect', rootDir, async () => ensureSuccess(
@@ -818,8 +861,13 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     }),
     '视频巡检失败。',
   ), services);
-  if (failIfNull(inspectResult)) {
-    return createWorkflowSummary(record);
+  stoppedOrFailed = failIfStoppedOrNull(inspectResult);
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
+  }
+
+  if (!await workflowFileExists(workflowId, rootDir)) {
+    return createWorkflowStoppedSummary(workflowId);
   }
 
   const doneAt = getNow(services);

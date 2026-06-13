@@ -861,6 +861,30 @@ a { color: #fe2c55; text-decoration: none; }
 .creativeDetailMeta > .stepBadge {
   flex: 0 0 auto;
 }
+.creativeStopDeleteButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fff5f5;
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.creativeStopDeleteButton:hover:not(:disabled) {
+  background: #fee2e2;
+  border-color: #fca5a5;
+}
+.creativeStopDeleteButton:disabled {
+  cursor: not-allowed;
+  opacity: .72;
+}
 .creativeWorkflowStepper {
   display: grid;
   grid-template-columns: repeat(10, minmax(72px, 1fr));
@@ -1227,6 +1251,9 @@ a { color: #fe2c55; text-decoration: none; }
     flex-direction: column;
   }
   .creativeDetailMeta > .stepBadge {
+    align-self: flex-start;
+  }
+  .creativeStopDeleteButton {
     align-self: flex-start;
   }
   .toolbar, .mediaHeader, .workspaceIntro, .settingsPanelHeader, .modelConfigHeader { flex-direction: column; align-items: stretch; }
