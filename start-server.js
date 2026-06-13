@@ -40,12 +40,13 @@ function shutdown(code = 0) {
   process.exit(code);
 }
 
-startProcess('api', nodeCommand, ['--watch', 'server/index.js']);
+startProcess('api', nodeCommand, ['server/index.js']);
 startProcess('web', frontendCommand, frontendArgs);
 
 console.log('开发服务已启动：');
 console.log('- 前端热更新：http://localhost:5173');
 console.log('- 后端 API：http://localhost:3000');
+console.log('提示：为避免中断长任务，后端不会自动重启；修改后端代码后请手动重启 npm run dev。');
 console.log('提示：npm start 仍用于读取 frontend-dist 的构建产物。');
 
 process.on('SIGTERM', () => shutdown(0));

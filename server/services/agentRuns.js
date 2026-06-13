@@ -1436,8 +1436,16 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
     );
   }
   if (!parsed.success) {
+    const rawText = String(modelResult.text || modelResult.raw_output || '');
     const message = parsed.message || '解析导演策划失败。';
-    logEvent(logger, 'warn', { ...baseLog, stage: 'parse_failed', message, ...elapsedMeta() });
+    logEvent(logger, 'warn', {
+      ...baseLog,
+      stage: 'parse_failed',
+      message,
+      raw_text_preview: rawText.slice(0, 500),
+      raw_text_length: rawText.length,
+      ...elapsedMeta(),
+    });
     return markFreeformBriefFailed(awemeId, runId, message, options, operationId, elapsedMeta());
   }
   logEvent(logger, 'info', {

@@ -162,6 +162,7 @@ const ROOT_COMPOSITION_ATTRS = [
   'data-duration',
   'data-width',
   'data-height',
+  'data-track-index',
 ];
 
 function getTagAttribute(tag, name) {
@@ -181,7 +182,8 @@ function ensureRootAttributes(tag, files = {}, options = {}, inheritedAttrs = {}
   const duration = getProjectDuration(files, options);
   const durationText = duration ? normalizeDurationValue(duration) : inheritedAttrs['data-duration'] || '';
   const { width, height } = getProjectDimensions(files);
-  let nextTag = tag;
+  let nextTag = tag
+    .replace(/\sdata-track-index\s*=\s*(?:"[^"]*"|'[^']*')/gi, '');
   nextTag = ensureRootAttribute(nextTag, 'data-composition-id', inheritedAttrs['data-composition-id'] || 'main');
   if (durationText) nextTag = ensureRootAttribute(nextTag, 'data-duration', durationText);
   nextTag = ensureRootAttribute(nextTag, 'data-width', inheritedAttrs['data-width'] || String(width));
@@ -265,6 +267,140 @@ function ensureClipClassOnTimedElements(content) {
       });
     }
     return tag.replace(/>$/, ' class="clip">');
+  });
+}
+
+function normalizeTimedClipBoundaries(content) {
+  let result = String(content || '').replace(/<([a-z][\w:-]*)([^>]*\sdata-start\s*=\s*['"][^'"]+['"][^>]*\sdata-duration\s*=\s*['"][^'"]+['"][^>]*)>/gi, (tag) => {
+    if (/\sdata-composition-id\s*=/.test(tag)) return tag;
+    return tag
+      .replace(/\sdata-start\s*=\s*(['"])([^'"]+)\1/i, (attr, quote, value) => {
+        const start = Number(value);
+        return Number.isFinite(start) ? ` data-start=${quote}${normalizeDurationValue(start)}${quote}` : attr;
+      })
+      .replace(/\sdata-duration\s*=\s*(['"])([^'"]+)\1/i, (attr, quote, value) => {
+        const duration = Number(value);
+        return Number.isFinite(duration) ? ` data-duration=${quote}${normalizeDurationValue(duration)}${quote}` : attr;
+      });
+  });
+
+  // Second pass: fix floating-point overlap between adjacent clips on the same track.
+  // Even after rounding individual attributes, the lintern computes start + duration in
+  // IEEE 754 which can produce artifacts like 45.28 + 7.84 = 53.120000000000005.
+  const clips = [];
+  const tagPattern = /<([a-z][\w:-]*)([^>]*\sdata-start\s*=\s*['"]([^'"]+)['"][^>]*\sdata-duration\s*=\s*['"]([^'"]+)['"][^>]*)>/gi;
+  let m;
+  while ((m = tagPattern.exec(result)) !== null) {
+    if (/\sdata-composition-id\s*=/.test(m[0])) continue;
+    const idMatch = m[0].match(/\sid\s*=\s*['"]([^'"]+)['"]/i);
+    if (!idMatch) continue;
+    const trackMatch = m[0].match(/\sdata-track-index\s*=\s*['"]([^'"]+)['"]/i);
+    const trackIndex = trackMatch ? trackMatch[1] : '0';
+    const start = Number(m[3]);
+    const duration = Number(m[4]);
+    if (!Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) continue;
+    clips.push({ id: idMatch[1], trackIndex, start, duration, end: start + duration });
+  }
+
+  // Group by track and sort by start time
+  const byTrack = new Map();
+  for (const clip of clips) {
+    if (!byTrack.has(clip.trackIndex)) byTrack.set(clip.trackIndex, []);
+    byTrack.get(clip.trackIndex).push(clip);
+  }
+  for (const track of byTrack.values()) {
+    track.sort((a, b) => a.start - b.start);
+  }
+
+  // For adjacent clips, if the raw floating-point end > next start (IEEE 754 artifact),
+  // reduce duration by 0.001 to prevent the lintern from flagging a false overlap.
+  // Example: 45.28 + 7.84 = 53.120000000000005 > 53.12
+  const adjustments = new Map();
+  for (const track of byTrack.values()) {
+    for (let i = 0; i < track.length - 1; i++) {
+      const clip = track[i];
+      const next = track[i + 1];
+      if (clip.end > next.start) {
+        const newDuration = Math.round((next.start - clip.start) * 1000) / 1000 - 0.001;
+        if (newDuration > 0) {
+          adjustments.set(clip.id, normalizeDurationValue(newDuration));
+        }
+      }
+    }
+  }
+
+  if (adjustments.size > 0) {
+    result = result.replace(/<([a-z][\w:-]*)([^>]*\sid\s*=\s*['"]([^'"]+)['"][^>]*\sdata-duration\s*=\s*['"]([^'"]+)['"][^>]*)>/gi, (tag, tagName, attrs, id, duration) => {
+      if (!adjustments.has(id)) return tag;
+      return tag.replace(/\sdata-duration\s*=\s*(['"])([^'"]+)\1/i, ` data-duration=$1${adjustments.get(id)}$1`);
+    });
+  }
+
+  return result;
+}
+
+function allowOverflowOnEmphasisContainers(content) {
+  return String(content || '').replace(/<([a-z][\w:-]*)([^>]*\sclass\s*=\s*(['"])(.*?)\3[^>]*)>/gi, (tag, tagName, attrs, quote, classValue) => {
+    if (/^(html|body|main|section|audio|video|script|style)$/i.test(tagName)) return tag;
+    if (/\sdata-layout-(?:allow-overflow|ignore)\b/i.test(tag)) return tag;
+    if (!/\b(?:hero-lock|lock|emphasis|glitch|burst|big-word|impact-word|tick|check)\b/i.test(classValue)) return tag;
+    return tag.replace(/>$/, ' data-layout-allow-overflow="true">');
+  });
+}
+
+function stripVisibilityFromRegisteredScript(script, clipIds) {
+  const lines = script.split('\n');
+  const result = [];
+  for (const line of lines) {
+    const setMatch = line.match(/^((?:\s*)(?:var |let |const )?\w+(?:\.\w+)*\.set\s*\(\s*)(['"])(#[^'"]+)\2\s*,\s*\{/);
+    if (setMatch) {
+      const selector = setMatch[3];
+      const id = selector.replace(/^#/, '');
+      if (clipIds.has(id)) {
+        const prefix = setMatch[1];
+        const openBrace = line.indexOf('{', line.indexOf('.set('));
+        if (openBrace === -1) { result.push(line); continue; }
+        let depth = 0, closeBrace = -1;
+        for (let i = openBrace; i < line.length; i++) {
+          if (line[i] === '{') depth++;
+          else if (line[i] === '}') { depth--; if (depth === 0) { closeBrace = i; break; } }
+        }
+        if (closeBrace === -1) { result.push(line); continue; }
+        const props = line.substring(openBrace + 1, closeBrace);
+        const rest = line.substring(closeBrace + 1);
+        const stripped = props
+          .replace(/(?:^|,)\s*(?:visibility\s*:\s*['"][^'"]*['"]|autoAlpha\s*:\s*[\d.]+|opacity\s*:\s*[\d.]+)\s*/g, '')
+          .replace(/^,\s*|\s*,$/g, '')
+          .trim();
+        if (!stripped) continue;
+        const after = rest.replace(/^\s*,\s*[\d.-]+\s*/, '').replace(/\s*,\s*$/g, '').trimEnd();
+        result.push(`${prefix}${JSON.stringify(selector)}, {${stripped}}${after}`);
+        continue;
+      }
+    }
+    result.push(line);
+  }
+  return result.join('\n');
+}
+
+function stripVisibilityTweensOnClipElements(content) {
+  const clipIds = new Set();
+  const tagPattern = /<([a-z][\w:-]*)([^>]*\sclass\s*=\s*(['"])(.*?)\3[^>]*\sdata-start\s*=\s*['"][^'"]+['"][^>]*)>/gi;
+  let m;
+  while ((m = tagPattern.exec(content)) !== null) {
+    if (/\sdata-composition-id\s*=/.test(m[0])) continue;
+    if (/^(audio|video)$/i.test(m[1])) continue;
+    if (/\bclip\b/.test(m[4])) {
+      const idMatch = m[0].match(/\sid\s*=\s*['"]([^'"]+)['"]/i);
+      if (idMatch) clipIds.add(idMatch[1]);
+    }
+  }
+  if (clipIds.size === 0) return content;
+
+  return content.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (script) => {
+    if (!/\bset\s*\(|\.set\s*\(/i.test(script)) return script;
+    if (!isRegisteredMainTimelineScript(script)) return script;
+    return stripVisibilityFromRegisteredScript(script, clipIds);
   });
 }
 
@@ -432,6 +568,9 @@ function normalizeFreeformIndexHtml(html, files = {}, options = {}) {
   content = normalizeRootCompositionAttributes(content, { ...files, 'index.html': content }, durationOptions);
   content = ensureNarrationAudioElement(content, audio);
   content = ensureClipClassOnTimedElements(content);
+  content = stripVisibilityTweensOnClipElements(content);
+  content = normalizeTimedClipBoundaries(content);
+  content = allowOverflowOnEmphasisContainers(content);
   content = ensureTimelineRegistry(content, { ...files, 'index.html': content }, durationOptions);
   return content;
 }

@@ -132,7 +132,7 @@ http://localhost:3000
 ## 常用命令
 
 ```powershell
-# 启动开发服务：后端自动重启，前端热更新
+# 启动开发服务：后端稳定运行，前端热更新
 npm run dev
 
 # 启动 Express 服务和已构建前端

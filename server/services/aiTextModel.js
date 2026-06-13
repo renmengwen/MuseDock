@@ -243,6 +243,27 @@ function isAbortLikeError(error) {
   return error?.name === 'AbortError' || /abort|aborted|超时|timeout/i.test(normalizeString(error?.message));
 }
 
+function getFetchErrorDetail(error, apiKey) {
+  const parts = [
+    normalizeString(error?.message),
+    normalizeString(error?.cause?.code),
+    normalizeString(error?.cause?.message),
+  ].filter(Boolean);
+  return sanitizeErrorDetail([...new Set(parts)].join('：'), apiKey);
+}
+
+function isRetryableNetworkError(error) {
+  if (!error) return false;
+  if (isAbortLikeError(error)) return false;
+  const code = normalizeString(error?.cause?.code || error?.code).toUpperCase();
+  if (['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET'].includes(code)) {
+    return true;
+  }
+  return /fetch failed|network|socket|connect|econnreset|etimedout|eai_again|enotfound/i.test(
+    `${normalizeString(error?.message)} ${normalizeString(error?.cause?.message)}`,
+  );
+}
+
 async function callTextModel(options = {}) {
   const {
     messages = [],
@@ -317,8 +338,17 @@ async function callTextModel(options = {}) {
           continue;
         }
       }
+      if (isRetryableNetworkError(error)) {
+        const detail = getFetchErrorDetail(error, apiKey) || '网络请求异常';
+        if (log) log.warn(`${requestLabel} — 第 ${attempt + 1} 次网络请求失败：${detail}，${attempt < retryLimit ? '重试中...' : '重试已用尽'}`);
+        if (attempt < retryLimit) {
+          await wait(retryDelayMs * (attempt + 1));
+          attempt += 1;
+          continue;
+        }
+      }
       if (!isAbortLikeError(error)) {
-        const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
+        const detail = getFetchErrorDetail(error, apiKey) || '网络请求异常';
         return {
           success: false,
           configured: true,
@@ -424,6 +454,55 @@ async function callTextModel(options = {}) {
       });
     } catch (error) {
       cleanupResponseTimeout(response);
+      if (fallbackToNonStreamOnGatewayTimeout && isAbortLikeError(error)) {
+        if (log) log.warn(`${requestLabel} — 流式响应读取超时，降级为非流式重试`);
+        try {
+          const fallbackResponse = await postChatCompletions({
+            baseUrl,
+            apiKey,
+            modelId,
+            messages,
+            temperature,
+            stream: false,
+            fetchImpl,
+            timeoutMs: requestTimeoutMs,
+          });
+          if (fallbackResponse.ok) {
+            const parsedResponse = await readJsonResponse(fallbackResponse, apiKey);
+            cleanupResponseTimeout(fallbackResponse);
+            const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
+            const text = rawResponse && rawResponse.choices && rawResponse.choices[0]
+              && rawResponse.choices[0].message && rawResponse.choices[0].message.content;
+            if (typeof text === 'string') {
+              return {
+                success: true,
+                configured: true,
+                text,
+                model: toModelInfo(provider, modelId),
+                raw_response: rawResponse,
+                fallback: {
+                  from_stream: true,
+                  reason: 'stream_timeout',
+                },
+              };
+            }
+          } else {
+            cleanupResponseTimeout(fallbackResponse);
+          }
+        } catch (fallbackError) {
+          const detail = sanitizeErrorDetail(fallbackError && fallbackError.message, apiKey) || '网络请求异常';
+          return {
+            success: false,
+            configured: true,
+            message: `文本模型调用失败：${detail}`,
+            model: toModelInfo(provider, modelId),
+            fallback: {
+              from_stream: true,
+              reason: 'stream_timeout',
+            },
+          };
+        }
+      }
       const detail = sanitizeErrorDetail(isAbortLikeError(error)
         ? getAbortErrorMessage(error, requestTimeoutMs)
         : error?.message, apiKey) || '读取流式响应失败';

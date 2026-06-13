@@ -1,4 +1,4 @@
-const MAX_JSON_CHARS = 12000;
+﻿const MAX_JSON_CHARS = 12000;
 
 const ALLOWED_PROJECT_FILES = new Set([
   'index.html',
@@ -137,11 +137,14 @@ function buildFreeformProjectMessages({ run = {}, brief = {}, skillContext = '',
         '5. 所有 files 内容必须是字符串。',
         '6. index.html 应是完整 HTML，可以直接作为 HyperFrames 工程入口。',
         '7. design.md 记录视觉设计、动效、验证和渲染说明。',
-        '8. index.html 的根合成元素必须包含 data-composition-id="main" 和 data-duration="<总秒数>"；如果使用 CSS/WAAPI/requestAnimationFrame 动画，不要省略 data-duration。',
-        '9. CSS font-family 只能使用 HyperFrames 可映射字体，例如 inter、jetbrains-mono、montserrat、noto-sans、open-sans；不要使用 Microsoft YaHei、PingFang SC、SFMono-Regular 等系统字体名。',
-        '10. 首屏不得一次性展示所有信息。请将首屏中的关键短语、能力标签、步骤标签、卖点词或主题关键词拆成多个独立元素，并在 0.2-2.5 秒内按节奏逐个进入、强调或点亮；具体文案应根据本次主题自动生成，不要使用固定模板词。',
-        '11. 每个主要场景至少设计 4 个元素级 motion beat，让标题、副标题、卡片、代码行、图标、数据点、标签或核心对象分层出现；不要只做整页显示/隐藏。',
-        '12. index.html 必须注册确定性的 GSAP 时间线：window.__timelines["main"] = tl；时间线需 paused: true，并使用 tl.from、tl.to 或 tl.fromTo 编排元素级动画。不要依赖 setInterval、performance.now、requestAnimationFrame 或无限 repeat 动画。',
+        '8. index.html 的根合成元素必须包含 data-composition-id="main" 和 data-duration="<总秒数>"，但根合成元素禁止包含 data-start 或 data-track-index；只有内部 scene/clip 元素可以使用 data-start、data-duration、data-track-index，否则会触发 overlapping_clips_same_track lint 错误。',
+        '9. 内部 scene/clip 如果放在同一个 data-track-index 上，必须首尾相接，不得重叠；data-start 和 data-duration 最多保留 2 位小数，不要输出 55.440000000000005 这类浮点长尾；如果需要与其它元素同时间出现，必须使用不同 data-track-index。',
+        '10. CSS font-family 只能使用 HyperFrames 可映射字体，例如 inter、jetbrains-mono、montserrat、noto-sans、open-sans；不要使用 Microsoft YaHei、PingFang SC、SFMono-Regular 等系统字体名。',
+        '11. 首屏不得一次性展示所有信息。请将首屏中的关键短语、能力标签、步骤标签、卖点词或主题关键词拆成多个独立元素，并在 0.2-2.5 秒内按节奏逐个进入、强调或点亮；具体文案应根据本次主题自动生成，不要使用固定模板词。',
+        '12. 每个主要场景至少设计 4 个元素级 motion beat，让标题、副标题、卡片、代码行、图标、数据点、标签或核心对象分层出现；不要只做整页显示/隐藏。',
+        '13. index.html 必须注册确定性的 GSAP 时间线：window.__timelines["main"] = tl；时间线需 paused: true，并使用 tl.from、tl.to 或 tl.fromTo 编排元素级动画。不要依赖 setInterval、performance.now、requestAnimationFrame 或无限 repeat 动画。',
+        '14. 如果 scene 通过 opacity/autoAlpha 退出，必须在退出结束时间追加硬隐藏，例如 tl.set("#scene01", { opacity: 0 }, 13.12)。注意：scene 元素（class 含 "clip"）的 visibility 由框架自动管理，禁止在 GSAP 中对 clip 元素设置 visibility/display，否则触发 gsap_animates_clip_element lint 错误；如需同时控制 visibility，请将内容包在子 <div> 中并对子元素做动画。',
+        '15. 大字号中文、标题、关键词、glitch word、burst word 或任何会 scale > 1.1 入场的文字，不能放在 overflow:hidden 的固定高度容器里；容器应使用 overflow:visible、足够高度，或添加 data-layout-allow-overflow="true"，避免 inspect 报 clipped_text/text_box_overflow。',
         '',
         '输出示例：',
         safeJson({
@@ -159,11 +162,41 @@ function buildFreeformProjectMessages({ run = {}, brief = {}, skillContext = '',
 }
 
 function parseJsonObject(text = '') {
-  const value = JSON.parse(stripCodeFence(text));
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('响应不是 JSON 对象');
+  const cleaned = stripCodeFence(text);
+  // AI 模型有时会用中文引号 「」""'' 代替标准双引号，统一清洗
+  const sanitized = cleaned
+    .replace(/[「『"']/g, '"')  // 「『"' → "
+    .replace(/[」』"']/g, '"');   // 」』"' → "
+
+  const candidates = [cleaned];
+  if (sanitized !== cleaned) candidates.push(sanitized);
+
+  for (const candidate of candidates) {
+    // 1. 直接解析
+    try {
+      const value = JSON.parse(candidate);
+      if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+    } catch (_) {}
+    // 2. 正则提取第一个完整的 JSON 对象（非贪婪，容错 AI 输出的额外文字）
+    const jsonMatch = candidate.match(/\{[\s\S]*?\}/);
+    if (jsonMatch && jsonMatch[0] !== candidate) {
+      try {
+        const value = JSON.parse(jsonMatch[0]);
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+      } catch (_) {}
+    }
+    // 3. 贪婪匹配兜底（处理嵌套大括号的情况）
+    const greedyMatch = candidate.match(/\{[\s\S]*\}/);
+    if (greedyMatch && greedyMatch[0] !== jsonMatch?.[0]) {
+      try {
+        const value = JSON.parse(greedyMatch[0]);
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+      } catch (_) {}
+    }
   }
-  return value;
+  // 记录原始内容以便诊断（截取前 500 字符）
+  const preview = String(text || '').slice(0, 500);
+  throw new Error(`响应不是 JSON 对象。原始内容预览：${preview}`);
 }
 
 function validateProjectFiles(files) {
