@@ -14,6 +14,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { api } from '../api/client.js';
+import { CreativeVideoEditor } from '../components/one-click-editor/CreativeVideoEditor.jsx';
 
 const CREATIVE_TASKS_STORAGE_KEY = 'musedock.creative.tasks.v1';
 
@@ -434,6 +435,7 @@ function CreativeVideoPreview({ videoUrl }) {
 }
 
 function CreativeTaskDetail({ status, message, workflowId, workflow }) {
+  const [editorOpen, setEditorOpen] = useState(false);
   if (!workflowId && !workflow) return null;
   const videoUrl = getWorkflowVideoUrl(workflow);
 
@@ -450,7 +452,13 @@ function CreativeTaskDetail({ status, message, workflowId, workflow }) {
       </div>
       <WorkflowStepProgress workflow={workflow} />
       {workflow?.status === 'done' && videoUrl ? (
-        <CreativeVideoPreview videoUrl={videoUrl} />
+        <>
+          <CreativeVideoPreview videoUrl={videoUrl} />
+          <button className="editorToggle" onClick={() => setEditorOpen(!editorOpen)}>
+            {editorOpen ? '关闭编辑器' : '编辑成片'}
+          </button>
+          {editorOpen && <CreativeVideoEditor workflowId={workflowId} api={api} onRendered={() => setEditorOpen(false)} />}
+        </>
       ) : (
         <div className={`creativeDetailMessage ${getStatusMessageClass(status)}`} aria-live="polite">
           {message || '创作任务已打开，正在获取最新进度...'}

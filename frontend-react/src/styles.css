@@ -1299,3 +1299,184 @@ a { color: #fe2c55; text-decoration: none; }
     max-height: none;
   }
 }
+
+.one-click-editor {
+  margin-top: 16px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.one-click-editor-status {
+  padding: 8px 12px;
+  font-size: 13px;
+  background: hsl(var(--muted));
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.one-click-editor-status.error {
+  background: hsl(var(--destructive) / 0.1);
+  color: hsl(var(--destructive));
+}
+
+.one-click-editor-body {
+  display: flex;
+  gap: 0;
+}
+
+.one-click-editor-scene-list {
+  width: 220px;
+  min-width: 180px;
+  border-right: 1px solid hsl(var(--border));
+  padding: 12px;
+  background: hsl(var(--muted));
+}
+
+.one-click-editor-scene-list h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.one-click-editor-scene-list .scene-item {
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.one-click-editor-scene-list .scene-item:hover {
+  background: hsl(var(--accent));
+}
+
+.one-click-editor-scene-list .scene-item.selected {
+  background: hsl(var(--primary) / 0.15);
+  font-weight: 600;
+}
+
+.one-click-editor-scene-list .scene-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.one-click-editor-scene-list .scene-actions button {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  background: hsl(var(--card));
+  cursor: pointer;
+}
+
+.one-click-editor-scene-list .scene-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.one-click-editor-edit-panel {
+  flex: 1;
+  padding: 12px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.one-click-editor-edit-panel h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.one-click-editor-edit-panel .edit-section {
+  margin-bottom: 16px;
+}
+
+.one-click-editor-edit-panel .edit-section label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+  color: hsl(var(--muted-foreground));
+}
+
+.one-click-editor-edit-panel .edit-section input,
+.one-click-editor-edit-panel .edit-section textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid hsl(var(--input));
+  border-radius: 4px;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.one-click-editor-edit-panel .edit-section button {
+  padding: 4px 12px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 4px;
+  background: hsl(var(--card));
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.one-click-editor-edit-panel .edit-section button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.one-click-editor-edit-panel .caption-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.one-click-editor-edit-panel .caption-row input {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.one-click-editor-edit-panel .edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.one-click-editor-edit-panel .edit-actions button {
+  padding: 6px 16px;
+  border: 1px solid hsl(var(--primary));
+  border-radius: 4px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.one-click-editor-edit-panel .edit-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.editorToggle {
+  margin-top: 12px;
+  padding: 6px 16px;
+  border: 1px solid hsl(var(--primary));
+  border-radius: 4px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-size: 13px;
+  cursor: pointer;
+}
+
+@media (max-width: 768px) {
+  .one-click-editor-body {
+    flex-direction: column;
+  }
+  .one-click-editor-scene-list {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+}
