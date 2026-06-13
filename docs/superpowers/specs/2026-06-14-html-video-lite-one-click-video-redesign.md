@@ -12,6 +12,7 @@
 - 生成完成后保存可编辑工程源数据，支持字幕、旁白、画面文字、场景时长、场景顺序、单场景重写、局部 TTS 和二创版本。
 - AI 不再输出完整工程，也不直接输出 HTML、CSS、JS 或 GSAP timeline。
 - AI 输出结构化规格：`scene_spec` 和 `frame_specs`。
+- AI 规格生成拆成两次调用：先生成 `scene_spec`，校验通过后再生成 `frame_specs`。
 - 后端模板渲染器负责把规格确定性转换为 HyperFrames 工程。
 - 渲染层通过 `RenderAdapter` 抽象，当前可继续接 HyperFrames，后续可切到 Playwright/逐帧渲染。
 - 视觉质检必须能拦住白底文字、空白帧、低信息密度、帧间变化不足等坏成片。
@@ -37,7 +38,10 @@
 本项目学习第一点，但不直接照搬第二点。原因是当前项目追求稳定一键成片，不是开放式 Studio。我们改为：
 
 ```text
-AI 输出 scene_spec + frame_specs JSON
+AI 第一次输出 scene_spec JSON
+ -> scene_spec 校验
+AI 第二次输出 frame_specs JSON
+ -> frame_specs 校验
 后端 template_renderer 生成 HTML/CSS/GSAP
 RenderAdapter 渲染视频
 Visual QA 拦截坏画面
@@ -63,6 +67,7 @@ Visual QA 拦截坏画面
       "order": 1,
       "start": 0,
       "duration": 8,
+      "kind": "text",
       "narration_text": "旁白文案",
       "captions": [
         {
@@ -148,6 +153,8 @@ AI 只输出 JSON，不输出工程文件。
 - `template`、`layout`、`background`、`motion`、`visual_layers.type` 必须从允许枚举中选择。
 - 不要把视觉意图写进 `cards` 文本。例如“深色科技背景”“光晕扩散效果”不能作为卡片文案。
 - 如果想表达视觉效果，必须用 `background`、`motion`、`visual_layers` 表达。
+- `visual_text.cards` 里的每个字符串都必须是最终观众能看到的实际内容文案，不能是制作说明、镜头说明或视觉效果描述。
+- 输出前必须自检：如果某个字段包含“背景”“光效”“动画”“转场”“布局”“发光”“粒子”“镜头”等制作词汇，必须确认它位于 `background`、`motion` 或 `visual_layers`，不能位于 `headline`、`keywords`、`cards`、`caption.text` 或 `narration_text`。
 
 允许枚举首版固定为：
 
@@ -161,6 +168,97 @@ AI 只输出 JSON，不输出工程文件。
   "visual_layer_type": ["glow_panel", "grid_lines", "shape_blocks", "number_counter", "progress_bar", "connector_lines"]
 }
 ```
+
+## AI 调用拆分
+
+首版使用两次 AI 调用，不能一次性要求模型输出完整 `scene_spec + frame_specs` 大 JSON。
+
+### 第一次调用：scene_spec
+
+输入：
+
+- 用户主题/文案/来源摘要
+- 创作上下文
+- 目标比例和时长
+- 字幕和旁白要求
+
+输出：
+
+```json
+{
+  "scene_spec": {
+    "version": 1,
+    "title": "视频标题",
+    "aspect_ratio": "16:9",
+    "target_duration_sec": 60,
+    "scenes": [
+      {
+        "id": "scene_01",
+        "order": 1,
+        "start": 0,
+        "duration": 8,
+        "kind": "text",
+        "narration_text": "旁白文案",
+        "captions": [],
+        "visual_text": {
+          "headline": "观众可见标题",
+          "keywords": ["观众可见关键词"],
+          "cards": ["观众可见卡片文案"]
+        }
+      }
+    ]
+  }
+}
+```
+
+要求：
+
+- `scene_spec.scenes[].kind` 必须从 `text/data/quote/steps/comparison/cta` 中选择。
+- `visual_text` 只能放观众可见内容。
+- 不允许输出 `frame_specs`。
+- 不允许输出任何 HTML 或工程文件。
+
+### 第二次调用：frame_specs
+
+输入：
+
+- 已校验通过的 `scene_spec`
+- 模板枚举
+- 布局/背景/动效/视觉层枚举
+- 每种模板的简短能力说明
+
+输出：
+
+```json
+{
+  "frame_specs": [
+    {
+      "id": "frame_01_01",
+      "scene_id": "scene_01",
+      "order": 1,
+      "start": 0,
+      "duration": 4,
+      "kind": "text",
+      "template": "hero_title",
+      "layout": "center_stack",
+      "background": "dark_gradient",
+      "motion": "fade_up",
+      "text_layers": [],
+      "visual_layers": []
+    }
+  ]
+}
+```
+
+要求：
+
+- `frame_specs[].kind` 必须与所属 scene 的 `kind` 兼容。
+- frame 的 `start + duration` 必须落在所属 scene 时间范围内。
+- 所有视觉效果只能通过枚举字段表达。
+- 不允许改写 `scene_spec` 文案。
+- 不允许输出 HTML、CSS、JS 或工程文件。
+
+这两次调用之间必须有确定性校验。第一次失败只重试 `scene_spec`，第二次失败只重试 `frame_specs`。
 
 ## 后端架构
 
@@ -217,6 +315,33 @@ AI 只输出 JSON，不输出工程文件。
 - 注册可用模板
 - 定义每个模板支持的 `kind/layout/background/motion`
 - 提供模板默认 token，例如颜色、字体、字幕位置、动效参数
+- 提供背景、布局、动效和视觉层的查表映射，禁止 renderer 临时自由拼接未登记样式。
+
+首版模板库必须至少包含：
+
+| template | 适用 kind | 默认布局 | 默认背景 | 默认动效 | 用途 |
+| --- | --- | --- | --- | --- | --- |
+| `hero_title` | `text/quote` | `center_stack` | `dark_gradient` | `fade_up` | 开场标题、核心观点 |
+| `keyword_burst` | `text` | `center_stack` | `radial_spotlight` | `stagger_cards` | 关键词爆发、卖点罗列 |
+| `process_steps` | `steps` | `three_step_grid` | `soft_grid` | `slide_in` | 步骤、流程、教程 |
+| `compare_split` | `comparison` | `split_compare` | `brand_blocks` | `slide_in` | 前后对比、方案对比 |
+| `data_cards` | `data` | `stat_focus` | `dark_gradient` | `scale_pop` | 数字、指标、排行榜 |
+| `cta_end` | `cta` | `center_stack` | `radial_spotlight` | `glow_pulse` | 结尾行动号召 |
+
+首版样式映射必须是预置表：
+
+```text
+background = "dark_gradient"
+  -> 固定 CSS 渐变、暗色底、可读文字色
+
+motion = "fade_up"
+  -> 固定 GSAP fromTo 配置
+
+visual_layer.type = "glow_panel"
+  -> 固定 DOM 结构 + 固定 CSS class + 固定 timeline 片段
+```
+
+renderer 只能查表和填充数据，不允许根据 AI 文本动态生成未知 CSS 或未知 GSAP。
 
 ### hyperframesTemplateRenderer
 
@@ -232,6 +357,25 @@ AI 只输出 JSON，不输出工程文件。
 - 每个 frame 必须有稳定尺寸、背景、主要文本层和时间控制。
 - 字幕必须有清晰样式、位置和显示时段。
 - 生成 HTML 必须可通过 HyperFrames lint/validate/inspect。
+- 每个 frame 必须根据 `frame_spec.template` 选择一个模板定义。
+- `text_layers` 必须映射为真实 DOM 元素，例如标题、副标题、卡片、数字、步骤项。
+- `layout` 必须映射为预置 CSS class 或 style token。
+- `background` 必须映射为预置 CSS 背景代码。
+- `motion` 必须映射为预置 GSAP timeline 片段。
+- `visual_layers` 必须映射为预置装饰 DOM 和 timeline 片段。
+
+renderer 的实现模型：
+
+```text
+frame_spec.template
+ -> templateRegistry.getTemplate()
+ -> template.renderFrame(frame_spec, scene_spec)
+ -> HTML fragments + CSS classes + timeline fragments
+ -> composeDocument()
+ -> index.html
+```
+
+renderer 不是自由生成器，只做模板查表、数据绑定和文档组装。
 
 ### renderAdapter
 
@@ -272,6 +416,16 @@ AI 只输出 JSON，不输出工程文件。
 - 画面主体集中在左上角的默认文档流风险
 
 只要这些检查失败，就不能把 workflow 标记为最终成功。
+
+首版量化阈值：
+
+- 平均亮度 `> 230` 判定为近白帧。
+- 平均亮度 `< 25` 判定为近黑帧。
+- 近白帧或近黑帧占抽样帧比例 `> 30%`，质检失败。
+- contact sheet 文件小于 `20KB`，质检失败。
+- 单帧亮度标准差 `< 12` 且边缘/颜色变化很低，判定为低信息帧。
+- 低信息帧比例 `> 40%`，质检失败。
+- 首版不使用 OCR，使用像素级分析；可用 `sharp`、`jimp` 或已有图像处理能力实现。
 
 ### creativeWorkflowFacade
 
@@ -319,6 +473,16 @@ AI 只输出 JSON，不输出工程文件。
 - 管理字幕编辑 draft
 - 直接拼 scene/frame payload
 - 直接写复杂编辑表单
+
+### 与 Hyperframes Studio 的关系
+
+首版 `CreativeVideoEditor` 不替换现有 `HyperframesStudioPage`。
+
+- `OneClickCreativePage` 是一键生成入口。
+- `CreativeVideoEditor` 是一键生成完成后的结构化编辑入口。
+- `HyperframesStudioPage` 保持为自由工程/高级 Studio 能力。
+- 首版不在两个页面之间共享复杂组件；只复用通用 API client、状态组件、预览组件和基础 UI 组件。
+- 后续如果要统一 Studio 和一键编辑，需要单独设计迁移计划。
 
 ### hook 层
 
