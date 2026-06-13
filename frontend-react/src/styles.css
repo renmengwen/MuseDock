@@ -1475,6 +1475,167 @@ a { color: #fe2c55; text-decoration: none; }
   cursor: pointer;
 }
 
+.creative-video-editor {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.creative-video-editor-status {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #eef2f7;
+  color: #233044;
+  font-size: 13px;
+}
+
+.creative-video-editor-status.error {
+  background: #fff0f0;
+  color: #9f1d1d;
+}
+
+.creative-video-editor-status.saving,
+.creative-video-editor-status.loading,
+.creative-video-editor-status.rerendering,
+.creative-video-editor-status.remixing,
+.creative-video-editor-status.rewriting,
+.creative-video-editor-status.tts {
+  background: #eef6ff;
+  color: #165a9f;
+}
+
+.creative-video-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.creative-video-editor-toolbar button,
+.creative-video-editor-panel button {
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: #111827;
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.creative-video-editor-toolbar button:disabled,
+.creative-video-editor-panel button:disabled,
+.creative-video-editor-scene-list button:disabled,
+.creative-video-editor-frame-list button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.creative-video-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.4fr) minmax(150px, 0.8fr) minmax(220px, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.creative-video-editor-scene-list,
+.creative-video-editor-frame-list,
+.creative-video-editor-panel,
+.creative-video-editor-render-versions {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.creative-video-editor-scene-list h3,
+.creative-video-editor-frame-list h3,
+.creative-video-editor-panel h3,
+.creative-video-editor-render-versions h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.creative-video-editor-scene-list button,
+.creative-video-editor-frame-list button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  border: 1px solid #d8dee8;
+  border-radius: 6px;
+  padding: 8px;
+  background: #f8fafc;
+  color: #233044;
+  text-align: left;
+  cursor: pointer;
+}
+
+.creative-video-editor-scene-list button.active,
+.creative-video-editor-frame-list button.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.creative-video-editor-section,
+.creative-video-editor-panel {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fbfdff;
+}
+
+.creative-video-editor-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.creative-video-editor-panel label,
+.creative-video-editor-section label {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.creative-video-editor-panel input,
+.creative-video-editor-panel textarea,
+.creative-video-editor-section input,
+.creative-video-editor-section textarea {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+  color: #111827;
+  background: #ffffff;
+}
+
+.creative-video-editor-render-versions div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+}
+
+@media (max-width: 1100px) {
+  .creative-video-editor-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .creative-video-editor-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .one-click-editor-error-boundary {
   padding: 24px;
   text-align: center;

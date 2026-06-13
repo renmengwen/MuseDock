@@ -14,7 +14,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { api } from '../api/client.js';
-import { CreativeVideoEditor } from '../components/one-click-editor/CreativeVideoEditor.jsx';
+import { CreativeVideoEditor } from '../components/creative-video-editor/CreativeVideoEditor.jsx';
 
 const CREATIVE_TASKS_STORAGE_KEY = 'musedock.creative.tasks.v1';
 
