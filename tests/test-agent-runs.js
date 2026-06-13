@@ -2292,6 +2292,12 @@ async function run() {
   const originalGetDouyinAgentRun = agentRuns.getDouyinAgentRun;
   const originalDecideNextAction = agentRuns.decideNextAction;
   const originalCompressDouyinRunSceneNarration = agentRuns.compressDouyinRunSceneNarration;
+  const creativeContextForRoute = {
+    input: { mode: 'text', raw_text: '本地创作方向', use_research: false, asset_ids: [] },
+    source_context: { status: 'ready', kind: 'text', summary: '本地创作方向' },
+    research_context: { status: 'disabled', sources: [] },
+    asset_context: { status: 'disabled', assets: [] },
+  };
   agentRuns.createDouyinAgentRun = async () => ({
     success: false,
     status: 'failed',
@@ -2380,7 +2386,8 @@ async function run() {
   agentRuns.generateDouyinRunHyperframesFreeformBrief = async (routeAwemeId, routeRunId, options = {}) => {
     assert.strictEqual(routeAwemeId, awemeId);
     assert.strictEqual(routeRunId, 'ok-run');
-    assert.deepStrictEqual(options.briefOptions, { tone: 'route brief' });
+    assert.strictEqual(options.briefOptions.tone, 'route brief');
+    assert.deepStrictEqual(options.briefOptions.creative_context, creativeContextForRoute);
     return {
       success: true,
       aweme_id: routeAwemeId,
@@ -2405,7 +2412,8 @@ async function run() {
   agentRuns.generateDouyinRunHyperframesFreeformProject = async (routeAwemeId, routeRunId, options = {}) => {
     assert.strictEqual(routeAwemeId, awemeId);
     assert.strictEqual(routeRunId, 'ok-run');
-    assert.deepStrictEqual(options.projectOptions, { theme: 'route project' });
+    assert.strictEqual(options.projectOptions.theme, 'route project');
+    assert.deepStrictEqual(options.projectOptions.creative_context, creativeContextForRoute);
     return {
       success: true,
       aweme_id: routeAwemeId,
@@ -2641,6 +2649,7 @@ async function run() {
 
     const freeformBriefResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/brief`, {
       tone: 'route brief',
+      creative_context: creativeContextForRoute,
     });
     assert.strictEqual(freeformBriefResponse.statusCode, 200);
     assert.strictEqual(freeformBriefResponse.body.success, true);
@@ -2656,6 +2665,7 @@ async function run() {
 
     const freeformProjectResponse = await requestJson(server, 'POST', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/project`, {
       theme: 'route project',
+      creative_context: creativeContextForRoute,
     });
     assert.strictEqual(freeformProjectResponse.statusCode, 200);
     assert.strictEqual(freeformProjectResponse.body.success, true);

@@ -42,6 +42,26 @@ async function run() {
   assert.equal(failed.validate, 'failed');
   assert.match(failed.message, /validate/);
 
+  const lintStdoutProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hf-freeform-quality-lint-stdout-'));
+  fs.writeFileSync(path.join(lintStdoutProjectDir, 'index.html'), '<html></html>');
+  const lintStdoutFailed = await quality.checkFreeformProject({
+    projectDir: lintStdoutProjectDir,
+    runCommand: async (_command, args) => ({
+      ok: args[1] !== 'lint',
+      code: args[1] === 'lint' ? 1 : 0,
+      stdout: args[1] === 'lint'
+        ? 'root_missing_composition_id [stage]: Root composition is missing `data-composition-id`.'
+        : 'ok',
+      stderr: args[1] === 'lint'
+        ? 'npm warn exec The following package was not found and will be installed: hyperframes@0.6.95'
+        : '',
+    }),
+  });
+
+  assert.equal(lintStdoutFailed.success, false);
+  assert.match(lintStdoutFailed.message, /root_missing_composition_id/);
+  assert.doesNotMatch(lintStdoutFailed.message, /npm warn exec/);
+
   const outputPath = path.join(projectDir, 'output.mp4');
   fs.writeFileSync(outputPath, 'fake mp4');
   const inspect = await quality.inspectRenderedVideo({

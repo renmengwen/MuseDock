@@ -168,6 +168,16 @@ export const api = {
       body: JSON.stringify({ config, values }),
     });
   },
+  createCreativeWorkflow(payload) {
+    return requestJson('/api/creative-workflows', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+  getCreativeWorkflow(workflowId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}`);
+  },
   createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}, agentConfigOverride = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',

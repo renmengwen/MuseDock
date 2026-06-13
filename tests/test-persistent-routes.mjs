@@ -1,6 +1,39 @@
 import assert from 'assert';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
 
-import { getPersistentRouteState } from '../frontend-react/src/utils/persistentRoutes.js';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const routePath = path.join(__dirname, '../frontend-react/src/utils/persistentRoutes.js');
+const routeSource = fs.readFileSync(routePath, 'utf-8');
+const routeModule = await import(`data:text/javascript;base64,${Buffer.from(`${routeSource}\n//# sourceURL=${pathToFileURL(routePath).href}`).toString('base64')}`);
+const { getPersistentRouteState } = routeModule;
+
+const defaultState = getPersistentRouteState(undefined, '/', '');
+assert.deepStrictEqual(defaultState, {
+  crawlPlatform: 'douyin',
+  recordsPlatform: 'douyin',
+  mediaPlatform: '',
+  mediaId: '',
+  aiSearch: '',
+  creativeWorkflowId: '',
+  studioAwemeId: '',
+  studioRunId: '',
+  activePage: 'creative',
+});
+
+const creative = getPersistentRouteState(undefined, '/creative', '');
+assert.strictEqual(creative.activePage, 'creative');
+assert.strictEqual(creative.creativeWorkflowId, '');
+
+const creativeDetail = getPersistentRouteState(creative, '/creative/wf-123', '');
+assert.strictEqual(creativeDetail.activePage, 'creative');
+assert.strictEqual(creativeDetail.creativeWorkflowId, 'wf-123');
+
+const creativeToMedia = getPersistentRouteState(creative, '/media/douyin/12345', '');
+assert.strictEqual(creativeToMedia.mediaPlatform, 'douyin');
+assert.strictEqual(creativeToMedia.mediaId, '12345');
+assert.strictEqual(creativeToMedia.activePage, 'media');
 
 const initial = getPersistentRouteState(undefined, '/crawl/douyin', '');
 assert.deepStrictEqual(initial, {
@@ -9,6 +42,7 @@ assert.deepStrictEqual(initial, {
   mediaPlatform: '',
   mediaId: '',
   aiSearch: '',
+  creativeWorkflowId: '',
   studioAwemeId: '',
   studioRunId: '',
   activePage: 'crawl',

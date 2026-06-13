@@ -4,9 +4,10 @@ const DEFAULT_STATE = {
   mediaPlatform: '',
   mediaId: '',
   aiSearch: '',
+  creativeWorkflowId: '',
   studioAwemeId: '',
   studioRunId: '',
-  activePage: 'crawl',
+  activePage: 'creative',
 };
 
 function splitPath(pathname = '') {
@@ -23,7 +24,15 @@ function normalizePlatform(value) {
 export function getPersistentRouteState(previous = DEFAULT_STATE, pathname = '/', search = '') {
   const state = { ...DEFAULT_STATE, ...(previous || {}) };
   const parts = splitPath(pathname);
-  const section = parts[0] || 'crawl';
+  const section = parts[0] || 'creative';
+
+  if (section === 'creative') {
+    return {
+      ...state,
+      creativeWorkflowId: parts[1] || '',
+      activePage: 'creative',
+    };
+  }
 
   if (section === 'records') {
     return {

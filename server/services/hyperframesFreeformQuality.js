@@ -29,6 +29,10 @@ async function runHyperframesCheck(projectDir, name, args, runCommand) {
   return result;
 }
 
+function summarizeFailedCheck(result = {}) {
+  return result.error || result.stdout || result.stderr || `exit ${result.code}`;
+}
+
 async function checkFreeformProject({ projectDir, runCommand = defaultRunCommand } = {}) {
   if (!projectDir || !fs.existsSync(path.join(projectDir, 'index.html'))) {
     return {
@@ -58,7 +62,7 @@ async function checkFreeformProject({ projectDir, runCommand = defaultRunCommand
     summary[name] = result.ok ? 'passed' : 'failed';
     if (!result.ok && summary.success) {
       summary.success = false;
-      summary.message = `动画工程 ${name} 校验失败：${result.error || result.stderr || result.stdout || `exit ${result.code}`}`;
+      summary.message = `动画工程 ${name} 校验失败：${summarizeFailedCheck(result)}`;
       summary.stdout = result.stdout;
       summary.stderr = result.stderr;
     }

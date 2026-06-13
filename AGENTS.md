@@ -26,3 +26,8 @@
 
 - 代码 review 结果、review 评论转述和 review 修复说明默认使用中文。
 - Git 提交信息默认使用中文。
+
+## PowerShell 中文读取
+
+- 使用 PowerShell 读取包含中文的文件时，必须显式指定编码，例如 `Get-Content -Encoding UTF8`，避免终端按错误编码显示乱码。
+- 如果 PowerShell 控制台仍然显示中文乱码，应改用 Unicode 转义或 UTF-8 字节方式校验文件内容，再进行 review、修改说明或运行结果转述。
