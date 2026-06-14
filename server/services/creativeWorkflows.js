@@ -403,6 +403,7 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
     stages,
     result: null,
     error: null,
+    skipValidation: normalized.data.skip_validation === true,
     created_at: now,
     updated_at: now,
   };
@@ -741,6 +742,10 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     };
   }
 
+  if (options.skipValidation === undefined && record.skipValidation === true) {
+    options = { ...options, skipValidation: true };
+  }
+
   const failIfStoppedOrNull = result => {
     if (result === WORKFLOW_STOPPED) {
       return createWorkflowStoppedSummary(workflowId);
@@ -821,10 +826,16 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     return stoppedOrFailed;
   }
 
+  let skipValidation = options.skipValidation === true;
+  if (!skipValidation && services.aiModelConfig) {
+    try { skipValidation = await services.aiModelConfig.getSkipValidation({ rootDir }); } catch {}
+  }
+
   stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'project', rootDir, async () => ensureSuccess(
     await services.agentRuns.generateDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
       useHtmlVideoLiteWorkflow: true,
+      skipValidation,
       projectOptions: {
         creative_context: record.creative_context,
       },
@@ -835,14 +846,16 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     return stoppedOrFailed;
   }
 
-  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'check', rootDir, async () => ensureSuccess(
-    await services.agentRuns.checkDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
-      rootDir: mediaRoot,
-    }),
-    '工程校验失败。',
-  ), services));
-  if (stoppedOrFailed) {
-    return stoppedOrFailed;
+  if (!skipValidation) {
+    stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'check', rootDir, async () => ensureSuccess(
+      await services.agentRuns.checkDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
+        rootDir: mediaRoot,
+      }),
+      '工程校验失败。',
+    ), services));
+    if (stoppedOrFailed) {
+      return stoppedOrFailed;
+    }
   }
 
   stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'render', rootDir, async () => ensureSuccess(
@@ -855,15 +868,18 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     return stoppedOrFailed;
   }
 
-  const inspectResult = await runStage(record, 'inspect', rootDir, async () => ensureSuccess(
-    await services.agentRuns.inspectDouyinRunHyperframesFreeformVideo(record.aweme_id, record.run_id, {
-      rootDir: mediaRoot,
-    }),
-    '视频巡检失败。',
-  ), services);
-  stoppedOrFailed = failIfStoppedOrNull(inspectResult);
-  if (stoppedOrFailed) {
-    return stoppedOrFailed;
+  let inspectResult = null;
+  if (!skipValidation) {
+    inspectResult = await runStage(record, 'inspect', rootDir, async () => ensureSuccess(
+      await services.agentRuns.inspectDouyinRunHyperframesFreeformVideo(record.aweme_id, record.run_id, {
+        rootDir: mediaRoot,
+      }),
+      '视频巡检失败。',
+    ), services);
+    stoppedOrFailed = failIfStoppedOrNull(inspectResult);
+    if (stoppedOrFailed) {
+      return stoppedOrFailed;
+    }
   }
 
   if (!await workflowFileExists(workflowId, rootDir)) {

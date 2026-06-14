@@ -73,6 +73,28 @@ const visualOnlyBackground = frameSpec.validateFrameSpecs({
 }, sceneSpec);
 assert.equal(visualOnlyBackground.success, true);
 
+const frameWithSceneFallbacks = frameSpec.validateFrameSpecs({
+  frames: [
+    raw.frames[0],
+    {
+      id: 'frame_02',
+      scene_id: 'scene_02',
+      start: 0,
+      kind: 'text',
+      template: 'cta_end',
+      layout: 'center_stack',
+      background: 'radial_spotlight',
+      motion: 'glow_pulse',
+      text_layers: [{ id: 'cta', role: 'headline', text: '马上行动', emphasis: 'primary' }],
+      visual_layers: [],
+    },
+  ],
+}, sceneSpec);
+assert.equal(frameWithSceneFallbacks.success, true);
+assert.equal(frameWithSceneFallbacks.frame_specs.frames[1].start, 8);
+assert.equal(frameWithSceneFallbacks.frame_specs.frames[1].duration, 6);
+assert.equal(frameWithSceneFallbacks.frame_specs.frames[1].kind, 'cta');
+
 const missingTextLayer = frameSpec.validateFrameSpecs({
   frames: [{ ...raw.frames[0], text_layers: [] }],
 }, sceneSpec);

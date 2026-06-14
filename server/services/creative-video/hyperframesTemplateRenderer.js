@@ -1,6 +1,21 @@
+const fs = require('fs');
+const path = require('path');
 const sceneSpecService = require('./sceneSpecService');
 const frameSpecService = require('./frameSpecService');
 const templateRegistry = require('./templateRegistry');
+
+const GSAP_LOCAL_PATH = path.resolve(__dirname, '../../../node_modules/gsap/dist/gsap.min.js');
+let gsapBundleCache = null;
+
+function getGsapBundle() {
+  if (gsapBundleCache !== null) return gsapBundleCache;
+  try {
+    gsapBundleCache = fs.readFileSync(GSAP_LOCAL_PATH, 'utf8');
+  } catch {
+    gsapBundleCache = '';
+  }
+  return gsapBundleCache;
+}
 
 const ASPECT_RATIOS = {
   '16:9': { width: 1920, height: 1080 },
@@ -122,7 +137,7 @@ ${fragments.css}
 ${fragments.html}
 ${captionsHtml}
   </main>
-  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+  <script src="./gsap.min.js"></script>
   <script>
     window.__timelines = window.__timelines || {};
     const tl = gsap.timeline({ paused: true });
@@ -234,6 +249,7 @@ function renderHyperframesProjectFiles({ sceneSpec, frameSpecs } = {}) {
     frame_specs: frameValidation.frame_specs,
     files: {
       'index.html': indexHtml,
+      'gsap.min.js': getGsapBundle(),
       'meta.json': JSON.stringify(meta, null, 2),
       'hyperframes.json': JSON.stringify(hyperframes, null, 2),
       'scene_spec.json': JSON.stringify(sceneValidation.scene_spec, null, 2),

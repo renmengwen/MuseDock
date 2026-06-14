@@ -10,6 +10,9 @@ assert.ok(scenePrompt.includes('不允许输出 frame_specs'));
 assert.ok(scenePrompt.includes('不要输出 HTML'));
 assert.ok(scenePrompt.includes('visual_text.cards'));
 assert.ok(scenePrompt.includes('背景'));
+assert.ok(scenePrompt.includes('scene_spec 是内容图'));
+assert.ok(scenePrompt.includes('不要因为主题本身提到 HTML、CSS、动画、转场或渲染就删除这些词'));
+assert.ok(scenePrompt.includes('frame_specs 阶段'));
 
 const sceneParsed = agent.parseSceneSpecResponse(JSON.stringify({
   scene_spec: {
@@ -28,6 +31,28 @@ const sceneParsed = agent.parseSceneSpecResponse(JSON.stringify({
 assert.equal(sceneParsed.success, true);
 assert.equal(sceneParsed.scene_spec.scenes[0].kind, 'text');
 
+const sceneParsedWithDurationFallback = agent.parseSceneSpecResponse(JSON.stringify({
+  scene_spec: {
+    title: '测试',
+    aspect_ratio: '16:9',
+    scenes: [{
+      id: 'scene_01',
+      kind: 'text',
+      narration_text: '旁白',
+      captions: [],
+      visual_text: { headline: '标题', keywords: [], cards: ['卡片文案'] },
+    }],
+  },
+}), {
+  sceneDurations: [{ id: 'scene_01', duration: 5.44 }],
+});
+assert.equal(sceneParsedWithDurationFallback.success, true);
+assert.equal(sceneParsedWithDurationFallback.scene_spec.scenes[0].duration, 5.44);
+
+const sceneParsedWithTrailingComma = agent.parseSceneSpecResponse('{"scene_spec":{"title":"测试","aspect_ratio":"16:9","scenes":[{"id":"scene_01","duration":5,"kind":"text","narration_text":"旁白","captions":[],"visual_text":{"headline":"标题","keywords":[],"cards":["卡片文案",],},}],},}');
+assert.equal(sceneParsedWithTrailingComma.success, true);
+assert.equal(sceneParsedWithTrailingComma.scene_spec.scenes[0].duration, 5);
+
 const framePrompt = agent.buildFrameSpecsPrompt({
   sceneSpec: sceneParsed.scene_spec,
 });
@@ -35,6 +60,9 @@ assert.ok(framePrompt.includes('只输出 JSON'));
 assert.ok(framePrompt.includes('不允许改写 scene_spec 文案'));
 assert.ok(framePrompt.includes('allowed_templates'));
 assert.ok(framePrompt.includes('hero_title'));
+assert.ok(framePrompt.includes('像 html-video 的模板 manifest'));
+assert.ok(framePrompt.includes('用 template、layout、background、motion 和 visual_layers 表达视觉实现'));
+assert.ok(framePrompt.includes('默认每个 scene 生成一个覆盖整段的 frame'));
 assert.equal(framePrompt.includes('上一次输出包含以下问题'), false);
 
 const frameParsed = agent.parseFrameSpecsResponse(JSON.stringify({
@@ -54,6 +82,10 @@ const frameParsed = agent.parseFrameSpecsResponse(JSON.stringify({
 }), sceneParsed.scene_spec);
 assert.equal(frameParsed.success, true);
 assert.equal(frameParsed.frame_specs.frames[0].template, 'hero_title');
+
+const frameParsedWithMissingArrayComma = agent.parseFrameSpecsResponse('{"frame_specs":[{"id":"frame_01_01","scene_id":"scene_01","start":0,"duration":4,"kind":"text","template":"hero_title","layout":"center_stack","background":"dark_gradient","motion":"fade_up","text_layers":[{"id":"headline","role":"headline","text":"标题","emphasis":"primary"}],"visual_layers":[]}{"id":"frame_01_02","scene_id":"scene_01","start":4,"duration":4,"kind":"text","template":"keyword_burst","layout":"center_stack","background":"radial_spotlight","motion":"stagger_cards","text_layers":[{"id":"card","role":"body","text":"卡片文案","emphasis":"secondary"}],"visual_layers":[]}]}', sceneParsed.scene_spec);
+assert.equal(frameParsedWithMissingArrayComma.success, true);
+assert.equal(frameParsedWithMissingArrayComma.frame_specs.frames.length, 2);
 
 const badScene = agent.parseSceneSpecResponse('```html\n<div>bad</div>\n```');
 assert.equal(badScene.success, false);

@@ -1539,11 +1539,13 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
         creativeContext: {
           run: detail.data,
           brief: currentState.brief.data || {},
+          audio: currentState.audio || {},
           input: options.creativeContextInput || {},
         },
         target: options.projectOptions || {},
         rootDir: options.rootDir,
         services: options.creativeVideoServices || {},
+        skipValidation: options.skipValidation === true,
       });
     } catch (error) {
       result = {

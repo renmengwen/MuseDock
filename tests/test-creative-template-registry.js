@@ -46,6 +46,26 @@ const escaped = hero.renderFrame({
 assert.equal(escaped.html.includes('<script>'), false);
 assert.ok(escaped.html.includes('&lt;script&gt;'));
 
+const fallbackText = hero.renderFrame({
+  id: 'frame_empty_text',
+  scene_id: 'scene_01',
+  template: 'hero_title',
+  layout: 'center_stack',
+  background: 'dark_gradient',
+  motion: 'fade_up',
+  text_layers: [
+    { id: 'empty_headline', role: 'headline', text: '', emphasis: 'primary' },
+    { id: 'empty_body', role: 'body', text: '   ', emphasis: 'secondary' },
+  ],
+  visual_layers: [],
+}, {
+  id: 'scene_01',
+  visual_text: { headline: '场景标题', keywords: ['关键词'], cards: ['卡片一', '卡片二'] },
+});
+assert.ok(fallbackText.html.includes('场景标题'));
+assert.ok(fallbackText.html.includes('卡片一'));
+assert.doesNotMatch(fallbackText.html, /class="creative-text-layer"[^>]*>\s*<\/div>/);
+
 enums.BACKGROUNDS.forEach(background => assert.ok(registry.getBackgroundCss(background)));
 enums.LAYOUTS.forEach(layout => assert.ok(registry.getLayoutClass(layout)));
 enums.MOTIONS.forEach(motion => assert.ok(registry.getMotionSnippet(motion, '.target', 0).includes('gsap')));

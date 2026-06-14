@@ -3,6 +3,14 @@ const fsp = require('fs/promises');
 const path = require('path');
 const mediaPipeline = require('./mediaPipeline');
 
+const GSAP_LOCAL_PATH = path.resolve(__dirname, '../../node_modules/gsap/dist/gsap.min.js');
+let gsapBundleCache = null;
+function getGsapBundle() {
+  if (gsapBundleCache !== null) return gsapBundleCache;
+  try { gsapBundleCache = fs.readFileSync(GSAP_LOCAL_PATH, 'utf8'); } catch { gsapBundleCache = ''; }
+  return gsapBundleCache;
+}
+
 const ALLOWED_FILES = new Set([
   'index.html',
   'design.md',
@@ -13,6 +21,7 @@ const ALLOWED_FILES = new Set([
   'scene_spec.json',
   'output.mp4',
   'contact_sheet.jpg',
+  'gsap.min.js',
 ]);
 
 const TEXT_FILES = new Set([
@@ -23,6 +32,7 @@ const TEXT_FILES = new Set([
   'package.json',
   'meta.json',
   'scene_spec.json',
+  'gsap.min.js',
 ]);
 const NARRATION_AUDIO_ASSET = 'assets/narration.wav';
 const NARRATION_AUDIO_TRACK_INDEX = '99';
@@ -431,7 +441,7 @@ function jsString(value) {
 }
 
 function ensureGsapDependency(content) {
-  const gsapScript = '<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>';
+  const gsapScript = '<script src="./gsap.min.js"></script>';
   if (/src\s*=\s*["'][^"']*gsap[^"']*["']/i.test(content)) return content;
 
   const gsapInlineScript = content.match(/<script\b[^>]*>[\s\S]*?gsap\.[\s\S]*?<\/script>/i);
@@ -459,7 +469,7 @@ function ensureTimelineRegistry(content, files = {}, options = {}) {
     clipLines.push(`  tl.set(${jsString(`#${clip.id}`)}, { autoAlpha: 0 }, ${normalizeDurationValue(clip.end)});`);
   }
   const timelineScript = [
-    '<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>',
+    '<script src="./gsap.min.js"></script>',
     '<script>',
     '(function(){',
     '  window.__timelines = window.__timelines || {};',
@@ -637,6 +647,9 @@ async function createFreeformProject({ awemeId, runId, rootDir, files = {}, audi
   ]);
 
   const normalizedFiles = normalizeFreeformProjectFiles(files, { audio });
+  if (!normalizedFiles['gsap.min.js']) {
+    normalizedFiles['gsap.min.js'] = getGsapBundle();
+  }
   for (const [fileName, content] of Object.entries(normalizedFiles)) {
     await writeFreeformFile({ projectDir, fileName, content });
   }

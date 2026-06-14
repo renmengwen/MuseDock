@@ -50,6 +50,58 @@ function getServices(services = {}) {
   };
 }
 
+function getSceneDurationsFromContext(creativeContext = {}) {
+  const scenes = Array.isArray(creativeContext?.audio?.scenes)
+    ? creativeContext.audio.scenes
+    : [];
+  return scenes.map((scene, index) => ({
+    id: scene?.id || scene?.scene_id || `scene_${String(index + 1).padStart(2, '0')}`,
+    index: Number(scene?.index || index + 1),
+    duration: Number(scene?.duration ?? scene?.actual_duration_sec ?? scene?.duration_sec ?? 0),
+  })).filter(scene => Number.isFinite(scene.duration) && scene.duration > 0);
+}
+
+async function requestSceneSpec({ model, creativeContext, target, sceneDurations, maxAttempts = 2 }) {
+  let previousErrors = [];
+  let lastParsed = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const prompt = creativeSpecAgent.buildSceneSpecPrompt({
+      creativeContext,
+      target,
+      retryCount: attempt,
+      previousErrors,
+    });
+    const sceneAi = await callTextModel(model, prompt);
+    if (!sceneAi.success) return sceneAi;
+    lastParsed = creativeSpecAgent.parseSceneSpecResponse(sceneAi.text, { sceneDurations });
+    if (lastParsed.success) return lastParsed;
+    previousErrors = lastParsed.errors && lastParsed.errors.length
+      ? lastParsed.errors
+      : [lastParsed.message || 'AI 返回不是有效 JSON'];
+  }
+  return lastParsed || failure('scene_spec 生成失败。');
+}
+
+async function requestFrameSpecs({ model, sceneSpec, maxAttempts = 2 }) {
+  let previousErrors = [];
+  let lastParsed = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const prompt = creativeSpecAgent.buildFrameSpecsPrompt({
+      sceneSpec,
+      retryCount: attempt,
+      previousErrors,
+    });
+    const frameAi = await callTextModel(model, prompt);
+    if (!frameAi.success) return frameAi;
+    lastParsed = creativeSpecAgent.parseFrameSpecsResponse(frameAi.text, sceneSpec);
+    if (lastParsed.success) return lastParsed;
+    previousErrors = lastParsed.errors && lastParsed.errors.length
+      ? lastParsed.errors
+      : [lastParsed.message || 'AI 返回不是有效 JSON'];
+  }
+  return lastParsed || failure('frame_specs 生成失败。');
+}
+
 async function generateCreativeVideoProject({
   workflowId,
   runId,
@@ -57,19 +109,22 @@ async function generateCreativeVideoProject({
   target = {},
   rootDir,
   services = {},
+  skipValidation = false,
 } = {}) {
   const resolved = getServices(services);
 
-  const scenePrompt = creativeSpecAgent.buildSceneSpecPrompt({ creativeContext, target });
-  const sceneAi = await callTextModel(resolved.aiTextModel, scenePrompt);
-  if (!sceneAi.success) return sceneAi;
-  const sceneParsed = creativeSpecAgent.parseSceneSpecResponse(sceneAi.text);
+  const sceneParsed = await requestSceneSpec({
+    model: resolved.aiTextModel,
+    creativeContext,
+    target,
+    sceneDurations: getSceneDurationsFromContext(creativeContext),
+  });
   if (!sceneParsed.success) return failure(sceneParsed.message, { errors: sceneParsed.errors || [] });
 
-  const framePrompt = creativeSpecAgent.buildFrameSpecsPrompt({ sceneSpec: sceneParsed.scene_spec });
-  const frameAi = await callTextModel(resolved.aiTextModel, framePrompt);
-  if (!frameAi.success) return frameAi;
-  const frameParsed = creativeSpecAgent.parseFrameSpecsResponse(frameAi.text, sceneParsed.scene_spec);
+  const frameParsed = await requestFrameSpecs({
+    model: resolved.aiTextModel,
+    sceneSpec: sceneParsed.scene_spec,
+  });
   if (!frameParsed.success) return failure(frameParsed.message, { errors: frameParsed.errors || [] });
 
   const renderedFiles = hyperframesTemplateRenderer.renderHyperframesProjectFiles({
@@ -95,15 +150,17 @@ async function generateCreativeVideoProject({
     });
   }
 
-  const checked = await checkProject(resolved.checker, written.project_dir);
-  if (!checked.success) {
-    return failure(checked.message || '工程校验失败。', {
-      scene_spec: sceneParsed.scene_spec,
-      frame_specs: frameParsed.frame_specs,
-      project_dir: written.project_dir,
-      files: written.files || [],
-      diagnostics: checked,
-    });
+  if (!skipValidation) {
+    const checked = await checkProject(resolved.checker, written.project_dir);
+    if (!checked.success) {
+      return failure(checked.message || '工程校验失败。', {
+        scene_spec: sceneParsed.scene_spec,
+        frame_specs: frameParsed.frame_specs,
+        project_dir: written.project_dir,
+        files: written.files || [],
+        diagnostics: checked,
+      });
+    }
   }
 
   const ttsResult = await resolved.ttsService.synthesizeSceneNarration({
@@ -136,22 +193,25 @@ async function generateCreativeVideoProject({
     });
   }
 
-  const visualReport = await resolved.visualQaService.inspectRenderedVideo({
-    projectDir: written.project_dir,
-    outputPath: renderResult.output_path,
-  });
-  if (!visualReport.success) {
-    return failure(visualReport.message || '视觉质检失败。', {
-      scene_spec: sceneParsed.scene_spec,
-      frame_specs: frameParsed.frame_specs,
-      project_dir: written.project_dir,
-      files: written.files || [],
-      audio_manifest: ttsResult.audio_manifest,
-      output_path: renderResult.output_path,
-      visual_report: visualReport,
-      issues: visualReport.issues || [],
-      diagnostics: renderResult.diagnostics || [],
+  let visualReport = { success: true, issues: [] };
+  if (!skipValidation) {
+    visualReport = await resolved.visualQaService.inspectRenderedVideo({
+      projectDir: written.project_dir,
+      outputPath: renderResult.output_path,
     });
+    if (!visualReport.success) {
+      return failure(visualReport.message || '视觉质检失败。', {
+        scene_spec: sceneParsed.scene_spec,
+        frame_specs: frameParsed.frame_specs,
+        project_dir: written.project_dir,
+        files: written.files || [],
+        audio_manifest: ttsResult.audio_manifest,
+        output_path: renderResult.output_path,
+        visual_report: visualReport,
+        issues: visualReport.issues || [],
+        diagnostics: renderResult.diagnostics || [],
+      });
+    }
   }
 
   return {
@@ -180,4 +240,5 @@ module.exports = {
   generateCreativeVideoProject,
   rerenderCreativeVideoProject,
   applyCreativeVideoEdit,
+  getSceneDurationsFromContext,
 };

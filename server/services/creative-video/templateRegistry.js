@@ -74,13 +74,27 @@ const BASE_FRAME_CSS = `
 
 function renderTextLayers(frame, scene) {
   const layers = textLayers(frame);
-  if (layers.length > 0) {
-    return layers.map(layer => (
+  const filledLayers = layers.filter(layer => String(layer && layer.text || '').trim());
+  if (filledLayers.length > 0) {
+    return filledLayers.map(layer => (
       `<div class="creative-text-layer" data-role="${escapeHtml(layer.role)}" data-emphasis="${escapeHtml(layer.emphasis)}">${escapeHtml(layer.text)}</div>`
     )).join('\n');
   }
-  const headline = scene && scene.visual_text && scene.visual_text.headline;
-  return `<div class="creative-text-layer" data-role="headline" data-emphasis="primary">${escapeHtml(headline)}</div>`;
+  const visualText = scene && scene.visual_text ? scene.visual_text : {};
+  const fallbackLayers = [];
+  if (visualText.headline) {
+    fallbackLayers.push({ role: 'headline', emphasis: 'primary', text: visualText.headline });
+  }
+  [...(visualText.cards || []), ...(visualText.keywords || [])]
+    .filter(text => String(text || '').trim())
+    .slice(0, 4)
+    .forEach(text => fallbackLayers.push({ role: 'body', emphasis: 'secondary', text }));
+  if (fallbackLayers.length === 0 && scene && scene.narration_text) {
+    fallbackLayers.push({ role: 'body', emphasis: 'secondary', text: scene.narration_text });
+  }
+  return fallbackLayers.map(layer => (
+    `<div class="creative-text-layer" data-role="${escapeHtml(layer.role)}" data-emphasis="${escapeHtml(layer.emphasis)}">${escapeHtml(layer.text)}</div>`
+  )).join('\n');
 }
 
 function renderVisualLayers(frame) {

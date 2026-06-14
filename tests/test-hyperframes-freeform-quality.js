@@ -62,6 +62,26 @@ async function run() {
   assert.match(lintStdoutFailed.message, /root_missing_composition_id/);
   assert.doesNotMatch(lintStdoutFailed.message, /npm warn exec/);
 
+  const inspectTimeoutProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hf-freeform-quality-inspect-timeout-'));
+  fs.writeFileSync(path.join(inspectTimeoutProjectDir, 'index.html'), '<html></html>');
+  const inspectTimeoutFailed = await quality.checkFreeformProject({
+    projectDir: inspectTimeoutProjectDir,
+    runCommand: async (_command, args) => ({
+      ok: args[1] !== 'inspect',
+      code: args[1] === 'inspect' ? 1 : 0,
+      stdout: args[1] === 'inspect'
+        ? '◆  Inspecting layout for example (12 timeline samples)'
+        : 'ok',
+      stderr: args[1] === 'inspect'
+        ? '✗ Inspect failed: Navigation timeout of 10000 ms exceeded'
+        : '',
+    }),
+  });
+
+  assert.equal(inspectTimeoutFailed.success, false);
+  assert.match(inspectTimeoutFailed.message, /Navigation timeout/);
+  assert.doesNotMatch(inspectTimeoutFailed.message, /Inspecting layout/);
+
   const outputPath = path.join(projectDir, 'output.mp4');
   fs.writeFileSync(outputPath, 'fake mp4');
   const inspect = await quality.inspectRenderedVideo({

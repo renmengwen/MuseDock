@@ -1247,12 +1247,25 @@ async function run() {
   await writeJson(htmlVideoLiteRunPath, {
     ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
     run_id: htmlVideoLiteRunId,
+    hyperframes_freeform: {
+      ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')).hyperframes_freeform,
+      audio: {
+        status: 'ready',
+        scenes: [
+          { index: 1, duration: 5.44, narration_text: '第一段旁白' },
+          { index: 2, duration: 10.24, narration_text: '第二段旁白' },
+        ],
+      },
+    },
   });
+  let htmlVideoLiteCreativeContext = null;
   const htmlVideoLite = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, htmlVideoLiteRunId, {
     rootDir,
     useHtmlVideoLiteWorkflow: true,
     creativeVideoWorkflowFacade: {
-      generateCreativeVideoProject: async () => ({
+      generateCreativeVideoProject: async ({ creativeContext }) => {
+        htmlVideoLiteCreativeContext = creativeContext;
+        return {
         success: true,
         message: 'html-video lite 成片完成。',
         project_dir: path.join(rootDir, awemeId, 'agent_runs', `${htmlVideoLiteRunId}-lite-project`),
@@ -1262,10 +1275,12 @@ async function run() {
         audio_manifest: { scenes: [{ scene_id: 'scene_01', audio_path: 'tts/scene_01.wav' }] },
         output_path: path.join(rootDir, awemeId, 'agent_runs', `${htmlVideoLiteRunId}-lite-output.mp4`),
         visual_report: { success: true, issues: [], metrics: {} },
-      }),
+        };
+      },
     },
   });
   assert.equal(htmlVideoLite.success, true);
+  assert.deepEqual(htmlVideoLiteCreativeContext.audio.scenes.map(scene => scene.duration), [5.44, 10.24]);
   assert.equal(htmlVideoLite.hyperframes_freeform.project.status, 'ready');
   assert.equal(htmlVideoLite.hyperframes_freeform.audio.status, 'ready');
   assert.equal(htmlVideoLite.hyperframes_freeform.render.status, 'rendered');

@@ -1,6 +1,14 @@
 const fsp = require('fs/promises');
 const fs = require('fs');
 const path = require('path');
+
+const GSAP_LOCAL_PATH = path.resolve(__dirname, '../node_modules/gsap/dist/gsap.min.js');
+let gsapBundleCache = null;
+function getGsapBundle() {
+  if (gsapBundleCache !== null) return gsapBundleCache;
+  try { gsapBundleCache = fs.readFileSync(GSAP_LOCAL_PATH, 'utf8'); } catch { gsapBundleCache = ''; }
+  return gsapBundleCache;
+}
 const frameProfiles = require('./frameProfiles');
 const visualDsl = require('./hyperframesVisualDsl');
 const sceneRenderers = require('./hyperframesSceneRenderers');
@@ -407,7 +415,7 @@ function buildIndexHtml({ storyboard, captions, duration, renderOptions = {} }) 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script src="./gsap.min.js"></script>
   <title>MuseDock AI 分镜成片</title>
   <style>
     html, body { margin: 0; width: 100%; height: 100%; background: var(--frame-bg, #EFE9D9); color: var(--frame-text, #0F0F0F); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
@@ -622,6 +630,7 @@ async function createOriginalCaptionProject({ run, projectDir, renderOptions = {
     created_at: new Date().toISOString(),
   }, null, 2), 'utf-8');
   await fsp.writeFile(indexPath, indexHtml, 'utf-8');
+  await fsp.writeFile(path.join(projectDir, 'gsap.min.js'), getGsapBundle(), 'utf-8');
 
   return {
     success: true,

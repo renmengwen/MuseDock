@@ -46,9 +46,13 @@ router.post('/', async (req, res) => {
     res.json(result);
 
     if (result.workflow_id) {
+      const workflowOptions = {};
+      if (req.body && req.body.skipValidation === true) {
+        workflowOptions.skipValidation = true;
+      }
       setImmediate(async () => {
         try {
-          await service.runCreativeWorkflow(result.workflow_id);
+          await service.runCreativeWorkflow(result.workflow_id, workflowOptions);
         } catch (error) {
           console.error('[creative-workflows] background run failed:', error.message);
         }

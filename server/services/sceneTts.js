@@ -6,6 +6,20 @@ const defaultTtsModel = require('./aiTtsModel');
 const defaultTtsTimeline = require('./ttsTimeline');
 const defaultPhraseTimeline = require('./phraseTimeline');
 
+const DEFAULT_VOICE = 'mimo_default';
+const SUPPORTED_VOICES = new Set([
+  DEFAULT_VOICE,
+  '冰糖',
+  '茉莉',
+  '苏打',
+  '白桃',
+  '白桦',
+  'Mia',
+  'Chloe',
+  'Milo',
+  'Dean',
+]);
+
 function roundTime(value) {
   return Math.round(Number(value || 0) * 1000) / 1000;
 }
@@ -18,6 +32,11 @@ function safeFormat(format) {
 function getSceneAudioFileName(index, format = 'wav') {
   const sceneIndex = Math.max(1, Number(index) || 1);
   return `scene-${String(sceneIndex).padStart(3, '0')}.${safeFormat(format)}`;
+}
+
+function normalizeVoice(voice) {
+  const value = String(voice || '').trim();
+  return SUPPORTED_VOICES.has(value) ? value : DEFAULT_VOICE;
 }
 
 function fail(message, extra = {}) {
@@ -33,7 +52,7 @@ async function synthesizeSceneTts(options = {}) {
   const outputDir = typeof options.outputDir === 'string' ? options.outputDir : '';
   const runId = String(options.runId || 'run').replace(/[^A-Za-z0-9_-]/g, '') || 'run';
   const format = safeFormat(options.format || 'wav');
-  const voice = options.voice || 'mimo_default';
+  const voice = normalizeVoice(options.voice);
   const stylePrompt = options.stylePrompt || options.style_prompt || '';
 
   if (!outputDir) {
@@ -153,4 +172,5 @@ async function synthesizeSceneTts(options = {}) {
 module.exports = {
   synthesizeSceneTts,
   getSceneAudioFileName,
+  normalizeVoice,
 };

@@ -323,6 +323,55 @@ a { color: #fe2c55; text-decoration: none; }
 .settingsFormGrid input { width: 100%; height: 38px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 10px; background: #fff; color: #30343b; font-size: 13px; }
 .settingsWideField { grid-column: 1 / -1; }
 
+/* Settings: action bar */
+.settingsActionBar { display: flex; gap: 10px; justify-content: flex-end; margin-bottom: 16px; }
+
+/* Settings: global model selector */
+.globalSelectorGrid { display: flex; flex-direction: column; gap: 10px; }
+.globalSelectorRow { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
+.globalSelectorLabel { font-weight: 600; font-size: 13px; color: #30343b; }
+.globalSelectorSelect { height: 36px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 10px; background: #fff; font-size: 13px; color: #30343b; }
+.globalSelectorHint { font-size: 12px; color: #69717e; }
+
+/* Settings: project settings */
+.projectSettingsBody { padding: 8px 0; }
+.switchLabel { display: flex; flex-direction: column; gap: 2px; }
+.switchDesc { font-size: 12px; color: #69717e; font-weight: 400; }
+
+/* Settings: provider list */
+.providerList { display: flex; flex-direction: column; gap: 14px; }
+.providerEmpty { padding: 32px; text-align: center; color: #69717e; font-size: 14px; }
+.providerCard { border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; overflow: hidden; }
+.providerCardHeader { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; cursor: pointer; user-select: none; background: #f5f6f8; }
+.providerCardHeader:hover { background: #eef0f4; }
+.providerCardTitle { display: flex; align-items: center; gap: 8px; }
+.providerNameInput { border: none; background: transparent; font-size: 15px; font-weight: 600; color: #30343b; outline: none; padding: 2px 4px; border-radius: 4px; min-width: 120px; }
+.providerNameInput:focus { background: #fff; box-shadow: 0 0 0 1px #d9dde5; }
+.providerCardBody { padding: 16px; }
+.providerConnectionRow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.providerConnectionRow label { display: grid; gap: 6px; }
+.providerConnectionRow span { color: #5f6876; font-size: 12px; font-weight: 600; }
+.providerConnectionRow input { width: 100%; height: 38px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 10px; background: #fff; color: #30343b; font-size: 13px; }
+
+/* Settings: model config form (inside provider card) */
+.providerModelsGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.modelConfigForm { border: 1px solid #edf0f4; border-radius: 8px; padding: 12px; background: #fff; transition: border-color .15s; }
+.modelConfigForm.active { border-color: #fe2c55; }
+.modelConfigFormHeader { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.modelConfigFormTitle { font-size: 13px; font-weight: 600; color: #30343b; }
+.modelConfigFormInput { width: 100%; height: 34px; border: 1px solid #d9dde5; border-radius: 6px; padding: 0 8px; background: #fafbfc; font-size: 12px; color: #30343b; }
+.modelConfigFormInput:disabled { opacity: 0.5; }
+.modelConfigFormTtsRow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.modelConfigFormTtsRow label { display: grid; gap: 4px; }
+.modelConfigFormTtsRow span { font-size: 11px; color: #69717e; }
+.modelConfigFormTtsRow input { width: 100%; height: 30px; border: 1px solid #d9dde5; border-radius: 6px; padding: 0 6px; font-size: 12px; }
+.switchControl.small .switchTrack { width: 34px; height: 20px; flex: 0 0 34px; }
+.switchControl.small .switchThumb { width: 14px; height: 14px; top: 3px; left: 3px; }
+.switchControl.small input:checked + .switchTrack .switchThumb { transform: translateX(14px); }
+.btn.icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 6px; background: transparent; cursor: pointer; color: #69717e; }
+.btn.icon:hover { background: #eef0f4; }
+.btn.icon.danger:hover { color: #e33; background: #fde8e8; }
+
 .creativeChatShell {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);

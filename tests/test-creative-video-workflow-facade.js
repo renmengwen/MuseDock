@@ -61,6 +61,43 @@ const facade = require('../server/services/creative-video/workflowFacade');
   assert.ok(result.visual_report);
   assert.deepEqual(serviceOrder, ['projectWriter', 'checker', 'tts', 'render', 'visualQa']);
 
+  const retryCalls = [];
+  const retryResult = await facade.generateCreativeVideoProject({
+    workflowId: '202606140000000001_retry',
+    runId: 'run_retry',
+    creativeContext: { input: { raw_text: '测试重试' } },
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(message => message.content).join('\n');
+          retryCalls.push(prompt);
+          if (prompt.includes('不允许输出 frame_specs')) {
+            return { success: true, text: JSON.stringify({ scene_spec: { title: '测试', aspect_ratio: '16:9', scenes: [{ id: 'scene_01', duration: 8, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: ['卡片'] } }] } }) };
+          }
+          if (!prompt.includes('上一次输出包含以下问题')) {
+            return { success: true, text: '{"frame_specs":[{"id":"frame_01_01","scene_id":"scene_01","start":0,"duration":8,"kind":"text","template":"hero_title","layout":"center_stack","background":"dark_gradient","motion":"fade_up","text_layers":[{"id":"headline","role":"headline","text":"标题","emphasis":"primary"}],"visual_layers":[]}' };
+          }
+          return { success: true, text: JSON.stringify({ frame_specs: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 8, kind: 'text', template: 'hero_title', layout: 'center_stack', background: 'dark_gradient', motion: 'fade_up', text_layers: [{ id: 'headline', role: 'headline', text: '标题', emphasis: 'primary' }], visual_layers: [] }] }) };
+        },
+      },
+      projectWriter: async files => ({ success: true, project_dir: 'D:/tmp/project-retry', files: Object.keys(files) }),
+      checker: async () => ({ success: true, message: '校验通过' }),
+      ttsService: {
+        synthesizeSceneNarration: async () => ({ success: true, audio_manifest: { scenes: [] } }),
+      },
+      renderAdapter: {
+        render: async () => ({ success: true, output_path: 'D:/tmp/output-retry.mp4', diagnostics: [] }),
+      },
+      visualQaService: {
+        inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+      },
+    },
+  });
+  assert.equal(retryResult.success, true);
+  assert.equal(retryCalls.length, 3);
+  assert.ok(retryCalls[2].includes('上一次输出包含以下问题'));
+  assert.ok(retryCalls[2].includes('AI 返回不是有效 JSON'));
+
   const blockedOrder = [];
   const blocked = await facade.generateCreativeVideoProject({
     workflowId: '202606140000000002',

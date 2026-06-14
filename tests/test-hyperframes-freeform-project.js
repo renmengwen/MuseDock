@@ -32,7 +32,7 @@ async function run() {
   assert.equal(fs.existsSync(path.join(projectDir, 'index.html')), true);
   assert.equal(fs.existsSync(path.join(projectDir, 'design.md')), true);
   assert.equal(fs.existsSync(path.join(projectDir, 'frame_specs.json')), true);
-  assert.deepEqual(created.files.map(file => file.name).sort(), ['design.md', 'frame_specs.json', 'hyperframes.json', 'index.html', 'package.json']);
+  assert.deepEqual(created.files.map(file => file.name).sort(), ['design.md', 'frame_specs.json', 'gsap.min.js', 'hyperframes.json', 'index.html', 'package.json']);
 
   const repaired = await freeformProject.createFreeformProject({
     awemeId,
@@ -195,7 +195,7 @@ async function run() {
   assert.match(animatedHtml, /window\.__timelines\["main"\] = tl/);
   assert.match(animatedHtml, /tl\.from\("\.hero-title"/);
   assert.match(animatedHtml, /tl\.fromTo\("\.hero-keyword"/);
-  assert.match(animatedHtml, /<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/gsap@3\.12\.5\/dist\/gsap\.min\.js"><\/script>/);
+  assert.match(animatedHtml, /<script src="\.\/gsap\.min\.js"><\/script>/);
 
   const clipVisibilityRepaired = await freeformProject.createFreeformProject({
     awemeId,

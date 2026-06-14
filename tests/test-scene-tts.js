@@ -50,6 +50,38 @@ async function run() {
   assert.equal(path.basename(result.scene_tts.path), 'run-1-tts.wav');
   assert.ok(fs.existsSync(result.scene_tts.path));
 
+  const voiceCalls = [];
+  const fallbackVoiceResult = await sceneTts.synthesizeSceneTts({
+    scenes: [
+      { index: 1, narration_text: '测试旁白。' },
+    ],
+    outputDir: rootDir,
+    runId: 'run-voice',
+    format: 'wav',
+    voice: 'mimo_male_techvoice',
+    ttsModel: {
+      async callTtsModel(payload) {
+        voiceCalls.push(payload.voice);
+        return {
+          success: true,
+          audioBuffer: Buffer.from('audio'),
+          format: 'wav',
+          voice: payload.voice,
+          model: { provider: 'mock' },
+        };
+      },
+    },
+    readAudioDuration: async () => 1,
+    concatenateAudioFiles: async ({ targetPath }) => {
+      fs.writeFileSync(targetPath, 'audio');
+      return { success: true };
+    },
+  });
+
+  assert.equal(fallbackVoiceResult.success, true);
+  assert.deepEqual(voiceCalls, ['mimo_default']);
+  assert.equal(fallbackVoiceResult.scene_tts.voice, 'mimo_default');
+
   fs.rmSync(rootDir, { recursive: true, force: true });
 }
 

@@ -1,6 +1,14 @@
 const { isAllowedKind } = require('./specEnums');
 
-const PRODUCTION_WORDS = ['背景', '光效', '动画', '转场', '布局', '发光', '粒子', '镜头'];
+const PRODUCTION_PATTERNS = [
+  /(深色|浅色|科技|渐变|纯色|抽象|动态|玻璃|霓虹|粒子).{0,6}背景/,
+  /背景.{0,8}(出现|浮现|铺开|切换|移动|闪烁|渐变|虚化)/,
+  /光效.{0,8}(扩散|扫过|闪烁|流动|出现)/,
+  /(动画|转场).{0,8}(效果|入场|退场|切换|过渡|播放)/,
+  /镜头.{0,8}(推进|拉近|拉远|切换|跟随|扫过)/,
+  /布局.{0,8}(居中|左侧|右侧|上下|分屏|排列)/,
+  /(发光|粒子).{0,8}(效果|扩散|漂浮|闪烁|环绕)/,
+];
 
 function roundTime(value) {
   const number = Number(value);
@@ -95,15 +103,14 @@ function normalizeSceneSpec(raw) {
   return retimeScenes(raw && raw.scene_spec ? raw.scene_spec : raw);
 }
 
-function hasProductionWord(value) {
+function hasProductionInstruction(value) {
   const content = text(value);
-  return PRODUCTION_WORDS.some(word => content.includes(word));
+  return PRODUCTION_PATTERNS.some(pattern => pattern.test(content));
 }
 
-function collectTextFields(scene) {
+function collectVisualTextFields(scene) {
   const visualText = scene.visual_text || {};
   return [
-    { label: `${scene.id}.narration_text`, value: scene.narration_text },
     { label: `${scene.id}.visual_text.headline`, value: visualText.headline },
     ...list(visualText.keywords).map((value, index) => ({
       label: `${scene.id}.visual_text.keywords[${index}]`,
@@ -112,10 +119,6 @@ function collectTextFields(scene) {
     ...list(visualText.cards).map((value, index) => ({
       label: `${scene.id}.visual_text.cards[${index}]`,
       value,
-    })),
-    ...(Array.isArray(scene.captions) ? scene.captions : []).map(caption => ({
-      label: `${scene.id}.captions.${caption.id || 'caption'}`,
-      value: caption.text,
     })),
   ];
 }
@@ -154,8 +157,8 @@ function validateSceneSpec(raw) {
         errors.push(`场景 ${scene.id} 的字幕 ${caption.id} 时间范围必须落在场景时长内`);
       }
     });
-    collectTextFields(scene).forEach(field => {
-      if (hasProductionWord(field.value)) {
+    collectVisualTextFields(scene).forEach(field => {
+      if (hasProductionInstruction(field.value)) {
         errors.push(`${field.label} 包含视觉描述或制作说明，请移到 frame_specs 的视觉字段`);
       }
     });

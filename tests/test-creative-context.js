@@ -26,6 +26,7 @@ function testNormalizesTextInput() {
       aweme_id: '',
       douyin_url: '',
       use_research: false,
+      skip_validation: false,
       asset_ids: [],
     },
   });

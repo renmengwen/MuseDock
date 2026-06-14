@@ -73,15 +73,37 @@ function normalizeVisualLayer(layer, index) {
   };
 }
 
-function normalizeFrame(frame, index, usedIds) {
+function normalizeFrame(frame, index, usedIds, scenesById) {
   const source = frame && typeof frame === 'object' ? frame : {};
+  const sceneId = text(source.scene_id);
+  const scene = scenesById && scenesById.get(sceneId);
+  const rawStart = Number(source.start);
+  const hasStart = Number.isFinite(rawStart);
+  let start = roundTime(source.start);
+  if (scene) {
+    if (!hasStart) {
+      start = roundTime(scene.start);
+    } else if (rawStart >= 0 && rawStart < Number(scene.start || 0)) {
+      start = roundTime(Number(scene.start || 0) + rawStart);
+    }
+  }
+  const rawDuration = Number(source.duration);
+  const hasDuration = Number.isFinite(rawDuration) && rawDuration > 0;
+  let duration = roundTime(source.duration);
+  if (scene && !hasDuration) {
+    duration = roundTime(Number(scene.duration || 0) - Math.max(0, start - Number(scene.start || 0)));
+  }
+  const rawKind = text(source.kind) || 'text';
+  const kind = scene && isAllowedKind(rawKind) && rawKind !== scene.kind
+    ? scene.kind
+    : rawKind;
   return {
     id: uniqueFrameId(source.id, usedIds, index),
-    scene_id: text(source.scene_id),
+    scene_id: sceneId,
     order: Number.isFinite(Number(source.order)) ? Number(source.order) : index + 1,
-    start: roundTime(source.start),
-    duration: roundTime(source.duration),
-    kind: text(source.kind) || 'text',
+    start,
+    duration,
+    kind,
     template: text(source.template),
     layout: text(source.layout),
     background: text(source.background),
@@ -91,9 +113,10 @@ function normalizeFrame(frame, index, usedIds) {
   };
 }
 
-function normalizeFrameSpecs(raw) {
+function normalizeFrameSpecs(raw, sceneSpec) {
   const usedIds = new Set();
-  const frames = getFrames(raw).map((frame, index) => normalizeFrame(frame, index, usedIds));
+  const scenesById = sceneMap(sceneSpec);
+  const frames = getFrames(raw).map((frame, index) => normalizeFrame(frame, index, usedIds, scenesById));
   return { frames };
 }
 

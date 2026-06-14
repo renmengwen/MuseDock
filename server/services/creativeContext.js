@@ -74,6 +74,7 @@ function isDouyinLink(input) {
 function normalizeCreativeInput(payload = {}) {
   const assetIds = Array.isArray(payload.assetIds) ? [...payload.assetIds] : [];
   const useResearch = payload.useResearch === true;
+  const skipValidation = payload.skipValidation === true;
 
   if (assetIds.length > 0) {
     return createFailureResponse('图片素材将在下一阶段开放。', {
@@ -97,6 +98,7 @@ function normalizeCreativeInput(payload = {}) {
       aweme_id: awemeId,
       douyin_url: /^https?:\/\//i.test(input) ? input : '',
       use_research: useResearch,
+      skip_validation: skipValidation,
       asset_ids: assetIds,
     });
   }
@@ -112,6 +114,7 @@ function normalizeCreativeInput(payload = {}) {
     mode: 'text',
     raw_text: input,
     use_research: useResearch,
+    skip_validation: skipValidation,
     asset_ids: assetIds,
   });
 }

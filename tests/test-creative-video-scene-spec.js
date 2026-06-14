@@ -67,6 +67,38 @@ const invalidVisualText = sceneSpec.validateSceneSpec({
 assert.equal(invalidVisualText.success, false);
 assert.ok(invalidVisualText.errors.some(error => error.includes('视觉描述')));
 
+const technicalTopicText = sceneSpec.validateSceneSpec({
+  scenes: [{
+    id: 'scene_01',
+    duration: 3,
+    kind: 'text',
+    narration_text: '用 HTML 定义视频动画和渲染流程。',
+    captions: [],
+    visual_text: {
+      headline: '代码化视频',
+      keywords: ['HTML', 'GSAP'],
+      cards: ['字幕同步和场景转场都能用结构化数据描述'],
+    },
+  }],
+});
+assert.equal(technicalTopicText.success, true);
+
+const narrationAboutAnimationFeature = sceneSpec.validateSceneSpec({
+  scenes: [{
+    id: 'scene_02',
+    duration: 10,
+    kind: 'text',
+    narration_text: '它支持动画、特效和场景过渡，让视频更生动。（语速加快）例如，轻松添加动态文字和音频同步。',
+    captions: [{ id: 'cap_02_01', start: 0, end: 5, text: '它支持动画、特效和场景过渡，让视频更生动。' }],
+    visual_text: {
+      headline: '核心功能展示',
+      keywords: ['动画', '音频同步'],
+      cards: ['轻松添加动态文字'],
+    },
+  }],
+});
+assert.equal(narrationAboutAnimationFeature.success, true);
+
 let invalidCaptionResult;
 assert.doesNotThrow(() => {
   invalidCaptionResult = sceneSpec.validateSceneSpec({
