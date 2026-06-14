@@ -67,6 +67,7 @@ function createFakeServices(overrides = {}) {
     services: {
       now: () => NOW,
       idFactory: () => WORKFLOW_ID,
+      aiModelConfig: { getSkipValidation: async () => false },
       researchService: {
         createResearchContext: async ({ enabled, query, now }) => {
           if (overrides.researchContext) {

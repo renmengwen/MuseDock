@@ -403,22 +403,14 @@ router.post('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/inspect', async
   }
 });
 
-router.get('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/files/:file_name', (req, res) => {
-  if (typeof agentRuns.resolveDouyinRunHyperframesFreeformFile !== 'function') {
-    return res.status(501).json({
-      success: false,
-      aweme_id: req.params.aweme_id,
-      run_id: req.params.run_id,
-      message: 'HyperFrames 自由工程文件读取接口尚未实现。',
-    });
-  }
-
+router.get('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/files/:file_name', async (req, res) => {
   try {
-    const filePath = agentRuns.resolveDouyinRunHyperframesFreeformFile(
-      req.params.aweme_id,
-      req.params.run_id,
-      req.params.file_name,
-    );
+    const { aweme_id, run_id, file_name } = req.params;
+    const detail = await agentRuns.getDouyinAgentRun(aweme_id, run_id);
+    const storedDir = detail?.data?.hyperframes_freeform?.project_dir;
+    const filePath = storedDir
+      ? require('path').resolve(storedDir, file_name)
+      : agentRuns.resolveDouyinRunHyperframesFreeformFile(aweme_id, run_id, file_name);
     return res.sendFile(filePath);
   } catch (error) {
     return res.status(400).json({

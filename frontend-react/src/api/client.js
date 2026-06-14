@@ -2,9 +2,23 @@ async function requestJson(url, options) {
   const response = await fetch(url, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const message = data.message || data.error || `Request failed: ${response.status}`;
+    let message = data.message || data.error || '';
+    if (!message) {
+      if (response.status === 502) {
+        message = '服务暂时不可用（502 Bad Gateway），请稍后重试';
+      } else if (response.status === 503) {
+        message = '服务暂时不可用（503 Service Unavailable），请稍后重试';
+      } else if (response.status === 504) {
+        message = '请求超时（504 Gateway Timeout），请稍后重试';
+      } else if (response.status === 429) {
+        message = '请求过于频繁，请稍后重试';
+      } else {
+        message = `Request failed: ${response.status}`;
+      }
+    }
     const error = new Error(message);
     error.data = data;
+    error.status = response.status;
     throw error;
   }
   return data;

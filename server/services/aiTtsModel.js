@@ -84,7 +84,9 @@ async function resolveTtsRuntime(options = {}) {
   });
   const storedEnabled = storedConfig?.enabled === true && !!storedConfig.apiKey;
   const provider = normalizeProvider(env.TTS_PROVIDER || (storedEnabled ? storedConfig.provider : ''));
-  const isMimo = provider === 'mimo' || provider === 'xiaomi' || provider === 'xiaomimimo';
+  const modelId = env.MIMO_TTS_MODEL || env.TTS_MODEL || storedConfig?.modelId || DEFAULT_MIMO_TTS_MODEL;
+  const isMimo = provider === 'mimo' || provider === 'xiaomi' || provider === 'xiaomimimo'
+    || modelId.toLowerCase().startsWith('mimo');
 
   return {
     configured: !!(env.MIMO_API_KEY || env.TTS_API_KEY || (storedEnabled ? storedConfig.apiKey : '')),
@@ -181,17 +183,37 @@ async function callTtsModel(options = {}) {
       payload = await response.json().catch(() => null);
 
       if (!shouldRetryStatus(response.status) || attempt >= retryLimit) break;
-      await waitImpl(retryDelayMs * (attempt + 1));
+      // 对 502/503/504 使用指数退避
+      const isServerError = [502, 503, 504].includes(Number(response.status));
+      const delay = isServerError
+        ? retryDelayMs * Math.pow(2, attempt)
+        : retryDelayMs * (attempt + 1);
+      console.warn(`[TTS] HTTP ${response.status}，${attempt + 1}/${retryLimit + 1} 次尝试，${delay}ms 后重试...`);
+      await waitImpl(delay);
     }
 
     if (!response.ok) {
       const detail = payload?.error?.message || payload?.message || `HTTP ${response.status}`;
+      const hint = response.status === 502
+        ? 'MiMo TTS 服务暂时不可用（502 Bad Gateway），请稍后重试。如持续出现，请检查 Base URL 配置是否正确。'
+        : response.status === 429
+          ? '请求过于频繁，请稍后重试。'
+          : '';
+      console.error(`[TTS] 请求失败: HTTP ${response.status}`, {
+        url: `${runtime.baseUrl}/chat/completions`,
+        model: runtime.modelId,
+        textLength: text.length,
+        attempt: attempt + 1,
+        maxRetries: retryLimit,
+        error: detail,
+      });
       return {
         success: false,
         status: 'failed',
-        message: `TTS 合成失败：${detail}`,
+        message: `TTS 合成失败：${detail}${hint ? '\n' + hint : ''}`,
         model,
         raw_response: payload,
+        http_status: response.status,
       };
     }
   } catch (error) {

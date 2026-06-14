@@ -6,6 +6,7 @@ const creativeContext = require('./creativeContext');
 const defaultResearchService = require('./researchService');
 const mediaPipeline = require('./mediaPipeline');
 const defaultAgentRuns = require('./agentRuns');
+const aiModelConfig = require('./aiModelConfig');
 const defaultCreativeVideoEditor = require('./creativeVideoEditor');
 const defaultCreativeVideoRerender = require('./creativeVideoRerender');
 const sceneSpecService = require('./sceneSpec');
@@ -216,7 +217,6 @@ async function defaultResearchProvider({ query } = {}) {
   ];
 
   // 获取模型配置，判断是否为mimo模型
-  const aiModelConfig = require('./aiModelConfig');
   const config = await aiModelConfig.getRuntimeConfig('text');
   const modelId = config?.modelId || '';
   const isMimo = modelId.toLowerCase().startsWith('mimo');
@@ -332,6 +332,7 @@ function resolveServices(options = {}) {
     researchProvider: services.researchProvider || defaultResearchProvider,
     mediaPipeline: services.mediaPipeline || mediaPipeline,
     agentRuns: services.agentRuns || defaultAgentRuns,
+    aiModelConfig: services.aiModelConfig || aiModelConfig,
   };
 }
 

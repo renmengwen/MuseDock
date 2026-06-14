@@ -1,7 +1,14 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const facade = require('../server/services/creative-video/workflowFacade');
 
 (async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-facade-test-'));
+  const outputMp4 = path.join(tmpDir, 'output.mp4');
+  fs.writeFileSync(outputMp4, Buffer.alloc(100));
+
   const calls = [];
   const serviceOrder = [];
   let renderAudioManifest = null;
@@ -21,7 +28,7 @@ const facade = require('../server/services/creative-video/workflowFacade');
       },
       projectWriter: async files => {
         serviceOrder.push('projectWriter');
-        return { success: true, project_dir: 'D:/tmp/project', files: Object.keys(files) };
+        return { success: true, project_dir: tmpDir, files: Object.keys(files) };
       },
       checker: async () => {
         serviceOrder.push('checker');
@@ -37,7 +44,7 @@ const facade = require('../server/services/creative-video/workflowFacade');
         render: async ({ audio_manifest }) => {
           serviceOrder.push('render');
           renderAudioManifest = audio_manifest;
-          return { success: true, output_path: 'D:/tmp/output.mp4', diagnostics: [] };
+          return { success: true, output_path: outputMp4, diagnostics: [] };
         },
       },
       visualQaService: {
@@ -53,13 +60,17 @@ const facade = require('../server/services/creative-video/workflowFacade');
   assert.equal(calls.length, 2);
   assert.ok(result.scene_spec);
   assert.ok(result.frame_specs);
-  assert.equal(result.project_dir, 'D:/tmp/project');
+  assert.equal(result.project_dir, tmpDir);
   assert.ok(result.files.includes('index.html'));
   assert.ok(result.audio_manifest);
   assert.deepEqual(renderAudioManifest, { scenes: [] });
-  assert.equal(result.output_path, 'D:/tmp/output.mp4');
+  assert.equal(result.output_path, outputMp4);
   assert.ok(result.visual_report);
   assert.deepEqual(serviceOrder, ['projectWriter', 'checker', 'tts', 'render', 'visualQa']);
+
+  const retryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-facade-retry-'));
+  const retryOutput = path.join(retryDir, 'output.mp4');
+  fs.writeFileSync(retryOutput, Buffer.alloc(100));
 
   const retryCalls = [];
   const retryResult = await facade.generateCreativeVideoProject({
@@ -80,13 +91,13 @@ const facade = require('../server/services/creative-video/workflowFacade');
           return { success: true, text: JSON.stringify({ frame_specs: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 8, kind: 'text', template: 'hero_title', layout: 'center_stack', background: 'dark_gradient', motion: 'fade_up', text_layers: [{ id: 'headline', role: 'headline', text: '标题', emphasis: 'primary' }], visual_layers: [] }] }) };
         },
       },
-      projectWriter: async files => ({ success: true, project_dir: 'D:/tmp/project-retry', files: Object.keys(files) }),
+      projectWriter: async files => ({ success: true, project_dir: retryDir, files: Object.keys(files) }),
       checker: async () => ({ success: true, message: '校验通过' }),
       ttsService: {
         synthesizeSceneNarration: async () => ({ success: true, audio_manifest: { scenes: [] } }),
       },
       renderAdapter: {
-        render: async () => ({ success: true, output_path: 'D:/tmp/output-retry.mp4', diagnostics: [] }),
+        render: async () => ({ success: true, output_path: retryOutput, diagnostics: [] }),
       },
       visualQaService: {
         inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
@@ -161,13 +172,17 @@ const facade = require('../server/services/creative-video/workflowFacade');
           return { success: true, text: JSON.stringify({ frame_specs: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 8, kind: 'text', template: 'hero_title', layout: 'center_stack', background: 'dark_gradient', motion: 'fade_up', text_layers: [{ id: 'headline', role: 'headline', text: '标题', emphasis: 'primary' }], visual_layers: [{ id: 'accent', type: 'glow_panel', variant: 'cyan_pink' }] }] }) };
         },
       },
-      projectWriter: async files => ({ success: true, project_dir: 'D:/tmp/project-visual-failed', files: Object.keys(files) }),
+      projectWriter: async files => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-facade-visual-'));
+        fs.writeFileSync(path.join(dir, 'output.mp4'), Buffer.alloc(100));
+        return { success: true, project_dir: dir, files: Object.keys(files) };
+      },
       checker: async () => ({ success: true, message: '校验通过' }),
       ttsService: {
-        synthesizeSceneNarration: async () => ({ success: true, audio_manifest: { scenes: [{ scene_id: 'scene_01', audio_path: 'tts/scene_01.wav' }] } }),
+        synthesizeSceneNarration: async () => ({ success: true, audio_manifest: { scenes: [] } }),
       },
       renderAdapter: {
-        render: async () => ({ success: true, output_path: 'D:/tmp/output-bad.mp4', diagnostics: [] }),
+        render: async (input) => ({ success: true, output_path: path.join(input.project_dir, 'output.mp4'), diagnostics: [] }),
       },
       visualQaService: {
         inspectRenderedVideo: async () => ({

@@ -6,6 +6,7 @@ const defaultProjectWriter = require('./projectWriter');
 const defaultTtsService = require('./ttsService');
 const { createRenderAdapter } = require('./renderAdapter');
 const defaultVisualQaService = require('./visualQaService');
+const hyperframesRenderer = require('../hyperframesRenderer');
 
 function failure(message, extra = {}) {
   return {
@@ -190,6 +191,20 @@ async function generateCreativeVideoProject({
       files: written.files || [],
       audio_manifest: ttsResult.audio_manifest,
       diagnostics: renderResult.diagnostics || [],
+    });
+  }
+
+  const muxResult = await hyperframesRenderer.concatAndMuxAudio({
+    projectDir: written.project_dir,
+    videoPath: renderResult.output_path,
+    audioManifest: ttsResult.audio_manifest,
+  });
+  if (!muxResult.success) {
+    return failure(muxResult.message || '音频混流失败。', {
+      scene_spec: sceneParsed.scene_spec,
+      frame_specs: frameParsed.frame_specs,
+      project_dir: written.project_dir,
+      output_path: renderResult.output_path,
     });
   }
 
