@@ -1,6 +1,8 @@
 const aiTextModel = require('../aiTextModel');
 const quality = require('../hyperframesFreeformQuality');
 const creativeSpecAgent = require('./creativeSpecAgent');
+const templateSelectorAgent = require('./html-video/templateSelectorAgent');
+const templateInputAgent = require('./html-video/templateInputAgent');
 const hyperframesTemplateRenderer = require('./hyperframesTemplateRenderer');
 const templateRegistry = require('./templateRegistry');
 const defaultProjectWriter = require('./projectWriter');
@@ -108,7 +110,7 @@ async function requestFrameSpecs({ model, sceneSpec, maxAttempts = 2 }) {
 // Rich template path (new high-quality rendering)
 // ---------------------------------------------------------------------------
 
-async function requestTemplateSelection({ model, sceneSpec, maxAttempts = 2 }) {
+async function requestTemplateSelection({ model, sceneSpec, target, maxAttempts = 2 }) {
   const compactIndex = templateRegistry.buildCompactIndex();
   if (!compactIndex.length) {
     return failure('没有可用的 rich 模板。');
@@ -116,20 +118,42 @@ async function requestTemplateSelection({ model, sceneSpec, maxAttempts = 2 }) {
 
   let lastParsed = null;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const prompt = creativeSpecAgent.buildSelectTemplatePrompt({
+    const prompt = templateSelectorAgent.buildTemplateSelectionPrompt({
       sceneSpec,
       compactIndex,
+      target,
     });
     const ai = await callTextModel(model, prompt);
     if (!ai.success) return ai;
 
-    const availableIds = compactIndex.map(t => t.id);
-    lastParsed = creativeSpecAgent.parseSelectTemplateResponse(ai.text, availableIds);
+    lastParsed = templateSelectorAgent.parseTemplateSelectionResponse(ai.text, { compactIndex });
     if (lastParsed.success) return lastParsed;
   }
   return lastParsed || failure('模板选择失败。');
 }
 
+async function requestTemplateInputs({ model, sceneSpec, template, creativeContext, maxAttempts = 2 }) {
+  let lastParsed = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const prompt = templateInputAgent.buildTemplateInputPrompt({
+      sceneSpec,
+      template,
+      creativeContext,
+    });
+    const ai = await callTextModel(model, prompt);
+    if (!ai.success) return ai;
+
+    lastParsed = templateInputAgent.parseTemplateInputResponse(ai.text, { template });
+    if (lastParsed.success) return lastParsed;
+  }
+  return lastParsed || failure('模板字段填写失败。', {
+    user_message: '模板字段填写失败。',
+    fallback_allowed: true,
+  });
+}
+
+// Legacy fallback only: kept for manual rollback/debug paths. The default
+// production path must not ask AI to generate complete HTML.
 async function requestHtmlFill({ model, sceneSpec, frameSpecs, templateId, maxAttempts = 2 }) {
   const templateHtml = templateRegistry.getTemplateHtml(templateId, 4000);
   const templateManifest = templateRegistry.getTemplateManifest(templateId);
@@ -152,34 +176,51 @@ async function requestHtmlFill({ model, sceneSpec, frameSpecs, templateId, maxAt
 }
 
 /**
- * Try the rich template path: AI selects template → AI fills HTML → assemble project.
+ * Try the rich template path: AI selects template → AI fills JSON inputs → local HTML assembly.
  * Returns { success, ... } on success, or { success: false, ... } to trigger fallback.
  */
-async function tryRichTemplate({ model, sceneSpec, frameSpecs }) {
+async function tryRichTemplate({ model, sceneSpec, frameSpecs, creativeContext, target }) {
   // Step 1: AI selects template
-  const selection = await requestTemplateSelection({ model, sceneSpec });
+  const selection = await requestTemplateSelection({ model, sceneSpec, target });
   if (!selection.success) {
-    return failure(`Rich 模板选择失败（将回退到旧模板）：${selection.message}`);
+    return failure(`Rich 模板选择失败（将回退到旧模板）：${selection.message}`, {
+      user_message: selection.user_message || selection.message || '模板选择失败。',
+      fallback_allowed: selection.fallback_allowed !== false,
+      diagnostics: selection.diagnostics || [],
+    });
   }
 
   const templateId = selection.template_id;
+  const templateManifest = templateRegistry.getTemplateManifest(templateId);
+  const templateHtml = templateRegistry.getTemplateHtml(templateId, 120000);
 
-  // Step 2: AI fills template HTML
-  const fillResult = await requestHtmlFill({
+  // Step 2: AI fills JSON inputs only. HTML is rendered locally.
+  const inputResult = await requestTemplateInputs({
     model,
     sceneSpec,
-    frameSpecs,
+    template: templateManifest,
+    creativeContext,
+  });
+  if (!inputResult.success) {
+    return failure(`Rich 模板字段填写失败（将回退到旧模板）：${inputResult.message}`, {
+      user_message: inputResult.user_message || inputResult.message || '模板字段填写失败。',
+      fallback_allowed: inputResult.fallback_allowed !== false,
+      diagnostics: inputResult.diagnostics || [],
+    });
+  }
+
+  const filledHtml = templateInputAgent.renderTemplateHtmlWithInputs({
+    templateHtml,
+    inputs: inputResult.inputs,
+    sceneSpec,
     templateId,
   });
-  if (!fillResult.success) {
-    return failure(`Rich HTML 填充失败（将回退到旧模板）：${fillResult.message}`);
-  }
 
   // Step 3: Assemble project files
   const assembled = hyperframesTemplateRenderer.assembleProjectFiles({
     sceneSpec,
     frameSpecs,
-    aiGeneratedHtml: fillResult.html,
+    aiGeneratedHtml: filledHtml,
     templateId,
   });
 
@@ -191,6 +232,7 @@ async function tryRichTemplate({ model, sceneSpec, frameSpecs }) {
     success: true,
     template_id: templateId,
     template_reason: selection.reason,
+    template_inputs: inputResult.inputs,
     scene_spec: assembled.scene_spec,
     frame_specs: assembled.frame_specs,
     target_duration_sec: assembled.target_duration_sec,
@@ -233,6 +275,8 @@ async function generateCreativeVideoProject({
       model: resolved.aiTextModel,
       sceneSpec: sceneParsed.scene_spec,
       frameSpecs: null, // Rich path generates its own frame_specs if needed
+      creativeContext,
+      target,
     });
 
     if (richResult.success) {
@@ -393,5 +437,6 @@ module.exports = {
   // Export for testing
   tryRichTemplate,
   requestTemplateSelection,
+  requestTemplateInputs,
   requestHtmlFill,
 };

@@ -471,8 +471,11 @@ function buildSelectTemplatePrompt({ sceneSpec, compactIndex }) {
 }
 
 /**
- * Build a prompt for AI to fill a template's HTML with actual content.
- * Returns a prompt string that provides the template HTML + content data.
+ * Legacy fallback only.
+ *
+ * The default production path must use html-video/templateSelectorAgent and
+ * html-video/templateInputAgent so AI only selects a template and fills JSON
+ * inputs. This HTML prompt is retained for manual rollback/debug scenarios.
  */
 function buildFillTemplatePrompt({ sceneSpec, frameSpecs, templateHtml, templateManifest }) {
   const scenes = (sceneSpec.scenes || []);
@@ -501,7 +504,7 @@ function buildFillTemplatePrompt({ sceneSpec, frameSpecs, templateHtml, template
   const totalDuration = scenes.reduce((s, c) => s + (c.duration || 0), 0);
 
   return [
-    '你是一个前端动效工程师。请修改以下 HTML 模板，将示例内容替换为实际内容。',
+    'LEGACY FALLBACK：你是一个前端动效工程师。请修改以下 HTML 模板，将示例内容替换为实际内容。',
     '',
     '## 模板说明',
     `名称：${templateManifest.name}`,
