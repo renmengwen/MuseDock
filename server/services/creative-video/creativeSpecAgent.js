@@ -70,10 +70,21 @@ function rejectNonJsonText(text) {
   if (!raw) {
     return 'AI 返回为空，无法解析 JSON';
   }
-  if (/^```/m.test(raw) || /<\/?[a-z][\s\S]*>/i.test(raw)) {
-    return 'AI 返回必须是纯 JSON，不能包含 Markdown 代码块或 HTML';
+  // Only reject Markdown code blocks; don't reject HTML since valid JSON may contain HTML in string values
+  if (/^```/m.test(raw)) {
+    return 'AI 返回必须是纯 JSON，不能包含 Markdown 代码块';
   }
-  return '';
+  // Try JSON.parse first - if it succeeds, the content is valid JSON regardless of HTML-like patterns
+  try {
+    JSON.parse(raw);
+    return ''; // Valid JSON, no rejection
+  } catch {
+    // Not valid JSON - check if it looks like raw HTML (not JSON containing HTML strings)
+    if (/^<[a-z][\s\S]*>$/i.test(raw) && !raw.startsWith('{')) {
+      return 'AI 返回必须是纯 JSON，不能返回 HTML';
+    }
+    return ''; // Let parseJsonResponse handle the actual parse error
+  }
 }
 
 function removeTrailingJsonCommas(value) {
@@ -178,8 +189,101 @@ function addMissingArrayElementCommas(value) {
   return output;
 }
 
+function fixUnescapedControlChars(value) {
+  // Replace unescaped control characters inside JSON strings with escaped equivalents.
+  // JSON strings may not contain raw U+0000–U+001F; they must be \n, \t, etc.
+  const raw = String(value || '');
+  let output = '';
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    const code = char.charCodeAt(0);
+    if (inString) {
+      if (escaped) {
+        output += char;
+        escaped = false;
+      } else if (char === '\\') {
+        output += char;
+        escaped = true;
+      } else if (char === '"') {
+        output += char;
+        inString = false;
+      } else if (code >= 0x00 && code <= 0x1f) {
+        // Escape control characters
+        const replacements = {
+          '\b': '\\b', '\f': '\\f', '\n': '\\n', '\r': '\\r', '\t': '\\t',
+        };
+        output += replacements[char] || `\\u${String(code).padStart(4, '0')}`;
+      } else {
+        output += char;
+      }
+    } else {
+      output += char;
+      if (char === '"') inString = true;
+    }
+  }
+  return output;
+}
+
+function fixUnescapedQuotesInStrings(value) {
+  // Fix unescaped double quotes inside JSON string values by backslash-escaping them.
+  // This is a heuristic: only fixes quotes that would break JSON parsing.
+  const raw = String(value || '');
+  let output = '';
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if (inString) {
+      if (escaped) {
+        output += char;
+        escaped = false;
+      } else if (char === '\\') {
+        output += char;
+        escaped = true;
+      } else if (char === '"') {
+        // Check if this quote ends the string: look ahead for , or } or ] or :
+        let cursor = index + 1;
+        while (cursor < raw.length && /\s/.test(raw[cursor])) cursor += 1;
+        const next = raw[cursor] || '';
+        if (next === ',' || next === '}' || next === ']' || next === ':' || next === '') {
+          // This is a real closing quote
+          output += char;
+          inString = false;
+        } else {
+          // This quote is inside the string — escape it
+          output += '\\"';
+        }
+      } else {
+        output += char;
+      }
+    } else {
+      output += char;
+      if (char === '"') inString = true;
+    }
+  }
+  return output;
+}
+
 function repairJsonSeparators(value) {
   return addMissingArrayElementCommas(removeTrailingJsonCommas(value));
+}
+
+function aggressiveRepairJson(raw) {
+  // Multi-pass repair: try increasingly aggressive fixes
+  let text = raw;
+
+  // Pass 1: Fix unescaped control characters
+  text = fixUnescapedControlChars(text);
+
+  // Pass 2: Fix unescaped quotes inside strings
+  text = fixUnescapedQuotesInStrings(text);
+
+  // Pass 3: Standard separator repair
+  text = repairJsonSeparators(text);
+
+  return text;
 }
 
 function parseJsonResponse(responseText) {
@@ -190,14 +294,22 @@ function parseJsonResponse(responseText) {
   const raw = String(responseText).trim();
   try {
     return { success: true, data: JSON.parse(raw) };
-  } catch (error) {
+  } catch (firstError) {
+    // Pass 1: Standard separator repair (trailing commas, missing commas)
     const repaired = repairJsonSeparators(raw);
     if (repaired !== raw) {
       try {
         return { success: true, data: JSON.parse(repaired), repaired: true };
       } catch {}
     }
-    return { success: false, message: `AI 返回不是有效 JSON：${error.message}` };
+    // Pass 2: Aggressive repair (unescaped control chars, unescaped quotes)
+    const aggressive = aggressiveRepairJson(raw);
+    if (aggressive !== repaired) {
+      try {
+        return { success: true, data: JSON.parse(aggressive), repaired: true };
+      } catch {}
+    }
+    return { success: false, message: `AI 返回不是有效 JSON：${firstError.message}` };
   }
 }
 
@@ -326,12 +438,190 @@ function parseFrameSpecsResponse(responseText, sceneSpec) {
   };
 }
 
+/**
+ * Build a compact prompt for AI to select the best template based on scene content.
+ * Returns a prompt string (~500 token) that asks AI to output JSON { template_id, reason }.
+ */
+function buildSelectTemplatePrompt({ sceneSpec, compactIndex }) {
+  const scenes = (sceneSpec.scenes || []);
+  const firstScene = scenes[0] || {};
+  const title = sceneSpec.title || '';
+  const kind = firstScene.kind || 'text';
+  const narration = (firstScene.narration_text || '').slice(0, 200);
+  const headline = firstScene.visual_text?.headline || title;
+
+  return [
+    '你是视频模板选择专家。根据以下内容场景，从模板列表中选择最合适的模板。',
+    '请只输出 JSON，不要输出 Markdown、解释或代码块。',
+    '输出格式：{"template_id":"...","reason":"..."}',
+    '',
+    '## 内容场景',
+    `标题：${title}`,
+    `类型：${kind}`,
+    `关键文案：${headline}`,
+    `旁白摘要：${narration}`,
+    '',
+    '## 可用模板',
+    ...compactIndex.map(t =>
+      `- [${t.id}] ${t.name}：${t.description}。适合：${(t.best_for || []).join('、')}`
+    ),
+    '',
+    '请选择最匹配内容主题和情绪的模板。只输出 JSON。',
+  ].join('\n');
+}
+
+/**
+ * Build a prompt for AI to fill a template's HTML with actual content.
+ * Returns a prompt string that provides the template HTML + content data.
+ */
+function buildFillTemplatePrompt({ sceneSpec, frameSpecs, templateHtml, templateManifest }) {
+  const scenes = (sceneSpec.scenes || []);
+
+  // Extract content for each scene
+  const contentData = scenes.map((scene, index) => {
+    const frame = (frameSpecs?.frames || [])[index] || {};
+    return {
+      scene_id: scene.id,
+      kind: scene.kind,
+      duration: scene.duration,
+      headline: scene.visual_text?.headline || scene.title || '',
+      keywords: scene.visual_text?.keywords || [],
+      cards: scene.visual_text?.cards || [],
+      narration: scene.narration_text || '',
+      captions: (scene.captions || []).map(c => c.text),
+    };
+  });
+
+  const inputsDesc = templateManifest.inputs
+    ? Object.entries(templateManifest.inputs).map(([k, v]) =>
+      `  ${k}（${v.type}${v.required ? '，必填' : '，可选'}${v.max_length ? `，最多${v.max_length}字` : ''}）：${v.description || ''}`
+    ).join('\n')
+    : '  无特定字段要求';
+
+  const totalDuration = scenes.reduce((s, c) => s + (c.duration || 0), 0);
+
+  return [
+    '你是一个前端动效工程师。请修改以下 HTML 模板，将示例内容替换为实际内容。',
+    '',
+    '## 模板说明',
+    `名称：${templateManifest.name}`,
+    `描述：${templateManifest.description}`,
+    `内容字段：`,
+    inputsDesc,
+    '',
+    '## 实际内容',
+    stringify(contentData),
+    '',
+    `视频总时长：${totalDuration}秒`,
+    '',
+    '## 要求',
+    '1. 保持 CSS 样式和布局不变',
+    '2. 只替换文本内容和数据，保持 HTML 结构和 class 名不变',
+    '3. 如果内容超出模板容量，精简内容而非修改布局',
+    '4. 将所有英文示例文字替换为中文实际内容',
+    '5. 保持 Google Fonts 链接不变；GSAP 必须使用本地路径 <script src="./gsap.min.js"></script>，不要用 CDN',
+    '6. 如果目标宽高比不是 16:9，需要调整 body 的 width/height 为对应尺寸（9:16 = 1080x1920, 1:1 = 1080x1080, 4:5 = 1080x1350）',
+    '7. 返回完整的修改后 HTML，不要添加任何解释',
+    '',
+    '## ⚠️ 动画规范（最关键）',
+    '',
+    '视频渲染器通过 GSAP timeline 逐帧捕获画面。CSS @keyframes 动画对渲染器不可见，会导致输出全是静态图片。',
+    '',
+    '你必须：',
+    '- 删除所有 CSS @keyframes 和 animation 属性',
+    '- 所有动画效果必须用 GSAP timeline tweens 实现',
+    `- 在 <script> 中创建 window.__timelines["main"] = gsap.timeline({ paused: true })`,
+    `- 用 tl.fromTo() / tl.to() 控制每个元素的入场、退场动画`,
+    `- 最后添加 tl.to({}, { duration: ${totalDuration} }) 确保 timeline 时长正确`,
+    '- 每个 scene 的动画应在对应的时间点触发（根据 scene 的 start 和 duration 计算）',
+    '',
+    '示例结构：',
+    '```javascript',
+    'window.__timelines = window.__timelines || {};',
+    'const tl = gsap.timeline({ paused: true });',
+    'window.__timelines["main"] = tl;',
+    '// 元素入场动画',
+    'tl.fromTo(".headline", { opacity: 0, y: 40 }, { opacity: 1, y: 0, duration: 1, ease: "power3.out" }, 0);',
+    'tl.fromTo(".subtitle", { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.8, ease: "power2.out" }, 0.5);',
+    '// 元素退场动画（在场景结束前）',
+    'tl.to(".headline", { opacity: 0, y: -20, duration: 0.5, ease: "power2.in" }, 8.5);',
+    '// 确保 timeline 时长',
+    `tl.to({}, { duration: ${totalDuration} });`,
+    '```',
+    '',
+    '## 原始模板 HTML',
+    '```html',
+    templateHtml,
+    '```',
+  ].join('\n');
+}
+
+/**
+ * Parse the AI's template selection response.
+ * Expected: { template_id: "...", reason: "..." }
+ */
+function parseSelectTemplateResponse(responseText, availableIds) {
+  const parsed = parseJsonResponse(responseText);
+  if (!parsed.success) {
+    return { success: false, message: `模板选择解析失败：${parsed.message}` };
+  }
+  const data = parsed.data;
+  const templateId = data.template_id || data.id;
+  if (!templateId) {
+    return { success: false, message: 'AI 未返回 template_id' };
+  }
+  if (availableIds && !availableIds.includes(templateId)) {
+    return { success: false, message: `AI 选择了不存在的模板：${templateId}` };
+  }
+  return {
+    success: true,
+    template_id: templateId,
+    reason: data.reason || '',
+  };
+}
+
+/**
+ * Parse the AI's HTML fill response.
+ * The AI should return the full HTML content (not JSON).
+ */
+function parseFillTemplateResponse(responseText) {
+  const raw = String(responseText || '').trim();
+  if (!raw) {
+    return { success: false, message: 'AI 返回为空' };
+  }
+
+  // The AI might wrap HTML in a code block
+  let html = raw;
+  const codeBlockMatch = raw.match(/```(?:html)?\s*\n?([\s\S]*?)```/);
+  if (codeBlockMatch) {
+    html = codeBlockMatch[1].trim();
+  }
+
+  // Validate it looks like HTML
+  if (!html.includes('<html') && !html.includes('<HTML') && !html.includes('<!DOCTYPE') && !html.includes('<body')) {
+    return { success: false, message: 'AI 返回的内容不像 HTML' };
+  }
+
+  if (html.length < 200) {
+    return { success: false, message: 'AI 返回的 HTML 过短' };
+  }
+
+  return { success: true, html };
+}
+
 module.exports = {
   buildSceneSpecPrompt,
   buildFrameSpecsPrompt,
+  buildSelectTemplatePrompt,
+  buildFillTemplatePrompt,
   parseSceneSpecResponse,
   parseFrameSpecsResponse,
+  parseSelectTemplateResponse,
+  parseFillTemplateResponse,
   applyDurationFallbacks,
   removeTrailingJsonCommas,
   addMissingArrayElementCommas,
+  fixUnescapedControlChars,
+  fixUnescapedQuotesInStrings,
+  aggressiveRepairJson,
 };

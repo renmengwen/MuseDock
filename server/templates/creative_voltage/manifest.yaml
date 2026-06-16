@@ -1,0 +1,38 @@
+id: creative_voltage
+name: 创意电压
+description: 电蓝色分割面板+手写体装饰+等宽字体元数据，创意/设计/视觉风格
+category: titles
+tags: [创意, 设计, 视觉, 蓝色, 电压, creative, voltage, 设计师]
+best_for:
+  - 创意/设计类内容
+  - 视觉展示
+  - 设计理念表达
+  - 创作者故事
+not_for:
+  - 数据展示
+  - 正式商务
+  - 儿童内容
+aspect_support: ['16:9']
+duration_range: [3, 10]
+inputs:
+  title_lines:
+    type: array
+    required: true
+    max_items: 3
+    description: 标题行数组
+  script_text:
+    type: string
+    required: false
+    max_length: 20
+    description: 手写体装饰文字
+  meta_info:
+    type: string
+    required: false
+    max_length: 30
+    description: 左上角元数据
+  caption:
+    type: string
+    required: false
+    max_length: 30
+    description: 右下角标注
+license: Apache-2.0

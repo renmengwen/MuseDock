@@ -2,6 +2,7 @@ const aiTextModel = require('../aiTextModel');
 const quality = require('../hyperframesFreeformQuality');
 const creativeSpecAgent = require('./creativeSpecAgent');
 const hyperframesTemplateRenderer = require('./hyperframesTemplateRenderer');
+const templateRegistry = require('./templateRegistry');
 const defaultProjectWriter = require('./projectWriter');
 const defaultTtsService = require('./ttsService');
 const { createRenderAdapter } = require('./renderAdapter');
@@ -103,6 +104,104 @@ async function requestFrameSpecs({ model, sceneSpec, maxAttempts = 2 }) {
   return lastParsed || failure('frame_specs 生成失败。');
 }
 
+// ---------------------------------------------------------------------------
+// Rich template path (new high-quality rendering)
+// ---------------------------------------------------------------------------
+
+async function requestTemplateSelection({ model, sceneSpec, maxAttempts = 2 }) {
+  const compactIndex = templateRegistry.buildCompactIndex();
+  if (!compactIndex.length) {
+    return failure('没有可用的 rich 模板。');
+  }
+
+  let lastParsed = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const prompt = creativeSpecAgent.buildSelectTemplatePrompt({
+      sceneSpec,
+      compactIndex,
+    });
+    const ai = await callTextModel(model, prompt);
+    if (!ai.success) return ai;
+
+    const availableIds = compactIndex.map(t => t.id);
+    lastParsed = creativeSpecAgent.parseSelectTemplateResponse(ai.text, availableIds);
+    if (lastParsed.success) return lastParsed;
+  }
+  return lastParsed || failure('模板选择失败。');
+}
+
+async function requestHtmlFill({ model, sceneSpec, frameSpecs, templateId, maxAttempts = 2 }) {
+  const templateHtml = templateRegistry.getTemplateHtml(templateId, 4000);
+  const templateManifest = templateRegistry.getTemplateManifest(templateId);
+
+  let lastParsed = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const prompt = creativeSpecAgent.buildFillTemplatePrompt({
+      sceneSpec,
+      frameSpecs,
+      templateHtml,
+      templateManifest,
+    });
+    const ai = await callTextModel(model, prompt);
+    if (!ai.success) return ai;
+
+    lastParsed = creativeSpecAgent.parseFillTemplateResponse(ai.text);
+    if (lastParsed.success) return lastParsed;
+  }
+  return lastParsed || failure('HTML 填充失败。');
+}
+
+/**
+ * Try the rich template path: AI selects template → AI fills HTML → assemble project.
+ * Returns { success, ... } on success, or { success: false, ... } to trigger fallback.
+ */
+async function tryRichTemplate({ model, sceneSpec, frameSpecs }) {
+  // Step 1: AI selects template
+  const selection = await requestTemplateSelection({ model, sceneSpec });
+  if (!selection.success) {
+    return failure(`Rich 模板选择失败（将回退到旧模板）：${selection.message}`);
+  }
+
+  const templateId = selection.template_id;
+
+  // Step 2: AI fills template HTML
+  const fillResult = await requestHtmlFill({
+    model,
+    sceneSpec,
+    frameSpecs,
+    templateId,
+  });
+  if (!fillResult.success) {
+    return failure(`Rich HTML 填充失败（将回退到旧模板）：${fillResult.message}`);
+  }
+
+  // Step 3: Assemble project files
+  const assembled = hyperframesTemplateRenderer.assembleProjectFiles({
+    sceneSpec,
+    frameSpecs,
+    aiGeneratedHtml: fillResult.html,
+    templateId,
+  });
+
+  if (!assembled.success) {
+    return failure(`Rich 项目组装失败（将回退到旧模板）：${assembled.message}`);
+  }
+
+  return {
+    success: true,
+    template_id: templateId,
+    template_reason: selection.reason,
+    scene_spec: assembled.scene_spec,
+    frame_specs: assembled.frame_specs,
+    target_duration_sec: assembled.target_duration_sec,
+    files: assembled.files,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Main orchestrator
+// ---------------------------------------------------------------------------
+
 async function generateCreativeVideoProject({
   workflowId,
   runId,
@@ -114,6 +213,7 @@ async function generateCreativeVideoProject({
 } = {}) {
   const resolved = getServices(services);
 
+  // Stage 1: Generate scene_spec (content layer)
   const sceneParsed = await requestSceneSpec({
     model: resolved.aiTextModel,
     creativeContext,
@@ -122,22 +222,48 @@ async function generateCreativeVideoProject({
   });
   if (!sceneParsed.success) return failure(sceneParsed.message, { errors: sceneParsed.errors || [] });
 
-  const frameParsed = await requestFrameSpecs({
-    model: resolved.aiTextModel,
-    sceneSpec: sceneParsed.scene_spec,
-  });
-  if (!frameParsed.success) return failure(frameParsed.message, { errors: frameParsed.errors || [] });
+  // Stage 2: Try rich template path first
+  let renderedFiles = null;
+  let renderMode = 'legacy';
+  let richTemplateDiagnostics = null;
 
-  const renderedFiles = hyperframesTemplateRenderer.renderHyperframesProjectFiles({
-    sceneSpec: sceneParsed.scene_spec,
-    frameSpecs: frameParsed.frame_specs,
-  });
-  if (!renderedFiles.success) {
-    return failure(renderedFiles.message || 'HyperFrames 工程文件生成失败。', {
-      diagnostics: renderedFiles.diagnostics || [],
+  const hasRichTemplates = templateRegistry.getRichTemplateIds().length > 0;
+  if (hasRichTemplates) {
+    const richResult = await tryRichTemplate({
+      model: resolved.aiTextModel,
+      sceneSpec: sceneParsed.scene_spec,
+      frameSpecs: null, // Rich path generates its own frame_specs if needed
     });
+
+    if (richResult.success) {
+      renderedFiles = richResult;
+      renderMode = 'rich';
+    } else {
+      richTemplateDiagnostics = richResult.message || 'Rich template path failed';
+      console.warn(`[workflowFacade] Rich template fallback: ${richTemplateDiagnostics}`);
+    }
   }
 
+  // Stage 3: Fallback to legacy path if rich path didn't work
+  if (!renderedFiles) {
+    const frameParsed = await requestFrameSpecs({
+      model: resolved.aiTextModel,
+      sceneSpec: sceneParsed.scene_spec,
+    });
+    if (!frameParsed.success) return failure(frameParsed.message, { errors: frameParsed.errors || [] });
+
+    renderedFiles = hyperframesTemplateRenderer.renderHyperframesProjectFiles({
+      sceneSpec: sceneParsed.scene_spec,
+      frameSpecs: frameParsed.frame_specs,
+    });
+    if (!renderedFiles.success) {
+      return failure(renderedFiles.message || 'HyperFrames 工程文件生成失败。', {
+        diagnostics: renderedFiles.diagnostics || [],
+      });
+    }
+  }
+
+  // Stage 4: Write project files
   const written = await writeProject(resolved.projectWriter, {
     rootDir,
     workflowId,
@@ -146,17 +272,18 @@ async function generateCreativeVideoProject({
   });
   if (!written.success) {
     return failure(written.message || '工程写入失败。', {
-      scene_spec: sceneParsed.scene_spec,
-      frame_specs: frameParsed.frame_specs,
+      scene_spec: renderedFiles.scene_spec,
+      frame_specs: renderedFiles.frame_specs,
     });
   }
 
+  // Stage 5: Validate project
   if (!skipValidation) {
     const checked = await checkProject(resolved.checker, written.project_dir);
     if (!checked.success) {
       return failure(checked.message || '工程校验失败。', {
-        scene_spec: sceneParsed.scene_spec,
-        frame_specs: frameParsed.frame_specs,
+        scene_spec: renderedFiles.scene_spec,
+        frame_specs: renderedFiles.frame_specs,
         project_dir: written.project_dir,
         files: written.files || [],
         diagnostics: checked,
@@ -164,29 +291,31 @@ async function generateCreativeVideoProject({
     }
   }
 
+  // Stage 6: TTS synthesis
   const ttsResult = await resolved.ttsService.synthesizeSceneNarration({
     projectDir: written.project_dir,
-    sceneSpec: sceneParsed.scene_spec,
+    sceneSpec: renderedFiles.scene_spec,
   });
   if (!ttsResult.success) {
     return failure(ttsResult.message || '旁白音频生成失败。', {
-      scene_spec: sceneParsed.scene_spec,
-      frame_specs: frameParsed.frame_specs,
+      scene_spec: renderedFiles.scene_spec,
+      frame_specs: renderedFiles.frame_specs,
       project_dir: written.project_dir,
       files: written.files || [],
       audio_manifest: ttsResult.audio_manifest,
     });
   }
 
+  // Stage 7: Render video
   const renderResult = await resolved.renderAdapter.render({
     project_dir: written.project_dir,
-    duration: renderedFiles.scene_spec.target_duration_sec,
+    duration: renderedFiles.target_duration_sec || renderedFiles.scene_spec?.target_duration_sec,
     audio_manifest: ttsResult.audio_manifest,
   });
   if (!renderResult.success) {
     return failure(renderResult.message || '视频渲染失败。', {
-      scene_spec: sceneParsed.scene_spec,
-      frame_specs: frameParsed.frame_specs,
+      scene_spec: renderedFiles.scene_spec,
+      frame_specs: renderedFiles.frame_specs,
       project_dir: written.project_dir,
       files: written.files || [],
       audio_manifest: ttsResult.audio_manifest,
@@ -194,6 +323,7 @@ async function generateCreativeVideoProject({
     });
   }
 
+  // Stage 8: Mux audio
   const muxResult = await hyperframesRenderer.concatAndMuxAudio({
     projectDir: written.project_dir,
     videoPath: renderResult.output_path,
@@ -201,13 +331,14 @@ async function generateCreativeVideoProject({
   });
   if (!muxResult.success) {
     return failure(muxResult.message || '音频混流失败。', {
-      scene_spec: sceneParsed.scene_spec,
-      frame_specs: frameParsed.frame_specs,
+      scene_spec: renderedFiles.scene_spec,
+      frame_specs: renderedFiles.frame_specs,
       project_dir: written.project_dir,
       output_path: renderResult.output_path,
     });
   }
 
+  // Stage 9: Visual QA
   let visualReport = { success: true, issues: [] };
   if (!skipValidation) {
     visualReport = await resolved.visualQaService.inspectRenderedVideo({
@@ -216,8 +347,8 @@ async function generateCreativeVideoProject({
     });
     if (!visualReport.success) {
       return failure(visualReport.message || '视觉质检失败。', {
-        scene_spec: sceneParsed.scene_spec,
-        frame_specs: frameParsed.frame_specs,
+        scene_spec: renderedFiles.scene_spec,
+        frame_specs: renderedFiles.frame_specs,
         project_dir: written.project_dir,
         files: written.files || [],
         audio_manifest: ttsResult.audio_manifest,
@@ -231,9 +362,12 @@ async function generateCreativeVideoProject({
 
   return {
     success: true,
-    message: '创意视频生成完成。',
-    scene_spec: sceneParsed.scene_spec,
-    frame_specs: frameParsed.frame_specs,
+    message: `创意视频生成完成。（${renderMode === 'rich' ? 'Rich Template' : 'Legacy'} 模式）`,
+    render_mode: renderMode,
+    template_id: renderedFiles.template_id || null,
+    rich_template_diagnostics: richTemplateDiagnostics,
+    scene_spec: renderedFiles.scene_spec,
+    frame_specs: renderedFiles.frame_specs,
     project_dir: written.project_dir,
     files: written.files || [],
     audio_manifest: ttsResult.audio_manifest,
@@ -256,4 +390,8 @@ module.exports = {
   rerenderCreativeVideoProject,
   applyCreativeVideoEdit,
   getSceneDurationsFromContext,
+  // Export for testing
+  tryRichTemplate,
+  requestTemplateSelection,
+  requestHtmlFill,
 };

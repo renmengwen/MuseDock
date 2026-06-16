@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>漏光电影</title>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=Source+Serif+Pro:ital,wght@0,400;1,400;1,500&family=IBM+Plex+Mono:wght@400;500&family=Noto+Serif+SC:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Source Serif Pro','Noto Serif SC',Georgia,serif;background:#000;width:1920px;height:1080px;overflow:hidden;display:flex;align-items:center;justify-content:center;padding:24px}
+  .frame{position:relative;width:100%;max-width:1600px;aspect-ratio:2.39/1;background:#1a0d08;overflow:hidden}
+  .scene{position:absolute;inset:0;background:radial-gradient(ellipse at 78% 18%,#ffb547 0%,transparent 38%),radial-gradient(ellipse at 90% 30%,#ff7e3f 0%,transparent 30%),linear-gradient(180deg,transparent 60%,#d97757 110%),radial-gradient(ellipse at 30% 60%,#2a1410 0%,transparent 60%),linear-gradient(135deg,#1a0d08 0%,#28140c 50%,#0a0502 100%)}
+  .grain{position:absolute;inset:0;opacity:0.14;mix-blend-mode:overlay;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E")}
+  .scratch{position:absolute;top:0;bottom:0;width:1px;background:#f5e9d6;opacity:0.18}
+  .vignette{position:absolute;inset:0;background:radial-gradient(circle at center,transparent 50%,rgba(0,0,0,0.6) 100%)}
+  .cream{color:#f5e9d6}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .display{font-family:'EB Garamond','Noto Serif SC',serif}
+  .chip{font-size:10.5px;letter-spacing:0.22em;text-transform:uppercase}
+  .header-bar{position:absolute;top:24px;left:40px;right:40px;display:flex;align-items:baseline;justify-content:space-between;z-index:10;opacity:0.7}
+  .main-text{position:absolute;z-index:10;left:8%;bottom:18%;max-width:60%}
+  .footer-bar{position:absolute;bottom:24px;left:40px;right:40px;display:flex;align-items:baseline;justify-content:space-between;z-index:10;opacity:0.5}
+</style>
+</head>
+<body>
+  <div class="frame">
+    <div class="scene"></div>
+    <div class="scratch" style="left:14%;height:38%"></div>
+    <div class="scratch" style="left:42%;height:60%;top:20%;opacity:0.12"></div>
+    <div class="scratch" style="left:71%;height:30%;top:55%"></div>
+
+    <div class="header-bar chip mono cream">
+      <span>REEL 03 · CH I · MMXXVI</span>
+      <span>柏林的安静一年</span>
+      <span>00:03:21</span>
+    </div>
+
+    <div class="main-text cream">
+      <div class="chip mono" style="opacity:0.7">Reel III · 标题</div>
+      <h1 class="display" style="margin-top:12px;line-height:1.05;font-style:italic;font-weight:500;font-size:clamp(40px,5.5vw,84px);color:#f5e9d6">
+        柏林的<br/>
+        <span style="font-style:italic">安静</span>一年。
+      </h1>
+      <p class="display" style="margin-top:16px;font-style:italic;opacity:0.8;font-size:22px">
+        一部关于排版的短片，分十四卷讲述。
+      </p>
+    </div>
+
+    <div class="footer-bar chip mono cream">
+      <span>52.5200° N · 13.4050° E</span>
+      <span>35MM 胶片 · PROXY 1080P</span>
+      <span>FRAME · LIGHT-LEAK-CINEMA</span>
+    </div>
+
+    <div class="grain"></div>
+    <div class="vignette"></div>
+  </div>
+
+  <script src="./gsap.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+    tl.to({}, { duration: 6 });
+    window.__timelines["main"] = tl;
+  </script>
+</body>
+</html>

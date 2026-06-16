@@ -71,10 +71,16 @@ function enqueueTtsRequest(task, options = {}) {
 }
 
 function extractAudioData(payload) {
-  return payload?.choices?.[0]?.message?.audio?.data
-    || payload?.choices?.[0]?.message?.audio?.audio
-    || payload?.audio?.data
-    || payload?.data;
+  if (!payload || typeof payload !== 'object') return '';
+  return payload.choices?.[0]?.message?.audio?.data
+    || payload.choices?.[0]?.message?.audio?.audio
+    || payload.choices?.[0]?.audio?.data
+    || payload.choices?.[0]?.audio?.audio
+    || payload.audio?.data
+    || payload.audio?.audio
+    || payload.audio_data
+    || payload.audioContent
+    || payload.data;
 }
 
 async function resolveTtsRuntime(options = {}) {
@@ -230,6 +236,10 @@ async function callTtsModel(options = {}) {
 
   const audioData = extractAudioData(payload);
   if (!audioData || typeof audioData !== 'string') {
+    console.error('[TTS] MiMo 未返回有效音频数据，payload 结构:', JSON.stringify(payload, (key, value) => {
+      if (key === 'data' && typeof value === 'string' && value.length > 100) return `[base64 ${value.length} chars]`;
+      return value;
+    }, 2));
     return {
       success: false,
       status: 'failed',

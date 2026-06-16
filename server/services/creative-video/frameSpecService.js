@@ -73,6 +73,30 @@ function normalizeVisualLayer(layer, index) {
   };
 }
 
+function buildFallbackTextLayers(scene) {
+  const layers = [];
+  if (!scene) return layers;
+  const vt = scene.visual_text || {};
+  if (vt.headline) {
+    layers.push({ id: 'text_fb_01', role: 'headline', text: vt.headline, emphasis: 'primary' });
+  }
+  const extras = [...(vt.cards || []), ...(vt.keywords || [])]
+    .filter(t => String(t || '').trim())
+    .slice(0, 4);
+  extras.forEach((t, i) => {
+    layers.push({
+      id: `text_fb_${String(i + 2).padStart(2, '0')}`,
+      role: 'body',
+      text: t,
+      emphasis: 'secondary',
+    });
+  });
+  if (layers.length === 0 && scene.narration_text) {
+    layers.push({ id: 'text_fb_01', role: 'body', text: scene.narration_text, emphasis: 'secondary' });
+  }
+  return layers;
+}
+
 function normalizeFrame(frame, index, usedIds, scenesById) {
   const source = frame && typeof frame === 'object' ? frame : {};
   const sceneId = text(source.scene_id);
@@ -97,6 +121,11 @@ function normalizeFrame(frame, index, usedIds, scenesById) {
   const kind = scene && isAllowedKind(rawKind) && rawKind !== scene.kind
     ? scene.kind
     : rawKind;
+  let textLayers = list(source.text_layers).map(normalizeTextLayer);
+  // If AI omitted text_layers, auto-populate from scene.visual_text
+  if (textLayers.length === 0) {
+    textLayers = buildFallbackTextLayers(scene).map(normalizeTextLayer);
+  }
   return {
     id: uniqueFrameId(source.id, usedIds, index),
     scene_id: sceneId,
@@ -108,7 +137,7 @@ function normalizeFrame(frame, index, usedIds, scenesById) {
     layout: text(source.layout),
     background: text(source.background),
     motion: text(source.motion),
-    text_layers: list(source.text_layers).map(normalizeTextLayer),
+    text_layers: textLayers,
     visual_layers: list(source.visual_layers).map(normalizeVisualLayer),
   };
 }

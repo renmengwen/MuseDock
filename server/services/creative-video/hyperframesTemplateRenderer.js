@@ -5,13 +5,15 @@ const frameSpecService = require('./frameSpecService');
 const templateRegistry = require('./templateRegistry');
 
 const GSAP_LOCAL_PATH = path.resolve(__dirname, '../../../node_modules/gsap/dist/gsap.min.js');
-let gsapBundleCache = null;
+const GSAP_CACHE_SENTINEL = Symbol('not-loaded');
+let gsapBundleCache = GSAP_CACHE_SENTINEL;
 
 function getGsapBundle() {
-  if (gsapBundleCache !== null) return gsapBundleCache;
+  if (gsapBundleCache !== GSAP_CACHE_SENTINEL) return gsapBundleCache;
   try {
     gsapBundleCache = fs.readFileSync(GSAP_LOCAL_PATH, 'utf8');
-  } catch {
+  } catch (err) {
+    console.warn(`[hyperframesTemplateRenderer] Failed to load GSAP bundle: ${err.message}`);
     gsapBundleCache = '';
   }
   return gsapBundleCache;
@@ -260,7 +262,187 @@ function renderHyperframesProjectFiles({ sceneSpec, frameSpecs } = {}) {
   };
 }
 
+/**
+ * Assemble project files from AI-generated HTML (rich template path).
+ * The AI has already produced a complete index.html following the template's design.
+ * This function wraps it with the same file structure as renderHyperframesProjectFiles.
+ */
+function assembleProjectFiles({ sceneSpec, frameSpecs, aiGeneratedHtml, templateId }) {
+  const normalizedSceneSpec = sceneSpecService.normalizeSceneSpec(sceneSpec);
+  const sceneValidation = sceneSpecService.validateSceneSpec(normalizedSceneSpec);
+  if (!sceneValidation.success) {
+    return {
+      success: false,
+      message: `scene_spec 校验失败：${sceneValidation.errors.join('；')}`,
+      diagnostics: sceneValidation.errors,
+      files: {},
+    };
+  }
+
+  const dimensions = dimensionsFor(sceneValidation.scene_spec.aspect_ratio);
+  const duration = totalDuration(sceneValidation.scene_spec);
+
+  // Validate the AI-generated HTML is not empty
+  if (!aiGeneratedHtml || aiGeneratedHtml.trim().length < 100) {
+    return {
+      success: false,
+      message: 'AI 生成的 HTML 内容为空或过短。',
+      diagnostics: ['aiGeneratedHtml is empty or too short'],
+      files: {},
+    };
+  }
+
+  // Ensure the HTML loads GSAP from the LOCAL file (not CDN — rendering is offline).
+  // Replace any existing <script src="...gsap..."> with the local path.
+  let finalHtml = aiGeneratedHtml;
+  if (/<script[^>]+gsap[^>]+src=/i.test(finalHtml)) {
+    // Replace any GSAP script src (CDN or other) with local path
+    finalHtml = finalHtml.replace(/<script([^>]+)src=["'][^"']*gsap[^"']*["']/gi, '<script$1src="./gsap.min.js"');
+  } else if (!finalHtml.includes('gsap.min.js')) {
+    // No GSAP script at all — inject local one
+    const gsapScript = '\n<script src="./gsap.min.js"></script>\n';
+    if (finalHtml.includes('</body>')) {
+      finalHtml = finalHtml.replace('</body>', gsapScript + '</body>');
+    } else if (finalHtml.includes('</html>')) {
+      finalHtml = finalHtml.replace('</html>', gsapScript + '</html>');
+    } else {
+      finalHtml += gsapScript;
+    }
+  }
+
+  // Ensure window.__timelines["main"] exists for hyperframes compatibility.
+  // If AI generated CSS @keyframes instead of GSAP tweens, convert them.
+  // HyperFrames renders by seeking the GSAP timeline — CSS animations are invisible.
+  if (!finalHtml.includes('__timelines')) {
+    const timelineScript = `
+<script>
+  window.__timelines = window.__timelines || {};
+  (function() {
+    var DUR = ${duration};
+    var tl = gsap.timeline({ paused: true });
+    window.__timelines["main"] = tl;
+
+    // Freeze all CSS animations immediately
+    var cssAnims = [];
+    document.querySelectorAll("*").forEach(function(el) {
+      var cs = getComputedStyle(el);
+      var name = cs.animationName;
+      if (name && name !== "none") {
+        cssAnims.push({
+          el: el,
+          dur: parseFloat(cs.animationDuration) || 1,
+          delay: parseFloat(cs.animationDelay) || 0
+        });
+        el.style.animationPlayState = "paused";
+      }
+    });
+
+    if (cssAnims.length > 0) {
+      // Scrub CSS animations via negative animation-delay
+      var tick = function() {
+        var t = tl.time();
+        for (var i = 0; i < cssAnims.length; i++) {
+          var a = cssAnims[i];
+          var local = Math.max(0, Math.min(t - a.delay, a.dur));
+          a.el.style.animationDelay = (-local) + "s";
+        }
+      };
+      tl.eventCallback("onUpdate", tick);
+      for (var pos = 0; pos <= DUR; pos += 0.5) {
+        tl.add(tick, pos);
+      }
+    }
+
+    // Always add GSAP tweens for main visual elements as primary animation
+    var headline = document.querySelector(".headline, .card-title, h1, h2, .section-no");
+    var subtitle = document.querySelector(".subtitle, .card-label, .label, .content p");
+    var card = document.querySelector(".card");
+    var bars = document.querySelectorAll(".bar");
+    var bottomBar = document.querySelector(".bottom-bar");
+    if (headline) {
+      tl.fromTo(headline, { opacity: 0, y: 50 }, { opacity: 1, y: 0, duration: 1.2, ease: "power3.out" }, 0.3);
+    }
+    if (subtitle) {
+      tl.fromTo(subtitle, { opacity: 0, y: 25 }, { opacity: 1, y: 0, duration: 0.8, ease: "power2.out" }, 0.8);
+    }
+    if (card) {
+      tl.fromTo(card, { opacity: 0, x: "110%" }, { opacity: 1, x: "0%", duration: 1, ease: "power3.out" }, 0.5);
+    }
+    if (bars.length > 0) {
+      tl.fromTo(bars, { scaleY: 0 }, { scaleY: 1, duration: 0.7, stagger: 0.1, ease: "power2.out", transformOrigin: "bottom" }, 1.2);
+    }
+    if (bottomBar) {
+      tl.fromTo(bottomBar, { y: "100%" }, { y: "0%", duration: 0.6, ease: "power3.out" }, 1.5);
+    }
+
+    // Ensure timeline spans full duration
+    tl.to({}, { duration: DUR });
+  })();
+</script>`;
+    if (finalHtml.includes('</body>')) {
+      finalHtml = finalHtml.replace('</body>', timelineScript + '\n</body>');
+    } else {
+      finalHtml += timelineScript;
+    }
+  }
+
+  // Ensure HyperFrames can detect composition duration via data-duration attribute.
+  // The FrameCapture runtime reads data-duration from the composition element in static HTML.
+  // AI-generated HTML may not include this, so add it directly to the <body> tag.
+  if (!finalHtml.includes('data-duration')) {
+    const durationAttr = ` data-duration="${duration}" data-composition-id="main" data-width="${dimensions.width}" data-height="${dimensions.height}"`;
+    if (/<body[\s>]/i.test(finalHtml)) {
+      finalHtml = finalHtml.replace(/<body([\s>])/i, `<body${durationAttr}$1`);
+    }
+  }
+
+  const normalizedFrameSpecs = frameSpecs || { frames: [] };
+  const meta = {
+    title: normalizedSceneSpec.title,
+    aspect_ratio: normalizedSceneSpec.aspect_ratio,
+    width: dimensions.width,
+    height: dimensions.height,
+    duration_sec: duration,
+    scene_count: normalizedSceneSpec.scenes.length,
+    frame_count: normalizedFrameSpecs.frames ? normalizedFrameSpecs.frames.length : 0,
+    renderer: 'rich-template',
+    template_id: templateId,
+  };
+  const hyperframes = {
+    composition: 'main',
+    width: dimensions.width,
+    height: dimensions.height,
+    duration,
+    fps: 30,
+    timeline: 'main',
+    clips: (normalizedFrameSpecs.frames || []).map(frame => ({
+      id: frame.id,
+      scene_id: frame.scene_id,
+      start: frame.start,
+      duration: frame.duration,
+    })),
+  };
+
+  return {
+    success: true,
+    message: 'Rich template 工程文件已生成。',
+    scene_spec: sceneValidation.scene_spec,
+    frame_specs: normalizedFrameSpecs,
+    target_duration_sec: duration,
+    files: {
+      'index.html': finalHtml,
+      'gsap.min.js': getGsapBundle(),
+      'meta.json': JSON.stringify(meta, null, 2),
+      'hyperframes.json': JSON.stringify(hyperframes, null, 2),
+      'scene_spec.json': JSON.stringify(sceneValidation.scene_spec, null, 2),
+      'frame_specs.json': JSON.stringify(normalizedFrameSpecs, null, 2),
+    },
+    diagnostics: [],
+  };
+}
+
 module.exports = {
   renderHyperframesProjectFiles,
   buildIndexHtml,
+  assembleProjectFiles,
 };

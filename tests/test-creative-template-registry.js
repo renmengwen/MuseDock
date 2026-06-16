@@ -6,7 +6,12 @@ const templates = registry.listTemplates();
 assert.ok(templates.length >= 6);
 assert.ok(templates.some(template => template.id === 'hero_title'));
 assert.ok(templates.some(template => template.id === 'data_cards'));
-assert.deepEqual(templates.map(template => template.id).sort(), enums.TEMPLATES.slice().sort());
+// All legacy templates should be present
+const templateIds = templates.map(template => template.id);
+enums.TEMPLATES.forEach(id => assert.ok(templateIds.includes(id), `Legacy template ${id} should be in listTemplates()`));
+// Rich templates should also be present
+assert.ok(templateIds.includes('glitch_title'), 'Rich template glitch_title should be in listTemplates()');
+assert.ok(templateIds.includes('data_chart'), 'Rich template data_chart should be in listTemplates()');
 assert.equal(typeof registry.getLayoutClass, 'function');
 
 const hero = registry.getTemplate('hero_title');

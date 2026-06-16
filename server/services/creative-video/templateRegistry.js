@@ -1,3 +1,6 @@
+const fs = require('fs');
+const path = require('path');
+
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -6,6 +9,10 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
+
+// ---------------------------------------------------------------------------
+// Legacy templates (parameterized, PPT-style)
+// ---------------------------------------------------------------------------
 
 function textLayers(frame) {
   return Array.isArray(frame && frame.text_layers) ? frame.text_layers : [];
@@ -130,6 +137,7 @@ function template(id, supportedKinds, defaultLayout, defaultBackground, defaultM
     defaultLayout,
     defaultBackground,
     defaultMotion,
+    isRich: false,
     renderFrame: (frame, scene) => renderGenericFrame({
       ...frame,
       layout: frame.layout || defaultLayout,
@@ -139,7 +147,7 @@ function template(id, supportedKinds, defaultLayout, defaultBackground, defaultM
   };
 }
 
-const TEMPLATES = [
+const LEGACY_TEMPLATES = [
   template('hero_title', ['text', 'quote'], 'center_stack', 'dark_gradient', 'fade_up'),
   template('keyword_burst', ['text'], 'center_stack', 'radial_spotlight', 'stagger_cards'),
   template('process_steps', ['steps'], 'three_step_grid', 'soft_grid', 'slide_in'),
@@ -149,55 +157,365 @@ const TEMPLATES = [
   template('cta_end', ['cta'], 'center_stack', 'radial_spotlight', 'glow_pulse'),
 ];
 
+// ---------------------------------------------------------------------------
+// Rich templates (file-system based, high visual quality)
+// ---------------------------------------------------------------------------
+
+const TEMPLATES_DIR = path.resolve(__dirname, '../../templates');
+const richTemplatesMap = new Map();
+let richTemplatesScanned = false;
+
+/**
+ * Lightweight YAML parser for flat manifest files.
+ * Supports: top-level scalars, inline arrays [a, b], multi-line arrays (- item),
+ * and one level of nesting (key: / subkey: value). Does NOT support tabs, multi-line
+ * strings (|, >), or deeper nesting.
+ */
+function parseManifestYaml(content) {
+  const result = {};
+  let currentKey = null;       // top-level key being processed
+  let currentChild = null;     // nested child key (e.g., 'headline' under 'inputs')
+  let mode = 'top';            // 'top' | 'array' | 'object'
+  let arrayItems = [];
+  let nestedObj = {};
+
+  function flushPending() {
+    if (mode === 'array' && currentKey) {
+      result[currentKey] = arrayItems;
+      arrayItems = [];
+    } else if (mode === 'object' && currentKey) {
+      result[currentKey] = nestedObj;
+      nestedObj = {};
+    }
+    currentChild = null;
+    mode = 'top';
+  }
+
+  for (const rawLine of content.split('\n')) {
+    const line = rawLine.replace(/\r$/, '');
+    if (!line.trim() || line.trim().startsWith('#')) continue;
+
+    // 4-space indented key-value: child property (e.g., "    type: string")
+    const deepMatch = line.match(/^    (\w+):\s*(.*)$/);
+    if (deepMatch && mode === 'object') {
+      const [, k, v] = deepMatch;
+      const target = currentChild || '__root__';
+      if (!nestedObj[target]) nestedObj[target] = {};
+      nestedObj[target][k] = parseYamlValue(v);
+      continue;
+    }
+
+    // 2-space indented array item: "  - value"
+    const arrayItemMatch = line.match(/^  - (.+)$/);
+    if (arrayItemMatch) {
+      if (mode === 'object') {
+        // Switch from object mode to array mode
+        nestedObj = {};
+        mode = 'array';
+      }
+      if (mode === 'array' || mode === 'top') {
+        mode = 'array';
+        arrayItems.push(parseYamlValue(arrayItemMatch[1]));
+      }
+      continue;
+    }
+
+    // 2-space indented key: "  key: value" (nested child)
+    const nestedMatch = line.match(/^  (\w+):\s*(.*)$/);
+    if (nestedMatch) {
+      if (mode === 'array') {
+        // We were collecting array items; this is a new top-level-ish key
+        // Flush the array first
+        flushPending();
+      }
+      const [, k, v] = nestedMatch;
+      if (v === '') {
+        // Sub-object with its own children
+        mode = 'object';
+        currentChild = k;
+        if (!nestedObj[k]) nestedObj[k] = {};
+      } else {
+        mode = 'object';
+        currentChild = null;
+        nestedObj[k] = parseYamlValue(v);
+      }
+      continue;
+    }
+
+    // Top-level key: "key: value"
+    const topMatch = line.match(/^(\w+):\s*(.*)$/);
+    if (topMatch) {
+      flushPending();
+      const [, k, v] = topMatch;
+      currentKey = k;
+      if (v === '') {
+        // Could be array or nested object; next lines will determine
+        mode = 'top';
+      } else if (v.startsWith('[')) {
+        // Inline array
+        result[k] = parseInlineArray(v);
+        mode = 'top';
+      } else {
+        result[k] = parseYamlValue(v);
+        mode = 'top';
+      }
+      continue;
+    }
+  }
+
+  flushPending();
+  return result;
+}
+
+function parseInlineArray(v) {
+  // Strip [ ] and split on commas, respecting quoted strings
+  const inner = v.slice(1, -1).trim();
+  if (!inner) return [];
+  const items = [];
+  let current = '';
+  let inQuote = false;
+  let quoteChar = '';
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (inQuote) {
+      current += ch;
+      if (ch === quoteChar) inQuote = false;
+    } else if (ch === '"' || ch === "'") {
+      inQuote = true;
+      quoteChar = ch;
+      current += ch;
+    } else if (ch === ',') {
+      items.push(parseYamlValue(current.trim()));
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) items.push(parseYamlValue(current.trim()));
+  return items;
+}
+
+function parseYamlValue(v) {
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  if (v === 'null' || v === '') return null;
+  if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+  // Strip quotes
+  return v.replace(/^['"]|['"]$/g, '');
+}
+
+function scanRichTemplates() {
+  if (richTemplatesScanned) return;
+  richTemplatesScanned = true;
+
+  if (!fs.existsSync(TEMPLATES_DIR)) {
+    console.warn(`[templateRegistry] Templates directory not found: ${TEMPLATES_DIR}`);
+    return;
+  }
+
+  const entries = fs.readdirSync(TEMPLATES_DIR, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const dir = path.join(TEMPLATES_DIR, entry.name);
+    const manifestPath = path.join(dir, 'manifest.yaml');
+    const sourcePath = path.join(dir, 'source.html');
+
+    if (!fs.existsSync(manifestPath) || !fs.existsSync(sourcePath)) continue;
+
+    try {
+      const manifestContent = fs.readFileSync(manifestPath, 'utf8');
+      const manifest = parseManifestYaml(manifestContent);
+      const sourceHtml = fs.readFileSync(sourcePath, 'utf8');
+
+      const richTemplate = {
+        id: manifest.id || entry.name,
+        name: manifest.name || entry.name,
+        description: manifest.description || '',
+        category: manifest.category || 'other',
+        tags: Array.isArray(manifest.tags) ? manifest.tags : [],
+        best_for: Array.isArray(manifest.best_for) ? manifest.best_for : [],
+        not_for: Array.isArray(manifest.not_for) ? manifest.not_for : [],
+        aspect_support: Array.isArray(manifest.aspect_support) ? manifest.aspect_support : ['16:9'],
+        duration_range: Array.isArray(manifest.duration_range) ? manifest.duration_range : [3, 15],
+        inputs: parseInputsField(manifest),
+        license: manifest.license || 'unknown',
+        sourceHtml,
+        sourcePath,
+        isRich: true,
+        supportedKinds: ['text', 'data', 'quote', 'steps', 'comparison', 'cta'],
+      };
+
+      if (richTemplatesMap.has(richTemplate.id)) {
+        console.warn(`[templateRegistry] Duplicate template ID "${richTemplate.id}" in ${entry.name}, skipping`);
+        continue;
+      }
+
+      richTemplatesMap.set(richTemplate.id, richTemplate);
+    } catch (err) {
+      console.warn(`[templateRegistry] Failed to load template "${entry.name}": ${err.message}`);
+    }
+  }
+}
+
+/**
+ * Parse the nested inputs field from the manifest.
+ * The YAML parser produces nested objects like:
+ *   { inputs: { __root__: {}, headline: { type: 'string', ... }, subtitle: { ... } } }
+ * This function extracts the child keys as the actual inputs schema.
+ */
+function parseInputsField(manifest) {
+  const raw = manifest.inputs;
+  if (!raw || typeof raw !== 'object') return {};
+  if (raw.__root__) {
+    // Remove the __root__ key and return the rest as inputs
+    const { __root__, ...rest } = raw;
+    return rest;
+  }
+  return raw;
+}
+
+// ---------------------------------------------------------------------------
+// Unified registry
+// ---------------------------------------------------------------------------
+
 function listTemplates() {
-  return TEMPLATES.map(item => ({ ...item }));
+  scanRichTemplates();
+  const legacy = LEGACY_TEMPLATES.map(item => ({
+    id: item.id,
+    name: item.id,
+    description: '',
+    category: 'legacy',
+    tags: [],
+    best_for: [],
+    isRich: false,
+    supportedKinds: item.supportedKinds,
+  }));
+  const rich = Array.from(richTemplatesMap.values()).map(t => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    category: t.category,
+    tags: t.tags,
+    best_for: t.best_for,
+    isRich: true,
+    supportedKinds: t.supportedKinds,
+  }));
+  return [...rich, ...legacy];
 }
 
 function getTemplate(id) {
-  const found = TEMPLATES.find(item => item.id === id);
-  if (!found) {
-    throw new Error(`未知模板：${id}`);
-  }
-  return found;
+  scanRichTemplates();
+  const rich = richTemplatesMap.get(id);
+  if (rich) return rich;
+  const legacy = LEGACY_TEMPLATES.find(item => item.id === id);
+  if (legacy) return legacy;
+  throw new Error(`未知模板：${id}`);
 }
+
+function hasTemplate(id) {
+  scanRichTemplates();
+  return richTemplatesMap.has(id) || LEGACY_TEMPLATES.some(item => item.id === id);
+}
+
+function isRichTemplate(id) {
+  scanRichTemplates();
+  return richTemplatesMap.has(id);
+}
+
+function getRichTemplateIds() {
+  scanRichTemplates();
+  return Array.from(richTemplatesMap.keys());
+}
+
+/**
+ * Build a compact index of all templates for AI selection (~500 token).
+ * Returns an array of { id, name, description, best_for, category }.
+ */
+function buildCompactIndex() {
+  scanRichTemplates();
+  return Array.from(richTemplatesMap.values()).map(t => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    best_for: t.best_for,
+    category: t.category,
+    aspect_support: t.aspect_support,
+  }));
+}
+
+/**
+ * Get a template's source HTML, truncated to maxChars.
+ */
+function getTemplateHtml(id, maxChars = 4000) {
+  scanRichTemplates();
+  const t = richTemplatesMap.get(id);
+  if (!t) throw new Error(`Rich template not found: ${id}`);
+  return t.sourceHtml.slice(0, maxChars);
+}
+
+/**
+ * Get a template's manifest (without sourceHtml to save memory).
+ */
+function getTemplateManifest(id) {
+  scanRichTemplates();
+  const t = richTemplatesMap.get(id);
+  if (!t) throw new Error(`Rich template not found: ${id}`);
+  const { sourceHtml, sourcePath, ...manifest } = t;
+  return manifest;
+}
+
+/**
+ * Reset the scan cache (for testing or hot-reload).
+ */
+function resetScanCache() {
+  richTemplatesScanned = false;
+  richTemplatesMap.clear();
+}
+
+// Legacy functions (kept for backward compatibility)
 
 function getBackgroundCss(id) {
   const css = BACKGROUNDS[id];
-  if (!css) {
-    throw new Error(`未知背景：${id}`);
-  }
+  if (!css) throw new Error(`未知背景：${id}`);
   return css;
 }
 
 function getLayoutClass(id) {
   const className = LAYOUTS[id];
-  if (!className) {
-    throw new Error(`未知布局：${id}`);
-  }
+  if (!className) throw new Error(`未知布局：${id}`);
   return className;
 }
 
 function getMotionSnippet(id, selector, offset) {
   const motion = MOTIONS[id];
-  if (!motion) {
-    throw new Error(`未知动效：${id}`);
-  }
+  if (!motion) throw new Error(`未知动效：${id}`);
   return motion(selector, offset);
 }
 
 function getVisualLayerRenderer(type) {
   const renderer = VISUAL_LAYER_RENDERERS[type];
-  if (!renderer) {
-    throw new Error(`未知视觉层：${type}`);
-  }
+  if (!renderer) throw new Error(`未知视觉层：${type}`);
   return renderer;
 }
 
 module.exports = {
+  // Legacy
   listTemplates,
   getTemplate,
   getBackgroundCss,
   getLayoutClass,
   getMotionSnippet,
   getVisualLayerRenderer,
+  hasTemplate,
+  // Rich template support
+  isRichTemplate,
+  getRichTemplateIds,
+  buildCompactIndex,
+  getTemplateHtml,
+  getTemplateManifest,
+  scanRichTemplates,
+  resetScanCache,
+  parseManifestYaml,  // exported for testing
+  // Legacy template array (for backward compat)
+  LEGACY_TEMPLATES,
 };
