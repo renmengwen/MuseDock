@@ -71,7 +71,7 @@ MuseDock 保留完整素材前置链路：
 - 浏览器自动化：Playwright、Chrome CDP
 - 媒体处理：ffmpeg、ffprobe、`@ffmpeg-installer/ffmpeg`
 - AI 能力：OpenAI-compatible 文字模型、小米 MiMo ASR/TTS
-- 视频工程：HTML/CSS/GSAP、HyperFrames CLI
+- 视频工程：HTML/CSS/GSAP、html-video production path、Playwright/Chromium、HyperFrames legacy CLI
 
 ## 环境要求
 
@@ -94,6 +94,28 @@ npm rebuild better-sqlite3
 ```
 
 `ffmpeg` 会优先读取 `FFMPEG_PATH`，其次使用项目依赖内置路径，最后尝试系统 `PATH`。`ffprobe` 用于读取 TTS 分段音频时长，建议安装到系统 `PATH`，或通过 `FFPROBE_PATH` 指定。
+
+html-video 可编辑生产链路使用 Playwright Chromium 录制 HTML 帧，再通过 ffmpeg 输出 MP4。首次运行真实渲染前需要安装 Playwright 浏览器：
+
+```powershell
+npx playwright install chromium
+```
+
+默认开发和 `npm test` 不会启动真实浏览器渲染；真实烟测需要显式设置：
+
+```powershell
+$env:RUN_HTML_VIDEO_REAL_RENDER='1'
+node tests/test-html-video-vertical-mvp-smoke.js
+node tests/test-html-video-real-render-smoke.js
+```
+
+生产链路开关：
+
+| 变量 | 说明 | 默认值 |
+| --- | --- | --- |
+| `HTML_VIDEO_PRODUCTION_ENABLED` | 启用 html-video production path | `true` |
+| `HTML_VIDEO_LEGACY_FALLBACK_ENABLED` | 新链路失败时允许回退 legacy | `true` |
+| `HTML_VIDEO_REMOTION_ENHANCEMENT_ENABLED` | 启用 Remotion enhancement 预留能力 | `false` |
 
 ## 安装与启动
 
@@ -172,6 +194,10 @@ node tests/test-creative-workflow-routes.js
 | `ASR_LANGUAGE` | MiMo ASR 识别语言，支持 `auto`、`zh`、`en` | `auto` |
 | `FFMPEG_PATH` | 手动指定 ffmpeg 可执行文件路径 | 空 |
 | `FFPROBE_PATH` | 手动指定 ffprobe 可执行文件路径 | 空 |
+| `RUN_HTML_VIDEO_REAL_RENDER` | 设置为 `1` 时运行 html-video 真实渲染烟测 | 空 |
+| `HTML_VIDEO_PRODUCTION_ENABLED` | 启用 html-video production path | `true` |
+| `HTML_VIDEO_LEGACY_FALLBACK_ENABLED` | 新链路失败时允许 legacy fallback | `true` |
+| `HTML_VIDEO_REMOTION_ENHANCEMENT_ENABLED` | Remotion native enhancement 预留开关 | `false` |
 
 文字模型按 OpenAI-compatible `POST /chat/completions` 调用。DeepSeek、OpenAI 或自定义兼容服务都可以通过设置页配置供应商、Base URL、模型 ID 和 API Key。
 
@@ -284,6 +310,24 @@ node tests/test-one-click-creative-page.mjs
 node tests/test-persistent-routes.mjs
 node tests/test-creative-workflows.js
 node tests/test-creative-workflow-routes.js
+```
+
+html-video production path 专项验证：
+
+```powershell
+# 默认只验证模块行为，真实渲染测试会中文跳过
+node tests/test-html-video-content-graph.js
+node tests/test-html-video-template-registry.js
+node tests/test-html-video-materializer.js
+node tests/test-html-video-playwright-adapter-command.js
+node tests/test-html-video-ffmpeg-composer.js
+node tests/test-html-video-vertical-mvp-smoke.js
+node tests/test-html-video-real-render-smoke.js
+
+# 真实渲染：需要 Playwright Chromium 和 ffmpeg
+$env:RUN_HTML_VIDEO_REAL_RENDER='1'
+node tests/test-html-video-vertical-mvp-smoke.js
+node tests/test-html-video-real-render-smoke.js
 ```
 
 ## 路线图
