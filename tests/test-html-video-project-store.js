@@ -103,6 +103,10 @@ const assetStore = require('../server/services/creative-video/html-video/assetSt
     () => assetStore.resolveAssetPath(projectDir, 'frames/frame_01.html'),
     /assets/
   );
+  assert.throws(
+    () => assetStore.resolveAssetPath(projectDir, 'assets/../project.json'),
+    /素材路径不能包含 \.\./
+  );
 
   console.log('html-video project store tests passed');
 })();
