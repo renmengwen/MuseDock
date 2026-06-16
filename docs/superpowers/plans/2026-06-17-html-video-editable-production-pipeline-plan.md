@@ -89,8 +89,8 @@
 
 - `server/services/creative-video/html-video/projectOrchestrator.js`
   - [首版必做] 工程生命周期编排：创建 project、materialize、render frame、concat/export、revision/export 记录。
-  - 不直接依赖 `workflowId` 之外的业务输入，不调用 AI。
-  - 不直接处理 creativeContext fallback 策略。
+  - 不接收 `creativeContext`、AI 服务、fallback 策略等业务输入，不调用 AI。
+  - 只接收 `htmlVideoWorkflow` 准备好的 `storageContext`、`projectDir`、`projectId`、template、`contentGraph`、frames、render/export options 等纯工程参数。
 
 - `server/services/creative-video/html-video/htmlVideoWorkflow.js`
   - [首版必做] 当前项目业务适配层。
@@ -114,6 +114,8 @@
 
 - `server/services/creative-video/html-video/frameRenderer.js`
   - [首版必做] 单帧渲染调度，统一输入 `frame.html_path`、`duration_sec`、resolution、fps、output path。
+  - 只做 project frame 到 adapter 入参的调度、进度透传和 project 状态记录。
+  - 不直接操作 Playwright，不拼 ffmpeg 命令，不处理字体、动画、lead-in；这些细节全部在 `hyperframesPlaywrightAdapter.js`。
   - 不包含 ffmpeg concat 逻辑。
 
 - `server/services/creative-video/html-video/ffmpegComposer.js`
@@ -225,7 +227,8 @@
   - [首版必做] 用户自然语言编辑入口，提交后后端返回 `edit_patch` 并应用。
 
 - `frontend-react/src/components/creative-video-editor/ReservedCapabilitiesPanel.jsx`
-  - [预留] 只展示灰态入口或隐藏 feature flag，不实现 Premiere 式复杂编辑器。
+  - [预留] 默认不创建、不展示；仅当产品确认需要可见灰态入口时再创建。
+  - 首版高级能力只保留在 schema/API/service 边界中，避免让用户误以为时间线、源码编辑、元素拖拽等功能已可用。
 
 **Modify**
 
@@ -566,10 +569,10 @@ function mapTemplateEngineToProjectEngine(engine) {
 
 - Create: `server/services/creative-video/html-video/materializer.js`
 - Create: `tests/test-html-video-materializer.js`
-- Modify: `server/templates/glitch_title/source/index.html`
-- Modify: `server/templates/glitch_title/template.html-video.yaml`
-- Modify: `server/templates/bold_signal/source/index.html`
-- Modify: `server/templates/bold_signal/template.html-video.yaml`
+- Create: `server/templates/glitch_title/source/index.html`
+- Create: `server/templates/glitch_title/template.html-video.yaml`
+- Create: `server/templates/bold_signal/source/index.html`
+- Create: `server/templates/bold_signal/template.html-video.yaml`
 - Read: `server/templates/glitch_title/source.html`
 - Read: `server/templates/glitch_title/manifest.yaml`
 - Read: `server/templates/bold_signal/source.html`
@@ -587,6 +590,7 @@ server/templates/glitch_title/
 ```
 
 - [ ] 将 `bold_signal` 迁移为同样结构。
+- [ ] 旧 `source.html` 和 `manifest.yaml` 首版只作为迁移参考和 legacy fallback 输入保留，不进入 production registry；production registry 只扫描 `template.html-video.yaml` 与 `source/index.html`。
 - [ ] `template.html-video.yaml` 必须包含：
   - `engine: hyperframes`
   - `engine_version`
@@ -775,6 +779,55 @@ ffmpeg -y -i 01.mp4 -i 02.mp4 -filter_complex [0:v][1:v]concat=n=2:v=1:a=0[v] -m
 
 ---
 
+### Task 7.5: 纵向 MVP 渲染截点
+
+**状态:** [首版必做，必须在继续前端和完整编辑器前完成]
+
+**目标**
+
+不等待完整前端、自然语言编辑和多模板迁移，先用 `glitch_title` 一个 production-ready 模板验证最危险的纵向链路：mock `scene_spec` -> mock `template_inputs` -> project -> materialize -> 单帧 render -> MP4。
+
+**Files**
+
+- Create: `tests/test-html-video-vertical-mvp-smoke.js`
+- Read: `server/templates/glitch_title/template.html-video.yaml`
+- Read: `server/templates/glitch_title/source/index.html`
+- Read: `server/services/creative-video/html-video/projectStore.js`
+- Read: `server/services/creative-video/html-video/materializer.js`
+- Read: `server/services/creative-video/html-video/hyperframesPlaywrightAdapter.js`
+- Read: `server/services/creative-video/html-video/ffmpegComposer.js`
+
+**具体步骤**
+
+- [ ] 新增 mock `scene_spec`，只包含一个 `scene_01`，duration 为 4-6 秒，文案为中文。
+- [ ] 新增 mock `template_inputs`，字段完全符合 `glitch_title` 的 `inputs.schema`。
+- [ ] 创建临时 projectDir，并通过 `projectStore` 写入 `HtmlVideoProject`。
+- [ ] 调用 `materializer` 生成 `frames/01-scene_01.html`。
+- [ ] 调用 `hyperframesPlaywrightAdapter` 渲染单帧 MP4。
+- [ ] 用 ffprobe 或现有 video probe 检查 MP4 存在、时长大于 0、分辨率符合模板 output。
+- [ ] 该测试必须和真实 Playwright/ffmpeg 一样受环境变量保护：
+
+```js
+if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
+  console.log('跳过 html-video 纵向 MVP 真实渲染烟测：未设置 RUN_HTML_VIDEO_REAL_RENDER=1。');
+  process.exit(0);
+}
+```
+
+**测试/验证方式**
+
+- Default Run: `node tests/test-html-video-vertical-mvp-smoke.js`
+- Expected: 输出中文跳过信息并退出 0。
+- Real Run: `set RUN_HTML_VIDEO_REAL_RENDER=1; node tests/test-html-video-vertical-mvp-smoke.js`
+- Expected: 生成单帧 MP4，并通过时长、分辨率、非空文件校验。
+
+**完成标准**
+
+- 在 Task 8-14 继续铺外围模块前，至少一个 production-ready 模板的核心渲染链路已被真实验证。
+- 如果该截点失败，暂停前端和编辑器开发，优先修模板、materializer、adapter 或 ffmpeg 链路。
+
+---
+
 ### Task 8: validationGate、diagnostics、visual QA 扩展
 
 **状态:** [首版必做]
@@ -833,7 +886,8 @@ createDiagnostic({
   - 分辨率与 project output 不一致。
   - ffprobe 时长偏差。
   - 抽帧近白/近黑/低信息占比。
-  - 接触表过小。
+  - 抽帧 contact sheet 生成失败或有效抽帧数量过少。
+  - 主体/文本有效像素占比过低，疑似空画面或样式未加载。
   - 动画未运行：连续抽帧差异过低。
   - 字体/CSS 失效风险：adapter diagnostics 中有 stylesheet/font timeout。
 - [ ] 所有 QA 失败 message 使用中文。
@@ -1032,7 +1086,7 @@ POST   /api/creative-workflows/:workflowId/html-video-project/frames/:frameId/un
 - Create: `frontend-react/src/components/creative-video-editor/ProjectFramesList.jsx`
 - Create: `frontend-react/src/components/creative-video-editor/ExportsPanel.jsx`
 - Create: `frontend-react/src/components/creative-video-editor/NaturalLanguageEditBox.jsx`
-- Create: `frontend-react/src/components/creative-video-editor/ReservedCapabilitiesPanel.jsx`
+- 条件创建: `frontend-react/src/components/creative-video-editor/ReservedCapabilitiesPanel.jsx`
 - Create: `tests/test-html-video-api-client.mjs`
 - Create: `tests/test-html-video-editor-components.mjs`
 - Modify: `frontend-react/src/api/client.js`
@@ -1077,14 +1131,14 @@ needs_validation 工程需要验证。
 - [ ] `FrameInputsPanel` 支持单帧 inputs、duration、模板替换入口。
 - [ ] `NaturalLanguageEditBox` loading 文案：`正在解析编辑意图...`，完成后根据后端返回显示 `编辑已应用，需要重新渲染。` 或失败原因。
 - [ ] `Export` 按钮 loading 文案：`正在导出成片...`，成功后刷新 exports，失败后展示中文错误。
-- [ ] `ReservedCapabilitiesPanel` 只显示灰态或隐藏：
+- [ ] 默认不创建、不展示 `ReservedCapabilitiesPanel`；只有产品明确要求可见灰态入口时，才创建该组件并受 feature flag 控制：
   - 时间线
   - 毫秒级剪辑
   - HTML 源码
   - 元素调整
   - 转场
   - Remotion enhancement
-- [ ] 不做 Premiere 式复杂编辑器，不做拖拽时间线，不开放 HTML 源码编辑。
+- [ ] 不做 Premiere 式复杂编辑器，不做拖拽时间线，不开放 HTML 源码编辑；首版高级能力只保留 schema/API/service 口子。
 - [ ] `CreativeVideoEditor.jsx` 先尝试加载新工程；404 或 `NO_HTML_VIDEO_PROJECT` 时 fallback 到旧 `useCreativeVideoEditor`。
 
 **测试/验证方式**
@@ -1168,7 +1222,7 @@ needs_validation 工程需要验证。
 - Modify: `server/services/creative-video/hyperframesTemplateRenderer.js`
 - Modify: `server/services/creative-video/projectWriter.js`
 - Modify: `server/services/creative-video/renderAdapter.js`
-- Modify: `docs/superpowers/specs/2026-06-17-html-video-editable-production-pipeline-design.md` only if implementation discovers a design correction and user approves spec update
+- 条件修改: `docs/superpowers/specs/2026-06-17-html-video-editable-production-pipeline-design.md`，仅当实施发现设计需要修正且用户同意更新设计文档时修改
 
 **具体步骤**
 
@@ -1233,14 +1287,24 @@ HTML_VIDEO_REMOTION_ENHANCEMENT_ENABLED=false
 **Files**
 
 - Create: `tests/test-html-video-real-render-smoke.js`
-- Modify: `tests/run-all.js`
+- 条件修改: `tests/run-all.js`，仅当需要在测试文件自跳过之外再显式排除真实烟测时修改
 - Modify: `README.md`
-- Modify: `docs/superpowers/plans/2026-06-17-html-video-editable-production-pipeline-plan.md` after implementation completes to mark completed checkboxes
+- Modify: `docs/superpowers/plans/2026-06-17-html-video-editable-production-pipeline-plan.md`，实施完成后按实际进度勾选任务
 
 **具体步骤**
 
-- [ ] `tests/run-all.js` 加入纯单元测试，不默认跑真实 Playwright/ffmpeg 烟测。
-- [ ] `test-html-video-real-render-smoke.js` 通过环境变量开启：
+- [ ] 因为 `tests/run-all.js` 会自动发现所有 `test-*.js|mjs`，真实渲染烟测文件自身必须在未开启环境变量时自跳过，避免 `npm test` 默认启动 Playwright/ffmpeg。
+- [ ] `test-html-video-real-render-smoke.js` 文件开头必须包含以下保护逻辑：
+
+```js
+if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
+  console.log('跳过 html-video 真实渲染烟测：未设置 RUN_HTML_VIDEO_REAL_RENDER=1。');
+  process.exit(0);
+}
+```
+
+- [ ] `tests/run-all.js` 可额外显式排除 `test-html-video-real-render-smoke.js`，但不能只依赖 run-all 排除；测试文件自跳过是硬性要求。
+- [ ] 真实渲染烟测通过环境变量开启：
 
 ```text
 RUN_HTML_VIDEO_REAL_RENDER=1
@@ -1282,6 +1346,7 @@ mock scene_spec
 **测试/验证方式**
 
 - Run: `npm test`
+  - Expected: `tests/test-html-video-real-render-smoke.js` 被自动发现时输出中文跳过信息并退出 0，不启动 Playwright/ffmpeg。
 - Run: `npm run build:frontend`
 - Optional Run: `set RUN_HTML_VIDEO_REAL_RENDER=1; node tests/test-html-video-real-render-smoke.js`
 
