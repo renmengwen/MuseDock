@@ -4,7 +4,7 @@
 
 **Goal:** 将当前一键创意视频从 “AI 直接改完整 HTML + legacy 渲染” 升级为 “AI 输出结构化 JSON + html-video 行为移植 + 可编辑工程 + Playwright/Chromium/ffmpeg 导出” 的生产链路。
 
-**Architecture:** 首版在当前项目内新增 `server/services/creative-video/html-video/`，以 CommonJS/JavaScript 移植 `D:\code3\html-video` 的 contentGraph、Project/FrameRecord、Playwright adapter、ffmpeg concat/mux 等核心行为，不把 html-video TypeScript monorepo 作为运行时依赖。`workflowFacade` 只负责调用新链路，`htmlVideoWorkflow` 负责当前 workflowId/runId/creativeContext/AI/fallback 适配，`projectOrchestrator` 保持工程生命周期语义。
+**Architecture:** 首版在当前项目内新增 `server/services/creative-video/html-video/`，以 CommonJS/JavaScript 移植 `D:/code3/html-video` 的 contentGraph、Project/FrameRecord、Playwright adapter、ffmpeg concat/mux 等核心行为，不把 html-video TypeScript monorepo 作为运行时依赖。`workflowFacade` 只负责调用新链路，`htmlVideoWorkflow` 负责当前 workflowId/runId/creativeContext/AI/fallback 适配，`projectOrchestrator` 保持工程生命周期语义。
 
 **Tech Stack:** Node.js 22、CommonJS、Express、React 19、Vite、Playwright Chromium、ffmpeg、JSON Schema、YAML parser、现有 TTS/混音/visual QA/workflow 存储。
 
@@ -26,9 +26,9 @@
 
 - 设计文档：`docs/superpowers/specs/2026-06-17-html-video-editable-production-pipeline-design.md`
 - html-video 行为基准：
-  - `D:\code3\html-video\packages\content-graph\src\index.ts`
-  - `D:\code3\html-video\packages\adapter-hyperframes\src\render.ts`
-  - `D:\code3\html-video\packages\core\src\project.ts`
+  - `D:/code3/html-video/packages/content-graph/src/index.ts`
+  - `D:/code3/html-video/packages/adapter-hyperframes/src/render.ts`
+  - `D:/code3/html-video/packages/core/src/project.ts`
 - 当前入口：
   - `server/services/creative-video/workflowFacade.js`
   - `server/services/creativeWorkflows.js`
@@ -106,7 +106,7 @@
 - `server/services/creative-video/html-video/hyperframesPlaywrightAdapter.js`
   - [首版必做] JS 移植 Playwright/Chromium 录制路径。
   - 负责 `recordVideo`、动画冻结、字体等待、动画时长探测、lead-in 裁剪、webm->mp4 编码。
-  - 注释逐段标明对应 `D:\code3\html-video\packages\adapter-hyperframes\src\render.ts` 的关键步骤。
+  - 注释逐段标明对应 `D:/code3/html-video/packages/adapter-hyperframes/src/render.ts` 的关键步骤。
 
 - `server/services/creative-video/html-video/prepareSourceHtml.js`
   - [首版必做] 从 adapter 中独立拆出，处理 `data-composition-src` 组合模板内联与 `window.__hvPlayAll()` 注册。
@@ -290,13 +290,14 @@
 - Create: `tests/test-html-video-scene-spec-mapper.js`
 - Read: `server/services/creative-video/sceneSpecService.js`
 - Read: `server/services/creative-video/specEnums.js`
-- Reference: `D:\code3\html-video\packages\content-graph\src\index.ts`
+- Reference: `D:/code3/html-video/packages/content-graph/src/index.ts`
 
 **具体步骤**
 
 - [ ] 写 `contentGraph.validate()` 失败测试：空 graph、重复 node id、unknown edge from/to、自环、invalid kind、dependency cycle。
 - [ ] 写 `contentGraph.topoSort()` 行为测试：单节点、多 dependency、sequence tie-break、原始顺序平局、dependency cycle throw。
 - [ ] 写 `totalDurationSec()` 测试：缺省 duration 使用 `3` 秒，按 topoSort 顺序累加。
+- [ ] 参照设计文档“移植验证策略”，确保算法级对齐、行为测试迁移、渲染/ffmpeg 相关策略在后续任务中分别落地；本任务只实现 contentGraph 的算法级和行为测试迁移部分。
 - [ ] 实现 `contentGraph.js`，导出：
 
 ```js
@@ -335,9 +336,19 @@ module.exports = {
 
 **完成标准**
 
-- contentGraph 测试覆盖设计文档列出的行为迁移用例。
+- contentGraph 测试覆盖以下行为迁移用例：
+  - 空 graph 返回 `empty-graph`。
+  - 重复 node id 返回 `duplicate-node-id`。
+  - unknown edge from/to 返回 `edge-from-unknown-node` / `edge-to-unknown-node`。
+  - 自环返回 `self-edge`。
+  - invalid kind 返回 `invalid-kind`。
+  - dependency cycle 返回 `cycle`，并按 html-video 源实现保留涉及节点 `ref`。
+  - 单节点 graph 正确输出 `[nodeId]`。
+  - 多 dependency 场景按 dependency edge 约束拓扑排序。
+  - ready 队列平局时由 sequence edge 软排序打破，再按原始 node 顺序稳定排序。
+  - `totalDurationSec` 缺省 duration 使用 3 秒，并按 topoSort 顺序累加。
 - scene_spec 能稳定映射为 content_graph 与 frames。
-- 不依赖 `D:\code3\html-video` 的 TS 编译产物。
+- 不依赖 `D:/code3/html-video` 的 TS 编译产物。
 
 ---
 
@@ -363,6 +374,13 @@ module.exports = {
 **具体步骤**
 
 - [ ] 添加 YAML parser 依赖，例如 `yaml`，用于标准解析 `template.html-video.yaml`。
+- [ ] 创建 `tests/fixtures/html-video-templates/` 目录。
+- [ ] 在 `tests/fixtures/html-video-templates/` 下创建 fixture 模板目录：
+  - `glitch_title/`
+  - `bold_signal/`
+  - `remotion_template/`
+  - `non_commercial_template/`
+  - `missing_source_entry_template/`
 - [ ] 写 manifest fixture：一个 `engine: hyperframes` + `source_entry: source/index.html` + `commercial_use: true` 的合规模板。
 - [ ] 写 fixture：一个 `engine: remotion` + `source_entry: source/entry.tsx`，默认不得进入 AI 候选。
 - [ ] 写 fixture：一个 `license.commercial_use: false`，默认不得进入 AI 候选。
@@ -603,7 +621,7 @@ server/templates/glitch_title/
   - `preview`
   - `license.commercial_use: true`
   - `assets_attribution`
-- [ ] 模板 HTML 保留默认文案，未注入 `window.__HV_VARS__` 时可独立预览。
+- [ ] 模板 HTML 保留默认文案，未注入 `window.__HV_VARS__` 时可独立预览；实现细节参照设计文档“变量模板改造指南”。
 - [ ] 模板读取：
 
 ```js
@@ -662,7 +680,7 @@ window.__HV_DURATION__ = 6;
 - Create: `server/services/creative-video/html-video/environmentDoctor.js`
 - Create: `tests/test-html-video-prepare-source-html.js`
 - Create: `tests/test-html-video-playwright-adapter-command.js`
-- Reference: `D:\code3\html-video\packages\adapter-hyperframes\src\render.ts`
+- Reference: `D:/code3/html-video/packages/adapter-hyperframes/src/render.ts`
 - Read: `server/services/creative-video/renderAdapter.js`
 - Read: `server/services/hyperframesRenderer.js`
 
@@ -671,6 +689,7 @@ window.__HV_DURATION__ = 6;
 - [ ] 写 `prepareSourceHtml` 测试：无 `data-composition-src` 时返回原路径。
 - [ ] 写 `prepareSourceHtml` 测试：有 `data-composition-src` 时内联 composition HTML，注入 `window.__COMPOSITIONS__` 与 `window.__hvPlayAll()`。
 - [ ] 实现 prepared 临时文件 cleanup。
+- [ ] 参照设计文档“移植验证策略”的渲染时序对齐要求，确保 adapter 的代码注释和测试覆盖冻结动画、等待 stylesheet/fonts、释放动画、lead-in 裁剪、显式 duration 补齐等关键步骤。
 - [ ] 写 adapter 单元测试：mock Playwright 与 ffmpeg runner，验证 ffmpeg 参数包含：
 
 ```text
@@ -733,10 +752,11 @@ window.__HV_DURATION__ = 6;
 - Create: `tests/test-html-video-ffmpeg-composer.js`
 - Modify: `server/services/creative-video/html-video/projectOrchestrator.js`
 - Read: `server/services/hyperframesRenderer.js`
-- Reference: `D:\code3\html-video\packages\core\src\project.ts`
+- Reference: `D:/code3/html-video/packages/core/src/project.ts`
 
 **具体步骤**
 
+- [ ] 参照设计文档“移植验证策略”的 ffmpeg 行为对齐要求，golden command 测试必须覆盖 concat demuxer、concat filter 和音频 mux 参数，避免未来修改 PTS、编码参数或 `-shortest` 行为。
 - [ ] 写 golden command 测试：单 engine 多帧使用 concat demuxer：
 
 ```text
@@ -779,7 +799,7 @@ ffmpeg -y -i 01.mp4 -i 02.mp4 -filter_complex [0:v][1:v]concat=n=2:v=1:a=0[v] -m
 
 ---
 
-### Task 7.5: 纵向 MVP 渲染截点
+### Task 8: 纵向 MVP 渲染检查点
 
 **状态:** [首版必做，必须在继续前端和完整编辑器前完成]
 
@@ -823,12 +843,12 @@ if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
 
 **完成标准**
 
-- 在 Task 8-14 继续铺外围模块前，至少一个 production-ready 模板的核心渲染链路已被真实验证。
+- 在 Task 9-15 继续铺外围模块前，至少一个 production-ready 模板的核心渲染链路已被真实验证。
 - 如果该截点失败，暂停前端和编辑器开发，优先修模板、materializer、adapter 或 ffmpeg 链路。
 
 ---
 
-### Task 8: validationGate、diagnostics、visual QA 扩展
+### Task 9: validationGate、diagnostics、visual QA 扩展
 
 **状态:** [首版必做]
 
@@ -906,7 +926,7 @@ createDiagnostic({
 
 ---
 
-### Task 9: htmlVideoWorkflow 与 workflowFacade 集成
+### Task 10: htmlVideoWorkflow 与 workflowFacade 集成
 
 **状态:** [首版必做]
 
@@ -933,6 +953,11 @@ createDiagnostic({
   - `exportProject()`
   - `rerenderProject()`
   - `applyEditPatch()`
+- [ ] projectOrchestrator 只做工程生命周期编排，具体执行委托给职责模块：
+  - `materializer.js`：负责 HTML/frame HTML 物化。
+  - `frameRenderer.js` + `hyperframesPlaywrightAdapter.js`：负责单帧 render，Playwright 细节只在 adapter 中。
+  - `ffmpegComposer.js`：负责多帧 concat 和音频 mux。
+  - `editPatchService.js`：负责 patch 校验、应用和 revision 标记。
 - [ ] htmlVideoWorkflow 实现：
   - `generateProject({ workflowId, runId, creativeContext, sceneSpec, target, rootDir, services })`
   - `renderOrExport({ projectId, workflowId, rootDir, services })`
@@ -984,7 +1009,7 @@ requestSceneSpec()
 
 ---
 
-### Task 10: 编辑成片 API 与后端服务接入
+### Task 11: 编辑成片 API 与后端服务接入
 
 **状态:** [首版必做，timeline/html/elements/transition/enhance API 首版返回 501]
 
@@ -1066,7 +1091,7 @@ POST   /api/creative-workflows/:workflowId/html-video-project/frames/:frameId/un
 
 ---
 
-### Task 11: 前端 API client、hook 与组件化编辑器
+### Task 12: 前端 API client、hook 与组件化编辑器
 
 **状态:** [首版必做，高级能力面板为预留]
 
@@ -1156,7 +1181,7 @@ needs_validation 工程需要验证。
 
 ---
 
-### Task 12: 与当前 TTS、混音、visual QA、creative-video-editor 集成
+### Task 13: 与当前 TTS、混音、visual QA、creative-video-editor 集成
 
 **状态:** [首版必做]
 
@@ -1207,7 +1232,7 @@ needs_validation 工程需要验证。
 
 ---
 
-### Task 13: legacy fallback 策略与迁移/废弃边界
+### Task 14: legacy fallback 策略与迁移/废弃边界
 
 **状态:** [首版必做]
 
@@ -1226,6 +1251,7 @@ needs_validation 工程需要验证。
 
 **具体步骤**
 
+- [ ] 参照设计文档“现有模块对应关系”表，处理 `creativeSpecAgent.js`、`projectWriter.js`、`hyperframesTemplateRenderer.js`、`renderAdapter.js`、`templateRegistry.js`、`visualQaService.js` 等旧模块，确保首版保留、迁移、拆分或废弃边界一致。
 - [ ] 配置开关：
 
 ```text
@@ -1276,7 +1302,7 @@ HTML_VIDEO_REMOTION_ENHANCEMENT_ENABLED=false
 
 ---
 
-### Task 14: 真实渲染烟测、端到端验收与文档
+### Task 15: 真实渲染烟测、端到端验收与文档
 
 **状态:** [首版必做]
 
