@@ -1,0 +1,11 @@
+id: remotion_template
+name: Remotion 模板
+engine: remotion
+source_entry: index.html
+output:
+  aspect: "16:9"
+  duration_sec: 8
+license:
+  name: MIT
+  commercial_use: true
+  attribution_required: false

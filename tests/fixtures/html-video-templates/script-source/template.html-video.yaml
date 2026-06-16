@@ -1,0 +1,11 @@
+id: script_source
+name: 脚本入口模板
+engine: hyperframes
+source_entry: index.js
+output:
+  aspect: "16:9"
+  duration_sec: 8
+license:
+  name: MIT
+  commercial_use: true
+  attribution_required: false
