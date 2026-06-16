@@ -262,6 +262,13 @@ workflowFacade
 
 `projectOrchestrator` 是工程生命周期编排器；`htmlVideoWorkflow` 是当前业务工作流适配层。
 
+保留 `htmlVideoWorkflow` 的原因：
+
+- `projectOrchestrator` 应保持接近 `html-video` core 的工程语义，只处理 project、frames、variables、render/export 和 revisions。
+- `htmlVideoWorkflow` 承接当前项目特有的 `workflowId`、`runId`、`creativeContext`、AI 选模板、AI 填表、fallback diagnostics 和业务状态转换。
+- 如果把这些逻辑直接放进 `projectOrchestrator`，会让工程编排器同时依赖当前项目的业务上下文和 AI 服务，后续复用和测试边界会变差。
+- 实现阶段如果 `htmlVideoWorkflow` 只剩薄转发且没有业务适配逻辑，可以合并回 `workflowFacade`；但设计上先保留该边界，避免一开始污染 `projectOrchestrator`。
+
 ### templateRegistry
 
 职责：
@@ -646,7 +653,7 @@ fallback_to_legacy
         "items": [
           {
             "id": "item_intro",
-    "kind": "frame",
+            "kind": "frame",
             "frame_id": "intro",
             "start_sec": 0,
             "duration_sec": 6,
