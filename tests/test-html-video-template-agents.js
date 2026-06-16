@@ -141,5 +141,6 @@ const htmlInput = inputAgent.parseJsonOnlyResponse('<script>alert(1)</script>');
 assert.equal(htmlInput.success, false);
 assert.ok(htmlInput.user_message.includes('HTML'));
 assert.equal(htmlInput.fallback_allowed, true);
+assert.equal(inputAgent.renderTemplateHtmlWithInputs, undefined);
 
 console.log('html video template agent tests passed');

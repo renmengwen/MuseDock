@@ -206,59 +206,10 @@ function parseTemplateInputResponse(responseText, { template } = {}) {
   return validateTemplateInputs(parsed.data, template);
 }
 
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-function firstString(inputs, names, fallback = '') {
-  for (const name of names) {
-    if (typeof inputs?.[name] === 'string' && inputs[name].trim()) {
-      return inputs[name].trim();
-    }
-  }
-  return fallback;
-}
-
-function renderTemplateHtmlWithInputs({ templateHtml, inputs = {}, sceneSpec = {}, templateId } = {}) {
-  let html = String(templateHtml || '');
-  const headline = firstString(inputs, ['headline', 'title'], sceneSpec.title || '创意视频');
-  const subtitle = firstString(inputs, ['subtitle', 'description', 'summary'], '');
-  const channel = firstString(inputs, ['channel_info', 'source', 'label'], '');
-
-  if (headline) {
-    html = html.replace(/(<h1\b[^>]*>)([\s\S]*?)(<\/h1>)/i, `$1${escapeHtml(headline).replace(/\s+/g, '<br/>')}$3`);
-    html = html.replace(/(<h1\b[^>]*class=["'][^"']*\blayer\b[^"']*["'][^>]*>)([\s\S]*?)(<\/h1>)/gi, `$1${escapeHtml(headline).replace(/\s+/g, '<br/>')}$3`);
-    html = html.replace(/(<title>)([\s\S]*?)(<\/title>)/i, `$1${escapeHtml(headline)}$3`);
-  }
-  if (subtitle) {
-    html = html.replace(/(<p\b[^>]*>)([\s\S]*?)(<\/p>)/i, `$1${escapeHtml(subtitle)}$3`);
-  }
-  if (channel) {
-    html = html.replace(/(<span>)(?:&gt;&gt;|>>)[\s\S]*?(<\/span>)/i, `$1&gt;&gt; ${escapeHtml(channel)}$2`);
-  }
-
-  const sourceJson = JSON.stringify({
-    template_id: templateId,
-    template_inputs: inputs,
-    scene_spec: sceneSpec,
-  }).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
-  const script = `<script type="application/json" id="template-inputs">${sourceJson}</script>`;
-  if (!html.includes('id="template-inputs"')) {
-    html = html.includes('</body>') ? html.replace('</body>', `${script}\n</body>`) : `${html}\n${script}`;
-  }
-  return html;
-}
-
 module.exports = {
   buildTemplateInputPrompt,
   parseJsonOnlyResponse,
   parseTemplateInputResponse,
   validateTemplateInputs,
   getTemplateInputSchema,
-  renderTemplateHtmlWithInputs,
 };

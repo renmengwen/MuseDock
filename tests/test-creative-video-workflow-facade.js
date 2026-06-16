@@ -3,6 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const facade = require('../server/services/creative-video/workflowFacade');
+const hyperframesTemplateRenderer = require('../server/services/creative-video/hyperframesTemplateRenderer');
 
 (async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-facade-test-'));
@@ -204,6 +205,36 @@ const facade = require('../server/services/creative-video/workflowFacade');
   assert.match(visualQaFailed.message, /视觉质检失败/);
   assert.deepEqual(visualQaFailed.issues, ['低信息帧比例过高']);
   assert.equal(visualQaFailed.visual_report.success, false);
+
+  const originalAssemble = hyperframesTemplateRenderer.assembleProjectFiles;
+  hyperframesTemplateRenderer.assembleProjectFiles = () => ({
+    success: false,
+    message: '组装器模拟失败',
+    diagnostics: ['assembler_failed'],
+  });
+  const richAssemblyFailed = await facade.tryRichTemplate({
+    model: {
+      callTextModel: async ({ messages }) => {
+        const prompt = messages.map(message => message.content).join('\n');
+        if (prompt.includes('"template_id"')) {
+          return { success: true, text: JSON.stringify({ template_id: 'glitch_title', reason: '测试', confidence: 0.8 }) };
+        }
+        return { success: true, text: JSON.stringify({ headline: '标题', subtitle: '副标题' }) };
+      },
+    },
+    sceneSpec: {
+      title: '测试',
+      aspect_ratio: '16:9',
+      scenes: [{ id: 'scene_01', duration: 6, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }],
+    },
+    creativeContext: {},
+    target: { aspect_ratio: '16:9', duration: 6 },
+  });
+  hyperframesTemplateRenderer.assembleProjectFiles = originalAssemble;
+  assert.equal(richAssemblyFailed.success, false);
+  assert.equal(richAssemblyFailed.fallback_allowed, true);
+  assert.ok(richAssemblyFailed.user_message.includes('项目组装失败'));
+  assert.ok(richAssemblyFailed.diagnostics.some(item => String(item).includes('assembler_failed')));
 
   console.log('creative video workflow facade tests passed');
 })();

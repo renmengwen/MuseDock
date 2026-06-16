@@ -209,7 +209,7 @@ async function tryRichTemplate({ model, sceneSpec, frameSpecs, creativeContext, 
     });
   }
 
-  const filledHtml = templateInputAgent.renderTemplateHtmlWithInputs({
+  const filledHtml = hyperframesTemplateRenderer.renderTemplateHtmlWithInputs({
     templateHtml,
     inputs: inputResult.inputs,
     sceneSpec,
@@ -225,7 +225,11 @@ async function tryRichTemplate({ model, sceneSpec, frameSpecs, creativeContext, 
   });
 
   if (!assembled.success) {
-    return failure(`Rich 项目组装失败（将回退到旧模板）：${assembled.message}`);
+    return failure(`Rich 项目组装失败（将回退到旧模板）：${assembled.message}`, {
+      user_message: `项目组装失败：${assembled.message || '未知错误'}`,
+      fallback_allowed: true,
+      diagnostics: assembled.diagnostics || [assembled.message || '项目组装失败'],
+    });
   }
 
   return {
