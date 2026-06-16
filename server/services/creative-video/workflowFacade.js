@@ -10,6 +10,7 @@ const defaultTtsService = require('./ttsService');
 const { createRenderAdapter } = require('./renderAdapter');
 const defaultVisualQaService = require('./visualQaService');
 const hyperframesRenderer = require('../hyperframesRenderer');
+const defaultHtmlVideoWorkflow = require('./html-video/htmlVideoWorkflow');
 
 function failure(message, extra = {}) {
   return {
@@ -51,6 +52,7 @@ function getServices(services = {}) {
     ttsService: services.ttsService || defaultTtsService,
     renderAdapter: services.renderAdapter || createRenderAdapter({ type: 'hyperframes' }),
     visualQaService: services.visualQaService || defaultVisualQaService,
+    htmlVideoWorkflow: services.htmlVideoWorkflow || defaultHtmlVideoWorkflow,
   };
 }
 
@@ -258,6 +260,66 @@ async function generateCreativeVideoProject({
   skipValidation = false,
 } = {}) {
   const resolved = getServices(services);
+  let htmlVideoDiagnostics = [];
+  let htmlVideoProjectPath = null;
+  let legacyFallbackReason = null;
+
+  const htmlVideoEnabled = target.useHtmlVideoProduction !== false
+    && target.use_html_video_production !== false
+    && services.useHtmlVideoProduction !== false;
+  const legacyFallbackEnabled = target.fallbackLegacy !== false
+    && target.fallback_legacy !== false
+    && services.fallbackLegacy !== false;
+
+  if (htmlVideoEnabled) {
+    let htmlVideoResult;
+    try {
+      htmlVideoResult = await resolved.htmlVideoWorkflow.generateHtmlVideo({
+        workflowId,
+        runId,
+        creativeContext,
+        target,
+        rootDir,
+        services,
+        skipValidation,
+      });
+    } catch (error) {
+      htmlVideoResult = failure(`html-video 成片失败：${error.message || '未知错误'}`, {
+        fallback_allowed: true,
+        html_video_diagnostics: [{
+          code: 'html_video_error',
+          stage: 'workflow',
+          user_message: `html-video 成片失败：${error.message || '未知错误'}`,
+          details: {},
+          fallback_allowed: true,
+        }],
+      });
+    }
+
+    if (htmlVideoResult && htmlVideoResult.success) {
+      return {
+        ...htmlVideoResult,
+        render_mode: 'html-video',
+        html_video_project_path: htmlVideoResult.html_video_project_path || htmlVideoResult.project_dir || null,
+        html_video_diagnostics: htmlVideoResult.html_video_diagnostics || htmlVideoResult.diagnostics || [],
+        legacy_fallback_reason: null,
+        scene_spec: htmlVideoResult.scene_spec || null,
+        frame_specs: htmlVideoResult.frame_specs || { frames: htmlVideoResult.project?.frames || [] },
+      };
+    }
+
+    htmlVideoDiagnostics = htmlVideoResult?.html_video_diagnostics || htmlVideoResult?.diagnostics || [];
+    htmlVideoProjectPath = htmlVideoResult?.html_video_project_path || htmlVideoResult?.project_dir || null;
+    legacyFallbackReason = htmlVideoResult?.user_message || htmlVideoResult?.message || 'html-video production path 失败。';
+    if (!legacyFallbackEnabled || htmlVideoResult?.fallback_allowed === false) {
+      return failure(legacyFallbackReason, {
+        render_mode: 'html-video',
+        html_video_project_path: htmlVideoProjectPath,
+        html_video_diagnostics: htmlVideoDiagnostics,
+        legacy_fallback_reason: legacyFallbackReason,
+      });
+    }
+  }
 
   // Stage 1: Generate scene_spec (content layer)
   const sceneParsed = await requestSceneSpec({
@@ -411,9 +473,12 @@ async function generateCreativeVideoProject({
   return {
     success: true,
     message: `创意视频生成完成。（${renderMode === 'rich' ? 'Rich Template' : 'Legacy'} 模式）`,
-    render_mode: renderMode,
+    render_mode: legacyFallbackReason ? 'legacy' : renderMode,
     template_id: renderedFiles.template_id || null,
     rich_template_diagnostics: richTemplateDiagnostics,
+    html_video_project_path: htmlVideoProjectPath,
+    html_video_diagnostics: htmlVideoDiagnostics,
+    legacy_fallback_reason: legacyFallbackReason,
     scene_spec: renderedFiles.scene_spec,
     frame_specs: renderedFiles.frame_specs,
     project_dir: written.project_dir,

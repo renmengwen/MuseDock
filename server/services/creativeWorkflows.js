@@ -11,6 +11,10 @@ const defaultCreativeVideoEditor = require('./creativeVideoEditor');
 const defaultCreativeVideoRerender = require('./creativeVideoRerender');
 const sceneSpecService = require('./sceneSpec');
 const aiTextModel = require('./aiTextModel');
+const htmlVideoProjectStore = require('./creative-video/html-video/projectStore');
+const htmlVideoEditPatchService = require('./creative-video/html-video/editPatchService');
+const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
+const { createTemplateRegistry: createHtmlVideoTemplateRegistry } = require('./creative-video/html-video/templateRegistry');
 
 const DEFAULT_ROOT = path.join(__dirname, '../../data/creative-workflows');
 const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
@@ -1071,6 +1075,45 @@ function extractRenderVersionsFromWorkflow(record) {
   return Array.isArray(versions) ? versions : [];
 }
 
+function extractHtmlVideoProjectPathFromWorkflow(record) {
+  const hyperframes = record?.result?.hyperframes_freeform || {};
+  const project = hyperframes.project || {};
+  return safeString(
+    project.html_video_project_path
+    || project.project_dir
+    || hyperframes.html_video_project_path
+    || hyperframes.project_dir,
+  );
+}
+
+async function loadWorkflowWithHtmlVideoProject(workflowId, rootDir) {
+  let record;
+  try {
+    record = await readWorkflow(workflowId, rootDir);
+  } catch {
+    return { record: null, project: null, projectDir: '', error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
+  }
+  const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
+  if (!projectDir) {
+    return { record, project: null, projectDir: '', error: { success: false, code: 'NO_HTML_VIDEO_PROJECT', message: '该创作任务尚未生成 html-video 工程。' } };
+  }
+  try {
+    const project = await htmlVideoProjectStore.loadProject(projectDir);
+    return { record, project, projectDir, error: null };
+  } catch (error) {
+    return {
+      record,
+      project: null,
+      projectDir,
+      error: {
+        success: false,
+        code: 'NO_HTML_VIDEO_PROJECT',
+        message: `读取 html-video 工程失败：${error.message}`,
+      },
+    };
+  }
+}
+
 async function loadWorkflowWithSceneSpec(workflowId, rootDir) {
   let record;
   try {
@@ -1100,6 +1143,76 @@ async function getCreativeWorkflowVideoSpec(workflowId, options = {}) {
     scene_spec: sceneSpec,
     frame_specs: extractFrameSpecsFromWorkflow(record),
     render_versions: extractRenderVersionsFromWorkflow(record),
+  };
+}
+
+async function getCreativeWorkflowHtmlVideoProject(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  return {
+    success: true,
+    workflow_id: workflowId,
+    html_video_project: project,
+    html_video_project_path: projectDir,
+  };
+}
+
+async function patchCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+
+  const patcher = options.htmlVideoEditPatchService || htmlVideoEditPatchService;
+  const result = patcher.applyEditPatch(project, payload);
+  if (!result.success) {
+    return {
+      success: false,
+      code: result.code || 'EDIT_FAILED',
+      workflow_id: workflowId,
+      message: result.message || 'html-video 编辑失败。',
+    };
+  }
+
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, result.project);
+  return {
+    success: true,
+    workflow_id: workflowId,
+    html_video_project: saved,
+    html_video_project_path: projectDir,
+    revision: result.revision,
+    requires_tts: result.requires_tts,
+    requires_render: result.requires_render,
+    message: result.message || 'html-video 工程已保存。',
+  };
+}
+
+async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+
+  const templateRegistry = options.htmlVideoTemplateRegistry || createHtmlVideoTemplateRegistry(options.htmlVideoTemplateOptions || {});
+  const orchestrator = options.htmlVideoProjectOrchestrator || htmlVideoProjectOrchestrator;
+  const result = await orchestrator.renderHtmlVideoProject({
+    rootDir,
+    workflowId,
+    runId: project.run_id || safeString(payload.run_id) || 'manual',
+    projectDir,
+    project,
+    templateRegistry,
+    services: options.htmlVideoServices || {},
+    skipRender: payload.skip_render === true,
+  });
+
+  return {
+    success: result.success,
+    workflow_id: workflowId,
+    html_video_project: result.project,
+    html_video_project_path: result.html_video_project_path || projectDir,
+    output_path: result.output_path,
+    diagnostics: result.diagnostics || [],
+    message: result.message || (result.success ? 'html-video 工程已渲染。' : 'html-video 工程渲染失败。'),
   };
 }
 
@@ -1366,6 +1479,9 @@ module.exports = {
   makeLocalCreativeAwemeId,
   recoverStaleWorkflowsOnStartup,
   getCreativeWorkflowVideoSpec,
+  getCreativeWorkflowHtmlVideoProject,
+  patchCreativeWorkflowHtmlVideoProject,
+  renderCreativeWorkflowHtmlVideoProject,
   patchCreativeWorkflowVideoSpec,
   getCreativeWorkflowSceneSpec,
   patchCreativeWorkflowSceneSpec,
