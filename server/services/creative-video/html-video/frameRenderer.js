@@ -2,6 +2,20 @@ const path = require('path');
 
 const defaultAdapter = require('./hyperframesPlaywrightAdapter');
 
+function resolveFrameHtmlPath(frame, options) {
+  const sourcePath = frame.html_path || frame.htmlPath || frame.sourcePath;
+  if (!sourcePath || path.isAbsolute(sourcePath) || !options.projectDir) {
+    return sourcePath;
+  }
+  const projectDir = path.resolve(options.projectDir);
+  const resolved = path.resolve(projectDir, sourcePath);
+  const relative = path.relative(projectDir, resolved);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('帧 HTML 路径不能逃逸工程目录。');
+  }
+  return resolved;
+}
+
 async function renderFrame(frame = {}, options = {}) {
   const adapter = options.adapter || defaultAdapter;
   const state = options.state || {};
@@ -17,7 +31,7 @@ async function renderFrame(frame = {}, options = {}) {
   try {
     const result = await adapter.render(
       {
-        template: { sourcePath: frame.html_path || frame.htmlPath || frame.sourcePath },
+        template: { sourcePath: resolveFrameHtmlPath(frame, options) },
         config: {
           outputPath,
           resolution: options.resolution || frame.resolution || { width: 1280, height: 720 },
@@ -64,4 +78,5 @@ async function renderFrame(frame = {}, options = {}) {
 
 module.exports = {
   renderFrame,
+  resolveFrameHtmlPath,
 };

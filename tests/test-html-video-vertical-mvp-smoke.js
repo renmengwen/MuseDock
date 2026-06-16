@@ -76,6 +76,7 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   const manifest = templateRegistry.getTemplate('glitch_title');
   const outputPath = path.join(projectDir, 'exports', 'vertical-mvp-frame.mp4');
   const renderResult = await renderFrame(materialized.project.frames[0], {
+    projectDir,
     workDir: path.join(projectDir, 'frames'),
     outputPath,
     resolution: manifest.output.resolution,
