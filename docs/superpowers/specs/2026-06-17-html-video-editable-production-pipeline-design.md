@@ -772,7 +772,7 @@ overlay
 - `type` 首版枚举：`image`、`video`、`audio`、`data`、`text`、`template-asset`。
 - `path` 必须是 project 目录内相对路径，禁止 `..` 和绝对路径。
 - `source` 首版枚举：`uploaded`、`generated`、`template`、`external-cached`。
-- `metadata.filename` 是用户上传或模板原始文件名，用于展示和审计；不能简单等同于 `path` 的 basename，因为 `path` 可能是去重、脱敏或转码后的工程内路径。
+- `metadata.filename` 是用户侧原始文件名，用于展示和审计；`path` 是工程内相对路径，可能经过去重或转码，两者不保证相同。
 - 首版如果没有素材输入，可保留 `assets: []`，但 projectStore 和 validationGate 必须能读写该字段。
 
 ## 与 html-video 类型对齐
@@ -1042,6 +1042,17 @@ generateCreativeVideoProject()
 - 右侧表单读取 `template_inputs` 或 `frame.inputs`。
 - 字幕/旁白读取 `scene_spec` 和 audio manifest。
 - 重新渲染调用新 html-video project render/export API。
+
+### 现有模块对应关系
+
+| 现有文件 | 新架构中的角色 | 处理方式 |
+| --- | --- | --- |
+| `server/services/creative-video/creativeSpecAgent.js` | AI 内容规格、模板选择、模板填表 | 保留 scene_spec 生成能力；将模板选择/填表职责拆到 `templateSelectorAgent.js` 和 `templateInputAgent.js`，输出 `{ template_id, reason, confidence }` 与 `template_inputs` JSON。 |
+| `server/services/creative-video/projectWriter.js` | 工程持久化 | 升级为 `projectStore.js`，新增 `saveProject()`、`loadProject()`、`addRevision()`、`addExport()`；兼容当前 `{rootDir}/{workflowId}/agent_runs/` 路径习惯。 |
+| `server/services/creative-video/hyperframesTemplateRenderer.js` | 模板到 HTML、legacy 工程生成 | legacy path 暂保留；新链路拆为 `materializer.js`（变量注入/HTML 物化）和 `hyperframesPlaywrightAdapter.js`（渲染录制）。 |
+| `server/services/creative-video/renderAdapter.js` | 渲染适配抽象 | 新链路改用 `hyperframesPlaywrightAdapter.js`，接入 Playwright/Chromium 录制和 ffmpeg 编码；旧 adapter 仅用于 legacy fallback。 |
+| `server/services/creative-video/templateRegistry.js` | 模板列表与 legacy 模板扫描 | 升级为读取原生 `template.html-video.yaml`；保留现有 `listTemplates()`、`getTemplate()` 等接口兼容，新增 license/engine/source_entry 过滤。 |
+| `server/services/creative-video/visualQaService.js` | 视觉质检 | 扩展检查项，新增空白帧、字体/CSS 失效、动画未运行、时长偏差和分辨率偏差检测。 |
 
 ## 迁移策略
 
