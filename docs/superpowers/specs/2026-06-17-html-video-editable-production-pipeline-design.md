@@ -217,6 +217,7 @@ server/services/creative-video/html-video/
   templateManifestService.js
   templateSelectorAgent.js
   templateInputAgent.js
+  htmlVideoWorkflow.js
   projectSchema.js
   projectStore.js
   projectOrchestrator.js
@@ -239,6 +240,27 @@ server/services/creative-video/html-video/
 - 作为 `scene_spec` 到 `frames[]` 的工程 IR。
 
 首版可先支持线性 graph，但实现上必须保留 dependency cycle 检测和 sequence tie-break 规则，避免后续多节点依赖排序时重做底层模型。
+
+### htmlVideoWorkflow
+
+职责：
+
+- 作为 `workflowFacade` 调用 html-video 生产链路的单一入口。
+- 编排 `templateSelectorAgent`、`templateInputAgent`、`projectOrchestrator`、`validationGate` 和 render/export。
+- 负责把当前项目的 workflowId/runId/rootDir/creativeContext 转换成 `HtmlVideoProject` 创建参数。
+- 不直接写底层文件，不直接执行 Playwright/ffmpeg；这些由 `projectOrchestrator` 和 adapter 负责。
+
+关系：
+
+```text
+workflowFacade
+  -> htmlVideoWorkflow.generateProject()
+  -> htmlVideoWorkflow.renderOrExport()
+  -> projectOrchestrator.createProject()
+  -> materializer / render adapter / ffmpeg composer
+```
+
+`projectOrchestrator` 是工程生命周期编排器；`htmlVideoWorkflow` 是当前业务工作流适配层。
 
 ### templateRegistry
 
@@ -624,7 +646,7 @@ fallback_to_legacy
         "items": [
           {
             "id": "item_intro",
-            "kind": "frame",
+    "kind": "frame",
             "frame_id": "intro",
             "start_sec": 0,
             "duration_sec": 6,
@@ -680,6 +702,8 @@ fallback_to_legacy
 }
 ```
 
+`preferences.language` 使用 BCP 47 语言标签；示例值 `zh-CN` 表示简体中文/中国地区，保留语言小写、地区大写的标准写法。
+
 `frames[].enhancement.data` 是源 DataNode 的数据快照。后续启用 Remotion native enhancement 时，导出阶段必须使用这个快照作为 native template 的 input props / `variables.data`，让导出自包含，不依赖重新读取或重新计算 `contentGraph`。
 
 `timeline.tracks[].items[].kind` 首版只支持：
@@ -704,6 +728,8 @@ overlay
 ### Asset schema
 
 `assets[]` 首版可以为空，但 schema 需要先固定，方便后续接入图片、视频、音频、数据文件和模板本地资源：
+
+本工程 JSON schema 字段统一使用 snake_case，与 `template_id`、`source_mode`、`duration_target_sec` 等字段保持一致。
 
 ```json
 {
@@ -739,6 +765,7 @@ overlay
 - `type` 首版枚举：`image`、`video`、`audio`、`data`、`text`、`template-asset`。
 - `path` 必须是 project 目录内相对路径，禁止 `..` 和绝对路径。
 - `source` 首版枚举：`uploaded`、`generated`、`template`、`external-cached`。
+- `metadata.filename` 是用户上传或模板原始文件名，用于展示和审计；不能简单等同于 `path` 的 basename，因为 `path` 可能是去重、脱敏或转码后的工程内路径。
 - 首版如果没有素材输入，可保留 `assets: []`，但 projectStore 和 validationGate 必须能读写该字段。
 
 ## 与 html-video 类型对齐
@@ -794,7 +821,7 @@ AI 输出 `edit_patch`，不直接改 HTML：
   "edit_type": "frame_inputs_patch",
   "frame_id": "intro",
   "patch": {
-    "title": "信号失控",
+    "title": "信号已失控",
     "subtitle": "评论区正在改写品牌叙事"
   },
   "requires_tts": false,
