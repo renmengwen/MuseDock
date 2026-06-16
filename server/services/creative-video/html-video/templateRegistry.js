@@ -19,6 +19,8 @@ const DEFAULT_OPTIONS = {
   commercialOnly: true,
 };
 
+const DEFAULT_ROOT_DIR = path.resolve(__dirname, '../../../../templates');
+
 function normalizeEngine(engine) {
   return String(engine || '').trim();
 }
@@ -29,6 +31,16 @@ function mappedEngine(engine) {
 
 function isHtmlSourceEntry(sourceEntry) {
   return /\.html?$/i.test(String(sourceEntry || '').trim());
+}
+
+function resolveSourceEntryPath(manifest) {
+  if (!manifest || !manifest.__dir || !manifest.source_entry) return '';
+  const sourcePath = path.resolve(manifest.__dir, manifest.source_entry);
+  const relative = path.relative(manifest.__dir, sourcePath);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return '';
+  }
+  return sourcePath;
 }
 
 function readTemplateDirs(rootDir) {
@@ -49,10 +61,17 @@ function scanTemplateManifests(rootDir) {
 }
 
 function normalizeOptions(options = {}) {
+  const duration = options.durationSec ?? options.duration_sec ?? options.duration ?? options.target_duration_sec;
+  const aspect = options.aspectRatio || options.aspect_ratio || options.aspect;
+  const aspects = Array.isArray(options.aspects)
+    ? options.aspects
+    : (aspect ? [aspect] : []);
   return {
     ...DEFAULT_OPTIONS,
     ...options,
     engines: Array.isArray(options.engines) ? options.engines : DEFAULT_OPTIONS.engines,
+    aspects,
+    durationSec: duration,
   };
 }
 
@@ -66,9 +85,26 @@ function engineAllowed(manifest, options) {
 
 function aspectAllowed(manifest, options) {
   if (!Array.isArray(options.aspects) || options.aspects.length === 0) return true;
-  const aspect = manifest.output && manifest.output.aspect;
+  const aspect = getManifestAspect(manifest);
   if (!aspect) return true;
   return options.aspects.includes(aspect);
+}
+
+function getManifestAspect(manifest) {
+  const output = manifest.output || {};
+  if (output.aspect || output.aspect_ratio) return output.aspect || output.aspect_ratio;
+  const resolution = output.resolution || {};
+  const width = Number(resolution.width);
+  const height = Number(resolution.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return '';
+  }
+  const ratio = width / height;
+  if (Math.abs(ratio - 16 / 9) < 0.01) return '16:9';
+  if (Math.abs(ratio - 9 / 16) < 0.01) return '9:16';
+  if (Math.abs(ratio - 1) < 0.01) return '1:1';
+  if (Math.abs(ratio - 4 / 5) < 0.01) return '4:5';
+  return `${width}:${height}`;
 }
 
 function durationAllowed(manifest, options) {
@@ -81,8 +117,12 @@ function durationAllowed(manifest, options) {
   if (Array.isArray(output.duration_range) && output.duration_range.length >= 2) {
     return duration >= Number(output.duration_range[0]) && duration <= Number(output.duration_range[1]);
   }
-  if (output.duration_sec === undefined || output.duration_sec === null) return true;
-  return Number(output.duration_sec) === duration;
+  if (Array.isArray(output.duration) && output.duration.length >= 2) {
+    return duration >= Number(output.duration[0]) && duration <= Number(output.duration[1]);
+  }
+  const manifestDuration = output.duration_sec ?? output.duration;
+  if (manifestDuration === undefined || manifestDuration === null) return true;
+  return Number(manifestDuration) === duration;
 }
 
 function licenseNameAllowed(manifest, options) {
@@ -111,12 +151,21 @@ function validateTemplateCompatibility(manifest, options = {}) {
       code: 'unsafe-source-entry',
       message: sourceValidation.reason,
     });
-  } else if (!isHtmlSourceEntry(manifest.source_entry)) {
+  } else if (mappedEngine(manifest.engine) === 'hyperframes-playwright' && !isHtmlSourceEntry(manifest.source_entry)) {
     reasons.push({
       field: 'source_entry',
       code: 'non-html-source-entry',
       message: 'source_entry 必须指向 HTML 文件',
     });
+  } else {
+    const sourcePath = resolveSourceEntryPath(manifest);
+    if (!sourcePath || !fs.existsSync(sourcePath)) {
+      reasons.push({
+        field: 'source_entry',
+        code: 'source-entry-not-found',
+        message: 'source_entry 指向的文件不存在或不在模板目录内',
+      });
+    }
   }
 
   if (normalized.commercialOnly && !(manifest.license && manifest.license.commercial_use === true)) {
@@ -158,6 +207,8 @@ function validateTemplateCompatibility(manifest, options = {}) {
 }
 
 function toCompactTemplate(manifest) {
+  const output = manifest.output || {};
+  const durationSec = output.duration_sec ?? output.duration;
   return {
     id: manifest.id,
     name: manifest.name,
@@ -168,7 +219,8 @@ function toCompactTemplate(manifest) {
     mapped_engine: mappedEngine(manifest.engine),
     source_entry: manifest.source_entry,
     output: manifest.output,
-    duration_sec: manifest.output.duration_sec,
+    aspect_ratio: getManifestAspect(manifest),
+    duration_sec: durationSec,
     inputs: {
       schema: manifest.inputs.schema,
     },
@@ -178,16 +230,60 @@ function toCompactTemplate(manifest) {
   };
 }
 
-function buildCompactIndex(rootDir, options = {}) {
+function resolveRootAndOptions(rootDirOrOptions, maybeOptions) {
+  if (typeof rootDirOrOptions === 'string') {
+    return { rootDir: rootDirOrOptions, options: maybeOptions || {} };
+  }
+  return { rootDir: DEFAULT_ROOT_DIR, options: rootDirOrOptions || {} };
+}
+
+function buildCompactIndex(rootDirOrOptions, maybeOptions = {}) {
+  const { rootDir, options } = resolveRootAndOptions(rootDirOrOptions, maybeOptions);
   return scanTemplateManifests(rootDir)
     .filter(manifest => validateTemplateCompatibility(manifest, options).ok)
     .map(toCompactTemplate);
 }
 
+function createTemplateRegistry({ rootDir = DEFAULT_ROOT_DIR } = {}) {
+  let manifests = [];
+  function scanTemplates(nextRootDir = rootDir) {
+    rootDir = nextRootDir;
+    manifests = scanTemplateManifests(rootDir);
+    return manifests;
+  }
+  function ensureScanned() {
+    if (!manifests.length) scanTemplates(rootDir);
+  }
+  function listTemplates(options = {}) {
+    ensureScanned();
+    return manifests
+      .filter(manifest => validateTemplateCompatibility(manifest, options).ok);
+  }
+  function getTemplate(templateId) {
+    ensureScanned();
+    return manifests.find(manifest => manifest.id === templateId) || null;
+  }
+  function hasTemplate(templateId, options = {}) {
+    const template = getTemplate(templateId);
+    return Boolean(template && validateTemplateCompatibility(template, options).ok);
+  }
+  return {
+    scanTemplates,
+    listTemplates,
+    getTemplate,
+    hasTemplate,
+    buildCompactIndex: options => buildCompactIndex(rootDir, options),
+  };
+}
+
 module.exports = {
   INTERNAL_ENGINE_MAP,
+  DEFAULT_ROOT_DIR,
   scanTemplateManifests,
   buildCompactIndex,
+  createTemplateRegistry,
   validateTemplateCompatibility,
   mappedEngine,
+  getManifestAspect,
+  resolveSourceEntryPath,
 };

@@ -14,6 +14,7 @@ assert.ok(manifests.some(item => item.id === 'script_source'));
 const compactDefault = registry.buildCompactIndex(fixturesDir);
 assert.deepEqual(compactDefault.map(item => item.id), ['commercial_hyperframes']);
 assert.deepEqual(Object.keys(compactDefault[0]).sort(), [
+  'aspect_ratio',
   'assets_attribution',
   'attribution_required',
   'category',
@@ -30,11 +31,30 @@ assert.deepEqual(Object.keys(compactDefault[0]).sort(), [
   'tags',
 ].sort());
 assert.equal(compactDefault[0].mapped_engine, 'hyperframes-playwright');
+assert.equal(compactDefault[0].aspect_ratio, '16:9');
+assert.equal(compactDefault[0].duration_sec, 8);
 assert.equal(compactDefault[0].attribution_required, true);
 assert.equal(compactDefault[0].source_entry, 'index.html');
 assert.equal(compactDefault[0].license.commercial_use, true);
 assert.equal(compactDefault[0].license.attribution_required, true);
 assert.equal(compactDefault[0].sourceHtml, undefined);
+
+const statefulRegistry = registry.createTemplateRegistry({ rootDir: fixturesDir });
+assert.deepEqual(statefulRegistry.scanTemplates().map(item => item.id).sort(), manifests.map(item => item.id).sort());
+assert.deepEqual(statefulRegistry.listTemplates().map(item => item.id), ['commercial_hyperframes']);
+assert.equal(statefulRegistry.hasTemplate('commercial_hyperframes'), true);
+assert.equal(statefulRegistry.hasTemplate('noncommercial_hyperframes'), false);
+assert.equal(statefulRegistry.getTemplate('commercial_hyperframes').id, 'commercial_hyperframes');
+
+assert.deepEqual(
+  statefulRegistry.buildCompactIndex({ aspectRatio: '16:9', durationSec: 8 }).map(item => item.id),
+  ['commercial_hyperframes']
+);
+
+assert.deepEqual(
+  statefulRegistry.buildCompactIndex({ aspect_ratio: '9:16', duration: 8 }).map(item => item.id),
+  []
+);
 
 assert.deepEqual(
   registry.buildCompactIndex(fixturesDir, { commercialOnly: false }).map(item => item.id).sort(),
@@ -53,6 +73,11 @@ assert.deepEqual(
 
 assert.deepEqual(
   registry.buildCompactIndex(fixturesDir, { durationSec: 3 }).map(item => item.id),
+  []
+);
+
+assert.deepEqual(
+  registry.buildCompactIndex(fixturesDir, { duration: 3 }).map(item => item.id),
   []
 );
 
@@ -88,6 +113,11 @@ const failures = [
     options: { durationSec: 30 },
     field: 'duration',
     text: '模板不支持目标时长',
+  },
+  {
+    manifest: manifests.find(item => item.id === 'missing_source_entry'),
+    field: 'source_entry',
+    text: 'source_entry 指向的文件不存在',
   },
 ];
 

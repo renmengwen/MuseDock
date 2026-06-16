@@ -8,8 +8,10 @@ tags:
 engine: hyperframes
 source_entry: index.html
 output:
-  aspect: "16:9"
-  duration_sec: 8
+  resolution:
+    width: 1920
+    height: 1080
+  duration: 8
 inputs:
   schema:
     headline:

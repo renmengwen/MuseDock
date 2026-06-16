@@ -28,18 +28,24 @@ function defaultContentGraph() {
 function defaultTimeline() {
   return {
     tracks: [
-      { id: 'main', kind: 'video', items: [] },
-      { id: 'voice', kind: 'audio', items: [] },
-      { id: 'music', kind: 'audio', items: [] },
+      { id: 'main', type: 'video', items: [] },
+      { id: 'voice', type: 'audio', items: [] },
+      { id: 'music', type: 'audio', items: [] },
     ],
   };
 }
 
 function defaultAudio() {
   return {
-    voice: null,
-    music: null,
-    tts: [],
+    tts_manifest_path: null,
+    narration_path: null,
+    music_path: null,
+    mix: {
+      music_volume_db: -18,
+      narration_volume_db: 0,
+      fade_in_sec: 0,
+      fade_out_sec: 1.5,
+    },
   };
 }
 
@@ -49,6 +55,8 @@ function defaultOverrides() {
       enabled: false,
       frames: {},
     },
+    elements: {},
+    transitions: {},
   };
 }
 
@@ -145,7 +153,7 @@ function normalizeTimeline(value) {
       const normalized = objectOrEmpty(track);
       return {
         id: normalized.id || '',
-        kind: normalized.kind || '',
+        type: normalized.type || normalized.kind || '',
         items: arrayOrEmpty(normalized.items),
       };
     }),
@@ -154,10 +162,15 @@ function normalizeTimeline(value) {
 
 function normalizeAudio(value) {
   const input = objectOrEmpty(value);
+  const mix = objectOrEmpty(input.mix);
+  const defaults = defaultAudio();
   return {
-    ...defaultAudio(),
+    ...defaults,
     ...input,
-    tts: arrayOrEmpty(input.tts),
+    mix: {
+      ...defaults.mix,
+      ...mix,
+    },
   };
 }
 
@@ -173,6 +186,8 @@ function normalizeOverrides(value) {
       enabled: html.enabled === true,
       frames: objectOrEmpty(html.frames),
     },
+    elements: objectOrEmpty(input.elements),
+    transitions: objectOrEmpty(input.transitions),
   };
 }
 

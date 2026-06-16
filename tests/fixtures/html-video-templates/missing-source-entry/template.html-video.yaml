@@ -1,13 +1,13 @@
-id: remotion_template
-name: Remotion 模板
-engine: remotion
-source_entry: source/entry.tsx
+id: missing_source_entry
+name: 缺失入口模板
+engine: hyperframes
+source_entry: missing.html
 output:
   resolution:
     width: 1920
     height: 1080
   duration: 8
 license:
-  name: MIT
+  name: Apache-2.0
   commercial_use: true
   attribution_required: false

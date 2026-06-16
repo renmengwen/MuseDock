@@ -18,14 +18,24 @@ assert.deepEqual(project.content_graph, { schemaVersion: 1, intent: 'promo', syn
 assert.deepEqual(project.frames, []);
 assert.deepEqual(project.timeline, {
   tracks: [
-    { id: 'main', kind: 'video', items: [] },
-    { id: 'voice', kind: 'audio', items: [] },
-    { id: 'music', kind: 'audio', items: [] },
+    { id: 'main', type: 'video', items: [] },
+    { id: 'voice', type: 'audio', items: [] },
+    { id: 'music', type: 'audio', items: [] },
   ],
 });
 assert.deepEqual(project.assets, []);
-assert.deepEqual(project.audio, { voice: null, music: null, tts: [] });
-assert.deepEqual(project.overrides, { html: { enabled: false, frames: {} } });
+assert.deepEqual(project.audio, {
+  tts_manifest_path: null,
+  narration_path: null,
+  music_path: null,
+  mix: {
+    music_volume_db: -18,
+    narration_volume_db: 0,
+    fade_in_sec: 0,
+    fade_out_sec: 1.5,
+  },
+});
+assert.deepEqual(project.overrides, { html: { enabled: false, frames: {} }, elements: {}, transitions: {} });
 assert.deepEqual(project.revisions, []);
 assert.deepEqual(project.exports, []);
 assert.equal(project.status, 'draft');
@@ -100,7 +110,7 @@ assertValidationError({
   run_id: 'run_005',
   timeline: {
     tracks: [
-      { id: 'main', kind: 'video', items: [{ id: 'clip_01', kind: 'video', frame_id: 'frame_01' }] },
+      { id: 'main', type: 'video', items: [{ id: 'clip_01', kind: 'video', frame_id: 'frame_01' }] },
     ],
   },
 }, 'timeline-item-kind-unsupported', 'main/clip_01');

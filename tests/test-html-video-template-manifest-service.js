@@ -11,7 +11,7 @@ assert.equal(commercial.name, '商业 Hyperframes 模板');
 assert.equal(commercial.engine, 'hyperframes');
 assert.equal(commercial.source_entry, 'index.html');
 assert.equal(commercial.__dir, path.join(fixturesDir, 'commercial-hyperframes'));
-assert.deepEqual(commercial.output, { aspect: '16:9', duration_sec: 8 });
+assert.deepEqual(commercial.output, { resolution: { width: 1920, height: 1080 }, duration: 8 });
 assert.equal(commercial.inputs.schema.headline.type, 'string');
 assert.equal(commercial.license.commercial_use, true);
 assert.equal(commercial.license.attribution_required, true);
