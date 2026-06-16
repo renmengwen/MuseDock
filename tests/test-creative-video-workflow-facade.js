@@ -236,5 +236,70 @@ const hyperframesTemplateRenderer = require('../server/services/creative-video/h
   assert.ok(richAssemblyFailed.user_message.includes('项目组装失败'));
   assert.ok(richAssemblyFailed.diagnostics.some(item => String(item).includes('assembler_failed')));
 
+  const previousProductionEnabled = process.env.HTML_VIDEO_PRODUCTION_ENABLED;
+  process.env.HTML_VIDEO_PRODUCTION_ENABLED = 'false';
+  let htmlVideoCalledWhenDisabled = false;
+  const disabledHtmlVideo = await facade.generateCreativeVideoProject({
+    workflowId: '202606140000000004',
+    runId: 'run_004',
+    creativeContext: { input: { raw_text: '测试主题' } },
+    services: {
+      htmlVideoWorkflow: {
+        generateHtmlVideo: async () => {
+          htmlVideoCalledWhenDisabled = true;
+          return { success: true };
+        },
+      },
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(message => message.content).join('\n');
+          if (prompt.includes('不允许输出 frame_specs')) {
+            return { success: true, text: JSON.stringify({ scene_spec: { title: '测试', aspect_ratio: '16:9', scenes: [{ id: 'scene_01', duration: 8, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }] } }) };
+          }
+          return { success: true, text: JSON.stringify({ frame_specs: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 8, kind: 'text', template: 'hero_title', layout: 'center_stack', background: 'dark_gradient', motion: 'fade_up', text_layers: [{ id: 'headline', role: 'headline', text: '标题', emphasis: 'primary' }], visual_layers: [] }] }) };
+        },
+      },
+      projectWriter: async files => ({ success: true, project_dir: tmpDir, files: Object.keys(files) }),
+      checker: async () => ({ success: true, message: '校验通过' }),
+      ttsService: { synthesizeSceneNarration: async () => ({ success: true, audio_manifest: { scenes: [] } }) },
+      renderAdapter: { render: async () => ({ success: true, output_path: outputMp4, diagnostics: [] }) },
+      visualQaService: { inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }) },
+    },
+  });
+  if (previousProductionEnabled == null) delete process.env.HTML_VIDEO_PRODUCTION_ENABLED;
+  else process.env.HTML_VIDEO_PRODUCTION_ENABLED = previousProductionEnabled;
+  assert.equal(disabledHtmlVideo.success, true);
+  assert.equal(htmlVideoCalledWhenDisabled, false);
+
+  const previousFallbackEnabled = process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED;
+  process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED = 'false';
+  let legacyProjectWriterCalledWhenFallbackDisabled = false;
+  const blockedFallback = await facade.generateCreativeVideoProject({
+    workflowId: '202606140000000005',
+    runId: 'run_005',
+    creativeContext: { input: { raw_text: '测试主题' } },
+    services: {
+      htmlVideoWorkflow: {
+        generateHtmlVideo: async () => ({
+          success: false,
+          message: 'html-video 模拟失败。',
+          fallback_allowed: true,
+          html_video_diagnostics: [{ code: 'template_missing', stage: 'template', user_message: '没有可用模板。', details: {}, fallback_allowed: true }],
+        }),
+      },
+      aiTextModel: {
+        callTextModel: async () => ({ success: true, text: JSON.stringify({ scene_spec: { title: '测试', aspect_ratio: '16:9', scenes: [{ id: 'scene_01', duration: 8, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }] } }) }),
+      },
+      projectWriter: async () => {
+        legacyProjectWriterCalledWhenFallbackDisabled = true;
+        return { success: true, project_dir: tmpDir, files: [] };
+      },
+    },
+  });
+  if (previousFallbackEnabled == null) delete process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED;
+  else process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED = previousFallbackEnabled;
+  assert.equal(blockedFallback.success, false);
+  assert.equal(legacyProjectWriterCalledWhenFallbackDisabled, false);
+
   console.log('creative video workflow facade tests passed');
 })();

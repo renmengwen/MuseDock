@@ -28,7 +28,7 @@ function createDiagnostic(input = {}) {
   return {
     code,
     stage: String(input.stage || 'html-video'),
-    user_message: String(input.user_message || input.message || DEFAULT_MESSAGES[code] || 'html-video 处理失败。'),
+    user_message: String(input.user_message || DEFAULT_MESSAGES[code] || 'html-video 处理失败。'),
     details: objectOrEmpty(input.details),
     fallback_allowed: input.fallback_allowed !== false,
   };
@@ -38,7 +38,7 @@ function normalizeDiagnostic(input, defaults = {}) {
   if (typeof input === 'string') {
     return createDiagnostic({
       ...defaults,
-      user_message: input,
+      user_message: defaults.user_message || `html-video 处理失败：${input}`,
       details: { message: input },
     });
   }
@@ -47,6 +47,7 @@ function normalizeDiagnostic(input, defaults = {}) {
     ...objectOrEmpty(input),
     details: {
       ...objectOrEmpty(defaults.details),
+      ...(input && typeof input.message === 'string' ? { message: input.message } : {}),
       ...objectOrEmpty(input && input.details),
       ...Object.fromEntries(Object.entries(objectOrEmpty(input)).filter(([key]) => (
         !['code', 'stage', 'user_message', 'message', 'details', 'fallback_allowed'].includes(key)

@@ -56,6 +56,12 @@ function getServices(services = {}) {
   };
 }
 
+function envFlag(name, defaultValue) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return defaultValue;
+  return !/^(0|false|off|no)$/i.test(String(raw).trim());
+}
+
 function getSceneDurationsFromContext(creativeContext = {}) {
   const scenes = Array.isArray(creativeContext?.audio?.scenes)
     ? creativeContext.audio.scenes
@@ -264,12 +270,23 @@ async function generateCreativeVideoProject({
   let htmlVideoProjectPath = null;
   let legacyFallbackReason = null;
 
+  // Stage 1: Generate scene_spec (content layer). html-video and legacy share this IR.
+  const sceneParsed = await requestSceneSpec({
+    model: resolved.aiTextModel,
+    creativeContext,
+    target,
+    sceneDurations: getSceneDurationsFromContext(creativeContext),
+  });
+  if (!sceneParsed.success) return failure(sceneParsed.message, { errors: sceneParsed.errors || [] });
+
   const htmlVideoEnabled = target.useHtmlVideoProduction !== false
     && target.use_html_video_production !== false
-    && services.useHtmlVideoProduction !== false;
+    && services.useHtmlVideoProduction !== false
+    && envFlag('HTML_VIDEO_PRODUCTION_ENABLED', true);
   const legacyFallbackEnabled = target.fallbackLegacy !== false
     && target.fallback_legacy !== false
-    && services.fallbackLegacy !== false;
+    && services.fallbackLegacy !== false
+    && envFlag('HTML_VIDEO_LEGACY_FALLBACK_ENABLED', true);
 
   if (htmlVideoEnabled) {
     let htmlVideoResult;
@@ -277,6 +294,7 @@ async function generateCreativeVideoProject({
       htmlVideoResult = await resolved.htmlVideoWorkflow.generateHtmlVideo({
         workflowId,
         runId,
+        sceneSpec: sceneParsed.scene_spec,
         creativeContext,
         target,
         rootDir,
@@ -303,7 +321,7 @@ async function generateCreativeVideoProject({
         html_video_project_path: htmlVideoResult.html_video_project_path || htmlVideoResult.project_dir || null,
         html_video_diagnostics: htmlVideoResult.html_video_diagnostics || htmlVideoResult.diagnostics || [],
         legacy_fallback_reason: null,
-        scene_spec: htmlVideoResult.scene_spec || null,
+        scene_spec: htmlVideoResult.scene_spec || sceneParsed.scene_spec,
         frame_specs: htmlVideoResult.frame_specs || { frames: htmlVideoResult.project?.frames || [] },
       };
     }
@@ -320,15 +338,6 @@ async function generateCreativeVideoProject({
       });
     }
   }
-
-  // Stage 1: Generate scene_spec (content layer)
-  const sceneParsed = await requestSceneSpec({
-    model: resolved.aiTextModel,
-    creativeContext,
-    target,
-    sceneDurations: getSceneDurationsFromContext(creativeContext),
-  });
-  if (!sceneParsed.success) return failure(sceneParsed.message, { errors: sceneParsed.errors || [] });
 
   // Stage 2: Try rich template path first
   let renderedFiles = null;

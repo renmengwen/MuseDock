@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs/promises');
 
 const defaultMaterializer = require('./materializer');
 const defaultFrameRenderer = require('./frameRenderer');
@@ -16,9 +17,100 @@ function getOutputConfig(project) {
   return objectOrEmpty(project.output || project.render || {});
 }
 
+function expectedDurationSec(project) {
+  return (Array.isArray(project.frames) ? project.frames : [])
+    .reduce((total, frame) => total + Number(frame.duration_sec || frame.durationSec || 0), 0);
+}
+
+async function resolveNarrationPath(project, projectDir, ffmpegComposer, diagnostics) {
+  if (project.audio?.narration_path) {
+    return path.isAbsolute(project.audio.narration_path)
+      ? project.audio.narration_path
+      : path.join(projectDir, project.audio.narration_path);
+  }
+  const manifestPath = project.audio?.tts_manifest_path;
+  if (!manifestPath) return null;
+  const absoluteManifestPath = path.isAbsolute(manifestPath) ? manifestPath : path.join(projectDir, manifestPath);
+  let manifest;
+  try {
+    manifest = JSON.parse(await fs.readFile(absoluteManifestPath, 'utf8'));
+  } catch (error) {
+    diagnostics.push(createDiagnostic({
+      code: 'tts_manifest_missing',
+      stage: 'compose',
+      user_message: `读取旁白音频清单失败：${error.message}`,
+      details: { manifest_path: manifestPath },
+    }));
+    return null;
+  }
+  const sceneFiles = (Array.isArray(manifest.scenes) ? manifest.scenes : [])
+    .map(scene => scene.path || (scene.relative_path ? path.join(projectDir, scene.relative_path) : null))
+    .filter(Boolean)
+    .map(filePath => ({ path: path.isAbsolute(filePath) ? filePath : path.join(projectDir, filePath) }));
+  if (!sceneFiles.length) return null;
+  if (typeof ffmpegComposer.concatAudioWithFfmpeg !== 'function') return sceneFiles[0].path;
+  const outputPath = path.join(projectDir, 'exports', 'narration-track.mp3');
+  const concat = await ffmpegComposer.concatAudioWithFfmpeg(sceneFiles, outputPath, projectDir);
+  if (!concat.success) {
+    diagnostics.push(createDiagnostic({
+      code: 'compose_failed',
+      stage: 'compose',
+      user_message: concat.message || '旁白音频拼接失败。',
+      details: { stderr: concat.stderr },
+    }));
+    return null;
+  }
+  return concat.output_path || outputPath;
+}
+
 async function ensureProjectDir({ rootDir, workflowId, runId, projectDir }) {
   if (projectDir) return projectDir;
   return createProjectDir({ rootDir, workflowId, runId });
+}
+
+async function createProject({
+  rootDir,
+  workflowId,
+  runId,
+  projectDir,
+  project,
+} = {}) {
+  const resolvedProjectDir = await ensureProjectDir({ rootDir, workflowId, runId, projectDir });
+  const nextProject = normalizeProject(project);
+  await saveProject(resolvedProjectDir, nextProject);
+  return {
+    success: true,
+    project: nextProject,
+    project_dir: resolvedProjectDir,
+    html_video_project_path: resolvedProjectDir,
+  };
+}
+
+async function materializeProject({
+  rootDir,
+  workflowId,
+  runId,
+  projectDir,
+  project,
+  templateRegistry,
+  services = {},
+} = {}) {
+  const materializer = services.materializer || defaultMaterializer;
+  const resolvedProjectDir = await ensureProjectDir({ rootDir, workflowId, runId, projectDir });
+  const materialized = await materializer.materializeProject({
+    projectDir: resolvedProjectDir,
+    project: normalizeProject(project),
+    templateRegistry,
+  });
+  const nextProject = normalizeProject(materialized.project);
+  await saveProject(resolvedProjectDir, nextProject);
+  return {
+    success: true,
+    project: nextProject,
+    project_dir: resolvedProjectDir,
+    html_video_project_path: resolvedProjectDir,
+    diagnostics: normalizeDiagnostics(materialized.diagnostics, { stage: 'materialize' }),
+  };
 }
 
 async function renderHtmlVideoProject({
@@ -113,10 +205,11 @@ async function renderHtmlVideoProject({
     };
   }
 
+  const narrationPath = await resolveNarrationPath(nextProject, resolvedProjectDir, ffmpegComposer, diagnostics);
   const mux = await ffmpegComposer.muxAudioWithFfmpeg({
     videoPath: concat.output_path || videoPath,
     outputPath: path.join(resolvedProjectDir, 'exports', 'output-audio.mp4'),
-    narrationPath: nextProject.audio?.narration_path,
+    narrationPath,
     musicPath: nextProject.audio?.music_path,
     ...(nextProject.audio?.mix || {}),
   });
@@ -138,6 +231,37 @@ async function renderHtmlVideoProject({
   }
 
   const finalOutput = mux.output_path || concat.output_path || videoPath;
+  if (typeof ffmpegComposer.verifyDurationWithFfprobe === 'function') {
+    const durationCheck = await ffmpegComposer.verifyDurationWithFfprobe({
+      videoPath: finalOutput,
+      expectedDurationSec: expectedDurationSec(nextProject),
+      toleranceSec: 1.5,
+    });
+    if (durationCheck.skipped) {
+      diagnostics.push(createDiagnostic({
+        code: durationCheck.code || 'ffprobe_skipped',
+        stage: 'compose',
+        user_message: durationCheck.message || '已跳过导出时长校验。',
+        details: durationCheck,
+      }));
+    } else if (!durationCheck.success) {
+      diagnostics.push(createDiagnostic({
+        code: durationCheck.code || 'duration_mismatch',
+        stage: 'compose',
+        user_message: durationCheck.message || '导出视频时长校验失败。',
+        details: durationCheck,
+      }));
+      return {
+        success: false,
+        message: durationCheck.message || '导出视频时长校验失败。',
+        project: nextProject,
+        project_dir: resolvedProjectDir,
+        html_video_project_path: resolvedProjectDir,
+        diagnostics,
+      };
+    }
+  }
+
   addExport(nextProject, {
     format: 'mp4',
     path: path.relative(resolvedProjectDir, finalOutput).replace(/\\/g, '/'),
@@ -164,5 +288,11 @@ async function renderHtmlVideoProject({
 }
 
 module.exports = {
+  createProject,
+  materializeProject,
   renderHtmlVideoProject,
+  renderProject: renderHtmlVideoProject,
+  exportProject: renderHtmlVideoProject,
+  rerenderProject: renderHtmlVideoProject,
+  applyEditPatch: require('./editPatchService').applyEditPatch,
 };

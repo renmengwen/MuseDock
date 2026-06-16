@@ -12,6 +12,17 @@ function getFfmpegCommand(options = {}) {
   }
 }
 
+function getFfprobeCommand(options = {}) {
+  if (options.ffprobePath) return options.ffprobePath;
+  if (process.env.FFPROBE_PATH) return process.env.FFPROBE_PATH;
+  try {
+    const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
+    return path.join(path.dirname(ffmpegPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+  } catch {
+    return process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+  }
+}
+
 function runCommand(command, args, options = {}) {
   return new Promise(resolve => {
     let child;
@@ -28,6 +39,71 @@ function runCommand(command, args, options = {}) {
     child.on('error', error => resolve({ ok: false, code: null, error: error.message, stdout, stderr }));
     child.on('close', code => resolve({ ok: code === 0, code, stdout, stderr }));
   });
+}
+
+async function verifyDurationWithFfprobe({
+  videoPath,
+  expectedDurationSec,
+  toleranceSec = 1,
+  runCommand: runCommandImpl = runCommand,
+  ffprobePath,
+} = {}) {
+  const expected = Number(expectedDurationSec);
+  if (!videoPath || !Number.isFinite(expected) || expected <= 0) {
+    return { success: true, skipped: true, message: '未提供期望时长，跳过 ffprobe 时长校验。' };
+  }
+
+  const ffprobe = getFfprobeCommand({ ffprobePath });
+  const args = [
+    '-v', 'error',
+    '-show_entries', 'format=duration',
+    '-of', 'default=noprint_wrappers=1:nokey=1',
+    videoPath,
+  ];
+  const result = await runCommandImpl(ffprobe, args);
+  if (!result.ok) {
+    return {
+      success: true,
+      skipped: true,
+      code: 'ffprobe_unavailable',
+      message: `ffprobe 不可用，已跳过导出时长校验：${result.stderr || result.error || `ffprobe exited ${result.code}`}`,
+      args,
+    };
+  }
+
+  const actual = Number.parseFloat(String(result.stdout || '').trim());
+  if (!Number.isFinite(actual)) {
+    return {
+      success: false,
+      code: 'duration_probe_invalid',
+      message: 'ffprobe 未返回有效的视频时长。',
+      args,
+      stdout: result.stdout || '',
+    };
+  }
+
+  const diff = Math.abs(actual - expected);
+  if (diff > Number(toleranceSec || 1)) {
+    return {
+      success: false,
+      code: 'duration_mismatch',
+      message: `导出视频时长偏差过大：期望 ${expected.toFixed(2)} 秒，实际 ${actual.toFixed(2)} 秒。`,
+      expected_duration_sec: expected,
+      duration_sec: actual,
+      diff_sec: diff,
+      tolerance_sec: Number(toleranceSec || 1),
+      args,
+    };
+  }
+
+  return {
+    success: true,
+    duration_sec: actual,
+    expected_duration_sec: expected,
+    diff_sec: diff,
+    tolerance_sec: Number(toleranceSec || 1),
+    args,
+  };
 }
 
 function sameEncoding(frameMp4s) {
@@ -54,6 +130,48 @@ async function writeConcatList(frameMp4s, workDir) {
     .join('\n');
   await fs.writeFile(listPath, `${content}\n`, 'utf8');
   return listPath;
+}
+
+async function writeAudioConcatList(audioFiles, workDir) {
+  const audioDir = path.join(workDir, 'audio');
+  await fs.mkdir(audioDir, { recursive: true });
+  const listPath = path.join(audioDir, 'concat.txt');
+  const content = audioFiles
+    .map(item => `file '${escapeConcatPath(item.path || item)}'`)
+    .join('\n');
+  await fs.writeFile(listPath, `${content}\n`, 'utf8');
+  return listPath;
+}
+
+async function concatAudioWithFfmpeg(audioFiles, outputPath, workDir, opts = {}) {
+  const files = Array.isArray(audioFiles) ? audioFiles : [];
+  if (!files.length) {
+    return { success: false, message: '没有可拼接的旁白音频。' };
+  }
+  if (files.length === 1) {
+    return { success: true, skipped: true, output_path: files[0].path || files[0], message: '只有一段旁白音频，跳过拼接。' };
+  }
+  const runCommandImpl = opts.runCommand || runCommand;
+  const ffmpeg = getFfmpegCommand(opts);
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  const listPath = await writeAudioConcatList(files, workDir);
+  const args = [
+    '-y',
+    '-f', 'concat',
+    '-safe', '0',
+    '-i', listPath,
+    '-c', 'copy',
+    outputPath,
+  ];
+  const result = await runCommandImpl(ffmpeg, args);
+  if (!result.ok) {
+    return {
+      success: false,
+      message: `旁白音频拼接失败：${result.stderr || result.error || `ffmpeg exited ${result.code}`}`,
+      stderr: result.stderr || '',
+    };
+  }
+  return { success: true, output_path: outputPath, args };
 }
 
 async function concatFramesWithFfmpeg(frameMp4s, outputPath, workDir, opts = {}) {
@@ -187,7 +305,10 @@ async function muxAudioWithFfmpeg({
 
 module.exports = {
   concatFramesWithFfmpeg,
+  concatAudioWithFfmpeg,
   muxAudioWithFfmpeg,
+  verifyDurationWithFfprobe,
   getFfmpegCommand,
+  getFfprobeCommand,
   escapeConcatPath,
 };

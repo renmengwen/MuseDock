@@ -14,6 +14,7 @@ const aiTextModel = require('./aiTextModel');
 const htmlVideoProjectStore = require('./creative-video/html-video/projectStore');
 const htmlVideoEditPatchService = require('./creative-video/html-video/editPatchService');
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
+const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
 const { createTemplateRegistry: createHtmlVideoTemplateRegistry } = require('./creative-video/html-video/templateRegistry');
 
 const DEFAULT_ROOT = path.join(__dirname, '../../data/creative-workflows');
@@ -1187,6 +1188,66 @@ async function patchCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, o
   };
 }
 
+async function patchHtmlVideoProjectInputs(workflowId, payload = {}, options = {}) {
+  const patch = payload.template_inputs_patch || payload.patch || payload.inputs || payload.template_inputs || {};
+  return patchCreativeWorkflowHtmlVideoProject(workflowId, {
+    type: 'template_inputs_patch',
+    patch,
+    summary: payload.summary || '模板字段已保存，需要重新渲染。',
+  }, options);
+}
+
+async function patchHtmlVideoProjectFrame(workflowId, frameId, payload = {}, options = {}) {
+  const patch = payload.frame_inputs_patch || payload.patch || payload.inputs || {};
+  const type = payload.duration_sec != null || payload.duration != null
+    ? 'duration_patch'
+    : (payload.type || 'frame_inputs_patch');
+  return patchCreativeWorkflowHtmlVideoProject(workflowId, {
+    type,
+    frame_id: frameId,
+    patch,
+    duration_sec: payload.duration_sec,
+    duration: payload.duration,
+    summary: payload.summary || '帧字段已保存，需要重新渲染。',
+  }, options);
+}
+
+async function editHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const workflow = options.htmlVideoWorkflow || htmlVideoWorkflow;
+  const result = await workflow.applyEdit({
+    workflowId,
+    rootDir,
+    projectDir,
+    project,
+    payload,
+    services: {
+      aiTextModel: options.aiTextModel || aiTextModel,
+      ...(options.htmlVideoServices || {}),
+    },
+  });
+  if (!result.success) {
+    return {
+      success: false,
+      code: result.code || 'EDIT_FAILED',
+      workflow_id: workflowId,
+      message: result.message || 'html-video 编辑失败。',
+    };
+  }
+  return {
+    success: true,
+    workflow_id: workflowId,
+    html_video_project: result.project,
+    html_video_project_path: projectDir,
+    revision: result.revision,
+    requires_tts: result.requires_tts,
+    requires_render: result.requires_render,
+    message: result.message || 'html-video 工程已保存。',
+  };
+}
+
 async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
@@ -1215,6 +1276,27 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
     message: result.message || (result.success ? 'html-video 工程已渲染。' : 'html-video 工程渲染失败。'),
   };
 }
+
+async function renderHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  return renderCreativeWorkflowHtmlVideoProject(workflowId, payload, options);
+}
+
+async function exportHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  return renderCreativeWorkflowHtmlVideoProject(workflowId, payload, options);
+}
+
+async function listHtmlVideoProjectExports(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  return {
+    success: true,
+    workflow_id: workflowId,
+    html_video_project_path: projectDir,
+    exports: Array.isArray(project.exports) ? project.exports : [],
+  };
+}
+
 
 async function getCreativeWorkflowSceneSpec(workflowId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
@@ -1482,6 +1564,12 @@ module.exports = {
   getCreativeWorkflowHtmlVideoProject,
   patchCreativeWorkflowHtmlVideoProject,
   renderCreativeWorkflowHtmlVideoProject,
+  patchHtmlVideoProjectInputs,
+  patchHtmlVideoProjectFrame,
+  editHtmlVideoProject,
+  renderHtmlVideoProject,
+  exportHtmlVideoProject,
+  listHtmlVideoProjectExports,
   patchCreativeWorkflowVideoSpec,
   getCreativeWorkflowSceneSpec,
   patchCreativeWorkflowSceneSpec,

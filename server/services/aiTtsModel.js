@@ -148,9 +148,11 @@ async function callTtsModel(options = {}) {
 
   let payload = null;
   let response = null;
+  let lastAttempt = 0;
   const requestTimeoutMs = normalizeInteger(options.requestTimeoutMs ?? DEFAULT_TTS_REQUEST_TIMEOUT_MS, DEFAULT_TTS_REQUEST_TIMEOUT_MS, 5000, 300000);
   try {
     for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+      lastAttempt = attempt;
       response = await enqueueTtsRequest(() => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
@@ -209,7 +211,7 @@ async function callTtsModel(options = {}) {
         url: `${runtime.baseUrl}/chat/completions`,
         model: runtime.modelId,
         textLength: text.length,
-        attempt: attempt + 1,
+        attempt: lastAttempt + 1,
         maxRetries: retryLimit,
         error: detail,
       });

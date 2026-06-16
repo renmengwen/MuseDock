@@ -69,7 +69,12 @@ async function renderFrame(frame = {}, options = {}) {
       success: false,
       frame_id: frame.id || null,
       output_path: outputPath,
-      diagnostics: [error.message],
+      diagnostics: [{
+        code: error.code || 'render_failed',
+        stage: 'render',
+        user_message: state.message,
+        details: { message: error.message },
+      }],
       message: state.message,
       code: error.code || 'render_failed',
     };

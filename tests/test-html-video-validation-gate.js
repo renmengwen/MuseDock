@@ -123,6 +123,7 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   ]) {
     assert.ok(codes.includes(code), `缺少诊断 ${code}`);
   }
+  assert.equal(result.diagnostics.find(item => item.code === 'license_not_allowed').fallback_allowed, false);
 
   for (const diagnostic of result.diagnostics) {
     assert.equal(typeof diagnostic.code, 'string');
@@ -146,6 +147,14 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   });
   assert.equal(pass.ok, true);
   assert.deepEqual(pass.diagnostics, []);
+
+  const { normalizeDiagnostics } = require('../server/services/creative-video/html-video/diagnostics');
+  const normalized = normalizeDiagnostics(['Playwright browser executable not found'], { stage: 'render' });
+  assert.match(normalized[0].user_message, /html-video|失败|错误|未配置/);
+  assert.doesNotMatch(normalized[0].user_message, /^Playwright browser executable not found$/);
+  const objectDiagnostic = normalizeDiagnostics([{ code: 'playwright_not_configured', message: 'Playwright browser executable not found' }]);
+  assert.equal(objectDiagnostic[0].user_message, 'Playwright Chromium 未配置，无法渲染 html-video。');
+  assert.equal(objectDiagnostic[0].details.message, 'Playwright browser executable not found');
 
   console.log('html-video validation gate tests passed');
 })();

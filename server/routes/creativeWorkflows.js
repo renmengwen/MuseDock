@@ -161,6 +161,155 @@ router.get('/:workflow_id/html-video-project', async (req, res) => {
   }
 });
 
+router.patch('/:workflow_id/html-video-project/inputs', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+
+  try {
+    const service = getService(req);
+    const result = await service.patchHtmlVideoProjectInputs(workflowId, req.body || {});
+    if (!result || result.success === false) {
+      const message = getMessage(result, '保存模板字段失败。');
+      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, message });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `保存模板字段失败：${error.message}`,
+    });
+  }
+});
+
+router.patch('/:workflow_id/html-video-project/frames/:frame_id', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+  const frameId = String(req.params.frame_id || '').trim();
+  if (!frameId) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, message: '帧 ID 无效。' });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.patchHtmlVideoProjectFrame(workflowId, frameId, req.body || {});
+    if (!result || result.success === false) {
+      const message = getMessage(result, '保存帧字段失败。');
+      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, frame_id: frameId, message });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      frame_id: frameId,
+      message: `保存帧字段失败：${error.message}`,
+    });
+  }
+});
+
+router.post('/:workflow_id/html-video-project/edit', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+
+  try {
+    const service = getService(req);
+    const result = await service.editHtmlVideoProject(workflowId, req.body || {});
+    if (!result || result.success === false) {
+      const message = getMessage(result, '编辑失败。');
+      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, message });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `编辑失败：${error.message}`,
+    });
+  }
+});
+
+router.post('/:workflow_id/html-video-project/render', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+
+  try {
+    const service = getService(req);
+    const result = await service.renderHtmlVideoProject(workflowId, req.body || {});
+    if (!result || result.success === false) {
+      const message = getMessage(result, '渲染单帧预览失败。');
+      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, message });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `渲染单帧预览失败：${error.message}`,
+    });
+  }
+});
+
+router.post('/:workflow_id/html-video-project/export', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+
+  try {
+    const service = getService(req);
+    const result = await service.exportHtmlVideoProject(workflowId, req.body || {});
+    if (!result || result.success === false) {
+      const message = getMessage(result, '导出成片失败。');
+      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, message });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `导出成片失败：${error.message}`,
+    });
+  }
+});
+
+router.get('/:workflow_id/html-video-project/exports', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+
+  try {
+    const service = getService(req);
+    const result = await service.listHtmlVideoProjectExports(workflowId);
+    if (!result || result.success === false) {
+      const message = getMessage(result, '读取导出记录失败。');
+      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, message });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `读取导出记录失败：${error.message}`,
+    });
+  }
+});
+
 router.patch('/:workflow_id/html-video-project', async (req, res) => {
   const validation = validateWorkflowId(req.params.workflow_id);
   if (!validation.success) {
@@ -238,6 +387,12 @@ function sendHtmlVideoReserved(req, res) {
   });
 }
 
+router.patch('/:workflow_id/html-video-project/timeline', sendHtmlVideoReserved);
+router.patch('/:workflow_id/html-video-project/frames/:frame_id/html', sendHtmlVideoReserved);
+router.patch('/:workflow_id/html-video-project/frames/:frame_id/elements/:element_id', sendHtmlVideoReserved);
+router.patch('/:workflow_id/html-video-project/frames/:frame_id/transition', sendHtmlVideoReserved);
+router.post('/:workflow_id/html-video-project/frames/:frame_id/enhance', sendHtmlVideoReserved);
+router.post('/:workflow_id/html-video-project/frames/:frame_id/unenhance', sendHtmlVideoReserved);
 router.all('/:workflow_id/html-video-project/:feature(timeline|html|elements|transition|enhance|unenhance)', sendHtmlVideoReserved);
 
 router.get('/:workflow_id', async (req, res) => {

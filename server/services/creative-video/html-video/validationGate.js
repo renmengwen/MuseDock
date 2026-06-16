@@ -68,7 +68,7 @@ function validateTemplate({
       template_id: templateId,
       license: manifest.license || {},
       ref,
-    });
+    }, false);
   }
 
   const inputValidation = validateTemplateInputs(objectOrEmpty(inputs), manifest);

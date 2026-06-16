@@ -97,7 +97,9 @@ function migrateOldConfig(old) {
   if (old.providers) return normalizeStoredConfig(old);
   if (!old.models || typeof old.models !== 'object') return normalizeStoredConfig();
 
-  const firstProvider = { id: 'default', name: '默认', apiKey: '', baseUrl: '', models: {} };
+  const firstModel = Object.values(old.models).find(model => model && typeof model === 'object') || {};
+  const providerId = normalizeString(firstModel.provider) || 'default';
+  const firstProvider = { id: providerId, name: providerId === 'default' ? '默认' : providerId, apiKey: '', baseUrl: '', models: {} };
   const active = {};
 
   for (const type of MODEL_TYPES) {
@@ -115,7 +117,7 @@ function migrateOldConfig(old) {
         firstProvider.models[type].ttsQueueIntervalMs = normalizeInteger(m.ttsQueueIntervalMs, 1800, 0, 10000);
       }
       if (m.enabled && m.modelId) {
-        active[type] = 'default/' + type;
+        active[type] = `${providerId}/${type}`;
       }
     }
   }
@@ -236,7 +238,9 @@ async function getPublicConfig(options = {}) {
 
 async function saveConfig(input, options = {}) {
   const previous = await readStoredConfig(options);
-  const stored = normalizeStoredConfig(input, previous);
+  const stored = input && input.providers
+    ? normalizeStoredConfig(input, previous)
+    : migrateOldConfig(input);
   await writeStoredConfig(stored, options);
   return toPublicConfig(stored);
 }

@@ -1,6 +1,6 @@
-# html-video 可编辑生产链路 Implementation Plan
+﻿# html-video 可编辑生产链路 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 将当前一键创意视频从 “AI 直接改完整 HTML + legacy 渲染” 升级为 “AI 输出结构化 JSON + html-video 行为移植 + 可编辑工程 + Playwright/Chromium/ffmpeg 导出” 的生产链路。
 
@@ -294,11 +294,11 @@
 
 **具体步骤**
 
-- [ ] 写 `contentGraph.validate()` 失败测试：空 graph、重复 node id、unknown edge from/to、自环、invalid kind、dependency cycle。
-- [ ] 写 `contentGraph.topoSort()` 行为测试：单节点、多 dependency、sequence tie-break、原始顺序平局、dependency cycle throw。
-- [ ] 写 `totalDurationSec()` 测试：缺省 duration 使用 `3` 秒，按 topoSort 顺序累加。
-- [ ] 参照设计文档“移植验证策略”，确保算法级对齐、行为测试迁移、渲染/ffmpeg 相关策略在后续任务中分别落地；本任务只实现 contentGraph 的算法级和行为测试迁移部分。
-- [ ] 实现 `contentGraph.js`，导出：
+- [x] 写 `contentGraph.validate()` 失败测试：空 graph、重复 node id、unknown edge from/to、自环、invalid kind、dependency cycle。
+- [x] 写 `contentGraph.topoSort()` 行为测试：单节点、多 dependency、sequence tie-break、原始顺序平局、dependency cycle throw。
+- [x] 写 `totalDurationSec()` 测试：缺省 duration 使用 `3` 秒，按 topoSort 顺序累加。
+- [x] 参照设计文档“移植验证策略”，确保算法级对齐、行为测试迁移、渲染/ffmpeg 相关策略在后续任务中分别落地；本任务只实现 contentGraph 的算法级和行为测试迁移部分。
+- [x] 实现 `contentGraph.js`，导出：
 
 ```js
 module.exports = {
@@ -310,10 +310,10 @@ module.exports = {
 };
 ```
 
-- [ ] 保留错误 code 与 html-video 语义一致：`duplicate-node-id`、`edge-from-unknown-node`、`edge-to-unknown-node`、`self-edge`、`cycle`、`empty-graph`、`invalid-kind`。
-- [ ] 在 `topoSort()` 注释中标明：dependency edge 硬约束，sequence edge 只影响 ready 队列，原始 node 顺序保证稳定输出。
-- [ ] 写 `sceneSpecMapper` 测试：`scene_spec.scenes[]` 生成线性 sequence graph，保留 order/duration/kind/narration/captions/visual_text。
-- [ ] 实现 `sceneSpecMapper.mapSceneSpecToContentGraph(sceneSpec)`：
+- [x] 保留错误 code 与 html-video 语义一致：`duplicate-node-id`、`edge-from-unknown-node`、`edge-to-unknown-node`、`self-edge`、`cycle`、`empty-graph`、`invalid-kind`。
+- [x] 在 `topoSort()` 注释中标明：dependency edge 硬约束，sequence edge 只影响 ready 队列，原始 node 顺序保证稳定输出。
+- [x] 写 `sceneSpecMapper` 测试：`scene_spec.scenes[]` 生成线性 sequence graph，保留 order/duration/kind/narration/captions/visual_text。
+- [x] 实现 `sceneSpecMapper.mapSceneSpecToContentGraph(sceneSpec)`：
 
 ```js
 {
@@ -325,8 +325,8 @@ module.exports = {
 }
 ```
 
-- [ ] 实现 `sceneSpecMapper.buildFramesFromGraph({ sceneSpec, contentGraph, templateId, templateInputs })`，首版一 scene 一 frame，`engine: 'hyperframes-playwright'`。
-- [ ] frame 预留字段必须包含：`transition_in/out`、`trim`、`speed`、`loop`、`enhancement`。
+- [x] 实现 `sceneSpecMapper.buildFramesFromGraph({ sceneSpec, contentGraph, templateId, templateInputs })`，首版一 scene 一 frame，`engine: 'hyperframes-playwright'`。
+- [x] frame 预留字段必须包含：`transition_in/out`、`trim`、`speed`、`loop`、`enhancement`。
 
 **测试/验证方式**
 
@@ -373,20 +373,20 @@ module.exports = {
 
 **具体步骤**
 
-- [ ] 添加 YAML parser 依赖，例如 `yaml`，用于标准解析 `template.html-video.yaml`。
-- [ ] 创建 `tests/fixtures/html-video-templates/` 目录。
-- [ ] 在 `tests/fixtures/html-video-templates/` 下创建 fixture 模板目录：
+- [x] 添加 YAML parser 依赖，例如 `yaml`，用于标准解析 `template.html-video.yaml`。
+- [x] 创建 `tests/fixtures/html-video-templates/` 目录。
+- [x] 在 `tests/fixtures/html-video-templates/` 下创建 fixture 模板目录：
   - `glitch_title/`
   - `bold_signal/`
   - `remotion_template/`
   - `non_commercial_template/`
   - `missing_source_entry_template/`
-- [ ] 写 manifest fixture：一个 `engine: hyperframes` + `source_entry: source/index.html` + `commercial_use: true` 的合规模板。
-- [ ] 写 fixture：一个 `engine: remotion` + `source_entry: source/entry.tsx`，默认不得进入 AI 候选。
-- [ ] 写 fixture：一个 `license.commercial_use: false`，默认不得进入 AI 候选。
-- [ ] 写 fixture：一个 `source_entry` 指向不存在文件，registry 返回 diagnostics。
-- [ ] 实现 `loadTemplateManifest(filePath)`，输出包含 `__dir` 的 manifest。
-- [ ] 实现 `normalizeTemplateManifest(raw, dir)`，固定字段：
+- [x] 写 manifest fixture：一个 `engine: hyperframes` + `source_entry: source/index.html` + `commercial_use: true` 的合规模板。
+- [x] 写 fixture：一个 `engine: remotion` + `source_entry: source/entry.tsx`，默认不得进入 AI 候选。
+- [x] 写 fixture：一个 `license.commercial_use: false`，默认不得进入 AI 候选。
+- [x] 写 fixture：一个 `source_entry` 指向不存在文件，registry 返回 diagnostics。
+- [x] 实现 `loadTemplateManifest(filePath)`，输出包含 `__dir` 的 manifest。
+- [x] 实现 `normalizeTemplateManifest(raw, dir)`，固定字段：
 
 ```js
 {
@@ -404,9 +404,9 @@ module.exports = {
 }
 ```
 
-- [ ] 实现 `validateTemplateCompatibility(template, target)`，覆盖 aspect、duration、engine、source_entry、license。
-- [ ] 实现 `buildCompactIndex({ aspectRatio, durationSec, engines, licenseAllow, commercialOnly })`，只包含 AI 选择需要字段，不包含被 license 策略屏蔽的模板。
-- [ ] 实现 engine 映射函数：
+- [x] 实现 `validateTemplateCompatibility(template, target)`，覆盖 aspect、duration、engine、source_entry、license。
+- [x] 实现 `buildCompactIndex({ aspectRatio, durationSec, engines, licenseAllow, commercialOnly })`，只包含 AI 选择需要字段，不包含被 license 策略屏蔽的模板。
+- [x] 实现 engine 映射函数：
 
 ```js
 function mapTemplateEngineToProjectEngine(engine) {
@@ -416,12 +416,12 @@ function mapTemplateEngineToProjectEngine(engine) {
 }
 ```
 
-- [ ] production-ready 默认规则：
+- [x] production-ready 默认规则：
   - `engine === 'hyperframes'`
   - `source_entry` 后缀为 `.html`
   - `license.commercial_use === true`
   - `source_entry` 文件存在且路径位于模板目录内
-- [ ] 保留 legacy `server/services/creative-video/templateRegistry.js`，不在本阶段删除。
+- [x] 保留 legacy `server/services/creative-video/templateRegistry.js`，不在本阶段删除。
 
 **测试/验证方式**
 
@@ -456,9 +456,9 @@ function mapTemplateEngineToProjectEngine(engine) {
 
 **具体步骤**
 
-- [ ] 写 schema normalize 测试：缺省 project 字段补齐，`schema_version` 固定为 `1`。
-- [ ] 写 schema validate 测试：`assets[].path` 禁止绝对路径和 `..`；`timeline.tracks[].items[].kind` 首版只接受 `frame`。
-- [ ] 实现 `createEmptyProject(input)`，字段包含：
+- [x] 写 schema normalize 测试：缺省 project 字段补齐，`schema_version` 固定为 `1`。
+- [x] 写 schema validate 测试：`assets[].path` 禁止绝对路径和 `..`；`timeline.tracks[].items[].kind` 首版只接受 `frame`。
+- [x] 实现 `createEmptyProject(input)`，字段包含：
   - `project_id`
   - `workflow_id`
   - `run_id`
@@ -474,7 +474,7 @@ function mapTemplateEngineToProjectEngine(engine) {
   - `revisions`
   - `exports`
   - `status`
-- [ ] `frames[]` 首版字段包含：
+- [x] `frames[]` 首版字段包含：
   - `id`
   - `scene_id`
   - `graph_node_id`
@@ -490,10 +490,10 @@ function mapTemplateEngineToProjectEngine(engine) {
   - `speed`
   - `loop`
   - `enhancement`
-- [ ] `timeline` 默认三轨：`main` video、`voice` audio、`music` audio；首版导出按 `frames[].order + duration_sec` 消费。
-- [ ] `overrides.html.enabled` 默认 `false`；普通用户首版不开放源码编辑。
-- [ ] `enhancement.enabled` 默认 `false`；Remotion native 只保留字段。
-- [ ] 实现 `projectStore.createProjectDir({ rootDir, workflowId, runId })`，目录建议：
+- [x] `timeline` 默认三轨：`main` video、`voice` audio、`music` audio；首版导出按 `frames[].order + duration_sec` 消费。
+- [x] `overrides.html.enabled` 默认 `false`；普通用户首版不开放源码编辑。
+- [x] `enhancement.enabled` 默认 `false`；Remotion native 只保留字段。
+- [x] 实现 `projectStore.createProjectDir({ rootDir, workflowId, runId })`，目录建议：
 
 ```text
 {rootDir}/{workflowId}/agent_runs/{runId}-html-video/
@@ -506,10 +506,10 @@ function mapTemplateEngineToProjectEngine(engine) {
   tts/
 ```
 
-- [ ] 实现 `saveProject()` 使用临时文件 + rename，避免半写入。
-- [ ] 实现 `addRevision(project, change)`，revision 不覆盖历史。
-- [ ] 实现 `addExport(project, exportInfo)`，新 export 路径唯一，同时可更新 latest alias。
-- [ ] 实现 `resolveProjectPath(projectDir, relativePath)`，禁止逃逸工程目录。
+- [x] 实现 `saveProject()` 使用临时文件 + rename，避免半写入。
+- [x] 实现 `addRevision(project, change)`，revision 不覆盖历史。
+- [x] 实现 `addExport(project, exportInfo)`，新 export 路径唯一，同时可更新 latest alias。
+- [x] 实现 `resolveProjectPath(projectDir, relativePath)`，禁止逃逸工程目录。
 
 **测试/验证方式**
 
@@ -544,9 +544,9 @@ function mapTemplateEngineToProjectEngine(engine) {
 
 **具体步骤**
 
-- [ ] 写 selector agent 测试：AI 返回合法 JSON 且 `template_id` 存在时成功。
-- [ ] 写 selector agent 测试：AI 返回 Markdown、完整 HTML、未知 template_id、被过滤 template_id 时失败并返回中文 diagnostics。
-- [ ] 实现 `buildTemplateSelectionPrompt({ sceneSpec, compactIndex, target })`，明确要求只返回 JSON：
+- [x] 写 selector agent 测试：AI 返回合法 JSON 且 `template_id` 存在时成功。
+- [x] 写 selector agent 测试：AI 返回 Markdown、完整 HTML、未知 template_id、被过滤 template_id 时失败并返回中文 diagnostics。
+- [x] 实现 `buildTemplateSelectionPrompt({ sceneSpec, compactIndex, target })`，明确要求只返回 JSON：
 
 ```json
 {
@@ -556,11 +556,11 @@ function mapTemplateEngineToProjectEngine(engine) {
 }
 ```
 
-- [ ] 写 input agent 测试：根据 `inputs.schema` 填字段，缺失 required、类型错误、超长、枚举错误会失败。
-- [ ] 实现 `buildTemplateInputPrompt({ sceneSpec, template, creativeContext })`，明确禁止输出 HTML、CSS、JS。
-- [ ] 实现 `parseJsonOnlyResponse(text)`：提取并校验 JSON object；如果出现 `<html`、`<!doctype`、`<script`，直接拒绝。
-- [ ] 接入 JSON Schema validator。若不新增大型依赖，可先实现 schema 子集校验：`required`、`type`、`enum`、`minLength`、`maxLength`、`minimum`、`maximum`、`items`。
-- [ ] 在 `creativeSpecAgent.js` 保留旧 prompt builder，但标注为 legacy fallback；新链路调用新 agent。
+- [x] 写 input agent 测试：根据 `inputs.schema` 填字段，缺失 required、类型错误、超长、枚举错误会失败。
+- [x] 实现 `buildTemplateInputPrompt({ sceneSpec, template, creativeContext })`，明确禁止输出 HTML、CSS、JS。
+- [x] 实现 `parseJsonOnlyResponse(text)`：提取并校验 JSON object；如果出现 `<html`、`<!doctype`、`<script`，直接拒绝。
+- [x] 接入 JSON Schema validator。若不新增大型依赖，可先实现 schema 子集校验：`required`、`type`、`enum`、`minLength`、`maxLength`、`minimum`、`maximum`、`items`。
+- [x] 在 `creativeSpecAgent.js` 保留旧 prompt builder，但标注为 legacy fallback；新链路调用新 agent。
 
 **测试/验证方式**
 
@@ -598,7 +598,7 @@ function mapTemplateEngineToProjectEngine(engine) {
 
 **具体步骤**
 
-- [ ] 将 `glitch_title` 迁移为原生 html-video 模板目录结构：
+- [x] 将 `glitch_title` 迁移为原生 html-video 模板目录结构：
 
 ```text
 server/templates/glitch_title/
@@ -607,9 +607,9 @@ server/templates/glitch_title/
     index.html
 ```
 
-- [ ] 将 `bold_signal` 迁移为同样结构。
-- [ ] 旧 `source.html` 和 `manifest.yaml` 首版只作为迁移参考和 legacy fallback 输入保留，不进入 production registry；production registry 只扫描 `template.html-video.yaml` 与 `source/index.html`。
-- [ ] `template.html-video.yaml` 必须包含：
+- [x] 将 `bold_signal` 迁移为同样结构。
+- [x] 旧 `source.html` 和 `manifest.yaml` 首版只作为迁移参考和 legacy fallback 输入保留，不进入 production registry；production registry 只扫描 `template.html-video.yaml` 与 `source/index.html`。
+- [x] `template.html-video.yaml` 必须包含：
   - `engine: hyperframes`
   - `engine_version`
   - `source_entry: source/index.html`
@@ -621,22 +621,22 @@ server/templates/glitch_title/
   - `preview`
   - `license.commercial_use: true`
   - `assets_attribution`
-- [ ] 模板 HTML 保留默认文案，未注入 `window.__HV_VARS__` 时可独立预览；实现细节参照设计文档“变量模板改造指南”。
-- [ ] 模板读取：
+- [x] 模板 HTML 保留默认文案，未注入 `window.__HV_VARS__` 时可独立预览；实现细节参照设计文档“变量模板改造指南”。
+- [x] 模板读取：
 
 ```js
 const vars = window.__HV_VARS__ || {};
 const duration = Number(window.__HV_DURATION__ || vars.duration_sec || 6);
 ```
 
-- [ ] 模板写入文本使用 `textContent`，不使用 `innerHTML` 写 AI 文案。
-- [ ] 关键元素添加：
+- [x] 模板写入文本使用 `textContent`，不使用 `innerHTML` 写 AI 文案。
+- [x] 关键元素添加：
 
 ```html
 data-hv-element-id="headline" data-hv-bind="title"
 ```
 
-- [ ] materializer 支持变量注入式：
+- [x] materializer 支持变量注入式：
 
 ```html
 <script>
@@ -645,10 +645,10 @@ window.__HV_DURATION__ = 6;
 </script>
 ```
 
-- [ ] materializer 支持兼容替换式：`{{title}}`、`{{subtitle}}`、`{{duration_sec}}`。
-- [ ] materializer 输出 `frames/01-scene_01.html` 等相对路径，并更新 project `frames[].html_path`。
-- [ ] materializer 遇到 HTML override enabled 的 frame 时，不覆盖 override HTML，返回 `html_override_active` diagnostics。
-- [ ] materializer 对所有文本字段执行 HTML 转义或安全 JSON 注入，防止脚本注入。
+- [x] materializer 支持兼容替换式：`{{title}}`、`{{subtitle}}`、`{{duration_sec}}`。
+- [x] materializer 输出 `frames/01-scene_01.html` 等相对路径，并更新 project `frames[].html_path`。
+- [x] materializer 遇到 HTML override enabled 的 frame 时，不覆盖 override HTML，返回 `html_override_active` diagnostics。
+- [x] materializer 对所有文本字段执行 HTML 转义或安全 JSON 注入，防止脚本注入。
 
 **测试/验证方式**
 
@@ -686,11 +686,11 @@ window.__HV_DURATION__ = 6;
 
 **具体步骤**
 
-- [ ] 写 `prepareSourceHtml` 测试：无 `data-composition-src` 时返回原路径。
-- [ ] 写 `prepareSourceHtml` 测试：有 `data-composition-src` 时内联 composition HTML，注入 `window.__COMPOSITIONS__` 与 `window.__hvPlayAll()`。
-- [ ] 实现 prepared 临时文件 cleanup。
-- [ ] 参照设计文档“移植验证策略”的渲染时序对齐要求，确保 adapter 的代码注释和测试覆盖冻结动画、等待 stylesheet/fonts、释放动画、lead-in 裁剪、显式 duration 补齐等关键步骤。
-- [ ] 写 adapter 单元测试：mock Playwright 与 ffmpeg runner，验证 ffmpeg 参数包含：
+- [x] 写 `prepareSourceHtml` 测试：无 `data-composition-src` 时返回原路径。
+- [x] 写 `prepareSourceHtml` 测试：有 `data-composition-src` 时内联 composition HTML，注入 `window.__COMPOSITIONS__` 与 `window.__hvPlayAll()`。
+- [x] 实现 prepared 临时文件 cleanup。
+- [x] 参照设计文档“移植验证策略”的渲染时序对齐要求，确保 adapter 的代码注释和测试覆盖冻结动画、等待 stylesheet/fonts、释放动画、lead-in 裁剪、显式 duration 补齐等关键步骤。
+- [x] 写 adapter 单元测试：mock Playwright 与 ffmpeg runner，验证 ffmpeg 参数包含：
 
 ```text
 -c:v libx264
@@ -700,7 +700,7 @@ window.__HV_DURATION__ = 6;
 -movflags +faststart
 ```
 
-- [ ] adapter 实现关键步骤，并用注释标明对应 html-video 源码段：
+- [x] adapter 实现关键步骤，并用注释标明对应 html-video 源码段：
   - launch chromium headless
   - `recordVideo`
   - `page.addInitScript()` 冻结 CSS/SMIL 动画
@@ -716,13 +716,13 @@ window.__HV_DURATION__ = 6;
   - ffmpeg `-ss` 裁剪 dead lead-in
   - 显式 duration 使用 `tpad=stop_mode=clone`
   - `-t` 精准裁剪
-- [ ] `environmentDoctor` 检测：
+- [x] `environmentDoctor` 检测：
   - Playwright 是否可 import
   - Chromium 是否可 launch
   - ffmpeg 可执行路径
   - 缺失时返回 `environment_not_configured` diagnostics。
-- [ ] adapter 错误消息必须中文，例如：`Playwright Chromium 未配置，无法渲染 html-video 模板。`
-- [ ] frameRenderer 接收 frame，调用 adapter 输出 `frames/01.mp4`，返回 meta：duration、fps、resolution、file size。
+- [x] adapter 错误消息必须中文，例如：`Playwright Chromium 未配置，无法渲染 html-video 模板。`
+- [x] frameRenderer 接收 frame，调用 adapter 输出 `frames/01.mp4`，返回 meta：duration、fps、resolution、file size。
 
 **测试/验证方式**
 
@@ -756,34 +756,34 @@ window.__HV_DURATION__ = 6;
 
 **具体步骤**
 
-- [ ] 参照设计文档“移植验证策略”的 ffmpeg 行为对齐要求，golden command 测试必须覆盖 concat demuxer、concat filter 和音频 mux 参数，避免未来修改 PTS、编码参数或 `-shortest` 行为。
-- [ ] 写 golden command 测试：单 engine 多帧使用 concat demuxer：
+- [x] 参照设计文档“移植验证策略”的 ffmpeg 行为对齐要求，golden command 测试必须覆盖 concat demuxer、concat filter 和音频 mux 参数，避免未来修改 PTS、编码参数或 `-shortest` 行为。
+- [x] 写 golden command 测试：单 engine 多帧使用 concat demuxer：
 
 ```text
 ffmpeg -y -f concat -safe 0 -i frames/concat.txt -c copy exports/output.mp4
 ```
 
-- [ ] 写 golden command 测试：混合 engine 或编码不一致使用 concat filter：
+- [x] 写 golden command 测试：混合 engine 或编码不一致使用 concat filter：
 
 ```text
 ffmpeg -y -i 01.mp4 -i 02.mp4 -filter_complex [0:v][1:v]concat=n=2:v=1:a=0[v] -map [v] -c:v libx264 -pix_fmt yuv420p -r 30 -movflags +faststart output.mp4
 ```
 
-- [ ] 写 golden command 测试：音频 mux 使用 video copy + AAC + `-shortest`：
+- [x] 写 golden command 测试：音频 mux 使用 video copy + AAC + `-shortest`：
 
 ```text
 -map 0:v -map [aout] -c:v copy -c:a aac -b:a 192k -shortest
 ```
 
-- [ ] 实现 `concatFramesWithFfmpeg(frameMp4s, outputPath, workDir, opts)`。
-- [ ] 实现 `muxAudioWithFfmpeg({ videoPath, outputPath, musicPath, narrationPath, musicVolumeDb, narrationVolumeDb, fadeInSec, fadeOutSec, videoDurationSec })`。
-- [ ] 实现 Windows 路径写入 concat list 的引号转义，确保 ffmpeg 可读。
-- [ ] projectOrchestrator export 阶段：
+- [x] 实现 `concatFramesWithFfmpeg(frameMp4s, outputPath, workDir, opts)`。
+- [x] 实现 `muxAudioWithFfmpeg({ videoPath, outputPath, musicPath, narrationPath, musicVolumeDb, narrationVolumeDb, fadeInSec, fadeOutSec, videoDurationSec })`。
+- [x] 实现 Windows 路径写入 concat list 的引号转义，确保 ffmpeg 可读。
+- [x] projectOrchestrator export 阶段：
   - 按 `frames[].order` 渲染单帧。
   - 根据 engine/encoding 判断 concat 策略。
   - concat 后复用当前 TTS manifest 或 project.audio.narration_path mux。
   - `exports/output-YYYY-MM-DD_HH-mm-ss.mp4` 不覆盖旧文件。
-- [ ] ffprobe 校验时长，误差超过阈值返回 diagnostics。
+- [x] ffprobe 校验时长，误差超过阈值返回 diagnostics。
 
 **测试/验证方式**
 
@@ -819,13 +819,13 @@ ffmpeg -y -i 01.mp4 -i 02.mp4 -filter_complex [0:v][1:v]concat=n=2:v=1:a=0[v] -m
 
 **具体步骤**
 
-- [ ] 新增 mock `scene_spec`，只包含一个 `scene_01`，duration 为 4-6 秒，文案为中文。
-- [ ] 新增 mock `template_inputs`，字段完全符合 `glitch_title` 的 `inputs.schema`。
-- [ ] 创建临时 projectDir，并通过 `projectStore` 写入 `HtmlVideoProject`。
-- [ ] 调用 `materializer` 生成 `frames/01-scene_01.html`。
-- [ ] 调用 `hyperframesPlaywrightAdapter` 渲染单帧 MP4。
-- [ ] 用 ffprobe 或现有 video probe 检查 MP4 存在、时长大于 0、分辨率符合模板 output。
-- [ ] 该测试必须和真实 Playwright/ffmpeg 一样受环境变量保护：
+- [x] 新增 mock `scene_spec`，只包含一个 `scene_01`，duration 为 4-6 秒，文案为中文。
+- [x] 新增 mock `template_inputs`，字段完全符合 `glitch_title` 的 `inputs.schema`。
+- [x] 创建临时 projectDir，并通过 `projectStore` 写入 `HtmlVideoProject`。
+- [x] 调用 `materializer` 生成 `frames/01-scene_01.html`。
+- [x] 调用 `hyperframesPlaywrightAdapter` 渲染单帧 MP4。
+- [x] 用 ffprobe 或现有 video probe 检查 MP4 存在、时长大于 0、分辨率符合模板 output。
+- [x] 该测试必须和真实 Playwright/ffmpeg 一样受环境变量保护：
 
 ```js
 if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
@@ -866,7 +866,7 @@ if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
 
 **具体步骤**
 
-- [ ] 实现 diagnostics 工厂：
+- [x] 实现 diagnostics 工厂：
 
 ```js
 createDiagnostic({
@@ -878,7 +878,7 @@ createDiagnostic({
 })
 ```
 
-- [ ] 所有 diagnostics 输出字段统一为：
+- [x] 所有 diagnostics 输出字段统一为：
 
 ```json
 {
@@ -890,7 +890,7 @@ createDiagnostic({
 }
 ```
 
-- [ ] validationGate 增加检查：
+- [x] validationGate 增加检查：
   - `template_missing`
   - `unsupported_engine`
   - `source_entry_not_html`
@@ -901,8 +901,8 @@ createDiagnostic({
   - `playwright_not_configured`
   - `ffmpeg_not_configured`
   - `html_override_active`
-- [ ] `timeline.tracks[].items[].kind !== 'frame'` 首版返回 `timeline_item_kind_unsupported`，不静默忽略。
-- [ ] visual QA 扩展：
+- [x] `timeline.tracks[].items[].kind !== 'frame'` 首版返回 `timeline_item_kind_unsupported`，不静默忽略。
+- [x] visual QA 扩展：
   - 分辨率与 project output 不一致。
   - ffprobe 时长偏差。
   - 抽帧近白/近黑/低信息占比。
@@ -910,7 +910,7 @@ createDiagnostic({
   - 主体/文本有效像素占比过低，疑似空画面或样式未加载。
   - 动画未运行：连续抽帧差异过低。
   - 字体/CSS 失效风险：adapter diagnostics 中有 stylesheet/font timeout。
-- [ ] 所有 QA 失败 message 使用中文。
+- [x] 所有 QA 失败 message 使用中文。
 
 **测试/验证方式**
 
@@ -946,24 +946,24 @@ createDiagnostic({
 
 **具体步骤**
 
-- [ ] projectOrchestrator 实现：
+- [x] projectOrchestrator 实现：
   - `createProject()`
   - `materializeProject()`
   - `renderProject()`
   - `exportProject()`
   - `rerenderProject()`
   - `applyEditPatch()`
-- [ ] projectOrchestrator 只做工程生命周期编排，具体执行委托给职责模块：
+- [x] projectOrchestrator 只做工程生命周期编排，具体执行委托给职责模块：
   - `materializer.js`：负责 HTML/frame HTML 物化。
   - `frameRenderer.js` + `hyperframesPlaywrightAdapter.js`：负责单帧 render，Playwright 细节只在 adapter 中。
   - `ffmpegComposer.js`：负责多帧 concat 和音频 mux。
   - `editPatchService.js`：负责 patch 校验、应用和 revision 标记。
-- [ ] htmlVideoWorkflow 实现：
+- [x] htmlVideoWorkflow 实现：
   - `generateProject({ workflowId, runId, creativeContext, sceneSpec, target, rootDir, services })`
   - `renderOrExport({ projectId, workflowId, rootDir, services })`
   - `applyEdit({ workflowId, payload, rootDir, services })`
   - `rerender({ workflowId, payload, rootDir, services })`
-- [ ] `htmlVideoWorkflow.generateProject()` 顺序：
+- [x] `htmlVideoWorkflow.generateProject()` 顺序：
 
 ```text
 scene_spec
@@ -977,7 +977,7 @@ scene_spec
   -> materializer.materializeProject()
 ```
 
-- [ ] `workflowFacade.generateCreativeVideoProject()` 顺序改为：
+- [x] `workflowFacade.generateCreativeVideoProject()` 顺序改为：
 
 ```text
 requestSceneSpec()
@@ -988,12 +988,12 @@ requestSceneSpec()
   -> visualQaService.inspectRenderedVideo()
 ```
 
-- [ ] 失败 fallback 策略：
+- [x] 失败 fallback 策略：
   - 开发环境默认暴露 html-video diagnostics，不静默吞掉。
   - 配置允许时 fallback 到 legacy `requestFrameSpecs()` + `hyperframesTemplateRenderer.renderHyperframesProjectFiles()`。
   - fallback 后结果记录 `render_mode: 'legacy'` 与 `html_video_diagnostics`。
-- [ ] 删除默认 rich path 中 `requestHtmlFill()` 调用；函数可保留但只给 legacy 测试使用。
-- [ ] `projectOrchestrator` 不调用 AI；AI 适配全部在 `htmlVideoWorkflow`。
+- [x] 删除默认 rich path 中 `requestHtmlFill()` 调用；函数可保留但只给 legacy 测试使用。
+- [x] `projectOrchestrator` 不调用 AI；AI 适配全部在 `htmlVideoWorkflow`。
 
 **测试/验证方式**
 
@@ -1028,7 +1028,7 @@ requestSceneSpec()
 
 **具体步骤**
 
-- [ ] editPatchService 支持：
+- [x] editPatchService 支持：
 
 ```js
 applyTemplateInputsPatch(project, patch)
@@ -1039,11 +1039,11 @@ replaceFrameTemplate(project, frameId, templateId, inputs)
 createRevision(project, change)
 ```
 
-- [ ] patch 必须经过 schema 与白名单字段校验，不允许写任意路径或 HTML。
-- [ ] narration patch 标记 `requires_tts: true`、`requires_render: true`。
-- [ ] inputs/caption/duration patch 标记 `requires_render: true`。
-- [ ] replace template 只允许 schema 兼容模板。
-- [ ] `server/services/creativeWorkflows.js` 新增方法：
+- [x] patch 必须经过 schema 与白名单字段校验，不允许写任意路径或 HTML。
+- [x] narration patch 标记 `requires_tts: true`、`requires_render: true`。
+- [x] inputs/caption/duration patch 标记 `requires_render: true`。
+- [x] replace template 只允许 schema 兼容模板。
+- [x] `server/services/creativeWorkflows.js` 新增方法：
   - `getHtmlVideoProject(workflowId)`
   - `patchHtmlVideoProjectInputs(workflowId, payload)`
   - `patchHtmlVideoProjectFrame(workflowId, frameId, payload)`
@@ -1051,7 +1051,7 @@ createRevision(project, change)
   - `renderHtmlVideoProject(workflowId, payload)`
   - `exportHtmlVideoProject(workflowId, payload)`
   - `listHtmlVideoProjectExports(workflowId)`
-- [ ] `server/routes/creativeWorkflows.js` 新增：
+- [x] `server/routes/creativeWorkflows.js` 新增：
 
 ```text
 GET    /api/creative-workflows/:workflowId/html-video-project
@@ -1063,7 +1063,7 @@ POST   /api/creative-workflows/:workflowId/html-video-project/export
 GET    /api/creative-workflows/:workflowId/html-video-project/exports
 ```
 
-- [ ] 预留但首版返回 501：
+- [x] 预留但首版返回 501：
 
 ```text
 PATCH  /api/creative-workflows/:workflowId/html-video-project/timeline
@@ -1074,8 +1074,8 @@ POST   /api/creative-workflows/:workflowId/html-video-project/frames/:frameId/en
 POST   /api/creative-workflows/:workflowId/html-video-project/frames/:frameId/unenhance
 ```
 
-- [ ] 所有 route 错误 message 中文化。
-- [ ] 旧 `/video-spec` 继续可用：有新 project 时返回桥接字段，旧工程时返回 legacy 数据。
+- [x] 所有 route 错误 message 中文化。
+- [x] 旧 `/video-spec` 继续可用：有新 project 时返回桥接字段，旧工程时返回 legacy 数据。
 
 **测试/验证方式**
 
@@ -1121,7 +1121,7 @@ POST   /api/creative-workflows/:workflowId/html-video-project/frames/:frameId/un
 
 **具体步骤**
 
-- [ ] `api.client.js` 增加：
+- [x] `api.client.js` 增加：
   - `getHtmlVideoProject(workflowId)`
   - `patchHtmlVideoProjectInputs(workflowId, payload)`
   - `patchHtmlVideoProjectFrame(workflowId, frameId, payload)`
@@ -1129,7 +1129,7 @@ POST   /api/creative-workflows/:workflowId/html-video-project/frames/:frameId/un
   - `renderHtmlVideoProject(workflowId, payload)`
   - `exportHtmlVideoProject(workflowId, payload)`
   - `listHtmlVideoProjectExports(workflowId)`
-- [ ] `useHtmlVideoProject` 状态机：
+- [x] `useHtmlVideoProject` 状态机：
 
 ```text
 idle
@@ -1146,25 +1146,25 @@ not_configured 渲染环境未配置。
 needs_validation 工程需要验证。
 ```
 
-- [ ] hook 内部使用 ref 防重复请求，所有 mutating action 在进行中禁用。
-- [ ] `HtmlVideoProjectEditor` 只组织布局：
+- [x] hook 内部使用 ref 防重复请求，所有 mutating action 在进行中禁用。
+- [x] `HtmlVideoProjectEditor` 只组织布局：
   - 左侧 `ProjectFramesList`
   - 中间 `FrameInputsPanel` / `TemplateInputsPanel`
   - 右侧 `NarrationPanel` / `CaptionsPanel` / `ExportsPanel`
   - 顶部 `ProjectStatusBar` 与导出/重渲按钮
-- [ ] `TemplateInputsPanel` 根据 schema 渲染 string/number/boolean/enum/array 的基础控件。
-- [ ] `FrameInputsPanel` 支持单帧 inputs、duration、模板替换入口。
-- [ ] `NaturalLanguageEditBox` loading 文案：`正在解析编辑意图...`，完成后根据后端返回显示 `编辑已应用，需要重新渲染。` 或失败原因。
-- [ ] `Export` 按钮 loading 文案：`正在导出成片...`，成功后刷新 exports，失败后展示中文错误。
-- [ ] 默认不创建、不展示 `ReservedCapabilitiesPanel`；只有产品明确要求可见灰态入口时，才创建该组件并受 feature flag 控制：
+- [x] `TemplateInputsPanel` 根据 schema 渲染 string/number/boolean/enum/array 的基础控件。
+- [x] `FrameInputsPanel` 支持单帧 inputs、duration、模板替换入口。
+- [x] `NaturalLanguageEditBox` loading 文案：`正在解析编辑意图...`，完成后根据后端返回显示 `编辑已应用，需要重新渲染。` 或失败原因。
+- [x] `Export` 按钮 loading 文案：`正在导出成片...`，成功后刷新 exports，失败后展示中文错误。
+- [x] 默认不创建、不展示 `ReservedCapabilitiesPanel`；只有产品明确要求可见灰态入口时，才创建该组件并受 feature flag 控制：
   - 时间线
   - 毫秒级剪辑
   - HTML 源码
   - 元素调整
   - 转场
   - Remotion enhancement
-- [ ] 不做 Premiere 式复杂编辑器，不做拖拽时间线，不开放 HTML 源码编辑；首版高级能力只保留 schema/API/service 口子。
-- [ ] `CreativeVideoEditor.jsx` 先尝试加载新工程；404 或 `NO_HTML_VIDEO_PROJECT` 时 fallback 到旧 `useCreativeVideoEditor`。
+- [x] 不做 Premiere 式复杂编辑器，不做拖拽时间线，不开放 HTML 源码编辑；首版高级能力只保留 schema/API/service 口子。
+- [x] `CreativeVideoEditor.jsx` 先尝试加载新工程；404 或 `NO_HTML_VIDEO_PROJECT` 时 fallback 到旧 `useCreativeVideoEditor`。
 
 **测试/验证方式**
 
@@ -1202,7 +1202,7 @@ needs_validation 工程需要验证。
 
 **具体步骤**
 
-- [ ] `HtmlVideoProject.audio` 记录：
+- [x] `HtmlVideoProject.audio` 记录：
   - `tts_manifest_path`
   - `narration_path`
   - `music_path`
@@ -1210,12 +1210,12 @@ needs_validation 工程需要验证。
   - `mix.narration_volume_db`
   - `mix.fade_in_sec`
   - `mix.fade_out_sec`
-- [ ] 保留 `ttsService.synthesizeSceneNarration()`，输出 manifest 后写入 `project.audio.tts_manifest_path`。
-- [ ] narration patch 后调用当前 TTS 服务，只重做受影响场景或整段 manifest。
-- [ ] 混音阶段优先使用 `ffmpegComposer.muxAudioWithFfmpeg()`；兼容当前 `hyperframesRenderer.concatAndMuxAudio()` 返回结构。
-- [ ] visual QA 使用新 export 路径检查，不假设 `output.mp4` 固定文件名。
-- [ ] creative-video-editor 的旧 scene/frame 编辑能力保留；新工程编辑优先走 `HtmlVideoProjectEditor`。
-- [ ] `server/services/creativeVideoRerender.js` 标注为 legacy rerender；新工程 rerender 走 projectOrchestrator。
+- [x] 保留 `ttsService.synthesizeSceneNarration()`，输出 manifest 后写入 `project.audio.tts_manifest_path`。
+- [x] narration patch 后调用当前 TTS 服务，只重做受影响场景或整段 manifest。
+- [x] 混音阶段优先使用 `ffmpegComposer.muxAudioWithFfmpeg()`；兼容当前 `hyperframesRenderer.concatAndMuxAudio()` 返回结构。
+- [x] visual QA 使用新 export 路径检查，不假设 `output.mp4` 固定文件名。
+- [x] creative-video-editor 的旧 scene/frame 编辑能力保留；新工程编辑优先走 `HtmlVideoProjectEditor`。
+- [x] `server/services/creativeVideoRerender.js` 标注为 legacy rerender；新工程 rerender 走 projectOrchestrator。
 
 **测试/验证方式**
 
@@ -1251,8 +1251,8 @@ needs_validation 工程需要验证。
 
 **具体步骤**
 
-- [ ] 参照设计文档“现有模块对应关系”表，处理 `creativeSpecAgent.js`、`projectWriter.js`、`hyperframesTemplateRenderer.js`、`renderAdapter.js`、`templateRegistry.js`、`visualQaService.js` 等旧模块，确保首版保留、迁移、拆分或废弃边界一致。
-- [ ] 配置开关：
+- [x] 参照设计文档“现有模块对应关系”表，处理 `creativeSpecAgent.js`、`projectWriter.js`、`hyperframesTemplateRenderer.js`、`renderAdapter.js`、`templateRegistry.js`、`visualQaService.js` 等旧模块，确保首版保留、迁移、拆分或废弃边界一致。
+- [x] 配置开关：
 
 ```text
 HTML_VIDEO_PRODUCTION_ENABLED=true
@@ -1260,17 +1260,17 @@ HTML_VIDEO_LEGACY_FALLBACK_ENABLED=true
 HTML_VIDEO_REMOTION_ENHANCEMENT_ENABLED=false
 ```
 
-- [ ] fallback 允许触发的情况：
+- [x] fallback 允许触发的情况：
   - 没有 production-ready 模板。
   - AI selector/input JSON 失败且重试后仍失败。
   - Playwright/ffmpeg 未配置，并且任务允许 legacy。
   - validationGate 返回 `fallback_allowed: true`。
-- [ ] fallback 不允许静默触发的情况：
+- [x] fallback 不允许静默触发的情况：
   - 模板 license 不允许。
   - patch 越权尝试写 HTML 或路径。
   - project schema 已损坏。
   - 用户明确要求使用 html-video production path。
-- [ ] 旧模块处理方式：
+- [x] 旧模块处理方式：
 
 | 旧模块 | 首版处理 | 后续处理 |
 | --- | --- | --- |
@@ -1282,7 +1282,7 @@ HTML_VIDEO_REMOTION_ENHANCEMENT_ENABLED=false
 | `creativeVideoRerender.js` | 保留旧 rerender | 新工程使用 projectOrchestrator |
 | `server/templates/*/manifest.yaml + source.html` | 保留迁移参考 | production-ready 模板迁移到 `template.html-video.yaml + source/index.html` |
 
-- [ ] workflow result 记录：
+- [x] workflow result 记录：
   - `render_mode: 'html-video' | 'legacy'`
   - `html_video_project_path`
   - `html_video_diagnostics`
@@ -1319,8 +1319,8 @@ HTML_VIDEO_REMOTION_ENHANCEMENT_ENABLED=false
 
 **具体步骤**
 
-- [ ] 因为 `tests/run-all.js` 会自动发现所有 `test-*.js|mjs`，真实渲染烟测文件自身必须在未开启环境变量时自跳过，避免 `npm test` 默认启动 Playwright/ffmpeg。
-- [ ] `test-html-video-real-render-smoke.js` 文件开头必须包含以下保护逻辑：
+- [x] 因为 `tests/run-all.js` 会自动发现所有 `test-*.js|mjs`，真实渲染烟测文件自身必须在未开启环境变量时自跳过，避免 `npm test` 默认启动 Playwright/ffmpeg。
+- [x] `test-html-video-real-render-smoke.js` 文件开头必须包含以下保护逻辑：
 
 ```js
 if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
@@ -1329,14 +1329,14 @@ if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
 }
 ```
 
-- [ ] `tests/run-all.js` 可额外显式排除 `test-html-video-real-render-smoke.js`，但不能只依赖 run-all 排除；测试文件自跳过是硬性要求。
-- [ ] 真实渲染烟测通过环境变量开启：
+- [x] `tests/run-all.js` 可额外显式排除 `test-html-video-real-render-smoke.js`，但不能只依赖 run-all 排除；测试文件自跳过是硬性要求。
+- [x] 真实渲染烟测通过环境变量开启：
 
 ```text
 RUN_HTML_VIDEO_REAL_RENDER=1
 ```
 
-- [ ] 真实烟测流程：
+- [x] 真实烟测流程：
 
 ```text
 mock scene_spec
@@ -1354,13 +1354,13 @@ mock scene_spec
   -> new export
 ```
 
-- [ ] README 增加运行要求：
+- [x] README 增加运行要求：
   - Node.js 22
   - Playwright browsers 安装方式
   - ffmpeg 路径配置
   - 如何启用/关闭 html-video production path
   - 如何开启真实渲染烟测
-- [ ] 验收脚本检查：
+- [x] 验收脚本检查：
   - MP4 文件存在。
   - 时长接近预期。
   - 分辨率正确。

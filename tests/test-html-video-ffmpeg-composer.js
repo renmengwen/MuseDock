@@ -101,5 +101,49 @@ const composer = require('../server/services/creative-video/html-video/ffmpegCom
   assert.equal(noAudio.success, true);
   assert.equal(noAudio.skipped, true);
 
+  const probe = await composer.verifyDurationWithFfprobe({
+    videoPath: filterOutput,
+    expectedDurationSec: 6,
+    toleranceSec: 0.5,
+    ffprobePath: 'ffprobe-test',
+    runCommand: async (command, args) => {
+      assert.equal(command, 'ffprobe-test');
+      assert.deepEqual(args, [
+        '-v', 'error',
+        '-show_entries', 'format=duration',
+        '-of', 'default=noprint_wrappers=1:nokey=1',
+        filterOutput,
+      ]);
+      return { ok: true, stdout: '6.2\n', stderr: '' };
+    },
+  });
+  assert.equal(probe.success, true);
+  assert.equal(probe.duration_sec, 6.2);
+
+  const durationMismatch = await composer.verifyDurationWithFfprobe({
+    videoPath: filterOutput,
+    expectedDurationSec: 6,
+    toleranceSec: 0.25,
+    ffprobePath: 'ffprobe-test',
+    runCommand: async () => ({ ok: true, stdout: '7.1\n', stderr: '' }),
+  });
+  assert.equal(durationMismatch.success, false);
+  assert.equal(durationMismatch.code, 'duration_mismatch');
+  assert.match(durationMismatch.message, /时长偏差/);
+
+  const narrationTrack = await composer.concatAudioWithFfmpeg([
+    { path: path.join(workDir, 'tts/scene_01.mp3') },
+    { path: path.join(workDir, 'tts/scene_02.mp3') },
+  ], path.join(workDir, 'exports/narration.mp3'), workDir, { runCommand });
+  assert.equal(narrationTrack.success, true);
+  assert.deepEqual(commands[3].args, [
+    '-y',
+    '-f', 'concat',
+    '-safe', '0',
+    '-i', path.join(workDir, 'audio/concat.txt'),
+    '-c', 'copy',
+    path.join(workDir, 'exports/narration.mp3'),
+  ]);
+
   console.log('html-video ffmpeg composer tests passed');
 })();

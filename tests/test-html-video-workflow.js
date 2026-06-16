@@ -50,6 +50,11 @@ async function createTemplate(rootDir) {
     workflowId: '202606170000000001',
     runId: 'run_001',
     rootDir,
+    sceneSpec: {
+      title: '产品发布',
+      aspect_ratio: '16:9',
+      scenes: [{ id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '首版标题', keywords: [], cards: [] } }],
+    },
     creativeContext: { input: { raw_text: '产品发布' } },
     target: { duration_sec: 4 },
     templateRegistry,
@@ -66,6 +71,18 @@ async function createTemplate(rootDir) {
         },
       },
       environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ttsService: {
+        synthesizeSceneNarration: async ({ projectDir }) => {
+          calls.push(`tts:${path.basename(projectDir)}`);
+          await writeFile(path.join(projectDir, 'tts', 'scene_01.mp3'), 'audio');
+          await writeFile(path.join(projectDir, 'tts', 'audio_manifest.json'), JSON.stringify({
+            version: 1,
+            project_dir: projectDir,
+            scenes: [{ scene_id: 'scene_01', relative_path: 'tts/scene_01.mp3', duration: 4, format: 'mp3' }],
+          }));
+          return { success: true, audio_manifest: { scenes: [{ relative_path: 'tts/scene_01.mp3' }], combined_path: null } };
+        },
+      },
       frameRenderer: {
         renderFrame: async (frame, options) => {
           calls.push(`render:${frame.id}`);
@@ -83,7 +100,15 @@ async function createTemplate(rootDir) {
           await writeFile(outputPath, 'mp4');
           return { success: true, output_path: outputPath, strategy: 'stub' };
         },
-        muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+        concatAudioWithFfmpeg: async (files, outputPath) => {
+          calls.push(`audio:${path.basename(files[0].path)}`);
+          await writeFile(outputPath, 'audio');
+          return { success: true, output_path: outputPath };
+        },
+        muxAudioWithFfmpeg: async ({ videoPath, narrationPath }) => {
+          calls.push(`mux:${path.basename(narrationPath || '')}`);
+          return { success: true, skipped: false, output_path: videoPath };
+        },
       },
       visualQaService: {
         inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
@@ -97,8 +122,9 @@ async function createTemplate(rootDir) {
   assert.ok(result.html_video_project_path.endsWith(`${path.sep}202606170000000001${path.sep}agent_runs${path.sep}run_001-html-video`));
   assert.equal(result.project.frames.length, 1);
   assert.equal(result.project.frames[0].inputs.headline, '首版标题');
+  assert.equal(result.project.audio.tts_manifest_path, 'tts/audio_manifest.json');
   assert.equal(result.output_path, path.join(result.html_video_project_path, 'exports', 'output.mp4'));
-  assert.deepEqual(calls.slice(-2), ['render:frame_01', 'concat:1']);
+  assert.deepEqual(calls.slice(-5), [`tts:${path.basename(result.html_video_project_path)}`, 'render:frame_01', 'concat:1', 'audio:scene_01.mp3', 'mux:narration-track.mp3']);
 
   const fallback = await workflow.generateHtmlVideo({
     workflowId: '202606170000000002',
@@ -117,6 +143,25 @@ async function createTemplate(rootDir) {
   assert.equal(fallback.fallback_allowed, true);
   assert.equal(fallback.html_video_diagnostics[0].code, 'template_missing');
   assert.match(fallback.message, /html-video/);
+
+  const edited = await workflow.applyEdit({
+    workflowId: '202606170000000001',
+    projectDir: result.html_video_project_path,
+    project: result.project,
+    payload: { instruction: '把标题改成最终版' },
+    services: {
+      aiTextModel: {
+        callTextModel: async () => ({
+          success: true,
+          text: JSON.stringify({ edit_patch: { type: 'template_inputs_patch', patch: { headline: '最终版标题' } } }),
+        }),
+      },
+    },
+  });
+  assert.equal(edited.success, true);
+  assert.equal(edited.project.template_inputs.headline, '最终版标题');
+  const savedProject = JSON.parse(await fs.readFile(path.join(result.html_video_project_path, 'project.json'), 'utf8'));
+  assert.equal(savedProject.template_inputs.headline, '最终版标题');
 
   console.log('html-video workflow tests passed');
 })();
