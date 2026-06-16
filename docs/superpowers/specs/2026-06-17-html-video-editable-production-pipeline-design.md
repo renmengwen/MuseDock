@@ -92,6 +92,14 @@ AI 不负责：
 
 这意味着首版不是“重新发明一套视频引擎”，而是把 `html-video` 已经踩坑验证过的核心行为移植成当前项目可维护、可测试、可中文诊断的 JS service。
 
+移植验证策略：
+
+- 算法级对齐：`contentGraph.topoSort()` 必须使用与 `html-video/packages/content-graph/src/index.ts` 等价的 Kahn 拓扑排序；dependency edge 决定硬顺序，sequence edge 只作为 ready 队列中的软排序偏好；平局保持原始 node 数组顺序。
+- 行为测试迁移：从 `html-video` content-graph 行为中抽取空 graph、重复 node id、unknown edge、自环、dependency cycle、单节点、多依赖、sequence tie-break、totalDuration 默认值等测试用例，移植到当前项目测试。
+- 渲染时序对齐：JS 版 Playwright adapter 的代码注释必须逐段标明对应 `html-video/packages/adapter-hyperframes/src/render.ts` 中的关键步骤，包括 `page.addInitScript()` 冻结动画、等待 stylesheet、逐个 `fonts.load()`、等待 `fonts.ready`、释放动画、记录 `leadInMs`、ffmpeg `-ss` 裁剪 dead lead-in、显式 duration 使用 `tpad` 补齐尾帧。
+- ffmpeg 行为对齐：concat demuxer、concat filter、音频 mux 的参数必须有 golden command 测试，避免未来实现时悄悄改掉编码参数、PTS 处理或 `-shortest` 行为。
+- 关键差异显式记录：凡是当前项目因 JS/CommonJS、中文错误、workflow 目录或 TTS 集成而偏离 `html-video` 原实现的地方，必须在代码注释和测试名中说明原因。
+
 ### 变量化模板是本项目新增生产策略
 
 `html-video` 现有 studio 流程支持 Agent 直接写完整 frame HTML，例如 `writeFrameHtml(projectId, graphNodeId, html)` 和 `writePreviewHtmlRaw(projectId, html)`。本项目默认生产路径不采用这种方式，因为它会削弱生成后的表单编辑、字段校验和可追踪重渲能力。
@@ -168,6 +176,36 @@ totalDurationSec(graph)
 
 首版可以先从 `scene_spec.scenes[]` 生成线性 `sequence` graph；后续再让 AI 直接输出更丰富的 `contentGraph`。
 
+### scene_spec schema
+
+`scene_spec` 是当前项目已有业务 IR，schema 以 [server/services/creative-video/sceneSpecService.js](../../../server/services/creative-video/sceneSpecService.js) 的 `normalizeSceneSpec()`、`validateSceneSpec()` 和 `applySceneEdit()` 为准。
+
+首版字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `version` | number | 默认 `1`。 |
+| `title` | string | 视频标题。 |
+| `aspect_ratio` | string | 默认 `16:9`。 |
+| `target_duration_sec` | number | 全片目标时长，normalize 后按场景时长汇总。 |
+| `scenes[]` | array | 场景列表，不能为空。 |
+| `scenes[].id` | string | 场景稳定 ID，缺省时生成 `scene_01`。 |
+| `scenes[].order` | number | 场景顺序，normalize 后重排。 |
+| `scenes[].start` | number | 场景起点，normalize 后按顺序重算。 |
+| `scenes[].duration` | number | 场景时长，必须大于 0。 |
+| `scenes[].kind` | enum | 由 `specEnums.KINDS` 约束：`text`、`data`、`quote`、`steps`、`comparison`、`cta`。 |
+| `scenes[].narration_text` | string | 旁白文本，编辑后需要重新 TTS 和重渲。 |
+| `scenes[].captions[]` | array | 字幕块，必须落在场景时长范围内。 |
+| `scenes[].captions[].id` | string | 字幕 ID。 |
+| `scenes[].captions[].start` | number | 字幕相对场景起点。 |
+| `scenes[].captions[].end` | number | 字幕结束时间，不能早于 start。 |
+| `scenes[].captions[].text` | string | 字幕文本。 |
+| `scenes[].visual_text.headline` | string | 画面主标题。 |
+| `scenes[].visual_text.keywords[]` | string[] | 关键词。 |
+| `scenes[].visual_text.cards[]` | string[] | 卡片文案。 |
+
+`scene_spec.visual_text` 禁止包含“背景、光效、动画、转场、镜头、布局、粒子”等制作说明。这类信息应由模板能力、template inputs 或后续 frame 层处理，避免把制作指令混入观众可见文案。
+
 ## 模块设计
 
 新增服务目录：
@@ -237,6 +275,15 @@ license 过滤：
 - 如果 `license.attribution_required === true`，导出记录必须保存 attribution metadata，前端或导出报告要能展示。
 - AI compact index 不应包含被 license 策略屏蔽的模板。
 
+engine 映射：
+
+| 当前项目内部 engine | html-video 模板 engine | 说明 |
+| --- | --- | --- |
+| `hyperframes-playwright` | `hyperframes` | 首版默认渲染 engine，使用 Playwright/Chromium/ffmpeg JS adapter。 |
+| `remotion-native` | `remotion` | 后续 Remotion native enhancement 使用，首版不进默认候选。 |
+
+模板 manifest 中的 `engine: hyperframes` 不应直接与 project 内部的 `engine: hyperframes-playwright` 做字符串相等判断，必须通过映射层比较。
+
 ### templateSelectorAgent
 
 职责：
@@ -305,6 +352,17 @@ window.__HV_DURATION__ = 6;
 或者 manifest 中定义 selector 映射后由服务端替换节点文本。
 
 首版不要求所有旧模板立刻变成完美变量模板，但至少要选 1-2 个模板做成标准样板。
+
+变量模板改造指南：
+
+- 在 `source/index.html` 中保留可独立预览的默认文案；当 `window.__HV_VARS__` 未定义时使用默认值。
+- 在 `<script>` 中读取 `const vars = window.__HV_VARS__ || {};`，只把 schema 允许字段写入 DOM。
+- 使用 `window.__HV_DURATION__` 或 `vars.duration_sec` 控制总时长、CSS 动画时长或 GSAP timeline duration；如果缺失则使用模板默认 duration。
+- 文本写入必须使用 `textContent` 或等价安全方式，避免把 AI 文案当 HTML 注入。
+- 关键元素添加 `data-hv-element-id`，命名使用小写 snake/kebab 可读 ID，例如 `headline`、`subtitle`、`primary-stat`。
+- 字段绑定添加 `data-hv-bind`，值必须对应 `inputs.schema.properties` 的字段名，例如 `title`、`subtitle`、`items[0].label`。
+- 如果模板有多处同字段镜像，例如 glitch RGB 分层标题，所有镜像节点都应带同一 `data-hv-bind`，并由同一变量同步更新。
+- 模板应暴露明确的 duration 常量或函数，方便 materializer 和 adapter 校验时长。
 
 materializer 输出关键元素时必须尽量添加稳定绑定标记：
 
@@ -455,9 +513,54 @@ fallback_to_legacy
 
 前端展示 `user_message`；后端日志保存 `details`、stderr、stdout、workflowId、runId 和 projectId。
 
+### visual QA
+
+新链路渲染后继续调用当前项目视觉 QA，但首版需要固定至少以下检查项：
+
+- 空白帧：抽样帧中纯白、纯黑或近似单色帧比例超过阈值时失败；首帧连续空白超过 0.5 秒时失败。
+- CSS/字体失效迹象：检测明显白底黑字、默认 Times/Arial 风格大段文字、布局未加载导致的左上角堆叠。
+- 动画未运行：抽样帧之间像素差异低于阈值且模板声明了动画时，返回 warning 或失败。
+- 时长偏差：输出 MP4 时长与 `duration_target_sec` 或 frames 汇总时长偏差超过 0.5 秒或 5% 时失败。
+- 分辨率偏差：输出视频分辨率必须等于 project preferences 中的 width/height。
+- 内容可见性：主要文本区域不可全被裁切，联系表中至少能看到 headline 或核心视觉元素。
+
+这些检查项的阈值应在 `validationGate` 或 `visualQaService` 中集中配置，失败时返回结构化 diagnostics。
+
 ## 可编辑工程模型
 
 新增 `HtmlVideoProject`，保存到当前 workflow/run 的工程目录内。它不是用户直接感知的新产品，而是当前“编辑成片”和重渲的源数据。
+
+首版存储路径：
+
+```text
+{rootDir}/
+  {workflowId}/
+    agent_runs/
+      {runId}-html-video/
+        html-video-project.json
+        content-graph.json
+        template-inputs.json
+        scene_spec.json
+        frames/
+          01-{frameId}.html
+          01-{frameId}.mp4
+          01-{frameId}.preview.mp4
+        assets/
+        overrides/
+          {frameId}.html
+        checks/
+        exports/
+          output-{timestamp}.mp4
+        output.mp4
+```
+
+说明：
+
+- 继续沿用当前项目 `{rootDir}/{workflowId}/agent_runs/` 目录习惯。
+- 新链路目录后缀使用 `-html-video`，与现有 `-hyperframes-lite`、`-hyperframes-freeform` 区分。
+- `html-video-project.json` 是可编辑工程主文件。
+- `output.mp4` 是最新导出的稳定别名，`exports/` 保留历史版本。
+- 写入时应采用临时目录 + rename 策略，避免渲染中断留下半成品主工程。
 
 示例：
 
@@ -578,6 +681,65 @@ fallback_to_legacy
 ```
 
 `frames[].enhancement.data` 是源 DataNode 的数据快照。后续启用 Remotion native enhancement 时，导出阶段必须使用这个快照作为 native template 的 input props / `variables.data`，让导出自包含，不依赖重新读取或重新计算 `contentGraph`。
+
+`timeline.tracks[].items[].kind` 首版只支持：
+
+```text
+frame
+```
+
+后续可扩展：
+
+```text
+clip
+image
+video
+audio
+caption
+overlay
+```
+
+首版如果遇到非 `frame` item，应返回 `timeline_item_kind_unsupported` diagnostics，不应静默忽略。
+
+### Asset schema
+
+`assets[]` 首版可以为空，但 schema 需要先固定，方便后续接入图片、视频、音频、数据文件和模板本地资源：
+
+```json
+{
+  "id": "asset_001",
+  "type": "image",
+  "path": "assets/cover.png",
+  "source": "uploaded",
+  "mime_type": "image/png",
+  "size_bytes": 12345,
+  "metadata": {
+    "filename": "cover.png",
+    "width": 1080,
+    "height": 1080,
+    "duration_sec": null,
+    "user_caption": "封面图"
+  },
+  "usage": [
+    {
+      "frame_id": "intro",
+      "role": "background"
+    }
+  ],
+  "license": {
+    "spdx": null,
+    "attribution_required": false,
+    "source_url": null
+  }
+}
+```
+
+字段约束：
+
+- `type` 首版枚举：`image`、`video`、`audio`、`data`、`text`、`template-asset`。
+- `path` 必须是 project 目录内相对路径，禁止 `..` 和绝对路径。
+- `source` 首版枚举：`uploaded`、`generated`、`template`、`external-cached`。
+- 首版如果没有素材输入，可保留 `assets: []`，但 projectStore 和 validationGate 必须能读写该字段。
 
 ## 与 html-video 类型对齐
 
