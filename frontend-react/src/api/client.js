@@ -252,6 +252,47 @@ export const api = {
       body: JSON.stringify(payload || {}),
     });
   },
+  getHtmlVideoProject(workflowId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project`);
+  },
+  patchHtmlVideoProjectInputs(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/inputs`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  patchHtmlVideoProjectFrame(workflowId, frameId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/frames/${encodeURIComponent(frameId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  editHtmlVideoProject(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  renderHtmlVideoProject(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/render`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  exportHtmlVideoProject(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  listHtmlVideoProjectExports(workflowId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/exports`);
+  },
   createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}, agentConfigOverride = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',

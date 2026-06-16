@@ -1581,9 +1581,18 @@ a { color: #fe2c55; text-decoration: none; }
 .creative-video-editor-status.rerendering,
 .creative-video-editor-status.remixing,
 .creative-video-editor-status.rewriting,
+.creative-video-editor-status.editing,
+.creative-video-editor-status.materializing,
+.creative-video-editor-status.rendering,
+.creative-video-editor-status.exporting,
 .creative-video-editor-status.tts {
   background: #eef6ff;
   color: #165a9f;
+}
+
+.creative-video-editor-status strong {
+  margin-left: auto;
+  font-size: 12px;
 }
 
 .creative-video-editor-toolbar {
@@ -1680,8 +1689,10 @@ a { color: #fe2c55; text-decoration: none; }
 }
 
 .creative-video-editor-panel input,
+.creative-video-editor-panel select,
 .creative-video-editor-panel textarea,
 .creative-video-editor-section input,
+.creative-video-editor-section select,
 .creative-video-editor-section textarea {
   width: 100%;
   border: 1px solid #d1d5db;
@@ -1690,6 +1701,53 @@ a { color: #fe2c55; text-decoration: none; }
   font: inherit;
   color: #111827;
   background: #ffffff;
+}
+
+.creative-video-editor-panel input[type="checkbox"],
+.creative-video-editor-section input[type="checkbox"] {
+  width: auto;
+  justify-self: start;
+}
+
+.creative-video-editor-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.html-video-project-layout {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.75fr) minmax(280px, 1.4fr) minmax(260px, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.html-video-project-main,
+.html-video-project-side {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.html-video-natural-edit textarea,
+.html-video-frame-inputs textarea,
+.html-video-narration textarea {
+  resize: vertical;
+}
+
+.creative-video-editor-export-item {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.creative-video-editor-export-item strong {
+  color: #111827;
+  word-break: break-all;
 }
 
 .creative-video-editor-render-versions div {
@@ -1704,10 +1762,18 @@ a { color: #fe2c55; text-decoration: none; }
   .creative-video-editor-grid {
     grid-template-columns: 1fr 1fr;
   }
+
+  .html-video-project-layout {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 720px) {
   .creative-video-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .html-video-project-layout {
     grid-template-columns: 1fr;
   }
 }
