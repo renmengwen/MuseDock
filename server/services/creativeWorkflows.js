@@ -1274,7 +1274,7 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
 
   const templateRegistry = options.htmlVideoTemplateRegistry || createHtmlVideoTemplateRegistry(options.htmlVideoTemplateOptions || {});
   const orchestrator = options.htmlVideoProjectOrchestrator || htmlVideoProjectOrchestrator;
-  const result = await orchestrator.renderHtmlVideoProject({
+  const baseOptions = {
     rootDir,
     workflowId,
     runId: project.run_id || safeString(payload.run_id) || 'manual',
@@ -1282,8 +1282,22 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
     project,
     templateRegistry,
     services: options.htmlVideoServices || {},
-    skipRender: payload.skip_render === true,
-  });
+  };
+  const mode = safeString(payload.mode || payload.action || '');
+  let result;
+  if (mode === 'materialize') {
+    result = await orchestrator.materializeHtmlVideoProject(baseOptions);
+  } else if (mode === 'frame') {
+    result = await orchestrator.renderHtmlVideoFramePreview({
+      ...baseOptions,
+      frameId: safeString(payload.frame_id || payload.frameId),
+    });
+  } else {
+    result = await orchestrator.exportHtmlVideoProject({
+      ...baseOptions,
+      skipRender: payload.skip_render === true,
+    });
+  }
 
   return {
     success: result.success,
@@ -1291,8 +1305,10 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
     html_video_project: result.project,
     html_video_project_path: result.html_video_project_path || projectDir,
     output_path: result.output_path,
+    preview_path: result.preview_path,
+    preview_frame_id: result.preview_frame_id,
     diagnostics: result.diagnostics || [],
-    message: result.message || (result.success ? 'html-video 工程已渲染。' : 'html-video 工程渲染失败。'),
+    message: result.message || (result.success ? '操作已完成。' : 'html-video 工程渲染失败。'),
   };
 }
 
@@ -1301,7 +1317,7 @@ async function renderHtmlVideoProject(workflowId, payload = {}, options = {}) {
 }
 
 async function exportHtmlVideoProject(workflowId, payload = {}, options = {}) {
-  return renderCreativeWorkflowHtmlVideoProject(workflowId, payload, options);
+  return renderCreativeWorkflowHtmlVideoProject(workflowId, { ...payload, mode: 'export' }, options);
 }
 
 async function listHtmlVideoProjectExports(workflowId, options = {}) {
