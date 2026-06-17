@@ -37,6 +37,64 @@ async function requestRaw(url, options) {
   return response;
 }
 
+function parseSseChunk(buffer, onEvent) {
+  const parts = buffer.split(/\n\n/);
+  const rest = parts.pop() || '';
+  for (const part of parts) {
+    const dataLine = part.split(/\n/).find(line => line.startsWith('data: '));
+    if (!dataLine) continue;
+    try {
+      onEvent(JSON.parse(dataLine.slice(6)));
+    } catch {
+      onEvent({ type: 'task_stream_parse_failed', message: '任务事件解析失败。' });
+    }
+  }
+  return rest;
+}
+
+async function streamJsonSse(url, payload, handlers = {}) {
+  const controller = new AbortController();
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Accept: 'text/event-stream',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload || {}),
+    signal: controller.signal,
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`任务事件流连接失败：HTTP ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let closed = false;
+  const pump = async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        buffer = parseSseChunk(buffer, event => handlers.onEvent?.(event));
+      }
+      if (buffer.trim()) parseSseChunk(`${buffer}\n\n`, event => handlers.onEvent?.(event));
+      closed = true;
+      handlers.onClose?.();
+    } catch (error) {
+      if (!closed) handlers.onError?.(error);
+    }
+  };
+  pump();
+  return {
+    abort: () => {
+      closed = true;
+      controller.abort();
+      reader.cancel().catch(() => {});
+    },
+  };
+}
+
 export const api = {
   getCookies() {
     return requestJson('/api/config/cookies');
@@ -191,6 +249,12 @@ export const api = {
   },
   getCreativeWorkflow(workflowId) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}`);
+  },
+  streamCreativeWorkflowEvents(workflowId, payload, handlers = {}) {
+    return streamJsonSse(`/api/creative-workflows/${encodeURIComponent(workflowId)}/events`, {
+      task_id: payload?.task_id || payload?.taskId || '',
+      since_seq: payload?.since_seq ?? payload?.sinceSeq ?? 0,
+    }, handlers);
   },
   deleteCreativeWorkflow(workflowId) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}`, {
