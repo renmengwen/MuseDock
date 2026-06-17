@@ -167,6 +167,53 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(unknownHtmlVideoRegistry.getTask(unknownHtmlVideoTaskId).events[0].type, 'html_video_custom_progress');
   assert.equal(unknownHtmlVideoRecord.current_progress > 0, true);
 
+  const progressRoot = tempRoot();
+  await workflows.createCreativeWorkflow({ input: 'html-video 进度测试', useResearch: false }, {
+    rootDir: progressRoot,
+    services: services('2026-06-18T00:00:00.000Z'),
+  });
+  const progressRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-progress',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const startedProgress = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+    rootDir: progressRoot,
+    registry: progressRegistry,
+    workflowOptions: {
+      rootDir: progressRoot,
+      services: {
+        ...services('2026-06-18T00:00:00.000Z'),
+        agentRuns: {
+          createDouyinHyperframesFreeformRun: async () => ({
+            success: true,
+            run_id: 'run-progress',
+            message: '已创建运行记录。',
+          }),
+          generateDouyinRunHyperframesFreeformBrief: async () => ({ success: true, message: 'brief 完成。' }),
+          synthesizeDouyinRunHyperframesFreeformAudio: async () => ({ success: true, message: '音频完成。' }),
+          generateDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
+            await options.onProgress?.({ type: 'html_video_graph_started' });
+            return {
+              success: true,
+              message: 'html-video 完成。',
+              hyperframes_freeform: {
+                project: { status: 'ready', render_mode: 'html-video', html_video_project_path: 'project-dir' },
+                render: { status: 'rendered' },
+                visual_inspect: { status: 'passed' },
+              },
+            };
+          },
+        },
+      },
+    },
+  });
+  await waitFor(() => assert.equal(progressRegistry.getTask(startedProgress.task_id).status, 'done'));
+  const progressTask = progressRegistry.getTask(startedProgress.task_id);
+  const htmlVideoProgressEvent = progressTask.events.find(event => event.type === 'html_video_graph_started');
+  assert.ok(htmlVideoProgressEvent);
+  assert.equal(htmlVideoProgressEvent.stage, 'project');
+  assert.equal(htmlVideoProgressEvent.message, '正在生成 html-video 工程...');
+
   const failedRootDir = tempRoot();
   await workflows.createCreativeWorkflow({ input: '测试失败状态', useResearch: false }, { rootDir: failedRootDir, services: services() });
   const failedRegistry = createCreativeTaskRegistry({

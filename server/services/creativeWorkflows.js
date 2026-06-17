@@ -1134,6 +1134,14 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       rootDir: mediaRoot,
       useHtmlVideoLiteWorkflow: true,
       skipValidation,
+      onProgress: async event => {
+        await emitTaskContextEvent(taskContext, {
+          ...event,
+          type: event?.type || 'stage_progress',
+          stage: 'project',
+          message: event?.message || '正在生成 html-video 工程...',
+        });
+      },
       projectOptions: {
         creative_context: record.creative_context,
       },
