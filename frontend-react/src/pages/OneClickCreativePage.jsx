@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowUp,
@@ -17,6 +17,7 @@ import { api } from '../api/client.js';
 import { CreativeVideoEditor } from '../components/creative-video-editor/CreativeVideoEditor.jsx';
 
 const CREATIVE_TASKS_STORAGE_KEY = 'musedock.creative.tasks.v1';
+const ACTIVE_CREATIVE_TASK_STORAGE_KEY = 'musedock.creative.activeTask.v1';
 
 const STAGE_LABELS = {
   source: '准备来源资料',
@@ -153,6 +154,30 @@ function loadStoredTasks() {
 function saveStoredTasks(tasks) {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(CREATIVE_TASKS_STORAGE_KEY, JSON.stringify(tasks.slice(0, 30)));
+}
+
+function saveActiveCreativeTask(value) {
+  if (typeof window === 'undefined') return;
+  if (!value?.workflow_id || !value?.task_id) {
+    window.localStorage.removeItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY, JSON.stringify({
+    workflow_id: value.workflow_id,
+    task_id: value.task_id,
+    last_seq: Number(value.last_seq || 0),
+    updated_at: new Date().toISOString(),
+  }));
+}
+
+function loadActiveCreativeTask() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY) || 'null');
+    return parsed?.workflow_id && parsed?.task_id ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function upsertTask(tasks, task) {
@@ -487,6 +512,11 @@ export function OneClickCreativePage() {
   const params = useParams();
   const routeWorkflowId = params.workflowId || '';
   const isDetailRoute = Boolean(routeWorkflowId);
+  const activeStreamRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const lastSeqRef = useRef(0);
+  const activeTaskRef = useRef(null);
+  const streamClosedNormallyRef = useRef(false);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('quick');
   const [useResearch, setUseResearch] = useState(true);
@@ -498,6 +528,7 @@ export function OneClickCreativePage() {
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
   const [deletingWorkflowId, setDeletingWorkflowId] = useState('');
+  const [activeTask, setActiveTask] = useState(null);
   const isBusy = status === 'creating' || status === 'polling' || status === 'deleting';
   const submitDisabled = isBusy || mode === 'expert' || !input.trim();
 
@@ -509,8 +540,77 @@ export function OneClickCreativePage() {
     });
   }
 
+  function applyTaskEvent(event) {
+    const expectedWorkflowId = activeTaskRef.current?.workflow_id || workflowId;
+    if (!event || (expectedWorkflowId && event.workflow_id !== expectedWorkflowId)) return;
+    if (Number(event.seq) > 0) {
+      lastSeqRef.current = Number(event.seq);
+      saveActiveCreativeTask({ workflow_id: event.workflow_id, task_id: event.task_id, last_seq: lastSeqRef.current });
+    }
+    if (event.message) setMessage(event.message);
+    if (event.type === 'stage_progress' || event.type?.startsWith('html_video_')) {
+      setStatus('polling');
+    }
+    if (event.type === 'task_failed') {
+      setStatus('failed');
+      setMessage(event.message || '创作任务失败。');
+    }
+    if (event.type === 'task_done') {
+      setStatus('done');
+      setMessage(event.message || '创作任务已完成。');
+    }
+    if (event.type === 'task_stream_closed') {
+      streamClosedNormallyRef.current = true;
+      window.clearTimeout(reconnectTimerRef.current);
+      if (activeStreamRef.current) activeStreamRef.current.abort();
+      activeStreamRef.current = null;
+      activeTaskRef.current = null;
+      setActiveTask(null);
+      saveActiveCreativeTask(null);
+      if (event.status === 'done') setStatus('done');
+      if (event.status === 'failed') setStatus('failed');
+      if (event.status === 'deleted') setStatus('idle');
+    }
+  }
+
+  function subscribeTaskEvents(nextTask) {
+    if (!nextTask?.workflow_id || !nextTask?.task_id || !api?.streamCreativeWorkflowEvents) return;
+    if (activeTask?.task_id === nextTask.task_id && activeStreamRef.current) return;
+    if (activeStreamRef.current) {
+      streamClosedNormallyRef.current = true;
+      activeStreamRef.current.abort();
+    }
+    window.clearTimeout(reconnectTimerRef.current);
+    streamClosedNormallyRef.current = false;
+    activeTaskRef.current = nextTask;
+    setActiveTask(nextTask);
+    activeStreamRef.current = api.streamCreativeWorkflowEvents(nextTask.workflow_id, {
+      task_id: nextTask.task_id,
+      since_seq: lastSeqRef.current,
+    }, {
+      onEvent: applyTaskEvent,
+      onClose: () => {
+        activeStreamRef.current = null;
+      },
+      onError: () => {
+        activeStreamRef.current = null;
+        if (streamClosedNormallyRef.current) return;
+        reconnectTimerRef.current = window.setTimeout(() => {
+          subscribeTaskEvents(nextTask);
+        }, 1500);
+      },
+    });
+  }
+
   function startNewTask() {
     navigate('/creative');
+    streamClosedNormallyRef.current = true;
+    if (activeStreamRef.current) activeStreamRef.current.abort();
+    window.clearTimeout(reconnectTimerRef.current);
+    activeStreamRef.current = null;
+    activeTaskRef.current = null;
+    setActiveTask(null);
+    saveActiveCreativeTask(null);
     setInput('');
     setMode('quick');
     setUseResearch(false);
@@ -629,6 +729,13 @@ export function OneClickCreativePage() {
       setStatus('polling');
       setMessage(task.message);
       navigate(`/creative/${encodeURIComponent(nextWorkflowId)}`);
+      if (json.task_id) {
+        const nextTask = { workflow_id: nextWorkflowId, task_id: json.task_id };
+        lastSeqRef.current = 0;
+        activeTaskRef.current = nextTask;
+        saveActiveCreativeTask({ ...nextTask, last_seq: 0 });
+        subscribeTaskEvents(nextTask);
+      }
     } catch (error) {
       setStatus('failed');
       setMessage(getErrorMessage(error, '创建创作任务失败，请稍后重试。'));
@@ -667,6 +774,17 @@ export function OneClickCreativePage() {
   }, [routeWorkflowId, selectedWorkflowId, tasks, workflowId, status]);
 
   useEffect(() => {
+    const stored = loadActiveCreativeTask();
+    if (!stored?.workflow_id || !stored?.task_id) return undefined;
+    const currentWorkflowId = workflowId || routeWorkflowId || selectedWorkflowId;
+    if (currentWorkflowId && currentWorkflowId !== stored.workflow_id) return undefined;
+    lastSeqRef.current = Number(stored.last_seq || 0);
+    activeTaskRef.current = { workflow_id: stored.workflow_id, task_id: stored.task_id };
+    subscribeTaskEvents(activeTaskRef.current);
+    return undefined;
+  }, [workflowId, routeWorkflowId, selectedWorkflowId]);
+
+  useEffect(() => {
     if (status !== 'polling' || !workflowId) return undefined;
     let cancelled = false;
 
@@ -677,6 +795,10 @@ export function OneClickCreativePage() {
 
         const nextWorkflow = getWorkflowPayload(json);
         setWorkflow(nextWorkflow);
+        if (nextWorkflow?.active_task?.task_id && nextWorkflow.workflow_id) {
+          const nextTask = { workflow_id: nextWorkflow.workflow_id, task_id: nextWorkflow.active_task.task_id };
+          if (activeTaskRef.current?.task_id !== nextTask.task_id) subscribeTaskEvents(nextTask);
+        }
         const nextStatus = nextWorkflow?.status || (json?.success === false ? 'failed' : 'running');
         const nextMessage = getWorkflowDisplayMessage(nextWorkflow, json?.message);
 
@@ -718,6 +840,12 @@ export function OneClickCreativePage() {
       window.clearInterval(timer);
     };
   }, [status, workflowId]);
+
+  useEffect(() => () => {
+    streamClosedNormallyRef.current = true;
+    if (activeStreamRef.current) activeStreamRef.current.abort();
+    window.clearTimeout(reconnectTimerRef.current);
+  }, []);
 
   return (
     <main className={`creativeChatShell ${sidebarCollapsed ? 'sidebarCollapsed' : ''}`}>

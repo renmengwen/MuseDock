@@ -131,6 +131,15 @@ assert.match(page, /onStopAndDelete=\{stopAndDeleteTask\}/, 'Creative task detai
 assert.match(page, /onStopAndDelete\(workflowId\)/, 'Creative task detail stop button should delete the currently opened task');
 assert.match(page, /disabled=\{deletingWorkflowId === workflowId\}/, 'Current task stop-and-delete button should be disabled while deleting');
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');
+assert.match(page, /ACTIVE_CREATIVE_TASK_STORAGE_KEY/, 'OneClickCreativePage should persist active creative task stream state');
+assert.match(page, /streamCreativeWorkflowEvents/, 'OneClickCreativePage should subscribe to creative workflow event stream');
+assert.match(page, /lastSeqRef/, 'OneClickCreativePage should track last received task event sequence');
+assert.match(page, /activeTaskRef/, 'OneClickCreativePage should compare stream events against the active task ref');
+assert.match(page, /loadActiveCreativeTask/, 'OneClickCreativePage should recover active stream state after refresh');
+assert.match(page, /task_stream_closed/, 'OneClickCreativePage should stop reconnecting when stream closes normally');
+assert.match(page, /streamClosedNormallyRef/, 'OneClickCreativePage should distinguish normal stream closure from errors');
+assert.match(page, /since_seq/, 'OneClickCreativePage should reconnect with since_seq');
+assert.match(page, /window\.setTimeout/, 'OneClickCreativePage should schedule SSE reconnects');
 assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');
 assert.match(page, /window\.localStorage\.setItem/, 'OneClickCreativePage should save submitted tasks to localStorage');
 assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should automatically enter the created task detail');
