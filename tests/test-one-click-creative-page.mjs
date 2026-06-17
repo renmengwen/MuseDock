@@ -140,6 +140,14 @@ assert.match(page, /task_stream_closed/, 'OneClickCreativePage should stop recon
 assert.match(page, /streamClosedNormallyRef/, 'OneClickCreativePage should distinguish normal stream closure from errors');
 assert.match(page, /since_seq/, 'OneClickCreativePage should reconnect with since_seq');
 assert.match(page, /window\.setTimeout/, 'OneClickCreativePage should schedule SSE reconnects');
+assert.match(page, /function\s+stopTaskStream\s*\(\{ clearStorage = false \} = \{\}\)/, 'OneClickCreativePage should centralize task stream cleanup');
+assert.match(page, /const expectedTaskId = activeTaskRef\.current\?\.task_id/, 'OneClickCreativePage should compare event task id against active task ref');
+assert.match(page, /event\.task_id && expectedTaskId && event\.task_id !== expectedTaskId/, 'OneClickCreativePage should ignore stream events from stale task ids');
+assert.match(page, /activeTaskRef\.current\?\.workflow_id === nextTask\.workflow_id[\s\S]*activeTaskRef\.current\?\.task_id === nextTask\.task_id/, 'OneClickCreativePage should use activeTaskRef for duplicate subscription checks');
+assert.doesNotMatch(page, /activeTask\?\.task_id === nextTask\.task_id/, 'OneClickCreativePage should not use stale activeTask state for duplicate subscription checks');
+assert.match(page, /function selectTask\(task\) \{[\s\S]*stopTaskStream\(\{ clearStorage: true \}\)/, 'Selecting another task should stop the previous task stream');
+assert.match(page, /saveActiveCreativeTask\(null\)/, 'Normal close and stop paths should clear active task stream storage');
+assert.match(page, /if \(isDifferentTask\) \{[\s\S]*lastSeqRef\.current = Number\(sinceSeq \?\? 0\)/, 'Switching task stream subscriptions should reset lastSeq');
 assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');
 assert.match(page, /window\.localStorage\.setItem/, 'OneClickCreativePage should save submitted tasks to localStorage');
 assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should automatically enter the created task detail');

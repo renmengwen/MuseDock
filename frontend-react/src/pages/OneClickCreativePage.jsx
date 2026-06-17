@@ -517,6 +517,7 @@ export function OneClickCreativePage() {
   const lastSeqRef = useRef(0);
   const activeTaskRef = useRef(null);
   const streamClosedNormallyRef = useRef(false);
+  const streamGenerationRef = useRef(0);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('quick');
   const [useResearch, setUseResearch] = useState(true);
@@ -528,7 +529,7 @@ export function OneClickCreativePage() {
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
   const [deletingWorkflowId, setDeletingWorkflowId] = useState('');
-  const [activeTask, setActiveTask] = useState(null);
+  const [, setActiveTask] = useState(null);
   const isBusy = status === 'creating' || status === 'polling' || status === 'deleting';
   const submitDisabled = isBusy || mode === 'expert' || !input.trim();
 
@@ -540,9 +541,27 @@ export function OneClickCreativePage() {
     });
   }
 
+  function stopTaskStream({ clearStorage = false } = {}) {
+    streamGenerationRef.current += 1;
+    streamClosedNormallyRef.current = true;
+    if (activeStreamRef.current) activeStreamRef.current.abort();
+    window.clearTimeout(reconnectTimerRef.current);
+    activeStreamRef.current = null;
+    activeTaskRef.current = null;
+    setActiveTask(null);
+    if (clearStorage) {
+      lastSeqRef.current = 0;
+      saveActiveCreativeTask(null);
+    }
+  }
+
   function applyTaskEvent(event) {
     const expectedWorkflowId = activeTaskRef.current?.workflow_id || workflowId;
+    const expectedTaskId = activeTaskRef.current?.task_id;
     if (!event || (expectedWorkflowId && event.workflow_id !== expectedWorkflowId)) return;
+    if (event.task_id && expectedTaskId && event.task_id !== expectedTaskId) return;
+    const currentWorkflowId = routeWorkflowId || workflowId || selectedWorkflowId;
+    if (currentWorkflowId && event.workflow_id !== currentWorkflowId) return;
     if (Number(event.seq) > 0) {
       lastSeqRef.current = Number(event.seq);
       saveActiveCreativeTask({ workflow_id: event.workflow_id, task_id: event.task_id, last_seq: lastSeqRef.current });
@@ -560,42 +579,50 @@ export function OneClickCreativePage() {
       setMessage(event.message || '创作任务已完成。');
     }
     if (event.type === 'task_stream_closed') {
-      streamClosedNormallyRef.current = true;
-      window.clearTimeout(reconnectTimerRef.current);
-      if (activeStreamRef.current) activeStreamRef.current.abort();
-      activeStreamRef.current = null;
-      activeTaskRef.current = null;
-      setActiveTask(null);
-      saveActiveCreativeTask(null);
+      stopTaskStream({ clearStorage: true });
       if (event.status === 'done') setStatus('done');
       if (event.status === 'failed') setStatus('failed');
       if (event.status === 'deleted') setStatus('idle');
     }
   }
 
-  function subscribeTaskEvents(nextTask) {
+  function subscribeTaskEvents(nextTask, { sinceSeq } = {}) {
     if (!nextTask?.workflow_id || !nextTask?.task_id || !api?.streamCreativeWorkflowEvents) return;
-    if (activeTask?.task_id === nextTask.task_id && activeStreamRef.current) return;
-    if (activeStreamRef.current) {
-      streamClosedNormallyRef.current = true;
-      activeStreamRef.current.abort();
+    const isSameTask = activeTaskRef.current?.workflow_id === nextTask.workflow_id
+      && activeTaskRef.current?.task_id === nextTask.task_id;
+    if (isSameTask && activeStreamRef.current) return;
+    const isDifferentTask = !isSameTask;
+    if (isDifferentTask) {
+      stopTaskStream();
+      lastSeqRef.current = Number(sinceSeq ?? 0);
+    } else if (sinceSeq !== undefined) {
+      lastSeqRef.current = Number(sinceSeq || 0);
     }
     window.clearTimeout(reconnectTimerRef.current);
     streamClosedNormallyRef.current = false;
     activeTaskRef.current = nextTask;
     setActiveTask(nextTask);
+    saveActiveCreativeTask({ ...nextTask, last_seq: lastSeqRef.current });
+    streamGenerationRef.current += 1;
+    const streamGeneration = streamGenerationRef.current;
     activeStreamRef.current = api.streamCreativeWorkflowEvents(nextTask.workflow_id, {
       task_id: nextTask.task_id,
       since_seq: lastSeqRef.current,
     }, {
-      onEvent: applyTaskEvent,
+      onEvent: event => {
+        if (streamGenerationRef.current !== streamGeneration) return;
+        applyTaskEvent(event);
+      },
       onClose: () => {
+        if (streamGenerationRef.current !== streamGeneration) return;
         activeStreamRef.current = null;
       },
       onError: () => {
+        if (streamGenerationRef.current !== streamGeneration) return;
         activeStreamRef.current = null;
         if (streamClosedNormallyRef.current) return;
         reconnectTimerRef.current = window.setTimeout(() => {
+          if (streamGenerationRef.current !== streamGeneration) return;
           subscribeTaskEvents(nextTask);
         }, 1500);
       },
@@ -604,13 +631,7 @@ export function OneClickCreativePage() {
 
   function startNewTask() {
     navigate('/creative');
-    streamClosedNormallyRef.current = true;
-    if (activeStreamRef.current) activeStreamRef.current.abort();
-    window.clearTimeout(reconnectTimerRef.current);
-    activeStreamRef.current = null;
-    activeTaskRef.current = null;
-    setActiveTask(null);
-    saveActiveCreativeTask(null);
+    stopTaskStream({ clearStorage: true });
     setInput('');
     setMode('quick');
     setUseResearch(false);
@@ -622,6 +643,9 @@ export function OneClickCreativePage() {
   }
 
   function selectTask(task) {
+    if (activeTaskRef.current?.workflow_id && activeTaskRef.current.workflow_id !== task.workflow_id) {
+      stopTaskStream({ clearStorage: true });
+    }
     navigate(`/creative/${encodeURIComponent(task.workflow_id)}`);
     setWorkflowId(task.workflow_id);
     setSelectedWorkflowId(task.workflow_id);
@@ -731,10 +755,8 @@ export function OneClickCreativePage() {
       navigate(`/creative/${encodeURIComponent(nextWorkflowId)}`);
       if (json.task_id) {
         const nextTask = { workflow_id: nextWorkflowId, task_id: json.task_id };
-        lastSeqRef.current = 0;
-        activeTaskRef.current = nextTask;
         saveActiveCreativeTask({ ...nextTask, last_seq: 0 });
-        subscribeTaskEvents(nextTask);
+        subscribeTaskEvents(nextTask, { sinceSeq: 0 });
       }
     } catch (error) {
       setStatus('failed');
@@ -746,12 +768,19 @@ export function OneClickCreativePage() {
     if (!routeWorkflowId) {
       setSelectedWorkflowId('');
       if (workflowId && status !== 'creating') {
+        stopTaskStream({ clearStorage: true });
         setWorkflowId('');
         setWorkflow(null);
         setStatus('idle');
         setMessage('');
+      } else if (!workflowId && !selectedWorkflowId) {
+        stopTaskStream({ clearStorage: true });
       }
       return;
+    }
+
+    if (activeTaskRef.current?.workflow_id && activeTaskRef.current.workflow_id !== routeWorkflowId) {
+      stopTaskStream({ clearStorage: true });
     }
 
     if (routeWorkflowId === selectedWorkflowId) return;
@@ -776,11 +805,16 @@ export function OneClickCreativePage() {
   useEffect(() => {
     const stored = loadActiveCreativeTask();
     if (!stored?.workflow_id || !stored?.task_id) return undefined;
-    const currentWorkflowId = workflowId || routeWorkflowId || selectedWorkflowId;
-    if (currentWorkflowId && currentWorkflowId !== stored.workflow_id) return undefined;
-    lastSeqRef.current = Number(stored.last_seq || 0);
-    activeTaskRef.current = { workflow_id: stored.workflow_id, task_id: stored.task_id };
-    subscribeTaskEvents(activeTaskRef.current);
+    const currentWorkflowId = routeWorkflowId || workflowId || selectedWorkflowId;
+    if (!currentWorkflowId) return undefined;
+    if (currentWorkflowId !== stored.workflow_id) {
+      stopTaskStream({ clearStorage: true });
+      return undefined;
+    }
+    subscribeTaskEvents(
+      { workflow_id: stored.workflow_id, task_id: stored.task_id },
+      { sinceSeq: Number(stored.last_seq || 0) },
+    );
     return undefined;
   }, [workflowId, routeWorkflowId, selectedWorkflowId]);
 
@@ -797,7 +831,10 @@ export function OneClickCreativePage() {
         setWorkflow(nextWorkflow);
         if (nextWorkflow?.active_task?.task_id && nextWorkflow.workflow_id) {
           const nextTask = { workflow_id: nextWorkflow.workflow_id, task_id: nextWorkflow.active_task.task_id };
-          if (activeTaskRef.current?.task_id !== nextTask.task_id) subscribeTaskEvents(nextTask);
+          const isCurrentWorkflowTask = nextTask.workflow_id === workflowId;
+          const isNewTask = activeTaskRef.current?.workflow_id !== nextTask.workflow_id
+            || activeTaskRef.current?.task_id !== nextTask.task_id;
+          if (isCurrentWorkflowTask && isNewTask) subscribeTaskEvents(nextTask, { sinceSeq: 0 });
         }
         const nextStatus = nextWorkflow?.status || (json?.success === false ? 'failed' : 'running');
         const nextMessage = getWorkflowDisplayMessage(nextWorkflow, json?.message);
@@ -842,9 +879,7 @@ export function OneClickCreativePage() {
   }, [status, workflowId]);
 
   useEffect(() => () => {
-    streamClosedNormallyRef.current = true;
-    if (activeStreamRef.current) activeStreamRef.current.abort();
-    window.clearTimeout(reconnectTimerRef.current);
+    stopTaskStream();
   }, []);
 
   return (
