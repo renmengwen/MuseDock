@@ -51,10 +51,15 @@ async function waitImmediate() {
   assert.equal(task.status, 'done');
   assert.equal(task.events.at(-1).type, 'task_done');
 
+  const replayFromStart = [];
+  const startReplaySubscription = registry.subscribe(taskId, 0, event => replayFromStart.push(event));
+  assert.equal(startReplaySubscription.finished, true);
+  assert.deepEqual(replayFromStart.map(event => event.type), ['stage_started', 'stage_done', 'task_done']);
+
   const replayed = [];
   const subscription = registry.subscribe(taskId, 1, event => replayed.push(event));
   assert.equal(subscription.finished, true);
-  assert.deepEqual(replayed.map(event => event.seq), [2, 3]);
+  assert.deepEqual(replayed.map(event => event.seq), [2, 3, 4]);
   assert.equal(replayed.at(-1).type, 'task_done');
 
   const liveRegistry = createCreativeTaskRegistry({
@@ -78,6 +83,52 @@ async function waitImmediate() {
   liveRegistry.markFailed(liveTaskId, new Error('失败测试'));
   assert.equal(liveRegistry.getTask(liveTaskId).status, 'failed');
   assert.equal(liveRegistry.getTask(liveTaskId).events.at(-1).type, 'task_failed');
+
+  const resilientRegistry = createCreativeTaskRegistry({
+    now: () => '2026-06-18T00:00:00.000Z',
+    idFactory: () => 'creative-task-resilient',
+  });
+  const resilientTaskId = resilientRegistry.createDetachedTask({
+    workflowId: '202606180000000003',
+    operationId: 'workflow-op-3',
+  });
+  const resilientEvents = [];
+  resilientRegistry.subscribe(resilientTaskId, 0, () => {
+    throw new Error('订阅者失败');
+  });
+  resilientRegistry.subscribe(resilientTaskId, 0, event => resilientEvents.push(event));
+  assert.doesNotThrow(() => {
+    resilientRegistry.emit(resilientTaskId, {
+      type: 'stage_progress',
+      stage: 'project',
+      message: '正常订阅者应收到',
+    });
+  });
+  assert.equal(resilientEvents.at(-1).message, '正常订阅者应收到');
+  assert.doesNotThrow(() => {
+    resilientRegistry.subscribe(resilientTaskId, 0, () => {
+      throw new Error('重放订阅者失败');
+    });
+  });
+
+  const fullReplayRegistry = createCreativeTaskRegistry({
+    now: () => '2026-06-18T00:00:00.000Z',
+    idFactory: () => 'creative-task-full-replay',
+  });
+  const fullReplayTaskId = fullReplayRegistry.createTask({
+    workflowId: '202606180000000004',
+    operationId: 'workflow-op-4',
+    runner: async ({ emit }) => {
+      emit({ type: 'stage_done', stage: 'source', message: '来源资料已准备完成。' });
+    },
+  });
+  await waitImmediate();
+  await waitImmediate();
+  const fullReplayEvents = [];
+  const fullReplaySubscription = fullReplayRegistry.subscribe(fullReplayTaskId, 0, event => fullReplayEvents.push(event));
+  assert.equal(fullReplaySubscription.finished, true);
+  assert.deepEqual(fullReplayEvents.map(event => event.seq), [1, 2, 3]);
+  assert.equal(fullReplayEvents[0].type, 'task_started');
 
   console.log('creative task registry tests passed');
 })();

@@ -62,9 +62,8 @@ function createCreativeTaskRegistry(options = {}) {
   let seq = 0;
 
   function nextSeq() {
-    const currentSeq = seq;
     seq += 1;
-    return currentSeq;
+    return seq;
   }
 
   function trimEvents(task) {
@@ -120,7 +119,11 @@ function createCreativeTaskRegistry(options = {}) {
     trimEvents(task);
 
     for (const subscriber of task.subscribers) {
-      subscriber(taskEvent);
+      try {
+        subscriber(taskEvent);
+      } catch (error) {
+        task.subscribers.delete(subscriber);
+      }
     }
 
     return taskEvent;
@@ -202,7 +205,11 @@ function createCreativeTaskRegistry(options = {}) {
 
     for (const event of task.events) {
       if (event.seq > normalizedSinceSeq) {
-        listener(event);
+        try {
+          listener(event);
+        } catch (error) {
+          // 订阅回调异常不应破坏 replay 或后续订阅建立。
+        }
       }
     }
 
