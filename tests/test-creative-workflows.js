@@ -10,6 +10,7 @@ const {
   createCreativeWorkflow,
   runCreativeWorkflow,
   getCreativeWorkflow,
+  getCreativeWorkflowHtmlVideoProject,
   getWorkflowPath,
   makeLocalCreativeAwemeId,
 } = require('../server/services/creativeWorkflows');
@@ -189,6 +190,20 @@ async function testHtmlVideoLiteSkipsLegacyHyperframesStages() {
   const persisted = readJson(getWorkflowPath(WORKFLOW_ID, rootDir));
   assert.equal(persisted.result.hyperframes_freeform.project.html_video_project_path, projectDir);
   assert.equal(persisted.result.hyperframes_freeform.render.status, 'rendered');
+
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({
+    project_id: 'p1',
+    workflow_id: WORKFLOW_ID,
+    run_id: 'run-1',
+    template_id: 'simple',
+    template_inputs: {},
+    frames: [],
+    timeline: { tracks: [] },
+  }, null, 2));
+  const htmlVideoProject = await getCreativeWorkflowHtmlVideoProject(WORKFLOW_ID, { rootDir });
+  assert.equal(htmlVideoProject.success, true);
+  assert.equal(htmlVideoProject.html_video_project_path, projectDir);
 }
 
 async function testRejectsEmptyInput() {

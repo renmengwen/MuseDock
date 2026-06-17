@@ -40,7 +40,7 @@ async function listen(app) {
       return {
         success: true,
         workflow_id: id,
-        html_video_project: { project_id: 'p1', template_id: 'simple' },
+        html_video_project: { project_id: 'p1', template_id: 'simple', template_inputs: { headline: '标题' } },
         html_video_project_path: '/tmp/project',
       };
     },
@@ -72,17 +72,33 @@ async function listen(app) {
       return {
         success: true,
         workflow_id: id,
+        html_video_project: { project_id: 'p1', template_id: 'simple' },
+        html_video_project_path: '/tmp/project',
         output_path: '/tmp/project/exports/output.mp4',
-        message: 'html-video 工程已渲染。',
+        message: 'HTML 已重新生成。',
       };
     },
     renderHtmlVideoProject: async id => {
       calls.push(['render', id]);
-      return { success: true, workflow_id: id, output_path: '/tmp/project/frames/frame_01.mp4', message: '单帧预览已更新。' };
+      return {
+        success: true,
+        workflow_id: id,
+        html_video_project: { project_id: 'p1', template_id: 'simple' },
+        html_video_project_path: '/tmp/project',
+        output_path: '/tmp/project/frames/frame_01.mp4',
+        message: '单帧预览已更新。',
+      };
     },
     exportHtmlVideoProject: async id => {
       calls.push(['export', id]);
-      return { success: true, workflow_id: id, output_path: '/tmp/project/exports/output.mp4', message: '成片已导出。' };
+      return {
+        success: true,
+        workflow_id: id,
+        html_video_project: { project_id: 'p1', template_id: 'simple' },
+        html_video_project_path: '/tmp/project',
+        output_path: '/tmp/project/exports/output.mp4',
+        message: '成片已导出。',
+      };
     },
     listHtmlVideoProjectExports: async id => {
       calls.push(['exports', id]);
@@ -100,7 +116,10 @@ async function listen(app) {
     const got = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/html-video-project`);
     assert.equal(got.statusCode, 200);
     assert.equal(got.body.success, true);
+    assert.ok(got.body.html_video_project);
+    assert.equal(got.body.html_video_project_path, '/tmp/project');
     assert.equal(got.body.html_video_project.template_id, 'simple');
+    assert.equal(got.body.html_video_project.template_inputs.headline, '标题');
 
     const patched = await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project`, {
       type: 'template_inputs_patch',
@@ -113,13 +132,17 @@ async function listen(app) {
     const rendered = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project`, {});
     assert.equal(rendered.statusCode, 200);
     assert.equal(rendered.body.success, true);
+    assert.ok(rendered.body.html_video_project);
+    assert.equal(rendered.body.message, 'HTML 已重新生成。');
     assert.equal(rendered.body.output_path, '/tmp/project/exports/output.mp4');
 
     assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/inputs`, { patch: { headline: '模板' } })).statusCode, 200);
     assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01`, { patch: { headline: '帧' } })).statusCode, 200);
     assert.equal((await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit`, { instruction: '标题更狠' })).statusCode, 200);
     assert.equal((await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/render`, {})).body.message, '单帧预览已更新。');
-    assert.equal((await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/export`, {})).body.message, '成片已导出。');
+    const exported = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/export`, {});
+    assert.ok(exported.body.html_video_project);
+    assert.match(exported.body.message, /导出|渲染/);
     const exportsResult = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/html-video-project/exports`);
     assert.equal(exportsResult.statusCode, 200);
     assert.equal(exportsResult.body.exports.length, 1);
