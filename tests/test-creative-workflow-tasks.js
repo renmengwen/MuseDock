@@ -104,7 +104,7 @@ async function waitFor(assertion, timeoutMs = 1000) {
     operationId: 'workflow-op-done',
     kind: 'creative_workflow',
   });
-  await workflowTasks.emitAndPersistTaskEvent({
+  const ignoredDoneEvent = await workflowTasks.emitAndPersistTaskEvent({
     registry: doneRegistry,
     taskId: doneTaskId,
     workflowId: WORKFLOW_ID,
@@ -112,7 +112,9 @@ async function waitFor(assertion, timeoutMs = 1000) {
     event: { type: 'task_done', progress: 100, message: '完成' },
     rootDir: doneRootDir,
   });
-  assert.equal(readWorkflow(doneRootDir).task_status, 'done');
+  assert.equal(ignoredDoneEvent, null);
+  assert.equal(doneRegistry.getTask(doneTaskId).events.some(event => event.type === 'task_done'), false);
+  assert.equal(readWorkflow(doneRootDir).task_status || '', '');
 
   const unknownHtmlVideoRootDir = tempRoot();
   await workflows.createCreativeWorkflow({ input: '测试未知 HTML 事件', useResearch: false }, { rootDir: unknownHtmlVideoRootDir, services: services() });
@@ -152,7 +154,7 @@ async function waitFor(assertion, timeoutMs = 1000) {
     operationId: 'workflow-op-failed',
     kind: 'creative_workflow',
   });
-  await workflowTasks.emitAndPersistTaskEvent({
+  const ignoredFailedEvent = await workflowTasks.emitAndPersistTaskEvent({
     registry: failedRegistry,
     taskId: failedTaskId,
     workflowId: WORKFLOW_ID,
@@ -160,7 +162,9 @@ async function waitFor(assertion, timeoutMs = 1000) {
     event: { type: 'task_failed', message: '失败' },
     rootDir: failedRootDir,
   });
-  assert.equal(readWorkflow(failedRootDir).task_status, 'failed');
+  assert.equal(ignoredFailedEvent, null);
+  assert.equal(failedRegistry.getTask(failedTaskId).events.some(event => event.type === 'task_failed'), false);
+  assert.equal(readWorkflow(failedRootDir).task_status || '', '');
 
   const persistFailRegistry = createCreativeTaskRegistry({
     idFactory: () => 'creative-task-persist-failed',
@@ -206,6 +210,55 @@ async function waitFor(assertion, timeoutMs = 1000) {
   await waitFor(() => assert.equal(failedRunRegistry.getTask(failedRun.task_id).status, 'failed'));
   const failedRunTask = failedRunRegistry.getTask(failedRun.task_id);
   assert.equal(failedRunTask.events.filter(event => event.type === 'task_failed').length, 1);
+  await waitFor(() => assert.equal(readWorkflow(failedRunRootDir).task_status, 'failed'));
+
+  const innerDoneRootDir = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '测试内部完成事件', useResearch: false }, { rootDir: innerDoneRootDir, services: services() });
+  const innerDoneRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-inner-done',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const innerDone = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+    rootDir: innerDoneRootDir,
+    registry: innerDoneRegistry,
+    services: {
+      creativeWorkflows: {
+        runCreativeWorkflow: async (workflowId, options) => {
+          await options.taskContext.emit({ type: 'task_done', progress: 100, message: '内部完成' });
+          return { success: true, workflow_id: workflowId, status: 'done', message: '完成' };
+        },
+      },
+    },
+  });
+  await waitFor(() => assert.equal(innerDoneRegistry.getTask(innerDone.task_id).status, 'done'));
+  const innerDoneEvents = innerDoneRegistry.getTask(innerDone.task_id).events
+    .filter(event => event.type === 'task_done');
+  assert.equal(innerDoneEvents.length, 1);
+  assert.equal(innerDoneEvents[0].message, '创作任务已完成。');
+
+  const innerFailedRootDir = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '测试内部失败事件', useResearch: false }, { rootDir: innerFailedRootDir, services: services() });
+  const innerFailedRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-inner-failed',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const innerFailed = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+    rootDir: innerFailedRootDir,
+    registry: innerFailedRegistry,
+    services: {
+      creativeWorkflows: {
+        runCreativeWorkflow: async (workflowId, options) => {
+          await options.taskContext.emit({ type: 'task_failed', message: '内部失败' });
+          throw new Error('外层失败');
+        },
+      },
+    },
+  });
+  await waitFor(() => assert.equal(innerFailedRegistry.getTask(innerFailed.task_id).status, 'failed'));
+  const innerFailedEvents = innerFailedRegistry.getTask(innerFailed.task_id).events
+    .filter(event => event.type === 'task_failed');
+  assert.equal(innerFailedEvents.length, 1);
+  assert.equal(innerFailedEvents[0].message, '外层失败');
 
   const donePatchFailRootDir = tempRoot();
   await workflows.createCreativeWorkflow({ input: '测试终态写入失败', useResearch: false }, { rootDir: donePatchFailRootDir, services: services() });

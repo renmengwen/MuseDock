@@ -73,14 +73,10 @@ function taskEventProgress(event = {}) {
   });
 }
 
-function taskStatusForEvent(event = {}) {
-  if (event.type === 'task_done') {
-    return 'done';
-  }
-  if (event.type === 'task_failed') {
-    return 'failed';
-  }
-  return 'running';
+function isTerminalTaskEvent(event = {}) {
+  return event.type === 'task_done'
+    || event.type === 'task_failed'
+    || event.type === 'workflow_deleted';
 }
 
 function emitWorkflowPersistFailed(registry, taskId, operationId, message, failedEventSeq) {
@@ -126,6 +122,10 @@ async function emitAndPersistTaskEvent({
   rootDir,
   creativeWorkflows = defaultCreativeWorkflows,
 }) {
+  if (isTerminalTaskEvent(event || {})) {
+    return null;
+  }
+
   const emitted = registry.emit(taskId, {
     ...(event || {}),
     operation_id: operationId,
@@ -138,7 +138,7 @@ async function emitAndPersistTaskEvent({
   const patch = {
     active_task_id: taskId,
     active_operation_id: operationId,
-    task_status: taskStatusForEvent(event || {}),
+    task_status: 'running',
     current_stage: emitted.stage,
     current_stage_message: emitted.message,
     current_progress: progress,
