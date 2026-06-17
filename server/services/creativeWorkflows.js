@@ -566,6 +566,7 @@ function createWorkflowSummary(record) {
     message: record.message || '',
     active_task_id: record.active_task_id || '',
     active_operation_id: record.active_operation_id || '',
+    active_task: record.active_task || null,
     task_status: record.task_status || '',
     current_stage: record.current_stage || '',
     current_stage_message: record.current_stage_message || '',
@@ -932,7 +933,7 @@ async function markHtmlVideoLiteSkippedLegacyStages(record, now) {
   }
 }
 
-async function runStage(record, stageId, rootDir, handler, services) {
+async function runStage(record, stageId, rootDir, handler, services, taskContext = null) {
   if (!await workflowFileExists(record.workflow_id, rootDir)) {
     return WORKFLOW_STOPPED;
   }
@@ -944,9 +945,26 @@ async function runStage(record, stageId, rootDir, handler, services) {
   record.status = 'running';
   record.updated_at = startedAt;
   await persistWorkflow(record, rootDir);
+  if (taskContext && typeof taskContext.emit === 'function') {
+    await taskContext.emit({
+      type: 'stage_started',
+      stage: stageId,
+      stage_progress: 0,
+      message: `正在${STAGE_LABELS[stageId]}...`,
+    });
+  }
 
   try {
-    const result = await handler();
+    const reportStage = (message, progress = 50, data = {}) => taskContext && typeof taskContext.emit === 'function'
+      ? taskContext.emit({
+        type: 'stage_progress',
+        stage: stageId,
+        stage_progress: progress,
+        message,
+        data,
+      })
+      : null;
+    const result = await handler({ reportStage, taskContext });
     if (!await workflowFileExists(record.workflow_id, rootDir)) {
       return WORKFLOW_STOPPED;
     }
@@ -958,6 +976,14 @@ async function runStage(record, stageId, rootDir, handler, services) {
     });
     record.updated_at = completedAt;
     await persistWorkflow(record, rootDir);
+    if (taskContext && typeof taskContext.emit === 'function') {
+      await taskContext.emit({
+        type: 'stage_done',
+        stage: stageId,
+        stage_progress: 100,
+        message: result?.message || `${STAGE_LABELS[stageId]}完成。`,
+      });
+    }
     return result;
   } catch (error) {
     if (!await workflowFileExists(record.workflow_id, rootDir)) {
@@ -979,6 +1005,14 @@ async function runStage(record, stageId, rootDir, handler, services) {
     };
     record.updated_at = failedAt;
     await persistWorkflow(record, rootDir);
+    if (taskContext && typeof taskContext.emit === 'function') {
+      await taskContext.emit({
+        type: 'stage_failed',
+        stage: stageId,
+        message,
+        data: { error: message },
+      });
+    }
     return null;
   }
 }
@@ -987,6 +1021,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
   const services = resolveServices(options);
+  const taskContext = options.taskContext || null;
   let record;
   try {
     record = await readWorkflow(workflowId, rootDir);
@@ -1014,7 +1049,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
 
   let stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'source', rootDir, async () => (
     ensureSuccess(await prepareSource(record, mediaRoot, getNow(services), services), '来源资料准备失败。')
-  ), services));
+  ), services, taskContext));
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }
@@ -1030,7 +1065,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
         : '联网研究资料已准备完成。',
       research_context: record.research_context,
     };
-  }, services));
+  }, services, taskContext));
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }
@@ -1039,7 +1074,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     success: true,
     message: '图片素材将在下一阶段开放，当前任务继续使用来源上下文。',
     asset_context: record.asset_context,
-  }), services));
+  }), services, taskContext));
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }
@@ -1054,7 +1089,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       throw new Error('导演改写任务未返回 run_id。');
     }
     return result;
-  }, services));
+  }, services, taskContext));
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }
@@ -1067,7 +1102,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       },
     }),
     '成片策划失败。',
-  ), services));
+  ), services, taskContext));
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }
@@ -1077,7 +1112,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       rootDir: mediaRoot,
     }),
     '音频轨生成失败。',
-  ), services));
+  ), services, taskContext));
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }
@@ -1097,7 +1132,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       },
     }),
     '工程生成失败。',
-  ), services);
+  ), services, taskContext);
   stoppedOrFailed = failIfStoppedOrNull(projectStageResult);
   if (stoppedOrFailed) {
     return stoppedOrFailed;
@@ -1122,7 +1157,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
         rootDir: mediaRoot,
       }),
       '工程校验失败。',
-    ), services));
+    ), services, taskContext));
     if (stoppedOrFailed) {
       return stoppedOrFailed;
     }
@@ -1133,7 +1168,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       rootDir: mediaRoot,
     }),
     '视频渲染失败。',
-  ), services));
+  ), services, taskContext));
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }
@@ -1145,7 +1180,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
         rootDir: mediaRoot,
       }),
       '视频巡检失败。',
-    ), services);
+    ), services, taskContext);
     stoppedOrFailed = failIfStoppedOrNull(inspectResult);
     if (stoppedOrFailed) {
       return stoppedOrFailed;
@@ -1205,6 +1240,11 @@ async function markStaleRunningStageFailed(record, rootDir, services = {}, optio
   const timeoutMs = Number(options.staleStageTimeoutMs) || DEFAULT_STALE_STAGE_TIMEOUT_MS;
   const now = getNow(services);
   const nowMs = parseDateMs(now) || Date.now();
+  const activeTask = options.taskRegistry?.activeTaskForWorkflow?.(record.workflow_id);
+  if (activeTask && activeTask.status === 'running') {
+    record.active_task = activeTask;
+    return record;
+  }
   const stage = findStaleRunningStage(record, nowMs, timeoutMs);
   if (!stage) return record;
 

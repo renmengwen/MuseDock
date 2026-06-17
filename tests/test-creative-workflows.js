@@ -868,6 +868,45 @@ async function testMarksStaleBriefStageAsFailedWhenFetched() {
   assert.match(persisted.message, /长时间未更新/);
 }
 
+async function testDoesNotMarkRunningStageStaleWhenActiveTaskExists() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices({
+    services: {
+      now: () => '2026-06-12T12:20:00.000Z',
+    },
+  });
+
+  await createCreativeWorkflow({ input: '做一期关于 AI 视频生产的知识科普' }, { rootDir, mediaRoot, services });
+  const filePath = getWorkflowPath(WORKFLOW_ID, rootDir);
+  const record = readJson(filePath);
+  record.status = 'running';
+  record.active_task_id = 'creative-task-running';
+  record.stages = record.stages.map(stage => (
+    stage.id === 'project'
+      ? { ...stage, status: 'running', updated_at: '2026-06-12T12:00:00.000Z', started_at: '2026-06-12T12:00:00.000Z' }
+      : stage
+  ));
+  fs.writeFileSync(filePath, JSON.stringify(record, null, 2), 'utf-8');
+
+  const fetched = await getCreativeWorkflow(WORKFLOW_ID, {
+    rootDir,
+    services,
+    taskRegistry: {
+      activeTaskForWorkflow: () => ({
+        task_id: 'creative-task-running',
+        workflow_id: WORKFLOW_ID,
+        operation_id: 'workflow-op',
+        kind: 'creative_workflow',
+        status: 'running',
+      }),
+    },
+  });
+
+  assert.equal(fetched.success, true);
+  assert.equal(fetched.data.status, 'running');
+  assert.equal(fetched.data.stages.find(stage => stage.id === 'project').status, 'running');
+}
+
 async function testMissingWorkflowReturnsChineseMessage() {
   const { rootDir } = createTempDirs();
 
@@ -1026,6 +1065,7 @@ async function run() {
   await testPersistsFailureFromBriefStage();
   await testStopsWorkflowWhenDeletedDuringGeneration();
   await testMarksStaleBriefStageAsFailedWhenFetched();
+  await testDoesNotMarkRunningStageStaleWhenActiveTaskExists();
   await testMissingWorkflowReturnsChineseMessage();
   await testSceneSpecOperations();
   console.log('creative workflow tests passed');
