@@ -1,12 +1,18 @@
 const express = require('express');
 
 const defaultCreativeWorkflows = require('../services/creativeWorkflows');
+const defaultCreativeWorkflowTasks = require('../services/creativeWorkflowTasks');
+const { formatSseEvent, normalizeSinceSeq } = require('../services/creativeTaskEvents');
 
 const router = express.Router();
 const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;
 
 function getService(req) {
   return req.app?.locals?.creativeWorkflows || defaultCreativeWorkflows;
+}
+
+function getTaskService(req) {
+  return req.app?.locals?.creativeWorkflowTasks || defaultCreativeWorkflowTasks;
 }
 
 function getMessage(result, fallback) {
@@ -47,22 +53,25 @@ router.post('/', async (req, res) => {
       });
     }
 
-    res.json(result);
-
-    if (result.workflow_id) {
-      const workflowOptions = {};
-      if (req.body && req.body.skipValidation === true) {
-        workflowOptions.skipValidation = true;
-      }
-      setImmediate(async () => {
-        try {
-          await service.runCreativeWorkflow(result.workflow_id, workflowOptions);
-        } catch (error) {
-          console.error('[creative-workflows] background run failed:', error.message);
-        }
+    const taskService = getTaskService(req);
+    const workflowOptions = {};
+    if (req.body && req.body.skipValidation === true) {
+      workflowOptions.skipValidation = true;
+    }
+    const started = await taskService.startCreativeWorkflowTask(result.workflow_id, { workflowOptions });
+    if (!started.success) {
+      return res.status(500).json({
+        success: false,
+        workflow_id: result.workflow_id,
+        message: started.message || '创建后台创作任务失败。',
       });
     }
-    return undefined;
+    return res.status(202).json({
+      ...result,
+      task_id: started.task_id,
+      active_task: started.active_task,
+      message: result.message || '创作任务已创建，正在后台执行。',
+    });
   } catch (error) {
     return res.status(500).json({
       success: false,
@@ -414,6 +423,75 @@ router.patch('/:workflow_id/html-video-project/frames/:frame_id/transition', sen
 router.post('/:workflow_id/html-video-project/frames/:frame_id/enhance', sendHtmlVideoReserved);
 router.post('/:workflow_id/html-video-project/frames/:frame_id/unenhance', sendHtmlVideoReserved);
 router.all('/:workflow_id/html-video-project/:feature(timeline|html|elements|transition|enhance|unenhance)', sendHtmlVideoReserved);
+
+router.post('/:workflow_id/events', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) return res.status(400).json(validation);
+  const taskId = safeString(req.body?.task_id);
+  const sinceSeq = normalizeSinceSeq(req.body?.since_seq);
+  if (!taskId) {
+    return res.status(400).json({ success: false, workflow_id: validation.workflow_id, message: '缺少后台任务 ID。' });
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+
+  let subscriptionResult = null;
+  let streamWriteFailed = false;
+  const writeEvent = event => {
+    try {
+      if (res.writableEnded || res.destroyed) return false;
+      res.write(formatSseEvent(event));
+      return true;
+    } catch {
+      streamWriteFailed = true;
+      subscriptionResult?.unsubscribe?.();
+      if (!res.writableEnded) res.end();
+      return false;
+    }
+  };
+
+  req.on('close', () => {
+    subscriptionResult?.unsubscribe?.();
+  });
+
+  try {
+    subscriptionResult = await getTaskService(req).subscribeCreativeWorkflowEvents({
+      workflowId: validation.workflow_id,
+      taskId,
+      sinceSeq,
+      writeEvent,
+      onClose: () => {
+        if (!res.writableEnded) res.end();
+      },
+    });
+    if (streamWriteFailed) subscriptionResult?.unsubscribe?.();
+    if (!subscriptionResult || subscriptionResult.success === false) {
+      if (!res.writableEnded) res.end();
+    }
+  } catch (error) {
+    writeEvent({
+      seq: sinceSeq + 1,
+      type: 'task_stream_closed',
+      workflow_id: validation.workflow_id,
+      task_id: taskId,
+      status: 'failed',
+      final_seq: sinceSeq + 1,
+      message: `读取任务事件失败：${error.message}`,
+    });
+    if (!res.writableEnded) res.end();
+  }
+});
+
+router.get('/:workflow_id/tasks/active', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) return res.status(400).json(validation);
+  const result = await getTaskService(req).getActiveCreativeWorkflowTask(validation.workflow_id);
+  return res.json(result);
+});
 
 router.get('/:workflow_id', async (req, res) => {
   const workflowId = String(req.params.workflow_id || '').trim();

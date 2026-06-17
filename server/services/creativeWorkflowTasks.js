@@ -1,6 +1,6 @@
 const defaultCreativeWorkflows = require('./creativeWorkflows');
 const { defaultRegistry } = require('./creativeTaskRegistry');
-const { calculateProjectProgress, calculateWorkflowProgress } = require('./creativeTaskEvents');
+const { calculateProjectProgress, calculateWorkflowProgress, isTerminalEvent } = require('./creativeTaskEvents');
 
 function createOperationId(workflowId) {
   const stamp = new Date().toISOString().replace(/[^0-9A-Za-z]/g, '');
@@ -291,7 +291,98 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
   };
 }
 
+async function subscribeCreativeWorkflowEvents({
+  workflowId,
+  taskId,
+  sinceSeq,
+  writeEvent,
+  onClose,
+  registry = defaultRegistry,
+}) {
+  const task = registry.getTask(taskId);
+  if (!task || task.workflow_id !== String(workflowId)) {
+    writeEvent({
+      seq: sinceSeq + 1,
+      type: 'task_stream_closed',
+      workflow_id: workflowId,
+      task_id: taskId,
+      status: 'failed',
+      final_seq: sinceSeq + 1,
+      message: '未找到后台任务事件流。',
+    });
+    onClose?.();
+    return { success: false };
+  }
+
+  let closed = false;
+  let subscription = null;
+  const safeWrite = event => {
+    if (closed) return false;
+    try {
+      return writeEvent(event) !== false;
+    } catch {
+      closed = true;
+      subscription?.unsubscribe?.();
+      onClose?.();
+      return false;
+    }
+  };
+  const closeStream = finalEvent => {
+    if (closed) return;
+    const finalSeq = finalEvent?.seq || task.events.at(-1)?.seq || sinceSeq;
+    safeWrite({
+      seq: finalSeq + 1,
+      type: 'task_stream_closed',
+      workflow_id: workflowId,
+      task_id: taskId,
+      status: finalEvent?.type === 'workflow_deleted' ? 'deleted' : task.status,
+      final_seq: finalSeq,
+      message: '任务事件流已结束。',
+    });
+    closed = true;
+    onClose?.();
+  };
+
+  subscription = registry.subscribe(taskId, sinceSeq, event => {
+    if (!safeWrite(event)) {
+      closed = true;
+      subscription?.unsubscribe?.();
+      onClose?.();
+      return;
+    }
+    if (isTerminalEvent(event)) {
+      closeStream(event);
+    }
+  });
+  if (closed) {
+    subscription?.unsubscribe?.();
+    return { success: true, unsubscribe: () => {} };
+  }
+  if (!subscription || subscription.finished) {
+    closeStream(task.events.at(-1));
+    return { success: true };
+  }
+  return {
+    success: true,
+    unsubscribe: () => {
+      closed = true;
+      subscription.unsubscribe();
+    },
+  };
+}
+
+async function getActiveCreativeWorkflowTask(workflowId, options = {}) {
+  const registry = options.registry || defaultRegistry;
+  return {
+    success: true,
+    workflow_id: String(workflowId),
+    active_task: registry.activeTaskForWorkflow(workflowId),
+  };
+}
+
 module.exports = {
   startCreativeWorkflowTask,
   emitAndPersistTaskEvent,
+  subscribeCreativeWorkflowEvents,
+  getActiveCreativeWorkflowTask,
 };

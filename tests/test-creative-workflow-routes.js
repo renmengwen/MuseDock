@@ -36,14 +36,36 @@ async function requestJson(server, method, pathName, body) {
   });
 }
 
+async function requestSse(server, pathName, body) {
+  const { port } = server.address();
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathName,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+    }, res => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => {
+        text += chunk;
+      });
+      res.on('end', () => resolve({ statusCode: res.statusCode, body: text, headers: res.headers }));
+    });
+    req.on('error', reject);
+    req.write(JSON.stringify(body || {}));
+    req.end();
+  });
+}
+
 async function listen(app) {
   return new Promise(resolve => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server));
   });
-}
-
-async function waitImmediate() {
-  await new Promise(resolve => setImmediate(resolve));
 }
 
 function createFakeCreativeWorkflows(options = {}) {
@@ -100,6 +122,43 @@ function createFakeCreativeWorkflows(options = {}) {
         };
       },
     },
+    taskService: {
+      startCreativeWorkflowTask: async id => ({
+        success: true,
+        workflow_id: id,
+        task_id: 'creative-task-route',
+        active_task: {
+          task_id: 'creative-task-route',
+          workflow_id: id,
+          operation_id: 'workflow-op-route',
+          kind: 'creative_workflow',
+          status: 'running',
+        },
+      }),
+      subscribeCreativeWorkflowEvents: async ({ workflowId: eventWorkflowId, taskId, sinceSeq, writeEvent }) => {
+        writeEvent({
+          seq: sinceSeq + 1,
+          type: 'stage_progress',
+          workflow_id: eventWorkflowId,
+          task_id: taskId,
+          message: '正在生成工程...',
+        });
+        writeEvent({
+          seq: sinceSeq + 2,
+          type: 'task_stream_closed',
+          workflow_id: eventWorkflowId,
+          task_id: taskId,
+          status: 'done',
+          final_seq: sinceSeq + 2,
+          message: '任务事件流已结束。',
+        });
+      },
+      getActiveCreativeWorkflowTask: async id => ({
+        success: true,
+        workflow_id: id,
+        active_task: { task_id: 'creative-task-route', workflow_id: id, status: 'running' },
+      }),
+    },
   };
 }
 
@@ -107,10 +166,12 @@ async function assertMountedPost(server, workflowId) {
   const createResponse = await requestJson(server, 'POST', '/api/creative-workflows', {
     input: '做一个新视频',
   });
-  assert.strictEqual(createResponse.statusCode, 200);
+  assert.strictEqual(createResponse.statusCode, 202);
   assert.strictEqual(createResponse.body.success, true);
   assert.strictEqual(createResponse.body.status, 'queued');
   assert.strictEqual(createResponse.body.workflow_id, workflowId);
+  assert.strictEqual(createResponse.body.task_id, 'creative-task-route');
+  assert.strictEqual(createResponse.body.active_task.status, 'running');
   assert.strictEqual(createResponse.body.creative_context.asset_context.status, 'disabled');
   assert.match(createResponse.body.message, /创作任务已创建/);
 }
@@ -121,6 +182,7 @@ async function runIsolatedRouterTests() {
 
   app.use(express.json());
   app.locals.creativeWorkflows = fake.service;
+  app.locals.creativeWorkflowTasks = fake.taskService;
   app.use('/api/creative-workflows', creativeWorkflowsRouter);
 
   const server = await listen(app);
@@ -128,13 +190,23 @@ async function runIsolatedRouterTests() {
   try {
     await assertMountedPost(server, fake.workflowId);
 
-    await waitImmediate();
-    assert.deepStrictEqual(fake.runWorkflowIds, [fake.workflowId]);
-
     const getResponse = await requestJson(server, 'GET', `/api/creative-workflows/${fake.workflowId}`);
     assert.strictEqual(getResponse.statusCode, 200);
     assert.strictEqual(getResponse.body.success, true);
     assert.strictEqual(getResponse.body.data.workflow_id, fake.workflowId);
+
+    const sseResponse = await requestSse(server, `/api/creative-workflows/${fake.workflowId}/events`, {
+      task_id: 'creative-task-route',
+      since_seq: 0,
+    });
+    assert.strictEqual(sseResponse.statusCode, 200);
+    assert.match(sseResponse.headers['content-type'], /text\/event-stream/);
+    assert.match(sseResponse.body, /event: stage_progress/);
+    assert.match(sseResponse.body, /任务事件流已结束/);
+
+    const activeResponse = await requestJson(server, 'GET', `/api/creative-workflows/${fake.workflowId}/tasks/active`);
+    assert.strictEqual(activeResponse.statusCode, 200);
+    assert.strictEqual(activeResponse.body.active_task.task_id, 'creative-task-route');
 
     fake.setCreateMode('bad-input');
     const badInputResponse = await requestJson(server, 'POST', '/api/creative-workflows', {});
@@ -164,16 +236,15 @@ async function runRealAppMountTest() {
   const realApp = require('../server/app');
   const fake = createFakeCreativeWorkflows({ workflowId: '202606121200000003' });
   realApp.locals.creativeWorkflows = fake.service;
+  realApp.locals.creativeWorkflowTasks = fake.taskService;
 
   const server = await listen(realApp);
 
   try {
     await assertMountedPost(server, fake.workflowId);
-
-    await waitImmediate();
-    assert.deepStrictEqual(fake.runWorkflowIds, [fake.workflowId]);
   } finally {
     delete realApp.locals.creativeWorkflows;
+    delete realApp.locals.creativeWorkflowTasks;
     await new Promise(resolve => server.close(resolve));
   }
 }
