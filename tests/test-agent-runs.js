@@ -1260,6 +1260,8 @@ async function run() {
   });
   let htmlVideoLiteCreativeContext = null;
   const htmlVideoLiteProgressEvents = [];
+  let htmlVideoLiteProgressReturnIsThenable = false;
+  let htmlVideoLiteProgressSettledInFacade = false;
   const fullCreativeContext = {
     input: { raw_text: '完整输入', use_research: true },
     research_context: { status: 'ready', summary: '联网摘要', sources: [{ title: '来源' }] },
@@ -1273,7 +1275,10 @@ async function run() {
     creativeVideoWorkflowFacade: {
       generateCreativeVideoProject: async ({ creativeContext, onProgress }) => {
         htmlVideoLiteCreativeContext = creativeContext;
-        onProgress?.({ type: 'html_video_graph_started', message: '正在生成内容图...' });
+        const progressReturn = onProgress?.({ type: 'html_video_graph_started', message: '正在生成内容图...' });
+        htmlVideoLiteProgressReturnIsThenable = typeof progressReturn?.then === 'function';
+        await progressReturn;
+        htmlVideoLiteProgressSettledInFacade = htmlVideoLiteProgressEvents.some(event => event.type === 'html_video_graph_started' && event.stage === 'project');
         return {
         success: true,
         message: 'html-video lite 成片完成。',
@@ -1289,7 +1294,10 @@ async function run() {
         };
       },
     },
-    onProgress: event => htmlVideoLiteProgressEvents.push(event),
+    onProgress: async event => {
+      await new Promise(resolve => setImmediate(resolve));
+      htmlVideoLiteProgressEvents.push(event);
+    },
   });
   assert.equal(htmlVideoLite.success, true);
   assert.deepEqual(htmlVideoLiteCreativeContext.audio.scenes.map(scene => scene.duration), [5.44, 10.24]);
@@ -1305,6 +1313,8 @@ async function run() {
   assert.equal(htmlVideoLite.hyperframes_freeform.visual_inspect.status, 'passed');
   assert.equal(htmlVideoLite.hyperframes_freeform.visual_inspect.report.success, true);
   assert.equal(Object.prototype.hasOwnProperty.call(htmlVideoLite.hyperframes_freeform, 'inspect'), false);
+  assert.equal(htmlVideoLiteProgressReturnIsThenable, true);
+  assert.equal(htmlVideoLiteProgressSettledInFacade, true);
   assert.ok(htmlVideoLiteProgressEvents.some(event => event.type === 'html_video_graph_started' && event.stage === 'project'));
 
   const staleHtmlVideoLiteRunId = `${generated.run_id}-html-video-lite-stale`;
