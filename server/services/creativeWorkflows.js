@@ -1290,6 +1290,23 @@ async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options 
     const progress = Number(patch.current_progress ?? record.current_progress);
     record.current_progress = Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : 0;
     record.last_event_seq = Number.isFinite(seq) && seq > 0 ? Math.floor(seq) : 0;
+    if (patch.fail_running_stages === true) {
+      const failedStageMessage = safeString(patch.message || patch.current_stage_message)
+        || '服务器重启，后台创作任务被中断，请重新创建任务。';
+      record.stages = normalizeStages(record.stages).map(stage => (
+        stage.status === 'running'
+          ? {
+            ...stage,
+            status: 'failed',
+            message: failedStageMessage,
+            updated_at: now,
+            failed_at: now,
+            stale: true,
+            reason: 'server_restart',
+          }
+          : stage
+      ));
+    }
     if (Object.prototype.hasOwnProperty.call(patch, 'success')) record.success = patch.success !== false;
     if (Object.prototype.hasOwnProperty.call(patch, 'status')) record.status = safeString(patch.status);
     if (Object.prototype.hasOwnProperty.call(patch, 'message')) record.message = safeString(patch.message);

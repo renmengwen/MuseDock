@@ -429,6 +429,15 @@ async function waitFor(assertion, timeoutMs = 1000) {
     current_stage_message: '正在生成工程...',
     current_progress: 60,
   }, { rootDir: recoveryRoot });
+  const runningStageRecord = readWorkflow(recoveryRoot);
+  const projectStage = runningStageRecord.stages.find(stage => stage.id === 'project');
+  Object.assign(projectStage, {
+    status: 'running',
+    message: '正在生成工程...',
+    started_at: '2026-06-18T00:00:00.000Z',
+    updated_at: '2026-06-18T00:00:00.000Z',
+  });
+  fs.writeFileSync(path.join(recoveryRoot, `${WORKFLOW_ID}.json`), JSON.stringify(runningStageRecord, null, 2), 'utf-8');
   const recovered = await workflowTasks.recoverOrphanedWorkflows({
     rootDir: recoveryRoot,
     services: { now: () => '2026-06-18T00:05:00.000Z' },
@@ -440,6 +449,10 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(recoveredWorkflow.data.success, false);
   assert.match(recoveredWorkflow.data.message, /服务器重启/);
   assert.equal(recoveredWorkflow.data.active_task_id, '');
+  const recoveredProjectStage = recoveredWorkflow.data.stages.find(stage => stage.id === 'project');
+  assert.equal(recoveredProjectStage.status, 'failed');
+  assert.match(recoveredProjectStage.message, /服务器重启|后台创作任务被中断/);
+  assert.equal(recoveredWorkflow.data.stages.some(stage => stage.status === 'running'), false);
 
   const terminalResidueRoot = tempRoot();
   await workflows.createCreativeWorkflow({ input: '终态残留测试', useResearch: false }, {

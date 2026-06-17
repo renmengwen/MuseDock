@@ -420,6 +420,7 @@ async function recoverOrphanedWorkflows(options = {}) {
         task_status: 'failed',
         current_stage: '',
         current_stage_message: message,
+        fail_running_stages: true,
         success: false,
         status: 'failed',
         message,
