@@ -68,6 +68,20 @@ async function listen(app) {
   });
 }
 
+async function waitFor(assertion, timeoutMs = 1000) {
+  const startedAt = Date.now();
+  let lastError;
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      return assertion();
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  }
+  throw lastError;
+}
+
 function createFakeCreativeWorkflows(options = {}) {
   const workflowId = options.workflowId || '202606121200000001';
   const runWorkflowIds = [];
@@ -249,9 +263,54 @@ async function runRealAppMountTest() {
   }
 }
 
+async function runDefaultTaskServiceInjectionTest() {
+  const app = express();
+  const workflowId = '202606121200000004';
+  const patchCalls = [];
+  const runCalls = [];
+  const fakeService = {
+    createCreativeWorkflow: async () => ({
+      success: true,
+      status: 'queued',
+      workflow_id: workflowId,
+      creative_context: { asset_context: { status: 'disabled' } },
+      message: '创作任务已创建。',
+    }),
+    patchCreativeWorkflowTaskSummary: async (id, patch) => {
+      patchCalls.push({ id, patch });
+      return { success: true, workflow_id: id };
+    },
+    runCreativeWorkflow: async (id, options) => {
+      runCalls.push({ id, hasTaskContext: Boolean(options.taskContext) });
+      return { success: true, workflow_id: id, status: 'done', message: '完成' };
+    },
+  };
+
+  app.use(express.json());
+  app.locals.creativeWorkflows = fakeService;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const createResponse = await requestJson(server, 'POST', '/api/creative-workflows', {
+      input: '使用 route service 启动后台任务',
+    });
+    assert.strictEqual(createResponse.statusCode, 202);
+    assert.strictEqual(createResponse.body.success, true);
+    assert.ok(createResponse.body.task_id);
+    await waitFor(() => assert.ok(patchCalls.length >= 1));
+    assert.strictEqual(patchCalls[0].id, workflowId);
+    await waitFor(() => assert.deepStrictEqual(runCalls, [{ id: workflowId, hasTaskContext: true }]));
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
 async function run() {
   await runIsolatedRouterTests();
   await runRealAppMountTest();
+  await runDefaultTaskServiceInjectionTest();
   await runEditorRouteTests();
 }
 

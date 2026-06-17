@@ -314,5 +314,76 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(donePatchFailTask.events.filter(event => event.type === 'task_done').length, 1);
   assert.equal(donePatchFailTask.events.some(event => event.type === 'workflow_persist_failed'), true);
 
+  const deletedRunRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-run-deleted',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const deletedPatchCalls = [];
+  const deletedRun = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+    registry: deletedRunRegistry,
+    services: {
+      creativeWorkflows: {
+        patchCreativeWorkflowTaskSummary: async (workflowId, patch) => {
+          deletedPatchCalls.push({ workflowId, patch });
+          return { success: true };
+        },
+        runCreativeWorkflow: async workflowId => ({
+          success: false,
+          workflow_id: workflowId,
+          status: 'deleted',
+          message: '创作任务已停止并删除。',
+        }),
+      },
+    },
+  });
+  await waitFor(() => assert.equal(deletedRunRegistry.getTask(deletedRun.task_id).status, 'deleted'));
+  const deletedRunTask = deletedRunRegistry.getTask(deletedRun.task_id);
+  assert.equal(deletedRunTask.events.some(event => event.type === 'workflow_deleted'), true);
+  assert.equal(deletedRunTask.events.some(event => event.type === 'task_failed'), false);
+  assert.equal(deletedRunRegistry.activeTaskForWorkflow(WORKFLOW_ID), null);
+  assert.equal(deletedPatchCalls.length, 1);
+  const deletedReplayEvents = [];
+  await workflowTasks.subscribeCreativeWorkflowEvents({
+    workflowId: WORKFLOW_ID,
+    taskId: deletedRun.task_id,
+    sinceSeq: 0,
+    registry: deletedRunRegistry,
+    writeEvent: event => {
+      deletedReplayEvents.push(event);
+      return true;
+    },
+  });
+  assert.equal(deletedReplayEvents.some(event => event.type === 'workflow_deleted'), true);
+  assert.equal(deletedReplayEvents.at(-1).type, 'task_stream_closed');
+  assert.equal(deletedReplayEvents.at(-1).status, 'deleted');
+
+  const closeThrowRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-close-throw',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const closeThrowTaskId = closeThrowRegistry.createDetachedTask({
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-close-throw',
+    kind: 'creative_workflow',
+  });
+  closeThrowRegistry.markDone(closeThrowTaskId, '完成');
+  let onCloseCalls = 0;
+  await workflowTasks.subscribeCreativeWorkflowEvents({
+    workflowId: WORKFLOW_ID,
+    taskId: closeThrowTaskId,
+    sinceSeq: 0,
+    registry: closeThrowRegistry,
+    writeEvent: event => {
+      if (event.type === 'task_stream_closed') {
+        throw new Error('关闭事件写入失败');
+      }
+      return true;
+    },
+    onClose: () => {
+      onCloseCalls += 1;
+    },
+  });
+  assert.equal(onCloseCalls, 1);
+
   console.log('creative workflow task tests passed');
 })();

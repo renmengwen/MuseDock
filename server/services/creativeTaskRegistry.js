@@ -165,6 +165,22 @@ function createCreativeTaskRegistry(options = {}) {
     });
   }
 
+  function markDeleted(taskId, message = '创作任务已停止并删除。') {
+    const task = tasks.get(taskId);
+    if (!task || task.status !== 'running') {
+      return null;
+    }
+
+    const endedAt = now();
+    task.status = 'deleted';
+    task.ended_at = endedAt;
+    task.updated_at = endedAt;
+    return emit(taskId, {
+      type: 'workflow_deleted',
+      message,
+    });
+  }
+
   function createTask({ workflowId, operationId, kind = 'creative_workflow', runner } = {}) {
     const taskId = createDetachedTask({ workflowId, operationId, kind });
 
@@ -298,6 +314,7 @@ function createCreativeTaskRegistry(options = {}) {
     emit,
     markDone,
     markFailed,
+    markDeleted,
     subscribe,
     getTask,
     activeTaskForWorkflow,

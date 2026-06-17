@@ -219,6 +219,12 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
         ...(options.workflowOptions || {}),
         taskContext,
       });
+      if (result && result.success === false && result.status === 'deleted') {
+        await Promise.allSettled([...pendingEventWrites]);
+        registry.markDeleted(taskId, result.message || '创作任务已停止并删除。')
+          || registry.emit(taskId, { type: 'workflow_deleted', message: result.message || '创作任务已停止并删除。' });
+        return;
+      }
       if (result && result.success === false) {
         throw new Error(result.message || '创作任务执行失败。');
       }
@@ -339,12 +345,14 @@ async function subscribeCreativeWorkflowEvents({
       final_seq: finalSeq,
       message: '任务事件流已结束。',
     });
+    if (closed) return;
     closed = true;
     onClose?.();
   };
 
   subscription = registry.subscribe(taskId, sinceSeq, event => {
     if (!safeWrite(event)) {
+      if (closed) return;
       closed = true;
       subscription?.unsubscribe?.();
       onClose?.();

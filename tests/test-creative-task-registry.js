@@ -84,6 +84,20 @@ async function waitImmediate() {
   assert.equal(liveRegistry.getTask(liveTaskId).status, 'failed');
   assert.equal(liveRegistry.getTask(liveTaskId).events.at(-1).type, 'task_failed');
 
+  const deletedRegistry = createCreativeTaskRegistry({
+    now: () => '2026-06-18T00:00:00.000Z',
+    idFactory: () => 'creative-task-deleted',
+  });
+  const deletedTaskId = deletedRegistry.createDetachedTask({
+    workflowId: '202606180000000005',
+    operationId: 'workflow-op-deleted',
+  });
+  const deletedEvent = deletedRegistry.markDeleted(deletedTaskId, '创作任务已停止并删除。');
+  assert.equal(deletedRegistry.getTask(deletedTaskId).status, 'deleted');
+  assert.equal(deletedEvent.type, 'workflow_deleted');
+  assert.equal(deletedRegistry.getTask(deletedTaskId).events.at(-1).type, 'workflow_deleted');
+  assert.equal(deletedRegistry.activeTaskForWorkflow('202606180000000005'), null);
+
   const resilientRegistry = createCreativeTaskRegistry({
     now: () => '2026-06-18T00:00:00.000Z',
     idFactory: () => 'creative-task-resilient',

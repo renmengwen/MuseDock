@@ -58,7 +58,10 @@ router.post('/', async (req, res) => {
     if (req.body && req.body.skipValidation === true) {
       workflowOptions.skipValidation = true;
     }
-    const started = await taskService.startCreativeWorkflowTask(result.workflow_id, { workflowOptions });
+    const started = await taskService.startCreativeWorkflowTask(result.workflow_id, {
+      workflowOptions,
+      services: { creativeWorkflows: service },
+    });
     if (!started.success) {
       return res.status(500).json({
         success: false,
