@@ -1,6 +1,6 @@
 const defaultCreativeWorkflows = require('./creativeWorkflows');
 const { defaultRegistry } = require('./creativeTaskRegistry');
-const { calculateProjectProgress, calculateWorkflowProgress, isTerminalEvent } = require('./creativeTaskEvents');
+const { calculateProjectProgress, calculateWorkflowProgress } = require('./creativeTaskEvents');
 
 function createOperationId(workflowId) {
   const stamp = new Date().toISOString().replace(/[^0-9A-Za-z]/g, '');
@@ -70,6 +70,16 @@ function taskEventProgress(event = {}) {
   });
 }
 
+function taskStatusForEvent(event = {}) {
+  if (event.type === 'task_done') {
+    return 'done';
+  }
+  if (event.type === 'task_failed') {
+    return 'failed';
+  }
+  return 'running';
+}
+
 async function emitAndPersistTaskEvent({
   registry,
   taskId,
@@ -91,7 +101,7 @@ async function emitAndPersistTaskEvent({
   const patch = {
     active_task_id: taskId,
     active_operation_id: operationId,
-    task_status: isTerminalEvent(event || {}) ? emitted.type : 'running',
+    task_status: taskStatusForEvent(event || {}),
     current_stage: emitted.stage,
     current_stage_message: emitted.message,
     current_progress: progress,
@@ -104,7 +114,10 @@ async function emitAndPersistTaskEvent({
       type: 'workflow_persist_failed',
       operation_id: operationId,
       message: persisted.message || '更新创作任务进度失败。',
-      data: { error: persisted.message || '更新创作任务进度失败。' },
+      data: {
+        error: persisted.message || '更新创作任务进度失败。',
+        failed_event_seq: emitted.seq,
+      },
     });
   }
 
@@ -130,7 +143,7 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
     active_operation_id: operationId,
     task_status: 'running',
     current_stage: '',
-    current_stage_message: '创作任务已进入后台队列。',
+    current_stage_message: '后台创作任务已启动。',
     current_progress: 0,
     last_event_seq: 0,
   }, { rootDir });
@@ -138,7 +151,7 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
   registry.emit(taskId, {
     type: 'task_started',
     progress: 0,
-    message: '创作任务已启动。',
+    message: '后台创作任务已启动。',
   });
 
   setImmediate(async () => {

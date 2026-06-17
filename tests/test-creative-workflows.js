@@ -779,6 +779,7 @@ async function testDouyinLoginRequirementUsesChineseMessage() {
 
 async function testPersistsFailureFromBriefStage() {
   const { rootDir, mediaRoot } = createTempDirs();
+  const taskEvents = [];
   const { services } = createFakeServices({
     agentRuns: {
       generateDouyinRunHyperframesFreeformBrief: async () => ({
@@ -789,7 +790,16 @@ async function testPersistsFailureFromBriefStage() {
   });
 
   await createCreativeWorkflow({ input: '做一期关于 AI 视频生产的知识科普' }, { rootDir, mediaRoot, services });
-  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+  const run = await runCreativeWorkflow(WORKFLOW_ID, {
+    rootDir,
+    mediaRoot,
+    services,
+    taskContext: {
+      emit: async event => {
+        taskEvents.push(event);
+      },
+    },
+  });
 
   assert.equal(run.success, false);
   assert.equal(run.status, 'failed');
@@ -802,6 +812,8 @@ async function testPersistsFailureFromBriefStage() {
   const persisted = await getCreativeWorkflow(WORKFLOW_ID, { rootDir });
   assert.equal(persisted.data.status, 'failed');
   assert.equal(persisted.data.error.message, '策划失败');
+  const failedEvent = taskEvents.find(event => event.type === 'stage_failed' && event.stage === 'brief');
+  assert.equal(failedEvent.stage_progress, 100);
 }
 
 async function testStopsWorkflowWhenDeletedDuringGeneration() {

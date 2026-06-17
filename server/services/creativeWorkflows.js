@@ -1009,6 +1009,7 @@ async function runStage(record, stageId, rootDir, handler, services, taskContext
       await taskContext.emit({
         type: 'stage_failed',
         stage: stageId,
+        stage_progress: 100,
         message,
         data: { error: message },
       });

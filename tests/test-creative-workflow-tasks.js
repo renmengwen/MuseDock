@@ -13,6 +13,10 @@ function tempRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'creative-workflow-tasks-'));
 }
 
+function readWorkflow(rootDir) {
+  return JSON.parse(fs.readFileSync(path.join(rootDir, `${WORKFLOW_ID}.json`), 'utf-8'));
+}
+
 function services(now = '2026-06-18T00:00:00.000Z') {
   return {
     idFactory: () => WORKFLOW_ID,
@@ -55,6 +59,9 @@ function services(now = '2026-06-18T00:00:00.000Z') {
   assert.equal(started.success, true);
   assert.equal(started.task_id, 'creative-task-test');
   assert.equal(started.active_task.status, 'running');
+  const startedRecord = readWorkflow(rootDir);
+  assert.equal(startedRecord.current_stage_message, '后台创作任务已启动。');
+  assert.equal(registry.getTask(started.task_id).events[0].message, '后台创作任务已启动。');
   await new Promise(resolve => setImmediate(resolve));
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(runCalls, [{ workflowId: WORKFLOW_ID, hasTaskContext: true }]);
@@ -70,6 +77,72 @@ function services(now = '2026-06-18T00:00:00.000Z') {
   });
   assert.equal(fetched.success, true);
   assert.notEqual(fetched.data.status, 'failed');
+
+  const doneRootDir = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '测试终态状态', useResearch: false }, { rootDir: doneRootDir, services: services() });
+  const doneRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-done',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const doneTaskId = doneRegistry.createDetachedTask({
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-done',
+    kind: 'creative_workflow',
+  });
+  await workflowTasks.emitAndPersistTaskEvent({
+    registry: doneRegistry,
+    taskId: doneTaskId,
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-done',
+    event: { type: 'task_done', progress: 100, message: '完成' },
+    rootDir: doneRootDir,
+  });
+  assert.equal(readWorkflow(doneRootDir).task_status, 'done');
+
+  const failedRootDir = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '测试失败状态', useResearch: false }, { rootDir: failedRootDir, services: services() });
+  const failedRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-failed',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const failedTaskId = failedRegistry.createDetachedTask({
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-failed',
+    kind: 'creative_workflow',
+  });
+  await workflowTasks.emitAndPersistTaskEvent({
+    registry: failedRegistry,
+    taskId: failedTaskId,
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-failed',
+    event: { type: 'task_failed', message: '失败' },
+    rootDir: failedRootDir,
+  });
+  assert.equal(readWorkflow(failedRootDir).task_status, 'failed');
+
+  const persistFailRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-persist-failed',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const persistFailTaskId = persistFailRegistry.createDetachedTask({
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-persist-failed',
+    kind: 'creative_workflow',
+  });
+  const emitted = await workflowTasks.emitAndPersistTaskEvent({
+    registry: persistFailRegistry,
+    taskId: persistFailTaskId,
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-persist-failed',
+    event: { type: 'stage_progress', stage: 'project', message: '写入失败测试' },
+    rootDir: tempRoot(),
+    creativeWorkflows: {
+      patchCreativeWorkflowTaskSummary: async () => ({ success: false, message: '写入失败' }),
+    },
+  });
+  const persistFailedEvent = persistFailRegistry.getTask(persistFailTaskId).events
+    .find(event => event.type === 'workflow_persist_failed');
+  assert.equal(persistFailedEvent.data.failed_event_seq, emitted.seq);
 
   console.log('creative workflow task tests passed');
 })();
