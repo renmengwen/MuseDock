@@ -37,6 +37,46 @@ assert.equal(normalized.scenes[1].start, 8.35);
 assert.equal(normalized.scenes[0].kind, 'text');
 assert.equal(sceneSpec.validateSceneSpec(normalized).success, true);
 
+const normalizedObjectVisualText = sceneSpec.normalizeSceneSpec({
+  title: '对象视觉字段',
+  scenes: [{
+    id: 'scene_object_visual',
+    duration: 5,
+    kind: 'data',
+    narration_text: '对象字段不应渲染成 object。',
+    captions: [],
+    visual_text: {
+      headline: 'Cursor 的关键数字',
+      keywords: [{ label: '成立时间', value: '2022' }, '26 亿美元'],
+      cards: [
+        { title: '成立时间', value: '2022' },
+        { label: '年化收入', value: '26 亿美元' },
+        { name: '此前估值', value: '293 亿美元' },
+      ],
+    },
+  }],
+});
+assert.deepEqual(normalizedObjectVisualText.scenes[0].visual_text.keywords, ['成立时间：2022', '26 亿美元']);
+assert.deepEqual(normalizedObjectVisualText.scenes[0].visual_text.cards, ['成立时间：2022', '年化收入：26 亿美元', '此前估值：293 亿美元']);
+assert.equal(JSON.stringify(normalizedObjectVisualText).includes('[object Object]'), false);
+
+const normalizedObjectSentinel = sceneSpec.normalizeSceneSpec({
+  title: '过滤 object 字符串',
+  scenes: [{
+    id: 'scene_object_sentinel',
+    duration: 5,
+    narration_text: '过滤错误字符串。',
+    visual_text: {
+      headline: '关键数字',
+      keywords: ['2022', '[object Object]', '26 亿美元'],
+      cards: ['[object Object]', '293 亿美元'],
+    },
+  }],
+});
+assert.deepEqual(normalizedObjectSentinel.scenes[0].visual_text.keywords, ['2022', '26 亿美元']);
+assert.deepEqual(normalizedObjectSentinel.scenes[0].visual_text.cards, ['293 亿美元']);
+assert.equal(JSON.stringify(normalizedObjectSentinel).includes('[object Object]'), false);
+
 const edited = sceneSpec.applySceneEdit(normalized, {
   type: 'duration',
   scene_id: 'scene_01',

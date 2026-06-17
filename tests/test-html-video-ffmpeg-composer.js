@@ -9,6 +9,9 @@ const composer = require('../server/services/creative-video/html-video/ffmpegCom
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-ffmpeg-'));
   const commands = [];
   const runCommand = async (command, args) => {
+    if (command === (process.platform === 'win32' ? 'where.exe' : 'which')) {
+      return { ok: false, code: 1, stdout: '', stderr: '' };
+    }
     commands.push({ command, args });
     return { ok: true, code: 0, stdout: '', stderr: '' };
   };
@@ -130,6 +133,27 @@ const composer = require('../server/services/creative-video/html-video/ffmpegCom
   assert.equal(durationMismatch.success, false);
   assert.equal(durationMismatch.code, 'duration_mismatch');
   assert.match(durationMismatch.message, /时长偏差/);
+
+  const ffmpegDir = path.join(workDir, 'bin');
+  const foundFfmpeg = path.join(ffmpegDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+  const expectedFfprobe = path.join(ffmpegDir, process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+  await fs.mkdir(ffmpegDir, { recursive: true });
+  await fs.writeFile(expectedFfprobe, 'ffprobe');
+  const resolvedProbe = await composer.verifyDurationWithFfprobe({
+    videoPath: filterOutput,
+    expectedDurationSec: 6,
+    toleranceSec: 0.5,
+    runCommand: async (command, args) => {
+      if (command === (process.platform === 'win32' ? 'where.exe' : 'which')) {
+        assert.deepEqual(args, ['ffmpeg']);
+        return { ok: true, stdout: `${foundFfmpeg}\n`, stderr: '' };
+      }
+      assert.equal(command, expectedFfprobe);
+      return { ok: true, stdout: '6.0\n', stderr: '' };
+    },
+  });
+  assert.equal(resolvedProbe.success, true);
+  assert.equal(resolvedProbe.duration_sec, 6);
 
   const narrationTrack = await composer.concatAudioWithFfmpeg([
     { path: path.join(workDir, 'tts/scene_01.mp3') },

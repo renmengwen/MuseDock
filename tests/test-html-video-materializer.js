@@ -152,5 +152,33 @@ async function createTemplate(rootDir) {
   const overrideHtml = await fs.readFile(path.join(projectDir, 'frames/custom_scene_02.html'), 'utf8');
   assert.equal(overrideHtml, '<html><body>用户改写</body></html>');
 
+  const rawProjectDir = path.join(rootDir, 'raw-project');
+  await writeFile(path.join(rawProjectDir, 'frames/01-raw.html'), '<!doctype html><html><body>raw</body></html>');
+  const rawResult = await materializeProject({
+    projectDir: rawProjectDir,
+    project: normalizeProject({
+      project_id: 'project_raw',
+      frames: [
+        {
+          id: 'raw_01',
+          scene_id: 'raw_01',
+          order: 1,
+          source_mode: 'raw_html',
+          html_path: 'frames/01-raw.html',
+          duration_sec: 2,
+          narration_text: 'raw 旁白',
+          metadata: { from: 'raw-builder' },
+        },
+      ],
+    }),
+    templateRegistry,
+  });
+  assert.equal(rawResult.project.frames[0].html_path, 'frames/01-raw.html');
+  assert.equal(rawResult.project.frames[0].source_mode, 'raw_html');
+  assert.equal(rawResult.project.frames[0].narration_text, 'raw 旁白');
+  assert.equal(rawResult.project.frames[0].metadata.from, 'raw-builder');
+  assert.ok(rawResult.diagnostics.some(item => item.code === 'raw_html_preserved' && item.frame_id === 'raw_01'));
+  assert.equal(await fs.readFile(path.join(rawProjectDir, 'frames/01-raw.html'), 'utf8'), '<!doctype html><html><body>raw</body></html>');
+
   console.log('html-video materializer tests passed');
 })();

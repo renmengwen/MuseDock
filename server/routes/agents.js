@@ -409,16 +409,31 @@ router.get('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/files/:file_name
   try {
     const { aweme_id, run_id, file_name } = req.params;
     const detail = await agentRuns.getDouyinAgentRun(aweme_id, run_id);
-    const storedDir = detail?.data?.hyperframes_freeform?.project_dir;
+    const freeform = detail?.data?.hyperframes_freeform || {};
+    const storedDir = freeform.project_dir;
     let filePath = storedDir
       ? path.resolve(storedDir, file_name)
       : agentRuns.resolveDouyinRunHyperframesFreeformFile(aweme_id, run_id, file_name);
-    if (storedDir && file_name === 'output.mp4' && !fs.existsSync(filePath)) {
-      const exportPath = path.resolve(storedDir, 'exports', 'output.mp4');
-      const relative = path.relative(path.resolve(storedDir), exportPath);
-      if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
-        filePath = exportPath;
+    if (storedDir && file_name === 'output.mp4') {
+      const projectRoot = path.resolve(storedDir);
+      const recordedOutput = String(freeform.render?.output_path || '').trim();
+      if (recordedOutput) {
+        const recordedPath = path.resolve(recordedOutput);
+        const relative = path.relative(projectRoot, recordedPath);
+        if (!relative.startsWith('..') && !path.isAbsolute(relative) && fs.existsSync(recordedPath)) {
+          filePath = recordedPath;
+        }
       }
+      if (!fs.existsSync(filePath)) {
+        const exportPath = path.resolve(storedDir, 'exports', 'output.mp4');
+        const relative = path.relative(projectRoot, exportPath);
+        if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
+          filePath = exportPath;
+        }
+      }
+    }
+    if (!fs.existsSync(filePath)) {
+      throw new Error('HyperFrames freeform file not found');
     }
     return res.sendFile(filePath);
   } catch (error) {

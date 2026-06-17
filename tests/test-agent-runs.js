@@ -2823,6 +2823,7 @@ async function run() {
     const htmlVideoProjectDir = path.join(rootDir, awemeId, 'agent_runs', 'ok-run-html-video');
     fs.mkdirSync(path.join(htmlVideoProjectDir, 'exports'), { recursive: true });
     fs.writeFileSync(path.join(htmlVideoProjectDir, 'exports', 'output.mp4'), 'html-video-mp4');
+    fs.writeFileSync(path.join(htmlVideoProjectDir, 'exports', 'output-audio.mp4'), 'html-video-mp4-with-audio');
     agentRuns.getDouyinAgentRun = async () => ({
       success: true,
       aweme_id: awemeId,
@@ -2834,12 +2835,43 @@ async function run() {
             render_mode: 'html-video',
             html_video_project_path: htmlVideoProjectDir,
           },
+          render: {
+            output_path: path.join(htmlVideoProjectDir, 'exports', 'output-audio.mp4'),
+          },
         },
       },
     });
     const htmlVideoOutputResponse = await requestText(server, 'GET', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/files/output.mp4`);
     assert.strictEqual(htmlVideoOutputResponse.statusCode, 200);
-    assert.strictEqual(htmlVideoOutputResponse.body, 'html-video-mp4');
+    assert.strictEqual(htmlVideoOutputResponse.body, 'html-video-mp4-with-audio');
+
+    const failedHtmlVideoProjectDir = path.join(rootDir, awemeId, 'agent_runs', 'failed-run-html-video');
+    const silentFallbackDir = path.join(rootDir, awemeId, 'agent_runs', 'failed-run-hyperframes-lite');
+    fs.mkdirSync(silentFallbackDir, { recursive: true });
+    fs.writeFileSync(path.join(silentFallbackDir, 'output.mp4'), 'legacy-fallback-mp4');
+    agentRuns.getDouyinAgentRun = async () => ({
+      success: true,
+      aweme_id: awemeId,
+      run_id: 'failed-run',
+      data: {
+        hyperframes_freeform: {
+          project_dir: failedHtmlVideoProjectDir,
+          project: {
+            status: 'failed',
+            render_mode: 'html-video',
+            html_video_project_path: failedHtmlVideoProjectDir,
+            legacy_fallback_reason: 'html-video 渲染失败。',
+          },
+          render: {
+            status: 'failed',
+            output_path: '',
+          },
+        },
+      },
+    });
+    const failedHtmlVideoOutputResponse = await requestText(server, 'GET', `/api/agents/douyin/${awemeId}/runs/failed-run/hyperframes-freeform/files/output.mp4`);
+    assert.strictEqual(failedHtmlVideoOutputResponse.statusCode, 400);
+    assert.notStrictEqual(failedHtmlVideoOutputResponse.body, 'legacy-fallback-mp4');
 
     const saveFreeformFileResponse = await requestJson(server, 'PUT', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/files/index.html`, {
       content: '<html>saved route freeform</html>',

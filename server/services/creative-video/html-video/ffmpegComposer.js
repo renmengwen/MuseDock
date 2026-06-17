@@ -1,10 +1,24 @@
 const fs = require('fs/promises');
+const fsSync = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
-function getFfmpegCommand(options = {}) {
+async function findFfmpegOnPath(runCommandImpl) {
+  const finder = process.platform === 'win32' ? 'where.exe' : 'which';
+  const result = await runCommandImpl(finder, ['ffmpeg']);
+  if (!result.ok) return '';
+  return String(result.stdout || '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(Boolean) || '';
+}
+
+async function getFfmpegCommand(options = {}) {
   if (options.ffmpegPath) return options.ffmpegPath;
   if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
+  const runCommandImpl = options.runCommand || runCommand;
+  const pathFfmpeg = await findFfmpegOnPath(runCommandImpl);
+  if (pathFfmpeg) return pathFfmpeg;
   try {
     return require('@ffmpeg-installer/ffmpeg').path;
   } catch {
@@ -12,15 +26,22 @@ function getFfmpegCommand(options = {}) {
   }
 }
 
-function getFfprobeCommand(options = {}) {
+async function getFfprobeCommand(options = {}) {
   if (options.ffprobePath) return options.ffprobePath;
   if (process.env.FFPROBE_PATH) return process.env.FFPROBE_PATH;
-  try {
-    const ffmpegPath = require('@ffmpeg-installer/ffmpeg').path;
-    return path.join(path.dirname(ffmpegPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
-  } catch {
-    return process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+  const ffmpegPath = options.ffmpegPath || await getFfmpegCommand(options);
+  if (ffmpegPath && (ffmpegPath.includes(path.sep) || path.isAbsolute(ffmpegPath))) {
+    const adjacent = path.join(path.dirname(ffmpegPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+    if (fsSync.existsSync(adjacent)) return adjacent;
   }
+  try {
+    const installerPath = require('@ffmpeg-installer/ffmpeg').path;
+    const adjacent = path.join(path.dirname(installerPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+    if (fsSync.existsSync(adjacent)) return adjacent;
+  } catch {
+    // Fall through to PATH lookup.
+  }
+  return process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
 }
 
 function runCommand(command, args, options = {}) {
@@ -53,7 +74,7 @@ async function verifyDurationWithFfprobe({
     return { success: true, skipped: true, message: '未提供期望时长，跳过 ffprobe 时长校验。' };
   }
 
-  const ffprobe = getFfprobeCommand({ ffprobePath });
+  const ffprobe = await getFfprobeCommand({ ffprobePath, runCommand: runCommandImpl });
   const args = [
     '-v', 'error',
     '-show_entries', 'format=duration',
@@ -152,7 +173,7 @@ async function concatAudioWithFfmpeg(audioFiles, outputPath, workDir, opts = {})
     return { success: true, skipped: true, output_path: files[0].path || files[0], message: '只有一段旁白音频，跳过拼接。' };
   }
   const runCommandImpl = opts.runCommand || runCommand;
-  const ffmpeg = getFfmpegCommand(opts);
+  const ffmpeg = await getFfmpegCommand(opts);
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
   const listPath = await writeAudioConcatList(files, workDir);
   const args = [
@@ -180,7 +201,7 @@ async function concatFramesWithFfmpeg(frameMp4s, outputPath, workDir, opts = {})
     return { success: false, message: '没有可拼接的视频帧。' };
   }
   const runCommandImpl = opts.runCommand || runCommand;
-  const ffmpeg = getFfmpegCommand(opts);
+  const ffmpeg = await getFfmpegCommand(opts);
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
   let args;
@@ -271,7 +292,7 @@ async function muxAudioWithFfmpeg({
     return { success: true, skipped: true, output_path: videoPath, message: '无音频文件，跳过混流。' };
   }
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  const ffmpeg = getFfmpegCommand({ ffmpegPath });
+  const ffmpeg = await getFfmpegCommand({ ffmpegPath, runCommand: runCommandImpl });
   const args = [
     '-y',
     '-i', videoPath,

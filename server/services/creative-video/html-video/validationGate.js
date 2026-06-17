@@ -43,6 +43,7 @@ function validateTemplate({
   ref,
   stage,
   options,
+  validateInputs = true,
 }) {
   const manifest = templateRegistry && templateRegistry.getTemplate(templateId);
   if (!manifest) {
@@ -71,13 +72,15 @@ function validateTemplate({
     }, false);
   }
 
-  const inputValidation = validateTemplateInputs(objectOrEmpty(inputs), manifest);
-  if (!inputValidation.success) {
-    add(diagnostics, 'template_inputs_invalid', stage, inputValidation.user_message || '模板字段校验失败。', {
-      template_id: templateId,
-      ref,
-      diagnostics: inputValidation.diagnostics || [],
-    });
+  if (validateInputs) {
+    const inputValidation = validateTemplateInputs(objectOrEmpty(inputs), manifest);
+    if (!inputValidation.success) {
+      add(diagnostics, 'template_inputs_invalid', stage, inputValidation.user_message || '模板字段校验失败。', {
+        template_id: templateId,
+        ref,
+        diagnostics: inputValidation.diagnostics || [],
+      });
+    }
   }
 
   return manifest;
@@ -113,6 +116,7 @@ async function validateHtmlVideoProject({
     ref: 'project',
     stage: 'template',
     options,
+    validateInputs: arrayOrEmpty(input.frames).some(frame => frame.source_mode !== 'raw_html'),
   });
 
   arrayOrEmpty(input.frames).forEach(frame => {
@@ -124,6 +128,7 @@ async function validateHtmlVideoProject({
       ref: frame.id || frame.scene_id,
       stage: 'frame',
       options,
+      validateInputs: frame.source_mode !== 'raw_html',
     });
 
     if (frame.engine && !SUPPORTED_ENGINES.has(frame.engine) && !SUPPORTED_ENGINES.has(mappedEngine(frame.engine))) {

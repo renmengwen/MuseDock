@@ -10,6 +10,9 @@ const hyperframesTemplateRenderer = require('../server/services/creative-video/h
   const outputMp4 = path.join(tmpDir, 'output.mp4');
   fs.writeFileSync(outputMp4, Buffer.alloc(100));
 
+  const previousProductionForLegacyTests = process.env.HTML_VIDEO_PRODUCTION_ENABLED;
+  process.env.HTML_VIDEO_PRODUCTION_ENABLED = 'false';
+
   const calls = [];
   const serviceOrder = [];
   let renderAudioManifest = null;
@@ -201,10 +204,13 @@ const hyperframesTemplateRenderer = require('../server/services/creative-video/h
       },
     },
   });
-  assert.equal(visualQaFailed.success, false);
-  assert.match(visualQaFailed.message, /视觉质检失败/);
-  assert.deepEqual(visualQaFailed.issues, ['低信息帧比例过高']);
+  assert.equal(visualQaFailed.success, true);
+  assert.match(visualQaFailed.message, /创意视频生成完成/);
+  assert.deepEqual(visualQaFailed.visual_report.issues, ['低信息帧比例过高']);
   assert.equal(visualQaFailed.visual_report.success, false);
+
+  if (previousProductionForLegacyTests == null) delete process.env.HTML_VIDEO_PRODUCTION_ENABLED;
+  else process.env.HTML_VIDEO_PRODUCTION_ENABLED = previousProductionForLegacyTests;
 
   const originalAssemble = hyperframesTemplateRenderer.assembleProjectFiles;
   hyperframesTemplateRenderer.assembleProjectFiles = () => ({
@@ -300,6 +306,82 @@ const hyperframesTemplateRenderer = require('../server/services/creative-video/h
   else process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED = previousFallbackEnabled;
   assert.equal(blockedFallback.success, false);
   assert.equal(legacyProjectWriterCalledWhenFallbackDisabled, false);
+
+  const previousDefaultFallbackEnabled = process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED;
+  delete process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED;
+  let legacyProjectWriterCalledByDefault = false;
+  const defaultBlockedFallback = await facade.generateCreativeVideoProject({
+    workflowId: '202606140000000006',
+    runId: 'run_006',
+    creativeContext: { input: { raw_text: '测试主题' } },
+    services: {
+      htmlVideoWorkflow: {
+        generateHtmlVideo: async () => ({
+          success: false,
+          message: 'html-video 模拟失败。',
+          fallback_allowed: true,
+          html_video_diagnostics: [{ code: 'render_failed', stage: 'render', user_message: '首帧渲染失败。', details: {}, fallback_allowed: true }],
+        }),
+      },
+      aiTextModel: {
+        callTextModel: async () => ({ success: true, text: JSON.stringify({ scene_spec: { title: '测试', aspect_ratio: '16:9', scenes: [{ id: 'scene_01', duration: 8, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }] } }) }),
+      },
+      projectWriter: async () => {
+        legacyProjectWriterCalledByDefault = true;
+        return { success: true, project_dir: tmpDir, files: [] };
+      },
+    },
+  });
+  if (previousDefaultFallbackEnabled == null) delete process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED;
+  else process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED = previousDefaultFallbackEnabled;
+  assert.equal(defaultBlockedFallback.success, false);
+  assert.equal(legacyProjectWriterCalledByDefault, false);
+  assert.equal(defaultBlockedFallback.render_mode, 'html-video');
+  assert.ok(defaultBlockedFallback.legacy_fallback_reason);
+  assert.ok(defaultBlockedFallback.html_video_diagnostics.some(item => item.user_message === '首帧渲染失败。'));
+
+  const previousExplicitFallbackEnabled = process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED;
+  process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED = 'true';
+  let explicitFallbackProjectWriterCalled = false;
+  const explicitFallback = await facade.generateCreativeVideoProject({
+    workflowId: '202606140000000007',
+    runId: 'run_007',
+    creativeContext: { input: { raw_text: '测试主题' } },
+    services: {
+      htmlVideoWorkflow: {
+        generateHtmlVideo: async () => ({
+          success: false,
+          message: 'html-video 模拟失败。',
+          fallback_allowed: true,
+          html_video_diagnostics: [{ code: 'render_failed', stage: 'render', user_message: '首帧渲染失败。', details: {}, fallback_allowed: true }],
+        }),
+      },
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(message => message.content).join('\n');
+          if (prompt.includes('不允许输出 frame_specs')) {
+            return { success: true, text: JSON.stringify({ scene_spec: { title: '测试', aspect_ratio: '16:9', scenes: [{ id: 'scene_01', duration: 8, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }] } }) };
+          }
+          return { success: true, text: JSON.stringify({ frame_specs: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 8, kind: 'text', template: 'hero_title', layout: 'center_stack', background: 'dark_gradient', motion: 'fade_up', text_layers: [{ id: 'headline', role: 'headline', text: '标题', emphasis: 'primary' }], visual_layers: [] }] }) };
+        },
+      },
+      projectWriter: async files => {
+        explicitFallbackProjectWriterCalled = true;
+        return { success: true, project_dir: tmpDir, files: Object.keys(files) };
+      },
+      checker: async () => ({ success: true, message: '校验通过' }),
+      ttsService: { synthesizeSceneNarration: async () => ({ success: true, audio_manifest: { scenes: [] } }) },
+      renderAdapter: { render: async () => ({ success: true, output_path: outputMp4, diagnostics: [] }) },
+      visualQaService: { inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }) },
+    },
+  });
+  if (previousExplicitFallbackEnabled == null) delete process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED;
+  else process.env.HTML_VIDEO_LEGACY_FALLBACK_ENABLED = previousExplicitFallbackEnabled;
+  assert.equal(explicitFallback.success, true);
+  assert.equal(explicitFallbackProjectWriterCalled, true);
+  assert.equal(explicitFallback.render_mode, 'legacy');
+  assert.ok(explicitFallback.legacy_fallback_reason);
+  assert.match(explicitFallback.message, /html-video 生成失败，已按配置回退到 Legacy 模式。/);
 
   console.log('creative video workflow facade tests passed');
 })();

@@ -87,7 +87,7 @@ async function createVerticalTemplate(rootDir) {
     rootDir,
     sceneSpec,
     creativeContext: { input: { raw_text: 'SpaceX 收购 Cursor' } },
-    target: {},
+    target: { html_video_generation_mode: 'template_inputs' },
     templateRegistry,
     skipValidation: false,
     services: {

@@ -148,6 +148,27 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   assert.equal(pass.ok, true);
   assert.deepEqual(pass.diagnostics, []);
 
+  const rawHtmlPass = await validateHtmlVideoProject({
+    project: {
+      template_id: 'valid',
+      template_inputs: {},
+      frames: [
+        {
+          id: 'raw_01',
+          template_id: 'valid',
+          source_mode: 'raw_html',
+          inputs: {},
+          html_path: 'frames/raw_01.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_01', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(rawHtmlPass.ok, true);
+  assert.deepEqual(rawHtmlPass.diagnostics, []);
+
   const { normalizeDiagnostics } = require('../server/services/creative-video/html-video/diagnostics');
   const normalized = normalizeDiagnostics(['Playwright browser executable not found'], { stage: 'render' });
   assert.match(normalized[0].user_message, /html-video|失败|错误|未配置/);

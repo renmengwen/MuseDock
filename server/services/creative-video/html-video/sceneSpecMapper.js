@@ -88,8 +88,15 @@ function defaultFrameFields() {
 }
 
 function compactText(value, maxLength = 80) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  let raw = value;
+  if (Array.isArray(value)) {
+    raw = value.map(item => compactText(item, maxLength)).filter(Boolean).join(' / ');
+  } else if (value && typeof value === 'object') {
+    raw = objectText(value);
+  }
+  const text = String(raw || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
+  if (/^\[object Object\]$/i.test(text)) return '';
   return text.length > maxLength ? text.slice(0, maxLength - 1).trimEnd() : text;
 }
 
@@ -110,9 +117,44 @@ function fieldMaxLength(schema, key, fallback) {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
+function objectText(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const label = value.title
+    || value.label
+    || value.name
+    || value.text
+    || value.headline
+    || value.key
+    || '';
+  const metric = value.value
+    ?? value.metric
+    ?? value.amount
+    ?? value.count
+    ?? value.y
+    ?? '';
+  const labelText = compactText(label, 40);
+  const metricText = compactText(metric, 40);
+  if (labelText && metricText && labelText !== metricText) return `${labelText}：${metricText}`;
+  if (labelText) return labelText;
+  if (metricText) return metricText;
+  const nested = ['summary', 'description', 'subtitle']
+    .map(key => compactText(value[key], 40))
+    .find(Boolean);
+  return nested || '';
+}
+
 function sectionNo(index, total) {
   const width = Math.max(2, String(total).length);
   return `${String(index + 1).padStart(width, '0')}/${String(total).padStart(width, '0')}`;
+}
+
+function displayText(value) {
+  if (value == null) return '';
+  if (Array.isArray(value)) {
+    return value.map(item => compactText(item, 40)).filter(Boolean).join(' / ');
+  }
+  if (typeof value === 'object') return objectText(value);
+  return String(value);
 }
 
 function firstMetric(visualText = {}, maxLength = 24) {
@@ -121,7 +163,7 @@ function firstMetric(visualText = {}, maxLength = 24) {
     ...(Array.isArray(visualText.cards) ? visualText.cards : []),
     visualText.headline,
   ];
-  return compactText(candidates.find(item => /[$￥¥]?\d|%/.test(String(item || ''))) || visualText.headline || '', maxLength);
+  return compactText(candidates.find(item => /[$￥¥]?\d|%/.test(displayText(item))) || visualText.headline || '', maxLength);
 }
 
 function buildFrameInputs({ templateInputs, templateSchema, scene, index, total }) {
@@ -133,6 +175,7 @@ function buildFrameInputs({ templateInputs, templateSchema, scene, index, total 
   const keywords = Array.isArray(visualText.keywords)
     ? visualText.keywords.map(item => compactText(item, 24)).filter(Boolean)
     : [];
+  const bulletItems = cards.length ? cards : keywords;
   const inputs = clone(templateInputs);
 
   if (schemaHas(templateSchema, 'headline')) {
@@ -151,13 +194,13 @@ function buildFrameInputs({ templateInputs, templateSchema, scene, index, total 
   if (schemaHas(templateSchema, 'card_label')) {
     inputs.card_label = compactText(keywords.slice(0, 2).join('｜') || inputs.card_label, fieldMaxLength(templateSchema, 'card_label', 24));
   }
-  if (schemaHas(templateSchema, 'bullets')) inputs.bullets = cards.slice(0, 4);
-  if (schemaHas(templateSchema, 'cards')) inputs.cards = cards.slice(0, 4);
+  if (schemaHas(templateSchema, 'bullets')) inputs.bullets = bulletItems.slice(0, 4);
+  if (schemaHas(templateSchema, 'cards')) inputs.cards = bulletItems.slice(0, 4);
   if (schemaHas(templateSchema, 'metric')) {
     inputs.metric = firstMetric(visualText, fieldMaxLength(templateSchema, 'metric', 24));
   }
   if (schemaHas(templateSchema, 'footer_text')) {
-    inputs.footer_text = compactText(cards[0] || inputs.footer_text || '', fieldMaxLength(templateSchema, 'footer_text', 36));
+    inputs.footer_text = compactText(bulletItems[0] || inputs.footer_text || '', fieldMaxLength(templateSchema, 'footer_text', 36));
   }
   if (schemaHas(templateSchema, 'duration_sec')) {
     inputs.duration_sec = Number(scene.duration || scene.target_duration_sec || inputs.duration_sec || DEFAULT_FRAME_DURATION_SEC);

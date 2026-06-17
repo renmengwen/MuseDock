@@ -26,6 +26,34 @@ const ASPECT_RATIOS = {
   '4:5': { width: 1080, height: 1350 },
 };
 
+const GOOGLE_FONT_FALLBACKS = [
+  [/(['"]?)Archivo Black\1/gi, 'sans-serif'],
+  [/(['"]?)Archivo\1/gi, 'sans-serif'],
+  [/(['"]?)Caveat\1/gi, 'cursive'],
+  [/(['"]?)EB Garamond\1/gi, 'serif'],
+  [/(['"]?)IBM Plex Mono\1/gi, 'monospace'],
+  [/(['"]?)IBM Plex Sans\1/gi, 'sans-serif'],
+  [/(['"]?)Inter Tight\1/gi, 'sans-serif'],
+  [/(['"]?)JetBrains Mono\1/gi, 'monospace'],
+  [/(['"]?)Libre Baskerville\1/gi, 'serif'],
+  [/(['"]?)Noto Sans SC\1/gi, 'sans-serif'],
+  [/(['"]?)Noto Serif SC\1/gi, 'serif'],
+  [/(['"]?)Shrikhand\1/gi, 'cursive'],
+  [/(['"]?)Source Serif Pro\1/gi, 'serif'],
+  [/(['"]?)Space Grotesk\1/gi, 'sans-serif'],
+  [/(['"]?)Space Mono\1/gi, 'monospace'],
+  [/(['"]?)Syne\1/gi, 'sans-serif'],
+];
+
+const ROOT_COMPOSITION_ATTRS = [
+  'data-composition-id',
+  'data-start',
+  'data-duration',
+  'data-width',
+  'data-height',
+  'data-track-index',
+];
+
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -88,6 +116,274 @@ function roundTime(value) {
 
 function dimensionsFor(aspectRatio) {
   return ASPECT_RATIOS[aspectRatio] || ASPECT_RATIOS['16:9'];
+}
+
+function ensureRootAttribute(tag, name, value) {
+  const pattern = new RegExp(`\\s${name}\\s*=`, 'i');
+  if (pattern.test(tag)) return tag;
+  return tag.replace(/>$/, ` ${name}="${value}">`);
+}
+
+function stripRootCompositionAttributesFromBody(html) {
+  return String(html || '').replace(/<body\b[^>]*>/i, (tag) => {
+    let nextTag = tag;
+    for (const name of ROOT_COMPOSITION_ATTRS) {
+      nextTag = nextTag.replace(new RegExp(`\\s${name}\\s*=\\s*(?:"[^"]*"|'[^']*')`, 'gi'), '');
+    }
+    return nextTag;
+  });
+}
+
+function stripRootCompositionAttributesFromElements(html) {
+  return String(html || '').replace(/<([a-z][\w:-]*)([^>]*)>/gi, (tag, tagName) => {
+    if (/^(html|body|script|style)$/i.test(tagName)) return tag;
+    let nextTag = tag;
+    for (const name of ROOT_COMPOSITION_ATTRS) {
+      nextTag = nextTag.replace(new RegExp(`\\s${name}\\s*=\\s*(?:"[^"]*"|'[^']*')`, 'gi'), '');
+    }
+    return nextTag;
+  });
+}
+
+function splitTrailingScripts(bodyContent) {
+  const scripts = [];
+  let visualContent = String(bodyContent || '').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (script) => {
+    scripts.push(script);
+    return '';
+  });
+  visualContent = visualContent.trim();
+  return { visualContent, scripts: scripts.join('\n') };
+}
+
+function buildStageOpenTag({ duration, dimensions }) {
+  return [
+    '<div id="stage"',
+    ' data-composition-id="main"',
+    ' data-start="0"',
+    ` data-duration="${duration}"`,
+    ` data-width="${dimensions.width}"`,
+    ` data-height="${dimensions.height}"`,
+    ` style="position:relative;width:${dimensions.width}px;height:${dimensions.height}px;overflow:hidden"`,
+    '>',
+  ].join('');
+}
+
+function wrapBodyInEntryComposition(html, { duration, dimensions }) {
+  return String(html || '').replace(/(<body\b[^>]*>)([\s\S]*?)(<\/body>)/i, (match, bodyOpen, bodyContent, bodyClose) => {
+    const { visualContent, scripts } = splitTrailingScripts(stripRootCompositionAttributesFromElements(bodyContent));
+    const stage = `${buildStageOpenTag({ duration, dimensions })}\n${visualContent}\n</div>`;
+    return `${bodyOpen}\n  ${stage}${scripts ? `\n${scripts}` : ''}\n${bodyClose}`;
+  });
+}
+
+function bodyStartsWithEntryComposition(html) {
+  const bodyMatch = String(html || '').match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
+  if (!bodyMatch) return false;
+  const firstTag = bodyMatch[1].trimStart().match(/^<([a-z][\w:-]*)([^>]*)>/i);
+  return Boolean(firstTag && /\sdata-composition-id\s*=/.test(firstTag[0]));
+}
+
+function ensureEntryCompositionAttributes(html, { duration, dimensions }) {
+  const durationText = String(duration);
+  const attrs = {
+    'data-composition-id': 'main',
+    'data-start': '0',
+    'data-duration': durationText,
+    'data-width': String(dimensions.width),
+    'data-height': String(dimensions.height),
+  };
+  let content = stripRootCompositionAttributesFromBody(html);
+  if (/<body\b/i.test(content) && !bodyStartsWithEntryComposition(content)) {
+    return wrapBodyInEntryComposition(content, { duration: durationText, dimensions });
+  }
+
+  const rootPattern = /<([a-z][\w:-]*)([^>]*\sdata-composition-id\s*=\s*['"][^'"]+['"][^>]*)>/i;
+  if (rootPattern.test(content)) {
+    return content.replace(rootPattern, (tag) => {
+      let nextTag = tag.replace(/\sdata-track-index\s*=\s*(?:"[^"]*"|'[^']*')/gi, '');
+      for (const [name, value] of Object.entries(attrs)) {
+        nextTag = ensureRootAttribute(nextTag, name, value);
+      }
+      return nextTag;
+    });
+  }
+
+  const targetPatterns = [
+    /<main\b[^>]*>/i,
+    /<([a-z][\w:-]*)([^>]*\bid\s*=\s*['"]stage['"][^>]*)>/i,
+    /<([a-z][\w:-]*)([^>]*\bclass\s*=\s*['"][^'"]*\b(?:composition|stage)\b[^'"]*['"][^>]*)>/i,
+    /(<body\b[^>]*>\s*)<([a-z][\w:-]*)([^>]*)>/i,
+  ];
+
+  for (const pattern of targetPatterns) {
+    if (!pattern.test(content)) continue;
+    return content.replace(pattern, (...args) => {
+      if (pattern === targetPatterns[3]) {
+        const [, bodyOpen, tagName, tagAttrs] = args;
+        if (/^(script|style|svg)$/i.test(tagName)) return args[0];
+        let nextTag = `<${tagName}${tagAttrs}>`;
+        for (const [name, value] of Object.entries(attrs)) {
+          nextTag = ensureRootAttribute(nextTag, name, value);
+        }
+        return `${bodyOpen}${nextTag}`;
+      }
+      let nextTag = args[0];
+      for (const [name, value] of Object.entries(attrs)) {
+        nextTag = ensureRootAttribute(nextTag, name, value);
+      }
+      return nextTag;
+    });
+  }
+
+  return content;
+}
+
+function localizeTemplateFonts(html) {
+  let content = String(html || '')
+    .replace(/<link\b[^>]*href\s*=\s*["'][^"']*fonts\.googleapis\.com[^"']*["'][^>]*>\s*/gi, '')
+    .replace(/@import\s+url\(\s*["']?[^"')]*fonts\.googleapis\.com[^"')]*["']?\s*\)\s*;?/gi, '')
+    .replace(/@import\s+["'][^"']*fonts\.googleapis\.com[^"']*["']\s*;?/gi, '');
+  for (const [pattern, replacement] of GOOGLE_FONT_FALLBACKS) {
+    content = content.replace(pattern, replacement);
+  }
+  return content;
+}
+
+function mirrorBodySelectorsToStage(css) {
+  return String(css || '').replace(/([^{}@]+)\{([^{}]*)\}/g, (rule, selectors, declarations) => {
+    const stageSelectors = selectors
+      .split(',')
+      .map(selector => selector.trim())
+      .filter(selector => /\bbody\b/i.test(selector))
+      .map(selector => selector
+        .replace(/\bhtml\s+body\b/gi, '#stage')
+        .replace(/\bhtml\s*>\s*body\b/gi, '#stage')
+        .replace(/\bbody\b/gi, '#stage')
+        .trim())
+      .filter(Boolean);
+    if (stageSelectors.length === 0) return rule;
+    return `${rule}\n${Array.from(new Set(stageSelectors)).join(',')}{${declarations}}`;
+  });
+}
+
+function mirrorBodyVisualStylesToStage(html) {
+  return String(html || '').replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (tag, attrs, css) => {
+    const mirroredCss = mirrorBodySelectorsToStage(css);
+    return `<style${attrs}>${mirroredCss}</style>`;
+  });
+}
+
+function insertBeforeBodyClose(html, fragment) {
+  const content = String(html || '');
+  if (content.includes('</body>')) return content.replace('</body>', `${fragment}\n</body>`);
+  return `${content}\n${fragment}`;
+}
+
+function sceneOverlayTitle(scene, index) {
+  return String(
+    scene?.visual_text?.headline
+    || scene?.headline
+    || scene?.title
+    || scene?.narration_text
+    || `场景 ${index + 1}`
+  ).trim().slice(0, 80);
+}
+
+function sceneOverlayMeta(scene, index) {
+  const keywords = Array.isArray(scene?.visual_text?.keywords) ? scene.visual_text.keywords : [];
+  const cards = Array.isArray(scene?.visual_text?.cards) ? scene.visual_text.cards : [];
+  return [...keywords, ...cards].map(item => String(item || '').trim()).filter(Boolean).slice(0, 3).join(' · ')
+    || `SCENE ${String(index + 1).padStart(2, '0')}`;
+}
+
+function buildTimelineEnhancementScript({ sceneSpec, duration }) {
+  const scenes = (sceneSpec.scenes || [])
+    .map((scene, index) => ({
+      title: sceneOverlayTitle(scene, index),
+      meta: sceneOverlayMeta(scene, index),
+      start: roundTime(Number(scene.start || 0)),
+      duration: Math.max(0.3, roundTime(Number(scene.duration || 0))),
+    }))
+    .filter(scene => Number.isFinite(scene.start) && Number.isFinite(scene.duration));
+  if (scenes.length < 2) return '';
+
+  const scenesJson = JSON.stringify(scenes).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  return `
+<style data-hf-scene-overlay>
+  #stage .hf-scene-overlay{position:absolute;left:56px;right:56px;bottom:56px;z-index:80;pointer-events:none;font-family:sans-serif;color:#fff}
+  #stage .hf-scene-card{position:absolute;left:0;right:0;bottom:22px;opacity:0;visibility:hidden;padding:18px 22px;border-left:6px solid #ff4d4d;background:linear-gradient(90deg,rgba(8,12,20,.82),rgba(8,12,20,.42));box-shadow:0 20px 60px rgba(0,0,0,.28);backdrop-filter:blur(12px)}
+  #stage .hf-scene-card strong{display:block;font-size:34px;line-height:1.12;font-weight:800;letter-spacing:0;color:#fff;text-wrap:balance}
+  #stage .hf-scene-card span{display:block;margin-top:8px;font-size:14px;line-height:1.3;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.76)}
+  #stage .hf-progress-track{position:absolute;left:0;right:0;bottom:0;height:8px;background:rgba(255,255,255,.16);overflow:hidden}
+  #stage .hf-progress-fill{width:100%;height:100%;background:linear-gradient(90deg,#ff4d4d,#ffd166,#38bdf8);transform:scaleX(0);transform-origin:left center}
+</style>
+<script data-hf-scene-overlay>
+  (function enhanceRichTemplateTimeline() {
+    if (!window.gsap) return;
+    var scenes = ${scenesJson};
+    var duration = ${roundTime(duration)};
+    var stage = document.querySelector('[data-composition-id="main"]');
+    if (!stage || stage.querySelector('[data-hf-scene-overlay]')) return;
+    stage.setAttribute('data-hf-scene-overlay', 'true');
+    var overlay = document.createElement('div');
+    var hfSceneOverlay = overlay;
+    overlay.className = 'hf-scene-overlay';
+    overlay.setAttribute('data-hf-scene-overlay', 'true');
+    var cards = scenes.map(function(scene, index) {
+      var card = document.createElement('div');
+      card.className = 'hf-scene-card';
+      var title = document.createElement('strong');
+      title.textContent = scene.title;
+      var meta = document.createElement('span');
+      meta.textContent = scene.meta;
+      card.appendChild(title);
+      card.appendChild(meta);
+      overlay.appendChild(card);
+      return card;
+    });
+    var track = document.createElement('div');
+    track.className = 'hf-progress-track';
+    var fill = document.createElement('div');
+    fill.className = 'hf-progress-fill';
+    track.appendChild(fill);
+    overlay.appendChild(track);
+    stage.appendChild(overlay);
+    window.__timelines = window.__timelines || {};
+    var tl = window.__timelines["main"] || gsap.timeline({ paused: true });
+    window.__timelines["main"] = tl;
+    tl.to({}, { duration: ${roundTime(duration)} }, 0);
+    tl.fromTo(fill, { scaleX: 0 }, { scaleX: 1, duration: duration, ease: "none" }, 0);
+    cards.forEach(function(card, index) {
+      var scene = scenes[index];
+      var start = Number(scene.start || 0);
+      var end = Math.min(duration, start + Number(scene.duration || 0.3));
+      tl.set(card, { autoAlpha: 0 }, 0);
+      tl.set(card, { autoAlpha: 1 }, start);
+      tl.fromTo(card, { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.25, ease: "power2.out", overwrite: "auto" }, start);
+      tl.to(card, { autoAlpha: 0, duration: 0.22, ease: "power1.in", overwrite: "auto" }, Math.max(start + 0.4, end - 0.25));
+      tl.set(card, { autoAlpha: 0 }, end);
+    });
+  })();
+</script>`;
+}
+
+function enhanceRichTemplateTimeline(html, { sceneSpec, duration }) {
+  const fragment = buildTimelineEnhancementScript({ sceneSpec, duration });
+  if (!fragment) return html;
+  return insertBeforeBodyClose(html, fragment);
+}
+
+function normalizeBodyForStageCapture(html, { dimensions }) {
+  const style = [
+    '<style data-hf-stage-reset>',
+    'html{margin:0!important;padding:0!important;overflow:hidden!important}',
+    `body{display:block!important;padding:0!important;width:${dimensions.width}px!important;height:${dimensions.height}px!important;margin:0!important;overflow:hidden!important}`,
+    `#stage{position:relative!important;width:${dimensions.width}px!important;height:${dimensions.height}px!important;overflow:hidden!important}`,
+    '</style>',
+  ].join('');
+  const content = String(html || '');
+  if (content.includes('</head>')) return content.replace('</head>', `${style}\n</head>`);
+  return content.replace(/<body\b/i, `${style}\n<body`);
 }
 
 function totalDuration(sceneSpec) {
@@ -426,14 +722,13 @@ function assembleProjectFiles({ sceneSpec, frameSpecs, aiGeneratedHtml, template
   }
 
   // Ensure HyperFrames can detect composition duration via data-duration attribute.
-  // The FrameCapture runtime reads data-duration from the composition element in static HTML.
-  // AI-generated HTML may not include this, so add it directly to the <body> tag.
-  if (!finalHtml.includes('data-duration')) {
-    const durationAttr = ` data-duration="${duration}" data-composition-id="main" data-width="${dimensions.width}" data-height="${dimensions.height}"`;
-    if (/<body[\s>]/i.test(finalHtml)) {
-      finalHtml = finalHtml.replace(/<body([\s>])/i, `<body${durationAttr}$1`);
-    }
-  }
+  // The FrameCapture runtime expects these attributes on the entry composition
+  // element, not on <body>. Rich AI templates often put only data-duration on body.
+  finalHtml = ensureEntryCompositionAttributes(finalHtml, { duration, dimensions });
+  finalHtml = mirrorBodyVisualStylesToStage(finalHtml);
+  finalHtml = normalizeBodyForStageCapture(finalHtml, { dimensions });
+  finalHtml = enhanceRichTemplateTimeline(finalHtml, { sceneSpec: sceneValidation.scene_spec, duration });
+  finalHtml = localizeTemplateFonts(finalHtml);
 
   const normalizedFrameSpecs = frameSpecs || { frames: [] };
   const meta = {

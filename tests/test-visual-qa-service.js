@@ -32,6 +32,21 @@ const qa = require('../server/services/creative-video/visualQaService');
   assert.equal(blackResult.success, false);
   assert.ok(blackResult.issues.some(issue => issue.code === 'too_many_blank_frames'));
 
+  const darkInformativeFrames = Array.from({ length: 10 }, (_, index) => ({
+    id: `dark_informative_${index}`,
+    average_luma: 18,
+    luma_stddev: 42,
+    edge_score: 18,
+    color_variance: 28,
+  }));
+  const darkInformativeResult = qa.analyzeFrameMetrics({
+    frames: darkInformativeFrames,
+    contact_sheet_size: 45000,
+  });
+  assert.equal(darkInformativeResult.success, true);
+  assert.equal(darkInformativeResult.metrics.blank_ratio, 0);
+  assert.ok(!darkInformativeResult.issues.some(issue => issue.code === 'too_many_blank_frames'));
+
   const lowInfoFrames = Array.from({ length: 10 }, (_, index) => ({
     id: `frame_${index}`,
     average_luma: 120,
@@ -84,6 +99,45 @@ const qa = require('../server/services/creative-video/visualQaService');
   assert.ok(inspected.issues.some(issue => issue.code === 'too_many_blank_frames'));
   assert.ok(commands.some(call => call.args.includes('rawvideo')));
   assert.ok(commands.some(call => call.args.includes('contact_sheet.jpg') || String(call.args[call.args.length - 1]).includes('contact_sheet.jpg')));
+
+  {
+    const calls = [];
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      expectedAspectRatio: '9:16',
+      runCommand: async (command, args) => {
+        calls.push({ command, args });
+        if (args.includes('-show_entries')) {
+          return { ok: false, stdout: '', stderr: 'ffprobe missing' };
+        }
+        if (args.length === 2 && args[0] === '-i') {
+          return {
+            ok: false,
+            stdout: '',
+            stderr: 'Stream #0:0: Video: h264, yuv420p, 1080x1920 [SAR 1:1 DAR 9:16], 30 fps',
+          };
+        }
+        const target = args[args.length - 1];
+        if (args.includes('rawvideo')) {
+          const raw = Buffer.alloc(160 * 90 * 3);
+          for (let i = 0; i < raw.length; i += 3) {
+            const pixel = i / 3;
+            raw[i] = pixel % 255;
+            raw[i + 1] = (pixel * 3) % 255;
+            raw[i + 2] = (pixel * 7) % 255;
+          }
+          await fs.writeFile(target, raw);
+        } else {
+          await fs.writeFile(target, Buffer.alloc(45000, 1));
+        }
+        return { ok: true, stdout: '', stderr: '' };
+      },
+    });
+    assert.equal(report.success, true);
+    assert.ok(calls.some(call => call.args.length === 2 && call.args[0] === '-i'));
+    assert.ok(!report.issues.some(issue => issue.code === 'aspect_probe_unavailable'));
+  }
 
   {
     const report = await qa.inspectRenderedVideo({

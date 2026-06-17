@@ -105,12 +105,15 @@ function withAdditionalIssues(result, { videoInfo, expectedAspectRatio, frames }
 
 function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
   const total = frames.length;
-  const nearWhite = frames.filter(frame => Number(frame.average_luma) > THRESHOLDS.nearWhiteLuma).length;
-  const nearBlack = frames.filter(frame => Number(frame.average_luma) < THRESHOLDS.nearBlackLuma).length;
-  const lowInformation = frames.filter(frame => (
+  const isLowInformationFrame = frame => (
     Number(frame.luma_stddev) < THRESHOLDS.lowInfoLumaStddev
     && Number(frame.edge_score) < THRESHOLDS.lowInfoEdgeScore
     && Number(frame.color_variance) < THRESHOLDS.lowInfoColorVariance
+  );
+  const nearWhite = frames.filter(frame => Number(frame.average_luma) > THRESHOLDS.nearWhiteLuma && isLowInformationFrame(frame)).length;
+  const nearBlack = frames.filter(frame => Number(frame.average_luma) < THRESHOLDS.nearBlackLuma && isLowInformationFrame(frame)).length;
+  const lowInformation = frames.filter(frame => (
+    isLowInformationFrame(frame)
   )).length;
   const metrics = {
     frame_count: total,
@@ -195,7 +198,7 @@ async function probeVideo({ videoPath, runCommand }) {
       'json',
       videoPath,
     ]);
-    if (!result.ok) return {};
+    if (!result.ok) return probeVideoWithFfmpeg({ videoPath, runCommand });
     const parsed = JSON.parse(result.stdout || '{}');
     const stream = Array.isArray(parsed.streams) ? parsed.streams[0] : {};
     return {
@@ -203,6 +206,30 @@ async function probeVideo({ videoPath, runCommand }) {
       height: Number(stream.height) || undefined,
       duration: Number(stream.duration) || undefined,
     };
+  } catch {
+    return probeVideoWithFfmpeg({ videoPath, runCommand });
+  }
+}
+
+function parseFfmpegVideoInfo(text = '') {
+  const source = String(text || '');
+  const videoLine = source.split(/\r?\n/).find(line => /Video:/i.test(line)) || source;
+  const dimensions = videoLine.match(/(?:^|[,\s])(\d{2,5})x(\d{2,5})(?:\s|,|\[|$)/);
+  const durationMatch = source.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i);
+  const duration = durationMatch
+    ? (Number(durationMatch[1]) * 3600) + (Number(durationMatch[2]) * 60) + Number(durationMatch[3])
+    : undefined;
+  return {
+    width: dimensions ? Number(dimensions[1]) : undefined,
+    height: dimensions ? Number(dimensions[2]) : undefined,
+    duration,
+  };
+}
+
+async function probeVideoWithFfmpeg({ videoPath, runCommand }) {
+  try {
+    const result = await runCommand(getFfmpegCommand(), ['-i', videoPath]);
+    return parseFfmpegVideoInfo(`${result.stdout || ''}\n${result.stderr || ''}`);
   } catch {
     return {};
   }

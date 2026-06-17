@@ -99,6 +99,57 @@ assert.equal(frames[1].inputs.title, '数据正在变化');
 assert.equal(frames[1].inputs.section_no, '02/02');
 assert.deepEqual(frames[1].inputs.bullets, ['卡片二']);
 
+const objectCardInputs = mapper.buildFrameInputs({
+  templateInputs: { footer_text: '默认页脚' },
+  templateSchema: {
+    headline: { type: 'string' },
+    eyebrow: { type: 'string' },
+    metric: { type: 'string' },
+    bullets: { type: 'array' },
+    footer_text: { type: 'string' },
+  },
+  scene: {
+    id: 'scene_data_object_cards',
+    visual_text: {
+      headline: 'Cursor 的关键数字',
+      keywords: [{ label: '成立时间', value: '2022' }, '26 亿美元'],
+      cards: [
+        { title: '成立时间', value: '2022' },
+        { label: '年化收入', value: '26 亿美元' },
+        { name: '此前估值', value: '293 亿美元' },
+      ],
+    },
+  },
+  index: 0,
+  total: 1,
+});
+assert.deepEqual(objectCardInputs.bullets, ['成立时间：2022', '年化收入：26 亿美元', '此前估值：293 亿美元']);
+assert.equal(objectCardInputs.eyebrow, '成立时间：2022 / 26 亿美元');
+assert.equal(objectCardInputs.metric, '成立时间：2022');
+assert.equal(objectCardInputs.footer_text, '成立时间：2022');
+assert.equal(JSON.stringify(objectCardInputs).includes('[object Object]'), false);
+
+const keywordFallbackInputs = mapper.buildFrameInputs({
+  templateInputs: {},
+  templateSchema: {
+    bullets: { type: 'array' },
+    footer_text: { type: 'string' },
+  },
+  scene: {
+    id: 'scene_keyword_fallback',
+    visual_text: {
+      headline: 'Cursor 的关键数字',
+      keywords: ['2022', '26 亿美元', '293 亿美元'],
+      cards: ['[object Object]'],
+    },
+  },
+  index: 0,
+  total: 1,
+});
+assert.deepEqual(keywordFallbackInputs.bullets, ['2022', '26 亿美元', '293 亿美元']);
+assert.equal(keywordFallbackInputs.footer_text, '2022');
+assert.equal(JSON.stringify(keywordFallbackInputs).includes('[object Object]'), false);
+
 const compactCardTitleInputs = mapper.buildFrameInputs({
   templateInputs: {},
   templateSchema: {

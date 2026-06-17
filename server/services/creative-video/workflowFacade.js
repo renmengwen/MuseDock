@@ -286,7 +286,7 @@ async function generateCreativeVideoProject({
   const legacyFallbackEnabled = target.fallbackLegacy !== false
     && target.fallback_legacy !== false
     && services.fallbackLegacy !== false
-    && envFlag('HTML_VIDEO_LEGACY_FALLBACK_ENABLED', true);
+    && envFlag('HTML_VIDEO_LEGACY_FALLBACK_ENABLED', false);
 
   if (htmlVideoEnabled) {
     let htmlVideoResult;
@@ -337,6 +337,13 @@ async function generateCreativeVideoProject({
         legacy_fallback_reason: legacyFallbackReason,
       });
     }
+    htmlVideoDiagnostics.push({
+      code: 'legacy_fallback_used',
+      stage: 'workflow',
+      user_message: 'html-video 生成失败，已按配置回退到 Legacy 模式。',
+      details: { reason: legacyFallbackReason },
+      fallback_allowed: true,
+    });
   }
 
   // Stage 2: Try rich template path first
@@ -464,24 +471,13 @@ async function generateCreativeVideoProject({
       projectDir: written.project_dir,
       outputPath: renderResult.output_path,
     });
-    if (!visualReport.success) {
-      return failure(visualReport.message || '视觉质检失败。', {
-        scene_spec: renderedFiles.scene_spec,
-        frame_specs: renderedFiles.frame_specs,
-        project_dir: written.project_dir,
-        files: written.files || [],
-        audio_manifest: ttsResult.audio_manifest,
-        output_path: renderResult.output_path,
-        visual_report: visualReport,
-        issues: visualReport.issues || [],
-        diagnostics: renderResult.diagnostics || [],
-      });
-    }
   }
 
   return {
     success: true,
-    message: `创意视频生成完成。（${renderMode === 'rich' ? 'Rich Template' : 'Legacy'} 模式）`,
+    message: legacyFallbackReason
+      ? 'html-video 生成失败，已按配置回退到 Legacy 模式。'
+      : `创意视频生成完成。（${renderMode === 'rich' ? 'Rich Template' : 'Legacy'} 模式）`,
     render_mode: legacyFallbackReason ? 'legacy' : renderMode,
     template_id: renderedFiles.template_id || null,
     rich_template_diagnostics: richTemplateDiagnostics,

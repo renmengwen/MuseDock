@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const { spawn } = require('child_process');
 
 async function diagnoseEnvironment(options = {}) {
@@ -17,6 +19,9 @@ async function diagnoseEnvironment(options = {}) {
   const ffmpeg = await checkFfmpeg(options);
   diagnostics.push(ffmpeg);
 
+  const ffprobe = await checkFfprobe({ ...options, ffmpegPath: ffmpeg.path });
+  diagnostics.push(ffprobe);
+
   const ok = diagnostics.every(item => item.ok);
   return {
     ok,
@@ -24,7 +29,7 @@ async function diagnoseEnvironment(options = {}) {
     diagnostics: diagnostics.map(({ module, ...item }) => item),
     message: ok
       ? 'html-video 渲染环境已就绪。'
-      : 'html-video 渲染环境未配置完整，请检查 Playwright Chromium 和 ffmpeg。',
+      : 'html-video 渲染环境未配置完整，请检查 Playwright Chromium、ffmpeg 和 ffprobe。',
   };
 }
 
@@ -68,7 +73,7 @@ async function checkChromium(playwright, options = {}) {
 }
 
 async function checkFfmpeg(options = {}) {
-  const ffmpegPath = options.ffmpegPath || resolveFfmpegPath();
+  const ffmpegPath = await resolveFfmpegPath(options);
   const result = await runProbe(ffmpegPath, options.runCommand);
   if (result.ok) {
     return {
@@ -86,8 +91,30 @@ async function checkFfmpeg(options = {}) {
   };
 }
 
-function resolveFfmpegPath() {
+async function checkFfprobe(options = {}) {
+  const ffprobePath = await resolveFfprobePath(options);
+  const result = await runProbe(ffprobePath, options.runCommand);
+  if (result.ok) {
+    return {
+      ok: true,
+      code: 'ffprobe_available',
+      path: ffprobePath,
+      message: 'ffprobe 可用。',
+    };
+  }
+  return {
+    ok: false,
+    code: 'ffprobe_missing',
+    path: ffprobePath,
+    message: `ffprobe 未配置或无法执行：${result.stderr || result.error || `exit ${result.code}`}`,
+  };
+}
+
+async function resolveFfmpegPath(options = {}) {
+  if (options.ffmpegPath) return options.ffmpegPath;
   if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
+  const pathFfmpeg = await findFfmpegOnPath(options.runCommand);
+  if (pathFfmpeg) return pathFfmpeg;
   try {
     // Optional dependency: only use it when present.
     const installer = require('@ffmpeg-installer/ffmpeg');
@@ -96,12 +123,38 @@ function resolveFfmpegPath() {
   return process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
 }
 
-function runProbe(command, injectedRunCommand) {
-  if (injectedRunCommand) return injectedRunCommand(command, ['-version']);
+async function resolveFfprobePath(options = {}) {
+  if (options.ffprobePath) return options.ffprobePath;
+  if (process.env.FFPROBE_PATH) return process.env.FFPROBE_PATH;
+  const ffmpegPath = options.ffmpegPath || await resolveFfmpegPath(options);
+  const adjacent = adjacentFfprobePath(ffmpegPath);
+  if (adjacent) return adjacent;
+  return process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+}
+
+function adjacentFfprobePath(ffmpegPath) {
+  const text = String(ffmpegPath || '');
+  if (!text || (!path.isAbsolute(text) && !text.includes(path.sep))) return '';
+  const candidate = path.join(path.dirname(text), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+  return fs.existsSync(candidate) ? candidate : '';
+}
+
+async function findFfmpegOnPath(injectedRunCommand) {
+  const finder = process.platform === 'win32' ? 'where.exe' : 'which';
+  const result = await runProbe(finder, injectedRunCommand, ['ffmpeg']);
+  if (!result.ok) return '';
+  return String(result.stdout || '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(Boolean) || '';
+}
+
+function runProbe(command, injectedRunCommand, args = ['-version']) {
+  if (injectedRunCommand) return injectedRunCommand(command, args);
   return new Promise(resolve => {
     let child;
     try {
-      child = spawn(command, ['-version'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn(command, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (error) {
       resolve({ ok: false, code: null, error: error.message, stdout: '', stderr: '' });
       return;
@@ -122,4 +175,5 @@ function runProbe(command, injectedRunCommand) {
 module.exports = {
   diagnoseEnvironment,
   resolveFfmpegPath,
+  resolveFfprobePath,
 };

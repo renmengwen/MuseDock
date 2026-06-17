@@ -4,6 +4,9 @@ const aiTextModel = require('../../aiTextModel');
 const { createTemplateRegistry, DEFAULT_ROOT_DIR } = require('./templateRegistry');
 const templateSelectorAgent = require('./templateSelectorAgent');
 const templateInputAgent = require('./templateInputAgent');
+const contentGraphAgent = require('./contentGraphAgent');
+const frameHtmlAgent = require('./frameHtmlAgent');
+const { buildRawHtmlFrameProject } = require('./rawHtmlFrameBuilder');
 const environmentDoctor = require('./environmentDoctor');
 const projectStore = require('./projectStore');
 const { normalizeProject } = require('./projectSchema');
@@ -17,6 +20,15 @@ const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('./sceneSpe
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function resolveExistingNarrationPath(creativeContext = {}) {
+  const audio = objectOrEmpty(creativeContext.audio);
+  const audioPath = String(audio.path || audio.narration_path || audio.narrationPath || '').trim();
+  if (!audioPath) return null;
+  const status = String(audio.status || '').trim().toLowerCase();
+  if (status && !['ready', 'done', 'rendered'].includes(status)) return null;
+  return audioPath;
 }
 
 function failure(message, diagnostics, extra = {}) {
@@ -119,6 +131,13 @@ function buildTemplateIndexOptions(renderTarget = {}, sceneSpec = {}) {
       ? undefined
       : (renderTarget.duration_sec || renderTarget.durationSec || renderTarget.duration),
   };
+}
+
+function resolveGenerationMode(target = {}) {
+  return target.html_video_generation_mode
+    || target.htmlVideoGenerationMode
+    || target.generation_mode
+    || 'raw_html';
 }
 
 function buildInitialProject({ workflowId, runId, sceneSpec, template, templateInputs, target }) {
@@ -236,33 +255,115 @@ async function generateHtmlVideo({
     ]);
   }
 
-  const inputResult = await requestTemplateInputs({
-    model,
-    template,
-    creativeContext,
-    sceneSpec,
-  });
-  if (!inputResult.success) {
-    return failure(inputResult.user_message || inputResult.message || 'html-video 模板字段填写失败。', [
-      createDiagnostic({
-        code: 'template_inputs_invalid',
-        stage: 'ai-template-inputs',
-        user_message: inputResult.user_message || inputResult.message || 'html-video 模板字段填写失败。',
-        details: { diagnostics: inputResult.diagnostics || [] },
-      }),
-    ]);
+  const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
+  const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
+  const generationMode = resolveGenerationMode(renderTarget);
+  let project;
+  let templateInputs = {};
+
+  if (generationMode === 'template_inputs') {
+    const inputResult = await requestTemplateInputs({
+      model,
+      template,
+      creativeContext,
+      sceneSpec,
+    });
+    if (!inputResult.success) {
+      return failure(inputResult.user_message || inputResult.message || 'html-video 模板字段填写失败。', [
+        createDiagnostic({
+          code: 'template_inputs_invalid',
+          stage: 'ai-template-inputs',
+          user_message: inputResult.user_message || inputResult.message || 'html-video 模板字段填写失败。',
+          details: { diagnostics: inputResult.diagnostics || [] },
+        }),
+      ], {
+        html_video_project_path: projectDir,
+        project_dir: projectDir,
+      });
+    }
+    templateInputs = inputResult.inputs;
+    project = buildInitialProject({
+      workflowId,
+      runId,
+      sceneSpec,
+      template,
+      templateInputs,
+      target: renderTarget,
+    });
+  } else {
+    const graphPrompt = contentGraphAgent.buildContentGraphPrompt({
+      sceneSpec,
+      creativeContext,
+      target: renderTarget,
+    });
+    const graphAi = await callTextModel(model, graphPrompt);
+    if (!graphAi.success) {
+      return failure(graphAi.message || 'content graph 生成失败。', [
+        createDiagnostic({
+          code: 'content_graph_failed',
+          stage: 'ai-content-graph',
+          user_message: graphAi.message || 'content graph 生成失败。',
+        }),
+      ], {
+        html_video_project_path: projectDir,
+        project_dir: projectDir,
+      });
+    }
+    const graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec);
+    if (!graphParsed.success) {
+      return failure(graphParsed.message || 'content graph 解析失败。', [
+        createDiagnostic({
+          code: 'content_graph_invalid',
+          stage: 'ai-content-graph',
+          user_message: graphParsed.message || 'content graph 解析失败。',
+          details: { errors: graphParsed.errors || [] },
+        }),
+      ], {
+        html_video_project_path: projectDir,
+        project_dir: projectDir,
+      });
+    }
+    const frameHtmlByNodeId = {};
+    const nodes = graphParsed.graph.nodes || [];
+    for (let index = 0; index < nodes.length; index += 1) {
+      const htmlResult = await frameHtmlAgent.generateFrameHtml({
+        model,
+        graph: graphParsed.graph,
+        node: nodes[index],
+        index,
+        total: nodes.length,
+        sceneSpec,
+        creativeContext,
+        target: renderTarget,
+        template,
+      });
+      if (!htmlResult.success) {
+        return failure(htmlResult.message || '单帧 HTML 生成失败。', [
+          createDiagnostic({
+            code: 'frame_html_invalid',
+            stage: 'ai-frame-html',
+            user_message: htmlResult.message || '单帧 HTML 生成失败。',
+            details: { frame_id: nodes[index].id, diagnostics: htmlResult.diagnostics || [] },
+          }),
+        ], {
+          html_video_project_path: projectDir,
+          project_dir: projectDir,
+        });
+      }
+      frameHtmlByNodeId[nodes[index].id] = htmlResult.html;
+    }
+    project = await buildRawHtmlFrameProject({
+      projectDir,
+      workflowId,
+      runId,
+      graph: graphParsed.graph,
+      frameHtmlByNodeId,
+      sceneSpec,
+      target: renderTarget,
+      template,
+    });
   }
 
-  const project = buildInitialProject({
-    workflowId,
-    runId,
-    sceneSpec,
-    template,
-    templateInputs: inputResult.inputs,
-    target: renderTarget,
-  });
-
-  const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
   const validation = await validateHtmlVideoProject({
     project,
     templateRegistry: registry,
@@ -270,11 +371,19 @@ async function generateHtmlVideo({
   });
   diagnostics.push(...validation.diagnostics);
   if (!validation.ok) {
-    return failure('html-video 工程未通过生成前校验。', diagnostics);
+    return failure('html-video 工程未通过生成前校验。', diagnostics, {
+      html_video_project_path: projectDir,
+      project_dir: projectDir,
+      project,
+    });
   }
 
-  const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
-  if (services.ttsService && sceneSpec) {
+  const existingNarrationPath = resolveExistingNarrationPath(creativeContext);
+  if (existingNarrationPath) {
+    project.audio = objectOrEmpty(project.audio);
+    project.audio.narration_path = existingNarrationPath;
+    project.audio.tts_manifest_path = project.audio.tts_manifest_path || null;
+  } else if (services.ttsService && sceneSpec) {
     const tts = await services.ttsService.synthesizeSceneNarration({
       projectDir,
       sceneSpec,
@@ -319,18 +428,12 @@ async function generateHtmlVideo({
     });
     if (!visualReport.success) {
       diagnostics.push(createDiagnostic({
-        code: 'render_failed',
+        code: 'visual_qa_warning',
         stage: 'inspect',
-        user_message: visualReport.message || 'html-video 视觉质检失败。',
+        user_message: visualReport.message || 'html-video 视觉质检未通过，仅记录为参考报告。',
         details: { issues: visualReport.issues || [], metrics: visualReport.metrics || {} },
+        severity: 'warning',
       }));
-      return failure(visualReport.message || 'html-video 视觉质检失败。', diagnostics, {
-        html_video_project_path: projectDir,
-        project_dir: projectDir,
-        project: rendered.project,
-        output_path: rendered.output_path,
-        visual_report: visualReport,
-      });
     }
   }
 
@@ -340,7 +443,7 @@ async function generateHtmlVideo({
     render_mode: 'html-video',
     template_id: template.id,
     template_reason: selection.reason,
-    template_inputs: inputResult.inputs,
+    template_inputs: templateInputs,
     project: rendered.project,
     project_dir: projectDir,
     html_video_project_path: projectDir,

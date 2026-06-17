@@ -79,6 +79,36 @@ function materializeTemplate(sourceHtml, vars, durationSec, sceneData = {}) {
 
 async function materializeFrame({ projectDir, project, frame, index, templateRegistry }) {
   const diagnostics = [];
+  if (frame.source_mode === 'raw_html') {
+    if (!frame.html_path) {
+      diagnostics.push({
+        code: 'raw_html_missing_path',
+        frame_id: frame.id,
+        message: 'raw_html 帧缺少 html_path。',
+      });
+      return diagnostics;
+    }
+    const outputPath = resolveProjectPath(projectDir, frame.html_path);
+    try {
+      await fs.access(outputPath);
+      frame.html_path = toPosixPath(frame.html_path);
+      diagnostics.push({
+        code: 'raw_html_preserved',
+        frame_id: frame.id,
+        html_path: frame.html_path,
+        message: 'raw_html 帧已保留现有 HTML 文件。',
+      });
+    } catch {
+      diagnostics.push({
+        code: 'raw_html_missing_file',
+        frame_id: frame.id,
+        html_path: frame.html_path,
+        message: 'raw_html 帧指向的 HTML 文件不存在。',
+      });
+    }
+    return diagnostics;
+  }
+
   const override = getFrameOverride(project, frame);
   if (override) {
     const overridePath = override.html_path || frame.html_path;

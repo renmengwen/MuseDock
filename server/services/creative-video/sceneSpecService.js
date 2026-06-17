@@ -19,7 +19,33 @@ function roundTime(value) {
 }
 
 function text(value) {
-  return String(value || '').trim();
+  if (value == null) return '';
+  if (Array.isArray(value)) {
+    return value.map(item => text(item)).filter(Boolean).join(' / ').trim();
+  }
+  if (typeof value === 'object') {
+    const label = value.title
+      || value.label
+      || value.name
+      || value.text
+      || value.headline
+      || value.key
+      || '';
+    const metric = value.value
+      ?? value.metric
+      ?? value.amount
+      ?? value.count
+      ?? value.y
+      ?? '';
+    const labelText = text(label);
+    const metricText = text(metric);
+    if (labelText && metricText && labelText !== metricText) return `${labelText}：${metricText}`;
+    if (labelText) return labelText;
+    if (metricText) return metricText;
+    return text(value.summary || value.description || value.subtitle || '');
+  }
+  const result = String(value || '').trim();
+  return /^\[object Object\]$/i.test(result) ? '' : result;
 }
 
 function list(value) {

@@ -146,7 +146,9 @@ async function render(input = {}, ctx = {}, deps = {}) {
   }
 
   report(ctx, 90, '正在编码 MP4...');
-  const ffmpegPath = deps.ffmpegPath || resolveFfmpegPath();
+  const ffmpegPath = deps.ffmpegPath || await resolveFfmpegPath(deps);
+  const probeDeps = { ...deps, ffmpegPath };
+  const inputDurationSec = await probeMediaDurationSec(webmPath, probeDeps);
   const ffmpegArgs = buildFfmpegArgs({
     webmPath,
     outputPath: config.outputPath,
@@ -154,6 +156,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     duration: totalDuration,
     explicit: config.durationMode === 'explicit',
     leadInMs,
+    inputDurationSec,
   });
   const ffmpegResult = await runFfmpegCommand(ffmpegPath, ffmpegArgs, deps.runFfmpeg);
   if (!ffmpegResult.ok) {
@@ -165,6 +168,11 @@ async function render(input = {}, ctx = {}, deps = {}) {
 
   await fsp.rm(recordDir, { recursive: true, force: true }).catch(() => {});
   const stat = await fsp.stat(config.outputPath).catch(() => ({ size: 0 }));
+  const hasValidVideoStream = stat.size > 2048
+    && await outputHasVideoStream(config.outputPath, probeDeps);
+  if (!hasValidVideoStream) {
+    throw createRenderError('render-failed', 'html-video 编码完成但输出视频无有效画面流。');
+  }
   report(ctx, 100, 'html-video 帧渲染完成。');
   return {
     outputPath: config.outputPath,
@@ -179,7 +187,12 @@ async function render(input = {}, ctx = {}, deps = {}) {
       engineVersion: `hyperframes-playwright@${ADAPTER_VERSION}`,
       leadInMs,
     },
-    diagnostics: ['已通过 Playwright/Chromium 录制并使用 ffmpeg libx264 编码。'],
+    diagnostics: [{
+      code: 'frame_rendered',
+      stage: 'render',
+      message: '已通过 Playwright/Chromium 录制并使用 ffmpeg libx264 编码。',
+      fallback_allowed: false,
+    }],
   };
 }
 
@@ -308,8 +321,17 @@ async function waitWithProgress(page, ctx, durationSec) {
   }
 }
 
-function buildFfmpegArgs({ webmPath, outputPath, fps, duration, explicit, leadInMs }) {
-  const seekSec = leadInMs > 200 ? Math.max(0, (leadInMs - 120) / 1000) : 0;
+function buildFfmpegArgs({ webmPath, outputPath, fps, duration, explicit, leadInMs, inputDurationSec }) {
+  const proposedSeekSec = leadInMs > 200 ? Math.max(0, (leadInMs - 120) / 1000) : 0;
+  const outputDurationSec = Number(duration);
+  const sourceDurationSec = Number(inputDurationSec);
+  const seekSafe = proposedSeekSec > 0
+    && Number.isFinite(outputDurationSec)
+    && outputDurationSec > 0
+    && Number.isFinite(sourceDurationSec)
+    && sourceDurationSec > 0
+    && proposedSeekSec + outputDurationSec <= sourceDurationSec - 0.1;
+  const seekSec = seekSafe ? proposedSeekSec : 0;
   return [
     '-y',
     ...(seekSec > 0 ? ['-ss', seekSec.toFixed(3)] : []),
@@ -324,6 +346,75 @@ function buildFfmpegArgs({ webmPath, outputPath, fps, duration, explicit, leadIn
     '-movflags', '+faststart',
     outputPath,
   ];
+}
+
+async function probeMediaDurationSec(videoPath, deps = {}) {
+  if (typeof deps.probeWebmDurationSec === 'function') {
+    const injected = await deps.probeWebmDurationSec(videoPath);
+    const duration = Number(injected);
+    return Number.isFinite(duration) && duration > 0 ? duration : null;
+  }
+  const ffprobe = getFfprobeCommand(deps);
+  const args = [
+    '-v', 'error',
+    '-show_entries', 'format=duration',
+    '-of', 'default=noprint_wrappers=1:nokey=1',
+    videoPath,
+  ];
+  const result = await runFfprobeCommand(ffprobe, args, deps.runFfprobe);
+  if (!result.ok) return null;
+  const duration = Number.parseFloat(String(result.stdout || '').trim());
+  return Number.isFinite(duration) && duration > 0 ? duration : null;
+}
+
+async function outputHasVideoStream(videoPath, deps = {}) {
+  if (typeof deps.probeVideoStreams === 'function') {
+    const streams = await deps.probeVideoStreams(videoPath);
+    return hasVideoStream(streams);
+  }
+  const ffprobe = getFfprobeCommand(deps);
+  const args = [
+    '-v', 'error',
+    '-select_streams', 'v',
+    '-show_entries', 'stream=codec_type',
+    '-of', 'json',
+    videoPath,
+  ];
+  const result = await runFfprobeCommand(ffprobe, args, deps.runFfprobe);
+  if (!result.ok) return false;
+  try {
+    const parsed = JSON.parse(result.stdout || '{}');
+    return hasVideoStream(parsed.streams);
+  } catch (_) {
+    return false;
+  }
+}
+
+function hasVideoStream(streams) {
+  return Array.isArray(streams) && streams.some(stream => stream && stream.codec_type === 'video');
+}
+
+function getFfprobeCommand(deps = {}) {
+  if (deps.ffprobePath) return deps.ffprobePath;
+  if (process.env.FFPROBE_PATH) return process.env.FFPROBE_PATH;
+  const ffmpegPath = deps.ffmpegPath || '';
+  if (ffmpegPath && ffmpegPath.includes(path.sep)) {
+    const adjacent = path.join(path.dirname(ffmpegPath), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+    if (fs.existsSync(adjacent)) return adjacent;
+  }
+  try {
+    const installer = require('@ffmpeg-installer/ffmpeg');
+    if (installer && installer.path) {
+      const adjacent = path.join(path.dirname(installer.path), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+      if (fs.existsSync(adjacent)) return adjacent;
+    }
+  } catch (_) {}
+  return process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+}
+
+function runFfprobeCommand(command, args, injectedRunner) {
+  if (injectedRunner) return injectedRunner(command, args);
+  return runFfmpegCommand(command, args);
 }
 
 function runFfmpegCommand(command, args, injectedRunner) {
