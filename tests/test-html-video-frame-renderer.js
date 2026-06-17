@@ -77,5 +77,66 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   ]);
   assert.equal(asyncProgressState.status, 'done');
 
+  let rejectingProgressCalled = false;
+  const rejectingProgressResult = await renderFrame(
+    {
+      id: 'scene_03',
+      html_path: 'frames/01-scene_01.html',
+      duration_sec: 4,
+    },
+    {
+      projectDir,
+      outputPath: path.join(projectDir, 'frames', 'scene_03.mp4'),
+      onProgress: async event => {
+        rejectingProgressCalled = true;
+        assert.equal(event.percent, 30);
+        await new Promise(resolve => setImmediate(resolve));
+        throw new Error('progress failed');
+      },
+      adapter: {
+        render: async (input, ctx) => {
+          ctx.onProgress(30, '正在录制 html-video 帧...');
+          return {
+            output_path: input.config.outputPath,
+            meta: { durationSec: input.config.duration },
+            diagnostics: [],
+          };
+        },
+      },
+    },
+  );
+  assert.equal(rejectingProgressCalled, true);
+  assert.equal(rejectingProgressResult.success, true);
+
+  const failedProgressEvents = [];
+  const failedProgressState = {};
+  const failedProgressResult = await renderFrame(
+    {
+      id: 'scene_04',
+      html_path: 'frames/01-scene_01.html',
+      duration_sec: 4,
+    },
+    {
+      projectDir,
+      outputPath: path.join(projectDir, 'frames', 'scene_04.mp4'),
+      state: failedProgressState,
+      onProgress: async event => {
+        await new Promise(resolve => setImmediate(resolve));
+        failedProgressEvents.push({ percent: event.percent, message: event.message });
+      },
+      adapter: {
+        render: async (input, ctx) => {
+          ctx.onProgress(60, '正在录制 html-video 帧...');
+          throw new Error('render failed');
+        },
+      },
+    },
+  );
+  assert.equal(failedProgressResult.success, false);
+  assert.deepEqual(failedProgressEvents, [
+    { percent: 60, message: '正在录制 html-video 帧...' },
+  ]);
+  assert.equal(failedProgressState.status, 'failed');
+
   console.log('html-video frame renderer tests passed');
 })();

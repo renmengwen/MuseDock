@@ -47,7 +47,7 @@ async function writeFile(filePath, content) {
     frameRenderer: {
       renderFrame: async (frame, options) => {
         calls.push(`render:${frame.id}`);
-        options.onProgress?.({ frame, percent: 40, message: '正在录制 html-video 帧...' });
+        await options.onProgress?.({ frame, percent: 40, message: '正在录制 html-video 帧...' });
         await writeFile(options.outputPath, 'mp4');
         return { success: true, output_path: options.outputPath, diagnostics: [] };
       },
@@ -94,7 +94,13 @@ async function writeFile(filePath, content) {
     project: preview.project,
     templateRegistry,
     services,
-    onProgress: event => progressEvents.push(event),
+    onProgress: async event => {
+      await new Promise(resolve => setImmediate(resolve));
+      progressEvents.push(event);
+      if (event.type === 'html_video_compose_started') {
+        throw new Error('progress failed');
+      }
+    },
   });
   assert.equal(exported.success, true);
   assert.deepEqual(calls.slice(-3), ['render:frame_01', 'render:frame_02', 'concat:2']);

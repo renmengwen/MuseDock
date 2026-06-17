@@ -207,8 +207,11 @@ async function createVerticalTemplate(rootDir) {
     },
   });
   assert.equal(progressResult.success, true);
+  assert.ok(progressEvents.some(event => event.type === 'html_video_template_selected'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_graph_started'));
+  assert.ok(progressEvents.some(event => event.type === 'html_video_graph_done'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_frame_html_started'));
+  assert.ok(progressEvents.some(event => event.type === 'html_video_frame_html_done'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_frame_render_progress'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_export_ready'));
 
