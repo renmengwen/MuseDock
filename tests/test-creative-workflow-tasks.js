@@ -84,6 +84,7 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(task.events.some(event => event.message === '正在生成第 1/2 帧 HTML...'), true);
   assert.equal(task.events.filter(event => event.type === 'task_done').length, 1);
   await waitFor(() => assert.equal(readWorkflow(rootDir).last_event_seq, task.events.at(-1).seq));
+  await waitFor(() => assert.equal(readWorkflow(rootDir).task_status, 'done'));
 
   const fetched = await workflows.getCreativeWorkflow(WORKFLOW_ID, {
     rootDir,
@@ -115,6 +116,29 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(ignoredDoneEvent, null);
   assert.equal(doneRegistry.getTask(doneTaskId).events.some(event => event.type === 'task_done'), false);
   assert.equal(readWorkflow(doneRootDir).task_status || '', '');
+
+  const deletedRootDir = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '测试删除状态', useResearch: false }, { rootDir: deletedRootDir, services: services() });
+  const deletedRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-deleted',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const deletedTaskId = deletedRegistry.createDetachedTask({
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-deleted',
+    kind: 'creative_workflow',
+  });
+  const ignoredDeletedEvent = await workflowTasks.emitAndPersistTaskEvent({
+    registry: deletedRegistry,
+    taskId: deletedTaskId,
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-deleted',
+    event: { type: 'workflow_deleted' },
+    rootDir: deletedRootDir,
+  });
+  assert.equal(ignoredDeletedEvent, null);
+  assert.equal(deletedRegistry.getTask(deletedTaskId).events.some(event => event.type === 'workflow_deleted'), false);
+  assert.equal(readWorkflow(deletedRootDir).task_status || '', '');
 
   const unknownHtmlVideoRootDir = tempRoot();
   await workflows.createCreativeWorkflow({ input: '测试未知 HTML 事件', useResearch: false }, { rootDir: unknownHtmlVideoRootDir, services: services() });
