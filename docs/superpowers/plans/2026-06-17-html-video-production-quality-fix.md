@@ -1191,14 +1191,14 @@ git commit -m "完善 html-video 生产链路质量门禁"
 
 ## Self-Review
 
-**Spec coverage:**  
+**Spec coverage:**
 已覆盖最新失败链路的三个直接问题：帧内容重复、画幅错误、QA 误判。也覆盖一个辅助问题：成功诊断被包装成错误信息。
 
-**Placeholder scan:**  
+**Placeholder scan:**
 计划中没有 `TBD`、`TODO`、`implement later`。所有任务都有文件、测试、代码片段、运行命令和期望结果。
 
-**Type consistency:**  
+**Type consistency:**
 统一使用 `aspect_ratio/aspectRatio`、`duration_sec/durationSec`、`templateSchema`、`frame.inputs`、`metadata.visual_text`。新增 QA issue code 固定为 `aspect_ratio_mismatch` 和 `repeated_frames`。
 
-**Risk notes:**  
+**Risk notes:**
 当前生产模板只有 16:9，因此新增 9:16 模板是必要修复，不只是增强。多场景视频的总时长不能继续用来硬过滤单帧模板 `output.duration`，否则 60 秒/83 秒视频会把所有 5 秒/6 秒模板过滤掉。

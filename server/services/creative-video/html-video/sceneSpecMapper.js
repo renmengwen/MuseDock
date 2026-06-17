@@ -115,18 +115,18 @@ function sectionNo(index, total) {
   return `${String(index + 1).padStart(width, '0')}/${String(total).padStart(width, '0')}`;
 }
 
-function firstMetric(visualText = {}) {
+function firstMetric(visualText = {}, maxLength = 24) {
   const candidates = [
     ...(Array.isArray(visualText.keywords) ? visualText.keywords : []),
     ...(Array.isArray(visualText.cards) ? visualText.cards : []),
     visualText.headline,
   ];
-  return compactText(candidates.find(item => /[$￥¥]?\d|%/.test(String(item || ''))) || visualText.headline || '', 24);
+  return compactText(candidates.find(item => /[$￥¥]?\d|%/.test(String(item || ''))) || visualText.headline || '', maxLength);
 }
 
 function buildFrameInputs({ templateInputs, templateSchema, scene, index, total }) {
   const visualText = scene.visual_text || {};
-  const headline = compactText(visualText.headline || scene.title || scene.id, fieldMaxLength(templateSchema, 'headline', 48));
+  const headlineSource = visualText.headline || scene.title || scene.id;
   const cards = Array.isArray(visualText.cards)
     ? visualText.cards.map(item => compactText(item, 48)).filter(Boolean)
     : [];
@@ -135,9 +135,15 @@ function buildFrameInputs({ templateInputs, templateSchema, scene, index, total 
     : [];
   const inputs = clone(templateInputs);
 
-  if (schemaHas(templateSchema, 'headline')) inputs.headline = headline;
-  if (schemaHas(templateSchema, 'title')) inputs.title = headline;
-  if (schemaHas(templateSchema, 'card_title')) inputs.card_title = headline;
+  if (schemaHas(templateSchema, 'headline')) {
+    inputs.headline = compactText(headlineSource, fieldMaxLength(templateSchema, 'headline', 48));
+  }
+  if (schemaHas(templateSchema, 'title')) {
+    inputs.title = compactText(headlineSource, fieldMaxLength(templateSchema, 'title', 48));
+  }
+  if (schemaHas(templateSchema, 'card_title')) {
+    inputs.card_title = compactText(headlineSource, fieldMaxLength(templateSchema, 'card_title', 28));
+  }
   if (schemaHas(templateSchema, 'section_no')) inputs.section_no = sectionNo(index, total);
   if (schemaHas(templateSchema, 'eyebrow')) {
     inputs.eyebrow = compactText(keywords.slice(0, 2).join(' / '), fieldMaxLength(templateSchema, 'eyebrow', 28));
@@ -147,7 +153,9 @@ function buildFrameInputs({ templateInputs, templateSchema, scene, index, total 
   }
   if (schemaHas(templateSchema, 'bullets')) inputs.bullets = cards.slice(0, 4);
   if (schemaHas(templateSchema, 'cards')) inputs.cards = cards.slice(0, 4);
-  if (schemaHas(templateSchema, 'metric')) inputs.metric = firstMetric(visualText);
+  if (schemaHas(templateSchema, 'metric')) {
+    inputs.metric = firstMetric(visualText, fieldMaxLength(templateSchema, 'metric', 24));
+  }
   if (schemaHas(templateSchema, 'footer_text')) {
     inputs.footer_text = compactText(cards[0] || inputs.footer_text || '', fieldMaxLength(templateSchema, 'footer_text', 36));
   }

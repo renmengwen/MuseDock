@@ -107,6 +107,25 @@ const qa = require('../server/services/creative-video/visualQaService');
     const report = await qa.inspectRenderedVideo({
       projectDir,
       outputPath,
+      expectedAspectRatio: '9:16',
+      services: {
+        probeVideo: async () => ({}),
+        sampleFrames: async () => [
+          { id: 'frame_0', average_luma: 80, luma_stddev: 35, edge_score: 14, color_variance: 40, fingerprint: 'a' },
+          { id: 'frame_1', average_luma: 90, luma_stddev: 36, edge_score: 15, color_variance: 41, fingerprint: 'b' },
+          { id: 'frame_2', average_luma: 100, luma_stddev: 37, edge_score: 16, color_variance: 42, fingerprint: 'c' },
+          { id: 'frame_3', average_luma: 110, luma_stddev: 38, edge_score: 17, color_variance: 43, fingerprint: 'd' },
+        ],
+      },
+    });
+    assert.equal(report.success, false);
+    assert.ok(report.issues.some(issue => issue.code === 'aspect_probe_unavailable'));
+  }
+
+  {
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
       expectedAspectRatio: '16:9',
       services: {
         probeVideo: async () => ({ width: 1920, height: 1080, duration: 83.6 }),

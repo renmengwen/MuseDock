@@ -40,6 +40,16 @@ function addAspectIssue(issues, videoInfo, expectedAspectRatio) {
   const expected = String(expectedAspectRatio || '').trim();
   if (!expected || !videoInfo) return;
   const actual = aspectFromDimensions(videoInfo.width, videoInfo.height);
+  if (!actual) {
+    issues.push({
+      code: 'aspect_probe_unavailable',
+      message: `无法探测输出视频画幅，不能确认是否符合目标画幅 ${expected}。`,
+      expected,
+      width: videoInfo.width,
+      height: videoInfo.height,
+    });
+    return;
+  }
   if (actual && actual !== expected) {
     issues.push({
       code: 'aspect_ratio_mismatch',

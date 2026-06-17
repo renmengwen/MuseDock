@@ -99,4 +99,22 @@ assert.equal(frames[1].inputs.title, '数据正在变化');
 assert.equal(frames[1].inputs.section_no, '02/02');
 assert.deepEqual(frames[1].inputs.bullets, ['卡片二']);
 
+const compactCardTitleInputs = mapper.buildFrameInputs({
+  templateInputs: {},
+  templateSchema: {
+    card_title: { type: 'string', max_length: 8 },
+  },
+  scene: {
+    id: 'scene_long',
+    visual_text: {
+      headline: '这是一个非常长的卡片标题应该被裁剪',
+      keywords: [],
+      cards: [],
+    },
+  },
+  index: 0,
+  total: 1,
+});
+assert.ok(compactCardTitleInputs.card_title.length <= 8);
+
 console.log('html-video scene spec mapper tests passed');
