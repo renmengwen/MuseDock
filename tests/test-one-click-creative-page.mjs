@@ -135,6 +135,7 @@ assert.match(page, /ACTIVE_CREATIVE_TASK_STORAGE_KEY/, 'OneClickCreativePage sho
 assert.match(page, /streamCreativeWorkflowEvents/, 'OneClickCreativePage should subscribe to creative workflow event stream');
 assert.match(page, /lastSeqRef/, 'OneClickCreativePage should track last received task event sequence');
 assert.match(page, /activeTaskRef/, 'OneClickCreativePage should compare stream events against the active task ref');
+assert.match(page, /import\s+\{[^}]*useCallback[^}]*\}\s+from ['"]react['"]/, 'OneClickCreativePage should import useCallback for stable stream callbacks');
 assert.match(page, /loadActiveCreativeTask/, 'OneClickCreativePage should recover active stream state after refresh');
 assert.match(page, /task_stream_closed/, 'OneClickCreativePage should stop reconnecting when stream closes normally');
 assert.match(page, /streamClosedNormallyRef/, 'OneClickCreativePage should distinguish normal stream closure from errors');
@@ -148,7 +149,9 @@ assert.ok(onCloseBlock.includes('if (streamGenerationRef.current !== streamGener
 assert.ok(onCloseBlock.includes('activeStreamRef.current = null;'), 'SSE onClose should clear the active stream ref');
 assert.ok(onCloseBlock.includes('if (streamClosedNormallyRef.current) return;'), 'SSE onClose should not reconnect after task_stream_closed or manual stop');
 assert.match(onCloseBlock, /reconnectTimerRef\.current = window\.setTimeout\(\(\) => \{[\s\S]*if \(streamGenerationRef\.current !== streamGeneration\) return;[\s\S]*subscribeTaskEvents\(nextTask\);[\s\S]*\}, 1500\);/, 'SSE onClose should reconnect the same task after abnormal EOF while preserving generation guard');
-assert.match(page, /function\s+stopTaskStream\s*\(\{ clearStorage = false \} = \{\}\)/, 'OneClickCreativePage should centralize task stream cleanup');
+assert.match(page, /const\s+stopTaskStream\s*=\s*useCallback\(\(\{ clearStorage = false \} = \{\}\) => \{/, 'OneClickCreativePage should centralize task stream cleanup in a stable callback');
+assert.match(page, /const\s+applyTaskEvent\s*=\s*useCallback\(\(event\) => \{/, 'OneClickCreativePage should apply task events through a stable callback');
+assert.match(page, /const\s+subscribeTaskEvents\s*=\s*useCallback\(\(nextTask,\s*\{ sinceSeq \} = \{\}\) => \{/, 'OneClickCreativePage should subscribe to task events through a stable callback');
 assert.match(page, /const expectedTaskId = activeTaskRef\.current\?\.task_id/, 'OneClickCreativePage should compare event task id against active task ref');
 assert.match(page, /event\.task_id && expectedTaskId && event\.task_id !== expectedTaskId/, 'OneClickCreativePage should ignore stream events from stale task ids');
 assert.match(page, /activeTaskRef\.current\?\.workflow_id === nextTask\.workflow_id[\s\S]*activeTaskRef\.current\?\.task_id === nextTask\.task_id/, 'OneClickCreativePage should use activeTaskRef for duplicate subscription checks');
@@ -161,9 +164,14 @@ assert.ok(loadActiveStart > 0 && upsertTaskStart > loadActiveStart, 'OneClickCre
 const loadActiveBlock = page.slice(loadActiveStart, upsertTaskStart);
 assert.match(loadActiveBlock, /window\.localStorage\.removeItem\(ACTIVE_CREATIVE_TASK_STORAGE_KEY\);[\s\S]*return null;/, 'loadActiveCreativeTask should delete invalid active task storage values');
 assert.match(loadActiveBlock, /catch\s*\{[\s\S]*window\.localStorage\.removeItem\(ACTIVE_CREATIVE_TASK_STORAGE_KEY\);[\s\S]*return null;[\s\S]*\}/, 'loadActiveCreativeTask should delete active task storage when JSON parsing fails');
-assert.match(loadActiveBlock, /Number\.isFinite\(lastSeq\)/, 'loadActiveCreativeTask should reject non-finite last_seq values');
-assert.match(loadActiveBlock, /Math\.floor\(lastSeq\)/, 'loadActiveCreativeTask should normalize last_seq to an integer');
-assert.match(page, /if \(isDifferentTask\) \{[\s\S]*lastSeqRef\.current = Number\(sinceSeq \?\? 0\)/, 'Switching task stream subscriptions should reset lastSeq');
+assert.match(page, /function\s+normalizeLastSeq\(value\)\s*\{[\s\S]*Number\.isFinite\(nextValue\)[\s\S]*Math\.floor\(nextValue\)[\s\S]*\}/, 'OneClickCreativePage should normalize last_seq through a shared helper');
+assert.match(loadActiveBlock, /last_seq:\s*normalizeLastSeq\(parsed\.last_seq\)/, 'loadActiveCreativeTask should normalize missing or invalid last_seq to 0 without deleting otherwise valid storage');
+assert.match(page, /if \(isDifferentTask\) \{[\s\S]*lastSeqRef\.current = normalizeLastSeq\(sinceSeq\)/, 'Switching task stream subscriptions should normalize lastSeq');
+assert.match(page, /else if \(sinceSeq !== undefined\) \{[\s\S]*lastSeqRef\.current = normalizeLastSeq\(sinceSeq\)/, 'Reusing task stream subscriptions should normalize explicit sinceSeq');
+assert.match(page, /if \(nextWorkflow\?\.status === 'done'\) \{[\s\S]*if \(activeTaskRef\.current\?\.workflow_id === workflowId\) \{[\s\S]*stopTaskStream\(\{ clearStorage: true \}\);[\s\S]*\}[\s\S]*setStatus\('done'\);[\s\S]*setMessage\('视频生成完成。'\);/, 'Polling fallback should stop only the current workflow stream before setting done UI state');
+assert.match(page, /if \(nextWorkflow\?\.status === 'failed' \|\| json\?\.success === false\) \{[\s\S]*if \(activeTaskRef\.current\?\.workflow_id === workflowId\) \{[\s\S]*stopTaskStream\(\{ clearStorage: true \}\);[\s\S]*\}[\s\S]*setStatus\('failed'\);[\s\S]*setMessage\(nextMessage \|\| '视频生成失败，请查看任务详情。'\);/, 'Polling fallback should stop only the current workflow stream before setting failed UI state');
+assert.match(page, /\}, \[status, workflowId, persistTasks, stopTaskStream, subscribeTaskEvents\]\);/, 'Polling effect should declare stable stream callback dependencies');
+assert.match(page, /\}, \[workflowId, routeWorkflowId, selectedWorkflowId, stopTaskStream, subscribeTaskEvents\]\);/, 'Active task recovery effect should declare stream callback dependencies');
 assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');
 assert.match(page, /window\.localStorage\.setItem/, 'OneClickCreativePage should save submitted tasks to localStorage');
 assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should automatically enter the created task detail');
