@@ -1259,16 +1259,25 @@ async function run() {
     },
   });
   let htmlVideoLiteCreativeContext = null;
+  const fullCreativeContext = {
+    input: { raw_text: '完整输入', use_research: true },
+    research_context: { status: 'ready', summary: '联网摘要', sources: [{ title: '来源' }] },
+  };
   const htmlVideoLite = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, htmlVideoLiteRunId, {
     rootDir,
     useHtmlVideoLiteWorkflow: true,
+    projectOptions: {
+      creative_context: fullCreativeContext,
+    },
     creativeVideoWorkflowFacade: {
       generateCreativeVideoProject: async ({ creativeContext }) => {
         htmlVideoLiteCreativeContext = creativeContext;
         return {
         success: true,
         message: 'html-video lite 成片完成。',
+        render_mode: 'html-video',
         project_dir: path.join(rootDir, awemeId, 'agent_runs', `${htmlVideoLiteRunId}-lite-project`),
+        html_video_project_path: path.join(rootDir, awemeId, 'agent_runs', `${htmlVideoLiteRunId}-lite-project`),
         files: ['index.html', 'hyperframes.json'],
         scene_spec: { version: 1, scenes: [] },
         frame_specs: { frames: [] },
@@ -1281,7 +1290,10 @@ async function run() {
   });
   assert.equal(htmlVideoLite.success, true);
   assert.deepEqual(htmlVideoLiteCreativeContext.audio.scenes.map(scene => scene.duration), [5.44, 10.24]);
+  assert.deepEqual(htmlVideoLiteCreativeContext.input, fullCreativeContext.input);
+  assert.deepEqual(htmlVideoLiteCreativeContext.research_context, fullCreativeContext.research_context);
   assert.equal(htmlVideoLite.hyperframes_freeform.project.status, 'ready');
+  assert.equal(htmlVideoLite.hyperframes_freeform.project.render_mode, 'html-video');
   assert.equal(htmlVideoLite.hyperframes_freeform.project.html_video_project_path, path.join(rootDir, awemeId, 'agent_runs', `${htmlVideoLiteRunId}-lite-project`));
   assert.equal(htmlVideoLite.hyperframes_freeform.audio.status, 'ready');
   assert.equal(htmlVideoLite.hyperframes_freeform.render.status, 'rendered');
@@ -2807,6 +2819,27 @@ async function run() {
     const freeformFileResponse = await requestText(server, 'GET', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/files/index.html`);
     assert.strictEqual(freeformFileResponse.statusCode, 200);
     assert.strictEqual(freeformFileResponse.body, '<html>route freeform</html>');
+
+    const htmlVideoProjectDir = path.join(rootDir, awemeId, 'agent_runs', 'ok-run-html-video');
+    fs.mkdirSync(path.join(htmlVideoProjectDir, 'exports'), { recursive: true });
+    fs.writeFileSync(path.join(htmlVideoProjectDir, 'exports', 'output.mp4'), 'html-video-mp4');
+    agentRuns.getDouyinAgentRun = async () => ({
+      success: true,
+      aweme_id: awemeId,
+      run_id: 'ok-run',
+      data: {
+        hyperframes_freeform: {
+          project_dir: htmlVideoProjectDir,
+          project: {
+            render_mode: 'html-video',
+            html_video_project_path: htmlVideoProjectDir,
+          },
+        },
+      },
+    });
+    const htmlVideoOutputResponse = await requestText(server, 'GET', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/files/output.mp4`);
+    assert.strictEqual(htmlVideoOutputResponse.statusCode, 200);
+    assert.strictEqual(htmlVideoOutputResponse.body, 'html-video-mp4');
 
     const saveFreeformFileResponse = await requestJson(server, 'PUT', `/api/agents/douyin/${awemeId}/runs/ok-run/hyperframes-freeform/files/index.html`, {
       content: '<html>saved route freeform</html>',

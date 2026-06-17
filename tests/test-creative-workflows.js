@@ -158,6 +158,7 @@ async function testHtmlVideoLiteSkipsLegacyHyperframesStages() {
               status: 'ready',
               project_dir: projectDir,
               html_video_project_path: projectDir,
+              render_mode: 'html-video',
               scene_spec: { title: '测试', scenes: [] },
               frame_specs: { frames: [{ id: 'frame_01', scene_id: 'scene_01' }] },
             },
@@ -213,6 +214,46 @@ async function testHtmlVideoLiteSkipsLegacyHyperframesStages() {
   const htmlVideoProject = await getCreativeWorkflowHtmlVideoProject(WORKFLOW_ID, { rootDir });
   assert.equal(htmlVideoProject.success, true);
   assert.equal(htmlVideoProject.html_video_project_path, projectDir);
+}
+
+async function testFallbackProjectDoesNotSkipLegacyStages() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-rich-fallback');
+  const { services, calls } = createFakeServices({
+    agentRuns: {
+      generateDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
+        calls.push({ name: 'project', awemeId, runId, options });
+        return {
+          success: true,
+          status: 'done',
+          message: '创意视频生成完成。（Rich Template 模式）',
+          hyperframes_freeform: {
+            status: 'ready',
+            project_dir: projectDir,
+            project: {
+              status: 'ready',
+              project_dir: projectDir,
+              html_video_project_path: projectDir,
+              render_mode: 'rich',
+              scene_spec: { title: '测试', scenes: [] },
+              frame_specs: { frames: [] },
+            },
+            render: {
+              status: 'rendered',
+              output_path: path.join(projectDir, 'output.mp4'),
+              render_versions: [{ id: 'run-1-rich', status: 'rendered' }],
+            },
+          },
+        };
+      },
+    },
+  });
+
+  await createCreativeWorkflow({ input: '做一个 fallback 测试', useResearch: false, assetIds: [] }, { rootDir, mediaRoot, services });
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+  assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project', 'check', 'render', 'inspect']);
 }
 
 async function testRejectsEmptyInput() {
@@ -972,6 +1013,7 @@ async function testSceneSpecOperations() {
 async function run() {
   await testCreatesAndRunsTextWorkflow();
   await testHtmlVideoLiteSkipsLegacyHyperframesStages();
+  await testFallbackProjectDoesNotSkipLegacyStages();
   await testRejectsEmptyInput();
   await testCreatesDouyinWorkflowWithOriginalAwemeId();
   await testPreparesDouyinSourceBeforeAgentRun();

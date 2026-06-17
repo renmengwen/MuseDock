@@ -1532,15 +1532,21 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   if (options.useLegacyFreeformProject !== true && options.useHtmlVideoLiteWorkflow === true) {
     const facade = options.creativeVideoWorkflowFacade || defaultCreativeVideoWorkflowFacade;
     let result;
+    const optionCreativeContext = options.projectOptions?.creative_context
+      && typeof options.projectOptions.creative_context === 'object'
+      && !Array.isArray(options.projectOptions.creative_context)
+      ? options.projectOptions.creative_context
+      : {};
     try {
       result = await facade.generateCreativeVideoProject({
         workflowId: String(awemeId),
         runId: String(runId),
         creativeContext: {
+          ...optionCreativeContext,
           run: detail.data,
           brief: currentState.brief.data || {},
           audio: currentState.audio || {},
-          input: options.creativeContextInput || {},
+          input: optionCreativeContext.input || options.creativeContextInput || {},
         },
         target: options.projectOptions || {},
         rootDir: options.rootDir,
@@ -1556,18 +1562,26 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
     if (!result.success) {
       return markFreeformProjectFailed(awemeId, runId, result.message || 'html-video lite 成片失败。', options, operationId);
     }
-    const htmlVideoProjectPath = result.html_video_project_path || result.project_dir || '';
+    const renderMode = result.render_mode || '';
+    const isHtmlVideoProduction = renderMode === 'html-video';
+    const htmlVideoProjectPath = isHtmlVideoProduction
+      ? (result.html_video_project_path || result.project_dir || '')
+      : '';
+    const projectDir = htmlVideoProjectPath || result.project_dir || '';
     const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'project', operationId, current => ({
       status: 'ready',
-      project_dir: htmlVideoProjectPath,
+      project_dir: projectDir,
       project: {
         ...current.project,
         status: 'ready',
         operation_id: operationId,
         message: result.message || 'html-video lite 工程已生成。',
-        project_dir: htmlVideoProjectPath,
+        project_dir: projectDir,
         html_video_project_path: htmlVideoProjectPath,
-        files: mapFreeformProjectFilesToDir((result.files || []).map(name => ({ name })), htmlVideoProjectPath),
+        render_mode: renderMode,
+        html_video_diagnostics: result.html_video_diagnostics || result.diagnostics || [],
+        legacy_fallback_reason: result.legacy_fallback_reason || '',
+        files: mapFreeformProjectFilesToDir((result.files || []).map(name => ({ name })), projectDir),
         scene_spec: result.scene_spec,
         frame_specs: result.frame_specs,
       },
@@ -1581,6 +1595,7 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
         status: 'rendered',
         output_path: result.output_path,
         output_url: defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'output.mp4'),
+        render_mode: renderMode,
         render_versions: [{
           id: `${runId}-html-video-lite`,
           status: 'rendered',

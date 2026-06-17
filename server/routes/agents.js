@@ -1,4 +1,6 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const agentRuns = require('../services/agentRuns');
 const agentTemplateOverrides = require('../services/agentTemplateOverrides');
 
@@ -408,9 +410,16 @@ router.get('/douyin/:aweme_id/runs/:run_id/hyperframes-freeform/files/:file_name
     const { aweme_id, run_id, file_name } = req.params;
     const detail = await agentRuns.getDouyinAgentRun(aweme_id, run_id);
     const storedDir = detail?.data?.hyperframes_freeform?.project_dir;
-    const filePath = storedDir
-      ? require('path').resolve(storedDir, file_name)
+    let filePath = storedDir
+      ? path.resolve(storedDir, file_name)
       : agentRuns.resolveDouyinRunHyperframesFreeformFile(aweme_id, run_id, file_name);
+    if (storedDir && file_name === 'output.mp4' && !fs.existsSync(filePath)) {
+      const exportPath = path.resolve(storedDir, 'exports', 'output.mp4');
+      const relative = path.relative(path.resolve(storedDir), exportPath);
+      if (!relative.startsWith('..') && !path.isAbsolute(relative)) {
+        filePath = exportPath;
+      }
+    }
     return res.sendFile(filePath);
   } catch (error) {
     return res.status(400).json({

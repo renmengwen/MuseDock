@@ -51,12 +51,23 @@ async function createResearchContext({
     const sources = Array.isArray(result && result.sources)
       ? result.sources.map(source => normalizeSource(source, updatedAt))
       : [];
+    const summary = safeString(result && result.summary);
+
+    if (!summary && sources.length === 0) {
+      return {
+        status: 'failed',
+        query: normalizedQuery,
+        sources: [],
+        summary: '联网研究没有返回可用资料，请检查联网研究服务或关闭联网获取最新资料后重试。',
+        updated_at: updatedAt,
+      };
+    }
 
     return {
       status: 'ready',
       query: normalizedQuery,
       sources,
-      summary: safeString(result && result.summary),
+      summary,
       updated_at: updatedAt,
     };
   } catch (error) {

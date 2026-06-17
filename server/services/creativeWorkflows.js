@@ -209,7 +209,178 @@ function createDouyinSourceContext(input = {}) {
   };
 }
 
-async function defaultResearchProvider({ query } = {}) {
+async function defaultResearchProvider({
+  query,
+  aiModelConfig: injectedAiModelConfig,
+  aiTextModel: injectedAiTextModel,
+  webSearchProvider,
+} = {}) {
+  return runResearchProvider({
+    query,
+    aiModelConfig: injectedAiModelConfig || aiModelConfig,
+    aiTextModel: injectedAiTextModel || aiTextModel,
+    webSearchProvider: webSearchProvider || defaultWebSearchProvider,
+  });
+}
+
+function extractUrlsFromText(text) {
+  const urlRegex = /https?:\/\/[^\s)）\]}>"'，。；;]+/g;
+  return String(text || '').match(urlRegex) || [];
+}
+
+function stripHtml(value) {
+  return String(value || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function decodeDuckDuckGoRedirect(url) {
+  try {
+    const parsed = new URL(url, 'https://duckduckgo.com');
+    const uddg = parsed.searchParams.get('uddg');
+    return uddg ? decodeURIComponent(uddg) : parsed.href;
+  } catch {
+    return safeString(url);
+  }
+}
+
+function parseDuckDuckGoLiteResults(html, limit) {
+  const results = [];
+  const pattern = /<a([^>]*class=['"]result-link['"][^>]*)>([\s\S]*?)<\/a>[\s\S]*?<td[^>]+class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
+  let match;
+  while ((match = pattern.exec(html)) && results.length < limit) {
+    const hrefMatch = match[1].match(/\shref=['"]([^'"]+)['"]/i);
+    if (!hrefMatch) continue;
+    results.push({
+      title: stripHtml(match[2]),
+      url: decodeDuckDuckGoRedirect(hrefMatch[1]),
+      summary: stripHtml(match[3]),
+    });
+  }
+  return results;
+}
+
+function parseDuckDuckGoHtmlResults(html, limit) {
+  const results = [];
+  const pattern = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = pattern.exec(html)) && results.length < limit) {
+    results.push({
+      title: stripHtml(match[2]),
+      url: decodeDuckDuckGoRedirect(match[1]),
+      summary: stripHtml(match[3]),
+    });
+  }
+  return results;
+}
+
+function parseBingResults(html, limit) {
+  const results = [];
+  const pattern = /<li[^>]+class="[^"]*b_algo[^"]*"[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/gi;
+  let match;
+  while ((match = pattern.exec(html)) && results.length < limit) {
+    results.push({
+      title: stripHtml(match[2]),
+      url: safeString(match[1]),
+      summary: stripHtml(match[3]),
+    });
+  }
+  return results;
+}
+
+function normalizeSearchResults(value) {
+  const rawResults = Array.isArray(value)
+    ? value
+    : (Array.isArray(value?.results) ? value.results : []);
+  return rawResults
+    .map(item => ({
+      title: safeString(item?.title),
+      url: safeString(item?.url || item?.link),
+      summary: safeString(item?.summary || item?.snippet || item?.description),
+    }))
+    .filter(item => item.url)
+    .slice(0, 5);
+}
+
+async function defaultWebSearchProvider({ query, limit = 5, fetchImpl = global.fetch } = {}) {
+  const normalizedQuery = safeString(query);
+  if (!normalizedQuery) return { results: [] };
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('当前运行环境缺少 fetch 实现，无法执行联网搜索。');
+  }
+
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+    Accept: 'text/html,application/xhtml+xml',
+  };
+  const endpoints = [
+    {
+      url: `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(normalizedQuery)}`,
+      parse: parseDuckDuckGoLiteResults,
+    },
+    {
+      url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(normalizedQuery)}`,
+      parse: parseDuckDuckGoHtmlResults,
+    },
+    {
+      url: `https://www.bing.com/search?q=${encodeURIComponent(normalizedQuery)}`,
+      parse: parseBingResults,
+    },
+  ];
+  const errors = [];
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetchImpl(endpoint.url, {
+        headers,
+        signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+          ? AbortSignal.timeout(20000)
+          : undefined,
+      });
+      if (!response || !response.ok) {
+        errors.push(`HTTP ${response?.status || 'unknown'}: ${endpoint.url}`);
+        continue;
+      }
+      const html = await response.text();
+      const results = endpoint.parse(html, limit);
+      if (results.length > 0) return { results };
+      errors.push(`搜索结果为空: ${endpoint.url}`);
+    } catch (error) {
+      errors.push(`${endpoint.url}: ${error.message || '请求失败'}`);
+    }
+  }
+  return { results: [], diagnostics: errors };
+}
+
+function getFirstAssistantMessage(rawResponse = {}) {
+  return rawResponse?.choices?.[0]?.message || null;
+}
+
+function getWebSearchToolCalls(rawResponse = {}) {
+  const message = getFirstAssistantMessage(rawResponse);
+  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  return toolCalls.filter(toolCall => toolCall?.function?.name === 'web_search');
+}
+
+function parseToolCallArguments(toolCall) {
+  try {
+    return JSON.parse(toolCall?.function?.arguments || '{}');
+  } catch {
+    return {};
+  }
+}
+
+async function runResearchProvider({
+  query,
+  aiModelConfig: modelConfigService,
+  aiTextModel: textModelService,
+  webSearchProvider,
+} = {}) {
   const messages = [
     {
       role: 'system',
@@ -222,7 +393,7 @@ async function defaultResearchProvider({ query } = {}) {
   ];
 
   // 获取模型配置，判断是否为mimo模型
-  const config = await aiModelConfig.getRuntimeConfig('text');
+  const config = await modelConfigService.getRuntimeConfig('text');
   const modelId = config?.modelId || '';
   const isMimo = modelId.toLowerCase().startsWith('mimo');
 
@@ -266,7 +437,7 @@ async function defaultResearchProvider({ query } = {}) {
   }
 
   try {
-    const result = await aiTextModel.callTextModel({
+    const result = await textModelService.callTextModel({
       messages,
       tools,
       tool_choice: toolChoice,
@@ -281,6 +452,51 @@ async function defaultResearchProvider({ query } = {}) {
     // 从响应中提取搜索结果
     const text = result.text || '';
     const rawResponse = result.raw_response || {};
+    const webSearchToolCalls = getWebSearchToolCalls(rawResponse);
+
+    if (webSearchToolCalls.length > 0 && typeof webSearchProvider === 'function') {
+      const assistantMessage = getFirstAssistantMessage(rawResponse);
+      const toolMessages = [];
+      let searchSources = [];
+      for (const toolCall of webSearchToolCalls) {
+        const args = parseToolCallArguments(toolCall);
+        const searchQuery = safeString(args.query) || safeString(query);
+        const searchResult = await webSearchProvider({ query: searchQuery, limit: 5 });
+        const normalizedResults = normalizeSearchResults(searchResult);
+        searchSources = searchSources.concat(normalizedResults);
+        toolMessages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          name: 'web_search',
+          content: JSON.stringify({ query: searchQuery, results: normalizedResults }),
+        });
+      }
+
+      const finalResult = await textModelService.callTextModel({
+        messages: [
+          ...messages,
+          {
+            role: 'assistant',
+            content: assistantMessage?.content || '',
+            tool_calls: assistantMessage?.tool_calls || webSearchToolCalls,
+          },
+          ...toolMessages,
+          {
+            role: 'user',
+            content: '请基于搜索结果输出中文研究摘要，并在正文中保留关键来源 URL。不要编造搜索结果之外的信息。',
+          },
+        ],
+        temperature: 0.3,
+        stream: false,
+      });
+      if (!finalResult.success) {
+        throw new Error(finalResult.message || '文本模型整理搜索结果失败');
+      }
+      return {
+        summary: finalResult.text || '',
+        sources: normalizeSearchResults(searchSources),
+      };
+    }
 
     // 尝试从raw_response中提取搜索结果
     let sources = [];
@@ -311,8 +527,7 @@ async function defaultResearchProvider({ query } = {}) {
     // 如果没有从tool_calls中提取到，尝试从文本中提取
     if (sources.length === 0) {
       // 尝试从文本中提取URL和标题
-      const urlRegex = /https?:\/\/[^\s]+/g;
-      const urls = text.match(urlRegex) || [];
+      const urls = extractUrlsFromText(text);
       sources = urls.slice(0, 5).map(url => ({
         title: '',
         url: url,
@@ -676,7 +891,8 @@ function ensureSuccess(result, fallbackMessage) {
 function isHtmlVideoLiteProjectResult(result) {
   const hyperframes = result?.hyperframes_freeform || {};
   const project = hyperframes.project || {};
-  return Boolean(project.html_video_project_path || project.project_dir)
+  return project.render_mode === 'html-video'
+    && Boolean(project.html_video_project_path)
     && hyperframes.render?.status === 'rendered';
 }
 
@@ -1644,4 +1860,6 @@ module.exports = {
   ttsCreativeWorkflowScene,
   rerenderCreativeWorkflow,
   remixCreativeWorkflow,
+  defaultResearchProvider,
+  defaultWebSearchProvider,
 };

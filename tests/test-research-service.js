@@ -80,6 +80,18 @@ async function run() {
   ]);
   assert.equal(ready.updated_at, now);
 
+  const emptyResult = await createResearchContext({
+    enabled: true,
+    query,
+    now,
+    provider: async () => ({ summary: '', sources: [] }),
+  });
+  assert.equal(emptyResult.status, 'failed');
+  assert.equal(emptyResult.query, query);
+  assert.deepEqual(emptyResult.sources, []);
+  assert.match(emptyResult.summary, /没有返回可用资料/);
+  assert.equal(emptyResult.updated_at, now);
+
   const failed = await createResearchContext({
     enabled: true,
     query,
