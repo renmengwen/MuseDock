@@ -1,7 +1,13 @@
 ﻿const app = require('./app');
 const creativeWorkflows = require('./services/creativeWorkflows');
+const creativeWorkflowTasks = require('./services/creativeWorkflowTasks');
 
 const PORT = 3000;
+
+async function runStartupRecovery() {
+  await creativeWorkflowTasks.recoverOrphanedWorkflows();
+  await creativeWorkflows.recoverStaleWorkflowsOnStartup();
+}
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n====================================`);
@@ -9,7 +15,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  Open: http://localhost:${PORT}`);
   console.log(`====================================\n`);
 
-  creativeWorkflows.recoverStaleWorkflowsOnStartup().catch(err => {
-    console.error('[startup] 清理卡死工作流失败:', err);
+  runStartupRecovery().catch(err => {
+    console.error('[startup] 清理卡死的创作任务失败:', err.message);
   });
 });

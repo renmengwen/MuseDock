@@ -416,5 +416,29 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(liveTerminalEvents.filter(event => event.type === 'task_stream_closed').length, 1);
   assert.equal(liveTerminalEvents.at(-1).status, 'deleted');
 
+  const recoveryRoot = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '重启恢复测试', useResearch: false }, {
+    rootDir: recoveryRoot,
+    services: services('2026-06-18T00:00:00.000Z'),
+  });
+  await workflows.patchCreativeWorkflowTaskSummary(WORKFLOW_ID, {
+    active_task_id: 'lost-task',
+    active_operation_id: 'lost-op',
+    task_status: 'running',
+    current_stage: 'project',
+    current_stage_message: '正在生成工程...',
+    current_progress: 60,
+  }, { rootDir: recoveryRoot });
+  const recovered = await workflowTasks.recoverOrphanedWorkflows({
+    rootDir: recoveryRoot,
+    services: { now: () => '2026-06-18T00:05:00.000Z' },
+    registry: createCreativeTaskRegistry(),
+  });
+  assert.equal(recovered.recovered, 1);
+  const recoveredWorkflow = await workflows.getCreativeWorkflow(WORKFLOW_ID, { rootDir: recoveryRoot });
+  assert.equal(recoveredWorkflow.data.status, 'failed');
+  assert.match(recoveredWorkflow.data.message, /服务器重启/);
+  assert.equal(recoveredWorkflow.data.active_task_id, '');
+
   console.log('creative workflow task tests passed');
 })();

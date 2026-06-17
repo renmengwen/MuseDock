@@ -1313,6 +1313,17 @@ async function clearCreativeWorkflowTaskSummary(workflowId, options = {}) {
   }, options);
 }
 
+async function listCreativeWorkflowRecords(options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  let files;
+  try { files = await fsp.readdir(rootDir); } catch { return []; }
+  const records = [];
+  for (const file of files.filter(name => WORKFLOW_ID_PATTERN.test(path.basename(name, '.json')) && name.endsWith('.json'))) {
+    try { records.push(await readJson(path.join(rootDir, file))); } catch {}
+  }
+  return records;
+}
+
 async function deleteCreativeWorkflow(workflowId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
@@ -1942,6 +1953,7 @@ module.exports = {
   getCreativeWorkflow,
   patchCreativeWorkflowTaskSummary,
   clearCreativeWorkflowTaskSummary,
+  listCreativeWorkflowRecords,
   deleteCreativeWorkflow,
   getWorkflowPath,
   makeLocalCreativeAwemeId,
