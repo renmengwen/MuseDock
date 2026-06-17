@@ -155,6 +155,13 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const objectDiagnostic = normalizeDiagnostics([{ code: 'playwright_not_configured', message: 'Playwright browser executable not found' }]);
   assert.equal(objectDiagnostic[0].user_message, 'Playwright Chromium 未配置，无法渲染 html-video。');
   assert.equal(objectDiagnostic[0].details.message, 'Playwright browser executable not found');
+  const renderInfo = normalizeDiagnostics([{
+    code: 'frame_rendered',
+    stage: 'render',
+    message: '已通过 Playwright/Chromium 录制并使用 ffmpeg libx264 编码。',
+  }]);
+  assert.equal(renderInfo[0].code, 'frame_rendered');
+  assert.doesNotMatch(renderInfo[0].user_message, /处理失败/);
 
   console.log('html-video validation gate tests passed');
 })();

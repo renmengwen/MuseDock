@@ -87,10 +87,83 @@ function defaultFrameFields() {
   };
 }
 
-function buildFramesFromGraph({ sceneSpec: rawSceneSpec, contentGraph, templateId, templateInputs }) {
+function compactText(value, maxLength = 80) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length > maxLength ? text.slice(0, maxLength - 1).trimEnd() : text;
+}
+
+function schemaProperties(schema = {}) {
+  return schema && typeof schema.properties === 'object' && !Array.isArray(schema.properties)
+    ? schema.properties
+    : (schema || {});
+}
+
+function schemaHas(schema, key) {
+  return Object.prototype.hasOwnProperty.call(schemaProperties(schema), key);
+}
+
+function fieldMaxLength(schema, key, fallback) {
+  const raw = schemaProperties(schema)[key];
+  const value = raw && (raw.max_length ?? raw.maxLength);
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function sectionNo(index, total) {
+  const width = Math.max(2, String(total).length);
+  return `${String(index + 1).padStart(width, '0')}/${String(total).padStart(width, '0')}`;
+}
+
+function firstMetric(visualText = {}) {
+  const candidates = [
+    ...(Array.isArray(visualText.keywords) ? visualText.keywords : []),
+    ...(Array.isArray(visualText.cards) ? visualText.cards : []),
+    visualText.headline,
+  ];
+  return compactText(candidates.find(item => /[$￥¥]?\d|%/.test(String(item || ''))) || visualText.headline || '', 24);
+}
+
+function buildFrameInputs({ templateInputs, templateSchema, scene, index, total }) {
+  const visualText = scene.visual_text || {};
+  const headline = compactText(visualText.headline || scene.title || scene.id, fieldMaxLength(templateSchema, 'headline', 48));
+  const cards = Array.isArray(visualText.cards)
+    ? visualText.cards.map(item => compactText(item, 48)).filter(Boolean)
+    : [];
+  const keywords = Array.isArray(visualText.keywords)
+    ? visualText.keywords.map(item => compactText(item, 24)).filter(Boolean)
+    : [];
+  const inputs = clone(templateInputs);
+
+  if (schemaHas(templateSchema, 'headline')) inputs.headline = headline;
+  if (schemaHas(templateSchema, 'title')) inputs.title = headline;
+  if (schemaHas(templateSchema, 'card_title')) inputs.card_title = headline;
+  if (schemaHas(templateSchema, 'section_no')) inputs.section_no = sectionNo(index, total);
+  if (schemaHas(templateSchema, 'eyebrow')) {
+    inputs.eyebrow = compactText(keywords.slice(0, 2).join(' / '), fieldMaxLength(templateSchema, 'eyebrow', 28));
+  }
+  if (schemaHas(templateSchema, 'card_label')) {
+    inputs.card_label = compactText(keywords.slice(0, 2).join('｜') || inputs.card_label, fieldMaxLength(templateSchema, 'card_label', 24));
+  }
+  if (schemaHas(templateSchema, 'bullets')) inputs.bullets = cards.slice(0, 4);
+  if (schemaHas(templateSchema, 'cards')) inputs.cards = cards.slice(0, 4);
+  if (schemaHas(templateSchema, 'metric')) inputs.metric = firstMetric(visualText);
+  if (schemaHas(templateSchema, 'footer_text')) {
+    inputs.footer_text = compactText(cards[0] || inputs.footer_text || '', fieldMaxLength(templateSchema, 'footer_text', 36));
+  }
+  if (schemaHas(templateSchema, 'duration_sec')) {
+    inputs.duration_sec = Number(scene.duration || scene.target_duration_sec || inputs.duration_sec || DEFAULT_FRAME_DURATION_SEC);
+  }
+
+  return inputs;
+}
+
+function buildFramesFromGraph({ sceneSpec: rawSceneSpec, contentGraph, templateId, templateInputs, templateSchema }) {
   const sceneSpec = normalizeSceneSpec(rawSceneSpec);
   const scenesById = new Map((sceneSpec.scenes || []).map(scene => [scene.id, scene]));
-  return topoSort(contentGraph).map((nodeId, index) => {
+  const orderedNodeIds = topoSort(contentGraph);
+  const total = orderedNodeIds.length;
+  return orderedNodeIds.map((nodeId, index) => {
     const node = getNode(contentGraph, nodeId) || {};
     const scene = scenesById.get(nodeId) || {};
     return {
@@ -103,7 +176,13 @@ function buildFramesFromGraph({ sceneSpec: rawSceneSpec, contentGraph, templateI
       html_path: null,
       preview_mp4_path: null,
       duration_sec: Number.isFinite(node.durationSec) ? node.durationSec : (scene.duration || DEFAULT_FRAME_DURATION_SEC),
-      inputs: clone(templateInputs),
+      inputs: buildFrameInputs({
+        templateInputs,
+        templateSchema,
+        scene,
+        index,
+        total,
+      }),
       narration_text: scene.narration_text || '',
       captions: clone(scene.captions),
       metadata: {
@@ -118,4 +197,5 @@ function buildFramesFromGraph({ sceneSpec: rawSceneSpec, contentGraph, templateI
 module.exports = {
   mapSceneSpecToContentGraph,
   buildFramesFromGraph,
+  buildFrameInputs,
 };

@@ -20,8 +20,8 @@ async function createTemplate(rootDir) {
     'source_entry: index.html',
     'output:',
     '  resolution:',
-    '    width: 1080',
-    '    height: 1920',
+    '    width: 1920',
+    '    height: 1080',
     '  fps: 24',
     '  duration: 4',
     'inputs:',
@@ -38,10 +38,42 @@ async function createTemplate(rootDir) {
   await writeFile(path.join(dir, 'index.html'), '<html><body>{{headline}}</body></html>');
 }
 
+async function createVerticalTemplate(rootDir) {
+  const dir = path.join(rootDir, 'vertical');
+  await writeFile(path.join(dir, 'template.html-video.yaml'), [
+    'id: vertical',
+    'name: 竖屏模板',
+    'engine: hyperframes',
+    'source_entry: index.html',
+    'output:',
+    '  resolution:',
+    '    width: 1080',
+    '    height: 1920',
+    '  fps: 24',
+    '  duration: 4',
+    'inputs:',
+    '  schema:',
+    '    type: object',
+    '    required: [headline]',
+    '    properties:',
+    '      headline:',
+    '        type: string',
+    '      section_no:',
+    '        type: string',
+    '      bullets:',
+    '        type: array',
+    'license:',
+    '  commercial_use: true',
+    '',
+  ].join('\n'));
+  await writeFile(path.join(dir, 'index.html'), '<html><body>{{section_no}} {{headline}}</body></html>');
+}
+
 (async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-workflow-'));
   const templateRoot = path.join(rootDir, 'templates');
   await createTemplate(templateRoot);
+  await createVerticalTemplate(templateRoot);
   const templateRegistry = createTemplateRegistry({ rootDir: templateRoot });
   templateRegistry.scanTemplates();
 
@@ -52,14 +84,14 @@ async function createTemplate(rootDir) {
     rootDir,
     sceneSpec: {
       title: '产品发布',
-      aspect_ratio: '16:9',
+      aspect_ratio: '9:16',
       scenes: [
         { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: [], visual_text: { headline: '首版标题', keywords: [], cards: [] } },
         { id: 'scene_02', duration: 3, kind: 'text', narration_text: '旁白二', captions: [], visual_text: { headline: '第二幕', keywords: [], cards: [] } },
       ],
     },
     creativeContext: { input: { raw_text: '产品发布' } },
-    target: { duration_sec: 4 },
+    target: {},
     templateRegistry,
     services: {
       aiTextModel: {
@@ -68,7 +100,10 @@ async function createTemplate(rootDir) {
           calls.push(prompt);
           assert.match(prompt, /只返回 JSON/);
           if (calls.length === 1) {
-            return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配', confidence: 0.9 }) };
+            assert.match(prompt, /"aspect_ratio": "9:16"/);
+            assert.match(prompt, /"id": "vertical"/);
+            assert.doesNotMatch(prompt, /"id": "simple"/);
+            return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
           }
           return { success: true, text: JSON.stringify({ headline: '首版标题' }) };
         },
@@ -136,7 +171,7 @@ async function createTemplate(rootDir) {
 
   assert.equal(result.success, true);
   assert.equal(result.render_mode, 'html-video');
-  assert.equal(result.template_id, 'simple');
+  assert.equal(result.template_id, 'vertical');
   assert.ok(result.html_video_project_path.endsWith(`${path.sep}202606170000000001${path.sep}agent_runs${path.sep}run_001-html-video`));
   assert.equal(result.project.frames.length, 2);
   assert.equal(result.project.frames[0].scene_id, 'scene_01');

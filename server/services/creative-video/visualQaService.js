@@ -25,6 +25,74 @@ function ratio(count, total) {
   return total > 0 ? count / total : 0;
 }
 
+function aspectFromDimensions(width, height) {
+  const w = Number(width);
+  const h = Number(height);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return '';
+  const actualRatio = w / h;
+  if (Math.abs(actualRatio - 16 / 9) < 0.02) return '16:9';
+  if (Math.abs(actualRatio - 9 / 16) < 0.02) return '9:16';
+  if (Math.abs(actualRatio - 1) < 0.02) return '1:1';
+  return `${w}:${h}`;
+}
+
+function addAspectIssue(issues, videoInfo, expectedAspectRatio) {
+  const expected = String(expectedAspectRatio || '').trim();
+  if (!expected || !videoInfo) return;
+  const actual = aspectFromDimensions(videoInfo.width, videoInfo.height);
+  if (actual && actual !== expected) {
+    issues.push({
+      code: 'aspect_ratio_mismatch',
+      message: `输出画幅为 ${actual}，但目标画幅为 ${expected}。`,
+      expected,
+      actual,
+      width: videoInfo.width,
+      height: videoInfo.height,
+    });
+  }
+}
+
+function frameFingerprint(frame) {
+  if (frame.fingerprint) return String(frame.fingerprint);
+  return [
+    Math.round(Number(frame.average_luma || 0)),
+    Math.round(Number(frame.luma_stddev || 0)),
+    Math.round(Number(frame.edge_score || 0) * 10),
+    Math.round(Number(frame.color_variance || 0)),
+  ].join(':');
+}
+
+function addRepeatedFrameIssue(issues, frames, threshold = 0.75) {
+  if (!Array.isArray(frames) || frames.length < 4) return;
+  const counts = new Map();
+  for (const frame of frames) {
+    const key = frameFingerprint(frame);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const maxCount = Math.max(...counts.values());
+  const repeatedRatio = maxCount / frames.length;
+  if (repeatedRatio >= threshold) {
+    issues.push({
+      code: 'repeated_frames',
+      message: `采样帧重复率 ${(repeatedRatio * 100).toFixed(0)}%，疑似多场景重复同一画面。`,
+      repeated_ratio: repeatedRatio,
+      frame_count: frames.length,
+    });
+  }
+}
+
+function withAdditionalIssues(result, { videoInfo, expectedAspectRatio, frames }) {
+  const issues = [...(result.issues || [])];
+  addAspectIssue(issues, videoInfo, expectedAspectRatio);
+  addRepeatedFrameIssue(issues, frames);
+  return {
+    ...result,
+    success: issues.length === 0,
+    issues,
+    message: issues.length === 0 ? '视觉质检通过。' : '视觉质检失败。',
+  };
+}
+
 function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
   const total = frames.length;
   const nearWhite = frames.filter(frame => Number(frame.average_luma) > THRESHOLDS.nearWhiteLuma).length;
@@ -87,11 +155,46 @@ function getFfmpegCommand() {
   return process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
 }
 
+function getFfprobeCommand() {
+  if (process.env.FFPROBE_PATH) return process.env.FFPROBE_PATH;
+  const ffmpeg = getFfmpegCommand();
+  if (ffmpeg && ffmpeg !== 'ffmpeg' && ffmpeg !== 'ffmpeg.exe') {
+    return path.join(path.dirname(ffmpeg), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
+  }
+  return process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+}
+
 async function runFfmpeg(args, cwd, runCommand) {
   try {
     return await runCommand(getFfmpegCommand(), args, { cwd });
   } catch (error) {
     return { ok: false, stdout: '', stderr: '', error: error.message };
+  }
+}
+
+async function probeVideo({ videoPath, runCommand }) {
+  try {
+    const result = await runCommand(getFfprobeCommand(), [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'stream=width,height,duration',
+      '-of',
+      'json',
+      videoPath,
+    ]);
+    if (!result.ok) return {};
+    const parsed = JSON.parse(result.stdout || '{}');
+    const stream = Array.isArray(parsed.streams) ? parsed.streams[0] : {};
+    return {
+      width: Number(stream.width) || undefined,
+      height: Number(stream.height) || undefined,
+      duration: Number(stream.duration) || undefined,
+    };
+  } catch {
+    return {};
   }
 }
 
@@ -187,6 +290,9 @@ async function inspectRenderedVideo({
   projectDir,
   outputPath,
   runCommand = defaultRunCommand,
+  expectedAspectRatio = '',
+  expected_aspect_ratio = '',
+  services = {},
 } = {}) {
   const videoPath = outputPath || (projectDir ? path.join(projectDir, 'output.mp4') : '');
   if (!projectDir || !videoPath || !fs.existsSync(videoPath)) {
@@ -200,6 +306,21 @@ async function inspectRenderedVideo({
   const inspectRoot = path.join(projectDir, 'inspect');
   await fsp.mkdir(inspectRoot, { recursive: true });
   const workDir = await fsp.mkdtemp(path.join(inspectRoot, 'qa-'));
+  const videoInfo = services.probeVideo
+    ? await services.probeVideo({ projectDir, outputPath: videoPath, videoPath })
+    : await probeVideo({ videoPath, runCommand });
+  if (services.sampleFrames) {
+    const frames = await services.sampleFrames({ projectDir, outputPath: videoPath, videoPath, workDir });
+    const result = analyzeFrameMetrics({
+      frames,
+      contact_sheet_size: 45000,
+    });
+    return withAdditionalIssues(result, {
+      videoInfo,
+      expectedAspectRatio: expectedAspectRatio || expected_aspect_ratio,
+      frames,
+    });
+  }
   const contactSheet = await createContactSheet({ projectDir, workDir, videoPath, runCommand });
   const extracted = await extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand });
   if (!extracted.success) {
@@ -216,8 +337,13 @@ async function inspectRenderedVideo({
     frames: extracted.frames,
     contact_sheet_size: contactSheet.size,
   });
+  const finalResult = withAdditionalIssues(result, {
+    videoInfo,
+    expectedAspectRatio: expectedAspectRatio || expected_aspect_ratio,
+    frames: extracted.frames,
+  });
   return {
-    ...result,
+    ...finalResult,
     frames: extracted.frames,
     contact_sheet_path: contactSheet.path,
   };
@@ -226,4 +352,5 @@ async function inspectRenderedVideo({
 module.exports = {
   analyzeFrameMetrics,
   inspectRenderedVideo,
+  aspectFromDimensions,
 };

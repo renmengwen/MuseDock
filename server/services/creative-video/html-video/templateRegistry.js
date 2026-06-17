@@ -19,7 +19,7 @@ const DEFAULT_OPTIONS = {
   commercialOnly: true,
 };
 
-const DEFAULT_ROOT_DIR = path.resolve(__dirname, '../../../../templates');
+const DEFAULT_ROOT_DIR = path.resolve(__dirname, '../../../templates');
 
 function normalizeEngine(engine) {
   return String(engine || '').trim();

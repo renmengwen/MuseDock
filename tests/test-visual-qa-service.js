@@ -85,5 +85,42 @@ const qa = require('../server/services/creative-video/visualQaService');
   assert.ok(commands.some(call => call.args.includes('rawvideo')));
   assert.ok(commands.some(call => call.args.includes('contact_sheet.jpg') || String(call.args[call.args.length - 1]).includes('contact_sheet.jpg')));
 
+  {
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      expectedAspectRatio: '9:16',
+      services: {
+        probeVideo: async () => ({ width: 1920, height: 1080, duration: 83.6 }),
+        sampleFrames: async () => [
+          { id: 'frame_0', average_luma: 60, luma_stddev: 30, edge_score: 4, color_variance: 60, fingerprint: 'a' },
+          { id: 'frame_1', average_luma: 61, luma_stddev: 30, edge_score: 4, color_variance: 60, fingerprint: 'a' },
+          { id: 'frame_2', average_luma: 60, luma_stddev: 30, edge_score: 4, color_variance: 60, fingerprint: 'a' },
+        ],
+      },
+    });
+    assert.equal(report.success, false);
+    assert.ok(report.issues.some(issue => issue.code === 'aspect_ratio_mismatch'));
+  }
+
+  {
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      expectedAspectRatio: '16:9',
+      services: {
+        probeVideo: async () => ({ width: 1920, height: 1080, duration: 83.6 }),
+        sampleFrames: async () => [
+          { id: 'frame_0', average_luma: 60, luma_stddev: 30, edge_score: 4, color_variance: 60, fingerprint: 'same' },
+          { id: 'frame_1', average_luma: 60, luma_stddev: 30, edge_score: 4, color_variance: 60, fingerprint: 'same' },
+          { id: 'frame_2', average_luma: 60, luma_stddev: 30, edge_score: 4, color_variance: 60, fingerprint: 'same' },
+          { id: 'frame_3', average_luma: 60, luma_stddev: 30, edge_score: 4, color_variance: 60, fingerprint: 'same' },
+        ],
+      },
+    });
+    assert.equal(report.success, false);
+    assert.ok(report.issues.some(issue => issue.code === 'repeated_frames'));
+  }
+
   console.log('visual qa service tests passed');
 })();

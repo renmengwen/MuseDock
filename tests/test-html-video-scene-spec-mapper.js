@@ -58,6 +58,12 @@ const frames = mapper.buildFramesFromGraph({
   contentGraph,
   templateId: 'glitch_title',
   templateInputs: { title: '信号失控', subtitle: '评论区正在改写品牌传播' },
+  templateSchema: {
+    title: { type: 'string' },
+    subtitle: { type: 'string' },
+    section_no: { type: 'string' },
+    bullets: { type: 'array' },
+  },
 });
 
 assert.equal(frames.length, 2);
@@ -67,7 +73,10 @@ assert.equal(frames[0].scene_id, 'scene_01');
 assert.equal(frames[0].template_id, 'glitch_title');
 assert.equal(frames[0].engine, 'hyperframes-playwright');
 assert.equal(frames[0].duration_sec, 4);
-assert.deepEqual(frames[0].inputs, { title: '信号失控', subtitle: '评论区正在改写品牌传播' });
+assert.equal(frames[0].inputs.title, '信号失控');
+assert.equal(frames[0].inputs.subtitle, '评论区正在改写品牌传播');
+assert.equal(frames[0].inputs.section_no, '01/02');
+assert.deepEqual(frames[0].inputs.bullets, ['卡片一']);
 assert.deepEqual(frames[0].captions, sceneSpec.scenes[1].captions);
 assert.equal(frames[0].narration_text, '第一段旁白');
 assert.deepEqual(frames[0].transition_in, { type: 'cut', duration_sec: 0, params: {} });
@@ -86,5 +95,8 @@ assert.deepEqual(frames[0].enhancement, {
 assert.equal(frames[1].id, 'scene_02');
 assert.equal(frames[1].order, 2);
 assert.equal(frames[1].duration_sec, 5);
+assert.equal(frames[1].inputs.title, '数据正在变化');
+assert.equal(frames[1].inputs.section_no, '02/02');
+assert.deepEqual(frames[1].inputs.bullets, ['卡片二']);
 
 console.log('html-video scene spec mapper tests passed');

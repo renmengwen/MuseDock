@@ -130,7 +130,14 @@ failures.forEach(({ manifest, options, field, text }) => {
 
 const productionIndex = registry.buildCompactIndex(productionTemplatesDir);
 const productionIds = productionIndex.map(item => item.id).sort();
-assert.deepEqual(productionIds, ['bold_signal', 'glitch_title'].sort());
+assert.deepEqual(productionIds, ['bold_signal', 'glitch_title', 'news_signal_vertical'].sort());
+assert.deepEqual(
+  registry.buildCompactIndex().map(item => item.id).sort(),
+  ['bold_signal', 'glitch_title', 'news_signal_vertical'].sort(),
+);
+const defaultRegistry = registry.createTemplateRegistry();
+const verticalTemplates = defaultRegistry.buildCompactIndex({ aspect_ratio: '9:16' }).map(item => item.id);
+assert.ok(verticalTemplates.includes('news_signal_vertical'));
 for (const id of ['bold_signal', 'glitch_title']) {
   const template = productionIndex.find(item => item.id === id);
   assert.equal(template.engine, 'hyperframes');

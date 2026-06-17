@@ -42,17 +42,30 @@ function normalizeDiagnostic(input, defaults = {}) {
       details: { message: input },
     });
   }
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    const code = normalizeCode(input.code || defaults.code || 'html_video_info');
+    return createDiagnostic({
+      ...defaults,
+      ...objectOrEmpty(input),
+      code,
+      stage: input.stage || defaults.stage || 'unknown',
+      user_message: input.user_message || defaults.user_message || DEFAULT_MESSAGES[code] || input.message || 'html-video 处理信息。',
+      details: {
+        ...objectOrEmpty(defaults.details),
+        ...(typeof input.message === 'string' ? { message: input.message } : {}),
+        ...objectOrEmpty(input.details),
+        ...Object.fromEntries(Object.entries(objectOrEmpty(input)).filter(([key]) => (
+          !['code', 'stage', 'user_message', 'message', 'details', 'fallback_allowed'].includes(key)
+        ))),
+      },
+      fallback_allowed: input.fallback_allowed !== false,
+    });
+  }
   return createDiagnostic({
     ...defaults,
-    ...objectOrEmpty(input),
-    details: {
-      ...objectOrEmpty(defaults.details),
-      ...(input && typeof input.message === 'string' ? { message: input.message } : {}),
-      ...objectOrEmpty(input && input.details),
-      ...Object.fromEntries(Object.entries(objectOrEmpty(input)).filter(([key]) => (
-        !['code', 'stage', 'user_message', 'message', 'details', 'fallback_allowed'].includes(key)
-      ))),
-    },
+    code: defaults.code || 'html_video_error',
+    user_message: defaults.user_message || `html-video 处理失败：${String(input || '未知错误')}`,
+    details: { message: String(input || '') },
   });
 }
 

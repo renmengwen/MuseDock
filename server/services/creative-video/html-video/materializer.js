@@ -61,13 +61,13 @@ function frameOutputPath(frame, index) {
   return `frames/${String(index + 1).padStart(2, '0')}-${frameId}.html`;
 }
 
-function materializeTemplate(sourceHtml, vars, durationSec) {
+function materializeTemplate(sourceHtml, vars, durationSec, sceneData = {}) {
   const replaced = sourceHtml.replace(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g, (match, key) => {
     if (!Object.prototype.hasOwnProperty.call(vars, key)) return '';
     return htmlEscape(vars[key]);
   });
 
-  const injection = `<script>window.__HV_VARS__ = ${safeJson(vars)}; window.__HV_DURATION__ = ${safeJson(durationSec)};</script>`;
+  const injection = `<script>window.__HV_VARS__ = ${safeJson(vars)}; window.__HV_DURATION__ = ${safeJson(durationSec)}; window.__HV_SCENE__ = ${safeJson(sceneData)};</script>`;
   if (/<head\b[^>]*>/i.test(replaced)) {
     return replaced.replace(/<head\b([^>]*)>/i, `<head$1>\n${injection}`);
   }
@@ -124,7 +124,13 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
   vars.duration_sec = Number.isFinite(Number(vars.duration_sec)) ? Number(vars.duration_sec) : durationSec;
 
   const sourceHtml = await fs.readFile(sourcePath, 'utf8');
-  const html = materializeTemplate(sourceHtml, vars, durationSec);
+  const sceneData = {
+    id: frame.scene_id || frame.id,
+    narration_text: frame.narration_text || '',
+    captions: Array.isArray(frame.captions) ? frame.captions : [],
+    metadata: objectOrEmpty(frame.metadata),
+  };
+  const html = materializeTemplate(sourceHtml, vars, durationSec, sceneData);
   const relativePath = frameOutputPath(frame, index);
   const outputPath = resolveProjectPath(projectDir, relativePath);
   await fs.mkdir(path.dirname(outputPath), { recursive: true });

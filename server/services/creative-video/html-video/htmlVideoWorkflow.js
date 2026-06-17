@@ -79,6 +79,48 @@ function durationFromTarget(target, template) {
   return Number.isFinite(duration) && duration > 0 ? duration : 6;
 }
 
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return null;
+}
+
+function resolveRenderTarget(target = {}, sceneSpec = {}) {
+  const aspectRatio = target.aspect_ratio
+    || target.aspectRatio
+    || sceneSpec.aspect_ratio
+    || sceneSpec.aspectRatio
+    || '';
+  const durationSec = firstPositiveNumber(
+    target.duration_sec,
+    target.durationSec,
+    target.duration,
+    target.target_duration_sec,
+    target.targetDurationSec,
+    sceneSpec.target_duration_sec,
+    sceneSpec.targetDurationSec,
+  );
+  return {
+    ...target,
+    aspect_ratio: aspectRatio,
+    aspectRatio,
+    duration_sec: durationSec || target.duration_sec || target.durationSec || target.duration,
+  };
+}
+
+function buildTemplateIndexOptions(renderTarget = {}, sceneSpec = {}) {
+  const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
+  const isMultiScene = scenes.length > 1;
+  return {
+    aspectRatio: renderTarget.aspect_ratio || renderTarget.aspectRatio,
+    durationSec: isMultiScene
+      ? undefined
+      : (renderTarget.duration_sec || renderTarget.durationSec || renderTarget.duration),
+  };
+}
+
 function buildInitialProject({ workflowId, runId, sceneSpec, template, templateInputs, target }) {
   const duration = durationFromTarget(target, template);
   const output = objectOrEmpty(template.output);
@@ -89,6 +131,7 @@ function buildInitialProject({ workflowId, runId, sceneSpec, template, templateI
     contentGraph,
     templateId: template.id,
     templateInputs,
+    templateSchema,
   });
   const frames = mappedFrames.length ? mappedFrames : [{
     id: 'frame_01',
@@ -155,10 +198,8 @@ async function generateHtmlVideo({
   const registry = resolveRegistry(templateRegistry);
   const diagnostics = [];
   const model = getModel(services);
-  const compactIndex = registry.buildCompactIndex({
-    durationSec: target.duration_sec || target.durationSec || target.duration,
-    aspectRatio: target.aspect_ratio || target.aspectRatio,
-  });
+  const renderTarget = resolveRenderTarget(target, sceneSpec || {});
+  const compactIndex = registry.buildCompactIndex(buildTemplateIndexOptions(renderTarget, sceneSpec || {}));
 
   if (!compactIndex.length) {
     return failure('没有可用的 html-video 模板。', [
@@ -166,7 +207,7 @@ async function generateHtmlVideo({
     ]);
   }
 
-  const selection = await requestTemplateSelection({ model, compactIndex, creativeContext, target, sceneSpec });
+  const selection = await requestTemplateSelection({ model, compactIndex, creativeContext, target: renderTarget, sceneSpec });
   if (!selection.success) {
     const selectionDiagnostics = selection.diagnostics || [];
     const code = selectionDiagnostics.some(item => String(item).includes('unknown_template_id'))
@@ -218,7 +259,7 @@ async function generateHtmlVideo({
     sceneSpec,
     template,
     templateInputs: inputResult.inputs,
-    target,
+    target: renderTarget,
   });
 
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
@@ -274,6 +315,7 @@ async function generateHtmlVideo({
     visualReport = await visualQaService.inspectRenderedVideo({
       projectDir,
       outputPath: rendered.output_path,
+      expectedAspectRatio: renderTarget.aspect_ratio || sceneSpec?.aspect_ratio,
     });
     if (!visualReport.success) {
       diagnostics.push(createDiagnostic({
@@ -411,4 +453,6 @@ module.exports = {
   requestTemplateSelection,
   requestTemplateInputs,
   buildInitialProject,
+  resolveRenderTarget,
+  buildTemplateIndexOptions,
 };

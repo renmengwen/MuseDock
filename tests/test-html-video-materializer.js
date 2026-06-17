@@ -94,6 +94,13 @@ async function createTemplate(rootDir) {
           subtitle: '<img src=x onerror=alert(1)>',
           duration_sec: 4,
         },
+        metadata: {
+          visual_text: {
+            headline: '第一幕',
+            cards: ['卡片一'],
+            keywords: ['关键词一'],
+          },
+        },
       },
       {
         id: 'scene_02',
@@ -132,6 +139,8 @@ async function createTemplate(rootDir) {
   const html = await fs.readFile(path.join(projectDir, result.project.frames[0].html_path), 'utf8');
   assert.ok(html.includes('<script>window.__HV_VARS__ = '));
   assert.ok(html.includes('window.__HV_DURATION__ = 4;'));
+  assert.match(html, /window\.__HV_SCENE__/);
+  assert.match(html, /"headline":"第一幕"/);
   assert.ok(html.includes('data-hv-element-id="title"'));
   assert.ok(html.includes('data-hv-bind="subtitle"'));
   assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'));
