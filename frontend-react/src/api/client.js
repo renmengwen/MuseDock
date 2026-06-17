@@ -38,18 +38,37 @@ async function requestRaw(url, options) {
 }
 
 function parseSseChunk(buffer, onEvent) {
-  const parts = buffer.split(/\n\n/);
+  const parts = buffer.split(/\r?\n\r?\n/);
   const rest = parts.pop() || '';
   for (const part of parts) {
-    const dataLine = part.split(/\n/).find(line => line.startsWith('data: '));
-    if (!dataLine) continue;
+    const dataLines = part
+      .split(/\r?\n/)
+      .filter(line => line.startsWith('data:'))
+      .map(line => {
+        const data = line.slice(5);
+        return data.startsWith(' ') ? data.slice(1) : data;
+      });
+    if (!dataLines.length) continue;
+    let event;
     try {
-      onEvent(JSON.parse(dataLine.slice(6)));
+      event = JSON.parse(dataLines.join('\n'));
     } catch {
       onEvent({ type: 'task_stream_parse_failed', message: '任务事件解析失败。' });
+      continue;
     }
+    onEvent(event);
   }
   return rest;
+}
+
+function safeCall(handler, arg) {
+  if (typeof handler !== 'function') return;
+  try {
+    const result = handler(arg);
+    if (result && typeof result.catch === 'function') result.catch(() => {});
+  } catch {
+    // 外部回调异常不应打断事件流读取。
+  }
 }
 
 function streamJsonSse(url, payload, handlers = {}) {
@@ -77,14 +96,14 @@ function streamJsonSse(url, payload, handlers = {}) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        buffer = parseSseChunk(buffer, event => handlers.onEvent?.(event));
+        buffer = parseSseChunk(buffer, event => safeCall(handlers.onEvent, event));
       }
       if (closed) return;
-      if (buffer.trim()) parseSseChunk(`${buffer}\n\n`, event => handlers.onEvent?.(event));
+      if (buffer.trim()) parseSseChunk(`${buffer}\n\n`, event => safeCall(handlers.onEvent, event));
       closed = true;
-      handlers.onClose?.();
+      safeCall(handlers.onClose);
     } catch (error) {
-      if (!closed) handlers.onError?.(error);
+      if (!closed) safeCall(handlers.onError, error);
     }
   };
   pump();
