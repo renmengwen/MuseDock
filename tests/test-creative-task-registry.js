@@ -1,12 +1,15 @@
 const assert = require('assert/strict');
 
-const { createCreativeTaskRegistry } = require('../server/services/creativeTaskRegistry');
+const registryModule = require('../server/services/creativeTaskRegistry');
+const { createCreativeTaskRegistry } = registryModule;
 
 async function waitImmediate() {
   await new Promise(resolve => setImmediate(resolve));
 }
 
 (async () => {
+  assert.deepEqual(Object.keys(registryModule).sort(), ['createCreativeTaskRegistry', 'defaultRegistry']);
+
   const times = [
     '2026-06-18T00:00:00.000Z',
     '2026-06-18T00:00:01.000Z',
@@ -31,6 +34,8 @@ async function waitImmediate() {
   });
 
   assert.equal(taskId, 'creative-task-test');
+  assert.equal(registry.getTask(taskId).events[0].type, 'task_started');
+  assert.equal(registry.getTask(taskId).events[0].message, '后台创作任务已启动。');
   assert.deepEqual(registry.activeTaskForWorkflow('202606180000000001'), {
     task_id: 'creative-task-test',
     workflow_id: '202606180000000001',
@@ -60,6 +65,9 @@ async function waitImmediate() {
     workflowId: '202606180000000002',
     operationId: 'workflow-op-2',
   });
+  const liveTask = liveRegistry.getTask(liveTaskId);
+  assert.equal(liveTask.ended_at, null);
+  assert.equal(liveTask.error, null);
   const liveEvents = [];
   const liveSubscription = liveRegistry.subscribe(liveTaskId, 0, event => liveEvents.push(event));
   liveRegistry.emit(liveTaskId, { type: 'stage_progress', stage: 'project', message: '正在生成工程...' });

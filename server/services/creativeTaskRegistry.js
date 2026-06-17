@@ -89,8 +89,8 @@ function createCreativeTaskRegistry(options = {}) {
       status: 'running',
       started_at: timestamp,
       updated_at: timestamp,
-      ended_at: '',
-      error: '',
+      ended_at: null,
+      error: null,
       events: [],
       subscribers: new Set(),
       truncated: false,
@@ -168,7 +168,7 @@ function createCreativeTaskRegistry(options = {}) {
     emit(taskId, {
       type: 'task_started',
       progress: 0,
-      message: '后台创作任务已开始。',
+      message: '后台创作任务已启动。',
     });
 
     Promise.resolve()
@@ -302,7 +302,6 @@ function createCreativeTaskRegistry(options = {}) {
 const defaultRegistry = createCreativeTaskRegistry();
 
 module.exports = {
-  defaultIdFactory,
   createCreativeTaskRegistry,
   defaultRegistry,
 };
