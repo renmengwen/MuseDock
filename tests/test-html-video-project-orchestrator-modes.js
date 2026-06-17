@@ -42,10 +42,12 @@ async function writeFile(filePath, content) {
   };
 
   const calls = [];
+  const progressEvents = [];
   const services = {
     frameRenderer: {
       renderFrame: async (frame, options) => {
         calls.push(`render:${frame.id}`);
+        options.onProgress?.({ frame, percent: 40, message: '正在录制 html-video 帧...' });
         await writeFile(options.outputPath, 'mp4');
         return { success: true, output_path: options.outputPath, diagnostics: [] };
       },
@@ -92,10 +94,14 @@ async function writeFile(filePath, content) {
     project: preview.project,
     templateRegistry,
     services,
+    onProgress: event => progressEvents.push(event),
   });
   assert.equal(exported.success, true);
   assert.deepEqual(calls.slice(-3), ['render:frame_01', 'render:frame_02', 'concat:2']);
   assert.equal(exported.project.exports.length, 1);
+  assert.ok(progressEvents.some(event => event.type === 'html_video_frame_render_progress' && event.frame_id === 'frame_01'));
+  assert.ok(progressEvents.some(event => event.type === 'html_video_compose_started'));
+  assert.ok(progressEvents.some(event => event.type === 'html_video_export_ready'));
 
   console.log('html-video project orchestrator mode tests passed');
 })();

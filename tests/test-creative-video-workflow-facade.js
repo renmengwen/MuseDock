@@ -242,6 +242,51 @@ const hyperframesTemplateRenderer = require('../server/services/creative-video/h
   assert.ok(richAssemblyFailed.user_message.includes('项目组装失败'));
   assert.ok(richAssemblyFailed.diagnostics.some(item => String(item).includes('assembler_failed')));
 
+  const previousProductionForProgress = process.env.HTML_VIDEO_PRODUCTION_ENABLED;
+  process.env.HTML_VIDEO_PRODUCTION_ENABLED = 'true';
+  const facadeProgressEvents = [];
+  let facadeForwardedOnProgress = false;
+  const htmlVideoProgressResult = await facade.generateCreativeVideoProject({
+    workflowId: '202606140000000004_progress',
+    runId: 'run_progress',
+    creativeContext: { input: { raw_text: '测试进度' } },
+    onProgress: event => facadeProgressEvents.push(event),
+    services: {
+      htmlVideoWorkflow: {
+        generateHtmlVideo: async ({ onProgress }) => {
+          facadeForwardedOnProgress = typeof onProgress === 'function';
+          onProgress?.({ type: 'html_video_graph_started', stage: 'project', message: '正在生成内容图...' });
+          return {
+            success: true,
+            message: 'html-video 成片完成。',
+            render_mode: 'html-video',
+            html_video_project_path: tmpDir,
+            project_dir: tmpDir,
+            project: { frames: [] },
+            files: [],
+          };
+        },
+      },
+      aiTextModel: {
+        callTextModel: async () => ({
+          success: true,
+          text: JSON.stringify({
+            scene_spec: {
+              title: '测试进度',
+              aspect_ratio: '9:16',
+              scenes: [{ id: 'scene_01', duration: 2, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '进度', keywords: [], cards: [] } }],
+            },
+          }),
+        }),
+      },
+    },
+  });
+  if (previousProductionForProgress == null) delete process.env.HTML_VIDEO_PRODUCTION_ENABLED;
+  else process.env.HTML_VIDEO_PRODUCTION_ENABLED = previousProductionForProgress;
+  assert.equal(htmlVideoProgressResult.success, true);
+  assert.equal(facadeForwardedOnProgress, true);
+  assert.ok(facadeProgressEvents.some(event => event.type === 'html_video_graph_started'));
+
   const previousProductionEnabled = process.env.HTML_VIDEO_PRODUCTION_ENABLED;
   process.env.HTML_VIDEO_PRODUCTION_ENABLED = 'false';
   let htmlVideoCalledWhenDisabled = false;

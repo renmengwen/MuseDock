@@ -38,6 +38,15 @@ function failure(message, diagnostics, extra = {}) {
   });
 }
 
+function report(onProgress, event) {
+  if (typeof onProgress !== 'function') return;
+  try {
+    onProgress(event);
+  } catch (_) {
+    // 进度回调不能影响主生成流程。
+  }
+}
+
 function getModel(services = {}) {
   return services.aiTextModel || aiTextModel;
 }
@@ -213,6 +222,7 @@ async function generateHtmlVideo({
   templateRegistry,
   services = {},
   skipValidation = false,
+  onProgress = null,
 } = {}) {
   const registry = resolveRegistry(templateRegistry);
   const diagnostics = [];
@@ -254,6 +264,16 @@ async function generateHtmlVideo({
       }),
     ]);
   }
+  report(onProgress, {
+    type: 'html_video_template_selected',
+    stage: 'project',
+    message: `已选择 html-video 模板：${template.name || template.id}。`,
+    data: {
+      template_id: template.id,
+      template_name: template.name || '',
+      reason: selection.reason || '',
+    },
+  });
 
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
   const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
@@ -296,6 +316,12 @@ async function generateHtmlVideo({
       creativeContext,
       target: renderTarget,
     });
+    report(onProgress, {
+      type: 'html_video_graph_started',
+      stage: 'project',
+      message: '正在生成 html-video 内容图...',
+      data: {},
+    });
     const graphAi = await callTextModel(model, graphPrompt);
     if (!graphAi.success) {
       return failure(graphAi.message || 'content graph 生成失败。', [
@@ -323,9 +349,28 @@ async function generateHtmlVideo({
         project_dir: projectDir,
       });
     }
+    report(onProgress, {
+      type: 'html_video_graph_done',
+      stage: 'project',
+      message: 'html-video 内容图已生成。',
+      data: {
+        node_count: graphParsed.graph.nodes?.length || 0,
+        edge_count: graphParsed.graph.edges?.length || 0,
+      },
+    });
     const frameHtmlByNodeId = {};
     const nodes = graphParsed.graph.nodes || [];
     for (let index = 0; index < nodes.length; index += 1) {
+      report(onProgress, {
+        type: 'html_video_frame_html_started',
+        stage: 'project',
+        message: `正在生成第 ${index + 1}/${nodes.length} 帧 HTML...`,
+        data: {
+          frame_id: nodes[index].id,
+          index,
+          total: nodes.length,
+        },
+      });
       const htmlResult = await frameHtmlAgent.generateFrameHtml({
         model,
         graph: graphParsed.graph,
@@ -351,6 +396,16 @@ async function generateHtmlVideo({
         });
       }
       frameHtmlByNodeId[nodes[index].id] = htmlResult.html;
+      report(onProgress, {
+        type: 'html_video_frame_html_done',
+        stage: 'project',
+        message: `第 ${index + 1}/${nodes.length} 帧 HTML 已生成。`,
+        data: {
+          frame_id: nodes[index].id,
+          index,
+          total: nodes.length,
+        },
+      });
     }
     project = await buildRawHtmlFrameProject({
       projectDir,
@@ -408,6 +463,7 @@ async function generateHtmlVideo({
     project,
     templateRegistry: registry,
     services,
+    onProgress,
   });
   diagnostics.push(...normalizeDiagnostics(rendered.diagnostics));
   if (!rendered.success) {

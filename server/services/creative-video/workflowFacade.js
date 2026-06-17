@@ -264,6 +264,7 @@ async function generateCreativeVideoProject({
   rootDir,
   services = {},
   skipValidation = false,
+  onProgress = null,
 } = {}) {
   const resolved = getServices(services);
   let htmlVideoDiagnostics = [];
@@ -300,6 +301,7 @@ async function generateCreativeVideoProject({
         rootDir,
         services,
         skipValidation,
+        onProgress,
       });
     } catch (error) {
       htmlVideoResult = failure(`html-video 成片失败：${error.message || '未知错误'}`, {

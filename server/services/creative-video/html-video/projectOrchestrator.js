@@ -13,6 +13,15 @@ function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+function report(onProgress, event) {
+  if (typeof onProgress !== 'function') return;
+  try {
+    onProgress(event);
+  } catch (_) {
+    // 进度回调不能影响渲染主流程。
+  }
+}
+
 function getOutputConfig(project) {
   return objectOrEmpty(project.output || project.render || {});
 }
@@ -122,6 +131,7 @@ async function renderHtmlVideoProject({
   templateRegistry,
   services = {},
   skipRender = false,
+  onProgress = null,
 } = {}) {
   const materializer = services.materializer || defaultMaterializer;
   const frameRenderer = services.frameRenderer || defaultFrameRenderer;
@@ -151,13 +161,28 @@ async function renderHtmlVideoProject({
 
   const outputConfig = getOutputConfig(nextProject);
   const renderedFrames = [];
-  for (const frame of nextProject.frames) {
+  const frames = Array.isArray(nextProject.frames) ? nextProject.frames : [];
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index];
     const frameOutput = path.join(resolvedProjectDir, 'frames', `${frame.id || frame.scene_id}.mp4`);
     const rendered = await frameRenderer.renderFrame(frame, {
       projectDir: resolvedProjectDir,
       outputPath: frameOutput,
       resolution: outputConfig.resolution,
       fps: outputConfig.fps,
+      onProgress: progress => report(onProgress, {
+        type: 'html_video_frame_render_progress',
+        stage: 'project',
+        message: progress?.message || `正在渲染第 ${index + 1}/${frames.length} 帧...`,
+        frame_id: frame.id || frame.scene_id,
+        frame_progress: progress?.percent,
+        data: {
+          frame_id: frame.id || frame.scene_id,
+          index,
+          total: frames.length,
+          percent: progress?.percent,
+        },
+      }),
     });
     diagnostics.push(...normalizeDiagnostics(rendered.diagnostics, { stage: 'render', details: { frame_id: frame.id } }));
     if (!rendered.success) {
@@ -185,6 +210,15 @@ async function renderHtmlVideoProject({
   }
 
   const videoPath = path.join(resolvedProjectDir, 'exports', 'output.mp4');
+  report(onProgress, {
+    type: 'html_video_compose_started',
+    stage: 'project',
+    message: '正在合成 html-video 成片...',
+    data: {
+      frame_count: renderedFrames.length,
+      output_path: videoPath,
+    },
+  });
   const concat = await ffmpegComposer.concatFramesWithFfmpeg(renderedFrames, videoPath, resolvedProjectDir, {
     fps: outputConfig.fps,
   });
@@ -274,6 +308,15 @@ async function renderHtmlVideoProject({
   });
   nextProject.status = 'rendered';
   await saveProject(resolvedProjectDir, nextProject);
+  report(onProgress, {
+    type: 'html_video_export_ready',
+    stage: 'project',
+    message: 'html-video 成片已导出。',
+    data: {
+      output_path: finalOutput,
+      export_count: nextProject.exports?.length || 0,
+    },
+  });
 
   return {
     success: true,

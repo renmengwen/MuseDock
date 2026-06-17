@@ -157,6 +157,55 @@ async function createVerticalTemplate(rootDir) {
   assert.ok(rawCalls.some(call => call === 'render:scene_01:raw_html'));
   assert.ok(rawCalls.some(call => call === 'render:scene_02:raw_html'));
 
+  const progressEvents = [];
+  const progressResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000003_progress',
+    runId: 'run_progress',
+    rootDir,
+    sceneSpec: {
+      title: '进度测试',
+      aspect_ratio: '9:16',
+      scenes: [{ id: 'scene_01', duration: 2, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '进度' } }],
+    },
+    creativeContext: { input: { raw_text: '进度测试' } },
+    target: {},
+    templateRegistry,
+    skipValidation: true,
+    onProgress: event => progressEvents.push(event),
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          if (prompt.startsWith('你是 html-video 的 content graph')) {
+            return { success: true, text: JSON.stringify({ synopsis: '进度', nodes: [{ id: 'scene_01', kind: 'text', label: '进度', durationSec: 2, text: '进度' }], edges: [] }) };
+          }
+          return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01">进度</main></body></html>' };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      frameRenderer: {
+        renderFrame: async (frame, options) => {
+          options.onProgress?.({ frame, percent: 50, message: '正在录制 html-video 帧...' });
+          return { success: true, frame_id: frame.id, output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`), diagnostics: [] };
+        },
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath };
+        },
+        muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+      },
+      visualQaService: { inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }) },
+    },
+  });
+  assert.equal(progressResult.success, true);
+  assert.ok(progressEvents.some(event => event.type === 'html_video_graph_started'));
+  assert.ok(progressEvents.some(event => event.type === 'html_video_frame_html_started'));
+  assert.ok(progressEvents.some(event => event.type === 'html_video_frame_render_progress'));
+  assert.ok(progressEvents.some(event => event.type === 'html_video_export_ready'));
+
   const calls = [];
   const result = await workflow.generateHtmlVideo({
     workflowId: '202606170000000001',

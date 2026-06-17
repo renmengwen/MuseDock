@@ -1259,6 +1259,7 @@ async function run() {
     },
   });
   let htmlVideoLiteCreativeContext = null;
+  const htmlVideoLiteProgressEvents = [];
   const fullCreativeContext = {
     input: { raw_text: '完整输入', use_research: true },
     research_context: { status: 'ready', summary: '联网摘要', sources: [{ title: '来源' }] },
@@ -1270,8 +1271,9 @@ async function run() {
       creative_context: fullCreativeContext,
     },
     creativeVideoWorkflowFacade: {
-      generateCreativeVideoProject: async ({ creativeContext }) => {
+      generateCreativeVideoProject: async ({ creativeContext, onProgress }) => {
         htmlVideoLiteCreativeContext = creativeContext;
+        onProgress?.({ type: 'html_video_graph_started', message: '正在生成内容图...' });
         return {
         success: true,
         message: 'html-video lite 成片完成。',
@@ -1287,6 +1289,7 @@ async function run() {
         };
       },
     },
+    onProgress: event => htmlVideoLiteProgressEvents.push(event),
   });
   assert.equal(htmlVideoLite.success, true);
   assert.deepEqual(htmlVideoLiteCreativeContext.audio.scenes.map(scene => scene.duration), [5.44, 10.24]);
@@ -1302,6 +1305,7 @@ async function run() {
   assert.equal(htmlVideoLite.hyperframes_freeform.visual_inspect.status, 'passed');
   assert.equal(htmlVideoLite.hyperframes_freeform.visual_inspect.report.success, true);
   assert.equal(Object.prototype.hasOwnProperty.call(htmlVideoLite.hyperframes_freeform, 'inspect'), false);
+  assert.ok(htmlVideoLiteProgressEvents.some(event => event.type === 'html_video_graph_started' && event.stage === 'project'));
 
   const staleHtmlVideoLiteRunId = `${generated.run_id}-html-video-lite-stale`;
   const staleHtmlVideoLiteRunPath = path.join(rootDir, awemeId, 'agent_runs', `${staleHtmlVideoLiteRunId}.json`);

@@ -1519,6 +1519,7 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
 
   const operationId = createFreeformOperationId('project');
   const logger = getLogger(options);
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
   await updateRunHyperframesFreeform(awemeId, runId, current => ({
     status: 'generating',
     project: {
@@ -1552,6 +1553,9 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
         rootDir: options.rootDir,
         services: options.creativeVideoServices || {},
         skipValidation: options.skipValidation === true,
+        onProgress: event => {
+          if (onProgress) onProgress({ stage: 'project', ...event });
+        },
       });
     } catch (error) {
       result = {
