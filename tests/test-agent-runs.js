@@ -1317,6 +1317,45 @@ async function run() {
   assert.equal(htmlVideoLiteProgressSettledInFacade, true);
   assert.ok(htmlVideoLiteProgressEvents.some(event => event.type === 'html_video_graph_started' && event.stage === 'project'));
 
+  const rejectingProgressRunId = `${generated.run_id}-html-video-lite-progress-reject`;
+  const rejectingProgressRunPath = path.join(rootDir, awemeId, 'agent_runs', `${rejectingProgressRunId}.json`);
+  await writeJson(rejectingProgressRunPath, {
+    ...JSON.parse(fs.readFileSync(path.join(rootDir, awemeId, 'agent_runs', `${generated.run_id}.json`), 'utf-8')),
+    run_id: rejectingProgressRunId,
+  });
+  let rejectingProgressCalled = false;
+  const rejectingProgressResult = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, rejectingProgressRunId, {
+    rootDir,
+    useHtmlVideoLiteWorkflow: true,
+    creativeVideoWorkflowFacade: {
+      generateCreativeVideoProject: async ({ onProgress }) => {
+        await onProgress?.({ type: 'html_video_graph_started', message: '正在生成内容图...' });
+        return {
+          success: true,
+          message: 'html-video lite 成片完成。',
+          render_mode: 'html-video',
+          project_dir: path.join(rootDir, awemeId, 'agent_runs', `${rejectingProgressRunId}-lite-project`),
+          html_video_project_path: path.join(rootDir, awemeId, 'agent_runs', `${rejectingProgressRunId}-lite-project`),
+          files: ['index.html', 'hyperframes.json'],
+          scene_spec: { version: 1, scenes: [] },
+          frame_specs: { frames: [] },
+          audio_manifest: { scenes: [] },
+          output_path: path.join(rootDir, awemeId, 'agent_runs', `${rejectingProgressRunId}-lite-output.mp4`),
+          visual_report: { success: true, issues: [], metrics: {} },
+        };
+      },
+    },
+    onProgress: async event => {
+      assert.equal(event.type, 'html_video_graph_started');
+      assert.equal(event.stage, 'project');
+      rejectingProgressCalled = true;
+      await new Promise(resolve => setImmediate(resolve));
+      throw new Error('progress failed');
+    },
+  });
+  assert.equal(rejectingProgressCalled, true);
+  assert.equal(rejectingProgressResult.success, true);
+
   const staleHtmlVideoLiteRunId = `${generated.run_id}-html-video-lite-stale`;
   const staleHtmlVideoLiteRunPath = path.join(rootDir, awemeId, 'agent_runs', `${staleHtmlVideoLiteRunId}.json`);
   await writeJson(staleHtmlVideoLiteRunPath, {

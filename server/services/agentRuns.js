@@ -1553,9 +1553,10 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
         rootDir: options.rootDir,
         services: options.creativeVideoServices || {},
         skipValidation: options.skipValidation === true,
-        onProgress: event => (
-          onProgress ? onProgress({ stage: 'project', ...event }) : undefined
-        ),
+        onProgress: event => {
+          if (!onProgress) return undefined;
+          return Promise.resolve(onProgress({ stage: 'project', ...event })).catch(() => undefined);
+        },
       });
     } catch (error) {
       result = {
