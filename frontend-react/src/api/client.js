@@ -52,32 +52,34 @@ function parseSseChunk(buffer, onEvent) {
   return rest;
 }
 
-async function streamJsonSse(url, payload, handlers = {}) {
+function streamJsonSse(url, payload, handlers = {}) {
   const controller = new AbortController();
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Accept: 'text/event-stream',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload || {}),
-    signal: controller.signal,
-  });
-  if (!response.ok || !response.body) {
-    throw new Error(`任务事件流连接失败：HTTP ${response.status}`);
-  }
-  const reader = response.body.getReader();
   const decoder = new TextDecoder();
+  let reader = null;
   let buffer = '';
   let closed = false;
   const pump = async () => {
     try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Accept: 'text/event-stream',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload || {}),
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(`任务事件流连接失败：HTTP ${response.status}`);
+      }
+      reader = response.body.getReader();
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         buffer = parseSseChunk(buffer, event => handlers.onEvent?.(event));
       }
+      if (closed) return;
       if (buffer.trim()) parseSseChunk(`${buffer}\n\n`, event => handlers.onEvent?.(event));
       closed = true;
       handlers.onClose?.();
@@ -90,7 +92,7 @@ async function streamJsonSse(url, payload, handlers = {}) {
     abort: () => {
       closed = true;
       controller.abort();
-      reader.cancel().catch(() => {});
+      if (reader) reader.cancel().catch(() => {});
     },
   };
 }
