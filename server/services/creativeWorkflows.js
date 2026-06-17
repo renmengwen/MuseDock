@@ -689,6 +689,19 @@ async function markStage(record, stageId, status, message, now, extra = {}) {
   });
 }
 
+async function markHtmlVideoLiteSkippedLegacyStages(record, now) {
+  const messages = {
+    check: 'html-video production 已完成，跳过旧 HyperFrames 工程校验。',
+    render: 'html-video production 已完成，跳过旧 HyperFrames 渲染。',
+    inspect: 'html-video production 已完成，跳过旧 HyperFrames 巡检。',
+  };
+  for (const [stageId, message] of Object.entries(messages)) {
+    await markStage(record, stageId, 'skipped', message, now, {
+      skipped_at: now,
+    });
+  }
+}
+
 async function runStage(record, stageId, rootDir, handler, services) {
   if (!await workflowFileExists(record.workflow_id, rootDir)) {
     return WORKFLOW_STOPPED;
@@ -861,12 +874,14 @@ async function runCreativeWorkflow(workflowId, options = {}) {
   }
 
   if (isHtmlVideoLiteProjectResult(projectStageResult)) {
+    const doneAt = getNow(services);
+    await markHtmlVideoLiteSkippedLegacyStages(record, doneAt);
     record.success = true;
     record.status = 'done';
     record.message = '创作任务已完成。';
     record.result = { hyperframes_freeform: projectStageResult.hyperframes_freeform };
     record.error = null;
-    record.updated_at = getNow(services);
+    record.updated_at = doneAt;
     const persisted = await persistWorkflow(record, rootDir);
     return createWorkflowSummary(persisted);
   }
@@ -1313,11 +1328,28 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
 }
 
 async function renderHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  const mode = safeString(payload.mode || payload.action || '');
+  if (mode !== 'materialize' && mode !== 'frame') {
+    return {
+      success: false,
+      code: 'HTML_VIDEO_RENDER_MODE_INVALID',
+      workflow_id: workflowId,
+      message: 'html-video render mode 无效，请选择 materialize 或 frame。',
+    };
+  }
+  if (mode === 'frame' && !safeString(payload.frame_id || payload.frameId)) {
+    return {
+      success: false,
+      code: 'HTML_VIDEO_FRAME_ID_REQUIRED',
+      workflow_id: workflowId,
+      message: '渲染单帧预览失败：缺少帧 ID。',
+    };
+  }
   return renderCreativeWorkflowHtmlVideoProject(workflowId, payload, options);
 }
 
 async function exportHtmlVideoProject(workflowId, payload = {}, options = {}) {
-  return renderCreativeWorkflowHtmlVideoProject(workflowId, { ...payload, mode: 'export' }, options);
+  return renderCreativeWorkflowHtmlVideoProject(workflowId, { ...payload, skip_render: false, mode: 'export' }, options);
 }
 
 async function listHtmlVideoProjectExports(workflowId, options = {}) {

@@ -30,6 +30,10 @@ function validateWorkflowId(workflowId) {
   return { success: true, workflow_id: id };
 }
 
+function safeString(value) {
+  return String(value || '').trim();
+}
+
 router.post('/', async (req, res) => {
   const service = getService(req);
 
@@ -246,8 +250,24 @@ router.post('/:workflow_id/html-video-project/render', async (req, res) => {
   const workflowId = validation.workflow_id;
 
   try {
+    const payload = req.body || {};
+    const mode = safeString(payload.mode || payload.action);
+    if (mode !== 'materialize' && mode !== 'frame') {
+      return res.status(400).json({
+        success: false,
+        workflow_id: workflowId,
+        message: 'html-video render mode 无效，请选择 materialize 或 frame。',
+      });
+    }
+    if (mode === 'frame' && !safeString(payload.frame_id || payload.frameId)) {
+      return res.status(400).json({
+        success: false,
+        workflow_id: workflowId,
+        message: '渲染单帧预览失败：缺少帧 ID。',
+      });
+    }
     const service = getService(req);
-    const result = await service.renderHtmlVideoProject(workflowId, req.body || {});
+    const result = await service.renderHtmlVideoProject(workflowId, payload);
     if (!result || result.success === false) {
       const message = getMessage(result, '渲染单帧预览失败。');
       return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, message });
@@ -271,7 +291,7 @@ router.post('/:workflow_id/html-video-project/export', async (req, res) => {
 
   try {
     const service = getService(req);
-    const result = await service.exportHtmlVideoProject(workflowId, req.body || {});
+    const result = await service.exportHtmlVideoProject(workflowId, { ...(req.body || {}), skip_render: false });
     if (!result || result.success === false) {
       const message = getMessage(result, '导出成片失败。');
       return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, message });

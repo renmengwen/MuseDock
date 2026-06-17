@@ -46,6 +46,7 @@ const zh = {
   queued: textFromCodePoints([0x6392, 0x961f, 0x4e2d]),
   running: textFromCodePoints([0x8fdb, 0x884c, 0x4e2d]),
   done: textFromCodePoints([0x5df2, 0x5b8c, 0x6210]),
+  skipped: textFromCodePoints([0x5df2, 0x8df3, 0x8fc7]),
   failed: textFromCodePoints([0x5931, 0x8d25]),
   stopAndDelete: textFromCodePoints([0x505c, 0x6b62, 0x5e76, 0x5220, 0x9664]),
   stoppingAndDeleting: textFromCodePoints([0x6b63, 0x5728, 0x505c, 0x6b62, 0x5e76, 0x5220, 0x9664, 0x4efb, 0x52a1, 0x2e, 0x2e, 0x2e]),
@@ -96,6 +97,7 @@ for (const text of [
   zh.queued,
   zh.running,
   zh.done,
+  zh.skipped,
   zh.failed,
 ]) {
   assert.ok(page.includes(text), `OneClickCreativePage.jsx should keep workflow text readable: ${text}`);
@@ -194,6 +196,8 @@ assert.match(page, /getWorkflowVideoUrl/, 'Creative task detail should resolve r
 assert.match(page, /workflow\?\.stages\?\.find\(stage => stage\.id === 'render'\)\?\.result/, 'Creative task detail should read video URL from render stage result');
 assert.match(page, /getWorkflowDisplayMessage/, 'Creative task detail should derive the visible status message from workflow progress');
 assert.match(page, /find\(stage => \['running', 'queued', 'pending'\]\.includes\(stage\.status\)\)/, 'Creative task detail should surface the current active stage message while polling');
+assert.match(page, /skipped:\s*'已跳过'/, 'Workflow progress should show skipped stages as 已跳过');
+assert.match(page, /stage\.status === 'skipped'[\s\S]*return 'done'/, 'Workflow stepper should render skipped stages as non-active completed steps');
 assert.match(page, /<CreativeVideoPreview videoUrl=\{videoUrl\}/, 'Creative task detail should render video preview when a video URL is available');
 assert.match(page, /<video\s+className="creativeResultVideo"\s+src=\{videoUrl\}\s+controls/, 'Creative video preview should render a native controls video element');
 assert.match(page, /workflow\?\.status === 'done' && videoUrl/, 'Creative video preview should render after workflow is done');

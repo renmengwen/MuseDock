@@ -190,6 +190,15 @@ async function testHtmlVideoLiteSkipsLegacyHyperframesStages() {
   const persisted = readJson(getWorkflowPath(WORKFLOW_ID, rootDir));
   assert.equal(persisted.result.hyperframes_freeform.project.html_video_project_path, projectDir);
   assert.equal(persisted.result.hyperframes_freeform.render.status, 'rendered');
+  assert.equal(persisted.status, 'done');
+  for (const stageId of ['check', 'render', 'inspect']) {
+    const stage = persisted.stages.find(item => item.id === stageId);
+    assert.equal(stage.status, 'skipped');
+    assert.match(stage.message, /跳过旧 HyperFrames/);
+    assert.notEqual(stage.status, 'pending');
+    assert.notEqual(stage.status, 'queued');
+    assert.notEqual(stage.status, 'running');
+  }
 
   fs.mkdirSync(projectDir, { recursive: true });
   fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({

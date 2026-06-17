@@ -43,11 +43,12 @@ const STATUS_TEXT = {
   queued: '排队中',
   running: '进行中',
   done: '已完成',
+  skipped: '已跳过',
   failed: '失败',
 };
 
 function getStatusClass(status) {
-  if (status === 'done') return 'done';
+  if (status === 'done' || status === 'skipped') return 'done';
   if (status === 'failed') return 'failed';
   if (status === 'queued' || status === 'pending' || status === 'running') return 'pending';
   return '';
@@ -386,6 +387,7 @@ function WorkflowStageList({ workflow }) {
 
 function getStepState(stage, index, stages) {
   if (stage.status === 'done') return 'done';
+  if (stage.status === 'skipped') return 'done';
   if (stage.status === 'failed') return 'failed';
   if (stage.status === 'running' || stage.status === 'queued' || stage.status === 'pending') return 'active';
   const hasActiveBefore = stages.slice(0, index).some(item => (

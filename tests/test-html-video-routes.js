@@ -78,19 +78,19 @@ async function listen(app) {
         message: 'HTML 已重新生成。',
       };
     },
-    renderHtmlVideoProject: async id => {
-      calls.push(['render', id]);
+    renderHtmlVideoProject: async (id, payload) => {
+      calls.push(['render', id, payload?.mode, payload?.frame_id || payload?.frameId || '']);
       return {
         success: true,
         workflow_id: id,
         html_video_project: { project_id: 'p1', template_id: 'simple' },
         html_video_project_path: '/tmp/project',
-        output_path: '/tmp/project/frames/frame_01.mp4',
-        message: '单帧预览已更新。',
+        output_path: payload?.mode === 'materialize' ? undefined : '/tmp/project/frames/frame_01.mp4',
+        message: payload?.mode === 'materialize' ? 'HTML 已重新生成。' : '单帧预览已更新。',
       };
     },
-    exportHtmlVideoProject: async id => {
-      calls.push(['export', id]);
+    exportHtmlVideoProject: async (id, payload) => {
+      calls.push(['export', id, payload?.skip_render === true]);
       return {
         success: true,
         workflow_id: id,
@@ -139,8 +139,23 @@ async function listen(app) {
     assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/inputs`, { patch: { headline: '模板' } })).statusCode, 200);
     assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01`, { patch: { headline: '帧' } })).statusCode, 200);
     assert.equal((await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit`, { instruction: '标题更狠' })).statusCode, 200);
-    assert.equal((await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/render`, {})).body.message, '单帧预览已更新。');
-    const exported = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/export`, {});
+    const materialized = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/render`, { mode: 'materialize' });
+    assert.equal(materialized.statusCode, 200);
+    assert.equal(materialized.body.message, 'HTML 已重新生成。');
+    const framePreview = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/render`, { mode: 'frame', frame_id: 'frame_01' });
+    assert.equal(framePreview.statusCode, 200);
+    assert.equal(framePreview.body.message, '单帧预览已更新。');
+    for (const [payload, pattern] of [
+      [{}, /mode 无效|materialize|frame/],
+      [{ mode: 'bad' }, /mode 无效|materialize|frame/],
+      [{ mode: 'frame' }, /帧 ID/],
+    ]) {
+      const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/render`, payload);
+      assert.equal(response.statusCode, 400);
+      assert.equal(response.body.success, false);
+      assert.match(response.body.message, pattern);
+    }
+    const exported = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/export`, { skip_render: true });
     assert.ok(exported.body.html_video_project);
     assert.match(exported.body.message, /导出|渲染/);
     const exportsResult = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/html-video-project/exports`);
@@ -167,7 +182,9 @@ async function listen(app) {
     assert.equal(invalid.statusCode, 400);
     assert.match(invalid.body.message, /创作任务 ID 无效/);
 
-    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'export', 'exports']);
+    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'render', 'export', 'exports']);
+    assert.deepEqual(calls.filter(item => item[0] === 'render').map(item => [item[2], item[3]]), [['materialize', ''], ['frame', 'frame_01']]);
+    assert.deepEqual(calls.find(item => item[0] === 'export'), ['export', workflowId, false]);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
