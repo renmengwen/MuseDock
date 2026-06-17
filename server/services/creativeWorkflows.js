@@ -933,6 +933,17 @@ async function markHtmlVideoLiteSkippedLegacyStages(record, now) {
   }
 }
 
+async function emitTaskContextEvent(taskContext, event) {
+  if (!taskContext || typeof taskContext.emit !== 'function') {
+    return;
+  }
+  try {
+    await taskContext.emit(event);
+  } catch {
+    // 后台任务事件是辅助状态通道，不能改变主 workflow 阶段成败。
+  }
+}
+
 async function runStage(record, stageId, rootDir, handler, services, taskContext = null) {
   if (!await workflowFileExists(record.workflow_id, rootDir)) {
     return WORKFLOW_STOPPED;
@@ -945,25 +956,24 @@ async function runStage(record, stageId, rootDir, handler, services, taskContext
   record.status = 'running';
   record.updated_at = startedAt;
   await persistWorkflow(record, rootDir);
-  if (taskContext && typeof taskContext.emit === 'function') {
-    await taskContext.emit({
-      type: 'stage_started',
-      stage: stageId,
-      stage_progress: 0,
-      message: `正在${STAGE_LABELS[stageId]}...`,
-    });
-  }
+  await emitTaskContextEvent(taskContext, {
+    type: 'stage_started',
+    stage: stageId,
+    stage_progress: 0,
+    message: `正在${STAGE_LABELS[stageId]}...`,
+  });
 
   try {
-    const reportStage = (message, progress = 50, data = {}) => taskContext && typeof taskContext.emit === 'function'
-      ? taskContext.emit({
+    const reportStage = (message, progress = 50, data = {}) => emitTaskContextEvent(
+      taskContext,
+      {
         type: 'stage_progress',
         stage: stageId,
         stage_progress: progress,
         message,
         data,
-      })
-      : null;
+      },
+    );
     const result = await handler({ reportStage, taskContext });
     if (!await workflowFileExists(record.workflow_id, rootDir)) {
       return WORKFLOW_STOPPED;
@@ -976,14 +986,12 @@ async function runStage(record, stageId, rootDir, handler, services, taskContext
     });
     record.updated_at = completedAt;
     await persistWorkflow(record, rootDir);
-    if (taskContext && typeof taskContext.emit === 'function') {
-      await taskContext.emit({
-        type: 'stage_done',
-        stage: stageId,
-        stage_progress: 100,
-        message: result?.message || `${STAGE_LABELS[stageId]}完成。`,
-      });
-    }
+    await emitTaskContextEvent(taskContext, {
+      type: 'stage_done',
+      stage: stageId,
+      stage_progress: 100,
+      message: result?.message || `${STAGE_LABELS[stageId]}完成。`,
+    });
     return result;
   } catch (error) {
     if (!await workflowFileExists(record.workflow_id, rootDir)) {
@@ -1005,15 +1013,13 @@ async function runStage(record, stageId, rootDir, handler, services, taskContext
     };
     record.updated_at = failedAt;
     await persistWorkflow(record, rootDir);
-    if (taskContext && typeof taskContext.emit === 'function') {
-      await taskContext.emit({
-        type: 'stage_failed',
-        stage: stageId,
-        stage_progress: 100,
-        message,
-        data: { error: message },
-      });
-    }
+    await emitTaskContextEvent(taskContext, {
+      type: 'stage_failed',
+      stage: stageId,
+      stage_progress: 100,
+      message,
+      data: { error: message },
+    });
     return null;
   }
 }
@@ -1272,6 +1278,10 @@ async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options 
   try {
     const record = await readWorkflow(workflowId, rootDir);
     const now = safeString(patch.updated_at) || getNow(resolveServices(options)) || new Date().toISOString();
+    const seq = Number(patch.last_event_seq ?? record.last_event_seq);
+    if (Number.isFinite(seq) && seq > 0 && Number(record.last_event_seq) > seq) {
+      return { success: true, workflow_id: record.workflow_id, data: record };
+    }
     record.active_task_id = safeString(patch.active_task_id ?? record.active_task_id);
     record.active_operation_id = safeString(patch.active_operation_id ?? record.active_operation_id);
     record.task_status = safeString(patch.task_status ?? record.task_status);
@@ -1279,7 +1289,6 @@ async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options 
     record.current_stage_message = safeString(patch.current_stage_message ?? record.current_stage_message);
     const progress = Number(patch.current_progress ?? record.current_progress);
     record.current_progress = Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : 0;
-    const seq = Number(patch.last_event_seq ?? record.last_event_seq);
     record.last_event_seq = Number.isFinite(seq) && seq > 0 ? Math.floor(seq) : 0;
     if (Object.prototype.hasOwnProperty.call(patch, 'status')) record.status = safeString(patch.status);
     if (Object.prototype.hasOwnProperty.call(patch, 'message')) record.message = safeString(patch.message);

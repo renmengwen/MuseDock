@@ -816,6 +816,26 @@ async function testPersistsFailureFromBriefStage() {
   assert.equal(failedEvent.stage_progress, 100);
 }
 
+async function testTaskEventEmitFailureDoesNotFailWorkflow() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices();
+
+  await createCreativeWorkflow({ input: '做一期关于 AI 视频生产的知识科普', useResearch: false }, { rootDir, mediaRoot, services });
+  const run = await runCreativeWorkflow(WORKFLOW_ID, {
+    rootDir,
+    mediaRoot,
+    services,
+    taskContext: {
+      emit: async () => {
+        throw new Error('事件发送失败');
+      },
+    },
+  });
+
+  assert.equal(run.success, true);
+  assert.equal(run.status, 'done');
+}
+
 async function testStopsWorkflowWhenDeletedDuringGeneration() {
   const { rootDir, mediaRoot } = createTempDirs();
   const filePath = getWorkflowPath(WORKFLOW_ID, rootDir);
@@ -1075,6 +1095,7 @@ async function run() {
   await testRepreparesWhenAnalysisInputFramesAreStale();
   await testDouyinLoginRequirementUsesChineseMessage();
   await testPersistsFailureFromBriefStage();
+  await testTaskEventEmitFailureDoesNotFailWorkflow();
   await testStopsWorkflowWhenDeletedDuringGeneration();
   await testMarksStaleBriefStageAsFailedWhenFetched();
   await testDoesNotMarkRunningStageStaleWhenActiveTaskExists();

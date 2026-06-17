@@ -27,6 +27,20 @@ function services(now = '2026-06-18T00:00:00.000Z') {
   };
 }
 
+async function waitFor(assertion, timeoutMs = 1000) {
+  const startedAt = Date.now();
+  let lastError;
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      return assertion();
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  }
+  throw lastError;
+}
+
 (async () => {
   const rootDir = tempRoot();
   await workflows.createCreativeWorkflow({ input: '测试后台任务', useResearch: false }, { rootDir, services: services() });
@@ -62,13 +76,14 @@ function services(now = '2026-06-18T00:00:00.000Z') {
   const startedRecord = readWorkflow(rootDir);
   assert.equal(startedRecord.current_stage_message, '后台创作任务已启动。');
   assert.equal(registry.getTask(started.task_id).events[0].message, '后台创作任务已启动。');
-  await new Promise(resolve => setImmediate(resolve));
-  await new Promise(resolve => setImmediate(resolve));
+  await waitFor(() => assert.equal(registry.getTask(started.task_id).status, 'done'));
   assert.deepEqual(runCalls, [{ workflowId: WORKFLOW_ID, hasTaskContext: true }]);
 
   const task = registry.getTask(started.task_id);
   assert.equal(task.status, 'done');
   assert.equal(task.events.some(event => event.message === '正在生成第 1/2 帧 HTML...'), true);
+  assert.equal(task.events.filter(event => event.type === 'task_done').length, 1);
+  await waitFor(() => assert.equal(readWorkflow(rootDir).last_event_seq, task.events.at(-1).seq));
 
   const fetched = await workflows.getCreativeWorkflow(WORKFLOW_ID, {
     rootDir,
@@ -98,6 +113,33 @@ function services(now = '2026-06-18T00:00:00.000Z') {
     rootDir: doneRootDir,
   });
   assert.equal(readWorkflow(doneRootDir).task_status, 'done');
+
+  const unknownHtmlVideoRootDir = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '测试未知 HTML 事件', useResearch: false }, { rootDir: unknownHtmlVideoRootDir, services: services() });
+  const unknownHtmlVideoRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-unknown-html-video',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const unknownHtmlVideoTaskId = unknownHtmlVideoRegistry.createDetachedTask({
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-unknown-html-video',
+    kind: 'creative_workflow',
+  });
+  await workflowTasks.emitAndPersistTaskEvent({
+    registry: unknownHtmlVideoRegistry,
+    taskId: unknownHtmlVideoTaskId,
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-unknown-html-video',
+    event: {
+      type: 'html_video_custom_progress',
+      stage: 'project',
+      message: '未知 HTML 事件',
+    },
+    rootDir: unknownHtmlVideoRootDir,
+  });
+  const unknownHtmlVideoRecord = readWorkflow(unknownHtmlVideoRootDir);
+  assert.equal(unknownHtmlVideoRegistry.getTask(unknownHtmlVideoTaskId).events[0].type, 'html_video_custom_progress');
+  assert.equal(unknownHtmlVideoRecord.current_progress > 0, true);
 
   const failedRootDir = tempRoot();
   await workflows.createCreativeWorkflow({ input: '测试失败状态', useResearch: false }, { rootDir: failedRootDir, services: services() });
@@ -143,6 +185,57 @@ function services(now = '2026-06-18T00:00:00.000Z') {
   const persistFailedEvent = persistFailRegistry.getTask(persistFailTaskId).events
     .find(event => event.type === 'workflow_persist_failed');
   assert.equal(persistFailedEvent.data.failed_event_seq, emitted.seq);
+
+  const failedRunRootDir = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '测试后台失败', useResearch: false }, { rootDir: failedRunRootDir, services: services() });
+  const failedRunRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-run-failed',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const failedRun = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+    rootDir: failedRunRootDir,
+    registry: failedRunRegistry,
+    services: {
+      creativeWorkflows: {
+        runCreativeWorkflow: async () => {
+          throw new Error('后台失败');
+        },
+      },
+    },
+  });
+  await waitFor(() => assert.equal(failedRunRegistry.getTask(failedRun.task_id).status, 'failed'));
+  const failedRunTask = failedRunRegistry.getTask(failedRun.task_id);
+  assert.equal(failedRunTask.events.filter(event => event.type === 'task_failed').length, 1);
+
+  const donePatchFailRootDir = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '测试终态写入失败', useResearch: false }, { rootDir: donePatchFailRootDir, services: services() });
+  const donePatchFailRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-done-patch-fail',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  let donePatchCalls = 0;
+  const donePatchFail = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+    rootDir: donePatchFailRootDir,
+    registry: donePatchFailRegistry,
+    services: {
+      creativeWorkflows: {
+        patchCreativeWorkflowTaskSummary: async () => {
+          donePatchCalls += 1;
+          if (donePatchCalls > 1) {
+            throw new Error('终态写入失败');
+          }
+          return { success: true };
+        },
+        runCreativeWorkflow: async workflowId => ({ success: true, workflow_id: workflowId, status: 'done', message: '完成' }),
+      },
+    },
+  });
+  await waitFor(() => assert.equal(donePatchFailRegistry.getTask(donePatchFail.task_id).status, 'done'));
+  const donePatchFailTask = donePatchFailRegistry.getTask(donePatchFail.task_id);
+  assert.equal(donePatchFailTask.status, 'done');
+  assert.equal(donePatchFailTask.events.filter(event => event.type === 'task_failed').length, 0);
+  assert.equal(donePatchFailTask.events.filter(event => event.type === 'task_done').length, 1);
+  assert.equal(donePatchFailTask.events.some(event => event.type === 'workflow_persist_failed'), true);
 
   console.log('creative workflow task tests passed');
 })();

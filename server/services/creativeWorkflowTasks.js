@@ -58,10 +58,13 @@ function taskEventProgress(event = {}) {
 
   if (typeof event.type === 'string' && event.type.startsWith('html_video_')) {
     const projectProgress = htmlVideoProjectProgress(event);
-    if (projectProgress === null) {
-      return 0;
+    if (Number.isFinite(projectProgress)) {
+      return calculateWorkflowProgress({ stage: 'project', stageProgress: projectProgress });
     }
-    return calculateWorkflowProgress({ stage: 'project', stageProgress: projectProgress });
+    return calculateWorkflowProgress({
+      stage: event.stage || 'project',
+      stageProgress: event.stage_progress || 0,
+    });
   }
 
   return calculateWorkflowProgress({
@@ -78,6 +81,40 @@ function taskStatusForEvent(event = {}) {
     return 'failed';
   }
   return 'running';
+}
+
+function emitWorkflowPersistFailed(registry, taskId, operationId, message, failedEventSeq) {
+  return registry.emit(taskId, {
+    type: 'workflow_persist_failed',
+    operation_id: operationId,
+    message: message || '更新创作任务进度失败。',
+    data: {
+      error: message || '更新创作任务进度失败。',
+      failed_event_seq: failedEventSeq,
+    },
+  });
+}
+
+async function patchTaskSummaryOrEmitFailure({
+  registry,
+  taskId,
+  workflowId,
+  operationId,
+  creativeWorkflows,
+  rootDir,
+  patch,
+  failedEventSeq,
+}) {
+  try {
+    const persisted = await creativeWorkflows.patchCreativeWorkflowTaskSummary(workflowId, patch, { rootDir });
+    if (!persisted?.success) {
+      emitWorkflowPersistFailed(registry, taskId, operationId, persisted?.message || '更新创作任务进度失败。', failedEventSeq);
+    }
+    return persisted;
+  } catch (error) {
+    emitWorkflowPersistFailed(registry, taskId, operationId, error.message || '更新创作任务进度失败。', failedEventSeq);
+    return { success: false, message: error.message || '更新创作任务进度失败。' };
+  }
 }
 
 async function emitAndPersistTaskEvent({
@@ -108,18 +145,16 @@ async function emitAndPersistTaskEvent({
     last_event_seq: emitted.seq,
   };
 
-  const persisted = await creativeWorkflows.patchCreativeWorkflowTaskSummary(workflowId, patch, { rootDir });
-  if (!persisted.success) {
-    registry.emit(taskId, {
-      type: 'workflow_persist_failed',
-      operation_id: operationId,
-      message: persisted.message || '更新创作任务进度失败。',
-      data: {
-        error: persisted.message || '更新创作任务进度失败。',
-        failed_event_seq: emitted.seq,
-      },
-    });
-  }
+  await patchTaskSummaryOrEmitFailure({
+    registry,
+    taskId,
+    workflowId,
+    operationId,
+    creativeWorkflows,
+    rootDir,
+    patch,
+    failedEventSeq: emitted.seq,
+  });
 
   return emitted;
 }
@@ -154,11 +189,21 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
     message: '后台创作任务已启动。',
   });
 
-  setImmediate(async () => {
+  async function runBackgroundTask() {
+    const pendingEventWrites = new Set();
+    function trackEventWrite(promise) {
+      const tracked = Promise.resolve(promise).catch(() => null);
+      pendingEventWrites.add(tracked);
+      tracked.finally(() => {
+        pendingEventWrites.delete(tracked);
+      });
+      return promise;
+    }
+
     const taskContext = {
       taskId,
       operationId,
-      emit: event => emitAndPersistTaskEvent({
+      emit: event => trackEventWrite(emitAndPersistTaskEvent({
         registry,
         taskId,
         workflowId,
@@ -166,7 +211,7 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
         event,
         rootDir,
         creativeWorkflows,
-      }),
+      })),
     };
 
     try {
@@ -178,37 +223,64 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
         throw new Error(result.message || '创作任务执行失败。');
       }
 
-      const doneEvent = taskContext.emit({ type: 'task_done', progress: 100, message: '创作任务已完成。' });
-      registry.markDone(taskId, '创作任务已完成。');
-      await doneEvent;
-      await creativeWorkflows.patchCreativeWorkflowTaskSummary(workflowId, {
-        active_task_id: '',
-        active_operation_id: '',
-        task_status: 'done',
-        current_stage: '',
-        current_stage_message: '创作任务已完成。',
-        current_progress: 100,
-        status: 'done',
-        message: '创作任务已完成。',
-        error: null,
-      }, { rootDir });
-    } catch (error) {
-      const failedEvent = taskContext.emit({ type: 'task_failed', message: error.message || '创作任务执行失败。' });
-      registry.markFailed(taskId, error);
-      await failedEvent;
-      await creativeWorkflows.patchCreativeWorkflowTaskSummary(workflowId, {
-        active_task_id: '',
-        active_operation_id: '',
-        task_status: 'failed',
-        current_stage: '',
-        current_stage_message: error.message || '创作任务执行失败。',
-        status: 'failed',
-        message: error.message || '创作任务执行失败。',
-        error: {
-          message: error.message || '创作任务执行失败。',
+      await Promise.allSettled([...pendingEventWrites]);
+      const terminalEvent = registry.markDone(taskId, '创作任务已完成。')
+        || registry.emit(taskId, { type: 'task_done', progress: 100, message: '创作任务已完成。' });
+      await patchTaskSummaryOrEmitFailure({
+        registry,
+        taskId,
+        workflowId,
+        operationId,
+        creativeWorkflows,
+        rootDir,
+        patch: {
+          active_task_id: '',
+          active_operation_id: '',
+          task_status: 'done',
+          current_stage: '',
+          current_stage_message: '创作任务已完成。',
+          current_progress: 100,
+          status: 'done',
+          message: '创作任务已完成。',
+          error: null,
+          last_event_seq: terminalEvent?.seq || 0,
         },
-      }, { rootDir });
+        failedEventSeq: terminalEvent?.seq || 0,
+      });
+    } catch (error) {
+      const message = error.message || '创作任务执行失败。';
+      await Promise.allSettled([...pendingEventWrites]);
+      const terminalEvent = registry.markFailed(taskId, error)
+        || registry.emit(taskId, { type: 'task_failed', message, data: { error: message } });
+      await patchTaskSummaryOrEmitFailure({
+        registry,
+        taskId,
+        workflowId,
+        operationId,
+        creativeWorkflows,
+        rootDir,
+        patch: {
+          active_task_id: '',
+          active_operation_id: '',
+          task_status: 'failed',
+          current_stage: '',
+          current_stage_message: message,
+          status: 'failed',
+          message,
+          error: {
+            message,
+          },
+          last_event_seq: terminalEvent?.seq || 0,
+        },
+        failedEventSeq: terminalEvent?.seq || 0,
+      });
     }
+  }
+
+  setImmediate(() => {
+    runBackgroundTask().catch(error => {
+      emitWorkflowPersistFailed(registry, taskId, operationId, error.message || '后台创作任务执行异常。', 0);
+    });
   });
 
   return {
