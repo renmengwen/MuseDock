@@ -385,5 +385,36 @@ async function waitFor(assertion, timeoutMs = 1000) {
   });
   assert.equal(onCloseCalls, 1);
 
+  const liveTerminalRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-live-terminal',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const liveTerminalTaskId = liveTerminalRegistry.createDetachedTask({
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-live-terminal',
+    kind: 'creative_workflow',
+  });
+  const liveStartedEvent = liveTerminalRegistry.emit(liveTerminalTaskId, {
+    type: 'task_started',
+    message: '后台创作任务已启动。',
+  });
+  const liveTerminalEvents = [];
+  await workflowTasks.subscribeCreativeWorkflowEvents({
+    workflowId: WORKFLOW_ID,
+    taskId: liveTerminalTaskId,
+    sinceSeq: liveStartedEvent.seq,
+    registry: liveTerminalRegistry,
+    writeEvent: event => {
+      liveTerminalEvents.push(event);
+      return true;
+    },
+  });
+  assert.equal(liveTerminalRegistry.getTask(liveTerminalTaskId).subscribers.size, 1);
+  liveTerminalRegistry.markDeleted(liveTerminalTaskId, '创作任务已停止并删除。');
+  assert.equal(liveTerminalRegistry.getTask(liveTerminalTaskId).subscribers.size, 0);
+  assert.equal(liveTerminalEvents.filter(event => event.type === 'workflow_deleted').length, 1);
+  assert.equal(liveTerminalEvents.filter(event => event.type === 'task_stream_closed').length, 1);
+  assert.equal(liveTerminalEvents.at(-1).status, 'deleted');
+
   console.log('creative workflow task tests passed');
 })();

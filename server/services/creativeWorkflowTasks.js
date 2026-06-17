@@ -347,6 +347,7 @@ async function subscribeCreativeWorkflowEvents({
     });
     if (closed) return;
     closed = true;
+    subscription?.unsubscribe?.();
     onClose?.();
   };
 
