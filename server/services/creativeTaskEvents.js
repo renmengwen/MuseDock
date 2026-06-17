@@ -108,7 +108,8 @@ function calculateWorkflowProgress({ stage, stageProgress = 0, skippedStages = [
 
   if (stage === 'project') {
     const projectStart = sumWeightsBefore(STAGE_WEIGHTS, 'project');
-    rawProgress = Math.max(projectStart, STAGE_WEIGHTS.source + progress);
+    const projectEnd = sumWeightsBefore(STAGE_WEIGHTS, 'check');
+    rawProgress = Math.min(projectEnd, Math.max(projectStart, STAGE_WEIGHTS.source + progress));
     return normalizeWorkflowProgressForSkippedStages(rawProgress, skippedStages);
   }
 
