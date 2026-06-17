@@ -53,10 +53,10 @@ function parseSseChunk(buffer, onEvent) {
     try {
       event = JSON.parse(dataLines.join('\n'));
     } catch {
-      onEvent({ type: 'task_stream_parse_failed', message: '任务事件解析失败。' });
+      if (onEvent({ type: 'task_stream_parse_failed', message: '任务事件解析失败。' }) === false) return '';
       continue;
     }
-    onEvent(event);
+    if (onEvent(event) === false) return '';
   }
   return rest;
 }
@@ -96,10 +96,23 @@ function streamJsonSse(url, payload, handlers = {}) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        buffer = parseSseChunk(buffer, event => safeCall(handlers.onEvent, event));
+        buffer = parseSseChunk(buffer, event => {
+          if (closed) return false;
+          safeCall(handlers.onEvent, event);
+          return !closed;
+        });
+        if (closed) return;
       }
       if (closed) return;
-      if (buffer.trim()) parseSseChunk(`${buffer}\n\n`, event => safeCall(handlers.onEvent, event));
+      buffer += decoder.decode();
+      if (buffer.trim()) {
+        parseSseChunk(`${buffer}\n\n`, event => {
+          if (closed) return false;
+          safeCall(handlers.onEvent, event);
+          return !closed;
+        });
+      }
+      if (closed) return;
       closed = true;
       safeCall(handlers.onClose);
     } catch (error) {

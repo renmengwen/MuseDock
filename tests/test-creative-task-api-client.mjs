@@ -271,6 +271,26 @@ try {
   {
     const stream = createManualResponse();
     const events = [];
+    let subscription = null;
+    globalThis.fetch = async () => stream.response;
+
+    subscription = api.streamCreativeWorkflowEvents('wf-events-abort', {}, {
+      onEvent: event => {
+        events.push(event);
+        if (event.seq === 1) subscription.abort();
+      },
+    });
+
+    await settleTicks();
+    stream.push('data: {"seq":1}\n\ndata: {"seq":2}\n\n');
+    await waitFor(() => events.length > 0, 'first event before abort');
+    await settleTicks();
+    assert.deepEqual(events, [{ seq: 1 }]);
+  }
+
+  {
+    const stream = createManualResponse();
+    const events = [];
     globalThis.fetch = async () => stream.response;
 
     api.streamCreativeWorkflowEvents('wf-events-4', {}, {
