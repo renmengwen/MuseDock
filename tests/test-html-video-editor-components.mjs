@@ -66,6 +66,8 @@ for (const method of [
 assert.match(hook, /useRef\(/, 'hook should use refs for duplicate request protection');
 assert.match(hook, /mutatingRef|actionRef|inFlightRef/, 'hook should keep a mutating ref');
 assert.match(hook, /isMutating/, 'hook should expose mutating disabled state');
+assert.match(hook, /html_video_project/, 'hook should parse API html_video_project payloads');
+assert.match(hook, /data\?\.html_video_project/, 'hook should parse nested data.html_video_project payloads');
 
 for (const componentName of [
   'ProjectStatusBar',
@@ -87,6 +89,8 @@ const templateInputs = fs.readFileSync('frontend-react/src/components/creative-v
 for (const inputType of ['string', 'number', 'boolean', 'enum', 'array']) {
   assert.ok(templateInputs.includes(inputType), `TemplateInputsPanel should render ${inputType} fields`);
 }
+assert.match(templateInputs, /schema\?\.properties/, 'TemplateInputsPanel should read schema.properties');
+assert.ok(templateInputs.includes('当前模板未声明可编辑字段'), 'TemplateInputsPanel should show Chinese empty schema state');
 
 const naturalEdit = fs.readFileSync('frontend-react/src/components/creative-video-editor/NaturalLanguageEditBox.jsx', 'utf-8');
 assert.ok(naturalEdit.includes('正在解析编辑意图'), 'natural language edit should show loading text');

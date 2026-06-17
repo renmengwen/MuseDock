@@ -98,7 +98,7 @@ export function TemplateInputsPanel({ schema, values = {}, disabled, onSave }) {
             {renderInput(field, getFieldValue(draft, field), disabled, value => updateField(field, value))}
           </label>
         );
-      }) : <p>暂无模板字段</p>}
+      }) : <p>当前模板未声明可编辑字段。</p>}
     </section>
   );
 }

@@ -32,7 +32,9 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
       />
       <div className="creative-video-editor-toolbar">
         <button type="button" disabled={disabled} onClick={editor.load}>重新加载</button>
-        <button type="button" disabled={disabled} onClick={() => editor.materializeProject({})}>重新生成 HTML</button>
+        <button type="button" disabled={disabled} onClick={() => editor.materializeProject({})}>
+          {editor.status === 'materializing' ? '正在重新生成 HTML...' : '重新生成 HTML'}
+        </button>
         <button type="button" disabled={disabled} onClick={() => handleExport({})}>
           {editor.status === 'exporting' ? '正在导出成片...' : '导出成片'}
         </button>

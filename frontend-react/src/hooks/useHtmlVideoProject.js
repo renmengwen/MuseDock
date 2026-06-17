@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 function getPayload(result) {
-  return result?.project || result?.data?.project || result?.data || result || null;
+  return result?.html_video_project
+    || result?.project
+    || result?.data?.html_video_project
+    || result?.data?.project
+    || result?.data
+    || result
+    || null;
 }
 
 function getExports(result) {
   const payload = getPayload(result);
   if (Array.isArray(result?.exports)) return result.exports;
+  if (Array.isArray(result?.html_video_project?.exports)) return result.html_video_project.exports;
   if (Array.isArray(payload?.exports)) return payload.exports;
   return [];
 }
