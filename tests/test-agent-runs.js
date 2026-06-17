@@ -1282,6 +1282,7 @@ async function run() {
   assert.equal(htmlVideoLite.success, true);
   assert.deepEqual(htmlVideoLiteCreativeContext.audio.scenes.map(scene => scene.duration), [5.44, 10.24]);
   assert.equal(htmlVideoLite.hyperframes_freeform.project.status, 'ready');
+  assert.equal(htmlVideoLite.hyperframes_freeform.project.html_video_project_path, path.join(rootDir, awemeId, 'agent_runs', `${htmlVideoLiteRunId}-lite-project`));
   assert.equal(htmlVideoLite.hyperframes_freeform.audio.status, 'ready');
   assert.equal(htmlVideoLite.hyperframes_freeform.render.status, 'rendered');
   assert.match(htmlVideoLite.hyperframes_freeform.render.output_url, /hyperframes-freeform\/files\/output\.mp4/);

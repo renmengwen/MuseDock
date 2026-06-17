@@ -673,6 +673,13 @@ function ensureSuccess(result, fallbackMessage) {
   return result;
 }
 
+function isHtmlVideoLiteProjectResult(result) {
+  const hyperframes = result?.hyperframes_freeform || {};
+  const project = hyperframes.project || {};
+  return Boolean(project.html_video_project_path || project.project_dir)
+    && hyperframes.render?.status === 'rendered';
+}
+
 async function markStage(record, stageId, status, message, now, extra = {}) {
   updateStage(record, stageId, {
     status,
@@ -837,7 +844,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     try { skipValidation = await services.aiModelConfig.getSkipValidation({ rootDir }); } catch {}
   }
 
-  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'project', rootDir, async () => ensureSuccess(
+  const projectStageResult = await runStage(record, 'project', rootDir, async () => ensureSuccess(
     await services.agentRuns.generateDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
       useHtmlVideoLiteWorkflow: true,
@@ -847,9 +854,21 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       },
     }),
     '工程生成失败。',
-  ), services));
+  ), services);
+  stoppedOrFailed = failIfStoppedOrNull(projectStageResult);
   if (stoppedOrFailed) {
     return stoppedOrFailed;
+  }
+
+  if (isHtmlVideoLiteProjectResult(projectStageResult)) {
+    record.success = true;
+    record.status = 'done';
+    record.message = '创作任务已完成。';
+    record.result = { hyperframes_freeform: projectStageResult.hyperframes_freeform };
+    record.error = null;
+    record.updated_at = getNow(services);
+    const persisted = await persistWorkflow(record, rootDir);
+    return createWorkflowSummary(persisted);
   }
 
   if (!skipValidation) {

@@ -1556,16 +1556,18 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
     if (!result.success) {
       return markFreeformProjectFailed(awemeId, runId, result.message || 'html-video lite 成片失败。', options, operationId);
     }
+    const htmlVideoProjectPath = result.html_video_project_path || result.project_dir || '';
     const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'project', operationId, current => ({
       status: 'ready',
-      project_dir: result.project_dir,
+      project_dir: htmlVideoProjectPath,
       project: {
         ...current.project,
         status: 'ready',
         operation_id: operationId,
         message: result.message || 'html-video lite 工程已生成。',
-        project_dir: result.project_dir,
-        files: mapFreeformProjectFilesToDir((result.files || []).map(name => ({ name })), result.project_dir),
+        project_dir: htmlVideoProjectPath,
+        html_video_project_path: htmlVideoProjectPath,
+        files: mapFreeformProjectFilesToDir((result.files || []).map(name => ({ name })), htmlVideoProjectPath),
         scene_spec: result.scene_spec,
         frame_specs: result.frame_specs,
       },

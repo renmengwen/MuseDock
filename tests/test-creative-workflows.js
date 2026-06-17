@@ -139,6 +139,58 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.equal(fetched.data.stages.find(stage => stage.id === 'render').status, 'done');
 }
 
+async function testHtmlVideoLiteSkipsLegacyHyperframesStages() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-html-video');
+  const { services, calls } = createFakeServices({
+    agentRuns: {
+      generateDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
+        calls.push({ name: 'project', awemeId, runId, options });
+        return {
+          success: true,
+          status: 'done',
+          message: 'html-video lite 成片完成。',
+          hyperframes_freeform: {
+            status: 'ready',
+            project_dir: projectDir,
+            project: {
+              status: 'ready',
+              project_dir: projectDir,
+              html_video_project_path: projectDir,
+              scene_spec: { title: '测试', scenes: [] },
+              frame_specs: { frames: [{ id: 'frame_01', scene_id: 'scene_01' }] },
+            },
+            render: {
+              status: 'rendered',
+              output_path: path.join(projectDir, 'exports', 'output.mp4'),
+              render_versions: [{ id: 'run-1-html-video-lite', status: 'rendered' }],
+            },
+            visual_inspect: { status: 'passed', issues: [] },
+          },
+        };
+      },
+      checkDouyinRunHyperframesFreeformProject: async () => {
+        throw new Error('不应调用旧 HyperFrames 工程校验');
+      },
+      renderDouyinRunHyperframesFreeformVideo: async () => {
+        throw new Error('不应调用旧 HyperFrames 渲染');
+      },
+      inspectDouyinRunHyperframesFreeformVideo: async () => {
+        throw new Error('不应调用旧 HyperFrames 巡检');
+      },
+    },
+  });
+
+  await createCreativeWorkflow({ input: '做一个 html-video 测试', useResearch: false, assetIds: [] }, { rootDir, mediaRoot, services });
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+  assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project']);
+  const persisted = readJson(getWorkflowPath(WORKFLOW_ID, rootDir));
+  assert.equal(persisted.result.hyperframes_freeform.project.html_video_project_path, projectDir);
+  assert.equal(persisted.result.hyperframes_freeform.render.status, 'rendered');
+}
+
 async function testRejectsEmptyInput() {
   const { rootDir } = createTempDirs();
   const { services } = createFakeServices();
@@ -895,6 +947,7 @@ async function testSceneSpecOperations() {
 
 async function run() {
   await testCreatesAndRunsTextWorkflow();
+  await testHtmlVideoLiteSkipsLegacyHyperframesStages();
   await testRejectsEmptyInput();
   await testCreatesDouyinWorkflowWithOriginalAwemeId();
   await testPreparesDouyinSourceBeforeAgentRun();
