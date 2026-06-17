@@ -82,6 +82,7 @@ function durationFromTarget(target, template) {
 function buildInitialProject({ workflowId, runId, sceneSpec, template, templateInputs, target }) {
   const duration = durationFromTarget(target, template);
   const output = objectOrEmpty(template.output);
+  const templateSchema = objectOrEmpty(objectOrEmpty(template.inputs).schema);
   const contentGraph = mapSceneSpecToContentGraph(sceneSpec || {});
   const mappedFrames = buildFramesFromGraph({
     sceneSpec: sceneSpec || {},
@@ -117,6 +118,7 @@ function buildInitialProject({ workflowId, runId, sceneSpec, template, templateI
     template_id: template.id,
     template_inputs: templateInputs,
     output,
+    template_schema: templateSchema,
     content_graph: contentGraph,
     frames,
     timeline: {

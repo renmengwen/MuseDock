@@ -20,9 +20,9 @@ async function createTemplate(rootDir) {
     'source_entry: index.html',
     'output:',
     '  resolution:',
-    '    width: 1280',
-    '    height: 720',
-    '  fps: 30',
+    '    width: 1080',
+    '    height: 1920',
+    '  fps: 24',
     '  duration: 4',
     'inputs:',
     '  schema:',
@@ -102,6 +102,8 @@ async function createTemplate(rootDir) {
       frameRenderer: {
         renderFrame: async (frame, options) => {
           calls.push(`render:${frame.id}`);
+          assert.deepEqual(options.resolution, { width: 1080, height: 1920 });
+          assert.equal(options.fps, 24);
           return {
             success: true,
             frame_id: frame.id,
@@ -142,6 +144,9 @@ async function createTemplate(rootDir) {
   assert.equal(result.project.frames[0].inputs.headline, '首版标题');
   assert.equal(result.project.content_graph.nodes.length, 2);
   assert.equal(result.project.timeline.tracks.find(track => track.id === 'main').items.length, 2);
+  assert.deepEqual(result.project.output.resolution, { width: 1080, height: 1920 });
+  assert.equal(result.project.output.fps, 24);
+  assert.equal(result.project.template_schema.properties.headline.type, 'string');
   assert.equal(result.project.audio.tts_manifest_path, 'tts/audio_manifest.json');
   assert.equal(result.output_path, path.join(result.html_video_project_path, 'exports', 'output.mp4'));
   assert.deepEqual(calls.slice(-6), [

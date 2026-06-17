@@ -174,6 +174,26 @@ function normalizeAudio(value) {
   };
 }
 
+function normalizeOutput(value) {
+  const input = objectOrEmpty(value);
+  const resolution = objectOrEmpty(input.resolution);
+  const width = Number(resolution.width);
+  const height = Number(resolution.height);
+  const fps = Number(input.fps);
+  const duration = Number(input.duration ?? input.duration_sec);
+  const output = {
+    resolution: {
+      width: Number.isFinite(width) && width > 0 ? width : 1280,
+      height: Number.isFinite(height) && height > 0 ? height : 720,
+    },
+    fps: Number.isFinite(fps) && fps > 0 ? fps : 30,
+  };
+  if (Number.isFinite(duration) && duration > 0) {
+    output.duration = duration;
+  }
+  return output;
+}
+
 function normalizeOverrides(value) {
   const input = objectOrEmpty(value);
   const html = objectOrEmpty(input.html);
@@ -211,6 +231,8 @@ function normalizeProject(project = {}) {
     schema_version: SCHEMA_VERSION,
     template_id: input.template_id || null,
     template_inputs: objectOrEmpty(input.template_inputs),
+    output: normalizeOutput(input.output),
+    template_schema: objectOrEmpty(input.template_schema),
     content_graph: normalizeContentGraph(input.content_graph),
     frames: arrayOrEmpty(input.frames).map(normalizeFrame),
     timeline: normalizeTimeline(input.timeline),

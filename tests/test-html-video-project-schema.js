@@ -40,6 +40,24 @@ assert.deepEqual(project.revisions, []);
 assert.deepEqual(project.exports, []);
 assert.equal(project.status, 'draft');
 
+const outputProject = schema.normalizeProject({
+  project_id: 'p1',
+  output: {
+    resolution: { width: 1080, height: 1920 },
+    fps: 24,
+    duration: 7,
+  },
+  template_schema: {
+    type: 'object',
+    properties: { headline: { type: 'string', label: '标题' } },
+  },
+});
+
+assert.deepEqual(outputProject.output.resolution, { width: 1080, height: 1920 });
+assert.equal(outputProject.output.fps, 24);
+assert.equal(outputProject.output.duration, 7);
+assert.equal(outputProject.template_schema.properties.headline.label, '标题');
+
 const normalized = schema.normalizeProject({
   project_id: 'project_002',
   workflow_id: 'workflow_002',
