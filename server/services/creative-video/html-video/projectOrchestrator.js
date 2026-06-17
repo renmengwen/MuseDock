@@ -13,10 +13,10 @@ function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-function report(onProgress, event) {
+async function report(onProgress, event) {
   if (typeof onProgress !== 'function') return;
   try {
-    onProgress(event);
+    await onProgress(event);
   } catch (_) {
     // 进度回调不能影响渲染主流程。
   }
@@ -210,7 +210,7 @@ async function renderHtmlVideoProject({
   }
 
   const videoPath = path.join(resolvedProjectDir, 'exports', 'output.mp4');
-  report(onProgress, {
+  await report(onProgress, {
     type: 'html_video_compose_started',
     stage: 'project',
     message: '正在合成 html-video 成片...',
@@ -308,7 +308,7 @@ async function renderHtmlVideoProject({
   });
   nextProject.status = 'rendered';
   await saveProject(resolvedProjectDir, nextProject);
-  report(onProgress, {
+  await report(onProgress, {
     type: 'html_video_export_ready',
     stage: 'project',
     message: 'html-video 成片已导出。',

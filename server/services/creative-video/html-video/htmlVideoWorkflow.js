@@ -38,10 +38,10 @@ function failure(message, diagnostics, extra = {}) {
   });
 }
 
-function report(onProgress, event) {
+async function report(onProgress, event) {
   if (typeof onProgress !== 'function') return;
   try {
-    onProgress(event);
+    await onProgress(event);
   } catch (_) {
     // 进度回调不能影响主生成流程。
   }
@@ -264,7 +264,7 @@ async function generateHtmlVideo({
       }),
     ]);
   }
-  report(onProgress, {
+  await report(onProgress, {
     type: 'html_video_template_selected',
     stage: 'project',
     message: `已选择 html-video 模板：${template.name || template.id}。`,
@@ -316,7 +316,7 @@ async function generateHtmlVideo({
       creativeContext,
       target: renderTarget,
     });
-    report(onProgress, {
+    await report(onProgress, {
       type: 'html_video_graph_started',
       stage: 'project',
       message: '正在生成 html-video 内容图...',
@@ -349,7 +349,7 @@ async function generateHtmlVideo({
         project_dir: projectDir,
       });
     }
-    report(onProgress, {
+    await report(onProgress, {
       type: 'html_video_graph_done',
       stage: 'project',
       message: 'html-video 内容图已生成。',
@@ -361,7 +361,7 @@ async function generateHtmlVideo({
     const frameHtmlByNodeId = {};
     const nodes = graphParsed.graph.nodes || [];
     for (let index = 0; index < nodes.length; index += 1) {
-      report(onProgress, {
+      await report(onProgress, {
         type: 'html_video_frame_html_started',
         stage: 'project',
         message: `正在生成第 ${index + 1}/${nodes.length} 帧 HTML...`,
@@ -396,7 +396,7 @@ async function generateHtmlVideo({
         });
       }
       frameHtmlByNodeId[nodes[index].id] = htmlResult.html;
-      report(onProgress, {
+      await report(onProgress, {
         type: 'html_video_frame_html_done',
         stage: 'project',
         message: `第 ${index + 1}/${nodes.length} 帧 HTML 已生成。`,

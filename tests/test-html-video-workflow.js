@@ -171,7 +171,13 @@ async function createVerticalTemplate(rootDir) {
     target: {},
     templateRegistry,
     skipValidation: true,
-    onProgress: event => progressEvents.push(event),
+    onProgress: async event => {
+      await new Promise(resolve => setImmediate(resolve));
+      progressEvents.push(event);
+      if (event.type === 'html_video_graph_done') {
+        throw new Error('progress failed');
+      }
+    },
     services: {
       aiTextModel: {
         callTextModel: async ({ messages }) => {
@@ -186,7 +192,7 @@ async function createVerticalTemplate(rootDir) {
       environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
       frameRenderer: {
         renderFrame: async (frame, options) => {
-          options.onProgress?.({ frame, percent: 50, message: '正在录制 html-video 帧...' });
+          await options.onProgress?.({ frame, percent: 50, message: '正在录制 html-video 帧...' });
           return { success: true, frame_id: frame.id, output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`), diagnostics: [] };
         },
       },
