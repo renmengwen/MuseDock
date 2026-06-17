@@ -53,7 +53,10 @@ async function createTemplate(rootDir) {
     sceneSpec: {
       title: '产品发布',
       aspect_ratio: '16:9',
-      scenes: [{ id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '首版标题', keywords: [], cards: [] } }],
+      scenes: [
+        { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: [], visual_text: { headline: '首版标题', keywords: [], cards: [] } },
+        { id: 'scene_02', duration: 3, kind: 'text', narration_text: '旁白二', captions: [], visual_text: { headline: '第二幕', keywords: [], cards: [] } },
+      ],
     },
     creativeContext: { input: { raw_text: '产品发布' } },
     target: { duration_sec: 4 },
@@ -75,12 +78,25 @@ async function createTemplate(rootDir) {
         synthesizeSceneNarration: async ({ projectDir }) => {
           calls.push(`tts:${path.basename(projectDir)}`);
           await writeFile(path.join(projectDir, 'tts', 'scene_01.mp3'), 'audio');
+          await writeFile(path.join(projectDir, 'tts', 'scene_02.mp3'), 'audio');
           await writeFile(path.join(projectDir, 'tts', 'audio_manifest.json'), JSON.stringify({
             version: 1,
             project_dir: projectDir,
-            scenes: [{ scene_id: 'scene_01', relative_path: 'tts/scene_01.mp3', duration: 4, format: 'mp3' }],
+            scenes: [
+              { scene_id: 'scene_01', relative_path: 'tts/scene_01.mp3', duration: 4, format: 'mp3' },
+              { scene_id: 'scene_02', relative_path: 'tts/scene_02.mp3', duration: 3, format: 'mp3' },
+            ],
           }));
-          return { success: true, audio_manifest: { scenes: [{ relative_path: 'tts/scene_01.mp3' }], combined_path: null } };
+          return {
+            success: true,
+            audio_manifest: {
+              scenes: [
+                { scene_id: 'scene_01', relative_path: 'tts/scene_01.mp3' },
+                { scene_id: 'scene_02', relative_path: 'tts/scene_02.mp3' },
+              ],
+              combined_path: null,
+            },
+          };
         },
       },
       frameRenderer: {
@@ -120,11 +136,22 @@ async function createTemplate(rootDir) {
   assert.equal(result.render_mode, 'html-video');
   assert.equal(result.template_id, 'simple');
   assert.ok(result.html_video_project_path.endsWith(`${path.sep}202606170000000001${path.sep}agent_runs${path.sep}run_001-html-video`));
-  assert.equal(result.project.frames.length, 1);
+  assert.equal(result.project.frames.length, 2);
+  assert.equal(result.project.frames[0].scene_id, 'scene_01');
+  assert.equal(result.project.frames[1].scene_id, 'scene_02');
   assert.equal(result.project.frames[0].inputs.headline, '首版标题');
+  assert.equal(result.project.content_graph.nodes.length, 2);
+  assert.equal(result.project.timeline.tracks.find(track => track.id === 'main').items.length, 2);
   assert.equal(result.project.audio.tts_manifest_path, 'tts/audio_manifest.json');
   assert.equal(result.output_path, path.join(result.html_video_project_path, 'exports', 'output.mp4'));
-  assert.deepEqual(calls.slice(-5), [`tts:${path.basename(result.html_video_project_path)}`, 'render:frame_01', 'concat:1', 'audio:scene_01.mp3', 'mux:narration-track.mp3']);
+  assert.deepEqual(calls.slice(-6), [
+    `tts:${path.basename(result.html_video_project_path)}`,
+    'render:scene_01',
+    'render:scene_02',
+    'concat:2',
+    'audio:scene_01.mp3',
+    'mux:narration-track.mp3',
+  ]);
 
   const fallback = await workflow.generateHtmlVideo({
     workflowId: '202606170000000002',

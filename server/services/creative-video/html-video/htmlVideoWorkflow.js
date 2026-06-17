@@ -13,6 +13,7 @@ const editPatchService = require('./editPatchService');
 const { parseJsonOnlyResponse } = require('./templateInputAgent');
 const defaultVisualQaService = require('../visualQaService');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
+const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('./sceneSpecMapper');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -78,9 +79,37 @@ function durationFromTarget(target, template) {
   return Number.isFinite(duration) && duration > 0 ? duration : 6;
 }
 
-function buildInitialProject({ workflowId, runId, template, templateInputs, target }) {
+function buildInitialProject({ workflowId, runId, sceneSpec, template, templateInputs, target }) {
   const duration = durationFromTarget(target, template);
   const output = objectOrEmpty(template.output);
+  const contentGraph = mapSceneSpecToContentGraph(sceneSpec || {});
+  const mappedFrames = buildFramesFromGraph({
+    sceneSpec: sceneSpec || {},
+    contentGraph,
+    templateId: template.id,
+    templateInputs,
+  });
+  const frames = mappedFrames.length ? mappedFrames : [{
+    id: 'frame_01',
+    scene_id: 'scene_01',
+    order: 1,
+    template_id: template.id,
+    inputs: templateInputs,
+    duration_sec: duration,
+  }];
+  let cursor = 0;
+  const items = frames.map(frame => {
+    const durationSec = Number(frame.duration_sec || duration);
+    const item = {
+      id: `item_${frame.id}`,
+      kind: 'frame',
+      frame_id: frame.id,
+      start_sec: cursor,
+      duration_sec: durationSec,
+    };
+    cursor += durationSec;
+    return item;
+  });
   return normalizeProject({
     project_id: `${workflowId}_${runId}`,
     workflow_id: workflowId,
@@ -88,19 +117,11 @@ function buildInitialProject({ workflowId, runId, template, templateInputs, targ
     template_id: template.id,
     template_inputs: templateInputs,
     output,
-    frames: [
-      {
-        id: 'frame_01',
-        scene_id: 'scene_01',
-        order: 1,
-        template_id: template.id,
-        inputs: templateInputs,
-        duration_sec: duration,
-      },
-    ],
+    content_graph: contentGraph,
+    frames,
     timeline: {
       tracks: [
-        { id: 'main', type: 'video', items: [{ id: 'frame_01', kind: 'frame', frame_id: 'frame_01', start_sec: 0, duration_sec: duration }] },
+        { id: 'main', type: 'video', items },
         { id: 'voice', type: 'audio', items: [] },
         { id: 'music', type: 'audio', items: [] },
       ],
@@ -192,6 +213,7 @@ async function generateHtmlVideo({
   const project = buildInitialProject({
     workflowId,
     runId,
+    sceneSpec,
     template,
     templateInputs: inputResult.inputs,
     target,
