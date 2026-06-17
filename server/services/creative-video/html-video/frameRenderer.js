@@ -28,6 +28,17 @@ async function renderFrame(frame = {}, options = {}) {
   state.frame_id = frame.id || null;
   state.message = '正在渲染 html-video 帧...';
 
+  let progressQueue = Promise.resolve();
+  const enqueueProgress = (percent, message) => {
+    state.progress = percent;
+    state.message = message;
+    if (typeof options.onProgress !== 'function') return progressQueue;
+    progressQueue = progressQueue
+      .then(() => options.onProgress({ frame, percent, message }))
+      .catch(() => {});
+    return progressQueue;
+  };
+
   try {
     const result = await adapter.render(
       {
@@ -43,15 +54,12 @@ async function renderFrame(frame = {}, options = {}) {
       },
       {
         onProgress: (percent, message) => {
-          state.progress = percent;
-          state.message = message;
-          if (typeof options.onProgress === 'function') {
-            options.onProgress({ frame, percent, message });
-          }
+          return enqueueProgress(percent, message);
         },
       },
       options.adapterDeps || {},
     );
+    await progressQueue;
     state.status = 'done';
     state.output_path = result.output_path || result.outputPath || outputPath;
     state.message = 'html-video 帧渲染完成。';
@@ -63,6 +71,7 @@ async function renderFrame(frame = {}, options = {}) {
       diagnostics: result.diagnostics || [],
     };
   } catch (error) {
+    await progressQueue;
     state.status = 'failed';
     state.message = `html-video 帧渲染失败：${error.message}`;
     return {

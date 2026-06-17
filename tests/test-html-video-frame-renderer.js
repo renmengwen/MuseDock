@@ -40,5 +40,42 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   assert.equal(receivedSourcePath, htmlPath);
   assert.equal(state.status, 'done');
 
+  const asyncProgressEvents = [];
+  const asyncProgressState = {};
+  const asyncProgressResult = await renderFrame(
+    {
+      id: 'scene_02',
+      html_path: 'frames/01-scene_01.html',
+      duration_sec: 4,
+    },
+    {
+      projectDir,
+      outputPath: path.join(projectDir, 'frames', 'scene_02.mp4'),
+      state: asyncProgressState,
+      onProgress: async event => {
+        await new Promise(resolve => setImmediate(resolve));
+        asyncProgressEvents.push({ percent: event.percent, message: event.message });
+      },
+      adapter: {
+        render: async (input, ctx) => {
+          ctx.onProgress(40, '正在录制 html-video 帧...');
+          ctx.onProgress(80, '正在收尾 html-video 帧...');
+          return {
+            output_path: input.config.outputPath,
+            meta: { durationSec: input.config.duration },
+            diagnostics: [],
+          };
+        },
+      },
+    },
+  );
+
+  assert.equal(asyncProgressResult.success, true);
+  assert.deepEqual(asyncProgressEvents, [
+    { percent: 40, message: '正在录制 html-video 帧...' },
+    { percent: 80, message: '正在收尾 html-video 帧...' },
+  ]);
+  assert.equal(asyncProgressState.status, 'done');
+
   console.log('html-video frame renderer tests passed');
 })();
