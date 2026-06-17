@@ -1555,7 +1555,9 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
         skipValidation: options.skipValidation === true,
         onProgress: event => {
           if (!onProgress) return undefined;
-          return Promise.resolve(onProgress({ stage: 'project', ...event })).catch(() => undefined);
+          return Promise.resolve()
+            .then(() => onProgress({ stage: 'project', ...event }))
+            .catch(() => undefined);
         },
       });
     } catch (error) {
