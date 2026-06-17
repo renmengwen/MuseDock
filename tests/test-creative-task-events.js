@@ -44,6 +44,7 @@ const events = require('../server/services/creativeTaskEvents');
 {
   assert.equal(events.calculateWorkflowProgress({ stage: 'source', stageProgress: 100 }), 5);
   assert.equal(events.calculateWorkflowProgress({ stage: 'project', stageProgress: 50 }), 55);
+  assert.equal(events.calculateWorkflowProgress({ stage: 'project', stageProgress: 50, skippedStages: ['research'] }), 58);
   assert.equal(events.calculateWorkflowProgress({
     stage: 'project',
     stageProgress: events.calculateProjectProgress({ step: 'frame_html', index: 1, total: 4, stepProgress: 50 }),

@@ -60,6 +60,26 @@ function sumWeightsBefore(weights, key) {
   return 0;
 }
 
+function sumActiveStageWeights(skippedStages) {
+  const skipped = new Set(Array.isArray(skippedStages) ? skippedStages : []);
+  return Object.entries(STAGE_WEIGHTS).reduce((total, [stage, weight]) => {
+    return skipped.has(stage) ? total : total + weight;
+  }, 0);
+}
+
+function normalizeWorkflowProgressForSkippedStages(progress, skippedStages) {
+  if (!Array.isArray(skippedStages) || skippedStages.length === 0) {
+    return clampPercent(progress);
+  }
+
+  const activeTotal = sumActiveStageWeights(skippedStages);
+  if (activeTotal <= 0) {
+    return clampPercent(progress);
+  }
+
+  return clampPercent((progress / activeTotal) * 100);
+}
+
 function createTaskEvent(input = {}) {
   const now = typeof input.now === 'function' ? input.now : () => new Date().toISOString();
 
@@ -77,27 +97,32 @@ function createTaskEvent(input = {}) {
   };
 }
 
-function calculateWorkflowProgress({ stage, stageProgress = 0 } = {}) {
+function calculateWorkflowProgress({ stage, stageProgress = 0, skippedStages = [] } = {}) {
   const progress = clampPercent(stageProgress);
+  let rawProgress;
 
   if (stage === 'source') {
-    return clampPercent((progress / 100) * STAGE_WEIGHTS.source);
+    rawProgress = (progress / 100) * STAGE_WEIGHTS.source;
+    return normalizeWorkflowProgressForSkippedStages(rawProgress, skippedStages);
   }
 
   if (stage === 'project') {
     const projectStart = sumWeightsBefore(STAGE_WEIGHTS, 'project');
-    return clampPercent(Math.max(projectStart, STAGE_WEIGHTS.source + progress));
+    rawProgress = Math.max(projectStart, STAGE_WEIGHTS.source + progress);
+    return normalizeWorkflowProgressForSkippedStages(rawProgress, skippedStages);
   }
 
   if (stage === 'inspect') {
-    return clampPercent(sumWeightsBefore(STAGE_WEIGHTS, 'inspect') + (progress / 100) * STAGE_WEIGHTS.inspect);
+    rawProgress = sumWeightsBefore(STAGE_WEIGHTS, 'inspect') + (progress / 100) * STAGE_WEIGHTS.inspect;
+    return normalizeWorkflowProgressForSkippedStages(rawProgress, skippedStages);
   }
 
   if (!Object.prototype.hasOwnProperty.call(STAGE_WEIGHTS, stage)) {
     return 0;
   }
 
-  return clampPercent(sumWeightsBefore(STAGE_WEIGHTS, stage) + (progress / 100) * STAGE_WEIGHTS[stage]);
+  rawProgress = sumWeightsBefore(STAGE_WEIGHTS, stage) + (progress / 100) * STAGE_WEIGHTS[stage];
+  return normalizeWorkflowProgressForSkippedStages(rawProgress, skippedStages);
 }
 
 function calculateProjectProgress({ step, index = 0, total = 1, stepProgress = 0 } = {}) {
