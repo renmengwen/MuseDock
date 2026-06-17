@@ -14,6 +14,7 @@ assert.match(source, /response\.body\.getReader\(\)/);
 assert.match(source, /since_seq/);
 assert.match(source, /onEvent/);
 assert.match(source, /AbortController/);
+assert.doesNotMatch(source, /EventSource/);
 
 const testModuleSource = `${source.replace('export const api =', 'const api =')}\nexport { api };\n`;
 const testModuleUrl = `data:text/javascript;charset=utf-8,${encodeURIComponent(testModuleSource)}#${Date.now()}`;
@@ -107,6 +108,7 @@ try {
     assert.equal(request.url, '/api/creative-workflows/wf-1/events');
     assert.equal(request.options.method, 'POST');
     assert.equal(request.options.headers.Accept, 'text/event-stream');
+    assert.equal(request.options.headers['Content-Type'], 'application/json');
     assert.deepEqual(JSON.parse(request.options.body), { task_id: 'task-1', since_seq: 7 });
 
     stream.abort();
@@ -349,6 +351,25 @@ try {
     stream.done();
     await waitFor(() => events.length === 1, 'flushed SSE event');
     assert.deepEqual(events[0], { type: 'flush' });
+  }
+
+  {
+    const stream = createManualResponse();
+    const closes = [];
+    const errors = [];
+    globalThis.fetch = async () => stream.response;
+
+    api.streamCreativeWorkflowEvents('wf-events-close', {}, {
+      onClose: () => closes.push('closed'),
+      onError: error => errors.push(error),
+    });
+
+    await settleTicks();
+    stream.done();
+    await waitFor(() => closes.length === 1, 'normal stream close');
+    await settleTicks();
+    assert.deepEqual(closes, ['closed']);
+    assert.equal(errors.length, 0);
   }
 
   {
