@@ -174,8 +174,22 @@ function loadActiveCreativeTask() {
   if (typeof window === 'undefined') return null;
   try {
     const parsed = JSON.parse(window.localStorage.getItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY) || 'null');
-    return parsed?.workflow_id && parsed?.task_id ? parsed : null;
+    if (!parsed?.workflow_id || !parsed?.task_id) {
+      window.localStorage.removeItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY);
+      return null;
+    }
+    const lastSeq = Number(parsed.last_seq || 0);
+    if (!Number.isFinite(lastSeq) || lastSeq < 0) {
+      window.localStorage.removeItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY);
+      return null;
+    }
+    return {
+      workflow_id: parsed.workflow_id,
+      task_id: parsed.task_id,
+      last_seq: Math.floor(lastSeq),
+    };
   } catch {
+    window.localStorage.removeItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY);
     return null;
   }
 }
@@ -616,6 +630,11 @@ export function OneClickCreativePage() {
       onClose: () => {
         if (streamGenerationRef.current !== streamGeneration) return;
         activeStreamRef.current = null;
+        if (streamClosedNormallyRef.current) return;
+        reconnectTimerRef.current = window.setTimeout(() => {
+          if (streamGenerationRef.current !== streamGeneration) return;
+          subscribeTaskEvents(nextTask);
+        }, 1500);
       },
       onError: () => {
         if (streamGenerationRef.current !== streamGeneration) return;
