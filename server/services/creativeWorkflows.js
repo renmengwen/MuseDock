@@ -564,6 +564,13 @@ function createWorkflowSummary(record) {
     status: record.status,
     run_id: record.run_id || '',
     message: record.message || '',
+    active_task_id: record.active_task_id || '',
+    active_operation_id: record.active_operation_id || '',
+    task_status: record.task_status || '',
+    current_stage: record.current_stage || '',
+    current_stage_message: record.current_stage_message || '',
+    current_progress: Number.isFinite(record.current_progress) ? record.current_progress : 0,
+    last_event_seq: Number.isFinite(record.last_event_seq) ? record.last_event_seq : 0,
     stages: normalizeStages(record.stages),
     creative_context: record.creative_context,
     source_context: record.source_context,
@@ -616,6 +623,13 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
     status: 'queued',
     message: '创作任务已创建，等待执行。',
     run_id: '',
+    active_task_id: '',
+    active_operation_id: '',
+    task_status: '',
+    current_stage: '',
+    current_stage_message: '',
+    current_progress: 0,
+    last_event_seq: 0,
     input: normalized.data,
     source_context: sourceContext,
     research_context: researchContext,
@@ -1210,6 +1224,43 @@ async function markStaleRunningStageFailed(record, rootDir, services = {}, optio
   };
   record.updated_at = now;
   return persistWorkflow(record, rootDir);
+}
+
+async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  try {
+    const record = await readWorkflow(workflowId, rootDir);
+    const now = safeString(patch.updated_at) || getNow(resolveServices(options)) || new Date().toISOString();
+    record.active_task_id = safeString(patch.active_task_id ?? record.active_task_id);
+    record.active_operation_id = safeString(patch.active_operation_id ?? record.active_operation_id);
+    record.task_status = safeString(patch.task_status ?? record.task_status);
+    record.current_stage = safeString(patch.current_stage ?? record.current_stage);
+    record.current_stage_message = safeString(patch.current_stage_message ?? record.current_stage_message);
+    const progress = Number(patch.current_progress ?? record.current_progress);
+    record.current_progress = Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : 0;
+    const seq = Number(patch.last_event_seq ?? record.last_event_seq);
+    record.last_event_seq = Number.isFinite(seq) && seq > 0 ? Math.floor(seq) : 0;
+    if (patch.status) record.status = safeString(patch.status);
+    if (patch.message) record.message = safeString(patch.message);
+    if (Object.prototype.hasOwnProperty.call(patch, 'error')) record.error = patch.error || null;
+    record.updated_at = now;
+    const persisted = await persistWorkflow(record, rootDir);
+    return { success: true, workflow_id: record.workflow_id, data: persisted };
+  } catch (error) {
+    return { success: false, workflow_id: safeString(workflowId), message: `更新创作任务进度失败：${error.message}` };
+  }
+}
+
+async function clearCreativeWorkflowTaskSummary(workflowId, options = {}) {
+  return patchCreativeWorkflowTaskSummary(workflowId, {
+    active_task_id: '',
+    active_operation_id: '',
+    task_status: '',
+    current_stage: '',
+    current_stage_message: '',
+    current_progress: 0,
+    last_event_seq: 0,
+  }, options);
 }
 
 async function deleteCreativeWorkflow(workflowId, options = {}) {
@@ -1839,6 +1890,8 @@ module.exports = {
   createCreativeWorkflow,
   runCreativeWorkflow,
   getCreativeWorkflow,
+  patchCreativeWorkflowTaskSummary,
+  clearCreativeWorkflowTaskSummary,
   deleteCreativeWorkflow,
   getWorkflowPath,
   makeLocalCreativeAwemeId,
