@@ -437,8 +437,98 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(recovered.recovered, 1);
   const recoveredWorkflow = await workflows.getCreativeWorkflow(WORKFLOW_ID, { rootDir: recoveryRoot });
   assert.equal(recoveredWorkflow.data.status, 'failed');
+  assert.equal(recoveredWorkflow.data.success, false);
   assert.match(recoveredWorkflow.data.message, /服务器重启/);
   assert.equal(recoveredWorkflow.data.active_task_id, '');
+
+  const terminalResidueRoot = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '终态残留测试', useResearch: false }, {
+    rootDir: terminalResidueRoot,
+    services: services('2026-06-18T00:00:00.000Z'),
+  });
+  await workflows.patchCreativeWorkflowTaskSummary(WORKFLOW_ID, {
+    status: 'done',
+    message: '创作任务已完成。',
+    active_task_id: 'done-task',
+    active_operation_id: 'done-op',
+    task_status: 'running',
+    current_stage: 'project',
+    current_stage_message: '创作任务已完成。',
+    current_progress: 100,
+    last_event_seq: 9,
+  }, { rootDir: terminalResidueRoot });
+  const terminalRecovered = await workflowTasks.recoverOrphanedWorkflows({
+    rootDir: terminalResidueRoot,
+    registry: createCreativeTaskRegistry(),
+  });
+  assert.equal(terminalRecovered.recovered, 1);
+  const terminalWorkflow = await workflows.getCreativeWorkflow(WORKFLOW_ID, { rootDir: terminalResidueRoot });
+  assert.equal(terminalWorkflow.data.status, 'done');
+  assert.equal(terminalWorkflow.data.success, true);
+  assert.equal(terminalWorkflow.data.message, '创作任务已完成。');
+  assert.equal(terminalWorkflow.data.current_progress, 100);
+  assert.equal(terminalWorkflow.data.last_event_seq, 9);
+  assert.equal(terminalWorkflow.data.active_task_id, '');
+  assert.equal(terminalWorkflow.data.task_status, '');
+
+  const liveRecoveryRoot = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '运行中任务不恢复测试', useResearch: false }, {
+    rootDir: liveRecoveryRoot,
+    services: services('2026-06-18T00:00:00.000Z'),
+  });
+  const liveRecoveryRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'live-task',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  liveRecoveryRegistry.createDetachedTask({
+    workflowId: WORKFLOW_ID,
+    operationId: 'live-op',
+    kind: 'creative_workflow',
+  });
+  await workflows.patchCreativeWorkflowTaskSummary(WORKFLOW_ID, {
+    active_task_id: 'live-task',
+    active_operation_id: 'live-op',
+    task_status: 'running',
+    current_stage: 'project',
+    current_stage_message: '正在生成工程...',
+    current_progress: 60,
+  }, { rootDir: liveRecoveryRoot });
+  const liveRecovered = await workflowTasks.recoverOrphanedWorkflows({
+    rootDir: liveRecoveryRoot,
+    registry: liveRecoveryRegistry,
+  });
+  assert.equal(liveRecovered.recovered, 0);
+  const liveWorkflow = await workflows.getCreativeWorkflow(WORKFLOW_ID, { rootDir: liveRecoveryRoot });
+  assert.equal(liveWorkflow.data.status, 'queued');
+  assert.equal(liveWorkflow.data.task_status, 'running');
+  assert.equal(liveWorkflow.data.active_task_id, 'live-task');
+  assert.equal(liveWorkflow.data.current_progress, 60);
+
+  const partialFakeRoot = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '局部服务注入测试', useResearch: false }, {
+    rootDir: partialFakeRoot,
+    services: services('2026-06-18T00:00:00.000Z'),
+  });
+  await workflows.patchCreativeWorkflowTaskSummary(WORKFLOW_ID, {
+    status: 'done',
+    message: '创作任务已完成。',
+    active_task_id: 'partial-done-task',
+    task_status: 'running',
+    current_progress: 100,
+    last_event_seq: 9,
+  }, { rootDir: partialFakeRoot });
+  const partialFakeRecovered = await workflowTasks.recoverOrphanedWorkflows({
+    rootDir: partialFakeRoot,
+    registry: createCreativeTaskRegistry(),
+    creativeWorkflows: {
+      listCreativeWorkflowRecords: async () => [readWorkflow(partialFakeRoot)],
+    },
+  });
+  assert.equal(partialFakeRecovered.recovered, 1);
+  const partialFakeWorkflow = await workflows.getCreativeWorkflow(WORKFLOW_ID, { rootDir: partialFakeRoot });
+  assert.equal(partialFakeWorkflow.data.status, 'done');
+  assert.equal(partialFakeWorkflow.data.active_task_id, '');
+  assert.equal(partialFakeWorkflow.data.current_progress, 100);
 
   console.log('creative workflow task tests passed');
 })();

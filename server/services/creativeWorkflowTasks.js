@@ -391,11 +391,24 @@ async function getActiveCreativeWorkflowTask(workflowId, options = {}) {
 
 async function recoverOrphanedWorkflows(options = {}) {
   const registry = options.registry || defaultRegistry;
-  const creativeWorkflows = options.creativeWorkflows || defaultCreativeWorkflows;
+  const creativeWorkflows = {
+    ...defaultCreativeWorkflows,
+    ...(options.creativeWorkflows || {}),
+  };
   const rootDir = options.rootDir;
   const records = await creativeWorkflows.listCreativeWorkflowRecords({ rootDir });
   let recovered = 0;
   for (const record of records) {
+    if ((record.status === 'done' || record.status === 'failed') && record.active_task_id) {
+      await creativeWorkflows.patchCreativeWorkflowTaskSummary(record.workflow_id, {
+        active_task_id: '',
+        active_operation_id: '',
+        task_status: '',
+      }, { rootDir });
+      recovered += 1;
+      continue;
+    }
+
     const hasOrphanedRunningTask = (record.status === 'running' || record.task_status === 'running')
       && record.active_task_id
       && !registry.getTask(record.active_task_id);
@@ -405,7 +418,9 @@ async function recoverOrphanedWorkflows(options = {}) {
         active_task_id: '',
         active_operation_id: '',
         task_status: 'failed',
+        current_stage: '',
         current_stage_message: message,
+        success: false,
         status: 'failed',
         message,
         error: {
@@ -415,9 +430,6 @@ async function recoverOrphanedWorkflows(options = {}) {
           updated_at: options.services?.now?.() || new Date().toISOString(),
         },
       }, { rootDir });
-      recovered += 1;
-    } else if ((record.status === 'done' || record.status === 'failed') && record.active_task_id) {
-      await creativeWorkflows.clearCreativeWorkflowTaskSummary(record.workflow_id, { rootDir });
       recovered += 1;
     }
   }

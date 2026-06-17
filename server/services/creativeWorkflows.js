@@ -1290,6 +1290,7 @@ async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options 
     const progress = Number(patch.current_progress ?? record.current_progress);
     record.current_progress = Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : 0;
     record.last_event_seq = Number.isFinite(seq) && seq > 0 ? Math.floor(seq) : 0;
+    if (Object.prototype.hasOwnProperty.call(patch, 'success')) record.success = patch.success !== false;
     if (Object.prototype.hasOwnProperty.call(patch, 'status')) record.status = safeString(patch.status);
     if (Object.prototype.hasOwnProperty.call(patch, 'message')) record.message = safeString(patch.message);
     if (Object.prototype.hasOwnProperty.call(patch, 'error')) record.error = patch.error || null;
