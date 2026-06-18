@@ -590,7 +590,7 @@ export function OneClickCreativePage() {
       ? Number(closedGeneration)
       : (closedByStream ? expectedGeneration : null);
     if (finalWorkflowRefreshRef.current?.key === refreshKey
-      && (finalWorkflowRefreshRef.current.started || finalWorkflowRefreshRef.current.settled)) {
+      && (finalWorkflowRefreshRef.current.inFlight || finalWorkflowRefreshRef.current.settled)) {
       if (closedByStream) {
         finalWorkflowRefreshRef.current = {
           ...finalWorkflowRefreshRef.current,
@@ -608,7 +608,7 @@ export function OneClickCreativePage() {
       closedGeneration: closedByStream ? terminalGeneration : null,
       closedByStream,
       terminalStatus,
-      started: true,
+      inFlight: false,
       settled: false,
     };
 
@@ -636,9 +636,31 @@ export function OneClickCreativePage() {
     const fallbackMessage = terminalMessage
       || (terminalStatus === 'failed' ? '视频生成失败，请查看任务详情。' : '视频生成完成。');
     try {
-      if (isStaleFinalFetch()) return;
+      if (isStaleFinalFetch()) {
+        if (finalWorkflowRefreshRef.current?.key === refreshKey) {
+          finalWorkflowRefreshRef.current = {
+            ...finalWorkflowRefreshRef.current,
+            inFlight: false,
+          };
+        }
+        return;
+      }
+      if (finalWorkflowRefreshRef.current?.key === refreshKey) {
+        finalWorkflowRefreshRef.current = {
+          ...finalWorkflowRefreshRef.current,
+          inFlight: true,
+        };
+      }
       const json = await api.getCreativeWorkflow(targetWorkflowId);
-      if (isStaleFinalFetch()) return;
+      if (isStaleFinalFetch()) {
+        if (finalWorkflowRefreshRef.current?.key === refreshKey) {
+          finalWorkflowRefreshRef.current = {
+            ...finalWorkflowRefreshRef.current,
+            inFlight: false,
+          };
+        }
+        return;
+      }
 
       const nextWorkflow = getWorkflowPayload(json);
       const nextStatus = nextWorkflow?.status || (json?.success === false ? 'failed' : terminalStatus);
@@ -657,7 +679,7 @@ export function OneClickCreativePage() {
       if (finalWorkflowRefreshRef.current?.key === refreshKey) {
         finalWorkflowRefreshRef.current = {
           ...finalWorkflowRefreshRef.current,
-          started: false,
+          inFlight: false,
           settled: true,
         };
       }
@@ -674,11 +696,19 @@ export function OneClickCreativePage() {
       }
       setMessage(nextMessage);
     } catch {
-      if (isStaleFinalFetch()) return;
+      if (isStaleFinalFetch()) {
+        if (finalWorkflowRefreshRef.current?.key === refreshKey) {
+          finalWorkflowRefreshRef.current = {
+            ...finalWorkflowRefreshRef.current,
+            inFlight: false,
+          };
+        }
+        return;
+      }
       if (finalWorkflowRefreshRef.current?.key === refreshKey) {
         finalWorkflowRefreshRef.current = {
           ...finalWorkflowRefreshRef.current,
-          started: false,
+          inFlight: false,
           settled: true,
         };
       }
