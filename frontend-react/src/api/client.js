@@ -391,6 +391,9 @@ export const api = {
   listHtmlVideoProjectExports(workflowId) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/exports`);
   },
+  getHtmlVideoProjectExportFileUrl(workflowId, exportId) {
+    return `/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/exports/${encodeURIComponent(exportId)}/file`;
+  },
   createDouyinAgentRun(awemeId, template = 'viral_rewrite', promptOptions = {}, agentConfigOverride = null) {
     return requestJson(`/api/agents/douyin/${encodeURIComponent(awemeId)}/runs`, {
       method: 'POST',

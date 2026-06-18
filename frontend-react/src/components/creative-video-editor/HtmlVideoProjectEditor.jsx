@@ -83,6 +83,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
             exporting={editor.status === 'exporting'}
             onExport={handleExport}
             onRefresh={editor.refreshExports}
+            getExportPlaybackUrl={editor.getExportPlaybackUrl}
           />
         </div>
       </div>

@@ -29,7 +29,7 @@ const { buildRawHtmlFrameProject } = require('../server/services/creative-video/
       title: '测试标题',
       scenes: [
         { id: 'scene_01', narration_text: '第一幕旁白', captions: [{ text: '第一幕' }], visual_text: { headline: '第一幕' } },
-        { id: 'scene_02', narration_text: '第二幕旁白', captions: [{ text: '第二幕' }], visual_text: { headline: '第二幕' } },
+        { id: 'scene_02', narration_text: '第二幕旁白', captions: [], visual_text: { headline: '第二幕' } },
       ],
     },
     target: { aspect_ratio: '16:9', resolution: { width: 1920, height: 1080 }, fps: 30 },
@@ -51,13 +51,21 @@ const { buildRawHtmlFrameProject } = require('../server/services/creative-video/
   assert.equal(project.frames[0].duration_sec, 2.5);
   assert.equal(project.frames[0].narration_text, '第一幕旁白');
   assert.deepEqual(project.frames[0].captions, [{ text: '第一幕' }]);
+  assert.equal(project.frames[1].captions[0].text, '第二幕旁白');
+  assert.equal(project.frames[1].captions[0].start, 0);
+  assert.equal(project.frames[1].captions[0].end, 3);
   assert.equal(project.frames[0].metadata.visual_text.headline, '第一幕');
   assert.equal(project.frames[0].metadata.graph_node.kind, 'text');
   assert.equal(project.timeline.tracks[0].items[1].start_sec, 2.5);
   assert.equal(project.timeline.tracks[0].items[1].duration_sec, 3);
 
-  assert.equal(await fs.readFile(path.join(projectDir, 'frames/01-scene_01.html'), 'utf8'), '<!doctype html><html><body><main>第一幕</main></body></html>');
-  assert.equal(await fs.readFile(path.join(projectDir, 'frames/02-scene_02.html'), 'utf8'), '<!doctype html><html><body><main>第二幕</main></body></html>');
+  const firstHtml = await fs.readFile(path.join(projectDir, 'frames/01-scene_01.html'), 'utf8');
+  const secondHtml = await fs.readFile(path.join(projectDir, 'frames/02-scene_02.html'), 'utf8');
+  assert.match(firstHtml, /data-role="subtitle-caption"/);
+  assert.match(firstHtml, /data-text-key="subtitle"/);
+  assert.match(firstHtml, /第一幕/);
+  assert.match(secondHtml, /data-role="subtitle-caption"/);
+  assert.match(secondHtml, /第二幕旁白/);
 
   console.log('html-video raw html frame builder tests passed');
 })().catch(error => {

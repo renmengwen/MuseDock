@@ -12,6 +12,15 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value || {}));
 }
 
+function htmlEscape(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function safeFilePart(value, fallback) {
   const text = String(value || fallback || 'frame')
     .trim()
@@ -65,6 +74,50 @@ function defaultFrameFields() {
   };
 }
 
+function normalizeCaptions(scene = {}, durationSec = DEFAULT_FRAME_DURATION_SEC) {
+  const captions = Array.isArray(scene.captions)
+    ? scene.captions
+      .filter(caption => caption && String(caption.text || '').trim())
+      .map(caption => clone(caption))
+    : [];
+  if (captions.length > 0) return captions;
+
+  const text = String(scene.narration_text || '').trim();
+  if (!text) return [];
+  const duration = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : DEFAULT_FRAME_DURATION_SEC;
+  return [{
+    id: `${scene.id || 'scene'}_caption_01`,
+    start: 0,
+    end: duration,
+    duration,
+    text,
+  }];
+}
+
+function captionText(captions = []) {
+  return captions
+    .map(caption => String(caption?.text || '').trim())
+    .filter(Boolean)
+    .join(' / ');
+}
+
+function injectCaptionOverlay(html, captions = []) {
+  const text = captionText(captions);
+  if (!text || /data-role=["']subtitle-caption["']|data-text-key=["']subtitle["']/i.test(html)) {
+    return html;
+  }
+  const overlay = [
+    '<style data-role="subtitle-caption-style">',
+    '.hv-subtitle-caption{position:absolute;left:50%;bottom:42px;transform:translateX(-50%);max-width:84%;padding:14px 22px;border-radius:8px;background:rgba(0,0,0,.68);color:#fff;font:600 34px/1.28 "Noto Sans SC","Microsoft YaHei",Arial,sans-serif;text-align:center;text-shadow:0 2px 8px rgba(0,0,0,.55);z-index:9999;letter-spacing:0;}',
+    '</style>',
+    `<div class="hv-subtitle-caption" data-role="subtitle-caption" data-text-key="subtitle">${htmlEscape(text)}</div>`,
+  ].join('');
+  if (/<\/body>/i.test(html)) {
+    return html.replace(/<\/body>/i, `${overlay}</body>`);
+  }
+  return `${html}${overlay}`;
+}
+
 async function buildRawHtmlFrameProject({
   projectDir,
   workflowId,
@@ -94,10 +147,11 @@ async function buildRawHtmlFrameProject({
     const htmlPath = `frames/${String(index + 1).padStart(2, '0')}-${safeId}.html`;
     const outputPath = resolveProjectPath(projectDir, htmlPath);
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
-    await fs.writeFile(outputPath, html, 'utf8');
 
     const scene = scenes.get(nodeId) || {};
     const durationSec = Number(node.durationSec || scene.duration || scene.target_duration_sec || DEFAULT_FRAME_DURATION_SEC);
+    const normalizedDurationSec = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : DEFAULT_FRAME_DURATION_SEC;
+    const captions = normalizeCaptions(scene, normalizedDurationSec);
     const frame = {
       id: nodeId,
       scene_id: nodeId,
@@ -108,10 +162,10 @@ async function buildRawHtmlFrameProject({
       source_mode: 'raw_html',
       html_path: htmlPath,
       preview_mp4_path: null,
-      duration_sec: Number.isFinite(durationSec) && durationSec > 0 ? durationSec : DEFAULT_FRAME_DURATION_SEC,
+      duration_sec: normalizedDurationSec,
       inputs: {},
       narration_text: scene.narration_text || '',
-      captions: Array.isArray(scene.captions) ? clone(scene.captions) : [],
+      captions,
       metadata: {
         frame_intent: node.kind || scene.kind || 'text',
         visual_text: clone(scene.visual_text),
@@ -119,6 +173,7 @@ async function buildRawHtmlFrameProject({
       },
       ...defaultFrameFields(),
     };
+    await fs.writeFile(outputPath, injectCaptionOverlay(html, captions), 'utf8');
     frames.push(frame);
     items.push({
       id: `item_${frame.id}`,
@@ -155,4 +210,6 @@ async function buildRawHtmlFrameProject({
 
 module.exports = {
   buildRawHtmlFrameProject,
+  injectCaptionOverlay,
+  normalizeCaptions,
 };

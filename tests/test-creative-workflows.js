@@ -141,6 +141,45 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.equal(fetched.data.stages.find(stage => stage.id === 'render').status, 'done');
 }
 
+async function testResearchRunsInBackgroundStage() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  let researchCalls = 0;
+  const { services, calls } = createFakeServices({
+    services: {
+      researchService: {
+        createResearchContext: async ({ enabled, query, now }) => {
+          researchCalls += 1;
+          return enabled
+            ? { status: 'ready', query, sources: [], summary: '后台研究完成', updated_at: now }
+            : { status: 'disabled', query: '', sources: [], summary: '', updated_at: now };
+        },
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: '做一期关于 AI 视频生产的知识科普',
+    useResearch: true,
+    assetIds: [],
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+  assert.equal(researchCalls, 0);
+  assert.equal(created.research_context.status, 'pending');
+  assert.equal(created.creative_context.research_context.status, 'pending');
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+  assert.equal(researchCalls, 1);
+  assert.equal(calls[1].options.briefOptions.creative_context.research_context.status, 'ready');
+  assert.equal(calls[1].options.briefOptions.creative_context.research_context.summary, '后台研究完成');
+
+  const fetched = await getCreativeWorkflow(WORKFLOW_ID, { rootDir, services });
+  assert.equal(fetched.data.research_context.status, 'ready');
+  assert.equal(fetched.data.creative_context.research_context.status, 'ready');
+}
+
 async function testHtmlVideoLiteSkipsLegacyHyperframesStages() {
   const { rootDir, mediaRoot } = createTempDirs();
   const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-html-video');
@@ -1126,6 +1165,7 @@ async function testSceneSpecOperations() {
 
 async function run() {
   await testCreatesAndRunsTextWorkflow();
+  await testResearchRunsInBackgroundStage();
   await testHtmlVideoLiteSkipsLegacyHyperframesStages();
   await testFallbackProjectDoesNotSkipLegacyStages();
   await testRejectsEmptyInput();

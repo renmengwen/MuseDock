@@ -144,6 +144,16 @@ function createDisabledResearchContext({ now } = {}) {
   };
 }
 
+function createPendingResearchContext({ query, now } = {}) {
+  return {
+    status: 'pending',
+    query: safeString(query),
+    sources: [],
+    summary: '联网研究将在后台任务中执行。',
+    updated_at: now || '',
+  };
+}
+
 function createDisabledAssetContext({ now } = {}) {
   return {
     status: 'disabled',
@@ -208,6 +218,7 @@ module.exports = {
   extractAwemeId,
   createTextSourceContext,
   createDisabledResearchContext,
+  createPendingResearchContext,
   createDisabledAssetContext,
   buildCreativeContext,
 };

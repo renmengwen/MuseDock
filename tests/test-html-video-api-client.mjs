@@ -15,6 +15,7 @@ const expectedMethods = [
   'renderHtmlVideoProject(workflowId, payload)',
   'exportHtmlVideoProject(workflowId, payload)',
   'listHtmlVideoProjectExports(workflowId)',
+  'getHtmlVideoProjectExportFileUrl(workflowId, exportId)',
 ];
 
 for (const method of expectedMethods) {
@@ -29,6 +30,7 @@ for (const segment of [
   '/html-video-project/render',
   '/html-video-project/export',
   '/html-video-project/exports',
+  '/file',
 ]) {
   assert.ok(source.includes(segment), `client should call ${segment}`);
 }
@@ -40,7 +42,7 @@ assert.match(source, /renderHtmlVideoProject\([^]*?method:\s*'POST'/);
 assert.match(source, /exportHtmlVideoProject\([^]*?method:\s*'POST'/);
 assert.match(source, /body:\s*JSON\.stringify\(payload\s*\|\|\s*\{\}\)/);
 
-for (const identifier of ['workflowId', 'frameId']) {
+for (const identifier of ['workflowId', 'frameId', 'exportId']) {
   assert.match(source, new RegExp(`encodeURIComponent\\(${identifier}\\)`), `missing encodeURIComponent(${identifier})`);
 }
 

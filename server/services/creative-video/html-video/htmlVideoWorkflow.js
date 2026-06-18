@@ -13,6 +13,7 @@ const { normalizeProject } = require('./projectSchema');
 const { validateHtmlVideoProject } = require('./validationGate');
 const projectOrchestrator = require('./projectOrchestrator');
 const editPatchService = require('./editPatchService');
+const { syncRawHtmlFrameTextPatch } = require('./rawHtmlTextPatch');
 const { parseJsonOnlyResponse } = require('./templateInputAgent');
 const defaultVisualQaService = require('../visualQaService');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
@@ -527,7 +528,7 @@ async function parseEditInstruction({ model, project, instruction }) {
       content: [
         '你是 html-video 可编辑工程的编辑补丁生成器。',
         '只能返回 JSON，不要返回 Markdown、HTML、CSS 或 JS。',
-        'JSON 必须是 edit_patch，type 只能是 template_inputs_patch、frame_inputs_patch、narration_patch、caption_patch、duration_patch、replace_frame_template。',
+        'JSON 必须是 edit_patch，type 只能是 template_inputs_patch、frame_inputs_patch、frame_patch、narration_patch、caption_patch、duration_patch、replace_frame_template。',
         '当前 project 摘要：',
         JSON.stringify({
           template_id: project.template_id,
@@ -536,7 +537,10 @@ async function parseEditInstruction({ model, project, instruction }) {
             id: frame.id,
             scene_id: frame.scene_id,
             template_id: frame.template_id,
+            source_mode: frame.source_mode,
             inputs: frame.inputs,
+            visual_text: frame.metadata?.visual_text || {},
+            narration_text: frame.narration_text || '',
             duration_sec: frame.duration_sec,
           })),
         }),
@@ -587,11 +591,20 @@ async function applyEdit({
   }
   const result = editPatchService.applyEditPatch(loaded.project, editPatch);
   if (!result.success) return result;
-  if (loaded.projectDir) await projectStore.saveProject(loaded.projectDir, result.project);
+  let rawHtmlTextPatch = { updated: false, updated_keys: [] };
+  if (loaded.projectDir) {
+    rawHtmlTextPatch = await syncRawHtmlFrameTextPatch({
+      projectDir: loaded.projectDir,
+      project: result.project,
+      editPatch,
+    });
+    await projectStore.saveProject(loaded.projectDir, result.project);
+  }
   return {
     ...result,
     workflow_id: workflowId,
     html_video_project_path: loaded.projectDir,
+    raw_html_text_patch: rawHtmlTextPatch,
   };
 }
 

@@ -75,6 +75,25 @@ function baseProject() {
   assert.equal(result.requires_render, true);
 
   result = applyEditPatch(baseProject(), {
+    type: 'frame_patch',
+    frame_id: 'frame_01',
+    duration_sec: 7,
+    template_id: 'base',
+    inputs: { headline: '组合保存标题' },
+    metadata_patch: { visual_text: { headline: '组合保存标题' } },
+    narration_text: '组合保存旁白',
+  });
+  assert.equal(result.success, true);
+  assert.equal(result.project.frames[0].duration_sec, 7);
+  assert.equal(result.project.timeline.tracks[0].items[0].duration_sec, 7);
+  assert.equal(result.project.frames[0].template_id, 'base');
+  assert.equal(result.project.frames[0].inputs.headline, '组合保存标题');
+  assert.equal(result.project.frames[0].metadata.visual_text.headline, '组合保存标题');
+  assert.equal(result.project.frames[0].narration_text, '组合保存旁白');
+  assert.equal(result.requires_tts, true);
+  assert.equal(result.requires_render, true);
+
+  result = applyEditPatch(baseProject(), {
     type: 'replace_frame_template',
     frame_id: 'frame_01',
     template_id: 'next',

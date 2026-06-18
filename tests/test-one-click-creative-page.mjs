@@ -144,7 +144,7 @@ assert.match(page, /window\.setTimeout/, 'OneClickCreativePage should schedule S
 assert.match(page, /const\s+(fetchFinalWorkflow|refreshFinalWorkflow)\s*=\s*useCallback\(\s*async\s*\(/, 'OneClickCreativePage should define a stable final workflow refresh helper');
 assert.match(page, /(fetchFinalWorkflow|refreshFinalWorkflow)\(\{[\s\S]*workflowId:[\s\S]*event\.workflow_id[\s\S]*taskId:[\s\S]*event\.task_id[\s\S]*generation:/, 'Terminal task events should trigger a guarded final workflow refresh');
 assert.match(page, /task_stream_closed[\s\S]*(fetchFinalWorkflow|refreshFinalWorkflow)\(\{[\s\S]*status:[\s\S]*event\.status/, 'task_stream_closed should trigger final refresh for terminal done or failed statuses');
-assert.match(page, /const json = await api\.getCreativeWorkflow\(targetWorkflowId\);[\s\S]*persistTasks\(prev => upsertTask\(prev, \{/, 'Final workflow refresh should fetch the current workflow and persist the final task snapshot');
+assert.match(page, /const json = await api\.getCreativeWorkflow\(targetWorkflowId\);[\s\S]*persistTasks\(prev => updateTask\(prev, \{/, 'Final workflow refresh should fetch the current workflow and update the final task snapshot without reordering the sidebar');
 assert.match(page, /finalWorkflowRefreshRef/, 'Final workflow refresh should keep a ref token for dedupe and stale guards');
 assert.match(page, /finalWorkflowRefreshRef\.current[\s\S]*(started|inFlight)[\s\S]*(settled|completed)/, 'Final workflow refresh should remember in-flight and settled identity keys to avoid duplicate fetches');
 assert.match(page, /const\s+refreshKey\s*=[\s\S]*targetWorkflowId[\s\S]*expectedTaskId/, 'Final workflow refresh should dedupe by workflow and task identity');
@@ -232,6 +232,12 @@ const routeLeaveEnd = page.indexOf('if (activeTaskRef.current?.workflow_id', rou
 assert.ok(routeLeaveStart > 0 && routeLeaveEnd > routeLeaveStart, 'OneClickCreativePage should handle leaving a creative detail route');
 const routeLeaveBlock = page.slice(routeLeaveStart, routeLeaveEnd);
 assert.match(routeLeaveBlock, /finalWorkflowRefreshRef\.current = null/, 'Leaving the creative detail route should clear pending final workflow refresh tokens');
+const startNewTaskStart = page.indexOf('function startNewTask() {');
+const selectTaskStart = page.indexOf('function selectTask', startNewTaskStart);
+assert.ok(startNewTaskStart > 0 && selectTaskStart > startNewTaskStart, 'OneClickCreativePage should define startNewTask before selectTask');
+const startNewTaskBlock = page.slice(startNewTaskStart, selectTaskStart);
+assert.match(startNewTaskBlock, /setUseResearch\(true\)/, 'Starting a new creative task should restore the default research-enabled state');
+assert.doesNotMatch(startNewTaskBlock, /setUseResearch\(false\)/, 'Starting a new creative task should not turn off research by default');
 assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');
 assert.match(page, /window\.localStorage\.setItem/, 'OneClickCreativePage should save submitted tasks to localStorage');
 assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should automatically enter the created task detail');
@@ -240,6 +246,9 @@ assert.match(page, /useParams/, 'OneClickCreativePage should read the workflow i
 assert.match(page, /navigate\(`\/creative\/\$\{encodeURIComponent\(nextWorkflowId\)\}`/, 'Submitting should route to the created workflow detail URL');
 assert.match(page, /navigate\(`\/creative\/\$\{encodeURIComponent\(task\.workflow_id\)\}`/, 'Selecting a sidebar task should route to its workflow detail URL');
 assert.match(page, /navigate\('\/creative'\)/, 'Starting a new task should route back to the creative home URL');
+assert.match(page, /function updateTask\(tasks, task\) \{[\s\S]*return tasks\.map\(item => item\.workflow_id === task\.workflow_id \? \{ \.\.\.item, \.\.\.task \} : item\);[\s\S]*\}/, 'Task refreshes should update existing sidebar tasks in place so identical titles do not jump');
+assert.match(page, /async function pollWorkflow\(\) \{[\s\S]*persistTasks\(prev => updateTask\(prev, \{/, 'Polling workflow refreshes should preserve the sidebar order');
+assert.doesNotMatch(page, /async function pollWorkflow\(\) \{[\s\S]*persistTasks\(prev => upsertTask\(prev, \{/, 'Polling workflow refreshes should not move the selected task to the top');
 assert.match(page, /const isDetailRoute = Boolean\(routeWorkflowId\)/, 'Creative detail mode should be derived from the route workflow id');
 assert.match(page, /!\s*isDetailRoute\s*&&\s*\(/, 'Creative input composer should be hidden on task detail routes');
 assert.match(page, /sidebarCollapsed/, 'OneClickCreativePage should track collapsed task sidebar state');

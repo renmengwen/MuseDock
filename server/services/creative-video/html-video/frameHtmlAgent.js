@@ -1,3 +1,5 @@
+const fs = require('fs');
+const { resolveSourceEntryPath } = require('./templateRegistry');
 const { summarizeCreativeContextForPrompt } = require('./contentGraphAgent');
 
 function objectOrEmpty(value) {
@@ -60,6 +62,87 @@ function templateStyleReference(template = {}) {
   }, null, 2);
 }
 
+function readTemplateSourceSnippet(template = {}, maxLength = 4000) {
+  if (!template || typeof template !== 'object') return '';
+  const inlineSource = template.sourceHtml || template.source_html || template.templateHtml || template.template_html;
+  if (inlineSource) return compactTemplateSource(inlineSource, maxLength);
+
+  const sourcePath = resolveSourceEntryPath(template);
+  if (!sourcePath || !fs.existsSync(sourcePath)) return '';
+  try {
+    return compactTemplateSource(fs.readFileSync(sourcePath, 'utf8'), maxLength);
+  } catch {
+    return '';
+  }
+}
+
+function compactTemplateSource(source, maxLength = 4000) {
+  const text = String(source || '').trim();
+  if (!text) return '';
+  return text.length > maxLength ? text.slice(0, maxLength).trimEnd() : text;
+}
+
+function extractViewportDimensions(html = '') {
+  const pairs = [];
+  const metaPattern = /<meta\b[^>]*name=["']viewport["'][^>]*>/gi;
+  for (const match of String(html || '').matchAll(metaPattern)) {
+    const tag = match[0];
+    const content = tag.match(/\bcontent=["']([^"']+)["']/i)?.[1] || tag;
+    const width = Number(content.match(/\bwidth\s*=\s*(\d{3,5})\b/i)?.[1]);
+    const height = Number(content.match(/\bheight\s*=\s*(\d{3,5})\b/i)?.[1]);
+    if (Number.isFinite(width) && Number.isFinite(height)) {
+      pairs.push({ source: 'viewport', width, height });
+    }
+  }
+  return pairs;
+}
+
+function isRootCanvasSelector(selector = '') {
+  const normalized = String(selector || '').toLowerCase();
+  if (/(^|[\s,])html([\s,]|$)/.test(normalized)) return true;
+  if (/(^|[\s,])body([\s,]|$)/.test(normalized)) return true;
+  return /[.#-](app|root|stage|scene|frame|canvas|screen|page|video|container)\b/.test(normalized);
+}
+
+function extractCssRootDimensions(html = '') {
+  const pairs = [];
+  const rulePattern = /([^{}]+)\{([^{}]+)\}/g;
+  for (const match of String(html || '').matchAll(rulePattern)) {
+    const selector = match[1] || '';
+    const body = match[2] || '';
+    if (!isRootCanvasSelector(selector)) continue;
+    const width = Number(body.match(/(?:^|[;\s])width\s*:\s*(\d{3,5})px\b/i)?.[1]);
+    const height = Number(body.match(/(?:^|[;\s])height\s*:\s*(\d{3,5})px\b/i)?.[1]);
+    if (Number.isFinite(width) && Number.isFinite(height)) {
+      pairs.push({ source: `css:${selector.trim().replace(/\s+/g, ' ')}`, width, height });
+    }
+  }
+  return pairs;
+}
+
+function validateHtmlTargetResolution(html, target = {}) {
+  const resolution = resolveResolution(target);
+  const expectedWidth = resolution.width;
+  const expectedHeight = resolution.height;
+  const pairs = [
+    ...extractViewportDimensions(html),
+    ...extractCssRootDimensions(html),
+  ];
+  const mismatched = pairs.find(pair => pair.width !== expectedWidth || pair.height !== expectedHeight);
+  if (!mismatched) return { success: true };
+  const reversed = mismatched.width === expectedHeight && mismatched.height === expectedWidth;
+  return {
+    success: false,
+    message: [
+      `HTML 画幅尺寸不符合目标 ${expectedWidth}x${expectedHeight}。`,
+      `${mismatched.source} 使用 ${mismatched.width}x${mismatched.height}。`,
+      reversed ? `不能使用 ${expectedHeight}x${expectedWidth}，这会把横屏画面裁进竖屏。` : '',
+    ].filter(Boolean).join(''),
+    expected: { width: expectedWidth, height: expectedHeight },
+    actual: { width: mismatched.width, height: mismatched.height, source: mismatched.source },
+  };
+}
+
 function buildFrameHtmlPrompt({
   graph = {},
   node = {},
@@ -72,6 +155,7 @@ function buildFrameHtmlPrompt({
 } = {}) {
   const resolution = resolveResolution(target);
   const adjacent = adjacentSummary(graph, index);
+  const templateSource = readTemplateSourceSnippet(template);
   return [
     '你是 html-video 单帧完整 HTML 生成器。',
     '请输出 exactly one fenced ```html code block 或一个完整 HTML document；不要输出解释、Markdown 说明或 HTML 之外的 prose。',
@@ -85,9 +169,20 @@ function buildFrameHtmlPrompt({
     `下一帧：${adjacent.next || '无'}`,
     '',
     `Target resolution：${resolution.width}x${resolution.height}，画面必须 full-bleed ${resolution.width}x${resolution.height}，不要留白边或浏览器默认 margin。`,
+    `必须按目标尺寸生成 root canvas：meta viewport、html/body 或主舞台容器都必须是 ${resolution.width}x${resolution.height}；不能交换宽高。`,
     '',
-    'Style reference from selected template（只作为视觉风格参考，不要把它当成固定 inputs schema）：',
+    'Selected template metadata（用于理解模板身份、输入语义和适配边界）：',
     templateStyleReference(template),
+    ...(templateSource ? [
+      '',
+      'Template HTML — this is the REQUIRED visual style for THIS frame. Reuse its palette, background, typography, layout structure and animation approach; only swap in this frame text/data. Do NOT invent a different theme:',
+      '```html',
+      templateSource,
+      '```',
+    ] : [
+      '',
+      'Template HTML：未能读取模板源码时，仍必须继承所选模板 metadata 描述的视觉方向和 motion vocabulary，不能退化为静态信息图。',
+    ]),
     '',
     'Source context summary：',
     summarizeCreativeContextForPrompt(creativeContext) || '（无）',
@@ -100,6 +195,11 @@ function buildFrameHtmlPrompt({
     '',
     '硬性要求：',
     '- 生成这一帧的 fresh complete HTML page，包含 <!doctype html>、html、head、body、style；JS 可选但不能依赖外网。',
+    '- Output opens with an animation timeline: define CSS @keyframes/animation, GSAP timeline, or window.__hvPlayAll-driven timeline before the main visual settles.',
+    '- 必须包含可检测的动效实现：CSS animation/@keyframes、GSAP timeline 或 window.__hvPlayAll 三者至少一种；禁止完全静态 HTML。',
+    '- 主体运动必须覆盖标题、主卡片、核心图表、核心对象或关键数据；不要只有角落装饰、背景扫光、微弱脉冲在动。',
+    '- 当前帧长于 6 秒时，必须设计至少 2-3 个 sub-beats，例如入场、数据/观点推进、强调/收束；不要入场后长期静止。',
+    '- 动画节奏要服务当前 frame content，避免无意义漂浮、随机闪烁或只有背景纹理变化。',
     '- 可见文本默认使用中文，技术词、品牌名、文件名可保留英文。',
     '- 可见文本尽量加稳定 data-* 属性，例如 data-frame-id、data-role、data-text-key，便于后续编辑。',
     '- 不要让每一帧都使用相同主布局；相邻帧必须有清晰不同的主视觉、层级或构图。',
@@ -138,11 +238,16 @@ function extractRawHtmlDocument(raw) {
 
 function buildRetryPrompt(args = {}) {
   const resolution = resolveResolution(args.target || {});
+  const validationMessage = compactText(args.validationMessage || args.validation_message || '', 260);
   return [
     '上一次没有返回有效 HTML。只返回一个完整 HTML document，不要解释。',
     `当前帧 id：${args.node?.id || ''}`,
     `目标尺寸：${resolution.width}x${resolution.height}`,
+    validationMessage ? `上一次失败原因：${validationMessage}` : '',
     '必须包含 <!doctype html><html><head><style>...</style></head><body>...</body></html>。',
+    `meta viewport、html/body 或主舞台容器必须使用 ${resolution.width}x${resolution.height}；不能使用 ${resolution.height}x${resolution.width}，不要交换宽高。`,
+    '必须包含 animation timeline：CSS animation/@keyframes、GSAP timeline 或 window.__hvPlayAll 至少一种。',
+    '主体元素必须有明显运动；超过 6 秒的帧必须包含 2-3 个 sub-beats，禁止只有角落闪烁或背景扫光。',
     '不要输出 [object Object]，不要输出无关导航，不要只改底部 caption。',
     '只返回一个完整 HTML。',
   ].join('\n');
@@ -166,12 +271,43 @@ async function generateFrameHtml({ model, ...args } = {}) {
   const first = await callModel(model, firstPrompt);
   if (!first.success) return first;
   const firstExtracted = extractHtmlDocument(first.text);
-  if (firstExtracted.success) return firstExtracted;
+  if (firstExtracted.success) {
+    const validation = validateHtmlTargetResolution(firstExtracted.html, args.target || {});
+    if (validation.success) return firstExtracted;
+    const retry = await callModel(model, buildRetryPrompt({
+      ...args,
+      validationMessage: validation.message,
+    }));
+    if (!retry.success) return retry;
+    const retryExtracted = extractHtmlDocument(retry.text);
+    if (!retryExtracted.success) {
+      return {
+        success: false,
+        message: 'AI 未返回有效 HTML document。',
+        diagnostics: [validation.message, retryExtracted.message].filter(Boolean),
+      };
+    }
+    const retryValidation = validateHtmlTargetResolution(retryExtracted.html, args.target || {});
+    if (retryValidation.success) return retryExtracted;
+    return {
+      success: false,
+      message: 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
+      diagnostics: [validation.message, retryValidation.message].filter(Boolean),
+    };
+  }
 
   const retry = await callModel(model, buildRetryPrompt(args));
   if (!retry.success) return retry;
   const retryExtracted = extractHtmlDocument(retry.text);
-  if (retryExtracted.success) return retryExtracted;
+  if (retryExtracted.success) {
+    const retryValidation = validateHtmlTargetResolution(retryExtracted.html, args.target || {});
+    if (retryValidation.success) return retryExtracted;
+    return {
+      success: false,
+      message: 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
+      diagnostics: [firstExtracted.message, retryValidation.message].filter(Boolean),
+    };
+  }
   return {
     success: false,
     message: 'AI 未返回有效 HTML document。',
@@ -184,4 +320,6 @@ module.exports = {
   extractHtmlDocument,
   generateFrameHtml,
   buildRetryPrompt,
+  readTemplateSourceSnippet,
+  validateHtmlTargetResolution,
 };

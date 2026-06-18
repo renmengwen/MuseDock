@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const agent = require('../server/services/creative-video/html-video/frameHtmlAgent');
 
@@ -67,6 +70,51 @@ assert.match(prompt, /Search \/ GitHub \/ Tech Forums \/ Docs \/ Issues/);
 assert.match(prompt, /\[object Object\]/);
 assert.match(prompt, /不要发明源素材中没有的精确事实/);
 
+const templateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'frame-html-template-'));
+const templateSourcePath = path.join(templateDir, 'source.html');
+fs.writeFileSync(templateSourcePath, [
+  '<!doctype html>',
+  '<html><head><style>',
+  '@keyframes heroEnter { from { transform: translateY(80px); } to { transform: translateY(0); } }',
+  '.hero { animation: heroEnter 900ms ease-out both; }',
+  '</style></head><body><main class="hero">模板源码动效</main></body></html>',
+].join('\n'));
+
+const sourceBackedPrompt = agent.buildFrameHtmlPrompt({
+  graph,
+  node: { ...graph.nodes[0], durationSec: 8 },
+  index: 0,
+  total: 2,
+  target: { resolution: { width: 1920, height: 1080 } },
+  template: {
+    id: 'source_backed_template',
+    name: '带源码模板',
+    description: '模板源码内有主体入场动画。',
+    __dir: templateDir,
+    source_entry: 'source.html',
+    tags: ['motion'],
+    inputs: { examples: [{ headline: '示例' }] },
+  },
+});
+
+assert.match(sourceBackedPrompt, /Template HTML/);
+assert.match(sourceBackedPrompt, /REQUIRED visual style/i);
+assert.match(sourceBackedPrompt, /@keyframes heroEnter/);
+assert.match(sourceBackedPrompt, /模板源码动效/);
+assert.match(sourceBackedPrompt, /opens with an animation timeline/i);
+assert.match(sourceBackedPrompt, /window\.__hvPlayAll|GSAP|@keyframes|animation/);
+assert.match(sourceBackedPrompt, /超过 6 秒|长于 6 秒/);
+assert.match(sourceBackedPrompt, /sub-beats/);
+assert.match(sourceBackedPrompt, /主体/);
+assert.match(sourceBackedPrompt, /禁止只有角落|不要只有角落/);
+
+const retryPrompt = agent.buildRetryPrompt({
+  node: { id: 'scene_01', durationSec: 8 },
+  target: { resolution: { width: 1920, height: 1080 } },
+});
+assert.match(retryPrompt, /animation timeline/i);
+assert.match(retryPrompt, /window\.__hvPlayAll|GSAP|@keyframes|animation/);
+
 const fenced = agent.extractHtmlDocument([
   '说明',
   '```html',
@@ -110,6 +158,66 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   assert.equal(result.success, true);
   assert.equal(calls, 2);
   assert.match(result.html, /data-frame-id/);
+
+  let dimensionCalls = 0;
+  const dimensionResult = await agent.generateFrameHtml({
+    model: {
+      callTextModel: async ({ messages }) => {
+        dimensionCalls += 1;
+        if (dimensionCalls === 1) {
+          return {
+            success: true,
+            text: [
+              '```html',
+              '<!doctype html><html><head>',
+              '<meta name="viewport" content="width=1920,height=1080,initial-scale=1.0">',
+              '<style>html,body{margin:0;width:1920px;height:1080px;overflow:hidden}</style>',
+              '</head><body><main>横屏错误尺寸</main></body></html>',
+              '```',
+            ].join('\n'),
+          };
+        }
+        const retryText = messages[0].content;
+        assert.match(retryText, /1080x1920/);
+        assert.match(retryText, /不要输出 1920x1080|不能使用 1920x1080/);
+        return {
+          success: true,
+          text: [
+            '```html',
+            '<!doctype html><html><head>',
+            '<meta name="viewport" content="width=1080,height=1920,initial-scale=1.0">',
+            '<style>html,body{margin:0;width:1080px;height:1920px;overflow:hidden}</style>',
+            '</head><body><main>竖屏正确尺寸</main></body></html>',
+            '```',
+          ].join('\n'),
+        };
+      },
+    },
+    graph,
+    node: graph.nodes[0],
+    index: 0,
+    total: 2,
+    target: { resolution: { width: 1080, height: 1920 }, aspect_ratio: '9:16' },
+  });
+  assert.equal(dimensionResult.success, true);
+  assert.equal(dimensionCalls, 2);
+  assert.match(dimensionResult.html, /width=1080,height=1920/);
+
+  const dimensionFailed = await agent.generateFrameHtml({
+    model: {
+      callTextModel: async () => ({
+        success: true,
+        text: '<!doctype html><html><head><meta name="viewport" content="width=1920,height=1080"><style>html,body{width:1920px;height:1080px}</style></head><body>bad</body></html>',
+      }),
+    },
+    graph,
+    node: graph.nodes[0],
+    index: 0,
+    total: 2,
+    target: { resolution: { width: 1080, height: 1920 }, aspect_ratio: '9:16' },
+  });
+  assert.equal(dimensionFailed.success, false);
+  assert.match(dimensionFailed.message, /尺寸|画幅/);
 
   const failed = await agent.generateFrameHtml({
     model: { callTextModel: async () => ({ success: true, text: '仍然不是 HTML' }) },

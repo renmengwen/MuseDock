@@ -77,6 +77,45 @@ const qa = require('../server/services/creative-video/visualQaService');
   assert.equal(healthyResult.success, true);
   assert.deepEqual(healthyResult.issues, []);
 
+  const lowMotionFrames = Array.from({ length: 8 }, (_, index) => ({
+    id: `low_motion_${index}`,
+    average_luma: 120 + index,
+    luma_stddev: 45,
+    edge_score: 28,
+    color_variance: 35,
+    fingerprint: `unique_${index}`,
+    motion_from_previous: index === 0 ? null : {
+      mean_abs_diff: 0.35,
+      changed_pixel_ratio: 0.004,
+    },
+  }));
+  const lowMotionResult = qa.analyzeFrameMetrics({
+    frames: lowMotionFrames,
+    contact_sheet_size: 45000,
+  });
+  assert.equal(lowMotionResult.success, false);
+  assert.ok(lowMotionResult.issues.some(issue => issue.code === 'low_motion'));
+  assert.ok(lowMotionResult.metrics.motion_sample_count >= 7);
+
+  const movingFrames = Array.from({ length: 8 }, (_, index) => ({
+    id: `moving_${index}`,
+    average_luma: 120 + index,
+    luma_stddev: 45,
+    edge_score: 28,
+    color_variance: 35,
+    fingerprint: `moving_${index}`,
+    motion_from_previous: index === 0 ? null : {
+      mean_abs_diff: 5.5,
+      changed_pixel_ratio: 0.08,
+    },
+  }));
+  const movingResult = qa.analyzeFrameMetrics({
+    frames: movingFrames,
+    contact_sheet_size: 45000,
+  });
+  assert.equal(movingResult.success, true);
+  assert.ok(!movingResult.issues.some(issue => issue.code === 'low_motion'));
+
   const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'visual-qa-'));
   const outputPath = path.join(projectDir, 'output.mp4');
   await fs.writeFile(outputPath, 'fake video');
@@ -98,6 +137,7 @@ const qa = require('../server/services/creative-video/visualQaService');
   assert.equal(inspected.success, false);
   assert.ok(inspected.issues.some(issue => issue.code === 'too_many_blank_frames'));
   assert.ok(commands.some(call => call.args.includes('rawvideo')));
+  assert.ok(commands.some(call => call.args.includes('fps=2,scale=160:90:force_original_aspect_ratio=decrease,pad=160:90:(ow-iw)/2:(oh-ih)/2')));
   assert.ok(commands.some(call => call.args.includes('contact_sheet.jpg') || String(call.args[call.args.length - 1]).includes('contact_sheet.jpg')));
 
   {

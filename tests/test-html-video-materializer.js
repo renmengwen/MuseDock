@@ -176,9 +176,12 @@ async function createTemplate(rootDir) {
   assert.equal(rawResult.project.frames[0].html_path, 'frames/01-raw.html');
   assert.equal(rawResult.project.frames[0].source_mode, 'raw_html');
   assert.equal(rawResult.project.frames[0].narration_text, 'raw 旁白');
+  assert.equal(rawResult.project.frames[0].captions[0].text, 'raw 旁白');
   assert.equal(rawResult.project.frames[0].metadata.from, 'raw-builder');
-  assert.ok(rawResult.diagnostics.some(item => item.code === 'raw_html_preserved' && item.frame_id === 'raw_01'));
-  assert.equal(await fs.readFile(path.join(rawProjectDir, 'frames/01-raw.html'), 'utf8'), '<!doctype html><html><body>raw</body></html>');
+  assert.ok(rawResult.diagnostics.some(item => item.code === 'raw_html_caption_injected' && item.frame_id === 'raw_01'));
+  const rawHtml = await fs.readFile(path.join(rawProjectDir, 'frames/01-raw.html'), 'utf8');
+  assert.match(rawHtml, /data-role="subtitle-caption"/);
+  assert.match(rawHtml, /raw 旁白/);
 
   console.log('html-video materializer tests passed');
 })();

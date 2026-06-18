@@ -3,6 +3,7 @@ const path = require('path');
 
 const { normalizeProject } = require('./projectSchema');
 const { resolveSourceEntryPath } = require('./templateRegistry');
+const { injectCaptionOverlay, normalizeCaptions } = require('./rawHtmlFrameBuilder');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -91,6 +92,19 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
     const outputPath = resolveProjectPath(projectDir, frame.html_path);
     try {
       await fs.access(outputPath);
+      const html = await fs.readFile(outputPath, 'utf8');
+      const captions = normalizeCaptions(frame, frame.duration_sec);
+      frame.captions = captions;
+      const nextHtml = injectCaptionOverlay(html, captions);
+      if (nextHtml !== html) {
+        await fs.writeFile(outputPath, nextHtml, 'utf8');
+        diagnostics.push({
+          code: 'raw_html_caption_injected',
+          frame_id: frame.id,
+          html_path: toPosixPath(frame.html_path),
+          message: 'raw_html 帧已补充字幕层。',
+        });
+      }
       frame.html_path = toPosixPath(frame.html_path);
       diagnostics.push({
         code: 'raw_html_preserved',

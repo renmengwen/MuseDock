@@ -99,6 +99,19 @@ assert.ok(naturalEdit.includes('编辑已应用，需要重新渲染'), 'natural
 const exportsPanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/ExportsPanel.jsx', 'utf-8');
 assert.ok(exportsPanel.includes('正在导出成片'), 'exports panel should show export loading text');
 assert.ok(exportsPanel.includes('导出成片'), 'exports panel should provide export action');
+assert.ok(exportsPanel.includes('播放'), 'exports panel should provide a playback action for each export record');
+assert.ok(exportsPanel.includes('formatExportTime'), 'exports panel should format export timestamps before rendering');
+assert.match(exportsPanel, /toLocaleString\('zh-CN'/, 'exports panel should render export timestamps in local Chinese format');
+assert.ok(exportsPanel.includes('getExportPlaybackUrl'), 'exports panel should resolve a safe playback URL for exported videos');
+
+const frameInputsPanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/FrameInputsPanel.jsx', 'utf-8');
+assert.match(frameInputsPanel, /duration_sec/, 'FrameInputsPanel should edit html-video duration_sec values returned by the project schema');
+assert.match(frameInputsPanel, /metadata\?\.visual_text\?\.headline/, 'FrameInputsPanel should project raw_html visual headline into the title field');
+assert.match(frameInputsPanel, /frame_patch/, 'FrameInputsPanel should send explicit frame_patch payloads instead of saving the entire frame object');
+
+const projectFramesList = fs.readFileSync('frontend-react/src/components/creative-video-editor/ProjectFramesList.jsx', 'utf-8');
+assert.match(projectFramesList, /duration_sec/, 'ProjectFramesList should display duration_sec values returned by html-video projects');
+assert.match(projectFramesList, /metadata\?\.visual_text\?\.headline/, 'ProjectFramesList should use raw_html visual headline as the frame title');
 
 assert.ok(shell.includes('useHtmlVideoProject'), 'CreativeVideoEditor should try HtmlVideoProject first');
 assert.ok(shell.includes('HtmlVideoProjectEditor'), 'CreativeVideoEditor should render HtmlVideoProjectEditor');

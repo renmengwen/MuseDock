@@ -1737,17 +1737,32 @@ a { color: #fe2c55; text-decoration: none; }
 }
 
 .creative-video-editor-export-item {
-  display: grid;
-  gap: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   border-top: 1px solid #e5e7eb;
   padding-top: 8px;
   font-size: 12px;
   color: #4b5563;
 }
 
+.creative-video-editor-export-summary {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
 .creative-video-editor-export-item strong {
   color: #111827;
   word-break: break-all;
+}
+
+.creative-video-editor-export-play {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
 }
 
 .creative-video-editor-render-versions div {

@@ -1,10 +1,71 @@
 import { useEffect, useState } from 'react';
 
+function objectOrEmpty(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function getFrameDuration(frame) {
+  const duration = Number(frame?.duration_sec ?? frame?.duration);
+  return Number.isFinite(duration) && duration > 0 ? duration : '';
+}
+
+function getFrameTitle(frame) {
+  return frame?.title
+    || frame?.metadata?.visual_text?.headline
+    || frame?.inputs?.headline
+    || frame?.inputs?.title
+    || '';
+}
+
+function getFrameInputs(frame) {
+  const inputs = objectOrEmpty(frame?.inputs);
+  if (Object.keys(inputs).length > 0) return inputs;
+  return objectOrEmpty(frame?.metadata?.visual_text);
+}
+
+function createDraft(frame) {
+  if (!frame) return null;
+  const inputs = getFrameInputs(frame);
+  return {
+    ...frame,
+    title: getFrameTitle(frame),
+    duration_sec: getFrameDuration(frame),
+    inputs,
+    inputsText: JSON.stringify(inputs, null, 2),
+    narration_text: frame.narration_text || '',
+  };
+}
+
+function updateHeadline(inputs, title) {
+  const nextInputs = { ...objectOrEmpty(inputs) };
+  if (title || Object.prototype.hasOwnProperty.call(nextInputs, 'headline')) {
+    nextInputs.headline = title;
+  }
+  return nextInputs;
+}
+
+function buildSavePayload(draft) {
+  const inputs = updateHeadline(draft.inputs, draft.title || '');
+  const payload = {
+    type: 'frame_patch',
+    template_id: draft.template_id || draft.template || '',
+    duration_sec: Number(draft.duration_sec),
+    inputs,
+    narration_text: draft.narration_text || '',
+  };
+  if (draft.source_mode === 'raw_html') {
+    payload.metadata_patch = {
+      visual_text: inputs,
+    };
+  }
+  return payload;
+}
+
 export function FrameInputsPanel({ frame, disabled, onSave, onRenderPreview }) {
-  const [draft, setDraft] = useState(frame || null);
+  const [draft, setDraft] = useState(() => createDraft(frame));
 
   useEffect(() => {
-    setDraft(frame || null);
+    setDraft(createDraft(frame));
   }, [frame]);
 
   if (!draft) {
@@ -17,7 +78,7 @@ export function FrameInputsPanel({ frame, disabled, onSave, onRenderPreview }) {
         <h3>帧字段</h3>
         <div className="creative-video-editor-inline-actions">
           <button type="button" disabled={disabled} onClick={() => onRenderPreview(draft.id)}>渲染单帧预览</button>
-          <button type="button" disabled={disabled} onClick={() => onSave(draft.id, draft)}>保存帧</button>
+          <button type="button" disabled={disabled} onClick={() => onSave(draft.id, buildSavePayload(draft))}>保存帧</button>
         </div>
       </div>
       <label>
@@ -26,23 +87,45 @@ export function FrameInputsPanel({ frame, disabled, onSave, onRenderPreview }) {
       </label>
       <label>
         <span>时长（秒）</span>
-        <input type="number" min="0" step="0.1" value={draft.duration || ''} disabled={disabled} onChange={event => setDraft({ ...draft, duration: Number(event.target.value) || 0 })} />
+        <input type="number" min="0" step="0.1" value={draft.duration_sec || ''} disabled={disabled} onChange={event => setDraft({ ...draft, duration_sec: event.target.value === '' ? '' : Number(event.target.value) })} />
       </label>
       <label>
         <span>标题</span>
-        <input value={draft.title || ''} disabled={disabled} onChange={event => setDraft({ ...draft, title: event.target.value })} />
+        <input
+          value={draft.title || ''}
+          disabled={disabled}
+          onChange={event => {
+            const title = event.target.value;
+            setDraft({
+              ...draft,
+              title,
+              inputs: updateHeadline(draft.inputs, title),
+              inputsText: JSON.stringify(updateHeadline(draft.inputs, title), null, 2),
+            });
+          }}
+        />
+      </label>
+      <label>
+        <span>旁白</span>
+        <textarea
+          value={draft.narration_text || ''}
+          disabled={disabled}
+          rows={3}
+          onChange={event => setDraft({ ...draft, narration_text: event.target.value })}
+        />
       </label>
       <label>
         <span>帧输入 JSON</span>
         <textarea
-          value={JSON.stringify(draft.inputs || {}, null, 2)}
+          value={draft.inputsText}
           disabled={disabled}
           rows={6}
           onChange={event => {
+            const inputsText = event.target.value;
             try {
-              setDraft({ ...draft, inputs: JSON.parse(event.target.value || '{}') });
+              setDraft({ ...draft, inputs: JSON.parse(inputsText || '{}'), inputsText });
             } catch {
-              setDraft({ ...draft, inputsText: event.target.value });
+              setDraft({ ...draft, inputsText });
             }
           }}
         />

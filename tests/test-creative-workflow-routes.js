@@ -401,6 +401,54 @@ async function runRealAppMountTest() {
   }
 }
 
+async function runCreateRouteReturnsBeforeBackgroundResearchSettlesTest() {
+  const app = express();
+  const rootDir = tempRoot();
+  const mediaRoot = path.join(rootDir, 'media');
+  const registry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-background-research',
+  });
+  let resolveResearch;
+  const services = {
+    ...routeWorkflowServices(),
+    researchService: {
+      createResearchContext: async ({ enabled, query, now }) => new Promise(resolve => {
+        resolveResearch = () => resolve(enabled
+          ? { status: 'ready', query, sources: [], summary: '后台研究完成', updated_at: now }
+          : { status: 'disabled', query: '', sources: [], summary: '', updated_at: now });
+      }),
+    },
+  };
+  const service = {
+    createCreativeWorkflow: (payload) => workflows.createCreativeWorkflow(payload, { rootDir, mediaRoot, services }),
+    patchCreativeWorkflowTaskSummary: (workflowId, patch) => workflows.patchCreativeWorkflowTaskSummary(workflowId, patch, { rootDir, services }),
+    runCreativeWorkflow: (workflowId, options = {}) => workflows.runCreativeWorkflow(workflowId, { ...options, rootDir, mediaRoot, services }),
+  };
+
+  app.use(express.json());
+  app.locals.creativeTaskRegistry = registry;
+  app.locals.creativeWorkflows = service;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+  try {
+    const response = await Promise.race([
+      requestJson(server, 'POST', '/api/creative-workflows', {
+        input: '做一期关于 AI 视频生产的知识科普',
+        useResearch: true,
+      }),
+      delay(100).then(() => ({ timedOut: true })),
+    ]);
+    assert.notStrictEqual(response.timedOut, true);
+    assert.strictEqual(response.statusCode, 202);
+    assert.strictEqual(response.body.task_id, 'creative-task-background-research');
+    assert.strictEqual(response.body.research_context.status, 'pending');
+  } finally {
+    resolveResearch?.();
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
 async function runCreateRouteWithCustomWorkflowServiceWithoutRegistryFailsTest() {
   const app = express();
   const workflowId = '202606121200000004';
@@ -669,6 +717,7 @@ async function runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryT
 async function run() {
   await runIsolatedRouterTests();
   await runRealAppMountTest();
+  await runCreateRouteReturnsBeforeBackgroundResearchSettlesTest();
   await runCreateRouteWithCustomWorkflowServiceWithoutRegistryFailsTest();
   await runCreateRouteUsesInjectedRegistryTest();
   await runActiveTaskRouteUsesInjectedRegistryTest();

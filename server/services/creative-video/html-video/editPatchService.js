@@ -52,6 +52,20 @@ function mergePatch(target, patch) {
   };
 }
 
+function mergeDeepPatch(target, patch) {
+  const base = objectOrEmpty(target);
+  const input = objectOrEmpty(patch);
+  const next = { ...base };
+  for (const [key, value] of Object.entries(input)) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      next[key] = mergeDeepPatch(base[key], value);
+    } else {
+      next[key] = value;
+    }
+  }
+  return next;
+}
+
 function markRevision(project, patch, flags) {
   const revision = addRevision(project, {
     summary: patch.summary || 'html-video 编辑已保存。',
@@ -96,6 +110,36 @@ function applyDuration(project, patch) {
   return null;
 }
 
+function applyFramePatch(project, patch, flags) {
+  const frame = findFrame(project, patch.frame_id);
+  if (!frame) return fail(`未找到帧 ${patch.frame_id || ''}。`, 'FRAME_NOT_FOUND');
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'template_id')) {
+    const templateId = String(patch.template_id || '').trim();
+    if (!templateId) return fail('缺少新模板 ID。', 'TEMPLATE_ID_REQUIRED');
+    frame.template_id = templateId;
+  }
+
+  if (patch.patch || patch.inputs) {
+    frame.inputs = mergePatch(frame.inputs, patch.patch || patch.inputs);
+  }
+
+  if (patch.metadata_patch) {
+    frame.metadata = mergeDeepPatch(frame.metadata, patch.metadata_patch);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'narration_text') || Object.prototype.hasOwnProperty.call(patch, 'text')) {
+    frame.narration_text = String(patch.narration_text ?? patch.text ?? '');
+    flags.requires_tts = true;
+  }
+
+  if (patch.duration_sec != null || patch.duration != null) {
+    return applyDuration(project, patch);
+  }
+
+  return null;
+}
+
 function applyEditPatch(project, patch = {}) {
   const edit = objectOrEmpty(patch);
   const safeError = assertPatchSafe(edit);
@@ -125,6 +169,8 @@ function applyEditPatch(project, patch = {}) {
     error = patchCaption(nextProject, edit);
   } else if (edit.type === 'duration_patch') {
     error = applyDuration(nextProject, edit);
+  } else if (edit.type === 'frame_patch') {
+    error = applyFramePatch(nextProject, edit, flags);
   } else if (edit.type === 'replace_frame_template') {
     const frame = findFrame(nextProject, edit.frame_id);
     if (!frame) error = fail(`未找到帧 ${edit.frame_id || ''}。`, 'FRAME_NOT_FOUND');

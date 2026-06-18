@@ -243,6 +243,14 @@ export function useHtmlVideoProject({ workflowId, api }) {
     }
   }, [workflowId, api, setFailure]);
 
+  const getExportPlaybackUrl = useCallback((exportItem) => {
+    const directUrl = exportItem?.url || exportItem?.output_url || exportItem?.playback_url || '';
+    if (directUrl) return directUrl;
+    const exportId = exportItem?.id;
+    if (!workflowId || !exportId || !api?.getHtmlVideoProjectExportFileUrl) return '';
+    return api.getHtmlVideoProjectExportFileUrl(workflowId, exportId);
+  }, [api, workflowId]);
+
   const exportProject = useCallback((payload = {}) => (
     runMutatingAction({
       nextStatus: 'exporting',
@@ -262,6 +270,7 @@ export function useHtmlVideoProject({ workflowId, api }) {
 
   return {
     project,
+    workflowId,
     frames,
     exportsList,
     selectedFrame,
@@ -282,5 +291,6 @@ export function useHtmlVideoProject({ workflowId, api }) {
     regenerateNarration,
     exportProject,
     refreshExports,
+    getExportPlaybackUrl,
   };
 }

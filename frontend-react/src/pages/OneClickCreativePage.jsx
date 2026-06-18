@@ -200,6 +200,13 @@ function upsertTask(tasks, task) {
   return next.slice(0, 30);
 }
 
+function updateTask(tasks, task) {
+  if (!tasks.some(item => item.workflow_id === task.workflow_id)) {
+    return upsertTask(tasks, task);
+  }
+  return tasks.map(item => item.workflow_id === task.workflow_id ? { ...item, ...task } : item);
+}
+
 function CreativeTaskSidebar({ tasks, selectedWorkflowId, sidebarCollapsed, onToggleSidebar, onNewTask, onSelectTask, onDeleteTask }) {
   if (sidebarCollapsed) {
     return (
@@ -673,7 +680,7 @@ export function OneClickCreativePage() {
       const nextStatus = nextWorkflow?.status || (json?.success === false ? 'failed' : terminalStatus);
       const nextMessage = getWorkflowDisplayMessage(nextWorkflow, json?.message || fallbackMessage);
       setWorkflow(nextWorkflow);
-      persistTasks(prev => upsertTask(prev, {
+      persistTasks(prev => updateTask(prev, {
         workflow_id: targetWorkflowId,
         title: prev.find(task => task.workflow_id === targetWorkflowId)?.title || getTaskTitle(nextWorkflow?.creative_context?.input?.raw_text),
         input: prev.find(task => task.workflow_id === targetWorkflowId)?.input || nextWorkflow?.creative_context?.input?.raw_text || '',
@@ -866,7 +873,7 @@ export function OneClickCreativePage() {
     stopTaskStream({ clearStorage: true });
     setInput('');
     setMode('quick');
-    setUseResearch(false);
+    setUseResearch(true);
     setWorkflow(null);
     setWorkflowId('');
     setSelectedWorkflowId('');
@@ -1076,7 +1083,7 @@ export function OneClickCreativePage() {
         const nextStatus = nextWorkflow?.status || (json?.success === false ? 'failed' : 'running');
         const nextMessage = getWorkflowDisplayMessage(nextWorkflow, json?.message);
 
-        persistTasks(prev => upsertTask(prev, {
+        persistTasks(prev => updateTask(prev, {
           workflow_id: workflowId,
           title: prev.find(task => task.workflow_id === workflowId)?.title || getTaskTitle(nextWorkflow?.creative_context?.input?.raw_text),
           status: nextStatus,

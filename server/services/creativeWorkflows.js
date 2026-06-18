@@ -15,6 +15,7 @@ const htmlVideoProjectStore = require('./creative-video/html-video/projectStore'
 const htmlVideoEditPatchService = require('./creative-video/html-video/editPatchService');
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
 const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
+const { syncRawHtmlFrameTextPatch } = require('./creative-video/html-video/rawHtmlTextPatch');
 const { createTemplateRegistry: createHtmlVideoTemplateRegistry } = require('./creative-video/html-video/templateRegistry');
 const { defaultRegistry: defaultCreativeTaskRegistry } = require('./creativeTaskRegistry');
 
@@ -599,12 +600,10 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
   const sourceContext = normalized.data.mode === 'douyin'
     ? createDouyinSourceContext(normalized.data)
     : creativeContext.createTextSourceContext(normalized.data.raw_text);
-  const researchContext = await services.researchService.createResearchContext({
-    enabled: normalized.data.use_research,
-    query: normalized.data.raw_text || normalized.data.aweme_id,
-    now,
-    provider: services.researchProvider,
-  });
+  const researchQuery = normalized.data.raw_text || normalized.data.aweme_id;
+  const researchContext = normalized.data.use_research
+    ? creativeContext.createPendingResearchContext({ query: researchQuery, now })
+    : creativeContext.createDisabledResearchContext({ now });
   const assetContext = creativeContext.createDisabledAssetContext({ now });
   const creative = creativeContext.buildCreativeContext({
     input: normalized.data,
@@ -1062,16 +1061,31 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     return stoppedOrFailed;
   }
 
-  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'research', rootDir, async () => {
-    if (record.research_context?.status === 'failed') {
-      throw new Error(record.research_context.summary || '联网研究失败。');
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'research', rootDir, async ({ reportStage }) => {
+    const inputContext = record.creative_context?.input || record.input || {};
+    const useResearch = inputContext.use_research === true;
+    const query = inputContext.raw_text || inputContext.aweme_id || record.research_context?.query || '';
+    await reportStage(useResearch ? '正在联网研究最新资料...' : '联网研究已关闭，继续下一步。', 20);
+    const nextResearchContext = await services.researchService.createResearchContext({
+      enabled: useResearch,
+      query,
+      now: getNow(services),
+      provider: services.researchProvider,
+    });
+    record.research_context = nextResearchContext;
+    record.creative_context = {
+      ...(record.creative_context || {}),
+      research_context: nextResearchContext,
+    };
+    if (nextResearchContext?.status === 'failed') {
+      throw new Error(nextResearchContext.summary || '联网研究失败。');
     }
     return {
       success: true,
-      message: record.research_context?.status === 'disabled'
+      message: nextResearchContext?.status === 'disabled'
         ? '联网研究已关闭，继续下一步。'
         : '联网研究资料已准备完成。',
-      research_context: record.research_context,
+      research_context: nextResearchContext,
     };
   }, services, taskContext));
   if (stoppedOrFailed) {
@@ -1576,6 +1590,11 @@ async function patchCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, o
     };
   }
 
+  const rawHtmlTextPatch = await syncRawHtmlFrameTextPatch({
+    projectDir,
+    project: result.project,
+    editPatch: payload,
+  });
   const saved = await htmlVideoProjectStore.saveProject(projectDir, result.project);
   return {
     success: true,
@@ -1585,6 +1604,7 @@ async function patchCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, o
     revision: result.revision,
     requires_tts: result.requires_tts,
     requires_render: result.requires_render,
+    raw_html_text_patch: rawHtmlTextPatch,
     message: result.message || 'html-video 工程已保存。',
   };
 }
@@ -1600,9 +1620,21 @@ async function patchHtmlVideoProjectInputs(workflowId, payload = {}, options = {
 
 async function patchHtmlVideoProjectFrame(workflowId, frameId, payload = {}, options = {}) {
   const patch = payload.frame_inputs_patch || payload.patch || payload.inputs || {};
-  const type = payload.duration_sec != null || payload.duration != null
-    ? 'duration_patch'
-    : (payload.type || 'frame_inputs_patch');
+  if (payload.type === 'frame_patch') {
+    return patchCreativeWorkflowHtmlVideoProject(workflowId, {
+      ...payload,
+      type: 'frame_patch',
+      frame_id: frameId,
+      patch,
+      inputs: payload.inputs,
+      summary: payload.summary || '帧字段已保存，需要重新渲染。',
+    }, options);
+  }
+  const type = payload.type || (
+    payload.duration_sec != null || payload.duration != null
+      ? 'duration_patch'
+      : 'frame_inputs_patch'
+  );
   return patchCreativeWorkflowHtmlVideoProject(workflowId, {
     type,
     frame_id: frameId,
@@ -1728,6 +1760,45 @@ async function listHtmlVideoProjectExports(workflowId, options = {}) {
     workflow_id: workflowId,
     html_video_project_path: projectDir,
     exports: Array.isArray(project.exports) ? project.exports : [],
+  };
+}
+
+async function getHtmlVideoProjectExportFile(workflowId, exportId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const safeExportId = safeString(exportId);
+  const exportItem = (Array.isArray(project.exports) ? project.exports : [])
+    .find(item => String(item?.id || '') === safeExportId);
+  if (!exportItem || !exportItem.path) {
+    return {
+      success: false,
+      code: 'EXPORT_NOT_FOUND',
+      workflow_id: workflowId,
+      export_id: safeExportId,
+      message: '未找到导出文件记录。',
+    };
+  }
+  let filePath;
+  try {
+    filePath = htmlVideoProjectStore.resolveProjectPath(projectDir, exportItem.path);
+    const stat = await fsp.stat(filePath);
+    if (!stat.isFile()) throw new Error('not file');
+  } catch {
+    return {
+      success: false,
+      code: 'EXPORT_NOT_FOUND',
+      workflow_id: workflowId,
+      export_id: safeExportId,
+      message: '导出文件不存在或路径无效。',
+    };
+  }
+  return {
+    success: true,
+    workflow_id: workflowId,
+    export_id: safeExportId,
+    export: exportItem,
+    file_path: filePath,
   };
 }
 
@@ -2007,6 +2078,7 @@ module.exports = {
   renderHtmlVideoProject,
   exportHtmlVideoProject,
   listHtmlVideoProjectExports,
+  getHtmlVideoProjectExportFile,
   patchCreativeWorkflowVideoSpec,
   getCreativeWorkflowSceneSpec,
   patchCreativeWorkflowSceneSpec,

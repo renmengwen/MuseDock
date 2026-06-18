@@ -19,6 +19,10 @@ const THRESHOLDS = {
   lowInfoEdgeScore: 8,
   lowInfoColorVariance: 10,
   lowInfoRatio: 0.4,
+  motionMinSamples: 4,
+  lowMotionMeanAbsDiff: 1,
+  lowMotionChangedPixelRatio: 0.015,
+  lowMotionRatio: 0.75,
 };
 
 function ratio(count, total) {
@@ -91,6 +95,27 @@ function addRepeatedFrameIssue(issues, frames, threshold = 0.75) {
   }
 }
 
+function normalizeMotionMetric(frame = {}) {
+  const motion = frame.motion_from_previous || frame.motionFromPrevious || frame.motion || null;
+  if (!motion || typeof motion !== 'object') return null;
+  const meanAbsDiff = Number(motion.mean_abs_diff ?? motion.meanAbsDiff);
+  const changedPixelRatio = Number(motion.changed_pixel_ratio ?? motion.changedPixelRatio);
+  if (!Number.isFinite(meanAbsDiff) || !Number.isFinite(changedPixelRatio)) return null;
+  return {
+    mean_abs_diff: meanAbsDiff,
+    changed_pixel_ratio: changedPixelRatio,
+  };
+}
+
+function median(values) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+}
+
 function withAdditionalIssues(result, { videoInfo, expectedAspectRatio, frames }) {
   const issues = [...(result.issues || [])];
   addAspectIssue(issues, videoInfo, expectedAspectRatio);
@@ -115,12 +140,28 @@ function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
   const lowInformation = frames.filter(frame => (
     isLowInformationFrame(frame)
   )).length;
+  const motionSamples = frames.map(normalizeMotionMetric).filter(Boolean);
+  const lowMotion = motionSamples.filter(motion => (
+    motion.mean_abs_diff < THRESHOLDS.lowMotionMeanAbsDiff
+    && motion.changed_pixel_ratio < THRESHOLDS.lowMotionChangedPixelRatio
+  )).length;
+  const motionMeanAbsDiffValues = motionSamples.map(motion => motion.mean_abs_diff);
+  const motionChangedRatioValues = motionSamples.map(motion => motion.changed_pixel_ratio);
   const metrics = {
     frame_count: total,
     near_white_ratio: ratio(nearWhite, total),
     near_black_ratio: ratio(nearBlack, total),
     blank_ratio: ratio(nearWhite + nearBlack, total),
     low_information_ratio: ratio(lowInformation, total),
+    motion_sample_count: motionSamples.length,
+    low_motion_ratio: ratio(lowMotion, motionSamples.length),
+    mean_motion_abs_diff: motionMeanAbsDiffValues.length
+      ? Math.round((motionMeanAbsDiffValues.reduce((sum, value) => sum + value, 0) / motionMeanAbsDiffValues.length) * 1000) / 1000
+      : 0,
+    median_motion_abs_diff: Math.round(median(motionMeanAbsDiffValues) * 1000) / 1000,
+    mean_motion_changed_pixel_ratio: motionChangedRatioValues.length
+      ? Math.round((motionChangedRatioValues.reduce((sum, value) => sum + value, 0) / motionChangedRatioValues.length) * 10000) / 10000
+      : 0,
     contact_sheet_size,
   };
   const issues = [];
@@ -151,6 +192,19 @@ function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
       code: 'too_many_low_information_frames',
       message: '低信息量帧比例过高。',
       value: metrics.low_information_ratio,
+    });
+  }
+  if (
+    metrics.motion_sample_count >= THRESHOLDS.motionMinSamples
+    && metrics.low_motion_ratio >= THRESHOLDS.lowMotionRatio
+  ) {
+    issues.push({
+      code: 'low_motion',
+      message: `场景内运动强度过低：${(metrics.low_motion_ratio * 100).toFixed(0)}% 的相邻抽帧变化不足。`,
+      value: metrics.low_motion_ratio,
+      mean_abs_diff: metrics.mean_motion_abs_diff,
+      changed_pixel_ratio: metrics.mean_motion_changed_pixel_ratio,
+      sample_count: metrics.motion_sample_count,
     });
   }
 
@@ -272,6 +326,32 @@ function readRgbFrameMetrics(buffer, width, height, id) {
   };
 }
 
+function measureRgbFrameMotion(previous, current, width, height) {
+  if (!previous || !current) return null;
+  const pixels = Math.min(
+    Math.floor(previous.length / 3),
+    Math.floor(current.length / 3),
+    width * height,
+  );
+  if (pixels <= 0) return null;
+  let totalDiff = 0;
+  let changedPixels = 0;
+  for (let i = 0; i < pixels; i += 1) {
+    const offset = i * 3;
+    const diff = (
+      Math.abs((current[offset] || 0) - (previous[offset] || 0))
+      + Math.abs((current[offset + 1] || 0) - (previous[offset + 1] || 0))
+      + Math.abs((current[offset + 2] || 0) - (previous[offset + 2] || 0))
+    ) / 3;
+    totalDiff += diff;
+    if (diff >= 2) changedPixels += 1;
+  }
+  return {
+    mean_abs_diff: Math.round((totalDiff / pixels) * 1000) / 1000,
+    changed_pixel_ratio: Math.round((changedPixels / pixels) * 10000) / 10000,
+  };
+}
+
 async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand, width = 160, height = 90 }) {
   const rawPath = path.join(workDir, 'frames.rgb');
   await fsp.mkdir(workDir, { recursive: true });
@@ -281,9 +361,9 @@ async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runComma
     '-i',
     videoPath,
     '-vf',
-    `fps=1,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
+    `fps=2,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
     '-frames:v',
-    '12',
+    '24',
     '-f',
     'rawvideo',
     '-pix_fmt',
@@ -299,8 +379,14 @@ async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runComma
   const raw = await fsp.readFile(rawPath);
   const frameSize = width * height * 3;
   const frames = [];
+  let previousFrameBuffer = null;
   for (let offset = 0, index = 0; offset + frameSize <= raw.length; offset += frameSize, index += 1) {
-    frames.push(readRgbFrameMetrics(raw.subarray(offset, offset + frameSize), width, height, `frame_${index}`));
+    const frameBuffer = raw.subarray(offset, offset + frameSize);
+    const frame = readRgbFrameMetrics(frameBuffer, width, height, `frame_${index}`);
+    const motion = measureRgbFrameMotion(previousFrameBuffer, frameBuffer, width, height);
+    if (motion) frame.motion_from_previous = motion;
+    frames.push(frame);
+    previousFrameBuffer = frameBuffer;
   }
   return { success: true, frames };
 }

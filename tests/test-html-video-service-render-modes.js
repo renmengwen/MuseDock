@@ -7,6 +7,7 @@ const {
   getWorkflowPath,
   renderHtmlVideoProject,
   exportHtmlVideoProject,
+  getHtmlVideoProjectExportFile,
 } = require('../server/services/creativeWorkflows');
 
 const WORKFLOW_ID = '202606171200000001';
@@ -39,7 +40,10 @@ function createFixture() {
     template_inputs: {},
     frames: [{ id: 'frame_01', scene_id: 'scene_01', template_id: 'simple', inputs: {} }],
     timeline: { tracks: [] },
+    exports: [{ id: 'export_001', path: 'exports/output.mp4', format: 'mp4' }],
   });
+  fs.mkdirSync(path.join(projectDir, 'exports'), { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'exports', 'output.mp4'), 'fake mp4');
   return { rootDir, projectDir };
 }
 
@@ -102,6 +106,14 @@ function createFixture() {
   const exported = await exportHtmlVideoProject(WORKFLOW_ID, { skip_render: true }, options);
   assert.equal(exported.success, true);
   assert.deepEqual(calls.slice(-1), [['export', false]]);
+
+  const exportFile = await getHtmlVideoProjectExportFile(WORKFLOW_ID, 'export_001', { rootDir });
+  assert.equal(exportFile.success, true);
+  assert.equal(exportFile.file_path, path.join(projectDir, 'exports', 'output.mp4'));
+
+  const missingExportFile = await getHtmlVideoProjectExportFile(WORKFLOW_ID, 'missing_export', { rootDir });
+  assert.equal(missingExportFile.success, false);
+  assert.match(missingExportFile.message, /未找到导出文件记录/);
 
   console.log('html-video service render mode tests passed');
 })();

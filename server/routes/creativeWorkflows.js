@@ -47,7 +47,12 @@ function getMessage(result, fallback) {
 }
 
 function getStatusCode(result) {
-  if (result?.code === 'NOT_FOUND' || result?.code === 'NO_SCENE_SPEC' || result?.code === 'NO_HTML_VIDEO_PROJECT') return 404;
+  if (
+    result?.code === 'NOT_FOUND'
+    || result?.code === 'NO_SCENE_SPEC'
+    || result?.code === 'NO_HTML_VIDEO_PROJECT'
+    || result?.code === 'EXPORT_NOT_FOUND'
+  ) return 404;
   return 400;
 }
 
@@ -366,6 +371,35 @@ router.get('/:workflow_id/html-video-project/exports', async (req, res) => {
       success: false,
       workflow_id: workflowId,
       message: `读取导出记录失败：${error.message}`,
+    });
+  }
+});
+
+router.get('/:workflow_id/html-video-project/exports/:export_id/file', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+  const exportId = safeString(req.params.export_id);
+  if (!exportId) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, message: '导出记录 ID 无效。' });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.getHtmlVideoProjectExportFile(workflowId, exportId);
+    if (!result || result.success === false) {
+      const message = getMessage(result, '读取导出文件失败。');
+      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, export_id: exportId, message });
+    }
+    return res.sendFile(result.file_path);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      export_id: exportId,
+      message: `读取导出文件失败：${error.message}`,
     });
   }
 });

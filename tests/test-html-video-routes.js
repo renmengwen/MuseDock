@@ -1,6 +1,9 @@
 const assert = require('assert/strict');
 const express = require('express');
+const fs = require('fs/promises');
 const http = require('http');
+const os = require('os');
+const path = require('path');
 
 const creativeWorkflowsRouter = require('../server/routes/creativeWorkflows');
 
@@ -25,6 +28,25 @@ async function requestJson(server, method, pathName, body) {
   });
 }
 
+async function requestText(server, method, pathName) {
+  const { port } = server.address();
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathName,
+      method,
+    }, res => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { text += chunk; });
+      res.on('end', () => resolve({ statusCode: res.statusCode, body: text, contentType: res.headers['content-type'] || '' }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 async function listen(app) {
   return new Promise(resolve => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server));
@@ -34,6 +56,9 @@ async function listen(app) {
 (async () => {
   const workflowId = '202606170000000001';
   const calls = [];
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-export-route-'));
+  const exportFilePath = path.join(tmpDir, 'output.mp4');
+  await fs.writeFile(exportFilePath, 'fake mp4');
   const fakeService = {
     getCreativeWorkflowHtmlVideoProject: async id => {
       calls.push(['get', id]);
@@ -104,6 +129,13 @@ async function listen(app) {
       calls.push(['exports', id]);
       return { success: true, workflow_id: id, exports: [{ id: 'export_001', path: 'exports/output.mp4' }] };
     },
+    getHtmlVideoProjectExportFile: async (id, exportId) => {
+      calls.push(['export-file', id, exportId]);
+      if (exportId !== 'export_001') {
+        return { success: false, code: 'EXPORT_NOT_FOUND', workflow_id: id, export_id: exportId, message: '未找到导出文件记录。' };
+      }
+      return { success: true, workflow_id: id, export_id: exportId, file_path: exportFilePath };
+    },
   };
 
   const app = express();
@@ -161,6 +193,12 @@ async function listen(app) {
     const exportsResult = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/html-video-project/exports`);
     assert.equal(exportsResult.statusCode, 200);
     assert.equal(exportsResult.body.exports.length, 1);
+    const exportFile = await requestText(server, 'GET', `/api/creative-workflows/${workflowId}/html-video-project/exports/export_001/file`);
+    assert.equal(exportFile.statusCode, 200);
+    assert.equal(exportFile.body, 'fake mp4');
+    const missingExportFile = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/html-video-project/exports/missing_export/file`);
+    assert.equal(missingExportFile.statusCode, 404);
+    assert.match(missingExportFile.body.message, /未找到导出文件记录/);
 
     const reservedRequests = [
       ['PATCH', 'timeline'],
@@ -182,11 +220,13 @@ async function listen(app) {
     assert.equal(invalid.statusCode, 400);
     assert.match(invalid.body.message, /创作任务 ID 无效/);
 
-    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'render', 'export', 'exports']);
+    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'render', 'export', 'exports', 'export-file', 'export-file']);
     assert.deepEqual(calls.filter(item => item[0] === 'render').map(item => [item[2], item[3]]), [['materialize', ''], ['frame', 'frame_01']]);
     assert.deepEqual(calls.find(item => item[0] === 'export'), ['export', workflowId, false]);
+    assert.deepEqual(calls.find(item => item[0] === 'export-file'), ['export-file', workflowId, 'export_001']);
   } finally {
     await new Promise(resolve => server.close(resolve));
+    await fs.rm(tmpDir, { recursive: true, force: true });
   }
 
   console.log('html-video route tests passed');
