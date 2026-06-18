@@ -7,7 +7,7 @@ const path = require('path');
 
 const creativeWorkflowsRouter = require('../server/routes/creativeWorkflows');
 const workflows = require('../server/services/creativeWorkflows');
-const { createCreativeTaskRegistry } = require('../server/services/creativeTaskRegistry');
+const { createCreativeTaskRegistry, defaultRegistry } = require('../server/services/creativeTaskRegistry');
 
 async function requestJson(server, method, pathName, body) {
   const { port } = server.address();
@@ -431,6 +431,38 @@ async function runActiveTaskRouteUsesInjectedRegistryTest() {
   }
 }
 
+async function runActiveTaskRouteWithCustomWorkflowServiceDoesNotUseDefaultRegistryTest() {
+  const app = express();
+  const workflowId = '202606121200000008';
+  const defaultTaskId = defaultRegistry.createDetachedTask({
+    workflowId,
+    operationId: 'workflow-op-default-should-not-leak',
+    kind: 'creative_workflow',
+  });
+
+  app.use(express.json());
+  app.locals.creativeWorkflows = {
+    getCreativeWorkflow: async id => ({
+      success: true,
+      data: { workflow_id: id },
+    }),
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const activeResponse = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/tasks/active`);
+    assert.strictEqual(activeResponse.statusCode, 200);
+    assert.strictEqual(activeResponse.body.success, true);
+    assert.strictEqual(activeResponse.body.workflow_id, workflowId);
+    assert.strictEqual(activeResponse.body.active_task, null);
+  } finally {
+    defaultRegistry.markDeleted(defaultTaskId, '测试清理默认注册表任务。');
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
 async function runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest() {
   const app = express();
   const workflowId = '202606121200000007';
@@ -466,6 +498,7 @@ async function run() {
   await runRealAppMountTest();
   await runDefaultTaskServiceInjectionTest();
   await runActiveTaskRouteUsesInjectedRegistryTest();
+  await runActiveTaskRouteWithCustomWorkflowServiceDoesNotUseDefaultRegistryTest();
   await runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest();
   await runGetWorkflowUsesActiveRegistryTest();
   await runSseWriteBackpressureKeepsSubscriptionTest();

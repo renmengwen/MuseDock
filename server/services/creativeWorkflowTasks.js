@@ -410,11 +410,11 @@ async function subscribeCreativeWorkflowEvents({
 }
 
 async function getActiveCreativeWorkflowTask(workflowId, options = {}) {
-  const registry = options.registry || defaultRegistry;
+  const registry = options.registry === null ? null : (options.registry || defaultRegistry);
   return {
     success: true,
     workflow_id: String(workflowId),
-    active_task: registry.activeTaskForWorkflow(workflowId),
+    active_task: registry ? registry.activeTaskForWorkflow(workflowId) : null,
   };
 }
 
