@@ -356,7 +356,7 @@ async function runRealAppMountTest() {
   }
 }
 
-async function runDefaultTaskServiceInjectionTest() {
+async function runCreateRouteWithCustomWorkflowServiceWithoutRegistryFailsTest() {
   const app = express();
   const workflowId = '202606121200000004';
   const patchCalls = [];
@@ -375,7 +375,7 @@ async function runDefaultTaskServiceInjectionTest() {
     },
     runCreativeWorkflow: async (id, options) => {
       runCalls.push({ id, hasTaskContext: Boolean(options.taskContext) });
-      return { success: true, workflow_id: id, status: 'done', message: '完成' };
+      return new Promise(() => {});
     },
   };
 
@@ -386,16 +386,22 @@ async function runDefaultTaskServiceInjectionTest() {
   const server = await listen(app);
 
   try {
+    assert.strictEqual(defaultRegistry.activeTaskForWorkflow(workflowId), null);
     const createResponse = await requestJson(server, 'POST', '/api/creative-workflows', {
-      input: '使用 route service 启动后台任务',
+      input: '自定义 workflow service 未注入 registry 时拒绝创建后台任务',
     });
-    assert.strictEqual(createResponse.statusCode, 202);
-    assert.strictEqual(createResponse.body.success, true);
-    assert.ok(createResponse.body.task_id);
-    await waitFor(() => assert.ok(patchCalls.length >= 1));
-    assert.strictEqual(patchCalls[0].id, workflowId);
-    await waitFor(() => assert.deepStrictEqual(runCalls, [{ id: workflowId, hasTaskContext: true }]));
+    assert.strictEqual(createResponse.statusCode, 500);
+    assert.strictEqual(createResponse.body.success, false);
+    assert.strictEqual(createResponse.body.workflow_id, workflowId);
+    assert.match(createResponse.body.message, /后台创作任务注册表未配置/);
+    assert.strictEqual(defaultRegistry.activeTaskForWorkflow(workflowId), null);
+    assert.deepStrictEqual(patchCalls, []);
+    assert.deepStrictEqual(runCalls, []);
   } finally {
+    const leakedTask = defaultRegistry.activeTaskForWorkflow(workflowId);
+    if (leakedTask) {
+      defaultRegistry.markDeleted(leakedTask.task_id, '测试清理默认注册表任务。');
+    }
     await new Promise(resolve => server.close(resolve));
   }
 }
@@ -588,7 +594,7 @@ async function runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryT
 async function run() {
   await runIsolatedRouterTests();
   await runRealAppMountTest();
-  await runDefaultTaskServiceInjectionTest();
+  await runCreateRouteWithCustomWorkflowServiceWithoutRegistryFailsTest();
   await runCreateRouteUsesInjectedRegistryTest();
   await runActiveTaskRouteUsesInjectedRegistryTest();
   await runActiveTaskRouteWithCustomWorkflowServiceDoesNotUseDefaultRegistryTest();

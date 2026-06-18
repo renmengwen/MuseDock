@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const workflows = require('../server/services/creativeWorkflows');
-const { createCreativeTaskRegistry } = require('../server/services/creativeTaskRegistry');
+const { createCreativeTaskRegistry, defaultRegistry } = require('../server/services/creativeTaskRegistry');
 const workflowTasks = require('../server/services/creativeWorkflowTasks');
 
 const WORKFLOW_ID = '202606180000000001';
@@ -42,6 +42,47 @@ async function waitFor(assertion, timeoutMs = 1000) {
 }
 
 (async () => {
+  {
+    const nullRegistryRootDir = tempRoot();
+    await workflows.createCreativeWorkflow({ input: '显式空注册表测试', useResearch: false }, {
+      rootDir: nullRegistryRootDir,
+      services: services(),
+    });
+    const patchCalls = [];
+    const runCalls = [];
+    try {
+      assert.equal(defaultRegistry.activeTaskForWorkflow(WORKFLOW_ID), null);
+      const startedWithoutRegistry = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+        rootDir: nullRegistryRootDir,
+        registry: null,
+        services: {
+          creativeWorkflows: {
+            patchCreativeWorkflowTaskSummary: async (workflowId, patch) => {
+              patchCalls.push({ workflowId, patch });
+              return { success: true, workflow_id: workflowId };
+            },
+            runCreativeWorkflow: async workflowId => {
+              runCalls.push(workflowId);
+              return new Promise(() => {});
+            },
+          },
+        },
+      });
+
+      assert.equal(startedWithoutRegistry.success, false);
+      assert.equal(startedWithoutRegistry.workflow_id, WORKFLOW_ID);
+      assert.match(startedWithoutRegistry.message, /后台创作任务注册表未配置/);
+      assert.equal(defaultRegistry.activeTaskForWorkflow(WORKFLOW_ID), null);
+      assert.deepEqual(patchCalls, []);
+      assert.deepEqual(runCalls, []);
+    } finally {
+      const leakedTask = defaultRegistry.activeTaskForWorkflow(WORKFLOW_ID);
+      if (leakedTask) {
+        defaultRegistry.markDeleted(leakedTask.task_id, '测试清理默认注册表任务。');
+      }
+    }
+  }
+
   const rootDir = tempRoot();
   await workflows.createCreativeWorkflow({ input: '测试后台任务', useResearch: false }, { rootDir, services: services() });
   const registry = createCreativeTaskRegistry({

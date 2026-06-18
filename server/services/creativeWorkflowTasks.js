@@ -174,7 +174,14 @@ async function emitAndPersistTaskEvent({
 
 async function startCreativeWorkflowTask(workflowId, options = {}) {
   const rootDir = options.rootDir;
-  const registry = options.registry || defaultRegistry;
+  const registry = options.registry === null ? null : (options.registry || defaultRegistry);
+  if (registry === null) {
+    return {
+      success: false,
+      workflow_id: String(workflowId),
+      message: '后台创作任务注册表未配置，无法启动创作任务。',
+    };
+  }
   const creativeWorkflows = {
     ...defaultCreativeWorkflows,
     ...(options.services?.creativeWorkflows || {}),
