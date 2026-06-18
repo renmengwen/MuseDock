@@ -54,9 +54,9 @@ const assetStore = require('../server/services/creative-video/html-video/assetSt
     },
   });
 
-  await store.saveProject(projectDir, project);
+  const savedProject = await store.saveProject(projectDir, project);
   const loaded = await store.loadProject(projectDir);
-  assert.deepEqual(loaded, project);
+  assert.deepEqual(loaded, savedProject);
   await assert.rejects(
     fs.access(path.join(projectDir, 'project.json.tmp')),
     /ENOENT/
