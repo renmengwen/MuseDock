@@ -473,9 +473,7 @@ router.post('/:workflow_id/events', async (req, res) => {
       }
       const wrote = res.write(formatSseEvent(event));
       if (wrote === false) {
-        streamWriteFailed = true;
-        cleanup({ end: true });
-        return false;
+        return true;
       }
       return true;
     } catch {
@@ -485,7 +483,6 @@ router.post('/:workflow_id/events', async (req, res) => {
     }
   };
 
-  req.on('close', () => cleanup());
   res.on('close', () => cleanup());
   res.on('error', () => cleanup());
   res.on('finish', () => cleanup());

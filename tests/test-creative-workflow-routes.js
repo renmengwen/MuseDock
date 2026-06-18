@@ -67,6 +67,70 @@ async function requestSse(server, pathName, body) {
   });
 }
 
+function startSse(server, pathName, body) {
+  const { port } = server.address();
+  const client = {
+    req: null,
+    response: null,
+    destroy: () => client.req?.destroy(),
+  };
+  client.response = new Promise((resolve, reject) => {
+    let settled = false;
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathName,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+    }, res => {
+      settled = true;
+      let text = '';
+      let endSettled = false;
+      res.setEncoding('utf8');
+      const ended = new Promise(resolveEnded => {
+        const finish = closed => {
+          if (endSettled) return;
+          endSettled = true;
+          resolveEnded({
+            statusCode: res.statusCode,
+            body: text,
+            headers: res.headers,
+            closed,
+          });
+        };
+        res.on('data', chunk => {
+          text += chunk;
+        });
+        res.on('end', () => finish(false));
+        res.on('close', () => finish(true));
+      });
+      resolve({
+        req,
+        res,
+        get body() {
+          return text;
+        },
+        ended,
+        destroy: () => req.destroy(),
+      });
+    });
+    client.req = req;
+    req.on('error', error => {
+      if (!settled) reject(error);
+    });
+    req.write(JSON.stringify(body || {}));
+    req.end();
+  });
+  return client;
+}
+
+async function openSse(server, pathName, body) {
+  return startSse(server, pathName, body).response;
+}
+
 async function listen(app) {
   return new Promise(resolve => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server));
@@ -85,6 +149,10 @@ async function waitFor(assertion, timeoutMs = 1000) {
     }
   }
   throw lastError;
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function tempRoot() {
@@ -337,6 +405,8 @@ async function run() {
   await runRealAppMountTest();
   await runDefaultTaskServiceInjectionTest();
   await runGetWorkflowUsesActiveRegistryTest();
+  await runSseWriteBackpressureKeepsSubscriptionTest();
+  await runSseRequestCloseKeepsSubscriptionTest();
   await runSseRouteCleanupStaticTest();
   await runEditorRouteTests();
 }
@@ -419,6 +489,144 @@ async function runSseRouteCleanupStaticTest() {
   assert.match(routeSource, /res\.on\('error'/);
   assert.match(routeSource, /res\.on\('finish'/);
   assert.match(routeSource, /function cleanup|const cleanup/);
+}
+
+async function runSseRequestCloseKeepsSubscriptionTest() {
+  const app = express();
+  const workflowId = '202606141200000001';
+  let unsubscribeCount = 0;
+  let capturedWriteEvent = null;
+  let capturedOnClose = null;
+
+  app.use(express.json());
+  app.use((req, res, next) => {
+    const shouldEmitRequestClose = req.originalUrl === `/api/creative-workflows/${workflowId}/events`;
+    next();
+    if (shouldEmitRequestClose) {
+      setImmediate(() => {
+        assert.strictEqual(req.complete, true);
+        req.emit('close');
+      });
+    }
+  });
+  app.locals.creativeWorkflowTasks = {
+    subscribeCreativeWorkflowEvents: async ({ writeEvent, onClose }) => {
+      capturedWriteEvent = writeEvent;
+      capturedOnClose = onClose;
+      writeEvent({
+        seq: 1,
+        type: 'stage_progress',
+        workflow_id: workflowId,
+        task_id: 'creative-task-sse-close',
+        message: '连接已建立。',
+      });
+      return {
+        success: true,
+        unsubscribe: () => {
+          unsubscribeCount += 1;
+        },
+      };
+    },
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+  let sse = null;
+
+  try {
+    sse = await openSse(server, `/api/creative-workflows/${workflowId}/events`, {
+      task_id: 'creative-task-sse-close',
+      since_seq: 0,
+    });
+    await waitFor(() => assert.strictEqual(unsubscribeCount, 0));
+    await delay(20);
+    assert.strictEqual(unsubscribeCount, 0);
+
+    const wrote = capturedWriteEvent({
+      seq: 2,
+      type: 'stage_progress',
+      workflow_id: workflowId,
+      task_id: 'creative-task-sse-close',
+      message: '后续事件仍可写入。',
+    });
+    assert.strictEqual(wrote, true);
+    await waitFor(() => assert.match(sse.body, /后续事件仍可写入/));
+
+    capturedOnClose();
+    const ended = await sse.ended;
+    assert.strictEqual(ended.statusCode, 200);
+    assert.strictEqual(unsubscribeCount, 1);
+  } finally {
+    if (sse) sse.destroy();
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runSseWriteBackpressureKeepsSubscriptionTest() {
+  const app = express();
+  const workflowId = '202606141200000002';
+  let unsubscribeCount = 0;
+  let capturedWriteEvent = null;
+  let capturedOnClose = null;
+
+  app.use(express.json());
+  app.use((req, res, next) => {
+    const originalWrite = res.write.bind(res);
+    res.write = (chunk, encoding, callback) => {
+      originalWrite(chunk, encoding, callback);
+      return false;
+    };
+    next();
+  });
+  app.locals.creativeWorkflowTasks = {
+    subscribeCreativeWorkflowEvents: async ({ writeEvent, onClose }) => {
+      capturedWriteEvent = writeEvent;
+      capturedOnClose = onClose;
+      return {
+        success: true,
+        unsubscribe: () => {
+          unsubscribeCount += 1;
+        },
+      };
+    },
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+  let sseClient = null;
+  let sse = null;
+
+  try {
+    sseClient = startSse(server, `/api/creative-workflows/${workflowId}/events`, {
+      task_id: 'creative-task-sse-backpressure',
+      since_seq: 0,
+    });
+    const ssePromise = sseClient.response;
+    await waitFor(() => assert.ok(capturedWriteEvent));
+
+    const wrote = capturedWriteEvent({
+      seq: 1,
+      type: 'stage_progress',
+      workflow_id: workflowId,
+      task_id: 'creative-task-sse-backpressure',
+      message: '写入遇到背压但连接保持。',
+    });
+    assert.strictEqual(wrote, true);
+
+    sse = await ssePromise;
+    await waitFor(() => assert.match(sse.body, /写入遇到背压但连接保持/));
+    await delay(20);
+    assert.strictEqual(unsubscribeCount, 0);
+
+    capturedOnClose();
+    const ended = await sse.ended;
+    assert.strictEqual(ended.statusCode, 200);
+    assert.strictEqual(unsubscribeCount, 1);
+  } finally {
+    if (sse) sse.destroy();
+    if (sseClient) sseClient.destroy();
+    await new Promise(resolve => server.close(resolve));
+  }
 }
 
 async function runEditorRouteTests() {
