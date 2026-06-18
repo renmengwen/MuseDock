@@ -118,6 +118,12 @@ function createCreativeTaskRegistry(options = {}) {
     task.updated_at = taskEvent.time;
     trimEvents(task);
 
+    notifySubscribers(task, taskEvent);
+
+    return taskEvent;
+  }
+
+  function notifySubscribers(task, taskEvent) {
     for (const subscriber of task.subscribers) {
       try {
         subscriber(taskEvent);
@@ -125,8 +131,6 @@ function createCreativeTaskRegistry(options = {}) {
         task.subscribers.delete(subscriber);
       }
     }
-
-    return taskEvent;
   }
 
   function markDone(taskId, message = '后台创作任务已完成。') {
@@ -179,6 +183,72 @@ function createCreativeTaskRegistry(options = {}) {
       type: 'workflow_deleted',
       message,
     });
+  }
+
+  async function markTerminalAfter(taskId, terminal = {}, beforeEmit) {
+    const task = tasks.get(taskId);
+    if (!task || task.status !== 'running') {
+      return null;
+    }
+
+    const taskEvent = createTaskEvent({
+      ...terminal.event,
+      seq: nextSeq(),
+      task_id: task.task_id,
+      workflow_id: task.workflow_id,
+      operation_id: task.operation_id,
+      now,
+    });
+
+    if (typeof beforeEmit === 'function') {
+      await beforeEmit(taskEvent);
+    }
+
+    task.status = terminal.status;
+    task.ended_at = taskEvent.time;
+    task.updated_at = taskEvent.time;
+    if (terminal.status === 'failed') {
+      task.error = taskEvent.message || getErrorMessage(terminal.error);
+    }
+
+    task.events.push(taskEvent);
+    trimEvents(task);
+    notifySubscribers(task, taskEvent);
+    return taskEvent;
+  }
+
+  function markDoneAfter(taskId, message = '后台创作任务已完成。', beforeEmit) {
+    return markTerminalAfter(taskId, {
+      status: 'done',
+      event: {
+        type: 'task_done',
+        progress: 100,
+        message,
+      },
+    }, beforeEmit);
+  }
+
+  function markFailedAfter(taskId, error, beforeEmit) {
+    const message = getErrorMessage(error);
+    return markTerminalAfter(taskId, {
+      status: 'failed',
+      error,
+      event: {
+        type: 'task_failed',
+        message,
+        data: { error: message },
+      },
+    }, beforeEmit);
+  }
+
+  function markDeletedAfter(taskId, message = '创作任务已停止并删除。', beforeEmit) {
+    return markTerminalAfter(taskId, {
+      status: 'deleted',
+      event: {
+        type: 'workflow_deleted',
+        message,
+      },
+    }, beforeEmit);
   }
 
   function createTask({ workflowId, operationId, kind = 'creative_workflow', runner } = {}) {
@@ -315,6 +385,9 @@ function createCreativeTaskRegistry(options = {}) {
     markDone,
     markFailed,
     markDeleted,
+    markDoneAfter,
+    markFailedAfter,
+    markDeletedAfter,
     subscribe,
     getTask,
     activeTaskForWorkflow,

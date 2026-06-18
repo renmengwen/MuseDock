@@ -113,6 +113,14 @@ async function patchTaskSummaryOrEmitFailure({
   }
 }
 
+async function patchTerminalTaskSummaryOrThrow(options = {}) {
+  const persisted = await patchTaskSummaryOrEmitFailure(options);
+  if (!persisted?.success) {
+    throw new Error(persisted?.message || '更新创作任务终态失败。');
+  }
+  return persisted;
+}
+
 async function emitAndPersistTaskEvent({
   registry,
   taskId,
@@ -221,8 +229,26 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
       });
       if (result && result.success === false && result.status === 'deleted') {
         await Promise.allSettled([...pendingEventWrites]);
-        registry.markDeleted(taskId, result.message || '创作任务已停止并删除。')
-          || registry.emit(taskId, { type: 'workflow_deleted', message: result.message || '创作任务已停止并删除。' });
+        await registry.markDeletedAfter(taskId, result.message || '创作任务已停止并删除。', terminalEvent => patchTerminalTaskSummaryOrThrow({
+          registry,
+          taskId,
+          workflowId,
+          operationId,
+          creativeWorkflows,
+          rootDir,
+          patch: {
+            active_task_id: '',
+            active_operation_id: '',
+            task_status: 'deleted',
+            current_stage: '',
+            current_stage_message: result.message || '创作任务已停止并删除。',
+            status: 'deleted',
+            message: result.message || '创作任务已停止并删除。',
+            error: null,
+            last_event_seq: terminalEvent.seq,
+          },
+          failedEventSeq: terminalEvent.seq,
+        }));
         return;
       }
       if (result && result.success === false) {
@@ -230,9 +256,7 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
       }
 
       await Promise.allSettled([...pendingEventWrites]);
-      const terminalEvent = registry.markDone(taskId, '创作任务已完成。')
-        || registry.emit(taskId, { type: 'task_done', progress: 100, message: '创作任务已完成。' });
-      await patchTaskSummaryOrEmitFailure({
+      await registry.markDoneAfter(taskId, '创作任务已完成。', terminalEvent => patchTerminalTaskSummaryOrThrow({
         registry,
         taskId,
         workflowId,
@@ -249,16 +273,14 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
           status: 'done',
           message: '创作任务已完成。',
           error: null,
-          last_event_seq: terminalEvent?.seq || 0,
+          last_event_seq: terminalEvent.seq,
         },
-        failedEventSeq: terminalEvent?.seq || 0,
-      });
+        failedEventSeq: terminalEvent.seq,
+      }));
     } catch (error) {
       const message = error.message || '创作任务执行失败。';
       await Promise.allSettled([...pendingEventWrites]);
-      const terminalEvent = registry.markFailed(taskId, error)
-        || registry.emit(taskId, { type: 'task_failed', message, data: { error: message } });
-      await patchTaskSummaryOrEmitFailure({
+      await registry.markFailedAfter(taskId, error, terminalEvent => patchTerminalTaskSummaryOrThrow({
         registry,
         taskId,
         workflowId,
@@ -276,10 +298,10 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
           error: {
             message,
           },
-          last_event_seq: terminalEvent?.seq || 0,
+          last_event_seq: terminalEvent.seq,
         },
-        failedEventSeq: terminalEvent?.seq || 0,
-      });
+        failedEventSeq: terminalEvent.seq,
+      }));
     }
   }
 
@@ -443,4 +465,5 @@ module.exports = {
   subscribeCreativeWorkflowEvents,
   getActiveCreativeWorkflowTask,
   recoverOrphanedWorkflows,
+  getCreativeTaskRegistry: () => defaultRegistry,
 };

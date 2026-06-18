@@ -84,6 +84,49 @@ async function waitImmediate() {
   assert.equal(liveRegistry.getTask(liveTaskId).status, 'failed');
   assert.equal(liveRegistry.getTask(liveTaskId).events.at(-1).type, 'task_failed');
 
+  const orderedRegistry = createCreativeTaskRegistry({
+    now: () => '2026-06-18T00:00:00.000Z',
+    idFactory: () => 'creative-task-ordered-terminal',
+  });
+  const orderedTaskId = orderedRegistry.createDetachedTask({
+    workflowId: '202606180000000006',
+    operationId: 'workflow-op-ordered',
+  });
+  const orderedEvents = [];
+  const orderedCalls = [];
+  orderedRegistry.subscribe(orderedTaskId, 0, event => {
+    if (event.type === 'task_done') {
+      orderedCalls.push('subscriber-task_done');
+    }
+    orderedEvents.push(event);
+  });
+  const orderedTerminal = await orderedRegistry.markDoneAfter(orderedTaskId, '完成', async event => {
+    orderedCalls.push(`before-${event.type}-${event.seq}`);
+  });
+  assert.equal(orderedTerminal.type, 'task_done');
+  assert.deepEqual(orderedCalls, [`before-task_done-${orderedTerminal.seq}`, 'subscriber-task_done']);
+  assert.equal(orderedRegistry.getTask(orderedTaskId).status, 'done');
+  assert.equal(orderedEvents.at(-1).type, 'task_done');
+
+  const blockedRegistry = createCreativeTaskRegistry({
+    now: () => '2026-06-18T00:00:00.000Z',
+    idFactory: () => 'creative-task-blocked-terminal',
+  });
+  const blockedTaskId = blockedRegistry.createDetachedTask({
+    workflowId: '202606180000000007',
+    operationId: 'workflow-op-blocked',
+  });
+  const blockedEvents = [];
+  blockedRegistry.subscribe(blockedTaskId, 0, event => blockedEvents.push(event));
+  await assert.rejects(
+    () => blockedRegistry.markDoneAfter(blockedTaskId, '完成', async () => {
+      throw new Error('终态写入失败');
+    }),
+    /终态写入失败/,
+  );
+  assert.equal(blockedRegistry.getTask(blockedTaskId).status, 'running');
+  assert.equal(blockedEvents.some(event => event.type === 'task_done'), false);
+
   const deletedRegistry = createCreativeTaskRegistry({
     now: () => '2026-06-18T00:00:00.000Z',
     idFactory: () => 'creative-task-deleted',

@@ -15,6 +15,14 @@ function getTaskService(req) {
   return req.app?.locals?.creativeWorkflowTasks || defaultCreativeWorkflowTasks;
 }
 
+function getTaskRegistry(req) {
+  return req.app?.locals?.creativeTaskRegistry
+    || req.app?.locals?.creativeWorkflowTasks?.taskRegistry
+    || req.app?.locals?.creativeWorkflowTasks?.registry
+    || defaultCreativeWorkflowTasks.getCreativeTaskRegistry?.()
+    || null;
+}
+
 function getMessage(result, fallback) {
   return result?.message || result?.error || fallback;
 }
@@ -444,22 +452,43 @@ router.post('/:workflow_id/events', async (req, res) => {
 
   let subscriptionResult = null;
   let streamWriteFailed = false;
+  let closed = false;
+  let unsubscribed = false;
+  const cleanup = ({ end = false } = {}) => {
+    closed = true;
+    if (!unsubscribed && subscriptionResult?.unsubscribe) {
+      unsubscribed = true;
+      subscriptionResult.unsubscribe();
+    }
+    if (end && !res.writableEnded) {
+      res.end();
+    }
+  };
   const writeEvent = event => {
     try {
-      if (res.writableEnded || res.destroyed) return false;
-      res.write(formatSseEvent(event));
+      if (closed || res.writableEnded || res.destroyed) {
+        streamWriteFailed = true;
+        cleanup();
+        return false;
+      }
+      const wrote = res.write(formatSseEvent(event));
+      if (wrote === false) {
+        streamWriteFailed = true;
+        cleanup({ end: true });
+        return false;
+      }
       return true;
     } catch {
       streamWriteFailed = true;
-      subscriptionResult?.unsubscribe?.();
-      if (!res.writableEnded) res.end();
+      cleanup({ end: true });
       return false;
     }
   };
 
-  req.on('close', () => {
-    subscriptionResult?.unsubscribe?.();
-  });
+  req.on('close', () => cleanup());
+  res.on('close', () => cleanup());
+  res.on('error', () => cleanup());
+  res.on('finish', () => cleanup());
 
   try {
     subscriptionResult = await getTaskService(req).subscribeCreativeWorkflowEvents({
@@ -468,12 +497,12 @@ router.post('/:workflow_id/events', async (req, res) => {
       sinceSeq,
       writeEvent,
       onClose: () => {
-        if (!res.writableEnded) res.end();
+        cleanup({ end: true });
       },
     });
-    if (streamWriteFailed) subscriptionResult?.unsubscribe?.();
+    if (closed || streamWriteFailed) cleanup();
     if (!subscriptionResult || subscriptionResult.success === false) {
-      if (!res.writableEnded) res.end();
+      cleanup({ end: true });
     }
   } catch (error) {
     writeEvent({
@@ -485,7 +514,7 @@ router.post('/:workflow_id/events', async (req, res) => {
       final_seq: sinceSeq + 1,
       message: `读取任务事件失败：${error.message}`,
     });
-    if (!res.writableEnded) res.end();
+    cleanup({ end: true });
   }
 });
 
@@ -508,7 +537,9 @@ router.get('/:workflow_id', async (req, res) => {
 
   try {
     const service = getService(req);
-    const result = await service.getCreativeWorkflow(workflowId);
+    const result = await service.getCreativeWorkflow(workflowId, {
+      taskRegistry: getTaskRegistry(req),
+    });
     if (!result || result.success === false) {
       const message = getMessage(result, '未找到创作任务。');
       const statusCode = /未找到|不存在/.test(message) ? 404 : 400;

@@ -1,8 +1,13 @@
 const assert = require('assert');
 const express = require('express');
+const fs = require('fs');
 const http = require('http');
+const os = require('os');
+const path = require('path');
 
 const creativeWorkflowsRouter = require('../server/routes/creativeWorkflows');
+const workflows = require('../server/services/creativeWorkflows');
+const { createCreativeTaskRegistry } = require('../server/services/creativeTaskRegistry');
 
 async function requestJson(server, method, pathName, body) {
   const { port } = server.address();
@@ -80,6 +85,26 @@ async function waitFor(assertion, timeoutMs = 1000) {
     }
   }
   throw lastError;
+}
+
+function tempRoot() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'creative-workflow-route-'));
+}
+
+function routeWorkflowServices(now = '2026-06-12T12:00:00.000Z') {
+  return {
+    idFactory: () => '202606121200000005',
+    now: () => now,
+    researchService: {
+      createResearchContext: async ({ now: n }) => ({
+        status: 'disabled',
+        query: '',
+        sources: [],
+        summary: '',
+        updated_at: n,
+      }),
+    },
+  };
 }
 
 function createFakeCreativeWorkflows(options = {}) {
@@ -311,7 +336,89 @@ async function run() {
   await runIsolatedRouterTests();
   await runRealAppMountTest();
   await runDefaultTaskServiceInjectionTest();
+  await runGetWorkflowUsesActiveRegistryTest();
+  await runSseRouteCleanupStaticTest();
   await runEditorRouteTests();
+}
+
+async function runGetWorkflowUsesActiveRegistryTest() {
+  const app = express();
+  const rootDir = tempRoot();
+  const workflowId = '202606121200000005';
+  await workflows.createCreativeWorkflow({ input: '真实路由 active registry 测试', useResearch: false }, {
+    rootDir,
+    services: routeWorkflowServices(),
+  });
+
+  const filePath = workflows.getWorkflowPath(workflowId, rootDir);
+  const record = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  record.status = 'running';
+  record.active_task_id = 'creative-task-route-active';
+  record.active_operation_id = 'workflow-op-route-active';
+  record.task_status = 'running';
+  record.current_stage = 'project';
+  record.current_stage_message = '正在生成工程...';
+  record.stages = record.stages.map(stage => (
+    stage.id === 'project'
+      ? {
+        ...stage,
+        status: 'running',
+        message: '正在生成工程...',
+        started_at: '2026-06-12T12:00:00.000Z',
+        updated_at: '2026-06-12T12:00:00.000Z',
+      }
+      : stage
+  ));
+  fs.writeFileSync(filePath, JSON.stringify(record, null, 2), 'utf-8');
+
+  const registry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-route-active',
+    now: () => '2026-06-12T12:20:00.000Z',
+  });
+  registry.createDetachedTask({
+    workflowId,
+    operationId: 'workflow-op-route-active',
+    kind: 'creative_workflow',
+  });
+
+  app.use(express.json());
+  app.locals.creativeTaskRegistry = registry;
+  app.locals.creativeWorkflows = {
+    getCreativeWorkflow: async (id, options = {}) => workflows.getCreativeWorkflow(id, {
+      ...options,
+      rootDir,
+      services: routeWorkflowServices('2026-06-12T12:20:00.000Z'),
+      staleStageTimeoutMs: 10 * 60 * 1000,
+    }),
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const response = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}`);
+    assert.strictEqual(response.statusCode, 200);
+    assert.strictEqual(response.body.success, true);
+    assert.strictEqual(response.body.data.status, 'running');
+    assert.strictEqual(response.body.data.task_status, 'running');
+    assert.strictEqual(response.body.data.active_task_id, 'creative-task-route-active');
+    assert.strictEqual(response.body.data.active_task.task_id, 'creative-task-route-active');
+    assert.strictEqual(response.body.data.stages.find(stage => stage.id === 'project').status, 'running');
+
+    const persisted = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    assert.strictEqual(persisted.status, 'running');
+    assert.strictEqual(persisted.stages.find(stage => stage.id === 'project').status, 'running');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runSseRouteCleanupStaticTest() {
+  const routeSource = fs.readFileSync(path.join(__dirname, '../server/routes/creativeWorkflows.js'), 'utf-8');
+  assert.match(routeSource, /res\.on\('close'/);
+  assert.match(routeSource, /res\.on\('error'/);
+  assert.match(routeSource, /res\.on\('finish'/);
+  assert.match(routeSource, /function cleanup|const cleanup/);
 }
 
 async function runEditorRouteTests() {

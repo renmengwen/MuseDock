@@ -16,6 +16,7 @@ const htmlVideoEditPatchService = require('./creative-video/html-video/editPatch
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
 const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
 const { createTemplateRegistry: createHtmlVideoTemplateRegistry } = require('./creative-video/html-video/templateRegistry');
+const { defaultRegistry: defaultCreativeTaskRegistry } = require('./creativeTaskRegistry');
 
 const DEFAULT_ROOT = path.join(__dirname, '../../data/creative-workflows');
 const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
@@ -1255,7 +1256,8 @@ async function markStaleRunningStageFailed(record, rootDir, services = {}, optio
   const timeoutMs = Number(options.staleStageTimeoutMs) || DEFAULT_STALE_STAGE_TIMEOUT_MS;
   const now = getNow(services);
   const nowMs = parseDateMs(now) || Date.now();
-  const activeTask = options.taskRegistry?.activeTaskForWorkflow?.(record.workflow_id);
+  const taskRegistry = options.taskRegistry || defaultCreativeTaskRegistry;
+  const activeTask = taskRegistry?.activeTaskForWorkflow?.(record.workflow_id);
   if (activeTask && activeTask.status === 'running') {
     record.active_task = activeTask;
     return record;

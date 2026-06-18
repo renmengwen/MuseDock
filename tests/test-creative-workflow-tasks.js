@@ -331,6 +331,44 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(innerFailedEvents.length, 1);
   assert.equal(innerFailedEvents[0].message, '外层失败');
 
+  const terminalOrderRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-terminal-order',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const terminalOrderCalls = [];
+  const terminalOrder = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+    registry: terminalOrderRegistry,
+    services: {
+      creativeWorkflows: {
+        patchCreativeWorkflowTaskSummary: async (workflowId, patch) => {
+          if (patch.task_status === 'done') {
+            terminalOrderCalls.push(`patch-${patch.task_status}-${patch.last_event_seq}`);
+          }
+          return { success: true };
+        },
+        runCreativeWorkflow: async workflowId => ({ success: true, workflow_id: workflowId, status: 'done', message: '完成' }),
+      },
+    },
+  });
+  await workflowTasks.subscribeCreativeWorkflowEvents({
+    workflowId: WORKFLOW_ID,
+    taskId: terminalOrder.task_id,
+    sinceSeq: 0,
+    registry: terminalOrderRegistry,
+    writeEvent: event => {
+      if (event.type === 'task_done') {
+        terminalOrderCalls.push(`subscriber-${event.type}-${event.seq}`);
+      }
+      return true;
+    },
+  });
+  await waitFor(() => assert.equal(terminalOrderRegistry.getTask(terminalOrder.task_id).status, 'done'));
+  const terminalPatchIndex = terminalOrderCalls.findIndex(call => call.startsWith('patch-done-'));
+  const subscriberDoneIndex = terminalOrderCalls.findIndex(call => call.startsWith('subscriber-task_done-'));
+  assert.notEqual(terminalPatchIndex, -1);
+  assert.notEqual(subscriberDoneIndex, -1);
+  assert.equal(terminalPatchIndex < subscriberDoneIndex, true);
+
   const donePatchFailRootDir = tempRoot();
   await workflows.createCreativeWorkflow({ input: '测试终态写入失败', useResearch: false }, { rootDir: donePatchFailRootDir, services: services() });
   const donePatchFailRegistry = createCreativeTaskRegistry({
@@ -343,9 +381,9 @@ async function waitFor(assertion, timeoutMs = 1000) {
     registry: donePatchFailRegistry,
     services: {
       creativeWorkflows: {
-        patchCreativeWorkflowTaskSummary: async () => {
+        patchCreativeWorkflowTaskSummary: async (workflowId, patch) => {
           donePatchCalls += 1;
-          if (donePatchCalls > 1) {
+          if (patch.task_status === 'done') {
             throw new Error('终态写入失败');
           }
           return { success: true };
@@ -354,11 +392,11 @@ async function waitFor(assertion, timeoutMs = 1000) {
       },
     },
   });
-  await waitFor(() => assert.equal(donePatchFailRegistry.getTask(donePatchFail.task_id).status, 'done'));
+  await waitFor(() => assert.equal(donePatchFailRegistry.getTask(donePatchFail.task_id).status, 'failed'));
   const donePatchFailTask = donePatchFailRegistry.getTask(donePatchFail.task_id);
-  assert.equal(donePatchFailTask.status, 'done');
-  assert.equal(donePatchFailTask.events.filter(event => event.type === 'task_failed').length, 0);
-  assert.equal(donePatchFailTask.events.filter(event => event.type === 'task_done').length, 1);
+  assert.equal(donePatchFailTask.status, 'failed');
+  assert.equal(donePatchFailTask.events.filter(event => event.type === 'task_done').length, 0);
+  assert.equal(donePatchFailTask.events.filter(event => event.type === 'task_failed').length, 1);
   assert.equal(donePatchFailTask.events.some(event => event.type === 'workflow_persist_failed'), true);
 
   const deletedRunRegistry = createCreativeTaskRegistry({
@@ -388,7 +426,9 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(deletedRunTask.events.some(event => event.type === 'workflow_deleted'), true);
   assert.equal(deletedRunTask.events.some(event => event.type === 'task_failed'), false);
   assert.equal(deletedRunRegistry.activeTaskForWorkflow(WORKFLOW_ID), null);
-  assert.equal(deletedPatchCalls.length, 1);
+  assert.equal(deletedPatchCalls.length, 2);
+  assert.equal(deletedPatchCalls.at(-1).patch.task_status, 'deleted');
+  assert.equal(deletedPatchCalls.at(-1).patch.last_event_seq, deletedRunTask.events.at(-1).seq);
   const deletedReplayEvents = [];
   await workflowTasks.subscribeCreativeWorkflowEvents({
     workflowId: WORKFLOW_ID,
