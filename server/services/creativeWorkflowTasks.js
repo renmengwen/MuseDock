@@ -410,9 +410,24 @@ async function subscribeCreativeWorkflowEvents({
   sinceSeq,
   writeEvent,
   onClose,
-  registry = defaultRegistry,
+  registry,
 }) {
-  const task = registry.getTask(taskId);
+  const resolvedRegistry = registry === null ? null : (registry || defaultRegistry);
+  if (resolvedRegistry === null) {
+    writeEvent({
+      seq: sinceSeq + 1,
+      type: 'task_stream_closed',
+      workflow_id: workflowId,
+      task_id: taskId,
+      status: 'failed',
+      final_seq: sinceSeq + 1,
+      message: '后台创作任务注册表未配置，无法读取任务事件流。',
+    });
+    onClose?.();
+    return { success: false };
+  }
+
+  const task = resolvedRegistry.getTask(taskId);
   if (!task || task.workflow_id !== String(workflowId)) {
     writeEvent({
       seq: sinceSeq + 1,
@@ -458,7 +473,7 @@ async function subscribeCreativeWorkflowEvents({
     onClose?.();
   };
 
-  subscription = registry.subscribe(taskId, sinceSeq, event => {
+  subscription = resolvedRegistry.subscribe(taskId, sinceSeq, event => {
     if (!safeWrite(event)) {
       if (closed) return;
       closed = true;

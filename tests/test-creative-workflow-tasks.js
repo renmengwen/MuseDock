@@ -83,6 +83,31 @@ async function waitFor(assertion, timeoutMs = 1000) {
     }
   }
 
+  {
+    const events = [];
+    let onCloseCalls = 0;
+    const subscribedWithoutRegistry = await workflowTasks.subscribeCreativeWorkflowEvents({
+      workflowId: WORKFLOW_ID,
+      taskId: 'creative-task-no-registry',
+      sinceSeq: 0,
+      registry: null,
+      writeEvent: event => {
+        events.push(event);
+        return true;
+      },
+      onClose: () => {
+        onCloseCalls += 1;
+      },
+    });
+
+    assert.equal(subscribedWithoutRegistry.success, false);
+    assert.equal(onCloseCalls, 1);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, 'task_stream_closed');
+    assert.equal(events[0].status, 'failed');
+    assert.equal(events[0].message, '后台创作任务注册表未配置，无法读取任务事件流。');
+  }
+
   const rootDir = tempRoot();
   await workflows.createCreativeWorkflow({ input: '测试后台任务', useResearch: false }, { rootDir, services: services() });
   const registry = createCreativeTaskRegistry({

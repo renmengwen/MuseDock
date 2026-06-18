@@ -606,6 +606,36 @@ async function runEventsRouteUsesInjectedRegistryTest() {
   }
 }
 
+async function runEventsRouteWithCustomWorkflowServiceWithoutRegistryDoesNotLeakTypeErrorTest() {
+  const app = express();
+  const workflowId = '202606121200000011';
+
+  app.use(express.json());
+  app.locals.creativeWorkflows = {
+    getCreativeWorkflow: async id => ({
+      success: true,
+      data: { workflow_id: id },
+    }),
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const sseResponse = await requestSse(server, `/api/creative-workflows/${workflowId}/events`, {
+      task_id: 'creative-task-no-registry',
+      since_seq: 0,
+    });
+    assert.strictEqual(sseResponse.statusCode, 200);
+    assert.match(sseResponse.headers['content-type'], /text\/event-stream/);
+    assert.match(sseResponse.body, /event: task_stream_closed/);
+    assert.match(sseResponse.body, /后台创作任务注册表未配置，无法读取任务事件流。/);
+    assert.doesNotMatch(sseResponse.body, /TypeError|Cannot read properties/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
 async function runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest() {
   const app = express();
   const workflowId = '202606121200000007';
@@ -645,6 +675,7 @@ async function run() {
   await runActiveTaskRouteWithCustomWorkflowServiceDoesNotUseDefaultRegistryTest();
   await runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest();
   await runGetWorkflowUsesActiveRegistryTest();
+  await runEventsRouteWithCustomWorkflowServiceWithoutRegistryDoesNotLeakTypeErrorTest();
   await runEventsRouteUsesInjectedRegistryTest();
   await runSseHelperTimeoutsTest();
   await runSseWriteBackpressureKeepsSubscriptionTest();

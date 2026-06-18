@@ -51,6 +51,16 @@ function getErrorMessage(error) {
   return '后台创作任务执行失败。';
 }
 
+function createFailureEventData(error, message) {
+  const eventData = error && typeof error === 'object' && error.data && typeof error.data === 'object' && !Array.isArray(error.data)
+    ? { ...error.data }
+    : {};
+  if (!eventData.error) {
+    eventData.error = message;
+  }
+  return eventData;
+}
+
 function createCreativeTaskRegistry(options = {}) {
   const now = typeof options.now === 'function' ? options.now : defaultNow;
   const idFactory = typeof options.idFactory === 'function' ? options.idFactory : defaultIdFactory;
@@ -166,12 +176,7 @@ function createCreativeTaskRegistry(options = {}) {
     }
 
     const message = getErrorMessage(error);
-    const eventData = error && typeof error === 'object' && error.data && typeof error.data === 'object'
-      ? { ...error.data }
-      : {};
-    if (!eventData.error) {
-      eventData.error = message;
-    }
+    const eventData = createFailureEventData(error, message);
     const endedAt = now();
     task.status = 'failed';
     task.error = message;
@@ -273,13 +278,14 @@ function createCreativeTaskRegistry(options = {}) {
 
   function markFailedAfter(taskId, error, beforeEmit) {
     const message = getErrorMessage(error);
+    const eventData = createFailureEventData(error, message);
     return markTerminalAfter(taskId, {
       status: 'failed',
       error,
       event: {
         type: 'task_failed',
         message,
-        data: { error: message },
+        data: eventData,
       },
     }, beforeEmit);
   }

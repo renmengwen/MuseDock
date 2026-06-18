@@ -94,6 +94,22 @@ function createDeferred() {
   assert.equal(liveRegistry.getTask(liveTaskId).status, 'failed');
   assert.equal(liveRegistry.getTask(liveTaskId).events.at(-1).type, 'task_failed');
 
+  const failedAfterDataRegistry = createCreativeTaskRegistry({
+    now: () => '2026-06-18T00:00:00.000Z',
+    idFactory: () => 'creative-task-failed-after-data',
+  });
+  const failedAfterDataTaskId = failedAfterDataRegistry.createDetachedTask({
+    workflowId: '202606180000000012',
+    operationId: 'workflow-op-failed-after-data',
+  });
+  const businessError = new Error('业务失败');
+  businessError.data = { code: 'X', stage: 'project' };
+  const failedAfterDataEvent = await failedAfterDataRegistry.markFailedAfter(failedAfterDataTaskId, businessError);
+  assert.equal(failedAfterDataEvent.type, 'task_failed');
+  assert.equal(failedAfterDataEvent.data.code, 'X');
+  assert.equal(failedAfterDataEvent.data.stage, 'project');
+  assert.equal(failedAfterDataEvent.data.error, '业务失败');
+
   const orderedRegistry = createCreativeTaskRegistry({
     now: () => '2026-06-18T00:00:00.000Z',
     idFactory: () => 'creative-task-ordered-terminal',
