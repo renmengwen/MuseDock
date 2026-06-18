@@ -166,6 +166,12 @@ function createCreativeTaskRegistry(options = {}) {
     }
 
     const message = getErrorMessage(error);
+    const eventData = error && typeof error === 'object' && error.data && typeof error.data === 'object'
+      ? { ...error.data }
+      : {};
+    if (!eventData.error) {
+      eventData.error = message;
+    }
     const endedAt = now();
     task.status = 'failed';
     task.error = message;
@@ -174,7 +180,7 @@ function createCreativeTaskRegistry(options = {}) {
     return emit(taskId, {
       type: 'task_failed',
       message,
-      data: { error: message },
+      data: eventData,
     });
   }
 

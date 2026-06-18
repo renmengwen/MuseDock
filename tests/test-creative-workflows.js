@@ -960,22 +960,26 @@ async function testCustomRootDoesNotUseDefaultRegistryActiveTask() {
   ));
   fs.writeFileSync(filePath, JSON.stringify(record, null, 2), 'utf-8');
 
-  defaultRegistry.createDetachedTask({
+  const defaultTaskId = defaultRegistry.createDetachedTask({
     workflowId: WORKFLOW_ID,
     operationId: 'workflow-op-default-registry-same-id',
     kind: 'creative_workflow',
   });
 
-  const fetched = await getCreativeWorkflow(WORKFLOW_ID, {
-    rootDir,
-    services,
-    staleStageTimeoutMs: 10 * 60 * 1000,
-  });
+  try {
+    const fetched = await getCreativeWorkflow(WORKFLOW_ID, {
+      rootDir,
+      services,
+      staleStageTimeoutMs: 10 * 60 * 1000,
+    });
 
-  assert.equal(fetched.success, true);
-  assert.equal(fetched.data.status, 'failed');
-  assert.equal(fetched.data.stages.find(stage => stage.id === 'project').status, 'failed');
-  assert.equal(fetched.data.active_task || null, null);
+    assert.equal(fetched.success, true);
+    assert.equal(fetched.data.status, 'failed');
+    assert.equal(fetched.data.stages.find(stage => stage.id === 'project').status, 'failed');
+    assert.equal(fetched.data.active_task || null, null);
+  } finally {
+    defaultRegistry.markDeleted(defaultTaskId, '测试清理默认注册表任务。');
+  }
 }
 
 async function testMissingWorkflowReturnsChineseMessage() {

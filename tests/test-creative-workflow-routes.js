@@ -9,6 +9,18 @@ const creativeWorkflowsRouter = require('../server/routes/creativeWorkflows');
 const workflows = require('../server/services/creativeWorkflows');
 const { createCreativeTaskRegistry, defaultRegistry } = require('../server/services/creativeTaskRegistry');
 
+const SSE_HELPER_TIMEOUT_MS = 1000;
+
+function normalizeTimeoutMs(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : SSE_HELPER_TIMEOUT_MS;
+}
+
+function sseTimeoutError(pathName, body) {
+  const snippet = String(body || '').slice(0, 500);
+  return new Error(`SSE 请求超时：${pathName}，已收到：${snippet}`);
+}
+
 async function requestJson(server, method, pathName, body) {
   const { port } = server.address();
   return new Promise((resolve, reject) => {
@@ -41,10 +53,25 @@ async function requestJson(server, method, pathName, body) {
   });
 }
 
-async function requestSse(server, pathName, body) {
+async function requestSse(server, pathName, body, options = {}) {
   const { port } = server.address();
+  const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
   return new Promise((resolve, reject) => {
-    const req = http.request({
+    let text = '';
+    let settled = false;
+    let req = null;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+    const timer = setTimeout(() => {
+      const error = sseTimeoutError(pathName, text);
+      req?.destroy(error);
+      settle(reject, error);
+    }, timeoutMs);
+    req = http.request({
       hostname: '127.0.0.1',
       port,
       path: pathName,
@@ -54,21 +81,21 @@ async function requestSse(server, pathName, body) {
         Accept: 'text/event-stream',
       },
     }, res => {
-      let text = '';
       res.setEncoding('utf8');
       res.on('data', chunk => {
         text += chunk;
       });
-      res.on('end', () => resolve({ statusCode: res.statusCode, body: text, headers: res.headers }));
+      res.on('end', () => settle(resolve, { statusCode: res.statusCode, body: text, headers: res.headers }));
     });
-    req.on('error', reject);
+    req.on('error', error => settle(reject, error));
     req.write(JSON.stringify(body || {}));
     req.end();
   });
 }
 
-function startSse(server, pathName, body) {
+function startSse(server, pathName, body, options = {}) {
   const { port } = server.address();
+  const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
   const client = {
     req: null,
     response: null,
@@ -76,7 +103,15 @@ function startSse(server, pathName, body) {
   };
   client.response = new Promise((resolve, reject) => {
     let settled = false;
-    const req = http.request({
+    let req = null;
+    const responseTimer = setTimeout(() => {
+      const error = sseTimeoutError(pathName, '');
+      req?.destroy(error);
+      if (settled) return;
+      settled = true;
+      reject(error);
+    }, timeoutMs);
+    req = http.request({
       hostname: '127.0.0.1',
       port,
       path: pathName,
@@ -87,13 +122,22 @@ function startSse(server, pathName, body) {
       },
     }, res => {
       settled = true;
+      clearTimeout(responseTimer);
       let text = '';
       let endSettled = false;
       res.setEncoding('utf8');
-      const ended = new Promise(resolveEnded => {
+      const ended = new Promise((resolveEnded, rejectEnded) => {
+        const endTimer = setTimeout(() => {
+          const error = sseTimeoutError(pathName, text);
+          req.destroy(error);
+          if (endSettled) return;
+          endSettled = true;
+          rejectEnded(error);
+        }, timeoutMs);
         const finish = closed => {
           if (endSettled) return;
           endSettled = true;
+          clearTimeout(endTimer);
           resolveEnded({
             statusCode: res.statusCode,
             body: text,
@@ -119,6 +163,7 @@ function startSse(server, pathName, body) {
     });
     client.req = req;
     req.on('error', error => {
+      clearTimeout(responseTimer);
       if (!settled) reject(error);
     });
     req.write(JSON.stringify(body || {}));
@@ -601,6 +646,7 @@ async function run() {
   await runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest();
   await runGetWorkflowUsesActiveRegistryTest();
   await runEventsRouteUsesInjectedRegistryTest();
+  await runSseHelperTimeoutsTest();
   await runSseWriteBackpressureKeepsSubscriptionTest();
   await runSseRequestCloseKeepsSubscriptionTest();
   await runSseRouteCleanupStaticTest();
@@ -685,6 +731,50 @@ async function runSseRouteCleanupStaticTest() {
   assert.match(routeSource, /res\.on\('error'/);
   assert.match(routeSource, /res\.on\('finish'/);
   assert.match(routeSource, /function cleanup|const cleanup/);
+}
+
+async function runSseHelperTimeoutsTest() {
+  const app = express();
+  app.use(express.json());
+  app.post('/hang-events', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write('event: stage_progress\ndata: {"message":"连接保持中"}\n\n');
+  });
+  const server = await listen(app);
+
+  try {
+    const requestResult = await Promise.race([
+      requestSse(server, '/hang-events', {}, { timeoutMs: 30 }).then(
+        () => 'resolved',
+        error => error,
+      ),
+      delay(120).then(() => 'no-timeout'),
+    ]);
+    assert.notStrictEqual(requestResult, 'no-timeout');
+    assert.ok(requestResult instanceof Error);
+    assert.match(requestResult.message, /\/hang-events/);
+    assert.match(requestResult.message, /连接保持中/);
+
+    const sse = await startSse(server, '/hang-events', {}, { timeoutMs: 30 }).response;
+    const endedResult = await Promise.race([
+      sse.ended.then(
+        () => 'resolved',
+        error => error,
+      ),
+      delay(120).then(() => 'no-timeout'),
+    ]);
+    assert.notStrictEqual(endedResult, 'no-timeout');
+    assert.ok(endedResult instanceof Error);
+    assert.match(endedResult.message, /\/hang-events/);
+    assert.match(endedResult.message, /连接保持中/);
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise(resolve => server.close(resolve));
+  }
 }
 
 async function runSseRequestCloseKeepsSubscriptionTest() {

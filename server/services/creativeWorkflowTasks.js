@@ -91,9 +91,50 @@ function emitWorkflowPersistFailed(registry, taskId, operationId, message, faile
   });
 }
 
+function getMessage(value, fallback = '') {
+  if (value instanceof Error) {
+    return value.message || fallback;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+  return fallback;
+}
+
+function isWorkflowSummaryMissingPersistenceFailure(resultOrError) {
+  const code = resultOrError?.code || resultOrError?.error?.code;
+  if (code === 'ENOENT' || code === 'NOT_FOUND') {
+    return true;
+  }
+  const message = getMessage(resultOrError, resultOrError?.message || '');
+  return /\bENOENT\b|NOT_FOUND|未找到创作任务|no such file/i.test(message);
+}
+
+function createTerminalPersistenceFailureError(persistError, terminalError) {
+  const persistMessage = getMessage(persistError, '终态写入失败');
+  const terminalMessage = getMessage(terminalError, '');
+  const error = new Error(persistMessage);
+  error.persist_error = persistMessage;
+  if (terminalMessage) {
+    error.terminal_error = terminalMessage;
+    error.original_error = terminalMessage;
+  }
+  return error;
+}
+
 function markTaskFailedAfterTerminalPersistenceFailure(registry, taskId, error) {
-  const detail = error?.message || '终态写入失败';
-  return registry.markFailed(taskId, new Error(`创作任务终态写入失败：${detail}`));
+  const persistMessage = error?.persist_error || getMessage(error, '终态写入失败');
+  const terminalMessage = error?.terminal_error || error?.original_error || '';
+  const fallbackError = new Error(`创作任务终态写入失败：${persistMessage}`);
+  fallbackError.data = {
+    error: fallbackError.message,
+    persist_error: persistMessage,
+  };
+  if (terminalMessage) {
+    fallbackError.data.terminal_error = terminalMessage;
+    fallbackError.data.original_error = terminalMessage;
+  }
+  return registry.markFailed(taskId, fallbackError);
 }
 
 async function patchTaskSummaryOrEmitFailure({
@@ -124,6 +165,32 @@ async function patchTerminalTaskSummaryOrThrow(options = {}) {
     throw new Error(persisted?.message || '更新创作任务终态失败。');
   }
   return persisted;
+}
+
+async function patchDeletedTerminalTaskSummaryOrIgnoreMissing({
+  registry,
+  taskId,
+  workflowId,
+  operationId,
+  creativeWorkflows,
+  rootDir,
+  patch,
+  failedEventSeq,
+}) {
+  try {
+    const persisted = await creativeWorkflows.patchCreativeWorkflowTaskSummary(workflowId, patch, { rootDir });
+    if (persisted?.success || isWorkflowSummaryMissingPersistenceFailure(persisted)) {
+      return { ...(persisted || {}), success: true };
+    }
+    emitWorkflowPersistFailed(registry, taskId, operationId, persisted?.message || '更新创作任务进度失败。', failedEventSeq);
+    throw new Error(persisted?.message || '更新创作任务终态失败。');
+  } catch (error) {
+    if (isWorkflowSummaryMissingPersistenceFailure(error)) {
+      return { success: true, workflow_id: String(workflowId), ignored_missing_summary: true };
+    }
+    emitWorkflowPersistFailed(registry, taskId, operationId, error.message || '更新创作任务进度失败。', failedEventSeq);
+    throw error;
+  }
 }
 
 async function emitAndPersistTaskEvent({
@@ -241,7 +308,7 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
       });
       if (result && result.success === false && result.status === 'deleted') {
         await Promise.allSettled([...pendingEventWrites]);
-        await registry.markDeletedAfter(taskId, result.message || '创作任务已停止并删除。', terminalEvent => patchTerminalTaskSummaryOrThrow({
+        await registry.markDeletedAfter(taskId, result.message || '创作任务已停止并删除。', terminalEvent => patchDeletedTerminalTaskSummaryOrIgnoreMissing({
           registry,
           taskId,
           workflowId,
@@ -292,28 +359,32 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
     } catch (error) {
       const message = error.message || '创作任务执行失败。';
       await Promise.allSettled([...pendingEventWrites]);
-      await registry.markFailedAfter(taskId, error, terminalEvent => patchTerminalTaskSummaryOrThrow({
-        registry,
-        taskId,
-        workflowId,
-        operationId,
-        creativeWorkflows,
-        rootDir,
-        patch: {
-          active_task_id: '',
-          active_operation_id: '',
-          task_status: 'failed',
-          current_stage: '',
-          current_stage_message: message,
-          status: 'failed',
-          message,
-          error: {
+      try {
+        await registry.markFailedAfter(taskId, error, terminalEvent => patchTerminalTaskSummaryOrThrow({
+          registry,
+          taskId,
+          workflowId,
+          operationId,
+          creativeWorkflows,
+          rootDir,
+          patch: {
+            active_task_id: '',
+            active_operation_id: '',
+            task_status: 'failed',
+            current_stage: '',
+            current_stage_message: message,
+            status: 'failed',
             message,
+            error: {
+              message,
+            },
+            last_event_seq: terminalEvent.seq,
           },
-          last_event_seq: terminalEvent.seq,
-        },
-        failedEventSeq: terminalEvent.seq,
-      }));
+          failedEventSeq: terminalEvent.seq,
+        }));
+      } catch (persistError) {
+        throw createTerminalPersistenceFailureError(persistError, error);
+      }
     }
   }
 

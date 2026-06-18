@@ -481,6 +481,35 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(terminalPatchAlwaysFailReplay.at(-1).type, 'task_stream_closed');
   assert.equal(terminalPatchAlwaysFailReplay.at(-1).status, 'failed');
 
+  const failedTerminalPatchAlwaysFailRootDir = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '测试失败终态写入持续失败', useResearch: false }, { rootDir: failedTerminalPatchAlwaysFailRootDir, services: services() });
+  const failedTerminalPatchAlwaysFailRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-failed-terminal-patch-always-fail',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const failedTerminalPatchAlwaysFail = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+    rootDir: failedTerminalPatchAlwaysFailRootDir,
+    registry: failedTerminalPatchAlwaysFailRegistry,
+    services: {
+      creativeWorkflows: {
+        patchCreativeWorkflowTaskSummary: async (workflowId, patch) => {
+          if (patch.task_status === 'running') {
+            return { success: true };
+          }
+          throw new Error('持久化层不可用');
+        },
+        runCreativeWorkflow: async () => ({ success: false, workflow_id: WORKFLOW_ID, status: 'failed', message: '业务执行失败' }),
+      },
+    },
+  });
+  await waitFor(() => assert.equal(failedTerminalPatchAlwaysFailRegistry.getTask(failedTerminalPatchAlwaysFail.task_id).status, 'failed'));
+  const failedTerminalPatchAlwaysFailTask = failedTerminalPatchAlwaysFailRegistry.getTask(failedTerminalPatchAlwaysFail.task_id);
+  const fallbackFailedEvent = failedTerminalPatchAlwaysFailTask.events.at(-1);
+  assert.equal(fallbackFailedEvent.type, 'task_failed');
+  assert.match(fallbackFailedEvent.message, /创作任务终态写入失败/);
+  assert.match(fallbackFailedEvent.data.terminal_error || fallbackFailedEvent.data.original_error || '', /业务执行失败/);
+  assert.match(fallbackFailedEvent.data.persist_error || '', /持久化层不可用/);
+
   const deletedRunRegistry = createCreativeTaskRegistry({
     idFactory: () => 'creative-task-run-deleted',
     now: () => '2026-06-18T00:00:00.000Z',
@@ -525,6 +554,47 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(deletedReplayEvents.some(event => event.type === 'workflow_deleted'), true);
   assert.equal(deletedReplayEvents.at(-1).type, 'task_stream_closed');
   assert.equal(deletedReplayEvents.at(-1).status, 'deleted');
+
+  const realDeletedRootDir = tempRoot();
+  const realDeletedMediaRoot = path.join(realDeletedRootDir, 'media');
+  await workflows.createCreativeWorkflow({ input: '真实删除终态缺失 workflow 文件测试', useResearch: false }, {
+    rootDir: realDeletedRootDir,
+    mediaRoot: realDeletedMediaRoot,
+    services: services(),
+  });
+  const realDeletedWorkflowPath = workflows.getWorkflowPath(WORKFLOW_ID, realDeletedRootDir);
+  const realDeletedRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-real-deleted-missing-summary',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const realDeletedServices = {
+    ...services(),
+    aiModelConfig: { getSkipValidation: async () => false },
+    agentRuns: {
+      createDouyinHyperframesFreeformRun: async () => ({ success: true, status: 'done', run_id: 'run-real-deleted', message: '已创建运行记录。' }),
+      generateDouyinRunHyperframesFreeformBrief: async () => {
+        fs.unlinkSync(realDeletedWorkflowPath);
+        return { success: true, status: 'done', message: '成片策划完成。' };
+      },
+      synthesizeDouyinRunHyperframesFreeformAudio: async () => {
+        throw new Error('workflow 删除后不应继续生成音频');
+      },
+    },
+  };
+  const realDeletedRun = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+    rootDir: realDeletedRootDir,
+    registry: realDeletedRegistry,
+    workflowOptions: {
+      rootDir: realDeletedRootDir,
+      mediaRoot: realDeletedMediaRoot,
+      services: realDeletedServices,
+    },
+  });
+  await waitFor(() => assert.equal(realDeletedRegistry.getTask(realDeletedRun.task_id).status, 'deleted'));
+  const realDeletedTask = realDeletedRegistry.getTask(realDeletedRun.task_id);
+  assert.equal(realDeletedTask.events.some(event => event.type === 'workflow_deleted'), true);
+  assert.equal(realDeletedTask.events.some(event => event.type === 'task_failed'), false);
+  assert.equal(fs.existsSync(realDeletedWorkflowPath), false);
 
   const closeThrowRegistry = createCreativeTaskRegistry({
     idFactory: () => 'creative-task-close-throw',
