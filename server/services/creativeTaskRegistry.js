@@ -105,7 +105,12 @@ function createCreativeTaskRegistry(options = {}) {
     if (!task) {
       return null;
     }
-    if (task.terminal_pending && event.type !== 'workflow_persist_failed') {
+    if (task.terminal_pending) {
+      if (event.type === 'workflow_persist_failed') {
+        task.terminal_pending.workflow_persist_failed = {
+          ...event,
+        };
+      }
       return null;
     }
 
@@ -214,8 +219,12 @@ function createCreativeTaskRegistry(options = {}) {
         await beforeEmit(taskEvent);
       }
     } catch (error) {
+      const pendingPersistFailed = task.terminal_pending?.workflow_persist_failed;
       if (task.terminal_pending?.seq === pending.seq && task.terminal_pending?.type === pending.type) {
         task.terminal_pending = null;
+      }
+      if (pendingPersistFailed) {
+        emit(taskId, pendingPersistFailed);
       }
       throw error;
     }

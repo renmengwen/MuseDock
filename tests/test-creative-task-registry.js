@@ -136,6 +136,44 @@ function createDeferred() {
   );
   assert.equal(blockedRegistry.getTask(blockedTaskId).status, 'running');
   assert.equal(blockedEvents.some(event => event.type === 'task_done'), false);
+  const blockedPersistFailed = blockedRegistry.emit(blockedTaskId, {
+    type: 'workflow_persist_failed',
+    message: '终态写入失败后持久化失败可记录',
+    data: { error: 'patch failed' },
+  });
+  const blockedFailed = blockedRegistry.markFailed(blockedTaskId, new Error('终态写入失败'));
+  assert.equal(blockedPersistFailed.type, 'workflow_persist_failed');
+  assert.equal(blockedFailed.type, 'task_failed');
+  assert.equal(blockedRegistry.getTask(blockedTaskId).status, 'failed');
+
+  const pendingPersistFailFallbackRegistry = createCreativeTaskRegistry({
+    now: () => '2026-06-18T00:00:00.000Z',
+    idFactory: () => 'creative-task-pending-persist-fail-fallback',
+  });
+  const pendingPersistFailFallbackTaskId = pendingPersistFailFallbackRegistry.createDetachedTask({
+    workflowId: '202606180000000011',
+    operationId: 'workflow-op-pending-persist-fail-fallback',
+  });
+  let pendingPersistFailFallbackEmit = undefined;
+  await assert.rejects(
+    () => pendingPersistFailFallbackRegistry.markDoneAfter(pendingPersistFailFallbackTaskId, '完成', async () => {
+      pendingPersistFailFallbackEmit = pendingPersistFailFallbackRegistry.emit(pendingPersistFailFallbackTaskId, {
+        type: 'workflow_persist_failed',
+        message: '终态写入失败后持久化失败可补记',
+        data: { error: 'patch failed' },
+      });
+      throw new Error('终态写入失败');
+    }),
+    /终态写入失败/,
+  );
+  const pendingPersistFailFallbackTask = pendingPersistFailFallbackRegistry.getTask(pendingPersistFailFallbackTaskId);
+  assert.equal(pendingPersistFailFallbackEmit, null);
+  assert.equal(pendingPersistFailFallbackTask.status, 'running');
+  assert.deepEqual(pendingPersistFailFallbackTask.events.map(event => event.type), ['workflow_persist_failed']);
+  assert.deepEqual(pendingPersistFailFallbackTask.events.map(event => event.seq), [2]);
+  const pendingPersistFailFallbackFailed = pendingPersistFailFallbackRegistry.markFailed(pendingPersistFailFallbackTaskId, new Error('终态写入失败'));
+  assert.equal(pendingPersistFailFallbackFailed.type, 'task_failed');
+  assert.equal(pendingPersistFailFallbackRegistry.getTask(pendingPersistFailFallbackTaskId).status, 'failed');
 
   const pendingFailRaceRegistry = createCreativeTaskRegistry({
     now: () => '2026-06-18T00:00:00.000Z',
@@ -173,6 +211,42 @@ function createDeferred() {
   assert.deepEqual(pendingFailRaceTask.events.map(event => event.seq), [1, 2]);
   assert.deepEqual(
     pendingFailRaceTask.events.filter(event => event.type === 'task_done' || event.type === 'task_failed').map(event => event.type),
+    ['task_done'],
+  );
+
+  const pendingPersistFailRaceRegistry = createCreativeTaskRegistry({
+    now: () => '2026-06-18T00:00:00.000Z',
+    idFactory: () => 'creative-task-pending-persist-fail-race',
+  });
+  const pendingPersistFailRaceTaskId = pendingPersistFailRaceRegistry.createDetachedTask({
+    workflowId: '202606180000000010',
+    operationId: 'workflow-op-pending-persist-fail-race',
+  });
+  pendingPersistFailRaceRegistry.emit(pendingPersistFailRaceTaskId, {
+    type: 'stage_progress',
+    stage: 'project',
+    message: '正在生成工程...',
+  });
+  const pendingPersistFailDeferred = createDeferred();
+  const pendingPersistFailDonePromise = pendingPersistFailRaceRegistry.markDoneAfter(
+    pendingPersistFailRaceTaskId,
+    '完成',
+    async () => pendingPersistFailDeferred.promise,
+  );
+  await waitImmediate();
+  const competingPersistFailed = pendingPersistFailRaceRegistry.emit(pendingPersistFailRaceTaskId, {
+    type: 'workflow_persist_failed',
+    message: '终态等待期间的持久化失败不应插入',
+    data: { error: 'patch failed' },
+  });
+  pendingPersistFailDeferred.resolve();
+  await pendingPersistFailDonePromise;
+  const pendingPersistFailRaceTask = pendingPersistFailRaceRegistry.getTask(pendingPersistFailRaceTaskId);
+  assert.equal(competingPersistFailed, null);
+  assert.equal(pendingPersistFailRaceTask.status, 'done');
+  assert.deepEqual(pendingPersistFailRaceTask.events.map(event => event.seq), [1, 2]);
+  assert.deepEqual(
+    pendingPersistFailRaceTask.events.filter(event => event.type === 'task_done' || event.type === 'workflow_persist_failed').map(event => event.type),
     ['task_done'],
   );
 
