@@ -532,6 +532,7 @@ export function OneClickCreativePage() {
   const lastSeqRef = useRef(0);
   const activeTaskRef = useRef(null);
   const currentWorkflowRef = useRef({ routeWorkflowId: '', workflowId: '', selectedWorkflowId: '' });
+  const finalWorkflowRefreshRef = useRef(null);
   const streamClosedNormallyRef = useRef(false);
   const streamGenerationRef = useRef(0);
   const [input, setInput] = useState('');
@@ -581,9 +582,25 @@ export function OneClickCreativePage() {
   } = {}) => {
     const targetWorkflowId = String(nextWorkflowId || '').trim();
     if (!targetWorkflowId || terminalStatus === 'deleted') return;
+    const expectedWorkflowId = targetWorkflowId;
+    const refreshKey = `${targetWorkflowId}:${expectedTaskId || ''}`;
+    if (finalWorkflowRefreshRef.current?.key === refreshKey
+      && (finalWorkflowRefreshRef.current.started || finalWorkflowRefreshRef.current.settled)) {
+      return;
+    }
+    finalWorkflowRefreshRef.current = {
+      key: refreshKey,
+      workflowId: expectedWorkflowId,
+      taskId: expectedTaskId,
+      generation: expectedGeneration,
+      terminalStatus,
+      started: true,
+      settled: false,
+    };
 
     const isStaleFinalFetch = () => {
-      if (streamGenerationRef.current !== expectedGeneration) return true;
+      if (finalWorkflowRefreshRef.current?.key !== refreshKey) return true;
+      if (streamGenerationRef.current !== expectedGeneration && activeTaskRef.current) return true;
       if (activeTaskRef.current?.workflow_id && activeTaskRef.current?.workflow_id !== targetWorkflowId) return true;
       if (expectedTaskId && activeTaskRef.current?.task_id && activeTaskRef.current?.task_id !== expectedTaskId) return true;
       const currentWorkflowId = currentWorkflowRef.current.routeWorkflowId
@@ -613,6 +630,13 @@ export function OneClickCreativePage() {
         created_at: prev.find(task => task.workflow_id === targetWorkflowId)?.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }));
+      if (finalWorkflowRefreshRef.current?.key === refreshKey) {
+        finalWorkflowRefreshRef.current = {
+          ...finalWorkflowRefreshRef.current,
+          started: false,
+          settled: true,
+        };
+      }
 
       if (nextStatus === 'failed' || terminalStatus === 'failed') {
         setStatus('failed');
@@ -627,8 +651,15 @@ export function OneClickCreativePage() {
       setMessage(nextMessage);
     } catch {
       if (isStaleFinalFetch()) return;
+      if (finalWorkflowRefreshRef.current?.key === refreshKey) {
+        finalWorkflowRefreshRef.current = {
+          ...finalWorkflowRefreshRef.current,
+          started: false,
+          settled: true,
+        };
+      }
       setStatus(terminalStatus === 'failed' ? 'failed' : 'done');
-      setMessage(fallbackMessage || '终态详情暂时未刷新，请稍后重新打开任务。');
+      setMessage('终态详情暂时未刷新，请稍后重新打开任务。');
     }
   }, [persistTasks]);
 
@@ -695,13 +726,17 @@ export function OneClickCreativePage() {
         });
       }
       if (event.status === 'deleted') {
+        finalWorkflowRefreshRef.current = null;
         persistTasks(prev => prev.filter(item => item.workflow_id !== event.workflow_id));
         setWorkflow(null);
+        setWorkflowId('');
+        setSelectedWorkflowId('');
         setStatus('idle');
         setMessage('任务已删除。');
+        if (routeWorkflowId) navigate('/creative');
       }
     }
-  }, [fetchFinalWorkflow, persistTasks, routeWorkflowId, selectedWorkflowId, stopTaskStream, workflowId]);
+  }, [fetchFinalWorkflow, navigate, persistTasks, routeWorkflowId, selectedWorkflowId, stopTaskStream, workflowId]);
 
   useEffect(() => {
     currentWorkflowRef.current = { routeWorkflowId, workflowId, selectedWorkflowId };
@@ -715,6 +750,7 @@ export function OneClickCreativePage() {
     const isDifferentTask = !isSameTask;
     if (isDifferentTask) {
       stopTaskStream();
+      finalWorkflowRefreshRef.current = null;
       lastSeqRef.current = normalizeLastSeq(sinceSeq);
     } else if (sinceSeq !== undefined) {
       lastSeqRef.current = normalizeLastSeq(sinceSeq);
@@ -756,6 +792,7 @@ export function OneClickCreativePage() {
   }, [applyTaskEvent, stopTaskStream]);
 
   function startNewTask() {
+    finalWorkflowRefreshRef.current = null;
     navigate('/creative');
     stopTaskStream({ clearStorage: true });
     setInput('');
@@ -771,6 +808,9 @@ export function OneClickCreativePage() {
   function selectTask(task) {
     if (activeTaskRef.current?.workflow_id && activeTaskRef.current.workflow_id !== task.workflow_id) {
       stopTaskStream({ clearStorage: true });
+    }
+    if (selectedWorkflowId && selectedWorkflowId !== task.workflow_id) {
+      finalWorkflowRefreshRef.current = null;
     }
     navigate(`/creative/${encodeURIComponent(task.workflow_id)}`);
     setWorkflowId(task.workflow_id);
@@ -845,6 +885,7 @@ export function OneClickCreativePage() {
     setMessage('正在创建创作任务...');
     setWorkflow(null);
     setWorkflowId('');
+    finalWorkflowRefreshRef.current = null;
 
     try {
       const json = await api.createCreativeWorkflow({
