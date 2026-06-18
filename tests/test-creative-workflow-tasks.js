@@ -399,6 +399,47 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.equal(donePatchFailTask.events.filter(event => event.type === 'task_failed').length, 1);
   assert.equal(donePatchFailTask.events.some(event => event.type === 'workflow_persist_failed'), true);
 
+  const terminalPatchAlwaysFailRootDir = tempRoot();
+  await workflows.createCreativeWorkflow({ input: '测试终态写入持续失败', useResearch: false }, { rootDir: terminalPatchAlwaysFailRootDir, services: services() });
+  const terminalPatchAlwaysFailRegistry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-terminal-patch-always-fail',
+    now: () => '2026-06-18T00:00:00.000Z',
+  });
+  const terminalPatchAlwaysFail = await workflowTasks.startCreativeWorkflowTask(WORKFLOW_ID, {
+    rootDir: terminalPatchAlwaysFailRootDir,
+    registry: terminalPatchAlwaysFailRegistry,
+    services: {
+      creativeWorkflows: {
+        patchCreativeWorkflowTaskSummary: async (workflowId, patch) => {
+          if (patch.task_status === 'running') {
+            return { success: true };
+          }
+          throw new Error('持久化层不可用');
+        },
+        runCreativeWorkflow: async workflowId => ({ success: true, workflow_id: workflowId, status: 'done', message: '完成' }),
+      },
+    },
+  });
+  await waitFor(() => assert.equal(terminalPatchAlwaysFailRegistry.getTask(terminalPatchAlwaysFail.task_id).status, 'failed'));
+  const terminalPatchAlwaysFailTask = terminalPatchAlwaysFailRegistry.getTask(terminalPatchAlwaysFail.task_id);
+  assert.equal(terminalPatchAlwaysFailTask.events.some(event => event.type === 'workflow_persist_failed'), true);
+  assert.equal(terminalPatchAlwaysFailTask.events.filter(event => event.type === 'task_failed').length, 1);
+  assert.equal(terminalPatchAlwaysFailTask.events.filter(event => event.type === 'task_done').length, 0);
+  assert.match(terminalPatchAlwaysFailTask.events.at(-1).message, /创作任务终态写入失败/);
+  const terminalPatchAlwaysFailReplay = [];
+  await workflowTasks.subscribeCreativeWorkflowEvents({
+    workflowId: WORKFLOW_ID,
+    taskId: terminalPatchAlwaysFail.task_id,
+    sinceSeq: 0,
+    registry: terminalPatchAlwaysFailRegistry,
+    writeEvent: event => {
+      terminalPatchAlwaysFailReplay.push(event);
+      return true;
+    },
+  });
+  assert.equal(terminalPatchAlwaysFailReplay.at(-1).type, 'task_stream_closed');
+  assert.equal(terminalPatchAlwaysFailReplay.at(-1).status, 'failed');
+
   const deletedRunRegistry = createCreativeTaskRegistry({
     idFactory: () => 'creative-task-run-deleted',
     now: () => '2026-06-18T00:00:00.000Z',

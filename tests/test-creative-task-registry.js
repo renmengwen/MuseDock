@@ -7,6 +7,16 @@ async function waitImmediate() {
   await new Promise(resolve => setImmediate(resolve));
 }
 
+function createDeferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 (async () => {
   assert.deepEqual(Object.keys(registryModule).sort(), ['createCreativeTaskRegistry', 'defaultRegistry']);
 
@@ -126,6 +136,71 @@ async function waitImmediate() {
   );
   assert.equal(blockedRegistry.getTask(blockedTaskId).status, 'running');
   assert.equal(blockedEvents.some(event => event.type === 'task_done'), false);
+
+  const pendingFailRaceRegistry = createCreativeTaskRegistry({
+    now: () => '2026-06-18T00:00:00.000Z',
+    idFactory: () => 'creative-task-pending-fail-race',
+  });
+  const pendingFailRaceTaskId = pendingFailRaceRegistry.createDetachedTask({
+    workflowId: '202606180000000008',
+    operationId: 'workflow-op-pending-fail-race',
+  });
+  pendingFailRaceRegistry.emit(pendingFailRaceTaskId, {
+    type: 'stage_progress',
+    stage: 'project',
+    message: '正在生成工程...',
+  });
+  const pendingFailDeferred = createDeferred();
+  const pendingDonePromise = pendingFailRaceRegistry.markDoneAfter(
+    pendingFailRaceTaskId,
+    '完成',
+    async () => pendingFailDeferred.promise,
+  );
+  await waitImmediate();
+  const competingProgress = pendingFailRaceRegistry.emit(pendingFailRaceTaskId, {
+    type: 'stage_progress',
+    stage: 'project',
+    message: '终态等待期间的进度不应插入',
+  });
+  const competingFailed = pendingFailRaceRegistry.markFailed(pendingFailRaceTaskId, new Error('并发失败'));
+  pendingFailDeferred.resolve();
+  const pendingDoneEvent = await pendingDonePromise;
+  const pendingFailRaceTask = pendingFailRaceRegistry.getTask(pendingFailRaceTaskId);
+  assert.equal(competingProgress, null);
+  assert.equal(competingFailed, null);
+  assert.equal(pendingFailRaceTask.status, 'done');
+  assert.equal(pendingDoneEvent.type, 'task_done');
+  assert.deepEqual(pendingFailRaceTask.events.map(event => event.seq), [1, 2]);
+  assert.deepEqual(
+    pendingFailRaceTask.events.filter(event => event.type === 'task_done' || event.type === 'task_failed').map(event => event.type),
+    ['task_done'],
+  );
+
+  const pendingDeleteRaceRegistry = createCreativeTaskRegistry({
+    now: () => '2026-06-18T00:00:00.000Z',
+    idFactory: () => 'creative-task-pending-delete-race',
+  });
+  const pendingDeleteRaceTaskId = pendingDeleteRaceRegistry.createDetachedTask({
+    workflowId: '202606180000000009',
+    operationId: 'workflow-op-pending-delete-race',
+  });
+  const pendingDeleteDeferred = createDeferred();
+  const pendingDeleteDonePromise = pendingDeleteRaceRegistry.markDoneAfter(
+    pendingDeleteRaceTaskId,
+    '完成',
+    async () => pendingDeleteDeferred.promise,
+  );
+  await waitImmediate();
+  const competingDeleted = pendingDeleteRaceRegistry.markDeleted(pendingDeleteRaceTaskId, '并发删除');
+  pendingDeleteDeferred.resolve();
+  await pendingDeleteDonePromise;
+  const pendingDeleteRaceTask = pendingDeleteRaceRegistry.getTask(pendingDeleteRaceTaskId);
+  assert.equal(competingDeleted, null);
+  assert.equal(pendingDeleteRaceTask.status, 'done');
+  assert.deepEqual(
+    pendingDeleteRaceTask.events.filter(event => event.type === 'task_done' || event.type === 'workflow_deleted').map(event => event.type),
+    ['task_done'],
+  );
 
   const deletedRegistry = createCreativeTaskRegistry({
     now: () => '2026-06-18T00:00:00.000Z',

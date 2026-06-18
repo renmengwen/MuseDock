@@ -518,7 +518,9 @@ router.post('/:workflow_id/events', async (req, res) => {
 router.get('/:workflow_id/tasks/active', async (req, res) => {
   const validation = validateWorkflowId(req.params.workflow_id);
   if (!validation.success) return res.status(400).json(validation);
-  const result = await getTaskService(req).getActiveCreativeWorkflowTask(validation.workflow_id);
+  const result = await getTaskService(req).getActiveCreativeWorkflowTask(validation.workflow_id, {
+    registry: getTaskRegistry(req),
+  });
   return res.json(result);
 });
 

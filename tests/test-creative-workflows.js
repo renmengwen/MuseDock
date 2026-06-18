@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const mediaPipeline = require('../server/services/mediaPipeline');
+const { defaultRegistry } = require('../server/services/creativeTaskRegistry');
 const {
   STAGE_IDS,
   STAGE_LABELS,
@@ -939,6 +940,44 @@ async function testDoesNotMarkRunningStageStaleWhenActiveTaskExists() {
   assert.equal(fetched.data.stages.find(stage => stage.id === 'project').status, 'running');
 }
 
+async function testCustomRootDoesNotUseDefaultRegistryActiveTask() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices({
+    services: {
+      now: () => '2026-06-12T12:20:00.000Z',
+    },
+  });
+
+  await createCreativeWorkflow({ input: '自定义 root 默认 registry 隔离测试' }, { rootDir, mediaRoot, services });
+  const filePath = getWorkflowPath(WORKFLOW_ID, rootDir);
+  const record = readJson(filePath);
+  record.status = 'running';
+  record.active_task_id = 'creative-task-default-registry-same-id';
+  record.stages = record.stages.map(stage => (
+    stage.id === 'project'
+      ? { ...stage, status: 'running', updated_at: '2026-06-12T12:00:00.000Z', started_at: '2026-06-12T12:00:00.000Z' }
+      : stage
+  ));
+  fs.writeFileSync(filePath, JSON.stringify(record, null, 2), 'utf-8');
+
+  defaultRegistry.createDetachedTask({
+    workflowId: WORKFLOW_ID,
+    operationId: 'workflow-op-default-registry-same-id',
+    kind: 'creative_workflow',
+  });
+
+  const fetched = await getCreativeWorkflow(WORKFLOW_ID, {
+    rootDir,
+    services,
+    staleStageTimeoutMs: 10 * 60 * 1000,
+  });
+
+  assert.equal(fetched.success, true);
+  assert.equal(fetched.data.status, 'failed');
+  assert.equal(fetched.data.stages.find(stage => stage.id === 'project').status, 'failed');
+  assert.equal(fetched.data.active_task || null, null);
+}
+
 async function testMissingWorkflowReturnsChineseMessage() {
   const { rootDir } = createTempDirs();
 
@@ -1099,6 +1138,7 @@ async function run() {
   await testStopsWorkflowWhenDeletedDuringGeneration();
   await testMarksStaleBriefStageAsFailedWhenFetched();
   await testDoesNotMarkRunningStageStaleWhenActiveTaskExists();
+  await testCustomRootDoesNotUseDefaultRegistryActiveTask();
   await testMissingWorkflowReturnsChineseMessage();
   await testSceneSpecOperations();
   console.log('creative workflow tests passed');

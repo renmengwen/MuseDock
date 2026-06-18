@@ -400,10 +400,42 @@ async function runDefaultTaskServiceInjectionTest() {
   }
 }
 
+async function runActiveTaskRouteUsesInjectedRegistryTest() {
+  const app = express();
+  const workflowId = '202606121200000006';
+  const registry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-active-route-injected',
+    now: () => '2026-06-12T12:00:00.000Z',
+  });
+  registry.createDetachedTask({
+    workflowId,
+    operationId: 'workflow-op-active-route-injected',
+    kind: 'creative_workflow',
+  });
+
+  app.use(express.json());
+  app.locals.creativeTaskRegistry = registry;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const activeResponse = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/tasks/active`);
+    assert.strictEqual(activeResponse.statusCode, 200);
+    assert.strictEqual(activeResponse.body.success, true);
+    assert.strictEqual(activeResponse.body.active_task.task_id, 'creative-task-active-route-injected');
+    assert.strictEqual(activeResponse.body.active_task.workflow_id, workflowId);
+    assert.strictEqual(activeResponse.body.active_task.status, 'running');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
 async function run() {
   await runIsolatedRouterTests();
   await runRealAppMountTest();
   await runDefaultTaskServiceInjectionTest();
+  await runActiveTaskRouteUsesInjectedRegistryTest();
   await runGetWorkflowUsesActiveRegistryTest();
   await runSseWriteBackpressureKeepsSubscriptionTest();
   await runSseRequestCloseKeepsSubscriptionTest();

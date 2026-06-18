@@ -93,6 +93,7 @@ function createCreativeTaskRegistry(options = {}) {
       events: [],
       subscribers: new Set(),
       truncated: false,
+      terminal_pending: null,
     };
 
     tasks.set(taskId, task);
@@ -102,6 +103,9 @@ function createCreativeTaskRegistry(options = {}) {
   function emit(taskId, event = {}) {
     const task = tasks.get(taskId);
     if (!task) {
+      return null;
+    }
+    if (task.terminal_pending && event.type !== 'workflow_persist_failed') {
       return null;
     }
 
@@ -135,7 +139,7 @@ function createCreativeTaskRegistry(options = {}) {
 
   function markDone(taskId, message = '后台创作任务已完成。') {
     const task = tasks.get(taskId);
-    if (!task || task.status !== 'running') {
+    if (!task || task.status !== 'running' || task.terminal_pending) {
       return null;
     }
 
@@ -152,7 +156,7 @@ function createCreativeTaskRegistry(options = {}) {
 
   function markFailed(taskId, error) {
     const task = tasks.get(taskId);
-    if (!task || task.status !== 'running') {
+    if (!task || task.status !== 'running' || task.terminal_pending) {
       return null;
     }
 
@@ -171,7 +175,7 @@ function createCreativeTaskRegistry(options = {}) {
 
   function markDeleted(taskId, message = '创作任务已停止并删除。') {
     const task = tasks.get(taskId);
-    if (!task || task.status !== 'running') {
+    if (!task || task.status !== 'running' || task.terminal_pending) {
       return null;
     }
 
@@ -187,7 +191,7 @@ function createCreativeTaskRegistry(options = {}) {
 
   async function markTerminalAfter(taskId, terminal = {}, beforeEmit) {
     const task = tasks.get(taskId);
-    if (!task || task.status !== 'running') {
+    if (!task || task.status !== 'running' || task.terminal_pending) {
       return null;
     }
 
@@ -199,14 +203,38 @@ function createCreativeTaskRegistry(options = {}) {
       operation_id: task.operation_id,
       now,
     });
+    const pending = {
+      seq: taskEvent.seq,
+      type: taskEvent.type,
+    };
+    task.terminal_pending = pending;
 
-    if (typeof beforeEmit === 'function') {
-      await beforeEmit(taskEvent);
+    try {
+      if (typeof beforeEmit === 'function') {
+        await beforeEmit(taskEvent);
+      }
+    } catch (error) {
+      if (task.terminal_pending?.seq === pending.seq && task.terminal_pending?.type === pending.type) {
+        task.terminal_pending = null;
+      }
+      throw error;
+    }
+
+    if (
+      task.status !== 'running'
+      || task.terminal_pending?.seq !== pending.seq
+      || task.terminal_pending?.type !== pending.type
+    ) {
+      if (task.terminal_pending?.seq === pending.seq && task.terminal_pending?.type === pending.type) {
+        task.terminal_pending = null;
+      }
+      return null;
     }
 
     task.status = terminal.status;
     task.ended_at = taskEvent.time;
     task.updated_at = taskEvent.time;
+    task.terminal_pending = null;
     if (terminal.status === 'failed') {
       task.error = taskEvent.message || getErrorMessage(terminal.error);
     }

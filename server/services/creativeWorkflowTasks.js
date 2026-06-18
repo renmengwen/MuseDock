@@ -91,6 +91,11 @@ function emitWorkflowPersistFailed(registry, taskId, operationId, message, faile
   });
 }
 
+function markTaskFailedAfterTerminalPersistenceFailure(registry, taskId, error) {
+  const detail = error?.message || '终态写入失败';
+  return registry.markFailed(taskId, new Error(`创作任务终态写入失败：${detail}`));
+}
+
 async function patchTaskSummaryOrEmitFailure({
   registry,
   taskId,
@@ -307,7 +312,9 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
 
   setImmediate(() => {
     runBackgroundTask().catch(error => {
-      emitWorkflowPersistFailed(registry, taskId, operationId, error.message || '后台创作任务执行异常。', 0);
+      const message = `创作任务终态写入失败：${error.message || '后台创作任务执行异常。'}`;
+      emitWorkflowPersistFailed(registry, taskId, operationId, message, 0);
+      markTaskFailedAfterTerminalPersistenceFailure(registry, taskId, error);
     });
   });
 

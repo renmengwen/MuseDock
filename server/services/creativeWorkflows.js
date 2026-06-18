@@ -1242,6 +1242,17 @@ function parseDateMs(value) {
   return Number.isFinite(time) ? time : 0;
 }
 
+function isDefaultWorkflowRoot(rootDir) {
+  return path.resolve(rootDir || DEFAULT_ROOT) === path.resolve(DEFAULT_ROOT);
+}
+
+function resolveTaskRegistry(rootDir, options = {}) {
+  if (Object.prototype.hasOwnProperty.call(options, 'taskRegistry')) {
+    return options.taskRegistry;
+  }
+  return isDefaultWorkflowRoot(rootDir) ? defaultCreativeTaskRegistry : null;
+}
+
 function findStaleRunningStage(record, nowMs, timeoutMs) {
   if (record?.status !== 'running') return null;
   const stages = normalizeStages(record.stages);
@@ -1256,7 +1267,7 @@ async function markStaleRunningStageFailed(record, rootDir, services = {}, optio
   const timeoutMs = Number(options.staleStageTimeoutMs) || DEFAULT_STALE_STAGE_TIMEOUT_MS;
   const now = getNow(services);
   const nowMs = parseDateMs(now) || Date.now();
-  const taskRegistry = options.taskRegistry || defaultCreativeTaskRegistry;
+  const taskRegistry = resolveTaskRegistry(rootDir, options);
   const activeTask = taskRegistry?.activeTaskForWorkflow?.(record.workflow_id);
   if (activeTask && activeTask.status === 'running') {
     record.active_task = activeTask;
