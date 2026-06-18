@@ -82,6 +82,42 @@ function compactTemplateSource(source, maxLength = 4000) {
   return text.length > maxLength ? text.slice(0, maxLength).trimEnd() : text;
 }
 
+function compactHtmlReference(source, maxLength = 2600) {
+  const text = String(source || '')
+    .replace(/\s+/g, ' ')
+    .replace(/>\s+</g, '><')
+    .trim();
+  if (!text) return '';
+  return text.length > maxLength ? text.slice(0, maxLength).trimEnd() : text;
+}
+
+function buildVisualContinuitySection({ visualStyleReferenceHtml = '', previousFrameHtml = '' } = {}) {
+  const styleReference = compactHtmlReference(visualStyleReferenceHtml);
+  const previousReference = compactHtmlReference(previousFrameHtml);
+  if (!styleReference && !previousReference) return [];
+  return [
+    '',
+    'Visual continuity lock（跨镜头风格锁定）：',
+    '本视频按 html-video multi-composition 的思路生成：每一帧可以有不同构图和叙事重点，但必须保持同一套调色板、字体、背景语言、组件形状和 motion vocabulary。',
+    '允许当前帧更换构图、信息层级和主视觉对象；不要另起一套视觉主题，不要切换到新的蓝紫科技风、玻璃拟态 dashboard 或与视觉锚点不一致的风格。',
+    '如果当前内容需要流程图、卡片、数据或设备界面，必须用视觉锚点中的颜色、字体、形状、阴影、圆角、边框和动效语言重新表达，而不是重新设计一套美术风格。',
+    ...(styleReference ? [
+      '',
+      '全片视觉锚点 HTML（通常来自第一帧；用于锁定全片 visual signature，只参考视觉系统，不复制文案）：',
+      '```html',
+      styleReference,
+      '```',
+    ] : []),
+    ...(previousReference ? [
+      '',
+      '相邻上一帧 HTML（用于保持镜头衔接；当前帧要延续它的视觉语言，但内容和构图必须服务当前 frame）：',
+      '```html',
+      previousReference,
+      '```',
+    ] : []),
+  ];
+}
+
 function extractViewportDimensions(html = '') {
   const pairs = [];
   const metaPattern = /<meta\b[^>]*name=["']viewport["'][^>]*>/gi;
@@ -152,10 +188,16 @@ function buildFrameHtmlPrompt({
   creativeContext = {},
   target = {},
   template = null,
+  visualStyleReferenceHtml = '',
+  previousFrameHtml = '',
 } = {}) {
   const resolution = resolveResolution(target);
   const adjacent = adjacentSummary(graph, index);
   const templateSource = readTemplateSourceSnippet(template);
+  const continuitySection = buildVisualContinuitySection({
+    visualStyleReferenceHtml,
+    previousFrameHtml,
+  });
   return [
     '你是 html-video 单帧完整 HTML 生成器。',
     '请输出 exactly one fenced ```html code block 或一个完整 HTML document；不要输出解释、Markdown 说明或 HTML 之外的 prose。',
@@ -183,6 +225,7 @@ function buildFrameHtmlPrompt({
       '',
       'Template HTML：未能读取模板源码时，仍必须继承所选模板 metadata 描述的视觉方向和 motion vocabulary，不能退化为静态信息图。',
     ]),
+    ...continuitySection,
     '',
     'Source context summary：',
     summarizeCreativeContextForPrompt(creativeContext) || '（无）',
@@ -245,6 +288,10 @@ function extractRawHtmlDocument(raw) {
 function buildRetryPrompt(args = {}) {
   const resolution = resolveResolution(args.target || {});
   const validationMessage = compactText(args.validationMessage || args.validation_message || '', 260);
+  const continuitySection = buildVisualContinuitySection({
+    visualStyleReferenceHtml: args.visualStyleReferenceHtml,
+    previousFrameHtml: args.previousFrameHtml,
+  });
   return [
     '上一次没有返回有效 HTML。只返回一个完整 HTML document，不要解释。',
     `当前帧 id：${args.node?.id || ''}`,
@@ -257,6 +304,7 @@ function buildRetryPrompt(args = {}) {
     'raw_html 每帧必须包含 data-text-key="headline"、data-text-key="subtitle"、data-text-key="body" 三类稳定可编辑文本锚点。',
     '不允许只把可见文案写进 canvas 或伪元素；字幕可由系统注入，但 HTML 不得阻挡底部字幕层。',
     '不要输出 [object Object]，不要输出无关导航，不要只改底部 caption。',
+    ...continuitySection,
     '只返回一个完整 HTML。',
   ].join('\n');
 }

@@ -74,6 +74,31 @@ assert.match(prompt, /Search \/ GitHub \/ Tech Forums \/ Docs \/ Issues/);
 assert.match(prompt, /\[object Object\]/);
 assert.match(prompt, /不要发明源素材中没有的精确事实/);
 
+const continuityPrompt = agent.buildFrameHtmlPrompt({
+  graph,
+  node: graph.nodes[1],
+  index: 1,
+  total: 2,
+  target: { resolution: { width: 1920, height: 1080 } },
+  template: {
+    id: 'bold_signal',
+    name: '信号卡片',
+    description: '深色背景和橙色焦点卡片滑入。',
+  },
+  visualStyleReferenceHtml: '<!doctype html><html><body><main class="orange-signal" style="background:#1a1a1a;color:#FF5722"><h1>首帧视觉锚点</h1></main></body></html>',
+  previousFrameHtml: '<!doctype html><html><body><main class="orange-flow"><section>上一帧橙黑流程图</section></main></body></html>',
+});
+
+assert.match(continuityPrompt, /全片视觉锚点|视觉锚点/);
+assert.match(continuityPrompt, /相邻上一帧|上一帧 HTML/);
+assert.match(continuityPrompt, /orange-signal/);
+assert.match(continuityPrompt, /#1a1a1a/);
+assert.match(continuityPrompt, /#FF5722/);
+assert.match(continuityPrompt, /orange-flow/);
+assert.match(continuityPrompt, /保持同一套调色板、字体、背景语言、组件形状和 motion vocabulary/);
+assert.match(continuityPrompt, /允许当前帧更换构图/);
+assert.match(continuityPrompt, /不要切换到新的蓝紫科技风|不要另起一套视觉主题/);
+
 const templateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'frame-html-template-'));
 const templateSourcePath = path.join(templateDir, 'source.html');
 fs.writeFileSync(templateSourcePath, [

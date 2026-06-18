@@ -361,6 +361,8 @@ async function generateHtmlVideo({
     });
     const frameHtmlByNodeId = {};
     const nodes = graphParsed.graph.nodes || [];
+    let visualStyleReferenceHtml = '';
+    let previousFrameHtml = '';
     for (let index = 0; index < nodes.length; index += 1) {
       await report(onProgress, {
         type: 'html_video_frame_html_started',
@@ -382,6 +384,8 @@ async function generateHtmlVideo({
         creativeContext,
         target: renderTarget,
         template,
+        visualStyleReferenceHtml,
+        previousFrameHtml,
       });
       if (!htmlResult.success) {
         return failure(htmlResult.message || '单帧 HTML 生成失败。', [
@@ -397,6 +401,8 @@ async function generateHtmlVideo({
         });
       }
       frameHtmlByNodeId[nodes[index].id] = htmlResult.html;
+      if (!visualStyleReferenceHtml) visualStyleReferenceHtml = htmlResult.html;
+      previousFrameHtml = htmlResult.html;
       await report(onProgress, {
         type: 'html_video_frame_html_done',
         stage: 'project',
