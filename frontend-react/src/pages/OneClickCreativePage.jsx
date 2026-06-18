@@ -577,6 +577,8 @@ export function OneClickCreativePage() {
     workflowId: nextWorkflowId,
     taskId: expectedTaskId = '',
     generation: expectedGeneration,
+    closedGeneration = null,
+    closedByStream = false,
     status: terminalStatus = 'done',
     message: terminalMessage = '',
   } = {}) => {
@@ -584,8 +586,18 @@ export function OneClickCreativePage() {
     if (!targetWorkflowId || terminalStatus === 'deleted') return;
     const expectedWorkflowId = targetWorkflowId;
     const refreshKey = `${targetWorkflowId}:${expectedTaskId || ''}`;
+    const terminalGeneration = Number.isFinite(Number(closedGeneration))
+      ? Number(closedGeneration)
+      : (closedByStream ? expectedGeneration : null);
     if (finalWorkflowRefreshRef.current?.key === refreshKey
       && (finalWorkflowRefreshRef.current.started || finalWorkflowRefreshRef.current.settled)) {
+      if (closedByStream) {
+        finalWorkflowRefreshRef.current = {
+          ...finalWorkflowRefreshRef.current,
+          closedByStream: true,
+          closedGeneration: terminalGeneration,
+        };
+      }
       return;
     }
     finalWorkflowRefreshRef.current = {
@@ -593,6 +605,8 @@ export function OneClickCreativePage() {
       workflowId: expectedWorkflowId,
       taskId: expectedTaskId,
       generation: expectedGeneration,
+      closedGeneration: closedByStream ? terminalGeneration : null,
+      closedByStream,
       terminalStatus,
       started: true,
       settled: false,
@@ -600,13 +614,23 @@ export function OneClickCreativePage() {
 
     const isStaleFinalFetch = () => {
       if (finalWorkflowRefreshRef.current?.key !== refreshKey) return true;
-      if (streamGenerationRef.current !== expectedGeneration && activeTaskRef.current) return true;
+      const refreshToken = finalWorkflowRefreshRef.current;
+      if (refreshToken.workflowId !== targetWorkflowId) return true;
+      if (expectedTaskId && refreshToken.taskId !== expectedTaskId) return true;
+      const isAllowedClosedGeneration = Boolean(
+        refreshToken.closedByStream
+        && refreshToken.closedGeneration === streamGenerationRef.current
+        && refreshToken.workflowId === targetWorkflowId
+        && (!expectedTaskId || refreshToken.taskId === expectedTaskId),
+      );
+      if (streamGenerationRef.current !== expectedGeneration && !isAllowedClosedGeneration) return true;
       if (activeTaskRef.current?.workflow_id && activeTaskRef.current?.workflow_id !== targetWorkflowId) return true;
       if (expectedTaskId && activeTaskRef.current?.task_id && activeTaskRef.current?.task_id !== expectedTaskId) return true;
       const currentWorkflowId = currentWorkflowRef.current.routeWorkflowId
         || currentWorkflowRef.current.workflowId
         || currentWorkflowRef.current.selectedWorkflowId;
-      return Boolean(currentWorkflowId && currentWorkflowId !== targetWorkflowId);
+      if (!currentWorkflowId) return !isAllowedClosedGeneration;
+      return currentWorkflowId !== targetWorkflowId;
     };
 
     const fallbackMessage = terminalMessage
@@ -710,6 +734,8 @@ export function OneClickCreativePage() {
           workflowId: event.workflow_id,
           taskId: event.task_id,
           generation: terminalGeneration,
+          closedGeneration: terminalGeneration,
+          closedByStream: true,
           status: event.status,
           message: event.message,
         });
@@ -721,6 +747,8 @@ export function OneClickCreativePage() {
           workflowId: event.workflow_id,
           taskId: event.task_id,
           generation: terminalGeneration,
+          closedGeneration: terminalGeneration,
+          closedByStream: true,
           status: event.status,
           message: event.message,
         });
@@ -933,6 +961,7 @@ export function OneClickCreativePage() {
 
   useEffect(() => {
     if (!routeWorkflowId) {
+      finalWorkflowRefreshRef.current = null;
       setSelectedWorkflowId('');
       if (workflowId && status !== 'creating') {
         stopTaskStream({ clearStorage: true });
