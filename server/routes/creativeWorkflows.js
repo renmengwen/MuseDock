@@ -15,12 +15,31 @@ function getTaskService(req) {
   return req.app?.locals?.creativeWorkflowTasks || defaultCreativeWorkflowTasks;
 }
 
+function hasLocal(req, key) {
+  return Boolean(req.app?.locals) && Object.prototype.hasOwnProperty.call(req.app.locals, key);
+}
+
+function getRegistryFromTaskService(taskService) {
+  if (!taskService) return null;
+  if (taskService.taskRegistry) return taskService.taskRegistry;
+  if (taskService.registry) return taskService.registry;
+  if (typeof taskService.getCreativeTaskRegistry === 'function') {
+    return taskService.getCreativeTaskRegistry() || null;
+  }
+  return null;
+}
+
 function getTaskRegistry(req) {
-  return req.app?.locals?.creativeTaskRegistry
-    || req.app?.locals?.creativeWorkflowTasks?.taskRegistry
-    || req.app?.locals?.creativeWorkflowTasks?.registry
-    || defaultCreativeWorkflowTasks.getCreativeTaskRegistry?.()
-    || null;
+  if (hasLocal(req, 'creativeTaskRegistry')) {
+    return req.app.locals.creativeTaskRegistry || null;
+  }
+  if (hasLocal(req, 'creativeWorkflowTasks')) {
+    return getRegistryFromTaskService(req.app.locals.creativeWorkflowTasks);
+  }
+  if (hasLocal(req, 'creativeWorkflows') && req.app.locals.creativeWorkflows !== defaultCreativeWorkflows) {
+    return null;
+  }
+  return defaultCreativeWorkflowTasks.getCreativeTaskRegistry?.() || null;
 }
 
 function getMessage(result, fallback) {

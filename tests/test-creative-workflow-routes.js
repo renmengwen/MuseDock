@@ -431,11 +431,42 @@ async function runActiveTaskRouteUsesInjectedRegistryTest() {
   }
 }
 
+async function runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest() {
+  const app = express();
+  const workflowId = '202606121200000007';
+  let capturedTaskRegistry = 'not-called';
+
+  app.use(express.json());
+  app.locals.creativeWorkflows = {
+    getCreativeWorkflow: async (id, options = {}) => {
+      capturedTaskRegistry = options.taskRegistry;
+      return {
+        success: true,
+        data: { workflow_id: id },
+      };
+    },
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const response = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}`);
+    assert.strictEqual(response.statusCode, 200);
+    assert.strictEqual(response.body.success, true);
+    assert.strictEqual(response.body.data.workflow_id, workflowId);
+    assert.ok(!capturedTaskRegistry, 'custom creativeWorkflows service should not receive default global task registry');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
 async function run() {
   await runIsolatedRouterTests();
   await runRealAppMountTest();
   await runDefaultTaskServiceInjectionTest();
   await runActiveTaskRouteUsesInjectedRegistryTest();
+  await runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest();
   await runGetWorkflowUsesActiveRegistryTest();
   await runSseWriteBackpressureKeepsSubscriptionTest();
   await runSseRequestCloseKeepsSubscriptionTest();
