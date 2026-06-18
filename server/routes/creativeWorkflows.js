@@ -86,6 +86,7 @@ router.post('/', async (req, res) => {
       workflowOptions.skipValidation = true;
     }
     const started = await taskService.startCreativeWorkflowTask(result.workflow_id, {
+      registry: getTaskRegistry(req),
       workflowOptions,
       services: { creativeWorkflows: service },
     });
@@ -511,6 +512,7 @@ router.post('/:workflow_id/events', async (req, res) => {
       workflowId: validation.workflow_id,
       taskId,
       sinceSeq,
+      registry: getTaskRegistry(req),
       writeEvent,
       onClose: () => {
         cleanup({ end: true });

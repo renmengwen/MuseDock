@@ -400,6 +400,56 @@ async function runDefaultTaskServiceInjectionTest() {
   }
 }
 
+async function runCreateRouteUsesInjectedRegistryTest() {
+  const app = express();
+  const workflowId = '202606121200000009';
+  const registry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-create-route-injected',
+    now: () => '2026-06-12T12:00:00.000Z',
+  });
+  const patchCalls = [];
+  const runCalls = [];
+
+  app.use(express.json());
+  app.locals.creativeTaskRegistry = registry;
+  app.locals.creativeWorkflows = {
+    createCreativeWorkflow: async () => ({
+      success: true,
+      status: 'queued',
+      workflow_id: workflowId,
+      creative_context: { asset_context: { status: 'disabled' } },
+      message: '创作任务已创建。',
+    }),
+    patchCreativeWorkflowTaskSummary: async (id, patch) => {
+      patchCalls.push({ id, patch });
+      return { success: true, workflow_id: id };
+    },
+    runCreativeWorkflow: async (id, options) => {
+      runCalls.push({ id, hasTaskContext: Boolean(options.taskContext) });
+      return { success: true, workflow_id: id, status: 'done', message: '完成' };
+    },
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const createResponse = await requestJson(server, 'POST', '/api/creative-workflows', {
+      input: '使用 injected registry 启动后台任务',
+    });
+    assert.strictEqual(createResponse.statusCode, 202);
+    assert.strictEqual(createResponse.body.success, true);
+    assert.strictEqual(createResponse.body.task_id, 'creative-task-create-route-injected');
+    assert.strictEqual(createResponse.body.active_task.task_id, 'creative-task-create-route-injected');
+    assert.strictEqual(createResponse.body.active_task.workflow_id, workflowId);
+    assert.strictEqual(registry.getTask('creative-task-create-route-injected').workflow_id, workflowId);
+    assert.strictEqual(patchCalls[0].id, workflowId);
+    await waitFor(() => assert.deepStrictEqual(runCalls, [{ id: workflowId, hasTaskContext: true }]));
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
 async function runActiveTaskRouteUsesInjectedRegistryTest() {
   const app = express();
   const workflowId = '202606121200000006';
@@ -463,6 +513,48 @@ async function runActiveTaskRouteWithCustomWorkflowServiceDoesNotUseDefaultRegis
   }
 }
 
+async function runEventsRouteUsesInjectedRegistryTest() {
+  const app = express();
+  const workflowId = '202606121200000010';
+  const registry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-events-route-injected',
+    now: () => '2026-06-12T12:00:00.000Z',
+  });
+  const taskId = registry.createDetachedTask({
+    workflowId,
+    operationId: 'workflow-op-events-route-injected',
+    kind: 'creative_workflow',
+  });
+  registry.emit(taskId, {
+    type: 'stage_progress',
+    stage: 'project',
+    progress: 50,
+    message: 'injected registry replay event',
+  });
+  registry.markDone(taskId, 'injected registry done');
+
+  app.use(express.json());
+  app.locals.creativeTaskRegistry = registry;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const sseResponse = await requestSse(server, `/api/creative-workflows/${workflowId}/events`, {
+      task_id: taskId,
+      since_seq: 0,
+    });
+    assert.strictEqual(sseResponse.statusCode, 200);
+    assert.match(sseResponse.headers['content-type'], /text\/event-stream/);
+    assert.match(sseResponse.body, /event: stage_progress/);
+    assert.match(sseResponse.body, /injected registry replay event/);
+    assert.match(sseResponse.body, /event: task_done/);
+    assert.doesNotMatch(sseResponse.body, /未找到后台任务事件流/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
 async function runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest() {
   const app = express();
   const workflowId = '202606121200000007';
@@ -497,10 +589,12 @@ async function run() {
   await runIsolatedRouterTests();
   await runRealAppMountTest();
   await runDefaultTaskServiceInjectionTest();
+  await runCreateRouteUsesInjectedRegistryTest();
   await runActiveTaskRouteUsesInjectedRegistryTest();
   await runActiveTaskRouteWithCustomWorkflowServiceDoesNotUseDefaultRegistryTest();
   await runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest();
   await runGetWorkflowUsesActiveRegistryTest();
+  await runEventsRouteUsesInjectedRegistryTest();
   await runSseWriteBackpressureKeepsSubscriptionTest();
   await runSseRequestCloseKeepsSubscriptionTest();
   await runSseRouteCleanupStaticTest();
