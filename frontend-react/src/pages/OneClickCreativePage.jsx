@@ -791,10 +791,10 @@ export function OneClickCreativePage() {
         setSelectedWorkflowId('');
         setStatus('idle');
         setMessage('任务已删除。');
-        if (routeWorkflowId) navigate('/creative');
+        navigate('/creative');
       }
     }
-  }, [fetchFinalWorkflow, navigate, persistTasks, routeWorkflowId, selectedWorkflowId, stopTaskStream, workflowId]);
+  }, [fetchFinalWorkflow, navigate, persistTasks, stopTaskStream]);
 
   useEffect(() => {
     currentWorkflowRef.current = { routeWorkflowId, workflowId, selectedWorkflowId };

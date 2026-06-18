@@ -194,6 +194,7 @@ assert.doesNotMatch(deletedBranchBlock, /fetchFinalWorkflow|refreshFinalWorkflow
 assert.match(deletedBranchBlock, /setWorkflowId\(''\)/, 'Deleted stream close should clear workflowId state');
 assert.match(deletedBranchBlock, /setSelectedWorkflowId\(''\)/, 'Deleted stream close should clear selectedWorkflowId state');
 assert.match(deletedBranchBlock, /navigate\('\/creative'\)/, 'Deleted stream close should navigate detail routes back to /creative');
+assert.doesNotMatch(deletedBranchBlock, /if\s*\(\s*routeWorkflowId\s*\)\s*navigate\('\/creative'\)/, 'Deleted stream close navigation should not depend on a stale routeWorkflowId closure');
 assert.match(page, /function selectTask\(task\) \{[\s\S]*stopTaskStream\(\{ clearStorage: true \}\)/, 'Selecting another task should stop the previous task stream');
 assert.match(page, /saveActiveCreativeTask\(null\)/, 'Normal close and stop paths should clear active task stream storage');
 const loadActiveStart = page.indexOf('function loadActiveCreativeTask() {');
