@@ -181,6 +181,15 @@ assert.ok(onCloseBlock.includes('if (streamClosedNormallyRef.current) return;'),
 assert.match(onCloseBlock, /reconnectTimerRef\.current = window\.setTimeout\(\(\) => \{[\s\S]*if \(streamGenerationRef\.current !== streamGeneration\) return;[\s\S]*subscribeTaskEvents\(nextTask\);[\s\S]*\}, 1500\);/, 'SSE onClose should reconnect the same task after abnormal EOF while preserving generation guard');
 assert.match(page, /const\s+stopTaskStream\s*=\s*useCallback\(\(\{ clearStorage = false \} = \{\}\) => \{/, 'OneClickCreativePage should centralize task stream cleanup in a stable callback');
 assert.match(page, /const\s+applyTaskEvent\s*=\s*useCallback\(\(event\) => \{/, 'OneClickCreativePage should apply task events through a stable callback');
+const applyTaskEventStartIndex = page.indexOf('const applyTaskEvent = useCallback((event) => {');
+const applyTaskEventEndIndex = page.indexOf('useEffect(() => {\n    currentWorkflowRef.current', applyTaskEventStartIndex);
+assert.ok(applyTaskEventStartIndex > 0 && applyTaskEventEndIndex > applyTaskEventStartIndex, 'OneClickCreativePage should define applyTaskEvent before currentWorkflowRef sync effect');
+const applyTaskEventBlock = page.slice(applyTaskEventStartIndex, applyTaskEventEndIndex);
+assert.match(applyTaskEventBlock, /currentWorkflowRef\.current/, 'applyTaskEvent should read the latest workflow context from currentWorkflowRef before writing UI state');
+assert.doesNotMatch(applyTaskEventBlock, /const\s+currentWorkflowId\s*=\s*routeWorkflowId\s*\|\|\s*workflowId\s*\|\|\s*selectedWorkflowId/, 'applyTaskEvent should not compute currentWorkflowId from stale route/workflow closure state');
+const applyTaskEventDependencyMatch = applyTaskEventBlock.match(/\},\s*\[([^\]]*)\]\);/);
+assert.ok(applyTaskEventDependencyMatch, 'applyTaskEvent should declare a dependency array');
+assert.doesNotMatch(applyTaskEventDependencyMatch[1], /\b(routeWorkflowId|workflowId|selectedWorkflowId)\b/, 'applyTaskEvent dependency array should not re-add workflow route state to mask stale closures');
 assert.match(page, /const\s+subscribeTaskEvents\s*=\s*useCallback\(\(nextTask,\s*\{ sinceSeq \} = \{\}\) => \{/, 'OneClickCreativePage should subscribe to task events through a stable callback');
 assert.match(page, /const expectedTaskId = activeTaskRef\.current\?\.task_id/, 'OneClickCreativePage should compare event task id against active task ref');
 assert.match(page, /event\.task_id && expectedTaskId && event\.task_id !== expectedTaskId/, 'OneClickCreativePage should ignore stream events from stale task ids');

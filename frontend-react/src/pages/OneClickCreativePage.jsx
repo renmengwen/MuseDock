@@ -718,12 +718,16 @@ export function OneClickCreativePage() {
   }, [persistTasks]);
 
   const applyTaskEvent = useCallback((event) => {
-    const expectedWorkflowId = activeTaskRef.current?.workflow_id || workflowId;
+    if (!event) return;
+    const currentWorkflowId = currentWorkflowRef.current.routeWorkflowId
+      || currentWorkflowRef.current.workflowId
+      || currentWorkflowRef.current.selectedWorkflowId;
+    const expectedWorkflowId = activeTaskRef.current?.workflow_id || currentWorkflowId;
     const expectedTaskId = activeTaskRef.current?.task_id;
-    if (!event || (expectedWorkflowId && event.workflow_id !== expectedWorkflowId)) return;
+    if (expectedWorkflowId && event.workflow_id !== expectedWorkflowId) return;
     if (event.task_id && expectedTaskId && event.task_id !== expectedTaskId) return;
-    const currentWorkflowId = routeWorkflowId || workflowId || selectedWorkflowId;
     if (currentWorkflowId && event.workflow_id !== currentWorkflowId) return;
+    if (!currentWorkflowId && activeTaskRef.current?.workflow_id !== event.workflow_id) return;
     if (Number(event.seq) > 0) {
       lastSeqRef.current = Number(event.seq);
       saveActiveCreativeTask({ workflow_id: event.workflow_id, task_id: event.task_id, last_seq: lastSeqRef.current });
