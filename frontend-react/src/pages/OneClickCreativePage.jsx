@@ -531,6 +531,7 @@ export function OneClickCreativePage() {
   const reconnectTimerRef = useRef(null);
   const lastSeqRef = useRef(0);
   const activeTaskRef = useRef(null);
+  const currentWorkflowRef = useRef({ routeWorkflowId: '', workflowId: '', selectedWorkflowId: '' });
   const streamClosedNormallyRef = useRef(false);
   const streamGenerationRef = useRef(0);
   const [input, setInput] = useState('');
@@ -571,6 +572,66 @@ export function OneClickCreativePage() {
     }
   }, []);
 
+  const fetchFinalWorkflow = useCallback(async ({
+    workflowId: nextWorkflowId,
+    taskId: expectedTaskId = '',
+    generation: expectedGeneration,
+    status: terminalStatus = 'done',
+    message: terminalMessage = '',
+  } = {}) => {
+    const targetWorkflowId = String(nextWorkflowId || '').trim();
+    if (!targetWorkflowId || terminalStatus === 'deleted') return;
+
+    const isStaleFinalFetch = () => {
+      if (streamGenerationRef.current !== expectedGeneration) return true;
+      if (activeTaskRef.current?.workflow_id && activeTaskRef.current?.workflow_id !== targetWorkflowId) return true;
+      if (expectedTaskId && activeTaskRef.current?.task_id && activeTaskRef.current?.task_id !== expectedTaskId) return true;
+      const currentWorkflowId = currentWorkflowRef.current.routeWorkflowId
+        || currentWorkflowRef.current.workflowId
+        || currentWorkflowRef.current.selectedWorkflowId;
+      return Boolean(currentWorkflowId && currentWorkflowId !== targetWorkflowId);
+    };
+
+    const fallbackMessage = terminalMessage
+      || (terminalStatus === 'failed' ? '视频生成失败，请查看任务详情。' : '视频生成完成。');
+    try {
+      if (isStaleFinalFetch()) return;
+      const json = await api.getCreativeWorkflow(targetWorkflowId);
+      if (isStaleFinalFetch()) return;
+
+      const nextWorkflow = getWorkflowPayload(json);
+      const nextStatus = nextWorkflow?.status || (json?.success === false ? 'failed' : terminalStatus);
+      const nextMessage = getWorkflowDisplayMessage(nextWorkflow, json?.message || fallbackMessage);
+      setWorkflow(nextWorkflow);
+      persistTasks(prev => upsertTask(prev, {
+        workflow_id: targetWorkflowId,
+        title: prev.find(task => task.workflow_id === targetWorkflowId)?.title || getTaskTitle(nextWorkflow?.creative_context?.input?.raw_text),
+        input: prev.find(task => task.workflow_id === targetWorkflowId)?.input || nextWorkflow?.creative_context?.input?.raw_text || '',
+        status: nextStatus,
+        message: nextMessage,
+        workflow: nextWorkflow,
+        created_at: prev.find(task => task.workflow_id === targetWorkflowId)?.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+
+      if (nextStatus === 'failed' || terminalStatus === 'failed') {
+        setStatus('failed');
+        setMessage(nextMessage || '视频生成失败，请查看任务详情。');
+        return;
+      }
+      if (nextStatus === 'done' || terminalStatus === 'done') {
+        setStatus('done');
+        setMessage(nextMessage || '视频生成完成。');
+        return;
+      }
+      setMessage(nextMessage);
+    } catch {
+      if (isStaleFinalFetch()) return;
+      setStatus(terminalStatus === 'failed' ? 'failed' : 'done');
+      setMessage(fallbackMessage || '终态详情暂时未刷新，请稍后重新打开任务。');
+    }
+  }, [persistTasks]);
+
   const applyTaskEvent = useCallback((event) => {
     const expectedWorkflowId = activeTaskRef.current?.workflow_id || workflowId;
     const expectedTaskId = activeTaskRef.current?.task_id;
@@ -589,18 +650,62 @@ export function OneClickCreativePage() {
     if (event.type === 'task_failed') {
       setStatus('failed');
       setMessage(event.message || '创作任务失败。');
+      fetchFinalWorkflow({
+        workflowId: event.workflow_id,
+        taskId: event.task_id,
+        generation: streamGenerationRef.current,
+        status: 'failed',
+        message: event.message,
+      });
     }
     if (event.type === 'task_done') {
       setStatus('done');
       setMessage(event.message || '创作任务已完成。');
+      fetchFinalWorkflow({
+        workflowId: event.workflow_id,
+        taskId: event.task_id,
+        generation: streamGenerationRef.current,
+        status: 'done',
+        message: event.message,
+      });
     }
     if (event.type === 'task_stream_closed') {
+      const terminalGeneration = streamGenerationRef.current + 1;
       stopTaskStream({ clearStorage: true });
-      if (event.status === 'done') setStatus('done');
-      if (event.status === 'failed') setStatus('failed');
-      if (event.status === 'deleted') setStatus('idle');
+      if (event.status === 'done') {
+        setStatus('done');
+        setMessage(event.message || '创作任务已完成。');
+        fetchFinalWorkflow({
+          workflowId: event.workflow_id,
+          taskId: event.task_id,
+          generation: terminalGeneration,
+          status: event.status,
+          message: event.message,
+        });
+      }
+      if (event.status === 'failed') {
+        setStatus('failed');
+        setMessage(event.message || '创作任务失败。');
+        fetchFinalWorkflow({
+          workflowId: event.workflow_id,
+          taskId: event.task_id,
+          generation: terminalGeneration,
+          status: event.status,
+          message: event.message,
+        });
+      }
+      if (event.status === 'deleted') {
+        persistTasks(prev => prev.filter(item => item.workflow_id !== event.workflow_id));
+        setWorkflow(null);
+        setStatus('idle');
+        setMessage('任务已删除。');
+      }
     }
-  }, [routeWorkflowId, selectedWorkflowId, stopTaskStream, workflowId]);
+  }, [fetchFinalWorkflow, persistTasks, routeWorkflowId, selectedWorkflowId, stopTaskStream, workflowId]);
+
+  useEffect(() => {
+    currentWorkflowRef.current = { routeWorkflowId, workflowId, selectedWorkflowId };
+  }, [routeWorkflowId, workflowId, selectedWorkflowId]);
 
   const subscribeTaskEvents = useCallback((nextTask, { sinceSeq } = {}) => {
     if (!nextTask?.workflow_id || !nextTask?.task_id || !api?.streamCreativeWorkflowEvents) return;

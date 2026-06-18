@@ -141,6 +141,13 @@ assert.match(page, /task_stream_closed/, 'OneClickCreativePage should stop recon
 assert.match(page, /streamClosedNormallyRef/, 'OneClickCreativePage should distinguish normal stream closure from errors');
 assert.match(page, /since_seq/, 'OneClickCreativePage should reconnect with since_seq');
 assert.match(page, /window\.setTimeout/, 'OneClickCreativePage should schedule SSE reconnects');
+assert.match(page, /const\s+(fetchFinalWorkflow|refreshFinalWorkflow)\s*=\s*useCallback\(\s*async\s*\(/, 'OneClickCreativePage should define a stable final workflow refresh helper');
+assert.match(page, /(fetchFinalWorkflow|refreshFinalWorkflow)\(\{[\s\S]*workflowId:[\s\S]*event\.workflow_id[\s\S]*taskId:[\s\S]*event\.task_id[\s\S]*generation:/, 'Terminal task events should trigger a guarded final workflow refresh');
+assert.match(page, /task_stream_closed[\s\S]*(fetchFinalWorkflow|refreshFinalWorkflow)\(\{[\s\S]*status:[\s\S]*event\.status/, 'task_stream_closed should trigger final refresh for terminal done or failed statuses');
+assert.match(page, /const json = await api\.getCreativeWorkflow\(targetWorkflowId\);[\s\S]*persistTasks\(prev => upsertTask\(prev, \{/, 'Final workflow refresh should fetch the current workflow and persist the final task snapshot');
+assert.match(page, /streamGenerationRef\.current !== expectedGeneration/, 'Final workflow refresh should guard against stale stream generations');
+assert.match(page, /activeTaskRef\.current\?\.workflow_id[\s\S]*targetWorkflowId[\s\S]*activeTaskRef\.current\?\.task_id[\s\S]*expectedTaskId/, 'Final workflow refresh should guard against stale active workflow and task ids');
+assert.match(page, /currentWorkflowRef\.current[\s\S]*targetWorkflowId/, 'Final workflow refresh should guard against stale selected or routed workflow ids');
 const onCloseStart = page.indexOf('onClose: () => {');
 const onErrorStart = page.indexOf('onError: () => {', onCloseStart);
 assert.ok(onCloseStart > 0 && onErrorStart > onCloseStart, 'OneClickCreativePage should define adjacent SSE onClose and onError handlers');
