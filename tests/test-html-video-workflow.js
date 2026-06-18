@@ -116,9 +116,9 @@ async function createVerticalTemplate(rootDir) {
             };
           }
           if (prompt.includes('当前帧：scene_01')) {
-            return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01">第一幕完整页面</main></body></html>' };
+            return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">第一幕</h1><p data-text-key="subtitle">短字幕</p><section data-text-key="body">第一幕完整页面</section></main></body></html>' };
           }
-          return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_02">第二幕完整页面</main></body></html>' };
+          return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_02"><h1 data-text-key="headline">第二幕</h1><p>短字幕</p><section>第二幕完整页面</section></main></body></html>' };
         },
       },
       environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
@@ -154,6 +154,7 @@ async function createVerticalTemplate(rootDir) {
   assert.equal(rawPathResult.project.frames.some(frame => Object.keys(frame.inputs || {}).length > 0), false);
   const rawHtmlFiles = await Promise.all(rawPathResult.project.frames.map(frame => fs.readFile(path.join(rawPathResult.html_video_project_path, frame.html_path), 'utf8')));
   assert.notEqual(rawHtmlFiles[0], rawHtmlFiles[1]);
+  assert.ok(rawPathResult.html_video_diagnostics.some(item => item.code === 'raw_html_text_keys_missing'));
   assert.ok(rawCalls.some(call => call === 'render:scene_01:raw_html'));
   assert.ok(rawCalls.some(call => call === 'render:scene_02:raw_html'));
 
@@ -186,7 +187,7 @@ async function createVerticalTemplate(rootDir) {
           if (prompt.startsWith('你是 html-video 的 content graph')) {
             return { success: true, text: JSON.stringify({ synopsis: '进度', nodes: [{ id: 'scene_01', kind: 'text', label: '进度', durationSec: 2, text: '进度' }], edges: [] }) };
           }
-          return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01">进度</main></body></html>' };
+          return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">进度</h1><p data-text-key="subtitle">短字幕</p><section data-text-key="body">进度</section></main></body></html>' };
         },
       },
       environmentDoctor: async () => ({ ok: true, diagnostics: [] }),

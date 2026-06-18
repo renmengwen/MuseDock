@@ -1,19 +1,15 @@
 const path = require('path');
 
 const defaultAdapter = require('./hyperframesPlaywrightAdapter');
+const { resolveFrameRenderSource } = require('./frameRenderSource');
 
-function resolveFrameHtmlPath(frame, options) {
-  const sourcePath = frame.html_path || frame.htmlPath || frame.sourcePath;
-  if (!sourcePath || path.isAbsolute(sourcePath) || !options.projectDir) {
-    return sourcePath;
-  }
-  const projectDir = path.resolve(options.projectDir);
-  const resolved = path.resolve(projectDir, sourcePath);
-  const relative = path.relative(projectDir, resolved);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error('帧 HTML 路径不能逃逸工程目录。');
-  }
-  return resolved;
+function resolveFrameHtmlPath(frame, options = {}) {
+  const source = resolveFrameRenderSource({
+    projectDir: options.projectDir || options.workDir,
+    project: options.project || {},
+    frame,
+  });
+  return source.absolute_html_path;
 }
 
 async function renderFrame(frame = {}, options = {}) {
@@ -40,14 +36,28 @@ async function renderFrame(frame = {}, options = {}) {
   };
 
   try {
+    const source = resolveFrameRenderSource({
+      projectDir: options.projectDir || options.workDir,
+      project: options.project || {},
+      frame,
+    });
+    if (!source.absolute_html_path) {
+      const error = new Error('template_inputs 帧尚未生成 html_path，请先 materialize。');
+      error.code = 'frame_not_materialized';
+      throw error;
+    }
     const result = await adapter.render(
       {
-        template: { sourcePath: resolveFrameHtmlPath(frame, options) },
+        template: {
+          id: source.template_id || source.frame_id || 'frame',
+          engine: source.engine,
+          sourcePath: source.absolute_html_path,
+        },
         config: {
           outputPath,
           resolution: options.resolution || frame.resolution || { width: 1280, height: 720 },
           fps: options.fps || frame.fps || 30,
-          duration: frame.duration_sec || frame.durationSec || options.duration || 5,
+          duration: source.duration_sec,
           durationMode: frame.duration_mode || frame.durationMode || 'explicit',
         },
         frame,

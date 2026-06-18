@@ -3,6 +3,7 @@ const path = require('path');
 
 const { normalizeProject } = require('./projectSchema');
 const { topoSort, getNode, DEFAULT_FRAME_DURATION_SEC } = require('./contentGraph');
+const { ensureCaptionLayer, normalizeCaptionsForFrame } = require('./captionLayer');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -10,15 +11,6 @@ function objectOrEmpty(value) {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value || {}));
-}
-
-function htmlEscape(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
 }
 
 function safeFilePart(value, fallback) {
@@ -75,47 +67,17 @@ function defaultFrameFields() {
 }
 
 function normalizeCaptions(scene = {}, durationSec = DEFAULT_FRAME_DURATION_SEC) {
-  const captions = Array.isArray(scene.captions)
-    ? scene.captions
-      .filter(caption => caption && String(caption.text || '').trim())
-      .map(caption => clone(caption))
-    : [];
-  if (captions.length > 0) return captions;
-
-  const text = String(scene.narration_text || '').trim();
-  if (!text) return [];
-  const duration = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : DEFAULT_FRAME_DURATION_SEC;
-  return [{
-    id: `${scene.id || 'scene'}_caption_01`,
-    start: 0,
-    end: duration,
-    duration,
-    text,
-  }];
-}
-
-function captionText(captions = []) {
-  return captions
-    .map(caption => String(caption?.text || '').trim())
-    .filter(Boolean)
-    .join(' / ');
+  return normalizeCaptionsForFrame({
+    id: scene.id,
+    scene_id: scene.scene_id,
+    duration_sec: durationSec,
+    narration_text: scene.narration_text,
+    captions: scene.captions,
+  });
 }
 
 function injectCaptionOverlay(html, captions = []) {
-  const text = captionText(captions);
-  if (!text || /data-role=["']subtitle-caption["']|data-text-key=["']subtitle["']/i.test(html)) {
-    return html;
-  }
-  const overlay = [
-    '<style data-role="subtitle-caption-style">',
-    '.hv-subtitle-caption{position:absolute;left:50%;bottom:42px;transform:translateX(-50%);max-width:84%;padding:14px 22px;border-radius:8px;background:rgba(0,0,0,.68);color:#fff;font:600 34px/1.28 "Noto Sans SC","Microsoft YaHei",Arial,sans-serif;text-align:center;text-shadow:0 2px 8px rgba(0,0,0,.55);z-index:9999;letter-spacing:0;}',
-    '</style>',
-    `<div class="hv-subtitle-caption" data-role="subtitle-caption" data-text-key="subtitle">${htmlEscape(text)}</div>`,
-  ].join('');
-  if (/<\/body>/i.test(html)) {
-    return html.replace(/<\/body>/i, `${overlay}</body>`);
-  }
-  return `${html}${overlay}`;
+  return ensureCaptionLayer(html, captions);
 }
 
 async function buildRawHtmlFrameProject({
@@ -173,7 +135,7 @@ async function buildRawHtmlFrameProject({
       },
       ...defaultFrameFields(),
     };
-    await fs.writeFile(outputPath, injectCaptionOverlay(html, captions), 'utf8');
+    await fs.writeFile(outputPath, ensureCaptionLayer(html, captions), 'utf8');
     frames.push(frame);
     items.push({
       id: `item_${frame.id}`,

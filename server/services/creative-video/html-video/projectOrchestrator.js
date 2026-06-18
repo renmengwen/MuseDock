@@ -167,6 +167,7 @@ async function renderHtmlVideoProject({
     const frameOutput = path.join(resolvedProjectDir, 'frames', `${frame.id || frame.scene_id}.mp4`);
     const rendered = await frameRenderer.renderFrame(frame, {
       projectDir: resolvedProjectDir,
+      project: nextProject,
       outputPath: frameOutput,
       resolution: outputConfig.resolution,
       fps: outputConfig.fps,
@@ -369,6 +370,7 @@ async function renderHtmlVideoFramePreview(options = {}) {
   const previewPath = path.join(materialized.project_dir, 'inspect', 'previews', `${frameId}.mp4`);
   const rendered = await frameRenderer.renderFrame(targetFrame, {
     projectDir: materialized.project_dir,
+    project: nextProject,
     outputPath: previewPath,
     resolution: outputConfig.resolution,
     fps: outputConfig.fps,

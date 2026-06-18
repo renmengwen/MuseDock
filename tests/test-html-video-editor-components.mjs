@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
+const { buildFrameSavePayload } = await import('../frontend-react/src/components/creative-video-editor/frameInputsPayload.mjs');
+
 const hook = fs.readFileSync('frontend-react/src/hooks/useHtmlVideoProject.js', 'utf-8');
 const shell = fs.readFileSync('frontend-react/src/components/creative-video-editor/CreativeVideoEditor.jsx', 'utf-8');
 const editor = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoProjectEditor.jsx', 'utf-8');
@@ -105,9 +107,71 @@ assert.match(exportsPanel, /toLocaleString\('zh-CN'/, 'exports panel should rend
 assert.ok(exportsPanel.includes('getExportPlaybackUrl'), 'exports panel should resolve a safe playback URL for exported videos');
 
 const frameInputsPanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/FrameInputsPanel.jsx', 'utf-8');
+const frameInputsPayload = fs.readFileSync('frontend-react/src/components/creative-video-editor/frameInputsPayload.mjs', 'utf-8');
 assert.match(frameInputsPanel, /duration_sec/, 'FrameInputsPanel should edit html-video duration_sec values returned by the project schema');
 assert.match(frameInputsPanel, /metadata\?\.visual_text\?\.headline/, 'FrameInputsPanel should project raw_html visual headline into the title field');
-assert.match(frameInputsPanel, /frame_patch/, 'FrameInputsPanel should send explicit frame_patch payloads instead of saving the entire frame object');
+assert.match(frameInputsPanel, /buildFrameSavePayload/, 'FrameInputsPanel should use the tested frame payload helper');
+assert.doesNotMatch(frameInputsPanel, /template_id:\s*draft\.template_id\s*\|\|\s*draft\.template\s*\|\|\s*''/, 'FrameInputsPanel should not send empty template_id values');
+assert.match(frameInputsPayload, /type:\s*'frame_patch'/, 'Frame payload helper should send explicit frame_patch payloads');
+assert.match(frameInputsPayload, /frame_id:\s*draft\.id\s*\|\|\s*draft\.scene_id/, 'Frame payload helper should include the edited frame id');
+assert.match(frameInputsPayload, /if\s*\(templateId\)/, 'Frame payload helper should only include non-empty template_id values');
+assert.doesNotMatch(frameInputsPanel, /duration_sec:\s*Number\(draft\.duration_sec\)/, 'FrameInputsPanel should not always send empty duration as 0');
+assert.match(frameInputsPayload, /duration\s*>\s*0/, 'Frame payload helper should only include duration_sec when the draft duration is positive');
+assert.match(frameInputsPayload, /metadata_patch:\s*\{[^]*visual_text:\s*\{[^]*headline/s, 'Frame payload helper should save headline through frame metadata_patch');
+
+{
+  const payload = buildFrameSavePayload({
+    id: 'frame_01',
+    duration_sec: '',
+    title: '新标题',
+    narration_text: '新旁白',
+    inputs: { headline: '旧标题', body: '正文' },
+  });
+  assert.equal(payload.type, 'frame_patch');
+  assert.equal(payload.frame_id, 'frame_01');
+  assert.equal(payload.narration_text, '新旁白');
+  assert.equal(payload.inputs.headline, '新标题');
+  assert.equal(payload.inputs.body, '正文');
+  assert.equal(payload.metadata_patch.visual_text.headline, '新标题');
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'template_id'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'duration_sec'), false);
+}
+
+{
+  const payload = buildFrameSavePayload({
+    scene_id: 'scene_01',
+    template_id: ' template_a ',
+    duration_sec: 2.5,
+    headline: '标题',
+    inputs: {},
+  });
+  assert.equal(payload.frame_id, 'scene_01');
+  assert.equal(payload.template_id, 'template_a');
+  assert.equal(payload.duration_sec, 2.5);
+  assert.equal(payload.metadata_patch.visual_text.headline, '标题');
+}
+
+for (const invalidDuration of [0, -1, '0', '-1', 'abc']) {
+  const payload = buildFrameSavePayload({
+    id: 'frame_invalid_duration',
+    duration_sec: invalidDuration,
+    title: '标题',
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'duration_sec'), false, `invalid duration should be omitted: ${invalidDuration}`);
+}
+
+const captionsPanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/CaptionsPanel.jsx', 'utf-8');
+assert.match(captionsPanel, /selectedFrameId/, 'CaptionsPanel should require a selected frame before saving captions');
+assert.match(captionsPanel, /type:\s*'frame_patch'/, 'CaptionsPanel should save captions through frame_patch');
+assert.match(captionsPanel, /frame_id:\s*selectedFrameId/, 'CaptionsPanel should target the selected frame id');
+assert.doesNotMatch(captionsPanel, /onSave\(\{\s*captions:\s*drafts\s*\}\)/, 'CaptionsPanel should not save project-level captions');
+assert.ok(captionsPanel.includes('请选择一帧后编辑字幕。'), 'CaptionsPanel should show a Chinese empty selection state');
+
+assert.match(editor, /frames\s*=\s*Array\.isArray\(editor\.frames\)\s*\?\s*editor\.frames\s*:\s*\[\]/, 'HtmlVideoProjectEditor should fallback to an empty frames array');
+assert.match(editor, /selectedFrame\s*=\s*frames\.find/, 'HtmlVideoProjectEditor should resolve captions from the selected frame');
+assert.match(editor, /frames=\{frames\}/, 'HtmlVideoProjectEditor should pass the safe frames array to ProjectFramesList');
+assert.match(editor, /captions=\{selectedFrame\?\.captions\s*\|\|\s*\[\]\}/, 'HtmlVideoProjectEditor should pass selected frame captions to CaptionsPanel');
+assert.match(editor, /selectedFrameId=\{selectedFrame\?\.id\s*\|\|\s*selectedFrame\?\.scene_id\s*\|\|\s*''\}/, 'HtmlVideoProjectEditor should pass selected frame id to CaptionsPanel');
 
 const projectFramesList = fs.readFileSync('frontend-react/src/components/creative-video-editor/ProjectFramesList.jsx', 'utf-8');
 assert.match(projectFramesList, /duration_sec/, 'ProjectFramesList should display duration_sec values returned by html-video projects');

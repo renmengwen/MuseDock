@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 
-export function CaptionsPanel({ captions = [], disabled, onSave }) {
+export function CaptionsPanel({ captions = [], selectedFrameId, disabled, onSave }) {
   const [drafts, setDrafts] = useState(captions);
+  const canSave = Boolean(selectedFrameId) && !disabled;
 
   useEffect(() => {
     setDrafts(captions);
@@ -17,8 +18,19 @@ export function CaptionsPanel({ captions = [], disabled, onSave }) {
     <section className="creative-video-editor-panel html-video-captions">
       <div className="creative-video-editor-panel-header">
         <h3>字幕</h3>
-        <button type="button" disabled={disabled} onClick={() => onSave({ captions: drafts })}>保存字幕</button>
+        <button
+          type="button"
+          disabled={!canSave}
+          onClick={() => onSave({
+            type: 'frame_patch',
+            frame_id: selectedFrameId,
+            captions: drafts,
+          })}
+        >
+          保存字幕
+        </button>
       </div>
+      {!selectedFrameId ? <p className="muted">请选择一帧后编辑字幕。</p> : null}
       {drafts.length ? drafts.map((caption, index) => (
         <label key={caption.id || index}>
           <span>{caption.id || `字幕 ${index + 1}`}</span>

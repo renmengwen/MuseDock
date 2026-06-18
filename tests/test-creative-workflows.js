@@ -14,6 +14,7 @@ const {
   getCreativeWorkflowHtmlVideoProject,
   getWorkflowPath,
   makeLocalCreativeAwemeId,
+  exportHtmlVideoProject,
 } = require('../server/services/creativeWorkflows');
 
 const NOW = '2026-06-12T12:00:00.000Z';
@@ -254,6 +255,79 @@ async function testHtmlVideoLiteSkipsLegacyHyperframesStages() {
   const htmlVideoProject = await getCreativeWorkflowHtmlVideoProject(WORKFLOW_ID, { rootDir });
   assert.equal(htmlVideoProject.success, true);
   assert.equal(htmlVideoProject.html_video_project_path, projectDir);
+}
+
+async function testHtmlVideoExportUsesOrchestratorWithTemplateRegistry() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const workflowPath = getWorkflowPath(WORKFLOW_ID, rootDir);
+  const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-html-video');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.mkdirSync(path.dirname(workflowPath), { recursive: true });
+  fs.writeFileSync(workflowPath, JSON.stringify({
+    workflow_id: WORKFLOW_ID,
+    status: 'done',
+    result: {
+      hyperframes_freeform: {
+        project: {
+          html_video_project_path: projectDir,
+        },
+      },
+    },
+  }, null, 2), 'utf-8');
+  fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({
+    project_id: 'p1',
+    workflow_id: WORKFLOW_ID,
+    run_id: 'run-1',
+    template_id: 'simple',
+    template_inputs: { headline: '旧标题' },
+    output: { fps: 24 },
+    frames: [
+      {
+        id: 'frame_01',
+        scene_id: 'scene_01',
+        template_id: 'simple',
+        html_path: 'frames/stale.html',
+        inputs: { headline: '旧帧标题' },
+        duration_sec: 2,
+      },
+    ],
+    timeline: { tracks: [] },
+  }, null, 2), 'utf-8');
+
+  const calls = [];
+  const result = await exportHtmlVideoProject(WORKFLOW_ID, {}, {
+    rootDir,
+    htmlVideoProjectOrchestrator: {
+      exportHtmlVideoProject: async options => {
+        calls.push(options);
+        assert.ok(options.templateRegistry);
+        assert.equal(options.projectDir, projectDir);
+        assert.equal(options.project.frames[0].html_path, 'frames/stale.html');
+        return {
+          success: true,
+          message: '导出完成。',
+          html_video_project_path: projectDir,
+          output_path: path.join(projectDir, 'exports', 'output.mp4'),
+          project: {
+            ...options.project,
+            frames: [
+              {
+                ...options.project.frames[0],
+                html_path: 'frames/01-scene_01.html',
+              },
+            ],
+            exports: [{ id: 'export_0001', path: 'exports/output.mp4' }],
+          },
+          diagnostics: [],
+        };
+      },
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(calls.length, 1);
+  assert.equal(result.html_video_project.frames[0].html_path, 'frames/01-scene_01.html');
+  assert.equal(result.output_path, path.join(projectDir, 'exports', 'output.mp4'));
 }
 
 async function testFallbackProjectDoesNotSkipLegacyStages() {
@@ -1167,6 +1241,7 @@ async function run() {
   await testCreatesAndRunsTextWorkflow();
   await testResearchRunsInBackgroundStage();
   await testHtmlVideoLiteSkipsLegacyHyperframesStages();
+  await testHtmlVideoExportUsesOrchestratorWithTemplateRegistry();
   await testFallbackProjectDoesNotSkipLegacyStages();
   await testRejectsEmptyInput();
   await testCreatesDouyinWorkflowWithOriginalAwemeId();

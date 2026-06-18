@@ -1,4 +1,5 @@
 const path = require('path');
+const { normalizeCaptionsForFrame } = require('./captionLayer');
 
 const SCHEMA_VERSION = 1;
 const DEFAULT_ENGINE = 'hyperframes-playwright';
@@ -13,6 +14,14 @@ function objectOrEmpty(value) {
 
 function arrayOrEmpty(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text) return text;
+  }
+  return '';
 }
 
 function defaultContentGraph() {
@@ -113,26 +122,44 @@ function normalizeEnhancement(value) {
 
 function normalizeFrame(frame, index) {
   const input = objectOrEmpty(frame);
+  const defaultId = `frame_${String(index + 1).padStart(2, '0')}`;
+  const id = firstNonEmptyString(input.id, input.scene_id, input.sceneId, input.graph_node_id, input.graphNodeId, defaultId);
+  const sceneId = firstNonEmptyString(input.scene_id, input.sceneId, id);
+  const graphNodeId = firstNonEmptyString(input.graph_node_id, input.graphNodeId, id);
+  const sourceMode = firstNonEmptyString(input.source_mode, input.sourceMode);
+  const duration = Number(input.duration_sec ?? input.durationSec ?? input.duration);
+  const durationSec = Number.isFinite(duration) && duration > 0 ? duration : 3;
+  const narrationText = String(input.narration_text ?? input.narrationText ?? '');
+  const metadata = objectOrEmpty(input.metadata);
+  const captions = normalizeCaptionsForFrame({
+    id,
+    duration_sec: durationSec,
+    narration_text: narrationText,
+    captions: input.captions,
+  });
   return {
     ...input,
-    id: input.id || `frame_${String(index + 1).padStart(2, '0')}`,
-    scene_id: input.scene_id || null,
-    graph_node_id: input.graph_node_id || null,
-    order: Number.isFinite(input.order) ? input.order : index + 1,
-    template_id: input.template_id || null,
-    source_mode: input.source_mode || 'template_inputs',
+    id,
+    scene_id: sceneId,
+    graph_node_id: graphNodeId,
+    order: Number.isFinite(Number(input.order)) && Number(input.order) > 0 ? Number(input.order) : index + 1,
+    template_id: input.template_id || input.templateId || null,
+    source_mode: sourceMode === 'raw_html' ? 'raw_html' : 'template_inputs',
     inputs: objectOrEmpty(input.inputs),
-    html_path: input.html_path || null,
-    preview_mp4_path: input.preview_mp4_path || null,
-    duration_sec: Number.isFinite(input.duration_sec) ? input.duration_sec : 3,
+    html_path: input.html_path || input.htmlPath || null,
+    preview_mp4_path: input.preview_mp4_path || input.previewMp4Path || null,
+    duration_sec: durationSec,
     engine: input.engine || DEFAULT_ENGINE,
-    narration_text: input.narration_text || '',
-    captions: arrayOrEmpty(input.captions),
-    metadata: objectOrEmpty(input.metadata),
+    narration_text: narrationText,
+    captions,
+    metadata: {
+      ...metadata,
+      visual_text: objectOrEmpty(metadata.visual_text),
+    },
     transition_in: input.transition_in ? normalizeTransition(input.transition_in) : defaultTransition(),
     transition_out: input.transition_out ? normalizeTransition(input.transition_out) : defaultTransition(),
     trim: input.trim ? normalizeTrim(input.trim) : defaultTrim(),
-    speed: Number.isFinite(input.speed) ? input.speed : 1,
+    speed: Number.isFinite(Number(input.speed)) && Number(input.speed) > 0 ? Number(input.speed) : 1,
     loop: input.loop === true,
     enhancement: normalizeEnhancement(input.enhancement),
   };

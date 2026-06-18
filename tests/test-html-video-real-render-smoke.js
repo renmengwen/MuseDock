@@ -1,7 +1,12 @@
 const assert = require('assert');
+const { execFile } = require('child_process');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const { promisify } = require('util');
+
+const execFileAsync = promisify(execFile);
+const SKIP_PIXEL = process.env.PIXEL_CHECK !== '1';
 
 if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
   console.log('跳过 html-video 真实渲染烟测：未设置 RUN_HTML_VIDEO_REAL_RENDER=1。');
@@ -14,6 +19,66 @@ const projectStore = require('../server/services/creative-video/html-video/proje
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 const { materializeProject } = require('../server/services/creative-video/html-video/materializer');
 const { renderFrame } = require('../server/services/creative-video/html-video/frameRenderer');
+
+function optionalPngReader() {
+  try {
+    return require('pngjs').PNG;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveFfmpegPath() {
+  try {
+    return require('@ffmpeg-installer/ffmpeg').path;
+  } catch {
+    return process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  }
+}
+
+async function assertCaptionPixelsIfEnabled({ outputPath, projectDir }) {
+  if (SKIP_PIXEL) {
+    console.log('跳过字幕像素检查：未设置 PIXEL_CHECK=1。');
+    return;
+  }
+
+  const PNG = optionalPngReader();
+  if (!PNG || !PNG.sync || typeof PNG.sync.read !== 'function') {
+    console.log('跳过字幕像素检查：未安装稳定 PNG 解析库。');
+    return;
+  }
+
+  const ffmpegPath = await resolveFfmpegPath();
+  const framePath = path.join(projectDir, 'exports', 'caption-pixel-check.png');
+  try {
+    await execFileAsync(ffmpegPath, ['-y', '-ss', '1', '-i', outputPath, '-frames:v', '1', framePath], {
+      maxBuffer: 1024 * 1024 * 8,
+    });
+  } catch (error) {
+    console.log(`跳过字幕像素检查：ffmpeg 抽帧失败：${error.stderr || error.message}`);
+    return;
+  }
+
+  const png = PNG.sync.read(await fs.readFile(framePath));
+  const background = { r: 16, g: 24, b: 32 };
+  const yStart = Math.floor(png.height * 0.72);
+  const yEnd = Math.floor(png.height * 0.9);
+  let sampled = 0;
+  let changed = 0;
+  for (let y = yStart; y < yEnd; y += 4) {
+    for (let x = Math.floor(png.width * 0.08); x < Math.floor(png.width * 0.92); x += 4) {
+      const offset = (png.width * y + x) * 4;
+      const distance = Math.abs(png.data[offset] - background.r)
+        + Math.abs(png.data[offset + 1] - background.g)
+        + Math.abs(png.data[offset + 2] - background.b);
+      sampled += 1;
+      if (distance > 24) changed += 1;
+    }
+  }
+
+  assert.ok(sampled > 0, '字幕像素检查应至少采样到一个像素');
+  assert.ok(changed / sampled > 0.02, '底部字幕区域应存在非背景像素');
+}
 
 (async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-real-render-'));
@@ -66,6 +131,29 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
     templateId: 'glitch_title',
     templateInputs: inputs,
   });
+  const rawFrameHtmlPath = 'frames/raw-caption-smoke.html';
+  await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
+  await fs.writeFile(path.join(projectDir, rawFrameHtmlPath), [
+    '<!doctype html>',
+    '<html>',
+    '<head><meta charset="utf-8"><style>',
+    'html,body{margin:0;width:100%;height:100%;background:#101820;color:#fff;font-family:"Microsoft YaHei",Arial,sans-serif;}',
+    'main{position:absolute;inset:0;display:grid;place-items:center;font-size:64px;font-weight:700;}',
+    '</style></head>',
+    '<body><main data-text-key="headline">RAW HTML</main></body>',
+    '</html>',
+  ].join(''), 'utf8');
+  project.frames.push({
+    id: 'raw_caption_smoke',
+    scene_id: 'raw_caption_smoke',
+    order: 2,
+    source_mode: 'raw_html',
+    html_path: rawFrameHtmlPath,
+    duration_sec: 4,
+    narration_text: '旁白文本应自动生成底部字幕层。',
+    inputs: {},
+    metadata: { visual_text: { headline: 'RAW HTML' } },
+  });
   projectStore.addRevision(project, {
     summary: '首次生成',
     author: 'smoke',
@@ -74,6 +162,24 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
 
   let materialized = await materializeProject({ projectDir, project, templateRegistry });
   await projectStore.saveProject(projectDir, materialized.project);
+  const rawFrame = materialized.project.frames.find(frame => frame.id === 'raw_caption_smoke');
+  assert.ok(rawFrame, '应包含 raw_html 字幕烟测帧');
+  const rawHtml = await fs.readFile(path.join(projectDir, rawFrame.html_path), 'utf8');
+  assert.match(rawHtml, /data-hv-layer="captions"|data-role="subtitle-caption"/);
+
+  const rawOutput = path.join(projectDir, 'exports', 'real-render-raw-caption.mp4');
+  const rawRender = await renderFrame(rawFrame, {
+    projectDir,
+    outputPath: rawOutput,
+    resolution: template.output.resolution,
+    fps: template.output.fps,
+    duration: 4,
+  });
+  assert.equal(rawRender.success, true, rawRender.message || 'raw_html 字幕帧渲染失败');
+  const rawStat = await fs.stat(rawOutput);
+  assert.ok(rawStat.size > 0, 'raw_html 字幕帧 MP4 应非空');
+  await assertCaptionPixelsIfEnabled({ outputPath: rawOutput, projectDir });
+
   const firstOutput = path.join(projectDir, 'exports', 'real-render-first.mp4');
   const firstRender = await renderFrame(materialized.project.frames[0], {
     projectDir,

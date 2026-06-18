@@ -1,3 +1,4 @@
+const fs = require('fs/promises');
 const path = require('path');
 
 const { createDiagnostic } = require('./diagnostics');
@@ -25,14 +26,55 @@ function isSafeRelativePath(value) {
   return !text.split('/').some(part => part === '..');
 }
 
-function add(diagnostics, code, stage, userMessage, details = {}, fallbackAllowed = true) {
-  diagnostics.push(createDiagnostic({
-    code,
-    stage,
-    user_message: userMessage,
-    details,
-    fallback_allowed: fallbackAllowed,
-  }));
+function resolveProjectPath(projectDir, relativePath) {
+  const root = path.resolve(projectDir);
+  const target = path.resolve(root, relativePath);
+  const relative = path.relative(root, target);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    return null;
+  }
+  return target;
+}
+
+function add(diagnostics, code, stage, userMessage, details = {}, fallbackAllowed = true, extra = {}) {
+  diagnostics.push({
+    ...createDiagnostic({
+      code,
+      stage,
+      user_message: userMessage,
+      details,
+      fallback_allowed: fallbackAllowed,
+    }),
+    ...extra,
+  });
+}
+
+function isBlockingDiagnostic(diagnostic = {}) {
+  const details = objectOrEmpty(diagnostic.details);
+  if (details.blocking === false) return false;
+  if (diagnostic.severity === 'warning') return false;
+  return true;
+}
+
+function stripIgnoredHtmlRegions(html) {
+  return String(html || '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, '');
+}
+
+function hasTextKey(html, key) {
+  const cleaned = stripIgnoredHtmlRegions(html);
+  const tags = cleaned.match(/<[A-Za-z][^>]*>/g) || [];
+  const pattern = new RegExp(`\\bdata-text-key\\s*=\\s*(['"])${key}\\1`, 'i');
+  return tags.some(tag => pattern.test(tag));
+}
+
+function warningDiagnostic(diagnostics, code, stage, userMessage, details = {}) {
+  add(diagnostics, code, stage, userMessage, {
+    ...details,
+    blocking: false,
+  }, true, { severity: 'warning' });
 }
 
 function validateTemplate({
@@ -99,14 +141,57 @@ function validateEnvironment(diagnostics, environment) {
   }
 }
 
+function collectMissingTextKeys(html) {
+  const missing = [];
+  for (const key of ['headline', 'subtitle', 'body']) {
+    if (!hasTextKey(html, key)) {
+      missing.push(key);
+    }
+  }
+  return missing;
+}
+
+async function readFrameHtmlForValidation(projectDir, frame, diagnostics) {
+  if (!projectDir || frame.source_mode !== 'raw_html' || !frame.html_path) return null;
+  const htmlPath = resolveProjectPath(projectDir, frame.html_path);
+  if (!htmlPath) {
+    add(diagnostics, 'raw_html_path_invalid', 'frame', 'raw_html 帧 HTML 路径不合法。', {
+      frame_id: frame.id,
+      html_path: frame.html_path,
+    });
+    return null;
+  }
+  try {
+    return await fs.readFile(htmlPath, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+async function validateRawHtmlTextKeys({ diagnostics, projectDir, frames }) {
+  for (const frame of frames) {
+    const html = await readFrameHtmlForValidation(projectDir, frame, diagnostics);
+    if (html == null) continue;
+    const missing = collectMissingTextKeys(html);
+    if (missing.length) {
+      warningDiagnostic(diagnostics, 'raw_html_text_keys_missing', 'frame', 'raw_html 帧缺少可编辑文本锚点。', {
+        frame_id: frame.id,
+        missing_keys: missing,
+      });
+    }
+  }
+}
+
 async function validateHtmlVideoProject({
   project,
+  projectDir,
   templateRegistry,
   environment,
   options = {},
 } = {}) {
   const input = objectOrEmpty(project);
   const diagnostics = [];
+  const frames = arrayOrEmpty(input.frames);
 
   validateTemplate({
     diagnostics,
@@ -116,10 +201,10 @@ async function validateHtmlVideoProject({
     ref: 'project',
     stage: 'template',
     options,
-    validateInputs: arrayOrEmpty(input.frames).some(frame => frame.source_mode !== 'raw_html'),
+    validateInputs: frames.some(frame => frame.source_mode !== 'raw_html'),
   });
 
-  arrayOrEmpty(input.frames).forEach(frame => {
+  frames.forEach(frame => {
     validateTemplate({
       diagnostics,
       templateRegistry,
@@ -138,6 +223,8 @@ async function validateHtmlVideoProject({
       });
     }
   });
+
+  await validateRawHtmlTextKeys({ diagnostics, projectDir, frames });
 
   const schemaValidation = validateProject(input);
   for (const error of schemaValidation.errors || []) {
@@ -172,11 +259,12 @@ async function validateHtmlVideoProject({
   validateEnvironment(diagnostics, environment);
 
   return {
-    ok: diagnostics.length === 0,
+    ok: diagnostics.every(item => !isBlockingDiagnostic(item)),
     diagnostics,
   };
 }
 
 module.exports = {
   validateHtmlVideoProject,
+  collectMissingTextKeys,
 };

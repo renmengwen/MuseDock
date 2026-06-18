@@ -12,10 +12,11 @@ async function writeFile(filePath, content) {
   await fs.writeFile(filePath, content, 'utf8');
 }
 
-async function createTemplate(rootDir) {
-  const templateDir = path.join(rootDir, 'variable_title');
+async function createTemplate(rootDir, options = {}) {
+  const templateId = options.id || 'variable_title';
+  const templateDir = path.join(rootDir, templateId);
   await writeFile(path.join(templateDir, 'template.html-video.yaml'), [
-    'id: variable_title',
+    `id: ${templateId}`,
     'name: 变量标题',
     'engine: hyperframes',
     'engine_version: "1.0.0"',
@@ -52,6 +53,7 @@ async function createTemplate(rootDir) {
     '<body>',
     '<h1 data-hv-element-id="title" data-hv-bind="title">{{title}}</h1>',
     '<p data-hv-element-id="subtitle" data-hv-bind="subtitle">{{subtitle}}</p>',
+    options.includeUnmanagedCaptionLayer ? '<div data-hv-layer="captions" data-hv-managed="false">模板字幕</div>' : '',
     '<span data-hv-element-id="duration" data-hv-bind="duration_sec">{{duration_sec}}</span>',
     '<script>',
     'const vars = window.__HV_VARS__ || {};',
@@ -70,6 +72,7 @@ async function createTemplate(rootDir) {
   const projectDir = path.join(rootDir, 'project');
   await fs.mkdir(projectDir, { recursive: true });
   await createTemplate(templateRoot);
+  await createTemplate(templateRoot, { id: 'variable_title_unmanaged', includeUnmanagedCaptionLayer: true });
 
   const templateRegistry = createTemplateRegistry({ rootDir: templateRoot });
   templateRegistry.scanTemplates();
@@ -152,6 +155,62 @@ async function createTemplate(rootDir) {
   const overrideHtml = await fs.readFile(path.join(projectDir, 'frames/custom_scene_02.html'), 'utf8');
   assert.equal(overrideHtml, '<html><body>用户改写</body></html>');
 
+  const unmanagedTemplateProjectDir = path.join(rootDir, 'unmanaged-template-project');
+  await fs.mkdir(unmanagedTemplateProjectDir, { recursive: true });
+  const unmanagedTemplateResult = await materializeProject({
+    projectDir: unmanagedTemplateProjectDir,
+    project: normalizeProject({
+      project_id: 'project_unmanaged_template',
+      template_id: 'variable_title_unmanaged',
+      template_inputs: { title: '标题', subtitle: '副标题', duration_sec: 3 },
+      frames: [
+        {
+          id: 'template_unmanaged_01',
+          scene_id: 'template_unmanaged_01',
+          order: 1,
+          template_id: 'variable_title_unmanaged',
+          duration_sec: 3,
+          narration_text: '模板帧旁白',
+          inputs: { title: '标题', subtitle: '副标题', duration_sec: 3 },
+        },
+      ],
+    }),
+    templateRegistry,
+  });
+  assert.ok(unmanagedTemplateResult.diagnostics.some(item => item.code === 'unmanaged_caption_layer_preserved' && item.frame_id === 'template_unmanaged_01'));
+  const unmanagedTemplateHtml = await fs.readFile(path.join(unmanagedTemplateProjectDir, unmanagedTemplateResult.project.frames[0].html_path), 'utf8');
+  assert.equal((unmanagedTemplateHtml.match(/data-hv-layer="captions"/g) || []).length, 2);
+  assert.match(unmanagedTemplateHtml, /模板字幕/);
+  assert.match(unmanagedTemplateHtml, /模板帧旁白/);
+
+  const unmanagedTemplateEmptyProjectDir = path.join(rootDir, 'unmanaged-template-empty-project');
+  await fs.mkdir(unmanagedTemplateEmptyProjectDir, { recursive: true });
+  const unmanagedTemplateEmptyResult = await materializeProject({
+    projectDir: unmanagedTemplateEmptyProjectDir,
+    project: normalizeProject({
+      project_id: 'project_unmanaged_template_empty',
+      template_id: 'variable_title_unmanaged',
+      template_inputs: { title: '标题', subtitle: '副标题', duration_sec: 3 },
+      frames: [
+        {
+          id: 'template_unmanaged_empty_01',
+          scene_id: 'template_unmanaged_empty_01',
+          order: 1,
+          template_id: 'variable_title_unmanaged',
+          duration_sec: 3,
+          narration_text: '',
+          captions: [],
+          inputs: { title: '标题', subtitle: '副标题', duration_sec: 3 },
+        },
+      ],
+    }),
+    templateRegistry,
+  });
+  assert.ok(unmanagedTemplateEmptyResult.diagnostics.some(item => item.code === 'unmanaged_caption_layer_preserved' && item.frame_id === 'template_unmanaged_empty_01'));
+  const unmanagedTemplateEmptyHtml = await fs.readFile(path.join(unmanagedTemplateEmptyProjectDir, unmanagedTemplateEmptyResult.project.frames[0].html_path), 'utf8');
+  assert.equal((unmanagedTemplateEmptyHtml.match(/data-hv-layer="captions"/g) || []).length, 1);
+  assert.match(unmanagedTemplateEmptyHtml, /模板字幕/);
+
   const rawProjectDir = path.join(rootDir, 'raw-project');
   await writeFile(path.join(rawProjectDir, 'frames/01-raw.html'), '<!doctype html><html><body>raw</body></html>');
   const rawResult = await materializeProject({
@@ -182,6 +241,87 @@ async function createTemplate(rootDir) {
   const rawHtml = await fs.readFile(path.join(rawProjectDir, 'frames/01-raw.html'), 'utf8');
   assert.match(rawHtml, /data-role="subtitle-caption"/);
   assert.match(rawHtml, /raw 旁白/);
+
+  const rawUnmanagedProjectDir = path.join(rootDir, 'raw-unmanaged-project');
+  await writeFile(
+    path.join(rawUnmanagedProjectDir, 'frames/01-raw.html'),
+    '<!doctype html><html><body><div data-hv-layer="captions" data-hv-managed="false">模板字幕</div></body></html>',
+  );
+  const rawUnmanagedResult = await materializeProject({
+    projectDir: rawUnmanagedProjectDir,
+    project: normalizeProject({
+      project_id: 'project_raw_unmanaged',
+      frames: [
+        {
+          id: 'raw_unmanaged_01',
+          scene_id: 'raw_unmanaged_01',
+          order: 1,
+          source_mode: 'raw_html',
+          html_path: 'frames/01-raw.html',
+          duration_sec: 2,
+          narration_text: 'raw 非受管旁白',
+        },
+      ],
+    }),
+    templateRegistry,
+  });
+  assert.ok(rawUnmanagedResult.diagnostics.some(item => item.code === 'unmanaged_caption_layer_preserved' && item.frame_id === 'raw_unmanaged_01'));
+  const rawUnmanagedHtml = await fs.readFile(path.join(rawUnmanagedProjectDir, 'frames/01-raw.html'), 'utf8');
+  assert.equal((rawUnmanagedHtml.match(/data-hv-layer="captions"/g) || []).length, 2);
+  assert.match(rawUnmanagedHtml, /模板字幕/);
+  assert.match(rawUnmanagedHtml, /raw 非受管旁白/);
+
+  const rawUnmanagedEmptyProjectDir = path.join(rootDir, 'raw-unmanaged-empty-project');
+  await writeFile(
+    path.join(rawUnmanagedEmptyProjectDir, 'frames/01-raw.html'),
+    '<!doctype html><html><body><div data-hv-layer="captions" data-hv-managed="false">模板字幕</div></body></html>',
+  );
+  const rawUnmanagedEmptyResult = await materializeProject({
+    projectDir: rawUnmanagedEmptyProjectDir,
+    project: normalizeProject({
+      project_id: 'project_raw_unmanaged_empty',
+      frames: [
+        {
+          id: 'raw_unmanaged_empty_01',
+          scene_id: 'raw_unmanaged_empty_01',
+          order: 1,
+          source_mode: 'raw_html',
+          html_path: 'frames/01-raw.html',
+          duration_sec: 2,
+          narration_text: '',
+          captions: [],
+        },
+      ],
+    }),
+    templateRegistry,
+  });
+  assert.ok(rawUnmanagedEmptyResult.diagnostics.some(item => item.code === 'unmanaged_caption_layer_preserved' && item.frame_id === 'raw_unmanaged_empty_01'));
+  const rawUnmanagedEmptyHtml = await fs.readFile(path.join(rawUnmanagedEmptyProjectDir, 'frames/01-raw.html'), 'utf8');
+  assert.equal((rawUnmanagedEmptyHtml.match(/data-hv-layer="captions"/g) || []).length, 1);
+  assert.match(rawUnmanagedEmptyHtml, /模板字幕/);
+
+  const rawNoRegistryProjectDir = path.join(rootDir, 'raw-no-registry-project');
+  await writeFile(path.join(rawNoRegistryProjectDir, 'frames/01-raw.html'), '<!doctype html><html><body>raw no registry</body></html>');
+  const rawNoRegistryResult = await materializeProject({
+    projectDir: rawNoRegistryProjectDir,
+    project: normalizeProject({
+      project_id: 'project_raw_no_registry',
+      frames: [
+        {
+          id: 'raw_no_registry_01',
+          scene_id: 'raw_no_registry_01',
+          order: 1,
+          source_mode: 'raw_html',
+          html_path: 'frames/01-raw.html',
+          duration_sec: 2,
+          narration_text: 'raw 无 registry 旁白',
+        },
+      ],
+    }),
+  });
+  assert.equal(rawNoRegistryResult.project.frames[0].captions[0].text, 'raw 无 registry 旁白');
+  const rawNoRegistryHtml = await fs.readFile(path.join(rawNoRegistryProjectDir, 'frames/01-raw.html'), 'utf8');
+  assert.match(rawNoRegistryHtml, /raw 无 registry 旁白/);
 
   console.log('html-video materializer tests passed');
 })();

@@ -93,6 +93,44 @@ function baseProject() {
   assert.equal(result.requires_tts, true);
   assert.equal(result.requires_render, true);
 
+  {
+    const result = applyEditPatch(baseProject(), {
+      type: 'frame_patch',
+      frame_id: 'frame_01',
+      narration_text: '新的旁白',
+      captions: [{ id: 'c1', start: 0, end: 2, text: '新的字幕' }],
+      metadata_patch: {
+        visual_text: { headline: '新标题' },
+      },
+      duration_sec: 2,
+    });
+
+    assert.equal(result.success, true);
+    const frame = result.project.frames.find(item => item.id === 'frame_01');
+    assert.equal(frame.narration_text, '新的旁白');
+    assert.equal(frame.captions[0].text, '新的字幕');
+    assert.equal(frame.metadata.visual_text.headline, '新标题');
+    assert.equal(frame.duration_sec, 2);
+    assert.equal(result.requires_tts, true);
+  }
+
+  {
+    const result = applyEditPatch(baseProject(), {
+      type: 'frame_patch',
+      frame_id: 'frame_01',
+      narration_text: '只改旁白时字幕应同步更新',
+    });
+
+    assert.equal(result.success, true);
+    const frame = result.project.frames.find(item => item.id === 'frame_01');
+    assert.equal(frame.narration_text, '只改旁白时字幕应同步更新');
+    assert.equal(frame.captions.length, 1);
+    assert.equal(frame.captions[0].text, '只改旁白时字幕应同步更新');
+    assert.equal(frame.captions[0].start, 0);
+    assert.equal(frame.captions[0].end, 4);
+    assert.equal(result.requires_tts, true);
+  }
+
   result = applyEditPatch(baseProject(), {
     type: 'replace_frame_template',
     frame_id: 'frame_01',

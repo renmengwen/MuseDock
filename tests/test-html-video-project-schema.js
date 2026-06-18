@@ -77,7 +77,7 @@ const normalized = schema.normalizeProject({
 });
 
 assert.equal(normalized.schema_version, 1);
-assert.equal(normalized.frames[0].graph_node_id, null);
+assert.equal(normalized.frames[0].graph_node_id, normalized.frames[0].id);
 assert.deepEqual(normalized.frames[0].inputs, {});
 assert.equal(normalized.frames[0].html_path, null);
 assert.equal(normalized.frames[0].engine, 'hyperframes-playwright');
@@ -93,8 +93,124 @@ assert.deepEqual(normalized.frames[0].enhancement, {
   data: null,
   preview_mp4_path: null,
 });
-assert.deepEqual(normalized.frames[0].captions, [{ text: '保留字幕' }]);
+assert.equal(normalized.frames[0].captions.length, 1);
+assert.equal(normalized.frames[0].captions[0].id, 'frame_01_caption_01');
+assert.equal(normalized.frames[0].captions[0].text, '保留字幕');
+assert.equal(normalized.frames[0].captions[0].start, 0);
+assert.equal(normalized.frames[0].captions[0].end, 4);
+assert.equal(normalized.frames[0].captions[0].duration, 4);
 assert.deepEqual(normalized.frames[0].metadata, { visual_text: { headline: '保留元数据' } });
+
+{
+  const project = schema.normalizeProject({
+    project_id: 'wf_run',
+    frames: [
+      {
+        id: 'scene_01',
+        source_mode: 'raw_html',
+        html_path: 'frames/01-scene_01.html',
+        duration_sec: 4,
+        narration_text: '第一帧旁白。',
+        metadata: {
+          visual_text: { headline: '标题一' },
+        },
+      },
+    ],
+  });
+
+  assert.equal(project.frames[0].id, 'scene_01');
+  assert.equal(project.frames[0].scene_id, 'scene_01');
+  assert.equal(project.frames[0].graph_node_id, 'scene_01');
+  assert.equal(project.frames[0].order, 1);
+  assert.equal(project.frames[0].source_mode, 'raw_html');
+  assert.equal(project.frames[0].duration_sec, 4);
+  assert.equal(project.frames[0].captions.length, 1);
+  assert.equal(project.frames[0].captions[0].text, '第一帧旁白。');
+  assert.equal(project.frames[0].captions[0].start, 0);
+  assert.equal(project.frames[0].captions[0].end, 4);
+  assert.equal(project.frames[0].metadata.visual_text.headline, '标题一');
+}
+
+{
+  const project = schema.normalizeProject({
+    project_id: 'camel_case_project',
+    frames: [
+      {
+        id: 'camel_frame',
+        sourceMode: 'raw_html',
+        htmlPath: 'frames/camel.html',
+        durationSec: 5,
+        narrationText: '驼峰字段旁白。',
+        graphNodeId: 'graph_camel',
+      },
+    ],
+  });
+
+  assert.equal(project.frames[0].source_mode, 'raw_html');
+  assert.equal(project.frames[0].html_path, 'frames/camel.html');
+  assert.equal(project.frames[0].duration_sec, 5);
+  assert.equal(project.frames[0].narration_text, '驼峰字段旁白。');
+  assert.equal(project.frames[0].graph_node_id, 'graph_camel');
+  assert.equal(project.frames[0].captions[0].end, 5);
+}
+
+{
+  const project = schema.normalizeProject({
+    project_id: 'default_id_project',
+    frames: [
+      {},
+    ],
+  });
+
+  assert.equal(project.frames[0].id, 'frame_01');
+  assert.equal(project.frames[0].scene_id, 'frame_01');
+  assert.equal(project.frames[0].graph_node_id, 'frame_01');
+}
+
+{
+  const project = schema.normalizeProject({
+    project_id: 'trim_project',
+    frames: [
+      {
+        id: '  ',
+        scene_id: '  ',
+        sceneId: ' scene_camel ',
+        graph_node_id: '  ',
+        graphNodeId: ' graph_camel ',
+      },
+      {
+        id: ' frame_explicit ',
+        scene_id: '  ',
+        graph_node_id: '  ',
+      },
+    ],
+  });
+
+  assert.equal(project.frames[0].id, 'scene_camel');
+  assert.equal(project.frames[0].scene_id, 'scene_camel');
+  assert.equal(project.frames[0].graph_node_id, 'graph_camel');
+  assert.equal(project.frames[1].id, 'frame_explicit');
+  assert.equal(project.frames[1].scene_id, 'frame_explicit');
+  assert.equal(project.frames[1].graph_node_id, 'frame_explicit');
+}
+
+{
+  const project = schema.normalizeProject({
+    project_id: 'fallback_project',
+    frames: [
+      {
+        id: 'fallback_frame',
+        source_mode: 'unsupported',
+        duration_sec: 0,
+        speed: 0,
+      },
+    ],
+  });
+
+  assert.equal(project.frames[0].source_mode, 'template_inputs');
+  assert.equal(project.frames[0].duration_sec, 3);
+  assert.equal(project.frames[0].speed, 1);
+}
 
 assert.deepEqual(schema.validateProject(normalized), { ok: true, errors: [], warnings: [] });
 

@@ -1,5 +1,6 @@
 const { normalizeProject, clone } = require('./projectSchema');
 const { addRevision } = require('./projectStore');
+const { normalizeCaptionsForFrame } = require('./captionLayer');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -113,6 +114,7 @@ function applyDuration(project, patch) {
 function applyFramePatch(project, patch, flags) {
   const frame = findFrame(project, patch.frame_id);
   if (!frame) return fail(`未找到帧 ${patch.frame_id || ''}。`, 'FRAME_NOT_FOUND');
+  let shouldRegenerateCaptionsFromNarration = false;
 
   if (Object.prototype.hasOwnProperty.call(patch, 'template_id')) {
     const templateId = String(patch.template_id || '').trim();
@@ -131,10 +133,24 @@ function applyFramePatch(project, patch, flags) {
   if (Object.prototype.hasOwnProperty.call(patch, 'narration_text') || Object.prototype.hasOwnProperty.call(patch, 'text')) {
     frame.narration_text = String(patch.narration_text ?? patch.text ?? '');
     flags.requires_tts = true;
+    shouldRegenerateCaptionsFromNarration = !Array.isArray(patch.captions);
   }
 
   if (patch.duration_sec != null || patch.duration != null) {
-    return applyDuration(project, patch);
+    const error = applyDuration(project, patch);
+    if (error) return error;
+  }
+
+  if (Array.isArray(patch.captions)) {
+    frame.captions = normalizeCaptionsForFrame({
+      ...frame,
+      captions: patch.captions,
+    });
+  } else if (shouldRegenerateCaptionsFromNarration) {
+    frame.captions = normalizeCaptionsForFrame({
+      ...frame,
+      captions: [],
+    });
   }
 
   return null;

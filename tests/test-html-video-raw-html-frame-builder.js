@@ -50,7 +50,13 @@ const { buildRawHtmlFrameProject } = require('../server/services/creative-video/
   assert.ok(project.frames.every(frame => !Object.prototype.hasOwnProperty.call(frame, 'template_inputs')));
   assert.equal(project.frames[0].duration_sec, 2.5);
   assert.equal(project.frames[0].narration_text, '第一幕旁白');
-  assert.deepEqual(project.frames[0].captions, [{ text: '第一幕' }]);
+  assert.deepEqual(project.frames[0].captions, [{
+    id: 'scene_01_caption_01',
+    start: 0,
+    end: 2.5,
+    duration: 2.5,
+    text: '第一幕',
+  }]);
   assert.equal(project.frames[1].captions[0].text, '第二幕旁白');
   assert.equal(project.frames[1].captions[0].start, 0);
   assert.equal(project.frames[1].captions[0].end, 3);
@@ -62,7 +68,7 @@ const { buildRawHtmlFrameProject } = require('../server/services/creative-video/
   const firstHtml = await fs.readFile(path.join(projectDir, 'frames/01-scene_01.html'), 'utf8');
   const secondHtml = await fs.readFile(path.join(projectDir, 'frames/02-scene_02.html'), 'utf8');
   assert.match(firstHtml, /data-role="subtitle-caption"/);
-  assert.match(firstHtml, /data-text-key="subtitle"/);
+  assert.doesNotMatch(firstHtml, /data-text-key="subtitle"/);
   assert.match(firstHtml, /第一幕/);
   assert.match(secondHtml, /data-role="subtitle-caption"/);
   assert.match(secondHtml, /第二幕旁白/);

@@ -17,10 +17,22 @@ function getTemplateValues(project) {
 
 export function HtmlVideoProjectEditor({ editor, onExported }) {
   const disabled = editor.disabled;
+  const frames = Array.isArray(editor.frames) ? editor.frames : [];
+  const selectedFrame = frames.find(frame => (
+    frame.id === editor.selectedFrameId || frame.scene_id === editor.selectedFrameId
+  )) || editor.selectedFrame || null;
 
   async function handleExport(payload) {
     const result = await editor.exportProject(payload);
     if (result) onExported?.(result);
+  }
+
+  function patchProject(payload) {
+    if (editor.patchProject) return editor.patchProject(payload);
+    if (payload?.type === 'frame_patch') {
+      return editor.saveFrame(payload.frame_id, payload);
+    }
+    return editor.saveTemplateInputs(payload);
   }
 
   return (
@@ -46,16 +58,16 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
       />
       <div className="html-video-project-layout">
         <ProjectFramesList
-          frames={editor.frames}
+          frames={frames}
           selectedFrameId={editor.selectedFrameId}
           disabled={disabled}
           onSelect={editor.selectFrame}
         />
         <div className="html-video-project-main">
           <FrameInputsPanel
-            frame={editor.selectedFrame}
+            frame={selectedFrame}
             disabled={disabled}
-            onSave={editor.saveFrame}
+            onSave={patchProject}
             onRenderPreview={editor.renderFramePreview}
           />
           <TemplateInputsPanel
@@ -73,9 +85,10 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
             onRegenerate={editor.regenerateNarration}
           />
           <CaptionsPanel
-            captions={editor.project?.captions || []}
+            captions={selectedFrame?.captions || []}
+            selectedFrameId={selectedFrame?.id || selectedFrame?.scene_id || ''}
             disabled={disabled}
-            onSave={editor.saveTemplateInputs}
+            onSave={patchProject}
           />
           <ExportsPanel
             exportsList={editor.exportsList}

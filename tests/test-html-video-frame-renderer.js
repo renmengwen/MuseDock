@@ -8,8 +8,11 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
 (async () => {
   const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-renderer-'));
   const htmlPath = path.join(projectDir, 'frames', '01-scene_01.html');
+  const absoluteLegacyHtmlPath = path.join(projectDir, 'legacy', 'absolute.html');
   await fs.mkdir(path.dirname(htmlPath), { recursive: true });
   await fs.writeFile(htmlPath, '<html><body>帧</body></html>', 'utf8');
+  await fs.mkdir(path.dirname(absoluteLegacyHtmlPath), { recursive: true });
+  await fs.writeFile(absoluteLegacyHtmlPath, '<html><body>旧路径</body></html>', 'utf8');
 
   let receivedSourcePath = '';
   const state = {};
@@ -26,6 +29,9 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
       adapter: {
         render: async input => {
           receivedSourcePath = input.template.sourcePath;
+          assert.equal(input.template.id, 'scene_01');
+          assert.equal(input.template.engine, 'hyperframes-playwright');
+          assert.equal(input.config.duration, 4);
           return {
             output_path: input.config.outputPath,
             meta: { durationSec: input.config.duration },
@@ -39,6 +45,54 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   assert.equal(result.success, true);
   assert.equal(receivedSourcePath, htmlPath);
   assert.equal(state.status, 'done');
+
+  let legacySourcePath = '';
+  const legacyResult = await renderFrame(
+    {
+      id: 'legacy_absolute',
+      source_mode: 'raw_html',
+      sourcePath: absoluteLegacyHtmlPath,
+      duration_sec: 3,
+    },
+    {
+      outputPath: path.join(projectDir, 'frames', 'legacy_absolute.mp4'),
+      adapter: {
+        render: async input => {
+          legacySourcePath = input.template.sourcePath;
+          return {
+            output_path: input.config.outputPath,
+            diagnostics: [],
+          };
+        },
+      },
+    },
+  );
+  assert.equal(legacyResult.success, true);
+  assert.equal(legacySourcePath, absoluteLegacyHtmlPath);
+
+  let unmaterializedAdapterCalled = false;
+  const unmaterializedResult = await renderFrame(
+    {
+      id: 'template_input_frame',
+      source_mode: 'template_inputs',
+      duration_sec: 3,
+      inputs: { headline: '标题' },
+    },
+    {
+      projectDir,
+      outputPath: path.join(projectDir, 'frames', 'template_input_frame.mp4'),
+      adapter: {
+        render: async () => {
+          unmaterializedAdapterCalled = true;
+          return { output_path: 'should-not-render.mp4', diagnostics: [] };
+        },
+      },
+    },
+  );
+  assert.equal(unmaterializedResult.success, false);
+  assert.equal(unmaterializedAdapterCalled, false);
+  assert.match(unmaterializedResult.message, /template_inputs 帧尚未生成 html_path，请先 materialize。/);
+  assert.equal(unmaterializedResult.diagnostics[0].code, 'frame_not_materialized');
 
   const asyncProgressEvents = [];
   const asyncProgressState = {};

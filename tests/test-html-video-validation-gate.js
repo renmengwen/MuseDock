@@ -5,6 +5,7 @@ const path = require('path');
 
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 const { validateHtmlVideoProject } = require('../server/services/creative-video/html-video/validationGate');
+const { ensureCaptionLayer } = require('../server/services/creative-video/html-video/captionLayer');
 
 async function writeFile(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -168,6 +169,204 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   });
   assert.equal(rawHtmlPass.ok, true);
   assert.deepEqual(rawHtmlPass.diagnostics, []);
+
+  const rawHtmlProjectDir = path.join(rootDir, 'raw-html-project');
+  await writeFile(path.join(rawHtmlProjectDir, 'frames', 'missing-keys.html'), [
+    '<!doctype html>',
+    '<html><body>',
+    '<main>',
+    '<h1 data-text-key="headline">标题</h1>',
+    '<p>缺少 subtitle 和 body 锚点</p>',
+    '</main>',
+    '</body></html>',
+  ].join('\n'));
+  const rawHtmlMissingKeys = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: {
+      template_id: 'valid',
+      template_inputs: {},
+      frames: [
+        {
+          id: 'raw_missing_keys',
+          template_id: 'valid',
+          source_mode: 'raw_html',
+          inputs: {},
+          html_path: 'frames/missing-keys.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_missing_keys', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(rawHtmlMissingKeys.ok, true);
+  assert.ok(rawHtmlMissingKeys.diagnostics.some(item => item.code === 'raw_html_text_keys_missing'));
+  const missingKeysDiagnostic = rawHtmlMissingKeys.diagnostics.find(item => item.code === 'raw_html_text_keys_missing');
+  assert.deepEqual(missingKeysDiagnostic.details.missing_keys, ['subtitle', 'body']);
+  assert.equal(missingKeysDiagnostic.details.blocking, false);
+  assert.equal(missingKeysDiagnostic.severity, 'warning');
+
+  await writeFile(path.join(rawHtmlProjectDir, 'frames', 'valid-keys.html'), [
+    '<!doctype html>',
+    '<html><body>',
+    '<main>',
+    '<h1 DATA-TEXT-KEY = "headline">标题</h1>',
+    "<p data-text-key = 'subtitle'>短字幕</p>",
+    '<section data-text-key="body">正文</section>',
+    '</main>',
+    '</body></html>',
+  ].join('\n'));
+  const rawHtmlValidKeys = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: {
+      template_id: 'valid',
+      template_inputs: {},
+      frames: [
+        {
+          id: 'raw_valid_keys',
+          template_id: 'valid',
+          source_mode: 'raw_html',
+          inputs: {},
+          html_path: 'frames/valid-keys.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_valid_keys', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(rawHtmlValidKeys.ok, true);
+  assert.equal(rawHtmlValidKeys.diagnostics.some(item => item.code === 'raw_html_text_keys_missing'), false);
+
+  await writeFile(path.join(rawHtmlProjectDir, 'frames', 'comment-fake-key.html'), [
+    '<!doctype html>',
+    '<html><body>',
+    '<main>',
+    '<h1 data-text-key="headline">标题</h1>',
+    '<!-- <p data-text-key="subtitle">注释里的假锚点</p> -->',
+    '<section data-text-key="body">正文</section>',
+    '</main>',
+    '</body></html>',
+  ].join('\n'));
+  const rawHtmlCommentFakeKey = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: {
+      template_id: 'valid',
+      template_inputs: {},
+      frames: [
+        {
+          id: 'raw_comment_fake_key',
+          template_id: 'valid',
+          source_mode: 'raw_html',
+          inputs: {},
+          html_path: 'frames/comment-fake-key.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_comment_fake_key', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(rawHtmlCommentFakeKey.ok, true);
+  const commentFakeDiagnostic = rawHtmlCommentFakeKey.diagnostics.find(item => item.code === 'raw_html_text_keys_missing');
+  assert.deepEqual(commentFakeDiagnostic.details.missing_keys, ['subtitle']);
+
+  await writeFile(path.join(rawHtmlProjectDir, 'frames', 'managed-caption-layer.html'), ensureCaptionLayer([
+    '<!doctype html>',
+    '<html><body>',
+    '<main>',
+    '<h1 data-text-key="headline">标题</h1>',
+    '<section data-text-key="body">正文</section>',
+    '</main>',
+    '</body></html>',
+  ].join('\n'), [{ id: 'cap_1', start: 0, end: 2, text: '系统字幕' }]));
+  const rawHtmlManagedCaptionLayer = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: {
+      template_id: 'valid',
+      template_inputs: {},
+      frames: [
+        {
+          id: 'raw_managed_caption_layer',
+          template_id: 'valid',
+          source_mode: 'raw_html',
+          inputs: {},
+          html_path: 'frames/managed-caption-layer.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_managed_caption_layer', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(rawHtmlManagedCaptionLayer.ok, true);
+  const managedCaptionDiagnostic = rawHtmlManagedCaptionLayer.diagnostics.find(item => item.code === 'raw_html_text_keys_missing');
+  assert.deepEqual(managedCaptionDiagnostic.details.missing_keys, ['subtitle']);
+
+  const rawHtmlMissingFile = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: {
+      template_id: 'valid',
+      template_inputs: {},
+      frames: [
+        {
+          id: 'raw_missing_file',
+          template_id: 'valid',
+          source_mode: 'raw_html',
+          inputs: {},
+          html_path: 'frames/not-found.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_missing_file', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(rawHtmlMissingFile.diagnostics.some(item => item.code === 'raw_html_text_keys_missing'), false);
+
+  const rawHtmlPathEscape = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: {
+      template_id: 'valid',
+      template_inputs: {},
+      frames: [
+        {
+          id: 'raw_path_escape',
+          template_id: 'valid',
+          source_mode: 'raw_html',
+          inputs: {},
+          html_path: '../escape.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_path_escape', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(rawHtmlPathEscape.ok, false);
+  assert.ok(rawHtmlPathEscape.diagnostics.some(item => item.code === 'raw_html_path_invalid'));
+
+  const templateInputsSkipRawHtmlCheck = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: {
+      template_id: 'valid',
+      template_inputs: { headline: '标题' },
+      frames: [
+        {
+          id: 'template_inputs_missing_file',
+          template_id: 'valid',
+          source_mode: 'template_inputs',
+          inputs: { headline: '帧标题' },
+          html_path: 'frames/not-found.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'template_inputs_missing_file', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(templateInputsSkipRawHtmlCheck.ok, true);
+  assert.equal(templateInputsSkipRawHtmlCheck.diagnostics.some(item => /^raw_html_/.test(item.code)), false);
 
   const { normalizeDiagnostics } = require('../server/services/creative-video/html-video/diagnostics');
   const normalized = normalizeDiagnostics(['Playwright browser executable not found'], { stage: 'render' });

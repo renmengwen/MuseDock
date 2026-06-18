@@ -109,5 +109,51 @@ async function writeFile(filePath, content) {
   assert.ok(progressEvents.some(event => event.type === 'html_video_compose_started'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_export_ready'));
 
+  const rawProjectDir = path.join(rootDir, 'raw-project');
+  await writeFile(path.join(rawProjectDir, 'frames', 'raw.html'), [
+    '<html>',
+    '<body>',
+    '<main>Raw HTML frame</main>',
+    '</body>',
+    '</html>',
+  ].join('\n'));
+  const rawProject = {
+    project_id: 'wf_raw',
+    workflow_id: 'wf',
+    run_id: 'raw',
+    output: { resolution: { width: 1080, height: 1920 }, fps: 24 },
+    frames: [
+      {
+        id: 'raw_frame_01',
+        scene_id: 'raw_scene_01',
+        source_mode: 'raw_html',
+        html_path: 'frames/raw.html',
+        narration_text: '导出前必须恢复字幕层',
+        duration_sec: 2,
+      },
+    ],
+    timeline: { tracks: [{ id: 'main', type: 'video', items: [] }] },
+  };
+  const rawCalls = [];
+  const rawExported = await orchestrator.exportHtmlVideoProject({
+    projectDir: rawProjectDir,
+    project: rawProject,
+    services: {
+      frameRenderer: {
+        renderFrame: async (frame, options) => {
+          rawCalls.push(`render:${frame.id}`);
+          await writeFile(options.outputPath, 'mp4');
+          return { success: true, output_path: options.outputPath, diagnostics: [] };
+        },
+      },
+      ffmpegComposer: services.ffmpegComposer,
+    },
+  });
+  assert.equal(rawExported.success, true);
+  assert.deepEqual(rawCalls, ['render:raw_frame_01']);
+  assert.ok(rawExported.project.frames[0].captions.length > 0);
+  const rawHtml = await fs.readFile(path.join(rawProjectDir, rawExported.project.frames[0].html_path), 'utf8');
+  assert.match(rawHtml, /data-hv-layer="captions"|data-role="subtitle-caption"/);
+
   console.log('html-video project orchestrator mode tests passed');
 })();

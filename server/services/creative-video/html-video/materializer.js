@@ -3,7 +3,7 @@ const path = require('path');
 
 const { normalizeProject } = require('./projectSchema');
 const { resolveSourceEntryPath } = require('./templateRegistry');
-const { injectCaptionOverlay, normalizeCaptions } = require('./rawHtmlFrameBuilder');
+const { ensureCaptionLayer, hasUnmanagedCaptionLayer, normalizeCaptionsForFrame } = require('./captionLayer');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -78,6 +78,14 @@ function materializeTemplate(sourceHtml, vars, durationSec, sceneData = {}) {
   return `${injection}\n${replaced}`;
 }
 
+function recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame) {
+  diagnostics.push({
+    code: 'unmanaged_caption_layer_preserved',
+    frame_id: frame.id,
+    message: '检测到模板或第三方非受管字幕层，已保留并另行写入受管字幕层。',
+  });
+}
+
 async function materializeFrame({ projectDir, project, frame, index, templateRegistry }) {
   const diagnostics = [];
   if (frame.source_mode === 'raw_html') {
@@ -93,9 +101,12 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
     try {
       await fs.access(outputPath);
       const html = await fs.readFile(outputPath, 'utf8');
-      const captions = normalizeCaptions(frame, frame.duration_sec);
+      const captions = normalizeCaptionsForFrame(frame);
       frame.captions = captions;
-      const nextHtml = injectCaptionOverlay(html, captions);
+      if (hasUnmanagedCaptionLayer(html)) {
+        recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame);
+      }
+      const nextHtml = ensureCaptionLayer(html, captions);
       if (nextHtml !== html) {
         await fs.writeFile(outputPath, nextHtml, 'utf8');
         diagnostics.push({
@@ -167,14 +178,20 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
   const durationSec = Number(frame.duration_sec || vars.duration_sec || objectOrEmpty(manifest.output).duration || 6);
   vars.duration_sec = Number.isFinite(Number(vars.duration_sec)) ? Number(vars.duration_sec) : durationSec;
 
+  const captions = normalizeCaptionsForFrame(frame);
+  frame.captions = captions;
   const sourceHtml = await fs.readFile(sourcePath, 'utf8');
   const sceneData = {
     id: frame.scene_id || frame.id,
     narration_text: frame.narration_text || '',
-    captions: Array.isArray(frame.captions) ? frame.captions : [],
+    captions,
     metadata: objectOrEmpty(frame.metadata),
   };
-  const html = materializeTemplate(sourceHtml, vars, durationSec, sceneData);
+  const materializedHtml = materializeTemplate(sourceHtml, vars, durationSec, sceneData);
+  if (hasUnmanagedCaptionLayer(materializedHtml)) {
+    recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame);
+  }
+  const html = ensureCaptionLayer(materializedHtml, captions);
   const relativePath = frameOutputPath(frame, index);
   const outputPath = resolveProjectPath(projectDir, relativePath);
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
@@ -194,11 +211,11 @@ async function materializeProject({ projectDir, project, templateRegistry }) {
   if (!projectDir) {
     throw new Error('缺少 projectDir。');
   }
-  if (!templateRegistry) {
+  const normalized = normalizeProject(project);
+  const needsTemplateRegistry = normalized.frames.some(frame => frame.source_mode !== 'raw_html' && !getFrameOverride(normalized, frame));
+  if (!templateRegistry && needsTemplateRegistry) {
     throw new Error('缺少 templateRegistry。');
   }
-
-  const normalized = normalizeProject(project);
   const diagnostics = [];
   for (let index = 0; index < normalized.frames.length; index += 1) {
     const frameDiagnostics = await materializeFrame({
