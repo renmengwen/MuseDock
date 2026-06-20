@@ -9,6 +9,7 @@ const { prepareSourceHtml } = require('./prepareSourceHtml');
 const { resolveFfmpegPath } = require('./environmentDoctor');
 
 const ADAPTER_VERSION = '0.1.0-playwright';
+const DEFAULT_RENDER_RESOLUTION = { width: 1920, height: 1080 };
 
 async function render(input = {}, ctx = {}, deps = {}) {
   const startedAt = Date.now();
@@ -198,8 +199,8 @@ async function render(input = {}, ctx = {}, deps = {}) {
 
 function normalizeConfig(config) {
   const resolution = config.resolution || {};
-  const width = Number(resolution.width || config.width || 1280);
-  const height = Number(resolution.height || config.height || 720);
+  const width = Number(resolution.width || config.width || DEFAULT_RENDER_RESOLUTION.width);
+  const height = Number(resolution.height || config.height || DEFAULT_RENDER_RESOLUTION.height);
   const duration = config.duration === 'auto'
     ? 5
     : Math.max(0.5, Number(config.duration || config.duration_sec || 5));

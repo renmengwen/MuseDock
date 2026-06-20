@@ -2,6 +2,7 @@ const path = require('path');
 
 const defaultAdapter = require('./hyperframesPlaywrightAdapter');
 const { resolveFrameRenderSource } = require('./frameRenderSource');
+const { DEFAULT_OUTPUT_RESOLUTION } = require('./projectSchema');
 
 function resolveFrameHtmlPath(frame, options = {}) {
   const source = resolveFrameRenderSource({
@@ -55,7 +56,7 @@ async function renderFrame(frame = {}, options = {}) {
         },
         config: {
           outputPath,
-          resolution: options.resolution || frame.resolution || { width: 1280, height: 720 },
+          resolution: options.resolution || frame.resolution || DEFAULT_OUTPUT_RESOLUTION,
           fps: options.fps || frame.fps || 30,
           duration: source.duration_sec,
           durationMode: frame.duration_mode || frame.durationMode || 'explicit',

@@ -46,6 +46,30 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   assert.equal(receivedSourcePath, htmlPath);
   assert.equal(state.status, 'done');
 
+  let defaultResolution = null;
+  const defaultResolutionResult = await renderFrame(
+    {
+      id: 'scene_default_resolution',
+      html_path: 'frames/01-scene_01.html',
+      duration_sec: 4,
+    },
+    {
+      projectDir,
+      outputPath: path.join(projectDir, 'frames', 'scene_default_resolution.mp4'),
+      adapter: {
+        render: async input => {
+          defaultResolution = input.config.resolution;
+          return {
+            output_path: input.config.outputPath,
+            diagnostics: [],
+          };
+        },
+      },
+    },
+  );
+  assert.equal(defaultResolutionResult.success, true);
+  assert.deepEqual(defaultResolution, { width: 1920, height: 1080 });
+
   let legacySourcePath = '';
   const legacyResult = await renderFrame(
     {

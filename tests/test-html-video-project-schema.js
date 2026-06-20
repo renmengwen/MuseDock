@@ -15,6 +15,8 @@ assert.equal(project.schema_version, 1);
 assert.equal(project.template_id, null);
 assert.deepEqual(project.template_inputs, {});
 assert.deepEqual(project.content_graph, { schemaVersion: 1, intent: 'promo', synopsis: '', nodes: [], edges: [] });
+assert.deepEqual(project.output.resolution, { width: 1920, height: 1080 });
+assert.equal(project.output.fps, 30);
 assert.deepEqual(project.frames, []);
 assert.deepEqual(project.timeline, {
   tracks: [

@@ -3,6 +3,7 @@ const { normalizeCaptionsForFrame } = require('./captionLayer');
 
 const SCHEMA_VERSION = 1;
 const DEFAULT_ENGINE = 'hyperframes-playwright';
+const DEFAULT_OUTPUT_RESOLUTION = { width: 1920, height: 1080 };
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -215,8 +216,8 @@ function normalizeOutput(value) {
   const duration = Number(input.duration ?? input.duration_sec);
   const output = {
     resolution: {
-      width: Number.isFinite(width) && width > 0 ? width : 1280,
-      height: Number.isFinite(height) && height > 0 ? height : 720,
+      width: Number.isFinite(width) && width > 0 ? width : DEFAULT_OUTPUT_RESOLUTION.width,
+      height: Number.isFinite(height) && height > 0 ? height : DEFAULT_OUTPUT_RESOLUTION.height,
     },
     fps: Number.isFinite(fps) && fps > 0 ? fps : 30,
   };
@@ -336,6 +337,7 @@ module.exports = {
   createEmptyProject,
   normalizeProject,
   validateProject,
+  DEFAULT_OUTPUT_RESOLUTION,
   defaultTimeline,
   defaultEnhancement,
   clone,

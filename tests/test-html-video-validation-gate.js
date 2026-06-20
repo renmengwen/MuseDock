@@ -303,6 +303,45 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const managedCaptionDiagnostic = rawHtmlManagedCaptionLayer.diagnostics.find(item => item.code === 'raw_html_text_keys_missing');
   assert.deepEqual(managedCaptionDiagnostic.details.missing_keys, ['subtitle']);
 
+  await writeFile(path.join(rawHtmlProjectDir, 'frames', 'wrong-resolution.html'), [
+    '<!doctype html>',
+    '<html><head>',
+    '<meta name="viewport" content="width=1920,height=1080,initial-scale=1.0">',
+    '<style>html,body{margin:0;width:1920px;height:1080px;overflow:hidden}</style>',
+    '</head><body>',
+    '<main>',
+    '<h1 data-text-key="headline">横屏标题</h1>',
+    '<p data-text-key="subtitle">短字幕</p>',
+    '<section data-text-key="body">正文</section>',
+    '</main>',
+    '</body></html>',
+  ].join('\n'));
+  const rawHtmlWrongResolution = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: {
+      template_id: 'valid',
+      template_inputs: {},
+      output: { resolution: { width: 1080, height: 1920 }, fps: 30 },
+      frames: [
+        {
+          id: 'raw_wrong_resolution',
+          template_id: 'valid',
+          source_mode: 'raw_html',
+          inputs: {},
+          html_path: 'frames/wrong-resolution.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_wrong_resolution', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(rawHtmlWrongResolution.ok, false);
+  const wrongResolutionDiagnostic = rawHtmlWrongResolution.diagnostics.find(item => item.code === 'raw_html_resolution_mismatch');
+  assert.ok(wrongResolutionDiagnostic);
+  assert.deepEqual(wrongResolutionDiagnostic.details.expected, { width: 1080, height: 1920 });
+  assert.deepEqual(wrongResolutionDiagnostic.details.actual, { width: 1920, height: 1080, source: 'viewport' });
+
   const rawHtmlMissingFile = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {

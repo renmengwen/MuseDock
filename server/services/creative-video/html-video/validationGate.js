@@ -5,6 +5,7 @@ const { createDiagnostic } = require('./diagnostics');
 const { validateProject } = require('./projectSchema');
 const { mappedEngine } = require('./templateRegistry');
 const { validateTemplateInputs } = require('./templateInputAgent');
+const { validateHtmlTargetResolution } = require('./frameHtmlAgent');
 
 const SUPPORTED_ENGINES = new Set(['hyperframes', 'hyperframes-playwright']);
 
@@ -168,10 +169,21 @@ async function readFrameHtmlForValidation(projectDir, frame, diagnostics) {
   }
 }
 
-async function validateRawHtmlTextKeys({ diagnostics, projectDir, frames }) {
+async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames }) {
+  const output = objectOrEmpty(project.output);
+  const resolution = objectOrEmpty(output.resolution);
   for (const frame of frames) {
     const html = await readFrameHtmlForValidation(projectDir, frame, diagnostics);
     if (html == null) continue;
+    const resolutionValidation = validateHtmlTargetResolution(html, { resolution });
+    if (!resolutionValidation.success) {
+      add(diagnostics, 'raw_html_resolution_mismatch', 'frame', resolutionValidation.message || 'raw_html 帧画幅尺寸不符合工程输出尺寸。', {
+        frame_id: frame.id,
+        html_path: frame.html_path,
+        expected: resolutionValidation.expected,
+        actual: resolutionValidation.actual,
+      });
+    }
     const missing = collectMissingTextKeys(html);
     if (missing.length) {
       warningDiagnostic(diagnostics, 'raw_html_text_keys_missing', 'frame', 'raw_html 帧缺少可编辑文本锚点。', {
@@ -224,7 +236,7 @@ async function validateHtmlVideoProject({
     }
   });
 
-  await validateRawHtmlTextKeys({ diagnostics, projectDir, frames });
+  await validateRawHtmlFrames({ diagnostics, projectDir, project: input, frames });
 
   const schemaValidation = validateProject(input);
   for (const error of schemaValidation.errors || []) {
