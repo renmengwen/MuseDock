@@ -31,6 +31,23 @@ const sceneParsed = agent.parseSceneSpecResponse(JSON.stringify({
 assert.equal(sceneParsed.success, true);
 assert.equal(sceneParsed.scene_spec.scenes[0].kind, 'text');
 
+const sceneParsedWithDurationAliases = agent.parseSceneSpecResponse(JSON.stringify({
+  scene_spec: {
+    title: '字段别名测试',
+    aspect_ratio: '16:9',
+    scenes: [{
+      id: 'scene_08',
+      target_duration_sec: 3,
+      kind: 'text',
+      narration_text: '第八段旁白',
+      captions: [],
+      visual_text: { headline: '第八幕', keywords: [], cards: ['结尾文案'] },
+    }],
+  },
+}));
+assert.equal(sceneParsedWithDurationAliases.success, true);
+assert.equal(sceneParsedWithDurationAliases.scene_spec.scenes[0].duration, 3);
+
 const sceneParsedWithDurationFallback = agent.parseSceneSpecResponse(JSON.stringify({
   scene_spec: {
     title: '测试',

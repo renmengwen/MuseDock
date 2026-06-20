@@ -55,6 +55,16 @@ function list(value) {
   return value.map(item => text(item)).filter(Boolean);
 }
 
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) {
+      return number;
+    }
+  }
+  return 0;
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value || {}));
 }
@@ -87,11 +97,20 @@ function normalizeCaptions(captions) {
 
 function normalizeScene(scene, index) {
   const kind = isAllowedKind(scene && scene.kind) ? text(scene.kind) : 'text';
+  const duration = firstPositiveNumber(
+    scene && scene.duration,
+    scene && scene.duration_sec,
+    scene && scene.durationSec,
+    scene && scene.target_duration_sec,
+    scene && scene.targetDurationSec,
+    scene && scene.actual_duration_sec,
+    scene && scene.actualDurationSec,
+  );
   return {
     id: text(scene && scene.id) || `scene_${String(index + 1).padStart(2, '0')}`,
     order: index + 1,
     start: roundTime(scene && scene.start),
-    duration: roundTime(scene && scene.duration),
+    duration: roundTime(duration),
     kind,
     narration_text: text(scene && scene.narration_text),
     captions: normalizeCaptions(scene && scene.captions),

@@ -37,6 +37,27 @@ assert.equal(normalized.scenes[1].start, 8.35);
 assert.equal(normalized.scenes[0].kind, 'text');
 assert.equal(sceneSpec.validateSceneSpec(normalized).success, true);
 
+const aliasedDurations = sceneSpec.validateSceneSpec({
+  title: '字段别名时长',
+  target_duration_sec: 24,
+  scenes: Array.from({ length: 8 }, (_, index) => ({
+    id: `scene_${String(index + 1).padStart(2, '0')}`,
+    duration: index >= 5 ? undefined : 3,
+    duration_sec: index === 5 ? 3 : undefined,
+    durationSec: index === 6 ? 3 : undefined,
+    target_duration_sec: index === 7 ? 3 : undefined,
+    kind: 'text',
+    narration_text: `第 ${index + 1} 段旁白`,
+    captions: [],
+    visual_text: { headline: `第 ${index + 1} 幕`, keywords: [], cards: [] },
+  })),
+});
+assert.equal(aliasedDurations.success, true);
+assert.equal(aliasedDurations.scene_spec.scenes[5].duration, 3);
+assert.equal(aliasedDurations.scene_spec.scenes[6].duration, 3);
+assert.equal(aliasedDurations.scene_spec.scenes[7].duration, 3);
+assert.equal(aliasedDurations.scene_spec.scenes[7].start, 21);
+
 const normalizedObjectVisualText = sceneSpec.normalizeSceneSpec({
   title: '对象视觉字段',
   scenes: [{
