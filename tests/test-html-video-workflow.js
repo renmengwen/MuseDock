@@ -116,8 +116,10 @@ async function createVerticalTemplate(rootDir) {
             };
           }
           if (prompt.includes('当前帧：scene_01')) {
+            assert.match(prompt, /Target resolution：1080x1920/);
             return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">第一幕</h1><p data-text-key="subtitle">短字幕</p><section data-text-key="body">第一幕完整页面</section></main></body></html>' };
           }
+          assert.match(prompt, /Target resolution：1080x1920/);
           return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_02"><h1 data-text-key="headline">第二幕</h1><p>短字幕</p><section>第二幕完整页面</section></main></body></html>' };
         },
       },

@@ -132,6 +132,35 @@ function resolveRenderTarget(target = {}, sceneSpec = {}) {
   };
 }
 
+function resolveTemplateRenderTarget(target = {}, template = {}) {
+  const output = objectOrEmpty(template.output);
+  const outputResolution = objectOrEmpty(output.resolution);
+  const targetResolution = objectOrEmpty(target.resolution);
+  const width = firstPositiveNumber(target.width, targetResolution.width, outputResolution.width);
+  const height = firstPositiveNumber(target.height, targetResolution.height, outputResolution.height);
+  const fps = firstPositiveNumber(target.fps, output.fps);
+  const durationSec = firstPositiveNumber(
+    target.duration_sec,
+    target.durationSec,
+    target.duration,
+    output.duration_sec,
+    output.duration,
+  );
+  return {
+    ...target,
+    ...(width && height ? {
+      width,
+      height,
+      resolution: { width, height },
+    } : {}),
+    ...(fps ? { fps } : {}),
+    ...(durationSec ? {
+      duration_sec: durationSec,
+      durationSec,
+    } : {}),
+  };
+}
+
 function buildTemplateIndexOptions(renderTarget = {}, sceneSpec = {}) {
   const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
   const isMultiScene = scenes.length > 1;
@@ -265,6 +294,7 @@ async function generateHtmlVideo({
       }),
     ]);
   }
+  const templateRenderTarget = resolveTemplateRenderTarget(renderTarget, template);
   await report(onProgress, {
     type: 'html_video_template_selected',
     stage: 'project',
@@ -278,7 +308,7 @@ async function generateHtmlVideo({
 
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
   const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
-  const generationMode = resolveGenerationMode(renderTarget);
+  const generationMode = resolveGenerationMode(templateRenderTarget);
   let project;
   let templateInputs = {};
 
@@ -309,13 +339,13 @@ async function generateHtmlVideo({
       sceneSpec,
       template,
       templateInputs,
-      target: renderTarget,
+      target: templateRenderTarget,
     });
   } else {
     const graphPrompt = contentGraphAgent.buildContentGraphPrompt({
       sceneSpec,
       creativeContext,
-      target: renderTarget,
+      target: templateRenderTarget,
     });
     await report(onProgress, {
       type: 'html_video_graph_started',
@@ -382,7 +412,7 @@ async function generateHtmlVideo({
         total: nodes.length,
         sceneSpec,
         creativeContext,
-        target: renderTarget,
+        target: templateRenderTarget,
         template,
         visualStyleReferenceHtml,
         previousFrameHtml,
@@ -421,7 +451,7 @@ async function generateHtmlVideo({
       graph: graphParsed.graph,
       frameHtmlByNodeId,
       sceneSpec,
-      target: renderTarget,
+      target: templateRenderTarget,
       template,
     });
   }
@@ -488,7 +518,7 @@ async function generateHtmlVideo({
     visualReport = await visualQaService.inspectRenderedVideo({
       projectDir,
       outputPath: rendered.output_path,
-      expectedAspectRatio: renderTarget.aspect_ratio || sceneSpec?.aspect_ratio,
+      expectedAspectRatio: templateRenderTarget.aspect_ratio || sceneSpec?.aspect_ratio,
     });
     if (!visualReport.success) {
       diagnostics.push(createDiagnostic({
@@ -636,5 +666,6 @@ module.exports = {
   requestTemplateInputs,
   buildInitialProject,
   resolveRenderTarget,
+  resolveTemplateRenderTarget,
   buildTemplateIndexOptions,
 };
