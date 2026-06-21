@@ -230,7 +230,7 @@ function testNormalizesSourceUrls() {
   assert.equal(multiple.success, true);
   assert.equal(multiple.data.mode, 'source_url');
   assert.equal(multiple.data.source_url, 'https://example.com/a');
-  assert.equal(multiple.data.source_hint, '先看 再看');
+  assert.equal(multiple.data.source_hint, '先看 再看 https://example.com/b');
   assert.equal(multiple.data.ignored_url_count, 1);
 
   assert.equal(many.success, true);

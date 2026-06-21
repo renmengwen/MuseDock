@@ -141,19 +141,17 @@ function isDouyinLink(input) {
   }
 }
 
-function removeUrlsFromText(text, urls) {
+function removeUrlFromText(text, url) {
   const sourceText = safeString(text);
-  const sourceUrls = Array.isArray(urls) ? urls.map(safeString).filter(Boolean) : [];
-  if (!sourceText || sourceUrls.length === 0) {
+  const sourceUrl = safeString(url);
+  if (!sourceText || !sourceUrl) {
     return sourceText;
   }
 
   const punctuation = '[\\s\\u3002\\uff0c\\uff1b\\uff1a\\uff01\\uff1f\\u3001,.;:!?]*';
-  return sourceUrls.reduce((hint, sourceUrl) => {
-    const escapedUrl = sourceUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const urlWithNoise = new RegExp(`${punctuation}${escapedUrl}${punctuation}`, 'g');
-    return hint.replace(urlWithNoise, ' ');
-  }, sourceText).replace(/\s+/g, ' ').trim();
+  const escapedUrl = sourceUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const urlWithNoise = new RegExp(`${punctuation}${escapedUrl}${punctuation}`, 'g');
+  return sourceText.replace(urlWithNoise, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function extractUrlOccurrences(text) {
@@ -212,14 +210,15 @@ function normalizeCreativeInput(payload = {}) {
     });
   }
 
-  if (urls.length > 0) {
-    const sourceUrl = urls[0];
+  const sourceUrls = sourceFetch.extractUrls(input, 3);
+  if (sourceUrls.length > 0) {
+    const sourceUrl = sourceUrls[0];
     const urlOccurrences = extractUrlOccurrences(input);
     return createSuccessResponse({
       mode: 'source_url',
       raw_text: input,
       source_url: sourceUrl,
-      source_hint: removeUrlsFromText(input, urls),
+      source_hint: removeUrlFromText(input, sourceUrl),
       ignored_url_count: Math.max(0, urlOccurrences.length - 1),
       use_research: useResearch,
       skip_validation: skipValidation,
