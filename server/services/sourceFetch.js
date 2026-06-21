@@ -466,11 +466,14 @@ function stripInline(html) {
 
 function countVisibleLength(value) {
   const visible = String(value || '')
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
     .replace(/\[([^\]]*)\]\([^)]+\)/g, '$1')
     .replace(/https?:\/\/\S+/gi, '')
     .replace(/[`*_>#~\-[\]()!]/g, '');
-  return Array.from(visible.replace(/\s+/g, '')).length;
+  const compact = visible.replace(/\s+/g, '');
+  const meaningful = compact.replace(/[\p{P}\p{S}]/gu, '');
+  if (!meaningful) return 0;
+  return Array.from(compact).length;
 }
 
 function decodeEntities(value) {

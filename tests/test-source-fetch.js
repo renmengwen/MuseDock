@@ -196,6 +196,41 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
+    const longAlt = '这是一段超过八十个字符的图片说明'.repeat(4);
+    const html = `<html><head><title>图片说明不是正文</title></head><body><article><p><img src="/image.png" alt="${longAlt}"></p></article></body></html>`;
+    const result = await sourceFetch.fetchSource('https://example.com/image-alt-only', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /未能读取文章正文/);
+  }
+
+  {
+    const longHref = `https://example.com/very/long/${'path-segment/'.repeat(20)}`;
+    const html = `<html><head><title>链接地址不是正文</title></head><body><article><p><a href="${longHref}"> </a></p></article></body></html>`;
+    const result = await sourceFetch.fetchSource('https://example.com/link-url-only', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /未能读取文章正文/);
+  }
+
+  {
+    const html = [
+      '<html><head><title>符号不是正文</title></head><body><article>',
+      '<p><img src="/image.png" alt="这段图片说明也不能算作文章正文"></p>',
+      '<p><a href="https://example.com/very/long/path"> </a></p>',
+      `<p>${'！@#￥%……&*（）【】[]()_-+=~`'.repeat(6)}</p>`,
+      '</article></body></html>',
+    ].join('');
+    const result = await sourceFetch.fetchSource('https://example.com/symbols-only', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /未能读取文章正文/);
+  }
+
+  {
     const html = [
       '<html><head><title>main fallback</title></head><body>',
       `<main><p>${'主'.repeat(80)}</p></main>`,
