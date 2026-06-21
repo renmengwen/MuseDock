@@ -70,7 +70,7 @@ MuseDock 保留完整素材前置链路：
 ## 技术栈
 
 - 前端：React、React Router、Vite
-- UI：Tailwind CSS、本地 shadcn 风格组件、lucide-react
+- UI：Tailwind CSS、shadcn/ui、lucide-react
 - 后端：Node.js 22、Express
 - 数据库：SQLite、better-sqlite3
 - 浏览器自动化：Playwright、Chrome CDP

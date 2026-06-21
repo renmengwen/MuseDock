@@ -799,19 +799,6 @@ a { color: #fe2c55; text-decoration: none; }
 .spinIcon {
   animation: spin .8s linear infinite;
 }
-.creativeAssetNotice {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
-  max-width: 100%;
-  padding: 7px 10px;
-  border-radius: 999px;
-  background: #f8fafc;
-  color: #667085;
-  font-size: 12px;
-  line-height: 1.4;
-}
 .creativeExpertSlot {
   display: grid;
   align-content: start;
@@ -851,37 +838,6 @@ a { color: #fe2c55; text-decoration: none; }
 .creativeTaskDetail.hasVideo {
   grid-template-rows: auto auto minmax(0, 1fr);
   min-height: calc(100vh - 176px);
-}
-.creativeDetailCard {
-  min-width: 0;
-  padding: 16px;
-  border: 1px solid #edf0f4;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 10px 28px rgba(15,23,42,.05);
-}
-.creativeDetailCardHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.creativeDetailCardHeader h3 {
-  margin: 0;
-  color: #111827;
-  font-size: 15px;
-}
-.creativeDetailCardHeader span {
-  color: #8a93a2;
-  font-size: 12px;
-}
-.creativeDetailCard .status {
-  margin-bottom: 12px;
-}
-.creativeStagePanel {
-  max-height: min(58vh, 520px);
-  overflow: auto;
 }
 .creativeDetailMeta {
   display: flex;
