@@ -157,7 +157,7 @@ function classifySourceUrl(rawUrl) {
     'topics',
     'trending',
   ]);
-  if (parts.length >= 2 && !reserved.has(parts[0].toLowerCase())) {
+  if (parts.length === 2 && !reserved.has(parts[0].toLowerCase())) {
     return {
       kind: 'github_repo',
       owner: parts[0],
@@ -386,13 +386,13 @@ function extractBalanced(html, tag, openTagRe) {
 
 function extractMainHtml(html) {
   const wx = extractBalanced(html, 'div', /<div[^>]*\bid=["']js_content["'][^>]*>/i);
-  if (wx && wx.length > 80) return wx;
+  if (wx !== null) return wx;
   const article = extractBalanced(html, 'article', /<article[^>]*>/i);
-  if (article && article.length > 80) return article;
+  if (article !== null) return article;
   const main = extractBalanced(html, 'main', /<main[^>]*>/i);
-  if (main && main.length > 80) return main;
+  if (main !== null) return main;
   const body = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  return body && body[1] ? body[1] : html;
+  return body ? body[1] : html;
 }
 
 function extractTitle(html) {

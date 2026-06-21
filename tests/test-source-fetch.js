@@ -74,6 +74,8 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
       owner: 'openai',
       repo: 'codex',
     });
+    assert.equal(sourceFetch.classifySourceUrl('https://github.com/openai/codex/issues/1').kind, 'article');
+    assert.equal(sourceFetch.classifySourceUrl('https://github.com/openai/codex/tree/main').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/search?q=codex').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/settings/profile').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/orgs/foo').kind, 'article');
@@ -106,6 +108,21 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     assert.match(result.markdown, /^# 微信文章标题/);
     assert.match(result.markdown, /第一段正文/);
     assert.match(result.markdown, /第二段 重点/);
+  }
+
+  {
+    const html = [
+      '<html><head><title>短微信正文</title></head><body>',
+      '<div id="js_content"><p>太短</p></div>',
+      '<article><p>这是一段很长的页面其他区域内容，用于确认存在短微信正文时不会降级读取 article 区域。</p>',
+      '<p>如果实现错误地跳过短的 js_content，这些正文会让读取结果误判为成功。</p></article>',
+      '</body></html>',
+    ].join('');
+    const result = await sourceFetch.fetchSource('https://mp.weixin.qq.com/s/short', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /未能读取文章正文/);
   }
 
   {
