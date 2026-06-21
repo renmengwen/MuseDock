@@ -156,7 +156,7 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
-    const html = '<html><head><title>普通文章</title></head><body><article><h1>标题</h1><p>正文内容足够长，用于验证 article 提取逻辑。文章解释了产品背景、关键能力、落地方式和风险边界，并继续补充来源摘要、素材准备、脚本生成和结果校验的完整上下文。</p><ul><li>要点 A</li></ul></article></body></html>';
+    const html = '<html><head><title>普通文章</title></head><body><article><h1>标题</h1><p>正文内容足够长，用于验证 article 提取逻辑。文章解释了产品背景、关键能力、落地方式和风险边界，并继续补充来源摘要、素材准备、脚本生成、结果校验和使用建议的完整上下文。</p><ul><li>要点 A</li></ul></article></body></html>';
     const result = await sourceFetch.fetchSource('https://example.com/post', {
       fetchImpl: async () => makeResponse(html),
     });
@@ -170,6 +170,24 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   {
     const html = `<html><head><title>四十字中文正文</title></head><body><article><p>${'中'.repeat(40)}</p></article></body></html>`;
     const result = await sourceFetch.fetchSource('https://example.com/forty-chinese-chars', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /未能读取文章正文/);
+  }
+
+  {
+    const html = `<html><head><title>单字加标点</title></head><body><article><p>中${'！'.repeat(79)}</p></article></body></html>`;
+    const result = await sourceFetch.fetchSource('https://example.com/one-char-with-punctuation', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /未能读取文章正文/);
+  }
+
+  {
+    const html = `<html><head><title>四十字加标点</title></head><body><article><p>${'中'.repeat(40)}${'！'.repeat(40)}</p></article></body></html>`;
+    const result = await sourceFetch.fetchSource('https://example.com/forty-chars-with-punctuation', {
       fetchImpl: async () => makeResponse(html),
     });
     assert.equal(result.success, false);
@@ -297,7 +315,7 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     const html = [
       '<html><head><title>跳转后文章</title></head><body><article>',
       '<p>公开跳转后的正文内容足够长，用于验证手动处理公开到公开的重定向时仍然可以读取文章正文。</p>',
-      '<p>这里继续补充视频生成、素材准备和来源摘要的上下文，保证正文长度满足提取逻辑。</p>',
+      '<p>这里继续补充视频生成、素材准备、来源摘要和结果校验的上下文，保证正文长度满足提取逻辑。</p>',
       '</article></body></html>',
     ].join('');
     const result = await sourceFetch.fetchSource('https://example.com/redirect', {
@@ -357,6 +375,15 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     });
     assert.equal(result.success, true);
     assert.equal(result.title, '反序标题');
+  }
+
+  {
+    const html = `<html><head><title>超大响应</title></head><body><article><p>${'中'.repeat(80)}</p></article></body></html>`;
+    const result = await sourceFetch.fetchSource('https://example.com/huge', {
+      fetchImpl: async () => makeResponse(html, { headers: { 'content-length': String(999999999) } }),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /内容过大|响应过大|资料过大/);
   }
 
   {

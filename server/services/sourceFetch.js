@@ -1,5 +1,7 @@
 const ARTICLE_MAX = 8000;
 const README_MAX = 10000;
+// 限制单次外部来源响应体，避免明显超大页面进入完整解析。
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 12000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
@@ -353,9 +355,58 @@ async function fetchText(url, headers, options = {}) {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    return response.text();
+    return readResponseText(response);
   }
   throw new Error('重定向次数过多，已停止读取外部来源。');
+}
+
+async function readResponseText(response) {
+  const contentLength = Number(getHeader(response.headers, 'content-length'));
+  if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+    throw new Error('外部来源响应过大，已停止读取。');
+  }
+
+  if (response.body && typeof response.body.getReader === 'function') {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let bytes = 0;
+    let text = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += chunkByteLength(value);
+      if (bytes > MAX_RESPONSE_BYTES) {
+        throw new Error('外部来源响应过大，已停止读取。');
+      }
+      text += decodeResponseChunk(value, decoder);
+    }
+    return text + decoder.decode();
+  }
+
+  const text = await response.text();
+  if (utf8ByteLength(text) > MAX_RESPONSE_BYTES) {
+    throw new Error('外部来源响应过大，已停止读取。');
+  }
+  return text;
+}
+
+function chunkByteLength(value) {
+  if (typeof value === 'string') return utf8ByteLength(value);
+  if (value instanceof ArrayBuffer) return value.byteLength;
+  if (ArrayBuffer.isView(value)) return value.byteLength;
+  return utf8ByteLength(String(value || ''));
+}
+
+function decodeResponseChunk(value, decoder) {
+  if (typeof value === 'string') return value;
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+    return decoder.decode(value, { stream: true });
+  }
+  return String(value || '');
+}
+
+function utf8ByteLength(value) {
+  return Buffer.byteLength(String(value || ''), 'utf8');
 }
 
 function getHeader(headers, name) {
@@ -473,7 +524,7 @@ function countVisibleLength(value) {
   const compact = visible.replace(/\s+/g, '');
   const meaningful = compact.replace(/[\p{P}\p{S}]/gu, '');
   if (!meaningful) return 0;
-  return Array.from(compact).length;
+  return Array.from(meaningful).length;
 }
 
 function decodeEntities(value) {
