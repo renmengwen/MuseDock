@@ -1030,14 +1030,6 @@ async function prepareSourceUrl(record, mediaRoot, now, services = {}, reportSta
     };
   }
 
-  if (typeof reportStage === 'function') {
-    await reportStage('外部来源资料已读取，正在准备创作上下文...', 70, {
-      source_url: sourceUrl,
-      source_kind: fetched.kind,
-      title: fetched.title || '',
-    });
-  }
-
   const sourceMaterial = normalizeFetchedSource(fetched, sourceUrl);
   if (!sourceMaterial.markdown) {
     updateFailedSourceUrlSourceContext(record, sourceUrl, {
@@ -1052,6 +1044,14 @@ async function prepareSourceUrl(record, mediaRoot, now, services = {}, reportSta
       message: '外部来源读取失败：未生成可用于创作的 Markdown 内容。',
       result: fetched,
     };
+  }
+
+  if (typeof reportStage === 'function') {
+    await reportStage('外部来源资料已读取，正在准备创作上下文...', 70, {
+      source_url: sourceUrl,
+      source_kind: fetched.kind,
+      title: fetched.title || '',
+    });
   }
 
   return writeSyntheticSourceWorkspace(record, mediaRoot, sourceMaterial, now);

@@ -293,6 +293,62 @@ async function testSourceUrlStageEmitsSpecificProgressMessages() {
   )));
 }
 
+async function testSourceUrlEmptyMarkdownDoesNotEmitSuccessProgress() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const emitted = [];
+  const sourceUrl = 'https://example.com/empty';
+  const { services } = createFakeServices({
+    services: {
+      sourceFetch: {
+        fetchSource: async url => ({
+          success: true,
+          kind: 'article',
+          url,
+          title: '空文章',
+          markdown: '',
+          truncated: false,
+          metadata: {},
+        }),
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: sourceUrl,
+    useResearch: false,
+    assetIds: [],
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, {
+    rootDir,
+    mediaRoot,
+    taskContext: {
+      emit: async event => emitted.push(event),
+    },
+    services,
+  });
+
+  assert.equal(run.success, false);
+  assert.equal(run.error.stage, 'source');
+  assert.equal(run.stages.find(stage => stage.id === 'source').status, 'failed');
+  assert.ok(emitted.some(event => (
+    event.type === 'stage_progress'
+    && event.stage === 'source'
+    && /正在读取网页文章/.test(event.message)
+  )));
+  assert.equal(emitted.some(event => (
+    event.type === 'stage_progress'
+    && event.stage === 'source'
+    && /外部来源资料已读取/.test(event.message)
+  )), false);
+  assert.equal(emitted.some(event => (
+    event.type === 'stage_done'
+    && event.stage === 'source'
+  )), false);
+}
+
 async function testSuccessfulSourceUrlFetchDropsStaleMetadataAndDiagnostics() {
   const { rootDir, mediaRoot } = createTempDirs();
   const sourceUrl = 'https://example.com/current-article';
@@ -1595,6 +1651,7 @@ async function run() {
   await testCreatesAndRunsTextWorkflow();
   await testCreatesAndRunsSourceUrlWorkflow();
   await testSourceUrlStageEmitsSpecificProgressMessages();
+  await testSourceUrlEmptyMarkdownDoesNotEmitSuccessProgress();
   await testSuccessfulSourceUrlFetchDropsStaleMetadataAndDiagnostics();
   await testSourceUrlFailurePersistsFailedSourceContext();
   await testSourceUrlFetchExceptionPersistsFailedSourceContext();
