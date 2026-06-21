@@ -172,6 +172,24 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(created.creative_context.input.mode, 'source_url');
   assert.equal(created.creative_context.input.ignored_url_count, 0);
 
+  const workflowPath = getWorkflowPath(WORKFLOW_ID, rootDir);
+  const staleWorkflow = readJson(workflowPath);
+  staleWorkflow.source_context = {
+    ...(staleWorkflow.source_context || {}),
+    source_metadata: {
+      kind: 'article',
+      url: 'https://old.example/a',
+      title: '旧标题',
+      truncated: true,
+      language: 'OldLang',
+    },
+  };
+  staleWorkflow.creative_context = {
+    ...(staleWorkflow.creative_context || {}),
+    source_context: staleWorkflow.source_context,
+  };
+  fs.writeFileSync(workflowPath, JSON.stringify(staleWorkflow, null, 2), 'utf-8');
+
   const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
 
   assert.equal(run.success, true);
@@ -200,7 +218,9 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(analysisInput.creative_context.source_context.comments_summary, '');
   assert.equal(analysisInput.creative_context.source_context.source_metadata.kind, 'github_repo');
   assert.equal(analysisInput.creative_context.source_context.source_metadata.url, repoUrl);
+  assert.equal(analysisInput.creative_context.source_context.source_metadata.title, 'owner/repo');
   assert.equal(analysisInput.creative_context.source_context.source_metadata.truncated, false);
+  assert.equal(analysisInput.creative_context.source_context.source_metadata.language, 'JavaScript');
   assert.equal(analysisInput.creative_context.source_context.diagnostics.source_kind, 'github_repo');
   assert.equal(analysisInput.creative_context.source_context.diagnostics.fetched_at, '2026-06-21T00:00:00.000Z');
   assert.equal(analysisInput.creative_context.source_context.diagnostics.ignored_url_count, 0);
