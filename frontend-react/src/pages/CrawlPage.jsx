@@ -8,7 +8,13 @@ import { PlatformTabs } from '../components/PlatformTabs.jsx';
 import { Status } from '../components/Status.jsx';
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
-import { Select } from '@/components/ui/select.jsx';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select.jsx';
 import { useDouyinComments } from '../hooks/useDouyinComments.js';
 import { useDouyinLogin } from '../hooks/useDouyinLogin.js';
 import { setSelectedMediaItem } from '../state/mediaSelection.js';
@@ -59,8 +65,8 @@ export function CrawlPage({ routePlatform = '' } = {}) {
     }
   }, [platform, crawlMode]);
 
-  function handleModeChange(event) {
-    setCrawlMode(event.target.value);
+  function handleModeChange(nextMode) {
+    setCrawlMode(nextMode);
     setInputValue('');
     setStatus(null);
   }
@@ -157,12 +163,17 @@ export function CrawlPage({ routePlatform = '' } = {}) {
         />
         <Select
           value={crawlMode}
-          onChange={handleModeChange}
+          onValueChange={handleModeChange}
           disabled={loading || platform === 'xhs'}
         >
-          {CRAWL_MODES.map(mode => (
-            <option key={mode.value} value={mode.value}>{mode.label}</option>
-          ))}
+          <SelectTrigger className="modeSelect" aria-label="选择抓取模式">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {CRAWL_MODES.map(mode => (
+              <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>
+            ))}
+          </SelectContent>
         </Select>
         <Button disabled={!canRunCrawl} onClick={runCrawl}>{getActionLabel()}</Button>
         {platform === 'douyin' ? <Button variant="login" onClick={login.startLogin}>扫码登录</Button> : null}

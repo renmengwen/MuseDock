@@ -1,6 +1,11 @@
 import { Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
-import { DropdownMenu, DropdownMenuCheckboxItem } from '@/components/ui/dropdown-menu.jsx';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu.jsx';
 import {
   Table,
   TableBody,
@@ -34,28 +39,30 @@ export function ConfigurableTable({
   return (
     <section className={cn('tableShell', className)}>
       <div className="mb-2 flex justify-end">
-        <DropdownMenu
-          trigger={(
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button type="button" variant="secondary" size="sm" aria-label="配置表格列">
               <Settings2 className="mr-1.5 h-4 w-4" />
               列设置
             </Button>
-          )}
-        >
-          {columns.map(column => {
-            const checked = isColumnVisible(column.id);
-            const disableHide = column.alwaysVisible || (checked && visibleIds.length <= 1);
-            return (
-              <DropdownMenuCheckboxItem
-                key={column.id}
-                checked={checked}
-                disabled={disableHide}
-                onCheckedChange={checkedValue => setColumnVisible(column.id, checkedValue)}
-              >
-                {column.settingsLabel || column.label}
-              </DropdownMenuCheckboxItem>
-            );
-          })}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {columns.map(column => {
+              const checked = isColumnVisible(column.id);
+              const disableHide = column.alwaysVisible || (checked && visibleIds.length <= 1);
+              return (
+                <DropdownMenuCheckboxItem
+                  key={column.id}
+                  checked={checked}
+                  disabled={disableHide}
+                  onSelect={event => event.preventDefault()}
+                  onCheckedChange={checkedValue => setColumnVisible(column.id, checkedValue)}
+                >
+                  {column.settingsLabel || column.label}
+                </DropdownMenuCheckboxItem>
+              );
+            })}
+          </DropdownMenuContent>
         </DropdownMenu>
       </div>
 

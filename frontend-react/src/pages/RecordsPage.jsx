@@ -7,13 +7,21 @@ import { PlatformTabs } from '../components/PlatformTabs.jsx';
 import { Status } from '../components/Status.jsx';
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
-import { Select } from '@/components/ui/select.jsx';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select.jsx';
 import { useDouyinComments } from '../hooks/useDouyinComments.js';
 import { setSelectedMediaItem } from '../state/mediaSelection.js';
 import { getCommentCacheFromResponse, updateCommentCacheForAweme } from '../utils/commentCache.js';
 import { filterByTitle } from '../utils/content.js';
 import { getDouyinAwemeId } from '../utils/format.js';
 import { shouldAutoPrepareMedia } from '../utils/mediaStatus.js';
+
+const ALL_KEYWORDS_VALUE = '__all_keywords__';
 
 export function RecordsPage({ routePlatform = '' } = {}) {
   const params = useParams();
@@ -68,8 +76,7 @@ export function RecordsPage({ routePlatform = '' } = {}) {
     }
   }
 
-  function handleKeywordChange(event) {
-    const keyword = event.target.value;
+  function handleKeywordChange(keyword) {
     setSelectedKeyword(keyword);
     loadHistory(keyword);
   }
@@ -150,15 +157,19 @@ export function RecordsPage({ routePlatform = '' } = {}) {
           {loading ? '加载中...' : '刷新记录'}
         </Button>
         <Select
-          value={selectedKeyword}
-          onChange={handleKeywordChange}
+          value={selectedKeyword || ALL_KEYWORDS_VALUE}
+          onValueChange={value => handleKeywordChange(value === ALL_KEYWORDS_VALUE ? '' : value)}
           disabled={loading || deletingIds.length > 0}
-          aria-label="按关键词筛选"
         >
-          <option value="">全部关键词</option>
-          {keywordOptions.map(item => (
-            <option key={item.keyword} value={item.keyword}>{item.keyword}</option>
-          ))}
+          <SelectTrigger className="modeSelect" aria-label="按关键词筛选">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_KEYWORDS_VALUE}>全部关键词</SelectItem>
+            {keywordOptions.map(item => (
+              <SelectItem key={item.keyword} value={item.keyword}>{item.keyword}</SelectItem>
+            ))}
+          </SelectContent>
         </Select>
         <Button variant="secondary" disabled={!visibleIds.length || deletingIds.length > 0} onClick={toggleSelectVisible}>
           {visibleIds.length > 0 && selectedVisibleIds.length === visibleIds.length ? '取消本页选择' : '选择本页'}
