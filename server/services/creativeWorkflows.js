@@ -746,13 +746,17 @@ function summarizeMarkdown(markdown, fallback = '') {
   return (text || safeString(fallback)).slice(0, 240);
 }
 
-function createSourceDescription(sourceMaterial = {}) {
+function buildSourceDescription(sourceMaterial = {}) {
   const title = safeString(sourceMaterial.title);
   const summary = summarizeMarkdown(sourceMaterial.markdown, sourceMaterial.description || sourceMaterial.url);
   if (title && summary && summary !== title) {
     return `${title}：${summary}`;
   }
   return title || summary || safeString(sourceMaterial.url);
+}
+
+function createSourceDescription(sourceMaterial = {}) {
+  return buildSourceDescription(sourceMaterial);
 }
 
 function normalizeFetchedSource(fetchResult = {}, requestedUrl = '') {
@@ -774,7 +778,7 @@ function normalizeFetchedSource(fetchResult = {}, requestedUrl = '') {
 }
 
 function createFetchedSourceContext(record, sourceMaterial = {}, now) {
-  const description = createSourceDescription(sourceMaterial);
+  const description = buildSourceDescription(sourceMaterial);
   const input = record.creative_context?.input || record.input || {};
   const ignoredUrlCount = Number(input.ignored_url_count) || 0;
   return {
@@ -782,22 +786,29 @@ function createFetchedSourceContext(record, sourceMaterial = {}, now) {
     status: 'ready',
     kind: 'source_url',
     summary: description,
+    transcript: safeString(sourceMaterial.markdown),
+    comments_summary: '',
     source_url: sourceMaterial.url,
     source_kind: sourceMaterial.kind,
     title: sourceMaterial.title,
     description,
     source_metadata: {
-      ...(record.source_context?.source_metadata || {}),
+      kind: safeString(sourceMaterial.kind),
+      url: safeString(sourceMaterial.url || input.source_url),
+      title: safeString(sourceMaterial.title),
+      truncated: sourceMaterial.truncated === true,
       ...(sourceMaterial.metadata || {}),
+      ...(record.source_context?.source_metadata || {}),
       source_url: sourceMaterial.url,
       source_kind: sourceMaterial.kind,
-      title: sourceMaterial.title,
       user_hint: safeString(record.creative_context?.input?.source_hint),
     },
     diagnostics: {
       ...(record.source_context?.diagnostics || {}),
       ...(sourceMaterial.diagnostics || {}),
       source_type: 'source_url',
+      source_kind: safeString(sourceMaterial.kind),
+      fetched_at: now,
       ignored_url_count: ignoredUrlCount,
       prepared_at: now,
     },
@@ -852,10 +863,11 @@ function updateFailedSourceUrlSourceContext(record, requestedUrl, failure = {}, 
   return sourceContext;
 }
 
-async function writeSyntheticSourceWorkspace(record, mediaRoot, now, sourceMaterial = {}) {
+async function writeSyntheticSourceWorkspace(record, mediaRoot, fetched = {}, now) {
+  const sourceMaterial = fetched || {};
   const paths = mediaPipeline.getMediaPaths(record.aweme_id, mediaRoot);
   const userHint = safeString(record.creative_context?.input?.source_hint);
-  const description = createSourceDescription(sourceMaterial);
+  const description = buildSourceDescription(sourceMaterial);
   const sourceContext = createFetchedSourceContext(record, sourceMaterial, now);
   const creativeContextWithSource = {
     ...(record.creative_context || {}),
@@ -909,7 +921,7 @@ async function writeSyntheticSourceWorkspace(record, mediaRoot, now, sourceMater
       description,
       author: {},
       statistics: {},
-      aweme_url: sourceMaterial.url,
+      aweme_url: '',
       source_url: sourceMaterial.url,
     },
     local_assets: {
@@ -942,7 +954,7 @@ async function writeSyntheticSourceWorkspace(record, mediaRoot, now, sourceMater
 
   return {
     success: true,
-    message: '外部来源资料已准备完成。',
+    message: '外部来源资料已读取并准备完成。',
     paths,
     source_context: sourceContext,
   };
@@ -951,12 +963,13 @@ async function writeSyntheticSourceWorkspace(record, mediaRoot, now, sourceMater
 async function prepareSourceUrl(record, mediaRoot, now, services = {}) {
   const sourceUrl = safeString(record.creative_context?.input?.source_url || record.input?.source_url);
   if (!sourceUrl) {
+    const message = '外部来源链接为空，请重新输入文章或 GitHub 仓库链接。';
     updateFailedSourceUrlSourceContext(record, sourceUrl, {
-      message: '外部来源 URL 为空，无法准备来源资料。',
+      message,
     }, now);
     return {
       success: false,
-      message: '外部来源 URL 为空，无法准备来源资料。',
+      message,
     };
   }
 
@@ -981,7 +994,7 @@ async function prepareSourceUrl(record, mediaRoot, now, services = {}) {
       code: 'SOURCE_FETCH_EXCEPTION',
       error: safeString(error && error.message),
     };
-    const message = '读取外部来源失败，请稍后重试或确认链接可公开访问。';
+    const message = '读取外部来源失败，请确认链接可公开访问。';
     updateFailedSourceUrlSourceContext(record, sourceUrl, {
       url: sourceUrl,
       message,
@@ -995,13 +1008,15 @@ async function prepareSourceUrl(record, mediaRoot, now, services = {}) {
   }
 
   if (!fetched || fetched.success === false) {
-    updateFailedSourceUrlSourceContext(record, sourceUrl, fetched || {
+    const message = safeString(fetched?.message || fetched?.error) || '读取外部来源失败，请确认链接可公开访问。';
+    updateFailedSourceUrlSourceContext(record, sourceUrl, {
+      ...(fetched || {}),
       url: sourceUrl,
-      message: '外部来源读取失败。',
+      message,
     }, now);
     return {
       success: false,
-      message: safeString(fetched?.message || fetched?.error) || '外部来源读取失败。',
+      message,
       result: fetched,
     };
   }
@@ -1022,7 +1037,7 @@ async function prepareSourceUrl(record, mediaRoot, now, services = {}) {
     };
   }
 
-  return writeSyntheticSourceWorkspace(record, mediaRoot, now, sourceMaterial);
+  return writeSyntheticSourceWorkspace(record, mediaRoot, sourceMaterial, now);
 }
 
 function hasPreparedLocalMedia(analysisInput = {}, status = {}) {

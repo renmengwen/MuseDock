@@ -145,9 +145,9 @@ async function testCreatesAndRunsTextWorkflow() {
 async function testCreatesAndRunsSourceUrlWorkflow() {
   const { rootDir, mediaRoot } = createTempDirs();
   const repoUrl = 'https://github.com/owner/repo';
-  const extraUrl = 'https://example.com/extra';
   const { services } = createFakeServices({
     services: {
+      now: () => '2026-06-21T00:00:00.000Z',
       sourceFetch: {
         fetchSource: async sourceUrl => ({
           success: true,
@@ -155,7 +155,7 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
           url: sourceUrl,
           title: 'owner/repo',
           markdown: '# owner/repo\n\n真实 README 内容。',
-          truncated: true,
+          truncated: false,
           metadata: { language: 'JavaScript' },
         }),
       },
@@ -163,20 +163,20 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   });
 
   const created = await createCreativeWorkflow({
-    input: `做成项目解读视频 ${repoUrl} ${extraUrl}`,
+    input: `做成项目解读视频 ${repoUrl}`,
     useResearch: false,
     assetIds: [],
   }, { rootDir, mediaRoot, services });
 
   assert.equal(created.success, true);
   assert.equal(created.creative_context.input.mode, 'source_url');
-  assert.equal(created.creative_context.input.ignored_url_count, 1);
+  assert.equal(created.creative_context.input.ignored_url_count, 0);
 
   const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
 
   assert.equal(run.success, true);
   assert.equal(run.status, 'done');
-  assert.equal(run.source_context.diagnostics.ignored_url_count, 1);
+  assert.equal(run.source_context.diagnostics.ignored_url_count, 0);
 
   const mediaPaths = mediaPipeline.getMediaPaths(created.aweme_id, mediaRoot);
   const metadata = readJson(mediaPaths.metadata);
@@ -187,16 +187,24 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(metadata.source_kind, 'github_repo');
   assert.equal(metadata.source_url, repoUrl);
   assert.match(transcript.text, /真实 README 内容/);
-  assert.equal(transcript.user_hint, `做成项目解读视频 ${extraUrl}`);
-  assert.equal(transcript.truncated, true);
+  assert.equal(transcript.user_hint, '做成项目解读视频');
+  assert.equal(transcript.truncated, false);
   assert.equal(analysisInput.source_material.kind, 'github_repo');
   assert.equal(analysisInput.source_material.url, 'https://github.com/owner/repo');
   assert.equal(analysisInput.source_material.title, 'owner/repo');
-  assert.equal(analysisInput.source_material.user_hint, `做成项目解读视频 ${extraUrl}`);
+  assert.equal(analysisInput.source_material.user_hint, '做成项目解读视频');
   assert.match(analysisInput.source_material.markdown, /owner\/repo/);
   assert.equal(analysisInput.source_material.metadata.language, 'JavaScript');
   assert.equal(analysisInput.creative_context.source_context.kind, 'source_url');
-  assert.equal(analysisInput.creative_context.source_context.diagnostics.ignored_url_count, 1);
+  assert.match(analysisInput.creative_context.source_context.transcript, /真实 README 内容/);
+  assert.equal(analysisInput.creative_context.source_context.comments_summary, '');
+  assert.equal(analysisInput.creative_context.source_context.source_metadata.kind, 'github_repo');
+  assert.equal(analysisInput.creative_context.source_context.source_metadata.url, repoUrl);
+  assert.equal(analysisInput.creative_context.source_context.source_metadata.truncated, false);
+  assert.equal(analysisInput.creative_context.source_context.diagnostics.source_kind, 'github_repo');
+  assert.equal(analysisInput.creative_context.source_context.diagnostics.fetched_at, '2026-06-21T00:00:00.000Z');
+  assert.equal(analysisInput.creative_context.source_context.diagnostics.ignored_url_count, 0);
+  assert.equal(analysisInput.video.aweme_url, '');
 }
 
 async function testSourceUrlFailurePersistsFailedSourceContext() {
@@ -290,6 +298,34 @@ async function testSourceUrlFetchExceptionPersistsFailedSourceContext() {
   assert.equal(persisted.data.creative_context.source_context.status, 'failed');
   assert.match(persisted.data.message, /外部来源/);
   assert.notEqual(persisted.data.message, 'boom');
+}
+
+async function testSourceUrlFetchFailureUsesDefaultChineseMessage() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const sourceUrl = 'https://example.com/post';
+  const { services } = createFakeServices({
+    services: {
+      sourceFetch: {
+        fetchSource: async url => ({
+          success: false,
+          kind: 'article',
+          url,
+        }),
+      },
+    },
+  });
+
+  await createCreativeWorkflow({
+    input: sourceUrl,
+    useResearch: false,
+    assetIds: [],
+  }, { rootDir, mediaRoot, services });
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, false);
+  assert.equal(run.message, '读取外部来源失败，请确认链接可公开访问。');
+  assert.equal(run.source_context.summary, '读取外部来源失败，请确认链接可公开访问。');
 }
 
 async function testResearchRunsInBackgroundStage() {
@@ -1392,6 +1428,7 @@ async function run() {
   await testCreatesAndRunsSourceUrlWorkflow();
   await testSourceUrlFailurePersistsFailedSourceContext();
   await testSourceUrlFetchExceptionPersistsFailedSourceContext();
+  await testSourceUrlFetchFailureUsesDefaultChineseMessage();
   await testResearchRunsInBackgroundStage();
   await testHtmlVideoLiteSkipsLegacyHyperframesStages();
   await testHtmlVideoExportUsesOrchestratorWithTemplateRegistry();
