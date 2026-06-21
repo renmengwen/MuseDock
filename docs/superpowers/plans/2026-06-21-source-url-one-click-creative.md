@@ -1177,18 +1177,57 @@ Expected: commit succeeds.
 - Modify: `frontend-react/src/pages/OneClickCreativePage.jsx`
 - Modify: `tests/test-one-click-creative-page.mjs`
 
-- [ ] **Step 1: Add failing UI copy assertions**
+- [ ] **Step 1: Inspect the current static UI test shape**
 
-In `tests/test-one-click-creative-page.mjs`, add assertions near existing copy checks:
+Run:
+
+```powershell
+Get-Content -Encoding UTF8 tests\test-one-click-creative-page.mjs | Select-Object -First 120
+```
+
+Expected:
+
+- The test defines a `zh` object with `inputLabel`, `emptyInputMessage`, and `creativeInputPlaceholder`.
+- The test loops through those strings and checks `page.includes(text)`.
+- Do not add duplicate top-level imports.
+
+- [ ] **Step 2: Replace the three `zh` constants**
+
+In `tests/test-one-click-creative-page.mjs`, replace these existing properties in the `zh` object:
+
+```js
+  inputLabel: textFromCodePoints([0x8f93, 0x5165, 0x89c6, 0x9891, 0x65b9, 0x5411, 0x3001, 0x6296, 0x97f3, 0x20, 0x49, 0x44, 0x20, 0x6216, 0x6296, 0x97f3, 0x94fe, 0x63a5]),
+  emptyInputMessage: textFromCodePoints([0x8bf7, 0x8f93, 0x5165, 0x89c6, 0x9891, 0x65b9, 0x5411, 0x3001, 0x6296, 0x97f3, 0x20, 0x49, 0x44, 0x20, 0x6216, 0x6296, 0x97f3, 0x94fe, 0x63a5]),
+  creativeInputPlaceholder: textFromCodePoints([0x5728, 0x8fd9, 0x91cc, 0x8f93, 0x5165, 0x4f60, 0x7684, 0x521b, 0x610f]),
+```
+
+with direct UTF-8 strings:
+
+```js
+  inputLabel: '输入视频方向、抖音链接、微信公众号文章或 GitHub 仓库链接',
+  emptyInputMessage: '请输入视频方向、抖音链接、文章链接或 GitHub 仓库链接',
+  creativeInputPlaceholder: '粘贴文章/GitHub 链接，或输入你想生成的视频方向',
+```
+
+Rationale: this test file already uses UTF-8 reads, so direct Chinese strings are acceptable here and make future copy changes easier.
+
+- [ ] **Step 3: Add explicit positive and negative copy assertions**
+
+After the existing loop that checks `page.includes(text)`, add:
 
 ```js
 assert.match(page, /输入视频方向、抖音链接、微信公众号文章或 GitHub 仓库链接/);
 assert.match(page, /粘贴文章\/GitHub 链接，或输入你想生成的视频方向/);
 assert.match(page, /请输入视频方向、抖音链接、文章链接或 GitHub 仓库链接/);
 assert.match(page, /填写方向、抖音来源或外部资料链接后，即可创建视频生成任务。/);
+
+assert.doesNotMatch(page, /输入视频方向、抖音 ID 或抖音链接/);
+assert.doesNotMatch(page, /在这里输入你的创意/);
+assert.doesNotMatch(page, /请输入视频方向、抖音 ID 或抖音链接/);
+assert.doesNotMatch(page, /填写方向或抖音来源后，即可创建视频生成任务。/);
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 4: Run test to verify it fails**
 
 Run:
 
@@ -1196,11 +1235,16 @@ Run:
 node tests/test-one-click-creative-page.mjs
 ```
 
-Expected: FAIL because old copy is still present.
+Expected: FAIL. Acceptable failure examples:
 
-- [ ] **Step 3: Update form label and placeholder**
+- `OneClickCreativePage.jsx should include normal Chinese text: 输入视频方向、抖音链接、微信公众号文章或 GitHub 仓库链接`
+- `Expected regular expression not to match input`
 
-In `frontend-react/src/pages/OneClickCreativePage.jsx`, update `CreativePromptComposer`:
+If it passes before implementation, inspect the test because it may not be reading the intended `OneClickCreativePage.jsx`.
+
+- [ ] **Step 5: Update form label and placeholder**
+
+In `frontend-react/src/pages/OneClickCreativePage.jsx`, find `function CreativePromptComposer`. Replace only the label text and textarea placeholder. The final block must be:
 
 ```jsx
       <label className="creativePromptLabel" htmlFor="creative-input">
@@ -1216,7 +1260,7 @@ In `frontend-react/src/pages/OneClickCreativePage.jsx`, update `CreativePromptCo
       />
 ```
 
-- [ ] **Step 4: Update empty input and default status messages**
+- [ ] **Step 6: Update empty input message**
 
 In `submitCreativeWorkflow()`, change:
 
@@ -1230,13 +1274,27 @@ to:
 setMessage('请输入视频方向、抖音链接、文章链接或 GitHub 仓库链接');
 ```
 
-In `WorkflowStatusPanel`, change fallback message to:
+- [ ] **Step 7: Update default status message**
+
+In `WorkflowStatusPanel`, change the fallback message. The final JSX expression must be:
 
 ```js
 {message || '填写方向、抖音来源或外部资料链接后，即可创建视频生成任务。'}
 ```
 
-- [ ] **Step 5: Run UI test**
+- [ ] **Step 8: Search for stale copy in the page**
+
+Run:
+
+```powershell
+Select-String -Path frontend-react\src\pages\OneClickCreativePage.jsx -Pattern "抖音 ID 或抖音链接|在这里输入你的创意|填写方向或抖音来源"
+```
+
+Expected: no output.
+
+If there is output, update the stale string only if it is user-visible one-click creative copy. Do not change unrelated comments or historical task data.
+
+- [ ] **Step 9: Run UI test**
 
 Run:
 
@@ -1246,7 +1304,7 @@ node tests/test-one-click-creative-page.mjs
 
 Expected: PASS.
 
-- [ ] **Step 6: Run API client stream test**
+- [ ] **Step 10: Run API client stream test**
 
 Run:
 
@@ -1256,7 +1314,7 @@ node tests/test-creative-task-api-client.mjs
 
 Expected: PASS. This confirms the existing SSE client path remains intact.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 11: Commit**
 
 Run:
 
@@ -1275,21 +1333,70 @@ Expected: commit succeeds.
 - Modify: `server/services/creativeWorkflows.js`
 - Modify: `tests/test-creative-workflows.js`
 
-- [ ] **Step 1: Add failing progress test**
+- [ ] **Step 1: Inspect existing workflow test helpers**
 
-In `tests/test-creative-workflows.js`, add a focused test that captures task events from the source stage. If the file already has task context helper tests, reuse them. Otherwise add:
+Run:
+
+```powershell
+Select-String -Path tests\test-creative-workflows.js -Pattern "function createFakeServices|function createTempDirs|taskContext|runCreativeWorkflow" | ForEach-Object { "$($_.LineNumber):$($_.Line.Trim())" }
+```
+
+Expected:
+
+- `createTempDirs()` exists.
+- `createFakeServices()` exists and accepts `overrides.services`.
+- Some existing tests already pass `taskContext.emit`.
+
+Do not add `const os = require('os')`, `const path = require('path')`, or `const workflows = require(...)` inside the new test. Those are already available at file scope.
+
+- [ ] **Step 2: Add failing progress test function**
+
+In `tests/test-creative-workflows.js`, add this function near the other `async function test...` blocks, preferably after the source URL workspace test added in Task 3:
 
 ```js
-{
-  const os = require('os');
-  const path = require('path');
-  const fsp = require('fs/promises');
-  const rootDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'creative-source-progress-root-'));
-  const mediaRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'creative-source-progress-media-'));
-  const workflows = require('../server/services/creativeWorkflows');
+async function testSourceUrlStageEmitsSpecificProgressMessages() {
+  const { rootDir, mediaRoot } = createTempDirs();
   const emitted = [];
+  const { services } = createFakeServices({
+    services: {
+      now: () => '2026-06-21T00:00:00.000Z',
+      idFactory: () => '202606211200000002',
+      sourceFetch: {
+        fetchSource: async url => ({
+          success: true,
+          kind: 'article',
+          url,
+          title: '微信文章标题',
+          markdown: [
+            '# 微信文章标题',
+            '',
+            'Source: https://mp.weixin.qq.com/s/demo',
+            '',
+            '这是一篇真实文章正文，包含足够多的信息用于生成视频。',
+            '文章讨论了 HTML 视频生产、外部来源读取和真实材料 grounding。',
+          ].join('\n'),
+          truncated: false,
+          metadata: {},
+        }),
+      },
+    },
+    agentRuns: {
+      generateDouyinRunHyperframesFreeformProject: async () => ({
+        success: true,
+        status: 'done',
+        message: 'html-video 成片完成。',
+        hyperframes_freeform: {
+          project: {
+            render_mode: 'html-video',
+            html_video_project_path: path.join(mediaRoot, 'project'),
+          },
+          render: { status: 'rendered' },
+        },
+      }),
+    },
+  });
 
-  const created = await workflows.createCreativeWorkflow({
+  const created = await createCreativeWorkflow({
     input: 'https://mp.weixin.qq.com/s/demo',
     useResearch: false,
   }, {
@@ -1300,53 +1407,42 @@ In `tests/test-creative-workflows.js`, add a focused test that captures task eve
     },
   });
 
-  await workflows.runCreativeWorkflow(created.workflow_id, {
+  const run = await runCreativeWorkflow(created.workflow_id, {
     rootDir,
     mediaRoot,
     taskContext: {
       emit: async event => emitted.push(event),
     },
-    services: {
-      now: () => '2026-06-21T00:00:00.000Z',
-      sourceFetch: {
-        fetchSource: async url => ({
-          success: true,
-          kind: 'article',
-          url,
-          title: '微信文章标题',
-          markdown: '# 微信文章标题\n\nSource: https://mp.weixin.qq.com/s/demo\n\n这是一篇真实文章正文，包含足够多的信息用于生成视频。',
-          truncated: false,
-          metadata: {},
-        }),
-      },
-      researchService: {
-        createResearchContext: async () => ({ status: 'disabled', sources: [], summary: '', updated_at: '2026-06-21T00:00:00.000Z' }),
-      },
-      agentRuns: {
-        createDouyinHyperframesFreeformRun: async awemeId => ({ success: true, aweme_id: awemeId, run_id: 'hyperframes_freeform_002', message: '已新建高级成片记录。' }),
-        generateDouyinRunHyperframesFreeformBrief: async () => ({ success: true, message: '成片策划完成。' }),
-        synthesizeDouyinRunHyperframesFreeformAudio: async () => ({ success: true, message: '音频轨已生成。' }),
-        generateDouyinRunHyperframesFreeformProject: async () => ({
-          success: true,
-          message: 'html-video 成片完成。',
-          hyperframes_freeform: {
-            project: { render_mode: 'html-video', html_video_project_path: path.join(mediaRoot, 'project') },
-            render: { status: 'rendered' },
-          },
-        }),
-      },
-      aiModelConfig: {
-        getSkipValidation: async () => true,
-      },
-    },
+    services,
   });
 
-  assert.ok(emitted.some(event => /正在读取微信公众号文章/.test(event.message)), 'source stage should emit WeChat article loading message');
-  assert.ok(emitted.some(event => /外部来源资料已读取/.test(event.message)), 'source stage should emit external source done message');
+  assert.equal(run.success, true);
+  assert.ok(
+    emitted.some(event => event.type === 'stage_progress' && event.stage === 'source' && /正在读取微信公众号文章/.test(event.message)),
+    'source stage should emit WeChat article loading message',
+  );
+  assert.ok(
+    emitted.some(event => event.type === 'stage_progress' && event.stage === 'source' && /外部来源资料已读取/.test(event.message)),
+    'source stage should emit external source done message',
+  );
+  assert.ok(
+    emitted.some(event => event.type === 'stage_done' && event.stage === 'source' && /外部来源资料已读取并准备完成/.test(event.message)),
+    'source stage should finish with external source done message',
+  );
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 3: Register the new test in the test runner**
+
+At the bottom of `tests/test-creative-workflows.js`, find the sequence that awaits each test function. Add:
+
+```js
+  await testSourceUrlStageEmitsSpecificProgressMessages();
+```
+
+Place it near related source preparation tests, before the final `console.log(...)`.
+
+- [ ] **Step 4: Run test to verify it fails**
 
 Run:
 
@@ -1356,9 +1452,9 @@ node tests/test-creative-workflows.js
 
 Expected: FAIL because source URL preparation does not emit specific loading messages.
 
-- [ ] **Step 3: Add loading message helpers**
+- [ ] **Step 5: Add loading message helper**
 
-In `server/services/creativeWorkflows.js`, add:
+In `server/services/creativeWorkflows.js`, add this helper near other small helper functions, before `prepareSourceUrl()`:
 
 ```js
 function getSourceUrlLoadingMessage(sourceUrl, kindHint = '') {
@@ -1369,7 +1465,7 @@ function getSourceUrlLoadingMessage(sourceUrl, kindHint = '') {
 }
 ```
 
-- [ ] **Step 4: Allow source handler to report progress**
+- [ ] **Step 6: Allow source URL preparation to report progress**
 
 Change `prepareSourceUrl()` signature:
 
@@ -1377,7 +1473,7 @@ Change `prepareSourceUrl()` signature:
 async function prepareSourceUrl(record, mediaRoot, now, services = {}, reportStage = null) {
 ```
 
-Inside it, before `fetchSource`:
+Inside `prepareSourceUrl()`, after validating `sourceUrl` and before `services.sourceFetch.fetchSource(sourceUrl)`, add:
 
 ```js
   if (typeof reportStage === 'function') {
@@ -1387,7 +1483,7 @@ Inside it, before `fetchSource`:
   }
 ```
 
-After successful fetch and before workspace write:
+After successful fetch and before `writeSyntheticSourceWorkspace(...)`, add:
 
 ```js
   if (typeof reportStage === 'function') {
@@ -1399,21 +1495,23 @@ After successful fetch and before workspace write:
   }
 ```
 
+- [ ] **Step 7: Allow generic `prepareSource()` to receive progress reporter**
+
 Change `prepareSource()` signature:
 
 ```js
 async function prepareSource(record, mediaRoot, now, services = {}, reportStage = null) {
 ```
 
-Call source URL branch:
+In the `mode === 'source_url'` branch, call:
 
 ```js
 return prepareSourceUrl(record, mediaRoot, now, services, reportStage);
 ```
 
-- [ ] **Step 5: Pass `reportStage` from source stage**
+- [ ] **Step 8: Pass `reportStage` from source stage**
 
-In `runCreativeWorkflow()`, change source stage handler from:
+In `runCreativeWorkflow()`, find the `runStage(record, 'source', ...)` call. Change the source stage handler from:
 
 ```js
 async () => (
@@ -1429,7 +1527,22 @@ async ({ reportStage }) => (
 )
 ```
 
-- [ ] **Step 6: Run workflow tests**
+- [ ] **Step 9: Check source stage message flow manually in the file**
+
+Run:
+
+```powershell
+Select-String -Path server\services\creativeWorkflows.js -Pattern "getSourceUrlLoadingMessage|prepareSourceUrl\\(|prepareSource\\(|runStage\\(record, 'source'"
+```
+
+Expected:
+
+- `getSourceUrlLoadingMessage` exists.
+- `prepareSourceUrl` has a `reportStage = null` parameter.
+- `prepareSource` has a `reportStage = null` parameter.
+- The source stage `runStage` handler destructures `{ reportStage }`.
+
+- [ ] **Step 10: Run workflow tests**
 
 Run:
 
@@ -1439,7 +1552,18 @@ node tests/test-creative-workflows.js
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 11: Run source fetch and context tests to catch integration regressions**
+
+Run:
+
+```powershell
+node tests/test-source-fetch.js
+node tests/test-creative-context.js
+```
+
+Expected: both PASS.
+
+- [ ] **Step 12: Commit**
 
 Run:
 
@@ -1457,7 +1581,24 @@ Expected: commit succeeds.
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Update one-click overview**
+- [ ] **Step 1: Inspect current README wording**
+
+Run:
+
+```powershell
+Select-String -Path README.md -Pattern "当前主入口|一键创作任务|打开 `/creative`|小红书关键词|data/media/douyin|补齐小红书" | ForEach-Object { "$($_.LineNumber):$($_.Line.Trim())" }
+```
+
+Expected:
+
+- README says the current main entry accepts “一句话、抖音 ID 或抖音链接”.
+- README has a feature bullet for one-click creative.
+- README separately says 小红书 supports keyword search / note detail / history.
+- README later says 小红书评论、素材准备和 AI 成片工作流 still need completion.
+
+Do not delete the 小红书 crawl description. The goal is to avoid implying 小红书 is connected to one-click creative.
+
+- [ ] **Step 2: Update one-click overview**
 
 In `README.md`, update the one-click creative description so it says the homepage accepts:
 
@@ -1467,7 +1608,21 @@ In `README.md`, update the one-click creative description so it says the homepag
 
 Do not say it supports private repos, full source analysis, or login-required pages.
 
-- [ ] **Step 2: Add source URL capability bullet**
+- [ ] **Step 3: Update the feature bullet for one-click creative**
+
+Find the bullet that starts with:
+
+```markdown
+- **一键创作任务**：从一句创作方向、抖音 ID 或抖音链接开始
+```
+
+Replace the source list so the bullet says:
+
+```markdown
+- **一键创作任务**：从一句创作方向、抖音 ID、抖音链接、公开文章链接或公开 GitHub 仓库链接开始，自动串联来源准备、联网研究、素材分析、导演改写、成片策划、音频生成、工程生成、校验、渲染和巡检。
+```
+
+- [ ] **Step 4: Add source URL capability bullet**
 
 In the feature list, add a bullet:
 
@@ -1475,7 +1630,23 @@ In the feature list, add a bullet:
 - **外部来源成片**：一键创作可读取公开微信公众号/网页文章和公开 GitHub 仓库 README，把真实来源内容转为本地创作上下文后生成视频。
 ```
 
-- [ ] **Step 3: Add boundary note**
+Place this bullet immediately after `一键创作任务` or before `任务路由化` so it is clearly part of one-click creative.
+
+- [ ] **Step 5: Update one-click usage step**
+
+Find the usage step that currently says:
+
+```markdown
+1. 打开 `/creative`，输入视频方向、抖音 ID 或抖音链接。
+```
+
+Change it to:
+
+```markdown
+1. 打开 `/creative`，输入视频方向、抖音 ID、抖音链接、公开文章链接或公开 GitHub 仓库链接。
+```
+
+- [ ] **Step 6: Add boundary note**
 
 Near the one-click creative section, add:
 
@@ -1483,7 +1654,9 @@ Near the one-click creative section, add:
 外部 URL 首版只读取公开内容：文章页面会提取正文，GitHub 仓库会读取公开 metadata、README 和顶层目录。不支持私有仓库、登录态页面、GitHub Token、clone 仓库或全量源码分析。
 ```
 
-- [ ] **Step 4: Update data directory description**
+Place this note after the numbered one-click usage steps and before the stage table. This keeps the boundary visible before users read the generated stages.
+
+- [ ] **Step 7: Update data directory description**
 
 Where README describes `data/media/douyin/<aweme_id>/`, add:
 
@@ -1491,7 +1664,21 @@ Where README describes `data/media/douyin/<aweme_id>/`, add:
 纯文本和外部 URL 一键创作会复用同一 synthetic media workspace；目录名仍沿用 `douyin` 结构，但 `metadata.json` 中会标记 `source_type`。
 ```
 
-- [ ] **Step 5: Review README for misleading wording**
+Place it immediately after the `data/media/douyin/<aweme_id>/` bullet, not in the API section.
+
+- [ ] **Step 8: Add or update API wording only if needed**
+
+If the README API section describes `POST /api/creative-workflows` only as “创建一键创作任务”, it can remain unchanged.
+
+If it has a sentence explaining accepted inputs, update that sentence to:
+
+```text
+请求体 `input` 支持创作方向、抖音 ID、抖音链接、公开文章链接或公开 GitHub 仓库链接。
+```
+
+Do not add new public REST endpoints for source URL fetching in README. Source fetching is an internal workflow stage.
+
+- [ ] **Step 9: Review README for misleading wording**
 
 Run:
 
@@ -1499,9 +1686,26 @@ Run:
 Select-String -Path README.md -Pattern "小红书|GitHub|文章|一键创作|抖音 ID" | ForEach-Object { "$($_.LineNumber):$($_.Line.Trim())" }
 ```
 
-Expected: output should not imply 小红书 is connected to one-click creative, and should clearly state URL boundaries.
+Expected:
 
-- [ ] **Step 6: Commit**
+- 一键创作 lines mention public article/GitHub repo support.
+- 小红书 lines still only describe crawl/search/history, not one-click creative.
+- The existing “补齐小红书评论、素材准备和 AI 成片工作流” line remains or is equivalent.
+- The README clearly says private repos, login pages, Token, clone, and full source analysis are not supported.
+
+- [ ] **Step 10: Run markdown grep checks for stale one-click source wording**
+
+Run:
+
+```powershell
+Select-String -Path README.md -Pattern "一句话、抖音 ID 或抖音链接|视频方向、抖音 ID 或抖音链接|从一句创作方向、抖音 ID 或抖音链接"
+```
+
+Expected: no output.
+
+If there is output, update it unless the sentence is explicitly describing historical behavior.
+
+- [ ] **Step 11: Commit**
 
 Run:
 
@@ -1519,21 +1723,79 @@ Expected: commit succeeds.
 **Files:**
 - No source changes unless tests expose regressions.
 
-- [ ] **Step 1: Run focused backend tests**
+- [ ] **Step 1: Confirm branch and working tree before verification**
+
+Run:
+
+```powershell
+git branch --show-current
+git status --short
+```
+
+Expected:
+
+- Branch is `dev`.
+- `git status --short` is empty, or only contains intentional changes from a failed earlier verification fix.
+
+If the branch is not `dev`, stop. If there are unrelated changes, do not touch them.
+
+- [ ] **Step 2: Run source URL unit tests**
 
 Run:
 
 ```powershell
 node tests/test-source-fetch.js
 node tests/test-creative-context.js
+```
+
+Expected: both PASS.
+
+If `test-source-fetch.js` fails:
+
+- URL extraction / SSRF failure means fix `server/services/sourceFetch.js`.
+- Article body length failure means compare the fixture text with the 80-character readable body threshold.
+- GitHub API mock failure means inspect URL strings used by `fetchGithubRepo()`.
+
+If `test-creative-context.js` fails:
+
+- Check that Douyin ID and Douyin URL still win before generic source URL detection.
+- Check that `source_hint` removes only the first URL and preserves surrounding user text.
+
+- [ ] **Step 3: Run workflow integration tests**
+
+Run:
+
+```powershell
 node tests/test-creative-workflows.js
+```
+
+Expected: PASS.
+
+If it fails in source URL workflow:
+
+- Check `resolveServices()` includes `sourceFetch`.
+- Check `prepareSource()` routes `mode === 'source_url'` to `prepareSourceUrl()`.
+- Check `writeSyntheticSourceWorkspace()` writes `metadata.json`, `transcript.json`, and `analysis_input.json`.
+- Check the source stage passes `reportStage` into `prepareSource()`.
+
+- [ ] **Step 4: Run prompt grounding tests**
+
+Run:
+
+```powershell
 node tests/test-source-grounding-prompts.js
 node tests/test-html-video-content-graph.js
 ```
 
-Expected: all PASS.
+Expected: both PASS.
 
-- [ ] **Step 2: Run focused frontend/static tests**
+If grounding tests fail:
+
+- Check `creativeSpecAgent.buildSceneSpecPrompt()` contains source URL grounding instructions.
+- Check `contentGraphAgent.buildContentGraphPrompt()` labels the source section as `SOURCE MATERIAL / 源素材上下文`.
+- Check `summarizeCreativeContextForPrompt()` includes `sourceContext.transcript`.
+
+- [ ] **Step 5: Run focused frontend/static tests**
 
 Run:
 
@@ -1545,7 +1807,14 @@ node tests/test-creative-task-api-client.mjs
 
 Expected: all PASS.
 
-- [ ] **Step 3: Run existing one-click recommended tests**
+If `test-one-click-creative-page.mjs` fails:
+
+- Check `zh.inputLabel`, `zh.emptyInputMessage`, and `zh.creativeInputPlaceholder` in the test.
+- Check `CreativePromptComposer` label and placeholder.
+- Check `submitCreativeWorkflow()` empty input message.
+- Check `WorkflowStatusPanel` fallback message.
+
+- [ ] **Step 6: Run existing one-click recommended tests**
 
 Run:
 
@@ -1559,7 +1828,9 @@ node tests/test-creative-workflow-tasks.js
 
 Expected: all PASS.
 
-- [ ] **Step 4: Run html-video production focused tests**
+If route or task tests fail, do not change source URL logic first. These tests usually fail because async task response shape or SSE behavior regressed. Inspect the failure message before editing.
+
+- [ ] **Step 7: Run html-video production focused tests**
 
 Run:
 
@@ -1573,11 +1844,52 @@ node tests/test-html-video-vertical-mvp-smoke.js
 
 Expected: all PASS.
 
-- [ ] **Step 5: Optional real network manual check**
+If `test-html-video-vertical-mvp-smoke.js` fails due to missing browser/ffmpeg environment, record the environment error in the final report. Do not mask it by weakening the test.
+
+- [ ] **Step 8: Run README consistency checks**
+
+Run:
+
+```powershell
+Select-String -Path README.md -Pattern "一句话、抖音 ID 或抖音链接|视频方向、抖音 ID 或抖音链接|从一句创作方向、抖音 ID 或抖音链接"
+Select-String -Path README.md -Pattern "私有仓库|登录态|GitHub Token|clone 仓库|全量源码"
+Select-String -Path README.md -Pattern "小红书.*一键创作|一键创作.*小红书"
+```
+
+Expected:
+
+- First command: no output.
+- Second command: at least one boundary note line.
+- Third command: no output unless the line explicitly says 小红书成片工作流 still needs completion.
+
+- [ ] **Step 9: Check generated source URL files with a mocked workflow test artifact**
+
+After `node tests/test-creative-workflows.js`, inspect the test output only if the test leaves a temp path in failure output. If the test passed, no manual filesystem inspection is required.
+
+If a failure leaves a temp root path, inspect:
+
+```powershell
+Get-ChildItem -Recurse -Filter analysis_input.json <TEMP_ROOT_FROM_FAILURE> | Select-Object -ExpandProperty FullName
+Get-Content -Encoding UTF8 <FOUND_ANALYSIS_INPUT_JSON>
+```
+
+Expected for source URL tasks:
+
+- `source_material.kind` is `article` or `github_repo`.
+- `source_material.markdown` contains fetched Markdown, not only a URL.
+- `creative_context.source_context.kind` is `source_url`.
+
+- [ ] **Step 10: Optional real network manual check**
 
 Only run this if network access is allowed and real external URLs are acceptable in the development environment.
 
-Start the app using the repo's normal dev command, then create one task with:
+Start the app using the repo's normal dev command. If unsure, inspect `package.json` scripts first:
+
+```powershell
+Get-Content -Encoding UTF8 package.json
+```
+
+Then create one task with:
 
 ```text
 https://github.com/nexu-io/html-video
@@ -1597,7 +1909,30 @@ Expected:
 - `transcript.json` contains article Markdown.
 - If the article blocks scraping, workflow fails at `source` with a clear Chinese message.
 
-- [ ] **Step 6: Check git status**
+- [ ] **Step 11: Produce final implementation summary**
+
+In the final worker response, include:
+
+```markdown
+## 完成内容
+- Task 1: ...
+- Task 2: ...
+
+## 提交
+- <sha> 新增外部来源抓取服务
+- ...
+
+## 验证
+- `node tests/test-source-fetch.js` PASS
+- ...
+
+## 未完成或风险
+- 如无，写“无”。
+```
+
+Do not claim optional real network checks were run unless they were actually run.
+
+- [ ] **Step 12: Check git status**
 
 Run:
 
