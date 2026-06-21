@@ -19,6 +19,11 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
+    const urls = sourceFetch.extractUrls('请看（https://example.com/a）');
+    assert.deepEqual(urls, ['https://example.com/a']);
+  }
+
+  {
     const urls = sourceFetch.extractUrls([
       'https://example.com/a',
       'https://example.com/b',
@@ -34,8 +39,13 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
+    assert.throws(() => sourceFetch.assertPublicHttpUrl('not a url'), /URL 无效/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('ftp://example.com/a'), /只支持 http\(s\) URL/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://localhost:3000/a'), /不能读取本机或内网地址/);
+    assert.throws(() => sourceFetch.assertPublicHttpUrl('http://0.0.0.0/a'), /不能读取本机或内网地址/);
+    assert.throws(() => sourceFetch.assertPublicHttpUrl('http://test.localhost/a'), /不能读取本机或内网地址/);
+    assert.throws(() => sourceFetch.assertPublicHttpUrl('http://service.internal/a'), /不能读取本机或内网地址/);
+    assert.throws(() => sourceFetch.assertPublicHttpUrl('http://printer.local/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://127.0.0.1/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://10.0.0.1/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://172.16.0.1/a'), /不能读取本机或内网地址/);
@@ -87,6 +97,9 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/apps/copilot').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/advisories/GHSA-abcd-1234').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/events/foo').kind, 'article');
+    assert.equal(sourceFetch.classifySourceUrl('https://github.com/issues/assigned').kind, 'article');
+    assert.equal(sourceFetch.classifySourceUrl('https://github.com/pulls/review-requested').kind, 'article');
+    assert.equal(sourceFetch.classifySourceUrl('https://github.com/new/import').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://mp.weixin.qq.com/s/abc').kind, 'article');
   }
 
@@ -96,6 +109,7 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
       '<div class="rich_media_content" id="js_content">',
       '<section><p>第一段正文说明这篇文章正在讨论如何把 HTML 和浏览器动画变成可复用的视频生产流程。</p>',
       '<p>第二段 <strong>重点</strong> 是把真实来源内容作为视频主题，而不是只拿链接做装饰。</p></section>',
+      '<p>第三段继续补充来源摘要、素材准备、脚本生成和结果校验的完整上下文。</p>',
       '</div></body></html>',
     ].join('');
     const result = await sourceFetch.fetchSource('https://mp.weixin.qq.com/s/demo', {
@@ -126,7 +140,7 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
-    const html = '<html><head><title>普通文章</title></head><body><article><h1>标题</h1><p>正文内容足够长，用于验证 article 提取逻辑。文章解释了产品背景、关键能力、落地方式和风险边界。</p><ul><li>要点 A</li></ul></article></body></html>';
+    const html = '<html><head><title>普通文章</title></head><body><article><h1>标题</h1><p>正文内容足够长，用于验证 article 提取逻辑。文章解释了产品背景、关键能力、落地方式和风险边界，并继续补充来源摘要、素材准备、脚本生成和结果校验的完整上下文。</p><ul><li>要点 A</li></ul></article></body></html>';
     const result = await sourceFetch.fetchSource('https://example.com/post', {
       fetchImpl: async () => makeResponse(html),
     });
@@ -138,8 +152,83 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
+    const html = `<html><head><title>四十字中文正文</title></head><body><article><p>${'中'.repeat(40)}</p></article></body></html>`;
+    const result = await sourceFetch.fetchSource('https://example.com/forty-chinese-chars', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /未能读取文章正文/);
+  }
+
+  {
+    const html = `<html><head><title>八十字中文正文</title></head><body><article><p>${'中'.repeat(80)}</p></article></body></html>`;
+    const result = await sourceFetch.fetchSource('https://example.com/eighty-chinese-chars', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, true);
+    assert.match(result.markdown, new RegExp('中{80}'));
+  }
+
+  {
+    const html = [
+      '<html><head><title>main fallback</title></head><body>',
+      `<main><p>${'主'.repeat(80)}</p></main>`,
+      '</body></html>',
+    ].join('');
+    const result = await sourceFetch.fetchSource('https://example.com/main-fallback', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, true);
+    assert.match(result.markdown, new RegExp('主{80}'));
+  }
+
+  {
+    const html = [
+      '<html><head><title>body fallback</title></head><body>',
+      `<p>${'体'.repeat(80)}</p>`,
+      '</body></html>',
+    ].join('');
+    const result = await sourceFetch.fetchSource('https://example.com/body-fallback', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, true);
+    assert.match(result.markdown, new RegExp('体{80}'));
+  }
+
+  {
+    const html = [
+      '<html><head><title>短 article 不降级</title></head><body>',
+      '<article><p>太短</p></article>',
+      `<section><p>${'身'.repeat(80)}</p></section>`,
+      '</body></html>',
+    ].join('');
+    const result = await sourceFetch.fetchSource('https://example.com/short-article-no-fallback', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /未能读取文章正文/);
+  }
+
+  {
+    const html = [
+      '<html><head><title>短 main 不降级</title></head><body>',
+      '<main><p>太短</p></main>',
+      `<section><p>${'身'.repeat(80)}</p></section>`,
+      '</body></html>',
+    ].join('');
+    const result = await sourceFetch.fetchSource('https://example.com/short-main-no-fallback', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /未能读取文章正文/);
+  }
+
+  {
     assert.equal(sourceFetch.htmlToMarkdown('<p><img alt="说明" src="/a.png"></p>'), '![说明](/a.png)');
     assert.equal(sourceFetch.htmlToMarkdown('<p><img src="/a.png" alt="说明"></p>'), '![说明](/a.png)');
+    assert.match(sourceFetch.htmlToMarkdown('<ul><li><a href="/a">链接</a></li></ul>'), /- \[链接\]\(\/a\)/);
+    assert.match(sourceFetch.htmlToMarkdown('<h2><a href="/a">标题链接</a></h2>'), /## \[标题链接\]\(\/a\)/);
+    assert.match(sourceFetch.htmlToMarkdown('<ul><li><img alt="图" src="/a.png"></li></ul>'), /- !\[图\]\(\/a\.png\)/);
   }
 
   {
@@ -210,6 +299,11 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
 
   {
     const calls = [];
+    const readme = 'R'.repeat(10050);
+    const contents = Array.from({ length: 45 }, (_item, index) => ({
+      name: `item-${String(index + 1).padStart(2, '0')}`,
+      type: index % 2 === 0 ? 'dir' : 'file',
+    }));
     const result = await sourceFetch.fetchSource('https://github.com/owner/repo', {
       fetchImpl: async (url, options) => {
         calls.push({ url, options });
@@ -225,13 +319,10 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
           }));
         }
         if (url.endsWith('/repos/owner/repo/readme')) {
-          return makeResponse('# README\n\n项目说明。');
+          return makeResponse(readme);
         }
         if (url.endsWith('/repos/owner/repo/contents')) {
-          return makeResponse(JSON.stringify([
-            { name: 'packages', type: 'dir' },
-            { name: 'README.md', type: 'file' },
-          ]));
+          return makeResponse(JSON.stringify(contents));
         }
         throw new Error(`unexpected url ${url}`);
       },
@@ -241,8 +332,12 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     assert.equal(result.title, 'owner/repo');
     assert.match(result.markdown, /Language: JavaScript/);
     assert.match(result.markdown, /Stars: 1,234/);
-    assert.match(result.markdown, /- packages\//);
+    assert.match(result.markdown, /- item-01\//);
+    assert.match(result.markdown, /- item-40/);
+    assert.doesNotMatch(result.markdown, /- item-41\//);
     assert.match(result.markdown, /## README/);
+    assert.equal(result.truncated, true);
+    assert.equal(result.markdown.split('## README\n\n')[1].length, 10000);
     assert.equal(calls.length, 3);
   }
 

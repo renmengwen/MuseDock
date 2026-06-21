@@ -13,7 +13,7 @@ function extractUrls(text, max = 3) {
   const seen = new Set();
   const urls = [];
   for (const match of matches) {
-    const url = match.replace(/[.,;:!?，。；：！？]+$/, '');
+    const url = match.replace(/[.,;:!?，。；：！？）】》]+$/, '');
     if (!seen.has(url)) {
       seen.add(url);
       urls.push(url);
@@ -146,11 +146,14 @@ function classifySourceUrl(rawUrl) {
     'events',
     'features',
     'explore',
+    'issues',
     'login',
     'marketplace',
+    'new',
     'notifications',
     'orgs',
     'pricing',
+    'pulls',
     'search',
     'settings',
     'sponsors',
@@ -417,8 +420,8 @@ function htmlToMarkdown(html) {
   let text = String(html || '');
   text = text.replace(/<(script|style|noscript|svg|head|nav|footer|form|iframe)[^>]*>[\s\S]*?<\/\1>/gi, '');
   text = text.replace(/<!--[\s\S]*?-->/g, '');
-  text = text.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_match, level, inner) => `\n\n${'#'.repeat(Number(level))} ${stripInline(inner)}\n`);
-  text = text.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_match, inner) => `\n- ${stripInline(inner)}`);
+  text = text.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_match, level, inner) => `\n\n${'#'.repeat(Number(level))} ${inlineToMarkdown(inner)}\n`);
+  text = text.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_match, inner) => `\n- ${inlineToMarkdown(inner)}`);
   text = text.replace(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_match, href, inner) => {
     const label = stripInline(inner);
     return label ? `[${label}](${href})` : '';
@@ -442,14 +445,27 @@ function htmlToMarkdown(html) {
     .trim();
 }
 
+function inlineToMarkdown(html) {
+  let text = String(html || '');
+  text = text.replace(/<img\b[^>]*>/gi, (tag) => {
+    const src = getHtmlAttribute(tag, 'src');
+    if (!src) return '';
+    const alt = getHtmlAttribute(tag, 'alt');
+    return `![${alt}](${src})`;
+  });
+  text = text.replace(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_match, href, inner) => {
+    const label = stripInline(inner);
+    return label ? `[${label}](${href})` : '';
+  });
+  return decodeEntities(text.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+}
+
 function stripInline(html) {
   return decodeEntities(String(html || '').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
 }
 
 function countVisibleLength(value) {
-  return Array.from(String(value || '').replace(/\s+/g, '')).reduce((total, char) => (
-    total + (/[\u4e00-\u9fff]/.test(char) ? 2 : 1)
-  ), 0);
+  return Array.from(String(value || '').replace(/\s+/g, '')).length;
 }
 
 function decodeEntities(value) {
