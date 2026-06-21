@@ -37,6 +37,11 @@ function buildPromptCreativeContext(creativeContext = {}) {
   };
 }
 
+function isSourceUrlCreativeContext(creativeContext = {}) {
+  return creativeContext?.input?.mode === 'source_url'
+    || creativeContext?.source_context?.kind === 'source_url';
+}
+
 function retrySection(retryCount, previousErrors) {
   if (!retryCount) {
     return '';
@@ -48,9 +53,9 @@ function retrySection(retryCount, previousErrors) {
 }
 
 function buildSceneSpecPrompt({ creativeContext, target, retryCount = 0, previousErrors = [] } = {}) {
-  const isSourceUrl = creativeContext?.input?.mode === 'source_url';
+  const isSourceUrl = isSourceUrlCreativeContext(creativeContext);
   const sourceUrlGroundingLines = isSourceUrl ? [
-    '如果 creativeContext.input.mode 是 source_url，来源材料是视频主题，不是装饰素材。',
+    '如果 creativeContext.input.mode 是 source_url 或 source_context.kind 是 source_url，来源材料是视频主题，不是装饰素材。',
     'source_context.transcript 是文章、网页或 GitHub repo 的真实来源材料；必须基于其中的具体事实、名字、数字、项目术语和主张生成场景。',
     '不要输出可套用到任何文章或任何仓库的泛泛句子。',
     '不要编造来源材料没有的精确数字、机构、版本、结论或功能。',

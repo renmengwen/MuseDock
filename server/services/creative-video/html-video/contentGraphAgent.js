@@ -82,7 +82,7 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
     '- kind 只能是 text、data、entity；优先使用 text 和 data。',
     '- data node 的 data 必须形如 {"title":"string","unit":"optional shared unit","items":[{"label":"string","value":123}]}。',
     '- 数据帧必须使用可比较的同一单位，数值要合理；不能把不同口径的数据强行放进同一组。',
-    '- 必须保留源素材事实，不要编造来源中没有的精确数字、机构、时间或结论。',
+    '- 必须保留源素材事实，不要编造来源中没有的精确数字、机构、时间、版本、功能或结论。',
     ...sourceUrlGroundingRequirements,
     '- 不要让对象值变成字符串 [object Object]；对象必须提取有意义的 label/text/value。',
     '- 中文素材默认生成中文可见文本，技术名词和品牌名可保留英文。',

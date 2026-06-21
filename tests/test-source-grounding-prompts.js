@@ -28,6 +28,27 @@ function createCreativeContext(transcript) {
   };
 }
 
+function createSourceContextOnlyCreativeContext(transcript) {
+  return {
+    input: {
+      mode: 'text',
+      raw_text: '做成项目解读视频 https://github.com/owner/repo',
+      source_url: 'https://github.com/owner/repo',
+      source_hint: '做成项目解读视频',
+    },
+    source_context: {
+      kind: 'source_url',
+      summary: 'owner/repo',
+      transcript,
+      source_metadata: {
+        kind: 'github_repo',
+        url: 'https://github.com/owner/repo',
+        title: 'owner/repo',
+      },
+    },
+  };
+}
+
 function createDouyinCreativeContext(transcript) {
   return {
     input: {
@@ -94,6 +115,20 @@ assert.match(scenePrompt, /不要编造来源材料没有的精确数字、机�
 assert.match(scenePrompt, /GitHub repo 视频只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。/);
 assert.match(scenePrompt, /owner\/repo/);
 
+const sourceContextOnlyScenePrompt = creativeSpecAgent.buildSceneSpecPrompt({
+  creativeContext: createSourceContextOnlyCreativeContext([
+    '# owner/repo',
+    '',
+    '## README',
+    '',
+    '这个项目把 HTML 变成视频。',
+  ].join('\n')),
+  target: { duration_sec: 30 },
+});
+
+assert.match(sourceContextOnlyScenePrompt, /来源材料是视频主题/);
+assert.match(sourceContextOnlyScenePrompt, /GitHub repo 视频只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。/);
+
 const douyinScenePrompt = creativeSpecAgent.buildSceneSpecPrompt({
   creativeContext: createDouyinCreativeContext('这是一段普通视频转写，讲述本地生活探店过程。'),
   target: { duration_sec: 30 },
@@ -113,6 +148,7 @@ assert.match(graphPrompt, /每个节点/);
 assert.match(graphPrompt, /每个节点都必须引用或改写来源材料里的具体事实、名字、数字、产品、项目能力、术语或主张/);
 assert.match(graphPrompt, /禁止输出可套用到任何文章或任何仓库的泛泛句子/);
 assert.match(graphPrompt, /GitHub repo 只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。/);
+assert.match(graphPrompt, /不要编造来源中没有的精确数字、机构、时间、版本、功能或结论/);
 assert.match(graphPrompt, /真实 README 内容|这个项目把 HTML 变成视频/);
 assert.ok(sourceTranscriptLine.includes(SOURCE_TRANSCRIPT_ONLY_MARKER));
 
