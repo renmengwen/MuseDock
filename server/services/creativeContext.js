@@ -1,4 +1,5 @@
 const AWEME_ID_PATTERN = /^\d{5,32}$/;
+const sourceFetch = require('./sourceFetch');
 
 function safeString(value) {
   if (value === null || value === undefined) {
@@ -17,14 +18,41 @@ function extractAwemeId(input) {
     return text;
   }
 
-  const videoMatch = text.match(/\/video\/(\d{5,32})(?=\D|$)/);
-  if (videoMatch && AWEME_ID_PATTERN.test(videoMatch[1])) {
-    return videoMatch[1];
+  const bareQueryId = extractAwemeIdFromBareQuery(text);
+  if (bareQueryId) {
+    return bareQueryId;
   }
 
-  const queryMatch = text.match(/(?:^|[?&])(?:modal_id|aweme_id)=(\d{5,32})(?=\D|$)/);
-  if (queryMatch && AWEME_ID_PATTERN.test(queryMatch[1])) {
-    return queryMatch[1];
+  const urls = sourceFetch.extractUrls(text, Number.MAX_SAFE_INTEGER);
+  const noProtocolDouyinCandidates = extractNoProtocolDouyinCandidates(text);
+  const candidates = /^https?:\/\//i.test(text) || isDouyinLink(text)
+    ? [text, ...urls, ...noProtocolDouyinCandidates]
+    : [...urls, ...noProtocolDouyinCandidates];
+
+  for (const candidate of candidates) {
+    if (!isDouyinLink(candidate)) {
+      continue;
+    }
+
+    try {
+      const url = new URL(normalizeUrlForParsing(candidate));
+      const videoMatch = url.pathname.match(/\/video\/(\d{5,32})(?=\D|$)/);
+      if (videoMatch && AWEME_ID_PATTERN.test(videoMatch[1])) {
+        return videoMatch[1];
+      }
+
+      const queryId = url.searchParams.get('modal_id') || url.searchParams.get('aweme_id');
+      if (AWEME_ID_PATTERN.test(safeString(queryId))) {
+        return queryId;
+      }
+
+      const fallbackMatch = safeString(candidate).match(/\/video\/(\d{5,32})(?=\D|$)/);
+      if (fallbackMatch && AWEME_ID_PATTERN.test(fallbackMatch[1])) {
+        return fallbackMatch[1];
+      }
+    } catch (error) {
+      continue;
+    }
   }
 
   return '';
@@ -36,7 +64,11 @@ function createNormalizedData(overrides = {}) {
     raw_text: '',
     aweme_id: '',
     douyin_url: '',
+    source_url: '',
+    source_hint: '',
+    ignored_url_count: 0,
     use_research: false,
+    skip_validation: false,
     asset_ids: [],
     ...overrides,
   };
@@ -57,18 +89,79 @@ function createFailureResponse(message, overrides = {}) {
   };
 }
 
+function normalizeUrlForParsing(input) {
+  const text = safeString(input);
+  return /^https?:\/\//i.test(text) ? text : `https://${text}`;
+}
+
+function extractAwemeIdFromBareQuery(input) {
+  const text = safeString(input);
+  if (!/^\??(?:modal_id|aweme_id)=/i.test(text)) {
+    return '';
+  }
+
+  const query = text.startsWith('?') ? text.slice(1) : text;
+  const params = new URLSearchParams(query);
+  const queryId = params.get('modal_id') || params.get('aweme_id');
+  return AWEME_ID_PATTERN.test(safeString(queryId)) ? queryId : '';
+}
+
+function extractNoProtocolDouyinCandidates(input) {
+  const text = safeString(input);
+  if (!text) {
+    return [];
+  }
+
+  const candidates = [];
+  const douyinHost = '(?:(?:www|v)\\.)?douyin\\.com';
+  const path = '[^\\s\\u3002\\uff0c\\uff1b\\uff1a\\uff01\\uff1f\\u3001,;!?]+';
+  const pattern = new RegExp(`(^|[^\\w:/.-])(${douyinHost}\\/${path})`, 'ig');
+
+  for (const match of text.matchAll(pattern)) {
+    const candidate = safeString(match[2]).replace(/[.。；;，,！？!?]+$/g, '');
+    if (candidate) {
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates;
+}
+
 function isDouyinLink(input) {
   const text = safeString(input);
-  if (!/^https?:\/\//i.test(text)) {
+  if (!text || /^\//.test(text)) {
     return false;
   }
 
   try {
-    const hostname = new URL(text).hostname.toLowerCase();
+    const hostname = new URL(normalizeUrlForParsing(text)).hostname.toLowerCase();
     return hostname === 'douyin.com' || hostname.endsWith('.douyin.com');
   } catch (error) {
     return false;
   }
+}
+
+function removeUrlsFromText(text, urls) {
+  const sourceText = safeString(text);
+  const sourceUrls = Array.isArray(urls) ? urls.map(safeString).filter(Boolean) : [];
+  if (!sourceText || sourceUrls.length === 0) {
+    return sourceText;
+  }
+
+  const punctuation = '[\\s\\u3002\\uff0c\\uff1b\\uff1a\\uff01\\uff1f\\u3001,.;:!?]*';
+  return sourceUrls.reduce((hint, sourceUrl) => {
+    const escapedUrl = sourceUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const urlWithNoise = new RegExp(`${punctuation}${escapedUrl}${punctuation}`, 'g');
+    return hint.replace(urlWithNoise, ' ');
+  }, sourceText).replace(/\s+/g, ' ').trim();
+}
+
+function extractUrlOccurrences(text) {
+  const raw = String(text || '');
+  const matches = raw.match(/https?:\/\/[^\s<>"'`)\]}，。；;]+/gi) || [];
+  return matches
+    .map(match => match.replace(/[.,;:!?，。；：！？]+$/, ''))
+    .filter(Boolean);
 }
 
 function normalizeCreativeInput(payload = {}) {
@@ -79,6 +172,7 @@ function normalizeCreativeInput(payload = {}) {
   if (assetIds.length > 0) {
     return createFailureResponse('图片素材将在下一阶段开放。', {
       use_research: useResearch,
+      skip_validation: skipValidation,
       asset_ids: [],
     });
   }
@@ -87,6 +181,7 @@ function normalizeCreativeInput(payload = {}) {
   if (!input) {
     return createFailureResponse('请输入视频方向、抖音 ID 或抖音链接。', {
       use_research: useResearch,
+      skip_validation: skipValidation,
       asset_ids: assetIds,
     });
   }
@@ -103,9 +198,31 @@ function normalizeCreativeInput(payload = {}) {
     });
   }
 
-  if (isDouyinLink(input)) {
+  const urls = sourceFetch.extractUrls(input, Number.MAX_SAFE_INTEGER);
+  const noProtocolDouyinCandidates = extractNoProtocolDouyinCandidates(input);
+  const hasUnrecognizedDouyinUrl =
+    isDouyinLink(input) ||
+    urls.some(isDouyinLink) ||
+    noProtocolDouyinCandidates.some(isDouyinLink);
+  if (hasUnrecognizedDouyinUrl) {
     return createFailureResponse('暂时无法从抖音链接中识别视频 ID。', {
       use_research: useResearch,
+      skip_validation: skipValidation,
+      asset_ids: assetIds,
+    });
+  }
+
+  if (urls.length > 0) {
+    const sourceUrl = urls[0];
+    const urlOccurrences = extractUrlOccurrences(input);
+    return createSuccessResponse({
+      mode: 'source_url',
+      raw_text: input,
+      source_url: sourceUrl,
+      source_hint: removeUrlsFromText(input, urls),
+      ignored_url_count: Math.max(0, urlOccurrences.length - 1),
+      use_research: useResearch,
+      skip_validation: skipValidation,
       asset_ids: assetIds,
     });
   }
