@@ -1,22 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import {
-  Eye,
-  Loader2,
-  Trash2,
-  X,
-} from 'lucide-react';
 import { api } from '../api/client.js';
 import { CreativeComposer } from '../components/creative/CreativeComposer.jsx';
 import { CreativeSidebar } from '../components/creative/CreativeSidebar.jsx';
-import {
-  STATUS_TEXT,
-  getStatusClass,
-  getStatusMessageClass,
-  getStepState,
-  getWorkflowStatusText,
-  normalizeWorkflowStages,
-} from '../components/creative/creativeDisplay.js';
+import { CreativeTaskDetail } from '../components/creative/CreativeTaskDetail.jsx';
 
 const CREATIVE_TASKS_STORAGE_KEY = 'musedock.creative.tasks.v1';
 const ACTIVE_CREATIVE_TASK_STORAGE_KEY = 'musedock.creative.activeTask.v1';
@@ -158,150 +145,6 @@ function updateTask(tasks, task) {
     return upsertTask(tasks, task);
   }
   return tasks.map(item => item.workflow_id === task.workflow_id ? { ...item, ...task } : item);
-}
-
-function WorkflowStatusPanel({ status, message, workflowId, workflow }) {
-  const statusClass = getStatusMessageClass(status);
-  const workflowStatus = workflow?.status ? (STATUS_TEXT[workflow.status] || workflow.status) : '等待输入';
-
-  return (
-    <section className="creativeDetailCard">
-      <div className="creativeDetailCardHeader">
-        <h3>当前任务</h3>
-        <strong className={`stepBadge ${getStatusClass(workflow?.status)}`}>{workflowStatus}</strong>
-      </div>
-      <div className={`status ${statusClass}`} aria-live="polite">
-        {message || '填写方向、抖音来源或外部资料链接后，即可创建视频生成任务。'}
-      </div>
-      <ul className="agentStatusList">
-        <li>
-          <span>任务状态</span>
-          <strong className={`stepBadge ${getStatusClass(workflow?.status)}`}>{workflowStatus}</strong>
-          {workflowId ? <small>任务 ID：{workflowId}</small> : <small>尚未创建创作任务</small>}
-        </li>
-      </ul>
-    </section>
-  );
-}
-
-function WorkflowStepProgress({ workflow }) {
-  const stages = useMemo(() => normalizeWorkflowStages(workflow), [workflow]);
-
-  return (
-    <div className="creativeWorkflowStepper" aria-label="生成进度">
-      {stages.map((stage, index) => {
-        const stepState = getStepState(stage, index, stages);
-        return (
-          <div className={`creativeWorkflowStep ${stepState}`} key={stage.id || stage.label}>
-            {index > 0 ? <span className="creativeWorkflowStepConnector" aria-hidden="true" /> : null}
-            <span className="creativeWorkflowStepDot">{index + 1}</span>
-            <span className="creativeWorkflowStepLabel">{stage.label}</span>
-            <small>{STATUS_TEXT[stage.status] || stage.status || '等待中'}</small>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function CreativeVideoPreview({ videoUrl, onEdit, disabled, title }) {
-  return (
-    <section className="creativeVideoStage" aria-label="生成视频预览">
-      <video className="creativeResultVideo" src={videoUrl} controls playsInline preload="metadata">
-        当前浏览器不支持直接播放视频。
-      </video>
-      <button className="editorToggle" type="button" onClick={onEdit} disabled={disabled} title={title}>
-        继续编辑
-      </button>
-    </section>
-  );
-}
-
-function CreativeTaskDetail({ status, message, workflowId, workflow, deletingWorkflowId, onStopAndDelete, onContinueEdit }) {
-  const [promptModalOpen, setPromptModalOpen] = useState(false);
-  if (!workflowId && !workflow) return null;
-  const videoUrl = getWorkflowVideoUrl(workflow);
-  const canStopAndDelete = workflowId && workflow?.status !== 'done';
-  const promptText = workflow?.creative_context?.input?.raw_text?.trim() || '';
-  const editableWorkflowId = workflowId || workflow?.workflow_id || workflow?.id || '';
-
-  function continueEdit() {
-    onContinueEdit?.(editableWorkflowId);
-  }
-
-  return (
-    <div className={`creativeTaskDetail ${workflow?.status === 'done' && videoUrl ? 'hasVideo' : ''}`}>
-      <div className="creativeDetailMeta">
-        <div>
-          <span>任务 ID</span>
-          <strong>{workflowId || '尚未创建'}</strong>
-        </div>
-        <strong className={`stepBadge ${getStatusClass(workflow?.status)}`}>
-          {getWorkflowStatusText(workflow, status)}
-        </strong>
-        <div className="creativeTaskActions">
-          <button
-            className="creativePromptViewButton"
-            type="button"
-            onClick={() => setPromptModalOpen(true)}
-          >
-            <Eye size={14} />
-            <span>查看提示词</span>
-          </button>
-          {canStopAndDelete ? (
-            <button
-              className="creativeStopDeleteButton"
-              type="button"
-              disabled={deletingWorkflowId === workflowId}
-              onClick={() => onStopAndDelete(workflowId)}
-            >
-              {deletingWorkflowId === workflowId ? <Loader2 size={14} className="spinIcon" /> : <Trash2 size={14} />}
-              <span>{deletingWorkflowId === workflowId ? '正在删除' : '停止并删除'}</span>
-            </button>
-          ) : null}
-        </div>
-      </div>
-      {promptModalOpen ? (
-        <div className="creativePromptModalOverlay" role="presentation" onClick={() => setPromptModalOpen(false)}>
-          <div
-            className="creativePromptModal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="creative-prompt-modal-title"
-            onClick={event => event.stopPropagation()}
-          >
-            <div className="creativePromptModalHeader">
-              <h3 id="creative-prompt-modal-title">当前任务提示词</h3>
-              <button
-                className="creativePromptModalClose"
-                type="button"
-                aria-label="关闭提示词弹框"
-                onClick={() => setPromptModalOpen(false)}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <pre className="creativePromptModalText">{promptText || '暂无可显示的提示词。'}</pre>
-          </div>
-        </div>
-      ) : null}
-      <WorkflowStepProgress workflow={workflow} />
-      {workflow?.status === 'done' && videoUrl ? (
-        <>
-          <CreativeVideoPreview
-            videoUrl={videoUrl}
-            onEdit={continueEdit}
-            disabled={!editableWorkflowId}
-            title={editableWorkflowId ? '继续编辑视频' : '缺少创作任务 ID，无法进入编辑器。'}
-          />
-        </>
-      ) : (
-        <div className={`creativeDetailMessage ${getStatusMessageClass(status)}`} aria-live="polite">
-          {message || '创作任务已打开，正在获取最新进度...'}
-        </div>
-      )}
-    </div>
-  );
 }
 
 export function OneClickCreativePage() {
@@ -954,6 +797,7 @@ export function OneClickCreativePage() {
             deletingWorkflowId={deletingWorkflowId}
             onStopAndDelete={stopAndDeleteTask}
             onContinueEdit={continueEdit}
+            getWorkflowVideoUrl={getWorkflowVideoUrl}
           />
         </div>
       </section>

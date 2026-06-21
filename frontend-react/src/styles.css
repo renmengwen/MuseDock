@@ -952,16 +952,6 @@ a { color: #fe2c55; text-decoration: none; }
   cursor: not-allowed;
   opacity: .72;
 }
-.creativePromptModalOverlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(15, 23, 42, .42);
-}
 .creativePromptModal {
   width: min(92vw, 680px);
   max-height: min(82vh, 640px);
@@ -972,34 +962,6 @@ a { color: #fe2c55; text-decoration: none; }
   border-radius: 14px;
   background: #fff;
   box-shadow: 0 24px 70px rgba(15, 23, 42, .24);
-}
-.creativePromptModalHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 18px;
-  border-bottom: 1px solid #eef2f7;
-}
-.creativePromptModalHeader h3 {
-  margin: 0;
-  color: #111827;
-  font-size: 16px;
-}
-.creativePromptModalClose {
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fff;
-  color: #4b5563;
-  cursor: pointer;
-}
-.creativePromptModalClose:hover {
-  background: #f3f4f6;
 }
 .creativePromptModalText {
   margin: 0;
