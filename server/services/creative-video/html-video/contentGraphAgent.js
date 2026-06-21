@@ -51,6 +51,14 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
   const targetDuration = target.duration_sec || target.durationSec || target.duration || sceneSpec.target_duration_sec || '';
   const aspectRatio = target.aspect_ratio || target.aspectRatio || sceneSpec.aspect_ratio || sceneSpec.aspectRatio || '';
   const language = target.language || target.lang || 'zh-CN';
+  const isSourceUrl = creativeContext?.input?.mode === 'source_url'
+    || creativeContext?.source_context?.kind === 'source_url';
+  const sourceUrlGroundingRequirements = isSourceUrl ? [
+    '- 如果源素材来自 source_url，SOURCE MATERIAL 是视频真正主题，不是装饰信息。',
+    '- 每个节点都必须引用或改写来源材料里的具体事实、名字、数字、产品、项目能力、术语或主张。',
+    '- 禁止输出可套用到任何文章或任何仓库的泛泛句子。',
+    '- GitHub repo 只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。',
+  ] : [];
   return [
     '你是 html-video 的 content graph 规划器。请只输出严格 JSON，不要输出 Markdown、解释或额外文本。',
     '',
@@ -75,10 +83,7 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
     '- data node 的 data 必须形如 {"title":"string","unit":"optional shared unit","items":[{"label":"string","value":123}]}。',
     '- 数据帧必须使用可比较的同一单位，数值要合理；不能把不同口径的数据强行放进同一组。',
     '- 必须保留源素材事实，不要编造来源中没有的精确数字、机构、时间或结论。',
-    '- 如果源素材来自 source_url，SOURCE MATERIAL 是视频真正主题，不是装饰信息。',
-    '- 每个节点都必须引用或改写来源材料里的具体事实、名字、数字、产品、项目能力、术语或主张。',
-    '- 禁止输出可套用到任何文章或任何仓库的泛泛句子。',
-    '- GitHub repo 只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。',
+    ...sourceUrlGroundingRequirements,
     '- 不要让对象值变成字符串 [object Object]；对象必须提取有意义的 label/text/value。',
     '- 中文素材默认生成中文可见文本，技术名词和品牌名可保留英文。',
     '',

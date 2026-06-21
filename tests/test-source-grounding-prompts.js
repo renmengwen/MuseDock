@@ -42,6 +42,20 @@ function createDouyinCreativeContext(transcript) {
   };
 }
 
+function createTextCreativeContext(transcript) {
+  return {
+    input: {
+      mode: 'text',
+      raw_text: '写一个介绍独立创作者工作流的短视频。',
+    },
+    source_context: {
+      kind: 'text',
+      summary: '围绕独立创作者的日常工作流，强调灵感整理、脚本打磨和持续发布。',
+      transcript,
+    },
+  };
+}
+
 function buildGraphPrompt(creativeContext) {
   return contentGraphAgent.buildContentGraphPrompt({
     sceneSpec: {
@@ -102,15 +116,27 @@ assert.match(graphPrompt, /GitHub repo 只能基于 README、仓库描述、语�
 assert.match(graphPrompt, /真实 README 内容|这个项目把 HTML 变成视频/);
 assert.ok(sourceTranscriptLine.includes(SOURCE_TRANSCRIPT_ONLY_MARKER));
 
+const textGraphPrompt = buildGraphPrompt(createTextCreativeContext(
+  '这是普通文本创作方向：讲述独立创作者如何整理灵感、打磨脚本并持续发布。'
+));
+
+assert.ok(textGraphPrompt.includes('SOURCE MATERIAL / 源素材上下文：'));
+assert.ok(!textGraphPrompt.includes('SOURCE MATERIAL 是视频真正主题'));
+assert.ok(!textGraphPrompt.includes('每个节点都必须引用或改写来源材料里的具体事实'));
+assert.ok(!textGraphPrompt.includes('GitHub repo 只能基于 README'));
+
 const longTranscript = `${LONG_TRANSCRIPT_START_MARKER} ${'A'.repeat(2450)} ${LONG_TRANSCRIPT_TAIL_MARKER}`;
+const longSceneCreativeContext = createCreativeContext(longTranscript);
 const longScenePrompt = creativeSpecAgent.buildSceneSpecPrompt({
-  creativeContext: createCreativeContext(longTranscript),
+  creativeContext: longSceneCreativeContext,
   target: { duration_sec: 30 },
 });
 
 assert.ok(longScenePrompt.includes(LONG_TRANSCRIPT_START_MARKER));
 assert.ok(!longScenePrompt.includes(LONG_TRANSCRIPT_TAIL_MARKER));
 assert.ok(longScenePrompt.includes('已截断'));
+assert.equal(longSceneCreativeContext.source_context.transcript, longTranscript);
+assert.ok(longSceneCreativeContext.source_context.transcript.includes(LONG_TRANSCRIPT_TAIL_MARKER));
 
 const longGraphPrompt = buildGraphPrompt(createCreativeContext(longTranscript));
 const longSourceTranscriptLine = findSourceTranscriptLine(longGraphPrompt);
