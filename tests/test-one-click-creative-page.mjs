@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pagePath = path.join(__dirname, '../frontend-react/src/pages/OneClickCreativePage.jsx');
+const creativeDisplayPath = path.join(__dirname, '../frontend-react/src/components/creative/creativeDisplay.js');
 const appPath = path.join(__dirname, '../frontend-react/src/App.jsx');
 const shellPath = path.join(__dirname, '../frontend-react/src/components/AppShell.jsx');
 const stylesPath = path.join(__dirname, '../frontend-react/src/styles.css');
@@ -57,8 +58,10 @@ const zh = {
 };
 
 assert.ok(fs.existsSync(pagePath), 'missing page frontend-react/src/pages/OneClickCreativePage.jsx');
+assert.ok(fs.existsSync(creativeDisplayPath), 'creative display helpers should be extracted');
 
 const page = fs.readFileSync(pagePath, 'utf-8');
+const creativeDisplay = fs.readFileSync(creativeDisplayPath, 'utf-8');
 const app = fs.readFileSync(appPath, 'utf-8');
 const shell = fs.readFileSync(shellPath, 'utf-8');
 const styles = fs.readFileSync(stylesPath, 'utf-8');
@@ -120,7 +123,7 @@ for (const text of [
   zh.skipped,
   zh.failed,
 ]) {
-  assert.ok(page.includes(text), `OneClickCreativePage.jsx should keep workflow text readable: ${text}`);
+  assert.ok(creativeDisplay.includes(text), `creativeDisplay.js should keep workflow text readable: ${text}`);
 }
 
 for (const mojibake of ['涓€閿', '鑱旂綉', '鍥剧墖', '姝ｅ湪', '璇疯緭']) {
@@ -134,7 +137,6 @@ for (const symbol of [
   'CreativePromptComposer',
   'CreativeTaskDetail',
   'CreativeInputForm',
-  'WorkflowStageList',
   'WorkflowStatusPanel',
   'WorkflowStepProgress',
   'CreativeVideoPreview',
@@ -350,8 +352,8 @@ assert.match(page, /getWorkflowVideoUrl/, 'Creative task detail should resolve r
 assert.match(page, /workflow\?\.stages\?\.find\(stage => stage\.id === 'render'\)\?\.result/, 'Creative task detail should read video URL from render stage result');
 assert.match(page, /getWorkflowDisplayMessage/, 'Creative task detail should derive the visible status message from workflow progress');
 assert.match(page, /find\(stage => \['running', 'queued', 'pending'\]\.includes\(stage\.status\)\)/, 'Creative task detail should surface the current active stage message while polling');
-assert.match(page, /skipped:\s*'已跳过'/, 'Workflow progress should show skipped stages as 已跳过');
-assert.match(page, /stage\.status === 'skipped'[\s\S]*return 'done'/, 'Workflow stepper should render skipped stages as non-active completed steps');
+assert.match(creativeDisplay, /skipped:\s*'已跳过'/, 'Workflow progress should show skipped stages as 已跳过');
+assert.match(creativeDisplay, /stage\.status === 'skipped'[\s\S]*return 'done'/, 'Workflow stepper should render skipped stages as non-active completed steps');
 const videoPreviewStart = page.indexOf('<CreativeVideoPreview');
 assert.ok(videoPreviewStart > 0, 'Creative task detail should render CreativeVideoPreview when a video URL is available');
 const videoPreviewEnd = page.indexOf('/>', videoPreviewStart);

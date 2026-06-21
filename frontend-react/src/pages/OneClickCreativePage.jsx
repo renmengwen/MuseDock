@@ -16,58 +16,17 @@ import {
   Zap,
 } from 'lucide-react';
 import { api } from '../api/client.js';
+import {
+  STATUS_TEXT,
+  getStatusClass,
+  getStatusMessageClass,
+  getStepState,
+  getWorkflowStatusText,
+  normalizeWorkflowStages,
+} from '../components/creative/creativeDisplay.js';
 
 const CREATIVE_TASKS_STORAGE_KEY = 'musedock.creative.tasks.v1';
 const ACTIVE_CREATIVE_TASK_STORAGE_KEY = 'musedock.creative.activeTask.v1';
-
-const STAGE_LABELS = {
-  source: '准备来源资料',
-  research: '联网研究',
-  assets: '素材分析',
-  agent_run: '导演改写',
-  brief: '成片策划',
-  audio: '生成音频轨',
-  project: '生成工程',
-  check: '校验工程',
-  render: '渲染视频',
-  inspect: '巡检视频',
-};
-
-const DEFAULT_STAGES = Object.entries(STAGE_LABELS).map(([id, label]) => ({
-  id,
-  label,
-  status: 'waiting',
-}));
-
-const STATUS_TEXT = {
-  waiting: '等待中',
-  pending: '排队中',
-  queued: '排队中',
-  running: '进行中',
-  done: '已完成',
-  skipped: '已跳过',
-  failed: '失败',
-};
-
-function getStatusClass(status) {
-  if (status === 'done' || status === 'skipped') return 'done';
-  if (status === 'failed') return 'failed';
-  if (status === 'queued' || status === 'pending' || status === 'running') return 'pending';
-  return '';
-}
-
-function getStatusMessageClass(status) {
-  if (status === 'creating' || status === 'polling') return 'loading';
-  if (status === 'done') return 'success';
-  if (status === 'failed') return 'error';
-  return 'info';
-}
-
-function getWorkflowStatusText(workflow, fallbackStatus = 'idle') {
-  const nextStatus = workflow?.status || fallbackStatus;
-  if (!workflow && fallbackStatus === 'idle') return '等待输入';
-  return STATUS_TEXT[nextStatus] || nextStatus || '等待中';
-}
 
 function getWorkflowDisplayMessage(workflow, fallback = '') {
   const stages = Array.isArray(workflow?.stages) ? workflow.stages : [];
@@ -402,60 +361,8 @@ function WorkflowStatusPanel({ status, message, workflowId, workflow }) {
   );
 }
 
-function WorkflowStageList({ workflow }) {
-  const stages = useMemo(() => {
-    const source = Array.isArray(workflow?.stages) && workflow.stages.length ? workflow.stages : DEFAULT_STAGES;
-    return source.map(stage => ({
-      ...stage,
-      label: stage.label || STAGE_LABELS[stage.id] || stage.id || '未命名阶段',
-      status: stage.status || 'waiting',
-    }));
-  }, [workflow]);
-
-  return (
-    <section className="creativeDetailCard creativeStagePanel">
-      <div className="creativeDetailCardHeader">
-        <h3>生成进度</h3>
-        <span>任务详情</span>
-      </div>
-      <div className="agentSteps compact">
-        {stages.map(stage => (
-          <div className="agentStep" key={stage.id || stage.label}>
-            <span>{stage.label}</span>
-            <strong className={`stepBadge ${getStatusClass(stage.status)}`}>
-              {STATUS_TEXT[stage.status] || stage.status || '等待中'}
-            </strong>
-            {stage.message ? <small>{stage.message}</small> : null}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function getStepState(stage, index, stages) {
-  if (stage.status === 'done') return 'done';
-  if (stage.status === 'skipped') return 'done';
-  if (stage.status === 'failed') return 'failed';
-  if (stage.status === 'running' || stage.status === 'queued' || stage.status === 'pending') return 'active';
-  const hasActiveBefore = stages.slice(0, index).some(item => (
-    item.status === 'running'
-    || item.status === 'queued'
-    || item.status === 'pending'
-    || item.status === 'failed'
-  ));
-  return hasActiveBefore ? 'waiting' : '';
-}
-
 function WorkflowStepProgress({ workflow }) {
-  const stages = useMemo(() => {
-    const source = Array.isArray(workflow?.stages) && workflow.stages.length ? workflow.stages : DEFAULT_STAGES;
-    return source.map(stage => ({
-      ...stage,
-      label: stage.label || STAGE_LABELS[stage.id] || stage.id || '未命名阶段',
-      status: stage.status || 'waiting',
-    }));
-  }, [workflow]);
+  const stages = useMemo(() => normalizeWorkflowStages(workflow), [workflow]);
 
   return (
     <div className="creativeWorkflowStepper" aria-label="生成进度">
