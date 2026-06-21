@@ -334,14 +334,14 @@ function CreativePromptComposer({
   return (
     <form className="creativePromptComposer" onSubmit={onSubmit}>
       <label className="creativePromptLabel" htmlFor="creative-input">
-        输入视频方向、抖音 ID 或抖音链接
+        输入视频方向、抖音链接、微信公众号文章或 GitHub 仓库链接
       </label>
       <textarea
         id="creative-input"
         value={input}
         onChange={event => setInput(event.target.value)}
         disabled={isBusy}
-        placeholder="在这里输入你的创意"
+        placeholder="粘贴文章/GitHub 链接，或输入你想生成的视频方向"
         rows={4}
       />
 
@@ -388,7 +388,7 @@ function WorkflowStatusPanel({ status, message, workflowId, workflow }) {
         <strong className={`stepBadge ${getStatusClass(workflow?.status)}`}>{workflowStatus}</strong>
       </div>
       <div className={`status ${statusClass}`} aria-live="polite">
-        {message || '填写方向或抖音来源后，即可创建视频生成任务。'}
+        {message || '填写方向、抖音来源或外部资料链接后，即可创建视频生成任务。'}
       </div>
       <ul className="agentStatusList">
         <li>
@@ -953,7 +953,7 @@ export function OneClickCreativePage() {
     const trimmed = input.trim();
     if (!trimmed) {
       setStatus('failed');
-      setMessage('请输入视频方向、抖音 ID 或抖音链接');
+      setMessage('请输入视频方向、抖音链接、文章链接或 GitHub 仓库链接');
       return;
     }
 
