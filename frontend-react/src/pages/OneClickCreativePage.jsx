@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowUp,
   CirclePlus,
+  Eye,
   FileText,
   Globe2,
   Loader2,
@@ -11,6 +12,7 @@ import {
   Shield,
   Sparkles,
   Trash2,
+  X,
   Zap,
 } from 'lucide-react';
 import { api } from '../api/client.js';
@@ -485,9 +487,11 @@ function CreativeVideoPreview({ videoUrl }) {
 
 function CreativeTaskDetail({ status, message, workflowId, workflow, deletingWorkflowId, onStopAndDelete }) {
   const [editorOpen, setEditorOpen] = useState(false);
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
   if (!workflowId && !workflow) return null;
   const videoUrl = getWorkflowVideoUrl(workflow);
   const canStopAndDelete = workflowId && workflow?.status !== 'done';
+  const promptText = workflow?.creative_context?.input?.raw_text?.trim() || '';
 
   return (
     <div className={`creativeTaskDetail ${workflow?.status === 'done' && videoUrl ? 'hasVideo' : ''}`}>
@@ -499,18 +503,52 @@ function CreativeTaskDetail({ status, message, workflowId, workflow, deletingWor
         <strong className={`stepBadge ${getStatusClass(workflow?.status)}`}>
           {getWorkflowStatusText(workflow, status)}
         </strong>
-        {canStopAndDelete ? (
+        <div className="creativeTaskActions">
           <button
-            className="creativeStopDeleteButton"
+            className="creativePromptViewButton"
             type="button"
-            disabled={deletingWorkflowId === workflowId}
-            onClick={() => onStopAndDelete(workflowId)}
+            onClick={() => setPromptModalOpen(true)}
           >
-            {deletingWorkflowId === workflowId ? <Loader2 size={14} className="spinIcon" /> : <Trash2 size={14} />}
-            <span>{deletingWorkflowId === workflowId ? '正在删除' : '停止并删除'}</span>
+            <Eye size={14} />
+            <span>查看提示词</span>
           </button>
-        ) : null}
+          {canStopAndDelete ? (
+            <button
+              className="creativeStopDeleteButton"
+              type="button"
+              disabled={deletingWorkflowId === workflowId}
+              onClick={() => onStopAndDelete(workflowId)}
+            >
+              {deletingWorkflowId === workflowId ? <Loader2 size={14} className="spinIcon" /> : <Trash2 size={14} />}
+              <span>{deletingWorkflowId === workflowId ? '正在删除' : '停止并删除'}</span>
+            </button>
+          ) : null}
+        </div>
       </div>
+      {promptModalOpen ? (
+        <div className="creativePromptModalOverlay" role="presentation" onClick={() => setPromptModalOpen(false)}>
+          <div
+            className="creativePromptModal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="creative-prompt-modal-title"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="creativePromptModalHeader">
+              <h3 id="creative-prompt-modal-title">当前任务提示词</h3>
+              <button
+                className="creativePromptModalClose"
+                type="button"
+                aria-label="关闭提示词弹框"
+                onClick={() => setPromptModalOpen(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <pre className="creativePromptModalText">{promptText || '暂无可显示的提示词。'}</pre>
+          </div>
+        </div>
+      ) : null}
       <WorkflowStepProgress workflow={workflow} />
       {workflow?.status === 'done' && videoUrl ? (
         <>

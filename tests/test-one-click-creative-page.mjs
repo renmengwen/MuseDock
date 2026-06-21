@@ -50,6 +50,9 @@ const zh = {
   failed: textFromCodePoints([0x5931, 0x8d25]),
   stopAndDelete: textFromCodePoints([0x505c, 0x6b62, 0x5e76, 0x5220, 0x9664]),
   stoppingAndDeleting: textFromCodePoints([0x6b63, 0x5728, 0x505c, 0x6b62, 0x5e76, 0x5220, 0x9664, 0x4efb, 0x52a1, 0x2e, 0x2e, 0x2e]),
+  viewPrompt: textFromCodePoints([0x67e5, 0x770b, 0x63d0, 0x793a, 0x8bcd]),
+  promptModalTitle: textFromCodePoints([0x5f53, 0x524d, 0x4efb, 0x52a1, 0x63d0, 0x793a, 0x8bcd]),
+  promptEmpty: textFromCodePoints([0x6682, 0x65e0, 0x53ef, 0x663e, 0x793a, 0x7684, 0x63d0, 0x793a, 0x8bcd]),
 };
 
 assert.ok(fs.existsSync(pagePath), 'missing page frontend-react/src/pages/OneClickCreativePage.jsx');
@@ -78,6 +81,9 @@ for (const text of [
   zh.creativeInputPlaceholder,
   zh.stopAndDelete,
   zh.stoppingAndDeleting,
+  zh.viewPrompt,
+  zh.promptModalTitle,
+  zh.promptEmpty,
 ]) {
   assert.ok(page.includes(text), `OneClickCreativePage.jsx should include normal Chinese text: ${text}`);
 }
@@ -140,6 +146,12 @@ assert.match(page, /stopAndDeleteTask/, 'OneClickCreativePage should expose a st
 assert.match(page, /onStopAndDelete=\{stopAndDeleteTask\}/, 'Creative task detail should receive the current task stop-and-delete handler');
 assert.match(page, /onStopAndDelete\(workflowId\)/, 'Creative task detail stop button should delete the currently opened task');
 assert.match(page, /disabled=\{deletingWorkflowId === workflowId\}/, 'Current task stop-and-delete button should be disabled while deleting');
+assert.match(page, /const\s+promptText\s*=\s*workflow\?\.creative_context\?\.input\?\.raw_text/, 'Creative task detail should read the original user prompt from workflow.creative_context.input.raw_text');
+assert.match(page, /const\s+\[promptModalOpen,\s*setPromptModalOpen\]\s*=\s*useState\(false\)/, 'Creative task detail should track whether the prompt modal is open');
+assert.match(page, /className="creativePromptViewButton"/, 'Creative task detail should render a prompt viewing button beside task actions');
+assert.match(page, /setPromptModalOpen\(true\)/, 'Prompt view button should open the prompt modal');
+assert.match(page, /role="dialog"[\s\S]*aria-modal="true"[\s\S]*当前任务提示词/, 'Prompt modal should be an accessible dialog with a Chinese title');
+assert.match(page, /<pre className="creativePromptModalText">\{promptText \|\| '暂无可显示的提示词。'\}<\/pre>/, 'Prompt modal should show the original prompt with a Chinese empty state');
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');
 assert.match(page, /ACTIVE_CREATIVE_TASK_STORAGE_KEY/, 'OneClickCreativePage should persist active creative task stream state');
 assert.match(page, /streamCreativeWorkflowEvents/, 'OneClickCreativePage should subscribe to creative workflow event stream');
@@ -312,6 +324,10 @@ assert.doesNotMatch(page, /<WorkflowStatusPanel/, 'Creative task detail should n
 assert.match(page, /creativeDetailMeta/, 'Creative task detail should show task id and status in a compact meta row');
 assert.match(page, /creativeWorkflowStepper/, 'Creative task detail should render a horizontal workflow stepper');
 assert.match(page, /creativeWorkflowStepConnector/, 'Creative workflow stepper should render connectors between steps');
+assert.ok(styles.includes('.creativeTaskActions'), 'styles.css should group creative task detail action buttons');
+assert.ok(styles.includes('.creativePromptViewButton'), 'styles.css should style the prompt view button');
+assert.ok(styles.includes('.creativePromptModalOverlay'), 'styles.css should style the prompt modal overlay');
+assert.ok(styles.includes('.creativePromptModalText'), 'styles.css should preserve prompt text formatting inside the modal');
 assert.match(page, /getWorkflowVideoUrl/, 'Creative task detail should resolve rendered video URL from workflow data');
 assert.match(page, /workflow\?\.stages\?\.find\(stage => stage\.id === 'render'\)\?\.result/, 'Creative task detail should read video URL from render stage result');
 assert.match(page, /getWorkflowDisplayMessage/, 'Creative task detail should derive the visible status message from workflow progress');

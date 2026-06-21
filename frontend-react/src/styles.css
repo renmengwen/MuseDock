@@ -910,6 +910,15 @@ a { color: #fe2c55; text-decoration: none; }
 .creativeDetailMeta > .stepBadge {
   flex: 0 0 auto;
 }
+.creativeTaskActions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+.creativePromptViewButton,
 .creativeStopDeleteButton {
   display: inline-flex;
   align-items: center;
@@ -926,6 +935,15 @@ a { color: #fe2c55; text-decoration: none; }
   font-weight: 700;
   cursor: pointer;
 }
+.creativePromptViewButton {
+  border-color: #d6e4ff;
+  background: #f5f8ff;
+  color: #1d4ed8;
+}
+.creativePromptViewButton:hover {
+  background: #eaf1ff;
+  border-color: #b8cdf8;
+}
 .creativeStopDeleteButton:hover:not(:disabled) {
   background: #fee2e2;
   border-color: #fca5a5;
@@ -933,6 +951,67 @@ a { color: #fe2c55; text-decoration: none; }
 .creativeStopDeleteButton:disabled {
   cursor: not-allowed;
   opacity: .72;
+}
+.creativePromptModalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, .42);
+}
+.creativePromptModal {
+  width: min(92vw, 680px);
+  max-height: min(82vh, 640px);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .24);
+}
+.creativePromptModalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #eef2f7;
+}
+.creativePromptModalHeader h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 16px;
+}
+.creativePromptModalClose {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #4b5563;
+  cursor: pointer;
+}
+.creativePromptModalClose:hover {
+  background: #f3f4f6;
+}
+.creativePromptModalText {
+  margin: 0;
+  padding: 18px;
+  overflow: auto;
+  color: #111827;
+  background: #f8fafc;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .creativeWorkflowStepper {
   display: grid;
@@ -1302,8 +1381,9 @@ a { color: #fe2c55; text-decoration: none; }
   .creativeDetailMeta > .stepBadge {
     align-self: flex-start;
   }
-  .creativeStopDeleteButton {
+  .creativeTaskActions {
     align-self: flex-start;
+    justify-content: flex-start;
   }
   .toolbar, .mediaHeader, .workspaceIntro, .settingsPanelHeader, .modelConfigHeader { flex-direction: column; align-items: stretch; }
   .tabs { overflow-x: auto; }
