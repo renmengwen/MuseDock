@@ -173,6 +173,13 @@ function classifySourceUrl(rawUrl) {
       repo: parts[1].replace(/\.git$/, ''),
     };
   }
+  if (parts.length > 2 && !reserved.has(parts[0].toLowerCase())) {
+    return {
+      kind: 'unsupported_github_path',
+      owner: parts[0],
+      repo: parts[1].replace(/\.git$/, ''),
+    };
+  }
   return { kind: 'article' };
 }
 
@@ -183,6 +190,18 @@ async function fetchSource(rawUrl, options = {}) {
     classification = classifySourceUrl(parsed.href);
     if (classification.kind === 'github_repo') {
       return await fetchGithubRepo(classification.owner, classification.repo, parsed.href, options);
+    }
+    if (classification.kind === 'unsupported_github_path') {
+      return {
+        success: false,
+        kind: 'github_repo',
+        url: parsed.href,
+        title: '',
+        markdown: '',
+        truncated: false,
+        message: '不支持指定 GitHub 分支、目录或文件，请粘贴仓库首页 URL。',
+        diagnostic: { code: 'UNSUPPORTED_GITHUB_PATH' },
+      };
     }
     return await fetchArticle(parsed.href, options);
   } catch (error) {

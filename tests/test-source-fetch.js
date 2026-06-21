@@ -103,11 +103,23 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
       owner: 'openai',
       repo: 'codex',
     });
-    assert.equal(sourceFetch.classifySourceUrl('https://github.com/openai/codex/issues/1').kind, 'article');
-    assert.equal(sourceFetch.classifySourceUrl('https://github.com/openai/codex/tree/main').kind, 'article');
-    assert.equal(sourceFetch.classifySourceUrl('https://github.com/owner/repo/pulls').kind, 'article');
-    assert.equal(sourceFetch.classifySourceUrl('https://github.com/owner/repo/new/main').kind, 'article');
-    assert.equal(sourceFetch.classifySourceUrl('https://github.com/owner/repo/blob/main/file.js').kind, 'article');
+    assert.deepEqual(sourceFetch.classifySourceUrl('https://github.com/openai/codex/tree/main'), {
+      kind: 'unsupported_github_path',
+      owner: 'openai',
+      repo: 'codex',
+    });
+    assert.deepEqual(sourceFetch.classifySourceUrl('https://github.com/openai/codex/blob/main/file.js'), {
+      kind: 'unsupported_github_path',
+      owner: 'openai',
+      repo: 'codex',
+    });
+    assert.deepEqual(sourceFetch.classifySourceUrl('https://github.com/openai/codex/issues/1'), {
+      kind: 'unsupported_github_path',
+      owner: 'openai',
+      repo: 'codex',
+    });
+    assert.equal(sourceFetch.classifySourceUrl('https://github.com/owner/repo/pulls').kind, 'unsupported_github_path');
+    assert.equal(sourceFetch.classifySourceUrl('https://github.com/owner/repo/new/main').kind, 'unsupported_github_path');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/search?q=codex').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/settings/profile').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/orgs/foo').kind, 'article');
@@ -123,6 +135,20 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/pulls/review-requested').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/new/import').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://mp.weixin.qq.com/s/abc').kind, 'article');
+  }
+
+  {
+    let called = false;
+    const result = await sourceFetch.fetchSource('https://github.com/openai/codex/tree/main', {
+      fetchImpl: async () => {
+        called = true;
+        throw new Error('should not fetch');
+      },
+    });
+    assert.equal(result.success, false);
+    assert.equal(called, false);
+    assert.match(result.message, /不支持指定 GitHub 分支、目录或文件/);
+    assert.equal(result.diagnostic.code, 'UNSUPPORTED_GITHUB_PATH');
   }
 
   {
