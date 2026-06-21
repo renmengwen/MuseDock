@@ -19,6 +19,21 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
+    const urls = sourceFetch.extractUrls([
+      'https://example.com/a',
+      'https://example.com/b',
+      'https://example.com/a',
+      'https://example.com/c',
+      'https://example.com/d',
+    ].join(' '));
+    assert.deepEqual(urls, [
+      'https://example.com/a',
+      'https://example.com/b',
+      'https://example.com/c',
+    ]);
+  }
+
+  {
     assert.throws(() => sourceFetch.assertPublicHttpUrl('ftp://example.com/a'), /只支持 http\(s\) URL/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://localhost:3000/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://127.0.0.1/a'), /不能读取本机或内网地址/);
@@ -106,6 +121,11 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
+    assert.equal(sourceFetch.htmlToMarkdown('<p><img alt="说明" src="/a.png"></p>'), '![说明](/a.png)');
+    assert.equal(sourceFetch.htmlToMarkdown('<p><img src="/a.png" alt="说明"></p>'), '![说明](/a.png)');
+  }
+
+  {
     const html = [
       '<html><head><title>跳转后文章</title></head><body><article>',
       '<p>公开跳转后的正文内容足够长，用于验证手动处理公开到公开的重定向时仍然可以读取文章正文。</p>',
@@ -135,6 +155,26 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     });
     assert.equal(result.success, false);
     assert.match(result.message, /不能读取本机或内网地址/);
+  }
+
+  {
+    const result = await sourceFetch.fetchSource('https://example.com/network-error', {
+      fetchImpl: async () => {
+        throw new Error('network boom');
+      },
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /读取外部来源失败/);
+    assert.notEqual(result.message, 'network boom');
+  }
+
+  {
+    const result = await sourceFetch.fetchSource('https://example.com/server-error', {
+      fetchImpl: async () => makeResponse('server error', { status: 500 }),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /读取外部来源失败/);
+    assert.notEqual(result.message, 'HTTP 500');
   }
 
   {
@@ -196,6 +236,46 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     assert.equal(result.success, false);
     assert.equal(result.kind, 'github_repo');
     assert.match(result.message, /仓库公开可访问/);
+  }
+
+  {
+    const result = await sourceFetch.fetchSource('https://github.com/owner/readme-fail', {
+      fetchImpl: async (url) => {
+        if (url.endsWith('/repos/owner/readme-fail')) {
+          return makeResponse(JSON.stringify({ full_name: 'owner/readme-fail' }));
+        }
+        if (url.endsWith('/repos/owner/readme-fail/readme')) {
+          return makeResponse('readme failed', { status: 500 });
+        }
+        if (url.endsWith('/repos/owner/readme-fail/contents')) {
+          return makeResponse(JSON.stringify([]));
+        }
+        throw new Error(`unexpected url ${url}`);
+      },
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.kind, 'github_repo');
+    assert.match(result.message, /读取 GitHub README 失败/);
+  }
+
+  {
+    const result = await sourceFetch.fetchSource('https://github.com/owner/contents-fail', {
+      fetchImpl: async (url) => {
+        if (url.endsWith('/repos/owner/contents-fail')) {
+          return makeResponse(JSON.stringify({ full_name: 'owner/contents-fail' }));
+        }
+        if (url.endsWith('/repos/owner/contents-fail/readme')) {
+          return makeResponse('# README');
+        }
+        if (url.endsWith('/repos/owner/contents-fail/contents')) {
+          return makeResponse('contents failed', { status: 500 });
+        }
+        throw new Error(`unexpected url ${url}`);
+      },
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.kind, 'github_repo');
+    assert.match(result.message, /读取 GitHub 仓库目录失败/);
   }
 
   console.log('source fetch tests passed');

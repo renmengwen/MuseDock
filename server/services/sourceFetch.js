@@ -184,10 +184,20 @@ async function fetchSource(rawUrl, options = {}) {
       title: '',
       markdown: '',
       truncated: false,
-      message: error.message || '读取外部来源失败。',
+      message: formatFetchErrorMessage(error),
       diagnostic: { code: 'SOURCE_FETCH_FAILED' },
     };
   }
+}
+
+function formatFetchErrorMessage(error) {
+  const message = String(error && error.message || '').trim();
+  if (!message) return '读取外部来源失败。';
+  if (/[\u4e00-\u9fff]/.test(message)) return message;
+  if (/^HTTP \d+$/.test(message)) {
+    return `读取外部来源失败：远端服务返回 ${message.replace('HTTP ', 'HTTP 状态码 ')}。`;
+  }
+  return '读取外部来源失败：网络请求异常，请稍后重试。';
 }
 
 async function fetchArticle(url, options = {}) {
@@ -223,11 +233,22 @@ async function fetchGithubRepo(owner, repo, url, options = {}) {
     throw mapGithubError(error);
   }
 
-  const readme = await fetchText(`${api}/readme`, {
-    ...ghHeaders,
-    accept: 'application/vnd.github.raw',
-  }, options).catch(() => '');
-  const tree = await fetchTopLevelTree(api, ghHeaders, options).catch(() => []);
+  let readme;
+  try {
+    readme = await fetchText(`${api}/readme`, {
+      ...ghHeaders,
+      accept: 'application/vnd.github.raw',
+    }, options);
+  } catch (error) {
+    throw mapGithubError(error, 'README');
+  }
+
+  let tree;
+  try {
+    tree = await fetchTopLevelTree(api, ghHeaders, options);
+  } catch (error) {
+    throw mapGithubError(error, '仓库目录');
+  }
 
   const title = meta.full_name || `${owner}/${repo}`;
   const lines = [`# ${title}`, '', `Source: ${url}`, ''];
@@ -267,15 +288,27 @@ async function fetchGithubRepo(owner, repo, url, options = {}) {
   };
 }
 
-function mapGithubError(error) {
+function mapGithubError(error, target = '仓库') {
   const message = String(error && error.message || '');
+  const prefix = target === 'README'
+    ? '读取 GitHub README 失败'
+    : `读取 GitHub ${target}失败`;
   if (/HTTP 404/.test(message)) {
-    return new Error('读取 GitHub 仓库失败：请确认仓库公开可访问。');
+    return new Error(`${prefix}：请确认仓库公开可访问。`);
   }
   if (/HTTP 403/.test(message)) {
-    return new Error('读取 GitHub 仓库失败：GitHub API 访问受限，请稍后重试。');
+    return new Error(`${prefix}：GitHub API 访问受限，请稍后重试。`);
   }
-  return new Error(`读取 GitHub 仓库失败：${message || '未知错误'}`);
+  return new Error(`${prefix}：${formatGithubErrorCause(message)}`);
+}
+
+function formatGithubErrorCause(message) {
+  if (/^HTTP \d+$/.test(message)) {
+    return `GitHub API 返回 ${message.replace('HTTP ', 'HTTP 状态码 ')}。`;
+  }
+  if (!message) return '未知错误。';
+  if (/[\u4e00-\u9fff]/.test(message)) return message;
+  return '网络请求异常，请稍后重试。';
 }
 
 async function fetchTopLevelTree(api, headers, options) {
@@ -390,8 +423,12 @@ function htmlToMarkdown(html) {
     const label = stripInline(inner);
     return label ? `[${label}](${href})` : '';
   });
-  text = text.replace(/<img[^>]*alt=["']([^"']*)["'][^>]*src=["']([^"']+)["'][^>]*>/gi, (_match, alt, src) => `![${alt}](${src})`);
-  text = text.replace(/<img[^>]*src=["']([^"']+)["'][^>]*>/gi, (_match, src) => `![](${src})`);
+  text = text.replace(/<img\b[^>]*>/gi, (tag) => {
+    const src = getHtmlAttribute(tag, 'src');
+    if (!src) return '';
+    const alt = getHtmlAttribute(tag, 'alt');
+    return `![${alt}](${src})`;
+  });
   text = text.replace(/<(p|div|section|article|tr|h[1-6]|ul|ol|blockquote)[^>]*>/gi, '\n');
   text = text.replace(/<\/(p|div|section|article|tr|li|ul|ol|blockquote)>/gi, '\n');
   text = text.replace(/<br\s*\/?>/gi, '\n');
