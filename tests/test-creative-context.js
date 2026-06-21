@@ -256,6 +256,22 @@ function testNormalizesSourceUrls() {
   assert.equal(chineseEnumerationComma.data.ignored_url_count, 1);
 }
 
+function testCountsAllIgnoredSourceUrlsWithoutFixedCap() {
+  const urls = Array.from(
+    { length: 25 },
+    (_, index) => `https://example.com/${index + 1}`
+  );
+  const result = normalizeCreativeInput({
+    input: urls.join(' '),
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data.mode, 'source_url');
+  assert.equal(result.data.source_url, 'https://example.com/1');
+  assert.equal(result.data.ignored_url_count, 24);
+  assert.match(result.data.source_hint, /https:\/\/example\.com\/25/);
+}
+
 function testKeepsUnselectedDuplicateUrlInSourceHint() {
   const duplicate = normalizeCreativeInput({
     input: '请分析 https://example.com/a https://example.com/a',
@@ -466,6 +482,7 @@ function run() {
   testRejectsEmptyInput();
   testRejectsDouyinLinksWithoutVideoId();
   testNormalizesSourceUrls();
+  testCountsAllIgnoredSourceUrlsWithoutFixedCap();
   testKeepsUnselectedDuplicateUrlInSourceHint();
   testRejectsAssetsForPhaseOne();
   testExtractsAwemeIdFromSupportedInputs();

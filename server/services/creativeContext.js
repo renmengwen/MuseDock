@@ -158,18 +158,18 @@ function countRemainingSourceUrls(text) {
   let remaining = safeString(text);
   let count = 0;
 
-  while (remaining && count < 20) {
+  while (remaining) {
     const [url] = sourceFetch.extractUrls(remaining, 1);
     if (!url) {
       break;
     }
 
-    count += 1;
     const nextRemaining = removeUrlFromText(remaining, url);
-    if (nextRemaining === remaining) {
+    if (nextRemaining === remaining || nextRemaining.length >= remaining.length) {
       break;
     }
 
+    count += 1;
     remaining = nextRemaining;
   }
 
