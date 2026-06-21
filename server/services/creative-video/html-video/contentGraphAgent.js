@@ -1,5 +1,7 @@
 const contentGraph = require('./contentGraph');
 
+const TRUNCATION_MARKER = '...（已截断）';
+
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
@@ -13,7 +15,11 @@ function compactText(value, maxLength = 1200) {
   }
   const text = String(raw || '').replace(/\s+/g, ' ').trim();
   if (!text || /^\[object Object\]$/i.test(text)) return '';
-  return text.length > maxLength ? text.slice(0, maxLength).trimEnd() : text;
+  if (text.length <= maxLength) return text;
+  if (maxLength <= TRUNCATION_MARKER.length) {
+    return TRUNCATION_MARKER.slice(0, maxLength);
+  }
+  return `${text.slice(0, maxLength - TRUNCATION_MARKER.length).trimEnd()}${TRUNCATION_MARKER}`;
 }
 
 function summarizeCreativeContextForPrompt(creativeContext = {}) {

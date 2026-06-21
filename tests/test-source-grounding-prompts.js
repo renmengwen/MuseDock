@@ -28,6 +28,20 @@ function createCreativeContext(transcript) {
   };
 }
 
+function createDouyinCreativeContext(transcript) {
+  return {
+    input: {
+      mode: 'douyin',
+      raw_text: '抖音视频转写',
+    },
+    source_context: {
+      kind: 'douyin',
+      summary: '普通视频转写',
+      transcript,
+    },
+  };
+}
+
 function buildGraphPrompt(creativeContext) {
   return contentGraphAgent.buildContentGraphPrompt({
     sceneSpec: {
@@ -66,6 +80,14 @@ assert.match(scenePrompt, /不要编造来源材料没有的精确数字、机�
 assert.match(scenePrompt, /GitHub repo 视频只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。/);
 assert.match(scenePrompt, /owner\/repo/);
 
+const douyinScenePrompt = creativeSpecAgent.buildSceneSpecPrompt({
+  creativeContext: createDouyinCreativeContext('这是一段普通视频转写，讲述本地生活探店过程。'),
+  target: { duration_sec: 30 },
+});
+
+assert.ok(!douyinScenePrompt.includes('文章、网页或 GitHub repo'));
+assert.ok(!douyinScenePrompt.includes('GitHub repo 视频只能基于 README'));
+
 const graphPrompt = buildGraphPrompt(creativeContext);
 const graphPromptLines = graphPrompt.split('\n');
 const sourceTranscriptLine = findSourceTranscriptLine(graphPrompt);
@@ -81,6 +103,15 @@ assert.match(graphPrompt, /真实 README 内容|这个项目把 HTML 变成视�
 assert.ok(sourceTranscriptLine.includes(SOURCE_TRANSCRIPT_ONLY_MARKER));
 
 const longTranscript = `${LONG_TRANSCRIPT_START_MARKER} ${'A'.repeat(2450)} ${LONG_TRANSCRIPT_TAIL_MARKER}`;
+const longScenePrompt = creativeSpecAgent.buildSceneSpecPrompt({
+  creativeContext: createCreativeContext(longTranscript),
+  target: { duration_sec: 30 },
+});
+
+assert.ok(longScenePrompt.includes(LONG_TRANSCRIPT_START_MARKER));
+assert.ok(!longScenePrompt.includes(LONG_TRANSCRIPT_TAIL_MARKER));
+assert.ok(longScenePrompt.includes('已截断'));
+
 const longGraphPrompt = buildGraphPrompt(createCreativeContext(longTranscript));
 const longSourceTranscriptLine = findSourceTranscriptLine(longGraphPrompt);
 const longSourceTranscriptText = longSourceTranscriptLine.replace(/^来源全文：/, '');
@@ -88,6 +119,7 @@ const longSourceTranscriptText = longSourceTranscriptLine.replace(/^来源全文
 assert.ok(longSourceTranscriptLine, '来源全文行应该存在');
 assert.ok(longSourceTranscriptText.includes(LONG_TRANSCRIPT_START_MARKER));
 assert.ok(!longSourceTranscriptText.includes(LONG_TRANSCRIPT_TAIL_MARKER));
+assert.ok(longSourceTranscriptText.includes('已截断'));
 assert.ok(longSourceTranscriptText.length <= 2400);
 
 console.log('source grounding prompt tests passed');

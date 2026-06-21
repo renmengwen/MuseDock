@@ -6,6 +6,37 @@ function stringify(value) {
   return JSON.stringify(value || {}, null, 2);
 }
 
+const PROMPT_TRUNCATION_MARKER = '...（已截断）';
+const SOURCE_CONTEXT_TEXT_LIMIT = 2400;
+
+function truncatePromptText(value, maxLength = SOURCE_CONTEXT_TEXT_LIMIT) {
+  const text = String(value || '');
+  if (text.length <= maxLength) {
+    return text;
+  }
+  if (maxLength <= PROMPT_TRUNCATION_MARKER.length) {
+    return PROMPT_TRUNCATION_MARKER.slice(0, maxLength);
+  }
+  return `${text.slice(0, maxLength - PROMPT_TRUNCATION_MARKER.length).trimEnd()}${PROMPT_TRUNCATION_MARKER}`;
+}
+
+function buildPromptCreativeContext(creativeContext = {}) {
+  const sourceContext = creativeContext?.source_context;
+  if (!sourceContext || typeof sourceContext !== 'object' || Array.isArray(sourceContext)) {
+    return creativeContext || {};
+  }
+  const promptSourceContext = { ...sourceContext };
+  ['transcript', 'markdown', 'content'].forEach(key => {
+    if (promptSourceContext[key]) {
+      promptSourceContext[key] = truncatePromptText(promptSourceContext[key], SOURCE_CONTEXT_TEXT_LIMIT);
+    }
+  });
+  return {
+    ...creativeContext,
+    source_context: promptSourceContext,
+  };
+}
+
 function retrySection(retryCount, previousErrors) {
   if (!retryCount) {
     return '';
@@ -17,6 +48,14 @@ function retrySection(retryCount, previousErrors) {
 }
 
 function buildSceneSpecPrompt({ creativeContext, target, retryCount = 0, previousErrors = [] } = {}) {
+  const isSourceUrl = creativeContext?.input?.mode === 'source_url';
+  const sourceUrlGroundingLines = isSourceUrl ? [
+    '如果 creativeContext.input.mode 是 source_url，来源材料是视频主题，不是装饰素材。',
+    'source_context.transcript 是文章、网页或 GitHub repo 的真实来源材料；必须基于其中的具体事实、名字、数字、项目术语和主张生成场景。',
+    '不要输出可套用到任何文章或任何仓库的泛泛句子。',
+    '不要编造来源材料没有的精确数字、机构、版本、结论或功能。',
+    'GitHub repo 视频只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。',
+  ] : [];
   return [
     '你是 html-video lite 的创意规格生成器。',
     '请只输出 JSON，不要输出 Markdown、解释、注释或代码块。',
@@ -29,14 +68,10 @@ function buildSceneSpecPrompt({ creativeContext, target, retryCount = 0, previou
     '不要把视觉意图写进 visual_text.cards，例如“深色科技背景”“光效扩散”“动画转场”“镜头布局”等制作说明必须避免。',
     '如果需要表达背景、光效、动画、转场、布局、发光、粒子、镜头，请留给第二次 frame_specs 阶段调用。',
     '不要因为主题本身提到 HTML、CSS、动画、转场或渲染就删除这些词；它们作为观众内容出现时可以保留。',
-    '如果 creativeContext.input.mode 是 source_url，来源材料是视频主题，不是装饰素材。',
-    'source_context.transcript 是文章、网页或 GitHub repo 的真实来源材料；必须基于其中的具体事实、名字、数字、项目术语和主张生成场景。',
-    '不要输出可套用到任何文章或任何仓库的泛泛句子。',
-    '不要编造来源材料没有的精确数字、机构、版本、结论或功能。',
-    'GitHub repo 视频只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。',
+    ...sourceUrlGroundingLines,
     '输出格式必须是：{"scene_spec":{...}}。',
     '创作上下文：',
-    stringify(creativeContext),
+    stringify(buildPromptCreativeContext(creativeContext)),
     '目标参数：',
     stringify(target),
     retrySection(retryCount, previousErrors),
