@@ -142,6 +142,27 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
 
   {
     const html = [
+      '<html><head><meta property="og:title" content="微信 rich class 标题"></head><body>',
+      '<p>外层噪声文本不应该出现在提取后的 markdown 中。</p>',
+      '<div class="rich_media_content">',
+      '<p>只有 rich_media_content class 的微信正文容器也应该被优先提取。</p>',
+      '<p>这里继续补充正文长度，说明来源内容、素材准备、脚本生成、结果校验、发布复盘和使用建议的完整上下文。</p>',
+      '<p>这些正文用于确认提取结果来自目标容器，而不是把页面 body 中的无关噪声一起作为文章正文。</p>',
+      '</div>',
+      '</body></html>',
+    ].join('');
+    const result = await sourceFetch.fetchSource('https://mp.weixin.qq.com/s/demo-rich', {
+      fetchImpl: async () => makeResponse(html),
+      now: () => '2026-06-21T00:00:00.000Z',
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.kind, 'article');
+    assert.match(result.markdown, /只有 rich_media_content class 的微信正文容器/);
+    assert.doesNotMatch(result.markdown, /外层噪声文本/);
+  }
+
+  {
+    const html = [
       '<html><head><title>短微信正文</title></head><body>',
       '<div id="js_content"><p>太短</p></div>',
       '<article><p>这是一段很长的页面其他区域内容，用于确认存在短微信正文时不会降级读取 article 区域。</p>',

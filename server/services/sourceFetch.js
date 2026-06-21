@@ -441,6 +441,8 @@ function extractBalanced(html, tag, openTagRe) {
 function extractMainHtml(html) {
   const wx = extractBalanced(html, 'div', /<div[^>]*\bid=["']js_content["'][^>]*>/i);
   if (wx !== null) return wx;
+  const wxRich = extractBalanced(html, 'div', /<div[^>]*\bclass\s*=\s*["'][^"']*\brich_media_content\b[^"']*["'][^>]*>/i);
+  if (wxRich !== null) return wxRich;
   const article = extractBalanced(html, 'article', /<article[^>]*>/i);
   if (article !== null) return article;
   const main = extractBalanced(html, 'main', /<main[^>]*>/i);
