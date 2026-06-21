@@ -16,7 +16,6 @@ import {
   Zap,
 } from 'lucide-react';
 import { api } from '../api/client.js';
-import { CreativeVideoEditor } from '../components/creative-video-editor/CreativeVideoEditor.jsx';
 
 const CREATIVE_TASKS_STORAGE_KEY = 'musedock.creative.tasks.v1';
 const ACTIVE_CREATIVE_TASK_STORAGE_KEY = 'musedock.creative.activeTask.v1';
@@ -475,23 +474,30 @@ function WorkflowStepProgress({ workflow }) {
   );
 }
 
-function CreativeVideoPreview({ videoUrl }) {
+function CreativeVideoPreview({ videoUrl, onEdit, disabled, title }) {
   return (
     <section className="creativeVideoStage" aria-label="生成视频预览">
       <video className="creativeResultVideo" src={videoUrl} controls playsInline preload="metadata">
         当前浏览器不支持直接播放视频。
       </video>
+      <button className="editorToggle" type="button" onClick={onEdit} disabled={disabled} title={title}>
+        继续编辑
+      </button>
     </section>
   );
 }
 
-function CreativeTaskDetail({ status, message, workflowId, workflow, deletingWorkflowId, onStopAndDelete }) {
-  const [editorOpen, setEditorOpen] = useState(false);
+function CreativeTaskDetail({ status, message, workflowId, workflow, deletingWorkflowId, onStopAndDelete, onContinueEdit }) {
   const [promptModalOpen, setPromptModalOpen] = useState(false);
   if (!workflowId && !workflow) return null;
   const videoUrl = getWorkflowVideoUrl(workflow);
   const canStopAndDelete = workflowId && workflow?.status !== 'done';
   const promptText = workflow?.creative_context?.input?.raw_text?.trim() || '';
+  const editableWorkflowId = workflowId || workflow?.workflow_id || workflow?.id || '';
+
+  function continueEdit() {
+    onContinueEdit?.(editableWorkflowId);
+  }
 
   return (
     <div className={`creativeTaskDetail ${workflow?.status === 'done' && videoUrl ? 'hasVideo' : ''}`}>
@@ -552,11 +558,12 @@ function CreativeTaskDetail({ status, message, workflowId, workflow, deletingWor
       <WorkflowStepProgress workflow={workflow} />
       {workflow?.status === 'done' && videoUrl ? (
         <>
-          <CreativeVideoPreview videoUrl={videoUrl} />
-          <button className="editorToggle" onClick={() => setEditorOpen(!editorOpen)}>
-            {editorOpen ? '关闭编辑器' : '编辑成片'}
-          </button>
-          {editorOpen && <CreativeVideoEditor workflowId={workflowId} api={api} onRendered={() => setEditorOpen(false)} />}
+          <CreativeVideoPreview
+            videoUrl={videoUrl}
+            onEdit={continueEdit}
+            disabled={!editableWorkflowId}
+            title={editableWorkflowId ? '继续编辑视频' : '缺少创作任务 ID，无法进入编辑器。'}
+          />
         </>
       ) : (
         <div className={`creativeDetailMessage ${getStatusMessageClass(status)}`} aria-live="polite">
@@ -934,6 +941,12 @@ export function OneClickCreativePage() {
     setMessage(task.message || '正在打开任务详情...');
   }
 
+  function continueEdit(targetWorkflowId) {
+    const id = String(targetWorkflowId || '').trim();
+    if (!id) return;
+    navigate(`/editor/${encodeURIComponent(id)}`);
+  }
+
   async function deleteTask(task) {
     const confirmed = window.confirm(`确定删除任务「${task.title}」吗？此操作不可恢复。`);
     if (!confirmed) return;
@@ -1207,6 +1220,7 @@ export function OneClickCreativePage() {
             workflow={workflow}
             deletingWorkflowId={deletingWorkflowId}
             onStopAndDelete={stopAndDeleteTask}
+            onContinueEdit={continueEdit}
           />
         </div>
       </section>

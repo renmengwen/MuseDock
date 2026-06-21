@@ -151,7 +151,14 @@ assert.doesNotMatch(page, creativeVideoEditorImportPattern, 'OneClickCreativePag
 assert.ok(!page.includes('<CreativeVideoEditor'), 'OneClickCreativePage should not render CreativeVideoEditor');
 assert.doesNotMatch(page, /editorOpen/, 'OneClickCreativePage should not track editor open state');
 assert.match(page, /continueEdit/, 'OneClickCreativePage should expose a continue edit action');
-assert.ok(page.includes('navigate(`/editor/${encodeURIComponent(workflowId)}`)'), 'Continue edit should navigate to the editor route');
+assert.ok(page.includes('navigate(`/editor/${encodeURIComponent(id)}`)'), 'Continue edit should navigate to the editor route');
+assert.match(
+  page,
+  /const\s+editableWorkflowId\s*=\s*workflowId\s*\|\|\s*workflow\?\.workflow_id\s*\|\|\s*workflow\?\.id\s*\|\|\s*''/,
+  'Creative task detail should fall back to workflow IDs when the prop workflowId is missing',
+);
+assert.match(page, /onContinueEdit\?\.\(editableWorkflowId\)/, 'Creative task detail should continue editing with the editable workflow ID');
+assert.match(page, /缺少创作任务 ID，无法进入编辑器。/, 'Continue edit should explain why the editor cannot open without a workflow ID');
 assert.match(page, /getCreativeWorkflow/, 'OneClickCreativePage should poll creative workflows');
 assert.match(page, /stopAndDeleteTask/, 'OneClickCreativePage should expose a stop-and-delete action for the current task');
 assert.match(page, /onStopAndDelete=\{stopAndDeleteTask\}/, 'Creative task detail should receive the current task stop-and-delete handler');
@@ -352,6 +359,8 @@ assert.ok(videoPreviewEnd > videoPreviewStart, 'CreativeVideoPreview JSX should 
 const videoPreviewBlock = page.slice(videoPreviewStart, videoPreviewEnd);
 assert.ok(videoPreviewBlock.includes('videoUrl={videoUrl}'), 'CreativeVideoPreview should receive the rendered video URL');
 assert.ok(videoPreviewBlock.includes('onEdit={continueEdit}'), 'CreativeVideoPreview should receive the continue edit handler');
+assert.ok(videoPreviewBlock.includes('disabled={!editableWorkflowId}'), 'CreativeVideoPreview should disable continue edit without an editable workflow ID');
+assert.match(videoPreviewBlock, /title=\{editableWorkflowId \? '继续编辑视频' : '缺少创作任务 ID，无法进入编辑器。'\}/, 'CreativeVideoPreview should receive a Chinese unavailable reason when edit ID is missing');
 assert.match(page, /<video\s+className="creativeResultVideo"\s+src=\{videoUrl\}\s+controls/, 'Creative video preview should render a native controls video element');
 assert.match(page, /workflow\?\.status === 'done' && videoUrl/, 'Creative video preview should render after workflow is done');
 assert.match(page, /<WorkflowStepProgress workflow=\{workflow\} \/>[\s\S]*workflow\?\.status === 'done' && videoUrl/, 'Creative detail should keep the progress stepper visible when showing the completed video');
