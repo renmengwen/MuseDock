@@ -24,6 +24,15 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
+    const urls = sourceFetch.extractUrls('（https://example.com/a）、《https://example.com/b》【https://example.com/c】');
+    assert.deepEqual(urls, [
+      'https://example.com/a',
+      'https://example.com/b',
+      'https://example.com/c',
+    ]);
+  }
+
+  {
     const urls = sourceFetch.extractUrls([
       'https://example.com/a',
       'https://example.com/b',
@@ -46,6 +55,10 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://test.localhost/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://service.internal/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://printer.local/a'), /不能读取本机或内网地址/);
+    assert.throws(() => sourceFetch.assertPublicHttpUrl('http://localhost./a'), /不能读取本机或内网地址/);
+    assert.throws(() => sourceFetch.assertPublicHttpUrl('http://x.localhost./a'), /不能读取本机或内网地址/);
+    assert.throws(() => sourceFetch.assertPublicHttpUrl('http://service.internal./a'), /不能读取本机或内网地址/);
+    assert.throws(() => sourceFetch.assertPublicHttpUrl('http://printer.local./a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://127.0.0.1/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://10.0.0.1/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://172.16.0.1/a'), /不能读取本机或内网地址/);
@@ -86,6 +99,9 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     });
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/openai/codex/issues/1').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/openai/codex/tree/main').kind, 'article');
+    assert.equal(sourceFetch.classifySourceUrl('https://github.com/owner/repo/pulls').kind, 'article');
+    assert.equal(sourceFetch.classifySourceUrl('https://github.com/owner/repo/new/main').kind, 'article');
+    assert.equal(sourceFetch.classifySourceUrl('https://github.com/owner/repo/blob/main/file.js').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/search?q=codex').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/settings/profile').kind, 'article');
     assert.equal(sourceFetch.classifySourceUrl('https://github.com/orgs/foo').kind, 'article');
@@ -170,6 +186,16 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
+    const imageUrl = `https://example.com/${'very-long-image-url-'.repeat(10)}.png`;
+    const html = `<html><head><title>只有图片</title></head><body><article><p><img src="${imageUrl}" alt=""></p></article></body></html>`;
+    const result = await sourceFetch.fetchSource('https://example.com/image-only', {
+      fetchImpl: async () => makeResponse(html),
+    });
+    assert.equal(result.success, false);
+    assert.match(result.message, /未能读取文章正文/);
+  }
+
+  {
     const html = [
       '<html><head><title>main fallback</title></head><body>',
       `<main><p>${'主'.repeat(80)}</p></main>`,
@@ -226,6 +252,7 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   {
     assert.equal(sourceFetch.htmlToMarkdown('<p><img alt="说明" src="/a.png"></p>'), '![说明](/a.png)');
     assert.equal(sourceFetch.htmlToMarkdown('<p><img src="/a.png" alt="说明"></p>'), '![说明](/a.png)');
+    assert.match(sourceFetch.htmlToMarkdown('<p><a href="/target"><img alt="图" src="/image.png"></a></p>'), /!\[图\]\(\/image\.png\)/);
     assert.match(sourceFetch.htmlToMarkdown('<ul><li><a href="/a">链接</a></li></ul>'), /- \[链接\]\(\/a\)/);
     assert.match(sourceFetch.htmlToMarkdown('<h2><a href="/a">标题链接</a></h2>'), /## \[标题链接\]\(\/a\)/);
     assert.match(sourceFetch.htmlToMarkdown('<ul><li><img alt="图" src="/a.png"></li></ul>'), /- !\[图\]\(\/a\.png\)/);

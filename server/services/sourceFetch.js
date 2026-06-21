@@ -9,11 +9,11 @@ function safeString(value) {
 
 function extractUrls(text, max = 3) {
   const raw = String(text || '');
-  const matches = raw.match(/https?:\/\/[^\s<>"'`)\]}，。；;]+/gi) || [];
+  const matches = raw.match(/https?:\/\/[^\s<>"'`()\[\]{}，。；;、（）《》【】「」『』“”‘’]+/gi) || [];
   const seen = new Set();
   const urls = [];
   for (const match of matches) {
-    const url = match.replace(/[.,;:!?，。；：！？）】》]+$/, '');
+    const url = match.replace(/[.,;:!?，。；：！？、)\]}）】》」』”’]+$/, '');
     if (!seen.has(url)) {
       seen.add(url);
       urls.push(url);
@@ -35,7 +35,7 @@ function assertPublicHttpUrl(raw) {
   }
 
   // 首版只校验 URL 字面量和手动重定向目标；不解析 DNS 结果，如开放给不可信用户需在连接层增强。
-  const host = parsed.hostname.toLowerCase();
+  const host = parsed.hostname.toLowerCase().replace(/\.+$/, '');
   if (
     host === 'localhost'
     || host === '0.0.0.0'
@@ -423,7 +423,7 @@ function htmlToMarkdown(html) {
   text = text.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_match, level, inner) => `\n\n${'#'.repeat(Number(level))} ${inlineToMarkdown(inner)}\n`);
   text = text.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_match, inner) => `\n- ${inlineToMarkdown(inner)}`);
   text = text.replace(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_match, href, inner) => {
-    const label = stripInline(inner);
+    const label = inlineToMarkdown(inner);
     return label ? `[${label}](${href})` : '';
   });
   text = text.replace(/<img\b[^>]*>/gi, (tag) => {
@@ -454,7 +454,7 @@ function inlineToMarkdown(html) {
     return `![${alt}](${src})`;
   });
   text = text.replace(/<a[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_match, href, inner) => {
-    const label = stripInline(inner);
+    const label = inlineToMarkdown(inner);
     return label ? `[${label}](${href})` : '';
   });
   return decodeEntities(text.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
@@ -465,7 +465,12 @@ function stripInline(html) {
 }
 
 function countVisibleLength(value) {
-  return Array.from(String(value || '').replace(/\s+/g, '')).length;
+  const visible = String(value || '')
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]]*)\]\([^)]+\)/g, '$1')
+    .replace(/https?:\/\/\S+/gi, '')
+    .replace(/[`*_>#~\-[\]()!]/g, '');
+  return Array.from(visible.replace(/\s+/g, '')).length;
 }
 
 function decodeEntities(value) {
