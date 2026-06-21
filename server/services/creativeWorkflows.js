@@ -793,7 +793,6 @@ function createFetchedSourceContext(record, sourceMaterial = {}, now) {
     title: sourceMaterial.title,
     description,
     source_metadata: {
-      ...(record.source_context?.source_metadata || {}),
       ...(sourceMaterial.metadata || {}),
       kind: safeString(sourceMaterial.kind),
       url: safeString(sourceMaterial.url || input.source_url),
@@ -804,7 +803,6 @@ function createFetchedSourceContext(record, sourceMaterial = {}, now) {
       user_hint: safeString(record.creative_context?.input?.source_hint),
     },
     diagnostics: {
-      ...(record.source_context?.diagnostics || {}),
       ...(sourceMaterial.diagnostics || {}),
       source_type: 'source_url',
       source_kind: safeString(sourceMaterial.kind),

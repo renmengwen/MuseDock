@@ -227,6 +227,88 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(analysisInput.video.aweme_url, '');
 }
 
+async function testSuccessfulSourceUrlFetchDropsStaleMetadataAndDiagnostics() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const sourceUrl = 'https://example.com/current-article';
+  const { services } = createFakeServices({
+    services: {
+      now: () => '2026-06-21T00:00:00.000Z',
+      sourceFetch: {
+        fetchSource: async url => ({
+          success: true,
+          kind: 'article',
+          url,
+          title: '当前文章',
+          markdown: '# 当前文章\n\n本次读取到的正文。',
+          truncated: false,
+          metadata: {},
+        }),
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: `请解读这篇文章 ${sourceUrl}`,
+    useResearch: false,
+    assetIds: [],
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+
+  const workflowPath = getWorkflowPath(WORKFLOW_ID, rootDir);
+  const staleWorkflow = readJson(workflowPath);
+  staleWorkflow.source_context = {
+    ...(staleWorkflow.source_context || {}),
+    source_metadata: {
+      kind: 'github_repo',
+      url: 'https://github.com/old-owner/old-repo',
+      title: 'old-owner/old-repo',
+      truncated: true,
+      owner: 'old-owner',
+      repo: 'old-repo',
+      language: 'OldLang',
+      legacy_only: 'stale',
+    },
+    diagnostics: {
+      code: 'SOURCE_FETCH_EXCEPTION',
+      legacy_code: 'stale',
+      source_type: 'source_url',
+      source_kind: 'github_repo',
+      fetched_at: '2026-06-20T00:00:00.000Z',
+      ignored_url_count: 3,
+    },
+  };
+  staleWorkflow.creative_context = {
+    ...(staleWorkflow.creative_context || {}),
+    source_context: staleWorkflow.source_context,
+  };
+  fs.writeFileSync(workflowPath, JSON.stringify(staleWorkflow, null, 2), 'utf-8');
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+
+  const mediaPaths = mediaPipeline.getMediaPaths(created.aweme_id, mediaRoot);
+  const analysisInput = readJson(mediaPaths.analysisInput);
+  const sourceContext = analysisInput.creative_context.source_context;
+
+  assert.equal(sourceContext.source_metadata.kind, 'article');
+  assert.equal(sourceContext.source_metadata.url, sourceUrl);
+  assert.equal(sourceContext.source_metadata.title, '当前文章');
+  assert.equal(sourceContext.source_metadata.truncated, false);
+  assert.equal(sourceContext.source_metadata.owner, undefined);
+  assert.equal(sourceContext.source_metadata.repo, undefined);
+  assert.equal(sourceContext.source_metadata.language, undefined);
+  assert.equal(sourceContext.source_metadata.legacy_only, undefined);
+  assert.equal(sourceContext.diagnostics.source_type, 'source_url');
+  assert.equal(sourceContext.diagnostics.source_kind, 'article');
+  assert.equal(sourceContext.diagnostics.fetched_at, '2026-06-21T00:00:00.000Z');
+  assert.equal(sourceContext.diagnostics.ignored_url_count, 0);
+  assert.equal(sourceContext.diagnostics.prepared_at, '2026-06-21T00:00:00.000Z');
+  assert.equal(sourceContext.diagnostics.code, undefined);
+  assert.equal(sourceContext.diagnostics.legacy_code, undefined);
+}
+
 async function testSourceUrlFailurePersistsFailedSourceContext() {
   const { rootDir, mediaRoot } = createTempDirs();
   const sourceUrl = 'https://example.com/post';
@@ -1446,6 +1528,7 @@ async function testSceneSpecOperations() {
 async function run() {
   await testCreatesAndRunsTextWorkflow();
   await testCreatesAndRunsSourceUrlWorkflow();
+  await testSuccessfulSourceUrlFetchDropsStaleMetadataAndDiagnostics();
   await testSourceUrlFailurePersistsFailedSourceContext();
   await testSourceUrlFetchExceptionPersistsFailedSourceContext();
   await testSourceUrlFetchFailureUsesDefaultChineseMessage();
