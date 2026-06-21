@@ -973,7 +973,27 @@ async function prepareSourceUrl(record, mediaRoot, now, services = {}) {
     };
   }
 
-  const fetched = await fetcher.fetchSource(sourceUrl);
+  let fetched;
+  try {
+    fetched = await fetcher.fetchSource(sourceUrl);
+  } catch (error) {
+    const diagnostic = {
+      code: 'SOURCE_FETCH_EXCEPTION',
+      error: safeString(error && error.message),
+    };
+    const message = '读取外部来源失败，请稍后重试或确认链接可公开访问。';
+    updateFailedSourceUrlSourceContext(record, sourceUrl, {
+      url: sourceUrl,
+      message,
+      diagnostic,
+    }, now);
+    return {
+      success: false,
+      message,
+      diagnostic,
+    };
+  }
+
   if (!fetched || fetched.success === false) {
     updateFailedSourceUrlSourceContext(record, sourceUrl, fetched || {
       url: sourceUrl,

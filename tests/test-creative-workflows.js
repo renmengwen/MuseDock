@@ -246,6 +246,52 @@ async function testSourceUrlFailurePersistsFailedSourceContext() {
   assert.equal(persisted.data.stages.find(stage => stage.id === 'source').status, 'failed');
 }
 
+async function testSourceUrlFetchExceptionPersistsFailedSourceContext() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const sourceUrl = 'https://example.com/post';
+  const { services, calls } = createFakeServices({
+    services: {
+      sourceFetch: {
+        fetchSource: async () => {
+          throw new Error('boom');
+        },
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: sourceUrl,
+    useResearch: false,
+    assetIds: [],
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+  assert.equal(created.creative_context.input.mode, 'source_url');
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, false);
+  assert.equal(run.error.stage, 'source');
+  assert.deepEqual(calls, []);
+  assert.equal(run.source_context.status, 'failed');
+  assert.equal(run.source_context.kind, 'source_url');
+  assert.equal(run.source_context.source_metadata.url, sourceUrl);
+  assert.equal(run.source_context.diagnostics.code, 'SOURCE_FETCH_EXCEPTION');
+  assert.equal(run.creative_context.source_context.status, 'failed');
+  assert.equal(run.stages.find(stage => stage.id === 'source').status, 'failed');
+  assert.notEqual(run.message, 'boom');
+  assert.match(run.message, /外部来源/);
+
+  const persisted = await getCreativeWorkflow(WORKFLOW_ID, { rootDir });
+  assert.equal(persisted.data.source_context.status, 'failed');
+  assert.equal(persisted.data.source_context.kind, 'source_url');
+  assert.equal(persisted.data.source_context.source_metadata.url, sourceUrl);
+  assert.equal(persisted.data.source_context.diagnostics.code, 'SOURCE_FETCH_EXCEPTION');
+  assert.equal(persisted.data.creative_context.source_context.status, 'failed');
+  assert.match(persisted.data.message, /外部来源/);
+  assert.notEqual(persisted.data.message, 'boom');
+}
+
 async function testResearchRunsInBackgroundStage() {
   const { rootDir, mediaRoot } = createTempDirs();
   let researchCalls = 0;
@@ -1345,6 +1391,7 @@ async function run() {
   await testCreatesAndRunsTextWorkflow();
   await testCreatesAndRunsSourceUrlWorkflow();
   await testSourceUrlFailurePersistsFailedSourceContext();
+  await testSourceUrlFetchExceptionPersistsFailedSourceContext();
   await testResearchRunsInBackgroundStage();
   await testHtmlVideoLiteSkipsLegacyHyperframesStages();
   await testHtmlVideoExportUsesOrchestratorWithTemplateRegistry();
