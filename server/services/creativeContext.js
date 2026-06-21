@@ -154,14 +154,6 @@ function removeUrlFromText(text, url) {
   return sourceText.replace(urlWithNoise, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function extractUrlOccurrences(text) {
-  const raw = String(text || '');
-  const matches = raw.match(/https?:\/\/[^\s<>"'`)\]}，。；;]+/gi) || [];
-  return matches
-    .map(match => match.replace(/[.,;:!?，。；：！？]+$/, ''))
-    .filter(Boolean);
-}
-
 function normalizeCreativeInput(payload = {}) {
   const assetIds = Array.isArray(payload.assetIds) ? [...payload.assetIds] : [];
   const useResearch = payload.useResearch === true;
@@ -213,13 +205,14 @@ function normalizeCreativeInput(payload = {}) {
   const sourceUrls = sourceFetch.extractUrls(input, 3);
   if (sourceUrls.length > 0) {
     const sourceUrl = sourceUrls[0];
-    const urlOccurrences = extractUrlOccurrences(input);
+    const sourceHint = removeUrlFromText(input, sourceUrl);
+    const ignoredUrls = sourceFetch.extractUrls(sourceHint, Number.MAX_SAFE_INTEGER);
     return createSuccessResponse({
       mode: 'source_url',
       raw_text: input,
       source_url: sourceUrl,
-      source_hint: removeUrlFromText(input, sourceUrl),
-      ignored_url_count: Math.max(0, urlOccurrences.length - 1),
+      source_hint: sourceHint,
+      ignored_url_count: ignoredUrls.length,
       use_research: useResearch,
       skip_validation: skipValidation,
       asset_ids: assetIds,

@@ -214,6 +214,9 @@ function testNormalizesSourceUrls() {
   const punctuated = normalizeCreativeInput({
     input: '请分析 https://example.com/a。',
   });
+  const chineseEnumerationComma = normalizeCreativeInput({
+    input: 'https://a.com/1、https://b.com/2',
+  });
 
   assert.equal(wechat.success, true);
   assert.equal(wechat.data.mode, 'source_url');
@@ -245,6 +248,12 @@ function testNormalizesSourceUrls() {
 
   assert.equal(punctuated.success, true);
   assert.equal(punctuated.data.source_hint, '请分析');
+
+  assert.equal(chineseEnumerationComma.success, true);
+  assert.equal(chineseEnumerationComma.data.mode, 'source_url');
+  assert.equal(chineseEnumerationComma.data.source_url, 'https://a.com/1');
+  assert.equal(chineseEnumerationComma.data.source_hint, 'https://b.com/2');
+  assert.equal(chineseEnumerationComma.data.ignored_url_count, 1);
 }
 
 function testKeepsUnselectedDuplicateUrlInSourceHint() {
