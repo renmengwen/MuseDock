@@ -1,4 +1,5 @@
 const assert = require('assert');
+const sourceFetch = require('../server/services/sourceFetch');
 
 const {
   AWEME_ID_PATTERN,
@@ -272,6 +273,37 @@ function testCountsAllIgnoredSourceUrlsWithoutFixedCap() {
   assert.match(result.data.source_hint, /https:\/\/example\.com\/25/);
 }
 
+function testCountsLargeSourceUrlListWithoutRepeatedExtraction() {
+  const originalExtractUrls = sourceFetch.extractUrls;
+  let extractCallCount = 0;
+  sourceFetch.extractUrls = function wrappedExtractUrls(...args) {
+    extractCallCount += 1;
+    return originalExtractUrls.apply(this, args);
+  };
+
+  try {
+    const urls = Array.from(
+      { length: 1000 },
+      (_, index) => `https://example.com/${index + 1}`
+    );
+    const result = normalizeCreativeInput({
+      input: urls.join(' '),
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.mode, 'source_url');
+    assert.equal(result.data.source_url, 'https://example.com/1');
+    assert.equal(result.data.ignored_url_count, 999);
+    assert.match(result.data.source_hint, /https:\/\/example\.com\/1000/);
+    assert.ok(
+      extractCallCount <= 4,
+      `expected URL extraction to stay single-pass, got ${extractCallCount} calls`
+    );
+  } finally {
+    sourceFetch.extractUrls = originalExtractUrls;
+  }
+}
+
 function testKeepsUnselectedDuplicateUrlInSourceHint() {
   const duplicate = normalizeCreativeInput({
     input: '请分析 https://example.com/a https://example.com/a',
@@ -291,6 +323,18 @@ function testKeepsUnselectedDuplicateUrlInSourceHint() {
   assert.equal(tripleDuplicate.data.source_url, 'https://example.com/a');
   assert.equal(tripleDuplicate.data.source_hint, '请分析 https://example.com/a https://example.com/a');
   assert.equal(tripleDuplicate.data.ignored_url_count, 2);
+}
+
+function testCountsUrlsSeparatedByChineseBookTitleAndParentheses() {
+  const result = normalizeCreativeInput({
+    input: '参考《https://example.com/a》（https://example.com/b）',
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data.mode, 'source_url');
+  assert.equal(result.data.source_url, 'https://example.com/a');
+  assert.match(result.data.source_hint, /https:\/\/example\.com\/b/);
+  assert.equal(result.data.ignored_url_count, 1);
 }
 
 function testRejectsAssetsForPhaseOne() {
@@ -483,7 +527,9 @@ function run() {
   testRejectsDouyinLinksWithoutVideoId();
   testNormalizesSourceUrls();
   testCountsAllIgnoredSourceUrlsWithoutFixedCap();
+  testCountsLargeSourceUrlListWithoutRepeatedExtraction();
   testKeepsUnselectedDuplicateUrlInSourceHint();
+  testCountsUrlsSeparatedByChineseBookTitleAndParentheses();
   testRejectsAssetsForPhaseOne();
   testExtractsAwemeIdFromSupportedInputs();
   testBuildsStableCreativeContext();

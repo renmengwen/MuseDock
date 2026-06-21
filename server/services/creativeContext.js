@@ -1,4 +1,6 @@
 const AWEME_ID_PATTERN = /^\d{5,32}$/;
+const SOURCE_URL_PATTERN = /https?:\/\/[^\s<>"'`()\[\]{}，。；;、（）《》【】「」『』“”‘’]+/gi;
+const SOURCE_URL_TRAILING_PUNCTUATION_PATTERN = /[.,;:!?，。；：！？、)\]}）】》」』”’]+$/;
 const sourceFetch = require('./sourceFetch');
 
 function safeString(value) {
@@ -155,22 +157,23 @@ function removeUrlFromText(text, url) {
 }
 
 function countRemainingSourceUrls(text) {
-  let remaining = safeString(text);
+  return countSourceUrlOccurrences(text);
+}
+
+function countSourceUrlOccurrences(text) {
+  const remaining = safeString(text);
+  if (!remaining) {
+    return 0;
+  }
+
   let count = 0;
+  SOURCE_URL_PATTERN.lastIndex = 0;
 
-  while (remaining) {
-    const [url] = sourceFetch.extractUrls(remaining, 1);
-    if (!url) {
-      break;
+  for (const match of remaining.matchAll(SOURCE_URL_PATTERN)) {
+    const url = match[0].replace(SOURCE_URL_TRAILING_PUNCTUATION_PATTERN, '');
+    if (url) {
+      count += 1;
     }
-
-    const nextRemaining = removeUrlFromText(remaining, url);
-    if (nextRemaining === remaining || nextRemaining.length >= remaining.length) {
-      break;
-    }
-
-    count += 1;
-    remaining = nextRemaining;
   }
 
   return count;
