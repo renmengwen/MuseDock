@@ -764,6 +764,7 @@ function normalizeFetchedSource(fetchResult = {}, requestedUrl = '') {
     title,
     description,
     markdown,
+    truncated: data.truncated === true,
     metadata: data.metadata || data.source_metadata || {},
     diagnostics: data.diagnostics || fetchResult.diagnostics || {},
   };
@@ -863,6 +864,7 @@ async function writeSyntheticSourceWorkspace(record, mediaRoot, now, sourceMater
     title: sourceMaterial.title,
     description,
     markdown: sourceMaterial.markdown,
+    truncated: sourceMaterial.truncated === true,
     user_hint: userHint,
     metadata: sourceMaterial.metadata || {},
   };
@@ -889,6 +891,7 @@ async function writeSyntheticSourceWorkspace(record, mediaRoot, now, sourceMater
     source_url: sourceMaterial.url,
     title: sourceMaterial.title,
     text: sourceMaterial.markdown,
+    truncated: sourceMaterial.truncated === true,
     user_hint: userHint,
     updated_at: now,
   });

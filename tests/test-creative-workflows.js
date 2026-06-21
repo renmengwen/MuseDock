@@ -154,6 +154,7 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
           url: sourceUrl,
           title: 'owner/repo',
           markdown: '# owner/repo\n\n真实 README 内容。',
+          truncated: true,
           metadata: { language: 'JavaScript' },
         }),
       },
@@ -184,6 +185,7 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(metadata.source_url, repoUrl);
   assert.match(transcript.text, /真实 README 内容/);
   assert.equal(transcript.user_hint, '做成项目解读视频');
+  assert.equal(transcript.truncated, true);
   assert.equal(analysisInput.source_material.kind, 'github_repo');
   assert.equal(analysisInput.source_material.url, 'https://github.com/owner/repo');
   assert.equal(analysisInput.source_material.title, 'owner/repo');
