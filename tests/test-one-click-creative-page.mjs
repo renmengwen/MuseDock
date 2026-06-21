@@ -50,6 +50,7 @@ const zh = {
   failed: textFromCodePoints([0x5931, 0x8d25]),
   stopAndDelete: textFromCodePoints([0x505c, 0x6b62, 0x5e76, 0x5220, 0x9664]),
   stoppingAndDeleting: textFromCodePoints([0x6b63, 0x5728, 0x505c, 0x6b62, 0x5e76, 0x5220, 0x9664, 0x4efb, 0x52a1, 0x2e, 0x2e, 0x2e]),
+  continueEdit: textFromCodePoints([0x7ee7, 0x7eed, 0x7f16, 0x8f91]),
   viewPrompt: textFromCodePoints([0x67e5, 0x770b, 0x63d0, 0x793a, 0x8bcd]),
   promptModalTitle: textFromCodePoints([0x5f53, 0x524d, 0x4efb, 0x52a1, 0x63d0, 0x793a, 0x8bcd]),
   promptEmpty: textFromCodePoints([0x6682, 0x65e0, 0x53ef, 0x663e, 0x793a, 0x7684, 0x63d0, 0x793a, 0x8bcd]),
@@ -62,6 +63,8 @@ const app = fs.readFileSync(appPath, 'utf-8');
 const shell = fs.readFileSync(shellPath, 'utf-8');
 const styles = fs.readFileSync(stylesPath, 'utf-8');
 const persistentRoutes = fs.readFileSync(persistentRoutesPath, 'utf-8');
+const creativeVideoEditorImportPattern =
+  /import\s+(?:\{[\s\S]*?\bCreativeVideoEditor\b[\s\S]*?\}|CreativeVideoEditor\b|[A-Za-z_$][\w$]*\s*,\s*\{[\s\S]*?\bCreativeVideoEditor\b[\s\S]*?\})\s+from\s+['"][^'"]+['"]/;
 
 for (const text of [
   zh.creativeTitle,
@@ -81,6 +84,7 @@ for (const text of [
   zh.creativeInputPlaceholder,
   zh.stopAndDelete,
   zh.stoppingAndDeleting,
+  zh.continueEdit,
   zh.viewPrompt,
   zh.promptModalTitle,
   zh.promptEmpty,
@@ -139,8 +143,15 @@ for (const symbol of [
 }
 
 assert.match(page, /createCreativeWorkflow/, 'OneClickCreativePage should create creative workflows');
-assert.match(page, /CreativeVideoEditor/, 'OneClickCreativePage should import and render CreativeVideoEditor');
-assert.match(page, /editorOpen/, 'OneClickCreativePage should track editor open state');
+assert.ok(
+  !page.includes("from '../components/creative-video-editor/CreativeVideoEditor.jsx'"),
+  'OneClickCreativePage should not import CreativeVideoEditor',
+);
+assert.doesNotMatch(page, creativeVideoEditorImportPattern, 'OneClickCreativePage should not import CreativeVideoEditor from any path');
+assert.ok(!page.includes('<CreativeVideoEditor'), 'OneClickCreativePage should not render CreativeVideoEditor');
+assert.doesNotMatch(page, /editorOpen/, 'OneClickCreativePage should not track editor open state');
+assert.match(page, /continueEdit/, 'OneClickCreativePage should expose a continue edit action');
+assert.ok(page.includes('navigate(`/editor/${encodeURIComponent(workflowId)}`)'), 'Continue edit should navigate to the editor route');
 assert.match(page, /getCreativeWorkflow/, 'OneClickCreativePage should poll creative workflows');
 assert.match(page, /stopAndDeleteTask/, 'OneClickCreativePage should expose a stop-and-delete action for the current task');
 assert.match(page, /onStopAndDelete=\{stopAndDeleteTask\}/, 'Creative task detail should receive the current task stop-and-delete handler');
@@ -334,7 +345,13 @@ assert.match(page, /getWorkflowDisplayMessage/, 'Creative task detail should der
 assert.match(page, /find\(stage => \['running', 'queued', 'pending'\]\.includes\(stage\.status\)\)/, 'Creative task detail should surface the current active stage message while polling');
 assert.match(page, /skipped:\s*'已跳过'/, 'Workflow progress should show skipped stages as 已跳过');
 assert.match(page, /stage\.status === 'skipped'[\s\S]*return 'done'/, 'Workflow stepper should render skipped stages as non-active completed steps');
-assert.match(page, /<CreativeVideoPreview videoUrl=\{videoUrl\}/, 'Creative task detail should render video preview when a video URL is available');
+const videoPreviewStart = page.indexOf('<CreativeVideoPreview');
+assert.ok(videoPreviewStart > 0, 'Creative task detail should render CreativeVideoPreview when a video URL is available');
+const videoPreviewEnd = page.indexOf('/>', videoPreviewStart);
+assert.ok(videoPreviewEnd > videoPreviewStart, 'CreativeVideoPreview JSX should be self-closing');
+const videoPreviewBlock = page.slice(videoPreviewStart, videoPreviewEnd);
+assert.ok(videoPreviewBlock.includes('videoUrl={videoUrl}'), 'CreativeVideoPreview should receive the rendered video URL');
+assert.ok(videoPreviewBlock.includes('onEdit={continueEdit}'), 'CreativeVideoPreview should receive the continue edit handler');
 assert.match(page, /<video\s+className="creativeResultVideo"\s+src=\{videoUrl\}\s+controls/, 'Creative video preview should render a native controls video element');
 assert.match(page, /workflow\?\.status === 'done' && videoUrl/, 'Creative video preview should render after workflow is done');
 assert.match(page, /<WorkflowStepProgress workflow=\{workflow\} \/>[\s\S]*workflow\?\.status === 'done' && videoUrl/, 'Creative detail should keep the progress stepper visible when showing the completed video');

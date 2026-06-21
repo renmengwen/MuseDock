@@ -30,6 +30,9 @@ const creativeDetail = getPersistentRouteState(creative, '/creative/wf-123', '')
 assert.strictEqual(creativeDetail.activePage, 'creative');
 assert.strictEqual(creativeDetail.creativeWorkflowId, 'wf-123');
 
+const editorFromCreative = getPersistentRouteState(creativeDetail, '/editor/wf-123', '');
+assert.notStrictEqual(editorFromCreative.activePage, 'creative', 'persistent route helper should not treat /editor as a creative page');
+
 const creativeToMedia = getPersistentRouteState(creative, '/media/douyin/12345', '');
 assert.strictEqual(creativeToMedia.mediaPlatform, 'douyin');
 assert.strictEqual(creativeToMedia.mediaId, '12345');
