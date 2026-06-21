@@ -4,7 +4,9 @@
 
 当前 `/creative` 同时承担一键创作、任务状态展示、首版视频预览和二次编辑入口。二次编辑器短期内可以继续复用现有实现，但长期不应继续嵌在一键创作页面内，否则 `OneClickCreativePage.jsx` 会持续膨胀，页面职责也会混杂。
 
-项目已接入 Tailwind CSS，并存在本地 shadcn/ui 风格基础组件，但 `/creative` 主页面仍主要依赖 `frontend-react/src/styles.css` 中的大量 `creative*` 全局样式。本次设计把路由职责拆分和 UI 样式治理放在同一方向上推进，但不在同一阶段重构视频编辑器内部。
+项目已接入 Tailwind CSS，但 `/creative` 主页面仍主要依赖 `frontend-react/src/styles.css` 中的大量 `creative*` 全局样式。后续 UI 基础层应转向官方 `shadcn/ui` 组件体系，而不是继续维护手写的“shadcn 风格”仿制组件。本次设计把路由职责拆分和 UI 样式治理放在同一方向上推进，但不在同一阶段重构视频编辑器内部。
+
+`shadcn/ui` 接入默认参考 Vite 安装文档：https://www.shadcn-ui.cn/docs/installation/vite 。实施时应按该文档使用 `shadcn@latest` 初始化和添加组件，而不是继续手写本地仿制组件。
 
 ## 目标
 
@@ -12,7 +14,7 @@
 - 新增 `/editor/:workflowId` 作为独立视频编辑器路由。
 - `/editor/:workflowId` 根据 `workflowId` 自行加载 workflow 与编辑器数据，支持刷新、直达和分享链接。
 - `/creative` 生成完成后提供“继续编辑”入口，跳转到 `/editor/:workflowId`。
-- `/creative` 主页面重构时优先使用 Tailwind CSS 与本地 shadcn/ui 风格基础组件，逐步减少 `styles.css` 中的 `creative*` 全局样式。
+- `/creative` 主页面重构时优先使用 Tailwind CSS 与官方 `shadcn/ui` 组件，逐步减少 `styles.css` 中的 `creative*` 全局样式。
 
 ## 非目标
 
@@ -98,10 +100,21 @@
 `/creative` 主页面重构遵循以下规则：
 
 - 新增或重构 UI 默认使用 Tailwind CSS utility class。
-- 通用控件优先复用 `frontend-react/src/components/ui/` 下的基础组件。
-- 如果缺少基础组件，优先补齐 `Button`、`Textarea`、`Badge`、`Alert`、`Tabs`、`Tooltip` 等本地 shadcn/ui 风格组件。
+- 通用控件优先通过 `shadcn@latest` CLI/registry 引入官方 `shadcn/ui` 组件。
+- `Button`、`Textarea`、`Badge`、`Alert`、`Tabs`、`Tooltip`、`Dialog`、`DropdownMenu`、`Checkbox`、`Switch` 等通用组件应以官方 `shadcn/ui` 组件为来源；需要项目化调整时，在引入后的组件代码上做小范围修改，并保留清晰 API 边界。
+- 不继续新增手写的“shadcn 风格”仿制基础组件。
 - 避免继续向 `styles.css` 追加大段 `creative*` 全局样式。
 - 每迁移一个区域，同步清理对应不再使用的旧 CSS。
+
+### shadcn/ui 接入要求
+
+当前项目已有 Tailwind 3 与 PostCSS 配置。给定的 Vite 安装文档使用最新 `shadcn/ui` 与 Tailwind/Vite 接入方式，因此实施计划中需要先处理 UI 基础设施：
+
+- 按 Vite 文档补齐或调整 Tailwind 与 Vite 集成。
+- 使用 `npx shadcn@latest init` 初始化 `components.json`、路径别名和全局 CSS 入口。
+- 使用 `npx shadcn@latest add ...` 添加 `/creative` 需要的官方组件。
+- 现有 `frontend-react/src/components/ui/` 下的手写仿制组件需要逐步替换为 `shadcn/ui` CLI 生成的组件；如果文件名相同，替换前必须检查调用方 API，避免破坏已有页面。
+- README 中的 UI 技术栈只有在官方 `shadcn/ui` 接入完成后，才能从“本地 shadcn 风格组件”改成 `shadcn/ui`。
 
 视频编辑器内部暂时保持现状：
 
@@ -160,7 +173,8 @@ frontend-react/src/components/creative-video-editor/
 1. 新增 `/editor/:workflowId` 页面和路由。
 2. 将 `/creative` 内嵌编辑器替换为“继续编辑”跳转入口。
 3. 保留 `CreativeVideoEditor` 内部实现和样式。
-4. 拆分 `/creative` 主页面 UI 组件。
-5. 用 Tailwind CSS 与本地 shadcn/ui 风格组件迁移 `/creative` 主页面样式。
-6. 清理已不再使用的 `creative*` 主页面 CSS。
-7. 后续单独规划视频编辑器 UI 重构。
+4. 按 Vite 文档接入官方 `shadcn/ui`，并用 CLI 添加本轮需要的基础组件。
+5. 拆分 `/creative` 主页面 UI 组件。
+6. 用 Tailwind CSS 与官方 `shadcn/ui` 组件迁移 `/creative` 主页面样式。
+7. 清理已不再使用的 `creative*` 主页面 CSS。
+8. 后续单独规划视频编辑器 UI 重构。
