@@ -1631,6 +1631,37 @@ a { color: #fe2c55; text-decoration: none; }
   cursor: pointer;
 }
 
+.creativeEditorPage {
+  min-height: calc(100vh - 148px);
+  padding: 24px 32px;
+  background: #f6f7f9;
+}
+
+.creativeEditorHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.creativeEditorHeader h1 {
+  margin: 4px 0 0;
+  color: #20242a;
+  font-size: 20px;
+}
+
+.creativeEditorHeader span {
+  color: #69717e;
+  font-size: 13px;
+}
+
+.creativeEditorHeader .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .creative-video-editor {
   display: grid;
   gap: 12px;

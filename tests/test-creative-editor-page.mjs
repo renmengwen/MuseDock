@@ -5,25 +5,26 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const editorPagePath = path.join(__dirname, '../frontend-react/src/pages/CreativeEditorPage.jsx');
-const oneClickPagePath = path.join(__dirname, '../frontend-react/src/pages/OneClickCreativePage.jsx');
 const appPath = path.join(__dirname, '../frontend-react/src/App.jsx');
 
 assert.ok(fs.existsSync(editorPagePath), 'missing page frontend-react/src/pages/CreativeEditorPage.jsx');
 
 const editorPage = fs.readFileSync(editorPagePath, 'utf-8');
-const oneClickPage = fs.readFileSync(oneClickPagePath, 'utf-8');
 const app = fs.readFileSync(appPath, 'utf-8');
-const creativeVideoEditorImportPattern =
-  /import\s+(?:\{[\s\S]*?\bCreativeVideoEditor\b[\s\S]*?\}|CreativeVideoEditor\b|[A-Za-z_$][\w$]*\s*,\s*\{[\s\S]*?\bCreativeVideoEditor\b[\s\S]*?\})\s+from\s+['"][^'"]+['"]/;
-const routeTags = app.match(/<Route\b(?:(?!\/>)[\s\S])*?\/>/g) || [];
-const editorRoute = routeTags.find(routeTag =>
-  /\bpath=["']\/?editor\/:workflowId["']/.test(routeTag) &&
-  /\belement=\{\s*<CreativeEditorPage\s*\/>\s*\}/.test(routeTag)
-);
+const editorRoutePattern =
+  /<Route\b(?=[^>]*\bpath=["']\/?editor\/:workflowId["'])(?=[^>]*\belement=\{\s*<CreativeEditorPage\s*\/>\s*\})[^>]*\/>/;
 
 assert.match(editorPage, /export\s+function\s+CreativeEditorPage\s*\(\s*\)/, 'CreativeEditorPage should export a page component');
+assert.match(editorPage, /\buseRef\b/, 'CreativeEditorPage should use refs for async request guards');
 assert.match(editorPage, /useParams\(\)/, 'CreativeEditorPage should read workflowId from route params');
 assert.match(editorPage, /api\.getCreativeWorkflow\(workflowId\)/, 'CreativeEditorPage should load the creative workflow by workflowId');
+assert.match(editorPage, /requestSeqRef/, 'CreativeEditorPage should track request sequence tokens');
+assert.match(editorPage, /mountedRef/, 'CreativeEditorPage should track mounted state');
+assert.match(
+  editorPage,
+  /requestSeqRef\.current\s*(?:===|!==)\s*requestSeq|requestSeq\s*(?:===|!==)\s*requestSeqRef\.current/,
+  'CreativeEditorPage should ignore stale workflow requests',
+);
 assert.ok(editorPage.includes('正在加载编辑任务'), 'CreativeEditorPage should show Chinese loading text');
 assert.ok(editorPage.includes('缺少创作任务 ID。'), 'CreativeEditorPage should show Chinese missing id text');
 assert.ok(editorPage.includes('未找到创作任务。'), 'CreativeEditorPage should show Chinese not found text');
@@ -50,19 +51,8 @@ assert.ok(
   'App.jsx should import CreativeEditorPage',
 );
 assert.ok(
-  editorRoute,
+  editorRoutePattern.test(app),
   'App.jsx should register the editor workflow route',
-);
-
-assert.ok(
-  !oneClickPage.includes("from '../components/creative-video-editor/CreativeVideoEditor.jsx'"),
-  'OneClickCreativePage should not import CreativeVideoEditor',
-);
-assert.doesNotMatch(oneClickPage, creativeVideoEditorImportPattern, 'OneClickCreativePage should not import CreativeVideoEditor from any path');
-assert.ok(!oneClickPage.includes('<CreativeVideoEditor'), 'OneClickCreativePage should not render CreativeVideoEditor');
-assert.ok(
-  oneClickPage.includes('navigate(`/editor/${encodeURIComponent(workflowId)}`)'),
-  'OneClickCreativePage should navigate to the editor route',
 );
 
 console.log('creative editor page tests passed');

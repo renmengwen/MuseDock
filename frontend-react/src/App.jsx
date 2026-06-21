@@ -5,6 +5,7 @@ import { AiWorkspace } from './pages/AiWorkspace.jsx';
 import { CrawlPage } from './pages/CrawlPage.jsx';
 import { HyperframesStudioPage } from './pages/HyperframesStudioPage.jsx';
 import { MediaWorkspace } from './pages/MediaWorkspace.jsx';
+import { CreativeEditorPage } from './pages/CreativeEditorPage.jsx';
 import { OneClickCreativePage } from './pages/OneClickCreativePage.jsx';
 import { RecordsPage } from './pages/RecordsPage.jsx';
 import { SettingsPage } from './pages/SettingsPage.jsx';
@@ -52,6 +53,7 @@ export function App() {
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/creative" replace />} />
         <Route path="creative/:workflowId" element={<PersistentPages />} />
+        <Route path="editor/:workflowId" element={<CreativeEditorPage />} />
         <Route path="crawl" element={<Navigate to="/crawl/douyin" replace />} />
         <Route path="records" element={<Navigate to="/records/douyin" replace />} />
         <Route path="*" element={<PersistentPages />} />
