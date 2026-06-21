@@ -10,6 +10,7 @@ function safeString(value) {
 }
 
 function extractUrls(text, max = 3) {
+  if (max <= 0) return [];
   const raw = String(text || '');
   const matches = raw.match(/https?:\/\/[^\s<>"'`()\[\]{}，。；;、（）《》【】「」『』“”‘’]+/gi) || [];
   const seen = new Set();
@@ -48,6 +49,9 @@ function assertPublicHttpUrl(raw) {
     || host.endsWith('.local')
     || isPrivateIpv6Host(host)
   ) {
+    throw new Error(`出于安全原因，不能读取本机或内网地址：${host}`);
+  }
+  if (!host.includes('.') && !host.includes(':')) {
     throw new Error(`出于安全原因，不能读取本机或内网地址：${host}`);
   }
 

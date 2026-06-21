@@ -48,9 +48,15 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   }
 
   {
+    const urls = sourceFetch.extractUrls('https://a.example/a https://b.example/b', 0);
+    assert.deepEqual(urls, []);
+  }
+
+  {
     assert.throws(() => sourceFetch.assertPublicHttpUrl('not a url'), /URL 无效/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('ftp://example.com/a'), /只支持 http\(s\) URL/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://localhost:3000/a'), /不能读取本机或内网地址/);
+    assert.throws(() => sourceFetch.assertPublicHttpUrl('http://printer/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://0.0.0.0/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://test.localhost/a'), /不能读取本机或内网地址/);
     assert.throws(() => sourceFetch.assertPublicHttpUrl('http://service.internal/a'), /不能读取本机或内网地址/);
