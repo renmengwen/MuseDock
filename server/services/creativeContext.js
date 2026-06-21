@@ -154,6 +154,28 @@ function removeUrlFromText(text, url) {
   return sourceText.replace(urlWithNoise, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function countRemainingSourceUrls(text) {
+  let remaining = safeString(text);
+  let count = 0;
+
+  while (remaining && count < 20) {
+    const [url] = sourceFetch.extractUrls(remaining, 1);
+    if (!url) {
+      break;
+    }
+
+    count += 1;
+    const nextRemaining = removeUrlFromText(remaining, url);
+    if (nextRemaining === remaining) {
+      break;
+    }
+
+    remaining = nextRemaining;
+  }
+
+  return count;
+}
+
 function normalizeCreativeInput(payload = {}) {
   const assetIds = Array.isArray(payload.assetIds) ? [...payload.assetIds] : [];
   const useResearch = payload.useResearch === true;
@@ -206,13 +228,12 @@ function normalizeCreativeInput(payload = {}) {
   if (sourceUrls.length > 0) {
     const sourceUrl = sourceUrls[0];
     const sourceHint = removeUrlFromText(input, sourceUrl);
-    const ignoredUrls = sourceFetch.extractUrls(sourceHint, Number.MAX_SAFE_INTEGER);
     return createSuccessResponse({
       mode: 'source_url',
       raw_text: input,
       source_url: sourceUrl,
       source_hint: sourceHint,
-      ignored_url_count: ignoredUrls.length,
+      ignored_url_count: countRemainingSourceUrls(sourceHint),
       use_research: useResearch,
       skip_validation: skipValidation,
       asset_ids: assetIds,

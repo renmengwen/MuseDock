@@ -260,12 +260,21 @@ function testKeepsUnselectedDuplicateUrlInSourceHint() {
   const duplicate = normalizeCreativeInput({
     input: '请分析 https://example.com/a https://example.com/a',
   });
+  const tripleDuplicate = normalizeCreativeInput({
+    input: '请分析 https://example.com/a https://example.com/a https://example.com/a',
+  });
 
   assert.equal(duplicate.success, true);
   assert.equal(duplicate.data.mode, 'source_url');
   assert.equal(duplicate.data.source_url, 'https://example.com/a');
   assert.equal(duplicate.data.source_hint, '请分析 https://example.com/a');
   assert.equal(duplicate.data.ignored_url_count, 1);
+
+  assert.equal(tripleDuplicate.success, true);
+  assert.equal(tripleDuplicate.data.mode, 'source_url');
+  assert.equal(tripleDuplicate.data.source_url, 'https://example.com/a');
+  assert.equal(tripleDuplicate.data.source_hint, '请分析 https://example.com/a https://example.com/a');
+  assert.equal(tripleDuplicate.data.ignored_url_count, 2);
 }
 
 function testRejectsAssetsForPhaseOne() {
