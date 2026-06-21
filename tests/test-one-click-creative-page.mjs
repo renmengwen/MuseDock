@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pagePath = path.join(__dirname, '../frontend-react/src/pages/OneClickCreativePage.jsx');
 const creativeDisplayPath = path.join(__dirname, '../frontend-react/src/components/creative/creativeDisplay.js');
+const creativeSidebarPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeSidebar.jsx');
+const creativeComposerPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeComposer.jsx');
 const appPath = path.join(__dirname, '../frontend-react/src/App.jsx');
 const shellPath = path.join(__dirname, '../frontend-react/src/components/AppShell.jsx');
 const stylesPath = path.join(__dirname, '../frontend-react/src/styles.css');
@@ -59,9 +61,17 @@ const zh = {
 
 assert.ok(fs.existsSync(pagePath), 'missing page frontend-react/src/pages/OneClickCreativePage.jsx');
 assert.ok(fs.existsSync(creativeDisplayPath), 'creative display helpers should be extracted');
+for (const componentPath of [
+  '../frontend-react/src/components/creative/CreativeSidebar.jsx',
+  '../frontend-react/src/components/creative/CreativeComposer.jsx',
+]) {
+  assert.ok(fs.existsSync(path.join(__dirname, componentPath)), `${componentPath} should exist`);
+}
 
 const page = fs.readFileSync(pagePath, 'utf-8');
 const creativeDisplay = fs.readFileSync(creativeDisplayPath, 'utf-8');
+const creativeSidebar = fs.readFileSync(creativeSidebarPath, 'utf-8');
+const creativeComposer = fs.readFileSync(creativeComposerPath, 'utf-8');
 const app = fs.readFileSync(appPath, 'utf-8');
 const shell = fs.readFileSync(shellPath, 'utf-8');
 const styles = fs.readFileSync(stylesPath, 'utf-8');
@@ -70,21 +80,10 @@ const creativeVideoEditorImportPattern =
   /import\s+(?:\{[\s\S]*?\bCreativeVideoEditor\b[\s\S]*?\}|CreativeVideoEditor\b|[A-Za-z_$][\w$]*\s*,\s*\{[\s\S]*?\bCreativeVideoEditor\b[\s\S]*?\})\s+from\s+['"][^'"]+['"]/;
 
 for (const text of [
-  zh.creativeTitle,
-  zh.newTask,
-  zh.taskList,
-  zh.quickMode,
-  zh.expertMode,
-  zh.expertDeveloping,
   zh.taskDetail,
   zh.currentTask,
-  zh.inputLabel,
-  zh.researchToggle,
-  zh.submitButton,
   zh.creatingMessage,
   zh.emptyInputMessage,
-  zh.chatGreeting,
-  zh.creativeInputPlaceholder,
   zh.stopAndDelete,
   zh.stoppingAndDeleting,
   zh.continueEdit,
@@ -95,8 +94,29 @@ for (const text of [
   assert.ok(page.includes(text), `OneClickCreativePage.jsx should include normal Chinese text: ${text}`);
 }
 
-assert.match(page, /输入视频方向、抖音链接、微信公众号文章或 GitHub 仓库链接/);
-assert.match(page, /粘贴文章\/GitHub 链接，或输入你想生成的视频方向/);
+for (const text of [
+  zh.creativeTitle,
+  zh.newTask,
+  zh.taskList,
+]) {
+  assert.ok(creativeSidebar.includes(text), `CreativeSidebar.jsx should include normal Chinese text: ${text}`);
+}
+
+for (const text of [
+  zh.quickMode,
+  zh.expertMode,
+  zh.expertDeveloping,
+  zh.inputLabel,
+  zh.researchToggle,
+  zh.submitButton,
+  zh.chatGreeting,
+  zh.creativeInputPlaceholder,
+]) {
+  assert.ok(creativeComposer.includes(text), `CreativeComposer.jsx should include normal Chinese text: ${text}`);
+}
+
+assert.match(creativeComposer, /输入视频方向、抖音链接、微信公众号文章或 GitHub 仓库链接/);
+assert.match(creativeComposer, /粘贴文章\/GitHub 链接，或输入你想生成的视频方向/);
 assert.match(page, /请输入视频方向、抖音链接、文章链接或 GitHub 仓库链接/);
 assert.match(page, /填写方向、抖音来源或外部资料链接后，即可创建视频生成任务。/);
 
@@ -128,20 +148,23 @@ for (const text of [
 
 for (const mojibake of ['涓€閿', '鑱旂綉', '鍥剧墖', '姝ｅ湪', '璇疯緭']) {
   assert.ok(!page.includes(mojibake), `OneClickCreativePage.jsx should not contain mojibake text: ${mojibake}`);
+  assert.ok(!creativeSidebar.includes(mojibake), `CreativeSidebar.jsx should not contain mojibake text: ${mojibake}`);
+  assert.ok(!creativeComposer.includes(mojibake), `CreativeComposer.jsx should not contain mojibake text: ${mojibake}`);
 }
 
 for (const symbol of [
-  'CreativeTaskSidebar',
+  'OneClickCreativePage',
+]) {
+  assert.match(page, new RegExp(`function\\s+${symbol}\\s*\\(`), `OneClickCreativePage.jsx should define ${symbol}`);
+}
+
+for (const symbol of [
   'CreativeHeroHeader',
   'CreativeModeSwitch',
   'CreativePromptComposer',
-  'CreativeTaskDetail',
   'CreativeInputForm',
-  'WorkflowStatusPanel',
-  'WorkflowStepProgress',
-  'CreativeVideoPreview',
 ]) {
-  assert.match(page, new RegExp(`function\\s+${symbol}\\s*\\(`), `OneClickCreativePage.jsx should define ${symbol}`);
+  assert.match(creativeComposer, new RegExp(`function\\s+${symbol}\\s*\\(`), `CreativeComposer.jsx should define ${symbol}`);
 }
 
 assert.match(page, /createCreativeWorkflow/, 'OneClickCreativePage should create creative workflows');
@@ -293,14 +316,15 @@ assert.match(page, /async function pollWorkflow\(\) \{[\s\S]*persistTasks\(prev 
 assert.doesNotMatch(page, /async function pollWorkflow\(\) \{[\s\S]*persistTasks\(prev => upsertTask\(prev, \{/, 'Polling workflow refreshes should not move the selected task to the top');
 assert.match(page, /const isDetailRoute = Boolean\(routeWorkflowId\)/, 'Creative detail mode should be derived from the route workflow id');
 assert.match(page, /!\s*isDetailRoute\s*&&\s*\(/, 'Creative input composer should be hidden on task detail routes');
+assert.match(page, /<CreativeComposer[\s\S]*setMode=\{setMode\}/, 'OneClickCreativePage should pass setMode into CreativeComposer');
 assert.match(page, /sidebarCollapsed/, 'OneClickCreativePage should track collapsed task sidebar state');
 assert.match(page, /setSidebarCollapsed/, 'OneClickCreativePage should toggle the task sidebar');
-assert.ok(page.includes('className="creativeSidebarToggle"'), 'Task sidebar collapse control should be a real button');
-assert.match(page, /if \(sidebarCollapsed\) \{\s*return \(\s*<aside className="creativeTaskSidebar collapsed"/, 'Collapsed sidebar should render a minimal rail instead of compressed full sidebar content');
-assert.match(page, /className="creativeCollapsedExpand"/, 'Collapsed sidebar should expose only one top-left expand button');
+assert.ok(creativeSidebar.includes('className="creativeSidebarToggle"'), 'Task sidebar collapse control should be a real button');
+assert.match(creativeSidebar, /return sidebarCollapsed \? \(\s*<aside className="creativeTaskSidebar collapsed"/, 'Collapsed sidebar should render a minimal rail instead of compressed full sidebar content');
+assert.match(creativeSidebar, /className="creativeCollapsedExpand"/, 'Collapsed sidebar should expose only one top-left expand button');
 assert.ok(!page.includes('creativeFloatingExpand'), 'Collapsed sidebar should not render a floating expand pill over the rail');
-assert.ok(page.includes('className="creativeModeThumb"'), 'Mode switch should use an animated thumb instead of button borders');
-assert.ok(page.includes('data-mode={mode}'), 'Mode switch should expose mode state for thumb animation');
+assert.ok(creativeComposer.includes('className="creativeModeThumb"'), 'Mode switch should use an animated thumb instead of button borders');
+assert.ok(creativeComposer.includes('data-mode={mode}'), 'Mode switch should expose mode state for thumb animation');
 assert.match(shell, /to="\/settings"/, 'AppShell should expose settings entry inside the top brand card');
 assert.match(shell, /<header className="header"[\s\S]*className="creativeHeaderSettings"[\s\S]*<\/header>/, 'Settings entry should live on the right side of the top brand card');
 assert.doesNotMatch(page, /<form className="creativePromptComposer"[\s\S]*className="creativeHeaderSettings"[\s\S]*<\/form>/, 'Settings entry should not sit inside the input box');
@@ -309,19 +333,19 @@ assert.ok(shell.includes(zh.settings), 'AppShell should render settings text in 
 assert.doesNotMatch(page, /<Bot\s+size=\{15\}/, 'Prompt quick actions should remove the smart video pill in every mode');
 assert.ok(!page.includes('智能成片'), 'Prompt quick actions should not render smart video copy');
 assert.match(page, /const submitDisabled = isBusy \|\| mode === 'expert'/, 'Expert mode should contribute to submit disabled state');
-assert.match(page, /disabled=\{submitDisabled\}/, 'Submit button should use the combined disabled state');
-assert.match(page, /creativeExpertHint/, 'Expert mode should show a developing hint');
+assert.match(creativeComposer, /disabled=\{submitDisabled\}/, 'Submit button should use the combined disabled state');
+assert.match(creativeComposer, /creativeExpertHint/, 'Expert mode should show a developing hint');
 assert.ok(page.includes(zh.expertDeveloping), 'Expert mode developing hint should use Chinese copy');
 assert.ok(!page.includes(zh.assetNotice), 'Expert mode should not show the future asset-context notice copy');
 assert.doesNotMatch(page, /AssetContextNotice/, 'Expert mode should not render a second asset-context notice below the developing hint');
-assert.match(page, /className=\{`creativeResearchToggle \$\{useResearch \? 'active' : ''\}`\}/, 'Research button should have an explicit inactive state');
-assert.ok(page.includes('<div className="creativeExpertSlot">'), 'Expert-only notice should live in a stable reserved slot');
-assert.match(page, /mode === 'expert' \? \(\s*<div className="creativeExpertSlot">/, 'Expert notice slot should only render in expert mode to avoid quick-mode empty space');
+assert.match(creativeComposer, /className=\{`creativeResearchToggle \$\{useResearch \? 'active' : ''\}`\}/, 'Research button should have an explicit inactive state');
+assert.ok(creativeComposer.includes('<div className="creativeExpertSlot">'), 'Expert-only notice should live in a stable reserved slot');
+assert.match(creativeComposer, /mode === 'expert' \? \(\s*<div className="creativeExpertSlot">/, 'Expert notice slot should only render in expert mode to avoid quick-mode empty space');
 assert.match(page, /assetIds:\s*\[\]/, 'OneClickCreativePage payload should preserve empty assetIds');
-assert.match(page, /disabled=\{isBusy\}/, 'OneClickCreativePage should disable submit while busy');
+assert.match(creativeComposer, /disabled=\{isBusy\}/, 'CreativeComposer should disable controls while busy');
 assert.match(page, /creativeChatShell/, 'OneClickCreativePage should use a dedicated chat shell');
-assert.match(page, /creativeTaskSidebar/, 'OneClickCreativePage should render a left task sidebar');
-assert.ok(page.includes('className="creativePromptComposer"'), 'OneClickCreativePage should render a central prompt composer');
+assert.match(creativeSidebar, /creativeTaskSidebar/, 'CreativeSidebar should render a left task sidebar');
+assert.ok(creativeComposer.includes('className="creativePromptComposer"'), 'CreativeComposer should render a central prompt composer');
 assert.ok(styles.includes('.creativeChatShell'), 'styles.css should define the creative chat shell layout');
 assert.ok(styles.includes('.creativeTaskSidebar'), 'styles.css should define the creative task sidebar');
 assert.ok(styles.includes('.creativePromptComposer'), 'styles.css should define the creative prompt composer');

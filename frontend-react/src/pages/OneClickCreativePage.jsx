@@ -1,21 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-  ArrowUp,
-  CirclePlus,
   Eye,
-  FileText,
-  Globe2,
   Loader2,
-  PanelLeft,
-  Search,
-  Shield,
-  Sparkles,
   Trash2,
   X,
-  Zap,
 } from 'lucide-react';
 import { api } from '../api/client.js';
+import { CreativeComposer } from '../components/creative/CreativeComposer.jsx';
+import { CreativeSidebar } from '../components/creative/CreativeSidebar.jsx';
 import {
   STATUS_TEXT,
   getStatusClass,
@@ -165,176 +158,6 @@ function updateTask(tasks, task) {
     return upsertTask(tasks, task);
   }
   return tasks.map(item => item.workflow_id === task.workflow_id ? { ...item, ...task } : item);
-}
-
-function CreativeTaskSidebar({ tasks, selectedWorkflowId, sidebarCollapsed, onToggleSidebar, onNewTask, onSelectTask, onDeleteTask }) {
-  if (sidebarCollapsed) {
-    return (
-      <aside className="creativeTaskSidebar collapsed" aria-label="已收起的创作任务栏">
-        <button
-          className="creativeCollapsedExpand"
-          type="button"
-          aria-label="展开任务列表"
-          aria-pressed="true"
-          onClick={onToggleSidebar}
-        >
-          <PanelLeft size={17} aria-hidden="true" />
-        </button>
-      </aside>
-    );
-  }
-
-  return (
-    <aside className="creativeTaskSidebar">
-      <div className="creativeSidebarBrand">
-        <div className="creativeBrandMark"><Sparkles size={18} /></div>
-        <strong>一键创作</strong>
-        <div className="creativeSidebarTools">
-          <Search size={17} aria-hidden="true" />
-          <button
-            className="creativeSidebarToggle"
-            type="button"
-            aria-label="收起任务列表"
-            aria-pressed="false"
-            onClick={onToggleSidebar}
-          >
-            <PanelLeft size={17} aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-
-      <button className="creativeNewTaskButton" type="button" onClick={onNewTask}>
-        <CirclePlus size={16} />
-        <span>开启新创作</span>
-      </button>
-
-      <div className="creativeTaskListHeader">创作任务</div>
-      <div className="creativeTaskList" aria-label="创作任务列表">
-        {tasks.length ? tasks.map(task => (
-          <div
-            className={`creativeTaskItem ${task.workflow_id === selectedWorkflowId ? 'active' : ''}`}
-            key={task.workflow_id}
-            role="button"
-            tabIndex={0}
-            onClick={() => onSelectTask(task)}
-            onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') onSelectTask(task); }}
-          >
-            <div className="creativeTaskItemContent">
-              <span>{task.title}</span>
-              <small>{STATUS_TEXT[task.status] || task.status || '等待中'} · {getTaskTimeLabel(task.updated_at || task.created_at)}</small>
-            </div>
-            <button
-              type="button"
-              className="creativeTaskDeleteButton"
-              aria-label={`删除任务 ${task.title}`}
-              title="删除任务"
-              onClick={event => { event.stopPropagation(); onDeleteTask(task); }}
-            >
-              <Trash2 size={14} />
-            </button>
-          </div>
-        )) : (
-          <div className="creativeTaskEmpty">
-            <FileText size={18} />
-            <span>提交后，任务会出现在这里。</span>
-          </div>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-function CreativeHeroHeader({ mode }) {
-  return (
-    <div className="creativeHeroHeader">
-      <div className="creativeHeroTitle">
-        <Sparkles size={30} />
-        <h1>嘿，今天我们来做点什么？</h1>
-      </div>
-    </div>
-  );
-}
-
-function CreativeModeSwitch({ mode, setMode, disabled }) {
-  return (
-    <div className="creativeModeSwitch" role="tablist" aria-label="创作模式" data-mode={mode}>
-      <span className="creativeModeThumb" aria-hidden="true" />
-      <button
-        type="button"
-        className={mode === 'quick' ? 'active' : ''}
-        disabled={disabled}
-        onClick={() => setMode('quick')}
-      >
-        <Zap size={15} />
-        <span>快速模式</span>
-      </button>
-      <button
-        type="button"
-        className={mode === 'expert' ? 'active' : ''}
-        disabled={disabled}
-        onClick={() => setMode('expert')}
-      >
-        <Shield size={15} />
-        <span>专家模式</span>
-      </button>
-    </div>
-  );
-}
-
-function CreativePromptComposer({
-  input,
-  setInput,
-  mode,
-  useResearch,
-  setUseResearch,
-  isBusy,
-  submitDisabled,
-  onSubmit,
-}) {
-  return (
-    <form className="creativePromptComposer" onSubmit={onSubmit}>
-      <label className="creativePromptLabel" htmlFor="creative-input">
-        输入视频方向、抖音链接、微信公众号文章或 GitHub 仓库链接
-      </label>
-      <textarea
-        id="creative-input"
-        value={input}
-        onChange={event => setInput(event.target.value)}
-        disabled={isBusy}
-        placeholder="粘贴文章/GitHub 链接，或输入你想生成的视频方向"
-        rows={4}
-      />
-
-      <div className="creativeComposerFooter">
-        <div className="creativeQuickActions">
-          <button
-            type="button"
-            className={`creativeResearchToggle ${useResearch ? 'active' : ''}`}
-            disabled={isBusy}
-            onClick={() => setUseResearch(!useResearch)}
-          >
-            <Globe2 size={15} />
-            <span>联网获取最新资料</span>
-          </button>
-        </div>
-
-        <button className="creativeSubmitButton" type="submit" disabled={submitDisabled} aria-label="一键生成视频">
-          {isBusy ? <Loader2 size={18} className="spinIcon" /> : <ArrowUp size={19} />}
-        </button>
-      </div>
-
-      {mode === 'expert' ? (
-        <div className="creativeExpertSlot">
-            <div className="creativeExpertHint">专家模式正在开发中，请先使用快速模式创建任务。</div>
-        </div>
-      ) : null}
-      <input type="hidden" value={mode} readOnly />
-    </form>
-  );
-}
-
-function CreativeInputForm(props) {
-  return <CreativePromptComposer {...props} />;
 }
 
 function WorkflowStatusPanel({ status, message, workflowId, workflow }) {
@@ -509,6 +332,10 @@ export function OneClickCreativePage() {
   const [, setActiveTask] = useState(null);
   const isBusy = status === 'creating' || status === 'polling' || status === 'deleting';
   const submitDisabled = isBusy || mode === 'expert' || !input.trim();
+  const sidebarTasks = useMemo(() => tasks.map(task => ({
+    ...task,
+    timeLabel: getTaskTimeLabel(task.updated_at || task.created_at),
+  })), [tasks]);
 
   const persistTasks = useCallback((updater) => {
     setTasks(prev => {
@@ -1092,8 +919,8 @@ export function OneClickCreativePage() {
 
   return (
     <main className={`creativeChatShell ${sidebarCollapsed ? 'sidebarCollapsed' : ''}`}>
-      <CreativeTaskSidebar
-        tasks={tasks}
+      <CreativeSidebar
+        tasks={sidebarTasks}
         selectedWorkflowId={selectedWorkflowId}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed(value => !value)}
@@ -1106,12 +933,11 @@ export function OneClickCreativePage() {
         <div className={`creativeChatCenter ${selectedWorkflowId ? 'hasDetail' : ''}`}>
           {!isDetailRoute && (
             <>
-              <CreativeHeroHeader mode={mode} />
-              <CreativeModeSwitch mode={mode} setMode={setMode} disabled={isBusy} />
-              <CreativeInputForm
+              <CreativeComposer
                 input={input}
                 setInput={setInput}
                 mode={mode}
+                setMode={setMode}
                 useResearch={useResearch}
                 setUseResearch={setUseResearch}
                 isBusy={isBusy}
