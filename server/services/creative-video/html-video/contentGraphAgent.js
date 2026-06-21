@@ -26,13 +26,15 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
     ['原始标题', input.title],
     ['原始正文', input.raw_text || input.text || input.content],
     ['来源摘要', sourceContext.summary],
+    ['来源全文', sourceContext.transcript || sourceContext.markdown || sourceContext.content],
     ['创作摘要', brief.summary],
     ['评论摘要', creativeContext.comments_summary || creativeContext.comment_summary || creativeContext.comment_insights],
     ['二级评论摘要', creativeContext.secondary_comments_summary || creativeContext.reply_summary],
     ['旁白文本', audio.narration_text || audio.text || creativeContext.narration_text],
   ];
   pairs.forEach(([label, value]) => {
-    const text = compactText(value, label.includes('正文') ? 1600 : 700);
+    const maxLength = label.includes('全文') ? 2400 : label.includes('正文') ? 1600 : 700;
+    const text = compactText(value, maxLength);
     if (text) lines.push(`${label}：${text}`);
   });
   return lines.join('\n');
@@ -46,7 +48,7 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
   return [
     '你是 html-video 的 content graph 规划器。请只输出严格 JSON，不要输出 Markdown、解释或额外文本。',
     '',
-    '源素材上下文：',
+    'SOURCE MATERIAL / 源素材上下文：',
     summarizeCreativeContextForPrompt(creativeContext) || '（无）',
     '',
     'scene_spec：',
@@ -67,6 +69,10 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
     '- data node 的 data 必须形如 {"title":"string","unit":"optional shared unit","items":[{"label":"string","value":123}]}。',
     '- 数据帧必须使用可比较的同一单位，数值要合理；不能把不同口径的数据强行放进同一组。',
     '- 必须保留源素材事实，不要编造来源中没有的精确数字、机构、时间或结论。',
+    '- 如果源素材来自 source_url，SOURCE MATERIAL 是视频真正主题，不是装饰信息。',
+    '- 每个节点都必须引用或改写来源材料里的具体事实、名字、数字、产品、项目能力、术语或主张。',
+    '- 禁止输出可套用到任何文章或任何仓库的泛泛句子。',
+    '- GitHub repo 只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。',
     '- 不要让对象值变成字符串 [object Object]；对象必须提取有意义的 label/text/value。',
     '- 中文素材默认生成中文可见文本，技术名词和品牌名可保留英文。',
     '',
