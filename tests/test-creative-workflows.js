@@ -227,6 +227,72 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(analysisInput.video.aweme_url, '');
 }
 
+async function testSourceUrlStageEmitsSpecificProgressMessages() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const emitted = [];
+  const now = () => '2026-06-21T00:00:00.000Z';
+  const idFactory = () => WORKFLOW_ID;
+  const sourceUrl = 'https://mp.weixin.qq.com/s/demo';
+  const { services } = createFakeServices({
+    services: {
+      now,
+      idFactory,
+      sourceFetch: {
+        fetchSource: async url => ({
+          success: true,
+          kind: 'article',
+          url,
+          title: '公众号文章',
+          markdown: '# 公众号文章\n\n这是一篇用于创作的文章正文。',
+          truncated: false,
+          metadata: {},
+        }),
+      },
+    },
+    agentRuns: {
+      generateDouyinRunHyperframesFreeformProject: async () => ({
+        success: true,
+        status: 'done',
+        message: '工程生成完成',
+      }),
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: sourceUrl,
+    useResearch: false,
+    assetIds: [],
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, {
+    rootDir,
+    mediaRoot,
+    taskContext: {
+      emit: async event => emitted.push(event),
+    },
+    services,
+  });
+
+  assert.equal(run.success, true);
+  assert.ok(emitted.some(event => (
+    event.type === 'stage_progress'
+    && event.stage === 'source'
+    && /正在读取微信公众号文章/.test(event.message)
+  )));
+  assert.ok(emitted.some(event => (
+    event.type === 'stage_progress'
+    && event.stage === 'source'
+    && /外部来源资料已读取/.test(event.message)
+  )));
+  assert.ok(emitted.some(event => (
+    event.type === 'stage_done'
+    && event.stage === 'source'
+    && /外部来源资料已读取并准备完成/.test(event.message)
+  )));
+}
+
 async function testSuccessfulSourceUrlFetchDropsStaleMetadataAndDiagnostics() {
   const { rootDir, mediaRoot } = createTempDirs();
   const sourceUrl = 'https://example.com/current-article';
@@ -1528,6 +1594,7 @@ async function testSceneSpecOperations() {
 async function run() {
   await testCreatesAndRunsTextWorkflow();
   await testCreatesAndRunsSourceUrlWorkflow();
+  await testSourceUrlStageEmitsSpecificProgressMessages();
   await testSuccessfulSourceUrlFetchDropsStaleMetadataAndDiagnostics();
   await testSourceUrlFailurePersistsFailedSourceContext();
   await testSourceUrlFetchExceptionPersistsFailedSourceContext();

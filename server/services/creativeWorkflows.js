@@ -47,6 +47,13 @@ function safeString(value) {
   return String(value).trim();
 }
 
+function getSourceUrlLoadingMessage(sourceUrl, kindHint = '') {
+  const url = safeString(sourceUrl).toLowerCase();
+  if (url.includes('mp.weixin.qq.com')) return '正在读取微信公众号文章...';
+  if (kindHint === 'github_repo' || url.includes('github.com/')) return '正在读取 GitHub 仓库信息...';
+  return '正在读取网页文章...';
+}
+
 function getNow(services = {}) {
   if (typeof services.now === 'function') {
     return safeString(services.now()) || new Date().toISOString();
@@ -958,7 +965,7 @@ async function writeSyntheticSourceWorkspace(record, mediaRoot, fetched = {}, no
   };
 }
 
-async function prepareSourceUrl(record, mediaRoot, now, services = {}) {
+async function prepareSourceUrl(record, mediaRoot, now, services = {}, reportStage = null) {
   const sourceUrl = safeString(record.creative_context?.input?.source_url || record.input?.source_url);
   if (!sourceUrl) {
     const message = '外部来源链接为空，请重新输入文章或 GitHub 仓库链接。';
@@ -982,6 +989,10 @@ async function prepareSourceUrl(record, mediaRoot, now, services = {}) {
       success: false,
       message: '外部来源抓取服务未配置。',
     };
+  }
+
+  if (typeof reportStage === 'function') {
+    await reportStage(getSourceUrlLoadingMessage(sourceUrl), 15, { source_url: sourceUrl });
   }
 
   let fetched;
@@ -1017,6 +1028,14 @@ async function prepareSourceUrl(record, mediaRoot, now, services = {}) {
       message,
       result: fetched,
     };
+  }
+
+  if (typeof reportStage === 'function') {
+    await reportStage('外部来源资料已读取，正在准备创作上下文...', 70, {
+      source_url: sourceUrl,
+      source_kind: fetched.kind,
+      title: fetched.title || '',
+    });
   }
 
   const sourceMaterial = normalizeFetchedSource(fetched, sourceUrl);
@@ -1215,13 +1234,13 @@ async function prepareDouyinSource(record, mediaRoot, now, services = {}) {
   };
 }
 
-async function prepareSource(record, mediaRoot, now, services = {}) {
+async function prepareSource(record, mediaRoot, now, services = {}, reportStage = null) {
   if (record.creative_context?.input?.mode === 'text') {
     return writeSyntheticTextWorkspace(record, mediaRoot, now);
   }
 
   if (record.creative_context?.input?.mode === 'source_url') {
-    return prepareSourceUrl(record, mediaRoot, now, services);
+    return prepareSourceUrl(record, mediaRoot, now, services, reportStage);
   }
 
   return prepareDouyinSource(record, mediaRoot, now, services);
@@ -1385,8 +1404,8 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     return null;
   };
 
-  let stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'source', rootDir, async () => (
-    ensureSuccess(await prepareSource(record, mediaRoot, getNow(services), services), '来源资料准备失败。')
+  let stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'source', rootDir, async ({ reportStage }) => (
+    ensureSuccess(await prepareSource(record, mediaRoot, getNow(services), services, reportStage), '来源资料准备失败。')
   ), services, taskContext));
   if (stoppedOrFailed) {
     return stoppedOrFailed;
