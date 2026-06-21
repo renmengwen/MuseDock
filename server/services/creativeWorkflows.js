@@ -11,6 +11,7 @@ const defaultCreativeVideoEditor = require('./creativeVideoEditor');
 const defaultCreativeVideoRerender = require('./creativeVideoRerender');
 const sceneSpecService = require('./sceneSpec');
 const aiTextModel = require('./aiTextModel');
+const defaultSourceFetch = require('./sourceFetch');
 const htmlVideoProjectStore = require('./creative-video/html-video/projectStore');
 const htmlVideoEditPatchService = require('./creative-video/html-video/editPatchService');
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
@@ -206,6 +207,22 @@ function createDouyinSourceContext(input = {}) {
     douyin_metadata: {
       aweme_id: safeString(input.aweme_id),
       douyin_url: safeString(input.douyin_url),
+    },
+    diagnostics: {},
+  };
+}
+
+function createSourceUrlSourceContext(input = {}) {
+  const sourceUrl = safeString(input.source_url);
+  return {
+    status: 'pending',
+    kind: 'source_url',
+    summary: sourceUrl ? `等待读取外部来源：${sourceUrl}` : '等待读取外部来源。',
+    source_url: sourceUrl,
+    source_kind: '',
+    source_metadata: {
+      source_url: sourceUrl,
+      user_hint: safeString(input.source_hint),
     },
     diagnostics: {},
   };
@@ -555,6 +572,7 @@ function resolveServices(options = {}) {
     mediaPipeline: services.mediaPipeline || mediaPipeline,
     agentRuns: services.agentRuns || defaultAgentRuns,
     aiModelConfig: services.aiModelConfig || aiModelConfig,
+    sourceFetch: services.sourceFetch || defaultSourceFetch,
   };
 }
 
@@ -597,9 +615,14 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
   const awemeId = normalized.data.mode === 'douyin'
     ? normalized.data.aweme_id
     : makeLocalCreativeAwemeId(workflowId);
-  const sourceContext = normalized.data.mode === 'douyin'
-    ? createDouyinSourceContext(normalized.data)
-    : creativeContext.createTextSourceContext(normalized.data.raw_text);
+  let sourceContext;
+  if (normalized.data.mode === 'douyin') {
+    sourceContext = createDouyinSourceContext(normalized.data);
+  } else if (normalized.data.mode === 'source_url') {
+    sourceContext = createSourceUrlSourceContext(normalized.data);
+  } else {
+    sourceContext = creativeContext.createTextSourceContext(normalized.data.raw_text);
+  }
   const researchQuery = normalized.data.raw_text || normalized.data.aweme_id;
   const researchContext = normalized.data.use_research
     ? creativeContext.createPendingResearchContext({ query: researchQuery, now })
@@ -709,6 +732,268 @@ async function writeSyntheticTextWorkspace(record, mediaRoot, now) {
     message: '纯文本来源资料已准备完成。',
     paths,
   };
+}
+
+function summarizeMarkdown(markdown, fallback = '') {
+  const text = safeString(markdown)
+    .split(/\r?\n/)
+    .map(line => line.replace(/^#{1,6}\s+/, '').trim())
+    .filter(Boolean)
+    .join(' ');
+  return (text || safeString(fallback)).slice(0, 240);
+}
+
+function createSourceDescription(sourceMaterial = {}) {
+  const title = safeString(sourceMaterial.title);
+  const summary = summarizeMarkdown(sourceMaterial.markdown, sourceMaterial.description || sourceMaterial.url);
+  if (title && summary && summary !== title) {
+    return `${title}：${summary}`;
+  }
+  return title || summary || safeString(sourceMaterial.url);
+}
+
+function normalizeFetchedSource(fetchResult = {}, requestedUrl = '') {
+  const data = fetchResult.data && typeof fetchResult.data === 'object' ? fetchResult.data : fetchResult;
+  const sourceUrl = safeString(data.url || data.source_url || requestedUrl);
+  const markdown = safeString(data.markdown || data.text || data.content);
+  const title = safeString(data.title) || sourceUrl;
+  const description = safeString(data.description || data.summary) || summarizeMarkdown(markdown, title);
+  return {
+    kind: safeString(data.kind || data.source_kind || 'web_page'),
+    url: sourceUrl,
+    title,
+    description,
+    markdown,
+    metadata: data.metadata || data.source_metadata || {},
+    diagnostics: data.diagnostics || fetchResult.diagnostics || {},
+  };
+}
+
+function createFetchedSourceContext(record, sourceMaterial = {}, now) {
+  const description = createSourceDescription(sourceMaterial);
+  return {
+    ...(record.source_context || {}),
+    status: 'ready',
+    kind: 'source_url',
+    summary: description,
+    source_url: sourceMaterial.url,
+    source_kind: sourceMaterial.kind,
+    title: sourceMaterial.title,
+    description,
+    source_metadata: {
+      ...(record.source_context?.source_metadata || {}),
+      ...(sourceMaterial.metadata || {}),
+      source_url: sourceMaterial.url,
+      source_kind: sourceMaterial.kind,
+      title: sourceMaterial.title,
+      user_hint: safeString(record.creative_context?.input?.source_hint),
+    },
+    diagnostics: {
+      ...(record.source_context?.diagnostics || {}),
+      ...(sourceMaterial.diagnostics || {}),
+      source_type: 'source_url',
+      prepared_at: now,
+    },
+  };
+}
+
+function normalizeSourceFetchDiagnostics(fetchResult = {}) {
+  const data = fetchResult?.data && typeof fetchResult.data === 'object' ? fetchResult.data : fetchResult;
+  return {
+    ...(data?.diagnostics && typeof data.diagnostics === 'object' ? data.diagnostics : {}),
+    ...(data?.diagnostic && typeof data.diagnostic === 'object' ? data.diagnostic : {}),
+    ...(fetchResult?.diagnostics && typeof fetchResult.diagnostics === 'object' ? fetchResult.diagnostics : {}),
+    ...(fetchResult?.diagnostic && typeof fetchResult.diagnostic === 'object' ? fetchResult.diagnostic : {}),
+  };
+}
+
+function updateFailedSourceUrlSourceContext(record, requestedUrl, failure = {}, now) {
+  const data = failure?.data && typeof failure.data === 'object' ? failure.data : failure;
+  const sourceUrl = safeString(data?.url || data?.source_url || requestedUrl);
+  const sourceKind = safeString(data?.kind || data?.source_kind);
+  const message = safeString(data?.message || data?.error || failure?.message || failure?.error)
+    || '外部来源读取失败。';
+  const diagnostics = normalizeSourceFetchDiagnostics(failure);
+  const sourceContext = {
+    ...(record.source_context || {}),
+    status: 'failed',
+    kind: 'source_url',
+    summary: message,
+    source_url: sourceUrl,
+    source_kind: sourceKind,
+    source_metadata: {
+      ...(record.source_context?.source_metadata || {}),
+      ...(data?.metadata && typeof data.metadata === 'object' ? data.metadata : {}),
+      url: sourceUrl,
+      source_url: sourceUrl,
+      source_kind: sourceKind,
+      user_hint: safeString(record.creative_context?.input?.source_hint),
+    },
+    diagnostics: {
+      ...(record.source_context?.diagnostics || {}),
+      ...diagnostics,
+      source_type: 'source_url',
+      failed_at: now,
+      message,
+    },
+  };
+  record.source_context = sourceContext;
+  record.creative_context = {
+    ...(record.creative_context || {}),
+    source_context: sourceContext,
+  };
+  return sourceContext;
+}
+
+async function writeSyntheticSourceWorkspace(record, mediaRoot, now, sourceMaterial = {}) {
+  const paths = mediaPipeline.getMediaPaths(record.aweme_id, mediaRoot);
+  const userHint = safeString(record.creative_context?.input?.source_hint);
+  const description = createSourceDescription(sourceMaterial);
+  const sourceContext = createFetchedSourceContext(record, sourceMaterial, now);
+  const creativeContextWithSource = {
+    ...(record.creative_context || {}),
+    source_context: sourceContext,
+  };
+
+  await fsp.mkdir(paths.framesDir, { recursive: true });
+
+  const sourceMaterialPayload = {
+    kind: sourceMaterial.kind,
+    url: sourceMaterial.url,
+    title: sourceMaterial.title,
+    description,
+    markdown: sourceMaterial.markdown,
+    user_hint: userHint,
+    metadata: sourceMaterial.metadata || {},
+  };
+
+  await writeJson(paths.metadata, {
+    aweme_id: record.aweme_id,
+    source_type: 'source_url',
+    source_kind: sourceMaterial.kind,
+    source_url: sourceMaterial.url,
+    title: sourceMaterial.title,
+    description,
+    user_hint: userHint,
+    source_material: sourceMaterialPayload,
+    creative_workflow_id: record.workflow_id,
+    created_at: record.created_at,
+    updated_at: now,
+  });
+
+  await writeJson(paths.transcript, {
+    success: true,
+    status: 'done',
+    source_type: 'source_url',
+    source_kind: sourceMaterial.kind,
+    source_url: sourceMaterial.url,
+    title: sourceMaterial.title,
+    text: sourceMaterial.markdown,
+    user_hint: userHint,
+    updated_at: now,
+  });
+
+  await writeJson(paths.analysisInput, {
+    aweme_id: record.aweme_id,
+    video: {
+      title: sourceMaterial.title,
+      description,
+      author: {},
+      statistics: {},
+      aweme_url: sourceMaterial.url,
+      source_url: sourceMaterial.url,
+    },
+    local_assets: {
+      dir: paths.dir,
+      metadata: paths.metadata,
+      video: '',
+      audio: '',
+      frames: [],
+    },
+    comments_summary: {
+      status: 'disabled',
+      message: '外部来源创作暂无评论素材。',
+    },
+    transcript: {
+      status: 'done',
+      path: paths.transcript,
+    },
+    source_material: sourceMaterialPayload,
+    steps: {
+      metadata: { status: 'done', path: paths.metadata },
+      transcript: { status: 'done', path: paths.transcript },
+      analysis_input: { status: 'done', path: paths.analysisInput },
+    },
+    creative_context: creativeContextWithSource,
+    updated_at: now,
+  });
+
+  record.source_context = sourceContext;
+  record.creative_context = creativeContextWithSource;
+
+  return {
+    success: true,
+    message: '外部来源资料已准备完成。',
+    paths,
+    source_context: sourceContext,
+  };
+}
+
+async function prepareSourceUrl(record, mediaRoot, now, services = {}) {
+  const sourceUrl = safeString(record.creative_context?.input?.source_url || record.input?.source_url);
+  if (!sourceUrl) {
+    updateFailedSourceUrlSourceContext(record, sourceUrl, {
+      message: '外部来源 URL 为空，无法准备来源资料。',
+    }, now);
+    return {
+      success: false,
+      message: '外部来源 URL 为空，无法准备来源资料。',
+    };
+  }
+
+  const fetcher = services.sourceFetch;
+  if (!fetcher || typeof fetcher.fetchSource !== 'function') {
+    updateFailedSourceUrlSourceContext(record, sourceUrl, {
+      url: sourceUrl,
+      message: '外部来源抓取服务未配置。',
+      diagnostic: { code: 'SOURCE_FETCH_UNCONFIGURED' },
+    }, now);
+    return {
+      success: false,
+      message: '外部来源抓取服务未配置。',
+    };
+  }
+
+  const fetched = await fetcher.fetchSource(sourceUrl);
+  if (!fetched || fetched.success === false) {
+    updateFailedSourceUrlSourceContext(record, sourceUrl, fetched || {
+      url: sourceUrl,
+      message: '外部来源读取失败。',
+    }, now);
+    return {
+      success: false,
+      message: safeString(fetched?.message || fetched?.error) || '外部来源读取失败。',
+      result: fetched,
+    };
+  }
+
+  const sourceMaterial = normalizeFetchedSource(fetched, sourceUrl);
+  if (!sourceMaterial.markdown) {
+    updateFailedSourceUrlSourceContext(record, sourceUrl, {
+      ...(fetched || {}),
+      url: sourceMaterial.url,
+      kind: sourceMaterial.kind,
+      message: '外部来源读取失败：未生成可用于创作的 Markdown 内容。',
+      diagnostics: sourceMaterial.diagnostics,
+    }, now);
+    return {
+      success: false,
+      message: '外部来源读取失败：未生成可用于创作的 Markdown 内容。',
+      result: fetched,
+    };
+  }
+
+  return writeSyntheticSourceWorkspace(record, mediaRoot, now, sourceMaterial);
 }
 
 function hasPreparedLocalMedia(analysisInput = {}, status = {}) {
@@ -891,6 +1176,10 @@ async function prepareDouyinSource(record, mediaRoot, now, services = {}) {
 async function prepareSource(record, mediaRoot, now, services = {}) {
   if (record.creative_context?.input?.mode === 'text') {
     return writeSyntheticTextWorkspace(record, mediaRoot, now);
+  }
+
+  if (record.creative_context?.input?.mode === 'source_url') {
+    return prepareSourceUrl(record, mediaRoot, now, services);
   }
 
   return prepareDouyinSource(record, mediaRoot, now, services);

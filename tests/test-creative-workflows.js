@@ -142,6 +142,104 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.equal(fetched.data.stages.find(stage => stage.id === 'render').status, 'done');
 }
 
+async function testCreatesAndRunsSourceUrlWorkflow() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const repoUrl = 'https://github.com/owner/repo';
+  const { services } = createFakeServices({
+    services: {
+      sourceFetch: {
+        fetchSource: async sourceUrl => ({
+          success: true,
+          kind: 'github_repo',
+          url: sourceUrl,
+          title: 'owner/repo',
+          markdown: '# owner/repo\n\n真实 README 内容。',
+          metadata: { language: 'JavaScript' },
+        }),
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: `做成项目解读视频 ${repoUrl}`,
+    useResearch: false,
+    assetIds: [],
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+  assert.equal(created.creative_context.input.mode, 'source_url');
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+  assert.equal(run.status, 'done');
+
+  const mediaPaths = mediaPipeline.getMediaPaths(created.aweme_id, mediaRoot);
+  const metadata = readJson(mediaPaths.metadata);
+  const transcript = readJson(mediaPaths.transcript);
+  const analysisInput = readJson(mediaPaths.analysisInput);
+
+  assert.equal(metadata.source_type, 'source_url');
+  assert.equal(metadata.source_kind, 'github_repo');
+  assert.equal(metadata.source_url, repoUrl);
+  assert.match(transcript.text, /真实 README 内容/);
+  assert.equal(transcript.user_hint, '做成项目解读视频');
+  assert.equal(analysisInput.source_material.kind, 'github_repo');
+  assert.equal(analysisInput.source_material.url, 'https://github.com/owner/repo');
+  assert.equal(analysisInput.source_material.title, 'owner/repo');
+  assert.equal(analysisInput.source_material.user_hint, '做成项目解读视频');
+  assert.match(analysisInput.source_material.markdown, /owner\/repo/);
+  assert.equal(analysisInput.source_material.metadata.language, 'JavaScript');
+  assert.equal(analysisInput.creative_context.source_context.kind, 'source_url');
+}
+
+async function testSourceUrlFailurePersistsFailedSourceContext() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const sourceUrl = 'https://example.com/post';
+  const { services, calls } = createFakeServices({
+    services: {
+      sourceFetch: {
+        fetchSource: async url => ({
+          success: false,
+          kind: 'article',
+          url,
+          message: '未能读取文章正文，请确认链接可公开访问。',
+          diagnostic: { code: 'ARTICLE_EMPTY' },
+        }),
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: sourceUrl,
+    useResearch: false,
+    assetIds: [],
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+  assert.equal(created.creative_context.input.mode, 'source_url');
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, false);
+  assert.equal(run.error.stage, 'source');
+  assert.deepEqual(calls, []);
+  assert.equal(run.source_context.status, 'failed');
+  assert.equal(run.source_context.kind, 'source_url');
+  assert.equal(run.source_context.source_metadata.url, sourceUrl);
+  assert.equal(run.source_context.diagnostics.code, 'ARTICLE_EMPTY');
+  assert.equal(run.creative_context.source_context.status, 'failed');
+  assert.equal(run.stages.find(stage => stage.id === 'source').status, 'failed');
+
+  const persisted = await getCreativeWorkflow(WORKFLOW_ID, { rootDir });
+  assert.equal(persisted.data.source_context.status, 'failed');
+  assert.equal(persisted.data.source_context.kind, 'source_url');
+  assert.equal(persisted.data.source_context.source_metadata.url, sourceUrl);
+  assert.equal(persisted.data.source_context.diagnostics.code, 'ARTICLE_EMPTY');
+  assert.equal(persisted.data.creative_context.source_context.status, 'failed');
+  assert.equal(persisted.data.stages.find(stage => stage.id === 'source').status, 'failed');
+}
+
 async function testResearchRunsInBackgroundStage() {
   const { rootDir, mediaRoot } = createTempDirs();
   let researchCalls = 0;
@@ -1239,6 +1337,8 @@ async function testSceneSpecOperations() {
 
 async function run() {
   await testCreatesAndRunsTextWorkflow();
+  await testCreatesAndRunsSourceUrlWorkflow();
+  await testSourceUrlFailurePersistsFailedSourceContext();
   await testResearchRunsInBackgroundStage();
   await testHtmlVideoLiteSkipsLegacyHyperframesStages();
   await testHtmlVideoExportUsesOrchestratorWithTemplateRegistry();
