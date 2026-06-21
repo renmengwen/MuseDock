@@ -214,6 +214,7 @@ function createDouyinSourceContext(input = {}) {
 
 function createSourceUrlSourceContext(input = {}) {
   const sourceUrl = safeString(input.source_url);
+  const ignoredUrlCount = Number(input.ignored_url_count) || 0;
   return {
     status: 'pending',
     kind: 'source_url',
@@ -224,7 +225,9 @@ function createSourceUrlSourceContext(input = {}) {
       source_url: sourceUrl,
       user_hint: safeString(input.source_hint),
     },
-    diagnostics: {},
+    diagnostics: {
+      ignored_url_count: ignoredUrlCount,
+    },
   };
 }
 
@@ -772,6 +775,8 @@ function normalizeFetchedSource(fetchResult = {}, requestedUrl = '') {
 
 function createFetchedSourceContext(record, sourceMaterial = {}, now) {
   const description = createSourceDescription(sourceMaterial);
+  const input = record.creative_context?.input || record.input || {};
+  const ignoredUrlCount = Number(input.ignored_url_count) || 0;
   return {
     ...(record.source_context || {}),
     status: 'ready',
@@ -793,6 +798,7 @@ function createFetchedSourceContext(record, sourceMaterial = {}, now) {
       ...(record.source_context?.diagnostics || {}),
       ...(sourceMaterial.diagnostics || {}),
       source_type: 'source_url',
+      ignored_url_count: ignoredUrlCount,
       prepared_at: now,
     },
   };

@@ -145,6 +145,7 @@ async function testCreatesAndRunsTextWorkflow() {
 async function testCreatesAndRunsSourceUrlWorkflow() {
   const { rootDir, mediaRoot } = createTempDirs();
   const repoUrl = 'https://github.com/owner/repo';
+  const extraUrl = 'https://example.com/extra';
   const { services } = createFakeServices({
     services: {
       sourceFetch: {
@@ -162,18 +163,20 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   });
 
   const created = await createCreativeWorkflow({
-    input: `做成项目解读视频 ${repoUrl}`,
+    input: `做成项目解读视频 ${repoUrl} ${extraUrl}`,
     useResearch: false,
     assetIds: [],
   }, { rootDir, mediaRoot, services });
 
   assert.equal(created.success, true);
   assert.equal(created.creative_context.input.mode, 'source_url');
+  assert.equal(created.creative_context.input.ignored_url_count, 1);
 
   const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
 
   assert.equal(run.success, true);
   assert.equal(run.status, 'done');
+  assert.equal(run.source_context.diagnostics.ignored_url_count, 1);
 
   const mediaPaths = mediaPipeline.getMediaPaths(created.aweme_id, mediaRoot);
   const metadata = readJson(mediaPaths.metadata);
@@ -184,15 +187,16 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(metadata.source_kind, 'github_repo');
   assert.equal(metadata.source_url, repoUrl);
   assert.match(transcript.text, /真实 README 内容/);
-  assert.equal(transcript.user_hint, '做成项目解读视频');
+  assert.equal(transcript.user_hint, `做成项目解读视频 ${extraUrl}`);
   assert.equal(transcript.truncated, true);
   assert.equal(analysisInput.source_material.kind, 'github_repo');
   assert.equal(analysisInput.source_material.url, 'https://github.com/owner/repo');
   assert.equal(analysisInput.source_material.title, 'owner/repo');
-  assert.equal(analysisInput.source_material.user_hint, '做成项目解读视频');
+  assert.equal(analysisInput.source_material.user_hint, `做成项目解读视频 ${extraUrl}`);
   assert.match(analysisInput.source_material.markdown, /owner\/repo/);
   assert.equal(analysisInput.source_material.metadata.language, 'JavaScript');
   assert.equal(analysisInput.creative_context.source_context.kind, 'source_url');
+  assert.equal(analysisInput.creative_context.source_context.diagnostics.ignored_url_count, 1);
 }
 
 async function testSourceUrlFailurePersistsFailedSourceContext() {
