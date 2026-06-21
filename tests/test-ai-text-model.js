@@ -466,6 +466,48 @@ async function run() {
   assert.strictEqual(missingText.configured, true);
   assert.match(missingText.message, /缺少文本内容/);
   assert.doesNotMatch(missingText.message, /sk-test/);
+
+  const contentParts = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'content parts' }],
+    configPath,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: [
+              { type: 'text', text: '数组' },
+              { type: 'text', text: '内容' },
+            ],
+          },
+        }],
+      }),
+    }),
+  });
+  assert.strictEqual(contentParts.success, true);
+  assert.strictEqual(contentParts.text, '数组内容');
+
+  let missingTextAttempts = 0;
+  const missingTextRetry = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'missing text retry' }],
+    configPath,
+    maxRetries: 1,
+    retryDelayMs: 1,
+    fetchImpl: async () => {
+      missingTextAttempts += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => missingTextAttempts === 1
+          ? ({ choices: [{ message: { content: null } }] })
+          : ({ choices: [{ message: { content: '重试成功' } }] }),
+      };
+    },
+  });
+  assert.strictEqual(missingTextRetry.success, true);
+  assert.strictEqual(missingTextRetry.text, '重试成功');
+  assert.strictEqual(missingTextAttempts, 2);
 }
 
 run().then(() => {

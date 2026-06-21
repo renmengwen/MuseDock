@@ -1,7 +1,9 @@
 const ARTICLE_MAX = 8000;
 const README_MAX = 10000;
-// 限制单次外部来源响应体，避免明显超大页面进入完整解析。
-const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+// GitHub API/README 等结构化响应继续使用较小上限；网页文章允许更大的页面壳，
+// 再由正文提取和 ARTICLE_MAX 控制最终进入创作链路的内容体量。
+const DEFAULT_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
+const ARTICLE_RESPONSE_MAX_BYTES = 10 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 12000;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
@@ -229,7 +231,10 @@ function formatFetchErrorMessage(error) {
 }
 
 async function fetchArticle(url, options = {}) {
-  const html = await fetchText(url, { accept: 'text/html,application/xhtml+xml' }, options);
+  const html = await fetchText(url, { accept: 'text/html,application/xhtml+xml' }, {
+    ...options,
+    maxResponseBytes: ARTICLE_RESPONSE_MAX_BYTES,
+  });
   const title = extractTitle(html) || url;
   let body = htmlToMarkdown(extractMainHtml(html));
   if (countVisibleLength(body) < 80) {
@@ -355,6 +360,7 @@ async function fetchText(url, headers, options = {}) {
     throw new Error('当前运行环境不支持 fetch，无法读取外部来源。');
   }
   const signal = options.signal || AbortSignal.timeout(FETCH_TIMEOUT_MS);
+  const maxResponseBytes = resolveMaxResponseBytes(options.maxResponseBytes);
   for (let redirects = 0; redirects <= 5; redirects += 1) {
     const response = await fetchImpl(currentUrl, {
       headers: { 'user-agent': UA, ...headers },
@@ -378,14 +384,19 @@ async function fetchText(url, headers, options = {}) {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    return readResponseText(response);
+    return readResponseText(response, { maxResponseBytes });
   }
   throw new Error('重定向次数过多，已停止读取外部来源。');
 }
 
-async function readResponseText(response) {
+function resolveMaxResponseBytes(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : DEFAULT_RESPONSE_MAX_BYTES;
+}
+
+async function readResponseText(response, { maxResponseBytes = DEFAULT_RESPONSE_MAX_BYTES } = {}) {
   const contentLength = Number(getHeader(response.headers, 'content-length'));
-  if (Number.isFinite(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+  if (Number.isFinite(contentLength) && contentLength > maxResponseBytes) {
     throw new Error('外部来源响应过大，已停止读取。');
   }
 
@@ -398,7 +409,7 @@ async function readResponseText(response) {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += chunkByteLength(value);
-      if (bytes > MAX_RESPONSE_BYTES) {
+      if (bytes > maxResponseBytes) {
         throw new Error('外部来源响应过大，已停止读取。');
       }
       text += decodeResponseChunk(value, decoder);
@@ -407,7 +418,7 @@ async function readResponseText(response) {
   }
 
   const text = await response.text();
-  if (utf8ByteLength(text) > MAX_RESPONSE_BYTES) {
+  if (utf8ByteLength(text) > maxResponseBytes) {
     throw new Error('外部来源响应过大，已停止读取。');
   }
   return text;

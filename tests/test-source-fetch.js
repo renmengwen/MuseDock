@@ -12,6 +12,26 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
   };
 }
 
+function makeStreamingResponse(body, { status = 200, headers = {}, chunkSize = 65536 } = {}) {
+  const bytes = new TextEncoder().encode(body);
+  return {
+    ...makeResponse(body, { status, headers }),
+    body: {
+      getReader() {
+        let offset = 0;
+        return {
+          async read() {
+            if (offset >= bytes.length) return { done: true };
+            const value = bytes.slice(offset, Math.min(offset + chunkSize, bytes.length));
+            offset += value.byteLength;
+            return { done: false, value };
+          },
+        };
+      },
+    },
+  };
+}
+
 (async () => {
   {
     const urls = sourceFetch.extractUrls('请分析 https://mp.weixin.qq.com/s/abc ，再看 https://github.com/a/b。');
@@ -191,6 +211,32 @@ function makeResponse(body, { status = 200, headers = {} } = {}) {
     assert.equal(result.kind, 'article');
     assert.match(result.markdown, /只有 rich_media_content class 的微信正文容器/);
     assert.doesNotMatch(result.markdown, /外层噪声文本/);
+  }
+
+  {
+    const html = [
+      '<html><head><meta property="og:title" content="大壳微信文章"></head><body>',
+      '<script>',
+      'window.__wx_noise__ = "',
+      'x'.repeat(2 * 1024 * 1024 + 1024),
+      '";',
+      '</script>',
+      '<div class="rich_media_content" id="js_content">',
+      '<p>这篇微信文章的正文可以正常提取，虽然完整 HTML 页面包含大量平台脚本和配置。</p>',
+      '<p>最终进入创作链路的 Markdown 应该只包含正文内容，并继续说明来源材料、场景规划、内容图生成、单帧 HTML 生成和结果校验。</p>',
+      '<p>这个用例用于确认页面壳超过旧的 2MiB 限制时，不会在正文提取之前提前失败。</p>',
+      '</div>',
+      '<p>尾部噪声不应该进入正文。</p>',
+      '</body></html>',
+    ].join('');
+    const result = await sourceFetch.fetchSource('https://mp.weixin.qq.com/s/large-shell', {
+      fetchImpl: async () => makeStreamingResponse(html),
+    });
+    assert.equal(result.success, true);
+    assert.equal(result.title, '大壳微信文章');
+    assert.match(result.markdown, /完整 HTML 页面包含大量平台脚本和配置/);
+    assert.doesNotMatch(result.markdown, /window.__wx_noise__/);
+    assert.doesNotMatch(result.markdown, /尾部噪声/);
   }
 
   {
