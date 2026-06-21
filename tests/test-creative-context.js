@@ -247,13 +247,15 @@ function testNormalizesSourceUrls() {
   assert.equal(punctuated.data.source_hint, '请分析');
 }
 
-function testRemovesDuplicateUrlsFromSourceHint() {
+function testKeepsUnselectedDuplicateUrlInSourceHint() {
   const duplicate = normalizeCreativeInput({
     input: '请分析 https://example.com/a https://example.com/a',
   });
 
+  assert.equal(duplicate.success, true);
   assert.equal(duplicate.data.mode, 'source_url');
-  assert.equal(duplicate.data.source_hint, '请分析');
+  assert.equal(duplicate.data.source_url, 'https://example.com/a');
+  assert.equal(duplicate.data.source_hint, '请分析 https://example.com/a');
   assert.equal(duplicate.data.ignored_url_count, 1);
 }
 
@@ -446,7 +448,7 @@ function run() {
   testRejectsEmptyInput();
   testRejectsDouyinLinksWithoutVideoId();
   testNormalizesSourceUrls();
-  testRemovesDuplicateUrlsFromSourceHint();
+  testKeepsUnselectedDuplicateUrlInSourceHint();
   testRejectsAssetsForPhaseOne();
   testExtractsAwemeIdFromSupportedInputs();
   testBuildsStableCreativeContext();

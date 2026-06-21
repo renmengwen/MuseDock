@@ -150,7 +150,7 @@ function removeUrlFromText(text, url) {
 
   const punctuation = '[\\s\\u3002\\uff0c\\uff1b\\uff1a\\uff01\\uff1f\\u3001,.;:!?]*';
   const escapedUrl = sourceUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const urlWithNoise = new RegExp(`${punctuation}${escapedUrl}${punctuation}`, 'g');
+  const urlWithNoise = new RegExp(`${punctuation}${escapedUrl}${punctuation}`);
   return sourceText.replace(urlWithNoise, ' ').replace(/\s+/g, ' ').trim();
 }
 
