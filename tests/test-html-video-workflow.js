@@ -259,6 +259,128 @@ function fullSceneCaption(sceneId, text, duration) {
     projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
   }
 
+  const tenSceneSpec = {
+    title: '最新根因回归',
+    aspect_ratio: '9:16',
+    scenes: Array.from({ length: 10 }, (_, index) => ({
+      id: `scene_${String(index + 1).padStart(2, '0')}`,
+      order: index + 1,
+      duration: 1,
+      kind: 'text',
+      narration_text: `第 ${index + 1} 段新旁白`,
+      captions: [{ start: 0, end: 1, text: `第 ${index + 1} 段新字幕` }],
+      visual_text: { headline: `第 ${index + 1} 帧画面`, keywords: [], cards: [] },
+    })),
+  };
+  let latestRootBugTtsCalls = 0;
+  let latestRootBugMuxedAudio = null;
+  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => {
+    latestRootBugMuxedAudio = project.audio.narration_path;
+    return {
+      success: true,
+      message: 'mock render success',
+      project,
+      project_dir: projectDir,
+      html_video_project_path: projectDir,
+      output_path: path.join(projectDir, 'exports', 'output.mp4'),
+      diagnostics: [],
+    };
+  };
+  try {
+    const latestRootBugResult = await workflow.generateHtmlVideo({
+      workflowId: '202606170000000006_latest_root_bug',
+      runId: 'run_latest_root_bug',
+      rootDir,
+      sceneSpec: tenSceneSpec,
+      creativeContext: {
+        input: { raw_text: '旧音频七段，新字幕十段，AI 多出十一帧。' },
+        audio: {
+          path: path.join(rootDir, 'legacy-seven-segment.wav'),
+          status: 'ready',
+          segment_count: 7,
+        },
+      },
+      target: { html_video_generation_mode: 'raw_html' },
+      templateRegistry,
+      skipValidation: true,
+      services: {
+        aiTextModel: {
+          callTextModel: async ({ messages }) => {
+            const prompt = messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              const nodes = Array.from({ length: 11 }, (_, index) => ({
+                id: `scene_${String(index + 1).padStart(2, '0')}`,
+                kind: 'text',
+                label: `第 ${index + 1} 帧画面`,
+                durationSec: 1,
+                text: `第 ${index + 1} 段新字幕`,
+              }));
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: 'AI 多生成了一帧',
+                  nodes,
+                  edges: nodes.slice(1).map((node, index) => ({
+                    from: nodes[index].id,
+                    to: node.id,
+                    kind: 'sequence',
+                  })),
+                }),
+              };
+            }
+            const scene = tenSceneSpec.scenes.find(item => prompt.includes(`当前帧：${item.id}`));
+            assert.ok(scene, 'raw html prompt should target one of the ten scene_spec scenes');
+            return {
+              success: true,
+              text: `<!doctype html><html><body><main data-frame-id="${scene.id}"><h1 data-text-key="headline">${scene.visual_text.headline}</h1><p data-text-key="subtitle">${scene.captions[0].text}</p><section data-text-key="body">${scene.narration_text}</section></main></body></html>`,
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        ttsService: {
+          synthesizeSceneNarration: async ({ sceneSpec }) => {
+            latestRootBugTtsCalls += 1;
+            return {
+              success: true,
+              audio_manifest: {
+                source: 'scene_spec',
+                scene_spec_hash: computeSceneSpecSpeechHash(sceneSpec),
+                scene_count: sceneSpec.scenes.length,
+                scene_ids: sceneSpec.scenes.map(scene => scene.id),
+                combined_path: path.join(rootDir, 'tts-current-ten-scenes.wav'),
+                scenes: sceneSpec.scenes.map(scene => ({ scene_id: scene.id })),
+                status: 'ready',
+              },
+            };
+          },
+        },
+        visualQaService: {
+          inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+        },
+      },
+    });
+    assert.equal(latestRootBugResult.success, true, JSON.stringify({
+      message: latestRootBugResult.message,
+      diagnostics: latestRootBugResult.html_video_diagnostics,
+    }, null, 2));
+    assert.equal(latestRootBugResult.project.frames.length, 10);
+    assert.deepEqual(latestRootBugResult.project.frames.map(frame => frame.scene_id), tenSceneSpec.scenes.map(scene => scene.id));
+    assert.equal(latestRootBugTtsCalls, 1);
+    assert.equal(latestRootBugMuxedAudio, path.join(rootDir, 'tts-current-ten-scenes.wav'));
+    assert.equal(latestRootBugResult.project.audio.scene_count, 10);
+    assert.equal(latestRootBugResult.project.audio.scene_spec_hash, computeSceneSpecSpeechHash(tenSceneSpec));
+    assert.equal(latestRootBugResult.project.audio.status, 'ready');
+    assert.ok(latestRootBugResult.html_video_diagnostics.some(item => item.code === 'content_graph_scene_spec_mismatch'));
+    assert.equal(latestRootBugResult.html_video_diagnostics.some(item => item.code === 'audio_scene_spec_hash_mismatch'), false);
+    assert.deepEqual(latestRootBugResult.project.content_graph.nodes.map(node => node.id), tenSceneSpec.scenes.map(scene => scene.id));
+    assert.equal(latestRootBugResult.project.content_graph.nodes.some(node => node.id === 'scene_11'), false);
+  } finally {
+    projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
+  }
+
   const rawMissingSceneSpecResult = await workflow.generateHtmlVideo({
     workflowId: '202606170000000005_raw_missing_scene_spec',
     runId: 'run_raw_missing_scene_spec',

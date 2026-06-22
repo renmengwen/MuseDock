@@ -36,7 +36,7 @@ function stableComparableValue(value) {
 function normalizeCaption(value) {
   const caption = objectOrEmpty(value);
   return Object.keys(caption)
-    .filter(key => key !== 'duration')
+    .filter(key => key !== 'duration' && key !== 'id')
     .sort()
     .reduce((normalized, key) => {
       normalized[key] = stableComparableValue(caption[key]);
