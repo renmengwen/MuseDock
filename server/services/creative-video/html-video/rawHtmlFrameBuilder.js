@@ -4,6 +4,7 @@ const path = require('path');
 const { normalizeProject } = require('./projectSchema');
 const { topoSort, getNode, DEFAULT_FRAME_DURATION_SEC } = require('./contentGraph');
 const { ensureCaptionLayer, normalizeCaptionsForFrame } = require('./captionLayer');
+const { resolveNodeSceneId } = require('./sceneGraphBinding');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -110,13 +111,17 @@ async function buildRawHtmlFrameProject({
     const outputPath = resolveProjectPath(projectDir, htmlPath);
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-    const scene = scenes.get(nodeId) || {};
+    const sceneId = resolveNodeSceneId(node);
+    const scene = scenes.get(sceneId);
+    if (!scene) {
+      throw new Error(`内容图节点 ${nodeId} 未匹配到 scene_spec 场景 ${sceneId || '未指定'}。`);
+    }
     const durationSec = Number(node.durationSec || scene.duration || scene.target_duration_sec || DEFAULT_FRAME_DURATION_SEC);
     const normalizedDurationSec = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : DEFAULT_FRAME_DURATION_SEC;
     const captions = normalizeCaptions(scene, normalizedDurationSec);
     const frame = {
-      id: nodeId,
-      scene_id: nodeId,
+      id: scene.id,
+      scene_id: scene.id,
       graph_node_id: nodeId,
       order: index + 1,
       template_id: template.id || null,
@@ -132,6 +137,12 @@ async function buildRawHtmlFrameProject({
         frame_intent: node.kind || scene.kind || 'text',
         visual_text: clone(scene.visual_text),
         graph_node: clone(node),
+        scene_snapshot: {
+          id: scene.id,
+          order: scene.order,
+          narration_text: scene.narration_text || '',
+          captions: clone(scene.captions),
+        },
       },
       ...defaultFrameFields(),
     };

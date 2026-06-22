@@ -73,6 +73,74 @@ const { buildRawHtmlFrameProject } = require('../server/services/creative-video/
   assert.match(secondHtml, /data-role="subtitle-caption"/);
   assert.match(secondHtml, /第二幕旁白/);
 
+  await assert.rejects(async () => {
+    await buildRawHtmlFrameProject({
+      projectDir,
+      workflowId: 'wf',
+      runId: 'run',
+      graph: {
+        nodes: [
+          { id: 'scene_01' },
+          { id: 'scene_02' },
+        ],
+        edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence' }],
+      },
+      frameHtmlByNodeId: {
+        scene_01: '<html><body><main data-text-key="headline">A</main></body></html>',
+        scene_02: '<html><body><main data-text-key="headline">B</main></body></html>',
+      },
+      sceneSpec: {
+        scenes: [
+          { id: 'scene_01', order: 1, narration_text: '第一段', captions: [{ text: '字幕一' }] },
+        ],
+      },
+      target: {},
+      template: { id: 'template-a' },
+    });
+  }, /内容图节点 scene_02 未匹配到 scene_spec 场景/);
+
+  {
+    const boundProject = await buildRawHtmlFrameProject({
+      projectDir,
+      workflowId: 'wf',
+      runId: 'run-bound',
+      graph: {
+        nodes: [
+          { id: 'node_a', scene_id: 'scene_01', durationSec: 4 },
+        ],
+        edges: [],
+      },
+      frameHtmlByNodeId: {
+        node_a: '<html><body><main data-text-key="headline">A</main></body></html>',
+      },
+      sceneSpec: {
+        scenes: [
+          { id: 'scene_01', order: 1, narration_text: '第一段', captions: [{ text: '字幕一' }], visual_text: { headline: '标题一' } },
+        ],
+      },
+      target: {},
+      template: { id: 'template-a' },
+    });
+    assert.equal(boundProject.frames.length, 1);
+    assert.equal(boundProject.frames[0].id, 'scene_01');
+    assert.equal(boundProject.frames[0].scene_id, 'scene_01');
+    assert.equal(boundProject.frames[0].graph_node_id, 'node_a');
+    assert.equal(boundProject.frames[0].html_path, 'frames/01-node_a.html');
+    assert.equal(boundProject.frames[0].narration_text, '第一段');
+    assert.deepEqual(boundProject.frames[0].captions, [{
+      id: 'scene_01_caption_01',
+      start: 0,
+      end: 4,
+      duration: 4,
+      text: '字幕一',
+    }]);
+    assert.equal(boundProject.frames[0].metadata.graph_node.id, 'node_a');
+    assert.equal(boundProject.frames[0].metadata.scene_snapshot.id, 'scene_01');
+    assert.equal(boundProject.frames[0].metadata.scene_snapshot.order, 1);
+    assert.equal(boundProject.frames[0].metadata.scene_snapshot.narration_text, '第一段');
+    assert.deepEqual(boundProject.frames[0].metadata.scene_snapshot.captions, [{ text: '字幕一' }]);
+  }
+
   console.log('html-video raw html frame builder tests passed');
 })().catch(error => {
   console.error(error);
