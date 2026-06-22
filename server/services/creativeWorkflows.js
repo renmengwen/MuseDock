@@ -7,6 +7,7 @@ const defaultResearchService = require('./researchService');
 const mediaPipeline = require('./mediaPipeline');
 const defaultAgentRuns = require('./agentRuns');
 const aiModelConfig = require('./aiModelConfig');
+const appSettings = require('./appSettings');
 const defaultCreativeVideoEditor = require('./creativeVideoEditor');
 const defaultCreativeVideoRerender = require('./creativeVideoRerender');
 const sceneSpecService = require('./sceneSpec');
@@ -582,7 +583,67 @@ function resolveServices(options = {}) {
     mediaPipeline: services.mediaPipeline || mediaPipeline,
     agentRuns: services.agentRuns || defaultAgentRuns,
     aiModelConfig: services.aiModelConfig || aiModelConfig,
+    appSettings: services.appSettings || appSettings,
     sourceFetch: services.sourceFetch || defaultSourceFetch,
+  };
+}
+
+function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride = {}, payload = {}) {
+  const defaultsSource = defaults && typeof defaults === 'object' ? defaults : {};
+  const overrideSource = creativeDefaultsOverride && typeof creativeDefaultsOverride === 'object'
+    ? creativeDefaultsOverride
+    : {};
+  const payloadSource = payload && typeof payload === 'object' ? payload : {};
+  const defaultTemplates = defaultsSource.templateByAspectRatio && typeof defaultsSource.templateByAspectRatio === 'object'
+    ? defaultsSource.templateByAspectRatio
+    : {};
+  const overrideTemplates = overrideSource.templateByAspectRatio && typeof overrideSource.templateByAspectRatio === 'object'
+    ? overrideSource.templateByAspectRatio
+    : {};
+  const templateByAspectRatio = {
+    ...defaultTemplates,
+    ...overrideTemplates,
+  };
+
+  const aspectRatio = safeString(overrideSource.aspectRatio) || safeString(defaultsSource.aspectRatio);
+  const targetDurationSec = Number.isFinite(Number(overrideSource.targetDurationSec))
+    ? Number(overrideSource.targetDurationSec)
+    : Number(defaultsSource.targetDurationSec);
+  const useResearchFromDefaults = defaultsSource.useResearch !== false;
+  const useResearch = typeof overrideSource.useResearch === 'boolean'
+    ? overrideSource.useResearch
+    : (typeof payloadSource.useResearch === 'boolean' ? payloadSource.useResearch : useResearchFromDefaults);
+  const templateId = safeString(overrideSource.templateId) || safeString(templateByAspectRatio[aspectRatio]);
+
+  return {
+    aspectRatio,
+    targetDurationSec,
+    templateByAspectRatio,
+    templateId,
+    lockTemplate: typeof overrideSource.lockTemplate === 'boolean'
+      ? overrideSource.lockTemplate
+      : defaultsSource.lockTemplate === true,
+    useResearch,
+  };
+}
+
+function buildWorkflowTarget(snapshot = {}) {
+  return {
+    aspect_ratio: safeString(snapshot.aspectRatio),
+    duration_sec: Number(snapshot.targetDurationSec),
+    preferredTemplateId: safeString(snapshot.templateId),
+    lockTemplate: snapshot.lockTemplate === true,
+  };
+}
+
+function mergeProjectOptions(recordTarget = {}, incoming = {}) {
+  const target = recordTarget && typeof recordTarget === 'object' ? recordTarget : {};
+  const incomingOptions = incoming && typeof incoming === 'object' ? incoming : {};
+  return {
+    ...target,
+    ...incomingOptions,
+    preferredTemplateId: safeString(target.preferredTemplateId) || safeString(incomingOptions.preferredTemplateId),
+    lockTemplate: target.lockTemplate === true,
   };
 }
 
@@ -616,10 +677,21 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const services = resolveServices(options);
   const now = getNow(services);
-  const normalized = creativeContext.normalizeCreativeInput(payload);
+  const creativeDefaults = await services.appSettings.getCreativeDefaults(options);
+  const snapshot = buildCreativeDefaultsSnapshot(
+    creativeDefaults,
+    payload && typeof payload === 'object' ? payload.creativeDefaultsOverride : {},
+    payload,
+  );
+  const effectivePayload = {
+    ...(payload || {}),
+    useResearch: snapshot.useResearch,
+  };
+  const normalized = creativeContext.normalizeCreativeInput(effectivePayload);
   if (!normalized.success) {
-    return normalizeFailureResult(normalized, payload);
+    return normalizeFailureResult(normalized, effectivePayload);
   }
+  const effectiveSystemSettings = await services.appSettings.getEffectiveSystemSettings(options);
 
   const workflowId = safeString(typeof services.idFactory === 'function' ? services.idFactory() : makeId(now));
   const awemeId = normalized.data.mode === 'douyin'
@@ -672,7 +744,9 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
     stages,
     result: null,
     error: null,
-    skipValidation: normalized.data.skip_validation === true,
+    creative_defaults_snapshot: snapshot,
+    target: buildWorkflowTarget(snapshot),
+    skipValidation: normalized.data.skip_validation === true || effectiveSystemSettings.skipValidation === true,
     created_at: now,
     updated_at: now,
   };
@@ -1489,10 +1563,17 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     return stoppedOrFailed;
   }
 
-  let skipValidation = options.skipValidation === true;
-  if (!skipValidation && services.aiModelConfig) {
-    try { skipValidation = await services.aiModelConfig.getSkipValidation({ rootDir }); } catch {}
+  let skipValidation = options.skipValidation === true || record.skipValidation === true;
+  if (!skipValidation && typeof record.skipValidation !== 'boolean') {
+    try {
+      const effectiveSystemSettings = await services.appSettings.getEffectiveSystemSettings(options);
+      skipValidation = effectiveSystemSettings.skipValidation === true;
+    } catch {}
   }
+  const existingProjectOptions = {
+    ...(options.projectOptions && typeof options.projectOptions === 'object' ? options.projectOptions : {}),
+    creative_context: record.creative_context,
+  };
 
   const projectStageResult = await runStage(record, 'project', rootDir, async () => ensureSuccess(
     await services.agentRuns.generateDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
@@ -1507,9 +1588,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
           message: event?.message || '正在生成 html-video 工程...',
         });
       },
-      projectOptions: {
-        creative_context: record.creative_context,
-      },
+      projectOptions: mergeProjectOptions(record.target, existingProjectOptions),
     }),
     '工程生成失败。',
   ), services, taskContext);
