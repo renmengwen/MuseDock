@@ -58,7 +58,7 @@ async function createVerticalTemplate(rootDir) {
         duration: 8,
         kind: 'data',
         narration_text: '第一段',
-        captions: [],
+        captions: [{ id: 'scene_01_caption_01', start: 0, end: 8, duration: 8, text: '第一段' }],
         visual_text: {
           headline: '600 亿美元全股票收购',
           keywords: ['$60B', 'SpaceX'],
@@ -71,7 +71,7 @@ async function createVerticalTemplate(rootDir) {
         duration: 12,
         kind: 'data',
         narration_text: '第二段',
-        captions: [],
+        captions: [{ id: 'scene_02_caption_01', start: 0, end: 12, duration: 12, text: '第二段' }],
         visual_text: {
           headline: '第三季度完成，分手费高昂',
           keywords: ['$1.5B', '$8.5B'],
@@ -94,7 +94,7 @@ async function createVerticalTemplate(rootDir) {
       aiTextModel: {
         callTextModel: async ({ messages }) => {
           const prompt = messages.map(item => item.content).join('\n');
-          if (prompt.includes('模板选择助手')) {
+          if (prompt.includes('"template_id"')) {
             assert.match(prompt, /"aspect_ratio": "9:16"/);
             return { success: true, text: JSON.stringify({ template_id: 'news_signal_vertical', reason: '竖屏财经', confidence: 0.95 }) };
           }
