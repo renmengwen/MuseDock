@@ -49,6 +49,10 @@ function defaultAudio() {
   return {
     tts_manifest_path: null,
     narration_path: null,
+    source: null,
+    scene_spec_hash: null,
+    scene_count: 0,
+    scene_ids: [],
     music_path: null,
     mix: {
       music_volume_db: -18,
@@ -200,6 +204,7 @@ function normalizeAudio(value) {
   return {
     ...defaults,
     ...input,
+    scene_ids: arrayOrEmpty(input.scene_ids || input.sceneIds),
     mix: {
       ...defaults.mix,
       ...mix,

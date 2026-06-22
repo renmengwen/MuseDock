@@ -29,6 +29,10 @@ assert.deepEqual(project.assets, []);
 assert.deepEqual(project.audio, {
   tts_manifest_path: null,
   narration_path: null,
+  source: null,
+  scene_spec_hash: null,
+  scene_count: 0,
+  scene_ids: [],
   music_path: null,
   mix: {
     music_volume_db: -18,
@@ -59,6 +63,46 @@ assert.deepEqual(outputProject.output.resolution, { width: 1080, height: 1920 })
 assert.equal(outputProject.output.fps, 24);
 assert.equal(outputProject.output.duration, 7);
 assert.equal(outputProject.template_schema.properties.headline.label, '标题');
+
+const audioHashProject = schema.normalizeProject({
+  project_id: 'audio_hash_project',
+  audio: {
+    source: 'scene_spec',
+    scene_spec_hash: 'hash-001',
+    scene_count: 2,
+    scene_ids: ['scene_01', 'scene_02'],
+    narration_path: 'tts/narration.wav',
+    tts_manifest_path: 'tts/manifest.json',
+    music_path: 'music/background.mp3',
+    mix: {
+      music_volume_db: -12,
+      narration_volume_db: 1,
+    },
+  },
+});
+
+assert.equal(audioHashProject.audio.source, 'scene_spec');
+assert.equal(audioHashProject.audio.scene_spec_hash, 'hash-001');
+assert.equal(audioHashProject.audio.scene_count, 2);
+assert.deepEqual(audioHashProject.audio.scene_ids, ['scene_01', 'scene_02']);
+assert.equal(audioHashProject.audio.narration_path, 'tts/narration.wav');
+assert.equal(audioHashProject.audio.tts_manifest_path, 'tts/manifest.json');
+assert.equal(audioHashProject.audio.music_path, 'music/background.mp3');
+assert.equal(audioHashProject.audio.mix.music_volume_db, -12);
+assert.equal(audioHashProject.audio.mix.narration_volume_db, 1);
+assert.equal(audioHashProject.audio.mix.fade_in_sec, 0);
+assert.equal(audioHashProject.audio.mix.fade_out_sec, 1.5);
+
+{
+  const project = schema.normalizeProject({
+    project_id: 'audio_hash_camel_project',
+    audio: {
+      sceneIds: ['scene_camel_01', 'scene_camel_02'],
+    },
+  });
+
+  assert.deepEqual(project.audio.scene_ids, ['scene_camel_01', 'scene_camel_02']);
+}
 
 const normalized = schema.normalizeProject({
   project_id: 'project_002',
