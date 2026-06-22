@@ -364,7 +364,26 @@ git commit -m "添加应用设置配置服务"
 
 - [ ] **Step 1: 写失败路由测试**
 
-创建 `tests/test-config-settings-routes.js`。测试用 Express app 挂载 `server/routes/config.js`，用注入或临时 config path 避免写真实 `data/config`。如果现有 route 不支持注入，先测试公开路由 shape，再在 Step 3 添加轻量注入点。
+创建 `tests/test-config-settings-routes.js`。本任务假设 Task 1 已完成，`server/services/appSettings.js` 已存在；如果单独执行本任务，先用最小 stub 提供同名模块，再在 Task 1 合并时删除 stub。
+
+第一版测试用静态结构断言，不要求 route 先支持依赖注入：
+
+```js
+import assert from 'assert';
+import fs from 'fs';
+
+const source = fs.readFileSync('server/routes/config.js', 'utf-8');
+
+assert.match(source, /app-settings/);
+assert.match(source, /templates/);
+assert.match(source, /getAppSettingsRoute|router\.get\('\/app-settings'/);
+assert.match(source, /saveAppSettingsRoute|router\.post\('\/app-settings'/);
+assert.match(source, /getConfigTemplatesRoute|router\.get\('\/templates'/);
+
+console.log('config settings route static tests passed');
+```
+
+Step 3 实现后，再把同一文件扩展为 Express 集成测试，挂载 `server/routes/config.js`，用临时 config path 或轻量依赖注入避免写真实 `data/config`。
 
 Core assertions:
 
@@ -538,7 +557,7 @@ Expected: fails because cleanup functions and route do not exist.
 
 - [ ] **Step 3: 实现 cleanup helpers**
 
-Add exports in `systemMaintenance.js`:
+在 Task 3 的 `module.exports` 基础上追加 cleanup 相关导出，不要重写一份不一致的导出列表。最终 `systemMaintenance.js` 导出应为：
 
 ```js
 module.exports = {
@@ -558,7 +577,7 @@ module.exports = {
 
 Implementation requirements:
 
-- `isPathInside(child, parent)` uses `path.resolve()` and `path.relative()`; equal path is allowed only when target type explicitly deletes that root, not for render output file deletion.
+- `isPathInside(child, parent)` uses `path.resolve()` and `path.relative()`；相等路径只允许在 target 明确删除该 root 时使用。例如 `creative-workflows` 可以删除 `rootDir` 下的 workflow record 文件或重建空目录；`render-outputs` 绝不允许删除 `data/media/douyin` 整个目录，只能删识别出的产物文件。
 - `cleanupTargets({ targets, rootDir, mediaRoot, browserDataRoot, cookieFile, storedCookies, hasRunningCreativeTasks })` returns:
 
 ```json
@@ -622,6 +641,7 @@ git commit -m "添加系统数据清理能力"
 - `runCreativeWorkflow()` 不读取最新 app settings，只使用 record 内 `target` 和 snapshot。
 - `runCreativeWorkflow()` 合并 `projectOptions` 时遵守 N1 规则。
 - `skipValidation` 有效值来自 `appSettings.getEffectiveSystemSettings()`，旧 ai-models 仅作降级。
+- `runCreativeWorkflow()` 不再直接调用 `aiModelConfig.getSkipValidation()`；旧兼容逻辑只允许留在 `appSettings.getEffectiveSystemSettings()` 内。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -638,6 +658,8 @@ git commit -m "添加系统数据清理能力"
   - `input.use_research === false`
 - 创建 workflow 传 `useResearch: true`，断言兼容旧字段覆盖默认。
 - 创建 workflow 传 `creativeDefaultsOverride: { useResearch: true, aspectRatio: '9:16' }`，断言新字段覆盖默认。
+- 创建 workflow 同时传 `useResearch: false` 和 `creativeDefaultsOverride: { useResearch: true }`，断言新字段优先，最终 `input.use_research === true`。
+- mock `aiModelConfig.getSkipValidation()` 抛错、`services.appSettings.getEffectiveSystemSettings()` 返回 `{ skipValidation: true }`，断言创建和运行 workflow 不直接依赖 `aiModelConfig.getSkipValidation()`。
 - 运行 workflow 时修改 mock appSettings 返回值，断言 agentRuns 收到的 `projectOptions` 仍来自 record.target。
 - 运行 workflow 传 incoming `projectOptions.preferredTemplateId = 'runtime_override'`，断言最终仍是 record.target 的模板。
 
@@ -656,7 +678,7 @@ In `server/services/creativeWorkflows.js`:
 - Add pure helpers near create workflow code:
 
 ```js
-function buildCreativeDefaultsSnapshot(defaults = {}, override = {}, payload = {}) {
+function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride = {}, payload = {}) {
   // Return { aspectRatio, targetDurationSec, templateId, lockTemplate, useResearch }.
 }
 
@@ -671,9 +693,20 @@ function mergeProjectOptions(recordTarget = {}, incoming = {}) {
 
 Helper behavior:
 
-- `templateId` resolves from `override.templateId` first, then `defaults.templateByAspectRatio[aspectRatio]`。
-- If `payload.useResearch` is boolean, treat it as override after app settings.
-- If `payload.creativeDefaultsOverride.useResearch` is boolean, it overrides default. If both old and new fields exist, new `creativeDefaultsOverride` wins.
+- `creativeDefaultsOverride` 参数只表示 `payload.creativeDefaultsOverride`，不要把旧兼容字段混进这个参数。
+- 字段优先级固定为 `defaults < payload.useResearch 旧兼容字段 < creativeDefaultsOverride`；如果新旧字段同时存在，新字段 wins。
+- Pseudocode:
+
+```js
+const override = payload.creativeDefaultsOverride || {};
+const aspectRatio = override.aspectRatio || defaults.aspectRatio || '9:16';
+const templateId = override.templateId || defaults.templateByAspectRatio?.[aspectRatio] || '';
+let useResearch = defaults.useResearch !== false;
+if (typeof payload.useResearch === 'boolean') useResearch = payload.useResearch;
+if (typeof override.useResearch === 'boolean') useResearch = override.useResearch;
+```
+
+- `targetDurationSec`、`lockTemplate` 使用同样的 `defaults < creativeDefaultsOverride` 顺序。
 - Do not mutate original `payload`.
 - Pass `effectivePayload` to `creativeContext.normalizeCreativeInput(effectivePayload)`。
 
@@ -725,6 +758,7 @@ git commit -m "添加一键创作默认值快照"
 
 **Acceptance:**
 - `generateHtmlVideo({ preferredTemplateId = '', lockTemplate = false })` supports preferred and locked template.
+- 所有新参数都有默认值；现有调用方不传 `preferredTemplateId`、`lockTemplate` 时行为不变。
 - `requestTemplateSelection({ preferredTemplateId = '', lockTemplate = false })` supports prompt preference.
 - `lockTemplate=false` 且模板有效时，首选模板排在 compact index 第一位，AI 仍可选择其他模板。
 - `lockTemplate=false` 且模板无效时，记录诊断并回退普通选择。
@@ -746,6 +780,7 @@ Test cases:
 - preferred missing + unlocked: result still succeeds with fallback, diagnostics includes `preferred_template_unavailable`。
 - preferred incompatible + locked: result fails, message matches `默认模板 vertical_template 不支持当前画面比例 16:9`。
 - preferred valid + locked: result uses preferred id even if model mock would choose another id.
+- backward compatibility: direct call to `generateHtmlVideo({ workflowId, runId, sceneSpec, creativeContext, target, templateRegistry, services })` without new params still succeeds exactly as before.
 - facade pass-through: mock `htmlVideoWorkflow.generateHtmlVideo` receives `preferredTemplateId` and `lockTemplate` from `target`。
 
 - [ ] **Step 2: 确认测试失败**
@@ -842,6 +877,7 @@ Before commit, ensure `git diff --cached` does not include unrelated pre-existin
 **Files:**
 - Modify: `frontend-react/src/api/client.js`
 - Modify: `frontend-react/src/pages/SettingsPage.jsx`
+- Modify: `frontend-react/src/styles.css`
 - Create: `frontend-react/src/components/settings/SettingsOverview.jsx`
 - Create: `frontend-react/src/components/settings/ModelSettings.jsx`
 - Create: `tests/test-settings-center-shell.mjs`
@@ -965,6 +1001,7 @@ In `SettingsPage.jsx`:
 - Provide `saveAppSettings(nextSettings)` that calls `api.saveAppSettings()` and updates Chinese status。
 - Render left nav with exact labels。
 - Render right content by section。
+- 先在 `frontend-react/src/styles.css` 追加最小布局样式，只包含 `.settingsCenterLayout`、`.settingsCenterNav`、`.settingsPanel` 三个 class，让 Task 8/9 开发时页面可用；完整细节留给 Task 11。
 
 - [ ] **Step 7: 跑测试**
 
@@ -982,7 +1019,7 @@ Expected: both pass.
 Run:
 
 ```powershell
-git add frontend-react/src/api/client.js frontend-react/src/pages/SettingsPage.jsx frontend-react/src/components/settings/SettingsOverview.jsx frontend-react/src/components/settings/ModelSettings.jsx tests/test-settings-center-shell.mjs
+git add frontend-react/src/api/client.js frontend-react/src/pages/SettingsPage.jsx frontend-react/src/styles.css frontend-react/src/components/settings/SettingsOverview.jsx frontend-react/src/components/settings/ModelSettings.jsx tests/test-settings-center-shell.mjs
 git commit -m "重做设置中心页面壳层"
 ```
 
@@ -1259,6 +1296,7 @@ const source = fs.readFileSync('frontend-react/src/pages/OneClickCreativePage.js
 assert.match(source, /useResearchTouched/);
 assert.match(source, /api\.getAppSettings\(\)/);
 assert.match(source, /creativeDefaultsOverride/);
+assert.match(source, /useResearchTouchedRef/);
 assert.match(source, /setUseResearchTouched\(true\)/);
 assert.doesNotMatch(source, /useResearch:\s*useResearch,\s*assetIds/s);
 
@@ -1278,6 +1316,7 @@ Expected: fails because touched state does not exist.
 In `OneClickCreativePage.jsx`:
 
 - Add `const [useResearchTouched, setUseResearchTouched] = useState(false);`
+- Add `const useResearchTouchedRef = useRef(false);` and include `useRef` in the React import.
 - Add effect to load app settings:
 
 ```jsx
@@ -1287,24 +1326,25 @@ useEffect(() => {
     try {
       const json = await api.getAppSettings();
       const config = json?.data || json;
-      if (!cancelled && !useResearchTouched) {
+      if (!cancelled && !useResearchTouchedRef.current) {
         setUseResearch(config?.creativeDefaults?.useResearch !== false);
       }
     } catch {
-      if (!cancelled && !useResearchTouched) {
+      if (!cancelled && !useResearchTouchedRef.current) {
         setUseResearch(true);
       }
     }
   }
   loadCreativeDefaults();
   return () => { cancelled = true; };
-}, [useResearchTouched]);
+}, []);
 ```
 
 - Update `CreativeComposer` setter:
 
 ```jsx
 setUseResearch={(value) => {
+  useResearchTouchedRef.current = true;
   setUseResearchTouched(true);
   setUseResearch(value);
 }}
