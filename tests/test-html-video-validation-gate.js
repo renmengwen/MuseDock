@@ -82,6 +82,40 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const registry = createTemplateRegistry({ rootDir: templateRoot });
   registry.scanTemplates();
 
+  const timelineSceneSpec = {
+    scenes: [
+      { id: 'scene_01', order: 1, narration_text: '第一段', captions: [{ text: '字幕一' }] },
+    ],
+  };
+
+  function timelineGateProject(audio, frameOverrides = {}) {
+    return {
+      template_id: 'valid',
+      template_inputs: { headline: '标题' },
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30 },
+      frames: [
+        {
+          id: 'scene_01',
+          scene_id: 'scene_01',
+          template_id: 'valid',
+          inputs: { headline: '帧标题' },
+          narration_text: '第一段',
+          captions: [{ text: '字幕一' }],
+          ...frameOverrides,
+        },
+      ],
+      audio,
+    };
+  }
+
+  function assertHasDiagnostic(result, code) {
+    assert.equal(result.diagnostics.some(item => item.code === code), true);
+  }
+
+  function assertLacksDiagnostic(result, code) {
+    assert.equal(result.diagnostics.some(item => item.code === code), false);
+  }
+
   const project = {
     template_id: 'missing',
     template_inputs: {},
@@ -148,6 +182,148 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   });
   assert.equal(pass.ok, true);
   assert.deepEqual(pass.diagnostics, []);
+
+  const emptySceneSpec = await validateHtmlVideoProject({
+    projectDir: rootDir,
+    project: timelineGateProject({
+      source: 'scene_spec',
+      scene_spec_hash: 'legacy-hash',
+      scene_count: 0,
+      scene_ids: [],
+      status: 'ready',
+    }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+    sceneSpec: { scenes: [] },
+  });
+  assert.equal(emptySceneSpec.ok, false);
+  assertHasDiagnostic(emptySceneSpec, 'scene_spec_empty');
+
+  const timelineMismatch = await validateHtmlVideoProject({
+    projectDir: rootDir,
+    project: timelineGateProject({
+      source: 'scene_spec',
+      scene_spec_hash: 'legacy-hash',
+      scene_count: 1,
+      scene_ids: ['scene_01'],
+      narration_path: 'tts/legacy.wav',
+      status: 'ready',
+    }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+    sceneSpec: timelineSceneSpec,
+  });
+  assert.equal(timelineMismatch.ok, false);
+  assertHasDiagnostic(timelineMismatch, 'audio_scene_spec_hash_mismatch');
+
+  const combinedTimelineMismatch = await validateHtmlVideoProject({
+    projectDir: rootDir,
+    project: timelineGateProject({
+      source: 'scene_spec',
+      scene_spec_hash: 'legacy-hash',
+      scene_count: 1,
+      scene_ids: ['scene_01'],
+      narration_path: 'tts/legacy.wav',
+      status: 'ready',
+    }, { narration_text: '错误旁白' }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+    sceneSpec: timelineSceneSpec,
+  });
+  assert.equal(combinedTimelineMismatch.ok, false);
+  assertHasDiagnostic(combinedTimelineMismatch, 'audio_scene_spec_hash_mismatch');
+  assertHasDiagnostic(combinedTimelineMismatch, 'frame_narration_mismatch');
+
+  const structuralBeforeTimelineProject = timelineGateProject({
+    source: 'scene_spec',
+    scene_spec_hash: 'legacy-hash',
+    scene_count: 1,
+    scene_ids: ['scene_01'],
+    narration_path: 'tts/legacy.wav',
+    status: 'ready',
+  }, { narration_text: '错误旁白' });
+  structuralBeforeTimelineProject.timeline = {
+    tracks: [{ id: 'main', items: [{ id: 'bad', kind: 'clip' }] }],
+  };
+  const structuralBeforeTimeline = await validateHtmlVideoProject({
+    projectDir: rootDir,
+    project: structuralBeforeTimelineProject,
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+    sceneSpec: timelineSceneSpec,
+  });
+  const orderedCodes = structuralBeforeTimeline.diagnostics.map(item => item.code);
+  const structuralIndex = orderedCodes.indexOf('timeline_item_kind_unsupported');
+  const timelineIndex = orderedCodes.indexOf('frame_narration_mismatch');
+  assert.ok(structuralIndex >= 0, '缺少结构校验诊断 timeline_item_kind_unsupported');
+  assert.ok(timelineIndex > structuralIndex, 'timeline consistency 诊断应追加在结构校验之后');
+
+  const pathTimelineMismatch = await validateHtmlVideoProject({
+    projectDir: rootDir,
+    project: timelineGateProject({
+      source: 'scene_spec',
+      scene_spec_hash: 'legacy-hash',
+      scene_count: 1,
+      scene_ids: ['scene_01'],
+      path: 'tts/legacy.wav',
+      status: 'ready',
+    }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+    sceneSpec: timelineSceneSpec,
+  });
+  assert.equal(pathTimelineMismatch.ok, false);
+  assertHasDiagnostic(pathTimelineMismatch, 'audio_scene_spec_hash_mismatch');
+
+  const narrationPathTimelineMismatch = await validateHtmlVideoProject({
+    projectDir: rootDir,
+    project: timelineGateProject({
+      source: 'scene_spec',
+      scene_spec_hash: 'legacy-hash',
+      scene_count: 1,
+      scene_ids: ['scene_01'],
+      narrationPath: 'tts/legacy.wav',
+      status: 'ready',
+    }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+    sceneSpec: timelineSceneSpec,
+  });
+  assert.equal(narrationPathTimelineMismatch.ok, false);
+  assertHasDiagnostic(narrationPathTimelineMismatch, 'audio_scene_spec_hash_mismatch');
+
+  const combinedPathTimelineMismatch = await validateHtmlVideoProject({
+    projectDir: rootDir,
+    project: timelineGateProject({
+      source: 'scene_spec',
+      scene_spec_hash: 'legacy-hash',
+      scene_count: 1,
+      scene_ids: ['scene_01'],
+      combined_path: 'tts/legacy.wav',
+      status: 'ready',
+    }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+    sceneSpec: timelineSceneSpec,
+  });
+  assert.equal(combinedPathTimelineMismatch.ok, false);
+  assertHasDiagnostic(combinedPathTimelineMismatch, 'audio_scene_spec_hash_mismatch');
+
+  const noAudioPathTimelinePass = await validateHtmlVideoProject({
+    projectDir: rootDir,
+    project: timelineGateProject({
+      source: 'scene_spec',
+      scene_spec_hash: 'legacy-hash',
+      scene_count: 1,
+      scene_ids: ['scene_01'],
+      status: 'ready',
+    }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+    sceneSpec: timelineSceneSpec,
+  });
+  assert.equal(noAudioPathTimelinePass.ok, true);
+  assertLacksDiagnostic(noAudioPathTimelinePass, 'audio_scene_spec_hash_mismatch');
 
   const rawHtmlPass = await validateHtmlVideoProject({
     project: {

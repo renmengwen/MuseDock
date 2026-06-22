@@ -6,6 +6,7 @@ const { validateProject } = require('./projectSchema');
 const { mappedEngine } = require('./templateRegistry');
 const { validateTemplateInputs } = require('./templateInputAgent');
 const { validateHtmlTargetResolution } = require('./frameHtmlAgent');
+const { validateSceneSpecTimelineConsistency } = require('./timelineConsistency');
 
 const SUPPORTED_ENGINES = new Set(['hyperframes', 'hyperframes-playwright']);
 
@@ -199,6 +200,7 @@ async function validateHtmlVideoProject({
   projectDir,
   templateRegistry,
   environment,
+  sceneSpec,
   options = {},
 } = {}) {
   const input = objectOrEmpty(project);
@@ -256,6 +258,15 @@ async function validateHtmlVideoProject({
       }
     }
   });
+
+  if (sceneSpec) {
+    const timelineConsistency = validateSceneSpecTimelineConsistency({
+      sceneSpec,
+      project: input,
+      audio: input.audio,
+    });
+    diagnostics.push(...timelineConsistency.diagnostics);
+  }
 
   const htmlOverride = objectOrEmpty(objectOrEmpty(input.overrides).html);
   if (htmlOverride.enabled === true) {
