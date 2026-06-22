@@ -18,6 +18,7 @@ const { parseJsonOnlyResponse } = require('./templateInputAgent');
 const defaultVisualQaService = require('../visualQaService');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
 const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('./sceneSpecMapper');
+const { validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -179,6 +180,10 @@ function resolveGenerationMode(target = {}) {
     || 'raw_html';
 }
 
+function hasSceneSpecScenes(sceneSpec) {
+  return Boolean(sceneSpec && Array.isArray(sceneSpec.scenes) && sceneSpec.scenes.length > 0);
+}
+
 function buildInitialProject({ workflowId, runId, sceneSpec, template, templateInputs, target }) {
   const duration = durationFromTarget(target, template);
   const output = objectOrEmpty(template.output);
@@ -309,6 +314,20 @@ async function generateHtmlVideo({
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
   const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
   const generationMode = resolveGenerationMode(templateRenderTarget);
+  if (generationMode === 'raw_html' && !hasSceneSpecScenes(sceneSpec)) {
+    return failure('缺少 scene_spec，无法生成 raw_html 帧。', [
+      createDiagnostic({
+        code: 'scene_spec_missing',
+        stage: 'project',
+        user_message: '缺少 scene_spec，无法生成 raw_html 帧。',
+        details: { generation_mode: generationMode },
+        fallback_allowed: false,
+      }),
+    ], {
+      html_video_project_path: projectDir,
+      project_dir: projectDir,
+    });
+  }
   let project;
   let templateInputs = {};
 
@@ -380,17 +399,39 @@ async function generateHtmlVideo({
         project_dir: projectDir,
       });
     }
+    let contentGraph = graphParsed.graph;
+    if (sceneSpec) {
+      const graphBinding = validateGraphMatchesSceneSpec(contentGraph, sceneSpec);
+      if (!graphBinding.ok) {
+        const message = '画面帧与字幕脚本不一致，已回退为字幕脚本生成画面结构。';
+        diagnostics.push(createDiagnostic({
+          code: 'content_graph_scene_spec_mismatch',
+          stage: 'ai-content-graph',
+          user_message: message,
+          details: graphBinding,
+          severity: 'warning',
+          fallback_allowed: true,
+        }));
+        await report(onProgress, {
+          type: 'html_video_graph_scene_spec_mismatch',
+          stage: 'project',
+          message,
+          data: graphBinding,
+        });
+        contentGraph = mapSceneSpecToContentGraph(sceneSpec);
+      }
+    }
     await report(onProgress, {
       type: 'html_video_graph_done',
       stage: 'project',
       message: 'html-video 内容图已生成。',
       data: {
-        node_count: graphParsed.graph.nodes?.length || 0,
-        edge_count: graphParsed.graph.edges?.length || 0,
+        node_count: contentGraph.nodes?.length || 0,
+        edge_count: contentGraph.edges?.length || 0,
       },
     });
     const frameHtmlByNodeId = {};
-    const nodes = graphParsed.graph.nodes || [];
+    const nodes = contentGraph.nodes || [];
     let visualStyleReferenceHtml = '';
     let previousFrameHtml = '';
     for (let index = 0; index < nodes.length; index += 1) {
@@ -406,7 +447,7 @@ async function generateHtmlVideo({
       });
       const htmlResult = await frameHtmlAgent.generateFrameHtml({
         model,
-        graph: graphParsed.graph,
+        graph: contentGraph,
         node: nodes[index],
         index,
         total: nodes.length,
@@ -448,7 +489,7 @@ async function generateHtmlVideo({
       projectDir,
       workflowId,
       runId,
-      graph: graphParsed.graph,
+      graph: contentGraph,
       frameHtmlByNodeId,
       sceneSpec,
       target: templateRenderTarget,

@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
+const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 
 async function writeFile(filePath, content) {
@@ -159,6 +160,128 @@ async function createVerticalTemplate(rootDir) {
   assert.ok(rawPathResult.html_video_diagnostics.some(item => item.code === 'raw_html_text_keys_missing'));
   assert.ok(rawCalls.some(call => call === 'render:scene_01:raw_html'));
   assert.ok(rawCalls.some(call => call === 'render:scene_02:raw_html'));
+
+  const originalRenderHtmlVideoProject = projectOrchestrator.renderHtmlVideoProject;
+  const progressMessages = [];
+  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
+    success: true,
+    message: 'mock render success',
+    project,
+    project_dir: projectDir,
+    html_video_project_path: projectDir,
+    output_path: path.join(projectDir, 'exports', 'output.mp4'),
+    diagnostics: [],
+  });
+  try {
+    const graphMismatchResult = await workflow.generateHtmlVideo({
+      workflowId: '202606170000000004_graph_mismatch',
+      runId: 'run_graph_mismatch',
+      rootDir,
+      sceneSpec: {
+        title: '内容图错位',
+        aspect_ratio: '9:16',
+        scenes: [
+          { id: 'scene_01', duration: 2, kind: 'text', narration_text: '第一幕旁白', captions: [], visual_text: { headline: '第一幕', keywords: [], cards: [] } },
+          { id: 'scene_02', duration: 2, kind: 'text', narration_text: '第二幕旁白', captions: [], visual_text: { headline: '第二幕', keywords: [], cards: [] } },
+        ],
+      },
+      creativeContext: { input: { raw_text: '内容图多出一帧' } },
+      target: { html_video_generation_mode: 'raw_html' },
+      templateRegistry,
+      skipValidation: true,
+      onProgress: event => {
+        progressMessages.push(event.message || '');
+      },
+      services: {
+        aiTextModel: {
+          callTextModel: async ({ messages }) => {
+            const prompt = messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: 'AI 多生成了一帧',
+                  nodes: [
+                    { id: 'scene_01', kind: 'text', label: '第一幕', durationSec: 2, text: '第一幕完整页面' },
+                    { id: 'scene_02', kind: 'text', label: '第二幕', durationSec: 2, text: '第二幕完整页面' },
+                    { id: 'scene_03', kind: 'text', label: '第三幕', durationSec: 2, text: '第三幕完整页面' },
+                  ],
+                  edges: [
+                    { from: 'scene_01', to: 'scene_02', kind: 'sequence' },
+                    { from: 'scene_02', to: 'scene_03', kind: 'sequence' },
+                  ],
+                }),
+              };
+            }
+            if (prompt.includes('当前帧：scene_01')) {
+              return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">第一幕</h1><p data-text-key="subtitle">短字幕</p><section data-text-key="body">第一幕完整页面</section></main></body></html>' };
+            }
+            if (prompt.includes('当前帧：scene_02')) {
+              return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_02"><h1 data-text-key="headline">第二幕</h1><p data-text-key="subtitle">短字幕</p><section data-text-key="body">第二幕完整页面</section></main></body></html>' };
+            }
+            return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_03"><h1 data-text-key="headline">第三幕</h1><p data-text-key="subtitle">短字幕</p><section data-text-key="body">第三幕完整页面</section></main></body></html>' };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      },
+    });
+    assert.equal(graphMismatchResult.success, true);
+    assert.equal(graphMismatchResult.project.frames.length, 2);
+    assert.deepEqual(graphMismatchResult.project.frames.map(frame => frame.scene_id), ['scene_01', 'scene_02']);
+    assert.equal(graphMismatchResult.project.frames.some(frame => frame.scene_id === 'scene_03'), false);
+    assert.deepEqual(graphMismatchResult.project.content_graph.nodes.map(node => node.id), ['scene_01', 'scene_02']);
+    assert.equal(graphMismatchResult.project.content_graph.nodes.some(node => node.id === 'scene_03'), false);
+    const mismatchDiagnostic = graphMismatchResult.html_video_diagnostics.find(item => item.code === 'content_graph_scene_spec_mismatch');
+    assert.ok(mismatchDiagnostic);
+    assert.equal(mismatchDiagnostic.stage, 'ai-content-graph');
+    assert.equal(mismatchDiagnostic.severity, 'warning');
+    assert.equal(mismatchDiagnostic.fallback_allowed, true);
+    assert.equal(mismatchDiagnostic.details.reason, 'node_count_mismatch');
+    assert.ok(progressMessages.some(message => message.includes('画面帧与字幕脚本不一致，已回退为字幕脚本生成画面结构。')));
+  } finally {
+    projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
+  }
+
+  const rawMissingSceneSpecResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000005_raw_missing_scene_spec',
+    runId: 'run_raw_missing_scene_spec',
+    rootDir,
+    creativeContext: { input: { raw_text: '缺少场景脚本' } },
+    target: { html_video_generation_mode: 'raw_html' },
+    templateRegistry,
+    skipValidation: true,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          }
+          if (prompt.startsWith('你是 html-video 的 content graph')) {
+            return {
+              success: true,
+              text: JSON.stringify({
+                synopsis: '缺少场景脚本',
+                nodes: [{ id: 'scene_01', kind: 'text', label: '第一幕', durationSec: 2, text: '第一幕完整页面' }],
+                edges: [],
+              }),
+            };
+          }
+          return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">第一幕</h1></main></body></html>' };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+    },
+  });
+  assert.equal(rawMissingSceneSpecResult.success, false);
+  assert.match(rawMissingSceneSpecResult.message, /缺少 scene_spec/);
+  const missingSceneSpecDiagnostic = rawMissingSceneSpecResult.html_video_diagnostics.find(item => item.code === 'scene_spec_missing');
+  assert.ok(missingSceneSpecDiagnostic);
+  assert.equal(missingSceneSpecDiagnostic.stage, 'project');
+  assert.equal(missingSceneSpecDiagnostic.fallback_allowed, false);
 
   const progressEvents = [];
   const progressResult = await workflow.generateHtmlVideo({

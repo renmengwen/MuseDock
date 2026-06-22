@@ -25,12 +25,14 @@ function normalizeCode(code) {
 
 function createDiagnostic(input = {}) {
   const code = normalizeCode(input.code);
+  const severity = String(input.severity || '').trim();
   return {
     code,
     stage: String(input.stage || 'html-video'),
     user_message: String(input.user_message || DEFAULT_MESSAGES[code] || 'html-video 处理失败。'),
     details: objectOrEmpty(input.details),
     fallback_allowed: input.fallback_allowed !== false,
+    ...(severity ? { severity } : {}),
   };
 }
 
@@ -55,7 +57,7 @@ function normalizeDiagnostic(input, defaults = {}) {
         ...(typeof input.message === 'string' ? { message: input.message } : {}),
         ...objectOrEmpty(input.details),
         ...Object.fromEntries(Object.entries(objectOrEmpty(input)).filter(([key]) => (
-          !['code', 'stage', 'user_message', 'message', 'details', 'fallback_allowed'].includes(key)
+          !['code', 'stage', 'user_message', 'message', 'details', 'fallback_allowed', 'severity'].includes(key)
         ))),
       },
       fallback_allowed: input.fallback_allowed !== false,
