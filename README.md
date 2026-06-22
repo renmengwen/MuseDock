@@ -42,6 +42,8 @@ MuseDock 是一个本地优先的短视频采集、素材准备与 AI 成片工�
 
 外部 URL 首版只读取公开内容：文章页面会提取正文，GitHub 仓库会读取公开 metadata、README 和顶层目录。不支持私有仓库、登录态页面、GitHub Token、clone 仓库或全量源码分析。
 
+一键创作在创建 workflow 时会把当前创作默认值写入 `creative_defaults_snapshot`，后续运行只读取该快照，不会因用户之后修改设置而改变已创建任务。
+
 一键创作阶段：
 
 | 阶段 | 说明 |
@@ -218,6 +220,7 @@ MuseDock 会在本地生成运行数据：
 - `data/media/douyin/<aweme_id>/agent_runs/`：Agent 运行结果、TTS 音频、字幕时间轴、视频工程、质检报告和 MP4
 - `data/config/agent_templates.json`：本地保存的 Agent 模板覆盖配置
 - `data/config/ai-models.json`：本地 AI 模型配置
+- `data/config/app-settings.json`：设置中心保存的一键创作默认值和系统设置
 - `chrome-user-data/`：Chrome CDP 使用的本地浏览器数据
 - `douyin-cookies.json`：抖音 Cookie 持久化文件
 
@@ -294,6 +297,11 @@ MuseDock 会在本地生成运行数据：
 - `GET /api/history/xhs`：读取小红书抓取记录
 - `GET /api/config/ai-models`：读取 AI 模型配置
 - `POST /api/config/ai-models`：保存 AI 模型配置
+- `GET /api/config/app-settings`：读取设置中心应用配置
+- `POST /api/config/app-settings`：保存设置中心应用配置
+- `GET /api/config/templates`：读取 html-video 可用模板简表
+- `GET /api/config/system-health`：读取系统环境和数据占用概览
+- `POST /api/config/maintenance/cleanup`：按类型清理本地数据
 - `GET /api/config/cookies`：读取 Cookie 配置
 - `POST /api/config/cookies`：保存 Cookie 配置
 
