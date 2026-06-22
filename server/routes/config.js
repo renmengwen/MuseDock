@@ -2,6 +2,7 @@ const express = require('express');
 const storedCookies = require('../state/cookies');
 const aiModelConfig = require('../services/aiModelConfig');
 const appSettings = require('../services/appSettings');
+const { cleanupTargets } = require('../services/systemMaintenance');
 const {
   DEFAULT_ROOT_DIR,
   scanTemplateManifests,
@@ -11,6 +12,7 @@ const {
 } = require('../services/creative-video/html-video/templateRegistry');
 
 const router = express.Router();
+const SUPPORTED_CLEANUP_TARGETS = new Set(['creative-workflows', 'media-cache', 'render-outputs', 'browser-data', 'cookies']);
 
 async function getAppSettingsRoute(req, res) {
   try {
@@ -62,9 +64,33 @@ async function getConfigTemplatesRoute(req, res) {
   }
 }
 
+async function cleanupConfigDataRoute(req, res) {
+  const targets = Array.isArray(req.body?.targets)
+    ? req.body.targets.map(target => String(target || '').trim()).filter(Boolean)
+    : [];
+
+  if (targets.length === 0) {
+    return res.status(400).json({ success: false, message: '请选择要清理的类型。' });
+  }
+  if (targets.some(target => !SUPPORTED_CLEANUP_TARGETS.has(target))) {
+    return res.status(400).json({ success: false, message: '不支持的清理类型。' });
+  }
+
+  try {
+    const result = await cleanupTargets({
+      targets,
+      storedCookies,
+    });
+    return res.status(result.success ? 200 : 409).json(result);
+  } catch (error) {
+    return res.status(500).json({ success: false, message: '清理维护数据失败。', error: error.message });
+  }
+}
+
 router.get('/app-settings', getAppSettingsRoute);
 router.post('/app-settings', saveAppSettingsRoute);
 router.get('/templates', getConfigTemplatesRoute);
+router.post('/maintenance/cleanup', cleanupConfigDataRoute);
 
 router.get('/cookies', (req, res) => {
   res.json({ douyin: storedCookies.douyin, xhs: storedCookies.xhs });
@@ -97,3 +123,4 @@ router.post('/ai-models', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.cleanupConfigDataRoute = cleanupConfigDataRoute;

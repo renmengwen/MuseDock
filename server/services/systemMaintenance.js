@@ -9,6 +9,9 @@ const defaultAiModelConfig = require('./aiModelConfig');
 
 const HEALTH_CACHE_TTL_MS = 60 * 1000;
 const STORAGE_CACHE_TTL_MS = 15 * 1000;
+const RUNNING_CREATIVE_STATUSES = new Set(['queued', 'running', 'processing']);
+const CLEANUP_TARGETS = new Set(['creative-workflows', 'media-cache', 'render-outputs', 'browser-data', 'cookies']);
+const CREATIVE_TASK_BLOCKED_TARGETS = new Set(['creative-workflows', 'media-cache', 'render-outputs']);
 
 const environmentCache = new Map();
 const storageCache = new Map();
@@ -144,7 +147,7 @@ function resolveStoragePaths(options = {}) {
   const rootDir = options.rootDir || defaultRootDir();
   const mediaRoot = options.mediaRoot || path.join(rootDir, 'data', 'media');
   const browserDataRoot = options.browserDataRoot || path.join(rootDir, 'data', 'browser-data');
-  const cookieFile = options.cookieFile || path.join(rootDir, 'data', 'cookies.json');
+  const cookieFile = options.cookieFile || path.join(rootDir, 'douyin-cookies.json');
   return {
     creativeWorkflows: path.join(rootDir, 'data', 'creative-workflows'),
     mediaCache: path.join(mediaRoot, 'cache'),
@@ -152,6 +155,347 @@ function resolveStoragePaths(options = {}) {
     browserData: browserDataRoot,
     cookies: cookieFile,
   };
+}
+
+function isPathInside(child, parent) {
+  if (!child || !parent) return false;
+  const resolvedChild = path.resolve(child);
+  const resolvedParent = path.resolve(parent);
+  const relative = path.relative(resolvedParent, resolvedChild);
+  return relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+async function readJsonIfPossible(filePath) {
+  try {
+    return JSON.parse(await fsp.readFile(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function walkFiles(rootPath) {
+  const files = [];
+  let entries;
+  try {
+    entries = await fsp.readdir(rootPath, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(rootPath, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await walkFiles(entryPath));
+    } else if (entry.isFile()) {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
+function pushOutputPath(outputPaths, value) {
+  if (typeof value === 'string' && value.trim()) {
+    outputPaths.push(value.trim());
+  }
+}
+
+function collectJsonOutputPaths(input) {
+  const outputPaths = [];
+  const seen = new Set();
+
+  function visit(value) {
+    if (!value || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+
+    const hyperframesRender = value.result?.hyperframes_freeform?.render;
+    if (hyperframesRender && typeof hyperframesRender === 'object') {
+      pushOutputPath(outputPaths, hyperframesRender.output_path);
+      if (Array.isArray(hyperframesRender.render_versions)) {
+        for (const version of hyperframesRender.render_versions) {
+          pushOutputPath(outputPaths, version?.output_path);
+        }
+      }
+    }
+
+    if (value.video && typeof value.video === 'object') {
+      pushOutputPath(outputPaths, value.video.output_path);
+      if (Array.isArray(value.video.render_versions)) {
+        for (const version of value.video.render_versions) {
+          pushOutputPath(outputPaths, version?.output_path);
+        }
+      }
+    }
+
+    pushOutputPath(outputPaths, value.visual_inspect?.output_path);
+
+    for (const child of Object.values(value)) {
+      if (child && typeof child === 'object') {
+        visit(child);
+      }
+    }
+  }
+
+  visit(input);
+  return [...new Set(outputPaths)];
+}
+
+function renderOutputAllowedRoots(options = {}) {
+  const rootDir = options.rootDir || defaultRootDir();
+  const mediaRoot = options.mediaRoot || path.join(rootDir, 'data', 'media');
+  return [
+    path.join(rootDir, 'data', 'render-outputs'),
+    mediaRoot,
+  ].map(root => path.resolve(root));
+}
+
+function isAllowedRenderOutputPath(filePath, options = {}) {
+  const resolvedPath = path.resolve(filePath);
+  return renderOutputAllowedRoots(options).some(root => isPathInside(resolvedPath, root));
+}
+
+function allowedRenderOutputRoot(filePath, options = {}) {
+  const resolvedPath = path.resolve(filePath);
+  return renderOutputAllowedRoots(options).find(root => isPathInside(resolvedPath, root)) || '';
+}
+
+function isHtmlVideoProjectOutput(filePath, mediaRoot) {
+  if (!isPathInside(filePath, mediaRoot)) return false;
+  if (isNonRenderMetadataFile(filePath)) return false;
+  const relative = path.relative(path.resolve(mediaRoot), path.resolve(filePath)).replace(/\\/g, '/');
+  const segments = relative.split('/');
+  if (segments.length < 2) return false;
+
+  const fileName = segments[segments.length - 1];
+  const parent = segments[segments.length - 2];
+  const grandParent = segments[segments.length - 3];
+  const ext = path.extname(fileName).toLowerCase();
+
+  if (fileName === 'output.mp4') return true;
+  if (parent === 'exports' && ['.mp4', '.webm', '.mov'].includes(ext)) return true;
+  if (parent === 'frames' && ext === '.mp4') return true;
+  return grandParent === 'inspect' && parent === 'previews' && ext === '.mp4';
+}
+
+function isNonRenderMetadataFile(filePath) {
+  const fileName = path.basename(filePath).toLowerCase();
+  return fileName === 'metadata.json' || fileName === 'transcript.json';
+}
+
+async function findRenderOutputs(options = {}) {
+  const rootDir = options.rootDir || defaultRootDir();
+  const mediaRoot = options.mediaRoot || path.join(rootDir, 'data', 'media');
+  const workflowRoot = options.workflowRoot || path.join(rootDir, 'data', 'creative-workflows');
+  const includeSkipped = options.includeSkipped === true;
+  const byPath = new Map();
+
+  function addCandidate(filePath, source) {
+    const resolvedPath = path.resolve(filePath);
+    if (byPath.has(resolvedPath)) return;
+    if (isNonRenderMetadataFile(resolvedPath)) return;
+    const allowed = isAllowedRenderOutputPath(resolvedPath, { rootDir, mediaRoot });
+    if (allowed || includeSkipped) {
+      byPath.set(resolvedPath, {
+        path: resolvedPath,
+        source,
+        allowed,
+        reason: allowed ? '' : '路径不在允许清理范围内。',
+      });
+    }
+  }
+
+  for (const jsonPath of await walkFiles(workflowRoot)) {
+    if (path.extname(jsonPath).toLowerCase() !== '.json') continue;
+    const json = await readJsonIfPossible(jsonPath);
+    if (!json) continue;
+    for (const outputPath of collectJsonOutputPaths(json)) {
+      addCandidate(outputPath, jsonPath);
+    }
+  }
+
+  for (const filePath of await walkFiles(mediaRoot)) {
+    if (isHtmlVideoProjectOutput(filePath, mediaRoot)) {
+      addCandidate(filePath, 'html-video-project');
+    }
+  }
+
+  return [...byPath.values()].filter(item => includeSkipped || item.allowed);
+}
+
+async function defaultHasRunningCreativeTasks(options = {}) {
+  const rootDir = options.rootDir || defaultRootDir();
+  const workflowRoot = options.workflowRoot || path.join(rootDir, 'data', 'creative-workflows');
+  for (const jsonPath of await walkFiles(workflowRoot)) {
+    if (path.extname(jsonPath).toLowerCase() !== '.json') continue;
+    const json = await readJsonIfPossible(jsonPath);
+    if (!json || typeof json !== 'object') continue;
+    const status = normalizeString(json.status).toLowerCase();
+    const taskStatus = normalizeString(json.task_status).toLowerCase();
+    if (RUNNING_CREATIVE_STATUSES.has(status) || RUNNING_CREATIVE_STATUSES.has(taskStatus)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function deleteCandidate(candidatePath, allowedRoot, result) {
+  const resolvedPath = path.resolve(candidatePath);
+  const resolvedRoot = path.resolve(allowedRoot);
+  if (!isPathInside(resolvedPath, resolvedRoot) || resolvedPath === resolvedRoot) {
+    result.skipped.push({ path: resolvedPath, reason: '路径不在允许清理范围内。' });
+    return;
+  }
+
+  let stat;
+  try {
+    stat = await fsp.stat(resolvedPath);
+  } catch {
+    return;
+  }
+
+  const bytes = stat.isDirectory() ? await getDirectorySize(resolvedPath) : stat.size;
+  try {
+    await fsp.rm(resolvedPath, { recursive: true, force: true });
+    result.deleted.push({ path: resolvedPath, bytes });
+    result.freedBytes += bytes;
+  } catch (error) {
+    result.skipped.push({ path: resolvedPath, reason: error.message || '删除失败。' });
+  }
+}
+
+async function deleteDirectoryContents(rootPath, result) {
+  const resolvedRoot = path.resolve(rootPath);
+  let entries;
+  try {
+    entries = await fsp.readdir(resolvedRoot, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    await deleteCandidate(path.join(resolvedRoot, entry.name), resolvedRoot, result);
+  }
+}
+
+async function cleanupRenderOutputs(options, result) {
+  const rootDir = options.rootDir || defaultRootDir();
+  const mediaRoot = options.mediaRoot || path.join(rootDir, 'data', 'media');
+  const outputs = await findRenderOutputs({ ...options, rootDir, mediaRoot, includeSkipped: true });
+  for (const output of outputs) {
+    if (!output.allowed) {
+      result.skipped.push({ path: output.path, reason: output.reason || '路径不在允许清理范围内。' });
+      continue;
+    }
+    if (path.resolve(output.path) === path.resolve(mediaRoot)) {
+      result.skipped.push({ path: output.path, reason: 'render-outputs 不允许删除整个媒体目录。' });
+      continue;
+    }
+    let stat;
+    try {
+      stat = await fsp.stat(output.path);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile()) {
+      result.skipped.push({ path: output.path, reason: 'render-outputs 只清理识别出的产物文件。' });
+      continue;
+    }
+    await deleteCandidate(output.path, allowedRenderOutputRoot(output.path, { rootDir, mediaRoot }), result);
+  }
+}
+
+async function cleanupCookies(options, result) {
+  if (options.storedCookies && typeof options.storedCookies === 'object') {
+    options.storedCookies.douyin = '';
+    options.storedCookies.xhs = '';
+  }
+
+  const rootDir = options.rootDir || defaultRootDir();
+  const cookieFile = options.cookieFile || path.join(rootDir, 'douyin-cookies.json');
+  if (!cookieFile) return;
+  const allowedRoot = path.dirname(path.resolve(cookieFile));
+  await deleteCandidate(cookieFile, allowedRoot, result);
+}
+
+function normalizeTargets(targets) {
+  return Array.isArray(targets)
+    ? [...new Set(targets.map(target => normalizeString(target)).filter(Boolean))]
+    : [];
+}
+
+function cleanupMessage(result) {
+  result.freedDisplay = formatBytes(result.freedBytes);
+  if (!result.success) return result.message;
+  if (result.skipped.length > 0) {
+    return `清理部分完成，释放 ${result.freedDisplay}，${result.skipped.length} 个项目未清理。`;
+  }
+  return `清理完成，已释放 ${result.freedDisplay}。`;
+}
+
+async function cleanupTargets(options = {}) {
+  const targets = normalizeTargets(options.targets);
+  const result = {
+    success: true,
+    message: '',
+    deleted: [],
+    skipped: [],
+    freedBytes: 0,
+    freedDisplay: '0 B',
+  };
+
+  if (targets.length === 0) {
+    return {
+      ...result,
+      success: false,
+      message: '请选择要清理的类型。',
+    };
+  }
+  if (targets.some(target => !CLEANUP_TARGETS.has(target))) {
+    return {
+      ...result,
+      success: false,
+      message: '不支持的清理类型。',
+    };
+  }
+
+  const hasBlockedTarget = targets.some(target => CREATIVE_TASK_BLOCKED_TARGETS.has(target));
+  if (hasBlockedTarget) {
+    const checker = typeof options.hasRunningCreativeTasks === 'function'
+      ? options.hasRunningCreativeTasks
+      : defaultHasRunningCreativeTasks;
+    if (await checker(options)) {
+      return {
+        ...result,
+        success: false,
+        message: '当前有创作任务正在运行，请等待任务结束后再清理相关数据。',
+      };
+    }
+  }
+
+  const rootDir = options.rootDir || defaultRootDir();
+  const mediaRoot = options.mediaRoot || path.join(rootDir, 'data', 'media');
+  const browserDataRoot = options.browserDataRoot || path.join(rootDir, 'data', 'browser-data');
+  const paths = resolveStoragePaths({ ...options, rootDir, mediaRoot, browserDataRoot });
+
+  for (const target of targets) {
+    try {
+      if (target === 'creative-workflows') {
+        await deleteDirectoryContents(paths.creativeWorkflows, result);
+      } else if (target === 'media-cache') {
+        await deleteDirectoryContents(paths.mediaCache, result);
+      } else if (target === 'render-outputs') {
+        await cleanupRenderOutputs({ ...options, rootDir, mediaRoot }, result);
+      } else if (target === 'browser-data') {
+        await deleteDirectoryContents(paths.browserData, result);
+      } else if (target === 'cookies') {
+        await cleanupCookies({ ...options, rootDir }, result);
+      }
+    } catch (error) {
+      result.skipped.push({ path: target, reason: error.message || '清理失败。' });
+    }
+  }
+
+  result.message = cleanupMessage(result);
+  return result;
 }
 
 async function getStorageOverview(options = {}) {
@@ -313,4 +657,8 @@ module.exports = {
   getDirectorySize,
   getStorageOverview,
   getSystemHealth,
+  isPathInside,
+  collectJsonOutputPaths,
+  findRenderOutputs,
+  cleanupTargets,
 };
