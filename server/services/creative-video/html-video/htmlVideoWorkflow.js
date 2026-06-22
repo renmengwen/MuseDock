@@ -1,7 +1,7 @@
 const path = require('path');
 
 const aiTextModel = require('../../aiTextModel');
-const { createTemplateRegistry, DEFAULT_ROOT_DIR } = require('./templateRegistry');
+const { createTemplateRegistry, DEFAULT_ROOT_DIR, validateTemplateCompatibility } = require('./templateRegistry');
 const templateSelectorAgent = require('./templateSelectorAgent');
 const templateInputAgent = require('./templateInputAgent');
 const contentGraphAgent = require('./contentGraphAgent');
@@ -84,18 +84,59 @@ async function callTextModel(model, prompt) {
   return { success: true, text: response.text || response.content || '' };
 }
 
-async function requestTemplateSelection({ model, compactIndex, creativeContext, target, sceneSpec }) {
+function reorderCompactIndex(compactIndex = [], preferredTemplateId = '') {
+  const preferredId = String(preferredTemplateId || '').trim();
+  const items = Array.isArray(compactIndex) ? compactIndex : [];
+  if (!preferredId) return items;
+  const preferred = items.find(item => item && item.id === preferredId);
+  if (!preferred) return items;
+  return [
+    preferred,
+    ...items.filter(item => item && item.id !== preferredId),
+  ];
+}
+
+async function requestTemplateSelection({
+  model,
+  compactIndex,
+  creativeContext,
+  target,
+  sceneSpec,
+  preferredTemplateId = '',
+  lockTemplate = false,
+} = {}) {
+  const preferredId = firstNonEmptyString(preferredTemplateId, target?.preferredTemplateId, target?.preferred_template_id);
+  const preferred = (Array.isArray(compactIndex) ? compactIndex : [])
+    .find(item => item && item.id === preferredId);
+  const selectionIndex = preferred ? reorderCompactIndex(compactIndex, preferredId) : compactIndex;
+
+  if (lockTemplate === true && preferred) {
+    return {
+      success: true,
+      template_id: preferred.id,
+      reason: '使用锁定模板。',
+      confidence: 1,
+    };
+  }
+
+  const promptTarget = preferred && lockTemplate !== true
+    ? {
+      ...objectOrEmpty(target),
+      preferredTemplateId: preferredId,
+      templateSelectionPolicy: '优先选择该模板，除非内容明显不适合。',
+    }
+    : target;
   const prompt = templateSelectorAgent.buildTemplateSelectionPrompt({
     sceneSpec: sceneSpec || {
       title: creativeContext?.brief?.title || creativeContext?.input?.raw_text || creativeContext?.input?.title || 'html-video',
       creative_context_summary: creativeContext?.brief?.summary || creativeContext?.source_context?.summary || '',
     },
-    compactIndex,
-    target,
+    compactIndex: selectionIndex,
+    target: promptTarget,
   });
   const ai = await callTextModel(model, prompt);
   if (!ai.success) return ai;
-  return templateSelectorAgent.parseTemplateSelectionResponse(ai.text, { compactIndex });
+  return templateSelectorAgent.parseTemplateSelectionResponse(ai.text, { compactIndex: selectionIndex });
 }
 
 async function requestTemplateInputs({ model, template, creativeContext, sceneSpec }) {
@@ -190,6 +231,37 @@ function buildTemplateIndexOptions(renderTarget = {}, sceneSpec = {}) {
   };
 }
 
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function resolveLockTemplate(options = {}, target = {}) {
+  if (hasOwn(options, 'lockTemplate')) return options.lockTemplate === true;
+  if (hasOwn(options, 'lock_template')) return options.lock_template === true;
+  return target.lockTemplate === true || target.lock_template === true;
+}
+
+function resolvePreferredTemplateId(preferredTemplateId, target = {}) {
+  return firstNonEmptyString(preferredTemplateId, target.preferredTemplateId, target.preferred_template_id);
+}
+
+function validatePreferredTemplate({ registry, preferredTemplateId, options }) {
+  const id = String(preferredTemplateId || '').trim();
+  if (!id) return { id: '', template: null, compatible: false, missing: false, validation: null };
+  const template = registry.getTemplate(id);
+  if (!template) {
+    return { id, template: null, compatible: false, missing: true, validation: null };
+  }
+  const validation = validateTemplateCompatibility(template, options);
+  return {
+    id,
+    template,
+    compatible: validation.ok,
+    missing: false,
+    validation,
+  };
+}
+
 function resolveGenerationMode(target = {}) {
   return target.html_video_generation_mode
     || target.htmlVideoGenerationMode
@@ -264,23 +336,68 @@ async function runEnvironmentDoctor(services) {
   return doctor();
 }
 
-async function generateHtmlVideo({
-  workflowId,
-  runId,
-  rootDir,
-  sceneSpec = null,
-  creativeContext = {},
-  target = {},
-  templateRegistry,
-  services = {},
-  skipValidation = false,
-  onProgress = null,
-} = {}) {
+async function generateHtmlVideo(options = {}) {
+  const {
+    workflowId,
+    runId,
+    rootDir,
+    sceneSpec = null,
+    creativeContext = {},
+    target = {},
+    templateRegistry,
+    services = {},
+    skipValidation = false,
+    onProgress = null,
+    preferredTemplateId = '',
+  } = options;
   const registry = resolveRegistry(templateRegistry);
   const diagnostics = [];
   const model = getModel(services);
   const renderTarget = resolveRenderTarget(target, sceneSpec || {});
-  const compactIndex = registry.buildCompactIndex(buildTemplateIndexOptions(renderTarget, sceneSpec || {}));
+  const templateIndexOptions = buildTemplateIndexOptions(renderTarget, sceneSpec || {});
+  const effectivePreferredTemplateId = resolvePreferredTemplateId(preferredTemplateId, target);
+  const effectiveLockTemplate = resolveLockTemplate(options, target);
+  const preferredTemplate = validatePreferredTemplate({
+    registry,
+    preferredTemplateId: effectivePreferredTemplateId,
+    options: templateIndexOptions,
+  });
+  if (effectiveLockTemplate && effectivePreferredTemplateId && !preferredTemplate.compatible) {
+    const aspectRatio = templateIndexOptions.aspectRatio || renderTarget.aspect_ratio || renderTarget.aspectRatio || '未指定';
+    const message = `默认模板 ${effectivePreferredTemplateId} 不支持当前画面比例 ${aspectRatio}。`;
+    return failure(message, [
+      createDiagnostic({
+        code: 'locked_template_invalid',
+        stage: 'template',
+        user_message: message,
+        details: {
+          template_id: effectivePreferredTemplateId,
+          aspect_ratio: aspectRatio,
+          missing: preferredTemplate.missing,
+          reasons: preferredTemplate.validation?.reasons || [],
+        },
+        fallback_allowed: false,
+      }),
+    ]);
+  }
+
+  let compactIndex = registry.buildCompactIndex(templateIndexOptions);
+  if (effectivePreferredTemplateId && !effectiveLockTemplate && !preferredTemplate.compatible) {
+    diagnostics.push(createDiagnostic({
+      code: 'preferred_template_unavailable',
+      stage: 'template',
+      user_message: `首选模板 ${effectivePreferredTemplateId} 不可用，已回退为普通模板选择。`,
+      details: {
+        template_id: effectivePreferredTemplateId,
+        missing: preferredTemplate.missing,
+        reasons: preferredTemplate.validation?.reasons || [],
+      },
+      severity: 'warning',
+      fallback_allowed: true,
+    }));
+  } else if (effectivePreferredTemplateId && preferredTemplate.compatible) {
+    compactIndex = reorderCompactIndex(compactIndex, effectivePreferredTemplateId);
+  }
 
   if (!compactIndex.length) {
     return failure('没有可用的 html-video 模板。', [
@@ -288,7 +405,15 @@ async function generateHtmlVideo({
     ]);
   }
 
-  const selection = await requestTemplateSelection({ model, compactIndex, creativeContext, target: renderTarget, sceneSpec });
+  const selection = await requestTemplateSelection({
+    model,
+    compactIndex,
+    creativeContext,
+    target: renderTarget,
+    sceneSpec,
+    preferredTemplateId: preferredTemplate.compatible ? effectivePreferredTemplateId : '',
+    lockTemplate: effectiveLockTemplate,
+  });
   if (!selection.success) {
     const selectionDiagnostics = selection.diagnostics || [];
     const code = selectionDiagnostics.some(item => String(item).includes('unknown_template_id'))
@@ -766,4 +891,5 @@ module.exports = {
   resolveRenderTarget,
   resolveTemplateRenderTarget,
   buildTemplateIndexOptions,
+  reorderCompactIndex,
 };
