@@ -2,47 +2,218 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将设置页重构为设置中心 v1，支持一键创作默认值自动生效、模型配置迁移展示、系统健康概览和安全的数据维护。
+**Goal:** 将设置页重构为设置中心 v1，支持一键创作默认值自动生效、模型配置保留、系统健康概览和安全的数据维护。
 
-**Architecture:** 新增独立 `appSettings` 配置服务和 `systemMaintenance` 服务，前端设置中心通过 `/api/config/*` 统一读取应用配置、模板、系统健康和维护操作。workflow 创建时在 `createCreativeWorkflow()` 内合并默认值并持久化 snapshot，运行阶段只读取 workflow 记录，不再读取最新设置。
+**Architecture:** 应用级设置独立存入 `data/config/app-settings.json`，模型配置继续使用 `data/config/ai-models.json`。一键创作在 `createCreativeWorkflow()` 创建 workflow 时合并默认值并写入 snapshot，后续运行只读 workflow 记录，不再读取最新 settings，避免已创建任务漂移。
 
-**Tech Stack:** Node.js 22、Express、React 19、Vite、shadcn/ui、Tailwind CSS、内置 Node 测试脚本。
+**Tech Stack:** Node.js 22、Express、React 19、Vite、现有 CSS/Tailwind 约束、内置 `node tests/run-all.js` 测试发现器。
 
 ---
 
-## Scope Notes
+## 子代理执行护栏
 
-本计划覆盖 `docs/superpowers/specs/2026-06-22-settings-center-redesign-design.md` 的 v1 范围。`captionMode`、`showCaptionBar`、`renderQuality` 不作为 v1 自动生效项，只在后续扩展中接入。
+- [ ] 每个任务开始前运行 `git branch --show-current`，确认输出为 `dev`；如果不是 `dev`，立即停止并汇报。
+- [ ] 每个任务开始前运行 `git status --short`，记录已有未提交文件。不要改动与当前任务无关的脏文件，尤其是已存在的 `server/services/creative-video/workflowFacade.js`、`tests/test-creative-video-workflow-facade.js`、`.workbuddy/memory/2026-06-22.md`。
+- [ ] 每个任务只提交该任务列出的文件。提交前运行 `git diff --name-only --cached`，确认没有混入其他任务或用户文件。
+- [ ] 用户可见文案全部使用中文，包括按钮、状态、错误、loading、确认弹窗和后端返回消息。
+- [ ] 不改变 `data/config/ai-models.json` 的模型配置结构；只保留旧 `skipValidation` 的兼容读取和过渡期写入。
+- [ ] 不把 `captionMode`、`showCaptionBar`、`renderQuality` 接入 html-video production 自动生效路径；它们不属于 v1 验收。
+- [ ] 新增接口操作必须有 loading、成功、失败状态，并在 loading 期间禁用重复点击。
+- [ ] 前端新增通用控件优先复用项目已有控件或官方 `shadcn/ui` 可用组件；若本仓库尚未接入对应组件，不在本计划中引入大规模组件体系迁移。
+- [ ] 不向 `frontend-react/src/styles.css` 追加大段跨页面样式；只允许追加以 `.settingsCenter`、`.settingsPanel`、`.settingsCleanup`、`.modal` 等设置中心前缀限定的小块样式。
+- [ ] `tests/run-all.js` 当前自动发现 `tests/test-*.js` 和 `tests/test-*.mjs`。新增测试文件不需要手动注册，除非实现过程中主动改变 runner 行为。
+- [ ] 每个任务按“失败测试 -> 最小实现 -> 针对测试 -> 提交”的顺序执行。无法稳定写自动测试时，必须写静态断言测试或明确的手工验收步骤。
 
-本计划包含 review 备注：
+## 已确认范围
 
-- N1：`creativeWorkflows.runCreativeWorkflow()` 合并 `record.target` 到 `projectOptions` 时，以 `record.target` 为基础；如果调用方已传 `projectOptions`，`record.target.preferredTemplateId` 和 `record.target.lockTemplate` 必须覆盖调用方同名字段，保证 workflow snapshot 稳定。
-- N2：`system-health.environment.diagnostics[]` 使用统一对象格式 `{ code, ok, message, detail, path }`，前端折叠展示读取 `detail`。
-- N3：一键创作 `useResearch` 请求体测试使用前端集成式静态测试或 mock API，不做脆弱的纯单元测试。
+设置中心 v1 包含：
 
-## File Map
+- 左侧分组导航：`总览`、`创作默认值`、`模型配置`、`系统`。
+- 新增 `data/config/app-settings.json` 保存应用级设置。
+- 默认画面比例、默认目标时长、按比例默认模板、锁定模板、联网研究默认值自动影响新的一键创作任务。
+- 模型配置继续读取和保存 `ai-models.json`，现有模型配置能力不回退。
+- 系统页展示质检状态、html-video 环境诊断、模板状态、模型能力摘要、数据占用和清理入口。
+- 数据维护只做全局按类型清理，不在设置中心实现任务级删除。
 
-- Create `server/services/appSettings.js`：读写 `data/config/app-settings.json`，规范化创作默认值和系统设置，处理旧 `ai-models.json` 的 `skipValidation` 降级。
-- Create `server/services/systemMaintenance.js`：系统健康缓存、存储占用统计、render outputs 识别、白名单清理和运行中任务阻止。
-- Modify `server/routes/config.js`：新增 app settings、templates、system health、maintenance cleanup 路由。
-- Modify `server/services/creativeWorkflows.js`：在创建 workflow 时合并默认值，写入 `creative_defaults_snapshot` 和 `target`；运行时把 `record.target` 合并到 `projectOptions`。
-- Modify `server/services/creative-video/html-video/htmlVideoWorkflow.js`：支持 `preferredTemplateId` 和 `lockTemplate`。
-- Modify `server/services/creative-video/workflowFacade.js`：透传 `target.preferredTemplateId` 和 `target.lockTemplate` 到 html-video workflow。
-- Modify `frontend-react/src/api/client.js`：新增设置中心 API client 方法。
-- Modify `frontend-react/src/hooks/useSettings.js`：保留模型配置 hook，避免把应用默认值塞回模型配置状态。
-- Modify `frontend-react/src/pages/SettingsPage.jsx`：改为设置中心壳层。
-- Create `frontend-react/src/components/settings/SettingsOverview.jsx`。
-- Create `frontend-react/src/components/settings/CreativeDefaultsSettings.jsx`。
-- Create `frontend-react/src/components/settings/ModelSettings.jsx`。
-- Create `frontend-react/src/components/settings/SystemSettings.jsx`。
-- Create `frontend-react/src/components/settings/CleanupConfirmDialog.jsx`。
-- Modify `frontend-react/src/pages/OneClickCreativePage.jsx`：加载默认联网研究值，跟踪 `useResearchTouched`，未触碰时不发送覆盖字段。
-- Modify `README.md`：补充 `app-settings.json`、新增 API 和维护行为。
-- Create `tests/test-app-settings.js`。
-- Create `tests/test-creative-workflow-defaults.js`。
-- Create `tests/test-html-video-template-preference.js`。
-- Create `tests/test-system-maintenance.js`。
-- Create or modify frontend static tests under `tests/*.mjs` for settings center and one-click request body behavior.
+设置中心 v1 不包含：
+
+- Agent 模板编辑后台。
+- 完整模板管理后台。
+- settings schema 平台化框架。
+- 把任务级删除入口迁移到设置中心。
+- `captionMode`、`showCaptionBar`、`renderQuality` 对 html-video production 的自动生效。
+
+## 关键代码锚点
+
+- `server/routes/config.js`：当前只有 `/cookies`、`/ai-models`，新增 app settings、templates、system health、cleanup 路由都从这里挂载。
+- `server/services/aiModelConfig.js`：模型配置服务；旧 `skipValidation` 兼容读取来源。
+- `server/services/creativeWorkflows.js:createCreativeWorkflow(payload = {}, options = {})`：创建 workflow 的唯一 snapshot 写入点。
+- `server/services/creativeWorkflows.js:runCreativeWorkflow(workflowId, options = {})`：运行时读取 record，不能读取最新 app settings。
+- `server/services/creative-video/html-video/htmlVideoWorkflow.js:generateHtmlVideo()`：新增 `preferredTemplateId`、`lockTemplate` 入参。
+- `server/services/creative-video/html-video/htmlVideoWorkflow.js:requestTemplateSelection()`：首选模板 prompt 和锁定模板策略入口。
+- `server/services/creative-video/html-video/templateRegistry.js`：已有 `scanTemplateManifests()`、`buildCompactIndex()`、`validateTemplateCompatibility()`、`createTemplateRegistry()`。
+- `server/services/creative-video/workflowFacade.js:generateCreativeVideoProject()`：从 `target` 透传模板偏好到 html-video workflow。
+- `frontend-react/src/pages/SettingsPage.jsx`：设置中心壳层重做入口。
+- `frontend-react/src/hooks/useSettings.js`：现有模型配置 hook，保留模型职责，不塞入应用默认值状态。
+- `frontend-react/src/pages/OneClickCreativePage.jsx`：联网研究默认值初始化和请求体覆盖语义。
+- `frontend-react/src/api/client.js`：新增设置中心 API client 方法。
+- `tests/run-all.js`：自动发现新增测试，无需手动维护测试列表。
+
+## 数据契约
+
+### `data/config/app-settings.json`
+
+```json
+{
+  "version": 1,
+  "creativeDefaults": {
+    "aspectRatio": "9:16",
+    "targetDurationSec": 60,
+    "templateByAspectRatio": {
+      "9:16": "news_signal_vertical",
+      "16:9": "bold_signal",
+      "1:1": "",
+      "4:5": ""
+    },
+    "lockTemplate": false,
+    "useResearch": true
+  },
+  "system": {
+    "skipValidation": false
+  }
+}
+```
+
+规范化规则：
+
+- `aspectRatio` 只允许 `9:16`、`16:9`、`1:1`、`4:5`，非法值回退 `9:16`。
+- `targetDurationSec` 限制在 `15` 到 `180` 秒，非法值回退 `60`。
+- `templateByAspectRatio` 只保存上述比例键，值必须是 trim 后字符串，非字符串保存为空字符串。
+- `lockTemplate`、`useResearch`、`system.skipValidation` 只接受 boolean，否则使用默认值。
+
+### Workflow Snapshot
+
+创建 workflow 时写入：
+
+```json
+{
+  "creative_defaults_snapshot": {
+    "aspectRatio": "9:16",
+    "targetDurationSec": 60,
+    "templateId": "news_signal_vertical",
+    "lockTemplate": false,
+    "useResearch": true
+  },
+  "target": {
+    "aspect_ratio": "9:16",
+    "duration_sec": 60,
+    "preferredTemplateId": "news_signal_vertical",
+    "lockTemplate": false
+  }
+}
+```
+
+合并顺序：
+
+1. 系统默认值。
+2. `app-settings.json`。
+3. 请求显式覆盖，包括兼容字段 `payload.useResearch` 和新字段 `payload.creativeDefaultsOverride`。
+
+`creativeDefaultsOverride` 允许字段：`aspectRatio`、`targetDurationSec`、`templateId`、`lockTemplate`、`useResearch`。
+
+### `projectOptions` 合并规则
+
+在 `creativeWorkflows.runCreativeWorkflow()` 调用 agentRuns 时：
+
+```js
+function mergeProjectOptions(recordTarget = {}, incoming = {}) {
+  return {
+    ...(recordTarget || {}),
+    ...(incoming || {}),
+    preferredTemplateId: recordTarget?.preferredTemplateId || incoming?.preferredTemplateId || '',
+    lockTemplate: recordTarget?.lockTemplate === true,
+  };
+}
+```
+
+含义：
+
+- `record.target` 是稳定 snapshot 基础。
+- 调用方传入的 `projectOptions` 可以补充其他运行参数。
+- `record.target.preferredTemplateId` 和 `record.target.lockTemplate` 必须覆盖调用方同名字段，防止已创建任务因运行期参数漂移。
+- 如果 `record.target.preferredTemplateId` 为空，才允许使用 incoming 的 `preferredTemplateId`。
+
+### `system-health.environment.diagnostics[]`
+
+统一诊断对象格式：
+
+```json
+{
+  "ok": true,
+  "code": "ffmpeg_available",
+  "message": "ffmpeg 可用。",
+  "detail": "",
+  "path": "ffmpeg"
+}
+```
+
+前端规则：
+
+- 列表主行显示 `message`。
+- 折叠详情显示 `detail`，为空时显示 `path`，仍为空时显示 `无更多诊断信息。`。
+- 所有缺失、异常、第三方英文错误都要包装中文 `message`。
+
+### `/api/config/templates`
+
+返回：
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "news_signal_vertical",
+      "name": "竖屏财经信号",
+      "description": "9:16 竖屏科技财经新闻模板",
+      "category": "news",
+      "tags": ["竖屏", "财经"],
+      "engine": "hyperframes",
+      "mapped_engine": "hyperframes-playwright",
+      "aspect_ratio": "9:16",
+      "duration_sec": 6,
+      "source_entry": "source/index.html",
+      "license": { "name": "Apache-2.0", "commercial_use": true },
+      "compatible": true,
+      "compatibility_reasons": []
+    }
+  ]
+}
+```
+
+实现注意：
+
+- `buildCompactIndex({ aspectRatio })` 只返回兼容模板。
+- 如果下拉要显示所有模板并标记兼容性，必须使用 `scanTemplateManifests()` 加 `validateTemplateCompatibility()`，不要用 `buildCompactIndex()` 伪造“全部模板”。
+
+### `render-outputs` 识别规则
+
+只删除白名单内已知渲染产物：
+
+- 从 workflow/run JSON 收集输出字段：
+  - `result.hyperframes_freeform.render.output_path`
+  - `result.hyperframes_freeform.render.render_versions[].output_path`
+  - `video.output_path`
+  - `video.render_versions[].output_path`
+  - `visual_inspect.output_path`
+- 对 html-video project 目录，仅允许：
+  - `exports/*.mp4`
+  - `exports/*.webm`
+  - `exports/*.mov`
+  - `frames/*.mp4`
+  - `inspect/previews/*.mp4`
+  - project 根目录 `output.mp4`
+- 删除前对候选路径执行 `path.resolve()`，确认仍位于允许根目录内。
+- 不递归删除整个媒体目录，不删除原始素材、JSON、转写、评论、配置。
 
 ---
 
@@ -50,283 +221,92 @@
 
 **Files:**
 - Create: `server/services/appSettings.js`
-- Test: `tests/test-app-settings.js`
-- Modify: `package.json` only if the project test runner requires adding the new test to `tests/run-all.js` instead of discovering it automatically.
+- Create: `tests/test-app-settings.js`
 
-- [ ] **Step 1: Write failing app settings tests**
+**Acceptance:**
+- 缺失 `app-settings.json` 时返回默认配置。
+- 保存时按数据契约规范化非法值。
+- `app-settings.json` 存在时 `system.skipValidation` 以新文件为准。
+- `app-settings.json` 不存在时 `getEffectiveSystemSettings()` 回退旧 `ai-models.json.skipValidation`。
+- 第一次保存 app settings 时保留当前有效 `skipValidation`，避免升级后状态跳变。
 
-Create `tests/test-app-settings.js`:
+- [ ] **Step 1: 写失败测试**
+
+创建 `tests/test-app-settings.js`，覆盖 4 个场景：
 
 ```js
 const assert = require('assert');
-const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
-
 const appSettings = require('../server/services/appSettings');
 
 async function makeRoot() {
-  return fsp.mkdtemp(path.join(os.tmpdir(), 'app-settings-test-'));
+  return fsp.mkdtemp(path.join(os.tmpdir(), 'app-settings-'));
 }
 
-async function readJson(filePath) {
-  return JSON.parse(await fsp.readFile(filePath, 'utf-8'));
-}
-
-async function runDefaultConfigTest() {
+async function run() {
   const root = await makeRoot();
   const configPath = path.join(root, 'app-settings.json');
-  const publicConfig = await appSettings.getPublicConfig({ configPath });
-  assert.equal(publicConfig.version, 1);
-  assert.equal(publicConfig.creativeDefaults.aspectRatio, '9:16');
-  assert.equal(publicConfig.creativeDefaults.targetDurationSec, 60);
-  assert.equal(publicConfig.creativeDefaults.templateByAspectRatio['9:16'], 'news_signal_vertical');
-  assert.equal(publicConfig.creativeDefaults.lockTemplate, false);
-  assert.equal(publicConfig.creativeDefaults.useResearch, true);
-  assert.equal(publicConfig.system.skipValidation, false);
-}
+  const aiConfigPath = path.join(root, 'ai-models.json');
 
-async function runSaveNormalizationTest() {
-  const root = await makeRoot();
-  const configPath = path.join(root, 'app-settings.json');
+  const defaults = await appSettings.getPublicConfig({ configPath, aiConfigPath });
+  assert.equal(defaults.version, 1);
+  assert.equal(defaults.creativeDefaults.aspectRatio, '9:16');
+  assert.equal(defaults.creativeDefaults.targetDurationSec, 60);
+  assert.equal(defaults.creativeDefaults.templateByAspectRatio['9:16'], 'news_signal_vertical');
+  assert.equal(defaults.creativeDefaults.lockTemplate, false);
+  assert.equal(defaults.creativeDefaults.useResearch, true);
+  assert.equal(defaults.system.skipValidation, false);
+
   const saved = await appSettings.saveConfig({
     creativeDefaults: {
       aspectRatio: 'bad',
-      targetDurationSec: 9999,
-      templateByAspectRatio: {
-        '9:16': '  news_signal_vertical  ',
-        '16:9': 123,
-      },
+      targetDurationSec: 999,
+      templateByAspectRatio: { '9:16': '  news_signal_vertical  ', '16:9': 123 },
       lockTemplate: true,
       useResearch: false,
     },
     system: { skipValidation: true },
-  }, { configPath });
+  }, { configPath, aiConfigPath });
   assert.equal(saved.creativeDefaults.aspectRatio, '9:16');
   assert.equal(saved.creativeDefaults.targetDurationSec, 180);
   assert.equal(saved.creativeDefaults.templateByAspectRatio['9:16'], 'news_signal_vertical');
   assert.equal(saved.creativeDefaults.templateByAspectRatio['16:9'], '');
-  assert.equal(saved.creativeDefaults.lockTemplate, true);
-  assert.equal(saved.creativeDefaults.useResearch, false);
   assert.equal(saved.system.skipValidation, true);
-  const disk = await readJson(configPath);
-  assert.equal(disk.version, 1);
+
+  await fsp.unlink(configPath);
+  await fsp.writeFile(aiConfigPath, JSON.stringify({ skipValidation: true, providers: {}, active: {} }), 'utf-8');
+  const fallback = await appSettings.getEffectiveSystemSettings({ configPath, aiConfigPath });
+  assert.equal(fallback.skipValidation, true);
+  assert.equal(fallback.source, 'legacy-ai-models');
+
+  const firstSave = await appSettings.saveConfig({ creativeDefaults: {} }, { configPath, aiConfigPath });
+  assert.equal(firstSave.system.skipValidation, true);
+  const effective = await appSettings.getEffectiveSystemSettings({ configPath, aiConfigPath });
+  assert.equal(effective.source, 'app-settings');
+  assert.equal(effective.skipValidation, true);
 }
 
-async function runLegacySkipValidationFallbackTest() {
-  const root = await makeRoot();
-  const configPath = path.join(root, 'app-settings.json');
-  const aiConfigPath = path.join(root, 'ai-models.json');
-  await fsp.writeFile(aiConfigPath, JSON.stringify({ providers: {}, active: {}, skipValidation: true }), 'utf-8');
-  const effectiveBeforeSave = await appSettings.getEffectiveSystemSettings({ configPath, aiConfigPath });
-  assert.equal(effectiveBeforeSave.skipValidation, true);
-  assert.equal(effectiveBeforeSave.source, 'legacy-ai-models');
-  await appSettings.saveConfig({ creativeDefaults: {}, system: { skipValidation: false } }, { configPath, aiConfigPath });
-  const effectiveAfterSave = await appSettings.getEffectiveSystemSettings({ configPath, aiConfigPath });
-  assert.equal(effectiveAfterSave.skipValidation, false);
-  assert.equal(effectiveAfterSave.source, 'app-settings');
-}
-
-async function runHasConfigTest() {
-  const root = await makeRoot();
-  const configPath = path.join(root, 'app-settings.json');
-  assert.equal(await appSettings.hasConfig({ configPath }), false);
-  await appSettings.saveConfig({}, { configPath });
-  assert.equal(fs.existsSync(configPath), true);
-  assert.equal(await appSettings.hasConfig({ configPath }), true);
-}
-
-(async () => {
-  await runDefaultConfigTest();
-  await runSaveNormalizationTest();
-  await runLegacySkipValidationFallbackTest();
-  await runHasConfigTest();
+run().then(() => {
   console.log('app settings tests passed');
-})().catch(error => {
+}).catch(error => {
   console.error(error);
   process.exit(1);
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: 确认测试失败**
 
-Run:
+Run: `node tests/test-app-settings.js`
 
-```powershell
-node tests/test-app-settings.js
-```
+Expected: fails with `Cannot find module '../server/services/appSettings'`.
 
-Expected: FAIL with `Cannot find module '../server/services/appSettings'`.
+- [ ] **Step 3: 实现服务**
 
-- [ ] **Step 3: Implement `server/services/appSettings.js`**
-
-Create `server/services/appSettings.js`:
+实现 `server/services/appSettings.js`，导出：
 
 ```js
-const fsp = require('fs/promises');
-const path = require('path');
-const aiModelConfig = require('./aiModelConfig');
-
-const DEFAULT_CONFIG_PATH = path.join(__dirname, '../../data/config/app-settings.json');
-const DEFAULT_AI_CONFIG_PATH = aiModelConfig.DEFAULT_CONFIG_PATH;
-const ALLOWED_ASPECT_RATIOS = ['9:16', '16:9', '1:1', '4:5'];
-const DEFAULT_TEMPLATE_BY_ASPECT_RATIO = {
-  '9:16': 'news_signal_vertical',
-  '16:9': 'bold_signal',
-  '1:1': '',
-  '4:5': '',
-};
-
-const DEFAULT_CONFIG = {
-  version: 1,
-  creativeDefaults: {
-    aspectRatio: '9:16',
-    targetDurationSec: 60,
-    templateByAspectRatio: DEFAULT_TEMPLATE_BY_ASPECT_RATIO,
-    lockTemplate: false,
-    useResearch: true,
-  },
-  system: {
-    skipValidation: false,
-  },
-};
-
-function normalizeString(value) {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function normalizeBoolean(value, fallback = false) {
-  return typeof value === 'boolean' ? value : fallback;
-}
-
-function normalizeInteger(value, fallback, min, max) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return fallback;
-  return Math.min(max, Math.max(min, Math.round(number)));
-}
-
-function normalizeAspectRatio(value) {
-  const text = normalizeString(value);
-  return ALLOWED_ASPECT_RATIOS.includes(text) ? text : DEFAULT_CONFIG.creativeDefaults.aspectRatio;
-}
-
-function normalizeTemplateByAspectRatio(input = {}) {
-  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  const result = {};
-  for (const aspect of ALLOWED_ASPECT_RATIOS) {
-    const rawValue = Object.prototype.hasOwnProperty.call(source, aspect)
-      ? source[aspect]
-      : DEFAULT_TEMPLATE_BY_ASPECT_RATIO[aspect];
-    result[aspect] = normalizeString(rawValue);
-  }
-  return result;
-}
-
-function normalizeCreativeDefaults(input = {}) {
-  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  return {
-    aspectRatio: normalizeAspectRatio(source.aspectRatio),
-    targetDurationSec: normalizeInteger(source.targetDurationSec, DEFAULT_CONFIG.creativeDefaults.targetDurationSec, 15, 180),
-    templateByAspectRatio: normalizeTemplateByAspectRatio(source.templateByAspectRatio),
-    lockTemplate: normalizeBoolean(source.lockTemplate, DEFAULT_CONFIG.creativeDefaults.lockTemplate),
-    useResearch: normalizeBoolean(source.useResearch, DEFAULT_CONFIG.creativeDefaults.useResearch),
-  };
-}
-
-function normalizeSystemSettings(input = {}) {
-  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  return {
-    skipValidation: normalizeBoolean(source.skipValidation, DEFAULT_CONFIG.system.skipValidation),
-  };
-}
-
-function normalizeConfig(input = {}) {
-  const source = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  return {
-    version: 1,
-    creativeDefaults: normalizeCreativeDefaults(source.creativeDefaults),
-    system: normalizeSystemSettings(source.system),
-  };
-}
-
-async function hasConfig(options = {}) {
-  const configPath = options.configPath || DEFAULT_CONFIG_PATH;
-  try {
-    await fsp.access(configPath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function readStoredConfig(options = {}) {
-  const configPath = options.configPath || DEFAULT_CONFIG_PATH;
-  try {
-    const raw = JSON.parse(await fsp.readFile(configPath, 'utf-8'));
-    return normalizeConfig(raw);
-  } catch {
-    return normalizeConfig(DEFAULT_CONFIG);
-  }
-}
-
-async function writeStoredConfig(config, options = {}) {
-  const configPath = options.configPath || DEFAULT_CONFIG_PATH;
-  await fsp.mkdir(path.dirname(configPath), { recursive: true });
-  await fsp.writeFile(configPath, JSON.stringify(normalizeConfig(config), null, 2), 'utf-8');
-}
-
-async function getPublicConfig(options = {}) {
-  return readStoredConfig(options);
-}
-
-async function saveConfig(input = {}, options = {}) {
-  const existed = await hasConfig(options);
-  let baseSystem = {};
-  if (!existed) {
-    baseSystem = await getEffectiveSystemSettings(options);
-  }
-  const normalized = normalizeConfig({
-    creativeDefaults: input.creativeDefaults || {},
-    system: {
-      ...baseSystem,
-      ...(input.system || {}),
-    },
-  });
-  await writeStoredConfig(normalized, options);
-  return normalized;
-}
-
-async function getCreativeDefaults(options = {}) {
-  const config = await readStoredConfig(options);
-  return config.creativeDefaults;
-}
-
-async function getSystemSettings(options = {}) {
-  const config = await readStoredConfig(options);
-  return config.system;
-}
-
-async function getEffectiveSystemSettings(options = {}) {
-  if (await hasConfig(options)) {
-    return {
-      ...await getSystemSettings(options),
-      source: 'app-settings',
-    };
-  }
-  const aiConfigPath = options.aiConfigPath || DEFAULT_AI_CONFIG_PATH;
-  let skipValidation = false;
-  try {
-    skipValidation = await aiModelConfig.getSkipValidation({ configPath: aiConfigPath });
-  } catch {
-    skipValidation = false;
-  }
-  return {
-    skipValidation,
-    source: 'legacy-ai-models',
-  };
-}
-
 module.exports = {
   DEFAULT_CONFIG_PATH,
   DEFAULT_CONFIG,
@@ -343,17 +323,22 @@ module.exports = {
 };
 ```
 
-- [ ] **Step 4: Run app settings test**
+Implementation requirements:
 
-Run:
+- 使用 `fs/promises` 读写 JSON，保存前 `mkdir(path.dirname(configPath), { recursive: true })`。
+- `DEFAULT_CONFIG_PATH` 指向 `data/config/app-settings.json`。
+- `DEFAULT_AI_CONFIG_PATH` 使用 `aiModelConfig.DEFAULT_CONFIG_PATH`，如果该常量不存在，退回 `data/config/ai-models.json`。
+- `saveConfig(input, options)` 在新文件不存在时先调用 `getEffectiveSystemSettings(options)`，把当前有效 `skipValidation` 合并进保存结果。
+- 读取损坏 JSON 时返回默认配置，但不要覆盖磁盘文件；只有保存时才写盘。
+- 错误消息只在路由层展示给用户，服务层可以抛原始异常。
 
-```powershell
-node tests/test-app-settings.js
-```
+- [ ] **Step 4: 跑测试**
 
-Expected: `app settings tests passed`.
+Run: `node tests/test-app-settings.js`
 
-- [ ] **Step 5: Commit**
+Expected: prints `app settings tests passed`.
+
+- [ ] **Step 5: 提交**
 
 Run:
 
@@ -362,1033 +347,550 @@ git add server/services/appSettings.js tests/test-app-settings.js
 git commit -m "添加应用设置配置服务"
 ```
 
-Expected: commit succeeds.
-
 ---
 
-### Task 2: Config Routes, Templates API, and System Health Skeleton
+### Task 2: Config Routes and Templates API
 
 **Files:**
-- Create: `server/services/systemMaintenance.js`
 - Modify: `server/routes/config.js`
-- Test: `tests/test-system-maintenance.js`
+- Create: `tests/test-config-settings-routes.js`
 
-- [ ] **Step 1: Write failing system maintenance tests**
+**Acceptance:**
+- `GET /api/config/app-settings` 返回 `{ success: true, data: config }`。
+- `POST /api/config/app-settings` 保存配置并返回 `{ success: true, data: config }`。
+- `GET /api/config/templates` 返回上方契约字段。
+- templates API 能按当前默认比例计算兼容性，但仍可返回全部模板。
+- `/api/config/ai-models`、`/api/config/cookies` 原行为保留。
 
-Create `tests/test-system-maintenance.js`:
+- [ ] **Step 1: 写失败路由测试**
+
+创建 `tests/test-config-settings-routes.js`。测试用 Express app 挂载 `server/routes/config.js`，用注入或临时 config path 避免写真实 `data/config`。如果现有 route 不支持注入，先测试公开路由 shape，再在 Step 3 添加轻量注入点。
+
+Core assertions:
 
 ```js
-const assert = require('assert');
-const fs = require('fs');
-const fsp = require('fs/promises');
-const os = require('os');
-const path = require('path');
-
-const maintenance = require('../server/services/systemMaintenance');
-
-async function makeRoot() {
-  return fsp.mkdtemp(path.join(os.tmpdir(), 'system-maintenance-test-'));
-}
-
-async function runHealthCacheTest() {
-  const root = await makeRoot();
-  let doctorCalls = 0;
-  const services = {
-    environmentDoctor: async () => {
-      doctorCalls += 1;
-      return {
-        ok: true,
-        diagnostics: [{ ok: true, code: 'ffmpeg_available', message: 'ffmpeg 可用。', path: 'ffmpeg' }],
-      };
-    },
-    modelConfig: {
-      getPublicConfig: async () => ({
-        providers: {
-          p1: {
-            name: '测试供应商',
-            models: {
-              text: { enabled: true, modelId: 'gpt-test' },
-              tts: { enabled: false, modelId: '' },
-              multimodal: { enabled: false, modelId: '' },
-            },
-          },
-        },
-        active: { text: 'p1/text' },
-      }),
-    },
-  };
-  const first = await maintenance.getSystemHealth({ rootDir: root, services, now: () => '2026-06-22T00:00:00.000Z' });
-  const second = await maintenance.getSystemHealth({ rootDir: root, services, now: () => '2026-06-22T00:00:10.000Z' });
-  assert.equal(first.cached, false);
-  assert.equal(second.cached, true);
-  assert.equal(doctorCalls, 1);
-  assert.deepEqual(first.environment.diagnostics[0], {
-    ok: true,
-    code: 'ffmpeg_available',
-    message: 'ffmpeg 可用。',
-    detail: '',
-    path: 'ffmpeg',
-  });
-}
-
-async function runRenderOutputDetectionTest() {
-  const root = await makeRoot();
-  const mediaRoot = path.join(root, 'data', 'media', 'douyin');
-  const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-project');
-  await fsp.mkdir(path.join(projectDir, 'exports'), { recursive: true });
-  await fsp.mkdir(path.join(projectDir, 'frames'), { recursive: true });
-  await fsp.mkdir(path.join(projectDir, 'inspect', 'previews'), { recursive: true });
-  await fsp.writeFile(path.join(projectDir, 'exports', 'output.mp4'), 'mp4');
-  await fsp.writeFile(path.join(projectDir, 'frames', 'frame_01.mp4'), 'mp4');
-  await fsp.writeFile(path.join(projectDir, 'inspect', 'previews', 'frame_01.mp4'), 'mp4');
-  await fsp.writeFile(path.join(projectDir, 'metadata.json'), '{}');
-  const outputs = await maintenance.findRenderOutputs({ mediaRoot });
-  const normalized = outputs.map(item => path.basename(item.path)).sort();
-  assert.deepEqual(normalized, ['frame_01.mp4', 'frame_01.mp4', 'output.mp4'].sort());
-  assert.equal(outputs.some(item => item.path.endsWith('metadata.json')), false);
-}
-
-async function runCleanupGuardTest() {
-  const root = await makeRoot();
-  const mediaRoot = path.join(root, 'data', 'media', 'douyin');
-  await fsp.mkdir(mediaRoot, { recursive: true });
-  const blocked = await maintenance.cleanupTargets({
-    targets: ['media-cache'],
-    mediaRoot,
-    hasRunningCreativeTasks: async () => true,
-  });
-  assert.equal(blocked.success, false);
-  assert.match(blocked.message, /当前有创作任务正在运行/);
-}
-
-(async () => {
-  await runHealthCacheTest();
-  await runRenderOutputDetectionTest();
-  await runCleanupGuardTest();
-  console.log('system maintenance tests passed');
-})().catch(error => {
-  console.error(error);
-  process.exit(1);
-});
+assert.equal(appSettingsResponse.success, true);
+assert.equal(appSettingsResponse.data.creativeDefaults.aspectRatio, '9:16');
+assert.equal(saveResponse.data.creativeDefaults.lockTemplate, true);
+assert.equal(Array.isArray(templatesResponse.data), true);
+assert.ok(templatesResponse.data.every(item => Object.prototype.hasOwnProperty.call(item, 'compatible')));
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: 确认测试失败**
+
+Run: `node tests/test-config-settings-routes.js`
+
+Expected: fails because routes do not exist.
+
+- [ ] **Step 3: 实现 routes**
+
+In `server/routes/config.js`:
+
+- Require `appSettings`.
+- Require html-video template registry from `server/services/creative-video/html-video/templateRegistry.js`.
+- Add named handler `getAppSettingsRoute(req, res)` and mount it with `router.get('/app-settings', getAppSettingsRoute)`；handler 读取 `appSettings.getPublicConfig()`。
+- Add named handler `saveAppSettingsRoute(req, res)` and mount it with `router.post('/app-settings', saveAppSettingsRoute)`；handler 调用 `appSettings.saveConfig(req.body || {})`。
+- Add named handler `getConfigTemplatesRoute(req, res)` and mount it with `router.get('/templates', getConfigTemplatesRoute)`；handler 扫描模板并映射返回字段。
+
+Templates implementation rules:
+
+- Use `scanTemplateManifests(rootDir)` to list all manifests.
+- Compute current aspect ratio from `await appSettings.getCreativeDefaults()`.
+- For each manifest, call `validateTemplateCompatibility(manifest, { aspectRatio })`.
+- Map fields exactly to the `/api/config/templates` contract.
+- If template scan fails, return `500` with `{ success: false, message: '读取视频模板失败。', error: error.message }`.
+
+- [ ] **Step 4: 跑路由测试和旧配置 smoke**
 
 Run:
 
 ```powershell
-node tests/test-system-maintenance.js
-```
-
-Expected: FAIL with `Cannot find module '../server/services/systemMaintenance'`.
-
-- [ ] **Step 3: Implement `server/services/systemMaintenance.js`**
-
-Create `server/services/systemMaintenance.js`:
-
-```js
-const fs = require('fs');
-const fsp = require('fs/promises');
-const path = require('path');
-
-const DEFAULT_ROOT = path.join(__dirname, '../../data/creative-workflows');
-const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
-const DEFAULT_BROWSER_DATA_ROOT = path.join(__dirname, '../../chrome-user-data');
-const DEFAULT_COOKIE_FILE = path.join(__dirname, '../../douyin-cookies.json');
-const HEALTH_CACHE_TTL_MS = 60 * 1000;
-const STORAGE_CACHE_TTL_MS = 15 * 1000;
-
-const cache = {
-  health: null,
-  healthAt: 0,
-  storage: null,
-  storageAt: 0,
-};
-
-function nowMs() {
-  return Date.now();
-}
-
-function normalizeDiagnostic(item = {}) {
-  return {
-    ok: item.ok === true,
-    code: String(item.code || (item.ok ? 'ok' : 'diagnostic')).trim(),
-    message: String(item.message || '').trim(),
-    detail: String(item.detail || item.error || item.stderr || '').trim(),
-    path: String(item.path || '').trim(),
-  };
-}
-
-function formatBytes(bytes) {
-  const value = Number(bytes) || 0;
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
-  return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
-}
-
-async function pathSize(targetPath) {
-  try {
-    const stat = await fsp.stat(targetPath);
-    if (stat.isFile()) return stat.size;
-    if (!stat.isDirectory()) return 0;
-    const entries = await fsp.readdir(targetPath, { withFileTypes: true });
-    let total = 0;
-    for (const entry of entries) {
-      total += await pathSize(path.join(targetPath, entry.name));
-    }
-    return total;
-  } catch {
-    return 0;
-  }
-}
-
-function statEntry(bytes) {
-  return { bytes, display: formatBytes(bytes) };
-}
-
-function assertInside(rootDir, targetPath) {
-  const root = path.resolve(rootDir);
-  const target = path.resolve(targetPath);
-  const relative = path.relative(root, target);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    return null;
-  }
-  return target;
-}
-
-async function walkFiles(rootDir, visitor) {
-  let entries;
-  try {
-    entries = await fsp.readdir(rootDir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const fullPath = path.join(rootDir, entry.name);
-    if (entry.isDirectory()) {
-      await walkFiles(fullPath, visitor);
-    } else if (entry.isFile()) {
-      await visitor(fullPath);
-    }
-  }
-}
-
-function isAllowedRenderOutput(filePath) {
-  const normalized = filePath.replace(/\\/g, '/');
-  return /\/exports\/[^/]+\.(mp4|webm|mov)$/i.test(normalized)
-    || /\/frames\/[^/]+\.mp4$/i.test(normalized)
-    || /\/inspect\/previews\/[^/]+\.mp4$/i.test(normalized)
-    || /\/output\.mp4$/i.test(normalized);
-}
-
-async function findRenderOutputs({ mediaRoot = DEFAULT_MEDIA_ROOT } = {}) {
-  const root = path.resolve(mediaRoot);
-  const outputs = [];
-  await walkFiles(root, async filePath => {
-    const safePath = assertInside(root, filePath);
-    if (!safePath || !isAllowedRenderOutput(safePath)) return;
-    const stat = await fsp.stat(safePath);
-    outputs.push({ path: safePath, bytes: stat.size });
-  });
-  return outputs;
-}
-
-async function getStorageOverview(options = {}) {
-  const rootDir = options.rootDir || DEFAULT_ROOT;
-  const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
-  const browserDataRoot = options.browserDataRoot || DEFAULT_BROWSER_DATA_ROOT;
-  const cookieFile = options.cookieFile || DEFAULT_COOKIE_FILE;
-  const renderOutputs = await findRenderOutputs({ mediaRoot });
-  const renderBytes = renderOutputs.reduce((sum, item) => sum + item.bytes, 0);
-  return {
-    creativeWorkflows: statEntry(await pathSize(rootDir)),
-    mediaCache: statEntry(await pathSize(mediaRoot)),
-    renderOutputs: statEntry(renderBytes),
-    browserData: statEntry(await pathSize(browserDataRoot)),
-    cookies: statEntry(await pathSize(cookieFile)),
-  };
-}
-
-function resolveModelSummary(publicConfig = {}) {
-  const result = {};
-  const providers = publicConfig.providers || {};
-  const active = publicConfig.active || {};
-  for (const type of ['text', 'tts', 'multimodal']) {
-    const ref = String(active[type] || '');
-    const [providerId, modelType] = ref.split('/');
-    const provider = providers[providerId] || {};
-    const model = provider.models?.[modelType || type] || {};
-    result[type] = {
-      enabled: model.enabled === true,
-      providerName: provider.name || '',
-      modelId: model.modelId || '',
-    };
-  }
-  return result;
-}
-
-async function getSystemHealth(options = {}) {
-  const refresh = options.refresh === true;
-  const currentMs = nowMs();
-  const currentIso = options.now ? options.now() : new Date().toISOString();
-  const healthFresh = cache.health && currentMs - cache.healthAt < HEALTH_CACHE_TTL_MS;
-  const storageFresh = cache.storage && currentMs - cache.storageAt < STORAGE_CACHE_TTL_MS;
-  let environment;
-  let storage;
-  let cached = false;
-
-  if (!refresh && healthFresh) {
-    environment = cache.health;
-    cached = true;
-  } else {
-    const doctor = options.services?.environmentDoctor || (async () => ({ ok: true, diagnostics: [] }));
-    const rawEnvironment = await doctor();
-    environment = {
-      ok: rawEnvironment.ok === true,
-      diagnostics: (rawEnvironment.diagnostics || []).map(normalizeDiagnostic),
-    };
-    cache.health = environment;
-    cache.healthAt = currentMs;
-  }
-
-  if (!refresh && storageFresh) {
-    storage = cache.storage;
-  } else {
-    storage = await getStorageOverview(options);
-    cache.storage = storage;
-    cache.storageAt = currentMs;
-  }
-
-  const modelConfig = options.services?.modelConfig;
-  const modelPublicConfig = modelConfig?.getPublicConfig ? await modelConfig.getPublicConfig() : {};
-
-  return {
-    success: true,
-    cached,
-    checked_at: currentIso,
-    cache_ttl_sec: HEALTH_CACHE_TTL_MS / 1000,
-    environment,
-    templates: options.templates || {
-      count: 0,
-      default_template_id: '',
-      default_template_compatible: false,
-      default_template_reasons: [],
-    },
-    models: resolveModelSummary(modelPublicConfig),
-    storage,
-  };
-}
-
-async function cleanupTargets(options = {}) {
-  const targets = Array.isArray(options.targets) ? options.targets : [];
-  const hasRunningCreativeTasks = options.hasRunningCreativeTasks || (async () => false);
-  if (await hasRunningCreativeTasks()) {
-    return { success: false, message: '当前有创作任务正在运行，请停止或等待完成后再清理媒体缓存。' };
-  }
-  return {
-    success: true,
-    cleaned: [],
-    released_bytes: 0,
-    message: targets.length ? '清理完成。' : '未选择清理类型。',
-  };
-}
-
-module.exports = {
-  normalizeDiagnostic,
-  formatBytes,
-  assertInside,
-  findRenderOutputs,
-  getStorageOverview,
-  getSystemHealth,
-  cleanupTargets,
-};
-```
-
-- [ ] **Step 4: Run system maintenance test**
-
-Run:
-
-```powershell
-node tests/test-system-maintenance.js
-```
-
-Expected: `system maintenance tests passed`.
-
-- [ ] **Step 5: Add config routes**
-
-Modify `server/routes/config.js` to import services:
-
-```js
-const appSettings = require('../services/appSettings');
-const systemMaintenance = require('../services/systemMaintenance');
-const { buildCompactIndex, validateTemplateCompatibility } = require('../services/creative-video/html-video/templateRegistry');
-const environmentDoctor = require('../services/creative-video/html-video/environmentDoctor');
-```
-
-Add routes after `/ai-models` routes:
-
-```js
-router.get('/app-settings', async (req, res) => {
-  try {
-    const config = await appSettings.getPublicConfig();
-    res.json({ success: true, ...config });
-  } catch (error) {
-    res.status(500).json({ success: false, message: `读取应用设置失败：${error.message}` });
-  }
-});
-
-router.post('/app-settings', async (req, res) => {
-  try {
-    const config = await appSettings.saveConfig(req.body || {});
-    res.json({ success: true, ...config });
-  } catch (error) {
-    res.status(500).json({ success: false, message: `保存应用设置失败：${error.message}` });
-  }
-});
-
-router.get('/templates', async (req, res) => {
-  try {
-    const settings = await appSettings.getPublicConfig();
-    const aspectRatio = settings.creativeDefaults.aspectRatio;
-    const templates = buildCompactIndex({ aspectRatio }).map(template => ({
-      ...template,
-      compatible: true,
-      compatibility_reasons: [],
-    }));
-    res.json({ success: true, data: templates });
-  } catch (error) {
-    res.status(500).json({ success: false, message: `读取模板列表失败：${error.message}` });
-  }
-});
-
-router.get('/system-health', async (req, res) => {
-  try {
-    const health = await systemMaintenance.getSystemHealth({
-      refresh: req.query.refresh === '1',
-      services: {
-        environmentDoctor: environmentDoctor.diagnoseEnvironment,
-        modelConfig: aiModelConfig,
-      },
-    });
-    res.json(health);
-  } catch (error) {
-    res.status(500).json({ success: false, message: `读取系统状态失败：${error.message}` });
-  }
-});
-
-router.post('/maintenance/cleanup', async (req, res) => {
-  try {
-    const result = await systemMaintenance.cleanupTargets({ targets: req.body?.targets || [] });
-    res.status(result.success === false ? 400 : 200).json(result);
-  } catch (error) {
-    res.status(500).json({ success: false, message: `清理数据失败：${error.message}` });
-  }
-});
-```
-
-If `validateTemplateCompatibility` is not exported from the registry used by the route, do not use it in this route step; compatibility is already represented by filtering `buildCompactIndex({ aspectRatio })`.
-
-- [ ] **Step 6: Run route smoke tests**
-
-Run:
-
-```powershell
-node tests/test-system-maintenance.js
-npm test -- --filter test-ai-model-config
-```
-
-Expected: system maintenance passes; existing config tests still pass. If `npm test -- --filter` is unsupported, run `node tests/run-all.js` after Task 8.
-
-- [ ] **Step 7: Commit**
-
-Run:
-
-```powershell
-git add server/services/systemMaintenance.js server/routes/config.js tests/test-system-maintenance.js
-git commit -m "添加设置中心系统状态接口"
-```
-
-Expected: commit succeeds.
-
----
-
-### Task 3: Workflow Defaults Snapshot
-
-**Files:**
-- Modify: `server/services/creativeWorkflows.js`
-- Test: `tests/test-creative-workflow-defaults.js`
-
-- [ ] **Step 1: Write failing workflow defaults tests**
-
-Create `tests/test-creative-workflow-defaults.js`:
-
-```js
-const assert = require('assert');
-const fsp = require('fs/promises');
-const os = require('os');
-const path = require('path');
-
-const workflows = require('../server/services/creativeWorkflows');
-
-async function makeRoot() {
-  return fsp.mkdtemp(path.join(os.tmpdir(), 'creative-workflow-defaults-test-'));
-}
-
-async function readWorkflow(rootDir, workflowId) {
-  return JSON.parse(await fsp.readFile(path.join(rootDir, `${workflowId}.json`), 'utf-8'));
-}
-
-function servicesWithDefaults(defaults) {
-  return {
-    idFactory: () => '20260622000000123456',
-    appSettings: {
-      getCreativeDefaults: async () => defaults,
-      getEffectiveSystemSettings: async () => ({ skipValidation: false, source: 'app-settings' }),
-    },
-  };
-}
-
-async function runSnapshotCreationTest() {
-  const rootDir = await makeRoot();
-  const result = await workflows.createCreativeWorkflow({
-    input: '做一期 AI 视频生产科普',
-  }, {
-    rootDir,
-    services: servicesWithDefaults({
-      aspectRatio: '16:9',
-      targetDurationSec: 45,
-      templateByAspectRatio: { '16:9': 'bold_signal' },
-      lockTemplate: true,
-      useResearch: false,
-    }),
-  });
-  assert.equal(result.success, true);
-  const record = await readWorkflow(rootDir, result.workflow_id);
-  assert.deepEqual(record.creative_defaults_snapshot, {
-    aspectRatio: '16:9',
-    targetDurationSec: 45,
-    templateId: 'bold_signal',
-    lockTemplate: true,
-    useResearch: false,
-  });
-  assert.deepEqual(record.target, {
-    aspect_ratio: '16:9',
-    duration_sec: 45,
-    preferredTemplateId: 'bold_signal',
-    lockTemplate: true,
-  });
-  assert.equal(record.input.use_research, false);
-}
-
-async function runExplicitUseResearchOverrideTest() {
-  const rootDir = await makeRoot();
-  const result = await workflows.createCreativeWorkflow({
-    input: '做一期 AI 视频生产科普',
-    creativeDefaultsOverride: { useResearch: true },
-  }, {
-    rootDir,
-    services: servicesWithDefaults({
-      aspectRatio: '9:16',
-      targetDurationSec: 60,
-      templateByAspectRatio: { '9:16': 'news_signal_vertical' },
-      lockTemplate: false,
-      useResearch: false,
-    }),
-  });
-  const record = await readWorkflow(rootDir, result.workflow_id);
-  assert.equal(record.creative_defaults_snapshot.useResearch, true);
-  assert.equal(record.input.use_research, true);
-}
-
-async function runProjectOptionsMergeTest() {
-  const rootDir = await makeRoot();
-  const mediaRoot = await makeRoot();
-  const calls = [];
-  const createResult = await workflows.createCreativeWorkflow({
-    input: '做一期 AI 视频生产科普',
-  }, {
-    rootDir,
-    services: servicesWithDefaults({
-      aspectRatio: '9:16',
-      targetDurationSec: 60,
-      templateByAspectRatio: { '9:16': 'news_signal_vertical' },
-      lockTemplate: true,
-      useResearch: false,
-    }),
-  });
-  const services = {
-    ...servicesWithDefaults({
-      aspectRatio: '9:16',
-      targetDurationSec: 60,
-      templateByAspectRatio: { '9:16': 'ignored' },
-      lockTemplate: false,
-      useResearch: true,
-    }),
-    researchService: { createResearchContext: async () => ({ status: 'disabled', summary: 'disabled' }) },
-    mediaPipeline: {
-      getMediaPaths: () => ({ dir: mediaRoot, framesDir: mediaRoot, metadata: path.join(mediaRoot, 'metadata.json'), transcript: path.join(mediaRoot, 'transcript.json'), analysisInput: path.join(mediaRoot, 'analysis.json') }),
-      prepareDouyinMedia: async () => ({ success: true }),
-    },
-    agentRuns: {
-      createDouyinHyperframesFreeformRun: async () => ({ success: true, run_id: 'run-1' }),
-      generateDouyinRunHyperframesFreeformBrief: async () => ({ success: true }),
-      synthesizeDouyinRunHyperframesFreeformAudio: async () => ({ success: true }),
-      generateDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
-        calls.push(options.projectOptions);
-        return {
-          success: true,
-          hyperframes_freeform: {
-            project: { status: 'ready' },
-            render: { status: 'rendered' },
-          },
-          render_mode: 'html-video',
-        };
-      },
-    },
-  };
-  const runResult = await workflows.runCreativeWorkflow(createResult.workflow_id, { rootDir, mediaRoot, services });
-  assert.equal(runResult.success, true);
-  assert.equal(calls[0].aspect_ratio, '9:16');
-  assert.equal(calls[0].duration_sec, 60);
-  assert.equal(calls[0].preferredTemplateId, 'news_signal_vertical');
-  assert.equal(calls[0].lockTemplate, true);
-}
-
-(async () => {
-  await runSnapshotCreationTest();
-  await runExplicitUseResearchOverrideTest();
-  await runProjectOptionsMergeTest();
-  console.log('creative workflow defaults tests passed');
-})().catch(error => {
-  console.error(error);
-  process.exit(1);
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run:
-
-```powershell
-node tests/test-creative-workflow-defaults.js
-```
-
-Expected: FAIL because `creative_defaults_snapshot` and `target` are missing.
-
-- [ ] **Step 3: Implement workflow defaults helpers**
-
-Modify `server/services/creativeWorkflows.js`:
-
-```js
-const appSettings = require('./appSettings');
-```
-
-Update `resolveServices(options = {})` to include app settings:
-
-```js
-appSettings: services.appSettings || appSettings,
-```
-
-Add helpers near `normalizeFailureResult`:
-
-```js
-function normalizeCreativeDefaultsOverride(payload = {}) {
-  const override = payload.creativeDefaultsOverride && typeof payload.creativeDefaultsOverride === 'object' && !Array.isArray(payload.creativeDefaultsOverride)
-    ? payload.creativeDefaultsOverride
-    : {};
-  const result = { ...override };
-  if (typeof payload.useResearch === 'boolean' && result.useResearch === undefined) {
-    result.useResearch = payload.useResearch;
-  }
-  return result;
-}
-
-function resolveCreativeDefaultsSnapshot(defaults = {}, payload = {}) {
-  const override = normalizeCreativeDefaultsOverride(payload);
-  const aspectRatio = safeString(override.aspectRatio) || safeString(defaults.aspectRatio) || '9:16';
-  const targetDurationSec = Number(override.targetDurationSec || defaults.targetDurationSec || 60);
-  const templateByAspectRatio = defaults.templateByAspectRatio || {};
-  const templateId = safeString(override.templateId) || safeString(templateByAspectRatio[aspectRatio]);
-  const lockTemplate = typeof override.lockTemplate === 'boolean' ? override.lockTemplate : defaults.lockTemplate === true;
-  const useResearch = typeof override.useResearch === 'boolean' ? override.useResearch : defaults.useResearch === true;
-  return {
-    aspectRatio,
-    targetDurationSec: Number.isFinite(targetDurationSec) && targetDurationSec > 0 ? targetDurationSec : 60,
-    templateId,
-    lockTemplate,
-    useResearch,
-  };
-}
-
-function buildWorkflowTarget(snapshot = {}) {
-  return {
-    aspect_ratio: snapshot.aspectRatio || '9:16',
-    duration_sec: snapshot.targetDurationSec || 60,
-    preferredTemplateId: snapshot.templateId || '',
-    lockTemplate: snapshot.lockTemplate === true,
-  };
-}
-
-function buildEffectiveCreativePayload(payload = {}, snapshot = {}) {
-  return {
-    ...payload,
-    useResearch: snapshot.useResearch === true,
-  };
-}
-
-function mergeProjectOptions(recordTarget = {}, incoming = {}) {
-  return {
-    ...(recordTarget || {}),
-    ...(incoming || {}),
-    preferredTemplateId: recordTarget.preferredTemplateId || incoming.preferredTemplateId || '',
-    lockTemplate: recordTarget.lockTemplate === true ? true : incoming.lockTemplate === true,
-  };
-}
-```
-
-N1 requirement: `record.target` is the base; if `projectOptions` already has values, `record.target.preferredTemplateId` and `record.target.lockTemplate` override same-name fields so the snapshot cannot drift.
-
-- [ ] **Step 4: Wire snapshot into `createCreativeWorkflow()` and run stage**
-
-In `createCreativeWorkflow(payload = {}, options = {})`, before normalization:
-
-```js
-const defaults = services.appSettings?.getCreativeDefaults
-  ? await services.appSettings.getCreativeDefaults()
-  : {
-    aspectRatio: '9:16',
-    targetDurationSec: 60,
-    templateByAspectRatio: { '9:16': 'news_signal_vertical', '16:9': 'bold_signal' },
-    lockTemplate: false,
-    useResearch: payload.useResearch === true,
-  };
-const creativeDefaultsSnapshot = resolveCreativeDefaultsSnapshot(defaults, payload);
-const effectivePayload = buildEffectiveCreativePayload(payload, creativeDefaultsSnapshot);
-const normalized = creativeContext.normalizeCreativeInput(effectivePayload);
-```
-
-Replace the existing `const normalized = creativeContext.normalizeCreativeInput(payload);`.
-
-Add to `record`:
-
-```js
-creative_defaults_snapshot: creativeDefaultsSnapshot,
-target: buildWorkflowTarget(creativeDefaultsSnapshot),
-```
-
-In `runCreativeWorkflow()` project stage, replace `projectOptions`:
-
-```js
-projectOptions: mergeProjectOptions(record.target, {
-  creative_context: record.creative_context,
-}),
-```
-
-Update skip validation lookup:
-
-```js
-if (!skipValidation && services.appSettings?.getEffectiveSystemSettings) {
-  try {
-    const systemSettings = await services.appSettings.getEffectiveSystemSettings({ rootDir });
-    skipValidation = systemSettings.skipValidation === true;
-  } catch {}
-} else if (!skipValidation && services.aiModelConfig) {
-  try { skipValidation = await services.aiModelConfig.getSkipValidation({ rootDir }); } catch {}
-}
-```
-
-- [ ] **Step 5: Run workflow defaults test**
-
-Run:
-
-```powershell
-node tests/test-creative-workflow-defaults.js
-```
-
-Expected: `creative workflow defaults tests passed`.
-
-- [ ] **Step 6: Run related existing workflow tests**
-
-Run:
-
-```powershell
-node tests/test-creative-workflows.js
-node tests/test-creative-context.js
+node tests/test-config-settings-routes.js
+node tests/test-creative-api-client.mjs
 ```
 
 Expected: both pass.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: 提交**
+
+Run:
+
+```powershell
+git add server/routes/config.js tests/test-config-settings-routes.js
+git commit -m "添加设置中心配置接口"
+```
+
+---
+
+### Task 3: System Health Service
+
+**Files:**
+- Create: `server/services/systemMaintenance.js`
+- Create: `tests/test-system-health.js`
+
+**Acceptance:**
+- `getSystemHealth({ refresh: false })` 返回 environment、templates、models、storage。
+- 环境检测缓存 60 秒；存储统计缓存 15 秒。
+- `refresh: true` 强制刷新两个缓存。
+- `environment.diagnostics[]` 统一为 `{ ok, code, message, detail, path }`。
+- ffmpeg、ffprobe、Playwright 错误对用户返回中文 `message`，原始错误放 `detail`。
+
+- [ ] **Step 1: 写失败测试**
+
+创建 `tests/test-system-health.js`，覆盖：
+
+- 两次 10 秒内调用只执行一次 `environmentDoctor`。
+- 70 秒后再次调用会重新执行环境检测。
+- diagnostics 缺字段时仍被 `normalizeDiagnostic()` 补齐。
+- models 摘要从 `aiModelConfig.getPublicConfig()` 映射 `text`、`tts`、`multimodal`。
+- storage 每项都包含 `{ bytes, display }`。
+
+Key assertion:
+
+```js
+assert.deepEqual(health.environment.diagnostics[0], {
+  ok: true,
+  code: 'ffmpeg_available',
+  message: 'ffmpeg 可用。',
+  detail: '',
+  path: 'ffmpeg'
+});
+```
+
+- [ ] **Step 2: 确认测试失败**
+
+Run: `node tests/test-system-health.js`
+
+Expected: fails because `systemMaintenance` does not exist.
+
+- [ ] **Step 3: 实现 health service**
+
+In `server/services/systemMaintenance.js`, export:
+
+```js
+module.exports = {
+  HEALTH_CACHE_TTL_MS,
+  STORAGE_CACHE_TTL_MS,
+  normalizeDiagnostic,
+  formatBytes,
+  getDirectorySize,
+  getStorageOverview,
+  getSystemHealth,
+};
+```
+
+Implementation requirements:
+
+- Cache key can be module-level because this is local desktop app. Tests must be able to pass `cacheKey` or call `clearCaches()` if cache state leaks; choose one explicit mechanism and test it.
+- `getSystemHealth({ rootDir, mediaRoot, browserDataRoot, cookieFile, services, refresh, nowMs })` supports dependency injection.
+- `services.environmentDoctor` returns raw diagnostics or throws.
+- On thrown environment error, return `environment.ok = false` and one diagnostic `{ ok: false, code: 'environment_check_failed', message: '运行环境检测失败。', detail: error.message, path: '' }`.
+- `templates` uses current app settings default template and `validateTemplateCompatibility()`.
+- `storage` keys use camelCase: `creativeWorkflows`、`mediaCache`、`renderOutputs`、`browserData`、`cookies`。
+
+- [ ] **Step 4: 跑测试**
+
+Run: `node tests/test-system-health.js`
+
+Expected: prints `system health tests passed`.
+
+- [ ] **Step 5: 提交**
+
+Run:
+
+```powershell
+git add server/services/systemMaintenance.js tests/test-system-health.js
+git commit -m "添加系统健康检测服务"
+```
+
+---
+
+### Task 4: Maintenance Cleanup Service and Route
+
+**Files:**
+- Modify: `server/services/systemMaintenance.js`
+- Modify: `server/routes/config.js`
+- Create: `tests/test-system-maintenance-cleanup.js`
+
+**Acceptance:**
+- `POST /api/config/maintenance/cleanup` accepts `{ targets: ['cookies'] }` and returns Chinese success/failure message.
+- 支持 targets：`creative-workflows`、`media-cache`、`render-outputs`、`browser-data`、`cookies`。
+- 没有“清理全部”语义；空数组或未知 target 返回 400。
+- 有运行中一键创作任务时，阻止 `creative-workflows`、`media-cache`、`render-outputs` 清理。
+- 所有删除候选都经过白名单路径校验。
+- `cookies` 清理会清空 `storedCookies.douyin`、`storedCookies.xhs`，并删除或清空本地 cookie 文件。
+
+- [ ] **Step 1: 写失败测试**
+
+创建 `tests/test-system-maintenance-cleanup.js`，覆盖：
+
+- `findRenderOutputs()` 只识别白名单产物，不包含 `metadata.json`、`transcript.json`。
+- 候选路径逃逸白名单时不会删除，返回 `skipped`。
+- 运行中任务时返回 `success: false`，message 包含 `当前有创作任务正在运行`。
+- cookies 清理后内存值为空。
+- route unknown target 返回 400 中文错误。
+
+- [ ] **Step 2: 确认测试失败**
+
+Run: `node tests/test-system-maintenance-cleanup.js`
+
+Expected: fails because cleanup functions and route do not exist.
+
+- [ ] **Step 3: 实现 cleanup helpers**
+
+Add exports in `systemMaintenance.js`:
+
+```js
+module.exports = {
+  HEALTH_CACHE_TTL_MS,
+  STORAGE_CACHE_TTL_MS,
+  normalizeDiagnostic,
+  formatBytes,
+  getDirectorySize,
+  getStorageOverview,
+  getSystemHealth,
+  isPathInside,
+  collectJsonOutputPaths,
+  findRenderOutputs,
+  cleanupTargets,
+};
+```
+
+Implementation requirements:
+
+- `isPathInside(child, parent)` uses `path.resolve()` and `path.relative()`; equal path is allowed only when target type explicitly deletes that root, not for render output file deletion.
+- `cleanupTargets({ targets, rootDir, mediaRoot, browserDataRoot, cookieFile, storedCookies, hasRunningCreativeTasks })` returns:
+
+```json
+{
+  "success": true,
+  "message": "清理完成。",
+  "deleted": [{ "path": "D:/code3/MediaCrawler-GUI/data/media/douyin/123/exports/output.mp4", "bytes": 123 }],
+  "skipped": [{ "path": "D:/code3/MediaCrawler-GUI/data/media/douyin/123/metadata.json", "reason": "路径不在允许范围内。" }],
+  "freedBytes": 123,
+  "freedDisplay": "123 B"
+}
+```
+
+- `hasRunningCreativeTasks` default reads workflow records and treats `queued`、`running`、`processing` as running.
+- 清理失败不要中断全部 targets；记录 skipped，最终 message 用中文说明部分失败。
+
+- [ ] **Step 4: 实现 cleanup route**
+
+In `server/routes/config.js`:
+
+- Add named handler `cleanupConfigDataRoute(req, res)` and mount it with `router.post('/maintenance/cleanup', cleanupConfigDataRoute)`；handler 校验 targets 并调用 `systemMaintenance.cleanupTargets()`。
+- Validate `targets` is a non-empty array.
+- Return `400` for unknown target with `message: '不支持的清理类型。'`。
+- Pass `storedCookies` to cleanup service for cookies cleanup.
+- On service `success: false`, use HTTP 409 for running-task guard.
+
+- [ ] **Step 5: 跑测试**
+
+Run:
+
+```powershell
+node tests/test-system-maintenance-cleanup.js
+node tests/test-system-health.js
+```
+
+Expected: both pass.
+
+- [ ] **Step 6: 提交**
+
+Run:
+
+```powershell
+git add server/services/systemMaintenance.js server/routes/config.js tests/test-system-maintenance-cleanup.js
+git commit -m "添加系统数据清理能力"
+```
+
+---
+
+### Task 5: Workflow Defaults Snapshot
+
+**Files:**
+- Modify: `server/services/creativeWorkflows.js`
+- Create: `tests/test-creative-workflow-defaults.js`
+
+**Acceptance:**
+- `createCreativeWorkflow()` 在调用 `creativeContext.normalizeCreativeInput()` 前读取创作默认值并生成 `effectivePayload`。
+- snapshot 和 target 与 workflow record 同一次 `persistWorkflow(record, rootDir)` 写盘。
+- 旧 `payload.useResearch` boolean 仍视为显式覆盖。
+- 新 `payload.creativeDefaultsOverride.useResearch` 覆盖默认值。
+- 未传覆盖时使用 app settings 默认值。
+- `runCreativeWorkflow()` 不读取最新 app settings，只使用 record 内 `target` 和 snapshot。
+- `runCreativeWorkflow()` 合并 `projectOptions` 时遵守 N1 规则。
+- `skipValidation` 有效值来自 `appSettings.getEffectiveSystemSettings()`，旧 ai-models 仅作降级。
+
+- [ ] **Step 1: 写失败测试**
+
+创建 `tests/test-creative-workflow-defaults.js`，使用临时 `rootDir` 和注入 services：
+
+- `services.appSettings.getCreativeDefaults()` 返回 `aspectRatio: '16:9'`、`targetDurationSec: 90`、`templateByAspectRatio['16:9']: 'bold_signal'`、`lockTemplate: true`、`useResearch: false`。
+- 创建 workflow 不传 `useResearch`，断言磁盘 record：
+  - `creative_defaults_snapshot.useResearch === false`
+  - `creative_defaults_snapshot.templateId === 'bold_signal'`
+  - `target.aspect_ratio === '16:9'`
+  - `target.duration_sec === 90`
+  - `target.preferredTemplateId === 'bold_signal'`
+  - `target.lockTemplate === true`
+  - `input.use_research === false`
+- 创建 workflow 传 `useResearch: true`，断言兼容旧字段覆盖默认。
+- 创建 workflow 传 `creativeDefaultsOverride: { useResearch: true, aspectRatio: '9:16' }`，断言新字段覆盖默认。
+- 运行 workflow 时修改 mock appSettings 返回值，断言 agentRuns 收到的 `projectOptions` 仍来自 record.target。
+- 运行 workflow 传 incoming `projectOptions.preferredTemplateId = 'runtime_override'`，断言最终仍是 record.target 的模板。
+
+- [ ] **Step 2: 确认测试失败**
+
+Run: `node tests/test-creative-workflow-defaults.js`
+
+Expected: fails because snapshot fields are missing.
+
+- [ ] **Step 3: 实现 defaults merge**
+
+In `server/services/creativeWorkflows.js`:
+
+- Import `appSettings`.
+- Extend `resolveServices(options)` to expose `appSettings: options.services?.appSettings || appSettings` without breaking existing service injection.
+- Add pure helpers near create workflow code:
+
+```js
+function buildCreativeDefaultsSnapshot(defaults = {}, override = {}, payload = {}) {
+  // Return { aspectRatio, targetDurationSec, templateId, lockTemplate, useResearch }.
+}
+
+function buildWorkflowTarget(snapshot) {
+  // Return { aspect_ratio, duration_sec, preferredTemplateId, lockTemplate }.
+}
+
+function mergeProjectOptions(recordTarget = {}, incoming = {}) {
+  // Implement the exact N1 precedence from the data contract section.
+}
+```
+
+Helper behavior:
+
+- `templateId` resolves from `override.templateId` first, then `defaults.templateByAspectRatio[aspectRatio]`。
+- If `payload.useResearch` is boolean, treat it as override after app settings.
+- If `payload.creativeDefaultsOverride.useResearch` is boolean, it overrides default. If both old and new fields exist, new `creativeDefaultsOverride` wins.
+- Do not mutate original `payload`.
+- Pass `effectivePayload` to `creativeContext.normalizeCreativeInput(effectivePayload)`。
+
+- [ ] **Step 4: 写入 record**
+
+In `createCreativeWorkflow()` record:
+
+- Add `creative_defaults_snapshot: snapshot`。
+- Add `target: buildWorkflowTarget(snapshot)`。
+- Set `skipValidation` from effective system settings, while preserving `normalized.data.skip_validation === true` as explicit request override if currently supported.
+
+- [ ] **Step 5: 更新 run 合并**
+
+In `runCreativeWorkflow()` where `generateDouyinRunHyperframesFreeformProject()` is called:
+
+- Build `projectOptions` with `mergeProjectOptions(record.target, existingProjectOptions)`。
+- Do not call `appSettings.getCreativeDefaults()` inside `runCreativeWorkflow()`。
+
+- [ ] **Step 6: 跑测试**
+
+Run:
+
+```powershell
+node tests/test-creative-workflow-defaults.js
+node tests/test-creative-workflows.js
+node tests/test-creative-workflow-tasks.js
+```
+
+Expected: all pass.
+
+- [ ] **Step 7: 提交**
 
 Run:
 
 ```powershell
 git add server/services/creativeWorkflows.js tests/test-creative-workflow-defaults.js
-git commit -m "接入一键创作默认值快照"
+git commit -m "添加一键创作默认值快照"
 ```
-
-Expected: commit succeeds.
 
 ---
 
-### Task 4: Html-Video Preferred and Locked Template
+### Task 6: Html-Video Preferred and Locked Template
 
 **Files:**
 - Modify: `server/services/creative-video/html-video/htmlVideoWorkflow.js`
 - Modify: `server/services/creative-video/workflowFacade.js`
-- Test: `tests/test-html-video-template-preference.js`
+- Create: `tests/test-html-video-template-preference.js`
+- Modify: `tests/test-creative-video-workflow-facade.js` only if no existing test can cover pass-through; preserve unrelated dirty changes.
 
-- [ ] **Step 1: Write failing template preference tests**
+**Acceptance:**
+- `generateHtmlVideo({ preferredTemplateId = '', lockTemplate = false })` supports preferred and locked template.
+- `requestTemplateSelection({ preferredTemplateId = '', lockTemplate = false })` supports prompt preference.
+- `lockTemplate=false` 且模板有效时，首选模板排在 compact index 第一位，AI 仍可选择其他模板。
+- `lockTemplate=false` 且模板无效时，记录诊断并回退普通选择。
+- `lockTemplate=true` 且模板不存在或不兼容时，直接返回失败，中文 message 包含模板 ID 和画面比例。
+- `lockTemplate=true` 且模板有效时，不允许 AI 改选其他模板。
+- `workflowFacade.generateCreativeVideoProject()` 从 `target.preferredTemplateId` 和 `target.lockTemplate` 透传。
 
-Create `tests/test-html-video-template-preference.js`:
+- [ ] **Step 1: 写失败测试**
 
-```js
-const assert = require('assert');
-const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
+创建 `tests/test-html-video-template-preference.js`，使用临时模板目录和 `createTemplateRegistry({ rootDir })`：
 
-function makeRegistry() {
-  const templates = [
-    { id: 'news_signal_vertical', name: '竖屏财经信号', output: { resolution: { width: 1080, height: 1920 } }, engine: 'hyperframes', source_entry: 'source/index.html', inputs: { schema: {} }, license: { commercial_use: true } },
-    { id: 'bold_signal', name: '信号卡片', output: { resolution: { width: 1920, height: 1080 } }, engine: 'hyperframes', source_entry: 'source/index.html', inputs: { schema: {} }, license: { commercial_use: true } },
-  ];
-  return {
-    buildCompactIndex: () => templates.map(item => ({ id: item.id, name: item.name, aspect_ratio: item.id === 'news_signal_vertical' ? '9:16' : '16:9' })),
-    getTemplate: id => templates.find(item => item.id === id) || null,
-  };
-}
+- 竖屏模板 `vertical_template`，aspect `9:16`。
+- 横屏模板 `wide_template`，aspect `16:9`。
+- Mock model returns selected template id.
 
-async function runLockedMissingTemplateTest() {
-  const result = await workflow.generateHtmlVideo({
-    workflowId: 'wf1',
-    runId: 'run1',
-    sceneSpec: { title: '测试', aspect_ratio: '9:16', scenes: [{ id: 'scene_01', duration: 3, narration_text: '测试' }] },
-    target: { aspect_ratio: '9:16' },
-    preferredTemplateId: 'missing_template',
-    lockTemplate: true,
-    templateRegistry: makeRegistry(),
-    services: { model: { callTextModel: async () => ({ success: true, text: '{}' }) } },
-    skipValidation: true,
-  });
-  assert.equal(result.success, false);
-  assert.match(result.message, /默认模板 missing_template/);
-}
+Test cases:
 
-async function runPreferredTemplateFirstTest() {
-  let promptText = '';
-  const result = await workflow.generateHtmlVideo({
-    workflowId: 'wf2',
-    runId: 'run2',
-    sceneSpec: { title: '测试', aspect_ratio: '9:16', scenes: [{ id: 'scene_01', duration: 3, narration_text: '测试', visual_text: { headline: '标题' } }] },
-    target: { aspect_ratio: '9:16', duration_sec: 3 },
-    preferredTemplateId: 'news_signal_vertical',
-    lockTemplate: false,
-    templateRegistry: makeRegistry(),
-    services: {
-      model: {
-        callTextModel: async ({ messages }) => {
-          promptText += JSON.stringify(messages);
-          if (promptText.includes('template_id')) {
-            return { success: true, text: JSON.stringify({ template_id: 'news_signal_vertical', reason: '首选模板匹配', confidence: 0.9 }) };
-          }
-          return { success: false, message: 'stop after selection' };
-        },
-      },
-    },
-    skipValidation: true,
-  });
-  assert.equal(result.success, false);
-  assert.match(promptText, /news_signal_vertical/);
-  assert.match(promptText, /优先选择/);
-}
+- preferred valid + unlocked: `compactIndex[0].id === 'vertical_template'` can be asserted by wrapping `requestTemplateSelection()` model prompt or direct helper export.
+- preferred missing + unlocked: result still succeeds with fallback, diagnostics includes `preferred_template_unavailable`。
+- preferred incompatible + locked: result fails, message matches `默认模板 vertical_template 不支持当前画面比例 16:9`。
+- preferred valid + locked: result uses preferred id even if model mock would choose another id.
+- facade pass-through: mock `htmlVideoWorkflow.generateHtmlVideo` receives `preferredTemplateId` and `lockTemplate` from `target`。
 
-(async () => {
-  await runLockedMissingTemplateTest();
-  await runPreferredTemplateFirstTest();
-  console.log('html-video template preference tests passed');
-})().catch(error => {
-  console.error(error);
-  process.exit(1);
-});
-```
+- [ ] **Step 2: 确认测试失败**
 
-- [ ] **Step 2: Run test to verify it fails**
+Run: `node tests/test-html-video-template-preference.js`
 
-Run:
+Expected: fails because parameters are ignored.
 
-```powershell
-node tests/test-html-video-template-preference.js
-```
+- [ ] **Step 3: 实现 html-video 参数**
 
-Expected: FAIL because `preferredTemplateId` and `lockTemplate` are ignored.
+In `htmlVideoWorkflow.js`:
 
-- [ ] **Step 3: Update html-video workflow signatures**
-
-Modify `generateHtmlVideo()` signature:
+- Extend `generateHtmlVideo()` signature:
 
 ```js
-preferredTemplateId = '',
-lockTemplate = false,
-```
-
-Modify `requestTemplateSelection()` signature:
-
-```js
-async function requestTemplateSelection({ model, compactIndex, creativeContext, target, sceneSpec, preferredTemplateId = '', lockTemplate = false }) {
-```
-
-Add helper functions near `buildTemplateIndexOptions()`:
-
-```js
-function normalizeTemplateId(value) {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function findCompactTemplate(compactIndex = [], templateId = '') {
-  return compactIndex.find(item => item.id === templateId) || null;
-}
-
-function movePreferredTemplateFirst(compactIndex = [], preferredTemplateId = '') {
-  const id = normalizeTemplateId(preferredTemplateId);
-  if (!id) return compactIndex;
-  const preferred = findCompactTemplate(compactIndex, id);
-  if (!preferred) return compactIndex;
-  return [preferred, ...compactIndex.filter(item => item.id !== id)];
+async function generateHtmlVideo({
+  workflowId,
+  runId,
+  rootDir,
+  sceneSpec = null,
+  creativeContext = {},
+  target = {},
+  preferredTemplateId = '',
+  lockTemplate = false,
+  templateRegistry,
+  services = {},
+  skipValidation = false,
+  onProgress = null,
+} = {}) {
+  // Keep existing body shape and add preferred-template handling before AI template selection.
 }
 ```
 
-- [ ] **Step 4: Enforce locked template and prefer unlocked template**
+- Resolve effective preferred values from explicit args first, then `target.preferredTemplateId` and `target.lockTemplate`。
+- Validate preferred template with `registry.getTemplate(id)` and `validateTemplateCompatibility(template, buildTemplateIndexOptions(renderTarget, sceneSpec))`。
+- For locked invalid template, return failure with Chinese message and diagnostic code `locked_template_invalid`。
+- For unlocked invalid template, push diagnostic code `preferred_template_unavailable` and continue with existing compact index。
+- For unlocked valid template, reorder compact index by moving preferred template to index 0 without duplicating it。
 
-Inside `generateHtmlVideo()` after `compactIndex` is built:
+- [ ] **Step 4: 实现 requestTemplateSelection 参数**
 
-```js
-const preferredId = normalizeTemplateId(preferredTemplateId || target.preferredTemplateId || target.template_id);
-let templateIndex = compactIndex;
-if (preferredId) {
-  const preferredInIndex = findCompactTemplate(compactIndex, preferredId);
-  if (!preferredInIndex && lockTemplate === true) {
-    return failure(`默认模板 ${preferredId} 不支持当前画面比例 ${renderTarget.aspect_ratio || '未指定'}，请在设置中心修改模板或关闭锁定模板。`, [
-      createDiagnostic({
-        code: 'template_missing',
-        stage: 'template',
-        user_message: `默认模板 ${preferredId} 不支持当前画面比例 ${renderTarget.aspect_ratio || '未指定'}，请在设置中心修改模板或关闭锁定模板。`,
-        details: { template_id: preferredId, aspect_ratio: renderTarget.aspect_ratio || '' },
-      }),
-    ]);
-  }
-  templateIndex = movePreferredTemplateFirst(compactIndex, preferredId);
-}
-```
+In `requestTemplateSelection()`:
 
-Use `templateIndex` instead of `compactIndex` when calling `requestTemplateSelection()`:
-
-```js
-const selection = await requestTemplateSelection({
-  model,
-  compactIndex: templateIndex,
-  creativeContext,
-  target: renderTarget,
-  sceneSpec,
-  preferredTemplateId: preferredId,
-  lockTemplate,
-});
-```
-
-Inside `requestTemplateSelection()`, pass a target object that includes the preference:
+- Add `preferredTemplateId = ''` and `lockTemplate = false` params。
+- If locked and valid selection is already known, bypass AI selection or constrain compact index to only preferred template。
+- If unlocked, include preferred template note in target passed to prompt:
 
 ```js
 target: {
   ...target,
-  preferred_template_id: preferredTemplateId,
-  lock_template: lockTemplate === true,
-  template_instruction: preferredTemplateId
-    ? (lockTemplate ? `必须使用模板 ${preferredTemplateId}` : `优先选择模板 ${preferredTemplateId}，除非内容明显不适合`)
-    : '',
-},
+  preferredTemplateId,
+  templateSelectionPolicy: '优先选择该模板，除非内容明显不适合。'
+}
 ```
 
-- [ ] **Step 5: Update workflow facade passthrough**
+- [ ] **Step 5: 透传 facade**
 
-In `server/services/creative-video/workflowFacade.js`, when calling `htmlVideoWorkflow.generateHtmlVideo()`, add:
+In `workflowFacade.generateCreativeVideoProject()` call to `generateHtmlVideo()`:
 
 ```js
-preferredTemplateId: target.preferredTemplateId || target.preferred_template_id || target.template_id || '',
-lockTemplate: target.lockTemplate === true || target.lock_template === true,
+preferredTemplateId: target.preferredTemplateId || '',
+lockTemplate: target.lockTemplate === true,
 ```
 
-- [ ] **Step 6: Run template tests**
+Do not refactor unrelated facade code. This file may already be dirty; inspect `git diff -- server/services/creative-video/workflowFacade.js` before editing and preserve existing changes.
+
+- [ ] **Step 6: 跑测试**
 
 Run:
 
 ```powershell
 node tests/test-html-video-template-preference.js
-node tests/test-html-video-workflow.js
+node tests/test-html-video-production-regression.js
 node tests/test-creative-video-workflow-facade.js
 ```
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 7: 提交**
 
 Run:
 
 ```powershell
-git add server/services/creative-video/html-video/htmlVideoWorkflow.js server/services/creative-video/workflowFacade.js tests/test-html-video-template-preference.js
-git commit -m "支持默认模板首选和锁定"
+git add server/services/creative-video/html-video/htmlVideoWorkflow.js server/services/creative-video/workflowFacade.js tests/test-html-video-template-preference.js tests/test-creative-video-workflow-facade.js
+git commit -m "支持默认视频模板策略"
 ```
 
-Expected: commit succeeds.
+Before commit, ensure `git diff --cached` does not include unrelated pre-existing edits.
 
 ---
 
-### Task 5: Settings Center API Client and UI Shell
+### Task 7: Settings API Client and Page Shell
 
 **Files:**
 - Modify: `frontend-react/src/api/client.js`
 - Modify: `frontend-react/src/pages/SettingsPage.jsx`
-- Create: `frontend-react/src/components/settings/ModelSettings.jsx`
 - Create: `frontend-react/src/components/settings/SettingsOverview.jsx`
-- Test: `tests/test-settings-center-ui.mjs`
+- Create: `frontend-react/src/components/settings/ModelSettings.jsx`
+- Create: `tests/test-settings-center-shell.mjs`
 
-- [ ] **Step 1: Write failing static UI test**
+**Acceptance:**
+- `api` exposes `getAppSettings()`、`saveAppSettings(payload)`、`getConfigTemplates()`、`getSystemHealth(refresh)`、`cleanupSystemData(targets)`。
+- Settings page first viewport is actual settings center, not marketing content。
+- 左侧导航固定 4 项：`总览`、`创作默认值`、`模型配置`、`系统`。
+- 模型配置迁移进 `ModelSettings` 后仍使用 `useSettings()` 的现有模型状态和保存逻辑。
+- 页面加载 app settings、templates、system health 时有中文 loading 和失败状态。
+- 保存模型配置和保存应用配置是两个独立按钮或动作，不混写。
 
-Create `tests/test-settings-center-ui.mjs`:
+- [ ] **Step 1: 写失败静态测试**
+
+创建 `tests/test-settings-center-shell.mjs`：
 
 ```js
 import assert from 'assert';
 import fs from 'fs';
 
-const settingsPage = fs.readFileSync('frontend-react/src/pages/SettingsPage.jsx', 'utf-8');
-const apiClient = fs.readFileSync('frontend-react/src/api/client.js', 'utf-8');
+const page = fs.readFileSync('frontend-react/src/pages/SettingsPage.jsx', 'utf-8');
+const client = fs.readFileSync('frontend-react/src/api/client.js', 'utf-8');
 
-assert.match(settingsPage, /总览/);
-assert.match(settingsPage, /创作默认值/);
-assert.match(settingsPage, /模型配置/);
-assert.match(settingsPage, /系统/);
-assert.match(settingsPage, /SettingsOverview/);
-assert.match(settingsPage, /ModelSettings/);
-assert.match(apiClient, /getAppSettings/);
-assert.match(apiClient, /saveAppSettings/);
-assert.match(apiClient, /getConfigTemplates/);
-assert.match(apiClient, /getSystemHealth/);
-assert.match(apiClient, /cleanupSystemData/);
+assert.match(client, /getAppSettings\(\)/);
+assert.match(client, /saveAppSettings\(payload\)/);
+assert.match(client, /getConfigTemplates\(\)/);
+assert.match(client, /getSystemHealth\(refresh/);
+assert.match(client, /cleanupSystemData\(targets\)/);
 
-console.log('settings center ui tests passed');
+assert.match(page, /总览/);
+assert.match(page, /创作默认值/);
+assert.match(page, /模型配置/);
+assert.match(page, /系统/);
+assert.match(page, /正在加载设置中心/);
+assert.match(page, /SettingsOverview/);
+assert.match(page, /ModelSettings/);
+
+console.log('settings center shell tests passed');
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: 确认测试失败**
 
-Run:
+Run: `node tests/test-settings-center-shell.mjs`
 
-```powershell
-node tests/test-settings-center-ui.mjs
-```
+Expected: fails because API methods and shell are missing.
 
-Expected: FAIL because settings center components and API methods do not exist.
+- [ ] **Step 3: 新增 API client 方法**
 
-- [ ] **Step 3: Add API client methods**
-
-Modify `frontend-react/src/api/client.js`:
+In `frontend-react/src/api/client.js`:
 
 ```js
 getAppSettings() {
@@ -1407,7 +909,7 @@ getConfigTemplates() {
 getSystemHealth(refresh = false) {
   return requestJson(`/api/config/system-health${refresh ? '?refresh=1' : ''}`);
 },
-cleanupSystemData(targets = []) {
+cleanupSystemData(targets) {
   return requestJson('/api/config/maintenance/cleanup', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1416,263 +918,337 @@ cleanupSystemData(targets = []) {
 },
 ```
 
-- [ ] **Step 4: Create `ModelSettings` wrapper**
+- [ ] **Step 4: 创建 `ModelSettings`**
 
-Create `frontend-react/src/components/settings/ModelSettings.jsx`:
+Move existing SettingsPage model controls into `frontend-react/src/components/settings/ModelSettings.jsx`:
 
-```jsx
-import { GlobalModelSelector } from './GlobalModelSelector.jsx';
-import { ProviderList } from './ProviderList.jsx';
+- `GlobalModelSelector`
+- `ProviderList`
+- existing model save/reload action bar
+- `Status` for model config status
 
-export function ModelSettings({ settings }) {
-  return (
-    <div className="settingsSection">
-      <GlobalModelSelector
-        modelTypes={settings.MODEL_TYPES}
-        modelTypeInfo={settings.MODEL_TYPE_INFO}
-        providerList={settings.providerList}
-        activeModels={settings.activeModels}
-        onChange={settings.setActive}
-      />
-      <ProviderList
-        providerList={settings.providerList}
-        modelTypes={settings.MODEL_TYPES}
-        modelTypeInfo={settings.MODEL_TYPE_INFO}
-        onUpdate={settings.updateProvider}
-        onUpdateModel={settings.updateProviderModel}
-        onAdd={settings.addProvider}
-        onRemove={settings.removeProvider}
-      />
-    </div>
-  );
+Do not include `ProjectSettings` in model section; `skipValidation` belongs to System section in v1.
+
+- [ ] **Step 5: 创建 `SettingsOverview`**
+
+`SettingsOverview` props:
+
+```js
+{
+  appSettings,
+  modelSettings,
+  systemHealth,
+  onNavigate
 }
 ```
 
-- [ ] **Step 5: Create `SettingsOverview`**
+Display Chinese status cards:
 
-Create `frontend-react/src/components/settings/SettingsOverview.jsx`:
+- 文字模型
+- TTS
+- 默认画面比例
+- 默认模板策略
+- 质检状态
+- 渲染环境
+- 数据占用
 
-```jsx
-export function SettingsOverview({ appSettings, activeModels, systemHealth, onNavigate }) {
-  const defaults = appSettings?.creativeDefaults || {};
-  const textModelReady = activeModels?.text?.enabled === true;
-  const ttsReady = activeModels?.tts?.enabled === true;
-  const environmentReady = systemHealth?.environment?.ok === true;
+Cards can be buttons that call `onNavigate('models')`、`onNavigate('creative')`、`onNavigate('system')`。
 
-  return (
-    <section className="settingsPanel">
-      <div className="settingsPanelHeader">
-        <div>
-          <h3>总览</h3>
-          <p>查看模型、创作默认值、系统环境和本地数据状态。</p>
-        </div>
-      </div>
-      <div className="settingsOverviewGrid">
-        <button type="button" className="settingsOverviewItem" onClick={() => onNavigate('models')}>
-          <span>文字模型</span>
-          <strong>{textModelReady ? '已启用' : '未配置'}</strong>
-        </button>
-        <button type="button" className="settingsOverviewItem" onClick={() => onNavigate('models')}>
-          <span>TTS</span>
-          <strong>{ttsReady ? '已启用' : '未配置'}</strong>
-        </button>
-        <button type="button" className="settingsOverviewItem" onClick={() => onNavigate('creative')}>
-          <span>默认画面比例</span>
-          <strong>{defaults.aspectRatio || '9:16'}</strong>
-        </button>
-        <button type="button" className="settingsOverviewItem" onClick={() => onNavigate('system')}>
-          <span>渲染环境</span>
-          <strong>{environmentReady ? '已就绪' : '需检查'}</strong>
-        </button>
-      </div>
-    </section>
-  );
-}
-```
+- [ ] **Step 6: 重做 SettingsPage shell**
 
-- [ ] **Step 6: Replace `SettingsPage` with settings center shell**
+In `SettingsPage.jsx`:
 
-Modify `frontend-react/src/pages/SettingsPage.jsx` to use:
+- Use `useState('overview')` for active section.
+- Use existing `useSettings()` as `modelSettings`。
+- Add app state: `appSettings`、`templates`、`systemHealth`、`loadingApp`、`savingApp`、`status`。
+- Load app settings, templates, system health on mount with `Promise.allSettled` so one failed request does not blank whole page。
+- Provide `saveAppSettings(nextSettings)` that calls `api.saveAppSettings()` and updates Chinese status。
+- Render left nav with exact labels。
+- Render right content by section。
 
-```jsx
-import { useEffect, useMemo, useState } from 'react';
-import { Status } from '../components/Status.jsx';
-import { CreativeDefaultsSettings } from '../components/settings/CreativeDefaultsSettings.jsx';
-import { ModelSettings } from '../components/settings/ModelSettings.jsx';
-import { SettingsOverview } from '../components/settings/SettingsOverview.jsx';
-import { SystemSettings } from '../components/settings/SystemSettings.jsx';
-import { useSettings } from '../hooks/useSettings.js';
-import { api } from '../api/client.js';
-
-const SECTIONS = [
-  { id: 'overview', label: '总览' },
-  { id: 'creative', label: '创作默认值' },
-  { id: 'models', label: '模型配置' },
-  { id: 'system', label: '系统' },
-];
-
-export function SettingsPage() {
-  const modelSettings = useSettings();
-  const [activeSection, setActiveSection] = useState('overview');
-  const [appSettings, setAppSettings] = useState(null);
-  const [templates, setTemplates] = useState([]);
-  const [systemHealth, setSystemHealth] = useState(null);
-  const [status, setStatus] = useState(null);
-  const [loadingAppSettings, setLoadingAppSettings] = useState(true);
-  const [savingAppSettings, setSavingAppSettings] = useState(false);
-
-  async function loadAppSettings(refreshHealth = false) {
-    setLoadingAppSettings(true);
-    setStatus({ type: 'loading', message: '正在加载设置中心配置...' });
-    try {
-      const [settingsJson, templatesJson, healthJson] = await Promise.all([
-        api.getAppSettings(),
-        api.getConfigTemplates(),
-        api.getSystemHealth(refreshHealth),
-      ]);
-      setAppSettings(settingsJson);
-      setTemplates(templatesJson.data || []);
-      setSystemHealth(healthJson);
-      setStatus({ type: 'success', message: '设置中心配置已加载。' });
-    } catch (error) {
-      setStatus({ type: 'error', message: error.message || '加载设置中心配置失败。' });
-    } finally {
-      setLoadingAppSettings(false);
-    }
-  }
-
-  async function saveAppSettings(nextSettings = appSettings) {
-    setSavingAppSettings(true);
-    setStatus({ type: 'loading', message: '正在保存设置中心配置...' });
-    try {
-      const saved = await api.saveAppSettings(nextSettings);
-      setAppSettings(saved);
-      setStatus({ type: 'success', message: '设置中心配置已保存。' });
-    } catch (error) {
-      setStatus({ type: 'error', message: error.message || '保存设置中心配置失败。' });
-    } finally {
-      setSavingAppSettings(false);
-    }
-  }
-
-  useEffect(() => { loadAppSettings(false); }, []);
-
-  const combinedStatus = status || modelSettings.status;
-  const busy = loadingAppSettings || savingAppSettings || modelSettings.loading || modelSettings.saving;
-
-  return (
-    <main className="container settingsCenter">
-      <div className="workspaceIntro">
-        <div>
-          <h2>设置中心</h2>
-          <p>管理创作默认值、模型配置、系统环境和本地数据。</p>
-        </div>
-      </div>
-      <Status status={combinedStatus} />
-      {busy ? <div className="pageLoading">{savingAppSettings || modelSettings.saving ? '正在保存配置...' : '正在加载配置...'}</div> : null}
-      <div className="settingsCenterLayout">
-        <aside className="settingsCenterNav">
-          {SECTIONS.map(section => (
-            <button
-              key={section.id}
-              type="button"
-              className={activeSection === section.id ? 'active' : ''}
-              onClick={() => setActiveSection(section.id)}
-            >
-              {section.label}
-            </button>
-          ))}
-        </aside>
-        <section className="settingsCenterContent">
-          {activeSection === 'overview' ? (
-            <SettingsOverview
-              appSettings={appSettings}
-              activeModels={modelSettings.activeModels}
-              systemHealth={systemHealth}
-              onNavigate={setActiveSection}
-            />
-          ) : null}
-          {activeSection === 'creative' ? (
-            <CreativeDefaultsSettings
-              appSettings={appSettings}
-              templates={templates}
-              disabled={busy}
-              onChange={setAppSettings}
-              onSave={saveAppSettings}
-            />
-          ) : null}
-          {activeSection === 'models' ? (
-            <ModelSettings settings={modelSettings} />
-          ) : null}
-          {activeSection === 'system' ? (
-            <SystemSettings
-              appSettings={appSettings}
-              systemHealth={systemHealth}
-              disabled={busy}
-              onChange={setAppSettings}
-              onSave={saveAppSettings}
-              onRefresh={() => loadAppSettings(true)}
-            />
-          ) : null}
-        </section>
-      </div>
-    </main>
-  );
-}
-```
-
-- [ ] **Step 7: Run static UI test**
+- [ ] **Step 7: 跑测试**
 
 Run:
 
 ```powershell
-node tests/test-settings-center-ui.mjs
+node tests/test-settings-center-shell.mjs
+npm run build:frontend
 ```
 
-Expected: `settings center ui tests passed`.
+Expected: both pass.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 8: 提交**
 
 Run:
 
 ```powershell
-git add frontend-react/src/api/client.js frontend-react/src/pages/SettingsPage.jsx frontend-react/src/components/settings/ModelSettings.jsx frontend-react/src/components/settings/SettingsOverview.jsx tests/test-settings-center-ui.mjs
-git commit -m "重构设置页为设置中心壳层"
+git add frontend-react/src/api/client.js frontend-react/src/pages/SettingsPage.jsx frontend-react/src/components/settings/SettingsOverview.jsx frontend-react/src/components/settings/ModelSettings.jsx tests/test-settings-center-shell.mjs
+git commit -m "重做设置中心页面壳层"
 ```
-
-Expected: commit succeeds.
 
 ---
 
-### Task 6: Creative Defaults UI and One-Click Research Override
+### Task 8: Creative Defaults UI
 
 **Files:**
 - Create: `frontend-react/src/components/settings/CreativeDefaultsSettings.jsx`
-- Modify: `frontend-react/src/pages/OneClickCreativePage.jsx`
-- Test: `tests/test-creative-defaults-ui.mjs`
-- Test: `tests/test-one-click-research-defaults.mjs`
+- Modify: `frontend-react/src/pages/SettingsPage.jsx`
+- Create: `tests/test-creative-defaults-ui.mjs`
 
-- [ ] **Step 1: Write failing frontend tests**
+**Acceptance:**
+- 创作默认值 section 包含默认画面比例、默认目标时长、按比例默认模板、锁定模板、联网研究默认开关。
+- 模板下拉按比例展示兼容模板；不兼容模板可以隐藏或禁用，但不得保存非字符串。
+- 保存按钮 loading 文案为 `正在保存创作默认值...`，loading 期间禁用。
+- 保存成功显示 `创作默认值已保存`。
+- 失败显示中文错误。
+- 不展示或暗示 `captionMode`、`showCaptionBar`、`renderQuality` 已自动生效。
 
-Create `tests/test-creative-defaults-ui.mjs`:
+- [ ] **Step 1: 写失败静态测试**
+
+创建 `tests/test-creative-defaults-ui.mjs`：
 
 ```js
 import assert from 'assert';
 import fs from 'fs';
 
 const source = fs.readFileSync('frontend-react/src/components/settings/CreativeDefaultsSettings.jsx', 'utf-8');
+const page = fs.readFileSync('frontend-react/src/pages/SettingsPage.jsx', 'utf-8');
 
 assert.match(source, /默认画面比例/);
 assert.match(source, /默认目标时长/);
 assert.match(source, /按比例默认模板/);
 assert.match(source, /锁定模板/);
 assert.match(source, /联网研究默认开启/);
-assert.match(source, /正在保存/);
+assert.match(source, /正在保存创作默认值/);
+assert.match(source, /保存创作默认值/);
+assert.doesNotMatch(source, /captionMode|showCaptionBar|renderQuality/);
+assert.match(page, /CreativeDefaultsSettings/);
 
 console.log('creative defaults ui tests passed');
 ```
 
-Create `tests/test-one-click-research-defaults.mjs`:
+- [ ] **Step 2: 确认测试失败**
+
+Run: `node tests/test-creative-defaults-ui.mjs`
+
+Expected: fails because component does not exist.
+
+- [ ] **Step 3: 创建组件**
+
+Implement `CreativeDefaultsSettings` with props:
+
+```js
+{
+  appSettings,
+  templates,
+  disabled,
+  saving,
+  onChange,
+  onSave
+}
+```
+
+Implementation requirements:
+
+- `ASPECT_RATIOS = ['9:16', '16:9', '1:1', '4:5']`。
+- Use controlled inputs. `onChange(nextAppSettings)` updates parent draft immediately。
+- `templateByAspectRatio[aspect]` updates only that aspect key。
+- Save button calls `onSave(nextAppSettings)`。
+- Template option label uses `template.name || template.id`。
+- If `template.compatible === false`, mark option disabled and append `（不兼容）`。
+
+- [ ] **Step 4: 接入 SettingsPage**
+
+In creative section render:
+
+```jsx
+<CreativeDefaultsSettings
+  appSettings={appSettings}
+  templates={templates}
+  disabled={loadingApp || savingApp}
+  saving={savingApp}
+  onChange={setAppSettings}
+  onSave={saveAppSettings}
+/>
+```
+
+- [ ] **Step 5: 跑测试**
+
+Run:
+
+```powershell
+node tests/test-creative-defaults-ui.mjs
+npm run build:frontend
+```
+
+Expected: both pass.
+
+- [ ] **Step 6: 提交**
+
+Run:
+
+```powershell
+git add frontend-react/src/components/settings/CreativeDefaultsSettings.jsx frontend-react/src/pages/SettingsPage.jsx tests/test-creative-defaults-ui.mjs
+git commit -m "添加创作默认值设置界面"
+```
+
+---
+
+### Task 9: System UI and Cleanup Dialog
+
+**Files:**
+- Create: `frontend-react/src/components/settings/SystemSettings.jsx`
+- Create: `frontend-react/src/components/settings/CleanupConfirmDialog.jsx`
+- Modify: `frontend-react/src/pages/SettingsPage.jsx`
+- Create: `tests/test-system-settings-ui.mjs`
+
+**Acceptance:**
+- 系统 section 包含质检状态、重新检测、html-video 环境、模板状态、数据维护。
+- 清理项固定为创作任务记录、媒体素材缓存、渲染产物、浏览器数据、Cookie。
+- 每个清理项单独按钮，不提供“清理全部”。
+- 点击清理先打开确认弹窗。
+- 确认按钮文案形如 `确认清理媒体素材缓存`。
+- loading 文案形如 `正在清理媒体素材缓存...`。
+- 成功后刷新 system health。
+- 失败显示中文错误。
+
+- [ ] **Step 1: 写失败静态测试**
+
+创建 `tests/test-system-settings-ui.mjs`：
+
+```js
+import assert from 'assert';
+import fs from 'fs';
+
+const system = fs.readFileSync('frontend-react/src/components/settings/SystemSettings.jsx', 'utf-8');
+const dialog = fs.readFileSync('frontend-react/src/components/settings/CleanupConfirmDialog.jsx', 'utf-8');
+const page = fs.readFileSync('frontend-react/src/pages/SettingsPage.jsx', 'utf-8');
+
+assert.match(system, /质检状态/);
+assert.match(system, /重新检测/);
+assert.match(system, /html-video 环境/);
+assert.match(system, /创作任务记录/);
+assert.match(system, /媒体素材缓存/);
+assert.match(system, /渲染产物/);
+assert.match(system, /浏览器数据/);
+assert.match(system, /Cookie/);
+assert.doesNotMatch(system, /清理全部/);
+assert.match(dialog, /确认清理/);
+assert.match(dialog, /正在清理/);
+assert.match(dialog, /此操作不可恢复/);
+assert.match(page, /SystemSettings/);
+
+console.log('system settings ui tests passed');
+```
+
+- [ ] **Step 2: 确认测试失败**
+
+Run: `node tests/test-system-settings-ui.mjs`
+
+Expected: fails because components do not exist.
+
+- [ ] **Step 3: 创建 `CleanupConfirmDialog`**
+
+Props:
+
+```js
+{
+  target,
+  open,
+  loading,
+  estimate,
+  onCancel,
+  onConfirm
+}
+```
+
+Dialog content:
+
+- Title: `确认清理${label}`
+- Body includes `此操作不可恢复。`
+- Body includes expected affected path or storage display if passed.
+- Cancel button: `取消`
+- Confirm button: loading ? `正在清理${label}...` : `确认清理${label}`
+
+- [ ] **Step 4: 创建 `SystemSettings`**
+
+Props:
+
+```js
+{
+  appSettings,
+  systemHealth,
+  disabled,
+  saving,
+  onChange,
+  onSave,
+  onRefresh
+}
+```
+
+Implementation requirements:
+
+- `skipValidation` switch updates `appSettings.system.skipValidation`。
+- Save system settings uses same `onSave(appSettings)` but button text `保存系统设置`。
+- Diagnostics render via `<details>` and read `item.detail`。
+- Cleanup calls `api.cleanupSystemData([target])`。
+- On cleanup success call `await onRefresh(true)`。
+- Disable cleanup buttons while `disabled || cleanupLoading`。
+
+- [ ] **Step 5: 接入 SettingsPage**
+
+Render system section with:
+
+```jsx
+<SystemSettings
+  appSettings={appSettings}
+  systemHealth={systemHealth}
+  disabled={loadingApp || savingApp}
+  saving={savingApp}
+  onChange={setAppSettings}
+  onSave={saveAppSettings}
+  onRefresh={loadSystemHealth}
+/>
+```
+
+- [ ] **Step 6: 跑测试**
+
+Run:
+
+```powershell
+node tests/test-system-settings-ui.mjs
+npm run build:frontend
+```
+
+Expected: both pass.
+
+- [ ] **Step 7: 提交**
+
+Run:
+
+```powershell
+git add frontend-react/src/components/settings/SystemSettings.jsx frontend-react/src/components/settings/CleanupConfirmDialog.jsx frontend-react/src/pages/SettingsPage.jsx tests/test-system-settings-ui.mjs
+git commit -m "添加系统状态和数据维护界面"
+```
+
+---
+
+### Task 10: One-Click Research Override
+
+**Files:**
+- Modify: `frontend-react/src/pages/OneClickCreativePage.jsx`
+- Create: `tests/test-one-click-research-defaults.mjs`
+
+**Acceptance:**
+- 页面加载时读取 `api.getAppSettings()`，用 `creativeDefaults.useResearch` 初始化联网研究开关。
+- 用户未手动切换时，创建请求不发送 `useResearch`，也不发送 `creativeDefaultsOverride.useResearch`。
+- 用户手动切换后，创建请求发送 `creativeDefaultsOverride: { useResearch }`。
+- 保留旧后端兼容，但新前端不再无条件发送 `useResearch: useResearch`。
+- 加载默认值失败时使用 `true` 作为前端兜底，不阻止用户创建任务。
+
+- [ ] **Step 1: 写失败静态测试**
+
+创建 `tests/test-one-click-research-defaults.mjs`：
 
 ```js
 import assert from 'assert';
@@ -1681,158 +1257,28 @@ import fs from 'fs';
 const source = fs.readFileSync('frontend-react/src/pages/OneClickCreativePage.jsx', 'utf-8');
 
 assert.match(source, /useResearchTouched/);
-assert.match(source, /api\.getAppSettings/);
+assert.match(source, /api\.getAppSettings\(\)/);
 assert.match(source, /creativeDefaultsOverride/);
-assert.doesNotMatch(source, /useResearch: useResearch,\s*assetIds/s);
+assert.match(source, /setUseResearchTouched\(true\)/);
+assert.doesNotMatch(source, /useResearch:\s*useResearch,\s*assetIds/s);
 
 console.log('one click research defaults tests passed');
 ```
 
-N3 requirement: this is an integration-style static test over request body construction. Do not write a narrow unit test around internal React state because the page currently owns fetch behavior through `api`.
+N3 rationale: `OneClickCreativePage.jsx` 当前直接构造 API 请求，优先用集成式静态测试或 mock API 测试请求体，不写脆弱的纯 React state 单元测试。
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: 确认测试失败**
 
-Run:
+Run: `node tests/test-one-click-research-defaults.mjs`
 
-```powershell
-node tests/test-creative-defaults-ui.mjs
-node tests/test-one-click-research-defaults.mjs
-```
+Expected: fails because touched state does not exist.
 
-Expected: both fail because the component and touched-state request behavior do not exist.
+- [ ] **Step 3: 实现 touched state**
 
-- [ ] **Step 3: Create `CreativeDefaultsSettings`**
+In `OneClickCreativePage.jsx`:
 
-Create `frontend-react/src/components/settings/CreativeDefaultsSettings.jsx`:
-
-```jsx
-const ASPECT_RATIOS = ['9:16', '16:9', '1:1', '4:5'];
-
-function updateCreativeDefaults(appSettings, patch) {
-  return {
-    ...(appSettings || {}),
-    creativeDefaults: {
-      ...(appSettings?.creativeDefaults || {}),
-      ...patch,
-    },
-  };
-}
-
-function updateTemplateForAspect(appSettings, aspect, templateId) {
-  const current = appSettings?.creativeDefaults || {};
-  return updateCreativeDefaults(appSettings, {
-    templateByAspectRatio: {
-      ...(current.templateByAspectRatio || {}),
-      [aspect]: templateId,
-    },
-  });
-}
-
-export function CreativeDefaultsSettings({ appSettings, templates = [], disabled, onChange, onSave }) {
-  const defaults = appSettings?.creativeDefaults || {};
-  const templateByAspectRatio = defaults.templateByAspectRatio || {};
-  const savingText = disabled ? '正在保存或加载配置...' : '';
-
-  return (
-    <section className="settingsPanel">
-      <div className="settingsPanelHeader">
-        <div>
-          <h3>创作默认值</h3>
-          <p>这些配置会自动应用到新建的一键创作任务。</p>
-        </div>
-        <button className="btn primary" type="button" disabled={disabled} onClick={() => onSave(appSettings)}>
-          {disabled ? '正在保存...' : '保存创作默认值'}
-        </button>
-      </div>
-      {savingText ? <p className="muted">{savingText}</p> : null}
-      <div className="settingsFormGrid">
-        <label>
-          <span>默认画面比例</span>
-          <select
-            value={defaults.aspectRatio || '9:16'}
-            disabled={disabled}
-            onChange={event => onChange(updateCreativeDefaults(appSettings, { aspectRatio: event.target.value }))}
-          >
-            {ASPECT_RATIOS.map(aspect => <option key={aspect} value={aspect}>{aspect}</option>)}
-          </select>
-        </label>
-        <label>
-          <span>默认目标时长</span>
-          <input
-            type="number"
-            min="15"
-            max="180"
-            value={defaults.targetDurationSec || 60}
-            disabled={disabled}
-            onChange={event => onChange(updateCreativeDefaults(appSettings, { targetDurationSec: Number(event.target.value) }))}
-          />
-        </label>
-      </div>
-      <div className="settingsPanelSubsection">
-        <h4>按比例默认模板</h4>
-        <div className="settingsFormGrid">
-          {ASPECT_RATIOS.map(aspect => (
-            <label key={aspect}>
-              <span>{aspect}</span>
-              <select
-                value={templateByAspectRatio[aspect] || ''}
-                disabled={disabled}
-                onChange={event => onChange(updateTemplateForAspect(appSettings, aspect, event.target.value))}
-              >
-                <option value="">自动选择模板</option>
-                {templates
-                  .filter(template => !template.aspect_ratio || template.aspect_ratio === aspect)
-                  .map(template => <option key={template.id} value={template.id}>{template.name || template.id}</option>)}
-              </select>
-            </label>
-          ))}
-        </div>
-      </div>
-      <label className="switchControl">
-        <input
-          type="checkbox"
-          checked={defaults.lockTemplate === true}
-          disabled={disabled}
-          onChange={event => onChange(updateCreativeDefaults(appSettings, { lockTemplate: event.target.checked }))}
-        />
-        <span className="switchTrack" aria-hidden="true"><span className="switchThumb" /></span>
-        <div className="switchLabel">
-          <span className="switchText">锁定模板</span>
-          <span className="switchDesc">开启后，新任务必须使用默认模板；模板不兼容时任务会停止并提示原因。</span>
-        </div>
-      </label>
-      <label className="switchControl">
-        <input
-          type="checkbox"
-          checked={defaults.useResearch !== false}
-          disabled={disabled}
-          onChange={event => onChange(updateCreativeDefaults(appSettings, { useResearch: event.target.checked }))}
-        />
-        <span className="switchTrack" aria-hidden="true"><span className="switchThumb" /></span>
-        <div className="switchLabel">
-          <span className="switchText">联网研究默认开启</span>
-          <span className="switchDesc">新建一键创作任务时默认联网获取资料，任务页可临时切换。</span>
-        </div>
-      </label>
-    </section>
-  );
-}
-```
-
-- [ ] **Step 4: Update one-click page research default behavior**
-
-In `frontend-react/src/pages/OneClickCreativePage.jsx`:
-
-Add state:
-
-```jsx
-const [useResearch, setUseResearch] = useState(true);
-const [useResearchTouched, setUseResearchTouched] = useState(false);
-```
-
-Replace the existing `useResearch` state declaration.
-
-Add effect:
+- Add `const [useResearchTouched, setUseResearchTouched] = useState(false);`
+- Add effect to load app settings:
 
 ```jsx
 useEffect(() => {
@@ -1840,10 +1286,12 @@ useEffect(() => {
   async function loadCreativeDefaults() {
     try {
       const json = await api.getAppSettings();
-      if (cancelled || useResearchTouched) return;
-      setUseResearch(json?.creativeDefaults?.useResearch !== false);
+      const config = json?.data || json;
+      if (!cancelled && !useResearchTouched) {
+        setUseResearch(config?.creativeDefaults?.useResearch !== false);
+      }
     } catch {
-      if (!cancelled || !useResearchTouched) {
+      if (!cancelled && !useResearchTouched) {
         setUseResearch(true);
       }
     }
@@ -1853,7 +1301,7 @@ useEffect(() => {
 }, [useResearchTouched]);
 ```
 
-Update the `CreativeComposer` prop:
+- Update `CreativeComposer` setter:
 
 ```jsx
 setUseResearch={(value) => {
@@ -1862,338 +1310,190 @@ setUseResearch={(value) => {
 }}
 ```
 
-Update submit payload:
+- Build submit payload:
 
 ```js
-const creativeDefaultsOverride = useResearchTouched ? { useResearch } : {};
-const json = await api.createCreativeWorkflow({
+const requestPayload = {
   input: trimmed,
-  ...(useResearchTouched ? { creativeDefaultsOverride } : {}),
   assetIds: [],
   renderOptions: {},
   workflowOptions: {},
-});
+  ...(useResearchTouched ? { creativeDefaultsOverride: { useResearch } } : {}),
+};
 ```
 
-Remove the old unconditional `useResearch: useResearch` field from the request body.
+- Remove unconditional `useResearch: useResearch` from request payload.
 
-- [ ] **Step 5: Run frontend static tests**
+- [ ] **Step 4: 跑测试**
 
 Run:
 
 ```powershell
-node tests/test-creative-defaults-ui.mjs
 node tests/test-one-click-research-defaults.mjs
+node tests/test-one-click-creative-page.mjs
+npm run build:frontend
 ```
 
-Expected: both pass.
+Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: 提交**
 
 Run:
 
 ```powershell
-git add frontend-react/src/components/settings/CreativeDefaultsSettings.jsx frontend-react/src/pages/OneClickCreativePage.jsx tests/test-creative-defaults-ui.mjs tests/test-one-click-research-defaults.mjs
-git commit -m "添加创作默认值设置界面"
+git add frontend-react/src/pages/OneClickCreativePage.jsx tests/test-one-click-research-defaults.mjs
+git commit -m "接入一键创作联网研究默认值"
 ```
-
-Expected: commit succeeds.
 
 ---
 
-### Task 7: System Settings UI and Cleanup Dialog
+### Task 11: Settings Center Styles
 
 **Files:**
-- Create: `frontend-react/src/components/settings/SystemSettings.jsx`
-- Create: `frontend-react/src/components/settings/CleanupConfirmDialog.jsx`
-- Test: `tests/test-system-settings-ui.mjs`
+- Modify: `frontend-react/src/styles.css`
+- Create: `tests/test-settings-center-styles.mjs`
 
-- [ ] **Step 1: Write failing static UI test**
+**Acceptance:**
+- 样式只新增设置中心命名前缀 block。
+- 左侧导航桌面为固定窄栏，移动端变为两列或单列按钮。
+- 不出现 UI 元素重叠；按钮文字在移动端可换行。
+- 没有新增大面积单色调装饰背景、渐变球、营销 hero。
+- 设置内容保持工具型界面密度。
 
-Create `tests/test-system-settings-ui.mjs`:
+- [ ] **Step 1: 写失败静态测试**
+
+创建 `tests/test-settings-center-styles.mjs`：
 
 ```js
 import assert from 'assert';
 import fs from 'fs';
 
-const systemSettings = fs.readFileSync('frontend-react/src/components/settings/SystemSettings.jsx', 'utf-8');
-const dialog = fs.readFileSync('frontend-react/src/components/settings/CleanupConfirmDialog.jsx', 'utf-8');
+const css = fs.readFileSync('frontend-react/src/styles.css', 'utf-8');
 
-assert.match(systemSettings, /质检状态/);
-assert.match(systemSettings, /重新检测/);
-assert.match(systemSettings, /创作任务记录/);
-assert.match(systemSettings, /媒体素材缓存/);
-assert.match(systemSettings, /渲染产物/);
-assert.match(systemSettings, /浏览器数据/);
-assert.match(systemSettings, /Cookie/);
-assert.match(dialog, /确认清理/);
-assert.match(dialog, /正在清理/);
-assert.match(dialog, /此操作不可恢复/);
+assert.match(css, /\.settingsCenterLayout/);
+assert.match(css, /\.settingsCenterNav/);
+assert.match(css, /\.settingsPanel/);
+assert.match(css, /\.settingsCleanupGrid/);
+assert.match(css, /@media \(max-width: 900px\)/);
+assert.doesNotMatch(css, /gradient-orb|bokeh|heroGradient/);
 
-console.log('system settings ui tests passed');
+console.log('settings center styles tests passed');
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: 确认测试失败**
+
+Run: `node tests/test-settings-center-styles.mjs`
+
+Expected: fails because styles are missing.
+
+- [ ] **Step 3: 添加小范围样式**
+
+Append one bounded block marked:
+
+```css
+/* Settings center */
+```
+
+Required selectors:
+
+- `.settingsCenterLayout`
+- `.settingsCenterNav`
+- `.settingsCenterNav button`
+- `.settingsCenterNav button.active`
+- `.settingsCenterContent`
+- `.settingsPanel`
+- `.settingsPanelHeader`
+- `.settingsOverviewGrid`
+- `.settingsCleanupGrid`
+- `.settingsCleanupItem`
+- `.modalBackdrop`
+- `.modalPanel`
+
+Style constraints:
+
+- Cards radius max `8px`。
+- Avoid nested card styling。
+- Keep colors neutral with clear accents; do not create one-note purple/blue/slate theme。
+- Mobile media query at `max-width: 900px`。
+
+- [ ] **Step 4: 跑测试和构建**
 
 Run:
 
 ```powershell
-node tests/test-system-settings-ui.mjs
+node tests/test-settings-center-styles.mjs
+npm run build:frontend
 ```
 
-Expected: FAIL because components do not exist.
+Expected: both pass.
 
-- [ ] **Step 3: Create cleanup dialog**
-
-Create `frontend-react/src/components/settings/CleanupConfirmDialog.jsx`:
-
-```jsx
-const TARGET_LABELS = {
-  'creative-workflows': '创作任务记录',
-  'media-cache': '媒体素材缓存',
-  'render-outputs': '渲染产物',
-  'browser-data': '浏览器数据',
-  cookies: 'Cookie',
-};
-
-export function CleanupConfirmDialog({ target, open, loading, onCancel, onConfirm }) {
-  if (!open || !target) return null;
-  const label = TARGET_LABELS[target] || target;
-  return (
-    <div className="modalBackdrop" role="presentation">
-      <div className="modalPanel" role="dialog" aria-modal="true" aria-label={`确认清理${label}`}>
-        <h3>确认清理{label}</h3>
-        <p>此操作不可恢复。清理前请确认没有正在运行的一键创作任务。</p>
-        <p>系统只会删除白名单内与「{label}」对应的数据。</p>
-        <div className="settingsActionBar">
-          <button type="button" className="btn secondary" disabled={loading} onClick={onCancel}>取消</button>
-          <button type="button" className="btn danger" disabled={loading} onClick={() => onConfirm(target)}>
-            {loading ? `正在清理${label}...` : `确认清理${label}`}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-```
-
-- [ ] **Step 4: Create `SystemSettings`**
-
-Create `frontend-react/src/components/settings/SystemSettings.jsx`:
-
-```jsx
-import { useState } from 'react';
-import { api } from '../../api/client.js';
-import { CleanupConfirmDialog } from './CleanupConfirmDialog.jsx';
-
-const CLEANUP_TARGETS = [
-  ['creative-workflows', '创作任务记录', '删除本地一键创作 workflow 记录。'],
-  ['media-cache', '媒体素材缓存', '删除本地媒体素材缓存。'],
-  ['render-outputs', '渲染产物', '仅删除识别出的渲染视频和预览产物。'],
-  ['browser-data', '浏览器数据', '删除本地浏览器数据目录。'],
-  ['cookies', 'Cookie', '清空内存 Cookie 并清理本地 Cookie 文件。'],
-];
-
-function updateSystem(appSettings, patch) {
-  return {
-    ...(appSettings || {}),
-    system: {
-      ...(appSettings?.system || {}),
-      ...patch,
-    },
-  };
-}
-
-export function SystemSettings({ appSettings, systemHealth, disabled, onChange, onSave, onRefresh }) {
-  const [cleanupTarget, setCleanupTarget] = useState('');
-  const [cleanupLoading, setCleanupLoading] = useState(false);
-  const [cleanupMessage, setCleanupMessage] = useState('');
-  const system = appSettings?.system || {};
-  const storage = systemHealth?.storage || {};
-  const diagnostics = systemHealth?.environment?.diagnostics || [];
-
-  async function confirmCleanup(target) {
-    setCleanupLoading(true);
-    setCleanupMessage(`正在清理${target}...`);
-    try {
-      const result = await api.cleanupSystemData([target]);
-      setCleanupMessage(result.message || '清理完成。');
-      setCleanupTarget('');
-      await onRefresh();
-    } catch (error) {
-      setCleanupMessage(error.message || '清理失败。');
-    } finally {
-      setCleanupLoading(false);
-    }
-  }
-
-  return (
-    <section className="settingsPanel">
-      <div className="settingsPanelHeader">
-        <div>
-          <h3>系统</h3>
-          <p>检查运行环境，维护本地数据。</p>
-        </div>
-        <button type="button" className="btn secondary" disabled={disabled} onClick={onRefresh}>重新检测</button>
-      </div>
-      <label className="switchControl">
-        <input
-          type="checkbox"
-          checked={system.skipValidation === true}
-          disabled={disabled}
-          onChange={event => onChange(updateSystem(appSettings, { skipValidation: event.target.checked }))}
-        />
-        <span className="switchTrack" aria-hidden="true"><span className="switchThumb" /></span>
-        <div className="switchLabel">
-          <span className="switchText">质检状态：{system.skipValidation ? '已跳过' : '已启用'}</span>
-          <span className="switchDesc">跳过质检会减少阻塞，但可能保留渲染或视觉问题。</span>
-        </div>
-      </label>
-      <button type="button" className="btn primary" disabled={disabled} onClick={() => onSave(appSettings)}>保存系统设置</button>
-      <div className="settingsPanelSubsection">
-        <h4>html-video 环境</h4>
-        {diagnostics.length ? diagnostics.map(item => (
-          <details key={item.code}>
-            <summary>{item.message || item.code}</summary>
-            <p>{item.detail || item.path || '无更多诊断信息。'}</p>
-          </details>
-        )) : <p>尚未检测环境。</p>}
-      </div>
-      <div className="settingsPanelSubsection">
-        <h4>数据维护</h4>
-        {cleanupMessage ? <p>{cleanupMessage}</p> : null}
-        <div className="settingsCleanupGrid">
-          {CLEANUP_TARGETS.map(([target, label, description]) => (
-            <div className="settingsCleanupItem" key={target}>
-              <strong>{label}</strong>
-              <span>{description}</span>
-              <small>{storage[target] || storage[target.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())]?.display || '未统计'}</small>
-              <button type="button" className="btn secondary" disabled={disabled || cleanupLoading} onClick={() => setCleanupTarget(target)}>
-                清理{label}
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-      <CleanupConfirmDialog
-        target={cleanupTarget}
-        open={!!cleanupTarget}
-        loading={cleanupLoading}
-        onCancel={() => setCleanupTarget('')}
-        onConfirm={confirmCleanup}
-      />
-    </section>
-  );
-}
-```
-
-- [ ] **Step 5: Run system UI test**
+- [ ] **Step 5: 提交**
 
 Run:
 
 ```powershell
-node tests/test-system-settings-ui.mjs
+git add frontend-react/src/styles.css tests/test-settings-center-styles.mjs
+git commit -m "完善设置中心样式"
 ```
-
-Expected: `system settings ui tests passed`.
-
-- [ ] **Step 6: Commit**
-
-Run:
-
-```powershell
-git add frontend-react/src/components/settings/SystemSettings.jsx frontend-react/src/components/settings/CleanupConfirmDialog.jsx tests/test-system-settings-ui.mjs
-git commit -m "添加系统状态和数据维护界面"
-```
-
-Expected: commit succeeds.
 
 ---
 
-### Task 8: Styles, Test Runner, Docs, and Verification
+### Task 12: Documentation and Final Verification
 
 **Files:**
-- Modify: `frontend-react/src/styles.css`
-- Modify: `tests/run-all.js`
 - Modify: `README.md`
 
-- [ ] **Step 1: Add focused settings center styles**
+**Acceptance:**
+- README 记录 `data/config/app-settings.json`。
+- README 记录新增 API。
+- README 记录默认值 snapshot 行为。
+- 全量测试和前端构建通过，或明确列出与本次无关的失败。
 
-Append a small bounded block to `frontend-react/src/styles.css`:
+- [ ] **Step 1: 更新 README**
 
-```css
-.settingsCenterLayout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: start; }
-.settingsCenterNav { position: sticky; top: 16px; display: grid; gap: 8px; padding: 10px; border: 1px solid #edf0f4; border-radius: 8px; background: #fff; }
-.settingsCenterNav button { width: 100%; text-align: left; border: 0; border-radius: 8px; padding: 10px 12px; background: transparent; color: #3b4351; cursor: pointer; }
-.settingsCenterNav button.active { background: #111827; color: #fff; }
-.settingsCenterContent { display: grid; gap: 16px; min-width: 0; }
-.settingsOverviewGrid, .settingsCleanupGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.settingsOverviewItem, .settingsCleanupItem { display: grid; gap: 6px; padding: 14px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; text-align: left; }
-.settingsOverviewItem strong, .settingsCleanupItem strong { color: #111827; }
-.settingsPanelSubsection { display: grid; gap: 10px; margin-top: 16px; }
-.modalBackdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: rgba(17, 24, 39, .45); }
-.modalPanel { width: min(480px, 100%); display: grid; gap: 12px; padding: 18px; border-radius: 8px; background: #fff; box-shadow: 0 18px 60px rgba(15, 23, 42, .28); }
-.btn.danger { background: #b91c1c; color: #fff; }
-@media (max-width: 900px) {
-  .settingsCenterLayout { grid-template-columns: 1fr; }
-  .settingsCenterNav { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .settingsOverviewGrid, .settingsCleanupGrid { grid-template-columns: 1fr; }
-}
-```
-
-- [ ] **Step 2: Register tests if needed**
-
-Open `tests/run-all.js`. If it uses an explicit file list, add:
-
-```js
-'tests/test-app-settings.js',
-'tests/test-creative-workflow-defaults.js',
-'tests/test-html-video-template-preference.js',
-'tests/test-system-maintenance.js',
-'tests/test-settings-center-ui.mjs',
-'tests/test-creative-defaults-ui.mjs',
-'tests/test-one-click-research-defaults.mjs',
-'tests/test-system-settings-ui.mjs',
-```
-
-If `tests/run-all.js` auto-discovers tests, do not edit it.
-
-- [ ] **Step 3: Update README**
-
-In `README.md` 本地数据列表 add:
+Add local config note:
 
 ```markdown
-- `data/config/app-settings.json`：设置中心保存的一键创作默认值和系统设置
+- `data/config/app-settings.json`：设置中心保存的一键创作默认值和系统设置。
 ```
 
-In API overview under 配置与历史 add:
+Add API notes:
 
 ```markdown
-- `GET /api/config/app-settings`：读取设置中心应用配置
-- `POST /api/config/app-settings`：保存设置中心应用配置
-- `GET /api/config/templates`：读取 html-video 可用模板简表
-- `GET /api/config/system-health`：读取系统环境和数据占用概览
-- `POST /api/config/maintenance/cleanup`：按类型清理本地数据
+- `GET /api/config/app-settings`：读取设置中心应用配置。
+- `POST /api/config/app-settings`：保存设置中心应用配置。
+- `GET /api/config/templates`：读取 html-video 可用模板简表。
+- `GET /api/config/system-health`：读取系统环境和数据占用概览。
+- `POST /api/config/maintenance/cleanup`：按类型清理本地数据。
 ```
 
-- [ ] **Step 4: Run targeted tests**
+Add behavior note:
+
+```markdown
+一键创作在创建 workflow 时会把当前创作默认值写入 `creative_defaults_snapshot`，后续运行只读取该快照，不会因用户之后修改设置而改变已创建任务。
+```
+
+- [ ] **Step 2: 跑定向测试**
 
 Run:
 
 ```powershell
 node tests/test-app-settings.js
-node tests/test-system-maintenance.js
+node tests/test-config-settings-routes.js
+node tests/test-system-health.js
+node tests/test-system-maintenance-cleanup.js
 node tests/test-creative-workflow-defaults.js
 node tests/test-html-video-template-preference.js
-node tests/test-settings-center-ui.mjs
+node tests/test-settings-center-shell.mjs
 node tests/test-creative-defaults-ui.mjs
-node tests/test-one-click-research-defaults.mjs
 node tests/test-system-settings-ui.mjs
+node tests/test-one-click-research-defaults.mjs
+node tests/test-settings-center-styles.mjs
 ```
 
-Expected: all print their `... tests passed` line.
+Expected: all print their passed line.
 
-- [ ] **Step 5: Run broader regression**
+- [ ] **Step 3: 跑回归**
 
 Run:
 
@@ -2202,25 +1502,60 @@ npm test
 npm run build:frontend
 ```
 
-Expected: both pass. If either fails because of unrelated pre-existing worktree changes, capture the exact failing test or build error before changing code.
+Expected: both pass. If either fails, record exact failing file, command, and first actionable error line.
 
-- [ ] **Step 6: Final commit**
+- [ ] **Step 4: 手工检查本地页面**
+
+Start dev server if not running:
+
+```powershell
+npm run dev
+```
+
+Open current app URL and verify:
+
+- Settings page opens.
+- 左侧 4 个分组可切换。
+- 保存创作默认值显示 loading 并成功。
+- 系统页重新检测显示 loading 并刷新时间。
+- 清理按钮弹确认框，取消不会删除。
+- 模型配置仍能加载。
+
+- [ ] **Step 5: 提交**
 
 Run:
 
 ```powershell
-git add frontend-react/src/styles.css tests/run-all.js README.md
-git commit -m "完善设置中心样式和文档"
+git add README.md
+git commit -m "补充设置中心文档"
 ```
 
-Expected: commit succeeds if files changed. If `tests/run-all.js` did not need edits, omit it from `git add`.
+If README already contains all required content and no diff remains, skip this commit and report `README 无需修改`。
 
 ---
 
-## Self-Review Checklist
+## 自检清单
 
-- Spec coverage: app settings, settings center UI, workflow defaults snapshot, template preference/locking, system health cache, render output cleanup rules, Cookie cleanup route, and documentation are mapped to tasks.
-- N1 coverage: Task 3 defines `mergeProjectOptions(record.target, incoming)` and requires `preferredTemplateId`/`lockTemplate` from `record.target` to override incoming values.
-- N2 coverage: Task 2 defines `normalizeDiagnostic()` returning `{ ok, code, message, detail, path }`.
-- N3 coverage: Task 6 uses integration-style static request-body checks rather than brittle isolated React state unit tests.
-- Verification: targeted tests run before broad `npm test` and `npm run build:frontend`.
+- [ ] B1 snapshot 写入时机明确：Task 5 在 `createCreativeWorkflow()`、`normalizeCreativeInput()` 前合并默认值，并与 record 同次 `persistWorkflow()`。
+- [ ] I1 `skipValidation` 双写窗口明确：Task 1 和 Task 5 使用 `appSettings.getEffectiveSystemSettings()`，旧 ai-models 只作 fallback。
+- [ ] I2 `useResearch` 临时切换明确：Task 10 使用 `useResearchTouched`，未触碰不发送覆盖字段。
+- [ ] I3 `system-health` 延迟明确：Task 3 缓存环境 60 秒、存储 15 秒，支持 refresh。
+- [ ] I4 `render-outputs` 规则明确：Task 4 只删白名单已知产物。
+- [ ] I5 `htmlVideoWorkflow` 签名明确：Task 6 定义 `preferredTemplateId`、`lockTemplate`。
+- [ ] I6 `/api/config/templates` 字段明确：数据契约和 Task 2 已列字段。
+- [ ] L1-L3 范围明确：护栏排除 `captionMode`、`showCaptionBar`、`renderQuality` 自动生效。
+- [ ] N1 `projectOptions` 合并优先级明确：数据契约给出 `mergeProjectOptions()`。
+- [ ] N2 diagnostics 结构明确：数据契约给出 `{ ok, code, message, detail, path }`。
+- [ ] N3 前端测试策略明确：Task 10 使用静态或 mock API 集成式测试。
+- [ ] `tests/run-all.js` 自动发现已说明，不要求手动注册测试。
+- [ ] 每个任务都有文件列表、验收标准、失败测试、实现要点、测试命令和提交命令。
+- [ ] 计划没有要求改动无关脏文件。
+
+## 执行选项
+
+Plan complete and saved to `docs/superpowers/plans/2026-06-22-settings-center-redesign.md`. Two execution options:
+
+1. **Subagent-Driven (recommended)** - 每个任务派一个新子代理执行，任务间做 review 和验收。
+2. **Inline Execution** - 在当前会话按任务顺序执行，阶段性检查。
+
+Which approach?
