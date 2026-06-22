@@ -298,14 +298,6 @@ a { color: #fe2c55; text-decoration: none; }
 .settingsSummary { min-width: 92px; padding: 10px 14px; border: 1px solid #e7e9ee; border-radius: 8px; background: #fff; text-align: center; }
 .settingsSummary strong { display: block; font-size: 20px; color: #fe2c55; line-height: 1.1; }
 .settingsSummary span { color: #69717e; font-size: 12px; }
-.settingsCenterLayout { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 16px; align-items: start; }
-.settingsCenterNav { position: sticky; top: 16px; display: grid; gap: 8px; }
-.settingsCenterNav button { border: 1px solid #e7e9ee; border-radius: 8px; background: #fff; padding: 10px 12px; text-align: left; color: #30343b; cursor: pointer; }
-.settingsCenterNav button.active { border-color: #fe2c55; color: #fe2c55; font-weight: 700; }
-.settingsPanel { background: #fff; border: 1px solid #e7e9ee; border-radius: 8px; padding: 20px; }
-.settingsPanelHeader { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
-.settingsPanelHeader h3 { margin: 0 0 6px; font-size: 18px; }
-.settingsPanelHeader p { margin: 0; color: #69717e; font-size: 13px; }
 .settingsActions { display: flex; gap: 10px; flex-wrap: wrap; }
 .modelConfigGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .modelConfigCard { border: 1px solid #edf0f4; border-radius: 8px; padding: 16px; background: #fafbfc; }
@@ -1307,7 +1299,7 @@ a { color: #fe2c55; text-decoration: none; }
     align-self: flex-start;
     justify-content: flex-start;
   }
-  .toolbar, .mediaHeader, .workspaceIntro, .settingsPanelHeader, .modelConfigHeader { flex-direction: column; align-items: stretch; }
+  .toolbar, .mediaHeader, .workspaceIntro, .modelConfigHeader { flex-direction: column; align-items: stretch; }
   .tabs { overflow-x: auto; }
   .tabs a { white-space: nowrap; padding: 0 16px; }
   .subTabs { overflow-x: auto; }
@@ -1869,5 +1861,142 @@ a { color: #fe2c55; text-decoration: none; }
     width: 100%;
     border-right: none;
     border-bottom: 1px solid hsl(var(--border));
+  }
+}
+
+/* Settings center */
+.settingsCenterLayout {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.settingsCenterNav {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settingsCenterNav button {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #d9dde5;
+  border-radius: 8px;
+  background: #fff;
+  color: #30343b;
+  padding: 9px 12px;
+  text-align: left;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.settingsCenterNav button.active {
+  border-color: #fe2c55;
+  background: #fff5f7;
+  color: #fe2c55;
+  font-weight: 700;
+}
+
+.settingsCenterContent {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.settingsPanel {
+  min-width: 0;
+  border: 1px solid #e7e9ee;
+  border-radius: 8px;
+  background: #fff;
+  padding: 18px;
+}
+
+.settingsPanelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.settingsPanelHeader h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.settingsPanelHeader p {
+  margin: 0;
+  color: #69717e;
+  font-size: 13px;
+}
+
+.settingsOverviewGrid,
+.settingsCleanupGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.settingsCleanupItem {
+  min-width: 0;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+  background: #fafbfc;
+  padding: 12px;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(15, 17, 21, .48);
+}
+
+.modalPanel {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border-radius: 8px;
+  background: #fff;
+  padding: 20px;
+  box-shadow: 0 12px 36px rgba(15, 17, 21, .18);
+}
+
+@media (max-width: 900px) {
+  .settingsCenterLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsCenterNav {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settingsCenterNav button {
+    text-align: center;
+  }
+
+  .settingsOverviewGrid,
+  .settingsCleanupGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .settingsCenterNav {
+    grid-template-columns: 1fr;
+  }
+
+  .settingsPanelHeader {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
