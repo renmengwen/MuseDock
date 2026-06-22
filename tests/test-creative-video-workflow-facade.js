@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const facade = require('../server/services/creative-video/workflowFacade');
 const hyperframesTemplateRenderer = require('../server/services/creative-video/hyperframesTemplateRenderer');
+const { computeSceneSpecSpeechHash } = require('../server/services/creative-video/sceneSpecHash');
 
 (async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-facade-test-'));
@@ -286,6 +287,162 @@ const hyperframesTemplateRenderer = require('../server/services/creative-video/h
   assert.equal(htmlVideoProgressResult.success, true);
   assert.equal(facadeForwardedOnProgress, true);
   assert.ok(facadeProgressEvents.some(event => event.type === 'html_video_graph_started'));
+
+  const voicedStoryboard = {
+    title: '已配音分镜',
+    storyboard: {
+      scenes: Array.from({ length: 10 }, (_, index) => ({
+        id: `scene_${String(index + 1).padStart(2, '0')}`,
+        index: index + 1,
+        duration: 1,
+        headline: `第 ${index + 1} 帧`,
+        narration_text: `第 ${index + 1} 段旁白`,
+        captions: [{ id: `cap_${index + 1}`, start: 0, end: 1, text: `第 ${index + 1} 段字幕` }],
+      })),
+    },
+  };
+  let htmlVideoSceneSpec = null;
+  let htmlVideoCreativeContext = null;
+  let htmlVideoServices = null;
+  let driftSceneSpecCalls = 0;
+  process.env.HTML_VIDEO_PRODUCTION_ENABLED = 'true';
+  const voicedStoryboardResult = await facade.generateCreativeVideoProject({
+    workflowId: '202606140000000004_voiced_storyboard',
+    runId: 'run_voiced_storyboard',
+    creativeContext: {
+      input: { raw_text: '已有配音分镜，不应重新漂移' },
+      brief: voicedStoryboard,
+      audio: {
+        status: 'ready',
+        source: 'scene_tts',
+        path: path.join(tmpDir, 'voiced-storyboard.wav'),
+        scenes: voicedStoryboard.storyboard.scenes.map(scene => ({
+          id: scene.id,
+          index: scene.index,
+          duration: scene.duration,
+        })),
+      },
+    },
+    services: {
+      htmlVideoWorkflow: {
+        generateHtmlVideo: async ({ sceneSpec, creativeContext, services }) => {
+          htmlVideoSceneSpec = sceneSpec;
+          htmlVideoCreativeContext = creativeContext;
+          htmlVideoServices = services;
+          return {
+            success: true,
+            message: 'html-video 成片完成。',
+            render_mode: 'html-video',
+            html_video_project_path: tmpDir,
+            project_dir: tmpDir,
+            project: { frames: [] },
+            files: [],
+          };
+        },
+      },
+      aiTextModel: {
+        callTextModel: async () => {
+          driftSceneSpecCalls += 1;
+          return {
+            success: true,
+            text: JSON.stringify({
+              scene_spec: {
+                title: '漂移规格',
+                aspect_ratio: '9:16',
+                scenes: Array.from({ length: 12 }, (_, index) => ({
+                  id: `scene_${String(index + 1).padStart(2, '0')}`,
+                  duration: 1,
+                  kind: 'text',
+                  narration_text: `漂移第 ${index + 1} 段`,
+                  captions: [{ start: 0, end: 1, text: `漂移第 ${index + 1} 段` }],
+                  visual_text: { headline: `漂移第 ${index + 1} 帧`, keywords: [], cards: [] },
+                })),
+              },
+            }),
+          };
+        },
+      },
+    },
+  });
+  assert.equal(voicedStoryboardResult.success, true);
+  assert.equal(driftSceneSpecCalls, 0);
+  assert.equal(htmlVideoSceneSpec.scenes.length, 10);
+  assert.deepEqual(htmlVideoSceneSpec.scenes.map(scene => scene.id), voicedStoryboard.storyboard.scenes.map(scene => scene.id));
+  assert.equal(htmlVideoSceneSpec.scenes[0].narration_text, '第 1 段旁白');
+  assert.equal(htmlVideoSceneSpec.scenes[0].visual_text.headline, '第 1 帧');
+  assert.equal(typeof htmlVideoServices.ttsService.synthesizeSceneNarration, 'function');
+  assert.equal(htmlVideoCreativeContext.audio.source, 'scene_spec');
+  assert.equal(htmlVideoCreativeContext.audio.scene_spec_hash, computeSceneSpecSpeechHash(htmlVideoSceneSpec));
+  assert.equal(htmlVideoCreativeContext.audio.scene_count, 10);
+  assert.deepEqual(htmlVideoCreativeContext.audio.scene_ids, htmlVideoSceneSpec.scenes.map(scene => scene.id));
+
+  const uncaptionedStoryboard = {
+    title: '无字幕分镜',
+    storyboard: {
+      scenes: [
+        {
+          id: 'scene_01',
+          index: 1,
+          duration_sec: 6,
+          headline: '真实 TTS 更长',
+          narration_text: '这是一段已经完成配音的旁白。',
+        },
+      ],
+    },
+  };
+  let uncaptionedSceneSpec = null;
+  const uncaptionedStoryboardResult = await facade.generateCreativeVideoProject({
+    workflowId: '202606140000000004_uncaptioned_storyboard',
+    runId: 'run_uncaptioned_storyboard',
+    creativeContext: {
+      input: { raw_text: '已有配音但分镜没有字幕' },
+      brief: uncaptionedStoryboard,
+      audio: {
+        status: 'ready',
+        source: 'scene_tts',
+        path: path.join(tmpDir, 'uncaptioned-storyboard.wav'),
+        scenes: [
+          {
+            id: 'scene_01',
+            index: 1,
+            actual_duration_sec: 8.64,
+            captions: [{ start: 0, end: 8.64, duration: 8.64, text: '这是一段已经完成配音的旁白。' }],
+          },
+        ],
+      },
+    },
+    services: {
+      htmlVideoWorkflow: {
+        generateHtmlVideo: async ({ sceneSpec }) => {
+          uncaptionedSceneSpec = sceneSpec;
+          return {
+            success: true,
+            message: 'html-video 成片完成。',
+            render_mode: 'html-video',
+            html_video_project_path: tmpDir,
+            project_dir: tmpDir,
+            project: { frames: [] },
+            files: [],
+          };
+        },
+      },
+      aiTextModel: {
+        callTextModel: async () => {
+          throw new Error('已有配音分镜时不应重新生成 scene_spec');
+        },
+      },
+    },
+  });
+  assert.equal(uncaptionedStoryboardResult.success, true);
+  assert.equal(uncaptionedSceneSpec.scenes[0].duration, 8.64);
+  assert.deepEqual(uncaptionedSceneSpec.scenes[0].captions, [
+    {
+      id: 'cap_01',
+      start: 0,
+      end: 8.64,
+      text: '这是一段已经完成配音的旁白。',
+    },
+  ]);
 
   const previousProductionEnabled = process.env.HTML_VIDEO_PRODUCTION_ENABLED;
   process.env.HTML_VIDEO_PRODUCTION_ENABLED = 'false';
