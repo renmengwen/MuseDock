@@ -6,6 +6,10 @@ const path = require('path');
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
+const {
+  computeSceneSpecSpeechHash,
+  audioMatchesSceneSpec,
+} = require('../server/services/creative-video/sceneSpecHash');
 
 async function writeFile(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -70,6 +74,16 @@ async function createVerticalTemplate(rootDir) {
   await writeFile(path.join(dir, 'index.html'), '<html><body>{{section_no}} {{headline}}</body></html>');
 }
 
+function fullSceneCaption(sceneId, text, duration) {
+  return [{
+    id: `${sceneId}_caption_01`,
+    start: 0,
+    end: duration,
+    duration,
+    text,
+  }];
+}
+
 (async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-workflow-'));
   const templateRoot = path.join(rootDir, 'templates');
@@ -87,8 +101,8 @@ async function createVerticalTemplate(rootDir) {
       title: '默认 Raw HTML',
       aspect_ratio: '9:16',
       scenes: [
-        { id: 'scene_01', duration: 2, kind: 'text', narration_text: '第一幕旁白', captions: [], visual_text: { headline: '第一幕', keywords: [], cards: [] } },
-        { id: 'scene_02', duration: 2, kind: 'text', narration_text: '第二幕旁白', captions: [], visual_text: { headline: '第二幕', keywords: [], cards: [] } },
+        { id: 'scene_01', duration: 2, kind: 'text', narration_text: '第一幕旁白', captions: fullSceneCaption('scene_01', '第一幕旁白', 2), visual_text: { headline: '第一幕', keywords: [], cards: [] } },
+        { id: 'scene_02', duration: 2, kind: 'text', narration_text: '第二幕旁白', captions: fullSceneCaption('scene_02', '第二幕旁白', 2), visual_text: { headline: '第二幕', keywords: [], cards: [] } },
       ],
     },
     creativeContext: { input: { raw_text: '默认应该生成完整 HTML。' } },
@@ -181,8 +195,8 @@ async function createVerticalTemplate(rootDir) {
         title: '内容图错位',
         aspect_ratio: '9:16',
         scenes: [
-          { id: 'scene_01', duration: 2, kind: 'text', narration_text: '第一幕旁白', captions: [], visual_text: { headline: '第一幕', keywords: [], cards: [] } },
-          { id: 'scene_02', duration: 2, kind: 'text', narration_text: '第二幕旁白', captions: [], visual_text: { headline: '第二幕', keywords: [], cards: [] } },
+          { id: 'scene_01', duration: 2, kind: 'text', narration_text: '第一幕旁白', captions: fullSceneCaption('scene_01', '第一幕旁白', 2), visual_text: { headline: '第一幕', keywords: [], cards: [] } },
+          { id: 'scene_02', duration: 2, kind: 'text', narration_text: '第二幕旁白', captions: fullSceneCaption('scene_02', '第二幕旁白', 2), visual_text: { headline: '第二幕', keywords: [], cards: [] } },
         ],
       },
       creativeContext: { input: { raw_text: '内容图多出一帧' } },
@@ -291,7 +305,7 @@ async function createVerticalTemplate(rootDir) {
     sceneSpec: {
       title: '进度测试',
       aspect_ratio: '9:16',
-      scenes: [{ id: 'scene_01', duration: 2, kind: 'text', narration_text: '旁白', captions: [], visual_text: { headline: '进度' } }],
+      scenes: [{ id: 'scene_01', duration: 2, kind: 'text', narration_text: '旁白', captions: fullSceneCaption('scene_01', '旁白', 2), visual_text: { headline: '进度' } }],
     },
     creativeContext: { input: { raw_text: '进度测试' } },
     target: {},
@@ -350,8 +364,8 @@ async function createVerticalTemplate(rootDir) {
       title: '产品发布',
       aspect_ratio: '9:16',
       scenes: [
-        { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: [], visual_text: { headline: '首版标题', keywords: [], cards: [] } },
-        { id: 'scene_02', duration: 3, kind: 'text', narration_text: '旁白二', captions: [], visual_text: { headline: '第二幕', keywords: [], cards: [] } },
+        { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: fullSceneCaption('scene_01', '旁白一', 4), visual_text: { headline: '首版标题', keywords: [], cards: [] } },
+        { id: 'scene_02', duration: 3, kind: 'text', narration_text: '旁白二', captions: fullSceneCaption('scene_02', '旁白二', 3), visual_text: { headline: '第二幕', keywords: [], cards: [] } },
       ],
     },
     creativeContext: { input: { raw_text: '产品发布' } },
@@ -458,19 +472,25 @@ async function createVerticalTemplate(rootDir) {
   ]);
 
   const existingAudioPath = path.join(rootDir, 'existing-narration.wav');
+  const generatedAudioPath = path.join(rootDir, 'generated-narration.wav');
   await writeFile(existingAudioPath, 'existing audio');
+  await writeFile(generatedAudioPath, 'generated audio');
+  const existingAudioSceneSpec = {
+    title: '已有音频',
+    aspect_ratio: '9:16',
+    scenes: [
+      { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: fullSceneCaption('scene_01', '旁白一', 4), visual_text: { headline: '已有音频标题', keywords: [], cards: [] } },
+    ],
+  };
   let existingAudioMuxPath = null;
+  let ttsCalls = 0;
+  let ttsSceneSpec = null;
+  const legacyAudioProgressEvents = [];
   const existingAudioResult = await workflow.generateHtmlVideo({
     workflowId: '202606170000000001_existing_audio',
     runId: 'run_existing_audio',
     rootDir,
-    sceneSpec: {
-      title: '已有音频',
-      aspect_ratio: '9:16',
-      scenes: [
-        { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: [], visual_text: { headline: '已有音频标题', keywords: [], cards: [] } },
-      ],
-    },
+    sceneSpec: existingAudioSceneSpec,
     creativeContext: {
       input: { raw_text: '已有音频' },
       audio: {
@@ -481,6 +501,9 @@ async function createVerticalTemplate(rootDir) {
     },
     target: { html_video_generation_mode: 'template_inputs' },
     templateRegistry,
+    onProgress: event => {
+      legacyAudioProgressEvents.push(event);
+    },
     services: {
       aiTextModel: {
         callTextModel: async ({ messages }) => {
@@ -492,6 +515,23 @@ async function createVerticalTemplate(rootDir) {
         },
       },
       environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ttsService: {
+        synthesizeSceneNarration: async ({ sceneSpec }) => {
+          ttsCalls += 1;
+          ttsSceneSpec = sceneSpec;
+          return {
+            success: true,
+            audio_manifest: {
+              source: 'scene_spec',
+              scene_spec_hash: computeSceneSpecSpeechHash(sceneSpec),
+              scene_count: sceneSpec.scenes.length,
+              scene_ids: sceneSpec.scenes.map(scene => scene.id),
+              combined_path: generatedAudioPath,
+              scenes: [],
+            },
+          };
+        },
+      },
       frameRenderer: {
         renderFrame: async (frame, options) => ({
           success: true,
@@ -516,8 +556,223 @@ async function createVerticalTemplate(rootDir) {
     },
   });
   assert.equal(existingAudioResult.success, true);
-  assert.equal(existingAudioResult.project.audio.narration_path, existingAudioPath);
-  assert.equal(existingAudioMuxPath, existingAudioPath);
+  assert.equal(ttsCalls, 1);
+  assert.deepEqual(ttsSceneSpec, existingAudioSceneSpec);
+  assert.equal(existingAudioResult.project.audio.narration_path, generatedAudioPath);
+  assert.equal(existingAudioResult.project.audio.scene_spec_hash, computeSceneSpecSpeechHash(existingAudioSceneSpec));
+  assert.equal(audioMatchesSceneSpec(existingAudioResult.project.audio, existingAudioSceneSpec), true);
+  assert.equal(existingAudioMuxPath, generatedAudioPath);
+  assert.notEqual(existingAudioMuxPath, existingAudioPath);
+  assert.ok(legacyAudioProgressEvents.some(event => (
+    event.type === 'html_video_tts_regenerate_started'
+    && event.stage === 'audio'
+    && event.message === '检测到脚本已变化，正在按当前字幕重新生成旁白...'
+    && event.data?.reason === 'scene_spec_mismatch'
+  )));
+
+  let reuseTtsCalls = 0;
+  let reusedAudioMuxPath = null;
+  const reusableAudioResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000001_reusable_audio',
+    runId: 'run_reusable_audio',
+    rootDir,
+    sceneSpec: existingAudioSceneSpec,
+    creativeContext: {
+      input: { raw_text: '可复用音频' },
+      audio: {
+        source: 'scene_spec',
+        scene_spec_hash: computeSceneSpecSpeechHash(existingAudioSceneSpec),
+        scene_count: existingAudioSceneSpec.scenes.length,
+        scene_ids: existingAudioSceneSpec.scenes.map(scene => scene.id),
+        status: 'ready',
+        path: existingAudioPath,
+      },
+    },
+    target: { html_video_generation_mode: 'template_inputs' },
+    templateRegistry,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          }
+          return { success: true, text: JSON.stringify({ headline: '已有音频标题' }) };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ttsService: {
+        synthesizeSceneNarration: async () => {
+          reuseTtsCalls += 1;
+          return { success: false, message: '不应重新生成旁白。' };
+        },
+      },
+      frameRenderer: {
+        renderFrame: async (frame, options) => ({
+          success: true,
+          frame_id: frame.id,
+          output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+          diagnostics: [],
+        }),
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath, strategy: 'stub' };
+        },
+        muxAudioWithFfmpeg: async ({ videoPath, narrationPath }) => {
+          reusedAudioMuxPath = narrationPath;
+          return { success: true, skipped: false, output_path: videoPath };
+        },
+      },
+      visualQaService: {
+        inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+      },
+    },
+  });
+  assert.equal(reusableAudioResult.success, true);
+  assert.equal(reuseTtsCalls, 0);
+  assert.equal(reusableAudioResult.project.audio.narration_path, existingAudioPath);
+  assert.equal(reusableAudioResult.project.audio.scene_spec_hash, computeSceneSpecSpeechHash(existingAudioSceneSpec));
+  assert.deepEqual(reusableAudioResult.project.audio.scene_ids, ['scene_01']);
+  assert.equal(audioMatchesSceneSpec(reusableAudioResult.project.audio, existingAudioSceneSpec), true);
+  assert.equal(reusedAudioMuxPath, existingAudioPath);
+
+  let blankPathReuseTtsCalls = 0;
+  let blankPathReuseMuxPath = null;
+  const blankPathReuseResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000001_blank_path_reuse',
+    runId: 'run_blank_path_reuse',
+    rootDir,
+    sceneSpec: existingAudioSceneSpec,
+    creativeContext: {
+      input: { raw_text: '空白 path 复用音频' },
+      audio: {
+        source: 'scene_spec',
+        scene_spec_hash: computeSceneSpecSpeechHash(existingAudioSceneSpec),
+        scene_count: existingAudioSceneSpec.scenes.length,
+        scene_ids: existingAudioSceneSpec.scenes.map(scene => scene.id),
+        status: 'ready',
+        path: '   ',
+        combined_path: existingAudioPath,
+      },
+    },
+    target: { html_video_generation_mode: 'template_inputs' },
+    templateRegistry,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          }
+          return { success: true, text: JSON.stringify({ headline: '已有音频标题' }) };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ttsService: {
+        synthesizeSceneNarration: async () => {
+          blankPathReuseTtsCalls += 1;
+          return { success: false, message: '不应重新生成旁白。' };
+        },
+      },
+      frameRenderer: {
+        renderFrame: async (frame, options) => ({
+          success: true,
+          frame_id: frame.id,
+          output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+          diagnostics: [],
+        }),
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath, strategy: 'stub' };
+        },
+        muxAudioWithFfmpeg: async ({ videoPath, narrationPath }) => {
+          blankPathReuseMuxPath = narrationPath;
+          return { success: true, skipped: false, output_path: videoPath };
+        },
+      },
+      visualQaService: {
+        inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+      },
+    },
+  });
+  assert.equal(blankPathReuseResult.success, true);
+  assert.equal(blankPathReuseTtsCalls, 0);
+  assert.equal(blankPathReuseResult.project.audio.narration_path, existingAudioPath);
+  assert.equal(audioMatchesSceneSpec(blankPathReuseResult.project.audio, existingAudioSceneSpec), true);
+  assert.equal(blankPathReuseMuxPath, existingAudioPath);
+
+  const emptyManifestSceneSpec = {
+    title: '无旁白',
+    aspect_ratio: '9:16',
+    scenes: [
+      { id: 'scene_01', duration: 4, kind: 'text', narration_text: '', captions: [], visual_text: { headline: '无旁白标题', keywords: [], cards: [] } },
+    ],
+  };
+  let emptyManifestMuxPath = '未调用';
+  const emptyManifestResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000001_empty_manifest',
+    runId: 'run_empty_manifest',
+    rootDir,
+    sceneSpec: emptyManifestSceneSpec,
+    creativeContext: { input: { raw_text: '无旁白' } },
+    target: { html_video_generation_mode: 'template_inputs' },
+    templateRegistry,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          }
+          return { success: true, text: JSON.stringify({ headline: '无旁白标题' }) };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ttsService: {
+        synthesizeSceneNarration: async ({ sceneSpec }) => ({
+          success: true,
+          audio_manifest: {
+            source: 'scene_spec',
+            scene_spec_hash: computeSceneSpecSpeechHash(sceneSpec),
+            scene_count: sceneSpec.scenes.length,
+            scene_ids: sceneSpec.scenes.map(scene => scene.id),
+            status: 'ready',
+            scenes: [],
+          },
+        }),
+      },
+      frameRenderer: {
+        renderFrame: async (frame, options) => ({
+          success: true,
+          frame_id: frame.id,
+          output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+          diagnostics: [],
+        }),
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath, strategy: 'stub' };
+        },
+        muxAudioWithFfmpeg: async ({ videoPath, narrationPath }) => {
+          emptyManifestMuxPath = narrationPath;
+          return { success: true, skipped: true, output_path: videoPath };
+        },
+      },
+      visualQaService: {
+        inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+      },
+    },
+  });
+  assert.equal(emptyManifestResult.success, true);
+  assert.equal(emptyManifestResult.project.audio.tts_manifest_path, null);
+  assert.equal(emptyManifestResult.audio_manifest, null);
+  assert.equal(emptyManifestMuxPath, null);
+  assert.equal(emptyManifestResult.html_video_diagnostics.some(item => item.code === 'tts_manifest_missing'), false);
 
   const visualQaWarning = await workflow.generateHtmlVideo({
     workflowId: '202606170000000001_visual_warning',
@@ -527,7 +782,7 @@ async function createVerticalTemplate(rootDir) {
       title: '视觉报告误判',
       aspect_ratio: '9:16',
       scenes: [
-        { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: [], visual_text: { headline: '深色场景', keywords: [], cards: [] } },
+        { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: fullSceneCaption('scene_01', '旁白一', 4), visual_text: { headline: '深色场景', keywords: [], cards: [] } },
       ],
     },
     creativeContext: { input: { raw_text: '视觉报告误判' } },
