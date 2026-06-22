@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client.js';
 import { Status } from '../components/Status.jsx';
+import { CreativeDefaultsSettings } from '../components/settings/CreativeDefaultsSettings.jsx';
 import { ModelSettings } from '../components/settings/ModelSettings.jsx';
 import { SettingsOverview } from '../components/settings/SettingsOverview.jsx';
 import { useSettings } from '../hooks/useSettings.js';
@@ -63,18 +64,23 @@ export function SettingsPage() {
   }, []);
 
   const saveAppSettings = useCallback(async (nextSettings) => {
+    const isCreativeSection = activeSection === 'creative';
+    const savingMessage = isCreativeSection ? '正在保存创作默认值...' : '正在保存应用配置...';
+    const successMessage = isCreativeSection ? '创作默认值已保存' : '应用配置已保存';
+    const failurePrefix = isCreativeSection ? '创作默认值保存失败' : '应用配置保存失败';
+
     setSavingApp(true);
-    setStatus({ type: 'loading', message: '正在保存应用配置...' });
+    setStatus({ type: 'loading', message: savingMessage });
     try {
       const response = await api.saveAppSettings(nextSettings);
       setAppSettings(unwrapData(response));
-      setStatus({ type: 'success', message: '应用配置已保存' });
+      setStatus({ type: 'success', message: successMessage });
     } catch (error) {
-      setStatus({ type: 'error', message: `应用配置保存失败：${error.message}` });
+      setStatus({ type: 'error', message: `${failurePrefix}：${error.message || '未知错误'}` });
     } finally {
       setSavingApp(false);
     }
-  }, []);
+  }, [activeSection]);
 
   const renderSection = () => {
     if (activeSection === 'overview') {
@@ -90,22 +96,14 @@ export function SettingsPage() {
 
     if (activeSection === 'creative') {
       return (
-        <section>
-          <div className="settingsPanelHeader">
-            <div>
-              <h3>创作默认值</h3>
-              <p>默认画面比例、模板策略和联网研究默认值将在后续任务补全。</p>
-            </div>
-            <button
-              className="btn primary"
-              disabled={loadingApp || savingApp || !appSettings}
-              onClick={() => saveAppSettings(appSettings)}
-            >
-              {savingApp ? '正在保存应用配置...' : '保存应用配置'}
-            </button>
-          </div>
-          <p>已加载 {templates.length} 个模板。当前默认画幅：{appSettings?.creativeDefaults?.aspectRatio || '未设置'}。</p>
-        </section>
+        <CreativeDefaultsSettings
+          appSettings={appSettings}
+          templates={templates}
+          disabled={loadingApp || savingApp}
+          saving={savingApp}
+          onChange={setAppSettings}
+          onSave={saveAppSettings}
+        />
       );
     }
 
