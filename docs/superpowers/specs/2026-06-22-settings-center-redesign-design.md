@@ -23,6 +23,7 @@
 - 完整模板管理后台。
 - 通用 settings schema 平台化迁移。
 - 任务级数据删除入口迁移到设置中心。任务级删除仍保留在一键创作任务列表。
+- html-video production path 的字幕条、字幕模式、渲染质量深度接入。`captionMode`、`showCaptionBar`、`renderQuality` 可在配置文件中预留，但不作为设置中心 v1 的自动生效验收项。
 
 ## 页面结构
 
@@ -34,7 +35,7 @@
    展示关键状态和快捷入口：文字模型、TTS、默认画面比例、默认模板策略、质检状态、渲染环境状态、数据占用概览。总览只展示状态，不承载复杂编辑。
 
 2. **创作默认值**
-   承载一键创作自动生效的默认项：默认画面比例、默认目标时长、按比例默认模板、是否锁定模板、渲染质量、字幕显示偏好、联网研究默认开关。
+   承载一键创作自动生效的默认项：默认画面比例、默认目标时长、按比例默认模板、是否锁定模板、联网研究默认开关。渲染质量和字幕显示偏好作为后续扩展入口，不在 v1 中承诺对 html-video production 自动生效。
 
 3. **模型配置**
    迁移现有模型配置 UI，保留供应商、模型类型、API Key、Base URL、启用模型等业务逻辑。数据仍来自现有 `data/config/ai-models.json`。
@@ -48,7 +49,7 @@
 
 - `SettingsPage`：设置中心壳层、左侧导航、当前分组、统一状态提示。
 - `SettingsOverview`：总览状态和快捷入口。
-- `CreativeDefaultsSettings`：画面比例、时长、按比例模板、锁定模板、渲染和字幕默认值。
+- `CreativeDefaultsSettings`：画面比例、时长、按比例模板、锁定模板、联网研究默认值。
 - `ModelSettings`：承接现有 `GlobalModelSelector`、`ProviderList` 等模型配置组件。
 - `SystemSettings`：质检、环境状态、数据维护。
 - `CleanupConfirmDialog`：危险清理确认弹窗。
@@ -76,9 +77,6 @@
       "4:5": ""
     },
     "lockTemplate": false,
-    "renderQuality": "standard",
-    "captionMode": "phrase_kinetic",
-    "showCaptionBar": true,
     "useResearch": true
   },
   "system": {
@@ -98,9 +96,11 @@
 
 兼容策略：
 
-- 现有 `ai-models.json` 里的 `skipValidation` 继续兼容读取。
-- 第一次保存 `app-settings.json` 后，以 `app-settings.system.skipValidation` 为准。
-- 如果新配置不存在但旧 `skipValidation` 存在，总览和系统页展示当前实际值，避免升级后状态跳变。
+- 新增 `appSettings.hasConfig()` 或等价能力，用于判断 `app-settings.json` 是否已经存在。
+- 读取系统开关时使用 `getEffectiveSystemSettings()`：如果 `app-settings.json` 存在，以 `app-settings.system.skipValidation` 为准；如果不存在，回退读取现有 `ai-models.json` 的 `skipValidation`。
+- 第一次保存 `app-settings.json` 时，将当前有效 `skipValidation` 写入 `app-settings.system.skipValidation`，避免升级后状态跳变。
+- `POST /api/config/ai-models` 在过渡期继续保留旧字段兼容，但设置中心 UI 不再把质检开关保存到 `ai-models.json`。
+- `runCreativeWorkflow()` 不再直接调用 `aiModelConfig.getSkipValidation()` 作为唯一来源；它应通过 `appSettings.getEffectiveSystemSettings()` 获取有效值，只有在 `appSettings` 未注入或未实现时才降级到旧 `aiModelConfig.getSkipValidation()`。
 
 ## API 设计
 
@@ -117,15 +117,65 @@
 - `/api/config/ai-models` 继续处理模型配置。
 - `/api/config/cookies` 继续处理 Cookie 配置；系统页可以复用它展示或清理 Cookie。
 
+`GET /api/config/templates` 返回字段：
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "news_signal_vertical",
+      "name": "竖屏财经信号",
+      "description": "9:16 竖屏科技财经新闻模板...",
+      "category": "news",
+      "tags": ["竖屏", "财经"],
+      "engine": "hyperframes",
+      "mapped_engine": "hyperframes-playwright",
+      "aspect_ratio": "9:16",
+      "duration_sec": 6,
+      "source_entry": "source/index.html",
+      "license": { "name": "Apache-2.0", "commercial_use": true },
+      "compatible": true,
+      "compatibility_reasons": []
+    }
+  ]
+}
+```
+
+`compatible` 和 `compatibility_reasons` 基于当前默认画面比例、引擎支持、入口文件和授权规则计算。前端下拉展示 `name`，保存 `id`。
+
+`GET /api/config/system-health` 缓存策略：
+
+- 环境检测会启动 Chromium 并探测 ffmpeg/ffprobe，默认缓存 60 秒。
+- 数据占用统计默认缓存 15 秒。
+- 接口支持 `?refresh=1` 强制刷新，系统页“重新检测”按钮使用该参数。
+- 返回体带 `cached: true/false`、`checked_at`、`cache_ttl_sec`，前端展示“最近检测时间”。
+
 ## 一键创作自动生效
 
 默认值在后端创建 workflow 时合并，而不是只在前端提交时拼参数。这样未来从其他入口创建任务，默认值也一致生效。
+
+精确写入时机：
+
+- 落点是 `server/services/creativeWorkflows.js` 的 `createCreativeWorkflow(payload = {}, options = {})`。
+- 在调用 `creativeContext.normalizeCreativeInput()` 之前读取 `appSettings.getCreativeDefaults()`，生成 `effectivePayload`。
+- 在构造 `record` 时写入 `creative_defaults_snapshot` 和 `target` 字段。
+- `creative_defaults_snapshot` 与 workflow 记录一起通过同一次 `persistWorkflow(record, rootDir)` 写入磁盘；没有额外异步补写步骤。
+- `runCreativeWorkflow()` 只读取 record 内的 snapshot 和 target，不再读取最新 app settings。
 
 合并顺序：
 
 1. 系统默认值。
 2. `app-settings.json`。
-3. 请求显式覆盖项。
+3. 请求显式覆盖项，包括兼容字段 `payload.useResearch` 和新字段 `payload.creativeDefaultsOverride`。
+
+请求语义：
+
+- 兼容旧调用：如果请求体包含 boolean `useResearch`，视为用户显式覆盖。
+- 新前端为避免默认值冲突，应跟踪 `useResearchTouched`。
+- 如果用户没有切换联网研究按钮，创建请求不传 `useResearch`，由后端默认值决定。
+- 如果用户切换了联网研究按钮，创建请求传 `creativeDefaultsOverride.useResearch`；后端也接受旧字段 `useResearch`。
+- `creativeDefaultsOverride` 允许覆盖 `aspectRatio`、`targetDurationSec`、`templateId`、`lockTemplate`、`useResearch`。
 
 创建 workflow 时写入 snapshot，例如：
 
@@ -136,10 +186,13 @@
     "targetDurationSec": 60,
     "templateId": "news_signal_vertical",
     "lockTemplate": false,
-    "renderQuality": "standard",
-    "captionMode": "phrase_kinetic",
-    "showCaptionBar": true,
     "useResearch": true
+  },
+  "target": {
+    "aspect_ratio": "9:16",
+    "duration_sec": 60,
+    "preferredTemplateId": "news_signal_vertical",
+    "lockTemplate": false
   }
 }
 ```
@@ -151,6 +204,9 @@
 - `aspectRatio` 写入 `target.aspect_ratio`，影响 scene spec、模板筛选和视觉质检期望比例。
 - `targetDurationSec` 写入 `target.duration_sec`，影响策划、模板筛选、内容图和渲染时长。
 - `useResearch` 作为一键创作联网研究默认值。前端初始值读取配置；用户临时切换后，该次请求覆盖默认值。
+- `preferredTemplateId` 和 `lockTemplate` 写入 `target`，由 html-video workflow 执行模板首选或锁定策略。
+
+`creativeContext.normalizeCreativeInput()` 不负责读取配置文件；它只消费 `effectivePayload`，保持纯输入规范化职责。
 
 ## 模板策略
 
@@ -178,6 +234,20 @@
 - `templateByAspectRatio["16:9"]`: `bold_signal`
 - `lockTemplate`: `false`
 
+函数签名：
+
+- `server/services/creative-video/html-video/htmlVideoWorkflow.js` 的 `generateHtmlVideo()` 新增参数：
+  - `preferredTemplateId = ''`
+  - `lockTemplate = false`
+- `requestTemplateSelection()` 新增参数：
+  - `preferredTemplateId = ''`
+  - `lockTemplate = false`
+- `generateHtmlVideo()` 先用 `registry.getTemplate(preferredTemplateId)` 和 `validateTemplateCompatibility()` 验证首选模板。
+- `lockTemplate = true` 且验证失败时直接返回失败。
+- `lockTemplate = false` 且验证成功时，将首选模板排在 `compactIndex` 第一位，并在 prompt 中声明“优先选择该模板，除非内容明显不适合”。验证失败时记录诊断并回退到普通 `compactIndex`。
+- `workflowFacade.generateCreativeVideoProject()` 从 `target.preferredTemplateId` 和 `target.lockTemplate` 透传到 `htmlVideoWorkflow.generateHtmlVideo()`。
+- `agentRuns.generateDouyinRunHyperframesFreeformProject()` 调用 facade 时，`target` 使用 `options.projectOptions`；`creativeWorkflows.runCreativeWorkflow()` 必须把 `record.target` 合并进 `projectOptions`。
+
 ## 系统页
 
 系统页分为运行能力和数据维护。
@@ -190,6 +260,39 @@
 - 模型能力摘要：文字模型、TTS、多模态是否已启用，详情跳转到“模型配置”。
 
 运行状态必须中文化。ffmpeg 缺失时显示类似 `未检测到 ffmpeg，无法合成视频`，原始错误可折叠展示。
+
+系统健康返回结构：
+
+```json
+{
+  "success": true,
+  "cached": false,
+  "checked_at": "2026-06-22T14:00:00.000Z",
+  "cache_ttl_sec": 60,
+  "environment": {
+    "ok": true,
+    "diagnostics": []
+  },
+  "templates": {
+    "count": 3,
+    "default_template_id": "news_signal_vertical",
+    "default_template_compatible": true,
+    "default_template_reasons": []
+  },
+  "models": {
+    "text": { "enabled": true, "providerName": "OpenAI", "modelId": "gpt-test" },
+    "tts": { "enabled": false, "providerName": "", "modelId": "" },
+    "multimodal": { "enabled": false, "providerName": "", "modelId": "" }
+  },
+  "storage": {
+    "creativeWorkflows": { "bytes": 0, "display": "0 B" },
+    "mediaCache": { "bytes": 0, "display": "0 B" },
+    "renderOutputs": { "bytes": 0, "display": "0 B" },
+    "browserData": { "bytes": 0, "display": "0 B" },
+    "cookies": { "bytes": 0, "display": "0 B" }
+  }
+}
+```
 
 ## 数据维护
 
@@ -209,6 +312,26 @@
 - `browser-data`：清理本地浏览器数据。
 - `cookies`：清理 Cookie 配置。
 
+`render-outputs` 识别规则：
+
+- 只扫描白名单根目录内的已知产物，不删除原始素材、JSON、转写、评论或配置。
+- 白名单根目录：`data/media/douyin` 下各素材目录、html-video project 目录、agent run 目录。
+- 从 workflow/run JSON 中收集明确记录的输出字段：
+  - `result.hyperframes_freeform.render.output_path`
+  - `result.hyperframes_freeform.render.render_versions[].output_path`
+  - `video.output_path`
+  - `video.render_versions[].output_path`
+  - `visual_inspect.output_path`
+- 对 html-video project 目录，仅允许删除：
+  - `exports/*.mp4`
+  - `exports/*.webm`
+  - `exports/*.mov`
+  - `frames/*.mp4`
+  - `inspect/previews/*.mp4`
+  - project 根目录下的 `output.mp4`
+- 删除前对每个候选路径执行 `path.resolve()`，并确认仍位于白名单根目录内。
+- 未被 JSON 引用且不匹配上述目录规则的文件不删除。
+
 交互规则：
 
 - 每个清理项有独立按钮，不提供“清理全部”。
@@ -224,6 +347,7 @@
 - 清理服务只允许删除白名单路径。
 - 删除前解析绝对路径，并确认路径仍在允许目录内。
 - `browser-data` 和 `cookies` 分开清理。
+- `cookies` 通过 `POST /api/config/maintenance/cleanup` 的 `targets: ["cookies"]` 执行，清空 `server/state/cookies` 内存值，并删除或清空 `douyin-cookies.json`。现有 `/api/config/cookies` 继续用于读取和保存 Cookie，不承担清理确认语义。
 - `render-outputs` 只删除识别出的产物，不递归删除整个媒体目录。
 - 如果有正在运行的一键创作任务，清理相关类型时返回中文阻止提示，例如 `当前有创作任务正在运行，请停止或等待完成后再清理媒体缓存。`
 
@@ -236,6 +360,7 @@
 - `server/routes/config.js`：新增 app settings、templates、system health、cleanup routes。
 - `server/services/creativeWorkflows.js`：创建 workflow 时合并默认值并持久化 snapshot。
 - `server/services/creative-video/html-video/htmlVideoWorkflow.js`：支持 preferred/locked template 输入。
+- `frontend-react/src/pages/OneClickCreativePage.jsx`：加载创作默认值，初始化联网研究开关，并跟踪用户是否显式修改。
 
 ## 测试
 
@@ -245,13 +370,13 @@
   验证默认配置、保存规范化、非法值回退、旧 `skipValidation` 兼容。
 
 - `tests/test-creative-workflow-defaults.js`
-  验证一键创作创建时合并默认画面比例、时长、模板策略，并写入 snapshot。
+  验证一键创作创建时合并默认画面比例、时长、模板策略、联网研究默认值，并在 `createCreativeWorkflow()` 同一次持久化中写入 `creative_defaults_snapshot` 和 `target`。
 
 - `tests/test-html-video-template-preference.js`
   验证首选模板、锁定模板、模板不存在和不兼容时的行为。
 
 - `tests/test-system-maintenance.js`
-  验证占用统计、白名单路径保护、按类型清理、运行中任务阻止。
+  验证占用统计、system-health 缓存、render outputs 识别规则、白名单路径保护、按类型清理、运行中任务阻止、Cookie 清理。
 
 前端测试建议：
 
@@ -259,6 +384,7 @@
 - 创作默认值控件文案为中文。
 - 清理按钮有 loading 和确认文案。
 - 模型配置仍能加载、保存、重新加载。
+- 一键创作未手动切换联网研究时不发送覆盖字段；手动切换后发送显式覆盖。
 
 ## 分阶段落地
 
@@ -282,6 +408,7 @@
 - 设置页以设置中心形态呈现，不再像单一模型配置页。
 - 用户保存默认画面比例和默认模板后，新的一键创作任务自动使用这些默认值。
 - 锁定模板时，模板不兼容会给出明确中文失败原因。
+- `useResearch` 默认值只有在用户没有显式覆盖时生效；用户在一键创作页面临时切换时，以本次请求为准。
 - 模型配置原有能力不回退。
 - 系统页能展示运行能力和数据占用，并能安全地按类型清理。
 - 所有新增接口请求都有 loading、成功和失败状态。
