@@ -4,6 +4,7 @@ import { Status } from '../components/Status.jsx';
 import { CreativeDefaultsSettings } from '../components/settings/CreativeDefaultsSettings.jsx';
 import { ModelSettings } from '../components/settings/ModelSettings.jsx';
 import { SettingsOverview } from '../components/settings/SettingsOverview.jsx';
+import { SystemSettings } from '../components/settings/SystemSettings.jsx';
 import { useSettings } from '../hooks/useSettings.js';
 
 const SECTIONS = [
@@ -30,6 +31,26 @@ export function SettingsPage() {
   const [savingApp, setSavingApp] = useState(false);
   const [status, setStatus] = useState(null);
   const modelSettings = useSettings();
+
+  const loadSystemHealth = useCallback(async (refresh = false) => {
+    setStatus({
+      type: 'loading',
+      message: refresh ? '正在重新检测系统状态...' : '正在加载系统状态...',
+    });
+    try {
+      const response = await api.getSystemHealth(refresh);
+      const nextHealth = unwrapData(response);
+      setSystemHealth(nextHealth);
+      setStatus({
+        type: 'success',
+        message: refresh ? '系统状态已刷新' : '系统状态已加载',
+      });
+      return nextHealth;
+    } catch (error) {
+      setStatus({ type: 'error', message: `系统状态加载失败：${error.message || '未知错误'}` });
+      throw error;
+    }
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -65,9 +86,22 @@ export function SettingsPage() {
 
   const saveAppSettings = useCallback(async (nextSettings) => {
     const isCreativeSection = activeSection === 'creative';
-    const savingMessage = isCreativeSection ? '正在保存创作默认值...' : '正在保存应用配置...';
-    const successMessage = isCreativeSection ? '创作默认值已保存' : '应用配置已保存';
-    const failurePrefix = isCreativeSection ? '创作默认值保存失败' : '应用配置保存失败';
+    const isSystemSection = activeSection === 'system';
+    const savingMessage = isCreativeSection
+      ? '正在保存创作默认值...'
+      : isSystemSection
+        ? '正在保存系统设置...'
+        : '正在保存应用配置...';
+    const successMessage = isCreativeSection
+      ? '创作默认值已保存'
+      : isSystemSection
+        ? '系统设置已保存'
+        : '应用配置已保存';
+    const failurePrefix = isCreativeSection
+      ? '创作默认值保存失败'
+      : isSystemSection
+        ? '系统设置保存失败'
+        : '应用配置保存失败';
 
     setSavingApp(true);
     setStatus({ type: 'loading', message: savingMessage });
@@ -112,23 +146,15 @@ export function SettingsPage() {
     }
 
     return (
-      <section>
-        <div className="settingsPanelHeader">
-          <div>
-            <h3>系统</h3>
-            <p>质检开关、渲染环境和数据清理将在后续任务补全。</p>
-          </div>
-          <button
-            className="btn primary"
-            disabled={loadingApp || savingApp || !appSettings}
-            onClick={() => saveAppSettings(appSettings)}
-          >
-            {savingApp ? '正在保存应用配置...' : '保存应用配置'}
-          </button>
-        </div>
-        <p>质检状态：{appSettings?.system?.skipValidation ? '已跳过' : '已启用'}</p>
-        <p>渲染环境：{systemHealth?.environment?.ok === undefined ? '待检测' : systemHealth.environment.ok ? '可用' : '需处理'}</p>
-      </section>
+      <SystemSettings
+        appSettings={appSettings}
+        systemHealth={systemHealth}
+        disabled={loadingApp || savingApp}
+        saving={savingApp}
+        onChange={setAppSettings}
+        onSave={saveAppSettings}
+        onRefresh={loadSystemHealth}
+      />
     );
   };
 
