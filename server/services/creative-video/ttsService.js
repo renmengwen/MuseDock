@@ -1,6 +1,10 @@
 const fs = require('fs/promises');
 const path = require('path');
 const defaultTtsModel = require('../aiTtsModel');
+const {
+  computeSceneSpecSpeechHash,
+  getSceneSpecSpeechSignature,
+} = require('./sceneSpecHash');
 
 function safeSceneId(sceneId) {
   return String(sceneId || 'scene')
@@ -55,6 +59,25 @@ function getScenes(sceneSpec, sceneId) {
   return scenes.filter(scene => scene.id === sceneId);
 }
 
+function sceneIds(sceneSpec = {}) {
+  const signature = getSceneSpecSpeechSignature(sceneSpec);
+  return signature.scenes.map(scene => scene.id);
+}
+
+function createSceneSpecManifestBase(projectDir, sceneSpec, { status = 'ready' } = {}) {
+  const ids = sceneIds(sceneSpec);
+  return {
+    version: 1,
+    source: 'scene_spec',
+    scene_spec_hash: computeSceneSpecSpeechHash(sceneSpec || {}),
+    scene_count: ids.length,
+    scene_ids: ids,
+    status,
+    project_dir: projectDir,
+    scenes: [],
+  };
+}
+
 async function defaultReadAudioDuration() {
   return 0;
 }
@@ -70,28 +93,24 @@ async function synthesizeSceneNarration({
   }
   const selectedScenes = getScenes(sceneSpec, sceneId);
   if (sceneId && selectedScenes.length === 0) {
-    return { success: false, message: `TTS 失败：未找到场景 ${sceneId}。`, audio_manifest: { scenes: [] } };
+    return { success: false, message: `TTS 失败：未找到场景 ${sceneId}。`, audio_manifest: createSceneSpecManifestBase(projectDir, sceneSpec, { status: 'failed' }) };
   }
   const scenes = selectedScenes.filter(scene => String(scene.narration_text || '').trim());
   if (scenes.length === 0) {
-    return { success: true, message: '没有可生成的旁白音频。', audio_manifest: { version: 1, project_dir: projectDir, scenes: [] } };
+    return { success: true, message: '没有可生成的旁白音频。', audio_manifest: createSceneSpecManifestBase(projectDir, sceneSpec) };
   }
 
   const ttsModel = services.ttsModel || defaultTtsModel;
   const callTtsModel = ttsModel && ttsModel.callTtsModel;
   if (typeof callTtsModel !== 'function') {
-    return { success: false, message: 'TTS 失败：未配置语音合成服务。', audio_manifest: { scenes: [] } };
+    return { success: false, message: 'TTS 失败：未配置语音合成服务。', audio_manifest: createSceneSpecManifestBase(projectDir, sceneSpec, { status: 'failed' }) };
   }
 
   const readAudioDuration = services.readAudioDuration || defaultReadAudioDuration;
   const ttsDir = path.join(projectDir, 'tts');
   await fs.mkdir(ttsDir, { recursive: true });
   const tempDir = await fs.mkdtemp(path.join(ttsDir, '.tmp-'));
-  const manifest = {
-    version: 1,
-    project_dir: projectDir,
-    scenes: [],
-  };
+  const manifest = createSceneSpecManifestBase(projectDir, sceneSpec);
   const pendingFiles = [];
   const usedNames = new Set();
 
@@ -100,6 +119,7 @@ async function synthesizeSceneNarration({
       const text = String(scene.narration_text || '').trim();
       const response = await callTtsModel({ text, scene_id: scene.id });
       if (!response || response.success === false || !response.audioBuffer) {
+        manifest.status = 'failed';
         return {
           success: false,
           message: `TTS 失败：场景 ${scene.id} 旁白生成失败。`,
