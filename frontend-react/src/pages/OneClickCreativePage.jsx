@@ -160,9 +160,11 @@ export function OneClickCreativePage() {
   const finalWorkflowRefreshRef = useRef(null);
   const streamClosedNormallyRef = useRef(false);
   const streamGenerationRef = useRef(0);
+  const useResearchTouchedRef = useRef(false);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('quick');
   const [useResearch, setUseResearch] = useState(true);
+  const [useResearchTouched, setUseResearchTouched] = useState(false);
   const [workflow, setWorkflow] = useState(null);
   const [workflowId, setWorkflowId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
@@ -179,6 +181,25 @@ export function OneClickCreativePage() {
     ...task,
     timeLabel: getTaskTimeLabel(task.updated_at || task.created_at),
   })), [tasks]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCreativeDefaults() {
+      try {
+        const json = await api.getAppSettings();
+        const config = json?.data || json;
+        if (!cancelled && !useResearchTouchedRef.current) {
+          setUseResearch(config?.creativeDefaults?.useResearch !== false);
+        }
+      } catch {
+        if (!cancelled && !useResearchTouchedRef.current) {
+          setUseResearch(true);
+        }
+      }
+    }
+    loadCreativeDefaults();
+    return () => { cancelled = true; };
+  }, []);
 
   const persistTasks = useCallback((updater) => {
     setTasks(prev => {
@@ -496,6 +517,8 @@ export function OneClickCreativePage() {
     setInput('');
     setMode('quick');
     setUseResearch(true);
+    useResearchTouchedRef.current = false;
+    setUseResearchTouched(false);
     setWorkflow(null);
     setWorkflowId('');
     setSelectedWorkflowId('');
@@ -592,13 +615,14 @@ export function OneClickCreativePage() {
     finalWorkflowRefreshRef.current = null;
 
     try {
-      const json = await api.createCreativeWorkflow({
+      const requestPayload = {
         input: trimmed,
-        useResearch: useResearch,
         assetIds: [],
         renderOptions: {},
         workflowOptions: {},
-      });
+        ...(useResearchTouched ? { creativeDefaultsOverride: { useResearch } } : {}),
+      };
+      const json = await api.createCreativeWorkflow(requestPayload);
       const nextWorkflow = getWorkflowPayload(json);
       const nextWorkflowId = getWorkflowId(json);
       setWorkflow(nextWorkflow);
@@ -782,7 +806,11 @@ export function OneClickCreativePage() {
                 mode={mode}
                 setMode={setMode}
                 useResearch={useResearch}
-                setUseResearch={setUseResearch}
+                setUseResearch={(value) => {
+                  useResearchTouchedRef.current = true;
+                  setUseResearchTouched(true);
+                  setUseResearch(value);
+                }}
                 isBusy={isBusy}
                 submitDisabled={submitDisabled}
                 onSubmit={submitCreativeWorkflow}
