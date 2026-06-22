@@ -1,5 +1,6 @@
 const { normalizeSceneSpec } = require('../sceneSpecService');
 const { topoSort, getNode, DEFAULT_FRAME_DURATION_SEC } = require('./contentGraph');
+const { resolveNodeSceneId } = require('./sceneGraphBinding');
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value || {}));
@@ -210,16 +211,29 @@ function buildFrameInputs({ templateInputs, templateSchema, scene, index, total 
 }
 
 function buildFramesFromGraph({ sceneSpec: rawSceneSpec, contentGraph, templateId, templateInputs, templateSchema }) {
+  const rawSceneSpecSource = rawSceneSpec && rawSceneSpec.scene_spec ? rawSceneSpec.scene_spec : rawSceneSpec;
+  const rawScenesById = new Map(((rawSceneSpecSource && rawSceneSpecSource.scenes) || []).map(scene => [scene.id, scene]));
   const sceneSpec = normalizeSceneSpec(rawSceneSpec);
   const scenesById = new Map((sceneSpec.scenes || []).map(scene => [scene.id, scene]));
   const orderedNodeIds = topoSort(contentGraph);
   const total = orderedNodeIds.length;
   return orderedNodeIds.map((nodeId, index) => {
     const node = getNode(contentGraph, nodeId) || {};
-    const scene = scenesById.get(nodeId) || {};
+    const sceneId = resolveNodeSceneId(node);
+    const scene = scenesById.get(sceneId);
+    if (!scene) {
+      throw new Error(`内容图节点 ${nodeId} 未匹配到 scene_spec 场景 ${sceneId || '未指定'}。`);
+    }
+    const sourceScene = rawScenesById.get(scene.id) || scene;
+    const narrationText = sourceScene.narration_text || scene.narration_text || '';
+    const captions = Array.isArray(sourceScene.captions) ? sourceScene.captions : scene.captions;
+    const visualText = sourceScene.visual_text && typeof sourceScene.visual_text === 'object'
+      ? sourceScene.visual_text
+      : scene.visual_text;
     return {
-      id: nodeId,
-      scene_id: nodeId,
+      id: scene.id,
+      scene_id: scene.id,
+      graph_node_id: nodeId,
       order: index + 1,
       template_id: templateId,
       engine: 'hyperframes-playwright',
@@ -234,11 +248,18 @@ function buildFramesFromGraph({ sceneSpec: rawSceneSpec, contentGraph, templateI
         index,
         total,
       }),
-      narration_text: scene.narration_text || '',
-      captions: clone(scene.captions),
+      narration_text: narrationText,
+      captions: clone(captions),
       metadata: {
         frame_intent: node.frameIntent || scene.kind || 'text',
-        visual_text: clone(scene.visual_text),
+        visual_text: clone(visualText),
+        graph_node: clone(node),
+        scene_snapshot: {
+          id: scene.id,
+          order: sourceScene.order || scene.order,
+          narration_text: narrationText,
+          captions: clone(captions),
+        },
       },
       ...defaultFrameFields(),
     };

@@ -39,6 +39,55 @@ const sceneSpec = {
 
 const contentGraph = mapper.mapSceneSpecToContentGraph(sceneSpec);
 
+assert.throws(() => {
+  mapper.buildFramesFromGraph({
+    sceneSpec: {
+      scenes: [
+        { id: 'scene_01', order: 1, narration_text: '第一段', captions: [{ text: '字幕一' }] },
+      ],
+    },
+    contentGraph: {
+      nodes: [
+        { id: 'scene_01', durationSec: 3 },
+        { id: 'scene_02', durationSec: 3 },
+      ],
+      edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence' }],
+    },
+    templateId: 'template-a',
+    templateInputs: {},
+    templateSchema: {},
+  });
+}, /内容图节点 scene_02 未匹配到 scene_spec 场景/);
+
+{
+  const boundFrames = mapper.buildFramesFromGraph({
+    sceneSpec: {
+      scenes: [
+        { id: 'scene_01', order: 1, narration_text: '第一段', captions: [{ text: '字幕一' }], visual_text: { headline: '标题一' } },
+        { id: 'scene_02', order: 2, narration_text: '第二段', captions: [{ text: '字幕二' }], visual_text: { headline: '标题二' } },
+      ],
+    },
+    contentGraph: {
+      nodes: [
+        { id: 'node_a', scene_id: 'scene_01', durationSec: 4, frameIntent: 'data' },
+        { id: 'node_b', scene_id: 'scene_02', durationSec: 5, frameIntent: 'text' },
+      ],
+      edges: [{ from: 'node_a', to: 'node_b', kind: 'sequence' }],
+    },
+    templateId: 'template-a',
+    templateInputs: {},
+    templateSchema: {},
+  });
+  assert.equal(boundFrames.length, 2);
+  assert.equal(boundFrames[0].id, 'scene_01');
+  assert.equal(boundFrames[0].scene_id, 'scene_01');
+  assert.equal(boundFrames[0].graph_node_id, 'node_a');
+  assert.equal(boundFrames[0].narration_text, '第一段');
+  assert.deepEqual(boundFrames[0].captions, [{ text: '字幕一' }]);
+  assert.equal(boundFrames[0].metadata.graph_node.id, 'node_a');
+  assert.equal(boundFrames[0].metadata.scene_snapshot.id, 'scene_01');
+}
+
 assert.equal(contentGraph.schemaVersion, 1);
 assert.equal(contentGraph.intent, 'promo');
 assert.equal(contentGraph.synopsis, sceneSpec.title);
