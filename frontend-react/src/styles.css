@@ -298,6 +298,10 @@ a { color: #fe2c55; text-decoration: none; }
 .settingsSummary { min-width: 92px; padding: 10px 14px; border: 1px solid #e7e9ee; border-radius: 8px; background: #fff; text-align: center; }
 .settingsSummary strong { display: block; font-size: 20px; color: #fe2c55; line-height: 1.1; }
 .settingsSummary span { color: #69717e; font-size: 12px; }
+.settingsCenterLayout { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 16px; align-items: start; }
+.settingsCenterNav { position: sticky; top: 16px; display: grid; gap: 8px; }
+.settingsCenterNav button { border: 1px solid #e7e9ee; border-radius: 8px; background: #fff; padding: 10px 12px; text-align: left; color: #30343b; cursor: pointer; }
+.settingsCenterNav button.active { border-color: #fe2c55; color: #fe2c55; font-weight: 700; }
 .settingsPanel { background: #fff; border: 1px solid #e7e9ee; border-radius: 8px; padding: 20px; }
 .settingsPanelHeader { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
 .settingsPanelHeader h3 { margin: 0 0 6px; font-size: 18px; }

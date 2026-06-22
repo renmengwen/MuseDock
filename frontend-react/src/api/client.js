@@ -150,6 +150,29 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  getAppSettings() {
+    return requestJson('/api/config/app-settings');
+  },
+  saveAppSettings(payload) {
+    return requestJson('/api/config/app-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  },
+  getConfigTemplates() {
+    return requestJson('/api/config/templates');
+  },
+  getSystemHealth(refresh = false) {
+    return requestJson(`/api/config/system-health${refresh ? '?refresh=1' : ''}`);
+  },
+  cleanupSystemData(targets) {
+    return requestJson('/api/config/maintenance/cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targets }),
+    });
+  },
   startDouyinLogin() {
     return requestJson('/api/douyin/qrcode-login', { method: 'POST' });
   },
