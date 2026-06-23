@@ -240,11 +240,77 @@ export const api = {
       body: JSON.stringify(payload || {}),
     });
   },
+  getHtmlVideoProjectFrameHtml(workflowId, frameId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/frames/${encodeURIComponent(frameId)}/html`);
+  },
+  saveHtmlVideoProjectFrameHtml(workflowId, frameId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/frames/${encodeURIComponent(frameId)}/html`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  acceptHtmlVideoProjectFrameDraft(workflowId, frameId, draftId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/frames/${encodeURIComponent(frameId)}/drafts/${encodeURIComponent(draftId)}/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+  },
+  discardHtmlVideoProjectFrameDraft(workflowId, frameId, draftId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/frames/${encodeURIComponent(frameId)}/drafts/${encodeURIComponent(draftId)}/discard`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+  },
+  inspectHtmlVideoProjectLayout(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/layout-qa`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  iterateHtmlVideoProjectFrame(workflowId, frameId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/frames/${encodeURIComponent(frameId)}/iterate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
   editHtmlVideoProject(workflowId, payload) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/edit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload || {}),
+    });
+  },
+  createHtmlVideoProjectEditPlan(workflowId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/edit-plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  runHtmlVideoProjectEditPlan(workflowId, planId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/edit-plan/${encodeURIComponent(planId)}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
+  acceptHtmlVideoProjectEditPlan(workflowId, planId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/edit-plan/${encodeURIComponent(planId)}/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+  },
+  discardHtmlVideoProjectEditPlan(workflowId, planId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/edit-plan/${encodeURIComponent(planId)}/discard`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
     });
   },
   renderHtmlVideoProject(workflowId, payload) {

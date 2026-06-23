@@ -16,6 +16,16 @@ const expectedMethods = [
   'exportHtmlVideoProject(workflowId, payload)',
   'listHtmlVideoProjectExports(workflowId)',
   'getHtmlVideoProjectExportFileUrl(workflowId, exportId)',
+  'getHtmlVideoProjectFrameHtml(workflowId, frameId)',
+  'saveHtmlVideoProjectFrameHtml(workflowId, frameId, payload)',
+  'acceptHtmlVideoProjectFrameDraft(workflowId, frameId, draftId)',
+  'discardHtmlVideoProjectFrameDraft(workflowId, frameId, draftId)',
+  'inspectHtmlVideoProjectLayout(workflowId, payload)',
+  'iterateHtmlVideoProjectFrame(workflowId, frameId, payload)',
+  'createHtmlVideoProjectEditPlan(workflowId, payload)',
+  'runHtmlVideoProjectEditPlan(workflowId, planId, payload)',
+  'acceptHtmlVideoProjectEditPlan(workflowId, planId)',
+  'discardHtmlVideoProjectEditPlan(workflowId, planId)',
 ];
 
 for (const method of expectedMethods) {
@@ -26,7 +36,16 @@ for (const segment of [
   '/html-video-project',
   '/html-video-project/inputs',
   '/html-video-project/frames/',
+  '/html-video-project/frames/${encodeURIComponent(frameId)}/html',
+  '/drafts/${encodeURIComponent(draftId)}/accept',
+  '/drafts/${encodeURIComponent(draftId)}/discard',
+  '/html-video-project/layout-qa',
+  '/html-video-project/frames/${encodeURIComponent(frameId)}/iterate',
   '/html-video-project/edit',
+  '/html-video-project/edit-plan',
+  '/run',
+  '/accept',
+  '/discard',
   '/html-video-project/render',
   '/html-video-project/export',
   '/html-video-project/exports',
@@ -37,12 +56,21 @@ for (const segment of [
 
 assert.match(source, /patchHtmlVideoProjectInputs\([^]*?method:\s*'PATCH'/);
 assert.match(source, /patchHtmlVideoProjectFrame\([^]*?method:\s*'PATCH'/);
+assert.match(source, /saveHtmlVideoProjectFrameHtml\([^]*?method:\s*'PUT'/);
+assert.match(source, /acceptHtmlVideoProjectFrameDraft\([^]*?method:\s*'POST'/);
+assert.match(source, /discardHtmlVideoProjectFrameDraft\([^]*?method:\s*'POST'/);
+assert.match(source, /inspectHtmlVideoProjectLayout\([^]*?method:\s*'POST'/);
+assert.match(source, /iterateHtmlVideoProjectFrame\([^]*?method:\s*'POST'/);
 assert.match(source, /editHtmlVideoProject\([^]*?method:\s*'POST'/);
+assert.match(source, /createHtmlVideoProjectEditPlan\([^]*?method:\s*'POST'/);
+assert.match(source, /runHtmlVideoProjectEditPlan\([^]*?method:\s*'POST'/);
+assert.match(source, /acceptHtmlVideoProjectEditPlan\([^]*?method:\s*'POST'/);
+assert.match(source, /discardHtmlVideoProjectEditPlan\([^]*?method:\s*'POST'/);
 assert.match(source, /renderHtmlVideoProject\([^]*?method:\s*'POST'/);
 assert.match(source, /exportHtmlVideoProject\([^]*?method:\s*'POST'/);
 assert.match(source, /body:\s*JSON\.stringify\(payload\s*\|\|\s*\{\}\)/);
 
-for (const identifier of ['workflowId', 'frameId', 'exportId']) {
+for (const identifier of ['workflowId', 'frameId', 'draftId', 'planId', 'exportId']) {
   assert.match(source, new RegExp(`encodeURIComponent\\(${identifier}\\)`), `missing encodeURIComponent(${identifier})`);
 }
 

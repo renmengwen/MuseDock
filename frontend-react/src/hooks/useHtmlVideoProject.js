@@ -18,6 +18,37 @@ function getExports(result) {
   return [];
 }
 
+function getFrameHtml(result) {
+  return result?.html || result?.data?.html || '';
+}
+
+function getLayoutQa(result) {
+  return result?.layout_qa
+    || result?.layoutQa
+    || result?.data?.layout_qa
+    || result?.data?.layoutQa
+    || null;
+}
+
+function getEditPlan(result) {
+  return result?.plan
+    || result?.edit_plan
+    || result?.editPlan
+    || result?.data?.plan
+    || result?.data?.edit_plan
+    || result?.data?.editPlan
+    || null;
+}
+
+function getLatestEditPlan(project) {
+  const sessions = Array.isArray(project?.edit_sessions) ? project.edit_sessions : [];
+  return [...sessions].reverse().find(session => session?.kind === 'edit_plan') || null;
+}
+
+function hasExplicitProjectResult(result) {
+  return Boolean(result?.html_video_project || result?.project || result?.data?.html_video_project || result?.data?.project);
+}
+
 function getErrorCode(error) {
   return error?.data?.code || error?.data?.error_code || error?.code || '';
 }
@@ -42,6 +73,16 @@ const STATUS_MESSAGES = {
   rendering: '正在渲染单帧预览...',
   exporting: '正在导出成片...',
   tts: '正在重新生成旁白...',
+  loading_source: '正在加载当前帧源码...',
+  saving_source: '正在保存帧源码草稿...',
+  accepting_draft: '正在接受草稿...',
+  discarding_draft: '正在放弃草稿...',
+  layout_qa: '正在运行布局检查...',
+  iterating_frame: '正在重写当前帧 HTML...',
+  planning_edit: '正在生成全片编辑计划...',
+  running_edit_plan: '正在执行全片编辑计划...',
+  accepting_plan: '正在接受计划草稿...',
+  discarding_plan: '正在放弃计划草稿...',
   error: '操作失败。',
   not_configured: '渲染环境未配置。',
   needs_validation: '工程需要验证。',
@@ -56,6 +97,9 @@ export function useHtmlVideoProject({ workflowId, api }) {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [isMutating, setIsMutating] = useState(false);
+  const [frameHtml, setFrameHtml] = useState('');
+  const [layoutQa, setLayoutQa] = useState(null);
+  const [editPlan, setEditPlan] = useState(null);
   const [dirtyRequiresRender, setDirtyRequiresRender] = useState(false);
   const mountedRef = useRef(true);
   const loadingRef = useRef(false);
@@ -84,6 +128,13 @@ export function useHtmlVideoProject({ workflowId, api }) {
       setDirtyRequiresRender(Boolean(result.requires_render));
     }
   }, []);
+
+  const applySecondaryResult = useCallback((result = {}) => {
+    if (hasExplicitProjectResult(result)) applyProjectResult(result);
+    if (result?.requires_render !== undefined) {
+      setDirtyRequiresRender(Boolean(result.requires_render));
+    }
+  }, [applyProjectResult]);
 
   const setFailure = useCallback((error, fallbackMessage = '操作失败。') => {
     const nextStatus = getFailureStatus(error);
@@ -137,7 +188,20 @@ export function useHtmlVideoProject({ workflowId, api }) {
     }
   }, [frames, selectedFrameId]);
 
-  const runMutatingAction = useCallback(async ({ nextStatus, loadingMessage, successMessage, action, fallbackMessage }) => {
+  useEffect(() => {
+    const latestPlan = getLatestEditPlan(project);
+    if (latestPlan && !editPlan) setEditPlan(latestPlan);
+  }, [project, editPlan]);
+
+  const runMutatingAction = useCallback(async ({
+    nextStatus,
+    loadingMessage,
+    successMessage,
+    action,
+    fallbackMessage,
+    applyResult = true,
+    onSuccess,
+  }) => {
     if (!workflowId || !api || mutatingRef.current || loadingRef.current) return null;
     mutatingRef.current = true;
     setIsMutating(true);
@@ -146,7 +210,8 @@ export function useHtmlVideoProject({ workflowId, api }) {
     try {
       const result = await action();
       if (!mountedRef.current) return null;
-      applyProjectResult(result);
+      if (applyResult) applyProjectResult(result);
+      if (typeof onSuccess === 'function') onSuccess(result);
       setStatus('ready');
       setMessage(result?.message || successMessage);
       return result;
@@ -159,6 +224,150 @@ export function useHtmlVideoProject({ workflowId, api }) {
       if (mountedRef.current) setIsMutating(false);
     }
   }, [workflowId, api, applyProjectResult, setFailure]);
+
+  const loadFrameHtml = useCallback((frameId) => (
+    runMutatingAction({
+      nextStatus: 'loading_source',
+      loadingMessage: STATUS_MESSAGES.loading_source,
+      successMessage: '当前帧源码已加载。',
+      fallbackMessage: '加载当前帧源码失败。',
+      applyResult: false,
+      action: () => api.getHtmlVideoProjectFrameHtml(workflowId, frameId),
+      onSuccess: (result) => {
+        applySecondaryResult(result);
+        setFrameHtml(getFrameHtml(result));
+      },
+    })
+  ), [api, workflowId, runMutatingAction, applySecondaryResult]);
+
+  const saveFrameHtmlDraft = useCallback((frameId, payload) => (
+    runMutatingAction({
+      nextStatus: 'saving_source',
+      loadingMessage: STATUS_MESSAGES.saving_source,
+      successMessage: '帧源码草稿已保存，可渲染单帧预览。',
+      fallbackMessage: '保存帧源码草稿失败。',
+      applyResult: false,
+      action: () => api.saveHtmlVideoProjectFrameHtml(workflowId, frameId, payload),
+      onSuccess: applySecondaryResult,
+    })
+  ), [api, workflowId, runMutatingAction, applySecondaryResult]);
+
+  const acceptFrameDraft = useCallback((frameId, draftId) => (
+    runMutatingAction({
+      nextStatus: 'accepting_draft',
+      loadingMessage: STATUS_MESSAGES.accepting_draft,
+      successMessage: '草稿已接受，需要重新导出成片。',
+      fallbackMessage: '接受草稿失败。',
+      applyResult: false,
+      action: () => api.acceptHtmlVideoProjectFrameDraft(workflowId, frameId, draftId),
+      onSuccess: applySecondaryResult,
+    })
+  ), [api, workflowId, runMutatingAction, applySecondaryResult]);
+
+  const discardFrameDraft = useCallback((frameId, draftId) => (
+    runMutatingAction({
+      nextStatus: 'discarding_draft',
+      loadingMessage: STATUS_MESSAGES.discarding_draft,
+      successMessage: '草稿已放弃。',
+      fallbackMessage: '放弃草稿失败。',
+      applyResult: false,
+      action: () => api.discardHtmlVideoProjectFrameDraft(workflowId, frameId, draftId),
+      onSuccess: applySecondaryResult,
+    })
+  ), [api, workflowId, runMutatingAction, applySecondaryResult]);
+
+  const inspectLayout = useCallback((payload = {}) => {
+    const nextPayload = typeof payload === 'string' ? { frame_id: payload } : payload;
+    return runMutatingAction({
+      nextStatus: 'layout_qa',
+      loadingMessage: STATUS_MESSAGES.layout_qa,
+      successMessage: '布局检查完成。',
+      fallbackMessage: '布局检查失败。',
+      applyResult: false,
+      action: () => api.inspectHtmlVideoProjectLayout(workflowId, nextPayload),
+      onSuccess: (result) => {
+        applySecondaryResult(result);
+        setLayoutQa(getLayoutQa(result));
+      },
+    });
+  }, [api, workflowId, runMutatingAction, applySecondaryResult]);
+
+  const iterateFrame = useCallback((frameId, payload) => (
+    runMutatingAction({
+      nextStatus: 'iterating_frame',
+      loadingMessage: STATUS_MESSAGES.iterating_frame,
+      successMessage: '当前帧草稿已生成。',
+      fallbackMessage: '重写当前帧 HTML 失败。',
+      applyResult: false,
+      action: () => api.iterateHtmlVideoProjectFrame(workflowId, frameId, payload),
+      onSuccess: (result) => {
+        applySecondaryResult(result);
+        setLayoutQa(getLayoutQa(result));
+        if (getFrameHtml(result)) setFrameHtml(getFrameHtml(result));
+      },
+    })
+  ), [api, workflowId, runMutatingAction, applySecondaryResult]);
+
+  const createEditPlan = useCallback((payload) => (
+    runMutatingAction({
+      nextStatus: 'planning_edit',
+      loadingMessage: STATUS_MESSAGES.planning_edit,
+      successMessage: '全片编辑计划已生成，请确认后执行。',
+      fallbackMessage: '生成全片编辑计划失败。',
+      applyResult: false,
+      action: () => api.createHtmlVideoProjectEditPlan(workflowId, payload),
+      onSuccess: (result) => {
+        applySecondaryResult(result);
+        setEditPlan(getEditPlan(result));
+      },
+    })
+  ), [api, workflowId, runMutatingAction, applySecondaryResult]);
+
+  const runEditPlan = useCallback((planId, payload) => (
+    runMutatingAction({
+      nextStatus: 'running_edit_plan',
+      loadingMessage: STATUS_MESSAGES.running_edit_plan,
+      successMessage: '全片编辑计划已执行，草稿已生成。',
+      fallbackMessage: '执行全片编辑计划失败。',
+      applyResult: false,
+      action: () => api.runHtmlVideoProjectEditPlan(workflowId, planId, payload),
+      onSuccess: (result) => {
+        applySecondaryResult(result);
+        setEditPlan(getEditPlan(result));
+        setLayoutQa(getLayoutQa(result));
+      },
+    })
+  ), [api, workflowId, runMutatingAction, applySecondaryResult]);
+
+  const acceptEditPlan = useCallback((planId) => (
+    runMutatingAction({
+      nextStatus: 'accepting_plan',
+      loadingMessage: STATUS_MESSAGES.accepting_plan,
+      successMessage: '计划草稿已接受，需要重新导出成片。',
+      fallbackMessage: '接受计划草稿失败。',
+      applyResult: false,
+      action: () => api.acceptHtmlVideoProjectEditPlan(workflowId, planId),
+      onSuccess: (result) => {
+        applySecondaryResult(result);
+        setEditPlan(getEditPlan(result));
+      },
+    })
+  ), [api, workflowId, runMutatingAction, applySecondaryResult]);
+
+  const discardEditPlan = useCallback((planId) => (
+    runMutatingAction({
+      nextStatus: 'discarding_plan',
+      loadingMessage: STATUS_MESSAGES.discarding_plan,
+      successMessage: '计划草稿已放弃。',
+      fallbackMessage: '放弃计划草稿失败。',
+      applyResult: false,
+      action: () => api.discardHtmlVideoProjectEditPlan(workflowId, planId),
+      onSuccess: (result) => {
+        applySecondaryResult(result);
+        setEditPlan(getEditPlan(result));
+      },
+    })
+  ), [api, workflowId, runMutatingAction, applySecondaryResult]);
 
   const saveTemplateInputs = useCallback((payload) => (
     runMutatingAction({
@@ -279,10 +488,23 @@ export function useHtmlVideoProject({ workflowId, api }) {
     message,
     loading,
     isMutating,
+    frameHtml,
+    layoutQa,
+    editPlan,
     disabled: loading || isMutating,
     dirtyRequiresRender,
     load,
     selectFrame: setSelectedFrameId,
+    loadFrameHtml,
+    saveFrameHtmlDraft,
+    acceptFrameDraft,
+    discardFrameDraft,
+    inspectLayout,
+    iterateFrame,
+    createEditPlan,
+    runEditPlan,
+    acceptEditPlan,
+    discardEditPlan,
     saveTemplateInputs,
     saveFrame,
     applyNaturalLanguageEdit,

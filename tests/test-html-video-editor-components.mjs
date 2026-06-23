@@ -49,6 +49,16 @@ for (const message of [
   '正在重新生成旁白',
   '渲染环境未配置',
   '工程需要验证',
+  '正在加载当前帧源码',
+  '正在保存帧源码草稿',
+  '正在接受草稿',
+  '正在放弃草稿',
+  '正在运行布局检查',
+  '正在重写当前帧 HTML',
+  '正在生成全片编辑计划',
+  '正在执行全片编辑计划',
+  '正在接受计划草稿',
+  '正在放弃计划草稿',
 ]) {
   assert.ok(hook.includes(message), `hook should expose Chinese message: ${message}`);
 }
@@ -61,8 +71,36 @@ for (const method of [
   'renderHtmlVideoProject',
   'exportHtmlVideoProject',
   'listHtmlVideoProjectExports',
+  'getHtmlVideoProjectFrameHtml',
+  'saveHtmlVideoProjectFrameHtml',
+  'acceptHtmlVideoProjectFrameDraft',
+  'discardHtmlVideoProjectFrameDraft',
+  'inspectHtmlVideoProjectLayout',
+  'iterateHtmlVideoProjectFrame',
+  'createHtmlVideoProjectEditPlan',
+  'runHtmlVideoProjectEditPlan',
+  'acceptHtmlVideoProjectEditPlan',
+  'discardHtmlVideoProjectEditPlan',
 ]) {
   assert.ok(hook.includes(method), `hook should call api.${method}`);
+}
+
+for (const hookSurface of [
+  'frameHtml',
+  'layoutQa',
+  'editPlan',
+  'loadFrameHtml',
+  'saveFrameHtmlDraft',
+  'acceptFrameDraft',
+  'discardFrameDraft',
+  'inspectLayout',
+  'iterateFrame',
+  'createEditPlan',
+  'runEditPlan',
+  'acceptEditPlan',
+  'discardEditPlan',
+]) {
+  assert.ok(hook.includes(hookSurface), `hook should expose ${hookSurface}`);
 }
 
 assert.match(hook, /useRef\(/, 'hook should use refs for duplicate request protection');
