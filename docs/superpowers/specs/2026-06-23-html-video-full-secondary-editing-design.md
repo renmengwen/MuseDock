@@ -985,7 +985,6 @@ frames/.drafts/<frame_id>/<draft_id>.html
 现有 `renderHtmlVideoFramePreview` 增加参数：
 
 - `draftId`
-- `htmlPathOverride`
 - `runLayoutQa`
 
 实现上不要永久修改 frame。渲染 draft 时构造临时 frame：
