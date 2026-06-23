@@ -97,6 +97,10 @@ async function listen(app) {
       calls.push(['put-frame-html', id, frameId, payload.mode || 'draft']);
       return { success: true, workflow_id: id, frame_id: frameId, draft: { id: 'draft_0001', html_path: 'frames/.drafts/frame_01/draft_0001.html' }, requires_render: true, message: '帧源码草稿已保存，可渲染单帧预览。' };
     },
+    iterateHtmlVideoProjectFrame: async (id, frameId, payload) => {
+      calls.push(['iterate-frame', id, frameId, payload.mode || 'layout_fix']);
+      return { success: true, workflow_id: id, frame_id: frameId, draft: { id: 'draft_ai_0001', kind: 'ai_iterate', html_path: 'frames/.drafts/frame_01/draft_ai_0001.html' }, requires_render: true, message: '当前帧草稿已生成。' };
+    },
     acceptHtmlVideoProjectFrameDraft: async (id, frameId, draftId) => {
       calls.push(['accept-draft', id, frameId, draftId]);
       return { success: true, workflow_id: id, frame_id: frameId, accepted_draft_id: draftId, message: '草稿已接受，需要重新导出成片。' };
@@ -230,6 +234,14 @@ async function listen(app) {
     assert.equal(savedDraft.statusCode, 200);
     assert.equal(savedDraft.body.draft.id, 'draft_0001');
 
+    const iteratedDraft = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01/iterate`, {
+      instruction: '修复文字遮挡',
+      mode: 'layout_fix',
+    });
+    assert.equal(iteratedDraft.statusCode, 200);
+    assert.equal(iteratedDraft.body.draft.kind, 'ai_iterate');
+    assert.equal(iteratedDraft.body.message, '当前帧草稿已生成。');
+
     const acceptedDraft = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01/drafts/draft_0001/accept`, {});
     assert.equal(acceptedDraft.statusCode, 200);
     assert.equal(acceptedDraft.body.accepted_draft_id, 'draft_0001');
@@ -280,9 +292,10 @@ async function listen(app) {
     assert.equal(invalid.statusCode, 400);
     assert.match(invalid.body.message, /创作任务 ID 无效/);
 
-    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
+    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
     assert.deepEqual(calls.filter(item => item[0] === 'render').map(item => [item[2], item[3], item[4], item[5]]), [['materialize', '', '', false], ['frame', 'frame_01', '', false], ['frame', 'frame_01', 'draft_0001', true]]);
     assert.deepEqual(calls.filter(item => item[0] === 'layout-qa').map(item => item[2]), ['frame_01', 'all']);
+    assert.deepEqual(calls.find(item => item[0] === 'iterate-frame'), ['iterate-frame', workflowId, 'frame_01', 'layout_fix']);
     assert.deepEqual(calls.find(item => item[0] === 'export'), ['export', workflowId, false]);
     assert.deepEqual(calls.find(item => item[0] === 'export-file'), ['export-file', workflowId, 'export_001']);
   } finally {

@@ -16,6 +16,7 @@ const defaultSourceFetch = require('./sourceFetch');
 const htmlVideoProjectStore = require('./creative-video/html-video/projectStore');
 const htmlVideoEditPatchService = require('./creative-video/html-video/editPatchService');
 const frameHtmlEditService = require('./creative-video/html-video/frameHtmlEditService');
+const htmlVideoIterateService = require('./creative-video/html-video/htmlVideoIterateService');
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
 const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
 const { syncRawHtmlFrameTextPatch } = require('./creative-video/html-video/rawHtmlTextPatch');
@@ -2110,6 +2111,31 @@ async function saveHtmlVideoProjectFrameHtml(workflowId, frameId, payload = {}, 
   return { ...result, workflow_id: workflowId, frame_id: frameId, html_video_project: saved, html_video_project_path: projectDir };
 }
 
+async function iterateHtmlVideoProjectFrame(workflowId, frameId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const iterateService = options.htmlVideoIterateService || htmlVideoIterateService;
+  const result = await iterateService.iterateFrameHtml({
+    projectDir,
+    project,
+    frameId,
+    instruction: payload.instruction,
+    mode: payload.mode,
+    preserveText: payload.preserve_text !== false,
+    model: options.aiTextModel || aiTextModel,
+  });
+  if (!result.success) return { ...result, workflow_id: workflowId, frame_id: frameId };
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, project);
+  return {
+    ...result,
+    workflow_id: workflowId,
+    frame_id: frameId,
+    html_video_project: saved,
+    html_video_project_path: projectDir,
+  };
+}
+
 async function acceptHtmlVideoProjectFrameDraft(workflowId, frameId, draftId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
@@ -2613,6 +2639,7 @@ module.exports = {
   patchHtmlVideoProjectFrame,
   getHtmlVideoProjectFrameHtml,
   saveHtmlVideoProjectFrameHtml,
+  iterateHtmlVideoProjectFrame,
   acceptHtmlVideoProjectFrameDraft,
   discardHtmlVideoProjectFrameDraft,
   inspectHtmlVideoProjectLayout,
