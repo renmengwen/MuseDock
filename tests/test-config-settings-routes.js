@@ -12,9 +12,11 @@ assert.match(source, /require\(['"]\.\.\/services\/creative-video\/html-video\/t
 assert.match(source, /async function getAppSettingsRoute\s*\(\s*req\s*,\s*res\s*\)/, 'config route should define getAppSettingsRoute');
 assert.match(source, /async function saveAppSettingsRoute\s*\(\s*req\s*,\s*res\s*\)/, 'config route should define saveAppSettingsRoute');
 assert.match(source, /async function getConfigTemplatesRoute\s*\(\s*req\s*,\s*res\s*\)/, 'config route should define getConfigTemplatesRoute');
+assert.match(source, /async function getConfigSystemHealthRoute\s*\(\s*req\s*,\s*res\s*\)/, 'config route should define getConfigSystemHealthRoute');
 assert.match(source, /router\.get\(['"]\/app-settings['"]\s*,\s*getAppSettingsRoute\s*\)/, 'config route should mount GET /app-settings');
 assert.match(source, /router\.post\(['"]\/app-settings['"]\s*,\s*saveAppSettingsRoute\s*\)/, 'config route should mount POST /app-settings');
 assert.match(source, /router\.get\(['"]\/templates['"]\s*,\s*getConfigTemplatesRoute\s*\)/, 'config route should mount GET /templates');
+assert.match(source, /router\.get\(['"]\/system-health['"]\s*,\s*getConfigSystemHealthRoute\s*\)/, 'config route should mount GET /system-health');
 
 async function listen(app) {
   const server = http.createServer(app);
@@ -37,16 +39,19 @@ async function requestJson(server, method, pathname, body) {
 
 async function runIntegrationTests() {
   const appSettings = require('../server/services/appSettings');
+  const systemMaintenance = require('../server/services/systemMaintenance');
   const templateRegistry = require('../server/services/creative-video/html-video/templateRegistry');
   const originals = {
     getPublicConfig: appSettings.getPublicConfig,
     saveConfig: appSettings.saveConfig,
     getCreativeDefaults: appSettings.getCreativeDefaults,
+    getSystemHealth: systemMaintenance.getSystemHealth,
     scanTemplateManifests: templateRegistry.scanTemplateManifests,
     validateTemplateCompatibility: templateRegistry.validateTemplateCompatibility,
   };
   const savedPayloads = [];
   const compatibilityCalls = [];
+  const healthCalls = [];
   let scannedRootDir = '';
 
   appSettings.getPublicConfig = async () => ({
@@ -63,6 +68,10 @@ async function runIntegrationTests() {
     };
   };
   appSettings.getCreativeDefaults = async () => ({ aspectRatio: '16:9' });
+  systemMaintenance.getSystemHealth = async options => {
+    healthCalls.push(options);
+    return { environment: { ok: true }, templates: { items: [] }, models: {}, storage: {} };
+  };
   templateRegistry.scanTemplateManifests = rootDir => {
     scannedRootDir = rootDir;
     return [
@@ -135,7 +144,7 @@ async function runIntegrationTests() {
 
     const templates = await requestJson(server, 'GET', '/api/config/templates');
     assert.strictEqual(templates.status, 200);
-    assert.strictEqual(scannedRootDir, templateRegistry.DEFAULT_ROOT_DIR);
+    assert.deepStrictEqual(scannedRootDir, templateRegistry.DEFAULT_ROOT_DIRS);
     assert.deepStrictEqual(compatibilityCalls, [
       { id: 'wide-news', options: { aspectRatio: '16:9' } },
       { id: 'vertical-news', options: { aspectRatio: '16:9' } },
@@ -152,6 +161,7 @@ async function runIntegrationTests() {
           engine: 'hyperframes',
           mapped_engine: 'hyperframes-playwright',
           aspect_ratio: '16:9',
+          supported_aspects: ['16:9'],
           duration_sec: 30,
           source_entry: 'index.html',
           license: { name: 'MIT', commercial_use: true },
@@ -167,6 +177,7 @@ async function runIntegrationTests() {
           engine: 'hyperframes',
           mapped_engine: 'hyperframes-playwright',
           aspect_ratio: '9:16',
+          supported_aspects: ['9:16'],
           duration_sec: 60,
           source_entry: 'index.html',
           license: { name: 'MIT', commercial_use: true },
@@ -175,11 +186,20 @@ async function runIntegrationTests() {
         },
       ],
     });
+
+    const health = await requestJson(server, 'GET', '/api/config/system-health?refresh=1');
+    assert.strictEqual(health.status, 200);
+    assert.deepStrictEqual(healthCalls, [{ refresh: true }]);
+    assert.deepStrictEqual(health.body, {
+      success: true,
+      data: { environment: { ok: true }, templates: { items: [] }, models: {}, storage: {} },
+    });
   } finally {
     await new Promise(resolve => server.close(resolve));
     appSettings.getPublicConfig = originals.getPublicConfig;
     appSettings.saveConfig = originals.saveConfig;
     appSettings.getCreativeDefaults = originals.getCreativeDefaults;
+    systemMaintenance.getSystemHealth = originals.getSystemHealth;
     templateRegistry.scanTemplateManifests = originals.scanTemplateManifests;
     templateRegistry.validateTemplateCompatibility = originals.validateTemplateCompatibility;
     delete require.cache[require.resolve('../server/routes/config')];

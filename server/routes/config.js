@@ -2,13 +2,15 @@ const express = require('express');
 const storedCookies = require('../state/cookies');
 const aiModelConfig = require('../services/aiModelConfig');
 const appSettings = require('../services/appSettings');
-const { cleanupTargets } = require('../services/systemMaintenance');
+const { cleanupTargets, getSystemHealth } = require('../services/systemMaintenance');
 const {
   DEFAULT_ROOT_DIR,
+  DEFAULT_ROOT_DIRS,
   scanTemplateManifests,
   validateTemplateCompatibility,
   mappedEngine,
   getManifestAspect,
+  getManifestAspects,
 } = require('../services/creative-video/html-video/templateRegistry');
 
 const router = express.Router();
@@ -36,7 +38,7 @@ async function getConfigTemplatesRoute(req, res) {
   try {
     const defaults = await appSettings.getCreativeDefaults();
     const aspectRatio = defaults && defaults.aspectRatio;
-    const manifests = scanTemplateManifests(DEFAULT_ROOT_DIR);
+    const manifests = scanTemplateManifests(DEFAULT_ROOT_DIRS || DEFAULT_ROOT_DIR);
     const templates = manifests.map(manifest => {
       const output = manifest.output || {};
       const compatibility = validateTemplateCompatibility(manifest, { aspectRatio });
@@ -50,6 +52,7 @@ async function getConfigTemplatesRoute(req, res) {
         engine: manifest.engine,
         mapped_engine: mappedEngine(manifest.engine),
         aspect_ratio: getManifestAspect(manifest),
+        supported_aspects: getManifestAspects(manifest),
         duration_sec: output.duration_sec ?? output.duration,
         source_entry: manifest.source_entry,
         license: manifest.license,
@@ -61,6 +64,15 @@ async function getConfigTemplatesRoute(req, res) {
     res.json({ success: true, data: templates });
   } catch (error) {
     res.status(500).json({ success: false, message: '读取视频模板失败。', error: error.message });
+  }
+}
+
+async function getConfigSystemHealthRoute(req, res) {
+  try {
+    const health = await getSystemHealth({ refresh: req.query?.refresh === '1' });
+    res.json({ success: true, data: health });
+  } catch (error) {
+    res.status(500).json({ success: false, message: '读取系统状态失败。', error: error.message });
   }
 }
 
@@ -90,19 +102,8 @@ async function cleanupConfigDataRoute(req, res) {
 router.get('/app-settings', getAppSettingsRoute);
 router.post('/app-settings', saveAppSettingsRoute);
 router.get('/templates', getConfigTemplatesRoute);
+router.get('/system-health', getConfigSystemHealthRoute);
 router.post('/maintenance/cleanup', cleanupConfigDataRoute);
-
-router.get('/cookies', (req, res) => {
-  res.json({ douyin: storedCookies.douyin, xhs: storedCookies.xhs });
-});
-
-router.post('/cookies', (req, res) => {
-  const { douyin, xhs } = req.body;
-  storedCookies.douyin = douyin || '';
-  storedCookies.xhs = xhs || '';
-  console.log('[config] Cookies saved: douyin=' + (douyin ? douyin.length + ' chars' : 'empty') + ', xhs=' + (xhs ? xhs.length + ' chars' : 'empty'));
-  res.json({ success: true });
-});
 
 router.get('/ai-models', async (req, res) => {
   try {

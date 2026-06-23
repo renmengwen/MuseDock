@@ -10,8 +10,8 @@ async function run() {
   const calls = [];
   const result = await sceneTts.synthesizeSceneTts({
     scenes: [
-      { index: 1, narration_text: '第一段。' },
-      { index: 2, narration_text: '第二段。' },
+      { index: 1, narration_text: '（吸气）第一段。' },
+      { index: 2, narration_text: '第二段。（稍停顿）' },
     ],
     outputDir: rootDir,
     runId: 'run-1',
@@ -47,6 +47,8 @@ async function run() {
   assert.equal(result.scene_tts.scenes.length, 2);
   assert.equal(result.scene_tts.scenes[0].duration, 1.1);
   assert.equal(result.scene_tts.scenes[0].captions[0].text, '第一段。');
+  assert.equal(result.scene_tts.scenes[0].narration_text, '第一段。');
+  assert.equal(result.scene_tts.scenes[1].narration_text, '第二段。');
   assert.equal(path.basename(result.scene_tts.path), 'run-1-tts.wav');
   assert.ok(fs.existsSync(result.scene_tts.path));
 

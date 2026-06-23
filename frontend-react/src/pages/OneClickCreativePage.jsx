@@ -37,16 +37,6 @@ function getWorkflowVideoUrl(workflow) {
   ];
   const directUrl = candidates.find(value => typeof value === 'string' && value.trim());
   if (directUrl) return directUrl;
-  if (workflow?.aweme_id && workflow?.run_id) {
-    return [
-      '/api/agents/douyin',
-      encodeURIComponent(String(workflow.aweme_id)),
-      'runs',
-      encodeURIComponent(String(workflow.run_id)),
-      'hyperframes-freeform/files',
-      'output.mp4',
-    ].join('/');
-  }
   return '';
 }
 
@@ -686,7 +676,7 @@ export function OneClickCreativePage() {
       setWorkflowId(storedTask.workflow_id);
       setSelectedWorkflowId(storedTask.workflow_id);
       setWorkflow(storedTask.workflow || null);
-      setStatus(storedTask.status === 'done' ? 'done' : 'polling');
+      setStatus('polling');
       setMessage(storedTask.message || '正在打开任务详情...');
       return;
     }

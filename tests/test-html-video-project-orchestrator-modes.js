@@ -87,6 +87,83 @@ async function writeFile(filePath, content) {
   assert.deepEqual(calls, ['render:frame_02']);
   assert.equal(preview.preview_frame_id, 'frame_02');
 
+  const autoFitRenderCalls = [];
+  const autoFitExport = await orchestrator.exportHtmlVideoProject({
+    rootDir,
+    workflowId: 'wf',
+    runId: 'auto-fit',
+    project: {
+      ...project,
+      project_id: 'wf_auto_fit',
+      run_id: 'auto-fit',
+      frames: [
+        {
+          id: 'frame_auto_fit',
+          scene_id: 'scene_auto_fit',
+          template_id: 'simple',
+          inputs: { headline: '越界字幕' },
+          duration_sec: 2,
+          captions: [{ id: 'cap_01', start: 0, end: 3.2, text: '这句字幕超过画面时长' }],
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', type: 'video', items: [{ id: 'item_auto_fit', kind: 'frame', frame_id: 'frame_auto_fit', start_sec: 0, duration_sec: 2 }] }] },
+    },
+    templateRegistry,
+    services: {
+      frameRenderer: {
+        renderFrame: async (frame, options) => {
+          autoFitRenderCalls.push({ id: frame.id, duration_sec: frame.duration_sec });
+          await writeFile(options.outputPath, 'mp4');
+          return { success: true, output_path: options.outputPath, diagnostics: [] };
+        },
+      },
+      ffmpegComposer: services.ffmpegComposer,
+    },
+  });
+  assert.equal(autoFitExport.success, true);
+  assert.deepEqual(autoFitRenderCalls, [{ id: 'frame_auto_fit', duration_sec: 3.2 }]);
+  assert.equal(autoFitExport.project.frames[0].duration_sec, 3.2);
+  assert.equal(autoFitExport.project.timeline.tracks[0].items[0].duration_sec, 3.2);
+  assert.ok(autoFitExport.diagnostics.some(item => item.code === 'frame_duration_auto_extended'));
+
+  const lockedRenderCalls = [];
+  const lockedExport = await orchestrator.exportHtmlVideoProject({
+    rootDir,
+    workflowId: 'wf',
+    runId: 'locked',
+    project: {
+      ...project,
+      project_id: 'wf_locked',
+      run_id: 'locked',
+      output: { ...project.output, duration_locked: true },
+      frames: [
+        {
+          id: 'frame_locked',
+          scene_id: 'scene_locked',
+          template_id: 'simple',
+          inputs: { headline: '锁定时长' },
+          duration_sec: 2,
+          captions: [{ id: 'cap_01', start: 0, end: 3.2, text: '锁定后不能自动延长' }],
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', type: 'video', items: [] }] },
+    },
+    templateRegistry,
+    services: {
+      frameRenderer: {
+        renderFrame: async () => {
+          lockedRenderCalls.push('render');
+          return { success: true, output_path: 'unused.mp4', diagnostics: [] };
+        },
+      },
+      ffmpegComposer: services.ffmpegComposer,
+    },
+  });
+  assert.equal(lockedExport.success, false);
+  assert.match(lockedExport.message, /字幕时间超过锁定的画面时长/);
+  assert.deepEqual(lockedRenderCalls, []);
+  assert.ok(lockedExport.diagnostics.some(item => item.code === 'caption_duration_exceeds_frame'));
+
   const exported = await orchestrator.exportHtmlVideoProject({
     rootDir,
     workflowId: 'wf',

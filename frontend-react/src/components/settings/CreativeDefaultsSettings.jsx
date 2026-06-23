@@ -22,6 +22,35 @@ const SELECT_CONTROL_STYLE = {
   background: '#fff',
 };
 
+const TEMPLATE_NAME_ZH = {
+  bold_signal: '信号卡片',
+  glitch_title: '故障风格标题',
+  news_signal_vertical: '竖屏财经信号',
+  'frame-bold-poster': '醒目海报',
+  'frame-bold-signal': '强信号卡片',
+  'frame-build-minimal': '极简构建',
+  'frame-creative-voltage': '创意电压',
+  'frame-data-chart-nyt': '数据图表',
+  'frame-data-rollup': '数据汇总',
+  'frame-decision-tree': '决策树',
+  'frame-electric-studio': '电光工作室',
+  'frame-glitch-title': '故障标题',
+  'frame-kinetic-type': '动态文字',
+  'frame-light-leak-cinema': '漏光电影',
+  'frame-liquid-bg-hero': '液态背景主视觉',
+  'frame-logo-outro': 'Logo 片尾',
+  'frame-nyt-graph': '新闻图表',
+  'frame-pentagram-stat': '醒目数据',
+  'frame-play-mode': '播放模式',
+  'frame-product-promo': '产品推广',
+  'frame-product-promo-30s': '产品推广 30 秒',
+  'frame-swiss-grid': '瑞士网格',
+  'frame-takram-organic': '有机视觉',
+  'frame-vignelli': '维涅利版式',
+  'frame-warm-grain': '暖色颗粒',
+  'vfx-text-cursor': '文字光标特效',
+};
+
 function getCreativeDefaults(appSettings) {
   return {
     ...DEFAULT_CREATIVE_DEFAULTS,
@@ -37,17 +66,35 @@ function getTemplateAspect(template) {
   return template?.aspect_ratio || template?.aspectRatio || template?.aspect || '';
 }
 
+function getTemplateAspects(template) {
+  const aspects = template?.supported_aspects || template?.supportedAspects;
+  if (Array.isArray(aspects)) return aspects.map(item => String(item || '').trim()).filter(Boolean);
+  const aspect = getTemplateAspect(template);
+  return aspect ? [aspect] : [];
+}
+
 function getTemplateId(template) {
   return typeof template?.id === 'string' ? template.id : '';
 }
 
 function isTemplateShownForAspect(template, aspectRatio) {
-  const templateAspect = getTemplateAspect(template);
-  return !templateAspect || templateAspect === aspectRatio;
+  const aspects = getTemplateAspects(template);
+  return !aspects.length || aspects.includes(aspectRatio);
 }
 
-function optionLabel(template) {
-  return `${template.name || template.id}${template.compatible === false ? '（不兼容）' : ''}`;
+function hasBlockingCompatibilityReason(template) {
+  const reasons = Array.isArray(template?.compatibility_reasons) ? template.compatibility_reasons : [];
+  return reasons.some(reason => reason?.code && reason.code !== 'unsupported-aspect');
+}
+
+function getTemplateDisplayName(template) {
+  const id = getTemplateId(template);
+  return TEMPLATE_NAME_ZH[id] || template?.name || id;
+}
+
+function optionLabel(template, aspectRatio) {
+  const compatible = isTemplateShownForAspect(template, aspectRatio) && !hasBlockingCompatibilityReason(template);
+  return `${getTemplateDisplayName(template)}${compatible ? '' : '（不兼容）'}`;
 }
 
 export function CreativeDefaultsSettings({
@@ -161,9 +208,9 @@ export function CreativeDefaultsSettings({
                     <option
                       key={`${aspectRatio}-${getTemplateId(template)}`}
                       value={getTemplateId(template)}
-                      disabled={template.compatible === false}
+                      disabled={!isTemplateShownForAspect(template, aspectRatio) || hasBlockingCompatibilityReason(template)}
                     >
-                      {optionLabel(template)}
+                      {optionLabel(template, aspectRatio)}
                     </option>
                   ))}
                 </select>

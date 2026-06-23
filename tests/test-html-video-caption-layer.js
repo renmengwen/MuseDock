@@ -1,5 +1,10 @@
 const assert = require('assert');
-const { ensureCaptionLayer, hasUnmanagedCaptionLayer, renderCaptionLayer } = require('../server/services/creative-video/html-video/captionLayer');
+const {
+  ensureCaptionLayer,
+  hasUnmanagedCaptionLayer,
+  normalizeCaptionsForFrame,
+  renderCaptionLayer,
+} = require('../server/services/creative-video/html-video/captionLayer');
 
 const captions = [{ id: 'c1', start: 0, end: 3, text: '字幕文本' }];
 const captionLayerCount = html => (html.match(/data-hv-layer="captions"/g) || []).length;
@@ -15,6 +20,15 @@ const captionLayerCount = html => (html.match(/data-hv-layer="captions"/g) || []
 
 {
   const layer = renderCaptionLayer([
+    { id: 'c1', start: 0, end: 2, text: '（吸气）先收藏这 10 类插件。（稍停顿）用到时再安装。（推荐）保留括号说明。' },
+  ]);
+  assert.doesNotMatch(layer, /吸气|稍停顿/);
+  assert.match(layer, /先收藏这 10 类插件。用到时再安装。/);
+  assert.match(layer, /（推荐）保留括号说明。/);
+}
+
+{
+  const layer = renderCaptionLayer([
     { id: 'c1', start: 0, end: 1, text: '第一句' },
     { id: 'c2', start: 1, end: 2, text: '第二句' },
   ]);
@@ -22,6 +36,27 @@ const captionLayerCount = html => (html.match(/data-hv-layer="captions"/g) || []
   assert.match(layer, /\.hv-caption-item\[data-hv-active="true"\]\{display:block;/);
   assert.match(layer, /data-hv-caption-clock/);
   assert.match(layer, /requestAnimationFrame/);
+}
+
+{
+  const split = normalizeCaptionsForFrame({
+    id: 'scene_02',
+    duration_sec: 12,
+    captions: [{
+      id: 'cap_01',
+      start: 0,
+      end: 12,
+      text: '最近，微软正式合并了一个关于 Vite+ 的 PR：在 VS Code 的 npm.scriptRunner 枚举里，新增了 vp，也就是 Vite+。',
+    }],
+  });
+  assert.ok(split.length > 1);
+  assert.equal(split.map(item => item.text).join(''), '最近，微软正式合并了一个关于 Vite+ 的 PR：在 VS Code 的 npm.scriptRunner 枚举里，新增了 vp，也就是 Vite+。');
+  assert.equal(split[0].start, 0);
+  assert.equal(split.at(-1).end, 12);
+  for (let index = 1; index < split.length; index += 1) {
+    assert.equal(split[index].start, split[index - 1].end);
+  }
+  assert.ok(split.every(item => item.text.length <= 34));
 }
 
 {

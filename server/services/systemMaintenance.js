@@ -588,7 +588,11 @@ async function getTemplateOverview(options = {}) {
   const settings = services.appSettings || defaultAppSettings;
   const registry = services.templateRegistry || defaultTemplateRegistry;
   const defaults = await settings.getCreativeDefaults();
-  const templateRoot = options.templateRoot || registry.DEFAULT_ROOT_DIR || defaultTemplateRegistry.DEFAULT_ROOT_DIR;
+  const templateRoot = options.templateRoot
+    || registry.DEFAULT_ROOT_DIRS
+    || registry.DEFAULT_ROOT_DIR
+    || defaultTemplateRegistry.DEFAULT_ROOT_DIRS
+    || defaultTemplateRegistry.DEFAULT_ROOT_DIR;
   const manifests = typeof registry.scanTemplateManifests === 'function'
     ? registry.scanTemplateManifests(templateRoot)
     : [];

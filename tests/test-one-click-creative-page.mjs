@@ -15,7 +15,6 @@ const creativeTaskDetailPath = path.join(__dirname, '../frontend-react/src/compo
 const appPath = path.join(__dirname, '../frontend-react/src/App.jsx');
 const shellPath = path.join(__dirname, '../frontend-react/src/components/AppShell.jsx');
 const stylesPath = path.join(__dirname, '../frontend-react/src/styles.css');
-const persistentRoutesPath = path.join(__dirname, '../frontend-react/src/utils/persistentRoutes.js');
 
 function textFromCodePoints(points) {
   return String.fromCodePoint(...points);
@@ -87,7 +86,6 @@ const creativeTaskDetail = fs.readFileSync(creativeTaskDetailPath, 'utf-8');
 const app = fs.readFileSync(appPath, 'utf-8');
 const shell = fs.readFileSync(shellPath, 'utf-8');
 const styles = fs.readFileSync(stylesPath, 'utf-8');
-const persistentRoutes = fs.readFileSync(persistentRoutesPath, 'utf-8');
 const creativeVideoEditorImportPattern =
   /import\s+(?:\{[\s\S]*?\bCreativeVideoEditor\b[\s\S]*?\}|CreativeVideoEditor\b|[A-Za-z_$][\w$]*\s*,\s*\{[\s\S]*?\bCreativeVideoEditor\b[\s\S]*?\})\s+from\s+['"][^'"]+['"]/;
 
@@ -360,6 +358,9 @@ assert.match(shell, /<header className="header"[\s\S]*className="creativeHeaderS
 assert.doesNotMatch(page, /<form className="creativePromptComposer"[\s\S]*className="creativeHeaderSettings"[\s\S]*<\/form>/, 'Settings entry should not sit inside the input box');
 assert.match(shell, /Settings2/, 'Settings entry should include a settings icon');
 assert.ok(shell.includes(zh.settings), 'AppShell should render settings text in normal Chinese');
+assert.match(shell, /location\.pathname === '\/settings'/, 'AppShell should detect the settings route');
+assert.match(shell, /navigate\(-1\)/, 'Settings route header action should return to the previous route');
+assert.ok(shell.includes('返回'), 'Settings route header action should render back text in Chinese');
 assert.doesNotMatch(page, /<Bot\s+size=\{15\}/, 'Prompt quick actions should remove the smart video pill in every mode');
 assert.ok(!page.includes('智能成片'), 'Prompt quick actions should not render smart video copy');
 assert.match(page, /const submitDisabled = isBusy \|\| mode === 'expert'/, 'Expert mode should contribute to submit disabled state');
@@ -395,6 +396,7 @@ assert.match(creativeTaskDetail, /getWorkflowVideoUrl/, 'Creative task detail sh
 assert.match(page, /workflow\?\.stages\?\.find\(stage => stage\.id === 'render'\)\?\.result/, 'Creative task detail should read video URL from render stage result');
 assert.match(page, /getWorkflowDisplayMessage/, 'Creative task detail should derive the visible status message from workflow progress');
 assert.match(page, /find\(stage => \['running', 'queued', 'pending'\]\.includes\(stage\.status\)\)/, 'Creative task detail should surface the current active stage message while polling');
+assert.match(page, /if \(storedTask\) \{[\s\S]*setStatus\('polling'\);/, 'Stored creative tasks should refresh from backend instead of freezing stale local workflow data');
 assert.match(creativeDisplay, /skipped:\s*'已跳过'/, 'Workflow progress should show skipped stages as 已跳过');
 assert.match(creativeDisplay, /stage\.status === 'skipped'[\s\S]*return 'done'/, 'Workflow stepper should render skipped stages as non-active completed steps');
 assert.match(creativeStatusMessage, /getStatusMessageClass/, 'CreativeStatusMessage should use the shared status message class helper');
@@ -420,16 +422,18 @@ assert.ok(styles.includes('.creativeResultVideo'), 'styles.css should define cre
 
 assert.match(app, /OneClickCreativePage/, 'App.jsx should import and render OneClickCreativePage');
 assert.match(app, /<Navigate\s+to="\/creative"\s+replace\s+\/>/, 'App.jsx index route should navigate to /creative');
-assert.match(persistentRoutes, /creativeWorkflowId/, 'persistent route state should preserve creative workflow id');
-assert.match(persistentRoutes, /creativeWorkflowId:\s*parts\[1\]/, 'persistent routes should parse /creative/:workflowId');
+assert.match(app, /path="creative"/, 'App.jsx should keep the one-click creative route');
+assert.match(app, /path="creative\/:workflowId"/, 'App.jsx should keep the one-click workflow detail route');
+assert.match(app, /path="editor\/:workflowId"/, 'App.jsx should keep the editor route');
+assert.match(app, /path="settings"/, 'App.jsx should keep the settings route');
+for (const removedRoute of ['crawl', 'records', 'media', 'ai', 'hyperframes-freeform']) {
+  assert.ok(!app.includes(`path="${removedRoute}`), `App.jsx should remove ${removedRoute} route`);
+}
 
-assert.ok(shell.includes('{/* <nav className="tabs">'), 'AppShell should comment out the top tab markup without deleting it');
-assert.ok(shell.includes('</nav> */}'), 'AppShell should keep the top tab markup commented out');
-assert.ok(!shell.includes('\n      <nav className="tabs">'), 'AppShell should not render top tabs outside the comment block');
-assert.match(shell, /to="\/creative"/, 'AppShell should keep a creative nav item in the commented tab markup');
-assert.ok(shell.includes(zh.creativeTitle), 'AppShell should keep creative nav text in commented tab markup');
-for (const route of ['/crawl/douyin', '/records/douyin', '/media', '/hyperframes-freeform', '/settings']) {
-  assert.ok(shell.includes(`to="${route}"`), `AppShell should preserve nav route: ${route}`);
+assert.ok(!shell.includes('<nav className="tabs">'), 'AppShell should remove the old top tab markup');
+assert.ok(!shell.includes('NavLink'), 'AppShell should not import or render NavLink');
+for (const route of ['/crawl/douyin', '/records/douyin', '/media', '/hyperframes-freeform']) {
+  assert.ok(!shell.includes(`to="${route}"`), `AppShell should remove old nav route: ${route}`);
 }
 
 console.log('one click creative page tests passed');

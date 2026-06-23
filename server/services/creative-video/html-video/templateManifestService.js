@@ -34,6 +34,24 @@ function validateSourceEntry(sourceEntry) {
   return { ok: true, source_entry: normalized };
 }
 
+function normalizeOutput(rawOutput) {
+  const output = asObject(rawOutput);
+  const resolution = asObject(output.resolution);
+  const defaultResolution = asObject(resolution.default);
+  const fps = asObject(output.fps);
+  const duration = asObject(output.duration);
+  return {
+    ...output,
+    ...(duration.default_sec !== undefined && output.duration_sec === undefined ? { duration_sec: duration.default_sec } : {}),
+    ...(fps.default !== undefined ? { fps: fps.default } : {}),
+    resolution: {
+      ...resolution,
+      ...(resolution.width === undefined && defaultResolution.width !== undefined ? { width: defaultResolution.width } : {}),
+      ...(resolution.height === undefined && defaultResolution.height !== undefined ? { height: defaultResolution.height } : {}),
+    },
+  };
+}
+
 function resolveManifestPath(templateDirOrManifestPath) {
   const inputPath = path.resolve(templateDirOrManifestPath);
   if (path.basename(inputPath) === MANIFEST_FILENAME) {
@@ -59,7 +77,7 @@ function normalizeTemplateManifest(rawManifest, options = {}) {
     name: String(raw.name || raw.id || '').trim(),
     engine: String(raw.engine || '').trim(),
     source_entry: sourceValidation.source_entry,
-    output: asObject(raw.output),
+    output: normalizeOutput(raw.output),
     inputs: {
       ...inputs,
       schema: asObject(inputs.schema),

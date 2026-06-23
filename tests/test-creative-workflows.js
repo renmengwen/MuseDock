@@ -591,7 +591,7 @@ async function testResearchRunsInBackgroundStage() {
   assert.equal(fetched.data.creative_context.research_context.status, 'ready');
 }
 
-async function testHtmlVideoLiteSkipsLegacyHyperframesStages() {
+async function testHtmlVideoLiteCompletesVisibleFinalStages() {
   const { rootDir, mediaRoot } = createTempDirs();
   const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-html-video');
   const { services, calls } = createFakeServices({
@@ -643,10 +643,12 @@ async function testHtmlVideoLiteSkipsLegacyHyperframesStages() {
   assert.equal(persisted.result.hyperframes_freeform.project.html_video_project_path, projectDir);
   assert.equal(persisted.result.hyperframes_freeform.render.status, 'rendered');
   assert.equal(persisted.status, 'done');
-  for (const stageId of ['check', 'render', 'inspect']) {
+  const checkStage = persisted.stages.find(item => item.id === 'check');
+  assert.equal(checkStage.status, 'skipped');
+  assert.match(checkStage.message, /跳过旧 HyperFrames/);
+  for (const stageId of ['render', 'inspect']) {
     const stage = persisted.stages.find(item => item.id === stageId);
-    assert.equal(stage.status, 'skipped');
-    assert.match(stage.message, /跳过旧 HyperFrames/);
+    assert.equal(stage.status, 'done');
     assert.notEqual(stage.status, 'pending');
     assert.notEqual(stage.status, 'queued');
     assert.notEqual(stage.status, 'running');
@@ -1657,7 +1659,7 @@ async function run() {
   await testSourceUrlFetchExceptionPersistsFailedSourceContext();
   await testSourceUrlFetchFailureUsesDefaultChineseMessage();
   await testResearchRunsInBackgroundStage();
-  await testHtmlVideoLiteSkipsLegacyHyperframesStages();
+  await testHtmlVideoLiteCompletesVisibleFinalStages();
   await testHtmlVideoExportUsesOrchestratorWithTemplateRegistry();
   await testFallbackProjectDoesNotSkipLegacyStages();
   await testRejectsEmptyInput();

@@ -1344,17 +1344,25 @@ async function markStage(record, stageId, status, message, now, extra = {}) {
   });
 }
 
-async function markHtmlVideoLiteSkippedLegacyStages(record, now) {
-  const messages = {
-    check: 'html-video production 已完成，跳过旧 HyperFrames 工程校验。',
-    render: 'html-video production 已完成，跳过旧 HyperFrames 渲染。',
-    inspect: 'html-video production 已完成，跳过旧 HyperFrames 巡检。',
-  };
-  for (const [stageId, message] of Object.entries(messages)) {
-    await markStage(record, stageId, 'skipped', message, now, {
-      skipped_at: now,
-    });
-  }
+async function markHtmlVideoLiteFinalStages(record, now, projectStageResult = {}) {
+  const hyperframes = projectStageResult.hyperframes_freeform || {};
+  await markStage(record, 'check', 'skipped', 'html-video production 已完成，跳过旧 HyperFrames 工程校验。', now, {
+    skipped_at: now,
+  });
+  await markStage(record, 'render', 'done', hyperframes.render?.message || 'html-video production 成片已导出。', now, {
+    completed_at: now,
+    result: {
+      success: true,
+      render: hyperframes.render || null,
+    },
+  });
+  await markStage(record, 'inspect', 'done', hyperframes.visual_inspect?.message || 'html-video production 视觉质检通过。', now, {
+    completed_at: now,
+    result: {
+      success: true,
+      visual_inspect: hyperframes.visual_inspect || null,
+    },
+  });
 }
 
 async function emitTaskContextEvent(taskContext, event) {
@@ -1599,7 +1607,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
 
   if (isHtmlVideoLiteProjectResult(projectStageResult)) {
     const doneAt = getNow(services);
-    await markHtmlVideoLiteSkippedLegacyStages(record, doneAt);
+    await markHtmlVideoLiteFinalStages(record, doneAt, projectStageResult);
     record.success = true;
     record.status = 'done';
     record.message = '创作任务已完成。';

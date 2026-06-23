@@ -29,6 +29,7 @@ assert.deepEqual(Object.keys(compactDefault[0]).sort(), [
   'name',
   'output',
   'source_entry',
+  'supported_aspects',
   'tags',
 ].sort());
 assert.equal(compactDefault[0].mapped_engine, 'hyperframes-playwright');
@@ -131,10 +132,13 @@ failures.forEach(({ manifest, options, field, text }) => {
 const productionIndex = registry.buildCompactIndex(productionTemplatesDir);
 const productionIds = productionIndex.map(item => item.id).sort();
 assert.deepEqual(productionIds, ['bold_signal', 'glitch_title', 'news_signal_vertical'].sort());
-assert.deepEqual(
-  registry.buildCompactIndex().map(item => item.id).sort(),
-  ['bold_signal', 'glitch_title', 'news_signal_vertical'].sort(),
-);
+const defaultIndex = registry.buildCompactIndex();
+for (const id of ['bold_signal', 'glitch_title', 'news_signal_vertical']) {
+  assert.ok(defaultIndex.some(item => item.id === id), `default index should include ${id}`);
+}
+if (require('fs').existsSync(registry.DEFAULT_EXTERNAL_ROOT_DIR)) {
+  assert.ok(defaultIndex.some(item => item.id === 'frame-bold-signal'), 'default index should include adjacent html-video templates');
+}
 const defaultRegistry = registry.createTemplateRegistry();
 const verticalTemplates = defaultRegistry.buildCompactIndex({ aspect_ratio: '9:16' }).map(item => item.id);
 assert.ok(verticalTemplates.includes('news_signal_vertical'));

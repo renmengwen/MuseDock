@@ -10,12 +10,6 @@ app.use(express.static(path.join(__dirname, '../frontend-dist')));
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 app.use('/api/config', require('./routes/config'));
-app.use('/api/debug', require('./routes/debug'));
-app.use('/api/douyin', require('./routes/douyin'));
-app.use('/api/xhs', require('./routes/xhs'));
-app.use('/api/history', require('./routes/history'));
-app.use('/api/media', require('./routes/media'));
-app.use('/api/agents', require('./routes/agents'));
 app.use('/api/creative-workflows', require('./routes/creativeWorkflows'));
 
 app.get('*', (req, res, next) => {

@@ -72,6 +72,10 @@ function isSafeRunId(runId) {
   return /^[A-Za-z0-9_.-]+$/.test(value);
 }
 
+function buildHtmlVideoExportFileUrl(workflowId, exportId) {
+  return `/api/creative-workflows/${encodeURIComponent(String(workflowId))}/html-video-project/exports/${encodeURIComponent(String(exportId))}/file`;
+}
+
 function createInvalidAwemeResult(awemeId) {
   return {
     success: false,
@@ -1575,6 +1579,10 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
       ? (result.html_video_project_path || result.project_dir || '')
       : '';
     const projectDir = htmlVideoProjectPath || result.project_dir || '';
+    const latestExport = Array.isArray(result.project?.exports) ? result.project.exports.at(-1) : null;
+    const outputUrl = latestExport?.id
+      ? buildHtmlVideoExportFileUrl(awemeId, latestExport.id)
+      : defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'output.mp4');
     const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'project', operationId, current => ({
       status: 'ready',
       project_dir: projectDir,
@@ -1601,12 +1609,13 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
         ...current.render,
         status: 'rendered',
         output_path: result.output_path,
-        output_url: defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'output.mp4'),
+        output_url: outputUrl,
         render_mode: renderMode,
         render_versions: [{
           id: `${runId}-html-video-lite`,
           status: 'rendered',
           output_path: result.output_path,
+          output_url: outputUrl,
           message: '渲染完成。',
           created_at: new Date().toISOString(),
         }],

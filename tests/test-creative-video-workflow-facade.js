@@ -319,7 +319,10 @@ const { computeSceneSpecSpeechHash } = require('../server/services/creative-vide
         scenes: voicedStoryboard.storyboard.scenes.map(scene => ({
           id: scene.id,
           index: scene.index,
-          duration: scene.duration,
+          duration: scene.index === 1 ? 1.4 : scene.duration,
+          captions: scene.index === 1
+            ? [{ start: 0, end: 1.4, duration: 1.4, text: '第 1 段 TTS 字幕' }]
+            : [],
         })),
       },
     },
@@ -369,6 +372,7 @@ const { computeSceneSpecSpeechHash } = require('../server/services/creative-vide
   assert.equal(htmlVideoSceneSpec.scenes.length, 10);
   assert.deepEqual(htmlVideoSceneSpec.scenes.map(scene => scene.id), voicedStoryboard.storyboard.scenes.map(scene => scene.id));
   assert.equal(htmlVideoSceneSpec.scenes[0].narration_text, '第 1 段旁白');
+  assert.deepEqual(htmlVideoSceneSpec.scenes[0].captions, [{ id: 'cap_01', start: 0, end: 1.4, text: '第 1 段 TTS 字幕' }]);
   assert.equal(htmlVideoSceneSpec.scenes[0].visual_text.headline, '第 1 帧');
   assert.equal(typeof htmlVideoServices.ttsService.synthesizeSceneNarration, 'function');
   assert.equal(htmlVideoCreativeContext.audio.source, 'scene_spec');

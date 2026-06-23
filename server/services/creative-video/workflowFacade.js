@@ -160,9 +160,9 @@ function createSceneSpecFromVoicedStoryboard(creativeContext = {}, target = {}) 
     const visualText = scene?.visual_text && typeof scene.visual_text === 'object' && !Array.isArray(scene.visual_text)
       ? scene.visual_text
       : {};
-    const captions = Array.isArray(scene?.captions) && scene.captions.length
-      ? scene.captions
-      : (Array.isArray(audioScene?.captions) ? audioScene.captions : []);
+    const captions = Array.isArray(audioScene?.captions) && audioScene.captions.length
+      ? audioScene.captions
+      : (Array.isArray(scene?.captions) ? scene.captions : []);
     return {
       id,
       order,

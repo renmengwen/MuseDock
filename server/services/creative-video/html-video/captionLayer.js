@@ -1,4 +1,6 @@
 const DEFAULT_CAPTION_DURATION_SEC = 3;
+const MAX_CAPTION_TEXT_LENGTH = 34;
+const { stripSpeechStageDirections } = require('../../speechText');
 const VOID_ELEMENTS = new Set([
   'area',
   'base',
@@ -44,8 +46,73 @@ function frameDurationSec(frame = {}) {
   );
 }
 
+function roundCaptionTime(value) {
+  return Math.round(Number(value || 0) * 1000) / 1000;
+}
+
+function splitLongText(text, maxLength = MAX_CAPTION_TEXT_LENGTH) {
+  const value = String(text || '').trim();
+  if (value.length <= maxLength) return value ? [value] : [];
+
+  const phrases = value.match(/[^，。！？；：,.!?;:]+[，。！？；：,.!?;:]?/g) || [value];
+  const chunks = [];
+  let current = '';
+
+  const pushHardWrapped = chunk => {
+    let rest = chunk;
+    while (rest.length > maxLength) {
+      chunks.push(rest.slice(0, maxLength));
+      rest = rest.slice(maxLength);
+    }
+    current = rest;
+  };
+
+  for (const phrase of phrases) {
+    if (!phrase) continue;
+    const next = current + phrase;
+    if (next.length <= maxLength) {
+      current = next;
+      continue;
+    }
+    if (current) chunks.push(current);
+    if (phrase.length > maxLength) {
+      pushHardWrapped(phrase);
+    } else {
+      current = phrase;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function splitNormalizedCaption(caption) {
+  const chunks = splitLongText(caption.text);
+  if (chunks.length <= 1) return [caption];
+
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const duration = finitePositiveNumber(caption.end - caption.start, caption.duration || DEFAULT_CAPTION_DURATION_SEC);
+  let cursor = caption.start;
+
+  return chunks.map((text, index) => {
+    const start = cursor;
+    const end = index === chunks.length - 1
+      ? caption.end
+      : roundCaptionTime(start + (duration * text.length / totalLength));
+    cursor = end;
+    return {
+      ...caption,
+      id: `${caption.id}_${String(index + 1).padStart(2, '0')}`,
+      start,
+      end,
+      duration: roundCaptionTime(end - start),
+      text,
+    };
+  });
+}
+
 function normalizeCaption(caption = {}, frame = {}, index = 0) {
-  const text = String(caption.text ?? '').trim();
+  const text = stripSpeechStageDirections(caption.text);
   if (!text) return null;
 
   const frameDuration = frameDurationSec(frame);
@@ -72,26 +139,30 @@ function normalizeCaptionsForFrame(frame = {}) {
   const sourceCaptions = Array.isArray(frame.captions) ? frame.captions : [];
   const captions = sourceCaptions
     .map((caption, index) => normalizeCaption(caption, frame, index))
-    .filter(Boolean);
+    .filter(Boolean)
+    .flatMap(splitNormalizedCaption);
   if (captions.length > 0) return captions;
 
-  const text = String(frame.narration_text || '').trim();
+  const text = stripSpeechStageDirections(frame.narration_text);
   if (!text) return [];
 
   const duration = frameDurationSec(frame);
   const frameId = frame.id || frame.scene_id || 'frame';
-  return [{
+  return splitNormalizedCaption({
     id: `${frameId}_caption_01`,
     start: 0,
     end: duration,
     duration,
     text,
-  }];
+  });
 }
 
 function renderCaptionLayer(captions = [], options = {}) {
   const normalizedCaptions = Array.isArray(captions)
-    ? captions.filter(caption => caption && String(caption.text || '').trim())
+    ? captions
+      .map((caption, index) => normalizeCaption(caption, {}, index))
+      .filter(Boolean)
+      .flatMap(splitNormalizedCaption)
     : [];
   if (normalizedCaptions.length === 0) return '';
 

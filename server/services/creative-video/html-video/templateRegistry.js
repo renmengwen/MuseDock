@@ -20,6 +20,8 @@ const DEFAULT_OPTIONS = {
 };
 
 const DEFAULT_ROOT_DIR = path.resolve(__dirname, '../../../templates');
+const DEFAULT_EXTERNAL_ROOT_DIR = path.resolve(DEFAULT_ROOT_DIR, '../../../html-video/templates');
+const DEFAULT_ROOT_DIRS = [DEFAULT_ROOT_DIR, DEFAULT_EXTERNAL_ROOT_DIR];
 
 function normalizeEngine(engine) {
   return String(engine || '').trim();
@@ -43,6 +45,13 @@ function resolveSourceEntryPath(manifest) {
   return sourcePath;
 }
 
+function resolveRootDirs(rootDir) {
+  return (Array.isArray(rootDir) ? rootDir : [rootDir || DEFAULT_ROOT_DIRS])
+    .flat()
+    .filter(Boolean)
+    .map(item => path.resolve(item));
+}
+
 function readTemplateDirs(rootDir) {
   if (!fs.existsSync(rootDir)) return [];
   return fs.readdirSync(rootDir, { withFileTypes: true })
@@ -50,12 +59,14 @@ function readTemplateDirs(rootDir) {
     .map(entry => path.join(rootDir, entry.name));
 }
 
-function scanTemplateManifests(rootDir) {
+function scanTemplateManifests(rootDir = DEFAULT_ROOT_DIRS) {
   const manifests = [];
-  for (const templateDir of readTemplateDirs(rootDir)) {
-    const manifestPath = path.join(templateDir, MANIFEST_FILENAME);
-    if (!fs.existsSync(manifestPath)) continue;
-    manifests.push(loadTemplateManifest(templateDir));
+  for (const templateRoot of resolveRootDirs(rootDir)) {
+    for (const templateDir of readTemplateDirs(templateRoot)) {
+      const manifestPath = path.join(templateDir, MANIFEST_FILENAME);
+      if (!fs.existsSync(manifestPath)) continue;
+      manifests.push(loadTemplateManifest(templateDir));
+    }
   }
   return manifests;
 }
@@ -85,17 +96,18 @@ function engineAllowed(manifest, options) {
 
 function aspectAllowed(manifest, options) {
   if (!Array.isArray(options.aspects) || options.aspects.length === 0) return true;
-  const aspect = getManifestAspect(manifest);
-  if (!aspect) return true;
-  return options.aspects.includes(aspect);
+  const aspects = getManifestAspects(manifest);
+  if (!aspects.length) return true;
+  return options.aspects.some(aspect => aspects.includes(aspect));
 }
 
 function getManifestAspect(manifest) {
   const output = manifest.output || {};
   if (output.aspect || output.aspect_ratio) return output.aspect || output.aspect_ratio;
   const resolution = output.resolution || {};
-  const width = Number(resolution.width);
-  const height = Number(resolution.height);
+  const defaultResolution = resolution.default || {};
+  const width = Number(resolution.width || defaultResolution.width);
+  const height = Number(resolution.height || defaultResolution.height);
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     return '';
   }
@@ -105,6 +117,15 @@ function getManifestAspect(manifest) {
   if (Math.abs(ratio - 1) < 0.01) return '1:1';
   if (Math.abs(ratio - 4 / 5) < 0.01) return '4:5';
   return `${width}:${height}`;
+}
+
+function getManifestAspects(manifest) {
+  const output = manifest.output || {};
+  const resolution = output.resolution || {};
+  const supported = output.supported_aspects || output.supportedAspects || resolution.supported_aspects || resolution.supportedAspects;
+  if (Array.isArray(supported)) return supported.map(item => String(item || '').trim()).filter(Boolean);
+  const aspect = getManifestAspect(manifest);
+  return aspect ? [aspect] : [];
 }
 
 function durationAllowed(manifest, options) {
@@ -119,6 +140,11 @@ function durationAllowed(manifest, options) {
   }
   if (Array.isArray(output.duration) && output.duration.length >= 2) {
     return duration >= Number(output.duration[0]) && duration <= Number(output.duration[1]);
+  }
+  if (output.duration && typeof output.duration === 'object') {
+    const min = Number(output.duration.min_sec ?? output.duration.minSec);
+    const max = Number(output.duration.max_sec ?? output.duration.maxSec);
+    if (Number.isFinite(min) && Number.isFinite(max)) return duration >= min && duration <= max;
   }
   const manifestDuration = output.duration_sec ?? output.duration;
   if (manifestDuration === undefined || manifestDuration === null) return true;
@@ -220,6 +246,7 @@ function toCompactTemplate(manifest) {
     source_entry: manifest.source_entry,
     output: manifest.output,
     aspect_ratio: getManifestAspect(manifest),
+    supported_aspects: getManifestAspects(manifest),
     duration_sec: durationSec,
     inputs: {
       schema: manifest.inputs.schema,
@@ -234,7 +261,10 @@ function resolveRootAndOptions(rootDirOrOptions, maybeOptions) {
   if (typeof rootDirOrOptions === 'string') {
     return { rootDir: rootDirOrOptions, options: maybeOptions || {} };
   }
-  return { rootDir: DEFAULT_ROOT_DIR, options: rootDirOrOptions || {} };
+  if (Array.isArray(rootDirOrOptions)) {
+    return { rootDir: rootDirOrOptions, options: maybeOptions || {} };
+  }
+  return { rootDir: DEFAULT_ROOT_DIRS, options: rootDirOrOptions || {} };
 }
 
 function buildCompactIndex(rootDirOrOptions, maybeOptions = {}) {
@@ -244,7 +274,7 @@ function buildCompactIndex(rootDirOrOptions, maybeOptions = {}) {
     .map(toCompactTemplate);
 }
 
-function createTemplateRegistry({ rootDir = DEFAULT_ROOT_DIR } = {}) {
+function createTemplateRegistry({ rootDir = DEFAULT_ROOT_DIRS } = {}) {
   let manifests = [];
   function scanTemplates(nextRootDir = rootDir) {
     rootDir = nextRootDir;
@@ -279,11 +309,14 @@ function createTemplateRegistry({ rootDir = DEFAULT_ROOT_DIR } = {}) {
 module.exports = {
   INTERNAL_ENGINE_MAP,
   DEFAULT_ROOT_DIR,
+  DEFAULT_EXTERNAL_ROOT_DIR,
+  DEFAULT_ROOT_DIRS,
   scanTemplateManifests,
   buildCompactIndex,
   createTemplateRegistry,
   validateTemplateCompatibility,
   mappedEngine,
   getManifestAspect,
+  getManifestAspects,
   resolveSourceEntryPath,
 };

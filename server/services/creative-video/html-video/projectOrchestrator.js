@@ -31,6 +31,115 @@ function expectedDurationSec(project) {
     .reduce((total, frame) => total + Number(frame.duration_sec || frame.durationSec || 0), 0);
 }
 
+function roundDuration(value) {
+  return Math.round(Number(value || 0) * 1000) / 1000;
+}
+
+function maxCaptionEndSec(frame) {
+  return (Array.isArray(frame?.captions) ? frame.captions : [])
+    .reduce((max, caption) => Math.max(max, Number(caption?.end ?? caption?.end_sec ?? 0) || 0), 0);
+}
+
+function isDurationLocked(project) {
+  const output = objectOrEmpty(project?.output);
+  return output.duration_locked === true || output.lock_duration === true;
+}
+
+function syncTimelineDuration(project, frame, durationSec) {
+  const timeline = objectOrEmpty(project?.timeline);
+  for (const track of Array.isArray(timeline.tracks) ? timeline.tracks : []) {
+    for (const item of Array.isArray(track?.items) ? track.items : []) {
+      if (
+        item.id === frame.id
+        || item.frame_id === frame.id
+        || item.ref === frame.id
+        || item.scene_id === frame.scene_id
+      ) {
+        item.duration_sec = durationSec;
+        if (item.duration != null) item.duration = durationSec;
+      }
+    }
+  }
+}
+
+function retimeTimelineStarts(project) {
+  const timeline = objectOrEmpty(project?.timeline);
+  const frames = Array.isArray(project?.frames) ? project.frames : [];
+  const frameStarts = new Map();
+  let cursor = 0;
+  for (const frame of frames) {
+    frameStarts.set(frame.id, roundDuration(cursor));
+    if (frame.scene_id) frameStarts.set(frame.scene_id, roundDuration(cursor));
+    cursor += Number(frame.duration_sec || frame.durationSec || 0);
+  }
+
+  for (const track of Array.isArray(timeline.tracks) ? timeline.tracks : []) {
+    for (const item of Array.isArray(track?.items) ? track.items : []) {
+      const start = frameStarts.get(item.frame_id) ?? frameStarts.get(item.ref) ?? frameStarts.get(item.scene_id);
+      if (start != null) {
+        item.start_sec = start;
+        if (item.start != null) item.start = start;
+      }
+    }
+  }
+}
+
+function fitFrameDurationsToCaptions(project, toleranceSec = 0.2) {
+  const diagnostics = [];
+  const locked = isDurationLocked(project);
+  let changed = false;
+  for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
+    const duration = Number(frame.duration_sec ?? frame.durationSec ?? frame.duration ?? 0);
+    const captionEnd = maxCaptionEndSec(frame);
+    if (Number.isFinite(duration) && duration > 0 && captionEnd > duration + toleranceSec) {
+      if (locked) {
+        diagnostics.push(createDiagnostic({
+          code: 'caption_duration_exceeds_frame',
+          stage: 'timeline-consistency',
+          user_message: '字幕时间超过锁定的画面时长，无法继续渲染。请缩短旁白或解除固定时长。',
+          details: {
+            frame_id: frame.id || frame.scene_id || '',
+            duration_sec: duration,
+            caption_end_sec: captionEnd,
+            diff_sec: roundDuration(captionEnd - duration),
+            duration_locked: true,
+          },
+          fallback_allowed: false,
+        }));
+        continue;
+      }
+
+      const nextDuration = roundDuration(captionEnd);
+      frame.duration_sec = nextDuration;
+      if (frame.durationSec != null) frame.durationSec = nextDuration;
+      if (frame.duration != null) frame.duration = nextDuration;
+      syncTimelineDuration(project, frame, nextDuration);
+      changed = true;
+      diagnostics.push(createDiagnostic({
+        code: 'frame_duration_auto_extended',
+        stage: 'timeline-consistency',
+        severity: 'warning',
+        user_message: '已按字幕时长自动延长画面帧。',
+        details: {
+          frame_id: frame.id || frame.scene_id || '',
+          previous_duration_sec: duration,
+          duration_sec: nextDuration,
+          caption_end_sec: roundDuration(captionEnd),
+          diff_sec: roundDuration(captionEnd - duration),
+        },
+        fallback_allowed: true,
+      }));
+    }
+  }
+  if (changed) retimeTimelineStarts(project);
+  return {
+    project,
+    diagnostics,
+    errors: diagnostics.filter(item => item.fallback_allowed === false),
+    changed,
+  };
+}
+
 async function resolveNarrationPath(project, projectDir, ffmpegComposer, diagnostics) {
   if (project.audio?.narration_path) {
     return path.isAbsolute(project.audio.narration_path)
@@ -160,6 +269,22 @@ async function renderHtmlVideoProject({
   }
 
   const outputConfig = getOutputConfig(nextProject);
+  const timingFit = fitFrameDurationsToCaptions(nextProject);
+  diagnostics.push(...timingFit.diagnostics);
+  if (timingFit.changed) {
+    await saveProject(resolvedProjectDir, nextProject);
+  }
+  if (timingFit.errors.length) {
+    return {
+      success: false,
+      message: timingFit.errors[0].user_message,
+      project: nextProject,
+      project_dir: resolvedProjectDir,
+      html_video_project_path: resolvedProjectDir,
+      diagnostics,
+    };
+  }
+
   const renderedFrames = [];
   const frames = Array.isArray(nextProject.frames) ? nextProject.frames : [];
   for (let index = 0; index < frames.length; index += 1) {
@@ -246,6 +371,7 @@ async function renderHtmlVideoProject({
     outputPath: path.join(resolvedProjectDir, 'exports', 'output-audio.mp4'),
     narrationPath,
     musicPath: nextProject.audio?.music_path,
+    videoDurationSec: expectedDurationSec(nextProject),
     ...(nextProject.audio?.mix || {}),
   });
   if (!mux.success) {

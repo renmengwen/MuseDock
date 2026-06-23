@@ -5,6 +5,7 @@ const path = require('path');
 const defaultTtsModel = require('./aiTtsModel');
 const defaultTtsTimeline = require('./ttsTimeline');
 const defaultPhraseTimeline = require('./phraseTimeline');
+const { stripSpeechStageDirections } = require('./speechText');
 
 const DEFAULT_VOICE = 'mimo_default';
 const SUPPORTED_VOICES = new Set([
@@ -77,7 +78,7 @@ async function synthesizeSceneTts(options = {}) {
 
   for (const scene of scenes) {
     const sceneIndex = Number(scene?.index || sceneResults.length + 1);
-    const text = String(scene?.narration_text || '').trim();
+    const text = stripSpeechStageDirections(scene?.narration_text);
     if (!text) {
       return fail(`第 ${sceneIndex} 幕缺少旁白文本，无法生成分段配音。`, { scene_index: sceneIndex, model });
     }
@@ -128,6 +129,7 @@ async function synthesizeSceneTts(options = {}) {
     sceneResults.push({
       ...scene,
       index: sceneIndex,
+      narration_text: text,
       duration,
       actual_duration_sec: duration,
       path: filePath,

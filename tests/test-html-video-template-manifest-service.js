@@ -24,7 +24,7 @@ const minimal = manifestService.normalizeTemplateManifest(
   { id: 'minimal', name: '最小模板', engine: 'hyperframes', source_entry: 'main.html' },
   { templateDir: path.join(fixturesDir, 'minimal') }
 );
-assert.deepEqual(minimal.output, {});
+assert.deepEqual(minimal.output, { resolution: {} });
 assert.deepEqual(minimal.inputs, { schema: {} });
 assert.deepEqual(minimal.license, { commercial_use: false, attribution_required: false });
 assert.deepEqual(minimal.assets_attribution, []);

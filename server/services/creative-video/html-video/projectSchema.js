@@ -229,6 +229,12 @@ function normalizeOutput(value) {
   if (Number.isFinite(duration) && duration > 0) {
     output.duration = duration;
   }
+  if (input.duration_locked === true || input.durationLocked === true) {
+    output.duration_locked = true;
+  }
+  if (input.lock_duration === true || input.lockDuration === true) {
+    output.lock_duration = true;
+  }
   return output;
 }
 
