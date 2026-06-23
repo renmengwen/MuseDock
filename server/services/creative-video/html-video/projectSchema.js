@@ -157,6 +157,8 @@ function normalizeFrame(frame, index) {
     engine: input.engine || DEFAULT_ENGINE,
     narration_text: narrationText,
     captions,
+    drafts: arrayOrEmpty(input.drafts),
+    active_draft_id: firstNonEmptyString(input.active_draft_id, input.activeDraftId),
     metadata: {
       ...metadata,
       visual_text: objectOrEmpty(metadata.visual_text),
@@ -284,6 +286,8 @@ function normalizeProject(project = {}) {
     audio: normalizeAudio(input.audio),
     overrides: normalizeOverrides(input.overrides),
     revisions: arrayOrEmpty(input.revisions).map(revision => ({ ...objectOrEmpty(revision) })),
+    edit_sessions: arrayOrEmpty(input.edit_sessions || input.editSessions),
+    layout_qa_reports: arrayOrEmpty(input.layout_qa_reports || input.layoutQaReports),
     exports: arrayOrEmpty(input.exports).map(item => ({ ...objectOrEmpty(item) })),
     status: input.status || 'draft',
   };
