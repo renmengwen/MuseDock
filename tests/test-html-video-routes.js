@@ -28,7 +28,7 @@ async function requestJson(server, method, pathName, body) {
   });
 }
 
-async function requestText(server, method, pathName) {
+async function requestText(server, method, pathName, headers = {}) {
   const { port } = server.address();
   return new Promise((resolve, reject) => {
     const req = http.request({
@@ -36,6 +36,7 @@ async function requestText(server, method, pathName) {
       port,
       path: pathName,
       method,
+      headers: { Accept: 'text/plain', ...headers },
     }, res => {
       let text = '';
       res.setEncoding('utf8');
@@ -87,6 +88,22 @@ async function listen(app) {
     patchHtmlVideoProjectFrame: async (id, frameId, payload) => {
       calls.push(['patch-frame', id, frameId, payload.frame_inputs_patch?.headline]);
       return { success: true, workflow_id: id, requires_render: true, message: '帧字段已保存，需要重新渲染。' };
+    },
+    getHtmlVideoProjectFrameHtml: async (id, frameId, payload) => {
+      calls.push(['get-frame-html', id, frameId, payload?.format || 'json']);
+      return { success: true, workflow_id: id, frame_id: frameId, resolved_frame_id: 'frame_01', html: '<!doctype html><html></html>', html_path: 'frames/frame_01.html' };
+    },
+    saveHtmlVideoProjectFrameHtml: async (id, frameId, payload) => {
+      calls.push(['put-frame-html', id, frameId, payload.mode || 'draft']);
+      return { success: true, workflow_id: id, frame_id: frameId, draft: { id: 'draft_0001', html_path: 'frames/.drafts/frame_01/draft_0001.html' }, requires_render: true, message: '帧源码草稿已保存，可渲染单帧预览。' };
+    },
+    acceptHtmlVideoProjectFrameDraft: async (id, frameId, draftId) => {
+      calls.push(['accept-draft', id, frameId, draftId]);
+      return { success: true, workflow_id: id, frame_id: frameId, accepted_draft_id: draftId, message: '草稿已接受，需要重新导出成片。' };
+    },
+    discardHtmlVideoProjectFrameDraft: async (id, frameId, draftId) => {
+      calls.push(['discard-draft', id, frameId, draftId]);
+      return { success: true, workflow_id: id, frame_id: frameId, discarded_draft_id: draftId, message: '草稿已放弃。' };
     },
     editHtmlVideoProject: async (id, payload) => {
       calls.push(['edit', id, payload.instruction]);
@@ -177,6 +194,31 @@ async function listen(app) {
     const framePreview = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/render`, { mode: 'frame', frame_id: 'frame_01' });
     assert.equal(framePreview.statusCode, 200);
     assert.equal(framePreview.body.message, '单帧预览已更新。');
+    const frameHtmlJson = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01/html`);
+    assert.equal(frameHtmlJson.statusCode, 200);
+    assert.equal(frameHtmlJson.body.html, '<!doctype html><html></html>');
+
+    const frameHtmlText = await requestText(server, 'GET', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01/html`);
+    assert.equal(frameHtmlText.statusCode, 200);
+    assert.match(frameHtmlText.contentType, /text\/plain/);
+    assert.equal(frameHtmlText.body, '<!doctype html><html></html>');
+    assert.equal(calls.filter(item => item[0] === 'get-frame-html')[1][3], 'text');
+
+    const savedDraft = await requestJson(server, 'PUT', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01/html`, {
+      html: '<!doctype html><html></html>',
+      mode: 'draft',
+    });
+    assert.equal(savedDraft.statusCode, 200);
+    assert.equal(savedDraft.body.draft.id, 'draft_0001');
+
+    const acceptedDraft = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01/drafts/draft_0001/accept`, {});
+    assert.equal(acceptedDraft.statusCode, 200);
+    assert.equal(acceptedDraft.body.accepted_draft_id, 'draft_0001');
+
+    const discardedDraft = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01/drafts/draft_0002/discard`, {});
+    assert.equal(discardedDraft.statusCode, 200);
+    assert.equal(discardedDraft.body.discarded_draft_id, 'draft_0002');
+
     for (const [payload, pattern] of [
       [{}, /mode 无效|materialize|frame/],
       [{ mode: 'bad' }, /mode 无效|materialize|frame/],
@@ -202,7 +244,6 @@ async function listen(app) {
 
     const reservedRequests = [
       ['PATCH', 'timeline'],
-      ['PATCH', 'frames/frame_01/html'],
       ['PATCH', 'frames/frame_01/elements/headline'],
       ['PATCH', 'frames/frame_01/transition'],
       ['POST', 'frames/frame_01/enhance'],
@@ -220,7 +261,7 @@ async function listen(app) {
     assert.equal(invalid.statusCode, 400);
     assert.match(invalid.body.message, /创作任务 ID 无效/);
 
-    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'render', 'export', 'exports', 'export-file', 'export-file']);
+    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'render', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
     assert.deepEqual(calls.filter(item => item[0] === 'render').map(item => [item[2], item[3]]), [['materialize', ''], ['frame', 'frame_01']]);
     assert.deepEqual(calls.find(item => item[0] === 'export'), ['export', workflowId, false]);
     assert.deepEqual(calls.find(item => item[0] === 'export-file'), ['export-file', workflowId, 'export_001']);

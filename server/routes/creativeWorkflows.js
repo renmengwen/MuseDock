@@ -52,6 +52,8 @@ function getStatusCode(result) {
     || result?.code === 'NO_SCENE_SPEC'
     || result?.code === 'NO_HTML_VIDEO_PROJECT'
     || result?.code === 'EXPORT_NOT_FOUND'
+    || result?.code === 'FRAME_NOT_FOUND'
+    || result?.code === 'DRAFT_NOT_FOUND'
   ) return 404;
   return 400;
 }
@@ -259,6 +261,164 @@ router.patch('/:workflow_id/html-video-project/frames/:frame_id', async (req, re
       workflow_id: workflowId,
       frame_id: frameId,
       message: `保存帧字段失败：${error.message}`,
+    });
+  }
+});
+
+router.get('/:workflow_id/html-video-project/frames/:frame_id/html', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+  const frameId = String(req.params.frame_id || '').trim();
+  if (!frameId) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, frame_id: frameId, message: '帧 ID 无效。' });
+  }
+
+  try {
+    const accept = String(req.headers.accept || '');
+    const wantsText = accept.includes('text/html') || accept.includes('text/plain');
+    const service = getService(req);
+    const result = await service.getHtmlVideoProjectFrameHtml(workflowId, frameId, { format: wantsText ? 'text' : 'json' });
+    if (!result || result.success === false) {
+      const message = getMessage(result, '读取帧源码失败。');
+      return res.status(getStatusCode(result)).json({
+        success: false,
+        code: result?.code,
+        workflow_id: workflowId,
+        frame_id: frameId,
+        message,
+      });
+    }
+    if (wantsText) {
+      res.type('text/plain; charset=utf-8');
+      return res.send(result.html || '');
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      frame_id: frameId,
+      message: `读取帧源码失败：${error.message}`,
+    });
+  }
+});
+
+router.put('/:workflow_id/html-video-project/frames/:frame_id/html', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+  const frameId = String(req.params.frame_id || '').trim();
+  if (!frameId) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, frame_id: frameId, message: '帧 ID 无效。' });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.saveHtmlVideoProjectFrameHtml(workflowId, frameId, req.body || {});
+    if (!result || result.success === false) {
+      const message = getMessage(result, '保存帧源码草稿失败。');
+      return res.status(getStatusCode(result)).json({
+        success: false,
+        code: result?.code,
+        workflow_id: workflowId,
+        frame_id: frameId,
+        message,
+      });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      frame_id: frameId,
+      message: `保存帧源码草稿失败：${error.message}`,
+    });
+  }
+});
+
+router.post('/:workflow_id/html-video-project/frames/:frame_id/drafts/:draft_id/accept', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+  const frameId = String(req.params.frame_id || '').trim();
+  const draftId = String(req.params.draft_id || '').trim();
+  if (!frameId) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, frame_id: frameId, draft_id: draftId, message: '帧 ID 无效。' });
+  }
+  if (!draftId) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, frame_id: frameId, draft_id: draftId, message: '草稿 ID 无效。' });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.acceptHtmlVideoProjectFrameDraft(workflowId, frameId, draftId);
+    if (!result || result.success === false) {
+      const message = getMessage(result, '接受帧源码草稿失败。');
+      return res.status(getStatusCode(result)).json({
+        success: false,
+        code: result?.code,
+        workflow_id: workflowId,
+        frame_id: frameId,
+        draft_id: draftId,
+        message,
+      });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      frame_id: frameId,
+      draft_id: draftId,
+      message: `接受帧源码草稿失败：${error.message}`,
+    });
+  }
+});
+
+router.post('/:workflow_id/html-video-project/frames/:frame_id/drafts/:draft_id/discard', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+  const frameId = String(req.params.frame_id || '').trim();
+  const draftId = String(req.params.draft_id || '').trim();
+  if (!frameId) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, frame_id: frameId, draft_id: draftId, message: '帧 ID 无效。' });
+  }
+  if (!draftId) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, frame_id: frameId, draft_id: draftId, message: '草稿 ID 无效。' });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.discardHtmlVideoProjectFrameDraft(workflowId, frameId, draftId);
+    if (!result || result.success === false) {
+      const message = getMessage(result, '放弃帧源码草稿失败。');
+      return res.status(getStatusCode(result)).json({
+        success: false,
+        code: result?.code,
+        workflow_id: workflowId,
+        frame_id: frameId,
+        draft_id: draftId,
+        message,
+      });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      frame_id: frameId,
+      draft_id: draftId,
+      message: `放弃帧源码草稿失败：${error.message}`,
     });
   }
 });

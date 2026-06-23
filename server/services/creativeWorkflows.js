@@ -15,6 +15,7 @@ const aiTextModel = require('./aiTextModel');
 const defaultSourceFetch = require('./sourceFetch');
 const htmlVideoProjectStore = require('./creative-video/html-video/projectStore');
 const htmlVideoEditPatchService = require('./creative-video/html-video/editPatchService');
+const frameHtmlEditService = require('./creative-video/html-video/frameHtmlEditService');
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
 const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
 const { syncRawHtmlFrameTextPatch } = require('./creative-video/html-video/rawHtmlTextPatch');
@@ -2082,6 +2083,52 @@ async function patchHtmlVideoProjectFrame(workflowId, frameId, payload = {}, opt
   }, options);
 }
 
+async function getHtmlVideoProjectFrameHtml(workflowId, frameId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  return frameHtmlEditService.readFrameHtml({ projectDir, project, frameId, format: payload.format });
+}
+
+async function saveHtmlVideoProjectFrameHtml(workflowId, frameId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const result = await frameHtmlEditService.saveFrameHtmlDraft({
+    projectDir,
+    project,
+    frameId,
+    html: payload.html,
+    mode: payload.mode,
+    summary: payload.summary,
+    instruction: payload.instruction,
+    kind: payload.kind || 'manual_source',
+  });
+  if (!result.success) return { ...result, workflow_id: workflowId, frame_id: frameId };
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, project);
+  return { ...result, workflow_id: workflowId, frame_id: frameId, html_video_project: saved, html_video_project_path: projectDir };
+}
+
+async function acceptHtmlVideoProjectFrameDraft(workflowId, frameId, draftId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const result = await frameHtmlEditService.acceptFrameDraft({ projectDir, project, frameId, draftId });
+  if (!result.success) return { ...result, workflow_id: workflowId, frame_id: frameId };
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, project);
+  return { ...result, workflow_id: workflowId, frame_id: frameId, html_video_project: saved, html_video_project_path: projectDir };
+}
+
+async function discardHtmlVideoProjectFrameDraft(workflowId, frameId, draftId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const result = await frameHtmlEditService.discardFrameDraft({ project, frameId, draftId });
+  if (!result.success) return { ...result, workflow_id: workflowId, frame_id: frameId };
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, project);
+  return { ...result, workflow_id: workflowId, frame_id: frameId, html_video_project: saved, html_video_project_path: projectDir };
+}
+
 async function editHtmlVideoProject(workflowId, payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
@@ -2511,6 +2558,10 @@ module.exports = {
   renderCreativeWorkflowHtmlVideoProject,
   patchHtmlVideoProjectInputs,
   patchHtmlVideoProjectFrame,
+  getHtmlVideoProjectFrameHtml,
+  saveHtmlVideoProjectFrameHtml,
+  acceptHtmlVideoProjectFrameDraft,
+  discardHtmlVideoProjectFrameDraft,
   editHtmlVideoProject,
   renderHtmlVideoProject,
   exportHtmlVideoProject,
