@@ -3,6 +3,7 @@ const fs = require('fs/promises');
 
 const defaultMaterializer = require('./materializer');
 const defaultFrameRenderer = require('./frameRenderer');
+const defaultLayoutQaService = require('./layoutQaService');
 const defaultFfmpegComposer = require('./ffmpegComposer');
 const projectStore = require('./projectStore');
 const { addExport, addRevision, saveProject, createProjectDir } = projectStore;
@@ -515,6 +516,19 @@ async function renderHtmlVideoFramePreview(options = {}) {
   }
   const outputConfig = getOutputConfig(nextProject);
   const previewPath = path.join(materialized.project_dir, 'inspect', 'previews', `${previewName}.mp4`);
+  let layoutQa = null;
+  if (options.runLayoutQa === true || options.run_layout_qa === true) {
+    const layoutQaService = options.services?.layoutQaService || defaultLayoutQaService;
+    const sourcePath = path.isAbsolute(frameToRender.html_path)
+      ? frameToRender.html_path
+      : path.join(materialized.project_dir, frameToRender.html_path);
+    layoutQa = await layoutQaService.inspectFrameHtmlLayout({
+      htmlPath: sourcePath,
+      frame: frameToRender,
+      resolution: outputConfig.resolution,
+      durationSec: frameToRender.duration_sec,
+    });
+  }
   const rendered = await frameRenderer.renderFrame(frameToRender, {
     projectDir: materialized.project_dir,
     project: nextProject,
@@ -549,7 +563,7 @@ async function renderHtmlVideoFramePreview(options = {}) {
     preview_frame_id: frameId,
     preview_draft_id: draftId || null,
     preview_path: rendered.output_path,
-    layout_qa: rendered.layout_qa || null,
+    layout_qa: layoutQa || rendered.layout_qa || null,
     diagnostics,
   };
 }

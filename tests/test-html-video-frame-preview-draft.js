@@ -43,6 +43,7 @@ async function writeFile(filePath, content) {
   };
 
   const renderedFrames = [];
+  const qaFrames = [];
   const services = {
     materializer: {
       materializeProject: async ({ project: nextProject }) => ({ success: true, project: nextProject, diagnostics: [] }),
@@ -54,6 +55,12 @@ async function writeFile(filePath, content) {
         return { success: true, output_path: options.outputPath, diagnostics: [] };
       },
     },
+    layoutQaService: {
+      inspectFrameHtmlLayout: async ({ frame }) => {
+        qaFrames.push(frame);
+        return { success: true, issues: [], metrics: { frame_id: frame.id } };
+      },
+    },
   };
 
   const result = await renderHtmlVideoFramePreview({
@@ -62,9 +69,12 @@ async function writeFile(filePath, content) {
     frameId: 'scene_01',
     draftId: 'draft_0001',
     services,
+    runLayoutQa: true,
   });
 
   assert.equal(result.success, true);
+  assert.equal(result.layout_qa.success, true);
+  assert.equal(qaFrames[0].html_path, draftHtmlPath);
   assert.equal(renderedFrames.length, 1);
   assert.equal(renderedFrames[0].html_path, draftHtmlPath);
   assert.equal(result.project.frames[0].html_path, officialHtmlPath);

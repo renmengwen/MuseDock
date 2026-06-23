@@ -19,6 +19,7 @@ const frameHtmlEditService = require('./creative-video/html-video/frameHtmlEditS
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
 const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
 const { syncRawHtmlFrameTextPatch } = require('./creative-video/html-video/rawHtmlTextPatch');
+const { findFrameByAnyId } = require('./creative-video/html-video/frameIdentity');
 const { createTemplateRegistry: createHtmlVideoTemplateRegistry } = require('./creative-video/html-video/templateRegistry');
 const { defaultRegistry: defaultCreativeTaskRegistry } = require('./creativeTaskRegistry');
 
@@ -2129,6 +2130,54 @@ async function discardHtmlVideoProjectFrameDraft(workflowId, frameId, draftId, o
   return { ...result, workflow_id: workflowId, frame_id: frameId, html_video_project: saved, html_video_project_path: projectDir };
 }
 
+async function inspectHtmlVideoProjectLayout(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const layoutQaService = options.layoutQaService || require('./creative-video/html-video/layoutQaService');
+  const frameId = safeString(payload.frame_id || payload.frameId);
+  const targetFrame = frameId ? findFrameByAnyId(project, frameId) : null;
+  if (frameId && !targetFrame) {
+    return { success: false, code: 'FRAME_NOT_FOUND', workflow_id: workflowId, frame_id: frameId, message: '未找到要检查的帧。' };
+  }
+
+  const frames = frameId ? [targetFrame] : (Array.isArray(project.frames) ? project.frames : []);
+  const reports = [];
+  for (const frame of frames) {
+    if (frame.source_mode !== 'raw_html' || !frame.html_path) continue;
+    const htmlPath = path.isAbsolute(frame.html_path) ? frame.html_path : path.join(projectDir, frame.html_path);
+    reports.push(await layoutQaService.inspectFrameHtmlLayout({
+      htmlPath,
+      frame,
+      resolution: project.output?.resolution || { width: 1920, height: 1080 },
+      durationSec: frame.duration_sec,
+    }));
+  }
+
+  const issues = reports.flatMap(report => report.issues || []);
+  const layoutQa = {
+    success: issues.every(issue => issue.severity === 'warning' || issue.severity === 'info'),
+    issues,
+    reports,
+  };
+  project.layout_qa_reports = Array.isArray(project.layout_qa_reports) ? project.layout_qa_reports : [];
+  project.layout_qa_reports.push({
+    id: `layout_qa_${String(project.layout_qa_reports.length + 1).padStart(4, '0')}`,
+    created_at: new Date().toISOString(),
+    frame_id: frameId || null,
+    ...layoutQa,
+  });
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, project);
+  return {
+    success: true,
+    workflow_id: workflowId,
+    html_video_project: saved,
+    html_video_project_path: projectDir,
+    layout_qa: layoutQa,
+    message: layoutQa.success ? '布局检查通过。' : '布局检查发现问题。',
+  };
+}
+
 async function editHtmlVideoProject(workflowId, payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
@@ -2566,6 +2615,7 @@ module.exports = {
   saveHtmlVideoProjectFrameHtml,
   acceptHtmlVideoProjectFrameDraft,
   discardHtmlVideoProjectFrameDraft,
+  inspectHtmlVideoProjectLayout,
   editHtmlVideoProject,
   renderHtmlVideoProject,
   exportHtmlVideoProject,
