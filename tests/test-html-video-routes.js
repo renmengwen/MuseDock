@@ -134,10 +134,34 @@ async function listen(app) {
         success: true,
         workflow_id: id,
         plan_id: planId,
-        plan: { id: planId, status: 'running' },
-        html_video_project: { project_id: 'p1', edit_sessions: [{ id: planId, status: 'running' }] },
+        plan: { id: planId, status: 'drafts_ready', generated_drafts: [{ frame_id: 'frame_01', draft_id: 'draft_frame_01' }] },
+        html_video_project: { project_id: 'p1', edit_sessions: [{ id: planId, status: 'drafts_ready' }] },
         html_video_project_path: '/tmp/project',
-        message: '编辑计划已开始执行。',
+        message: '编辑计划已生成批量草稿。',
+      };
+    },
+    acceptHtmlVideoProjectEditPlan: async (id, planId) => {
+      calls.push(['accept-edit-plan', id, planId]);
+      return {
+        success: true,
+        workflow_id: id,
+        plan_id: planId,
+        plan: { id: planId, status: 'accepted' },
+        html_video_project: { project_id: 'p1', edit_sessions: [{ id: planId, status: 'accepted' }] },
+        html_video_project_path: '/tmp/project',
+        message: '编辑计划草稿已接受，需要重新导出成片。',
+      };
+    },
+    discardHtmlVideoProjectEditPlan: async (id, planId) => {
+      calls.push(['discard-edit-plan', id, planId]);
+      return {
+        success: true,
+        workflow_id: id,
+        plan_id: planId,
+        plan: { id: planId, status: 'discarded' },
+        html_video_project: { project_id: 'p1', edit_sessions: [{ id: planId, status: 'discarded' }] },
+        html_video_project_path: '/tmp/project',
+        message: '编辑计划草稿已放弃。',
       };
     },
     renderCreativeWorkflowHtmlVideoProject: async id => {
@@ -236,7 +260,14 @@ async function listen(app) {
     });
     assert.equal(ranEditPlan.statusCode, 200);
     assert.equal(ranEditPlan.body.plan_id, 'edit_plan_0001');
-    assert.equal(ranEditPlan.body.plan.status, 'running');
+    assert.equal(ranEditPlan.body.plan.status, 'drafts_ready');
+    assert.equal(ranEditPlan.body.plan.generated_drafts[0].draft_id, 'draft_frame_01');
+    const acceptedEditPlan = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit-plan/edit_plan_0001/accept`, {});
+    assert.equal(acceptedEditPlan.statusCode, 200);
+    assert.equal(acceptedEditPlan.body.plan.status, 'accepted');
+    const discardedEditPlan = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit-plan/edit_plan_0001/discard`, {});
+    assert.equal(discardedEditPlan.statusCode, 200);
+    assert.equal(discardedEditPlan.body.plan.status, 'discarded');
     const materialized = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/render`, { mode: 'materialize' });
     assert.equal(materialized.statusCode, 200);
     assert.equal(materialized.body.message, 'HTML 已重新生成。');
@@ -335,10 +366,18 @@ async function listen(app) {
     });
     assert.equal(invalidEditPlanWorkflow.statusCode, 400);
     assert.match(invalidEditPlanWorkflow.body.message, /创作任务 ID 无效/);
+    const invalidAcceptPlanId = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit-plan/%20/accept`, {});
+    assert.equal(invalidAcceptPlanId.statusCode, 400);
+    assert.match(invalidAcceptPlanId.body.message, /编辑计划 ID 无效/);
+    const invalidDiscardPlanId = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit-plan/%20/discard`, {});
+    assert.equal(invalidDiscardPlanId.statusCode, 400);
+    assert.match(invalidDiscardPlanId.body.message, /编辑计划 ID 无效/);
 
-    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'create-edit-plan', 'run-edit-plan', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
+    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'create-edit-plan', 'run-edit-plan', 'accept-edit-plan', 'discard-edit-plan', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
     assert.deepEqual(calls.find(item => item[0] === 'create-edit-plan'), ['create-edit-plan', workflowId, '全片改成财经杂志风']);
     assert.deepEqual(calls.find(item => item[0] === 'run-edit-plan'), ['run-edit-plan', workflowId, 'edit_plan_0001', true]);
+    assert.deepEqual(calls.find(item => item[0] === 'accept-edit-plan'), ['accept-edit-plan', workflowId, 'edit_plan_0001']);
+    assert.deepEqual(calls.find(item => item[0] === 'discard-edit-plan'), ['discard-edit-plan', workflowId, 'edit_plan_0001']);
     assert.deepEqual(calls.filter(item => item[0] === 'render').map(item => [item[2], item[3], item[4], item[5]]), [['materialize', '', '', false], ['frame', 'frame_01', '', false], ['frame', 'frame_01', 'draft_0001', true]]);
     assert.deepEqual(calls.filter(item => item[0] === 'layout-qa').map(item => item[2]), ['frame_01', 'all']);
     assert.deepEqual(calls.find(item => item[0] === 'iterate-frame'), ['iterate-frame', workflowId, 'frame_01', 'layout_fix']);
