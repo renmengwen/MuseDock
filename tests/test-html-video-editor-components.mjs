@@ -19,6 +19,7 @@ const componentPaths = [
   'frontend-react/src/components/creative-video-editor/HtmlVideoSourcePanel.jsx',
   'frontend-react/src/components/creative-video-editor/HtmlVideoDraftPanel.jsx',
   'frontend-react/src/components/creative-video-editor/HtmlVideoQualityPanel.jsx',
+  'frontend-react/src/components/creative-video-editor/HtmlVideoAiEditPanel.jsx',
 ];
 
 for (const componentPath of componentPaths) {
@@ -142,9 +143,28 @@ const qualityPanel = fs.readFileSync('frontend-react/src/components/creative-vid
 assert.ok(qualityPanel.includes('布局检查'), 'Quality panel should show layout QA');
 assert.ok(qualityPanel.includes('用 AI 修复当前帧'), 'Quality panel should expose frame fix action');
 
+const aiEditPanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoAiEditPanel.jsx', 'utf-8');
+for (const message of [
+  'AI 修改',
+  '修复布局',
+  '生成当前帧草稿',
+  '生成全片编辑计划',
+  '执行全片编辑计划',
+  '接受计划草稿',
+  '放弃计划草稿',
+]) {
+  assert.ok(aiEditPanel.includes(message), `AI edit panel should show Chinese message: ${message}`);
+}
+assert.ok(aiEditPanel.includes('visual_rewrite'), 'AI edit panel should expose visual rewrite mode value');
+assert.ok(aiEditPanel.includes('style_match'), 'AI edit panel should expose style match mode value');
+assert.ok(aiEditPanel.includes('confirm: true'), 'AI edit panel should confirm edit plan runs');
+assert.ok(aiEditPanel.includes("editPlan.status !== 'drafts_ready'"), 'AI edit panel should only accept ready plan drafts');
+assert.ok(aiEditPanel.includes('editPlan.generated_drafts?.length'), 'AI edit panel should only discard generated plan drafts');
+
 assert.ok(editor.includes('HtmlVideoSourcePanel'), 'HtmlVideoProjectEditor should compose source panel');
 assert.ok(editor.includes('HtmlVideoDraftPanel'), 'HtmlVideoProjectEditor should compose draft panel');
 assert.ok(editor.includes('HtmlVideoQualityPanel'), 'HtmlVideoProjectEditor should compose quality panel');
+assert.ok(editor.includes('HtmlVideoAiEditPanel'), 'HtmlVideoProjectEditor should compose AI edit panel');
 assert.doesNotMatch(editor, /ReservedCapabilitiesPanel/, 'reserved panel should remain hidden');
 
 const templateInputs = fs.readFileSync('frontend-react/src/components/creative-video-editor/TemplateInputsPanel.jsx', 'utf-8');

@@ -1,6 +1,7 @@
 import { CaptionsPanel } from './CaptionsPanel.jsx';
 import { ExportsPanel } from './ExportsPanel.jsx';
 import { FrameInputsPanel } from './FrameInputsPanel.jsx';
+import { HtmlVideoAiEditPanel } from './HtmlVideoAiEditPanel.jsx';
 import { HtmlVideoDraftPanel } from './HtmlVideoDraftPanel.jsx';
 import { HtmlVideoQualityPanel } from './HtmlVideoQualityPanel.jsx';
 import { HtmlVideoSourcePanel } from './HtmlVideoSourcePanel.jsx';
@@ -58,6 +59,16 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         disabled={disabled}
         editing={editor.status === 'editing'}
         onSubmit={editor.applyNaturalLanguageEdit}
+      />
+      <HtmlVideoAiEditPanel
+        frame={selectedFrame}
+        editPlan={editor.editPlan}
+        disabled={disabled}
+        onIterateFrame={editor.iterateFrame}
+        onCreatePlan={editor.createEditPlan}
+        onRunPlan={editor.runEditPlan}
+        onAcceptPlan={editor.acceptEditPlan}
+        onDiscardPlan={editor.discardEditPlan}
       />
       <div className="html-video-project-layout">
         <ProjectFramesList
