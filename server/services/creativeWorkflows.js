@@ -17,6 +17,7 @@ const htmlVideoProjectStore = require('./creative-video/html-video/projectStore'
 const htmlVideoEditPatchService = require('./creative-video/html-video/editPatchService');
 const frameHtmlEditService = require('./creative-video/html-video/frameHtmlEditService');
 const htmlVideoIterateService = require('./creative-video/html-video/htmlVideoIterateService');
+const htmlVideoEditModeService = require('./creative-video/html-video/htmlVideoEditModeService');
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
 const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
 const { syncRawHtmlFrameTextPatch } = require('./creative-video/html-video/rawHtmlTextPatch');
@@ -2085,6 +2086,62 @@ async function patchHtmlVideoProjectFrame(workflowId, frameId, payload = {}, opt
   }, options);
 }
 
+async function createHtmlVideoProjectEditPlan(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+
+  const service = options.htmlVideoEditModeService || htmlVideoEditModeService;
+  const result = await service.createEditPlan({
+    project,
+    instruction: payload.instruction,
+    selectedFrameId: payload.selected_frame_id || payload.selectedFrameId,
+  });
+  if (!result.success) {
+    return {
+      ...result,
+      workflow_id: workflowId,
+    };
+  }
+
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, project);
+  return {
+    ...result,
+    workflow_id: workflowId,
+    html_video_project: saved,
+    html_video_project_path: projectDir,
+  };
+}
+
+async function runHtmlVideoProjectEditPlan(workflowId, planId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+
+  const service = options.htmlVideoEditModeService || htmlVideoEditModeService;
+  const result = await service.runEditPlan({
+    project,
+    planId,
+    confirm: payload.confirm === true,
+  });
+  if (!result.success) {
+    return {
+      ...result,
+      workflow_id: workflowId,
+      plan_id: planId,
+    };
+  }
+
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, project);
+  return {
+    ...result,
+    workflow_id: workflowId,
+    plan_id: result.plan_id || planId,
+    html_video_project: saved,
+    html_video_project_path: projectDir,
+  };
+}
+
 async function getHtmlVideoProjectFrameHtml(workflowId, frameId, payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
@@ -2637,6 +2694,8 @@ module.exports = {
   renderCreativeWorkflowHtmlVideoProject,
   patchHtmlVideoProjectInputs,
   patchHtmlVideoProjectFrame,
+  createHtmlVideoProjectEditPlan,
+  runHtmlVideoProjectEditPlan,
   getHtmlVideoProjectFrameHtml,
   saveHtmlVideoProjectFrameHtml,
   iterateHtmlVideoProjectFrame,

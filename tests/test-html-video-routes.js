@@ -113,6 +113,33 @@ async function listen(app) {
       calls.push(['edit', id, payload.instruction]);
       return { success: true, workflow_id: id, requires_render: true, message: '编辑已应用，需要重新渲染。' };
     },
+    createHtmlVideoProjectEditPlan: async (id, payload) => {
+      calls.push(['create-edit-plan', id, payload.instruction || '']);
+      return {
+        success: true,
+        workflow_id: id,
+        plan: {
+          id: 'edit_plan_0001',
+          status: 'planned',
+          affected_frames: ['frame_01'],
+        },
+        html_video_project: { project_id: 'p1', edit_sessions: [{ id: 'edit_plan_0001' }] },
+        html_video_project_path: '/tmp/project',
+        message: '编辑计划已生成。',
+      };
+    },
+    runHtmlVideoProjectEditPlan: async (id, planId, payload) => {
+      calls.push(['run-edit-plan', id, planId, payload.confirm === true]);
+      return {
+        success: true,
+        workflow_id: id,
+        plan_id: planId,
+        plan: { id: planId, status: 'running' },
+        html_video_project: { project_id: 'p1', edit_sessions: [{ id: planId, status: 'running' }] },
+        html_video_project_path: '/tmp/project',
+        message: '编辑计划已开始执行。',
+      };
+    },
     renderCreativeWorkflowHtmlVideoProject: async id => {
       calls.push(['post', id]);
       return {
@@ -198,6 +225,18 @@ async function listen(app) {
     assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/inputs`, { patch: { headline: '模板' } })).statusCode, 200);
     assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01`, { patch: { headline: '帧' } })).statusCode, 200);
     assert.equal((await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit`, { instruction: '标题更狠' })).statusCode, 200);
+    const createdEditPlan = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit-plan`, {
+      instruction: '全片改成财经杂志风',
+    });
+    assert.equal(createdEditPlan.statusCode, 200);
+    assert.equal(createdEditPlan.body.plan.id, 'edit_plan_0001');
+    assert.equal(createdEditPlan.body.html_video_project_path, '/tmp/project');
+    const ranEditPlan = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit-plan/edit_plan_0001/run`, {
+      confirm: true,
+    });
+    assert.equal(ranEditPlan.statusCode, 200);
+    assert.equal(ranEditPlan.body.plan_id, 'edit_plan_0001');
+    assert.equal(ranEditPlan.body.plan.status, 'running');
     const materialized = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/render`, { mode: 'materialize' });
     assert.equal(materialized.statusCode, 200);
     assert.equal(materialized.body.message, 'HTML 已重新生成。');
@@ -291,8 +330,15 @@ async function listen(app) {
     const invalid = await requestJson(server, 'GET', '/api/creative-workflows/bad!/html-video-project');
     assert.equal(invalid.statusCode, 400);
     assert.match(invalid.body.message, /创作任务 ID 无效/);
+    const invalidEditPlanWorkflow = await requestJson(server, 'POST', '/api/creative-workflows/bad!/html-video-project/edit-plan', {
+      instruction: '整体换风格',
+    });
+    assert.equal(invalidEditPlanWorkflow.statusCode, 400);
+    assert.match(invalidEditPlanWorkflow.body.message, /创作任务 ID 无效/);
 
-    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
+    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'create-edit-plan', 'run-edit-plan', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
+    assert.deepEqual(calls.find(item => item[0] === 'create-edit-plan'), ['create-edit-plan', workflowId, '全片改成财经杂志风']);
+    assert.deepEqual(calls.find(item => item[0] === 'run-edit-plan'), ['run-edit-plan', workflowId, 'edit_plan_0001', true]);
     assert.deepEqual(calls.filter(item => item[0] === 'render').map(item => [item[2], item[3], item[4], item[5]]), [['materialize', '', '', false], ['frame', 'frame_01', '', false], ['frame', 'frame_01', 'draft_0001', true]]);
     assert.deepEqual(calls.filter(item => item[0] === 'layout-qa').map(item => item[2]), ['frame_01', 'all']);
     assert.deepEqual(calls.find(item => item[0] === 'iterate-frame'), ['iterate-frame', workflowId, 'frame_01', 'layout_fix']);
