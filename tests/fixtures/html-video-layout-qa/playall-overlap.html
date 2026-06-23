@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>播放后覆盖布局问题</title>
+  <style>
+    *{box-sizing:border-box}
+    h1,p{margin:0}
+    body{margin:0;width:1920px;height:1080px;overflow:hidden;font-family:Arial,"Microsoft YaHei",sans-serif;background:#f4efe7;color:#18212f}
+    section{position:relative;width:1920px;height:1080px;padding:120px 130px}
+    .card{position:absolute;left:130px;top:120px;width:980px;height:600px}
+    .headline{position:absolute;left:0;top:0;width:980px;font-size:92px;line-height:1.06;font-weight:800}
+    .body-copy{position:absolute;left:0;top:240px;width:780px;font-size:42px;line-height:1.38;font-weight:500}
+    .launch-zone{position:absolute;right:80px;bottom:60px;width:420px;height:180px;border:2px solid #df7d37;background:rgba(255,229,194,.86)}
+    .valuation{position:absolute;left:24px;top:22px;font-size:72px;line-height:1;font-weight:900;color:#a94513}
+    .label{position:absolute;left:28px;top:112px;font-size:34px;font-weight:700;color:#593018}
+  </style>
+</head>
+<body>
+  <section data-role="scene_07">
+    <article class="card" data-role="story-card">
+      <h1 class="headline" data-text-key="headline">播放后估值层进入正文区</h1>
+      <p class="body-copy" data-text-key="body">初始布局没有重叠，只有播放时间线启动后估值层才会压到正文内容。</p>
+    </article>
+    <div class="launch-zone" data-role="decorative-valuation">
+      <div class="valuation" data-text-key="valuation">¥8.6B</div>
+      <div class="label" data-text-key="valuation-label">目标估值</div>
+    </div>
+  </section>
+  <script>
+    window.__hvPlayAll = function () {
+      const zone = document.querySelector('.launch-zone');
+      zone.style.right = 'auto';
+      zone.style.bottom = 'auto';
+      zone.style.left = '320px';
+      zone.style.top = '360px';
+    };
+  </script>
+</body>
+</html>

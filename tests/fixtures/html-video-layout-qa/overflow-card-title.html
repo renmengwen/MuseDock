@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>卡片标题溢出布局问题</title>
+  <style>
+    *{box-sizing:border-box}
+    h2,p{margin:0}
+    body{margin:0;width:1920px;height:1080px;overflow:hidden;font-family:Arial,"Microsoft YaHei",sans-serif;background:#111923;color:#f6f0e8}
+    section{position:relative;width:1920px;height:1080px;padding:100px 128px}
+    .card{position:absolute;left:240px;top:140px;width:1120px;height:540px;border:4px solid #e9b44c;background:#243447;overflow:hidden}
+    .big-number{position:absolute;left:54px;top:38px;font-size:300px;line-height:.82;font-weight:900;color:#e9b44c}
+    .card-title{position:absolute;left:70px;top:474px;width:980px;font-size:76px;line-height:1.08;font-weight:800;color:#ffffff}
+    .caption{position:absolute;left:240px;top:740px;width:900px;font-size:40px;line-height:1.3;color:#d9e3ee}
+  </style>
+</head>
+<body>
+  <section data-role="scene_04">
+    <article class="card" data-role="metric-card">
+      <div class="big-number" data-text-key="big-number">42%</div>
+      <h2 class="card-title" data-text-key="card-title">年度复购率提升</h2>
+    </article>
+    <p class="caption" data-text-key="caption">卡片标题位置过低，文本实际绘制区域会越过卡片边界。</p>
+  </section>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>合法富文本嵌套</title>
+  <style>
+    *{box-sizing:border-box}
+    h1,p{margin:0}
+    body{margin:0;width:1920px;height:1080px;overflow:hidden;font-family:Arial,"Microsoft YaHei",sans-serif;background:#eef3f7;color:#152238}
+    section{position:relative;width:1920px;height:1080px;padding:120px 130px}
+    .card{position:absolute;left:180px;top:180px;width:1180px;height:460px}
+    .headline{position:absolute;left:0;top:40px;width:1040px;font-size:96px;line-height:1.12;font-weight:900}
+    .headline span{color:#d85b2a}
+    .body-copy{position:absolute;left:0;top:180px;width:760px;font-size:40px;line-height:1.38}
+  </style>
+</head>
+<body>
+  <section data-role="scene_08">
+    <article class="card" data-role="story-card">
+      <h1 class="headline" data-text-key="headline">核心<span>增长</span>逻辑</h1>
+      <p class="body-copy" data-text-key="body">标题内部使用 span 做局部强调，父子文本盒子重叠是合法富文本结构。</p>
+    </article>
+  </section>
+</body>
+</html>
