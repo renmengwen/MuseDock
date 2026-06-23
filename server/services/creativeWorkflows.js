@@ -2189,6 +2189,8 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
     result = await orchestrator.renderHtmlVideoFramePreview({
       ...baseOptions,
       frameId: safeString(payload.frame_id || payload.frameId),
+      draftId: safeString(payload.draft_id || payload.draftId),
+      runLayoutQa: payload.run_layout_qa === true || payload.runLayoutQa === true,
     });
   } else {
     result = await orchestrator.exportHtmlVideoProject({
@@ -2205,6 +2207,8 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
     output_path: result.output_path,
     preview_path: result.preview_path,
     preview_frame_id: result.preview_frame_id,
+    preview_draft_id: result.preview_draft_id || null,
+    layout_qa: result.layout_qa || null,
     diagnostics: result.diagnostics || [],
     message: result.message || (result.success ? '操作已完成。' : 'html-video 工程渲染失败。'),
   };

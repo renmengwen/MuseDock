@@ -121,13 +121,15 @@ async function listen(app) {
       };
     },
     renderHtmlVideoProject: async (id, payload) => {
-      calls.push(['render', id, payload?.mode, payload?.frame_id || payload?.frameId || '']);
+      calls.push(['render', id, payload?.mode, payload?.frame_id || payload?.frameId || '', payload?.draft_id || '', payload?.run_layout_qa === true]);
       return {
         success: true,
         workflow_id: id,
         html_video_project: { project_id: 'p1', template_id: 'simple' },
         html_video_project_path: '/tmp/project',
         output_path: payload?.mode === 'materialize' ? undefined : '/tmp/project/frames/frame_01.mp4',
+        preview_draft_id: payload?.draft_id || null,
+        layout_qa: payload?.run_layout_qa ? { success: true, issues: [] } : null,
         message: payload?.mode === 'materialize' ? 'HTML 已重新生成。' : '单帧预览已更新。',
       };
     },
@@ -194,6 +196,13 @@ async function listen(app) {
     const framePreview = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/render`, { mode: 'frame', frame_id: 'frame_01' });
     assert.equal(framePreview.statusCode, 200);
     assert.equal(framePreview.body.message, '单帧预览已更新。');
+    const draftPreview = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/render`, {
+      mode: 'frame', frame_id: 'frame_01', draft_id: 'draft_0001', run_layout_qa: true,
+    });
+    assert.equal(draftPreview.statusCode, 200);
+    assert.equal(draftPreview.body.preview_draft_id, 'draft_0001');
+    assert.equal(draftPreview.body.layout_qa.success, true);
+    assert.deepEqual(calls.find(call => call[0] === 'render' && call[4] === 'draft_0001'), ['render', workflowId, 'frame', 'frame_01', 'draft_0001', true]);
     const frameHtmlJson = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01/html`);
     assert.equal(frameHtmlJson.statusCode, 200);
     assert.equal(frameHtmlJson.body.html, '<!doctype html><html></html>');
@@ -261,8 +270,8 @@ async function listen(app) {
     assert.equal(invalid.statusCode, 400);
     assert.match(invalid.body.message, /创作任务 ID 无效/);
 
-    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'render', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
-    assert.deepEqual(calls.filter(item => item[0] === 'render').map(item => [item[2], item[3]]), [['materialize', ''], ['frame', 'frame_01']]);
+    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'render', 'render', 'render', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
+    assert.deepEqual(calls.filter(item => item[0] === 'render').map(item => [item[2], item[3], item[4], item[5]]), [['materialize', '', '', false], ['frame', 'frame_01', '', false], ['frame', 'frame_01', 'draft_0001', true]]);
     assert.deepEqual(calls.find(item => item[0] === 'export'), ['export', workflowId, false]);
     assert.deepEqual(calls.find(item => item[0] === 'export-file'), ['export-file', workflowId, 'export_001']);
   } finally {

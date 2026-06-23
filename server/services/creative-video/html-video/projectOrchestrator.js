@@ -8,6 +8,8 @@ const projectStore = require('./projectStore');
 const { addExport, addRevision, saveProject, createProjectDir } = projectStore;
 const { normalizeProject } = require('./projectSchema');
 const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
+const { findFrameByAnyId, canonicalFrameId, sanitizePathSegment } = require('./frameIdentity');
+const { findDraft } = require('./htmlVideoDraftService');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -471,6 +473,7 @@ async function materializeHtmlVideoProject(options = {}) {
 
 async function renderHtmlVideoFramePreview(options = {}) {
   const frameId = String(options.frameId || options.frame_id || '');
+  const draftId = String(options.draftId || options.draft_id || '').trim();
   if (!frameId) {
     return { success: false, message: '缺少要渲染的帧 ID。', diagnostics: [] };
   }
@@ -481,7 +484,7 @@ async function renderHtmlVideoFramePreview(options = {}) {
     return materialized;
   }
   const nextProject = normalizeProject(materialized.project);
-  const targetFrame = nextProject.frames.find(frame => frame.id === frameId);
+  const targetFrame = findFrameByAnyId(nextProject, frameId);
   if (!targetFrame) {
     return {
       success: false,
@@ -492,14 +495,33 @@ async function renderHtmlVideoFramePreview(options = {}) {
       diagnostics,
     };
   }
+  let frameToRender = targetFrame;
+  let previewName = sanitizePathSegment(canonicalFrameId(targetFrame) || frameId);
+  if (draftId) {
+    const draft = findDraft(nextProject, frameId, draftId);
+    if (!draft || draft.status === 'discarded') {
+      return {
+        success: false,
+        code: 'DRAFT_NOT_FOUND',
+        message: '未找到要预览的草稿。',
+        project: nextProject,
+        project_dir: materialized.project_dir,
+        html_video_project_path: materialized.html_video_project_path,
+        diagnostics,
+      };
+    }
+    frameToRender = { ...targetFrame, html_path: draft.html_path };
+    previewName = `${previewName}-${sanitizePathSegment(draft.id)}`;
+  }
   const outputConfig = getOutputConfig(nextProject);
-  const previewPath = path.join(materialized.project_dir, 'inspect', 'previews', `${frameId}.mp4`);
-  const rendered = await frameRenderer.renderFrame(targetFrame, {
+  const previewPath = path.join(materialized.project_dir, 'inspect', 'previews', `${previewName}.mp4`);
+  const rendered = await frameRenderer.renderFrame(frameToRender, {
     projectDir: materialized.project_dir,
     project: nextProject,
     outputPath: previewPath,
     resolution: outputConfig.resolution,
     fps: outputConfig.fps,
+    runLayoutQa: options.runLayoutQa === true || options.run_layout_qa === true,
   });
   diagnostics.push(...normalizeDiagnostics(rendered.diagnostics, { stage: 'render', details: { frame_id: frameId } }));
   if (!rendered.success) {
@@ -525,7 +547,9 @@ async function renderHtmlVideoFramePreview(options = {}) {
     project_dir: materialized.project_dir,
     html_video_project_path: materialized.html_video_project_path,
     preview_frame_id: frameId,
+    preview_draft_id: draftId || null,
     preview_path: rendered.output_path,
+    layout_qa: rendered.layout_qa || null,
     diagnostics,
   };
 }
