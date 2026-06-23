@@ -21,6 +21,7 @@
 - Do not expose direct `mode=replace`; it must return `FRAME_REPLACE_FORBIDDEN`.
 - Do not store edit plans in memory; persist them in `project.edit_sessions`.
 - Do not use only `frame.id` to find frames; support `id`, `scene_id`, `graph_node_id`, and `graphNodeId`.
+- Phase 6 export quality gate is not in this implementation plan; add it in a later PR after draft/edit-plan execution is stable.
 
 ## Files To Create Or Modify
 
@@ -890,7 +891,7 @@ Export these functions in `module.exports`.
 
 - [ ] **Step 4: Add routes**
 
-In `server/routes/creativeWorkflows.js`, before reserved routes:
+In `server/routes/creativeWorkflows.js`, before the existing reserved catch-all route such as `router.all('/:workflow_id/html-video-project/:feature(...)', sendReserved)`:
 
 ```js
 router.get('/:workflow_id/html-video-project/frames/:frame_id/html', async (req, res) => {
@@ -1601,15 +1602,19 @@ Return `layout_qa: layoutQa`.
 In `server/services/creativeWorkflows.js`, add:
 
 ```js
+const { findFrameByAnyId } = require('./creative-video/html-video/frameIdentity');
+
 async function inspectHtmlVideoProjectLayout(workflowId, payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
   if (error) return error;
   const layoutQaService = options.layoutQaService || require('./creative-video/html-video/layoutQaService');
   const frameId = safeString(payload.frame_id || payload.frameId);
-  const frames = frameId
-    ? project.frames.filter(frame => [frame.id, frame.scene_id, frame.graph_node_id].map(String).includes(frameId))
-    : project.frames;
+  const targetFrame = frameId ? findFrameByAnyId(project, frameId) : null;
+  if (frameId && !targetFrame) {
+    return { success: false, code: 'FRAME_NOT_FOUND', workflow_id: workflowId, frame_id: frameId, message: '未找到要检查的帧。' };
+  }
+  const frames = frameId ? [targetFrame] : project.frames;
   const reports = [];
   for (const frame of frames) {
     if (frame.source_mode !== 'raw_html' || !frame.html_path) continue;
@@ -1711,6 +1716,8 @@ assert.ok(source.includes('inspectHtmlVideoProjectLayout(workflowId, payload)'),
 assert.ok(source.includes('iterateHtmlVideoProjectFrame(workflowId, frameId, payload)'), 'client should expose iterateHtmlVideoProjectFrame');
 assert.ok(source.includes('createHtmlVideoProjectEditPlan(workflowId, payload)'), 'client should expose createHtmlVideoProjectEditPlan');
 assert.ok(source.includes('runHtmlVideoProjectEditPlan(workflowId, planId, payload)'), 'client should expose runHtmlVideoProjectEditPlan');
+assert.ok(source.includes('acceptHtmlVideoProjectEditPlan(workflowId, planId)'), 'client should expose acceptHtmlVideoProjectEditPlan');
+assert.ok(source.includes('discardHtmlVideoProjectEditPlan(workflowId, planId)'), 'client should expose discardHtmlVideoProjectEditPlan');
 ```
 
 In `tests/test-html-video-editor-components.mjs`, add hook assertions:
@@ -1725,6 +1732,8 @@ for (const method of [
   'iterateHtmlVideoProjectFrame',
   'createHtmlVideoProjectEditPlan',
   'runHtmlVideoProjectEditPlan',
+  'acceptHtmlVideoProjectEditPlan',
+  'discardHtmlVideoProjectEditPlan',
 ]) {
   assert.ok(hook.includes(method), `hook should call api.${method}`);
 }
@@ -1735,6 +1744,8 @@ for (const message of [
   '正在接受草稿',
   '正在放弃草稿',
   '正在运行布局检查',
+  '正在接受计划草稿',
+  '正在放弃计划草稿',
 ]) {
   assert.ok(hook.includes(message), `hook should expose Chinese secondary editing message: ${message}`);
 }
@@ -1808,6 +1819,20 @@ In `frontend-react/src/api/client.js`, add:
       body: JSON.stringify(payload || {}),
     });
   },
+  acceptHtmlVideoProjectEditPlan(workflowId, planId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/edit-plan/${encodeURIComponent(planId)}/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+  },
+  discardHtmlVideoProjectEditPlan(workflowId, planId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/edit-plan/${encodeURIComponent(planId)}/discard`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+  },
 ```
 
 - [ ] **Step 4: Extend `useHtmlVideoProject`**
@@ -1836,7 +1861,7 @@ Add actions using `runMutatingAction` or dedicated loading for GET:
   }), [api, workflowId, runMutatingAction]);
 ```
 
-Add `saveFrameHtmlDraft`, `acceptFrameDraft`, `discardFrameDraft`, `inspectLayout`, `iterateFrame`, `createEditPlan`, `runEditPlan`. Each must set Chinese loading/success/failure messages.
+Add `saveFrameHtmlDraft`, `acceptFrameDraft`, `discardFrameDraft`, `inspectLayout`, `iterateFrame`, `createEditPlan`, `runEditPlan`, `acceptEditPlan`, and `discardEditPlan`. Each must set Chinese loading/success/failure messages.
 
 Return new state/actions from hook.
 
@@ -2392,6 +2417,11 @@ const {
   assert.equal(frameFix.plan.mode, 'frame_layout_fix');
   assert.deepEqual(frameFix.plan.affected_frames, ['scene_02']);
 
+  const projectLayoutSweep = await createEditPlan({ project, instruction: '整体每一帧都检查遮挡和标签错位。', selectedFrameId: 'scene_02' });
+  assert.equal(projectLayoutSweep.plan.scope, 'project');
+  assert.equal(projectLayoutSweep.plan.mode, 'project_restyle');
+  assert.deepEqual(projectLayoutSweep.plan.affected_frames, ['scene_01', 'scene_02']);
+
   const format = await createEditPlan({ project, instruction: '每帧短一点，节奏快一点。' });
   assert.equal(format.plan.mode, 'project_iterate_format');
 
@@ -2440,15 +2470,17 @@ function ensureSessions(project) {
 }
 
 function frameIds(project) {
-  return (Array.isArray(project.frames) ? project.frames : []).map(frame => frame.id || frame.scene_id || frame.graph_node_id).filter(Boolean);
+  return (Array.isArray(project.frames) ? project.frames : []).map(frame => frame.id || frame.scene_id || frame.sceneId || frame.graph_node_id || frame.graphNodeId).filter(Boolean);
 }
 
 function classifyInstruction(instruction, selectedFrameId) {
   const text = String(instruction || '');
-  if (selectedFrameId && /(这|当前|本).{0,4}帧|遮挡|错位|越界|标签|文字/.test(text)) return { scope: 'frame', mode: 'frame_layout_fix' };
+  const isProject = /整体|全片|每一帧|全局|全部/.test(text);
   if (/短一点|快一点|慢一点|节奏|时长|每帧/.test(text)) return { scope: 'project', mode: 'project_iterate_format' };
   if (/内容|主题|改成|换成讲|融资|重写文案/.test(text)) return { scope: 'project', mode: 'project_iterate_content' };
-  if (/风格|视觉|高级|杂志|整体|全片|每一帧/.test(text)) return { scope: 'project', mode: 'project_restyle' };
+  if (/风格|视觉|高级|杂志/.test(text) || isProject) return { scope: 'project', mode: 'project_restyle' };
+  if (selectedFrameId && /(这|当前|本).{0,4}帧/.test(text)) return { scope: 'frame', mode: 'frame_layout_fix' };
+  if (selectedFrameId && /遮挡|错位|越界|标签|文字/.test(text)) return { scope: 'frame', mode: 'frame_layout_fix' };
   return { scope: selectedFrameId ? 'frame' : 'project', mode: selectedFrameId ? 'frame_layout_fix' : 'project_restyle', ambiguous: true };
 }
 
@@ -2643,7 +2675,382 @@ git commit -m "feat: 增加 html-video 全片编辑计划"
 
 ---
 
-## Task 12: AI Edit UI And Plan UI
+## Task 12: Execute Project Edit Plans
+
+**Files:**
+- Modify: `server/services/creative-video/html-video/htmlVideoEditModeService.js`
+- Modify: `server/services/creativeWorkflows.js`
+- Modify: `server/routes/creativeWorkflows.js`
+- Modify: `tests/test-html-video-edit-plan-service.js`
+- Modify: `tests/test-html-video-routes.js`
+
+- [ ] **Step 1: Write failing execution tests**
+
+In `tests/test-html-video-edit-plan-service.js`, replace the old Task 11 assertion that expected `runEditPlan()` to only set `status = 'running'`:
+
+```js
+  const run = await runEditPlan({ project, planId: restyle.plan.id });
+  assert.equal(run.success, true);
+  assert.equal(findEditPlan(project, restyle.plan.id).status, 'running');
+```
+
+with this missing-service guard:
+
+```js
+  const missingRunner = await runEditPlan({ project, planId: restyle.plan.id });
+  assert.equal(missingRunner.success, false);
+  assert.equal(missingRunner.code, 'EDIT_PLAN_ITERATE_SERVICE_MISSING');
+```
+
+Then add the real execution assertions:
+
+```js
+  const executedProject = {
+    frames: [
+      { id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html' },
+      { id: 'scene_02', source_mode: 'raw_html', html_path: 'frames/scene_02.html' },
+    ],
+    edit_sessions: [],
+  };
+  const planResult = await createEditPlan({ project: executedProject, instruction: '全片修复文字遮挡。' });
+  const iterateCalls = [];
+  const qaCalls = [];
+  const execution = await runEditPlan({
+    projectDir: '/tmp/html-video-project',
+    project: executedProject,
+    planId: planResult.plan.id,
+    iterateService: {
+      iterateFrameHtml: async ({ frameId, instruction, mode }) => {
+        iterateCalls.push([frameId, instruction, mode]);
+        return {
+          success: true,
+          draft: { id: `draft_${frameId}`, html_path: `frames/.drafts/${frameId}/draft_${frameId}.html` },
+        };
+      },
+    },
+    layoutQaService: {
+      inspectFrameHtmlLayout: async ({ frame }) => {
+        qaCalls.push(frame.id);
+        return { success: true, issues: [], metrics: { frame_id: frame.id } };
+      },
+    },
+  });
+  assert.equal(execution.success, true);
+  assert.equal(execution.plan.status, 'drafts_ready');
+  assert.deepEqual(iterateCalls.map(call => call[0]), ['scene_01', 'scene_02']);
+  assert.deepEqual(qaCalls, ['scene_01', 'scene_02']);
+  assert.deepEqual(execution.plan.generated_drafts.map(item => item.draft_id), ['draft_scene_01', 'draft_scene_02']);
+
+  const acceptCalls = [];
+  const accepted = await acceptEditPlanDrafts({
+    projectDir: '/tmp/html-video-project',
+    project: executedProject,
+    planId: planResult.plan.id,
+    frameHtmlEditService: {
+      acceptFrameDraft: async ({ frameId, draftId }) => {
+        acceptCalls.push([frameId, draftId]);
+        return { success: true };
+      },
+    },
+  });
+  assert.equal(accepted.success, true);
+  assert.equal(accepted.plan.status, 'accepted');
+  assert.deepEqual(acceptCalls, [['scene_01', 'draft_scene_01'], ['scene_02', 'draft_scene_02']]);
+
+  const discardPlan = await createEditPlan({ project: executedProject, instruction: '全片修复标签遮挡。' });
+  discardPlan.plan.generated_drafts = [{ frame_id: 'scene_01', draft_id: 'draft_discard_01' }];
+  const discardCalls = [];
+  const discarded = await discardEditPlanDrafts({
+    project: executedProject,
+    planId: discardPlan.plan.id,
+    frameHtmlEditService: {
+      discardFrameDraft: async ({ frameId, draftId }) => {
+        discardCalls.push([frameId, draftId]);
+        return { success: true };
+      },
+    },
+  });
+  assert.equal(discarded.success, true);
+  assert.equal(discarded.plan.status, 'discarded');
+  assert.deepEqual(discardCalls, [['scene_01', 'draft_discard_01']]);
+```
+
+Update the import at the top:
+
+```js
+const {
+  createEditPlan,
+  runEditPlan,
+  findEditPlan,
+  acceptEditPlanDrafts,
+  discardEditPlanDrafts,
+} = require('../server/services/creative-video/html-video/htmlVideoEditModeService');
+```
+
+- [ ] **Step 2: Run test and verify RED**
+
+```powershell
+node tests/test-html-video-edit-plan-service.js
+```
+
+Expected: fails because `acceptEditPlanDrafts` and `discardEditPlanDrafts` are not exported, and `runEditPlan` does not generate drafts.
+
+- [ ] **Step 3: Implement real plan execution**
+
+In `htmlVideoEditModeService.js`, require the shared frame lookup helper, then replace `runEditPlan` and add helpers:
+
+```js
+const { findFrameByAnyId } = require('./frameIdentity');
+
+function normalizeGeneratedDraft(result, frameId) {
+  const draft = result && result.draft;
+  if (!draft || !draft.id) return null;
+  return {
+    frame_id: frameId,
+    draft_id: draft.id,
+    html_path: draft.html_path || '',
+    status: 'ready',
+  };
+}
+
+async function runEditPlan({ projectDir, project, planId, iterateService, layoutQaService } = {}) {
+  const plan = findEditPlan(project, planId);
+  if (!plan) return { success: false, code: 'EDIT_PLAN_NOT_FOUND', message: '未找到编辑计划。' };
+  if (!iterateService || typeof iterateService.iterateFrameHtml !== 'function') {
+    return { success: false, code: 'EDIT_PLAN_ITERATE_SERVICE_MISSING', message: '缺少执行编辑计划所需的帧重写服务。' };
+  }
+  plan.status = 'running';
+  plan.updated_at = timestamp();
+  plan.generated_drafts = [];
+  plan.execution_errors = [];
+  plan.layout_qa_reports = [];
+
+  for (const frameId of plan.affected_frames || []) {
+    const result = await iterateService.iterateFrameHtml({
+      projectDir,
+      project,
+      frameId,
+      instruction: plan.instruction,
+      mode: plan.mode,
+      preserveText: true,
+    });
+    if (!result.success) {
+      plan.execution_errors.push({ frame_id: frameId, code: result.code || 'FRAME_ITERATE_FAILED', message: result.message || '当前帧重写失败。' });
+      continue;
+    }
+    const generated = normalizeGeneratedDraft(result, frameId);
+    if (generated) plan.generated_drafts.push(generated);
+
+    if (layoutQaService && typeof layoutQaService.inspectFrameHtmlLayout === 'function' && generated?.html_path) {
+      const frame = findFrameByAnyId(project, frameId);
+      if (frame) {
+        const qa = await layoutQaService.inspectFrameHtmlLayout({
+          htmlPath: require('path').join(projectDir, generated.html_path),
+          frame: { ...frame, html_path: generated.html_path },
+          resolution: project.output?.resolution || { width: 1920, height: 1080 },
+          durationSec: frame.duration_sec,
+        });
+        plan.layout_qa_reports.push({ frame_id: frameId, ...qa });
+      }
+    }
+  }
+
+  plan.status = plan.execution_errors.length ? 'failed' : 'drafts_ready';
+  plan.updated_at = timestamp();
+  return {
+    success: plan.status === 'drafts_ready',
+    plan,
+    generated_drafts: plan.generated_drafts,
+    layout_qa_reports: plan.layout_qa_reports,
+    message: plan.status === 'drafts_ready' ? '编辑计划已生成批量草稿。' : '编辑计划执行失败，请查看失败帧。',
+  };
+}
+
+async function acceptEditPlanDrafts({ projectDir, project, planId, frameHtmlEditService } = {}) {
+  const plan = findEditPlan(project, planId);
+  if (!plan) return { success: false, code: 'EDIT_PLAN_NOT_FOUND', message: '未找到编辑计划。' };
+  for (const item of plan.generated_drafts || []) {
+    const result = await frameHtmlEditService.acceptFrameDraft({ projectDir, project, frameId: item.frame_id, draftId: item.draft_id });
+    if (!result.success) return { ...result, plan };
+  }
+  plan.status = 'accepted';
+  plan.updated_at = timestamp();
+  return { success: true, plan, message: '编辑计划草稿已批量接受。' };
+}
+
+async function discardEditPlanDrafts({ project, planId, frameHtmlEditService } = {}) {
+  const plan = findEditPlan(project, planId);
+  if (!plan) return { success: false, code: 'EDIT_PLAN_NOT_FOUND', message: '未找到编辑计划。' };
+  for (const item of plan.generated_drafts || []) {
+    const result = await frameHtmlEditService.discardFrameDraft({ project, frameId: item.frame_id, draftId: item.draft_id });
+    if (!result.success) return { ...result, plan };
+  }
+  plan.status = 'discarded';
+  plan.updated_at = timestamp();
+  return { success: true, plan, message: '编辑计划草稿已批量放弃。' };
+}
+```
+
+Export `acceptEditPlanDrafts` and `discardEditPlanDrafts`.
+
+- [ ] **Step 4: Wire workflow service execution**
+
+In `creativeWorkflows.js`, update `runHtmlVideoProjectEditPlan()` so it passes real services:
+
+```js
+  const result = await editModeService.runEditPlan({
+    projectDir,
+    project,
+    planId,
+    confirm: payload.confirm === true,
+    iterateService: options.htmlVideoIterateService || require('./creative-video/html-video/htmlVideoIterateService'),
+    layoutQaService: options.layoutQaService || require('./creative-video/html-video/layoutQaService'),
+  });
+```
+
+Add workflow methods:
+
+```js
+async function acceptHtmlVideoProjectEditPlan(workflowId, planId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const editModeService = options.htmlVideoEditModeService || require('./creative-video/html-video/htmlVideoEditModeService');
+  const result = await editModeService.acceptEditPlanDrafts({
+    projectDir,
+    project,
+    planId,
+    frameHtmlEditService: options.frameHtmlEditService || frameHtmlEditService,
+  });
+  if (!result.success) return { ...result, workflow_id: workflowId, plan_id: planId };
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, project);
+  return { ...result, workflow_id: workflowId, plan_id: planId, html_video_project: saved, html_video_project_path: projectDir };
+}
+
+async function discardHtmlVideoProjectEditPlan(workflowId, planId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const editModeService = options.htmlVideoEditModeService || require('./creative-video/html-video/htmlVideoEditModeService');
+  const result = await editModeService.discardEditPlanDrafts({
+    project,
+    planId,
+    frameHtmlEditService: options.frameHtmlEditService || frameHtmlEditService,
+  });
+  if (!result.success) return { ...result, workflow_id: workflowId, plan_id: planId };
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, project);
+  return { ...result, workflow_id: workflowId, plan_id: planId, html_video_project: saved, html_video_project_path: projectDir };
+}
+```
+
+Export both methods.
+
+- [ ] **Step 5: Add accept/discard plan routes and route tests**
+
+In `tests/test-html-video-routes.js`, replace the Task 11 fake `runHtmlVideoProjectEditPlan` return value with a draft-producing result:
+
+```js
+    runHtmlVideoProjectEditPlan: async (id, planId, payload) => {
+      calls.push(['run-edit-plan', id, planId, payload.confirm === true]);
+      return {
+        success: true,
+        workflow_id: id,
+        plan_id: planId,
+        plan: {
+          id: planId,
+          status: 'drafts_ready',
+          generated_drafts: [{ frame_id: 'frame_01', draft_id: 'draft_frame_01' }],
+        },
+        message: '编辑计划已生成批量草稿。',
+      };
+    },
+```
+
+Update the run assertion:
+
+```js
+    assert.equal(runPlan.body.plan.status, 'drafts_ready');
+    assert.equal(runPlan.body.plan.generated_drafts[0].draft_id, 'draft_frame_01');
+```
+
+Then add fake accept/discard service methods:
+
+```js
+    acceptHtmlVideoProjectEditPlan: async (id, planId) => {
+      calls.push(['accept-edit-plan', id, planId]);
+      return { success: true, workflow_id: id, plan_id: planId, plan: { id: planId, status: 'accepted' }, message: '编辑计划草稿已批量接受。' };
+    },
+    discardHtmlVideoProjectEditPlan: async (id, planId) => {
+      calls.push(['discard-edit-plan', id, planId]);
+      return { success: true, workflow_id: id, plan_id: planId, plan: { id: planId, status: 'discarded' }, message: '编辑计划草稿已批量放弃。' };
+    },
+```
+
+Add assertions:
+
+```js
+    const acceptPlan = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit-plan/edit_plan_0001/accept`, {});
+    assert.equal(acceptPlan.statusCode, 200);
+    assert.equal(acceptPlan.body.plan.status, 'accepted');
+
+    const discardPlan = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit-plan/edit_plan_0001/discard`, {});
+    assert.equal(discardPlan.statusCode, 200);
+    assert.equal(discardPlan.body.plan.status, 'discarded');
+```
+
+Add routes before reserved routes:
+
+```js
+router.post('/:workflow_id/html-video-project/edit-plan/:plan_id/accept', async (req, res) => {
+  const workflowId = String(req.params.workflow_id || '').trim();
+  const planId = String(req.params.plan_id || '').trim();
+  try {
+    const result = await getService(req).acceptHtmlVideoProjectEditPlan(workflowId, planId, req.body || {});
+    if (!result?.success) {
+      const message = result?.message || '接受编辑计划草稿失败。';
+      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, plan_id: planId, message, code: result?.code });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ success: false, workflow_id: workflowId, plan_id: planId, message: `接受编辑计划草稿失败：${error.message}` });
+  }
+});
+
+router.post('/:workflow_id/html-video-project/edit-plan/:plan_id/discard', async (req, res) => {
+  const workflowId = String(req.params.workflow_id || '').trim();
+  const planId = String(req.params.plan_id || '').trim();
+  try {
+    const result = await getService(req).discardHtmlVideoProjectEditPlan(workflowId, planId, req.body || {});
+    if (!result?.success) {
+      const message = result?.message || '放弃编辑计划草稿失败。';
+      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, plan_id: planId, message, code: result?.code });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ success: false, workflow_id: workflowId, plan_id: planId, message: `放弃编辑计划草稿失败：${error.message}` });
+  }
+});
+```
+
+- [ ] **Step 6: Run tests**
+
+```powershell
+node tests/test-html-video-edit-plan-service.js
+node tests/test-html-video-routes.js
+```
+
+Expected: edit-plan execution generates drafts, layout QA reports are recorded on the plan, and bulk accept/discard routes pass.
+
+- [ ] **Step 7: Commit**
+
+```powershell
+git add server/services/creative-video/html-video/htmlVideoEditModeService.js server/services/creativeWorkflows.js server/routes/creativeWorkflows.js tests/test-html-video-edit-plan-service.js tests/test-html-video-routes.js
+git commit -m "feat: 执行 html-video 全片编辑计划"
+```
+
+---
+
+## Task 13: AI Edit UI And Plan UI
 
 **Files:**
 - Create: `frontend-react/src/components/creative-video-editor/HtmlVideoAiEditPanel.jsx`
@@ -2661,6 +3068,8 @@ assert.ok(aiPanel.includes('修复布局'), 'AI panel should support layout fix 
 assert.ok(aiPanel.includes('生成当前帧草稿'), 'AI panel should generate frame drafts');
 assert.ok(aiPanel.includes('生成全片编辑计划'), 'AI panel should create project edit plans');
 assert.ok(aiPanel.includes('执行全片编辑计划'), 'AI panel should run project edit plans');
+assert.ok(aiPanel.includes('接受计划草稿'), 'AI panel should accept generated plan drafts');
+assert.ok(aiPanel.includes('放弃计划草稿'), 'AI panel should discard generated plan drafts');
 assert.ok(editor.includes('HtmlVideoAiEditPanel'), 'HtmlVideoProjectEditor should compose AI edit panel');
 ```
 
@@ -2679,7 +3088,7 @@ Create:
 ```jsx
 import { useState } from 'react';
 
-export function HtmlVideoAiEditPanel({ frame, editPlan, disabled, onIterateFrame, onCreatePlan, onRunPlan }) {
+export function HtmlVideoAiEditPanel({ frame, editPlan, disabled, onIterateFrame, onCreatePlan, onRunPlan, onAcceptPlan, onDiscardPlan }) {
   const [frameInstruction, setFrameInstruction] = useState('');
   const [projectInstruction, setProjectInstruction] = useState('');
   const [mode, setMode] = useState('layout_fix');
@@ -2720,6 +3129,8 @@ export function HtmlVideoAiEditPanel({ frame, editPlan, disabled, onIterateFrame
           <div className="html-video-edit-plan">
             <p>{editPlan.summary || editPlan.mode || editPlan.id}</p>
             <button type="button" disabled={disabled} onClick={() => onRunPlan(editPlan.id, { confirm: true })}>执行全片编辑计划</button>
+            <button type="button" disabled={disabled || editPlan.status !== 'drafts_ready'} onClick={() => onAcceptPlan(editPlan.id)}>接受计划草稿</button>
+            <button type="button" disabled={disabled || !editPlan.generated_drafts?.length} onClick={() => onDiscardPlan(editPlan.id)}>放弃计划草稿</button>
           </div>
         ) : null}
       </div>
@@ -2744,6 +3155,8 @@ import { HtmlVideoAiEditPanel } from './HtmlVideoAiEditPanel.jsx';
   onIterateFrame={editor.iterateFrame}
   onCreatePlan={editor.createEditPlan}
   onRunPlan={editor.runEditPlan}
+  onAcceptPlan={editor.acceptEditPlan}
+  onDiscardPlan={editor.discardEditPlan}
 />
 ```
 
@@ -2764,7 +3177,7 @@ git commit -m "feat: 增加 html-video AI 二次编辑面板"
 
 ---
 
-## Task 13: Final Integration Verification
+## Task 14: Final Integration Verification
 
 **Files:**
 - Modify only if tests reveal small contract mismatches.
@@ -2804,13 +3217,27 @@ npm test
 
 Expected: no new failures. If unrelated pre-existing failures occur, capture the exact failing test names and stderr.
 
-- [ ] **Step 3: Manual workflow smoke test with latest generated project**
+- [ ] **Step 3: Manual workflow smoke test with latest raw HTML project**
 
-Use latest project path if available:
+Find the latest generated html-video project that contains at least one `raw_html` frame:
 
-```text
-D:\code3\MediaCrawler-GUI\data\media\douyin\20260623132311711137\agent_runs\20260623-132332-998Z-5df8ee-hyperframes_freeform-html-video
+```powershell
+$latestProject = Get-ChildItem -Path data -Recurse -Filter project.json |
+  Sort-Object LastWriteTime -Descending |
+  Where-Object {
+    try {
+      $project = Get-Content -Encoding UTF8 $_.FullName | ConvertFrom-Json
+      @($project.frames | Where-Object { $_.source_mode -eq 'raw_html' }).Count -gt 0
+    } catch {
+      $false
+    }
+  } |
+  Select-Object -First 1
+
+$latestProject.DirectoryName
 ```
+
+If this command prints no path, generate one html-video project first, then rerun the command.
 
 Manual API smoke sequence:
 
@@ -2865,4 +3292,6 @@ After all tasks:
 - Users can run DOM layout QA and see issues.
 - Users can ask AI to rewrite only the current frame.
 - Users can create and run full-project edit plans.
+- Users can review, bulk accept, or bulk discard drafts generated by a full-project edit plan.
 - Official export uses only accepted frame HTML by default.
+- Export-time QA gate remains out of scope for this plan.
