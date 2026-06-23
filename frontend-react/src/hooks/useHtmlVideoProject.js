@@ -409,13 +409,13 @@ export function useHtmlVideoProject({ workflowId, api }) {
     })
   ), [api, workflowId, runMutatingAction]);
 
-  const renderFramePreview = useCallback((frameId) => (
+  const renderFramePreview = useCallback((frameId, payload = {}) => (
     runMutatingAction({
       nextStatus: 'rendering',
       loadingMessage: STATUS_MESSAGES.rendering,
       successMessage: '单帧预览已渲染。',
       fallbackMessage: '渲染单帧预览失败。',
-      action: () => api.renderHtmlVideoProject(workflowId, { mode: 'frame', frame_id: frameId }),
+      action: () => api.renderHtmlVideoProject(workflowId, { ...payload, mode: 'frame', frame_id: frameId }),
     })
   ), [api, workflowId, runMutatingAction]);
 

@@ -29,6 +29,7 @@ export function ProjectFramesList({ frames = [], selectedFrameId, disabled, onSe
         >
           <strong>{getFrameTitle(frame, index)}</strong>
           <span>{getFrameDuration(frame) ? `${getFrameDuration(frame)}s` : '未设置时长'}</span>
+          {frame.active_draft_id ? <span className="creative-video-editor-frame-status">有草稿</span> : null}
         </button>
       )) : <p>暂无帧数据</p>}
     </aside>

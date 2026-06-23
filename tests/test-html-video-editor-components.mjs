@@ -16,6 +16,9 @@ const componentPaths = [
   'frontend-react/src/components/creative-video-editor/ProjectFramesList.jsx',
   'frontend-react/src/components/creative-video-editor/ExportsPanel.jsx',
   'frontend-react/src/components/creative-video-editor/NaturalLanguageEditBox.jsx',
+  'frontend-react/src/components/creative-video-editor/HtmlVideoSourcePanel.jsx',
+  'frontend-react/src/components/creative-video-editor/HtmlVideoDraftPanel.jsx',
+  'frontend-react/src/components/creative-video-editor/HtmlVideoQualityPanel.jsx',
 ];
 
 for (const componentPath of componentPaths) {
@@ -123,7 +126,26 @@ for (const componentName of [
 }
 
 assert.doesNotMatch(editor, /ReservedCapabilitiesPanel/, 'advanced reserved panel should not be shown by default');
-assert.doesNotMatch(editor, /源码|sourceHtml|html_source|contentEditable/, 'editor should not expose HTML source editing');
+assert.ok(editor.includes('源码'), 'editor should expose a controlled Source tab');
+
+const sourcePanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoSourcePanel.jsx', 'utf-8');
+assert.ok(sourcePanel.includes('源码'), 'Source panel should show Chinese source title');
+assert.ok(sourcePanel.includes('保存为草稿'), 'Source panel should save draft');
+assert.ok(sourcePanel.includes('当前帧不是 raw_html'), 'Source panel should handle non raw_html frame');
+assert.doesNotMatch(sourcePanel, /mode:\s*['"]replace['"]/, 'Source panel should not send replace mode');
+
+const draftPanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoDraftPanel.jsx', 'utf-8');
+assert.ok(draftPanel.includes('接受草稿'), 'Draft panel should accept drafts');
+assert.ok(draftPanel.includes('放弃草稿'), 'Draft panel should discard drafts');
+
+const qualityPanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoQualityPanel.jsx', 'utf-8');
+assert.ok(qualityPanel.includes('布局检查'), 'Quality panel should show layout QA');
+assert.ok(qualityPanel.includes('用 AI 修复当前帧'), 'Quality panel should expose frame fix action');
+
+assert.ok(editor.includes('HtmlVideoSourcePanel'), 'HtmlVideoProjectEditor should compose source panel');
+assert.ok(editor.includes('HtmlVideoDraftPanel'), 'HtmlVideoProjectEditor should compose draft panel');
+assert.ok(editor.includes('HtmlVideoQualityPanel'), 'HtmlVideoProjectEditor should compose quality panel');
+assert.doesNotMatch(editor, /ReservedCapabilitiesPanel/, 'reserved panel should remain hidden');
 
 const templateInputs = fs.readFileSync('frontend-react/src/components/creative-video-editor/TemplateInputsPanel.jsx', 'utf-8');
 for (const inputType of ['string', 'number', 'boolean', 'enum', 'array']) {

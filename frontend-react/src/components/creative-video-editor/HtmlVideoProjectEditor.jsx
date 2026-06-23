@@ -1,6 +1,9 @@
 import { CaptionsPanel } from './CaptionsPanel.jsx';
 import { ExportsPanel } from './ExportsPanel.jsx';
 import { FrameInputsPanel } from './FrameInputsPanel.jsx';
+import { HtmlVideoDraftPanel } from './HtmlVideoDraftPanel.jsx';
+import { HtmlVideoQualityPanel } from './HtmlVideoQualityPanel.jsx';
+import { HtmlVideoSourcePanel } from './HtmlVideoSourcePanel.jsx';
 import { NarrationPanel } from './NarrationPanel.jsx';
 import { NaturalLanguageEditBox } from './NaturalLanguageEditBox.jsx';
 import { ProjectFramesList } from './ProjectFramesList.jsx';
@@ -63,7 +66,35 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
           disabled={disabled}
           onSelect={editor.selectFrame}
         />
-        <div className="html-video-project-main">
+        <div className="html-video-project-main" aria-label="源码">
+          <HtmlVideoSourcePanel
+            frame={selectedFrame}
+            html={editor.frameHtml}
+            disabled={disabled}
+            onLoad={editor.loadFrameHtml}
+            onSaveDraft={editor.saveFrameHtmlDraft}
+            onRenderDraft={(frameId, draftId) => editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true })}
+          />
+          <HtmlVideoDraftPanel
+            frame={selectedFrame}
+            disabled={disabled}
+            onRender={(frameId, draftId) => editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true })}
+            onAccept={editor.acceptFrameDraft}
+            onDiscard={editor.discardFrameDraft}
+          />
+          <HtmlVideoQualityPanel
+            frame={selectedFrame}
+            layoutQa={editor.layoutQa}
+            disabled={disabled}
+            onInspectFrame={editor.inspectLayout}
+            onFixFrame={(frameId) => editor.iterateFrame(frameId, {
+              mode: 'layout_fix',
+              preserve_text: true,
+              run_layout_qa: true,
+              render_preview: true,
+              instruction: '修复当前帧文字错位、越界或遮挡问题，保留现有文案和整体风格。',
+            })}
+          />
           <FrameInputsPanel
             frame={selectedFrame}
             disabled={disabled}
