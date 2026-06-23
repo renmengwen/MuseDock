@@ -84,7 +84,8 @@ const composer = require('../server/services/creative-video/html-video/ffmpegCom
   assert.ok(filterComplex.includes('volume=-18dB'));
   assert.ok(filterComplex.includes('afade=t=in:st=0:d=0.2'));
   assert.ok(filterComplex.includes('afade=t=out:st=4.5:d=1.5'));
-  assert.ok(filterComplex.includes('amix=inputs=2:duration=first:dropout_transition=0[aout]'));
+  assert.ok(filterComplex.includes('amix=inputs=2:duration=longest:dropout_transition=0[mixed]'));
+  assert.ok(filterComplex.includes('[mixed]apad=whole_dur=6[aout]'));
   assert.deepEqual(commands[2].args.slice(-9), [
     '-map', '0:v',
     '-map', '[aout]',

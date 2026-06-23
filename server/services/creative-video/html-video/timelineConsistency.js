@@ -3,6 +3,7 @@ const {
   audioMatchesSceneSpec,
   computeSceneSpecSpeechHash,
 } = require('../sceneSpecHash');
+const { normalizeCaptionsForFrame } = require('./captionLayer');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -46,6 +47,26 @@ function normalizeCaption(value) {
 
 function normalizeCaptions(value) {
   return JSON.stringify(arrayOrEmpty(value).map(normalizeCaption));
+}
+
+function comparableFrameCaptions(frame = {}, scene = {}) {
+  return normalizeCaptionsForFrame({
+    id: frame.id || scene.id,
+    scene_id: frame.scene_id || scene.id,
+    duration_sec: frame.duration_sec || scene.duration,
+    narration_text: frame.narration_text,
+    captions: frame.captions,
+  });
+}
+
+function comparableSceneCaptions(scene = {}, frame = {}) {
+  return normalizeCaptionsForFrame({
+    id: scene.id || frame.id,
+    scene_id: scene.id || frame.scene_id,
+    duration_sec: frame.duration_sec || scene.duration,
+    narration_text: scene.narration_text,
+    captions: scene.captions,
+  });
 }
 
 function add(diagnostics, code, userMessage, details = {}) {
@@ -148,8 +169,8 @@ function validateSceneSpecTimelineConsistency({ sceneSpec, project, audio } = {}
       });
     }
 
-    const actualCaptions = arrayOrEmpty(frame.captions);
-    const expectedCaptions = arrayOrEmpty(scene.captions);
+    const actualCaptions = comparableFrameCaptions(frame, scene);
+    const expectedCaptions = comparableSceneCaptions(scene, frame);
     if (normalizeCaptions(actualCaptions) !== normalizeCaptions(expectedCaptions)) {
       add(diagnostics, 'frame_captions_mismatch', '画面帧字幕与字幕脚本不一致，无法继续渲染。', {
         frame_id: frame.id,

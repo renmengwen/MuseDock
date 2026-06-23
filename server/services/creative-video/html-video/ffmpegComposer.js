@@ -256,13 +256,13 @@ function audioInputs({ narrationPath, musicPath }) {
 
 function buildAudioFilter(inputs, options) {
   const chains = [];
+  const duration = Number(options.videoDurationSec || 0);
   inputs.forEach((input, index) => {
     const streamIndex = index + 1;
     const label = input.role === 'music' ? 'music' : 'narration';
     const volume = input.role === 'music' ? options.musicVolumeDb : options.narrationVolumeDb;
     const fadeIn = Number(options.fadeInSec || 0);
     const fadeOut = Number(options.fadeOutSec || 0);
-    const duration = Number(options.videoDurationSec || 0);
     const outLabel = `${label}${index}`;
     const filters = [`volume=${Number(volume || 0)}dB`];
     if (fadeIn > 0) filters.push(`afade=t=in:st=0:d=${fadeIn}`);
@@ -270,7 +270,8 @@ function buildAudioFilter(inputs, options) {
     chains.push(`[${streamIndex}:a]${filters.join(',')}[${outLabel}]`);
   });
   const mixInputs = inputs.map((input, index) => `[${input.role === 'music' ? 'music' : 'narration'}${index}]`).join('');
-  chains.push(`${mixInputs}amix=inputs=${inputs.length}:duration=first:dropout_transition=0[aout]`);
+  chains.push(`${mixInputs}amix=inputs=${inputs.length}:duration=longest:dropout_transition=0[mixed]`);
+  chains.push(duration > 0 ? `[mixed]apad=whole_dur=${duration}[aout]` : '[mixed]anull[aout]');
   return chains.join(';');
 }
 

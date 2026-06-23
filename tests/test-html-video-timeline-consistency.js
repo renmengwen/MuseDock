@@ -149,6 +149,40 @@ for (const emptySceneSpec of [{ scenes: [] }, {}]) {
 }
 
 {
+  const longText = 'AI 大时代，金字塔顶尖的学生毕业就能实现别人一辈子达不到的财富高度。';
+  const longSpec = {
+    scenes: [
+      { id: 'scene_01', order: 1, duration: 8, narration_text: longText, captions: [{ id: 'cap_01', start: 0, end: 8, text: longText }] },
+    ],
+  };
+  const longProject = {
+    frames: [
+      {
+        id: 'scene_01',
+        scene_id: 'scene_01',
+        duration_sec: 8,
+        narration_text: longText,
+        captions: [
+          { id: 'cap_01_01', start: 0, end: 1.6, duration: 1.6, text: 'AI 大时代，' },
+          { id: 'cap_01_02', start: 1.6, end: 8, duration: 6.4, text: '金字塔顶尖的学生毕业就能实现别人一辈子达不到的财富高度。' },
+        ],
+      },
+    ],
+    audio: {
+      source: 'scene_spec',
+      scene_spec_hash: computeSceneSpecSpeechHash(longSpec),
+      scene_count: 1,
+      scene_ids: ['scene_01'],
+      narration_path: 'tts/combined.wav',
+      status: 'ready',
+    },
+  };
+  const result = validateSceneSpecTimelineConsistency({ sceneSpec: longSpec, project: longProject, audio: longProject.audio });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.diagnostics, []);
+}
+
+{
   const richSpec = spec();
   richSpec.scenes[0].captions = [{ id: 'caption_01', start: 0, end: 1.2, text: '字幕一', style: { color: 'red' } }];
   const badProject = project();
