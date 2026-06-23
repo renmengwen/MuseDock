@@ -215,12 +215,25 @@
   "edit_sessions": [
     {
       "id": "edit_20260623_001",
+      "kind": "frame_iterate",
       "scope": "frame",
       "frame_id": "scene_06",
       "mode": "layout_fix",
       "instruction": "修复遮挡",
       "status": "draft_ready",
       "draft_id": "draft_20260623_001"
+    },
+    {
+      "id": "edit_plan_20260623_001",
+      "kind": "edit_plan",
+      "scope": "project",
+      "mode": "restyle",
+      "instruction": "整体换成更高级的财经杂志风，文案不变。",
+      "status": "planned",
+      "requires_confirmation": true,
+      "affected_frames": ["scene_01", "scene_02", "scene_03", "scene_04", "scene_05", "scene_06", "scene_07"],
+      "created_at": "2026-06-23T14:10:00.000Z",
+      "updated_at": "2026-06-23T14:10:00.000Z"
     }
   ],
   "layout_qa_reports": []
@@ -231,8 +244,26 @@
 
 - `drafts` 记录挂在 frame 下，便于前端展示当前帧草稿历史。
 - `active_draft_id` 只表示当前选中的待接受草稿，不影响正式导出，除非导出 API 显式传 `include_active_drafts=true`。默认导出只用已接受的正式帧。
-- `edit_sessions` 记录一次自然语言编辑动作的生命周期。
+- `edit_sessions` 记录自然语言编辑动作和全片 edit plan 的生命周期。`kind=edit_plan` 的记录必须持久化到 `project.json`，因为 `edit-plan/:plan_id/run` 依赖它跨刷新、跨服务重启继续执行。
 - `layout_qa_reports` 保存全片 DOM 质检结果，便于问题定位。
+
+### 帧标识解析规则
+
+API 路径统一叫 `frame_id`，但当前 project schema 里历史帧可能同时存在 `id`、`scene_id`、`graph_node_id` 三个字段，且三者不保证相同。服务层必须提供统一查找函数：
+
+```js
+function findFrameByAnyId(project, frameId) {
+  const id = String(frameId || '').trim();
+  return (Array.isArray(project.frames) ? project.frames : []).find(frame => (
+    String(frame.id || '') === id
+    || String(frame.scene_id || '') === id
+    || String(frame.graph_node_id || '') === id
+    || String(frame.graphNodeId || '') === id
+  ));
+}
+```
+
+所有新增服务都必须复用这个匹配规则，不能只按 `frame.id` 查找。响应里的 `frame_id` 使用请求传入值，`resolved_frame_id` 使用实际匹配到的 `frame.id || frame.scene_id || frame.graph_node_id`，便于前端和日志定位。
 
 ## API 设计
 
@@ -249,6 +280,7 @@ GET /api/creative-workflows/:workflow_id/html-video-project/frames/:frame_id/htm
   "success": true,
   "workflow_id": "workflow_123",
   "frame_id": "scene_06",
+  "resolved_frame_id": "scene_06",
   "html": "<!doctype html>...",
   "html_path": "frames/06-scene_06.html",
   "source_mode": "raw_html",
@@ -256,11 +288,16 @@ GET /api/creative-workflows/:workflow_id/html-video-project/frames/:frame_id/htm
 }
 ```
 
+响应格式：
+
+- 默认返回 JSON，保持当前 API 风格。
+- 如果请求头 `Accept: text/html` 或 `Accept: text/plain`，可以直接返回 HTML 文本，`Content-Type: text/plain; charset=utf-8`。Source Tab 首版可以继续用 JSON，后续源码编辑器可切到文本响应以减少大字符串 JSON 编解码。
+
 失败响应：
 
 - `NO_HTML_VIDEO_PROJECT`：没有 html-video 工程。
 - `FRAME_NOT_FOUND`：找不到帧。
-- `FRAME_HTML_NOT_AVAILABLE`：不是 raw_html 或缺少 `html_path`。
+- `FRAME_HTML_NOT_AVAILABLE`：不是 raw_html、缺少 `html_path`，或 `html_path` 指向的文件不存在。`source_mode=template_inputs` 的帧即使有历史 materialize 临时 HTML，也不通过这个源码编辑入口暴露，避免用户编辑会被下次 materialize 覆盖的临时文件。
 - `FRAME_HTML_PATH_INVALID`：路径为空、绝对路径或逃逸工程目录。
 - `FRAME_HTML_READ_FAILED`：文件读取失败。
 
@@ -309,7 +346,9 @@ PUT /api/creative-workflows/:workflow_id/html-video-project/frames/:frame_id/htm
 
 ### 直接覆盖当前帧 HTML
 
-直接覆盖只允许内部服务或高级用户显式传：
+首版不开放直接覆盖正式帧。所有用户和 AI 写入都必须先生成 draft，再通过 accept 草稿覆盖正式帧。
+
+如果请求显式传：
 
 ```json
 {
@@ -321,9 +360,9 @@ PUT /api/creative-workflows/:workflow_id/html-video-project/frames/:frame_id/htm
 
 限制：
 
-- 前端 Source Tab 的“保存”默认保存草稿。
-- “接受草稿”再覆盖正式帧。
-- `mode=replace` 可留给调试入口，不作为普通按钮首选。
+- 服务层直接返回 `403` / `FRAME_REPLACE_FORBIDDEN`。
+- 前端不提供 `mode=replace` 按钮。
+- 后续如果确实需要高级调试入口，必须另加鉴权或本地开发开关；不要在首版留下无保护覆盖路径。
 
 ### 接受草稿
 
@@ -388,6 +427,8 @@ POST /api/creative-workflows/:workflow_id/html-video-project/render
 - 传 `draft_id`：渲染 draft HTML，不覆盖正式帧。
 - `run_layout_qa=true` 时，渲染前或渲染后跑 DOM QA。
 - 预览输出路径建议：`inspect/previews/scene_06-draft_20260623_001.mp4`。
+- draft 渲染实现必须在 `projectOrchestrator.renderHtmlVideoFramePreview` 内构造临时 frame：`{ ...targetFrame, html_path: draft.html_path }`。当前 `frameRenderSource.js` 已按 `frame.html_path || frame.htmlPath || frame.sourcePath` 解析渲染源，因此不需要新增 `htmlPathOverride` 参数；实现前仍需在 Phase 1/2 读 `frameRenderSource.js` 并用测试锁住这个注入点。
+- 如果 `draft_id` 不属于该 frame，返回 `DRAFT_NOT_FOUND`。
 
 响应增加：
 
@@ -516,6 +557,9 @@ POST /api/creative-workflows/:workflow_id/html-video-project/edit-plan
 - 明确指令可以返回单一 plan，但仍要求前端确认。
 - 如果用户选中了某帧且指令明显是“这帧”，优先 `scope=frame`。
 - 如果指令包含“整体 / 全片 / 每一帧 / 风格统一”，优先 `scope=project`。
+- plan 必须持久化到 `project.edit_sessions`，不能只存在内存中。服务重启、前端刷新后，用户仍应能看到待确认或执行中的 plan。
+- `project.edit_sessions[].kind = "edit_plan"`，`status` 可为 `planned`、`running`、`drafts_ready`、`failed`、`discarded`、`accepted`。
+- `plan_id` 就是对应 edit session 的 `id`。`edit-plan/:plan_id/run` 必须从 project.json 重新读取 plan，而不是依赖进程内 Map。
 
 ### 执行全片编辑计划
 
@@ -761,6 +805,18 @@ DOM QA issue 示例：
 - 采样时间必须落在 `[0, duration]`。
 - 去重后最多 5 个采样点。
 
+### Playwright 动画采样环境
+
+layout QA 必须复用或抽取 `hyperframesPlaywrightAdapter.js` 中与页面录制相关的 Playwright 初始化约束，避免后台页、字体加载或动画状态导致采样不稳定。实现要求：
+
+- 使用和渲染相同的 viewport、deviceScaleFactor 和本地 file URL 访问方式。
+- 在 `page.goto()` 前调用 `page.addInitScript()` 注入 QA 专用初始化脚本。
+- 初始化脚本要尽量避免页面因后台状态暂停动画，必要时监听 `visibilitychange` 并记录诊断信息。
+- 采样前等待 `document.fonts.ready`，再等待两个 `requestAnimationFrame`，确保文本布局稳定。
+- QA 不应沿用渲染录制里的“冻结 CSS animation”逻辑；layout QA 需要观察目标时刻的真实布局。可共享字体等待、viewport、错误收集等通用逻辑，但不能把动画永久 pause 在首帧。
+- 如果目标页提供 `window.__hvPlayAll` 或后续提供可 seek timeline，优先使用可 seek 方式；首版没有 seek 能力时才使用 `page.waitForTimeout(sampleTime * 1000)`。
+- 如果 Playwright/Chromium 不可用，返回 `LAYOUT_QA_ENVIRONMENT_NOT_CONFIGURED` warning，不阻塞保存草稿。
+
 ### 检查元素
 
 候选文本元素：
@@ -831,7 +887,7 @@ DOM QA issue 示例：
 
 全片编辑必须先 plan，再 run。
 
-`edit-plan` 负责分类：
+`htmlVideoEditModeService` 是 `edit-plan` API 的内部实现模块，不单独暴露路由。它负责把用户自然语言和当前选择帧分类成以下模式：
 
 - `frame_layout_fix`
 - `frame_visual_rewrite`
@@ -918,10 +974,11 @@ frames/.drafts/<frame_id>/<draft_id>.html
 首版可以使用 real-time wait，不必实现复杂 timeline seek。即：
 
 - `page.goto(file://...)`
+- 等待字体和布局稳定。
 - `page.waitForTimeout(sampleTime * 1000)`
 - 采样 bbox。
 
-后续如果动画稳定性不足，再引入 `window.__hvPlayAll` 或 CSS animation seeking。
+如果实现发现后台页面动画被暂停或采样不稳定，不能靠扩大 timeout 解决；必须回到 Playwright 初始化脚本或 timeline seek 方案。
 
 ### `projectOrchestrator.js` 扩展
 
@@ -1106,6 +1163,16 @@ Loading 文案：
 - `fixture-overflow-card-title.html`
 - `fixture-overlay-valuation.html`
 
+fixture 要在 Phase 2 的第一步手工创建，不能由被测的 layout QA 代码生成。文件建议放在 `tests/fixtures/html-video-layout-qa/`：
+
+```text
+tests/fixtures/html-video-layout-qa/
+  overflow-card-title.html
+  overflow-card-title-fixed.html
+  overlay-valuation.html
+  overlay-valuation-fixed.html
+```
+
 验收：
 
 - layout QA 对 fixture 返回 error。
@@ -1127,6 +1194,8 @@ Loading 文案：
 - accept/discard
 - Source Tab
 - 后端和前端测试
+- 统一 `findFrameByAnyId()`，所有新增服务按 `id -> scene_id -> graph_node_id -> graphNodeId` 兼容查找。
+- `mode=replace` 明确返回 `FRAME_REPLACE_FORBIDDEN`，不开放直接覆盖。
 
 验收：
 
@@ -1134,21 +1203,27 @@ Loading 文案：
 - 可以保存源码草稿。
 - 可以接受草稿并导出成片。
 - 正式帧在接受前不被覆盖。
+- `source_mode=template_inputs` 或 `html_path` 文件不存在时，读取源码返回 `FRAME_HTML_NOT_AVAILABLE`。
 
 ### Phase 2：DOM layout QA
 
 交付：
 
+- 手工创建 `tests/fixtures/html-video-layout-qa/` 下 4 个 fixture，作为 TDD 起点。
 - `layoutQaService`
 - 单帧 layout QA API
 - 全片 layout QA API
 - 预览接口支持 `run_layout_qa`
 - 质检 Tab
+- `renderHtmlVideoFramePreview` 支持 `draft_id`，通过临时 frame 注入 draft 的 `html_path`，并用测试确认正式 frame 不被修改。
+- layout QA Playwright 初始化复用渲染链路的 viewport、字体等待和页面稳定策略，但不冻结动画在首帧。
 
 验收：
 
 - 能自动发现 `scene_04` 的 `.card-title` 越界。
 - 能自动发现 `scene_06` 的 `.launch-zone` 遮挡正文。
+- draft preview 能渲染 draft HTML。
+- Playwright 环境缺失时返回中文 warning，不阻塞保存草稿。
 
 ### Phase 3：AI 单帧重写
 
@@ -1173,12 +1248,14 @@ Loading 文案：
 - `POST /edit-plan`
 - 计划确认 UI
 - 模糊指令 choices
+- edit plan 持久化到 `project.edit_sessions`，前端刷新后仍可继续确认或执行。
 
 验收：
 
 - “整体换风格，文案不变”生成 `project_restyle` 计划。
 - “把内容改成讲融资”生成 `project_iterate_content` 计划。
 - “每帧短一点”生成 `project_iterate_format` 计划。
+- 服务重启或重新 load project 后，`edit-plan/:plan_id/run` 仍能找到 plan。
 
 ### Phase 5：执行全片编辑计划
 
@@ -1285,6 +1362,9 @@ Loading 文案：
 - 不要让 `mode=materialize` 覆盖 raw_html draft。
 - 不要绕过 projectDir 路径校验。
 - 不要默认导出 active draft，必须接受后才参与正式导出。
+- 不要只用 `frame.id` 查找帧；必须兼容 `id`、`scene_id`、`graph_node_id`、`graphNodeId`。
+- 不要把 edit plan 存在内存 Map；必须写入 `project.edit_sessions`。
+- 不要让 layout QA 冻结动画在首帧；QA 要采样目标时刻的布局。
 - 不要在首版引入 CodeMirror，除非实施计划明确批准。
 - 所有用户可见文案必须中文。
 - PowerShell 读取中文文件必须 `Get-Content -Encoding UTF8`。
@@ -1296,7 +1376,6 @@ Loading 文案：
 
 - Source Tab 首版是否接受 `<textarea>`。本设计默认接受。
 - DOM QA 首版是否阻塞导出。本设计默认不阻塞，只提示。
-- `mode=replace` 是否开放给前端。本设计默认不作为普通按钮，只用于内部或高级调试。
 - 全片 restyle 是否允许改变帧数。本设计默认不允许；改变帧数属于 `iterate_content` 或 `iterate_format`。
 
 ## 验收标准
