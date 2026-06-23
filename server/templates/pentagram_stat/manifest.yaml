@@ -1,0 +1,43 @@
+id: pentagram_stat
+name: 瑞士网格统计
+description: 瑞士国际主义排版风格，巨型数字锚点+柱状图+红色强调线+底部数据栏
+category: data
+tags: [数据, 统计, 瑞士, 网格, 柱状图, benchmark, stat, 数字]
+best_for:
+  - 数据对比
+  - 成绩/评分展示
+  - Benchmark对比
+  - 关键指标展示
+not_for:
+  - 纯文字叙述
+  - 品牌氛围类
+  - 故事/情感类
+aspect_support: ['16:9']
+duration_range: [3, 10]
+inputs:
+  stat_number:
+    type: string
+    required: true
+    max_length: 8
+    description: 主数字
+  label:
+    type: string
+    required: true
+    max_length: 30
+    description: 数字标签
+  subtitle:
+    type: string
+    required: false
+    max_length: 60
+    description: 说明文字
+  bars:
+    type: array
+    required: false
+    max_items: 6
+    description: 柱状图数据 [{height_percent, is_highlight}]
+  bottom_stats:
+    type: array
+    required: false
+    max_items: 4
+    description: 底部数据 [{value, label}]
+license: Apache-2.0

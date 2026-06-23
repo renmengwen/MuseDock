@@ -15,6 +15,16 @@
 - 技术专有名词、接口字段、品牌名、文件名、命令、环境变量、第三方服务名可以保留英文，例如 `OpenAI API`、`ffmpeg`、`OPENAI_API_KEY`。
 - 如果必须展示后端或第三方返回的英文错误，应尽量补充中文解释，避免只把英文原样抛给用户。
 
+## 前端 UI 与样式
+
+- 新增或重构面向用户的前端 UI 时，默认优先使用 Tailwind CSS utility class 与官方 `shadcn/ui` 组件体系。
+- `shadcn/ui` 接入默认参考 Vite 安装文档：https://www.shadcn-ui.cn/docs/installation/vite 。
+- 通用控件应通过 `shadcn@latest` CLI/registry 引入或同步官方 `shadcn/ui` 组件，再在业务页面中复用，避免继续手写“shadcn 风格”的本地仿制基础组件。
+- 按钮、输入框、下拉框、弹窗、标签页、徽标、提示、表格、Tooltip、Checkbox、Switch 等通用控件，应优先来自官方 `shadcn/ui` 组件；如果确需改造，优先在引入的组件基础上做项目化调整，并保留清晰来源和 API 边界。
+- 避免继续向 `frontend-react/src/styles.css` 追加大段跨页面全局样式；确需新增 CSS 时，应优先限制在小范围组件、复杂布局、媒体编辑器、第三方渲染容器或 Tailwind 难以清晰表达的场景，并保持选择器边界清楚。
+- 重构历史页面时采用渐进迁移，不要求一次性把已有手写 CSS 全量改为 Tailwind；每次迁移应同步清理已不再使用的旧样式。
+- 复杂工具界面（例如视频编辑器）可以阶段性保留局部 CSS，但新增通用操作控件和状态展示仍应优先走官方 `shadcn/ui` 组件。
+
 ## 接口加载状态
 
 - 所有会触发接口请求的用户操作，必须在请求期间展示明确的 loading 提示。

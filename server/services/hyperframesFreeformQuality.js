@@ -30,7 +30,17 @@ async function runHyperframesCheck(projectDir, name, args, runCommand) {
 }
 
 function summarizeFailedCheck(result = {}) {
-  return result.error || result.stdout || result.stderr || `exit ${result.code}`;
+  const meaningfulLines = value => String(value || '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(line => !/^npm warn\b/i.test(line))
+    .filter(line => !/^◆\s+Inspecting layout\b/.test(line));
+  if (result.error) return result.error;
+  const stderr = meaningfulLines(result.stderr).join('\n');
+  if (stderr) return stderr;
+  const stdout = meaningfulLines(result.stdout).join('\n');
+  return stdout || String(result.stdout || result.stderr || '').trim() || `exit ${result.code}`;
 }
 
 async function checkFreeformProject({ projectDir, runCommand = defaultRunCommand } = {}) {

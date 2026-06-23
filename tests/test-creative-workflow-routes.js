@@ -1,8 +1,25 @@
 const assert = require('assert');
 const express = require('express');
+const fs = require('fs');
 const http = require('http');
+const os = require('os');
+const path = require('path');
 
 const creativeWorkflowsRouter = require('../server/routes/creativeWorkflows');
+const workflows = require('../server/services/creativeWorkflows');
+const { createCreativeTaskRegistry, defaultRegistry } = require('../server/services/creativeTaskRegistry');
+
+const SSE_HELPER_TIMEOUT_MS = 1000;
+
+function normalizeTimeoutMs(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : SSE_HELPER_TIMEOUT_MS;
+}
+
+function sseTimeoutError(pathName, body) {
+  const snippet = String(body || '').slice(0, 500);
+  return new Error(`SSE 请求超时：${pathName}，已收到：${snippet}`);
+}
 
 async function requestJson(server, method, pathName, body) {
   const { port } = server.address();
@@ -36,14 +53,171 @@ async function requestJson(server, method, pathName, body) {
   });
 }
 
+async function requestSse(server, pathName, body, options = {}) {
+  const { port } = server.address();
+  const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
+  return new Promise((resolve, reject) => {
+    let text = '';
+    let settled = false;
+    let req = null;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+    const timer = setTimeout(() => {
+      const error = sseTimeoutError(pathName, text);
+      req?.destroy(error);
+      settle(reject, error);
+    }, timeoutMs);
+    req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathName,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+    }, res => {
+      res.setEncoding('utf8');
+      res.on('data', chunk => {
+        text += chunk;
+      });
+      res.on('end', () => settle(resolve, { statusCode: res.statusCode, body: text, headers: res.headers }));
+    });
+    req.on('error', error => settle(reject, error));
+    req.write(JSON.stringify(body || {}));
+    req.end();
+  });
+}
+
+function startSse(server, pathName, body, options = {}) {
+  const { port } = server.address();
+  const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
+  const client = {
+    req: null,
+    response: null,
+    destroy: () => client.req?.destroy(),
+  };
+  client.response = new Promise((resolve, reject) => {
+    let settled = false;
+    let req = null;
+    const responseTimer = setTimeout(() => {
+      const error = sseTimeoutError(pathName, '');
+      req?.destroy(error);
+      if (settled) return;
+      settled = true;
+      reject(error);
+    }, timeoutMs);
+    req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathName,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+      },
+    }, res => {
+      settled = true;
+      clearTimeout(responseTimer);
+      let text = '';
+      let endSettled = false;
+      res.setEncoding('utf8');
+      const ended = new Promise((resolveEnded, rejectEnded) => {
+        const endTimer = setTimeout(() => {
+          const error = sseTimeoutError(pathName, text);
+          req.destroy(error);
+          if (endSettled) return;
+          endSettled = true;
+          rejectEnded(error);
+        }, timeoutMs);
+        const finish = closed => {
+          if (endSettled) return;
+          endSettled = true;
+          clearTimeout(endTimer);
+          resolveEnded({
+            statusCode: res.statusCode,
+            body: text,
+            headers: res.headers,
+            closed,
+          });
+        };
+        res.on('data', chunk => {
+          text += chunk;
+        });
+        res.on('end', () => finish(false));
+        res.on('close', () => finish(true));
+      });
+      resolve({
+        req,
+        res,
+        get body() {
+          return text;
+        },
+        ended,
+        destroy: () => req.destroy(),
+      });
+    });
+    client.req = req;
+    req.on('error', error => {
+      clearTimeout(responseTimer);
+      if (!settled) reject(error);
+    });
+    req.write(JSON.stringify(body || {}));
+    req.end();
+  });
+  return client;
+}
+
+async function openSse(server, pathName, body) {
+  return startSse(server, pathName, body).response;
+}
+
 async function listen(app) {
   return new Promise(resolve => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server));
   });
 }
 
-async function waitImmediate() {
-  await new Promise(resolve => setImmediate(resolve));
+async function waitFor(assertion, timeoutMs = 1000) {
+  const startedAt = Date.now();
+  let lastError;
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      return assertion();
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  }
+  throw lastError;
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function tempRoot() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'creative-workflow-route-'));
+}
+
+function routeWorkflowServices(now = '2026-06-12T12:00:00.000Z') {
+  return {
+    idFactory: () => '202606121200000005',
+    now: () => now,
+    researchService: {
+      createResearchContext: async ({ now: n }) => ({
+        status: 'disabled',
+        query: '',
+        sources: [],
+        summary: '',
+        updated_at: n,
+      }),
+    },
+  };
 }
 
 function createFakeCreativeWorkflows(options = {}) {
@@ -100,6 +274,43 @@ function createFakeCreativeWorkflows(options = {}) {
         };
       },
     },
+    taskService: {
+      startCreativeWorkflowTask: async id => ({
+        success: true,
+        workflow_id: id,
+        task_id: 'creative-task-route',
+        active_task: {
+          task_id: 'creative-task-route',
+          workflow_id: id,
+          operation_id: 'workflow-op-route',
+          kind: 'creative_workflow',
+          status: 'running',
+        },
+      }),
+      subscribeCreativeWorkflowEvents: async ({ workflowId: eventWorkflowId, taskId, sinceSeq, writeEvent }) => {
+        writeEvent({
+          seq: sinceSeq + 1,
+          type: 'stage_progress',
+          workflow_id: eventWorkflowId,
+          task_id: taskId,
+          message: '正在生成工程...',
+        });
+        writeEvent({
+          seq: sinceSeq + 2,
+          type: 'task_stream_closed',
+          workflow_id: eventWorkflowId,
+          task_id: taskId,
+          status: 'done',
+          final_seq: sinceSeq + 2,
+          message: '任务事件流已结束。',
+        });
+      },
+      getActiveCreativeWorkflowTask: async id => ({
+        success: true,
+        workflow_id: id,
+        active_task: { task_id: 'creative-task-route', workflow_id: id, status: 'running' },
+      }),
+    },
   };
 }
 
@@ -107,10 +318,12 @@ async function assertMountedPost(server, workflowId) {
   const createResponse = await requestJson(server, 'POST', '/api/creative-workflows', {
     input: '做一个新视频',
   });
-  assert.strictEqual(createResponse.statusCode, 200);
+  assert.strictEqual(createResponse.statusCode, 202);
   assert.strictEqual(createResponse.body.success, true);
   assert.strictEqual(createResponse.body.status, 'queued');
   assert.strictEqual(createResponse.body.workflow_id, workflowId);
+  assert.strictEqual(createResponse.body.task_id, 'creative-task-route');
+  assert.strictEqual(createResponse.body.active_task.status, 'running');
   assert.strictEqual(createResponse.body.creative_context.asset_context.status, 'disabled');
   assert.match(createResponse.body.message, /创作任务已创建/);
 }
@@ -121,6 +334,7 @@ async function runIsolatedRouterTests() {
 
   app.use(express.json());
   app.locals.creativeWorkflows = fake.service;
+  app.locals.creativeWorkflowTasks = fake.taskService;
   app.use('/api/creative-workflows', creativeWorkflowsRouter);
 
   const server = await listen(app);
@@ -128,13 +342,23 @@ async function runIsolatedRouterTests() {
   try {
     await assertMountedPost(server, fake.workflowId);
 
-    await waitImmediate();
-    assert.deepStrictEqual(fake.runWorkflowIds, [fake.workflowId]);
-
     const getResponse = await requestJson(server, 'GET', `/api/creative-workflows/${fake.workflowId}`);
     assert.strictEqual(getResponse.statusCode, 200);
     assert.strictEqual(getResponse.body.success, true);
     assert.strictEqual(getResponse.body.data.workflow_id, fake.workflowId);
+
+    const sseResponse = await requestSse(server, `/api/creative-workflows/${fake.workflowId}/events`, {
+      task_id: 'creative-task-route',
+      since_seq: 0,
+    });
+    assert.strictEqual(sseResponse.statusCode, 200);
+    assert.match(sseResponse.headers['content-type'], /text\/event-stream/);
+    assert.match(sseResponse.body, /event: stage_progress/);
+    assert.match(sseResponse.body, /任务事件流已结束/);
+
+    const activeResponse = await requestJson(server, 'GET', `/api/creative-workflows/${fake.workflowId}/tasks/active`);
+    assert.strictEqual(activeResponse.statusCode, 200);
+    assert.strictEqual(activeResponse.body.active_task.task_id, 'creative-task-route');
 
     fake.setCreateMode('bad-input');
     const badInputResponse = await requestJson(server, 'POST', '/api/creative-workflows', {});
@@ -164,16 +388,328 @@ async function runRealAppMountTest() {
   const realApp = require('../server/app');
   const fake = createFakeCreativeWorkflows({ workflowId: '202606121200000003' });
   realApp.locals.creativeWorkflows = fake.service;
+  realApp.locals.creativeWorkflowTasks = fake.taskService;
 
   const server = await listen(realApp);
 
   try {
     await assertMountedPost(server, fake.workflowId);
-
-    await waitImmediate();
-    assert.deepStrictEqual(fake.runWorkflowIds, [fake.workflowId]);
   } finally {
     delete realApp.locals.creativeWorkflows;
+    delete realApp.locals.creativeWorkflowTasks;
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runCreateRouteReturnsBeforeBackgroundResearchSettlesTest() {
+  const app = express();
+  const rootDir = tempRoot();
+  const mediaRoot = path.join(rootDir, 'media');
+  const registry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-background-research',
+  });
+  let resolveResearch;
+  const services = {
+    ...routeWorkflowServices(),
+    researchService: {
+      createResearchContext: async ({ enabled, query, now }) => new Promise(resolve => {
+        resolveResearch = () => resolve(enabled
+          ? { status: 'ready', query, sources: [], summary: '后台研究完成', updated_at: now }
+          : { status: 'disabled', query: '', sources: [], summary: '', updated_at: now });
+      }),
+    },
+  };
+  const service = {
+    createCreativeWorkflow: (payload) => workflows.createCreativeWorkflow(payload, { rootDir, mediaRoot, services }),
+    patchCreativeWorkflowTaskSummary: (workflowId, patch) => workflows.patchCreativeWorkflowTaskSummary(workflowId, patch, { rootDir, services }),
+    runCreativeWorkflow: (workflowId, options = {}) => workflows.runCreativeWorkflow(workflowId, { ...options, rootDir, mediaRoot, services }),
+  };
+
+  app.use(express.json());
+  app.locals.creativeTaskRegistry = registry;
+  app.locals.creativeWorkflows = service;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+  try {
+    const response = await Promise.race([
+      requestJson(server, 'POST', '/api/creative-workflows', {
+        input: '做一期关于 AI 视频生产的知识科普',
+        useResearch: true,
+      }),
+      delay(100).then(() => ({ timedOut: true })),
+    ]);
+    assert.notStrictEqual(response.timedOut, true);
+    assert.strictEqual(response.statusCode, 202);
+    assert.strictEqual(response.body.task_id, 'creative-task-background-research');
+    assert.strictEqual(response.body.research_context.status, 'pending');
+  } finally {
+    resolveResearch?.();
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runCreateRouteWithCustomWorkflowServiceWithoutRegistryFailsTest() {
+  const app = express();
+  const workflowId = '202606121200000004';
+  const patchCalls = [];
+  const runCalls = [];
+  const fakeService = {
+    createCreativeWorkflow: async () => ({
+      success: true,
+      status: 'queued',
+      workflow_id: workflowId,
+      creative_context: { asset_context: { status: 'disabled' } },
+      message: '创作任务已创建。',
+    }),
+    patchCreativeWorkflowTaskSummary: async (id, patch) => {
+      patchCalls.push({ id, patch });
+      return { success: true, workflow_id: id };
+    },
+    runCreativeWorkflow: async (id, options) => {
+      runCalls.push({ id, hasTaskContext: Boolean(options.taskContext) });
+      return new Promise(() => {});
+    },
+  };
+
+  app.use(express.json());
+  app.locals.creativeWorkflows = fakeService;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    assert.strictEqual(defaultRegistry.activeTaskForWorkflow(workflowId), null);
+    const createResponse = await requestJson(server, 'POST', '/api/creative-workflows', {
+      input: '自定义 workflow service 未注入 registry 时拒绝创建后台任务',
+    });
+    assert.strictEqual(createResponse.statusCode, 500);
+    assert.strictEqual(createResponse.body.success, false);
+    assert.strictEqual(createResponse.body.workflow_id, workflowId);
+    assert.match(createResponse.body.message, /后台创作任务注册表未配置/);
+    assert.strictEqual(defaultRegistry.activeTaskForWorkflow(workflowId), null);
+    assert.deepStrictEqual(patchCalls, []);
+    assert.deepStrictEqual(runCalls, []);
+  } finally {
+    const leakedTask = defaultRegistry.activeTaskForWorkflow(workflowId);
+    if (leakedTask) {
+      defaultRegistry.markDeleted(leakedTask.task_id, '测试清理默认注册表任务。');
+    }
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runCreateRouteUsesInjectedRegistryTest() {
+  const app = express();
+  const workflowId = '202606121200000009';
+  const registry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-create-route-injected',
+    now: () => '2026-06-12T12:00:00.000Z',
+  });
+  const patchCalls = [];
+  const runCalls = [];
+
+  app.use(express.json());
+  app.locals.creativeTaskRegistry = registry;
+  app.locals.creativeWorkflows = {
+    createCreativeWorkflow: async () => ({
+      success: true,
+      status: 'queued',
+      workflow_id: workflowId,
+      creative_context: { asset_context: { status: 'disabled' } },
+      message: '创作任务已创建。',
+    }),
+    patchCreativeWorkflowTaskSummary: async (id, patch) => {
+      patchCalls.push({ id, patch });
+      return { success: true, workflow_id: id };
+    },
+    runCreativeWorkflow: async (id, options) => {
+      runCalls.push({ id, hasTaskContext: Boolean(options.taskContext) });
+      return { success: true, workflow_id: id, status: 'done', message: '完成' };
+    },
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const createResponse = await requestJson(server, 'POST', '/api/creative-workflows', {
+      input: '使用 injected registry 启动后台任务',
+    });
+    assert.strictEqual(createResponse.statusCode, 202);
+    assert.strictEqual(createResponse.body.success, true);
+    assert.strictEqual(createResponse.body.task_id, 'creative-task-create-route-injected');
+    assert.strictEqual(createResponse.body.active_task.task_id, 'creative-task-create-route-injected');
+    assert.strictEqual(createResponse.body.active_task.workflow_id, workflowId);
+    assert.strictEqual(registry.getTask('creative-task-create-route-injected').workflow_id, workflowId);
+    assert.strictEqual(patchCalls[0].id, workflowId);
+    await waitFor(() => assert.deepStrictEqual(runCalls, [{ id: workflowId, hasTaskContext: true }]));
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runActiveTaskRouteUsesInjectedRegistryTest() {
+  const app = express();
+  const workflowId = '202606121200000006';
+  const registry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-active-route-injected',
+    now: () => '2026-06-12T12:00:00.000Z',
+  });
+  registry.createDetachedTask({
+    workflowId,
+    operationId: 'workflow-op-active-route-injected',
+    kind: 'creative_workflow',
+  });
+
+  app.use(express.json());
+  app.locals.creativeTaskRegistry = registry;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const activeResponse = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/tasks/active`);
+    assert.strictEqual(activeResponse.statusCode, 200);
+    assert.strictEqual(activeResponse.body.success, true);
+    assert.strictEqual(activeResponse.body.active_task.task_id, 'creative-task-active-route-injected');
+    assert.strictEqual(activeResponse.body.active_task.workflow_id, workflowId);
+    assert.strictEqual(activeResponse.body.active_task.status, 'running');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runActiveTaskRouteWithCustomWorkflowServiceDoesNotUseDefaultRegistryTest() {
+  const app = express();
+  const workflowId = '202606121200000008';
+  const defaultTaskId = defaultRegistry.createDetachedTask({
+    workflowId,
+    operationId: 'workflow-op-default-should-not-leak',
+    kind: 'creative_workflow',
+  });
+
+  app.use(express.json());
+  app.locals.creativeWorkflows = {
+    getCreativeWorkflow: async id => ({
+      success: true,
+      data: { workflow_id: id },
+    }),
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const activeResponse = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/tasks/active`);
+    assert.strictEqual(activeResponse.statusCode, 200);
+    assert.strictEqual(activeResponse.body.success, true);
+    assert.strictEqual(activeResponse.body.workflow_id, workflowId);
+    assert.strictEqual(activeResponse.body.active_task, null);
+  } finally {
+    defaultRegistry.markDeleted(defaultTaskId, '测试清理默认注册表任务。');
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runEventsRouteUsesInjectedRegistryTest() {
+  const app = express();
+  const workflowId = '202606121200000010';
+  const registry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-events-route-injected',
+    now: () => '2026-06-12T12:00:00.000Z',
+  });
+  const taskId = registry.createDetachedTask({
+    workflowId,
+    operationId: 'workflow-op-events-route-injected',
+    kind: 'creative_workflow',
+  });
+  registry.emit(taskId, {
+    type: 'stage_progress',
+    stage: 'project',
+    progress: 50,
+    message: 'injected registry replay event',
+  });
+  registry.markDone(taskId, 'injected registry done');
+
+  app.use(express.json());
+  app.locals.creativeTaskRegistry = registry;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const sseResponse = await requestSse(server, `/api/creative-workflows/${workflowId}/events`, {
+      task_id: taskId,
+      since_seq: 0,
+    });
+    assert.strictEqual(sseResponse.statusCode, 200);
+    assert.match(sseResponse.headers['content-type'], /text\/event-stream/);
+    assert.match(sseResponse.body, /event: stage_progress/);
+    assert.match(sseResponse.body, /injected registry replay event/);
+    assert.match(sseResponse.body, /event: task_done/);
+    assert.doesNotMatch(sseResponse.body, /未找到后台任务事件流/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runEventsRouteWithCustomWorkflowServiceWithoutRegistryDoesNotLeakTypeErrorTest() {
+  const app = express();
+  const workflowId = '202606121200000011';
+
+  app.use(express.json());
+  app.locals.creativeWorkflows = {
+    getCreativeWorkflow: async id => ({
+      success: true,
+      data: { workflow_id: id },
+    }),
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const sseResponse = await requestSse(server, `/api/creative-workflows/${workflowId}/events`, {
+      task_id: 'creative-task-no-registry',
+      since_seq: 0,
+    });
+    assert.strictEqual(sseResponse.statusCode, 200);
+    assert.match(sseResponse.headers['content-type'], /text\/event-stream/);
+    assert.match(sseResponse.body, /event: task_stream_closed/);
+    assert.match(sseResponse.body, /后台创作任务注册表未配置，无法读取任务事件流。/);
+    assert.doesNotMatch(sseResponse.body, /TypeError|Cannot read properties/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest() {
+  const app = express();
+  const workflowId = '202606121200000007';
+  let capturedTaskRegistry = 'not-called';
+
+  app.use(express.json());
+  app.locals.creativeWorkflows = {
+    getCreativeWorkflow: async (id, options = {}) => {
+      capturedTaskRegistry = options.taskRegistry;
+      return {
+        success: true,
+        data: { workflow_id: id },
+      };
+    },
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const response = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}`);
+    assert.strictEqual(response.statusCode, 200);
+    assert.strictEqual(response.body.success, true);
+    assert.strictEqual(response.body.data.workflow_id, workflowId);
+    assert.ok(!capturedTaskRegistry, 'custom creativeWorkflows service should not receive default global task registry');
+  } finally {
     await new Promise(resolve => server.close(resolve));
   }
 }
@@ -181,6 +717,414 @@ async function runRealAppMountTest() {
 async function run() {
   await runIsolatedRouterTests();
   await runRealAppMountTest();
+  await runCreateRouteReturnsBeforeBackgroundResearchSettlesTest();
+  await runCreateRouteWithCustomWorkflowServiceWithoutRegistryFailsTest();
+  await runCreateRouteUsesInjectedRegistryTest();
+  await runActiveTaskRouteUsesInjectedRegistryTest();
+  await runActiveTaskRouteWithCustomWorkflowServiceDoesNotUseDefaultRegistryTest();
+  await runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryTest();
+  await runGetWorkflowUsesActiveRegistryTest();
+  await runEventsRouteWithCustomWorkflowServiceWithoutRegistryDoesNotLeakTypeErrorTest();
+  await runEventsRouteUsesInjectedRegistryTest();
+  await runSseHelperTimeoutsTest();
+  await runSseWriteBackpressureKeepsSubscriptionTest();
+  await runSseRequestCloseKeepsSubscriptionTest();
+  await runSseRouteCleanupStaticTest();
+  await runEditorRouteTests();
+}
+
+async function runGetWorkflowUsesActiveRegistryTest() {
+  const app = express();
+  const rootDir = tempRoot();
+  const workflowId = '202606121200000005';
+  await workflows.createCreativeWorkflow({ input: '真实路由 active registry 测试', useResearch: false }, {
+    rootDir,
+    services: routeWorkflowServices(),
+  });
+
+  const filePath = workflows.getWorkflowPath(workflowId, rootDir);
+  const record = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  record.status = 'running';
+  record.active_task_id = 'creative-task-route-active';
+  record.active_operation_id = 'workflow-op-route-active';
+  record.task_status = 'running';
+  record.current_stage = 'project';
+  record.current_stage_message = '正在生成工程...';
+  record.stages = record.stages.map(stage => (
+    stage.id === 'project'
+      ? {
+        ...stage,
+        status: 'running',
+        message: '正在生成工程...',
+        started_at: '2026-06-12T12:00:00.000Z',
+        updated_at: '2026-06-12T12:00:00.000Z',
+      }
+      : stage
+  ));
+  fs.writeFileSync(filePath, JSON.stringify(record, null, 2), 'utf-8');
+
+  const registry = createCreativeTaskRegistry({
+    idFactory: () => 'creative-task-route-active',
+    now: () => '2026-06-12T12:20:00.000Z',
+  });
+  registry.createDetachedTask({
+    workflowId,
+    operationId: 'workflow-op-route-active',
+    kind: 'creative_workflow',
+  });
+
+  app.use(express.json());
+  app.locals.creativeTaskRegistry = registry;
+  app.locals.creativeWorkflows = {
+    getCreativeWorkflow: async (id, options = {}) => workflows.getCreativeWorkflow(id, {
+      ...options,
+      rootDir,
+      services: routeWorkflowServices('2026-06-12T12:20:00.000Z'),
+      staleStageTimeoutMs: 10 * 60 * 1000,
+    }),
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const response = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}`);
+    assert.strictEqual(response.statusCode, 200);
+    assert.strictEqual(response.body.success, true);
+    assert.strictEqual(response.body.data.status, 'running');
+    assert.strictEqual(response.body.data.task_status, 'running');
+    assert.strictEqual(response.body.data.active_task_id, 'creative-task-route-active');
+    assert.strictEqual(response.body.data.active_task.task_id, 'creative-task-route-active');
+    assert.strictEqual(response.body.data.stages.find(stage => stage.id === 'project').status, 'running');
+
+    const persisted = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    assert.strictEqual(persisted.status, 'running');
+    assert.strictEqual(persisted.stages.find(stage => stage.id === 'project').status, 'running');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runSseRouteCleanupStaticTest() {
+  const routeSource = fs.readFileSync(path.join(__dirname, '../server/routes/creativeWorkflows.js'), 'utf-8');
+  assert.match(routeSource, /res\.on\('close'/);
+  assert.match(routeSource, /res\.on\('error'/);
+  assert.match(routeSource, /res\.on\('finish'/);
+  assert.match(routeSource, /function cleanup|const cleanup/);
+}
+
+async function runSseHelperTimeoutsTest() {
+  const app = express();
+  app.use(express.json());
+  app.post('/hang-events', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write('event: stage_progress\ndata: {"message":"连接保持中"}\n\n');
+  });
+  const server = await listen(app);
+
+  try {
+    const requestResult = await Promise.race([
+      requestSse(server, '/hang-events', {}, { timeoutMs: 30 }).then(
+        () => 'resolved',
+        error => error,
+      ),
+      delay(120).then(() => 'no-timeout'),
+    ]);
+    assert.notStrictEqual(requestResult, 'no-timeout');
+    assert.ok(requestResult instanceof Error);
+    assert.match(requestResult.message, /\/hang-events/);
+    assert.match(requestResult.message, /连接保持中/);
+
+    const sse = await startSse(server, '/hang-events', {}, { timeoutMs: 30 }).response;
+    const endedResult = await Promise.race([
+      sse.ended.then(
+        () => 'resolved',
+        error => error,
+      ),
+      delay(120).then(() => 'no-timeout'),
+    ]);
+    assert.notStrictEqual(endedResult, 'no-timeout');
+    assert.ok(endedResult instanceof Error);
+    assert.match(endedResult.message, /\/hang-events/);
+    assert.match(endedResult.message, /连接保持中/);
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runSseRequestCloseKeepsSubscriptionTest() {
+  const app = express();
+  const workflowId = '202606141200000001';
+  let unsubscribeCount = 0;
+  let capturedWriteEvent = null;
+  let capturedOnClose = null;
+
+  app.use(express.json());
+  app.use((req, res, next) => {
+    const shouldEmitRequestClose = req.originalUrl === `/api/creative-workflows/${workflowId}/events`;
+    next();
+    if (shouldEmitRequestClose) {
+      setImmediate(() => {
+        assert.strictEqual(req.complete, true);
+        req.emit('close');
+      });
+    }
+  });
+  app.locals.creativeWorkflowTasks = {
+    subscribeCreativeWorkflowEvents: async ({ writeEvent, onClose }) => {
+      capturedWriteEvent = writeEvent;
+      capturedOnClose = onClose;
+      writeEvent({
+        seq: 1,
+        type: 'stage_progress',
+        workflow_id: workflowId,
+        task_id: 'creative-task-sse-close',
+        message: '连接已建立。',
+      });
+      return {
+        success: true,
+        unsubscribe: () => {
+          unsubscribeCount += 1;
+        },
+      };
+    },
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+  let sse = null;
+
+  try {
+    sse = await openSse(server, `/api/creative-workflows/${workflowId}/events`, {
+      task_id: 'creative-task-sse-close',
+      since_seq: 0,
+    });
+    await waitFor(() => assert.strictEqual(unsubscribeCount, 0));
+    await delay(20);
+    assert.strictEqual(unsubscribeCount, 0);
+
+    const wrote = capturedWriteEvent({
+      seq: 2,
+      type: 'stage_progress',
+      workflow_id: workflowId,
+      task_id: 'creative-task-sse-close',
+      message: '后续事件仍可写入。',
+    });
+    assert.strictEqual(wrote, true);
+    await waitFor(() => assert.match(sse.body, /后续事件仍可写入/));
+
+    capturedOnClose();
+    const ended = await sse.ended;
+    assert.strictEqual(ended.statusCode, 200);
+    assert.strictEqual(unsubscribeCount, 1);
+  } finally {
+    if (sse) sse.destroy();
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runSseWriteBackpressureKeepsSubscriptionTest() {
+  const app = express();
+  const workflowId = '202606141200000002';
+  let unsubscribeCount = 0;
+  let capturedWriteEvent = null;
+  let capturedOnClose = null;
+
+  app.use(express.json());
+  app.use((req, res, next) => {
+    const originalWrite = res.write.bind(res);
+    res.write = (chunk, encoding, callback) => {
+      originalWrite(chunk, encoding, callback);
+      return false;
+    };
+    next();
+  });
+  app.locals.creativeWorkflowTasks = {
+    subscribeCreativeWorkflowEvents: async ({ writeEvent, onClose }) => {
+      capturedWriteEvent = writeEvent;
+      capturedOnClose = onClose;
+      return {
+        success: true,
+        unsubscribe: () => {
+          unsubscribeCount += 1;
+        },
+      };
+    },
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+  let sseClient = null;
+  let sse = null;
+
+  try {
+    sseClient = startSse(server, `/api/creative-workflows/${workflowId}/events`, {
+      task_id: 'creative-task-sse-backpressure',
+      since_seq: 0,
+    });
+    const ssePromise = sseClient.response;
+    await waitFor(() => assert.ok(capturedWriteEvent));
+
+    const wrote = capturedWriteEvent({
+      seq: 1,
+      type: 'stage_progress',
+      workflow_id: workflowId,
+      task_id: 'creative-task-sse-backpressure',
+      message: '写入遇到背压但连接保持。',
+    });
+    assert.strictEqual(wrote, true);
+
+    sse = await ssePromise;
+    await waitFor(() => assert.match(sse.body, /写入遇到背压但连接保持/));
+    await delay(20);
+    assert.strictEqual(unsubscribeCount, 0);
+
+    capturedOnClose();
+    const ended = await sse.ended;
+    assert.strictEqual(ended.statusCode, 200);
+    assert.strictEqual(unsubscribeCount, 1);
+  } finally {
+    if (sse) sse.destroy();
+    if (sseClient) sseClient.destroy();
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runEditorRouteTests() {
+  const workflowId = '202606131200000001';
+  const sceneSpec = {
+    title: '测试',
+    scenes: [{ id: 'scene_01', duration: 5, narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }],
+  };
+  const frameSpecs = {
+    frames: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 5, template: 'hero_title' }],
+  };
+
+  const fakeService = {
+    getCreativeWorkflowVideoSpec: async id => ({
+      success: true,
+      workflow_id: id,
+      scene_spec: sceneSpec,
+      frame_specs: frameSpecs,
+      render_versions: [{ id: 'render_001', status: 'rendered' }],
+    }),
+    patchCreativeWorkflowVideoSpec: async (id, payload) => ({
+      success: true,
+      workflow_id: id,
+      scene_spec: payload.scene_spec || sceneSpec,
+      frame_specs: payload.frame_specs || frameSpecs,
+      requires_tts: false,
+      requires_render: true,
+      message: '视频规格已保存。',
+    }),
+    getCreativeWorkflowSceneSpec: async id => ({
+      success: true,
+      workflow_id: id,
+      scene_spec: sceneSpec,
+    }),
+    patchCreativeWorkflowSceneSpec: async (id, edit) => ({
+      success: true,
+      workflow_id: id,
+      scene_spec: { ...sceneSpec, title: 'edited' },
+      edit_type: edit.type,
+      requires_tts: false,
+      requires_render: true,
+      message: '编辑已保存。',
+    }),
+    rewriteCreativeWorkflowScene: async (id, sceneId) => ({
+      success: true,
+      workflow_id: id,
+      scene_id: sceneId,
+      scene_spec: { ...sceneSpec, title: 'rewritten' },
+      requires_tts: true,
+      requires_render: true,
+      message: '场景已重写。',
+    }),
+    ttsCreativeWorkflowScene: async (id, sceneId) => ({
+      success: true,
+      workflow_id: id,
+      scene_id: sceneId,
+      output_path: '/tmp/output.mp4',
+      message: '场景配音已更新。',
+    }),
+    rerenderCreativeWorkflow: async id => ({
+      success: true,
+      workflow_id: id,
+      output_path: '/tmp/output.mp4',
+      message: '成片已重新渲染。',
+    }),
+    remixCreativeWorkflow: async (id, payload) => ({
+      success: true,
+      source_workflow_id: id,
+      workflow_id: payload?.workflow_id || '202606131200000002',
+      message: '二创任务已创建。',
+    }),
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.locals.creativeWorkflows = fakeService;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+
+  try {
+    const getVideoSpecRes = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/video-spec`);
+    assert.strictEqual(getVideoSpecRes.statusCode, 200);
+    assert.strictEqual(getVideoSpecRes.body.success, true);
+    assert.strictEqual(getVideoSpecRes.body.scene_spec.title, '测试');
+    assert.strictEqual(getVideoSpecRes.body.frame_specs.frames[0].id, 'frame_01_01');
+
+    const patchVideoSpecRes = await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/video-spec`, { scene_spec: { ...sceneSpec, title: 'edited video' }, frame_specs: frameSpecs });
+    assert.strictEqual(patchVideoSpecRes.statusCode, 200);
+    assert.strictEqual(patchVideoSpecRes.body.success, true);
+    assert.strictEqual(patchVideoSpecRes.body.requires_render, true);
+
+    const getRes = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/scene-spec`);
+    assert.strictEqual(getRes.statusCode, 200);
+    assert.strictEqual(getRes.body.success, true);
+    assert.strictEqual(getRes.body.scene_spec.title, '测试');
+
+    const patchRes = await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/scene-spec`, { type: 'caption_text', scene_id: 'scene_01', caption_id: 'c1', text: '新字幕' });
+    assert.strictEqual(patchRes.statusCode, 200);
+    assert.strictEqual(patchRes.body.success, true);
+    assert.strictEqual(patchRes.body.requires_render, true);
+
+    const rewriteRes = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/scenes/scene_01/rewrite`, { narration_text: '新旁白' });
+    assert.strictEqual(rewriteRes.statusCode, 200);
+    assert.strictEqual(rewriteRes.body.success, true);
+    assert.strictEqual(rewriteRes.body.requires_tts, true);
+
+    const ttsRes = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/scenes/scene_01/tts`, {});
+    assert.strictEqual(ttsRes.statusCode, 200);
+    assert.strictEqual(ttsRes.body.success, true);
+    assert.strictEqual(ttsRes.body.scene_id, 'scene_01');
+
+    const rerenderRes = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/rerender`, {});
+    assert.strictEqual(rerenderRes.statusCode, 200);
+    assert.strictEqual(rerenderRes.body.success, true);
+    assert.strictEqual(rerenderRes.body.output_path, '/tmp/output.mp4');
+
+    const remixRes = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/remix`, { workflow_id: '202606131200000099' });
+    assert.strictEqual(remixRes.statusCode, 200);
+    assert.strictEqual(remixRes.body.success, true);
+    assert.strictEqual(remixRes.body.source_workflow_id, workflowId);
+
+    const invalidId = await requestJson(server, 'GET', '/api/creative-workflows/invalid!/scene-spec');
+    assert.strictEqual(invalidId.statusCode, 400);
+    assert.strictEqual(invalidId.body.success, false);
+
+    const emptyScene = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/scenes/%20/rewrite`, {});
+    assert.strictEqual(emptyScene.statusCode, 400);
+    assert.strictEqual(emptyScene.body.success, false);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
 }
 
 run().then(() => {

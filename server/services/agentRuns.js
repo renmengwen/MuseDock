@@ -21,6 +21,8 @@ const defaultHyperframesSkillContext = require('./hyperframesSkillContext');
 const defaultHyperframesFreeformAgent = require('./hyperframesFreeformAgent');
 const defaultHyperframesFreeformProject = require('./hyperframesFreeformProject');
 const defaultHyperframesFreeformQuality = require('./hyperframesFreeformQuality');
+const defaultHyperframesSceneSpecComposer = require('./hyperframesSceneSpecComposer');
+const defaultCreativeVideoWorkflowFacade = require('./creative-video/workflowFacade');
 
 const TEMPLATE_VIRAL_REWRITE = 'viral_rewrite';
 const MAX_COMMENTS_CHARS = agentTemplates.MAX_COMMENTS_CHARS;
@@ -68,6 +70,10 @@ function isSafeRunId(runId) {
   if (!value || value !== path.basename(value)) return false;
   if (value.includes('..') || value.includes('/') || value.includes('\\')) return false;
   return /^[A-Za-z0-9_.-]+$/.test(value);
+}
+
+function buildHtmlVideoExportFileUrl(workflowId, exportId) {
+  return `/api/creative-workflows/${encodeURIComponent(String(workflowId))}/html-video-project/exports/${encodeURIComponent(String(exportId))}/file`;
 }
 
 function createInvalidAwemeResult(awemeId) {
@@ -1436,8 +1442,16 @@ async function generateDouyinRunHyperframesFreeformBrief(awemeId, runId, options
     );
   }
   if (!parsed.success) {
+    const rawText = String(modelResult.text || modelResult.raw_output || '');
     const message = parsed.message || '解析导演策划失败。';
-    logEvent(logger, 'warn', { ...baseLog, stage: 'parse_failed', message, ...elapsedMeta() });
+    logEvent(logger, 'warn', {
+      ...baseLog,
+      stage: 'parse_failed',
+      message,
+      raw_text_preview: rawText.slice(0, 500),
+      raw_text_length: rawText.length,
+      ...elapsedMeta(),
+    });
     return markFreeformBriefFailed(awemeId, runId, message, options, operationId, elapsedMeta());
   }
   logEvent(logger, 'info', {
@@ -1509,6 +1523,7 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
 
   const operationId = createFreeformOperationId('project');
   const logger = getLogger(options);
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
   await updateRunHyperframesFreeform(awemeId, runId, current => ({
     status: 'generating',
     project: {
@@ -1518,6 +1533,118 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
       message: '正在生成 HyperFrames 工程...',
     },
   }), options);
+
+  if (options.useLegacyFreeformProject !== true && options.useHtmlVideoLiteWorkflow === true) {
+    const facade = options.creativeVideoWorkflowFacade || defaultCreativeVideoWorkflowFacade;
+    let result;
+    const optionCreativeContext = options.projectOptions?.creative_context
+      && typeof options.projectOptions.creative_context === 'object'
+      && !Array.isArray(options.projectOptions.creative_context)
+      ? options.projectOptions.creative_context
+      : {};
+    try {
+      result = await facade.generateCreativeVideoProject({
+        workflowId: String(awemeId),
+        runId: String(runId),
+        creativeContext: {
+          ...optionCreativeContext,
+          run: detail.data,
+          brief: currentState.brief.data || {},
+          audio: currentState.audio || {},
+          input: optionCreativeContext.input || options.creativeContextInput || {},
+        },
+        target: options.projectOptions || {},
+        rootDir: options.rootDir,
+        services: options.creativeVideoServices || {},
+        skipValidation: options.skipValidation === true,
+        onProgress: event => {
+          if (!onProgress) return undefined;
+          return Promise.resolve()
+            .then(() => onProgress({ stage: 'project', ...event }))
+            .catch(() => undefined);
+        },
+      });
+    } catch (error) {
+      result = {
+        success: false,
+        message: `html-video lite 成片失败：${error.message || '未知错误'}`,
+      };
+    }
+    if (!result.success) {
+      return markFreeformProjectFailed(awemeId, runId, result.message || 'html-video lite 成片失败。', options, operationId);
+    }
+    const renderMode = result.render_mode || '';
+    const isHtmlVideoProduction = renderMode === 'html-video';
+    const htmlVideoProjectPath = isHtmlVideoProduction
+      ? (result.html_video_project_path || result.project_dir || '')
+      : '';
+    const projectDir = htmlVideoProjectPath || result.project_dir || '';
+    const latestExport = Array.isArray(result.project?.exports) ? result.project.exports.at(-1) : null;
+    const outputUrl = latestExport?.id
+      ? buildHtmlVideoExportFileUrl(awemeId, latestExport.id)
+      : defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'output.mp4');
+    const updated = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'project', operationId, current => ({
+      status: 'ready',
+      project_dir: projectDir,
+      project: {
+        ...current.project,
+        status: 'ready',
+        operation_id: operationId,
+        message: result.message || 'html-video lite 工程已生成。',
+        project_dir: projectDir,
+        html_video_project_path: htmlVideoProjectPath,
+        render_mode: renderMode,
+        html_video_diagnostics: result.html_video_diagnostics || result.diagnostics || [],
+        legacy_fallback_reason: result.legacy_fallback_reason || '',
+        files: mapFreeformProjectFilesToDir((result.files || []).map(name => ({ name })), projectDir),
+        scene_spec: result.scene_spec,
+        frame_specs: result.frame_specs,
+      },
+      audio: {
+        ...current.audio,
+        status: 'ready',
+        manifest: result.audio_manifest,
+      },
+      render: {
+        ...current.render,
+        status: 'rendered',
+        output_path: result.output_path,
+        output_url: outputUrl,
+        render_mode: renderMode,
+        render_versions: [{
+          id: `${runId}-html-video-lite`,
+          status: 'rendered',
+          output_path: result.output_path,
+          output_url: outputUrl,
+          message: '渲染完成。',
+          created_at: new Date().toISOString(),
+        }],
+        message: '渲染完成。',
+      },
+      visual_inspect: {
+        ...current.visual_inspect,
+        status: 'passed',
+        report: result.visual_report,
+        issues: result.visual_report?.issues || [],
+        message: '视觉质检通过。',
+      },
+    }), options);
+    if (!updated.success) {
+      return createFreeformFailureResponse(
+        awemeId,
+        runId,
+        updated.hyperframes_freeform || null,
+        updated.message || '已有更新的生成任务完成，已忽略旧结果。',
+      );
+    }
+    return {
+      success: true,
+      aweme_id: String(awemeId),
+      run_id: String(runId),
+      message: result.message || 'html-video lite 成片完成。',
+      hyperframes_freeform: updated.data.hyperframes_freeform,
+    };
+  }
 
   const skillContext = options.skillContext || defaultHyperframesSkillContext;
   let context;
@@ -1540,13 +1667,23 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
 
   const freeformAgent = options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent;
   let messages;
+  let useSceneSpec = options.useSceneSpec !== false;
   try {
-    messages = freeformAgent.buildFreeformProjectMessages({
-      run: detail.data,
-      brief: currentState.brief.data || {},
-      skillContext: context.prompt_context,
-      options: options.projectOptions || {},
-    });
+    if (useSceneSpec) {
+      messages = freeformAgent.buildSceneSpecMessages({
+        run: detail.data,
+        brief: currentState.brief.data || {},
+        skillContext: context.prompt_context,
+        options: options.projectOptions || {},
+      });
+    } else {
+      messages = freeformAgent.buildFreeformProjectMessages({
+        run: detail.data,
+        brief: currentState.brief.data || {},
+        skillContext: context.prompt_context,
+        options: options.projectOptions || {},
+      });
+    }
   } catch (error) {
     return markFreeformProjectFailed(
       awemeId,
@@ -1585,8 +1722,28 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
   }
 
   let parsed;
+  let sceneSpec = null;
   try {
-    parsed = freeformAgent.parseFreeformProjectResponse(modelResult.text || modelResult.raw_output || '');
+    if (useSceneSpec) {
+      parsed = freeformAgent.parseSceneSpecResponse(modelResult.text || modelResult.raw_output || '');
+      if (parsed.success) {
+        sceneSpec = parsed.scene_spec;
+        const composer = options.hyperframesSceneSpecComposer || defaultHyperframesSceneSpecComposer;
+        const composed = composer.composeHyperframesProjectFiles(sceneSpec);
+        if (!composed.success) {
+          return markFreeformProjectFailed(
+            awemeId,
+            runId,
+            `场景规格工程生成失败：${composed.message || '规格验证失败'}`,
+            options,
+            operationId,
+          );
+        }
+        parsed = { success: true, summary: '工程已从场景规格生成', files: composed.files };
+      }
+    } else {
+      parsed = freeformAgent.parseFreeformProjectResponse(modelResult.text || modelResult.raw_output || '');
+    }
   } catch (error) {
     return markFreeformProjectFailed(
       awemeId,
@@ -1705,6 +1862,7 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
           index_path: indexPath,
           files,
           message,
+          scene_spec: sceneSpec || current.project.scene_spec || null,
         },
       }));
       const updatedRun = {

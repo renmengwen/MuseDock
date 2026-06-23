@@ -108,7 +108,7 @@ async function readStreamResponse(response, apiKey, options = {}) {
           };
         }
         events.push(sanitizeRawResponse(parsed, apiKey));
-        const delta = parsed?.choices?.[0]?.delta?.content;
+        const delta = extractContentText(parsed?.choices?.[0]?.delta?.content);
         if (typeof delta === 'string') text += delta;
       }
     }
@@ -162,6 +162,42 @@ function toModelInfo(provider, modelId) {
   };
 }
 
+function extractContentText(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    const parts = value
+      .map(item => extractContentText(item))
+      .filter(part => typeof part === 'string');
+    return parts.length ? parts.join('') : undefined;
+  }
+  if (value && typeof value === 'object') {
+    if (typeof value.text === 'string') return value.text;
+    if (typeof value.content === 'string' || Array.isArray(value.content)) {
+      return extractContentText(value.content);
+    }
+  }
+  return undefined;
+}
+
+function extractOutputArrayText(output) {
+  if (!Array.isArray(output)) return undefined;
+  const parts = [];
+  for (const item of output) {
+    if (!item || typeof item !== 'object') continue;
+    const text = extractContentText(item.content);
+    if (typeof text === 'string') parts.push(text);
+  }
+  return parts.length ? parts.join('') : undefined;
+}
+
+function extractResponseText(rawResponse) {
+  const chatText = extractContentText(rawResponse?.choices?.[0]?.message?.content);
+  if (typeof chatText === 'string') return chatText;
+  const outputText = extractContentText(rawResponse?.output_text);
+  if (typeof outputText === 'string') return outputText;
+  return extractOutputArrayText(rawResponse?.output);
+}
+
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -170,12 +206,14 @@ function shouldRetryStatus(status) {
   return [502, 503, 504].includes(Number(status));
 }
 
-function buildChatCompletionsBody({ modelId, messages, temperature, stream }) {
+function buildChatCompletionsBody({ modelId, messages, temperature, stream, tools, tool_choice }) {
   return JSON.stringify({
     model: modelId,
     messages,
     temperature,
     ...(stream ? { stream: true } : {}),
+    ...(tools ? { tools } : {}),
+    ...(tool_choice ? { tool_choice } : {}),
   });
 }
 
@@ -204,7 +242,7 @@ function getAbortErrorMessage(error, timeoutMs) {
   return `文本模型请求超时：${Math.round(Number(timeoutMs) / 1000)} 秒内未返回结果。`;
 }
 
-async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl, timeoutMs }) {
+async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl, timeoutMs, tools, tool_choice }) {
   const timeout = createTimeoutSignal(timeoutMs);
   try {
     const response = await fetchImpl(`${baseUrl}/chat/completions`, {
@@ -213,7 +251,7 @@ async function postChatCompletions({ baseUrl, apiKey, modelId, messages, tempera
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: buildChatCompletionsBody({ modelId, messages, temperature, stream }),
+      body: buildChatCompletionsBody({ modelId, messages, temperature, stream, tools, tool_choice }),
       signal: timeout.signal,
     });
     if (response && typeof response === 'object') {
@@ -243,6 +281,27 @@ function isAbortLikeError(error) {
   return error?.name === 'AbortError' || /abort|aborted|超时|timeout/i.test(normalizeString(error?.message));
 }
 
+function getFetchErrorDetail(error, apiKey) {
+  const parts = [
+    normalizeString(error?.message),
+    normalizeString(error?.cause?.code),
+    normalizeString(error?.cause?.message),
+  ].filter(Boolean);
+  return sanitizeErrorDetail([...new Set(parts)].join('：'), apiKey);
+}
+
+function isRetryableNetworkError(error) {
+  if (!error) return false;
+  if (isAbortLikeError(error)) return false;
+  const code = normalizeString(error?.cause?.code || error?.code).toUpperCase();
+  if (['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET'].includes(code)) {
+    return true;
+  }
+  return /fetch failed|network|socket|connect|econnreset|etimedout|eai_again|enotfound/i.test(
+    `${normalizeString(error?.message)} ${normalizeString(error?.cause?.message)}`,
+  );
+}
+
 async function callTextModel(options = {}) {
   const {
     messages = [],
@@ -257,6 +316,8 @@ async function callTextModel(options = {}) {
     requestTimeoutMs = 180000,
     streamChunkTimeoutMs,
     logger,
+    tools,
+    tool_choice,
   } = options;
 
   const log = logger && typeof logger === 'object' ? logger : null;
@@ -304,6 +365,8 @@ async function callTextModel(options = {}) {
         stream,
         fetchImpl,
         timeoutMs: requestTimeoutMs,
+        tools,
+        tool_choice,
       });
       lastFetchError = null;
     } catch (error) {
@@ -317,8 +380,17 @@ async function callTextModel(options = {}) {
           continue;
         }
       }
+      if (isRetryableNetworkError(error)) {
+        const detail = getFetchErrorDetail(error, apiKey) || '网络请求异常';
+        if (log) log.warn(`${requestLabel} — 第 ${attempt + 1} 次网络请求失败：${detail}，${attempt < retryLimit ? '重试中...' : '重试已用尽'}`);
+        if (attempt < retryLimit) {
+          await wait(retryDelayMs * (attempt + 1));
+          attempt += 1;
+          continue;
+        }
+      }
       if (!isAbortLikeError(error)) {
-        const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
+        const detail = getFetchErrorDetail(error, apiKey) || '网络请求异常';
         return {
           success: false,
           configured: true,
@@ -354,6 +426,8 @@ async function callTextModel(options = {}) {
         stream: false,
         fetchImpl,
         timeoutMs: requestTimeoutMs,
+        tools,
+        tool_choice,
       });
     } catch (error) {
       const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
@@ -372,8 +446,7 @@ async function callTextModel(options = {}) {
       const parsedResponse = await readJsonResponse(response, apiKey);
       cleanupResponseTimeout(response);
       const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
-      const text = rawResponse && rawResponse.choices && rawResponse.choices[0]
-        && rawResponse.choices[0].message && rawResponse.choices[0].message.content;
+      const text = extractResponseText(rawResponse);
       if (typeof text === 'string') {
         return {
           success: true,
@@ -424,6 +497,56 @@ async function callTextModel(options = {}) {
       });
     } catch (error) {
       cleanupResponseTimeout(response);
+      if (fallbackToNonStreamOnGatewayTimeout && isAbortLikeError(error)) {
+        if (log) log.warn(`${requestLabel} — 流式响应读取超时，降级为非流式重试`);
+        try {
+          const fallbackResponse = await postChatCompletions({
+            baseUrl,
+            apiKey,
+            modelId,
+            messages,
+            temperature,
+            stream: false,
+            fetchImpl,
+            timeoutMs: requestTimeoutMs,
+            tools,
+            tool_choice,
+          });
+          if (fallbackResponse.ok) {
+            const parsedResponse = await readJsonResponse(fallbackResponse, apiKey);
+            cleanupResponseTimeout(fallbackResponse);
+            const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
+            const text = extractResponseText(rawResponse);
+            if (typeof text === 'string') {
+              return {
+                success: true,
+                configured: true,
+                text,
+                model: toModelInfo(provider, modelId),
+                raw_response: rawResponse,
+                fallback: {
+                  from_stream: true,
+                  reason: 'stream_timeout',
+                },
+              };
+            }
+          } else {
+            cleanupResponseTimeout(fallbackResponse);
+          }
+        } catch (fallbackError) {
+          const detail = sanitizeErrorDetail(fallbackError && fallbackError.message, apiKey) || '网络请求异常';
+          return {
+            success: false,
+            configured: true,
+            message: `文本模型调用失败：${detail}`,
+            model: toModelInfo(provider, modelId),
+            fallback: {
+              from_stream: true,
+              reason: 'stream_timeout',
+            },
+          };
+        }
+      }
       const detail = sanitizeErrorDetail(isAbortLikeError(error)
         ? getAbortErrorMessage(error, requestTimeoutMs)
         : error?.message, apiKey) || '读取流式响应失败';
@@ -466,7 +589,7 @@ async function callTextModel(options = {}) {
 
   const parsedResponse = await readJsonResponse(response, apiKey);
   cleanupResponseTimeout(response);
-  const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
+  let rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
 
   if (parsedResponse.parseError && parsedResponse.rawText) {
     return {
@@ -482,8 +605,45 @@ async function callTextModel(options = {}) {
     };
   }
 
-  const text = rawResponse && rawResponse.choices && rawResponse.choices[0]
-    && rawResponse.choices[0].message && rawResponse.choices[0].message.content;
+  let text = extractResponseText(rawResponse);
+
+  for (let missingTextRetry = 0; typeof text !== 'string' && missingTextRetry < retryLimit; missingTextRetry += 1) {
+    if (log) log.warn(`${requestLabel} — 返回结果缺少文本内容，重试中...`);
+    await wait(retryDelayMs * (missingTextRetry + 1));
+    let retryResponse;
+    try {
+      retryResponse = await postChatCompletions({
+        baseUrl,
+        apiKey,
+        modelId,
+        messages,
+        temperature,
+        stream: false,
+        fetchImpl,
+        timeoutMs: requestTimeoutMs,
+        tools,
+        tool_choice,
+      });
+    } catch (error) {
+      const detail = getFetchErrorDetail(error, apiKey) || '网络请求异常';
+      return {
+        success: false,
+        configured: true,
+        message: `文本模型调用失败：${detail}`,
+        model: toModelInfo(provider, modelId),
+      };
+    }
+    if (!retryResponse.ok) {
+      const retryParsed = await readJsonResponse(retryResponse, apiKey);
+      cleanupResponseTimeout(retryResponse);
+      rawResponse = sanitizeRawResponse(retryParsed.data, apiKey);
+      break;
+    }
+    const retryParsed = await readJsonResponse(retryResponse, apiKey);
+    cleanupResponseTimeout(retryResponse);
+    rawResponse = sanitizeRawResponse(retryParsed.data, apiKey);
+    text = extractResponseText(rawResponse);
+  }
 
   if (typeof text !== 'string') {
     return {

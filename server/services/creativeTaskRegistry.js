@@ -1,0 +1,453 @@
+const crypto = require('crypto');
+
+const { createTaskEvent, isTerminalEvent } = require('./creativeTaskEvents');
+
+const DEFAULT_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_MAX_EVENTS_PER_TASK = 1000;
+const DEFAULT_MAX_FINISHED_TASKS = 100;
+
+function defaultNow() {
+  return new Date().toISOString();
+}
+
+function sanitizeIsoStamp(value) {
+  return String(value || defaultNow()).replace(/[^0-9A-Za-z]/g, '');
+}
+
+function defaultIdFactory() {
+  const stamp = sanitizeIsoStamp(defaultNow());
+  const randomHex = crypto.randomBytes(3).toString('hex');
+  return `creative-task-${stamp}-${randomHex}`;
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return fallback;
+  }
+  return Math.floor(number);
+}
+
+function normalizeTtlMs(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) {
+    return DEFAULT_TTL_MS;
+  }
+  return number;
+}
+
+function toTimestamp(value) {
+  const timestamp = Date.parse(value || '');
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function getErrorMessage(error) {
+  if (error instanceof Error) {
+    return error.message || '后台创作任务执行失败。';
+  }
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+  return '后台创作任务执行失败。';
+}
+
+function createFailureEventData(error, message) {
+  const eventData = error && typeof error === 'object' && error.data && typeof error.data === 'object' && !Array.isArray(error.data)
+    ? { ...error.data }
+    : {};
+  if (!eventData.error) {
+    eventData.error = message;
+  }
+  return eventData;
+}
+
+function createCreativeTaskRegistry(options = {}) {
+  const now = typeof options.now === 'function' ? options.now : defaultNow;
+  const idFactory = typeof options.idFactory === 'function' ? options.idFactory : defaultIdFactory;
+  const ttlMs = normalizeTtlMs(options.ttlMs);
+  const maxEventsPerTask = normalizePositiveInteger(options.maxEventsPerTask, DEFAULT_MAX_EVENTS_PER_TASK);
+  const maxFinishedTasks = normalizePositiveInteger(options.maxFinishedTasks, DEFAULT_MAX_FINISHED_TASKS);
+
+  const tasks = new Map();
+  let seq = 0;
+
+  function nextSeq() {
+    seq += 1;
+    return seq;
+  }
+
+  function trimEvents(task) {
+    if (task.events.length <= maxEventsPerTask) {
+      return;
+    }
+
+    task.events = task.events.slice(-maxEventsPerTask);
+    task.truncated = true;
+  }
+
+  function createDetachedTask({ workflowId, operationId, kind = 'creative_workflow' } = {}) {
+    prune();
+
+    const taskId = idFactory();
+    const timestamp = now();
+    const task = {
+      task_id: taskId,
+      workflow_id: typeof workflowId === 'string' ? workflowId : '',
+      operation_id: typeof operationId === 'string' ? operationId : '',
+      kind: typeof kind === 'string' && kind ? kind : 'creative_workflow',
+      status: 'running',
+      started_at: timestamp,
+      updated_at: timestamp,
+      ended_at: null,
+      error: null,
+      events: [],
+      subscribers: new Set(),
+      truncated: false,
+      terminal_pending: null,
+    };
+
+    tasks.set(taskId, task);
+    return taskId;
+  }
+
+  function emit(taskId, event = {}) {
+    const task = tasks.get(taskId);
+    if (!task) {
+      return null;
+    }
+    if (task.terminal_pending) {
+      if (event.type === 'workflow_persist_failed') {
+        task.terminal_pending.workflow_persist_failed = {
+          ...event,
+        };
+      }
+      return null;
+    }
+
+    const taskEvent = createTaskEvent({
+      ...event,
+      seq: nextSeq(),
+      task_id: task.task_id,
+      workflow_id: task.workflow_id,
+      operation_id: task.operation_id,
+      now,
+    });
+
+    task.events.push(taskEvent);
+    task.updated_at = taskEvent.time;
+    trimEvents(task);
+
+    notifySubscribers(task, taskEvent);
+
+    return taskEvent;
+  }
+
+  function notifySubscribers(task, taskEvent) {
+    for (const subscriber of task.subscribers) {
+      try {
+        subscriber(taskEvent);
+      } catch (error) {
+        task.subscribers.delete(subscriber);
+      }
+    }
+  }
+
+  function markDone(taskId, message = '后台创作任务已完成。') {
+    const task = tasks.get(taskId);
+    if (!task || task.status !== 'running' || task.terminal_pending) {
+      return null;
+    }
+
+    const endedAt = now();
+    task.status = 'done';
+    task.ended_at = endedAt;
+    task.updated_at = endedAt;
+    return emit(taskId, {
+      type: 'task_done',
+      progress: 100,
+      message,
+    });
+  }
+
+  function markFailed(taskId, error) {
+    const task = tasks.get(taskId);
+    if (!task || task.status !== 'running' || task.terminal_pending) {
+      return null;
+    }
+
+    const message = getErrorMessage(error);
+    const eventData = createFailureEventData(error, message);
+    const endedAt = now();
+    task.status = 'failed';
+    task.error = message;
+    task.ended_at = endedAt;
+    task.updated_at = endedAt;
+    return emit(taskId, {
+      type: 'task_failed',
+      message,
+      data: eventData,
+    });
+  }
+
+  function markDeleted(taskId, message = '创作任务已停止并删除。') {
+    const task = tasks.get(taskId);
+    if (!task || task.status !== 'running' || task.terminal_pending) {
+      return null;
+    }
+
+    const endedAt = now();
+    task.status = 'deleted';
+    task.ended_at = endedAt;
+    task.updated_at = endedAt;
+    return emit(taskId, {
+      type: 'workflow_deleted',
+      message,
+    });
+  }
+
+  async function markTerminalAfter(taskId, terminal = {}, beforeEmit) {
+    const task = tasks.get(taskId);
+    if (!task || task.status !== 'running' || task.terminal_pending) {
+      return null;
+    }
+
+    const taskEvent = createTaskEvent({
+      ...terminal.event,
+      seq: nextSeq(),
+      task_id: task.task_id,
+      workflow_id: task.workflow_id,
+      operation_id: task.operation_id,
+      now,
+    });
+    const pending = {
+      seq: taskEvent.seq,
+      type: taskEvent.type,
+    };
+    task.terminal_pending = pending;
+
+    try {
+      if (typeof beforeEmit === 'function') {
+        await beforeEmit(taskEvent);
+      }
+    } catch (error) {
+      const pendingPersistFailed = task.terminal_pending?.workflow_persist_failed;
+      if (task.terminal_pending?.seq === pending.seq && task.terminal_pending?.type === pending.type) {
+        task.terminal_pending = null;
+      }
+      if (pendingPersistFailed) {
+        emit(taskId, pendingPersistFailed);
+      }
+      throw error;
+    }
+
+    if (
+      task.status !== 'running'
+      || task.terminal_pending?.seq !== pending.seq
+      || task.terminal_pending?.type !== pending.type
+    ) {
+      if (task.terminal_pending?.seq === pending.seq && task.terminal_pending?.type === pending.type) {
+        task.terminal_pending = null;
+      }
+      return null;
+    }
+
+    task.status = terminal.status;
+    task.ended_at = taskEvent.time;
+    task.updated_at = taskEvent.time;
+    task.terminal_pending = null;
+    if (terminal.status === 'failed') {
+      task.error = taskEvent.message || getErrorMessage(terminal.error);
+    }
+
+    task.events.push(taskEvent);
+    trimEvents(task);
+    notifySubscribers(task, taskEvent);
+    return taskEvent;
+  }
+
+  function markDoneAfter(taskId, message = '后台创作任务已完成。', beforeEmit) {
+    return markTerminalAfter(taskId, {
+      status: 'done',
+      event: {
+        type: 'task_done',
+        progress: 100,
+        message,
+      },
+    }, beforeEmit);
+  }
+
+  function markFailedAfter(taskId, error, beforeEmit) {
+    const message = getErrorMessage(error);
+    const eventData = createFailureEventData(error, message);
+    return markTerminalAfter(taskId, {
+      status: 'failed',
+      error,
+      event: {
+        type: 'task_failed',
+        message,
+        data: eventData,
+      },
+    }, beforeEmit);
+  }
+
+  function markDeletedAfter(taskId, message = '创作任务已停止并删除。', beforeEmit) {
+    return markTerminalAfter(taskId, {
+      status: 'deleted',
+      event: {
+        type: 'workflow_deleted',
+        message,
+      },
+    }, beforeEmit);
+  }
+
+  function createTask({ workflowId, operationId, kind = 'creative_workflow', runner } = {}) {
+    const taskId = createDetachedTask({ workflowId, operationId, kind });
+
+    emit(taskId, {
+      type: 'task_started',
+      progress: 0,
+      message: '后台创作任务已启动。',
+    });
+
+    Promise.resolve()
+      .then(() => {
+        if (typeof runner !== 'function') {
+          return null;
+        }
+        return runner({
+          taskId,
+          emit: event => emit(taskId, event),
+        });
+      })
+      .then(() => {
+        markDone(taskId);
+      })
+      .catch(error => {
+        markFailed(taskId, error);
+      });
+
+    return taskId;
+  }
+
+  function subscribe(taskId, sinceSeq, onEvent) {
+    const task = tasks.get(taskId);
+    if (!task) {
+      return null;
+    }
+
+    const normalizedSinceSeq = Number.isFinite(Number(sinceSeq)) ? Math.floor(Number(sinceSeq)) : 0;
+    const listener = typeof onEvent === 'function' ? onEvent : () => {};
+
+    for (const event of task.events) {
+      if (event.seq > normalizedSinceSeq) {
+        try {
+          listener(event);
+        } catch (error) {
+          // 订阅回调异常不应破坏 replay 或后续订阅建立。
+        }
+      }
+    }
+
+    if (task.status !== 'running') {
+      return {
+        unsubscribe: () => {},
+        finished: true,
+      };
+    }
+
+    task.subscribers.add(listener);
+    return {
+      unsubscribe: () => {
+        task.subscribers.delete(listener);
+      },
+      finished: false,
+    };
+  }
+
+  function getTask(taskId) {
+    return tasks.get(taskId) || null;
+  }
+
+  function activeTaskForWorkflow(workflowId) {
+    let newestTask = null;
+
+    for (const task of tasks.values()) {
+      if (task.workflow_id !== workflowId || task.status !== 'running') {
+        continue;
+      }
+
+      if (!newestTask || toTimestamp(task.started_at) >= toTimestamp(newestTask.started_at)) {
+        newestTask = task;
+      }
+    }
+
+    if (!newestTask) {
+      return null;
+    }
+
+    return {
+      task_id: newestTask.task_id,
+      workflow_id: newestTask.workflow_id,
+      operation_id: newestTask.operation_id,
+      kind: newestTask.kind,
+      status: newestTask.status,
+    };
+  }
+
+  function prune(nowMs = Date.now()) {
+    const finishedTasks = [];
+
+    for (const [taskId, task] of tasks.entries()) {
+      if (task.status === 'running') {
+        continue;
+      }
+
+      const finishedAt = toTimestamp(task.ended_at || task.updated_at);
+      if (finishedAt && nowMs - finishedAt > ttlMs) {
+        tasks.delete(taskId);
+        continue;
+      }
+
+      finishedTasks.push([taskId, task]);
+    }
+
+    if (finishedTasks.length <= maxFinishedTasks) {
+      return;
+    }
+
+    finishedTasks.sort((left, right) => {
+      const leftTime = toTimestamp(left[1].ended_at || left[1].updated_at);
+      const rightTime = toTimestamp(right[1].ended_at || right[1].updated_at);
+      return leftTime - rightTime;
+    });
+
+    const removeCount = finishedTasks.length - maxFinishedTasks;
+    for (const [taskId] of finishedTasks.slice(0, removeCount)) {
+      tasks.delete(taskId);
+    }
+  }
+
+  return {
+    createTask,
+    createDetachedTask,
+    emit,
+    markDone,
+    markFailed,
+    markDeleted,
+    markDoneAfter,
+    markFailedAfter,
+    markDeletedAfter,
+    subscribe,
+    getTask,
+    activeTaskForWorkflow,
+    prune,
+    isTerminalEvent,
+  };
+}
+
+const defaultRegistry = createCreativeTaskRegistry();
+
+module.exports = {
+  createCreativeTaskRegistry,
+  defaultRegistry,
+};

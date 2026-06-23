@@ -19,7 +19,7 @@ data/config/
 browser_data/
 chrome-user-data/
 douyin-cookies.json
-
+opc-doc/*
 # Logs
 *.log
 server.out.log

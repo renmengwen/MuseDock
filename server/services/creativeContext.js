@@ -1,4 +1,7 @@
 const AWEME_ID_PATTERN = /^\d{5,32}$/;
+const SOURCE_URL_PATTERN = /https?:\/\/[^\s<>"'`()\[\]{}，。；;、（）《》【】「」『』“”‘’]+/gi;
+const SOURCE_URL_TRAILING_PUNCTUATION_PATTERN = /[.,;:!?，。；：！？、)\]}）】》」』”’]+$/;
+const sourceFetch = require('./sourceFetch');
 
 function safeString(value) {
   if (value === null || value === undefined) {
@@ -17,14 +20,41 @@ function extractAwemeId(input) {
     return text;
   }
 
-  const videoMatch = text.match(/\/video\/(\d{5,32})(?=\D|$)/);
-  if (videoMatch && AWEME_ID_PATTERN.test(videoMatch[1])) {
-    return videoMatch[1];
+  const bareQueryId = extractAwemeIdFromBareQuery(text);
+  if (bareQueryId) {
+    return bareQueryId;
   }
 
-  const queryMatch = text.match(/(?:^|[?&])(?:modal_id|aweme_id)=(\d{5,32})(?=\D|$)/);
-  if (queryMatch && AWEME_ID_PATTERN.test(queryMatch[1])) {
-    return queryMatch[1];
+  const urls = sourceFetch.extractUrls(text, Number.MAX_SAFE_INTEGER);
+  const noProtocolDouyinCandidates = extractNoProtocolDouyinCandidates(text);
+  const candidates = /^https?:\/\//i.test(text) || isDouyinLink(text)
+    ? [text, ...urls, ...noProtocolDouyinCandidates]
+    : [...urls, ...noProtocolDouyinCandidates];
+
+  for (const candidate of candidates) {
+    if (!isDouyinLink(candidate)) {
+      continue;
+    }
+
+    try {
+      const url = new URL(normalizeUrlForParsing(candidate));
+      const videoMatch = url.pathname.match(/\/video\/(\d{5,32})(?=\D|$)/);
+      if (videoMatch && AWEME_ID_PATTERN.test(videoMatch[1])) {
+        return videoMatch[1];
+      }
+
+      const queryId = url.searchParams.get('modal_id') || url.searchParams.get('aweme_id');
+      if (AWEME_ID_PATTERN.test(safeString(queryId))) {
+        return queryId;
+      }
+
+      const fallbackMatch = safeString(candidate).match(/\/video\/(\d{5,32})(?=\D|$)/);
+      if (fallbackMatch && AWEME_ID_PATTERN.test(fallbackMatch[1])) {
+        return fallbackMatch[1];
+      }
+    } catch (error) {
+      continue;
+    }
   }
 
   return '';
@@ -36,7 +66,11 @@ function createNormalizedData(overrides = {}) {
     raw_text: '',
     aweme_id: '',
     douyin_url: '',
+    source_url: '',
+    source_hint: '',
+    ignored_url_count: 0,
     use_research: false,
+    skip_validation: false,
     asset_ids: [],
     ...overrides,
   };
@@ -57,27 +91,103 @@ function createFailureResponse(message, overrides = {}) {
   };
 }
 
+function normalizeUrlForParsing(input) {
+  const text = safeString(input);
+  return /^https?:\/\//i.test(text) ? text : `https://${text}`;
+}
+
+function extractAwemeIdFromBareQuery(input) {
+  const text = safeString(input);
+  if (!/^\??(?:modal_id|aweme_id)=/i.test(text)) {
+    return '';
+  }
+
+  const query = text.startsWith('?') ? text.slice(1) : text;
+  const params = new URLSearchParams(query);
+  const queryId = params.get('modal_id') || params.get('aweme_id');
+  return AWEME_ID_PATTERN.test(safeString(queryId)) ? queryId : '';
+}
+
+function extractNoProtocolDouyinCandidates(input) {
+  const text = safeString(input);
+  if (!text) {
+    return [];
+  }
+
+  const candidates = [];
+  const douyinHost = '(?:(?:www|v)\\.)?douyin\\.com';
+  const path = '[^\\s\\u3002\\uff0c\\uff1b\\uff1a\\uff01\\uff1f\\u3001,;!?]+';
+  const pattern = new RegExp(`(^|[^\\w:/.-])(${douyinHost}\\/${path})`, 'ig');
+
+  for (const match of text.matchAll(pattern)) {
+    const candidate = safeString(match[2]).replace(/[.。；;，,！？!?]+$/g, '');
+    if (candidate) {
+      candidates.push(candidate);
+    }
+  }
+
+  return candidates;
+}
+
 function isDouyinLink(input) {
   const text = safeString(input);
-  if (!/^https?:\/\//i.test(text)) {
+  if (!text || /^\//.test(text)) {
     return false;
   }
 
   try {
-    const hostname = new URL(text).hostname.toLowerCase();
+    const hostname = new URL(normalizeUrlForParsing(text)).hostname.toLowerCase();
     return hostname === 'douyin.com' || hostname.endsWith('.douyin.com');
   } catch (error) {
     return false;
   }
 }
 
+function removeUrlFromText(text, url) {
+  const sourceText = safeString(text);
+  const sourceUrl = safeString(url);
+  if (!sourceText || !sourceUrl) {
+    return sourceText;
+  }
+
+  const punctuation = '[\\s\\u3002\\uff0c\\uff1b\\uff1a\\uff01\\uff1f\\u3001,.;:!?]*';
+  const escapedUrl = sourceUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const urlWithNoise = new RegExp(`${punctuation}${escapedUrl}${punctuation}`);
+  return sourceText.replace(urlWithNoise, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function countRemainingSourceUrls(text) {
+  return countSourceUrlOccurrences(text);
+}
+
+function countSourceUrlOccurrences(text) {
+  const remaining = safeString(text);
+  if (!remaining) {
+    return 0;
+  }
+
+  let count = 0;
+  SOURCE_URL_PATTERN.lastIndex = 0;
+
+  for (const match of remaining.matchAll(SOURCE_URL_PATTERN)) {
+    const url = match[0].replace(SOURCE_URL_TRAILING_PUNCTUATION_PATTERN, '');
+    if (url) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
 function normalizeCreativeInput(payload = {}) {
   const assetIds = Array.isArray(payload.assetIds) ? [...payload.assetIds] : [];
   const useResearch = payload.useResearch === true;
+  const skipValidation = payload.skipValidation === true;
 
   if (assetIds.length > 0) {
     return createFailureResponse('图片素材将在下一阶段开放。', {
       use_research: useResearch,
+      skip_validation: skipValidation,
       asset_ids: [],
     });
   }
@@ -86,6 +196,7 @@ function normalizeCreativeInput(payload = {}) {
   if (!input) {
     return createFailureResponse('请输入视频方向、抖音 ID 或抖音链接。', {
       use_research: useResearch,
+      skip_validation: skipValidation,
       asset_ids: assetIds,
     });
   }
@@ -97,13 +208,37 @@ function normalizeCreativeInput(payload = {}) {
       aweme_id: awemeId,
       douyin_url: /^https?:\/\//i.test(input) ? input : '',
       use_research: useResearch,
+      skip_validation: skipValidation,
       asset_ids: assetIds,
     });
   }
 
-  if (isDouyinLink(input)) {
+  const urls = sourceFetch.extractUrls(input, Number.MAX_SAFE_INTEGER);
+  const noProtocolDouyinCandidates = extractNoProtocolDouyinCandidates(input);
+  const hasUnrecognizedDouyinUrl =
+    isDouyinLink(input) ||
+    urls.some(isDouyinLink) ||
+    noProtocolDouyinCandidates.some(isDouyinLink);
+  if (hasUnrecognizedDouyinUrl) {
     return createFailureResponse('暂时无法从抖音链接中识别视频 ID。', {
       use_research: useResearch,
+      skip_validation: skipValidation,
+      asset_ids: assetIds,
+    });
+  }
+
+  const sourceUrls = sourceFetch.extractUrls(input, 3);
+  if (sourceUrls.length > 0) {
+    const sourceUrl = sourceUrls[0];
+    const sourceHint = removeUrlFromText(input, sourceUrl);
+    return createSuccessResponse({
+      mode: 'source_url',
+      raw_text: input,
+      source_url: sourceUrl,
+      source_hint: sourceHint,
+      ignored_url_count: countRemainingSourceUrls(sourceHint),
+      use_research: useResearch,
+      skip_validation: skipValidation,
       asset_ids: assetIds,
     });
   }
@@ -112,6 +247,7 @@ function normalizeCreativeInput(payload = {}) {
     mode: 'text',
     raw_text: input,
     use_research: useResearch,
+    skip_validation: skipValidation,
     asset_ids: assetIds,
   });
 }
@@ -137,6 +273,16 @@ function createDisabledResearchContext({ now } = {}) {
     query: '',
     sources: [],
     summary: '',
+    updated_at: now || '',
+  };
+}
+
+function createPendingResearchContext({ query, now } = {}) {
+  return {
+    status: 'pending',
+    query: safeString(query),
+    sources: [],
+    summary: '联网研究将在后台任务中执行。',
     updated_at: now || '',
   };
 }
@@ -205,6 +351,7 @@ module.exports = {
   extractAwemeId,
   createTextSourceContext,
   createDisabledResearchContext,
+  createPendingResearchContext,
   createDisabledAssetContext,
   buildCreativeContext,
 };

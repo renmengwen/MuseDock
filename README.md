@@ -1,129 +1,107 @@
 # MuseDock
 
-MuseDock 是一个本地优先的短视频采集、素材准备与 AI 成片工作台。它把抖音/小红书内容抓取、评论缓存、媒体素材处理、音频转写、一键创作任务、TTS 口播、视频工程生成、工程校验、MP4 渲染和视频质检放在同一个 Web GUI 里，适合把分散的短视频素材沉淀为可复用、可检查、可继续打磨的本地创作资产。
+MuseDock 是一个本地优先的 AI 短视频创作工作台。当前主线不是单纯的采集器，而是把选题输入、来源资料整理、联网研究、脚本/分镜生成、TTS 配音、HTML 视频工程生成、编辑、渲染和本地结果管理放在同一个 Web GUI 里。
 
-当前主入口是 **一键创作**：在首页用一句话、抖音 ID 或抖音链接创建创作任务；任务创建后进入独立详情路由，页面展示任务状态、横向生成步骤条，并在视频生成完成后直接播放最终 MP4。
+项目仍保留抖音、小红书、媒体处理和历史素材管线的代码基础，但当前可见产品入口主要围绕“一键创作”和“视频编辑器”展开。
 
 ![MuseDock 一键创作首页](docs/assets/musedock-creative-home.png)
 
 ![MuseDock 一键创作任务详情](docs/assets/musedock-creative-detail.png)
 
-## 核心亮点
+## 当前能做什么
 
-- **一键创作任务**：从一句创作方向、抖音 ID 或抖音链接开始，自动串联来源准备、联网研究、素材分析、导演改写、成片策划、音频生成、工程生成、校验、渲染和巡检。
-- **任务路由化**：创作任务详情使用 `/creative/:workflowId`，创建任务和点击任务列表都会跳转到对应详情页，刷新和分享任务 URL 更自然。
-- **横向进度步骤条**：任务详情页用横向步骤条展示十个生成阶段，完成态保留步骤条并在下方直接显示最终视频。
-- **本地视频预览**：渲染完成后页面直接显示 MP4 播放器，视频文件由本地 API 提供，不需要离开工作台检查产物。
-- **素材前置链路**：支持抖音扫码登录、关键词搜索、视频 ID/链接抓取、作者主页抓取、评论和二级评论缓存、媒体下载、关键帧抽取与音频转写。
-- **本地优先数据**：采集记录、评论、素材、Agent 运行记录、TTS、工程文件、质检报告和渲染产物都保存在本地目录，便于复盘和二次加工。
+- **一键创作**：输入视频方向、抖音链接、微信公众号文章链接或 GitHub 仓库链接，创建本地创作任务。
+- **任务进度跟踪**：任务详情页展示生成阶段、当前状态、失败信息和最终视频。
+- **视频编辑器**：进入 `/editor/:workflowId` 后编辑场景、模板字段、画面帧、字幕、配音和导出版本。
+- **HTML 视频生产链路**：使用模板、HTML/CSS/GSAP、Playwright 和 ffmpeg 生成可导出的 MP4。
+- **设置中心**：配置 AI 模型、一键创作默认值、系统状态检查和本地数据清理。
+- **本地数据沉淀**：创作任务、媒体素材、工程文件、TTS、导出视频和配置都保存在本地目录。
 
-## 页面与工作流
-
-### 一键创作
-
-一键创作是默认首页：
+## 页面入口
 
 ```text
-/creative
-/creative/:workflowId
+/creative              # 一键创作首页
+/creative/:workflowId  # 创作任务详情
+/editor/:workflowId    # 视频编辑器
+/settings              # 设置中心
 ```
 
-推荐流程：
+默认访问根路径会跳转到 `/creative`。
 
-1. 打开 `/creative`，输入视频方向、抖音 ID 或抖音链接。
-2. 选择是否“联网获取最新资料”。
-3. 提交任务后自动进入 `/creative/:workflowId`。
-4. 在任务详情页查看横向步骤条和当前状态。
-5. 渲染完成后直接在详情页播放最终视频。
-6. 左侧任务列表可重新打开历史创作任务；“开启新创作”会回到 `/creative`。
+## 一键创作流程
 
-一键创作阶段：
+1. 在 `/creative` 输入创作方向、公开文章/GitHub 链接或抖音链接。
+2. 按需开启“联网获取最新资料”。
+3. 提交后进入任务详情页。
+4. 后台依次完成来源准备、研究、素材分析、导演改写、成片策划、音频、工程、校验、渲染和巡检。
+5. 任务完成后可直接预览视频，也可以进入编辑器继续调整。
 
-| 阶段 | 说明 |
-| --- | --- |
-| 准备来源资料 | 根据文本、抖音 ID 或链接准备创作上下文 |
-| 联网研究 | 可选地补充最新资料 |
-| 素材分析 | 汇总来源素材和后续生成所需上下文 |
-| 导演改写 | 创建导演任务并重写内容方向 |
-| 成片策划 | 生成结构化成片策划 |
-| 生成音频轨 | 生成 TTS 口播音频 |
-| 生成工程 | 生成可渲染的视频工程 |
-| 校验工程 | 执行 lint、validate、inspect |
-| 渲染视频 | 渲染最终 MP4 |
-| 巡检视频 | 抽帧检查最终画面 |
-
-### 采集与素材
-
-MuseDock 保留完整素材前置链路：
-
-- 抖音扫码登录、关键词搜索、视频 ID/链接抓取、作者主页视频抓取。
-- 小红书关键词搜索、笔记详情和历史记录入口。
-- 抖音一级评论与二级评论缓存，结果写入本地 SQLite。
-- 视频下载、音频抽取、关键帧抽取、素材状态查看。
-- 小米 MiMo ASR 音频转写，支持大音频压缩、切片转写和结果合并。
+当前专家模式入口已经出现在界面上，但仍处于开发中，日常使用请先走快速模式。
 
 ## 技术栈
 
-- 前端：React、React Router、Vite
-- UI：Tailwind CSS、本地 shadcn 风格组件、lucide-react
+- 前端：React 19、React Router 7、Vite 8
+- UI：Tailwind CSS、shadcn/ui、lucide-react
 - 后端：Node.js 22、Express
-- 数据库：SQLite、better-sqlite3
-- 浏览器自动化：Playwright、Chrome CDP
-- 媒体处理：ffmpeg、ffprobe、`@ffmpeg-installer/ffmpeg`
-- AI 能力：OpenAI-compatible 文字模型、小米 MiMo ASR/TTS
-- 视频工程：HTML/CSS/GSAP、HyperFrames CLI
+- 存储：SQLite、better-sqlite3、本地 JSON 文件
+- 视频生产：HTML/CSS/GSAP、Playwright/Chromium、ffmpeg、ffprobe
+- AI：OpenAI-compatible 文本模型、小米 MiMo ASR/TTS 兼容配置
 
 ## 环境要求
 
-- Node.js 22
+- Node.js `>=22 <23`
 - npm
-- Google Chrome
+- Google Chrome 或 Playwright Chromium
 - ffmpeg
 - ffprobe
 
-项目在 `package.json#engines` 中约束 Node.js 22。切换 Node 版本后建议重新安装依赖：
+安装依赖：
 
 ```powershell
 npm install
 ```
 
-如果 `better-sqlite3` 出现 ABI 不匹配，可执行：
+如果切换过 Node 版本，`better-sqlite3` 可能需要重新编译：
 
 ```powershell
 npm rebuild better-sqlite3
 ```
 
-`ffmpeg` 会优先读取 `FFMPEG_PATH`，其次使用项目依赖内置路径，最后尝试系统 `PATH`。`ffprobe` 用于读取 TTS 分段音频时长，建议安装到系统 `PATH`，或通过 `FFPROBE_PATH` 指定。
-
-## 安装与启动
-
-日常开发使用一个命令同时启动后端和 Vite 前端：
+真实视频渲染依赖 Playwright Chromium：
 
 ```powershell
-npm install
+npx playwright install chromium
+```
+
+`ffmpeg` 查找顺序为 `FFMPEG_PATH`、项目依赖内置路径、系统 `PATH`。`ffprobe` 建议安装到系统 `PATH`，或通过 `FFPROBE_PATH` 指定。
+
+## 启动
+
+开发模式同时启动后端和 Vite 前端：
+
+```powershell
 npm run dev
 ```
 
-开发时打开 Vite 地址，前端会热更新，`/api` 会代理到后端：
+打开：
 
 ```text
 http://localhost:5173
 ```
 
-其中后端 API 仍运行在：
-
-```text
-http://localhost:3000
-```
-
-发布或验证构建产物时再使用 build + start：
+构建前端：
 
 ```powershell
 npm run build:frontend
+```
+
+启动 Express 和已构建前端：
+
+```powershell
 npm run start
 ```
 
-启动后打开：
+打开：
 
 ```text
 http://localhost:3000
@@ -132,32 +110,26 @@ http://localhost:3000
 ## 常用命令
 
 ```powershell
-# 启动开发服务：后端自动重启，前端热更新
+# 后端 + Vite 前端
 npm run dev
 
-# 启动 Express 服务和已构建前端
-npm run start
-
-# 只启动 Vite 前端开发服务
+# 只启动前端开发服务
 npm run dev:frontend
 
-# 构建前端
+# 构建前端产物
 npm run build:frontend
 
-# 运行完整回归测试
+# 启动后端并托管 frontend-dist
+npm run start
+
+# 跑完整测试脚本
 npm test
+
+# 按文件名过滤测试
+npm run test:filter -- creative-workflows
 ```
 
-常用专项测试：
-
-```powershell
-node tests/test-one-click-creative-page.mjs
-node tests/test-persistent-routes.mjs
-node tests/test-creative-workflows.js
-node tests/test-creative-workflow-routes.js
-```
-
-## 环境变量
+## 重要环境变量
 
 | 变量 | 说明 | 默认值 |
 | --- | --- | --- |
@@ -172,132 +144,84 @@ node tests/test-creative-workflow-routes.js
 | `ASR_LANGUAGE` | MiMo ASR 识别语言，支持 `auto`、`zh`、`en` | `auto` |
 | `FFMPEG_PATH` | 手动指定 ffmpeg 可执行文件路径 | 空 |
 | `FFPROBE_PATH` | 手动指定 ffprobe 可执行文件路径 | 空 |
+| `RUN_HTML_VIDEO_REAL_RENDER` | 设置为 `1` 时运行真实渲染烟测 | 空 |
+| `HTML_VIDEO_PRODUCTION_ENABLED` | 启用 html-video production path | `true` |
+| `HTML_VIDEO_LEGACY_FALLBACK_ENABLED` | 新链路失败时允许 legacy fallback | `true` |
+| `HTML_VIDEO_REMOTION_ENHANCEMENT_ENABLED` | Remotion native enhancement 预留开关 | `false` |
 
-文字模型按 OpenAI-compatible `POST /chat/completions` 调用。DeepSeek、OpenAI 或自定义兼容服务都可以通过设置页配置供应商、Base URL、模型 ID 和 API Key。
+AI 模型也可以在设置中心配置，配置会写入本地 `data/config/`。
 
 ## 本地数据
 
-MuseDock 会在本地生成运行数据：
+常见运行数据：
 
-- `data/mediacrawler.db`：SQLite 数据库
-- `data/creative-workflows/`：一键创作任务记录
-- `data/media/douyin/<aweme_id>/`：抖音视频素材目录
-- `data/media/douyin/<aweme_id>/transcript.json`：音频转写结果
-- `data/media/douyin/<aweme_id>/agent_runs/`：Agent 运行结果、TTS 音频、字幕时间轴、视频工程、质检报告和 MP4
-- `data/config/agent_templates.json`：本地保存的 Agent 模板覆盖配置
-- `data/config/ai-models.json`：本地 AI 模型配置
-- `chrome-user-data/`：Chrome CDP 使用的本地浏览器数据
-- `douyin-cookies.json`：抖音 Cookie 持久化文件
+```text
+data/mediacrawler.db                 # SQLite 数据库
+data/creative-workflows/             # 一键创作任务记录
+data/media/                          # 媒体素材、分析输入、转写和产物
+data/config/                         # AI 模型、应用设置和模板覆盖配置
+chrome-user-data/                    # Chrome CDP 用户数据
+douyin-cookies.json                  # 抖音 Cookie 持久化文件
+frontend-dist/                       # 前端构建产物
+```
 
-这些文件通常不适合提交到公开仓库。协作或开源前请确认 `.gitignore` 已排除本地数据库、浏览器缓存、Cookie、媒体产物和本地任务记录。
+这些通常不适合提交到公开仓库。协作前请确认本地数据库、浏览器缓存、Cookie、媒体产物和任务记录没有被误提交。
 
 ## 目录结构
 
 ```text
 .
 +-- frontend-react/      # React + Vite 前端源码
-|   +-- src/pages/       # 页面入口，一键创作页在 OneClickCreativePage.jsx
-|   +-- src/components/  # 通用组件和工作台组件
+|   +-- src/pages/       # 页面入口
+|   +-- src/components/  # 通用组件、创作页和视频编辑器组件
+|   +-- src/api/         # 前端请求封装
 +-- frontend-dist/       # 前端构建产物
-+-- server/              # Express 服务、路由、抓取器和业务服务
-|   +-- routes/          # API 路由
++-- server/              # Express 服务和业务逻辑
+|   +-- routes/          # 当前后端路由入口
+|   +-- services/        # 创作任务、AI、媒体、视频工程和系统维护服务
+|   +-- templates/       # html-video 模板
+|   +-- resources/       # 视频工程技能和提示资源
 |   +-- scraper/         # 抖音、小红书抓取逻辑
-|   +-- services/        # 数据存储、媒体处理、AI 配置、Agent、创作任务和视频工程服务
-|   +-- resources/       # 视频工程技能与提示上下文资源
-|   +-- state/           # 运行时 Cookie 状态
-+-- data/                # SQLite 数据库、本地媒体素材、本地配置和任务记录
-+-- docs/                # 项目文档、截图、计划和交接记录
-+-- tests/               # 回归测试脚本
++-- data/                # 本地数据库、配置、任务和素材
++-- docs/                # 设计文档、截图和交接记录
++-- tests/               # Node 测试脚本
++-- scripts/             # 调试和辅助脚本
 ```
 
-## API 概览
+## 测试
 
-### 一键创作
-
-- `POST /api/creative-workflows`：创建一键创作任务
-- `GET /api/creative-workflows/:workflow_id`：读取一键创作任务状态和结果
-
-### 抖音
-
-- `POST /api/douyin/qrcode-login`：启动扫码登录
-- `GET /api/douyin/login-status`：检查扫码登录结果
-- `GET /api/douyin/check-login`：检查当前登录态
-- `GET /api/douyin/search?keyword=...&max=20`：关键词搜索
-- `GET /api/douyin/aweme?ids=...`：按视频 ID 或链接抓取详情
-- `GET /api/douyin/creator?sec_uid=...&max=20`：抓取作者主页视频
-- `GET /api/douyin/comments?aweme_id=...`：抓取评论和二级评论
-- `GET /api/douyin/comments/local?aweme_id=...`：读取本地评论缓存
-
-### 素材
-
-- `POST /api/media/douyin/:aweme_id/prepare`：准备视频、音频和关键帧
-- `GET /api/media/douyin/:aweme_id/status`：查看素材状态
-- `POST /api/media/douyin/:aweme_id/transcribe`：触发音频转写
-- `POST /api/media/douyin/:aweme_id/open`：打开素材目录或目标文件
-- `GET /api/media/douyin/:aweme_id/tasks`：读取素材任务列表
-- `GET /api/media/douyin/:aweme_id/tasks/:task_id`：读取素材任务状态
-
-### AI Agent
-
-- `GET /api/agents/templates`：读取可编辑任务 Agent 模板列表
-- `GET /api/agents/templates/:id`：读取单个任务 Agent 模板
-- `PUT /api/agents/templates/:id`：保存任务 Agent 模板覆盖配置
-- `DELETE /api/agents/templates/:id/override`：恢复任务 Agent 默认配置
-- `POST /api/agents/messages/preview`：预览任务 Agent messages
-- `POST /api/agents/douyin/:aweme_id/runs`：执行抖音素材的 Agent 任务
-- `GET /api/agents/douyin/:aweme_id/runs`：读取素材的 Agent 运行记录
-- `GET /api/agents/douyin/:aweme_id/runs/:run_id`：读取单次 Agent 运行详情
-- `POST /api/agents/douyin/:aweme_id/runs/:run_id/tts`：生成 TTS 音频和字幕时间轴
-- `POST /api/agents/douyin/:aweme_id/runs/:run_id/storyboard`：生成 AI 分镜
-- `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/project`：生成视频工程
-- `POST /api/agents/douyin/:aweme_id/runs/:run_id/hyperframes/render`：渲染 MP4
-
-### 配置与历史
-
-- `GET /api/history/douyin`：读取抖音抓取记录，并附带素材、转写和评论缓存状态
-- `GET /api/history/douyin/keywords`：读取抖音历史关键词
-- `DELETE /api/history/douyin`：删除抖音历史记录
-- `GET /api/history/xhs`：读取小红书抓取记录
-- `GET /api/config/ai-models`：读取 AI 模型配置
-- `POST /api/config/ai-models`：保存 AI 模型配置
-- `GET /api/config/cookies`：读取 Cookie 配置
-- `POST /api/config/cookies`：保存 Cookie 配置
-
-## 测试与验证
-
-完整回归测试：
+完整测试：
 
 ```powershell
 npm test
 ```
 
-前端发布前请运行：
-
-```powershell
-npm run build:frontend
-```
-
-一键创作和路由改动建议至少运行：
+常用专项测试：
 
 ```powershell
 node tests/test-one-click-creative-page.mjs
-node tests/test-persistent-routes.mjs
+node tests/test-creative-editor-page.mjs
 node tests/test-creative-workflows.js
 node tests/test-creative-workflow-routes.js
+node tests/test-html-video-project-schema.js
+node tests/test-html-video-workflow.js
 ```
 
-## 路线图
+真实渲染烟测默认会跳过。需要本机已安装 Playwright Chromium、ffmpeg 和 ffprobe，然后显式开启：
 
-- 继续完善一键创作任务详情页的视频预览、失败诊断和任务恢复体验。
-- 增加真实任务队列和后端进度推送，替代部分前端轮询与估算状态。
-- 增强视频工程预览、差异检查和版本回退能力。
-- 扩展更多成片风格预设和可复用视频技能。
-- 补齐小红书评论、素材准备和 AI 成片工作流。
-- 增加端到端测试、CI 和更清晰的部署文档。
+```powershell
+$env:RUN_HTML_VIDEO_REAL_RENDER='1'
+node tests/test-html-video-vertical-mvp-smoke.js
+node tests/test-html-video-real-render-smoke.js
+```
 
-## 免责声明
+## 开发注意
 
-MuseDock 仅用于学习、研究和本地内容工作流整理。使用者应遵守目标平台的服务条款、robots 协议、版权规则和所在地法律法规。请勿将本项目用于未授权的数据采集、隐私侵犯、批量骚扰或其他不当用途。
+- 日常开发在 `dev` 分支进行。
+- 面向用户的文案默认使用中文。
+- 新增前端通用控件优先使用 Tailwind CSS 和官方 `shadcn/ui` 组件。
+- 会触发请求的用户操作需要明确 loading、完成、失败或未配置状态。
+- 不要把本地数据、Cookie、浏览器缓存、媒体产物和构建临时文件提交到仓库。
 
 ## License
 

@@ -6,11 +6,26 @@ const creativeContext = require('./creativeContext');
 const defaultResearchService = require('./researchService');
 const mediaPipeline = require('./mediaPipeline');
 const defaultAgentRuns = require('./agentRuns');
+const aiModelConfig = require('./aiModelConfig');
+const appSettings = require('./appSettings');
+const defaultCreativeVideoEditor = require('./creativeVideoEditor');
+const defaultCreativeVideoRerender = require('./creativeVideoRerender');
+const sceneSpecService = require('./sceneSpec');
+const aiTextModel = require('./aiTextModel');
+const defaultSourceFetch = require('./sourceFetch');
+const htmlVideoProjectStore = require('./creative-video/html-video/projectStore');
+const htmlVideoEditPatchService = require('./creative-video/html-video/editPatchService');
+const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
+const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
+const { syncRawHtmlFrameTextPatch } = require('./creative-video/html-video/rawHtmlTextPatch');
+const { createTemplateRegistry: createHtmlVideoTemplateRegistry } = require('./creative-video/html-video/templateRegistry');
+const { defaultRegistry: defaultCreativeTaskRegistry } = require('./creativeTaskRegistry');
 
 const DEFAULT_ROOT = path.join(__dirname, '../../data/creative-workflows');
 const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
 const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;
 const DEFAULT_STALE_STAGE_TIMEOUT_MS = 10 * 60 * 1000;
+const WORKFLOW_STOPPED = Symbol('workflow-stopped');
 
 const STAGE_IDS = ['source', 'research', 'assets', 'agent_run', 'brief', 'audio', 'project', 'check', 'render', 'inspect'];
 const STAGE_LABELS = {
@@ -31,6 +46,13 @@ function safeString(value) {
     return '';
   }
   return String(value).trim();
+}
+
+function getSourceUrlLoadingMessage(sourceUrl, kindHint = '') {
+  const url = safeString(sourceUrl).toLowerCase();
+  if (url.includes('mp.weixin.qq.com')) return '正在读取微信公众号文章...';
+  if (kindHint === 'github_repo' || url.includes('github.com/')) return '正在读取 GitHub 仓库信息...';
+  return '正在读取网页文章...';
 }
 
 function getNow(services = {}) {
@@ -135,6 +157,24 @@ async function readWorkflow(workflowId, rootDir) {
   return record;
 }
 
+async function workflowFileExists(workflowId, rootDir) {
+  try {
+    await fsp.access(getWorkflowPath(workflowId, rootDir));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createWorkflowStoppedSummary(workflowId) {
+  return {
+    success: false,
+    workflow_id: safeString(workflowId),
+    status: 'deleted',
+    message: '创作任务已停止并删除。',
+  };
+}
+
 async function persistWorkflow(record, rootDir) {
   const filePath = getWorkflowPath(record.workflow_id, rootDir);
   record.stages = normalizeStages(record.stages);
@@ -180,13 +220,430 @@ function createDouyinSourceContext(input = {}) {
   };
 }
 
+function createSourceUrlSourceContext(input = {}) {
+  const sourceUrl = safeString(input.source_url);
+  const ignoredUrlCount = Number(input.ignored_url_count) || 0;
+  return {
+    status: 'pending',
+    kind: 'source_url',
+    summary: sourceUrl ? `等待读取外部来源：${sourceUrl}` : '等待读取外部来源。',
+    source_url: sourceUrl,
+    source_kind: '',
+    source_metadata: {
+      source_url: sourceUrl,
+      user_hint: safeString(input.source_hint),
+    },
+    diagnostics: {
+      ignored_url_count: ignoredUrlCount,
+    },
+  };
+}
+
+async function defaultResearchProvider({
+  query,
+  aiModelConfig: injectedAiModelConfig,
+  aiTextModel: injectedAiTextModel,
+  webSearchProvider,
+} = {}) {
+  return runResearchProvider({
+    query,
+    aiModelConfig: injectedAiModelConfig || aiModelConfig,
+    aiTextModel: injectedAiTextModel || aiTextModel,
+    webSearchProvider: webSearchProvider || defaultWebSearchProvider,
+  });
+}
+
+function extractUrlsFromText(text) {
+  const urlRegex = /https?:\/\/[^\s)）\]}>"'，。；;]+/g;
+  return String(text || '').match(urlRegex) || [];
+}
+
+function stripHtml(value) {
+  return String(value || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function decodeDuckDuckGoRedirect(url) {
+  try {
+    const parsed = new URL(url, 'https://duckduckgo.com');
+    const uddg = parsed.searchParams.get('uddg');
+    return uddg ? decodeURIComponent(uddg) : parsed.href;
+  } catch {
+    return safeString(url);
+  }
+}
+
+function parseDuckDuckGoLiteResults(html, limit) {
+  const results = [];
+  const pattern = /<a([^>]*class=['"]result-link['"][^>]*)>([\s\S]*?)<\/a>[\s\S]*?<td[^>]+class=['"]result-snippet['"][^>]*>([\s\S]*?)<\/td>/gi;
+  let match;
+  while ((match = pattern.exec(html)) && results.length < limit) {
+    const hrefMatch = match[1].match(/\shref=['"]([^'"]+)['"]/i);
+    if (!hrefMatch) continue;
+    results.push({
+      title: stripHtml(match[2]),
+      url: decodeDuckDuckGoRedirect(hrefMatch[1]),
+      summary: stripHtml(match[3]),
+    });
+  }
+  return results;
+}
+
+function parseDuckDuckGoHtmlResults(html, limit) {
+  const results = [];
+  const pattern = /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = pattern.exec(html)) && results.length < limit) {
+    results.push({
+      title: stripHtml(match[2]),
+      url: decodeDuckDuckGoRedirect(match[1]),
+      summary: stripHtml(match[3]),
+    });
+  }
+  return results;
+}
+
+function parseBingResults(html, limit) {
+  const results = [];
+  const pattern = /<li[^>]+class="[^"]*b_algo[^"]*"[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/gi;
+  let match;
+  while ((match = pattern.exec(html)) && results.length < limit) {
+    results.push({
+      title: stripHtml(match[2]),
+      url: safeString(match[1]),
+      summary: stripHtml(match[3]),
+    });
+  }
+  return results;
+}
+
+function normalizeSearchResults(value) {
+  const rawResults = Array.isArray(value)
+    ? value
+    : (Array.isArray(value?.results) ? value.results : []);
+  return rawResults
+    .map(item => ({
+      title: safeString(item?.title),
+      url: safeString(item?.url || item?.link),
+      summary: safeString(item?.summary || item?.snippet || item?.description),
+    }))
+    .filter(item => item.url)
+    .slice(0, 5);
+}
+
+async function defaultWebSearchProvider({ query, limit = 5, fetchImpl = global.fetch } = {}) {
+  const normalizedQuery = safeString(query);
+  if (!normalizedQuery) return { results: [] };
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('当前运行环境缺少 fetch 实现，无法执行联网搜索。');
+  }
+
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+    Accept: 'text/html,application/xhtml+xml',
+  };
+  const endpoints = [
+    {
+      url: `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(normalizedQuery)}`,
+      parse: parseDuckDuckGoLiteResults,
+    },
+    {
+      url: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(normalizedQuery)}`,
+      parse: parseDuckDuckGoHtmlResults,
+    },
+    {
+      url: `https://www.bing.com/search?q=${encodeURIComponent(normalizedQuery)}`,
+      parse: parseBingResults,
+    },
+  ];
+  const errors = [];
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetchImpl(endpoint.url, {
+        headers,
+        signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+          ? AbortSignal.timeout(20000)
+          : undefined,
+      });
+      if (!response || !response.ok) {
+        errors.push(`HTTP ${response?.status || 'unknown'}: ${endpoint.url}`);
+        continue;
+      }
+      const html = await response.text();
+      const results = endpoint.parse(html, limit);
+      if (results.length > 0) return { results };
+      errors.push(`搜索结果为空: ${endpoint.url}`);
+    } catch (error) {
+      errors.push(`${endpoint.url}: ${error.message || '请求失败'}`);
+    }
+  }
+  return { results: [], diagnostics: errors };
+}
+
+function getFirstAssistantMessage(rawResponse = {}) {
+  return rawResponse?.choices?.[0]?.message || null;
+}
+
+function getWebSearchToolCalls(rawResponse = {}) {
+  const message = getFirstAssistantMessage(rawResponse);
+  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  return toolCalls.filter(toolCall => toolCall?.function?.name === 'web_search');
+}
+
+function parseToolCallArguments(toolCall) {
+  try {
+    return JSON.parse(toolCall?.function?.arguments || '{}');
+  } catch {
+    return {};
+  }
+}
+
+async function runResearchProvider({
+  query,
+  aiModelConfig: modelConfigService,
+  aiTextModel: textModelService,
+  webSearchProvider,
+} = {}) {
+  const messages = [
+    {
+      role: 'system',
+      content: '你是一个联网研究助手。请搜索最新资料，为用户提供准确、有帮助的信息。',
+    },
+    {
+      role: 'user',
+      content: `请搜索并研究以下主题：${query}`,
+    },
+  ];
+
+  // 获取模型配置，判断是否为mimo模型
+  const config = await modelConfigService.getRuntimeConfig('text');
+  const modelId = config?.modelId || '';
+  const isMimo = modelId.toLowerCase().startsWith('mimo');
+
+  // 根据模型类型选择工具格式
+  let tools;
+  let toolChoice;
+
+  if (isMimo) {
+    // mimo-v2.5-pro 的 web_search 工具格式
+    tools = [
+      {
+        type: 'web_search',
+        max_keyword: 3,
+        force_search: true,
+        limit: 5,
+      },
+    ];
+    toolChoice = 'auto';
+  } else {
+    // OpenAI 标准格式
+    tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'web_search',
+          description: '搜索互联网获取最新信息',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: {
+                type: 'string',
+                description: '搜索关键词',
+              },
+            },
+            required: ['query'],
+          },
+        },
+      },
+    ];
+    toolChoice = { type: 'function', function: { name: 'web_search' } };
+  }
+
+  try {
+    const result = await textModelService.callTextModel({
+      messages,
+      tools,
+      tool_choice: toolChoice,
+      temperature: 0.3,
+      stream: false,
+    });
+
+    if (!result.success) {
+      throw new Error(result.message || '文本模型调用失败');
+    }
+
+    // 从响应中提取搜索结果
+    const text = result.text || '';
+    const rawResponse = result.raw_response || {};
+    const webSearchToolCalls = getWebSearchToolCalls(rawResponse);
+
+    if (webSearchToolCalls.length > 0 && typeof webSearchProvider === 'function') {
+      const assistantMessage = getFirstAssistantMessage(rawResponse);
+      const toolMessages = [];
+      let searchSources = [];
+      for (const toolCall of webSearchToolCalls) {
+        const args = parseToolCallArguments(toolCall);
+        const searchQuery = safeString(args.query) || safeString(query);
+        const searchResult = await webSearchProvider({ query: searchQuery, limit: 5 });
+        const normalizedResults = normalizeSearchResults(searchResult);
+        searchSources = searchSources.concat(normalizedResults);
+        toolMessages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          name: 'web_search',
+          content: JSON.stringify({ query: searchQuery, results: normalizedResults }),
+        });
+      }
+
+      const finalResult = await textModelService.callTextModel({
+        messages: [
+          ...messages,
+          {
+            role: 'assistant',
+            content: assistantMessage?.content || '',
+            tool_calls: assistantMessage?.tool_calls || webSearchToolCalls,
+          },
+          ...toolMessages,
+          {
+            role: 'user',
+            content: '请基于搜索结果输出中文研究摘要，并在正文中保留关键来源 URL。不要编造搜索结果之外的信息。',
+          },
+        ],
+        temperature: 0.3,
+        stream: false,
+      });
+      if (!finalResult.success) {
+        throw new Error(finalResult.message || '文本模型整理搜索结果失败');
+      }
+      return {
+        summary: finalResult.text || '',
+        sources: normalizeSearchResults(searchSources),
+      };
+    }
+
+    // 尝试从raw_response中提取搜索结果
+    let sources = [];
+    if (rawResponse.choices && rawResponse.choices[0] && rawResponse.choices[0].message) {
+      const message = rawResponse.choices[0].message;
+      // mimo的搜索结果可能在message的某个字段中
+      if (message.tool_calls) {
+        // 解析tool_calls中的搜索结果
+        for (const toolCall of message.tool_calls) {
+          if (toolCall.function && toolCall.function.name === 'web_search') {
+            try {
+              const searchResult = JSON.parse(toolCall.function.arguments);
+              if (searchResult.results) {
+                sources = searchResult.results.map(item => ({
+                  title: item.title || '',
+                  url: item.url || item.link || '',
+                  summary: item.snippet || item.description || '',
+                }));
+              }
+            } catch {
+              // 解析失败，继续
+            }
+          }
+        }
+      }
+    }
+
+    // 如果没有从tool_calls中提取到，尝试从文本中提取
+    if (sources.length === 0) {
+      // 尝试从文本中提取URL和标题
+      const urls = extractUrlsFromText(text);
+      sources = urls.slice(0, 5).map(url => ({
+        title: '',
+        url: url,
+        summary: '',
+      }));
+    }
+
+    return {
+      summary: text,
+      sources: sources,
+    };
+  } catch (error) {
+    throw new Error(`联网研究失败：${error.message}`);
+  }
+}
+
 function resolveServices(options = {}) {
   const services = options.services || {};
   return {
     ...services,
     researchService: services.researchService || defaultResearchService,
+    researchProvider: services.researchProvider || defaultResearchProvider,
     mediaPipeline: services.mediaPipeline || mediaPipeline,
     agentRuns: services.agentRuns || defaultAgentRuns,
+    aiModelConfig: services.aiModelConfig || aiModelConfig,
+    appSettings: services.appSettings || appSettings,
+    sourceFetch: services.sourceFetch || defaultSourceFetch,
+  };
+}
+
+function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride = {}, payload = {}) {
+  const defaultsSource = defaults && typeof defaults === 'object' ? defaults : {};
+  const overrideSource = creativeDefaultsOverride && typeof creativeDefaultsOverride === 'object'
+    ? creativeDefaultsOverride
+    : {};
+  const payloadSource = payload && typeof payload === 'object' ? payload : {};
+  const defaultTemplates = defaultsSource.templateByAspectRatio && typeof defaultsSource.templateByAspectRatio === 'object'
+    ? defaultsSource.templateByAspectRatio
+    : {};
+  const overrideTemplates = overrideSource.templateByAspectRatio && typeof overrideSource.templateByAspectRatio === 'object'
+    ? overrideSource.templateByAspectRatio
+    : {};
+  const templateByAspectRatio = {
+    ...defaultTemplates,
+    ...overrideTemplates,
+  };
+
+  const aspectRatio = safeString(overrideSource.aspectRatio) || safeString(defaultsSource.aspectRatio);
+  const targetDurationSec = Number.isFinite(Number(overrideSource.targetDurationSec))
+    ? Number(overrideSource.targetDurationSec)
+    : Number(defaultsSource.targetDurationSec);
+  const useResearchFromDefaults = defaultsSource.useResearch !== false;
+  const useResearch = typeof overrideSource.useResearch === 'boolean'
+    ? overrideSource.useResearch
+    : (typeof payloadSource.useResearch === 'boolean' ? payloadSource.useResearch : useResearchFromDefaults);
+  const templateId = safeString(overrideSource.templateId) || safeString(templateByAspectRatio[aspectRatio]);
+
+  return {
+    aspectRatio,
+    targetDurationSec,
+    templateByAspectRatio,
+    templateId,
+    lockTemplate: typeof overrideSource.lockTemplate === 'boolean'
+      ? overrideSource.lockTemplate
+      : defaultsSource.lockTemplate === true,
+    useResearch,
+  };
+}
+
+function buildWorkflowTarget(snapshot = {}) {
+  return {
+    aspect_ratio: safeString(snapshot.aspectRatio),
+    duration_sec: Number(snapshot.targetDurationSec),
+    preferredTemplateId: safeString(snapshot.templateId),
+    lockTemplate: snapshot.lockTemplate === true,
+  };
+}
+
+function mergeProjectOptions(recordTarget = {}, incoming = {}) {
+  const target = recordTarget && typeof recordTarget === 'object' ? recordTarget : {};
+  const incomingOptions = incoming && typeof incoming === 'object' ? incoming : {};
+  return {
+    ...target,
+    ...incomingOptions,
+    preferredTemplateId: safeString(target.preferredTemplateId) || safeString(incomingOptions.preferredTemplateId),
+    lockTemplate: target.lockTemplate === true,
   };
 }
 
@@ -198,6 +655,14 @@ function createWorkflowSummary(record) {
     status: record.status,
     run_id: record.run_id || '',
     message: record.message || '',
+    active_task_id: record.active_task_id || '',
+    active_operation_id: record.active_operation_id || '',
+    active_task: record.active_task || null,
+    task_status: record.task_status || '',
+    current_stage: record.current_stage || '',
+    current_stage_message: record.current_stage_message || '',
+    current_progress: Number.isFinite(record.current_progress) ? record.current_progress : 0,
+    last_event_seq: Number.isFinite(record.last_event_seq) ? record.last_event_seq : 0,
     stages: normalizeStages(record.stages),
     creative_context: record.creative_context,
     source_context: record.source_context,
@@ -212,24 +677,38 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const services = resolveServices(options);
   const now = getNow(services);
-  const normalized = creativeContext.normalizeCreativeInput(payload);
+  const creativeDefaults = await services.appSettings.getCreativeDefaults(options);
+  const snapshot = buildCreativeDefaultsSnapshot(
+    creativeDefaults,
+    payload && typeof payload === 'object' ? payload.creativeDefaultsOverride : {},
+    payload,
+  );
+  const effectivePayload = {
+    ...(payload || {}),
+    useResearch: snapshot.useResearch,
+  };
+  const normalized = creativeContext.normalizeCreativeInput(effectivePayload);
   if (!normalized.success) {
-    return normalizeFailureResult(normalized, payload);
+    return normalizeFailureResult(normalized, effectivePayload);
   }
+  const effectiveSystemSettings = await services.appSettings.getEffectiveSystemSettings(options);
 
   const workflowId = safeString(typeof services.idFactory === 'function' ? services.idFactory() : makeId(now));
   const awemeId = normalized.data.mode === 'douyin'
     ? normalized.data.aweme_id
     : makeLocalCreativeAwemeId(workflowId);
-  const sourceContext = normalized.data.mode === 'douyin'
-    ? createDouyinSourceContext(normalized.data)
-    : creativeContext.createTextSourceContext(normalized.data.raw_text);
-  const researchContext = await services.researchService.createResearchContext({
-    enabled: normalized.data.use_research,
-    query: normalized.data.raw_text || normalized.data.aweme_id,
-    now,
-    provider: services.researchProvider,
-  });
+  let sourceContext;
+  if (normalized.data.mode === 'douyin') {
+    sourceContext = createDouyinSourceContext(normalized.data);
+  } else if (normalized.data.mode === 'source_url') {
+    sourceContext = createSourceUrlSourceContext(normalized.data);
+  } else {
+    sourceContext = creativeContext.createTextSourceContext(normalized.data.raw_text);
+  }
+  const researchQuery = normalized.data.raw_text || normalized.data.aweme_id;
+  const researchContext = normalized.data.use_research
+    ? creativeContext.createPendingResearchContext({ query: researchQuery, now })
+    : creativeContext.createDisabledResearchContext({ now });
   const assetContext = creativeContext.createDisabledAssetContext({ now });
   const creative = creativeContext.buildCreativeContext({
     input: normalized.data,
@@ -250,6 +729,13 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
     status: 'queued',
     message: '创作任务已创建，等待执行。',
     run_id: '',
+    active_task_id: '',
+    active_operation_id: '',
+    task_status: '',
+    current_stage: '',
+    current_stage_message: '',
+    current_progress: 0,
+    last_event_seq: 0,
     input: normalized.data,
     source_context: sourceContext,
     research_context: researchContext,
@@ -258,6 +744,9 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
     stages,
     result: null,
     error: null,
+    creative_defaults_snapshot: snapshot,
+    target: buildWorkflowTarget(snapshot),
+    skipValidation: normalized.data.skip_validation === true || effectiveSystemSettings.skipValidation === true,
     created_at: now,
     updated_at: now,
   };
@@ -327,6 +816,319 @@ async function writeSyntheticTextWorkspace(record, mediaRoot, now) {
     message: '纯文本来源资料已准备完成。',
     paths,
   };
+}
+
+function summarizeMarkdown(markdown, fallback = '') {
+  const text = safeString(markdown)
+    .split(/\r?\n/)
+    .map(line => line.replace(/^#{1,6}\s+/, '').trim())
+    .filter(Boolean)
+    .join(' ');
+  return (text || safeString(fallback)).slice(0, 240);
+}
+
+function buildSourceDescription(sourceMaterial = {}) {
+  const title = safeString(sourceMaterial.title);
+  const summary = summarizeMarkdown(sourceMaterial.markdown, sourceMaterial.description || sourceMaterial.url);
+  if (title && summary && summary !== title) {
+    return `${title}：${summary}`;
+  }
+  return title || summary || safeString(sourceMaterial.url);
+}
+
+function createSourceDescription(sourceMaterial = {}) {
+  return buildSourceDescription(sourceMaterial);
+}
+
+function normalizeFetchedSource(fetchResult = {}, requestedUrl = '') {
+  const data = fetchResult.data && typeof fetchResult.data === 'object' ? fetchResult.data : fetchResult;
+  const sourceUrl = safeString(data.url || data.source_url || requestedUrl);
+  const markdown = safeString(data.markdown || data.text || data.content);
+  const title = safeString(data.title) || sourceUrl;
+  const description = safeString(data.description || data.summary) || summarizeMarkdown(markdown, title);
+  return {
+    kind: safeString(data.kind || data.source_kind || 'web_page'),
+    url: sourceUrl,
+    title,
+    description,
+    markdown,
+    truncated: data.truncated === true,
+    metadata: data.metadata || data.source_metadata || {},
+    diagnostics: data.diagnostics || fetchResult.diagnostics || {},
+  };
+}
+
+function createFetchedSourceContext(record, sourceMaterial = {}, now) {
+  const description = buildSourceDescription(sourceMaterial);
+  const input = record.creative_context?.input || record.input || {};
+  const ignoredUrlCount = Number(input.ignored_url_count) || 0;
+  return {
+    ...(record.source_context || {}),
+    status: 'ready',
+    kind: 'source_url',
+    summary: description,
+    transcript: safeString(sourceMaterial.markdown),
+    comments_summary: '',
+    source_url: sourceMaterial.url,
+    source_kind: sourceMaterial.kind,
+    title: sourceMaterial.title,
+    description,
+    source_metadata: {
+      ...(sourceMaterial.metadata || {}),
+      kind: safeString(sourceMaterial.kind),
+      url: safeString(sourceMaterial.url || input.source_url),
+      title: safeString(sourceMaterial.title),
+      truncated: sourceMaterial.truncated === true,
+      source_url: sourceMaterial.url,
+      source_kind: sourceMaterial.kind,
+      user_hint: safeString(record.creative_context?.input?.source_hint),
+    },
+    diagnostics: {
+      ...(sourceMaterial.diagnostics || {}),
+      source_type: 'source_url',
+      source_kind: safeString(sourceMaterial.kind),
+      fetched_at: now,
+      ignored_url_count: ignoredUrlCount,
+      prepared_at: now,
+    },
+  };
+}
+
+function normalizeSourceFetchDiagnostics(fetchResult = {}) {
+  const data = fetchResult?.data && typeof fetchResult.data === 'object' ? fetchResult.data : fetchResult;
+  return {
+    ...(data?.diagnostics && typeof data.diagnostics === 'object' ? data.diagnostics : {}),
+    ...(data?.diagnostic && typeof data.diagnostic === 'object' ? data.diagnostic : {}),
+    ...(fetchResult?.diagnostics && typeof fetchResult.diagnostics === 'object' ? fetchResult.diagnostics : {}),
+    ...(fetchResult?.diagnostic && typeof fetchResult.diagnostic === 'object' ? fetchResult.diagnostic : {}),
+  };
+}
+
+function updateFailedSourceUrlSourceContext(record, requestedUrl, failure = {}, now) {
+  const data = failure?.data && typeof failure.data === 'object' ? failure.data : failure;
+  const sourceUrl = safeString(data?.url || data?.source_url || requestedUrl);
+  const sourceKind = safeString(data?.kind || data?.source_kind);
+  const message = safeString(data?.message || data?.error || failure?.message || failure?.error)
+    || '外部来源读取失败。';
+  const diagnostics = normalizeSourceFetchDiagnostics(failure);
+  const sourceContext = {
+    ...(record.source_context || {}),
+    status: 'failed',
+    kind: 'source_url',
+    summary: message,
+    source_url: sourceUrl,
+    source_kind: sourceKind,
+    source_metadata: {
+      ...(record.source_context?.source_metadata || {}),
+      ...(data?.metadata && typeof data.metadata === 'object' ? data.metadata : {}),
+      url: sourceUrl,
+      source_url: sourceUrl,
+      source_kind: sourceKind,
+      user_hint: safeString(record.creative_context?.input?.source_hint),
+    },
+    diagnostics: {
+      ...(record.source_context?.diagnostics || {}),
+      ...diagnostics,
+      source_type: 'source_url',
+      failed_at: now,
+      message,
+    },
+  };
+  record.source_context = sourceContext;
+  record.creative_context = {
+    ...(record.creative_context || {}),
+    source_context: sourceContext,
+  };
+  return sourceContext;
+}
+
+async function writeSyntheticSourceWorkspace(record, mediaRoot, fetched = {}, now) {
+  const sourceMaterial = fetched || {};
+  const paths = mediaPipeline.getMediaPaths(record.aweme_id, mediaRoot);
+  const userHint = safeString(record.creative_context?.input?.source_hint);
+  const description = buildSourceDescription(sourceMaterial);
+  const sourceContext = createFetchedSourceContext(record, sourceMaterial, now);
+  const creativeContextWithSource = {
+    ...(record.creative_context || {}),
+    source_context: sourceContext,
+  };
+
+  await fsp.mkdir(paths.framesDir, { recursive: true });
+
+  const sourceMaterialPayload = {
+    kind: sourceMaterial.kind,
+    url: sourceMaterial.url,
+    title: sourceMaterial.title,
+    description,
+    markdown: sourceMaterial.markdown,
+    truncated: sourceMaterial.truncated === true,
+    user_hint: userHint,
+    metadata: sourceMaterial.metadata || {},
+  };
+
+  await writeJson(paths.metadata, {
+    aweme_id: record.aweme_id,
+    source_type: 'source_url',
+    source_kind: sourceMaterial.kind,
+    source_url: sourceMaterial.url,
+    title: sourceMaterial.title,
+    description,
+    user_hint: userHint,
+    source_material: sourceMaterialPayload,
+    creative_workflow_id: record.workflow_id,
+    created_at: record.created_at,
+    updated_at: now,
+  });
+
+  await writeJson(paths.transcript, {
+    success: true,
+    status: 'done',
+    source_type: 'source_url',
+    source_kind: sourceMaterial.kind,
+    source_url: sourceMaterial.url,
+    title: sourceMaterial.title,
+    text: sourceMaterial.markdown,
+    truncated: sourceMaterial.truncated === true,
+    user_hint: userHint,
+    updated_at: now,
+  });
+
+  await writeJson(paths.analysisInput, {
+    aweme_id: record.aweme_id,
+    video: {
+      title: sourceMaterial.title,
+      description,
+      author: {},
+      statistics: {},
+      aweme_url: '',
+      source_url: sourceMaterial.url,
+    },
+    local_assets: {
+      dir: paths.dir,
+      metadata: paths.metadata,
+      video: '',
+      audio: '',
+      frames: [],
+    },
+    comments_summary: {
+      status: 'disabled',
+      message: '外部来源创作暂无评论素材。',
+    },
+    transcript: {
+      status: 'done',
+      path: paths.transcript,
+    },
+    source_material: sourceMaterialPayload,
+    steps: {
+      metadata: { status: 'done', path: paths.metadata },
+      transcript: { status: 'done', path: paths.transcript },
+      analysis_input: { status: 'done', path: paths.analysisInput },
+    },
+    creative_context: creativeContextWithSource,
+    updated_at: now,
+  });
+
+  record.source_context = sourceContext;
+  record.creative_context = creativeContextWithSource;
+
+  return {
+    success: true,
+    message: '外部来源资料已读取并准备完成。',
+    paths,
+    source_context: sourceContext,
+  };
+}
+
+async function prepareSourceUrl(record, mediaRoot, now, services = {}, reportStage = null) {
+  const sourceUrl = safeString(record.creative_context?.input?.source_url || record.input?.source_url);
+  if (!sourceUrl) {
+    const message = '外部来源链接为空，请重新输入文章或 GitHub 仓库链接。';
+    updateFailedSourceUrlSourceContext(record, sourceUrl, {
+      message,
+    }, now);
+    return {
+      success: false,
+      message,
+    };
+  }
+
+  const fetcher = services.sourceFetch;
+  if (!fetcher || typeof fetcher.fetchSource !== 'function') {
+    updateFailedSourceUrlSourceContext(record, sourceUrl, {
+      url: sourceUrl,
+      message: '外部来源抓取服务未配置。',
+      diagnostic: { code: 'SOURCE_FETCH_UNCONFIGURED' },
+    }, now);
+    return {
+      success: false,
+      message: '外部来源抓取服务未配置。',
+    };
+  }
+
+  if (typeof reportStage === 'function') {
+    await reportStage(getSourceUrlLoadingMessage(sourceUrl), 15, { source_url: sourceUrl });
+  }
+
+  let fetched;
+  try {
+    fetched = await fetcher.fetchSource(sourceUrl);
+  } catch (error) {
+    const diagnostic = {
+      code: 'SOURCE_FETCH_EXCEPTION',
+      error: safeString(error && error.message),
+    };
+    const message = '读取外部来源失败，请确认链接可公开访问。';
+    updateFailedSourceUrlSourceContext(record, sourceUrl, {
+      url: sourceUrl,
+      message,
+      diagnostic,
+    }, now);
+    return {
+      success: false,
+      message,
+      diagnostic,
+    };
+  }
+
+  if (!fetched || fetched.success === false) {
+    const message = safeString(fetched?.message || fetched?.error) || '读取外部来源失败，请确认链接可公开访问。';
+    updateFailedSourceUrlSourceContext(record, sourceUrl, {
+      ...(fetched || {}),
+      url: sourceUrl,
+      message,
+    }, now);
+    return {
+      success: false,
+      message,
+      result: fetched,
+    };
+  }
+
+  const sourceMaterial = normalizeFetchedSource(fetched, sourceUrl);
+  if (!sourceMaterial.markdown) {
+    updateFailedSourceUrlSourceContext(record, sourceUrl, {
+      ...(fetched || {}),
+      url: sourceMaterial.url,
+      kind: sourceMaterial.kind,
+      message: '外部来源读取失败：未生成可用于创作的 Markdown 内容。',
+      diagnostics: sourceMaterial.diagnostics,
+    }, now);
+    return {
+      success: false,
+      message: '外部来源读取失败：未生成可用于创作的 Markdown 内容。',
+      result: fetched,
+    };
+  }
+
+  if (typeof reportStage === 'function') {
+    await reportStage('外部来源资料已读取，正在准备创作上下文...', 70, {
+      source_url: sourceUrl,
+      source_kind: fetched.kind,
+      title: fetched.title || '',
+    });
+  }
+
+  return writeSyntheticSourceWorkspace(record, mediaRoot, sourceMaterial, now);
 }
 
 function hasPreparedLocalMedia(analysisInput = {}, status = {}) {
@@ -506,9 +1308,13 @@ async function prepareDouyinSource(record, mediaRoot, now, services = {}) {
   };
 }
 
-async function prepareSource(record, mediaRoot, now, services = {}) {
+async function prepareSource(record, mediaRoot, now, services = {}, reportStage = null) {
   if (record.creative_context?.input?.mode === 'text') {
     return writeSyntheticTextWorkspace(record, mediaRoot, now);
+  }
+
+  if (record.creative_context?.input?.mode === 'source_url') {
+    return prepareSourceUrl(record, mediaRoot, now, services, reportStage);
   }
 
   return prepareDouyinSource(record, mediaRoot, now, services);
@@ -521,6 +1327,14 @@ function ensureSuccess(result, fallbackMessage) {
   return result;
 }
 
+function isHtmlVideoLiteProjectResult(result) {
+  const hyperframes = result?.hyperframes_freeform || {};
+  const project = hyperframes.project || {};
+  return project.render_mode === 'html-video'
+    && Boolean(project.html_video_project_path)
+    && hyperframes.render?.status === 'rendered';
+}
+
 async function markStage(record, stageId, status, message, now, extra = {}) {
   updateStage(record, stageId, {
     status,
@@ -530,7 +1344,43 @@ async function markStage(record, stageId, status, message, now, extra = {}) {
   });
 }
 
-async function runStage(record, stageId, rootDir, handler, services) {
+async function markHtmlVideoLiteFinalStages(record, now, projectStageResult = {}) {
+  const hyperframes = projectStageResult.hyperframes_freeform || {};
+  await markStage(record, 'check', 'skipped', 'html-video production 已完成，跳过旧 HyperFrames 工程校验。', now, {
+    skipped_at: now,
+  });
+  await markStage(record, 'render', 'done', hyperframes.render?.message || 'html-video production 成片已导出。', now, {
+    completed_at: now,
+    result: {
+      success: true,
+      render: hyperframes.render || null,
+    },
+  });
+  await markStage(record, 'inspect', 'done', hyperframes.visual_inspect?.message || 'html-video production 视觉质检通过。', now, {
+    completed_at: now,
+    result: {
+      success: true,
+      visual_inspect: hyperframes.visual_inspect || null,
+    },
+  });
+}
+
+async function emitTaskContextEvent(taskContext, event) {
+  if (!taskContext || typeof taskContext.emit !== 'function') {
+    return;
+  }
+  try {
+    await taskContext.emit(event);
+  } catch {
+    // 后台任务事件是辅助状态通道，不能改变主 workflow 阶段成败。
+  }
+}
+
+async function runStage(record, stageId, rootDir, handler, services, taskContext = null) {
+  if (!await workflowFileExists(record.workflow_id, rootDir)) {
+    return WORKFLOW_STOPPED;
+  }
+
   const startedAt = getNow(services);
   await markStage(record, stageId, 'running', `正在${STAGE_LABELS[stageId]}...`, startedAt, {
     started_at: startedAt,
@@ -538,9 +1388,29 @@ async function runStage(record, stageId, rootDir, handler, services) {
   record.status = 'running';
   record.updated_at = startedAt;
   await persistWorkflow(record, rootDir);
+  await emitTaskContextEvent(taskContext, {
+    type: 'stage_started',
+    stage: stageId,
+    stage_progress: 0,
+    message: `正在${STAGE_LABELS[stageId]}...`,
+  });
 
   try {
-    const result = await handler();
+    const reportStage = (message, progress = 50, data = {}) => emitTaskContextEvent(
+      taskContext,
+      {
+        type: 'stage_progress',
+        stage: stageId,
+        stage_progress: progress,
+        message,
+        data,
+      },
+    );
+    const result = await handler({ reportStage, taskContext });
+    if (!await workflowFileExists(record.workflow_id, rootDir)) {
+      return WORKFLOW_STOPPED;
+    }
+
     const completedAt = getNow(services);
     await markStage(record, stageId, 'done', result?.message || `${STAGE_LABELS[stageId]}完成。`, completedAt, {
       completed_at: completedAt,
@@ -548,8 +1418,18 @@ async function runStage(record, stageId, rootDir, handler, services) {
     });
     record.updated_at = completedAt;
     await persistWorkflow(record, rootDir);
+    await emitTaskContextEvent(taskContext, {
+      type: 'stage_done',
+      stage: stageId,
+      stage_progress: 100,
+      message: result?.message || `${STAGE_LABELS[stageId]}完成。`,
+    });
     return result;
   } catch (error) {
+    if (!await workflowFileExists(record.workflow_id, rootDir)) {
+      return WORKFLOW_STOPPED;
+    }
+
     const failedAt = getNow(services);
     const message = safeString(error && error.message) || `${STAGE_LABELS[stageId]}失败。`;
     await markStage(record, stageId, 'failed', message, failedAt, {
@@ -565,6 +1445,13 @@ async function runStage(record, stageId, rootDir, handler, services) {
     };
     record.updated_at = failedAt;
     await persistWorkflow(record, rootDir);
+    await emitTaskContextEvent(taskContext, {
+      type: 'stage_failed',
+      stage: stageId,
+      stage_progress: 100,
+      message,
+      data: { error: message },
+    });
     return null;
   }
 }
@@ -573,6 +1460,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
   const services = resolveServices(options);
+  const taskContext = options.taskContext || null;
   let record;
   try {
     record = await readWorkflow(workflowId, rootDir);
@@ -584,43 +1472,68 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     };
   }
 
-  const failIfNull = result => {
-    if (result === null) {
-      return true;
-    }
-    return false;
-  };
-
-  if (failIfNull(await runStage(record, 'source', rootDir, async () => (
-    ensureSuccess(await prepareSource(record, mediaRoot, getNow(services), services), '来源资料准备失败。')
-  ), services))) {
-    return createWorkflowSummary(record);
+  if (options.skipValidation === undefined && record.skipValidation === true) {
+    options = { ...options, skipValidation: true };
   }
 
-  if (failIfNull(await runStage(record, 'research', rootDir, async () => {
-    if (record.research_context?.status === 'failed') {
-      throw new Error(record.research_context.summary || '联网研究失败。');
+  const failIfStoppedOrNull = result => {
+    if (result === WORKFLOW_STOPPED) {
+      return createWorkflowStoppedSummary(workflowId);
+    }
+    if (result === null) {
+      return createWorkflowSummary(record);
+    }
+    return null;
+  };
+
+  let stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'source', rootDir, async ({ reportStage }) => (
+    ensureSuccess(await prepareSource(record, mediaRoot, getNow(services), services, reportStage), '来源资料准备失败。')
+  ), services, taskContext));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
+  }
+
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'research', rootDir, async ({ reportStage }) => {
+    const inputContext = record.creative_context?.input || record.input || {};
+    const useResearch = inputContext.use_research === true;
+    const query = inputContext.raw_text || inputContext.aweme_id || record.research_context?.query || '';
+    await reportStage(useResearch ? '正在联网研究最新资料...' : '联网研究已关闭，继续下一步。', 20);
+    const nextResearchContext = await services.researchService.createResearchContext({
+      enabled: useResearch,
+      query,
+      now: getNow(services),
+      provider: services.researchProvider,
+    });
+    record.research_context = nextResearchContext;
+    record.creative_context = {
+      ...(record.creative_context || {}),
+      research_context: nextResearchContext,
+    };
+    if (nextResearchContext?.status === 'failed') {
+      throw new Error(nextResearchContext.summary || '联网研究失败。');
     }
     return {
       success: true,
-      message: record.research_context?.status === 'disabled'
+      message: nextResearchContext?.status === 'disabled'
         ? '联网研究已关闭，继续下一步。'
         : '联网研究资料已准备完成。',
-      research_context: record.research_context,
+      research_context: nextResearchContext,
     };
-  }, services))) {
-    return createWorkflowSummary(record);
+  }, services, taskContext));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'assets', rootDir, async () => ({
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'assets', rootDir, async () => ({
     success: true,
     message: '图片素材将在下一阶段开放，当前任务继续使用来源上下文。',
     asset_context: record.asset_context,
-  }), services))) {
-    return createWorkflowSummary(record);
+  }), services, taskContext));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'agent_run', rootDir, async () => {
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'agent_run', rootDir, async () => {
     const result = ensureSuccess(
       await services.agentRuns.createDouyinHyperframesFreeformRun(record.aweme_id, { rootDir: mediaRoot }),
       '导演改写任务创建失败。',
@@ -630,11 +1543,12 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       throw new Error('导演改写任务未返回 run_id。');
     }
     return result;
-  }, services))) {
-    return createWorkflowSummary(record);
+  }, services, taskContext));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'brief', rootDir, async () => ensureSuccess(
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'brief', rootDir, async () => ensureSuccess(
     await services.agentRuns.generateDouyinRunHyperframesFreeformBrief(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
       briefOptions: {
@@ -642,57 +1556,106 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       },
     }),
     '成片策划失败。',
-  ), services))) {
-    return createWorkflowSummary(record);
+  ), services, taskContext));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'audio', rootDir, async () => ensureSuccess(
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'audio', rootDir, async () => ensureSuccess(
     await services.agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
     }),
     '音频轨生成失败。',
-  ), services))) {
-    return createWorkflowSummary(record);
+  ), services, taskContext));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'project', rootDir, async () => ensureSuccess(
+  let skipValidation = options.skipValidation === true || record.skipValidation === true;
+  if (!skipValidation && typeof record.skipValidation !== 'boolean') {
+    try {
+      const effectiveSystemSettings = await services.appSettings.getEffectiveSystemSettings(options);
+      skipValidation = effectiveSystemSettings.skipValidation === true;
+    } catch {}
+  }
+  const existingProjectOptions = {
+    ...(options.projectOptions && typeof options.projectOptions === 'object' ? options.projectOptions : {}),
+    creative_context: record.creative_context,
+  };
+
+  const projectStageResult = await runStage(record, 'project', rootDir, async () => ensureSuccess(
     await services.agentRuns.generateDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
-      projectOptions: {
-        creative_context: record.creative_context,
+      useHtmlVideoLiteWorkflow: true,
+      skipValidation,
+      onProgress: async event => {
+        await emitTaskContextEvent(taskContext, {
+          ...event,
+          type: event?.type || 'stage_progress',
+          stage: 'project',
+          message: event?.message || '正在生成 html-video 工程...',
+        });
       },
+      projectOptions: mergeProjectOptions(record.target, existingProjectOptions),
     }),
     '工程生成失败。',
-  ), services))) {
-    return createWorkflowSummary(record);
+  ), services, taskContext);
+  stoppedOrFailed = failIfStoppedOrNull(projectStageResult);
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  if (failIfNull(await runStage(record, 'check', rootDir, async () => ensureSuccess(
-    await services.agentRuns.checkDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
-      rootDir: mediaRoot,
-    }),
-    '工程校验失败。',
-  ), services))) {
-    return createWorkflowSummary(record);
+  if (isHtmlVideoLiteProjectResult(projectStageResult)) {
+    const doneAt = getNow(services);
+    await markHtmlVideoLiteFinalStages(record, doneAt, projectStageResult);
+    record.success = true;
+    record.status = 'done';
+    record.message = '创作任务已完成。';
+    record.result = { hyperframes_freeform: projectStageResult.hyperframes_freeform };
+    record.error = null;
+    record.updated_at = doneAt;
+    const persisted = await persistWorkflow(record, rootDir);
+    return createWorkflowSummary(persisted);
   }
 
-  if (failIfNull(await runStage(record, 'render', rootDir, async () => ensureSuccess(
+  if (!skipValidation) {
+    stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'check', rootDir, async () => ensureSuccess(
+      await services.agentRuns.checkDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
+        rootDir: mediaRoot,
+      }),
+      '工程校验失败。',
+    ), services, taskContext));
+    if (stoppedOrFailed) {
+      return stoppedOrFailed;
+    }
+  }
+
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'render', rootDir, async () => ensureSuccess(
     await services.agentRuns.renderDouyinRunHyperframesFreeformVideo(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
     }),
     '视频渲染失败。',
-  ), services))) {
-    return createWorkflowSummary(record);
+  ), services, taskContext));
+  if (stoppedOrFailed) {
+    return stoppedOrFailed;
   }
 
-  const inspectResult = await runStage(record, 'inspect', rootDir, async () => ensureSuccess(
-    await services.agentRuns.inspectDouyinRunHyperframesFreeformVideo(record.aweme_id, record.run_id, {
-      rootDir: mediaRoot,
-    }),
-    '视频巡检失败。',
-  ), services);
-  if (failIfNull(inspectResult)) {
-    return createWorkflowSummary(record);
+  let inspectResult = null;
+  if (!skipValidation) {
+    inspectResult = await runStage(record, 'inspect', rootDir, async () => ensureSuccess(
+      await services.agentRuns.inspectDouyinRunHyperframesFreeformVideo(record.aweme_id, record.run_id, {
+        rootDir: mediaRoot,
+      }),
+      '视频巡检失败。',
+    ), services, taskContext);
+    stoppedOrFailed = failIfStoppedOrNull(inspectResult);
+    if (stoppedOrFailed) {
+      return stoppedOrFailed;
+    }
+  }
+
+  if (!await workflowFileExists(workflowId, rootDir)) {
+    return createWorkflowStoppedSummary(workflowId);
   }
 
   const doneAt = getNow(services);
@@ -730,6 +1693,17 @@ function parseDateMs(value) {
   return Number.isFinite(time) ? time : 0;
 }
 
+function isDefaultWorkflowRoot(rootDir) {
+  return path.resolve(rootDir || DEFAULT_ROOT) === path.resolve(DEFAULT_ROOT);
+}
+
+function resolveTaskRegistry(rootDir, options = {}) {
+  if (Object.prototype.hasOwnProperty.call(options, 'taskRegistry')) {
+    return options.taskRegistry;
+  }
+  return isDefaultWorkflowRoot(rootDir) ? defaultCreativeTaskRegistry : null;
+}
+
 function findStaleRunningStage(record, nowMs, timeoutMs) {
   if (record?.status !== 'running') return null;
   const stages = normalizeStages(record.stages);
@@ -744,6 +1718,12 @@ async function markStaleRunningStageFailed(record, rootDir, services = {}, optio
   const timeoutMs = Number(options.staleStageTimeoutMs) || DEFAULT_STALE_STAGE_TIMEOUT_MS;
   const now = getNow(services);
   const nowMs = parseDateMs(now) || Date.now();
+  const taskRegistry = resolveTaskRegistry(rootDir, options);
+  const activeTask = taskRegistry?.activeTaskForWorkflow?.(record.workflow_id);
+  if (activeTask && activeTask.status === 'running') {
+    record.active_task = activeTask;
+    return record;
+  }
   const stage = findStaleRunningStage(record, nowMs, timeoutMs);
   if (!stage) return record;
 
@@ -763,6 +1743,75 @@ async function markStaleRunningStageFailed(record, rootDir, services = {}, optio
   };
   record.updated_at = now;
   return persistWorkflow(record, rootDir);
+}
+
+async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  try {
+    const record = await readWorkflow(workflowId, rootDir);
+    const now = safeString(patch.updated_at) || getNow(resolveServices(options)) || new Date().toISOString();
+    const seq = Number(patch.last_event_seq ?? record.last_event_seq);
+    if (Number.isFinite(seq) && seq > 0 && Number(record.last_event_seq) > seq) {
+      return { success: true, workflow_id: record.workflow_id, data: record };
+    }
+    record.active_task_id = safeString(patch.active_task_id ?? record.active_task_id);
+    record.active_operation_id = safeString(patch.active_operation_id ?? record.active_operation_id);
+    record.task_status = safeString(patch.task_status ?? record.task_status);
+    record.current_stage = safeString(patch.current_stage ?? record.current_stage);
+    record.current_stage_message = safeString(patch.current_stage_message ?? record.current_stage_message);
+    const progress = Number(patch.current_progress ?? record.current_progress);
+    record.current_progress = Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : 0;
+    record.last_event_seq = Number.isFinite(seq) && seq > 0 ? Math.floor(seq) : 0;
+    if (patch.fail_running_stages === true) {
+      const failedStageMessage = safeString(patch.message || patch.current_stage_message)
+        || '服务器重启，后台创作任务被中断，请重新创建任务。';
+      record.stages = normalizeStages(record.stages).map(stage => (
+        stage.status === 'running'
+          ? {
+            ...stage,
+            status: 'failed',
+            message: failedStageMessage,
+            updated_at: now,
+            failed_at: now,
+            stale: true,
+            reason: 'server_restart',
+          }
+          : stage
+      ));
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'success')) record.success = patch.success !== false;
+    if (Object.prototype.hasOwnProperty.call(patch, 'status')) record.status = safeString(patch.status);
+    if (Object.prototype.hasOwnProperty.call(patch, 'message')) record.message = safeString(patch.message);
+    if (Object.prototype.hasOwnProperty.call(patch, 'error')) record.error = patch.error || null;
+    record.updated_at = now;
+    const persisted = await persistWorkflow(record, rootDir);
+    return { success: true, workflow_id: record.workflow_id, data: persisted };
+  } catch (error) {
+    return { success: false, workflow_id: safeString(workflowId), message: `更新创作任务进度失败：${error.message}` };
+  }
+}
+
+async function clearCreativeWorkflowTaskSummary(workflowId, options = {}) {
+  return patchCreativeWorkflowTaskSummary(workflowId, {
+    active_task_id: '',
+    active_operation_id: '',
+    task_status: '',
+    current_stage: '',
+    current_stage_message: '',
+    current_progress: 0,
+    last_event_seq: 0,
+  }, options);
+}
+
+async function listCreativeWorkflowRecords(options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  let files;
+  try { files = await fsp.readdir(rootDir); } catch { return []; }
+  const records = [];
+  for (const file of files.filter(name => WORKFLOW_ID_PATTERN.test(path.basename(name, '.json')) && name.endsWith('.json'))) {
+    try { records.push(await readJson(path.join(rootDir, file))); } catch {}
+  }
+  return records;
 }
 
 async function deleteCreativeWorkflow(workflowId, options = {}) {
@@ -858,14 +1907,622 @@ async function recoverStaleWorkflowsOnStartup(services = {}) {
   if (recovered > 0) console.log(`[startup] 共清理 ${recovered} 个卡死的工作流`);
 }
 
+function extractSceneSpecFromWorkflow(record) {
+  const hyperframes = record?.result?.hyperframes_freeform;
+  if (!hyperframes || !hyperframes.project || !hyperframes.project.scene_spec) {
+    return null;
+  }
+  return hyperframes.project.scene_spec;
+}
+
+function extractFrameSpecsFromWorkflow(record) {
+  const frameSpecs = record?.result?.hyperframes_freeform?.project?.frame_specs;
+  if (!frameSpecs || typeof frameSpecs !== 'object' || Array.isArray(frameSpecs)) {
+    return { frames: [] };
+  }
+  return frameSpecs;
+}
+
+function extractRenderVersionsFromWorkflow(record) {
+  const versions = record?.result?.hyperframes_freeform?.render?.render_versions;
+  return Array.isArray(versions) ? versions : [];
+}
+
+function extractHtmlVideoProjectPathFromWorkflow(record) {
+  const hyperframes = record?.result?.hyperframes_freeform || {};
+  const project = hyperframes.project || {};
+  return safeString(
+    project.html_video_project_path
+    || project.project_dir
+    || hyperframes.html_video_project_path
+    || hyperframes.project_dir,
+  );
+}
+
+async function loadWorkflowWithHtmlVideoProject(workflowId, rootDir) {
+  let record;
+  try {
+    record = await readWorkflow(workflowId, rootDir);
+  } catch {
+    return { record: null, project: null, projectDir: '', error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
+  }
+  const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
+  if (!projectDir) {
+    return { record, project: null, projectDir: '', error: { success: false, code: 'NO_HTML_VIDEO_PROJECT', message: '该创作任务尚未生成 html-video 工程。' } };
+  }
+  try {
+    const project = await htmlVideoProjectStore.loadProject(projectDir);
+    return { record, project, projectDir, error: null };
+  } catch (error) {
+    return {
+      record,
+      project: null,
+      projectDir,
+      error: {
+        success: false,
+        code: 'NO_HTML_VIDEO_PROJECT',
+        message: `读取 html-video 工程失败：${error.message}`,
+      },
+    };
+  }
+}
+
+async function loadWorkflowWithSceneSpec(workflowId, rootDir) {
+  let record;
+  try {
+    record = await readWorkflow(workflowId, rootDir);
+  } catch {
+    return { record: null, sceneSpec: null, error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
+  }
+  if (!record) {
+    return { record: null, sceneSpec: null, error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
+  }
+  const rawSceneSpec = extractSceneSpecFromWorkflow(record);
+  if (!rawSceneSpec) {
+    return { record, sceneSpec: null, error: { success: false, code: 'NO_SCENE_SPEC', message: '该创作任务尚未生成场景规格。' } };
+  }
+  const sceneSpec = sceneSpecService.normalizeSceneSpec(rawSceneSpec);
+  return { record, sceneSpec, error: null };
+}
+
+async function getCreativeWorkflowVideoSpec(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  return {
+    success: true,
+    workflow_id: workflowId,
+    scene_spec: sceneSpec,
+    frame_specs: extractFrameSpecsFromWorkflow(record),
+    render_versions: extractRenderVersionsFromWorkflow(record),
+  };
+}
+
+async function getCreativeWorkflowHtmlVideoProject(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  return {
+    success: true,
+    workflow_id: workflowId,
+    html_video_project: project,
+    html_video_project_path: projectDir,
+  };
+}
+
+async function patchCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+
+  const patcher = options.htmlVideoEditPatchService || htmlVideoEditPatchService;
+  const result = patcher.applyEditPatch(project, payload);
+  if (!result.success) {
+    return {
+      success: false,
+      code: result.code || 'EDIT_FAILED',
+      workflow_id: workflowId,
+      message: result.message || 'html-video 编辑失败。',
+    };
+  }
+
+  const rawHtmlTextPatch = await syncRawHtmlFrameTextPatch({
+    projectDir,
+    project: result.project,
+    editPatch: payload,
+  });
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, result.project);
+  return {
+    success: true,
+    workflow_id: workflowId,
+    html_video_project: saved,
+    html_video_project_path: projectDir,
+    revision: result.revision,
+    requires_tts: result.requires_tts,
+    requires_render: result.requires_render,
+    raw_html_text_patch: rawHtmlTextPatch,
+    message: result.message || 'html-video 工程已保存。',
+  };
+}
+
+async function patchHtmlVideoProjectInputs(workflowId, payload = {}, options = {}) {
+  const patch = payload.template_inputs_patch || payload.patch || payload.inputs || payload.template_inputs || {};
+  return patchCreativeWorkflowHtmlVideoProject(workflowId, {
+    type: 'template_inputs_patch',
+    patch,
+    summary: payload.summary || '模板字段已保存，需要重新渲染。',
+  }, options);
+}
+
+async function patchHtmlVideoProjectFrame(workflowId, frameId, payload = {}, options = {}) {
+  const patch = payload.frame_inputs_patch || payload.patch || payload.inputs || {};
+  if (payload.type === 'frame_patch') {
+    return patchCreativeWorkflowHtmlVideoProject(workflowId, {
+      ...payload,
+      type: 'frame_patch',
+      frame_id: frameId,
+      patch,
+      inputs: payload.inputs,
+      summary: payload.summary || '帧字段已保存，需要重新渲染。',
+    }, options);
+  }
+  const type = payload.type || (
+    payload.duration_sec != null || payload.duration != null
+      ? 'duration_patch'
+      : 'frame_inputs_patch'
+  );
+  return patchCreativeWorkflowHtmlVideoProject(workflowId, {
+    type,
+    frame_id: frameId,
+    patch,
+    duration_sec: payload.duration_sec,
+    duration: payload.duration,
+    summary: payload.summary || '帧字段已保存，需要重新渲染。',
+  }, options);
+}
+
+async function editHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const workflow = options.htmlVideoWorkflow || htmlVideoWorkflow;
+  const result = await workflow.applyEdit({
+    workflowId,
+    rootDir,
+    projectDir,
+    project,
+    payload,
+    services: {
+      aiTextModel: options.aiTextModel || aiTextModel,
+      ...(options.htmlVideoServices || {}),
+    },
+  });
+  if (!result.success) {
+    return {
+      success: false,
+      code: result.code || 'EDIT_FAILED',
+      workflow_id: workflowId,
+      message: result.message || 'html-video 编辑失败。',
+    };
+  }
+  return {
+    success: true,
+    workflow_id: workflowId,
+    html_video_project: result.project,
+    html_video_project_path: projectDir,
+    revision: result.revision,
+    requires_tts: result.requires_tts,
+    requires_render: result.requires_render,
+    message: result.message || 'html-video 工程已保存。',
+  };
+}
+
+async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+
+  const templateRegistry = options.htmlVideoTemplateRegistry || createHtmlVideoTemplateRegistry(options.htmlVideoTemplateOptions || {});
+  const orchestrator = options.htmlVideoProjectOrchestrator || htmlVideoProjectOrchestrator;
+  const baseOptions = {
+    rootDir,
+    workflowId,
+    runId: project.run_id || safeString(payload.run_id) || 'manual',
+    projectDir,
+    project,
+    templateRegistry,
+    services: options.htmlVideoServices || {},
+  };
+  const mode = safeString(payload.mode || payload.action || '');
+  let result;
+  if (mode === 'materialize') {
+    result = await orchestrator.materializeHtmlVideoProject(baseOptions);
+  } else if (mode === 'frame') {
+    result = await orchestrator.renderHtmlVideoFramePreview({
+      ...baseOptions,
+      frameId: safeString(payload.frame_id || payload.frameId),
+    });
+  } else {
+    result = await orchestrator.exportHtmlVideoProject({
+      ...baseOptions,
+      skipRender: payload.skip_render === true,
+    });
+  }
+
+  return {
+    success: result.success,
+    workflow_id: workflowId,
+    html_video_project: result.project,
+    html_video_project_path: result.html_video_project_path || projectDir,
+    output_path: result.output_path,
+    preview_path: result.preview_path,
+    preview_frame_id: result.preview_frame_id,
+    diagnostics: result.diagnostics || [],
+    message: result.message || (result.success ? '操作已完成。' : 'html-video 工程渲染失败。'),
+  };
+}
+
+async function renderHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  const mode = safeString(payload.mode || payload.action || '');
+  if (mode !== 'materialize' && mode !== 'frame') {
+    return {
+      success: false,
+      code: 'HTML_VIDEO_RENDER_MODE_INVALID',
+      workflow_id: workflowId,
+      message: 'html-video render mode 无效，请选择 materialize 或 frame。',
+    };
+  }
+  if (mode === 'frame' && !safeString(payload.frame_id || payload.frameId)) {
+    return {
+      success: false,
+      code: 'HTML_VIDEO_FRAME_ID_REQUIRED',
+      workflow_id: workflowId,
+      message: '渲染单帧预览失败：缺少帧 ID。',
+    };
+  }
+  return renderCreativeWorkflowHtmlVideoProject(workflowId, payload, options);
+}
+
+async function exportHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  return renderCreativeWorkflowHtmlVideoProject(workflowId, { ...payload, skip_render: false, mode: 'export' }, options);
+}
+
+async function listHtmlVideoProjectExports(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  return {
+    success: true,
+    workflow_id: workflowId,
+    html_video_project_path: projectDir,
+    exports: Array.isArray(project.exports) ? project.exports : [],
+  };
+}
+
+async function getHtmlVideoProjectExportFile(workflowId, exportId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const safeExportId = safeString(exportId);
+  const exportItem = (Array.isArray(project.exports) ? project.exports : [])
+    .find(item => String(item?.id || '') === safeExportId);
+  if (!exportItem || !exportItem.path) {
+    return {
+      success: false,
+      code: 'EXPORT_NOT_FOUND',
+      workflow_id: workflowId,
+      export_id: safeExportId,
+      message: '未找到导出文件记录。',
+    };
+  }
+  let filePath;
+  try {
+    filePath = htmlVideoProjectStore.resolveProjectPath(projectDir, exportItem.path);
+    const stat = await fsp.stat(filePath);
+    if (!stat.isFile()) throw new Error('not file');
+  } catch {
+    return {
+      success: false,
+      code: 'EXPORT_NOT_FOUND',
+      workflow_id: workflowId,
+      export_id: safeExportId,
+      message: '导出文件不存在或路径无效。',
+    };
+  }
+  return {
+    success: true,
+    workflow_id: workflowId,
+    export_id: safeExportId,
+    export: exportItem,
+    file_path: filePath,
+  };
+}
+
+
+async function getCreativeWorkflowSceneSpec(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  return {
+    success: true,
+    workflow_id: workflowId,
+    scene_spec: sceneSpec,
+  };
+}
+
+async function patchCreativeWorkflowVideoSpec(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  const nextSceneSpec = payload.scene_spec && typeof payload.scene_spec === 'object'
+    ? payload.scene_spec
+    : sceneSpec;
+  const nextFrameSpecs = payload.frame_specs && typeof payload.frame_specs === 'object'
+    ? payload.frame_specs
+    : extractFrameSpecsFromWorkflow(record);
+  const hyperframes = record.result.hyperframes_freeform;
+  hyperframes.project.scene_spec = nextSceneSpec;
+  hyperframes.project.frame_specs = nextFrameSpecs;
+  record.updated_at = new Date().toISOString();
+  await persistWorkflow(record, rootDir);
+
+  return {
+    success: true,
+    workflow_id: workflowId,
+    scene_spec: nextSceneSpec,
+    frame_specs: nextFrameSpecs,
+    render_versions: extractRenderVersionsFromWorkflow(record),
+    requires_tts: !!payload.requires_tts,
+    requires_render: true,
+    message: '视频规格已保存。',
+  };
+}
+
+async function patchCreativeWorkflowSceneSpec(workflowId, edit, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const editor = options.creativeVideoEditor || defaultCreativeVideoEditor;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  try {
+    const result = editor.applyEditCommand(sceneSpec, edit);
+    if (!result.success) {
+      return { success: false, code: 'EDIT_FAILED', message: result.message };
+    }
+    const hyperframes = record.result.hyperframes_freeform;
+    hyperframes.project.scene_spec = result.scene_spec;
+    record.updated_at = new Date().toISOString();
+    await persistWorkflow(record, rootDir);
+
+    return {
+      success: true,
+      workflow_id: workflowId,
+      scene_spec: result.scene_spec,
+      edit_type: result.edit_type,
+      requires_tts: result.requires_tts,
+      requires_render: result.requires_render,
+      message: '编辑已保存。',
+    };
+  } catch (error) {
+    return { success: false, code: 'EDIT_FAILED', message: `编辑失败：${error.message}` };
+  }
+}
+
+async function remixCreativeWorkflow(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  const frameSpecs = extractFrameSpecsFromWorkflow(record);
+  const sourceInput = safeString(payload.input)
+    || safeString(record.input?.raw_text)
+    || safeString(record.creative_context?.input?.raw_text)
+    || `二创 ${workflowId}`;
+  const created = await createCreativeWorkflow({
+    ...(payload || {}),
+    input: sourceInput,
+  }, {
+    rootDir,
+    mediaRoot,
+    services: options.services || {},
+  });
+  if (!created.success) return created;
+
+  const remixRecord = await readWorkflow(created.workflow_id, rootDir);
+  remixRecord.status = 'done';
+  remixRecord.success = true;
+  remixRecord.source_workflow_id = workflowId;
+  remixRecord.message = '二创任务已创建。';
+  remixRecord.result = {
+    ...(record.result || {}),
+    source_workflow_id: workflowId,
+    hyperframes_freeform: {
+      ...(record.result?.hyperframes_freeform || {}),
+      project: {
+        ...(record.result?.hyperframes_freeform?.project || {}),
+        scene_spec: sceneSpec,
+        frame_specs: frameSpecs,
+      },
+    },
+  };
+  remixRecord.updated_at = getNow(options.services || {});
+  await persistWorkflow(remixRecord, rootDir);
+
+  return {
+    success: true,
+    workflow_id: created.workflow_id,
+    source_workflow_id: workflowId,
+    scene_spec: sceneSpec,
+    frame_specs: frameSpecs,
+    message: '二创任务已创建。',
+  };
+}
+
+async function rewriteCreativeWorkflowScene(workflowId, sceneId, payload, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const editor = options.creativeVideoEditor || defaultCreativeVideoEditor;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  const scene = (sceneSpec.scenes || []).find(s => s.id === sceneId);
+  if (!scene) {
+    return { success: false, code: 'NOT_FOUND', message: `未找到场景 ${sceneId}。` };
+  }
+
+  try {
+    const result = editor.applyRewriteResult(sceneSpec, sceneId, payload);
+    if (!result.success) {
+      return { success: false, code: 'REWRITE_FAILED', message: result.message };
+    }
+    const hyperframes = record.result.hyperframes_freeform;
+    hyperframes.project.scene_spec = result.scene_spec;
+    record.updated_at = new Date().toISOString();
+    await persistWorkflow(record, rootDir);
+
+    return {
+      success: true,
+      workflow_id: workflowId,
+      scene_spec: result.scene_spec,
+      requires_tts: result.requires_tts,
+      requires_render: result.requires_render,
+      message: '场景已重写。',
+    };
+  } catch (error) {
+    return { success: false, code: 'REWRITE_FAILED', message: `重写失败：${error.message}` };
+  }
+}
+
+async function ttsCreativeWorkflowScene(workflowId, sceneId, payload, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const rerender = options.creativeVideoRerender || defaultCreativeVideoRerender;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  const scene = (sceneSpec.scenes || []).find(s => s.id === sceneId);
+  if (!scene) {
+    return { success: false, code: 'NOT_FOUND', message: `未找到场景 ${sceneId}。` };
+  }
+
+  const hyperframes = record.result.hyperframes_freeform;
+  const previousOutputPath = hyperframes?.render?.output_path || '';
+
+  try {
+    const result = await rerender.rerenderSceneWithLocalTts({
+      workflowId,
+      sceneSpec,
+      sceneId,
+      outputPath: payload?.outputPath || previousOutputPath,
+      previousOutputPath,
+      services: options.services || {},
+    });
+
+    if (result.success) {
+      hyperframes.render = {
+        ...hyperframes.render,
+        status: 'ready',
+        output_path: result.output_path,
+        message: '场景配音已更新。',
+      };
+      if (result.scene_spec) {
+        hyperframes.project.scene_spec = result.scene_spec;
+      }
+      record.updated_at = new Date().toISOString();
+      await persistWorkflow(record, rootDir);
+    }
+
+    return {
+      success: result.success,
+      workflow_id: workflowId,
+      scene_id: sceneId,
+      scene_spec: result.scene_spec || sceneSpec,
+      output_path: result.output_path,
+      previous_output_path: result.previous_output_path,
+      message: result.message || (result.success ? '场景配音已更新。' : '场景配音失败。'),
+    };
+  } catch (error) {
+    return { success: false, code: 'TTS_FAILED', message: `场景配音失败：${error.message}` };
+  }
+}
+
+async function rerenderCreativeWorkflow(workflowId, payload, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const rerender = options.creativeVideoRerender || defaultCreativeVideoRerender;
+  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
+  if (error) return error;
+
+  const hyperframes = record.result.hyperframes_freeform;
+  const previousOutputPath = hyperframes?.render?.output_path || '';
+
+  try {
+    const result = await rerender.rerenderSceneSpecProject({
+      workflowId,
+      sceneSpec,
+      outputPath: payload?.outputPath || previousOutputPath,
+      previousOutputPath,
+      services: options.services || {},
+    });
+
+    if (result.success) {
+      hyperframes.render = {
+        ...hyperframes.render,
+        status: 'ready',
+        output_path: result.output_path,
+        message: '成片已重新渲染。',
+      };
+      if (result.scene_spec) {
+        hyperframes.project.scene_spec = result.scene_spec;
+      }
+      record.updated_at = new Date().toISOString();
+      await persistWorkflow(record, rootDir);
+    }
+
+    return {
+      success: result.success,
+      workflow_id: workflowId,
+      output_path: result.output_path,
+      previous_output_path: result.previous_output_path,
+      message: result.message || (result.success ? '成片已重新渲染。' : '重新渲染失败。'),
+    };
+  } catch (error) {
+    return { success: false, code: 'RENDER_FAILED', message: `重新渲染失败：${error.message}` };
+  }
+}
+
 module.exports = {
   STAGE_IDS,
   STAGE_LABELS,
   createCreativeWorkflow,
   runCreativeWorkflow,
   getCreativeWorkflow,
+  patchCreativeWorkflowTaskSummary,
+  clearCreativeWorkflowTaskSummary,
+  listCreativeWorkflowRecords,
   deleteCreativeWorkflow,
   getWorkflowPath,
   makeLocalCreativeAwemeId,
   recoverStaleWorkflowsOnStartup,
+  getCreativeWorkflowVideoSpec,
+  getCreativeWorkflowHtmlVideoProject,
+  patchCreativeWorkflowHtmlVideoProject,
+  renderCreativeWorkflowHtmlVideoProject,
+  patchHtmlVideoProjectInputs,
+  patchHtmlVideoProjectFrame,
+  editHtmlVideoProject,
+  renderHtmlVideoProject,
+  exportHtmlVideoProject,
+  listHtmlVideoProjectExports,
+  getHtmlVideoProjectExportFile,
+  patchCreativeWorkflowVideoSpec,
+  getCreativeWorkflowSceneSpec,
+  patchCreativeWorkflowSceneSpec,
+  rewriteCreativeWorkflowScene,
+  ttsCreativeWorkflowScene,
+  rerenderCreativeWorkflow,
+  remixCreativeWorkflow,
+  defaultResearchProvider,
+  defaultWebSearchProvider,
 };

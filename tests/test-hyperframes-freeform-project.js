@@ -23,6 +23,7 @@ async function run() {
       'index.html': '<html><body>ok</body></html>',
       'design.md': '# Design',
       'hyperframes.json': '{}',
+      'frame_specs.json': '{"frames":[]}',
       'package.json': '{"private":true}',
     },
   });
@@ -30,7 +31,8 @@ async function run() {
   assert.equal(created.success, true);
   assert.equal(fs.existsSync(path.join(projectDir, 'index.html')), true);
   assert.equal(fs.existsSync(path.join(projectDir, 'design.md')), true);
-  assert.deepEqual(created.files.map(file => file.name).sort(), ['design.md', 'hyperframes.json', 'index.html', 'package.json']);
+  assert.equal(fs.existsSync(path.join(projectDir, 'frame_specs.json')), true);
+  assert.deepEqual(created.files.map(file => file.name).sort(), ['design.md', 'frame_specs.json', 'gsap.min.js', 'hyperframes.json', 'index.html', 'package.json']);
 
   const repaired = await freeformProject.createFreeformProject({
     awemeId,
@@ -46,7 +48,8 @@ async function run() {
   assert.match(repairedHtml, /data-duration="66"/);
   assert.match(repairedHtml, /data-width="1080"/);
   assert.match(repairedHtml, /data-height="1920"/);
-  assert.match(repairedHtml, /data-start="0"/);
+  assert.match(repairedHtml, /<div id="stage"[^>]*data-start="0"/);
+  assert.doesNotMatch(repairedHtml, /<div id="stage"[^>]*data-track-index=/);
   assert.doesNotMatch(repairedHtml, /Microsoft YaHei|PingFang SC|SFMono-Regular|inter|jetbrains-mono/);
   assert.match(repairedHtml, /font-family: sans-serif, sans-serif, monospace, sans-serif/);
 
@@ -64,7 +67,8 @@ async function run() {
   assert.match(timelineHtml, /data-duration="90"/);
   assert.match(timelineHtml, /data-width="1080"/);
   assert.match(timelineHtml, /data-height="1920"/);
-  assert.match(timelineHtml, /data-start="0"/);
+  assert.match(timelineHtml, /<main id="root"[^>]*data-start="0"/);
+  assert.doesNotMatch(timelineHtml, /<main id="root"[^>]*data-track-index=/);
   assert.match(timelineHtml, /window\.__timelines/);
   assert.match(timelineHtml, /gsap\.timeline/);
   assert.doesNotMatch(timelineHtml, /performance\.now|requestAnimationFrame/);
@@ -99,6 +103,46 @@ async function run() {
   assert.match(lintHtml, /tl\.set\("#s1", \{ autoAlpha: 0 \}, 5\)/);
   assert.match(lintHtml, /tl\.set\("#s2", \{ autoAlpha: 1 \}, 5\)/);
 
+  const floatBoundaryRepaired = await freeformProject.createFreeformProject({
+    awemeId,
+    runId: `${runId}-float-boundary-repair`,
+    rootDir,
+    files: {
+      'index.html': [
+        '<!doctype html><html><body><main id="main" data-composition-id="main" data-duration="10" data-track-index="0">',
+        '<section id="s1" data-start="0" data-duration="55.440000000000005" data-track-index="0"></section>',
+        '<section id="s2" data-start="55.44" data-duration="4" data-track-index="0"></section>',
+        '</main></body></html>',
+      ].join(''),
+      'hyperframes.json': '{"duration":60,"width":1080,"height":1920}',
+    },
+  });
+  const floatBoundaryHtml = fs.readFileSync(path.join(floatBoundaryRepaired.projectDir, 'index.html'), 'utf-8');
+  assert.match(floatBoundaryHtml, /<main id="main"[^>]*data-start="0"/);
+  assert.doesNotMatch(floatBoundaryHtml, /<main id="main"[^>]*data-track-index=/);
+  assert.match(floatBoundaryHtml, /<section id="s1"[^>]*data-duration="55.44"/);
+  assert.match(floatBoundaryHtml, /<section id="s2"[^>]*data-start="55.44"/);
+
+  const emphasisOverflowRepaired = await freeformProject.createFreeformProject({
+    awemeId,
+    runId: `${runId}-emphasis-overflow-repair`,
+    rootDir,
+    files: {
+      'index.html': [
+        '<!doctype html><html><head><style>',
+        '.hero-lock{min-height:360px;overflow:hidden;position:relative}',
+        '.glitch-word{position:absolute;font-size:138px;font-weight:1000}',
+        '</style></head><body><main id="main" data-composition-id="main" data-duration="8">',
+        '<section id="s1" data-start="0" data-duration="8"><div class="hero-lock"><div class="glitch-word">卡住了</div></div></section>',
+        '<script>window.__timelines=window.__timelines||{};const tl=gsap.timeline({paused:true});tl.from(".glitch-word",{scale:2.4,opacity:0,duration:.22},2.5);window.__timelines["main"]=tl;</script>',
+        '</main></body></html>',
+      ].join(''),
+      'hyperframes.json': '{"duration":8,"width":1080,"height":1920}',
+    },
+  });
+  const emphasisOverflowHtml = fs.readFileSync(path.join(emphasisOverflowRepaired.projectDir, 'index.html'), 'utf-8');
+  assert.match(emphasisOverflowHtml, /<div class="hero-lock"[^>]*data-layout-allow-overflow/);
+
   const htmlRootProject = await freeformProject.createFreeformProject({
     awemeId,
     runId: `${runId}-html-root-stage`,
@@ -120,6 +164,7 @@ async function run() {
   assert.match(htmlRoot, /<div class="stage" id="stage"[^>]*data-width="1080"/);
   assert.match(htmlRoot, /<div class="stage" id="stage"[^>]*data-height="1920"/);
   assert.match(htmlRoot, /<div class="stage" id="stage"[^>]*data-start="0"/);
+  assert.doesNotMatch(htmlRoot, /<div class="stage" id="stage"[^>]*data-track-index=/);
 
   const animated = await freeformProject.createFreeformProject({
     awemeId,
@@ -150,7 +195,58 @@ async function run() {
   assert.match(animatedHtml, /window\.__timelines\["main"\] = tl/);
   assert.match(animatedHtml, /tl\.from\("\.hero-title"/);
   assert.match(animatedHtml, /tl\.fromTo\("\.hero-keyword"/);
-  assert.match(animatedHtml, /<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/gsap@3\.12\.5\/dist\/gsap\.min\.js"><\/script>/);
+  assert.match(animatedHtml, /<script src="\.\/gsap\.min\.js"><\/script>/);
+
+  const clipVisibilityRepaired = await freeformProject.createFreeformProject({
+    awemeId,
+    runId: `${runId}-clip-visibility-repair`,
+    rootDir,
+    files: {
+      'index.html': [
+        '<!doctype html><html><head></head><body>',
+        '<main id="main" data-composition-id="main" data-duration="38">',
+        '<div id="scene1" class="scene" data-start="0" data-duration="11.36"></div>',
+        '<div id="scene2" class="scene clip" data-start="11.36" data-duration="2.72" data-track-index="1">',
+        '  <div id="error-text">上不了网</div>',
+        '</div>',
+        '<div id="scene3" class="scene clip" data-start="14.08" data-duration="12.64" data-track-index="2">',
+        '  <div id="block1">Twitter</div>',
+        '</div>',
+        '</main>',
+        '<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>',
+        '<script>',
+        'window.__timelines = window.__timelines || {};',
+        'const tl = gsap.timeline({ paused: true });',
+        'tl.set("#scene1", { visibility: "visible", opacity: 1 }, 0);',
+        'tl.from("#agent1", { y: 60, opacity: 0, duration: 0.6 }, 0);',
+        'tl.set("#scene1", { visibility: "hidden" }, 11.36);',
+        'tl.set("#scene2", { visibility: "visible", opacity: 1 }, 11.36);',
+        'tl.from("#error-text", { y: 60, opacity: 0, duration: 0.8 }, 11.36);',
+        'tl.set("#scene2", { visibility: "hidden" }, 14.08);',
+        'tl.set("#scene3", { visibility: "visible", opacity: 1 }, 14.08);',
+        'tl.from("#block1", { x: -100, opacity: 0, duration: 0.5 }, 14.08);',
+        'tl.set("#scene3", { visibility: "hidden" }, 26.72);',
+        'window.__timelines["main"] = tl;',
+        '</script>',
+        '</body></html>',
+      ].join('\n'),
+      'hyperframes.json': '{"duration":38,"width":1080,"height":1920}',
+    },
+  });
+  const clipVisHtml = fs.readFileSync(path.join(clipVisibilityRepaired.projectDir, 'index.html'), 'utf-8');
+  // Clip elements should have clip class
+  assert.match(clipVisHtml, /<div id="scene2" class="scene clip"/);
+  assert.match(clipVisHtml, /<div id="scene3" class="scene clip"/);
+  // Visibility set calls on clip elements should be removed (including opacity, since framework uses autoAlpha)
+  assert.doesNotMatch(clipVisHtml, /\.set\("#scene1"/);
+  assert.doesNotMatch(clipVisHtml, /\.set\("#scene2"/);
+  assert.doesNotMatch(clipVisHtml, /\.set\("#scene3"/);
+  // Child element animations should be preserved
+  assert.match(clipVisHtml, /tl\.from\("#agent1"/);
+  assert.match(clipVisHtml, /tl\.from\("#error-text"/);
+  assert.match(clipVisHtml, /tl\.from\("#block1"/);
+  // Registered timeline should be preserved
+  assert.match(clipVisHtml, /window\.__timelines\["main"\] = tl/);
 
   const audioSourcePath = path.join(rootDir, 'freeform-narration.wav');
   fs.writeFileSync(audioSourcePath, 'fake narration audio');
@@ -199,6 +295,8 @@ async function run() {
   const generatedApiAudioHtml = fs.readFileSync(path.join(withGeneratedApiAudio.projectDir, 'index.html'), 'utf-8');
   assert.equal(fs.readFileSync(path.join(withGeneratedApiAudio.projectDir, 'assets', 'narration.wav'), 'utf-8'), 'fake narration audio');
   assert.equal((generatedApiAudioHtml.match(/<audio\b/gi) || []).length, 1);
+  assert.match(generatedApiAudioHtml, /<main id="main"[^>]*data-start="0"/);
+  assert.doesNotMatch(generatedApiAudioHtml, /<main id="main"[^>]*data-track-index=/);
   assert.match(generatedApiAudioHtml, /<audio id="narration-audio"[^>]*data-start="0"[^>]*data-duration="6"[^>]*data-track-index="99"[^>]*src="assets\/narration\.wav"/);
   assert.doesNotMatch(generatedApiAudioHtml, /\/api\/agents\/douyin\/1234567890\/runs\/run-1\/tts\/run-1-tts\.wav/);
 

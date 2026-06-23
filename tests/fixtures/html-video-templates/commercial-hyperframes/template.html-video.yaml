@@ -1,0 +1,29 @@
+id: commercial_hyperframes
+name: 商业 Hyperframes 模板
+description: 可商用且需要署名的 HTML 模板
+category: promo
+tags:
+  - promo
+  - commercial
+engine: hyperframes
+source_entry: index.html
+output:
+  resolution:
+    width: 1920
+    height: 1080
+  duration: 8
+inputs:
+  schema:
+    headline:
+      type: string
+license:
+  name: Apache-2.0
+  commercial_use: true
+  attribution_required: true
+assets_attribution:
+  - title: 测试素材
+    author: 测试作者
+    license: CC-BY-4.0
+    url: https://example.com/asset
+preview:
+  poster: preview.png

@@ -140,7 +140,9 @@ async function resolveAsrRuntime(options = {}) {
   });
   const storedEnabled = storedConfig?.enabled === true && !!storedConfig.apiKey;
   const provider = normalizeProvider(env.ASR_PROVIDER || env.MIMO_PROVIDER || (storedEnabled ? storedConfig.provider : ''));
-  const isMimo = provider === 'mimo' || provider === 'xiaomi' || provider === 'xiaomimimo';
+  const asrModelId = env.MIMO_ASR_MODEL || env.ASR_MODEL || storedConfig?.modelId || '';
+  const isMimo = provider === 'mimo' || provider === 'xiaomi' || provider === 'xiaomimimo'
+    || asrModelId.toLowerCase().startsWith('mimo');
 
   if (isMimo) {
     return {

@@ -20,7 +20,7 @@ function normalizeVideo(item = {}) {
 
   return {
     aweme_id: String(item.aweme_id || item.id || ''),
-    aweme_type: item.aweme_type || '',
+    aweme_type: item.aweme_type == null ? '' : String(item.aweme_type),
     title: item.title || item.description || '',
     description: item.description || item.title || '',
     create_time: item.create_time || 0,

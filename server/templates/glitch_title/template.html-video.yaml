@@ -1,0 +1,74 @@
+id: glitch_title
+name: 故障风格标题
+description: 赛博朋克故障风格，CRT 扫描线、色差分离和噪点纹理，适合科技、游戏和电竞话题。
+category: titles
+tags:
+  - 科技
+  - 游戏
+  - 赛博朋克
+  - 故障
+  - glitch
+  - cyberpunk
+  - 电竞
+  - 数码
+engine: hyperframes
+engine_version: "1.0.0"
+source_entry: source/index.html
+output:
+  resolution:
+    width: 1920
+    height: 1080
+  fps: 30
+  duration: 6
+inputs:
+  schema:
+    title:
+      type: string
+      required: true
+      max_length: 20
+      description: 主标题，建议 2-8 个字。
+    subtitle:
+      type: string
+      required: false
+      max_length: 48
+      description: 副标题或状态说明。
+    channel_info:
+      type: string
+      required: false
+      max_length: 36
+      description: 顶部频道或来源信息。
+    footer_text:
+      type: string
+      required: false
+      max_length: 36
+      description: 底部模板标注。
+    duration_sec:
+      type: number
+      required: false
+      description: 目标时长，单位秒。
+  examples:
+    - title: 信号丢失
+      subtitle: 04 · 数据损坏 · 等待恢复中
+      channel_info: SIGNAL_LOST · CH-04
+      footer_text: HTML-VIDEO / VFX
+      duration_sec: 6
+preview:
+  poster: preview.png
+  title: 故障标题预览
+license:
+  name: Apache-2.0
+  commercial_use: true
+  attribution_required: false
+assets_attribution:
+  - title: Space Grotesk
+    author: Florian Karsten
+    license: OFL-1.1
+    url: https://fonts.google.com/specimen/Space+Grotesk
+  - title: JetBrains Mono
+    author: JetBrains
+    license: OFL-1.1
+    url: https://fonts.google.com/specimen/JetBrains+Mono
+  - title: Noto Sans SC
+    author: Google
+    license: OFL-1.1
+    url: https://fonts.google.com/noto/specimen/Noto+Sans+SC

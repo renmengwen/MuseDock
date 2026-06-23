@@ -5,6 +5,21 @@ const path = require('path');
 const defaultTtsModel = require('./aiTtsModel');
 const defaultTtsTimeline = require('./ttsTimeline');
 const defaultPhraseTimeline = require('./phraseTimeline');
+const { stripSpeechStageDirections } = require('./speechText');
+
+const DEFAULT_VOICE = 'mimo_default';
+const SUPPORTED_VOICES = new Set([
+  DEFAULT_VOICE,
+  '冰糖',
+  '茉莉',
+  '苏打',
+  '白桃',
+  '白桦',
+  'Mia',
+  'Chloe',
+  'Milo',
+  'Dean',
+]);
 
 function roundTime(value) {
   return Math.round(Number(value || 0) * 1000) / 1000;
@@ -20,6 +35,11 @@ function getSceneAudioFileName(index, format = 'wav') {
   return `scene-${String(sceneIndex).padStart(3, '0')}.${safeFormat(format)}`;
 }
 
+function normalizeVoice(voice) {
+  const value = String(voice || '').trim();
+  return SUPPORTED_VOICES.has(value) ? value : DEFAULT_VOICE;
+}
+
 function fail(message, extra = {}) {
   return {
     success: false,
@@ -33,7 +53,7 @@ async function synthesizeSceneTts(options = {}) {
   const outputDir = typeof options.outputDir === 'string' ? options.outputDir : '';
   const runId = String(options.runId || 'run').replace(/[^A-Za-z0-9_-]/g, '') || 'run';
   const format = safeFormat(options.format || 'wav');
-  const voice = options.voice || 'mimo_default';
+  const voice = normalizeVoice(options.voice);
   const stylePrompt = options.stylePrompt || options.style_prompt || '';
 
   if (!outputDir) {
@@ -58,7 +78,7 @@ async function synthesizeSceneTts(options = {}) {
 
   for (const scene of scenes) {
     const sceneIndex = Number(scene?.index || sceneResults.length + 1);
-    const text = String(scene?.narration_text || '').trim();
+    const text = stripSpeechStageDirections(scene?.narration_text);
     if (!text) {
       return fail(`第 ${sceneIndex} 幕缺少旁白文本，无法生成分段配音。`, { scene_index: sceneIndex, model });
     }
@@ -109,6 +129,7 @@ async function synthesizeSceneTts(options = {}) {
     sceneResults.push({
       ...scene,
       index: sceneIndex,
+      narration_text: text,
       duration,
       actual_duration_sec: duration,
       path: filePath,
@@ -153,4 +174,5 @@ async function synthesizeSceneTts(options = {}) {
 module.exports = {
   synthesizeSceneTts,
   getSceneAudioFileName,
+  normalizeVoice,
 };

@@ -1,0 +1,11 @@
+id: noncommercial_hyperframes
+name: 非商业 Hyperframes 模板
+engine: hyperframes
+source_entry: index.html
+output:
+  aspect: "16:9"
+  duration_sec: 8
+license:
+  name: CC-BY-NC-4.0
+  commercial_use: false
+  attribution_required: true

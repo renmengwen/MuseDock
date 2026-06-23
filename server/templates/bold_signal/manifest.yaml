@@ -1,0 +1,43 @@
+id: bold_signal
+name: 信号卡片
+description: 深色背景+橙色焦点卡片滑入，章节编号+面包屑导航，适合产品/功能发布
+category: heroes
+tags: [产品, 功能, 发布, 卡片, 橙色, signal, launch, agent]
+best_for:
+  - 产品功能发布
+  - 技术更新
+  - 里程碑展示
+  - 章节标题
+not_for:
+  - 数据可视化
+  - 情感/文艺类
+  - 教程/步骤类
+aspect_support: ['16:9']
+duration_range: [3, 10]
+inputs:
+  card_title:
+    type: string
+    required: true
+    max_length: 20
+    description: 卡片大标题
+  card_label:
+    type: string
+    required: false
+    max_length: 20
+    description: 卡片标签
+  section_no:
+    type: string
+    required: false
+    max_length: 6
+    description: 章节编号如 01/04
+  nav_items:
+    type: array
+    required: false
+    max_items: 5
+    description: 导航项 [{text, is_active}]
+  footer_text:
+    type: string
+    required: false
+    max_length: 30
+    description: 底部标注
+license: Apache-2.0

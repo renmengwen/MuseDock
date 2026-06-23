@@ -322,11 +322,87 @@ async function run() {
     reason: 'stream_timeout',
   });
 
+  const streamReadTimeoutBodies = [];
+  const streamReadTimeoutFallback = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'stream read timeout fallback' }],
+    configPath,
+    stream: true,
+    maxRetries: 0,
+    retryDelayMs: 1,
+    requestTimeoutMs: 50,
+    fallbackToNonStreamOnGatewayTimeout: true,
+    fetchImpl: async (url, options) => {
+      const body = JSON.parse(options.body);
+      streamReadTimeoutBodies.push(body);
+      if (body.stream === true) {
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
+          },
+          pull() {
+            const err = new Error('文本模型请求超时：0 秒内未返回结果。');
+            err.name = 'AbortError';
+            throw err;
+          },
+        });
+        return new Response(stream, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: 'stream read timeout fallback ok' } }],
+        }),
+      };
+    },
+  });
+  assert.strictEqual(streamReadTimeoutFallback.success, true);
+  assert.strictEqual(streamReadTimeoutFallback.text, 'stream read timeout fallback ok');
+  assert.strictEqual(streamReadTimeoutBodies.length, 2);
+  assert.strictEqual(streamReadTimeoutBodies[0].stream, true);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(streamReadTimeoutBodies[1], 'stream'), false);
+  assert.deepStrictEqual(streamReadTimeoutFallback.fallback, {
+    from_stream: true,
+    reason: 'stream_timeout',
+  });
+
+  let networkRetryCalls = 0;
+  const networkRetried = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'network retry' }],
+    configPath,
+    retryDelayMs: 1,
+    maxRetries: 1,
+    fetchImpl: async () => {
+      networkRetryCalls += 1;
+      if (networkRetryCalls === 1) {
+        const err = new TypeError('fetch failed');
+        err.cause = Object.assign(new Error('connect ETIMEDOUT 104.21.73.139:443'), {
+          code: 'ETIMEDOUT',
+        });
+        throw err;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: 'network retry ok' } }],
+        }),
+      };
+    },
+  });
+  assert.strictEqual(networkRetried.success, true);
+  assert.strictEqual(networkRetried.text, 'network retry ok');
+  assert.strictEqual(networkRetryCalls, 2);
+
   const networkFailed = await aiTextModel.callTextModel({
     messages: [{ role: 'user', content: 'network fail' }],
     configPath,
     fetchImpl: async () => {
-      throw new Error('connect ECONNRESET sk-test');
+      const err = new TypeError('fetch failed');
+      err.cause = Object.assign(new Error('connect ECONNRESET 104.21.73.139:443'), {
+        code: 'ECONNRESET',
+      });
+      throw err;
     },
   });
   assert.strictEqual(networkFailed.success, false);
@@ -334,6 +410,7 @@ async function run() {
   assert.strictEqual(networkFailed.model.provider, 'OpenAI');
   assert.strictEqual(networkFailed.model.model_id, 'gpt-test');
   assert.match(networkFailed.message, /文本模型调用失败/);
+  assert.match(networkFailed.message, /ECONNRESET/);
   assert.match(networkFailed.message, /connect ECONNRESET/);
   assert.doesNotMatch(networkFailed.message, /sk-test/);
 
@@ -389,6 +466,48 @@ async function run() {
   assert.strictEqual(missingText.configured, true);
   assert.match(missingText.message, /缺少文本内容/);
   assert.doesNotMatch(missingText.message, /sk-test/);
+
+  const contentParts = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'content parts' }],
+    configPath,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: [
+              { type: 'text', text: '数组' },
+              { type: 'text', text: '内容' },
+            ],
+          },
+        }],
+      }),
+    }),
+  });
+  assert.strictEqual(contentParts.success, true);
+  assert.strictEqual(contentParts.text, '数组内容');
+
+  let missingTextAttempts = 0;
+  const missingTextRetry = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'missing text retry' }],
+    configPath,
+    maxRetries: 1,
+    retryDelayMs: 1,
+    fetchImpl: async () => {
+      missingTextAttempts += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => missingTextAttempts === 1
+          ? ({ choices: [{ message: { content: null } }] })
+          : ({ choices: [{ message: { content: '重试成功' } }] }),
+      };
+    },
+  });
+  assert.strictEqual(missingTextRetry.success, true);
+  assert.strictEqual(missingTextRetry.text, '重试成功');
+  assert.strictEqual(missingTextAttempts, 2);
 }
 
 run().then(() => {

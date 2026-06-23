@@ -1,0 +1,38 @@
+id: bold_poster
+name: 大字报海报
+description: 70年代欧洲编辑海报风格，大号倾斜字体+番茄红强调色+墨线分割，有力度感
+category: titles
+tags: [海报, 大字, 态度, 力度, 编辑, editorial, bold, manifesto]
+best_for:
+  - 态度宣言
+  - 观点表达
+  - 创意展示
+  - 品牌态度
+not_for:
+  - 数据展示
+  - 教程类内容
+  - 正式商务
+aspect_support: ['16:9']
+duration_range: [3, 10]
+inputs:
+  headline_lines:
+    type: array
+    required: true
+    max_items: 3
+    description: 标题行数组，每行一个词/短语
+  kicker:
+    type: string
+    required: false
+    max_length: 20
+    description: 左上角标签
+  standfirst:
+    type: string
+    required: false
+    max_length: 80
+    description: 说明文字
+  figure:
+    type: string
+    required: false
+    max_length: 4
+    description: 右上角大数字
+license: Apache-2.0

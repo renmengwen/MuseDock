@@ -1,0 +1,13 @@
+id: missing_source_entry
+name: 缺失入口模板
+engine: hyperframes
+source_entry: missing.html
+output:
+  resolution:
+    width: 1920
+    height: 1080
+  duration: 8
+license:
+  name: Apache-2.0
+  commercial_use: true
+  attribution_required: false

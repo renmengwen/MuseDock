@@ -8,89 +8,119 @@ const aiModelConfig = require('../server/services/aiModelConfig');
 async function run() {
   const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-config-test-')), 'ai-models.json');
 
+  // Test 1: empty config returns default structure
   const initial = await aiModelConfig.getPublicConfig({ configPath });
-  assert.deepStrictEqual(Object.keys(initial.models), ['asr', 'text', 'image', 'video', 'multimodal', 'tts']);
-  assert.strictEqual(initial.models.asr.enabled, false);
-  assert.strictEqual(initial.models.text.provider, '');
-  assert.strictEqual(initial.models.image.apiKeyMasked, '');
-  assert.strictEqual(initial.models.video.hasApiKey, false);
-  assert.strictEqual(initial.models.tts.modelId, '');
+  assert.deepStrictEqual(Object.keys(initial), ['providers', 'active', 'skipValidation']);
+  assert.deepStrictEqual(initial.providers, {});
+  assert.strictEqual(initial.skipValidation, false);
+  for (const type of aiModelConfig.MODEL_TYPES) {
+    assert.strictEqual(initial.active[type], '');
+  }
 
+  // Test 2: save new multi-provider config
   const saved = await aiModelConfig.saveConfig({
-    models: {
-      asr: {
-        enabled: true,
-        provider: 'openai',
-        apiKey: 'sk-asr-secret-1234',
+    providers: {
+      openai: {
+        name: 'OpenAI',
+        apiKey: 'sk-openai-secret-1234',
         baseUrl: 'https://api.openai.com/v1/',
-        modelId: 'whisper-1',
-        note: 'audio transcription',
+        models: {
+          text: { enabled: true, modelId: 'gpt-4o' },
+          asr: { enabled: true, modelId: 'whisper-1' },
+        },
       },
-      text: {
-        enabled: true,
-        provider: 'deepseek',
-        apiKey: 'deepseek-secret',
-        baseUrl: 'https://api.deepseek.com',
-        modelId: 'deepseek-chat',
-      },
-      tts: {
-        enabled: true,
-        provider: 'mimo',
+      mimo: {
+        name: '小米 MiMo',
         apiKey: 'mimo-secret',
         baseUrl: 'https://api.xiaomimimo.com/v1',
-        modelId: 'mimo-v2.5-tts',
-        ttsConcurrency: 2,
-        ttsQueueIntervalMs: 3000,
-      },
-      unknown: {
-        enabled: true,
-        apiKey: 'ignored',
+        models: {
+          tts: { enabled: true, modelId: 'mimo-v2.5-tts', ttsConcurrency: 2, ttsQueueIntervalMs: 3000 },
+          text: { enabled: true, modelId: 'mimo-v2.5-pro' },
+        },
       },
     },
+    active: {
+      text: 'mimo/text',
+      tts: 'mimo/tts',
+      asr: 'openai/asr',
+    },
+    skipValidation: true,
   }, { configPath });
 
-  assert.strictEqual(saved.models.asr.enabled, true);
-  assert.strictEqual(saved.models.asr.baseUrl, 'https://api.openai.com/v1');
-  assert.strictEqual(saved.models.asr.apiKey, undefined);
-  assert.strictEqual(saved.models.asr.hasApiKey, true);
-  assert.strictEqual(saved.models.asr.apiKeyMasked, 'sk-****1234');
-  assert.strictEqual(saved.models.text.apiKeyMasked, '****cret');
-  assert.strictEqual(saved.models.multimodal.enabled, false);
-  assert.strictEqual(saved.models.tts.enabled, true);
-  assert.strictEqual(saved.models.tts.ttsConcurrency, 2);
-  assert.strictEqual(saved.models.tts.ttsQueueIntervalMs, 3000);
-  assert.strictEqual(saved.models.unknown, undefined);
+  // Verify public config masks API keys
+  assert.strictEqual(saved.providers.openai.hasApiKey, true);
+  assert.strictEqual(saved.providers.openai.apiKeyMasked, 'sk-****1234');
+  assert.strictEqual(saved.providers.openai.apiKey, undefined);
+  assert.strictEqual(saved.providers.mimo.apiKeyMasked, '****cret');
+  assert.strictEqual(saved.providers.openai.models.text.enabled, true);
+  assert.strictEqual(saved.providers.openai.models.text.modelId, 'gpt-4o');
+  assert.strictEqual(saved.active.text, 'mimo/text');
+  assert.strictEqual(saved.skipValidation, true);
 
+  // Verify raw storage preserves API keys
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  assert.strictEqual(raw.models.asr.apiKey, 'sk-asr-secret-1234');
-  assert.strictEqual(raw.models.text.apiKey, 'deepseek-secret');
+  assert.strictEqual(raw.providers.openai.apiKey, 'sk-openai-secret-1234');
+  assert.strictEqual(raw.providers.mimo.apiKey, 'mimo-secret');
 
-  const updated = await aiModelConfig.saveConfig({
-    models: {
-      asr: {
-        enabled: false,
-        provider: 'openai',
-        apiKey: '',
-        baseUrl: 'https://proxy.example/v1',
-        modelId: 'gpt-4o-transcribe',
-      },
-    },
-  }, { configPath });
-
-  assert.strictEqual(updated.models.asr.enabled, false);
-  assert.strictEqual(updated.models.asr.baseUrl, 'https://proxy.example/v1');
-  assert.strictEqual(updated.models.asr.apiKeyMasked, 'sk-****1234');
-
-  const rawAfterBlankKeyUpdate = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  assert.strictEqual(rawAfterBlankKeyUpdate.models.asr.apiKey, 'sk-asr-secret-1234');
-
-  const runtime = await aiModelConfig.getRuntimeConfig('asr', { configPath });
-  assert.strictEqual(runtime.apiKey, 'sk-asr-secret-1234');
-  assert.strictEqual(runtime.modelId, 'gpt-4o-transcribe');
+  // Test 3: runtime config resolves active provider
+  const textRuntime = await aiModelConfig.getRuntimeConfig('text', { configPath });
+  assert.strictEqual(textRuntime.provider, 'mimo');
+  assert.strictEqual(textRuntime.apiKey, 'mimo-secret');
+  assert.strictEqual(textRuntime.baseUrl, 'https://api.xiaomimimo.com/v1');
+  assert.strictEqual(textRuntime.modelId, 'mimo-v2.5-pro');
 
   const ttsRuntime = await aiModelConfig.getRuntimeConfig('tts', { configPath });
+  assert.strictEqual(ttsRuntime.provider, 'mimo');
+  assert.strictEqual(ttsRuntime.modelId, 'mimo-v2.5-tts');
   assert.strictEqual(ttsRuntime.ttsConcurrency, 2);
   assert.strictEqual(ttsRuntime.ttsQueueIntervalMs, 3000);
+
+  const asrRuntime = await aiModelConfig.getRuntimeConfig('asr', { configPath });
+  assert.strictEqual(asrRuntime.provider, 'openai');
+  assert.strictEqual(asrRuntime.apiKey, 'sk-openai-secret-1234');
+  assert.strictEqual(asrRuntime.modelId, 'whisper-1');
+
+  // Test 4: unselected model returns null
+  const videoRuntime = await aiModelConfig.getRuntimeConfig('video', { configPath });
+  assert.strictEqual(videoRuntime, null);
+
+  // Test 5: update with blank API key preserves old key
+  const updated = await aiModelConfig.saveConfig({
+    providers: {
+      openai: {
+        name: 'OpenAI',
+        apiKey: '',
+        baseUrl: 'https://api.openai.com/v1/',
+        models: {
+          text: { enabled: true, modelId: 'gpt-4o-mini' },
+        },
+      },
+    },
+    active: { text: 'openai/text' },
+  }, { configPath });
+
+  const afterUpdate = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  assert.strictEqual(afterUpdate.providers.openai.apiKey, 'sk-openai-secret-1234'); // blank key preserves old
+  assert.strictEqual(afterUpdate.active.text, 'openai/text');
+
+  // Test 6: getSkipValidation
+  const skipVal = await aiModelConfig.getSkipValidation({ configPath });
+  assert.strictEqual(skipVal, false); // new save didn't set it
+
+  // Test 7: old format migration
+  const oldConfigPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'old-config-')), 'ai-models.json');
+  fs.writeFileSync(oldConfigPath, JSON.stringify({
+    models: {
+      text: { enabled: true, provider: 'mimo', apiKey: 'old-key', baseUrl: 'https://old.com/v1', modelId: 'mimo-v2.5-pro' },
+      tts: { enabled: true, provider: 'mimo', apiKey: 'old-key', baseUrl: 'https://old.com/v1', modelId: 'mimo-v2.5-tts', ttsConcurrency: 3, ttsQueueIntervalMs: 500 },
+    },
+  }));
+  const migrated = await aiModelConfig.getPublicConfig({ configPath: oldConfigPath });
+  assert.strictEqual(Object.keys(migrated.providers).length, 1);
+  const migProvider = migrated.providers[Object.keys(migrated.providers)[0]];
+  assert.strictEqual(migProvider.models.text.enabled, true);
+  assert.strictEqual(migProvider.models.text.modelId, 'mimo-v2.5-pro');
+  assert.strictEqual(migrated.active.text?.includes('/text'), true);
 }
 
 run().then(() => {

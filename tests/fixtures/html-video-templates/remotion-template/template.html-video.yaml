@@ -1,0 +1,13 @@
+id: remotion_template
+name: Remotion 模板
+engine: remotion
+source_entry: source/entry.tsx
+output:
+  resolution:
+    width: 1920
+    height: 1080
+  duration: 8
+license:
+  name: MIT
+  commercial_use: true
+  attribution_required: false
