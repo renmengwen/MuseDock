@@ -256,6 +256,17 @@ export function HtmlVideoCanvasEditor({ editor }) {
     if (iframeLoadTimerRef.current) clearTimeout(iframeLoadTimerRef.current);
     setPreviewError('');
     // HV-CANVAS-INJECT-STYLE-HERE
+    doc.querySelectorAll('[data-hv-canvas-editor-style]').forEach(node => node.remove());
+    const editorStyle = doc.createElement('style');
+    editorStyle.setAttribute('data-hv-canvas-editor-style', 'true');
+    editorStyle.textContent = `
+  [data-hv-canvas-selected="true"] {
+    outline: 3px solid #10b981 !important;
+    outline-offset: 4px !important;
+    cursor: move !important;
+  }
+`;
+    doc.head.appendChild(editorStyle);
     doc.addEventListener('click', event => {
       if (!editingReadyRef.current) return;
       const target = event.target?.closest?.(editableSelector);

@@ -1761,6 +1761,156 @@ a { color: #fe2c55; text-decoration: none; }
   min-width: 0;
 }
 
+.html-video-canvas-editor {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.html-video-canvas-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.html-video-canvas-stage {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.html-video-canvas-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.html-video-canvas-toolbar span {
+  color: #374151;
+  font-size: 13px;
+}
+
+.html-video-canvas-stage iframe {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 420px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #111827;
+}
+
+.html-video-element-inspector {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.html-video-element-inspector dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.html-video-element-inspector dl div {
+  display: grid;
+  gap: 2px;
+}
+
+.html-video-element-inspector dt {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.html-video-element-inspector dd {
+  margin: 0;
+  color: #111827;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.html-video-element-inspector label {
+  display: grid;
+  gap: 6px;
+  color: #374151;
+  font-size: 13px;
+}
+
+.html-video-element-inspector textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.html-video-canvas-frame-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(150px, 190px);
+  gap: 10px;
+  overflow-x: auto;
+  padding: 10px 2px 4px;
+}
+
+.html-video-canvas-frame-strip button {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.html-video-canvas-frame-strip button.active {
+  border-color: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, .16);
+}
+
+.html-video-canvas-frame-strip button:disabled {
+  cursor: not-allowed;
+  opacity: .65;
+}
+
+.html-video-canvas-frame-thumb {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  border-radius: 6px;
+  background: #111827;
+  color: #fff;
+  font-weight: 700;
+}
+
+.html-video-canvas-frame-strip strong {
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.html-video-canvas-frame-strip small {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .html-video-canvas-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
 .html-video-natural-edit textarea,
 .html-video-frame-inputs textarea,
 .html-video-narration textarea {
