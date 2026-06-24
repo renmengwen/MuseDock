@@ -110,12 +110,29 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
 
   {
     const project = {
-      output: { duration: 96.2 },
+      output: { duration: 108.64 },
       target: { duration_sec: 60 },
       frames: [
-        { id: 'scene_01', duration_sec: 32.2 },
-        { id: 'scene_02', duration_sec: 32 },
-        { id: 'scene_03', duration_sec: 32 },
+        { id: 'scene_01', duration_sec: 36.64 },
+        { id: 'scene_02', duration_sec: 36 },
+        { id: 'scene_03', duration_sec: 36 },
+      ],
+    };
+
+    const result = projectOrchestrator.validateReasonableTimelineDuration(project, { targetDurationSec: 60 });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.within_grace_duration, true);
+  }
+
+  {
+    const project = {
+      output: { duration: 121 },
+      target: { duration_sec: 60 },
+      frames: [
+        { id: 'scene_01', duration_sec: 41 },
+        { id: 'scene_02', duration_sec: 40 },
+        { id: 'scene_03', duration_sec: 40 },
       ],
     };
 

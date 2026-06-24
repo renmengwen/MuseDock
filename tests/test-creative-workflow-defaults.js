@@ -220,6 +220,28 @@ async function testEmotionalVoiceDefaultPassesToAudioStage() {
   assert.match(audioCall.options.stylePrompt, /情绪|停顿|语气/);
 }
 
+async function testDisabledEmotionalVoicePassesNeutralAudioStyle() {
+  const workflowId = '202606230000000004';
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services, calls } = createServices({
+    workflowId,
+    defaults: createDefaults({ emotionalVoice: false }),
+  });
+
+  const created = await createCreativeWorkflow({
+    input: '关闭情绪化配音默认值测试',
+  }, { rootDir, mediaRoot, services });
+  assert.equal(created.success, true);
+
+  const run = await runCreativeWorkflow(workflowId, { rootDir, mediaRoot, services });
+  assert.equal(run.success, true);
+
+  const audioCall = calls.find(call => call.name === 'audio');
+  assert.ok(audioCall, 'audio stage should run');
+  assert.match(audioCall.options.stylePrompt, /自然|清晰|语速稳定/);
+  assert.doesNotMatch(audioCall.options.stylePrompt, /情绪起伏|停顿|加强语气/);
+}
+
 async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   const workflowId = '202606230000000002';
   const { rootDir, mediaRoot } = createTempDirs();
@@ -293,6 +315,7 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   await testCreativeDefaultsOverrideBeatsLegacyUseResearch();
   await testMissingDefaultUseResearchDefaultsToTrue();
   await testEmotionalVoiceDefaultPassesToAudioStage();
+  await testDisabledEmotionalVoicePassesNeutralAudioStyle();
   await testSkipValidationUsesAppSettingsAndRunUsesRecordTarget();
   console.log('creative workflow defaults tests passed');
 })().catch(error => {

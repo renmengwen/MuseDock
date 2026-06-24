@@ -67,8 +67,8 @@ function buildFreeformBriefMessages({ run = {}, skillContext = '', options = {} 
         '1. 只返回 JSON 对象。',
         '2. title 用中文概括短片主题。',
         '3. summary 说明成片表达目标。',
-        '4. narration 保留或整理口播结构。',
-        '5. storyboard 给出关键场景规划。',
+        '4. narration 不要输出完整口播，只写 120 字以内的口播结构摘要。',
+        '5. storyboard 给出关键场景规划；storyboard.scenes[].narration_text 承载实际配音文本。',
         '6. audio_direction 给出高级成片音频导演建议，必须包含 voice 和 style_prompt；style_prompt 可描述情绪、口吻、语速、停顿、吸气、笑声或哭腔，例如紧张、深呼吸、语速加快、沉默片刻、长叹一口气。',
         '7. storyboard.scenes[].narration_text 和 captions.text 只能包含观众可见、可朗读的正文；吸气、停顿、语速等表演指令只能写入 audio_direction.style_prompt，不要写进旁白或字幕。',
         '8. design_md 使用 Markdown 文本描述视觉方向、版式、动效和检查要点。',
@@ -77,7 +77,7 @@ function buildFreeformBriefMessages({ run = {}, skillContext = '', options = {} 
         safeJson({
           title: '短片标题',
           summary: '成片目标说明',
-          narration: '整理后的口播',
+          narration: '口播结构摘要，不粘贴完整长稿。',
           audio_direction: {
             voice: 'mimo_default',
             style_prompt: '自然清晰，带一点紧张感；开头深呼吸，关键句语速加快，结尾留出短暂停顿。',

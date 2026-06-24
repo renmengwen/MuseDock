@@ -172,7 +172,7 @@ function validateReasonableTimelineDuration(project, options = {}) {
   ));
   if (!Number.isFinite(target) || target <= 0) return { ok: true, duration_sec: actual };
   const softAllowed = Math.max(target * 1.5, target + 30);
-  const grace = Math.max(5, target * 0.1);
+  const grace = Math.max(5, Math.min(target * 0.5, 30));
   const allowed = softAllowed + grace;
   if (actual > allowed) {
     return {

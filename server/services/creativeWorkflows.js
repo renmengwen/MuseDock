@@ -31,6 +31,7 @@ const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
 const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;
 const DEFAULT_STALE_STAGE_TIMEOUT_MS = 10 * 60 * 1000;
 const WORKFLOW_STOPPED = Symbol('workflow-stopped');
+const NEUTRAL_VOICE_STYLE_PROMPT = '请使用自然、清晰、语速稳定的短视频口播风格；避免夸张表演、过长间隔、深呼吸或拖慢语速。';
 const EMOTIONAL_VOICE_STYLE_PROMPT = '请使用自然、有情绪起伏的短视频口播风格；关键句加强语气，适度停顿，保持清晰表达，不要过度拖慢语速。';
 
 const STAGE_IDS = ['source', 'research', 'assets', 'agent_run', 'brief', 'audio', 'project', 'check', 'render', 'inspect'];
@@ -1627,7 +1628,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     return ensureSuccess(
       await services.agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(record.aweme_id, record.run_id, {
         rootDir: mediaRoot,
-        ...(record.target?.emotionalVoice === true ? { stylePrompt: EMOTIONAL_VOICE_STYLE_PROMPT } : {}),
+        stylePrompt: record.target?.emotionalVoice === true ? EMOTIONAL_VOICE_STYLE_PROMPT : NEUTRAL_VOICE_STYLE_PROMPT,
       }),
       '音频轨生成失败。',
     );
