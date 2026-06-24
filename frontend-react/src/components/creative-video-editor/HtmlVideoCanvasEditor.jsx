@@ -8,7 +8,7 @@ import {
   formatElementLabel,
   nextEditId,
   parsePx,
-} from './htmlVideoCanvasDom.js';
+} from './htmlVideoCanvasDom.mjs';
 import { HtmlVideoElementInspector } from './HtmlVideoElementInspector.jsx';
 import { HtmlVideoFrameStrip } from './HtmlVideoFrameStrip.jsx';
 

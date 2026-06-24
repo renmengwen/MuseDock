@@ -12,6 +12,8 @@ assert.match(frameStrip, /onSelect/);
 assert.match(frameStrip, /selectedFrameId/);
 
 assert.match(canvasEditor, /export function HtmlVideoCanvasEditor/);
+assert.match(canvasEditor, /from ['"]\.\/htmlVideoCanvasDom\.mjs['"]/);
+assert.doesNotMatch(canvasEditor, /from ['"]\.\/htmlVideoCanvasDom\.js['"]/);
 assert.match(canvasEditor, /跳到结尾并编辑/);
 assert.match(canvasEditor, /保存为草稿/);
 assert.match(canvasEditor, /renderFramePreview/);
