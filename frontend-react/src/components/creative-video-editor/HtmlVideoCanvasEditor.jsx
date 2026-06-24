@@ -358,17 +358,26 @@ export function HtmlVideoCanvasEditor({ editor }) {
         mode: 'draft',
         summary: createDraftSummary(label),
       });
+      if (!result || result.success === false) {
+        setPreviewError('保存草稿失败，请稍后重试。');
+        return null;
+      }
       const nextProject = result?.html_video_project || result?.project || result?.data?.project || result?.data;
       const nextFrame = Array.isArray(nextProject?.frames)
         ? nextProject.frames.find(item => String(item.id || item.scene_id) === String(frameId))
         : null;
-      const draftId = nextFrame?.active_draft_id || result?.draft_id || result?.draft?.id || activeDraftId;
-      if (draftId) {
-        try {
-          await editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true });
-        } catch (_) {
+      const draftId = nextFrame?.active_draft_id || result?.draft_id || result?.draft?.id;
+      if (!draftId) {
+        setPreviewError('草稿已保存，但未获取到草稿 ID，请刷新后重试。');
+        return result;
+      }
+      try {
+        const renderResult = await editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true });
+        if (!renderResult || renderResult.success === false) {
           setPreviewError('草稿已保存，但渲染预览失败，请点击“渲染草稿”重试。');
         }
+      } catch (_) {
+        setPreviewError('草稿已保存，但渲染预览失败，请点击“渲染草稿”重试。');
       }
       return result;
     } catch (_) {
