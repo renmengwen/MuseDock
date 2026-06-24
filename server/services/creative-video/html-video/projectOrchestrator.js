@@ -56,7 +56,7 @@ function syncTimelineDuration(project, frame, durationSec) {
         item.id === frame.id
         || item.frame_id === frame.id
         || item.ref === frame.id
-        || item.scene_id === frame.scene_id
+        || (frame.scene_id && item.scene_id === frame.scene_id)
       ) {
         item.duration_sec = durationSec;
         if (item.duration != null) item.duration = durationSec;
@@ -112,6 +112,24 @@ function fitFrameDurationsToCaptions(project, toleranceSec = 0.2) {
         continue;
       }
 
+      const diff = captionEnd - duration;
+      const tooLarge = diff > 8 || captionEnd > duration * 2 || captionEnd > 30;
+      if (tooLarge) {
+        diagnostics.push(createDiagnostic({
+          code: 'caption_duration_exceeds_reasonable_frame',
+          stage: 'timeline-consistency',
+          user_message: '字幕时间异常超出画面时长，已停止渲染。请重新生成该段配音或缩短字幕时间。',
+          details: {
+            frame_id: frame.id || frame.scene_id || '',
+            duration_sec: duration,
+            caption_end_sec: roundDuration(captionEnd),
+            diff_sec: roundDuration(diff),
+          },
+          fallback_allowed: false,
+        }));
+        continue;
+      }
+
       const nextDuration = roundDuration(captionEnd);
       frame.duration_sec = nextDuration;
       if (frame.durationSec != null) frame.durationSec = nextDuration;
@@ -136,11 +154,53 @@ function fitFrameDurationsToCaptions(project, toleranceSec = 0.2) {
   }
   if (changed) retimeTimelineStarts(project);
   return {
-    project,
-    diagnostics,
-    errors: diagnostics.filter(item => item.fallback_allowed === false),
+    ok: !diagnostics.some(item => item.fallback_allowed === false),
     changed,
+    diagnostics,
   };
+}
+
+function validateReasonableTimelineDuration(project, options = {}) {
+  const actual = expectedDurationSec(project);
+  const hasExplicitTarget = Object.prototype.hasOwnProperty.call(options, 'targetDurationSec');
+  const target = Number(hasExplicitTarget
+    ? options.targetDurationSec
+    : (
+      project?.target?.duration_sec
+      ?? project?.output?.duration
+      ?? 0
+  ));
+  if (!Number.isFinite(target) || target <= 0) return { ok: true, duration_sec: actual };
+  const softAllowed = Math.max(target * 1.5, target + 30);
+  const grace = Math.max(5, target * 0.1);
+  const allowed = softAllowed + grace;
+  if (actual > allowed) {
+    return {
+      ok: false,
+      code: 'timeline_duration_unreasonable',
+      message: `视频时间轴异常：目标 ${target.toFixed(2)} 秒，当前 ${actual.toFixed(2)} 秒。`,
+      target_duration_sec: target,
+      duration_sec: actual,
+      soft_allowed_duration_sec: softAllowed,
+      grace_duration_sec: grace,
+      allowed_duration_sec: allowed,
+    };
+  }
+  return {
+    ok: true,
+    target_duration_sec: target,
+    duration_sec: actual,
+    soft_allowed_duration_sec: softAllowed,
+    grace_duration_sec: grace,
+    allowed_duration_sec: allowed,
+    within_grace_duration: actual > softAllowed,
+  };
+}
+
+function resolveTargetDurationSec(project, targetDurationSec) {
+  const rawTarget = targetDurationSec ?? project?.target?.duration_sec;
+  const parsed = Number(rawTarget);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 async function resolveNarrationPath(project, projectDir, ffmpegComposer, diagnostics) {
@@ -244,11 +304,13 @@ async function renderHtmlVideoProject({
   services = {},
   skipRender = false,
   onProgress = null,
+  targetDurationSec,
 } = {}) {
   const materializer = services.materializer || defaultMaterializer;
   const frameRenderer = services.frameRenderer || defaultFrameRenderer;
   const ffmpegComposer = services.ffmpegComposer || defaultFfmpegComposer;
   const resolvedProjectDir = await ensureProjectDir({ rootDir, workflowId, runId, projectDir });
+  const trustedTargetDurationSec = resolveTargetDurationSec(project, targetDurationSec);
   let nextProject = normalizeProject(project);
   const diagnostics = [];
 
@@ -274,13 +336,37 @@ async function renderHtmlVideoProject({
   const outputConfig = getOutputConfig(nextProject);
   const timingFit = fitFrameDurationsToCaptions(nextProject);
   diagnostics.push(...timingFit.diagnostics);
+  if (!timingFit.ok) {
+    const firstError = timingFit.diagnostics.find(item => item.fallback_allowed === false);
+    return {
+      success: false,
+      message: firstError?.user_message || '视频时间轴异常，已停止渲染。',
+      project: nextProject,
+      project_dir: resolvedProjectDir,
+      html_video_project_path: resolvedProjectDir,
+      diagnostics,
+    };
+  }
   if (timingFit.changed) {
     await saveProject(resolvedProjectDir, nextProject);
   }
-  if (timingFit.errors.length) {
+
+  const timelineDurationOptions = Number.isFinite(trustedTargetDurationSec) && trustedTargetDurationSec > 0
+    ? { targetDurationSec: trustedTargetDurationSec }
+    : {};
+  const timelineDuration = validateReasonableTimelineDuration(nextProject, timelineDurationOptions);
+  if (!timelineDuration.ok) {
+    diagnostics.push(createDiagnostic({
+      code: timelineDuration.code,
+      stage: 'timeline-consistency',
+      user_message: timelineDuration.message || '视频时间轴异常，已停止渲染。',
+      details: timelineDuration,
+      fallback_allowed: false,
+    }));
     return {
       success: false,
-      message: timingFit.errors[0].user_message,
+      code: timelineDuration.code,
+      message: timelineDuration.message || '视频时间轴异常，已停止渲染。',
       project: nextProject,
       project_dir: resolvedProjectDir,
       html_video_project_path: resolvedProjectDir,
@@ -368,33 +454,37 @@ async function renderHtmlVideoProject({
     };
   }
 
-  const narrationPath = await resolveNarrationPath(nextProject, resolvedProjectDir, ffmpegComposer, diagnostics);
-  const mux = await ffmpegComposer.muxAudioWithFfmpeg({
-    videoPath: concat.output_path || videoPath,
-    outputPath: path.join(resolvedProjectDir, 'exports', 'output-audio.mp4'),
-    narrationPath,
-    musicPath: nextProject.audio?.music_path,
-    videoDurationSec: expectedDurationSec(nextProject),
-    ...(nextProject.audio?.mix || {}),
-  });
-  if (!mux.success) {
-    diagnostics.push(createDiagnostic({
-      code: 'compose_failed',
-      stage: 'compose',
-      user_message: mux.message || 'html-video 音频混流失败。',
-      details: { stderr: mux.stderr },
-    }));
-    return {
-      success: false,
-      message: mux.message || 'html-video 音频混流失败。',
-      project: nextProject,
-      project_dir: resolvedProjectDir,
-      html_video_project_path: resolvedProjectDir,
-      diagnostics,
-    };
+  let finalOutput = concat.output_path || videoPath;
+  const audioDisabled = nextProject.audio?.status === 'skipped'
+    && nextProject.audio?.reason === 'disabled_by_settings';
+  if (!audioDisabled) {
+    const narrationPath = await resolveNarrationPath(nextProject, resolvedProjectDir, ffmpegComposer, diagnostics);
+    const mux = await ffmpegComposer.muxAudioWithFfmpeg({
+      videoPath: finalOutput,
+      outputPath: path.join(resolvedProjectDir, 'exports', 'output-audio.mp4'),
+      narrationPath,
+      musicPath: nextProject.audio?.music_path,
+      videoDurationSec: expectedDurationSec(nextProject),
+      ...(nextProject.audio?.mix || {}),
+    });
+    if (!mux.success) {
+      diagnostics.push(createDiagnostic({
+        code: 'compose_failed',
+        stage: 'compose',
+        user_message: mux.message || 'html-video 音频混流失败。',
+        details: { stderr: mux.stderr },
+      }));
+      return {
+        success: false,
+        message: mux.message || 'html-video 音频混流失败。',
+        project: nextProject,
+        project_dir: resolvedProjectDir,
+        html_video_project_path: resolvedProjectDir,
+        diagnostics,
+      };
+    }
+    finalOutput = mux.output_path || finalOutput;
   }
-
-  const finalOutput = mux.output_path || concat.output_path || videoPath;
   if (typeof ffmpegComposer.verifyDurationWithFfprobe === 'function') {
     const durationCheck = await ffmpegComposer.verifyDurationWithFfprobe({
       videoPath: finalOutput,
@@ -583,6 +673,8 @@ module.exports = {
   renderHtmlVideoFramePreview,
   exportHtmlVideoProject,
   renderHtmlVideoProject,
+  fitFrameDurationsToCaptions,
+  validateReasonableTimelineDuration,
   renderProject: renderHtmlVideoProject,
   exportProject: exportHtmlVideoProject,
   rerenderProject: renderHtmlVideoProject,

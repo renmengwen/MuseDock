@@ -31,6 +31,7 @@ const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../data/media/douyin');
 const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;
 const DEFAULT_STALE_STAGE_TIMEOUT_MS = 10 * 60 * 1000;
 const WORKFLOW_STOPPED = Symbol('workflow-stopped');
+const EMOTIONAL_VOICE_STYLE_PROMPT = '请使用自然、有情绪起伏的短视频口播风格；关键句加强语气，适度停顿，保持清晰表达，不要过度拖慢语速。';
 
 const STAGE_IDS = ['source', 'research', 'assets', 'agent_run', 'brief', 'audio', 'project', 'check', 'render', 'inspect'];
 const STAGE_LABELS = {
@@ -629,6 +630,15 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
       ? overrideSource.lockTemplate
       : defaultsSource.lockTemplate === true,
     useResearch,
+    generateAudio: typeof overrideSource.generateAudio === 'boolean'
+      ? overrideSource.generateAudio
+      : defaultsSource.generateAudio !== false,
+    generateCaptions: typeof overrideSource.generateCaptions === 'boolean'
+      ? overrideSource.generateCaptions
+      : defaultsSource.generateCaptions !== false,
+    emotionalVoice: typeof overrideSource.emotionalVoice === 'boolean'
+      ? overrideSource.emotionalVoice
+      : defaultsSource.emotionalVoice === true,
   };
 }
 
@@ -638,6 +648,21 @@ function buildWorkflowTarget(snapshot = {}) {
     duration_sec: Number(snapshot.targetDurationSec),
     preferredTemplateId: safeString(snapshot.templateId),
     lockTemplate: snapshot.lockTemplate === true,
+    generateAudio: snapshot.generateAudio !== false,
+    generateCaptions: snapshot.generateCaptions !== false,
+    emotionalVoice: snapshot.emotionalVoice === true,
+  };
+}
+
+function resolveMediaGenerationOptions(defaults = {}, target = {}, options = {}) {
+  const source = {
+    ...defaults,
+    ...(target && typeof target === 'object' ? target : {}),
+    ...(options.projectOptions && typeof options.projectOptions === 'object' ? options.projectOptions : {}),
+  };
+  return {
+    generateAudio: source.generateAudio !== false,
+    generateCaptions: source.generateCaptions !== false,
   };
 }
 
@@ -1481,6 +1506,27 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     options = { ...options, skipValidation: true };
   }
 
+  const creativeDefaultsSnapshot = record.creative_defaults_snapshot && typeof record.creative_defaults_snapshot === 'object'
+    ? record.creative_defaults_snapshot
+    : null;
+  let creativeDefaultsForMedia = creativeDefaultsSnapshot;
+  if (
+    !creativeDefaultsForMedia
+    || typeof creativeDefaultsForMedia.generateAudio !== 'boolean'
+    || typeof creativeDefaultsForMedia.generateCaptions !== 'boolean'
+  ) {
+    const realtimeCreativeDefaults = await services.appSettings.getCreativeDefaults(options);
+    creativeDefaultsForMedia = {
+      ...(realtimeCreativeDefaults && typeof realtimeCreativeDefaults === 'object' ? realtimeCreativeDefaults : {}),
+      ...(creativeDefaultsSnapshot || {}),
+    };
+  }
+  const mediaOptions = resolveMediaGenerationOptions(
+    creativeDefaultsForMedia,
+    record.target,
+    options,
+  );
+
   const failIfStoppedOrNull = result => {
     if (result === WORKFLOW_STOPPED) {
       return createWorkflowStoppedSummary(workflowId);
@@ -1566,12 +1612,26 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     return stoppedOrFailed;
   }
 
-  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'audio', rootDir, async () => ensureSuccess(
-    await services.agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(record.aweme_id, record.run_id, {
-      rootDir: mediaRoot,
-    }),
-    '音频轨生成失败。',
-  ), services, taskContext));
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'audio', rootDir, async () => {
+    if (mediaOptions.generateAudio === false) {
+      return {
+        success: true,
+        skipped: true,
+        message: '已关闭旁白音频生成，跳过 TTS。',
+        audio: {
+          status: 'skipped',
+          reason: 'disabled_by_settings',
+        },
+      };
+    }
+    return ensureSuccess(
+      await services.agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(record.aweme_id, record.run_id, {
+        rootDir: mediaRoot,
+        ...(record.target?.emotionalVoice === true ? { stylePrompt: EMOTIONAL_VOICE_STYLE_PROMPT } : {}),
+      }),
+      '音频轨生成失败。',
+    );
+  }, services, taskContext));
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }
@@ -1586,6 +1646,8 @@ async function runCreativeWorkflow(workflowId, options = {}) {
   const existingProjectOptions = {
     ...(options.projectOptions && typeof options.projectOptions === 'object' ? options.projectOptions : {}),
     creative_context: record.creative_context,
+    generateAudio: mediaOptions.generateAudio,
+    generateCaptions: mediaOptions.generateCaptions,
   };
 
   const projectStageResult = await runStage(record, 'project', rootDir, async () => ensureSuccess(

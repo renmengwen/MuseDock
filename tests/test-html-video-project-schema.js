@@ -179,6 +179,24 @@ assert.deepEqual(normalized.frames[0].metadata, { visual_text: { headline: '保�
 
 {
   const project = schema.normalizeProject({
+    project_id: 'captions_disabled_project',
+    frames: [
+      {
+        id: 'scene_no_captions',
+        duration_sec: 4,
+        narration_text: '这段旁白不应该被自动生成字幕。',
+        captions: [],
+        generate_captions: false,
+      },
+    ],
+  });
+
+  assert.equal(project.frames[0].generate_captions, false);
+  assert.deepEqual(project.frames[0].captions, []);
+}
+
+{
+  const project = schema.normalizeProject({
     project_id: 'camel_case_project',
     frames: [
       {

@@ -3,7 +3,7 @@ const path = require('path');
 
 const { normalizeProject } = require('./projectSchema');
 const { topoSort, getNode, DEFAULT_FRAME_DURATION_SEC } = require('./contentGraph');
-const { ensureCaptionLayer, normalizeCaptionsForFrame } = require('./captionLayer');
+const { applyCaptionLayer, normalizeCaptionsForFrame } = require('./captionLayer');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
 
 function objectOrEmpty(value) {
@@ -67,6 +67,32 @@ function defaultFrameFields() {
   };
 }
 
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return null;
+}
+
+function trustedSceneDuration(scene = {}, node = {}) {
+  return firstPositiveNumber(
+    scene.speech_duration_sec,
+    scene.speechDurationSec,
+    scene.duration,
+    scene.duration_sec,
+    scene.durationSec,
+    scene.actual_duration_sec,
+    scene.actualDurationSec,
+    scene.target_duration_sec,
+    scene.targetDurationSec,
+    node.durationSec,
+    node.duration_sec,
+    node.duration,
+    DEFAULT_FRAME_DURATION_SEC,
+  );
+}
+
 function normalizeCaptions(scene = {}, durationSec = DEFAULT_FRAME_DURATION_SEC) {
   return normalizeCaptionsForFrame({
     id: scene.id,
@@ -78,7 +104,7 @@ function normalizeCaptions(scene = {}, durationSec = DEFAULT_FRAME_DURATION_SEC)
 }
 
 function injectCaptionOverlay(html, captions = []) {
-  return ensureCaptionLayer(html, captions);
+  return applyCaptionLayer(html, captions);
 }
 
 async function buildRawHtmlFrameProject({
@@ -90,6 +116,7 @@ async function buildRawHtmlFrameProject({
   sceneSpec = {},
   target = {},
   template = {},
+  mediaOptions = {},
 } = {}) {
   if (!projectDir) throw new Error('缺少 projectDir。');
   const htmlMap = frameHtmlByNodeId instanceof Map
@@ -99,7 +126,9 @@ async function buildRawHtmlFrameProject({
   const scenes = sceneById(sceneSpec);
   const frames = [];
   const items = [];
+  const trustedDurations = new Map();
   let cursor = 0;
+  const includeCaptions = mediaOptions.generateCaptions !== false;
 
   for (let index = 0; index < orderedNodeIds.length; index += 1) {
     const nodeId = orderedNodeIds[index];
@@ -116,9 +145,13 @@ async function buildRawHtmlFrameProject({
     if (!scene) {
       throw new Error(`内容图节点 ${nodeId} 未匹配到 scene_spec 场景 ${sceneId || '未指定'}。`);
     }
-    const durationSec = Number(node.durationSec || scene.duration || scene.target_duration_sec || DEFAULT_FRAME_DURATION_SEC);
+    const durationSec = trustedSceneDuration(scene, node);
     const normalizedDurationSec = Number.isFinite(durationSec) && durationSec > 0 ? durationSec : DEFAULT_FRAME_DURATION_SEC;
-    const captions = normalizeCaptions(scene, normalizedDurationSec);
+    trustedDurations.set(nodeId, normalizedDurationSec);
+    const trustedNode = { ...node, durationSec: normalizedDurationSec };
+    if (trustedNode.duration_sec != null) trustedNode.duration_sec = normalizedDurationSec;
+    if (trustedNode.duration != null) trustedNode.duration = normalizedDurationSec;
+    const captions = includeCaptions ? normalizeCaptions(scene, normalizedDurationSec) : [];
     const frame = {
       id: scene.id,
       scene_id: scene.id,
@@ -133,10 +166,11 @@ async function buildRawHtmlFrameProject({
       inputs: {},
       narration_text: scene.narration_text || '',
       captions,
+      generate_captions: includeCaptions,
       metadata: {
         frame_intent: node.kind || scene.kind || 'text',
         visual_text: clone(scene.visual_text),
-        graph_node: clone(node),
+        graph_node: clone(trustedNode),
         scene_snapshot: {
           id: scene.id,
           order: scene.order,
@@ -146,7 +180,10 @@ async function buildRawHtmlFrameProject({
       },
       ...defaultFrameFields(),
     };
-    await fs.writeFile(outputPath, ensureCaptionLayer(html, captions), 'utf8');
+    const htmlWithCaptions = includeCaptions
+      ? applyCaptionLayer(html, frame.captions, { durationSec: frame.duration_sec, generateCaptions: true })
+      : html;
+    await fs.writeFile(outputPath, htmlWithCaptions, 'utf8');
     frames.push(frame);
     items.push({
       id: `item_${frame.id}`,
@@ -158,7 +195,19 @@ async function buildRawHtmlFrameProject({
     cursor += frame.duration_sec;
   }
 
-  return normalizeProject({
+  const trustedGraph = clone(graph);
+  if (Array.isArray(trustedGraph.nodes)) {
+    trustedGraph.nodes = trustedGraph.nodes.map(node => {
+      if (!node || !trustedDurations.has(node.id)) return node;
+      const durationSec = trustedDurations.get(node.id);
+      const next = { ...node, durationSec };
+      if (next.duration_sec != null) next.duration_sec = durationSec;
+      if (next.duration != null) next.duration = durationSec;
+      return next;
+    });
+  }
+
+  const project = normalizeProject({
     project_id: `${workflowId || 'workflow'}_${runId || 'run'}`,
     workflow_id: workflowId || null,
     run_id: runId || null,
@@ -169,7 +218,7 @@ async function buildRawHtmlFrameProject({
       duration: cursor,
     },
     template_schema: {},
-    content_graph: graph,
+    content_graph: trustedGraph,
     frames,
     timeline: {
       tracks: [
@@ -179,6 +228,10 @@ async function buildRawHtmlFrameProject({
       ],
     },
   });
+  for (const frame of project.frames) {
+    if (frame.generate_captions === false) frame.captions = [];
+  }
+  return project;
 }
 
 module.exports = {

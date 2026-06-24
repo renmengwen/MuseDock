@@ -32,6 +32,7 @@ function createDefaults(overrides = {}) {
     },
     lockTemplate: true,
     useResearch: false,
+    emotionalVoice: false,
     ...overrides,
   };
 }
@@ -107,6 +108,7 @@ function assertSnapshotRecord(record, {
   templateId = 'bold_signal',
   lockTemplate = true,
   useResearch = false,
+  emotionalVoice = false,
 } = {}) {
   assert.ok(record.creative_defaults_snapshot, 'snapshot fields missing');
   assert.equal(record.creative_defaults_snapshot.aspectRatio, aspectRatio);
@@ -114,11 +116,13 @@ function assertSnapshotRecord(record, {
   assert.equal(record.creative_defaults_snapshot.templateId, templateId);
   assert.equal(record.creative_defaults_snapshot.lockTemplate, lockTemplate);
   assert.equal(record.creative_defaults_snapshot.useResearch, useResearch);
+  assert.equal(record.creative_defaults_snapshot.emotionalVoice, emotionalVoice);
   assert.ok(record.target, 'target fields missing');
   assert.equal(record.target.aspect_ratio, aspectRatio);
   assert.equal(record.target.duration_sec, durationSec);
   assert.equal(record.target.preferredTemplateId, templateId);
   assert.equal(record.target.lockTemplate, lockTemplate);
+  assert.equal(record.target.emotionalVoice, emotionalVoice);
   assert.equal(record.input.use_research, useResearch);
 }
 
@@ -190,6 +194,30 @@ async function testMissingDefaultUseResearchDefaultsToTrue() {
   delete defaults.useResearch;
   const { record } = await createAndRead({}, { defaults });
   assertSnapshotRecord(record, { useResearch: true });
+}
+
+async function testEmotionalVoiceDefaultPassesToAudioStage() {
+  const workflowId = '202606230000000003';
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services, calls } = createServices({
+    workflowId,
+    defaults: createDefaults({ emotionalVoice: true }),
+  });
+
+  const created = await createCreativeWorkflow({
+    input: '情绪化配音默认值测试',
+  }, { rootDir, mediaRoot, services });
+  assert.equal(created.success, true);
+
+  const record = readWorkflow(workflowId, rootDir);
+  assertSnapshotRecord(record, { emotionalVoice: true });
+
+  const run = await runCreativeWorkflow(workflowId, { rootDir, mediaRoot, services });
+  assert.equal(run.success, true);
+
+  const audioCall = calls.find(call => call.name === 'audio');
+  assert.ok(audioCall, 'audio stage should run');
+  assert.match(audioCall.options.stylePrompt, /情绪|停顿|语气/);
 }
 
 async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
@@ -264,6 +292,7 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   await testCreativeDefaultsOverrideTemplateIdWins();
   await testCreativeDefaultsOverrideBeatsLegacyUseResearch();
   await testMissingDefaultUseResearchDefaultsToTrue();
+  await testEmotionalVoiceDefaultPassesToAudioStage();
   await testSkipValidationUsesAppSettingsAndRunUsesRecordTarget();
   console.log('creative workflow defaults tests passed');
 })().catch(error => {

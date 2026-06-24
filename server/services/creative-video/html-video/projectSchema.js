@@ -136,11 +136,13 @@ function normalizeFrame(frame, index) {
   const durationSec = Number.isFinite(duration) && duration > 0 ? duration : 3;
   const narrationText = String(input.narration_text ?? input.narrationText ?? '');
   const metadata = objectOrEmpty(input.metadata);
+  const generateCaptions = input.generate_captions === false || input.generateCaptions === false ? false : true;
   const captions = normalizeCaptionsForFrame({
     id,
     duration_sec: durationSec,
     narration_text: narrationText,
     captions: input.captions,
+    generate_captions: generateCaptions,
   });
   return {
     ...input,
@@ -157,6 +159,7 @@ function normalizeFrame(frame, index) {
     engine: input.engine || DEFAULT_ENGINE,
     narration_text: narrationText,
     captions,
+    ...(generateCaptions === false ? { generate_captions: false } : {}),
     drafts: arrayOrEmpty(input.drafts),
     active_draft_id: firstNonEmptyString(input.active_draft_id, input.activeDraftId),
     metadata: {

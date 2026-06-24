@@ -135,7 +135,15 @@ function normalizeCaption(caption = {}, frame = {}, index = 0) {
   };
 }
 
+function captionsDisabled(frame = {}) {
+  return frame.generate_captions === false
+    || frame.generateCaptions === false
+    || frame.media_options?.generateCaptions === false
+    || frame.mediaOptions?.generateCaptions === false;
+}
+
 function normalizeCaptionsForFrame(frame = {}) {
+  if (captionsDisabled(frame)) return [];
   const sourceCaptions = Array.isArray(frame.captions) ? frame.captions : [];
   const captions = sourceCaptions
     .map((caption, index) => normalizeCaption(caption, frame, index))
@@ -409,7 +417,8 @@ function findClosingBodyOutsideSkippedRegions(html) {
   return -1;
 }
 
-function ensureCaptionLayer(html, captions = []) {
+function ensureCaptionLayer(html, captions = [], options = {}) {
+  if (options.generateCaptions === false) return removeExistingCaptionLayer(html);
   const layer = renderCaptionLayer(captions);
   const withoutLayer = removeExistingCaptionLayer(html);
   if (!layer) return withoutLayer;
@@ -420,7 +429,10 @@ function ensureCaptionLayer(html, captions = []) {
   return `${withoutLayer}${layer}`;
 }
 
+const applyCaptionLayer = ensureCaptionLayer;
+
 module.exports = {
+  applyCaptionLayer,
   ensureCaptionLayer,
   hasUnmanagedCaptionLayer,
   htmlEscape,

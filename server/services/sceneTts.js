@@ -1,10 +1,12 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const { spawn } = require('child_process');
 
 const defaultTtsModel = require('./aiTtsModel');
 const defaultTtsTimeline = require('./ttsTimeline');
 const defaultPhraseTimeline = require('./phraseTimeline');
+const defaultAudioQuality = require('./ttsAudioQuality');
 const { stripSpeechStageDirections } = require('./speechText');
 
 const DEFAULT_VOICE = 'mimo_default';
@@ -28,6 +30,53 @@ function roundTime(value) {
 function safeFormat(format) {
   const clean = String(format || '').replace(/[^A-Za-z0-9]/g, '');
   return clean || 'wav';
+}
+
+async function getExistingExecutable(filePath) {
+  if (!filePath) return null;
+  try {
+    await fsp.access(filePath, fs.constants.X_OK);
+    return filePath;
+  } catch {
+    try {
+      await fsp.access(filePath, fs.constants.F_OK);
+      return filePath;
+    } catch {
+      return null;
+    }
+  }
+}
+
+async function resolveFfmpegPath(options = {}) {
+  const explicitPath = options.ffmpegPath || process.env.FFMPEG_PATH;
+  const resolvedExplicitPath = await getExistingExecutable(explicitPath);
+  if (resolvedExplicitPath) return resolvedExplicitPath;
+
+  try {
+    const installer = require('@ffmpeg-installer/ffmpeg');
+    const bundledPath = await getExistingExecutable(installer.path);
+    if (bundledPath) return bundledPath;
+  } catch {
+    // Optional dependency fallback. If it is not installed, use PATH lookup below.
+  }
+
+  return process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+}
+
+function runCommand(command, args, options = {}) {
+  return new Promise(resolve => {
+    const child = spawn(command, args, { windowsHide: true, ...options });
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr?.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', error => {
+      resolve({ ok: false, code: null, error: error.message, stdout, stderr });
+    });
+    child.on('close', code => {
+      resolve({ ok: code === 0, code, stdout, stderr });
+    });
+  });
 }
 
 function getSceneAudioFileName(index, format = 'wav') {
@@ -66,7 +115,18 @@ async function synthesizeSceneTts(options = {}) {
   const ttsModel = options.ttsModel || defaultTtsModel;
   const ttsTimeline = options.ttsTimeline || defaultTtsTimeline;
   const phraseTimeline = options.phraseTimeline || defaultPhraseTimeline;
-  const readAudioDuration = options.readAudioDuration || ttsTimeline.readAudioDuration;
+  const audioQuality = options.audioQuality || defaultAudioQuality;
+  const audioToolOptions = {
+    ...(options.audioDurationOptions || {}),
+    ffmpegPath: options.ffmpegPath || options.audioDurationOptions?.ffmpegPath,
+    ffprobePath: options.ffprobePath || options.audioDurationOptions?.ffprobePath,
+  };
+  const resolveFfprobePath = typeof ttsTimeline.resolveFfprobePath === 'function'
+    ? ttsTimeline.resolveFfprobePath
+    : defaultTtsTimeline.resolveFfprobePath;
+  const runAudioQualityCommand = options.runCommand || runCommand;
+  const getFfprobeCommand = options.getFfprobeCommand || (() => resolveFfprobePath(audioToolOptions));
+  const getFfmpegCommand = options.getFfmpegCommand || (() => resolveFfmpegPath(audioToolOptions));
   const concatenateAudioFiles = options.concatenateAudioFiles || ttsTimeline.concatenateAudioFiles;
   const sceneDir = path.join(outputDir, `${runId}-scene-tts`);
   const inputPaths = [];
@@ -110,30 +170,55 @@ async function synthesizeSceneTts(options = {}) {
     const filePath = path.join(sceneDir, fileName);
     await fsp.writeFile(filePath, ttsResult.audioBuffer);
 
-    const durationResult = await readAudioDuration(filePath, options.audioDurationOptions || {});
-    const durationValue = typeof durationResult === 'number' ? durationResult : durationResult?.duration;
-    if (typeof durationResult !== 'number' && !durationResult?.success) {
-      return fail(durationResult?.message || `第 ${sceneIndex} 幕音频时长读取失败。`, {
+    const cleanFileName = fileName.replace(/(\.[^.]+)$/, '.clean$1');
+    const cleanPath = path.join(sceneDir, cleanFileName);
+    const quality = await audioQuality.inspectAndCleanAudio({
+      inputPath: filePath,
+      outputPath: cleanPath,
+      plannedDurationSec: Number(scene?.duration ?? scene?.duration_sec ?? scene?.target_duration_sec ?? 0),
+      runCommand: runAudioQualityCommand,
+      getFfprobeCommand,
+      getFfmpegCommand,
+    });
+    if (!quality?.success) {
+      return fail(quality?.message || `第 ${sceneIndex} 幕配音时长异常。`, {
         scene_index: sceneIndex,
+        code: quality?.code,
+        diagnostics: quality,
+        model,
+      });
+    }
+    const speechDuration = Number(quality.speech_duration_sec);
+    if (!Number.isFinite(speechDuration) || speechDuration <= 0) {
+      return fail(quality.message || `第 ${sceneIndex} 幕配音时长无效。`, {
+        scene_index: sceneIndex,
+        code: quality.code || 'tts_speech_duration_invalid',
+        diagnostics: quality,
         model,
       });
     }
 
-    const duration = roundTime(durationValue);
+    const audioPath = quality.path || filePath;
+    const duration = roundTime(speechDuration);
     const captions = ttsTimeline.buildCaptionsFromSegments([
-      { index: 1, text, duration, path: filePath },
+      { index: 1, text, duration, path: audioPath },
     ]);
     const phraseCaptions = phraseTimeline.buildPhraseBlocksFromCaptions(captions);
 
-    inputPaths.push(filePath);
+    inputPaths.push(audioPath);
     sceneResults.push({
       ...scene,
       index: sceneIndex,
       narration_text: text,
       duration,
       actual_duration_sec: duration,
-      path: filePath,
-      file_name: fileName,
+      path: audioPath,
+      raw_path: quality.raw_path || filePath,
+      raw_duration_sec: quality.raw_duration_sec,
+      speech_duration_sec: duration,
+      tail_silence_sec: quality.tail_silence_sec || 0,
+      trimmed: quality.trimmed === true,
+      file_name: path.basename(audioPath),
       captions,
       phrase_captions: phraseCaptions,
     });

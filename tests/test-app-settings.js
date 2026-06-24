@@ -27,6 +27,9 @@ async function run() {
     },
     lockTemplate: false,
     useResearch: true,
+    generateAudio: true,
+    generateCaptions: true,
+    emotionalVoice: false,
   });
   assert.strictEqual(defaults.creativeDefaults.templateByAspectRatio['9:16'], 'news_signal_vertical');
   assert.strictEqual(defaults.creativeDefaults.useResearch, true);
@@ -47,6 +50,9 @@ async function run() {
       },
       lockTemplate: true,
       useResearch: false,
+      generateAudio: false,
+      generateCaptions: false,
+      emotionalVoice: true,
     },
     system: {
       skipValidation: true,
@@ -65,6 +71,9 @@ async function run() {
     },
     lockTemplate: true,
     useResearch: false,
+    generateAudio: false,
+    generateCaptions: false,
+    emotionalVoice: true,
   });
   assert.deepStrictEqual(saved.system, { skipValidation: true });
   assert.deepStrictEqual(readJson(configPath), saved);
@@ -106,6 +115,13 @@ async function run() {
   const afterCorruptRead = await appSettings.getPublicConfig({ configPath, aiConfigPath });
   assert.deepStrictEqual(afterCorruptRead, appSettings.DEFAULT_CONFIG);
   assert.strictEqual(fs.readFileSync(configPath, 'utf-8'), '{ bad json');
+
+  assert.equal(appSettings.normalizeCreativeDefaults({}).generateAudio, true);
+  assert.equal(appSettings.normalizeCreativeDefaults({}).generateCaptions, true);
+  assert.equal(appSettings.normalizeCreativeDefaults({}).emotionalVoice, false);
+  assert.equal(appSettings.normalizeCreativeDefaults({ generateAudio: false }).generateAudio, false);
+  assert.equal(appSettings.normalizeCreativeDefaults({ generateCaptions: false }).generateCaptions, false);
+  assert.equal(appSettings.normalizeCreativeDefaults({ emotionalVoice: true }).emotionalVoice, true);
 }
 
 run().then(() => {

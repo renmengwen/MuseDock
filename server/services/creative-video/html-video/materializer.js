@@ -103,10 +103,11 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
       const html = await fs.readFile(outputPath, 'utf8');
       const captions = normalizeCaptionsForFrame(frame);
       frame.captions = captions;
+      const generateCaptions = frame.generate_captions !== false && frame.generateCaptions !== false;
       if (hasUnmanagedCaptionLayer(html)) {
         recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame);
       }
-      const nextHtml = ensureCaptionLayer(html, captions);
+      const nextHtml = ensureCaptionLayer(html, captions, { generateCaptions });
       if (nextHtml !== html) {
         await fs.writeFile(outputPath, nextHtml, 'utf8');
         diagnostics.push({
@@ -180,6 +181,7 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
 
   const captions = normalizeCaptionsForFrame(frame);
   frame.captions = captions;
+  const generateCaptions = frame.generate_captions !== false && frame.generateCaptions !== false;
   const sourceHtml = await fs.readFile(sourcePath, 'utf8');
   const sceneData = {
     id: frame.scene_id || frame.id,
@@ -191,7 +193,7 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
   if (hasUnmanagedCaptionLayer(materializedHtml)) {
     recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame);
   }
-  const html = ensureCaptionLayer(materializedHtml, captions);
+  const html = ensureCaptionLayer(materializedHtml, captions, { generateCaptions });
   const relativePath = frameOutputPath(frame, index);
   const outputPath = resolveProjectPath(projectDir, relativePath);
   await fs.mkdir(path.dirname(outputPath), { recursive: true });

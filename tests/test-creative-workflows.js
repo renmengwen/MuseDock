@@ -82,6 +82,23 @@ function createFakeServices(overrides = {}) {
         },
       },
       agentRuns,
+      appSettings: {
+        getCreativeDefaults: async () => ({
+          aspectRatio: '9:16',
+          targetDurationSec: 60,
+          templateByAspectRatio: {
+            '9:16': 'news_signal_vertical',
+            '16:9': 'bold_signal',
+            '1:1': '',
+            '4:5': '',
+          },
+          lockTemplate: false,
+          useResearch: true,
+          generateAudio: true,
+          generateCaptions: true,
+        }),
+        getEffectiveSystemSettings: async () => ({ skipValidation: false }),
+      },
       ...(overrides.services || {}),
     },
   };
@@ -667,6 +684,134 @@ async function testHtmlVideoLiteCompletesVisibleFinalStages() {
   const htmlVideoProject = await getCreativeWorkflowHtmlVideoProject(WORKFLOW_ID, { rootDir });
   assert.equal(htmlVideoProject.success, true);
   assert.equal(htmlVideoProject.html_video_project_path, projectDir);
+}
+
+async function testCreativeDefaultsDisableAudioAndCaptionsInWorkflow() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-html-video');
+  let audioCalls = 0;
+  let projectOptionsSeen = null;
+  const { services } = createFakeServices({
+    services: {
+      appSettings: {
+        getCreativeDefaults: async () => ({
+          aspectRatio: '9:16',
+          targetDurationSec: 60,
+          generateAudio: false,
+          generateCaptions: false,
+        }),
+        getEffectiveSystemSettings: async () => ({ skipValidation: false }),
+      },
+    },
+    agentRuns: {
+      synthesizeDouyinRunHyperframesFreeformAudio: async () => {
+        audioCalls += 1;
+        return { success: true, status: 'done', message: '音频轨生成完成' };
+      },
+      generateDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
+        projectOptionsSeen = options.projectOptions;
+        return {
+          success: true,
+          status: 'done',
+          message: 'html-video lite 成片完成。',
+          hyperframes_freeform: {
+            status: 'ready',
+            project_dir: projectDir,
+            project: {
+              status: 'ready',
+              project_dir: projectDir,
+              html_video_project_path: projectDir,
+              render_mode: 'html-video',
+              scene_spec: { title: '测试', scenes: [] },
+              frame_specs: { frames: [] },
+            },
+            render: {
+              status: 'rendered',
+              output_path: path.join(projectDir, 'exports', 'output.mp4'),
+              render_versions: [{ id: 'run-1-html-video-lite', status: 'rendered' }],
+            },
+            visual_inspect: { status: 'passed', issues: [] },
+          },
+        };
+      },
+    },
+  });
+
+  await createCreativeWorkflow({ input: '做一个关闭音频字幕的测试', useResearch: false, assetIds: [] }, { rootDir, mediaRoot, services });
+  const result = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(result.success, true);
+  assert.equal(audioCalls, 0);
+  assert.equal(projectOptionsSeen.generateAudio, false);
+  assert.equal(projectOptionsSeen.generateCaptions, false);
+}
+
+async function testLegacyCreativeDefaultsSnapshotFallsBackToRealtimeMediaOptions() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-html-video');
+  let audioCalls = 0;
+  let projectOptionsSeen = null;
+  const { services } = createFakeServices({
+    services: {
+      appSettings: {
+        getCreativeDefaults: async () => ({
+          aspectRatio: '9:16',
+          targetDurationSec: 60,
+          generateAudio: false,
+          generateCaptions: false,
+        }),
+        getEffectiveSystemSettings: async () => ({ skipValidation: false }),
+      },
+    },
+    agentRuns: {
+      synthesizeDouyinRunHyperframesFreeformAudio: async () => {
+        audioCalls += 1;
+        return { success: true, status: 'done', message: '音频轨生成完成' };
+      },
+      generateDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
+        projectOptionsSeen = options.projectOptions;
+        return {
+          success: true,
+          status: 'done',
+          message: 'html-video lite 成片完成。',
+          hyperframes_freeform: {
+            status: 'ready',
+            project_dir: projectDir,
+            project: {
+              status: 'ready',
+              project_dir: projectDir,
+              html_video_project_path: projectDir,
+              render_mode: 'html-video',
+              scene_spec: { title: '测试', scenes: [] },
+              frame_specs: { frames: [] },
+            },
+            render: {
+              status: 'rendered',
+              output_path: path.join(projectDir, 'exports', 'output.mp4'),
+              render_versions: [{ id: 'run-1-html-video-lite', status: 'rendered' }],
+            },
+            visual_inspect: { status: 'passed', issues: [] },
+          },
+        };
+      },
+    },
+  });
+
+  await createCreativeWorkflow({ input: '做一个旧快照兼容测试', useResearch: false, assetIds: [] }, { rootDir, mediaRoot, services });
+  const workflowPath = getWorkflowPath(WORKFLOW_ID, rootDir);
+  const legacyRecord = readJson(workflowPath);
+  delete legacyRecord.creative_defaults_snapshot.generateAudio;
+  delete legacyRecord.creative_defaults_snapshot.generateCaptions;
+  delete legacyRecord.target.generateAudio;
+  delete legacyRecord.target.generateCaptions;
+  fs.writeFileSync(workflowPath, JSON.stringify(legacyRecord, null, 2), 'utf-8');
+
+  const result = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(result.success, true);
+  assert.equal(audioCalls, 0);
+  assert.equal(projectOptionsSeen.generateAudio, false);
+  assert.equal(projectOptionsSeen.generateCaptions, false);
 }
 
 async function testHtmlVideoExportUsesOrchestratorWithTemplateRegistry() {
@@ -1660,6 +1805,8 @@ async function run() {
   await testSourceUrlFetchFailureUsesDefaultChineseMessage();
   await testResearchRunsInBackgroundStage();
   await testHtmlVideoLiteCompletesVisibleFinalStages();
+  await testCreativeDefaultsDisableAudioAndCaptionsInWorkflow();
+  await testLegacyCreativeDefaultsSnapshotFallsBackToRealtimeMediaOptions();
   await testHtmlVideoExportUsesOrchestratorWithTemplateRegistry();
   await testFallbackProjectDoesNotSkipLegacyStages();
   await testRejectsEmptyInput();

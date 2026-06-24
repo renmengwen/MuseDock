@@ -148,6 +148,40 @@ assert.equal(frames[1].inputs.title, '数据正在变化');
 assert.equal(frames[1].inputs.section_no, '02/02');
 assert.deepEqual(frames[1].inputs.bullets, ['卡片二']);
 
+{
+  const pollutedDurationSceneSpec = {
+    title: 'TTS 清理时长优先',
+    aspect_ratio: '9:16',
+    scenes: [
+      {
+        id: 'scene_04',
+        order: 1,
+        duration: 9,
+        speech_duration_sec: 13.996,
+        actual_duration_sec: 13.996,
+        raw_duration_sec: 231.04,
+        narration_text: '他用 Claude Code 搭建了一套 Python 工具。',
+        captions: [{ start: 0, end: 13.996, text: '他用 Claude Code 搭建了一套 Python 工具。' }],
+        visual_text: { headline: 'Python 工具' },
+      },
+    ],
+  };
+  const pollutedDurationGraph = mapper.mapSceneSpecToContentGraph(pollutedDurationSceneSpec);
+  assert.equal(pollutedDurationGraph.nodes[0].durationSec, 13.996);
+  const pollutedDurationFrames = mapper.buildFramesFromGraph({
+    sceneSpec: pollutedDurationSceneSpec,
+    contentGraph: {
+      nodes: [{ id: 'scene_04', durationSec: 231.04 }],
+      edges: [],
+    },
+    templateId: 'template-a',
+    templateInputs: {},
+    templateSchema: { duration_sec: { type: 'number' } },
+  });
+  assert.equal(pollutedDurationFrames[0].duration_sec, 13.996);
+  assert.equal(pollutedDurationFrames[0].inputs.duration_sec, 13.996);
+}
+
 const objectCardInputs = mapper.buildFrameInputs({
   templateInputs: { footer_text: '默认页脚' },
   templateSchema: {

@@ -326,6 +326,24 @@ function buildInitialProject({ workflowId, runId, sceneSpec, template, templateI
   });
 }
 
+function applyMediaOptionsToProject(project, mediaOptions = {}) {
+  if (mediaOptions.generateCaptions !== false) return project;
+  for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
+    frame.generate_captions = false;
+    frame.captions = [];
+  }
+  return project;
+}
+
+function mediaOptionEnabled(key, target = {}, projectOptions = {}) {
+  const snakeKey = key === 'generateAudio' ? 'generate_audio' : 'generate_captions';
+  if (typeof projectOptions[key] === 'boolean') return projectOptions[key];
+  if (typeof projectOptions[snakeKey] === 'boolean') return projectOptions[snakeKey];
+  if (typeof target[key] === 'boolean') return target[key];
+  if (typeof target[snakeKey] === 'boolean') return target[snakeKey];
+  return true;
+}
+
 function resolveRegistry(input) {
   if (input) return input;
   return createTemplateRegistry({ rootDir: DEFAULT_ROOT_DIR });
@@ -341,7 +359,7 @@ async function generateHtmlVideo(options = {}) {
     workflowId,
     runId,
     rootDir,
-    sceneSpec = null,
+    sceneSpec: inputSceneSpec = null,
     creativeContext = {},
     target = {},
     templateRegistry,
@@ -349,7 +367,16 @@ async function generateHtmlVideo(options = {}) {
     skipValidation = false,
     onProgress = null,
     preferredTemplateId = '',
+    projectOptions = {},
   } = options;
+  const sceneSpec = inputSceneSpec
+    || objectOrEmpty(creativeContext).scene_spec
+    || objectOrEmpty(creativeContext).sceneSpec
+    || null;
+  const mediaOptions = {
+    generateAudio: mediaOptionEnabled('generateAudio', target, projectOptions),
+    generateCaptions: mediaOptionEnabled('generateCaptions', target, projectOptions),
+  };
   const registry = resolveRegistry(templateRegistry);
   const diagnostics = [];
   const model = getModel(services);
@@ -442,6 +469,11 @@ async function generateHtmlVideo(options = {}) {
     ]);
   }
   const templateRenderTarget = resolveTemplateRenderTarget(renderTarget, template);
+  const trustedTargetDurationSec = firstPositiveNumber(
+    templateRenderTarget.duration_sec,
+    templateRenderTarget.durationSec,
+    templateRenderTarget.duration,
+  );
   await report(onProgress, {
     type: 'html_video_template_selected',
     stage: 'project',
@@ -636,8 +668,10 @@ async function generateHtmlVideo(options = {}) {
       sceneSpec,
       target: templateRenderTarget,
       template,
+      mediaOptions,
     });
   }
+  project = applyMediaOptionsToProject(project, mediaOptions);
 
   const validation = await validateHtmlVideoProject({
     project,
@@ -645,6 +679,7 @@ async function generateHtmlVideo(options = {}) {
     templateRegistry: registry,
     environment: env,
     sceneSpec,
+    mediaOptions,
   });
   diagnostics.push(...validation.diagnostics);
   if (!validation.ok) {
@@ -655,65 +690,75 @@ async function generateHtmlVideo(options = {}) {
     });
   }
 
-  const existingNarrationAudio = resolveExistingNarrationAudio(creativeContext, sceneSpec);
-  if (existingNarrationAudio.reusable) {
-    const audio = existingNarrationAudio.audio;
-    project.audio = objectOrEmpty(project.audio);
-    project.audio.source = audio.source;
-    project.audio.scene_spec_hash = audio.scene_spec_hash;
-    project.audio.scene_count = audio.scene_count ?? audio.sceneCount;
-    project.audio.scene_ids = Array.isArray(audio.scene_ids) ? audio.scene_ids : [];
-    project.audio.status = audio.status || 'ready';
-    project.audio.narration_path = existingNarrationAudio.path;
-    project.audio.tts_manifest_path = audio.tts_manifest_path || audio.ttsManifestPath || null;
-  } else if (services.ttsService && sceneSpec) {
-    if (existingNarrationAudio.path) {
-      await report(onProgress, {
-        type: 'html_video_tts_regenerate_started',
-        stage: 'audio',
-        message: '检测到脚本已变化，正在按当前字幕重新生成旁白...',
-        data: { reason: existingNarrationAudio.reason },
+  if (mediaOptions.generateAudio === false) {
+    project.audio = {
+      ...(project.audio || {}),
+      status: 'skipped',
+      reason: 'disabled_by_settings',
+      narration_path: null,
+      tts_manifest_path: null,
+    };
+  } else {
+    const existingNarrationAudio = resolveExistingNarrationAudio(creativeContext, sceneSpec);
+    if (existingNarrationAudio.reusable) {
+      const audio = existingNarrationAudio.audio;
+      project.audio = objectOrEmpty(project.audio);
+      project.audio.source = audio.source;
+      project.audio.scene_spec_hash = audio.scene_spec_hash;
+      project.audio.scene_count = audio.scene_count ?? audio.sceneCount;
+      project.audio.scene_ids = Array.isArray(audio.scene_ids) ? audio.scene_ids : [];
+      project.audio.status = audio.status || 'ready';
+      project.audio.narration_path = existingNarrationAudio.path;
+      project.audio.tts_manifest_path = audio.tts_manifest_path || audio.ttsManifestPath || null;
+    } else if (services.ttsService && sceneSpec) {
+      if (existingNarrationAudio.path) {
+        await report(onProgress, {
+          type: 'html_video_tts_regenerate_started',
+          stage: 'audio',
+          message: '检测到脚本已变化，正在按当前字幕重新生成旁白...',
+          data: { reason: existingNarrationAudio.reason },
+        });
+      }
+      const tts = await services.ttsService.synthesizeSceneNarration({
+        projectDir,
+        sceneSpec,
       });
-    }
-    const tts = await services.ttsService.synthesizeSceneNarration({
-      projectDir,
-      sceneSpec,
-    });
-    if (!tts.success) {
-      return failure(tts.message || '旁白音频生成失败。', diagnostics, {
+      if (!tts.success) {
+        return failure(tts.message || '旁白音频生成失败。', diagnostics, {
+          html_video_project_path: projectDir,
+          project_dir: projectDir,
+          project,
+        });
+      }
+      const audioManifest = objectOrEmpty(tts.audio_manifest);
+      const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
+      const narrationPath = firstNonEmptyString(
+        audioManifest.combined_path,
+        audioManifest.narration_path,
+        audioManifest.narrationPath,
+        project.audio?.narration_path,
+      );
+      const manifestPath = firstNonEmptyString(
+        audioManifest.tts_manifest_path,
+        audioManifest.ttsManifestPath,
+        audioManifest.manifest_path,
+        audioManifest.manifestPath,
+      );
+      project.audio = objectOrEmpty(project.audio);
+      project.audio.source = 'scene_spec';
+      project.audio.scene_spec_hash = audioManifest.scene_spec_hash || computeSceneSpecSpeechHash(sceneSpec);
+      project.audio.scene_count = audioManifest.scene_count || scenes.length;
+      project.audio.scene_ids = audioManifest.scene_ids || scenes.map(scene => scene.id);
+      project.audio.status = audioManifest.status || 'ready';
+      project.audio.tts_manifest_path = manifestPath || (narrationPath || hasManifestSceneAudio(audioManifest) ? 'tts/audio_manifest.json' : null);
+      project.audio.narration_path = narrationPath || null;
+    } else if (existingNarrationAudio.path && sceneSpec) {
+      return failure('当前音频与字幕脚本不一致，请重新生成旁白后再渲染。', diagnostics, {
         html_video_project_path: projectDir,
         project_dir: projectDir,
         project,
       });
     }
-    const audioManifest = objectOrEmpty(tts.audio_manifest);
-    const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
-    const narrationPath = firstNonEmptyString(
-      audioManifest.combined_path,
-      audioManifest.narration_path,
-      audioManifest.narrationPath,
-      project.audio?.narration_path,
-    );
-    const manifestPath = firstNonEmptyString(
-      audioManifest.tts_manifest_path,
-      audioManifest.ttsManifestPath,
-      audioManifest.manifest_path,
-      audioManifest.manifestPath,
-    );
-    project.audio = objectOrEmpty(project.audio);
-    project.audio.source = 'scene_spec';
-    project.audio.scene_spec_hash = audioManifest.scene_spec_hash || computeSceneSpecSpeechHash(sceneSpec);
-    project.audio.scene_count = audioManifest.scene_count || scenes.length;
-    project.audio.scene_ids = audioManifest.scene_ids || scenes.map(scene => scene.id);
-    project.audio.status = audioManifest.status || 'ready';
-    project.audio.tts_manifest_path = manifestPath || (narrationPath || hasManifestSceneAudio(audioManifest) ? 'tts/audio_manifest.json' : null);
-    project.audio.narration_path = narrationPath || null;
-  } else if (existingNarrationAudio.path && sceneSpec) {
-    return failure('当前音频与字幕脚本不一致，请重新生成旁白后再渲染。', diagnostics, {
-      html_video_project_path: projectDir,
-      project_dir: projectDir,
-      project,
-    });
   }
   await projectStore.saveProject(projectDir, project);
   const rendered = await projectOrchestrator.renderHtmlVideoProject({
@@ -725,6 +770,7 @@ async function generateHtmlVideo(options = {}) {
     templateRegistry: registry,
     services,
     onProgress,
+    targetDurationSec: trustedTargetDurationSec,
   });
   diagnostics.push(...normalizeDiagnostics(rendered.diagnostics));
   if (!rendered.success) {
@@ -881,6 +927,7 @@ async function rerender(options = {}) {
 
 module.exports = {
   generateHtmlVideo,
+  generateHtmlVideoProject: generateHtmlVideo,
   generateProject: generateHtmlVideo,
   renderOrExport,
   rerender,

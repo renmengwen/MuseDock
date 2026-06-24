@@ -103,12 +103,14 @@ function hasAudioPath(audio) {
   return Boolean(getAudioPath(audio));
 }
 
-function validateSceneSpecTimelineConsistency({ sceneSpec, project, audio } = {}) {
+function validateSceneSpecTimelineConsistency({ sceneSpec, project, audio, mediaOptions = {} } = {}) {
   const diagnostics = [];
   const scenes = arrayOrEmpty(objectOrEmpty(sceneSpec).scenes);
   const frames = arrayOrEmpty(objectOrEmpty(project).frames);
   const scenesById = new Map(scenes.map(scene => [String(scene.id || ''), scene]));
   const matchedFrameCounts = new Map();
+  const checkCaptions = mediaOptions?.generateCaptions !== false;
+  const checkAudio = mediaOptions?.generateAudio !== false;
 
   if (scenes.length === 0) {
     add(diagnostics, 'scene_spec_empty', '字幕脚本为空，无法校验旁白和画面时间轴。', {
@@ -169,15 +171,17 @@ function validateSceneSpecTimelineConsistency({ sceneSpec, project, audio } = {}
       });
     }
 
-    const actualCaptions = comparableFrameCaptions(frame, scene);
-    const expectedCaptions = comparableSceneCaptions(scene, frame);
-    if (normalizeCaptions(actualCaptions) !== normalizeCaptions(expectedCaptions)) {
-      add(diagnostics, 'frame_captions_mismatch', '画面帧字幕与字幕脚本不一致，无法继续渲染。', {
-        frame_id: frame.id,
-        scene_id: sceneId,
-        expected_caption_count: expectedCaptions.length,
-        actual_caption_count: actualCaptions.length,
-      });
+    if (checkCaptions) {
+      const actualCaptions = comparableFrameCaptions(frame, scene);
+      const expectedCaptions = comparableSceneCaptions(scene, frame);
+      if (normalizeCaptions(actualCaptions) !== normalizeCaptions(expectedCaptions)) {
+        add(diagnostics, 'frame_captions_mismatch', '画面帧字幕与字幕脚本不一致，无法继续渲染。', {
+          frame_id: frame.id,
+          scene_id: sceneId,
+          expected_caption_count: expectedCaptions.length,
+          actual_caption_count: actualCaptions.length,
+        });
+      }
     }
   });
 
@@ -192,7 +196,7 @@ function validateSceneSpecTimelineConsistency({ sceneSpec, project, audio } = {}
   });
 
   const audioInput = audio || objectOrEmpty(project).audio;
-  if (audioInput && hasAudioPath(audioInput)) {
+  if (checkAudio && audioInput && hasAudioPath(audioInput)) {
     if (!audioMatchesSceneSpec(audioInput, sceneSpec)) {
       const audioRecord = objectOrEmpty(audioInput);
       add(diagnostics, 'audio_scene_spec_hash_mismatch', '当前音频与字幕脚本不一致，请重新生成旁白后再渲染。', {

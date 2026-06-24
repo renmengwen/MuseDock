@@ -14,15 +14,51 @@ function normalizeKind(kind) {
   return kind === 'data' ? 'data' : 'text';
 }
 
-function buildNode(scene) {
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return null;
+}
+
+function trustedSceneDuration(scene = {}, fallbackScene = {}, node = {}) {
+  return firstPositiveNumber(
+    scene.speech_duration_sec,
+    scene.speechDurationSec,
+    scene.duration,
+    scene.duration_sec,
+    scene.durationSec,
+    scene.actual_duration_sec,
+    scene.actualDurationSec,
+    scene.target_duration_sec,
+    scene.targetDurationSec,
+    fallbackScene.speech_duration_sec,
+    fallbackScene.speechDurationSec,
+    fallbackScene.duration,
+    fallbackScene.duration_sec,
+    fallbackScene.durationSec,
+    fallbackScene.actual_duration_sec,
+    fallbackScene.actualDurationSec,
+    fallbackScene.target_duration_sec,
+    fallbackScene.targetDurationSec,
+    node.durationSec,
+    node.duration_sec,
+    node.duration,
+    DEFAULT_FRAME_DURATION_SEC,
+  );
+}
+
+function buildNode(scene, sourceScene = scene) {
   const visualText = clone(scene.visual_text);
   const headline = visualText.headline || scene.id;
+  const durationSec = trustedSceneDuration(sourceScene, scene);
   const base = {
     id: scene.id,
     kind: normalizeKind(scene.kind),
     label: headline,
     frameIntent: scene.kind || 'text',
-    durationSec: scene.duration || DEFAULT_FRAME_DURATION_SEC,
+    durationSec,
     metadata: {
       scene_id: scene.id,
       order: scene.order,
@@ -62,7 +98,7 @@ function mapSceneSpecToContentGraph(rawSceneSpec) {
     schemaVersion: 1,
     intent: 'promo',
     synopsis: sceneSpec.title,
-    nodes: scenes.map(buildNode),
+    nodes: scenes.map((scene, index) => buildNode(scene, sortedRaw.scenes[index] || scene)),
     edges: scenes.slice(0, -1).map((scene, index) => ({
       from: scene.id,
       to: scenes[index + 1].id,
@@ -167,7 +203,7 @@ function firstMetric(visualText = {}, maxLength = 24) {
   return compactText(candidates.find(item => /[$￥¥]?\d|%/.test(displayText(item))) || visualText.headline || '', maxLength);
 }
 
-function buildFrameInputs({ templateInputs, templateSchema, scene, index, total }) {
+function buildFrameInputs({ templateInputs, templateSchema, scene, sourceScene, index, total }) {
   const visualText = scene.visual_text || {};
   const headlineSource = visualText.headline || scene.title || scene.id;
   const cards = Array.isArray(visualText.cards)
@@ -204,7 +240,7 @@ function buildFrameInputs({ templateInputs, templateSchema, scene, index, total 
     inputs.footer_text = compactText(bulletItems[0] || inputs.footer_text || '', fieldMaxLength(templateSchema, 'footer_text', 36));
   }
   if (schemaHas(templateSchema, 'duration_sec')) {
-    inputs.duration_sec = Number(scene.duration || scene.target_duration_sec || inputs.duration_sec || DEFAULT_FRAME_DURATION_SEC);
+    inputs.duration_sec = trustedSceneDuration(sourceScene || scene, scene, { durationSec: inputs.duration_sec });
   }
 
   return inputs;
@@ -230,6 +266,10 @@ function buildFramesFromGraph({ sceneSpec: rawSceneSpec, contentGraph, templateI
     const visualText = sourceScene.visual_text && typeof sourceScene.visual_text === 'object'
       ? sourceScene.visual_text
       : scene.visual_text;
+    const durationSec = trustedSceneDuration(sourceScene, scene, node);
+    const trustedNode = { ...node, durationSec };
+    if (trustedNode.duration_sec != null) trustedNode.duration_sec = durationSec;
+    if (trustedNode.duration != null) trustedNode.duration = durationSec;
     return {
       id: scene.id,
       scene_id: scene.id,
@@ -240,11 +280,12 @@ function buildFramesFromGraph({ sceneSpec: rawSceneSpec, contentGraph, templateI
       source_mode: 'template_inputs',
       html_path: null,
       preview_mp4_path: null,
-      duration_sec: Number.isFinite(node.durationSec) ? node.durationSec : (scene.duration || DEFAULT_FRAME_DURATION_SEC),
+      duration_sec: durationSec,
       inputs: buildFrameInputs({
         templateInputs,
         templateSchema,
         scene,
+        sourceScene,
         index,
         total,
       }),
@@ -253,7 +294,7 @@ function buildFramesFromGraph({ sceneSpec: rawSceneSpec, contentGraph, templateI
       metadata: {
         frame_intent: node.frameIntent || scene.kind || 'text',
         visual_text: clone(visualText),
-        graph_node: clone(node),
+        graph_node: clone(trustedNode),
         scene_snapshot: {
           id: scene.id,
           order: sourceScene.order || scene.order,

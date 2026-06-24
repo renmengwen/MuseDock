@@ -71,7 +71,7 @@ function getSceneDurationsFromContext(creativeContext = {}) {
   return scenes.map((scene, index) => ({
     id: scene?.id || scene?.scene_id || `scene_${String(index + 1).padStart(2, '0')}`,
     index: Number(scene?.index || index + 1),
-    duration: Number(scene?.duration ?? scene?.actual_duration_sec ?? scene?.duration_sec ?? 0),
+    duration: Number(scene?.speech_duration_sec ?? scene?.speechDurationSec ?? scene?.duration ?? scene?.duration_sec ?? scene?.durationSec ?? scene?.actual_duration_sec ?? scene?.actualDurationSec ?? 0),
   })).filter(scene => Number.isFinite(scene.duration) && scene.duration > 0);
 }
 
@@ -167,11 +167,13 @@ function createSceneSpecFromVoicedStoryboard(creativeContext = {}, target = {}) 
       id,
       order,
       duration: firstPositiveNumber(
-        audioScene?.actual_duration_sec,
-        audioScene?.actualDurationSec,
+        audioScene?.speech_duration_sec,
+        audioScene?.speechDurationSec,
         audioScene?.duration,
         audioScene?.duration_sec,
         audioScene?.durationSec,
+        audioScene?.actual_duration_sec,
+        audioScene?.actualDurationSec,
         scene?.duration,
         scene?.duration_sec,
         scene?.durationSec,

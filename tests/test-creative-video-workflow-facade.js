@@ -409,8 +409,10 @@ const { computeSceneSpecSpeechHash } = require('../server/services/creative-vide
           {
             id: 'scene_01',
             index: 1,
-            actual_duration_sec: 8.64,
-            captions: [{ start: 0, end: 8.64, duration: 8.64, text: '这是一段已经完成配音的旁白。' }],
+            speech_duration_sec: 13.996,
+            actual_duration_sec: 231.04,
+            raw_duration_sec: 231.04,
+            captions: [{ start: 0, end: 13.996, duration: 13.996, text: '这是一段已经完成配音的旁白。' }],
           },
         ],
       },
@@ -438,12 +440,13 @@ const { computeSceneSpecSpeechHash } = require('../server/services/creative-vide
     },
   });
   assert.equal(uncaptionedStoryboardResult.success, true);
-  assert.equal(uncaptionedSceneSpec.scenes[0].duration, 8.64);
+  assert.equal(uncaptionedSceneSpec.scenes[0].duration, 14);
+  assert.notEqual(uncaptionedSceneSpec.scenes[0].duration, 231.04);
   assert.deepEqual(uncaptionedSceneSpec.scenes[0].captions, [
     {
       id: 'cap_01',
       start: 0,
-      end: 8.64,
+      end: 14,
       text: '这是一段已经完成配音的旁白。',
     },
   ]);

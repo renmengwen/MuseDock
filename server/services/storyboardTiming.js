@@ -3,7 +3,11 @@ function roundTime(value) {
 }
 
 function getSceneDuration(sceneTts) {
-  const explicit = Number(sceneTts?.duration ?? sceneTts?.actual_duration_sec);
+  const explicit = Number(
+    sceneTts?.speech_duration_sec
+    ?? sceneTts?.duration
+    ?? sceneTts?.actual_duration_sec
+  );
   if (Number.isFinite(explicit) && explicit >= 0) return roundTime(explicit);
 
   const captions = Array.isArray(sceneTts?.captions) ? sceneTts.captions : [];

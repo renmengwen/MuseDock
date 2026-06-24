@@ -175,6 +175,96 @@ function fullSceneCaption(sceneId, text, duration) {
   assert.ok(rawCalls.some(call => call === 'render:scene_01:raw_html'));
   assert.ok(rawCalls.some(call => call === 'render:scene_02:raw_html'));
 
+  let unreasonableTimelineRenderCalls = 0;
+  const unreasonableTimelineResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000007_unreasonable_timeline',
+    runId: 'run_unreasonable_timeline',
+    rootDir,
+    sceneSpec: {
+      title: '异常时间轴',
+      aspect_ratio: '9:16',
+      scenes: [
+        {
+          id: 'scene_01',
+          duration: 300,
+          kind: 'text',
+          narration_text: '异常长旁白一',
+          captions: [{ start: 0, end: 300, text: '异常长字幕一' }],
+          visual_text: { headline: '异常时间轴一', keywords: [], cards: [] },
+        },
+        {
+          id: 'scene_02',
+          duration: 29,
+          kind: 'text',
+          narration_text: '异常长旁白二',
+          captions: [{ start: 0, end: 29, text: '异常长字幕二' }],
+          visual_text: { headline: '异常时间轴二', keywords: [], cards: [] },
+        },
+      ],
+    },
+    creativeContext: { input: { raw_text: '目标 60 秒，但内容图异常生成 329 秒。' } },
+    target: { html_video_generation_mode: 'raw_html', duration_sec: 60 },
+    templateRegistry,
+    skipValidation: true,
+    projectOptions: { generateAudio: false },
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          }
+          if (prompt.startsWith('你是 html-video 的 content graph')) {
+            return {
+              success: true,
+              text: JSON.stringify({
+                synopsis: '异常时间轴',
+                nodes: [
+                  { id: 'scene_01', kind: 'text', label: '异常时间轴一', durationSec: 300, text: '异常长字幕一' },
+                  { id: 'scene_02', kind: 'text', label: '异常时间轴二', durationSec: 29, text: '异常长字幕二' },
+                ],
+                edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence' }],
+              }),
+            };
+          }
+          const frameId = prompt.includes('当前帧：scene_02') ? 'scene_02' : 'scene_01';
+          return {
+            success: true,
+            text: `<!doctype html><html><head><style>html,body,#app{width:1080px;height:1920px;margin:0;} main{width:1080px;height:1920px;animation:fade 1s ease;} @keyframes fade{from{opacity:.2}to{opacity:1}}</style></head><body><main id="app" data-frame-id="${frameId}"><h1 data-text-key="headline">异常时间轴</h1><p data-text-key="subtitle">异常长字幕</p><section data-text-key="body">异常长旁白</section></main></body></html>`,
+          };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      frameRenderer: {
+        renderFrame: async (frame, options) => {
+          unreasonableTimelineRenderCalls += 1;
+          return {
+            success: true,
+            frame_id: frame.id,
+            output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+            diagnostics: [],
+          };
+        },
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath, strategy: 'stub' };
+        },
+        muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+      },
+      visualQaService: {
+        inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+      },
+    },
+  });
+  assert.equal(unreasonableTimelineResult.success, false);
+  assert.ok(unreasonableTimelineResult.html_video_diagnostics.some(item => item.code === 'timeline_duration_unreasonable'), JSON.stringify({
+    message: unreasonableTimelineResult.message,
+    diagnostics: unreasonableTimelineResult.html_video_diagnostics,
+  }, null, 2));
+  assert.equal(unreasonableTimelineRenderCalls, 0);
+
   const originalRenderHtmlVideoProject = projectOrchestrator.renderHtmlVideoProject;
   const progressMessages = [];
   projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
@@ -381,6 +471,137 @@ function fullSceneCaption(sceneId, text, duration) {
     projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
   }
 
+  const reportedFailureSceneSpec = {
+    title: 'TTS 长尾静音回归',
+    aspect_ratio: '9:16',
+    target_duration_sec: 20.996,
+    scenes: [
+      {
+        index: 1,
+        id: 'scene_01',
+        duration: 7,
+        kind: 'text',
+        narration_text: '第一段。',
+        captions: fullSceneCaption('scene_01', '第一段。', 7),
+        visual_text: { headline: '第一段', keywords: [], cards: [] },
+      },
+      {
+        index: 2,
+        id: 'scene_04',
+        duration: 13.996,
+        actual_duration_sec: 13.996,
+        raw_duration_sec: 231.04,
+        speech_duration_sec: 13.996,
+        tail_silence_sec: 217.544,
+        trimmed: true,
+        kind: 'text',
+        narration_text: '他用 Claude Code 搭建了一套 Python 工具。',
+        captions: fullSceneCaption('scene_04', '他用 Claude Code 搭建了一套 Python 工具。', 13.996),
+        visual_text: { headline: 'Python 工具', keywords: [], cards: [] },
+      },
+    ],
+  };
+  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
+    success: true,
+    message: 'mock render success',
+    project,
+    project_dir: projectDir,
+    html_video_project_path: projectDir,
+    output_path: path.join(projectDir, 'exports', 'output.mp4'),
+    diagnostics: [],
+  });
+  try {
+    const reportedFailureWorkflowResult = await workflow.generateHtmlVideo({
+      workflowId: '202606170000000008_reported_tts_duration',
+      runId: 'run_reported_tts_duration',
+      rootDir,
+      sceneSpec: reportedFailureSceneSpec,
+      creativeContext: { input: { raw_text: 'TTS 长尾静音不应污染 html-video 时长。' } },
+      target: { html_video_generation_mode: 'raw_html', duration_sec: 60 },
+      templateRegistry,
+      skipValidation: true,
+      services: {
+        aiTextModel: {
+          callTextModel: async ({ messages }) => {
+            const prompt = messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: 'TTS 长尾静音回归',
+                  nodes: reportedFailureSceneSpec.scenes.map(scene => ({
+                    id: scene.id,
+                    kind: 'text',
+                    label: scene.visual_text.headline,
+                    durationSec: scene.id === 'scene_04' ? 231.04 : scene.duration,
+                    text: scene.narration_text,
+                  })),
+                  edges: [{ from: 'scene_01', to: 'scene_04', kind: 'sequence' }],
+                }),
+              };
+            }
+            const scene = reportedFailureSceneSpec.scenes.find(item => prompt.includes(`当前帧：${item.id}`));
+            assert.ok(scene, 'raw html prompt should target the reported failure scenes');
+            return {
+              success: true,
+              text: `<!doctype html><html><body><main data-frame-id="${scene.id}"><h1 data-text-key="headline">${scene.visual_text.headline}</h1><p data-text-key="subtitle">${scene.narration_text}</p></main></body></html>`,
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        ttsService: {
+          synthesizeSceneNarration: async ({ sceneSpec }) => ({
+            success: true,
+            audio_manifest: {
+              source: 'scene_spec',
+              scene_spec_hash: computeSceneSpecSpeechHash(sceneSpec),
+              scene_count: sceneSpec.scenes.length,
+              scene_ids: sceneSpec.scenes.map(scene => scene.id),
+              combined_path: path.join(rootDir, 'reported-failure-clean-tts.wav'),
+              scenes: sceneSpec.scenes.map(scene => ({
+                scene_id: scene.id,
+                duration: scene.duration,
+                raw_duration_sec: scene.raw_duration_sec,
+              })),
+              status: 'ready',
+            },
+          }),
+        },
+        visualQaService: {
+          inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+        },
+      },
+    });
+
+    assert.equal(reportedFailureWorkflowResult.success, true, JSON.stringify({
+      message: reportedFailureWorkflowResult.message,
+      diagnostics: reportedFailureWorkflowResult.html_video_diagnostics,
+    }, null, 2));
+    assert.ok(reportedFailureWorkflowResult.project.frames.every(frame => frame.duration_sec < 30));
+    const reportedFailureScene01Frame = reportedFailureWorkflowResult.project.frames.find(frame => frame.scene_id === 'scene_01');
+    const reportedFailureScene04Frame = reportedFailureWorkflowResult.project.frames.find(frame => frame.scene_id === 'scene_04');
+    assert.ok(reportedFailureScene01Frame);
+    assert.ok(reportedFailureScene04Frame);
+    assert.equal(reportedFailureScene01Frame.duration_sec, 7);
+    assert.equal(reportedFailureScene04Frame.duration_sec, 13.996);
+    const reportedFailureMainTrack = reportedFailureWorkflowResult.project.timeline.tracks.find(track => track.id === 'main');
+    assert.ok(reportedFailureMainTrack);
+    assert.ok(reportedFailureMainTrack.items.every(item => item.duration_sec < 30));
+    const reportedFailureScene01Item = reportedFailureMainTrack.items.find(item => item.frame_id === 'scene_01');
+    const reportedFailureScene04Item = reportedFailureMainTrack.items.find(item => item.frame_id === 'scene_04');
+    assert.ok(reportedFailureScene01Item);
+    assert.ok(reportedFailureScene04Item);
+    assert.equal(reportedFailureScene01Item.duration_sec, 7);
+    assert.equal(reportedFailureScene04Item.duration_sec, 13.996);
+    assert.equal(reportedFailureScene04Item.start_sec, 7);
+    assert.doesNotMatch(JSON.stringify(reportedFailureWorkflowResult.project), /231\.04/);
+  } finally {
+    projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
+  }
+
   const rawMissingSceneSpecResult = await workflow.generateHtmlVideo({
     workflowId: '202606170000000005_raw_missing_scene_spec',
     runId: 'run_raw_missing_scene_spec',
@@ -476,6 +697,224 @@ function fullSceneCaption(sceneId, text, duration) {
   assert.ok(progressEvents.some(event => event.type === 'html_video_frame_html_done'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_frame_render_progress'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_export_ready'));
+
+  const originalRenderForNoCaptions = projectOrchestrator.renderHtmlVideoProject;
+  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
+    success: true,
+    message: 'mock render success',
+    project,
+    project_dir: projectDir,
+    html_video_project_path: projectDir,
+    output_path: path.join(projectDir, 'exports', 'output.mp4'),
+    diagnostics: [],
+  });
+  try {
+    const noCaptionsResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-no-captions',
+      runId: 'run-no-captions',
+      rootDir,
+      sceneSpec: {
+        title: '无字幕测试',
+        aspect_ratio: '16:9',
+        scenes: [{
+          id: 'scene_01',
+          duration: 4,
+          narration_text: '这段可以有旁白但不显示字幕。',
+          captions: [{ id: 'c1', start: 0, end: 4, text: '这段可以有旁白但不显示字幕。' }],
+          visual_text: { headline: '标题' },
+        }],
+      },
+      creativeContext: { input: { raw_text: '无字幕测试' } },
+      projectOptions: {
+        generateAudio: true,
+        generateCaptions: false,
+      },
+      templateRegistry,
+      services: {
+        aiTextModel: {
+          callTextModel: async ({ messages }) => {
+            const prompt = messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配横屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: '无字幕测试',
+                  nodes: [{ id: 'scene_01', kind: 'text', label: '标题', durationSec: 4, text: '标题' }],
+                  edges: [],
+                }),
+              };
+            }
+            return {
+              success: true,
+              text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">标题</h1><section data-text-key="body">画面</section></main></body></html>',
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      },
+    });
+
+    assert.equal(noCaptionsResult.success, true);
+    assert.equal(noCaptionsResult.project.frames[0].captions.length, 0);
+    const html = await fs.readFile(path.join(
+      noCaptionsResult.html_video_project_path,
+      noCaptionsResult.project.frames[0].html_path,
+    ), 'utf8');
+    assert.doesNotMatch(html, /data-hv-layer="captions"/);
+  } finally {
+    projectOrchestrator.renderHtmlVideoProject = originalRenderForNoCaptions;
+  }
+
+  const sceneSpecWithNarration = {
+    title: '禁用音频测试',
+    aspect_ratio: '16:9',
+    scenes: [{
+      id: 'scene_01',
+      duration: 4,
+      narration_text: '这段旁白不应该生成音频。',
+      captions: [{ id: 'c1', start: 0, end: 4, text: '这段旁白不应该生成音频。' }],
+      visual_text: { headline: '禁用音频' },
+    }],
+  };
+  const originalRenderForNoAudio = projectOrchestrator.renderHtmlVideoProject;
+  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
+    success: true,
+    message: 'mock render success',
+    project,
+    project_dir: projectDir,
+    html_video_project_path: projectDir,
+    output_path: path.join(projectDir, 'exports', 'output.mp4'),
+    diagnostics: [],
+  });
+  try {
+    let noAudioTtsCalls = 0;
+    const noAudioResult = await workflow.generateHtmlVideoProject({
+      workflowId: 'wf-no-audio',
+      runId: 'run-no-audio',
+      rootDir,
+      creativeContext: {
+        input: { raw_text: '禁用音频测试' },
+        scene_spec: sceneSpecWithNarration,
+        audio: {
+          path: 'stale.wav',
+          scene_spec_hash: 'old-hash',
+        },
+      },
+      projectOptions: {
+        generateAudio: false,
+        generateCaptions: true,
+      },
+      templateRegistry,
+      services: {
+        aiTextModel: {
+          callTextModel: async ({ messages }) => {
+            const prompt = messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配横屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: '禁用音频测试',
+                  nodes: [{ id: 'scene_01', kind: 'text', label: '禁用音频', durationSec: 4, text: '这段旁白不应该生成音频。' }],
+                  edges: [],
+                }),
+              };
+            }
+            return {
+              success: true,
+              text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">禁用音频</h1><section data-text-key="body">画面</section></main></body></html>',
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        ttsService: {
+          synthesizeSceneNarration: async () => {
+            noAudioTtsCalls += 1;
+            return { success: true };
+          },
+        },
+      },
+    });
+
+    assert.equal(noAudioResult.success, true);
+    assert.equal(noAudioTtsCalls, 0);
+    assert.equal(noAudioResult.project.audio.status, 'skipped');
+    assert.equal(noAudioResult.project.audio.reason, 'disabled_by_settings');
+  } finally {
+    projectOrchestrator.renderHtmlVideoProject = originalRenderForNoAudio;
+  }
+
+  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
+    success: true,
+    message: 'mock render success',
+    project,
+    project_dir: projectDir,
+    html_video_project_path: projectDir,
+    output_path: path.join(projectDir, 'exports', 'output.mp4'),
+    diagnostics: [],
+  });
+  try {
+    let targetMediaTtsCalls = 0;
+    const targetMediaResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-target-media-options',
+      runId: 'run-target-media-options',
+      rootDir,
+      sceneSpec: sceneSpecWithNarration,
+      creativeContext: { input: { raw_text: 'target 关闭音频和字幕' } },
+      target: {
+        html_video_generation_mode: 'raw_html',
+        generateAudio: false,
+        generateCaptions: false,
+      },
+      templateRegistry,
+      skipValidation: true,
+      services: {
+        aiTextModel: {
+          callTextModel: async ({ messages }) => {
+            const prompt = messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配横屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: 'target 关闭音频和字幕',
+                  nodes: [{ id: 'scene_01', kind: 'text', label: '禁用音频', durationSec: 4, text: '这段旁白不应该生成音频。' }],
+                  edges: [],
+                }),
+              };
+            }
+            return {
+              success: true,
+              text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">禁用音频</h1><section data-text-key="body">画面</section></main></body></html>',
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        ttsService: {
+          synthesizeSceneNarration: async () => {
+            targetMediaTtsCalls += 1;
+            return { success: true };
+          },
+        },
+      },
+    });
+
+    assert.equal(targetMediaResult.success, true);
+    assert.equal(targetMediaTtsCalls, 0);
+    assert.equal(targetMediaResult.project.audio.status, 'skipped');
+    assert.equal(targetMediaResult.project.audio.reason, 'disabled_by_settings');
+    assert.equal(targetMediaResult.project.frames[0].generate_captions, false);
+    assert.equal(targetMediaResult.project.frames[0].captions.length, 0);
+  } finally {
+    projectOrchestrator.renderHtmlVideoProject = originalRenderForNoAudio;
+  }
 
   const calls = [];
   const result = await workflow.generateHtmlVideo({

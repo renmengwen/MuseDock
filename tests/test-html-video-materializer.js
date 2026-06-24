@@ -242,6 +242,33 @@ async function createTemplate(rootDir, options = {}) {
   assert.match(rawHtml, /data-role="subtitle-caption"/);
   assert.match(rawHtml, /raw 旁白/);
 
+  const disabledCaptionProjectDir = path.join(rootDir, 'disabled-caption-project');
+  const disabledCaptionResult = await materializeProject({
+    projectDir: disabledCaptionProjectDir,
+    project: normalizeProject({
+      project_id: 'project_disabled_caption',
+      template_id: 'variable_title',
+      template_inputs: { title: '标题', subtitle: '副标题', duration_sec: 3 },
+      frames: [
+        {
+          id: 'disabled_caption_01',
+          scene_id: 'disabled_caption_01',
+          order: 1,
+          template_id: 'variable_title',
+          duration_sec: 3,
+          narration_text: '这段旁白不应该被注入字幕层。',
+          captions: [],
+          generate_captions: false,
+          inputs: { title: '标题', subtitle: '副标题', duration_sec: 3 },
+        },
+      ],
+    }),
+    templateRegistry,
+  });
+  assert.deepEqual(disabledCaptionResult.project.frames[0].captions, []);
+  const disabledCaptionHtml = await fs.readFile(path.join(disabledCaptionProjectDir, disabledCaptionResult.project.frames[0].html_path), 'utf8');
+  assert.doesNotMatch(disabledCaptionHtml, /data-hv-layer="captions"/);
+
   const rawUnmanagedProjectDir = path.join(rootDir, 'raw-unmanaged-project');
   await writeFile(
     path.join(rawUnmanagedProjectDir, 'frames/01-raw.html'),

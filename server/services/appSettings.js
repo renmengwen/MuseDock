@@ -22,6 +22,9 @@ const DEFAULT_CONFIG = {
     },
     lockTemplate: false,
     useResearch: true,
+    generateAudio: true,
+    generateCaptions: true,
+    emotionalVoice: false,
   },
   system: {
     skipValidation: false,
@@ -64,6 +67,13 @@ function normalizeCreativeDefaults(input = {}) {
     useResearch: typeof source.useResearch === 'boolean'
       ? source.useResearch
       : DEFAULT_CONFIG.creativeDefaults.useResearch,
+    generateAudio: typeof source.generateAudio === 'boolean'
+      ? source.generateAudio
+      : DEFAULT_CONFIG.creativeDefaults.generateAudio,
+    generateCaptions: typeof source.generateCaptions === 'boolean'
+      ? source.generateCaptions
+      : DEFAULT_CONFIG.creativeDefaults.generateCaptions,
+    emotionalVoice: source.emotionalVoice === true,
   };
 }
 

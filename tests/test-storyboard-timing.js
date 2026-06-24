@@ -66,5 +66,40 @@ const { buildTimedStoryboardPlan, roundTime } = require('../server/services/stor
   assert.equal(timed.phrase_captions[1].id, 'cap-2-p1');
   assert.equal(timed.phrase_captions[1].caption_index, 2);
 
+  const qualityTimed = buildTimedStoryboardPlan({
+    storyboardPlan: {
+      status: 'planned',
+      target_duration_sec: 14,
+      scenes: [
+        {
+          index: 1,
+          target_duration_sec: 9,
+          narration_text: '测试旁白。',
+          headline: '干净音频时长',
+        },
+      ],
+    },
+    sceneTts: {
+      status: 'done',
+      scenes: [
+        {
+          index: 1,
+          speech_duration_sec: 13.996,
+          duration: 231.04,
+          actual_duration_sec: 231.04,
+          captions: [
+            { index: 1, start: 0, end: 13.996, duration: 13.996, text: '测试旁白。' },
+          ],
+          phrase_captions: [],
+        },
+      ],
+    },
+  });
+
+  assert.equal(qualityTimed.status, 'timed');
+  assert.equal(qualityTimed.duration, 13.996);
+  assert.equal(qualityTimed.scenes[0].duration, 13.996);
+  assert.equal(qualityTimed.scenes[0].actual_duration_sec, 13.996);
+
   console.log('storyboard timing tests passed');
 })();

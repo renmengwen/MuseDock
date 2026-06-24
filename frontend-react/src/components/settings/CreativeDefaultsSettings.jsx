@@ -11,6 +11,9 @@ const DEFAULT_CREATIVE_DEFAULTS = {
   },
   lockTemplate: false,
   useResearch: true,
+  generateAudio: true,
+  generateCaptions: true,
+  emotionalVoice: false,
 };
 
 const SELECT_CONTROL_STYLE = {
@@ -245,6 +248,48 @@ export function CreativeDefaultsSettings({
           </span>
           <span className="switchText">{creativeDefaults.useResearch ? '已开启' : '已关闭'}</span>
           <span>联网研究默认开启</span>
+        </label>
+
+        <label className="switchControl">
+          <input
+            type="checkbox"
+            checked={creativeDefaults.generateAudio !== false}
+            disabled={disabled}
+            onChange={event => updateCreativeDefaults({ generateAudio: event.target.checked })}
+          />
+          <span className="switchTrack" aria-hidden="true">
+            <span className="switchThumb" />
+          </span>
+          <span className="switchText">{creativeDefaults.generateAudio !== false ? '已开启' : '已关闭'}</span>
+          <span>生成旁白音频</span>
+        </label>
+
+        <label className="switchControl">
+          <input
+            type="checkbox"
+            checked={creativeDefaults.emotionalVoice === true}
+            disabled={disabled || creativeDefaults.generateAudio === false}
+            onChange={event => updateCreativeDefaults({ emotionalVoice: event.target.checked })}
+          />
+          <span className="switchTrack" aria-hidden="true">
+            <span className="switchThumb" />
+          </span>
+          <span className="switchText">{creativeDefaults.emotionalVoice ? '已开启' : '已关闭'}</span>
+          <span>情绪化配音</span>
+        </label>
+
+        <label className="switchControl">
+          <input
+            type="checkbox"
+            checked={creativeDefaults.generateCaptions !== false}
+            disabled={disabled}
+            onChange={event => updateCreativeDefaults({ generateCaptions: event.target.checked })}
+          />
+          <span className="switchTrack" aria-hidden="true">
+            <span className="switchThumb" />
+          </span>
+          <span className="switchText">{creativeDefaults.generateCaptions !== false ? '已开启' : '已关闭'}</span>
+          <span>生成字幕</span>
         </label>
       </div>
     </section>

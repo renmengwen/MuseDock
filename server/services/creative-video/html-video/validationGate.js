@@ -201,6 +201,7 @@ async function validateHtmlVideoProject({
   templateRegistry,
   environment,
   sceneSpec,
+  mediaOptions = {},
   options = {},
 } = {}) {
   const input = objectOrEmpty(project);
@@ -264,6 +265,7 @@ async function validateHtmlVideoProject({
       sceneSpec,
       project: input,
       audio: input.audio,
+      mediaOptions,
     });
     diagnostics.push(...timelineConsistency.diagnostics);
   }

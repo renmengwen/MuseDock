@@ -68,6 +68,48 @@ const captionLayerCount = html => (html.match(/data-hv-layer="captions"/g) || []
 }
 
 {
+  const html = '<html><body><main>画面</main></body></html>';
+  const result = ensureCaptionLayer(html, [{ start: 0, end: 1, text: '字幕' }], {
+    generateCaptions: false,
+  });
+  assert.equal(result, html);
+}
+
+{
+  const html = [
+    '<html><body>',
+    '<main>画面</main>',
+    '<div data-hv-layer="captions" data-hv-managed="true"><span>旧字幕</span></div>',
+    '<footer>结尾</footer>',
+    '</body></html>',
+  ].join('');
+  const result = ensureCaptionLayer(html, [{ start: 0, end: 1, text: '新字幕' }], {
+    generateCaptions: false,
+  });
+  assert.doesNotMatch(result, /data-hv-layer="captions"/);
+  assert.doesNotMatch(result, /旧字幕/);
+  assert.doesNotMatch(result, /新字幕/);
+  assert.match(result, /<main>画面<\/main>/);
+  assert.match(result, /<footer>结尾<\/footer>/);
+}
+
+{
+  const html = [
+    '<html><body>',
+    '<main>画面</main>',
+    '<div data-hv-layer="captions" data-hv-managed="false">用户字幕层</div>',
+    '</body></html>',
+  ].join('');
+  const result = ensureCaptionLayer(html, [{ start: 0, end: 1, text: '新字幕' }], {
+    generateCaptions: false,
+  });
+  assert.match(result, /data-hv-layer="captions"/);
+  assert.match(result, /data-hv-managed="false"/);
+  assert.match(result, /用户字幕层/);
+  assert.doesNotMatch(result, /新字幕/);
+}
+
+{
   const html = '<html><body><div data-hv-layer="captions">已有字幕</div></body></html>';
   const next = ensureCaptionLayer(html, captions);
   assert.equal(captionLayerCount(next), 1);
