@@ -34,6 +34,10 @@ function serializeDocument(doc) {
   return `${doctype}\n${root.outerHTML}`;
 }
 
+function getLoadedFrameHtml(result) {
+  return result?.html || result?.data?.html || '';
+}
+
 function elementSelector(element) {
   if (!element) return '';
   if (element.dataset?.hvEditId) return `[data-hv-edit-id="${element.dataset.hvEditId}"]`;
@@ -169,8 +173,10 @@ export function HtmlVideoCanvasEditor({ editor }) {
   const iframeLoadTimerRef = useRef(null);
   const selectedElementRef = useRef(null);
   const editingReadyRef = useRef(false);
+  const frameLoadRequestRef = useRef(0);
   const dragRef = useRef(null);
   const [html, setHtml] = useState('');
+  const [loadedFrameId, setLoadedFrameId] = useState('');
   const [iframeKey, setIframeKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [previewError, setPreviewError] = useState('');
@@ -184,7 +190,10 @@ export function HtmlVideoCanvasEditor({ editor }) {
   const activeDraftId = frame?.active_draft_id || '';
   const disabled = editor.disabled;
 
-  const srcDoc = useMemo(() => html || '<!doctype html><html><body></body></html>', [html]);
+  const htmlReady = Boolean(html && loadedFrameId === frameId);
+  const srcDoc = useMemo(() => (
+    htmlReady ? html : '<!doctype html><html><body></body></html>'
+  ), [htmlReady, html]);
 
   useEffect(() => {
     if (!rawHtml || !html) return undefined;
@@ -203,17 +212,40 @@ export function HtmlVideoCanvasEditor({ editor }) {
   }, [editingReady]);
 
   useEffect(() => {
+    const requestId = frameLoadRequestRef.current + 1;
+    let cancelled = false;
+    frameLoadRequestRef.current = requestId;
     setHtml('');
+    setLoadedFrameId('');
     setPreviewError('');
     setEditingReady(false);
     setPlaybackState('idle');
     setElementInfo(null);
     selectedElementRef.current = null;
-    if (frameId && rawHtml) editor.loadFrameHtml(frameId);
+    if (frameId && rawHtml) {
+      Promise.resolve(editor.loadFrameHtml(frameId))
+        .then(result => {
+          if (cancelled || frameLoadRequestRef.current !== requestId) return;
+          const loadedHtml = getLoadedFrameHtml(result);
+          if (loadedHtml) {
+            setHtml(loadedHtml);
+            setLoadedFrameId(frameId);
+          }
+        })
+        .catch(() => null)
+        .finally(() => {
+          if (!cancelled && frameLoadRequestRef.current === requestId) frameLoadRequestRef.current = 0;
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
   }, [frameId, rawHtml]);
 
   useEffect(() => {
-    setHtml(editor.frameHtml || '');
+    if (!editor.frameHtml || !frameId || frameLoadRequestRef.current) return;
+    setHtml(editor.frameHtml);
+    setLoadedFrameId(frameId);
   }, [editor.frameHtml, frameId]);
 
   useEffect(() => () => {
@@ -414,6 +446,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
               <button type="button" disabled={disabled || saving || !activeDraftId} onClick={renderDraft}>渲染草稿</button>
             </div>
           </div>
+          {!htmlReady ? <p className="html-video-canvas-loading">正在加载当前镜头 HTML...</p> : null}
           <iframe
             key={iframeKey}
             ref={iframeRef}

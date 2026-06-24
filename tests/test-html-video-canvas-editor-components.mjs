@@ -19,6 +19,8 @@ assert.match(canvasEditor, /editingReadyRef/);
 assert.match(canvasEditor, /iframeKey/);
 assert.match(canvasEditor, /saving/);
 assert.match(canvasEditor, /previewError/);
+assert.match(canvasEditor, /loadedFrameId/);
+assert.match(canvasEditor, /正在加载当前镜头 HTML/);
 assert.match(canvasEditor, /onError/);
 assert.match(canvasEditor, /HV-CANVAS-INJECT-STYLE-HERE/);
 assert.match(canvasEditor, /data-hv-canvas-editor-style/);
