@@ -180,6 +180,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
   const [iframeKey, setIframeKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [previewError, setPreviewError] = useState('');
+  const [htmlLoadError, setHtmlLoadError] = useState('');
   const [editingReady, setEditingReady] = useState(false);
   const [playbackState, setPlaybackState] = useState('idle');
   const [elementInfo, setElementInfo] = useState(null);
@@ -196,7 +197,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
   ), [htmlReady, html]);
 
   useEffect(() => {
-    if (!rawHtml || !html) return undefined;
+    if (!rawHtml || !htmlReady) return undefined;
     setPreviewError('');
     if (iframeLoadTimerRef.current) clearTimeout(iframeLoadTimerRef.current);
     iframeLoadTimerRef.current = setTimeout(() => {
@@ -205,7 +206,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
     return () => {
       if (iframeLoadTimerRef.current) clearTimeout(iframeLoadTimerRef.current);
     };
-  }, [rawHtml, html, iframeKey]);
+  }, [rawHtml, htmlReady, iframeKey]);
 
   useEffect(() => {
     editingReadyRef.current = editingReady;
@@ -217,36 +218,44 @@ export function HtmlVideoCanvasEditor({ editor }) {
     frameLoadRequestRef.current = requestId;
     setHtml('');
     setLoadedFrameId('');
+    setHtmlLoadError('');
     setPreviewError('');
     setEditingReady(false);
     setPlaybackState('idle');
     setElementInfo(null);
     selectedElementRef.current = null;
     if (frameId && rawHtml) {
-      Promise.resolve(editor.loadFrameHtml(frameId))
+      Promise.resolve()
+        .then(() => editor.loadFrameHtml(frameId))
         .then(result => {
           if (cancelled || frameLoadRequestRef.current !== requestId) return;
+          if (!result) {
+            setHtmlLoadError('当前镜头 HTML 加载失败，请重试。');
+            return;
+          }
           const loadedHtml = getLoadedFrameHtml(result);
-          if (loadedHtml) {
-            setHtml(loadedHtml);
-            setLoadedFrameId(frameId);
+          if (!loadedHtml) {
+            setHtmlLoadError('当前镜头暂无可加载 HTML。');
+            return;
+          }
+          setHtml(loadedHtml);
+          setLoadedFrameId(frameId);
+        })
+        .catch(() => {
+          if (!cancelled && frameLoadRequestRef.current === requestId) {
+            setHtmlLoadError('当前镜头 HTML 加载失败，请重试。');
           }
         })
-        .catch(() => null)
         .finally(() => {
           if (!cancelled && frameLoadRequestRef.current === requestId) frameLoadRequestRef.current = 0;
         });
+    } else {
+      frameLoadRequestRef.current = 0;
     }
     return () => {
       cancelled = true;
     };
   }, [frameId, rawHtml]);
-
-  useEffect(() => {
-    if (!editor.frameHtml || !frameId || frameLoadRequestRef.current) return;
-    setHtml(editor.frameHtml);
-    setLoadedFrameId(frameId);
-  }, [editor.frameHtml, frameId]);
 
   useEffect(() => () => {
     if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
@@ -278,13 +287,12 @@ export function HtmlVideoCanvasEditor({ editor }) {
     setPreviewError('');
     setElementInfo(null);
     selectedElementRef.current = null;
-    setHtml(editor.frameHtml || '');
     setIframeKey(key => key + 1);
   }
 
   function handleIframeLoad() {
     const doc = iframeRef.current?.contentDocument;
-    if (!doc || !rawHtml) return;
+    if (!doc || !rawHtml || !htmlReady) return;
     if (iframeLoadTimerRef.current) clearTimeout(iframeLoadTimerRef.current);
     setPreviewError('');
     // HV-CANVAS-INJECT-STYLE-HERE
@@ -446,7 +454,8 @@ export function HtmlVideoCanvasEditor({ editor }) {
               <button type="button" disabled={disabled || saving || !activeDraftId} onClick={renderDraft}>渲染草稿</button>
             </div>
           </div>
-          {!htmlReady ? <p className="html-video-canvas-loading">正在加载当前镜头 HTML...</p> : null}
+          {!htmlReady && htmlLoadError ? <p className="html-video-canvas-loading">{htmlLoadError}</p> : null}
+          {!htmlReady && !htmlLoadError ? <p className="html-video-canvas-loading">正在加载当前镜头 HTML...</p> : null}
           <iframe
             key={iframeKey}
             ref={iframeRef}
