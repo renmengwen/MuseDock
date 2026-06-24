@@ -350,13 +350,30 @@ export function HtmlVideoCanvasEditor({ editor }) {
     const doc = iframeRef.current?.contentDocument;
     if (!doc || !frameId) return null;
     setSaving(true);
+    setPreviewError('');
     const label = elementInfo?.text || elementInfo?.label || '';
     try {
-      return await editor.saveFrameHtmlDraft(frameId, {
+      const result = await editor.saveFrameHtmlDraft(frameId, {
         html: serializeDocument(doc),
         mode: 'draft',
         summary: createDraftSummary(label),
       });
+      const nextProject = result?.html_video_project || result?.project || result?.data?.project || result?.data;
+      const nextFrame = Array.isArray(nextProject?.frames)
+        ? nextProject.frames.find(item => String(item.id || item.scene_id) === String(frameId))
+        : null;
+      const draftId = nextFrame?.active_draft_id || result?.draft_id || result?.draft?.id || activeDraftId;
+      if (draftId) {
+        try {
+          await editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true });
+        } catch (_) {
+          setPreviewError('草稿已保存，但渲染预览失败，请点击“渲染草稿”重试。');
+        }
+      }
+      return result;
+    } catch (_) {
+      setPreviewError('保存草稿失败，请稍后重试。');
+      return null;
     } finally {
       setSaving(false);
     }
