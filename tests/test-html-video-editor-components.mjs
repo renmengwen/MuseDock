@@ -128,7 +128,7 @@ for (const componentName of [
 
 assert.doesNotMatch(editor, /ReservedCapabilitiesPanel/, 'advanced reserved panel should not be shown by default');
 assert.ok(editor.includes('源码'), 'editor should expose a controlled Source tab');
-assert.match(editor, /useState\(['"]source['"]\)/, 'HtmlVideoProjectEditor should keep active tab state');
+assert.match(editor, /useState\(['"]canvas['"]\)/, 'HtmlVideoProjectEditor should default to the canvas tab');
 assert.ok(editor.includes('activeTab'), 'HtmlVideoProjectEditor should switch between editor tabs');
 for (const tabLabel of ['源码', '草稿', '布局检查', 'AI 修改', '字段', '导出']) {
   assert.ok(editor.includes(tabLabel), `HtmlVideoProjectEditor should expose ${tabLabel} tab`);

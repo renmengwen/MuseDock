@@ -31,6 +31,16 @@ assert.match(inspector, /当前元素/);
 assert.match(inspector, /文案/);
 
 assert.match(projectEditor, /HtmlVideoCanvasEditor/);
+assert.match(projectEditor, /useState\(['"]canvas['"]\)/);
 assert.match(projectEditor, /id: 'canvas', label: '画布'/);
+assert.ok(
+  projectEditor.indexOf("{ id: 'canvas', label: '画布' }") < projectEditor.indexOf("{ id: 'source', label: '源码' }"),
+  'canvas tab should render before source tab',
+);
+assert.match(projectEditor, /activeTab === 'canvas'[^]*<HtmlVideoCanvasEditor\s+editor=\{editor\}\s*\/>/);
+
+for (const tabLabel of ['源码', '草稿', '布局检查', 'AI 修改', '字段', '导出']) {
+  assert.ok(projectEditor.includes(tabLabel), `HtmlVideoProjectEditor should keep ${tabLabel} tab`);
+}
 
 console.log('test-html-video-canvas-editor-components passed');
