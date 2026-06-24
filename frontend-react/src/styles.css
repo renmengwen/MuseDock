@@ -1796,6 +1796,21 @@ a { color: #fe2c55; text-decoration: none; }
   font-size: 13px;
 }
 
+.html-video-canvas-toolbar button {
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: #111827;
+  color: #ffffff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.html-video-canvas-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .html-video-canvas-stage iframe {
   width: 100%;
   aspect-ratio: 16 / 9;
