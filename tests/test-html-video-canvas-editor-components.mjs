@@ -23,6 +23,8 @@ assert.match(canvasEditor, /loadedFrameId/);
 assert.match(canvasEditor, /正在加载当前镜头 HTML/);
 assert.match(canvasEditor, /htmlLoadError/);
 assert.match(canvasEditor, /当前镜头 HTML 加载失败，请重试。/);
+assert.match(canvasEditor, /重新加载 HTML/);
+assert.match(canvasEditor, /htmlReloadKey/);
 assert.doesNotMatch(canvasEditor, /setHtml\(editor\.frameHtml\);\s*setLoadedFrameId\(frameId\);/);
 assert.doesNotMatch(canvasEditor, /setHtml\(editor\.frameHtml \|\| ''\);/);
 assert.match(canvasEditor, /onError/);

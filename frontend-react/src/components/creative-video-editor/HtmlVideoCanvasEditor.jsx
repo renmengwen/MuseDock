@@ -181,6 +181,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
   const [saving, setSaving] = useState(false);
   const [previewError, setPreviewError] = useState('');
   const [htmlLoadError, setHtmlLoadError] = useState('');
+  const [htmlReloadKey, setHtmlReloadKey] = useState(0);
   const [editingReady, setEditingReady] = useState(false);
   const [playbackState, setPlaybackState] = useState('idle');
   const [elementInfo, setElementInfo] = useState(null);
@@ -255,7 +256,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
     return () => {
       cancelled = true;
     };
-  }, [frameId, rawHtml]);
+  }, [frameId, rawHtml, htmlReloadKey]);
 
   useEffect(() => () => {
     if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
@@ -288,6 +289,10 @@ export function HtmlVideoCanvasEditor({ editor }) {
     setElementInfo(null);
     selectedElementRef.current = null;
     setIframeKey(key => key + 1);
+  }
+
+  function reloadHtml() {
+    setHtmlReloadKey(key => key + 1);
   }
 
   function handleIframeLoad() {
@@ -454,7 +459,12 @@ export function HtmlVideoCanvasEditor({ editor }) {
               <button type="button" disabled={disabled || saving || !activeDraftId} onClick={renderDraft}>渲染草稿</button>
             </div>
           </div>
-          {!htmlReady && htmlLoadError ? <p className="html-video-canvas-loading">{htmlLoadError}</p> : null}
+          {!htmlReady && htmlLoadError ? (
+            <div className="html-video-canvas-loading">
+              <p>{htmlLoadError}</p>
+              <button type="button" disabled={disabled} onClick={reloadHtml}>重新加载 HTML</button>
+            </div>
+          ) : null}
           {!htmlReady && !htmlLoadError ? <p className="html-video-canvas-loading">正在加载当前镜头 HTML...</p> : null}
           <iframe
             key={iframeKey}
