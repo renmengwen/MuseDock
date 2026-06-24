@@ -197,6 +197,11 @@ export function HtmlVideoCanvasEditor({ editor }) {
     htmlReady ? html : '<!doctype html><html><body></body></html>'
   ), [htmlReady, html]);
 
+  function clearPlaybackTimer() {
+    if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
+    playbackTimerRef.current = null;
+  }
+
   useEffect(() => {
     if (!rawHtml || !htmlReady) return undefined;
     setPreviewError('');
@@ -217,6 +222,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
     const requestId = frameLoadRequestRef.current + 1;
     let cancelled = false;
     frameLoadRequestRef.current = requestId;
+    clearPlaybackTimer();
     setHtml('');
     setLoadedFrameId('');
     setHtmlLoadError('');
@@ -259,12 +265,12 @@ export function HtmlVideoCanvasEditor({ editor }) {
   }, [frameId, rawHtml, htmlReloadKey]);
 
   useEffect(() => () => {
-    if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
+    clearPlaybackTimer();
     if (iframeLoadTimerRef.current) clearTimeout(iframeLoadTimerRef.current);
   }, []);
 
   function beginPlayback() {
-    if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
+    clearPlaybackTimer();
     setEditingReady(false);
     setPlaybackState('playing');
     setElementInfo(null);
@@ -275,7 +281,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
   }
 
   function jumpToEnd() {
-    if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
+    clearPlaybackTimer();
     const win = iframeRef.current?.contentWindow;
     if (win?.document) freezeFrame(win);
     setPlaybackState('ended');
@@ -283,6 +289,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
   }
 
   function replay() {
+    clearPlaybackTimer();
     setEditingReady(false);
     setPlaybackState('idle');
     setPreviewError('');

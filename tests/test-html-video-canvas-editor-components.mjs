@@ -40,6 +40,11 @@ assert.match(canvasEditor, /absolutePositionFor/);
 assert.match(canvasEditor, /viewportSize/);
 assert.match(canvasEditor, /writeElementText/);
 assert.match(canvasEditor, /serializeDocument/);
+assert.match(canvasEditor, /function clearPlaybackTimer\(\)\s*\{\s*if \(playbackTimerRef\.current\) clearTimeout\(playbackTimerRef\.current\);\s*playbackTimerRef\.current = null;\s*\}/);
+assert.match(canvasEditor, /useEffect\(\(\) => \{\s*const requestId = frameLoadRequestRef\.current \+ 1;[^]*?clearPlaybackTimer\(\);[^]*?setEditingReady\(false\);[^]*?\}, \[frameId, rawHtml, htmlReloadKey\]\);/);
+assert.match(canvasEditor, /function beginPlayback\(\)\s*\{\s*clearPlaybackTimer\(\);/);
+assert.match(canvasEditor, /function jumpToEnd\(\)\s*\{\s*clearPlaybackTimer\(\);/);
+assert.match(canvasEditor, /function replay\(\)\s*\{\s*clearPlaybackTimer\(\);/);
 
 assert.match(inspector, /export function HtmlVideoElementInspector/);
 assert.match(inspector, /当前元素/);
