@@ -10,7 +10,7 @@ export function HtmlVideoElementInspector({
   activeDraftId,
 }) {
   return (
-    <aside className="html-video-element-inspector" aria-label="元素属性">
+    <aside className="creative-video-editor-panel html-video-element-inspector" aria-label="元素属性">
       <div className="creative-video-editor-panel-header">
         <h3>当前元素</h3>
       </div>
