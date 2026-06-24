@@ -52,10 +52,17 @@ function ensureEditId(element) {
   return id;
 }
 
+const excludedAncestorSelector = [
+  '.hv-caption-layer',
+  '.hv-caption-item',
+  '[data-hv-managed="true"]',
+  '[data-role="subtitle-caption"]',
+].join(',');
+
 function isEditableElement(element) {
   if (!element || element.nodeType !== 1) return false;
   if (element.matches(excludedSelector)) return false;
-  if (element.closest(excludedSelector)) return false;
+  if (element.closest(excludedAncestorSelector)) return false;
   return element.matches(editableSelector);
 }
 
