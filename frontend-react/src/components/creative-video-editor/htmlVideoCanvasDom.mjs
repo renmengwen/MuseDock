@@ -1,4 +1,4 @@
-export const editableParts = [
+const editableParts = [
   '[data-text-key]',
   '[data-role]',
   '.headline',
@@ -16,7 +16,7 @@ export const editableParts = [
   'li',
 ];
 
-export const excludedParts = [
+const excludedParts = [
   'html',
   'body',
   'head',

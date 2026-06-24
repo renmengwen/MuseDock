@@ -1,4 +1,5 @@
 const assert = require('assert');
+const cjs = require('../frontend-react/src/components/creative-video-editor/htmlVideoCanvasDom.js');
 const {
   clamp,
   createDraftSummary,
@@ -7,7 +8,7 @@ const {
   formatElementLabel,
   nextEditId,
   parsePx,
-} = require('../frontend-react/src/components/creative-video-editor/htmlVideoCanvasDom.js');
+} = cjs;
 
 assert.strictEqual(clamp(5, 1, 4), 4);
 assert.strictEqual(clamp(-2, 1, 4), 1);
@@ -52,4 +53,40 @@ assert.strictEqual(nextEditId(new Set(['hv_edit_001', 'hv_edit_002'])), 'hv_edit
 assert.strictEqual(createDraftSummary('太重'), '画布调整：太重');
 assert.strictEqual(createDraftSummary(''), '画布调整：元素位置');
 
-console.log('test-html-video-canvas-dom passed');
+(async () => {
+  const esm = await import('../frontend-react/src/components/creative-video-editor/htmlVideoCanvasDom.mjs');
+
+  assert.deepStrictEqual(Object.keys(esm).sort(), Object.keys(cjs).sort());
+  assert.strictEqual(esm.editableSelector, editableSelector);
+  assert.strictEqual(esm.excludedSelector, excludedSelector);
+  assert.strictEqual(esm.clamp(5, 1, 4), clamp(5, 1, 4));
+  assert.strictEqual(esm.clamp(-2, 1, 4), clamp(-2, 1, 4));
+  assert.strictEqual(esm.parsePx('3.5px'), parsePx('3.5px'));
+  assert.strictEqual(esm.parsePx('auto'), parsePx('auto'));
+
+  const textKeyInfo = {
+    textKey: 'headline',
+    role: 'title',
+    editId: 'hv_edit_001',
+    className: 'card-title',
+    tagName: 'h1',
+  };
+  const classFallbackInfo = {
+    textKey: '',
+    role: '',
+    editId: '',
+    className: 'card-title primary',
+    tagName: 'h1',
+  };
+
+  assert.strictEqual(esm.formatElementLabel(textKeyInfo), formatElementLabel(textKeyInfo));
+  assert.strictEqual(esm.formatElementLabel(classFallbackInfo), formatElementLabel(classFallbackInfo));
+  assert.strictEqual(esm.nextEditId(new Set(['hv_edit_001'])), nextEditId(new Set(['hv_edit_001'])));
+  assert.strictEqual(esm.createDraftSummary('太重'), createDraftSummary('太重'));
+  assert.strictEqual(esm.createDraftSummary(''), createDraftSummary(''));
+
+  console.log('test-html-video-canvas-dom passed');
+})().catch(error => {
+  console.error(error);
+  process.exit(1);
+});
