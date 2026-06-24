@@ -1,0 +1,36 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const frameStrip = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoFrameStrip.jsx', 'utf-8');
+const canvasEditor = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoCanvasEditor.jsx', 'utf-8');
+const inspector = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoElementInspector.jsx', 'utf-8');
+const projectEditor = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoProjectEditor.jsx', 'utf-8');
+
+assert.match(frameStrip, /export function HtmlVideoFrameStrip/);
+assert.match(frameStrip, /frames\.map/);
+assert.match(frameStrip, /onSelect/);
+assert.match(frameStrip, /selectedFrameId/);
+
+assert.match(canvasEditor, /export function HtmlVideoCanvasEditor/);
+assert.match(canvasEditor, /跳到结尾并编辑/);
+assert.match(canvasEditor, /保存为草稿/);
+assert.match(canvasEditor, /renderFramePreview/);
+assert.match(canvasEditor, /editingReadyRef/);
+assert.match(canvasEditor, /iframeKey/);
+assert.match(canvasEditor, /saving/);
+assert.match(canvasEditor, /previewError/);
+assert.match(canvasEditor, /onError/);
+assert.match(canvasEditor, /HV-CANVAS-INJECT-STYLE-HERE/);
+assert.match(canvasEditor, /absolutePositionFor/);
+assert.match(canvasEditor, /viewportSize/);
+assert.match(canvasEditor, /writeElementText/);
+assert.match(canvasEditor, /serializeDocument/);
+
+assert.match(inspector, /export function HtmlVideoElementInspector/);
+assert.match(inspector, /当前元素/);
+assert.match(inspector, /文案/);
+
+assert.match(projectEditor, /HtmlVideoCanvasEditor/);
+assert.match(projectEditor, /id: 'canvas', label: '画布'/);
+
+console.log('test-html-video-canvas-editor-components passed');

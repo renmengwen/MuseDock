@@ -4,6 +4,7 @@ import { CaptionsPanel } from './CaptionsPanel.jsx';
 import { ExportsPanel } from './ExportsPanel.jsx';
 import { FrameInputsPanel } from './FrameInputsPanel.jsx';
 import { HtmlVideoAiEditPanel } from './HtmlVideoAiEditPanel.jsx';
+import { HtmlVideoCanvasEditor } from './HtmlVideoCanvasEditor.jsx';
 import { HtmlVideoDraftPanel } from './HtmlVideoDraftPanel.jsx';
 import { HtmlVideoQualityPanel } from './HtmlVideoQualityPanel.jsx';
 import { HtmlVideoSourcePanel } from './HtmlVideoSourcePanel.jsx';
@@ -22,7 +23,7 @@ function getTemplateValues(project) {
 }
 
 export function HtmlVideoProjectEditor({ editor, onExported }) {
-  const [activeTab, setActiveTab] = useState('source');
+  const [activeTab, setActiveTab] = useState('canvas');
   const disabled = editor.disabled;
   const frames = Array.isArray(editor.frames) ? editor.frames : [];
   const selectedFrame = frames.find(frame => (
@@ -43,6 +44,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
   }
 
   const tabs = [
+    { id: 'canvas', label: '画布' },
     { id: 'source', label: '源码' },
     { id: 'draft', label: '草稿' },
     { id: 'quality', label: '布局检查' },
@@ -94,6 +96,9 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
           onSelect={editor.selectFrame}
         />
         <div className="html-video-project-main" aria-label={tabs.find(tab => tab.id === activeTab)?.label || '编辑面板'}>
+          {activeTab === 'canvas' ? (
+            <HtmlVideoCanvasEditor editor={editor} />
+          ) : null}
           {activeTab === 'source' ? (
             <HtmlVideoSourcePanel
               frame={selectedFrame}
