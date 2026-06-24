@@ -22,10 +22,16 @@ function frameDurationMs(frame) {
 }
 
 function serializeDocument(doc) {
+  const root = doc.documentElement.cloneNode(true);
+  root.querySelectorAll('[data-hv-canvas-freeze],[data-hv-canvas-editor-style]').forEach(node => node.remove());
+  root.querySelectorAll('[data-hv-canvas-selected]').forEach(node => {
+    node.removeAttribute('data-hv-canvas-selected');
+  });
+  root.removeAttribute('data-hv-canvas-selected');
   const doctype = doc.doctype
     ? `<!DOCTYPE ${doc.doctype.name}${doc.doctype.publicId ? ` PUBLIC "${doc.doctype.publicId}"` : ''}${doc.doctype.systemId ? ` "${doc.doctype.systemId}"` : ''}>`
     : '<!doctype html>';
-  return `${doctype}\n${doc.documentElement.outerHTML}`;
+  return `${doctype}\n${root.outerHTML}`;
 }
 
 function elementSelector(element) {
@@ -109,6 +115,11 @@ function absolutePositionFor(element) {
     parentWidth: parentIsBody ? viewport.width : offsetParent.clientWidth,
     parentHeight: parentIsBody ? viewport.height : offsetParent.clientHeight,
   };
+}
+
+function stylePxOrFallback(value, fallback) {
+  const normalized = String(value || '').trim();
+  return !normalized || normalized === 'auto' ? fallback : parsePx(normalized);
 }
 
 function writeElementText(element, text) {
@@ -275,8 +286,8 @@ export function HtmlVideoCanvasEditor({ editor }) {
         element: target,
         startX: event.clientX,
         startY: event.clientY,
-        startLeft: parsePx(target.style.left || computed.left || absolutePosition.left),
-        startTop: parsePx(target.style.top || computed.top || absolutePosition.top),
+        startLeft: stylePxOrFallback(target.style.left || computed.left, absolutePosition.left),
+        startTop: stylePxOrFallback(target.style.top || computed.top, absolutePosition.top),
         parentWidth: absolutePosition.parentWidth,
         parentHeight: absolutePosition.parentHeight,
       };
@@ -293,14 +304,16 @@ export function HtmlVideoCanvasEditor({ editor }) {
       drag.element.style.top = `${Math.round(nextTop)}px`;
       setElementInfo(readElementInfo(drag.element));
     }, true);
-    doc.addEventListener('pointerup', event => {
+    function endDrag(event) {
       const drag = dragRef.current;
       if (drag?.element) {
         drag.element.releasePointerCapture?.(event.pointerId);
         setElementInfo(readElementInfo(drag.element));
       }
       dragRef.current = null;
-    }, true);
+    }
+    doc.addEventListener('pointerup', endDrag, true);
+    doc.addEventListener('pointercancel', endDrag, true);
     beginPlayback();
   }
 
