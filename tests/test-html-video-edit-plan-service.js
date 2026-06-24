@@ -6,6 +6,7 @@ const {
   findEditPlan,
   acceptEditPlanDrafts,
   discardEditPlanDrafts,
+  ensureEditSessions,
 } = require('../server/services/creative-video/html-video/htmlVideoEditModeService');
 
 (async () => {
@@ -13,6 +14,7 @@ const {
     frames: [{ id: 'scene_01' }, { id: 'scene_02' }],
     edit_sessions: [],
   };
+  assert.equal(ensureEditSessions(project), project.edit_sessions);
 
   const restyle = await createEditPlan({ project, instruction: '整体换成更高级的财经杂志风，文案不变。' });
   assert.equal(restyle.success, true);
@@ -37,9 +39,21 @@ const {
   const content = await createEditPlan({ project, instruction: '把内容改成讲融资。' });
   assert.equal(content.plan.mode, 'project_iterate_content');
 
-  const missingRunner = await runEditPlan({ project, planId: restyle.plan.id });
+  const missingRunner = await runEditPlan({ project, planId: restyle.plan.id, confirm: true });
   assert.equal(missingRunner.success, false);
   assert.equal(missingRunner.code, 'EDIT_PLAN_ITERATE_SERVICE_MISSING');
+  assert.equal(findEditPlan(project, restyle.plan.id).status, 'planned');
+
+  const unconfirmed = await runEditPlan({
+    project,
+    planId: restyle.plan.id,
+    confirm: false,
+    iterateService: {
+      iterateFrameHtml: async () => ({ success: true, draft: { id: 'draft_should_not_run', html_path: 'frames/.drafts/nope.html' } }),
+    },
+  });
+  assert.equal(unconfirmed.success, false);
+  assert.equal(unconfirmed.code, 'EDIT_PLAN_CONFIRM_REQUIRED');
   assert.equal(findEditPlan(project, restyle.plan.id).status, 'planned');
 
   const modelForwardProject = {
@@ -53,6 +67,7 @@ const {
     projectDir: '/tmp/html-video-project',
     project: modelForwardProject,
     planId: modelForwardPlan.plan.id,
+    confirm: true,
     model: aiModel,
     iterateService: {
       iterateFrameHtml: async ({ model }) => {
@@ -79,6 +94,8 @@ const {
     projectDir: '/tmp/html-video-project',
     project: executedProject,
     planId: planResult.plan.id,
+    confirm: true,
+    runLayoutQa: false,
     iterateService: {
       iterateFrameHtml: async ({ frameId, instruction, mode, preserveText }) => {
         iterateCalls.push([frameId, instruction, mode, preserveText]);
@@ -102,8 +119,20 @@ const {
   assert.equal(execution.plan.status, 'drafts_ready');
   assert.deepEqual(iterateCalls.map(call => call[0]), ['scene_01', 'scene_02']);
   assert.deepEqual(iterateCalls.map(call => call[3]), [true, true]);
-  assert.deepEqual(qaCalls, ['scene_01', 'scene_02']);
+  assert.deepEqual(qaCalls, []);
   assert.deepEqual(execution.plan.generated_drafts.map(item => item.draft_id), ['draft_scene_01', 'draft_scene_02']);
+
+  const rerunAccepted = await runEditPlan({
+    projectDir: '/tmp/html-video-project',
+    project: executedProject,
+    planId: planResult.plan.id,
+    confirm: true,
+    iterateService: {
+      iterateFrameHtml: async () => ({ success: true, draft: { id: 'draft_should_not_rerun', html_path: 'frames/.drafts/nope.html' } }),
+    },
+  });
+  assert.equal(rerunAccepted.success, false);
+  assert.equal(rerunAccepted.code, 'EDIT_PLAN_ALREADY_RAN');
 
   const draftActions = [];
   const accept = await acceptEditPlanDrafts({

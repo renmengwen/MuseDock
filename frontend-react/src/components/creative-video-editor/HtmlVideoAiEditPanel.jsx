@@ -40,6 +40,7 @@ export function HtmlVideoAiEditPanel({
   const canIterateFrame = Boolean(frameId && trimmedFrameInstruction && !disabled);
   const canCreatePlan = Boolean(trimmedPlanInstruction && !disabled);
   const canUsePlan = Boolean(planId && !disabled);
+  const canRunPlan = Boolean(canUsePlan && editPlan?.status === 'planned');
 
   async function submitFrameDraft(event) {
     event.preventDefault();
@@ -122,7 +123,7 @@ export function HtmlVideoAiEditPanel({
           <div className="creative-video-editor-panel-header">
             <h4>计划草稿</h4>
             <div className="creative-video-editor-inline-actions">
-              <button type="button" disabled={!canUsePlan} onClick={() => onRunPlan?.(planId, { confirm: true })}>
+              <button type="button" disabled={!canRunPlan} onClick={() => onRunPlan?.(planId, { confirm: true })}>
                 执行全片编辑计划
               </button>
               <button type="button" disabled={!canUsePlan || editPlan.status !== 'drafts_ready'} onClick={() => onAcceptPlan?.(planId)}>接受计划草稿</button>

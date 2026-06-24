@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 import { CaptionsPanel } from './CaptionsPanel.jsx';
 import { ExportsPanel } from './ExportsPanel.jsx';
 import { FrameInputsPanel } from './FrameInputsPanel.jsx';
@@ -20,6 +22,7 @@ function getTemplateValues(project) {
 }
 
 export function HtmlVideoProjectEditor({ editor, onExported }) {
+  const [activeTab, setActiveTab] = useState('source');
   const disabled = editor.disabled;
   const frames = Array.isArray(editor.frames) ? editor.frames : [];
   const selectedFrame = frames.find(frame => (
@@ -38,6 +41,15 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
     }
     return editor.saveTemplateInputs(payload);
   }
+
+  const tabs = [
+    { id: 'source', label: '源码' },
+    { id: 'draft', label: '草稿' },
+    { id: 'quality', label: '布局检查' },
+    { id: 'ai', label: 'AI 修改' },
+    { id: 'fields', label: '字段' },
+    { id: 'export', label: '导出' },
+  ];
 
   return (
     <section className="creative-video-editor html-video-project-editor">
@@ -60,86 +72,112 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         editing={editor.status === 'editing'}
         onSubmit={editor.applyNaturalLanguageEdit}
       />
-      <HtmlVideoAiEditPanel
-        frame={selectedFrame}
-        editPlan={editor.editPlan}
-        disabled={disabled}
-        onIterateFrame={editor.iterateFrame}
-        onCreatePlan={editor.createEditPlan}
-        onRunPlan={editor.runEditPlan}
-        onAcceptPlan={editor.acceptEditPlan}
-        onDiscardPlan={editor.discardEditPlan}
-      />
-      <div className="html-video-project-layout">
+      <div className="tabs" role="tablist" aria-label="html-video 编辑面板">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            className={activeTab === tab.id ? 'active' : ''}
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="html-video-project-layout html-video-project-tab-layout">
         <ProjectFramesList
           frames={frames}
           selectedFrameId={editor.selectedFrameId}
           disabled={disabled}
           onSelect={editor.selectFrame}
         />
-        <div className="html-video-project-main" aria-label="源码">
-          <HtmlVideoSourcePanel
-            frame={selectedFrame}
-            html={editor.frameHtml}
-            disabled={disabled}
-            onLoad={editor.loadFrameHtml}
-            onSaveDraft={editor.saveFrameHtmlDraft}
-            onRenderDraft={(frameId, draftId) => editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true })}
-          />
-          <HtmlVideoDraftPanel
-            frame={selectedFrame}
-            disabled={disabled}
-            onRender={(frameId, draftId) => editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true })}
-            onAccept={editor.acceptFrameDraft}
-            onDiscard={editor.discardFrameDraft}
-          />
-          <HtmlVideoQualityPanel
-            frame={selectedFrame}
-            layoutQa={editor.layoutQa}
-            disabled={disabled}
-            onInspectFrame={editor.inspectLayout}
-            onFixFrame={(frameId) => editor.iterateFrame(frameId, {
-              mode: 'layout_fix',
-              preserve_text: true,
-              run_layout_qa: true,
-              render_preview: true,
-              instruction: '修复当前帧文字错位、越界或遮挡问题，保留现有文案和整体风格。',
-            })}
-          />
-          <FrameInputsPanel
-            frame={selectedFrame}
-            disabled={disabled}
-            onSave={patchProject}
-            onRenderPreview={editor.renderFramePreview}
-          />
-          <TemplateInputsPanel
-            schema={getTemplateSchema(editor.project)}
-            values={getTemplateValues(editor.project)}
-            disabled={disabled}
-            onSave={editor.saveTemplateInputs}
-          />
-        </div>
-        <div className="html-video-project-side">
-          <NarrationPanel
-            narration={editor.project?.narration}
-            disabled={disabled}
-            onSave={editor.saveTemplateInputs}
-            onRegenerate={editor.regenerateNarration}
-          />
-          <CaptionsPanel
-            captions={selectedFrame?.captions || []}
-            selectedFrameId={selectedFrame?.id || selectedFrame?.scene_id || ''}
-            disabled={disabled}
-            onSave={patchProject}
-          />
-          <ExportsPanel
-            exportsList={editor.exportsList}
-            disabled={disabled}
-            exporting={editor.status === 'exporting'}
-            onExport={handleExport}
-            onRefresh={editor.refreshExports}
-            getExportPlaybackUrl={editor.getExportPlaybackUrl}
-          />
+        <div className="html-video-project-main" aria-label={tabs.find(tab => tab.id === activeTab)?.label || '编辑面板'}>
+          {activeTab === 'source' ? (
+            <HtmlVideoSourcePanel
+              frame={selectedFrame}
+              html={editor.frameHtml}
+              disabled={disabled}
+              onLoad={editor.loadFrameHtml}
+              onSaveDraft={editor.saveFrameHtmlDraft}
+              onRenderDraft={(frameId, draftId) => editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true })}
+            />
+          ) : null}
+          {activeTab === 'draft' ? (
+            <HtmlVideoDraftPanel
+              frame={selectedFrame}
+              disabled={disabled}
+              onRender={(frameId, draftId) => editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true })}
+              onAccept={editor.acceptFrameDraft}
+              onDiscard={editor.discardFrameDraft}
+            />
+          ) : null}
+          {activeTab === 'quality' ? (
+            <HtmlVideoQualityPanel
+              frame={selectedFrame}
+              layoutQa={editor.layoutQa}
+              disabled={disabled}
+              onInspectFrame={editor.inspectLayout}
+              onFixFrame={(frameId) => editor.iterateFrame(frameId, {
+                mode: 'layout_fix',
+                preserve_text: true,
+                run_layout_qa: true,
+                render_preview: true,
+                instruction: '修复当前帧文字错位、越界或遮挡问题，保留现有文案和整体风格。',
+              })}
+            />
+          ) : null}
+          {activeTab === 'ai' ? (
+            <HtmlVideoAiEditPanel
+              frame={selectedFrame}
+              editPlan={editor.editPlan}
+              disabled={disabled}
+              onIterateFrame={editor.iterateFrame}
+              onCreatePlan={editor.createEditPlan}
+              onRunPlan={editor.runEditPlan}
+              onAcceptPlan={editor.acceptEditPlan}
+              onDiscardPlan={editor.discardEditPlan}
+            />
+          ) : null}
+          {activeTab === 'fields' ? (
+            <>
+              <FrameInputsPanel
+                frame={selectedFrame}
+                disabled={disabled}
+                onSave={patchProject}
+                onRenderPreview={editor.renderFramePreview}
+              />
+              <TemplateInputsPanel
+                schema={getTemplateSchema(editor.project)}
+                values={getTemplateValues(editor.project)}
+                disabled={disabled}
+                onSave={editor.saveTemplateInputs}
+              />
+              <NarrationPanel
+                narration={editor.project?.narration}
+                disabled={disabled}
+                onSave={editor.saveTemplateInputs}
+                onRegenerate={editor.regenerateNarration}
+              />
+              <CaptionsPanel
+                captions={selectedFrame?.captions || []}
+                selectedFrameId={selectedFrame?.id || selectedFrame?.scene_id || ''}
+                disabled={disabled}
+                onSave={patchProject}
+              />
+            </>
+          ) : null}
+          {activeTab === 'export' ? (
+            <ExportsPanel
+              exportsList={editor.exportsList}
+              disabled={disabled}
+              exporting={editor.status === 'exporting'}
+              onExport={handleExport}
+              onRefresh={editor.refreshExports}
+              getExportPlaybackUrl={editor.getExportPlaybackUrl}
+            />
+          ) : null}
         </div>
       </div>
     </section>

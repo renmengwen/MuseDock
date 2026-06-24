@@ -5,6 +5,9 @@ const path = require('path');
 
 const {
   getWorkflowPath,
+  runHtmlVideoProjectEditPlan,
+  acceptHtmlVideoProjectEditPlan,
+  discardHtmlVideoProjectEditPlan,
   renderHtmlVideoProject,
   exportHtmlVideoProject,
   getHtmlVideoProjectExportFile,
@@ -39,6 +42,7 @@ function createFixture() {
     template_id: 'simple',
     template_inputs: {},
     frames: [{ id: 'frame_01', scene_id: 'scene_01', template_id: 'simple', inputs: {} }],
+    edit_sessions: [{ id: 'edit_plan_0001', kind: 'edit_plan', status: 'planned' }],
     timeline: { tracks: [] },
     exports: [{ id: 'export_001', path: 'exports/output.mp4', format: 'mp4' }],
   });
@@ -114,6 +118,64 @@ function createFixture() {
   const missingExportFile = await getHtmlVideoProjectExportFile(WORKFLOW_ID, 'missing_export', { rootDir });
   assert.equal(missingExportFile.success, false);
   assert.match(missingExportFile.message, /未找到导出文件记录/);
+
+  const partialRun = await runHtmlVideoProjectEditPlan(WORKFLOW_ID, 'edit_plan_0001', { confirm: true }, {
+    rootDir,
+    htmlVideoEditModeService: {
+      runEditPlan: async ({ project }) => {
+        project.edit_sessions[0].status = 'failed';
+        project.edit_sessions[0].generated_drafts = [{ frame_id: 'frame_01', draft_id: 'draft_0001' }];
+        return {
+          success: false,
+          code: 'EDIT_PLAN_FRAME_ITERATE_FAILED',
+          plan: project.edit_sessions[0],
+          generated_drafts: project.edit_sessions[0].generated_drafts,
+          message: '编辑计划执行失败，请查看失败帧。',
+        };
+      },
+    },
+  });
+  assert.equal(partialRun.success, false);
+  assert.equal(partialRun.html_video_project.edit_sessions[0].status, 'failed');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf8')).edit_sessions[0].generated_drafts[0].draft_id, 'draft_0001');
+
+  const partialAccept = await acceptHtmlVideoProjectEditPlan(WORKFLOW_ID, 'edit_plan_0001', {}, {
+    rootDir,
+    htmlVideoEditModeService: {
+      acceptEditPlanDrafts: async ({ project }) => {
+        project.edit_sessions[0].status = 'failed';
+        project.edit_sessions[0].accepted_drafts = [{ frame_id: 'frame_01', draft_id: 'draft_0001' }];
+        return {
+          success: false,
+          code: 'DRAFT_NOT_FOUND',
+          plan: project.edit_sessions[0],
+          message: '接受编辑计划草稿失败。',
+        };
+      },
+    },
+  });
+  assert.equal(partialAccept.success, false);
+  assert.equal(partialAccept.html_video_project.edit_sessions[0].accepted_drafts[0].draft_id, 'draft_0001');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf8')).edit_sessions[0].accepted_drafts[0].draft_id, 'draft_0001');
+
+  const partialDiscard = await discardHtmlVideoProjectEditPlan(WORKFLOW_ID, 'edit_plan_0001', {}, {
+    rootDir,
+    htmlVideoEditModeService: {
+      discardEditPlanDrafts: async ({ project }) => {
+        project.edit_sessions[0].status = 'failed';
+        project.edit_sessions[0].discarded_drafts = [{ frame_id: 'frame_01', draft_id: 'draft_0001' }];
+        return {
+          success: false,
+          code: 'DRAFT_NOT_FOUND',
+          plan: project.edit_sessions[0],
+          message: '放弃编辑计划草稿失败。',
+        };
+      },
+    },
+  });
+  assert.equal(partialDiscard.success, false);
+  assert.equal(partialDiscard.html_video_project.edit_sessions[0].discarded_drafts[0].draft_id, 'draft_0001');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf8')).edit_sessions[0].discarded_drafts[0].draft_id, 'draft_0001');
 
   console.log('html-video service render mode tests passed');
 })();

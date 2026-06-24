@@ -2016,6 +2016,17 @@ async function getCreativeWorkflowHtmlVideoProject(workflowId, options = {}) {
   };
 }
 
+async function attachSavedHtmlVideoProject(result, workflowId, planId, projectDir, project) {
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, project);
+  return {
+    ...result,
+    workflow_id: workflowId,
+    plan_id: result.plan_id || planId,
+    html_video_project: saved,
+    html_video_project_path: projectDir,
+  };
+}
+
 async function patchCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
@@ -2125,11 +2136,15 @@ async function runHtmlVideoProjectEditPlan(workflowId, planId, payload = {}, opt
     project,
     planId,
     confirm: payload.confirm === true,
+    runLayoutQa: payload.run_layout_qa !== false && payload.runLayoutQa !== false,
     iterateService: options.htmlVideoIterateService || htmlVideoIterateService,
     layoutQaService: options.layoutQaService || layoutQaService,
     model: options.aiTextModel || aiTextModel,
   });
   if (!result.success) {
+    if (result.plan) {
+      return attachSavedHtmlVideoProject(result, workflowId, planId, projectDir, project);
+    }
     return {
       ...result,
       workflow_id: workflowId,
@@ -2160,6 +2175,9 @@ async function acceptHtmlVideoProjectEditPlan(workflowId, planId, payload = {}, 
     frameHtmlEditService: options.frameHtmlEditService || frameHtmlEditService,
   });
   if (!result.success) {
+    if (result.plan) {
+      return attachSavedHtmlVideoProject(result, workflowId, planId, projectDir, project);
+    }
     return {
       ...result,
       workflow_id: workflowId,
@@ -2189,6 +2207,9 @@ async function discardHtmlVideoProjectEditPlan(workflowId, planId, payload = {},
     frameHtmlEditService: options.frameHtmlEditService || frameHtmlEditService,
   });
   if (!result.success) {
+    if (result.plan) {
+      return attachSavedHtmlVideoProject(result, workflowId, planId, projectDir, project);
+    }
     return {
       ...result,
       workflow_id: workflowId,

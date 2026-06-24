@@ -128,6 +128,12 @@ for (const componentName of [
 
 assert.doesNotMatch(editor, /ReservedCapabilitiesPanel/, 'advanced reserved panel should not be shown by default');
 assert.ok(editor.includes('源码'), 'editor should expose a controlled Source tab');
+assert.match(editor, /useState\(['"]source['"]\)/, 'HtmlVideoProjectEditor should keep active tab state');
+assert.ok(editor.includes('activeTab'), 'HtmlVideoProjectEditor should switch between editor tabs');
+for (const tabLabel of ['源码', '草稿', '布局检查', 'AI 修改', '字段', '导出']) {
+  assert.ok(editor.includes(tabLabel), `HtmlVideoProjectEditor should expose ${tabLabel} tab`);
+}
+assert.match(editor, /aria-selected=\{activeTab === tab\.id\}/, 'HtmlVideoProjectEditor should mark the active tab');
 
 const sourcePanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoSourcePanel.jsx', 'utf-8');
 assert.ok(sourcePanel.includes('源码'), 'Source panel should show Chinese source title');

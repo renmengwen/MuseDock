@@ -6,13 +6,13 @@ function timestamp() {
   return new Date().toISOString();
 }
 
-function ensureSessions(project = {}) {
+function ensureEditSessions(project = {}) {
   if (!Array.isArray(project.edit_sessions)) project.edit_sessions = [];
   return project.edit_sessions;
 }
 
 function nextPlanId(project = {}) {
-  const sessions = ensureSessions(project);
+  const sessions = ensureEditSessions(project);
   return `edit_plan_${String(sessions.length + 1).padStart(4, '0')}`;
 }
 
@@ -51,7 +51,7 @@ function classifyInstruction(instruction = '', selectedFrameId = '') {
 }
 
 async function createEditPlan({ project, instruction = '', selectedFrameId = '' } = {}) {
-  const sessions = ensureSessions(project);
+  const sessions = ensureEditSessions(project);
   const classification = classifyInstruction(instruction, selectedFrameId);
   const affectedFrames = classification.scope === 'frame' && selectedFrameId
     ? [selectedFrameId]
@@ -85,7 +85,7 @@ async function createEditPlan({ project, instruction = '', selectedFrameId = '' 
 
 function findEditPlan(project = {}, planId = '') {
   const id = String(planId || '').trim();
-  return ensureSessions(project).find(session => session.kind === 'edit_plan' && session.id === id) || null;
+  return ensureEditSessions(project).find(session => session.kind === 'edit_plan' && session.id === id) || null;
 }
 
 function normalizeGeneratedDraft(result = {}, frameId = '') {
@@ -110,6 +110,8 @@ async function runEditPlan({
   projectDir = '',
   project,
   planId,
+  confirm = false,
+  runLayoutQa = true,
   iterateService,
   layoutQaService,
   model,
@@ -117,6 +119,12 @@ async function runEditPlan({
   const plan = findEditPlan(project, planId);
   if (!plan) {
     return { success: false, code: 'EDIT_PLAN_NOT_FOUND', message: '未找到编辑计划。' };
+  }
+  if (plan.requires_confirmation !== false && confirm !== true) {
+    return { success: false, code: 'EDIT_PLAN_CONFIRM_REQUIRED', message: '请先确认编辑计划后再执行。' };
+  }
+  if (plan.status !== 'planned') {
+    return { success: false, code: 'EDIT_PLAN_ALREADY_RAN', message: '该编辑计划已执行过，请重新生成计划。' };
   }
   if (!iterateService || typeof iterateService.iterateFrameHtml !== 'function') {
     return {
@@ -155,7 +163,7 @@ async function runEditPlan({
     const generatedDraft = normalizeGeneratedDraft(result, frameId);
     if (generatedDraft) plan.generated_drafts.push(generatedDraft);
 
-    if (layoutQaService && typeof layoutQaService.inspectFrameHtmlLayout === 'function' && generatedDraft?.html_path) {
+    if (runLayoutQa !== false && layoutQaService && typeof layoutQaService.inspectFrameHtmlLayout === 'function' && generatedDraft?.html_path) {
       const frame = findFrameByAnyId(project, frameId) || { id: frameId };
       const htmlPath = draftHtmlPath(projectDir, generatedDraft);
       if (htmlPath) {
@@ -216,7 +224,17 @@ async function acceptEditPlanDrafts({
       draftId: draft.draft_id,
     });
     if (!result || result.success === false) {
-      return { ...(result || { success: false, code: 'EDIT_PLAN_DRAFT_ACCEPT_FAILED', message: '接受帧源码草稿失败。' }), plan };
+      execution_errors.push({
+        frame_id: draft.frame_id,
+        draft_id: draft.draft_id,
+        code: result?.code || 'EDIT_PLAN_DRAFT_ACCEPT_FAILED',
+        message: result?.message || '接受帧源码草稿失败。',
+      });
+      plan.status = 'failed';
+      plan.execution_errors = execution_errors;
+      plan.accepted_drafts = accepted_drafts;
+      plan.updated_at = timestamp();
+      return { ...(result || { success: false, code: 'EDIT_PLAN_DRAFT_ACCEPT_FAILED', message: '接受帧源码草稿失败。' }), plan, accepted_drafts, execution_errors };
     }
     accepted_drafts.push({ frame_id: draft.frame_id, draft_id: draft.draft_id, result });
   }
@@ -258,7 +276,17 @@ async function discardEditPlanDrafts({
       draftId: draft.draft_id,
     });
     if (!result || result.success === false) {
-      return { ...(result || { success: false, code: 'EDIT_PLAN_DRAFT_DISCARD_FAILED', message: '放弃帧源码草稿失败。' }), plan };
+      execution_errors.push({
+        frame_id: draft.frame_id,
+        draft_id: draft.draft_id,
+        code: result?.code || 'EDIT_PLAN_DRAFT_DISCARD_FAILED',
+        message: result?.message || '放弃帧源码草稿失败。',
+      });
+      plan.status = 'failed';
+      plan.execution_errors = execution_errors;
+      plan.discarded_drafts = discarded_drafts;
+      plan.updated_at = timestamp();
+      return { ...(result || { success: false, code: 'EDIT_PLAN_DRAFT_DISCARD_FAILED', message: '放弃帧源码草稿失败。' }), plan, discarded_drafts, execution_errors };
     }
     discarded_drafts.push({ frame_id: draft.frame_id, draft_id: draft.draft_id, result });
   }
@@ -280,7 +308,7 @@ async function discardEditPlanDrafts({
 module.exports = {
   timestamp,
   nextPlanId,
-  ensureSessions,
+  ensureEditSessions,
   frameIds,
   classifyInstruction,
   createEditPlan,

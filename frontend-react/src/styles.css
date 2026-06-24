@@ -42,8 +42,10 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .header p { margin: 4px 0 0; font-size: 13px; opacity: .92; }
 .headerText { min-width: 0; }
 .tabs { display: flex; background: #fff; border-bottom: 1px solid #e7e9ee; }
-.tabs a { display: inline-flex; align-items: center; min-height: 46px; padding: 0 24px; color: #606774; border-bottom: 2px solid transparent; }
-.tabs a.active { color: #fe2c55; border-bottom-color: #fe2c55; font-weight: 600; }
+.tabs a,
+.tabs button { display: inline-flex; align-items: center; min-height: 46px; padding: 0 24px; color: #606774; border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: pointer; font: inherit; }
+.tabs a.active,
+.tabs button.active { color: #fe2c55; border-bottom-color: #fe2c55; font-weight: 600; }
 .subTabs { display: flex; gap: 8px; margin-bottom: 18px; }
 .subTabs a { display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border: 1px solid #d9dde5; border-radius: 8px; color: #606774; background: #fff; }
 .subTabs a.active { color: #fe2c55; border-color: #fe2c55; background: #fff5f7; font-weight: 600; }
@@ -1746,6 +1748,10 @@ a { color: #fe2c55; text-decoration: none; }
   grid-template-columns: minmax(160px, 0.75fr) minmax(280px, 1.4fr) minmax(260px, 1fr);
   gap: 12px;
   align-items: start;
+}
+
+.html-video-project-tab-layout {
+  grid-template-columns: minmax(160px, 0.45fr) minmax(320px, 1fr);
 }
 
 .html-video-project-main,
