@@ -169,8 +169,7 @@ function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, ori
   if (Number(attempt) >= 2) {
     return [
       '只输出严格 JSON，不要 Markdown。',
-      'schema: {"nodes":[{"id":"scene_01","kind":"text","label":"string","durationSec":2,"text":"string"}],"edges":[]}',
-      `scene ids: ${scenes.map(scene => scene.id).filter(Boolean).join(', ') || 'scene_01'}`,
+      'schema: {"nodes":[{"id":"scene_01","kind":"text","label":"string","durationSec":2,"text":"string"}]}',
     ].join('\n');
   }
   return [

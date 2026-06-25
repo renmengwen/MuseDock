@@ -77,7 +77,18 @@ assert.ok(retryPromptAttempt1.length < prompt.length);
 const retryPromptAttempt2 = agent.buildRetryPrompt(sceneSpec, creativeContext, { duration_sec: 8 }, prompt, 2);
 assert.match(retryPromptAttempt2, /nodes/);
 assert.match(retryPromptAttempt2, /durationSec/);
+assert.match(retryPromptAttempt2, /schema: \{"nodes":\[/);
+assert.doesNotMatch(retryPromptAttempt2, /edges/);
+assert.doesNotMatch(retryPromptAttempt2, /scene ids/);
+assert.doesNotMatch(retryPromptAttempt2, /scene_02/);
+assert.doesNotMatch(retryPromptAttempt2, /基础版价格/);
+assert.doesNotMatch(retryPromptAttempt2, /先看基础版价格/);
+assert.doesNotMatch(retryPromptAttempt2, /专业版对比/);
+assert.doesNotMatch(retryPromptAttempt2, /再看专业版/);
+assert.doesNotMatch(retryPromptAttempt2, /原始标题/);
 assert.doesNotMatch(retryPromptAttempt2, /原始正文里提到基础版 12 元/);
+assert.doesNotMatch(retryPromptAttempt2, /16:9/);
+assert.doesNotMatch(retryPromptAttempt2, /duration=8/);
 assert.ok(retryPromptAttempt2.length < retryPromptAttempt1.length);
 
 const fenced = agent.parseContentGraphResponse([
