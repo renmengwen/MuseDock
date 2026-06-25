@@ -163,6 +163,29 @@ function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target
   };
 }
 
+function hasUsableContentGraph(graph = {}) {
+  return Array.isArray(graph.nodes) && graph.nodes.length > 0;
+}
+
+function loadCheckpointContentGraph(projectDir, project = {}) {
+  const graphPath = String(project.generation_checkpoint?.stages?.content_graph?.path || '').trim();
+  if (!graphPath) return null;
+  try {
+    const absolutePath = projectStore.resolveProjectPath(projectDir, graphPath);
+    if (!fs.existsSync(absolutePath)) return null;
+    const graph = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+    return hasUsableContentGraph(graph) ? graph : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveResumeContentGraph(projectDir, project = {}) {
+  if (!project) return null;
+  if (hasUsableContentGraph(project.content_graph)) return project.content_graph;
+  return loadCheckpointContentGraph(projectDir, project);
+}
+
 function providerMissingTextDiagnostic() {
   return createDiagnostic({
     code: 'provider_missing_text',
@@ -745,96 +768,104 @@ async function generateHtmlVideo(options = {}) {
       target: templateRenderTarget,
     });
   } else {
-    await report(onProgress, {
-      type: 'html_video_graph_started',
-      stage: 'project',
-      sub_stage: 'content_graph',
-      message: '正在生成 html-video 内容图...',
-      data: {},
-    });
-    const graphResult = await generateContentGraphWithRetry({
-      model,
-      sceneSpec,
-      creativeContext,
-      target: templateRenderTarget,
-      onProgress,
-      project,
-      projectDir,
-    });
-    if (!graphResult.success) {
-      const graphDiagnostics = normalizeDiagnostics(graphResult.diagnostics, {
-        code: 'content_graph_failed',
-        stage: 'ai-content-graph',
-        sub_stage: 'content_graph',
-        user_message: graphResult.message || 'content graph 生成失败。',
-        retryable: true,
-        repair_action: 'retry_content_graph',
-      });
+    let contentGraph = resolveResumeContentGraph(projectDir, resumeProject);
+    if (contentGraph) {
       project = await projectStore.writeProjectJson(projectDir, current => {
+        current.content_graph = contentGraph;
+        return current;
+      });
+    } else {
+      await report(onProgress, {
+        type: 'html_video_graph_started',
+        stage: 'project',
+        sub_stage: 'content_graph',
+        message: '正在生成 html-video 内容图...',
+        data: {},
+      });
+      const graphResult = await generateContentGraphWithRetry({
+        model,
+        sceneSpec,
+        creativeContext,
+        target: templateRenderTarget,
+        onProgress,
+        project,
+        projectDir,
+      });
+      if (!graphResult.success) {
+        const graphDiagnostics = normalizeDiagnostics(graphResult.diagnostics, {
+          code: 'content_graph_failed',
+          stage: 'ai-content-graph',
+          sub_stage: 'content_graph',
+          user_message: graphResult.message || 'content graph 生成失败。',
+          retryable: true,
+          repair_action: 'retry_content_graph',
+        });
+        project = await projectStore.writeProjectJson(projectDir, current => {
+          markCheckpointStage(current, 'content_graph', {
+            status: 'failed',
+            input_hash: graphResult.inputHash || '',
+            diagnostic_code: graphDiagnostics[0]?.code || 'content_graph_failed',
+          });
+          return current;
+        });
+        return failure(graphResult.message || 'content graph 生成失败。', graphDiagnostics, {
+          html_video_project_path: projectDir,
+          project_dir: projectDir,
+          project,
+        });
+      }
+      diagnostics.push(...normalizeDiagnostics(graphResult.diagnostics));
+      contentGraph = graphResult.contentGraph;
+      if (sceneSpec) {
+        const graphBinding = validateGraphMatchesSceneSpec(contentGraph, sceneSpec);
+        if (!graphBinding.ok) {
+          const message = '画面帧与字幕脚本不一致，已回退为字幕脚本生成画面结构。';
+          diagnostics.push(createDiagnostic({
+            code: 'content_graph_scene_spec_mismatch',
+            stage: 'ai-content-graph',
+            sub_stage: 'content_graph',
+            user_message: message,
+            details: graphBinding,
+            severity: 'warning',
+            fallback_allowed: true,
+          }));
+          await report(onProgress, {
+            type: 'html_video_graph_scene_spec_mismatch',
+            stage: 'project',
+            sub_stage: 'content_graph',
+            message,
+            data: graphBinding,
+          });
+          contentGraph = mapSceneSpecToContentGraph(sceneSpec);
+        }
+      }
+      await report(onProgress, {
+        type: 'html_video_graph_done',
+        stage: 'project',
+        sub_stage: 'content_graph',
+        message: 'html-video 内容图已生成。',
+        data: {
+          node_count: contentGraph.nodes?.length || 0,
+          edge_count: contentGraph.edges?.length || 0,
+        },
+      });
+      const contentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
+      project = await projectStore.writeProjectJson(projectDir, current => {
+        current.content_graph = contentGraph;
+        current.generation_checkpoint.target = {
+          duration_sec: firstPositiveNumber(templateRenderTarget.duration_sec, templateRenderTarget.durationSec, templateRenderTarget.duration),
+          aspect_ratio: templateRenderTarget.aspect_ratio || templateRenderTarget.aspectRatio || '',
+        };
         markCheckpointStage(current, 'content_graph', {
-          status: 'failed',
+          status: 'done',
+          path: contentGraphPath,
           input_hash: graphResult.inputHash || '',
-          diagnostic_code: graphDiagnostics[0]?.code || 'content_graph_failed',
+          output_hash: sha256(JSON.stringify(contentGraph)),
+          diagnostic_code: '',
         });
         return current;
       });
-      return failure(graphResult.message || 'content graph 生成失败。', graphDiagnostics, {
-        html_video_project_path: projectDir,
-        project_dir: projectDir,
-        project,
-      });
     }
-    diagnostics.push(...normalizeDiagnostics(graphResult.diagnostics));
-    let contentGraph = graphResult.contentGraph;
-    if (sceneSpec) {
-      const graphBinding = validateGraphMatchesSceneSpec(contentGraph, sceneSpec);
-      if (!graphBinding.ok) {
-        const message = '画面帧与字幕脚本不一致，已回退为字幕脚本生成画面结构。';
-        diagnostics.push(createDiagnostic({
-          code: 'content_graph_scene_spec_mismatch',
-          stage: 'ai-content-graph',
-          sub_stage: 'content_graph',
-          user_message: message,
-          details: graphBinding,
-          severity: 'warning',
-          fallback_allowed: true,
-        }));
-        await report(onProgress, {
-          type: 'html_video_graph_scene_spec_mismatch',
-          stage: 'project',
-          sub_stage: 'content_graph',
-          message,
-          data: graphBinding,
-        });
-        contentGraph = mapSceneSpecToContentGraph(sceneSpec);
-      }
-    }
-    await report(onProgress, {
-      type: 'html_video_graph_done',
-      stage: 'project',
-      sub_stage: 'content_graph',
-      message: 'html-video 内容图已生成。',
-      data: {
-        node_count: contentGraph.nodes?.length || 0,
-        edge_count: contentGraph.edges?.length || 0,
-      },
-    });
-    const contentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
-    project = await projectStore.writeProjectJson(projectDir, current => {
-      current.content_graph = contentGraph;
-      current.generation_checkpoint.target = {
-        duration_sec: firstPositiveNumber(templateRenderTarget.duration_sec, templateRenderTarget.durationSec, templateRenderTarget.duration),
-        aspect_ratio: templateRenderTarget.aspect_ratio || templateRenderTarget.aspectRatio || '',
-      };
-      markCheckpointStage(current, 'content_graph', {
-        status: 'done',
-        path: contentGraphPath,
-        input_hash: graphResult.inputHash || '',
-        output_hash: sha256(JSON.stringify(contentGraph)),
-        diagnostic_code: '',
-      });
-      return current;
-    });
     const nodes = contentGraph.nodes || [];
     const scenes = new Map((Array.isArray(sceneSpec?.scenes) ? sceneSpec.scenes : []).map(scene => [scene.id, scene]));
     let visualStyleReferenceHtml = '';

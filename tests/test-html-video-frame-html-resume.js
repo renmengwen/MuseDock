@@ -9,7 +9,7 @@ const frameFallbackBuilder = require('../server/services/creative-video/html-vid
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
-const { createEmptyProject, markCheckpointFrame } = require('../server/services/creative-video/html-video/projectSchema');
+const { createEmptyProject, markCheckpointStage, markCheckpointFrame } = require('../server/services/creative-video/html-video/projectSchema');
 
 async function writeFile(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -59,6 +59,21 @@ function sceneSpec() {
   };
 }
 
+function contentGraph(label = '三帧恢复') {
+  return {
+    synopsis: label,
+    nodes: [
+      { id: 'scene_01', kind: 'text', text: '第一幕' },
+      { id: 'scene_02', kind: 'text', text: '第二幕' },
+      { id: 'scene_03', kind: 'text', text: '第三幕' },
+    ],
+    edges: [
+      { from: 'scene_01', to: 'scene_02', kind: 'sequence' },
+      { from: 'scene_02', to: 'scene_03', kind: 'sequence' },
+    ],
+  };
+}
+
 async function setupProject(rootDir, workflowId, runId) {
   const templateRoot = path.join(rootDir, 'templates');
   await createTemplate(templateRoot);
@@ -68,7 +83,19 @@ async function setupProject(rootDir, workflowId, runId) {
   const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
   await writeFile(path.join(projectDir, 'frames/01-scene_01.html'), validHtml('scene_01', '已完成一'));
   await writeFile(path.join(projectDir, 'frames/02-scene_02.html'), validHtml('scene_02', '已完成二'));
-  const project = createEmptyProject({ projectId: `${workflowId}_${runId}`, workflowId, runId });
+  const graph = contentGraph();
+  const project = createEmptyProject({
+    projectId: `${workflowId}_${runId}`,
+    workflowId,
+    runId,
+    contentGraph: graph,
+  });
+  await writeFile(path.join(projectDir, 'content-graph.json'), `${JSON.stringify(graph, null, 2)}\n`);
+  markCheckpointStage(project, 'content_graph', {
+    status: 'done',
+    path: 'content-graph.json',
+    output_hash: 'graph-out',
+  });
   markCheckpointFrame(project, 'frame_html', 'scene_01', {
     status: 'done',
     html_path: 'frames/01-scene_01.html',
@@ -145,21 +172,7 @@ async function main() {
               return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
             }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
-              return {
-                success: true,
-                text: JSON.stringify({
-                  synopsis: '三帧恢复',
-                  nodes: [
-                    { id: 'scene_01', kind: 'text', text: '第一幕' },
-                    { id: 'scene_02', kind: 'text', text: '第二幕' },
-                    { id: 'scene_03', kind: 'text', text: '第三幕' },
-                  ],
-                  edges: [
-                    { from: 'scene_01', to: 'scene_02', kind: 'sequence' },
-                    { from: 'scene_02', to: 'scene_03', kind: 'sequence' },
-                  ],
-                }),
-              };
+              throw new Error('resume 不应重新生成 content graph。');
             }
             throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
           },
@@ -209,6 +222,7 @@ async function main() {
       const runId = 'run_fallback';
       const { templateRegistry, projectDir } = await setupProject(rootDir, workflowId, runId);
       const calls = [];
+      let contentGraphCalls = 0;
       const fallbackCalls = [];
       frameHtmlAgent.generateFrameHtml = async (args) => {
         calls.push(args);
@@ -243,21 +257,8 @@ async function main() {
               return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
             }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
-              return {
-                success: true,
-                text: JSON.stringify({
-                  synopsis: '三帧 fallback',
-                  nodes: [
-                    { id: 'scene_01', kind: 'text', text: '第一幕' },
-                    { id: 'scene_02', kind: 'text', text: '第二幕' },
-                    { id: 'scene_03', kind: 'text', text: '第三幕' },
-                  ],
-                  edges: [
-                    { from: 'scene_01', to: 'scene_02', kind: 'sequence' },
-                    { from: 'scene_02', to: 'scene_03', kind: 'sequence' },
-                  ],
-                }),
-              };
+              contentGraphCalls += 1;
+              throw new Error('resume fallback 不应重新生成 content graph。');
             }
             throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
           },
@@ -265,6 +266,7 @@ async function main() {
       });
 
       assert.equal(result.success, true);
+      assert.equal(contentGraphCalls, 0);
       assert.equal(calls.length, 2);
       assert.equal(calls[0].node.id, 'scene_03');
       assert.equal(calls[0].attempt, 1);
