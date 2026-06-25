@@ -411,7 +411,9 @@ async function generateFrameHtml({
       validationMessage: validation.message,
     }), callOptions);
     if (!retry.success) {
-      return frameFailure(retry.code || 'frame_html_invalid', retry.message || '单帧 HTML 生成失败。', promptArgs);
+      return frameFailure('frame_html_invalid', retry.message || '单帧 HTML 生成失败。', promptArgs, {
+        diagnostics: [validation.message, retry.message].filter(Boolean),
+      });
     }
     const retryExtracted = extractHtmlDocument(retry.text);
     if (!retryExtracted.success) {
@@ -428,7 +430,9 @@ async function generateFrameHtml({
 
   const retry = await callModel(model, buildRetryPrompt(promptArgs), callOptions);
   if (!retry.success) {
-    return frameFailure(retry.code || 'frame_html_invalid', retry.message || '单帧 HTML 生成失败。', promptArgs);
+    return frameFailure('frame_html_invalid', retry.message || '单帧 HTML 生成失败。', promptArgs, {
+      diagnostics: [firstExtracted.message, retry.message].filter(Boolean),
+    });
   }
   const retryExtracted = extractHtmlDocument(retry.text);
   if (retryExtracted.success) {

@@ -270,7 +270,7 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   });
   assert.equal(retryBlankResult.success, false);
   assert.equal(retryBlankCalls, 2);
-  assert.equal(retryBlankResult.diagnostics[0].code, 'provider_missing_text');
+  assert.equal(retryBlankResult.diagnostics[0].code, 'frame_html_invalid');
   assert.equal(retryBlankResult.diagnostics[0].sub_stage, 'frame_html');
   assert.equal(retryBlankResult.diagnostics[0].frame_id, 'scene_01');
   assert.equal(retryBlankResult.diagnostics[0].retryable, true);
