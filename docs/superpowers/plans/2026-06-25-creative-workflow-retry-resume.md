@@ -399,6 +399,7 @@ node tests/test-html-video-scene-spec-mapper.js
 - [x] 修改 `htmlVideoWorkflow.js` frame loop：读取 `generation_checkpoint.stages.frame_html.frames[scene_id]`，已 done 且 HTML 文件存在并通过基础校验时复用。
 - [x] 失败帧只丢弃当前 `frames:<scene_id>` 和后续 render/export，不删除其它 frame HTML。
 - [x] 运行本 Task 验收命令。
+- [x] Task 4 closure audit、spec compliance review、code quality review 均通过；补齐 content graph 重新生成清理与 diagnostic code 优先级回归测试。
 
 **需要新增/修改的函数签名:**
 

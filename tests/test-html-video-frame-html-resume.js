@@ -776,7 +776,61 @@ async function main() {
 
       assert.equal(result.success, true);
       assert.equal(contentGraphCalls, 1);
-      assert.deepEqual(calls.map(item => item.node.id), ['scene_03']);
+      assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_02', 'scene_03']);
+    }
+
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-invalid-message-'));
+      const workflowId = '202606260000000014_invalid_message';
+      const runId = 'run_invalid_message';
+      const { templateRegistry, projectDir } = await setupProject(rootDir, workflowId, runId);
+      const calls = [];
+      frameHtmlAgent.generateFrameHtml = async (args) => {
+        calls.push(args);
+        return {
+          success: false,
+          message: '返回结果缺少文本内容，但 HTML 结构校验失败。',
+          diagnostics: [{
+            code: 'frame_html_invalid',
+            stage: 'ai-frame-html',
+            sub_stage: 'frame_html',
+            frame_id: args.node.id,
+            user_message: '单帧 HTML 结构校验失败。',
+            retryable: true,
+            repair_action: 'retry_frame_html',
+          }],
+        };
+      };
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        templateRegistry,
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              throw new Error('诊断优先级测试不应重新生成 content graph。');
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+
+      assert.equal(result.success, false);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].node.id, 'scene_03');
+      assert.equal(result.diagnostics[0].code, 'frame_html_invalid');
+      assert.equal(result.diagnostics[0].sub_stage, 'frame_html');
+      assert.equal(result.diagnostics[0].frame_id, 'scene_03');
+      assert.equal(result.diagnostics[0].retryable, true);
+      assert.equal(result.diagnostics[0].repair_action, 'retry_frame_html');
+      const project = await projectStore.loadProject(projectDir);
+      assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_03.diagnostic_code, 'frame_html_invalid');
     }
 
     {

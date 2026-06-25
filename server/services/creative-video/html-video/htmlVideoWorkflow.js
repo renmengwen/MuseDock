@@ -141,9 +141,20 @@ function isProviderMissingText(message) {
   return /返回结果缺少文本内容|流式返回结果缺少文本内容/.test(String(message || ''));
 }
 
+function firstExplicitDiagnosticCode(diagnostics) {
+  if (!Array.isArray(diagnostics)) return '';
+  for (const item of diagnostics) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const code = String(item.code || '').trim().replace(/-/g, '_');
+    if (code) return code;
+  }
+  return '';
+}
+
 function isFrameProviderMissingText(result = {}) {
-  return isProviderMissingText(result.message)
-    || normalizeDiagnostics(result.diagnostics).some(item => item.code === 'provider_missing_text');
+  const diagnosticCode = firstExplicitDiagnosticCode(result.diagnostics);
+  if (diagnosticCode) return diagnosticCode === 'provider_missing_text';
+  return isProviderMissingText(result.message);
 }
 
 function frameFallbackDiagnostic(frameId) {
@@ -910,6 +921,7 @@ async function generateHtmlVideo(options = {}) {
   } else {
     const resumeAllowed = resumeArtifactsMatch(resumeProject || {}, sceneSpec, template);
     let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec, template);
+    const reusedContentGraph = Boolean(contentGraph);
     if (contentGraph) {
       project = await projectStore.writeProjectJson(projectDir, current => {
         current.template_id = template.id || current.template_id;
@@ -994,7 +1006,7 @@ async function generateHtmlVideo(options = {}) {
       });
       const contentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
       project = await projectStore.writeProjectJson(projectDir, current => {
-        if (!resumeAllowed) invalidateFrameHtmlResumeState(current);
+        if (!reusedContentGraph) invalidateFrameHtmlResumeState(current);
         current.template_id = template.id || current.template_id;
         current.content_graph = contentGraph;
         current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
@@ -1123,8 +1135,9 @@ async function generateHtmlVideo(options = {}) {
         }
       }
       if (!htmlResult.success) {
-        const diagnosticCode = isProviderMissingText(htmlResult.message) ? 'provider_missing_text' : 'frame_html_invalid';
-        const rawDiagnostics = diagnosticCode === 'provider_missing_text'
+        const explicitDiagnosticCode = firstExplicitDiagnosticCode(htmlResult.diagnostics);
+        const diagnosticCode = explicitDiagnosticCode || (isProviderMissingText(htmlResult.message) ? 'provider_missing_text' : 'frame_html_invalid');
+        const rawDiagnostics = diagnosticCode === 'provider_missing_text' && !explicitDiagnosticCode
           ? (Array.isArray(htmlResult.diagnostics) ? htmlResult.diagnostics : []).map(item => ({
             ...objectOrEmpty(item),
             code: 'provider_missing_text',
