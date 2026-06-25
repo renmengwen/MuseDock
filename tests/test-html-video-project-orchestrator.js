@@ -222,5 +222,421 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     assert.equal(project.timeline.tracks[0].items[1].duration_sec, 3.2);
   }
 
+  {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-render-'));
+    let renderCalls = 0;
+    let composeCalls = 0;
+    const project = {
+      project_id: 'render-subset',
+      template_id: 'raw-html',
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
+      frames: [
+        { id: 'scene_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
+        { id: 'scene_02', scene_id: 'scene_02', source_mode: 'raw_html', html_path: 'frames/scene_02.html', duration_sec: 2 },
+      ],
+      timeline: {
+        tracks: [{
+          id: 'main',
+          type: 'video',
+          items: [
+            { frame_id: 'scene_01', duration_sec: 2 },
+            { frame_id: 'scene_02', duration_sec: 2 },
+          ],
+        }],
+      },
+      audio: { status: 'skipped', reason: 'disabled_by_settings' },
+    };
+
+    const result = await projectOrchestrator.renderHtmlVideoFrames({
+      project,
+      projectDir,
+      frameIds: ['scene_02'],
+      services: {
+        materializer: {
+          materializeProject: async ({ project }) => ({ project, diagnostics: [] }),
+        },
+        frameRenderer: {
+          renderFrame: async frame => {
+            renderCalls += 1;
+            assert.equal(frame.id, 'scene_02');
+            return {
+              success: true,
+              output_path: path.join(projectDir, 'frames', 'scene_02.mp4'),
+              output_hash: 'scene_02-hash',
+              meta: { encoding: 'h264' },
+              diagnostics: [],
+            };
+          },
+        },
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async () => {
+            composeCalls += 1;
+            throw new Error('renderHtmlVideoFrames 不应进入合成。');
+          },
+        },
+      },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(renderCalls, 1);
+    assert.equal(composeCalls, 0);
+    assert.equal(result.rendered_frames.length, 1);
+    assert.equal(result.rendered_frames[0].frame_id, 'scene_02');
+    assert.equal(result.project.generation_checkpoint.stages.render.frames.scene_02.status, 'done');
+    assert.equal(result.project.generation_checkpoint.stages.render.frames.scene_02.diagnostic_code, '');
+    assert.equal(Object.hasOwn(result.project.generation_checkpoint.stages.render.frames, 'scene_01'), false);
+  }
+
+  {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-render-scene-key-'));
+    let renderCalls = 0;
+    const project = {
+      project_id: 'render-scene-key',
+      template_id: 'raw-html',
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 2 },
+      frames: [
+        { id: 'frame_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
+      ],
+      timeline: { tracks: [{ id: 'main', type: 'video', items: [{ frame_id: 'frame_01', scene_id: 'scene_01', duration_sec: 2 }] }] },
+      audio: { status: 'skipped', reason: 'disabled_by_settings' },
+    };
+
+    const rendered = await projectOrchestrator.renderHtmlVideoFrames({
+      project,
+      projectDir,
+      frameIds: ['scene_01'],
+      services: {
+        frameRenderer: {
+          renderFrame: async frame => {
+            renderCalls += 1;
+            return {
+              success: true,
+              output_path: path.join(projectDir, 'frames', `${frame.id}.mp4`),
+              output_hash: 'frame_01-hash',
+              diagnostics: [],
+            };
+          },
+        },
+      },
+    });
+
+    assert.equal(rendered.success, true);
+    assert.equal(renderCalls, 1);
+    assert.equal(rendered.project.generation_checkpoint.stages.render.frames.scene_01.status, 'done');
+    assert.equal(Object.hasOwn(rendered.project.generation_checkpoint.stages.render.frames, 'frame_01'), false);
+    const composed = await projectOrchestrator.composeHtmlVideoProject({
+      projectDir,
+      project: rendered.project,
+      services: {
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async (frames, outputPath) => {
+            assert.equal(frames.length, 1);
+            assert.equal(frames[0].frame_id, 'frame_01');
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, 'mp4');
+            return { success: true, output_path: outputPath };
+          },
+          verifyDurationWithFfprobe: async () => ({ success: true, duration_sec: 2, expected_duration_sec: 2 }),
+        },
+      },
+    });
+    assert.equal(composed.success, true);
+
+    renderCalls = 0;
+    const aliasResult = await projectOrchestrator.renderHtmlVideoFrames({
+      project,
+      projectDir,
+      frameIds: ['frame_01', 'scene_01'],
+      services: {
+        frameRenderer: {
+          renderFrame: async frame => {
+            renderCalls += 1;
+            assert.equal(frame.id, 'frame_01');
+            return {
+              success: true,
+              output_path: path.join(projectDir, 'frames', `${frame.id}-alias.mp4`),
+              output_hash: 'frame_01-alias-hash',
+              diagnostics: [],
+            };
+          },
+        },
+      },
+    });
+    assert.equal(aliasResult.success, true);
+    assert.equal(renderCalls, 1);
+  }
+
+  {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-render-failure-'));
+    let renderCalls = 0;
+    const project = {
+      project_id: 'render-failure',
+      template_id: 'raw-html',
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
+      frames: [
+        { id: 'scene_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
+        { id: 'scene_02', scene_id: 'scene_02', source_mode: 'raw_html', html_path: 'frames/scene_02.html', duration_sec: 2 },
+      ],
+      timeline: {
+        tracks: [{
+          id: 'main',
+          type: 'video',
+          items: [
+            { frame_id: 'scene_01', duration_sec: 2 },
+            { frame_id: 'scene_02', duration_sec: 2 },
+          ],
+        }],
+      },
+      audio: { status: 'skipped', reason: 'disabled_by_settings' },
+    };
+
+    const result = await projectOrchestrator.renderHtmlVideoFrames({
+      project,
+      projectDir,
+      frameIds: ['scene_02'],
+      services: {
+        materializer: {
+          materializeProject: async ({ project }) => ({ project, diagnostics: [] }),
+        },
+        frameRenderer: {
+          renderFrame: async () => {
+            renderCalls += 1;
+            return {
+              success: false,
+              message: '单帧渲染失败。',
+              output_path: path.join(projectDir, 'frames', 'scene_02.mp4'),
+              diagnostics: [],
+            };
+          },
+        },
+      },
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(renderCalls, 1);
+    assert.equal(result.diagnostics.some(item => item.code === 'render_failed'), true);
+    assert.equal(result.project.generation_checkpoint.stages.render.frames.scene_02.status, 'failed');
+    assert.equal(result.project.generation_checkpoint.stages.render.frames.scene_02.diagnostic_code, 'render_failed');
+  }
+
+  {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-render-missing-'));
+    const result = await projectOrchestrator.renderHtmlVideoFrames({
+      project: {
+        project_id: 'render-missing',
+        frames: [{ id: 'scene_01', scene_id: 'scene_01', duration_sec: 2 }],
+        audio: { status: 'skipped', reason: 'disabled_by_settings' },
+      },
+      projectDir,
+      frameIds: ['scene_99'],
+      services: {
+        frameRenderer: {
+          renderFrame: async () => {
+            throw new Error('不存在的帧不应进入渲染。');
+          },
+        },
+      },
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.diagnostics[0].code, 'frame_not_found');
+  }
+
+  {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-compose-'));
+    let concatCalls = 0;
+    let muxCalls = 0;
+    let verifyCalls = 0;
+    const project = {
+      project_id: 'compose-success',
+      template_id: 'raw-html',
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
+      frames: [
+        { id: 'scene_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
+        { id: 'scene_02', scene_id: 'scene_02', source_mode: 'raw_html', html_path: 'frames/scene_02.html', duration_sec: 2 },
+      ],
+      timeline: {
+        tracks: [{
+          id: 'main',
+          type: 'video',
+          items: [
+            { frame_id: 'scene_01', duration_sec: 2 },
+            { frame_id: 'scene_02', duration_sec: 2 },
+          ],
+        }],
+      },
+      audio: { status: 'skipped', reason: 'disabled_by_settings' },
+    };
+
+    const rendered = await projectOrchestrator.renderHtmlVideoFrames({
+      project,
+      projectDir,
+      services: {
+        materializer: {
+          materializeProject: async ({ project }) => ({ project, diagnostics: [] }),
+        },
+        frameRenderer: {
+          renderFrame: async frame => ({
+            success: true,
+            output_path: path.join(projectDir, 'frames', `${frame.id}.mp4`),
+            output_hash: `${frame.id}-hash`,
+            meta: { encoding: 'h264' },
+            diagnostics: [],
+          }),
+        },
+      },
+    });
+
+    const composed = await projectOrchestrator.composeHtmlVideoProject({
+      projectDir,
+      project: rendered.project,
+      targetDurationSec: 4,
+      services: {
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async (frames, outputPath) => {
+            concatCalls += 1;
+            assert.equal(frames.length, 2);
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, 'mp4');
+            return { success: true, output_path: outputPath };
+          },
+          muxAudioWithFfmpeg: async () => {
+            muxCalls += 1;
+            throw new Error('音频已禁用，不应执行混流。');
+          },
+          verifyDurationWithFfprobe: async () => {
+            verifyCalls += 1;
+            return { success: true, duration_sec: 4, expected_duration_sec: 4 };
+          },
+        },
+      },
+    });
+
+    assert.equal(composed.success, true);
+    assert.equal(concatCalls, 1);
+    assert.equal(muxCalls, 0);
+    assert.equal(verifyCalls, 1);
+    assert.equal(composed.output_path, path.join(projectDir, 'exports', 'output.mp4'));
+    assert.equal(composed.project.generation_checkpoint.stages.compose.status, 'done');
+    assert.equal(composed.project.generation_checkpoint.stages.compose.output_path, 'exports/output.mp4');
+    assert.equal(composed.project.generation_checkpoint.stages.duration_verify.status, 'done');
+    assert.equal(composed.project.generation_checkpoint.stages.duration_verify.expected_duration_sec, 4);
+    assert.equal(composed.project.generation_checkpoint.stages.duration_verify.actual_duration_sec, 4);
+  }
+
+  {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-compose-incomplete-'));
+    const partial = await projectOrchestrator.renderHtmlVideoFrames({
+      project: {
+        project_id: 'compose-incomplete',
+        output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
+        frames: [
+          { id: 'scene_01', scene_id: 'scene_01', duration_sec: 2 },
+          { id: 'scene_02', scene_id: 'scene_02', duration_sec: 2 },
+        ],
+        audio: { status: 'skipped', reason: 'disabled_by_settings' },
+      },
+      projectDir,
+      frameIds: ['scene_02'],
+      services: {
+        frameRenderer: {
+          renderFrame: async frame => ({
+            success: true,
+            output_path: path.join(projectDir, 'frames', `${frame.id}.mp4`),
+            diagnostics: [],
+          }),
+        },
+      },
+    });
+
+    const composed = await projectOrchestrator.composeHtmlVideoProject({
+      projectDir,
+      project: partial.project,
+      services: {
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async () => {
+            throw new Error('缺帧时不应进入合成。');
+          },
+        },
+      },
+    });
+
+    assert.equal(composed.success, false);
+    assert.equal(composed.diagnostics[0].code, 'render_checkpoint_missing');
+    assert.equal(composed.project.generation_checkpoint.stages.compose.status, 'failed');
+    assert.equal(composed.project.generation_checkpoint.stages.compose.diagnostic_code, 'render_checkpoint_missing');
+  }
+
+  {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-duration-failure-'));
+    const project = {
+      project_id: 'compose-duration-failure',
+      template_id: 'raw-html',
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
+      frames: [
+        { id: 'scene_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
+      ],
+      timeline: {
+        tracks: [{
+          id: 'main',
+          type: 'video',
+          items: [
+            { frame_id: 'scene_01', duration_sec: 2 },
+          ],
+        }],
+      },
+      audio: { status: 'skipped', reason: 'disabled_by_settings' },
+    };
+
+    const rendered = await projectOrchestrator.renderHtmlVideoFrames({
+      project,
+      projectDir,
+      services: {
+        materializer: {
+          materializeProject: async ({ project }) => ({ project, diagnostics: [] }),
+        },
+        frameRenderer: {
+          renderFrame: async frame => ({
+            success: true,
+            output_path: path.join(projectDir, 'frames', `${frame.id}.mp4`),
+            output_hash: `${frame.id}-hash`,
+            meta: { encoding: 'h264' },
+            diagnostics: [],
+          }),
+        },
+      },
+    });
+
+    const composed = await projectOrchestrator.composeHtmlVideoProject({
+      projectDir,
+      project: rendered.project,
+      targetDurationSec: 4,
+      services: {
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async (frames, outputPath) => {
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, 'mp4');
+            return { success: true, output_path: outputPath };
+          },
+          muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+          verifyDurationWithFfprobe: async () => ({
+            success: false,
+            code: 'duration_mismatch',
+            message: '导出视频时长偏差过大。',
+            expected_duration_sec: 4,
+            duration_sec: 4.8,
+          }),
+        },
+      },
+    });
+
+    assert.equal(composed.success, false);
+    assert.equal(composed.diagnostics.some(item => item.code === 'duration_mismatch'), true);
+    assert.equal(composed.project.generation_checkpoint.stages.duration_verify.status, 'failed');
+    assert.equal(composed.project.generation_checkpoint.stages.duration_verify.diagnostic_code, 'duration_mismatch');
+    assert.equal(composed.project.generation_checkpoint.stages.duration_verify.expected_duration_sec, 4);
+    assert.equal(composed.project.generation_checkpoint.stages.duration_verify.actual_duration_sec, 4.8);
+  }
+
   console.log('html-video project orchestrator tests passed');
 })();

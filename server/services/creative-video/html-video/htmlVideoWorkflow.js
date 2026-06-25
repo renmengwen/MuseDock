@@ -1431,6 +1431,7 @@ async function generateHtmlVideo(options = {}) {
       outputPath: rendered.output_path,
       expectedAspectRatio: templateRenderTarget.aspect_ratio || sceneSpec?.aspect_ratio,
     });
+    const visualReportPath = visualReport.report_path || visualReport.reportPath || 'inspect/visual-report.json';
     if (!visualReport.success) {
       diagnostics.push(createDiagnostic({
         code: 'visual_qa_warning',
@@ -1441,6 +1442,12 @@ async function generateHtmlVideo(options = {}) {
         severity: 'warning',
       }));
     }
+    markCheckpointStage(rendered.project, 'visual_inspect', {
+      status: visualReport.success ? 'done' : 'warning',
+      report_path: visualReportPath,
+      diagnostic_code: visualReport.success ? '' : 'visual_qa_warning',
+    });
+    rendered.project = await projectStore.saveProject(projectDir, rendered.project);
     await report(onProgress, {
       type: 'html_video_visual_inspect_done',
       stage: 'project',

@@ -339,7 +339,7 @@ async function readProjectJson(projectDir) {
   }, null, 2));
   assert.equal(unreasonableTimelineDiagnostic.sub_stage, 'timeline_check');
   assert.equal(unreasonableTimelineDiagnostic.retryable, true);
-  assert.equal(unreasonableTimelineDiagnostic.repair_action, 'regenerate_content_graph');
+  assert.equal(unreasonableTimelineDiagnostic.repair_action, 'repair_timeline');
   assert.equal(unreasonableTimelineRenderCalls, 0);
 
   const originalWriteRawFrameHtml = projectStore.writeRawFrameHtml;
@@ -1508,6 +1508,8 @@ async function readProjectJson(projectDir) {
   assert.equal(emptyManifestResult.audio_manifest, null);
   assert.equal(emptyManifestMuxPath, null);
   assert.equal(emptyManifestResult.html_video_diagnostics.some(item => item.code === 'tts_manifest_missing'), false);
+  assert.equal(emptyManifestResult.project.generation_checkpoint.stages.visual_inspect.status, 'done');
+  assert.equal(emptyManifestResult.project.generation_checkpoint.stages.visual_inspect.diagnostic_code, '');
 
   const visualQaWarning = await workflow.generateHtmlVideo({
     workflowId: '202606170000000001_visual_warning',
@@ -1564,6 +1566,8 @@ async function readProjectJson(projectDir) {
   assert.equal(visualQaWarning.render_mode, 'html-video');
   assert.equal(visualQaWarning.visual_report.success, false);
   assert.ok(visualQaWarning.html_video_diagnostics.some(item => item.code === 'visual_qa_warning'));
+  assert.equal(visualQaWarning.project.generation_checkpoint.stages.visual_inspect.status, 'warning');
+  assert.equal(visualQaWarning.project.generation_checkpoint.stages.visual_inspect.diagnostic_code, 'visual_qa_warning');
 
   const fallback = await workflow.generateHtmlVideo({
     workflowId: '202606170000000002',

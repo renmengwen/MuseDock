@@ -502,24 +502,25 @@ node tests/test-html-video-raw-html-frame-builder.js
 
 **具体实现步骤:**
 
-- [ ] 写 `tests/test-html-video-timeline-repair.js`：target 60 秒、frames 总和 132 秒、audio 未超目标时，`analyzeTimelineMismatch()` 返回 `repair_action: 'repair_timeline'`。
-- [ ] 写同一测试：audio duration 超 60 秒时，`analyzeTimelineMismatch()` 返回 `requires_script_repair: true` 和 `repair_action: 'repair_script_and_timeline'`。
-- [ ] 写同一测试：`compressNarrationForTarget(sceneSpec, 60)` 返回保留 scene id/order/theme metadata 的 scene_spec，并缩短 `narration_text` 与 `captions`。
-- [ ] 写同一测试：`repairProjectTimeline()` 不调用 AI、不重新 TTS，只调整 scene/frame/content_graph duration。
-- [ ] 运行 `node tests/test-html-video-timeline-repair.js`，预期失败为 `timelineRepair.js` 不存在。
-- [ ] 新增 `timelineRepair.js`，实现 `analyzeTimelineMismatch()`、`compressNarrationForTarget()` 与 `repairProjectTimeline()`。
-- [ ] 修改 `htmlVideoWorkflow.js` 调用 `validateHtmlVideoProject()` 后立即更新 `generation_checkpoint.stages.validate_project`：成功写 `status:'done'`，失败写 `status:'failed'` 与首个 diagnostic code，避免 planner 把 validation failure 误判成未知 project failure。
-- [ ] 修改 `projectOrchestrator.js`：`validateReasonableTimelineDuration()` 失败时 diagnostic 使用 `sub_stage: 'timeline_check'`、`repair_action: 'repair_timeline'` 或 `repair_script_and_timeline`。
-- [ ] 在 `projectOrchestrator.js` 新增 `renderHtmlVideoFrames({ rootDir, workflowId, runId, projectDir, project, frameIds, templateRegistry, services, onProgress, materialize = false })`，只渲染 `frameIds` 指定帧，更新对应 `render.frames[scene_id]` checkpoint，不执行 compose。
-- [ ] `renderHtmlVideoFrames()` materialize 策略固定：`rerender_frames` 场景默认 `materialize:false`，直接使用已落盘 frame HTML 与 project frame metadata；`retry_frame_html`、`repair_timeline`、`repair_script_and_timeline` 修改了 HTML 或 project duration 时传 `materialize:true`，仅此时先调用 materializer。
-- [ ] 在 `projectOrchestrator.js` 新增 `composeHtmlVideoProject({ rootDir, workflowId, runId, projectDir, project, services, onProgress, targetDurationSec })`，复用已存在 frame mp4 执行 concat/mux/duration verify，更新 `compose` 和 `duration_verify` checkpoint，不调用 AI、不重新渲染 frame。
-- [ ] `composeHtmlVideoProject()` 必须复用现有完整 compose 段逻辑：收集 renderedFrames -> `concatFramesWithFfmpeg()` -> 判断 `audioDisabled` -> `resolveNarrationPath()` -> `muxAudioWithFfmpeg()` -> `verifyDurationWithFfprobe()` -> `addExport()` -> `addRevision()` -> `saveProject()`；不得只做 concat 后直接返回。
-- [ ] 保留现有 `renderHtmlVideoProject()` 作为完整路径入口，但内部改为顺序调用 materialize/timeline check -> `renderHtmlVideoFrames()` -> `composeHtmlVideoProject()`，避免三套渲染/合成逻辑分叉。
-- [ ] 修改 `projectOrchestrator.js` frame render loop：每帧成功写 `generation_checkpoint.stages.render.frames[scene_id] = { status:'done', mp4_path, output_hash, diagnostic_code:'' }`；失败写 `status:'failed'` 与具体 code。
-- [ ] 修改 compose 成功后写 `generation_checkpoint.stages.compose = { status:'done', output_path, output_audio_path }`；compose 失败写 `status:'failed'`。
-- [ ] 修改 duration verify 成功后写 `duration_verify.status = 'done'`、`expected_duration_sec`、`actual_duration_sec`；失败写 `status:'failed'`、`diagnostic_code:'duration_mismatch'`。
-- [ ] 修改 `htmlVideoWorkflow.js` visual inspect 成功后写 `visual_inspect.status = 'done'`、`report_path`；失败 warning 也写 checkpoint 状态，供 `rerun_visual_inspect` 使用。
-- [ ] 运行本 Task 验收命令。
+- [x] 写 `tests/test-html-video-timeline-repair.js`：target 60 秒、frames 总和 132 秒、audio 未超目标时，`analyzeTimelineMismatch()` 返回 `repair_action: 'repair_timeline'`。
+- [x] 写同一测试：audio duration 超 60 秒时，`analyzeTimelineMismatch()` 返回 `requires_script_repair: true` 和 `repair_action: 'repair_script_and_timeline'`。
+- [x] 写同一测试：`compressNarrationForTarget(sceneSpec, 60)` 返回保留 scene id/order/theme metadata 的 scene_spec，并缩短 `narration_text` 与 `captions`。
+- [x] 写同一测试：`repairProjectTimeline()` 不调用 AI、不重新 TTS，只调整 scene/frame/content_graph duration。
+- [x] 运行 `node tests/test-html-video-timeline-repair.js`，预期失败为 `timelineRepair.js` 不存在。
+- [x] 新增 `timelineRepair.js`，实现 `analyzeTimelineMismatch()`、`compressNarrationForTarget()` 与 `repairProjectTimeline()`。
+- [x] 修改 `htmlVideoWorkflow.js` 调用 `validateHtmlVideoProject()` 后立即更新 `generation_checkpoint.stages.validate_project`：成功写 `status:'done'`，失败写 `status:'failed'` 与首个 diagnostic code，避免 planner 把 validation failure 误判成未知 project failure。
+- [x] 修改 `projectOrchestrator.js`：`validateReasonableTimelineDuration()` 失败时 diagnostic 使用 `sub_stage: 'timeline_check'`、`repair_action: 'repair_timeline'` 或 `repair_script_and_timeline`。
+- [x] 在 `projectOrchestrator.js` 新增 `renderHtmlVideoFrames({ rootDir, workflowId, runId, projectDir, project, frameIds, templateRegistry, services, onProgress, materialize = false })`，只渲染 `frameIds` 指定帧，更新对应 `render.frames[scene_id]` checkpoint，不执行 compose。
+- [x] `renderHtmlVideoFrames()` materialize 策略固定：`rerender_frames` 场景默认 `materialize:false`，直接使用已落盘 frame HTML 与 project frame metadata；`retry_frame_html`、`repair_timeline`、`repair_script_and_timeline` 修改了 HTML 或 project duration 时传 `materialize:true`，仅此时先调用 materializer。
+- [x] 在 `projectOrchestrator.js` 新增 `composeHtmlVideoProject({ rootDir, workflowId, runId, projectDir, project, services, onProgress, targetDurationSec })`，复用已存在 frame mp4 执行 concat/mux/duration verify，更新 `compose` 和 `duration_verify` checkpoint，不调用 AI、不重新渲染 frame。
+- [x] `composeHtmlVideoProject()` 必须复用现有完整 compose 段逻辑：收集 renderedFrames -> `concatFramesWithFfmpeg()` -> 判断 `audioDisabled` -> `resolveNarrationPath()` -> `muxAudioWithFfmpeg()` -> `verifyDurationWithFfprobe()` -> `addExport()` -> `addRevision()` -> `saveProject()`；不得只做 concat 后直接返回。
+- [x] 保留现有 `renderHtmlVideoProject()` 作为完整路径入口，但内部改为顺序调用 materialize/timeline check -> `renderHtmlVideoFrames()` -> `composeHtmlVideoProject()`，避免三套渲染/合成逻辑分叉。
+- [x] 修改 `projectOrchestrator.js` frame render loop：每帧成功写 `generation_checkpoint.stages.render.frames[scene_id] = { status:'done', mp4_path, output_hash, diagnostic_code:'' }`；失败写 `status:'failed'` 与具体 code。
+- [x] 修改 compose 成功后写 `generation_checkpoint.stages.compose = { status:'done', output_path, output_audio_path }`；compose 失败写 `status:'failed'`。
+- [x] 修改 duration verify 成功后写 `duration_verify.status = 'done'`、`expected_duration_sec`、`actual_duration_sec`；失败写 `status:'failed'`、`diagnostic_code:'duration_mismatch'`。
+- [x] 修改 `htmlVideoWorkflow.js` visual inspect 成功后写 `visual_inspect.status = 'done'`、`report_path`；失败 warning 也写 checkpoint 状态，供 `rerun_visual_inspect` 使用。
+- [x] 运行本 Task 验收命令。
+- [x] Task 5 spec compliance review、code quality review 均通过；补齐局部 render 未命中、compose 缺帧、caption 缩放与 visual inspect checkpoint 回归测试。
 
 **需要新增/修改的函数签名:**
 
