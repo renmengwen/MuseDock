@@ -385,20 +385,20 @@ node tests/test-html-video-scene-spec-mapper.js
 
 **具体实现步骤:**
 
-- [ ] 写 `tests/test-html-video-frame-html-resume.js`：`scene_01`、`scene_02` 已在 checkpoint 标记 done，`scene_03` 缺文本失败时，resume 只调用 `generateFrameHtml()` 一次处理 `scene_03`。
-- [ ] 写同一测试：第一次 `generateFrameHtml({ frameId:'scene_03', attempt:1 })` 返回 provider missing text，第二次调用参数必须包含 `attempt:2`、`modelOptions:{ stream:false }`、`shortPrompt:true`。
-- [ ] 写同一测试：第二次仍缺文本时调用 `frameFallbackBuilder.buildFallbackFrameHtml()`，checkpoint 写 warning diagnostic。
-- [ ] 运行 `node tests/test-html-video-frame-html-resume.js`，预期失败为 `attempt` 参数或 fallback builder 不存在。
-- [ ] 修改 `frameHtmlAgent.js` 的 `callModel(model, prompt, options = {})` wrapper，将 `options.stream` 传给 `model.callTextModel()`；当前底层默认 `stream:false`，显式传参用于固定 retry 语义。
-- [ ] 在 `frameHtmlAgent.js` 修改 `generateFrameHtml({ model, frameId, attempt = 1, modelOptions = {}, shortPrompt = false, ...args })`；非流式重试通过 `model.callTextModel({ ..., stream:false })` 或 wrapper 透传 `modelOptions.stream = false` 实现，禁止新增只在流程层存在但模型层不生效的伪参数。
-- [ ] 定义 `shortPrompt:true` 行为：使用 skeleton prompt，只保留 scene id、scene title、当前 scene narration/captions、target resolution、必须输出完整 HTML、必须包含 `data-text-key="headline|subtitle|body"` 和基础动画；移除 creativeContext 长文、content graph 全量 JSON、visual style reference HTML、previous frame HTML、长示例和设计解释。
-- [ ] 修改 `generateFrameHtml()` 内部调用 `callModel()` 的位置：当 `attempt >= 2` 且 `modelOptions.stream === false` 时，显式传递 `{ stream:false }`；普通 HTML 无效 retry 继续走原有 retry prompt，不计入 provider missing text 外层 attempt。
-- [ ] 明确调用计数边界：`provider_missing_text` 外层最多两次模型调用，分别是 attempt 1 原始 prompt 和 attempt 2 `modelOptions:{ stream:false }` + `shortPrompt:true`；只有模型返回了非空文本但 HTML 无效时，才允许执行现有 HTML 验证 retry，该内部 retry 不触发第三次 provider missing text 外层 attempt。
-- [ ] 新增 `frameFallbackBuilder.js`，导出 `buildFallbackFrameHtml({ scene, node, target, template } = {})`，生成完整 `<!doctype html>` 文档，包含 `data-text-key="headline"`、`subtitle`、`body`。
-- [ ] 修改 `htmlVideoWorkflow.js` frame HTML 失败路径：当 `htmlResult.message` 匹配 `返回结果缺少文本内容` 或 `流式返回结果缺少文本内容` 时，diagnostic `code` 使用 `provider_missing_text`，否则保持 `frame_html_invalid`。
-- [ ] 修改 `htmlVideoWorkflow.js` frame loop：读取 `generation_checkpoint.stages.frame_html.frames[scene_id]`，已 done 且 HTML 文件存在并通过基础校验时复用。
-- [ ] 失败帧只丢弃当前 `frames:<scene_id>` 和后续 render/export，不删除其它 frame HTML。
-- [ ] 运行本 Task 验收命令。
+- [x] 写 `tests/test-html-video-frame-html-resume.js`：`scene_01`、`scene_02` 已在 checkpoint 标记 done，`scene_03` 缺文本失败时，resume 只调用 `generateFrameHtml()` 一次处理 `scene_03`。
+- [x] 写同一测试：第一次 `generateFrameHtml({ frameId:'scene_03', attempt:1 })` 返回 provider missing text，第二次调用参数必须包含 `attempt:2`、`modelOptions:{ stream:false }`、`shortPrompt:true`。
+- [x] 写同一测试：第二次仍缺文本时调用 `frameFallbackBuilder.buildFallbackFrameHtml()`，checkpoint 写 warning diagnostic。
+- [x] 运行 `node tests/test-html-video-frame-html-resume.js`，预期失败为 `attempt` 参数或 fallback builder 不存在。
+- [x] 修改 `frameHtmlAgent.js` 的 `callModel(model, prompt, options = {})` wrapper，将 `options.stream` 传给 `model.callTextModel()`；当前底层默认 `stream:false`，显式传参用于固定 retry 语义。
+- [x] 在 `frameHtmlAgent.js` 修改 `generateFrameHtml({ model, frameId, attempt = 1, modelOptions = {}, shortPrompt = false, ...args })`；非流式重试通过 `model.callTextModel({ ..., stream:false })` 或 wrapper 透传 `modelOptions.stream = false` 实现，禁止新增只在流程层存在但模型层不生效的伪参数。
+- [x] 定义 `shortPrompt:true` 行为：使用 skeleton prompt，只保留 scene id、scene title、当前 scene narration/captions、target resolution、必须输出完整 HTML、必须包含 `data-text-key="headline|subtitle|body"` 和基础动画；移除 creativeContext 长文、content graph 全量 JSON、visual style reference HTML、previous frame HTML、长示例和设计解释。
+- [x] 修改 `generateFrameHtml()` 内部调用 `callModel()` 的位置：当 `attempt >= 2` 且 `modelOptions.stream === false` 时，显式传递 `{ stream:false }`；普通 HTML 无效 retry 继续走原有 retry prompt，不计入 provider missing text 外层 attempt。
+- [x] 明确调用计数边界：`provider_missing_text` 外层最多两次模型调用，分别是 attempt 1 原始 prompt 和 attempt 2 `modelOptions:{ stream:false }` + `shortPrompt:true`；只有模型返回了非空文本但 HTML 无效时，才允许执行现有 HTML 验证 retry，该内部 retry 不触发第三次 provider missing text 外层 attempt。
+- [x] 新增 `frameFallbackBuilder.js`，导出 `buildFallbackFrameHtml({ scene, node, target, template } = {})`，生成完整 `<!doctype html>` 文档，包含 `data-text-key="headline"`、`subtitle`、`body`。
+- [x] 修改 `htmlVideoWorkflow.js` frame HTML 失败路径：当 `htmlResult.message` 匹配 `返回结果缺少文本内容` 或 `流式返回结果缺少文本内容` 时，diagnostic `code` 使用 `provider_missing_text`，否则保持 `frame_html_invalid`。
+- [x] 修改 `htmlVideoWorkflow.js` frame loop：读取 `generation_checkpoint.stages.frame_html.frames[scene_id]`，已 done 且 HTML 文件存在并通过基础校验时复用。
+- [x] 失败帧只丢弃当前 `frames:<scene_id>` 和后续 render/export，不删除其它 frame HTML。
+- [x] 运行本 Task 验收命令。
 
 **需要新增/修改的函数签名:**
 

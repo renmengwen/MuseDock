@@ -267,6 +267,37 @@ function buildFrameHtmlPrompt({
   ].join('\n');
 }
 
+function findScene(sceneSpec = {}, sceneId = '') {
+  return (Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [])
+    .find(scene => scene && scene.id === sceneId) || {};
+}
+
+function buildShortFrameHtmlPrompt({
+  frameId = '',
+  node = {},
+  sceneSpec = {},
+  target = {},
+} = {}) {
+  const resolution = resolveResolution(target);
+  const sceneId = frameId || node.id || '';
+  const scene = findScene(sceneSpec, sceneId);
+  const title = compactText(scene.visual_text?.headline || node.label || scene.title || sceneId, 160);
+  const narration = compactText(scene.narration_text || node.text || node.data || '', 420);
+  const captions = compactText(scene.captions || [], 360);
+  return [
+    '你是 html-video 单帧 HTML 生成器。只返回完整 HTML document，不要解释。',
+    `当前帧：${sceneId}`,
+    `scene title：${title || sceneId}`,
+    `当前 scene narration：${narration || '无'}`,
+    `当前 scene captions：${captions || '无'}`,
+    `Target resolution：${resolution.width}x${resolution.height}`,
+    `必须生成 full-bleed ${resolution.width}x${resolution.height} 完整 HTML，包含 <!doctype html>、html、head、body、style。`,
+    '必须包含 data-text-key="headline"、data-text-key="subtitle"、data-text-key="body" 三类可见文本锚点。',
+    '必须包含基础动画：CSS @keyframes/animation、GSAP timeline 或 window.__hvPlayAll 至少一种。',
+    '可见文本使用中文；不要输出 Markdown、解释或 HTML 外文字。',
+  ].join('\n');
+}
+
 function extractHtmlDocument(text) {
   const raw = String(text || '').trim();
   if (!raw) return { success: false, message: 'AI 返回为空，未返回有效 HTML。' };
@@ -310,11 +341,12 @@ function buildRetryPrompt(args = {}) {
   ].join('\n');
 }
 
-async function callModel(model, prompt) {
+async function callModel(model, prompt, options = {}) {
   if (!model || typeof model.callTextModel !== 'function') {
     return { success: false, message: '未配置 HTML 生成模型。' };
   }
   const response = await model.callTextModel({
+    ...objectOrEmpty(options),
     messages: [{ role: 'user', content: prompt }],
   });
   if (!response || response.success === false) {
@@ -348,57 +380,75 @@ function frameFailure(code, message, args = {}, details = {}) {
   };
 }
 
-async function generateFrameHtml({ model, ...args } = {}) {
-  const firstPrompt = buildFrameHtmlPrompt(args);
-  const first = await callModel(model, firstPrompt);
+async function generateFrameHtml({
+  model,
+  frameId,
+  attempt = 1,
+  modelOptions = {},
+  shortPrompt = false,
+  ...args
+} = {}) {
+  const callOptions = attempt >= 2 && modelOptions.stream === false ? { stream: false } : modelOptions;
+  const promptArgs = {
+    ...args,
+    frameId,
+    node: {
+      ...objectOrEmpty(args.node),
+      ...(frameId ? { id: args.node?.id || frameId } : {}),
+    },
+  };
+  const firstPrompt = shortPrompt ? buildShortFrameHtmlPrompt(promptArgs) : buildFrameHtmlPrompt(promptArgs);
+  const first = await callModel(model, firstPrompt, callOptions);
   if (!first.success) {
-    return frameFailure(first.code || 'frame_html_invalid', first.message || '单帧 HTML 生成失败。', args);
+    return frameFailure(first.code || 'frame_html_invalid', first.message || '单帧 HTML 生成失败。', promptArgs);
   }
   const firstExtracted = extractHtmlDocument(first.text);
   if (firstExtracted.success) {
-    const validation = validateHtmlTargetResolution(firstExtracted.html, args.target || {});
+    const validation = validateHtmlTargetResolution(firstExtracted.html, promptArgs.target || {});
     if (validation.success) return firstExtracted;
     const retry = await callModel(model, buildRetryPrompt({
-      ...args,
+      ...promptArgs,
       validationMessage: validation.message,
-    }));
+    }), callOptions);
     if (!retry.success) {
-      return frameFailure(retry.code || 'frame_html_invalid', retry.message || '单帧 HTML 生成失败。', args);
+      return frameFailure(retry.code || 'frame_html_invalid', retry.message || '单帧 HTML 生成失败。', promptArgs);
     }
     const retryExtracted = extractHtmlDocument(retry.text);
     if (!retryExtracted.success) {
-      return frameFailure('frame_html_invalid', 'AI 未返回有效 HTML document。', args, {
+      return frameFailure('frame_html_invalid', 'AI 未返回有效 HTML document。', promptArgs, {
         diagnostics: [validation.message, retryExtracted.message].filter(Boolean),
       });
     }
-    const retryValidation = validateHtmlTargetResolution(retryExtracted.html, args.target || {});
+    const retryValidation = validateHtmlTargetResolution(retryExtracted.html, promptArgs.target || {});
     if (retryValidation.success) return retryExtracted;
-    return frameFailure('frame_html_invalid', 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。', args, {
+    return frameFailure('frame_html_invalid', 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。', promptArgs, {
       diagnostics: [validation.message, retryValidation.message].filter(Boolean),
     });
   }
 
-  const retry = await callModel(model, buildRetryPrompt(args));
+  const retry = await callModel(model, buildRetryPrompt(promptArgs), callOptions);
   if (!retry.success) {
-    return frameFailure(retry.code || 'frame_html_invalid', retry.message || '单帧 HTML 生成失败。', args);
+    return frameFailure(retry.code || 'frame_html_invalid', retry.message || '单帧 HTML 生成失败。', promptArgs);
   }
   const retryExtracted = extractHtmlDocument(retry.text);
   if (retryExtracted.success) {
-    const retryValidation = validateHtmlTargetResolution(retryExtracted.html, args.target || {});
+    const retryValidation = validateHtmlTargetResolution(retryExtracted.html, promptArgs.target || {});
     if (retryValidation.success) return retryExtracted;
-    return frameFailure('frame_html_invalid', 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。', args, {
+    return frameFailure('frame_html_invalid', 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。', promptArgs, {
       diagnostics: [firstExtracted.message, retryValidation.message].filter(Boolean),
     });
   }
-  return frameFailure('frame_html_invalid', 'AI 未返回有效 HTML document。', args, {
+  return frameFailure('frame_html_invalid', 'AI 未返回有效 HTML document。', promptArgs, {
     diagnostics: [firstExtracted.message, retryExtracted.message].filter(Boolean),
   });
 }
 
 module.exports = {
   buildFrameHtmlPrompt,
+  buildShortFrameHtmlPrompt,
   extractHtmlDocument,
   generateFrameHtml,
+  callModel,
   buildRetryPrompt,
   readTemplateSourceSnippet,
   validateHtmlTargetResolution,

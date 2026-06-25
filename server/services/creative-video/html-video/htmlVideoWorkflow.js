@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -7,6 +8,7 @@ const templateSelectorAgent = require('./templateSelectorAgent');
 const templateInputAgent = require('./templateInputAgent');
 const contentGraphAgent = require('./contentGraphAgent');
 const frameHtmlAgent = require('./frameHtmlAgent');
+const frameFallbackBuilder = require('./frameFallbackBuilder');
 const { buildRawHtmlFrameProject, normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
 const environmentDoctor = require('./environmentDoctor');
 const projectStore = require('./projectStore');
@@ -99,6 +101,66 @@ async function callTextModel(model, prompt, options = {}) {
 
 function isProviderMissingText(message) {
   return /返回结果缺少文本内容|流式返回结果缺少文本内容/.test(String(message || ''));
+}
+
+function isFrameProviderMissingText(result = {}) {
+  return isProviderMissingText(result.message)
+    || normalizeDiagnostics(result.diagnostics).some(item => item.code === 'provider_missing_text');
+}
+
+function frameFallbackDiagnostic(frameId) {
+  return createDiagnostic({
+    code: 'fallback_frame_html_used',
+    stage: 'ai-frame-html',
+    sub_stage: 'frame_html',
+    frame_id: frameId,
+    severity: 'warning',
+    fallback_allowed: true,
+    retryable: false,
+    user_message: '当前帧 AI 生成连续失败，已使用基础 HTML 兜底。',
+  });
+}
+
+const SAFE_PROJECT_ID = /^[A-Za-z0-9_.-]+$/;
+
+function existingProjectDir(rootDir, workflowId, runId) {
+  const safeWorkflowId = String(workflowId || '').trim();
+  const safeRunId = String(runId || '').trim();
+  if (!rootDir || !SAFE_PROJECT_ID.test(safeWorkflowId) || !SAFE_PROJECT_ID.test(safeRunId)) return '';
+  return path.resolve(rootDir, safeWorkflowId, 'agent_runs', `${safeRunId}-html-video`);
+}
+
+async function loadExistingProject(projectDir) {
+  if (!projectDir) return null;
+  try {
+    return await projectStore.loadProject(projectDir);
+  } catch (error) {
+    if (error && error.code !== 'ENOENT') throw error;
+    return null;
+  }
+}
+
+function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target } = {}) {
+  const frame = objectOrEmpty(checkpointFrame);
+  if (frame.status !== 'done' || !frame.html_path) return { reuse: false };
+  let html;
+  try {
+    const absolutePath = projectStore.resolveProjectPath(projectDir, frame.html_path);
+    if (!fs.existsSync(absolutePath)) return { reuse: false };
+    html = fs.readFileSync(absolutePath, 'utf8');
+  } catch {
+    return { reuse: false };
+  }
+  const extracted = frameHtmlAgent.extractHtmlDocument(html);
+  if (!extracted.success) return { reuse: false };
+  const validation = frameHtmlAgent.validateHtmlTargetResolution(extracted.html, target || {});
+  if (!validation.success) return { reuse: false };
+  return {
+    reuse: true,
+    html,
+    html_path: frame.html_path,
+    scene_id: scene?.id || resolveNodeSceneId(node) || node?.id || '',
+  };
 }
 
 function providerMissingTextDiagnostic() {
@@ -628,7 +690,11 @@ async function generateHtmlVideo(options = {}) {
   });
 
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
-  const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
+  let projectDir = existingProjectDir(rootDir, workflowId, runId);
+  const resumeProject = await loadExistingProject(projectDir);
+  if (!resumeProject) {
+    projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
+  }
   const generationMode = resolveGenerationMode(templateRenderTarget);
   if (generationMode === 'raw_html' && !hasSceneSpecScenes(sceneSpec)) {
     return failure('缺少 scene_spec，无法生成 raw_html 帧。', [
@@ -645,7 +711,7 @@ async function generateHtmlVideo(options = {}) {
       project_dir: projectDir,
     });
   }
-  let project;
+  let project = resumeProject || undefined;
   let templateInputs = {};
 
   if (generationMode === 'template_inputs') {
@@ -776,6 +842,48 @@ async function generateHtmlVideo(options = {}) {
     for (let index = 0; index < nodes.length; index += 1) {
       const node = nodes[index];
       const sceneId = resolveNodeSceneId(node) || node.id;
+      const scene = scenes.get(sceneId);
+      const checkpointFrame = objectOrEmpty(project.generation_checkpoint?.stages?.frame_html?.frames?.[sceneId]);
+      const reuse = shouldReuseFrameHtml({
+        projectDir,
+        checkpointFrame,
+        scene,
+        node,
+        target: templateRenderTarget,
+      });
+      if (reuse.reuse) {
+        const durationSec = trustedSceneDuration(scene || {}, node);
+        nodes[index] = {
+          ...node,
+          durationSec,
+          html_path: reuse.html_path,
+        };
+        contentGraph = {
+          ...contentGraph,
+          nodes,
+        };
+        project = await projectStore.writeProjectJson(projectDir, current => {
+          current.content_graph = contentGraph;
+          markCheckpointStage(current, 'frame_html', { status: 'partial' });
+          return current;
+        });
+        if (!visualStyleReferenceHtml) visualStyleReferenceHtml = reuse.html;
+        previousFrameHtml = reuse.html;
+        await report(onProgress, {
+          type: 'html_video_frame_html_done',
+          stage: 'project',
+          sub_stage: 'frame_html',
+          message: `第 ${index + 1}/${nodes.length} 帧 HTML 已复用。`,
+          frame_id: node.id,
+          data: {
+            frame_id: node.id,
+            index,
+            total: nodes.length,
+            reused: true,
+          },
+        });
+        continue;
+      }
       await report(onProgress, {
         type: 'html_video_frame_html_started',
         stage: 'project',
@@ -788,8 +896,10 @@ async function generateHtmlVideo(options = {}) {
           total: nodes.length,
         },
       });
-      const htmlResult = await frameHtmlAgent.generateFrameHtml({
+      let htmlResult = await frameHtmlAgent.generateFrameHtml({
         model,
+        frameId: node.id || sceneId,
+        attempt: 1,
         graph: contentGraph,
         node,
         index,
@@ -801,9 +911,49 @@ async function generateHtmlVideo(options = {}) {
         visualStyleReferenceHtml,
         previousFrameHtml,
       });
+      if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
+        htmlResult = await frameHtmlAgent.generateFrameHtml({
+          model,
+          frameId: node.id || sceneId,
+          attempt: 2,
+          modelOptions: { stream: false },
+          shortPrompt: true,
+          graph: contentGraph,
+          node,
+          index,
+          total: nodes.length,
+          sceneSpec,
+          creativeContext,
+          target: templateRenderTarget,
+          template,
+          visualStyleReferenceHtml,
+          previousFrameHtml,
+        });
+        if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
+          const warning = frameFallbackDiagnostic(node.id || sceneId);
+          diagnostics.push(warning);
+          htmlResult = {
+            success: true,
+            html: frameFallbackBuilder.buildFallbackFrameHtml({
+              scene,
+              node,
+              target: templateRenderTarget,
+              template,
+            }),
+            fallbackDiagnostic: warning,
+          };
+        }
+      }
       if (!htmlResult.success) {
-        const frameDiagnostics = normalizeDiagnostics(htmlResult.diagnostics, {
-          code: 'frame_html_invalid',
+        const diagnosticCode = isProviderMissingText(htmlResult.message) ? 'provider_missing_text' : 'frame_html_invalid';
+        const rawDiagnostics = diagnosticCode === 'provider_missing_text'
+          ? (Array.isArray(htmlResult.diagnostics) ? htmlResult.diagnostics : []).map(item => ({
+            ...objectOrEmpty(item),
+            code: 'provider_missing_text',
+          }))
+          : htmlResult.diagnostics;
+        const normalizedFrameDiagnostics = normalizeDiagnostics(rawDiagnostics, {
+          code: diagnosticCode,
           stage: 'ai-frame-html',
           sub_stage: 'frame_html',
           frame_id: node.id || sceneId,
@@ -811,17 +961,18 @@ async function generateHtmlVideo(options = {}) {
           retryable: true,
           repair_action: 'retry_frame_html',
         });
-        const diagnosticCode = frameDiagnostics[0]?.code || 'frame_html_invalid';
+        const checkpointDiagnosticCode = normalizedFrameDiagnostics[0]?.code || diagnosticCode;
         project = await projectStore.writeProjectJson(projectDir, current => {
+          markCheckpointStage(current, 'frame_html', { status: 'partial' });
           markCheckpointFrame(current, 'frame_html', sceneId, {
             status: 'failed',
-            diagnostic_code: diagnosticCode,
+            diagnostic_code: checkpointDiagnosticCode,
           });
           return current;
         });
-        return failure(htmlResult.message || '单帧 HTML 生成失败。', frameDiagnostics.length ? frameDiagnostics : [
+        return failure(htmlResult.message || '单帧 HTML 生成失败。', normalizedFrameDiagnostics.length ? normalizedFrameDiagnostics : [
           createDiagnostic({
-            code: 'frame_html_invalid',
+            code: diagnosticCode,
             stage: 'ai-frame-html',
             sub_stage: 'frame_html',
             frame_id: node.id || sceneId,
@@ -835,7 +986,6 @@ async function generateHtmlVideo(options = {}) {
           project_dir: projectDir,
         });
       }
-      const scene = scenes.get(sceneId);
       const durationSec = trustedSceneDuration(scene || {}, node);
       const captions = mediaOptions.generateCaptions !== false && scene
         ? normalizeCaptions(scene, durationSec)
@@ -852,6 +1002,7 @@ async function generateHtmlVideo(options = {}) {
         });
       } catch (error) {
         project = await projectStore.writeProjectJson(projectDir, current => {
+          markCheckpointStage(current, 'frame_html', { status: 'partial' });
           markCheckpointFrame(current, 'frame_html', sceneId, {
             status: 'failed',
             diagnostic_code: 'frame_html_write_failed',
@@ -885,12 +1036,13 @@ async function generateHtmlVideo(options = {}) {
       };
       project = await projectStore.writeProjectJson(projectDir, current => {
         current.content_graph = contentGraph;
+        markCheckpointStage(current, 'frame_html', { status: 'partial' });
         markCheckpointFrame(current, 'frame_html', sceneId, {
           status: 'done',
           html_path: written.html_path,
           input_hash: sha256(htmlResult.html),
           output_hash: written.output_hash,
-          diagnostic_code: '',
+          diagnostic_code: htmlResult.fallbackDiagnostic?.code || '',
         });
         return current;
       });
@@ -909,6 +1061,11 @@ async function generateHtmlVideo(options = {}) {
         },
       });
     }
+    project = await projectStore.writeProjectJson(projectDir, current => {
+      current.content_graph = contentGraph;
+      markCheckpointStage(current, 'frame_html', { status: 'done' });
+      return current;
+    });
     try {
       project = await buildRawHtmlFrameProject({
         projectDir,
@@ -1233,6 +1390,7 @@ module.exports = {
   callTextModel,
   generateContentGraphWithRetry,
   buildInitialProject,
+  shouldReuseFrameHtml,
   resolveRenderTarget,
   resolveTemplateRenderTarget,
   buildTemplateIndexOptions,
