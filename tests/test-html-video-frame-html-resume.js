@@ -10,6 +10,7 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 const { createEmptyProject, markCheckpointStage, markCheckpointFrame } = require('../server/services/creative-video/html-video/projectSchema');
+const { computeSceneSpecSpeechHash } = require('../server/services/creative-video/sceneSpecHash');
 
 async function writeFile(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -127,25 +128,90 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
     html_path: '',
     diagnostic_code: 'provider_missing_text',
   });
+  if (options.audio) {
+    project.audio = options.audio;
+  }
+  if (options.downstreamDone) {
+    markCheckpointFrame(project, 'render', 'scene_01', {
+      status: 'done',
+      mp4_path: 'frames/scene_01.mp4',
+      output_hash: 'render-1',
+    });
+    markCheckpointFrame(project, 'render', 'scene_03', {
+      status: 'done',
+      mp4_path: 'frames/scene_03.mp4',
+      output_hash: 'render-3',
+    });
+    markCheckpointStage(project, 'compose', {
+      status: 'done',
+      output_path: 'exports/output.mp4',
+      output_audio_path: 'exports/output-audio.mp4',
+      diagnostic_code: '',
+    });
+    markCheckpointStage(project, 'duration_verify', {
+      status: 'done',
+      expected_duration_sec: 6,
+      actual_duration_sec: 6,
+      diagnostic_code: '',
+    });
+    markCheckpointStage(project, 'visual_inspect', {
+      status: 'done',
+      report_path: 'inspect/report.json',
+      diagnostic_code: '',
+    });
+    project.exports = [{ id: 'export_001', path: 'exports/output.mp4', format: 'mp4' }];
+    project.render_outputs = [{ path: 'exports/output.mp4' }];
+  }
   await projectStore.saveProject(projectDir, project);
   return { projectDir, templateRegistry };
 }
 
-async function runWorkflow({ rootDir, workflowId, runId, templateRegistry, aiTextModel }) {
+async function runWorkflow({ rootDir, workflowId, runId, templateRegistry, aiTextModel, target = {}, services = {} }) {
   return workflow.generateHtmlVideo({
     workflowId,
     runId,
     rootDir,
     sceneSpec: sceneSpec(),
     creativeContext: { input: { raw_text: '三帧恢复测试' } },
-    target: { html_video_generation_mode: 'raw_html', generate_audio: false },
+    target: { html_video_generation_mode: 'raw_html', generate_audio: false, ...target },
     templateRegistry,
     skipValidation: true,
     services: {
       aiTextModel,
       environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ...services,
     },
   });
+}
+
+function matchingAudio() {
+  const spec = sceneSpec();
+  return {
+    source: 'scene_spec',
+    scene_spec_hash: computeSceneSpecSpeechHash(spec),
+    scene_count: spec.scenes.length,
+    scene_ids: spec.scenes.map(scene => scene.id),
+    status: 'ready',
+    narration_path: 'tts/narration.mp3',
+    tts_manifest_path: 'tts/audio_manifest.json',
+  };
+}
+
+function assertDownstreamInvalidated(project, sceneId = 'scene_03') {
+  const checkpoint = project.generation_checkpoint;
+  assert.equal(checkpoint.stages.frame_html.frames.scene_01.status, 'done');
+  assert.equal(checkpoint.stages.frame_html.frames.scene_02.status, 'done');
+  assert.equal(checkpoint.stages.render.frames.scene_01.status, 'done');
+  assert.equal(checkpoint.stages.render.frames[sceneId].status, 'pending');
+  assert.equal(checkpoint.stages.render.frames[sceneId].mp4_path, '');
+  assert.equal(checkpoint.stages.compose.status, 'pending');
+  assert.equal(checkpoint.stages.compose.output_path, '');
+  assert.equal(checkpoint.stages.compose.output_audio_path, '');
+  assert.equal(checkpoint.stages.duration_verify.status, 'pending');
+  assert.notEqual(checkpoint.stages.duration_verify.actual_duration_sec, 6);
+  assert.equal(checkpoint.stages.visual_inspect.status, 'pending');
+  assert.equal(checkpoint.stages.visual_inspect.report_path, null);
+  assert.deepEqual(project.exports, []);
 }
 
 async function main() {
@@ -200,6 +266,47 @@ async function main() {
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_01.html_path, 'frames/01-scene_01.html');
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_02.html_path, 'frames/02-scene_02.html');
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_03.status, 'done');
+    }
+
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-audio-resume-'));
+      const workflowId = '202606260000000005_audio_resume';
+      const runId = 'run_audio_resume';
+      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { audio: matchingAudio() });
+      let ttsCalls = 0;
+      frameHtmlAgent.generateFrameHtml = async args => ({ success: true, html: validHtml(args.node.id, args.node.id) });
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        templateRegistry,
+        target: { generate_audio: true },
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              throw new Error('音频恢复场景不应重新生成 content graph。');
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+        services: {
+          ttsService: {
+            async synthesizeSceneNarration() {
+              ttsCalls += 1;
+              throw new Error('resume 已有匹配音频时不应调用 TTS。');
+            },
+          },
+        },
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(ttsCalls, 0);
+      assert.equal(result.project.audio.narration_path, 'tts/narration.mp3');
     }
 
     {
@@ -305,7 +412,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-fallback-'));
       const workflowId = '202606260000000002_frame_fallback';
       const runId = 'run_fallback';
-      const { templateRegistry, projectDir } = await setupProject(rootDir, workflowId, runId);
+      const { templateRegistry, projectDir } = await setupProject(rootDir, workflowId, runId, { downstreamDone: true });
       const calls = [];
       let contentGraphCalls = 0;
       const fallbackCalls = [];
@@ -379,6 +486,7 @@ async function main() {
       assert.match(fallbackHtml, /data-text-key="headline"/);
       assert.match(fallbackHtml, /data-text-key="subtitle"/);
       assert.match(fallbackHtml, /data-text-key="body"/);
+      assertDownstreamInvalidated(project);
     }
   } finally {
     frameHtmlAgent.generateFrameHtml = originalGenerateFrameHtml;

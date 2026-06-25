@@ -53,6 +53,40 @@ function resolveExistingNarrationAudio(creativeContext = {}, sceneSpec = null) {
   return { reusable: true, audio, path: audioPath, reason: 'matched' };
 }
 
+function mergeResumeAudioIntoCreativeContext(creativeContext = {}, project = {}, resumeProject = null) {
+  const current = objectOrEmpty(creativeContext);
+  const currentAudio = objectOrEmpty(current.audio);
+  const currentPath = firstNonEmptyString(
+    currentAudio.path,
+    currentAudio.narration_path,
+    currentAudio.narrationPath,
+    currentAudio.combined_path,
+  );
+  if (currentPath) return current;
+  const projectAudio = objectOrEmpty(project.audio);
+  const resumeAudio = objectOrEmpty(resumeProject?.audio);
+  const audio = firstNonEmptyString(
+    projectAudio.path,
+    projectAudio.narration_path,
+    projectAudio.narrationPath,
+    projectAudio.combined_path,
+  ) ? projectAudio : resumeAudio;
+  const projectPath = firstNonEmptyString(
+    audio.path,
+    audio.narration_path,
+    audio.narrationPath,
+    audio.combined_path,
+  );
+  if (!projectPath) return current;
+  return {
+    ...current,
+    audio: {
+      ...audio,
+      path: projectPath,
+    },
+  };
+}
+
 function failure(message, diagnostics, extra = {}) {
   return failureFromDiagnostics(message, diagnostics, {
     render_mode: 'html-video',
@@ -166,6 +200,36 @@ function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target
     html_path: frame.html_path,
     scene_id: scene?.id || resolveNodeSceneId(node) || node?.id || '',
   };
+}
+
+function invalidateFrameHtmlDependents(project, sceneId) {
+  if (!project) return project;
+  markCheckpointFrame(project, 'render', sceneId, {
+    status: 'pending',
+    mp4_path: '',
+    output_hash: '',
+    diagnostic_code: '',
+  });
+  markCheckpointStage(project, 'compose', {
+    status: 'pending',
+    output_path: '',
+    output_audio_path: '',
+    diagnostic_code: '',
+  });
+  markCheckpointStage(project, 'duration_verify', {
+    status: 'pending',
+    expected_duration_sec: undefined,
+    actual_duration_sec: undefined,
+    diagnostic_code: '',
+  });
+  markCheckpointStage(project, 'visual_inspect', {
+    status: 'pending',
+    report_path: null,
+    diagnostic_code: '',
+  });
+  project.exports = [];
+  project.render_outputs = [];
+  return project;
 }
 
 function hasUsableContentGraph(graph = {}) {
@@ -1007,6 +1071,7 @@ async function generateHtmlVideo(options = {}) {
         });
         const checkpointDiagnosticCode = normalizedFrameDiagnostics[0]?.code || diagnosticCode;
         project = await projectStore.writeProjectJson(projectDir, current => {
+          invalidateFrameHtmlDependents(current, sceneId);
           markCheckpointStage(current, 'frame_html', { status: 'partial' });
           markCheckpointFrame(current, 'frame_html', sceneId, {
             status: 'failed',
@@ -1046,6 +1111,7 @@ async function generateHtmlVideo(options = {}) {
         });
       } catch (error) {
         project = await projectStore.writeProjectJson(projectDir, current => {
+          invalidateFrameHtmlDependents(current, sceneId);
           markCheckpointStage(current, 'frame_html', { status: 'partial' });
           markCheckpointFrame(current, 'frame_html', sceneId, {
             status: 'failed',
@@ -1079,6 +1145,7 @@ async function generateHtmlVideo(options = {}) {
         nodes,
       };
       project = await projectStore.writeProjectJson(projectDir, current => {
+        invalidateFrameHtmlDependents(current, sceneId);
         current.content_graph = contentGraph;
         markCheckpointStage(current, 'frame_html', { status: 'partial' });
         markCheckpointFrame(current, 'frame_html', sceneId, {
@@ -1180,7 +1247,10 @@ async function generateHtmlVideo(options = {}) {
       tts_manifest_path: null,
     };
   } else {
-    const existingNarrationAudio = resolveExistingNarrationAudio(creativeContext, sceneSpec);
+    const existingNarrationAudio = resolveExistingNarrationAudio(
+      mergeResumeAudioIntoCreativeContext(creativeContext, project, resumeProject),
+      sceneSpec,
+    );
     if (existingNarrationAudio.reusable) {
       const audio = existingNarrationAudio.audio;
       project.audio = objectOrEmpty(project.audio);
