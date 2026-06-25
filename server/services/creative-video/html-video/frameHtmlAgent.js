@@ -380,6 +380,12 @@ function frameFailure(code, message, args = {}, details = {}) {
   };
 }
 
+function htmlRetryFailureMessage(retry = {}) {
+  return retry.code === 'provider_missing_text'
+    ? 'AI 未返回有效 HTML document。'
+    : (retry.message || '单帧 HTML 生成失败。');
+}
+
 async function generateFrameHtml({
   model,
   frameId,
@@ -415,7 +421,7 @@ async function generateFrameHtml({
       validationMessage: validation.message,
     }), callOptions);
     if (!retry.success) {
-      return frameFailure('frame_html_invalid', retry.message || '单帧 HTML 生成失败。', promptArgs, {
+      return frameFailure('frame_html_invalid', htmlRetryFailureMessage(retry), promptArgs, {
         diagnostics: [validation.message, retry.message].filter(Boolean),
       });
     }
@@ -437,7 +443,7 @@ async function generateFrameHtml({
   }
   const retry = await callModel(model, buildRetryPrompt(promptArgs), callOptions);
   if (!retry.success) {
-    return frameFailure('frame_html_invalid', retry.message || '单帧 HTML 生成失败。', promptArgs, {
+    return frameFailure('frame_html_invalid', htmlRetryFailureMessage(retry), promptArgs, {
       diagnostics: [firstExtracted.message, retry.message].filter(Boolean),
     });
   }

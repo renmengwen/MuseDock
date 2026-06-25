@@ -293,11 +293,34 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   });
   assert.equal(retryBlankResult.success, false);
   assert.equal(retryBlankCalls, 2);
+  assert.doesNotMatch(retryBlankResult.message, /缺少文本|返回结果缺少文本内容/);
   assert.equal(retryBlankResult.diagnostics[0].code, 'frame_html_invalid');
+  assert.doesNotMatch(retryBlankResult.diagnostics[0].user_message, /缺少文本|返回结果缺少文本内容/);
   assert.equal(retryBlankResult.diagnostics[0].sub_stage, 'frame_html');
   assert.equal(retryBlankResult.diagnostics[0].frame_id, 'scene_01');
   assert.equal(retryBlankResult.diagnostics[0].retryable, true);
   assert.equal(retryBlankResult.diagnostics[0].repair_action, 'retry_frame_html');
+
+  let invalidRetryBlankCalls = 0;
+  const invalidRetryBlankResult = await agent.generateFrameHtml({
+    model: {
+      callTextModel: async () => {
+        invalidRetryBlankCalls += 1;
+        return invalidRetryBlankCalls === 1
+          ? { success: true, text: '仍然不是 HTML' }
+          : { success: true, text: '' };
+      },
+    },
+    graph,
+    node: graph.nodes[0],
+    index: 0,
+    total: 2,
+  });
+  assert.equal(invalidRetryBlankResult.success, false);
+  assert.equal(invalidRetryBlankCalls, 2);
+  assert.doesNotMatch(invalidRetryBlankResult.message, /缺少文本|返回结果缺少文本内容/);
+  assert.equal(invalidRetryBlankResult.diagnostics[0].code, 'frame_html_invalid');
+  assert.doesNotMatch(invalidRetryBlankResult.diagnostics[0].user_message, /缺少文本|返回结果缺少文本内容/);
 
   const failed = await agent.generateFrameHtml({
     model: { callTextModel: async () => ({ success: true, text: '仍然不是 HTML' }) },
