@@ -78,6 +78,8 @@ const retryPromptAttempt2 = agent.buildRetryPrompt(sceneSpec, creativeContext, {
 assert.match(retryPromptAttempt2, /nodes/);
 assert.match(retryPromptAttempt2, /durationSec/);
 assert.match(retryPromptAttempt2, /schema: \{"nodes":\[/);
+assert.match(retryPromptAttempt2, /\{"id":"string","kind":"text","label":"string","durationSec":2,"text":"string"\}/);
+assert.doesNotMatch(retryPromptAttempt2, /scene_01/);
 assert.doesNotMatch(retryPromptAttempt2, /edges/);
 assert.doesNotMatch(retryPromptAttempt2, /scene ids/);
 assert.doesNotMatch(retryPromptAttempt2, /scene_02/);

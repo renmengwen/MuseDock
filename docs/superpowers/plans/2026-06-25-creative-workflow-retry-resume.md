@@ -292,18 +292,18 @@ node tests/test-html-video-content-graph-agent.js
 
 **具体实现步骤:**
 
-- [ ] 写 `tests/test-html-video-content-graph-retry.js`：AI 返回带尾逗号 JSON 时 `parseContentGraphResponse()` 成功并保留 nodes。
-- [ ] 写同一测试：content graph 空文本第一次失败后，workflow 通过现有模型调用参数 `stream:false` 做非流式短 prompt 重试一次；第二次仍失败时使用 `mapSceneSpecToContentGraph(sceneSpec)`。
-- [ ] 写同一测试：`content_graph_scene_spec_mismatch` 首次运行记录 warning 并自动 fallback，不把 retry action 设为 `fallback_scene_spec_graph`。
-- [ ] 运行 `node tests/test-html-video-content-graph-retry.js`，预期失败为尾逗号无法解析或空文本未重试。
-- [ ] 在 `contentGraphAgent.js` 新增 `tolerantParseJson(text)`，只做 fenced JSON 提取、去尾逗号、有限未转义引号修复。
-- [ ] 在 `contentGraphAgent.js` 新增 `buildRetryPrompt(sceneSpec, creativeContext, target, originalPrompt, attempt)`；attempt 1 保留 scene id/title/duration/narration，attempt 2 只保留最小 `nodes` schema。
-- [ ] 修改 `parseContentGraphResponse()` 先调用 tolerant parse，再进入 `normalizeContentGraph()`。
-- [ ] 修改 `htmlVideoWorkflow.js` 的 `callTextModel(model, prompt, options = {})` wrapper，将 `options.stream`、`options.temperature` 等传给 `model.callTextModel()`；当前底层默认 `stream:false`，显式传参用于固定 retry 语义并防止未来默认值变化。
-- [ ] 修改 `htmlVideoWorkflow.js` content graph AI 调用失败路径：当 `graphAi.message` 匹配 `返回结果缺少文本内容` 或 `流式返回结果缺少文本内容` 时，diagnostic `code` 使用 `provider_missing_text`，否则保持 `content_graph_failed`。
-- [ ] 修改 `htmlVideoWorkflow.js` content graph 调用：provider missing text 时先非流式重试，再短 prompt 重试；仍失败则返回带 `repair_action: 'fallback_scene_spec_graph'` 的 diagnostic，或在首次运行可直接用 scene_spec graph 继续。
-- [ ] content graph 成功、fallback 成功、失败三种路径都更新 `generation_checkpoint.stages.content_graph`。
-- [ ] 运行本 Task 验收命令。
+- [x] 写 `tests/test-html-video-content-graph-retry.js`：AI 返回带尾逗号 JSON 时 `parseContentGraphResponse()` 成功并保留 nodes。
+- [x] 写同一测试：content graph 空文本第一次失败后，workflow 通过现有模型调用参数 `stream:false` 做非流式短 prompt 重试一次；第二次仍失败时使用 `mapSceneSpecToContentGraph(sceneSpec)`。
+- [x] 写同一测试：`content_graph_scene_spec_mismatch` 首次运行记录 warning 并自动 fallback，不把 retry action 设为 `fallback_scene_spec_graph`。
+- [x] 运行 `node tests/test-html-video-content-graph-retry.js`，预期失败为尾逗号无法解析或空文本未重试。
+- [x] 在 `contentGraphAgent.js` 新增 `tolerantParseJson(text)`，只做 fenced JSON 提取、去尾逗号、有限未转义引号修复。
+- [x] 在 `contentGraphAgent.js` 新增 `buildRetryPrompt(sceneSpec, creativeContext, target, originalPrompt, attempt)`；attempt 1 保留 scene id/title/duration/narration，attempt 2 只保留最小 `nodes` schema。
+- [x] 修改 `parseContentGraphResponse()` 先调用 tolerant parse，再进入 `normalizeContentGraph()`。
+- [x] 修改 `htmlVideoWorkflow.js` 的 `callTextModel(model, prompt, options = {})` wrapper，将 `options.stream`、`options.temperature` 等传给 `model.callTextModel()`；当前底层默认 `stream:false`，显式传参用于固定 retry 语义并防止未来默认值变化。
+- [x] 修改 `htmlVideoWorkflow.js` content graph AI 调用失败路径：当 `graphAi.message` 匹配 `返回结果缺少文本内容` 或 `流式返回结果缺少文本内容` 时，diagnostic `code` 使用 `provider_missing_text`，否则保持 `content_graph_failed`。
+- [x] 修改 `htmlVideoWorkflow.js` content graph 调用：provider missing text 时先非流式重试，再短 prompt 重试；仍失败则返回带 `repair_action: 'fallback_scene_spec_graph'` 的 diagnostic，或在首次运行可直接用 scene_spec graph 继续。
+- [x] content graph 成功、fallback 成功、失败三种路径都更新 `generation_checkpoint.stages.content_graph`。
+- [x] 运行本 Task 验收命令。
 
 **需要新增/修改的函数签名:**
 
