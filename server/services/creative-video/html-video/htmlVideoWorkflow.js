@@ -188,12 +188,12 @@ function htmlHasTextKey(html, key) {
 }
 
 function resumeArtifactsMatch(project = {}, sceneSpec = null, template = {}) {
+  const currentHash = computeSceneSpecSpeechHash(sceneSpec || {});
   const checkpointHash = String(project.generation_checkpoint?.scene_spec_hash || '').trim();
-  if (checkpointHash && checkpointHash !== computeSceneSpecSpeechHash(sceneSpec || {})) return false;
+  if (!checkpointHash || !currentHash || checkpointHash !== currentHash) return false;
   const projectTemplateId = String(project.template_id || '').trim();
   const templateId = String(template?.id || '').trim();
-  if (projectTemplateId && templateId && projectTemplateId !== templateId) return false;
-  return true;
+  return Boolean(projectTemplateId && templateId && projectTemplateId === templateId);
 }
 
 function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target, resumeAllowed = true } = {}) {

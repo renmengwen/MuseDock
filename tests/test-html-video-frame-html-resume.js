@@ -139,9 +139,13 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
     runId,
     contentGraph: graph,
   });
-  project.template_id = options.templateId || 'vertical';
+  if (!options.omitTemplateId) {
+    project.template_id = options.templateId || 'vertical';
+  }
   await writeFile(path.join(projectDir, 'content-graph.json'), `${JSON.stringify(graph, null, 2)}\n`);
-  project.generation_checkpoint.scene_spec_hash = options.sceneSpecHash || computeSceneSpecSpeechHash(sceneSpec());
+  if (!options.omitSceneSpecHash) {
+    project.generation_checkpoint.scene_spec_hash = options.sceneSpecHash || computeSceneSpecSpeechHash(sceneSpec());
+  }
   markCheckpointStage(project, 'content_graph', {
     status: 'done',
     path: 'content-graph.json',
@@ -442,6 +446,80 @@ async function main() {
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               contentGraphCalls += 1;
               return { success: true, text: JSON.stringify(contentGraph('脚本已修改')) };
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(contentGraphCalls, 1);
+      assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_02', 'scene_03']);
+    }
+
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-missing-hash-'));
+      const workflowId = '202606260000000009_missing_hash';
+      const runId = 'run_missing_hash';
+      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { omitSceneSpecHash: true });
+      const calls = [];
+      let contentGraphCalls = 0;
+      frameHtmlAgent.generateFrameHtml = async args => {
+        calls.push(args);
+        return { success: true, html: validHtml(args.node.id, args.node.id) };
+      };
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        templateRegistry,
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              contentGraphCalls += 1;
+              return { success: true, text: JSON.stringify(contentGraph('缺 hash 重新生成')) };
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(contentGraphCalls, 1);
+      assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_02', 'scene_03']);
+    }
+
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-missing-template-'));
+      const workflowId = '202606260000000010_missing_template';
+      const runId = 'run_missing_template';
+      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { omitTemplateId: true });
+      const calls = [];
+      let contentGraphCalls = 0;
+      frameHtmlAgent.generateFrameHtml = async args => {
+        calls.push(args);
+        return { success: true, html: validHtml(args.node.id, args.node.id) };
+      };
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        templateRegistry,
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              contentGraphCalls += 1;
+              return { success: true, text: JSON.stringify(contentGraph('缺模板重新生成')) };
             }
             throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
           },
