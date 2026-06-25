@@ -561,7 +561,7 @@ async function generateHtmlVideo(options = {}) {
     });
     const graphAi = await callTextModel(model, graphPrompt);
     if (!graphAi.success) {
-      return failure(graphAi.message || 'content graph 生成失败。', [
+      const graphDiagnostics = [
         createDiagnostic({
           code: 'content_graph_failed',
           stage: 'ai-content-graph',
@@ -570,9 +570,18 @@ async function generateHtmlVideo(options = {}) {
           retryable: true,
           repair_action: 'retry_content_graph',
         }),
-      ], {
+      ];
+      project = await projectStore.writeProjectJson(projectDir, current => {
+        markCheckpointStage(current, 'content_graph', {
+          status: 'failed',
+          diagnostic_code: graphDiagnostics[0]?.code || 'content_graph_failed',
+        });
+        return current;
+      });
+      return failure(graphAi.message || 'content graph 生成失败。', graphDiagnostics, {
         html_video_project_path: projectDir,
         project_dir: projectDir,
+        project,
       });
     }
     const graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec);
@@ -586,7 +595,7 @@ async function generateHtmlVideo(options = {}) {
         retryable: true,
         repair_action: 'retry_content_graph',
       });
-      return failure(graphParsed.message || 'content graph 解析失败。', graphDiagnostics.length ? graphDiagnostics : [
+      const fallbackGraphDiagnostics = graphDiagnostics.length ? graphDiagnostics : [
         createDiagnostic({
           code: 'content_graph_invalid',
           stage: 'ai-content-graph',
@@ -596,9 +605,18 @@ async function generateHtmlVideo(options = {}) {
           repair_action: 'retry_content_graph',
           details: { errors: graphParsed.errors || [] },
         }),
-      ], {
+      ];
+      project = await projectStore.writeProjectJson(projectDir, current => {
+        markCheckpointStage(current, 'content_graph', {
+          status: 'failed',
+          diagnostic_code: fallbackGraphDiagnostics[0]?.code || 'content_graph_invalid',
+        });
+        return current;
+      });
+      return failure(graphParsed.message || 'content graph 解析失败。', fallbackGraphDiagnostics, {
         html_video_project_path: projectDir,
         project_dir: projectDir,
+        project,
       });
     }
     let contentGraph = graphParsed.graph;
@@ -813,12 +831,22 @@ async function generateHtmlVideo(options = {}) {
   });
   diagnostics.push(...validation.diagnostics);
   if (!validation.ok) {
+    markCheckpointStage(project, 'validate_project', {
+      status: 'failed',
+      diagnostic_code: validation.diagnostics[0]?.code || diagnostics[0]?.code || 'project_invalid',
+    });
+    project = await projectStore.saveProject(projectDir, project);
     return failure('html-video 工程未通过生成前校验。', diagnostics, {
       html_video_project_path: projectDir,
       project_dir: projectDir,
       project,
     });
   }
+  markCheckpointStage(project, 'validate_project', {
+    status: 'done',
+    diagnostic_code: '',
+  });
+  project = await projectStore.saveProject(projectDir, project);
 
   if (mediaOptions.generateAudio === false) {
     project.audio = {

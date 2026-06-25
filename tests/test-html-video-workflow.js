@@ -85,6 +85,10 @@ function fullSceneCaption(sceneId, text, duration) {
   }];
 }
 
+async function readProjectJson(projectDir) {
+  return JSON.parse(await fs.readFile(path.join(projectDir, 'project.json'), 'utf8'));
+}
+
 (async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-workflow-'));
   const templateRoot = path.join(rootDir, 'templates');
@@ -175,6 +179,74 @@ function fullSceneCaption(sceneId, text, duration) {
   assert.ok(rawPathResult.html_video_diagnostics.some(item => item.code === 'raw_html_text_keys_missing'));
   assert.ok(rawCalls.some(call => call === 'render:scene_01:raw_html'));
   assert.ok(rawCalls.some(call => call === 'render:scene_02:raw_html'));
+  const rawPathSavedProject = await readProjectJson(rawPathResult.html_video_project_path);
+  assert.equal(rawPathSavedProject.generation_checkpoint.stages.validate_project.status, 'done');
+  assert.equal(rawPathSavedProject.generation_checkpoint.stages.validate_project.diagnostic_code, '');
+
+  const contentGraphAiFailure = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000009_graph_ai_failure',
+    runId: 'run_graph_ai_failure',
+    rootDir,
+    sceneSpec: {
+      title: '内容图失败',
+      aspect_ratio: '9:16',
+      scenes: [
+        { id: 'scene_01', duration: 2, kind: 'text', narration_text: '内容图失败旁白', captions: fullSceneCaption('scene_01', '内容图失败旁白', 2), visual_text: { headline: '内容图失败', keywords: [], cards: [] } },
+      ],
+    },
+    creativeContext: { input: { raw_text: '内容图模型失败' } },
+    target: { html_video_generation_mode: 'raw_html' },
+    templateRegistry,
+    skipValidation: true,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          }
+          return { success: false, message: 'content graph 生成失败。' };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+    },
+  });
+  assert.equal(contentGraphAiFailure.success, false);
+  const graphFailureProject = await readProjectJson(contentGraphAiFailure.html_video_project_path);
+  assert.equal(graphFailureProject.generation_checkpoint.stages.content_graph.status, 'failed');
+  assert.equal(graphFailureProject.generation_checkpoint.stages.content_graph.diagnostic_code, 'content_graph_failed');
+
+  const validationFailure = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000010_validation_failure',
+    runId: 'run_validation_failure',
+    rootDir,
+    sceneSpec: {
+      title: '校验失败',
+      aspect_ratio: '16:9',
+      scenes: [
+        { id: 'scene_01', duration: 2, kind: 'text', narration_text: '校验失败旁白', captions: fullSceneCaption('scene_01', '校验失败旁白', 2), visual_text: { headline: '校验失败', keywords: [], cards: [] } },
+      ],
+    },
+    creativeContext: { input: { raw_text: '校验失败' } },
+    target: { html_video_generation_mode: 'template_inputs' },
+    templateRegistry,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配横屏', confidence: 0.9 }) };
+          }
+          return { success: true, text: JSON.stringify({ headline: '校验失败标题' }) };
+        },
+      },
+      environmentDoctor: async () => ({ ok: false, diagnostics: [{ code: 'ffmpeg_missing', ok: false }] }),
+    },
+  });
+  assert.equal(validationFailure.success, false);
+  const validationFailureProject = await readProjectJson(validationFailure.html_video_project_path);
+  assert.equal(validationFailureProject.generation_checkpoint.stages.validate_project.status, 'failed');
+  assert.equal(validationFailureProject.generation_checkpoint.stages.validate_project.diagnostic_code, 'ffmpeg_not_configured');
 
   let unreasonableTimelineRenderCalls = 0;
   const unreasonableTimelineResult = await workflow.generateHtmlVideo({
