@@ -350,13 +350,22 @@ async function callModel(model, prompt, options = {}) {
     messages: [{ role: 'user', content: prompt }],
   });
   if (!response || response.success === false) {
-    return { success: false, message: response?.message || 'AI 调用失败。' };
+    const message = response?.message || 'AI 调用失败。';
+    return {
+      success: false,
+      message,
+      ...(isProviderMissingTextMessage(message) ? { code: 'provider_missing_text' } : {}),
+    };
   }
   const text = response.text || response.content || '';
   if (!String(text || '').trim()) {
     return { success: false, message: '模型返回结果缺少文本内容。', code: 'provider_missing_text' };
   }
   return { success: true, text };
+}
+
+function isProviderMissingTextMessage(message = '') {
+  return /返回结果缺少文本内容|流式返回结果缺少文本内容|缺少文本/.test(String(message || ''));
 }
 
 function frameDiagnostic(code, message, args = {}, details = {}) {
