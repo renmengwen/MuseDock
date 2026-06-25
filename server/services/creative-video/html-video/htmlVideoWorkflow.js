@@ -53,38 +53,28 @@ function resolveExistingNarrationAudio(creativeContext = {}, sceneSpec = null) {
   return { reusable: true, audio, path: audioPath, reason: 'matched' };
 }
 
-function mergeResumeAudioIntoCreativeContext(creativeContext = {}, project = {}, resumeProject = null) {
+function audioWithResolvedPath(audio = {}) {
+  const safeAudio = objectOrEmpty(audio);
+  const pathValue = firstNonEmptyString(
+    safeAudio.path,
+    safeAudio.narration_path,
+    safeAudio.narrationPath,
+    safeAudio.combined_path,
+  );
+  return pathValue ? { ...safeAudio, path: pathValue } : safeAudio;
+}
+
+function mergeResumeAudioIntoCreativeContext(creativeContext = {}, project = {}, resumeProject = null, sceneSpec = null) {
   const current = objectOrEmpty(creativeContext);
-  const currentAudio = objectOrEmpty(current.audio);
-  const currentPath = firstNonEmptyString(
-    currentAudio.path,
-    currentAudio.narration_path,
-    currentAudio.narrationPath,
-    currentAudio.combined_path,
-  );
-  if (currentPath) return current;
-  const projectAudio = objectOrEmpty(project.audio);
-  const resumeAudio = objectOrEmpty(resumeProject?.audio);
-  const audio = firstNonEmptyString(
-    projectAudio.path,
-    projectAudio.narration_path,
-    projectAudio.narrationPath,
-    projectAudio.combined_path,
-  ) ? projectAudio : resumeAudio;
-  const projectPath = firstNonEmptyString(
-    audio.path,
-    audio.narration_path,
-    audio.narrationPath,
-    audio.combined_path,
-  );
-  if (!projectPath) return current;
-  return {
-    ...current,
-    audio: {
-      ...audio,
-      path: projectPath,
-    },
-  };
+  const candidates = [
+    audioWithResolvedPath(current.audio),
+    audioWithResolvedPath(project.audio),
+    audioWithResolvedPath(resumeProject?.audio),
+  ];
+  const matched = candidates.find(audio => audioMatchesSceneSpec(audio, sceneSpec || {}));
+  if (!matched) return current;
+  if (matched === candidates[0]) return current;
+  return { ...current, audio: matched };
 }
 
 function failure(message, diagnostics, extra = {}) {
@@ -247,6 +237,39 @@ function invalidateFrameHtmlDependents(project, sceneId) {
     output_hash: '',
     diagnostic_code: '',
   });
+  markCheckpointStage(project, 'compose', {
+    status: 'pending',
+    output_path: '',
+    output_audio_path: '',
+    diagnostic_code: '',
+  });
+  markCheckpointStage(project, 'duration_verify', {
+    status: 'pending',
+    expected_duration_sec: undefined,
+    actual_duration_sec: undefined,
+    diagnostic_code: '',
+  });
+  markCheckpointStage(project, 'visual_inspect', {
+    status: 'pending',
+    report_path: null,
+    diagnostic_code: '',
+  });
+  project.exports = [];
+  project.render_outputs = [];
+  project.status = 'draft';
+  return project;
+}
+
+function invalidateFrameHtmlResumeState(project) {
+  if (!project) return project;
+  markCheckpointStage(project, 'frame_html', { status: 'pending' });
+  if (project.generation_checkpoint?.stages?.frame_html) {
+    project.generation_checkpoint.stages.frame_html.frames = {};
+  }
+  if (project.generation_checkpoint?.stages?.render) {
+    project.generation_checkpoint.stages.render.frames = {};
+    project.generation_checkpoint.stages.render.status = 'pending';
+  }
   markCheckpointStage(project, 'compose', {
     status: 'pending',
     output_path: '',
@@ -971,6 +994,7 @@ async function generateHtmlVideo(options = {}) {
       });
       const contentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
       project = await projectStore.writeProjectJson(projectDir, current => {
+        if (!resumeAllowed) invalidateFrameHtmlResumeState(current);
         current.template_id = template.id || current.template_id;
         current.content_graph = contentGraph;
         current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
@@ -1294,7 +1318,7 @@ async function generateHtmlVideo(options = {}) {
     };
   } else {
     const existingNarrationAudio = resolveExistingNarrationAudio(
-      mergeResumeAudioIntoCreativeContext(creativeContext, project, resumeProject),
+      mergeResumeAudioIntoCreativeContext(creativeContext, project, resumeProject, sceneSpec),
       sceneSpec,
     );
     if (existingNarrationAudio.reusable) {

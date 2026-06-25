@@ -234,13 +234,13 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
   return { projectDir, templateRegistry };
 }
 
-async function runWorkflow({ rootDir, workflowId, runId, templateRegistry, aiTextModel, target = {}, services = {}, sceneSpecOverride = null }) {
+async function runWorkflow({ rootDir, workflowId, runId, templateRegistry, aiTextModel, target = {}, services = {}, sceneSpecOverride = null, creativeContextOverride = null }) {
   return workflow.generateHtmlVideo({
     workflowId,
     runId,
     rootDir,
     sceneSpec: sceneSpecOverride || sceneSpec(),
-    creativeContext: { input: { raw_text: '三帧恢复测试' } },
+    creativeContext: creativeContextOverride || { input: { raw_text: '三帧恢复测试' } },
     target: { html_video_generation_mode: 'raw_html', generate_audio: false, ...target },
     templateRegistry,
     skipValidation: true,
@@ -262,6 +262,18 @@ function matchingAudio() {
     status: 'ready',
     narration_path: 'tts/narration.mp3',
     tts_manifest_path: 'tts/audio_manifest.json',
+  };
+}
+
+function mismatchedAudio() {
+  return {
+    source: 'scene_spec',
+    scene_spec_hash: 'old-hash',
+    scene_count: 1,
+    scene_ids: ['old_scene'],
+    status: 'ready',
+    narration_path: 'tts/old-narration.mp3',
+    tts_manifest_path: 'tts/old-audio_manifest.json',
   };
 }
 
@@ -368,6 +380,51 @@ async function main() {
             async synthesizeSceneNarration() {
               ttsCalls += 1;
               throw new Error('resume 已有匹配音频时不应调用 TTS。');
+            },
+          },
+        },
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(ttsCalls, 0);
+      assert.equal(result.project.audio.narration_path, 'tts/narration.mp3');
+    }
+
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-audio-current-mismatch-'));
+      const workflowId = '202606260000000012_audio_current_mismatch';
+      const runId = 'run_audio_current_mismatch';
+      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { audio: matchingAudio() });
+      let ttsCalls = 0;
+      frameHtmlAgent.generateFrameHtml = async args => ({ success: true, html: validHtml(args.node.id, args.node.id) });
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        templateRegistry,
+        target: { generate_audio: true },
+        creativeContextOverride: {
+          input: { raw_text: '三帧恢复测试' },
+          audio: mismatchedAudio(),
+        },
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              throw new Error('音频候选选择场景不应重新生成 content graph。');
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+        services: {
+          ttsService: {
+            async synthesizeSceneNarration() {
+              ttsCalls += 1;
+              throw new Error('resume 有匹配音频时不应调用 TTS。');
             },
           },
         },
@@ -522,6 +579,59 @@ async function main() {
       assert.equal(result.success, true);
       assert.equal(contentGraphCalls, 1);
       assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_02', 'scene_03']);
+    }
+
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-rewrite-interrupt-'));
+      const workflowId = '202606260000000013_rewrite_interrupt';
+      const runId = 'run_rewrite_interrupt';
+      const visualSpec = changedVisualSceneSpec();
+      const { templateRegistry, projectDir } = await setupProject(rootDir, workflowId, runId, { downstreamDone: true });
+      let contentGraphCalls = 0;
+      frameHtmlAgent.generateFrameHtml = async args => ({
+        success: false,
+        message: `模拟 ${args.node.id} 失败`,
+        diagnostics: [{
+          code: 'frame_html_invalid',
+          stage: 'ai-frame-html',
+          sub_stage: 'frame_html',
+          frame_id: args.node.id,
+          user_message: '模拟帧 HTML 失败。',
+          retryable: true,
+          repair_action: 'retry_frame_html',
+        }],
+      });
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        templateRegistry,
+        sceneSpecOverride: visualSpec,
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              contentGraphCalls += 1;
+              return { success: true, text: JSON.stringify(contentGraph('中断新图')) };
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+
+      assert.equal(result.success, false);
+      assert.equal(contentGraphCalls, 1);
+      const project = await projectStore.loadProject(projectDir);
+      assert.equal(project.generation_checkpoint.scene_spec_hash, computeSceneSpecCheckpointHash(visualSpec));
+      assert.equal(project.content_graph.synopsis, '中断新图');
+      assert.notEqual(project.generation_checkpoint.stages.frame_html.frames.scene_01?.status, 'done');
+      assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_02, undefined);
+      assert.deepEqual(project.exports, []);
+      assert.notEqual(project.status, 'rendered');
     }
 
     {
