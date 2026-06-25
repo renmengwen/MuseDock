@@ -70,12 +70,15 @@ function comparableSceneCaptions(scene = {}, frame = {}) {
 }
 
 function add(diagnostics, code, userMessage, details = {}) {
+  const inputDetails = objectOrEmpty(details);
   diagnostics.push({
     ...createDiagnostic({
       code,
       stage: 'timeline-consistency',
+      sub_stage: 'timeline_check',
+      frame_id: inputDetails.frame_id || '',
       user_message: userMessage,
-      details,
+      details: inputDetails,
       fallback_allowed: false,
     }),
     severity: 'error',

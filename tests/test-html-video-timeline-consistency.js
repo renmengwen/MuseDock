@@ -54,7 +54,9 @@ function assertDiagnosticCode(result, code) {
   assert.equal(diagnostic.details.index, 0);
   assert.equal(diagnostic.details.expected_scene_id, 'scene_01');
   assert.equal(diagnostic.details.actual_scene_id, 'scene_02');
-  assert.equal(diagnostic.details.frame_id, 'scene_02');
+  assert.equal(diagnostic.sub_stage, 'timeline_check');
+  assert.equal(diagnostic.frame_id, 'scene_02');
+  assert.equal(Object.hasOwn(diagnostic.details, 'frame_id'), false);
 }
 
 for (const emptySceneSpec of [{ scenes: [] }, {}]) {
@@ -81,7 +83,10 @@ for (const emptySceneSpec of [{ scenes: [] }, {}]) {
   badProject.frames[1].scene_id = 'scene_03';
   const result = validateSceneSpecTimelineConsistency({ sceneSpec: spec(), project: badProject, audio: badProject.audio });
   assert.equal(result.ok, false);
-  assertDiagnosticCode(result, 'frame_scene_missing');
+  const diagnostic = assertDiagnosticCode(result, 'frame_scene_missing');
+  assert.equal(diagnostic.sub_stage, 'timeline_check');
+  assert.equal(diagnostic.frame_id, 'scene_02');
+  assert.equal(Object.hasOwn(diagnostic.details, 'frame_id'), false);
 }
 
 {
