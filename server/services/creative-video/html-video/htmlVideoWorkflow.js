@@ -174,7 +174,30 @@ async function loadExistingProject(projectDir) {
   }
 }
 
-function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target } = {}) {
+function stripIgnoredHtmlRegions(html) {
+  return String(html || '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, '');
+}
+
+function htmlHasTextKey(html, key) {
+  const tags = stripIgnoredHtmlRegions(html).match(/<[A-Za-z][^>]*>/g) || [];
+  const pattern = new RegExp(`\\bdata-text-key\\s*=\\s*(['"])${key}\\1`, 'i');
+  return tags.some(tag => pattern.test(tag));
+}
+
+function resumeArtifactsMatch(project = {}, sceneSpec = null, template = {}) {
+  const checkpointHash = String(project.generation_checkpoint?.scene_spec_hash || '').trim();
+  if (checkpointHash && checkpointHash !== computeSceneSpecSpeechHash(sceneSpec || {})) return false;
+  const projectTemplateId = String(project.template_id || '').trim();
+  const templateId = String(template?.id || '').trim();
+  if (projectTemplateId && templateId && projectTemplateId !== templateId) return false;
+  return true;
+}
+
+function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target, resumeAllowed = true } = {}) {
+  if (!resumeAllowed) return { reuse: false };
   const frame = objectOrEmpty(checkpointFrame);
   if (frame.status !== 'done' || !frame.html_path) return { reuse: false };
   let html;
@@ -190,7 +213,7 @@ function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target
   const validation = frameHtmlAgent.validateHtmlTargetResolution(extracted.html, target || {});
   if (!validation.success) return { reuse: false };
   for (const key of ['headline', 'subtitle', 'body']) {
-    if (!new RegExp(`data-text-key=["']${key}["']`, 'i').test(extracted.html)) {
+    if (!htmlHasTextKey(extracted.html, key)) {
       return { reuse: false };
     }
   }
@@ -229,6 +252,7 @@ function invalidateFrameHtmlDependents(project, sceneId) {
   });
   project.exports = [];
   project.render_outputs = [];
+  project.status = 'draft';
   return project;
 }
 
@@ -254,8 +278,9 @@ function loadCheckpointContentGraph(projectDir, project = {}) {
   }
 }
 
-function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null) {
+function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null, template = {}) {
   if (!project) return null;
+  if (!resumeArtifactsMatch(project, sceneSpec, template)) return null;
   if (hasUsableContentGraph(project.content_graph) && contentGraphMatchesSceneSpec(project.content_graph, sceneSpec)) {
     return project.content_graph;
   }
@@ -772,6 +797,7 @@ async function generateHtmlVideo(options = {}) {
     ]);
   }
   const templateRenderTarget = resolveTemplateRenderTarget(renderTarget, template);
+  const currentSceneSpecHash = computeSceneSpecSpeechHash(sceneSpec || {});
   const trustedTargetDurationSec = firstPositiveNumber(
     templateRenderTarget.duration_sec,
     templateRenderTarget.durationSec,
@@ -845,9 +871,12 @@ async function generateHtmlVideo(options = {}) {
       target: templateRenderTarget,
     });
   } else {
-    let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec);
+    const resumeAllowed = resumeArtifactsMatch(resumeProject || {}, sceneSpec, template);
+    let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec, template);
     if (contentGraph) {
       project = await projectStore.writeProjectJson(projectDir, current => {
+        current.template_id = template.id || current.template_id;
+        current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
         current.content_graph = contentGraph;
         return current;
       });
@@ -928,7 +957,9 @@ async function generateHtmlVideo(options = {}) {
       });
       const contentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
       project = await projectStore.writeProjectJson(projectDir, current => {
+        current.template_id = template.id || current.template_id;
         current.content_graph = contentGraph;
+        current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
         current.generation_checkpoint.target = {
           duration_sec: firstPositiveNumber(templateRenderTarget.duration_sec, templateRenderTarget.durationSec, templateRenderTarget.duration),
           aspect_ratio: templateRenderTarget.aspect_ratio || templateRenderTarget.aspectRatio || '',
@@ -958,6 +989,7 @@ async function generateHtmlVideo(options = {}) {
         scene,
         node,
         target: templateRenderTarget,
+        resumeAllowed,
       });
       if (reuse.reuse) {
         const durationSec = trustedSceneDuration(scene || {}, node);
