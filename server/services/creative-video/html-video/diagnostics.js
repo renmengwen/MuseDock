@@ -2,6 +2,19 @@ function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+const DIAGNOSTIC_DETAIL_EXTENSION_KEYS = new Set([
+  'sub_stage',
+  'frame_id',
+  'retryable',
+  'repair_action',
+]);
+
+function stripDiagnosticDetailKeys(details) {
+  return Object.fromEntries(Object.entries(objectOrEmpty(details)).filter(([key]) => (
+    !DIAGNOSTIC_DETAIL_EXTENSION_KEYS.has(key)
+  )));
+}
+
 const DEFAULT_MESSAGES = {
   template_missing: '未找到可用的 html-video 模板。',
   unsupported_engine: '当前模板引擎暂不支持。',
@@ -35,7 +48,7 @@ function createDiagnostic(input = {}) {
     ...(sub_stage ? { sub_stage } : {}),
     ...(frame_id ? { frame_id } : {}),
     user_message: String(input.user_message || DEFAULT_MESSAGES[code] || 'html-video 处理失败。'),
-    details: objectOrEmpty(input.details),
+    details: stripDiagnosticDetailKeys(input.details),
     fallback_allowed: input.fallback_allowed !== false,
     ...(typeof input.retryable === 'boolean' ? { retryable: input.retryable } : {}),
     ...(repair_action ? { repair_action } : {}),

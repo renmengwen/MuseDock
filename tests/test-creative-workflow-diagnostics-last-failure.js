@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const creativeWorkflows = require('../server/services/creativeWorkflows');
-const { createDiagnostic } = require('../server/services/creative-video/html-video/diagnostics');
+const { createDiagnostic, normalizeDiagnostic, normalizeDiagnostics } = require('../server/services/creative-video/html-video/diagnostics');
 const { createEmptyProject, markCheckpointStage, markCheckpointFrame } = require('../server/services/creative-video/html-video/projectSchema');
 
 async function writeJson(filePath, data) {
@@ -31,6 +31,72 @@ async function writeJson(filePath, data) {
   assert.equal(Object.hasOwn(diagnostic.details, 'frame_id'), false);
   assert.equal(Object.hasOwn(diagnostic.details, 'retryable'), false);
   assert.equal(Object.hasOwn(diagnostic.details, 'repair_action'), false);
+
+  const detailPollutedDiagnostic = createDiagnostic({
+    code: 'frame_html_invalid',
+    stage: 'ai-frame-html',
+    sub_stage: 'frame_html',
+    frame_id: 'scene_01',
+    retryable: true,
+    repair_action: 'retry_frame_html',
+    details: {
+      frame_id: 'scene_01',
+      sub_stage: 'frame_html',
+      retryable: true,
+      repair_action: 'retry_frame_html',
+      provider: 'provider_1',
+    },
+  });
+  assert.equal(detailPollutedDiagnostic.sub_stage, 'frame_html');
+  assert.equal(detailPollutedDiagnostic.frame_id, 'scene_01');
+  assert.equal(detailPollutedDiagnostic.retryable, true);
+  assert.equal(detailPollutedDiagnostic.repair_action, 'retry_frame_html');
+  assert.deepEqual(detailPollutedDiagnostic.details, { provider: 'provider_1' });
+
+  const normalizedDiagnostic = normalizeDiagnostic({
+    code: 'raw_html_path_invalid',
+    stage: 'frame',
+    sub_stage: 'frame_html',
+    frame_id: 'scene_02',
+    retryable: true,
+    repair_action: 'retry_frame_html',
+    details: {
+      frame_id: 'scene_02',
+      sub_stage: 'frame_html',
+      retryable: true,
+      repair_action: 'retry_frame_html',
+      html_path: '../bad.html',
+    },
+  }, {
+    details: {
+      frame_id: 'scene_default',
+      sub_stage: 'frame_html',
+      retryable: false,
+      repair_action: 'retry_frame_html',
+      source: 'default',
+    },
+  });
+  assert.equal(normalizedDiagnostic.sub_stage, 'frame_html');
+  assert.equal(normalizedDiagnostic.frame_id, 'scene_02');
+  assert.equal(normalizedDiagnostic.retryable, true);
+  assert.equal(normalizedDiagnostic.repair_action, 'retry_frame_html');
+  assert.deepEqual(normalizedDiagnostic.details, { source: 'default', html_path: '../bad.html' });
+
+  const normalizedDiagnostics = normalizeDiagnostics([{
+    code: 'render_failed',
+    sub_stage: 'render',
+    frame_id: 'scene_03',
+    details: {
+      frame_id: 'scene_03',
+      sub_stage: 'render',
+      retryable: true,
+      repair_action: 'retry_render_frame',
+      exit_code: 1,
+    },
+  }]);
+  assert.equal(normalizedDiagnostics[0].sub_stage, 'render');
+  assert.equal(normalizedDiagnostics[0].frame_id, 'scene_03');
+  assert.deepEqual(normalizedDiagnostics[0].details, { exit_code: 1 });
 
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'creative-workflow-last-failure-'));
   const mediaRoot = path.join(rootDir, 'media');
