@@ -62,6 +62,13 @@ function sha256(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
 }
 
+function rawHtmlBuildFrameIdFromError(error) {
+  const message = String(error?.message || '');
+  return message.match(/缺少帧\s+([^\s]+)\s+的 raw HTML 路径/)?.[1]
+    || message.match(/内容图节点\s+([^\s]+)\s+未匹配到 scene_spec/)?.[1]
+    || '';
+}
+
 async function report(onProgress, event) {
   if (typeof onProgress !== 'function') return;
   try {
@@ -808,16 +815,37 @@ async function generateHtmlVideo(options = {}) {
         },
       });
     }
-    project = await buildRawHtmlFrameProject({
-      projectDir,
-      workflowId,
-      runId,
-      graph: contentGraph,
-      sceneSpec,
-      target: templateRenderTarget,
-      template,
-      mediaOptions,
-    });
+    try {
+      project = await buildRawHtmlFrameProject({
+        projectDir,
+        workflowId,
+        runId,
+        graph: contentGraph,
+        sceneSpec,
+        target: templateRenderTarget,
+        template,
+        mediaOptions,
+      });
+    } catch (error) {
+      const frameId = rawHtmlBuildFrameIdFromError(error);
+      const message = error?.message || 'raw HTML 工程构建失败。';
+      return failure(message, [
+        createDiagnostic({
+          code: 'raw_html_build_failed',
+          stage: 'project',
+          sub_stage: 'raw_html_build',
+          ...(frameId ? { frame_id: frameId } : {}),
+          user_message: message,
+          retryable: true,
+          repair_action: 'retry_frame_html',
+          details: { message },
+        }),
+      ], {
+        html_video_project_path: projectDir,
+        project_dir: projectDir,
+        project,
+      });
+    }
   }
   project = applyMediaOptionsToProject(project, mediaOptions);
 
