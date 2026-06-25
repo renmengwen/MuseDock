@@ -159,6 +159,12 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
     assert.ok(codes.includes(code), `缺少诊断 ${code}`);
   }
   assert.equal(result.diagnostics.find(item => item.code === 'license_not_allowed').fallback_allowed, false);
+  const playwrightDiagnostic = result.diagnostics.find(item => item.code === 'playwright_not_configured');
+  const ffmpegDiagnostic = result.diagnostics.find(item => item.code === 'ffmpeg_not_configured');
+  assert.equal(playwrightDiagnostic.sub_stage, 'validate_project');
+  assert.equal(ffmpegDiagnostic.sub_stage, 'validate_project');
+  assert.equal(Object.hasOwn(playwrightDiagnostic.details, 'sub_stage'), false);
+  assert.equal(Object.hasOwn(ffmpegDiagnostic.details, 'sub_stage'), false);
 
   for (const diagnostic of result.diagnostics) {
     assert.equal(typeof diagnostic.code, 'string');

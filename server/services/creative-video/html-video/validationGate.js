@@ -62,6 +62,7 @@ function sub_stage_for_diagnostic(stage, code) {
   if (stage === 'frame' || String(code || '').startsWith('raw_html_')) return 'frame_html';
   if (stage === 'timeline') return 'timeline_check';
   if (stage === 'template') return 'template_select';
+  if (['environment', 'assets', 'overrides'].includes(stage)) return 'validate_project';
   return stage === 'project' ? 'validate_project' : '';
 }
 
