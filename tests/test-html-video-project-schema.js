@@ -45,6 +45,12 @@ assert.deepEqual(project.overrides, { html: { enabled: false, frames: {} }, elem
 assert.deepEqual(project.revisions, []);
 assert.deepEqual(project.exports, []);
 assert.equal(project.status, 'draft');
+assert.equal(project.generation_checkpoint.version, 1);
+assert.equal(project.generation_checkpoint.workflow_id, 'workflow_001');
+assert.equal(project.generation_checkpoint.run_id, 'run_001');
+assert.equal(project.generation_checkpoint.stages.content_graph.status, 'pending');
+assert.deepEqual(project.generation_checkpoint.stages.frame_html.frames, {});
+assert.deepEqual(project.generation_checkpoint.stages.render.frames, {});
 
 const outputProject = schema.normalizeProject({
   project_id: 'p1',
@@ -92,6 +98,87 @@ assert.equal(audioHashProject.audio.mix.music_volume_db, -12);
 assert.equal(audioHashProject.audio.mix.narration_volume_db, 1);
 assert.equal(audioHashProject.audio.mix.fade_in_sec, 0);
 assert.equal(audioHashProject.audio.mix.fade_out_sec, 1.5);
+
+{
+  const checkpointProject = schema.normalizeProject({
+    workflow_id: 'workflow_checkpoint',
+    run_id: 'run_checkpoint',
+    generation_checkpoint: {
+      version: 99,
+      workflow_id: 'custom_workflow',
+      run_id: 'custom_run',
+      scene_spec_hash: 'scene-hash',
+      target: { duration_sec: 12, aspect_ratio: '9:16', unknown: true },
+      stages: {
+        content_graph: {
+          status: 'done',
+          path: 'content-graph.json',
+          input_hash: 'input',
+          output_hash: 'output',
+          diagnostic_code: '',
+          ignored: 'drop',
+        },
+        frame_html: {
+          status: 'done',
+          frames: {
+            scene_01: {
+              status: 'done',
+              html_path: 'frames/01-scene_01.html',
+              input_hash: 'frame-input',
+              output_hash: 'frame-output',
+              diagnostic_code: '',
+              ignored: 'drop',
+            },
+          },
+        },
+      },
+      ignored: 'drop',
+    },
+  });
+
+  assert.deepEqual(checkpointProject.generation_checkpoint, {
+    version: 1,
+    workflow_id: 'custom_workflow',
+    run_id: 'custom_run',
+    scene_spec_hash: 'scene-hash',
+    target: { duration_sec: 12, aspect_ratio: '9:16' },
+    stages: {
+      validate_project: { status: 'pending', diagnostic_code: '' },
+      content_graph: {
+        status: 'done',
+        path: 'content-graph.json',
+        input_hash: 'input',
+        output_hash: 'output',
+        diagnostic_code: '',
+      },
+      frame_html: {
+        status: 'done',
+        frames: {
+          scene_01: {
+            status: 'done',
+            html_path: 'frames/01-scene_01.html',
+            input_hash: 'frame-input',
+            output_hash: 'frame-output',
+            diagnostic_code: '',
+          },
+        },
+      },
+      render: { status: 'pending', frames: {} },
+      compose: { status: 'pending', output_path: '', output_audio_path: '' },
+      duration_verify: { status: 'pending', expected_duration_sec: null, actual_duration_sec: null },
+      visual_inspect: { status: 'pending', report_path: null },
+    },
+    updated_at: '',
+  });
+
+  schema.markCheckpointStage(checkpointProject, 'content_graph', { status: 'failed', diagnostic_code: 'bad_graph' });
+  schema.markCheckpointFrame(checkpointProject, 'frame_html', 'scene_02', { status: 'failed', diagnostic_code: 'bad_html' });
+  assert.equal(checkpointProject.generation_checkpoint.stages.content_graph.status, 'failed');
+  assert.equal(checkpointProject.generation_checkpoint.stages.content_graph.diagnostic_code, 'bad_graph');
+  assert.equal(checkpointProject.generation_checkpoint.stages.frame_html.frames.scene_02.status, 'failed');
+  assert.equal(checkpointProject.generation_checkpoint.stages.frame_html.frames.scene_02.diagnostic_code, 'bad_html');
+  assert.ok(checkpointProject.generation_checkpoint.updated_at);
+}
 
 {
   const project = schema.normalizeProject({

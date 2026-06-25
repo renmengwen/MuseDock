@@ -1,6 +1,7 @@
 const fs = require('fs');
 const { resolveSourceEntryPath } = require('./templateRegistry');
 const { summarizeCreativeContextForPrompt } = require('./contentGraphAgent');
+const { createDiagnostic } = require('./diagnostics');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -319,13 +320,40 @@ async function callModel(model, prompt) {
   if (!response || response.success === false) {
     return { success: false, message: response?.message || 'AI 调用失败。' };
   }
-  return { success: true, text: response.text || response.content || '' };
+  const text = response.text || response.content || '';
+  if (!String(text || '').trim()) {
+    return { success: false, message: '模型返回结果缺少文本内容。', code: 'provider_missing_text' };
+  }
+  return { success: true, text };
+}
+
+function frameDiagnostic(code, message, args = {}, details = {}) {
+  return createDiagnostic({
+    code,
+    stage: 'ai-frame-html',
+    sub_stage: 'frame_html',
+    frame_id: args.node?.id || '',
+    retryable: true,
+    repair_action: 'retry_frame_html',
+    user_message: message,
+    details,
+  });
+}
+
+function frameFailure(code, message, args = {}, details = {}) {
+  return {
+    success: false,
+    message,
+    diagnostics: [frameDiagnostic(code, message, args, details)],
+  };
 }
 
 async function generateFrameHtml({ model, ...args } = {}) {
   const firstPrompt = buildFrameHtmlPrompt(args);
   const first = await callModel(model, firstPrompt);
-  if (!first.success) return first;
+  if (!first.success) {
+    return frameFailure(first.code || 'frame_html_invalid', first.message || '单帧 HTML 生成失败。', args);
+  }
   const firstExtracted = extractHtmlDocument(first.text);
   if (firstExtracted.success) {
     const validation = validateHtmlTargetResolution(firstExtracted.html, args.target || {});
@@ -334,41 +362,37 @@ async function generateFrameHtml({ model, ...args } = {}) {
       ...args,
       validationMessage: validation.message,
     }));
-    if (!retry.success) return retry;
+    if (!retry.success) {
+      return frameFailure(retry.code || 'frame_html_invalid', retry.message || '单帧 HTML 生成失败。', args);
+    }
     const retryExtracted = extractHtmlDocument(retry.text);
     if (!retryExtracted.success) {
-      return {
-        success: false,
-        message: 'AI 未返回有效 HTML document。',
+      return frameFailure('frame_html_invalid', 'AI 未返回有效 HTML document。', args, {
         diagnostics: [validation.message, retryExtracted.message].filter(Boolean),
-      };
+      });
     }
     const retryValidation = validateHtmlTargetResolution(retryExtracted.html, args.target || {});
     if (retryValidation.success) return retryExtracted;
-    return {
-      success: false,
-      message: 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
+    return frameFailure('frame_html_invalid', 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。', args, {
       diagnostics: [validation.message, retryValidation.message].filter(Boolean),
-    };
+    });
   }
 
   const retry = await callModel(model, buildRetryPrompt(args));
-  if (!retry.success) return retry;
+  if (!retry.success) {
+    return frameFailure(retry.code || 'frame_html_invalid', retry.message || '单帧 HTML 生成失败。', args);
+  }
   const retryExtracted = extractHtmlDocument(retry.text);
   if (retryExtracted.success) {
     const retryValidation = validateHtmlTargetResolution(retryExtracted.html, args.target || {});
     if (retryValidation.success) return retryExtracted;
-    return {
-      success: false,
-      message: 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
+    return frameFailure('frame_html_invalid', 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。', args, {
       diagnostics: [firstExtracted.message, retryValidation.message].filter(Boolean),
-    };
+    });
   }
-  return {
-    success: false,
-    message: 'AI 未返回有效 HTML document。',
+  return frameFailure('frame_html_invalid', 'AI 未返回有效 HTML document。', args, {
     diagnostics: [firstExtracted.message, retryExtracted.message].filter(Boolean),
-  };
+  });
 }
 
 module.exports = {

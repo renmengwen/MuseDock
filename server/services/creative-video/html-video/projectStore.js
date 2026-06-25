@@ -1,7 +1,9 @@
 const fs = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 
 const { createEmptyProject, normalizeProject } = require('./projectSchema');
+const { applyCaptionLayer } = require('./captionLayer');
 
 const ID_PATTERN = /^[A-Za-z0-9_.-]+$/;
 
@@ -74,6 +76,49 @@ async function loadProject(projectDir) {
   const projectPath = resolveProjectPath(projectDir, 'project.json');
   const text = await fs.readFile(projectPath, 'utf8');
   return normalizeProject(JSON.parse(text));
+}
+
+async function writeProjectJson(projectDir, updater) {
+  const project = await loadProject(projectDir);
+  const updated = typeof updater === 'function' ? await updater(project) : project;
+  return saveProject(projectDir, updated || project);
+}
+
+async function saveContentGraph(projectDir, graph) {
+  const relativePath = 'content-graph.json';
+  await saveJsonAtomic(resolveProjectPath(projectDir, relativePath), graph);
+  return relativePath;
+}
+
+function safeFilePart(value, fallback) {
+  const text = String(value || fallback || 'frame')
+    .trim()
+    .replace(/[^A-Za-z0-9_.-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return text || fallback || 'frame';
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+async function writeRawFrameHtml({ projectDir, sceneId, order, html, captions = [], durationSec = null } = {}) {
+  if (!projectDir) throw new Error('缺少 projectDir。');
+  const index = Number(order);
+  const safeOrder = Number.isFinite(index) && index > 0 ? index : 1;
+  const fileName = `${String(safeOrder).padStart(2, '0')}-${safeFilePart(sceneId, `scene_${String(safeOrder).padStart(2, '0')}`)}.html`;
+  const htmlPath = `frames/${fileName}`;
+  const outputPath = resolveProjectPath(projectDir, htmlPath);
+  await fs.mkdir(path.dirname(outputPath), { recursive: true });
+  const output = applyCaptionLayer(html, captions, {
+    durationSec,
+    generateCaptions: Array.isArray(captions) && captions.length > 0,
+  });
+  await fs.writeFile(outputPath, output, 'utf8');
+  return {
+    html_path: htmlPath,
+    output_hash: sha256(output),
+  };
 }
 
 function timestamp() {
@@ -150,6 +195,9 @@ module.exports = {
   createProjectDir,
   saveProject,
   loadProject,
+  writeProjectJson,
+  saveContentGraph,
+  writeRawFrameHtml,
   addRevision,
   addExport,
   resolveProjectPath,

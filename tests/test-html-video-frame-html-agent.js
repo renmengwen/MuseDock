@@ -248,6 +248,34 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   assert.equal(dimensionFailed.success, false);
   assert.match(dimensionFailed.message, /尺寸|画幅/);
 
+  let retryBlankCalls = 0;
+  const retryBlankResult = await agent.generateFrameHtml({
+    model: {
+      callTextModel: async () => {
+        retryBlankCalls += 1;
+        if (retryBlankCalls === 1) {
+          return {
+            success: true,
+            text: '<!doctype html><html><head><meta name="viewport" content="width=1920,height=1080"><style>html,body{width:1920px;height:1080px}</style></head><body>bad</body></html>',
+          };
+        }
+        return { success: true, text: '' };
+      },
+    },
+    graph,
+    node: graph.nodes[0],
+    index: 0,
+    total: 2,
+    target: { resolution: { width: 1080, height: 1920 }, aspect_ratio: '9:16' },
+  });
+  assert.equal(retryBlankResult.success, false);
+  assert.equal(retryBlankCalls, 2);
+  assert.equal(retryBlankResult.diagnostics[0].code, 'provider_missing_text');
+  assert.equal(retryBlankResult.diagnostics[0].sub_stage, 'frame_html');
+  assert.equal(retryBlankResult.diagnostics[0].frame_id, 'scene_01');
+  assert.equal(retryBlankResult.diagnostics[0].retryable, true);
+  assert.equal(retryBlankResult.diagnostics[0].repair_action, 'retry_frame_html');
+
   const failed = await agent.generateFrameHtml({
     model: { callTextModel: async () => ({ success: true, text: '仍然不是 HTML' }) },
     graph,
@@ -257,6 +285,25 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   });
   assert.equal(failed.success, false);
   assert.match(failed.message, /未返回有效 HTML/);
+  assert.equal(failed.diagnostics[0].code, 'frame_html_invalid');
+  assert.equal(failed.diagnostics[0].sub_stage, 'frame_html');
+  assert.equal(failed.diagnostics[0].frame_id, 'scene_01');
+  assert.equal(failed.diagnostics[0].retryable, true);
+  assert.equal(failed.diagnostics[0].repair_action, 'retry_frame_html');
+
+  const providerMissing = await agent.generateFrameHtml({
+    model: { callTextModel: async () => ({ success: true, text: '' }) },
+    graph,
+    node: graph.nodes[0],
+    index: 0,
+    total: 2,
+  });
+  assert.equal(providerMissing.success, false);
+  assert.equal(providerMissing.diagnostics[0].code, 'provider_missing_text');
+  assert.equal(providerMissing.diagnostics[0].sub_stage, 'frame_html');
+  assert.equal(providerMissing.diagnostics[0].frame_id, 'scene_01');
+  assert.equal(providerMissing.diagnostics[0].retryable, true);
+  assert.equal(providerMissing.diagnostics[0].repair_action, 'retry_frame_html');
 
   console.log('html-video frame html agent tests passed');
 })().catch(error => {

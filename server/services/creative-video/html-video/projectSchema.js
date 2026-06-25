@@ -74,6 +74,29 @@ function defaultOverrides() {
   };
 }
 
+function defaultGenerationCheckpoint(project = {}) {
+  return {
+    version: 1,
+    workflow_id: project.workflow_id || null,
+    run_id: project.run_id || null,
+    scene_spec_hash: '',
+    target: {
+      duration_sec: null,
+      aspect_ratio: '',
+    },
+    stages: {
+      validate_project: { status: 'pending', diagnostic_code: '' },
+      content_graph: { status: 'pending', path: '', input_hash: '', output_hash: '', diagnostic_code: '' },
+      frame_html: { status: 'pending', frames: {} },
+      render: { status: 'pending', frames: {} },
+      compose: { status: 'pending', output_path: '', output_audio_path: '' },
+      duration_verify: { status: 'pending', expected_duration_sec: null, actual_duration_sec: null },
+      visual_inspect: { status: 'pending', report_path: null },
+    },
+    updated_at: '',
+  };
+}
+
 function defaultEnhancement() {
   return {
     enabled: false,
@@ -260,6 +283,135 @@ function normalizeOverrides(value) {
   };
 }
 
+function stringField(value) {
+  return String(value ?? '');
+}
+
+function nullableNumberField(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeCheckpointFrames(value, type) {
+  const frames = objectOrEmpty(value);
+  return Object.fromEntries(Object.entries(frames).map(([sceneId, frame]) => {
+    const input = objectOrEmpty(frame);
+    const status = stringField(input.status || 'pending');
+    const failed = status === 'failed';
+    const normalized = {
+      status,
+      ...(type === 'render'
+        ? { mp4_path: failed ? '' : stringField(input.mp4_path) }
+        : { html_path: failed ? '' : stringField(input.html_path) }),
+      ...(type === 'render' ? {} : { input_hash: failed ? '' : stringField(input.input_hash) }),
+      output_hash: failed ? '' : stringField(input.output_hash),
+      diagnostic_code: stringField(input.diagnostic_code),
+    };
+    return [sceneId, normalized];
+  }));
+}
+
+function normalizeGenerationCheckpoint(input = {}, project = {}) {
+  const source = objectOrEmpty(input);
+  const defaults = defaultGenerationCheckpoint(project);
+  const stages = objectOrEmpty(source.stages);
+  const target = objectOrEmpty(source.target);
+  return {
+    version: 1,
+    workflow_id: source.workflow_id || project.workflow_id || defaults.workflow_id,
+    run_id: source.run_id || project.run_id || defaults.run_id,
+    scene_spec_hash: stringField(source.scene_spec_hash),
+    target: {
+      duration_sec: nullableNumberField(target.duration_sec),
+      aspect_ratio: stringField(target.aspect_ratio),
+    },
+    stages: {
+      validate_project: {
+        status: stringField(objectOrEmpty(stages.validate_project).status || 'pending'),
+        diagnostic_code: stringField(objectOrEmpty(stages.validate_project).diagnostic_code),
+      },
+      content_graph: {
+        status: stringField(objectOrEmpty(stages.content_graph).status || 'pending'),
+        path: stringField(objectOrEmpty(stages.content_graph).path),
+        input_hash: stringField(objectOrEmpty(stages.content_graph).input_hash),
+        output_hash: stringField(objectOrEmpty(stages.content_graph).output_hash),
+        diagnostic_code: stringField(objectOrEmpty(stages.content_graph).diagnostic_code),
+      },
+      frame_html: {
+        status: stringField(objectOrEmpty(stages.frame_html).status || 'pending'),
+        frames: normalizeCheckpointFrames(objectOrEmpty(stages.frame_html).frames, 'html'),
+      },
+      render: {
+        status: stringField(objectOrEmpty(stages.render).status || 'pending'),
+        frames: normalizeCheckpointFrames(objectOrEmpty(stages.render).frames, 'render'),
+      },
+      compose: {
+        status: stringField(objectOrEmpty(stages.compose).status || 'pending'),
+        output_path: stringField(objectOrEmpty(stages.compose).output_path),
+        output_audio_path: stringField(objectOrEmpty(stages.compose).output_audio_path),
+      },
+      duration_verify: {
+        status: stringField(objectOrEmpty(stages.duration_verify).status || 'pending'),
+        expected_duration_sec: nullableNumberField(objectOrEmpty(stages.duration_verify).expected_duration_sec),
+        actual_duration_sec: nullableNumberField(objectOrEmpty(stages.duration_verify).actual_duration_sec),
+      },
+      visual_inspect: {
+        status: stringField(objectOrEmpty(stages.visual_inspect).status || 'pending'),
+        report_path: objectOrEmpty(stages.visual_inspect).report_path == null
+          ? null
+          : stringField(objectOrEmpty(stages.visual_inspect).report_path),
+      },
+    },
+    updated_at: stringField(source.updated_at),
+  };
+}
+
+function createEmptyGenerationCheckpoint(project = {}) {
+  return normalizeGenerationCheckpoint({}, project);
+}
+
+function ensureGenerationCheckpoint(project) {
+  project.generation_checkpoint = normalizeGenerationCheckpoint(project.generation_checkpoint, project);
+  return project.generation_checkpoint;
+}
+
+function markCheckpointStage(project, stageId, patch = {}) {
+  const checkpoint = ensureGenerationCheckpoint(project);
+  const stages = checkpoint.stages;
+  if (!stages[stageId]) return project;
+  const updatedAt = new Date().toISOString();
+  stages[stageId] = normalizeGenerationCheckpoint({
+    ...checkpoint,
+    stages: {
+      ...stages,
+      [stageId]: {
+        ...stages[stageId],
+        ...objectOrEmpty(patch),
+      },
+    },
+    updated_at: updatedAt,
+  }, project).stages[stageId];
+  checkpoint.updated_at = updatedAt;
+  return project;
+}
+
+function markCheckpointFrame(project, stageId, sceneId, patch = {}) {
+  const checkpoint = ensureGenerationCheckpoint(project);
+  const stage = checkpoint.stages[stageId];
+  if (!stage || !stage.frames) return project;
+  const id = String(sceneId || '').trim();
+  if (!id) return project;
+  stage.frames[id] = {
+    ...(stage.frames[id] || { status: 'pending' }),
+    ...objectOrEmpty(patch),
+  };
+  project.generation_checkpoint = normalizeGenerationCheckpoint({
+    ...checkpoint,
+    updated_at: new Date().toISOString(),
+  }, project);
+  return project;
+}
+
 function createEmptyProject(input = {}) {
   return normalizeProject({
     project_id: input.projectId || input.project_id || null,
@@ -293,6 +445,7 @@ function normalizeProject(project = {}) {
     layout_qa_reports: arrayOrEmpty(input.layout_qa_reports || input.layoutQaReports),
     exports: arrayOrEmpty(input.exports).map(item => ({ ...objectOrEmpty(item) })),
     status: input.status || 'draft',
+    generation_checkpoint: normalizeGenerationCheckpoint(input.generation_checkpoint, input),
   };
 }
 
@@ -354,6 +507,10 @@ module.exports = {
   DEFAULT_ENGINE,
   createEmptyProject,
   normalizeProject,
+  normalizeGenerationCheckpoint,
+  createEmptyGenerationCheckpoint,
+  markCheckpointStage,
+  markCheckpointFrame,
   validateProject,
   DEFAULT_OUTPUT_RESOLUTION,
   defaultTimeline,

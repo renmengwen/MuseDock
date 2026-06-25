@@ -21,6 +21,8 @@ const layoutQaService = require('./creative-video/html-video/layoutQaService');
 const htmlVideoEditModeService = require('./creative-video/html-video/htmlVideoEditModeService');
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
 const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
+const { CreativeWorkflowStageError } = require('./creative-video/errors');
+const { normalizeDiagnostics } = require('./creative-video/html-video/diagnostics');
 const { syncRawHtmlFrameTextPatch } = require('./creative-video/html-video/rawHtmlTextPatch');
 const { findFrameByAnyId } = require('./creative-video/html-video/frameIdentity');
 const { createTemplateRegistry: createHtmlVideoTemplateRegistry } = require('./creative-video/html-video/templateRegistry');
@@ -701,6 +703,8 @@ function createWorkflowSummary(record) {
     asset_context: record.asset_context,
     result: record.result,
     error: record.error,
+    last_failure: record.last_failure || null,
+    project_substages: Array.isArray(record.project_substages) ? record.project_substages : [],
   };
 }
 
@@ -1351,11 +1355,97 @@ async function prepareSource(record, mediaRoot, now, services = {}, reportStage 
   return prepareDouyinSource(record, mediaRoot, now, services);
 }
 
-function ensureSuccess(result, fallbackMessage) {
+function ensureSuccess(result, fallbackMessage, context = {}) {
   if (!result || result.success === false) {
-    throw new Error(safeString(result && result.message) || fallbackMessage);
+    const diagnostics = normalizeDiagnostics(result?.diagnostics || result?.html_video_diagnostics || []);
+    const firstDiagnostic = diagnostics[0] || {};
+    throw new CreativeWorkflowStageError(safeString(result && result.message) || fallbackMessage, {
+      stage: context.stage || '',
+      sub_stage: firstDiagnostic.sub_stage || context.sub_stage || '',
+      code: firstDiagnostic.code || context.code || '',
+      frame_id: firstDiagnostic.frame_id || '',
+      project_dir: result?.project_dir || result?.html_video_project_path || context.project_dir || '',
+      diagnostics,
+      retryable: result?.retryable === true || firstDiagnostic.retryable === true,
+      fallback_allowed: result?.fallback_allowed !== false && firstDiagnostic.fallback_allowed !== false,
+    });
   }
   return result;
+}
+
+function createLastFailureFromError(error, stageId, updatedAt) {
+  const diagnostics = normalizeDiagnostics(error?.diagnostics || []);
+  const firstDiagnostic = diagnostics[0] || {};
+  return {
+    stage: safeString(error?.stage) || stageId,
+    sub_stage: safeString(error?.sub_stage) || safeString(firstDiagnostic.sub_stage),
+    code: safeString(error?.code) || safeString(firstDiagnostic.code),
+    frame_id: safeString(error?.frame_id) || safeString(firstDiagnostic.frame_id),
+    project_dir: safeString(error?.project_dir),
+    message: safeString(error?.message) || `${STAGE_LABELS[stageId]}失败。`,
+    diagnostics,
+    updated_at: updatedAt,
+  };
+}
+
+function normalizeProjectStageSummary(summary = {}) {
+  const input = summary && typeof summary === 'object' ? summary : {};
+  const next = {
+    id: safeString(input.id),
+    status: safeString(input.status),
+    message: safeString(input.message),
+    artifacts: input.artifacts && typeof input.artifacts === 'object' && !Array.isArray(input.artifacts)
+      ? input.artifacts
+      : {},
+    diagnostics: normalizeDiagnostics(input.diagnostics || []),
+  };
+  return next.id ? next : null;
+}
+
+function upsertProjectStageSummary(record, summary) {
+  const next = normalizeProjectStageSummary(summary);
+  if (!next) return record;
+  const existing = Array.isArray(record.project_substages) ? record.project_substages : [];
+  const index = existing.findIndex(item => item?.id === next.id);
+  record.project_substages = index >= 0
+    ? existing.map((item, itemIndex) => (itemIndex === index ? next : item))
+    : [...existing, next];
+  return record;
+}
+
+function checkpointStageSummaries(generationCheckpoint = {}) {
+  const stages = generationCheckpoint?.stages;
+  if (Array.isArray(stages)) return stages;
+  if (!stages || typeof stages !== 'object') return [];
+  return Object.entries(stages).map(([id, stage]) => ({
+    id,
+    status: stage?.status || '',
+    message: stage?.message || '',
+    artifacts: stage?.artifacts && typeof stage.artifacts === 'object' && !Array.isArray(stage.artifacts)
+      ? stage.artifacts
+      : {},
+    diagnostics: stage?.diagnostics || [],
+  }));
+}
+
+function syncProjectStageSummariesFromCheckpoint(record, generationCheckpoint) {
+  for (const summary of checkpointStageSummaries(generationCheckpoint)) {
+    upsertProjectStageSummary(record, summary);
+  }
+  return record;
+}
+
+async function syncProjectStageSummariesFromProjectDir(record, projectDir) {
+  const resolvedProjectDir = safeString(projectDir);
+  if (!resolvedProjectDir) return record;
+  try {
+    const projectPath = htmlVideoProjectStore.resolveProjectPath(resolvedProjectDir, 'project.json');
+    const project = JSON.parse(await fsp.readFile(projectPath, 'utf8'));
+    syncProjectStageSummariesFromCheckpoint(record, project.generation_checkpoint);
+  } catch {
+    // checkpoint 只是辅助恢复状态，读取失败不能覆盖主阶段错误。
+  }
+  return record;
 }
 
 function isHtmlVideoLiteProjectResult(result) {
@@ -1443,6 +1533,15 @@ async function runStage(record, stageId, rootDir, handler, services, taskContext
     }
 
     const completedAt = getNow(services);
+    if (stageId === 'project') {
+      await syncProjectStageSummariesFromProjectDir(
+        record,
+        result?.project_dir || result?.html_video_project_path,
+      );
+      if (result?.project?.generation_checkpoint) {
+        syncProjectStageSummariesFromCheckpoint(record, result.project.generation_checkpoint);
+      }
+    }
     await markStage(record, stageId, 'done', result?.message || `${STAGE_LABELS[stageId]}完成。`, completedAt, {
       completed_at: completedAt,
       result,
@@ -1474,6 +1573,10 @@ async function runStage(record, stageId, rootDir, handler, services, taskContext
       message,
       updated_at: failedAt,
     };
+    if (error?.name === 'CreativeWorkflowStageError') {
+      record.last_failure = createLastFailureFromError(error, stageId, failedAt);
+      await syncProjectStageSummariesFromProjectDir(record, record.last_failure.project_dir);
+    }
     record.updated_at = failedAt;
     await persistWorkflow(record, rootDir);
     await emitTaskContextEvent(taskContext, {
@@ -1667,6 +1770,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       projectOptions: mergeProjectOptions(record.target, existingProjectOptions),
     }),
     '工程生成失败。',
+    { stage: 'project', sub_stage: 'project', code: 'html_video_project_failed' },
   ), services, taskContext);
   stoppedOrFailed = failIfStoppedOrNull(projectStageResult);
   if (stoppedOrFailed) {
@@ -2447,7 +2551,7 @@ async function editHtmlVideoProject(workflowId, payload = {}, options = {}) {
 
 async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
-  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  const { record, project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
   if (error) return error;
 
   const templateRegistry = options.htmlVideoTemplateRegistry || createHtmlVideoTemplateRegistry(options.htmlVideoTemplateOptions || {});
@@ -2478,6 +2582,13 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
       skipRender: payload.skip_render === true,
     });
   }
+
+  await syncProjectStageSummariesFromProjectDir(record, result.html_video_project_path || projectDir);
+  if (result.project?.generation_checkpoint) {
+    syncProjectStageSummariesFromCheckpoint(record, result.project.generation_checkpoint);
+  }
+  record.updated_at = getNow(options.services || {});
+  await persistWorkflow(record, rootDir);
 
   return {
     success: result.success,

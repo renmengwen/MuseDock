@@ -61,21 +61,21 @@
 
 **具体实现步骤:**
 
-- [ ] 在 `tests/test-html-video-project-checkpoint-persistence.js` 写入 assert 测试：`createEmptyProject()` 默认包含 `generation_checkpoint.version === 1`，`stages.content_graph.status === 'pending'`，`stages.frame_html.frames` 和 `stages.render.frames` 是空对象。
-- [ ] 运行 `node tests/test-html-video-project-checkpoint-persistence.js`，预期失败信息包含 `generation_checkpoint` 不存在。
-- [ ] 在 `projectSchema.js` 新增 `normalizeGenerationCheckpoint(input, project)`，只保留恢复需要字段，未知字段不写入 project。
-- [ ] 在 `normalizeProject()` 返回值中加入 `generation_checkpoint: normalizeGenerationCheckpoint(input.generation_checkpoint, input)`。
-- [ ] 在 `projectStore.js` 新增 `writeProjectJson(projectDir, updater)`，内部 `loadProject()` -> 调用 updater -> `saveProject()`，复用 `resolveProjectPath()` 防止路径逃逸。
-- [ ] 在 `projectStore.js` 新增 `saveContentGraph(projectDir, graph)`，写 `content-graph.json` 后返回相对路径 `content-graph.json`。
-- [ ] 在 `htmlVideoWorkflow.js` content graph 成功后调用 `saveContentGraph()`，然后更新 `project.generation_checkpoint.stages.content_graph` 为 `done` 并 `saveProject()`。
-- [ ] 在 `htmlVideoWorkflow.js` 的逐帧 `generateFrameHtml()` loop 中完成“生成 HTML -> 注入字幕层 -> 写入 `frames/<order>-<scene_id>.html` -> 更新 `generation_checkpoint.stages.frame_html.frames[scene_id]` -> `saveProject()`”的闭环，确保第 N 帧失败时前 N-1 帧的 HTML 与 checkpoint 已落盘。
-- [ ] 明确 caption overlay 只有一个 owner：V1 恢复路径若由 `htmlVideoWorkflow.js` / `writeRawFrameHtml()` 写入最终 HTML，则该函数负责唯一一次 `applyCaptionLayer()`；`rawHtmlFrameBuilder.buildRawHtmlFrameProject()` 在恢复路径只读取已落盘 `html_path` 并组装 metadata，不再重新注入字幕、不覆盖 HTML 文件。
-- [ ] `writeRawFrameHtml({ projectDir, sceneId, order, html, captions, durationSec })` 放在 `projectStore.js`，复用 `resolveProjectPath()` 防路径逃逸，负责写 HTML 文件和唯一一次 `applyCaptionLayer()`，返回相对路径与 output hash。
-- [ ] 明确选定单一路径：V1 恢复路径中，frame loop 写盘后，`rawHtmlFrameBuilder.buildRawHtmlFrameProject()` 改为从已落盘 `frames/` HTML 路径构造 `frames`、`timeline`、`content_graph` 和 project，不再接收 `frameHtmlByNodeId`，不写盘，不注入字幕。
-- [ ] 如需兼容非恢复路径中“HTML 尚未写盘”的旧调用，新增独立 `buildRawHtmlFrameProjectFromMemory({ frameHtmlByNodeId, ... })`，内部先调用 `writeRawFrameHtml()` 后再委托 `buildRawHtmlFrameProject()`；不要让同一个函数同时承担内存 HTML 写盘和已落盘 HTML 组装两种模式。
-- [ ] 在 `htmlVideoWorkflow.js` 第 N 帧失败前，把当前失败帧写为 `status: 'failed'`、`diagnostic_code` 并立即 `saveProject()`，保留前 N-1 帧的 `done` 状态。
-- [ ] 在 `projectOrchestrator.js` 后续 Task 5 接入前，先由 Task 1 只初始化 `render`、`compose`、`duration_verify`、`visual_inspect` pending 结构，不改变渲染行为。
-- [ ] 运行本 Task 验收命令。
+- [x] 在 `tests/test-html-video-project-checkpoint-persistence.js` 写入 assert 测试：`createEmptyProject()` 默认包含 `generation_checkpoint.version === 1`，`stages.content_graph.status === 'pending'`，`stages.frame_html.frames` 和 `stages.render.frames` 是空对象。
+- [x] 运行 `node tests/test-html-video-project-checkpoint-persistence.js`，预期失败信息包含 `generation_checkpoint` 不存在。
+- [x] 在 `projectSchema.js` 新增 `normalizeGenerationCheckpoint(input, project)`，只保留恢复需要字段，未知字段不写入 project。
+- [x] 在 `normalizeProject()` 返回值中加入 `generation_checkpoint: normalizeGenerationCheckpoint(input.generation_checkpoint, input)`。
+- [x] 在 `projectStore.js` 新增 `writeProjectJson(projectDir, updater)`，内部 `loadProject()` -> 调用 updater -> `saveProject()`，复用 `resolveProjectPath()` 防止路径逃逸。
+- [x] 在 `projectStore.js` 新增 `saveContentGraph(projectDir, graph)`，写 `content-graph.json` 后返回相对路径 `content-graph.json`。
+- [x] 在 `htmlVideoWorkflow.js` content graph 成功后调用 `saveContentGraph()`，然后更新 `project.generation_checkpoint.stages.content_graph` 为 `done` 并 `saveProject()`。
+- [x] 在 `htmlVideoWorkflow.js` 的逐帧 `generateFrameHtml()` loop 中完成“生成 HTML -> 注入字幕层 -> 写入 `frames/<order>-<scene_id>.html` -> 更新 `generation_checkpoint.stages.frame_html.frames[scene_id]` -> `saveProject()`”的闭环，确保第 N 帧失败时前 N-1 帧的 HTML 与 checkpoint 已落盘。
+- [x] 明确 caption overlay 只有一个 owner：V1 恢复路径若由 `htmlVideoWorkflow.js` / `writeRawFrameHtml()` 写入最终 HTML，则该函数负责唯一一次 `applyCaptionLayer()`；`rawHtmlFrameBuilder.buildRawHtmlFrameProject()` 在恢复路径只读取已落盘 `html_path` 并组装 metadata，不再重新注入字幕、不覆盖 HTML 文件。
+- [x] `writeRawFrameHtml({ projectDir, sceneId, order, html, captions, durationSec })` 放在 `projectStore.js`，复用 `resolveProjectPath()` 防路径逃逸，负责写 HTML 文件和唯一一次 `applyCaptionLayer()`，返回相对路径与 output hash。
+- [x] 明确选定单一路径：V1 恢复路径中，frame loop 写盘后，`rawHtmlFrameBuilder.buildRawHtmlFrameProject()` 改为从已落盘 `frames/` HTML 路径构造 `frames`、`timeline`、`content_graph` 和 project，不再接收 `frameHtmlByNodeId`，不写盘，不注入字幕。
+- [x] 如需兼容非恢复路径中“HTML 尚未写盘”的旧调用，新增独立 `buildRawHtmlFrameProjectFromMemory({ frameHtmlByNodeId, ... })`，内部先调用 `writeRawFrameHtml()` 后再委托 `buildRawHtmlFrameProject()`；不要让同一个函数同时承担内存 HTML 写盘和已落盘 HTML 组装两种模式。
+- [x] 在 `htmlVideoWorkflow.js` 第 N 帧失败前，把当前失败帧写为 `status: 'failed'`、`diagnostic_code` 并立即 `saveProject()`，保留前 N-1 帧的 `done` 状态。
+- [x] 在 `projectOrchestrator.js` 后续 Task 5 接入前，先由 Task 1 只初始化 `render`、`compose`、`duration_verify`、`visual_inspect` pending 结构，不改变渲染行为。
+- [x] 运行本 Task 验收命令。
 
 **需要新增/修改的函数签名:**
 
@@ -181,22 +181,22 @@ node tests/test-html-video-project-store.js
 
 **具体实现步骤:**
 
-- [ ] 先写 `tests/test-creative-workflow-diagnostics-last-failure.js`：构造 `ensureSuccess({ success:false, html_video_project_path:'D:/tmp/project', diagnostics:[...] })` 经 `runCreativeWorkflow()` project 阶段失败后，workflow JSON 包含 `last_failure.stage`、`sub_stage`、`code`、`frame_id`、`project_dir`、`message`、`diagnostics`、`updated_at`。
-- [ ] 运行 `node tests/test-creative-workflow-diagnostics-last-failure.js`，预期失败为 `last_failure` 缺失或 diagnostics 丢失。
-- [ ] 新增 `server/services/creative-video/errors.js`，导出 `CreativeWorkflowStageError`，构造参数只使用 snake_case。
-- [ ] 修改 `diagnostics.js` 的 `createDiagnostic()` 与 `normalizeDiagnostic()`，把 `sub_stage`、`frame_id`、`retryable`、`repair_action` 保留为顶层字段；原有 `code`、`stage`、`user_message`、`details`、`fallback_allowed`、`severity` 行为保持兼容。
-- [ ] 修改 `createDiagnostic()` 返回值，显式读取 `input.sub_stage`、`input.frame_id`、`input.retryable`、`input.repair_action`；空字符串或未传入时不输出可选字段，`retryable` 只在布尔值时输出。
-- [ ] 修改 `normalizeDiagnostic()` 的 details 过滤列表，把 `sub_stage`、`frame_id`、`retryable`、`repair_action` 加入排除名单，确保它们不被塞进 `details`。
-- [ ] 在 `tests/test-creative-workflow-diagnostics-last-failure.js` 增加断言：`createDiagnostic({ sub_stage:'frame_html', frame_id:'scene_05', retryable:true, repair_action:'retry_frame_html' })` 返回对象顶层包含这四个字段。
-- [ ] 保持所有 html-video failure 继续通过 `failureFromDiagnostics()` 返回，并在调用前后使用 `normalizeDiagnostics()` 归一化 diagnostics；禁止新增第二套 error/diagnostic 格式。
-- [ ] 修改 `creativeWorkflows.js` 的 `ensureSuccess(result, fallbackMessage, context = {})`，失败时抛 `CreativeWorkflowStageError`，保留 `result.diagnostics || result.html_video_diagnostics`，并从 `result.project_dir || result.html_video_project_path || context.project_dir` 提取 `project_dir` 写入 error。
-- [ ] 只给 `creativeWorkflows.js` 的 project stage `ensureSuccess()` 调用传入 context：`{ stage:'project', sub_stage:'project', code:'html_video_project_failed' }`，其它 source/research/agent_run/brief/audio/check/render/inspect 调用保持旧签名。
-- [ ] 修改 `runStage()` catch：识别 `CreativeWorkflowStageError`，写入 `record.last_failure`；同时保留旧 `record.error` 兼容前端现有逻辑。`record.last_failure.project_dir` 必须优先来自 `error.project_dir`，planner 后续通过它定位 `<projectDir>/project.json`。
-- [ ] 修改 html-video failure 创建点：`provider_missing_text`、`content_graph_invalid`、`frame_html_invalid`、`timeline_duration_unreasonable`、`render_failed`、`compose_failed`、`duration_mismatch` 均写 `sub_stage`、可定位时写 `frame_id`、可自动恢复时写 `retryable: true` 和对应 `repair_action`。
-- [ ] 新增 `upsertProjectStageSummary(record, summary)` 与 `syncProjectStageSummariesFromCheckpoint(record, generationCheckpoint)`，把 `generation_checkpoint.stages` 映射成 workflow record 的用户可见 `project_substages`；它只复制 `id/status/message/artifacts/diagnostics`，不复制完整 checkpoint。
-- [ ] `runStage()` project 阶段失败时，如果 error/project result 有 project_dir 且能读取 project checkpoint，调用 `syncProjectStageSummariesFromCheckpoint()` 后再 persist workflow；retry executor 成功/失败时也复用同一 helper 更新 `record.project_substages`。
-- [ ] 修改 html-video progress event：content graph、frame HTML、render、compose、duration verify、visual inspect 事件增加 `sub_stage`。
-- [ ] 运行本 Task 验收命令。
+- [x] 先写 `tests/test-creative-workflow-diagnostics-last-failure.js`：构造 `ensureSuccess({ success:false, html_video_project_path:'D:/tmp/project', diagnostics:[...] })` 经 `runCreativeWorkflow()` project 阶段失败后，workflow JSON 包含 `last_failure.stage`、`sub_stage`、`code`、`frame_id`、`project_dir`、`message`、`diagnostics`、`updated_at`。
+- [x] 运行 `node tests/test-creative-workflow-diagnostics-last-failure.js`，预期失败为 `last_failure` 缺失或 diagnostics 丢失。
+- [x] 新增 `server/services/creative-video/errors.js`，导出 `CreativeWorkflowStageError`，构造参数只使用 snake_case。
+- [x] 修改 `diagnostics.js` 的 `createDiagnostic()` 与 `normalizeDiagnostic()`，把 `sub_stage`、`frame_id`、`retryable`、`repair_action` 保留为顶层字段；原有 `code`、`stage`、`user_message`、`details`、`fallback_allowed`、`severity` 行为保持兼容。
+- [x] 修改 `createDiagnostic()` 返回值，显式读取 `input.sub_stage`、`input.frame_id`、`input.retryable`、`input.repair_action`；空字符串或未传入时不输出可选字段，`retryable` 只在布尔值时输出。
+- [x] 修改 `normalizeDiagnostic()` 的 details 过滤列表，把 `sub_stage`、`frame_id`、`retryable`、`repair_action` 加入排除名单，确保它们不被塞进 `details`。
+- [x] 在 `tests/test-creative-workflow-diagnostics-last-failure.js` 增加断言：`createDiagnostic({ sub_stage:'frame_html', frame_id:'scene_05', retryable:true, repair_action:'retry_frame_html' })` 返回对象顶层包含这四个字段。
+- [x] 保持所有 html-video failure 继续通过 `failureFromDiagnostics()` 返回，并在调用前后使用 `normalizeDiagnostics()` 归一化 diagnostics；禁止新增第二套 error/diagnostic 格式。
+- [x] 修改 `creativeWorkflows.js` 的 `ensureSuccess(result, fallbackMessage, context = {})`，失败时抛 `CreativeWorkflowStageError`，保留 `result.diagnostics || result.html_video_diagnostics`，并从 `result.project_dir || result.html_video_project_path || context.project_dir` 提取 `project_dir` 写入 error。
+- [x] 只给 `creativeWorkflows.js` 的 project stage `ensureSuccess()` 调用传入 context：`{ stage:'project', sub_stage:'project', code:'html_video_project_failed' }`，其它 source/research/agent_run/brief/audio/check/render/inspect 调用保持旧签名。
+- [x] 修改 `runStage()` catch：识别 `CreativeWorkflowStageError`，写入 `record.last_failure`；同时保留旧 `record.error` 兼容前端现有逻辑。`record.last_failure.project_dir` 必须优先来自 `error.project_dir`，planner 后续通过它定位 `<projectDir>/project.json`。
+- [x] 修改 html-video failure 创建点：`provider_missing_text`、`content_graph_invalid`、`frame_html_invalid`、`timeline_duration_unreasonable`、`render_failed`、`compose_failed`、`duration_mismatch` 均写 `sub_stage`、可定位时写 `frame_id`、可自动恢复时写 `retryable: true` 和对应 `repair_action`。
+- [x] 新增 `upsertProjectStageSummary(record, summary)` 与 `syncProjectStageSummariesFromCheckpoint(record, generationCheckpoint)`，把 `generation_checkpoint.stages` 映射成 workflow record 的用户可见 `project_substages`；它只复制 `id/status/message/artifacts/diagnostics`，不复制完整 checkpoint。
+- [x] `runStage()` project 阶段失败时，如果 error/project result 有 project_dir 且能读取 project checkpoint，调用 `syncProjectStageSummariesFromCheckpoint()` 后再 persist workflow；retry executor 成功/失败时也复用同一 helper 更新 `record.project_substages`。
+- [x] 修改 html-video progress event：content graph、frame HTML、render、compose、duration verify、visual inspect 事件增加 `sub_stage`。
+- [x] 运行本 Task 验收命令。
 
 **需要新增/修改的函数签名:**
 

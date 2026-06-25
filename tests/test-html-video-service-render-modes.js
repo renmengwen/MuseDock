@@ -80,7 +80,21 @@ function createFixture() {
       return {
         success: true,
         message: '成片已导出。',
-        project: options.project,
+        project: {
+          ...options.project,
+          generation_checkpoint: {
+            stages: [
+              {
+                id: 'compose',
+                status: 'done',
+                message: '成片已导出。',
+                artifacts: { output_path: 'exports/output.mp4' },
+                diagnostics: [],
+                ignored: '不应复制',
+              },
+            ],
+          },
+        },
         html_video_project_path: projectDir,
         output_path: path.join(projectDir, 'exports', 'output.mp4'),
       };
@@ -110,6 +124,15 @@ function createFixture() {
   const exported = await exportHtmlVideoProject(WORKFLOW_ID, { skip_render: true }, options);
   assert.equal(exported.success, true);
   assert.deepEqual(calls.slice(-1), [['export', false]]);
+  const workflowAfterExport = JSON.parse(fs.readFileSync(getWorkflowPath(WORKFLOW_ID, rootDir), 'utf8'));
+  const composeSubstage = workflowAfterExport.project_substages.find(item => item.id === 'compose');
+  assert.deepEqual(composeSubstage, {
+    id: 'compose',
+    status: 'done',
+    message: '成片已导出。',
+    artifacts: { output_path: 'exports/output.mp4' },
+    diagnostics: [],
+  });
 
   const exportFile = await getHtmlVideoProjectExportFile(WORKFLOW_ID, 'export_001', { rootDir });
   assert.equal(exportFile.success, true);

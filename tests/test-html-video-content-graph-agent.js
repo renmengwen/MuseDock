@@ -108,6 +108,10 @@ assert.equal(raw.graph.nodes[0].data.items[0].value, 12);
 
 const invalid = agent.parseContentGraphResponse('{bad json');
 assert.equal(invalid.success, false);
+assert.equal(invalid.diagnostics[0].code, 'content_graph_invalid');
+assert.equal(invalid.diagnostics[0].sub_stage, 'content_graph');
+assert.equal(invalid.diagnostics[0].retryable, true);
+assert.equal(invalid.diagnostics[0].repair_action, 'retry_content_graph');
 
 const missingNodes = agent.parseContentGraphResponse(JSON.stringify({ synopsis: '缺 nodes' }));
 assert.equal(missingNodes.success, false);

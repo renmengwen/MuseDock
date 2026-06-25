@@ -26,12 +26,19 @@ function normalizeCode(code) {
 function createDiagnostic(input = {}) {
   const code = normalizeCode(input.code);
   const severity = String(input.severity || '').trim();
+  const sub_stage = String(input.sub_stage || '').trim();
+  const frame_id = String(input.frame_id || '').trim();
+  const repair_action = String(input.repair_action || '').trim();
   return {
     code,
     stage: String(input.stage || 'html-video'),
+    ...(sub_stage ? { sub_stage } : {}),
+    ...(frame_id ? { frame_id } : {}),
     user_message: String(input.user_message || DEFAULT_MESSAGES[code] || 'html-video 处理失败。'),
     details: objectOrEmpty(input.details),
     fallback_allowed: input.fallback_allowed !== false,
+    ...(typeof input.retryable === 'boolean' ? { retryable: input.retryable } : {}),
+    ...(repair_action ? { repair_action } : {}),
     ...(severity ? { severity } : {}),
   };
 }
@@ -57,7 +64,7 @@ function normalizeDiagnostic(input, defaults = {}) {
         ...(typeof input.message === 'string' ? { message: input.message } : {}),
         ...objectOrEmpty(input.details),
         ...Object.fromEntries(Object.entries(objectOrEmpty(input)).filter(([key]) => (
-          !['code', 'stage', 'user_message', 'message', 'details', 'fallback_allowed', 'severity'].includes(key)
+          !['code', 'stage', 'sub_stage', 'frame_id', 'retryable', 'repair_action', 'user_message', 'message', 'details', 'fallback_allowed', 'severity'].includes(key)
         ))),
       },
       fallback_allowed: input.fallback_allowed !== false,

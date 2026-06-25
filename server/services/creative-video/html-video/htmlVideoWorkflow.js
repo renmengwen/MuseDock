@@ -1,4 +1,5 @@
 const path = require('path');
+const crypto = require('crypto');
 
 const aiTextModel = require('../../aiTextModel');
 const { createTemplateRegistry, DEFAULT_ROOT_DIR, validateTemplateCompatibility } = require('./templateRegistry');
@@ -6,10 +7,10 @@ const templateSelectorAgent = require('./templateSelectorAgent');
 const templateInputAgent = require('./templateInputAgent');
 const contentGraphAgent = require('./contentGraphAgent');
 const frameHtmlAgent = require('./frameHtmlAgent');
-const { buildRawHtmlFrameProject } = require('./rawHtmlFrameBuilder');
+const { buildRawHtmlFrameProject, normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
 const environmentDoctor = require('./environmentDoctor');
 const projectStore = require('./projectStore');
-const { normalizeProject } = require('./projectSchema');
+const { normalizeProject, markCheckpointStage, markCheckpointFrame } = require('./projectSchema');
 const { validateHtmlVideoProject } = require('./validationGate');
 const projectOrchestrator = require('./projectOrchestrator');
 const editPatchService = require('./editPatchService');
@@ -19,7 +20,7 @@ const defaultVisualQaService = require('../visualQaService');
 const { computeSceneSpecSpeechHash, audioMatchesSceneSpec } = require('../sceneSpecHash');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
 const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('./sceneSpecMapper');
-const { validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
+const { resolveNodeSceneId, validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -55,6 +56,10 @@ function failure(message, diagnostics, extra = {}) {
     render_mode: 'html-video',
     ...extra,
   });
+}
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
 }
 
 async function report(onProgress, event) {
@@ -477,6 +482,7 @@ async function generateHtmlVideo(options = {}) {
   await report(onProgress, {
     type: 'html_video_template_selected',
     stage: 'project',
+    sub_stage: 'template_select',
     message: `已选择 html-video 模板：${template.name || template.id}。`,
     data: {
       template_id: template.id,
@@ -543,6 +549,7 @@ async function generateHtmlVideo(options = {}) {
     await report(onProgress, {
       type: 'html_video_graph_started',
       stage: 'project',
+      sub_stage: 'content_graph',
       message: '正在生成 html-video 内容图...',
       data: {},
     });
@@ -552,7 +559,10 @@ async function generateHtmlVideo(options = {}) {
         createDiagnostic({
           code: 'content_graph_failed',
           stage: 'ai-content-graph',
+          sub_stage: 'content_graph',
           user_message: graphAi.message || 'content graph 生成失败。',
+          retryable: true,
+          repair_action: 'retry_content_graph',
         }),
       ], {
         html_video_project_path: projectDir,
@@ -561,11 +571,23 @@ async function generateHtmlVideo(options = {}) {
     }
     const graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec);
     if (!graphParsed.success) {
-      return failure(graphParsed.message || 'content graph 解析失败。', [
+      const graphDiagnostics = normalizeDiagnostics(graphParsed.diagnostics, {
+        code: 'content_graph_invalid',
+        stage: 'ai-content-graph',
+        sub_stage: 'content_graph',
+        user_message: graphParsed.message || 'content graph 解析失败。',
+        details: { errors: graphParsed.errors || [] },
+        retryable: true,
+        repair_action: 'retry_content_graph',
+      });
+      return failure(graphParsed.message || 'content graph 解析失败。', graphDiagnostics.length ? graphDiagnostics : [
         createDiagnostic({
           code: 'content_graph_invalid',
           stage: 'ai-content-graph',
+          sub_stage: 'content_graph',
           user_message: graphParsed.message || 'content graph 解析失败。',
+          retryable: true,
+          repair_action: 'retry_content_graph',
           details: { errors: graphParsed.errors || [] },
         }),
       ], {
@@ -581,6 +603,7 @@ async function generateHtmlVideo(options = {}) {
         diagnostics.push(createDiagnostic({
           code: 'content_graph_scene_spec_mismatch',
           stage: 'ai-content-graph',
+          sub_stage: 'content_graph',
           user_message: message,
           details: graphBinding,
           severity: 'warning',
@@ -589,6 +612,7 @@ async function generateHtmlVideo(options = {}) {
         await report(onProgress, {
           type: 'html_video_graph_scene_spec_mismatch',
           stage: 'project',
+          sub_stage: 'content_graph',
           message,
           data: graphBinding,
         });
@@ -598,21 +622,41 @@ async function generateHtmlVideo(options = {}) {
     await report(onProgress, {
       type: 'html_video_graph_done',
       stage: 'project',
+      sub_stage: 'content_graph',
       message: 'html-video 内容图已生成。',
       data: {
         node_count: contentGraph.nodes?.length || 0,
         edge_count: contentGraph.edges?.length || 0,
       },
     });
-    const frameHtmlByNodeId = {};
+    const contentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
+    project = await projectStore.writeProjectJson(projectDir, current => {
+      current.content_graph = contentGraph;
+      current.generation_checkpoint.target = {
+        duration_sec: firstPositiveNumber(templateRenderTarget.duration_sec, templateRenderTarget.durationSec, templateRenderTarget.duration),
+        aspect_ratio: templateRenderTarget.aspect_ratio || templateRenderTarget.aspectRatio || '',
+      };
+      markCheckpointStage(current, 'content_graph', {
+        status: 'done',
+        path: contentGraphPath,
+        output_hash: sha256(JSON.stringify(contentGraph)),
+        diagnostic_code: '',
+      });
+      return current;
+    });
     const nodes = contentGraph.nodes || [];
+    const scenes = new Map((Array.isArray(sceneSpec?.scenes) ? sceneSpec.scenes : []).map(scene => [scene.id, scene]));
     let visualStyleReferenceHtml = '';
     let previousFrameHtml = '';
     for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      const sceneId = resolveNodeSceneId(node) || node.id;
       await report(onProgress, {
         type: 'html_video_frame_html_started',
         stage: 'project',
+        sub_stage: 'frame_html',
         message: `正在生成第 ${index + 1}/${nodes.length} 帧 HTML...`,
+        frame_id: nodes[index].id,
         data: {
           frame_id: nodes[index].id,
           index,
@@ -622,7 +666,7 @@ async function generateHtmlVideo(options = {}) {
       const htmlResult = await frameHtmlAgent.generateFrameHtml({
         model,
         graph: contentGraph,
-        node: nodes[index],
+        node,
         index,
         total: nodes.length,
         sceneSpec,
@@ -633,27 +677,104 @@ async function generateHtmlVideo(options = {}) {
         previousFrameHtml,
       });
       if (!htmlResult.success) {
-        return failure(htmlResult.message || '单帧 HTML 生成失败。', [
+        const frameDiagnostics = normalizeDiagnostics(htmlResult.diagnostics, {
+          code: 'frame_html_invalid',
+          stage: 'ai-frame-html',
+          sub_stage: 'frame_html',
+          frame_id: node.id || sceneId,
+          user_message: htmlResult.message || '单帧 HTML 生成失败。',
+          retryable: true,
+          repair_action: 'retry_frame_html',
+        });
+        const diagnosticCode = frameDiagnostics[0]?.code || 'frame_html_invalid';
+        project = await projectStore.writeProjectJson(projectDir, current => {
+          markCheckpointFrame(current, 'frame_html', sceneId, {
+            status: 'failed',
+            diagnostic_code: diagnosticCode,
+          });
+          return current;
+        });
+        return failure(htmlResult.message || '单帧 HTML 生成失败。', frameDiagnostics.length ? frameDiagnostics : [
           createDiagnostic({
             code: 'frame_html_invalid',
             stage: 'ai-frame-html',
+            sub_stage: 'frame_html',
+            frame_id: node.id || sceneId,
             user_message: htmlResult.message || '单帧 HTML 生成失败。',
-            details: { frame_id: nodes[index].id, diagnostics: htmlResult.diagnostics || [] },
+            retryable: true,
+            repair_action: 'retry_frame_html',
+            details: { frame_id: node.id },
           }),
         ], {
           html_video_project_path: projectDir,
           project_dir: projectDir,
         });
       }
-      frameHtmlByNodeId[nodes[index].id] = htmlResult.html;
+      const scene = scenes.get(sceneId);
+      const durationSec = trustedSceneDuration(scene || {}, node);
+      const captions = mediaOptions.generateCaptions !== false && scene
+        ? normalizeCaptions(scene, durationSec)
+        : [];
+      let written;
+      try {
+        written = await projectStore.writeRawFrameHtml({
+          projectDir,
+          sceneId,
+          order: index + 1,
+          html: htmlResult.html,
+          captions,
+          durationSec,
+        });
+      } catch (error) {
+        project = await projectStore.writeProjectJson(projectDir, current => {
+          markCheckpointFrame(current, 'frame_html', sceneId, {
+            status: 'failed',
+            diagnostic_code: 'frame_html_write_failed',
+          });
+          return current;
+        });
+        return failure(error.message || '单帧 HTML 写入失败。', [
+          createDiagnostic({
+            code: 'frame_html_write_failed',
+            stage: 'frame-html',
+            user_message: '单帧 HTML 写入失败。',
+            details: { frame_id: node.id },
+          }),
+        ], {
+          html_video_project_path: projectDir,
+          project_dir: projectDir,
+        });
+      }
+      nodes[index] = {
+        ...node,
+        durationSec,
+        html_path: written.html_path,
+      };
+      contentGraph = {
+        ...contentGraph,
+        nodes,
+      };
+      project = await projectStore.writeProjectJson(projectDir, current => {
+        current.content_graph = contentGraph;
+        markCheckpointFrame(current, 'frame_html', sceneId, {
+          status: 'done',
+          html_path: written.html_path,
+          input_hash: sha256(htmlResult.html),
+          output_hash: written.output_hash,
+          diagnostic_code: '',
+        });
+        return current;
+      });
       if (!visualStyleReferenceHtml) visualStyleReferenceHtml = htmlResult.html;
       previousFrameHtml = htmlResult.html;
       await report(onProgress, {
         type: 'html_video_frame_html_done',
         stage: 'project',
+        sub_stage: 'frame_html',
         message: `第 ${index + 1}/${nodes.length} 帧 HTML 已生成。`,
+        frame_id: node.id,
         data: {
-          frame_id: nodes[index].id,
+          frame_id: node.id,
           index,
           total: nodes.length,
         },
@@ -664,7 +785,6 @@ async function generateHtmlVideo(options = {}) {
       workflowId,
       runId,
       graph: contentGraph,
-      frameHtmlByNodeId,
       sceneSpec,
       target: templateRenderTarget,
       template,
@@ -784,6 +904,13 @@ async function generateHtmlVideo(options = {}) {
   let visualReport = { success: true, issues: [], metrics: {} };
   if (!skipValidation) {
     const visualQaService = services.visualQaService || defaultVisualQaService;
+    await report(onProgress, {
+      type: 'html_video_visual_inspect_started',
+      stage: 'project',
+      sub_stage: 'visual_inspect',
+      message: '正在巡检 html-video 成片画面...',
+      data: {},
+    });
     visualReport = await visualQaService.inspectRenderedVideo({
       projectDir,
       outputPath: rendered.output_path,
@@ -793,11 +920,19 @@ async function generateHtmlVideo(options = {}) {
       diagnostics.push(createDiagnostic({
         code: 'visual_qa_warning',
         stage: 'inspect',
+        sub_stage: 'visual_inspect',
         user_message: visualReport.message || 'html-video 视觉质检未通过，仅记录为参考报告。',
         details: { issues: visualReport.issues || [], metrics: visualReport.metrics || {} },
         severity: 'warning',
       }));
     }
+    await report(onProgress, {
+      type: 'html_video_visual_inspect_done',
+      stage: 'project',
+      sub_stage: 'visual_inspect',
+      message: visualReport.success ? 'html-video 成片画面巡检完成。' : 'html-video 成片画面巡检发现问题。',
+      data: visualReport,
+    });
   }
 
   return {

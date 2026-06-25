@@ -99,7 +99,9 @@ function fitFrameDurationsToCaptions(project, toleranceSec = 0.2) {
         diagnostics.push(createDiagnostic({
           code: 'caption_duration_exceeds_frame',
           stage: 'timeline-consistency',
+          sub_stage: 'timeline_check',
           user_message: '字幕时间超过锁定的画面时长，无法继续渲染。请缩短旁白或解除固定时长。',
+          frame_id: frame.id || frame.scene_id || '',
           details: {
             frame_id: frame.id || frame.scene_id || '',
             duration_sec: duration,
@@ -118,7 +120,11 @@ function fitFrameDurationsToCaptions(project, toleranceSec = 0.2) {
         diagnostics.push(createDiagnostic({
           code: 'caption_duration_exceeds_reasonable_frame',
           stage: 'timeline-consistency',
+          sub_stage: 'timeline_check',
           user_message: '字幕时间异常超出画面时长，已停止渲染。请重新生成该段配音或缩短字幕时间。',
+          frame_id: frame.id || frame.scene_id || '',
+          retryable: true,
+          repair_action: 'retry_frame_html',
           details: {
             frame_id: frame.id || frame.scene_id || '',
             duration_sec: duration,
@@ -139,8 +145,10 @@ function fitFrameDurationsToCaptions(project, toleranceSec = 0.2) {
       diagnostics.push(createDiagnostic({
         code: 'frame_duration_auto_extended',
         stage: 'timeline-consistency',
+        sub_stage: 'timeline_check',
         severity: 'warning',
         user_message: '已按字幕时长自动延长画面帧。',
+        frame_id: frame.id || frame.scene_id || '',
         details: {
           frame_id: frame.id || frame.scene_id || '',
           previous_duration_sec: duration,
@@ -236,7 +244,10 @@ async function resolveNarrationPath(project, projectDir, ffmpegComposer, diagnos
     diagnostics.push(createDiagnostic({
       code: 'compose_failed',
       stage: 'compose',
+      sub_stage: 'compose',
       user_message: concat.message || '旁白音频拼接失败。',
+      retryable: true,
+      repair_action: 'retry_compose',
       details: { stderr: concat.stderr },
     }));
     return null;
@@ -359,7 +370,10 @@ async function renderHtmlVideoProject({
     diagnostics.push(createDiagnostic({
       code: timelineDuration.code,
       stage: 'timeline-consistency',
+      sub_stage: 'timeline_check',
       user_message: timelineDuration.message || '视频时间轴异常，已停止渲染。',
+      retryable: true,
+      repair_action: 'regenerate_content_graph',
       details: timelineDuration,
       fallback_allowed: false,
     }));
@@ -388,6 +402,7 @@ async function renderHtmlVideoProject({
       onProgress: progress => report(onProgress, {
         type: 'html_video_frame_render_progress',
         stage: 'project',
+        sub_stage: 'render',
         message: progress?.message || `正在渲染第 ${index + 1}/${frames.length} 帧...`,
         frame_id: frame.id || frame.scene_id,
         frame_progress: progress?.percent,
@@ -399,12 +414,21 @@ async function renderHtmlVideoProject({
         },
       }),
     });
-    diagnostics.push(...normalizeDiagnostics(rendered.diagnostics, { stage: 'render', details: { frame_id: frame.id } }));
+    diagnostics.push(...normalizeDiagnostics(rendered.diagnostics, {
+      stage: 'render',
+      sub_stage: 'render',
+      frame_id: frame.id || frame.scene_id || '',
+      details: { frame_id: frame.id },
+    }));
     if (!rendered.success) {
       diagnostics.push(createDiagnostic({
         code: 'render_failed',
         stage: 'render',
+        sub_stage: 'render',
+        frame_id: frame.id || frame.scene_id || '',
         user_message: rendered.message || 'html-video 帧渲染失败。',
+        retryable: true,
+        repair_action: 'retry_render',
         details: { frame_id: frame.id, output_path: rendered.output_path },
       }));
       return {
@@ -428,6 +452,7 @@ async function renderHtmlVideoProject({
   await report(onProgress, {
     type: 'html_video_compose_started',
     stage: 'project',
+    sub_stage: 'compose',
     message: '正在合成 html-video 成片...',
     data: {
       frame_count: renderedFrames.length,
@@ -441,7 +466,10 @@ async function renderHtmlVideoProject({
     diagnostics.push(createDiagnostic({
       code: 'compose_failed',
       stage: 'compose',
+      sub_stage: 'compose',
       user_message: concat.message || 'html-video 视频合成失败。',
+      retryable: true,
+      repair_action: 'retry_compose',
       details: { strategy: concat.strategy, stderr: concat.stderr },
     }));
     return {
@@ -471,7 +499,10 @@ async function renderHtmlVideoProject({
       diagnostics.push(createDiagnostic({
         code: 'compose_failed',
         stage: 'compose',
+        sub_stage: 'compose',
         user_message: mux.message || 'html-video 音频混流失败。',
+        retryable: true,
+        repair_action: 'retry_compose',
         details: { stderr: mux.stderr },
       }));
       return {
@@ -486,6 +517,13 @@ async function renderHtmlVideoProject({
     finalOutput = mux.output_path || finalOutput;
   }
   if (typeof ffmpegComposer.verifyDurationWithFfprobe === 'function') {
+    await report(onProgress, {
+      type: 'html_video_duration_verify_started',
+      stage: 'project',
+      sub_stage: 'duration_verify',
+      message: '正在校验导出视频时长...',
+      data: {},
+    });
     const durationCheck = await ffmpegComposer.verifyDurationWithFfprobe({
       videoPath: finalOutput,
       expectedDurationSec: expectedDurationSec(nextProject),
@@ -495,6 +533,7 @@ async function renderHtmlVideoProject({
       diagnostics.push(createDiagnostic({
         code: durationCheck.code || 'ffprobe_skipped',
         stage: 'compose',
+        sub_stage: 'duration_verify',
         user_message: durationCheck.message || '已跳过导出时长校验。',
         details: durationCheck,
       }));
@@ -502,7 +541,10 @@ async function renderHtmlVideoProject({
       diagnostics.push(createDiagnostic({
         code: durationCheck.code || 'duration_mismatch',
         stage: 'compose',
+        sub_stage: 'duration_verify',
         user_message: durationCheck.message || '导出视频时长校验失败。',
+        retryable: true,
+        repair_action: 'retry_duration_verify',
         details: durationCheck,
       }));
       return {
@@ -514,6 +556,13 @@ async function renderHtmlVideoProject({
         diagnostics,
       };
     }
+    await report(onProgress, {
+      type: 'html_video_duration_verify_done',
+      stage: 'project',
+      sub_stage: 'duration_verify',
+      message: durationCheck.skipped ? '已跳过导出视频时长校验。' : '导出视频时长校验完成。',
+      data: durationCheck,
+    });
   }
 
   addExport(nextProject, {
@@ -531,6 +580,7 @@ async function renderHtmlVideoProject({
   await report(onProgress, {
     type: 'html_video_export_ready',
     stage: 'project',
+    sub_stage: 'compose',
     message: 'html-video 成片已导出。',
     data: {
       output_path: finalOutput,
@@ -627,12 +677,21 @@ async function renderHtmlVideoFramePreview(options = {}) {
     fps: outputConfig.fps,
     runLayoutQa: options.runLayoutQa === true || options.run_layout_qa === true,
   });
-  diagnostics.push(...normalizeDiagnostics(rendered.diagnostics, { stage: 'render', details: { frame_id: frameId } }));
+  diagnostics.push(...normalizeDiagnostics(rendered.diagnostics, {
+    stage: 'render',
+    sub_stage: 'render',
+    frame_id: frameId,
+    details: { frame_id: frameId },
+  }));
   if (!rendered.success) {
     diagnostics.push(createDiagnostic({
       code: 'render_failed',
       stage: 'render',
+      sub_stage: 'render',
+      frame_id: frameId,
       user_message: rendered.message || 'html-video 帧渲染失败。',
+      retryable: true,
+      repair_action: 'retry_render',
       details: { frame_id: frameId, output_path: rendered.output_path },
     }));
     return {

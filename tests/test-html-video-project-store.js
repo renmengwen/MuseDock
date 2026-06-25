@@ -57,10 +57,39 @@ const assetStore = require('../server/services/creative-video/html-video/assetSt
   const savedProject = await store.saveProject(projectDir, project);
   const loaded = await store.loadProject(projectDir);
   assert.deepEqual(loaded, savedProject);
+  assert.equal(loaded.generation_checkpoint.version, 1);
   await assert.rejects(
     fs.access(path.join(projectDir, 'project.json.tmp')),
     /ENOENT/
   );
+
+  const updated = await store.writeProjectJson(projectDir, current => {
+    schema.markCheckpointStage(current, 'content_graph', { status: 'done', path: 'content-graph.json' });
+    return current;
+  });
+  assert.equal(updated.generation_checkpoint.stages.content_graph.status, 'done');
+  assert.equal((await store.loadProject(projectDir)).generation_checkpoint.stages.content_graph.path, 'content-graph.json');
+
+  const graphPath = await store.saveContentGraph(projectDir, { schemaVersion: 1, nodes: [{ id: 'node_01' }], edges: [] });
+  assert.equal(graphPath, 'content-graph.json');
+  assert.deepEqual(
+    JSON.parse(await fs.readFile(path.join(projectDir, graphPath), 'utf8')),
+    { schemaVersion: 1, nodes: [{ id: 'node_01' }], edges: [] }
+  );
+
+  const frameWrite = await store.writeRawFrameHtml({
+    projectDir,
+    sceneId: 'scene_01',
+    order: 1,
+    html: '<!doctype html><html><body><main>原始画面</main></body></html>',
+    captions: [{ id: 'c1', text: '中文字幕', start: 0, end: 1 }],
+    durationSec: 3,
+  });
+  assert.equal(frameWrite.html_path, 'frames/01-scene_01.html');
+  assert.match(frameWrite.output_hash, /^[a-f0-9]{64}$/);
+  const frameHtml = await fs.readFile(path.join(projectDir, frameWrite.html_path), 'utf8');
+  assert.match(frameHtml, /原始画面/);
+  assert.match(frameHtml, /中文字幕/);
 
   const firstRevision = store.addRevision(project, { summary: '初始化工程', author: 'tester' });
   const secondRevision = store.addRevision(project, { summary: '更新帧', author: 'tester' });

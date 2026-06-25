@@ -259,14 +259,18 @@ function fullSceneCaption(sceneId, text, duration) {
     },
   });
   assert.equal(unreasonableTimelineResult.success, false);
-  assert.ok(unreasonableTimelineResult.html_video_diagnostics.some(item => item.code === 'timeline_duration_unreasonable'), JSON.stringify({
+  const unreasonableTimelineDiagnostic = unreasonableTimelineResult.html_video_diagnostics.find(item => item.code === 'timeline_duration_unreasonable');
+  assert.ok(unreasonableTimelineDiagnostic, JSON.stringify({
     message: unreasonableTimelineResult.message,
     diagnostics: unreasonableTimelineResult.html_video_diagnostics,
   }, null, 2));
+  assert.equal(unreasonableTimelineDiagnostic.sub_stage, 'timeline_check');
+  assert.equal(unreasonableTimelineDiagnostic.retryable, true);
+  assert.equal(unreasonableTimelineDiagnostic.repair_action, 'regenerate_content_graph');
   assert.equal(unreasonableTimelineRenderCalls, 0);
 
   const originalRenderHtmlVideoProject = projectOrchestrator.renderHtmlVideoProject;
-  const progressMessages = [];
+  const graphProgressEvents = [];
   projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
     success: true,
     message: 'mock render success',
@@ -294,7 +298,7 @@ function fullSceneCaption(sceneId, text, duration) {
       templateRegistry,
       skipValidation: true,
       onProgress: event => {
-        progressMessages.push(event.message || '');
+        graphProgressEvents.push(event);
       },
       services: {
         aiTextModel: {
@@ -343,8 +347,9 @@ function fullSceneCaption(sceneId, text, duration) {
     assert.equal(mismatchDiagnostic.stage, 'ai-content-graph');
     assert.equal(mismatchDiagnostic.severity, 'warning');
     assert.equal(mismatchDiagnostic.fallback_allowed, true);
+    assert.equal(mismatchDiagnostic.sub_stage, 'content_graph');
     assert.equal(mismatchDiagnostic.details.reason, 'node_count_mismatch');
-    assert.ok(progressMessages.some(message => message.includes('画面帧与字幕脚本不一致，已回退为字幕脚本生成画面结构。')));
+    assert.ok(graphProgressEvents.some(event => event.sub_stage === 'content_graph' && String(event.message || '').includes('画面帧与字幕脚本不一致，已回退为字幕脚本生成画面结构。')));
   } finally {
     projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
   }
@@ -690,13 +695,13 @@ function fullSceneCaption(sceneId, text, duration) {
     },
   });
   assert.equal(progressResult.success, true);
-  assert.ok(progressEvents.some(event => event.type === 'html_video_template_selected'));
+  assert.ok(progressEvents.some(event => event.type === 'html_video_template_selected' && event.sub_stage === 'template_select'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_graph_started'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_graph_done'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_frame_html_started'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_frame_html_done'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_frame_render_progress'));
-  assert.ok(progressEvents.some(event => event.type === 'html_video_export_ready'));
+  assert.ok(progressEvents.some(event => event.type === 'html_video_export_ready' && event.sub_stage === 'compose'));
 
   const originalRenderForNoCaptions = projectOrchestrator.renderHtmlVideoProject;
   projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({

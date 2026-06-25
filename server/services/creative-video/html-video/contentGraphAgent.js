@@ -1,4 +1,5 @@
 const contentGraph = require('./contentGraph');
+const { createDiagnostic } = require('./diagnostics');
 
 const TRUNCATION_MARKER = '...（已截断）';
 
@@ -200,13 +201,37 @@ function normalizeContentGraph(graph, sceneSpec = {}) {
 
 function parseContentGraphResponse(text, sceneSpec = {}) {
   const jsonText = extractJsonText(text);
-  if (!jsonText) return { success: false, message: 'AI 未返回 content graph JSON。' };
+  if (!jsonText) return contentGraphFailure('AI 未返回 content graph JSON。');
   try {
     const parsed = JSON.parse(jsonText);
-    return normalizeContentGraph(parsed, sceneSpec);
+    const normalized = normalizeContentGraph(parsed, sceneSpec);
+    return normalized.success ? normalized : {
+      ...normalized,
+      diagnostics: [contentGraphDiagnostic(normalized.message || 'content graph 校验失败。', { errors: normalized.errors || [] })],
+    };
   } catch (error) {
-    return { success: false, message: `AI 返回的 content graph JSON 无效：${error.message}` };
+    return contentGraphFailure(`AI 返回的 content graph JSON 无效：${error.message}`);
   }
+}
+
+function contentGraphDiagnostic(message, details = {}) {
+  return createDiagnostic({
+    code: 'content_graph_invalid',
+    stage: 'ai-content-graph',
+    sub_stage: 'content_graph',
+    retryable: true,
+    repair_action: 'retry_content_graph',
+    user_message: message,
+    details,
+  });
+}
+
+function contentGraphFailure(message, details = {}) {
+  return {
+    success: false,
+    message,
+    diagnostics: [contentGraphDiagnostic(message, details)],
+  };
 }
 
 module.exports = {

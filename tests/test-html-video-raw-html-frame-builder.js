@@ -3,7 +3,12 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 
-const { buildRawHtmlFrameProject } = require('../server/services/creative-video/html-video/rawHtmlFrameBuilder');
+const {
+  buildRawHtmlFrameProject,
+  buildRawHtmlFrameProjectFromMemory,
+} = require('../server/services/creative-video/html-video/rawHtmlFrameBuilder');
+const { createEmptyProject, markCheckpointFrame } = require('../server/services/creative-video/html-video/projectSchema');
+const projectStore = require('../server/services/creative-video/html-video/projectStore');
 
 (async () => {
   const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-raw-html-'));
@@ -16,7 +21,7 @@ const { buildRawHtmlFrameProject } = require('../server/services/creative-video/
     edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence' }],
   };
 
-  const project = await buildRawHtmlFrameProject({
+  const project = await buildRawHtmlFrameProjectFromMemory({
     projectDir,
     workflowId: 'wf_001',
     runId: 'run_001',
@@ -74,7 +79,7 @@ const { buildRawHtmlFrameProject } = require('../server/services/creative-video/
   assert.match(secondHtml, /第二幕旁白/);
 
   await assert.rejects(async () => {
-    await buildRawHtmlFrameProject({
+    await buildRawHtmlFrameProjectFromMemory({
       projectDir,
       workflowId: 'wf',
       runId: 'run',
@@ -100,7 +105,7 @@ const { buildRawHtmlFrameProject } = require('../server/services/creative-video/
   }, /内容图节点 scene_02 未匹配到 scene_spec 场景/);
 
   {
-    const boundProject = await buildRawHtmlFrameProject({
+    const boundProject = await buildRawHtmlFrameProjectFromMemory({
       projectDir,
       workflowId: 'wf',
       runId: 'run-bound',
@@ -125,7 +130,7 @@ const { buildRawHtmlFrameProject } = require('../server/services/creative-video/
     assert.equal(boundProject.frames[0].id, 'scene_01');
     assert.equal(boundProject.frames[0].scene_id, 'scene_01');
     assert.equal(boundProject.frames[0].graph_node_id, 'node_a');
-    assert.equal(boundProject.frames[0].html_path, 'frames/01-node_a.html');
+    assert.equal(boundProject.frames[0].html_path, 'frames/01-scene_01.html');
     assert.equal(boundProject.frames[0].narration_text, '第一段');
     assert.deepEqual(boundProject.frames[0].captions, [{
       id: 'scene_01_caption_01',
@@ -139,6 +144,39 @@ const { buildRawHtmlFrameProject } = require('../server/services/creative-video/
     assert.equal(boundProject.frames[0].metadata.scene_snapshot.order, 1);
     assert.equal(boundProject.frames[0].metadata.scene_snapshot.narration_text, '第一段');
     assert.deepEqual(boundProject.frames[0].metadata.scene_snapshot.captions, [{ text: '字幕一' }]);
+  }
+
+  {
+    const staleDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-stale-checkpoint-'));
+    const staleProject = createEmptyProject({
+      projectId: 'stale_project',
+      workflowId: 'wf_stale',
+      runId: 'run_stale',
+    });
+    markCheckpointFrame(staleProject, 'frame_html', 'scene_01', {
+      status: 'failed',
+      html_path: 'frames/01-scene_01.html',
+      output_hash: 'stale-output',
+      diagnostic_code: 'frame_html_invalid',
+    });
+    await projectStore.saveProject(staleDir, staleProject);
+
+    await assert.rejects(async () => {
+      await buildRawHtmlFrameProject({
+        projectDir: staleDir,
+        workflowId: 'wf_stale',
+        runId: 'run_stale',
+        graph: {
+          nodes: [{ id: 'scene_01', kind: 'text', durationSec: 2 }],
+          edges: [],
+        },
+        sceneSpec: {
+          scenes: [{ id: 'scene_01', narration_text: '失败帧不应恢复。' }],
+        },
+        target: {},
+        template: { id: 'template-a' },
+      });
+    }, /缺少帧 scene_01 的 raw HTML 路径/);
   }
 
   console.log('html-video raw html frame builder tests passed');
