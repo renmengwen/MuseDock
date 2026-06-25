@@ -23,7 +23,7 @@ function frameDurationMs(frame) {
 
 function serializeDocument(doc) {
   const root = doc.documentElement.cloneNode(true);
-  root.querySelectorAll('[data-hv-canvas-freeze],[data-hv-canvas-editor-style]').forEach(node => node.remove());
+  root.querySelectorAll('[data-hv-canvas-freeze],[data-hv-canvas-editor-style],[data-hv-canvas-viewport-style]').forEach(node => node.remove());
   root.querySelectorAll('[data-hv-canvas-selected]').forEach(node => {
     node.removeAttribute('data-hv-canvas-selected');
   });
@@ -76,18 +76,35 @@ function isEditableElement(element) {
   return element.matches(editableSelector);
 }
 
-function freezeFrame(win) {
+function freezeFrame(win, targetTimeMs) {
   const doc = win.document;
+  const targetMs = Number.isFinite(targetTimeMs) && targetTimeMs >= 0 ? targetTimeMs : null;
   doc.querySelectorAll('[data-hv-canvas-freeze]').forEach(node => node.remove());
   for (const animation of doc.getAnimations()) {
     try {
       const timing = animation.effect?.getTiming?.();
-      if (Number.isFinite(timing?.duration)) animation.currentTime = timing.duration;
+      const duration = Number(timing?.duration);
+      if (targetMs !== null) {
+        animation.currentTime = targetMs;
+      } else if (animation.playState === 'idle' && Number.isFinite(duration)) {
+        animation.currentTime = duration;
+      }
       animation.pause();
     } catch (_) {
       try { animation.pause(); } catch (_) {}
     }
   }
+  Object.values(win.__timelines || {}).forEach(timeline => {
+    try {
+      if (timeline && typeof timeline.seek === 'function') {
+        if (targetMs !== null) timeline.seek(targetMs / 1000, false);
+        timeline.pause?.();
+      } else if (timeline && typeof timeline.progress === 'function') {
+        if (targetMs !== null) timeline.progress(1);
+        timeline.pause?.();
+      }
+    } catch (_) {}
+  });
   if (win.gsap?.globalTimeline) {
     try { win.gsap.globalTimeline.pause(); } catch (_) {}
   }
@@ -95,6 +112,18 @@ function freezeFrame(win) {
   style.setAttribute('data-hv-canvas-freeze', 'true');
   style.textContent = '*{animation-play-state:paused!important;transition-property:none!important;}';
   doc.head.appendChild(style);
+}
+
+function playFrame(win) {
+  try {
+    if (typeof win.__hvPlayAll === 'function') {
+      win.__hvPlayed = true;
+      win.__hvPlayAll();
+    }
+  } catch (_) {}
+  try {
+    if (typeof win.__hvUnfreeze === 'function') win.__hvUnfreeze();
+  } catch (_) {}
 }
 
 function viewportSize(win) {
@@ -105,19 +134,86 @@ function viewportSize(win) {
   };
 }
 
+function canvasScale(win) {
+  const scale = Number(win?.__HV_CANVAS_SCALE__);
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+function canvasSize(win) {
+  const size = win?.__HV_CANVAS_SIZE__;
+  return {
+    width: Number.isFinite(size?.width) && size.width > 0 ? size.width : viewportSize(win).width,
+    height: Number.isFinite(size?.height) && size.height > 0 ? size.height : viewportSize(win).height,
+  };
+}
+
+function installCanvasViewport(doc) {
+  const win = doc.defaultView;
+  const viewport = viewportSize(win);
+  const body = doc.body;
+  const designWidth = Math.max(
+    doc.documentElement.scrollWidth,
+    doc.documentElement.clientWidth,
+    body?.scrollWidth || 0,
+    body?.offsetWidth || 0,
+    1,
+  );
+  const designHeight = Math.max(
+    doc.documentElement.scrollHeight,
+    doc.documentElement.clientHeight,
+    body?.scrollHeight || 0,
+    body?.offsetHeight || 0,
+    1,
+  );
+  const scale = viewport.width && viewport.height
+    ? Math.min(viewport.width / designWidth, viewport.height / designHeight)
+    : 1;
+
+  win.__HV_CANVAS_SCALE__ = scale > 0 ? scale : 1;
+  win.__HV_CANVAS_SIZE__ = { width: designWidth, height: designHeight };
+  doc.querySelectorAll('[data-hv-canvas-viewport-style]').forEach(node => node.remove());
+  const style = doc.createElement('style');
+  style.setAttribute('data-hv-canvas-viewport-style', 'true');
+  style.textContent = `
+html {
+  width: 100% !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+body {
+  width: ${Math.round(designWidth)}px !important;
+  height: ${Math.round(designHeight)}px !important;
+  transform: scale(${win.__HV_CANVAS_SCALE__}) !important;
+  transform-origin: 0 0 !important;
+  overflow: hidden !important;
+}
+`;
+  doc.head.appendChild(style);
+}
+
 function absolutePositionFor(element) {
   const doc = element.ownerDocument;
   const win = doc.defaultView;
   const rect = element.getBoundingClientRect();
   const offsetParent = element.offsetParent || doc.body;
   const parentRect = offsetParent.getBoundingClientRect();
-  const viewport = viewportSize(win);
+  const scale = canvasScale(win);
+  const size = canvasSize(win);
   const parentIsBody = offsetParent === doc.body || offsetParent === doc.documentElement;
+  const bodyRect = doc.body?.getBoundingClientRect?.() || doc.documentElement.getBoundingClientRect();
+  const parentCanvasLeft = parentIsBody ? 0 : (parentRect.left - bodyRect.left) / scale;
+  const parentCanvasTop = parentIsBody ? 0 : (parentRect.top - bodyRect.top) / scale;
+  const minLeft = parentIsBody ? 0 : -parentCanvasLeft + offsetParent.scrollLeft;
+  const minTop = parentIsBody ? 0 : -parentCanvasTop + offsetParent.scrollTop;
+  const maxLeft = parentIsBody ? size.width : size.width - parentCanvasLeft + offsetParent.scrollLeft;
+  const maxTop = parentIsBody ? size.height : size.height - parentCanvasTop + offsetParent.scrollTop;
   return {
-    left: rect.left - parentRect.left + offsetParent.scrollLeft,
-    top: rect.top - parentRect.top + offsetParent.scrollTop,
-    parentWidth: parentIsBody ? viewport.width : offsetParent.clientWidth,
-    parentHeight: parentIsBody ? viewport.height : offsetParent.clientHeight,
+    left: (rect.left - parentRect.left) / scale + offsetParent.scrollLeft,
+    top: (rect.top - parentRect.top) / scale + offsetParent.scrollTop,
+    minLeft,
+    minTop,
+    maxLeft,
+    maxTop,
   };
 }
 
@@ -271,21 +367,27 @@ export function HtmlVideoCanvasEditor({ editor }) {
 
   function beginPlayback() {
     clearPlaybackTimer();
+    const win = iframeRef.current?.contentWindow;
+    if (win?.document) playFrame(win);
     setEditingReady(false);
     setPlaybackState('playing');
     setElementInfo(null);
     selectedElementRef.current = null;
     playbackTimerRef.current = setTimeout(() => {
-      jumpToEnd();
+      finishPlayback();
     }, frameDurationMs(frame));
   }
 
-  function jumpToEnd() {
+  function finishPlayback(targetTimeMs = null) {
     clearPlaybackTimer();
     const win = iframeRef.current?.contentWindow;
-    if (win?.document) freezeFrame(win);
+    if (win?.document) freezeFrame(win, targetTimeMs);
     setPlaybackState('ended');
     setEditingReady(true);
+  }
+
+  function jumpToEnd() {
+    finishPlayback(frameDurationMs(frame));
   }
 
   function replay() {
@@ -307,6 +409,8 @@ export function HtmlVideoCanvasEditor({ editor }) {
     if (!doc || !rawHtml || !htmlReady) return;
     if (iframeLoadTimerRef.current) clearTimeout(iframeLoadTimerRef.current);
     setPreviewError('');
+    installCanvasViewport(doc);
+    doc.defaultView.addEventListener('resize', () => installCanvasViewport(doc));
     // HV-CANVAS-INJECT-STYLE-HERE
     doc.querySelectorAll('[data-hv-canvas-editor-style]').forEach(node => node.remove());
     const editorStyle = doc.createElement('style');
@@ -351,8 +455,11 @@ export function HtmlVideoCanvasEditor({ editor }) {
         startY: event.clientY,
         startLeft: stylePxOrFallback(target.style.left || computed.left, absolutePosition.left),
         startTop: stylePxOrFallback(target.style.top || computed.top, absolutePosition.top),
-        parentWidth: absolutePosition.parentWidth,
-        parentHeight: absolutePosition.parentHeight,
+        minLeft: absolutePosition.minLeft,
+        minTop: absolutePosition.minTop,
+        maxLeft: absolutePosition.maxLeft,
+        maxTop: absolutePosition.maxTop,
+        scale: canvasScale(doc.defaultView),
       };
       target.setPointerCapture?.(event.pointerId);
     }, true);
@@ -361,8 +468,17 @@ export function HtmlVideoCanvasEditor({ editor }) {
       if (!drag?.element) return;
       event.preventDefault();
       const rect = drag.element.getBoundingClientRect();
-      const nextLeft = clamp(drag.startLeft + event.clientX - drag.startX, 0, Math.max(0, drag.parentWidth - rect.width));
-      const nextTop = clamp(drag.startTop + event.clientY - drag.startY, 0, Math.max(0, drag.parentHeight - rect.height));
+      const scale = drag.scale || 1;
+      const nextLeft = clamp(
+        drag.startLeft + (event.clientX - drag.startX) / scale,
+        drag.minLeft,
+        Math.max(drag.minLeft, drag.maxLeft - rect.width / scale),
+      );
+      const nextTop = clamp(
+        drag.startTop + (event.clientY - drag.startY) / scale,
+        drag.minTop,
+        Math.max(drag.minTop, drag.maxTop - rect.height / scale),
+      );
       drag.element.style.left = `${Math.round(nextLeft)}px`;
       drag.element.style.top = `${Math.round(nextTop)}px`;
       setElementInfo(readElementInfo(drag.element));
@@ -458,7 +574,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
       <div className="html-video-canvas-workspace">
         <div className="html-video-canvas-stage">
           <div className="html-video-canvas-toolbar">
-            <span>{previewError || (playbackState === 'playing' ? '正在播放镜头动画...' : editingReady ? '已停在镜头结束帧，可开始编辑。' : '正在准备预览...')}</span>
+            <span>{previewError || (playbackState === 'playing' ? '正在播放镜头动画...' : editingReady ? '已停在镜头可编辑帧，可开始编辑。' : '正在准备预览...')}</span>
             <div className="creative-video-editor-inline-actions">
               <button type="button" disabled={disabled} onClick={replay}>重新播放</button>
               <button type="button" disabled={disabled} onClick={jumpToEnd}>跳到结尾并编辑</button>

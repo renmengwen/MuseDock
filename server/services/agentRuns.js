@@ -276,6 +276,14 @@ function trimNarrationToBudget(text, maxChars) {
   return (output || compact).slice(0, limit);
 }
 
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return 0;
+}
+
 function createInputSummary({ analysisInput, transcript, comments }) {
   return {
     title: analysisInput?.video?.title || '',
@@ -1151,6 +1159,86 @@ function normalizeFreeformNarrationScenes(brief = {}) {
   return narration ? [{ index: 1, narration_text: narration }] : [];
 }
 
+function resolveFreeformTargetDurationSec(brief = {}, run = {}, options = {}) {
+  return firstPositiveNumber(
+    options.targetDurationSec,
+    options.target_duration_sec,
+    brief.target_duration_sec,
+    brief.targetDurationSec,
+    run?.result?.video_brief?.target_duration_sec,
+    run?.result?.videoBrief?.targetDurationSec,
+    60,
+  );
+}
+
+function freeformStoryboardPlanForBudget(brief = {}, scenes = [], targetDurationSec = 60) {
+  const totalChars = scenes.reduce((sum, scene) => (
+    sum + narrationBudget.countNarrationChars(scene?.narration_text || '')
+  ), 0);
+  const target = firstPositiveNumber(targetDurationSec, 60);
+  return {
+    target_duration_sec: target,
+    scenes: scenes.map((scene, index) => {
+      const sceneTarget = firstPositiveNumber(
+        scene?.target_duration_sec,
+        scene?.targetDurationSec,
+        totalChars ? (target * narrationBudget.countNarrationChars(scene?.narration_text || '') / totalChars) : 0,
+        target / Math.max(1, scenes.length),
+      );
+      return {
+        ...scene,
+        index: Number(scene?.index || index + 1),
+        target_duration_sec: sceneTarget,
+      };
+    }),
+  };
+}
+
+function replaceFreeformBriefScenes(brief = {}, scenes = [], narrationBudgetReport = null) {
+  const sceneByIndex = new Map(scenes.map((scene, index) => [Number(scene.index || index + 1), scene]));
+  const applyScene = (scene, index) => {
+    const replacement = sceneByIndex.get(Number(scene?.index || index + 1));
+    return replacement ? { ...scene, narration_text: replacement.narration_text } : scene;
+  };
+  const storyboard = brief?.storyboard;
+  const nextBrief = { ...brief, narration_budget: narrationBudgetReport };
+  if (Array.isArray(storyboard?.scenes)) {
+    nextBrief.storyboard = { ...storyboard, scenes: storyboard.scenes.map(applyScene) };
+    return nextBrief;
+  }
+  if (Array.isArray(storyboard)) {
+    nextBrief.storyboard = storyboard.map(applyScene);
+    return nextBrief;
+  }
+  if (scenes[0]?.narration_text) nextBrief.narration = scenes[0].narration_text;
+  return nextBrief;
+}
+
+function fitFreeformNarrationToBudget(brief = {}, scenes = [], targetDurationSec = 60) {
+  const plan = freeformStoryboardPlanForBudget(brief, scenes, targetDurationSec);
+  const budget = narrationBudget.buildNarrationBudget(plan);
+  if (budget.status !== 'too_long') {
+    return { scenes, brief: replaceFreeformBriefScenes(brief, scenes, budget), budget, changed: false };
+  }
+  const budgetsByIndex = new Map((budget.scenes || []).map(item => [Number(item.index), item]));
+  const nextScenes = scenes.map((scene, index) => {
+    const sceneIndex = Number(scene.index || index + 1);
+    const sceneBudget = budgetsByIndex.get(sceneIndex) || {};
+    return {
+      ...scene,
+      narration_text: trimNarrationToBudget(scene.narration_text, sceneBudget.max_recommended_chars),
+    };
+  });
+  const nextPlan = freeformStoryboardPlanForBudget(brief, nextScenes, targetDurationSec);
+  const nextBudget = narrationBudget.buildNarrationBudget(nextPlan);
+  return {
+    scenes: nextScenes,
+    brief: replaceFreeformBriefScenes(brief, nextScenes, nextBudget),
+    budget: nextBudget,
+    changed: true,
+  };
+}
+
 function getCaptionDuration(captions = []) {
   return captions.reduce((max, caption) => Math.max(max, Number(caption?.end || 0)), 0);
 }
@@ -1212,21 +1300,30 @@ async function synthesizeDouyinRunHyperframesFreeformAudio(awemeId, runId, optio
     return failHyperframesFreeformSection(awemeId, runId, 'audio', '请先生成导演策划。', options);
   }
 
-  const scenes = normalizeFreeformNarrationScenes(currentState.brief.data);
+  let scenes = normalizeFreeformNarrationScenes(currentState.brief.data);
   if (!scenes.length) {
     return failHyperframesFreeformSection(awemeId, runId, 'audio', '导演策划中没有可用于配音的旁白。', options);
   }
+  const targetDurationSec = resolveFreeformTargetDurationSec(currentState.brief.data, detail.data, options);
+  const narrationFit = fitFreeformNarrationToBudget(currentState.brief.data, scenes, targetDurationSec);
+  scenes = narrationFit.scenes;
 
   const operationId = createFreeformOperationId('audio');
   await updateRunHyperframesFreeform(awemeId, runId, current => ({
     status: 'generating',
+    brief: {
+      ...current.brief,
+      data: narrationFit.brief,
+    },
     audio: {
       ...current.audio,
       operation_id: operationId,
       status: 'generating',
       voice: options.voice || current.audio.voice || '',
       style_prompt: options.stylePrompt || options.style_prompt || current.audio.style_prompt || '',
-      message: '正在生成高级成片音频...',
+      message: narrationFit.changed
+        ? '口播超过目标时长，已先压缩旁白并正在生成高级成片音频...'
+        : '正在生成高级成片音频...',
     },
   }), options);
 
@@ -1286,7 +1383,7 @@ async function synthesizeDouyinRunHyperframesFreeformAudio(awemeId, runId, optio
   };
   const timedPlan = storyboardTiming.buildTimedStoryboardPlan({
     storyboardPlan: {
-      target_duration_sec: currentState.brief.data?.target_duration_sec || currentState.brief.data?.targetDurationSec || 0,
+      target_duration_sec: targetDurationSec,
       scenes,
     },
     sceneTts: sceneTtsValue,

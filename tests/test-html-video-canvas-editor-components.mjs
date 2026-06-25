@@ -36,14 +36,27 @@ assert.match(canvasEditor, /querySelectorAll\('\[data-hv-canvas-editor-style\]'\
 assert.match(canvasEditor, /doc\.head\.appendChild\(editorStyle\)/);
 assert.match(canvasEditor, /data-hv-canvas-freeze/);
 assert.match(canvasEditor, /data-hv-canvas-selected/);
+assert.match(canvasEditor, /data-hv-canvas-viewport-style/);
+assert.match(canvasEditor, /function installCanvasViewport/);
+assert.match(canvasEditor, /__HV_CANVAS_SCALE__/);
+assert.match(canvasEditor, /transform: scale/);
+assert.match(canvasEditor, /\(event\.clientY - drag\.startY\) \/ scale/);
+assert.match(canvasEditor, /parentCanvasTop/);
+assert.match(canvasEditor, /minTop: absolutePosition\.minTop/);
+assert.match(canvasEditor, /maxTop: absolutePosition\.maxTop/);
+assert.doesNotMatch(canvasEditor, /offsetParent\.clientHeight/);
 assert.match(canvasEditor, /absolutePositionFor/);
 assert.match(canvasEditor, /viewportSize/);
 assert.match(canvasEditor, /writeElementText/);
 assert.match(canvasEditor, /serializeDocument/);
 assert.match(canvasEditor, /function clearPlaybackTimer\(\)\s*\{\s*if \(playbackTimerRef\.current\) clearTimeout\(playbackTimerRef\.current\);\s*playbackTimerRef\.current = null;\s*\}/);
+assert.match(canvasEditor, /function playFrame/);
+assert.match(canvasEditor, /__hvPlayAll/);
+assert.match(canvasEditor, /__hvPlayed = true/);
 assert.match(canvasEditor, /useEffect\(\(\) => \{\s*const requestId = frameLoadRequestRef\.current \+ 1;[^]*?clearPlaybackTimer\(\);[^]*?setEditingReady\(false\);[^]*?\}, \[frameId, rawHtml, htmlReloadKey\]\);/);
 assert.match(canvasEditor, /function beginPlayback\(\)\s*\{\s*clearPlaybackTimer\(\);/);
-assert.match(canvasEditor, /function jumpToEnd\(\)\s*\{\s*clearPlaybackTimer\(\);/);
+assert.match(canvasEditor, /function finishPlayback/);
+assert.match(canvasEditor, /finishPlayback\(\);/);
 assert.match(canvasEditor, /function replay\(\)\s*\{\s*clearPlaybackTimer\(\);/);
 
 assert.match(inspector, /export function HtmlVideoElementInspector/);
