@@ -164,9 +164,9 @@ assert.equal(audioHashProject.audio.mix.fade_out_sec, 1.5);
         },
       },
       render: { status: 'pending', frames: {} },
-      compose: { status: 'pending', output_path: '', output_audio_path: '' },
-      duration_verify: { status: 'pending', expected_duration_sec: null, actual_duration_sec: null },
-      visual_inspect: { status: 'pending', report_path: null },
+      compose: { status: 'pending', output_path: '', output_audio_path: '', diagnostic_code: '' },
+      duration_verify: { status: 'pending', expected_duration_sec: null, actual_duration_sec: null, diagnostic_code: '' },
+      visual_inspect: { status: 'pending', report_path: null, diagnostic_code: '' },
     },
     updated_at: '',
   });

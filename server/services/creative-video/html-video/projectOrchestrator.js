@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs/promises');
+const crypto = require('crypto');
 
 const defaultMaterializer = require('./materializer');
 const defaultFrameRenderer = require('./frameRenderer');
@@ -7,7 +8,7 @@ const defaultLayoutQaService = require('./layoutQaService');
 const defaultFfmpegComposer = require('./ffmpegComposer');
 const projectStore = require('./projectStore');
 const { addExport, addRevision, saveProject, createProjectDir } = projectStore;
-const { normalizeProject } = require('./projectSchema');
+const { normalizeProject, markCheckpointFrame, markCheckpointStage } = require('./projectSchema');
 const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { findFrameByAnyId, canonicalFrameId, sanitizePathSegment } = require('./frameIdentity');
 const { findDraft } = require('./htmlVideoDraftService');
@@ -36,6 +37,18 @@ function expectedDurationSec(project) {
 
 function roundDuration(value) {
   return Math.round(Number(value || 0) * 1000) / 1000;
+}
+
+async function fileHash(filePath) {
+  try {
+    return crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
+  } catch {
+    return '';
+  }
+}
+
+function relativeProjectPath(projectDir, filePath) {
+  return path.relative(projectDir, filePath).replace(/\\/g, '/');
 }
 
 function maxCaptionEndSec(frame) {
@@ -392,6 +405,7 @@ async function renderHtmlVideoProject({
   const frames = Array.isArray(nextProject.frames) ? nextProject.frames : [];
   for (let index = 0; index < frames.length; index += 1) {
     const frame = frames[index];
+    const frameId = frame.id || frame.scene_id || `frame_${index + 1}`;
     const frameOutput = path.join(resolvedProjectDir, 'frames', `${frame.id || frame.scene_id}.mp4`);
     const rendered = await frameRenderer.renderFrame(frame, {
       projectDir: resolvedProjectDir,
@@ -417,19 +431,26 @@ async function renderHtmlVideoProject({
     diagnostics.push(...normalizeDiagnostics(rendered.diagnostics, {
       stage: 'render',
       sub_stage: 'render',
-      frame_id: frame.id || frame.scene_id || '',
-      details: { frame_id: frame.id },
+      frame_id: frameId,
+      details: { frame_id: frameId },
     }));
     if (!rendered.success) {
+      nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
+        markCheckpointFrame(current, 'render', frameId, {
+          status: 'failed',
+          diagnostic_code: rendered.code || 'render_failed',
+        });
+        return current;
+      });
       diagnostics.push(createDiagnostic({
         code: 'render_failed',
         stage: 'render',
         sub_stage: 'render',
-        frame_id: frame.id || frame.scene_id || '',
+        frame_id: frameId,
         user_message: rendered.message || 'html-video 帧渲染失败。',
         retryable: true,
         repair_action: 'retry_render',
-        details: { frame_id: frame.id, output_path: rendered.output_path },
+        details: { frame_id: frameId, output_path: rendered.output_path },
       }));
       return {
         success: false,
@@ -440,11 +461,27 @@ async function renderHtmlVideoProject({
         diagnostics,
       };
     }
+    nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
+      markCheckpointFrame(current, 'render', frameId, {
+        status: 'done',
+        mp4_path: relativeProjectPath(resolvedProjectDir, rendered.output_path),
+        output_hash: rendered.output_hash || rendered.meta?.output_hash || '',
+        diagnostic_code: '',
+      });
+      return current;
+    });
+    const outputHash = rendered.output_hash || rendered.meta?.output_hash || await fileHash(rendered.output_path);
+    if (outputHash) {
+      nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
+        markCheckpointFrame(current, 'render', frameId, { output_hash: outputHash });
+        return current;
+      });
+    }
     renderedFrames.push({
       path: rendered.output_path,
       engine: frame.engine,
       encoding: rendered.meta?.encoding,
-      frame_id: frame.id,
+      frame_id: frameId,
     });
   }
 
@@ -463,6 +500,15 @@ async function renderHtmlVideoProject({
     fps: outputConfig.fps,
   });
   if (!concat.success) {
+    nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
+      markCheckpointStage(current, 'compose', {
+        status: 'failed',
+        output_path: relativeProjectPath(resolvedProjectDir, videoPath),
+        output_audio_path: '',
+        diagnostic_code: concat.code || 'compose_failed',
+      });
+      return current;
+    });
     diagnostics.push(createDiagnostic({
       code: 'compose_failed',
       stage: 'compose',
@@ -483,6 +529,7 @@ async function renderHtmlVideoProject({
   }
 
   let finalOutput = concat.output_path || videoPath;
+  let composeVideoOutput = finalOutput;
   const audioDisabled = nextProject.audio?.status === 'skipped'
     && nextProject.audio?.reason === 'disabled_by_settings';
   if (!audioDisabled) {
@@ -496,6 +543,15 @@ async function renderHtmlVideoProject({
       ...(nextProject.audio?.mix || {}),
     });
     if (!mux.success) {
+      nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
+        markCheckpointStage(current, 'compose', {
+          status: 'failed',
+          output_path: relativeProjectPath(resolvedProjectDir, composeVideoOutput),
+          output_audio_path: '',
+          diagnostic_code: mux.code || 'compose_failed',
+        });
+        return current;
+      });
       diagnostics.push(createDiagnostic({
         code: 'compose_failed',
         stage: 'compose',
@@ -516,6 +572,15 @@ async function renderHtmlVideoProject({
     }
     finalOutput = mux.output_path || finalOutput;
   }
+  nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
+    markCheckpointStage(current, 'compose', {
+      status: 'done',
+      output_path: relativeProjectPath(resolvedProjectDir, composeVideoOutput),
+      output_audio_path: finalOutput !== composeVideoOutput ? relativeProjectPath(resolvedProjectDir, finalOutput) : '',
+      diagnostic_code: '',
+    });
+    return current;
+  });
   if (typeof ffmpegComposer.verifyDurationWithFfprobe === 'function') {
     await report(onProgress, {
       type: 'html_video_duration_verify_started',
@@ -530,6 +595,15 @@ async function renderHtmlVideoProject({
       toleranceSec: 1.5,
     });
     if (durationCheck.skipped) {
+      nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
+        markCheckpointStage(current, 'duration_verify', {
+          status: 'skipped',
+          expected_duration_sec: expectedDurationSec(nextProject),
+          actual_duration_sec: null,
+          diagnostic_code: durationCheck.code || '',
+        });
+        return current;
+      });
       diagnostics.push(createDiagnostic({
         code: durationCheck.code || 'ffprobe_skipped',
         stage: 'compose',
@@ -538,6 +612,15 @@ async function renderHtmlVideoProject({
         details: durationCheck,
       }));
     } else if (!durationCheck.success) {
+      nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
+        markCheckpointStage(current, 'duration_verify', {
+          status: 'failed',
+          expected_duration_sec: durationCheck.expected_duration_sec ?? expectedDurationSec(nextProject),
+          actual_duration_sec: durationCheck.actual_duration_sec ?? durationCheck.duration_sec ?? null,
+          diagnostic_code: durationCheck.code || 'duration_mismatch',
+        });
+        return current;
+      });
       diagnostics.push(createDiagnostic({
         code: durationCheck.code || 'duration_mismatch',
         stage: 'compose',
@@ -556,6 +639,15 @@ async function renderHtmlVideoProject({
         diagnostics,
       };
     }
+    nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
+      markCheckpointStage(current, 'duration_verify', {
+        status: 'done',
+        expected_duration_sec: durationCheck.expected_duration_sec ?? expectedDurationSec(nextProject),
+        actual_duration_sec: durationCheck.actual_duration_sec ?? durationCheck.duration_sec ?? null,
+        diagnostic_code: '',
+      });
+      return current;
+    });
     await report(onProgress, {
       type: 'html_video_duration_verify_done',
       stage: 'project',

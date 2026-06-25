@@ -5,6 +5,7 @@ const path = require('path');
 
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
+const projectStore = require('../server/services/creative-video/html-video/projectStore');
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 const {
   computeSceneSpecSpeechHash,
@@ -268,6 +269,52 @@ function fullSceneCaption(sceneId, text, duration) {
   assert.equal(unreasonableTimelineDiagnostic.retryable, true);
   assert.equal(unreasonableTimelineDiagnostic.repair_action, 'regenerate_content_graph');
   assert.equal(unreasonableTimelineRenderCalls, 0);
+
+  const originalWriteRawFrameHtml = projectStore.writeRawFrameHtml;
+  projectStore.writeRawFrameHtml = async () => {
+    throw new Error('模拟帧 HTML 写入失败。');
+  };
+  try {
+    const frameWriteFailure = await workflow.generateHtmlVideo({
+      workflowId: '202606170000000008_frame_write_failure',
+      runId: 'run_frame_write_failure',
+      rootDir,
+      sceneSpec: {
+        title: '写入失败',
+        aspect_ratio: '9:16',
+        scenes: [
+          { id: 'scene_01', duration: 2, kind: 'text', narration_text: '写入失败旁白', captions: fullSceneCaption('scene_01', '写入失败旁白', 2), visual_text: { headline: '写入失败', keywords: [], cards: [] } },
+        ],
+      },
+      creativeContext: { input: { raw_text: '写入失败' } },
+      target: { html_video_generation_mode: 'raw_html' },
+      templateRegistry,
+      skipValidation: true,
+      services: {
+        aiTextModel: {
+          callTextModel: async ({ messages }) => {
+            const prompt = messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return { success: true, text: JSON.stringify({ synopsis: '写入失败', nodes: [{ id: 'scene_01', kind: 'text', label: '写入失败', durationSec: 2, text: '写入失败' }], edges: [] }) };
+            }
+            return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">写入失败</h1><p data-text-key="subtitle">短字幕</p><section data-text-key="body">正文</section></main></body></html>' };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      },
+    });
+    assert.equal(frameWriteFailure.success, false);
+    const frameWriteDiagnostic = frameWriteFailure.html_video_diagnostics.find(item => item.code === 'frame_html_write_failed');
+    assert.equal(frameWriteDiagnostic.sub_stage, 'frame_html');
+    assert.equal(frameWriteDiagnostic.frame_id, 'scene_01');
+    assert.equal(frameWriteDiagnostic.retryable, true);
+    assert.equal(frameWriteDiagnostic.repair_action, 'retry_frame_html');
+  } finally {
+    projectStore.writeRawFrameHtml = originalWriteRawFrameHtml;
+  }
 
   const originalRenderHtmlVideoProject = projectOrchestrator.renderHtmlVideoProject;
   const graphProgressEvents = [];
@@ -1412,6 +1459,7 @@ function fullSceneCaption(sceneId, text, duration) {
   assert.equal(fallback.success, false);
   assert.equal(fallback.fallback_allowed, true);
   assert.equal(fallback.html_video_diagnostics[0].code, 'template_missing');
+  assert.equal(fallback.html_video_diagnostics[0].sub_stage, 'template_select');
   assert.match(fallback.message, /html-video/);
 
   const edited = await workflow.applyEdit({

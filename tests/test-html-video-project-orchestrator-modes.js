@@ -59,6 +59,11 @@ async function writeFile(filePath, content) {
         return { success: true, output_path: outputPath };
       },
       muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, output_path: videoPath, skipped: true }),
+      verifyDurationWithFfprobe: async ({ expectedDurationSec }) => ({
+        success: true,
+        expected_duration_sec: expectedDurationSec,
+        duration_sec: expectedDurationSec,
+      }),
     },
   };
 
@@ -164,6 +169,31 @@ async function writeFile(filePath, content) {
   assert.deepEqual(lockedRenderCalls, []);
   assert.ok(lockedExport.diagnostics.some(item => item.code === 'caption_duration_exceeds_frame'));
 
+  const renderFailureDir = path.join(rootDir, 'render-failure-project');
+  const renderFailure = await orchestrator.exportHtmlVideoProject({
+    projectDir: renderFailureDir,
+    project: {
+      ...project,
+      project_id: 'wf_render_failure',
+      run_id: 'render-failure',
+      frames: [
+        { id: 'frame_failed', scene_id: 'scene_failed', template_id: 'simple', inputs: { headline: '失败' }, duration_sec: 2 },
+      ],
+      timeline: { tracks: [{ id: 'main', type: 'video', items: [] }] },
+    },
+    templateRegistry,
+    services: {
+      frameRenderer: {
+        renderFrame: async () => ({ success: false, code: 'render_timeout', message: '单帧渲染超时。', diagnostics: [] }),
+      },
+      ffmpegComposer: services.ffmpegComposer,
+    },
+  });
+  assert.equal(renderFailure.success, false);
+  const renderFailureProjectJson = JSON.parse(await fs.readFile(path.join(renderFailureDir, 'project.json'), 'utf8'));
+  assert.equal(renderFailureProjectJson.generation_checkpoint.stages.render.frames.frame_failed.status, 'failed');
+  assert.equal(renderFailureProjectJson.generation_checkpoint.stages.render.frames.frame_failed.diagnostic_code, 'render_timeout');
+
   const exported = await orchestrator.exportHtmlVideoProject({
     rootDir,
     workflowId: 'wf',
@@ -185,6 +215,15 @@ async function writeFile(filePath, content) {
   assert.ok(progressEvents.some(event => event.type === 'html_video_frame_render_progress' && event.frame_id === 'frame_01'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_compose_started'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_export_ready'));
+  const exportedProjectJson = JSON.parse(await fs.readFile(path.join(exported.html_video_project_path, 'project.json'), 'utf8'));
+  assert.equal(exportedProjectJson.generation_checkpoint.stages.render.frames.frame_01.status, 'done');
+  assert.equal(exportedProjectJson.generation_checkpoint.stages.render.frames.frame_01.mp4_path, 'frames/frame_01.mp4');
+  assert.ok(exportedProjectJson.generation_checkpoint.stages.render.frames.frame_01.output_hash);
+  assert.equal(exportedProjectJson.generation_checkpoint.stages.compose.status, 'done');
+  assert.equal(exportedProjectJson.generation_checkpoint.stages.compose.output_path, 'exports/output.mp4');
+  assert.equal(exportedProjectJson.generation_checkpoint.stages.duration_verify.status, 'done');
+  assert.equal(exportedProjectJson.generation_checkpoint.stages.duration_verify.expected_duration_sec, 4);
+  assert.equal(exportedProjectJson.generation_checkpoint.stages.duration_verify.actual_duration_sec, 4);
 
   const rawProjectDir = path.join(rootDir, 'raw-project');
   await writeFile(path.join(rawProjectDir, 'frames', 'raw.html'), [

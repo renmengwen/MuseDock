@@ -401,6 +401,7 @@ async function generateHtmlVideo(options = {}) {
       createDiagnostic({
         code: 'locked_template_invalid',
         stage: 'template',
+        sub_stage: 'template_select',
         user_message: message,
         details: {
           template_id: effectivePreferredTemplateId,
@@ -418,6 +419,7 @@ async function generateHtmlVideo(options = {}) {
     diagnostics.push(createDiagnostic({
       code: 'preferred_template_unavailable',
       stage: 'template',
+      sub_stage: 'template_select',
       user_message: `首选模板 ${effectivePreferredTemplateId} 不可用，已回退为普通模板选择。`,
       details: {
         template_id: effectivePreferredTemplateId,
@@ -433,7 +435,7 @@ async function generateHtmlVideo(options = {}) {
 
   if (!compactIndex.length) {
     return failure('没有可用的 html-video 模板。', [
-      createDiagnostic({ code: 'template_missing', stage: 'template', user_message: '没有可用的 html-video 模板。' }),
+      createDiagnostic({ code: 'template_missing', stage: 'template', sub_stage: 'template_select', user_message: '没有可用的 html-video 模板。' }),
     ]);
   }
 
@@ -456,6 +458,7 @@ async function generateHtmlVideo(options = {}) {
       createDiagnostic({
         code,
         stage: 'ai-template-selection',
+        sub_stage: 'template_select',
         user_message: `html-video ${message}`,
         details: { diagnostics: selectionDiagnostics },
       }),
@@ -468,6 +471,7 @@ async function generateHtmlVideo(options = {}) {
       createDiagnostic({
         code: 'template_missing',
         stage: 'template',
+        sub_stage: 'template_select',
         user_message: `未找到 html-video 模板：${selection.template_id}。`,
         details: { template_id: selection.template_id },
       }),
@@ -499,6 +503,7 @@ async function generateHtmlVideo(options = {}) {
       createDiagnostic({
         code: 'scene_spec_missing',
         stage: 'project',
+        sub_stage: 'raw_html_build',
         user_message: '缺少 scene_spec，无法生成 raw_html 帧。',
         details: { generation_mode: generationMode },
         fallback_allowed: false,
@@ -523,6 +528,7 @@ async function generateHtmlVideo(options = {}) {
         createDiagnostic({
           code: 'template_inputs_invalid',
           stage: 'ai-template-inputs',
+          sub_stage: 'template_inputs',
           user_message: inputResult.user_message || inputResult.message || 'html-video 模板字段填写失败。',
           details: { diagnostics: inputResult.diagnostics || [] },
         }),
@@ -737,7 +743,11 @@ async function generateHtmlVideo(options = {}) {
           createDiagnostic({
             code: 'frame_html_write_failed',
             stage: 'frame-html',
+            sub_stage: 'frame_html',
+            frame_id: node.id || sceneId,
             user_message: '单帧 HTML 写入失败。',
+            retryable: true,
+            repair_action: 'retry_frame_html',
             details: { frame_id: node.id },
           }),
         ], {

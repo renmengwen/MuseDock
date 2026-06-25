@@ -38,17 +38,31 @@ function resolveProjectPath(projectDir, relativePath) {
   return target;
 }
 
-function add(diagnostics, code, stage, userMessage, details = {}, fallbackAllowed = true, extra = {}) {
+function add(diagnostics, code, stage, user_message, details = {}, fallback_allowed = true, extra = {}) {
+  const inputDetails = objectOrEmpty(details);
   diagnostics.push({
     ...createDiagnostic({
       code,
       stage,
-      user_message: userMessage,
-      details,
-      fallback_allowed: fallbackAllowed,
+      sub_stage: extra.sub_stage || sub_stage_for_diagnostic(stage, code),
+      frame_id: extra.frame_id || inputDetails.frame_id,
+      retryable: extra.retryable,
+      repair_action: extra.repair_action,
+      user_message,
+      details: inputDetails,
+      fallback_allowed,
     }),
-    ...extra,
+    ...Object.fromEntries(Object.entries(extra).filter(([key]) => (
+      !['sub_stage', 'frame_id', 'retryable', 'repair_action'].includes(key)
+    ))),
   });
+}
+
+function sub_stage_for_diagnostic(stage, code) {
+  if (stage === 'frame' || String(code || '').startsWith('raw_html_')) return 'frame_html';
+  if (stage === 'timeline') return 'timeline_check';
+  if (stage === 'template') return 'template_select';
+  return stage === 'project' ? 'validate_project' : '';
 }
 
 function isBlockingDiagnostic(diagnostic = {}) {
@@ -72,8 +86,8 @@ function hasTextKey(html, key) {
   return tags.some(tag => pattern.test(tag));
 }
 
-function warningDiagnostic(diagnostics, code, stage, userMessage, details = {}) {
-  add(diagnostics, code, stage, userMessage, {
+function warningDiagnostic(diagnostics, code, stage, user_message, details = {}) {
+  add(diagnostics, code, stage, user_message, {
     ...details,
     blocking: false,
   }, true, { severity: 'warning' });
@@ -160,6 +174,9 @@ async function readFrameHtmlForValidation(projectDir, frame, diagnostics) {
     add(diagnostics, 'raw_html_path_invalid', 'frame', 'raw_html 帧 HTML 路径不合法。', {
       frame_id: frame.id,
       html_path: frame.html_path,
+    }, true, {
+      sub_stage: 'frame_html',
+      frame_id: frame.id,
     });
     return null;
   }
@@ -183,14 +200,17 @@ async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames 
         html_path: frame.html_path,
         expected: resolutionValidation.expected,
         actual: resolutionValidation.actual,
+      }, true, {
+        sub_stage: 'frame_html',
+        frame_id: frame.id,
       });
     }
     const missing = collectMissingTextKeys(html);
     if (missing.length) {
-      warningDiagnostic(diagnostics, 'raw_html_text_keys_missing', 'frame', 'raw_html 帧缺少可编辑文本锚点。', {
-        frame_id: frame.id,
-        missing_keys: missing,
-      });
+    warningDiagnostic(diagnostics, 'raw_html_text_keys_missing', 'frame', 'raw_html 帧缺少可编辑文本锚点。', {
+      frame_id: frame.id,
+      missing_keys: missing,
+    });
     }
   }
 }

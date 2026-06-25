@@ -559,7 +559,10 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlPathEscape.ok, false);
-  assert.ok(rawHtmlPathEscape.diagnostics.some(item => item.code === 'raw_html_path_invalid'));
+  const rawHtmlPathInvalid = rawHtmlPathEscape.diagnostics.find(item => item.code === 'raw_html_path_invalid');
+  assert.ok(rawHtmlPathInvalid);
+  assert.equal(rawHtmlPathInvalid.sub_stage, 'frame_html');
+  assert.equal(rawHtmlPathInvalid.frame_id, 'raw_path_escape');
 
   const templateInputsSkipRawHtmlCheck = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,

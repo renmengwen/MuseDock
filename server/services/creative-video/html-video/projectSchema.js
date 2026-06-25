@@ -349,17 +349,20 @@ function normalizeGenerationCheckpoint(input = {}, project = {}) {
         status: stringField(objectOrEmpty(stages.compose).status || 'pending'),
         output_path: stringField(objectOrEmpty(stages.compose).output_path),
         output_audio_path: stringField(objectOrEmpty(stages.compose).output_audio_path),
+        diagnostic_code: stringField(objectOrEmpty(stages.compose).diagnostic_code),
       },
       duration_verify: {
         status: stringField(objectOrEmpty(stages.duration_verify).status || 'pending'),
         expected_duration_sec: nullableNumberField(objectOrEmpty(stages.duration_verify).expected_duration_sec),
         actual_duration_sec: nullableNumberField(objectOrEmpty(stages.duration_verify).actual_duration_sec),
+        diagnostic_code: stringField(objectOrEmpty(stages.duration_verify).diagnostic_code),
       },
       visual_inspect: {
         status: stringField(objectOrEmpty(stages.visual_inspect).status || 'pending'),
         report_path: objectOrEmpty(stages.visual_inspect).report_path == null
           ? null
           : stringField(objectOrEmpty(stages.visual_inspect).report_path),
+        diagnostic_code: stringField(objectOrEmpty(stages.visual_inspect).diagnostic_code),
       },
     },
     updated_at: stringField(source.updated_at),
