@@ -98,6 +98,20 @@ function sha256(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
 }
 
+function stableSceneSpecValue(value) {
+  if (Array.isArray(value)) return value.map(stableSceneSpecValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map(key => [key, stableSceneSpecValue(value[key])]),
+  );
+}
+
+function computeSceneSpecCheckpointHash(sceneSpec = {}) {
+  return sha256(JSON.stringify(stableSceneSpecValue(sceneSpec || {})));
+}
+
 function rawHtmlBuildFrameIdFromError(error) {
   const message = String(error?.message || '');
   return message.match(/缺少帧\s+([^\s]+)\s+的 raw HTML 路径/)?.[1]
@@ -188,7 +202,7 @@ function htmlHasTextKey(html, key) {
 }
 
 function resumeArtifactsMatch(project = {}, sceneSpec = null, template = {}) {
-  const currentHash = computeSceneSpecSpeechHash(sceneSpec || {});
+  const currentHash = computeSceneSpecCheckpointHash(sceneSpec || {});
   const checkpointHash = String(project.generation_checkpoint?.scene_spec_hash || '').trim();
   if (!checkpointHash || !currentHash || checkpointHash !== currentHash) return false;
   const projectTemplateId = String(project.template_id || '').trim();
@@ -797,7 +811,7 @@ async function generateHtmlVideo(options = {}) {
     ]);
   }
   const templateRenderTarget = resolveTemplateRenderTarget(renderTarget, template);
-  const currentSceneSpecHash = computeSceneSpecSpeechHash(sceneSpec || {});
+  const currentSceneSpecHash = computeSceneSpecCheckpointHash(sceneSpec || {});
   const trustedTargetDurationSec = firstPositiveNumber(
     templateRenderTarget.duration_sec,
     templateRenderTarget.durationSec,

@@ -1,4 +1,5 @@
 const assert = require('assert/strict');
+const crypto = require('crypto');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
@@ -70,6 +71,32 @@ function changedSceneSpec() {
         : scene
     )),
   };
+}
+
+function changedVisualSceneSpec() {
+  const spec = sceneSpec();
+  return {
+    ...spec,
+    scenes: spec.scenes.map(scene => (
+      scene.id === 'scene_02'
+        ? { ...scene, visual_text: { ...scene.visual_text, headline: '第二幕视觉标题已修改' } }
+        : scene
+    )),
+  };
+}
+
+function stableSceneSpecValue(value) {
+  if (Array.isArray(value)) return value.map(stableSceneSpecValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map(key => [key, stableSceneSpecValue(value[key])]),
+  );
+}
+
+function computeSceneSpecCheckpointHash(spec = {}) {
+  return crypto.createHash('sha256').update(JSON.stringify(stableSceneSpecValue(spec || {}))).digest('hex');
 }
 
 function contentGraph(label = '三帧恢复') {
@@ -144,7 +171,7 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
   }
   await writeFile(path.join(projectDir, 'content-graph.json'), `${JSON.stringify(graph, null, 2)}\n`);
   if (!options.omitSceneSpecHash) {
-    project.generation_checkpoint.scene_spec_hash = options.sceneSpecHash || computeSceneSpecSpeechHash(sceneSpec());
+    project.generation_checkpoint.scene_spec_hash = options.sceneSpecHash || computeSceneSpecCheckpointHash(sceneSpec());
   }
   markCheckpointStage(project, 'content_graph', {
     status: 'done',
@@ -446,6 +473,46 @@ async function main() {
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               contentGraphCalls += 1;
               return { success: true, text: JSON.stringify(contentGraph('脚本已修改')) };
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(contentGraphCalls, 1);
+      assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_02', 'scene_03']);
+    }
+
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-changed-visual-'));
+      const workflowId = '202606260000000011_changed_visual';
+      const runId = 'run_changed_visual';
+      const visualSpec = changedVisualSceneSpec();
+      assert.equal(computeSceneSpecSpeechHash(sceneSpec()), computeSceneSpecSpeechHash(visualSpec));
+      const { templateRegistry } = await setupProject(rootDir, workflowId, runId);
+      const calls = [];
+      let contentGraphCalls = 0;
+      frameHtmlAgent.generateFrameHtml = async args => {
+        calls.push(args);
+        return { success: true, html: validHtml(args.node.id, args.node.id) };
+      };
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        templateRegistry,
+        sceneSpecOverride: visualSpec,
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              contentGraphCalls += 1;
+              return { success: true, text: JSON.stringify(contentGraph('视觉字段已修改')) };
             }
             throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
           },
