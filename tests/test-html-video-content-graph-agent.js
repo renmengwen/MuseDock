@@ -68,6 +68,18 @@ assert.match(prompt, /不要编造/);
 assert.match(prompt, /\[object Object\]/);
 assert.match(prompt, /每个 intended frame 对应一个 node/);
 
+const retryPromptAttempt1 = agent.buildRetryPrompt(sceneSpec, creativeContext, { duration_sec: 8 }, prompt, 1);
+assert.match(retryPromptAttempt1, /scene_01/);
+assert.match(retryPromptAttempt1, /基础版价格/);
+assert.match(retryPromptAttempt1, /先看基础版价格/);
+assert.ok(retryPromptAttempt1.length < prompt.length);
+
+const retryPromptAttempt2 = agent.buildRetryPrompt(sceneSpec, creativeContext, { duration_sec: 8 }, prompt, 2);
+assert.match(retryPromptAttempt2, /nodes/);
+assert.match(retryPromptAttempt2, /durationSec/);
+assert.doesNotMatch(retryPromptAttempt2, /原始正文里提到基础版 12 元/);
+assert.ok(retryPromptAttempt2.length < retryPromptAttempt1.length);
+
 const fenced = agent.parseContentGraphResponse([
   '```json',
   JSON.stringify({

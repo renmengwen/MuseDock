@@ -82,8 +82,9 @@ function getModel(services = {}) {
   return services.aiTextModel || aiTextModel;
 }
 
-async function callTextModel(model, prompt) {
+async function callTextModel(model, prompt, options = {}) {
   const response = await model.callTextModel({
+    ...objectOrEmpty(options),
     messages: [{ role: 'user', content: prompt }],
   });
   if (!response || response.success === false) {
@@ -94,6 +95,130 @@ async function callTextModel(model, prompt) {
     };
   }
   return { success: true, text: response.text || response.content || '' };
+}
+
+function isProviderMissingText(message) {
+  return /返回结果缺少文本内容|流式返回结果缺少文本内容/.test(String(message || ''));
+}
+
+function providerMissingTextDiagnostic() {
+  return createDiagnostic({
+    code: 'provider_missing_text',
+    stage: 'ai-content-graph',
+    sub_stage: 'content_graph',
+    retryable: true,
+    repair_action: 'retry_content_graph',
+    fallback_allowed: true,
+    user_message: 'content graph 生成时模型返回空内容，将重试内容图生成。',
+  });
+}
+
+function graphAiFailureDiagnostic(graphAi) {
+  if (isProviderMissingText(graphAi?.message)) {
+    return providerMissingTextDiagnostic();
+  }
+  return createDiagnostic({
+    code: 'content_graph_failed',
+    stage: 'ai-content-graph',
+    sub_stage: 'content_graph',
+    user_message: graphAi?.message || 'content graph 生成失败。',
+    retryable: true,
+    repair_action: 'retry_content_graph',
+  });
+}
+
+function ensureGraphAiHasText(graphAi) {
+  if (graphAi?.success && !String(graphAi.text || '').trim()) {
+    return { success: false, message: '返回结果缺少文本内容。', text: '' };
+  }
+  return graphAi;
+}
+
+async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext, target, onProgress, project, projectDir } = {}) {
+  const originalPrompt = contentGraphAgent.buildContentGraphPrompt({
+    sceneSpec,
+    creativeContext,
+    target,
+  });
+  let graphAi = ensureGraphAiHasText(await callTextModel(model, originalPrompt));
+  const diagnostics = [];
+  let retriedForProviderMissing = false;
+
+  if (!graphAi.success && isProviderMissingText(graphAi.message)) {
+    diagnostics.push(providerMissingTextDiagnostic());
+    await report(onProgress, {
+      type: 'html_video_graph_retry_started',
+      stage: 'project',
+      sub_stage: 'content_graph',
+      message: 'content graph 生成时模型返回空内容，正在使用短提示词重试...',
+      data: {},
+    });
+    const retryPrompt = contentGraphAgent.buildRetryPrompt(sceneSpec, creativeContext, target, originalPrompt, 1);
+    graphAi = ensureGraphAiHasText(await callTextModel(model, retryPrompt, { stream: false }));
+    retriedForProviderMissing = true;
+    if (!graphAi.success && sceneSpec) {
+      await report(onProgress, {
+        type: 'html_video_graph_fallback_scene_spec',
+        stage: 'project',
+        sub_stage: 'content_graph',
+        message: 'content graph 重试仍为空，已使用字幕脚本生成内容图。',
+        data: {},
+      });
+      return {
+        success: true,
+        contentGraph: mapSceneSpecToContentGraph(sceneSpec),
+        diagnostics,
+        inputHash: sha256(originalPrompt),
+      };
+    }
+  }
+
+  if (!graphAi.success) {
+    return {
+      success: false,
+      message: graphAi.message || 'content graph 生成失败。',
+      diagnostics: [graphAiFailureDiagnostic(graphAi)],
+      inputHash: sha256(originalPrompt),
+    };
+  }
+
+  const graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec);
+  if (!graphParsed.success) {
+    if (retriedForProviderMissing && sceneSpec) {
+      await report(onProgress, {
+        type: 'html_video_graph_fallback_scene_spec',
+        stage: 'project',
+        sub_stage: 'content_graph',
+        message: 'content graph 重试仍无效，已使用字幕脚本生成内容图。',
+        data: {},
+      });
+      return {
+        success: true,
+        contentGraph: mapSceneSpecToContentGraph(sceneSpec),
+        diagnostics,
+        inputHash: sha256(originalPrompt),
+      };
+    }
+    return {
+      ...graphParsed,
+      diagnostics: normalizeDiagnostics(graphParsed.diagnostics, {
+        code: 'content_graph_invalid',
+        stage: 'ai-content-graph',
+        sub_stage: 'content_graph',
+        user_message: graphParsed.message || 'content graph 解析失败。',
+        details: { errors: graphParsed.errors || [] },
+        retryable: true,
+        repair_action: 'retry_content_graph',
+      }),
+      inputHash: sha256(originalPrompt),
+    };
+  }
+  return {
+    success: true,
+    contentGraph: graphParsed.graph,
+    diagnostics,
+    inputHash: sha256(originalPrompt),
+  };
 }
 
 function reorderCompactIndex(compactIndex = [], preferredTemplateId = '') {
@@ -554,11 +679,6 @@ async function generateHtmlVideo(options = {}) {
       target: templateRenderTarget,
     });
   } else {
-    const graphPrompt = contentGraphAgent.buildContentGraphPrompt({
-      sceneSpec,
-      creativeContext,
-      target: templateRenderTarget,
-    });
     await report(onProgress, {
       type: 'html_video_graph_started',
       stage: 'project',
@@ -566,67 +686,40 @@ async function generateHtmlVideo(options = {}) {
       message: '正在生成 html-video 内容图...',
       data: {},
     });
-    const graphAi = await callTextModel(model, graphPrompt);
-    if (!graphAi.success) {
-      const graphDiagnostics = [
-        createDiagnostic({
-          code: 'content_graph_failed',
-          stage: 'ai-content-graph',
-          sub_stage: 'content_graph',
-          user_message: graphAi.message || 'content graph 生成失败。',
-          retryable: true,
-          repair_action: 'retry_content_graph',
-        }),
-      ];
+    const graphResult = await generateContentGraphWithRetry({
+      model,
+      sceneSpec,
+      creativeContext,
+      target: templateRenderTarget,
+      onProgress,
+      project,
+      projectDir,
+    });
+    if (!graphResult.success) {
+      const graphDiagnostics = normalizeDiagnostics(graphResult.diagnostics, {
+        code: 'content_graph_failed',
+        stage: 'ai-content-graph',
+        sub_stage: 'content_graph',
+        user_message: graphResult.message || 'content graph 生成失败。',
+        retryable: true,
+        repair_action: 'retry_content_graph',
+      });
       project = await projectStore.writeProjectJson(projectDir, current => {
         markCheckpointStage(current, 'content_graph', {
           status: 'failed',
+          input_hash: graphResult.inputHash || '',
           diagnostic_code: graphDiagnostics[0]?.code || 'content_graph_failed',
         });
         return current;
       });
-      return failure(graphAi.message || 'content graph 生成失败。', graphDiagnostics, {
+      return failure(graphResult.message || 'content graph 生成失败。', graphDiagnostics, {
         html_video_project_path: projectDir,
         project_dir: projectDir,
         project,
       });
     }
-    const graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec);
-    if (!graphParsed.success) {
-      const graphDiagnostics = normalizeDiagnostics(graphParsed.diagnostics, {
-        code: 'content_graph_invalid',
-        stage: 'ai-content-graph',
-        sub_stage: 'content_graph',
-        user_message: graphParsed.message || 'content graph 解析失败。',
-        details: { errors: graphParsed.errors || [] },
-        retryable: true,
-        repair_action: 'retry_content_graph',
-      });
-      const fallbackGraphDiagnostics = graphDiagnostics.length ? graphDiagnostics : [
-        createDiagnostic({
-          code: 'content_graph_invalid',
-          stage: 'ai-content-graph',
-          sub_stage: 'content_graph',
-          user_message: graphParsed.message || 'content graph 解析失败。',
-          retryable: true,
-          repair_action: 'retry_content_graph',
-          details: { errors: graphParsed.errors || [] },
-        }),
-      ];
-      project = await projectStore.writeProjectJson(projectDir, current => {
-        markCheckpointStage(current, 'content_graph', {
-          status: 'failed',
-          diagnostic_code: fallbackGraphDiagnostics[0]?.code || 'content_graph_invalid',
-        });
-        return current;
-      });
-      return failure(graphParsed.message || 'content graph 解析失败。', fallbackGraphDiagnostics, {
-        html_video_project_path: projectDir,
-        project_dir: projectDir,
-        project,
-      });
-    }
-    let contentGraph = graphParsed.graph;
+    diagnostics.push(...normalizeDiagnostics(graphResult.diagnostics));
+    let contentGraph = graphResult.contentGraph;
     if (sceneSpec) {
       const graphBinding = validateGraphMatchesSceneSpec(contentGraph, sceneSpec);
       if (!graphBinding.ok) {
@@ -670,6 +763,7 @@ async function generateHtmlVideo(options = {}) {
       markCheckpointStage(current, 'content_graph', {
         status: 'done',
         path: contentGraphPath,
+        input_hash: graphResult.inputHash || '',
         output_hash: sha256(JSON.stringify(contentGraph)),
         diagnostic_code: '',
       });
@@ -1136,6 +1230,8 @@ module.exports = {
   applyEdit,
   requestTemplateSelection,
   requestTemplateInputs,
+  callTextModel,
+  generateContentGraphWithRetry,
   buildInitialProject,
   resolveRenderTarget,
   resolveTemplateRenderTarget,

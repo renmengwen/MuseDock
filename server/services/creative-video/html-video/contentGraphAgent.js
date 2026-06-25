@@ -118,6 +118,76 @@ function extractJsonText(text) {
   return raw;
 }
 
+function withoutTrailingCommas(text) {
+  return String(text || '').replace(/,\s*([}\]])/g, '$1');
+}
+
+function repairUnescapedQuotes(text) {
+  let repaired = String(text || '');
+  for (let index = 0; index < 3; index += 1) {
+    const next = repaired.replace(/(:\s*"[^"\r\n]*)"(?=[^,\r\n}\]]*"\s*[,}\]])/g, '$1\\"');
+    if (next === repaired) break;
+    repaired = next;
+  }
+  return repaired;
+}
+
+function tolerantParseJson(text) {
+  const jsonText = extractJsonText(text);
+  if (!jsonText) {
+    const error = new Error('AI 未返回 content graph JSON。');
+    error.code = 'empty_json';
+    throw error;
+  }
+  const candidates = [
+    jsonText,
+    withoutTrailingCommas(jsonText),
+    repairUnescapedQuotes(withoutTrailingCommas(jsonText)),
+  ];
+  let lastError;
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+function summarizeScenesForRetry(sceneSpec = {}) {
+  return (Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : []).map(scene => ({
+    id: scene?.id || '',
+    title: scene?.title || scene?.visual_text?.headline || scene?.headline || '',
+    duration: scene?.duration ?? scene?.duration_sec ?? scene?.durationSec ?? '',
+    narration: compactText(scene?.narration_text || scene?.narration || '', 240),
+  }));
+}
+
+function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, originalPrompt = '', attempt = 1) {
+  const scenes = summarizeScenesForRetry(sceneSpec);
+  if (Number(attempt) >= 2) {
+    return [
+      '只输出严格 JSON，不要 Markdown。',
+      'schema: {"nodes":[{"id":"scene_01","kind":"text","label":"string","durationSec":2,"text":"string"}],"edges":[]}',
+      `scene ids: ${scenes.map(scene => scene.id).filter(Boolean).join(', ') || 'scene_01'}`,
+    ].join('\n');
+  }
+  return [
+    '你是 html-video 的 content graph 规划器。上次返回为空，请重新输出严格 JSON。',
+    '只输出一个 JSON 对象，必须包含 synopsis、nodes、edges。',
+    `目标：aspect ratio=${target.aspect_ratio || target.aspectRatio || sceneSpec.aspect_ratio || ''}，duration=${target.duration_sec || target.durationSec || sceneSpec.target_duration_sec || ''}。`,
+    '场景摘要：',
+    JSON.stringify(scenes, null, 2),
+    'JSON schema：',
+    JSON.stringify({
+      synopsis: 'string',
+      nodes: [{ id: 'scene_01', kind: 'text|data|entity', label: 'string', durationSec: 2, text: 'string' }],
+      edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence' }],
+    }, null, 2),
+  ].join('\n');
+}
+
 function normalizeId(value, fallback) {
   const base = compactText(value, 80) || fallback;
   return String(base || fallback)
@@ -199,18 +269,18 @@ function normalizeContentGraph(graph, sceneSpec = {}) {
   return { success: true, graph: normalizedGraph };
 }
 
-function parseContentGraphResponse(text, sceneSpec = {}) {
-  const jsonText = extractJsonText(text);
-  if (!jsonText) return contentGraphFailure('AI 未返回 content graph JSON。');
+function parseContentGraphResponse(text, sceneSpec = {}, options = {}) {
   try {
-    const parsed = JSON.parse(jsonText);
+    const parsed = tolerantParseJson(text);
     const normalized = normalizeContentGraph(parsed, sceneSpec);
     return normalized.success ? normalized : {
       ...normalized,
       diagnostics: [contentGraphDiagnostic(normalized.message || 'content graph 校验失败。', { errors: normalized.errors || [] })],
     };
   } catch (error) {
-    return contentGraphFailure(`AI 返回的 content graph JSON 无效：${error.message}`);
+    return contentGraphFailure(error.code === 'empty_json'
+      ? error.message
+      : `AI 返回的 content graph JSON 无效：${error.message}`);
   }
 }
 
@@ -236,6 +306,8 @@ function contentGraphFailure(message, details = {}) {
 
 module.exports = {
   buildContentGraphPrompt,
+  buildRetryPrompt,
+  tolerantParseJson,
   parseContentGraphResponse,
   normalizeContentGraph,
   summarizeCreativeContextForPrompt,
