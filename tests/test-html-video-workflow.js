@@ -1251,6 +1251,7 @@ async function readProjectJson(projectDir) {
   assert.ok(legacyAudioProgressEvents.some(event => (
     event.type === 'html_video_tts_regenerate_started'
     && event.stage === 'audio'
+    && event.sub_stage === 'tts'
     && event.message === '检测到脚本已变化，正在按当前字幕重新生成旁白...'
     && event.data?.reason === 'scene_spec_mismatch'
   )));

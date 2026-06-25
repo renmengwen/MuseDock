@@ -240,7 +240,10 @@ async function resolveNarrationPath(project, projectDir, ffmpegComposer, diagnos
     diagnostics.push(createDiagnostic({
       code: 'tts_manifest_missing',
       stage: 'compose',
+      sub_stage: 'compose',
       user_message: `读取旁白音频清单失败：${error.message}`,
+      retryable: true,
+      repair_action: 'retry_compose',
       details: { manifest_path: manifestPath },
     }));
     return null;

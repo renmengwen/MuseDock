@@ -873,6 +873,7 @@ async function generateHtmlVideo(options = {}) {
         await report(onProgress, {
           type: 'html_video_tts_regenerate_started',
           stage: 'audio',
+          sub_stage: 'tts',
           message: '检测到脚本已变化，正在按当前字幕重新生成旁白...',
           data: { reason: existingNarrationAudio.reason },
         });

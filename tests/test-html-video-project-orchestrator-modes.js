@@ -225,6 +225,26 @@ async function writeFile(filePath, content) {
   assert.equal(exportedProjectJson.generation_checkpoint.stages.duration_verify.expected_duration_sec, 4);
   assert.equal(exportedProjectJson.generation_checkpoint.stages.duration_verify.actual_duration_sec, 4);
 
+  const missingManifestExport = await orchestrator.exportHtmlVideoProject({
+    rootDir,
+    workflowId: 'wf',
+    runId: 'missing-manifest',
+    project: {
+      ...project,
+      project_id: 'wf_missing_manifest',
+      run_id: 'missing-manifest',
+      audio: { status: 'ready', tts_manifest_path: 'tts/missing-manifest.json' },
+    },
+    templateRegistry,
+    services,
+  });
+  assert.equal(missingManifestExport.success, true);
+  const missingManifestDiagnostic = missingManifestExport.diagnostics.find(item => item.code === 'tts_manifest_missing');
+  assert.ok(missingManifestDiagnostic);
+  assert.equal(missingManifestDiagnostic.sub_stage, 'compose');
+  assert.equal(missingManifestDiagnostic.retryable, true);
+  assert.equal(missingManifestDiagnostic.repair_action, 'retry_compose');
+
   const rawProjectDir = path.join(rootDir, 'raw-project');
   await writeFile(path.join(rawProjectDir, 'frames', 'raw.html'), [
     '<html>',
