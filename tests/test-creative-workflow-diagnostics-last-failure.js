@@ -251,5 +251,69 @@ async function writeJson(filePath, data) {
   assert.equal(JSON.stringify(record.project_substages).includes('generation_checkpoint'), false);
   assert.equal(JSON.stringify(record.project_substages).includes('不应复制'), false);
 
+  const warningDiagnostic = createDiagnostic({
+    code: 'frame_duration_auto_extended',
+    stage: 'timeline-consistency',
+    sub_stage: 'timeline_check',
+    severity: 'warning',
+    user_message: '已按字幕时长自动延长画面帧。',
+    details: { previous_duration_sec: 2, duration_sec: 3.2 },
+  });
+  const renderDiagnostic = createDiagnostic({
+    code: 'render_failed',
+    stage: 'render',
+    sub_stage: 'render',
+    frame_id: 'scene_02',
+    retryable: true,
+    repair_action: 'rerender_frames',
+    user_message: '第 2 帧渲染失败。',
+    details: { exit_code: 1 },
+  });
+  const warningFirstRootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'creative-workflow-warning-first-'));
+  const warningFirstMediaRoot = path.join(warningFirstRootDir, 'media');
+  const warningFirstProjectDir = path.join(warningFirstRootDir, 'project');
+  const warningFirstServices = {
+    now: () => now,
+    idFactory: () => '202606250000000002',
+    appSettings: services.appSettings,
+    mediaPipeline: services.mediaPipeline,
+    agentRuns: {
+      createDouyinHyperframesFreeformRun: async () => ({
+        success: true,
+        run_id: 'run-warning-first',
+        message: '导演改写任务已创建。',
+      }),
+      generateDouyinRunHyperframesFreeformBrief: async () => ({
+        success: true,
+        message: '成片策划完成。',
+      }),
+      generateDouyinRunHyperframesFreeformProject: async () => ({
+        success: false,
+        message: 'html-video 工程渲染失败。',
+        html_video_project_path: warningFirstProjectDir,
+        diagnostics: [warningDiagnostic, renderDiagnostic],
+      }),
+    },
+  };
+  const warningFirstCreated = await creativeWorkflows.createCreativeWorkflow({
+    input: '测试 warning 后实际失败诊断选择',
+  }, { rootDir: warningFirstRootDir, mediaRoot: warningFirstMediaRoot, services: warningFirstServices });
+  assert.equal(warningFirstCreated.success, true);
+  const warningFirstResult = await creativeWorkflows.runCreativeWorkflow(warningFirstCreated.workflow_id, {
+    rootDir: warningFirstRootDir,
+    mediaRoot: warningFirstMediaRoot,
+    services: warningFirstServices,
+    skipValidation: true,
+  });
+  assert.equal(warningFirstResult.success, false);
+  const warningFirstRecord = JSON.parse(await fs.readFile(
+    creativeWorkflows.getWorkflowPath(warningFirstCreated.workflow_id, warningFirstRootDir),
+    'utf8',
+  ));
+  assert.equal(warningFirstRecord.last_failure.code, 'render_failed');
+  assert.equal(warningFirstRecord.last_failure.sub_stage, 'render');
+  assert.equal(warningFirstRecord.last_failure.frame_id, 'scene_02');
+  assert.deepEqual(warningFirstRecord.last_failure.diagnostics, [warningDiagnostic, renderDiagnostic]);
+
   console.log('creative workflow diagnostics last_failure tests passed');
 })();

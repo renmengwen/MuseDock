@@ -1358,16 +1358,16 @@ async function prepareSource(record, mediaRoot, now, services = {}, reportStage 
 function ensureSuccess(result, fallbackMessage, context = {}) {
   if (!result || result.success === false) {
     const diagnostics = normalizeDiagnostics(selectFailureDiagnostics(result));
-    const firstDiagnostic = diagnostics[0] || {};
+    const failureDiagnostic = selectFailureDiagnostic(diagnostics);
     throw new CreativeWorkflowStageError(safeString(result && result.message) || fallbackMessage, {
       stage: context.stage || '',
-      sub_stage: firstDiagnostic.sub_stage || context.sub_stage || '',
-      code: firstDiagnostic.code || context.code || '',
-      frame_id: firstDiagnostic.frame_id || '',
+      sub_stage: failureDiagnostic.sub_stage || context.sub_stage || '',
+      code: failureDiagnostic.code || context.code || '',
+      frame_id: failureDiagnostic.frame_id || '',
       project_dir: result?.project_dir || result?.html_video_project_path || context.project_dir || '',
       diagnostics,
-      retryable: result?.retryable === true || firstDiagnostic.retryable === true,
-      fallback_allowed: result?.fallback_allowed !== false && firstDiagnostic.fallback_allowed !== false,
+      retryable: result?.retryable === true || failureDiagnostic.retryable === true,
+      fallback_allowed: result?.fallback_allowed !== false && failureDiagnostic.fallback_allowed !== false,
     });
   }
   return result;
@@ -1380,14 +1380,26 @@ function selectFailureDiagnostics(result = {}) {
   return htmlVideoDiagnostics.length > 0 ? htmlVideoDiagnostics : [];
 }
 
+function selectFailureDiagnostic(diagnostics = []) {
+  const items = Array.isArray(diagnostics) ? diagnostics : [];
+  if (!items.length) return {};
+  const nonWarnings = items.filter(item => item?.severity !== 'warning');
+  if (nonWarnings.length) {
+    return nonWarnings.find(item => item?.retryable === true || safeString(item?.repair_action))
+      || nonWarnings[nonWarnings.length - 1]
+      || {};
+  }
+  return items[0] || {};
+}
+
 function createLastFailureFromError(error, stageId, updatedAt) {
   const diagnostics = normalizeDiagnostics(error?.diagnostics || []);
-  const firstDiagnostic = diagnostics[0] || {};
+  const failureDiagnostic = selectFailureDiagnostic(diagnostics);
   return {
     stage: safeString(error?.stage) || stageId,
-    sub_stage: safeString(error?.sub_stage) || safeString(firstDiagnostic.sub_stage),
-    code: safeString(error?.code) || safeString(firstDiagnostic.code),
-    frame_id: safeString(error?.frame_id) || safeString(firstDiagnostic.frame_id),
+    sub_stage: safeString(error?.sub_stage) || safeString(failureDiagnostic.sub_stage),
+    code: safeString(error?.code) || safeString(failureDiagnostic.code),
+    frame_id: safeString(error?.frame_id) || safeString(failureDiagnostic.frame_id),
     project_dir: safeString(error?.project_dir),
     message: safeString(error?.message) || `${STAGE_LABELS[stageId]}失败。`,
     diagnostics,
