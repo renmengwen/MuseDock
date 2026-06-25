@@ -5,6 +5,7 @@ const path = require('path');
 
 const creativeWorkflows = require('../server/services/creativeWorkflows');
 const { createDiagnostic } = require('../server/services/creative-video/html-video/diagnostics');
+const { createEmptyProject, markCheckpointStage, markCheckpointFrame } = require('../server/services/creative-video/html-video/projectSchema');
 
 async function writeJson(filePath, data) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -34,26 +35,51 @@ async function writeJson(filePath, data) {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'creative-workflow-last-failure-'));
   const mediaRoot = path.join(rootDir, 'media');
   const projectDir = path.join(rootDir, 'project');
+  const checkpointProject = createEmptyProject({
+    workflowId: '202606250000000001',
+    runId: 'run-last-failure',
+  });
+  markCheckpointStage(checkpointProject, 'content_graph', {
+    status: 'done',
+    path: 'content-graph.json',
+    output_hash: 'graph-hash',
+    diagnostic_code: '',
+  });
+  markCheckpointFrame(checkpointProject, 'frame_html', 'scene_01', {
+    status: 'done',
+    html_path: 'frames/01-scene_01.html',
+    output_hash: 'html-hash-1',
+    diagnostic_code: '',
+  });
+  markCheckpointFrame(checkpointProject, 'frame_html', 'scene_05', {
+    status: 'failed',
+    diagnostic_code: 'provider_missing_text',
+  });
+  markCheckpointFrame(checkpointProject, 'render', 'scene_05', {
+    status: 'failed',
+    diagnostic_code: 'render_failed',
+  });
+  checkpointProject.generation_checkpoint.stages.compose = {
+    ...checkpointProject.generation_checkpoint.stages.compose,
+    status: 'done',
+    output_path: 'exports/output.mp4',
+    output_audio_path: 'exports/output-audio.mp4',
+    ignored: '不应复制',
+  };
+  checkpointProject.generation_checkpoint.stages.duration_verify = {
+    ...checkpointProject.generation_checkpoint.stages.duration_verify,
+    status: 'failed',
+    expected_duration_sec: 60,
+    actual_duration_sec: 132,
+    diagnostic_code: 'duration_mismatch',
+  };
+  checkpointProject.generation_checkpoint.stages.visual_inspect = {
+    ...checkpointProject.generation_checkpoint.stages.visual_inspect,
+    status: 'done',
+    report_path: 'inspect/report.json',
+  };
   await writeJson(path.join(projectDir, 'project.json'), {
-    generation_checkpoint: {
-      stages: [
-        {
-          id: 'content_graph',
-          status: 'done',
-          message: '内容图已生成。',
-          artifacts: { path: 'content-graph.json' },
-          diagnostics: [],
-          ignored: '不应复制',
-        },
-        {
-          id: 'frame_html',
-          status: 'failed',
-          message: '第 5 帧 HTML 生成失败。',
-          artifacts: { frame_id: 'scene_05' },
-          diagnostics: [diagnostic],
-        },
-      ],
-    },
+    generation_checkpoint: checkpointProject.generation_checkpoint,
   });
 
   const now = '2026-06-25T00:00:00.000Z';
@@ -92,7 +118,8 @@ async function writeJson(filePath, data) {
         success: false,
         message: 'provider_1781667270005 返回结果缺少文本内容。',
         html_video_project_path: projectDir,
-        diagnostics: [diagnostic],
+        diagnostics: [],
+        html_video_diagnostics: [diagnostic],
       }),
     },
   };
@@ -122,22 +149,41 @@ async function writeJson(filePath, data) {
   assert.equal(record.last_failure.message, 'provider_1781667270005 返回结果缺少文本内容。');
   assert.equal(record.last_failure.updated_at, now);
   assert.deepEqual(record.last_failure.diagnostics, [diagnostic]);
-  assert.deepEqual(record.project_substages, [
-    {
-      id: 'content_graph',
-      status: 'done',
-      message: '内容图已生成。',
-      artifacts: { path: 'content-graph.json' },
-      diagnostics: [],
-    },
-    {
-      id: 'frame_html',
-      status: 'failed',
-      message: '第 5 帧 HTML 生成失败。',
-      artifacts: { frame_id: 'scene_05' },
-      diagnostics: [diagnostic],
-    },
+  const contentGraphStage = record.project_substages.find(item => item.id === 'content_graph');
+  assert.deepEqual(contentGraphStage.artifacts, { kind: 'content_graph', path: 'content-graph.json', hash: 'graph-hash' });
+  assert.equal(Object.hasOwn(contentGraphStage, 'path'), false);
+
+  const frameHtmlStage = record.project_substages.find(item => item.id === 'frame_html');
+  assert.deepEqual(frameHtmlStage.artifacts, [
+    { kind: 'frame_html', frame_id: 'scene_01', path: 'frames/01-scene_01.html', hash: 'html-hash-1' },
   ]);
+  assert.deepEqual(frameHtmlStage.diagnostics, [
+    createDiagnostic({ code: 'provider_missing_text', sub_stage: 'frame_html', frame_id: 'scene_05' }),
+  ]);
+
+  const renderStage = record.project_substages.find(item => item.id === 'render');
+  assert.deepEqual(renderStage.diagnostics, [
+    createDiagnostic({ code: 'render_failed', sub_stage: 'render', frame_id: 'scene_05' }),
+  ]);
+
+  const composeStage = record.project_substages.find(item => item.id === 'compose');
+  assert.deepEqual(composeStage.artifacts, [
+    { kind: 'compose_output', path: 'exports/output.mp4' },
+    { kind: 'compose_audio_output', path: 'exports/output-audio.mp4' },
+  ]);
+  assert.equal(Object.hasOwn(composeStage, 'ignored'), false);
+
+  const durationStage = record.project_substages.find(item => item.id === 'duration_verify');
+  assert.deepEqual(durationStage.artifacts, { kind: 'duration_verify', expected_duration_sec: 60, actual_duration_sec: 132 });
+  assert.deepEqual(durationStage.diagnostics, [
+    createDiagnostic({ code: 'duration_mismatch', sub_stage: 'duration_verify' }),
+  ]);
+
+  const visualStage = record.project_substages.find(item => item.id === 'visual_inspect');
+  assert.deepEqual(visualStage.artifacts, { kind: 'visual_report', path: 'inspect/report.json' });
+  assert.equal(JSON.stringify(record.project_substages).includes('"frames"'), false);
+  assert.equal(JSON.stringify(record.project_substages).includes('generation_checkpoint'), false);
+  assert.equal(JSON.stringify(record.project_substages).includes('不应复制'), false);
 
   console.log('creative workflow diagnostics last_failure tests passed');
 })();

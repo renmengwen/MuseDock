@@ -22,7 +22,7 @@ const htmlVideoEditModeService = require('./creative-video/html-video/htmlVideoE
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
 const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
 const { CreativeWorkflowStageError } = require('./creative-video/errors');
-const { normalizeDiagnostics } = require('./creative-video/html-video/diagnostics');
+const { createDiagnostic, normalizeDiagnostics } = require('./creative-video/html-video/diagnostics');
 const { syncRawHtmlFrameTextPatch } = require('./creative-video/html-video/rawHtmlTextPatch');
 const { findFrameByAnyId } = require('./creative-video/html-video/frameIdentity');
 const { createTemplateRegistry: createHtmlVideoTemplateRegistry } = require('./creative-video/html-video/templateRegistry');
@@ -1357,7 +1357,7 @@ async function prepareSource(record, mediaRoot, now, services = {}, reportStage 
 
 function ensureSuccess(result, fallbackMessage, context = {}) {
   if (!result || result.success === false) {
-    const diagnostics = normalizeDiagnostics(result?.diagnostics || result?.html_video_diagnostics || []);
+    const diagnostics = normalizeDiagnostics(selectFailureDiagnostics(result));
     const firstDiagnostic = diagnostics[0] || {};
     throw new CreativeWorkflowStageError(safeString(result && result.message) || fallbackMessage, {
       stage: context.stage || '',
@@ -1371,6 +1371,13 @@ function ensureSuccess(result, fallbackMessage, context = {}) {
     });
   }
   return result;
+}
+
+function selectFailureDiagnostics(result = {}) {
+  const diagnostics = Array.isArray(result?.diagnostics) ? result.diagnostics : [];
+  if (diagnostics.length > 0) return diagnostics;
+  const htmlVideoDiagnostics = Array.isArray(result?.html_video_diagnostics) ? result.html_video_diagnostics : [];
+  return htmlVideoDiagnostics.length > 0 ? htmlVideoDiagnostics : [];
 }
 
 function createLastFailureFromError(error, stageId, updatedAt) {
@@ -1394,7 +1401,9 @@ function normalizeProjectStageSummary(summary = {}) {
     id: safeString(input.id),
     status: safeString(input.status),
     message: safeString(input.message),
-    artifacts: input.artifacts && typeof input.artifacts === 'object' && !Array.isArray(input.artifacts)
+    artifacts: Array.isArray(input.artifacts)
+      ? input.artifacts
+      : input.artifacts && typeof input.artifacts === 'object'
       ? input.artifacts
       : {},
     diagnostics: normalizeDiagnostics(input.diagnostics || []),
@@ -1417,15 +1426,103 @@ function checkpointStageSummaries(generationCheckpoint = {}) {
   const stages = generationCheckpoint?.stages;
   if (Array.isArray(stages)) return stages;
   if (!stages || typeof stages !== 'object') return [];
-  return Object.entries(stages).map(([id, stage]) => ({
+  return Object.entries(stages).map(([id, stage]) => checkpointStageSummary(id, stage));
+}
+
+function checkpointDiagnostic(code, sub_stage, frame_id = '') {
+  return safeString(code) ? createDiagnostic({ code, sub_stage, frame_id }) : null;
+}
+
+function compactFrameStageSummary(id, stage = {}, sub_stage, pathKey, kind) {
+  const frames = stage?.frames && typeof stage.frames === 'object' ? stage.frames : {};
+  const artifacts = [];
+  const diagnostics = [];
+  let hasDone = false;
+  let hasFailed = false;
+  for (const [frameId, frame] of Object.entries(frames)) {
+    if (frame?.status === 'done') {
+      hasDone = true;
+      if (safeString(frame[pathKey])) {
+        artifacts.push({
+          kind,
+          frame_id: frameId,
+          path: safeString(frame[pathKey]),
+          ...(safeString(frame.output_hash) ? { hash: safeString(frame.output_hash) } : {}),
+        });
+      }
+    } else if (frame?.status === 'failed') {
+      hasFailed = true;
+      const diagnostic = checkpointDiagnostic(frame.diagnostic_code, sub_stage, frameId);
+      if (diagnostic) diagnostics.push(diagnostic);
+    }
+  }
+  return {
+    id,
+    status: hasFailed ? 'failed' : hasDone ? 'done' : safeString(stage?.status),
+    artifacts,
+    diagnostics,
+  };
+}
+
+function checkpointStageSummary(id, stage = {}) {
+  if (id === 'content_graph') {
+    return {
+      id,
+      status: safeString(stage?.status),
+      artifacts: safeString(stage?.path) ? {
+        kind: 'content_graph',
+        path: safeString(stage.path),
+        ...(safeString(stage.output_hash) ? { hash: safeString(stage.output_hash) } : {}),
+      } : {},
+      diagnostics: [checkpointDiagnostic(stage?.diagnostic_code, 'content_graph')].filter(Boolean),
+    };
+  }
+  if (id === 'frame_html') {
+    return compactFrameStageSummary(id, stage, 'frame_html', 'html_path', 'frame_html');
+  }
+  if (id === 'render') {
+    return compactFrameStageSummary(id, stage, 'render', 'mp4_path', 'render_frame');
+  }
+  if (id === 'compose') {
+    return {
+      id,
+      status: safeString(stage?.status),
+      artifacts: [
+        safeString(stage?.output_path) ? { kind: 'compose_output', path: safeString(stage.output_path) } : null,
+        safeString(stage?.output_audio_path) ? { kind: 'compose_audio_output', path: safeString(stage.output_audio_path) } : null,
+      ].filter(Boolean),
+      diagnostics: [checkpointDiagnostic(stage?.diagnostic_code, 'compose')].filter(Boolean),
+    };
+  }
+  if (id === 'duration_verify') {
+    return {
+      id,
+      status: safeString(stage?.status),
+      artifacts: {
+        kind: 'duration_verify',
+        expected_duration_sec: stage?.expected_duration_sec ?? null,
+        actual_duration_sec: stage?.actual_duration_sec ?? null,
+      },
+      diagnostics: stage?.status === 'failed'
+        ? [checkpointDiagnostic(stage?.diagnostic_code || 'duration_mismatch', 'duration_verify')].filter(Boolean)
+        : [],
+    };
+  }
+  if (id === 'visual_inspect') {
+    return {
+      id,
+      status: safeString(stage?.status),
+      artifacts: safeString(stage?.report_path) ? { kind: 'visual_report', path: safeString(stage.report_path) } : {},
+      diagnostics: [checkpointDiagnostic(stage?.diagnostic_code, 'visual_inspect')].filter(Boolean),
+    };
+  }
+  return {
     id,
     status: stage?.status || '',
     message: stage?.message || '',
-    artifacts: stage?.artifacts && typeof stage.artifacts === 'object' && !Array.isArray(stage.artifacts)
-      ? stage.artifacts
-      : {},
+    artifacts: stage?.artifacts && typeof stage.artifacts === 'object' ? stage.artifacts : {},
     diagnostics: stage?.diagnostics || [],
-  }));
+  };
 }
 
 function syncProjectStageSummariesFromCheckpoint(record, generationCheckpoint) {
