@@ -155,6 +155,11 @@ function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target
   if (!extracted.success) return { reuse: false };
   const validation = frameHtmlAgent.validateHtmlTargetResolution(extracted.html, target || {});
   if (!validation.success) return { reuse: false };
+  for (const key of ['headline', 'subtitle', 'body']) {
+    if (!new RegExp(`data-text-key=["']${key}["']`, 'i').test(extracted.html)) {
+      return { reuse: false };
+    }
+  }
   return {
     reuse: true,
     html,
@@ -165,6 +170,11 @@ function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target
 
 function hasUsableContentGraph(graph = {}) {
   return Array.isArray(graph.nodes) && graph.nodes.length > 0;
+}
+
+function contentGraphMatchesSceneSpec(graph = {}, sceneSpec = null) {
+  if (!sceneSpec) return true;
+  return validateGraphMatchesSceneSpec(graph, sceneSpec).ok;
 }
 
 function loadCheckpointContentGraph(projectDir, project = {}) {
@@ -180,10 +190,13 @@ function loadCheckpointContentGraph(projectDir, project = {}) {
   }
 }
 
-function resolveResumeContentGraph(projectDir, project = {}) {
+function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null) {
   if (!project) return null;
-  if (hasUsableContentGraph(project.content_graph)) return project.content_graph;
-  return loadCheckpointContentGraph(projectDir, project);
+  if (hasUsableContentGraph(project.content_graph) && contentGraphMatchesSceneSpec(project.content_graph, sceneSpec)) {
+    return project.content_graph;
+  }
+  const checkpointGraph = loadCheckpointContentGraph(projectDir, project);
+  return checkpointGraph && contentGraphMatchesSceneSpec(checkpointGraph, sceneSpec) ? checkpointGraph : null;
 }
 
 function providerMissingTextDiagnostic() {
@@ -768,7 +781,7 @@ async function generateHtmlVideo(options = {}) {
       target: templateRenderTarget,
     });
   } else {
-    let contentGraph = resolveResumeContentGraph(projectDir, resumeProject);
+    let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec);
     if (contentGraph) {
       project = await projectStore.writeProjectJson(projectDir, current => {
         current.content_graph = contentGraph;

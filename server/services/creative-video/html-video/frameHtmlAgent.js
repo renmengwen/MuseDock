@@ -402,10 +402,14 @@ async function generateFrameHtml({
   if (!first.success) {
     return frameFailure(first.code || 'frame_html_invalid', first.message || '单帧 HTML 生成失败。', promptArgs);
   }
+  const allowInternalRetry = attempt < 2 && shortPrompt !== true;
   const firstExtracted = extractHtmlDocument(first.text);
   if (firstExtracted.success) {
     const validation = validateHtmlTargetResolution(firstExtracted.html, promptArgs.target || {});
     if (validation.success) return firstExtracted;
+    if (!allowInternalRetry) {
+      return frameFailure('frame_html_invalid', validation.message || 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。', promptArgs);
+    }
     const retry = await callModel(model, buildRetryPrompt({
       ...promptArgs,
       validationMessage: validation.message,
@@ -428,6 +432,9 @@ async function generateFrameHtml({
     });
   }
 
+  if (!allowInternalRetry) {
+    return frameFailure('frame_html_invalid', firstExtracted.message || 'AI 未返回有效 HTML document。', promptArgs);
+  }
   const retry = await callModel(model, buildRetryPrompt(promptArgs), callOptions);
   if (!retry.success) {
     return frameFailure('frame_html_invalid', retry.message || '单帧 HTML 生成失败。', promptArgs, {

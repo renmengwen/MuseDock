@@ -248,6 +248,29 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   assert.equal(dimensionFailed.success, false);
   assert.match(dimensionFailed.message, /尺寸|画幅/);
 
+  let shortPromptInvalidCalls = 0;
+  const shortPromptInvalid = await agent.generateFrameHtml({
+    model: {
+      callTextModel: async request => {
+        shortPromptInvalidCalls += 1;
+        assert.equal(request.stream, false);
+        return { success: true, text: '不是 HTML' };
+      },
+    },
+    frameId: 'scene_01',
+    attempt: 2,
+    modelOptions: { stream: false },
+    shortPrompt: true,
+    graph,
+    node: graph.nodes[0],
+    index: 0,
+    total: 2,
+    target: { resolution: { width: 1080, height: 1920 }, aspect_ratio: '9:16' },
+  });
+  assert.equal(shortPromptInvalid.success, false);
+  assert.equal(shortPromptInvalidCalls, 1);
+  assert.equal(shortPromptInvalid.diagnostics[0].code, 'frame_html_invalid');
+
   let retryBlankCalls = 0;
   const retryBlankResult = await agent.generateFrameHtml({
     model: {

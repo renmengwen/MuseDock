@@ -74,16 +74,30 @@ function contentGraph(label = '三帧恢复') {
   };
 }
 
-async function setupProject(rootDir, workflowId, runId) {
+function staleContentGraph() {
+  return {
+    synopsis: '旧内容图',
+    nodes: [
+      { id: 'old_scene_01', kind: 'text', text: '旧第一幕' },
+    ],
+    edges: [],
+  };
+}
+
+function invalidCheckpointHtml() {
+  return '<!doctype html><html><head></head><body>bad</body></html>';
+}
+
+async function setupProject(rootDir, workflowId, runId, options = {}) {
   const templateRoot = path.join(rootDir, 'templates');
   await createTemplate(templateRoot);
   const templateRegistry = createTemplateRegistry({ rootDir: templateRoot });
   templateRegistry.scanTemplates();
 
   const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
-  await writeFile(path.join(projectDir, 'frames/01-scene_01.html'), validHtml('scene_01', '已完成一'));
+  await writeFile(path.join(projectDir, 'frames/01-scene_01.html'), options.badScene01Html ? invalidCheckpointHtml() : validHtml('scene_01', '已完成一'));
   await writeFile(path.join(projectDir, 'frames/02-scene_02.html'), validHtml('scene_02', '已完成二'));
-  const graph = contentGraph();
+  const graph = options.contentGraph || contentGraph();
   const project = createEmptyProject({
     projectId: `${workflowId}_${runId}`,
     workflowId,
@@ -186,6 +200,77 @@ async function main() {
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_01.html_path, 'frames/01-scene_01.html');
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_02.html_path, 'frames/02-scene_02.html');
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_03.status, 'done');
+    }
+
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-bad-reuse-'));
+      const workflowId = '202606260000000003_bad_frame_reuse';
+      const runId = 'run_bad_reuse';
+      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { badScene01Html: true });
+      const calls = [];
+      frameHtmlAgent.generateFrameHtml = async (args) => {
+        calls.push(args);
+        return { success: true, html: validHtml(args.node.id, args.node.id) };
+      };
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        templateRegistry,
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              throw new Error('坏 HTML 复用场景不应重新生成 content graph。');
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+
+      assert.equal(result.success, true);
+      assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_03']);
+    }
+
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-stale-graph-'));
+      const workflowId = '202606260000000004_stale_graph';
+      const runId = 'run_stale_graph';
+      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { contentGraph: staleContentGraph() });
+      const calls = [];
+      let contentGraphCalls = 0;
+      frameHtmlAgent.generateFrameHtml = async (args) => {
+        calls.push(args);
+        return { success: true, html: validHtml(args.node.id, args.node.id) };
+      };
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        templateRegistry,
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              contentGraphCalls += 1;
+              return { success: true, text: JSON.stringify(contentGraph('重新生成内容图')) };
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(contentGraphCalls, 1);
+      assert.deepEqual(calls.map(item => item.node.id), ['scene_03']);
     }
 
     {
