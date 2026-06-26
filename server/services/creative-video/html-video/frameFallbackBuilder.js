@@ -64,7 +64,7 @@ function buildFallbackFrameHtml({ scene, node, target, template } = {}) {
     '.line{width:260px;height:8px;background:#ffcc66;border-radius:999px;margin-top:44px;transform-origin:left;animation:fallbackLine .8s .25s ease-out both}',
     '</style>',
     '</head>',
-    '<body>',
+    `<body data-hv-canvas data-width="${resolution.width}" data-height="${resolution.height}">`,
     `<main class="stage" data-frame-id="${escapeHtml(frameId)}">`,
     '<section class="panel">',
     '<div class="kicker">基础 HTML 兜底</div>',

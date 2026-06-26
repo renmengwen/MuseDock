@@ -3,6 +3,7 @@ const { topoSort, getNode, DEFAULT_FRAME_DURATION_SEC } = require('./contentGrap
 const { applyCaptionLayer, normalizeCaptionsForFrame } = require('./captionLayer');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
 const projectStore = require('./projectStore');
+const { normalizeHtmlCanvasContract } = require('./frameCanvasContract');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -266,7 +267,7 @@ async function buildRawHtmlFrameProjectFromMemory({
       projectDir,
       sceneId: scene.id,
       order: index + 1,
-      html,
+      html: normalizeHtmlCanvasContract(html, target),
       captions,
       durationSec: normalizedDurationSec,
     });

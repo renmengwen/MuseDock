@@ -2,6 +2,10 @@ const fs = require('fs');
 const { resolveSourceEntryPath } = require('./templateRegistry');
 const { summarizeCreativeContextForPrompt } = require('./contentGraphAgent');
 const { createDiagnostic } = require('./diagnostics');
+const {
+  normalizeHtmlCanvasContract,
+  validateHtmlCanvasContract,
+} = require('./frameCanvasContract');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -119,65 +123,8 @@ function buildVisualContinuitySection({ visualStyleReferenceHtml = '', previousF
   ];
 }
 
-function extractViewportDimensions(html = '') {
-  const pairs = [];
-  const metaPattern = /<meta\b[^>]*name=["']viewport["'][^>]*>/gi;
-  for (const match of String(html || '').matchAll(metaPattern)) {
-    const tag = match[0];
-    const content = tag.match(/\bcontent=["']([^"']+)["']/i)?.[1] || tag;
-    const width = Number(content.match(/\bwidth\s*=\s*(\d{3,5})\b/i)?.[1]);
-    const height = Number(content.match(/\bheight\s*=\s*(\d{3,5})\b/i)?.[1]);
-    if (Number.isFinite(width) && Number.isFinite(height)) {
-      pairs.push({ source: 'viewport', width, height });
-    }
-  }
-  return pairs;
-}
-
-function isRootCanvasSelector(selector = '') {
-  const normalized = String(selector || '').toLowerCase();
-  if (/(^|[\s,])html([\s,]|$)/.test(normalized)) return true;
-  if (/(^|[\s,])body([\s,]|$)/.test(normalized)) return true;
-  return /[.#-](app|root|stage|scene|frame|canvas|screen|page|video|container)\b/.test(normalized);
-}
-
-function extractCssRootDimensions(html = '') {
-  const pairs = [];
-  const rulePattern = /([^{}]+)\{([^{}]+)\}/g;
-  for (const match of String(html || '').matchAll(rulePattern)) {
-    const selector = match[1] || '';
-    const body = match[2] || '';
-    if (!isRootCanvasSelector(selector)) continue;
-    const width = Number(body.match(/(?:^|[;\s])width\s*:\s*(\d{3,5})px\b/i)?.[1]);
-    const height = Number(body.match(/(?:^|[;\s])height\s*:\s*(\d{3,5})px\b/i)?.[1]);
-    if (Number.isFinite(width) && Number.isFinite(height)) {
-      pairs.push({ source: `css:${selector.trim().replace(/\s+/g, ' ')}`, width, height });
-    }
-  }
-  return pairs;
-}
-
 function validateHtmlTargetResolution(html, target = {}) {
-  const resolution = resolveResolution(target);
-  const expectedWidth = resolution.width;
-  const expectedHeight = resolution.height;
-  const pairs = [
-    ...extractViewportDimensions(html),
-    ...extractCssRootDimensions(html),
-  ];
-  const mismatched = pairs.find(pair => pair.width !== expectedWidth || pair.height !== expectedHeight);
-  if (!mismatched) return { success: true };
-  const reversed = mismatched.width === expectedHeight && mismatched.height === expectedWidth;
-  return {
-    success: false,
-    message: [
-      `HTML 画幅尺寸不符合目标 ${expectedWidth}x${expectedHeight}。`,
-      `${mismatched.source} 使用 ${mismatched.width}x${mismatched.height}。`,
-      reversed ? `不能使用 ${expectedHeight}x${expectedWidth}，这会把横屏画面裁进竖屏。` : '',
-    ].filter(Boolean).join(''),
-    expected: { width: expectedWidth, height: expectedHeight },
-    actual: { width: mismatched.width, height: mismatched.height, source: mismatched.source },
-  };
+  return validateHtmlCanvasContract(html, target);
 }
 
 function buildFrameHtmlPrompt({
@@ -213,6 +160,7 @@ function buildFrameHtmlPrompt({
     '',
     `Target resolution：${resolution.width}x${resolution.height}，画面必须 full-bleed ${resolution.width}x${resolution.height}，不要留白边或浏览器默认 margin。`,
     `必须按目标尺寸生成 root canvas：meta viewport、html/body 或主舞台容器都必须是 ${resolution.width}x${resolution.height}；不能交换宽高。`,
+    `必须包含明确根画布 contract：body 或 #root 带 data-hv-canvas、data-width="${resolution.width}"、data-height="${resolution.height}"；普通装饰元素可有自己的 width/height，但不能替代根画布。`,
     '',
     'Selected template metadata（用于理解模板身份、输入语义和适配边界）：',
     templateStyleReference(template),
@@ -497,6 +445,7 @@ function buildShortFrameHtmlPrompt({
     `当前 scene captions：${captions || '无'}`,
     `Target resolution：${resolution.width}x${resolution.height}`,
     `必须生成 full-bleed ${resolution.width}x${resolution.height} 完整 HTML，包含 <!doctype html>、html、head、body、style。`,
+    `body 或 #root 必须带 data-hv-canvas、data-width="${resolution.width}"、data-height="${resolution.height}"。`,
     '必须包含 data-text-key="headline"、data-text-key="subtitle"、data-text-key="body" 三类可见文本锚点。',
     '必须包含基础动画：CSS @keyframes/animation、GSAP timeline 或 window.__hvPlayAll 至少一种。',
     '可见文本使用中文；不要输出 Markdown、解释或 HTML 外文字。',
@@ -539,8 +488,9 @@ function buildRetryPrompt(args = {}) {
     expectedHeadline ? `当前镜头核心标题：${expectedHeadline}` : '',
     expectedTexts.length ? `当前镜头允许使用的内容文案：${expectedTexts.join(' / ')}` : '',
     args.template ? '如果使用模板，必须删除模板默认可见文案，只保留视觉风格、布局、配色、动效和结构。' : '',
-    '必须包含 <!doctype html><html><head><style>...</style></head><body>...</body></html>。',
+    `必须包含 <!doctype html><html><head><style>...</style></head><body data-hv-canvas data-width="${resolution.width}" data-height="${resolution.height}">...</body></html>。`,
     `meta viewport、html/body 或主舞台容器必须使用 ${resolution.width}x${resolution.height}；不能使用 ${resolution.height}x${resolution.width}，不要交换宽高。`,
+    '普通装饰元素可以有自己的 width/height，但不能替代 data-hv-canvas 根画布。',
     '必须包含 animation timeline：CSS animation/@keyframes、GSAP timeline 或 window.__hvPlayAll 至少一种。',
     '主体元素必须有明显运动；超过 6 秒的帧必须包含 2-3 个 sub-beats，禁止只有角落闪烁或背景扫光。',
     'raw_html 每帧必须包含 data-text-key="headline"、data-text-key="subtitle"、data-text-key="body" 三类稳定可编辑文本锚点。',
@@ -630,8 +580,9 @@ async function generateFrameHtml({
   const allowInternalRetry = attempt < 2 && shortPrompt !== true;
   const firstExtracted = extractHtmlDocument(first.text);
   if (firstExtracted.success) {
-    const validation = validateGeneratedHtml(firstExtracted.html, promptArgs);
-    if (validation.success) return firstExtracted;
+    const normalizedHtml = normalizeHtmlCanvasContract(firstExtracted.html, promptArgs.target || {});
+    const validation = validateGeneratedHtml(normalizedHtml, promptArgs);
+    if (validation.success) return { ...firstExtracted, html: normalizedHtml };
     if (!allowInternalRetry) {
       return frameFailure(validation.code || 'frame_html_invalid', validation.message || '单帧 HTML 内容校验失败。', promptArgs, validation.details || {});
     }
@@ -650,8 +601,9 @@ async function generateFrameHtml({
         diagnostics: [validation.message, retryExtracted.message].filter(Boolean),
       });
     }
-    const retryValidation = validateGeneratedHtml(retryExtracted.html, promptArgs);
-    if (retryValidation.success) return retryExtracted;
+    const retryHtml = normalizeHtmlCanvasContract(retryExtracted.html, promptArgs.target || {});
+    const retryValidation = validateGeneratedHtml(retryHtml, promptArgs);
+    if (retryValidation.success) return { ...retryExtracted, html: retryHtml };
     return frameFailure(retryValidation.code || 'frame_html_invalid', retryValidation.message || '单帧 HTML 内容校验失败。', promptArgs, {
       diagnostics: [validation.message, retryValidation.message].filter(Boolean),
       details: retryValidation.details || {},
@@ -669,8 +621,9 @@ async function generateFrameHtml({
   }
   const retryExtracted = extractHtmlDocument(retry.text);
   if (retryExtracted.success) {
-    const retryValidation = validateGeneratedHtml(retryExtracted.html, promptArgs);
-    if (retryValidation.success) return retryExtracted;
+    const retryHtml = normalizeHtmlCanvasContract(retryExtracted.html, promptArgs.target || {});
+    const retryValidation = validateGeneratedHtml(retryHtml, promptArgs);
+    if (retryValidation.success) return { ...retryExtracted, html: retryHtml };
     return frameFailure(retryValidation.code || 'frame_html_invalid', retryValidation.message || '单帧 HTML 内容校验失败。', promptArgs, {
       diagnostics: [firstExtracted.message, retryValidation.message].filter(Boolean),
       details: retryValidation.details || {},

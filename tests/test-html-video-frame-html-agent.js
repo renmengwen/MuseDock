@@ -66,6 +66,7 @@ assert.match(prompt, /data-/);
 assert.match(prompt, /data-text-key="headline"/);
 assert.match(prompt, /data-text-key="subtitle"/);
 assert.match(prompt, /data-text-key="body"/);
+assert.match(prompt, /data-hv-canvas/);
 assert.match(prompt, /captions|字幕/);
 assert.match(prompt, /不要输出解释/);
 assert.match(prompt, /不要让每一帧都使用相同主布局/);
@@ -231,6 +232,23 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   assert.equal(dimensionResult.success, true);
   assert.equal(dimensionCalls, 2);
   assert.match(dimensionResult.html, /width=1080,height=1920/);
+
+  const decorativeFrameHtml = [
+    '<!doctype html><html><head>',
+    '<meta name="viewport" content="width=1920,height=1080,initial-scale=1.0">',
+    '<style>',
+    'html,body{margin:0;width:1920px;height:1080px;overflow:hidden}',
+    '.corner-frame span{width:140px;height:140px}',
+    '</style>',
+    '</head><body data-hv-canvas data-width="1920" data-height="1080">',
+    '<div class="corner-frame"><span></span></div>',
+    '<main><h1 data-text-key="headline">基础版</h1><p data-text-key="subtitle">价格</p><section data-text-key="body">基础版价格 12 元</section></main>',
+    '</body></html>',
+  ].join('');
+  const decorativeValidation = agent.validateHtmlTargetResolution(decorativeFrameHtml, {
+    resolution: { width: 1920, height: 1080 },
+  });
+  assert.equal(decorativeValidation.success, true);
 
   const dimensionFailed = await agent.generateFrameHtml({
     model: {

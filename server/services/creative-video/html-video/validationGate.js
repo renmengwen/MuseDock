@@ -5,7 +5,7 @@ const { createDiagnostic } = require('./diagnostics');
 const { validateProject } = require('./projectSchema');
 const { mappedEngine } = require('./templateRegistry');
 const { validateTemplateInputs } = require('./templateInputAgent');
-const { validateHtmlTargetResolution } = require('./frameHtmlAgent');
+const { validateHtmlCanvasContract } = require('./frameCanvasContract');
 const { validateSceneSpecTimelineConsistency } = require('./timelineConsistency');
 
 const SUPPORTED_ENGINES = new Set(['hyperframes', 'hyperframes-playwright']);
@@ -194,7 +194,7 @@ async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames 
   for (const frame of frames) {
     const html = await readFrameHtmlForValidation(projectDir, frame, diagnostics);
     if (html == null) continue;
-    const resolutionValidation = validateHtmlTargetResolution(html, { resolution });
+    const resolutionValidation = validateHtmlCanvasContract(html, { resolution });
     if (!resolutionValidation.success) {
       add(diagnostics, 'raw_html_resolution_mismatch', 'frame', resolutionValidation.message || 'raw_html 帧画幅尺寸不符合工程输出尺寸。', {
         frame_id: frame.id,

@@ -485,6 +485,45 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const managedCaptionDiagnostic = rawHtmlManagedCaptionLayer.diagnostics.find(item => item.code === 'raw_html_text_keys_missing');
   assert.deepEqual(managedCaptionDiagnostic.details.missing_keys, ['subtitle']);
 
+  await writeFile(path.join(rawHtmlProjectDir, 'frames', 'decorative-frame.html'), [
+    '<!doctype html>',
+    '<html><head>',
+    '<meta name="viewport" content="width=1920,height=1080,initial-scale=1.0">',
+    '<style>',
+    'html,body{margin:0;width:1920px;height:1080px;overflow:hidden}',
+    '.corner-frame span{width:140px;height:140px}',
+    '</style>',
+    '</head><body data-hv-canvas data-width="1920" data-height="1080">',
+    '<div class="corner-frame"><span></span></div>',
+    '<main>',
+    '<h1 data-text-key="headline">横屏标题</h1>',
+    '<p data-text-key="subtitle">短字幕</p>',
+    '<section data-text-key="body">正文</section>',
+    '</main>',
+    '</body></html>',
+  ].join('\n'));
+  const rawHtmlDecorativeFrame = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: {
+      template_id: 'valid',
+      template_inputs: {},
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30 },
+      frames: [
+        {
+          id: 'raw_decorative_frame',
+          template_id: 'valid',
+          source_mode: 'raw_html',
+          inputs: {},
+          html_path: 'frames/decorative-frame.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_decorative_frame', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(rawHtmlDecorativeFrame.ok, true);
+
   await writeFile(path.join(rawHtmlProjectDir, 'frames', 'wrong-resolution.html'), [
     '<!doctype html>',
     '<html><head>',
