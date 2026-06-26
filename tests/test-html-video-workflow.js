@@ -309,6 +309,10 @@ async function readProjectJson(projectDir) {
   const rawPathSavedProject = await readProjectJson(rawPathResult.html_video_project_path);
   assert.equal(rawPathSavedProject.generation_checkpoint.stages.validate_project.status, 'done');
   assert.equal(rawPathSavedProject.generation_checkpoint.stages.validate_project.diagnostic_code, '');
+  assert.deepEqual(rawPathSavedProject.generation_checkpoint.agent_pipeline, [
+    { agent: 'ContentGraphAgent', stage: 'content_graph', artifact: 'content-graph.json' },
+    { agent: 'FrameHtmlAgent', stage: 'frame_html', artifact: 'frames' },
+  ]);
 
   const contentGraphAiFailure = await workflow.generateHtmlVideo({
     workflowId: '202606170000000009_graph_ai_failure',

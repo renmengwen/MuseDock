@@ -25,6 +25,7 @@ const htmlVideoEditModeService = require('./creative-video/html-video/htmlVideoE
 const htmlVideoProjectOrchestrator = require('./creative-video/html-video/projectOrchestrator');
 const htmlVideoWorkflow = require('./creative-video/html-video/htmlVideoWorkflow');
 const { CreativeWorkflowStageError } = require('./creative-video/errors');
+const { AGENTS, STAGES } = require('./creative-video/agentStages');
 const { createDiagnostic, normalizeDiagnostics } = require('./creative-video/html-video/diagnostics');
 const { syncRawHtmlFrameTextPatch } = require('./creative-video/html-video/rawHtmlTextPatch');
 const { findFrameByAnyId } = require('./creative-video/html-video/frameIdentity');
@@ -532,8 +533,8 @@ async function runResearchProvider({
       temperature: 0.3,
       stream: false,
       audit: {
-        agent: 'ResearchAgent',
-        stage: 'research',
+        agent: AGENTS.research,
+        stage: STAGES.research,
         sub_stage: 'web_search_request',
         attempt: 1,
       },
@@ -583,8 +584,8 @@ async function runResearchProvider({
         temperature: 0.3,
         stream: false,
         audit: {
-          agent: 'ResearchAgent',
-          stage: 'research',
+          agent: AGENTS.research,
+          stage: STAGES.research,
           sub_stage: 'web_search_summary',
           attempt: 1,
         },

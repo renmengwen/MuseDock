@@ -29,6 +29,7 @@ const { computeSceneSpecSpeechHash, audioMatchesSceneSpec } = require('../sceneS
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
 const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('./sceneSpecMapper');
 const { resolveNodeSceneId, validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
+const { AGENTS, STAGES } = require('../agentStages');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -467,8 +468,8 @@ async function retryContentGraphAfterMismatch({
   return ensureGraphAiHasText(await callTextModel(model, retryPrompt, {
     stream: false,
     audit: {
-      agent: 'ContentGraphAgent',
-      stage: 'content_graph',
+      agent: AGENTS.contentGraph,
+      stage: STAGES.contentGraph,
       sub_stage: 'content_graph',
       attempt: 2,
     },
@@ -483,8 +484,8 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
   });
   let graphAi = ensureGraphAiHasText(await callTextModel(model, originalPrompt, {
     audit: {
-      agent: 'ContentGraphAgent',
-      stage: 'content_graph',
+      agent: AGENTS.contentGraph,
+      stage: STAGES.contentGraph,
       sub_stage: 'content_graph',
       attempt: 1,
     },
@@ -505,8 +506,8 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
     graphAi = ensureGraphAiHasText(await callTextModel(model, retryPrompt, {
       stream: false,
       audit: {
-        agent: 'ContentGraphAgent',
-        stage: 'content_graph',
+        agent: AGENTS.contentGraph,
+        stage: STAGES.contentGraph,
         sub_stage: 'content_graph',
         attempt: 2,
       },
@@ -683,8 +684,8 @@ async function requestTemplateSelection({
   });
   const ai = await callTextModel(model, prompt, {
     audit: {
-      agent: 'TemplateSelectorAgent',
-      stage: 'template_selection',
+      agent: AGENTS.templateSelector,
+      stage: STAGES.templateSelection,
       sub_stage: 'template_select',
       attempt: 1,
     },
@@ -704,8 +705,8 @@ async function requestTemplateInputs({ model, template, creativeContext, sceneSp
   });
   const ai = await callTextModel(model, prompt, {
     audit: {
-      agent: 'TemplateInputAgent',
-      stage: 'template_inputs',
+      agent: AGENTS.templateInput,
+      stage: STAGES.templateInputs,
       sub_stage: 'template_inputs',
       attempt: 1,
     },
@@ -1362,8 +1363,8 @@ async function generateHtmlVideo(options = {}) {
         modelOptions: {
           ...FRAME_HTML_MODEL_OPTIONS,
           audit: {
-            agent: 'FrameHtmlAgent',
-            stage: 'frame_html',
+            agent: AGENTS.frameHtml,
+            stage: STAGES.frameHtml,
             sub_stage: 'frame_html',
             frame_id: node.id || sceneId,
             node_id: node.id || '',
@@ -1390,8 +1391,8 @@ async function generateHtmlVideo(options = {}) {
             ...FRAME_HTML_MODEL_OPTIONS,
             stream: false,
             audit: {
-              agent: 'FrameHtmlAgent',
-              stage: 'frame_html',
+              agent: AGENTS.frameHtml,
+              stage: STAGES.frameHtml,
               sub_stage: 'frame_html',
               frame_id: node.id || sceneId,
               node_id: node.id || '',
@@ -1562,6 +1563,12 @@ async function generateHtmlVideo(options = {}) {
         template,
         mediaOptions,
       });
+      project.generation_checkpoint = objectOrEmpty(project.generation_checkpoint);
+      project.generation_checkpoint.agent_pipeline = [
+        { agent: AGENTS.contentGraph, stage: STAGES.contentGraph, artifact: 'content-graph.json' },
+        { agent: AGENTS.frameHtml, stage: STAGES.frameHtml, artifact: 'frames' },
+      ];
+      project = await projectStore.saveProject(projectDir, project);
     } catch (error) {
       const frameId = rawHtmlBuildFrameIdFromError(error);
       const message = error?.message || 'raw HTML 工程构建失败。';

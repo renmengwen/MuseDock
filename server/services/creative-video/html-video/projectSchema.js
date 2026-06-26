@@ -94,6 +94,7 @@ function defaultGenerationCheckpoint(project = {}) {
       visual_inspect: { status: 'pending', report_path: null },
     },
     model_calls: [],
+    agent_pipeline: [],
     updated_at: '',
   };
 }
@@ -346,6 +347,15 @@ function normalizeModelCall(value, index = 0) {
   };
 }
 
+function normalizeAgentPipelineItem(value) {
+  const input = objectOrEmpty(value);
+  return {
+    agent: stringField(input.agent),
+    stage: stringField(input.stage),
+    artifact: stringField(input.artifact),
+  };
+}
+
 function normalizeGenerationCheckpoint(input = {}, project = {}) {
   const source = objectOrEmpty(input);
   const defaults = defaultGenerationCheckpoint(project);
@@ -361,6 +371,7 @@ function normalizeGenerationCheckpoint(input = {}, project = {}) {
       aspect_ratio: stringField(target.aspect_ratio),
     },
     model_calls: arrayOrEmpty(source.model_calls).map(normalizeModelCall).slice(-500),
+    agent_pipeline: arrayOrEmpty(source.agent_pipeline).map(normalizeAgentPipelineItem),
     stages: {
       validate_project: {
         status: stringField(objectOrEmpty(stages.validate_project).status || 'pending'),
