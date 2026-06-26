@@ -980,6 +980,8 @@ async function generateHtmlVideo(options = {}) {
     generateAudio: mediaOptionEnabled('generateAudio', target, projectOptions),
     generateCaptions: mediaOptionEnabled('generateCaptions', target, projectOptions),
   };
+  const reuseContentGraphRequested = options.reuseContentGraph === true || projectOptions?.reuseContentGraph === true;
+  const regenerateFrameHtmlRequested = options.regenerateFrameHtml === true || projectOptions?.regenerateFrameHtml === true;
   const registry = resolveRegistry(templateRegistry);
   const diagnostics = [];
   let model = getModel(services);
@@ -1165,9 +1167,31 @@ async function generateHtmlVideo(options = {}) {
         current.template_id = template.id || current.template_id;
         current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
         current.content_graph = contentGraph;
+        markCheckpointStage(current, 'content_graph', {
+          status: 'done',
+          reused: true,
+          diagnostic_code: '',
+        });
         return current;
       });
     } else {
+      if (reuseContentGraphRequested) {
+        const message = '未找到可复用的内容图，请先完整生成一次视频。';
+        return failure(message, [
+          createDiagnostic({
+            code: 'content_graph_reuse_missing',
+            stage: 'project',
+            sub_stage: 'content_graph',
+            user_message: message,
+            retryable: false,
+            fallback_allowed: false,
+          }),
+        ], {
+          html_video_project_path: projectDir,
+          project_dir: projectDir,
+          project,
+        });
+      }
       await report(onProgress, {
         type: 'html_video_graph_started',
         stage: 'project',
@@ -1264,6 +1288,7 @@ async function generateHtmlVideo(options = {}) {
           input_hash: graphResult.inputHash || '',
           output_hash: sha256(JSON.stringify(contentGraph)),
           diagnostic_code: '',
+          reused: false,
         });
         return current;
       });
@@ -1283,7 +1308,7 @@ async function generateHtmlVideo(options = {}) {
         scene,
         node,
         target: templateRenderTarget,
-        resumeAllowed,
+        resumeAllowed: resumeAllowed && !regenerateFrameHtmlRequested,
       });
       if (reuse.reuse) {
         const durationSec = trustedSceneDuration(scene || {}, node);

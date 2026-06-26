@@ -372,6 +372,7 @@ function normalizeGenerationCheckpoint(input = {}, project = {}) {
         input_hash: stringField(objectOrEmpty(stages.content_graph).input_hash),
         output_hash: stringField(objectOrEmpty(stages.content_graph).output_hash),
         diagnostic_code: stringField(objectOrEmpty(stages.content_graph).diagnostic_code),
+        reused: objectOrEmpty(stages.content_graph).reused === true,
       },
       frame_html: {
         status: stringField(objectOrEmpty(stages.frame_html).status || 'pending'),

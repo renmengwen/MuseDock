@@ -993,6 +993,139 @@ async function readProjectJson(projectDir) {
   assert.ok(progressEvents.some(event => event.type === 'html_video_frame_render_progress'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_export_ready' && event.sub_stage === 'compose'));
 
+  const reuseSceneSpec = {
+    title: '内容图复用测试',
+    aspect_ratio: '16:9',
+    scenes: [{ id: 'scene_01', duration: 2, kind: 'text', narration_text: '复用旁白', captions: fullSceneCaption('scene_01', '复用旁白', 2), visual_text: { headline: '复用标题' } }],
+  };
+  const renderServices = {
+    frameRenderer: {
+      renderFrame: async (frame, options) => ({
+        success: true,
+        frame_id: frame.id,
+        output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+        diagnostics: [],
+      }),
+    },
+    ffmpegComposer: {
+      concatFramesWithFfmpeg: async (frames, outputPath) => {
+        await writeFile(outputPath, 'mp4');
+        return { success: true, output_path: outputPath };
+      },
+      muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+    },
+    visualQaService: { inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }) },
+  };
+  let secondRunContentGraphCalls = 0;
+  const firstReuseResult = await workflow.generateHtmlVideo({
+    workflowId: 'wf-content-graph-reuse',
+    runId: 'run-content-graph-reuse',
+    rootDir,
+    sceneSpec: reuseSceneSpec,
+    creativeContext: { input: { raw_text: '内容图复用测试' } },
+    target: { preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
+    templateRegistry,
+    skipValidation: true,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.startsWith('你是 html-video 的 content graph')) {
+            return { success: true, text: JSON.stringify({ synopsis: '复用测试', nodes: [{ id: 'scene_01', kind: 'text', label: '复用标题', durationSec: 2, text: '复用正文' }], edges: [] }) };
+          }
+          return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">复用标题</h1><p data-text-key="subtitle">复用旁白</p><section data-text-key="body">复用正文</section></main></body></html>' };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ...renderServices,
+    },
+  });
+  assert.equal(firstReuseResult.success, true);
+  const secondReuseResult = await workflow.generateHtmlVideo({
+    workflowId: 'wf-content-graph-reuse',
+    runId: 'run-content-graph-reuse',
+    rootDir,
+    sceneSpec: reuseSceneSpec,
+    creativeContext: { input: { raw_text: '内容图复用测试' } },
+    target: { preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
+    templateRegistry,
+    skipValidation: true,
+    services: {
+      aiTextModel: {
+        callTextModel: async request => {
+          if (request.audit?.stage === 'content_graph') {
+            secondRunContentGraphCalls += 1;
+            throw new Error('不应重新生成 content graph');
+          }
+          return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">复用标题</h1><p data-text-key="subtitle">复用旁白</p><section data-text-key="body">复用正文</section></main></body></html>' };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ...renderServices,
+    },
+  });
+  assert.equal(secondReuseResult.success, true);
+  assert.equal(secondRunContentGraphCalls, 0);
+  assert.equal(secondReuseResult.project.generation_checkpoint.stages.content_graph.reused, true);
+
+  let regenerateContentGraphCalls = 0;
+  let regenerateFrameHtmlCalls = 0;
+  const regenerateFrameResult = await workflow.generateHtmlVideo({
+    workflowId: 'wf-content-graph-reuse',
+    runId: 'run-content-graph-reuse',
+    rootDir,
+    sceneSpec: reuseSceneSpec,
+    creativeContext: { input: { raw_text: '内容图复用测试' } },
+    projectOptions: { reuseContentGraph: true, regenerateFrameHtml: true },
+    target: { preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
+    templateRegistry,
+    skipValidation: true,
+    services: {
+      aiTextModel: {
+        callTextModel: async request => {
+          if (request.audit?.stage === 'content_graph') {
+            regenerateContentGraphCalls += 1;
+            throw new Error('不应重新生成 content graph');
+          }
+          regenerateFrameHtmlCalls += 1;
+          return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">复用标题</h1><p data-text-key="subtitle">复用旁白</p><section data-text-key="body">重绘正文</section></main></body></html>' };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ...renderServices,
+    },
+  });
+  assert.equal(regenerateFrameResult.success, true);
+  assert.equal(regenerateContentGraphCalls, 0);
+  assert.equal(regenerateFrameHtmlCalls, 1);
+  assert.equal(regenerateFrameResult.project.generation_checkpoint.stages.content_graph.reused, true);
+  assert.equal(regenerateFrameResult.project.generation_checkpoint.stages.frame_html.frames.scene_01.status, 'done');
+
+  const missingReuseResult = await workflow.generateHtmlVideo({
+    workflowId: 'wf-content-graph-reuse-missing',
+    runId: 'run-content-graph-reuse-missing',
+    rootDir,
+    sceneSpec: reuseSceneSpec,
+    creativeContext: { input: { raw_text: '内容图复用测试' } },
+    projectOptions: { reuseContentGraph: true },
+    target: { preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
+    templateRegistry,
+    skipValidation: true,
+    services: {
+      aiTextModel: {
+        callTextModel: async request => {
+          if (request.audit?.stage === 'content_graph') throw new Error('缺失复用内容图时不应生成 content graph');
+          return { success: true, text: '' };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ...renderServices,
+    },
+  });
+  assert.equal(missingReuseResult.success, false);
+  assert.equal(missingReuseResult.html_video_diagnostics[0].code, 'content_graph_reuse_missing');
+  assert.equal(missingReuseResult.message, '未找到可复用的内容图，请先完整生成一次视频。');
+
   const originalRenderForNoCaptions = projectOrchestrator.renderHtmlVideoProject;
   projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
     success: true,
