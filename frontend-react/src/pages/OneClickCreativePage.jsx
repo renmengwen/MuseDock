@@ -4,6 +4,11 @@ import { api } from '../api/client.js';
 import { CreativeComposer } from '../components/creative/CreativeComposer.jsx';
 import { CreativeSidebar } from '../components/creative/CreativeSidebar.jsx';
 import { CreativeTaskDetail } from '../components/creative/CreativeTaskDetail.jsx';
+import {
+  appendWorkflowProgressEvent,
+  getSidebarTaskTimeSource,
+  removeWorkflowProgressEvents,
+} from '../components/creative/creativeProgress.js';
 
 const CREATIVE_TASKS_STORAGE_KEY = 'musedock.creative.tasks.v1';
 const ACTIVE_CREATIVE_TASK_STORAGE_KEY = 'musedock.creative.activeTask.v1';
@@ -163,6 +168,7 @@ export function OneClickCreativePage() {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [tasks, setTasks] = useState(() => loadStoredTasks());
+  const [progressEventsByWorkflow, setProgressEventsByWorkflow] = useState({});
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
   const [deletingWorkflowId, setDeletingWorkflowId] = useState('');
@@ -176,7 +182,7 @@ export function OneClickCreativePage() {
   const submitDisabled = isBusy || mode === 'expert' || !input.trim();
   const sidebarTasks = useMemo(() => tasks.map(task => ({
     ...task,
-    timeLabel: getTaskTimeLabel(task.updated_at || task.created_at),
+    timeLabel: getTaskTimeLabel(getSidebarTaskTimeSource(task)),
   })), [tasks]);
 
   useEffect(() => {
@@ -228,6 +234,10 @@ export function OneClickCreativePage() {
     setRetryPlanStatus('idle');
     setRetryPlanMessage('');
     setRetrying(false);
+  }, []);
+
+  const appendProgressEvent = useCallback((event) => {
+    setProgressEventsByWorkflow(prev => appendWorkflowProgressEvent(prev, event));
   }, []);
 
   const loadRetryPlan = useCallback(async (targetWorkflowId, { force = false, message: nextMessage = '', cacheKey = '' } = {}) => {
@@ -425,6 +435,7 @@ export function OneClickCreativePage() {
     if (event.task_id && expectedTaskId && event.task_id !== expectedTaskId) return;
     if (currentWorkflowId && event.workflow_id !== currentWorkflowId) return;
     if (!currentWorkflowId && activeTaskRef.current?.workflow_id !== event.workflow_id) return;
+    appendProgressEvent(event);
     if (Number(event.seq) > 0) {
       lastSeqRef.current = Number(event.seq);
       saveActiveCreativeTask({ workflow_id: event.workflow_id, task_id: event.task_id, last_seq: lastSeqRef.current });
@@ -491,6 +502,7 @@ export function OneClickCreativePage() {
       if (event.status === 'deleted') {
         setRetrying(false);
         finalWorkflowRefreshRef.current = null;
+        setProgressEventsByWorkflow(prev => removeWorkflowProgressEvents(prev, event.workflow_id));
         persistTasks(prev => prev.filter(item => item.workflow_id !== event.workflow_id));
         setWorkflow(null);
         setWorkflowId('');
@@ -500,7 +512,7 @@ export function OneClickCreativePage() {
         navigate('/creative');
       }
     }
-  }, [fetchFinalWorkflow, navigate, persistTasks, stopTaskStream]);
+  }, [fetchFinalWorkflow, appendProgressEvent, navigate, persistTasks, stopTaskStream]);
 
   useEffect(() => {
     currentWorkflowRef.current = { routeWorkflowId, workflowId, selectedWorkflowId };
@@ -567,6 +579,7 @@ export function OneClickCreativePage() {
     setWorkflow(null);
     setWorkflowId('');
     setSelectedWorkflowId('');
+    setProgressEventsByWorkflow({});
     setStatus('idle');
     setMessage('');
   }
@@ -606,6 +619,7 @@ export function OneClickCreativePage() {
     }
 
     persistTasks(prev => prev.filter(item => item.workflow_id !== task.workflow_id));
+    setProgressEventsByWorkflow(prev => removeWorkflowProgressEvents(prev, task.workflow_id));
 
     if (selectedWorkflowId === task.workflow_id) {
       startNewTask();
@@ -631,6 +645,7 @@ export function OneClickCreativePage() {
     }
 
     persistTasks(prev => prev.filter(item => item.workflow_id !== id));
+    setProgressEventsByWorkflow(prev => removeWorkflowProgressEvents(prev, id));
     if (selectedWorkflowId === id || workflowId === id) {
       startNewTask();
     }
@@ -982,6 +997,7 @@ export function OneClickCreativePage() {
             retryPlanStatus={retryPlanStatus}
             retryPlanMessage={retryPlanMessage}
             retrying={retrying}
+            progressEvents={progressEventsByWorkflow[selectedWorkflowId] || []}
             onStopAndDelete={stopAndDeleteTask}
             onContinueEdit={continueEdit}
             onRetryWorkflow={handleRetryWorkflow}

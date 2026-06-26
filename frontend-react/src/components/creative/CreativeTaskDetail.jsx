@@ -10,6 +10,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog.jsx';
 import { getStatusClass, getWorkflowStatusText } from './creativeDisplay.js';
+import { CreativeProgressPanel } from './CreativeProgressPanel.jsx';
 import { CreativeStatusMessage } from './CreativeStatusMessage.jsx';
 import { CreativeVideoPreview } from './CreativeVideoPreview.jsx';
 import { CreativeWorkflowStepper } from './CreativeWorkflowStepper.jsx';
@@ -160,6 +161,7 @@ export function CreativeTaskDetail({
   retryPlanStatus = 'idle',
   retryPlanMessage = '',
   retrying = false,
+  progressEvents = [],
   onStopAndDelete,
   onContinueEdit,
   onRetryWorkflow,
@@ -230,6 +232,12 @@ export function CreativeTaskDetail({
         </div>
       </div>
       <CreativeWorkflowStepper workflow={workflow} />
+      <CreativeProgressPanel
+        workflow={workflow}
+        status={status}
+        message={message}
+        progressEvents={progressEvents}
+      />
       {workflow?.status === 'failed' ? (
         <CreativeRetryPlan
           retryPlan={retryPlan}
