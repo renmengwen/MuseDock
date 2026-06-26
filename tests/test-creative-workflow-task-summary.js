@@ -51,6 +51,17 @@ function readJson(filePath) {
   assert.equal(persisted.current_progress, 55);
   assert.equal(persisted.last_event_seq, 7);
 
+  const retrySummary = await workflows.patchCreativeWorkflowTaskSummary(WORKFLOW_ID, {
+    operation: 'retry',
+    retry_attempt_id: 'retry_attempt_summary',
+  }, { rootDir });
+  assert.equal(retrySummary.success, true);
+  assert.equal(retrySummary.data.operation, 'retry');
+  assert.equal(retrySummary.data.retry_attempt_id, 'retry_attempt_summary');
+  const retryPersisted = readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));
+  assert.equal(retryPersisted.operation, 'retry');
+  assert.equal(retryPersisted.retry_attempt_id, 'retry_attempt_summary');
+
   await workflows.patchCreativeWorkflowTaskSummary(WORKFLOW_ID, {
     status: 'running',
     message: '正在处理后台任务。',

@@ -81,6 +81,24 @@ async function waitFor(assertion, timeoutMs = 1000) {
         defaultRegistry.markDeleted(leakedTask.task_id, '测试清理默认注册表任务。');
       }
     }
+
+    const retryWithoutRegistry = await workflowTasks.startCreativeWorkflowRetryTask(WORKFLOW_ID, {
+      rootDir: nullRegistryRootDir,
+      registry: null,
+      services: {
+        creativeWorkflows: {
+          patchCreativeWorkflowTaskSummary: async () => {
+            throw new Error('显式空注册表不应写入 retry summary');
+          },
+          retryCreativeWorkflow: async () => {
+            throw new Error('显式空注册表不应启动 retry');
+          },
+        },
+      },
+    });
+    assert.equal(retryWithoutRegistry.success, false);
+    assert.equal(retryWithoutRegistry.workflow_id, WORKFLOW_ID);
+    assert.match(retryWithoutRegistry.message, /后台创作任务注册表未配置/);
   }
 
   {

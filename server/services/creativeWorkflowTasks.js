@@ -404,6 +404,180 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
   };
 }
 
+async function startCreativeWorkflowRetryTask(workflowId, options = {}) {
+  const rootDir = options.rootDir;
+  const registry = options.registry === null ? null : (options.registry || defaultRegistry);
+  if (registry === null) {
+    return {
+      success: false,
+      workflow_id: String(workflowId),
+      message: '后台创作任务注册表未配置，无法启动创作任务。',
+    };
+  }
+
+  const activeTask = registry.activeTaskForWorkflow(workflowId);
+  if (activeTask && activeTask.status === 'running') {
+    return {
+      success: false,
+      workflow_id: String(workflowId),
+      message: '当前创作任务仍在运行，请等待结束后再重试。',
+      active_task: activeTask,
+    };
+  }
+
+  const creativeWorkflows = {
+    ...defaultCreativeWorkflows,
+    ...(options.services?.creativeWorkflows || {}),
+  };
+  const operationId = options.operationId || createOperationId(workflowId);
+  const retryAttemptId = options.retryAttemptId || `retry_${operationId.replace(/[^0-9A-Za-z]/g, '')}`;
+  const taskId = registry.createDetachedTask({
+    workflowId,
+    operationId,
+    kind: 'creative_workflow',
+  });
+
+  await creativeWorkflows.patchCreativeWorkflowTaskSummary(workflowId, {
+    operation: 'retry',
+    retry_attempt_id: retryAttemptId,
+    active_task_id: taskId,
+    active_operation_id: operationId,
+    task_status: 'running',
+    current_stage: 'project',
+    current_stage_message: '后台重试任务已启动。',
+    current_progress: 0,
+    last_event_seq: 0,
+  }, { rootDir });
+
+  registry.emit(taskId, {
+    type: 'task_started',
+    progress: 0,
+    message: '后台重试任务已启动。',
+  });
+
+  async function runBackgroundTask() {
+    const pendingEventWrites = new Set();
+    function trackEventWrite(promise) {
+      const tracked = Promise.resolve(promise).catch(() => null);
+      pendingEventWrites.add(tracked);
+      tracked.finally(() => {
+        pendingEventWrites.delete(tracked);
+      });
+      return promise;
+    }
+
+    const taskContext = {
+      taskId,
+      operationId,
+      emit: event => trackEventWrite(emitAndPersistTaskEvent({
+        registry,
+        taskId,
+        workflowId,
+        operationId,
+        event,
+        rootDir,
+        creativeWorkflows,
+      })),
+    };
+
+    try {
+      const workflowOptions = {
+        ...(options.workflowOptions || {}),
+        rootDir: options.workflowOptions?.rootDir || rootDir,
+        mediaRoot: options.workflowOptions?.mediaRoot || options.mediaRoot,
+        retryAttemptId,
+        taskContext,
+      };
+      const payload = options.payload || {
+        mode: 'repair_and_resume',
+        confirm_plan_code: options.confirm_plan_code || options.confirmPlanCode || options.plan_code,
+      };
+      const result = await creativeWorkflows.retryCreativeWorkflow(workflowId, payload, workflowOptions);
+      if (result && result.success === false) {
+        const error = new Error(result.message || '创作任务重试失败。');
+        error.business_failure = true;
+        throw error;
+      }
+
+      await Promise.allSettled([...pendingEventWrites]);
+      await registry.markDoneAfter(taskId, '创作任务重试已完成。', terminalEvent => patchTerminalTaskSummaryOrThrow({
+        registry,
+        taskId,
+        workflowId,
+        operationId,
+        creativeWorkflows,
+        rootDir,
+        patch: {
+          operation: 'retry',
+          retry_attempt_id: retryAttemptId,
+          active_task_id: '',
+          active_operation_id: '',
+          task_status: 'done',
+          current_stage: '',
+          current_stage_message: '创作任务重试已完成。',
+          current_progress: 100,
+          status: 'done',
+          message: '创作任务重试已完成。',
+          error: null,
+          last_event_seq: terminalEvent.seq,
+        },
+        failedEventSeq: terminalEvent.seq,
+      }));
+    } catch (error) {
+      const message = error.message || '创作任务重试失败。';
+      await Promise.allSettled([...pendingEventWrites]);
+      try {
+        const patch = {
+          operation: 'retry',
+          retry_attempt_id: retryAttemptId,
+          active_task_id: '',
+          active_operation_id: '',
+          task_status: 'failed',
+          current_stage: '',
+          current_stage_message: message,
+          status: 'failed',
+          message,
+          last_event_seq: 0,
+        };
+        if (!error.business_failure) {
+          patch.error = { message };
+        }
+        await registry.markFailedAfter(taskId, error, terminalEvent => patchTerminalTaskSummaryOrThrow({
+          registry,
+          taskId,
+          workflowId,
+          operationId,
+          creativeWorkflows,
+          rootDir,
+          patch: {
+            ...patch,
+            last_event_seq: terminalEvent.seq,
+          },
+          failedEventSeq: terminalEvent.seq,
+        }));
+      } catch (persistError) {
+        throw createTerminalPersistenceFailureError(persistError, error);
+      }
+    }
+  }
+
+  setImmediate(() => {
+    runBackgroundTask().catch(error => {
+      const message = `创作任务终态写入失败：${error.message || '后台创作任务执行异常。'}`;
+      emitWorkflowPersistFailed(registry, taskId, operationId, message, 0);
+      markTaskFailedAfterTerminalPersistenceFailure(registry, taskId, error);
+    });
+  });
+
+  return {
+    success: true,
+    workflow_id: workflowId,
+    task_id: taskId,
+    retry_attempt_id: retryAttemptId,
+    active_task: registry.activeTaskForWorkflow(workflowId),
+  };
+}
+
 async function subscribeCreativeWorkflowEvents({
   workflowId,
   taskId,
@@ -561,6 +735,7 @@ async function recoverOrphanedWorkflows(options = {}) {
 
 module.exports = {
   startCreativeWorkflowTask,
+  startCreativeWorkflowRetryTask,
   emitAndPersistTaskEvent,
   subscribeCreativeWorkflowEvents,
   getActiveCreativeWorkflowTask,

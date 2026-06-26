@@ -122,6 +122,10 @@ function classifyCreativeWorkflowFailure(input = {}) {
   const project = objectOrEmpty(input.project);
   const lastFailure = objectOrEmpty(input.last_failure || workflow.last_failure);
   const diagnostics = collectDiagnostics(input);
+  const checkpoint = classifyFromCheckpoint(project);
+  if (checkpoint?.sub_stage === 'validate_project' && checkpoint.code === 'project_read_failed') {
+    return { ...checkpoint, diagnostics };
+  }
   const diagnostic = chooseDiagnostic(diagnostics);
 
   if (diagnostic && safeString(diagnostic.code)) {
@@ -176,7 +180,6 @@ function classifyCreativeWorkflowFailure(input = {}) {
     };
   }
 
-  const checkpoint = classifyFromCheckpoint(project);
   if (checkpoint) {
     return { ...checkpoint, diagnostics };
   }
@@ -360,7 +363,7 @@ function createCreativeWorkflowRetryPlan(input = {}) {
     });
   }
 
-  if (subStage === 'validate_project' && classification.source === 'checkpoint') {
+  if (subStage === 'validate_project' && (classification.source === 'checkpoint' || code === 'project_read_failed')) {
     return retryPlan(classification, 'restart_project', 'validate_project', {
       reuse: ['source', 'research', 'brief', 'audio'],
       discard: ['project'],

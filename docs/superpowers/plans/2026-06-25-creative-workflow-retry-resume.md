@@ -722,33 +722,33 @@ node tests/test-creative-workflow-retry-planner.js
 
 **具体实现步骤:**
 
-- [ ] 写 `tests/test-creative-workflow-retry-task.js`：已有 active running task 时 `startCreativeWorkflowRetryTask()` 返回失败，不创建新 task。
-- [ ] 写同一测试：retry task summary 包含 `operation:'retry'` 和 `retry_attempt_id`。
-- [ ] 写同一测试：`retry_frame_html` 成功后 workflow `status === 'done'`，project/check/render/inspect 符合 html-video lite 语义：project done、check skipped、render done、inspect done。
-- [ ] 写同一测试：retry 失败时 `retry.attempts[last].status === 'failed'`，`previous_failure` 保留执行前的 `last_failure`，新的 `last_failure` 写最新 diagnostics。
-- [ ] 运行 `node tests/test-creative-workflow-retry-task.js`，预期失败为 retry task API 不存在。
-- [ ] 新增 `resumeExecutor.js`，导出 `executeCreativeWorkflowRetryPlan(options)`，只接受 planner schema，不自行创建 mode。
-- [ ] 实现 action：`retry_content_graph`、`fallback_scene_spec_graph`、`retry_frame_html`、`repair_timeline`、`repair_script_and_timeline`、`rerender_frames`、`recompose`、`rerun_visual_inspect`、`restart_project`。
-- [ ] `rerender_frames` 固定调用 Task 5 新增的 `projectOrchestrator.renderHtmlVideoFrames({ frameIds, materialize:false })` 后再调用 `composeHtmlVideoProject()` 和 visual inspect；不得调用完整 `renderHtmlVideoProject()` 导致全部帧重渲染。
-- [ ] `retry_frame_html`、`repair_timeline`、`repair_script_and_timeline` 在修改 HTML 或 duration 后调用 `renderHtmlVideoFrames({ frameIds, materialize:true })`，再 compose/inspect。
-- [ ] `recompose` 固定调用 Task 5 新增的 `projectOrchestrator.composeHtmlVideoProject()` 和 visual inspect；不得调用 AI、frame HTML 或 frame render。
-- [ ] executor 执行 visual inspect 时直接调用 `services.visualQaService.inspectRenderedVideo({ projectDir, outputPath, expectedAspectRatio })`；`outputPath` 来自 `composeHtmlVideoProject()` 返回的 `output_path`，`expectedAspectRatio` 优先使用 `project.target?.aspect_ratio || project.output?.aspect_ratio`，返回值作为 `visualInspectResult` 传给 `buildHtmlVideoLiteProjectStageResult()`。
-- [ ] `rerun_visual_inspect` 不调用 render/compose，只从 `project.exports` 或 checkpoint `compose.output_audio_path || compose.output_path` 找到现有输出文件，然后调用 `services.visualQaService.inspectRenderedVideo()` 并更新 `generation_checkpoint.stages.visual_inspect`。
-- [ ] `restart_project` V1 仅用于 `generation_checkpoint` 缺失、`validate_project` failed 且无法局部定位、或 project artifacts 不可读的失败：复用 source/research/assets/agent_run/brief/audio（仅当 audio `scene_spec_hash` 与当前 scene_spec hash 一致），丢弃旧 project artifacts，从 scene_spec/template/content_graph 重新开始 project 阶段。
-- [ ] `repair_timeline` 内部禁止调用 AI 和 TTS；`repair_script_and_timeline` 才允许压缩旁白或重新生成 brief -> TTS -> timeline repair。
-- [ ] `repair_script_and_timeline` V1 使用确定性压缩，不复用 `runCreativeWorkflow()` 里的 brief stage handler：scene_spec 来源优先级为 `project.scene_spec` / project metadata -> `workflow.result.hyperframes_freeform.scene_spec` -> run artifacts 中的 scene spec；读取后调用 `timelineRepair.compressNarrationForTarget(sceneSpec, targetDurationSec)` 按目标时长比例压缩 `narration_text` 与 `captions`，保留 scene id、order、主题结构和 visual metadata。
-- [ ] 压缩后重新计算 `scene_spec_hash`，更新 project 内 scene_spec/audio 相关字段，丢弃旧 `brief`、`audio`、`render_outputs`、`exports` 和依赖旧旁白时长的 duration 分配。
-- [ ] 重新 TTS 固定调用 `services.ttsService.synthesizeSceneNarration({ projectDir, sceneSpec })`；不要调用 `agentRuns.synthesizeDouyinRunHyperframesFreeformAudio()`，避免回到外层 workflow audio stage。
-- [ ] TTS 成功后更新 `project.audio.scene_spec_hash`、`project.audio.scene_count`、`project.audio.scene_ids`、`project.audio.status`、`project.audio.narration_path`、`project.audio.tts_manifest_path`，再调用 `timelineRepair.repairProjectTimeline()`，最后从 materialize -> render -> compose -> inspect 继续。
-- [ ] `rerun_visual_inspect` 复用所有 AI 产物、project.json、frame mp4、exports/output.mp4 或 output-audio.mp4；只清理旧 `visual_inspect` checkpoint 状态，历史报告保留在 revisions 或 reports 数组。
-- [ ] 在 `creativeWorkflows.js` 新增 `retryCreativeWorkflow(workflowId, payload, options)`，执行前重新生成 plan，校验 `payload.mode === 'repair_and_resume'` 和 `confirm_plan_code`。
-- [ ] 在 `creativeWorkflowTasks.js` 新增 `startCreativeWorkflowRetryTask(workflowId, options)`，复用 `startCreativeWorkflowTask()` 的 registry、SSE、terminal patch 写法，但 active task guard 是 retry 新增行为，不是 registry 或原启动函数已有能力；task kind 仍使用现有 registry 支持的 workflow task，summary 增加 retry 字段。
-- [ ] `startCreativeWorkflowRetryTask()` 创建 task 前必须先调用 `registry.activeTaskForWorkflow(workflowId)`；如果存在 `status === 'running'` 的 active task，直接返回 `{ success:false, workflow_id, message:'当前创作任务仍在运行，请等待结束后再重试。', active_task }`，不得调用 `registry.createDetachedTask()`。
-- [ ] 新增 `buildHtmlVideoLiteProjectStageResult({ project, projectDir, renderResult, visualInspectResult })`，构造 `markHtmlVideoLiteFinalStages()` 需要的最小结构：`{ hyperframes_freeform:{ project:{ render_mode:'html-video', html_video_project_path: projectDir, project_dir: projectDir }, render:{ status:'rendered', message:'html-video production 成片已导出。', output_path }, visual_inspect:{ status:'done', message:'html-video production 视觉质检通过。', report_path } } }`。
-- [ ] retry 成功时在 `creativeWorkflows.js` 同模块内调用现有 `markHtmlVideoLiteFinalStages(record, now, buildHtmlVideoLiteProjectStageResult(...))`；如果 `resumeExecutor.js` 必须跨模块调用，则从 `creativeWorkflows.js` 显式导出该 helper。禁止重新手写三段 check/render/inspect 标记逻辑。
-- [ ] retry 成功时调用 `syncProjectStageSummariesFromCheckpoint(record, project.generation_checkpoint)` 更新 `record.project_substages`，清空 `workflow.last_failure`，把执行前 failure 写入 attempt 的 `previous_failure`，更新 `workflow.status = 'done'`。
-- [ ] retry 失败时同样调用 `syncProjectStageSummariesFromCheckpoint()`，保留最新 failed project stage summary，写入新的 `workflow.last_failure`。
-- [ ] 运行本 Task 验收命令。
+- [x] 写 `tests/test-creative-workflow-retry-task.js`：已有 active running task 时 `startCreativeWorkflowRetryTask()` 返回失败，不创建新 task。
+- [x] 写同一测试：retry task summary 包含 `operation:'retry'` 和 `retry_attempt_id`。
+- [x] 写同一测试：`retry_frame_html` 成功后 workflow `status === 'done'`，project/check/render/inspect 符合 html-video lite 语义：project done、check skipped、render done、inspect done。
+- [x] 写同一测试：retry 失败时 `retry.attempts[last].status === 'failed'`，`previous_failure` 保留执行前的 `last_failure`，新的 `last_failure` 写最新 diagnostics。
+- [x] 运行 `node tests/test-creative-workflow-retry-task.js`，预期失败为 retry task API 不存在。
+- [x] 新增 `resumeExecutor.js`，导出 `executeCreativeWorkflowRetryPlan(options)`，只接受 planner schema，不自行创建 mode。
+- [x] 实现 action：`retry_content_graph`、`fallback_scene_spec_graph`、`retry_frame_html`、`repair_timeline`、`repair_script_and_timeline`、`rerender_frames`、`recompose`、`rerun_visual_inspect`、`restart_project`。
+- [x] `rerender_frames` 固定调用 Task 5 新增的 `projectOrchestrator.renderHtmlVideoFrames({ frameIds, materialize:false })` 后再调用 `composeHtmlVideoProject()` 和 visual inspect；不得调用完整 `renderHtmlVideoProject()` 导致全部帧重渲染。
+- [x] `retry_frame_html`、`repair_timeline`、`repair_script_and_timeline` 在修改 HTML 或 duration 后调用 `renderHtmlVideoFrames({ frameIds, materialize:true })`，再 compose/inspect。
+- [x] `recompose` 固定调用 Task 5 新增的 `projectOrchestrator.composeHtmlVideoProject()` 和 visual inspect；不得调用 AI、frame HTML 或 frame render。
+- [x] executor 执行 visual inspect 时直接调用 `services.visualQaService.inspectRenderedVideo({ projectDir, outputPath, expectedAspectRatio })`；`outputPath` 来自 `composeHtmlVideoProject()` 返回的 `output_path`，`expectedAspectRatio` 优先使用 `project.target?.aspect_ratio || project.output?.aspect_ratio`，返回值作为 `visualInspectResult` 传给 `buildHtmlVideoLiteProjectStageResult()`。
+- [x] `rerun_visual_inspect` 不调用 render/compose，只从 `project.exports` 或 checkpoint `compose.output_path` 找到现有视频输出文件，然后调用 `services.visualQaService.inspectRenderedVideo()` 并更新 `generation_checkpoint.stages.visual_inspect`。
+- [x] `restart_project` V1 仅用于 `generation_checkpoint` 缺失、`validate_project` failed 且无法局部定位、或 project artifacts 不可读的失败：复用 source/research/assets/agent_run/brief/audio（仅当 audio `scene_spec_hash` 与当前 scene_spec hash 一致），丢弃旧 project artifacts，从 scene_spec/template/content_graph 重新开始 project 阶段。
+- [x] `repair_timeline` 内部禁止调用 AI 和 TTS；`repair_script_and_timeline` 才允许压缩旁白或重新生成 brief -> TTS -> timeline repair。
+- [x] `repair_script_and_timeline` V1 使用确定性压缩，不复用 `runCreativeWorkflow()` 里的 brief stage handler：scene_spec 来源优先级为 `project.scene_spec` / project metadata -> `workflow.result.hyperframes_freeform.scene_spec` -> run artifacts 中的 scene spec；读取后调用 `timelineRepair.compressNarrationForTarget(sceneSpec, targetDurationSec)` 按目标时长比例压缩 `narration_text` 与 `captions`，保留 scene id、order、主题结构和 visual metadata。
+- [x] 压缩后重新计算 `scene_spec_hash`，更新 project 内 scene_spec/audio 相关字段，丢弃旧 `brief`、`audio`、`render_outputs`、`exports` 和依赖旧旁白时长的 duration 分配。
+- [x] 重新 TTS 固定调用 `services.ttsService.synthesizeSceneNarration({ projectDir, sceneSpec })`；不要调用 `agentRuns.synthesizeDouyinRunHyperframesFreeformAudio()`，避免回到外层 workflow audio stage。
+- [x] TTS 成功后更新 `project.audio.scene_spec_hash`、`project.audio.scene_count`、`project.audio.scene_ids`、`project.audio.status`、`project.audio.narration_path`、`project.audio.tts_manifest_path`，再调用 `timelineRepair.repairProjectTimeline()`，最后从 materialize -> render -> compose -> inspect 继续。
+- [x] `rerun_visual_inspect` 复用所有 AI 产物、project.json、frame mp4、exports/output.mp4；只清理旧 `visual_inspect` checkpoint 状态，历史报告保留在 revisions 或 reports 数组。
+- [x] 在 `creativeWorkflows.js` 新增 `retryCreativeWorkflow(workflowId, payload, options)`，执行前重新生成 plan，校验 `payload.mode === 'repair_and_resume'` 和 `confirm_plan_code`。
+- [x] 在 `creativeWorkflowTasks.js` 新增 `startCreativeWorkflowRetryTask(workflowId, options)`，复用 `startCreativeWorkflowTask()` 的 registry、SSE、terminal patch 写法，但 active task guard 是 retry 新增行为，不是 registry 或原启动函数已有能力；task kind 仍使用现有 registry 支持的 workflow task，summary 增加 retry 字段。
+- [x] `startCreativeWorkflowRetryTask()` 创建 task 前必须先调用 `registry.activeTaskForWorkflow(workflowId)`；如果存在 `status === 'running'` 的 active task，直接返回 `{ success:false, workflow_id, message:'当前创作任务仍在运行，请等待结束后再重试。', active_task }`，不得调用 `registry.createDetachedTask()`。
+- [x] 新增 `buildHtmlVideoLiteProjectStageResult({ project, projectDir, renderResult, visualInspectResult })`，构造 `markHtmlVideoLiteFinalStages()` 需要的最小结构：`{ hyperframes_freeform:{ project:{ render_mode:'html-video', html_video_project_path: projectDir, project_dir: projectDir }, render:{ status:'rendered', message:'html-video production 成片已导出。', output_path }, visual_inspect:{ status:'done', message:'html-video production 视觉质检通过。', report_path } } }`。
+- [x] retry 成功时在 `creativeWorkflows.js` 同模块内调用现有 `markHtmlVideoLiteFinalStages(record, now, buildHtmlVideoLiteProjectStageResult(...))`；如果 `resumeExecutor.js` 必须跨模块调用，则从 `creativeWorkflows.js` 显式导出该 helper。禁止重新手写三段 check/render/inspect 标记逻辑。
+- [x] retry 成功时调用 `syncProjectStageSummariesFromCheckpoint(record, project.generation_checkpoint)` 更新 `record.project_substages`，清空 `workflow.last_failure`，把执行前 failure 写入 attempt 的 `previous_failure`，更新 `workflow.status = 'done'`。
+- [x] retry 失败时同样调用 `syncProjectStageSummariesFromCheckpoint()`，保留最新 failed project stage summary，写入新的 `workflow.last_failure`。
+- [x] 运行本 Task 验收命令。
 
 **需要新增/修改的函数签名:**
 

@@ -15,6 +15,7 @@ const aiTextModel = require('./aiTextModel');
 const defaultSourceFetch = require('./sourceFetch');
 const htmlVideoProjectStore = require('./creative-video/html-video/projectStore');
 const retryPlanner = require('./creative-video/retryPlanner');
+const resumeExecutor = require('./creative-video/resumeExecutor');
 const htmlVideoEditPatchService = require('./creative-video/html-video/editPatchService');
 const frameHtmlEditService = require('./creative-video/html-video/frameHtmlEditService');
 const htmlVideoIterateService = require('./creative-video/html-video/htmlVideoIterateService');
@@ -2038,6 +2039,8 @@ async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options 
     }
     record.active_task_id = safeString(patch.active_task_id ?? record.active_task_id);
     record.active_operation_id = safeString(patch.active_operation_id ?? record.active_operation_id);
+    if (Object.prototype.hasOwnProperty.call(patch, 'operation')) record.operation = safeString(patch.operation);
+    if (Object.prototype.hasOwnProperty.call(patch, 'retry_attempt_id')) record.retry_attempt_id = safeString(patch.retry_attempt_id);
     record.task_status = safeString(patch.task_status ?? record.task_status);
     record.current_stage = safeString(patch.current_stage ?? record.current_stage);
     record.current_stage_message = safeString(patch.current_stage_message ?? record.current_stage_message);
@@ -2273,6 +2276,30 @@ async function readWorkflowAndHtmlVideoProject(workflowId, rootDir) {
     const project = await htmlVideoProjectStore.loadProject(projectDir);
     return { record, project, projectDir, error: null };
   } catch (error) {
+    try {
+      const stat = await fsp.stat(projectDir);
+      if (stat.isDirectory()) {
+        return {
+          record,
+          project: {
+            workflow_id: safeString(workflowId),
+            generation_checkpoint: {
+              stages: {
+                validate_project: {
+                  status: 'failed',
+                  diagnostic_code: 'project_read_failed',
+                },
+              },
+            },
+          },
+          projectDir,
+          projectLoadError: error,
+          error: null,
+        };
+      }
+    } catch {
+      // fall through to the existing hard failure when the project directory itself is gone
+    }
     return {
       record,
       project: null,
@@ -2326,6 +2353,219 @@ async function refreshCreativeWorkflowRetryPlan(workflowId, options = {}) {
     workflow_id: safeString(workflowId),
     project_dir: projectDir,
     plan,
+  };
+}
+
+function makeRetryAttemptId(now) {
+  const stamp = safeString(now).replace(/\D/g, '').slice(0, 14)
+    || new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+  return `retry_${stamp}`;
+}
+
+function buildHtmlVideoLiteProjectStageResult({ project, projectDir, renderResult, visualInspectResult } = {}) {
+  const outputPath = safeString(renderResult?.output_path || renderResult?.outputPath);
+  return {
+    hyperframes_freeform: {
+      project: {
+        render_mode: 'html-video',
+        html_video_project_path: projectDir,
+        project_dir: projectDir,
+      },
+      render: {
+        status: 'rendered',
+        message: 'html-video production 成片已导出。',
+        output_path: outputPath,
+        project_status: project?.status || '',
+      },
+      visual_inspect: {
+        status: 'done',
+        message: 'html-video production 视觉质检通过。',
+        report_path: visualInspectResult?.report_path || visualInspectResult?.reportPath || null,
+      },
+    },
+  };
+}
+
+function createLastFailureFromRetryResult(result = {}, projectDir = '', updatedAt = '') {
+  const diagnostics = normalizeDiagnostics(result.diagnostics || result.html_video_diagnostics || []);
+  const failureDiagnostic = selectFailureDiagnostic(diagnostics);
+  return {
+    stage: 'project',
+    sub_stage: safeString(failureDiagnostic.sub_stage || result.sub_stage),
+    code: safeString(failureDiagnostic.code || result.code || 'retry_failed'),
+    frame_id: safeString(failureDiagnostic.frame_id || result.frame_id),
+    project_dir: safeString(result.project_dir || result.html_video_project_path || projectDir),
+    message: safeString(result.message) || safeString(failureDiagnostic.user_message) || '恢复重试失败。',
+    diagnostics,
+    updated_at: updatedAt,
+  };
+}
+
+async function retryCreativeWorkflow(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
+  const services = resolveServices(options);
+  const mode = safeString(payload.mode);
+  if (mode !== 'repair_and_resume') {
+    return {
+      success: false,
+      workflow_id: safeString(workflowId),
+      code: 'RETRY_MODE_UNSUPPORTED',
+      message: 'V1 仅支持 repair_and_resume 恢复模式。',
+    };
+  }
+
+  const refreshed = await refreshCreativeWorkflowRetryPlan(workflowId, { rootDir, services });
+  if (!refreshed.success) return refreshed;
+  const plan = refreshed.plan;
+  if (safeString(payload.confirm_plan_code) !== safeString(plan.code)) {
+    return {
+      success: false,
+      workflow_id: safeString(workflowId),
+      code: 'RETRY_PLAN_CODE_CHANGED',
+      plan,
+      message: '恢复计划已变化，请确认最新建议后再重试。',
+    };
+  }
+  if (plan.can_retry !== true) {
+    return {
+      success: false,
+      workflow_id: safeString(workflowId),
+      code: plan.code || 'RETRY_NOT_ALLOWED',
+      plan,
+      message: plan.user_message || '当前任务无法自动重试。',
+    };
+  }
+
+  const loaded = await readWorkflowAndHtmlVideoProject(workflowId, rootDir);
+  if (loaded.error) return loaded.error;
+  const record = loaded.record;
+  const projectDir = loaded.projectDir || refreshed.project_dir;
+  const now = getNow(services);
+  const attempt = {
+    id: safeString(options.retryAttemptId) || makeRetryAttemptId(now),
+    created_at: now,
+    mode,
+    reason_code: plan.code,
+    retry_from: plan.retry_from,
+    repair_action: plan.repair_action,
+    reuse: Array.isArray(plan.reuse) ? plan.reuse : [],
+    discard: Array.isArray(plan.discard) ? plan.discard : [],
+    status: 'running',
+    message: plan.user_message || '正在修复并重试。',
+    previous_failure: record.last_failure || null,
+  };
+  record.retry = {
+    ...(record.retry || {}),
+    version: 1,
+    attempts: [...(Array.isArray(record.retry?.attempts) ? record.retry.attempts : []), attempt],
+    latest_plan: plan,
+  };
+  record.status = 'running';
+  record.success = false;
+  record.message = '正在修复并重试。';
+  record.updated_at = now;
+  await persistWorkflow(record, rootDir);
+
+  let execution;
+  try {
+    execution = await resumeExecutor.executeCreativeWorkflowRetryPlan({
+      workflowId: safeString(workflowId),
+      workflow: record,
+      projectDir,
+      plan,
+      rootDir,
+      mediaRoot,
+      services,
+      taskContext: options.taskContext,
+    });
+  } catch (error) {
+    execution = {
+      success: false,
+      message: error.message || '恢复重试失败。',
+      project_dir: projectDir,
+      diagnostics: [createDiagnostic({
+        code: 'retry_executor_failed',
+        sub_stage: plan.retry_from || plan.repair_action,
+        user_message: error.message || '恢复重试失败。',
+        retryable: true,
+        repair_action: plan.repair_action,
+      })],
+    };
+  }
+
+  const finishedAt = getNow(services);
+  const latestProject = execution.project || await htmlVideoProjectStore.loadProject(projectDir).catch(() => null);
+  if (latestProject?.generation_checkpoint) {
+    syncProjectStageSummariesFromCheckpoint(record, latestProject.generation_checkpoint);
+  }
+
+  if (execution.success) {
+    attempt.status = 'done';
+    attempt.message = execution.message || '恢复重试已完成。';
+    attempt.completed_at = finishedAt;
+    const projectStageResult = buildHtmlVideoLiteProjectStageResult({
+      project: latestProject,
+      projectDir,
+      renderResult: execution.renderResult || execution,
+      visualInspectResult: execution.visualInspectResult,
+    });
+    record.result = record.result || {};
+    const existingHyperframes = record.result.hyperframes_freeform || {};
+    const nextHyperframes = projectStageResult.hyperframes_freeform || {};
+    record.result.hyperframes_freeform = {
+      ...existingHyperframes,
+      ...nextHyperframes,
+      project: {
+        ...(existingHyperframes.project || {}),
+        ...(nextHyperframes.project || {}),
+      },
+    };
+    await markStage(record, 'project', 'done', 'html-video 工程已恢复。', finishedAt, {
+      completed_at: finishedAt,
+      result: { success: true, project: projectStageResult.hyperframes_freeform.project },
+    });
+    await markHtmlVideoLiteFinalStages(record, finishedAt, projectStageResult);
+    record.success = true;
+    record.status = 'done';
+    record.message = '创作任务已修复并完成。';
+    record.error = null;
+    record.last_failure = null;
+    record.current_progress = 100;
+    record.updated_at = finishedAt;
+    const persisted = await persistWorkflow(record, rootDir);
+    return {
+      success: true,
+      workflow_id: safeString(workflowId),
+      retry_attempt_id: attempt.id,
+      data: persisted,
+      message: record.message,
+    };
+  }
+
+  attempt.status = 'failed';
+  attempt.message = execution.message || '恢复重试失败。';
+  attempt.failed_at = finishedAt;
+  record.last_failure = createLastFailureFromRetryResult(execution, projectDir, finishedAt);
+  record.success = false;
+  record.status = 'failed';
+  record.message = record.last_failure.message;
+  record.error = {
+    stage: 'project',
+    sub_stage: record.last_failure.sub_stage,
+    code: record.last_failure.code,
+    message: record.last_failure.message,
+    updated_at: finishedAt,
+  };
+  record.updated_at = finishedAt;
+  const persisted = await persistWorkflow(record, rootDir);
+  return {
+    success: false,
+    workflow_id: safeString(workflowId),
+    retry_attempt_id: attempt.id,
+    data: persisted,
+    message: record.message,
+    diagnostics: record.last_failure.diagnostics,
   };
 }
 
@@ -3160,6 +3400,8 @@ module.exports = {
   getCreativeWorkflow,
   getCreativeWorkflowRetryPlan,
   refreshCreativeWorkflowRetryPlan,
+  retryCreativeWorkflow,
+  buildHtmlVideoLiteProjectStageResult,
   patchCreativeWorkflowTaskSummary,
   clearCreativeWorkflowTaskSummary,
   listCreativeWorkflowRecords,
