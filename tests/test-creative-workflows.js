@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const mediaPipeline = require('../server/services/mediaPipeline');
+const researchService = require('../server/services/researchService');
 const { defaultRegistry } = require('../server/services/creativeTaskRegistry');
 const {
   STAGE_IDS,
@@ -291,6 +292,50 @@ async function testRunResearchProviderAddsAuditMetadata() {
     sub_stage: 'web_search_request',
     attempt: 1,
   }]);
+}
+
+async function testRunWorkflowPersistsResearchModelCalls() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const modelRequests = [];
+  const { services } = createFakeServices({
+    services: {
+      researchService,
+      aiModelConfig: { getRuntimeConfig: async () => ({ modelId: 'gpt-test' }) },
+      aiTextModel: {
+        callTextModel: async request => {
+          modelRequests.push(request);
+          return {
+            success: true,
+            text: '研究摘要 https://example.com/report',
+            raw_response: {},
+            model: { provider: 'OpenAI', model_id: 'gpt-test' },
+            usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, cached_tokens: 0 },
+          };
+        },
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: '做一期关于 AI 视频生产的知识科普',
+    useResearch: true,
+    assetIds: [],
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+  assert.equal(run.success, true);
+
+  const saved = readJson(getWorkflowPath(WORKFLOW_ID, rootDir));
+  assert.equal(modelRequests.length, 1);
+  assert.equal(Object.prototype.hasOwnProperty.call(modelRequests[0], 'audit'), false);
+  assert.ok(saved.model_calls.some(call => (
+    call.agent === 'ResearchAgent'
+    && call.stage === 'research'
+    && call.sub_stage === 'web_search_request'
+    && call.model.model_id === 'gpt-test'
+    && call.usage.cached_tokens === 0
+  )));
 }
 
 async function testAppendWorkflowModelCall() {
@@ -1903,6 +1948,7 @@ async function testSceneSpecOperations() {
 async function run() {
   await testAppendWorkflowModelCall();
   await testRunResearchProviderAddsAuditMetadata();
+  await testRunWorkflowPersistsResearchModelCalls();
   await testCreatesAndRunsTextWorkflow();
   await testCreatesAndRunsSourceUrlWorkflow();
   await testSourceUrlStageEmitsSpecificProgressMessages();

@@ -128,6 +128,49 @@ function appendWorkflowModelCall(record, modelCall = {}) {
   return record;
 }
 
+function createAuditedWorkflowTextModel(record, textModel) {
+  if (!textModel || typeof textModel.callTextModel !== 'function') return textModel;
+  return {
+    ...textModel,
+    callTextModel: async request => {
+      const input = request && typeof request === 'object' && !Array.isArray(request) ? request : {};
+      const audit = input.audit && typeof input.audit === 'object' && !Array.isArray(input.audit) ? input.audit : {};
+      const { audit: _audit, ...forwardRequest } = input;
+      const startedAt = Date.now();
+      let response;
+      let thrownError = null;
+      try {
+        response = await textModel.callTextModel(forwardRequest);
+        return response;
+      } catch (error) {
+        thrownError = error;
+        throw error;
+      } finally {
+        if (audit.agent && audit.stage) {
+          appendWorkflowModelCall(record, {
+            ...audit,
+            model: response?.model || {},
+            usage: response?.usage || {},
+            duration_ms: Date.now() - startedAt,
+            success: !thrownError && response?.success !== false,
+            error: thrownError ? safeString(thrownError.message) : (response?.success === false ? safeString(response?.message || response?.error) : ''),
+          });
+        }
+      }
+    },
+  };
+}
+
+function createAuditedResearchProvider(record, provider, services = {}) {
+  if (typeof provider !== 'function') return provider;
+  return request => provider({
+    ...request,
+    aiModelConfig: services.aiModelConfig || aiModelConfig,
+    aiTextModel: createAuditedWorkflowTextModel(record, services.aiTextModel || aiTextModel),
+    webSearchProvider: services.webSearchProvider,
+  });
+}
+
 function makeLocalCreativeAwemeId(seed) {
   const numeric = safeString(seed).replace(/\D/g, '');
   if (WORKFLOW_ID_PATTERN.test(numeric)) {
@@ -1941,7 +1984,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
       enabled: useResearch,
       query,
       now: getNow(services),
-      provider: services.researchProvider,
+      provider: createAuditedResearchProvider(record, services.researchProvider, services),
     });
     record.research_context = nextResearchContext;
     record.creative_context = {
