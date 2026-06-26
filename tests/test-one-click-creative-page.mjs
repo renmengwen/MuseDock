@@ -282,9 +282,11 @@ assert.match(onCloseBlock, /reconnectTimerRef\.current = window\.setTimeout\(\(\
 assert.match(page, /const\s+stopTaskStream\s*=\s*useCallback\(\(\{ clearStorage = false \} = \{\}\) => \{/, 'OneClickCreativePage should centralize task stream cleanup in a stable callback');
 assert.match(page, /const\s+applyTaskEvent\s*=\s*useCallback\(\(event\) => \{/, 'OneClickCreativePage should apply task events through a stable callback');
 const applyTaskEventStartIndex = page.indexOf('const applyTaskEvent = useCallback((event) => {');
-const applyTaskEventEndIndex = page.indexOf('useEffect(() => {\n    currentWorkflowRef.current', applyTaskEventStartIndex);
-assert.ok(applyTaskEventStartIndex > 0 && applyTaskEventEndIndex > applyTaskEventStartIndex, 'OneClickCreativePage should define applyTaskEvent before currentWorkflowRef sync effect');
-const applyTaskEventBlock = page.slice(applyTaskEventStartIndex, applyTaskEventEndIndex);
+const normalizedPage = page.replace(/\r\n/g, '\n');
+const normalizedApplyTaskEventStartIndex = normalizedPage.indexOf('const applyTaskEvent = useCallback((event) => {');
+const applyTaskEventEndIndex = normalizedPage.indexOf('useEffect(() => {\n    currentWorkflowRef.current', normalizedApplyTaskEventStartIndex);
+assert.ok(normalizedApplyTaskEventStartIndex > 0 && applyTaskEventEndIndex > normalizedApplyTaskEventStartIndex, 'OneClickCreativePage should define applyTaskEvent before currentWorkflowRef sync effect');
+const applyTaskEventBlock = normalizedPage.slice(normalizedApplyTaskEventStartIndex, applyTaskEventEndIndex);
 assert.match(applyTaskEventBlock, /currentWorkflowRef\.current/, 'applyTaskEvent should read the latest workflow context from currentWorkflowRef before writing UI state');
 assert.doesNotMatch(applyTaskEventBlock, /const\s+currentWorkflowId\s*=\s*routeWorkflowId\s*\|\|\s*workflowId\s*\|\|\s*selectedWorkflowId/, 'applyTaskEvent should not compute currentWorkflowId from stale route/workflow closure state');
 const applyTaskEventDependencyMatch = applyTaskEventBlock.match(/\},\s*\[([^\]]*)\]\);/);

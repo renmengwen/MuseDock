@@ -1053,19 +1053,19 @@ npm run build:frontend
 
 **具体实现步骤:**
 
-- [ ] 新增 `tests/test-creative-workflow-retry-e2e.js`，使用 fake services 构造 workflow failed -> retry plan -> retry task -> done 的完整流程。
-- [ ] 覆盖 provider missing text at frame_html：只重试失败帧，不调用 source/research/brief/audio fake service。
-- [ ] 覆盖 content graph 空文本：先 retry，仍失败后 `fallback_scene_spec_graph`。
-- [ ] 覆盖 content graph JSON 尾逗号：tolerant parse 成功，无需 retry。
-- [ ] 覆盖 target 60 秒、frames 总和 132 秒：planner 输出 `repair_timeline`。
-- [ ] 覆盖 audio duration 超目标：planner 输出 `repair_script_and_timeline`。
-- [ ] 覆盖单帧 render timeout：只重渲染该帧。
-- [ ] 覆盖 compose duration mismatch：只 recompose，不调用 AI。
-- [ ] 覆盖 environment missing ffmpeg/playwright：`can_retry === false`。
-- [ ] 覆盖 active task guard：已有 task running 时 retry API 不启动新 task。
-- [ ] 覆盖 retry 成功后 workflow `status === 'done'`，project/check/render/inspect stage 状态符合 html-video lite 语义。
-- [ ] 确认所有新增测试文件名以 `test-` 开头；`tests/run-all.js` 会自动发现并按字母序运行，无需手动注册或改成手动排序。
-- [ ] 运行本 Task 验收命令。
+- [x] 新增 `tests/test-creative-workflow-retry-e2e.js`，使用 fake services 构造 workflow failed -> retry plan -> retry task -> done 的完整流程。
+- [x] 覆盖 provider missing text at frame_html：只重试失败帧，不调用 source/research/brief/audio fake service。
+- [x] 覆盖 content graph 空文本：先 retry，仍失败后 `fallback_scene_spec_graph`。
+- [x] 覆盖 content graph JSON 尾逗号：tolerant parse 成功，无需 retry。
+- [x] 覆盖 target 60 秒、frames 总和 132 秒：planner 输出 `repair_timeline`。
+- [x] 覆盖 audio duration 超目标：planner 输出 `repair_script_and_timeline`。
+- [x] 覆盖单帧 render timeout：只重渲染该帧。
+- [x] 覆盖 compose duration mismatch：只 recompose，不调用 AI。
+- [x] 覆盖 environment missing ffmpeg/playwright：`can_retry === false`。
+- [x] 覆盖 active task guard：已有 task running 时 retry API 不启动新 task。
+- [x] 覆盖 retry 成功后 workflow `status === 'done'`，project/check/render/inspect stage 状态符合 html-video lite 语义。
+- [x] 确认所有新增测试文件名以 `test-` 开头；`tests/run-all.js` 会自动发现并按字母序运行，无需手动注册或改成手动排序。
+- [x] 运行本 Task 验收命令。
 
 **需要新增/修改的函数签名:**
 
@@ -1133,13 +1133,13 @@ npm run build:frontend
 
 ## 自检清单
 
-- [ ] 全文统一使用 `sub_stage` 字段名。
-- [ ] 全文只使用 `fallback_allowed`，没有驼峰字段。
-- [ ] diagnostics 扩展字段只有 `sub_stage`、`frame_id`、`retryable`、`repair_action`。
-- [ ] 没有设计独立 `checkpoint.json`。
-- [ ] `retry` API V1 只有 `mode: "repair_and_resume"`。
-- [ ] executor 复用 `creativeWorkflowTasks.js`、active task guard、SSE、`patchCreativeWorkflowTaskSummary()`。
-- [ ] `repair_timeline` 不调用 AI、不重新 TTS。
-- [ ] `repair_script_and_timeline` 明确丢弃 brief/audio/render_outputs/exports 并重新 TTS。
-- [ ] `rerun_visual_inspect` 复用所有 AI 产物、project.json、frame mp4 和 exports。
-- [ ] 每个 Task 的修改文件不与并行任务隐式冲突；有共同文件时按合并顺序处理。
+- [x] 全文统一使用 `sub_stage` 字段名。
+- [x] 全文只使用 `fallback_allowed`，没有驼峰字段。
+- [x] diagnostics 扩展字段只有 `sub_stage`、`frame_id`、`retryable`、`repair_action`。
+- [x] 没有设计独立 `checkpoint.json`。
+- [x] `retry` API V1 只有 `mode: "repair_and_resume"`。
+- [x] executor 复用 `creativeWorkflowTasks.js`、active task guard、SSE、`patchCreativeWorkflowTaskSummary()`。
+- [x] `repair_timeline` 不调用 AI、不重新 TTS。
+- [x] `repair_script_and_timeline` 明确丢弃 brief/audio/render_outputs/exports 并重新 TTS。
+- [x] `rerun_visual_inspect` 复用所有 AI 产物、project.json、frame mp4 和 exports。
+- [x] 每个 Task 的修改文件不与并行任务隐式冲突；有共同文件时按合并顺序处理。

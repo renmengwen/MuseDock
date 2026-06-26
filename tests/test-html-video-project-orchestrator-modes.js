@@ -191,8 +191,8 @@ async function writeFile(filePath, content) {
   });
   assert.equal(renderFailure.success, false);
   const renderFailureProjectJson = JSON.parse(await fs.readFile(path.join(renderFailureDir, 'project.json'), 'utf8'));
-  assert.equal(renderFailureProjectJson.generation_checkpoint.stages.render.frames.frame_failed.status, 'failed');
-  assert.equal(renderFailureProjectJson.generation_checkpoint.stages.render.frames.frame_failed.diagnostic_code, 'render_timeout');
+  assert.equal(renderFailureProjectJson.generation_checkpoint.stages.render.frames.scene_failed.status, 'failed');
+  assert.equal(renderFailureProjectJson.generation_checkpoint.stages.render.frames.scene_failed.diagnostic_code, 'render_timeout');
 
   const exported = await orchestrator.exportHtmlVideoProject({
     rootDir,
@@ -216,9 +216,9 @@ async function writeFile(filePath, content) {
   assert.ok(progressEvents.some(event => event.type === 'html_video_compose_started'));
   assert.ok(progressEvents.some(event => event.type === 'html_video_export_ready'));
   const exportedProjectJson = JSON.parse(await fs.readFile(path.join(exported.html_video_project_path, 'project.json'), 'utf8'));
-  assert.equal(exportedProjectJson.generation_checkpoint.stages.render.frames.frame_01.status, 'done');
-  assert.equal(exportedProjectJson.generation_checkpoint.stages.render.frames.frame_01.mp4_path, 'frames/frame_01.mp4');
-  assert.ok(exportedProjectJson.generation_checkpoint.stages.render.frames.frame_01.output_hash);
+  assert.equal(exportedProjectJson.generation_checkpoint.stages.render.frames.scene_01.status, 'done');
+  assert.equal(exportedProjectJson.generation_checkpoint.stages.render.frames.scene_01.mp4_path, 'frames/frame_01.mp4');
+  assert.ok(exportedProjectJson.generation_checkpoint.stages.render.frames.scene_01.output_hash);
   assert.equal(exportedProjectJson.generation_checkpoint.stages.compose.status, 'done');
   assert.equal(exportedProjectJson.generation_checkpoint.stages.compose.output_path, 'exports/output.mp4');
   assert.equal(exportedProjectJson.generation_checkpoint.stages.duration_verify.status, 'done');
