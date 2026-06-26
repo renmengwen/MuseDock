@@ -348,6 +348,22 @@ function providerMissingTextDiagnostic() {
   });
 }
 
+const CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE = '画面结构与旁白脚本不一致，已停止渲染。请重新生成画面结构后再导出。';
+
+function contentGraphSceneSpecMismatchDiagnostic(graphBinding = {}, options = {}) {
+  return createDiagnostic({
+    code: 'content_graph_scene_spec_mismatch',
+    stage: 'ai-content-graph',
+    sub_stage: 'content_graph',
+    user_message: options.user_message || CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
+    details: graphBinding,
+    fallback_allowed: false,
+    retryable: options.retryable !== false,
+    repair_action: 'retry_content_graph',
+    ...(options.severity ? { severity: options.severity } : {}),
+  });
+}
+
 function graphAiFailureDiagnostic(graphAi) {
   if (isProviderMissingText(graphAi?.message)) {
     return providerMissingTextDiagnostic();
@@ -367,6 +383,31 @@ function ensureGraphAiHasText(graphAi) {
     return { success: false, message: '返回结果缺少文本内容。', text: '' };
   }
   return graphAi;
+}
+
+async function retryContentGraphAfterMismatch({
+  model,
+  sceneSpec,
+  creativeContext,
+  target,
+  originalPrompt,
+  diagnostics,
+  graphBinding,
+  onProgress,
+} = {}) {
+  diagnostics.push(contentGraphSceneSpecMismatchDiagnostic(graphBinding, {
+    severity: 'warning',
+    user_message: 'content graph 与字幕脚本不一致，已丢弃该结果并重试。',
+  }));
+  await report(onProgress, {
+    type: 'html_video_graph_scene_spec_mismatch',
+    stage: 'project',
+    sub_stage: 'content_graph',
+    message: 'content graph 与字幕脚本不一致，正在按脚本结构重试内容图生成...',
+    data: graphBinding,
+  });
+  const retryPrompt = contentGraphAgent.buildRetryPrompt(sceneSpec, creativeContext, target, originalPrompt, 1);
+  return ensureGraphAiHasText(await callTextModel(model, retryPrompt, { stream: false }));
 }
 
 async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext, target, onProgress, project, projectDir } = {}) {
@@ -417,7 +458,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
     };
   }
 
-  const graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec);
+  let graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec);
   if (!graphParsed.success) {
     if (retriedForProviderMissing && sceneSpec) {
       await report(onProgress, {
@@ -447,6 +488,60 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
       }),
       inputHash: sha256(originalPrompt),
     };
+  }
+  if (sceneSpec) {
+    const graphBinding = validateGraphMatchesSceneSpec(graphParsed.graph, sceneSpec);
+    if (!graphBinding.ok) {
+      graphAi = await retryContentGraphAfterMismatch({
+        model,
+        sceneSpec,
+        creativeContext,
+        target,
+        originalPrompt,
+        diagnostics,
+        graphBinding,
+        onProgress,
+      });
+      if (!graphAi.success) {
+        return {
+          success: false,
+          message: graphAi.message || CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
+          diagnostics: [
+            ...diagnostics,
+            contentGraphSceneSpecMismatchDiagnostic(graphBinding),
+          ],
+          inputHash: sha256(originalPrompt),
+        };
+      }
+      graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec);
+      if (!graphParsed.success) {
+        return {
+          ...graphParsed,
+          diagnostics: normalizeDiagnostics(graphParsed.diagnostics, {
+            code: 'content_graph_invalid',
+            stage: 'ai-content-graph',
+            sub_stage: 'content_graph',
+            user_message: graphParsed.message || 'content graph 重试解析失败。',
+            details: { errors: graphParsed.errors || [] },
+            retryable: true,
+            repair_action: 'retry_content_graph',
+          }),
+          inputHash: sha256(originalPrompt),
+        };
+      }
+      const retryBinding = validateGraphMatchesSceneSpec(graphParsed.graph, sceneSpec);
+      if (!retryBinding.ok) {
+        return {
+          success: false,
+          message: CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
+          diagnostics: [
+            ...diagnostics,
+            contentGraphSceneSpecMismatchDiagnostic(retryBinding),
+          ],
+          inputHash: sha256(originalPrompt),
+        };
+      }
+    }
   }
   return {
     success: true,
@@ -974,24 +1069,30 @@ async function generateHtmlVideo(options = {}) {
       if (sceneSpec) {
         const graphBinding = validateGraphMatchesSceneSpec(contentGraph, sceneSpec);
         if (!graphBinding.ok) {
-          const message = '画面帧与字幕脚本不一致，已回退为字幕脚本生成画面结构。';
-          diagnostics.push(createDiagnostic({
-            code: 'content_graph_scene_spec_mismatch',
-            stage: 'ai-content-graph',
-            sub_stage: 'content_graph',
-            user_message: message,
-            details: graphBinding,
-            severity: 'warning',
-            fallback_allowed: true,
-          }));
+          const graphDiagnostics = [
+            ...diagnostics,
+            contentGraphSceneSpecMismatchDiagnostic(graphBinding),
+          ];
           await report(onProgress, {
             type: 'html_video_graph_scene_spec_mismatch',
             stage: 'project',
             sub_stage: 'content_graph',
-            message,
+            message: CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
             data: graphBinding,
           });
-          contentGraph = mapSceneSpecToContentGraph(sceneSpec);
+          project = await projectStore.writeProjectJson(projectDir, current => {
+            markCheckpointStage(current, 'content_graph', {
+              status: 'failed',
+              input_hash: graphResult.inputHash || '',
+              diagnostic_code: 'content_graph_scene_spec_mismatch',
+            });
+            return current;
+          });
+          return failure(CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE, graphDiagnostics, {
+            html_video_project_path: projectDir,
+            project_dir: projectDir,
+            project,
+          });
         }
       }
       await report(onProgress, {

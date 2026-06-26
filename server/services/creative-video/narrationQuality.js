@@ -16,10 +16,17 @@ function endsWithDanglingToken(text) {
 function isIncompleteNarration(text) {
   const value = compactText(text);
   if (!value) return false;
+  if (isConditionalFragment(value)) return true;
   if (hasTerminalPunctuation(value)) return false;
   if (endsWithDanglingToken(value)) return true;
   const hasLongClause = /[，,：:；;]/.test(value) && value.length >= 18;
   return hasLongClause;
+}
+
+function isConditionalFragment(text) {
+  const value = compactText(text);
+  return /^(如果|当|假如|若|要是).{2,18}[。！？!?]$/.test(value)
+    && !/(就|则|建议|推荐|优先|选择|可以|应该|最好|通常|直接|记住|关键|结论|够用)/.test(value);
 }
 
 function trimNarrationToCompleteBoundary(text, maxChars) {

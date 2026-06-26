@@ -47,8 +47,15 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
   return lines.join('\n');
 }
 
+function sceneIdsFromSpec(sceneSpec = {}) {
+  return (Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [])
+    .map(scene => String(scene?.id || '').trim())
+    .filter(Boolean);
+}
+
 function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target = {} } = {}) {
   const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
+  const expectedSceneIds = sceneIdsFromSpec(sceneSpec);
   const targetDuration = target.duration_sec || target.durationSec || target.duration || sceneSpec.target_duration_sec || '';
   const aspectRatio = target.aspect_ratio || target.aspectRatio || sceneSpec.aspect_ratio || sceneSpec.aspectRatio || '';
   const language = target.language || target.lang || 'zh-CN';
@@ -79,6 +86,9 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
     '输出要求：',
     '- 只输出一个 JSON 对象，必须包含 synopsis、nodes、edges。',
     '- 每个 intended frame 对应一个 node，nodes 必须按成片叙事顺序排列。',
+    `- nodes.length 必须严格等于 scene_spec.scenes.length：${scenes.length}。`,
+    `- nodes 的 id 必须逐一严格等于 scene_spec.scenes 的 id：${expectedSceneIds.join(' -> ') || '（无）'}。`,
+    '- 禁止新增、删除、合并、拆分或重排序 scene_spec.scenes。',
     '- 每个 node 必须包含 id、kind、label、durationSec，并且根据 kind 包含 text 或 data。',
     '- kind 只能是 text、data、entity；优先使用 text 和 data。',
     '- data node 的 data 必须形如 {"title":"string","unit":"optional shared unit","items":[{"label":"string","value":123}]}。',
@@ -166,15 +176,23 @@ function summarizeScenesForRetry(sceneSpec = {}) {
 
 function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, originalPrompt = '', attempt = 1) {
   const scenes = summarizeScenesForRetry(sceneSpec);
+  const expectedSceneIds = sceneIdsFromSpec(sceneSpec);
+  const contractLines = [
+    `scene ids: ${expectedSceneIds.join(', ') || 'none'}`,
+    `nodes.length must equal ${expectedSceneIds.length}`,
+    'nodes[i].id must equal scene ids in the same order; do not add, remove, merge, split, or reorder scenes.',
+  ];
   if (Number(attempt) >= 2) {
     return [
       '只输出严格 JSON，不要 Markdown。',
+      ...contractLines,
       'schema: {"nodes":[{"id":"string","kind":"text","label":"string","durationSec":2,"text":"string"}]}',
     ].join('\n');
   }
   return [
     '你是 html-video 的 content graph 规划器。上次返回为空，请重新输出严格 JSON。',
     '只输出一个 JSON 对象，必须包含 synopsis、nodes、edges。',
+    ...contractLines,
     `目标：aspect ratio=${target.aspect_ratio || target.aspectRatio || sceneSpec.aspect_ratio || ''}，duration=${target.duration_sec || target.durationSec || sceneSpec.target_duration_sec || ''}。`,
     '场景摘要：',
     JSON.stringify(scenes, null, 2),
@@ -306,6 +324,7 @@ function contentGraphFailure(message, details = {}) {
 module.exports = {
   buildContentGraphPrompt,
   buildRetryPrompt,
+  sceneIdsFromSpec,
   tolerantParseJson,
   parseContentGraphResponse,
   normalizeContentGraph,

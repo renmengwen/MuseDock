@@ -1190,7 +1190,11 @@ function replaceFreeformBriefScenes(brief = {}, scenes = [], narrationBudgetRepo
   const sceneByIndex = new Map(scenes.map((scene, index) => [Number(scene.index || index + 1), scene]));
   const applyScene = (scene, index) => {
     const replacement = sceneByIndex.get(Number(scene?.index || index + 1));
-    return replacement ? { ...scene, narration_text: replacement.narration_text } : scene;
+    if (!replacement) return scene;
+    const nextScene = { ...scene, narration_text: replacement.narration_text };
+    if (replacement.target_duration_sec != null) nextScene.target_duration_sec = replacement.target_duration_sec;
+    if (replacement.targetDurationSec != null) nextScene.targetDurationSec = replacement.targetDurationSec;
+    return nextScene;
   };
   const storyboard = brief?.storyboard;
   const nextBrief = { ...brief, narration_budget: narrationBudgetReport };
@@ -1212,6 +1216,34 @@ function fitFreeformNarrationToBudget(brief = {}, scenes = [], targetDurationSec
   if (budget.status !== 'too_long') {
     return { scenes, brief: replaceFreeformBriefScenes(brief, scenes, budget), budget, changed: false };
   }
+  const target = firstPositiveNumber(targetDurationSec, 60);
+  const maxChars = Math.floor(target * narrationBudget.DEFAULT_CHARS_PER_SECOND);
+  const totalChars = scenes.reduce((sum, scene) => (
+    sum + narrationBudget.countNarrationChars(scene?.narration_text || '')
+  ), 0);
+
+  if (totalChars <= maxChars) {
+    const retimedScenes = scenes.map(scene => {
+      const next = { ...scene };
+      delete next.target_duration_sec;
+      delete next.targetDurationSec;
+      return next;
+    });
+    const retimedPlan = freeformStoryboardPlanForBudget(brief, retimedScenes, target);
+    const nextScenes = scenes.map((scene, index) => ({
+      ...scene,
+      target_duration_sec: retimedPlan.scenes[index]?.target_duration_sec || scene.target_duration_sec,
+    }));
+    const nextPlan = freeformStoryboardPlanForBudget(brief, nextScenes, target);
+    const nextBudget = narrationBudget.buildNarrationBudget(nextPlan);
+    return {
+      scenes: nextScenes,
+      brief: replaceFreeformBriefScenes(brief, nextScenes, nextBudget),
+      budget: nextBudget,
+      changed: false,
+    };
+  }
+
   const budgetsByIndex = new Map((budget.scenes || []).map(item => [Number(item.index), item]));
   const nextScenes = scenes.map((scene, index) => {
     const sceneIndex = Number(scene.index || index + 1);

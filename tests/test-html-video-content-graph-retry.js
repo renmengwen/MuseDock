@@ -100,6 +100,47 @@ async function main() {
   assert.equal(retryInvalidCalls[1].stream, false);
   assert.deepEqual(retryInvalid.contentGraph.nodes.map(node => node.id), ['scene_01']);
 
+  const mismatchRetryCalls = [];
+  const mismatchRetry = await workflow.generateContentGraphWithRetry({
+    sceneSpec: sceneSpec(),
+    creativeContext: { input: { raw_text: '第一次多出节点，第二次按 scene_spec 修正' } },
+    target: { duration_sec: 2 },
+    model: {
+      async callTextModel(request) {
+        mismatchRetryCalls.push(request);
+        if (mismatchRetryCalls.length === 1) {
+          return {
+            success: true,
+            text: JSON.stringify({
+              synopsis: '多出节点',
+              nodes: [
+                { id: 'scene_01', kind: 'text', label: '第一幕', durationSec: 2, text: '第一幕' },
+                { id: 'scene_02', kind: 'text', label: '多余', durationSec: 2, text: '多余' },
+              ],
+              edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence' }],
+            }),
+          };
+        }
+        return {
+          success: true,
+          text: JSON.stringify({
+            synopsis: '已修正',
+            nodes: [
+              { id: 'scene_01', kind: 'text', label: '第一幕', durationSec: 2, text: '第一幕' },
+            ],
+            edges: [],
+          }),
+        };
+      },
+    },
+  });
+  assert.equal(mismatchRetry.success, true);
+  assert.equal(mismatchRetryCalls.length, 2);
+  assert.equal(mismatchRetryCalls[1].stream, false);
+  assert.match(mismatchRetryCalls[1].messages[0].content, /scene ids: scene_01/);
+  assert.deepEqual(mismatchRetry.contentGraph.nodes.map(node => node.id), ['scene_01']);
+  assert.ok(mismatchRetry.diagnostics.some(item => item.code === 'content_graph_scene_spec_mismatch'));
+
   const retrySetup = await createRegistry();
   const retryGraphCalls = [];
   const retryRender = projectOrchestrator.renderHtmlVideoProject;
@@ -153,14 +194,18 @@ async function main() {
 
   const mismatchSetup = await createRegistry();
   const mismatchRender = projectOrchestrator.renderHtmlVideoProject;
-  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
-    success: true,
-    project,
-    html_video_project_path: projectDir,
-    project_dir: projectDir,
-    output_path: path.join(projectDir, 'out.mp4'),
-    diagnostics: [],
-  });
+  let mismatchRenderCalls = 0;
+  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => {
+    mismatchRenderCalls += 1;
+    return {
+      success: true,
+      project,
+      html_video_project_path: projectDir,
+      project_dir: projectDir,
+      output_path: path.join(projectDir, 'out.mp4'),
+      diagnostics: [],
+    };
+  };
   try {
     const result = await workflow.generateHtmlVideo({
       workflowId: '202606260000000002_content_graph_mismatch',
@@ -197,11 +242,13 @@ async function main() {
         environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
       },
     });
-    assert.equal(result.success, true);
+    assert.equal(result.success, false);
+    assert.match(result.message, /画面结构与旁白脚本不一致/);
+    assert.equal(mismatchRenderCalls, 0);
     const mismatch = result.html_video_diagnostics.find(item => item.code === 'content_graph_scene_spec_mismatch');
     assert.ok(mismatch);
-    assert.equal(mismatch.severity, 'warning');
-    assert.equal(Object.hasOwn(mismatch, 'repair_action'), false);
+    assert.equal(mismatch.fallback_allowed, false);
+    assert.equal(mismatch.repair_action, 'retry_content_graph');
     assert.equal(result.html_video_diagnostics.some(item => item.repair_action === 'fallback_scene_spec_graph'), false);
   } finally {
     projectOrchestrator.renderHtmlVideoProject = mismatchRender;

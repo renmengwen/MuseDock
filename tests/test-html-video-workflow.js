@@ -440,15 +440,19 @@ async function readProjectJson(projectDir) {
 
   const originalRenderHtmlVideoProject = projectOrchestrator.renderHtmlVideoProject;
   const graphProgressEvents = [];
-  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
-    success: true,
-    message: 'mock render success',
-    project,
-    project_dir: projectDir,
-    html_video_project_path: projectDir,
-    output_path: path.join(projectDir, 'exports', 'output.mp4'),
-    diagnostics: [],
-  });
+  let graphMismatchRenderCalls = 0;
+  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => {
+    graphMismatchRenderCalls += 1;
+    return {
+      success: true,
+      message: 'mock render success',
+      project,
+      project_dir: projectDir,
+      html_video_project_path: projectDir,
+      output_path: path.join(projectDir, 'exports', 'output.mp4'),
+      diagnostics: [],
+    };
+  };
   try {
     const graphMismatchResult = await workflow.generateHtmlVideo({
       workflowId: '202606170000000004_graph_mismatch',
@@ -505,20 +509,16 @@ async function readProjectJson(projectDir) {
         environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
       },
     });
-    assert.equal(graphMismatchResult.success, true);
-    assert.equal(graphMismatchResult.project.frames.length, 2);
-    assert.deepEqual(graphMismatchResult.project.frames.map(frame => frame.scene_id), ['scene_01', 'scene_02']);
-    assert.equal(graphMismatchResult.project.frames.some(frame => frame.scene_id === 'scene_03'), false);
-    assert.deepEqual(graphMismatchResult.project.content_graph.nodes.map(node => node.id), ['scene_01', 'scene_02']);
-    assert.equal(graphMismatchResult.project.content_graph.nodes.some(node => node.id === 'scene_03'), false);
+    assert.equal(graphMismatchResult.success, false);
+    assert.match(graphMismatchResult.message, /画面结构与旁白脚本不一致/);
+    assert.equal(graphMismatchRenderCalls, 0);
     const mismatchDiagnostic = graphMismatchResult.html_video_diagnostics.find(item => item.code === 'content_graph_scene_spec_mismatch');
     assert.ok(mismatchDiagnostic);
     assert.equal(mismatchDiagnostic.stage, 'ai-content-graph');
-    assert.equal(mismatchDiagnostic.severity, 'warning');
-    assert.equal(mismatchDiagnostic.fallback_allowed, true);
+    assert.equal(mismatchDiagnostic.fallback_allowed, false);
     assert.equal(mismatchDiagnostic.sub_stage, 'content_graph');
     assert.equal(mismatchDiagnostic.details.reason, 'node_count_mismatch');
-    assert.ok(graphProgressEvents.some(event => event.sub_stage === 'content_graph' && String(event.message || '').includes('画面帧与字幕脚本不一致，已回退为字幕脚本生成画面结构。')));
+    assert.ok(graphProgressEvents.some(event => event.sub_stage === 'content_graph' && String(event.message || '').includes('content graph 与字幕脚本不一致')));
   } finally {
     projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
   }
@@ -626,21 +626,15 @@ async function readProjectJson(projectDir) {
         },
       },
     });
-    assert.equal(latestRootBugResult.success, true, JSON.stringify({
+    assert.equal(latestRootBugResult.success, false, JSON.stringify({
       message: latestRootBugResult.message,
       diagnostics: latestRootBugResult.html_video_diagnostics,
     }, null, 2));
-    assert.equal(latestRootBugResult.project.frames.length, 10);
-    assert.deepEqual(latestRootBugResult.project.frames.map(frame => frame.scene_id), tenSceneSpec.scenes.map(scene => scene.id));
-    assert.equal(latestRootBugTtsCalls, 1);
-    assert.equal(latestRootBugMuxedAudio, path.join(rootDir, 'tts-current-ten-scenes.wav'));
-    assert.equal(latestRootBugResult.project.audio.scene_count, 10);
-    assert.equal(latestRootBugResult.project.audio.scene_spec_hash, computeSceneSpecSpeechHash(tenSceneSpec));
-    assert.equal(latestRootBugResult.project.audio.status, 'ready');
+    assert.match(latestRootBugResult.message, /画面结构与旁白脚本不一致/);
+    assert.equal(latestRootBugTtsCalls, 0);
+    assert.equal(latestRootBugMuxedAudio, null);
     assert.ok(latestRootBugResult.html_video_diagnostics.some(item => item.code === 'content_graph_scene_spec_mismatch'));
     assert.equal(latestRootBugResult.html_video_diagnostics.some(item => item.code === 'audio_scene_spec_hash_mismatch'), false);
-    assert.deepEqual(latestRootBugResult.project.content_graph.nodes.map(node => node.id), tenSceneSpec.scenes.map(scene => scene.id));
-    assert.equal(latestRootBugResult.project.content_graph.nodes.some(node => node.id === 'scene_11'), false);
   } finally {
     projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
   }
