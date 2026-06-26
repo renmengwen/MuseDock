@@ -1,0 +1,382 @@
+const { parseContentGraphResponse } = require('./html-video/contentGraphAgent');
+const { analyzeTimelineMismatch } = require('./html-video/timelineRepair');
+
+const MODE = 'repair_and_resume';
+const ENVIRONMENT_CODES = new Set(['ffmpeg_not_configured', 'playwright_not_configured']);
+
+function objectOrEmpty(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function arrayOrEmpty(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeString(value) {
+  return value === null || value === undefined ? '' : String(value).trim();
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = safeString(value);
+    if (text) return text;
+  }
+  return '';
+}
+
+function collectDiagnostics(input = {}) {
+  const workflow = objectOrEmpty(input.workflow);
+  const lastFailure = objectOrEmpty(input.last_failure || workflow.last_failure);
+  return [
+    ...arrayOrEmpty(input.diagnostics),
+    ...arrayOrEmpty(lastFailure.diagnostics),
+    ...arrayOrEmpty(workflow.diagnostics),
+  ].filter(item => item && typeof item === 'object');
+}
+
+function chooseDiagnostic(diagnostics) {
+  return diagnostics.find(item => item.severity !== 'warning' && safeString(item.code))
+    || diagnostics.find(item => safeString(item.code))
+    || diagnostics.find(item => safeString(item.stage) || safeString(item.message) || safeString(item.user_message))
+    || null;
+}
+
+function inferCodeFromText(stage, message) {
+  const text = `${safeString(stage)} ${safeString(message)}`.toLowerCase();
+  const hasCompose = /compose|合成/.test(text);
+  const hasDurationMismatch = /duration|时长/.test(text) && /mismatch|不匹配|不一致|不符/.test(text);
+  if (/ffmpeg/.test(text)) return 'ffmpeg_not_configured';
+  if (/playwright|chromium/.test(text)) return 'playwright_not_configured';
+  if (/content[_ -]?graph|nodes|json/.test(text)) return 'content_graph_invalid';
+  if (/frame[_ -]?html|html/.test(text) && /missing text|缺少文本|返回为空|空内容/.test(text)) return 'provider_missing_text';
+  if (/frame[_ -]?html/.test(text)) return 'frame_html_invalid';
+  if (/render|timeout|超时/.test(text)) return /timeout|超时/.test(text) ? 'render_failed_timeout' : 'render_failed';
+  if (hasCompose && hasDurationMismatch) return 'duration_mismatch';
+  if (/duration|时长|timeline|时间轴/.test(text)) return 'timeline_duration_unreasonable';
+  if (hasCompose) return 'compose_failed';
+  return '';
+}
+
+function firstFailedFrame(stage = {}) {
+  const frames = objectOrEmpty(stage.frames);
+  for (const [frameId, frame] of Object.entries(frames)) {
+    if (frame?.status === 'failed') {
+      return { frame_id: frameId, code: safeString(frame.diagnostic_code) };
+    }
+  }
+  return { frame_id: '', code: '' };
+}
+
+function classifyFromCheckpoint(project = {}) {
+  const stages = objectOrEmpty(project.generation_checkpoint?.stages);
+  if (stages.validate_project?.status === 'failed') {
+    return {
+      code: firstNonEmpty(stages.validate_project.diagnostic_code, 'project_invalid'),
+      sub_stage: 'validate_project',
+      source: 'checkpoint',
+    };
+  }
+  if (stages.content_graph?.status === 'failed') {
+    return {
+      code: firstNonEmpty(stages.content_graph.diagnostic_code, 'content_graph_invalid'),
+      sub_stage: 'content_graph',
+      source: 'checkpoint',
+    };
+  }
+  if (stages.frame_html) {
+    const failed = firstFailedFrame(stages.frame_html);
+    if (failed.frame_id) {
+      return {
+        code: firstNonEmpty(failed.code, 'frame_html_invalid'),
+        sub_stage: 'frame_html',
+        frame_id: failed.frame_id,
+        source: 'checkpoint',
+      };
+    }
+  }
+  if (stages.render) {
+    const failed = firstFailedFrame(stages.render);
+    if (failed.frame_id) {
+      return {
+        code: firstNonEmpty(failed.code, 'render_failed'),
+        sub_stage: 'render',
+        frame_id: failed.frame_id,
+        source: 'checkpoint',
+      };
+    }
+  }
+  for (const stageId of ['compose', 'duration_verify', 'visual_inspect']) {
+    if (stages[stageId]?.status === 'failed') {
+      return {
+        code: firstNonEmpty(stages[stageId].diagnostic_code, `${stageId}_failed`),
+        sub_stage: stageId,
+        source: 'checkpoint',
+      };
+    }
+  }
+  return null;
+}
+
+function classifyCreativeWorkflowFailure(input = {}) {
+  const workflow = objectOrEmpty(input.workflow);
+  const project = objectOrEmpty(input.project);
+  const lastFailure = objectOrEmpty(input.last_failure || workflow.last_failure);
+  const diagnostics = collectDiagnostics(input);
+  const diagnostic = chooseDiagnostic(diagnostics);
+
+  if (diagnostic && safeString(diagnostic.code)) {
+    return {
+      code: safeString(diagnostic.code),
+      sub_stage: firstNonEmpty(diagnostic.sub_stage, lastFailure.sub_stage),
+      frame_id: firstNonEmpty(diagnostic.frame_id, lastFailure.frame_id),
+      message: firstNonEmpty(diagnostic.user_message, diagnostic.message, lastFailure.message),
+      diagnostic,
+      diagnostics,
+      source: 'diagnostic_code',
+    };
+  }
+
+  if (diagnostic) {
+    const inferred = inferCodeFromText(diagnostic.stage, firstNonEmpty(diagnostic.message, diagnostic.user_message));
+    if (inferred) {
+      return {
+        code: inferred,
+        sub_stage: firstNonEmpty(diagnostic.sub_stage, lastFailure.sub_stage),
+        frame_id: firstNonEmpty(diagnostic.frame_id, lastFailure.frame_id),
+        message: firstNonEmpty(diagnostic.user_message, diagnostic.message, lastFailure.message),
+        diagnostic,
+        diagnostics,
+        source: 'diagnostic_message',
+      };
+    }
+  }
+
+  const workflowError = objectOrEmpty(workflow.error);
+  const workflowErrorCode = safeString(workflowError.code);
+  if (workflowErrorCode && workflowErrorCode !== 'unknown_project_failure') {
+    return {
+      code: workflowErrorCode,
+      sub_stage: safeString(workflowError.sub_stage),
+      frame_id: safeString(workflowError.frame_id),
+      message: safeString(workflowError.message),
+      diagnostics,
+      source: 'workflow_error_code',
+    };
+  }
+
+  const messageCode = inferCodeFromText(workflowError.stage, workflowError.message);
+  if (messageCode) {
+    return {
+      code: messageCode,
+      sub_stage: safeString(workflowError.sub_stage),
+      frame_id: safeString(workflowError.frame_id),
+      message: safeString(workflowError.message),
+      diagnostics,
+      source: 'workflow_error_message',
+    };
+  }
+
+  const checkpoint = classifyFromCheckpoint(project);
+  if (checkpoint) {
+    return { ...checkpoint, diagnostics };
+  }
+
+  if (safeString(lastFailure.code)) {
+    return {
+      code: safeString(lastFailure.code),
+      sub_stage: safeString(lastFailure.sub_stage),
+      frame_id: safeString(lastFailure.frame_id),
+      message: safeString(lastFailure.message),
+      diagnostics,
+      source: 'last_failure_code',
+    };
+  }
+
+  return {
+    code: 'unknown_project_failure',
+    sub_stage: safeString(lastFailure.sub_stage || workflowError.sub_stage),
+    frame_id: safeString(lastFailure.frame_id || workflowError.frame_id),
+    message: firstNonEmpty(lastFailure.message, workflowError.message, '工程阶段失败原因不足，无法自动恢复。'),
+    diagnostics,
+    source: 'unknown',
+  };
+}
+
+function sceneSpecFromWorkflow(workflow = {}, project = {}) {
+  return objectOrEmpty(project.scene_spec).scenes
+    ? project.scene_spec
+    : workflow?.result?.hyperframes_freeform?.project?.scene_spec
+      || workflow?.result?.hyperframes_freeform?.scene_spec
+      || null;
+}
+
+function retryContentGraphAlreadyFailed(workflow = {}) {
+  return arrayOrEmpty(workflow.retry?.attempts)
+    .some(attempt => attempt?.repair_action === 'retry_content_graph' && attempt?.status === 'failed');
+}
+
+function contentGraphRawResponse(diagnostics = []) {
+  for (const diagnostic of diagnostics) {
+    const details = objectOrEmpty(diagnostic.details);
+    const text = firstNonEmpty(details.raw_response, details.response_text, details.text, details.content, diagnostic.raw_response);
+    if (text) return text;
+  }
+  return '';
+}
+
+function failedRenderFrameIds(project = {}, preferredFrameId = '') {
+  if (preferredFrameId) return [preferredFrameId];
+  const frames = objectOrEmpty(project.generation_checkpoint?.stages?.render?.frames);
+  return Object.entries(frames)
+    .filter(([, frame]) => frame?.status === 'failed')
+    .map(([frameId]) => frameId);
+}
+
+function basePlan(classification, patch = {}) {
+  return {
+    version: 1,
+    can_retry: false,
+    fallback_allowed: true,
+    mode: MODE,
+    code: classification.code,
+    retry_from: classification.sub_stage || '',
+    repair_action: '',
+    reuse: [],
+    discard: [],
+    user_message: classification.message || '无法判断失败原因，暂不自动重试。',
+    executor_options: {},
+    ...patch,
+  };
+}
+
+function retryPlan(classification, repairAction, retryFrom, patch = {}) {
+  return basePlan(classification, {
+    can_retry: true,
+    retry_from: retryFrom || classification.sub_stage || '',
+    repair_action: repairAction,
+    user_message: patch.user_message || '将复用已完成内容，并从失败步骤继续修复。',
+    ...patch,
+  });
+}
+
+function createCreativeWorkflowRetryPlan(input = {}) {
+  const workflow = objectOrEmpty(input.workflow);
+  const project = objectOrEmpty(input.project);
+  const classification = classifyCreativeWorkflowFailure(input);
+  const code = classification.code;
+  const subStage = classification.sub_stage;
+
+  if (ENVIRONMENT_CODES.has(code)) {
+    return basePlan(classification, {
+      can_retry: false,
+      fallback_allowed: false,
+      user_message: code === 'ffmpeg_not_configured'
+        ? '无法自动重试：ffmpeg 不可用，请先到设置中心修复系统环境。'
+        : '无法自动重试：Playwright Chromium 不可用，请先到设置中心修复系统环境。',
+    });
+  }
+
+  if (code === 'unknown_project_failure' && classification.source !== 'checkpoint') {
+    return basePlan(classification, {
+      can_retry: false,
+      fallback_allowed: false,
+      code: 'unknown_project_failure',
+      user_message: '无法定位可恢复步骤，暂不支持自动重试。',
+    });
+  }
+
+  if (code === 'content_graph_invalid' || subStage === 'content_graph') {
+    const rawResponse = contentGraphRawResponse(classification.diagnostics);
+    const sceneSpec = sceneSpecFromWorkflow(workflow, project);
+    if (rawResponse && parseContentGraphResponse(rawResponse, sceneSpec || {}).success) {
+      return basePlan(classification, {
+        code: 'content_graph_ok',
+        user_message: 'content graph JSON 可被宽容解析，无需生成恢复计划。',
+      });
+    }
+    if (retryContentGraphAlreadyFailed(workflow) && sceneSpec) {
+      return retryPlan(classification, 'fallback_scene_spec_graph', 'content_graph', {
+        reuse: ['source', 'research', 'brief', 'audio'],
+        discard: ['content_graph', 'frame_html', 'render_outputs'],
+        user_message: 'content graph 重试仍失败，将使用脚本结构恢复内容图后继续生成。',
+      });
+    }
+    return retryPlan(classification, 'retry_content_graph', 'content_graph', {
+      reuse: ['source', 'research', 'brief', 'audio'],
+      discard: ['content_graph', 'frame_html', 'render_outputs'],
+      user_message: '将重新生成 content graph，并复用前置产物继续后续步骤。',
+    });
+  }
+
+  if (code === 'provider_missing_text' || code === 'frame_html_invalid') {
+    return retryPlan(classification, 'retry_frame_html', 'frame_html', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
+      discard: classification.frame_id ? [`frames:${classification.frame_id}`, 'render_outputs'] : ['frame_html', 'render_outputs'],
+      executor_options: classification.frame_id ? { frame_id: classification.frame_id } : {},
+      user_message: '将复用已完成内容，只重新生成失败帧并重新导出。',
+    });
+  }
+
+  if (code === 'timeline_duration_unreasonable') {
+    const analysis = analyzeTimelineMismatch({ project });
+    const repairAction = analysis.repair_action || 'repair_timeline';
+    return retryPlan(classification, repairAction, 'timeline_check', {
+      reuse: repairAction === 'repair_script_and_timeline'
+        ? ['source', 'research']
+        : ['source', 'research', 'brief', 'audio', 'content_graph', 'frame_html'],
+      discard: repairAction === 'repair_script_and_timeline'
+        ? ['brief', 'audio', 'render_outputs', 'exports']
+        : ['timeline', 'render_outputs', 'exports'],
+      executor_options: { analysis },
+      user_message: repairAction === 'repair_script_and_timeline'
+        ? '旁白时长超过目标，将压缩旁白并重新生成音频与时间轴。'
+        : '时间轴超过目标但音频未超时，将修复时间轴后重新渲染。',
+    });
+  }
+
+  if (code.startsWith('render_failed') || subStage === 'render') {
+    const frameIds = failedRenderFrameIds(project, classification.frame_id);
+    return retryPlan(classification, 'rerender_frames', 'render', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph', 'frame_html'],
+      discard: frameIds.map(frameId => `render:${frameId}`),
+      executor_options: { frame_ids: frameIds },
+      user_message: '将只重渲染失败镜头，并重新合成成片。',
+    });
+  }
+
+  if (code === 'duration_mismatch' || code === 'compose_failed' || subStage === 'compose' || subStage === 'duration_verify') {
+    return retryPlan(classification, 'recompose', 'compose', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph', 'frame_html', 'render_outputs'],
+      discard: ['exports'],
+      user_message: '将复用已渲染镜头，只重新合成成片。',
+    });
+  }
+
+  if (subStage === 'visual_inspect' || code === 'visual_inspect_failed') {
+    return retryPlan(classification, 'rerun_visual_inspect', 'visual_inspect', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph', 'frame_html', 'render_outputs', 'exports'],
+      discard: ['visual_inspect'],
+      user_message: '将复用成片文件，只重新执行视觉巡检。',
+    });
+  }
+
+  if (subStage === 'validate_project' && classification.source === 'checkpoint') {
+    return retryPlan(classification, 'restart_project', 'validate_project', {
+      reuse: ['source', 'research', 'brief', 'audio'],
+      discard: ['project'],
+      user_message: '工程校验失败，将从工程阶段重新开始。',
+    });
+  }
+
+  return basePlan(classification, {
+    can_retry: false,
+    fallback_allowed: false,
+    code: 'unknown_project_failure',
+    user_message: '无法定位可恢复步骤，暂不支持自动重试。',
+  });
+}
+
+module.exports = {
+  classifyCreativeWorkflowFailure,
+  createCreativeWorkflowRetryPlan,
+};

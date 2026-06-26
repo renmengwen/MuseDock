@@ -614,25 +614,25 @@ node tests/test-html-video-timeline-consistency.js
 
 **具体实现步骤:**
 
-- [ ] 写 `tests/test-creative-workflow-retry-planner.js`：provider missing text at frame_html 输出 `can_retry:true`、`mode:'repair_and_resume'`、`repair_action:'retry_frame_html'`、`retry_from:'frame_html'`。
-- [ ] 写同一测试：content graph 空文本先输出 `retry_content_graph`；模拟 retry 已失败且 scene_spec 可用时输出 `fallback_scene_spec_graph`。
-- [ ] 写同一测试：content graph JSON 尾逗号 tolerant parse 成功不需要 retry plan。
-- [ ] 写同一测试：target 60 秒、frames 132 秒且 audio 未超目标输出 `repair_timeline`。
-- [ ] 写同一测试：audio duration 超目标输出 `repair_script_and_timeline`。
-- [ ] 写同一测试：单帧 render timeout 输出 `rerender_frames` 且 `executor_options.frame_ids` 只含失败帧。
-- [ ] 写同一测试：compose duration mismatch 输出 `recompose`。
-- [ ] 写同一测试：workflow project stage 失败且只有 `last_failure.project_dir` 时，现有 `extractHtmlVideoProjectPathFromWorkflow(record)` 能定位并读取 `<projectDir>/project.json`。
-- [ ] 写同一测试：`generation_checkpoint.stages.validate_project.status === 'failed'` 时，planner 输出 `restart_project` 或对应可恢复 action，不落入 `unknown_project_failure`。
-- [ ] 写同一测试：`ffmpeg_not_configured`、`playwright_not_configured` 输出 `can_retry:false`、`fallback_allowed:false`。
-- [ ] 运行 `node tests/test-creative-workflow-retry-planner.js`，预期失败为模块不存在。
-- [ ] 实现 `retryPlanner.js`，分类优先级固定为 diagnostic code -> diagnostic stage + message -> workflow.error.code -> workflow.error.message -> checkpoint failed stage -> `unknown_project_failure`。
-- [ ] 在 `creativeWorkflows.js` 新增纯读 `getCreativeWorkflowRetryPlan(workflowId, options)`，只读取 workflow 与 html-video project 并返回 plan，不修改文件。
-- [ ] 在 `creativeWorkflows.js` 新增 `refreshCreativeWorkflowRetryPlan(workflowId, options)`，内部调用纯读 planner，然后显式写回 `record.retry.latest_plan` 与 `record.updated_at`；只有 GET `/retry-plan` 和 POST `/retry` 执行前允许调用这个刷新函数。
-- [ ] POST `/retry` 执行前必须重新调用 `refreshCreativeWorkflowRetryPlan()`，再校验 `confirm_plan_code`；不得直接信任旧 `latest_plan`。
-- [ ] 修改现有 `creativeWorkflows.js` 的 `extractHtmlVideoProjectPathFromWorkflow(record)`，定位优先级为 `record.last_failure.project_dir` -> `record.result.hyperframes_freeform.project.html_video_project_path` -> `record.result.hyperframes_freeform.project.project_dir` -> `record.result.hyperframes_freeform.html_video_project_path` -> `record.result.hyperframes_freeform.project_dir` -> stage result 中的 `html_video_project_path` / `project_dir` -> `''`。
-- [ ] planner、retry API、编辑、渲染、导出等所有 html-video project 读取路径都复用 `extractHtmlVideoProjectPathFromWorkflow(record)`；不要新增并维护第二套 `resolveHtmlVideoProjectFromWorkflow()`。首次 project stage 失败时 `record.result` 通常为空，必须依赖 `last_failure.project_dir`。
-- [ ] unknown 失败只允许 `can_retry:false`，除非已有 checkpoint 明确定位到可恢复 stage。
-- [ ] 运行本 Task 验收命令。
+- [x] 写 `tests/test-creative-workflow-retry-planner.js`：provider missing text at frame_html 输出 `can_retry:true`、`mode:'repair_and_resume'`、`repair_action:'retry_frame_html'`、`retry_from:'frame_html'`。
+- [x] 写同一测试：content graph 空文本先输出 `retry_content_graph`；模拟 retry 已失败且 scene_spec 可用时输出 `fallback_scene_spec_graph`。
+- [x] 写同一测试：content graph JSON 尾逗号 tolerant parse 成功不需要 retry plan。
+- [x] 写同一测试：target 60 秒、frames 132 秒且 audio 未超目标输出 `repair_timeline`。
+- [x] 写同一测试：audio duration 超目标输出 `repair_script_and_timeline`。
+- [x] 写同一测试：单帧 render timeout 输出 `rerender_frames` 且 `executor_options.frame_ids` 只含失败帧。
+- [x] 写同一测试：compose duration mismatch 输出 `recompose`。
+- [x] 写同一测试：workflow project stage 失败且只有 `last_failure.project_dir` 时，现有 `extractHtmlVideoProjectPathFromWorkflow(record)` 能定位并读取 `<projectDir>/project.json`。
+- [x] 写同一测试：`generation_checkpoint.stages.validate_project.status === 'failed'` 时，planner 输出 `restart_project` 或对应可恢复 action，不落入 `unknown_project_failure`。
+- [x] 写同一测试：`ffmpeg_not_configured`、`playwright_not_configured` 输出 `can_retry:false`、`fallback_allowed:false`。
+- [x] 运行 `node tests/test-creative-workflow-retry-planner.js`，预期失败为模块不存在。
+- [x] 实现 `retryPlanner.js`，分类优先级固定为 diagnostic code -> diagnostic stage + message -> workflow.error.code -> workflow.error.message -> checkpoint failed stage -> `unknown_project_failure`。
+- [x] 在 `creativeWorkflows.js` 新增纯读 `getCreativeWorkflowRetryPlan(workflowId, options)`，只读取 workflow 与 html-video project 并返回 plan，不修改文件。
+- [x] 在 `creativeWorkflows.js` 新增 `refreshCreativeWorkflowRetryPlan(workflowId, options)`，内部调用纯读 planner，然后显式写回 `record.retry.latest_plan` 与 `record.updated_at`；只有 GET `/retry-plan` 和 POST `/retry` 执行前允许调用这个刷新函数。
+- [x] POST `/retry` 执行前必须重新调用 `refreshCreativeWorkflowRetryPlan()`，再校验 `confirm_plan_code`；不得直接信任旧 `latest_plan`。
+- [x] 修改现有 `creativeWorkflows.js` 的 `extractHtmlVideoProjectPathFromWorkflow(record)`，定位优先级为 `record.last_failure.project_dir` -> `record.result.hyperframes_freeform.project.html_video_project_path` -> `record.result.hyperframes_freeform.project.project_dir` -> `record.result.hyperframes_freeform.html_video_project_path` -> `record.result.hyperframes_freeform.project_dir` -> stage result 中的 `html_video_project_path` / `project_dir` -> `''`。
+- [x] planner、retry API、编辑、渲染、导出等所有 html-video project 读取路径都复用 `extractHtmlVideoProjectPathFromWorkflow(record)`；不要新增并维护第二套 `resolveHtmlVideoProjectFromWorkflow()`。首次 project stage 失败时 `record.result` 通常为空，必须依赖 `last_failure.project_dir`。
+- [x] unknown 失败只允许 `can_retry:false`，除非已有 checkpoint 明确定位到可恢复 stage。
+- [x] 运行本 Task 验收命令。
 
 **需要新增/修改的函数签名:**
 

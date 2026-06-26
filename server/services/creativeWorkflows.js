@@ -14,6 +14,7 @@ const sceneSpecService = require('./sceneSpec');
 const aiTextModel = require('./aiTextModel');
 const defaultSourceFetch = require('./sourceFetch');
 const htmlVideoProjectStore = require('./creative-video/html-video/projectStore');
+const retryPlanner = require('./creative-video/retryPlanner');
 const htmlVideoEditPatchService = require('./creative-video/html-video/editPatchService');
 const frameHtmlEditService = require('./creative-video/html-video/frameHtmlEditService');
 const htmlVideoIterateService = require('./creative-video/html-video/htmlVideoIterateService');
@@ -2209,15 +2210,123 @@ function extractRenderVersionsFromWorkflow(record) {
   return Array.isArray(versions) ? versions : [];
 }
 
+function projectPathFromStageResult(value) {
+  if (!value || typeof value !== 'object') return '';
+  const hyperframes = value.hyperframes_freeform || {};
+  return safeString(
+    value.html_video_project_path
+    || value.project_dir
+    || value.project?.html_video_project_path
+    || value.project?.project_dir
+    || value.result?.html_video_project_path
+    || value.result?.project_dir
+    || value.result?.project?.html_video_project_path
+    || value.result?.project?.project_dir
+    || hyperframes.html_video_project_path
+    || hyperframes.project_dir
+    || hyperframes.project?.html_video_project_path
+    || hyperframes.project?.project_dir,
+  );
+}
+
+function extractStageHtmlVideoProjectPath(record) {
+  const stages = Array.isArray(record?.stages) ? record.stages : [];
+  for (const stage of stages) {
+    const found = projectPathFromStageResult(stage?.result || stage?.data || stage);
+    if (found) return found;
+  }
+  const stageResults = record?.stage_results;
+  if (stageResults && typeof stageResults === 'object') {
+    for (const result of Object.values(stageResults)) {
+      const found = projectPathFromStageResult(result);
+      if (found) return found;
+    }
+  }
+  return '';
+}
+
 function extractHtmlVideoProjectPathFromWorkflow(record) {
   const hyperframes = record?.result?.hyperframes_freeform || {};
   const project = hyperframes.project || {};
   return safeString(
-    project.html_video_project_path
+    record?.last_failure?.project_dir
+    || project.html_video_project_path
     || project.project_dir
     || hyperframes.html_video_project_path
-    || hyperframes.project_dir,
+    || hyperframes.project_dir
+    || extractStageHtmlVideoProjectPath(record),
   );
+}
+
+async function readWorkflowAndHtmlVideoProject(workflowId, rootDir) {
+  let record;
+  try {
+    record = await readWorkflow(workflowId, rootDir);
+  } catch {
+    return { record: null, project: null, projectDir: '', error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
+  }
+  const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
+  if (!projectDir) {
+    return { record, project: null, projectDir: '', error: null };
+  }
+  try {
+    const project = await htmlVideoProjectStore.loadProject(projectDir);
+    return { record, project, projectDir, error: null };
+  } catch (error) {
+    return {
+      record,
+      project: null,
+      projectDir,
+      error: {
+        success: false,
+        code: 'NO_HTML_VIDEO_PROJECT',
+        message: `读取 html-video 工程失败：${error.message}`,
+      },
+    };
+  }
+}
+
+async function getCreativeWorkflowRetryPlan(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { record, project, projectDir, error } = await readWorkflowAndHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const plan = retryPlanner.createCreativeWorkflowRetryPlan({
+    workflow: record,
+    project,
+    project_dir: projectDir,
+  });
+  return {
+    success: true,
+    workflow_id: safeString(workflowId),
+    project_dir: projectDir,
+    plan,
+  };
+}
+
+async function refreshCreativeWorkflowRetryPlan(workflowId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const services = options.services || {};
+  const { record, project, projectDir, error } = await readWorkflowAndHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  const plan = retryPlanner.createCreativeWorkflowRetryPlan({
+    workflow: record,
+    project,
+    project_dir: projectDir,
+  });
+  record.retry = {
+    ...(record.retry || {}),
+    version: 1,
+    attempts: Array.isArray(record.retry?.attempts) ? record.retry.attempts : [],
+    latest_plan: plan,
+  };
+  record.updated_at = getNow(services);
+  await persistWorkflow(record, rootDir);
+  return {
+    success: true,
+    workflow_id: safeString(workflowId),
+    project_dir: projectDir,
+    plan,
+  };
 }
 
 async function loadWorkflowWithHtmlVideoProject(workflowId, rootDir) {
@@ -3049,6 +3158,8 @@ module.exports = {
   createCreativeWorkflow,
   runCreativeWorkflow,
   getCreativeWorkflow,
+  getCreativeWorkflowRetryPlan,
+  refreshCreativeWorkflowRetryPlan,
   patchCreativeWorkflowTaskSummary,
   clearCreativeWorkflowTaskSummary,
   listCreativeWorkflowRecords,
@@ -3077,6 +3188,7 @@ module.exports = {
   exportHtmlVideoProject,
   listHtmlVideoProjectExports,
   getHtmlVideoProjectExportFile,
+  extractHtmlVideoProjectPathFromWorkflow,
   patchCreativeWorkflowVideoSpec,
   getCreativeWorkflowSceneSpec,
   patchCreativeWorkflowSceneSpec,
