@@ -144,6 +144,7 @@ assert.equal(audioHashProject.audio.mix.fade_out_sec, 1.5);
     scene_spec_hash: 'scene-hash',
     target: { duration_sec: 12, aspect_ratio: '9:16' },
     model_calls: [],
+    agent_pipeline: [],
     stages: {
       validate_project: { status: 'pending', diagnostic_code: '' },
       content_graph: {
@@ -152,6 +153,7 @@ assert.equal(audioHashProject.audio.mix.fade_out_sec, 1.5);
         input_hash: 'input',
         output_hash: 'output',
         diagnostic_code: '',
+        reused: false,
       },
       frame_html: {
         status: 'done',

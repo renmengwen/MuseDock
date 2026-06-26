@@ -915,10 +915,33 @@ async function main() {
       assert.equal(calls.length, 2);
       assert.equal(calls[0].node.id, 'scene_03');
       assert.equal(calls[0].attempt, 1);
-      assert.deepEqual(calls[0].modelOptions, { requestTimeoutMs: 90000, maxRetries: 0 });
+      assert.deepEqual(calls[0].modelOptions, {
+        requestTimeoutMs: 90000,
+        maxRetries: 0,
+        audit: {
+          agent: 'FrameHtmlAgent',
+          stage: 'frame_html',
+          sub_stage: 'frame_html',
+          frame_id: 'scene_03',
+          node_id: 'scene_03',
+          attempt: 1,
+        },
+      });
       assert.equal(calls[1].node.id, 'scene_03');
       assert.equal(calls[1].attempt, 2);
-      assert.deepEqual(calls[1].modelOptions, { requestTimeoutMs: 90000, maxRetries: 0, stream: false });
+      assert.deepEqual(calls[1].modelOptions, {
+        requestTimeoutMs: 90000,
+        maxRetries: 0,
+        stream: false,
+        audit: {
+          agent: 'FrameHtmlAgent',
+          stage: 'frame_html',
+          sub_stage: 'frame_html',
+          frame_id: 'scene_03',
+          node_id: 'scene_03',
+          attempt: 2,
+        },
+      });
       assert.equal(calls[1].shortPrompt, true);
       assert.equal(fallbackCalls.length, 1);
       assert.equal(fallbackCalls[0].scene.id, 'scene_03');
