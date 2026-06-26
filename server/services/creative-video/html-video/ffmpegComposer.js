@@ -127,6 +127,69 @@ async function verifyDurationWithFfprobe({
   };
 }
 
+async function verifyAudioStreamWithFfprobe({
+  videoPath,
+  runCommand: runCommandImpl = runCommand,
+  ffprobePath,
+} = {}) {
+  if (!videoPath) {
+    return {
+      success: false,
+      code: 'audio_stream_missing',
+      message: '未提供导出文件路径，无法校验音频轨。',
+    };
+  }
+
+  const ffprobe = await getFfprobeCommand({ ffprobePath, runCommand: runCommandImpl });
+  const args = [
+    '-v', 'error',
+    '-select_streams', 'a',
+    '-show_entries', 'stream=codec_type',
+    '-of', 'json',
+    videoPath,
+  ];
+  const result = await runCommandImpl(ffprobe, args);
+  if (!result.ok) {
+    return {
+      success: true,
+      skipped: true,
+      code: 'ffprobe_unavailable',
+      message: `ffprobe 不可用，已跳过导出音频轨校验：${result.stderr || result.error || `ffprobe exited ${result.code}`}`,
+      args,
+    };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(String(result.stdout || '{}'));
+  } catch (error) {
+    return {
+      success: false,
+      code: 'audio_probe_invalid',
+      message: `ffprobe 未返回有效的音频轨信息：${error.message || 'JSON 解析失败'}`,
+      args,
+      stdout: result.stdout || '',
+    };
+  }
+
+  const streams = Array.isArray(parsed.streams) ? parsed.streams : [];
+  if (!streams.some(stream => stream?.codec_type === 'audio')) {
+    return {
+      success: false,
+      code: 'audio_stream_missing',
+      message: '导出文件没有音频轨。',
+      args,
+      stdout: result.stdout || '',
+    };
+  }
+
+  return {
+    success: true,
+    audio_stream_count: streams.length,
+    args,
+  };
+}
+
 function sameEncoding(frameMp4s) {
   if (!frameMp4s.length) return true;
   const first = frameMp4s[0];
@@ -330,6 +393,7 @@ module.exports = {
   concatAudioWithFfmpeg,
   muxAudioWithFfmpeg,
   verifyDurationWithFfprobe,
+  verifyAudioStreamWithFfprobe,
   getFfmpegCommand,
   getFfprobeCommand,
   escapeConcatPath,

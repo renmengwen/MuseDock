@@ -628,6 +628,12 @@ async function composeHtmlVideoProject({
   const composeVideoOutput = finalOutput;
   const audioDisabled = nextProject.audio?.status === 'skipped'
     && nextProject.audio?.reason === 'disabled_by_settings';
+  const audioStatus = String(nextProject.audio?.status || '').trim().toLowerCase();
+  const hasAudioIntent = !audioDisabled && (
+    /^(ready|done|generated|rendered|mixed)$/i.test(audioStatus)
+    || Boolean(nextProject.audio?.narration_path || nextProject.audio?.tts_manifest_path || nextProject.audio?.music_path)
+  );
+  let audioTrackCheck = null;
   if (!audioDisabled) {
     const narrationPath = await resolveNarrationPath(nextProject, resolvedProjectDir, ffmpegComposer, diagnostics);
     const mux = await ffmpegComposer.muxAudioWithFfmpeg({
@@ -668,6 +674,77 @@ async function composeHtmlVideoProject({
       };
     }
     finalOutput = mux.output_path || finalOutput;
+  }
+
+  if (hasAudioIntent && typeof ffmpegComposer.verifyAudioStreamWithFfprobe === 'function') {
+    await report(onProgress, {
+      type: 'html_video_audio_verify_started',
+      stage: 'project',
+      sub_stage: 'compose',
+      message: '正在校验导出视频音频轨...',
+      data: {
+        output_path: finalOutput,
+      },
+    });
+    audioTrackCheck = await ffmpegComposer.verifyAudioStreamWithFfprobe({
+      videoPath: finalOutput,
+    });
+    if (audioTrackCheck.skipped) {
+      diagnostics.push(createDiagnostic({
+        code: audioTrackCheck.code || 'ffprobe_skipped',
+        stage: 'compose',
+        sub_stage: 'compose',
+        severity: 'warning',
+        user_message: audioTrackCheck.message || '已跳过导出音频轨校验。',
+        details: audioTrackCheck,
+      }));
+      await report(onProgress, {
+        type: 'html_video_audio_verify_done',
+        stage: 'project',
+        sub_stage: 'compose',
+        message: '已跳过导出视频音频轨校验。',
+        data: audioTrackCheck,
+      });
+    } else if (!audioTrackCheck.success) {
+      nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
+        markComposeCheckpoint(current, {
+          status: 'failed',
+          output_path: relativeProjectPath(resolvedProjectDir, composeVideoOutput),
+          output_audio_path: finalOutput !== composeVideoOutput ? relativeProjectPath(resolvedProjectDir, finalOutput) : '',
+          diagnostic_code: 'render_output_missing_audio',
+        });
+        return current;
+      });
+      const diagnostic = createDiagnostic({
+        code: 'render_output_missing_audio',
+        stage: 'compose',
+        sub_stage: 'compose',
+        user_message: audioTrackCheck.message || '导出成片缺少音频轨，已停止发布该文件。',
+        retryable: true,
+        repair_action: 'retry_compose',
+        details: audioTrackCheck,
+      });
+      diagnostics.push(diagnostic);
+      return {
+        success: false,
+        message: diagnostic.user_message,
+        project: nextProject,
+        project_dir: resolvedProjectDir,
+        html_video_project_path: resolvedProjectDir,
+        output_path: finalOutput,
+        rendered_frames: renderedFrames,
+        diagnostics,
+        audio_track_check: audioTrackCheck,
+      };
+    } else {
+      await report(onProgress, {
+        type: 'html_video_audio_verify_done',
+        stage: 'project',
+        sub_stage: 'compose',
+        message: '导出视频音频轨校验完成。',
+        data: audioTrackCheck,
+      });
+    }
   }
   nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
     markComposeCheckpoint(current, {
@@ -811,6 +888,7 @@ async function composeHtmlVideoProject({
     rendered_frames: renderedFrames,
     diagnostics,
     duration_check: durationCheck,
+    audio_track_check: audioTrackCheck,
   };
 }
 

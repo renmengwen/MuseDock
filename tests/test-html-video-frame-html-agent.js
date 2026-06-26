@@ -176,7 +176,7 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
           return { success: true, text: '不是 HTML' };
         }
         assert.match(promptText, /只返回一个完整 HTML/);
-        return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01">OK</main></body></html>' };
+        return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">基础版</h1><p data-text-key="subtitle">价格</p><section data-text-key="body">基础版价格 12 元</section></main></body></html>' };
       },
     },
     graph,
@@ -216,7 +216,7 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
             '<!doctype html><html><head>',
             '<meta name="viewport" content="width=1080,height=1920,initial-scale=1.0">',
             '<style>html,body{margin:0;width:1080px;height:1920px;overflow:hidden}</style>',
-            '</head><body><main>竖屏正确尺寸</main></body></html>',
+            '</head><body><main><h1 data-text-key="headline">基础版</h1><p data-text-key="subtitle">价格</p><section data-text-key="body">基础版价格 12 元</section></main></body></html>',
             '```',
           ].join('\n'),
         };

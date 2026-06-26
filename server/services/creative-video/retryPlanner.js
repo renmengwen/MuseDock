@@ -311,7 +311,12 @@ function createCreativeWorkflowRetryPlan(input = {}) {
     });
   }
 
-  if (code === 'provider_missing_text' || code === 'frame_html_invalid') {
+  if (
+    code === 'provider_missing_text'
+    || code === 'frame_html_invalid'
+    || code === 'frame_html_template_text_leak'
+    || code === 'frame_html_content_mismatch'
+  ) {
     return retryPlan(classification, 'retry_frame_html', 'frame_html', {
       reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
       discard: classification.frame_id ? [`frames:${classification.frame_id}`, 'render_outputs'] : ['frame_html', 'render_outputs'],
@@ -347,7 +352,7 @@ function createCreativeWorkflowRetryPlan(input = {}) {
     });
   }
 
-  if (code === 'duration_mismatch' || code === 'compose_failed' || subStage === 'compose' || subStage === 'duration_verify') {
+  if (code === 'duration_mismatch' || code === 'compose_failed' || code === 'render_output_missing_audio' || subStage === 'compose' || subStage === 'duration_verify') {
     return retryPlan(classification, 'recompose', 'compose', {
       reuse: ['source', 'research', 'brief', 'audio', 'content_graph', 'frame_html', 'render_outputs'],
       discard: ['exports'],

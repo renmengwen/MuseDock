@@ -300,10 +300,11 @@ async function readProjectJson(projectDir) {
               }),
             };
           }
-          const frameId = prompt.includes('当前帧：scene_02') ? 'scene_02' : 'scene_01';
+          const frameId = prompt.includes('当前帧：scene_02') || prompt.includes('当前帧 id：scene_02') ? 'scene_02' : 'scene_01';
+          const suffix = frameId === 'scene_02' ? '二' : '一';
           return {
             success: true,
-            text: `<!doctype html><html><head><style>html,body,#app{width:1080px;height:1920px;margin:0;} main{width:1080px;height:1920px;animation:fade 1s ease;} @keyframes fade{from{opacity:.2}to{opacity:1}}</style></head><body><main id="app" data-frame-id="${frameId}"><h1 data-text-key="headline">异常时间轴</h1><p data-text-key="subtitle">异常长字幕</p><section data-text-key="body">异常长旁白</section></main></body></html>`,
+            text: `<!doctype html><html><head><style>html,body,#app{width:1080px;height:1920px;margin:0;} main{width:1080px;height:1920px;animation:fade 1s ease;} @keyframes fade{from{opacity:.2}to{opacity:1}}</style></head><body><main id="app" data-frame-id="${frameId}"><h1 data-text-key="headline">异常时间轴${suffix}</h1><p data-text-key="subtitle">异常长字幕${suffix}</p><section data-text-key="body">异常长旁白${suffix}</section></main></body></html>`,
           };
         },
       },

@@ -15,6 +15,7 @@ const storyboardTiming = require('./storyboardTiming');
 const workflowDecision = require('./agentWorkflowDecision');
 const storyboardSchema = require('./storyboardSchema');
 const narrationBudget = require('./storyboardNarrationBudget');
+const narrationQuality = require('./creative-video/narrationQuality');
 const defaultHyperframesProject = require('./hyperframesProject');
 const defaultHyperframesRenderer = require('./hyperframesRenderer');
 const defaultHyperframesSkillContext = require('./hyperframesSkillContext');
@@ -264,16 +265,7 @@ function summarizeComments(comments = []) {
 }
 
 function trimNarrationToBudget(text, maxChars) {
-  const limit = Math.max(1, Number(maxChars || 0));
-  const compact = String(text || '').replace(/\s+/g, '').trim();
-  if (compact.length <= limit) return compact;
-  const sentences = compact.split(/(?<=[。！？!?])/).filter(Boolean);
-  let output = '';
-  for (const sentence of sentences) {
-    if ((output + sentence).length > limit) break;
-    output += sentence;
-  }
-  return (output || compact).slice(0, limit);
+  return narrationQuality.trimNarrationToCompleteBoundary(text, maxChars);
 }
 
 function firstPositiveNumber(...values) {
@@ -1307,6 +1299,17 @@ async function synthesizeDouyinRunHyperframesFreeformAudio(awemeId, runId, optio
   const targetDurationSec = resolveFreeformTargetDurationSec(currentState.brief.data, detail.data, options);
   const narrationFit = fitFreeformNarrationToBudget(currentState.brief.data, scenes, targetDurationSec);
   scenes = narrationFit.scenes;
+  const narrationValidation = narrationQuality.validateNarrationScenes(scenes);
+  if (!narrationValidation.ok) {
+    return failHyperframesFreeformSection(
+      awemeId,
+      runId,
+      'audio',
+      narrationValidation.message,
+      options,
+      { narration_issues: narrationValidation.issues },
+    );
+  }
 
   const operationId = createFreeformOperationId('audio');
   await updateRunHyperframesFreeform(awemeId, runId, current => ({

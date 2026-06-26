@@ -267,6 +267,211 @@ function buildFrameHtmlPrompt({
   ].join('\n');
 }
 
+function decodeBasicHtmlEntities(text = '') {
+  return String(text || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => {
+      const value = Number(code);
+      return Number.isFinite(value) ? String.fromCodePoint(value) : _;
+    })
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => {
+      const value = Number.parseInt(code, 16);
+      return Number.isFinite(value) ? String.fromCodePoint(value) : _;
+    });
+}
+
+function htmlVisibleSegments(html = '') {
+  const withoutHidden = String(html || '')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ');
+  return decodeBasicHtmlEntities(withoutHidden.replace(/<[^>]+>/g, '\n'))
+    .split(/\r?\n/)
+    .map(item => item.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+function visibleHtmlText(html = '') {
+  return htmlVisibleSegments(html).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalizedComparableText(value = '') {
+  return decodeBasicHtmlEntities(value)
+    .replace(/\s+/g, '')
+    .replace(/[“”‘’"']/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function flattenTextValues(value, output = []) {
+  if (value === null || value === undefined) return output;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    const text = compactText(value, 600);
+    if (text) output.push(text);
+    return output;
+  }
+  if (Array.isArray(value)) {
+    value.forEach(item => flattenTextValues(item, output));
+    return output;
+  }
+  if (typeof value === 'object') {
+    Object.entries(value).forEach(([key, item]) => {
+      if (/^(id|scene_id|frame_id|kind|type|status|path|url|html_path|mp4_path)$/i.test(key)) return;
+      flattenTextValues(item, output);
+    });
+  }
+  return output;
+}
+
+function resolveSceneForFrame(sceneSpec = {}, node = {}, frameId = '') {
+  const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
+  const candidates = [
+    node?.metadata?.scene_id,
+    node?.scene_id,
+    node?.sceneId,
+    frameId,
+    node?.id,
+  ].map(item => String(item || '').trim()).filter(Boolean);
+  return scenes.find(scene => candidates.includes(String(scene?.id || '').trim()))
+    || (scenes.length === 1 ? scenes[0] : {});
+}
+
+function expectedContentTexts(args = {}) {
+  const scene = resolveSceneForFrame(args.sceneSpec || {}, args.node || {}, args.frameId || args.node?.id || '');
+  const values = [];
+  flattenTextValues(scene?.visual_text, values);
+  flattenTextValues(scene?.title, values);
+  flattenTextValues(scene?.narration_text, values);
+  flattenTextValues(scene?.captions, values);
+  flattenTextValues(args.node?.label, values);
+  flattenTextValues(args.node?.text, values);
+  flattenTextValues(args.node?.data, values);
+  return [...new Set(values.map(item => compactText(item, 600)).filter(Boolean))];
+}
+
+function primaryExpectedText(args = {}) {
+  const scene = resolveSceneForFrame(args.sceneSpec || {}, args.node || {}, args.frameId || args.node?.id || '');
+  return compactText(
+    scene?.visual_text?.headline
+      || scene?.headline
+      || args.node?.label
+      || args.node?.text
+      || scene?.title
+      || '',
+    180,
+  );
+}
+
+function textLengthScore(text = '') {
+  const value = String(text || '');
+  const chinese = (value.match(/[\u4e00-\u9fff]/g) || []).length;
+  const latin = (value.match(/[A-Za-z0-9]/g) || []).length;
+  return chinese + latin;
+}
+
+function templateVisiblePhrases(template = {}) {
+  const source = readTemplateSourceSnippet(template, 12000);
+  if (!source) return [];
+  const phrases = [];
+  for (const segment of htmlVisibleSegments(source)) {
+    String(segment || '')
+      .split(/[\s|/\\,，。.!！?？:：;；、()[\]{}<>]+/)
+      .map(item => item.trim())
+      .filter(Boolean)
+      .forEach(item => {
+        const comparable = normalizedComparableText(item);
+        if (textLengthScore(comparable) >= 4) phrases.push(item);
+      });
+  }
+  return [...new Set(phrases)];
+}
+
+function contentOverlapScore(htmlComparable, expectedTexts) {
+  const tokens = new Set();
+  for (const text of expectedTexts) {
+    const raw = String(text || '');
+    for (const match of raw.matchAll(/[A-Za-z][A-Za-z0-9_-]{2,}/g)) {
+      tokens.add(match[0].toLowerCase());
+    }
+    for (const match of raw.matchAll(/[\u4e00-\u9fff]{2,}/g)) {
+      const chunk = match[0];
+      if (chunk.length <= 6) {
+        tokens.add(chunk);
+      } else {
+        for (let index = 0; index <= chunk.length - 4; index += 2) {
+          tokens.add(chunk.slice(index, index + 4));
+        }
+      }
+    }
+  }
+  return [...tokens]
+    .filter(token => textLengthScore(token) >= 3 && htmlComparable.includes(normalizedComparableText(token)))
+    .length;
+}
+
+function validateHtmlContentQuality(html, args = {}) {
+  const expectedTexts = expectedContentTexts(args);
+  const expectedComparable = normalizedComparableText(expectedTexts.join(' '));
+  const htmlComparable = normalizedComparableText(visibleHtmlText(html));
+  const leakedPhrases = templateVisiblePhrases(args.template)
+    .filter(phrase => {
+      const comparable = normalizedComparableText(phrase);
+      return comparable
+        && htmlComparable.includes(comparable)
+        && !expectedComparable.includes(comparable);
+    });
+  if (leakedPhrases.length) {
+    const shown = leakedPhrases.slice(0, 3);
+    return {
+      success: false,
+      code: 'frame_html_template_text_leak',
+      message: `HTML 保留了模板默认文案：${shown.join('、')}。请只继承模板视觉风格，替换为当前镜头内容。`,
+      details: {
+        leaked_text: shown,
+        expected_headline: primaryExpectedText(args),
+      },
+    };
+  }
+
+  const primary = primaryExpectedText(args);
+  const primaryComparable = normalizedComparableText(primary);
+  if (primaryComparable && !htmlComparable.includes(primaryComparable)) {
+    const overlap = contentOverlapScore(htmlComparable, expectedTexts);
+    if (overlap < 2) {
+      return {
+        success: false,
+        code: 'frame_html_content_mismatch',
+        message: `HTML 主画面文案没有匹配当前镜头内容，缺少核心标题或足够关键词：${primary}。`,
+        details: {
+          expected_headline: primary,
+          overlap_score: overlap,
+        },
+      };
+    }
+  }
+
+  return { success: true };
+}
+
+function validateGeneratedHtml(html, args = {}) {
+  const resolution = validateHtmlTargetResolution(html, args.target || {});
+  if (!resolution.success) {
+    return {
+      success: false,
+      code: 'frame_html_invalid',
+      message: resolution.message || 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
+      details: resolution,
+    };
+  }
+  return validateHtmlContentQuality(html, args);
+}
+
 function findScene(sceneSpec = {}, sceneId = '') {
   return (Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [])
     .find(scene => scene && scene.id === sceneId) || {};
@@ -320,6 +525,8 @@ function extractRawHtmlDocument(raw) {
 function buildRetryPrompt(args = {}) {
   const resolution = resolveResolution(args.target || {});
   const validationMessage = compactText(args.validationMessage || args.validation_message || '', 260);
+  const expectedTexts = expectedContentTexts(args).slice(0, 8);
+  const expectedHeadline = primaryExpectedText(args);
   const continuitySection = buildVisualContinuitySection({
     visualStyleReferenceHtml: args.visualStyleReferenceHtml,
     previousFrameHtml: args.previousFrameHtml,
@@ -329,6 +536,9 @@ function buildRetryPrompt(args = {}) {
     `当前帧 id：${args.node?.id || ''}`,
     `目标尺寸：${resolution.width}x${resolution.height}`,
     validationMessage ? `上一次失败原因：${validationMessage}` : '',
+    expectedHeadline ? `当前镜头核心标题：${expectedHeadline}` : '',
+    expectedTexts.length ? `当前镜头允许使用的内容文案：${expectedTexts.join(' / ')}` : '',
+    args.template ? '如果使用模板，必须删除模板默认可见文案，只保留视觉风格、布局、配色、动效和结构。' : '',
     '必须包含 <!doctype html><html><head><style>...</style></head><body>...</body></html>。',
     `meta viewport、html/body 或主舞台容器必须使用 ${resolution.width}x${resolution.height}；不能使用 ${resolution.height}x${resolution.width}，不要交换宽高。`,
     '必须包含 animation timeline：CSS animation/@keyframes、GSAP timeline 或 window.__hvPlayAll 至少一种。',
@@ -420,10 +630,10 @@ async function generateFrameHtml({
   const allowInternalRetry = attempt < 2 && shortPrompt !== true;
   const firstExtracted = extractHtmlDocument(first.text);
   if (firstExtracted.success) {
-    const validation = validateHtmlTargetResolution(firstExtracted.html, promptArgs.target || {});
+    const validation = validateGeneratedHtml(firstExtracted.html, promptArgs);
     if (validation.success) return firstExtracted;
     if (!allowInternalRetry) {
-      return frameFailure('frame_html_invalid', validation.message || 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。', promptArgs);
+      return frameFailure(validation.code || 'frame_html_invalid', validation.message || '单帧 HTML 内容校验失败。', promptArgs, validation.details || {});
     }
     const retry = await callModel(model, buildRetryPrompt({
       ...promptArgs,
@@ -440,10 +650,11 @@ async function generateFrameHtml({
         diagnostics: [validation.message, retryExtracted.message].filter(Boolean),
       });
     }
-    const retryValidation = validateHtmlTargetResolution(retryExtracted.html, promptArgs.target || {});
+    const retryValidation = validateGeneratedHtml(retryExtracted.html, promptArgs);
     if (retryValidation.success) return retryExtracted;
-    return frameFailure('frame_html_invalid', 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。', promptArgs, {
+    return frameFailure(retryValidation.code || 'frame_html_invalid', retryValidation.message || '单帧 HTML 内容校验失败。', promptArgs, {
       diagnostics: [validation.message, retryValidation.message].filter(Boolean),
+      details: retryValidation.details || {},
     });
   }
 
@@ -458,10 +669,11 @@ async function generateFrameHtml({
   }
   const retryExtracted = extractHtmlDocument(retry.text);
   if (retryExtracted.success) {
-    const retryValidation = validateHtmlTargetResolution(retryExtracted.html, promptArgs.target || {});
+    const retryValidation = validateGeneratedHtml(retryExtracted.html, promptArgs);
     if (retryValidation.success) return retryExtracted;
-    return frameFailure('frame_html_invalid', 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。', promptArgs, {
+    return frameFailure(retryValidation.code || 'frame_html_invalid', retryValidation.message || '单帧 HTML 内容校验失败。', promptArgs, {
       diagnostics: [firstExtracted.message, retryValidation.message].filter(Boolean),
+      details: retryValidation.details || {},
     });
   }
   return frameFailure('frame_html_invalid', 'AI 未返回有效 HTML document。', promptArgs, {
@@ -478,4 +690,5 @@ module.exports = {
   buildRetryPrompt,
   readTemplateSourceSnippet,
   validateHtmlTargetResolution,
+  validateHtmlContentQuality,
 };
