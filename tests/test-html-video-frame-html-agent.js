@@ -75,6 +75,33 @@ assert.match(prompt, /Search \/ GitHub \/ Tech Forums \/ Docs \/ Issues/);
 assert.match(prompt, /\[object Object\]/);
 assert.match(prompt, /不要发明源素材中没有的精确事实/);
 
+const assetPrompt = agent.buildFrameHtmlPrompt({
+  graph,
+  node: graph.nodes[0],
+  index: 0,
+  total: 2,
+  creativeContext: {
+    source_context: { summary: '来源摘要。' },
+    asset_context: {
+      status: 'ready',
+      assets: [{
+        id: 'article_01',
+        source: 'article',
+        alt: '价格表截图',
+        path: 'assets/source-image-01.png',
+        frame_src: '../assets/source-image-01.png',
+      }],
+    },
+  },
+  target: { resolution: { width: 1920, height: 1080 } },
+});
+
+assert.match(assetPrompt, /可用图片素材/);
+assert.match(assetPrompt, /\.\.\/assets\/source-image-01\.png/);
+assert.match(assetPrompt, /禁止引用外部图片 URL/);
+assert.match(assetPrompt, /object-fit: contain/);
+assert.match(assetPrompt, /不要做纯图片轮播/);
+
 const continuityPrompt = agent.buildFrameHtmlPrompt({
   graph,
   node: graph.nodes[1],

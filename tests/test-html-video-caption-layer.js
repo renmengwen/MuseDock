@@ -60,6 +60,22 @@ const captionLayerCount = html => (html.match(/data-hv-layer="captions"/g) || []
 }
 
 {
+  const split = normalizeCaptionsForFrame({
+    id: 'scene_06',
+    duration_sec: 7.68,
+    captions: [{
+      id: 'cap_01',
+      start: 0,
+      end: 7.68,
+      text: '如今Vue、React、Svelte、Solid等生态都拥抱Vite，新项目里它正成为默认选项。',
+    }],
+  });
+  assert.ok(split.length > 1);
+  assert.ok(split.every(item => !/^[，。！？；：,.!?;:]/.test(item.text)));
+  assert.equal(split.map(item => item.text).join(''), '如今Vue、React、Svelte、Solid等生态都拥抱Vite，新项目里它正成为默认选项。');
+}
+
+{
   const html = '<html><body><main>画面</main></body></html>';
   const next = ensureCaptionLayer(html, captions);
   assert.match(next, /data-hv-layer="captions"/);
@@ -234,6 +250,15 @@ const captionLayerCount = html => (html.match(/data-hv-layer="captions"/g) || []
   assert.doesNotMatch(next, /subtitle-caption-style/);
   assert.doesNotMatch(next, /hv-subtitle-caption/);
   assert.doesNotMatch(next, /旧字幕/);
+  assert.match(next, /字幕文本/);
+}
+
+{
+  const html = '<html><body><main>画面</main><div class="caption-bar">AI 内置字幕</div></body></html>';
+  const next = ensureCaptionLayer(html, captions);
+  assert.equal(captionLayerCount(next), 1);
+  assert.doesNotMatch(next, /AI 内置字幕/);
+  assert.doesNotMatch(next, /class="caption-bar"/);
   assert.match(next, /字幕文本/);
 }
 

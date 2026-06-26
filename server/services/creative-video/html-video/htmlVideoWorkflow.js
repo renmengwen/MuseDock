@@ -1,4 +1,5 @@
 const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
 
@@ -794,6 +795,48 @@ function buildInitialProject({ workflowId, runId, sceneSpec, template, templateI
   });
 }
 
+async function materializeCreativeContextAssets(projectDir, creativeContext = {}) {
+  const assetContext = objectOrEmpty(creativeContext.asset_context);
+  const assets = Array.isArray(assetContext.assets) ? assetContext.assets : [];
+  if (!assets.length) return creativeContext;
+  await fsp.mkdir(path.join(projectDir, 'assets'), { recursive: true });
+  const nextAssets = [];
+  for (const asset of assets) {
+    const sourcePath = String(asset.local_path || '').trim();
+    const fallbackName = path.posix.basename(String(asset.path || `asset-${nextAssets.length + 1}.jpg`).replace(/\\/g, '/'));
+    const fileName = fallbackName && !fallbackName.includes('..') ? fallbackName : `asset-${nextAssets.length + 1}.jpg`;
+    const targetRelative = `assets/${fileName}`;
+    const targetPath = projectStore.resolveProjectPath(projectDir, targetRelative);
+    if (sourcePath && fs.existsSync(sourcePath)) {
+      await fsp.copyFile(sourcePath, targetPath).catch(() => {});
+    }
+    if (!fs.existsSync(targetPath)) continue;
+    nextAssets.push({
+      ...asset,
+      path: targetRelative,
+      frame_src: `../${targetRelative}`,
+    });
+  }
+  creativeContext.asset_context = {
+    ...assetContext,
+    assets: nextAssets,
+  };
+  return creativeContext;
+}
+
+function projectAssetsFromCreativeContext(creativeContext = {}) {
+  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
+  return assets.map((asset, index) => ({
+    id: asset.id || `source_asset_${index + 1}`,
+    type: asset.type || 'image',
+    path: asset.path,
+    source: asset.source || '',
+    url: asset.url || '',
+    alt: asset.alt || '',
+    attribution: asset.attribution || null,
+  })).filter(asset => asset.path);
+}
+
 function applyMediaOptionsToProject(project, mediaOptions = {}) {
   if (mediaOptions.generateCaptions !== false) return project;
   for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
@@ -965,6 +1008,7 @@ async function generateHtmlVideo(options = {}) {
   if (!resumeProject) {
     projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
   }
+  await materializeCreativeContextAssets(projectDir, creativeContext);
   const generationMode = resolveGenerationMode(templateRenderTarget);
   if (generationMode === 'raw_html' && !hasSceneSpecScenes(sceneSpec)) {
     return failure('缺少 scene_spec，无法生成 raw_html 帧。', [
@@ -1396,6 +1440,12 @@ async function generateHtmlVideo(options = {}) {
     }
   }
   project = applyMediaOptionsToProject(project, mediaOptions);
+  const sourceProjectAssets = projectAssetsFromCreativeContext(creativeContext);
+  if (sourceProjectAssets.length) {
+    const byPath = new Map((Array.isArray(project.assets) ? project.assets : []).map(asset => [String(asset.path || ''), asset]));
+    sourceProjectAssets.forEach(asset => byPath.set(asset.path, { ...(byPath.get(asset.path) || {}), ...asset }));
+    project.assets = Array.from(byPath.values()).filter(asset => asset.path);
+  }
 
   const validation = await validateHtmlVideoProject({
     project,

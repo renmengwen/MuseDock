@@ -1,6 +1,7 @@
 const DEFAULT_CAPTION_DURATION_SEC = 3;
 const MAX_CAPTION_TEXT_LENGTH = 34;
 const { stripSpeechStageDirections } = require('../../speechText');
+const LEADING_PUNCTUATION_RE = /^[，。！？；：,.!?;:]/;
 const VOID_ELEMENTS = new Set([
   'area',
   'base',
@@ -61,8 +62,12 @@ function splitLongText(text, maxLength = MAX_CAPTION_TEXT_LENGTH) {
   const pushHardWrapped = chunk => {
     let rest = chunk;
     while (rest.length > maxLength) {
-      chunks.push(rest.slice(0, maxLength));
-      rest = rest.slice(maxLength);
+      let cut = maxLength;
+      if (LEADING_PUNCTUATION_RE.test(rest.slice(cut, cut + 1))) {
+        cut = Math.max(1, cut - 1);
+      }
+      chunks.push(rest.slice(0, cut));
+      rest = rest.slice(cut);
     }
     current = rest;
   };
@@ -327,6 +332,17 @@ function isLegacyCaptionOverlay(openingTag) {
     && getAttributeValue(openingTag, 'data-text-key') === 'subtitle';
 }
 
+function isGeneratedCaptionOverlay(openingTag) {
+  if (isExplicitUnmanagedCaptionLayer(openingTag)) return false;
+  const tagName = tagNameFromOpeningTag(openingTag);
+  return (tagName === 'div' || tagName === 'span')
+    && (
+      hasClass(openingTag, 'caption-bar')
+      || hasClass(openingTag, 'subtitle-caption')
+      || getAttributeValue(openingTag, 'data-role') === 'subtitle-caption'
+    );
+}
+
 function scanCaptionLayerTags(html, visitor) {
   const text = String(html || '');
   let index = 0;
@@ -380,7 +396,8 @@ function removeExistingCaptionLayer(html) {
     const remove = (tagName === 'style' && isManagedCaptionStyle(openingTag))
       || (tagName === 'script' && isManagedCaptionClock(openingTag))
       || (isCaptionLayerTag(openingTag) && !isExplicitUnmanagedCaptionLayer(openingTag))
-      || isLegacyCaptionOverlay(openingTag);
+      || isLegacyCaptionOverlay(openingTag)
+      || isGeneratedCaptionOverlay(openingTag);
     if (!remove) return;
     output += text.slice(cursor, start);
     cursor = end;

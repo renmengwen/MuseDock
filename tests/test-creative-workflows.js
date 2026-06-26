@@ -141,7 +141,7 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.equal(run.run_id, 'run-1');
   assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project', 'check', 'render', 'inspect']);
   assert.equal(calls[1].options.briefOptions.creative_context.input.mode, 'text');
-  assert.equal(calls[3].options.projectOptions.creative_context.asset_context.status, 'disabled');
+  assert.equal(calls[3].options.projectOptions.creative_context.asset_context.status, 'empty');
   assert.equal(calls[3].options.useHtmlVideoLiteWorkflow, true);
   assert.equal(calls[0].options.rootDir, mediaRoot);
 
@@ -171,9 +171,27 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
           kind: 'github_repo',
           url: sourceUrl,
           title: 'owner/repo',
-          markdown: '# owner/repo\n\n真实 README 内容。',
+          markdown: '# owner/repo\n\n真实 README 内容。\n\n![架构图](https://example.com/arch.png)',
           truncated: false,
           metadata: { language: 'JavaScript' },
+        }),
+      },
+      sourceAssets: {
+        prepareSourceAssets: async ({ sourceMaterial, now }) => ({
+          status: 'ready',
+          updated_at: now,
+          summary: '已准备 1 张图片素材。',
+          diagnostics: [],
+          assets: [{
+            id: 'article_01',
+            type: 'image',
+            source: 'article',
+            url: 'https://example.com/arch.png',
+            path: 'assets/source-image-01.png',
+            local_path: path.join(mediaRoot, 'fake-source-image-01.png'),
+            alt: sourceMaterial.title,
+            mime: 'image/png',
+          }],
         }),
       },
     },
@@ -241,6 +259,9 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(analysisInput.creative_context.source_context.diagnostics.source_kind, 'github_repo');
   assert.equal(analysisInput.creative_context.source_context.diagnostics.fetched_at, '2026-06-21T00:00:00.000Z');
   assert.equal(analysisInput.creative_context.source_context.diagnostics.ignored_url_count, 0);
+  assert.equal(analysisInput.creative_context.asset_context.status, 'ready');
+  assert.equal(analysisInput.creative_context.asset_context.assets[0].path, 'assets/source-image-01.png');
+  assert.deepEqual(analysisInput.local_assets.images, [path.join(mediaRoot, 'fake-source-image-01.png')]);
   assert.equal(analysisInput.video.aweme_url, '');
 }
 

@@ -13,6 +13,7 @@ const defaultCreativeVideoRerender = require('./creativeVideoRerender');
 const sceneSpecService = require('./sceneSpec');
 const aiTextModel = require('./aiTextModel');
 const defaultSourceFetch = require('./sourceFetch');
+const defaultSourceAssets = require('./sourceAssets');
 const htmlVideoProjectStore = require('./creative-video/html-video/projectStore');
 const retryPlanner = require('./creative-video/retryPlanner');
 const resumeExecutor = require('./creative-video/resumeExecutor');
@@ -596,6 +597,7 @@ function resolveServices(options = {}) {
     aiModelConfig: services.aiModelConfig || aiModelConfig,
     appSettings: services.appSettings || appSettings,
     sourceFetch: services.sourceFetch || defaultSourceFetch,
+    sourceAssets: services.sourceAssets || defaultSourceAssets,
   };
 }
 
@@ -1375,6 +1377,118 @@ function ensureSuccess(result, fallbackMessage, context = {}) {
   return result;
 }
 
+function buildSourceMaterialForAssets(record = {}) {
+  const input = record.creative_context?.input || record.input || {};
+  if (input.mode === 'douyin') return null;
+  const sourceContext = record.creative_context?.source_context || record.source_context || {};
+  if (input.mode === 'text') {
+    const rawText = safeString(input.raw_text);
+    return rawText ? {
+      kind: 'text',
+      url: '',
+      title: rawText.slice(0, 80),
+      description: rawText,
+      markdown: rawText,
+      metadata: {},
+    } : null;
+  }
+  return {
+    kind: safeString(sourceContext.source_kind || sourceContext.source_metadata?.kind || 'article'),
+    url: safeString(sourceContext.source_url || sourceContext.source_metadata?.url || input.source_url),
+    title: safeString(sourceContext.title || sourceContext.source_metadata?.title || input.source_hint),
+    description: safeString(sourceContext.description || sourceContext.summary || input.source_hint),
+    markdown: safeString(sourceContext.transcript || sourceContext.markdown),
+    metadata: sourceContext.source_metadata || {},
+  };
+}
+
+async function writeAssetContextToAnalysisInput(record, mediaRoot, assetContext) {
+  const paths = mediaPipeline.getMediaPaths(record.aweme_id, mediaRoot);
+  let analysisInput = {};
+  try {
+    analysisInput = await readJson(paths.analysisInput);
+  } catch {
+    return;
+  }
+  analysisInput.local_assets = {
+    ...(analysisInput.local_assets || {}),
+    images: Array.isArray(assetContext.assets)
+      ? assetContext.assets.map(asset => asset.local_path || asset.path).filter(Boolean)
+      : [],
+    source_assets: assetContext,
+  };
+  analysisInput.creative_context = {
+    ...(analysisInput.creative_context || {}),
+    asset_context: assetContext,
+  };
+  await writeJson(paths.analysisInput, analysisInput);
+}
+
+async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, reportStage = null) {
+  const inputMode = record.creative_context?.input?.mode || record.input?.mode || '';
+  if (inputMode === 'douyin') {
+    const assetContext = creativeContext.createDisabledAssetContext({ now });
+    record.asset_context = assetContext;
+    record.creative_context = {
+      ...(record.creative_context || {}),
+      asset_context: assetContext,
+    };
+    return {
+      success: true,
+      skipped: true,
+      message: '抖音来源已使用原视频素材，跳过图片补图。',
+      asset_context: assetContext,
+    };
+  }
+
+  const sourceMaterial = buildSourceMaterialForAssets(record);
+  if (!sourceMaterial?.markdown && !sourceMaterial?.title && !sourceMaterial?.description) {
+    const assetContext = {
+      ...creativeContext.createDisabledAssetContext({ now }),
+      status: 'empty',
+      summary: '没有可用于提取或搜索图片的来源内容。',
+    };
+    record.asset_context = assetContext;
+    record.creative_context = {
+      ...(record.creative_context || {}),
+      asset_context: assetContext,
+    };
+    return {
+      success: true,
+      message: assetContext.summary,
+      asset_context: assetContext,
+    };
+  }
+
+  if (typeof reportStage === 'function') {
+    await reportStage('正在提取文章图片并补充搜索素材...', 25);
+  }
+
+  const paths = mediaPipeline.getMediaPaths(record.aweme_id, mediaRoot);
+  const service = services.sourceAssets || defaultSourceAssets;
+  const assetContext = await service.prepareSourceAssets({
+    sourceMaterial,
+    projectDir: paths.dir,
+    assetDir: path.join(paths.dir, 'assets'),
+    now,
+    deps: {
+      fetchImpl: services.fetchImpl,
+      pexelsApiKey: services.pexelsApiKey,
+    },
+  });
+  record.asset_context = assetContext;
+  record.creative_context = {
+    ...(record.creative_context || {}),
+    asset_context: assetContext,
+  };
+  await writeAssetContextToAnalysisInput(record, mediaRoot, assetContext);
+  return {
+    success: true,
+    message: assetContext.summary || '图片素材准备完成。',
+    asset_context: assetContext,
+  };
+}
+
 function selectFailureDiagnostics(result = {}) {
   const diagnostics = Array.isArray(result?.diagnostics) ? result.diagnostics : [];
   if (diagnostics.length > 0) return diagnostics;
@@ -1790,11 +1904,12 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     return stoppedOrFailed;
   }
 
-  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'assets', rootDir, async () => ({
-    success: true,
-    message: '图片素材将在下一阶段开放，当前任务继续使用来源上下文。',
-    asset_context: record.asset_context,
-  }), services, taskContext));
+  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'assets', rootDir, async ({ reportStage }) => (
+    ensureSuccess(
+      await prepareSourceAssetContext(record, mediaRoot, getNow(services), services, reportStage),
+      '图片素材准备失败。',
+    )
+  ), services, taskContext));
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }

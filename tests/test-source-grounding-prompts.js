@@ -115,6 +115,29 @@ assert.match(scenePrompt, /不要编造来源材料没有的精确数字、机�
 assert.match(scenePrompt, /GitHub repo 视频只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。/);
 assert.match(scenePrompt, /owner\/repo/);
 
+const assetCreativeContext = {
+  ...creativeContext,
+  asset_context: {
+    status: 'ready',
+    assets: [{
+      id: 'article_01',
+      source: 'article',
+      alt: '架构图',
+      path: 'assets/source-image-01.png',
+      frame_src: '../assets/source-image-01.png',
+    }],
+  },
+};
+
+const assetScenePrompt = creativeSpecAgent.buildSceneSpecPrompt({
+  creativeContext: assetCreativeContext,
+  target: { duration_sec: 30 },
+});
+
+assert.match(assetScenePrompt, /creativeContext\.asset_context\.assets 是可用图片素材清单/);
+assert.match(assetScenePrompt, /不适合当前叙事时可以不用/);
+assert.match(assetScenePrompt, /禁止把视频做成纯图片轮播/);
+
 const sourceContextOnlyScenePrompt = creativeSpecAgent.buildSceneSpecPrompt({
   creativeContext: createSourceContextOnlyCreativeContext([
     '# owner/repo',
@@ -151,6 +174,12 @@ assert.match(graphPrompt, /GitHub repo 只能基于 README、仓库描述、语�
 assert.match(graphPrompt, /不要编造来源中没有的精确数字、机构、时间、版本、功能或结论/);
 assert.match(graphPrompt, /真实 README 内容|这个项目把 HTML 变成视频/);
 assert.ok(sourceTranscriptLine.includes(SOURCE_TRANSCRIPT_ONLY_MARKER));
+
+const assetGraphPrompt = buildGraphPrompt(assetCreativeContext);
+assert.match(assetGraphPrompt, /可用图片素材/);
+assert.match(assetGraphPrompt, /HTML引用=\.\.\/assets\/source-image-01\.png/);
+assert.match(assetGraphPrompt, /含文字的文章截图必须完整展示/);
+assert.match(assetGraphPrompt, /不适合当前叙事时可以不用/);
 
 const textGraphPrompt = buildGraphPrompt(createTextCreativeContext(
   '这是普通文本创作方向：讲述独立创作者如何整理灵感、打磨脚本并持续发布。'

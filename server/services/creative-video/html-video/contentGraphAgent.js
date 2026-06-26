@@ -26,6 +26,7 @@ function compactText(value, maxLength = 1200) {
 function summarizeCreativeContextForPrompt(creativeContext = {}) {
   const input = objectOrEmpty(creativeContext.input);
   const sourceContext = objectOrEmpty(creativeContext.source_context);
+  const assetContext = objectOrEmpty(creativeContext.asset_context);
   const brief = objectOrEmpty(creativeContext.brief);
   const audio = objectOrEmpty(creativeContext.audio);
   const lines = [];
@@ -44,6 +45,17 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
     const text = compactText(value, maxLength);
     if (text) lines.push(`${label}：${text}`);
   });
+  const assets = Array.isArray(assetContext.assets) ? assetContext.assets.slice(0, 8) : [];
+  if (assets.length) {
+    lines.push('可用图片素材：');
+    assets.forEach((asset, index) => {
+      const src = compactText(asset.frame_src || asset.path, 160);
+      const label = compactText(asset.alt || asset.title || asset.url || `图片${index + 1}`, 120);
+      const source = compactText(asset.source || 'article', 30);
+      if (src) lines.push(`- ${index + 1}. ${label}；来源=${source}；HTML引用=${src}`);
+    });
+    lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；不适合当前叙事时可以不用。优先使用 article 来源图片；search/Pexels 图片只作补充背景或氛围图；不要做纯图片轮播；含文字的文章截图必须完整展示，使用 object-fit: contain；图片应与关键词、字幕、数据卡或讲解节点混排。');
+  }
   return lines.join('\n');
 }
 
@@ -66,6 +78,7 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
     '- 每个节点都必须引用或改写来源材料里的具体事实、名字、数字、产品、项目能力、术语或主张。',
     '- 禁止输出可套用到任何文章或任何仓库的泛泛句子。',
     '- GitHub repo 只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。',
+    '- 如果 SOURCE MATERIAL 提供可用图片素材，内容图可以在适合的节点使用 showcase、图文卡、证据截图或对比说明；不适合当前叙事时不要硬塞图片，也不要把图片当作视频主题本身。',
   ] : [];
   return [
     '你是 html-video 的 content graph 规划器。请只输出严格 JSON，不要输出 Markdown、解释或额外文本。',

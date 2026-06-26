@@ -314,6 +314,7 @@ async function fetchGithubRepo(owner, repo, url, options = {}) {
     metadata: {
       owner,
       repo,
+      default_branch: meta.default_branch || 'main',
       language: meta.language || '',
       stars: typeof meta.stargazers_count === 'number' ? meta.stargazers_count : null,
       topics: Array.isArray(meta.topics) ? meta.topics : [],

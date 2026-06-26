@@ -54,12 +54,18 @@ function retrySection(retryCount, previousErrors) {
 
 function buildSceneSpecPrompt({ creativeContext, target, retryCount = 0, previousErrors = [] } = {}) {
   const isSourceUrl = isSourceUrlCreativeContext(creativeContext);
+  const hasAssets = Array.isArray(creativeContext?.asset_context?.assets)
+    && creativeContext.asset_context.assets.length > 0;
   const sourceUrlGroundingLines = isSourceUrl ? [
     '如果 creativeContext.input.mode 是 source_url 或 source_context.kind 是 source_url，来源材料是视频主题，不是装饰素材。',
     'source_context.transcript 是文章、网页或 GitHub repo 的真实来源材料；必须基于其中的具体事实、名字、数字、项目术语和主张生成场景。',
     '不要输出可套用到任何文章或任何仓库的泛泛句子。',
     '不要编造来源材料没有的精确数字、机构、版本、结论或功能。',
     'GitHub repo 视频只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。',
+  ] : [];
+  const assetPlanningLines = hasAssets ? [
+    'creativeContext.asset_context.assets 是可用图片素材清单；如图片能增强来源证据或解释效果，优先规划 showcase、图文证据、文章截图展示或项目配图说明场景。',
+    '不要为了用图而硬塞图片；不适合当前叙事时可以不用。禁止把视频做成纯图片轮播；图片必须服务旁白观点，并和关键词、字幕、数据卡或说明文字混排。',
   ] : [];
   return [
     '你是 html-video lite 的创意规格生成器。',
@@ -74,6 +80,7 @@ function buildSceneSpecPrompt({ creativeContext, target, retryCount = 0, previou
     '如果需要表达背景、光效、动画、转场、布局、发光、粒子、镜头，请留给第二次 frame_specs 阶段调用。',
     '不要因为主题本身提到 HTML、CSS、动画、转场或渲染就删除这些词；它们作为观众内容出现时可以保留。',
     ...sourceUrlGroundingLines,
+    ...assetPlanningLines,
     '输出格式必须是：{"scene_spec":{...}}。',
     '创作上下文：',
     stringify(buildPromptCreativeContext(creativeContext)),
