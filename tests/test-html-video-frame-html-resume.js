@@ -915,9 +915,10 @@ async function main() {
       assert.equal(calls.length, 2);
       assert.equal(calls[0].node.id, 'scene_03');
       assert.equal(calls[0].attempt, 1);
+      assert.deepEqual(calls[0].modelOptions, { requestTimeoutMs: 90000, maxRetries: 0 });
       assert.equal(calls[1].node.id, 'scene_03');
       assert.equal(calls[1].attempt, 2);
-      assert.deepEqual(calls[1].modelOptions, { stream: false });
+      assert.deepEqual(calls[1].modelOptions, { requestTimeoutMs: 90000, maxRetries: 0, stream: false });
       assert.equal(calls[1].shortPrompt, true);
       assert.equal(fallbackCalls.length, 1);
       assert.equal(fallbackCalls[0].scene.id, 'scene_03');

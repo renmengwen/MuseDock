@@ -1068,13 +1068,14 @@ async function updateRunHyperframesFreeform(awemeId, runId, updater, options = {
   });
 }
 
-function createFreeformFailureResponse(awemeId, runId, state, message) {
+function createFreeformFailureResponse(awemeId, runId, state, message, extra = {}) {
   return {
     success: false,
     aweme_id: String(awemeId),
     run_id: String(runId),
     message,
     hyperframes_freeform: state,
+    ...(extra && typeof extra === 'object' && !Array.isArray(extra) ? extra : {}),
   };
 }
 
@@ -1107,7 +1108,8 @@ async function markFreeformBriefFailed(awemeId, runId, message, options = {}, op
   );
 }
 
-async function markFreeformProjectFailed(awemeId, runId, message, options = {}, operationId = '') {
+async function markFreeformProjectFailed(awemeId, runId, message, options = {}, operationId = '', failureMeta = {}) {
+  const meta = failureMeta && typeof failureMeta === 'object' && !Array.isArray(failureMeta) ? failureMeta : {};
   const update = operationId
     ? updater => updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'project', operationId, updater, options)
     : updater => updateRunHyperframesFreeform(awemeId, runId, updater, options);
@@ -1115,6 +1117,7 @@ async function markFreeformProjectFailed(awemeId, runId, message, options = {}, 
     status: 'failed',
     project: {
       ...current.project,
+      ...meta,
       status: 'failed',
       message,
     },
@@ -1124,6 +1127,7 @@ async function markFreeformProjectFailed(awemeId, runId, message, options = {}, 
     runId,
     updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
     updated.message || message,
+    meta,
   );
 }
 
@@ -1192,6 +1196,7 @@ function replaceFreeformBriefScenes(brief = {}, scenes = [], narrationBudgetRepo
     const replacement = sceneByIndex.get(Number(scene?.index || index + 1));
     if (!replacement) return scene;
     const nextScene = { ...scene, narration_text: replacement.narration_text };
+    if (replacement.captions != null) nextScene.captions = replacement.captions;
     if (replacement.target_duration_sec != null) nextScene.target_duration_sec = replacement.target_duration_sec;
     if (replacement.targetDurationSec != null) nextScene.targetDurationSec = replacement.targetDurationSec;
     return nextScene;
@@ -1244,23 +1249,162 @@ function fitFreeformNarrationToBudget(brief = {}, scenes = [], targetDurationSec
     };
   }
 
-  const budgetsByIndex = new Map((budget.scenes || []).map(item => [Number(item.index), item]));
-  const nextScenes = scenes.map((scene, index) => {
-    const sceneIndex = Number(scene.index || index + 1);
-    const sceneBudget = budgetsByIndex.get(sceneIndex) || {};
-    return {
-      ...scene,
-      narration_text: trimNarrationToBudget(scene.narration_text, sceneBudget.max_recommended_chars),
-    };
-  });
-  const nextPlan = freeformStoryboardPlanForBudget(brief, nextScenes, targetDurationSec);
-  const nextBudget = narrationBudget.buildNarrationBudget(nextPlan);
   return {
-    scenes: nextScenes,
-    brief: replaceFreeformBriefScenes(brief, nextScenes, nextBudget),
-    budget: nextBudget,
-    changed: true,
+    scenes,
+    brief: replaceFreeformBriefScenes(brief, scenes, budget),
+    budget,
+    changed: false,
+    needsCompression: true,
   };
+}
+
+function buildFreeformNarrationCompressionMessages({ scenes = [], budget = {}, transcriptText = '', targetDurationSec = 60 } = {}) {
+  return [
+    {
+      role: 'system',
+      content: [
+        '你是短视频旁白压缩 Agent。',
+        '你的任务是把过长分镜旁白压缩到目标时长内，同时保留完整语义。',
+        '只能返回 JSON 对象，不要 Markdown、解释或额外文本。',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        '请压缩以下 storyboard 旁白。',
+        '',
+        `目标总时长：${targetDurationSec} 秒。`,
+        `建议总字数上限：${budget.max_recommended_chars || Math.floor(Number(targetDurationSec || 60) * narrationBudget.DEFAULT_CHARS_PER_SECOND)} 字。`,
+        '',
+        '当前预算：',
+        JSON.stringify(budget, null, 2),
+        '',
+        '当前 scenes：',
+        JSON.stringify(scenes.map(scene => ({
+          index: scene.index,
+          headline: scene.headline || '',
+          duration_sec: scene.duration_sec || scene.target_duration_sec || '',
+          narration_text: scene.narration_text || '',
+        })), null, 2),
+        '',
+        '来源材料 transcript：',
+        String(transcriptText || '').slice(0, 12000) || '（无）',
+        '',
+        '输出要求：',
+        '1. 返回所有需要替换的 scenes，格式：{"scenes":[{"index":1,"narration_text":"压缩后的完整旁白"}]}。',
+        '2. 每段 narration_text 必须是完整中文口播，不能出现半句、残词、文件名截断或只有铺垫没有落点。',
+        '3. 不要只按字符截断；必须改写压缩，保留主要信息和观点。',
+        '4. 不要写镜头说明、音效、停顿或语速指令。',
+      ].join('\n'),
+    },
+  ];
+}
+
+function buildFreeformNarrationRepairMessages({ scenes = [], issues = [], transcriptText = '', targetDurationSec = 60 } = {}) {
+  return [
+    {
+      role: 'system',
+      content: [
+        '你是短视频旁白修复 Agent。',
+        '你的任务是修复被质量门标记为半句、悬空或结尾不完整的旁白。',
+        '只能返回 JSON 对象，不要 Markdown、解释或额外文本。',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        '请修复以下 storyboard 中的问题旁白。',
+        '',
+        `目标总时长：${targetDurationSec} 秒。`,
+        '',
+        '问题：',
+        JSON.stringify(issues, null, 2),
+        '',
+        '当前 scenes：',
+        JSON.stringify(scenes.map(scene => ({
+          index: scene.index,
+          headline: scene.headline || '',
+          narration_text: scene.narration_text || '',
+        })), null, 2),
+        '',
+        '来源材料 transcript：',
+        String(transcriptText || '').slice(0, 12000) || '（无）',
+        '',
+        '输出要求：',
+        '1. 只返回需要替换的 scenes，格式：{"scenes":[{"index":2,"narration_text":"修复后的完整旁白"}]}。',
+        '2. 不要删除信息，不要写镜头说明，不要写语气/停顿指令。',
+        '3. 修复后的 narration_text 必须是完整、可直接配音的中文口播。',
+        '4. 优先根据 transcript 补齐语义落点；如果原句是对照铺垫，必须补出“今天/现在/未来”的后半句。',
+      ].join('\n'),
+    },
+  ];
+}
+
+function extractRepairScenes(parsed = {}) {
+  if (Array.isArray(parsed.scenes)) return parsed.scenes;
+  if (Array.isArray(parsed.storyboard?.scenes)) return parsed.storyboard.scenes;
+  return [];
+}
+
+function applyFreeformNarrationRepairs(scenes = [], repairs = []) {
+  const byIndex = new Map((Array.isArray(repairs) ? repairs : [])
+    .map(scene => [Number(scene?.index), String(scene?.narration_text || '').trim()])
+    .filter(([index, text]) => Number.isFinite(index) && index > 0 && text));
+  if (!byIndex.size) return { scenes, changed: false };
+  return {
+    changed: true,
+    scenes: scenes.map((scene, index) => {
+      const sceneIndex = Number(scene.index || index + 1);
+      const narrationText = byIndex.get(sceneIndex);
+      if (!narrationText) return scene;
+      return {
+        ...scene,
+        narration_text: narrationText,
+        captions: Array.isArray(scene.captions) && scene.captions.length
+          ? scene.captions.map((caption, captionIndex) => (captionIndex === 0 ? { ...caption, text: narrationText } : caption))
+          : scene.captions,
+      };
+    }),
+  };
+}
+
+async function compressFreeformNarrationWithModel({ modelService, freeformAgent, scenes, budget, transcriptText, targetDurationSec } = {}) {
+  const messages = buildFreeformNarrationCompressionMessages({ scenes, budget, transcriptText, targetDurationSec });
+  const response = await modelService.callTextModel({ messages });
+  if (!response || response.success === false) {
+    return { success: false, message: response?.message || '旁白压缩失败。' };
+  }
+  const parsed = freeformAgent.parseFreeformBriefResponse(response.text || response.content || '');
+  if (!parsed.success) return parsed;
+  const applied = applyFreeformNarrationRepairs(scenes, extractRepairScenes(parsed.brief));
+  if (!applied.changed) return { success: false, message: '旁白压缩结果缺少可用 scenes。' };
+  const validation = narrationQuality.validateNarrationScenes(applied.scenes);
+  if (!validation.ok) return { success: false, message: validation.message, issues: validation.issues };
+  const nextPlan = freeformStoryboardPlanForBudget({}, applied.scenes, targetDurationSec);
+  const nextBudget = narrationBudget.buildNarrationBudget(nextPlan);
+  if (nextBudget.status === 'too_long') {
+    return {
+      success: false,
+      message: `压缩后的旁白仍超过目标时长：预计 ${nextBudget.estimated_total_duration_sec} 秒，目标 ${nextBudget.target_duration_sec} 秒。`,
+      budget: nextBudget,
+    };
+  }
+  return { success: true, scenes: applied.scenes, budget: nextBudget };
+}
+
+async function repairFreeformNarrationWithModel({ modelService, freeformAgent, scenes, issues, transcriptText, targetDurationSec } = {}) {
+  const messages = buildFreeformNarrationRepairMessages({ scenes, issues, transcriptText, targetDurationSec });
+  const response = await modelService.callTextModel({ messages });
+  if (!response || response.success === false) {
+    return { success: false, message: response?.message || '旁白修复失败。' };
+  }
+  const parsed = freeformAgent.parseFreeformBriefResponse(response.text || response.content || '');
+  if (!parsed.success) return parsed;
+  const applied = applyFreeformNarrationRepairs(scenes, extractRepairScenes(parsed.brief));
+  if (!applied.changed) return { success: false, message: '旁白修复结果缺少可用 scenes。' };
+  const validation = narrationQuality.validateNarrationScenes(applied.scenes);
+  if (!validation.ok) return { success: false, message: validation.message, issues: validation.issues };
+  return { success: true, scenes: applied.scenes };
 }
 
 function getCaptionDuration(captions = []) {
@@ -1329,9 +1473,59 @@ async function synthesizeDouyinRunHyperframesFreeformAudio(awemeId, runId, optio
     return failHyperframesFreeformSection(awemeId, runId, 'audio', '导演策划中没有可用于配音的旁白。', options);
   }
   const targetDurationSec = resolveFreeformTargetDurationSec(currentState.brief.data, detail.data, options);
-  const narrationFit = fitFreeformNarrationToBudget(currentState.brief.data, scenes, targetDurationSec);
+  let narrationFit = fitFreeformNarrationToBudget(currentState.brief.data, scenes, targetDurationSec);
   scenes = narrationFit.scenes;
-  const narrationValidation = narrationQuality.validateNarrationScenes(scenes);
+  let transcript = null;
+  if (narrationFit.needsCompression) {
+    transcript = await readJsonIfExists(mediaPipeline.getMediaPaths(awemeId, options.rootDir).transcript);
+    const compression = await compressFreeformNarrationWithModel({
+      modelService: options.aiTextModel || defaultAiTextModel,
+      freeformAgent: options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent,
+      scenes,
+      budget: narrationFit.budget,
+      transcriptText: transcript?.text || '',
+      targetDurationSec,
+    });
+    if (!compression.success) {
+      return failHyperframesFreeformSection(
+        awemeId,
+        runId,
+        'audio',
+        `口播超过目标时长，自动压缩失败：${compression.message || '未知错误'}`,
+        options,
+        { narration_budget: compression.budget || narrationFit.budget },
+      );
+    }
+    scenes = compression.scenes;
+    narrationFit = {
+      scenes,
+      brief: replaceFreeformBriefScenes(currentState.brief.data, scenes, compression.budget),
+      budget: compression.budget,
+      changed: true,
+    };
+  }
+  let narrationValidation = narrationQuality.validateNarrationScenes(scenes);
+  if (!narrationValidation.ok) {
+    transcript = transcript || await readJsonIfExists(mediaPipeline.getMediaPaths(awemeId, options.rootDir).transcript);
+    const repair = await repairFreeformNarrationWithModel({
+      modelService: options.aiTextModel || defaultAiTextModel,
+      freeformAgent: options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent,
+      scenes,
+      issues: narrationValidation.issues,
+      transcriptText: transcript?.text || '',
+      targetDurationSec,
+    });
+    if (repair.success) {
+      scenes = repair.scenes;
+      narrationFit = {
+        ...narrationFit,
+        scenes,
+        brief: replaceFreeformBriefScenes(narrationFit.brief, scenes, narrationFit.budget),
+        changed: true,
+      };
+      narrationValidation = narrationQuality.validateNarrationScenes(scenes);
+    }
+  }
   if (!narrationValidation.ok) {
     return failHyperframesFreeformSection(
       awemeId,
@@ -1708,7 +1902,22 @@ async function generateDouyinRunHyperframesFreeformProject(awemeId, runId, optio
       };
     }
     if (!result.success) {
-      return markFreeformProjectFailed(awemeId, runId, result.message || 'html-video lite 成片失败。', options, operationId);
+      return markFreeformProjectFailed(
+        awemeId,
+        runId,
+        result.message || 'html-video lite 成片失败。',
+        options,
+        operationId,
+        {
+          render_mode: result.render_mode || '',
+          project_dir: result.project_dir || result.html_video_project_path || '',
+          html_video_project_path: result.html_video_project_path || result.project_dir || '',
+          html_video_diagnostics: result.html_video_diagnostics || result.diagnostics || [],
+          diagnostics: result.diagnostics || result.html_video_diagnostics || [],
+          fallback_allowed: result.fallback_allowed,
+          retryable: result.retryable,
+        },
+      );
     }
     const renderMode = result.render_mode || '';
     const isHtmlVideoProduction = renderMode === 'html-video';

@@ -524,6 +524,41 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   });
   assert.equal(rawHtmlDecorativeFrame.ok, true);
 
+  await writeFile(path.join(rawHtmlProjectDir, 'frames', 'root-container-with-body-contract.html'), [
+    '<!doctype html>',
+    '<html><head>',
+    '<meta name="viewport" content="width=1920,height=1080,initial-scale=1.0">',
+    '<style>html,body{margin:0;width:1920px;height:1080px;overflow:hidden}</style>',
+    '</head><body data-hv-canvas data-width="1920" data-height="1080">',
+    '<div id="root">',
+    '<h1 data-text-key="headline">横屏标题</h1>',
+    '<p data-text-key="subtitle">短字幕</p>',
+    '<section data-text-key="body">正文</section>',
+    '</div>',
+    '</body></html>',
+  ].join('\n'));
+  const rawHtmlRootContainer = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: {
+      template_id: 'valid',
+      template_inputs: {},
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30 },
+      frames: [
+        {
+          id: 'raw_root_container',
+          template_id: 'valid',
+          source_mode: 'raw_html',
+          inputs: {},
+          html_path: 'frames/root-container-with-body-contract.html',
+        },
+      ],
+      timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_root_container', kind: 'frame' }] }] },
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(rawHtmlRootContainer.ok, true);
+
   await writeFile(path.join(rawHtmlProjectDir, 'frames', 'wrong-resolution.html'), [
     '<!doctype html>',
     '<html><head>',

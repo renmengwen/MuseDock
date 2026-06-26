@@ -104,6 +104,7 @@ function extractDataCanvasDimensions(html = '') {
     const hasComposition = /\bdata-composition-id\s*=/i.test(tag);
     const isRoot = /^root$/i.test(id);
     if (!hasHvCanvas && !isRoot && !hasComposition) continue;
+    if (!hasAttr(tag, 'data-width') || !hasAttr(tag, 'data-height')) continue;
     const width = Number(attr(tag, 'data-width'));
     const height = Number(attr(tag, 'data-height'));
     if (Number.isFinite(width) && Number.isFinite(height)) {

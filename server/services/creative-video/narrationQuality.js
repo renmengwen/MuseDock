@@ -29,6 +29,12 @@ function isConditionalFragment(text) {
     && !/(就|则|建议|推荐|优先|选择|可以|应该|最好|通常|直接|记住|关键|结论|够用)/.test(value);
 }
 
+function isFinalRetrospectiveFragment(text) {
+  const value = compactText(text);
+  return /^(十年前|几年前|过去|以前|曾经|当年|那时).{4,40}(必经之路|行业标准|主流|标配|核心|代名词)[。！？!?]$/.test(value)
+    && !/(今天|现在|如今|而今天|而现在|但今天|但现在|新的|新项目|正在|已经|未来|接下来|必修课|默认答案)/.test(value);
+}
+
 function trimNarrationToCompleteBoundary(text, maxChars) {
   const limit = Math.max(1, Number(maxChars || 0));
   const compact = compactText(text);
@@ -46,9 +52,10 @@ function trimNarrationToCompleteBoundary(text, maxChars) {
 
 function validateNarrationScenes(scenes = []) {
   const issues = [];
-  for (const [index, scene] of (Array.isArray(scenes) ? scenes : []).entries()) {
+  const list = Array.isArray(scenes) ? scenes : [];
+  for (const [index, scene] of list.entries()) {
     const text = String(scene?.narration_text || '').trim();
-    if (isIncompleteNarration(text)) {
+    if (isIncompleteNarration(text) || (index === list.length - 1 && isFinalRetrospectiveFragment(text))) {
       issues.push({
         index: Number(scene?.index || index + 1),
         narration_text: text,
@@ -66,6 +73,7 @@ function validateNarrationScenes(scenes = []) {
 
 module.exports = {
   isIncompleteNarration,
+  isFinalRetrospectiveFragment,
   trimNarrationToCompleteBoundary,
   validateNarrationScenes,
 };

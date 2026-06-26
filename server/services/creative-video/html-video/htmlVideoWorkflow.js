@@ -349,6 +349,7 @@ function providerMissingTextDiagnostic() {
 }
 
 const CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE = '画面结构与旁白脚本不一致，已停止渲染。请重新生成画面结构后再导出。';
+const FRAME_HTML_MODEL_OPTIONS = { requestTimeoutMs: 90000, maxRetries: 0 };
 
 function contentGraphSceneSpecMismatchDiagnostic(graphBinding = {}, options = {}) {
   return createDiagnostic({
@@ -1191,6 +1192,7 @@ async function generateHtmlVideo(options = {}) {
         model,
         frameId: node.id || sceneId,
         attempt: 1,
+        modelOptions: FRAME_HTML_MODEL_OPTIONS,
         graph: contentGraph,
         node,
         index,
@@ -1207,7 +1209,7 @@ async function generateHtmlVideo(options = {}) {
           model,
           frameId: node.id || sceneId,
           attempt: 2,
-          modelOptions: { stream: false },
+          modelOptions: { ...FRAME_HTML_MODEL_OPTIONS, stream: false },
           shortPrompt: true,
           graph: contentGraph,
           node,
