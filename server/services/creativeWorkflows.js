@@ -74,11 +74,57 @@ function getNow(services = {}) {
   return new Date().toISOString();
 }
 
+function nullableNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeModelUsage(value) {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    prompt_tokens: nullableNumber(input.prompt_tokens),
+    completion_tokens: nullableNumber(input.completion_tokens),
+    total_tokens: nullableNumber(input.total_tokens),
+    cached_tokens: nullableNumber(input.cached_tokens),
+  };
+}
+
 function makeId(now = new Date().toISOString()) {
   const stamp = safeString(now).replace(/\D/g, '').slice(0, 14)
     || new Date().toISOString().replace(/\D/g, '').slice(0, 14);
   const random = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
   return `${stamp}${random}`;
+}
+
+function appendWorkflowModelCall(record, modelCall = {}) {
+  if (!record || typeof record !== 'object') return record;
+  const input = modelCall && typeof modelCall === 'object' && !Array.isArray(modelCall) ? modelCall : {};
+  const attempt = Number(input.attempt);
+  const durationMs = Number(input.duration_ms);
+  const existingCount = Array.isArray(record.model_calls) ? record.model_calls.length : 0;
+  const call = {
+    id: safeString(input.id) || `model_call_${String(existingCount + 1).padStart(4, '0')}`,
+    agent: safeString(input.agent),
+    stage: safeString(input.stage),
+    sub_stage: safeString(input.sub_stage),
+    frame_id: safeString(input.frame_id),
+    node_id: safeString(input.node_id),
+    attempt: Number.isFinite(attempt) ? attempt : null,
+    model: {
+      provider: safeString(input.model?.provider),
+      model_id: safeString(input.model?.model_id),
+    },
+    usage: normalizeModelUsage(input.usage),
+    duration_ms: Number.isFinite(durationMs) ? durationMs : null,
+    success: input.success !== false,
+    error: safeString(input.error),
+    created_at: safeString(input.created_at) || new Date().toISOString(),
+  };
+  record.model_calls = [
+    ...(Array.isArray(record.model_calls) ? record.model_calls : []),
+    call,
+  ].slice(-500);
+  return record;
 }
 
 function makeLocalCreativeAwemeId(seed) {
@@ -3523,6 +3569,7 @@ module.exports = {
   deleteCreativeWorkflow,
   getWorkflowPath,
   makeLocalCreativeAwemeId,
+  appendWorkflowModelCall,
   recoverStaleWorkflowsOnStartup,
   getCreativeWorkflowVideoSpec,
   getCreativeWorkflowHtmlVideoProject,

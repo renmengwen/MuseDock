@@ -93,6 +93,7 @@ function defaultGenerationCheckpoint(project = {}) {
       duration_verify: { status: 'pending', expected_duration_sec: null, actual_duration_sec: null },
       visual_inspect: { status: 'pending', report_path: null },
     },
+    model_calls: [],
     updated_at: '',
   };
 }
@@ -292,6 +293,16 @@ function nullableNumberField(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function normalizeModelUsage(value) {
+  const input = objectOrEmpty(value);
+  return {
+    prompt_tokens: nullableNumberField(input.prompt_tokens),
+    completion_tokens: nullableNumberField(input.completion_tokens),
+    total_tokens: nullableNumberField(input.total_tokens),
+    cached_tokens: nullableNumberField(input.cached_tokens),
+  };
+}
+
 function normalizeCheckpointFrames(value, type) {
   const frames = objectOrEmpty(value);
   return Object.fromEntries(Object.entries(frames).map(([sceneId, frame]) => {
@@ -311,6 +322,30 @@ function normalizeCheckpointFrames(value, type) {
   }));
 }
 
+function normalizeModelCall(value, index = 0) {
+  const input = objectOrEmpty(value);
+  const attempt = Number(input.attempt);
+  const durationMs = Number(input.duration_ms);
+  return {
+    id: firstNonEmptyString(input.id, `model_call_${String(index + 1).padStart(4, '0')}`),
+    agent: stringField(input.agent),
+    stage: stringField(input.stage),
+    sub_stage: stringField(input.sub_stage),
+    frame_id: stringField(input.frame_id),
+    node_id: stringField(input.node_id),
+    attempt: Number.isFinite(attempt) ? attempt : null,
+    model: {
+      provider: stringField(objectOrEmpty(input.model).provider),
+      model_id: stringField(objectOrEmpty(input.model).model_id),
+    },
+    usage: normalizeModelUsage(input.usage),
+    duration_ms: Number.isFinite(durationMs) ? durationMs : null,
+    success: input.success !== false,
+    error: stringField(input.error),
+    created_at: firstNonEmptyString(input.created_at, new Date().toISOString()),
+  };
+}
+
 function normalizeGenerationCheckpoint(input = {}, project = {}) {
   const source = objectOrEmpty(input);
   const defaults = defaultGenerationCheckpoint(project);
@@ -325,6 +360,7 @@ function normalizeGenerationCheckpoint(input = {}, project = {}) {
       duration_sec: nullableNumberField(target.duration_sec),
       aspect_ratio: stringField(target.aspect_ratio),
     },
+    model_calls: arrayOrEmpty(source.model_calls).map(normalizeModelCall).slice(-500),
     stages: {
       validate_project: {
         status: stringField(objectOrEmpty(stages.validate_project).status || 'pending'),
@@ -412,6 +448,16 @@ function markCheckpointFrame(project, stageId, sceneId, patch = {}) {
     ...checkpoint,
     updated_at: new Date().toISOString(),
   }, project);
+  return project;
+}
+
+function appendCheckpointModelCall(project, modelCall = {}) {
+  const checkpoint = ensureGenerationCheckpoint(project);
+  checkpoint.model_calls = [
+    ...arrayOrEmpty(checkpoint.model_calls),
+    normalizeModelCall(modelCall, checkpoint.model_calls.length),
+  ].slice(-500);
+  checkpoint.updated_at = new Date().toISOString();
   return project;
 }
 
@@ -511,6 +557,7 @@ module.exports = {
   createEmptyProject,
   normalizeProject,
   normalizeGenerationCheckpoint,
+  appendCheckpointModelCall,
   createEmptyGenerationCheckpoint,
   markCheckpointStage,
   markCheckpointFrame,

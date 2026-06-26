@@ -198,6 +198,31 @@ function extractResponseText(rawResponse) {
   return extractOutputArrayText(rawResponse?.output);
 }
 
+function nullableNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function extractUsage(rawResponse) {
+  const usage = rawResponse?.usage || (
+    Array.isArray(rawResponse?.chunks)
+      ? rawResponse.chunks.findLast(chunk => chunk?.usage)?.usage
+      : null
+  );
+  if (!usage || typeof usage !== 'object') return null;
+  return {
+    prompt_tokens: nullableNumber(usage.prompt_tokens ?? usage.input_tokens),
+    completion_tokens: nullableNumber(usage.completion_tokens ?? usage.output_tokens),
+    total_tokens: nullableNumber(usage.total_tokens),
+    cached_tokens: nullableNumber(
+      usage.cached_tokens
+      ?? usage.prompt_tokens_details?.cached_tokens
+      ?? usage.input_tokens_details?.cached_tokens
+      ?? usage.input_token_details?.cached_tokens,
+    ),
+  };
+}
+
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -454,6 +479,7 @@ async function callTextModel(options = {}) {
           text,
           model: toModelInfo(provider, modelId),
           raw_response: rawResponse,
+          usage: extractUsage(rawResponse),
           fallback: {
             from_stream: true,
             reason: timedOut ? 'stream_timeout' : 'gateway_timeout',
@@ -524,6 +550,7 @@ async function callTextModel(options = {}) {
                 text,
                 model: toModelInfo(provider, modelId),
                 raw_response: rawResponse,
+                usage: extractUsage(rawResponse),
                 fallback: {
                   from_stream: true,
                   reason: 'stream_timeout',
@@ -584,6 +611,7 @@ async function callTextModel(options = {}) {
       text: streamResult.text,
       model: toModelInfo(provider, modelId),
       raw_response: streamResult.raw_response,
+      usage: extractUsage(streamResult.raw_response),
     };
   }
 
@@ -663,6 +691,7 @@ async function callTextModel(options = {}) {
     text,
     model: toModelInfo(provider, modelId),
     raw_response: rawResponse,
+    usage: extractUsage(rawResponse),
   };
 }
 

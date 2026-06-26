@@ -66,6 +66,7 @@ async function run() {
   assert.strictEqual(ok.text, '{"summary":"ok"}');
   assert.strictEqual(ok.model.provider, 'OpenAI');
   assert.strictEqual(ok.model.model_id, 'gpt-test');
+  assert.strictEqual(ok.usage, null);
   assert.doesNotMatch(JSON.stringify(ok.raw_response), /sk-test/);
   assert.strictEqual(requestedUrl, 'https://api.example.com/v1/chat/completions');
   assert.strictEqual(requestedOptions.headers.Authorization, 'Bearer sk-test');
@@ -74,6 +75,82 @@ async function run() {
   assert.deepStrictEqual(body.messages, [{ role: 'user', content: '生成 JSON' }]);
   assert.ok(requestedOptions.signal, 'text model requests should include an AbortSignal');
   assert.strictEqual(typeof requestedOptions.signal.aborted, 'boolean');
+
+  const usageResult = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'usage' }],
+    configPath,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: 'usage ok' } }],
+        usage: {
+          prompt_tokens: 10,
+          completion_tokens: 3,
+          total_tokens: 13,
+          prompt_tokens_details: {
+            cached_tokens: 4,
+          },
+        },
+      }),
+    }),
+  });
+  assert.strictEqual(usageResult.success, true);
+  assert.deepStrictEqual(usageResult.usage, {
+    prompt_tokens: 10,
+    completion_tokens: 3,
+    total_tokens: 13,
+    cached_tokens: 4,
+  });
+
+  const usageAliasResult = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'usage alias' }],
+    configPath,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: 'usage alias ok' } }],
+        usage: {
+          input_tokens: 12,
+          output_tokens: 4,
+          input_token_details: {
+            cached_tokens: 7,
+          },
+        },
+      }),
+    }),
+  });
+  assert.strictEqual(usageAliasResult.success, true);
+  assert.deepStrictEqual(usageAliasResult.usage, {
+    prompt_tokens: 12,
+    completion_tokens: 4,
+    total_tokens: null,
+    cached_tokens: 7,
+  });
+
+  const usageInvalidNumberResult = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'usage invalid number' }],
+    configPath,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: 'usage invalid ok' } }],
+        usage: {
+          prompt_tokens: 'bad',
+          completion_tokens: 2,
+        },
+      }),
+    }),
+  });
+  assert.strictEqual(usageInvalidNumberResult.success, true);
+  assert.deepStrictEqual(usageInvalidNumberResult.usage, {
+    prompt_tokens: null,
+    completion_tokens: 2,
+    total_tokens: null,
+    cached_tokens: null,
+  });
 
   let injectedRequestOptions = null;
   const injected = await aiTextModel.callTextModel({
@@ -179,6 +256,7 @@ async function run() {
   assert.strictEqual(streamed.success, true);
   assert.strictEqual(streamed.text, '{"summary":"stream ok"}');
   assert.strictEqual(streamRequestBody.stream, true);
+  assert.strictEqual(streamed.usage, null);
 
   const encoder = new TextEncoder();
   const splitChineseBytes = encoder.encode('data: {"choices":[{"delta":{"content":"中文正常"}}]}\n\n');

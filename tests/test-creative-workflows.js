@@ -15,6 +15,7 @@ const {
   getWorkflowPath,
   makeLocalCreativeAwemeId,
   exportHtmlVideoProject,
+  appendWorkflowModelCall,
 } = require('../server/services/creativeWorkflows');
 
 const NOW = '2026-06-12T12:00:00.000Z';
@@ -263,6 +264,63 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(analysisInput.creative_context.asset_context.assets[0].path, 'assets/source-image-01.png');
   assert.deepEqual(analysisInput.local_assets.images, [path.join(mediaRoot, 'fake-source-image-01.png')]);
   assert.equal(analysisInput.video.aweme_url, '');
+}
+
+async function testAppendWorkflowModelCall() {
+  const record = { workflow_id: WORKFLOW_ID };
+  appendWorkflowModelCall(record, {
+    agent: 'director',
+    stage: 'brief',
+    sub_stage: 'outline',
+    frame_id: 'frame_01',
+    node_id: 'node_01',
+    attempt: 2,
+    model: { provider: 'OpenAI', model_id: 'gpt-test' },
+    usage: { prompt_tokens: 10, completion_tokens: 'bad', total_tokens: 15, cached_tokens: 2 },
+    duration_ms: 456,
+    extra: 'drop',
+  });
+
+  const firstCall = record.model_calls[0];
+  assert.equal(record.model_calls.length, 1);
+  assert.equal(firstCall.id, 'model_call_0001');
+  assert.ok(firstCall.created_at);
+  assert.equal(firstCall.agent, 'director');
+  assert.equal(firstCall.stage, 'brief');
+  assert.equal(firstCall.sub_stage, 'outline');
+  assert.equal(firstCall.frame_id, 'frame_01');
+  assert.equal(firstCall.node_id, 'node_01');
+  assert.equal(firstCall.attempt, 2);
+  assert.deepEqual(firstCall.model, { provider: 'OpenAI', model_id: 'gpt-test' });
+  assert.deepEqual(firstCall.usage, { prompt_tokens: 10, completion_tokens: null, total_tokens: 15, cached_tokens: 2 });
+  assert.equal(firstCall.duration_ms, 456);
+  assert.equal(firstCall.success, true);
+  assert.equal(firstCall.error, '');
+  assert.equal(Object.prototype.hasOwnProperty.call(firstCall, 'extra'), false);
+
+  appendWorkflowModelCall(record, {
+    id: 'failed_call',
+    created_at: '2026-06-12T12:00:00.000Z',
+    success: false,
+    error: '调用失败',
+    usage: { prompt_tokens: 'bad', completion_tokens: 1 },
+  });
+  assert.equal(record.model_calls[1].id, 'failed_call');
+  assert.deepEqual(record.model_calls[1].usage, {
+    prompt_tokens: null,
+    completion_tokens: 1,
+    total_tokens: null,
+    cached_tokens: null,
+  });
+  assert.equal(record.model_calls[1].success, false);
+  assert.equal(record.model_calls[1].error, '调用失败');
+
+  for (let index = 0; index < 505; index += 1) {
+    appendWorkflowModelCall(record, { id: `explicit_${index}`, created_at: `2026-06-12T12:00:${String(index % 60).padStart(2, '0')}.000Z` });
+  }
+  assert.equal(record.model_calls.length, 500);
+  assert.equal(record.model_calls[0].id, 'explicit_5');
+  assert.equal(record.model_calls[499].id, 'explicit_504');
 }
 
 async function testSourceUrlStageEmitsSpecificProgressMessages() {
@@ -1816,6 +1874,7 @@ async function testSceneSpecOperations() {
 }
 
 async function run() {
+  await testAppendWorkflowModelCall();
   await testCreatesAndRunsTextWorkflow();
   await testCreatesAndRunsSourceUrlWorkflow();
   await testSourceUrlStageEmitsSpecificProgressMessages();
