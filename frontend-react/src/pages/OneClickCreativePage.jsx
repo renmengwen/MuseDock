@@ -151,6 +151,9 @@ export function OneClickCreativePage() {
   const streamClosedNormallyRef = useRef(false);
   const streamGenerationRef = useRef(0);
   const useResearchTouchedRef = useRef(false);
+  const retryPlanRequestRef = useRef({ workflowId: '', inFlight: false });
+  const retryPlanLoadedRef = useRef('');
+  const retryPlanSeqRef = useRef(0);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('quick');
   const [useResearch, setUseResearch] = useState(true);
@@ -163,6 +166,10 @@ export function OneClickCreativePage() {
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
   const [deletingWorkflowId, setDeletingWorkflowId] = useState('');
+  const [retryPlan, setRetryPlan] = useState(null);
+  const [retryPlanStatus, setRetryPlanStatus] = useState('idle');
+  const [retryPlanMessage, setRetryPlanMessage] = useState('');
+  const [retrying, setRetrying] = useState(false);
   // activeTaskRef holds the value; this state only forces stream connect/stop rerenders.
   const [, setActiveTask] = useState(null);
   const isBusy = status === 'creating' || status === 'polling' || status === 'deleting';
@@ -210,6 +217,49 @@ export function OneClickCreativePage() {
     if (clearStorage) {
       lastSeqRef.current = 0;
       saveActiveCreativeTask(null);
+    }
+  }, []);
+
+  const resetRetryPlan = useCallback(() => {
+    retryPlanSeqRef.current += 1;
+    retryPlanRequestRef.current = { workflowId: '', inFlight: false };
+    retryPlanLoadedRef.current = '';
+    setRetryPlan(null);
+    setRetryPlanStatus('idle');
+    setRetryPlanMessage('');
+    setRetrying(false);
+  }, []);
+
+  const loadRetryPlan = useCallback(async (targetWorkflowId, { force = false, message: nextMessage = '', cacheKey = '' } = {}) => {
+    const id = String(targetWorkflowId || '').trim();
+    if (!id) return;
+    const requestKey = cacheKey || id;
+    if (!force && retryPlanRequestRef.current.workflowId === requestKey && retryPlanRequestRef.current.inFlight) return;
+
+    const seq = retryPlanSeqRef.current + 1;
+    retryPlanSeqRef.current = seq;
+    retryPlanRequestRef.current = { workflowId: requestKey, inFlight: true };
+    if (force) retryPlanLoadedRef.current = '';
+    setRetryPlanStatus('loading');
+    setRetryPlanMessage(nextMessage || '正在生成恢复计划...');
+    try {
+      const json = await api.getCreativeWorkflowRetryPlan(id);
+      if (retryPlanSeqRef.current !== seq) return;
+      const plan = json?.plan || json?.data?.plan || null;
+      setRetryPlan(plan);
+      setRetryPlanStatus('ready');
+      setRetryPlanMessage(nextMessage || plan?.user_message || json?.message || '恢复计划已生成。');
+      retryPlanLoadedRef.current = requestKey;
+    } catch (error) {
+      if (retryPlanSeqRef.current !== seq) return;
+      setRetryPlan(null);
+      setRetryPlanStatus('failed');
+      setRetryPlanMessage(getErrorMessage(error, '生成恢复计划失败，请稍后重试。'));
+      retryPlanLoadedRef.current = '';
+    } finally {
+      if (retryPlanSeqRef.current === seq) {
+        retryPlanRequestRef.current = { workflowId: '', inFlight: false };
+      }
     }
   }, []);
 
@@ -384,6 +434,7 @@ export function OneClickCreativePage() {
       setStatus('polling');
     }
     if (event.type === 'task_failed') {
+      setRetrying(false);
       setStatus('failed');
       setMessage(event.message || '创作任务失败。');
       fetchFinalWorkflow({
@@ -395,6 +446,7 @@ export function OneClickCreativePage() {
       });
     }
     if (event.type === 'task_done') {
+      setRetrying(false);
       setStatus('done');
       setMessage(event.message || '创作任务已完成。');
       fetchFinalWorkflow({
@@ -409,6 +461,7 @@ export function OneClickCreativePage() {
       const terminalGeneration = streamGenerationRef.current + 1;
       stopTaskStream({ clearStorage: true });
       if (event.status === 'done') {
+        setRetrying(false);
         setStatus('done');
         setMessage(event.message || '创作任务已完成。');
         fetchFinalWorkflow({
@@ -422,6 +475,7 @@ export function OneClickCreativePage() {
         });
       }
       if (event.status === 'failed') {
+        setRetrying(false);
         setStatus('failed');
         setMessage(event.message || '创作任务失败。');
         fetchFinalWorkflow({
@@ -435,6 +489,7 @@ export function OneClickCreativePage() {
         });
       }
       if (event.status === 'deleted') {
+        setRetrying(false);
         finalWorkflowRefreshRef.current = null;
         persistTasks(prev => prev.filter(item => item.workflow_id !== event.workflow_id));
         setWorkflow(null);
@@ -578,6 +633,90 @@ export function OneClickCreativePage() {
     persistTasks(prev => prev.filter(item => item.workflow_id !== id));
     if (selectedWorkflowId === id || workflowId === id) {
       startNewTask();
+    }
+  }
+
+  async function handleRetryWorkflow() {
+    const targetWorkflowId = String(workflow?.workflow_id || selectedWorkflowId || workflowId || '').trim();
+    if (!targetWorkflowId) {
+      setRetryPlanStatus('failed');
+      setRetryPlanMessage('缺少创作任务 ID，无法重试。');
+      return;
+    }
+    if (!retryPlan || retryPlan.can_retry !== true) {
+      setRetryPlanMessage(retryPlan?.user_message || '当前失败暂不支持自动恢复。');
+      return;
+    }
+    if (retrying) return;
+
+    setRetrying(true);
+    setStatus('polling');
+    setMessage('正在修复并重试...');
+    persistTasks(prev => updateTask(prev, {
+      workflow_id: targetWorkflowId,
+      status: 'running',
+      message: '正在修复并重试...',
+      workflow,
+      updated_at: new Date().toISOString(),
+    }));
+
+    try {
+      const json = await api.retryCreativeWorkflow(targetWorkflowId, {
+        mode: 'repair_and_resume',
+        confirm_plan_code: retryPlan.code,
+      });
+      const nextWorkflowId = json?.workflow_id || targetWorkflowId;
+      const taskId = json?.task_id || json?.active_task?.task_id || '';
+      if (!taskId) {
+        const noTaskMessage = '恢复重试已启动，但未返回任务 ID，请稍后刷新任务。';
+        setRetrying(false);
+        setStatus('failed');
+        setMessage(noTaskMessage);
+        persistTasks(prev => updateTask(prev, {
+          workflow_id: targetWorkflowId,
+          status: 'failed',
+          message: noTaskMessage,
+          workflow,
+          updated_at: new Date().toISOString(),
+        }));
+        return;
+      }
+      const nextTask = { workflow_id: nextWorkflowId, task_id: taskId };
+      saveActiveCreativeTask({ ...nextTask, last_seq: 0 });
+      subscribeTaskEvents(nextTask, { sinceSeq: 0 });
+      setWorkflowId(nextWorkflowId);
+      setSelectedWorkflowId(nextWorkflowId);
+      setMessage('正在修复并重试...');
+      persistTasks(prev => updateTask(prev, {
+        workflow_id: nextWorkflowId,
+        status: 'running',
+        message: '正在修复并重试...',
+        workflow,
+        updated_at: new Date().toISOString(),
+      }));
+    } catch (error) {
+      const errorMessage = getErrorMessage(error, '启动恢复重试失败，请稍后重试。');
+      const planChanged = error?.data?.code === 'RETRY_PLAN_CODE_CHANGED' || errorMessage.includes('恢复计划已变化');
+      setRetrying(false);
+      setStatus('failed');
+      setMessage(errorMessage);
+      persistTasks(prev => updateTask(prev, {
+        workflow_id: targetWorkflowId,
+        status: 'failed',
+        message: errorMessage,
+        workflow,
+        updated_at: new Date().toISOString(),
+      }));
+      if (planChanged) {
+        const changedMessage = '恢复计划已变化，请确认最新建议后再重试。';
+        await loadRetryPlan(targetWorkflowId, {
+          force: true,
+          message: changedMessage,
+          cacheKey: `${targetWorkflowId}:plan-changed:${Date.now()}`,
+        });
+        return;
+      }
+      setRetryPlanMessage(errorMessage);
     }
   }
 
@@ -770,6 +909,32 @@ export function OneClickCreativePage() {
     };
   }, [status, workflowId, persistTasks, stopTaskStream, subscribeTaskEvents]);
 
+  useEffect(() => {
+    const targetWorkflowId = String(workflow?.workflow_id || selectedWorkflowId || workflowId || '').trim();
+    if (workflow?.status !== 'failed' || !targetWorkflowId) {
+      resetRetryPlan();
+      return undefined;
+    }
+    const failureKey = [
+      targetWorkflowId,
+      workflow?.last_failure?.code || workflow?.retry?.latest_plan?.code || '',
+      workflow?.last_failure?.updated_at || workflow?.updated_at || '',
+    ].join(':');
+    loadRetryPlan(targetWorkflowId, { cacheKey: failureKey });
+    return undefined;
+  }, [
+    workflow?.status,
+    workflow?.workflow_id,
+    workflow?.last_failure?.code,
+    workflow?.last_failure?.updated_at,
+    workflow?.retry?.latest_plan?.code,
+    workflow?.updated_at,
+    selectedWorkflowId,
+    workflowId,
+    loadRetryPlan,
+    resetRetryPlan,
+  ]);
+
   useEffect(() => () => {
     stopTaskStream();
   }, [stopTaskStream]);
@@ -813,8 +978,13 @@ export function OneClickCreativePage() {
             workflowId={selectedWorkflowId}
             workflow={workflow}
             deletingWorkflowId={deletingWorkflowId}
+            retryPlan={retryPlan}
+            retryPlanStatus={retryPlanStatus}
+            retryPlanMessage={retryPlanMessage}
+            retrying={retrying}
             onStopAndDelete={stopAndDeleteTask}
             onContinueEdit={continueEdit}
+            onRetryWorkflow={handleRetryWorkflow}
             getWorkflowVideoUrl={getWorkflowVideoUrl}
           />
         </div>

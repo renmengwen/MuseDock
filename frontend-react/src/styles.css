@@ -906,6 +906,70 @@ a { color: #fe2c55; text-decoration: none; }
   cursor: not-allowed;
   opacity: .72;
 }
+.creativeRetryPanel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fffbeb;
+}
+.creativeRetryHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.creativeRetryHeader h3 {
+  margin: 0;
+  color: #111827;
+  font-size: 15px;
+  line-height: 1.35;
+}
+.creativeRetryHeader p {
+  margin: 4px 0 0;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.creativeRetryState {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #92400e;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.creativeRetryState.isError {
+  color: #b42318;
+}
+.creativeRetryFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin: 0;
+}
+.creativeRetryFacts div {
+  min-width: 0;
+}
+.creativeRetryFacts dt {
+  margin: 0 0 4px;
+  color: #8a93a2;
+  font-size: 12px;
+  font-weight: 700;
+}
+.creativeRetryFacts dd {
+  margin: 0;
+  color: #1f2937;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.creativeRetryButton {
+  justify-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .creativePromptModal {
   width: min(92vw, 680px);
   max-height: min(82vh, 640px);
@@ -1300,6 +1364,13 @@ a { color: #fe2c55; text-decoration: none; }
   .creativeTaskActions {
     align-self: flex-start;
     justify-content: flex-start;
+  }
+  .creativeRetryFacts {
+    grid-template-columns: 1fr;
+  }
+  .creativeRetryButton {
+    width: 100%;
+    justify-content: center;
   }
   .toolbar, .mediaHeader, .workspaceIntro, .modelConfigHeader { flex-direction: column; align-items: stretch; }
   .tabs { overflow-x: auto; }

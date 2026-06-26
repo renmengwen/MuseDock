@@ -961,16 +961,16 @@ node tests/test-creative-workflow-retry-task.js
 
 **具体实现步骤:**
 
-- [ ] 在 `CreativeTaskDetail.jsx` 增加 props：`retryPlan`、`retryPlanStatus`、`retryPlanMessage`、`retrying`、`onRetryWorkflow`。
-- [ ] 在 workflow `status === 'failed'` 时展示“恢复建议”区域。
-- [ ] 当 retry plan loading 时展示 `正在生成恢复计划...`。
-- [ ] 当 retry 执行中时按钮 disabled，按钮文案展示 `正在修复并重试...`。
-- [ ] `plan.can_retry === false` 时隐藏按钮，展示 `plan.user_message`；环境错误示例为 `无法自动重试：ffmpeg 不可用，请先到设置中心修复系统环境。`。
-- [ ] `plan.can_retry === true` 时展示失败位置、失败类型、处理方式、将复用、将重新执行。
-- [ ] 在 `OneClickCreativePage.jsx` 失败状态下调用 Task 8 已加入的 `api.getCreativeWorkflowRetryPlan(workflowId)`，并防止重复请求。
-- [ ] 点击“修复并重试”调用 Task 8 已加入的 `api.retryCreativeWorkflow(workflowId, { mode:'repair_and_resume', confirm_plan_code: retryPlan.code })`，成功后订阅现有 SSE。
-- [ ] retry API 返回 plan code 已变化时，重新拉取 retry plan，并展示中文提示 `恢复计划已变化，请确认最新建议后再重试。`。
-- [ ] 运行本 Task 验收命令。
+- [x] 在 `CreativeTaskDetail.jsx` 增加 props：`retryPlan`、`retryPlanStatus`、`retryPlanMessage`、`retrying`、`onRetryWorkflow`。
+- [x] 在 workflow `status === 'failed'` 时展示“恢复建议”区域。
+- [x] 当 retry plan loading 时展示 `正在生成恢复计划...`。
+- [x] 当 retry 执行中时按钮 disabled，按钮文案展示 `正在修复并重试...`。
+- [x] `plan.can_retry === false` 时隐藏按钮，展示 `plan.user_message`；环境错误示例为 `无法自动重试：ffmpeg 不可用，请先到设置中心修复系统环境。`。
+- [x] `plan.can_retry === true` 时展示失败位置、失败类型、处理方式、将复用、将重新执行。
+- [x] 在 `OneClickCreativePage.jsx` 失败状态下调用 Task 8 已加入的 `api.getCreativeWorkflowRetryPlan(workflowId)`，并防止重复请求。
+- [x] 点击“修复并重试”调用 Task 8 已加入的 `api.retryCreativeWorkflow(workflowId, { mode:'repair_and_resume', confirm_plan_code: retryPlan.code })`，成功后订阅现有 SSE。
+- [x] retry API 返回 plan code 已变化时，重新拉取 retry plan，并展示中文提示 `恢复计划已变化，请确认最新建议后再重试。`。
+- [x] 运行本 Task 验收命令。
 
 **需要新增/修改的函数签名:**
 
