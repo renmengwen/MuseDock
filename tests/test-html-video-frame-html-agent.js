@@ -75,6 +75,27 @@ assert.match(prompt, /Search \/ GitHub \/ Tech Forums \/ Docs \/ Issues/);
 assert.match(prompt, /\[object Object\]/);
 assert.match(prompt, /不要发明源素材中没有的精确事实/);
 
+const dynamicInputIndex = prompt.indexOf('---- 本次动态输入 ----');
+assert.notEqual(dynamicInputIndex, -1);
+[
+  '固定系统规则：',
+  '硬性要求：',
+  'Selected template metadata',
+].forEach(label => {
+  const index = prompt.indexOf(label);
+  assert.notEqual(index, -1);
+  assert.ok(index < dynamicInputIndex, `${label} should be before dynamic input`);
+});
+[
+  '当前帧：',
+  '当前 frame content graph node：',
+  'scene_spec 摘要：',
+].forEach(label => {
+  const index = prompt.indexOf(label);
+  assert.notEqual(index, -1);
+  assert.ok(index > dynamicInputIndex, `${label} should be after dynamic input`);
+});
+
 const assetPrompt = agent.buildFrameHtmlPrompt({
   graph,
   node: graph.nodes[0],
