@@ -8,6 +8,8 @@ const path = require('path');
 const creativeWorkflowsRouter = require('../server/routes/creativeWorkflows');
 const workflows = require('../server/services/creativeWorkflows');
 const { createCreativeTaskRegistry, defaultRegistry } = require('../server/services/creativeTaskRegistry');
+const { createDiagnostic } = require('../server/services/creative-video/html-video/diagnostics');
+const { createEmptyProject } = require('../server/services/creative-video/html-video/projectSchema');
 
 const SSE_HELPER_TIMEOUT_MS = 1000;
 
@@ -714,6 +716,214 @@ async function runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryT
   }
 }
 
+async function runRetryRouteTests() {
+  {
+    const app = express();
+    const rootDir = tempRoot();
+    const projectDir = path.join(rootDir, 'project');
+    const workflowId = '202606250800000001';
+    const diagnostic = createDiagnostic({
+      code: 'provider_missing_text',
+      stage: 'ai-frame-html',
+      sub_stage: 'frame_html',
+      frame_id: 'scene_05',
+      retryable: true,
+      repair_action: 'retry_frame_html',
+    });
+    const project = createEmptyProject({ workflowId, runId: 'run-route-retry-plan' });
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify(project, null, 2), 'utf-8');
+    const workflowRecord = {
+      workflow_id: workflowId,
+      status: 'failed',
+      result: {
+        hyperframes_freeform: {
+          project: {
+            html_video_project_path: projectDir,
+            project_dir: projectDir,
+            scene_spec: {
+              title: '测试脚本',
+              scenes: [{ id: 'scene_05', narration_text: '第五段旁白。' }],
+            },
+          },
+        },
+      },
+      last_failure: {
+        stage: 'project',
+        sub_stage: 'frame_html',
+        code: 'provider_missing_text',
+        frame_id: 'scene_05',
+        project_dir: projectDir,
+        diagnostics: [diagnostic],
+      },
+    };
+    const workflowPath = workflows.getWorkflowPath(workflowId, rootDir);
+    fs.mkdirSync(path.dirname(workflowPath), { recursive: true });
+    fs.writeFileSync(workflowPath, JSON.stringify(workflowRecord, null, 2), 'utf-8');
+    let retryTaskCalls = 0;
+
+    app.use(express.json());
+    app.locals.creativeWorkflows = {
+      refreshCreativeWorkflowRetryPlan: id => workflows.refreshCreativeWorkflowRetryPlan(id, { rootDir }),
+    };
+    app.locals.creativeWorkflowTasks = {
+      startCreativeWorkflowRetryTask: async () => {
+        retryTaskCalls += 1;
+        return { success: false };
+      },
+    };
+    app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+    const server = await listen(app);
+    try {
+      const response = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/retry-plan`);
+      assert.strictEqual(response.statusCode, 200);
+      assert.strictEqual(response.body.success, true);
+      assert.strictEqual(response.body.workflow_id, workflowId);
+      assert.strictEqual(response.body.plan.can_retry, true);
+      assert.strictEqual(response.body.plan.code, 'provider_missing_text');
+      assert.strictEqual(retryTaskCalls, 0);
+
+      const persisted = JSON.parse(fs.readFileSync(workflowPath, 'utf-8'));
+      assert.strictEqual(persisted.retry.latest_plan.code, response.body.plan.code);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+
+  {
+    const app = express();
+    const workflowId = '202606250800000002';
+    app.use(express.json());
+    app.locals.creativeWorkflows = {
+      refreshCreativeWorkflowRetryPlan: async id => ({
+        success: true,
+        workflow_id: id,
+        plan: { can_retry: false, code: 'workflow_not_failed' },
+      }),
+    };
+    app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+    const server = await listen(app);
+    try {
+      const response = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/retry-plan`);
+      assert.strictEqual(response.statusCode, 200);
+      assert.strictEqual(response.body.success, false);
+      assert.strictEqual(response.body.message, '当前任务未失败，无需重试。');
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+
+  {
+    const app = express();
+    const workflowId = '202606250800000003';
+    const plan = { can_retry: true, code: 'provider_missing_text', mode: 'repair_and_resume' };
+    const startCalls = [];
+    app.use(express.json());
+    app.locals.creativeTaskRegistry = createCreativeTaskRegistry({
+      idFactory: () => 'creative-task-retry-route',
+    });
+    app.locals.creativeWorkflows = {
+      refreshCreativeWorkflowRetryPlan: async id => ({ success: true, workflow_id: id, plan }),
+    };
+    app.locals.creativeWorkflowTasks = {
+      startCreativeWorkflowRetryTask: async (id, options = {}) => {
+        startCalls.push({ id, options });
+        return {
+          success: true,
+          workflow_id: id,
+          task_id: 'creative-task-retry-route',
+          retry_attempt_id: 'retry_route_001',
+          active_task: { task_id: 'creative-task-retry-route', workflow_id: id, status: 'running' },
+        };
+      },
+    };
+    app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+    const server = await listen(app);
+    try {
+      const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/retry`, {
+        mode: 'repair_and_resume',
+        confirm_plan_code: 'provider_missing_text',
+      });
+      assert.strictEqual(response.statusCode, 202);
+      assert.strictEqual(response.body.success, true);
+      assert.strictEqual(response.body.workflow_id, workflowId);
+      assert.strictEqual(response.body.task_id, 'creative-task-retry-route');
+      assert.strictEqual(response.body.retry_attempt_id, 'retry_route_001');
+      assert.strictEqual(response.body.plan.code, 'provider_missing_text');
+      assert.strictEqual(startCalls.length, 1);
+      assert.deepStrictEqual(startCalls[0].options.payload, {
+        mode: 'repair_and_resume',
+        confirm_plan_code: 'provider_missing_text',
+      });
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+
+  {
+    const app = express();
+    const workflowId = '202606250800000004';
+    app.use(express.json());
+    app.locals.creativeWorkflows = {
+      refreshCreativeWorkflowRetryPlan: async () => {
+        throw new Error('非法 mode 不应刷新恢复计划');
+      },
+    };
+    app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+    const server = await listen(app);
+    try {
+      const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/retry`, {
+        mode: 'rerun_only',
+      });
+      assert.strictEqual(response.statusCode, 400);
+      assert.match(response.body.message, /V1 仅支持 repair_and_resume/);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+
+  {
+    const app = express();
+    const workflowId = '202606250800000005';
+    const activeTask = { task_id: 'creative-task-running', workflow_id: workflowId, status: 'running' };
+    app.use(express.json());
+    app.locals.creativeWorkflows = {
+      refreshCreativeWorkflowRetryPlan: async id => ({
+        success: true,
+        workflow_id: id,
+        plan: { can_retry: true, code: 'provider_missing_text', mode: 'repair_and_resume' },
+      }),
+    };
+    app.locals.creativeWorkflowTasks = {
+      startCreativeWorkflowRetryTask: async id => ({
+        success: false,
+        workflow_id: id,
+        message: '当前创作任务仍在运行，请等待结束后再重试。',
+        active_task: activeTask,
+      }),
+    };
+    app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+    const server = await listen(app);
+    try {
+      const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/retry`, {
+        mode: 'repair_and_resume',
+        confirm_plan_code: 'provider_missing_text',
+      });
+      assert.strictEqual(response.statusCode, 409);
+      assert.strictEqual(response.body.success, false);
+      assert.strictEqual(response.body.message, '当前创作任务仍在运行，请等待结束后再重试。');
+      assert.strictEqual(response.body.active_task.task_id, 'creative-task-running');
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+}
+
 async function run() {
   await runIsolatedRouterTests();
   await runRealAppMountTest();
@@ -730,6 +940,7 @@ async function run() {
   await runSseWriteBackpressureKeepsSubscriptionTest();
   await runSseRequestCloseKeepsSubscriptionTest();
   await runSseRouteCleanupStaticTest();
+  await runRetryRouteTests();
   await runEditorRouteTests();
 }
 

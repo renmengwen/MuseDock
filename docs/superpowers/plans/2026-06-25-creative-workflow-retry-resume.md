@@ -870,19 +870,19 @@ node tests/test-creative-workflow-task-summary.js
 
 **具体实现步骤:**
 
-- [ ] 在 `tests/test-creative-workflow-routes.js` 增加 GET `/api/creative-workflows/:workflow_id/retry-plan` 成功用例：failed workflow 返回 `success:true` 和 `plan.can_retry`。
-- [ ] 在同一 GET 用例中读取 workflow JSON，断言 `record.retry.latest_plan.code === response.plan.code`，确认 GET 只刷新 plan 缓存、不启动 task。
-- [ ] 增加 GET 失败用例：非 failed workflow 返回 `success:false`、中文 message `当前任务未失败，无需重试。`。
-- [ ] 增加 POST `/api/creative-workflows/:workflow_id/retry` 用例：`mode:'repair_and_resume'` 返回 task id。
-- [ ] 增加 POST mode 非法用例：`mode:'rerun_only'` 返回 400，message 明确 V1 仅支持 `repair_and_resume`。
-- [ ] 增加 active task 用例：返回 409，message 为 `当前创作任务仍在运行，请等待结束后再重试。`。
-- [ ] 运行 `node tests/test-creative-workflow-routes.js`，预期 retry routes 不存在。
-- [ ] 在 `creativeWorkflows.js` 导出 `getCreativeWorkflowRetryPlan()`、`refreshCreativeWorkflowRetryPlan()` 与 `retryCreativeWorkflow()`。
-- [ ] 在 `creativeWorkflowTasks.js` 导出 `startCreativeWorkflowRetryTask()`。
-- [ ] 在 `server/routes/creativeWorkflows.js` 新增 GET retry-plan route，调用 `refreshCreativeWorkflowRetryPlan()` 生成 plan、写入 `record.retry.latest_plan`，再返回 plan；该 GET 不启动后台 task。
-- [ ] 在 `server/routes/creativeWorkflows.js` 新增 POST retry route，校验 mode，先重新调用 `refreshCreativeWorkflowRetryPlan()`，再校验 `confirm_plan_code` 并调用 task service 启动 retry task。
-- [ ] 在 `frontend-react/src/api/client.js` 新增 `getCreativeWorkflowRetryPlan(workflowId)` 和 `retryCreativeWorkflow(workflowId, payload)`。
-- [ ] 运行本 Task 验收命令。
+- [x] 在 `tests/test-creative-workflow-routes.js` 增加 GET `/api/creative-workflows/:workflow_id/retry-plan` 成功用例：failed workflow 返回 `success:true` 和 `plan.can_retry`。
+- [x] 在同一 GET 用例中读取 workflow JSON，断言 `record.retry.latest_plan.code === response.plan.code`，确认 GET 只刷新 plan 缓存、不启动 task。
+- [x] 增加 GET 失败用例：非 failed workflow 返回 `success:false`、中文 message `当前任务未失败，无需重试。`。
+- [x] 增加 POST `/api/creative-workflows/:workflow_id/retry` 用例：`mode:'repair_and_resume'` 返回 task id。
+- [x] 增加 POST mode 非法用例：`mode:'rerun_only'` 返回 400，message 明确 V1 仅支持 `repair_and_resume`。
+- [x] 增加 active task 用例：返回 409，message 为 `当前创作任务仍在运行，请等待结束后再重试。`。
+- [x] 运行 `node tests/test-creative-workflow-routes.js`，预期 retry routes 不存在。
+- [x] 在 `creativeWorkflows.js` 导出 `getCreativeWorkflowRetryPlan()`、`refreshCreativeWorkflowRetryPlan()` 与 `retryCreativeWorkflow()`。
+- [x] 在 `creativeWorkflowTasks.js` 导出 `startCreativeWorkflowRetryTask()`。
+- [x] 在 `server/routes/creativeWorkflows.js` 新增 GET retry-plan route，调用 `refreshCreativeWorkflowRetryPlan()` 生成 plan、写入 `record.retry.latest_plan`，再返回 plan；该 GET 不启动后台 task。
+- [x] 在 `server/routes/creativeWorkflows.js` 新增 POST retry route，校验 mode，先重新调用 `refreshCreativeWorkflowRetryPlan()`，再校验 `confirm_plan_code` 并调用 task service 启动 retry task。
+- [x] 在 `frontend-react/src/api/client.js` 新增 `getCreativeWorkflowRetryPlan(workflowId)` 和 `retryCreativeWorkflow(workflowId, payload)`。
+- [x] 运行本 Task 验收命令。
 
 **需要新增/修改的函数签名:**
 

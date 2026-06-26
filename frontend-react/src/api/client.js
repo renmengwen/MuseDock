@@ -157,6 +157,16 @@ export const api = {
   getCreativeWorkflow(workflowId) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}`);
   },
+  getCreativeWorkflowRetryPlan(workflowId) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/retry-plan`);
+  },
+  retryCreativeWorkflow(workflowId, payload = {}) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/retry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
   streamCreativeWorkflowEvents(workflowId, payload, handlers = {}) {
     return streamJsonSse(`/api/creative-workflows/${encodeURIComponent(workflowId)}/events`, {
       task_id: payload?.task_id || payload?.taskId || '',

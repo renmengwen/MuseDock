@@ -925,6 +925,124 @@ router.get('/:workflow_id/tasks/active', async (req, res) => {
   return res.json(result);
 });
 
+router.get('/:workflow_id/retry-plan', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) return res.status(400).json(validation);
+  const workflowId = validation.workflow_id;
+
+  try {
+    const service = getService(req);
+    const result = await service.refreshCreativeWorkflowRetryPlan(workflowId);
+    if (!result || result.success === false) {
+      return res.status(getStatusCode(result)).json({
+        success: false,
+        ...(result || {}),
+        workflow_id: result?.workflow_id || workflowId,
+        message: getMessage(result, '生成恢复计划失败。'),
+      });
+    }
+    if (result.plan?.can_retry === false) {
+      return res.json({
+        ...result,
+        success: false,
+        workflow_id: result.workflow_id || workflowId,
+        message: '当前任务未失败，无需重试。',
+      });
+    }
+    return res.json({
+      ...result,
+      success: true,
+      workflow_id: result.workflow_id || workflowId,
+      plan: result.plan,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `生成恢复计划失败：${error.message}`,
+    });
+  }
+});
+
+router.post('/:workflow_id/retry', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) return res.status(400).json(validation);
+  const workflowId = validation.workflow_id;
+  const payload = req.body || {};
+  const mode = safeString(payload.mode);
+  const confirmPlanCode = safeString(payload.confirm_plan_code);
+
+  if (mode !== 'repair_and_resume') {
+    return res.status(400).json({
+      success: false,
+      workflow_id: workflowId,
+      message: 'V1 仅支持 repair_and_resume 恢复模式。',
+    });
+  }
+
+  try {
+    const service = getService(req);
+    const refreshed = await service.refreshCreativeWorkflowRetryPlan(workflowId);
+    if (!refreshed || refreshed.success === false) {
+      return res.status(getStatusCode(refreshed)).json({
+        success: false,
+        ...(refreshed || {}),
+        workflow_id: refreshed?.workflow_id || workflowId,
+        message: getMessage(refreshed, '生成恢复计划失败。'),
+      });
+    }
+
+    const plan = refreshed.plan || {};
+    if (confirmPlanCode !== safeString(plan.code)) {
+      return res.status(400).json({
+        success: false,
+        workflow_id: workflowId,
+        plan,
+        message: '恢复计划已变化，请确认最新建议后再重试。',
+      });
+    }
+    if (plan.can_retry !== true) {
+      return res.status(400).json({
+        success: false,
+        workflow_id: workflowId,
+        plan,
+        message: plan.user_message || '当前任务无法自动重试。',
+      });
+    }
+
+    const started = await getTaskService(req).startCreativeWorkflowRetryTask(workflowId, {
+      registry: getTaskRegistry(req),
+      payload: {
+        mode: 'repair_and_resume',
+        confirm_plan_code: confirmPlanCode,
+      },
+      services: { creativeWorkflows: service },
+    });
+    if (!started || started.success === false) {
+      const message = getMessage(started, '启动恢复重试任务失败。');
+      return res.status(message === '当前创作任务仍在运行，请等待结束后再重试。' ? 409 : 500).json({
+        success: false,
+        ...(started || {}),
+        workflow_id: started?.workflow_id || workflowId,
+        message,
+      });
+    }
+
+    return res.status(202).json({
+      ...started,
+      success: true,
+      workflow_id: started.workflow_id || workflowId,
+      plan,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `启动恢复重试任务失败：${error.message}`,
+    });
+  }
+});
+
 router.get('/:workflow_id', async (req, res) => {
   const workflowId = String(req.params.workflow_id || '').trim();
   if (!WORKFLOW_ID_PATTERN.test(workflowId)) {
