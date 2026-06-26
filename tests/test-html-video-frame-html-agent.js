@@ -254,12 +254,13 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
       callTextModel: async request => {
         shortPromptInvalidCalls += 1;
         assert.equal(request.stream, false);
+        assert.equal(request.temperature, 0);
         return { success: true, text: '不是 HTML' };
       },
     },
     frameId: 'scene_01',
     attempt: 2,
-    modelOptions: { stream: false },
+    modelOptions: { temperature: 0 },
     shortPrompt: true,
     graph,
     node: graph.nodes[0],

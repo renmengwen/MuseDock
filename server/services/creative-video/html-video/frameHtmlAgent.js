@@ -403,7 +403,7 @@ async function generateFrameHtml({
   shortPrompt = false,
   ...args
 } = {}) {
-  const callOptions = attempt >= 2 && modelOptions.stream === false ? { stream: false } : modelOptions;
+  const callOptions = attempt >= 2 ? { ...modelOptions, stream: false } : modelOptions;
   const promptArgs = {
     ...args,
     frameId,
