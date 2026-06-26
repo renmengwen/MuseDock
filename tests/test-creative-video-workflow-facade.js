@@ -76,6 +76,67 @@ const { computeSceneSpecSpeechHash } = require('../server/services/creative-vide
   assert.ok(result.visual_report);
   assert.deepEqual(serviceOrder, ['projectWriter', 'checker', 'tts', 'render', 'visualQa']);
 
+  let shortCircuitModelCalls = 0;
+  const previousProductionForShortCircuit = process.env.HTML_VIDEO_PRODUCTION_ENABLED;
+  process.env.HTML_VIDEO_PRODUCTION_ENABLED = 'true';
+  const shortCircuitResult = await facade.generateCreativeVideoProject({
+    workflowId: '202606140000000008',
+    runId: 'run_008',
+    creativeContext: {
+      input: { raw_text: '短路测试' },
+      brief: {
+        title: '短路测试',
+        storyboard: {
+          scenes: [{
+            id: 'scene_01',
+            order: 1,
+            kind: 'text',
+            narration_text: '旁白',
+            visual_text: { headline: '标题', keywords: [], cards: [] },
+          }],
+        },
+      },
+      audio: {
+        status: 'ready',
+        path: path.join(tmpDir, 'short-circuit-audio.mp3'),
+        scenes: [{
+          scene_id: 'scene_01',
+          index: 1,
+          duration: 4,
+          captions: [{ id: 'cap_01', start: 0, end: 4, text: '旁白' }],
+        }],
+      },
+    },
+    services: {
+      htmlVideoWorkflow: {
+        generateHtmlVideo: async ({ sceneSpec }) => {
+          assert.equal(sceneSpec.title, '短路测试');
+          assert.equal(sceneSpec.scenes[0].id, 'scene_01');
+          assert.equal(sceneSpec.scenes[0].duration, 4);
+          assert.equal(sceneSpec.scenes[0].narration_text, '旁白');
+          return {
+            success: true,
+            render_mode: 'html-video',
+            html_video_project_path: tmpDir,
+            project: { frames: [{ id: 'scene_01' }] },
+            scene_spec: sceneSpec,
+          };
+        },
+      },
+      aiTextModel: {
+        callTextModel: async () => {
+          shortCircuitModelCalls += 1;
+          throw new Error('html-video 一键成功时不应调用 legacy/spec 模型');
+        },
+      },
+    },
+  });
+  if (previousProductionForShortCircuit == null) delete process.env.HTML_VIDEO_PRODUCTION_ENABLED;
+  else process.env.HTML_VIDEO_PRODUCTION_ENABLED = previousProductionForShortCircuit;
+  assert.equal(shortCircuitResult.success, true);
+  assert.equal(shortCircuitResult.render_mode, 'html-video');
+  assert.equal(shortCircuitModelCalls, 0);
+
   const retryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wf-facade-retry-'));
   const retryOutput = path.join(retryDir, 'output.mp4');
   fs.writeFileSync(retryOutput, Buffer.alloc(100));

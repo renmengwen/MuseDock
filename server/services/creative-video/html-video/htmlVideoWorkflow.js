@@ -13,7 +13,12 @@ const frameFallbackBuilder = require('./frameFallbackBuilder');
 const { buildRawHtmlFrameProject, normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
 const environmentDoctor = require('./environmentDoctor');
 const projectStore = require('./projectStore');
-const { normalizeProject, markCheckpointStage, markCheckpointFrame } = require('./projectSchema');
+const {
+  normalizeProject,
+  markCheckpointStage,
+  markCheckpointFrame,
+  appendCheckpointModelCall,
+} = require('./projectSchema');
 const { validateHtmlVideoProject } = require('./validationGate');
 const projectOrchestrator = require('./projectOrchestrator');
 const editPatchService = require('./editPatchService');
@@ -121,6 +126,56 @@ async function report(onProgress, event) {
 
 function getModel(services = {}) {
   return services.aiTextModel || aiTextModel;
+}
+
+function responseModelInfo(response = {}) {
+  const model = objectOrEmpty(response.model);
+  return {
+    provider: firstNonEmptyString(model.provider, response.provider),
+    model_id: firstNonEmptyString(model.model_id, model.id, response.model_id, response.modelId),
+  };
+}
+
+function createAuditedModel(model, projectDir) {
+  if (!model || typeof model.callTextModel !== 'function' || !projectDir) return model;
+  return {
+    ...model,
+    callTextModel: async request => {
+      const audit = objectOrEmpty(request?.audit);
+      const { audit: _audit, ...forwardRequest } = objectOrEmpty(request);
+      if (audit.agent && audit.stage) {
+        Object.defineProperty(forwardRequest, 'audit', {
+          value: audit,
+          enumerable: false,
+        });
+      }
+      const startedAt = Date.now();
+      let response;
+      let thrownError = null;
+      try {
+        response = await model.callTextModel(forwardRequest);
+        return response;
+      } catch (error) {
+        thrownError = error;
+        throw error;
+      } finally {
+        if (audit.agent && audit.stage) {
+          try {
+            await projectStore.writeProjectJson(projectDir, project => appendCheckpointModelCall(project, {
+              ...audit,
+              model: responseModelInfo(response),
+              usage: objectOrEmpty(response?.usage),
+              duration_ms: Date.now() - startedAt,
+              success: !thrownError && response?.success !== false,
+              error: thrownError ? firstNonEmptyString(thrownError.message) : (response?.success === false ? firstNonEmptyString(response?.message, response?.error) : ''),
+            }));
+          } catch (_) {
+            // 审计写入不能影响主生成流程。
+          }
+        }
+      }
+    },
+  };
 }
 
 async function callTextModel(model, prompt, options = {}) {
@@ -409,7 +464,15 @@ async function retryContentGraphAfterMismatch({
     data: graphBinding,
   });
   const retryPrompt = contentGraphAgent.buildRetryPrompt(sceneSpec, creativeContext, target, originalPrompt, 1);
-  return ensureGraphAiHasText(await callTextModel(model, retryPrompt, { stream: false }));
+  return ensureGraphAiHasText(await callTextModel(model, retryPrompt, {
+    stream: false,
+    audit: {
+      agent: 'ContentGraphAgent',
+      stage: 'content_graph',
+      sub_stage: 'content_graph',
+      attempt: 2,
+    },
+  }));
 }
 
 async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext, target, onProgress, project, projectDir } = {}) {
@@ -418,7 +481,14 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
     creativeContext,
     target,
   });
-  let graphAi = ensureGraphAiHasText(await callTextModel(model, originalPrompt));
+  let graphAi = ensureGraphAiHasText(await callTextModel(model, originalPrompt, {
+    audit: {
+      agent: 'ContentGraphAgent',
+      stage: 'content_graph',
+      sub_stage: 'content_graph',
+      attempt: 1,
+    },
+  }));
   const diagnostics = [];
   let retriedForProviderMissing = false;
 
@@ -432,7 +502,15 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
       data: {},
     });
     const retryPrompt = contentGraphAgent.buildRetryPrompt(sceneSpec, creativeContext, target, originalPrompt, 1);
-    graphAi = ensureGraphAiHasText(await callTextModel(model, retryPrompt, { stream: false }));
+    graphAi = ensureGraphAiHasText(await callTextModel(model, retryPrompt, {
+      stream: false,
+      audit: {
+        agent: 'ContentGraphAgent',
+        stage: 'content_graph',
+        sub_stage: 'content_graph',
+        attempt: 2,
+      },
+    }));
     retriedForProviderMissing = true;
     if (!graphAi.success && sceneSpec) {
       await report(onProgress, {
@@ -603,7 +681,14 @@ async function requestTemplateSelection({
     compactIndex: selectionIndex,
     target: promptTarget,
   });
-  const ai = await callTextModel(model, prompt);
+  const ai = await callTextModel(model, prompt, {
+    audit: {
+      agent: 'TemplateSelectorAgent',
+      stage: 'template_selection',
+      sub_stage: 'template_select',
+      attempt: 1,
+    },
+  });
   if (!ai.success) return ai;
   return templateSelectorAgent.parseTemplateSelectionResponse(ai.text, { compactIndex: selectionIndex });
 }
@@ -617,7 +702,14 @@ async function requestTemplateInputs({ model, template, creativeContext, sceneSp
     template,
     creativeContext,
   });
-  const ai = await callTextModel(model, prompt);
+  const ai = await callTextModel(model, prompt, {
+    audit: {
+      agent: 'TemplateInputAgent',
+      stage: 'template_inputs',
+      sub_stage: 'template_inputs',
+      attempt: 1,
+    },
+  });
   if (!ai.success) return ai;
   return templateInputAgent.parseTemplateInputResponse(ai.text, { template });
 }
@@ -890,7 +982,7 @@ async function generateHtmlVideo(options = {}) {
   };
   const registry = resolveRegistry(templateRegistry);
   const diagnostics = [];
-  const model = getModel(services);
+  let model = getModel(services);
   const renderTarget = resolveRenderTarget(target, sceneSpec || {});
   const templateIndexOptions = buildTemplateIndexOptions(renderTarget, sceneSpec || {});
   const effectivePreferredTemplateId = resolvePreferredTemplateId(preferredTemplateId, target);
@@ -944,6 +1036,13 @@ async function generateHtmlVideo(options = {}) {
       createDiagnostic({ code: 'template_missing', stage: 'template', sub_stage: 'template_select', user_message: '没有可用的 html-video 模板。' }),
     ]);
   }
+
+  let projectDir = existingProjectDir(rootDir, workflowId, runId);
+  const resumeProject = await loadExistingProject(projectDir);
+  if (!resumeProject) {
+    projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
+  }
+  model = createAuditedModel(model, projectDir);
 
   const selection = await requestTemplateSelection({
     model,
@@ -1003,11 +1102,6 @@ async function generateHtmlVideo(options = {}) {
   });
 
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
-  let projectDir = existingProjectDir(rootDir, workflowId, runId);
-  const resumeProject = await loadExistingProject(projectDir);
-  if (!resumeProject) {
-    projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
-  }
   await materializeCreativeContextAssets(projectDir, creativeContext);
   const generationMode = resolveGenerationMode(templateRenderTarget);
   if (generationMode === 'raw_html' && !hasSceneSpecScenes(sceneSpec)) {
@@ -1058,6 +1152,10 @@ async function generateHtmlVideo(options = {}) {
       templateInputs,
       target: templateRenderTarget,
     });
+    const checkpointProject = await loadExistingProject(projectDir);
+    if (checkpointProject?.generation_checkpoint?.model_calls?.length) {
+      project.generation_checkpoint.model_calls = checkpointProject.generation_checkpoint.model_calls;
+    }
   } else {
     const resumeAllowed = resumeArtifactsMatch(resumeProject || {}, sceneSpec, template);
     let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec, template);
@@ -1236,7 +1334,17 @@ async function generateHtmlVideo(options = {}) {
         model,
         frameId: node.id || sceneId,
         attempt: 1,
-        modelOptions: FRAME_HTML_MODEL_OPTIONS,
+        modelOptions: {
+          ...FRAME_HTML_MODEL_OPTIONS,
+          audit: {
+            agent: 'FrameHtmlAgent',
+            stage: 'frame_html',
+            sub_stage: 'frame_html',
+            frame_id: node.id || sceneId,
+            node_id: node.id || '',
+            attempt: 1,
+          },
+        },
         graph: contentGraph,
         node,
         index,
@@ -1253,7 +1361,18 @@ async function generateHtmlVideo(options = {}) {
           model,
           frameId: node.id || sceneId,
           attempt: 2,
-          modelOptions: { ...FRAME_HTML_MODEL_OPTIONS, stream: false },
+          modelOptions: {
+            ...FRAME_HTML_MODEL_OPTIONS,
+            stream: false,
+            audit: {
+              agent: 'FrameHtmlAgent',
+              stage: 'frame_html',
+              sub_stage: 'frame_html',
+              frame_id: node.id || sceneId,
+              node_id: node.id || '',
+              attempt: 2,
+            },
+          },
           shortPrompt: true,
           graph: contentGraph,
           node,

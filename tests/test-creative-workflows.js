@@ -16,6 +16,7 @@ const {
   makeLocalCreativeAwemeId,
   exportHtmlVideoProject,
   appendWorkflowModelCall,
+  runResearchProvider,
 } = require('../server/services/creativeWorkflows');
 
 const NOW = '2026-06-12T12:00:00.000Z';
@@ -264,6 +265,32 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(analysisInput.creative_context.asset_context.assets[0].path, 'assets/source-image-01.png');
   assert.deepEqual(analysisInput.local_assets.images, [path.join(mediaRoot, 'fake-source-image-01.png')]);
   assert.equal(analysisInput.video.aweme_url, '');
+}
+
+async function testRunResearchProviderAddsAuditMetadata() {
+  const audits = [];
+  const result = await runResearchProvider({
+    query: 'AI 视频生产',
+    aiModelConfig: { getRuntimeConfig: async () => ({ modelId: 'gpt-test' }) },
+    aiTextModel: {
+      callTextModel: async request => {
+        audits.push(request.audit);
+        return {
+          success: true,
+          text: '研究摘要 https://example.com/report',
+          raw_response: {},
+        };
+      },
+    },
+  });
+
+  assert.equal(result.summary, '研究摘要 https://example.com/report');
+  assert.deepEqual(audits, [{
+    agent: 'ResearchAgent',
+    stage: 'research',
+    sub_stage: 'web_search_request',
+    attempt: 1,
+  }]);
 }
 
 async function testAppendWorkflowModelCall() {
@@ -1875,6 +1902,7 @@ async function testSceneSpecOperations() {
 
 async function run() {
   await testAppendWorkflowModelCall();
+  await testRunResearchProviderAddsAuditMetadata();
   await testCreatesAndRunsTextWorkflow();
   await testCreatesAndRunsSourceUrlWorkflow();
   await testSourceUrlStageEmitsSpecificProgressMessages();

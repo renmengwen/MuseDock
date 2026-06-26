@@ -96,6 +96,133 @@ async function readProjectJson(projectDir) {
   await createVerticalTemplate(templateRoot);
   const templateRegistry = createTemplateRegistry({ rootDir: templateRoot });
   templateRegistry.scanTemplates();
+  assert.ok(templateRegistry.getTemplate('vertical'));
+
+  const auditedRawResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000020_audit_raw',
+    runId: 'run_audit_raw',
+    rootDir,
+    sceneSpec: {
+      title: '审计 Raw HTML',
+      aspect_ratio: '9:16',
+      scenes: [
+        { id: 'scene_01', duration: 2, kind: 'text', narration_text: '审计旁白', captions: fullSceneCaption('scene_01', '审计旁白', 2), visual_text: { headline: '审计标题', keywords: [], cards: [] } },
+      ],
+    },
+    creativeContext: { input: { raw_text: '审计 Raw HTML' } },
+    target: {
+      html_video_generation_mode: 'raw_html',
+      preferredTemplateId: 'vertical',
+      lockTemplate: true,
+      generateAudio: false,
+    },
+    templateRegistry,
+    skipValidation: true,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.startsWith('你是 html-video 的 content graph')) {
+            return {
+              success: true,
+              model: { model_id: 'gpt-test' },
+              usage: { cached_tokens: 1024 },
+              text: JSON.stringify({
+                synopsis: '审计 Raw HTML',
+                nodes: [{ id: 'scene_01', kind: 'text', label: '审计标题', durationSec: 2, text: '审计正文' }],
+                edges: [],
+              }),
+            };
+          }
+          return {
+            success: true,
+            model: { model_id: 'gpt-test' },
+            usage: { cached_tokens: 1024 },
+            text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">审计标题</h1><p data-text-key="subtitle">审计旁白</p><section data-text-key="body">审计正文</section></main></body></html>',
+          };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      frameRenderer: {
+        renderFrame: async (frame, options) => ({
+          success: true,
+          frame_id: frame.id,
+          output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+          diagnostics: [],
+        }),
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath };
+        },
+        muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+      },
+      visualQaService: { inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }) },
+    },
+  });
+  assert.equal(auditedRawResult.success, true);
+  const auditedRawProject = await readProjectJson(auditedRawResult.html_video_project_path);
+  const auditedRawCalls = auditedRawProject.generation_checkpoint.model_calls;
+  const contentGraphAudit = auditedRawCalls.find(call => call.agent === 'ContentGraphAgent' && call.stage === 'content_graph');
+  const frameHtmlAudit = auditedRawCalls.find(call => call.agent === 'FrameHtmlAgent' && call.stage === 'frame_html' && call.frame_id === 'scene_01');
+  assert.ok(contentGraphAudit);
+  assert.equal(contentGraphAudit.model.model_id, 'gpt-test');
+  assert.equal(contentGraphAudit.usage.cached_tokens, 1024);
+  assert.ok(frameHtmlAudit);
+  assert.equal(frameHtmlAudit.model.model_id, 'gpt-test');
+  assert.equal(frameHtmlAudit.usage.cached_tokens, 1024);
+
+  const auditedTemplateInputsResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000021_audit_template_inputs',
+    runId: 'run_audit_template_inputs',
+    rootDir,
+    sceneSpec: {
+      title: '审计模板字段',
+      aspect_ratio: '9:16',
+      scenes: [
+        { id: 'scene_01', duration: 2, kind: 'text', narration_text: '模板旁白', captions: fullSceneCaption('scene_01', '模板旁白', 2), visual_text: { headline: '模板标题', keywords: [], cards: [] } },
+      ],
+    },
+    creativeContext: { input: { raw_text: '审计模板字段' } },
+    target: { html_video_generation_mode: 'template_inputs', generateAudio: false },
+    templateRegistry,
+    services: {
+      aiTextModel: {
+        callTextModel: async request => {
+          if (request.audit?.stage === 'template_selection') {
+            return { success: true, model: { model_id: 'gpt-test' }, usage: { cached_tokens: 1024 }, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          }
+          if (request.audit?.stage === 'template_inputs') {
+            return { success: true, model: { model_id: 'gpt-test' }, usage: { cached_tokens: 1024 }, text: JSON.stringify({ headline: '模板标题' }) };
+          }
+          return { success: false, message: '缺少审计元数据。' };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      frameRenderer: {
+        renderFrame: async (frame, options) => ({
+          success: true,
+          frame_id: frame.id,
+          output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+          diagnostics: [],
+        }),
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath };
+        },
+        muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+      },
+      visualQaService: { inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }) },
+    },
+  });
+  assert.equal(auditedTemplateInputsResult.success, true);
+  const auditedTemplateInputsProject = await readProjectJson(auditedTemplateInputsResult.html_video_project_path);
+  const auditedTemplateInputCalls = auditedTemplateInputsProject.generation_checkpoint.model_calls;
+  assert.ok(auditedTemplateInputCalls.some(call => call.agent === 'TemplateSelectorAgent' && call.stage === 'template_selection'));
+  assert.ok(auditedTemplateInputCalls.some(call => call.agent === 'TemplateInputAgent' && call.stage === 'template_inputs'));
 
   const rawCalls = [];
   const rawPathResult = await workflow.generateHtmlVideo({

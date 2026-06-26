@@ -531,6 +531,12 @@ async function runResearchProvider({
       tool_choice: toolChoice,
       temperature: 0.3,
       stream: false,
+      audit: {
+        agent: 'ResearchAgent',
+        stage: 'research',
+        sub_stage: 'web_search_request',
+        attempt: 1,
+      },
     });
 
     if (!result.success) {
@@ -576,6 +582,12 @@ async function runResearchProvider({
         ],
         temperature: 0.3,
         stream: false,
+        audit: {
+          agent: 'ResearchAgent',
+          stage: 'research',
+          sub_stage: 'web_search_summary',
+          attempt: 1,
+        },
       });
       if (!finalResult.success) {
         throw new Error(finalResult.message || '文本模型整理搜索结果失败');
@@ -3600,6 +3612,7 @@ module.exports = {
   ttsCreativeWorkflowScene,
   rerenderCreativeWorkflow,
   remixCreativeWorkflow,
+  runResearchProvider,
   defaultResearchProvider,
   defaultWebSearchProvider,
 };
