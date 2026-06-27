@@ -5,9 +5,7 @@ export function HtmlVideoElementInspector({
   saving,
   onTextChange,
   onResetPosition,
-  onSaveDraft,
-  onRenderDraft,
-  activeDraftId,
+  onSaveEdit,
 }) {
   return (
     <aside className="creative-video-editor-panel html-video-element-inspector" aria-label="元素属性">
@@ -55,10 +53,9 @@ export function HtmlVideoElementInspector({
           </label>
           <div className="creative-video-editor-inline-actions">
             <button type="button" disabled={disabled || saving} onClick={onResetPosition}>重置位置</button>
-            <button type="button" disabled={disabled || saving} onClick={onSaveDraft}>
-              {saving ? '正在保存...' : '保存为草稿'}
+            <button type="button" disabled={disabled || saving} onClick={onSaveEdit}>
+              {saving ? '正在保存...' : '保存修改'}
             </button>
-            <button type="button" disabled={disabled || saving || !activeDraftId} onClick={onRenderDraft}>渲染草稿</button>
           </div>
         </>
       ) : null}

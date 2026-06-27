@@ -11,6 +11,10 @@ import {
 } from './htmlVideoCanvasDom.mjs';
 import { HtmlVideoElementInspector } from './HtmlVideoElementInspector.jsx';
 import { HtmlVideoFrameStrip } from './HtmlVideoFrameStrip.jsx';
+import { FrameInputsPanel } from './FrameInputsPanel.jsx';
+import { TemplateInputsPanel } from './TemplateInputsPanel.jsx';
+import { NarrationPanel } from './NarrationPanel.jsx';
+import { CaptionsPanel } from './CaptionsPanel.jsx';
 
 function frameIdOf(frame) {
   return frame?.id || frame?.scene_id || '';
@@ -285,7 +289,6 @@ export function HtmlVideoCanvasEditor({ editor }) {
   const frame = editor.selectedFrame;
   const frameId = frameIdOf(frame);
   const rawHtml = frame?.source_mode === 'raw_html';
-  const activeDraftId = frame?.active_draft_id || '';
   const disabled = editor.disabled;
 
   const htmlReady = Boolean(html && loadedFrameId === frameId);
@@ -513,7 +516,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
     setElementInfo(readElementInfo(element));
   }
 
-  async function saveDraft() {
+  async function saveEdit() {
     if (saving) return null;
     const doc = iframeRef.current?.contentDocument;
     if (!doc || !frameId) return null;
@@ -521,44 +524,27 @@ export function HtmlVideoCanvasEditor({ editor }) {
     setPreviewError('');
     const label = elementInfo?.text || elementInfo?.label || '';
     try {
-      const result = await editor.saveFrameHtmlDraft(frameId, {
+      const result = await editor.saveAndAcceptFrameEdit(frameId, {
         html: serializeDocument(doc),
         mode: 'draft',
         summary: createDraftSummary(label),
       });
       if (!result || result.success === false) {
-        setPreviewError('保存草稿失败，请稍后重试。');
+        setPreviewError('保存修改失败，请稍后重试。');
         return null;
-      }
-      const nextProject = result?.html_video_project || result?.project || result?.data?.project || result?.data;
-      const nextFrame = Array.isArray(nextProject?.frames)
-        ? nextProject.frames.find(item => String(item.id || item.scene_id) === String(frameId))
-        : null;
-      const draftId = nextFrame?.active_draft_id || result?.draft_id || result?.draft?.id;
-      if (!draftId) {
-        setPreviewError('草稿已保存，但未获取到草稿 ID，请刷新后重试。');
-        return result;
-      }
-      try {
-        const renderResult = await editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true });
-        if (!renderResult || renderResult.success === false) {
-          setPreviewError('草稿已保存，但渲染预览失败，请点击“渲染草稿”重试。');
-        }
-      } catch (_) {
-        setPreviewError('草稿已保存，但渲染预览失败，请点击“渲染草稿”重试。');
       }
       return result;
     } catch (_) {
-      setPreviewError('保存草稿失败，请稍后重试。');
+      setPreviewError('保存修改失败，请稍后重试。');
       return null;
     } finally {
       setSaving(false);
     }
   }
 
-  function renderDraft() {
-    if (!frameId || !activeDraftId) return null;
-    return editor.renderFramePreview(frameId, { draft_id: activeDraftId, run_layout_qa: true });
+  function patchFrame(payload) {
+    if (payload?.type === 'frame_patch') return editor.saveFrame(payload.frame_id, payload);
+    return editor.saveTemplateInputs(payload);
   }
 
   if (!frame) {
@@ -578,8 +564,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
             <div className="creative-video-editor-inline-actions">
               <button type="button" disabled={disabled} onClick={replay}>重新播放</button>
               <button type="button" disabled={disabled} onClick={jumpToEnd}>跳到结尾并编辑</button>
-              <button type="button" disabled={disabled || saving || !elementInfo} onClick={saveDraft}>{saving ? '正在保存...' : '保存为草稿'}</button>
-              <button type="button" disabled={disabled || saving || !activeDraftId} onClick={renderDraft}>渲染草稿</button>
+              <button type="button" disabled={disabled || saving || !elementInfo} onClick={saveEdit}>{saving ? '正在保存...' : '保存修改'}</button>
             </div>
           </div>
           {!htmlReady && htmlLoadError ? (
@@ -599,17 +584,24 @@ export function HtmlVideoCanvasEditor({ editor }) {
             onError={() => setPreviewError('镜头预览加载失败，请检查 HTML 或重新播放。')}
           />
         </div>
-        <HtmlVideoElementInspector
-          elementInfo={elementInfo}
-          editingReady={editingReady}
-          disabled={disabled}
-          saving={saving}
-          activeDraftId={activeDraftId}
-          onTextChange={updateSelectedText}
-          onResetPosition={resetSelectedPosition}
-          onSaveDraft={saveDraft}
-          onRenderDraft={renderDraft}
-        />
+        <div className="html-video-canvas-side">
+          <HtmlVideoElementInspector
+            elementInfo={elementInfo}
+            editingReady={editingReady}
+            disabled={disabled}
+            saving={saving}
+            onTextChange={updateSelectedText}
+            onResetPosition={resetSelectedPosition}
+            onSaveEdit={saveEdit}
+          />
+          <details className="html-video-canvas-fields">
+            <summary>帧字段 / 旁白 / 字幕</summary>
+            <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} onRenderPreview={() => {}} />
+            <NarrationPanel narration={editor.project?.narration} disabled={disabled} onSave={editor.saveTemplateInputs} onRegenerate={editor.regenerateNarration} />
+            <CaptionsPanel captions={frame?.captions || []} selectedFrameId={frameId} disabled={disabled} onSave={patchFrame} />
+            <TemplateInputsPanel schema={editor.project?.template_schema || editor.project?.input_schema || {}} values={editor.project?.inputs || {}} disabled={disabled} onSave={editor.saveTemplateInputs} />
+          </details>
+        </div>
       </div>
       <HtmlVideoFrameStrip
         frames={editor.frames}

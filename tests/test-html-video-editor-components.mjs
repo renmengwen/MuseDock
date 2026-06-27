@@ -280,4 +280,11 @@ assert.ok(hook.includes('saveAndAcceptFrameEdit'), 'hook should expose saveAndAc
 assert.ok(hook.includes('resolveSavedDraftId'), 'hook should resolve the saved draft id before accepting');
 assert.ok(hook.includes('保存修改失败'), 'hook should expose a combined save-and-accept failure message');
 
+const canvasEditor = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoCanvasEditor.jsx', 'utf-8');
+assert.ok(canvasEditor.includes('保存修改'), 'canvas should expose a single 保存修改 action');
+assert.ok(canvasEditor.includes('saveAndAcceptFrameEdit'), 'canvas 保存修改 should call saveAndAcceptFrameEdit');
+assert.doesNotMatch(canvasEditor, /保存为草稿/, 'canvas should no longer expose separate 保存为草稿');
+assert.ok(canvasEditor.includes('FrameInputsPanel'), 'canvas right rail should mount frame fields');
+assert.ok(canvasEditor.includes('CaptionsPanel'), 'canvas right rail should mount captions');
+
 console.log('html video editor component tests passed');
