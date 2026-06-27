@@ -10,6 +10,8 @@ const aiModelConfig = require('./aiModelConfig');
 const appSettings = require('./appSettings');
 const defaultCreativeVideoEditor = require('./creativeVideoEditor');
 const defaultCreativeVideoRerender = require('./creativeVideoRerender');
+const defaultCreativeVideoTtsService = require('./creative-video/ttsService');
+const defaultTtsTimeline = require('./ttsTimeline');
 const sceneSpecService = require('./sceneSpec');
 const aiTextModel = require('./aiTextModel');
 const defaultSourceFetch = require('./sourceFetch');
@@ -59,6 +61,29 @@ function safeString(value) {
     return '';
   }
   return String(value).trim();
+}
+
+function supportsEmotionalTtsRuntime(config) {
+  const provider = safeString(config?.provider).toLowerCase();
+  const providerName = safeString(config?.providerName).toLowerCase();
+  const modelId = safeString(config?.modelId).toLowerCase();
+  if (['mimo', 'xiaomi', 'xiaomimimo'].includes(provider)
+    || ['mimo', 'xiaomi', 'xiaomimimo', '小米 mimo'].includes(providerName)
+    || modelId.startsWith('mimo')) {
+    return true;
+  }
+  const isMiniMax = ['minimax', 'minimaxi', 'mini-max'].includes(provider)
+    || ['minimax', 'minimaxi', 'mini-max'].includes(providerName);
+  return isMiniMax && (modelId === 'speech-2.8-hd' || modelId === 'speech-2.8-turbo');
+}
+
+async function resolveVoiceStylePrompt(record, services) {
+  if (record?.target?.emotionalVoice !== true) return NEUTRAL_VOICE_STYLE_PROMPT;
+  try {
+    const config = await services.aiModelConfig.getRuntimeConfig('tts');
+    if (supportsEmotionalTtsRuntime(config)) return EMOTIONAL_VOICE_STYLE_PROMPT;
+  } catch {}
+  return NEUTRAL_VOICE_STYLE_PROMPT;
 }
 
 function plainObject(value) {
@@ -709,6 +734,7 @@ function resolveServices(options = {}) {
     agentRuns: services.agentRuns || defaultAgentRuns,
     aiModelConfig: services.aiModelConfig || aiModelConfig,
     appSettings: services.appSettings || appSettings,
+    ttsService: services.ttsService || defaultCreativeVideoTtsService,
     sourceFetch: services.sourceFetch || defaultSourceFetch,
     sourceAssets: services.sourceAssets || defaultSourceAssets,
   };
@@ -2121,10 +2147,11 @@ async function runCreativeWorkflow(workflowId, options = {}) {
         },
       };
     }
+    const stylePrompt = await resolveVoiceStylePrompt(record, services);
     return ensureSuccess(
       await services.agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(record.aweme_id, record.run_id, {
         rootDir: mediaRoot,
-        stylePrompt: record.target?.emotionalVoice === true ? EMOTIONAL_VOICE_STYLE_PROMPT : NEUTRAL_VOICE_STYLE_PROMPT,
+        stylePrompt,
       }),
       '音频轨生成失败。',
     );
@@ -3305,7 +3332,11 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
     projectDir,
     project,
     templateRegistry,
-    services: options.htmlVideoServices || {},
+    services: {
+      ...(options.services || {}),
+      ...(options.htmlVideoServices || {}),
+      ttsService: options.htmlVideoServices?.ttsService || (options.services || {}).ttsService || defaultCreativeVideoTtsService,
+    },
   };
   const mode = safeString(payload.mode || payload.action || '');
   let result;
@@ -3593,23 +3624,35 @@ async function ttsCreativeWorkflowScene(workflowId, sceneId, payload, options = 
 
   const hyperframes = record.result.hyperframes_freeform;
   const previousOutputPath = hyperframes?.render?.output_path || '';
+  const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
+  const inputServices = options.services || {};
+  const readAudioDuration = inputServices.readAudioDuration || (async filePath => {
+    const duration = await defaultTtsTimeline.readAudioDuration(filePath, options.audioDurationOptions || {});
+    return duration?.success ? duration.duration : 0;
+  });
 
   try {
     const result = await rerender.rerenderSceneWithLocalTts({
       workflowId,
       sceneSpec,
       sceneId,
+      projectDir,
       outputPath: payload?.outputPath || previousOutputPath,
       previousOutputPath,
-      services: options.services || {},
+      services: {
+        ...inputServices,
+        ttsService: inputServices.ttsService || defaultCreativeVideoTtsService,
+        readAudioDuration,
+      },
     });
 
     if (result.success) {
+      const requiresRender = result.requires_render === true;
       hyperframes.render = {
         ...hyperframes.render,
-        status: 'ready',
-        output_path: result.output_path,
-        message: '场景配音已更新。',
+        status: requiresRender ? 'needs_render' : 'ready',
+        ...(result.output_path ? { output_path: result.output_path } : {}),
+        message: result.message || (requiresRender ? '场景配音已更新，需要重新导出成片。' : '场景配音已更新。'),
       };
       if (result.scene_spec) {
         hyperframes.project.scene_spec = result.scene_spec;
@@ -3623,8 +3666,9 @@ async function ttsCreativeWorkflowScene(workflowId, sceneId, payload, options = 
       workflow_id: workflowId,
       scene_id: sceneId,
       scene_spec: result.scene_spec || sceneSpec,
-      output_path: result.output_path,
+      output_path: result.output_path || previousOutputPath,
       previous_output_path: result.previous_output_path,
+      requires_render: result.requires_render === true,
       message: result.message || (result.success ? '场景配音已更新。' : '场景配音失败。'),
     };
   } catch (error) {

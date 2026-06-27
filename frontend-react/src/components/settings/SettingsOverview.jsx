@@ -19,7 +19,7 @@ export function SettingsOverview({ appSettings, modelSettings, systemHealth, onN
 
   const cards = [
     {
-      title: '文字模型',
+      title: '分析模型',
       value: getActiveModelLabel(modelSettings.activeModels?.text),
       action: 'models',
     },

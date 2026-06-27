@@ -3,14 +3,13 @@ const path = require('path');
 
 const DEFAULT_CONFIG_PATH = path.join(__dirname, '../../data/config/ai-models.json');
 
-const MODEL_TYPES = ['asr', 'text', 'image', 'video', 'multimodal', 'tts'];
+const MODEL_TYPES = ['asr', 'text', 'image', 'video', 'tts'];
 
 const MODEL_TYPE_LABELS = {
   asr: 'ASR 转写',
-  text: '文字模型',
+  text: '分析模型',
   image: '图片生成',
   video: '视频生成',
-  multimodal: '多模态',
   tts: 'TTS 语音合成',
 };
 
@@ -50,6 +49,9 @@ function normalizeProvider(id, input = {}) {
       modelId: normalizeString(raw.modelId),
       note: normalizeString(raw.note),
     };
+    if (type === 'text') {
+      entry.supportsMultimodal = raw.supportsMultimodal === true;
+    }
     if (type === 'tts') {
       entry.ttsConcurrency = normalizeInteger(raw.ttsConcurrency, 1, 1, 5);
       entry.ttsQueueIntervalMs = normalizeInteger(raw.ttsQueueIntervalMs, 1800, 0, 10000);
@@ -141,6 +143,9 @@ function toPublicConfig(stored) {
     for (const type of MODEL_TYPES) {
       const m = provider.models[type] || emptyModelEntry();
       const entry = { enabled: m.enabled, modelId: m.modelId, note: m.note };
+      if (type === 'text') {
+        entry.supportsMultimodal = m.supportsMultimodal === true;
+      }
       if (type === 'tts') {
         entry.ttsConcurrency = m.ttsConcurrency;
         entry.ttsQueueIntervalMs = m.ttsQueueIntervalMs;
@@ -202,11 +207,15 @@ function resolveActiveConfig(type, stored) {
   const result = {
     enabled: true,
     provider: providerId,
+    providerName: provider.name,
     apiKey,
     baseUrl,
     modelId: model.modelId,
     note: model.note,
   };
+  if (modelType === 'text') {
+    result.supportsMultimodal = model.supportsMultimodal === true;
+  }
   if (modelType === 'tts') {
     result.ttsConcurrency = model.ttsConcurrency;
     result.ttsQueueIntervalMs = model.ttsQueueIntervalMs;

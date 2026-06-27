@@ -1,4 +1,13 @@
-const sceneSpec = require('./sceneSpec');
+const sceneSpecService = require('./sceneSpec');
+const defaultTtsService = require('./creative-video/ttsService');
+
+function hasSceneSpecRerenderPipeline(services = {}) {
+  return !!(
+    services.composer
+    && typeof services.composer.composeHyperframesProjectFiles === 'function'
+    && typeof services.projectWriter === 'function'
+  );
+}
 
 async function rerenderSceneSpecProject({
   workflowId,
@@ -133,12 +142,16 @@ async function rerenderSceneWithLocalTts({
   workflowId,
   sceneSpec,
   sceneId,
+  projectDir,
   outputPath,
   previousOutputPath,
   services = {},
 } = {}) {
-  const { ttsService } = services;
-  if (!ttsService || typeof ttsService.synthesizeScene !== 'function') {
+  const ttsService = services.ttsService || defaultTtsService;
+  if (
+    !ttsService
+    || (typeof ttsService.synthesizeScene !== 'function' && typeof ttsService.synthesizeSceneNarration !== 'function')
+  ) {
     return {
       success: false,
       message: '缺少 TTS 服务',
@@ -159,7 +172,24 @@ async function rerenderSceneWithLocalTts({
 
   let ttsResult;
   try {
-    ttsResult = await ttsService.synthesizeScene(scene, { workflowId, sceneSpec });
+    if (typeof ttsService.synthesizeScene === 'function') {
+      ttsResult = await ttsService.synthesizeScene(scene, { workflowId, sceneSpec });
+    } else {
+      ttsResult = await ttsService.synthesizeSceneNarration({
+        projectDir,
+        sceneSpec,
+        sceneId,
+        services,
+      });
+      const audioScene = Array.isArray(ttsResult.audio_manifest?.scenes)
+        ? ttsResult.audio_manifest.scenes[0]
+        : null;
+      ttsResult = {
+        ...ttsResult,
+        audio_path: audioScene?.relative_path || audioScene?.path || '',
+        duration: audioScene?.duration,
+      };
+    }
     if (!ttsResult.success) {
       return {
         success: false,
@@ -180,23 +210,57 @@ async function rerenderSceneWithLocalTts({
   // Merge TTS results back into scene spec before rerendering
   const updatedSpec = JSON.parse(JSON.stringify(sceneSpec));
   const updatedScene = updatedSpec.scenes.find(s => s.id === sceneId);
+  let sceneUpdated = false;
   if (updatedScene) {
     if (ttsResult.audio_path) {
       updatedScene.audio_path = ttsResult.audio_path;
+      sceneUpdated = true;
     }
     if (typeof ttsResult.duration === 'number' && ttsResult.duration > 0) {
       updatedScene.duration = Math.round(ttsResult.duration * 100) / 100;
-      updatedSpec.scenes = sceneSpec.retimeScenes(updatedSpec.scenes);
+      updatedSpec.scenes = sceneSpecService.retimeScenes(updatedSpec.scenes);
+      sceneUpdated = true;
     }
   }
 
-  return rerenderSceneSpecProject({
+  if (!sceneUpdated) {
+    return {
+      success: true,
+      scene_spec: updatedSpec,
+      output_path: outputPath || previousOutputPath,
+      previous_output_path: previousOutputPath,
+      requires_render: false,
+      message: ttsResult.message || '场景配音没有产生新的音频。',
+      diagnostics: ttsResult.diagnostics || [],
+    };
+  }
+
+  if (!hasSceneSpecRerenderPipeline(services)) {
+    return {
+      success: true,
+      scene_spec: updatedSpec,
+      output_path: outputPath || previousOutputPath,
+      previous_output_path: previousOutputPath,
+      requires_render: true,
+      message: '场景配音已更新，需要重新导出成片。',
+      diagnostics: ttsResult.diagnostics || [],
+    };
+  }
+
+  const rerendered = await rerenderSceneSpecProject({
     workflowId,
     sceneSpec: updatedSpec,
     outputPath,
     previousOutputPath,
     services,
   });
+  if (rerendered.success && !services.renderAdapter?.render) {
+    return {
+      ...rerendered,
+      requires_render: true,
+    };
+  }
+  return rerendered;
 }
 
 module.exports = {

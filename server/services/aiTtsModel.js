@@ -3,6 +3,9 @@ const aiModelConfig = require('./aiModelConfig');
 const DEFAULT_MIMO_BASE_URL = 'https://api.xiaomimimo.com/v1';
 const DEFAULT_MIMO_TTS_MODEL = 'mimo-v2.5-tts';
 const DEFAULT_MIMO_VOICE = 'mimo_default';
+const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
+const DEFAULT_MINIMAX_TTS_MODEL = 'speech-2.8-hd';
+const DEFAULT_MINIMAX_VOICE = 'male-qn-qingse';
 const DEFAULT_AUDIO_FORMAT = 'wav';
 const DEFAULT_TTS_CONCURRENCY = 1;
 const DEFAULT_TTS_QUEUE_INTERVAL_MS = 1800;
@@ -26,6 +29,16 @@ function toModelInfo(provider, modelId) {
     provider: provider || '',
     model_id: modelId || '',
   };
+}
+
+function isMimoProvider(value) {
+  const provider = normalizeProvider(value);
+  return provider === 'mimo' || provider === 'xiaomi' || provider === 'xiaomimimo';
+}
+
+function isMiniMaxProvider(value) {
+  const provider = normalizeProvider(value);
+  return provider === 'minimax' || provider === 'minimaxi' || provider === 'mini-max';
 }
 
 function wait(ms) {
@@ -70,8 +83,11 @@ function enqueueTtsRequest(task, options = {}) {
   return queued;
 }
 
-function extractAudioData(payload) {
+function extractAudioData(payload, provider) {
   if (!payload || typeof payload !== 'object') return '';
+  if (provider === 'minimax') {
+    return payload.data?.audio || payload.audio || '';
+  }
   return payload.choices?.[0]?.message?.audio?.data
     || payload.choices?.[0]?.message?.audio?.audio
     || payload.choices?.[0]?.audio?.data
@@ -90,16 +106,30 @@ async function resolveTtsRuntime(options = {}) {
   });
   const storedEnabled = storedConfig?.enabled === true && !!storedConfig.apiKey;
   const provider = normalizeProvider(env.TTS_PROVIDER || (storedEnabled ? storedConfig.provider : ''));
-  const modelId = env.MIMO_TTS_MODEL || env.TTS_MODEL || storedConfig?.modelId || DEFAULT_MIMO_TTS_MODEL;
-  const isMimo = provider === 'mimo' || provider === 'xiaomi' || provider === 'xiaomimimo'
-    || modelId.toLowerCase().startsWith('mimo');
+  const providerName = normalizeProvider(storedConfig?.providerName);
+  const requestedModelId = env.MINIMAX_TTS_MODEL || env.MIMO_TTS_MODEL || env.TTS_MODEL || storedConfig?.modelId || '';
+  const isMiniMax = isMiniMaxProvider(provider) || isMiniMaxProvider(providerName)
+    || requestedModelId.toLowerCase().startsWith('speech-');
+  const isMimo = !isMiniMax && (isMimoProvider(provider) || isMimoProvider(providerName)
+    || requestedModelId.toLowerCase().startsWith('mimo'));
+  const resolvedProvider = isMiniMax ? 'minimax' : (isMimo ? 'mimo' : (provider || providerName));
+  const envApiKey = resolvedProvider === 'minimax'
+    ? (env.MINIMAX_API_KEY || env.TTS_API_KEY)
+    : (env.MIMO_API_KEY || env.TTS_API_KEY);
+  const envBaseUrl = resolvedProvider === 'minimax'
+    ? (env.MINIMAX_BASE_URL || env.TTS_BASE_URL)
+    : (env.MIMO_BASE_URL || env.TTS_BASE_URL);
 
   return {
-    configured: !!(env.MIMO_API_KEY || env.TTS_API_KEY || (storedEnabled ? storedConfig.apiKey : '')),
-    provider: isMimo ? 'mimo' : (provider || normalizeProvider(storedConfig?.provider)),
-    apiKey: env.MIMO_API_KEY || env.TTS_API_KEY || (storedEnabled ? storedConfig.apiKey : ''),
-    baseUrl: normalizeBaseUrl(env.MIMO_BASE_URL || env.TTS_BASE_URL || storedConfig?.baseUrl || DEFAULT_MIMO_BASE_URL),
-    modelId: env.MIMO_TTS_MODEL || env.TTS_MODEL || storedConfig?.modelId || DEFAULT_MIMO_TTS_MODEL,
+    configured: !!(envApiKey || (storedEnabled ? storedConfig.apiKey : '')),
+    provider: resolvedProvider,
+    apiKey: envApiKey || (storedEnabled ? storedConfig.apiKey : ''),
+    baseUrl: normalizeBaseUrl(
+      envBaseUrl
+      || storedConfig?.baseUrl
+      || (resolvedProvider === 'minimax' ? DEFAULT_MINIMAX_BASE_URL : DEFAULT_MIMO_BASE_URL)
+    ),
+    modelId: requestedModelId || (resolvedProvider === 'minimax' ? DEFAULT_MINIMAX_TTS_MODEL : DEFAULT_MIMO_TTS_MODEL),
     ttsConcurrency: storedConfig?.ttsConcurrency,
     ttsQueueIntervalMs: storedConfig?.ttsQueueIntervalMs,
   };
@@ -107,10 +137,13 @@ async function resolveTtsRuntime(options = {}) {
 
 async function callTtsModel(options = {}) {
   const text = normalizeString(options.text);
-  const voice = normalizeString(options.voice) || DEFAULT_MIMO_VOICE;
   const stylePrompt = normalizeString(options.stylePrompt) || '请使用自然、清晰、适合短视频口播的语气。';
   const format = normalizeString(options.format) || DEFAULT_AUDIO_FORMAT;
   const runtime = await resolveTtsRuntime(options);
+  const requestedVoice = normalizeString(options.voice);
+  const voice = runtime.provider === 'minimax'
+    ? (requestedVoice && requestedVoice !== DEFAULT_MIMO_VOICE ? requestedVoice : DEFAULT_MINIMAX_VOICE)
+    : (requestedVoice || DEFAULT_MIMO_VOICE);
   const model = toModelInfo(runtime.provider, runtime.modelId);
 
   if (!text) {
@@ -122,11 +155,11 @@ async function callTtsModel(options = {}) {
     };
   }
 
-  if (!runtime.configured || runtime.provider !== 'mimo' || !runtime.baseUrl || !runtime.modelId) {
+  if (!runtime.configured || !['mimo', 'minimax'].includes(runtime.provider) || !runtime.baseUrl || !runtime.modelId) {
     return {
       success: false,
       status: 'not_configured',
-      message: 'TTS 语音合成模型未配置。请到设置页启用 TTS 模型，并填写 MiMo API Key、Base URL 和模型 ID。',
+      message: 'TTS 语音合成模型未配置。请到设置页启用 TTS 模型，并填写 API Key、Base URL 和模型 ID。',
       model,
     };
   }
@@ -156,30 +189,52 @@ async function callTtsModel(options = {}) {
       response = await enqueueTtsRequest(() => {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-        return fetchImpl(`${runtime.baseUrl}/chat/completions`, {
+        const isMiniMax = runtime.provider === 'minimax';
+        return fetchImpl(`${runtime.baseUrl}${isMiniMax ? '/t2a_v2' : '/chat/completions'}`, {
           method: 'POST',
-          headers: {
+          headers: isMiniMax ? {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${runtime.apiKey}`,
+          } : {
             'Content-Type': 'application/json',
             'api-key': runtime.apiKey,
           },
-          body: JSON.stringify({
+          body: JSON.stringify(isMiniMax ? {
             model: runtime.modelId,
-            messages: [
-              {
-                role: 'user',
-                content: stylePrompt,
-              },
-              {
-                role: 'assistant',
-                content: text,
-              },
-            ],
-            modalities: ['text', 'audio'],
-            audio: {
-              format,
-              voice,
+            text,
+            stream: false,
+            output_format: 'hex',
+            voice_setting: {
+              voice_id: voice,
+              speed: 1,
+              vol: 1,
+              pitch: 0,
             },
-          }),
+            audio_setting: {
+              sample_rate: 32000,
+              bitrate: 128000,
+              format,
+              channel: 1,
+            },
+            subtitle_enable: false,
+          } : {
+              model: runtime.modelId,
+              messages: [
+                {
+                  role: 'user',
+                  content: stylePrompt,
+                },
+                {
+                  role: 'assistant',
+                  content: text,
+                },
+              ],
+              modalities: ['text', 'audio'],
+              audio: {
+                format,
+                voice,
+              },
+            }),
           signal: controller.signal,
         }).finally(() => clearTimeout(timer));
       }, {
@@ -202,13 +257,14 @@ async function callTtsModel(options = {}) {
 
     if (!response.ok) {
       const detail = payload?.error?.message || payload?.message || `HTTP ${response.status}`;
+      const requestPath = runtime.provider === 'minimax' ? '/t2a_v2' : '/chat/completions';
       const hint = response.status === 502
-        ? 'MiMo TTS 服务暂时不可用（502 Bad Gateway），请稍后重试。如持续出现，请检查 Base URL 配置是否正确。'
+        ? 'TTS 服务暂时不可用（502 Bad Gateway），请稍后重试。如持续出现，请检查 Base URL 配置是否正确。'
         : response.status === 429
           ? '请求过于频繁，请稍后重试。'
           : '';
       console.error(`[TTS] 请求失败: HTTP ${response.status}`, {
-        url: `${runtime.baseUrl}/chat/completions`,
+        url: `${runtime.baseUrl}${requestPath}`,
         model: runtime.modelId,
         textLength: text.length,
         attempt: lastAttempt + 1,
@@ -224,28 +280,40 @@ async function callTtsModel(options = {}) {
         http_status: response.status,
       };
     }
+
+    if (runtime.provider === 'minimax' && Number(payload?.base_resp?.status_code || 0) !== 0) {
+      const detail = payload?.base_resp?.status_msg || `MiniMax 错误码 ${payload?.base_resp?.status_code}`;
+      return {
+        success: false,
+        status: 'failed',
+        message: `TTS 合成失败：${detail}`,
+        model,
+        raw_response: payload,
+        http_status: response.status,
+      };
+    }
   } catch (error) {
     const isTimeout = error?.name === 'AbortError';
     return {
       success: false,
       status: 'failed',
       message: isTimeout
-        ? `TTS 合成失败：请求超时（${requestTimeoutMs / 1000}秒），MiMo API 未响应。`
+        ? `TTS 合成失败：请求超时（${requestTimeoutMs / 1000}秒），TTS API 未响应。`
         : `TTS 合成失败：${error.message}`,
       model,
     };
   }
 
-  const audioData = extractAudioData(payload);
+  const audioData = extractAudioData(payload, runtime.provider);
   if (!audioData || typeof audioData !== 'string') {
-    console.error('[TTS] MiMo 未返回有效音频数据，payload 结构:', JSON.stringify(payload, (key, value) => {
-      if (key === 'data' && typeof value === 'string' && value.length > 100) return `[base64 ${value.length} chars]`;
+    console.error('[TTS] 未返回有效音频数据，payload 结构:', JSON.stringify(payload, (key, value) => {
+      if (key === 'data' && typeof value === 'string' && value.length > 100) return `[audio ${value.length} chars]`;
       return value;
     }, 2));
     return {
       success: false,
       status: 'failed',
-      message: 'TTS 合成失败：MiMo 未返回有效音频数据。',
+      message: 'TTS 合成失败：接口未返回有效音频数据。',
       model,
       raw_response: payload,
     };
@@ -255,7 +323,7 @@ async function callTtsModel(options = {}) {
     success: true,
     status: 'done',
     message: 'TTS 语音合成完成。',
-    audioBuffer: Buffer.from(audioData, 'base64'),
+    audioBuffer: Buffer.from(audioData, runtime.provider === 'minimax' ? 'hex' : 'base64'),
     format,
     voice,
     model,
@@ -267,6 +335,9 @@ module.exports = {
   DEFAULT_MIMO_BASE_URL,
   DEFAULT_MIMO_TTS_MODEL,
   DEFAULT_MIMO_VOICE,
+  DEFAULT_MINIMAX_BASE_URL,
+  DEFAULT_MINIMAX_TTS_MODEL,
+  DEFAULT_MINIMAX_VOICE,
   DEFAULT_AUDIO_FORMAT,
   DEFAULT_TTS_CONCURRENCY,
   DEFAULT_TTS_QUEUE_INTERVAL_MS,

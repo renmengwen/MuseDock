@@ -1922,6 +1922,27 @@ async function testSceneSpecOperations() {
   assert.equal(ttsResult.success, true);
   assert.equal(ttsResult.scene_id, 'scene_01');
   assert.equal(ttsResult.output_path, '/tmp/output.mp4');
+  assert.equal(ttsResult.requires_render, false);
+
+  const fakeTtsNeedsExport = {
+    rerenderSceneWithLocalTts: async () => ({
+      success: true,
+      scene_spec: {
+        title: 'rewritten',
+        scenes: [{ id: 'scene_01', duration: 5, narration_text: '旁白', audio_path: 'tts/scene_01.mp3', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }],
+      },
+      requires_render: true,
+      message: '场景配音已更新，需要重新导出成片。',
+    }),
+  };
+  const ttsNeedsExport = await ttsCreativeWorkflowScene(WORKFLOW_ID, 'scene_01', {}, { rootDir, creativeVideoRerender: fakeTtsNeedsExport });
+  assert.equal(ttsNeedsExport.success, true);
+  assert.equal(ttsNeedsExport.requires_render, true);
+  assert.equal(ttsNeedsExport.output_path, '/tmp/output.mp4');
+  assert.equal(ttsNeedsExport.scene_spec.scenes[0].audio_path, 'tts/scene_01.mp3');
+  const savedAfterTts = JSON.parse(fs.readFileSync(workflowPath, 'utf8'));
+  assert.equal(savedAfterTts.result.hyperframes_freeform.render.status, 'needs_render');
+  assert.equal(savedAfterTts.result.hyperframes_freeform.render.output_path, '/tmp/output.mp4');
 
   const ttsMissingScene = await ttsCreativeWorkflowScene(WORKFLOW_ID, 'nonexistent', {}, { rootDir, creativeVideoRerender: fakeRerender });
   assert.equal(ttsMissingScene.success, false);

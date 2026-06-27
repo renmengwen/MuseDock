@@ -195,8 +195,10 @@ export function useCreativeVideoEditor({ workflowId, api }) {
       const result = await api.ttsCreativeWorkflowScene(workflowId, sceneId, payload);
       if (!mountedRef.current) return;
       applySpecResult(result);
+      const requiresRender = result.requires_render === true;
+      setDirtyRequiresRender(requiresRender);
       setStatus('ready');
-      setMessage('配音完成。');
+      setMessage(result.message || (requiresRender ? '配音完成，需要重新渲染后才会更新成片。' : '配音完成。'));
     } catch (error) {
       if (!mountedRef.current) return;
       setStatus('error');

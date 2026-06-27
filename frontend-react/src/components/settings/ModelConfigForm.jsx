@@ -47,6 +47,16 @@ export function ModelConfigForm({ type, info, model, onChange }) {
           </label>
         </div>
       ) : null}
+      {type === 'text' && m.enabled ? (
+        <label className="modelConfigFormToggleRow">
+          <input
+            type="checkbox"
+            checked={m.supportsMultimodal === true}
+            onChange={e => onChange('supportsMultimodal', e.target.checked)}
+          />
+          <span>支持多模态输入</span>
+        </label>
+      ) : null}
     </div>
   );
 }

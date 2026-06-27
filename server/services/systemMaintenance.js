@@ -617,12 +617,16 @@ function resolveActiveModel(publicConfig, type) {
   const [providerId, modelType = type] = String(activeRef).split('/');
   const provider = providerId ? publicConfig?.providers?.[providerId] : null;
   const model = provider?.models?.[modelType] || null;
-  return {
+  const result = {
     configured: model?.enabled === true && !!model?.modelId,
     provider: provider?.name || providerId || '',
     providerId: providerId || '',
     modelId: model?.modelId || '',
   };
+  if (modelType === 'text') {
+    result.supportsMultimodal = model?.supportsMultimodal === true;
+  }
+  return result;
 }
 
 async function getModelOverview(options = {}) {
@@ -630,9 +634,8 @@ async function getModelOverview(options = {}) {
   const modelConfig = services.aiModelConfig || defaultAiModelConfig;
   const publicConfig = await modelConfig.getPublicConfig();
   return {
-    text: resolveActiveModel(publicConfig, 'text'),
+    analysis: resolveActiveModel(publicConfig, 'text'),
     tts: resolveActiveModel(publicConfig, 'tts'),
-    multimodal: resolveActiveModel(publicConfig, 'multimodal'),
   };
 }
 

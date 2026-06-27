@@ -25,8 +25,9 @@ async function run() {
         apiKey: 'sk-openai-secret-1234',
         baseUrl: 'https://api.openai.com/v1/',
         models: {
-          text: { enabled: true, modelId: 'gpt-4o' },
+          text: { enabled: true, modelId: 'gpt-4o', supportsMultimodal: true },
           asr: { enabled: true, modelId: 'whisper-1' },
+          multimodal: { enabled: true, modelId: 'gpt-4o-legacy' },
         },
       },
       mimo: {
@@ -43,6 +44,7 @@ async function run() {
       text: 'mimo/text',
       tts: 'mimo/tts',
       asr: 'openai/asr',
+      multimodal: 'openai/multimodal',
     },
     skipValidation: true,
   }, { configPath });
@@ -54,7 +56,10 @@ async function run() {
   assert.strictEqual(saved.providers.mimo.apiKeyMasked, '****cret');
   assert.strictEqual(saved.providers.openai.models.text.enabled, true);
   assert.strictEqual(saved.providers.openai.models.text.modelId, 'gpt-4o');
+  assert.strictEqual(saved.providers.openai.models.text.supportsMultimodal, true);
+  assert.strictEqual(saved.providers.openai.models.multimodal, undefined);
   assert.strictEqual(saved.active.text, 'mimo/text');
+  assert.strictEqual(saved.active.multimodal, undefined);
   assert.strictEqual(saved.skipValidation, true);
 
   // Verify raw storage preserves API keys
@@ -68,6 +73,7 @@ async function run() {
   assert.strictEqual(textRuntime.apiKey, 'mimo-secret');
   assert.strictEqual(textRuntime.baseUrl, 'https://api.xiaomimimo.com/v1');
   assert.strictEqual(textRuntime.modelId, 'mimo-v2.5-pro');
+  assert.strictEqual(textRuntime.supportsMultimodal, false);
 
   const ttsRuntime = await aiModelConfig.getRuntimeConfig('tts', { configPath });
   assert.strictEqual(ttsRuntime.provider, 'mimo');
@@ -81,6 +87,9 @@ async function run() {
   assert.strictEqual(asrRuntime.modelId, 'whisper-1');
 
   // Test 4: unselected model returns null
+  const multimodalRuntime = await aiModelConfig.getRuntimeConfig('multimodal', { configPath });
+  assert.strictEqual(multimodalRuntime, null);
+
   const videoRuntime = await aiModelConfig.getRuntimeConfig('video', { configPath });
   assert.strictEqual(videoRuntime, null);
 

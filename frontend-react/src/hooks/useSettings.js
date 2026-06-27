@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
 
-const MODEL_TYPES = ['asr', 'text', 'image', 'video', 'multimodal', 'tts'];
+const MODEL_TYPES = ['asr', 'text', 'image', 'video', 'tts'];
 
 const MODEL_TYPE_INFO = {
   asr:        { title: 'ASR 转写',   placeholder: 'whisper-1 / gpt-4o-transcribe' },
-  text:       { title: '文字模型',   placeholder: 'gpt-4o-mini / deepseek-chat' },
+  text:       { title: '分析模型',   placeholder: 'gpt-4o-mini / deepseek-chat' },
   image:      { title: '图片生成',   placeholder: 'gpt-image-1' },
   video:      { title: '视频生成',   placeholder: 'video-model-id' },
-  multimodal: { title: '多模态',     placeholder: 'gpt-4o / qwen-vl' },
   tts:        { title: 'TTS 语音合成', placeholder: 'mimo-v2.5-tts' },
 };
 
@@ -16,6 +15,9 @@ function emptyProvider(id) {
   const models = {};
   for (const type of MODEL_TYPES) {
     models[type] = { enabled: false, modelId: '', note: '' };
+    if (type === 'text') {
+      models[type].supportsMultimodal = false;
+    }
     if (type === 'tts') {
       models[type].ttsConcurrency = 1;
       models[type].ttsQueueIntervalMs = 1800;
@@ -32,6 +34,9 @@ function normalizeServerData(json) {
     for (const type of MODEL_TYPES) {
       const m = p.models?.[type] || {};
       models[type] = { enabled: !!m.enabled, modelId: m.modelId || '', note: m.note || '' };
+      if (type === 'text') {
+        models[type].supportsMultimodal = m.supportsMultimodal === true;
+      }
       if (type === 'tts') {
         models[type].ttsConcurrency = m.ttsConcurrency ?? 1;
         models[type].ttsQueueIntervalMs = m.ttsQueueIntervalMs ?? 1800;
@@ -61,6 +66,9 @@ function toServerPayload(state) {
     for (const type of MODEL_TYPES) {
       const m = p.models[type] || {};
       models[type] = { enabled: !!m.enabled, modelId: m.modelId || '', note: m.note || '' };
+      if (type === 'text') {
+        models[type].supportsMultimodal = m.supportsMultimodal === true;
+      }
       if (type === 'tts') {
         models[type].ttsConcurrency = m.ttsConcurrency ?? 1;
         models[type].ttsQueueIntervalMs = m.ttsQueueIntervalMs ?? 1800;

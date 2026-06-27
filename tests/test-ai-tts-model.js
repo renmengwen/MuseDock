@@ -218,6 +218,54 @@ async function run() {
     'concurrent three',
   ]);
   assert.strictEqual(concurrencyMaxInFlight, 2);
+
+  let minimaxUrl = '';
+  let minimaxOptions = null;
+  const minimax = await aiTtsModel.callTtsModel({
+    text: 'MiniMax 语音合成测试(laughs)。',
+    voice: 'mimo_default',
+    ttsConfig: {
+      enabled: true,
+      provider: 'provider_1',
+      providerName: 'minimax',
+      apiKey: 'minimax-secret',
+      baseUrl: 'https://api.minimaxi.com/v1',
+      modelId: 'speech-2.8-hd',
+      ttsQueueIntervalMs: 0,
+    },
+    fetchImpl: async (url, options) => {
+      minimaxUrl = url;
+      minimaxOptions = options;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: {
+            audio: Buffer.from('minimax mp3 data').toString('hex'),
+            status: 2,
+          },
+          base_resp: {
+            status_code: 0,
+            status_msg: 'success',
+          },
+        }),
+      };
+    },
+  });
+  assert.strictEqual(minimax.success, true);
+  assert.strictEqual(minimax.audioBuffer.toString(), 'minimax mp3 data');
+  assert.strictEqual(minimax.model.provider, 'minimax');
+  assert.strictEqual(minimax.model.model_id, 'speech-2.8-hd');
+  assert.strictEqual(minimax.voice, 'male-qn-qingse');
+  assert.strictEqual(minimaxUrl, 'https://api.minimaxi.com/v1/t2a_v2');
+  assert.strictEqual(minimaxOptions.headers.Authorization, 'Bearer minimax-secret');
+  const minimaxBody = JSON.parse(minimaxOptions.body);
+  assert.strictEqual(minimaxBody.model, 'speech-2.8-hd');
+  assert.strictEqual(minimaxBody.text, 'MiniMax 语音合成测试(laughs)。');
+  assert.strictEqual(minimaxBody.stream, false);
+  assert.strictEqual(minimaxBody.output_format, 'hex');
+  assert.strictEqual(minimaxBody.voice_setting.voice_id, 'male-qn-qingse');
+  assert.strictEqual(minimaxBody.audio_setting.format, 'wav');
 }
 
 run().then(() => {

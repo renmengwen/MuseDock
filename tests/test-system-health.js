@@ -75,16 +75,14 @@ async function run() {
             name: 'OpenAI',
             hasApiKey: true,
             models: {
-              text: { enabled: true, modelId: 'gpt-4.1' },
+              text: { enabled: true, modelId: 'gpt-4.1', supportsMultimodal: true },
               tts: { enabled: true, modelId: 'tts-1' },
-              multimodal: { enabled: false, modelId: 'gpt-4o' },
             },
           },
         },
         active: {
           text: 'openai/text',
           tts: 'openai/tts',
-          multimodal: 'openai/multimodal',
         },
       }),
     },
@@ -165,23 +163,18 @@ async function run() {
   }
 
   assert.deepStrictEqual(first.models, {
-    text: {
+    analysis: {
       configured: true,
       provider: 'OpenAI',
       providerId: 'openai',
       modelId: 'gpt-4.1',
+      supportsMultimodal: true,
     },
     tts: {
       configured: true,
       provider: 'OpenAI',
       providerId: 'openai',
       modelId: 'tts-1',
-    },
-    multimodal: {
-      configured: false,
-      provider: 'OpenAI',
-      providerId: 'openai',
-      modelId: 'gpt-4o',
     },
   });
 
