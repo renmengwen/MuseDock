@@ -15,8 +15,9 @@ assert.match(canvasEditor, /export function HtmlVideoCanvasEditor/);
 assert.match(canvasEditor, /from ['"]\.\/htmlVideoCanvasDom\.mjs['"]/);
 assert.doesNotMatch(canvasEditor, /from ['"]\.\/htmlVideoCanvasDom\.js['"]/);
 assert.match(canvasEditor, /跳到结尾并编辑/);
-assert.match(canvasEditor, /保存为草稿/);
-assert.match(canvasEditor, /renderFramePreview/);
+assert.match(canvasEditor, /保存修改/);
+assert.doesNotMatch(canvasEditor, /保存为草稿/);
+assert.match(canvasEditor, /saveAndAcceptFrameEdit/);
 assert.match(canvasEditor, /editingReadyRef/);
 assert.match(canvasEditor, /iframeKey/);
 assert.match(canvasEditor, /saving/);
@@ -64,16 +65,13 @@ assert.match(inspector, /当前元素/);
 assert.match(inspector, /文案/);
 
 assert.match(projectEditor, /HtmlVideoCanvasEditor/);
-assert.match(projectEditor, /useState\(['"]canvas['"]\)/);
-assert.match(projectEditor, /id: 'canvas', label: '画布'/);
-assert.ok(
-  projectEditor.indexOf("{ id: 'canvas', label: '画布' }") < projectEditor.indexOf("{ id: 'source', label: '源码' }"),
-  'canvas tab should render before source tab',
-);
-assert.match(projectEditor, /activeTab === 'canvas'[^]*<HtmlVideoCanvasEditor\s+editor=\{editor\}\s*\/>/);
+assert.doesNotMatch(projectEditor, /useState\(['"]canvas['"]\)/, 'project editor should not have canvas tab state');
+assert.match(projectEditor, /Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger/, 'project editor should use Dialog components');
+assert.match(projectEditor, /PanelDialog/, 'project editor should have PanelDialog component');
+assert.doesNotMatch(projectEditor, /id: 'canvas', label: '画布'/, 'project editor should no longer have tab definitions');
 
-for (const tabLabel of ['源码', '草稿', '布局检查', 'AI 修改', '字段', '导出']) {
-  assert.ok(projectEditor.includes(tabLabel), `HtmlVideoProjectEditor should keep ${tabLabel} tab`);
+for (const dialogLabel of ['源码', '草稿', '布局检查', 'AI 修改', '导出记录']) {
+  assert.ok(projectEditor.includes(dialogLabel), `HtmlVideoProjectEditor should expose ${dialogLabel} as a dialog button`);
 }
 
 console.log('test-html-video-canvas-editor-components passed');

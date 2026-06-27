@@ -116,11 +116,7 @@ assert.match(hook, /data\?\.html_video_project/, 'hook should parse nested data.
 
 for (const componentName of [
   'ProjectStatusBar',
-  'ProjectFramesList',
-  'TemplateInputsPanel',
-  'FrameInputsPanel',
-  'NarrationPanel',
-  'CaptionsPanel',
+  'HtmlVideoCanvasEditor',
   'ExportsPanel',
   'NaturalLanguageEditBox',
 ]) {
@@ -128,13 +124,13 @@ for (const componentName of [
 }
 
 assert.doesNotMatch(editor, /ReservedCapabilitiesPanel/, 'advanced reserved panel should not be shown by default');
-assert.ok(editor.includes('源码'), 'editor should expose a controlled Source tab');
-assert.match(editor, /useState\(['"]canvas['"]\)/, 'HtmlVideoProjectEditor should default to the canvas tab');
-assert.ok(editor.includes('activeTab'), 'HtmlVideoProjectEditor should switch between editor tabs');
-for (const tabLabel of ['源码', '草稿', '布局检查', 'AI 修改', '字段', '导出']) {
-  assert.ok(editor.includes(tabLabel), `HtmlVideoProjectEditor should expose ${tabLabel} tab`);
+assert.doesNotMatch(editor, /role="tablist"/, 'editor should no longer use a tab bar');
+assert.doesNotMatch(editor, /useState\(['"]canvas['"]\)/, 'editor should not track an active tab');
+assert.ok(editor.includes('ui/dialog'), 'editor should use the shared dialog for secondary panels');
+for (const dialogButton of ['源码', '草稿', '布局检查', 'AI 修改', '导出记录']) {
+  assert.ok(editor.includes(dialogButton), `editor should expose ${dialogButton} as a dialog button`);
 }
-assert.match(editor, /aria-selected=\{activeTab === tab\.id\}/, 'HtmlVideoProjectEditor should mark the active tab');
+assert.doesNotMatch(editor, /ProjectFramesList/, 'editor should drop the left frames list (bottom strip covers selection)');
 
 const sourcePanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoSourcePanel.jsx', 'utf-8');
 assert.ok(sourcePanel.includes('源码'), 'Source panel should show Chinese source title');
@@ -256,9 +252,6 @@ assert.ok(captionsPanel.includes('请选择一帧后编辑字幕。'), 'Captions
 
 assert.match(editor, /frames\s*=\s*Array\.isArray\(editor\.frames\)\s*\?\s*editor\.frames\s*:\s*\[\]/, 'HtmlVideoProjectEditor should fallback to an empty frames array');
 assert.match(editor, /selectedFrame\s*=\s*frames\.find/, 'HtmlVideoProjectEditor should resolve captions from the selected frame');
-assert.match(editor, /frames=\{frames\}/, 'HtmlVideoProjectEditor should pass the safe frames array to ProjectFramesList');
-assert.match(editor, /captions=\{selectedFrame\?\.captions\s*\|\|\s*\[\]\}/, 'HtmlVideoProjectEditor should pass selected frame captions to CaptionsPanel');
-assert.match(editor, /selectedFrameId=\{selectedFrame\?\.id\s*\|\|\s*selectedFrame\?\.scene_id\s*\|\|\s*''\}/, 'HtmlVideoProjectEditor should pass selected frame id to CaptionsPanel');
 
 const projectFramesList = fs.readFileSync('frontend-react/src/components/creative-video-editor/ProjectFramesList.jsx', 'utf-8');
 assert.match(projectFramesList, /duration_sec/, 'ProjectFramesList should display duration_sec values returned by html-video projects');

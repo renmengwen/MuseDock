@@ -1,29 +1,28 @@
-import { useState } from 'react';
-
-import { CaptionsPanel } from './CaptionsPanel.jsx';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { ExportsPanel } from './ExportsPanel.jsx';
-import { FrameInputsPanel } from './FrameInputsPanel.jsx';
 import { HtmlVideoAiEditPanel } from './HtmlVideoAiEditPanel.jsx';
 import { HtmlVideoCanvasEditor } from './HtmlVideoCanvasEditor.jsx';
 import { HtmlVideoDraftPanel } from './HtmlVideoDraftPanel.jsx';
 import { HtmlVideoQualityPanel } from './HtmlVideoQualityPanel.jsx';
 import { HtmlVideoSourcePanel } from './HtmlVideoSourcePanel.jsx';
-import { NarrationPanel } from './NarrationPanel.jsx';
 import { NaturalLanguageEditBox } from './NaturalLanguageEditBox.jsx';
-import { ProjectFramesList } from './ProjectFramesList.jsx';
 import { ProjectStatusBar } from './ProjectStatusBar.jsx';
-import { TemplateInputsPanel } from './TemplateInputsPanel.jsx';
 
-function getTemplateSchema(project) {
-  return project?.template_schema || project?.input_schema || project?.schema || project?.template?.schema || {};
-}
-
-function getTemplateValues(project) {
-  return project?.inputs || project?.template_inputs || project?.values || {};
+function PanelDialog({ label, title, children }) {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button type="button">{label}</button>
+      </DialogTrigger>
+      <DialogContent className="html-video-panel-dialog">
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export function HtmlVideoProjectEditor({ editor, onExported }) {
-  const [activeTab, setActiveTab] = useState('canvas');
   const disabled = editor.disabled;
   const frames = Array.isArray(editor.frames) ? editor.frames : [];
   const selectedFrame = frames.find(frame => (
@@ -35,36 +34,67 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
     if (result) onExported?.(result);
   }
 
-  function patchProject(payload) {
-    if (editor.patchProject) return editor.patchProject(payload);
-    if (payload?.type === 'frame_patch') {
-      return editor.saveFrame(payload.frame_id, payload);
-    }
-    return editor.saveTemplateInputs(payload);
-  }
-
-  const tabs = [
-    { id: 'canvas', label: '画布' },
-    { id: 'source', label: '源码' },
-    { id: 'draft', label: '草稿' },
-    { id: 'quality', label: '布局检查' },
-    { id: 'ai', label: 'AI 修改' },
-    { id: 'fields', label: '字段' },
-    { id: 'export', label: '导出' },
-  ];
-
   return (
     <section className="creative-video-editor html-video-project-editor">
-      <ProjectStatusBar
-        status={editor.status}
-        message={editor.message}
-        dirtyRequiresRender={editor.dirtyRequiresRender}
-      />
+      <ProjectStatusBar status={editor.status} message={editor.message} dirtyRequiresRender={editor.dirtyRequiresRender} />
       <div className="creative-video-editor-toolbar">
         <button type="button" disabled={disabled} onClick={editor.load}>重新加载</button>
         <button type="button" disabled={disabled} onClick={() => editor.materializeProject({})}>
           {editor.status === 'materializing' ? '正在重新生成 HTML...' : '重新生成 HTML'}
         </button>
+        <PanelDialog label="源码" title="帧源码">
+          <HtmlVideoSourcePanel
+            frame={selectedFrame}
+            html={editor.frameHtml}
+            disabled={disabled}
+            onLoad={editor.loadFrameHtml}
+            onSaveDraft={editor.saveFrameHtmlDraft}
+            onRenderDraft={(frameId, draftId) => editor.renderFramePreview(frameId, { draft_id: draftId })}
+          />
+        </PanelDialog>
+        <PanelDialog label="草稿" title="草稿">
+          <HtmlVideoDraftPanel
+            frame={selectedFrame}
+            disabled={disabled}
+            onRender={(frameId, draftId) => editor.renderFramePreview(frameId, { draft_id: draftId })}
+            onAccept={editor.acceptFrameDraft}
+            onDiscard={editor.discardFrameDraft}
+          />
+        </PanelDialog>
+        <PanelDialog label="布局检查" title="布局检查">
+          <HtmlVideoQualityPanel
+            frame={selectedFrame}
+            layoutQa={editor.layoutQa}
+            disabled={disabled}
+            onInspectFrame={editor.inspectLayout}
+            onFixFrame={(frameId) => editor.iterateFrame(frameId, {
+              mode: 'layout_fix', preserve_text: true, run_layout_qa: true, render_preview: true,
+              instruction: '修复当前帧文字错位、越界或遮挡问题，保留现有文案和整体风格。',
+            })}
+          />
+        </PanelDialog>
+        <PanelDialog label="AI 修改" title="AI 修改">
+          <HtmlVideoAiEditPanel
+            frame={selectedFrame}
+            editPlan={editor.editPlan}
+            disabled={disabled}
+            onIterateFrame={editor.iterateFrame}
+            onCreatePlan={editor.createEditPlan}
+            onRunPlan={editor.runEditPlan}
+            onAcceptPlan={editor.acceptEditPlan}
+            onDiscardPlan={editor.discardEditPlan}
+          />
+        </PanelDialog>
+        <PanelDialog label="导出记录" title="导出记录">
+          <ExportsPanel
+            exportsList={editor.exportsList}
+            disabled={disabled}
+            exporting={editor.status === 'exporting'}
+            onExport={handleExport}
+            onRefresh={editor.refreshExports}
+            getExportPlaybackUrl={editor.getExportPlaybackUrl}
+          />
+        </PanelDialog>
         <button type="button" disabled={disabled} onClick={() => handleExport({})}>
           {editor.status === 'exporting' ? '正在导出成片...' : '导出成片'}
         </button>
@@ -74,116 +104,8 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         editing={editor.status === 'editing'}
         onSubmit={editor.applyNaturalLanguageEdit}
       />
-      <div className="tabs" role="tablist" aria-label="html-video 编辑面板">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            className={activeTab === tab.id ? 'active' : ''}
-            aria-selected={activeTab === tab.id}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-      <div className="html-video-project-layout html-video-project-tab-layout">
-        <ProjectFramesList
-          frames={frames}
-          selectedFrameId={editor.selectedFrameId}
-          disabled={disabled}
-          onSelect={editor.selectFrame}
-        />
-        <div className="html-video-project-main" aria-label={tabs.find(tab => tab.id === activeTab)?.label || '编辑面板'}>
-          {activeTab === 'canvas' ? (
-            <HtmlVideoCanvasEditor editor={editor} />
-          ) : null}
-          {activeTab === 'source' ? (
-            <HtmlVideoSourcePanel
-              frame={selectedFrame}
-              html={editor.frameHtml}
-              disabled={disabled}
-              onLoad={editor.loadFrameHtml}
-              onSaveDraft={editor.saveFrameHtmlDraft}
-              onRenderDraft={(frameId, draftId) => editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true })}
-            />
-          ) : null}
-          {activeTab === 'draft' ? (
-            <HtmlVideoDraftPanel
-              frame={selectedFrame}
-              disabled={disabled}
-              onRender={(frameId, draftId) => editor.renderFramePreview(frameId, { draft_id: draftId, run_layout_qa: true })}
-              onAccept={editor.acceptFrameDraft}
-              onDiscard={editor.discardFrameDraft}
-            />
-          ) : null}
-          {activeTab === 'quality' ? (
-            <HtmlVideoQualityPanel
-              frame={selectedFrame}
-              layoutQa={editor.layoutQa}
-              disabled={disabled}
-              onInspectFrame={editor.inspectLayout}
-              onFixFrame={(frameId) => editor.iterateFrame(frameId, {
-                mode: 'layout_fix',
-                preserve_text: true,
-                run_layout_qa: true,
-                render_preview: true,
-                instruction: '修复当前帧文字错位、越界或遮挡问题，保留现有文案和整体风格。',
-              })}
-            />
-          ) : null}
-          {activeTab === 'ai' ? (
-            <HtmlVideoAiEditPanel
-              frame={selectedFrame}
-              editPlan={editor.editPlan}
-              disabled={disabled}
-              onIterateFrame={editor.iterateFrame}
-              onCreatePlan={editor.createEditPlan}
-              onRunPlan={editor.runEditPlan}
-              onAcceptPlan={editor.acceptEditPlan}
-              onDiscardPlan={editor.discardEditPlan}
-            />
-          ) : null}
-          {activeTab === 'fields' ? (
-            <>
-              <FrameInputsPanel
-                frame={selectedFrame}
-                disabled={disabled}
-                onSave={patchProject}
-                onRenderPreview={editor.renderFramePreview}
-              />
-              <TemplateInputsPanel
-                schema={getTemplateSchema(editor.project)}
-                values={getTemplateValues(editor.project)}
-                disabled={disabled}
-                onSave={editor.saveTemplateInputs}
-              />
-              <NarrationPanel
-                narration={editor.project?.narration}
-                disabled={disabled}
-                onSave={editor.saveTemplateInputs}
-                onRegenerate={editor.regenerateNarration}
-              />
-              <CaptionsPanel
-                captions={selectedFrame?.captions || []}
-                selectedFrameId={selectedFrame?.id || selectedFrame?.scene_id || ''}
-                disabled={disabled}
-                onSave={patchProject}
-              />
-            </>
-          ) : null}
-          {activeTab === 'export' ? (
-            <ExportsPanel
-              exportsList={editor.exportsList}
-              disabled={disabled}
-              exporting={editor.status === 'exporting'}
-              onExport={handleExport}
-              onRefresh={editor.refreshExports}
-              getExportPlaybackUrl={editor.getExportPlaybackUrl}
-            />
-          ) : null}
-        </div>
+      <div className="html-video-project-layout html-video-project-canvas-layout">
+        <HtmlVideoCanvasEditor editor={editor} />
       </div>
     </section>
   );
