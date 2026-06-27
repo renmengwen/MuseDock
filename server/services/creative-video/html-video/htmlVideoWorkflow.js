@@ -208,6 +208,17 @@ function firstExplicitDiagnosticCode(diagnostics) {
   return '';
 }
 
+async function writeFailedFrameHtml(projectDir, sceneId, html) {
+  const text = String(html || '');
+  if (!text.trim()) return '';
+  const safeSceneId = String(sceneId || 'frame').replace(/[^A-Za-z0-9_.-]+/g, '_') || 'frame';
+  const relativePath = `frames/.failed/${safeSceneId}.html`;
+  const absolutePath = projectStore.resolveProjectPath(projectDir, relativePath);
+  await fsp.mkdir(path.dirname(absolutePath), { recursive: true });
+  await fsp.writeFile(absolutePath, text, 'utf8');
+  return relativePath;
+}
+
 function isFrameProviderMissingText(result = {}) {
   const diagnosticCode = firstExplicitDiagnosticCode(result.diagnostics);
   if (diagnosticCode) return diagnosticCode === 'provider_missing_text';
@@ -973,10 +984,14 @@ async function generateHtmlVideo(options = {}) {
     preferredTemplateId = '',
     projectOptions = {},
   } = options;
-  const sceneSpec = inputSceneSpec
+  let sceneSpec = inputSceneSpec
     || objectOrEmpty(creativeContext).scene_spec
     || objectOrEmpty(creativeContext).sceneSpec
     || null;
+  if (!hasSceneSpecScenes(sceneSpec)) {
+    const persistedSceneSpec = await projectStore.loadSceneSpec(existingProjectDir(rootDir, workflowId, runId));
+    if (hasSceneSpecScenes(persistedSceneSpec)) sceneSpec = persistedSceneSpec;
+  }
   const mediaOptions = {
     generateAudio: mediaOptionEnabled('generateAudio', target, projectOptions),
     generateCaptions: mediaOptionEnabled('generateCaptions', target, projectOptions),
@@ -1046,6 +1061,9 @@ async function generateHtmlVideo(options = {}) {
     projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
   }
   model = createAuditedModel(model, projectDir);
+  if (hasSceneSpecScenes(sceneSpec)) {
+    await projectStore.saveSceneSpec(projectDir, sceneSpec);
+  }
 
   const selection = await requestTemplateSelection({
     model,
@@ -1427,14 +1445,24 @@ async function generateHtmlVideo(options = {}) {
         }
       }
       if (!htmlResult.success) {
+        const failedHtmlPath = await writeFailedFrameHtml(projectDir, sceneId, htmlResult.failed_html);
         const explicitDiagnosticCode = firstExplicitDiagnosticCode(htmlResult.diagnostics);
         const diagnosticCode = explicitDiagnosticCode || (isProviderMissingText(htmlResult.message) ? 'provider_missing_text' : 'frame_html_invalid');
-        const rawDiagnostics = diagnosticCode === 'provider_missing_text' && !explicitDiagnosticCode
+        let rawDiagnostics = diagnosticCode === 'provider_missing_text' && !explicitDiagnosticCode
           ? (Array.isArray(htmlResult.diagnostics) ? htmlResult.diagnostics : []).map(item => ({
             ...objectOrEmpty(item),
             code: 'provider_missing_text',
           }))
           : htmlResult.diagnostics;
+        if (failedHtmlPath && Array.isArray(rawDiagnostics)) {
+          rawDiagnostics = rawDiagnostics.map(item => ({
+            ...objectOrEmpty(item),
+            details: (() => {
+              const { failed_html: _failedHtml, ...details } = objectOrEmpty(item?.details);
+              return { ...details, failed_html_path: failedHtmlPath };
+            })(),
+          }));
+        }
         const normalizedFrameDiagnostics = normalizeDiagnostics(rawDiagnostics, {
           code: diagnosticCode,
           stage: 'ai-frame-html',
@@ -1443,6 +1471,7 @@ async function generateHtmlVideo(options = {}) {
           user_message: htmlResult.message || '单帧 HTML 生成失败。',
           retryable: true,
           repair_action: 'retry_frame_html',
+          details: failedHtmlPath ? { failed_html_path: failedHtmlPath } : {},
         });
         const checkpointDiagnosticCode = normalizedFrameDiagnostics[0]?.code || diagnosticCode;
         project = await projectStore.writeProjectJson(projectDir, current => {

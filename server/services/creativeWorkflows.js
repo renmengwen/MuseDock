@@ -61,6 +61,17 @@ function safeString(value) {
   return String(value).trim();
 }
 
+function plainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function inferMediaRootFromProjectDir(projectDir, workflowId) {
+  const resolvedProjectDir = path.resolve(String(projectDir || ''));
+  const marker = `${path.sep}${safeString(workflowId)}${path.sep}agent_runs${path.sep}`;
+  const index = resolvedProjectDir.indexOf(marker);
+  return index >= 0 ? resolvedProjectDir.slice(0, index) : '';
+}
+
 function getSourceUrlLoadingMessage(sourceUrl, kindHint = '') {
   const url = safeString(sourceUrl).toLowerCase();
   if (url.includes('mp.weixin.qq.com')) return '正在读取微信公众号文章...';
@@ -690,7 +701,7 @@ async function runResearchProvider({
 
 function resolveServices(options = {}) {
   const services = options.services || {};
-  return {
+  const resolved = {
     ...services,
     researchService: services.researchService || defaultResearchService,
     researchProvider: services.researchProvider || defaultResearchProvider,
@@ -701,6 +712,60 @@ function resolveServices(options = {}) {
     sourceFetch: services.sourceFetch || defaultSourceFetch,
     sourceAssets: services.sourceAssets || defaultSourceAssets,
   };
+  resolved.resumeActions = {
+    retryFrameHtml: context => defaultRetryFrameHtmlAction({ ...context, services: resolved }),
+    ...plainObject(services.resumeActions),
+  };
+  return resolved;
+}
+
+async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, mediaRoot, services, taskContext } = {}) {
+  const workflowId = safeString(workflow?.workflow_id || workflow?.id || project?.workflow_id);
+  const runId = safeString(project?.run_id || project?.runId);
+  if (!workflowId || !runId) {
+    return {
+      success: false,
+      message: '缺少 workflowId 或 runId，无法重试失败帧。',
+      diagnostics: [createDiagnostic({
+        code: 'retry_frame_html_context_invalid',
+        sub_stage: 'frame_html',
+        user_message: '缺少 workflowId 或 runId，无法重试失败帧。',
+        retryable: false,
+      })],
+    };
+  }
+  const sceneSpec = extractSceneSpecFromWorkflow(workflow) || project?.scene_spec || null;
+  const rootDir = inferMediaRootFromProjectDir(projectDir, workflowId) || safeString(mediaRoot) || DEFAULT_MEDIA_ROOT;
+  const target = {
+    ...plainObject(project?.generation_checkpoint?.target),
+    ...plainObject(project?.target),
+    ...plainObject(workflow?.target),
+  };
+  const storedTemplateId = safeString(project?.template_id);
+  const workflowService = services.htmlVideoWorkflow || htmlVideoWorkflow;
+  return workflowService.generateHtmlVideo({
+    workflowId,
+    runId,
+    rootDir,
+    sceneSpec,
+    creativeContext: {
+      ...plainObject(workflow?.result?.hyperframes_freeform),
+      scene_spec: sceneSpec,
+      frame_specs: extractFrameSpecsFromWorkflow(workflow),
+    },
+    target,
+    preferredTemplateId: safeString(target.preferredTemplateId) || storedTemplateId || '',
+    lockTemplate: target.lockTemplate === true || Boolean(storedTemplateId),
+    reuseContentGraph: true,
+    projectOptions: {
+      reuseContentGraph: true,
+    },
+    services: {
+      ...services,
+      aiTextModel: createAuditedWorkflowTextModel(workflow, services.aiTextModel || aiTextModel),
+    },
+    onProgress: taskContext?.emit,
+  });
 }
 
 function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride = {}, payload = {}) {
@@ -2756,6 +2821,8 @@ async function retryCreativeWorkflow(workflowId, payload = {}, options = {}) {
       workflow_id: safeString(workflowId),
       retry_attempt_id: attempt.id,
       data: persisted,
+      output_path: execution.output_path || execution.outputPath || null,
+      output_url: execution.output_url || execution.outputUrl || null,
       message: record.message,
     };
   }

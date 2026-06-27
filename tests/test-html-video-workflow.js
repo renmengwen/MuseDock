@@ -474,6 +474,67 @@ async function readProjectJson(projectDir) {
   assert.equal(unreasonableTimelineDiagnostic.repair_action, 'repair_timeline');
   assert.equal(unreasonableTimelineRenderCalls, 0);
 
+  const failedHtmlResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000007_failed_html',
+    runId: 'run_failed_html',
+    rootDir,
+    sceneSpec: {
+      title: '失败 HTML 落盘',
+      aspect_ratio: '16:9',
+      scenes: [
+        {
+          id: 'scene_01',
+          duration: 2,
+          kind: 'text',
+          narration_text: '失败 HTML 需要落盘。',
+          captions: fullSceneCaption('scene_01', '失败 HTML 需要落盘。', 2),
+          visual_text: { headline: '失败 HTML', keywords: [], cards: [] },
+        },
+      ],
+    },
+    creativeContext: { input: { raw_text: '失败 HTML 落盘' } },
+    target: { html_video_generation_mode: 'raw_html', generateAudio: false },
+    templateRegistry,
+    skipValidation: true,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配横屏', confidence: 0.9 }) };
+          }
+          if (prompt.startsWith('你是 html-video 的 content graph')) {
+            return {
+              success: true,
+              text: JSON.stringify({
+                synopsis: '失败 HTML 落盘',
+                nodes: [{ id: 'scene_01', kind: 'text', label: '失败 HTML', durationSec: 2, text: '失败 HTML 需要落盘。' }],
+                edges: [],
+              }),
+            };
+          }
+          return {
+            success: true,
+            text: [
+              '<!doctype html><html><head>',
+              '<style>.stage{width:900px;height:870px}</style>',
+              '</head><body>',
+              '<div class="stage"><h1 data-text-key="headline">失败 HTML</h1><p data-text-key="subtitle">落盘</p><section data-text-key="body">失败 HTML 需要落盘。</section></div>',
+              '</body></html>',
+            ].join(''),
+          };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+    },
+  });
+  assert.equal(failedHtmlResult.success, false);
+  const failedHtmlDiagnostic = failedHtmlResult.html_video_diagnostics.find(item => item.code === 'frame_html_invalid');
+  assert.ok(failedHtmlDiagnostic?.details?.failed_html_path);
+  const failedHtmlPath = path.join(failedHtmlResult.project_dir, failedHtmlDiagnostic.details.failed_html_path);
+  const failedHtmlContent = await fs.readFile(failedHtmlPath, 'utf8');
+  assert.match(failedHtmlContent, /\.stage/);
+
   const originalWriteRawFrameHtml = projectStore.writeRawFrameHtml;
   projectStore.writeRawFrameHtml = async () => {
     throw new Error('模拟帧 HTML 写入失败。');
@@ -1071,6 +1132,48 @@ async function readProjectJson(projectDir) {
   assert.equal(secondReuseResult.success, true);
   assert.equal(secondRunContentGraphCalls, 0);
   assert.equal(secondReuseResult.project.generation_checkpoint.stages.content_graph.reused, true);
+
+  // Retry-path regression: the resume entry must succeed even when the caller no longer
+  // has scene_spec in memory. The first run persists scene-spec.json; a later run that
+  // omits sceneSpec must hydrate it from disk so template selection + content-graph reuse
+  // still work (previously this failed with "没有可用的 html-video 模板").
+  const persistedSceneSpecPath = path.join(
+    rootDir,
+    'wf-content-graph-reuse',
+    'agent_runs',
+    'run-content-graph-reuse-html-video',
+    'scene-spec.json',
+  );
+  assert.ok(JSON.parse(await fs.readFile(persistedSceneSpecPath, 'utf8')).scenes.length > 0);
+  let hydratedRunContentGraphCalls = 0;
+  const hydratedReuseResult = await workflow.generateHtmlVideo({
+    workflowId: 'wf-content-graph-reuse',
+    runId: 'run-content-graph-reuse',
+    rootDir,
+    // sceneSpec intentionally omitted to mimic the retry path
+    creativeContext: { input: { raw_text: '内容图复用测试' } },
+    target: { preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
+    templateRegistry,
+    skipValidation: true,
+    reuseContentGraph: true,
+    projectOptions: { reuseContentGraph: true },
+    services: {
+      aiTextModel: {
+        callTextModel: async request => {
+          if (request.audit?.stage === 'content_graph') {
+            hydratedRunContentGraphCalls += 1;
+            throw new Error('不应重新生成 content graph');
+          }
+          return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">复用标题</h1><p data-text-key="subtitle">复用旁白</p><section data-text-key="body">复用正文</section></main></body></html>' };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      ...renderServices,
+    },
+  });
+  assert.equal(hydratedReuseResult.success, true);
+  assert.equal(hydratedRunContentGraphCalls, 0);
+  assert.equal(hydratedReuseResult.project.generation_checkpoint.stages.content_graph.reused, true);
 
   let regenerateContentGraphCalls = 0;
   let regenerateFrameHtmlCalls = 0;

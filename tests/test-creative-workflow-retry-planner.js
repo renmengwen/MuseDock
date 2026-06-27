@@ -79,6 +79,68 @@ function project(overrides = {}) {
   assert.equal(workflowErrorFramePlan.retry_from, 'frame_html');
   assert.equal(workflowErrorFramePlan.code, 'provider_missing_text');
 
+  const metaFailurePlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        code: 'resume_action_not_configured',
+        sub_stage: 'frame_html',
+        diagnostics: [createDiagnostic({
+          code: 'resume_action_not_configured',
+          sub_stage: 'frame_html',
+          retryable: false,
+        })],
+      },
+      retry: {
+        attempts: [{
+          status: 'failed',
+          previous_failure: {
+            code: 'frame_html_invalid',
+            sub_stage: 'frame_html',
+            frame_id: 'scene_02',
+            diagnostics: [createDiagnostic({
+              code: 'frame_html_invalid',
+              stage: 'ai-frame-html',
+              sub_stage: 'frame_html',
+              frame_id: 'scene_02',
+              retryable: true,
+              repair_action: 'retry_frame_html',
+            })],
+          },
+        }],
+      },
+    }),
+    project: project(),
+  });
+  assert.equal(metaFailurePlan.can_retry, true);
+  assert.equal(metaFailurePlan.code, 'frame_html_invalid');
+  assert.equal(metaFailurePlan.repair_action, 'retry_frame_html');
+  assert.deepEqual(metaFailurePlan.executor_options, { frame_id: 'scene_02' });
+
+  const checkpointFrameFailure = project();
+  markCheckpointFrame(checkpointFrameFailure, 'frame_html', 'scene_03', {
+    status: 'failed',
+    diagnostic_code: 'frame_html_invalid',
+  });
+  const metaFailureCheckpointPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        code: 'retry_executor_failed',
+        sub_stage: 'frame_html',
+        diagnostics: [createDiagnostic({
+          code: 'retry_executor_failed',
+          sub_stage: 'frame_html',
+          retryable: false,
+        })],
+      },
+      retry: { attempts: [{ status: 'failed' }] },
+    }),
+    project: checkpointFrameFailure,
+  });
+  assert.equal(metaFailureCheckpointPlan.can_retry, true);
+  assert.equal(metaFailureCheckpointPlan.code, 'frame_html_invalid');
+  assert.equal(metaFailureCheckpointPlan.repair_action, 'retry_frame_html');
+  assert.deepEqual(metaFailureCheckpointPlan.executor_options, { frame_id: 'scene_03' });
+
   const contentGraphFailure = {
     stage: 'project',
     sub_stage: 'content_graph',

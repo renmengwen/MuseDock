@@ -115,28 +115,42 @@ function extractDataCanvasDimensions(html = '') {
   return pairs;
 }
 
-function isRootCanvasSelector(selector = '') {
+function cssCanvasSelectorKind(selector = '') {
+  let hasFallback = false;
   return String(selector || '')
     .split(',')
     .map(item => item.trim().toLowerCase())
-    .some(item => {
-      if (!item || /[\s>+~]/.test(item)) return false;
-      if (item === 'html' || item === 'body' || item === ':root') return true;
-      return /^(#|\.)?(app|root|stage|scene|canvas|screen|page|video|container)$/.test(item);
-    });
+    .reduce((kind, item) => {
+      if (kind === 'authoritative') return kind;
+      if (!item || /[\s>+~]/.test(item)) return kind;
+      if (item === 'html' || item === 'body' || item === ':root') return 'authoritative';
+      if (/^#(app|root|stage|scene|canvas|screen|page|video|container)$/.test(item)) return 'authoritative';
+      if (/^\.(app|root|stage|scene|canvas|screen|page|video|container)$/.test(item)) hasFallback = true;
+      return kind;
+    }, '') || (hasFallback ? 'fallback' : '');
+}
+
+function isRootCanvasSelector(selector = '') {
+  return Boolean(cssCanvasSelectorKind(selector));
 }
 
 function extractCssRootDimensions(html = '') {
   const pairs = [];
+  const blocks = [...String(html || '').matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)]
+    .map(match => match[1] || '');
+  const sources = blocks.length ? blocks : [String(html || '')];
   const rulePattern = /([^{}]+)\{([^{}]+)\}/g;
-  for (const match of String(html || '').matchAll(rulePattern)) {
-    const selector = match[1] || '';
-    const body = match[2] || '';
-    if (!isRootCanvasSelector(selector)) continue;
-    const width = Number(body.match(/(?:^|[;\s])width\s*:\s*(\d{2,5})px\b/i)?.[1]);
-    const height = Number(body.match(/(?:^|[;\s])height\s*:\s*(\d{2,5})px\b/i)?.[1]);
-    if (Number.isFinite(width) && Number.isFinite(height)) {
-      pairs.push({ source: `css:${selector.trim().replace(/\s+/g, ' ')}`, width, height });
+  for (const source of sources) {
+    for (const match of source.matchAll(rulePattern)) {
+      const selector = match[1] || '';
+      const body = match[2] || '';
+      const kind = cssCanvasSelectorKind(selector);
+      if (!kind) continue;
+      const width = Number(body.match(/(?:^|[;\s])width\s*:\s*(\d{2,5})px\b/i)?.[1]);
+      const height = Number(body.match(/(?:^|[;\s])height\s*:\s*(\d{2,5})px\b/i)?.[1]);
+      if (Number.isFinite(width) && Number.isFinite(height)) {
+        pairs.push({ source: `css:${selector.trim().replace(/\s+/g, ' ')}`, width, height, kind });
+      }
     }
   }
   return pairs;
@@ -146,11 +160,15 @@ function validateHtmlCanvasContract(html, target = {}) {
   const resolution = resolveResolution(target);
   const expectedWidth = resolution.width;
   const expectedHeight = resolution.height;
-  const pairs = [
+  const cssPairs = extractCssRootDimensions(html);
+  const authoritativePairs = [
     ...extractViewportDimensions(html),
     ...extractDataCanvasDimensions(html),
-    ...extractCssRootDimensions(html),
+    ...cssPairs.filter(pair => pair.kind === 'authoritative'),
   ];
+  const pairs = authoritativePairs.length
+    ? authoritativePairs
+    : cssPairs.filter(pair => pair.kind === 'fallback');
   const mismatched = pairs.find(pair => pair.width !== expectedWidth || pair.height !== expectedHeight);
   if (!mismatched) return { success: true };
   const reversed = mismatched.width === expectedHeight && mismatched.height === expectedWidth;

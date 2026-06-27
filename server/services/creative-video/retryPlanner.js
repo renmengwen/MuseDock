@@ -3,6 +3,7 @@ const { analyzeTimelineMismatch } = require('./html-video/timelineRepair');
 
 const MODE = 'repair_and_resume';
 const ENVIRONMENT_CODES = new Set(['ffmpeg_not_configured', 'playwright_not_configured']);
+const RETRY_META_FAILURE_CODES = new Set(['resume_action_not_configured', 'retry_executor_failed']);
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -117,11 +118,25 @@ function classifyFromCheckpoint(project = {}) {
   return null;
 }
 
+function latestRetryAttempt(workflow = {}) {
+  const attempts = arrayOrEmpty(workflow.retry?.attempts);
+  return attempts.length ? attempts[attempts.length - 1] : null;
+}
+
+function retryMetaFailureReplacement(workflow = {}, lastFailure = {}) {
+  if (!RETRY_META_FAILURE_CODES.has(safeString(lastFailure.code))) return lastFailure;
+  const previous = latestRetryAttempt(workflow)?.previous_failure;
+  return previous && typeof previous === 'object' && !Array.isArray(previous) ? previous : {};
+}
+
 function classifyCreativeWorkflowFailure(input = {}) {
   const workflow = objectOrEmpty(input.workflow);
   const project = objectOrEmpty(input.project);
-  const lastFailure = objectOrEmpty(input.last_failure || workflow.last_failure);
-  const diagnostics = collectDiagnostics(input);
+  const lastFailure = retryMetaFailureReplacement(
+    workflow,
+    objectOrEmpty(input.last_failure || workflow.last_failure),
+  );
+  const diagnostics = collectDiagnostics({ ...input, last_failure: lastFailure });
   const checkpoint = classifyFromCheckpoint(project);
   if (checkpoint?.sub_stage === 'validate_project' && checkpoint.code === 'project_read_failed') {
     return { ...checkpoint, diagnostics };
@@ -155,7 +170,8 @@ function classifyCreativeWorkflowFailure(input = {}) {
     }
   }
 
-  const workflowError = objectOrEmpty(workflow.error);
+  const rawWorkflowError = objectOrEmpty(workflow.error);
+  const workflowError = RETRY_META_FAILURE_CODES.has(safeString(rawWorkflowError.code)) ? {} : rawWorkflowError;
   const workflowErrorCode = safeString(workflowError.code);
   if (workflowErrorCode && workflowErrorCode !== 'unknown_project_failure') {
     return {

@@ -72,6 +72,10 @@ function configuredAction(services, name) {
   return typeof actions[name] === 'function' ? actions[name] : null;
 }
 
+function hasCompletedRenderOutput(result = {}) {
+  return Boolean(safeString(result.output_path || result.outputPath || result.output_url || result.outputUrl));
+}
+
 async function emit(taskContext, event) {
   if (typeof taskContext?.emit !== 'function') return;
   await taskContext.emit(event);
@@ -185,7 +189,7 @@ async function renderComposeInspect({
   };
 }
 
-async function callConfiguredProjectAction({ name, workflow, project, projectDir, plan, services, taskContext, extra = {} }) {
+async function callConfiguredProjectAction({ name, workflow, project, projectDir, plan, services, taskContext, rootDir, mediaRoot, extra = {} }) {
   const action = configuredAction(services, name);
   if (!action) {
     return actionFailure(`恢复动作 ${name} 未配置，无法自动重试。`, [createDiagnostic({
@@ -200,6 +204,9 @@ async function callConfiguredProjectAction({ name, workflow, project, projectDir
     project,
     projectDir,
     plan,
+    rootDir,
+    mediaRoot,
+    services,
     taskContext,
     ...extra,
   });
@@ -211,7 +218,7 @@ async function callConfiguredProjectAction({ name, workflow, project, projectDir
 }
 
 async function retryFrameHtml(context) {
-  const { workflowId, rootDir, workflow, projectDir, plan, services, taskContext } = context;
+  const { workflowId, rootDir, mediaRoot, workflow, projectDir, plan, services, taskContext } = context;
   const project = context.project;
   const ids = planFrameIds(plan, project, 'frame_html');
   if (!ids.length) {
@@ -232,10 +239,20 @@ async function retryFrameHtml(context) {
       plan,
       services,
       taskContext,
+      rootDir,
+      mediaRoot,
       extra: { frame_id: frameId, frameId },
     });
     if (!actionResult.success) return actionResult;
     nextProject = actionResult.project;
+    if (hasCompletedRenderOutput(actionResult)) {
+      return {
+        ...actionResult,
+        project: nextProject,
+        project_dir: actionResult.project_dir || projectDir,
+        html_video_project_path: actionResult.html_video_project_path || projectDir,
+      };
+    }
   }
   return renderComposeInspect({
     workflowId,
@@ -456,7 +473,6 @@ async function executeCreativeWorkflowRetryPlan({
   services = {},
   taskContext,
 } = {}) {
-  void mediaRoot;
   if (!plan || plan.mode !== 'repair_and_resume') {
     return actionFailure('恢复计划无效：V1 只支持 repair_and_resume。', [createDiagnostic({
       code: 'retry_plan_invalid',

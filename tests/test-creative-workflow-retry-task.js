@@ -418,6 +418,85 @@ function fakeHtmlVideoServices(calls = {}) {
 
   {
     const rootDir = await tempRoot();
+    const { projectDir } = await createFailedWorkflowFixture(rootDir);
+    const calls = {};
+    const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: 'provider_missing_text',
+    }, {
+      rootDir,
+      services: {
+        now: () => '2026-06-25T01:00:00.000Z',
+        aiTextModel: {
+          callTextModel: async () => ({
+            success: true,
+            model: { provider: 'test-provider', model_id: 'test-model' },
+            usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+            text: '<html></html>',
+          }),
+        },
+        htmlVideoWorkflow: {
+          generateHtmlVideo: async args => {
+            calls.generateHtmlVideo = (calls.generateHtmlVideo || 0) + 1;
+            calls.generateArgs = args;
+            await args.services.aiTextModel.callTextModel({
+              audit: {
+                agent: 'FrameHtmlAgent',
+                stage: 'frame_html',
+                sub_stage: 'frame_html',
+                frame_id: 'scene_01',
+                attempt: 1,
+              },
+              messages: [],
+            });
+            const project = await projectStore.loadProject(projectDir);
+            project.frames[0].html_path = 'frames/01-scene_01.html';
+            markCheckpointFrame(project, 'frame_html', 'scene_01', {
+              status: 'done',
+              html_path: 'frames/01-scene_01.html',
+              output_hash: 'new-hash',
+              diagnostic_code: '',
+            });
+            return {
+              success: true,
+              project,
+              project_dir: projectDir,
+              html_video_project_path: projectDir,
+              output_path: path.join(projectDir, 'exports', 'output.mp4'),
+              message: 'html-video 已恢复。',
+            };
+          },
+        },
+        materializer: {
+          materializeProject: async () => {
+            throw new Error('默认 retryFrameHtml 返回成片后不应再次 materialize');
+          },
+        },
+        frameRenderer: {
+          renderFrame: async () => {
+            throw new Error('默认 retryFrameHtml 返回成片后不应再次 render');
+          },
+        },
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async () => {
+            throw new Error('默认 retryFrameHtml 返回成片后不应再次 compose');
+          },
+        },
+      },
+    });
+    assert.equal(result.success, true);
+    assert.equal(calls.generateHtmlVideo, 1);
+    assert.equal(calls.generateArgs.workflowId, WORKFLOW_ID);
+    assert.equal(calls.generateArgs.runId, 'run-retry-task');
+    assert.equal(calls.generateArgs.reuseContentGraph, true);
+    assert.equal(calls.generateArgs.projectOptions.reuseContentGraph, true);
+    assert.equal(result.data.model_calls.at(-1).stage, 'frame_html');
+    assert.equal(result.data.model_calls.at(-1).model.model_id, 'test-model');
+    assert.equal(result.output_path, path.join(projectDir, 'exports', 'output.mp4'));
+  }
+
+  {
+    const rootDir = await tempRoot();
     const { projectDir } = await createMissingProjectArtifactFixture(rootDir);
     const plan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
     assert.equal(plan.success, true);

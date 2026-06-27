@@ -547,11 +547,13 @@ function frameDiagnostic(code, message, args = {}, details = {}) {
 }
 
 function frameFailure(code, message, args = {}, details = {}) {
-  return {
+  const result = {
     success: false,
     message,
     diagnostics: [frameDiagnostic(code, message, args, details)],
   };
+  if (details.failed_html) result.failed_html = details.failed_html;
+  return result;
 }
 
 function htmlRetryFailureMessage(retry = {}) {
@@ -585,11 +587,22 @@ async function generateFrameHtml({
   const allowInternalRetry = attempt < 2 && shortPrompt !== true;
   const firstExtracted = extractHtmlDocument(first.text);
   if (firstExtracted.success) {
+    const targetValidation = validateHtmlTargetResolution(firstExtracted.html, promptArgs.target || {});
     const normalizedHtml = normalizeHtmlCanvasContract(firstExtracted.html, promptArgs.target || {});
-    const validation = validateGeneratedHtml(normalizedHtml, promptArgs);
+    const validation = targetValidation.success
+      ? validateGeneratedHtml(normalizedHtml, promptArgs)
+      : {
+        success: false,
+        code: 'frame_html_invalid',
+        message: targetValidation.message || 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
+        details: targetValidation,
+      };
     if (validation.success) return { ...firstExtracted, html: normalizedHtml };
     if (!allowInternalRetry) {
-      return frameFailure(validation.code || 'frame_html_invalid', validation.message || '单帧 HTML 内容校验失败。', promptArgs, validation.details || {});
+      return frameFailure(validation.code || 'frame_html_invalid', validation.message || '单帧 HTML 内容校验失败。', promptArgs, {
+        ...(validation.details || {}),
+        failed_html: normalizedHtml,
+      });
     }
     const retry = await callModel(model, buildRetryPrompt({
       ...promptArgs,
@@ -606,12 +619,21 @@ async function generateFrameHtml({
         diagnostics: [validation.message, retryExtracted.message].filter(Boolean),
       });
     }
+    const retryTargetValidation = validateHtmlTargetResolution(retryExtracted.html, promptArgs.target || {});
     const retryHtml = normalizeHtmlCanvasContract(retryExtracted.html, promptArgs.target || {});
-    const retryValidation = validateGeneratedHtml(retryHtml, promptArgs);
+    const retryValidation = retryTargetValidation.success
+      ? validateGeneratedHtml(retryHtml, promptArgs)
+      : {
+        success: false,
+        code: 'frame_html_invalid',
+        message: retryTargetValidation.message || 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
+        details: retryTargetValidation,
+      };
     if (retryValidation.success) return { ...retryExtracted, html: retryHtml };
     return frameFailure(retryValidation.code || 'frame_html_invalid', retryValidation.message || '单帧 HTML 内容校验失败。', promptArgs, {
       diagnostics: [validation.message, retryValidation.message].filter(Boolean),
       details: retryValidation.details || {},
+      failed_html: retryHtml,
     });
   }
 
@@ -626,12 +648,21 @@ async function generateFrameHtml({
   }
   const retryExtracted = extractHtmlDocument(retry.text);
   if (retryExtracted.success) {
+    const retryTargetValidation = validateHtmlTargetResolution(retryExtracted.html, promptArgs.target || {});
     const retryHtml = normalizeHtmlCanvasContract(retryExtracted.html, promptArgs.target || {});
-    const retryValidation = validateGeneratedHtml(retryHtml, promptArgs);
+    const retryValidation = retryTargetValidation.success
+      ? validateGeneratedHtml(retryHtml, promptArgs)
+      : {
+        success: false,
+        code: 'frame_html_invalid',
+        message: retryTargetValidation.message || 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
+        details: retryTargetValidation,
+      };
     if (retryValidation.success) return { ...retryExtracted, html: retryHtml };
     return frameFailure(retryValidation.code || 'frame_html_invalid', retryValidation.message || '单帧 HTML 内容校验失败。', promptArgs, {
       diagnostics: [firstExtracted.message, retryValidation.message].filter(Boolean),
       details: retryValidation.details || {},
+      failed_html: retryHtml,
     });
   }
   return frameFailure('frame_html_invalid', 'AI 未返回有效 HTML document。', promptArgs, {

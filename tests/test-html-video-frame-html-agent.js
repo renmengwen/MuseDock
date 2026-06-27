@@ -298,6 +298,35 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   });
   assert.equal(decorativeValidation.success, true);
 
+  const nestedStageHtml = [
+    '<!doctype html><html><head>',
+    '<meta name="viewport" content="width=1920,height=1080,initial-scale=1.0">',
+    '<style>',
+    'html,body{margin:0;width:1920px;height:1080px;overflow:hidden}',
+    '.stage{width:900px;height:870px}',
+    '</style>',
+    '</head><body data-hv-canvas data-width="1920" data-height="1080">',
+    '<div class="stage"><h1 data-text-key="headline">基础版</h1><p data-text-key="subtitle">价格</p><section data-text-key="body">基础版价格 12 元</section></div>',
+    '</body></html>',
+  ].join('');
+  const nestedStageValidation = agent.validateHtmlTargetResolution(nestedStageHtml, {
+    resolution: { width: 1920, height: 1080 },
+  });
+  assert.equal(nestedStageValidation.success, true);
+
+  const onlyStageHtml = [
+    '<!doctype html><html><head>',
+    '<style>.stage{width:900px;height:870px}</style>',
+    '</head><body>',
+    '<div class="stage"><h1 data-text-key="headline">基础版</h1><p data-text-key="subtitle">价格</p><section data-text-key="body">基础版价格 12 元</section></div>',
+    '</body></html>',
+  ].join('');
+  const onlyStageValidation = agent.validateHtmlTargetResolution(onlyStageHtml, {
+    resolution: { width: 1920, height: 1080 },
+  });
+  assert.equal(onlyStageValidation.success, false);
+  assert.match(onlyStageValidation.message, /css:\.stage 使用 900x870/);
+
   const dimensionFailed = await agent.generateFrameHtml({
     model: {
       callTextModel: async () => ({
@@ -313,6 +342,32 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   });
   assert.equal(dimensionFailed.success, false);
   assert.match(dimensionFailed.message, /尺寸|画幅/);
+
+  const failedHtml = await agent.generateFrameHtml({
+    model: {
+      callTextModel: async () => ({
+        success: true,
+        text: [
+          '<!doctype html><html><head>',
+          '<style>.stage{width:900px;height:870px}</style>',
+          '</head><body>',
+          '<div class="stage"><h1 data-text-key="headline">基础版</h1><p data-text-key="subtitle">价格</p><section data-text-key="body">基础版价格 12 元</section></div>',
+          '</body></html>',
+        ].join(''),
+      }),
+    },
+    frameId: 'scene_failed',
+    attempt: 2,
+    shortPrompt: true,
+    graph,
+    node: graph.nodes[0],
+    index: 0,
+    total: 2,
+    target: { resolution: { width: 1920, height: 1080 }, aspect_ratio: '16:9' },
+  });
+  assert.equal(failedHtml.success, false);
+  assert.match(failedHtml.failed_html, /\.stage/);
+  assert.match(failedHtml.diagnostics[0].details.failed_html, /\.stage/);
 
   let shortPromptInvalidCalls = 0;
   const shortPromptInvalid = await agent.generateFrameHtml({

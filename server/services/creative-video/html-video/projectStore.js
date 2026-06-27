@@ -90,6 +90,24 @@ async function saveContentGraph(projectDir, graph) {
   return relativePath;
 }
 
+async function saveSceneSpec(projectDir, sceneSpec) {
+  if (!projectDir || !sceneSpec || typeof sceneSpec !== 'object') return '';
+  const relativePath = 'scene-spec.json';
+  await saveJsonAtomic(resolveProjectPath(projectDir, relativePath), sceneSpec);
+  return relativePath;
+}
+
+async function loadSceneSpec(projectDir) {
+  if (!projectDir) return null;
+  try {
+    const text = await fs.readFile(resolveProjectPath(projectDir, 'scene-spec.json'), 'utf8');
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function safeFilePart(value, fallback) {
   const text = String(value || fallback || 'frame')
     .trim()
@@ -197,6 +215,8 @@ module.exports = {
   loadProject,
   writeProjectJson,
   saveContentGraph,
+  saveSceneSpec,
+  loadSceneSpec,
   writeRawFrameHtml,
   addRevision,
   addExport,
