@@ -96,6 +96,7 @@ for (const hookSurface of [
   'loadFrameHtml',
   'saveFrameHtmlDraft',
   'acceptFrameDraft',
+  'saveAndAcceptFrameEdit',
   'discardFrameDraft',
   'inspectLayout',
   'iterateFrame',
@@ -274,5 +275,9 @@ for (const componentPath of [
   const source = fs.readFileSync(componentPath, 'utf-8');
   assert.doesNotMatch(source, /fetch\(|from ['"]\.\.\/\.\.\/api\/client|api\./, `${componentPath} should not call API directly`);
 }
+
+assert.ok(hook.includes('saveAndAcceptFrameEdit'), 'hook should expose saveAndAcceptFrameEdit');
+assert.ok(hook.includes('resolveSavedDraftId'), 'hook should resolve the saved draft id before accepting');
+assert.ok(hook.includes('保存修改失败'), 'hook should expose a combined save-and-accept failure message');
 
 console.log('html video editor component tests passed');

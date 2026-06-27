@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { resolveSavedDraftId } from '../components/creative-video-editor/draftResultPayload.mjs';
 
 function getPayload(result) {
   return result?.html_video_project
@@ -264,6 +265,18 @@ export function useHtmlVideoProject({ workflowId, api }) {
     })
   ), [api, workflowId, runMutatingAction, applySecondaryResult]);
 
+  const saveAndAcceptFrameEdit = useCallback(async (frameId, payload) => {
+    // 画布所见即所得：存草稿 + 立即接受，对用户合并成「保存修改」一步。
+    const saved = await saveFrameHtmlDraft(frameId, payload);
+    if (!saved || saved.success === false) return saved;
+    const draftId = resolveSavedDraftId(saved, frameId);
+    if (!draftId) {
+      setFailure(new Error('保存修改失败：未获取到草稿 id。'), '保存修改失败。');
+      return null;
+    }
+    return acceptFrameDraft(frameId, draftId);
+  }, [saveFrameHtmlDraft, acceptFrameDraft, setFailure]);
+
   const discardFrameDraft = useCallback((frameId, draftId) => (
     runMutatingAction({
       nextStatus: 'discarding_draft',
@@ -497,6 +510,7 @@ export function useHtmlVideoProject({ workflowId, api }) {
     selectFrame: setSelectedFrameId,
     loadFrameHtml,
     saveFrameHtmlDraft,
+    saveAndAcceptFrameEdit,
     acceptFrameDraft,
     discardFrameDraft,
     inspectLayout,
