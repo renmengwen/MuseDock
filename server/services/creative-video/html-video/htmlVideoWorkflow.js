@@ -139,6 +139,7 @@ function responseModelInfo(response = {}) {
 
 function createAuditedModel(model, projectDir) {
   if (!model || typeof model.callTextModel !== 'function' || !projectDir) return model;
+  let auditWriteQueue = Promise.resolve();
   return {
     ...model,
     callTextModel: async request => {
@@ -161,7 +162,7 @@ function createAuditedModel(model, projectDir) {
         throw error;
       } finally {
         if (audit.agent && audit.stage) {
-          try {
+          auditWriteQueue = auditWriteQueue.catch(() => {}).then(async () => {
             await projectStore.writeProjectJson(projectDir, project => appendCheckpointModelCall(project, {
               ...audit,
               model: responseModelInfo(response),
@@ -170,13 +171,27 @@ function createAuditedModel(model, projectDir) {
               success: !thrownError && response?.success !== false,
               error: thrownError ? firstNonEmptyString(thrownError.message) : (response?.success === false ? firstNonEmptyString(response?.message, response?.error) : ''),
             }));
-          } catch (_) {
-            // 审计写入不能影响主生成流程。
-          }
+          });
+          await auditWriteQueue.catch(() => {});
         }
       }
     },
   };
+}
+
+async function mapLimit(items, limit, mapper) {
+  const list = Array.isArray(items) ? items : [];
+  const max = Math.max(1, Math.min(Number(limit) || 1, list.length || 1));
+  const results = new Array(list.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: max }, async () => {
+    while (next < list.length) {
+      const current = next;
+      next += 1;
+      results[current] = await mapper(list[current], current);
+    }
+  }));
+  return results;
 }
 
 async function callTextModel(model, prompt, options = {}) {
@@ -418,6 +433,7 @@ function providerMissingTextDiagnostic() {
 
 const CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE = '画面结构与旁白脚本不一致，已停止渲染。请重新生成画面结构后再导出。';
 const FRAME_HTML_MODEL_OPTIONS = { requestTimeoutMs: 90000, maxRetries: 0 };
+const FRAME_HTML_CONCURRENCY = 3;
 
 function contentGraphSceneSpecMismatchDiagnostic(graphBinding = {}, options = {}) {
   return createDiagnostic({
@@ -1315,7 +1331,99 @@ async function generateHtmlVideo(options = {}) {
     const nodes = contentGraph.nodes || [];
     const scenes = new Map((Array.isArray(sceneSpec?.scenes) ? sceneSpec.scenes : []).map(scene => [scene.id, scene]));
     let visualStyleReferenceHtml = '';
-    let previousFrameHtml = '';
+    const frameResults = [];
+    const frameJobs = [];
+    let completedFrameHtmlCount = 0;
+    const generateFrameJob = async job => {
+      const { index, node, sceneId, scene, styleReferenceHtml } = job;
+      await report(onProgress, {
+        type: 'html_video_frame_html_started',
+        stage: 'project',
+        sub_stage: 'frame_html',
+        message: `正在并发生成第 ${index + 1}/${nodes.length} 帧 HTML...`,
+        frame_id: node.id,
+        data: {
+          frame_id: node.id,
+          index,
+          total: nodes.length,
+          completed: completedFrameHtmlCount,
+          parallel: true,
+          concurrency: FRAME_HTML_CONCURRENCY,
+        },
+      });
+      let htmlResult = await frameHtmlAgent.generateFrameHtml({
+        model,
+        frameId: node.id || sceneId,
+        attempt: 1,
+        modelOptions: {
+          ...FRAME_HTML_MODEL_OPTIONS,
+          audit: {
+            agent: AGENTS.frameHtml,
+            stage: STAGES.frameHtml,
+            sub_stage: 'frame_html',
+            frame_id: node.id || sceneId,
+            node_id: node.id || '',
+            attempt: 1,
+          },
+        },
+        graph: contentGraph,
+        node,
+        index,
+        total: nodes.length,
+        sceneSpec,
+        creativeContext,
+        target: templateRenderTarget,
+        template,
+        visualStyleReferenceHtml: styleReferenceHtml,
+        previousFrameHtml: '',
+      });
+      if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
+        htmlResult = await frameHtmlAgent.generateFrameHtml({
+          model,
+          frameId: node.id || sceneId,
+          attempt: 2,
+          modelOptions: {
+            ...FRAME_HTML_MODEL_OPTIONS,
+            stream: false,
+            audit: {
+              agent: AGENTS.frameHtml,
+              stage: STAGES.frameHtml,
+              sub_stage: 'frame_html',
+              frame_id: node.id || sceneId,
+              node_id: node.id || '',
+              attempt: 2,
+            },
+          },
+          shortPrompt: true,
+          graph: contentGraph,
+          node,
+          index,
+          total: nodes.length,
+          sceneSpec,
+          creativeContext,
+          target: templateRenderTarget,
+          template,
+          visualStyleReferenceHtml: styleReferenceHtml,
+          previousFrameHtml: '',
+        });
+        if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
+          const warning = frameFallbackDiagnostic(node.id || sceneId);
+          diagnostics.push(warning);
+          htmlResult = {
+            success: true,
+            html: frameFallbackBuilder.buildFallbackFrameHtml({
+              scene,
+              node,
+              target: templateRenderTarget,
+              template,
+            }),
+            fallbackDiagnostic: warning,
+          };
+        }
+      }
+      return { ...job, htmlResult };
+    };
+
     for (let index = 0; index < nodes.length; index += 1) {
       const node = nodes[index];
       const sceneId = resolveNodeSceneId(node) || node.id;
@@ -1346,7 +1454,7 @@ async function generateHtmlVideo(options = {}) {
           return current;
         });
         if (!visualStyleReferenceHtml) visualStyleReferenceHtml = reuse.html;
-        previousFrameHtml = reuse.html;
+        completedFrameHtmlCount += 1;
         await report(onProgress, {
           type: 'html_video_frame_html_done',
           stage: 'project',
@@ -1358,92 +1466,49 @@ async function generateHtmlVideo(options = {}) {
             index,
             total: nodes.length,
             reused: true,
+            completed: completedFrameHtmlCount,
           },
         });
         continue;
       }
+      frameJobs.push({ index, node, sceneId, scene });
+    }
+
+    if (frameJobs.length > 1) {
       await report(onProgress, {
-        type: 'html_video_frame_html_started',
+        type: 'html_video_frame_html_parallel_started',
         stage: 'project',
         sub_stage: 'frame_html',
-        message: `正在生成第 ${index + 1}/${nodes.length} 帧 HTML...`,
-        frame_id: nodes[index].id,
+        message: `正在并发生成 ${frameJobs.length} 帧 HTML，最多同时生成 ${FRAME_HTML_CONCURRENCY} 帧。`,
         data: {
-          frame_id: nodes[index].id,
-          index,
           total: nodes.length,
+          completed: completedFrameHtmlCount,
+          pending: frameJobs.length,
+          concurrency: FRAME_HTML_CONCURRENCY,
         },
       });
-      let htmlResult = await frameHtmlAgent.generateFrameHtml({
-        model,
-        frameId: node.id || sceneId,
-        attempt: 1,
-        modelOptions: {
-          ...FRAME_HTML_MODEL_OPTIONS,
-          audit: {
-            agent: AGENTS.frameHtml,
-            stage: STAGES.frameHtml,
-            sub_stage: 'frame_html',
-            frame_id: node.id || sceneId,
-            node_id: node.id || '',
-            attempt: 1,
-          },
-        },
-        graph: contentGraph,
-        node,
-        index,
-        total: nodes.length,
-        sceneSpec,
-        creativeContext,
-        target: templateRenderTarget,
-        template,
-        visualStyleReferenceHtml,
-        previousFrameHtml,
-      });
-      if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
-        htmlResult = await frameHtmlAgent.generateFrameHtml({
-          model,
-          frameId: node.id || sceneId,
-          attempt: 2,
-          modelOptions: {
-            ...FRAME_HTML_MODEL_OPTIONS,
-            stream: false,
-            audit: {
-              agent: AGENTS.frameHtml,
-              stage: STAGES.frameHtml,
-              sub_stage: 'frame_html',
-              frame_id: node.id || sceneId,
-              node_id: node.id || '',
-              attempt: 2,
-            },
-          },
-          shortPrompt: true,
-          graph: contentGraph,
-          node,
-          index,
-          total: nodes.length,
-          sceneSpec,
-          creativeContext,
-          target: templateRenderTarget,
-          template,
-          visualStyleReferenceHtml,
-          previousFrameHtml,
+    }
+
+    if (frameJobs.length) {
+      let remainingJobs = frameJobs;
+      if (!visualStyleReferenceHtml) {
+        const firstResult = await generateFrameJob({
+          ...frameJobs[0],
+          styleReferenceHtml: '',
         });
-        if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
-          const warning = frameFallbackDiagnostic(node.id || sceneId);
-          diagnostics.push(warning);
-          htmlResult = {
-            success: true,
-            html: frameFallbackBuilder.buildFallbackFrameHtml({
-              scene,
-              node,
-              target: templateRenderTarget,
-              template,
-            }),
-            fallbackDiagnostic: warning,
-          };
-        }
+        frameResults.push(firstResult);
+        if (firstResult.htmlResult.success) visualStyleReferenceHtml = firstResult.htmlResult.html;
+        remainingJobs = frameJobs.slice(1);
       }
+      frameResults.push(...await mapLimit(
+        remainingJobs.map(job => ({ ...job, styleReferenceHtml: visualStyleReferenceHtml })),
+        FRAME_HTML_CONCURRENCY,
+        generateFrameJob,
+      ));
+    }
+
+    for (const frameResult of frameResults.sort((a, b) => a.index - b.index)) {
+      const { index, node, sceneId, scene, htmlResult } = frameResult;
       if (!htmlResult.success) {
         const failedHtmlPath = await writeFailedFrameHtml(projectDir, sceneId, htmlResult.failed_html);
         const explicitDiagnosticCode = firstExplicitDiagnosticCode(htmlResult.diagnostics);
@@ -1498,6 +1563,9 @@ async function generateHtmlVideo(options = {}) {
           html_video_project_path: projectDir,
           project_dir: projectDir,
         });
+      }
+      if (Array.isArray(htmlResult.diagnostics) && htmlResult.diagnostics.length) {
+        diagnostics.push(...normalizeDiagnostics(htmlResult.diagnostics));
       }
       const durationSec = trustedSceneDuration(scene || {}, node);
       const captions = mediaOptions.generateCaptions !== false && scene
@@ -1561,8 +1629,7 @@ async function generateHtmlVideo(options = {}) {
         });
         return current;
       });
-      if (!visualStyleReferenceHtml) visualStyleReferenceHtml = htmlResult.html;
-      previousFrameHtml = htmlResult.html;
+      completedFrameHtmlCount += 1;
       await report(onProgress, {
         type: 'html_video_frame_html_done',
         stage: 'project',
@@ -1573,6 +1640,9 @@ async function generateHtmlVideo(options = {}) {
           frame_id: node.id,
           index,
           total: nodes.length,
+          completed: completedFrameHtmlCount,
+          parallel: frameJobs.length > 1,
+          concurrency: frameJobs.length > 1 ? FRAME_HTML_CONCURRENCY : 1,
         },
       });
     }

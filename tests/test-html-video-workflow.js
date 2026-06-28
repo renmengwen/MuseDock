@@ -224,6 +224,110 @@ async function readProjectJson(projectDir) {
   assert.ok(auditedTemplateInputCalls.some(call => call.agent === 'TemplateSelectorAgent' && call.stage === 'template_selection'));
   assert.ok(auditedTemplateInputCalls.some(call => call.agent === 'TemplateInputAgent' && call.stage === 'template_inputs'));
 
+  let activeFrameHtmlCalls = 0;
+  let maxActiveFrameHtmlCalls = 0;
+  const parallelFramePrompts = {};
+  const parallelProgressEvents = [];
+  const parallelSceneSpec = {
+    title: '并发帧 HTML',
+    aspect_ratio: '9:16',
+    scenes: Array.from({ length: 4 }, (_, index) => {
+      const id = `scene_${String(index + 1).padStart(2, '0')}`;
+      return {
+        id,
+        duration: 2,
+        kind: 'text',
+        narration_text: `并发旁白 ${index + 1}`,
+        captions: fullSceneCaption(id, `并发旁白 ${index + 1}`, 2),
+        visual_text: { headline: `并发标题 ${index + 1}`, keywords: [], cards: [] },
+      };
+    }),
+  };
+  const parallelFrameResult = await workflow.generateHtmlVideo({
+    workflowId: '202606280000000001_parallel_frame_html',
+    runId: 'run_parallel_frame_html',
+    rootDir,
+    sceneSpec: parallelSceneSpec,
+    creativeContext: { input: { raw_text: '并发帧 HTML' } },
+    target: {
+      html_video_generation_mode: 'raw_html',
+      preferredTemplateId: 'vertical',
+      lockTemplate: true,
+      generateAudio: false,
+    },
+    templateRegistry,
+    skipValidation: true,
+    onProgress: event => parallelProgressEvents.push(event),
+    services: {
+      aiTextModel: {
+        callTextModel: async request => {
+          const prompt = request.messages.map(item => item.content).join('\n');
+          if (prompt.startsWith('你是 html-video 的 content graph')) {
+            return {
+              success: true,
+              text: JSON.stringify({
+                synopsis: '并发帧 HTML',
+                nodes: parallelSceneSpec.scenes.map(scene => ({
+                  id: scene.id,
+                  kind: 'text',
+                  label: scene.visual_text.headline,
+                  durationSec: scene.duration,
+                  text: scene.narration_text,
+                })),
+                edges: parallelSceneSpec.scenes.slice(1).map((scene, index) => ({
+                  from: parallelSceneSpec.scenes[index].id,
+                  to: scene.id,
+                  kind: 'sequence',
+                })),
+              }),
+            };
+          }
+          if (request.audit?.stage === 'frame_html') {
+            const frameId = request.audit.frame_id;
+            parallelFramePrompts[frameId] = prompt;
+            activeFrameHtmlCalls += 1;
+            maxActiveFrameHtmlCalls = Math.max(maxActiveFrameHtmlCalls, activeFrameHtmlCalls);
+            await new Promise(resolve => setTimeout(resolve, 30));
+            activeFrameHtmlCalls -= 1;
+            const scene = parallelSceneSpec.scenes.find(item => item.id === frameId);
+            const previousOnlyMarker = frameId === 'scene_02' ? 'SECOND_PREVIOUS_ONLY' : '';
+            return {
+              success: true,
+              text: `<!doctype html><html><body><main data-frame-id="${frameId}"><h1 data-text-key="headline">${scene.visual_text.headline}</h1><p data-text-key="subtitle">${scene.captions[0].text}</p><section data-text-key="body">${scene.narration_text} ${previousOnlyMarker}</section></main></body></html>`,
+            };
+          }
+          return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      frameRenderer: {
+        renderFrame: async (frame, options) => ({
+          success: true,
+          frame_id: frame.id,
+          output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+          diagnostics: [],
+        }),
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath };
+        },
+        muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+      },
+      visualQaService: { inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }) },
+    },
+  });
+  assert.equal(parallelFrameResult.success, true);
+  assert.ok(maxActiveFrameHtmlCalls > 1, `expected frame HTML calls to overlap, got ${maxActiveFrameHtmlCalls}`);
+  assert.doesNotMatch(parallelFramePrompts.scene_03, /SECOND_PREVIOUS_ONLY/);
+  assert.doesNotMatch(parallelFramePrompts.scene_04, /SECOND_PREVIOUS_ONLY/);
+  assert.ok(parallelProgressEvents.some(event => event.type === 'html_video_frame_html_parallel_started'));
+  assert.ok(parallelProgressEvents
+    .filter(event => event.type === 'html_video_frame_html_started')
+    .every(event => Number.isFinite(Number(event.data?.completed))));
+  assert.ok(parallelProgressEvents.some(event => event.type === 'html_video_frame_html_done' && event.data?.completed === 4));
+
   const rawCalls = [];
   const rawPathResult = await workflow.generateHtmlVideo({
     workflowId: '202606170000000000_raw',

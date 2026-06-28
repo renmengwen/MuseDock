@@ -54,6 +54,27 @@ function adjacentSummary(graph = {}, index) {
   };
 }
 
+function sceneLightSummary(scene = {}) {
+  if (!scene || typeof scene !== 'object') return null;
+  return {
+    id: scene.id,
+    title: compactText(scene.visual_text?.headline || scene.headline || scene.title || scene.narration_text, 160),
+  };
+}
+
+function frameSceneSpecSummary(sceneSpec = {}, node = {}, frameId = '', index = 0) {
+  const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
+  const currentScene = resolveSceneForFrame(sceneSpec, node, frameId || node?.id || '');
+  const currentIndex = scenes.findIndex(scene => scene && scene.id === currentScene?.id);
+  const sceneIndex = currentIndex >= 0 ? currentIndex : index;
+  return {
+    title: sceneSpec.title || '',
+    current_scene: currentScene && Object.keys(currentScene).length ? currentScene : null,
+    previous_scene: sceneIndex > 0 ? sceneLightSummary(scenes[sceneIndex - 1]) : null,
+    next_scene: sceneIndex >= 0 && sceneIndex < scenes.length - 1 ? sceneLightSummary(scenes[sceneIndex + 1]) : null,
+  };
+}
+
 function templateStyleReference(template = {}) {
   if (!template || typeof template !== 'object') return '（无模板，仅自由生成完整 HTML）';
   const examples = template.inputs?.examples || template.examples || [];
@@ -207,10 +228,7 @@ function buildFrameHtmlPrompt({
     summarizeCreativeContextForPrompt(creativeContext) || '（无）',
     '',
     'scene_spec 摘要：',
-    JSON.stringify({
-      title: sceneSpec.title || '',
-      scenes: Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [],
-    }, null, 2),
+    JSON.stringify(frameSceneSpecSummary(sceneSpec, node, node.id || '', index), null, 2),
     '',
     '请返回：',
     '```html',
@@ -398,13 +416,23 @@ function validateHtmlContentQuality(html, args = {}) {
     const overlap = contentOverlapScore(htmlComparable, expectedTexts);
     if (overlap < 2) {
       return {
-        success: false,
+        success: true,
+        diagnostics: [{
+          code: 'frame_html_content_mismatch',
+          severity: 'warning',
+          stage: 'ai-frame-html',
+          sub_stage: 'frame_html',
+          frame_id: args.node?.id || '',
+          retryable: false,
+          repair_action: '',
+          user_message: `HTML 主画面文案没有匹配当前镜头内容，缺少核心标题或足够关键词：${primary}。`,
+          details: {
+            expected_headline: primary,
+            overlap_score: overlap,
+          },
+        }],
         code: 'frame_html_content_mismatch',
         message: `HTML 主画面文案没有匹配当前镜头内容，缺少核心标题或足够关键词：${primary}。`,
-        details: {
-          expected_headline: primary,
-          overlap_score: overlap,
-        },
       };
     }
   }
@@ -597,7 +625,7 @@ async function generateFrameHtml({
         message: targetValidation.message || 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
         details: targetValidation,
       };
-    if (validation.success) return { ...firstExtracted, html: normalizedHtml };
+    if (validation.success) return { ...firstExtracted, html: normalizedHtml, diagnostics: validation.diagnostics || [] };
     if (!allowInternalRetry) {
       return frameFailure(validation.code || 'frame_html_invalid', validation.message || '单帧 HTML 内容校验失败。', promptArgs, {
         ...(validation.details || {}),
@@ -629,7 +657,7 @@ async function generateFrameHtml({
         message: retryTargetValidation.message || 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
         details: retryTargetValidation,
       };
-    if (retryValidation.success) return { ...retryExtracted, html: retryHtml };
+    if (retryValidation.success) return { ...retryExtracted, html: retryHtml, diagnostics: retryValidation.diagnostics || [] };
     return frameFailure(retryValidation.code || 'frame_html_invalid', retryValidation.message || '单帧 HTML 内容校验失败。', promptArgs, {
       diagnostics: [validation.message, retryValidation.message].filter(Boolean),
       details: retryValidation.details || {},
@@ -658,7 +686,7 @@ async function generateFrameHtml({
         message: retryTargetValidation.message || 'AI 返回的 HTML 画幅尺寸不符合目标尺寸。',
         details: retryTargetValidation,
       };
-    if (retryValidation.success) return { ...retryExtracted, html: retryHtml };
+    if (retryValidation.success) return { ...retryExtracted, html: retryHtml, diagnostics: retryValidation.diagnostics || [] };
     return frameFailure(retryValidation.code || 'frame_html_invalid', retryValidation.message || '单帧 HTML 内容校验失败。', promptArgs, {
       diagnostics: [firstExtracted.message, retryValidation.message].filter(Boolean),
       details: retryValidation.details || {},

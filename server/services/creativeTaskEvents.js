@@ -126,7 +126,7 @@ function calculateWorkflowProgress({ stage, stageProgress = 0, skippedStages = [
   return normalizeWorkflowProgressForSkippedStages(rawProgress, skippedStages);
 }
 
-function calculateProjectProgress({ step, index = 0, total = 1, stepProgress = 0 } = {}) {
+function calculateProjectProgress({ step, index = 0, total = 1, stepProgress = 0, completed = null } = {}) {
   if (!Object.prototype.hasOwnProperty.call(PROJECT_WEIGHTS, step)) {
     return 0;
   }
@@ -137,10 +137,14 @@ function calculateProjectProgress({ step, index = 0, total = 1, stepProgress = 0
 
   if ((step === 'frame_html' || step === 'frame_render') && Number(total) > 0) {
     const normalizedTotal = Math.max(1, Math.floor(Number(total)));
+    if (Number.isFinite(Number(completed))) {
+      const completedCount = Math.max(0, Math.min(normalizedTotal, Math.floor(Number(completed))));
+      return clampPercent(base + (completedCount / normalizedTotal) * weight);
+    }
     const normalizedIndex = Math.max(0, Math.min(normalizedTotal - 1, Math.floor(Number(index))));
-    const completed = (normalizedIndex / normalizedTotal) * weight;
+    const completedWeight = (normalizedIndex / normalizedTotal) * weight;
     const current = (progress / 100) * (weight / normalizedTotal);
-    return clampPercent(base + completed + current);
+    return clampPercent(base + completedWeight + current);
   }
 
   return clampPercent(base + (progress / 100) * weight);

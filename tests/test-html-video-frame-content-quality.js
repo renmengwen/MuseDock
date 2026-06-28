@@ -72,6 +72,26 @@ function validHtml(headline, body = '正文') {
   assert.match(repaired.html, /问题开场：为什么边缘发灰/);
   assert.doesNotMatch(repaired.html, /让增长信号/);
 
+  let softMismatchCalls = 0;
+  const softMismatch = await frameHtmlAgent.generateFrameHtml({
+    ...baseArgs,
+    template: null,
+    model: {
+      callTextModel: async () => {
+        softMismatchCalls += 1;
+        return {
+          success: true,
+          text: validHtml('完全不同的标题', '完全不同的正文'),
+        };
+      },
+    },
+  });
+
+  assert.equal(softMismatch.success, true);
+  assert.equal(softMismatchCalls, 1);
+  assert.equal(softMismatch.diagnostics.some(item => item.code === 'frame_html_content_mismatch'), true);
+  assert.equal(softMismatch.diagnostics.find(item => item.code === 'frame_html_content_mismatch').severity, 'warning');
+
   const failed = await frameHtmlAgent.generateFrameHtml({
     ...baseArgs,
     model: {

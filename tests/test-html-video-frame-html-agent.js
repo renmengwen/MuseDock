@@ -24,6 +24,7 @@ const prompt = agent.buildFrameHtmlPrompt({
     scenes: [
       { id: 'scene_01', narration_text: '先看基础版价格。' },
       { id: 'scene_02', narration_text: '再看专业版。' },
+      { id: 'scene_03', narration_text: '第三帧完整旁白不应进入当前帧 prompt。' },
     ],
   },
   creativeContext: {
@@ -74,6 +75,7 @@ assert.match(prompt, /不要只改底部 caption/);
 assert.match(prompt, /Search \/ GitHub \/ Tech Forums \/ Docs \/ Issues/);
 assert.match(prompt, /\[object Object\]/);
 assert.match(prompt, /不要发明源素材中没有的精确事实/);
+assert.doesNotMatch(prompt, /第三帧完整旁白不应进入当前帧 prompt/);
 
 const dynamicInputIndex = prompt.indexOf('---- 本次动态输入 ----');
 assert.notEqual(dynamicInputIndex, -1);

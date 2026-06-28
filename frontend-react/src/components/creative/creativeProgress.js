@@ -71,6 +71,12 @@ export function removeWorkflowProgressEvents(eventsByWorkflow, workflowId) {
 export function summarizeProgressEvent(event) {
   const data = event?.data && typeof event.data === 'object' ? event.data : {};
   const parts = [
+    Number.isFinite(Number(data.completed)) && Number.isFinite(Number(data.total))
+      ? `已完成 ${Number(data.completed)}/${data.total} 项`
+      : '',
+    Number.isFinite(Number(data.concurrency))
+      ? `并发上限 ${Number(data.concurrency)}`
+      : '',
     Number.isFinite(Number(data.index)) && Number.isFinite(Number(data.total))
       ? `第 ${Number(data.index) + 1}/${data.total} 项`
       : '',

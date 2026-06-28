@@ -72,4 +72,13 @@ assert.equal(
   eventsByWorkflow,
 );
 
+const { summarizeProgressEvent } = await import('../frontend-react/src/components/creative/creativeProgress.js');
+assert.equal(
+  summarizeProgressEvent({
+    type: 'html_video_frame_html_parallel_started',
+    data: { completed: 1, total: 4, concurrency: 3 },
+  }),
+  '已完成 1/4 项 · 并发上限 3',
+);
+
 console.log('creative progress visibility tests passed');

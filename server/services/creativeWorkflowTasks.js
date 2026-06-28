@@ -23,6 +23,7 @@ function htmlVideoProjectProgress(event = {}) {
       step: 'frame_html',
       index: data.index,
       total: data.total,
+      completed: data.completed,
       stepProgress: 10,
     });
   }
@@ -31,7 +32,15 @@ function htmlVideoProjectProgress(event = {}) {
       step: 'frame_html',
       index: data.index,
       total: data.total,
+      completed: data.completed,
       stepProgress: 100,
+    });
+  }
+  if (event.type === 'html_video_frame_html_parallel_started') {
+    return calculateProjectProgress({
+      step: 'frame_html',
+      total: data.total,
+      completed: data.completed || 0,
     });
   }
   if (event.type === 'html_video_frame_render_progress') {
