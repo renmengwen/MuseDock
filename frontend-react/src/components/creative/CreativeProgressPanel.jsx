@@ -9,7 +9,18 @@ import {
 
 function getActiveStage(workflow) {
   const stages = normalizeWorkflowStages(workflow);
-  return stages.find(stage => ['running', 'queued', 'pending'].includes(stage.status))
+  const stageById = new Map(stages.map(stage => [stage.id, stage]));
+  const currentStage = stageById.get(workflow?.current_stage);
+  if (workflow?.status === 'failed') {
+    const failedStageId = workflow?.last_failure?.stage || workflow?.error?.stage || '';
+    return stageById.get(failedStageId)
+      || stages.find(stage => stage.status === 'failed')
+      || currentStage
+      || stages[0]
+      || null;
+  }
+  return currentStage
+    || stages.find(stage => ['running', 'queued', 'pending'].includes(stage.status))
     || stages.find(stage => stage.status === 'failed')
     || [...stages].reverse().find(stage => stage.status === 'done')
     || stages[0]
@@ -21,7 +32,9 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
   const activeStage = useMemo(() => getActiveStage(workflow), [workflow]);
   if (!workflow) return null;
 
-  const stageId = workflow.current_stage || activeStage?.id || '';
+  const stageId = workflow.status === 'failed'
+    ? (workflow.last_failure?.stage || workflow.error?.stage || workflow.current_stage || activeStage?.id || '')
+    : (workflow.current_stage || activeStage?.id || '');
   const stageLabel = STAGE_LABELS[stageId] || activeStage?.label || '创作任务';
   const progress = normalizeWorkflowProgress(workflow);
   const durationLabel = formatWorkflowDurationLabel(workflow);

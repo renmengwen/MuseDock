@@ -279,8 +279,19 @@ function updateStage(record, stageId, patch = {}) {
 }
 
 async function writeJson(filePath, data) {
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  const dir = path.dirname(filePath);
+  await fsp.mkdir(dir, { recursive: true });
+  const tempPath = path.join(
+    dir,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}.tmp`,
+  );
+  try {
+    await fsp.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
+    await fsp.rename(tempPath, filePath);
+  } catch (error) {
+    await fsp.rm(tempPath, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 async function readJson(filePath) {
@@ -534,6 +545,10 @@ function mergeProjectOptions(recordTarget = {}, incoming = {}) {
     preferredTemplateId: safeString(target.preferredTemplateId) || safeString(incomingOptions.preferredTemplateId),
     lockTemplate: target.lockTemplate === true,
   };
+}
+
+function buildHtmlVideoExportFileUrl(workflowId, exportId) {
+  return `/api/creative-workflows/${encodeURIComponent(String(workflowId))}/html-video-project/exports/${encodeURIComponent(String(exportId))}/file`;
 }
 
 function createWorkflowSummary(record) {
@@ -1271,7 +1286,7 @@ async function getCreativeWorkflow(workflowId, options = {}) {
     const nextRecord = await markStaleRunningStageFailed(record, rootDir, services, options);
     return {
       success: true,
-      data: nextRecord,
+      data: await enrichWorkflowVideoUrls(nextRecord),
     };
   } catch (error) {
     return {
@@ -1358,6 +1373,15 @@ async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options 
     const progress = Number(patch.current_progress ?? record.current_progress);
     record.current_progress = Number.isFinite(progress) ? Math.max(0, Math.min(100, Math.round(progress))) : 0;
     record.last_event_seq = Number.isFinite(seq) && seq > 0 ? Math.floor(seq) : 0;
+    if (record.task_status === 'running' && record.current_stage) {
+      const stageMessage = record.current_stage_message || `正在${STAGE_LABELS[record.current_stage] || '处理当前阶段'}...`;
+      updateStage(record, record.current_stage, {
+        status: 'running',
+        message: stageMessage,
+        updated_at: now,
+        started_at: normalizeStages(record.stages).find(stage => stage.id === record.current_stage)?.started_at || now,
+      });
+    }
     if (patch.fail_running_stages === true) {
       const failedStageMessage = safeString(patch.message || patch.current_stage_message)
         || '服务器重启，后台创作任务被中断，请重新创建任务。';
@@ -1570,6 +1594,42 @@ function extractHtmlVideoProjectPathFromWorkflow(record) {
     || hyperframes.project_dir
     || extractStageHtmlVideoProjectPath(record),
   );
+}
+
+function normalizeComparablePath(value) {
+  const text = safeString(value);
+  if (!text) return '';
+  const normalized = path.normalize(text);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+}
+
+function findMatchingHtmlVideoExport(project, projectDir, outputPath) {
+  const output = normalizeComparablePath(outputPath);
+  if (!output || !Array.isArray(project?.exports)) return null;
+  return project.exports.find(item => {
+    const exportPath = safeString(item?.path);
+    const candidates = [
+      item?.absolute_path,
+      exportPath && projectDir ? path.resolve(projectDir, exportPath) : '',
+      exportPath,
+    ].map(normalizeComparablePath).filter(Boolean);
+    return safeString(item?.id) && candidates.includes(output);
+  }) || null;
+}
+
+async function enrichWorkflowVideoUrls(record) {
+  const workflowId = safeString(record?.workflow_id);
+  const render = record?.result?.hyperframes_freeform?.render;
+  const outputPath = safeString(render?.output_path || render?.outputPath);
+  if (!workflowId || !render || safeString(render.output_url) || !outputPath) return record;
+  const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
+  if (!projectDir) return record;
+  try {
+    const project = await htmlVideoProjectStore.loadProject(projectDir);
+    const exportItem = findMatchingHtmlVideoExport(project, projectDir, outputPath);
+    if (exportItem) render.output_url = buildHtmlVideoExportFileUrl(workflowId, exportItem.id);
+  } catch {}
+  return record;
 }
 
 async function readWorkflowAndHtmlVideoProject(workflowId, rootDir) {

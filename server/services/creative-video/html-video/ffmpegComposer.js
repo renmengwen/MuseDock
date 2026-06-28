@@ -244,7 +244,8 @@ async function concatAudioWithFfmpeg(audioFiles, outputPath, workDir, opts = {})
     '-f', 'concat',
     '-safe', '0',
     '-i', listPath,
-    '-c', 'copy',
+    '-c:a', 'libmp3lame',
+    '-b:a', '192k',
     outputPath,
   ];
   const result = await runCommandImpl(ffmpeg, args);

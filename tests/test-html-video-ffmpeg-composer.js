@@ -166,7 +166,8 @@ const composer = require('../server/services/creative-video/html-video/ffmpegCom
     '-f', 'concat',
     '-safe', '0',
     '-i', path.join(workDir, 'audio/concat.txt'),
-    '-c', 'copy',
+    '-c:a', 'libmp3lame',
+    '-b:a', '192k',
     path.join(workDir, 'exports/narration.mp3'),
   ]);
 

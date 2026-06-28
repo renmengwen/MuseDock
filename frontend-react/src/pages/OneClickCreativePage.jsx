@@ -16,10 +16,15 @@ const ACTIVE_CREATIVE_TASK_STORAGE_KEY = 'musedock.creative.activeTask.v1';
 function getWorkflowDisplayMessage(workflow, fallback = '') {
   const stages = Array.isArray(workflow?.stages) ? workflow.stages : [];
   const failedStage = stages.find(stage => stage.status === 'failed');
-  if (failedStage?.message) return failedStage.message;
-
   const activeStage = stages.find(stage => ['running', 'queued', 'pending'].includes(stage.status));
+  if (workflow?.current_stage_message) return workflow.current_stage_message;
+  if (workflow?.status === 'failed' && failedStage?.message) return failedStage.message;
   if (activeStage?.message) return activeStage.message;
+  if (workflow?.status === 'running') {
+    return workflow?.message
+      || fallback
+      || '创作任务已创建，正在生成视频...';
+  }
 
   return workflow?.error?.message
     || workflow?.message

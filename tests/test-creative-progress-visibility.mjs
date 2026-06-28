@@ -6,12 +6,25 @@ const {
   getSidebarTaskTimeSource,
   normalizeWorkflowProgress,
 } = await import('../frontend-react/src/components/creative/creativeProgress.js');
+const { normalizeWorkflowStages } = await import('../frontend-react/src/components/creative/creativeDisplay.js');
 
 assert.equal(normalizeWorkflowProgress({ current_progress: 68.6 }), 69);
 assert.equal(normalizeWorkflowProgress({ current_progress: 140 }), 100);
 assert.equal(normalizeWorkflowProgress({ current_progress: -20 }), 0);
 assert.equal(normalizeWorkflowProgress({}), 0);
 assert.equal(normalizeWorkflowProgress({ status: 'done' }), 100);
+
+const retryStages = normalizeWorkflowStages({
+  status: 'running',
+  current_stage: 'project',
+  current_stage_message: '正在生成第 2/6 帧 HTML...',
+  stages: [
+    { id: 'source', label: '准备来源资料', status: 'done' },
+    { id: 'project', label: '生成工程', status: 'failed', message: 'AI 未返回有效 HTML document。' },
+  ],
+});
+assert.equal(retryStages.find(stage => stage.id === 'project').status, 'running');
+assert.equal(retryStages.find(stage => stage.id === 'project').message, '正在生成第 2/6 帧 HTML...');
 
 assert.equal(
   formatWorkflowDurationLabel({

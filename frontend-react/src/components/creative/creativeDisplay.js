@@ -52,7 +52,12 @@ export function normalizeWorkflowStages(workflow) {
   return source.map(stage => ({
     ...stage,
     label: stage.label || STAGE_LABELS[stage.id] || stage.id || '未命名阶段',
-    status: stage.status || 'waiting',
+    status: workflow?.status === 'running' && workflow?.current_stage === stage.id
+      ? 'running'
+      : (stage.status || 'waiting'),
+    message: workflow?.status === 'running' && workflow?.current_stage === stage.id
+      ? (workflow.current_stage_message || stage.message || '')
+      : stage.message,
   }));
 }
 

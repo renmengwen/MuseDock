@@ -50,6 +50,8 @@ function readJson(filePath) {
   assert.equal(persisted.current_stage_message, '正在生成第 1/2 帧 HTML...');
   assert.equal(persisted.current_progress, 55);
   assert.equal(persisted.last_event_seq, 7);
+  assert.equal(persisted.stages.find(stage => stage.id === 'project').status, 'running');
+  assert.equal(persisted.stages.find(stage => stage.id === 'project').message, '正在生成第 1/2 帧 HTML...');
 
   const retrySummary = await workflows.patchCreativeWorkflowTaskSummary(WORKFLOW_ID, {
     operation: 'retry',
@@ -80,6 +82,33 @@ function readJson(filePath) {
   const clearedPersisted = readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));
   assert.equal(clearedPersisted.active_task_id, '');
   assert.equal(clearedPersisted.task_status, '');
+
+  const videoWorkflowId = '202606180000000002';
+  const projectDir = path.join(rootDir, 'html-video-project');
+  const outputPath = path.join(projectDir, 'exports', 'output-audio.mp4');
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, 'fake mp4');
+  fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({
+    exports: [{ id: 'export_0001', path: 'exports/output-audio.mp4', absolute_path: outputPath }],
+  }));
+  fs.writeFileSync(workflows.getWorkflowPath(videoWorkflowId, rootDir), JSON.stringify({
+    workflow_id: videoWorkflowId,
+    aweme_id: videoWorkflowId,
+    success: true,
+    status: 'done',
+    result: {
+      hyperframes_freeform: {
+        project: { render_mode: 'html-video', html_video_project_path: projectDir },
+        render: { status: 'rendered', output_path: outputPath },
+      },
+    },
+    stages: [],
+  }));
+  const videoWorkflow = await workflows.getCreativeWorkflow(videoWorkflowId, { rootDir });
+  assert.equal(
+    videoWorkflow.data.result.hyperframes_freeform.render.output_url,
+    `/api/creative-workflows/${videoWorkflowId}/html-video-project/exports/export_0001/file`,
+  );
 
   console.log('creative workflow task summary tests passed');
 })();
