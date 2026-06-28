@@ -7,7 +7,7 @@ const {
   createCreativeWorkflow,
   runCreativeWorkflow,
   getWorkflowPath,
-} = require('../server/services/creativeWorkflows');
+} = require('../server/services/creative/creativeWorkflows');
 
 const NOW = '2026-06-23T00:00:00.000Z';
 

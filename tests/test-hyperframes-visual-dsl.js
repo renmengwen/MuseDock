@@ -1,6 +1,6 @@
 const assert = require('assert');
-const visualDsl = require('../server/services/hyperframesVisualDsl');
-const animations = require('../server/services/hyperframesAnimations');
+const visualDsl = require('../server/services/hyperframes/hyperframesVisualDsl');
+const animations = require('../server/services/hyperframes/hyperframesAnimations');
 
 function run() {
   const scene = {

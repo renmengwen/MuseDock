@@ -1,5 +1,5 @@
 const assert = require('assert');
-const schema = require('../server/services/storyboardSchema');
+const schema = require('../server/services/storyboard/storyboardSchema');
 
 function run() {
   const captions = [

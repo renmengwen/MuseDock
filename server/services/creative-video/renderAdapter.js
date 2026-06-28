@@ -1,4 +1,4 @@
-const defaultRenderer = require('../hyperframesRenderer');
+const defaultRenderer = require('../hyperframes/hyperframesRenderer');
 
 class HyperFramesRenderAdapter {
   constructor({ renderer = defaultRenderer } = {}) {

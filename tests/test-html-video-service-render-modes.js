@@ -11,7 +11,7 @@ const {
   renderHtmlVideoProject,
   exportHtmlVideoProject,
   getHtmlVideoProjectExportFile,
-} = require('../server/services/creativeWorkflows');
+} = require('../server/services/creative/creativeWorkflows');
 
 const WORKFLOW_ID = '202606171200000001';
 

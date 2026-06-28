@@ -1,6 +1,6 @@
 const assert = require('assert/strict');
 
-const events = require('../server/services/creativeTaskEvents');
+const events = require('../server/services/creative/creativeTaskEvents');
 
 {
   assert.equal(events.normalizeSinceSeq(undefined), 0);

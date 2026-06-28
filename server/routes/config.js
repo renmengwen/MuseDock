@@ -1,6 +1,6 @@
 const express = require('express');
 const storedCookies = require('../state/cookies');
-const aiModelConfig = require('../services/aiModelConfig');
+const aiModelConfig = require('../services/ai/aiModelConfig');
 const appSettings = require('../services/appSettings');
 const { cleanupTargets, getSystemHealth } = require('../services/systemMaintenance');
 const {

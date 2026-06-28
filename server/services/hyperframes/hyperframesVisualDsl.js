@@ -1,4 +1,4 @@
-const storyboardSchema = require('./storyboardSchema');
+const storyboardSchema = require('../storyboard/storyboardSchema');
 
 function prepareSceneDsl(scene = {}) {
   const source = scene && typeof scene === 'object' && !Array.isArray(scene) ? scene : {};

@@ -3,7 +3,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const defaultTtsModel = require('./aiTtsModel');
+const defaultTtsModel = require('../ai/aiTtsModel');
 const defaultTtsTimeline = require('./ttsTimeline');
 const defaultPhraseTimeline = require('./phraseTimeline');
 const defaultAudioQuality = require('./ttsAudioQuality');

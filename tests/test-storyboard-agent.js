@@ -1,5 +1,5 @@
 const assert = require('assert');
-const storyboardAgent = require('../server/services/storyboardAgent');
+const storyboardAgent = require('../server/services/storyboard/storyboardAgent');
 
 async function run() {
   const messages = storyboardAgent.buildStoryboardMessages({

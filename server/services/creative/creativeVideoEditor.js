@@ -1,4 +1,4 @@
-const sceneSpec = require('./sceneSpec');
+const sceneSpec = require('../sceneSpec');
 
 function applyEditCommand(spec, command) {
   try {

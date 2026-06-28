@@ -5,7 +5,7 @@ const path = require('path');
 
 const mediaPipeline = require('../server/services/mediaPipeline');
 const researchService = require('../server/services/researchService');
-const { defaultRegistry } = require('../server/services/creativeTaskRegistry');
+const { defaultRegistry } = require('../server/services/creative/creativeTaskRegistry');
 const {
   STAGE_IDS,
   STAGE_LABELS,
@@ -18,7 +18,7 @@ const {
   exportHtmlVideoProject,
   appendWorkflowModelCall,
   runResearchProvider,
-} = require('../server/services/creativeWorkflows');
+} = require('../server/services/creative/creativeWorkflows');
 
 const NOW = '2026-06-12T12:00:00.000Z';
 const WORKFLOW_ID = '202606121200000001';
@@ -1824,7 +1824,7 @@ async function testSceneSpecOperations() {
     rerenderCreativeWorkflow,
     remixCreativeWorkflow,
     getWorkflowPath,
-  } = require('../server/services/creativeWorkflows');
+  } = require('../server/services/creative/creativeWorkflows');
 
   const { rootDir } = createTempDirs();
 

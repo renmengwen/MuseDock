@@ -3,7 +3,7 @@ const assert = require('assert/strict');
 const {
   defaultResearchProvider,
   defaultWebSearchProvider,
-} = require('../server/services/creativeWorkflows');
+} = require('../server/services/creative/creativeWorkflows');
 
 async function run() {
   const search = await defaultWebSearchProvider({

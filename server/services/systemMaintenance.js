@@ -5,7 +5,7 @@ const path = require('path');
 const defaultEnvironmentDoctor = require('./creative-video/html-video/environmentDoctor');
 const defaultTemplateRegistry = require('./creative-video/html-video/templateRegistry');
 const defaultAppSettings = require('./appSettings');
-const defaultAiModelConfig = require('./aiModelConfig');
+const defaultAiModelConfig = require('./ai/aiModelConfig');
 
 const HEALTH_CACHE_TTL_MS = 60 * 1000;
 const STORAGE_CACHE_TTL_MS = 15 * 1000;

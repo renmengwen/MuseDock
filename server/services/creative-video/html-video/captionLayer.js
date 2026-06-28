@@ -1,6 +1,6 @@
 const DEFAULT_CAPTION_DURATION_SEC = 3;
 const MAX_CAPTION_TEXT_LENGTH = 34;
-const { stripSpeechStageDirections } = require('../../speechText');
+const { stripSpeechStageDirections } = require('../../tts/speechText');
 const LEADING_PUNCTUATION_RE = /^[，。！？；：,.!?;:]/;
 const VOID_ELEMENTS = new Set([
   'area',

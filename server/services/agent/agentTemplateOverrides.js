@@ -1,7 +1,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const agentTemplates = require('./agentTemplates');
-const storyboardAgent = require('./storyboardAgent');
+const storyboardAgent = require('../storyboard/storyboardAgent');
 
 const DEFAULT_CONFIG_RELATIVE_PATH = path.join('data', 'config', 'agent_templates.json');
 

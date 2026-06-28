@@ -1,5 +1,5 @@
 const assert = require('assert');
-const quality = require('../server/services/ttsAudioQuality');
+const quality = require('../server/services/tts/ttsAudioQuality');
 
 (async () => {
   const calls = [];

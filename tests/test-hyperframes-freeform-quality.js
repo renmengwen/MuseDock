@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const quality = require('../server/services/hyperframesFreeformQuality');
+const quality = require('../server/services/hyperframes/hyperframesFreeformQuality');
 
 async function run() {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hf-freeform-quality-'));

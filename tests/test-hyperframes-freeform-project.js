@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const freeformProject = require('../server/services/hyperframesFreeformProject');
+const freeformProject = require('../server/services/hyperframes/hyperframesFreeformProject');
 
 async function run() {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hf-freeform-project-'));

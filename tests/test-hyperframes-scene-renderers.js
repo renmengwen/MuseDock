@@ -1,6 +1,6 @@
 const assert = require('assert');
 
-const renderers = require('../server/services/hyperframesSceneRenderers');
+const renderers = require('../server/services/hyperframes/hyperframesSceneRenderers');
 
 function makeScene(visualType, objects = [], extra = {}) {
   return {

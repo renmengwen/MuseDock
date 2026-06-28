@@ -3,14 +3,15 @@ const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
 
-const aiTextModel = require('../../aiTextModel');
+const aiTextModel = require('../../ai/aiTextModel');
 const { createTemplateRegistry, DEFAULT_ROOT_DIR, validateTemplateCompatibility } = require('./templateRegistry');
 const templateSelectorAgent = require('./templateSelectorAgent');
 const templateInputAgent = require('./templateInputAgent');
 const contentGraphAgent = require('./contentGraphAgent');
 const frameHtmlAgent = require('./frameHtmlAgent');
 const frameFallbackBuilder = require('./frameFallbackBuilder');
-const { buildRawHtmlFrameProject, normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
+const { runFrameHtmlPhase, isProviderMissingText } = require('./frameHtmlPhase');
+const { buildRawHtmlFrameProject } = require('./rawHtmlFrameBuilder');
 const environmentDoctor = require('./environmentDoctor');
 const projectStore = require('./projectStore');
 const {
@@ -179,21 +180,6 @@ function createAuditedModel(model, projectDir) {
   };
 }
 
-async function mapLimit(items, limit, mapper) {
-  const list = Array.isArray(items) ? items : [];
-  const max = Math.max(1, Math.min(Number(limit) || 1, list.length || 1));
-  const results = new Array(list.length);
-  let next = 0;
-  await Promise.all(Array.from({ length: max }, async () => {
-    while (next < list.length) {
-      const current = next;
-      next += 1;
-      results[current] = await mapper(list[current], current);
-    }
-  }));
-  return results;
-}
-
 async function callTextModel(model, prompt, options = {}) {
   const response = await model.callTextModel({
     ...objectOrEmpty(options),
@@ -207,50 +193,6 @@ async function callTextModel(model, prompt, options = {}) {
     };
   }
   return { success: true, text: response.text || response.content || '' };
-}
-
-function isProviderMissingText(message) {
-  return /返回结果缺少文本内容|流式返回结果缺少文本内容/.test(String(message || ''));
-}
-
-function firstExplicitDiagnosticCode(diagnostics) {
-  if (!Array.isArray(diagnostics)) return '';
-  for (const item of diagnostics) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
-    const code = String(item.code || '').trim().replace(/-/g, '_');
-    if (code) return code;
-  }
-  return '';
-}
-
-async function writeFailedFrameHtml(projectDir, sceneId, html) {
-  const text = String(html || '');
-  if (!text.trim()) return '';
-  const safeSceneId = String(sceneId || 'frame').replace(/[^A-Za-z0-9_.-]+/g, '_') || 'frame';
-  const relativePath = `frames/.failed/${safeSceneId}.html`;
-  const absolutePath = projectStore.resolveProjectPath(projectDir, relativePath);
-  await fsp.mkdir(path.dirname(absolutePath), { recursive: true });
-  await fsp.writeFile(absolutePath, text, 'utf8');
-  return relativePath;
-}
-
-function isFrameProviderMissingText(result = {}) {
-  const diagnosticCode = firstExplicitDiagnosticCode(result.diagnostics);
-  if (diagnosticCode) return diagnosticCode === 'provider_missing_text';
-  return isProviderMissingText(result.message);
-}
-
-function frameFallbackDiagnostic(frameId) {
-  return createDiagnostic({
-    code: 'fallback_frame_html_used',
-    stage: 'ai-frame-html',
-    sub_stage: 'frame_html',
-    frame_id: frameId,
-    severity: 'warning',
-    fallback_allowed: true,
-    retryable: false,
-    user_message: '当前帧 AI 生成连续失败，已使用基础 HTML 兜底。',
-  });
 }
 
 const SAFE_PROJECT_ID = /^[A-Za-z0-9_.-]+$/;
@@ -432,8 +374,6 @@ function providerMissingTextDiagnostic() {
 }
 
 const CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE = '画面结构与旁白脚本不一致，已停止渲染。请重新生成画面结构后再导出。';
-const FRAME_HTML_MODEL_OPTIONS = { requestTimeoutMs: 90000, maxRetries: 0 };
-const FRAME_HTML_CONCURRENCY = 3;
 
 function contentGraphSceneSpecMismatchDiagnostic(graphBinding = {}, options = {}) {
   return createDiagnostic({
@@ -1328,329 +1268,30 @@ async function generateHtmlVideo(options = {}) {
         return current;
       });
     }
-    const nodes = contentGraph.nodes || [];
-    const scenes = new Map((Array.isArray(sceneSpec?.scenes) ? sceneSpec.scenes : []).map(scene => [scene.id, scene]));
-    let visualStyleReferenceHtml = '';
-    const frameResults = [];
-    const frameJobs = [];
-    let completedFrameHtmlCount = 0;
-    const generateFrameJob = async job => {
-      const { index, node, sceneId, scene, styleReferenceHtml } = job;
-      await report(onProgress, {
-        type: 'html_video_frame_html_started',
-        stage: 'project',
-        sub_stage: 'frame_html',
-        message: `正在并发生成第 ${index + 1}/${nodes.length} 帧 HTML...`,
-        frame_id: node.id,
-        data: {
-          frame_id: node.id,
-          index,
-          total: nodes.length,
-          completed: completedFrameHtmlCount,
-          parallel: true,
-          concurrency: FRAME_HTML_CONCURRENCY,
-        },
-      });
-      let htmlResult = await frameHtmlAgent.generateFrameHtml({
-        model,
-        frameId: node.id || sceneId,
-        attempt: 1,
-        modelOptions: {
-          ...FRAME_HTML_MODEL_OPTIONS,
-          audit: {
-            agent: AGENTS.frameHtml,
-            stage: STAGES.frameHtml,
-            sub_stage: 'frame_html',
-            frame_id: node.id || sceneId,
-            node_id: node.id || '',
-            attempt: 1,
-          },
-        },
-        graph: contentGraph,
-        node,
-        index,
-        total: nodes.length,
-        sceneSpec,
-        creativeContext,
-        target: templateRenderTarget,
-        template,
-        visualStyleReferenceHtml: styleReferenceHtml,
-        previousFrameHtml: '',
-      });
-      if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
-        htmlResult = await frameHtmlAgent.generateFrameHtml({
-          model,
-          frameId: node.id || sceneId,
-          attempt: 2,
-          modelOptions: {
-            ...FRAME_HTML_MODEL_OPTIONS,
-            stream: false,
-            audit: {
-              agent: AGENTS.frameHtml,
-              stage: STAGES.frameHtml,
-              sub_stage: 'frame_html',
-              frame_id: node.id || sceneId,
-              node_id: node.id || '',
-              attempt: 2,
-            },
-          },
-          shortPrompt: true,
-          graph: contentGraph,
-          node,
-          index,
-          total: nodes.length,
-          sceneSpec,
-          creativeContext,
-          target: templateRenderTarget,
-          template,
-          visualStyleReferenceHtml: styleReferenceHtml,
-          previousFrameHtml: '',
-        });
-        if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
-          const warning = frameFallbackDiagnostic(node.id || sceneId);
-          diagnostics.push(warning);
-          htmlResult = {
-            success: true,
-            html: frameFallbackBuilder.buildFallbackFrameHtml({
-              scene,
-              node,
-              target: templateRenderTarget,
-              template,
-            }),
-            fallbackDiagnostic: warning,
-          };
-        }
-      }
-      return { ...job, htmlResult };
-    };
-
-    for (let index = 0; index < nodes.length; index += 1) {
-      const node = nodes[index];
-      const sceneId = resolveNodeSceneId(node) || node.id;
-      const scene = scenes.get(sceneId);
-      const checkpointFrame = objectOrEmpty(project.generation_checkpoint?.stages?.frame_html?.frames?.[sceneId]);
-      const reuse = shouldReuseFrameHtml({
-        projectDir,
-        checkpointFrame,
-        scene,
-        node,
-        target: templateRenderTarget,
-        resumeAllowed: resumeAllowed && !regenerateFrameHtmlRequested,
-      });
-      if (reuse.reuse) {
-        const durationSec = trustedSceneDuration(scene || {}, node);
-        nodes[index] = {
-          ...node,
-          durationSec,
-          html_path: reuse.html_path,
-        };
-        contentGraph = {
-          ...contentGraph,
-          nodes,
-        };
-        project = await projectStore.writeProjectJson(projectDir, current => {
-          current.content_graph = contentGraph;
-          markCheckpointStage(current, 'frame_html', { status: 'partial' });
-          return current;
-        });
-        if (!visualStyleReferenceHtml) visualStyleReferenceHtml = reuse.html;
-        completedFrameHtmlCount += 1;
-        await report(onProgress, {
-          type: 'html_video_frame_html_done',
-          stage: 'project',
-          sub_stage: 'frame_html',
-          message: `第 ${index + 1}/${nodes.length} 帧 HTML 已复用。`,
-          frame_id: node.id,
-          data: {
-            frame_id: node.id,
-            index,
-            total: nodes.length,
-            reused: true,
-            completed: completedFrameHtmlCount,
-          },
-        });
-        continue;
-      }
-      frameJobs.push({ index, node, sceneId, scene });
-    }
-
-    if (frameJobs.length > 1) {
-      await report(onProgress, {
-        type: 'html_video_frame_html_parallel_started',
-        stage: 'project',
-        sub_stage: 'frame_html',
-        message: `正在并发生成 ${frameJobs.length} 帧 HTML，最多同时生成 ${FRAME_HTML_CONCURRENCY} 帧。`,
-        data: {
-          total: nodes.length,
-          completed: completedFrameHtmlCount,
-          pending: frameJobs.length,
-          concurrency: FRAME_HTML_CONCURRENCY,
-        },
-      });
-    }
-
-    if (frameJobs.length) {
-      let remainingJobs = frameJobs;
-      if (!visualStyleReferenceHtml) {
-        const firstResult = await generateFrameJob({
-          ...frameJobs[0],
-          styleReferenceHtml: '',
-        });
-        frameResults.push(firstResult);
-        if (firstResult.htmlResult.success) visualStyleReferenceHtml = firstResult.htmlResult.html;
-        remainingJobs = frameJobs.slice(1);
-      }
-      frameResults.push(...await mapLimit(
-        remainingJobs.map(job => ({ ...job, styleReferenceHtml: visualStyleReferenceHtml })),
-        FRAME_HTML_CONCURRENCY,
-        generateFrameJob,
-      ));
-    }
-
-    for (const frameResult of frameResults.sort((a, b) => a.index - b.index)) {
-      const { index, node, sceneId, scene, htmlResult } = frameResult;
-      if (!htmlResult.success) {
-        const failedHtmlPath = await writeFailedFrameHtml(projectDir, sceneId, htmlResult.failed_html);
-        const explicitDiagnosticCode = firstExplicitDiagnosticCode(htmlResult.diagnostics);
-        const diagnosticCode = explicitDiagnosticCode || (isProviderMissingText(htmlResult.message) ? 'provider_missing_text' : 'frame_html_invalid');
-        let rawDiagnostics = diagnosticCode === 'provider_missing_text' && !explicitDiagnosticCode
-          ? (Array.isArray(htmlResult.diagnostics) ? htmlResult.diagnostics : []).map(item => ({
-            ...objectOrEmpty(item),
-            code: 'provider_missing_text',
-          }))
-          : htmlResult.diagnostics;
-        if (failedHtmlPath && Array.isArray(rawDiagnostics)) {
-          rawDiagnostics = rawDiagnostics.map(item => ({
-            ...objectOrEmpty(item),
-            details: (() => {
-              const { failed_html: _failedHtml, ...details } = objectOrEmpty(item?.details);
-              return { ...details, failed_html_path: failedHtmlPath };
-            })(),
-          }));
-        }
-        const normalizedFrameDiagnostics = normalizeDiagnostics(rawDiagnostics, {
-          code: diagnosticCode,
-          stage: 'ai-frame-html',
-          sub_stage: 'frame_html',
-          frame_id: node.id || sceneId,
-          user_message: htmlResult.message || '单帧 HTML 生成失败。',
-          retryable: true,
-          repair_action: 'retry_frame_html',
-          details: failedHtmlPath ? { failed_html_path: failedHtmlPath } : {},
-        });
-        const checkpointDiagnosticCode = normalizedFrameDiagnostics[0]?.code || diagnosticCode;
-        project = await projectStore.writeProjectJson(projectDir, current => {
-          invalidateFrameHtmlDependents(current, sceneId);
-          markCheckpointStage(current, 'frame_html', { status: 'partial' });
-          markCheckpointFrame(current, 'frame_html', sceneId, {
-            status: 'failed',
-            diagnostic_code: checkpointDiagnosticCode,
-          });
-          return current;
-        });
-        return failure(htmlResult.message || '单帧 HTML 生成失败。', normalizedFrameDiagnostics.length ? normalizedFrameDiagnostics : [
-          createDiagnostic({
-            code: diagnosticCode,
-            stage: 'ai-frame-html',
-            sub_stage: 'frame_html',
-            frame_id: node.id || sceneId,
-            user_message: htmlResult.message || '单帧 HTML 生成失败。',
-            retryable: true,
-            repair_action: 'retry_frame_html',
-            details: { frame_id: node.id },
-          }),
-        ], {
-          html_video_project_path: projectDir,
-          project_dir: projectDir,
-        });
-      }
-      if (Array.isArray(htmlResult.diagnostics) && htmlResult.diagnostics.length) {
-        diagnostics.push(...normalizeDiagnostics(htmlResult.diagnostics));
-      }
-      const durationSec = trustedSceneDuration(scene || {}, node);
-      const captions = mediaOptions.generateCaptions !== false && scene
-        ? normalizeCaptions(scene, durationSec)
-        : [];
-      let written;
-      try {
-        written = await projectStore.writeRawFrameHtml({
-          projectDir,
-          sceneId,
-          order: index + 1,
-          html: htmlResult.html,
-          captions,
-          durationSec,
-        });
-      } catch (error) {
-        project = await projectStore.writeProjectJson(projectDir, current => {
-          invalidateFrameHtmlDependents(current, sceneId);
-          markCheckpointStage(current, 'frame_html', { status: 'partial' });
-          markCheckpointFrame(current, 'frame_html', sceneId, {
-            status: 'failed',
-            diagnostic_code: 'frame_html_write_failed',
-          });
-          return current;
-        });
-        return failure(error.message || '单帧 HTML 写入失败。', [
-          createDiagnostic({
-            code: 'frame_html_write_failed',
-            stage: 'frame-html',
-            sub_stage: 'frame_html',
-            frame_id: node.id || sceneId,
-            user_message: '单帧 HTML 写入失败。',
-            retryable: true,
-            repair_action: 'retry_frame_html',
-            details: { frame_id: node.id },
-          }),
-        ], {
-          html_video_project_path: projectDir,
-          project_dir: projectDir,
-        });
-      }
-      nodes[index] = {
-        ...node,
-        durationSec,
-        html_path: written.html_path,
-      };
-      contentGraph = {
-        ...contentGraph,
-        nodes,
-      };
-      project = await projectStore.writeProjectJson(projectDir, current => {
-        invalidateFrameHtmlDependents(current, sceneId);
-        current.content_graph = contentGraph;
-        markCheckpointStage(current, 'frame_html', { status: 'partial' });
-        markCheckpointFrame(current, 'frame_html', sceneId, {
-          status: 'done',
-          html_path: written.html_path,
-          input_hash: sha256(htmlResult.html),
-          output_hash: written.output_hash,
-          diagnostic_code: htmlResult.fallbackDiagnostic?.code || '',
-        });
-        return current;
-      });
-      completedFrameHtmlCount += 1;
-      await report(onProgress, {
-        type: 'html_video_frame_html_done',
-        stage: 'project',
-        sub_stage: 'frame_html',
-        message: `第 ${index + 1}/${nodes.length} 帧 HTML 已生成。`,
-        frame_id: node.id,
-        data: {
-          frame_id: node.id,
-          index,
-          total: nodes.length,
-          completed: completedFrameHtmlCount,
-          parallel: frameJobs.length > 1,
-          concurrency: frameJobs.length > 1 ? FRAME_HTML_CONCURRENCY : 1,
-        },
-      });
-    }
-    project = await projectStore.writeProjectJson(projectDir, current => {
-      current.content_graph = contentGraph;
-      markCheckpointStage(current, 'frame_html', { status: 'done' });
-      return current;
+    const frameHtmlResult = await runFrameHtmlPhase({
+      model,
+      projectDir,
+      project,
+      contentGraph,
+      sceneSpec,
+      creativeContext,
+      templateRenderTarget,
+      template,
+      mediaOptions,
+      resumeAllowed,
+      regenerateFrameHtmlRequested,
+      onProgress,
+      diagnostics,
+      report,
+      objectOrEmpty,
+      sha256,
+      failure,
+      shouldReuseFrameHtml,
+      invalidateFrameHtmlDependents,
     });
+    if (!frameHtmlResult.ok) return frameHtmlResult.failure;
+    project = frameHtmlResult.project;
+    contentGraph = frameHtmlResult.contentGraph;
     try {
       project = await buildRawHtmlFrameProject({
         projectDir,

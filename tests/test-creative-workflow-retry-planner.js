@@ -3,7 +3,7 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 
-const creativeWorkflows = require('../server/services/creativeWorkflows');
+const creativeWorkflows = require('../server/services/creative/creativeWorkflows');
 const {
   classifyCreativeWorkflowFailure,
   createCreativeWorkflowRetryPlan,

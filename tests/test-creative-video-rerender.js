@@ -1,5 +1,5 @@
 const assert = require('assert');
-const rerender = require('../server/services/creativeVideoRerender');
+const rerender = require('../server/services/creative/creativeVideoRerender');
 
 const spec = {
   title: '测试',

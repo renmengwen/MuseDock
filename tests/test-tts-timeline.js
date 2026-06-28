@@ -1,5 +1,5 @@
 const assert = require('assert');
-const timeline = require('../server/services/ttsTimeline');
+const timeline = require('../server/services/tts/ttsTimeline');
 
 function run() {
   assert.deepStrictEqual(

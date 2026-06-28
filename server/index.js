@@ -1,6 +1,6 @@
 ﻿const app = require('./app');
-const creativeWorkflows = require('./services/creativeWorkflows');
-const creativeWorkflowTasks = require('./services/creativeWorkflowTasks');
+const creativeWorkflows = require('./services/creative/creativeWorkflows');
+const creativeWorkflowTasks = require('./services/creative/creativeWorkflowTasks');
 
 const PORT = 3000;
 

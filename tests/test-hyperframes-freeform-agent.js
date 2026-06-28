@@ -1,6 +1,6 @@
 const assert = require('assert');
 
-const agent = require('../server/services/hyperframesFreeformAgent');
+const agent = require('../server/services/hyperframes/hyperframesFreeformAgent');
 
 function assertProjectParseFails(response, messagePattern = /解析|不支持/) {
   const result = agent.parseFreeformProjectResponse(JSON.stringify(response));

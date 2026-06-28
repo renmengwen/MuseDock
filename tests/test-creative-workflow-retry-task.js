@@ -3,9 +3,9 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 
-const workflows = require('../server/services/creativeWorkflows');
-const workflowTasks = require('../server/services/creativeWorkflowTasks');
-const { createCreativeTaskRegistry } = require('../server/services/creativeTaskRegistry');
+const workflows = require('../server/services/creative/creativeWorkflows');
+const workflowTasks = require('../server/services/creative/creativeWorkflowTasks');
+const { createCreativeTaskRegistry } = require('../server/services/creative/creativeTaskRegistry');
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
 const { createEmptyProject, markCheckpointFrame, markCheckpointStage } = require('../server/services/creative-video/html-video/projectSchema');
 const { createDiagnostic } = require('../server/services/creative-video/html-video/diagnostics');

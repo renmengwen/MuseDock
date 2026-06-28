@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const agentRuns = require('../server/services/agentRuns');
+const agentRuns = require('../server/services/agent/agentRuns');
 
 (async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-runs-html-video-failure-'));

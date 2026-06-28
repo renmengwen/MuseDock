@@ -3,8 +3,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const aiModelConfig = require('../server/services/aiModelConfig');
-const aiTextModel = require('../server/services/aiTextModel');
+const aiModelConfig = require('../server/services/ai/aiModelConfig');
+const aiTextModel = require('../server/services/ai/aiTextModel');
 
 function makeStreamResponse(chunks) {
   return new ReadableStream({

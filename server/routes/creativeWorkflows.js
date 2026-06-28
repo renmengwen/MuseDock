@@ -1,8 +1,8 @@
 const express = require('express');
 
-const defaultCreativeWorkflows = require('../services/creativeWorkflows');
-const defaultCreativeWorkflowTasks = require('../services/creativeWorkflowTasks');
-const { formatSseEvent, normalizeSinceSeq } = require('../services/creativeTaskEvents');
+const defaultCreativeWorkflows = require('../services/creative/creativeWorkflows');
+const defaultCreativeWorkflowTasks = require('../services/creative/creativeWorkflowTasks');
+const { formatSseEvent, normalizeSinceSeq } = require('../services/creative/creativeTaskEvents');
 
 const router = express.Router();
 const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;

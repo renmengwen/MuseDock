@@ -1,5 +1,5 @@
 const assert = require('assert');
-const composer = require('../server/services/hyperframesSceneSpecComposer');
+const composer = require('../server/services/hyperframes/hyperframesSceneSpecComposer');
 
 const result = composer.composeHyperframesProjectFiles({
   title: '可编辑视频',

@@ -6,8 +6,8 @@ const os = require('os');
 const path = require('path');
 
 const creativeWorkflowsRouter = require('../server/routes/creativeWorkflows');
-const workflows = require('../server/services/creativeWorkflows');
-const { createCreativeTaskRegistry, defaultRegistry } = require('../server/services/creativeTaskRegistry');
+const workflows = require('../server/services/creative/creativeWorkflows');
+const { createCreativeTaskRegistry, defaultRegistry } = require('../server/services/creative/creativeTaskRegistry');
 const { createDiagnostic } = require('../server/services/creative-video/html-video/diagnostics');
 const { createEmptyProject } = require('../server/services/creative-video/html-video/projectSchema');
 

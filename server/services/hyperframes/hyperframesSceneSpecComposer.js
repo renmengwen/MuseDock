@@ -1,4 +1,4 @@
-const sceneSpec = require('./sceneSpec');
+const sceneSpec = require('../sceneSpec');
 
 const KNOWN_ASPECT_RATIOS = {
   '9:16': { width: 1080, height: 1920 },

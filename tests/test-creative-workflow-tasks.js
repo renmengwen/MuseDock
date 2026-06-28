@@ -3,9 +3,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const workflows = require('../server/services/creativeWorkflows');
-const { createCreativeTaskRegistry, defaultRegistry } = require('../server/services/creativeTaskRegistry');
-const workflowTasks = require('../server/services/creativeWorkflowTasks');
+const workflows = require('../server/services/creative/creativeWorkflows');
+const { createCreativeTaskRegistry, defaultRegistry } = require('../server/services/creative/creativeTaskRegistry');
+const workflowTasks = require('../server/services/creative/creativeWorkflowTasks');
 
 const WORKFLOW_ID = '202606180000000001';
 

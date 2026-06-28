@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const sourceAssets = require('../server/services/sourceAssets');
+const sourceAssets = require('../server/services/source/sourceAssets');
 
 function makeImageResponse(bytes = 'image') {
   return new Response(Buffer.from(bytes), {

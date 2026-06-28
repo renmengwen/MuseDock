@@ -1,6 +1,6 @@
 const assert = require('assert/strict');
 
-const budget = require('../server/services/storyboardNarrationBudget');
+const budget = require('../server/services/storyboard/storyboardNarrationBudget');
 
 function run() {
   assert.equal(budget.countNarrationChars('  先 学 AI。 '), 5);

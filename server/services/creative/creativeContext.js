@@ -1,7 +1,7 @@
 const AWEME_ID_PATTERN = /^\d{5,32}$/;
 const SOURCE_URL_PATTERN = /https?:\/\/[^\s<>"'`()\[\]{}，。；;、（）《》【】「」『』“”‘’]+/gi;
 const SOURCE_URL_TRAILING_PUNCTUATION_PATTERN = /[.,;:!?，。；：！？、)\]}）】》」』”’]+$/;
-const sourceFetch = require('./sourceFetch');
+const sourceFetch = require('../source/sourceFetch');
 
 function safeString(value) {
   if (value === null || value === undefined) {

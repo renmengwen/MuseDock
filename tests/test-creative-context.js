@@ -1,5 +1,5 @@
 const assert = require('assert');
-const sourceFetch = require('../server/services/sourceFetch');
+const sourceFetch = require('../server/services/source/sourceFetch');
 
 const {
   AWEME_ID_PATTERN,
@@ -9,7 +9,7 @@ const {
   createDisabledResearchContext,
   createDisabledAssetContext,
   buildCreativeContext,
-} = require('../server/services/creativeContext');
+} = require('../server/services/creative/creativeContext');
 
 const TEXT_INPUT = '做一期关于本地 AI 视频工作流的科普';
 

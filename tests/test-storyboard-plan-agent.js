@@ -1,6 +1,6 @@
 const assert = require('assert/strict');
 
-const storyboardPlanAgent = require('../server/services/storyboardPlanAgent');
+const storyboardPlanAgent = require('../server/services/storyboard/storyboardPlanAgent');
 
 (async () => {
   const messages = storyboardPlanAgent.buildStoryboardPlanMessages({

@@ -1,5 +1,5 @@
-const aiTextModel = require('../aiTextModel');
-const quality = require('../hyperframesFreeformQuality');
+const aiTextModel = require('../ai/aiTextModel');
+const quality = require('../hyperframes/hyperframesFreeformQuality');
 const creativeSpecAgent = require('./creativeSpecAgent');
 const sceneSpecService = require('./sceneSpecService');
 const templateSelectorAgent = require('./html-video/templateSelectorAgent');
@@ -10,7 +10,7 @@ const defaultProjectWriter = require('./projectWriter');
 const defaultTtsService = require('./ttsService');
 const { createRenderAdapter } = require('./renderAdapter');
 const defaultVisualQaService = require('./visualQaService');
-const hyperframesRenderer = require('../hyperframesRenderer');
+const hyperframesRenderer = require('../hyperframes/hyperframesRenderer');
 const defaultHtmlVideoWorkflow = require('./html-video/htmlVideoWorkflow');
 const { computeSceneSpecSpeechHash } = require('./sceneSpecHash');
 

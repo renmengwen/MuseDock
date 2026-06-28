@@ -19,7 +19,7 @@ assert.match(startServer, /NODE_ENV:\s*'development'/, 'development runner shoul
 assert.match(startServer, /http:\/\/localhost:5173/, 'development runner should tell developers to open the Vite URL');
 assert.match(readme, /npm run dev[\s\S]*http:\/\/localhost:5173/, 'README should document the hot-reload development entry');
 assert.match(readme, /npm run start[\s\S]*http:\/\/localhost:3000/, 'README should document the built frontend entry');
-assert.match(serverIndex, /require\(['"]\.\/services\/creativeWorkflowTasks['"]\)/, 'server startup should load creative workflow task recovery');
+assert.match(serverIndex, /require\(['"]\.\/services\/creative\/creativeWorkflowTasks['"]\)/, 'server startup should load creative workflow task recovery');
 assert.match(serverIndex, /async function runStartupRecovery\(\)/, 'server startup should define a startup recovery wrapper');
 const orphanRecoveryIndex = serverIndex.indexOf('creativeWorkflowTasks.recoverOrphanedWorkflows()');
 const staleRecoveryIndex = serverIndex.indexOf('creativeWorkflows.recoverStaleWorkflowsOnStartup()');

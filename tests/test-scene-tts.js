@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const sceneTts = require('../server/services/sceneTts');
+const sceneTts = require('../server/services/tts/sceneTts');
 
 async function run() {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scene-tts-test-'));

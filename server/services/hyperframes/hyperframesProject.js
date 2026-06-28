@@ -2,19 +2,19 @@ const fsp = require('fs/promises');
 const fs = require('fs');
 const path = require('path');
 
-const GSAP_LOCAL_PATH = path.resolve(__dirname, '../node_modules/gsap/dist/gsap.min.js');
+const GSAP_LOCAL_PATH = path.resolve(__dirname, '../../../node_modules/gsap/dist/gsap.min.js');
 let gsapBundleCache = null;
 function getGsapBundle() {
   if (gsapBundleCache !== null) return gsapBundleCache;
   try { gsapBundleCache = fs.readFileSync(GSAP_LOCAL_PATH, 'utf8'); } catch { gsapBundleCache = ''; }
   return gsapBundleCache;
 }
-const frameProfiles = require('./frameProfiles');
+const frameProfiles = require('../frameProfiles');
 const visualDsl = require('./hyperframesVisualDsl');
 const sceneRenderers = require('./hyperframesSceneRenderers');
 const animations = require('./hyperframesAnimations');
-const phraseTimeline = require('./phraseTimeline');
-const videoQualityReport = require('./videoQualityReport');
+const phraseTimeline = require('../tts/phraseTimeline');
+const videoQualityReport = require('../videoQualityReport');
 
 const TEMPLATE_AI_STORYBOARD_CARDS = 'ai_storyboard_cards';
 

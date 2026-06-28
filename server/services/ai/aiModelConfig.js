@@ -1,7 +1,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 
-const DEFAULT_CONFIG_PATH = path.join(__dirname, '../../data/config/ai-models.json');
+const DEFAULT_CONFIG_PATH = path.join(__dirname, '../../../data/config/ai-models.json');
 
 const MODEL_TYPES = ['asr', 'text', 'image', 'video', 'tts'];
 

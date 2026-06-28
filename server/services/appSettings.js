@@ -1,7 +1,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 
-const aiModelConfig = require('./aiModelConfig');
+const aiModelConfig = require('./ai/aiModelConfig');
 
 const DEFAULT_CONFIG_PATH = path.join(__dirname, '../../data/config/app-settings.json');
 const DEFAULT_AI_CONFIG_PATH = aiModelConfig.DEFAULT_CONFIG_PATH

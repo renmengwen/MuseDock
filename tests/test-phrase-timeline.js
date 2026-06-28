@@ -1,5 +1,5 @@
 const assert = require('assert');
-const phraseTimeline = require('../server/services/phraseTimeline');
+const phraseTimeline = require('../server/services/tts/phraseTimeline');
 
 function run() {
   const phrases = phraseTimeline.splitChineseCaptionIntoPhrases(

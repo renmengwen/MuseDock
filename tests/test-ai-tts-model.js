@@ -3,8 +3,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const aiModelConfig = require('../server/services/aiModelConfig');
-const aiTtsModel = require('../server/services/aiTtsModel');
+const aiModelConfig = require('../server/services/ai/aiModelConfig');
+const aiTtsModel = require('../server/services/ai/aiTtsModel');
 
 async function run() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-tts-model-test-'));

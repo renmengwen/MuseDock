@@ -1,6 +1,6 @@
 const assert = require('assert');
 
-const templates = require('../server/services/agentTemplates');
+const templates = require('../server/services/agent/agentTemplates');
 
 const all = templates.listAgentTemplates();
 assert.ok(all.length >= 2);

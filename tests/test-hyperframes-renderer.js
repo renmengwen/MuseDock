@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const renderer = require('../server/services/hyperframesRenderer');
+const renderer = require('../server/services/hyperframes/hyperframesRenderer');
 
 async function run() {
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hyperframes-renderer-test-'));

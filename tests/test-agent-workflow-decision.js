@@ -1,5 +1,5 @@
 const assert = require('assert');
-const decision = require('../server/services/agentWorkflowDecision');
+const decision = require('../server/services/agent/agentWorkflowDecision');
 
 function run() {
   assert.deepEqual(decision.decideNextAction({}).next_action, 'generate_storyboard_plan');

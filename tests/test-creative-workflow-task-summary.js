@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const workflows = require('../server/services/creativeWorkflows');
+const workflows = require('../server/services/creative/creativeWorkflows');
 
 const WORKFLOW_ID = '202606180000000001';
 

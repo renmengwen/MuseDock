@@ -1,4 +1,4 @@
-const defaultAiTextModel = require('./aiTextModel');
+const defaultAiTextModel = require('../ai/aiTextModel');
 const narrationBudget = require('./storyboardNarrationBudget');
 
 const VISUAL_TYPE_HINT_ALLOWED = [

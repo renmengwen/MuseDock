@@ -1,6 +1,6 @@
 const assert = require('assert/strict');
 
-const registryModule = require('../server/services/creativeTaskRegistry');
+const registryModule = require('../server/services/creative/creativeTaskRegistry');
 const { createCreativeTaskRegistry } = registryModule;
 
 async function waitImmediate() {

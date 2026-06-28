@@ -2,7 +2,7 @@ const assert = require('assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const overrides = require('../server/services/agentTemplateOverrides');
+const overrides = require('../server/services/agent/agentTemplateOverrides');
 
 (async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-template-overrides-'));

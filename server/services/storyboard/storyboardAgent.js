@@ -1,10 +1,10 @@
-const defaultAiTextModel = require('./aiTextModel');
+const defaultAiTextModel = require('../ai/aiTextModel');
 const storyboardSchema = require('./storyboardSchema');
 const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_FRAME_PROFILE_ID = 'creative_brutalist';
-const DEFAULT_FRAME_DOC_PATH = path.join(__dirname, '../../docs/frame/creative-brutalist.frame.md');
+const DEFAULT_FRAME_DOC_PATH = path.join(__dirname, '../../../docs/frame/creative-brutalist.frame.md');
 const MAX_FRAME_DOC_CHARS = 6000;
 
 const STORYBOARD_OPTION_LIMITS = {

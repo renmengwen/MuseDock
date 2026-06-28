@@ -1,9 +1,9 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
-const mediaPipeline = require('./mediaPipeline');
+const mediaPipeline = require('../mediaPipeline');
 
-const GSAP_LOCAL_PATH = path.resolve(__dirname, '../../node_modules/gsap/dist/gsap.min.js');
+const GSAP_LOCAL_PATH = path.resolve(__dirname, '../../../node_modules/gsap/dist/gsap.min.js');
 let gsapBundleCache = null;
 function getGsapBundle() {
   if (gsapBundleCache !== null) return gsapBundleCache;

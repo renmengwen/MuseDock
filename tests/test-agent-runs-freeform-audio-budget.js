@@ -3,8 +3,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const agentRuns = require('../server/services/agentRuns');
-const narrationBudget = require('../server/services/storyboardNarrationBudget');
+const agentRuns = require('../server/services/agent/agentRuns');
+const narrationBudget = require('../server/services/storyboard/storyboardNarrationBudget');
 
 (async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-runs-budget-'));

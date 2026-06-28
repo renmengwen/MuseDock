@@ -1,5 +1,5 @@
-const sceneSpecService = require('./sceneSpec');
-const defaultTtsService = require('./creative-video/ttsService');
+const sceneSpecService = require('../sceneSpec');
+const defaultTtsService = require('../creative-video/ttsService');
 
 function hasSceneSpecRerenderPipeline(services = {}) {
   return !!(

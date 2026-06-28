@@ -1,5 +1,5 @@
 const assert = require('assert');
-const editor = require('../server/services/creativeVideoEditor');
+const editor = require('../server/services/creative/creativeVideoEditor');
 
 const spec = {
   title: '测试',

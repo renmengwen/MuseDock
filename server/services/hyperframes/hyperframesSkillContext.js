@@ -26,8 +26,8 @@ function resolveHyperframesSkillDir({ skillRoot = '', env = process.env } = {}) 
     ? [explicitSkillRoot]
       : [
           env.HYPERFRAMES_SKILL_ROOT,
-          path.resolve(__dirname, '..', 'resources', 'hyperframes-skills-official'),
-          path.resolve(__dirname, '..', 'resources', 'hyperframes-skills'),
+          path.resolve(__dirname, '..', '..', 'resources', 'hyperframes-skills-official'),
+          path.resolve(__dirname, '..', '..', 'resources', 'hyperframes-skills'),
         ];
 
   for (const candidate of candidates) {

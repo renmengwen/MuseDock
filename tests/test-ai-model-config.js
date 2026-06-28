@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const aiModelConfig = require('../server/services/aiModelConfig');
+const aiModelConfig = require('../server/services/ai/aiModelConfig');
 
 async function run() {
   const configPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ai-model-config-test-')), 'ai-models.json');

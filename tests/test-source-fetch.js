@@ -1,6 +1,6 @@
 const assert = require('assert/strict');
 
-const sourceFetch = require('../server/services/sourceFetch');
+const sourceFetch = require('../server/services/source/sourceFetch');
 
 function makeResponse(body, { status = 200, headers = {} } = {}) {
   return {

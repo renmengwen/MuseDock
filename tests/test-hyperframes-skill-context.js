@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const skillContext = require('../server/services/hyperframesSkillContext');
+const skillContext = require('../server/services/hyperframes/hyperframesSkillContext');
 
 function tryCreateDirectoryLink(sourceDir, linkDir) {
   try {

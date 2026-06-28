@@ -1,6 +1,6 @@
 const fs = require('fs/promises');
 const path = require('path');
-const defaultTtsModel = require('../aiTtsModel');
+const defaultTtsModel = require('../ai/aiTtsModel');
 const {
   computeSceneSpecSpeechHash,
   getSceneSpecSpeechSignature,

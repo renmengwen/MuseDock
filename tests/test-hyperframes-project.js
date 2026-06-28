@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const hyperframesProject = require('../server/services/hyperframesProject');
+const hyperframesProject = require('../server/services/hyperframes/hyperframesProject');
 
 async function run() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hyperframes-project-test-'));
@@ -104,6 +104,7 @@ async function run() {
   assert.ok(fs.existsSync(path.join(result.project_dir, 'storyboard.json')));
   assert.ok(fs.existsSync(path.join(result.project_dir, 'captions.json')));
   assert.ok(fs.existsSync(path.join(result.project_dir, 'project.json')));
+  assert.ok(fs.statSync(path.join(result.project_dir, 'gsap.min.js')).size > 0);
   assert.ok(fs.existsSync(path.join(result.project_dir, 'assets', 'narration.wav')));
 
   const storyboard = JSON.parse(fs.readFileSync(path.join(result.project_dir, 'storyboard.json'), 'utf-8'));

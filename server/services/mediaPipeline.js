@@ -2,7 +2,7 @@ const fsp = require('fs/promises');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const aiModelConfig = require('./aiModelConfig');
+const aiModelConfig = require('./ai/aiModelConfig');
 
 const DEFAULT_ROOT = path.join(__dirname, '../../data/media/douyin');
 const DEFAULT_MIMO_BASE_URL = 'https://api.xiaomimimo.com/v1';

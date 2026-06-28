@@ -1,6 +1,6 @@
 const assert = require('assert/strict');
 
-const { buildTimedStoryboardPlan, roundTime } = require('../server/services/storyboardTiming');
+const { buildTimedStoryboardPlan, roundTime } = require('../server/services/storyboard/storyboardTiming');
 
 (() => {
   assert.equal(roundTime(1.23456), 1.235);
