@@ -38,6 +38,7 @@ server.err.log
 Thumbs.db
 .idea/
 .vscode/
+.claude/
 
 # Internal handoff notes
 docs/handoff-*.md

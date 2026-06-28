@@ -1948,6 +1948,10 @@ a { color: #fe2c55; text-decoration: none; }
   align-items: start;
 }
 
+.html-video-project-canvas-layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .html-video-project-tab-layout {
   grid-template-columns: minmax(160px, 0.45fr) minmax(320px, 1fr);
 }
@@ -1968,6 +1972,13 @@ a { color: #fe2c55; text-decoration: none; }
 .html-video-canvas-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 12px;
+  min-width: 0;
+}
+
+.html-video-canvas-side {
+  display: grid;
+  align-content: start;
   gap: 12px;
   min-width: 0;
 }
@@ -2012,7 +2023,7 @@ a { color: #fe2c55; text-decoration: none; }
 .html-video-canvas-stage iframe {
   width: 100%;
   aspect-ratio: 16 / 9;
-  min-height: 420px;
+  min-height: clamp(220px, 56.25vw, 420px);
   border: 1px solid #d1d5db;
   border-radius: 8px;
   background: #111827;
@@ -2178,12 +2189,32 @@ a { color: #fe2c55; text-decoration: none; }
 }
 
 @media (max-width: 720px) {
+  .creativeEditorPage {
+    padding: 20px 16px;
+  }
+
+  .creativeEditorHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .creative-video-editor-grid {
     grid-template-columns: 1fr;
   }
 
   .html-video-project-layout {
     grid-template-columns: 1fr;
+  }
+
+  .html-video-canvas-toolbar,
+  .creative-video-editor-panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .html-video-canvas-toolbar .creative-video-editor-inline-actions,
+  .creative-video-editor-panel-header .creative-video-editor-inline-actions {
+    justify-content: flex-start;
   }
 }
 

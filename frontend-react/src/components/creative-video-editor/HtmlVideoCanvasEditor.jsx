@@ -596,7 +596,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
           />
           <details className="html-video-canvas-fields">
             <summary>帧字段 / 旁白 / 字幕</summary>
-            <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} onRenderPreview={() => {}} />
+            <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} />
             <NarrationPanel narration={editor.project?.narration} disabled={disabled} onSave={editor.saveTemplateInputs} onRegenerate={editor.regenerateNarration} />
             <CaptionsPanel captions={frame?.captions || []} selectedFrameId={frameId} disabled={disabled} onSave={patchFrame} />
             <TemplateInputsPanel schema={editor.project?.template_schema || editor.project?.input_schema || {}} values={editor.project?.inputs || {}} disabled={disabled} onSave={editor.saveTemplateInputs} />

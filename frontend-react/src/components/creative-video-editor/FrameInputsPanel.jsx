@@ -40,6 +40,7 @@ function createDraft(frame) {
 
 export function FrameInputsPanel({ frame, disabled, onSave, onRenderPreview }) {
   const [draft, setDraft] = useState(() => createDraft(frame));
+  const canRenderPreview = typeof onRenderPreview === 'function';
 
   useEffect(() => {
     setDraft(createDraft(frame));
@@ -54,7 +55,9 @@ export function FrameInputsPanel({ frame, disabled, onSave, onRenderPreview }) {
       <div className="creative-video-editor-panel-header">
         <h3>帧字段</h3>
         <div className="creative-video-editor-inline-actions">
-          <button type="button" disabled={disabled} onClick={() => onRenderPreview(draft.id)}>渲染单帧预览</button>
+          {canRenderPreview ? (
+            <button type="button" disabled={disabled} onClick={() => onRenderPreview(draft.id)}>渲染单帧预览</button>
+          ) : null}
           <button type="button" disabled={disabled} onClick={() => onSave(buildFrameSavePayload(draft))}>保存帧</button>
         </div>
       </div>

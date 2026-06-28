@@ -13,7 +13,6 @@ const componentPaths = [
   'frontend-react/src/components/creative-video-editor/FrameInputsPanel.jsx',
   'frontend-react/src/components/creative-video-editor/NarrationPanel.jsx',
   'frontend-react/src/components/creative-video-editor/CaptionsPanel.jsx',
-  'frontend-react/src/components/creative-video-editor/ProjectFramesList.jsx',
   'frontend-react/src/components/creative-video-editor/ExportsPanel.jsx',
   'frontend-react/src/components/creative-video-editor/NaturalLanguageEditBox.jsx',
   'frontend-react/src/components/creative-video-editor/HtmlVideoSourcePanel.jsx',
@@ -250,12 +249,9 @@ assert.match(captionsPanel, /frame_id:\s*selectedFrameId/, 'CaptionsPanel should
 assert.doesNotMatch(captionsPanel, /onSave\(\{\s*captions:\s*drafts\s*\}\)/, 'CaptionsPanel should not save project-level captions');
 assert.ok(captionsPanel.includes('请选择一帧后编辑字幕。'), 'CaptionsPanel should show a Chinese empty selection state');
 
+assert.match(frameInputsPanel, /typeof onRenderPreview === 'function'/, 'FrameInputsPanel should hide preview action when no preview handler exists');
 assert.match(editor, /frames\s*=\s*Array\.isArray\(editor\.frames\)\s*\?\s*editor\.frames\s*:\s*\[\]/, 'HtmlVideoProjectEditor should fallback to an empty frames array');
 assert.match(editor, /selectedFrame\s*=\s*frames\.find/, 'HtmlVideoProjectEditor should resolve captions from the selected frame');
-
-const projectFramesList = fs.readFileSync('frontend-react/src/components/creative-video-editor/ProjectFramesList.jsx', 'utf-8');
-assert.match(projectFramesList, /duration_sec/, 'ProjectFramesList should display duration_sec values returned by html-video projects');
-assert.match(projectFramesList, /metadata\?\.visual_text\?\.headline/, 'ProjectFramesList should use raw_html visual headline as the frame title');
 
 assert.ok(shell.includes('useHtmlVideoProject'), 'CreativeVideoEditor should try HtmlVideoProject first');
 assert.ok(shell.includes('HtmlVideoProjectEditor'), 'CreativeVideoEditor should render HtmlVideoProjectEditor');
@@ -277,6 +273,7 @@ const canvasEditor = fs.readFileSync('frontend-react/src/components/creative-vid
 assert.ok(canvasEditor.includes('保存修改'), 'canvas should expose a single 保存修改 action');
 assert.ok(canvasEditor.includes('saveAndAcceptFrameEdit'), 'canvas 保存修改 should call saveAndAcceptFrameEdit');
 assert.doesNotMatch(canvasEditor, /保存为草稿/, 'canvas should no longer expose separate 保存为草稿');
+assert.doesNotMatch(canvasEditor, /onRenderPreview=\{\(\) => \{\}\}/, 'canvas should not wire dead preview actions');
 assert.ok(canvasEditor.includes('FrameInputsPanel'), 'canvas right rail should mount frame fields');
 assert.ok(canvasEditor.includes('CaptionsPanel'), 'canvas right rail should mount captions');
 

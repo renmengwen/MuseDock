@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Eye, Loader2, RefreshCcw, Trash2, X } from 'lucide-react';
+import { Check, Copy, Eye, Loader2, RefreshCcw, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import {
   Dialog,
@@ -168,12 +168,24 @@ export function CreativeTaskDetail({
   getWorkflowVideoUrl,
 }) {
   const [promptModalOpen, setPromptModalOpen] = useState(false);
+  const [promptCopyStatus, setPromptCopyStatus] = useState('idle');
   if (!workflowId && !workflow) return null;
 
   const videoUrl = getWorkflowVideoUrl?.(workflow) || '';
   const canStopAndDelete = workflowId && workflow?.status !== 'done';
   const promptText = workflow?.creative_context?.input?.raw_text?.trim() || '';
   const editableWorkflowId = workflowId || workflow?.workflow_id || workflow?.id || '';
+
+  async function copyPrompt() {
+    if (!promptText) return;
+    try {
+      await navigator.clipboard.writeText(promptText);
+      setPromptCopyStatus('copied');
+    } catch {
+      setPromptCopyStatus('failed');
+    }
+    setTimeout(() => setPromptCopyStatus('idle'), 2000);
+  }
 
   function continueEdit() {
     onContinueEdit?.(editableWorkflowId);
@@ -214,6 +226,16 @@ export function CreativeTaskDetail({
                 </Button>
               </DialogClose>
               <pre className="creativePromptModalText">{promptText || '暂无可显示的提示词。'}</pre>
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                onClick={copyPrompt}
+                disabled={!promptText}
+              >
+                {promptCopyStatus === 'copied' ? <Check size={14} /> : <Copy size={14} />}
+                <span>{promptCopyStatus === 'copied' ? '已复制' : promptCopyStatus === 'failed' ? '复制失败' : '复制提示词'}</span>
+              </Button>
             </DialogContent>
           </Dialog>
           {canStopAndDelete ? (

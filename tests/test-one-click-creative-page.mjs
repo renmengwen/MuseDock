@@ -102,6 +102,9 @@ for (const text of [
   zh.promptModalTitle,
   zh.promptEmpty,
   '关闭提示词弹框',
+  '复制提示词',
+  '已复制',
+  '复制失败',
   '缺少创作任务 ID，无法进入编辑器。',
 ]) {
   assert.ok(creativeTaskDetail.includes(text), `CreativeTaskDetail.jsx should include normal Chinese text: ${text}`);

@@ -855,12 +855,19 @@ async function composeHtmlVideoProject({
     });
   }
 
-  addExport(nextProject, {
+  const exportEntry = addExport(nextProject, {
     format: 'mp4',
     path: path.relative(resolvedProjectDir, finalOutput).replace(/\\/g, '/'),
     absolute_path: finalOutput,
     render_mode: 'html-video',
   });
+  // addExport 去重会把第二次起的记录改名为 output-audio-N.mp4，但 mux 始终覆盖写
+  // output-audio.mp4，需把成片复制到去重后的路径，否则记录指向不存在的文件（播放报“文件不存在”）。
+  const exportAbs = projectStore.resolveProjectPath(resolvedProjectDir, exportEntry.path);
+  if (path.resolve(exportAbs) !== path.resolve(finalOutput)) {
+    await fs.copyFile(finalOutput, exportAbs);
+    exportEntry.absolute_path = exportAbs;
+  }
   addRevision(nextProject, {
     summary: 'html-video 工程渲染完成。',
     change: { type: 'render', output_path: finalOutput },
