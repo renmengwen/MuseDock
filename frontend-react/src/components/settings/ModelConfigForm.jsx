@@ -1,8 +1,8 @@
 export function ModelConfigForm({ type, info, model, onChange }) {
   const m = model || { enabled: false, modelId: '', note: '' };
   return (
-    <div className={`modelConfigForm ${m.enabled ? 'active' : ''}`}>
-      <div className="modelConfigFormHeader">
+    <div className={`rounded-lg border bg-white p-3 transition ${m.enabled ? 'border-[#fe2c55]' : 'border-[#edf0f4]'}`}>
+      <div className="mb-2 flex items-center gap-2">
         <label className="switchControl small">
           <input
             type="checkbox"
@@ -13,43 +13,46 @@ export function ModelConfigForm({ type, info, model, onChange }) {
             <span className="switchThumb" />
           </span>
         </label>
-        <span className="modelConfigFormTitle">{info.title}</span>
+        <span className="text-[13px] font-semibold text-[#30343b]">{info.title}</span>
       </div>
       <input
-        className="modelConfigFormInput"
+        className="h-[34px] w-full rounded-md border border-[#d9dde5] bg-[#fafbfc] px-2 text-xs text-[#30343b] outline-none transition focus:border-[#fe2c55] focus:ring-2 focus:ring-[#fe2c55]/15 disabled:opacity-50"
         value={m.modelId}
         onChange={e => onChange('modelId', e.target.value)}
         placeholder={info.placeholder}
         disabled={!m.enabled}
       />
       {type === 'tts' && m.enabled ? (
-        <div className="modelConfigFormTtsRow">
-          <label>
-            <span>并发</span>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <label className="grid gap-1">
+            <span className="text-[11px] text-[#69717e]">并发</span>
             <input
               type="number"
               min="1"
               max="5"
               value={m.ttsConcurrency ?? 1}
+              className="h-[30px] w-full rounded-md border border-[#d9dde5] px-1.5 text-xs"
               onChange={e => onChange('ttsConcurrency', e.target.value)}
             />
           </label>
-          <label>
-            <span>间隔(ms)</span>
+          <label className="grid gap-1">
+            <span className="text-[11px] text-[#69717e]">间隔(ms)</span>
             <input
               type="number"
               min="0"
               max="10000"
               step="100"
               value={m.ttsQueueIntervalMs ?? 1800}
+              className="h-[30px] w-full rounded-md border border-[#d9dde5] px-1.5 text-xs"
               onChange={e => onChange('ttsQueueIntervalMs', e.target.value)}
             />
           </label>
         </div>
       ) : null}
       {type === 'text' && m.enabled ? (
-        <label className="modelConfigFormToggleRow">
+        <label className="mt-2 flex items-center gap-1.5 text-xs text-[#5f6876]">
           <input
+            className="size-3.5"
             type="checkbox"
             checked={m.supportsMultimodal === true}
             onChange={e => onChange('supportsMultimodal', e.target.checked)}

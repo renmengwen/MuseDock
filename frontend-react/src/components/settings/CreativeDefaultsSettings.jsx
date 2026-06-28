@@ -16,15 +16,6 @@ const DEFAULT_CREATIVE_DEFAULTS = {
   emotionalVoice: false,
 };
 
-const SELECT_CONTROL_STYLE = {
-  width: '100%',
-  height: 38,
-  border: '1px solid #d9dde5',
-  borderRadius: 8,
-  padding: '0 10px',
-  background: '#fff',
-};
-
 const TEMPLATE_NAME_ZH = {
   bold_signal: '信号卡片',
   glitch_title: '故障风格标题',
@@ -139,14 +130,14 @@ export function CreativeDefaultsSettings({
 
   return (
     <section>
-      <div className="settingsPanelHeader">
+      <div className="mb-4 flex items-start justify-between gap-3 max-[520px]:flex-col">
         <div>
-          <h3>创作默认值</h3>
-          <p>设置一键创作默认使用的画面比例、目标时长、模板策略和联网研究开关。</p>
+          <h3 className="m-0 text-lg font-bold">创作默认值</h3>
+          <p className="mt-1 text-[13px] text-[#69717e]">设置一键创作默认使用的画面比例、目标时长、模板策略和联网研究开关。</p>
         </div>
         <button
           type="button"
-          className="btn primary"
+          className="min-h-9 rounded-lg bg-[#fe2c55] px-4 text-sm font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55"
           disabled={disabled || saving || !appSettings}
           onClick={handleSave}
         >
@@ -154,14 +145,14 @@ export function CreativeDefaultsSettings({
         </button>
       </div>
 
-      <div className="settingsFormGrid">
-        <label>
-          <span>默认画面比例</span>
+      <div className="grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
+        <label className="grid gap-1.5">
+          <span className="text-xs font-semibold text-[#5f6876]">默认画面比例</span>
           <select
             value={creativeDefaults.aspectRatio}
             disabled={disabled}
             onChange={event => updateCreativeDefaults({ aspectRatio: event.target.value })}
-            style={SELECT_CONTROL_STYLE}
+            className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#fe2c55] focus:ring-2 focus:ring-[#fe2c55]/15 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {ASPECT_RATIOS.map(aspectRatio => (
               <option key={aspectRatio} value={aspectRatio}>{aspectRatio}</option>
@@ -169,8 +160,8 @@ export function CreativeDefaultsSettings({
           </select>
         </label>
 
-        <label>
-          <span>默认目标时长</span>
+        <label className="grid gap-1.5">
+          <span className="text-xs font-semibold text-[#5f6876]">默认目标时长</span>
           <input
             type="number"
             min="15"
@@ -178,14 +169,15 @@ export function CreativeDefaultsSettings({
             step="1"
             value={creativeDefaults.targetDurationSec}
             disabled={disabled}
+            className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#fe2c55] focus:ring-2 focus:ring-[#fe2c55]/15 disabled:cursor-not-allowed disabled:opacity-60"
             onChange={event => updateCreativeDefaults({
               targetDurationSec: event.target.value === '' ? '' : Number(event.target.value),
             })}
           />
         </label>
 
-        <div className="settingsWideField" style={{ display: 'grid', gap: 10 }}>
-          <span style={{ color: '#5f6876', fontSize: 12, fontWeight: 600 }}>按比例默认模板</span>
+        <div className="grid gap-2.5 md:col-span-2">
+          <span className="text-xs font-semibold text-[#5f6876]">按比例默认模板</span>
           {ASPECT_RATIOS.map(aspectRatio => {
             const value = typeof creativeDefaults.templateByAspectRatio?.[aspectRatio] === 'string'
               ? creativeDefaults.templateByAspectRatio[aspectRatio]
@@ -197,14 +189,14 @@ export function CreativeDefaultsSettings({
             return (
               <label
                 key={aspectRatio}
-                style={{ display: 'grid', gridTemplateColumns: '72px minmax(0, 1fr)', alignItems: 'center', gap: 10 }}
+                className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2.5"
               >
-                <span>{aspectRatio}</span>
+                <span className="text-xs font-semibold text-[#5f6876]">{aspectRatio}</span>
                 <select
                   value={value}
                   disabled={disabled}
                   onChange={event => updateTemplate(aspectRatio, event.target.value)}
-                  style={SELECT_CONTROL_STYLE}
+                  className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#fe2c55] focus:ring-2 focus:ring-[#fe2c55]/15 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <option value="">不指定模板</option>
                   {aspectTemplates.map(template => (
@@ -222,7 +214,7 @@ export function CreativeDefaultsSettings({
           })}
         </div>
 
-        <label className="switchControl">
+        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
           <input
             type="checkbox"
             checked={creativeDefaults.lockTemplate === true}
@@ -236,7 +228,7 @@ export function CreativeDefaultsSettings({
           <span>锁定模板</span>
         </label>
 
-        <label className="switchControl">
+        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
           <input
             type="checkbox"
             checked={creativeDefaults.useResearch === true}
@@ -250,7 +242,7 @@ export function CreativeDefaultsSettings({
           <span>联网研究默认开启</span>
         </label>
 
-        <label className="switchControl">
+        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
           <input
             type="checkbox"
             checked={creativeDefaults.generateAudio !== false}
@@ -264,7 +256,7 @@ export function CreativeDefaultsSettings({
           <span>生成旁白音频</span>
         </label>
 
-        <label className="switchControl">
+        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
           <input
             type="checkbox"
             checked={creativeDefaults.emotionalVoice === true}
@@ -278,7 +270,7 @@ export function CreativeDefaultsSettings({
           <span>情绪化配音</span>
         </label>
 
-        <label className="switchControl">
+        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
           <input
             type="checkbox"
             checked={creativeDefaults.generateCaptions !== false}

@@ -1,0 +1,410 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MuseDock 科技简约产品界面</title>
+  <link rel="stylesheet" href="../../design-systems/tech-minimal-product/tokens/colors_and_type.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">MD</span>
+        <div>
+          <strong>MuseDock</strong>
+          <span>内容抓取、素材准备和 AI 工作流的本地控制台</span>
+        </div>
+      </div>
+      <nav class="view-switch" aria-label="页面预览切换">
+        <button class="active" type="button" data-view="home">首页</button>
+        <button type="button" data-view="detail">任务详情</button>
+        <button type="button" data-view="editor">二次编辑</button>
+        <button type="button" data-view="settings">设置中心</button>
+      </nav>
+    </header>
+
+    <main class="viewport">
+      <section class="screen active" id="home" aria-label="首页">
+        <div class="workspace">
+          <aside class="command-rail">
+            <div class="rail-title">
+              <strong>一键创作</strong>
+              <button class="icon-btn" type="button" aria-label="收起任务列表">≡</button>
+            </div>
+            <button class="new-task" type="button">+ 开启新创作</button>
+            <div class="rail-list">
+              <span class="rail-label">创作任务</span>
+              <button class="task-row active" type="button">
+                <span>
+                  <strong>AI 产品发布短视频</strong>
+                  <small>渲染中 · 14:28</small>
+                </span>
+                <span class="chip">72%</span>
+              </button>
+              <button class="task-row" type="button">
+                <span>
+                  <strong>GitHub 项目讲解</strong>
+                  <small>已完成 · 昨天</small>
+                </span>
+                <span class="chip">完成</span>
+              </button>
+              <button class="task-row" type="button">
+                <span>
+                  <strong>行业文章改写</strong>
+                  <small>需处理 · 周二</small>
+                </span>
+                <span class="chip warning">恢复</span>
+              </button>
+            </div>
+          </aside>
+
+          <section class="main home-main">
+            <div class="content">
+              <div class="home-canvas">
+                <section class="composer">
+                  <div class="segmented" role="tablist" aria-label="创作模式">
+                    <span class="mode-thumb" aria-hidden="true"></span>
+                    <button class="active" type="button">快速模式</button>
+                    <button type="button">专家模式</button>
+                  </div>
+                  <div>
+                    <h2>今天要生成什么视频？</h2>
+                    <p>输入一个方向、链接或仓库地址即可。</p>
+                  </div>
+                  <div class="prompt-box">
+                    <label for="creative-prompt">创作输入</label>
+                    <textarea id="creative-prompt">把这篇产品更新文章改成 60 秒竖屏短视频，风格专业、信息密度高。</textarea>
+                    <div class="prompt-footer">
+                      <button class="btn" type="button">联网获取最新资料</button>
+                      <button class="btn primary" type="button" aria-label="一键生成视频">↑</button>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="screen" id="detail" aria-label="任务详情">
+        <div class="workspace">
+          <aside class="command-rail">
+            <div class="rail-title">
+              <strong>任务历史</strong>
+              <button class="icon-btn" type="button" aria-label="新建任务">+</button>
+            </div>
+            <button class="new-task" type="button">开启新创作</button>
+            <div class="rail-list">
+              <span class="rail-label">正在查看</span>
+              <button class="task-row active" type="button">
+                <span>
+                  <strong>AI 产品发布短视频</strong>
+                  <small>workflow_8f23a9 · 渲染中</small>
+                </span>
+                <span class="chip">72%</span>
+              </button>
+              <button class="task-row" type="button">
+                <span>
+                  <strong>GitHub 项目讲解</strong>
+                  <small>已完成 · 昨天</small>
+                </span>
+                <span class="chip">完成</span>
+              </button>
+            </div>
+          </aside>
+
+          <section class="main">
+            <header class="page-head">
+              <div>
+                <p class="page-kicker">/creative/workflow_8f23a9</p>
+                <h1>任务详情</h1>
+                <p>把任务 ID、状态、恢复建议和可编辑输出放在同一个扫描路径里。</p>
+              </div>
+              <div class="head-actions">
+                <button class="btn" type="button">查看提示词</button>
+                <button class="btn" type="button">停止并删除</button>
+              </div>
+            </header>
+
+            <div class="content">
+              <div class="detail-grid">
+                <div class="settings-stack">
+                  <section class="status-strip">
+                    <div>
+                      <p class="page-kicker">任务 ID</p>
+                      <h2 class="mono">workflow_8f23a9</h2>
+                    </div>
+                    <span class="chip">镜头渲染中</span>
+                  </section>
+
+                  <section class="progress-panel">
+                    <div class="panel-head">
+                      <div>
+                        <h3>生成进度</h3>
+                        <p>正在渲染第 6 个镜头，已完成内容会持续保留。</p>
+                      </div>
+                      <strong>72%</strong>
+                    </div>
+                    <div class="progress-track" aria-label="总进度 72%"><span></span></div>
+                    <dl class="facts">
+                      <div class="fact">
+                        <dt>当前阶段</dt>
+                        <dd>镜头渲染</dd>
+                      </div>
+                      <div class="fact">
+                        <dt>当前状态</dt>
+                        <dd>运行中</dd>
+                      </div>
+                      <div class="fact">
+                        <dt>事件序号</dt>
+                        <dd>128</dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section class="progress-panel">
+                    <div class="timeline">
+                      <div class="step done"><span class="dot">1</span><strong>素材解析</strong><small>完成</small></div>
+                      <div class="step done"><span class="dot">2</span><strong>资料检索</strong><small>完成</small></div>
+                      <div class="step done"><span class="dot">3</span><strong>脚本生成</strong><small>完成</small></div>
+                      <div class="step done"><span class="dot">4</span><strong>旁白音频</strong><small>完成</small></div>
+                      <div class="step done"><span class="dot">5</span><strong>内容图</strong><small>完成</small></div>
+                      <div class="step active"><span class="dot">6</span><strong>镜头 HTML</strong><small>运行中</small></div>
+                      <div class="step"><span class="dot">7</span><strong>时间轴</strong><small>等待</small></div>
+                      <div class="step"><span class="dot">8</span><strong>成片合成</strong><small>等待</small></div>
+                      <div class="step"><span class="dot">9</span><strong>质检</strong><small>等待</small></div>
+                      <div class="step"><span class="dot">10</span><strong>导出</strong><small>等待</small></div>
+                    </div>
+                  </section>
+                </div>
+
+                <aside class="settings-stack">
+                  <section class="preview-panel">
+                    <div class="video-placeholder">视频预览占位</div>
+                    <div class="preview-meta">
+                      <strong>当前预览</strong>
+                      <span>生成完成后可直接进入二次编辑。</span>
+                      <button class="btn primary" type="button">继续编辑视频</button>
+                    </div>
+                  </section>
+                  <section class="recovery-panel">
+                    <div class="panel-head">
+                      <div>
+                        <h3>恢复建议</h3>
+                        <p>如果渲染失败，优先复用已完成内容。</p>
+                      </div>
+                      <span class="chip warning">待命</span>
+                    </div>
+                    <button class="btn" type="button">生成恢复计划</button>
+                  </section>
+                </aside>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="screen editor-screen" id="editor" aria-label="二次编辑">
+        <header class="editor-head">
+          <div>
+            <span>/editor/workflow_8f23a9</span>
+            <h1>AI 产品发布短视频</h1>
+          </div>
+          <button class="btn dark" type="button">← 返回任务</button>
+        </header>
+        <div class="editor-body">
+          <div class="editor-toolbar">
+            <span>已停在镜头可编辑帧，可开始编辑。</span>
+            <div class="toolbar-actions">
+              <button class="tool-btn" type="button" title="重新加载">↻</button>
+              <button class="btn dark" type="button">重新生成 HTML</button>
+              <button class="btn dark" type="button">源码</button>
+              <button class="btn dark" type="button">布局检查</button>
+              <button class="btn primary" type="button">导出成片</button>
+            </div>
+          </div>
+          <form class="natural-edit">
+            <span>自然语言编辑</span>
+            <input value="把前三帧标题改得更有冲击力，并保持原有画面结构">
+            <button class="btn primary" type="button">应用编辑</button>
+          </form>
+          <div class="canvas-workspace">
+            <section class="stage">
+              <div class="stage-bar">
+                <span>Frame 06 · raw_html · 00:21-00:27</span>
+                <div class="toolbar-actions">
+                  <button class="btn dark" type="button">重新播放</button>
+                  <button class="btn dark" type="button">跳到结尾并编辑</button>
+                  <button class="btn primary" type="button">保存修改</button>
+                </div>
+              </div>
+              <div class="canvas-placeholder">16:9 HTML 视频画布</div>
+            </section>
+            <aside class="inspector">
+              <h3>元素检查器</h3>
+              <dl>
+                <div>
+                  <dt>当前元素</dt>
+                  <dd>标题 / data-text-key="headline"</dd>
+                </div>
+                <div>
+                  <dt>位置</dt>
+                  <dd>x: 126, y: 84, w: 720, h: 96</dd>
+                </div>
+              </dl>
+              <label class="field">
+                <span>文本内容</span>
+                <textarea>AI 工作流进入可编辑视频阶段</textarea>
+              </label>
+              <button class="btn primary" type="button">保存当前元素</button>
+              <button class="btn dark" type="button">重置位置</button>
+            </aside>
+          </div>
+          <div class="frame-strip" aria-label="镜头列表">
+            <button class="frame" type="button"><span class="frame-thumb">01</span><strong>开场信号</strong><small>00:00-00:04</small></button>
+            <button class="frame" type="button"><span class="frame-thumb">02</span><strong>问题引入</strong><small>00:04-00:09</small></button>
+            <button class="frame active" type="button"><span class="frame-thumb">06</span><strong>核心能力</strong><small>00:21-00:27</small></button>
+            <button class="frame" type="button"><span class="frame-thumb">07</span><strong>结果展示</strong><small>00:27-00:34</small></button>
+            <button class="frame" type="button"><span class="frame-thumb">08</span><strong>收束行动</strong><small>00:34-00:40</small></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen settings-screen" id="settings" aria-label="设置中心">
+        <div class="workspace">
+          <nav class="settings-nav" aria-label="设置中心导航">
+            <button class="active" type="button">总览</button>
+            <button type="button">创作默认值</button>
+            <button type="button">模型配置</button>
+            <button type="button">系统</button>
+          </nav>
+          <section class="main">
+            <header class="page-head">
+              <div>
+                <p class="page-kicker">/settings</p>
+                <h1>设置中心</h1>
+                <p>把模型、创作默认值和本地环境状态整理成控制台，而不是普通表单页。</p>
+              </div>
+              <div class="head-actions">
+                <span class="chip">3 个模型已启用</span>
+                <button class="btn primary" type="button">保存设置</button>
+              </div>
+            </header>
+            <div class="content">
+              <div class="settings-layout">
+                <div class="settings-stack">
+                  <div class="settings-grid">
+                    <button class="settings-item" type="button">
+                      <span>分析模型</span>
+                      <strong>OpenAI / gpt-5.4</strong>
+                    </button>
+                    <button class="settings-item" type="button">
+                      <span>TTS</span>
+                      <strong>已启用</strong>
+                    </button>
+                    <button class="settings-item" type="button">
+                      <span>默认比例</span>
+                      <strong>9:16</strong>
+                    </button>
+                    <button class="settings-item" type="button">
+                      <span>渲染环境</span>
+                      <strong>可用</strong>
+                    </button>
+                  </div>
+
+                  <section class="settings-section">
+                    <div class="panel-head">
+                      <div>
+                        <h3>创作默认值</h3>
+                        <p>默认比例、目标时长、模板策略和联网研究开关。</p>
+                      </div>
+                      <button class="btn" type="button">恢复默认</button>
+                    </div>
+                    <div class="form-grid">
+                      <div class="field">
+                        <label>默认画面比例</label>
+                        <select><option>9:16</option><option>16:9</option></select>
+                      </div>
+                      <div class="field">
+                        <label>默认目标时长</label>
+                        <input value="60 秒">
+                      </div>
+                      <div class="field">
+                        <label>9:16 默认模板</label>
+                        <select><option>信号卡片</option></select>
+                      </div>
+                      <div class="field">
+                        <label>16:9 默认模板</label>
+                        <select><option>极简构建</option></select>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="settings-section">
+                    <div class="panel-head">
+                      <div>
+                        <h3>模型配置</h3>
+                        <p>供应商、Base URL、API Key 和各类模型 ID。</p>
+                      </div>
+                      <button class="btn" type="button">添加供应商</button>
+                    </div>
+                    <div class="form-grid">
+                      <div class="field"><label>供应商名称</label><input value="OpenAI"></div>
+                      <div class="field"><label>Base URL</label><input value="https://api.example.com/v1"></div>
+                      <div class="field"><label>文本模型</label><input value="gpt-5.4"></div>
+                      <div class="field"><label>TTS 模型</label><input value="tts-1"></div>
+                    </div>
+                  </section>
+                </div>
+
+                <aside class="settings-stack">
+                  <section class="settings-section">
+                    <div class="panel-head">
+                      <div>
+                        <h3>系统状态</h3>
+                        <p>html-video、模板兼容和本地数据。</p>
+                      </div>
+                      <span class="chip">可用</span>
+                    </div>
+                    <div class="toggle-row">
+                      <span>质检状态：已启用</span>
+                      <span class="switch" aria-hidden="true"><span></span></span>
+                    </div>
+                    <div class="toggle-row">
+                      <span>联网研究默认开启</span>
+                      <span class="switch" aria-hidden="true"><span></span></span>
+                    </div>
+                    <div class="toggle-row">
+                      <span>生成旁白音频</span>
+                      <span class="switch" aria-hidden="true"><span></span></span>
+                    </div>
+                  </section>
+
+                  <section class="settings-section">
+                    <div class="panel-head">
+                      <div>
+                        <h3>数据维护</h3>
+                        <p>清理任务记录、缓存和渲染产物。</p>
+                      </div>
+                    </div>
+                    <ul class="signal-list">
+                      <li><span>创作任务记录</span><strong>18.4 MB</strong></li>
+                      <li><span>媒体素材缓存</span><strong>420 MB</strong></li>
+                      <li><span>渲染产物</span><strong>1.2 GB</strong></li>
+                    </ul>
+                  </section>
+                </aside>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="view-switch.js"></script>
+</body>
+</html>
+

@@ -15,16 +15,16 @@ export function CleanupConfirmDialog({ target, open, loading, estimate, onCancel
   const estimateText = getEstimateText(estimate);
 
   return (
-    <div className="modalBackdrop" role="presentation">
-      <div className="modalPanel" role="dialog" aria-modal="true" aria-labelledby="cleanup-confirm-title">
-        <h3 id="cleanup-confirm-title">确认清理{label}</h3>
-        <p>此操作不可恢复。</p>
-        {estimateText ? <p>预计影响：{estimateText}</p> : null}
-        <div className="settingsActions" style={{ justifyContent: 'center', marginTop: 18 }}>
-          <button className="btn secondary" type="button" disabled={loading} onClick={onCancel}>
+    <div className="fixed inset-0 z-[1000] grid place-items-center bg-black/45 p-4" role="presentation">
+      <div className="max-h-[calc(100vh-32px)] w-[min(520px,100%)] overflow-auto rounded-lg bg-white p-5 shadow-[0_12px_36px_rgba(15,17,21,.18)]" role="dialog" aria-modal="true" aria-labelledby="cleanup-confirm-title">
+        <h3 className="m-0 text-lg font-bold" id="cleanup-confirm-title">确认清理{label}</h3>
+        <p className="mt-2 text-sm text-[#4b5563]">此操作不可恢复。</p>
+        {estimateText ? <p className="mt-2 text-sm text-[#4b5563]">预计影响：{estimateText}</p> : null}
+        <div className="mt-[18px] flex justify-center gap-2">
+          <button className="min-h-9 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#bfdbfe] hover:bg-[#eef4ff] hover:text-[#2563eb] disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={loading} onClick={onCancel}>
             取消
           </button>
-          <button className="btn primary" type="button" disabled={loading} onClick={onConfirm}>
+          <button className="min-h-9 rounded-lg bg-[#fe2c55] px-4 text-sm font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={loading} onClick={onConfirm}>
             {loading ? `正在清理${label}...` : `确认清理${label}`}
           </button>
         </div>

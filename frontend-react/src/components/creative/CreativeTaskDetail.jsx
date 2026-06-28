@@ -9,6 +9,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog.jsx';
+import { cn } from '@/lib/utils.js';
 import { getStatusClass, getWorkflowStatusText } from './creativeDisplay.js';
 import { CreativeProgressPanel } from './CreativeProgressPanel.jsx';
 import { CreativeStatusMessage } from './CreativeStatusMessage.jsx';
@@ -58,6 +59,13 @@ const RETRY_CODE_TEXT = {
   visual_inspect_failed: '视觉巡检失败',
 };
 
+const STATUS_CHIP_CLASS = {
+  done: 'bg-green-50 text-green-700 ring-green-200',
+  pending: 'bg-[#fff1f3] text-[#fe2c55] ring-[#ffd6df]',
+  failed: 'bg-red-50 text-red-700 ring-red-200',
+  '': 'bg-slate-100 text-slate-600 ring-slate-200',
+};
+
 function formatRetryItem(value) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -84,61 +92,61 @@ function CreativeRetryPlan({
   const cannotRetry = retryPlanStatus === 'ready' && retryPlan?.can_retry === false;
 
   return (
-    <section className="creativeRetryPanel" aria-label="恢复建议">
-      <div className="creativeRetryHeader">
+    <section className="grid gap-3.5 rounded-lg border border-amber-200 bg-amber-50 p-4" aria-label="恢复建议">
+      <div className="flex justify-between gap-3">
         <div>
-          <h3>恢复建议</h3>
-          <p>{retryPlanMessage || retryPlan?.user_message || '系统会优先复用已完成内容，减少重复生成。'}</p>
+          <h3 className="m-0 text-[15px] font-bold leading-snug text-[#111827]">恢复建议</h3>
+          <p className="mt-1 text-[13px] leading-relaxed text-[#6b7280]">{retryPlanMessage || retryPlan?.user_message || '系统会优先复用已完成内容，减少重复生成。'}</p>
         </div>
       </div>
 
       {retryPlanStatus === 'idle' || retryPlanStatus === 'loading' ? (
-        <div className="creativeRetryState">
+        <div className="inline-flex items-center gap-2 text-[13px] leading-normal text-amber-800">
           <Loader2 size={14} className="spinIcon" />
           <span>正在生成恢复计划...</span>
         </div>
       ) : null}
 
       {retryPlanStatus === 'failed' ? (
-        <div className="creativeRetryState isError">
+        <div className="text-[13px] leading-normal text-red-700">
           {retryPlanMessage || '恢复计划生成失败，请稍后重试。'}
         </div>
       ) : null}
 
       {cannotRetry ? (
-        <div className="creativeRetryState">
+        <div className="text-[13px] leading-normal text-amber-800">
           {retryPlan?.user_message || retryPlanMessage || '当前失败暂不支持自动恢复。'}
         </div>
       ) : null}
 
       {canRetry ? (
         <>
-          <dl className="creativeRetryFacts">
-            <div>
-              <dt>失败位置</dt>
-              <dd>{formatRetryItem(retryPlan.retry_from) || '视频工程'}</dd>
+          <dl className="m-0 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+            <div className="min-w-0">
+              <dt className="mb-1 text-xs font-bold text-[#8a93a2]">失败位置</dt>
+              <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{formatRetryItem(retryPlan.retry_from) || '视频工程'}</dd>
             </div>
-            <div>
-              <dt>失败类型</dt>
-              <dd>{RETRY_CODE_TEXT[retryPlan.code] || retryPlan.user_message || retryPlan.code || '未知失败'}</dd>
+            <div className="min-w-0">
+              <dt className="mb-1 text-xs font-bold text-[#8a93a2]">失败类型</dt>
+              <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{RETRY_CODE_TEXT[retryPlan.code] || retryPlan.user_message || retryPlan.code || '未知失败'}</dd>
             </div>
-            <div>
-              <dt>处理方式</dt>
-              <dd>{RETRY_ACTION_TEXT[retryPlan.repair_action] || '按最新恢复计划继续执行'}</dd>
+            <div className="min-w-0">
+              <dt className="mb-1 text-xs font-bold text-[#8a93a2]">处理方式</dt>
+              <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{RETRY_ACTION_TEXT[retryPlan.repair_action] || '按最新恢复计划继续执行'}</dd>
             </div>
-            <div>
-              <dt>将复用</dt>
-              <dd>{formatRetryList(retryPlan.reuse)}</dd>
+            <div className="min-w-0">
+              <dt className="mb-1 text-xs font-bold text-[#8a93a2]">将复用</dt>
+              <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{formatRetryList(retryPlan.reuse)}</dd>
             </div>
-            <div>
-              <dt>将重新执行</dt>
-              <dd>{formatRetryList(retryPlan.discard)}</dd>
+            <div className="min-w-0">
+              <dt className="mb-1 text-xs font-bold text-[#8a93a2]">将重新执行</dt>
+              <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{formatRetryList(retryPlan.discard)}</dd>
             </div>
           </dl>
           <Button
             type="button"
             size="sm"
-            className="creativeRetryButton"
+            className="w-fit bg-[#fe2c55] text-white hover:bg-[#f2214b]"
             disabled={retrying}
             onClick={onRetryWorkflow}
           >
@@ -191,25 +199,27 @@ export function CreativeTaskDetail({
     onContinueEdit?.(editableWorkflowId);
   }
 
+  const statusClass = getStatusClass(workflow?.status);
+
   return (
-    <div className={`creativeTaskDetail ${workflow?.status === 'done' && videoUrl ? 'hasVideo' : ''}`}>
-      <div className="creativeDetailMeta">
-        <div>
-          <span>任务 ID</span>
-          <strong>{workflowId || '尚未创建'}</strong>
+    <div className={cn('grid w-full min-w-0 gap-6 px-1 pb-0 pt-1', workflow?.status === 'done' && videoUrl && 'min-h-[calc(100vh-176px)]')}>
+      <div className="flex min-w-0 items-start justify-between gap-4 rounded-lg border border-[#e7e9ee] bg-white p-4 max-[720px]:flex-col">
+        <div className="grid min-w-0 gap-1">
+          <span className="text-xs font-bold text-[#8a93a2]">任务 ID</span>
+          <strong className="min-w-0 break-words font-mono text-base leading-snug text-[#111827]">{workflowId || '尚未创建'}</strong>
         </div>
-        <strong className={`stepBadge ${getStatusClass(workflow?.status)}`}>
+        <strong className={cn('shrink-0 rounded-full px-3 py-1 text-xs font-bold ring-1', STATUS_CHIP_CLASS[statusClass])}>
           {getWorkflowStatusText(workflow, status)}
         </strong>
-        <div className="creativeTaskActions">
+        <div className="inline-flex shrink-0 flex-wrap items-center justify-end gap-2 max-[720px]:justify-start">
           <Dialog open={promptModalOpen} onOpenChange={setPromptModalOpen}>
             <DialogTrigger asChild>
-              <Button variant="secondary" size="sm" type="button" className="creativePromptViewButton">
+              <Button variant="secondary" size="sm" type="button" className="border border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100">
                 <Eye size={14} />
                 <span>查看提示词</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="creativePromptModal" showCloseButton={false}>
+            <DialogContent className="grid max-h-[82vh] w-[min(92vw,680px)] grid-rows-[auto_1fr_auto] overflow-hidden rounded-[14px] border border-[#e5e7eb] bg-white shadow-[0_24px_70px_rgba(15,23,42,.24)]" showCloseButton={false}>
               <DialogHeader>
                 <DialogTitle>当前任务提示词</DialogTitle>
               </DialogHeader>
@@ -225,7 +235,7 @@ export function CreativeTaskDetail({
                   <span className="sr-only">关闭提示词弹框</span>
                 </Button>
               </DialogClose>
-              <pre className="creativePromptModalText">{promptText || '暂无可显示的提示词。'}</pre>
+              <pre className="m-0 overflow-auto whitespace-pre-wrap break-words bg-[#f8fafc] p-[18px] font-sans text-sm leading-relaxed text-[#111827]">{promptText || '暂无可显示的提示词。'}</pre>
               <Button
                 variant="secondary"
                 size="sm"
@@ -243,7 +253,7 @@ export function CreativeTaskDetail({
               variant="destructive"
               size="sm"
               type="button"
-              className="creativeStopDeleteButton"
+              className="bg-red-600 text-white hover:bg-red-700"
               disabled={deletingWorkflowId === workflowId}
               onClick={() => onStopAndDelete(workflowId)}
             >

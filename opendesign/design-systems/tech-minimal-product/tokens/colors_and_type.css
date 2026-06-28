@@ -1,0 +1,81 @@
+:root {
+  /* Raw color tokens */
+  --bg-1: #ffffff;
+  --bg-2: #f8fafc;
+  --bg-3: #f6f7f9;
+  --surface-1: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-dark-1: #111827;
+  --surface-dark-2: #1f2937;
+  --fg-1: #111827;
+  --fg-2: #4b5563;
+  --fg-3: #69717e;
+  --fg-inverse-1: #ffffff;
+  --fg-inverse-2: #d7dde7;
+  --line-1: #e7e9ee;
+  --line-2: #d9dde5;
+  --accent-1: #fe2c55;
+  --accent-2: #25f4ee;
+  --warn-1: #f59e0b;
+  --danger-1: #dc2626;
+  --success-1: #16a34a;
+
+  /* Type tokens */
+  --font-sans: Aptos, "Segoe UI Variable", "Microsoft YaHei UI", sans-serif;
+  --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --weight-regular: 400;
+  --weight-medium: 600;
+  --weight-strong: 720;
+  --size-0: 12px;
+  --size-1: 13px;
+  --size-2: 14px;
+  --size-3: 16px;
+  --size-4: 20px;
+  --size-5: 28px;
+  --size-6: 36px;
+  --leading-tight: 1.18;
+  --leading-copy: 1.55;
+
+  /* Semantic color tokens */
+  --page-bg: var(--bg-3);
+  --page-bg-dark: var(--surface-dark-1);
+  --surface-primary: var(--surface-1);
+  --surface-secondary: var(--surface-2);
+  --surface-command: var(--surface-2);
+  --surface-command-raised: var(--surface-1);
+  --text-primary: var(--fg-1);
+  --text-secondary: var(--fg-2);
+  --text-muted: var(--fg-3);
+  --text-on-command: var(--fg-1);
+  --text-on-command-muted: var(--fg-3);
+  --border-subtle: var(--line-1);
+  --border-command: var(--line-1);
+  --accent-primary: var(--accent-1);
+  --accent-secondary: var(--accent-2);
+  --status-warning: var(--warn-1);
+  --status-danger: var(--danger-1);
+  --status-success: var(--success-1);
+
+  /* Layout tokens */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --shadow-panel: 0 16px 38px rgb(15 23 42 / 0.08);
+  --shadow-focus: 0 0 0 3px rgb(254 44 85 / 0.18);
+
+  /* Type semantics */
+  --h1: var(--weight-strong) var(--size-6) / var(--leading-tight) var(--font-sans);
+  --h2: var(--weight-strong) var(--size-5) / var(--leading-tight) var(--font-sans);
+  --h3: var(--weight-strong) var(--size-4) / 1.25 var(--font-sans);
+  --body: var(--weight-regular) var(--size-2) / var(--leading-copy) var(--font-sans);
+  --body-strong: var(--weight-medium) var(--size-2) / var(--leading-copy) var(--font-sans);
+  --caption: var(--weight-medium) var(--size-0) / 1.4 var(--font-sans);
+  --code: var(--weight-medium) var(--size-0) / 1.45 var(--font-mono);
+}

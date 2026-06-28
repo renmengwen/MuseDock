@@ -95,27 +95,31 @@ export function CreativeEditorPage() {
   const title = getEditorWorkflowTitle(workflow, workflowId);
 
   return (
-    <main className="creativeEditorPage">
-      <header className="creativeEditorHeader">
+    <main className="min-h-[calc(100vh-64px)] bg-[#f6f7f9] px-6 py-4 max-[720px]:px-4">
+      <header className="mb-3 flex items-center justify-between gap-4 max-[720px]:flex-col max-[720px]:items-start">
         <div>
-          <span>视频编辑器</span>
-          <h1>{title}</h1>
+          <span className="text-[13px] text-[#69717e]">视频编辑器</span>
+          <h1 className="m-0 mt-0.5 text-lg font-bold text-[#20242a]">{title}</h1>
         </div>
-        <button type="button" className="btn secondary" onClick={backToCreative}>
+        <button
+          type="button"
+          className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#bfdbfe] hover:bg-[#eef4ff] hover:text-[#2563eb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25f4ee]"
+          onClick={backToCreative}
+        >
           <ArrowLeft size={16} />
           返回任务
         </button>
       </header>
 
       {loading && (
-        <div className="status loading" role="status" aria-live="polite">
+        <div className="mb-4 inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] font-semibold text-blue-700" role="status" aria-live="polite">
           <Loader2 size={16} className="spinIcon" />
           正在加载编辑任务...
         </div>
       )}
 
       {!loading && errorMessage && (
-        <div className="status error" role="alert">
+        <div className="mb-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-[13px] font-semibold text-red-700" role="alert">
           {errorMessage}
         </div>
       )}

@@ -59,29 +59,22 @@ export function SettingsOverview({ appSettings, modelSettings, systemHealth, onN
 
   return (
     <section>
-      <div className="settingsPanelHeader">
+      <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <h3>设置中心总览</h3>
-          <p>查看创作默认值、模型能力和本地系统状态。</p>
+          <h3 className="m-0 text-lg font-bold">设置中心总览</h3>
+          <p className="mt-1 text-[13px] text-[#69717e]">查看创作默认值、模型能力和本地系统状态。</p>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
         {cards.map(card => (
           <button
             key={card.title}
             type="button"
             onClick={() => onNavigate(card.action)}
-            style={{
-              textAlign: 'left',
-              cursor: 'pointer',
-              border: '1px solid #e7e9ee',
-              borderRadius: 8,
-              background: '#fff',
-              padding: 16,
-            }}
+            className="min-w-0 rounded-lg border border-[#e7e9ee] bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-[#ffd6df] hover:shadow-[0_12px_28px_rgba(15,23,42,.08)]"
           >
-            <span style={{ display: 'block', color: '#69717e', fontSize: 12, marginBottom: 8 }}>{card.title}</span>
-            <strong style={{ display: 'block', color: '#30343b', fontSize: 16 }}>{card.value}</strong>
+            <span className="mb-2 block text-xs text-[#69717e]">{card.title}</span>
+            <strong className="block text-base text-[#30343b]">{card.value}</strong>
           </button>
         ))}
       </div>

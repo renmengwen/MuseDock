@@ -8,13 +8,16 @@ import { HtmlVideoSourcePanel } from './HtmlVideoSourcePanel.jsx';
 import { NaturalLanguageEditBox } from './NaturalLanguageEditBox.jsx';
 import { ProjectStatusBar } from './ProjectStatusBar.jsx';
 
+const TOOL_BUTTON_CLASS = 'min-h-8 rounded-md border border-slate-700 bg-slate-800 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55';
+const PRIMARY_TOOL_BUTTON_CLASS = 'min-h-8 rounded-md border border-[#fe2c55] bg-[#fe2c55] px-2.5 text-xs font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55';
+
 function PanelDialog({ label, title, children }) {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <button type="button">{label}</button>
+        <button className={TOOL_BUTTON_CLASS} type="button">{label}</button>
       </DialogTrigger>
-      <DialogContent className="html-video-panel-dialog">
+      <DialogContent className="max-h-[84vh] overflow-auto">
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         {children}
       </DialogContent>
@@ -35,11 +38,11 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
   }
 
   return (
-    <section className="creative-video-editor html-video-project-editor">
+    <section className="grid gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-slate-100 shadow-[0_18px_48px_rgba(15,23,42,.18)]">
       <ProjectStatusBar status={editor.status} message={editor.message} dirtyRequiresRender={editor.dirtyRequiresRender} />
-      <div className="creative-video-editor-toolbar">
-        <button type="button" disabled={disabled} onClick={editor.load}>重新加载</button>
-        <button type="button" disabled={disabled} onClick={() => editor.materializeProject({})}>
+      <div className="flex flex-wrap gap-2">
+        <button className={TOOL_BUTTON_CLASS} type="button" disabled={disabled} onClick={editor.load}>重新加载</button>
+        <button className={TOOL_BUTTON_CLASS} type="button" disabled={disabled} onClick={() => editor.materializeProject({})}>
           {editor.status === 'materializing' ? '正在重新生成 HTML...' : '重新生成 HTML'}
         </button>
         <PanelDialog label="源码" title="帧源码">
@@ -95,7 +98,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
             getExportPlaybackUrl={editor.getExportPlaybackUrl}
           />
         </PanelDialog>
-        <button type="button" disabled={disabled} onClick={() => handleExport({})}>
+        <button className={PRIMARY_TOOL_BUTTON_CLASS} type="button" disabled={disabled} onClick={() => handleExport({})}>
           {editor.status === 'exporting' ? '正在导出成片...' : '导出成片'}
         </button>
       </div>
@@ -104,7 +107,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         editing={editor.status === 'editing'}
         onSubmit={editor.applyNaturalLanguageEdit}
       />
-      <div className="html-video-project-layout html-video-project-canvas-layout">
+      <div className="grid min-w-0 grid-cols-1">
         <HtmlVideoCanvasEditor editor={editor} />
       </div>
     </section>

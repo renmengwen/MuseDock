@@ -31,60 +31,60 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
     || '正在获取最新进度...';
 
   return (
-    <section className="creativeProgressPanel" aria-label="当前进展">
-      <div className="creativeProgressHeader">
+    <section className="grid gap-3 rounded-lg border border-blue-100 bg-[#f8fbff] p-4" aria-label="当前进展">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <h3>当前进展</h3>
-          <p>{workflow.status === 'done' ? '创作任务已完成。' : currentMessage}</p>
+          <h3 className="m-0 text-[15px] font-bold leading-snug text-[#111827]">当前进展</h3>
+          <p className="mt-1 text-[13px] leading-relaxed text-[#4b5563]">{workflow.status === 'done' ? '创作任务已完成。' : currentMessage}</p>
         </div>
-        <strong className="creativeProgressPercent">{progress}%</strong>
+        <strong className="shrink-0 text-lg leading-tight text-[#fe2c55]">{progress}%</strong>
       </div>
-      <div className="creativeProgressTrack" aria-label={`总进度 ${progress}%`}>
-        <span style={{ width: `${progress}%` }} />
+      <div className="h-2 overflow-hidden rounded-full bg-[#e5e7eb]" aria-label={`总进度 ${progress}%`}>
+        <span className="block h-full rounded-full bg-[#fe2c55] transition-[width] duration-200" style={{ width: `${progress}%` }} />
       </div>
-      <dl className="creativeProgressFacts">
-        <div>
-          <dt>当前阶段</dt>
-          <dd>{stageLabel}</dd>
+      <dl className="m-0 grid grid-cols-3 gap-x-3 gap-y-2 max-[720px]:grid-cols-1">
+        <div className="min-w-0 rounded-md border border-[#edf0f4] bg-white p-3">
+          <dt className="mb-1 text-xs font-bold text-[#8a93a2]">当前阶段</dt>
+          <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{stageLabel}</dd>
         </div>
-        <div>
-          <dt>当前状态</dt>
-          <dd>{getWorkflowStatusText(workflow, status)}</dd>
+        <div className="min-w-0 rounded-md border border-[#edf0f4] bg-white p-3">
+          <dt className="mb-1 text-xs font-bold text-[#8a93a2]">当前状态</dt>
+          <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{getWorkflowStatusText(workflow, status)}</dd>
         </div>
         {durationLabel ? (
-          <div>
-            <dt>最终用时</dt>
-            <dd>{durationLabel}</dd>
+          <div className="min-w-0 rounded-md border border-[#edf0f4] bg-white p-3">
+            <dt className="mb-1 text-xs font-bold text-[#8a93a2]">最终用时</dt>
+            <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{durationLabel}</dd>
           </div>
         ) : null}
       </dl>
-      <button className="creativeProgressToggle" type="button" onClick={() => setExpanded(value => !value)}>
+      <button className="inline-flex w-fit items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] font-bold text-[#fe2c55] transition hover:text-[#d91f46]" type="button" onClick={() => setExpanded(value => !value)}>
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span>{expanded ? '收起详细进度' : '展开详细进度'}</span>
       </button>
       {expanded ? (
-        <div className="creativeProgressDebug">
-          <dl>
-            <div>
-              <dt>阶段 ID</dt>
-              <dd>{stageId || '无'}</dd>
+        <div className="grid gap-2 border-t border-blue-100 pt-2.5">
+          <dl className="m-0 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+            <div className="min-w-0">
+              <dt className="mb-1 text-xs font-bold text-[#8a93a2]">阶段 ID</dt>
+              <dd className="m-0 break-words text-[13px] text-[#1f2937]">{stageId || '无'}</dd>
             </div>
-            <div>
-              <dt>事件序号</dt>
-              <dd>{workflow.last_event_seq || 0}</dd>
+            <div className="min-w-0">
+              <dt className="mb-1 text-xs font-bold text-[#8a93a2]">事件序号</dt>
+              <dd className="m-0 break-words text-[13px] text-[#1f2937]">{workflow.last_event_seq || 0}</dd>
             </div>
           </dl>
           {progressEvents.length ? (
-            <ol>
+            <ol className="m-0 grid max-h-[220px] list-none gap-2 overflow-auto p-0">
               {progressEvents.map(event => (
-                <li key={`${event.seq || 0}-${event.type}-${event.received_at || ''}`}>
-                  <code>{event.type || 'unknown_event'}</code>
-                  <span>{summarizeProgressEvent(event)}</span>
+                <li className="grid gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2.5 py-2" key={`${event.seq || 0}-${event.type}-${event.received_at || ''}`}>
+                  <code className="break-all text-xs text-[#111827]">{event.type || 'unknown_event'}</code>
+                  <span className="break-words text-xs leading-normal text-[#4b5563]">{summarizeProgressEvent(event)}</span>
                 </li>
               ))}
             </ol>
           ) : (
-            <p>暂无本次页面会话的详细事件。</p>
+            <p className="m-0 text-xs leading-normal text-[#4b5563]">暂无本次页面会话的详细事件。</p>
           )}
         </div>
       ) : null}

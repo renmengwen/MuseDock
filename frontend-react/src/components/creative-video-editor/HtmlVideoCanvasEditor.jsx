@@ -548,35 +548,36 @@ export function HtmlVideoCanvasEditor({ editor }) {
   }
 
   if (!frame) {
-    return <section className="creative-video-editor-panel"><p>请选择要编辑的帧。</p></section>;
+    return <section className="rounded-lg border border-slate-700 bg-slate-800 p-4 text-sm text-slate-300"><p className="m-0">请选择要编辑的帧。</p></section>;
   }
 
   if (!rawHtml) {
-    return <section className="creative-video-editor-panel"><p>当前帧不是 raw_html，暂不支持画布编辑。</p></section>;
+    return <section className="rounded-lg border border-slate-700 bg-slate-800 p-4 text-sm text-slate-300"><p className="m-0">当前帧不是 raw_html，暂不支持画布编辑。</p></section>;
   }
 
   return (
-    <section className="html-video-canvas-editor">
-      <div className="html-video-canvas-workspace">
-        <div className="html-video-canvas-stage">
-          <div className="html-video-canvas-toolbar">
-            <span>{previewError || (playbackState === 'playing' ? '正在播放镜头动画...' : editingReady ? '已停在镜头可编辑帧，可开始编辑。' : '正在准备预览...')}</span>
-            <div className="creative-video-editor-inline-actions">
-              <button type="button" disabled={disabled} onClick={replay}>重新播放</button>
-              <button type="button" disabled={disabled} onClick={jumpToEnd}>跳到结尾并编辑</button>
-              <button type="button" disabled={disabled || saving || !elementInfo} onClick={saveEdit}>{saving ? '正在保存...' : '保存修改'}</button>
+    <section className="grid min-w-0 gap-2">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_260px] gap-2 max-[1100px]:grid-cols-1">
+        <div className="grid min-w-0 gap-2.5 rounded-lg border border-slate-700 bg-slate-950">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-700 bg-slate-800 px-2.5 py-2 max-[720px]:flex-col max-[720px]:items-start">
+            <span className="text-xs text-slate-300">{previewError || (playbackState === 'playing' ? '正在播放镜头动画...' : editingReady ? '已停在镜头可编辑帧，可开始编辑。' : '正在准备预览...')}</span>
+            <div className="flex flex-wrap justify-end gap-1.5">
+              <button className="min-h-7 rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled} onClick={replay}>重新播放</button>
+              <button className="min-h-7 rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled} onClick={jumpToEnd}>跳到结尾并编辑</button>
+              <button className="min-h-7 rounded-md bg-[#fe2c55] px-2.5 text-xs font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled || saving || !elementInfo} onClick={saveEdit}>{saving ? '正在保存...' : '保存修改'}</button>
             </div>
           </div>
           {!htmlReady && htmlLoadError ? (
-            <div className="html-video-canvas-loading">
-              <p>{htmlLoadError}</p>
-              <button type="button" disabled={disabled} onClick={reloadHtml}>重新加载 HTML</button>
+            <div className="m-3 grid gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
+              <p className="m-0">{htmlLoadError}</p>
+              <button className="w-fit rounded-md bg-red-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled} onClick={reloadHtml}>重新加载 HTML</button>
             </div>
           ) : null}
-          {!htmlReady && !htmlLoadError ? <p className="html-video-canvas-loading">正在加载当前镜头 HTML...</p> : null}
+          {!htmlReady && !htmlLoadError ? <p className="m-3 rounded-lg border border-slate-700 bg-slate-800 p-3 text-sm text-slate-300">正在加载当前镜头 HTML...</p> : null}
           <iframe
             key={iframeKey}
             ref={iframeRef}
+            className="mx-auto mb-2.5 mt-0 aspect-video w-full max-w-[min(560px,65vh)] rounded-md border border-slate-700 bg-slate-950"
             title="html-video 当前镜头画布"
             srcDoc={srcDoc}
             sandbox="allow-scripts allow-same-origin"
@@ -584,7 +585,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
             onError={() => setPreviewError('镜头预览加载失败，请检查 HTML 或重新播放。')}
           />
         </div>
-        <div className="html-video-canvas-side">
+        <div className="grid min-w-0 content-start gap-3">
           <HtmlVideoElementInspector
             elementInfo={elementInfo}
             editingReady={editingReady}
@@ -594,8 +595,8 @@ export function HtmlVideoCanvasEditor({ editor }) {
             onResetPosition={resetSelectedPosition}
             onSaveEdit={saveEdit}
           />
-          <details className="html-video-canvas-fields">
-            <summary>帧字段 / 旁白 / 字幕</summary>
+          <details className="rounded-lg border border-slate-700 bg-slate-800 p-3 text-slate-100">
+            <summary className="cursor-pointer text-sm font-bold">帧字段 / 旁白 / 字幕</summary>
             <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} />
             <NarrationPanel narration={editor.project?.narration} disabled={disabled} onSave={editor.saveTemplateInputs} onRegenerate={editor.regenerateNarration} />
             <CaptionsPanel captions={frame?.captions || []} selectedFrameId={frameId} disabled={disabled} onSave={patchFrame} />
