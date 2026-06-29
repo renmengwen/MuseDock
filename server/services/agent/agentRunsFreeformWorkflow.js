@@ -34,6 +34,7 @@
   cleanupFreeformTempProjectDir,
   publishFreeformProjectDirectory,
   mapFreeformProjectFilesToDir,
+  buildHtmlVideoExportFileUrl,
 } = {}) {
   const runUpdateQueues = new Map();
 

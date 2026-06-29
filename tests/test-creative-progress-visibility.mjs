@@ -80,6 +80,28 @@ assert.equal(eventsByWorkflow['workflow-1'].length, 30);
 assert.equal(eventsByWorkflow['workflow-1'][0].seq, 2);
 assert.equal(eventsByWorkflow['workflow-1'][29].received_at, 'received-30');
 
+let renderProgressEvents = {};
+for (const percent of [12, 48, 90]) {
+  renderProgressEvents = appendWorkflowProgressEvent(renderProgressEvents, {
+    workflow_id: 'workflow-render',
+    type: 'html_video_frame_render_progress',
+    seq: percent,
+    frame_id: 'frame_01',
+    data: { frame_id: 'frame_01', index: 0, total: 2, percent },
+  }, { now: () => `render-${percent}` });
+}
+renderProgressEvents = appendWorkflowProgressEvent(renderProgressEvents, {
+  workflow_id: 'workflow-render',
+  type: 'html_video_frame_render_progress',
+  seq: 13,
+  frame_id: 'frame_02',
+  data: { frame_id: 'frame_02', index: 1, total: 2, percent: 13 },
+}, { now: () => 'render-frame-02' });
+assert.equal(renderProgressEvents['workflow-render'].length, 2);
+assert.equal(renderProgressEvents['workflow-render'][0].seq, 90);
+assert.equal(renderProgressEvents['workflow-render'][0].data.percent, 90);
+assert.equal(renderProgressEvents['workflow-render'][1].frame_id, 'frame_02');
+
 assert.equal(
   appendWorkflowProgressEvent(eventsByWorkflow, { type: 'stage_progress' }),
   eventsByWorkflow,

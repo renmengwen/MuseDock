@@ -77,6 +77,20 @@ function readJson(filePath) {
   const emptiedMessagePersisted = readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));
   assert.equal(emptiedMessagePersisted.message, '');
 
+  await Promise.all(Array.from({ length: 50 }, (_, index) => workflows.patchCreativeWorkflowTaskSummary(WORKFLOW_ID, {
+    active_task_id: 'creative-task-1',
+    active_operation_id: 'workflow-op-1',
+    task_status: 'running',
+    current_stage: 'project',
+    current_stage_message: `并发进度 ${index + 1}`,
+    current_progress: index + 1,
+    last_event_seq: index + 1,
+  }, { rootDir })));
+  const concurrentPersisted = readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));
+  assert.equal(concurrentPersisted.last_event_seq, 50);
+  assert.equal(concurrentPersisted.current_progress, 50);
+  assert.equal(concurrentPersisted.current_stage_message, '并发进度 50');
+
   const cleared = await workflows.clearCreativeWorkflowTaskSummary(WORKFLOW_ID, { rootDir });
   assert.equal(cleared.success, true);
   const clearedPersisted = readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));

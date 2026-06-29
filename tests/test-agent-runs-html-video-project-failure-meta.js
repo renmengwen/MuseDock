@@ -68,5 +68,50 @@ const agentRuns = require('../server/services/agent/agentRuns');
   assert.equal(persisted.hyperframes_freeform.project.html_video_project_path, projectDir);
   assert.deepEqual(persisted.hyperframes_freeform.project.html_video_diagnostics, [diagnostic]);
 
+  const successRunId = 'run-html-video-success-url';
+  const successProjectDir = path.join(rootDir, awemeId, 'agent_runs', `${successRunId}-html-video`);
+  fs.writeFileSync(path.join(runDir, `${successRunId}.json`), JSON.stringify({
+    success: true,
+    run_id: successRunId,
+    template: 'hyperframes_freeform',
+    aweme_id: awemeId,
+    status: 'ready',
+    hyperframes_freeform: {
+      status: 'ready',
+      brief: {
+        status: 'ready',
+        data: {
+          title: 'HTML 成功 URL 测试',
+          storyboard: {
+            scenes: [{ index: 1, narration_text: '测试旁白。' }],
+          },
+        },
+      },
+    },
+  }, null, 2));
+
+  const successResult = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, successRunId, {
+    rootDir,
+    useHtmlVideoLiteWorkflow: true,
+    creativeVideoWorkflowFacade: {
+      generateCreativeVideoProject: async () => ({
+        success: true,
+        message: 'html-video lite 成片完成。',
+        render_mode: 'html-video',
+        project_dir: successProjectDir,
+        html_video_project_path: successProjectDir,
+        project: { exports: [{ id: 'export-success-01' }] },
+        files: [],
+      }),
+    },
+  });
+
+  assert.equal(successResult.success, true);
+  const successPersisted = JSON.parse(fs.readFileSync(path.join(runDir, `${successRunId}.json`), 'utf8'));
+  assert.equal(
+    successPersisted.hyperframes_freeform.render.output_url,
+    `/api/creative-workflows/${encodeURIComponent(awemeId)}/html-video-project/exports/${encodeURIComponent('export-success-01')}/file`,
+  );
+
   console.log('agent runs html-video project failure meta tests passed');
 })();

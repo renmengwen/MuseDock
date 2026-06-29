@@ -753,6 +753,7 @@ const freeformWorkflow = createAgentRunsFreeformWorkflow({
   cleanupFreeformTempProjectDir,
   publishFreeformProjectDirectory,
   mapFreeformProjectFilesToDir,
+  buildHtmlVideoExportFileUrl,
 });
 
 const {

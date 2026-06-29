@@ -858,7 +858,7 @@ export function OneClickCreativePage() {
     }
     subscribeTaskEvents(
       { workflow_id: stored.workflow_id, task_id: stored.task_id },
-      { sinceSeq: normalizeLastSeq(stored.last_seq) },
+      { sinceSeq: 0 },
     );
     return undefined;
   }, [workflowId, routeWorkflowId, selectedWorkflowId, stopTaskStream, subscribeTaskEvents]);

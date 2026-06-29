@@ -44,20 +44,30 @@ export function getSidebarTaskTimeSource(task) {
   return task?.created_at || task?.updated_at || '';
 }
 
+function getFrameRenderProgressKey(event) {
+  if (event?.type !== 'html_video_frame_render_progress') return '';
+  const data = event?.data && typeof event.data === 'object' ? event.data : {};
+  const frameId = data.frame_id || event.frame_id;
+  return frameId ? `html_video_frame_render_progress:${frameId}` : '';
+}
+
 export function appendWorkflowProgressEvent(eventsByWorkflow, event, options = {}) {
   if (!event?.workflow_id || !event?.type) return eventsByWorkflow;
   const limit = Number.isFinite(Number(options.limit)) ? Math.max(1, Number(options.limit)) : 30;
   const now = typeof options.now === 'function' ? options.now() : new Date().toISOString();
   const current = eventsByWorkflow?.[event.workflow_id] || [];
+  const nextEvent = {
+    ...event,
+    received_at: now,
+  };
+  const mergeKey = getFrameRenderProgressKey(nextEvent);
+  const mergeIndex = mergeKey ? current.findIndex(item => getFrameRenderProgressKey(item) === mergeKey) : -1;
+  const nextEvents = mergeIndex >= 0
+    ? [...current.slice(0, mergeIndex), ...current.slice(mergeIndex + 1), nextEvent]
+    : [...current, nextEvent];
   return {
     ...(eventsByWorkflow || {}),
-    [event.workflow_id]: [
-      ...current,
-      {
-        ...event,
-        received_at: now,
-      },
-    ].slice(-limit),
+    [event.workflow_id]: nextEvents.slice(-limit),
   };
 }
 

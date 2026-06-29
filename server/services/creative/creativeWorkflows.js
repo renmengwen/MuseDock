@@ -278,6 +278,40 @@ function updateStage(record, stageId, patch = {}) {
   ));
 }
 
+const workflowFileQueues = new Map();
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isTransientRenameError(error) {
+  return error?.syscall === 'rename' && ['EPERM', 'EBUSY', 'EACCES'].includes(error?.code);
+}
+
+async function renameWithRetry(tempPath, filePath) {
+  const delays = [25, 75, 150, 300];
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await fsp.rename(tempPath, filePath);
+      return;
+    } catch (error) {
+      if (!isTransientRenameError(error) || attempt >= delays.length) throw error;
+      await delay(delays[attempt]);
+    }
+  }
+}
+
+function withWorkflowFileQueue(filePath, task) {
+  const key = path.resolve(filePath);
+  const previous = workflowFileQueues.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(task);
+  workflowFileQueues.set(key, current);
+  current.finally(() => {
+    if (workflowFileQueues.get(key) === current) workflowFileQueues.delete(key);
+  }).catch(() => {});
+  return current;
+}
+
 async function writeJson(filePath, data) {
   const dir = path.dirname(filePath);
   await fsp.mkdir(dir, { recursive: true });
@@ -287,7 +321,7 @@ async function writeJson(filePath, data) {
   );
   try {
     await fsp.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
-    await fsp.rename(tempPath, filePath);
+    await renameWithRetry(tempPath, filePath);
   } catch (error) {
     await fsp.rm(tempPath, { force: true }).catch(() => {});
     throw error;
@@ -325,6 +359,10 @@ function createWorkflowStoppedSummary(workflowId) {
 
 async function persistWorkflow(record, rootDir) {
   const filePath = getWorkflowPath(record.workflow_id, rootDir);
+  return withWorkflowFileQueue(filePath, () => persistWorkflowUnlocked(record, rootDir, filePath));
+}
+
+async function persistWorkflowUnlocked(record, rootDir, filePath = getWorkflowPath(record.workflow_id, rootDir)) {
   record.stages = normalizeStages(record.stages);
   const nextRecord = {
     ...record,
@@ -1356,6 +1394,11 @@ async function markStaleRunningStageFailed(record, rootDir, services = {}, optio
 
 async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
+  const workflowPath = getWorkflowPath(workflowId, rootDir);
+  return withWorkflowFileQueue(workflowPath, () => patchCreativeWorkflowTaskSummaryUnlocked(workflowId, patch, options, rootDir, workflowPath));
+}
+
+async function patchCreativeWorkflowTaskSummaryUnlocked(workflowId, patch = {}, options = {}, rootDir = DEFAULT_ROOT, workflowPath = getWorkflowPath(workflowId, rootDir)) {
   try {
     const record = await readWorkflow(workflowId, rootDir);
     const now = safeString(patch.updated_at) || getNow(resolveServices(options)) || new Date().toISOString();
@@ -1404,7 +1447,7 @@ async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options 
     if (Object.prototype.hasOwnProperty.call(patch, 'message')) record.message = safeString(patch.message);
     if (Object.prototype.hasOwnProperty.call(patch, 'error')) record.error = patch.error || null;
     record.updated_at = now;
-    const persisted = await persistWorkflow(record, rootDir);
+    const persisted = await persistWorkflowUnlocked(record, rootDir, workflowPath);
     return { success: true, workflow_id: record.workflow_id, data: persisted };
   } catch (error) {
     return { success: false, workflow_id: safeString(workflowId), message: `更新创作任务进度失败：${error.message}` };
