@@ -50,6 +50,8 @@ function inferCodeFromText(stage, message) {
   if (/playwright|chromium/.test(text)) return 'playwright_not_configured';
   if (/content[_ -]?graph|nodes|json/.test(text)) return 'content_graph_invalid';
   if (/frame[_ -]?html|html/.test(text) && /missing text|缺少文本|返回为空|空内容/.test(text)) return 'provider_missing_text';
+  if (/html/.test(text) && /document|提取|完整/.test(text)) return 'html_document_extract_failed';
+  if (/html/.test(text) && /validation|校验|画幅|尺寸/.test(text)) return 'html_validation_failed';
   if (/frame[_ -]?html/.test(text)) return 'frame_html_invalid';
   if (/render|timeout|超时/.test(text)) return /timeout|超时/.test(text) ? 'render_failed_timeout' : 'render_failed';
   if (hasCompose && hasDurationMismatch) return 'duration_mismatch';
@@ -330,6 +332,8 @@ function createCreativeWorkflowRetryPlan(input = {}) {
   if (
     code === 'provider_missing_text'
     || code === 'frame_html_invalid'
+    || code === 'html_document_extract_failed'
+    || code === 'html_validation_failed'
     || code === 'frame_html_template_text_leak'
     || code === 'frame_html_content_mismatch'
   ) {

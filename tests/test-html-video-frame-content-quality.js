@@ -103,9 +103,40 @@ function validHtml(headline, body = '正文') {
   });
 
   assert.equal(failed.success, false);
-  assert.equal(failed.diagnostics.some(item => item.code === 'frame_html_template_text_leak'), true);
+  assert.equal(failed.diagnostics.some(item => item.code === 'html_validation_failed'), true);
+  assert.equal(failed.diagnostics[0].details.validation_code, 'frame_html_template_text_leak');
   assert.equal(failed.diagnostics[0].retryable, true);
   assert.equal(failed.diagnostics[0].repair_action, 'retry_frame_html');
+
+  const chromeTemplate = {
+    id: 'bold_signal_chrome',
+    sourceHtml: [
+      '<!doctype html><html><body>',
+      '<nav>信号 构建 发布 扩展</nav>',
+      '<main><h1>让增长信号</h1><p>实时洞察 自动协同</p></main>',
+      '<footer>创意视频 Bold Signal</footer>',
+      '</body></html>',
+    ].join(''),
+  };
+  const chromeOnlyLeak = await frameHtmlAgent.generateFrameHtml({
+    ...baseArgs,
+    template: chromeTemplate,
+    model: {
+      callTextModel: async () => ({
+        success: true,
+        text: [
+          '<!doctype html><html><head><style>@keyframes in{to{opacity:1}} h1{animation:in 1s}</style></head>',
+          '<body>',
+          '<nav>信号 构建 发布 扩展</nav>',
+          '<main style="width:1920px;height:1080px"><h1 data-text-key="headline">问题开场：为什么边缘发灰</h1><p data-text-key="subtitle">短字幕</p><section data-text-key="body">border 和 shadow 的语义冲突</section></main>',
+          '<footer>创意视频 Bold Signal</footer>',
+          '</body></html>',
+        ].join(''),
+      }),
+    },
+  });
+  assert.equal(chromeOnlyLeak.success, true);
+  assert.equal(chromeOnlyLeak.diagnostics.some(item => item.code === 'frame_html_template_text_leak'), false);
 
   console.log('html-video frame content quality tests passed');
 })().catch(error => {

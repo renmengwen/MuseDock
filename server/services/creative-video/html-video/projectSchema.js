@@ -326,6 +326,7 @@ function normalizeCheckpointFrames(value, type) {
 function normalizeModelCall(value, index = 0) {
   const input = objectOrEmpty(value);
   const attempt = Number(input.attempt);
+  const repairAttempt = Number(input.repair_attempt ?? input.repairAttempt);
   const durationMs = Number(input.duration_ms);
   return {
     id: firstNonEmptyString(input.id, `model_call_${String(index + 1).padStart(4, '0')}`),
@@ -335,6 +336,7 @@ function normalizeModelCall(value, index = 0) {
     frame_id: stringField(input.frame_id),
     node_id: stringField(input.node_id),
     attempt: Number.isFinite(attempt) ? attempt : null,
+    repair_attempt: Number.isFinite(repairAttempt) ? repairAttempt : null,
     model: {
       provider: stringField(objectOrEmpty(input.model).provider),
       model_id: stringField(objectOrEmpty(input.model).model_id),

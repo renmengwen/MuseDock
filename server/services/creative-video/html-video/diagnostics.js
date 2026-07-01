@@ -30,6 +30,8 @@ const DEFAULT_MESSAGES = {
   compose_failed: 'html-video 合成失败。',
   frame_html_template_text_leak: '单帧 HTML 保留了模板默认文案。',
   frame_html_content_mismatch: '单帧 HTML 主画面内容与当前镜头不匹配。',
+  html_document_extract_failed: 'AI 未返回完整 HTML document。',
+  html_validation_failed: '单帧 HTML 未通过校验。',
   render_output_missing_audio: '导出成片缺少音频轨。',
   storyboard_narration_incomplete: '导演策划旁白存在半句截断。',
   ai_response_invalid: 'AI 返回内容不符合 html-video JSON 要求。',

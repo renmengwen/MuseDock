@@ -136,6 +136,7 @@ function appendWorkflowModelCall(record, modelCall = {}) {
   if (!record || typeof record !== 'object') return record;
   const input = modelCall && typeof modelCall === 'object' && !Array.isArray(modelCall) ? modelCall : {};
   const attempt = Number(input.attempt);
+  const repairAttempt = Number(input.repair_attempt ?? input.repairAttempt);
   const durationMs = Number(input.duration_ms);
   const existingCount = Array.isArray(record.model_calls) ? record.model_calls.length : 0;
   const call = {
@@ -146,6 +147,7 @@ function appendWorkflowModelCall(record, modelCall = {}) {
     frame_id: safeString(input.frame_id),
     node_id: safeString(input.node_id),
     attempt: Number.isFinite(attempt) ? attempt : null,
+    repair_attempt: Number.isFinite(repairAttempt) ? repairAttempt : null,
     model: {
       provider: safeString(input.model?.provider),
       model_id: safeString(input.model?.model_id),

@@ -191,9 +191,13 @@ assert.match(sourceBackedPrompt, /禁止只有角落|不要只有角落/);
 const retryPrompt = agent.buildRetryPrompt({
   node: { id: 'scene_01', durationSec: 8 },
   target: { resolution: { width: 1920, height: 1080 } },
+  validationMessage: 'HTML 画幅尺寸不符合目标 1920x1080。',
+  sceneSpec: { scenes: [{ id: 'scene_01', visual_text: { headline: '基础版' }, narration_text: '价格说明' }] },
 });
 assert.match(retryPrompt, /animation timeline/i);
 assert.match(retryPrompt, /window\.__hvPlayAll|GSAP|@keyframes|animation/);
+assert.match(retryPrompt, /HTML skeleton|<!doctype html>/i);
+assert.doesNotMatch(retryPrompt, /Template HTML|Visual continuity lock|Source context summary/);
 
 const fenced = agent.extractHtmlDocument([
   '说明',
@@ -213,7 +217,10 @@ assert.equal(rawWithProse.success, true);
 assert.equal(rawWithProse.html, '<!doctype html><html><body>ok</body></html>');
 
 assert.equal(agent.extractHtmlDocument('').success, false);
-assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').success, false);
+assert.equal(agent.extractHtmlDocument('').code, 'provider_missing_text');
+const noHtmlDocument = agent.extractHtmlDocument('这里只是解释，没有 HTML');
+assert.equal(noHtmlDocument.success, false);
+assert.equal(noHtmlDocument.code, 'html_document_extract_failed');
 
 (async () => {
   let calls = 0;
@@ -283,6 +290,43 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   assert.equal(dimensionCalls, 2);
   assert.match(dimensionResult.html, /width=1080,height=1920/);
 
+  const auditedRequests = [];
+  const auditedRetry = await agent.generateFrameHtml({
+    model: {
+      callTextModel: async request => {
+        auditedRequests.push(request);
+        return auditedRequests.length === 1
+          ? {
+            success: true,
+            text: '<!doctype html><html><head><meta name="viewport" content="width=1920,height=1080"><style>html,body{width:1920px;height:1080px}</style></head><body>bad</body></html>',
+          }
+          : {
+            success: true,
+            text: '<!doctype html><html><head><meta name="viewport" content="width=1080,height=1920"><style>html,body{width:1080px;height:1920px}</style></head><body><h1 data-text-key="headline">基础版</h1><p data-text-key="subtitle">价格</p><section data-text-key="body">基础版价格 12 元</section></body></html>',
+          };
+      },
+    },
+    modelOptions: {
+      audit: {
+        agent: 'FrameHtmlAgent',
+        stage: 'frame_html',
+        sub_stage: 'frame_html',
+        frame_id: 'scene_01',
+        attempt: 1,
+      },
+    },
+    graph,
+    node: graph.nodes[0],
+    index: 0,
+    total: 2,
+    target: { resolution: { width: 1080, height: 1920 }, aspect_ratio: '9:16' },
+  });
+  assert.equal(auditedRetry.success, true);
+  assert.equal(auditedRequests.length, 2);
+  assert.equal(auditedRequests[0].audit.repair_attempt, undefined);
+  assert.equal(auditedRequests[1].audit.attempt, 1);
+  assert.equal(auditedRequests[1].audit.repair_attempt, 1);
+
   const decorativeFrameHtml = [
     '<!doctype html><html><head>',
     '<meta name="viewport" content="width=1920,height=1080,initial-scale=1.0">',
@@ -344,6 +388,8 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   });
   assert.equal(dimensionFailed.success, false);
   assert.match(dimensionFailed.message, /尺寸|画幅/);
+  assert.equal(dimensionFailed.diagnostics[0].code, 'html_validation_failed');
+  assert.equal(dimensionFailed.diagnostics[0].details.validation_code, 'frame_html_invalid');
 
   const failedHtml = await agent.generateFrameHtml({
     model: {
@@ -368,6 +414,8 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
     target: { resolution: { width: 1920, height: 1080 }, aspect_ratio: '16:9' },
   });
   assert.equal(failedHtml.success, false);
+  assert.equal(failedHtml.diagnostics[0].code, 'html_validation_failed');
+  assert.equal(failedHtml.diagnostics[0].details.validation_code, 'frame_html_invalid');
   assert.match(failedHtml.failed_html, /\.stage/);
   assert.match(failedHtml.diagnostics[0].details.failed_html, /\.stage/);
 
@@ -393,7 +441,7 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   });
   assert.equal(shortPromptInvalid.success, false);
   assert.equal(shortPromptInvalidCalls, 1);
-  assert.equal(shortPromptInvalid.diagnostics[0].code, 'frame_html_invalid');
+  assert.equal(shortPromptInvalid.diagnostics[0].code, 'html_document_extract_failed');
 
   let retryBlankCalls = 0;
   const retryBlankResult = await agent.generateFrameHtml({
@@ -417,13 +465,17 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   });
   assert.equal(retryBlankResult.success, false);
   assert.equal(retryBlankCalls, 2);
-  assert.doesNotMatch(retryBlankResult.message, /缺少文本|返回结果缺少文本内容/);
-  assert.equal(retryBlankResult.diagnostics[0].code, 'frame_html_invalid');
-  assert.doesNotMatch(retryBlankResult.diagnostics[0].user_message, /缺少文本|返回结果缺少文本内容/);
+  assert.match(retryBlankResult.message, /首版 HTML 未通过校验/);
+  assert.match(retryBlankResult.message, /修复重试时模型返回空内容/);
+  assert.equal(retryBlankResult.diagnostics[0].code, 'html_validation_failed');
+  assert.match(retryBlankResult.diagnostics[0].user_message, /首版 HTML 未通过校验/);
   assert.equal(retryBlankResult.diagnostics[0].sub_stage, 'frame_html');
   assert.equal(retryBlankResult.diagnostics[0].frame_id, 'scene_01');
   assert.equal(retryBlankResult.diagnostics[0].retryable, true);
   assert.equal(retryBlankResult.diagnostics[0].repair_action, 'retry_frame_html');
+  assert.equal(retryBlankResult.diagnostics[0].details.validation_code, 'frame_html_invalid');
+  assert.equal(retryBlankResult.diagnostics[0].details.retry_provider_missing_text, true);
+  assert.match(retryBlankResult.failed_html, /width=1920,height=1080/);
 
   let retryMissingFailureCalls = 0;
   const retryMissingFailureResult = await agent.generateFrameHtml({
@@ -447,9 +499,11 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   });
   assert.equal(retryMissingFailureResult.success, false);
   assert.equal(retryMissingFailureCalls, 2);
-  assert.equal(retryMissingFailureResult.diagnostics[0].code, 'frame_html_invalid');
-  assert.doesNotMatch(retryMissingFailureResult.message, /缺少文本|返回结果缺少文本内容/);
-  assert.doesNotMatch(retryMissingFailureResult.diagnostics[0].user_message, /缺少文本|返回结果缺少文本内容/);
+  assert.equal(retryMissingFailureResult.diagnostics[0].code, 'html_validation_failed');
+  assert.match(retryMissingFailureResult.message, /首版 HTML 未通过校验/);
+  assert.match(retryMissingFailureResult.message, /修复重试时模型返回空内容/);
+  assert.equal(retryMissingFailureResult.diagnostics[0].details.retry_provider_missing_text, true);
+  assert.match(retryMissingFailureResult.failed_html, /width=1920,height=1080/);
 
   let invalidRetryBlankCalls = 0;
   const invalidRetryBlankResult = await agent.generateFrameHtml({
@@ -469,7 +523,7 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   assert.equal(invalidRetryBlankResult.success, false);
   assert.equal(invalidRetryBlankCalls, 2);
   assert.doesNotMatch(invalidRetryBlankResult.message, /缺少文本|返回结果缺少文本内容/);
-  assert.equal(invalidRetryBlankResult.diagnostics[0].code, 'frame_html_invalid');
+  assert.equal(invalidRetryBlankResult.diagnostics[0].code, 'html_document_extract_failed');
   assert.doesNotMatch(invalidRetryBlankResult.diagnostics[0].user_message, /缺少文本|返回结果缺少文本内容/);
 
   let invalidRetryMissingFailureCalls = 0;
@@ -489,7 +543,7 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
   });
   assert.equal(invalidRetryMissingFailureResult.success, false);
   assert.equal(invalidRetryMissingFailureCalls, 2);
-  assert.equal(invalidRetryMissingFailureResult.diagnostics[0].code, 'frame_html_invalid');
+  assert.equal(invalidRetryMissingFailureResult.diagnostics[0].code, 'html_document_extract_failed');
   assert.doesNotMatch(invalidRetryMissingFailureResult.message, /缺少文本|返回结果缺少文本内容/);
   assert.doesNotMatch(invalidRetryMissingFailureResult.diagnostics[0].user_message, /缺少文本|返回结果缺少文本内容/);
 
@@ -501,8 +555,8 @@ assert.equal(agent.extractHtmlDocument('这里只是解释，没有 HTML').succe
     total: 2,
   });
   assert.equal(failed.success, false);
-  assert.match(failed.message, /未返回有效 HTML/);
-  assert.equal(failed.diagnostics[0].code, 'frame_html_invalid');
+  assert.match(failed.message, /未返回完整 HTML/);
+  assert.equal(failed.diagnostics[0].code, 'html_document_extract_failed');
   assert.equal(failed.diagnostics[0].sub_stage, 'frame_html');
   assert.equal(failed.diagnostics[0].frame_id, 'scene_01');
   assert.equal(failed.diagnostics[0].retryable, true);

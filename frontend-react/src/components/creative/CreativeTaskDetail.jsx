@@ -52,6 +52,8 @@ const RETRY_CODE_TEXT = {
   provider_missing_text: '模型返回内容为空',
   content_graph_invalid: '内容图格式异常',
   frame_html_invalid: '镜头 HTML 生成异常',
+  html_document_extract_failed: '镜头 HTML 文档提取失败',
+  html_validation_failed: '镜头 HTML 校验失败',
   timeline_duration_unreasonable: '时间轴时长异常',
   render_failed: '镜头渲染失败',
   compose_failed: '成片合成失败',

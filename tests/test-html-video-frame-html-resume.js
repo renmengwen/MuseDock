@@ -916,8 +916,8 @@ async function main() {
       assert.equal(calls[0].node.id, 'scene_03');
       assert.equal(calls[0].attempt, 1);
       assert.deepEqual(calls[0].modelOptions, {
-        requestTimeoutMs: 90000,
-        maxRetries: 0,
+        requestTimeoutMs: 180000,
+        maxRetries: 1,
         audit: {
           agent: 'FrameHtmlAgent',
           stage: 'frame_html',
@@ -930,8 +930,8 @@ async function main() {
       assert.equal(calls[1].node.id, 'scene_03');
       assert.equal(calls[1].attempt, 2);
       assert.deepEqual(calls[1].modelOptions, {
-        requestTimeoutMs: 90000,
-        maxRetries: 0,
+        requestTimeoutMs: 180000,
+        maxRetries: 1,
         stream: false,
         audit: {
           agent: 'FrameHtmlAgent',
@@ -963,6 +963,91 @@ async function main() {
       assert.match(fallbackHtml, /data-text-key="headline"/);
       assert.match(fallbackHtml, /data-text-key="subtitle"/);
       assert.match(fallbackHtml, /data-text-key="body"/);
+      assertDownstreamInvalidated(project);
+    }
+
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-mixed-fallback-'));
+      const workflowId = '202606260000000003_mixed_fallback';
+      const runId = 'run_mixed_fallback';
+      const { templateRegistry, projectDir } = await setupProject(rootDir, workflowId, runId, { downstreamDone: true });
+      const calls = [];
+      const failedHtml = [
+        '<!doctype html><html><head>',
+        '<meta name="viewport" content="width=1920,height=1080">',
+        '<style>html,body{width:1920px;height:1080px}</style>',
+        '</head><body><main>错误横屏 HTML</main></body></html>',
+      ].join('');
+      frameHtmlAgent.generateFrameHtml = async (args) => {
+        calls.push(args);
+        if (args.attempt === 1) {
+          return {
+            success: false,
+            message: '首版 HTML 未通过校验：HTML 画幅尺寸不符合目标 1080x1920；修复重试时模型返回空内容。',
+            failed_html: failedHtml,
+            diagnostics: [{
+              code: 'html_validation_failed',
+              stage: 'ai-frame-html',
+              sub_stage: 'frame_html',
+              frame_id: args.node.id,
+              user_message: '首版 HTML 未通过校验：HTML 画幅尺寸不符合目标 1080x1920；修复重试时模型返回空内容。',
+              retryable: true,
+              repair_action: 'retry_frame_html',
+              details: {
+                validation_code: 'frame_html_invalid',
+                retry_provider_missing_text: true,
+                failed_html: failedHtml,
+              },
+            }],
+          };
+        }
+        return {
+          success: false,
+          message: '返回结果缺少文本内容。',
+          diagnostics: [{
+            code: 'provider_missing_text',
+            stage: 'ai-frame-html',
+            sub_stage: 'frame_html',
+            frame_id: args.node.id,
+            user_message: '返回结果缺少文本内容。',
+            retryable: true,
+            repair_action: 'retry_frame_html',
+          }],
+        };
+      };
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        templateRegistry,
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              throw new Error('mixed fallback 不应重新生成 content graph。');
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+
+      assert.equal(result.success, true);
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0].attempt, 1);
+      assert.equal(calls[1].attempt, 2);
+      assert.equal(calls[1].shortPrompt, true);
+      const project = await projectStore.loadProject(projectDir);
+      const frame = project.generation_checkpoint.stages.frame_html.frames.scene_03;
+      assert.equal(frame.status, 'done');
+      assert.equal(frame.diagnostic_code, 'fallback_frame_html_used');
+      const warning = result.diagnostics.find(item => item.code === 'fallback_frame_html_used');
+      assert.ok(warning?.details?.failed_html_path);
+      const failedHtmlPath = path.join(projectDir, warning.details.failed_html_path);
+      assert.match(await fs.readFile(failedHtmlPath, 'utf8'), /错误横屏 HTML/);
       assertDownstreamInvalidated(project);
     }
   } finally {

@@ -319,10 +319,13 @@ async function readProjectJson(projectDir) {
     },
   });
   assert.equal(parallelFrameResult.success, true);
-  assert.ok(maxActiveFrameHtmlCalls > 1, `expected frame HTML calls to overlap, got ${maxActiveFrameHtmlCalls}`);
+  assert.equal(maxActiveFrameHtmlCalls, 1, `expected frame HTML calls to run sequentially, got ${maxActiveFrameHtmlCalls}`);
   assert.doesNotMatch(parallelFramePrompts.scene_03, /SECOND_PREVIOUS_ONLY/);
   assert.doesNotMatch(parallelFramePrompts.scene_04, /SECOND_PREVIOUS_ONLY/);
-  assert.ok(parallelProgressEvents.some(event => event.type === 'html_video_frame_html_parallel_started'));
+  const batchFrameHtmlStarted = parallelProgressEvents.find(event => event.type === 'html_video_frame_html_parallel_started');
+  assert.ok(batchFrameHtmlStarted);
+  assert.match(batchFrameHtmlStarted.message, /逐帧生成/);
+  assert.equal(batchFrameHtmlStarted.data?.concurrency, 1);
   assert.ok(parallelProgressEvents
     .filter(event => event.type === 'html_video_frame_html_started')
     .every(event => Number.isFinite(Number(event.data?.completed))));
@@ -633,8 +636,9 @@ async function readProjectJson(projectDir) {
     },
   });
   assert.equal(failedHtmlResult.success, false);
-  const failedHtmlDiagnostic = failedHtmlResult.html_video_diagnostics.find(item => item.code === 'frame_html_invalid');
+  const failedHtmlDiagnostic = failedHtmlResult.html_video_diagnostics.find(item => item.code === 'html_validation_failed');
   assert.ok(failedHtmlDiagnostic?.details?.failed_html_path);
+  assert.equal(failedHtmlDiagnostic.details.validation_code, 'frame_html_invalid');
   const failedHtmlPath = path.join(failedHtmlResult.project_dir, failedHtmlDiagnostic.details.failed_html_path);
   const failedHtmlContent = await fs.readFile(failedHtmlPath, 'utf8');
   assert.match(failedHtmlContent, /\.stage/);

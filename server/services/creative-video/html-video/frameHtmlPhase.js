@@ -10,8 +10,8 @@ const { normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuild
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
 const { AGENTS, STAGES } = require('../agentStages');
 
-const FRAME_HTML_MODEL_OPTIONS = { requestTimeoutMs: 90000, maxRetries: 0 };
-const FRAME_HTML_CONCURRENCY = 3;
+const FRAME_HTML_MODEL_OPTIONS = { requestTimeoutMs: 180000, maxRetries: 1 };
+const FRAME_HTML_CONCURRENCY = 1;
 
 async function mapLimit(items, limit, mapper) {
   const list = Array.isArray(items) ? items : [];
@@ -54,12 +54,14 @@ async function writeFailedFrameHtml(projectDir, sceneId, html) {
 }
 
 function isFrameProviderMissingText(result = {}) {
-  const diagnosticCode = firstExplicitDiagnosticCode(result.diagnostics);
+  const diagnostics = Array.isArray(result.diagnostics) ? result.diagnostics : [];
+  if (diagnostics.some(item => item?.details?.retry_provider_missing_text === true)) return true;
+  const diagnosticCode = firstExplicitDiagnosticCode(diagnostics);
   if (diagnosticCode) return diagnosticCode === 'provider_missing_text';
   return isProviderMissingText(result.message);
 }
 
-function frameFallbackDiagnostic(frameId) {
+function frameFallbackDiagnostic(frameId, details = {}) {
   return createDiagnostic({
     code: 'fallback_frame_html_used',
     stage: 'ai-frame-html',
@@ -69,6 +71,7 @@ function frameFallbackDiagnostic(frameId) {
     fallback_allowed: true,
     retryable: false,
     user_message: '当前帧 AI 生成连续失败，已使用基础 HTML 兜底。',
+    details,
   });
 }
 
@@ -106,20 +109,23 @@ async function runFrameHtmlPhase(ctx) {
   const frameResults = [];
   const frameJobs = [];
   let completedFrameHtmlCount = 0;
+  const frameHtmlRunsInParallel = FRAME_HTML_CONCURRENCY > 1;
   const generateFrameJob = async job => {
     const { index, node, sceneId, scene, styleReferenceHtml } = job;
     await report(onProgress, {
       type: 'html_video_frame_html_started',
       stage: 'project',
       sub_stage: 'frame_html',
-      message: `正在并发生成第 ${index + 1}/${nodes.length} 帧 HTML...`,
+      message: frameHtmlRunsInParallel
+        ? `正在并发生成第 ${index + 1}/${nodes.length} 帧 HTML...`
+        : `正在逐帧生成第 ${index + 1}/${nodes.length} 帧 HTML...`,
       frame_id: node.id,
       data: {
         frame_id: node.id,
         index,
         total: nodes.length,
         completed: completedFrameHtmlCount,
-        parallel: true,
+        parallel: frameHtmlRunsInParallel,
         concurrency: FRAME_HTML_CONCURRENCY,
       },
     });
@@ -150,6 +156,8 @@ async function runFrameHtmlPhase(ctx) {
       previousFrameHtml: '',
     });
     if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
+      const previousFailedHtml = htmlResult.failed_html;
+      const previousDiagnostics = Array.isArray(htmlResult.diagnostics) ? htmlResult.diagnostics : [];
       htmlResult = await frameHtmlAgent.generateFrameHtml({
         model,
         frameId: node.id || sceneId,
@@ -179,7 +187,14 @@ async function runFrameHtmlPhase(ctx) {
         previousFrameHtml: '',
       });
       if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
-        const warning = frameFallbackDiagnostic(node.id || sceneId);
+        const failedHtmlPath = await writeFailedFrameHtml(projectDir, sceneId, htmlResult.failed_html || previousFailedHtml);
+        const warning = frameFallbackDiagnostic(node.id || sceneId, {
+          ...(failedHtmlPath ? { failed_html_path: failedHtmlPath } : {}),
+          diagnostics: [
+            ...previousDiagnostics.map(item => item?.user_message || item?.message || item?.code).filter(Boolean),
+            ...(Array.isArray(htmlResult.diagnostics) ? htmlResult.diagnostics : []).map(item => item?.user_message || item?.message || item?.code).filter(Boolean),
+          ].slice(0, 6),
+        });
         diagnostics.push(warning);
         htmlResult = {
           success: true,
@@ -251,7 +266,9 @@ async function runFrameHtmlPhase(ctx) {
       type: 'html_video_frame_html_parallel_started',
       stage: 'project',
       sub_stage: 'frame_html',
-      message: `正在并发生成 ${frameJobs.length} 帧 HTML，最多同时生成 ${FRAME_HTML_CONCURRENCY} 帧。`,
+      message: frameHtmlRunsInParallel
+        ? `正在并发生成 ${frameJobs.length} 帧 HTML，最多同时生成 ${FRAME_HTML_CONCURRENCY} 帧。`
+        : `正在逐帧生成 ${frameJobs.length} 帧 HTML。`,
       data: {
         total: nodes.length,
         completed: completedFrameHtmlCount,
@@ -413,7 +430,7 @@ async function runFrameHtmlPhase(ctx) {
         index,
         total: nodes.length,
         completed: completedFrameHtmlCount,
-        parallel: frameJobs.length > 1,
+        parallel: frameJobs.length > 1 && frameHtmlRunsInParallel,
         concurrency: frameJobs.length > 1 ? FRAME_HTML_CONCURRENCY : 1,
       },
     });
