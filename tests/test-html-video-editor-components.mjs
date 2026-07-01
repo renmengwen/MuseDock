@@ -9,7 +9,6 @@ const editor = fs.readFileSync('frontend-react/src/components/creative-video-edi
 
 const componentPaths = [
   'frontend-react/src/components/creative-video-editor/ProjectStatusBar.jsx',
-  'frontend-react/src/components/creative-video-editor/TemplateInputsPanel.jsx',
   'frontend-react/src/components/creative-video-editor/FrameInputsPanel.jsx',
   'frontend-react/src/components/creative-video-editor/NarrationPanel.jsx',
   'frontend-react/src/components/creative-video-editor/CaptionsPanel.jsx',
@@ -169,13 +168,6 @@ assert.ok(editor.includes('HtmlVideoQualityPanel'), 'HtmlVideoProjectEditor shou
 assert.ok(editor.includes('HtmlVideoAiEditPanel'), 'HtmlVideoProjectEditor should compose AI edit panel');
 assert.doesNotMatch(editor, /ReservedCapabilitiesPanel/, 'reserved panel should remain hidden');
 
-const templateInputs = fs.readFileSync('frontend-react/src/components/creative-video-editor/TemplateInputsPanel.jsx', 'utf-8');
-for (const inputType of ['string', 'number', 'boolean', 'enum', 'array']) {
-  assert.ok(templateInputs.includes(inputType), `TemplateInputsPanel should render ${inputType} fields`);
-}
-assert.match(templateInputs, /schema\?\.properties/, 'TemplateInputsPanel should read schema.properties');
-assert.ok(templateInputs.includes('当前模板未声明可编辑字段'), 'TemplateInputsPanel should show Chinese empty schema state');
-
 const naturalEdit = fs.readFileSync('frontend-react/src/components/creative-video-editor/NaturalLanguageEditBox.jsx', 'utf-8');
 assert.ok(naturalEdit.includes('正在解析编辑意图'), 'natural language edit should show loading text');
 assert.ok(naturalEdit.includes('编辑已应用，需要重新渲染'), 'natural language edit should show success text');
@@ -270,7 +262,8 @@ assert.ok(hook.includes('resolveSavedDraftId'), 'hook should resolve the saved d
 assert.ok(hook.includes('保存修改失败'), 'hook should expose a combined save-and-accept failure message');
 
 const canvasEditor = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoCanvasEditor.jsx', 'utf-8');
-assert.ok(canvasEditor.includes('保存修改'), 'canvas should expose a single 保存修改 action');
+const inspector = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoElementInspector.jsx', 'utf-8');
+assert.ok(inspector.includes('保存修改'), 'inspector should expose 保存修改 for canvas edits');
 assert.ok(canvasEditor.includes('saveAndAcceptFrameEdit'), 'canvas 保存修改 should call saveAndAcceptFrameEdit');
 assert.doesNotMatch(canvasEditor, /保存为草稿/, 'canvas should no longer expose separate 保存为草稿');
 assert.doesNotMatch(canvasEditor, /onRenderPreview=\{\(\) => \{\}\}/, 'canvas should not wire dead preview actions');

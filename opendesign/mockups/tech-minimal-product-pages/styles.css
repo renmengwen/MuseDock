@@ -35,7 +35,7 @@ button {
   padding: 0 var(--space-6);
   color: #fff;
   border-bottom: 0;
-  background: linear-gradient(135deg, #fe2c55, #25f4ee);
+  background: #111827;
 }
 
 .brand {

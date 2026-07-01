@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MuseDock Console Redesign Demo</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="MuseDock 导航">
+      <div class="brand">
+        <div class="brand-mark">MD</div>
+        <div>
+          <strong>MuseDock</strong>
+          <span>本地视频生产控制台</span>
+        </div>
+      </div>
+
+      <button class="new-task" type="button">新建创作</button>
+
+      <nav class="primary-nav" aria-label="页面">
+        <button class="nav-item active" type="button" data-view="workspace">
+          <span class="nav-glyph"></span>
+          <span>创作台</span>
+          <small>输入与任务</small>
+        </button>
+        <button class="nav-item" type="button" data-view="detail">
+          <span class="nav-glyph"></span>
+          <span>任务详情</span>
+          <small>进度与产物</small>
+        </button>
+        <button class="nav-item" type="button" data-view="editor">
+          <span class="nav-glyph"></span>
+          <span>二次编辑</span>
+          <small>画布与导出</small>
+        </button>
+      </nav>
+
+      <section class="task-list" aria-label="最近任务">
+        <div class="section-label">最近任务</div>
+        <button class="task-row selected" type="button">
+          <span class="task-state running"></span>
+          <span>
+            <strong>OpenMontage 产品介绍</strong>
+            <small>正在二次编辑 · 12 帧</small>
+          </span>
+        </button>
+        <button class="task-row" type="button">
+          <span class="task-state done"></span>
+          <span>
+            <strong>GitHub 项目解读</strong>
+            <small>已导出 · 00:42</small>
+          </span>
+        </button>
+        <button class="task-row" type="button">
+          <span class="task-state idle"></span>
+          <span>
+            <strong>公众号文章复述</strong>
+            <small>等待素材 · 竖屏</small>
+          </span>
+        </button>
+      </section>
+
+      <div class="sidebar-footer">
+        <button class="nav-item settings-entry" type="button" data-view="settings">
+          <span class="nav-glyph"></span>
+          <span>设置</span>
+          <small>模型、默认值、本地状态</small>
+        </button>
+      </div>
+    </aside>
+
+    <main class="main-stage">
+      <section class="view active" id="workspace" aria-label="创作台">
+        <div class="home-center">
+          <header class="home-title">
+            <span class="eyebrow">WORKSPACE</span>
+            <h1>今天要生成什么视频？</h1>
+            <p>粘贴链接、输入选题或整理素材，MuseDock 会把它拆成可检查、可编辑、可重新导出的本地工程。</p>
+          </header>
+          <section class="composer-panel home-composer">
+            <div class="panel-title">
+              <h2>创建视频任务</h2>
+              <span class="mono">本地队列 3 · qwen-plus</span>
+            </div>
+            <textarea aria-label="创作输入">https://github.com/calesthio/OpenMontage
+
+做一个 45 秒产品介绍短视频，强调本地工作流、HTML 视频工程和可编辑成片。</textarea>
+            <div class="composer-actions">
+              <div class="segmented">
+                <button class="selected" type="button">自由输入</button>
+                <button type="button">链接解析</button>
+              </div>
+              <button class="primary dark" type="button">开始生成</button>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="detail" aria-label="任务详情">
+        <header class="page-head">
+          <div>
+            <span class="eyebrow">TASK DETAIL</span>
+            <h1>OpenMontage 产品介绍</h1>
+          </div>
+          <div class="head-actions">
+            <button type="button">刷新</button>
+            <button class="primary dark" type="button">继续编辑</button>
+          </div>
+        </header>
+
+        <section class="task-summary">
+          <div>
+            <span class="state-pill">正在编辑</span>
+            <strong>当前停在 html-video 工程，可进入画布微调或重新导出。</strong>
+          </div>
+          <span class="mono">12 frames · 00:45 · 16:9</span>
+        </section>
+
+        <div class="detail-grid">
+          <section class="timeline-panel">
+            <div class="panel-title">
+              <h2>生产链路</h2>
+              <span class="mono">workflow_20260701_2148</span>
+            </div>
+            <div class="pipeline">
+              <div class="step done"><span></span><strong>素材</strong><small>完成</small></div>
+              <div class="step done"><span></span><strong>脚本</strong><small>完成</small></div>
+              <div class="step done"><span></span><strong>HTML</strong><small>完成</small></div>
+              <div class="step current"><span></span><strong>编辑</strong><small>等待确认</small></div>
+              <div class="step"><span></span><strong>导出</strong><small>未开始</small></div>
+            </div>
+          </section>
+
+          <section class="progress-panel">
+            <div class="panel-title">
+              <h2>进度事件</h2>
+              <span>最近 3 条</span>
+            </div>
+            <ol class="mini-log">
+              <li><span></span>布局检查通过，未发现遮挡。</li>
+              <li><span></span>帧 HTML 已接受草稿。</li>
+              <li><span></span>等待用户导出成片。</li>
+            </ol>
+          </section>
+
+          <section class="preview-panel">
+            <div class="video-preview">
+              <div class="video-grid"></div>
+              <div class="video-label">
+                <strong>frame_06</strong>
+                <span>00:21 - 00:27</span>
+              </div>
+            </div>
+            <div class="artifact-list">
+              <button type="button">查看帧 HTML</button>
+              <button type="button">布局检查</button>
+              <button type="button">导出记录</button>
+            </div>
+          </section>
+
+          <section class="recovery-panel">
+            <div class="panel-title">
+              <h2>恢复建议</h2>
+              <span>无阻塞</span>
+            </div>
+            <p>当前任务没有失败阶段。若画面调整后不满意，可以从草稿记录恢复上一版 HTML。</p>
+            <button type="button">查看草稿</button>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="editor" aria-label="二次编辑">
+        <header class="editor-head">
+          <div>
+            <span class="eyebrow">EDITOR</span>
+            <h1>二次编辑 · frame_06</h1>
+          </div>
+          <div class="head-actions">
+            <button type="button" data-view="settings">设置</button>
+            <button type="button">返回任务</button>
+            <button class="primary dark" type="button">导出成片</button>
+          </div>
+        </header>
+
+        <div class="editor-shell">
+          <div class="editor-toolbar">
+            <button type="button">重新加载</button>
+            <button type="button">源码</button>
+            <button type="button">草稿</button>
+            <button type="button">布局检查</button>
+            <button type="button">AI 修改</button>
+          </div>
+          <div class="editor-layout">
+            <section class="canvas-area">
+              <div class="canvas-status">已停在镜头可编辑帧，可开始编辑。</div>
+              <div class="canvas-frame">
+                <div class="mock-video">
+                  <span class="video-node node-a">OPENMONTAGE</span>
+                  <span class="video-node node-b selected-node">你的 AI 助手，不只会写代码</span>
+                  <span class="video-node node-c">VIDEO PRODUCTION ENTRY</span>
+                </div>
+              </div>
+              <div class="frame-strip">
+                <button type="button">01<br><span>开场</span></button>
+                <button type="button">02<br><span>问题</span></button>
+                <button class="active" type="button">06<br><span>核心</span></button>
+                <button type="button">07<br><span>结果</span></button>
+              </div>
+            </section>
+
+            <aside class="inspector">
+              <h2>当前元素</h2>
+              <dl>
+                <div><dt>标识</dt><dd>headline</dd></div>
+                <div><dt>位置</dt><dd>36 / 101</dd></div>
+                <div><dt>尺寸</dt><dd>246 × 51</dd></div>
+              </dl>
+              <label>
+                文案
+                <textarea>你的 AI 助手，不只会写代码</textarea>
+              </label>
+              <div class="inspector-actions">
+                <button class="danger" type="button">删除元素</button>
+                <button type="button">重置位置</button>
+                <button class="primary dark" type="button">保存修改</button>
+              </div>
+              <button class="field-dialog" type="button">帧字段 / 旁白 / 字幕</button>
+            </aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="settings" aria-label="设置中心">
+        <header class="page-head">
+          <div>
+            <span class="eyebrow">SETTINGS</span>
+            <h1>设置中心</h1>
+          </div>
+          <button type="button" data-view="workspace">返回创作台</button>
+        </header>
+
+        <div class="settings-grid">
+          <nav class="settings-nav" aria-label="设置分类">
+            <button class="active" type="button">总览</button>
+            <button type="button">创作默认值</button>
+            <button type="button">模型配置</button>
+            <button type="button">本地系统</button>
+          </nav>
+          <section class="settings-panel">
+            <div class="panel-title">
+              <h2>总览</h2>
+              <span>已启用 4 项</span>
+            </div>
+            <div class="settings-cards">
+              <div><strong>文本模型</strong><span>qwen-plus</span></div>
+              <div><strong>TTS</strong><span>edge-local</span></div>
+              <div><strong>默认比例</strong><span>16:9</span></div>
+              <div><strong>质检</strong><span>已启用</span></div>
+            </div>
+
+            <div class="settings-section">
+              <div class="panel-title">
+                <h2>模型供应商</h2>
+                <span>列表只放关键状态，详情进弹框</span>
+              </div>
+              <div class="provider-list">
+                <div class="provider-row">
+                  <div>
+                    <strong>通义千问</strong>
+                    <span>文本 · 已启用 · qwen-plus</span>
+                  </div>
+                  <button type="button" data-modal="provider-modal">查看 / 编辑</button>
+                </div>
+                <div class="provider-row">
+                  <div>
+                    <strong>OpenAI</strong>
+                    <span>文本 · 未启用 · gpt-4.1-mini</span>
+                  </div>
+                  <button type="button" data-modal="provider-modal">查看 / 编辑</button>
+                </div>
+                <div class="provider-row">
+                  <div>
+                    <strong>Edge TTS</strong>
+                    <span>语音 · 已启用 · zh-CN-XiaoxiaoNeural</span>
+                  </div>
+                  <button type="button" data-modal="voice-modal">查看 / 编辑</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-section compact-settings">
+              <div>
+                <strong>创作默认值</strong>
+                <span>16:9 · 45 秒 · 自动模板 · 生成字幕</span>
+              </div>
+              <button type="button" data-modal="defaults-modal">编辑默认值</button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <header>
+        <div>
+          <span class="eyebrow">MODEL PROVIDER</span>
+          <h2 id="modal-title">通义千问</h2>
+        </div>
+        <button class="modal-close" type="button" aria-label="关闭">×</button>
+      </header>
+      <div class="modal-body">
+        <label>供应商名称<input value="通义千问"></label>
+        <label>API Key<input value="已保存 sk-••••••••••••"></label>
+        <label>文本模型<input value="qwen-plus"></label>
+        <label>请求超时<input value="120000 ms"></label>
+        <label class="wide">备注<textarea>用于脚本、分镜、HTML 帧生成。供应商列表只保留状态，复杂配置放到这里。</textarea></label>
+      </div>
+      <footer>
+        <button type="button" class="modal-close">取消</button>
+        <button class="primary dark" type="button">保存配置</button>
+      </footer>
+    </section>
+  </div>
+
+  <script src="./script.js"></script>
+</body>
+</html>

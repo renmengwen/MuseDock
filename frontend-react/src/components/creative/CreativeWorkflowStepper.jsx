@@ -4,7 +4,7 @@ import { STATUS_TEXT, getStepState, normalizeWorkflowStages } from './creativeDi
 
 const DOT_CLASS = {
   done: 'border-[#16a34a] bg-[#16a34a] text-white',
-  active: 'border-[#fe2c55] bg-white text-[#fe2c55] shadow-[0_0_0_5px_rgba(254,44,85,.10)]',
+  active: 'border-[#111827] bg-white text-[#111827] shadow-[0_0_0_5px_rgba(17,24,39,.08)]',
   failed: 'border-red-600 bg-red-50 text-red-600',
   waiting: 'border-[#d7dce3] bg-white text-[#8a93a2]',
   '': 'border-[#d7dce3] bg-white text-[#8a93a2]',
@@ -20,7 +20,7 @@ const CONNECTOR_CLASS = {
 
 const STATUS_CLASS = {
   done: 'text-[#15803d]',
-  active: 'text-[#fe2c55]',
+  active: 'text-[#111827]',
   failed: 'text-red-700',
   waiting: 'text-[#8a93a2]',
   '': 'text-[#8a93a2]',

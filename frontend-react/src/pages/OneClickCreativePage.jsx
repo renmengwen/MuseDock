@@ -960,7 +960,7 @@ export function OneClickCreativePage() {
   }, [stopTaskStream]);
 
   return (
-    <main className={`grid min-h-[calc(100vh-64px)] bg-white transition-[grid-template-columns] duration-200 ${sidebarCollapsed ? 'grid-cols-[76px_minmax(0,1fr)]' : 'grid-cols-[260px_minmax(0,1fr)]'}`}>
+    <main className={`grid min-h-screen bg-white transition-[grid-template-columns] duration-200 ${sidebarCollapsed ? 'grid-cols-[76px_minmax(0,1fr)]' : 'grid-cols-[260px_minmax(0,1fr)]'}`}>
       <CreativeSidebar
         tasks={sidebarTasks}
         selectedWorkflowId={selectedWorkflowId}
@@ -973,8 +973,8 @@ export function OneClickCreativePage() {
 
       <section className="min-w-0 overflow-auto bg-white">
         <div className={selectedWorkflowId
-          ? 'mx-auto grid min-h-[calc(100vh-64px)] w-full max-w-[1120px] content-start justify-stretch gap-[22px] px-8 py-[42px]'
-          : 'mx-auto grid min-h-[calc(100vh-64px)] w-full max-w-[920px] content-center justify-items-center gap-[22px] px-8 py-14'}
+          ? 'mx-auto grid min-h-screen w-full max-w-[1120px] content-start justify-stretch gap-[22px] px-8 py-[42px]'
+          : 'mx-auto grid min-h-screen w-full max-w-[920px] content-center justify-items-center gap-[22px] px-8 py-14'}
         >
           {!isDetailRoute && (
             <>

@@ -71,7 +71,7 @@ export function SettingsOverview({ appSettings, modelSettings, systemHealth, onN
             key={card.title}
             type="button"
             onClick={() => onNavigate(card.action)}
-            className="min-w-0 rounded-lg border border-[#e7e9ee] bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-[#ffd6df] hover:shadow-[0_12px_28px_rgba(15,23,42,.08)]"
+            className="min-w-0 rounded-lg border border-[#e7e9ee] bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-[#cbd5e1] hover:shadow-[0_12px_28px_rgba(15,23,42,.08)]"
           >
             <span className="mb-2 block text-xs text-[#69717e]">{card.title}</span>
             <strong className="block text-base text-[#30343b]">{card.value}</strong>

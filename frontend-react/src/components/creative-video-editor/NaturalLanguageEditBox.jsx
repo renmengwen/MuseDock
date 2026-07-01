@@ -30,7 +30,7 @@ export function NaturalLanguageEditBox({ disabled, editing, onSubmit }) {
         onChange={event => setInstruction(event.target.value)}
       />
       <button
-        className="min-h-9 rounded-md bg-[#fe2c55] px-3 text-xs font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55"
+        className="min-h-9 rounded-md border border-slate-100 bg-slate-100 px-3 text-xs font-bold text-slate-950 transition hover:border-white hover:bg-white disabled:cursor-not-allowed disabled:opacity-55"
         type="submit"
         disabled={disabled || !instruction.trim()}
       >

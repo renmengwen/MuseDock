@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Loader2 } from 'lucide-react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Loader2, Settings2 } from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { CreativeVideoEditor } from '../components/creative-video-editor/CreativeVideoEditor.jsx';
 
@@ -95,24 +95,33 @@ export function CreativeEditorPage() {
   const title = getEditorWorkflowTitle(workflow, workflowId);
 
   return (
-    <main className="min-h-[calc(100vh-64px)] bg-[#f6f7f9] px-6 py-4 max-[720px]:px-4">
+    <main className="min-h-screen bg-[#f6f7f9] px-6 py-4 max-[720px]:px-4">
       <header className="mb-3 flex items-center justify-between gap-4 max-[720px]:flex-col max-[720px]:items-start">
         <div>
           <span className="text-[13px] text-[#69717e]">视频编辑器</span>
           <h1 className="m-0 mt-0.5 text-lg font-bold text-[#20242a]">{title}</h1>
         </div>
-        <button
-          type="button"
-          className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#bfdbfe] hover:bg-[#eef4ff] hover:text-[#2563eb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25f4ee]"
-          onClick={backToCreative}
-        >
-          <ArrowLeft size={16} />
-          返回任务
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25f4ee]"
+            to="/settings"
+          >
+            <Settings2 size={16} />
+            设置
+          </Link>
+          <button
+            type="button"
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25f4ee]"
+            onClick={backToCreative}
+          >
+            <ArrowLeft size={16} />
+            返回任务
+          </button>
+        </div>
       </header>
 
       {loading && (
-        <div className="mb-4 inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] font-semibold text-blue-700" role="status" aria-live="polite">
+        <div className="mb-4 inline-flex items-center gap-2 rounded-lg border border-[#d9dde5] bg-[#f8fafc] px-4 py-3 text-[13px] font-semibold text-[#30343b]" role="status" aria-live="polite">
           <Loader2 size={16} className="spinIcon" />
           正在加载编辑任务...
         </div>

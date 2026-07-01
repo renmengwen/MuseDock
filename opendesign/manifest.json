@@ -1,51 +1,60 @@
 {
-    "generated":  "2026-06-28T22:25:40.3374103+08:00",
-    "sections":  [
-                     {
-                         "id":  "mockups",
-                         "label":  "Mockups",
-                         "groups":  [
-                                        {
-                                            "slug":  "tech-minimal-product-pages",
-                                            "files":  [
-                                                          {
-                                                              "label":  "index.html",
-                                                              "path":  "mockups/tech-minimal-product-pages/index.html"
-                                                          }
-                                                      ]
-                                        }
-                                    ]
-                     },
-                     {
-                         "id":  "design-systems",
-                         "label":  "Design Systems",
-                         "groups":  [
-                                        {
-                                            "slug":  "tech-minimal-product",
-                                            "files":  [
-                                                          {
-                                                              "label":  "style-notes.md",
-                                                              "path":  "design-systems/tech-minimal-product/brand/style-notes.md"
-                                                          },
-                                                          {
-                                                              "label":  "voice-and-tone.md",
-                                                              "path":  "design-systems/tech-minimal-product/brand/voice-and-tone.md"
-                                                          },
-                                                          {
-                                                              "label":  "README.md",
-                                                              "path":  "design-systems/tech-minimal-product/README.md"
-                                                          },
-                                                          {
-                                                              "label":  "SKILL.md",
-                                                              "path":  "design-systems/tech-minimal-product/SKILL.md"
-                                                          },
-                                                          {
-                                                              "label":  "colors_and_type.css",
-                                                              "path":  "design-systems/tech-minimal-product/tokens/colors_and_type.css"
-                                                          }
-                                                      ]
-                                        }
-                                    ]
-                     }
-                 ]
+  "generated": "2026-07-02T03:22:48.9153750+08:00",
+  "sections": [
+    {
+      "id": "mockups",
+      "label": "Mockups",
+      "groups": [
+        {
+          "slug": "musedock-console-redesign",
+          "files": [
+            {
+              "label": "index.html",
+              "path": "mockups/musedock-console-redesign/index.html"
+            }
+          ]
+        },
+        {
+          "slug": "tech-minimal-product-pages",
+          "files": [
+            {
+              "label": "index.html",
+              "path": "mockups/tech-minimal-product-pages/index.html"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "design-systems",
+      "label": "Design Systems",
+      "groups": [
+        {
+          "slug": "tech-minimal-product",
+          "files": [
+            {
+              "label": "README.md",
+              "path": "design-systems/tech-minimal-product/README.md"
+            },
+            {
+              "label": "SKILL.md",
+              "path": "design-systems/tech-minimal-product/SKILL.md"
+            },
+            {
+              "label": "style-notes.md",
+              "path": "design-systems/tech-minimal-product/brand/style-notes.md"
+            },
+            {
+              "label": "voice-and-tone.md",
+              "path": "design-systems/tech-minimal-product/brand/voice-and-tone.md"
+            },
+            {
+              "label": "colors_and_type.css",
+              "path": "design-systems/tech-minimal-product/tokens/colors_and_type.css"
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }

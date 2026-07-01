@@ -16,7 +16,7 @@ export function GlobalModelSelector({ modelTypes, modelTypeInfo, providerList, a
             <label className="grid gap-1.5 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3" key={type}>
               <span className="text-xs font-semibold text-[#5f6876]">{info.title}</span>
               <select
-                className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#fe2c55] focus:ring-2 focus:ring-[#fe2c55]/15"
+                className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15"
                 value={value}
                 onChange={event => {
                   const val = event.target.value;

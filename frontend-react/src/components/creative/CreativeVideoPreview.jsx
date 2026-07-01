@@ -7,7 +7,7 @@ export function CreativeVideoPreview({ videoUrl, onEdit, disabled, title }) {
         当前浏览器不支持直接播放视频。
       </video>
       <div className="flex items-center justify-end border-t border-[#edf0f4] p-3">
-        <Button className="bg-[#fe2c55] text-white hover:bg-[#f2214b]" type="button" onClick={onEdit} disabled={disabled} title={title}>
+        <Button className="bg-[#111827] text-white hover:bg-[#020617]" type="button" onClick={onEdit} disabled={disabled} title={title}>
           继续编辑
         </Button>
       </div>

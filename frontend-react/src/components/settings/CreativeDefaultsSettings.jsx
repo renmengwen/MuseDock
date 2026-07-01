@@ -137,7 +137,7 @@ export function CreativeDefaultsSettings({
         </div>
         <button
           type="button"
-          className="min-h-9 rounded-lg bg-[#fe2c55] px-4 text-sm font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55"
+          className="min-h-9 rounded-lg bg-[#111827] px-4 text-sm font-bold text-white transition hover:bg-[#020617] disabled:cursor-not-allowed disabled:opacity-55"
           disabled={disabled || saving || !appSettings}
           onClick={handleSave}
         >
@@ -152,7 +152,7 @@ export function CreativeDefaultsSettings({
             value={creativeDefaults.aspectRatio}
             disabled={disabled}
             onChange={event => updateCreativeDefaults({ aspectRatio: event.target.value })}
-            className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#fe2c55] focus:ring-2 focus:ring-[#fe2c55]/15 disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {ASPECT_RATIOS.map(aspectRatio => (
               <option key={aspectRatio} value={aspectRatio}>{aspectRatio}</option>
@@ -169,7 +169,7 @@ export function CreativeDefaultsSettings({
             step="1"
             value={creativeDefaults.targetDurationSec}
             disabled={disabled}
-            className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#fe2c55] focus:ring-2 focus:ring-[#fe2c55]/15 disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:cursor-not-allowed disabled:opacity-60"
             onChange={event => updateCreativeDefaults({
               targetDurationSec: event.target.value === '' ? '' : Number(event.target.value),
             })}
@@ -196,7 +196,7 @@ export function CreativeDefaultsSettings({
                   value={value}
                   disabled={disabled}
                   onChange={event => updateTemplate(aspectRatio, event.target.value)}
-                  className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#fe2c55] focus:ring-2 focus:ring-[#fe2c55]/15 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <option value="">不指定模板</option>
                   {aspectTemplates.map(template => (

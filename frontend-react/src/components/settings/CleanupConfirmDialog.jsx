@@ -21,10 +21,10 @@ export function CleanupConfirmDialog({ target, open, loading, estimate, onCancel
         <p className="mt-2 text-sm text-[#4b5563]">此操作不可恢复。</p>
         {estimateText ? <p className="mt-2 text-sm text-[#4b5563]">预计影响：{estimateText}</p> : null}
         <div className="mt-[18px] flex justify-center gap-2">
-          <button className="min-h-9 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#bfdbfe] hover:bg-[#eef4ff] hover:text-[#2563eb] disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={loading} onClick={onCancel}>
+          <button className="min-h-9 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827] disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={loading} onClick={onCancel}>
             取消
           </button>
-          <button className="min-h-9 rounded-lg bg-[#fe2c55] px-4 text-sm font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={loading} onClick={onConfirm}>
+          <button className="min-h-9 rounded-lg bg-red-600 px-4 text-sm font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={loading} onClick={onConfirm}>
             {loading ? `正在清理${label}...` : `确认清理${label}`}
           </button>
         </div>

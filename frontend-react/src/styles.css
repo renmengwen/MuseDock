@@ -10,19 +10,19 @@
     --card-foreground: 220 12% 19%;
     --popover: 0 0% 100%;
     --popover-foreground: 220 12% 19%;
-    --primary: 347 99% 58%;
+    --primary: 222 47% 11%;
     --primary-foreground: 0 0% 100%;
     --secondary: 220 16% 95%;
     --secondary-foreground: 220 12% 21%;
     --muted: 210 25% 98%;
     --muted-foreground: 219 10% 42%;
-    --accent: 347 100% 98%;
-    --accent-foreground: 347 99% 58%;
+    --accent: 220 16% 95%;
+    --accent-foreground: 220 12% 19%;
     --destructive: 0 68% 47%;
     --destructive-foreground: 0 0% 100%;
     --border: 220 18% 90%;
     --input: 220 18% 90%;
-    --ring: 347 99% 58%;
+    --ring: 178 91% 55%;
     --radius: 8px;
   }
 }
@@ -34,7 +34,7 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: linear-gradient(135deg, #fe2c55, #25f4ee);
+  background: #111827;
   color: #fff;
   padding: 20px 32px;
 }
@@ -45,10 +45,10 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .tabs a,
 .tabs button { display: inline-flex; align-items: center; min-height: 46px; padding: 0 24px; color: #606774; border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: pointer; font: inherit; }
 .tabs a.active,
-.tabs button.active { color: #fe2c55; border-bottom-color: #fe2c55; font-weight: 600; }
+.tabs button.active { color: #111827; border-bottom-color: #111827; font-weight: 600; }
 .subTabs { display: flex; gap: 8px; margin-bottom: 18px; }
 .subTabs a { display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border: 1px solid #d9dde5; border-radius: 8px; color: #606774; background: #fff; }
-.subTabs a.active { color: #fe2c55; border-color: #fe2c55; background: #fff5f7; font-weight: 600; }
+.subTabs a.active { color: #111827; border-color: #111827; background: #f3f4f6; font-weight: 600; }
 .container { width: 100%; max-width: none; margin: 0; padding: 24px 32px; }
 .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
 .toolbar input { height: 40px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 12px; font-size: 14px; }
@@ -58,7 +58,7 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .countInput { width: 96px; }
 .modeSelect { height: 40px; min-width: 158px; border: 1px solid #d9dde5; border-radius: 8px; padding: 0 10px; background: #fff; color: #30343b; font-size: 14px; }
 .btn { border: 0; border-radius: 8px; height: 40px; padding: 0 18px; cursor: pointer; font-weight: 600; }
-.btn.primary { background: #fe2c55; color: #fff; }
+.btn.primary { background: #111827; color: #fff; }
 .btn.login { background: #ff9800; color: #fff; }
 .btn.secondary { background: #eef0f4; color: #30343b; }
 .btn.danger { background: #fde8e8; color: #c62828; }
@@ -70,12 +70,12 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .status.success { background: #e8f5e9; color: #2e7d32; }
 .status.error { background: #fde8e8; color: #c62828; }
 .status.info { background: #fff3e0; color: #e65100; }
-.pageLoading { padding: 10px 14px; margin-bottom: 16px; border: 1px solid #dbeafe; border-radius: 8px; background: #eff6ff; color: #1d4ed8; font-size: 13px; font-weight: 600; }
-.progressLoading { padding: 12px 14px; margin-bottom: 16px; border: 1px solid #dbeafe; border-radius: 8px; background: #eff6ff; color: #1d4ed8; }
+.pageLoading { padding: 10px 14px; margin-bottom: 16px; border: 1px solid #d9dde5; border-radius: 8px; background: #f8fafc; color: #30343b; font-size: 13px; font-weight: 600; }
+.progressLoading { padding: 12px 14px; margin-bottom: 16px; border: 1px solid #d9dde5; border-radius: 8px; background: #f8fafc; color: #30343b; }
 .progressHeader { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
 .progressHeader strong { font-size: 14px; }
 .progressTrack { width: 100%; height: 8px; overflow: hidden; border-radius: 999px; background: #dbeafe; }
-.progressFill { height: 100%; border-radius: inherit; background: #fe2c55; transition: width .35s ease; }
+.progressFill { height: 100%; border-radius: inherit; background: #111827; transition: width .35s ease; }
 .progressHint { margin-top: 8px; color: #315c9d; font-size: 12px; line-height: 1.5; }
 .legacyTable { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .legacyTable th, .legacyTable td { padding: 12px 14px; border-bottom: 1px solid #edf0f4; font-size: 13px; text-align: left; vertical-align: top; }
@@ -97,7 +97,7 @@ body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sa
 .statusPill.ok { background: #e8f5e9; color: #2e7d32; }
 .statusPill.pending { background: #fff3e0; color: #e65100; }
 .statusPill.error { background: #fde8e8; color: #c62828; }
-a { color: #fe2c55; text-decoration: none; }
+a { color: #30343b; text-decoration: none; }
 .empty { text-align: center; color: #969da8; padding: 64px 20px; }
 .empty.small { padding: 24px; }
 .modalOverlay { position: fixed; inset: 0; background: rgba(0,0,0,.48); display: flex; align-items: center; justify-content: center; z-index: 1000; }
@@ -143,8 +143,8 @@ a { color: #fe2c55; text-decoration: none; }
 .loadingSpinner {
   width: 34px;
   height: 34px;
-  border: 3px solid #ffd2dc;
-  border-top-color: #fe2c55;
+  border: 3px solid #e5e7eb;
+  border-top-color: #111827;
   border-radius: 50%;
   animation: spin .8s linear infinite;
 }
@@ -202,8 +202,8 @@ a { color: #fe2c55; text-decoration: none; }
 .agentPanel h3 { margin: 0 0 12px; font-size: 16px; color: #30343b; }
 .agentPanel h3:not(:first-child) { margin-top: 22px; }
 .agentTemplate { display: grid; gap: 10px; padding: 14px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
-.agentTemplate.active { border-color: #fe2c55; background: #fff5f7; box-shadow: 0 0 0 1px #fe2c55 inset; }
-.agentTemplate strong { color: #fe2c55; font-size: 15px; }
+.agentTemplate.active { border-color: #111827; background: #f3f4f6; box-shadow: 0 0 0 1px #111827 inset; }
+.agentTemplate strong { color: #111827; font-size: 15px; }
 .agentTemplate p { margin: 0; color: #69717e; font-size: 13px; line-height: 1.6; }
 .configSource { color: #69717e; font-size: 12px; font-weight: 700; }
 .agentOptionGroup { display: grid; gap: 8px; margin: 12px 0; padding: 12px; border: 1px solid #edf0f4; border-radius: 8px; background: #fafbfc; }
@@ -223,8 +223,8 @@ a { color: #fe2c55; text-decoration: none; }
 .agentStep small { grid-column: 1 / -1; color: #858d9a; font-size: 12px; line-height: 1.5; }
 .agentRunList { display: grid; gap: 8px; }
 .agentRunItem { display: grid; gap: 4px; width: 100%; padding: 10px 12px; border: 1px solid #edf0f4; border-radius: 8px; background: #fff; color: #30343b; text-align: left; cursor: pointer; }
-.agentRunItem:hover { border-color: #fe8aa1; background: #fff8fa; }
-.agentRunItem.active { border-color: #fe2c55; background: #fff5f7; box-shadow: 0 0 0 1px #fe2c55 inset; }
+.agentRunItem:hover { border-color: #d1d5db; background: #f9fafb; }
+.agentRunItem.active { border-color: #111827; background: #f3f4f6; box-shadow: 0 0 0 1px #111827 inset; }
 .agentRunItem strong { font-size: 13px; }
 .agentRunItem span { color: #69717e; font-size: 12px; }
 .runIssueBadge { display: inline-flex; width: fit-content; align-items: center; padding: 2px 6px; border-radius: 999px; background: #fff1f2; color: #c41f3e !important; font-size: 11px !important; font-weight: 700; }
@@ -234,8 +234,8 @@ a { color: #fe2c55; text-decoration: none; }
 .agentResultTitleRow span { min-width: 0; color: #858d9a; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agentResultTabs { position: sticky; top: -18px; z-index: 4; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 8px 0 10px; background: #fff; border-bottom: 1px solid #edf0f4; }
 .agentResultTab { min-width: 0; height: 32px; border: 1px solid #d9dde5; border-radius: 8px; background: #fff; color: #5f6876; font-size: 13px; font-weight: 700; cursor: pointer; }
-.agentResultTab:hover { border-color: #fe8aa1; color: #fe2c55; }
-.agentResultTab.active { border-color: #fe2c55; background: #fff5f7; color: #fe2c55; box-shadow: 0 0 0 1px #fe2c55 inset; }
+.agentResultTab:hover { border-color: #d1d5db; color: #111827; }
+.agentResultTab.active { border-color: #111827; background: #f3f4f6; color: #111827; box-shadow: 0 0 0 1px #111827 inset; }
 .agentRunMeta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; color: #69717e; font-size: 12px; }
 .agentResultSection { padding: 14px 0; border-top: 1px solid #edf0f4; }
 .agentResultTabs + .agentResultSection, .agentResultTabs + .agentResultSection + .agentResultSection { border-top: 0; }
@@ -298,7 +298,7 @@ a { color: #fe2c55; text-decoration: none; }
 .ttsCaptionItem span { color: #30343b; font-size: 13px; line-height: 1.6; word-break: break-word; }
 .mutedText { margin: 0; color: #858d9a; font-size: 13px; line-height: 1.6; }
 .settingsSummary { min-width: 92px; padding: 10px 14px; border: 1px solid #e7e9ee; border-radius: 8px; background: #fff; text-align: center; }
-.settingsSummary strong { display: block; font-size: 20px; color: #fe2c55; line-height: 1.1; }
+.settingsSummary strong { display: block; font-size: 20px; color: #111827; line-height: 1.1; }
 .settingsSummary span { color: #69717e; font-size: 12px; }
 .settingsActions { display: flex; gap: 10px; flex-wrap: wrap; }
 .modelConfigGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
@@ -311,9 +311,9 @@ a { color: #fe2c55; text-decoration: none; }
 .switchTrack { position: relative; display: inline-flex; width: 42px; height: 24px; flex: 0 0 42px; border-radius: 999px; background: #c8ced8; transition: background .18s ease; }
 .switchThumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.24); transition: transform .18s ease; }
 .switchText { min-width: 42px; color: #69717e; }
-.switchControl input:checked + .switchTrack { background: #fe2c55; }
+.switchControl input:checked + .switchTrack { background: #111827; }
 .switchControl input:checked + .switchTrack .switchThumb { transform: translateX(18px); }
-.switchControl input:checked ~ .switchText { color: #fe2c55; }
+.switchControl input:checked ~ .switchText { color: #111827; }
 .switchControl input:focus-visible + .switchTrack { outline: 2px solid #25f4ee; outline-offset: 2px; }
 .settingsFormGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .settingsFormGrid label { display: grid; gap: 6px; }
@@ -354,7 +354,7 @@ a { color: #fe2c55; text-decoration: none; }
 /* Settings: model config form (inside provider card) */
 .providerModelsGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .modelConfigForm { border: 1px solid #edf0f4; border-radius: 8px; padding: 12px; background: #fff; transition: border-color .15s; }
-.modelConfigForm.active { border-color: #fe2c55; }
+.modelConfigForm.active { border-color: #111827; }
 .modelConfigFormHeader { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .modelConfigFormTitle { font-size: 13px; font-weight: 600; color: #30343b; }
 .modelConfigFormInput { width: 100%; height: 34px; border: 1px solid #d9dde5; border-radius: 6px; padding: 0 8px; background: #fafbfc; font-size: 12px; color: #30343b; }
@@ -2296,9 +2296,9 @@ a { color: #fe2c55; text-decoration: none; }
 }
 
 .settingsCenterNav button.active {
-  border-color: #fe2c55;
-  background: #fff5f7;
-  color: #fe2c55;
+  border-color: #111827;
+  background: #f3f4f6;
+  color: #111827;
   font-weight: 700;
 }
 

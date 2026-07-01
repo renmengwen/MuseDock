@@ -44,16 +44,16 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
     || '正在获取最新进度...';
 
   return (
-    <section className="grid gap-3 rounded-lg border border-blue-100 bg-[#f8fbff] p-4" aria-label="当前进展">
+    <section className="grid gap-3 rounded-lg border border-[#e7e9ee] bg-[#f8fafc] p-4" aria-label="当前进展">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="m-0 text-[15px] font-bold leading-snug text-[#111827]">当前进展</h3>
           <p className="mt-1 text-[13px] leading-relaxed text-[#4b5563]">{workflow.status === 'done' ? '创作任务已完成。' : currentMessage}</p>
         </div>
-        <strong className="shrink-0 text-lg leading-tight text-[#fe2c55]">{progress}%</strong>
+        <strong className="shrink-0 text-lg leading-tight text-[#111827]">{progress}%</strong>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-[#e5e7eb]" aria-label={`总进度 ${progress}%`}>
-        <span className="block h-full rounded-full bg-[#fe2c55] transition-[width] duration-200" style={{ width: `${progress}%` }} />
+        <span className="block h-full rounded-full bg-[#111827] transition-[width] duration-200" style={{ width: `${progress}%` }} />
       </div>
       <dl className="m-0 grid grid-cols-3 gap-x-3 gap-y-2 max-[720px]:grid-cols-1">
         <div className="min-w-0 rounded-md border border-[#edf0f4] bg-white p-3">
@@ -71,12 +71,12 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
           </div>
         ) : null}
       </dl>
-      <button className="inline-flex w-fit items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] font-bold text-[#fe2c55] transition hover:text-[#d91f46]" type="button" onClick={() => setExpanded(value => !value)}>
+      <button className="inline-flex w-fit items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] font-bold text-[#30343b] transition hover:text-[#111827]" type="button" onClick={() => setExpanded(value => !value)}>
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span>{expanded ? '收起详细进度' : '展开详细进度'}</span>
       </button>
       {expanded ? (
-        <div className="grid gap-2 border-t border-blue-100 pt-2.5">
+        <div className="grid gap-2 border-t border-[#e7e9ee] pt-2.5">
           <dl className="m-0 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
             <div className="min-w-0">
               <dt className="mb-1 text-xs font-bold text-[#8a93a2]">阶段 ID</dt>

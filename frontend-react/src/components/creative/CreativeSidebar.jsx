@@ -1,4 +1,5 @@
-import { CirclePlus, FileText, PanelLeft, Search, Sparkles, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { CirclePlus, FileText, PanelLeft, Search, Settings2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { cn } from '@/lib/utils.js';
 import { STATUS_TEXT } from './creativeDisplay.js';
@@ -13,9 +14,9 @@ export function CreativeSidebar({
   onDeleteTask,
 }) {
   return sidebarCollapsed ? (
-    <aside className="bg-white pt-[18px] pl-[18px]" aria-label="已收起的创作任务栏">
+    <aside className="grid content-start gap-2 bg-white pt-[18px] pl-[18px]" aria-label="已收起的创作任务栏">
       <Button
-        className="size-[34px] rounded-lg bg-white text-[#1f2937] shadow-[0_8px_20px_rgba(15,23,42,.08)] transition hover:-translate-y-0.5 hover:bg-[#eef4ff] hover:text-[#2563eb] hover:shadow-[0_10px_24px_rgba(37,99,235,.14)]"
+        className="size-[34px] rounded-lg bg-white text-[#1f2937] shadow-[0_8px_20px_rgba(15,23,42,.08)] transition hover:bg-[#f3f4f6] hover:text-[#111827]"
         type="button"
         variant="ghost"
         size="icon"
@@ -25,16 +26,26 @@ export function CreativeSidebar({
       >
         <PanelLeft size={17} aria-hidden="true" />
       </Button>
+      <Link
+        className="inline-flex size-[34px] items-center justify-center rounded-lg bg-white text-[#4b5563] shadow-[0_8px_20px_rgba(15,23,42,.08)] transition hover:bg-[#f3f4f6] hover:text-[#111827]"
+        to="/settings"
+        aria-label="打开设置"
+      >
+        <Settings2 size={16} aria-hidden="true" />
+      </Link>
     </aside>
   ) : (
-    <aside className="grid min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-[18px] border-r border-[#eef1f5] bg-[#f8fafc] px-3 pb-4 pt-5 transition-[background-color,padding] duration-200">
-      <div className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-2 text-[#2563eb]">
-        <div className="inline-flex size-7 items-center justify-center rounded-full bg-[#eef4ff]"><Sparkles size={18} /></div>
-        <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xl leading-none">一键创作</strong>
+    <aside className="grid min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] gap-[18px] border-r border-[#e7e9ee] bg-[#f8fafc] px-3 pb-4 pt-5 transition-[background-color,padding] duration-200">
+      <div className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-2 text-[#111827]">
+        <div className="inline-flex size-7 items-center justify-center rounded-md border border-[#d9dde5] bg-white text-[10px] font-black">MD</div>
+        <div className="min-w-0">
+          <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-none">MuseDock</strong>
+          <span className="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-[#69717e]">本地视频生产控制台</span>
+        </div>
         <div className="inline-flex gap-3 text-[#667085]">
           <Search size={17} aria-hidden="true" />
           <Button
-            className="size-[22px] rounded-md bg-transparent p-0 text-inherit transition hover:bg-[#eef4ff] hover:text-[#2563eb]"
+            className="size-[22px] rounded-md bg-transparent p-0 text-inherit transition hover:bg-[#eef0f4] hover:text-[#111827]"
             type="button"
             variant="ghost"
             size="icon"
@@ -48,7 +59,7 @@ export function CreativeSidebar({
       </div>
 
       <Button
-        className="min-h-[42px] w-full rounded-full border border-[#e5e7eb] bg-white text-sm text-[#111827] shadow-[0_8px_22px_rgba(15,23,42,.06)] transition hover:border-[#bfdbfe] hover:bg-white hover:text-[#2563eb]"
+        className="min-h-[42px] w-full rounded-lg border border-[#111827] bg-[#111827] text-sm text-white shadow-[0_8px_22px_rgba(15,23,42,.10)] transition hover:bg-[#020617]"
         type="button"
         variant="outline"
         onClick={onNewTask}
@@ -63,7 +74,7 @@ export function CreativeSidebar({
           <div
             className={cn(
               'group flex min-h-11 w-full cursor-pointer items-center gap-1.5 rounded-lg border border-transparent px-2.5 py-2 text-left text-[#1f2937] transition-[background-color,border-color,color,transform] duration-150 hover:border-[#e5e7eb] hover:bg-white',
-              task.workflow_id === selectedWorkflowId && 'border-[#bfdbfe] bg-[#eef4ff] text-[#1d4ed8]',
+              task.workflow_id === selectedWorkflowId && 'border-[#d1d5db] bg-white text-[#111827] shadow-[inset_3px_0_0_#111827]',
             )}
             key={task.workflow_id}
             role="button"
@@ -97,6 +108,18 @@ export function CreativeSidebar({
             <span>提交后，任务会出现在这里。</span>
           </div>
         )}
+      </div>
+      <div className="border-t border-[#e7e9ee] pt-3">
+        <Link
+          className="grid min-h-11 grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-lg px-2.5 py-2 text-[#30343b] transition hover:bg-white hover:text-[#111827]"
+          to="/settings"
+        >
+          <Settings2 size={16} aria-hidden="true" />
+          <span className="grid min-w-0 gap-0.5">
+            <strong className="text-sm leading-none">设置</strong>
+            <small className="overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-[#8a93a2]">模型、默认值、本地状态</small>
+          </span>
+        </Link>
       </div>
     </aside>
   );

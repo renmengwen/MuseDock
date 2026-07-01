@@ -9,6 +9,7 @@ const editableParts = [
   '.complaint',
   '.badge',
   '.chip',
+  '.output',
   'h1',
   'h2',
   'h3',

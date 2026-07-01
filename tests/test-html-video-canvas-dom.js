@@ -21,6 +21,7 @@ assert.strictEqual(parsePx('3.5px'), 3.5);
 
 assert.ok(editableSelector.includes('[data-text-key]'));
 assert.ok(editableSelector.includes('[data-role]'));
+assert.ok(editableSelector.includes('.output'));
 assert.ok(excludedSelector.includes('.hv-caption-layer'));
 assert.ok(excludedSelector.includes('[data-hv-managed="true"]'));
 

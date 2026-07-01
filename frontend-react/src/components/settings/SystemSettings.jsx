@@ -100,7 +100,7 @@ export function SystemSettings({
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            className="min-h-9 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#bfdbfe] hover:bg-[#eef4ff] hover:text-[#2563eb] disabled:cursor-not-allowed disabled:opacity-55"
+            className="min-h-9 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827] disabled:cursor-not-allowed disabled:opacity-55"
             type="button"
             disabled={disabled || refreshing}
             onClick={refreshSystemHealth}
@@ -108,7 +108,7 @@ export function SystemSettings({
             {refreshing ? '正在重新检测...' : '重新检测'}
           </button>
           <button
-            className="min-h-9 rounded-lg bg-[#fe2c55] px-4 text-sm font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55"
+            className="min-h-9 rounded-lg bg-[#111827] px-4 text-sm font-bold text-white transition hover:bg-[#020617] disabled:cursor-not-allowed disabled:opacity-55"
             type="button"
             disabled={disabled || !appSettings}
             onClick={() => onSave(appSettings)}
@@ -139,7 +139,7 @@ export function SystemSettings({
           <h4 className="m-0 text-base font-bold">html-video 环境</h4>
           <p className="mt-1 text-sm text-[#4b5563]">{getStatusText(systemHealth?.environment?.ok)}</p>
           <details className="mt-3">
-            <summary className="cursor-pointer text-sm font-semibold text-[#fe2c55]">诊断详情</summary>
+            <summary className="cursor-pointer text-sm font-semibold text-[#30343b]">诊断详情</summary>
             {diagnostics.length ? (
               <ul className="mt-2 grid gap-2 pl-5 text-sm text-[#4b5563]">
                 {diagnostics.map((item, index) => (
@@ -171,7 +171,7 @@ export function SystemSettings({
                   <span className="text-xs font-semibold text-[#5f6876]">{item.label}</span>
                   <p className="my-2 text-sm font-bold text-[#30343b]">{estimate?.display || '待检测'}</p>
                   <button
-                    className="min-h-8 rounded-md border border-[#d9dde5] bg-white px-3 text-xs font-semibold text-[#30343b] transition hover:border-[#ffd6df] hover:bg-[#fff8fa] hover:text-[#fe2c55] disabled:cursor-not-allowed disabled:opacity-55"
+                    className="min-h-8 rounded-md border border-[#d9dde5] bg-white px-3 text-xs font-semibold text-[#30343b] transition hover:border-[#f1c3bd] hover:bg-[#fff7f5] hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-55"
                     type="button"
                     disabled={disabled || !!cleanupLoading}
                     onClick={() => setPendingCleanup(item)}

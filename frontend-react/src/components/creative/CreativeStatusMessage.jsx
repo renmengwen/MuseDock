@@ -2,7 +2,7 @@ import { getStatusMessageClass } from './creativeDisplay.js';
 import { cn } from '@/lib/utils.js';
 
 const MESSAGE_CLASS = {
-  loading: 'border-blue-100 bg-blue-50 text-blue-700',
+  loading: 'border-[#d9dde5] bg-[#f8fafc] text-[#30343b]',
   success: 'border-green-100 bg-green-50 text-green-700',
   error: 'border-red-100 bg-red-50 text-red-700',
   info: 'border-[#edf0f4] bg-white text-[#4b5563]',

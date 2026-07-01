@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 import {
   clamp,
@@ -12,7 +13,6 @@ import {
 import { HtmlVideoElementInspector } from './HtmlVideoElementInspector.jsx';
 import { HtmlVideoFrameStrip } from './HtmlVideoFrameStrip.jsx';
 import { FrameInputsPanel } from './FrameInputsPanel.jsx';
-import { TemplateInputsPanel } from './TemplateInputsPanel.jsx';
 import { NarrationPanel } from './NarrationPanel.jsx';
 import { CaptionsPanel } from './CaptionsPanel.jsx';
 
@@ -267,6 +267,8 @@ function selectElement(element) {
   return readElementInfo(element);
 }
 
+const secondaryButtonClass = 'min-h-7 rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55';
+
 export function HtmlVideoCanvasEditor({ editor }) {
   const iframeRef = useRef(null);
   const playbackTimerRef = useRef(null);
@@ -516,6 +518,16 @@ export function HtmlVideoCanvasEditor({ editor }) {
     setElementInfo(readElementInfo(element));
   }
 
+  function deleteSelectedElement() {
+    const element = selectedElementRef.current;
+    if (!element) return;
+    const deletedInfo = { ...(elementInfo || readElementInfo(element)), deleted: true, text: '', width: 0, height: 0 };
+    element.remove();
+    selectedElementRef.current = null;
+    dragRef.current = null;
+    setElementInfo(deletedInfo);
+  }
+
   async function saveEdit() {
     if (saving) return null;
     const doc = iframeRef.current?.contentDocument;
@@ -562,9 +574,8 @@ export function HtmlVideoCanvasEditor({ editor }) {
           <div className="flex items-center justify-between gap-2 border-b border-slate-700 bg-slate-800 px-2.5 py-2 max-[720px]:flex-col max-[720px]:items-start">
             <span className="text-xs text-slate-300">{previewError || (playbackState === 'playing' ? '正在播放镜头动画...' : editingReady ? '已停在镜头可编辑帧，可开始编辑。' : '正在准备预览...')}</span>
             <div className="flex flex-wrap justify-end gap-1.5">
-              <button className="min-h-7 rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled} onClick={replay}>重新播放</button>
-              <button className="min-h-7 rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled} onClick={jumpToEnd}>跳到结尾并编辑</button>
-              <button className="min-h-7 rounded-md bg-[#fe2c55] px-2.5 text-xs font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled || saving || !elementInfo} onClick={saveEdit}>{saving ? '正在保存...' : '保存修改'}</button>
+              <button className={secondaryButtonClass} type="button" disabled={disabled} onClick={replay}>重新播放</button>
+              <button className={secondaryButtonClass} type="button" disabled={disabled} onClick={jumpToEnd}>跳到结尾并编辑</button>
             </div>
           </div>
           {!htmlReady && htmlLoadError ? (
@@ -594,14 +605,23 @@ export function HtmlVideoCanvasEditor({ editor }) {
             onTextChange={updateSelectedText}
             onResetPosition={resetSelectedPosition}
             onSaveEdit={saveEdit}
+            onDeleteSelected={deleteSelectedElement}
           />
-          <details className="rounded-lg border border-slate-700 bg-slate-800 p-3 text-slate-100">
-            <summary className="cursor-pointer text-sm font-bold">帧字段 / 旁白 / 字幕</summary>
-            <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} />
-            <NarrationPanel narration={editor.project?.narration} disabled={disabled} onSave={editor.saveTemplateInputs} onRegenerate={editor.regenerateNarration} />
-            <CaptionsPanel captions={frame?.captions || []} selectedFrameId={frameId} disabled={disabled} onSave={patchFrame} />
-            <TemplateInputsPanel schema={editor.project?.template_schema || editor.project?.input_schema || {}} values={editor.project?.inputs || {}} disabled={disabled} onSave={editor.saveTemplateInputs} />
-          </details>
+          <Dialog>
+            <DialogTrigger asChild>
+              <button className={secondaryButtonClass} type="button" disabled={disabled}>帧字段 / 旁白 / 字幕</button>
+            </DialogTrigger>
+            <DialogContent className="max-h-[84vh] overflow-auto border-slate-700 bg-slate-900 text-slate-100 sm:max-w-3xl">
+              <DialogHeader>
+                <DialogTitle>帧字段 / 旁白 / 字幕</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-3">
+                <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} />
+                <NarrationPanel narration={editor.project?.narration} disabled={disabled} onSave={editor.saveTemplateInputs} onRegenerate={editor.regenerateNarration} />
+                <CaptionsPanel captions={frame?.captions || []} selectedFrameId={frameId} disabled={disabled} onSave={patchFrame} />
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
       <HtmlVideoFrameStrip

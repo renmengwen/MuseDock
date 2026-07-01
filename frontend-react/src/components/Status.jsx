@@ -1,7 +1,7 @@
 export function Status({ status }) {
   if (!status?.message) return null;
   const typeClass = {
-    loading: 'border-blue-100 bg-blue-50 text-blue-700',
+    loading: 'border-[#d9dde5] bg-[#f8fafc] text-[#30343b]',
     success: 'border-green-100 bg-green-50 text-green-700',
     error: 'border-red-100 bg-red-50 text-red-700',
     info: 'border-amber-100 bg-amber-50 text-amber-700',

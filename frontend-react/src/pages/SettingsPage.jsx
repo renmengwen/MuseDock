@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Status } from '../components/Status.jsx';
 import { CreativeDefaultsSettings } from '../components/settings/CreativeDefaultsSettings.jsx';
@@ -159,20 +160,25 @@ export function SettingsPage() {
   };
 
   return (
-    <main className="min-h-[calc(100vh-64px)] bg-[#f6f7f9] px-8 py-6 max-[720px]:px-4">
+    <main className="min-h-screen bg-[#f6f7f9] px-8 py-6 max-[720px]:px-4">
       <div className="mb-5 flex items-start justify-between gap-4 max-[720px]:flex-col">
         <div>
           <h2 className="m-0 text-xl font-bold text-[#20242a]">设置中心</h2>
           <p className="mt-1 text-[13px] text-[#69717e]">管理创作默认值、模型配置和本地系统状态。</p>
         </div>
-        <div className="min-w-[92px] rounded-lg border border-[#e7e9ee] bg-white px-3.5 py-2.5 text-center">
-          <strong className="block text-xl leading-none text-[#fe2c55]">{modelSettings.enabledCount}</strong>
-          <span className="text-xs text-[#69717e]">已启用</span>
+        <div className="flex items-center gap-2">
+          <div className="min-w-[92px] rounded-lg border border-[#e7e9ee] bg-white px-3.5 py-2.5 text-center">
+            <strong className="block text-xl leading-none text-[#111827]">{modelSettings.enabledCount}</strong>
+            <span className="text-xs text-[#69717e]">已启用</span>
+          </div>
+          <Link className="inline-flex min-h-10 items-center rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827]" to="/creative">
+            返回创作台
+          </Link>
         </div>
       </div>
 
       <Status status={status} />
-      {loadingApp ? <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-[13px] font-semibold text-blue-700">正在加载设置中心...</div> : null}
+      {loadingApp ? <div className="mb-4 rounded-lg border border-[#d9dde5] bg-[#f8fafc] px-4 py-3 text-[13px] font-semibold text-[#30343b]">正在加载设置中心...</div> : null}
 
       <div className="grid grid-cols-[180px_minmax(0,1fr)] items-start gap-4 max-[900px]:grid-cols-1">
         <nav className="sticky top-4 grid min-w-0 gap-2 max-[900px]:static max-[900px]:grid-cols-2 max-[520px]:grid-cols-1" aria-label="设置中心导航">
@@ -180,7 +186,7 @@ export function SettingsPage() {
             <button
               key={section.id}
               type="button"
-              className={`min-h-10 w-full rounded-lg border px-3 py-2 text-left text-sm leading-snug transition max-[900px]:text-center ${activeSection === section.id ? 'border-[#fe2c55] bg-[#fff1f3] font-bold text-[#fe2c55]' : 'border-[#d9dde5] bg-white text-[#30343b] hover:border-[#ffd6df] hover:bg-[#fff8fa]'}`}
+              className={`min-h-10 w-full rounded-lg border px-3 py-2 text-left text-sm leading-snug transition max-[900px]:text-center ${activeSection === section.id ? 'border-[#111827] bg-[#111827] font-bold text-white' : 'border-[#d9dde5] bg-white text-[#30343b] hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827]'}`}
               onClick={() => setActiveSection(section.id)}
             >
               {section.label}

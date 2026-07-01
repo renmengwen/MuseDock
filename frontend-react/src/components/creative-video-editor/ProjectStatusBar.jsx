@@ -2,13 +2,13 @@ const STATUS_CLASS = {
   error: 'border-red-500/30 bg-red-500/10 text-red-100',
   not_configured: 'border-red-500/30 bg-red-500/10 text-red-100',
   needs_validation: 'border-red-500/30 bg-red-500/10 text-red-100',
-  loading: 'border-blue-400/30 bg-blue-400/10 text-blue-100',
-  saving: 'border-blue-400/30 bg-blue-400/10 text-blue-100',
-  editing: 'border-blue-400/30 bg-blue-400/10 text-blue-100',
-  materializing: 'border-blue-400/30 bg-blue-400/10 text-blue-100',
-  rendering: 'border-blue-400/30 bg-blue-400/10 text-blue-100',
-  exporting: 'border-blue-400/30 bg-blue-400/10 text-blue-100',
-  tts: 'border-blue-400/30 bg-blue-400/10 text-blue-100',
+  loading: 'border-slate-600 bg-slate-800 text-slate-100',
+  saving: 'border-slate-600 bg-slate-800 text-slate-100',
+  editing: 'border-slate-600 bg-slate-800 text-slate-100',
+  materializing: 'border-slate-600 bg-slate-800 text-slate-100',
+  rendering: 'border-slate-600 bg-slate-800 text-slate-100',
+  exporting: 'border-slate-600 bg-slate-800 text-slate-100',
+  tts: 'border-slate-600 bg-slate-800 text-slate-100',
 };
 
 export function ProjectStatusBar({ status, message, dirtyRequiresRender }) {

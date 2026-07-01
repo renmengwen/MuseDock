@@ -9,7 +9,7 @@ import { NaturalLanguageEditBox } from './NaturalLanguageEditBox.jsx';
 import { ProjectStatusBar } from './ProjectStatusBar.jsx';
 
 const TOOL_BUTTON_CLASS = 'min-h-8 rounded-md border border-slate-700 bg-slate-800 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55';
-const PRIMARY_TOOL_BUTTON_CLASS = 'min-h-8 rounded-md border border-[#fe2c55] bg-[#fe2c55] px-2.5 text-xs font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55';
+const PRIMARY_TOOL_BUTTON_CLASS = 'min-h-8 rounded-md border border-slate-100 bg-slate-100 px-2.5 text-xs font-bold text-slate-950 transition hover:border-white hover:bg-white disabled:cursor-not-allowed disabled:opacity-55';
 
 function PanelDialog({ label, title, children }) {
   return (

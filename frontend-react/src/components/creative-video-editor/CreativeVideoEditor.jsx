@@ -33,7 +33,7 @@ function LegacyCreativeVideoEditor({ workflowId, api, onRendered }) {
       <EditorStatusBar status={editor.status} message={editor.message} dirtyRequiresRender={editor.dirtyRequiresRender} />
       <div className="flex flex-wrap gap-2">
         <button className="min-h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled} onClick={editor.load}>重新加载</button>
-        <button className="min-h-9 rounded-md bg-[#fe2c55] px-3 text-sm font-bold text-white transition hover:bg-[#f2214b] disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled || !editor.dirtyRequiresRender} onClick={handleRerender}>重新渲染</button>
+        <button className="min-h-9 rounded-md border border-slate-100 bg-slate-100 px-3 text-sm font-bold text-slate-950 transition hover:border-white hover:bg-white disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled || !editor.dirtyRequiresRender} onClick={handleRerender}>重新渲染</button>
         <button className="min-h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled} onClick={() => editor.remix({})}>创建二创</button>
       </div>
       <div className="grid grid-cols-[minmax(150px,.8fr)_minmax(260px,1.4fr)_minmax(150px,.8fr)_minmax(220px,1fr)] gap-3 max-[1100px]:grid-cols-2 max-[720px]:grid-cols-1">

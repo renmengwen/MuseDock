@@ -63,7 +63,7 @@ const RETRY_CODE_TEXT = {
 
 const STATUS_CHIP_CLASS = {
   done: 'bg-green-50 text-green-700 ring-green-200',
-  pending: 'bg-[#fff1f3] text-[#fe2c55] ring-[#ffd6df]',
+  pending: 'bg-slate-100 text-slate-700 ring-slate-200',
   failed: 'bg-red-50 text-red-700 ring-red-200',
   '': 'bg-slate-100 text-slate-600 ring-slate-200',
 };
@@ -148,7 +148,7 @@ function CreativeRetryPlan({
           <Button
             type="button"
             size="sm"
-            className="w-fit bg-[#fe2c55] text-white hover:bg-[#f2214b]"
+            className="w-fit bg-[#111827] text-white hover:bg-[#020617]"
             disabled={retrying}
             onClick={onRetryWorkflow}
           >
@@ -216,7 +216,7 @@ export function CreativeTaskDetail({
         <div className="inline-flex shrink-0 flex-wrap items-center justify-end gap-2 max-[720px]:justify-start">
           <Dialog open={promptModalOpen} onOpenChange={setPromptModalOpen}>
             <DialogTrigger asChild>
-              <Button variant="secondary" size="sm" type="button" className="border border-blue-100 bg-blue-50 text-blue-700 hover:bg-blue-100">
+              <Button variant="secondary" size="sm" type="button" className="border border-[#d9dde5] bg-white text-[#30343b] hover:bg-[#f3f4f6] hover:text-[#111827]">
                 <Eye size={14} />
                 <span>查看提示词</span>
               </Button>

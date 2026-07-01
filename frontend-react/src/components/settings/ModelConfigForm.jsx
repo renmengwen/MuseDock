@@ -1,7 +1,7 @@
 export function ModelConfigForm({ type, info, model, onChange }) {
   const m = model || { enabled: false, modelId: '', note: '' };
   return (
-    <div className={`rounded-lg border bg-white p-3 transition ${m.enabled ? 'border-[#fe2c55]' : 'border-[#edf0f4]'}`}>
+    <div className={`rounded-lg border bg-white p-3 transition ${m.enabled ? 'border-[#111827]' : 'border-[#edf0f4]'}`}>
       <div className="mb-2 flex items-center gap-2">
         <label className="switchControl small">
           <input
@@ -16,7 +16,7 @@ export function ModelConfigForm({ type, info, model, onChange }) {
         <span className="text-[13px] font-semibold text-[#30343b]">{info.title}</span>
       </div>
       <input
-        className="h-[34px] w-full rounded-md border border-[#d9dde5] bg-[#fafbfc] px-2 text-xs text-[#30343b] outline-none transition focus:border-[#fe2c55] focus:ring-2 focus:ring-[#fe2c55]/15 disabled:opacity-50"
+        className="h-[34px] w-full rounded-md border border-[#d9dde5] bg-[#fafbfc] px-2 text-xs text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:opacity-50"
         value={m.modelId}
         onChange={e => onChange('modelId', e.target.value)}
         placeholder={info.placeholder}

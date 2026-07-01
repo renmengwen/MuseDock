@@ -14,7 +14,7 @@
   --fg-inverse-2: #d7dde7;
   --line-1: #e7e9ee;
   --line-2: #d9dde5;
-  --accent-1: #fe2c55;
+  --accent-1: #111827;
   --accent-2: #25f4ee;
   --warn-1: #f59e0b;
   --danger-1: #dc2626;
@@ -68,7 +68,7 @@
   --space-6: 24px;
   --space-8: 32px;
   --shadow-panel: 0 16px 38px rgb(15 23 42 / 0.08);
-  --shadow-focus: 0 0 0 3px rgb(254 44 85 / 0.18);
+  --shadow-focus: 0 0 0 3px rgb(37 244 238 / 0.18);
 
   /* Type semantics */
   --h1: var(--weight-strong) var(--size-6) / var(--leading-tight) var(--font-sans);
