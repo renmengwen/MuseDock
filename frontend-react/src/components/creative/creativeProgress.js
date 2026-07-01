@@ -80,8 +80,11 @@ export function removeWorkflowProgressEvents(eventsByWorkflow, workflowId) {
 
 export function summarizeProgressEvent(event) {
   const data = event?.data && typeof event.data === 'object' ? event.data : {};
+  const isFrameEvent = event?.type === 'html_video_frame_html_started'
+    || event?.type === 'html_video_frame_html_done'
+    || event?.type === 'html_video_frame_render_progress';
   const parts = [
-    Number.isFinite(Number(data.completed)) && Number.isFinite(Number(data.total))
+    !isFrameEvent && Number.isFinite(Number(data.completed)) && Number.isFinite(Number(data.total))
       ? `已完成 ${Number(data.completed)}/${data.total} 项`
       : '',
     Number.isFinite(Number(data.concurrency))

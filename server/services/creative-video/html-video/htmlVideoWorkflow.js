@@ -1343,7 +1343,7 @@ async function generateHtmlVideo(options = {}) {
     projectDir,
     templateRegistry: registry,
     environment: env,
-    sceneSpec,
+    sceneSpec: skipValidation ? null : sceneSpec,
     mediaOptions,
   });
   diagnostics.push(...validation.diagnostics);

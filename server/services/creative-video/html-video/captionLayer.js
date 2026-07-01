@@ -92,7 +92,9 @@ function splitLongText(text, maxLength = MAX_CAPTION_TEXT_LENGTH) {
 }
 
 function splitNormalizedCaption(caption) {
-  const chunks = splitLongText(caption.text);
+  const chunks = splitLongText(caption.text)
+    .map(chunk => String(chunk || '').trim())
+    .filter(Boolean);
   if (chunks.length <= 1) return [caption];
 
   const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);

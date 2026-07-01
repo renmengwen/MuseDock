@@ -19,6 +19,7 @@ const {
   appendWorkflowModelCall,
   runResearchProvider,
 } = require('../server/services/creative/creativeWorkflows');
+const { computeSceneSpecSpeechHash } = require('../server/services/creative-video/sceneSpecHash');
 
 const NOW = '2026-06-12T12:00:00.000Z';
 const WORKFLOW_ID = '202606121200000001';
@@ -1038,6 +1039,76 @@ async function testHtmlVideoExportUsesOrchestratorWithTemplateRegistry() {
   assert.equal(result.output_path, path.join(projectDir, 'exports', 'output.mp4'));
 }
 
+async function testHtmlVideoExportRestoresMissingNarrationReference() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const workflowPath = getWorkflowPath(WORKFLOW_ID, rootDir);
+  const runId = 'run-1';
+  const projectDir = path.join(mediaRoot, '12345', 'agent_runs', `${runId}-html-video`);
+  const narrationPath = path.join(mediaRoot, '12345', 'agent_runs', `${runId}-tts.wav`);
+  const sceneSpec = {
+    scenes: [
+      { id: 'scene_01', order: 1, narration_text: '第一段旁白。', captions: [{ text: '第一段旁白。' }] },
+      { id: 'scene_02', order: 2, narration_text: '第二段旁白。', captions: [{ text: '第二段旁白。' }] },
+    ],
+  };
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.mkdirSync(path.dirname(workflowPath), { recursive: true });
+  fs.writeFileSync(narrationPath, 'fake narration', 'utf-8');
+  fs.writeFileSync(path.join(projectDir, 'scene-spec.json'), JSON.stringify(sceneSpec, null, 2), 'utf-8');
+  fs.writeFileSync(workflowPath, JSON.stringify({
+    workflow_id: WORKFLOW_ID,
+    status: 'done',
+    result: {
+      hyperframes_freeform: {
+        project: {
+          html_video_project_path: projectDir,
+        },
+      },
+    },
+  }, null, 2), 'utf-8');
+  fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({
+    project_id: 'p1',
+    workflow_id: WORKFLOW_ID,
+    run_id: runId,
+    template_id: 'simple',
+    output: { fps: 24 },
+    frames: [],
+    timeline: { tracks: [] },
+    audio: {
+      narration_path: null,
+      tts_manifest_path: null,
+    },
+  }, null, 2), 'utf-8');
+
+  let projectSeen = null;
+  const result = await exportHtmlVideoProject(WORKFLOW_ID, {}, {
+    rootDir,
+    htmlVideoProjectOrchestrator: {
+      exportHtmlVideoProject: async options => {
+        projectSeen = options.project;
+        return {
+          success: true,
+          message: '导出完成。',
+          html_video_project_path: projectDir,
+          output_path: path.join(projectDir, 'exports', 'output-audio.mp4'),
+          project: {
+            ...options.project,
+            exports: [{ id: 'export_0001', path: 'exports/output-audio.mp4' }],
+          },
+          diagnostics: [],
+        };
+      },
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(projectSeen.audio.narration_path, narrationPath);
+  assert.equal(projectSeen.audio.status, 'ready');
+  assert.equal(projectSeen.audio.source, 'scene_spec');
+  assert.equal(projectSeen.audio.scene_spec_hash, computeSceneSpecSpeechHash(sceneSpec));
+  assert.deepEqual(projectSeen.audio.scene_ids, ['scene_01', 'scene_02']);
+}
+
 async function testFallbackProjectDoesNotSkipLegacyStages() {
   const { rootDir, mediaRoot } = createTempDirs();
   const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-rich-fallback');
@@ -1983,6 +2054,7 @@ async function run() {
   await testCreativeDefaultsDisableAudioAndCaptionsInWorkflow();
   await testLegacyCreativeDefaultsSnapshotFallsBackToRealtimeMediaOptions();
   await testHtmlVideoExportUsesOrchestratorWithTemplateRegistry();
+  await testHtmlVideoExportRestoresMissingNarrationReference();
   await testFallbackProjectDoesNotSkipLegacyStages();
   await testRejectsEmptyInput();
   await testCreatesDouyinWorkflowWithOriginalAwemeId();

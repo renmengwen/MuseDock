@@ -38,6 +38,7 @@ const {
   findFrameByAnyId,
   createTemplateRegistry: createHtmlVideoTemplateRegistry,
 } = htmlVideoProjectApi;
+const { computeSceneSpecSpeechHash } = require('../creative-video/sceneSpecHash');
 
 const DEFAULT_ROOT = path.join(__dirname, '../../../data/creative-workflows');
 const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../../data/media/douyin');
@@ -100,6 +101,70 @@ function inferMediaRootFromProjectDir(projectDir, workflowId) {
   const marker = `${path.sep}${safeString(workflowId)}${path.sep}agent_runs${path.sep}`;
   const index = resolvedProjectDir.indexOf(marker);
   return index >= 0 ? resolvedProjectDir.slice(0, index) : '';
+}
+
+function hasHtmlVideoNarrationReference(project = {}) {
+  return Boolean(
+    safeString(project.audio?.narration_path)
+    || safeString(project.audio?.tts_manifest_path)
+  );
+}
+
+function htmlVideoAudioDisabled(project = {}) {
+  return project.audio?.status === 'skipped'
+    && project.audio?.reason === 'disabled_by_settings';
+}
+
+async function fileExists(filePath) {
+  const resolved = safeString(filePath);
+  if (!resolved) return false;
+  try {
+    const stat = await fsp.stat(resolved);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function readHtmlVideoSceneSpec(projectDir) {
+  try {
+    const sceneSpecPath = htmlVideoProjectStore.resolveProjectPath(projectDir, 'scene-spec.json');
+    return JSON.parse(await fsp.readFile(sceneSpecPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function sceneIdsFromSceneSpec(sceneSpec = {}) {
+  const scenes = Array.isArray(sceneSpec?.scenes) ? sceneSpec.scenes : [];
+  return scenes.map((scene, index) => safeString(scene?.id) || `scene_${String(index + 1).padStart(2, '0')}`);
+}
+
+async function restoreHtmlVideoNarrationReference({ project, projectDir } = {}) {
+  if (!project || typeof project !== 'object' || htmlVideoAudioDisabled(project) || hasHtmlVideoNarrationReference(project)) {
+    return project;
+  }
+  const runId = safeString(project.run_id);
+  if (!runId || !projectDir) return project;
+
+  const candidate = path.join(path.dirname(projectDir), `${runId}-tts.wav`);
+  if (!await fileExists(candidate)) return project;
+
+  const sceneSpec = await readHtmlVideoSceneSpec(projectDir);
+  const sceneIds = sceneIdsFromSceneSpec(sceneSpec);
+  project.audio = {
+    ...(project.audio || {}),
+    status: 'ready',
+    source: 'scene_spec',
+    narration_path: candidate,
+    tts_manifest_path: null,
+    ...(sceneSpec ? {
+      scene_spec_hash: computeSceneSpecSpeechHash(sceneSpec),
+      scene_count: sceneIds.length,
+      scene_ids: sceneIds,
+    } : {}),
+  };
+  return project;
 }
 
 
@@ -2427,8 +2492,11 @@ async function editHtmlVideoProject(workflowId, payload = {}, options = {}) {
 
 async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
-  const { record, project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  const loaded = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  const { record, projectDir, error } = loaded;
+  let { project } = loaded;
   if (error) return error;
+  project = await restoreHtmlVideoNarrationReference({ project, projectDir });
 
   const templateRegistry = options.htmlVideoTemplateRegistry || createHtmlVideoTemplateRegistry(options.htmlVideoTemplateOptions || {});
   const orchestrator = options.htmlVideoProjectOrchestrator || htmlVideoProjectOrchestrator;

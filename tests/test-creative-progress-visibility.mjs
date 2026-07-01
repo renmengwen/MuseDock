@@ -116,4 +116,12 @@ assert.equal(
   '已完成 1/4 项 · 并发上限 3',
 );
 
+assert.equal(
+  summarizeProgressEvent({
+    type: 'html_video_frame_html_started',
+    data: { index: 0, total: 8, completed: 0 },
+  }),
+  '第 1/8 项',
+);
+
 console.log('creative progress visibility tests passed');

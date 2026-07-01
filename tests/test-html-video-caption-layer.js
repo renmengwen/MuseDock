@@ -76,6 +76,22 @@ const captionLayerCount = html => (html.match(/data-hv-layer="captions"/g) || []
 }
 
 {
+  const split = normalizeCaptionsForFrame({
+    id: 'scene_07',
+    duration_sec: 8.06,
+    captions: [{
+      id: 'cap_01',
+      start: 0,
+      end: 8.06,
+      text: '配置后，在 Claude、Cursor、Copilot、Windsurf 或 Codex 里说需求即可。',
+    }],
+  });
+  assert.ok(split.length > 1);
+  assert.ok(split.every(item => item.text === item.text.trim()));
+  assert.doesNotMatch(split.map(item => item.text).join('|'), /\|\s/);
+}
+
+{
   const html = '<html><body><main>画面</main></body></html>';
   const next = ensureCaptionLayer(html, captions);
   assert.match(next, /data-hv-layer="captions"/);
