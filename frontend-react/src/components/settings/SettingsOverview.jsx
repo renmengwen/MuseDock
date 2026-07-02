@@ -41,6 +41,11 @@ export function SettingsOverview({ appSettings, modelSettings, systemHealth, onN
       action: 'creative',
     },
     {
+      title: '帧 HTML 并发',
+      value: creativeDefaults.frameHtmlConcurrency || 1,
+      action: 'creative',
+    },
+    {
       title: '质检状态',
       value: appSettings?.system?.skipValidation ? '已跳过' : '已启用',
       action: 'system',

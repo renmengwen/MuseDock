@@ -17,6 +17,7 @@ const DEFAULT_CREATIVE_DEFAULTS = {
   generateCaptions: true,
   emotionalVoice: false,
   sourceImageAnalysisEnabled: false,
+  frameHtmlConcurrency: 1,
 };
 
 const TEMPLATE_NAME_ZH = {
@@ -204,6 +205,22 @@ export function CreativeDefaultsSettings({
             className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:cursor-not-allowed disabled:opacity-60"
             onChange={event => updateCreativeDefaults({
               targetDurationSec: event.target.value === '' ? '' : Number(event.target.value),
+            })}
+          />
+        </label>
+
+        <label className="grid gap-1.5">
+          <span className="text-xs font-semibold text-[#5f6876]">帧 HTML 并发上限</span>
+          <input
+            type="number"
+            min="1"
+            max="5"
+            step="1"
+            value={creativeDefaults.frameHtmlConcurrency}
+            disabled={disabled}
+            className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:cursor-not-allowed disabled:opacity-60"
+            onChange={event => updateCreativeDefaults({
+              frameHtmlConcurrency: event.target.value === '' ? '' : Number(event.target.value),
             })}
           />
         </label>

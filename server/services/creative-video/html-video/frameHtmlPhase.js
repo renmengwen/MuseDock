@@ -89,6 +89,7 @@ async function runFrameHtmlPhase(ctx) {
     templateRenderTarget,
     template,
     mediaOptions,
+    frameHtmlConcurrency,
     resumeAllowed,
     regenerateFrameHtmlRequested,
     onProgress,
@@ -109,7 +110,8 @@ async function runFrameHtmlPhase(ctx) {
   const frameResults = [];
   const frameJobs = [];
   let completedFrameHtmlCount = 0;
-  const frameHtmlRunsInParallel = FRAME_HTML_CONCURRENCY > 1;
+  const concurrency = Math.min(5, Math.max(1, Math.round(Number(frameHtmlConcurrency) || FRAME_HTML_CONCURRENCY)));
+  const frameHtmlRunsInParallel = concurrency > 1;
   const generateFrameJob = async job => {
     const { index, node, sceneId, scene, styleReferenceHtml } = job;
     await report(onProgress, {
@@ -126,7 +128,7 @@ async function runFrameHtmlPhase(ctx) {
         total: nodes.length,
         completed: completedFrameHtmlCount,
         parallel: frameHtmlRunsInParallel,
-        concurrency: FRAME_HTML_CONCURRENCY,
+        concurrency,
       },
     });
     let htmlResult = await frameHtmlAgent.generateFrameHtml({
@@ -267,13 +269,13 @@ async function runFrameHtmlPhase(ctx) {
       stage: 'project',
       sub_stage: 'frame_html',
       message: frameHtmlRunsInParallel
-        ? `正在并发生成 ${frameJobs.length} 帧 HTML，最多同时生成 ${FRAME_HTML_CONCURRENCY} 帧。`
+        ? `正在并发生成 ${frameJobs.length} 帧 HTML，最多同时生成 ${concurrency} 帧。`
         : `正在逐帧生成 ${frameJobs.length} 帧 HTML。`,
       data: {
         total: nodes.length,
         completed: completedFrameHtmlCount,
         pending: frameJobs.length,
-        concurrency: FRAME_HTML_CONCURRENCY,
+        concurrency,
       },
     });
   }
@@ -291,7 +293,7 @@ async function runFrameHtmlPhase(ctx) {
     }
     frameResults.push(...await mapLimit(
       remainingJobs.map(job => ({ ...job, styleReferenceHtml: visualStyleReferenceHtml })),
-      FRAME_HTML_CONCURRENCY,
+      concurrency,
       generateFrameJob,
     ));
   }
@@ -431,7 +433,7 @@ async function runFrameHtmlPhase(ctx) {
         total: nodes.length,
         completed: completedFrameHtmlCount,
         parallel: frameJobs.length > 1 && frameHtmlRunsInParallel,
-        concurrency: frameJobs.length > 1 ? FRAME_HTML_CONCURRENCY : 1,
+        concurrency: frameJobs.length > 1 ? concurrency : 1,
       },
     });
   }

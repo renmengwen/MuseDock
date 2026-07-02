@@ -26,6 +26,7 @@ const DEFAULT_CONFIG = {
     generateCaptions: true,
     emotionalVoice: false,
     sourceImageAnalysisEnabled: false,
+    frameHtmlConcurrency: 1,
   },
   system: {
     skipValidation: false,
@@ -40,6 +41,12 @@ function normalizeDurationSec(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return DEFAULT_CONFIG.creativeDefaults.targetDurationSec;
   return Math.min(180, Math.max(15, Math.round(number)));
+}
+
+function normalizeSmallInteger(value, defaultValue, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return defaultValue;
+  return Math.min(max, Math.max(min, Math.round(number)));
 }
 
 function normalizeCreativeDefaults(input = {}) {
@@ -76,6 +83,12 @@ function normalizeCreativeDefaults(input = {}) {
       : DEFAULT_CONFIG.creativeDefaults.generateCaptions,
     emotionalVoice: source.emotionalVoice === true,
     sourceImageAnalysisEnabled: source.sourceImageAnalysisEnabled === true,
+    frameHtmlConcurrency: normalizeSmallInteger(
+      source.frameHtmlConcurrency,
+      DEFAULT_CONFIG.creativeDefaults.frameHtmlConcurrency,
+      1,
+      5,
+    ),
   };
 }
 

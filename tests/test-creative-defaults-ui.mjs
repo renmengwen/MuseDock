@@ -14,6 +14,7 @@ const [componentSource, settingsPageSource] = await Promise.all([
 for (const text of [
   '默认画面比例',
   '默认目标时长',
+  '帧 HTML 并发上限',
   '按比例默认模板',
   '锁定模板',
   '联网研究默认开启',
@@ -25,6 +26,7 @@ for (const text of [
 }
 
 assert.doesNotMatch(componentSource, /captionMode|showCaptionBar|renderQuality/);
+assert.match(componentSource, /frameHtmlConcurrency/);
 assert.match(settingsPageSource, /CreativeDefaultsSettings/);
 
 console.log('creative defaults ui tests passed');

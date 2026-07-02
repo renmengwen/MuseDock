@@ -254,6 +254,7 @@ async function readProjectJson(projectDir) {
       preferredTemplateId: 'vertical',
       lockTemplate: true,
       generateAudio: false,
+      frameHtmlConcurrency: 2,
     },
     templateRegistry,
     skipValidation: true,
@@ -319,13 +320,13 @@ async function readProjectJson(projectDir) {
     },
   });
   assert.equal(parallelFrameResult.success, true);
-  assert.equal(maxActiveFrameHtmlCalls, 1, `expected frame HTML calls to run sequentially, got ${maxActiveFrameHtmlCalls}`);
+  assert.equal(maxActiveFrameHtmlCalls, 2, `expected frame HTML calls to respect configured concurrency, got ${maxActiveFrameHtmlCalls}`);
   assert.doesNotMatch(parallelFramePrompts.scene_03, /SECOND_PREVIOUS_ONLY/);
   assert.doesNotMatch(parallelFramePrompts.scene_04, /SECOND_PREVIOUS_ONLY/);
   const batchFrameHtmlStarted = parallelProgressEvents.find(event => event.type === 'html_video_frame_html_parallel_started');
   assert.ok(batchFrameHtmlStarted);
-  assert.match(batchFrameHtmlStarted.message, /逐帧生成/);
-  assert.equal(batchFrameHtmlStarted.data?.concurrency, 1);
+  assert.match(batchFrameHtmlStarted.message, /并发生成/);
+  assert.equal(batchFrameHtmlStarted.data?.concurrency, 2);
   assert.ok(parallelProgressEvents
     .filter(event => event.type === 'html_video_frame_html_started')
     .every(event => Number.isFinite(Number(event.data?.completed))));

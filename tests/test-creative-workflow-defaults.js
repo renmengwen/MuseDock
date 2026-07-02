@@ -34,6 +34,7 @@ function createDefaults(overrides = {}) {
     useResearch: false,
     emotionalVoice: false,
     sourceImageAnalysisEnabled: false,
+    frameHtmlConcurrency: 1,
     ...overrides,
   };
 }
@@ -118,6 +119,7 @@ function assertSnapshotRecord(record, {
   useResearch = false,
   emotionalVoice = false,
   sourceImageAnalysisEnabled = false,
+  frameHtmlConcurrency = 1,
 } = {}) {
   assert.ok(record.creative_defaults_snapshot, 'snapshot fields missing');
   assert.equal(record.creative_defaults_snapshot.aspectRatio, aspectRatio);
@@ -127,12 +129,14 @@ function assertSnapshotRecord(record, {
   assert.equal(record.creative_defaults_snapshot.useResearch, useResearch);
   assert.equal(record.creative_defaults_snapshot.emotionalVoice, emotionalVoice);
   assert.equal(record.creative_defaults_snapshot.sourceImageAnalysisEnabled, sourceImageAnalysisEnabled);
+  assert.equal(record.creative_defaults_snapshot.frameHtmlConcurrency, frameHtmlConcurrency);
   assert.ok(record.target, 'target fields missing');
   assert.equal(record.target.aspect_ratio, aspectRatio);
   assert.equal(record.target.duration_sec, durationSec);
   assert.equal(record.target.preferredTemplateId, templateId);
   assert.equal(record.target.lockTemplate, lockTemplate);
   assert.equal(record.target.emotionalVoice, emotionalVoice);
+  assert.equal(record.target.frameHtmlConcurrency, frameHtmlConcurrency);
   assert.equal(record.input.use_research, useResearch);
 }
 
@@ -204,9 +208,10 @@ async function testCreativeDefaultsOverrideSourceImageAnalysisWins() {
     input: '来源图片分析默认值测试 https://example.com/a',
     creativeDefaultsOverride: {
       sourceImageAnalysisEnabled: true,
+      frameHtmlConcurrency: 3,
     },
   });
-  assertSnapshotRecord(record, { sourceImageAnalysisEnabled: true });
+  assertSnapshotRecord(record, { sourceImageAnalysisEnabled: true, frameHtmlConcurrency: 3 });
 }
 
 async function testMissingDefaultUseResearchDefaultsToTrue() {
@@ -345,6 +350,7 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   assert.equal(projectCall.options.projectOptions.duration_sec, 90);
   assert.equal(projectCall.options.projectOptions.preferredTemplateId, 'bold_signal');
   assert.equal(projectCall.options.projectOptions.lockTemplate, true);
+  assert.equal(projectCall.options.projectOptions.frameHtmlConcurrency, 1);
   assert.equal(projectCall.options.projectOptions.runtimeFlag, 'kept');
   assert.equal(projectCall.options.projectOptions.creative_context.input.raw_text, '运行期默认值快照测试');
 }

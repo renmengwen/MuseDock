@@ -1051,6 +1051,12 @@ function mediaOptionEnabled(key, target = {}, projectOptions = {}) {
   return true;
 }
 
+function normalizeFrameHtmlConcurrency(target = {}, projectOptions = {}) {
+  const number = Number(projectOptions.frameHtmlConcurrency ?? projectOptions.frame_html_concurrency ?? target.frameHtmlConcurrency ?? target.frame_html_concurrency);
+  if (!Number.isFinite(number)) return 1;
+  return Math.min(5, Math.max(1, Math.round(number)));
+}
+
 function resolveRegistry(input) {
   if (input) return input;
   return createTemplateRegistry({ rootDir: DEFAULT_ROOT_DIR });
@@ -1088,6 +1094,7 @@ async function generateHtmlVideo(options = {}) {
     generateAudio: mediaOptionEnabled('generateAudio', target, projectOptions),
     generateCaptions: mediaOptionEnabled('generateCaptions', target, projectOptions),
   };
+  const frameHtmlConcurrency = normalizeFrameHtmlConcurrency(target, projectOptions);
   const reuseContentGraphRequested = options.reuseContentGraph === true || projectOptions?.reuseContentGraph === true;
   const regenerateFrameHtmlRequested = options.regenerateFrameHtml === true || projectOptions?.regenerateFrameHtml === true;
   const registry = resolveRegistry(templateRegistry);
@@ -1414,6 +1421,7 @@ async function generateHtmlVideo(options = {}) {
       templateRenderTarget,
       template,
       mediaOptions,
+      frameHtmlConcurrency,
       resumeAllowed,
       regenerateFrameHtmlRequested,
       onProgress,
