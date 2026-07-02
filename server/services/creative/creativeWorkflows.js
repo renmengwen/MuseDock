@@ -1162,7 +1162,7 @@ async function runStage(record, stageId, rootDir, handler, services, taskContext
     if (stageId === 'project') {
       await syncProjectStageSummariesFromProjectDir(
         record,
-        result?.project_dir || result?.html_video_project_path,
+        projectPathFromStageResult(result),
       );
       if (result?.project?.generation_checkpoint) {
         syncProjectStageSummariesFromCheckpoint(record, result.project.generation_checkpoint);

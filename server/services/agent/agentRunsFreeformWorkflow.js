@@ -1587,6 +1587,8 @@
 
           frame_specs: result.frame_specs,
 
+          asset_usage_report: result.project?.asset_usage_report || current.project?.asset_usage_report || null,
+
         },
 
         audio: {

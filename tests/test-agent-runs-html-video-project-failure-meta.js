@@ -100,7 +100,16 @@ const agentRuns = require('../server/services/agent/agentRuns');
         render_mode: 'html-video',
         project_dir: successProjectDir,
         html_video_project_path: successProjectDir,
-        project: { exports: [{ id: 'export-success-01' }] },
+        project: {
+          exports: [{ id: 'export-success-01' }],
+          asset_usage_report: {
+            status: 'ready',
+            assets: [{ asset_id: 'article_01', used: true, used_in_frames: ['scene_02'], usage_count: 1 }],
+            used_asset_ids: ['article_01'],
+            unused_asset_ids: [],
+            summary: '最终 HTML 使用了 1 张来源图片。',
+          },
+        },
         files: [],
       }),
     },
@@ -112,6 +121,8 @@ const agentRuns = require('../server/services/agent/agentRuns');
     successPersisted.hyperframes_freeform.render.output_url,
     `/api/creative-workflows/${encodeURIComponent(awemeId)}/html-video-project/exports/${encodeURIComponent('export-success-01')}/file`,
   );
+  assert.equal(successResult.hyperframes_freeform.project.asset_usage_report.used_asset_ids[0], 'article_01');
+  assert.equal(successPersisted.hyperframes_freeform.project.asset_usage_report.used_asset_ids[0], 'article_01');
 
   console.log('agent runs html-video project failure meta tests passed');
 })();
