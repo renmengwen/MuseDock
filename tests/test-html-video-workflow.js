@@ -422,6 +422,76 @@ async function readProjectJson(projectDir) {
     { agent: 'FrameHtmlAgent', stage: 'frame_html', artifact: 'frames' },
   ]);
 
+  const layoutQaCalls = [];
+  let layoutQaRenderCalled = false;
+  const layoutQaFailureResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000000_layout_qa_failure',
+    runId: 'run_layout_qa_failure',
+    rootDir,
+    sceneSpec: {
+      title: '布局遮挡检查',
+      aspect_ratio: '16:9',
+      scenes: [
+        { id: 'scene_01', duration: 2, kind: 'text', narration_text: '布局旁白', captions: fullSceneCaption('scene_01', '布局旁白', 2), visual_text: { headline: '布局标题', keywords: [], cards: [] } },
+      ],
+    },
+    creativeContext: { input: { raw_text: '检查元素遮挡。' } },
+    target: {
+      html_video_generation_mode: 'raw_html',
+      generateAudio: false,
+    },
+    templateRegistry,
+    runLayoutQa: true,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配横屏', confidence: 0.9 }) };
+          }
+          if (prompt.startsWith('你是 html-video 的 content graph')) {
+            return {
+              success: true,
+              text: JSON.stringify({
+                synopsis: '一帧布局检查',
+                nodes: [{ id: 'scene_01', kind: 'text', label: '布局标题', durationSec: 2, text: '布局正文' }],
+                edges: [],
+              }),
+            };
+          }
+          return {
+            success: true,
+            text: '<!doctype html><html><head><meta name="viewport" content="width=1920,height=1080,initial-scale=1"><style>html,body{margin:0;width:1920px;height:1080px;overflow:hidden}.stage{width:1920px;height:1080px;display:grid;place-items:center;animation:in .8s ease both}@keyframes in{from{opacity:.2}to{opacity:1}}</style></head><body data-hv-canvas data-width="1920" data-height="1080"><main class="stage" data-frame-id="scene_01"><h1 data-text-key="headline">布局标题</h1><p data-text-key="subtitle">布局旁白</p><section data-text-key="body">布局正文</section></main></body></html>',
+          };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      layoutQaService: {
+        inspectFrameHtmlLayout: async ({ htmlPath, frame }) => {
+          await fs.access(htmlPath);
+          layoutQaCalls.push({ htmlPath, frameId: frame.id });
+          return {
+            success: false,
+            issues: [{ code: 'text_overlap', message: '标题覆盖正文。', severity: 'error' }],
+            metrics: { samples: [{ sample_time_sec: 0.8 }] },
+          };
+        },
+      },
+      frameRenderer: {
+        renderFrame: async () => {
+          layoutQaRenderCalled = true;
+          throw new Error('layout QA failed frames should not render');
+        },
+      },
+    },
+  });
+  assert.equal(layoutQaFailureResult.success, false);
+  assert.equal(layoutQaFailureResult.code, 'layout_qa_failed');
+  assert.equal(layoutQaFailureResult.html_video_diagnostics.some(item => item.code === 'layout_qa_failed' && item.repair_action === 'retry_frame_html'), true);
+  assert.equal(layoutQaFailureResult.html_video_diagnostics.some(item => item.details?.issues?.[0]?.code === 'text_overlap'), true);
+  assert.equal(layoutQaCalls.length, 1);
+  assert.equal(layoutQaRenderCalled, false);
+
   const contentGraphAiFailure = await workflow.generateHtmlVideo({
     workflowId: '202606170000000009_graph_ai_failure',
     runId: 'run_graph_ai_failure',

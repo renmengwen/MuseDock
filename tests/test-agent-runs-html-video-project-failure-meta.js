@@ -124,5 +124,42 @@ const agentRuns = require('../server/services/agent/agentRuns');
   assert.equal(successResult.hyperframes_freeform.project.asset_usage_report.used_asset_ids[0], 'article_01');
   assert.equal(successPersisted.hyperframes_freeform.project.asset_usage_report.used_asset_ids[0], 'article_01');
 
+  const legacyRunId = 'run-legacy-freeform-disabled';
+  fs.writeFileSync(path.join(runDir, `${legacyRunId}.json`), JSON.stringify({
+    success: true,
+    run_id: legacyRunId,
+    template: 'hyperframes_freeform',
+    aweme_id: awemeId,
+    status: 'ready',
+    hyperframes_freeform: {
+      status: 'ready',
+      brief: {
+        status: 'ready',
+        data: {
+          title: '旧工程入口禁用测试',
+          storyboard: {
+            scenes: [{ index: 1, narration_text: '测试旁白。' }],
+          },
+        },
+      },
+    },
+  }, null, 2));
+
+  const legacyResult = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, legacyRunId, {
+    rootDir,
+    useLegacyFreeformProject: true,
+    creativeVideoWorkflowFacade: {
+      generateCreativeVideoProject: async () => {
+        throw new Error('不应调用 html-video facade');
+      },
+    },
+  });
+  assert.equal(legacyResult.success, false);
+  assert.match(legacyResult.message, /旧 HyperFrames\/freeform 工程生成入口已禁用/);
+  assert.equal(legacyResult.fallback_allowed, false);
+  const legacyPersisted = JSON.parse(fs.readFileSync(path.join(runDir, `${legacyRunId}.json`), 'utf8'));
+  assert.equal(legacyPersisted.hyperframes_freeform.project.status, 'failed');
+  assert.match(legacyPersisted.hyperframes_freeform.project.message, /旧 HyperFrames\/freeform 工程生成入口已禁用/);
+
   console.log('agent runs html-video project failure meta tests passed');
 })();

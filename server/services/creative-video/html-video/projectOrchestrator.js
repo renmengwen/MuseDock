@@ -31,6 +31,122 @@ function getOutputConfig(project) {
   return objectOrEmpty(project.output || project.render || {});
 }
 
+function frameHtmlAbsolutePath(projectDir, frame = {}) {
+  const htmlPath = String(frame.html_path || frame.htmlPath || '').trim();
+  if (!htmlPath) return '';
+  return path.isAbsolute(htmlPath) ? htmlPath : path.join(projectDir, htmlPath);
+}
+
+function summarizeLayoutIssue(issue = {}) {
+  return issue.message
+    || issue.user_message
+    || issue.code
+    || '检测到文字或元素遮挡、出框、被裁切等布局问题。';
+}
+
+async function inspectProjectLayoutBeforeRender({
+  projectDir,
+  project,
+  services = {},
+  onProgress = null,
+} = {}) {
+  const layoutQaService = services.layoutQaService || defaultLayoutQaService;
+  const outputConfig = getOutputConfig(project);
+  const resolution = outputConfig.resolution || {};
+  const frames = Array.isArray(project.frames) ? project.frames : [];
+  const diagnostics = [];
+  const reports = [];
+
+  for (let index = 0; index < frames.length; index += 1) {
+    const frame = frames[index];
+    const frameId = frame.id || frame.scene_id || `frame_${index + 1}`;
+    const htmlPath = frameHtmlAbsolutePath(projectDir, frame);
+    await report(onProgress, {
+      type: 'html_video_layout_qa_started',
+      stage: 'project',
+      sub_stage: 'layout_qa',
+      message: `正在检查第 ${index + 1}/${frames.length} 帧布局遮挡...`,
+      frame_id: frameId,
+      data: { frame_id: frameId, index, total: frames.length },
+    });
+
+    if (!htmlPath) {
+      diagnostics.push(createDiagnostic({
+        code: 'layout_qa_failed',
+        stage: 'project',
+        sub_stage: 'layout_qa',
+        frame_id: frameId,
+        user_message: `第 ${index + 1} 帧缺少 HTML 文件，无法进行布局检查。`,
+        retryable: true,
+        repair_action: 'retry_frame_html',
+        fallback_allowed: false,
+        details: { frame_id: frameId },
+      }));
+      continue;
+    }
+
+    let layoutQa;
+    try {
+      layoutQa = await layoutQaService.inspectFrameHtmlLayout({
+        htmlPath,
+        frame,
+        resolution,
+        durationSec: frame.duration_sec ?? frame.durationSec,
+      });
+    } catch (error) {
+      diagnostics.push(createDiagnostic({
+        code: 'layout_qa_failed',
+        stage: 'project',
+        sub_stage: 'layout_qa',
+        frame_id: frameId,
+        user_message: `第 ${index + 1} 帧布局检查失败：${error.message || '未知错误'}`,
+        retryable: true,
+        repair_action: 'retry_frame_html',
+        fallback_allowed: false,
+        details: { frame_id: frameId, error: error.message || String(error) },
+      }));
+      continue;
+    }
+
+    reports.push({ frame_id: frameId, ...layoutQa });
+    if (!layoutQa.success) {
+      diagnostics.push(createDiagnostic({
+        code: 'layout_qa_failed',
+        stage: 'project',
+        sub_stage: 'layout_qa',
+        frame_id: frameId,
+        user_message: `第 ${index + 1} 帧布局检查未通过：${summarizeLayoutIssue(layoutQa.issues?.[0])}`,
+        retryable: true,
+        repair_action: 'retry_frame_html',
+        fallback_allowed: false,
+        details: {
+          frame_id: frameId,
+          html_path: frame.html_path || frame.htmlPath || '',
+          issues: layoutQa.issues || [],
+          metrics: layoutQa.metrics || {},
+        },
+      }));
+    }
+
+    await report(onProgress, {
+      type: 'html_video_layout_qa_done',
+      stage: 'project',
+      sub_stage: 'layout_qa',
+      message: layoutQa.success
+        ? `第 ${index + 1}/${frames.length} 帧布局检查通过。`
+        : `第 ${index + 1}/${frames.length} 帧布局检查发现遮挡问题。`,
+      frame_id: frameId,
+      data: { frame_id: frameId, layout_qa: layoutQa },
+    });
+  }
+
+  return {
+    success: diagnostics.length === 0,
+    diagnostics,
+    reports,
+  };
+}
+
 function expectedDurationSec(project) {
   return (Array.isArray(project.frames) ? project.frames : [])
     .reduce((total, frame) => total + Number(frame.duration_sec || frame.durationSec || 0), 0);
@@ -908,6 +1024,7 @@ async function renderHtmlVideoProject({
   templateRegistry,
   services = {},
   skipRender = false,
+  runLayoutQa = false,
   onProgress = null,
   targetDurationSec,
 } = {}) {
@@ -985,6 +1102,28 @@ async function renderHtmlVideoProject({
       html_video_project_path: resolvedProjectDir,
       diagnostics,
     };
+  }
+
+  if (runLayoutQa === true) {
+    const layoutQa = await inspectProjectLayoutBeforeRender({
+      projectDir: resolvedProjectDir,
+      project: nextProject,
+      services,
+      onProgress,
+    });
+    diagnostics.push(...layoutQa.diagnostics);
+    if (!layoutQa.success) {
+      return {
+        success: false,
+        code: 'layout_qa_failed',
+        message: layoutQa.diagnostics[0]?.user_message || 'html-video 帧布局检查未通过，已停止渲染。',
+        project: nextProject,
+        project_dir: resolvedProjectDir,
+        html_video_project_path: resolvedProjectDir,
+        diagnostics,
+        layout_qa: layoutQa.reports,
+      };
+    }
   }
 
   const rendered = await renderHtmlVideoFrames({

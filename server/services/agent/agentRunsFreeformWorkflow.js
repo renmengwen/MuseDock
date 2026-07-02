@@ -1682,6 +1682,19 @@
     }
 
 
+    return markFreeformProjectFailed(
+      awemeId,
+      runId,
+      '旧 HyperFrames/freeform 工程生成入口已禁用，请使用 html-video production 生成工程。',
+      options,
+      operationId,
+      {
+        render_mode: 'html-video',
+        fallback_allowed: false,
+        retryable: false,
+      },
+    );
+
 
     const skillContext = options.skillContext || defaultHyperframesSkillContext;
 

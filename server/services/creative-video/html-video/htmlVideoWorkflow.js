@@ -1078,6 +1078,7 @@ async function generateHtmlVideo(options = {}) {
     templateRegistry,
     services = {},
     skipValidation = false,
+    runLayoutQa = false,
     onProgress = null,
     preferredTemplateId = '',
     projectOptions = {},
@@ -1594,6 +1595,7 @@ async function generateHtmlVideo(options = {}) {
     templateRegistry: registry,
     services,
     onProgress,
+    runLayoutQa: runLayoutQa === true && !skipValidation,
     targetDurationSec: trustedTargetDurationSec,
   });
   rendered.project = await attachAssetUsageReport({
@@ -1604,6 +1606,7 @@ async function generateHtmlVideo(options = {}) {
   diagnostics.push(...normalizeDiagnostics(rendered.diagnostics));
   if (!rendered.success) {
     return failure(rendered.message || 'html-video 工程渲染失败。', diagnostics, {
+      ...(rendered.code ? { code: rendered.code } : {}),
       html_video_project_path: rendered.html_video_project_path || projectDir,
       project_dir: rendered.project_dir || projectDir,
       project: rendered.project || project,

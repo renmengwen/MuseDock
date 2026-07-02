@@ -468,6 +468,7 @@ async function generateCreativeVideoProject({
           visualQaService: resolved.visualQaService,
         },
         skipValidation,
+        runLayoutQa: true,
         onProgress,
       });
     } catch (error) {
