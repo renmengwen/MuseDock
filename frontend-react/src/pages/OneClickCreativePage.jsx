@@ -971,7 +971,7 @@ export function OneClickCreativePage() {
         onDeleteTask={deleteTask}
       />
 
-      <section className="min-w-0 overflow-auto bg-white">
+      <section className="min-h-0 min-w-0 overflow-auto bg-white">
         <div className={selectedWorkflowId
           ? 'mx-auto grid min-h-screen w-full max-w-[1120px] content-start justify-stretch gap-[22px] px-8 py-[42px]'
           : 'mx-auto grid min-h-screen w-full max-w-[920px] content-center justify-items-center gap-[22px] px-8 py-14'}

@@ -4,7 +4,7 @@ import { STATUS_TEXT, getStepState, normalizeWorkflowStages } from './creativeDi
 
 const DOT_CLASS = {
   done: 'border-[#16a34a] bg-[#16a34a] text-white',
-  active: 'border-[#111827] bg-white text-[#111827] shadow-[0_0_0_5px_rgba(17,24,39,.08)]',
+  active: 'border-[#111827] bg-[#111827] text-white shadow-[0_0_0_5px_rgba(17,24,39,.12)]',
   failed: 'border-red-600 bg-red-50 text-red-600',
   waiting: 'border-[#d7dce3] bg-white text-[#8a93a2]',
   '': 'border-[#d7dce3] bg-white text-[#8a93a2]',
@@ -26,6 +26,11 @@ const STATUS_CLASS = {
   '': 'text-[#8a93a2]',
 };
 
+const STEP_CLASS = {
+  active: 'bg-[#f8fafc] ring-1 ring-[#d1d5db] shadow-[0_10px_24px_rgba(15,23,42,.08)]',
+  failed: 'bg-red-50 ring-1 ring-red-200',
+};
+
 export function CreativeWorkflowStepper({ workflow }) {
   const stages = useMemo(() => normalizeWorkflowStages(workflow), [workflow]);
 
@@ -34,10 +39,14 @@ export function CreativeWorkflowStepper({ workflow }) {
       {stages.map((stage, index) => {
         const stepState = getStepState(stage, index, stages);
         return (
-          <div className="relative grid min-w-[72px] justify-items-center gap-2 text-center" key={stage.id || stage.label}>
+          <div
+            className={cn('relative grid min-w-[72px] justify-items-center gap-2 rounded-lg px-2 py-2 text-center', STEP_CLASS[stepState])}
+            key={stage.id || stage.label}
+            aria-current={stepState === 'active' ? 'step' : undefined}
+          >
             {index > 0 ? (
               <span
-                className={cn('creativeWorkflowStepConnector absolute right-[calc(50%+18px)] top-[13px] h-0.5 w-[calc(100%-36px)] rounded-full', CONNECTOR_CLASS[stepState])}
+                className={cn('creativeWorkflowStepConnector absolute right-[calc(50%+18px)] top-[21px] h-0.5 w-[calc(100%-36px)] rounded-full', CONNECTOR_CLASS[stepState])}
                 aria-hidden="true"
               />
             ) : null}

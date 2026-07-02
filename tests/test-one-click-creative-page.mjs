@@ -120,6 +120,9 @@ for (const text of [
   zh.creativeTitle,
   zh.newTask,
   zh.taskList,
+  '搜索创作任务',
+  '输入关键词搜索任务',
+  '没有匹配的任务。',
 ]) {
   assert.ok(creativeSidebar.includes(text), `CreativeSidebar.jsx should include normal Chinese text: ${text}`);
 }
@@ -354,19 +357,20 @@ assert.match(page, /<CreativeComposer[\s\S]*setMode=\{setMode\}/, 'OneClickCreat
 assert.match(page, /sidebarCollapsed/, 'OneClickCreativePage should track collapsed task sidebar state');
 assert.match(page, /setSidebarCollapsed/, 'OneClickCreativePage should toggle the task sidebar');
 assert.ok(creativeSidebar.includes('className="creativeSidebarToggle"'), 'Task sidebar collapse control should be a real button');
+assert.match(creativeSidebar, /<Dialog\s+open=\{searchOpen\}\s+onOpenChange=\{setSearchOpen\}>/, 'Task search should open a real dialog');
+assert.match(creativeSidebar, /onClick=\{\(\) => selectSearchTask\(task\)\}/, 'Task search result should select and navigate to the task detail');
 assert.match(creativeSidebar, /return sidebarCollapsed \? \(\s*<aside className="creativeTaskSidebar collapsed"/, 'Collapsed sidebar should render a minimal rail instead of compressed full sidebar content');
 assert.match(creativeSidebar, /className="creativeCollapsedExpand"/, 'Collapsed sidebar should expose only one top-left expand button');
 assert.ok(!page.includes('creativeFloatingExpand'), 'Collapsed sidebar should not render a floating expand pill over the rail');
 assert.ok(creativeComposer.includes('className="creativeModeThumb"'), 'Mode switch should use an animated thumb instead of button borders');
 assert.ok(creativeComposer.includes('data-mode={mode}'), 'Mode switch should expose mode state for thumb animation');
-assert.match(shell, /to="\/settings"/, 'AppShell should expose settings entry inside the top brand card');
-assert.match(shell, /<header className="header"[\s\S]*className="creativeHeaderSettings"[\s\S]*<\/header>/, 'Settings entry should live on the right side of the top brand card');
-assert.doesNotMatch(page, /<form className="creativePromptComposer"[\s\S]*className="creativeHeaderSettings"[\s\S]*<\/form>/, 'Settings entry should not sit inside the input box');
-assert.match(shell, /Settings2/, 'Settings entry should include a settings icon');
-assert.ok(shell.includes(zh.settings), 'AppShell should render settings text in normal Chinese');
-assert.match(shell, /location\.pathname === '\/settings'/, 'AppShell should detect the settings route');
-assert.match(shell, /to="\/creative"/, 'Settings route header action should return to the creative page predictably');
-assert.ok(shell.includes('返回'), 'Settings route header action should render back text in Chinese');
+assert.doesNotMatch(shell, /<header className="header"/, 'AppShell should not render the removed top intro bar');
+assert.doesNotMatch(shell, /creativeHeaderSettings/, 'AppShell should not keep the removed header settings action');
+assert.doesNotMatch(styles, /\.header\s*\{/, 'styles.css should not keep the removed top intro bar styles');
+assert.ok(!styles.includes('.creativeHeaderSettings'), 'styles.css should remove the old top header action styles');
+assert.match(styles, /\.creativeChatShell\s*\{[\s\S]*min-height:\s*100vh;/, 'Creative shell should use the full viewport after removing the top intro bar');
+assert.match(styles, /\.creativeChatShell\s*\{[\s\S]*height:\s*100vh;[\s\S]*overflow:\s*hidden;/, 'Creative shell should not grow when task detail content is taller than the viewport');
+assert.match(page, /<section className="min-h-0 min-w-0 overflow-auto bg-white">/, 'Creative detail pane should be the scroll container');
 assert.doesNotMatch(page, /<Bot\s+size=\{15\}/, 'Prompt quick actions should remove the smart video pill in every mode');
 assert.ok(!page.includes('智能成片'), 'Prompt quick actions should not render smart video copy');
 assert.match(page, /const submitDisabled = isBusy \|\| mode === 'expert'/, 'Expert mode should contribute to submit disabled state');
@@ -385,13 +389,19 @@ assert.match(creativeSidebar, /creativeTaskSidebar/, 'CreativeSidebar should ren
 assert.ok(creativeComposer.includes('className="creativePromptComposer"'), 'CreativeComposer should render a central prompt composer');
 assert.ok(styles.includes('.creativeChatShell'), 'styles.css should define the creative chat shell layout');
 assert.ok(styles.includes('.creativeTaskSidebar'), 'styles.css should define the creative task sidebar');
+assert.match(styles, /grid-template-rows:\s*auto auto auto minmax\(0, 1fr\) auto;/, 'Task sidebar should keep settings visible while only the task list scrolls');
+assert.match(styles, /\.creativeTaskSidebar\s*\{[\s\S]*overflow:\s*hidden;/, 'Task sidebar should keep its footer inside the viewport shell');
 assert.ok(!styles.includes('.creativeFloatingExpand'), 'styles.css should not keep a floating expand button over collapsed sidebar');
 assert.ok(!page.includes('<div className="agentStatusList">'), 'WorkflowStatusPanel should not render li elements inside a div.agentStatusList');
 assert.doesNotMatch(page, /<WorkflowStatusPanel/, 'Creative task detail should not render the old current-task card');
 assert.match(creativeTaskDetail, /creativeDetailMeta/, 'Creative task detail should show task id and status in a compact meta row');
 assert.match(creativeWorkflowStepper, /creativeWorkflowStepper/, 'Creative task detail should render a horizontal workflow stepper');
 assert.match(creativeWorkflowStepper, /creativeWorkflowStepConnector/, 'Creative workflow stepper should render connectors between steps');
+assert.match(creativeWorkflowStepper, /aria-current=\{stepState === 'active' \? 'step' : undefined\}/, 'Active workflow step should be exposed and visually highlighted');
 assert.ok(styles.includes('.creativeWorkflowStepper'), 'styles.css should define workflow stepper layout');
+assert.ok(creativeComposer.includes('className="flex items-center justify-between gap-3 max-[720px]:items-end"'), 'CreativeComposer should keep prompt actions on one row with Tailwind');
+assert.match(creativeSidebar, /DialogContent className="w-\[min\(560px,calc\(100vw-32px\)\)\]"/, 'CreativeSidebar should size task search dialog with Tailwind');
+assert.ok(!styles.includes('.creativeTaskSearchDialog'), 'styles.css should not define task search dialog layout for new shadcn Dialog UI');
 assert.ok(!styles.includes('.creativePromptModalOverlay'), 'styles.css should remove the old prompt modal overlay styles after shadcn Dialog migration');
 assert.ok(!styles.includes('.creativePromptModalHeader'), 'styles.css should remove the old prompt modal header styles after shadcn Dialog migration');
 assert.ok(!styles.includes('.creativePromptModalClose'), 'styles.css should remove the old prompt modal close styles after shadcn Dialog migration');

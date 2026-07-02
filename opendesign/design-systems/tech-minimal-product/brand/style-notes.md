@@ -24,6 +24,7 @@
 
 ## 组件
 
+- 新增通用控件优先使用 Tailwind CSS utility class 与官方 `shadcn/ui` 组件；不要继续向 `frontend-react/src/styles.css` 追加大段全局样式。
 - 按钮高度 32-40px；图标按钮 32px。
 - 表单控件高度 36-40px；文本域最小高度根据用途设置。
 - 通用卡片圆角最大 8px，不使用套卡片；首页主输入器沿用原版较大的圆角输入框。

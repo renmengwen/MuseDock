@@ -83,7 +83,7 @@ function CreativePromptComposer({
         rows={4}
       />
 
-      <div className="creativePromptActions">
+      <div className="flex items-center justify-between gap-3 max-[720px]:items-end">
         <div className="creativeQuickActions">
           <Button
             type="button"
@@ -102,6 +102,7 @@ function CreativePromptComposer({
           type="submit"
           disabled={submitDisabled}
           aria-label="一键生成视频"
+          title="一键生成视频"
         >
           {isBusy ? <Loader2 size={18} className="spinIcon" /> : <ArrowUp size={19} />}
         </Button>

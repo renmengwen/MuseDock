@@ -29,18 +29,6 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f7f9; color: #2b2f36; }
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  background: #111827;
-  color: #fff;
-  padding: 20px 32px;
-}
-.header h1 { margin: 0; font-size: 22px; }
-.header p { margin: 4px 0 0; font-size: 13px; opacity: .92; }
-.headerText { min-width: 0; }
 .tabs { display: flex; background: #fff; border-bottom: 1px solid #e7e9ee; }
 .tabs a,
 .tabs button { display: inline-flex; align-items: center; min-height: 46px; padding: 0 24px; color: #606774; border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: pointer; font: inherit; }
@@ -375,7 +363,9 @@ a { color: #30343b; text-decoration: none; }
 .creativeChatShell {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  min-height: calc(100vh - 92px);
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
   background: #fff;
   transition: grid-template-columns .24s ease;
 }
@@ -385,9 +375,11 @@ a { color: #30343b; text-decoration: none; }
 .creativeTaskSidebar {
   position: relative;
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 18px;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   padding: 20px 12px 16px;
   border-right: 1px solid #eef1f5;
   background: #f8fafc;
@@ -433,8 +425,8 @@ a { color: #30343b; text-decoration: none; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 32px;
+  height: 32px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -593,7 +585,7 @@ a { color: #30343b; text-decoration: none; }
   align-content: center;
   gap: 22px;
   width: min(100%, 920px);
-  min-height: calc(100vh - 92px);
+  min-height: 100vh;
   margin: 0 auto;
   padding: 56px 32px;
 }
@@ -621,29 +613,6 @@ a { color: #30343b; text-decoration: none; }
   font-size: 24px;
   line-height: 1.2;
   letter-spacing: 0;
-}
-.creativeHeaderSettings {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex: 0 0 auto;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid rgba(255,255,255,.42);
-  border-radius: 999px;
-  background: rgba(255,255,255,.16);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
-  box-shadow: 0 8px 20px rgba(15,23,42,.10);
-  backdrop-filter: blur(10px);
-  transition: color .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
-}
-.creativeHeaderSettings:hover {
-  color: #fff;
-  border-color: rgba(255,255,255,.72);
-  box-shadow: 0 12px 28px rgba(15,23,42,.16);
-  transform: translateY(-2px);
 }
 .creativeModeSwitch {
   position: relative;
@@ -790,7 +759,9 @@ a { color: #30343b; text-decoration: none; }
   cursor: pointer;
 }
 .creativeSubmitButton:hover:not(:disabled) {
-  background: #2563eb;
+  background: #1d4ed8;
+  color: #fff;
+  transform: translateY(-1px);
 }
 .creativeSubmitButton:disabled {
   cursor: not-allowed;
@@ -1446,7 +1417,9 @@ a { color: #30343b; text-decoration: none; }
   .container { padding: 18px 16px; }
   .creativeChatShell {
     grid-template-columns: 1fr;
+    height: auto;
     min-height: auto;
+    overflow: visible;
   }
   .creativeTaskSidebar {
     max-height: 280px;
@@ -1746,7 +1719,7 @@ a { color: #30343b; text-decoration: none; }
 }
 
 .creativeEditorPage {
-  min-height: calc(100vh - 148px);
+  min-height: 100vh;
   padding: 24px 32px;
   background: #f6f7f9;
 }

@@ -1,6 +1,15 @@
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CirclePlus, FileText, PanelLeft, Search, Settings2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog.jsx';
 import { cn } from '@/lib/utils.js';
 import { STATUS_TEXT } from './creativeDisplay.js';
 
@@ -13,6 +22,26 @@ export function CreativeSidebar({
   onSelectTask,
   onDeleteTask,
 }) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const filteredTasks = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return tasks;
+    return tasks.filter(task => [
+      task.title,
+      task.input,
+      task.workflow_id,
+      STATUS_TEXT[task.status],
+      task.status,
+    ].some(value => String(value || '').toLowerCase().includes(query)));
+  }, [searchQuery, tasks]);
+
+  function selectSearchTask(task) {
+    onSelectTask(task);
+    setSearchOpen(false);
+    setSearchQuery('');
+  }
+
   return sidebarCollapsed ? (
     <aside className="creativeTaskSidebar collapsed" aria-label="已收起的创作任务栏">
       <Button
@@ -42,8 +71,53 @@ export function CreativeSidebar({
           <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-none">一键创作</strong>
           <span className="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-[#69717e]">MuseDock 本地视频生产控制台</span>
         </div>
-        <div className="inline-flex gap-3 text-[#667085]">
-          <Search size={17} aria-hidden="true" />
+        <div className="inline-flex items-center gap-1 text-[#667085]">
+          <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
+            <DialogTrigger asChild>
+              <Button
+                className="size-8 rounded-md bg-transparent p-0 text-[#667085] hover:bg-[#eef0f4] hover:text-[#111827]"
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="搜索创作任务"
+                title="搜索创作任务"
+              >
+                <Search size={17} aria-hidden="true" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="w-[min(560px,calc(100vw-32px))]" showCloseButton>
+              <DialogHeader>
+                <DialogTitle>搜索创作任务</DialogTitle>
+                <DialogDescription>按标题、输入内容、任务 ID 或状态筛选任务。</DialogDescription>
+              </DialogHeader>
+              <input
+                className="h-10 w-full rounded-lg border border-[#d9dde5] bg-white px-3 text-sm text-[#111827] outline-none focus:border-[#111827] focus:shadow-[0_0_0_3px_rgba(37,244,238,.18)]"
+                value={searchQuery}
+                onChange={event => setSearchQuery(event.target.value)}
+                placeholder="输入关键词搜索任务"
+                autoFocus
+              />
+              <div className="grid max-h-[min(54vh,420px)] gap-1.5 overflow-auto" aria-label="搜索结果">
+                {filteredTasks.length ? filteredTasks.map(task => (
+                  <button
+                    type="button"
+                    className={cn(
+                      'grid w-full min-w-0 cursor-pointer gap-1 rounded-lg border border-[#edf0f4] bg-white px-3 py-2.5 text-left text-[#111827] hover:border-[#111827] hover:bg-[#f8fafc]',
+                      task.workflow_id === selectedWorkflowId && 'border-[#111827] bg-[#f8fafc]',
+                    )}
+                    key={task.workflow_id}
+                    onClick={() => selectSearchTask(task)}
+                  >
+                    <strong className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{task.title}</strong>
+                    <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-[#69717e]">{STATUS_TEXT[task.status] || task.status || '等待中'} · {task.timeLabel}</span>
+                    <small className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-[#69717e]">{task.workflow_id}</small>
+                  </button>
+                )) : (
+                  <div className="rounded-lg border border-dashed border-[#d9dde5] p-[18px] text-center text-[13px] text-[#69717e]">没有匹配的任务。</div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
           <Button
             className="creativeSidebarToggle"
             type="button"
@@ -59,7 +133,7 @@ export function CreativeSidebar({
       </div>
 
       <Button
-        className="min-h-[42px] w-full rounded-lg border border-[#111827] bg-[#111827] text-sm text-white shadow-[0_8px_22px_rgba(15,23,42,.10)] transition hover:bg-[#020617]"
+        className="min-h-[42px] w-full rounded-lg border border-[#111827] bg-[#111827] text-sm text-white shadow-[0_8px_22px_rgba(15,23,42,.10)] transition hover:bg-[#020617] hover:text-white"
         type="button"
         variant="outline"
         onClick={onNewTask}
