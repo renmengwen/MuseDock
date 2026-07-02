@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 import {
   clamp,
@@ -568,9 +568,9 @@ export function HtmlVideoCanvasEditor({ editor }) {
   }
 
   return (
-    <section className="grid min-w-0 gap-2">
-      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_260px] gap-2 max-[1100px]:grid-cols-1">
-        <div className="grid min-w-0 gap-2.5 rounded-lg border border-slate-700 bg-slate-950">
+    <section className="grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] gap-2">
+      <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)_260px] gap-2 max-[1100px]:grid-cols-1">
+        <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 rounded-lg border border-slate-700 bg-slate-950">
           <div className="flex items-center justify-between gap-2 border-b border-slate-700 bg-slate-800 px-2.5 py-2 max-[720px]:flex-col max-[720px]:items-start">
             <span className="text-xs text-slate-300">{previewError || (playbackState === 'playing' ? '正在播放镜头动画...' : editingReady ? '已停在镜头可编辑帧，可开始编辑。' : '正在准备预览...')}</span>
             <div className="flex flex-wrap justify-end gap-1.5">
@@ -585,16 +585,18 @@ export function HtmlVideoCanvasEditor({ editor }) {
             </div>
           ) : null}
           {!htmlReady && !htmlLoadError ? <p className="m-3 rounded-lg border border-slate-700 bg-slate-800 p-3 text-sm text-slate-300">正在加载当前镜头 HTML...</p> : null}
-          <iframe
-            key={iframeKey}
-            ref={iframeRef}
-            className="mx-auto mb-2.5 mt-0 aspect-video w-full max-w-[min(560px,65vh)] rounded-md border border-slate-700 bg-slate-950"
-            title="html-video 当前镜头画布"
-            srcDoc={srcDoc}
-            sandbox="allow-scripts allow-same-origin"
-            onLoad={handleIframeLoad}
-            onError={() => setPreviewError('镜头预览加载失败，请检查 HTML 或重新播放。')}
-          />
+          <div className="grid min-h-0 place-items-center px-2 pb-2">
+            <iframe
+              key={iframeKey}
+              ref={iframeRef}
+              className="aspect-video h-full max-h-full w-auto max-w-full rounded-md border border-slate-700 bg-slate-950"
+              title="html-video 当前镜头画布"
+              srcDoc={srcDoc}
+              sandbox="allow-scripts allow-same-origin"
+              onLoad={handleIframeLoad}
+              onError={() => setPreviewError('镜头预览加载失败，请检查 HTML 或重新播放。')}
+            />
+          </div>
         </div>
         <div className="grid min-w-0 content-start gap-3">
           <HtmlVideoElementInspector
@@ -609,16 +611,19 @@ export function HtmlVideoCanvasEditor({ editor }) {
           />
           <Dialog>
             <DialogTrigger asChild>
-              <button className={secondaryButtonClass} type="button" disabled={disabled}>帧字段 / 旁白 / 字幕</button>
+              <button className={`${secondaryButtonClass} w-full`} type="button" disabled={disabled}>帧字段 / 旁白 / 字幕</button>
             </DialogTrigger>
-            <DialogContent className="max-h-[84vh] overflow-auto border-slate-700 bg-slate-900 text-slate-100 sm:max-w-3xl">
-              <DialogHeader>
-                <DialogTitle>帧字段 / 旁白 / 字幕</DialogTitle>
+            <DialogContent className="grid max-h-[86vh] w-[min(1040px,calc(100vw-32px))] max-w-[1040px] grid-rows-[auto_1fr] gap-0 overflow-hidden rounded-lg border-[#d9dde5] bg-[#f8fafc] p-0 text-[#111827] shadow-[0_24px_70px_rgba(15,23,42,.28)] sm:max-w-[1040px]">
+              <DialogHeader className="border-b border-[#e7e9ee] bg-white px-5 py-4 pr-12">
+                <DialogTitle className="text-[15px]">帧字段 / 旁白 / 字幕</DialogTitle>
+                <DialogDescription>编辑当前帧的模板字段、全片旁白和字幕文本。</DialogDescription>
               </DialogHeader>
-              <div className="grid gap-3">
+              <div className="grid min-h-0 gap-3 overflow-auto p-4 md:grid-cols-[minmax(0,1.2fr)_minmax(280px,.8fr)]">
                 <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} />
-                <NarrationPanel narration={editor.project?.narration} disabled={disabled} onSave={editor.saveTemplateInputs} onRegenerate={editor.regenerateNarration} />
-                <CaptionsPanel captions={frame?.captions || []} selectedFrameId={frameId} disabled={disabled} onSave={patchFrame} />
+                <div className="grid content-start gap-3">
+                  <NarrationPanel narration={editor.project?.narration} disabled={disabled} onSave={editor.saveTemplateInputs} onRegenerate={editor.regenerateNarration} />
+                  <CaptionsPanel captions={frame?.captions || []} selectedFrameId={frameId} disabled={disabled} onSave={patchFrame} />
+                </div>
               </div>
             </DialogContent>
           </Dialog>

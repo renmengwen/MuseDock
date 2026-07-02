@@ -95,7 +95,7 @@ export function CreativeEditorPage() {
   const title = getEditorWorkflowTitle(workflow, workflowId);
 
   return (
-    <main className="min-h-screen bg-[#f6f7f9] px-6 py-4 max-[720px]:px-4">
+    <main className="flex h-screen min-h-screen flex-col overflow-hidden bg-[#f6f7f9] px-6 py-4 max-[720px]:px-4">
       <header className="mb-3 flex items-center justify-between gap-4 max-[720px]:flex-col max-[720px]:items-start">
         <div>
           <span className="text-[13px] text-[#69717e]">视频编辑器</span>
@@ -134,7 +134,9 @@ export function CreativeEditorPage() {
       )}
 
       {!loading && !errorMessage && workflow && (
-        <CreativeVideoEditor workflowId={workflowId} api={api} onRendered={loadWorkflow} />
+        <div className="min-h-0 flex-1">
+          <CreativeVideoEditor workflowId={workflowId} api={api} onRendered={loadWorkflow} />
+        </div>
       )}
     </main>
   );

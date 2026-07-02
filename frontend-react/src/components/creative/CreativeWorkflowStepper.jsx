@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils.js';
 import { STATUS_TEXT, getStepState, normalizeWorkflowStages } from './creativeDisplay.js';
 
 const DOT_CLASS = {
-  done: 'border-[#16a34a] bg-[#16a34a] text-white',
+  done: 'border-[#111827] bg-[#f8fafc] text-[#111827]',
   active: 'border-[#111827] bg-[#111827] text-white shadow-[0_0_0_6px_rgba(17,24,39,.12)]',
   failed: 'border-red-600 bg-red-50 text-red-600',
   queued: 'border-[#cbd5e1] bg-[#f8fafc] text-[#475569]',
@@ -12,8 +12,8 @@ const DOT_CLASS = {
 };
 
 const CONNECTOR_CLASS = {
-  done: 'bg-[#16a34a]',
-  active: 'bg-[#16a34a]',
+  done: 'bg-[#111827]',
+  active: 'bg-[#111827]',
   failed: 'bg-red-300',
   queued: 'bg-[#e4e8ef]',
   waiting: 'bg-[#e4e8ef]',
@@ -21,7 +21,7 @@ const CONNECTOR_CLASS = {
 };
 
 const STATUS_CLASS = {
-  done: 'text-[#15803d]',
+  done: 'text-[#4b5563]',
   active: 'rounded-full bg-[#111827] px-2 py-0.5 text-white',
   failed: 'text-red-700',
   queued: 'text-[#64748b]',

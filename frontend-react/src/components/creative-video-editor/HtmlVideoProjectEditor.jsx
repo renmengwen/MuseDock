@@ -38,7 +38,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
   }
 
   return (
-    <section className="grid gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-slate-100 shadow-[0_18px_48px_rgba(15,23,42,.18)]">
+    <section className="grid h-full min-h-0 grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-slate-100 shadow-[0_18px_48px_rgba(15,23,42,.18)]">
       <ProjectStatusBar status={editor.status} message={editor.message} dirtyRequiresRender={editor.dirtyRequiresRender} />
       <div className="flex flex-wrap gap-2">
         <button className={TOOL_BUTTON_CLASS} type="button" disabled={disabled} onClick={editor.load}>重新加载</button>
@@ -107,7 +107,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         editing={editor.status === 'editing'}
         onSubmit={editor.applyNaturalLanguageEdit}
       />
-      <div className="grid min-w-0 grid-cols-1">
+      <div className="grid min-h-0 min-w-0 grid-cols-1">
         <HtmlVideoCanvasEditor editor={editor} />
       </div>
     </section>

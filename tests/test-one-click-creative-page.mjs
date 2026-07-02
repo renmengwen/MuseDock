@@ -415,6 +415,7 @@ assert.match(creativeProgressPanel, /isActiveProgress/, 'Current progress panel 
 assert.match(creativeProgressPanel, /motion-safe:animate-pulse/, 'Current progress bar should use Tailwind for its breathing animation');
 assert.match(creativeProgressPanel, /motion-reduce:animate-none/, 'Current progress bar animation should respect reduced motion');
 assert.match(creativeWorkflowStepper, /grid w-full min-w-0 grid-cols-\[repeat\(10,minmax\(72px,1fr\)\)\]/, 'workflow stepper layout should be inline Tailwind');
+assert.doesNotMatch(creativeWorkflowStepper, /#16a34a|#15803d|green-/, 'Workflow stepper completed state should stay on the neutral product palette');
 assert.ok(creativeComposer.includes('className="flex items-center justify-between gap-3 max-[720px]:items-end"'), 'CreativeComposer should keep prompt actions on one row with Tailwind');
 assert.match(creativeSidebar, /DialogContent className="w-\[min\(560px,calc\(100vw-32px\)\)\]"/, 'CreativeSidebar should size task search dialog with Tailwind');
 assert.ok(!styles.includes('.creativeTaskSearchDialog'), 'styles.css should not define task search dialog layout for new shadcn Dialog UI');
