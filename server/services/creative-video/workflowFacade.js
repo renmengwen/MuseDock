@@ -83,6 +83,13 @@ function firstText(...values) {
   return '';
 }
 
+function titleCandidates(...values) {
+  const items = values.flatMap(value => (Array.isArray(value) ? value : []))
+    .map(value => firstText(value))
+    .filter(Boolean);
+  return Array.from(new Set(items)).slice(0, 4);
+}
+
 function firstPositiveNumber(...values) {
   for (const value of values) {
     const number = Number(value);
@@ -199,6 +206,7 @@ function createSceneSpecFromVoicedStoryboard(creativeContext = {}, target = {}) 
   const validation = sceneSpecService.validateSceneSpec({
     version: 1,
     title: firstText(brief.title, brief.summary, target.title, creativeContext?.input?.title, creativeContext?.input?.raw_text, '创意视频'),
+    title_candidates: titleCandidates(brief.title_candidates, brief.titleCandidates, brief.titles, target.title_candidates, target.titleCandidates),
     aspect_ratio: firstText(target.aspect_ratio, target.aspectRatio, brief.aspect_ratio, brief.aspectRatio, '9:16'),
     target_duration_sec: firstPositiveNumber(
       target.duration_sec,

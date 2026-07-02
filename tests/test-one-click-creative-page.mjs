@@ -109,6 +109,8 @@ for (const text of [
   '已复制',
   '复制失败',
   '缺少创作任务 ID，无法进入编辑器。',
+  '视频标题',
+  '备选标题',
 ]) {
   assert.ok(creativeTaskDetail.includes(text), `CreativeTaskDetail.jsx should include normal Chinese text: ${text}`);
 }
@@ -223,6 +225,9 @@ assert.match(page, /getWorkflowVideoUrl=\{getWorkflowVideoUrl\}/, 'Creative task
 assert.match(creativeTaskDetail, /onStopAndDelete\(workflowId\)/, 'Creative task detail stop button should delete the currently opened task');
 assert.match(creativeTaskDetail, /disabled=\{deletingWorkflowId === workflowId\}/, 'Current task stop-and-delete button should be disabled while deleting');
 assert.match(creativeTaskDetail, /const\s+promptText\s*=\s*workflow\?\.creative_context\?\.input\?\.raw_text/, 'Creative task detail should read the original user prompt from workflow.creative_context.input.raw_text');
+assert.match(creativeTaskDetail, /function\s+getWorkflowTitleInfo\(workflow\)/, 'Creative task detail should derive generated title data from the workflow scene spec');
+assert.match(creativeTaskDetail, /title_candidates/, 'Creative task detail should read generated title candidates');
+assert.match(creativeTaskDetail, /<CreativeTitlePanel workflow=\{workflow\} \/>[\s\S]*<CreativeWorkflowStepper workflow=\{workflow\} \/>/, 'Generated video titles should sit between the task meta row and workflow stepper');
 assert.match(creativeTaskDetail, /const\s+\[promptModalOpen,\s*setPromptModalOpen\]\s*=\s*useState\(false\)/, 'Creative task detail should track whether the prompt modal is open');
 assert.match(creativeTaskDetail, /className="creativePromptViewButton"/, 'Creative task detail should render a prompt viewing button beside task actions');
 assert.match(creativeTaskDetail, /<Dialog\s+open=\{promptModalOpen\}\s+onOpenChange=\{setPromptModalOpen\}>/, 'Prompt modal should use shadcn Dialog state');
@@ -344,6 +349,8 @@ const startNewTaskBlock = page.slice(startNewTaskStart, selectTaskStart);
 assert.match(startNewTaskBlock, /setUseResearch\(true\)/, 'Starting a new creative task should restore the default research-enabled state');
 assert.doesNotMatch(startNewTaskBlock, /setUseResearch\(false\)/, 'Starting a new creative task should not turn off research by default');
 assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');
+assert.match(page, /function\s+getWorkflowGeneratedTitle\(workflow\)/, 'OneClickCreativePage should derive sidebar titles from generated scene spec titles');
+assert.match(page, /getTaskDisplayTitle\(nextWorkflow,\s*nextWorkflow\?\.creative_context\?\.input\?\.raw_text,\s*prev\.find\(task => task\.workflow_id === workflowId\)\?\.title\)/, 'Task list refresh should replace the prompt-derived title once a generated main title exists');
 assert.match(page, /window\.localStorage\.setItem/, 'OneClickCreativePage should save submitted tasks to localStorage');
 assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should automatically enter the created task detail');
 assert.match(page, /useNavigate/, 'OneClickCreativePage should use router navigation for creative tasks');

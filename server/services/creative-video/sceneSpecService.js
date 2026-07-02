@@ -55,6 +55,10 @@ function list(value) {
   return value.map(item => text(item)).filter(Boolean);
 }
 
+function titleCandidates(value) {
+  return Array.from(new Set(list(value))).slice(0, 4);
+}
+
 function firstPositiveNumber(...values) {
   for (const value of values) {
     const number = Number(value);
@@ -138,6 +142,7 @@ function retimeScenes(sceneSpec) {
     ...clone(source),
     version: Number(source && source.version) || 1,
     title: text(source && source.title),
+    title_candidates: titleCandidates(source && source.title_candidates),
     aspect_ratio: text(source && source.aspect_ratio) || '16:9',
     target_duration_sec: roundTime((source && source.target_duration_sec) || cursor),
     scenes: retimedScenes,

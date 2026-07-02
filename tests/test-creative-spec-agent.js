@@ -11,12 +11,15 @@ assert.ok(scenePrompt.includes('不要输出 HTML'));
 assert.ok(scenePrompt.includes('visual_text.cards'));
 assert.ok(scenePrompt.includes('背景'));
 assert.ok(scenePrompt.includes('scene_spec 是内容图'));
+assert.ok(scenePrompt.includes('title_candidates'));
+assert.ok(scenePrompt.includes('1 个主标题'));
 assert.ok(scenePrompt.includes('不要因为主题本身提到 HTML、CSS、动画、转场或渲染就删除这些词'));
 assert.ok(scenePrompt.includes('frame_specs 阶段'));
 
 const sceneParsed = agent.parseSceneSpecResponse(JSON.stringify({
   scene_spec: {
     title: '测试',
+    title_candidates: ['测试备选 1', '测试备选 2'],
     aspect_ratio: '16:9',
     scenes: [{
       id: 'scene_01',
@@ -30,6 +33,7 @@ const sceneParsed = agent.parseSceneSpecResponse(JSON.stringify({
 }));
 assert.equal(sceneParsed.success, true);
 assert.equal(sceneParsed.scene_spec.scenes[0].kind, 'text');
+assert.deepEqual(sceneParsed.scene_spec.title_candidates, ['测试备选 1', '测试备选 2']);
 
 const sceneParsedWithDurationAliases = agent.parseSceneSpecResponse(JSON.stringify({
   scene_spec: {

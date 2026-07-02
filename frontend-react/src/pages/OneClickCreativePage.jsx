@@ -69,6 +69,31 @@ function getTaskTitle(input) {
   return trimmed.length > 22 ? `${trimmed.slice(0, 22)}...` : trimmed;
 }
 
+function firstText(...values) {
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function getWorkflowGeneratedTitle(workflow) {
+  const sceneSpec = workflow?.result?.hyperframes_freeform?.project?.scene_spec
+    || workflow?.result?.hyperframes_freeform?.scene_spec
+    || workflow?.result?.scene_spec
+    || workflow?.scene_spec
+    || null;
+  return firstText(
+    sceneSpec?.title,
+    workflow?.result?.hyperframes_freeform?.project?.title,
+    workflow?.result?.hyperframes_freeform?.title,
+  );
+}
+
+function getTaskDisplayTitle(workflow, input, fallbackTitle = '') {
+  return getWorkflowGeneratedTitle(workflow) || fallbackTitle || getTaskTitle(input);
+}
+
 function getTaskTimeLabel(value) {
   if (!value) return '刚刚';
   const date = new Date(value);
@@ -380,7 +405,7 @@ export function OneClickCreativePage() {
       setWorkflow(nextWorkflow);
       persistTasks(prev => updateTask(prev, {
         workflow_id: targetWorkflowId,
-        title: prev.find(task => task.workflow_id === targetWorkflowId)?.title || getTaskTitle(nextWorkflow?.creative_context?.input?.raw_text),
+        title: getTaskDisplayTitle(nextWorkflow, nextWorkflow?.creative_context?.input?.raw_text, prev.find(task => task.workflow_id === targetWorkflowId)?.title),
         input: prev.find(task => task.workflow_id === targetWorkflowId)?.input || nextWorkflow?.creative_context?.input?.raw_text || '',
         status: nextStatus,
         message: nextMessage,
@@ -886,7 +911,7 @@ export function OneClickCreativePage() {
 
         persistTasks(prev => updateTask(prev, {
           workflow_id: workflowId,
-          title: prev.find(task => task.workflow_id === workflowId)?.title || getTaskTitle(nextWorkflow?.creative_context?.input?.raw_text),
+          title: getTaskDisplayTitle(nextWorkflow, nextWorkflow?.creative_context?.input?.raw_text, prev.find(task => task.workflow_id === workflowId)?.title),
           status: nextStatus,
           message: nextMessage,
           workflow: nextWorkflow,
