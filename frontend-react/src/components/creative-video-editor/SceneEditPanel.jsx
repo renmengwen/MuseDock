@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CaptionEditor } from './CaptionEditor.jsx';
 import { VisualTextEditor } from './VisualTextEditor.jsx';
+import { EditorPanel, EditorPanelHeader } from './editorUi.jsx';
 
 export function SceneEditPanel({ scene, disabled, onSave }) {
   const [draft, setDraft] = useState(scene || null);
@@ -10,15 +11,15 @@ export function SceneEditPanel({ scene, disabled, onSave }) {
   }, [scene]);
 
   if (!draft) {
-    return <section className="creative-video-editor-panel"><p>请选择场景</p></section>;
+    return <EditorPanel><p>请选择场景</p></EditorPanel>;
   }
 
   return (
-    <section className="creative-video-editor-panel">
-      <div className="creative-video-editor-panel-header">
+    <EditorPanel>
+      <EditorPanelHeader>
         <h3>场景编辑</h3>
         <button type="button" disabled={disabled} onClick={() => onSave(draft)}>保存场景</button>
-      </div>
+      </EditorPanelHeader>
       <label>
         <span>场景时长</span>
         <input
@@ -49,6 +50,6 @@ export function SceneEditPanel({ scene, disabled, onSave }) {
         disabled={disabled}
         onChange={captions => setDraft({ ...draft, captions })}
       />
-    </section>
+    </EditorPanel>
   );
 }

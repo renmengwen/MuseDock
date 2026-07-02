@@ -985,7 +985,7 @@ export function OneClickCreativePage() {
   }, [stopTaskStream]);
 
   return (
-    <main className={`creativeChatShell grid min-h-screen bg-white transition-[grid-template-columns] duration-200 ${sidebarCollapsed ? 'sidebarCollapsed grid-cols-[76px_minmax(0,1fr)]' : 'grid-cols-[260px_minmax(0,1fr)]'}`}>
+    <main className={`grid h-screen min-h-screen overflow-hidden bg-white transition-[grid-template-columns] duration-200 max-[760px]:h-auto max-[760px]:min-h-0 max-[760px]:grid-cols-1 max-[760px]:overflow-visible ${sidebarCollapsed ? 'grid-cols-[76px_minmax(0,1fr)]' : 'grid-cols-[260px_minmax(0,1fr)]'}`}>
       <CreativeSidebar
         tasks={sidebarTasks}
         selectedWorkflowId={selectedWorkflowId}

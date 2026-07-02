@@ -105,7 +105,7 @@ function CreativeRetryPlan({
 
       {retryPlanStatus === 'idle' || retryPlanStatus === 'loading' ? (
         <div className="inline-flex items-center gap-2 text-[13px] leading-normal text-amber-800">
-          <Loader2 size={14} className="spinIcon" />
+          <Loader2 size={14} className="animate-spin" />
           <span>正在生成恢复计划...</span>
         </div>
       ) : null}
@@ -153,7 +153,7 @@ function CreativeRetryPlan({
             disabled={retrying}
             onClick={onRetryWorkflow}
           >
-            {retrying ? <Loader2 size={14} className="spinIcon" /> : <RefreshCcw size={14} />}
+            {retrying ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
             <span>{retrying ? '正在修复并重试...' : '修复并重试'}</span>
           </Button>
         </>
@@ -490,7 +490,7 @@ export function CreativeTaskDetail({
 
   return (
     <div className={cn('grid w-full min-w-0 gap-6 px-1 pb-0 pt-1', workflow?.status === 'done' && videoUrl && 'min-h-[calc(100vh-176px)]')}>
-      <div className="creativeDetailMeta flex min-w-0 items-start justify-between gap-4 rounded-lg border border-[#e7e9ee] bg-white p-4 max-[720px]:flex-col">
+      <div className="flex min-w-0 items-start justify-between gap-4 rounded-lg border border-[#e7e9ee] bg-white p-4 max-[720px]:flex-col">
         <div className="grid min-w-0 gap-1">
           <span className="text-xs font-bold text-[#8a93a2]">任务 ID</span>
           <strong className="min-w-0 break-words font-mono text-base leading-snug text-[#111827]">{workflowId || '尚未创建'}</strong>
@@ -501,12 +501,12 @@ export function CreativeTaskDetail({
         <div className="inline-flex shrink-0 flex-wrap items-center justify-end gap-2 max-[720px]:justify-start">
           <Dialog open={promptModalOpen} onOpenChange={setPromptModalOpen}>
             <DialogTrigger asChild>
-              <Button variant="secondary" size="sm" type="button" className="creativePromptViewButton">
+              <Button variant="secondary" size="sm" type="button" className="min-h-[30px] flex-none gap-1.5 rounded-lg border border-[#d6e4ff] bg-[#f5f8ff] px-2.5 py-1.5 text-xs font-bold text-[#1d4ed8] hover:border-[#b8cdf8] hover:bg-[#eaf1ff]">
                 <Eye size={14} />
                 <span>查看提示词</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="creativePromptModal" showCloseButton={false}>
+            <DialogContent className="grid max-h-[min(82vh,640px)] w-[min(92vw,680px)] max-w-[680px] grid-rows-[auto_1fr] overflow-hidden rounded-[14px] border border-[#e5e7eb] bg-white shadow-[0_24px_70px_rgba(15,23,42,.24)]" showCloseButton={false}>
               <DialogHeader>
                 <DialogTitle>当前任务提示词</DialogTitle>
               </DialogHeader>
@@ -522,7 +522,7 @@ export function CreativeTaskDetail({
                   <span className="sr-only">关闭提示词弹框</span>
                 </Button>
               </DialogClose>
-              <pre className="creativePromptModalText">{promptText || '暂无可显示的提示词。'}</pre>
+              <pre className="m-0 overflow-auto whitespace-pre-wrap break-words bg-[#f8fafc] p-[18px] text-sm leading-[1.7] text-[#111827] [font-family:inherit]">{promptText || '暂无可显示的提示词。'}</pre>
               <Button
                 variant="secondary"
                 size="sm"
@@ -544,7 +544,7 @@ export function CreativeTaskDetail({
               disabled={deletingWorkflowId === workflowId}
               onClick={() => onStopAndDelete(workflowId)}
             >
-              {deletingWorkflowId === workflowId ? <Loader2 size={14} className="spinIcon" /> : <Trash2 size={14} />}
+              {deletingWorkflowId === workflowId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
               <span>{deletingWorkflowId === workflowId ? '正在删除' : '停止并删除'}</span>
             </Button>
           ) : null}

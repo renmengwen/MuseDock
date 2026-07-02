@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { EditorPanel, EditorPanelHeader } from './editorUi.jsx';
 
 export function CaptionsPanel({ captions = [], selectedFrameId, disabled, onSave }) {
   const [drafts, setDrafts] = useState(captions);
@@ -15,8 +16,8 @@ export function CaptionsPanel({ captions = [], selectedFrameId, disabled, onSave
   }
 
   return (
-    <section className="creative-video-editor-panel html-video-captions">
-      <div className="creative-video-editor-panel-header">
+    <EditorPanel>
+      <EditorPanelHeader>
         <h3>字幕</h3>
         <button
           type="button"
@@ -29,7 +30,7 @@ export function CaptionsPanel({ captions = [], selectedFrameId, disabled, onSave
         >
           保存字幕
         </button>
-      </div>
+      </EditorPanelHeader>
       {!selectedFrameId ? <p className="muted">请选择一帧后编辑字幕。</p> : null}
       {drafts.length ? drafts.map((caption, index) => (
         <label key={caption.id || index}>
@@ -41,6 +42,6 @@ export function CaptionsPanel({ captions = [], selectedFrameId, disabled, onSave
           />
         </label>
       )) : <p>暂无字幕</p>}
-    </section>
+    </EditorPanel>
   );
 }

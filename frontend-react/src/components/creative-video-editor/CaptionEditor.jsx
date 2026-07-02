@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { EditorSection } from './editorUi.jsx';
 
 export function CaptionEditor({ captions = [], disabled, onChange }) {
   const [drafts, setDrafts] = useState({});
@@ -20,7 +21,7 @@ export function CaptionEditor({ captions = [], disabled, onChange }) {
   }
 
   return (
-    <section className="creative-video-editor-section">
+    <EditorSection>
       <h4>字幕</h4>
       {captions.length ? captions.map(caption => (
         <label key={caption.id}>
@@ -32,6 +33,6 @@ export function CaptionEditor({ captions = [], disabled, onChange }) {
           />
         </label>
       )) : <p>暂无字幕</p>}
-    </section>
+    </EditorSection>
   );
 }

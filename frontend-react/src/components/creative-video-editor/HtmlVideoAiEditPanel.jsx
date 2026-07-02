@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { EditorInlineActions, EditorPanel, EditorPanelHeader } from './editorUi.jsx';
 
 function getFrameId(frame) {
   return frame?.id || frame?.scene_id || '';
@@ -67,16 +68,16 @@ export function HtmlVideoAiEditPanel({
   }
 
   return (
-    <section className="creative-video-editor-panel html-video-ai-edit-panel">
-      <div className="creative-video-editor-panel-header">
+    <EditorPanel>
+      <EditorPanelHeader>
         <h3>AI 修改</h3>
-      </div>
+      </EditorPanelHeader>
 
       <form onSubmit={submitFrameDraft}>
-        <div className="creative-video-editor-panel-header">
+        <EditorPanelHeader>
           <h4>当前帧</h4>
           <button type="submit" disabled={!canIterateFrame}>生成当前帧草稿</button>
-        </div>
+        </EditorPanelHeader>
         <label>
           修改模式
           <select value={frameMode} disabled={disabled} onChange={event => setFrameMode(event.target.value)}>
@@ -105,10 +106,10 @@ export function HtmlVideoAiEditPanel({
       </form>
 
       <form onSubmit={submitEditPlan}>
-        <div className="creative-video-editor-panel-header">
+        <EditorPanelHeader>
           <h4>全片</h4>
           <button type="submit" disabled={!canCreatePlan}>生成全片编辑计划</button>
-        </div>
+        </EditorPanelHeader>
         <textarea
           value={planInstruction}
           disabled={disabled}
@@ -119,20 +120,20 @@ export function HtmlVideoAiEditPanel({
       </form>
 
       {editPlan ? (
-        <div className="html-video-ai-edit-plan">
-          <div className="creative-video-editor-panel-header">
+        <div>
+          <EditorPanelHeader>
             <h4>计划草稿</h4>
-            <div className="creative-video-editor-inline-actions">
+            <EditorInlineActions>
               <button type="button" disabled={!canRunPlan} onClick={() => onRunPlan?.(planId, { confirm: true })}>
                 执行全片编辑计划
               </button>
               <button type="button" disabled={!canUsePlan || editPlan.status !== 'drafts_ready'} onClick={() => onAcceptPlan?.(planId)}>接受计划草稿</button>
               <button type="button" disabled={!canUsePlan || !editPlan.generated_drafts?.length} onClick={() => onDiscardPlan?.(planId)}>放弃计划草稿</button>
-            </div>
-          </div>
+            </EditorInlineActions>
+          </EditorPanelHeader>
           <pre>{summarizePlan(editPlan)}</pre>
         </div>
       ) : null}
-    </section>
+    </EditorPanel>
   );
 }

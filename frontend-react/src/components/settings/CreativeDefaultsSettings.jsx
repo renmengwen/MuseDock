@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { cn } from '@/lib/utils.js';
+import { Switch } from './Switch.jsx';
 
 export const ASPECT_RATIOS = ['9:16', '16:9', '1:1', '4:5'];
 
@@ -263,46 +265,34 @@ export function CreativeDefaultsSettings({
           })}
         </div>
 
-        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
-          <input
-            type="checkbox"
+        <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
+          <Switch
             checked={creativeDefaults.lockTemplate === true}
             disabled={disabled}
             onChange={event => updateCreativeDefaults({ lockTemplate: event.target.checked })}
           />
-          <span className="switchTrack" aria-hidden="true">
-            <span className="switchThumb" />
-          </span>
-          <span className="switchText">{creativeDefaults.lockTemplate ? '已锁定' : '未锁定'}</span>
+          <span className={cn('min-w-[42px]', creativeDefaults.lockTemplate ? 'text-[#111827]' : 'text-[#69717e]')}>{creativeDefaults.lockTemplate ? '已锁定' : '未锁定'}</span>
           <span>锁定模板</span>
         </label>
 
-        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
-          <input
-            type="checkbox"
+        <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
+          <Switch
             checked={creativeDefaults.useResearch === true}
             disabled={disabled}
             onChange={event => updateCreativeDefaults({ useResearch: event.target.checked })}
           />
-          <span className="switchTrack" aria-hidden="true">
-            <span className="switchThumb" />
-          </span>
-          <span className="switchText">{creativeDefaults.useResearch ? '已开启' : '已关闭'}</span>
+          <span className={cn('min-w-[42px]', creativeDefaults.useResearch ? 'text-[#111827]' : 'text-[#69717e]')}>{creativeDefaults.useResearch ? '已开启' : '已关闭'}</span>
           <span>联网研究默认开启</span>
         </label>
 
         <div className={`rounded-lg border p-3 ${sourceImageAnalysisUnsupported ? 'border-amber-200 bg-amber-50' : 'border-[#edf0f4] bg-[#fafbfc]'}`}>
-          <label className="switchControl">
-            <input
-              type="checkbox"
+          <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 text-[13px] font-semibold text-[#30343b]">
+            <Switch
               checked={sourceImageAnalysisEnabled}
               disabled={disabled || (!sourceImageAnalysisEnabled && sourceImageAnalysisUnavailable)}
               onChange={event => handleSourceImageAnalysisChange(event.target.checked)}
             />
-            <span className="switchTrack" aria-hidden="true">
-              <span className="switchThumb" />
-            </span>
-            <span className="switchText">{sourceImageAnalysisEnabled ? '已开启' : '已关闭'}</span>
+            <span className={cn('min-w-[42px]', sourceImageAnalysisEnabled ? 'text-[#111827]' : 'text-[#69717e]')}>{sourceImageAnalysisEnabled ? '已开启' : '已关闭'}</span>
             <span>来源图片多模态分析</span>
           </label>
           <p className="mt-2 whitespace-normal text-xs font-normal leading-relaxed text-[#69717e]">
@@ -313,45 +303,33 @@ export function CreativeDefaultsSettings({
           ) : null}
         </div>
 
-        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
-          <input
-            type="checkbox"
+        <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
+          <Switch
             checked={creativeDefaults.generateAudio !== false}
             disabled={disabled}
             onChange={event => updateCreativeDefaults({ generateAudio: event.target.checked })}
           />
-          <span className="switchTrack" aria-hidden="true">
-            <span className="switchThumb" />
-          </span>
-          <span className="switchText">{creativeDefaults.generateAudio !== false ? '已开启' : '已关闭'}</span>
+          <span className={cn('min-w-[42px]', creativeDefaults.generateAudio !== false ? 'text-[#111827]' : 'text-[#69717e]')}>{creativeDefaults.generateAudio !== false ? '已开启' : '已关闭'}</span>
           <span>生成旁白音频</span>
         </label>
 
-        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
-          <input
-            type="checkbox"
+        <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
+          <Switch
             checked={creativeDefaults.emotionalVoice === true}
             disabled={disabled || creativeDefaults.generateAudio === false}
             onChange={event => updateCreativeDefaults({ emotionalVoice: event.target.checked })}
           />
-          <span className="switchTrack" aria-hidden="true">
-            <span className="switchThumb" />
-          </span>
-          <span className="switchText">{creativeDefaults.emotionalVoice ? '已开启' : '已关闭'}</span>
+          <span className={cn('min-w-[42px]', creativeDefaults.emotionalVoice ? 'text-[#111827]' : 'text-[#69717e]')}>{creativeDefaults.emotionalVoice ? '已开启' : '已关闭'}</span>
           <span>情绪化配音</span>
         </label>
 
-        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
-          <input
-            type="checkbox"
+        <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
+          <Switch
             checked={creativeDefaults.generateCaptions !== false}
             disabled={disabled}
             onChange={event => updateCreativeDefaults({ generateCaptions: event.target.checked })}
           />
-          <span className="switchTrack" aria-hidden="true">
-            <span className="switchThumb" />
-          </span>
-          <span className="switchText">{creativeDefaults.generateCaptions !== false ? '已开启' : '已关闭'}</span>
+          <span className={cn('min-w-[42px]', creativeDefaults.generateCaptions !== false ? 'text-[#111827]' : 'text-[#69717e]')}>{creativeDefaults.generateCaptions !== false ? '已开启' : '已关闭'}</span>
           <span>生成字幕</span>
         </label>
       </div>

@@ -122,7 +122,7 @@ export function CreativeEditorPage() {
 
       {loading && (
         <div className="mb-4 inline-flex items-center gap-2 rounded-lg border border-[#d9dde5] bg-[#f8fafc] px-4 py-3 text-[13px] font-semibold text-[#30343b]" role="status" aria-live="polite">
-          <Loader2 size={16} className="spinIcon" />
+          <Loader2 size={16} className="animate-spin" />
           正在加载编辑任务...
         </div>
       )}

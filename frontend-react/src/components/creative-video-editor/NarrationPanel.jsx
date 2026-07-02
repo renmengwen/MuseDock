@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { EditorInlineActions, EditorPanel, EditorPanelHeader } from './editorUi.jsx';
 
 export function NarrationPanel({ narration, disabled, onSave, onRegenerate }) {
   const [draft, setDraft] = useState(narration?.text || narration || '');
@@ -8,15 +9,15 @@ export function NarrationPanel({ narration, disabled, onSave, onRegenerate }) {
   }, [narration]);
 
   return (
-    <section className="creative-video-editor-panel html-video-narration">
-      <div className="creative-video-editor-panel-header">
+    <EditorPanel className="[&_textarea]:resize-y">
+      <EditorPanelHeader>
         <h3>旁白</h3>
-        <div className="creative-video-editor-inline-actions">
+        <EditorInlineActions>
           <button type="button" disabled={disabled} onClick={() => onRegenerate({ text: draft })}>重新生成旁白</button>
           <button type="button" disabled={disabled} onClick={() => onSave({ narration: { text: draft } })}>保存旁白</button>
-        </div>
-      </div>
+        </EditorInlineActions>
+      </EditorPanelHeader>
       <textarea value={draft} disabled={disabled} rows={5} onChange={event => setDraft(event.target.value)} />
-    </section>
+    </EditorPanel>
   );
 }

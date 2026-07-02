@@ -16,13 +16,13 @@ function CreativeHeroHeader() {
 function CreativeModeSwitch({ mode, setMode, disabled }) {
   return (
     <div
-      className="creativeModeSwitch"
+      className="group relative grid min-h-10 w-[min(100%,286px)] grid-cols-2 overflow-hidden rounded-full border border-[#e5e7eb] bg-white p-0.5"
       data-mode={mode}
       role="tablist"
       aria-label="创作模式"
     >
       <span
-        className="creativeModeThumb"
+        className="absolute inset-y-0.5 left-0.5 z-0 w-[calc(50%-2px)] rounded-full bg-[#eef4ff] shadow-[inset_0_0_0_1px_#bcd0ff] transition-transform duration-200 group-data-[mode=expert]:translate-x-full"
         aria-hidden="true"
       />
       <Button
@@ -67,7 +67,7 @@ function CreativePromptComposer({
 }) {
   return (
     <form
-      className="creativePromptComposer"
+      className="grid min-h-0 w-[min(100%,776px)] gap-2.5 rounded-[20px] border border-[#dfe3ea] bg-white px-3 pb-2.5 pt-[17px] shadow-[0_16px_38px_rgba(15,23,42,.07)] max-[760px]:w-full"
       onSubmit={onSubmit}
     >
       <label className="sr-only" htmlFor="creative-input">
@@ -78,16 +78,21 @@ function CreativePromptComposer({
         value={input}
         onChange={event => setInput(event.target.value)}
         disabled={isBusy}
-        className="min-h-[74px] max-h-[220px] resize-y border-0 bg-transparent px-1 py-0 text-base leading-[1.55] text-[#111827] shadow-none placeholder:text-[#a4acb8] focus-visible:ring-0"
+        className="min-h-[74px] max-h-[220px] resize-y border-0 bg-transparent px-1 py-0 text-base leading-[1.55] text-[#111827] shadow-none placeholder:text-[#a4acb8] focus-visible:ring-0 disabled:text-[#8a93a2]"
         placeholder="粘贴文章/GitHub 链接，或输入你想生成的视频方向"
         rows={4}
       />
 
       <div className="flex items-center justify-between gap-3 max-[720px]:items-end">
-        <div className="creativeQuickActions">
+        <div className="flex min-w-0 flex-wrap gap-2">
           <Button
             type="button"
-            className={`creativeResearchToggle ${useResearch ? 'active' : ''}`}
+            className={cn(
+              'inline-flex min-h-[34px] items-center gap-1.5 rounded-full px-3 text-[13px] transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-[.62]',
+              useResearch
+                ? '-translate-y-px border-[#bcd0ff] bg-[#e6efff] text-[#2563eb] shadow-[inset_0_0_0_1px_#8fb0ff] hover:bg-[#e6efff] hover:text-[#2563eb]'
+                : 'border-[#e5e7eb] bg-white text-[#667085] hover:bg-white hover:text-[#667085]',
+            )}
             variant="outline"
             disabled={isBusy}
             onClick={() => setUseResearch(!useResearch)}
@@ -98,19 +103,20 @@ function CreativePromptComposer({
         </div>
 
         <Button
-          className="creativeSubmitButton"
+          className="flex-none rounded-full bg-[#2563eb] text-white hover:-translate-y-px hover:bg-[#1d4ed8] disabled:opacity-[.64]"
+          size="icon"
           type="submit"
           disabled={submitDisabled}
           aria-label="一键生成视频"
           title="一键生成视频"
         >
-          {isBusy ? <Loader2 size={18} className="spinIcon" /> : <ArrowUp size={19} />}
+          {isBusy ? <Loader2 size={18} className="animate-spin" /> : <ArrowUp size={19} />}
         </Button>
       </div>
 
       {mode === 'expert' ? (
-        <div className="creativeExpertSlot">
-          <div className="creativeExpertHint">
+        <div className="grid min-h-[72px] content-start gap-2 overflow-hidden">
+          <div className="w-fit max-w-full rounded-full border border-[#fed7aa] bg-[#fff7ed] px-2.5 py-[7px] text-xs leading-[1.4] text-[#c2410c]">
             专家模式正在开发中，请先使用快速模式创建任务。
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { EditorPanel, EditorPanelHeader } from './editorUi.jsx';
 
 export function FrameEditPanel({ frame, disabled, onSave }) {
   const [draft, setDraft] = useState(frame || null);
@@ -8,15 +9,15 @@ export function FrameEditPanel({ frame, disabled, onSave }) {
   }, [frame]);
 
   if (!draft) {
-    return <section className="creative-video-editor-panel"><p>请选择帧</p></section>;
+    return <EditorPanel><p>请选择帧</p></EditorPanel>;
   }
 
   return (
-    <section className="creative-video-editor-panel">
-      <div className="creative-video-editor-panel-header">
+    <EditorPanel>
+      <EditorPanelHeader>
         <h3>帧编辑</h3>
         <button type="button" disabled={disabled} onClick={() => onSave(draft)}>保存帧</button>
-      </div>
+      </EditorPanelHeader>
       <label>
         <span>模板</span>
         <input value={draft.template || ''} disabled={disabled} onChange={event => setDraft({ ...draft, template: event.target.value })} />
@@ -29,6 +30,6 @@ export function FrameEditPanel({ frame, disabled, onSave }) {
         <span>动效</span>
         <input value={draft.motion || ''} disabled={disabled} onChange={event => setDraft({ ...draft, motion: event.target.value })} />
       </label>
-    </section>
+    </EditorPanel>
   );
 }

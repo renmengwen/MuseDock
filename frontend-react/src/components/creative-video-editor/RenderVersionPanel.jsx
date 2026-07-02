@@ -1,6 +1,6 @@
 export function RenderVersionPanel({ versions = [] }) {
   return (
-    <section className="creative-video-editor-render-versions">
+    <section className="grid min-w-0 gap-2 [&_h3]:m-0 [&_h3]:text-sm [&>div]:flex [&>div]:justify-between [&>div]:gap-2 [&>div]:border-t [&>div]:border-[#e5e7eb] [&>div]:pt-2">
       <h3>渲染版本</h3>
       {versions.length ? versions.map(version => (
         <div key={version.id || version.output_path}>

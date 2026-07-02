@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { buildFrameSavePayload, updateHeadline } from './frameInputsPayload.mjs';
+import { EditorInlineActions, EditorPanel, EditorPanelHeader } from './editorUi.jsx';
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -47,20 +48,20 @@ export function FrameInputsPanel({ frame, disabled, onSave, onRenderPreview }) {
   }, [frame]);
 
   if (!draft) {
-    return <section className="creative-video-editor-panel"><p>请选择要编辑的帧</p></section>;
+    return <EditorPanel><p>请选择要编辑的帧</p></EditorPanel>;
   }
 
   return (
-    <section className="creative-video-editor-panel html-video-frame-inputs">
-      <div className="creative-video-editor-panel-header">
+    <EditorPanel className="[&_textarea]:resize-y">
+      <EditorPanelHeader>
         <h3>帧字段</h3>
-        <div className="creative-video-editor-inline-actions">
+        <EditorInlineActions>
           {canRenderPreview ? (
             <button type="button" disabled={disabled} onClick={() => onRenderPreview(draft.id)}>渲染单帧预览</button>
           ) : null}
           <button type="button" disabled={disabled} onClick={() => onSave(buildFrameSavePayload(draft))}>保存帧</button>
-        </div>
-      </div>
+        </EditorInlineActions>
+      </EditorPanelHeader>
       <label>
         <span>模板</span>
         <input value={draft.template_id || draft.template || ''} disabled={disabled} onChange={event => setDraft({ ...draft, template_id: event.target.value })} />
@@ -111,6 +112,6 @@ export function FrameInputsPanel({ frame, disabled, onSave, onRenderPreview }) {
           }}
         />
       </label>
-    </section>
+    </EditorPanel>
   );
 }

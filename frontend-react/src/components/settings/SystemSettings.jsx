@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import { api } from '../../api/client.js';
+import { cn } from '@/lib/utils.js';
 import { CleanupConfirmDialog } from './CleanupConfirmDialog.jsx';
+import { Switch } from './Switch.jsx';
 
 const CLEANUP_ITEMS = [
   { target: 'creative-workflows', label: '创作任务记录', storageKey: 'creativeWorkflows' },
@@ -130,19 +132,15 @@ export function SystemSettings({
       </div>
 
       <div className="grid gap-[18px] py-2">
-        <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
-          <input
-            type="checkbox"
+        <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 whitespace-nowrap rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
+          <Switch
             checked={!!appSettings?.system?.skipValidation}
             disabled={disabled || !appSettings}
             onChange={event => updateSkipValidation(event.target.checked)}
           />
-          <span className="switchTrack" aria-hidden="true">
-            <span className="switchThumb" />
-          </span>
-          <div className="switchLabel">
-            <span className="switchText">质检状态：{appSettings?.system?.skipValidation ? '已跳过' : '已启用'}</span>
-            <span className="switchDesc">跳过质检后会直接进入渲染流程，请仅在确认素材和模板稳定时使用。</span>
+          <div className="flex flex-col gap-0.5">
+            <span className={cn('min-w-[42px]', appSettings?.system?.skipValidation ? 'text-[#111827]' : 'text-[#69717e]')}>质检状态：{appSettings?.system?.skipValidation ? '已跳过' : '已启用'}</span>
+            <span className="text-xs font-normal text-[#69717e]">跳过质检后会直接进入渲染流程，请仅在确认素材和模板稳定时使用。</span>
           </div>
         </label>
 

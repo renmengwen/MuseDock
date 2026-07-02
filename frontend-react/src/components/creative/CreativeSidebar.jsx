@@ -43,9 +43,9 @@ export function CreativeSidebar({
   }
 
   return sidebarCollapsed ? (
-    <aside className="creativeTaskSidebar collapsed" aria-label="已收起的创作任务栏">
+    <aside className="relative block min-w-0 overflow-hidden border-r border-[#eef1f5] bg-white pl-[18px] pt-[18px] max-[760px]:max-h-[280px] max-[760px]:border-b max-[760px]:border-b-[#eef1f5] max-[760px]:border-r-0" aria-label="已收起的创作任务栏">
       <Button
-        className="creativeCollapsedExpand"
+        className="size-[34px] rounded-lg bg-white text-[#1f2937] shadow-[0_8px_20px_rgba(15,23,42,.08)] transition hover:-translate-y-px hover:bg-[#eef4ff] hover:text-[#2563eb] hover:shadow-[0_10px_24px_rgba(37,99,235,.14)]"
         type="button"
         variant="ghost"
         size="icon"
@@ -64,7 +64,7 @@ export function CreativeSidebar({
       </Link>
     </aside>
   ) : (
-    <aside className="creativeTaskSidebar">
+    <aside className="relative grid min-h-0 min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] gap-[18px] overflow-hidden border-r border-[#eef1f5] bg-[#f8fafc] px-3 pb-4 pt-5 transition-[padding,background-color] duration-[240ms] max-[760px]:max-h-[280px] max-[760px]:border-b max-[760px]:border-b-[#eef1f5] max-[760px]:border-r-0">
       <div className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-2 text-[#111827]">
         <div className="inline-flex size-7 items-center justify-center rounded-md border border-[#d9dde5] bg-white text-[10px] font-black">MD</div>
         <div className="min-w-0">
@@ -119,7 +119,7 @@ export function CreativeSidebar({
             </DialogContent>
           </Dialog>
           <Button
-            className="creativeSidebarToggle"
+            className="size-8 rounded-md bg-transparent text-inherit transition hover:bg-[#eef4ff] hover:text-[#2563eb]"
             type="button"
             variant="ghost"
             size="icon"

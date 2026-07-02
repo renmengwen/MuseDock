@@ -1,18 +1,11 @@
+import { Switch } from './Switch.jsx';
+
 export function ModelConfigForm({ type, info, model, onChange }) {
   const m = model || { enabled: false, modelId: '', note: '' };
   return (
     <div className={`rounded-lg border bg-white p-3 transition ${m.enabled ? 'border-[#111827]' : 'border-[#edf0f4]'}`}>
       <div className="mb-2 flex items-center gap-2">
-        <label className="switchControl small">
-          <input
-            type="checkbox"
-            checked={!!m.enabled}
-            onChange={e => onChange('enabled', e.target.checked)}
-          />
-          <span className="switchTrack" aria-hidden="true">
-            <span className="switchThumb" />
-          </span>
-        </label>
+        <Switch small checked={!!m.enabled} onChange={e => onChange('enabled', e.target.checked)} />
         <span className="text-[13px] font-semibold text-[#30343b]">{info.title}</span>
       </div>
       <input

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { EditorSection } from './editorUi.jsx';
 
 export function VisualTextEditor({ visualText = {}, disabled, onChange }) {
   const [headline, setHeadline] = useState(visualText.headline || '');
@@ -21,7 +22,7 @@ export function VisualTextEditor({ visualText = {}, disabled, onChange }) {
   }
 
   return (
-    <section className="creative-video-editor-section">
+    <EditorSection>
       <h4>画面文字</h4>
       <label>
         <span>画面标题</span>
@@ -49,6 +50,6 @@ export function VisualTextEditor({ visualText = {}, disabled, onChange }) {
           onChange={event => { setCards(event.target.value); emit({ cards: event.target.value.split('\n').map(item => item.trim()).filter(Boolean) }); }}
         />
       </label>
-    </section>
+    </EditorSection>
   );
 }
