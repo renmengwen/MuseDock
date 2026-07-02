@@ -10,6 +10,7 @@ const creativeSidebarPath = path.join(__dirname, '../frontend-react/src/componen
 const creativeComposerPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeComposer.jsx');
 const creativeStatusMessagePath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeStatusMessage.jsx');
 const creativeWorkflowStepperPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeWorkflowStepper.jsx');
+const creativeProgressPanelPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeProgressPanel.jsx');
 const creativeVideoPreviewPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeVideoPreview.jsx');
 const creativeTaskDetailPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeTaskDetail.jsx');
 const appPath = path.join(__dirname, '../frontend-react/src/App.jsx');
@@ -69,6 +70,7 @@ for (const componentPath of [
   '../frontend-react/src/components/creative/CreativeComposer.jsx',
   '../frontend-react/src/components/creative/CreativeStatusMessage.jsx',
   '../frontend-react/src/components/creative/CreativeWorkflowStepper.jsx',
+  '../frontend-react/src/components/creative/CreativeProgressPanel.jsx',
   '../frontend-react/src/components/creative/CreativeVideoPreview.jsx',
   '../frontend-react/src/components/creative/CreativeTaskDetail.jsx',
 ]) {
@@ -81,6 +83,7 @@ const creativeSidebar = fs.readFileSync(creativeSidebarPath, 'utf-8');
 const creativeComposer = fs.readFileSync(creativeComposerPath, 'utf-8');
 const creativeStatusMessage = fs.readFileSync(creativeStatusMessagePath, 'utf-8');
 const creativeWorkflowStepper = fs.readFileSync(creativeWorkflowStepperPath, 'utf-8');
+const creativeProgressPanel = fs.readFileSync(creativeProgressPanelPath, 'utf-8');
 const creativeVideoPreview = fs.readFileSync(creativeVideoPreviewPath, 'utf-8');
 const creativeTaskDetail = fs.readFileSync(creativeTaskDetailPath, 'utf-8');
 const app = fs.readFileSync(appPath, 'utf-8');
@@ -398,6 +401,12 @@ assert.match(creativeTaskDetail, /creativeDetailMeta/, 'Creative task detail sho
 assert.match(creativeWorkflowStepper, /creativeWorkflowStepper/, 'Creative task detail should render a horizontal workflow stepper');
 assert.match(creativeWorkflowStepper, /creativeWorkflowStepConnector/, 'Creative workflow stepper should render connectors between steps');
 assert.match(creativeWorkflowStepper, /aria-current=\{stepState === 'active' \? 'step' : undefined\}/, 'Active workflow step should be exposed and visually highlighted');
+assert.match(creativeWorkflowStepper, /ACTIVE_OUTLINE_CLASS/, 'Active workflow step should use Tailwind classes for the animated outline hook');
+assert.match(creativeWorkflowStepper, /before:animate-pulse/, 'Active workflow step should animate its outline with Tailwind');
+assert.match(creativeWorkflowStepper, /motion-reduce:before:animate-none/, 'Active workflow step animation should respect reduced motion');
+assert.match(creativeProgressPanel, /isActiveProgress/, 'Current progress panel should only animate active progress');
+assert.match(creativeProgressPanel, /motion-safe:animate-pulse/, 'Current progress bar should use Tailwind for its breathing animation');
+assert.match(creativeProgressPanel, /motion-reduce:animate-none/, 'Current progress bar animation should respect reduced motion');
 assert.ok(styles.includes('.creativeWorkflowStepper'), 'styles.css should define workflow stepper layout');
 assert.ok(creativeComposer.includes('className="flex items-center justify-between gap-3 max-[720px]:items-end"'), 'CreativeComposer should keep prompt actions on one row with Tailwind');
 assert.match(creativeSidebar, /DialogContent className="w-\[min\(560px,calc\(100vw-32px\)\)\]"/, 'CreativeSidebar should size task search dialog with Tailwind');
@@ -415,6 +424,8 @@ assert.match(page, /find\(stage => \['running', 'queued', 'pending'\]\.includes\
 assert.match(page, /if \(storedTask\) \{[\s\S]*setStatus\('polling'\);/, 'Stored creative tasks should refresh from backend instead of freezing stale local workflow data');
 assert.match(creativeDisplay, /skipped:\s*'已跳过'/, 'Workflow progress should show skipped stages as 已跳过');
 assert.match(creativeDisplay, /stage\.status === 'skipped'[\s\S]*return 'done'/, 'Workflow stepper should render skipped stages as non-active completed steps');
+assert.match(creativeDisplay, /stage\.status === 'running'[\s\S]*return 'active'/, 'Workflow stepper should treat only running stages as the active visual step');
+assert.match(creativeDisplay, /stage\.status === 'queued' \|\| stage\.status === 'pending'[\s\S]*return 'queued'/, 'Workflow stepper should keep queued stages visually quieter than the running step');
 assert.match(creativeStatusMessage, /getStatusMessageClass/, 'CreativeStatusMessage should use the shared status message class helper');
 assert.match(creativeTaskDetail, /<CreativeStatusMessage\s+status=\{status\}\s+message=\{message\}\s+\/>/, 'CreativeTaskDetail should render the extracted status message component while waiting');
 const videoPreviewStart = creativeTaskDetail.indexOf('<CreativeVideoPreview');
@@ -434,6 +445,7 @@ assert.match(creativeTaskDetail, /workflow\?\.status === 'done' && videoUrl/, 'C
 assert.match(creativeTaskDetail, /<CreativeWorkflowStepper workflow=\{workflow\} \/>[\s\S]*workflow\?\.status === 'done' && videoUrl/, 'Creative detail should keep the progress stepper visible when showing the completed video');
 assert.ok(styles.includes('.creativeDetailMeta'), 'styles.css should define compact task meta row');
 assert.ok(styles.includes('.creativeWorkflowStepConnector'), 'styles.css should define horizontal step connectors');
+assert.ok(!styles.includes('@keyframes activeStepPulse'), 'Active workflow step animation should not add custom global CSS');
 assert.ok(styles.includes('.creativeResultVideo'), 'styles.css should define creative result video');
 
 assert.match(app, /OneClickCreativePage/, 'App.jsx should import and render OneClickCreativePage');

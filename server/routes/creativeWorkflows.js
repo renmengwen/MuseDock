@@ -711,6 +711,38 @@ router.get('/:workflow_id/html-video-project/exports/:export_id/file', async (re
   }
 });
 
+router.get('/:workflow_id/assets/:asset_id/file', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+  const assetId = safeString(req.params.asset_id);
+  if (!assetId) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, message: '素材 ID 无效。' });
+  }
+
+  try {
+    const service = getService(req);
+    if (typeof service.getCreativeWorkflowAssetFile !== 'function') {
+      return res.status(501).json({ success: false, workflow_id: workflowId, asset_id: assetId, message: '当前服务暂不支持读取素材文件。' });
+    }
+    const result = await service.getCreativeWorkflowAssetFile(workflowId, assetId);
+    if (!result || result.success === false) {
+      const message = getMessage(result, '读取来源图片素材失败。');
+      return res.status(result?.code === 'ASSET_NOT_FOUND' ? 404 : getStatusCode(result)).json({ success: false, workflow_id: workflowId, asset_id: assetId, message });
+    }
+    return res.sendFile(result.file_path);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      asset_id: assetId,
+      message: `读取来源图片素材失败：${error.message}`,
+    });
+  }
+});
+
 router.patch('/:workflow_id/html-video-project', async (req, res) => {
   const validation = validateWorkflowId(req.params.workflow_id);
   if (!validation.success) {

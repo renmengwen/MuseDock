@@ -65,7 +65,8 @@ export function getStepState(stage, index, stages) {
   if (stage.status === 'done') return 'done';
   if (stage.status === 'skipped') return 'done';
   if (stage.status === 'failed') return 'failed';
-  if (stage.status === 'running' || stage.status === 'queued' || stage.status === 'pending') return 'active';
+  if (stage.status === 'running') return 'active';
+  if (stage.status === 'queued' || stage.status === 'pending') return 'queued';
   const hasActiveBefore = stages.slice(0, index).some(item => (
     item.status === 'running'
     || item.status === 'queued'

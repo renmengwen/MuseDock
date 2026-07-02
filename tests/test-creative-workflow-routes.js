@@ -55,6 +55,30 @@ async function requestJson(server, method, pathName, body) {
   });
 }
 
+async function requestBuffer(server, method, pathName) {
+  const { port } = server.address();
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathName,
+      method,
+    }, res => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(Buffer.from(chunk)));
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode,
+          body: Buffer.concat(chunks),
+          headers: res.headers,
+        });
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 async function requestSse(server, pathName, body, options = {}) {
   const { port } = server.address();
   const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
@@ -942,6 +966,7 @@ async function run() {
   await runSseRouteCleanupStaticTest();
   await runRetryRouteTests();
   await runEditorRouteTests();
+  await runAssetFileRouteTest();
 }
 
 async function runGetWorkflowUsesActiveRegistryTest() {
@@ -1333,6 +1358,47 @@ async function runEditorRouteTests() {
     const emptyScene = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/scenes/%20/rewrite`, {});
     assert.strictEqual(emptyScene.statusCode, 400);
     assert.strictEqual(emptyScene.body.success, false);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runAssetFileRouteTest() {
+  const app = express();
+  const rootDir = tempRoot();
+  const mediaRoot = path.join(rootDir, 'media');
+  const workflowId = '202606121200000081';
+  const assetDir = path.join(mediaRoot, workflowId, 'assets');
+  const assetPath = path.join(assetDir, 'source-image-01.png');
+  const outsidePath = path.join(rootDir, 'outside.png');
+  fs.mkdirSync(assetDir, { recursive: true });
+  fs.writeFileSync(assetPath, Buffer.from('local asset bytes'));
+  fs.writeFileSync(outsidePath, Buffer.from('outside bytes'));
+  fs.writeFileSync(workflows.getWorkflowPath(workflowId, rootDir), JSON.stringify({
+    workflow_id: workflowId,
+    asset_context: {
+      assets: [
+        { id: 'article_01', type: 'image', local_path: assetPath, path: 'assets/source-image-01.png' },
+        { id: 'bad_01', type: 'image', local_path: outsidePath },
+      ],
+    },
+  }, null, 2), 'utf-8');
+
+  app.use(express.json());
+  app.locals.creativeWorkflows = {
+    getCreativeWorkflowAssetFile: (id, assetId) => workflows.getCreativeWorkflowAssetFile(id, assetId, { rootDir, mediaRoot }),
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+  const server = await listen(app);
+  try {
+    const ok = await requestBuffer(server, 'GET', `/api/creative-workflows/${workflowId}/assets/article_01/file`);
+    assert.strictEqual(ok.statusCode, 200);
+    assert.strictEqual(ok.body.toString(), 'local asset bytes');
+
+    const blocked = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/assets/bad_01/file`);
+    assert.strictEqual(blocked.statusCode, 404);
+    assert.strictEqual(blocked.body.success, false);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

@@ -297,6 +297,11 @@ function getWorkflowPath(workflowId, rootDir = DEFAULT_ROOT) {
   return filePath;
 }
 
+function isPathInside(child, parent) {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 function createStages() {
   return STAGE_IDS.map(id => ({
       id,
@@ -2658,6 +2663,54 @@ async function getHtmlVideoProjectExportFile(workflowId, exportId, options = {})
   };
 }
 
+async function getCreativeWorkflowAssetFile(workflowId, assetId, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
+  const id = safeString(assetId);
+  let record;
+  try {
+    record = await readWorkflow(workflowId, rootDir);
+  } catch {
+    return {
+      success: false,
+      code: 'ASSET_NOT_FOUND',
+      workflow_id: workflowId,
+      asset_id: id,
+      message: '未找到来源图片素材文件。',
+    };
+  }
+  const assets = [
+    ...(Array.isArray(record.asset_context?.assets) ? record.asset_context.assets : []),
+    ...(Array.isArray(record.creative_context?.asset_context?.assets) ? record.creative_context.asset_context.assets : []),
+  ];
+  const asset = assets.find((item, index) => (
+    safeString(item?.id) === id
+    || safeString(item?.asset_id) === id
+    || `asset_${index + 1}` === id
+  ));
+  const workflowDir = path.resolve(mediaRoot, safeString(workflowId));
+  const rawPath = safeString(asset?.local_path) || (safeString(asset?.path) ? path.join(workflowDir, asset.path) : '');
+  const filePath = rawPath ? path.resolve(rawPath) : '';
+  const realWorkflowDir = workflowDir ? await fsp.realpath(workflowDir).catch(() => '') : '';
+  const realFilePath = filePath ? await fsp.realpath(filePath).catch(() => '') : '';
+  if (!asset || !realFilePath || !realWorkflowDir || !isPathInside(realFilePath, realWorkflowDir) || !await fileExists(realFilePath)) {
+    return {
+      success: false,
+      code: 'ASSET_NOT_FOUND',
+      workflow_id: workflowId,
+      asset_id: id,
+      message: '未找到来源图片素材文件。',
+    };
+  }
+  return {
+    success: true,
+    workflow_id: workflowId,
+    asset_id: id,
+    asset,
+    file_path: realFilePath,
+  };
+}
+
 
 async function getCreativeWorkflowSceneSpec(workflowId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
@@ -2963,6 +3016,7 @@ module.exports = {
   exportHtmlVideoProject,
   listHtmlVideoProjectExports,
   getHtmlVideoProjectExportFile,
+  getCreativeWorkflowAssetFile,
   extractHtmlVideoProjectPathFromWorkflow,
   patchCreativeWorkflowVideoSpec,
   getCreativeWorkflowSceneSpec,

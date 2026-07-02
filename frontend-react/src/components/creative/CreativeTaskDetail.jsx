@@ -5,6 +5,7 @@ import {
   Dialog,
   DialogClose,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -205,35 +206,54 @@ function sourceLabel(source) {
   return SOURCE_LABEL_TEXT[key] || key || '来源图片';
 }
 
-function SourceImageAssetsPanel({ workflow }) {
-  const assetContext = workflow?.asset_context || workflow?.creative_context?.asset_context || null;
-  const assets = Array.isArray(assetContext?.assets) ? assetContext.assets : [];
-  const diagnostics = Array.isArray(assetContext?.diagnostics) ? assetContext.diagnostics : [];
-  const usageReport = assetContext?.asset_usage_report
-    || workflow?.result?.hyperframes_freeform?.project?.asset_usage_report
-    || workflow?.html_video_project?.asset_usage_report
-    || null;
-  const usageById = new Map((Array.isArray(usageReport?.assets) ? usageReport.assets : [])
-    .map(item => [String(item.asset_id || item.id || '').trim(), item])
-    .filter(([id]) => id));
+function getAssetImageSrc(asset, assetId, workflowId) {
+  if (assetId && workflowId) {
+    return `/api/creative-workflows/${encodeURIComponent(workflowId)}/assets/${encodeURIComponent(assetId)}/file`;
+  }
+  const src = firstText(asset?.preview_url, asset?.thumbnail_url, asset?.url);
+  return /^(https?:\/\/|\/api\/|data:image\/)/i.test(src) ? src : '';
+}
 
-  if (!assetContext && !assets.length && !diagnostics.length) return null;
+function SourceImageThumbnail({ asset, assetId, workflowId, className }) {
+  const [failed, setFailed] = useState(false);
+  const src = getAssetImageSrc(asset, assetId, workflowId);
+  if (src && !failed) {
+    return (
+      <img
+        className={cn('h-full w-full rounded-md object-cover', className)}
+        src={src}
+        alt={firstText(asset.alt, asset.title, assetId, '来源图片')}
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <div className={cn('grid h-full w-full place-items-center rounded-md bg-white px-2 text-center font-mono text-[11px] font-bold text-[#69717e]', className)}>
+      {assetId}
+    </div>
+  );
+}
 
-  const contextStatus = assetContext?.image_analysis?.status || assetContext?.status || '';
+function SourceImageAssetsDialog({ assets, diagnostics, usageById, workflowId }) {
+  const sharedAnalysisMessage = Array.from(new Set(assets
+    .map(asset => firstText(asset.image_analysis?.message))
+    .filter(Boolean))).length === 1
+    ? firstText(assets[0]?.image_analysis?.message)
+    : '';
 
   return (
-    <section className="grid gap-3.5 rounded-lg border border-[#e7e9ee] bg-white p-4" aria-label="来源图片素材">
-      <div className="flex items-start justify-between gap-3 max-[720px]:flex-col">
-        <div className="min-w-0">
-          <h3 className="m-0 text-[15px] font-bold leading-snug text-[#111827]">来源图片素材</h3>
-          <p className="mt-1 text-[13px] leading-relaxed text-[#69717e]">
-            {assetContext?.summary || assetContext?.image_analysis?.summary || '展示文章/GitHub 图片的分析状态、引用结果和准备诊断。'}
-          </p>
+    <DialogContent className="max-h-[86vh] w-[min(1080px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-auto sm:max-w-[1080px]">
+      <DialogHeader>
+        <DialogTitle>来源图片列表</DialogTitle>
+        <DialogDescription>查看已提取图片、分析状态和最终引用情况。</DialogDescription>
+      </DialogHeader>
+
+      {sharedAnalysisMessage ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-[#92400e]">
+          分析说明：{sharedAnalysisMessage}
         </div>
-        <span className={cn('shrink-0 rounded-full px-3 py-1 text-xs font-bold ring-1', IMAGE_ANALYSIS_STATUS_CLASS[contextStatus] || IMAGE_ANALYSIS_STATUS_CLASS.default)}>
-          图片分析：{formatImageAnalysisStatus(contextStatus)}
-        </span>
-      </div>
+      ) : null}
 
       {assets.length ? (
         <div className="grid gap-3">
@@ -251,9 +271,9 @@ function SourceImageAssetsPanel({ workflow }) {
               .join(' / ');
 
             return (
-              <article key={`${assetId}-${index}`} className="grid grid-cols-[96px_minmax(0,1fr)] gap-3 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 max-[640px]:grid-cols-1">
-                <div className="grid aspect-[16/10] w-24 place-items-center rounded-md border border-[#d9dde5] bg-white px-2 text-center font-mono text-[11px] font-bold text-[#69717e] max-[640px]:w-full">
-                  {assetId}
+              <article key={`${assetId}-${index}`} className="grid grid-cols-[132px_minmax(0,1fr)] gap-3 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 max-[640px]:grid-cols-1">
+                <div className="aspect-[16/10] w-full overflow-hidden rounded-md border border-[#d9dde5] bg-white">
+                  <SourceImageThumbnail asset={asset} assetId={assetId} workflowId={workflowId} />
                 </div>
                 <div className="min-w-0">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -269,7 +289,7 @@ function SourceImageAssetsPanel({ workflow }) {
                   {analysis.summary ? <p className="mt-2 text-[13px] leading-relaxed text-[#30343b]">{analysis.summary}</p> : null}
                   {metaLine ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">类型/用途/适配：{metaLine}</p> : null}
                   {usedInFrames.length ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">引用镜头：{usedInFrames.join('、')}</p> : null}
-                  {analysis.message ? <p className="mt-1 text-xs leading-relaxed text-[#b45309]">分析说明：{analysis.message}</p> : null}
+                  {analysis.message && analysis.message !== sharedAnalysisMessage ? <p className="mt-1 text-xs leading-relaxed text-[#b45309]">分析说明：{analysis.message}</p> : null}
                 </div>
               </article>
             );
@@ -294,6 +314,76 @@ function SourceImageAssetsPanel({ workflow }) {
           })}
         </div>
       ) : null}
+    </DialogContent>
+  );
+}
+
+function SourceImageAssetsPanel({ workflow }) {
+  const assetContext = workflow?.asset_context || workflow?.creative_context?.asset_context || null;
+  const assets = Array.isArray(assetContext?.assets) ? assetContext.assets : [];
+  const diagnostics = Array.isArray(assetContext?.diagnostics) ? assetContext.diagnostics : [];
+  const usageReport = assetContext?.asset_usage_report
+    || workflow?.result?.hyperframes_freeform?.project?.asset_usage_report
+    || workflow?.html_video_project?.asset_usage_report
+    || null;
+  const usageById = new Map((Array.isArray(usageReport?.assets) ? usageReport.assets : [])
+    .map(item => [String(item.asset_id || item.id || '').trim(), item])
+    .filter(([id]) => id));
+
+  if (!assetContext && !assets.length && !diagnostics.length) return null;
+
+  const contextStatus = assetContext?.image_analysis?.status || assetContext?.status || '';
+  const assetWorkflowId = firstText(workflow?.workflow_id, workflow?.id);
+  const usedAssetCount = assets.filter((asset, index) => {
+    const assetId = firstText(asset.id, asset.asset_id, `asset_${index + 1}`);
+    const usage = usageById.get(assetId);
+    const usedInFrames = Array.isArray(usage?.used_in_frames) ? usage.used_in_frames.filter(Boolean) : [];
+    return usage?.used === true || usedInFrames.length > 0 || Number(usage?.usage_count || 0) > 0;
+  }).length;
+
+  return (
+    <section className="grid gap-3.5 rounded-lg border border-[#e7e9ee] bg-white p-4" aria-label="来源图片素材">
+      <div className="flex items-start justify-between gap-3 max-[720px]:flex-col">
+        <div className="min-w-0">
+          <h3 className="m-0 text-[15px] font-bold leading-snug text-[#111827]">来源图片素材</h3>
+          <p className="mt-1 text-[13px] leading-relaxed text-[#69717e]">
+            {assetContext?.summary || assetContext?.image_analysis?.summary || '展示文章/GitHub 图片的分析状态、引用结果和准备诊断。'}
+          </p>
+        </div>
+        <div className="inline-flex shrink-0 flex-wrap items-center justify-end gap-2 max-[720px]:justify-start">
+          <span className={cn('rounded-full px-3 py-1 text-xs font-bold ring-1', IMAGE_ANALYSIS_STATUS_CLASS[contextStatus] || IMAGE_ANALYSIS_STATUS_CLASS.default)}>
+            图片分析：{formatImageAnalysisStatus(contextStatus)}
+          </span>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="secondary" size="sm" type="button">
+                <Eye size={14} />
+                <span>{assets.length ? `查看图片列表（${assets.length}）` : '查看素材诊断'}</span>
+              </Button>
+            </DialogTrigger>
+            <SourceImageAssetsDialog assets={assets} diagnostics={diagnostics} usageById={usageById} workflowId={assetWorkflowId} />
+          </Dialog>
+        </div>
+      </div>
+
+      {assets.length ? (
+        <div className="grid grid-cols-3 gap-3 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] max-[640px]:grid-cols-1">
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-[#8a93a2]">图片素材</div>
+            <div className="mt-1 font-semibold text-[#111827]">{assets.length} 张</div>
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-[#8a93a2]">已用于镜头</div>
+            <div className="mt-1 font-semibold text-[#111827]">{usedAssetCount} 张</div>
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-[#8a93a2]">诊断信息</div>
+            <div className="mt-1 font-semibold text-[#111827]">{diagnostics.length} 条</div>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-[#d9dde5] bg-[#fafbfc] px-3 py-2 text-[13px] text-[#69717e]">暂无来源图片素材。</div>
+      )}
     </section>
   );
 }

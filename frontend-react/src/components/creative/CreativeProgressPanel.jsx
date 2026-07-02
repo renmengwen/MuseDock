@@ -37,6 +37,7 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
     : (workflow.current_stage || activeStage?.id || '');
   const stageLabel = STAGE_LABELS[stageId] || activeStage?.label || '创作任务';
   const progress = normalizeWorkflowProgress(workflow);
+  const isActiveProgress = !['done', 'failed'].includes(workflow.status) && progress < 100;
   const durationLabel = formatWorkflowDurationLabel(workflow);
   const currentMessage = workflow.current_stage_message
     || activeStage?.message
@@ -52,8 +53,14 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
         </div>
         <strong className="shrink-0 text-lg leading-tight text-[#111827]">{progress}%</strong>
       </div>
-      <div className="h-2 overflow-hidden rounded-full bg-[#e5e7eb]" aria-label={`总进度 ${progress}%`}>
-        <span className="block h-full rounded-full bg-[#111827] transition-[width] duration-200" style={{ width: `${progress}%` }} />
+      <div
+        className={`h-2 overflow-hidden rounded-full bg-[#e5e7eb] ${isActiveProgress ? 'motion-safe:animate-pulse ring-2 ring-[#111827]/10 motion-reduce:animate-none' : ''}`}
+        aria-label={`总进度 ${progress}%`}
+      >
+        <span
+          className={`block h-full rounded-full bg-[#111827] transition-[width] duration-200 ${isActiveProgress ? 'shadow-[0_0_0_4px_rgba(17,24,39,.12)]' : ''}`}
+          style={{ width: `${progress}%` }}
+        />
       </div>
       <dl className="m-0 grid grid-cols-3 gap-x-3 gap-y-2 max-[720px]:grid-cols-1">
         <div className="min-w-0 rounded-md border border-[#edf0f4] bg-white p-3">
