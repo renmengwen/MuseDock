@@ -600,6 +600,9 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
     ? overrideSource.useResearch
     : (typeof payloadSource.useResearch === 'boolean' ? payloadSource.useResearch : useResearchFromDefaults);
   const templateId = safeString(overrideSource.templateId) || safeString(templateByAspectRatio[aspectRatio]);
+  const frameHtmlConcurrency = Number.isFinite(Number(overrideSource.frameHtmlConcurrency))
+    ? Number(overrideSource.frameHtmlConcurrency)
+    : Number(defaultsSource.frameHtmlConcurrency);
 
   return {
     aspectRatio,
@@ -622,6 +625,9 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
     sourceImageAnalysisEnabled: typeof overrideSource.sourceImageAnalysisEnabled === 'boolean'
       ? overrideSource.sourceImageAnalysisEnabled
       : defaultsSource.sourceImageAnalysisEnabled === true,
+    frameHtmlConcurrency: Number.isFinite(frameHtmlConcurrency)
+      ? Math.min(5, Math.max(1, Math.round(frameHtmlConcurrency)))
+      : 1,
   };
 }
 
@@ -658,6 +664,9 @@ function buildWorkflowTarget(snapshot = {}) {
     generateAudio: snapshot.generateAudio !== false,
     generateCaptions: snapshot.generateCaptions !== false,
     emotionalVoice: snapshot.emotionalVoice === true,
+    frameHtmlConcurrency: Number.isFinite(Number(snapshot.frameHtmlConcurrency))
+      ? Math.min(5, Math.max(1, Math.round(Number(snapshot.frameHtmlConcurrency))))
+      : 1,
   };
 }
 
@@ -1009,6 +1018,47 @@ function syncProjectStageSummariesFromCheckpoint(record, generationCheckpoint) {
   return record;
 }
 
+function applyAssetUsageReportToRecord(record, assetUsageReport) {
+  if (!record || !assetUsageReport || !Array.isArray(assetUsageReport.assets)) return record;
+  if (record.asset_context && typeof record.asset_context === 'object' && !Array.isArray(record.asset_context)) {
+    record.asset_context = {
+      ...record.asset_context,
+      asset_usage_report: assetUsageReport,
+    };
+  }
+  if (record.creative_context?.asset_context && typeof record.creative_context.asset_context === 'object' && !Array.isArray(record.creative_context.asset_context)) {
+    record.creative_context = {
+      ...record.creative_context,
+      asset_context: {
+        ...record.creative_context.asset_context,
+        asset_usage_report: assetUsageReport,
+      },
+    };
+  }
+  if (record.result?.hyperframes_freeform) {
+    record.result.hyperframes_freeform.project = {
+      ...(record.result.hyperframes_freeform.project || {}),
+      asset_usage_report: assetUsageReport,
+    };
+  }
+  return record;
+}
+
+function buildProjectAssetUsageReport(project, projectDir, record) {
+  if (!project || typeof project !== 'object' || Array.isArray(project)) return null;
+  if (project?.asset_usage_report && Array.isArray(project.asset_usage_report.assets)) {
+    return project.asset_usage_report;
+  }
+  if (htmlVideoWorkflow && typeof htmlVideoWorkflow.buildAssetUsageReport === 'function') {
+    return htmlVideoWorkflow.buildAssetUsageReport({
+      project,
+      projectDir,
+      creativeContext: project?.creative_context || record?.creative_context || {},
+    });
+  }
+  return null;
+}
+
 async function syncProjectStageSummariesFromProjectDir(record, projectDir) {
   const resolvedProjectDir = safeString(projectDir);
   if (!resolvedProjectDir) return record;
@@ -1016,6 +1066,8 @@ async function syncProjectStageSummariesFromProjectDir(record, projectDir) {
     const projectPath = htmlVideoProjectStore.resolveProjectPath(resolvedProjectDir, 'project.json');
     const project = JSON.parse(await fsp.readFile(projectPath, 'utf8'));
     syncProjectStageSummariesFromCheckpoint(record, project.generation_checkpoint);
+    const assetUsageReport = buildProjectAssetUsageReport(project, resolvedProjectDir, record);
+    applyAssetUsageReportToRecord(record, assetUsageReport);
   } catch {
     // checkpoint 只是辅助恢复状态，读取失败不能覆盖主阶段错误。
   }
@@ -1362,6 +1414,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     record.result = { hyperframes_freeform: projectStageResult.hyperframes_freeform };
     record.error = null;
     record.updated_at = doneAt;
+    await syncProjectStageSummariesFromProjectDir(record, extractHtmlVideoProjectPathFromWorkflow(record));
     const persisted = await persistWorkflow(record, rootDir);
     return createWorkflowSummary(persisted);
   }
@@ -1423,6 +1476,13 @@ async function getCreativeWorkflow(workflowId, options = {}) {
   try {
     const record = await readWorkflow(workflowId, rootDir);
     const nextRecord = await markStaleRunningStageFailed(record, rootDir, services, options);
+    const beforeHydrate = JSON.stringify(nextRecord.asset_context?.asset_usage_report || nextRecord.result?.hyperframes_freeform?.project?.asset_usage_report || null);
+    await syncProjectStageSummariesFromProjectDir(nextRecord, extractHtmlVideoProjectPathFromWorkflow(nextRecord));
+    const afterHydrate = JSON.stringify(nextRecord.asset_context?.asset_usage_report || nextRecord.result?.hyperframes_freeform?.project?.asset_usage_report || null);
+    if (afterHydrate !== beforeHydrate) {
+      nextRecord.updated_at = getNow(services);
+      await persistWorkflow(nextRecord, rootDir);
+    }
     return {
       success: true,
       data: await enrichWorkflowVideoUrls(nextRecord),
@@ -1885,6 +1945,7 @@ function buildHtmlVideoLiteProjectStageResult({ project, projectDir, renderResul
         render_mode: 'html-video',
         html_video_project_path: projectDir,
         project_dir: projectDir,
+        ...(project?.asset_usage_report ? { asset_usage_report: project.asset_usage_report } : {}),
       },
       render: {
         status: 'rendered',
@@ -2036,6 +2097,7 @@ async function retryCreativeWorkflow(workflowId, payload = {}, options = {}) {
         ...(nextHyperframes.project || {}),
       },
     };
+    applyAssetUsageReportToRecord(record, buildProjectAssetUsageReport(latestProject, projectDir, record));
     await markStage(record, 'project', 'done', 'html-video 工程已恢复。', finishedAt, {
       completed_at: finishedAt,
       result: { success: true, project: projectStageResult.hyperframes_freeform.project },

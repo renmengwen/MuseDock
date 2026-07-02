@@ -160,4 +160,23 @@ assert.equal(normalized.graph.nodes[1].data.items[0].label, '基础版');
 assert.equal(normalized.graph.nodes[1].data.items[0].value, 12);
 assert.equal(JSON.stringify(normalized.graph).includes('[object Object]'), false);
 
+const assetFiltered = agent.normalizeContentGraph({
+  synopsis: '素材过滤',
+  nodes: [
+    { id: 'scene_01', kind: 'text', label: '推荐好图', durationSec: 2, text: '使用好图', asset_refs: [{ asset_id: 'article_01' }] },
+    { id: 'scene_02', kind: 'text', label: '过滤坏图', durationSec: 2, text: '不能用坏图', asset_refs: [{ asset_id: 'article_02' }] },
+  ],
+  edges: [],
+}, sceneSpec, {
+  asset_context: {
+    assets: [
+      { id: 'article_01', source: 'article', image_analysis: { should_use: true } },
+      { id: 'article_02', source: 'article', image_analysis: { should_use: false } },
+    ],
+  },
+});
+assert.equal(assetFiltered.success, true);
+assert.deepEqual(assetFiltered.graph.nodes[0].asset_refs, [{ asset_id: 'article_01', usage: '', reason: '' }]);
+assert.equal(assetFiltered.graph.nodes[1].asset_refs, undefined);
+
 console.log('html-video content graph agent tests passed');

@@ -324,8 +324,10 @@ function SourceImageAssetsPanel({ workflow }) {
   const diagnostics = Array.isArray(assetContext?.diagnostics) ? assetContext.diagnostics : [];
   const usageReport = assetContext?.asset_usage_report
     || workflow?.result?.hyperframes_freeform?.project?.asset_usage_report
+    || workflow?.result?.hyperframes_freeform?.html_video_project?.asset_usage_report
     || workflow?.html_video_project?.asset_usage_report
     || null;
+  const hasUsageReport = Array.isArray(usageReport?.assets);
   const usageById = new Map((Array.isArray(usageReport?.assets) ? usageReport.assets : [])
     .map(item => [String(item.asset_id || item.id || '').trim(), item])
     .filter(([id]) => id));
@@ -374,7 +376,7 @@ function SourceImageAssetsPanel({ workflow }) {
           </div>
           <div className="min-w-0">
             <div className="text-xs font-bold text-[#8a93a2]">已用于镜头</div>
-            <div className="mt-1 font-semibold text-[#111827]">{usedAssetCount} 张</div>
+            <div className="mt-1 font-semibold text-[#111827]">{hasUsageReport ? `${usedAssetCount} 张` : '未生成'}</div>
           </div>
           <div className="min-w-0">
             <div className="text-xs font-bold text-[#8a93a2]">诊断信息</div>

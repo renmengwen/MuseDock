@@ -8,6 +8,8 @@ assert.match(source, /来源图片素材/);
 assert.match(source, /image_analysis/);
 assert.match(source, /asset_usage_report/);
 assert.match(source, /最终未引用/);
+assert.match(source, /hasUsageReport/);
+assert.match(source, /未生成/);
 assert.match(source, /assetContext\?\.image_analysis\?\.status \|\| assetContext\?\.status/);
 assert.match(source, /SourceImageThumbnail/);
 assert.match(source, /<img[\s\S]*src=\{src\}/);

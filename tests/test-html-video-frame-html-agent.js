@@ -138,6 +138,7 @@ assert.match(assetPrompt, /匹配价格表截图说明/);
 assert.match(assetPrompt, /禁止引用外部图片 URL/);
 assert.match(assetPrompt, /object-fit: contain/);
 assert.match(assetPrompt, /不要做纯图片轮播/);
+assert.match(assetPrompt, /必须在 HTML 中引用该图片的 src/);
 
 const continuityPrompt = agent.buildFrameHtmlPrompt({
   graph,
@@ -589,6 +590,77 @@ assert.equal(noHtmlDocument.code, 'html_document_extract_failed');
   assert.equal(providerMissing.diagnostics[0].frame_id, 'scene_01');
   assert.equal(providerMissing.diagnostics[0].retryable, true);
   assert.equal(providerMissing.diagnostics[0].repair_action, 'retry_frame_html');
+
+  const assetContextForValidation = {
+    asset_context: {
+      assets: [
+        {
+          id: 'article_01',
+          path: 'assets/source-image-01.png',
+          frame_src: '../assets/source-image-01.png',
+          image_analysis: { should_use: true },
+        },
+        {
+          id: 'article_02',
+          path: 'assets/avoid-image-02.png',
+          frame_src: '../assets/avoid-image-02.png',
+          image_analysis: { should_use: false, avoid_reason: '画面不可读' },
+        },
+      ],
+    },
+  };
+  const assetNode = {
+    ...graph.nodes[0],
+    asset_refs: [{ asset_id: 'article_01', usage: 'showcase', reason: '价格表截图必须展示' }],
+  };
+  const missingAssetUsage = agent.validateFrameAssetUsage(
+    '<!doctype html><html><body><main>基础版价格</main></body></html>',
+    { node: assetNode, creativeContext: assetContextForValidation },
+  );
+  assert.equal(missingAssetUsage.success, false);
+  assert.equal(missingAssetUsage.code, 'frame_html_required_source_asset_missing');
+  assert.equal(missingAssetUsage.details.required_src, '../assets/source-image-01.png');
+
+  const blockedAssetUsage = agent.validateFrameAssetUsage(
+    '<!doctype html><html><body><img src="../assets/avoid-image-02.png"></body></html>',
+    { node: graph.nodes[0], creativeContext: assetContextForValidation },
+  );
+  assert.equal(blockedAssetUsage.success, false);
+  assert.equal(blockedAssetUsage.code, 'frame_html_blocked_source_asset_used');
+
+  let requiredAssetCallCount = 0;
+  const validAssetHtml = src => [
+    '<!doctype html>',
+    '<html lang="zh-CN"><head><meta name="viewport" content="width=1920,height=1080,initial-scale=1.0">',
+    '<style>html,body{margin:0;width:1920px;height:1080px;overflow:hidden}main{animation:enter .3s both}@keyframes enter{from{opacity:0}to{opacity:1}}</style></head>',
+    '<body data-hv-canvas data-width="1920" data-height="1080">',
+    '<main>',
+    '<h1 data-text-key="headline">基础版</h1>',
+    '<p data-text-key="subtitle">价格对比</p>',
+    `<section data-text-key="body">价格 12 元${src ? `<img src="${src}" style="object-fit:contain">` : ''}</section>`,
+    '</main></body></html>',
+  ].join('');
+  const requiredAssetResult = await agent.generateFrameHtml({
+    model: {
+      callTextModel: async ({ messages }) => {
+        requiredAssetCallCount += 1;
+        if (requiredAssetCallCount === 1) {
+          return { success: true, text: `\`\`\`html\n${validAssetHtml('')}\n\`\`\`` };
+        }
+        assert.match(messages[0].content, /必须引用上面的 src/);
+        assert.match(messages[0].content, /\.\.\/assets\/source-image-01\.png/);
+        return { success: true, text: `\`\`\`html\n${validAssetHtml('../assets/source-image-01.png')}\n\`\`\`` };
+      },
+    },
+    graph,
+    node: assetNode,
+    index: 0,
+    total: 2,
+    creativeContext: assetContextForValidation,
+    target: { resolution: { width: 1920, height: 1080 } },
+  });
+  assert.equal(requiredAssetResult.success, true);
+  assert.equal(requiredAssetCallCount, 2);
 
   console.log('html-video frame html agent tests passed');
 })().catch(error => {

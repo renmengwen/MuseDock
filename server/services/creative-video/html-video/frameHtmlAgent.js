@@ -145,11 +145,9 @@ function buildVisualContinuitySection({ visualStyleReferenceHtml = '', previousF
 }
 
 function frameAssetReferenceSummary(node = {}, creativeContext = {}) {
-  const ref = (Array.isArray(node.asset_refs) ? node.asset_refs : []).find(item => item && item.asset_id);
-  if (!ref) return '';
-  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
-  const asset = assets.find(item => String(item?.id || '') === String(ref.asset_id || ''));
-  if (!asset) return '';
+  const expected = resolveExpectedFrameAsset(node, creativeContext);
+  if (!expected) return '';
+  const { ref, asset } = expected;
   const analysis = asset.image_analysis || {};
   const lines = [
     '本帧推荐来源图片：',
@@ -161,6 +159,101 @@ function frameAssetReferenceSummary(node = {}, creativeContext = {}) {
     `- 推荐原因：${compactText(ref.reason, 260) || '（无）'}`,
   ];
   return lines.join('\n');
+}
+
+function normalizeAssetToken(value = '') {
+  return String(value || '').replace(/\\/g, '/').trim();
+}
+
+function normalizeHtmlAssetReference(value = '') {
+  const text = normalizeAssetToken(value).split(/[?#]/)[0];
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+function assetReferenceTokens(asset = {}) {
+  const assetPath = normalizeAssetToken(asset.path);
+  return [...new Set([
+    normalizeAssetToken(asset.frame_src),
+    assetPath,
+    assetPath ? `../${assetPath}` : '',
+  ].filter(Boolean))];
+}
+
+function extractHtmlAssetReferences(html = '') {
+  const references = new Set();
+  const searchable = String(html || '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<script\b[\s\S]*?<\/script>/gi, '');
+  const attrPattern = /\b(?:src|href|poster|data-src)=["']([^"']+)["']/gi;
+  for (const match of searchable.matchAll(attrPattern)) {
+    const value = normalizeHtmlAssetReference(match[1]);
+    if (value) references.add(value);
+  }
+  const cssPattern = /url\(["']?([^"')]+)["']?\)/gi;
+  for (const match of searchable.matchAll(cssPattern)) {
+    const value = normalizeHtmlAssetReference(match[1]);
+    if (value) references.add(value);
+  }
+  return references;
+}
+
+function htmlReferencesAsset(referenceSet, tokens = []) {
+  for (const rawToken of tokens) {
+    const token = normalizeHtmlAssetReference(rawToken);
+    if (!token) continue;
+    for (const ref of referenceSet) {
+      if (ref === token || ref.endsWith(`/${token.replace(/^\.\.\//, '')}`)) return true;
+    }
+  }
+  return false;
+}
+
+function resolveExpectedFrameAsset(node = {}, creativeContext = {}) {
+  const ref = (Array.isArray(node.asset_refs) ? node.asset_refs : []).find(item => item && item.asset_id);
+  if (!ref) return null;
+  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
+  const asset = assets.find(item => String(item?.id || item?.asset_id || '') === String(ref.asset_id || ''));
+  if (!asset) return null;
+  return { ref, asset };
+}
+
+function validateFrameAssetUsage(html = '', { node = {}, creativeContext = {} } = {}) {
+  const references = extractHtmlAssetReferences(html);
+  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
+  const blockedAsset = assets.find(asset => objectOrEmpty(asset.image_analysis).should_use === false
+    && htmlReferencesAsset(references, assetReferenceTokens(asset)));
+  if (blockedAsset) {
+    return {
+      success: false,
+      code: 'frame_html_blocked_source_asset_used',
+      message: `HTML 引用了不建议用于成片的来源图片：${blockedAsset.id || blockedAsset.asset_id || blockedAsset.path || ''}。`,
+      details: {
+        asset_id: blockedAsset.id || blockedAsset.asset_id || '',
+        path: blockedAsset.path || '',
+        avoid_reason: blockedAsset.image_analysis?.avoid_reason || '',
+      },
+    };
+  }
+
+  const expected = resolveExpectedFrameAsset(node, creativeContext);
+  if (!expected) return { success: true };
+  const tokens = assetReferenceTokens(expected.asset);
+  if (htmlReferencesAsset(references, tokens)) return { success: true };
+  return {
+    success: false,
+    code: 'frame_html_required_source_asset_missing',
+    message: `HTML 未引用本帧推荐来源图片：${expected.ref.asset_id}。`,
+    details: {
+      asset_id: expected.ref.asset_id,
+      required_src: expected.asset.frame_src || expected.asset.path || '',
+      accepted_refs: tokens,
+      reason: expected.ref.reason || '',
+    },
+  };
 }
 
 function validateHtmlTargetResolution(html, target = {}) {
@@ -226,7 +319,7 @@ function buildFrameHtmlPrompt({
     '- 不要让每一帧都使用相同主布局；相邻帧必须有清晰不同的主视觉、层级或构图。',
     '- 不要只改底部 caption；主画面、数据、标题或视觉结构必须服务当前 frame content。',
     '- 不要保留与内容无关的模板导航标签，例如 Search / GitHub / Tech Forums / Docs / Issues，除非这些词就是当前内容事实。',
-    '- 如果本帧提供“本帧推荐来源图片”，优先使用推荐图片；没有推荐图片时，才从 Source context summary 的可用图片素材中选择。',
+    '- 如果本帧提供“本帧推荐来源图片”，必须在 HTML 中引用该图片的 src；没有推荐图片时，才从 Source context summary 的可用图片素材中选择。',
     '- 如果 Source context summary 提供“可用图片素材”，本帧内容适合引用时，可以使用其中的 HTML引用路径，例如 <img src="../assets/source-image-01.jpg">；禁止引用外部图片 URL。',
     '- 文章截图或含文字图片必须完整展示，使用 object-fit: contain；不要裁切成不可读背景。图库/search 图片只适合做弱背景或氛围层，必须加遮罩保证文字可读。',
     '- 不要做纯图片轮播；图片必须和本帧关键词、字幕、数据卡、框选、高亮或解释文案混排。',
@@ -506,6 +599,17 @@ function validateGeneratedHtml(html, args = {}) {
       },
     };
   }
+  const assetUsage = validateFrameAssetUsage(html, args);
+  if (!assetUsage.success) {
+    return {
+      ...assetUsage,
+      code: 'html_validation_failed',
+      details: {
+        validation_code: assetUsage.code || 'frame_html_asset_usage_invalid',
+        ...(assetUsage.details || {}),
+      },
+    };
+  }
   return quality;
 }
 
@@ -519,6 +623,7 @@ function buildShortFrameHtmlPrompt({
   node = {},
   sceneSpec = {},
   target = {},
+  creativeContext = {},
 } = {}) {
   const resolution = resolveResolution(target);
   const sceneId = frameId || node.id || '';
@@ -526,12 +631,14 @@ function buildShortFrameHtmlPrompt({
   const title = compactText(scene.visual_text?.headline || node.label || scene.title || sceneId, 160);
   const narration = compactText(scene.narration_text || node.text || node.data || '', 420);
   const captions = compactText(scene.captions || [], 360);
+  const assetSummary = frameAssetReferenceSummary(node, creativeContext);
   return [
     '你是 html-video 单帧 HTML 生成器。只返回完整 HTML document，不要解释。',
     `当前帧：${sceneId}`,
     `scene title：${title || sceneId}`,
     `当前 scene narration：${narration || '无'}`,
     `当前 scene captions：${captions || '无'}`,
+    assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
     `Target resolution：${resolution.width}x${resolution.height}`,
     `必须生成 full-bleed ${resolution.width}x${resolution.height} 完整 HTML，包含 <!doctype html>、html、head、body、style。`,
     `body 或 #root 必须带 data-hv-canvas、data-width="${resolution.width}"、data-height="${resolution.height}"。`,
@@ -568,6 +675,7 @@ function buildRetryPrompt(args = {}) {
   const scene = resolveSceneForFrame(args.sceneSpec || {}, args.node || {}, args.frameId || args.node?.id || '');
   const frameText = compactText(args.node?.text || scene?.narration_text || '', 260);
   const templateName = compactText(args.template?.name || args.template?.id || '', 80);
+  const assetSummary = frameAssetReferenceSummary(args.node || {}, args.creativeContext || {});
   return [
     '上一次没有得到可用 HTML。只返回一个完整 HTML document，不要解释。',
     `当前帧 id：${args.node?.id || ''}`,
@@ -576,6 +684,7 @@ function buildRetryPrompt(args = {}) {
     expectedHeadline ? `当前镜头核心标题：${expectedHeadline}` : '',
     frameText ? `当前镜头正文：${frameText}` : '',
     expectedTexts.length ? `当前镜头允许使用的内容文案：${expectedTexts.join(' / ')}` : '',
+    assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
     templateName ? `视觉风格参考：延续模板「${templateName}」的配色、字体、形状和动效；不要保留模板默认主体文案。` : '',
     `必须包含 body data-hv-canvas data-width="${resolution.width}" data-height="${resolution.height}"。`,
     `meta viewport、html/body 必须使用 ${resolution.width}x${resolution.height}；不能使用 ${resolution.height}x${resolution.width}。`,
@@ -792,6 +901,7 @@ module.exports = {
   buildRetryPrompt,
   readTemplateSourceSnippet,
   frameAssetReferenceSummary,
+  validateFrameAssetUsage,
   validateHtmlTargetResolution,
   validateHtmlContentQuality,
 };

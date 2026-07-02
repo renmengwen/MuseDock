@@ -47,8 +47,10 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
   });
   const assets = Array.isArray(assetContext.assets) ? assetContext.assets.slice(0, 8) : [];
   if (assets.length) {
+    const usableAssets = assets.filter(isAssetUsableForFrames);
+    const blockedAssets = assets.filter(asset => !isAssetUsableForFrames(asset));
     lines.push('可用图片素材：');
-    assets.forEach((asset, index) => {
+    usableAssets.forEach((asset, index) => {
       const src = compactText(asset.frame_src || asset.path, 160);
       const label = compactText(asset.alt || asset.title || asset.url || `图片${index + 1}`, 120);
       const source = compactText(asset.source || 'article', 30);
@@ -67,9 +69,21 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
       const analysisText = analysisParts.length ? `；图片分析：${analysisParts.join('；')}` : '';
       if (src) lines.push(`- ${index + 1}. ${label}；asset_id=${compactText(asset.id, 80)}；来源=${source}；HTML引用=${src}${analysisText}`);
     });
+    if (!usableAssets.length) lines.push('- 无适合直接进入成片的图片。');
+    if (blockedAssets.length) {
+      const blockedText = blockedAssets
+        .map(asset => `${compactText(asset.id || asset.asset_id, 80)}：${compactText(asset.image_analysis?.avoid_reason || asset.image_analysis?.summary || '图片分析建议不要用于成片', 120)}`)
+        .filter(Boolean)
+        .join('；');
+      if (blockedText) lines.push(`不建议用于成片的图片素材：${blockedText}`);
+    }
     lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；每个 node 最多引用 1 张图片；不适合当前叙事时可以不用。优先使用 article 来源图片；search/Pexels 图片只作补充背景或氛围图，不要当来源证据；不要做纯图片轮播；含文字的文章截图必须完整展示，使用 object-fit: contain；图片应与关键词、字幕、数据卡或讲解节点混排。');
   }
   return lines.join('\n');
+}
+
+function isAssetUsableForFrames(asset = {}) {
+  return objectOrEmpty(asset.image_analysis).should_use !== false;
 }
 
 function sceneIdsFromSpec(sceneSpec = {}) {
@@ -265,6 +279,7 @@ function allowedAssetIdSet(creativeContext = {}) {
   if (!assets.length) return null;
   return new Set(assets
     .filter(asset => String(asset?.source || 'article').trim() === 'article')
+    .filter(isAssetUsableForFrames)
     .map(asset => compactText(asset?.id || asset?.asset_id, 80))
     .filter(Boolean));
 }

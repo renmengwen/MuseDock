@@ -2212,6 +2212,57 @@ async function testSceneSpecOperations() {
   assert.equal(remixed.frame_specs.frames[0].duration, 4);
 }
 
+async function testGetWorkflowHydratesAssetUsageReportFromProject() {
+  const { rootDir } = createTempDirs();
+  const workflowId = WORKFLOW_ID;
+  const projectDir = path.join(rootDir, 'html-video-project');
+  fs.mkdirSync(path.join(projectDir, 'frames'), { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, 'frames', '01.html'),
+    '<!doctype html><html><body><img src="../assets/source-image-01.png"></body></html>',
+    'utf8',
+  );
+  fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({
+    workflow_id: workflowId,
+    frames: [{ id: 'scene_01', scene_id: 'scene_01', html_path: 'frames/01.html' }],
+    assets: [{ id: 'article_01', path: 'assets/source-image-01.png' }],
+  }, null, 2), 'utf8');
+  const assetContext = {
+    status: 'ready',
+    assets: [{ id: 'article_01', type: 'image', source: 'article', path: 'assets/source-image-01.png' }],
+  };
+  fs.writeFileSync(getWorkflowPath(workflowId, rootDir), JSON.stringify({
+    success: true,
+    workflow_id: workflowId,
+    aweme_id: workflowId,
+    status: 'done',
+    message: 'done',
+    stages: [],
+    asset_context: assetContext,
+    creative_context: { asset_context: assetContext },
+    result: {
+      hyperframes_freeform: {
+        project: {
+          render_mode: 'html-video',
+          html_video_project_path: projectDir,
+          project_dir: projectDir,
+        },
+        render: { status: 'rendered', output_path: '' },
+      },
+    },
+  }, null, 2), 'utf8');
+
+  const fetched = await getCreativeWorkflow(workflowId, {
+    rootDir,
+    services: { now: () => NOW },
+  });
+  assert.equal(fetched.success, true);
+  assert.equal(fetched.data.asset_context.asset_usage_report.used_asset_ids[0], 'article_01');
+  assert.equal(fetched.data.result.hyperframes_freeform.project.asset_usage_report.used_asset_ids[0], 'article_01');
+  const persisted = readJson(getWorkflowPath(workflowId, rootDir));
+  assert.equal(persisted.asset_context.asset_usage_report.used_asset_ids[0], 'article_01');
+}
+
 async function run() {
   await testAppendWorkflowModelCall();
   await testRunResearchProviderAddsAuditMetadata();
@@ -2253,6 +2304,7 @@ async function run() {
   await testCustomRootDoesNotUseDefaultRegistryActiveTask();
   await testMissingWorkflowReturnsChineseMessage();
   await testSceneSpecOperations();
+  await testGetWorkflowHydratesAssetUsageReportFromProject();
   console.log('creative workflow tests passed');
 }
 
