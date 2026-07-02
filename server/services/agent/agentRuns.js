@@ -22,10 +22,9 @@ const defaultHyperframesSkillContext = require('../hyperframes/hyperframesSkillC
 const defaultHyperframesFreeformAgent = require('../hyperframes/hyperframesFreeformAgent');
 const defaultHyperframesFreeformProject = require('../hyperframes/hyperframesFreeformProject');
 const defaultHyperframesFreeformQuality = require('../hyperframes/hyperframesFreeformQuality');
-const defaultHyperframesSceneSpecComposer = require('../hyperframes/hyperframesSceneSpecComposer');
 const defaultCreativeVideoWorkflowFacade = require('../creative-video/workflowFacade');
 const { createAgentRunsFreeformWorkflow } = require('./agentRunsFreeformWorkflow');
-const { normalizeFreeformNarrationScenes, resolveFreeformTargetDurationSec, replaceFreeformBriefScenes, fitFreeformNarrationToBudget, compressFreeformNarrationWithModel, repairFreeformNarrationWithModel, pathExists, validateFreeformTempProjectDir, cleanupFreeformTempProjectDir, publishFreeformProjectDirectory, mapFreeformProjectFilesToDir } = require('./agentRunsFreeformHelpers');
+const { normalizeFreeformNarrationScenes, resolveFreeformTargetDurationSec, replaceFreeformBriefScenes, fitFreeformNarrationToBudget, compressFreeformNarrationWithModel, repairFreeformNarrationWithModel, pathExists, mapFreeformProjectFilesToDir } = require('./agentRunsFreeformHelpers');
 
 const TEMPLATE_VIRAL_REWRITE = 'viral_rewrite';
 const MAX_COMMENTS_CHARS = agentTemplates.MAX_COMMENTS_CHARS;
@@ -747,7 +746,6 @@ const freeformWorkflow = createAgentRunsFreeformWorkflow({
   defaultHyperframesFreeformAgent,
   defaultHyperframesFreeformProject,
   defaultHyperframesFreeformQuality,
-  defaultHyperframesSceneSpecComposer,
   defaultHyperframesRenderer,
   defaultCreativeVideoWorkflowFacade,
   getLogger,
@@ -766,9 +764,6 @@ const freeformWorkflow = createAgentRunsFreeformWorkflow({
   compressFreeformNarrationWithModel,
   repairFreeformNarrationWithModel,
   pathExists,
-  validateFreeformTempProjectDir,
-  cleanupFreeformTempProjectDir,
-  publishFreeformProjectDirectory,
   mapFreeformProjectFilesToDir,
   buildHtmlVideoExportFileUrl,
 });

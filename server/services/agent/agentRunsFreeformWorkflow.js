@@ -11,7 +11,6 @@
   defaultHyperframesFreeformAgent,
   defaultHyperframesFreeformProject,
   defaultHyperframesFreeformQuality,
-  defaultHyperframesSceneSpecComposer,
   defaultHyperframesRenderer,
   defaultCreativeVideoWorkflowFacade,
   getLogger,
@@ -30,9 +29,6 @@
   compressFreeformNarrationWithModel,
   repairFreeformNarrationWithModel,
   pathExists,
-  validateFreeformTempProjectDir,
-  cleanupFreeformTempProjectDir,
-  publishFreeformProjectDirectory,
   mapFreeformProjectFilesToDir,
   buildHtmlVideoExportFileUrl,
 } = {}) {
@@ -1446,7 +1442,20 @@
 
 
 
-    if (options.useLegacyFreeformProject !== true && options.useHtmlVideoLiteWorkflow === true) {
+    if (options.useLegacyFreeformProject === true) {
+      return markFreeformProjectFailed(
+        awemeId,
+        runId,
+        '旧 HyperFrames/freeform 工程生成入口已禁用，请使用 html-video production 生成工程。',
+        options,
+        operationId,
+        {
+          render_mode: 'html-video',
+          fallback_allowed: false,
+          retryable: false,
+        },
+      );
+    }
 
       const facade = options.creativeVideoWorkflowFacade || defaultCreativeVideoWorkflowFacade;
 
@@ -1679,668 +1688,51 @@
 
       };
 
-    }
-
-
-    return markFreeformProjectFailed(
-      awemeId,
-      runId,
-      '旧 HyperFrames/freeform 工程生成入口已禁用，请使用 html-video production 生成工程。',
-      options,
-      operationId,
-      {
-        render_mode: 'html-video',
-        fallback_allowed: false,
-        retryable: false,
-      },
-    );
-
-
-    const skillContext = options.skillContext || defaultHyperframesSkillContext;
-
-    let context;
-
-    try {
-
-      context = await skillContext.loadHyperframesSkillContext({
-
-        skillRoot: options.skillRoot,
-
-        maxChars: options.skillContextMaxChars,
-
-        env: options.env,
-
-      });
-
-    } catch (error) {
-
-      context = {
-
-        success: false,
-
-        message: `读取 HyperFrames skill 上下文失败：${error.message || '未知错误'}`,
-
-      };
-
-    }
-
-    if (!context.success) {
-
-      const message = context.message || '读取 HyperFrames skill 上下文失败。';
-
-      return markFreeformProjectFailed(awemeId, runId, message, options, operationId);
-
-    }
-
-
-
-    const freeformAgent = options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent;
-
-    let messages;
-
-    let useSceneSpec = options.useSceneSpec !== false;
-
-    try {
-
-      if (useSceneSpec) {
-
-        messages = freeformAgent.buildSceneSpecMessages({
-
-          run: detail.data,
-
-          brief: currentState.brief.data || {},
-
-          skillContext: context.prompt_context,
-
-          options: options.projectOptions || {},
-
-        });
-
-      } else {
-
-        messages = freeformAgent.buildFreeformProjectMessages({
-
-          run: detail.data,
-
-          brief: currentState.brief.data || {},
-
-          skillContext: context.prompt_context,
-
-          options: options.projectOptions || {},
-
-        });
-
-      }
-
-    } catch (error) {
-
-      return markFreeformProjectFailed(
-
-        awemeId,
-
-        runId,
-
-        `HyperFrames 工程生成失败：${error.message || '构建提示失败'}`,
-
-        options,
-
-        operationId,
-
-      );
-
-    }
-
-    const modelService = options.aiTextModel || defaultAiTextModel;
-
-    let modelResult;
-
-    try {
-
-      modelResult = await modelService.callTextModel({
-
-        messages,
-
-        temperature: 0.35,
-
-        stream: true,
-
-        fallbackToNonStreamOnGatewayTimeout: true,
-
-        configPath: options.configPath,
-
-        textConfig: options.textConfig,
-
-        fetchImpl: options.fetchImpl,
-
-        maxRetries: options.maxRetries,
-
-        requestTimeoutMs: 300000,
-
-        streamChunkTimeoutMs: 120000,
-
-        logger,
-
-      });
-
-    } catch (error) {
-
-      modelResult = {
-
-        success: false,
-
-        message: error.message || '模型调用失败',
-
-      };
-
-    }
-
-
-
-    if (!modelResult.success) {
-
-      const message = modelResult.message || 'HyperFrames 工程生成失败。';
-
-      return markFreeformProjectFailed(awemeId, runId, message, options, operationId);
-
-    }
-
-
-
-    let parsed;
-
-    let sceneSpec = null;
-
-    try {
-
-      if (useSceneSpec) {
-
-        parsed = freeformAgent.parseSceneSpecResponse(modelResult.text || modelResult.raw_output || '');
-
-        if (parsed.success) {
-
-          sceneSpec = parsed.scene_spec;
-
-          const composer = options.hyperframesSceneSpecComposer || defaultHyperframesSceneSpecComposer;
-
-          const composed = composer.composeHyperframesProjectFiles(sceneSpec);
-
-          if (!composed.success) {
-
-            return markFreeformProjectFailed(
-
-              awemeId,
-
-              runId,
-
-              `场景规格工程生成失败：${composed.message || '规格验证失败'}`,
-
-              options,
-
-              operationId,
-
-            );
-
-          }
-
-          parsed = { success: true, summary: '工程已从场景规格生成', files: composed.files };
-
-        }
-
-      } else {
-
-        parsed = freeformAgent.parseFreeformProjectResponse(modelResult.text || modelResult.raw_output || '');
-
-      }
-
-    } catch (error) {
-
-      return markFreeformProjectFailed(
-
-        awemeId,
-
-        runId,
-
-        `HyperFrames 工程解析失败：${error.message || '解析失败'}`,
-
-        options,
-
-        operationId,
-
-      );
-
-    }
-
-    if (!parsed.success) {
-
-      const message = parsed.message || '解析 HyperFrames 工程失败。';
-
-      return markFreeformProjectFailed(awemeId, runId, message, options, operationId);
-
-    }
-
-
-
-    const projectService = options.hyperframesFreeformProject || defaultHyperframesFreeformProject;
-
-    const tempRunId = `${runId}-${operationId}`;
-
-    const projectAudio = currentState.audio?.status === 'ready' && currentState.audio?.path
-
-      ? currentState.audio
-
-      : null;
-
-    let created;
-
-    try {
-
-      created = await projectService.createFreeformProject({
-
-        awemeId,
-
-        runId: tempRunId,
-
-        rootDir: options.rootDir,
-
-        files: parsed.files,
-
-        audio: projectAudio,
-
-      });
-
-    } catch (error) {
-
-      created = {
-
-        success: false,
-
-        message: `HyperFrames 工程写入失败：${error.message || '未知错误'}`,
-
-      };
-
-    }
-
-    if (!created.success) {
-
-      const message = created.message || 'HyperFrames 工程写入失败。';
-
-      return markFreeformProjectFailed(awemeId, runId, message, options, operationId);
-
-    }
-
-
-
-    const tempProjectDir = created.project_dir || created.projectDir;
-
-    try {
-
-      validateFreeformTempProjectDir({
-
-        tempDir: tempProjectDir,
-
-        finalDir: defaultHyperframesFreeformProject.getFreeformProjectDir(awemeId, runId, options.rootDir),
-
-        awemeId,
-
-        rootDir: options.rootDir,
-
-        tempRunId,
-
-        operationId,
-
-      });
-
-    } catch (error) {
-
-      return markFreeformProjectFailed(
-
-        awemeId,
-
-        runId,
-
-        error.message || 'HyperFrames 临时工程目录不安全。',
-
-        options,
-
-        operationId,
-
-      );
-
-    }
-
-
-
-    let snapshotMessage = '';
-
-    if (context.source_dir && typeof skillContext.copySkillSnapshot === 'function') {
-
-      let snapshot;
-
-      try {
-
-        snapshot = await skillContext.copySkillSnapshot({
-
-          sourceDir: context.source_dir,
-
-          projectDir: tempProjectDir,
-
-        });
-
-      } catch (error) {
-
-        snapshot = {
-
-          success: false,
-
-          message: `HyperFrames skill 快照保存失败：${error.message || '未知错误'}`,
-
-        };
-
-      }
-
-      if (snapshot && !snapshot.success) {
-
-        snapshotMessage = snapshot.message || 'HyperFrames skill 快照保存失败。';
-
-      }
-
-    }
-
-
-
-    const projectDir = defaultHyperframesFreeformProject.getFreeformProjectDir(awemeId, runId, options.rootDir);
-
-    const indexPath = path.join(projectDir, 'index.html');
-
-    const message = snapshotMessage || parsed.summary || created.message || 'HyperFrames 工程已生成。';
-
-    const files = mapFreeformProjectFilesToDir(created.files || [], projectDir);
-
-    let updated;
-
-    try {
-
-      updated = await withRunUpdateQueue(awemeId, runId, options, async () => {
-
-        const latest = await getDouyinAgentRun(awemeId, runId, options);
-
-        if (!latest.success) return latest;
-
-        const current = normalizeHyperframesFreeformState(latest.data.hyperframes_freeform);
-
-        if (current.project.operation_id !== operationId) {
-
-          return {
-
-            success: false,
-
-            stale: true,
-
-            aweme_id: String(awemeId),
-
-            run_id: String(runId),
-
-            message: '已有更新的生成任务完成，已忽略旧结果。',
-
-            run: latest.data,
-
-            hyperframes_freeform: current,
-
-          };
-
-        }
-
-
-
-        await publishFreeformProjectDirectory({
-
-          tempDir: tempProjectDir,
-
-          finalDir: projectDir,
-
-          operationId,
-
-          awemeId,
-
-          rootDir: options.rootDir,
-
-          tempRunId,
-
-        });
-
-        const nextState = normalizeHyperframesFreeformState(mergeHyperframesFreeformPatch(current, {
-
-          status: 'ready',
-
-          project_dir: projectDir,
-
-          project: {
-
-            ...current.project,
-
-            status: 'ready',
-
-            operation_id: operationId,
-
-            index_path: indexPath,
-
-            files,
-
-            message,
-
-            scene_spec: sceneSpec || current.project.scene_spec || null,
-
-          },
-
-        }));
-
-        const updatedRun = {
-
-          ...latest.data,
-
-          hyperframes_freeform: nextState,
-
-          updated_at: new Date().toISOString(),
-
-        };
-
-        await writeJson(getRunPath(awemeId, runId, options.rootDir), updatedRun);
-
-        return {
-
-          success: true,
-
-          aweme_id: String(awemeId),
-
-          run_id: String(runId),
-
-          data: updatedRun,
-
-        };
-
-      });
-
-    } catch (error) {
-
-      await cleanupFreeformTempProjectDir({
-
-        tempDir: tempProjectDir,
-
-        finalDir: projectDir,
-
-        awemeId,
-
-        rootDir: options.rootDir,
-
-        tempRunId,
-
-        operationId,
-
-      });
-
-      return markFreeformProjectFailed(
-
-        awemeId,
-
-        runId,
-
-        `HyperFrames 工程发布失败：${error.message || '未知错误'}`,
-
-        options,
-
-        operationId,
-
-      );
-
-    }
-
-
-
-    if (!updated.success) {
-
-      if (updated.stale) {
-
-        await cleanupFreeformTempProjectDir({
-
-          tempDir: tempProjectDir,
-
-          finalDir: projectDir,
-
-          awemeId,
-
-          rootDir: options.rootDir,
-
-          tempRunId,
-
-          operationId,
-
-        });
-
-      }
-
-      return {
-
-        success: false,
-
-        aweme_id: String(awemeId),
-
-        run_id: String(runId),
-
-        message: updated.message || '已有更新的生成任务完成，已忽略旧结果。',
-
-        hyperframes_freeform: updated.hyperframes_freeform,
-
-      };
-
-    }
-
-
-
-    return {
-
-      success: true,
-
-      aweme_id: String(awemeId),
-
-      run_id: String(runId),
-
-      message,
-
-      hyperframes_freeform: updated.data.hyperframes_freeform,
-
-    };
-
   }
-
-
 
   async function failHyperframesFreeformSection(awemeId, runId, section, message, options = {}, extraPatch = {}) {
-
     const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
-
       [section]: {
-
         ...current[section],
-
         ...extraPatch,
-
         status: 'failed',
-
         message,
-
       },
-
     }), options);
-
     return createFreeformFailureResponse(
-
       awemeId,
-
       runId,
-
       updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
-
       updated.message || message,
-
     );
-
   }
-
-
 
   function isHyperframesFreeformSectionSuccessful(section, state) {
-
     const status = state?.[section]?.status || '';
-
     if (section === 'checks') return status === 'passed';
-
     if (section === 'render') return status === 'rendered';
-
     if (section === 'visual_inspect') return status === 'passed';
-
     return status === 'ready' || status === 'done' || status === 'passed';
-
   }
-
-
 
   function createHyperframesFreeformOperationResponse(awemeId, runId, section, updated, fallbackSuccess, fallbackMessage) {
-
     const state = updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null;
-
     const sectionState = state?.[section] || {};
-
     const finalMessage = sectionState.message || (updated.stale ? updated.message : '') || fallbackMessage;
-
     return {
-
       success: updated.success || updated.stale
-
         ? isHyperframesFreeformSectionSuccessful(section, state)
-
         : fallbackSuccess,
-
       aweme_id: String(awemeId),
-
       run_id: String(runId),
-
       message: finalMessage,
-
       hyperframes_freeform: state,
-
     };
-
   }
-
-
 
   function areSameResolvedPath(left, right) {
-
     return path.resolve(String(left || '')) === path.resolve(String(right || ''));
-
   }
-
-
 
   async function checkDouyinRunHyperframesFreeformProject(awemeId, runId, options = {}) {
 

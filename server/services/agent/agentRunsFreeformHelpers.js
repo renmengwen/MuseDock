@@ -1,6 +1,5 @@
 const fsp = require('fs/promises');
 const path = require('path');
-const crypto = require('crypto');
 const mediaPipeline = require('../mediaPipeline');
 const narrationBudget = require('../storyboard/storyboardNarrationBudget');
 const narrationQuality = require('../creative-video/narrationQuality');
@@ -18,109 +17,12 @@ function getAgentRunsDir(awemeId, rootDir) {
   return path.join(mediaPipeline.getMediaDir(awemeId, rootDir), 'agent_runs');
 }
 
-async function removePathBestEffort(targetPath) {
-  if (!targetPath) return;
-  try {
-    await fsp.rm(targetPath, { recursive: true, force: true });
-  } catch {
-    // Best-effort cleanup should not mask the main generation result.
-  }
-}
-
-function getAgentRunsRootDir(awemeId, rootDir) {
-  return path.resolve(getAgentRunsDir(awemeId, rootDir));
-}
-
-function isPathInside(parentPath, childPath) {
-  const parent = path.resolve(parentPath);
-  const child = path.resolve(childPath);
-  const relative = path.relative(parent, child);
-  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
-}
-
-function validateFreeformTempProjectDir({ tempDir, finalDir, awemeId, rootDir, tempRunId, operationId }) {
-  const tempPath = path.resolve(String(tempDir || ''));
-  const finalPath = path.resolve(String(finalDir || ''));
-  if (!tempPath || tempPath === finalPath) {
-    throw new Error('HyperFrames 临时工程目录不安全：不能使用正式工程目录。');
-  }
-
-  const agentRunsRoot = getAgentRunsRootDir(awemeId, rootDir);
-  if (!isPathInside(agentRunsRoot, tempPath)) {
-    throw new Error('HyperFrames 临时工程目录不安全：目录不在当前运行目录内。');
-  }
-
-  const baseName = path.basename(tempPath);
-  if (!baseName.includes(String(tempRunId || '')) || !baseName.includes(String(operationId || ''))) {
-    throw new Error('HyperFrames 临时工程目录不安全：目录不属于当前生成任务。');
-  }
-
-  return tempPath;
-}
-
-async function cleanupFreeformTempProjectDir(context) {
-  let tempPath;
-  try {
-    tempPath = validateFreeformTempProjectDir(context);
-  } catch {
-    return false;
-  }
-  await removePathBestEffort(tempPath);
-  return true;
-}
-
 async function pathExists(targetPath) {
   try {
     await fsp.access(targetPath);
     return true;
   } catch {
     return false;
-  }
-}
-
-async function publishFreeformProjectDirectory({ tempDir, finalDir, operationId, awemeId, rootDir, tempRunId }) {
-  const safeTempDir = validateFreeformTempProjectDir({ tempDir, finalDir, awemeId, rootDir, tempRunId, operationId });
-  const backupDir = `${finalDir}.backup-${operationId || crypto.randomBytes(3).toString('hex')}`;
-  let hasBackup = false;
-  await fsp.mkdir(path.dirname(finalDir), { recursive: true });
-
-  try {
-    await fsp.rm(backupDir, { recursive: true, force: true });
-    if (await pathExists(finalDir)) {
-      await fsp.rename(finalDir, backupDir);
-      hasBackup = true;
-    }
-    await fsp.rename(safeTempDir, finalDir);
-    if (hasBackup) await removePathBestEffort(backupDir);
-  } catch (error) {
-    if (!error || error.code !== 'EXDEV') {
-      try {
-        if (!(await pathExists(finalDir)) && hasBackup && await pathExists(backupDir)) {
-          await fsp.rename(backupDir, finalDir);
-          hasBackup = false;
-        }
-      } catch {
-        // Restore is best-effort; the thrown publish error below remains the actionable failure.
-      }
-      throw new Error(`HyperFrames 工程发布失败：${error?.message || '无法替换正式工程目录'}`);
-    }
-
-    try {
-      await fsp.cp(safeTempDir, finalDir, { recursive: true });
-      await cleanupFreeformTempProjectDir({ tempDir: safeTempDir, finalDir, awemeId, rootDir, tempRunId, operationId });
-      if (hasBackup) await removePathBestEffort(backupDir);
-    } catch (copyError) {
-      try {
-        await removePathBestEffort(finalDir);
-        if (hasBackup && await pathExists(backupDir)) {
-          await fsp.rename(backupDir, finalDir);
-          hasBackup = false;
-        }
-      } catch {
-        // Restore is best-effort; report the original copy failure clearly.
-      }
-      throw new Error(`HyperFrames 工程发布失败：${copyError.message || '无法复制正式工程目录'}`);
-    }
   }
 }
 
@@ -421,12 +323,6 @@ module.exports = {
   applyFreeformNarrationRepairs,
   compressFreeformNarrationWithModel,
   repairFreeformNarrationWithModel,
-  removePathBestEffort,
-  isPathInside,
   pathExists,
-  getAgentRunsRootDir,
-  validateFreeformTempProjectDir,
-  cleanupFreeformTempProjectDir,
-  publishFreeformProjectDirectory,
   mapFreeformProjectFilesToDir,
 };

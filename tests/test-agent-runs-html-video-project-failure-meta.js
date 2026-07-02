@@ -92,7 +92,6 @@ const agentRuns = require('../server/services/agent/agentRuns');
 
   const successResult = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, successRunId, {
     rootDir,
-    useHtmlVideoLiteWorkflow: true,
     creativeVideoWorkflowFacade: {
       generateCreativeVideoProject: async () => ({
         success: true,
