@@ -368,7 +368,7 @@ async function prepareSourceAssets({
     }
     return result;
   };
-  if (candidates.length < maxArticleImages && maxSearchImages > 0) {
+  if (!candidates.length && maxSearchImages > 0) {
     searchResult = await runSearch();
     const searchImages = Array.isArray(searchResult?.images) ? searchResult.images.slice(0, maxSearchImages) : [];
     candidates.push(...searchImages.map(image => ({ ...image, source: 'search' })));

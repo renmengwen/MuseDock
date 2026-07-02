@@ -146,7 +146,7 @@ export function SystemSettings({
 
         <section className="rounded-lg border border-[#edf0f4] bg-white p-4">
           <h4 className="m-0 text-base font-bold">素材服务</h4>
-          <p className="mt-1 text-sm text-[#4b5563]">配置 Pexels 后，一键成片会在文章图片不足时自动搜索补图。</p>
+          <p className="mt-1 text-sm text-[#4b5563]">配置 Pexels 后，一键成片会在没有可用来源图片时自动搜索补图。</p>
           <label className="mt-3 grid gap-1.5">
             <span className="text-xs font-semibold text-[#5f6876]">PEXELS_API_KEY</span>
             <input

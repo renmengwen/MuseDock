@@ -27,7 +27,7 @@ async function testExtractMarkdownImagesResolvesAndDedupes() {
   ]);
 }
 
-async function testPrepareDownloadsArticleAndPexelsImages() {
+async function testPrepareDownloadsArticleImageWithoutPexelsBackfill() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'source-assets-test-'));
   const requested = [];
   const result = await sourceAssets.prepareSourceAssets({
@@ -63,13 +63,53 @@ async function testPrepareDownloadsArticleAndPexelsImages() {
   });
 
   assert.equal(result.status, 'ready');
-  assert.equal(result.assets.length, 2);
+  assert.equal(result.assets.length, 1);
   assert.equal(result.assets[0].source, 'article');
   assert.equal(result.assets[0].alt, '架构图');
-  assert.equal(result.assets[1].source, 'search');
-  assert.equal(result.assets[1].attribution.provider, 'Pexels');
   assert.ok(fs.existsSync(result.assets[0].local_path));
-  assert.ok(fs.existsSync(result.assets[1].local_path));
+  assert.equal(result.search, null);
+  assert.ok(!requested.some(url => String(url).startsWith('https://api.pexels.com/')));
+}
+
+async function testPrepareDownloadsPexelsWhenNoArticleImages() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'source-assets-pexels-success-test-'));
+  const requested = [];
+  const result = await sourceAssets.prepareSourceAssets({
+    sourceMaterial: {
+      title: 'AI 开源项目',
+      description: '介绍一个 React AI 开源项目',
+      markdown: '# 标题\n\n没有图片。',
+      metadata: { language: 'JavaScript', topics: ['ai', 'react'] },
+    },
+    assetDir: path.join(dir, 'assets'),
+    now: '2026-06-27T00:00:00.000Z',
+    maxArticleImages: 6,
+    maxSearchImages: 1,
+    deps: {
+      pexelsApiKey: 'pexels-key',
+      fetchImpl: async (url) => {
+        requested.push(url);
+        if (String(url).startsWith('https://api.pexels.com/')) {
+          return new Response(JSON.stringify({
+            photos: [{
+              src: { large2x: 'https://images.pexels.com/photo.jpg' },
+              alt: '代码屏幕',
+              photographer: 'Tester',
+              url: 'https://pexels.com/photo',
+            }],
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        return makeImageResponse(`bytes:${url}`);
+      },
+      lookupHost: publicLookup,
+    },
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.equal(result.assets.length, 1);
+  assert.equal(result.assets[0].source, 'search');
+  assert.equal(result.assets[0].attribution.provider, 'Pexels');
+  assert.ok(fs.existsSync(result.assets[0].local_path));
   assert.ok(requested.some(url => String(url).startsWith('https://api.pexels.com/')));
 }
 
@@ -279,7 +319,8 @@ async function testSearchFallbackWhenArticleImagesAllFail() {
 
 (async () => {
   await testExtractMarkdownImagesResolvesAndDedupes();
-  await testPrepareDownloadsArticleAndPexelsImages();
+  await testPrepareDownloadsArticleImageWithoutPexelsBackfill();
+  await testPrepareDownloadsPexelsWhenNoArticleImages();
   await testMissingPexelsKeyDoesNotFail();
   await testPexelsHttpFailureAddsDiagnostic();
   await testRejectsPrivateImageUrlBeforeFetch();
