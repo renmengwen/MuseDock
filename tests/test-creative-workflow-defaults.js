@@ -33,6 +33,7 @@ function createDefaults(overrides = {}) {
     lockTemplate: true,
     useResearch: false,
     emotionalVoice: false,
+    sourceImageAnalysisEnabled: false,
     ...overrides,
   };
 }
@@ -42,6 +43,7 @@ function createServices({
   defaults = createDefaults(),
   systemSettings = { skipValidation: false },
   ttsRuntime = { provider: 'mimo', modelId: 'mimo-v2.5-tts' },
+  textRuntime = { enabled: true, provider: 'mock', apiKey: 'sk-test', baseUrl: 'https://example.com/v1', modelId: 'mock-vision', supportsMultimodal: true },
   agentRuns: agentRunOverrides = {},
 } = {}) {
   const calls = [];
@@ -90,7 +92,11 @@ function createServices({
         ),
       },
       aiModelConfig: {
-        getRuntimeConfig: async type => (type === 'tts' ? ttsRuntime : null),
+        getRuntimeConfig: async type => {
+          if (type === 'tts') return ttsRuntime;
+          if (type === 'text') return textRuntime;
+          return null;
+        },
         getSkipValidation: async () => {
           throw new Error('不应直接读取 ai-models skipValidation');
         },
@@ -111,6 +117,7 @@ function assertSnapshotRecord(record, {
   lockTemplate = true,
   useResearch = false,
   emotionalVoice = false,
+  sourceImageAnalysisEnabled = false,
 } = {}) {
   assert.ok(record.creative_defaults_snapshot, 'snapshot fields missing');
   assert.equal(record.creative_defaults_snapshot.aspectRatio, aspectRatio);
@@ -119,6 +126,7 @@ function assertSnapshotRecord(record, {
   assert.equal(record.creative_defaults_snapshot.lockTemplate, lockTemplate);
   assert.equal(record.creative_defaults_snapshot.useResearch, useResearch);
   assert.equal(record.creative_defaults_snapshot.emotionalVoice, emotionalVoice);
+  assert.equal(record.creative_defaults_snapshot.sourceImageAnalysisEnabled, sourceImageAnalysisEnabled);
   assert.ok(record.target, 'target fields missing');
   assert.equal(record.target.aspect_ratio, aspectRatio);
   assert.equal(record.target.duration_sec, durationSec);
@@ -189,6 +197,16 @@ async function testCreativeDefaultsOverrideBeatsLegacyUseResearch() {
     },
   });
   assertSnapshotRecord(record, { useResearch: true });
+}
+
+async function testCreativeDefaultsOverrideSourceImageAnalysisWins() {
+  const { record } = await createAndRead({
+    input: '来源图片分析默认值测试 https://example.com/a',
+    creativeDefaultsOverride: {
+      sourceImageAnalysisEnabled: true,
+    },
+  });
+  assertSnapshotRecord(record, { sourceImageAnalysisEnabled: true });
 }
 
 async function testMissingDefaultUseResearchDefaultsToTrue() {
@@ -337,6 +355,7 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   await testCreativeDefaultsOverrideWins();
   await testCreativeDefaultsOverrideTemplateIdWins();
   await testCreativeDefaultsOverrideBeatsLegacyUseResearch();
+  await testCreativeDefaultsOverrideSourceImageAnalysisWins();
   await testMissingDefaultUseResearchDefaultsToTrue();
   await testEmotionalVoiceDefaultPassesToAudioStage();
   await testDisabledEmotionalVoicePassesNeutralAudioStyle();

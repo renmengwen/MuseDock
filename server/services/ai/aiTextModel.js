@@ -231,7 +231,7 @@ function shouldRetryStatus(status) {
   return [502, 503, 504].includes(Number(status));
 }
 
-function buildChatCompletionsBody({ modelId, messages, temperature, stream, tools, tool_choice }) {
+function buildChatCompletionsBody({ modelId, messages, temperature, stream, tools, tool_choice, response_format }) {
   return JSON.stringify({
     model: modelId,
     messages,
@@ -239,6 +239,7 @@ function buildChatCompletionsBody({ modelId, messages, temperature, stream, tool
     ...(stream ? { stream: true } : {}),
     ...(tools ? { tools } : {}),
     ...(tool_choice ? { tool_choice } : {}),
+    ...(response_format ? { response_format } : {}),
   });
 }
 
@@ -267,7 +268,7 @@ function getAbortErrorMessage(error, timeoutMs) {
   return `文本模型请求超时：${Math.round(Number(timeoutMs) / 1000)} 秒内未返回结果。`;
 }
 
-async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl, timeoutMs, tools, tool_choice }) {
+async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl, timeoutMs, tools, tool_choice, response_format }) {
   const timeout = createTimeoutSignal(timeoutMs);
   try {
     const response = await fetchImpl(`${baseUrl}/chat/completions`, {
@@ -276,7 +277,7 @@ async function postChatCompletions({ baseUrl, apiKey, modelId, messages, tempera
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: buildChatCompletionsBody({ modelId, messages, temperature, stream, tools, tool_choice }),
+      body: buildChatCompletionsBody({ modelId, messages, temperature, stream, tools, tool_choice, response_format }),
       signal: timeout.signal,
     });
     if (response && typeof response === 'object') {
@@ -343,6 +344,7 @@ async function callTextModel(options = {}) {
     logger,
     tools,
     tool_choice,
+    response_format,
   } = options;
 
   const log = logger && typeof logger === 'object' ? logger : null;
@@ -392,6 +394,7 @@ async function callTextModel(options = {}) {
         timeoutMs: requestTimeoutMs,
         tools,
         tool_choice,
+        response_format,
       });
       lastFetchError = null;
     } catch (error) {
@@ -453,6 +456,7 @@ async function callTextModel(options = {}) {
         timeoutMs: requestTimeoutMs,
         tools,
         tool_choice,
+        response_format,
       });
     } catch (error) {
       const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
@@ -537,6 +541,7 @@ async function callTextModel(options = {}) {
             timeoutMs: requestTimeoutMs,
             tools,
             tool_choice,
+            response_format,
           });
           if (fallbackResponse.ok) {
             const parsedResponse = await readJsonResponse(fallbackResponse, apiKey);
@@ -651,6 +656,7 @@ async function callTextModel(options = {}) {
         timeoutMs: requestTimeoutMs,
         tools,
         tool_choice,
+        response_format,
       });
     } catch (error) {
       const detail = getFetchErrorDetail(error, apiKey) || '网络请求异常';

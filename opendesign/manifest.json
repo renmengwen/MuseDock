@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-02T03:22:48.9153750+08:00",
+  "generated": "2026-07-02T05:22:38.0825643+08:00",
   "sections": [
     {
       "id": "mockups",
@@ -11,6 +11,15 @@
             {
               "label": "index.html",
               "path": "mockups/musedock-console-redesign/index.html"
+            }
+          ]
+        },
+        {
+          "slug": "source-image-analysis-settings",
+          "files": [
+            {
+              "label": "index.html",
+              "path": "mockups/source-image-analysis-settings/index.html"
             }
           ]
         },

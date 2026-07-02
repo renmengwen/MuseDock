@@ -100,6 +100,7 @@ function createFakeServices(overrides = {}) {
           useResearch: true,
           generateAudio: true,
           generateCaptions: true,
+          sourceImageAnalysisEnabled: false,
         }),
         getEffectiveSystemSettings: async () => ({ skipValidation: false }),
       },
@@ -264,9 +265,183 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(analysisInput.creative_context.source_context.diagnostics.fetched_at, '2026-06-21T00:00:00.000Z');
   assert.equal(analysisInput.creative_context.source_context.diagnostics.ignored_url_count, 0);
   assert.equal(analysisInput.creative_context.asset_context.status, 'ready');
+  assert.equal(run.asset_context.image_analysis.status, 'disabled');
+  assert.equal(run.asset_context.assets[0].image_analysis.status, 'disabled');
+  assert.equal(analysisInput.creative_context.asset_context.image_analysis.status, 'disabled');
+  assert.equal(analysisInput.creative_context.asset_context.assets[0].image_analysis.status, 'disabled');
   assert.equal(analysisInput.creative_context.asset_context.assets[0].path, 'assets/source-image-01.png');
   assert.deepEqual(analysisInput.local_assets.images, [path.join(mediaRoot, 'fake-source-image-01.png')]);
   assert.equal(analysisInput.video.aweme_url, '');
+}
+
+async function testSourceUrlWorkflowRunsSourceImageAnalysisWhenEnabled() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const repoUrl = 'https://github.com/owner/repo';
+  const { services } = createFakeServices({
+    services: {
+      aiModelConfig: {
+        getRuntimeConfig: async type => (type === 'text'
+          ? { enabled: true, provider: 'mock', apiKey: 'sk-test', baseUrl: 'https://example.com/v1', modelId: 'mock-vision', supportsMultimodal: true }
+          : null),
+      },
+      sourceFetch: {
+        fetchSource: async sourceUrl => ({
+          success: true,
+          kind: 'github_repo',
+          url: sourceUrl,
+          title: 'owner/repo',
+          markdown: '# owner/repo\n\n真实 README 内容。\n\n![架构图](https://example.com/arch.png)',
+          truncated: false,
+          metadata: { language: 'JavaScript' },
+        }),
+      },
+      sourceAssets: {
+        prepareSourceAssets: async ({ sourceMaterial, now }) => ({
+          status: 'ready',
+          updated_at: now,
+          summary: '已准备 1 张图片素材。',
+          diagnostics: [],
+          assets: [{
+            id: 'article_01',
+            type: 'image',
+            source: 'article',
+            url: 'https://example.com/arch.png',
+            path: 'assets/source-image-01.png',
+            local_path: path.join(mediaRoot, 'fake-source-image-01.png'),
+            alt: sourceMaterial.title,
+            mime: 'image/png',
+          }],
+        }),
+      },
+      sourceImageAnalysis: {
+        analyzeSourceImageAssets: async ({ enabled, assets, runtime }) => {
+          assert.equal(enabled, true);
+          assert.equal(runtime.modelId, 'mock-vision');
+          return {
+            status: 'ready',
+            summary: '已完成 1 张来源图片多模态分析。',
+            assets: assets.map(asset => ({
+              ...asset,
+              image_analysis: {
+                status: 'ready',
+                visual_type: 'architecture_diagram',
+                summary: '展示系统模块关系',
+                best_usage: '用于模块关系讲解',
+                should_use: true,
+              },
+            })),
+          };
+        },
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: `做成项目解读视频 ${repoUrl}`,
+    useResearch: false,
+    assetIds: [],
+    creativeDefaultsOverride: {
+      sourceImageAnalysisEnabled: true,
+    },
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+  const mediaPaths = mediaPipeline.getMediaPaths(created.aweme_id, mediaRoot);
+  const analysisInput = readJson(mediaPaths.analysisInput);
+
+  assert.equal(run.success, true);
+  assert.equal(run.asset_context.image_analysis.status, 'ready');
+  assert.equal(run.asset_context.assets[0].image_analysis.status, 'ready');
+  assert.equal(analysisInput.creative_context.asset_context.image_analysis.status, 'ready');
+  assert.equal(analysisInput.creative_context.asset_context.assets[0].image_analysis.status, 'ready');
+  assert.equal(analysisInput.creative_context.asset_context.assets[0].image_analysis.visual_type, 'architecture_diagram');
+  assert.deepEqual(analysisInput.local_assets.images, [path.join(mediaRoot, 'fake-source-image-01.png')]);
+}
+
+async function testRejectsSourceImageAnalysisWithoutMultimodalTextModel() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices({
+    services: {
+      aiModelConfig: {
+        getRuntimeConfig: async type => (type === 'text'
+          ? { enabled: true, provider: 'mock', modelId: 'mock-text', supportsMultimodal: false }
+          : null),
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: '做成项目解读视频 https://github.com/owner/repo',
+    creativeDefaultsOverride: {
+      sourceImageAnalysisEnabled: true,
+    },
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, false);
+  assert.match(created.message, /多模态|来源图片/);
+}
+
+async function testRejectsSourceImageAnalysisWithDisabledTextModel() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices({
+    services: {
+      aiModelConfig: {
+        getRuntimeConfig: async type => (type === 'text'
+          ? { enabled: false, provider: 'mock', modelId: 'mock-vision', supportsMultimodal: true }
+          : null),
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: '做成项目解读视频 https://github.com/owner/repo',
+    creativeDefaultsOverride: {
+      sourceImageAnalysisEnabled: true,
+    },
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, false);
+  assert.match(created.message, /未配置可用的分析模型|来源图片/);
+}
+
+async function testRejectsSourceImageAnalysisWithIncompleteTextModel() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices({
+    services: {
+      aiModelConfig: {
+        getRuntimeConfig: async type => (type === 'text'
+          ? { enabled: true, provider: 'mock', modelId: 'mock-vision', supportsMultimodal: true }
+          : null),
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: '做成项目解读视频 https://github.com/owner/repo',
+    creativeDefaultsOverride: {
+      sourceImageAnalysisEnabled: true,
+    },
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, false);
+  assert.match(created.message, /未配置可用的分析模型|来源图片/);
+}
+
+async function testTextWorkflowDoesNotRequireSourceImageAnalysisModel() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices();
+
+  const created = await createCreativeWorkflow({
+    input: '纯文本创作不需要来源图片分析模型',
+    creativeDefaultsOverride: {
+      sourceImageAnalysisEnabled: true,
+    },
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+  assert.equal(created.creative_context.input.mode, 'text');
 }
 
 async function testRunResearchProviderAddsAuditMetadata() {
@@ -2043,6 +2218,11 @@ async function run() {
   await testRunWorkflowPersistsResearchModelCalls();
   await testCreatesAndRunsTextWorkflow();
   await testCreatesAndRunsSourceUrlWorkflow();
+  await testSourceUrlWorkflowRunsSourceImageAnalysisWhenEnabled();
+  await testRejectsSourceImageAnalysisWithoutMultimodalTextModel();
+  await testRejectsSourceImageAnalysisWithDisabledTextModel();
+  await testRejectsSourceImageAnalysisWithIncompleteTextModel();
+  await testTextWorkflowDoesNotRequireSourceImageAnalysisModel();
   await testSourceUrlStageEmitsSpecificProgressMessages();
   await testSourceUrlEmptyMarkdownDoesNotEmitSuccessProgress();
   await testSuccessfulSourceUrlFetchDropsStaleMetadataAndDiagnostics();

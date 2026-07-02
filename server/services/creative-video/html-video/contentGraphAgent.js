@@ -52,9 +52,22 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
       const src = compactText(asset.frame_src || asset.path, 160);
       const label = compactText(asset.alt || asset.title || asset.url || `图片${index + 1}`, 120);
       const source = compactText(asset.source || 'article', 30);
-      if (src) lines.push(`- ${index + 1}. ${label}；来源=${source}；HTML引用=${src}`);
+      const analysis = objectOrEmpty(asset.image_analysis);
+      const analysisParts = [
+        ['类型', analysis.visual_type],
+        ['说明', analysis.summary],
+        ['建议用法', analysis.best_usage],
+        ['展示方式', analysis.contains_text === true ? '完整展示/contain' : analysis.fit],
+        ['should_use', analysis.should_use === true ? 'true' : analysis.should_use === false ? 'false' : ''],
+        ['avoid_reason', analysis.avoid_reason],
+      ].map(([key, value]) => {
+        const text = compactText(value, 120);
+        return text ? `${key}=${text}` : '';
+      }).filter(Boolean);
+      const analysisText = analysisParts.length ? `；图片分析：${analysisParts.join('；')}` : '';
+      if (src) lines.push(`- ${index + 1}. ${label}；asset_id=${compactText(asset.id, 80)}；来源=${source}；HTML引用=${src}${analysisText}`);
     });
-    lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；不适合当前叙事时可以不用。优先使用 article 来源图片；search/Pexels 图片只作补充背景或氛围图；不要做纯图片轮播；含文字的文章截图必须完整展示，使用 object-fit: contain；图片应与关键词、字幕、数据卡或讲解节点混排。');
+    lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；每个 node 最多引用 1 张图片；不适合当前叙事时可以不用。优先使用 article 来源图片；search/Pexels 图片只作补充背景或氛围图，不要当来源证据；不要做纯图片轮播；含文字的文章截图必须完整展示，使用 object-fit: contain；图片应与关键词、字幕、数据卡或讲解节点混排。');
   }
   return lines.join('\n');
 }
@@ -103,6 +116,7 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
     `- nodes 的 id 必须逐一严格等于 scene_spec.scenes 的 id：${expectedSceneIds.join(' -> ') || '（无）'}。`,
     '- 禁止新增、删除、合并、拆分或重排序 scene_spec.scenes。',
     '- 每个 node 必须包含 id、kind、label、durationSec，并且根据 kind 包含 text 或 data。',
+    '- 每个 node 可以输出 asset_refs，每帧最多 1 张，字段为 asset_id、usage、reason；只把 article 图片当来源证据，search/Pexels 只作补充。',
     '- kind 只能是 text、data、entity；优先使用 text 和 data。',
     '- data node 的 data 必须形如 {"title":"string","unit":"optional shared unit","items":[{"label":"string","value":123}]}。',
     '- 数据帧必须使用可比较的同一单位，数值要合理；不能把不同口径的数据强行放进同一组。',
@@ -126,6 +140,7 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
             unit: 'optional shared unit',
             items: [{ label: 'string', value: 123 }],
           },
+          asset_refs: [{ asset_id: 'article_01', usage: 'showcase|evidence|background', reason: 'string' }],
         },
       ],
       edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence|dependency' }],
@@ -194,6 +209,7 @@ function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, ori
     `scene ids: ${expectedSceneIds.join(', ') || 'none'}`,
     `nodes.length must equal ${expectedSceneIds.length}`,
     'nodes[i].id must equal scene ids in the same order; do not add, remove, merge, split, or reorder scenes.',
+    'nodes[i].asset_refs optional; max 1 item with asset_id, usage, reason.',
   ];
   if (Number(attempt) >= 2) {
     return [
@@ -212,7 +228,7 @@ function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, ori
     'JSON schema：',
     JSON.stringify({
       synopsis: 'string',
-      nodes: [{ id: 'scene_01', kind: 'text|data|entity', label: 'string', durationSec: 2, text: 'string' }],
+      nodes: [{ id: 'scene_01', kind: 'text|data|entity', label: 'string', durationSec: 2, text: 'string', asset_refs: [{ asset_id: 'article_01', usage: 'showcase', reason: 'string' }] }],
       edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence' }],
     }, null, 2),
   ].join('\n');
@@ -244,7 +260,34 @@ function normalizeData(data = {}) {
   };
 }
 
-function normalizeContentGraph(graph, sceneSpec = {}) {
+function allowedAssetIdSet(creativeContext = {}) {
+  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
+  if (!assets.length) return null;
+  return new Set(assets
+    .filter(asset => String(asset?.source || 'article').trim() === 'article')
+    .map(asset => compactText(asset?.id || asset?.asset_id, 80))
+    .filter(Boolean));
+}
+
+function normalizeAssetRefs(value, creativeContext = {}) {
+  const allowedIds = allowedAssetIdSet(creativeContext);
+  return (Array.isArray(value) ? value : [])
+    .map(ref => {
+      const object = objectOrEmpty(ref);
+      const assetId = compactText(object.asset_id || object.assetId || object.id, 80);
+      if (allowedIds && !allowedIds.has(assetId)) return null;
+      if (!assetId) return null;
+      return {
+        asset_id: assetId,
+        usage: compactText(object.usage || object.kind || object.type, 40),
+        reason: compactText(object.reason || object.summary || object.description, 160),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 1);
+}
+
+function normalizeContentGraph(graph, sceneSpec = {}, creativeContext = {}) {
   const source = objectOrEmpty(graph);
   const rawNodes = Array.isArray(source.nodes) ? source.nodes : [];
   if (!rawNodes.length) {
@@ -270,6 +313,8 @@ function normalizeContentGraph(graph, sceneSpec = {}) {
     } else {
       normalized.text = compactText(node?.text || node?.description || node?.label || normalized.label, 500) || normalized.label;
     }
+    const assetRefs = normalizeAssetRefs(node?.asset_refs, creativeContext);
+    if (assetRefs.length) normalized.asset_refs = assetRefs;
     return normalized;
   });
 
@@ -302,7 +347,7 @@ function normalizeContentGraph(graph, sceneSpec = {}) {
 function parseContentGraphResponse(text, sceneSpec = {}, options = {}) {
   try {
     const parsed = tolerantParseJson(text);
-    const normalized = normalizeContentGraph(parsed, sceneSpec);
+    const normalized = normalizeContentGraph(parsed, sceneSpec, options.creativeContext);
     return normalized.success ? normalized : {
       ...normalized,
       diagnostics: [contentGraphDiagnostic(normalized.message || 'content graph 校验失败。', { errors: normalized.errors || [] })],

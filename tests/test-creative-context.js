@@ -346,7 +346,7 @@ function testRejectsAssetsForPhaseOne() {
   });
 
   assert.equal(result.success, false);
-  assert.match(result.message, /图片素材将在下一阶段开放/);
+  assert.match(result.message, /暂不支持手动传入 assetIds/);
   assert.equal(result.data.use_research, true);
   assert.equal(result.data.skip_validation, true);
   assert.deepEqual(result.data.asset_ids, []);

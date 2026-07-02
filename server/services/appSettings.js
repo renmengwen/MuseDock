@@ -25,6 +25,7 @@ const DEFAULT_CONFIG = {
     generateAudio: true,
     generateCaptions: true,
     emotionalVoice: false,
+    sourceImageAnalysisEnabled: false,
   },
   system: {
     skipValidation: false,
@@ -74,6 +75,7 @@ function normalizeCreativeDefaults(input = {}) {
       ? source.generateCaptions
       : DEFAULT_CONFIG.creativeDefaults.generateCaptions,
     emotionalVoice: source.emotionalVoice === true,
+    sourceImageAnalysisEnabled: source.sourceImageAnalysisEnabled === true,
   };
 }
 

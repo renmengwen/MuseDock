@@ -1,0 +1,889 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>来源图片多模态分析设置</title>
+  <link rel="stylesheet" href="../../design-systems/tech-minimal-product/tokens/colors_and_type.css">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page-bg);
+      color: var(--text-primary);
+      font: var(--body);
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .topbar {
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+      padding: 0 var(--space-5);
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--surface-primary);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border-command);
+      border-radius: var(--radius-md);
+      background: var(--surface-command);
+      font: var(--code);
+      color: var(--text-primary);
+    }
+
+    .brand strong,
+    .brand span {
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .brand strong {
+      font: var(--body-strong);
+      line-height: 1.2;
+    }
+
+    .brand span {
+      color: var(--text-muted);
+      font: var(--caption);
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 210px minmax(0, 1fr);
+      min-height: calc(100vh - 56px);
+    }
+
+    .settings-nav {
+      border-right: 1px solid var(--border-subtle);
+      background: var(--surface-command);
+      padding: var(--space-4);
+      display: grid;
+      align-content: start;
+      gap: var(--space-2);
+    }
+
+    .nav-label {
+      margin: 0 0 var(--space-2);
+      color: var(--text-muted);
+      font: var(--caption);
+      text-transform: uppercase;
+    }
+
+    .nav-button {
+      min-height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-2);
+      padding: 0 var(--space-3);
+      border: 1px solid transparent;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--text-secondary);
+      text-align: left;
+      cursor: default;
+    }
+
+    .nav-button.active {
+      border-color: var(--border-command);
+      background: var(--surface-command-raised);
+      color: var(--text-primary);
+      font-weight: var(--weight-medium);
+    }
+
+    .main {
+      min-width: 0;
+      padding: var(--space-5);
+      display: grid;
+      gap: var(--space-4);
+      align-content: start;
+    }
+
+    .page-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: var(--space-4);
+      padding: var(--space-4);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      background: var(--surface-primary);
+    }
+
+    .page-head h1,
+    .panel-head h2,
+    .panel-head h3,
+    .asset-title strong {
+      margin: 0;
+      line-height: 1.25;
+    }
+
+    .page-head h1 {
+      font: var(--h3);
+    }
+
+    .page-head p,
+    .panel-head p,
+    .case-copy,
+    .meta,
+    .asset-title span,
+    .diag-copy {
+      margin: var(--space-1) 0 0;
+      color: var(--text-muted);
+      font-size: var(--size-1);
+      line-height: 1.45;
+    }
+
+    .kicker {
+      display: block;
+      margin-bottom: var(--space-1);
+      color: var(--text-muted);
+      font: var(--code);
+    }
+
+    .btn {
+      min-height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
+      padding: 0 var(--space-3);
+      border: 1px solid var(--border-command);
+      border-radius: var(--radius-md);
+      background: var(--surface-primary);
+      color: var(--text-primary);
+      font: var(--caption);
+      cursor: default;
+    }
+
+    .btn.primary {
+      border-color: var(--accent-primary);
+      background: var(--accent-primary);
+      color: var(--fg-inverse-1);
+    }
+
+    .chip {
+      min-height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 0 9px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 999px;
+      background: var(--surface-secondary);
+      color: var(--text-secondary);
+      font: var(--caption);
+      white-space: nowrap;
+    }
+
+    .chip.success {
+      border-color: #bbf7d0;
+      background: #f0fdf4;
+      color: #15803d;
+    }
+
+    .chip.warning {
+      border-color: #fde68a;
+      background: #fffbeb;
+      color: #b45309;
+    }
+
+    .chip.danger {
+      border-color: #fecaca;
+      background: #fef2f2;
+      color: #b91c1c;
+    }
+
+    .panel {
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      background: var(--surface-primary);
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--space-4);
+      padding: var(--space-4);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .panel-head h2 {
+      font: var(--h3);
+    }
+
+    .panel-head h3 {
+      font: var(--body-strong);
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: var(--space-3);
+      padding: var(--space-4);
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--surface-secondary);
+    }
+
+    .summary-cell {
+      min-width: 0;
+      padding: var(--space-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      background: var(--surface-primary);
+    }
+
+    .summary-cell span,
+    .field-label,
+    .asset-meta dt,
+    .diag-table th {
+      display: block;
+      color: var(--text-muted);
+      font: var(--caption);
+    }
+
+    .summary-cell strong {
+      display: block;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font: var(--body-strong);
+    }
+
+    .setting-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: var(--space-4);
+      padding: var(--space-4);
+    }
+
+    .setting-card,
+    .side-box {
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      background: var(--surface-primary);
+    }
+
+    .setting-card {
+      padding: var(--space-4);
+      display: grid;
+      gap: var(--space-4);
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: var(--space-4);
+      align-items: center;
+    }
+
+    .control-row h3 {
+      margin: 0;
+      font: var(--body-strong);
+    }
+
+    .switch {
+      width: 42px;
+      height: 24px;
+      position: relative;
+      flex: 0 0 auto;
+      border-radius: 999px;
+      border: 1px solid var(--border-command);
+      background: #e5e7eb;
+    }
+
+    .switch::after {
+      content: "";
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      top: 2px;
+      left: 2px;
+      border-radius: 999px;
+      background: var(--surface-primary);
+      border: 1px solid var(--border-subtle);
+      box-shadow: 0 1px 2px rgb(15 23 42 / 0.14);
+    }
+
+    .switch.on {
+      border-color: #0f766e;
+      background: #99f6e4;
+    }
+
+    .switch.on::after {
+      left: 20px;
+      border-color: #5eead4;
+    }
+
+    .switch.disabled {
+      opacity: 0.55;
+    }
+
+    .setting-variants {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: var(--space-3);
+    }
+
+    .case {
+      min-width: 0;
+      display: grid;
+      gap: var(--space-3);
+      padding: var(--space-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      background: var(--surface-secondary);
+    }
+
+    .case-top {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--space-2);
+      align-items: center;
+    }
+
+    .case-title {
+      display: grid;
+      gap: 2px;
+    }
+
+    .case-title strong {
+      line-height: 1.25;
+    }
+
+    .case-title span {
+      color: var(--text-muted);
+      font: var(--caption);
+    }
+
+    .model-box {
+      display: grid;
+      grid-template-columns: 80px minmax(0, 1fr);
+      gap: var(--space-2);
+      padding-top: var(--space-3);
+      border-top: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      font-size: var(--size-1);
+    }
+
+    .model-box strong {
+      color: var(--text-primary);
+      font-weight: var(--weight-medium);
+      overflow-wrap: anywhere;
+    }
+
+    .side-box {
+      padding: var(--space-3);
+      display: grid;
+      gap: var(--space-3);
+      align-content: start;
+    }
+
+    .side-box h3 {
+      margin: 0;
+      font: var(--body-strong);
+    }
+
+    .check-list {
+      display: grid;
+      gap: var(--space-2);
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .check-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: var(--space-3);
+      padding: var(--space-2) 0;
+      border-top: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      font-size: var(--size-1);
+    }
+
+    .task-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: var(--space-4);
+      padding: var(--space-4);
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      padding: var(--space-3) var(--space-4);
+      border-bottom: 1px solid var(--border-subtle);
+      background: var(--surface-secondary);
+    }
+
+    .asset-list {
+      display: grid;
+      gap: var(--space-3);
+    }
+
+    .asset-row {
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr) auto;
+      gap: var(--space-3);
+      align-items: center;
+      padding: var(--space-3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      background: var(--surface-primary);
+    }
+
+    .thumb {
+      width: 112px;
+      aspect-ratio: 16 / 10;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--border-command);
+      border-radius: var(--radius-md);
+      background:
+        repeating-linear-gradient(135deg, #f8fafc 0 8px, #eef2f7 8px 16px);
+      color: var(--text-muted);
+      font: var(--code);
+      text-align: center;
+    }
+
+    .asset-title {
+      min-width: 0;
+    }
+
+    .asset-title strong {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font: var(--body-strong);
+    }
+
+    .asset-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      margin-top: var(--space-2);
+    }
+
+    .asset-meta {
+      min-width: 118px;
+      display: grid;
+      gap: var(--space-2);
+      margin: 0;
+      text-align: right;
+    }
+
+    .asset-meta dd {
+      margin: 0;
+      color: var(--text-primary);
+      font: var(--code);
+    }
+
+    .diag-card {
+      display: grid;
+      gap: var(--space-3);
+      align-content: start;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: var(--space-3);
+      background: var(--surface-primary);
+    }
+
+    .diag-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: var(--size-1);
+    }
+
+    .diag-table th,
+    .diag-table td {
+      padding: 9px 0;
+      border-top: 1px solid var(--border-subtle);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .diag-table td:last-child,
+    .diag-table th:last-child {
+      text-align: right;
+    }
+
+    .mono {
+      font-family: var(--font-mono);
+    }
+
+    @media (max-width: 1020px) {
+      .summary-grid,
+      .setting-variants {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .setting-layout,
+      .task-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .topbar,
+      .page-head,
+      .panel-head,
+      .control-row {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .settings-nav {
+        border-right: 0;
+        border-bottom: 1px solid var(--border-subtle);
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .nav-label {
+        grid-column: 1 / -1;
+      }
+
+      .main {
+        padding: var(--space-3);
+      }
+
+      .summary-grid,
+      .setting-variants {
+        grid-template-columns: 1fr;
+      }
+
+      .asset-row {
+        grid-template-columns: 1fr;
+      }
+
+      .thumb {
+        width: 100%;
+      }
+
+      .asset-meta {
+        text-align: left;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">MD</span>
+        <div>
+          <strong>MuseDock</strong>
+          <span>设置中心与任务详情的来源图片分析状态</span>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span class="chip">OpenDesign mockup</span>
+        <button class="btn primary" type="button">保存设置</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <nav class="settings-nav" aria-label="设置中心导航">
+        <p class="nav-label">设置中心</p>
+        <button class="nav-button" type="button">总览</button>
+        <button class="nav-button active" type="button">创作默认值 <span class="chip">当前</span></button>
+        <button class="nav-button" type="button">模型配置</button>
+        <button class="nav-button" type="button">系统诊断</button>
+      </nav>
+
+      <main class="main">
+        <header class="page-head">
+          <div>
+            <span class="kicker">/settings/creative-defaults</span>
+            <h1>来源图片多模态分析</h1>
+            <p>在创作默认值里明确开关、模型能力和关闭后的降级行为。</p>
+          </div>
+          <div class="top-actions">
+            <span class="chip warning">默认关闭</span>
+            <button class="btn" type="button">重新检测模型</button>
+          </div>
+        </header>
+
+        <section class="panel" aria-label="设置中心来源图片分析开关">
+          <div class="panel-head">
+            <div>
+              <h2>设置中心</h2>
+              <p>开关沿用现有紧凑表单节奏；提示直接说明影响，不做营销式解释。</p>
+            </div>
+            <span class="chip">shadcn 风格状态</span>
+          </div>
+
+          <div class="summary-grid">
+            <div class="summary-cell">
+              <span>当前分析模型</span>
+              <strong>OpenAI / gpt-4.1-mini</strong>
+            </div>
+            <div class="summary-cell">
+              <span>多模态能力</span>
+              <strong>已支持图片输入</strong>
+            </div>
+            <div class="summary-cell">
+              <span>默认状态</span>
+              <strong>关闭</strong>
+            </div>
+            <div class="summary-cell">
+              <span>降级策略</span>
+              <strong>说明、URL、上下文匹配</strong>
+            </div>
+          </div>
+
+          <div class="setting-layout">
+            <div class="setting-card">
+              <div class="control-row">
+                <div>
+                  <h3>来源图片多模态分析</h3>
+                  <p class="case-copy">控制是否把文章或 GitHub 中提取到的图片交给支持多模态的分析模型理解。</p>
+                </div>
+                <span class="switch" aria-label="默认关闭"></span>
+              </div>
+
+              <div class="setting-variants">
+                <article class="case">
+                  <div class="case-top">
+                    <div class="case-title">
+                      <strong>默认关闭</strong>
+                      <span>新项目初始状态</span>
+                    </div>
+                    <span class="chip warning">已关闭</span>
+                  </div>
+                  <p class="case-copy">关闭后仍会提取文章/GitHub 图片，但只基于图片说明、URL 和上下文进行轻量匹配。</p>
+                  <div class="model-box">
+                    <span>按钮</span><strong>保存创作默认值</strong>
+                    <span>重复点击</span><strong>保存中禁用</strong>
+                  </div>
+                </article>
+
+                <article class="case">
+                  <div class="case-top">
+                    <div class="case-title">
+                      <strong>可开启</strong>
+                      <span>模型支持多模态</span>
+                    </div>
+                    <span class="switch on" aria-label="已开启"></span>
+                  </div>
+                  <p class="case-copy">开启后会在素材解析阶段请求图片分析，并把可用结论带入镜头素材匹配。</p>
+                  <div class="model-box">
+                    <span>状态</span><strong>已开启</strong>
+                    <span>能力</span><strong>supportsMultimodal: true</strong>
+                  </div>
+                </article>
+
+                <article class="case">
+                  <div class="case-top">
+                    <div class="case-title">
+                      <strong>模型不支持</strong>
+                      <span>禁用并给出警告</span>
+                    </div>
+                    <span class="switch disabled" aria-label="不可开启"></span>
+                  </div>
+                  <p class="case-copy">当前分析模型未标记为支持多模态输入，无法开启来源图片多模态分析。</p>
+                  <div class="model-box">
+                    <span>状态</span><strong>不可开启</strong>
+                    <span>操作</span><strong>先切换分析模型</strong>
+                  </div>
+                </article>
+              </div>
+            </div>
+
+            <aside class="side-box" aria-label="设置页交互检查">
+              <h3>交互状态</h3>
+              <p class="diag-copy">仅展示必要状态，避免把设置项做成复杂向导。</p>
+              <ul class="check-list">
+                <li><span>保存中</span><strong>按钮禁用</strong></li>
+                <li><span>模型未配置</span><strong>展示警告</strong></li>
+                <li><span>已关闭</span><strong>保留轻量匹配</strong></li>
+                <li><span>窄屏</span><strong>卡片纵向堆叠</strong></li>
+              </ul>
+            </aside>
+          </div>
+        </section>
+
+        <section class="panel" aria-label="任务详情来源图片素材面板">
+          <div class="panel-head">
+            <div>
+              <span class="kicker">/creative/workflow_8f23a9</span>
+              <h2>任务详情：来源图片素材</h2>
+              <p>把分析状态、最终引用状态和诊断信息放在一个可扫描面板内。</p>
+            </div>
+            <div class="top-actions">
+              <span class="chip success">3 张图片可用</span>
+              <button class="btn" type="button">下载诊断</button>
+            </div>
+          </div>
+
+          <div class="status-row">
+            <span class="chip success">ready 图片分析完成</span>
+            <span class="chip warning">disabled 图片分析关闭但图片仍可用</span>
+            <span class="chip danger">failed 分析失败后降级</span>
+          </div>
+
+          <div class="task-layout">
+            <section class="asset-list" aria-label="来源图片素材列表">
+              <article class="asset-row">
+                <div class="thumb">IMG-01<br>文章封面</div>
+                <div class="asset-title">
+                  <strong>产品发布封面图</strong>
+                  <span>图片分析完成，摘要可用于建立开场镜头视觉依据。</span>
+                  <div class="asset-tags">
+                    <span class="chip success">ready</span>
+                    <span class="chip success">已用于镜头 02</span>
+                    <span class="chip">人物与界面</span>
+                  </div>
+                </div>
+                <dl class="asset-meta">
+                  <div>
+                    <dt>匹配分</dt>
+                    <dd>0.84</dd>
+                  </div>
+                  <div>
+                    <dt>尺寸</dt>
+                    <dd>1200x675</dd>
+                  </div>
+                </dl>
+              </article>
+
+              <article class="asset-row">
+                <div class="thumb">IMG-02<br>GitHub 图表</div>
+                <div class="asset-title">
+                  <strong>仓库 README 架构图</strong>
+                  <span>图片分析关闭，仍基于 alt、文件名、URL 和上下文参与轻量匹配。</span>
+                  <div class="asset-tags">
+                    <span class="chip warning">disabled</span>
+                    <span class="chip">最终未引用</span>
+                    <span class="chip">轻量匹配</span>
+                  </div>
+                </div>
+                <dl class="asset-meta">
+                  <div>
+                    <dt>匹配分</dt>
+                    <dd>0.47</dd>
+                  </div>
+                  <div>
+                    <dt>来源</dt>
+                    <dd>README</dd>
+                  </div>
+                </dl>
+              </article>
+
+              <article class="asset-row">
+                <div class="thumb">IMG-03<br>接口截图</div>
+                <div class="asset-title">
+                  <strong>控制台状态截图</strong>
+                  <span>分析请求失败后自动降级，保留图片作为可选素材并显示失败原因。</span>
+                  <div class="asset-tags">
+                    <span class="chip danger">failed</span>
+                    <span class="chip success">已用于镜头 05</span>
+                    <span class="chip warning">已降级</span>
+                  </div>
+                </div>
+                <dl class="asset-meta">
+                  <div>
+                    <dt>匹配分</dt>
+                    <dd>0.62</dd>
+                  </div>
+                  <div>
+                    <dt>重试</dt>
+                    <dd>1 次</dd>
+                  </div>
+                </dl>
+              </article>
+            </section>
+
+            <aside class="diag-card" aria-label="来源图片诊断">
+              <div>
+                <h3>诊断信息</h3>
+                <p class="diag-copy">失败只影响图片理解，不阻塞文章和仓库文本继续生成。</p>
+              </div>
+              <table class="diag-table">
+                <thead>
+                  <tr>
+                    <th>项目</th>
+                    <th>状态</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <strong>下载失败</strong>
+                      <p class="diag-copy">https://example.com/missing.png 超时，已跳过该图片。</p>
+                    </td>
+                    <td><span class="chip danger">download_failed</span></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <strong>分析降级</strong>
+                      <p class="diag-copy">多模态请求失败后使用 URL 和上下文继续匹配。</p>
+                    </td>
+                    <td><span class="chip warning">fallback</span></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <strong>最终引用</strong>
+                      <p class="diag-copy">镜头 02、05 引用了来源图片素材。</p>
+                    </td>
+                    <td><span class="chip success">used</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

@@ -70,6 +70,19 @@ const assetStore = require('../server/services/creative-video/html-video/assetSt
   assert.equal(updated.generation_checkpoint.stages.content_graph.status, 'done');
   assert.equal((await store.loadProject(projectDir)).generation_checkpoint.stages.content_graph.path, 'content-graph.json');
 
+  const withUsageReport = await store.writeProjectJson(projectDir, current => ({
+    ...current,
+    asset_usage_report: {
+      status: 'ready',
+      assets: [{ asset_id: 'article_01', used: true, used_in_frames: ['scene_01'], usage_count: 1 }],
+      used_asset_ids: ['article_01'],
+      unused_asset_ids: [],
+      summary: '最终 HTML 使用了 1 张来源图片。',
+    },
+  }));
+  assert.equal(withUsageReport.asset_usage_report.status, 'ready');
+  assert.deepEqual((await store.loadProject(projectDir)).asset_usage_report.used_asset_ids, ['article_01']);
+
   const graphPath = await store.saveContentGraph(projectDir, { schemaVersion: 1, nodes: [{ id: 'node_01' }], edges: [] });
   assert.equal(graphPath, 'content-graph.json');
   assert.deepEqual(

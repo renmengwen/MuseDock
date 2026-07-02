@@ -125,6 +125,22 @@ const assetCreativeContext = {
       alt: '架构图',
       path: 'assets/source-image-01.png',
       frame_src: '../assets/source-image-01.png',
+      image_analysis: {
+        status: 'ready',
+        visual_type: 'architecture_diagram',
+        summary: '展示系统模块关系',
+        contains_text: true,
+        best_usage: '用于解释系统模块协作',
+        fit: 'high',
+        should_use: true,
+        avoid_reason: '',
+      },
+    }, {
+      id: 'search_01',
+      source: 'search',
+      alt: '搜索补图',
+      path: 'assets/search-image-01.png',
+      frame_src: '../assets/search-image-01.png',
     }],
   },
 };
@@ -178,8 +194,60 @@ assert.ok(sourceTranscriptLine.includes(SOURCE_TRANSCRIPT_ONLY_MARKER));
 const assetGraphPrompt = buildGraphPrompt(assetCreativeContext);
 assert.match(assetGraphPrompt, /可用图片素材/);
 assert.match(assetGraphPrompt, /HTML引用=\.\.\/assets\/source-image-01\.png/);
+assert.match(assetGraphPrompt, /图片分析/);
+assert.match(assetGraphPrompt, /architecture_diagram/);
+assert.match(assetGraphPrompt, /展示系统模块关系/);
+assert.match(assetGraphPrompt, /asset_refs/);
+assert.match(assetGraphPrompt, /每帧最多 1 张/);
 assert.match(assetGraphPrompt, /含文字的文章截图必须完整展示/);
 assert.match(assetGraphPrompt, /不适合当前叙事时可以不用/);
+assert.match(assetGraphPrompt, /search\/Pexels 图片只作补充/);
+
+const normalizedGraphWithAssetRefs = contentGraphAgent.normalizeContentGraph({
+  synopsis: '项目解读',
+  nodes: [{
+    id: 'scene_01',
+    kind: 'text',
+    label: '架构说明',
+    durationSec: 3,
+    text: '展示系统模块关系',
+    asset_refs: [
+      { asset_id: 'article_01', usage: 'showcase', reason: '展示系统模块关系' },
+      { asset_id: 'article_02', usage: 'background', reason: '第二张应被裁剪' },
+    ],
+  }],
+  edges: [],
+}, {
+  title: 'owner/repo',
+});
+
+assert.equal(normalizedGraphWithAssetRefs.success, true);
+assert.deepEqual(normalizedGraphWithAssetRefs.graph.nodes[0].asset_refs, [{
+  asset_id: 'article_01',
+  usage: 'showcase',
+  reason: '展示系统模块关系',
+}]);
+
+const normalizedGraphDropsSearchEvidenceRefs = contentGraphAgent.normalizeContentGraph({
+  synopsis: '项目解读',
+  nodes: [{
+    id: 'scene_01',
+    kind: 'text',
+    label: '架构说明',
+    durationSec: 3,
+    text: '展示系统模块关系',
+    asset_refs: [
+      { asset_id: 'search_01', usage: 'evidence', reason: '补图不能当来源证据' },
+      { asset_id: 'missing_01', usage: 'showcase', reason: '不存在的图片' },
+    ],
+  }],
+  edges: [],
+}, {
+  title: 'owner/repo',
+}, assetCreativeContext);
+
+assert.equal(normalizedGraphDropsSearchEvidenceRefs.success, true);
+assert.equal(normalizedGraphDropsSearchEvidenceRefs.graph.nodes[0].asset_refs, undefined);
 
 const textGraphPrompt = buildGraphPrompt(createTextCreativeContext(
   '这是普通文本创作方向：讲述独立创作者如何整理灵感、打磨脚本并持续发布。'

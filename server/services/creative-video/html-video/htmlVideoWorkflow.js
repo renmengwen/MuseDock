@@ -506,7 +506,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
     };
   }
 
-  let graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec);
+  let graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec, { creativeContext });
   if (!graphParsed.success) {
     if (retriedForProviderMissing && sceneSpec) {
       await report(onProgress, {
@@ -561,7 +561,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
           inputHash: sha256(originalPrompt),
         };
       }
-      graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec);
+      graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec, { creativeContext });
       if (!graphParsed.success) {
         return {
           ...graphParsed,
@@ -861,16 +861,37 @@ async function materializeCreativeContextAssets(projectDir, creativeContext = {}
   if (!assets.length) return creativeContext;
   await fsp.mkdir(path.join(projectDir, 'assets'), { recursive: true });
   const nextAssets = [];
+  const diagnostics = Array.isArray(assetContext.diagnostics) ? [...assetContext.diagnostics] : [];
   for (const asset of assets) {
     const sourcePath = String(asset.local_path || '').trim();
+    const hasSourceFile = Boolean(sourcePath && fs.existsSync(sourcePath));
     const fallbackName = path.posix.basename(String(asset.path || `asset-${nextAssets.length + 1}.jpg`).replace(/\\/g, '/'));
     const fileName = fallbackName && !fallbackName.includes('..') ? fallbackName : `asset-${nextAssets.length + 1}.jpg`;
     const targetRelative = `assets/${fileName}`;
     const targetPath = projectStore.resolveProjectPath(projectDir, targetRelative);
-    if (sourcePath && fs.existsSync(sourcePath)) {
-      await fsp.copyFile(sourcePath, targetPath).catch(() => {});
+    if (hasSourceFile) {
+      await fsp.copyFile(sourcePath, targetPath).catch(error => {
+        diagnostics.push(createDiagnostic({
+          code: 'source_asset_materialize_failed',
+          stage: 'project',
+          sub_stage: 'assets',
+          user_message: `来源图片 ${asset.id || asset.path || ''} 复制到 html-video 工程失败：${error.message}`,
+          severity: 'warning',
+        }));
+      });
     }
-    if (!fs.existsSync(targetPath)) continue;
+    if (!fs.existsSync(targetPath)) {
+      diagnostics.push(createDiagnostic({
+        code: 'source_asset_materialize_missing',
+        stage: 'project',
+        sub_stage: 'assets',
+        user_message: hasSourceFile
+          ? `来源图片 ${asset.id || asset.path || ''} 未进入 html-video 工程。`
+          : `来源图片 ${asset.id || asset.path || ''} 缺少本地文件，未进入 html-video 工程。`,
+        severity: 'warning',
+      }));
+      continue;
+    }
     nextAssets.push({
       ...asset,
       path: targetRelative,
@@ -880,6 +901,7 @@ async function materializeCreativeContextAssets(projectDir, creativeContext = {}
   creativeContext.asset_context = {
     ...assetContext,
     assets: nextAssets,
+    diagnostics,
   };
   return creativeContext;
 }
@@ -895,6 +917,120 @@ function projectAssetsFromCreativeContext(creativeContext = {}) {
     alt: asset.alt || '',
     attribution: asset.attribution || null,
   })).filter(asset => asset.path);
+}
+
+function normalizeAssetToken(value = '') {
+  return String(value || '').replace(/\\/g, '/').trim();
+}
+
+function assetReferenceTokens(asset = {}) {
+  const assetPath = normalizeAssetToken(asset.path);
+  return [...new Set([
+    normalizeAssetToken(asset.frame_src),
+    assetPath,
+    assetPath ? `../${assetPath}` : '',
+  ].filter(Boolean))];
+}
+
+function normalizeHtmlAssetReference(value = '') {
+  const text = normalizeAssetToken(value).split(/[?#]/)[0];
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+function extractHtmlAssetReferences(html = '') {
+  const references = new Set();
+  const searchable = String(html || '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<script\b[\s\S]*?<\/script>/gi, '');
+  const attrPattern = /\b(?:src|href|poster|data-src)=["']([^"']+)["']/gi;
+  for (const match of searchable.matchAll(attrPattern)) {
+    const value = normalizeHtmlAssetReference(match[1]);
+    if (value) references.add(value);
+  }
+  const cssPattern = /url\(["']?([^"')]+)["']?\)/gi;
+  for (const match of searchable.matchAll(cssPattern)) {
+    const value = normalizeHtmlAssetReference(match[1]);
+    if (value) references.add(value);
+  }
+  return references;
+}
+
+function htmlReferencesAsset(referenceSet, tokens = []) {
+  for (const rawToken of tokens) {
+    const token = normalizeHtmlAssetReference(rawToken);
+    if (!token) continue;
+    for (const ref of referenceSet) {
+      if (ref === token || ref.endsWith(`/${token.replace(/^\.\.\//, '')}`)) return true;
+    }
+  }
+  return false;
+}
+
+function readFrameHtml(projectDir, frame = {}) {
+  const htmlPath = firstNonEmptyString(frame.html_path, frame.htmlPath);
+  if (!htmlPath) return '';
+  try {
+    const absolutePath = projectStore.resolveProjectPath(projectDir, htmlPath);
+    if (!fs.existsSync(absolutePath)) return '';
+    return fs.readFileSync(absolutePath, 'utf8').replace(/\\/g, '/');
+  } catch {
+    return '';
+  }
+}
+
+function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext = {} } = {}) {
+  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
+  if (!assets.length) {
+    return {
+      status: 'empty',
+      assets: [],
+      used_asset_ids: [],
+      unused_asset_ids: [],
+      summary: '没有可追踪的来源图片。',
+    };
+  }
+  const frames = Array.isArray(project.frames) ? project.frames : [];
+  const frameHtmlEntries = frames.map(frame => ({
+    id: firstNonEmptyString(frame.scene_id, frame.id),
+    references: extractHtmlAssetReferences(readFrameHtml(projectDir, frame)),
+  }));
+  const reportAssets = assets.map((asset, index) => {
+    const assetId = firstNonEmptyString(asset.id, `asset_${index + 1}`);
+    const tokens = assetReferenceTokens(asset);
+    const usedInFrames = frameHtmlEntries
+      .filter(frame => frame.id && htmlReferencesAsset(frame.references, tokens))
+      .map(frame => frame.id);
+    return {
+      asset_id: assetId,
+      path: asset.path || '',
+      frame_src: asset.frame_src || '',
+      used: usedInFrames.length > 0,
+      used_in_frames: usedInFrames,
+      usage_count: usedInFrames.length,
+    };
+  });
+  const usedAssetIds = reportAssets.filter(asset => asset.used).map(asset => asset.asset_id);
+  const unusedAssetIds = reportAssets.filter(asset => !asset.used).map(asset => asset.asset_id);
+  return {
+    status: 'ready',
+    assets: reportAssets,
+    used_asset_ids: usedAssetIds,
+    unused_asset_ids: unusedAssetIds,
+    summary: usedAssetIds.length
+      ? `最终 HTML 使用了 ${usedAssetIds.length} 张来源图片。`
+      : '最终 HTML 未引用已准备的来源图片。',
+  };
+}
+
+async function attachAssetUsageReport({ project = {}, projectDir = '', creativeContext = {} } = {}) {
+  const assetUsageReport = buildAssetUsageReport({ project, projectDir, creativeContext });
+  project.asset_usage_report = assetUsageReport;
+  if (creativeContext.asset_context) creativeContext.asset_context.asset_usage_report = assetUsageReport;
+  return projectDir ? projectStore.saveProject(projectDir, project) : project;
 }
 
 function applyMediaOptionsToProject(project, mediaOptions = {}) {
@@ -1353,6 +1489,7 @@ async function generateHtmlVideo(options = {}) {
       diagnostic_code: validation.diagnostics[0]?.code || diagnostics[0]?.code || 'project_invalid',
     });
     project = await projectStore.saveProject(projectDir, project);
+    project = await attachAssetUsageReport({ project, projectDir, creativeContext });
     return failure('html-video 工程未通过生成前校验。', diagnostics, {
       html_video_project_path: projectDir,
       project_dir: projectDir,
@@ -1451,6 +1588,11 @@ async function generateHtmlVideo(options = {}) {
     onProgress,
     targetDurationSec: trustedTargetDurationSec,
   });
+  rendered.project = await attachAssetUsageReport({
+    project: rendered.project || project,
+    projectDir,
+    creativeContext,
+  });
   diagnostics.push(...normalizeDiagnostics(rendered.diagnostics));
   if (!rendered.success) {
     return failure(rendered.message || 'html-video 工程渲染失败。', diagnostics, {
@@ -1500,6 +1642,11 @@ async function generateHtmlVideo(options = {}) {
       data: visualReport,
     });
   }
+  rendered.project = await attachAssetUsageReport({
+    project: rendered.project,
+    projectDir,
+    creativeContext,
+  });
 
   return {
     success: true,
@@ -1638,6 +1785,7 @@ module.exports = {
   callTextModel,
   generateContentGraphWithRetry,
   buildInitialProject,
+  buildAssetUsageReport,
   shouldReuseFrameHtml,
   resolveRenderTarget,
   resolveTemplateRenderTarget,

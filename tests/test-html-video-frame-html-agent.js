@@ -100,7 +100,10 @@ assert.notEqual(dynamicInputIndex, -1);
 
 const assetPrompt = agent.buildFrameHtmlPrompt({
   graph,
-  node: graph.nodes[0],
+  node: {
+    ...graph.nodes[0],
+    asset_refs: [{ asset_id: 'article_01', usage: 'showcase_with_callouts', reason: '匹配价格表截图说明' }],
+  },
   index: 0,
   total: 2,
   creativeContext: {
@@ -113,6 +116,12 @@ const assetPrompt = agent.buildFrameHtmlPrompt({
         alt: '价格表截图',
         path: 'assets/source-image-01.png',
         frame_src: '../assets/source-image-01.png',
+        image_analysis: {
+          status: 'ready',
+          visual_type: 'screenshot',
+          summary: '展示会员价格表与套餐限制',
+          best_usage: '完整展示并标注关键价格',
+        },
       }],
     },
   },
@@ -121,6 +130,11 @@ const assetPrompt = agent.buildFrameHtmlPrompt({
 
 assert.match(assetPrompt, /可用图片素材/);
 assert.match(assetPrompt, /\.\.\/assets\/source-image-01\.png/);
+assert.match(assetPrompt, /本帧推荐来源图片/);
+assert.match(assetPrompt, /article_01/);
+assert.match(assetPrompt, /screenshot/);
+assert.match(assetPrompt, /展示会员价格表与套餐限制/);
+assert.match(assetPrompt, /匹配价格表截图说明/);
 assert.match(assetPrompt, /禁止引用外部图片 URL/);
 assert.match(assetPrompt, /object-fit: contain/);
 assert.match(assetPrompt, /不要做纯图片轮播/);

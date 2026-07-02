@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 export const ASPECT_RATIOS = ['9:16', '16:9', '1:1', '4:5'];
 
 const DEFAULT_CREATIVE_DEFAULTS = {
@@ -14,6 +16,7 @@ const DEFAULT_CREATIVE_DEFAULTS = {
   generateAudio: true,
   generateCaptions: true,
   emotionalVoice: false,
+  sourceImageAnalysisEnabled: false,
 };
 
 const TEMPLATE_NAME_ZH = {
@@ -93,14 +96,34 @@ function optionLabel(template, aspectRatio) {
 
 export function CreativeDefaultsSettings({
   appSettings,
+  activeModels,
+  modelSettingsLoading = false,
   templates,
   disabled,
   saving,
   onChange,
   onSave,
 }) {
+  const [sourceImageAnalysisMessage, setSourceImageAnalysisMessage] = useState('');
   const creativeDefaults = getCreativeDefaults(appSettings);
   const safeTemplates = Array.isArray(templates) ? templates : [];
+  const sourceImageAnalysisEnabled = creativeDefaults.sourceImageAnalysisEnabled === true;
+  const canUseSourceImageAnalysis = activeModels?.text?.enabled === true
+    && activeModels?.text?.modelId
+    && activeModels?.text?.supportsMultimodal === true;
+  const sourceImageAnalysisUnavailable = modelSettingsLoading !== true && !canUseSourceImageAnalysis;
+  const sourceImageAnalysisUnsupported = sourceImageAnalysisEnabled && sourceImageAnalysisUnavailable;
+  const sourceImageAnalysisWarning = sourceImageAnalysisUnsupported
+    ? '来源图片多模态分析已开启，但当前分析模型不支持图片输入。请切换到支持多模态的分析模型，或先关闭该开关。'
+    : sourceImageAnalysisUnavailable
+      ? '当前分析模型未标记为支持多模态输入，无法开启来源图片多模态分析。'
+      : sourceImageAnalysisMessage;
+
+  useEffect(() => {
+    if (modelSettingsLoading || canUseSourceImageAnalysis) {
+      setSourceImageAnalysisMessage('');
+    }
+  }, [canUseSourceImageAnalysis, modelSettingsLoading]);
 
   function updateCreativeDefaults(nextCreativeDefaults) {
     onChange({
@@ -126,6 +149,15 @@ export function CreativeDefaultsSettings({
       ...(appSettings || {}),
       creativeDefaults,
     });
+  }
+
+  function handleSourceImageAnalysisChange(checked) {
+    if (checked && sourceImageAnalysisUnavailable) {
+      setSourceImageAnalysisMessage('当前分析模型未标记为支持多模态输入，无法开启来源图片多模态分析。');
+      return;
+    }
+    setSourceImageAnalysisMessage('');
+    updateCreativeDefaults({ sourceImageAnalysisEnabled: checked });
   }
 
   return (
@@ -241,6 +273,28 @@ export function CreativeDefaultsSettings({
           <span className="switchText">{creativeDefaults.useResearch ? '已开启' : '已关闭'}</span>
           <span>联网研究默认开启</span>
         </label>
+
+        <div className={`rounded-lg border p-3 ${sourceImageAnalysisUnsupported ? 'border-amber-200 bg-amber-50' : 'border-[#edf0f4] bg-[#fafbfc]'}`}>
+          <label className="switchControl">
+            <input
+              type="checkbox"
+              checked={sourceImageAnalysisEnabled}
+              disabled={disabled || (!sourceImageAnalysisEnabled && sourceImageAnalysisUnavailable)}
+              onChange={event => handleSourceImageAnalysisChange(event.target.checked)}
+            />
+            <span className="switchTrack" aria-hidden="true">
+              <span className="switchThumb" />
+            </span>
+            <span className="switchText">{sourceImageAnalysisEnabled ? '已开启' : '已关闭'}</span>
+            <span>来源图片多模态分析</span>
+          </label>
+          <p className="mt-2 whitespace-normal text-xs font-normal leading-relaxed text-[#69717e]">
+            关闭后仍会提取文章/GitHub 图片，但只基于图片说明、URL 和上下文进行轻量匹配。
+          </p>
+          {sourceImageAnalysisWarning ? (
+            <p className="mt-2 whitespace-normal text-xs font-semibold leading-relaxed text-[#b45309]" role="status">{sourceImageAnalysisWarning}</p>
+          ) : null}
+        </div>
 
         <label className="switchControl rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
           <input

@@ -133,8 +133,10 @@ export function SettingsPage() {
       return (
         <CreativeDefaultsSettings
           appSettings={appSettings}
+          activeModels={modelSettings.activeModels}
+          modelSettingsLoading={modelSettings.loading}
           templates={templates}
-          disabled={loadingApp || savingApp}
+          disabled={loadingApp || savingApp || modelSettings.loading}
           saving={savingApp}
           onChange={setAppSettings}
           onSave={saveAppSettings}

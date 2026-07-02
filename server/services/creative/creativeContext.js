@@ -185,7 +185,7 @@ function normalizeCreativeInput(payload = {}) {
   const skipValidation = payload.skipValidation === true;
 
   if (assetIds.length > 0) {
-    return createFailureResponse('图片素材将在下一阶段开放。', {
+    return createFailureResponse('暂不支持手动传入 assetIds，请先移除手动素材后重试。文章/GitHub 链接图片会自动尝试提取。', {
       use_research: useResearch,
       skip_validation: skipValidation,
       asset_ids: [],

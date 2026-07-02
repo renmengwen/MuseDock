@@ -4,6 +4,8 @@ const path = require('path');
 const creativeContext = require('./creativeContext');
 const mediaPipeline = require('../mediaPipeline');
 const defaultSourceAssets = require('../source/sourceAssets');
+const defaultSourceImageAnalysis = require('../source/sourceImageAnalysis');
+const defaultAiTextModel = require('../ai/aiTextModel');
 
 // ponytail: 纯小助手与 creativeWorkflows 各持一份，避免为 safeString(159处)/readJson/writeJson 改全局
 function safeString(value) {
@@ -641,10 +643,79 @@ async function writeAssetContextToAnalysisInput(record, mediaRoot, assetContext)
   await writeJson(paths.analysisInput, analysisInput);
 }
 
+function isSourceImageAnalysisEnabled(record = {}) {
+  return record.creative_defaults_snapshot?.sourceImageAnalysisEnabled === true
+    || record.creative_context?.creative_defaults_snapshot?.sourceImageAnalysisEnabled === true;
+}
+
+function resolveImageAnalysisModel(services = {}) {
+  return [
+    services.aiTextModel,
+    services.ai,
+    services.aiClient,
+    services.llm,
+    defaultAiTextModel,
+  ].find(model => model && typeof model.callTextModel === 'function') || null;
+}
+
+function createFailedImageAnalysisResult(assets = [], error) {
+  const message = `来源图片多模态分析失败：${safeString(error?.message) || '未知错误'}`;
+  return {
+    status: 'failed',
+    summary: message,
+    assets: assets.map(asset => ({
+      ...asset,
+      image_analysis: {
+        status: 'failed',
+        message,
+      },
+    })),
+  };
+}
+
+async function applySourceImageAnalysis(assetContext = {}, record = {}, services = {}) {
+  const assets = Array.isArray(assetContext.assets) ? assetContext.assets : [];
+  const enabled = isSourceImageAnalysisEnabled(record);
+  const analyzer = services.sourceImageAnalysis || defaultSourceImageAnalysis;
+  try {
+    const runtime = enabled && typeof services.aiModelConfig?.getRuntimeConfig === 'function'
+      ? await services.aiModelConfig.getRuntimeConfig('text')
+      : {};
+    const result = await analyzer.analyzeSourceImageAssets({
+      enabled,
+      assets,
+      runtime,
+      model: enabled ? resolveImageAnalysisModel(services) : null,
+    });
+    return {
+      ...assetContext,
+      assets: Array.isArray(result.assets) ? result.assets : assets,
+      image_analysis: {
+        status: safeString(result.status) || (enabled ? 'failed' : 'disabled'),
+        summary: safeString(result.summary),
+      },
+    };
+  } catch (error) {
+    const result = createFailedImageAnalysisResult(assets, error);
+    return {
+      ...assetContext,
+      assets: result.assets,
+      image_analysis: {
+        status: result.status,
+        summary: result.summary,
+      },
+    };
+  }
+}
+
 async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, reportStage = null) {
   const inputMode = record.creative_context?.input?.mode || record.input?.mode || '';
   if (inputMode === 'douyin') {
-    const assetContext = creativeContext.createDisabledAssetContext({ now });
+    const assetContext = await applySourceImageAnalysis(
+      creativeContext.createDisabledAssetContext({ now }),
+      record,
+      services,
+    );
     record.asset_context = assetContext;
     record.creative_context = {
       ...(record.creative_context || {}),
@@ -660,11 +731,11 @@ async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, 
 
   const sourceMaterial = buildSourceMaterialForAssets(record);
   if (!sourceMaterial?.markdown && !sourceMaterial?.title && !sourceMaterial?.description) {
-    const assetContext = {
+    const assetContext = await applySourceImageAnalysis({
       ...creativeContext.createDisabledAssetContext({ now }),
       status: 'empty',
       summary: '没有可用于提取或搜索图片的来源内容。',
-    };
+    }, record, services);
     record.asset_context = assetContext;
     record.creative_context = {
       ...(record.creative_context || {}),
@@ -683,7 +754,7 @@ async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, 
 
   const paths = mediaPipeline.getMediaPaths(record.aweme_id, mediaRoot);
   const service = services.sourceAssets || defaultSourceAssets;
-  const assetContext = await service.prepareSourceAssets({
+  const preparedAssetContext = await service.prepareSourceAssets({
     sourceMaterial,
     projectDir: paths.dir,
     assetDir: path.join(paths.dir, 'assets'),
@@ -693,6 +764,7 @@ async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, 
       pexelsApiKey: services.pexelsApiKey,
     },
   });
+  const assetContext = await applySourceImageAnalysis(preparedAssetContext, record, services);
   record.asset_context = assetContext;
   record.creative_context = {
     ...(record.creative_context || {}),

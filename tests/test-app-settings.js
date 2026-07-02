@@ -30,6 +30,7 @@ async function run() {
     generateAudio: true,
     generateCaptions: true,
     emotionalVoice: false,
+    sourceImageAnalysisEnabled: false,
   });
   assert.strictEqual(defaults.creativeDefaults.templateByAspectRatio['9:16'], 'news_signal_vertical');
   assert.strictEqual(defaults.creativeDefaults.useResearch, true);
@@ -53,6 +54,7 @@ async function run() {
       generateAudio: false,
       generateCaptions: false,
       emotionalVoice: true,
+      sourceImageAnalysisEnabled: true,
     },
     system: {
       skipValidation: true,
@@ -74,6 +76,7 @@ async function run() {
     generateAudio: false,
     generateCaptions: false,
     emotionalVoice: true,
+    sourceImageAnalysisEnabled: true,
   });
   assert.deepStrictEqual(saved.system, { skipValidation: true });
   assert.deepStrictEqual(readJson(configPath), saved);
@@ -119,9 +122,12 @@ async function run() {
   assert.equal(appSettings.normalizeCreativeDefaults({}).generateAudio, true);
   assert.equal(appSettings.normalizeCreativeDefaults({}).generateCaptions, true);
   assert.equal(appSettings.normalizeCreativeDefaults({}).emotionalVoice, false);
+  assert.equal(appSettings.normalizeCreativeDefaults({}).sourceImageAnalysisEnabled, false);
   assert.equal(appSettings.normalizeCreativeDefaults({ generateAudio: false }).generateAudio, false);
   assert.equal(appSettings.normalizeCreativeDefaults({ generateCaptions: false }).generateCaptions, false);
   assert.equal(appSettings.normalizeCreativeDefaults({ emotionalVoice: true }).emotionalVoice, true);
+  assert.equal(appSettings.normalizeCreativeDefaults({ sourceImageAnalysisEnabled: true }).sourceImageAnalysisEnabled, true);
+  assert.equal(appSettings.normalizeCreativeDefaults({ sourceImageAnalysisEnabled: 'true' }).sourceImageAnalysisEnabled, false);
 }
 
 run().then(() => {

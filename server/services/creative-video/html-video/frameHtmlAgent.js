@@ -144,6 +144,25 @@ function buildVisualContinuitySection({ visualStyleReferenceHtml = '', previousF
   ];
 }
 
+function frameAssetReferenceSummary(node = {}, creativeContext = {}) {
+  const ref = (Array.isArray(node.asset_refs) ? node.asset_refs : []).find(item => item && item.asset_id);
+  if (!ref) return '';
+  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
+  const asset = assets.find(item => String(item?.id || '') === String(ref.asset_id || ''));
+  if (!asset) return '';
+  const analysis = asset.image_analysis || {};
+  const lines = [
+    '本帧推荐来源图片：',
+    `- asset_id：${compactText(ref.asset_id, 160)}`,
+    `- src：${compactText(asset.frame_src || asset.path, 260)}`,
+    `- 类型：${compactText(analysis.visual_type || asset.type || asset.source || 'image', 80)}`,
+    `- 图片说明：${compactText(analysis.summary || asset.alt || asset.caption || asset.description || asset.summary, 260) || '（无）'}`,
+    `- 建议用法：${compactText(ref.usage || analysis.best_usage, 180) || '（无）'}`,
+    `- 推荐原因：${compactText(ref.reason, 260) || '（无）'}`,
+  ];
+  return lines.join('\n');
+}
+
 function validateHtmlTargetResolution(html, target = {}) {
   return validateHtmlCanvasContract(html, target);
 }
@@ -179,6 +198,7 @@ function buildFrameHtmlPrompt({
     visualStyleReferenceHtml,
     previousFrameHtml,
   });
+  const assetReferenceSummary = frameAssetReferenceSummary(node, creativeContext);
   return [
     '你是 html-video 单帧完整 HTML 生成器。',
     '请输出 exactly one fenced ```html code block 或一个完整 HTML document；不要输出解释、Markdown 说明或 HTML 之外的 prose。',
@@ -206,6 +226,7 @@ function buildFrameHtmlPrompt({
     '- 不要让每一帧都使用相同主布局；相邻帧必须有清晰不同的主视觉、层级或构图。',
     '- 不要只改底部 caption；主画面、数据、标题或视觉结构必须服务当前 frame content。',
     '- 不要保留与内容无关的模板导航标签，例如 Search / GitHub / Tech Forums / Docs / Issues，除非这些词就是当前内容事实。',
+    '- 如果本帧提供“本帧推荐来源图片”，优先使用推荐图片；没有推荐图片时，才从 Source context summary 的可用图片素材中选择。',
     '- 如果 Source context summary 提供“可用图片素材”，本帧内容适合引用时，可以使用其中的 HTML引用路径，例如 <img src="../assets/source-image-01.jpg">；禁止引用外部图片 URL。',
     '- 文章截图或含文字图片必须完整展示，使用 object-fit: contain；不要裁切成不可读背景。图库/search 图片只适合做弱背景或氛围层，必须加遮罩保证文字可读。',
     '- 不要做纯图片轮播；图片必须和本帧关键词、字幕、数据卡、框选、高亮或解释文案混排。',
@@ -238,6 +259,8 @@ function buildFrameHtmlPrompt({
     '',
     'Source context summary：',
     summarizeCreativeContextForPrompt(creativeContext) || '（无）',
+    '',
+    assetReferenceSummary || '本帧没有专门推荐的来源图片。',
     '',
     'scene_spec 摘要：',
     JSON.stringify(frameSceneSpecSummary(sceneSpec, node, node.id || '', index), null, 2),
@@ -768,6 +791,7 @@ module.exports = {
   callModel,
   buildRetryPrompt,
   readTemplateSourceSnippet,
+  frameAssetReferenceSummary,
   validateHtmlTargetResolution,
   validateHtmlContentQuality,
 };

@@ -506,6 +506,7 @@ function normalizeProject(project = {}) {
     revisions: arrayOrEmpty(input.revisions).map(revision => ({ ...objectOrEmpty(revision) })),
     edit_sessions: arrayOrEmpty(input.edit_sessions || input.editSessions),
     layout_qa_reports: arrayOrEmpty(input.layout_qa_reports || input.layoutQaReports),
+    asset_usage_report: input.asset_usage_report ? objectOrEmpty(input.asset_usage_report) : null,
     exports: arrayOrEmpty(input.exports).map(item => ({ ...objectOrEmpty(item) })),
     status: input.status || 'draft',
     generation_checkpoint: normalizeGenerationCheckpoint(input.generation_checkpoint, input),

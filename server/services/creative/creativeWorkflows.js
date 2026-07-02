@@ -451,7 +451,7 @@ function normalizeFailureResult(normalized, payload = {}) {
   if (Array.isArray(payload.assetIds) && payload.assetIds.length > 0) {
     return {
       ...normalized,
-      message: '图片素材将在下一阶段开放。',
+      message: '暂不支持手动传入 assetIds，请先移除手动素材后重试。文章/GitHub 链接图片会自动尝试提取。',
     };
   }
 
@@ -614,7 +614,34 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
     emotionalVoice: typeof overrideSource.emotionalVoice === 'boolean'
       ? overrideSource.emotionalVoice
       : defaultsSource.emotionalVoice === true,
+    sourceImageAnalysisEnabled: typeof overrideSource.sourceImageAnalysisEnabled === 'boolean'
+      ? overrideSource.sourceImageAnalysisEnabled
+      : defaultsSource.sourceImageAnalysisEnabled === true,
   };
+}
+
+async function validateSourceImageAnalysisConfigIfNeeded(normalizedInput, snapshot, services) {
+  if (normalizedInput?.mode !== 'source_url' || snapshot?.sourceImageAnalysisEnabled !== true) {
+    return { success: true };
+  }
+
+  let runtime = null;
+  try {
+    runtime = await services.aiModelConfig.getRuntimeConfig('text');
+  } catch {}
+  if (!runtime || runtime.enabled !== true || !safeString(runtime.modelId) || !safeString(runtime.apiKey) || !safeString(runtime.baseUrl)) {
+    return {
+      success: false,
+      message: '已开启来源图片多模态分析，但当前未配置可用的分析模型。请到设置页配置支持图片输入的分析模型，或关闭该功能后重试。',
+    };
+  }
+  if (runtime.supportsMultimodal !== true) {
+    return {
+      success: false,
+      message: '已开启来源图片多模态分析，但当前分析模型未标记为支持多模态输入。请到设置页勾选“支持多模态输入”，或关闭该功能后重试。',
+    };
+  }
+  return { success: true };
 }
 
 function buildWorkflowTarget(snapshot = {}) {
@@ -702,6 +729,8 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
   if (!normalized.success) {
     return normalizeFailureResult(normalized, effectivePayload);
   }
+  const sourceImageAnalysisConfig = await validateSourceImageAnalysisConfigIfNeeded(normalized.data, snapshot, services);
+  if (!sourceImageAnalysisConfig.success) return sourceImageAnalysisConfig;
   const effectiveSystemSettings = await services.appSettings.getEffectiveSystemSettings(options);
 
   const workflowId = safeString(typeof services.idFactory === 'function' ? services.idFactory() : makeId(now));

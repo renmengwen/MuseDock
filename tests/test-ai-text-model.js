@@ -48,6 +48,7 @@ async function run() {
   const ok = await aiTextModel.callTextModel({
     messages: [{ role: 'user', content: '生成 JSON' }],
     configPath,
+    response_format: { type: 'json_object' },
     fetchImpl: async (url, options) => {
       requestedUrl = url;
       requestedOptions = options;
@@ -73,6 +74,7 @@ async function run() {
   const body = JSON.parse(requestedOptions.body);
   assert.strictEqual(body.model, 'gpt-test');
   assert.deepStrictEqual(body.messages, [{ role: 'user', content: '生成 JSON' }]);
+  assert.deepStrictEqual(body.response_format, { type: 'json_object' });
   assert.ok(requestedOptions.signal, 'text model requests should include an AbortSignal');
   assert.strictEqual(typeof requestedOptions.signal.aborted, 'boolean');
 

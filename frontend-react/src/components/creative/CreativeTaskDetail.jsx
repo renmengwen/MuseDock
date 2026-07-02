@@ -161,6 +161,143 @@ function CreativeRetryPlan({
   );
 }
 
+const IMAGE_ANALYSIS_STATUS_TEXT = {
+  ready: '已完成',
+  partial: '部分完成',
+  failed: '失败后降级',
+  disabled: '已关闭',
+  skipped: '已跳过',
+};
+
+const IMAGE_ANALYSIS_STATUS_CLASS = {
+  ready: 'bg-green-50 text-green-700 ring-green-200',
+  partial: 'bg-amber-50 text-amber-700 ring-amber-200',
+  failed: 'bg-red-50 text-red-700 ring-red-200',
+  disabled: 'bg-slate-100 text-slate-700 ring-slate-200',
+  skipped: 'bg-slate-100 text-slate-600 ring-slate-200',
+  default: 'bg-slate-100 text-slate-600 ring-slate-200',
+};
+
+const SOURCE_LABEL_TEXT = {
+  article: '文章图片',
+  github: 'GitHub 图片',
+  github_readme: 'GitHub README',
+  readme: 'README 图片',
+  pexels: 'Pexels 补图',
+  search: '搜索补图',
+  upload: '上传图片',
+};
+
+function firstText(...values) {
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function formatImageAnalysisStatus(status) {
+  return IMAGE_ANALYSIS_STATUS_TEXT[String(status || '').trim()] || '未分析';
+}
+
+function sourceLabel(source) {
+  const key = String(source || '').trim();
+  return SOURCE_LABEL_TEXT[key] || key || '来源图片';
+}
+
+function SourceImageAssetsPanel({ workflow }) {
+  const assetContext = workflow?.asset_context || workflow?.creative_context?.asset_context || null;
+  const assets = Array.isArray(assetContext?.assets) ? assetContext.assets : [];
+  const diagnostics = Array.isArray(assetContext?.diagnostics) ? assetContext.diagnostics : [];
+  const usageReport = assetContext?.asset_usage_report
+    || workflow?.result?.hyperframes_freeform?.project?.asset_usage_report
+    || workflow?.html_video_project?.asset_usage_report
+    || null;
+  const usageById = new Map((Array.isArray(usageReport?.assets) ? usageReport.assets : [])
+    .map(item => [String(item.asset_id || item.id || '').trim(), item])
+    .filter(([id]) => id));
+
+  if (!assetContext && !assets.length && !diagnostics.length) return null;
+
+  const contextStatus = assetContext?.image_analysis?.status || assetContext?.status || '';
+
+  return (
+    <section className="grid gap-3.5 rounded-lg border border-[#e7e9ee] bg-white p-4" aria-label="来源图片素材">
+      <div className="flex items-start justify-between gap-3 max-[720px]:flex-col">
+        <div className="min-w-0">
+          <h3 className="m-0 text-[15px] font-bold leading-snug text-[#111827]">来源图片素材</h3>
+          <p className="mt-1 text-[13px] leading-relaxed text-[#69717e]">
+            {assetContext?.summary || assetContext?.image_analysis?.summary || '展示文章/GitHub 图片的分析状态、引用结果和准备诊断。'}
+          </p>
+        </div>
+        <span className={cn('shrink-0 rounded-full px-3 py-1 text-xs font-bold ring-1', IMAGE_ANALYSIS_STATUS_CLASS[contextStatus] || IMAGE_ANALYSIS_STATUS_CLASS.default)}>
+          图片分析：{formatImageAnalysisStatus(contextStatus)}
+        </span>
+      </div>
+
+      {assets.length ? (
+        <div className="grid gap-3">
+          {assets.map((asset, index) => {
+            const assetId = firstText(asset.id, asset.asset_id, `asset_${index + 1}`);
+            const analysis = asset.image_analysis || {};
+            const usage = usageById.get(assetId);
+            const usedInFrames = Array.isArray(usage?.used_in_frames) ? usage.used_in_frames.filter(Boolean) : [];
+            const used = usage?.used === true || usedInFrames.length > 0 || Number(usage?.usage_count || 0) > 0;
+            const status = analysis.status || '';
+            const title = firstText(asset.alt, asset.title, asset.name, asset.path, asset.url, assetId);
+            const metaLine = [analysis.visual_type, analysis.best_usage, analysis.fit]
+              .map(item => String(item || '').trim())
+              .filter(Boolean)
+              .join(' / ');
+
+            return (
+              <article key={`${assetId}-${index}`} className="grid grid-cols-[96px_minmax(0,1fr)] gap-3 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 max-[640px]:grid-cols-1">
+                <div className="grid aspect-[16/10] w-24 place-items-center rounded-md border border-[#d9dde5] bg-white px-2 text-center font-mono text-[11px] font-bold text-[#69717e] max-[640px]:w-full">
+                  {assetId}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <strong className="min-w-0 break-words text-[13px] leading-snug text-[#111827]">{title}</strong>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-[#5f6876] ring-1 ring-[#e1e5eb]">{sourceLabel(asset.source)}</span>
+                    <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold ring-1', IMAGE_ANALYSIS_STATUS_CLASS[status] || IMAGE_ANALYSIS_STATUS_CLASS.default)}>
+                      {formatImageAnalysisStatus(status)}
+                    </span>
+                    <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold ring-1', used ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-slate-100 text-slate-700 ring-slate-200')}>
+                      {usage ? (used ? '已用于镜头' : '最终未引用') : '未生成引用报告'}
+                    </span>
+                  </div>
+                  {analysis.summary ? <p className="mt-2 text-[13px] leading-relaxed text-[#30343b]">{analysis.summary}</p> : null}
+                  {metaLine ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">类型/用途/适配：{metaLine}</p> : null}
+                  {usedInFrames.length ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">引用镜头：{usedInFrames.join('、')}</p> : null}
+                  {analysis.message ? <p className="mt-1 text-xs leading-relaxed text-[#b45309]">分析说明：{analysis.message}</p> : null}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-[#d9dde5] bg-[#fafbfc] px-3 py-2 text-[13px] text-[#69717e]">暂无来源图片素材。</div>
+      )}
+
+      {diagnostics.length ? (
+        <div className="grid gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
+          <strong className="text-xs font-bold text-[#5f6876]">诊断信息</strong>
+          {diagnostics.slice(0, 4).map((item, index) => {
+            const code = firstText(item.code, item.type, item.status, 'diagnostic');
+            const message = firstText(item.user_message, item.message, item.reason, item.url, '已记录素材处理诊断。');
+            return (
+              <div key={`${code}-${index}`} className="flex items-start justify-between gap-3 border-t border-[#edf0f4] pt-2 text-xs leading-relaxed max-[640px]:flex-col">
+                <span className="min-w-0 break-words text-[#30343b]">{code === 'download_failed' ? '下载失败' : code}：{message}</span>
+                <span className="shrink-0 rounded-full bg-white px-2 py-0.5 font-bold text-[#5f6876] ring-1 ring-[#e1e5eb]">{code}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function CreativeTaskDetail({
   status,
   message,
@@ -205,7 +342,7 @@ export function CreativeTaskDetail({
 
   return (
     <div className={cn('grid w-full min-w-0 gap-6 px-1 pb-0 pt-1', workflow?.status === 'done' && videoUrl && 'min-h-[calc(100vh-176px)]')}>
-      <div className="flex min-w-0 items-start justify-between gap-4 rounded-lg border border-[#e7e9ee] bg-white p-4 max-[720px]:flex-col">
+      <div className="creativeDetailMeta flex min-w-0 items-start justify-between gap-4 rounded-lg border border-[#e7e9ee] bg-white p-4 max-[720px]:flex-col">
         <div className="grid min-w-0 gap-1">
           <span className="text-xs font-bold text-[#8a93a2]">任务 ID</span>
           <strong className="min-w-0 break-words font-mono text-base leading-snug text-[#111827]">{workflowId || '尚未创建'}</strong>
@@ -216,12 +353,12 @@ export function CreativeTaskDetail({
         <div className="inline-flex shrink-0 flex-wrap items-center justify-end gap-2 max-[720px]:justify-start">
           <Dialog open={promptModalOpen} onOpenChange={setPromptModalOpen}>
             <DialogTrigger asChild>
-              <Button variant="secondary" size="sm" type="button" className="border border-[#d9dde5] bg-white text-[#30343b] hover:bg-[#f3f4f6] hover:text-[#111827]">
+              <Button variant="secondary" size="sm" type="button" className="creativePromptViewButton">
                 <Eye size={14} />
                 <span>查看提示词</span>
               </Button>
             </DialogTrigger>
-            <DialogContent className="grid max-h-[82vh] w-[min(92vw,680px)] grid-rows-[auto_1fr_auto] overflow-hidden rounded-[14px] border border-[#e5e7eb] bg-white shadow-[0_24px_70px_rgba(15,23,42,.24)]" showCloseButton={false}>
+            <DialogContent className="creativePromptModal" showCloseButton={false}>
               <DialogHeader>
                 <DialogTitle>当前任务提示词</DialogTitle>
               </DialogHeader>
@@ -237,7 +374,7 @@ export function CreativeTaskDetail({
                   <span className="sr-only">关闭提示词弹框</span>
                 </Button>
               </DialogClose>
-              <pre className="m-0 overflow-auto whitespace-pre-wrap break-words bg-[#f8fafc] p-[18px] font-sans text-sm leading-relaxed text-[#111827]">{promptText || '暂无可显示的提示词。'}</pre>
+              <pre className="creativePromptModalText">{promptText || '暂无可显示的提示词。'}</pre>
               <Button
                 variant="secondary"
                 size="sm"
@@ -272,6 +409,7 @@ export function CreativeTaskDetail({
         message={message}
         progressEvents={progressEvents}
       />
+      <SourceImageAssetsPanel workflow={workflow} />
       {workflow?.status === 'failed' ? (
         <CreativeRetryPlan
           retryPlan={retryPlan}
