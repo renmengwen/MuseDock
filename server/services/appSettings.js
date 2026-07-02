@@ -30,6 +30,7 @@ const DEFAULT_CONFIG = {
   },
   system: {
     skipValidation: false,
+    pexelsApiKey: '',
   },
 };
 
@@ -96,6 +97,7 @@ function normalizeSystemSettings(input = {}) {
   const source = input && typeof input === 'object' ? input : {};
   return {
     skipValidation: source.skipValidation === true,
+    pexelsApiKey: typeof source.pexelsApiKey === 'string' ? source.pexelsApiKey.trim() : '',
   };
 }
 
@@ -149,6 +151,11 @@ async function getSystemSettings(options = {}) {
   return config.system;
 }
 
+async function getPexelsApiKey(options = {}) {
+  const system = await getSystemSettings(options);
+  return system.pexelsApiKey || '';
+}
+
 async function getEffectiveSystemSettings(options = {}) {
   if (await hasConfig(options)) {
     const system = await getSystemSettings(options);
@@ -197,5 +204,6 @@ module.exports = {
   saveConfig,
   getCreativeDefaults,
   getSystemSettings,
+  getPexelsApiKey,
   getEffectiveSystemSettings,
 };

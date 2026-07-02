@@ -290,6 +290,7 @@ async function searchPexelsImages(sourceMaterial = {}, deps = {}) {
   const queries = buildSearchQueries(sourceMaterial);
   const images = [];
   const seen = new Set();
+  const failures = [];
   for (const query of queries) {
     if (images.length >= DEFAULT_MAX_SEARCH_IMAGES) break;
     const url = new URL('https://api.pexels.com/v1/search');
@@ -300,7 +301,10 @@ async function searchPexelsImages(sourceMaterial = {}, deps = {}) {
       headers: { authorization: apiKey, 'user-agent': UA },
       signal: deps.signal || AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
     });
-    if (!response || !response.ok) continue;
+    if (!response || !response.ok) {
+      failures.push(response?.status || 'NO_RESPONSE');
+      continue;
+    }
     const data = await response.json().catch(() => ({}));
     const photos = Array.isArray(data.photos) ? data.photos : [];
     for (const photo of photos) {
@@ -320,6 +324,19 @@ async function searchPexelsImages(sourceMaterial = {}, deps = {}) {
       });
       if (images.length >= DEFAULT_MAX_SEARCH_IMAGES) break;
     }
+  }
+  if (!images.length && failures.length) {
+    const code = failures.some(status => status === 401 || status === 403)
+      ? 'pexels_auth_failed'
+      : failures.some(status => status === 429)
+        ? 'pexels_rate_limited'
+        : 'pexels_request_failed';
+    const message = code === 'pexels_auth_failed'
+      ? 'Pexels API Key 无效或无权限，已跳过 AI 搜图补图。'
+      : code === 'pexels_rate_limited'
+        ? 'Pexels 请求频率受限，已跳过 AI 搜图补图。'
+        : `Pexels 搜图请求失败：HTTP ${failures.join('、')}。`;
+    return { success: false, code, message, images: [], queries };
   }
   return { success: true, images, queries };
 }

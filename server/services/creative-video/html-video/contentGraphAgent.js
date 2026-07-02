@@ -274,27 +274,35 @@ function normalizeData(data = {}) {
   };
 }
 
-function allowedAssetIdSet(creativeContext = {}) {
+function allowedAssetById(creativeContext = {}) {
   const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
   if (!assets.length) return null;
-  return new Set(assets
-    .filter(asset => String(asset?.source || 'article').trim() === 'article')
+  return new Map(assets
     .filter(isAssetUsableForFrames)
-    .map(asset => compactText(asset?.id || asset?.asset_id, 80))
-    .filter(Boolean));
+    .map(asset => [compactText(asset?.id || asset?.asset_id, 80), asset])
+    .filter(([id]) => id));
+}
+
+function isSourceEvidenceUsage(value = '') {
+  return /^(evidence|source|citation|proof)$/i.test(compactText(value, 40))
+    || /来源|证据|引用/.test(compactText(value, 40));
 }
 
 function normalizeAssetRefs(value, creativeContext = {}) {
-  const allowedIds = allowedAssetIdSet(creativeContext);
+  const allowedAssets = allowedAssetById(creativeContext);
   return (Array.isArray(value) ? value : [])
     .map(ref => {
       const object = objectOrEmpty(ref);
       const assetId = compactText(object.asset_id || object.assetId || object.id, 80);
-      if (allowedIds && !allowedIds.has(assetId)) return null;
       if (!assetId) return null;
+      const asset = allowedAssets?.get(assetId) || null;
+      if (allowedAssets && !asset) return null;
+      const usage = compactText(object.usage || object.kind || object.type, 40);
+      const source = compactText(asset?.source || 'article', 30);
+      if (source !== 'article' && isSourceEvidenceUsage(usage)) return null;
       return {
         asset_id: assetId,
-        usage: compactText(object.usage || object.kind || object.type, 40),
+        usage,
         reason: compactText(object.reason || object.summary || object.description, 160),
       };
     })

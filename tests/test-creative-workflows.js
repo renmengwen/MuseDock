@@ -167,9 +167,29 @@ async function testCreatesAndRunsTextWorkflow() {
 async function testCreatesAndRunsSourceUrlWorkflow() {
   const { rootDir, mediaRoot } = createTempDirs();
   const repoUrl = 'https://github.com/owner/repo';
+  const pexelsApiKey = 'pexels-from-settings';
   const { services } = createFakeServices({
     services: {
       now: () => '2026-06-21T00:00:00.000Z',
+      appSettings: {
+        getCreativeDefaults: async () => ({
+          aspectRatio: '9:16',
+          targetDurationSec: 60,
+          templateByAspectRatio: {
+            '9:16': 'news_signal_vertical',
+            '16:9': 'bold_signal',
+            '1:1': '',
+            '4:5': '',
+          },
+          lockTemplate: false,
+          useResearch: true,
+          generateAudio: true,
+          generateCaptions: true,
+          sourceImageAnalysisEnabled: false,
+        }),
+        getEffectiveSystemSettings: async () => ({ skipValidation: false, pexelsApiKey }),
+        getPexelsApiKey: async () => pexelsApiKey,
+      },
       sourceFetch: {
         fetchSource: async sourceUrl => ({
           success: true,
@@ -182,7 +202,9 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
         }),
       },
       sourceAssets: {
-        prepareSourceAssets: async ({ sourceMaterial, now }) => ({
+        prepareSourceAssets: async ({ sourceMaterial, now, deps }) => {
+          assert.equal(deps.pexelsApiKey, pexelsApiKey);
+          return {
           status: 'ready',
           updated_at: now,
           summary: '已准备 1 张图片素材。',
@@ -197,7 +219,8 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
             alt: sourceMaterial.title,
             mime: 'image/png',
           }],
-        }),
+          };
+        },
       },
     },
   });

@@ -51,6 +51,11 @@ export function SettingsOverview({ appSettings, modelSettings, systemHealth, onN
       action: 'system',
     },
     {
+      title: 'Pexels 补图',
+      value: appSettings?.system?.pexelsApiKey ? '已配置' : '未配置',
+      action: 'system',
+    },
+    {
       title: '渲染环境',
       value: environmentOk === undefined ? '待检测' : environmentOk ? '可用' : '需处理',
       action: 'system',

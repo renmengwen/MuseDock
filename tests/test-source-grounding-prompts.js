@@ -249,6 +249,30 @@ const normalizedGraphDropsSearchEvidenceRefs = contentGraphAgent.normalizeConten
 assert.equal(normalizedGraphDropsSearchEvidenceRefs.success, true);
 assert.equal(normalizedGraphDropsSearchEvidenceRefs.graph.nodes[0].asset_refs, undefined);
 
+const normalizedGraphKeepsSearchBackgroundRefs = contentGraphAgent.normalizeContentGraph({
+  synopsis: '项目解读',
+  nodes: [{
+    id: 'scene_01',
+    kind: 'text',
+    label: '架构说明',
+    durationSec: 3,
+    text: '展示系统模块关系',
+    asset_refs: [
+      { asset_id: 'search_01', usage: 'background', reason: '补图只做氛围背景' },
+    ],
+  }],
+  edges: [],
+}, {
+  title: 'owner/repo',
+}, assetCreativeContext);
+
+assert.equal(normalizedGraphKeepsSearchBackgroundRefs.success, true);
+assert.deepEqual(normalizedGraphKeepsSearchBackgroundRefs.graph.nodes[0].asset_refs, [{
+  asset_id: 'search_01',
+  usage: 'background',
+  reason: '补图只做氛围背景',
+}]);
+
 const textGraphPrompt = buildGraphPrompt(createTextCreativeContext(
   '这是普通文本创作方向：讲述独立创作者如何整理灵感、打磨脚本并持续发布。'
 ));

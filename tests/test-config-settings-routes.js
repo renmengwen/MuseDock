@@ -57,14 +57,14 @@ async function runIntegrationTests() {
   appSettings.getPublicConfig = async () => ({
     version: 1,
     creativeDefaults: { aspectRatio: '16:9' },
-    system: { skipValidation: false },
+    system: { skipValidation: false, pexelsApiKey: 'pexels-route-key' },
   });
   appSettings.saveConfig = async payload => {
     savedPayloads.push(payload);
     return {
       version: 1,
       creativeDefaults: { aspectRatio: payload.creativeDefaults.aspectRatio },
-      system: { skipValidation: payload.system.skipValidation },
+      system: { skipValidation: payload.system.skipValidation, pexelsApiKey: payload.system.pexelsApiKey || '' },
     };
   };
   appSettings.getCreativeDefaults = async () => ({ aspectRatio: '16:9' });
@@ -122,13 +122,13 @@ async function runIntegrationTests() {
       data: {
         version: 1,
         creativeDefaults: { aspectRatio: '16:9' },
-        system: { skipValidation: false },
+        system: { skipValidation: false, pexelsApiKey: 'pexels-route-key' },
       },
     });
 
     const settingsPayload = {
       creativeDefaults: { aspectRatio: '1:1' },
-      system: { skipValidation: true },
+      system: { skipValidation: true, pexelsApiKey: 'pexels-save-key' },
     };
     const saveSettings = await requestJson(server, 'POST', '/api/config/app-settings', settingsPayload);
     assert.strictEqual(saveSettings.status, 200);
@@ -138,7 +138,7 @@ async function runIntegrationTests() {
       data: {
         version: 1,
         creativeDefaults: { aspectRatio: '1:1' },
-        system: { skipValidation: true },
+        system: { skipValidation: true, pexelsApiKey: 'pexels-save-key' },
       },
     });
 

@@ -7,16 +7,21 @@ const systemSettingsPath = path.join(root, 'frontend-react/src/components/settin
 const cleanupDialogPath = path.join(root, 'frontend-react/src/components/settings/CleanupConfirmDialog.jsx');
 const settingsPagePath = path.join(root, 'frontend-react/src/pages/SettingsPage.jsx');
 const creativeDefaultsPath = path.join(root, 'frontend-react/src/components/settings/CreativeDefaultsSettings.jsx');
+const settingsOverviewPath = path.join(root, 'frontend-react/src/components/settings/SettingsOverview.jsx');
 
-const [systemSource, dialogSource, pageSource, creativeDefaultsSource] = await Promise.all([
+const [systemSource, dialogSource, pageSource, creativeDefaultsSource, overviewSource] = await Promise.all([
   readFile(systemSettingsPath, 'utf8'),
   readFile(cleanupDialogPath, 'utf8'),
   readFile(settingsPagePath, 'utf8'),
   readFile(creativeDefaultsPath, 'utf8'),
+  readFile(settingsOverviewPath, 'utf8'),
 ]);
 
 for (const text of [
   '质检状态',
+  '素材服务',
+  'PEXELS_API_KEY',
+  'Pexels 后，一键成片会在文章图片不足时自动搜索补图',
   '重新检测',
   'html-video 环境',
   '创作任务记录',
@@ -36,6 +41,7 @@ assert.match(dialogSource, /fixed inset-0/);
 assert.match(dialogSource, /role="dialog"/);
 assert.doesNotMatch(dialogSource, /modalOverlay/);
 assert.match(pageSource, /SystemSettings/);
+assert.match(overviewSource, /Pexels 补图/);
 assert.match(pageSource, /modelSettingsLoading=\{modelSettings\.loading\}/);
 assert.match(pageSource, /disabled=\{loadingApp \|\| savingApp \|\| modelSettings\.loading\}/);
 assert.match(creativeDefaultsSource, /生成旁白音频/);

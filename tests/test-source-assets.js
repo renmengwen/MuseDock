@@ -95,6 +95,30 @@ async function testMissingPexelsKeyDoesNotFail() {
   assert.match(result.diagnostics[0].message, /PEXELS_API_KEY/);
 }
 
+async function testPexelsHttpFailureAddsDiagnostic() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'source-assets-pexels-fail-test-'));
+  const result = await sourceAssets.prepareSourceAssets({
+    sourceMaterial: {
+      title: '没有图片的文章',
+      markdown: '只有正文，没有图片。',
+    },
+    assetDir: path.join(dir, 'assets'),
+    now: '2026-06-27T00:00:00.000Z',
+    deps: {
+      pexelsApiKey: 'bad-key',
+      fetchImpl: async (url) => {
+        assert.ok(String(url).startsWith('https://api.pexels.com/'));
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+      },
+    },
+  });
+
+  assert.equal(result.status, 'empty');
+  assert.deepEqual(result.assets, []);
+  assert.equal(result.diagnostics[0].code, 'pexels_auth_failed');
+  assert.match(result.diagnostics[0].message, /Pexels API Key/);
+}
+
 async function testRejectsPrivateImageUrlBeforeFetch() {
   let called = false;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'source-assets-private-test-'));
@@ -257,6 +281,7 @@ async function testSearchFallbackWhenArticleImagesAllFail() {
   await testExtractMarkdownImagesResolvesAndDedupes();
   await testPrepareDownloadsArticleAndPexelsImages();
   await testMissingPexelsKeyDoesNotFail();
+  await testPexelsHttpFailureAddsDiagnostic();
   await testRejectsPrivateImageUrlBeforeFetch();
   await testRejectsPrivateRedirect();
   await testRejectsOversizedImageByHeader();

@@ -35,7 +35,7 @@ async function run() {
   });
   assert.strictEqual(defaults.creativeDefaults.templateByAspectRatio['9:16'], 'news_signal_vertical');
   assert.strictEqual(defaults.creativeDefaults.useResearch, true);
-  assert.deepStrictEqual(defaults.system, { skipValidation: false });
+  assert.deepStrictEqual(defaults.system, { skipValidation: false, pexelsApiKey: '' });
   assert.strictEqual(await appSettings.hasConfig({ configPath }), false);
 
   const saved = await appSettings.saveConfig({
@@ -60,6 +60,7 @@ async function run() {
     },
     system: {
       skipValidation: true,
+      pexelsApiKey: ' pexels-test-key ',
     },
   }, { configPath, aiConfigPath });
 
@@ -81,19 +82,21 @@ async function run() {
     sourceImageAnalysisEnabled: true,
     frameHtmlConcurrency: 5,
   });
-  assert.deepStrictEqual(saved.system, { skipValidation: true });
+  assert.deepStrictEqual(saved.system, { skipValidation: true, pexelsApiKey: 'pexels-test-key' });
+  assert.equal(await appSettings.getPexelsApiKey({ configPath, aiConfigPath }), 'pexels-test-key');
   assert.deepStrictEqual(readJson(configPath), saved);
   assert.strictEqual(await appSettings.hasConfig({ configPath }), true);
 
   await fs.promises.writeFile(configPath, JSON.stringify({
     version: 1,
     creativeDefaults: {},
-    system: { skipValidation: false },
+    system: { skipValidation: false, pexelsApiKey: 'pexels-app-key' },
   }, null, 2), 'utf-8');
 
   const effectiveFromAppSettings = await appSettings.getEffectiveSystemSettings({ configPath, aiConfigPath });
   assert.deepStrictEqual(effectiveFromAppSettings, {
     skipValidation: false,
+    pexelsApiKey: 'pexels-app-key',
     source: 'app-settings',
   });
 
@@ -109,11 +112,12 @@ async function run() {
   const firstSaved = await appSettings.saveConfig({
     creativeDefaults: {},
   }, { configPath, aiConfigPath });
-  assert.deepStrictEqual(firstSaved.system, { skipValidation: true });
+  assert.deepStrictEqual(firstSaved.system, { skipValidation: true, pexelsApiKey: '' });
 
   const effectiveAfterFirstSave = await appSettings.getEffectiveSystemSettings({ configPath, aiConfigPath });
   assert.deepStrictEqual(effectiveAfterFirstSave, {
     skipValidation: true,
+    pexelsApiKey: '',
     source: 'app-settings',
   });
 

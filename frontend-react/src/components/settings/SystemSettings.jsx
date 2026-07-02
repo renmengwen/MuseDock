@@ -63,6 +63,17 @@ export function SystemSettings({
     });
   };
 
+  const updatePexelsApiKey = (value) => {
+    if (!appSettings) return;
+    onChange({
+      ...appSettings,
+      system: {
+        ...(appSettings.system || {}),
+        pexelsApiKey: value,
+      },
+    });
+  };
+
   const confirmCleanup = async () => {
     if (!pendingCleanup) return;
     const item = pendingCleanup;
@@ -134,6 +145,23 @@ export function SystemSettings({
             <span className="switchDesc">跳过质检后会直接进入渲染流程，请仅在确认素材和模板稳定时使用。</span>
           </div>
         </label>
+
+        <section className="rounded-lg border border-[#edf0f4] bg-white p-4">
+          <h4 className="m-0 text-base font-bold">素材服务</h4>
+          <p className="mt-1 text-sm text-[#4b5563]">配置 Pexels 后，一键成片会在文章图片不足时自动搜索补图。</p>
+          <label className="mt-3 grid gap-1.5">
+            <span className="text-xs font-semibold text-[#5f6876]">PEXELS_API_KEY</span>
+            <input
+              className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:opacity-50"
+              type="password"
+              value={appSettings?.system?.pexelsApiKey || ''}
+              disabled={disabled || !appSettings}
+              onChange={event => updatePexelsApiKey(event.target.value)}
+              placeholder="粘贴 Pexels API Key"
+              autoComplete="new-password"
+            />
+          </label>
+        </section>
 
         <section className="rounded-lg border border-[#edf0f4] bg-white p-4">
           <h4 className="m-0 text-base font-bold">html-video 环境</h4>
