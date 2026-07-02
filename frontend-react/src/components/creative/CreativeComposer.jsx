@@ -16,15 +16,13 @@ function CreativeHeroHeader() {
 function CreativeModeSwitch({ mode, setMode, disabled }) {
   return (
     <div
-      className="relative grid min-h-10 w-full max-w-[286px] grid-cols-2 overflow-hidden rounded-full border border-[#e5e7eb] bg-white p-0.5"
+      className="creativeModeSwitch"
+      data-mode={mode}
       role="tablist"
       aria-label="创作模式"
     >
       <span
-        className={cn(
-          'pointer-events-none absolute inset-y-0.5 left-0.5 z-0 w-[calc(50%-2px)] rounded-full bg-[#f3f4f6] shadow-[inset_0_0_0_1px_#d1d5db] transition-transform duration-200 ease-out',
-          mode === 'expert' && 'translate-x-full',
-        )}
+        className="creativeModeThumb"
         aria-hidden="true"
       />
       <Button
@@ -69,7 +67,7 @@ function CreativePromptComposer({
 }) {
   return (
     <form
-      className="grid min-h-0 w-full max-w-[776px] gap-2.5 rounded-[20px] border border-[#dfe3ea] bg-white px-3 pb-2.5 pt-[17px] shadow-[0_16px_38px_rgba(15,23,42,.07)] transition-shadow duration-200 focus-within:border-[#25f4ee]/70 focus-within:shadow-[0_18px_44px_rgba(15,23,42,.10)]"
+      className="creativePromptComposer"
       onSubmit={onSubmit}
     >
       <label className="sr-only" htmlFor="creative-input">
@@ -85,14 +83,11 @@ function CreativePromptComposer({
         rows={4}
       />
 
-      <div className="flex items-center justify-between gap-3 border-t border-[#edf0f4] pt-2.5">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <div className="creativePromptActions">
+        <div className="creativeQuickActions">
           <Button
             type="button"
-            className={cn(
-              'h-8 rounded-full border-[#e5e7eb] bg-white px-3 text-xs font-semibold text-[#4b5563] transition hover:border-[#d1d5db] hover:bg-[#f3f4f6] hover:text-[#111827]',
-              useResearch && 'border-[#111827] bg-[#f3f4f6] text-[#111827]',
-            )}
+            className={`creativeResearchToggle ${useResearch ? 'active' : ''}`}
             variant="outline"
             disabled={isBusy}
             onClick={() => setUseResearch(!useResearch)}
@@ -103,7 +98,7 @@ function CreativePromptComposer({
         </div>
 
         <Button
-          className="size-10 rounded-full bg-[#111827] p-0 text-white shadow-[0_10px_24px_rgba(15,23,42,.18)] transition hover:-translate-y-0.5 hover:bg-[#020617] hover:shadow-[0_14px_30px_rgba(15,23,42,.22)]"
+          className="creativeSubmitButton"
           type="submit"
           disabled={submitDisabled}
           aria-label="一键生成视频"
@@ -113,8 +108,10 @@ function CreativePromptComposer({
       </div>
 
       {mode === 'expert' ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
-          专家模式正在开发中，请先使用快速模式创建任务。
+        <div className="creativeExpertSlot">
+          <div className="creativeExpertHint">
+            专家模式正在开发中，请先使用快速模式创建任务。
+          </div>
         </div>
       ) : null}
       <input type="hidden" value={mode} readOnly />

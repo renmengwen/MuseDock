@@ -14,9 +14,9 @@ export function CreativeSidebar({
   onDeleteTask,
 }) {
   return sidebarCollapsed ? (
-    <aside className="grid content-start gap-2 bg-white pt-[18px] pl-[18px]" aria-label="已收起的创作任务栏">
+    <aside className="creativeTaskSidebar collapsed" aria-label="已收起的创作任务栏">
       <Button
-        className="size-[34px] rounded-lg bg-white text-[#1f2937] shadow-[0_8px_20px_rgba(15,23,42,.08)] transition hover:bg-[#f3f4f6] hover:text-[#111827]"
+        className="creativeCollapsedExpand"
         type="button"
         variant="ghost"
         size="icon"
@@ -35,17 +35,17 @@ export function CreativeSidebar({
       </Link>
     </aside>
   ) : (
-    <aside className="grid min-w-0 grid-rows-[auto_auto_auto_minmax(0,1fr)_auto] gap-[18px] border-r border-[#e7e9ee] bg-[#f8fafc] px-3 pb-4 pt-5 transition-[background-color,padding] duration-200">
+    <aside className="creativeTaskSidebar">
       <div className="grid min-w-0 grid-cols-[auto_1fr_auto] items-center gap-2 text-[#111827]">
         <div className="inline-flex size-7 items-center justify-center rounded-md border border-[#d9dde5] bg-white text-[10px] font-black">MD</div>
         <div className="min-w-0">
-          <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-none">MuseDock</strong>
-          <span className="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-[#69717e]">本地视频生产控制台</span>
+          <strong className="block min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-lg leading-none">一键创作</strong>
+          <span className="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-[#69717e]">MuseDock 本地视频生产控制台</span>
         </div>
         <div className="inline-flex gap-3 text-[#667085]">
           <Search size={17} aria-hidden="true" />
           <Button
-            className="size-[22px] rounded-md bg-transparent p-0 text-inherit transition hover:bg-[#eef0f4] hover:text-[#111827]"
+            className="creativeSidebarToggle"
             type="button"
             variant="ghost"
             size="icon"

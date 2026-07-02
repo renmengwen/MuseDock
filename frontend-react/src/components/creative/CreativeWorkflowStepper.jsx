@@ -30,14 +30,14 @@ export function CreativeWorkflowStepper({ workflow }) {
   const stages = useMemo(() => normalizeWorkflowStages(workflow), [workflow]);
 
   return (
-    <div className="grid w-full min-w-0 grid-cols-10 items-start overflow-x-auto px-1 pb-2 pt-5" aria-label="生成进度">
+    <div className="creativeWorkflowStepper grid w-full min-w-0 grid-cols-10 items-start overflow-x-auto px-1 pb-2 pt-5" aria-label="生成进度">
       {stages.map((stage, index) => {
         const stepState = getStepState(stage, index, stages);
         return (
           <div className="relative grid min-w-[72px] justify-items-center gap-2 text-center" key={stage.id || stage.label}>
             {index > 0 ? (
               <span
-                className={cn('absolute right-[calc(50%+18px)] top-[13px] h-0.5 w-[calc(100%-36px)] rounded-full', CONNECTOR_CLASS[stepState])}
+                className={cn('creativeWorkflowStepConnector absolute right-[calc(50%+18px)] top-[13px] h-0.5 w-[calc(100%-36px)] rounded-full', CONNECTOR_CLASS[stepState])}
                 aria-hidden="true"
               />
             ) : null}

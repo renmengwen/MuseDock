@@ -188,6 +188,7 @@ for (const symbol of [
 }
 
 assert.match(page, /createCreativeWorkflow/, 'OneClickCreativePage should create creative workflows');
+assert.match(page, /sidebarCollapsed \? 'sidebarCollapsed grid-cols-\[76px_minmax\(0,1fr\)\]'/, 'Collapsed sidebar should add the CSS marker expected by creativeChatShell styles');
 assert.match(page, /import\s+\{\s*CreativeTaskDetail\s*\}\s+from\s+['"]\.\.\/components\/creative\/CreativeTaskDetail\.jsx['"]/, 'OneClickCreativePage should import extracted CreativeTaskDetail');
 assert.doesNotMatch(page, /function\s+CreativeTaskDetail\s*\(/, 'OneClickCreativePage should not define CreativeTaskDetail locally');
 assert.doesNotMatch(page, /function\s+CreativeVideoPreview\s*\(/, 'OneClickCreativePage should not define CreativeVideoPreview locally');
@@ -364,7 +365,7 @@ assert.doesNotMatch(page, /<form className="creativePromptComposer"[\s\S]*classN
 assert.match(shell, /Settings2/, 'Settings entry should include a settings icon');
 assert.ok(shell.includes(zh.settings), 'AppShell should render settings text in normal Chinese');
 assert.match(shell, /location\.pathname === '\/settings'/, 'AppShell should detect the settings route');
-assert.match(shell, /navigate\(-1\)/, 'Settings route header action should return to the previous route');
+assert.match(shell, /to="\/creative"/, 'Settings route header action should return to the creative page predictably');
 assert.ok(shell.includes('返回'), 'Settings route header action should render back text in Chinese');
 assert.doesNotMatch(page, /<Bot\s+size=\{15\}/, 'Prompt quick actions should remove the smart video pill in every mode');
 assert.ok(!page.includes('智能成片'), 'Prompt quick actions should not render smart video copy');
