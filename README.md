@@ -1,6 +1,6 @@
-# MuseDock（MediaCrawler-GUI）
+# MuseDock
 
-MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台。仓库名仍保留早期的 `MediaCrawler-GUI`，但当前项目重点已经从“抖音/小红书采集器外壳”转向“一键创作 + HTML 视频工程 + 可视化二次编辑”：把选题输入、公开来源整理、联网研究、来源图片素材、脚本与分镜生成、TTS 配音、HTML 帧工程、布局质检、重新导出和失败恢复放在同一个 Web GUI 里。
+MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台。项目当前重点是“一键创作 + HTML 视频工程 + 可视化二次编辑”：把选题输入、公开来源整理、联网研究、来源图片素材、脚本与分镜生成、TTS 配音、HTML 帧工程、布局质检、重新导出和失败恢复放在同一个 Web GUI 里。
 
 ![MuseDock 一键创作首页](docs/assets/musedock-creative-home.png)
 
