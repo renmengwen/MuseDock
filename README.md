@@ -1,18 +1,18 @@
-# MuseDock
+# MuseDock（MediaCrawler-GUI）
 
-MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台。项目当前方向不是“采集器外壳”，而是把选题输入、公开来源整理、联网研究、脚本与分镜生成、TTS 配音、HTML 视频工程、可视化二次编辑、渲染导出和失败恢复放在同一个 Web GUI 里。
+MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台。仓库名仍保留早期的 `MediaCrawler-GUI`，但当前项目重点已经从“抖音/小红书采集器外壳”转向“一键创作 + HTML 视频工程 + 可视化二次编辑”：把选题输入、公开来源整理、联网研究、来源图片素材、脚本与分镜生成、TTS 配音、HTML 帧工程、布局质检、重新导出和失败恢复放在同一个 Web GUI 里。
 
 ![MuseDock 一键创作首页](docs/assets/musedock-creative-home.png)
 
 ![MuseDock 一键创作任务详情](docs/assets/musedock-creative-detail.png)
 
-## 当前方向
+## 这个项目现在在做什么
 
-- **从输入到成片**：用创作方向、抖音链接、微信公众号文章链接、GitHub 仓库链接或文本素材创建本地短视频任务。
-- **HTML 视频工程优先**：把视频拆成可检查、可重试、可编辑的 `scene_spec`、内容图、HTML 帧、音频、时间轴和导出版本。
-- **可编辑成片**：编辑器支持画布、源码、草稿、布局检查、AI 修改、字段和导出，不再只生成一次性 MP4。
-- **失败可恢复**：工程阶段写入 `generation_checkpoint`，失败后可生成恢复建议，复用已完成产物并从失败子阶段继续。
-- **本地数据沉淀**：任务、素材、配置、HTML 工程、TTS、渲染产物和导出视频默认保存在本地目录。
+- **快速创作闭环**：用创作方向、文本素材、抖音链接、文章链接、微信公众号文章链接或 GitHub 仓库链接创建本地短视频任务。
+- **来源材料可追踪**：链接来源会被整理成 `source_context`，文章/GitHub 图片会尝试下载成 `asset_context`，抖音来源会复用本地视频、音频和关键帧素材。
+- **HTML 视频工程优先**：成片不是一次性黑盒 MP4，而是可检查、可重试、可编辑的 `scene_spec`、内容图、HTML 帧、音频、时间轴、质检结果和导出版本。
+- **任务失败可恢复**：工程阶段写入 `generation_checkpoint`，失败后可生成恢复建议，复用已完成的来源、研究、素材、音频和工程产物，从失败子阶段继续。
+- **本地优先存储**：任务、配置、浏览器数据、媒体素材、TTS、HTML 工程、渲染结果和导出视频默认保存在本地目录。
 
 ## 主要入口
 
@@ -36,6 +36,15 @@ MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台。项目�
 
 专家模式入口已在界面中预留，但当前仍处于开发中，日常使用请先走快速模式。
 
+## 来源素材能力
+
+项目现在有两条不同的素材链路：
+
+- **抖音来源**：准备原视频、本地音频、关键帧和转写上下文，用于后续创作。
+- **文章/GitHub 来源**：从正文或 README 中提取 Markdown 图片，下载到本地 `asset_context`，复制进 html-video 工程，并在任务详情页展示图片分析、下载诊断和最终 HTML 引用情况。
+
+文章/GitHub 图片素材会作为“可用素材”交给 AI 使用，但不会无条件硬塞进每个视频。任务详情页会显示“已用于镜头 / 最终未引用 / 未生成引用报告”，方便判断模型是否真的引用了来源图片。Pexels 补图只作为视觉补充，不应当作来源证据。
+
 ## 编辑器能力
 
 `/editor/:workflowId` 面向 html-video 工程，当前重点是让 AI 生成结果可检查、可修复、可重新导出。
@@ -47,6 +56,14 @@ MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台。项目�
 - **AI 修改**：用自然语言生成帧级或工程级修改草稿。
 - **字段**：编辑模板字段、画面帧、字幕和旁白相关结构化数据。
 - **导出**：重新渲染、导出并下载版本化 MP4。
+
+## 当前边界
+
+- 这个仓库不是通用爬虫控制台；采集能力主要服务于本地短视频创作链路。
+- 专家模式仍在建设，稳定入口是 `/creative` 快速模式。
+- 文章/GitHub 来源当前主要处理正文和图片，不做任意网页截图，也不提取网页里的视频素材。
+- 来源图片会被提取、分析、展示和追踪引用情况，但默认不把“必须使用图片”作为硬性导出门禁。
+- 真实渲染依赖本机 Chromium、`ffmpeg` 和 `ffprobe`，缺失时部分烟测或导出能力会跳过或失败。
 
 ## HTML 视频工程
 
@@ -80,6 +97,7 @@ MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台。项目�
 - 存储：SQLite、better-sqlite3、本地 JSON 文件
 - 视频生产：HTML/CSS/GSAP、Playwright/Chromium、ffmpeg、ffprobe
 - AI：OpenAI-compatible 文本模型、小米 MiMo ASR/TTS 兼容配置
+- 来源素材：文章/GitHub 图片提取、本地素材缓存、可选 Pexels 补图
 
 ## 环境要求
 
@@ -176,6 +194,7 @@ npm run test:filter -- creative-workflows
 | `MIMO_ASR_MODEL` | 小米 MiMo ASR 模型 ID | `mimo-v2.5-asr` |
 | `MIMO_TTS_MODEL` | 小米 MiMo TTS 模型 ID | `mimo-v2.5-tts` |
 | `ASR_LANGUAGE` | MiMo ASR 识别语言，支持 `auto`、`zh`、`en` | `auto` |
+| `PEXELS_API_KEY` / `PEXELS_API_KEYS` | 文章/GitHub 图片不足时的 Pexels 搜图补图 Key | 空 |
 | `FFMPEG_PATH` | 手动指定 ffmpeg 可执行文件路径 | 空 |
 | `FFPROBE_PATH` | 手动指定 ffprobe 可执行文件路径 | 空 |
 | `RUN_HTML_VIDEO_REAL_RENDER` | 设置为 `1` 时运行真实渲染烟测 | 空 |
@@ -241,6 +260,9 @@ node tests/test-html-video-project-schema.js
 node tests/test-html-video-workflow.js
 node tests/test-html-video-canvas-editor-components.mjs
 node tests/test-creative-workflow-retry-e2e.js
+node tests/test-source-assets.js
+node tests/test-source-image-analysis.js
+node tests/test-html-video-asset-usage.js
 ```
 
 真实渲染烟测默认会跳过。需要本机已安装 Playwright Chromium、ffmpeg 和 ffprobe，然后显式开启：
