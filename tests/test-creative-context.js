@@ -65,7 +65,7 @@ function testNormalizesDouyinVideoUrl() {
 
   assert.equal(result.success, true);
   assert.equal(result.data.mode, 'douyin');
-  assert.equal(result.data.raw_text, '');
+  assert.equal(result.data.raw_text, url);
   assert.equal(result.data.aweme_id, '7345678901234567890');
   assert.equal(result.data.douyin_url, url);
   assert.equal(result.data.use_research, true);
@@ -109,6 +109,7 @@ function testNormalizesDouyinId() {
 
   assert.equal(result.success, true);
   assert.equal(result.data.mode, 'douyin');
+  assert.equal(result.data.raw_text, '7345678901234567890');
   assert.equal(result.data.aweme_id, '7345678901234567890');
   assert.equal(result.data.douyin_url, '');
 }

@@ -224,7 +224,7 @@ assert.match(page, /onStopAndDelete=\{stopAndDeleteTask\}/, 'Creative task detai
 assert.match(page, /getWorkflowVideoUrl=\{getWorkflowVideoUrl\}/, 'Creative task detail should receive the workflow video URL resolver');
 assert.match(creativeTaskDetail, /onStopAndDelete\(workflowId\)/, 'Creative task detail stop button should delete the currently opened task');
 assert.match(creativeTaskDetail, /disabled=\{deletingWorkflowId === workflowId\}/, 'Current task stop-and-delete button should be disabled while deleting');
-assert.match(creativeTaskDetail, /const\s+promptText\s*=\s*workflow\?\.creative_context\?\.input\?\.raw_text/, 'Creative task detail should read the original user prompt from workflow.creative_context.input.raw_text');
+assert.match(creativeTaskDetail, /const\s+promptText\s*=\s*\(promptInput\.raw_text\s*\|\|\s*promptInput\.douyin_url/, 'Creative task detail should show the original prompt and fall back to stored source URLs');
 assert.match(creativeTaskDetail, /function\s+getWorkflowTitleInfo\(workflow\)/, 'Creative task detail should derive generated title data from the workflow scene spec');
 assert.match(creativeTaskDetail, /title_candidates/, 'Creative task detail should read generated title candidates');
 assert.match(creativeTaskDetail, /<CreativeTitlePanel workflow=\{workflow\} \/>[\s\S]*<CreativeWorkflowStepper workflow=\{workflow\} \/>/, 'Generated video titles should sit between the task meta row and workflow stepper');

@@ -1459,6 +1459,8 @@
 
       const facade = options.creativeVideoWorkflowFacade || defaultCreativeVideoWorkflowFacade;
 
+      const workflowId = String(options.workflowId || awemeId);
+
       let result;
 
       const optionCreativeContext = options.projectOptions?.creative_context
@@ -1475,7 +1477,7 @@
 
         result = await facade.generateCreativeVideoProject({
 
-          workflowId: String(awemeId),
+          workflowId,
 
           runId: String(runId),
 
@@ -1560,7 +1562,7 @@
 
       const outputUrl = latestExport?.id
 
-        ? buildHtmlVideoExportFileUrl(awemeId, latestExport.id)
+        ? buildHtmlVideoExportFileUrl(workflowId, latestExport.id)
 
         : defaultHyperframesFreeformProject.buildFreeformFileUrl(awemeId, runId, 'output.mp4');
 

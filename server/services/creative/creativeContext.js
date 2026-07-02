@@ -269,6 +269,7 @@ function normalizeCreativeInput(payload = {}) {
   if (awemeId) {
     return createSuccessResponse({
       mode: 'douyin',
+      raw_text: input,
       aweme_id: awemeId,
       douyin_url: /^https?:\/\//i.test(input) ? input : '',
       use_research: useResearch,
@@ -332,6 +333,7 @@ async function normalizeCreativeInputWithDouyinShortLink(payload = {}, options =
       if (awemeId) {
         return createSuccessResponse({
           mode: 'douyin',
+          raw_text: safeString(payload.input),
           aweme_id: awemeId,
           douyin_url: resolvedUrl || shortLink,
           use_research: payload.useResearch === true,

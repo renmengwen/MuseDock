@@ -31,6 +31,7 @@ async function run() {
     generateCaptions: true,
     emotionalVoice: false,
     sourceImageAnalysisEnabled: false,
+    extractDouyinFrames: false,
     frameHtmlConcurrency: 1,
   });
   assert.strictEqual(defaults.creativeDefaults.templateByAspectRatio['9:16'], 'news_signal_vertical');
@@ -56,6 +57,7 @@ async function run() {
       generateCaptions: false,
       emotionalVoice: true,
       sourceImageAnalysisEnabled: true,
+      extractDouyinFrames: true,
       frameHtmlConcurrency: 99,
     },
     system: {
@@ -80,6 +82,7 @@ async function run() {
     generateCaptions: false,
     emotionalVoice: true,
     sourceImageAnalysisEnabled: true,
+    extractDouyinFrames: true,
     frameHtmlConcurrency: 5,
   });
   assert.deepStrictEqual(saved.system, { skipValidation: true, pexelsApiKey: 'pexels-test-key' });
@@ -130,12 +133,15 @@ async function run() {
   assert.equal(appSettings.normalizeCreativeDefaults({}).generateCaptions, true);
   assert.equal(appSettings.normalizeCreativeDefaults({}).emotionalVoice, false);
   assert.equal(appSettings.normalizeCreativeDefaults({}).sourceImageAnalysisEnabled, false);
+  assert.equal(appSettings.normalizeCreativeDefaults({}).extractDouyinFrames, false);
   assert.equal(appSettings.normalizeCreativeDefaults({}).frameHtmlConcurrency, 1);
   assert.equal(appSettings.normalizeCreativeDefaults({ generateAudio: false }).generateAudio, false);
   assert.equal(appSettings.normalizeCreativeDefaults({ generateCaptions: false }).generateCaptions, false);
   assert.equal(appSettings.normalizeCreativeDefaults({ emotionalVoice: true }).emotionalVoice, true);
   assert.equal(appSettings.normalizeCreativeDefaults({ sourceImageAnalysisEnabled: true }).sourceImageAnalysisEnabled, true);
   assert.equal(appSettings.normalizeCreativeDefaults({ sourceImageAnalysisEnabled: 'true' }).sourceImageAnalysisEnabled, false);
+  assert.equal(appSettings.normalizeCreativeDefaults({ extractDouyinFrames: true }).extractDouyinFrames, true);
+  assert.equal(appSettings.normalizeCreativeDefaults({ extractDouyinFrames: 'true' }).extractDouyinFrames, false);
   assert.equal(appSettings.normalizeCreativeDefaults({ frameHtmlConcurrency: 0 }).frameHtmlConcurrency, 1);
   assert.equal(appSettings.normalizeCreativeDefaults({ frameHtmlConcurrency: 3.6 }).frameHtmlConcurrency, 4);
   assert.equal(appSettings.normalizeCreativeDefaults({ frameHtmlConcurrency: 9 }).frameHtmlConcurrency, 5);

@@ -19,6 +19,7 @@ const DEFAULT_CREATIVE_DEFAULTS = {
   generateCaptions: true,
   emotionalVoice: false,
   sourceImageAnalysisEnabled: false,
+  extractDouyinFrames: false,
   frameHtmlConcurrency: 1,
 };
 
@@ -302,6 +303,16 @@ export function CreativeDefaultsSettings({
             <p className="mt-2 whitespace-normal text-xs font-semibold leading-relaxed text-[#b45309]" role="status">{sourceImageAnalysisWarning}</p>
           ) : null}
         </div>
+
+        <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
+          <Switch
+            checked={creativeDefaults.extractDouyinFrames === true}
+            disabled={disabled}
+            onChange={event => updateCreativeDefaults({ extractDouyinFrames: event.target.checked })}
+          />
+          <span className={cn('min-w-[42px]', creativeDefaults.extractDouyinFrames ? 'text-[#111827]' : 'text-[#69717e]')}>{creativeDefaults.extractDouyinFrames ? '已开启' : '已关闭'}</span>
+          <span>抖音视频抽帧</span>
+        </label>
 
         <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
           <Switch

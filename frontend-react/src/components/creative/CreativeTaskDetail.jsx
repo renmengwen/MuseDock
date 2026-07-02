@@ -468,7 +468,8 @@ export function CreativeTaskDetail({
 
   const videoUrl = getWorkflowVideoUrl?.(workflow) || '';
   const canStopAndDelete = workflowId && workflow?.status !== 'done';
-  const promptText = workflow?.creative_context?.input?.raw_text?.trim() || '';
+  const promptInput = workflow?.creative_context?.input || {};
+  const promptText = (promptInput.raw_text || promptInput.douyin_url || promptInput.source_url || promptInput.aweme_id || '').trim();
   const editableWorkflowId = workflowId || workflow?.workflow_id || workflow?.id || '';
 
   async function copyPrompt() {

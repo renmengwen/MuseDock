@@ -101,6 +101,7 @@ function createFakeServices(overrides = {}) {
           generateAudio: true,
           generateCaptions: true,
           sourceImageAnalysisEnabled: false,
+          extractDouyinFrames: false,
         }),
         getEffectiveSystemSettings: async () => ({ skipValidation: false }),
       },
@@ -148,6 +149,7 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.equal(calls[1].options.briefOptions.creative_context.input.mode, 'text');
   assert.equal(calls[3].options.projectOptions.creative_context.asset_context.status, 'empty');
   assert.equal(calls[3].options.useHtmlVideoLiteWorkflow, true);
+  assert.equal(calls[3].options.workflowId, WORKFLOW_ID);
   assert.equal(calls[0].options.rootDir, mediaRoot);
 
   const mediaPaths = mediaPipeline.getMediaPaths(created.aweme_id, mediaRoot);
@@ -186,6 +188,7 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
           generateAudio: true,
           generateCaptions: true,
           sourceImageAnalysisEnabled: false,
+          extractDouyinFrames: false,
         }),
         getEffectiveSystemSettings: async () => ({ skipValidation: false, pexelsApiKey }),
         getPexelsApiKey: async () => pexelsApiKey,
@@ -1443,7 +1446,7 @@ async function testPreparesDouyinSourceBeforeAgentRun() {
           return { success: true, exists: false, metadata: null, analysis_input: null };
         },
         prepareDouyinMedia: async (awemeId, metadata, options) => {
-          events.push(['prepareMedia', awemeId, options.rootDir, metadata.aweme_id]);
+          events.push(['prepareMedia', awemeId, options.rootDir, metadata.aweme_id, options.extractFrames]);
           prepared = true;
           return {
             success: true,
@@ -1479,6 +1482,26 @@ async function testPreparesDouyinSourceBeforeAgentRun() {
           },
         };
       },
+      sourceAssets: {
+        prepareSourceAssets: async ({ sourceMaterial, deps }) => {
+          events.push(['sourceAssets', sourceMaterial.kind, sourceMaterial.title, deps.pexelsApiKey || '']);
+          return {
+            status: 'ready',
+            summary: '已准备 1 张图片素材。',
+            diagnostics: [],
+            assets: [{
+              id: 'search_01',
+              type: 'image',
+              source: 'search',
+              url: 'https://images.pexels.test/tesla.jpg',
+              path: 'assets/search-image-01.jpg',
+              local_path: path.join(mediaRoot, 'search-image-01.jpg'),
+              alt: sourceMaterial.title,
+              mime: 'image/jpeg',
+            }],
+          };
+        },
+      },
     },
   });
 
@@ -1492,13 +1515,15 @@ async function testPreparesDouyinSourceBeforeAgentRun() {
   assert.deepEqual(events.slice(0, 5), [
     ['getStatus', '7345678901234567890', mediaRoot],
     ['getVideoDetail', '7345678901234567890'],
-    ['prepareMedia', '7345678901234567890', mediaRoot, '7345678901234567890'],
+    ['prepareMedia', '7345678901234567890', mediaRoot, '7345678901234567890', false],
     ['getStatus', '7345678901234567890', mediaRoot],
-    ['createRun', '7345678901234567890', mediaRoot],
+    ['sourceAssets', 'douyin_video', 'Douyin source title', ''],
   ]);
+  assert.deepEqual(events[5], ['createRun', '7345678901234567890', mediaRoot]);
   assert.equal(run.creative_context.source_context.status, 'ready');
   assert.equal(run.creative_context.source_context.summary, 'Douyin source title');
   assert.equal(run.creative_context.source_context.douyin_metadata.title, 'Douyin source title');
+  assert.equal(run.asset_context.assets[0].source, 'search');
 }
 
 async function testDouyinSourceFetchesCommentsAndRunsAsrBeforeAgentRun() {

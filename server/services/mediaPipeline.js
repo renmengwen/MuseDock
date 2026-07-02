@@ -544,8 +544,8 @@ async function listFrameAssets(framesDir, awemeId = '') {
   return frames;
 }
 
-async function buildAnalysisInput(awemeId, paths, metadata, steps) {
-  const frames = await listFramePaths(paths.framesDir);
+async function buildAnalysisInput(awemeId, paths, metadata, steps, options = {}) {
+  const frames = options.includeFrames === false ? [] : await listFramePaths(paths.framesDir);
   const transcript = await readJsonIfExists(paths.transcript);
   const transcriptStep = transcript
     ? { status: transcript.status || (transcript.success ? 'done' : 'failed'), path: paths.transcript, message: transcript.message || '' }
@@ -589,6 +589,7 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
   await writeJson(paths.metadata, metadata);
   onProgress({ progress: 18, step: 'metadata', message: '正在写入视频元数据...' });
   const force = !!options.force;
+  const shouldExtractFrames = options.extractFrames !== false;
 
   const steps = {
     metadata: { status: 'done', path: paths.metadata },
@@ -616,7 +617,7 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
   steps.ffmpeg = ffmpeg.available
     ? { status: 'available' }
     : { status: 'unavailable', error: ffmpeg.error };
-  onProgress({ progress: 48, step: 'ffmpeg', message: ffmpeg.available ? 'ffmpeg 可用，正在处理音频和关键帧...' : 'ffmpeg 不可用，正在检查可复用缓存...' });
+  onProgress({ progress: 48, step: 'ffmpeg', message: ffmpeg.available ? (shouldExtractFrames ? 'ffmpeg 可用，正在处理音频和关键帧...' : 'ffmpeg 可用，正在处理音频...') : 'ffmpeg 不可用，正在检查可复用缓存...' });
 
   const hasVideo = await fileExists(paths.video);
   const hasAudio = await fileExists(paths.audio);
@@ -626,7 +627,7 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
     steps.frames = { status: 'skipped', message: 'video.mp4 is not available' };
   } else {
     const canUseCachedAudio = !force && hasAudio;
-    const canUseCachedFrames = !force && existingFrames.length > 0;
+    const canUseCachedFrames = shouldExtractFrames && !force && existingFrames.length > 0;
 
     steps.audio = canUseCachedAudio ? { status: 'exists', path: paths.audio } : steps.audio;
     steps.frames = canUseCachedFrames
@@ -635,17 +636,25 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
 
     if (!ffmpeg.available) {
       if (!canUseCachedAudio) steps.audio = { status: 'skipped', message: 'ffmpeg is not available' };
-      if (!canUseCachedFrames) steps.frames = { status: 'skipped', message: 'ffmpeg is not available' };
+      if (!canUseCachedFrames) {
+        steps.frames = shouldExtractFrames
+          ? { status: 'skipped', message: 'ffmpeg is not available' }
+          : { status: 'skipped', message: '抖音视频抽帧已关闭。' };
+      }
     } else {
       onProgress({ progress: 62, step: 'audio', message: '正在抽取音频...' });
       if (!canUseCachedAudio) steps.audio = await extractAudio(paths.video, paths.audio, options);
-      onProgress({ progress: 78, step: 'frames', message: '正在抽取关键帧...' });
-      if (!canUseCachedFrames) steps.frames = await extractFrames(paths.video, paths.framesDir, options);
+      if (shouldExtractFrames) {
+        onProgress({ progress: 78, step: 'frames', message: '正在抽取关键帧...' });
+        if (!canUseCachedFrames) steps.frames = await extractFrames(paths.video, paths.framesDir, options);
+      } else {
+        steps.frames = { status: 'skipped', message: '抖音视频抽帧已关闭。' };
+      }
     }
   }
 
   onProgress({ progress: 92, step: 'analysis_input', message: '正在生成 AI 分析输入...' });
-  const analysisInput = await buildAnalysisInput(awemeId, paths, metadata, steps);
+  const analysisInput = await buildAnalysisInput(awemeId, paths, metadata, steps, { includeFrames: shouldExtractFrames });
   await writeJson(paths.analysisInput, analysisInput);
   return {
     success: true,

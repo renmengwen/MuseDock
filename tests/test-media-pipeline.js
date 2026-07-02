@@ -289,6 +289,20 @@ async function run() {
   assert.strictEqual(preparedAgain.steps.transcript.status, 'done');
   assert.strictEqual(preparedAgain.analysis_input.steps.transcript.status, 'done');
   assert.strictEqual(preparedAgain.analysis_input.transcript.status, 'done');
+
+  const withoutFrames = await mediaPipeline.prepareDouyinMedia('1234567890', {
+    aweme_id: '1234567890',
+    title: 'A test video',
+    aweme_url: 'https://www.douyin.com/video/1234567890',
+    video_download_url: '',
+  }, {
+    rootDir,
+    ffmpegAvailable: false,
+    extractFrames: false,
+  });
+  assert.strictEqual(withoutFrames.steps.frames.status, 'skipped');
+  assert.strictEqual(withoutFrames.steps.frames.message, '抖音视频抽帧已关闭。');
+  assert.deepStrictEqual(withoutFrames.analysis_input.local_assets.frames, []);
 }
 
 run().then(() => {

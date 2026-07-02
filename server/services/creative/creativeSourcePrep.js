@@ -705,6 +705,7 @@ async function prepareDouyinSource(record, mediaRoot, now, services = {}, report
   const prepared = await pipeline.prepareDouyinMedia(awemeId, metadata, {
     rootDir: mediaRoot,
     force: false,
+    extractFrames: record.creative_defaults_snapshot?.extractDouyinFrames === true,
   });
   if (!prepared || prepared.success === false) {
     return {
@@ -757,8 +758,20 @@ async function prepareSource(record, mediaRoot, now, services = {}, reportStage 
 
 function buildSourceMaterialForAssets(record = {}) {
   const input = record.creative_context?.input || record.input || {};
-  if (input.mode === 'douyin') return null;
   const sourceContext = record.creative_context?.source_context || record.source_context || {};
+  if (input.mode === 'douyin') {
+    const metadata = sourceContext.douyin_metadata || {};
+    const title = safeString(sourceContext.title || metadata.title || sourceContext.summary || input.raw_text || input.aweme_id);
+    const description = safeString(metadata.description || sourceContext.summary || title);
+    return title || description ? {
+      kind: 'douyin_video',
+      url: safeString(metadata.aweme_url || metadata.douyin_url || input.douyin_url),
+      title,
+      description,
+      markdown: '',
+      metadata,
+    } : null;
+  }
   if (input.mode === 'text') {
     const rawText = safeString(input.raw_text);
     return rawText ? {
@@ -876,26 +889,6 @@ async function resolvePexelsApiKey(services = {}) {
 }
 
 async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, reportStage = null) {
-  const inputMode = record.creative_context?.input?.mode || record.input?.mode || '';
-  if (inputMode === 'douyin') {
-    const assetContext = await applySourceImageAnalysis(
-      creativeContext.createDisabledAssetContext({ now }),
-      record,
-      services,
-    );
-    record.asset_context = assetContext;
-    record.creative_context = {
-      ...(record.creative_context || {}),
-      asset_context: assetContext,
-    };
-    return {
-      success: true,
-      skipped: true,
-      message: '抖音来源已使用原视频素材，跳过图片补图。',
-      asset_context: assetContext,
-    };
-  }
-
   const sourceMaterial = buildSourceMaterialForAssets(record);
   if (!sourceMaterial?.markdown && !sourceMaterial?.title && !sourceMaterial?.description) {
     const assetContext = await applySourceImageAnalysis({

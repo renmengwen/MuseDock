@@ -91,6 +91,7 @@ const agentRuns = require('../server/services/agent/agentRuns');
   }, null, 2));
 
   const successResult = await agentRuns.generateDouyinRunHyperframesFreeformProject(awemeId, successRunId, {
+    workflowId: 'workflow-success-01',
     rootDir,
     creativeVideoWorkflowFacade: {
       generateCreativeVideoProject: async () => ({
@@ -118,7 +119,7 @@ const agentRuns = require('../server/services/agent/agentRuns');
   const successPersisted = JSON.parse(fs.readFileSync(path.join(runDir, `${successRunId}.json`), 'utf8'));
   assert.equal(
     successPersisted.hyperframes_freeform.render.output_url,
-    `/api/creative-workflows/${encodeURIComponent(awemeId)}/html-video-project/exports/${encodeURIComponent('export-success-01')}/file`,
+    `/api/creative-workflows/${encodeURIComponent('workflow-success-01')}/html-video-project/exports/${encodeURIComponent('export-success-01')}/file`,
   );
   assert.equal(successResult.hyperframes_freeform.project.asset_usage_report.used_asset_ids[0], 'article_01');
   assert.equal(successPersisted.hyperframes_freeform.project.asset_usage_report.used_asset_ids[0], 'article_01');

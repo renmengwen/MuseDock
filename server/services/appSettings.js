@@ -26,6 +26,7 @@ const DEFAULT_CONFIG = {
     generateCaptions: true,
     emotionalVoice: false,
     sourceImageAnalysisEnabled: false,
+    extractDouyinFrames: false,
     frameHtmlConcurrency: 1,
   },
   system: {
@@ -84,6 +85,7 @@ function normalizeCreativeDefaults(input = {}) {
       : DEFAULT_CONFIG.creativeDefaults.generateCaptions,
     emotionalVoice: source.emotionalVoice === true,
     sourceImageAnalysisEnabled: source.sourceImageAnalysisEnabled === true,
+    extractDouyinFrames: source.extractDouyinFrames === true,
     frameHtmlConcurrency: normalizeSmallInteger(
       source.frameHtmlConcurrency,
       DEFAULT_CONFIG.creativeDefaults.frameHtmlConcurrency,

@@ -625,6 +625,9 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
     sourceImageAnalysisEnabled: typeof overrideSource.sourceImageAnalysisEnabled === 'boolean'
       ? overrideSource.sourceImageAnalysisEnabled
       : defaultsSource.sourceImageAnalysisEnabled === true,
+    extractDouyinFrames: typeof overrideSource.extractDouyinFrames === 'boolean'
+      ? overrideSource.extractDouyinFrames
+      : defaultsSource.extractDouyinFrames === true,
     frameHtmlConcurrency: Number.isFinite(frameHtmlConcurrency)
       ? Math.min(5, Math.max(1, Math.round(frameHtmlConcurrency)))
       : 1,
@@ -664,6 +667,7 @@ function buildWorkflowTarget(snapshot = {}) {
     generateAudio: snapshot.generateAudio !== false,
     generateCaptions: snapshot.generateCaptions !== false,
     emotionalVoice: snapshot.emotionalVoice === true,
+    extractDouyinFrames: snapshot.extractDouyinFrames === true,
     frameHtmlConcurrency: Number.isFinite(Number(snapshot.frameHtmlConcurrency))
       ? Math.min(5, Math.max(1, Math.round(Number(snapshot.frameHtmlConcurrency))))
       : 1,
@@ -1386,6 +1390,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
 
   const projectStageResult = await runStage(record, 'project', rootDir, async () => ensureSuccess(
     await services.agentRuns.generateDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
+      workflowId: record.workflow_id,
       rootDir: mediaRoot,
       useHtmlVideoLiteWorkflow: true,
       skipValidation,
