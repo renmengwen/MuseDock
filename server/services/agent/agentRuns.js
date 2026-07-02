@@ -614,6 +614,22 @@ async function createDouyinHyperframesFreeformRun(awemeId, options = {}) {
     transcript?.text ? '' : '未找到转写文本，导演策划会仅基于素材上下文生成。',
   ));
 
+  const getLocalComments = options.getLocalComments || defaultGetLocalComments;
+  let commentsResult;
+  try {
+    commentsResult = await getLocalComments(awemeId, { max: 50, maxReplies: 5 });
+  } catch (error) {
+    commentsResult = { success: false, count: 0, data: [], message: error.message };
+  }
+  const comments = Array.isArray(commentsResult?.data) ? commentsResult.data : [];
+  const commentsText = summarizeComments(comments);
+  steps.push(makeStep(
+    'comments',
+    '读取本地评论缓存',
+    'done',
+    comments.length > 0 ? `已读取本地评论缓存 ${comments.length} 条` : '暂无本地评论缓存',
+  ));
+
   const now = new Date().toISOString();
   const run = {
     success: true,
@@ -622,10 +638,11 @@ async function createDouyinHyperframesFreeformRun(awemeId, options = {}) {
     aweme_id: String(awemeId),
     status: 'ready',
     steps,
-    input_summary: createInputSummary({ analysisInput, transcript, comments: [] }),
+    input_summary: createInputSummary({ analysisInput, transcript, comments }),
     result: {
       summary: '',
       rewrite_script: transcript?.text || '',
+      comments_text: commentsText,
       video_brief: {
         title: analysisInput?.video?.title || '',
         target_duration_sec: 60,

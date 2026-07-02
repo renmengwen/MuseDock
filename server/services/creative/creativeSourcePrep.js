@@ -469,6 +469,152 @@ function resolveDouyinDetailGetter(services = {}) {
   return require('../../scraper/douyin').getVideoDetail;
 }
 
+function resolveDouyinCommentsGetter(services = {}, pipeline = mediaPipeline) {
+  if (typeof services.getComments === 'function') {
+    return services.getComments;
+  }
+  if (typeof services.douyinCommentService?.getComments === 'function') {
+    return services.douyinCommentService.getComments.bind(services.douyinCommentService);
+  }
+  return pipeline === mediaPipeline ? require('../../scraper/douyin').getComments : null;
+}
+
+function getDouyinStore(services = {}) {
+  return {
+    getLocalDouyinComments: services.getLocalDouyinComments || require('../douyinStore').getLocalDouyinComments,
+    saveDouyinComments: services.saveDouyinComments || require('../douyinStore').saveDouyinComments,
+  };
+}
+
+function summarizeCommentFetch(result = {}) {
+  const count = Array.isArray(result.data) ? result.data.length : Number(result.count || 0);
+  if (result.needLogin) {
+    return { status: 'need_login', count: 0, message: '需要先登录抖音后才能获取评论。' };
+  }
+  if (result.needVerify) {
+    return { status: 'need_verify', count: 0, message: '抖音需要完成验证后才能获取评论。' };
+  }
+  if (result.success === false) {
+    return { status: 'failed', count: 0, message: safeString(result.message || result.error) || '评论获取失败。' };
+  }
+  return {
+    status: count > 0 ? 'done' : 'empty',
+    count,
+    message: count > 0 ? `已获取并缓存 ${count} 条评论。` : '暂无可用评论。',
+  };
+}
+
+async function patchDouyinAnalysisInput(awemeId, mediaRoot, patch = {}, now) {
+  const paths = mediaPipeline.getMediaPaths(awemeId, mediaRoot);
+  let analysisInput;
+  try {
+    analysisInput = await readJson(paths.analysisInput);
+  } catch {
+    return null;
+  }
+
+  const next = {
+    ...analysisInput,
+    steps: { ...(analysisInput.steps || {}) },
+    updated_at: now,
+  };
+  if (patch.comments) {
+    next.comments_summary = patch.comments;
+    next.steps.comments = {
+      status: patch.comments.status,
+      count: patch.comments.count || 0,
+      message: patch.comments.message || '',
+    };
+  }
+
+  try {
+    const transcript = await readJson(paths.transcript);
+    const status = transcript.status || (transcript.success ? 'done' : 'failed');
+    next.transcript = { status, path: paths.transcript, message: transcript.message || '' };
+    next.steps.transcript = next.transcript;
+  } catch {
+    if (patch.transcript) {
+      const status = patch.transcript.status || (patch.transcript.success ? 'done' : 'failed');
+      next.transcript = { status, path: '', message: patch.transcript.message || '' };
+      next.steps.transcript = next.transcript;
+    }
+  }
+
+  await writeJson(paths.analysisInput, next);
+  return next;
+}
+
+async function prepareDouyinCommentsAndTranscript(record, mediaRoot, now, services = {}, reportStage = null) {
+  const awemeId = safeString(record.aweme_id);
+  const pipeline = services.mediaPipeline || mediaPipeline;
+  const result = {};
+  const canUseCommentStore = pipeline === mediaPipeline
+    || typeof services.getLocalDouyinComments === 'function'
+    || typeof services.saveDouyinComments === 'function';
+  const store = canUseCommentStore ? getDouyinStore(services) : null;
+
+  let localComments = { count: 0, data: [] };
+  if (store) {
+    try {
+      localComments = await store.getLocalDouyinComments(awemeId, { max: 50, maxReplies: 5 });
+    } catch {
+      localComments = { count: 0, data: [] };
+    }
+  }
+
+  if (Array.isArray(localComments.data) && localComments.data.length > 0) {
+    result.comments = {
+      status: 'done',
+      count: localComments.data.length,
+      message: `已复用本地评论缓存 ${localComments.data.length} 条。`,
+    };
+  } else {
+    const getComments = resolveDouyinCommentsGetter(services, pipeline);
+    if (getComments) {
+      if (typeof reportStage === 'function') await reportStage('正在抓取评论和二级评论...', 70);
+      let fetched;
+      try {
+        fetched = await getComments(awemeId, { max: 50, maxReplies: 5, includeReplies: true });
+      } catch (error) {
+        fetched = { success: false, error: error.message, data: [], count: 0 };
+      }
+      result.comments = summarizeCommentFetch(fetched);
+      if (store && fetched?.success !== false && Array.isArray(fetched.data) && fetched.data.length > 0) {
+        try {
+          await store.saveDouyinComments(awemeId, fetched.data);
+        } catch (error) {
+          result.comments = { status: 'failed', count: 0, message: `评论缓存写入失败：${error.message}` };
+        }
+      }
+    } else {
+      result.comments = { status: 'skipped', count: 0, message: '当前环境未接入评论抓取服务。' };
+    }
+  }
+
+  const paths = mediaPipeline.getMediaPaths(awemeId, mediaRoot);
+  let transcript = null;
+  try {
+    transcript = await readJson(paths.transcript);
+  } catch {
+    transcript = null;
+  }
+  if (transcript?.text) {
+    result.transcript = { status: 'done', message: '已复用本地 ASR 转写。' };
+  } else if (typeof pipeline.transcribeAudio === 'function') {
+    if (typeof reportStage === 'function') await reportStage('正在请求音频转写...', 82);
+    try {
+      result.transcript = await pipeline.transcribeAudio(awemeId, { rootDir: mediaRoot });
+    } catch (error) {
+      result.transcript = { success: false, status: 'failed', message: `ASR 转写失败：${error.message || '未知错误'}` };
+    }
+  } else {
+    result.transcript = { status: 'skipped', message: '当前素材管线未接入 ASR 转写。' };
+  }
+
+  result.analysis_input = await patchDouyinAnalysisInput(awemeId, mediaRoot, result, now);
+  return result;
+}
+
 function updatePreparedDouyinSourceContext(record, metadata = {}, result = {}, now) {
   const analysisInput = result.analysis_input || {};
   const video = analysisInput.video || {};
@@ -480,8 +626,8 @@ function updatePreparedDouyinSourceContext(record, metadata = {}, result = {}, n
     status: 'ready',
     kind: 'douyin',
     summary: title || description || `抖音视频 ${record.aweme_id}`,
-    transcript: safeString(record.creative_context?.source_context?.transcript),
-    comments_summary: safeString(record.creative_context?.source_context?.comments_summary),
+    transcript: safeString(result.transcript?.text || record.creative_context?.source_context?.transcript),
+    comments_summary: safeString(result.comments?.message || record.creative_context?.source_context?.comments_summary),
     douyin_metadata: {
       ...(record.creative_context?.source_context?.douyin_metadata || {}),
       ...metadata,
@@ -495,6 +641,8 @@ function updatePreparedDouyinSourceContext(record, metadata = {}, result = {}, n
       prepared_at: now,
       cache: result.cache || null,
       steps: result.steps || {},
+      comments: result.comments || null,
+      transcript: result.transcript || null,
     },
   };
 
@@ -506,21 +654,26 @@ function updatePreparedDouyinSourceContext(record, metadata = {}, result = {}, n
   return sourceContext;
 }
 
-async function prepareDouyinSource(record, mediaRoot, now, services = {}) {
+async function prepareDouyinSource(record, mediaRoot, now, services = {}, reportStage = null) {
   const pipeline = services.mediaPipeline || mediaPipeline;
   const awemeId = safeString(record.aweme_id);
   const status = await pipeline.getStatus(awemeId, { rootDir: mediaRoot });
 
   if (hasReusableDouyinSource(status)) {
+    const auxiliary = await prepareDouyinCommentsAndTranscript(record, mediaRoot, now, services, reportStage);
     updatePreparedDouyinSourceContext(record, status.metadata || {}, {
-      analysis_input: status.analysis_input,
+      analysis_input: auxiliary.analysis_input || status.analysis_input,
       cache: { metadata: 'local', force: false },
       steps: status.steps || {},
+      comments: auxiliary.comments,
+      transcript: auxiliary.transcript,
     }, now);
     return {
       success: true,
       message: '已复用本地抖音素材。',
       status,
+      comments: auxiliary.comments,
+      transcript: auxiliary.transcript,
     };
   }
 
@@ -571,9 +724,13 @@ async function prepareDouyinSource(record, mediaRoot, now, services = {}) {
     };
   }
 
+  const auxiliary = await prepareDouyinCommentsAndTranscript(record, mediaRoot, now, services, reportStage);
   updatePreparedDouyinSourceContext(record, preparedStatus.metadata || metadata, {
     ...preparedStatus,
+    analysis_input: auxiliary.analysis_input || preparedStatus.analysis_input,
     cache: prepared.cache || { metadata: detail ? 'remote' : 'local', force: false },
+    comments: auxiliary.comments,
+    transcript: auxiliary.transcript,
   }, now);
   return {
     ...prepared,
@@ -581,6 +738,8 @@ async function prepareDouyinSource(record, mediaRoot, now, services = {}) {
     message: detail ? '抖音来源资料已获取并准备完成。' : '已复用本地抖音元数据并准备素材。',
     detail_diagnostic: detail?.diagnostic,
     elapsed: detail?.elapsed,
+    comments: auxiliary.comments,
+    transcript: auxiliary.transcript,
   };
 }
 
@@ -593,7 +752,7 @@ async function prepareSource(record, mediaRoot, now, services = {}, reportStage 
     return prepareSourceUrl(record, mediaRoot, now, services, reportStage);
   }
 
-  return prepareDouyinSource(record, mediaRoot, now, services);
+  return prepareDouyinSource(record, mediaRoot, now, services, reportStage);
 }
 
 function buildSourceMaterialForAssets(record = {}) {

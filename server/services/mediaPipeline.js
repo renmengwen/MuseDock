@@ -790,6 +790,26 @@ function resolveFrameFile(awemeId, frameName, options = {}) {
   return targetPath;
 }
 
+async function updateAnalysisInputTranscript(paths, transcriptResult = {}) {
+  const analysisInput = await readJsonIfExists(paths.analysisInput);
+  if (!analysisInput) return;
+  const status = transcriptResult.status || (transcriptResult.success ? 'done' : 'failed');
+  const step = {
+    status,
+    path: await fileExists(paths.transcript) ? paths.transcript : '',
+    message: transcriptResult.message || '',
+  };
+  await writeJson(paths.analysisInput, {
+    ...analysisInput,
+    transcript: step,
+    steps: {
+      ...(analysisInput.steps || {}),
+      transcript: step,
+    },
+    updated_at: new Date().toISOString(),
+  });
+}
+
 async function transcribeAudio(awemeId, options = {}) {
   const paths = getMediaPaths(awemeId, options.rootDir);
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
@@ -799,6 +819,7 @@ async function transcribeAudio(awemeId, options = {}) {
     const result = {
       success: false,
       configured: false,
+      status: 'not_configured',
       aweme_id: String(awemeId),
       message: '音频转写未配置。请设置 OPENAI_API_KEY 或 ASR_API_KEY 后再启用 ASR。',
       transcript_path: paths.transcript,
@@ -808,17 +829,21 @@ async function transcribeAudio(awemeId, options = {}) {
       status: 'not_configured',
       updated_at: new Date().toISOString(),
     });
+    await updateAnalysisInputTranscript(paths, result);
     return result;
   }
 
   if (!(await fileExists(paths.audio))) {
-    return {
+    const result = {
       success: false,
       configured: true,
+      status: 'missing_audio',
       aweme_id: String(awemeId),
       message: 'audio.mp3 不存在，请先准备素材。',
       transcript_path: paths.transcript,
     };
+    await updateAnalysisInputTranscript(paths, result);
+    return result;
   }
 
   if (asrConfig.provider === 'mimo') {
@@ -838,15 +863,18 @@ async function transcribeAudio(awemeId, options = {}) {
     onProgress({ progress: 88, step: 'save', message: '正在保存转写结果...' });
     await writeJson(paths.transcript, {
       ...result,
+      status: result.status || (result.success ? 'done' : 'failed'),
       audio_path: paths.audio,
       updated_at: new Date().toISOString(),
     });
+    await updateAnalysisInputTranscript(paths, result);
     return result;
   }
 
   const result = {
     success: false,
     configured: true,
+    status: 'provider_not_implemented',
     aweme_id: String(awemeId),
     message: 'ASR 服务已配置，但当前只实现了 MiMo ASR。请将 ASR_PROVIDER 设置为 mimo，或在设置页将供应商配置为 mimo。',
     transcript_path: paths.transcript,
@@ -857,6 +885,7 @@ async function transcribeAudio(awemeId, options = {}) {
     audio_path: paths.audio,
     updated_at: new Date().toISOString(),
   });
+  await updateAnalysisInputTranscript(paths, result);
   return result;
 }
 

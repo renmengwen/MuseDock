@@ -1450,6 +1450,233 @@ async function testPreparesDouyinSourceBeforeAgentRun() {
   assert.equal(run.creative_context.source_context.douyin_metadata.title, 'Douyin source title');
 }
 
+async function testDouyinSourceFetchesCommentsAndRunsAsrBeforeAgentRun() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const events = [];
+  const awemeId = '7345678901234567890';
+  let prepared = false;
+  let metadata = null;
+
+  function writeAnalysisInput() {
+    const paths = mediaPipeline.getMediaPaths(awemeId, mediaRoot);
+    fs.mkdirSync(paths.dir, { recursive: true });
+    fs.writeFileSync(paths.video, 'video', 'utf8');
+    const analysisInput = {
+      aweme_id: awemeId,
+      video: {
+        title: metadata.title,
+        description: metadata.description,
+        statistics: metadata.statistics || {},
+        aweme_url: metadata.aweme_url,
+      },
+      local_assets: {
+        dir: paths.dir,
+        metadata: paths.metadata,
+        video: paths.video,
+        audio: paths.audio,
+        frames: [],
+      },
+      comments_summary: { status: 'placeholder', message: 'Comment analysis is not connected yet.' },
+      transcript: { status: 'not_requested', path: '' },
+      steps: {
+        metadata: { status: 'done' },
+        video: { status: 'done', path: paths.video },
+        transcript: { status: 'not_requested' },
+      },
+      updated_at: NOW,
+    };
+    fs.writeFileSync(paths.analysisInput, JSON.stringify(analysisInput, null, 2), 'utf8');
+    return analysisInput;
+  }
+
+  const { services } = createFakeServices({
+    services: {
+      mediaPipeline: {
+        getStatus: async () => {
+          events.push(['getStatus']);
+          if (!prepared) return { success: true, exists: false, metadata: null, analysis_input: null };
+          const paths = mediaPipeline.getMediaPaths(awemeId, mediaRoot);
+          return {
+            success: true,
+            exists: true,
+            metadata,
+            analysis_input: readJson(paths.analysisInput),
+          };
+        },
+        prepareDouyinMedia: async () => {
+          events.push(['prepareMedia']);
+          prepared = true;
+          const analysisInput = writeAnalysisInput();
+          return {
+            success: true,
+            analysis_input: analysisInput,
+            steps: analysisInput.steps,
+          };
+        },
+        transcribeAudio: async () => {
+          events.push(['transcribe']);
+          const paths = mediaPipeline.getMediaPaths(awemeId, mediaRoot);
+          fs.writeFileSync(paths.transcript, JSON.stringify({
+            success: true,
+            status: 'done',
+            text: '这是一段 ASR 转写文本。',
+            message: 'ASR 完成。',
+          }, null, 2), 'utf8');
+          const analysisInput = readJson(paths.analysisInput);
+          analysisInput.transcript = { status: 'done', path: paths.transcript, message: 'ASR 完成。' };
+          analysisInput.steps.transcript = analysisInput.transcript;
+          fs.writeFileSync(paths.analysisInput, JSON.stringify(analysisInput, null, 2), 'utf8');
+          return { success: true, status: 'done', text: '这是一段 ASR 转写文本。', message: 'ASR 完成。' };
+        },
+      },
+      getVideoDetail: async () => {
+        events.push(['getVideoDetail']);
+        metadata = {
+          aweme_id: awemeId,
+          title: '带评论的抖音视频',
+          description: '需要自动抓评论和 ASR',
+          aweme_url: `https://www.douyin.com/video/${awemeId}`,
+          video_download_url: 'https://example.test/video.mp4',
+          statistics: { comment_count: 12 },
+        };
+        return { success: true, data: metadata };
+      },
+      getLocalDouyinComments: async () => {
+        events.push(['getLocalComments']);
+        return { success: true, count: 0, data: [] };
+      },
+      getComments: async () => {
+        events.push(['getComments']);
+        return {
+          success: true,
+          count: 1,
+          data: [{ comment_id: 'c1', content: '想看后续', like_count: 3, replies: [] }],
+        };
+      },
+      saveDouyinComments: () => {
+        events.push(['saveComments']);
+        return { saved: 1 };
+      },
+    },
+  });
+
+  await createCreativeWorkflow({ input: `https://www.douyin.com/video/${awemeId}` }, { rootDir, mediaRoot, services });
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+  assert.deepEqual(events.slice(0, 7), [
+    ['getStatus'],
+    ['getVideoDetail'],
+    ['prepareMedia'],
+    ['getStatus'],
+    ['getLocalComments'],
+    ['getComments'],
+    ['saveComments'],
+  ]);
+  assert.equal(events[7][0], 'transcribe');
+  assert.equal(run.creative_context.source_context.diagnostics.comments.status, 'done');
+  assert.equal(run.creative_context.source_context.diagnostics.transcript.status, 'done');
+
+  const analysisInput = readJson(mediaPipeline.getMediaPaths(awemeId, mediaRoot).analysisInput);
+  assert.equal(analysisInput.comments_summary.status, 'done');
+  assert.equal(analysisInput.comments_summary.count, 1);
+  assert.equal(analysisInput.transcript.status, 'done');
+}
+
+async function testDouyinSourceContinuesWhenCommentSaveAndAsrFail() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const events = [];
+  const awemeId = '7345678901234567890';
+  const paths = mediaPipeline.getMediaPaths(awemeId, mediaRoot);
+  const metadata = {
+    aweme_id: awemeId,
+    title: '可降级抖音视频',
+    description: '评论缓存和 ASR 失败也应继续成片',
+    aweme_url: `https://www.douyin.com/video/${awemeId}`,
+    video_download_url: 'https://example.test/video.mp4',
+  };
+  let prepared = false;
+
+  function writeAnalysisInput() {
+    fs.mkdirSync(paths.dir, { recursive: true });
+    fs.writeFileSync(paths.video, 'video', 'utf8');
+    const analysisInput = {
+      aweme_id: awemeId,
+      video: { title: metadata.title, description: metadata.description, aweme_url: metadata.aweme_url },
+      local_assets: { dir: paths.dir, metadata: paths.metadata, video: paths.video, audio: paths.audio, frames: [] },
+      comments_summary: { status: 'placeholder', message: 'Comment analysis is not connected yet.' },
+      transcript: { status: 'not_requested', path: '' },
+      steps: { video: { status: 'done', path: paths.video }, transcript: { status: 'not_requested' } },
+      updated_at: NOW,
+    };
+    fs.writeFileSync(paths.analysisInput, JSON.stringify(analysisInput, null, 2), 'utf8');
+    return analysisInput;
+  }
+
+  const { services } = createFakeServices({
+    services: {
+      mediaPipeline: {
+        getStatus: async () => {
+          events.push(['getStatus']);
+          if (!prepared) return { success: true, exists: false, metadata: null, analysis_input: null };
+          return { success: true, exists: true, metadata, analysis_input: readJson(paths.analysisInput) };
+        },
+        prepareDouyinMedia: async () => {
+          events.push(['prepareMedia']);
+          prepared = true;
+          const analysisInput = writeAnalysisInput();
+          return { success: true, analysis_input: analysisInput, steps: analysisInput.steps };
+        },
+        transcribeAudio: async () => {
+          events.push(['transcribe']);
+          throw new Error('ASR provider timeout');
+        },
+      },
+      getVideoDetail: async () => {
+        events.push(['getVideoDetail']);
+        return { success: true, data: metadata };
+      },
+      getLocalDouyinComments: async () => {
+        events.push(['getLocalComments']);
+        return { success: true, count: 0, data: [] };
+      },
+      getComments: async () => {
+        events.push(['getComments']);
+        return { success: true, count: 1, data: [{ comment_id: 'c1', content: '先缓存评论', replies: [] }] };
+      },
+      saveDouyinComments: async () => {
+        events.push(['saveComments']);
+        await new Promise(resolve => setTimeout(resolve, 5));
+        throw new Error('db busy');
+      },
+    },
+  });
+
+  await createCreativeWorkflow({ input: `https://www.douyin.com/video/${awemeId}` }, { rootDir, mediaRoot, services });
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+
+  assert.equal(run.success, true);
+  assert.deepEqual(events.slice(0, 8), [
+    ['getStatus'],
+    ['getVideoDetail'],
+    ['prepareMedia'],
+    ['getStatus'],
+    ['getLocalComments'],
+    ['getComments'],
+    ['saveComments'],
+    ['transcribe'],
+  ]);
+  assert.equal(run.creative_context.source_context.diagnostics.comments.status, 'failed');
+  assert.match(run.creative_context.source_context.diagnostics.comments.message, /db busy/);
+  assert.equal(run.creative_context.source_context.diagnostics.transcript.status, 'failed');
+  assert.match(run.creative_context.source_context.diagnostics.transcript.message, /ASR provider timeout/);
+
+  const analysisInput = readJson(paths.analysisInput);
+  assert.equal(analysisInput.comments_summary.status, 'failed');
+  assert.equal(analysisInput.steps.transcript.status, 'failed');
+  assert.match(analysisInput.steps.transcript.message, /ASR provider timeout/);
+}
+
 async function testFailsDouyinSourceWhenPreparedMediaIsMissing() {
   const { rootDir, mediaRoot } = createTempDirs();
   const { services } = createFakeServices({
@@ -2290,6 +2517,8 @@ async function run() {
   await testRejectsEmptyInput();
   await testCreatesDouyinWorkflowWithOriginalAwemeId();
   await testPreparesDouyinSourceBeforeAgentRun();
+  await testDouyinSourceFetchesCommentsAndRunsAsrBeforeAgentRun();
+  await testDouyinSourceContinuesWhenCommentSaveAndAsrFail();
   await testFailsDouyinSourceWhenPreparedMediaIsMissing();
   await testFailsDouyinSourceWhenPreparedPathDoesNotExist();
   await testRepreparesStaleDouyinAnalysisInputWithoutLocalMedia();

@@ -61,6 +61,13 @@ async function run() {
   fs.writeFileSync(assetPaths.audio, Buffer.alloc(8, 2));
   fs.writeFileSync(path.join(assetPaths.framesDir, 'frame-0001.jpg'), Buffer.alloc(5, 3));
   fs.writeFileSync(path.join(assetPaths.framesDir, 'frame-0002.jpg'), Buffer.alloc(7, 4));
+  fs.writeFileSync(assetPaths.analysisInput, JSON.stringify({
+    aweme_id: '1234567890',
+    video: { title: 'A test video' },
+    local_assets: { dir: assetPaths.dir, metadata: assetPaths.metadata, video: assetPaths.video, audio: assetPaths.audio, frames: [] },
+    transcript: { status: 'not_requested', path: '' },
+    steps: { transcript: { status: 'not_requested' } },
+  }, null, 2));
 
   const statusWithAssets = await mediaPipeline.getStatus('1234567890', { rootDir });
   assert.strictEqual(statusWithAssets.assets.dir.path, assetPaths.dir);
@@ -266,6 +273,9 @@ async function run() {
   const statusAfterTranscribe = await mediaPipeline.getStatus('1234567890', { rootDir });
   assert.strictEqual(statusAfterTranscribe.steps.transcript.status, 'done');
   assert.strictEqual(statusAfterTranscribe.transcript.text, '第一段\n第二段');
+  const analysisAfterTranscribe = JSON.parse(fs.readFileSync(assetPaths.analysisInput, 'utf-8'));
+  assert.strictEqual(analysisAfterTranscribe.transcript.status, 'done');
+  assert.strictEqual(analysisAfterTranscribe.steps.transcript.status, 'done');
 
   const preparedAgain = await mediaPipeline.prepareDouyinMedia('1234567890', {
     aweme_id: '1234567890',
