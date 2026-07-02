@@ -1372,6 +1372,34 @@ async function testCreatesDouyinWorkflowWithOriginalAwemeId() {
   assert.equal(created.creative_context.source_context.douyin_metadata.aweme_id, '7345678901234567890');
 }
 
+async function testCreatesDouyinWorkflowFromShareTextShortLink() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const { services } = createFakeServices({
+    services: {
+      fetchImpl: async url => {
+        assert.equal(url, 'https://v.douyin.com/mAshaRrok1Y/');
+        return {
+          status: 302,
+          headers: {
+            get: name => name.toLowerCase() === 'location'
+              ? 'https://www.iesdouyin.com/share/video/7646434824751828239/?from=web_code_link'
+              : '',
+          },
+        };
+      },
+    },
+  });
+
+  const created = await createCreativeWorkflow({
+    input: '6.97 :2pm aAG:/ 05/29 B@t.rr 一期视频带你彻底上手飞书CLI! https://v.douyin.com/mAshaRrok1Y/ 复制此链接，打开Dou音搜索，直接观看视频！',
+  }, { rootDir, mediaRoot, services });
+
+  assert.equal(created.success, true);
+  assert.equal(created.aweme_id, '7646434824751828239');
+  assert.equal(created.creative_context.input.mode, 'douyin');
+  assert.equal(created.creative_context.input.douyin_url, 'https://www.iesdouyin.com/share/video/7646434824751828239/?from=web_code_link');
+}
+
 async function testPreparesDouyinSourceBeforeAgentRun() {
   const { rootDir, mediaRoot } = createTempDirs();
   const events = [];
@@ -2539,6 +2567,7 @@ async function run() {
   await testFallbackProjectDoesNotSkipLegacyStages();
   await testRejectsEmptyInput();
   await testCreatesDouyinWorkflowWithOriginalAwemeId();
+  await testCreatesDouyinWorkflowFromShareTextShortLink();
   await testPreparesDouyinSourceBeforeAgentRun();
   await testDouyinSourceFetchesCommentsAndRunsAsrBeforeAgentRun();
   await testDouyinSourceContinuesWhenCommentSaveAndAsrFail();

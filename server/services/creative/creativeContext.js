@@ -1,6 +1,9 @@
 const AWEME_ID_PATTERN = /^\d{5,32}$/;
 const SOURCE_URL_PATTERN = /https?:\/\/[^\s<>"'`()\[\]{}，。；;、（）《》【】「」『』“”‘’]+/gi;
 const SOURCE_URL_TRAILING_PUNCTUATION_PATTERN = /[.,;:!?，。；：！？、)\]}）】》」』”’]+$/;
+const DOUYIN_SHORT_LINK_TIMEOUT_MS = 8000;
+const DOUYIN_SHORT_LINK_MAX_REDIRECTS = 5;
+const DOUYIN_SHORT_LINK_RESOLVE_FAILED_MESSAGE = '暂时无法解析抖音短链，请稍后重试，或粘贴跳转后的完整视频链接。';
 const sourceFetch = require('../source/sourceFetch');
 
 function safeString(value) {
@@ -137,10 +140,71 @@ function isDouyinLink(input) {
 
   try {
     const hostname = new URL(normalizeUrlForParsing(text)).hostname.toLowerCase();
-    return hostname === 'douyin.com' || hostname.endsWith('.douyin.com');
+    return hostname === 'douyin.com'
+      || hostname.endsWith('.douyin.com')
+      || hostname === 'iesdouyin.com'
+      || hostname.endsWith('.iesdouyin.com');
   } catch (error) {
     return false;
   }
+}
+
+function isDouyinShortLink(input) {
+  const text = safeString(input);
+  if (!text || /^\//.test(text)) return false;
+  try {
+    return new URL(normalizeUrlForParsing(text)).hostname.toLowerCase() === 'v.douyin.com';
+  } catch {
+    return false;
+  }
+}
+
+function extractDouyinShortLinkCandidates(input) {
+  const urls = sourceFetch.extractUrls(input, Number.MAX_SAFE_INTEGER);
+  const candidates = [...urls, ...extractNoProtocolDouyinCandidates(input)]
+    .filter(isDouyinShortLink)
+    .map(normalizeUrlForParsing);
+  return [...new Set(candidates)];
+}
+
+function getHeader(headers, name) {
+  if (!headers) return '';
+  if (typeof headers.get === 'function') return safeString(headers.get(name));
+  return safeString(headers[name] || headers[name.toLowerCase()]);
+}
+
+async function resolveDouyinShortLink(shortUrl, {
+  fetchImpl = globalThis.fetch,
+  timeoutMs = DOUYIN_SHORT_LINK_TIMEOUT_MS,
+  maxRedirects = DOUYIN_SHORT_LINK_MAX_REDIRECTS,
+} = {}) {
+  if (typeof fetchImpl !== 'function') return '';
+
+  let currentUrl = normalizeUrlForParsing(shortUrl);
+  for (let redirects = 0; redirects <= maxRedirects; redirects += 1) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const response = await fetchImpl(currentUrl, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: controller?.signal,
+        headers: {
+          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
+        },
+      });
+      const location = Number(response?.status) >= 300 && Number(response?.status) < 400
+        ? getHeader(response.headers, 'location')
+        : '';
+      if (!location) return safeString(response?.url) || currentUrl;
+
+      currentUrl = new URL(location, currentUrl).href;
+      if (extractAwemeId(currentUrl)) return currentUrl;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  return currentUrl;
 }
 
 function removeUrlFromText(text, url) {
@@ -252,6 +316,39 @@ function normalizeCreativeInput(payload = {}) {
   });
 }
 
+async function normalizeCreativeInputWithDouyinShortLink(payload = {}, options = {}) {
+  const normalized = normalizeCreativeInput(payload);
+  if (normalized.success || normalized.message !== '暂时无法从抖音链接中识别视频 ID。') {
+    return normalized;
+  }
+
+  const shortLinks = extractDouyinShortLinkCandidates(payload.input);
+  if (shortLinks.length === 0) return normalized;
+
+  for (const shortLink of shortLinks) {
+    try {
+      const resolvedUrl = await resolveDouyinShortLink(shortLink, options);
+      const awemeId = extractAwemeId(resolvedUrl);
+      if (awemeId) {
+        return createSuccessResponse({
+          mode: 'douyin',
+          aweme_id: awemeId,
+          douyin_url: resolvedUrl || shortLink,
+          use_research: payload.useResearch === true,
+          skip_validation: payload.skipValidation === true,
+          asset_ids: [],
+        });
+      }
+    } catch {}
+  }
+
+  return createFailureResponse(DOUYIN_SHORT_LINK_RESOLVE_FAILED_MESSAGE, {
+    use_research: payload.useResearch === true,
+    skip_validation: payload.skipValidation === true,
+    asset_ids: [],
+  });
+}
+
 function createTextSourceContext(text) {
   const normalizedText = safeString(text);
   return {
@@ -348,6 +445,7 @@ function buildCreativeContext({
 module.exports = {
   AWEME_ID_PATTERN,
   normalizeCreativeInput,
+  normalizeCreativeInputWithDouyinShortLink,
   extractAwemeId,
   createTextSourceContext,
   createDisabledResearchContext,

@@ -739,7 +739,9 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
     ...(payload || {}),
     useResearch: snapshot.useResearch,
   };
-  const normalized = creativeContext.normalizeCreativeInput(effectivePayload);
+  const normalized = await creativeContext.normalizeCreativeInputWithDouyinShortLink(effectivePayload, {
+    fetchImpl: services.fetchImpl,
+  });
   if (!normalized.success) {
     return normalizeFailureResult(normalized, effectivePayload);
   }
