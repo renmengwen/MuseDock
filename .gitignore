@@ -2,6 +2,12 @@
 node_modules/
 .worktrees/
 .superpowers/
+/.workbuddy/
+/data/
+/.mimocode/
+/.tmp-test-config/
+/docs/
+/opc-doc/
 
 # Build output
 frontend-dist/
