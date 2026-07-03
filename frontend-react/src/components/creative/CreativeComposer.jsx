@@ -1,4 +1,4 @@
-import { ArrowUp, Globe2, Loader2, Shield, Zap } from 'lucide-react';
+import { ArrowUp, Globe2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Textarea } from '@/components/ui/textarea.jsx';
 import { cn } from '@/lib/utils.js';
@@ -9,48 +9,6 @@ function CreativeHeroHeader() {
       <div className="inline-flex items-center gap-2.5 text-[#111827]">
         <h1 className="m-0 text-2xl font-bold leading-tight tracking-normal text-[#111827]">嘿，今天我们来做点什么？</h1>
       </div>
-    </div>
-  );
-}
-
-function CreativeModeSwitch({ mode, setMode, disabled }) {
-  return (
-    <div
-      className="group relative grid min-h-10 w-[min(100%,286px)] grid-cols-2 overflow-hidden rounded-full border border-[#e5e7eb] bg-white p-0.5"
-      data-mode={mode}
-      role="tablist"
-      aria-label="创作模式"
-    >
-      <span
-        className="absolute inset-y-0.5 left-0.5 z-0 w-[calc(50%-2px)] rounded-full bg-[#eef4ff] shadow-[inset_0_0_0_1px_#bcd0ff] transition-transform duration-200 group-data-[mode=expert]:translate-x-full"
-        aria-hidden="true"
-      />
-      <Button
-        type="button"
-        variant="ghost"
-        className={cn(
-          'relative z-10 h-[34px] rounded-full bg-transparent text-[13px] text-[#111827] transition-colors hover:bg-transparent',
-          mode === 'quick' && 'text-[#111827]',
-        )}
-        disabled={disabled}
-        onClick={() => setMode('quick')}
-      >
-        <Zap size={15} />
-        <span>快速模式</span>
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        className={cn(
-          'relative z-10 h-[34px] rounded-full bg-transparent text-[13px] text-[#111827] transition-colors hover:bg-transparent',
-          mode === 'expert' && 'text-[#111827]',
-        )}
-        disabled={disabled}
-        onClick={() => setMode('expert')}
-      >
-        <Shield size={15} />
-        <span>专家模式</span>
-      </Button>
     </div>
   );
 }
@@ -113,26 +71,12 @@ function CreativePromptComposer({
           {isBusy ? <Loader2 size={18} className="animate-spin" /> : <ArrowUp size={19} />}
         </Button>
       </div>
-
-      {mode === 'expert' ? (
-        <div className="grid min-h-[72px] content-start gap-2 overflow-hidden">
-          <div className="w-fit max-w-full rounded-full border border-[#fed7aa] bg-[#fff7ed] px-2.5 py-[7px] text-xs leading-[1.4] text-[#c2410c]">
-            专家模式正在开发中，请先使用快速模式创建任务。
-          </div>
-        </div>
-      ) : null}
-      <input type="hidden" value={mode} readOnly />
     </form>
   );
 }
 
 function CreativeInputForm(props) {
-  return (
-    <>
-      <CreativeModeSwitch mode={props.mode} setMode={props.setMode} disabled={props.isBusy} />
-      <CreativePromptComposer {...props} />
-    </>
-  );
+  return <CreativePromptComposer {...props} />;
 }
 
 export function CreativeComposer(props) {

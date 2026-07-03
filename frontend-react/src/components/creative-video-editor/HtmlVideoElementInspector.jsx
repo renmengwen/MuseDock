@@ -5,6 +5,9 @@ export function HtmlVideoElementInspector({
   editingReady,
   disabled,
   saving,
+  dirty,
+  canUndo,
+  onUndo,
   onTextChange,
   onResetPosition,
   onSaveEdit,
@@ -16,6 +19,19 @@ export function HtmlVideoElementInspector({
     <aside className="grid min-w-0 content-start gap-2 rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-100" aria-label="元素属性">
       <div className="flex items-center justify-between gap-2">
         <h3 className="m-0 text-sm font-bold">当前元素</h3>
+        <div className="flex items-center gap-2">
+          {dirty ? <span className="text-xs font-bold text-amber-300">● 未保存</span> : null}
+          {canUndo ? (
+            <button
+              type="button"
+              className="min-h-7 rounded-md border border-slate-600 bg-slate-900 px-2 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55"
+              disabled={disabled}
+              onClick={onUndo}
+            >
+              撤销
+            </button>
+          ) : null}
+        </div>
       </div>
       {!editingReady ? (
         <p className="m-0 text-sm leading-relaxed text-slate-300">镜头播放完毕后可选择并拖拽元素。</p>

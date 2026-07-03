@@ -1828,18 +1828,39 @@ function findMatchingHtmlVideoExport(project, projectDir, outputPath) {
   }) || null;
 }
 
+function pickWorkflowRenderOutputUrl(record) {
+  const renderStageUrl = Array.isArray(record?.stages)
+    ? record.stages.find(stage => stage?.id === 'render')?.result?.render?.output_url
+    : '';
+  const candidates = [
+    record?.render_output_url,
+    record?.result?.video?.output_url,
+    record?.result?.render?.output_url,
+    record?.result?.hyperframes_freeform?.render?.output_url,
+    record?.render?.output_url,
+    record?.hyperframes_freeform?.render?.output_url,
+    renderStageUrl,
+  ];
+  return candidates.find(value => typeof value === 'string' && value.trim()) || '';
+}
+
 async function enrichWorkflowVideoUrls(record) {
   const workflowId = safeString(record?.workflow_id);
   const render = record?.result?.hyperframes_freeform?.render;
   const outputPath = safeString(render?.output_path || render?.outputPath);
-  if (!workflowId || !render || safeString(render.output_url) || !outputPath) return record;
-  const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
-  if (!projectDir) return record;
-  try {
-    const project = await htmlVideoProjectStore.loadProject(projectDir);
-    const exportItem = findMatchingHtmlVideoExport(project, projectDir, outputPath);
-    if (exportItem) render.output_url = buildHtmlVideoExportFileUrl(workflowId, exportItem.id);
-  } catch {}
+  if (workflowId && render && !safeString(render.output_url) && outputPath) {
+    const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
+    if (projectDir) {
+      try {
+        const project = await htmlVideoProjectStore.loadProject(projectDir);
+        const exportItem = findMatchingHtmlVideoExport(project, projectDir, outputPath);
+        if (exportItem) render.output_url = buildHtmlVideoExportFileUrl(workflowId, exportItem.id);
+      } catch {}
+    }
+  }
+  // 归一：提供稳定顶层 render_output_url，前端优先读它，减少对多层嵌套结构的猜测。
+  const canonicalUrl = pickWorkflowRenderOutputUrl(record);
+  if (canonicalUrl) record.render_output_url = canonicalUrl;
   return record;
 }
 

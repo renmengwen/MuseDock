@@ -33,6 +33,10 @@ function getWorkflowDisplayMessage(workflow, fallback = '') {
 }
 
 function getWorkflowVideoUrl(workflow) {
+  // 优先读后端归一的稳定字段；旧任务无此字段时回退到历史多版本嵌套结构。
+  if (typeof workflow?.render_output_url === 'string' && workflow.render_output_url.trim()) {
+    return workflow.render_output_url;
+  }
   const renderResult = workflow?.stages?.find(stage => stage.id === 'render')?.result;
   const candidates = [
     workflow?.result?.video?.output_url,
@@ -160,6 +164,29 @@ function loadActiveCreativeTask() {
   }
 }
 
+function mergeServerTasks(localTasks, serverItems) {
+  const byId = new Map(localTasks.map(task => [task.workflow_id, task]));
+  for (const item of Array.isArray(serverItems) ? serverItems : []) {
+    const id = String(item?.workflow_id || '').trim();
+    if (!id) continue;
+    const prev = byId.get(id) || {};
+    byId.set(id, {
+      ...prev,
+      workflow_id: id,
+      title: prev.title || item.title || getTaskTitle(item.input),
+      input: prev.input || item.input || '',
+      status: item.status || prev.status || 'queued',
+      message: item.message || prev.message || '',
+      workflow: prev.workflow || null,
+      created_at: prev.created_at || item.created_at || item.updated_at || '',
+      updated_at: item.updated_at || prev.updated_at || item.created_at || '',
+    });
+  }
+  return Array.from(byId.values())
+    .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())
+    .slice(0, 30);
+}
+
 function upsertTask(tasks, task) {
   const next = [task, ...tasks.filter(item => item.workflow_id !== task.workflow_id)];
   return next.slice(0, 30);
@@ -209,7 +236,7 @@ export function OneClickCreativePage() {
   // activeTaskRef holds the value; this state only forces stream connect/stop rerenders.
   const [, setActiveTask] = useState(null);
   const isBusy = status === 'creating' || status === 'polling' || status === 'deleting';
-  const submitDisabled = isBusy || mode === 'expert' || !input.trim();
+  const submitDisabled = isBusy || !input.trim();
   const sidebarTasks = useMemo(() => tasks.map(task => ({
     ...task,
     timeLabel: getTaskTimeLabel(getSidebarTaskTimeSource(task)),
@@ -241,6 +268,22 @@ export function OneClickCreativePage() {
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadServerTasks() {
+      try {
+        const json = await api.listCreativeWorkflows();
+        const items = json?.workflows || json?.items || json?.data?.workflows || [];
+        if (cancelled || !Array.isArray(items) || !items.length) return;
+        persistTasks(prev => mergeServerTasks(prev, items));
+      } catch {
+        // 拉取后端任务列表失败时保留本地缓存，不打断首页加载。
+      }
+    }
+    loadServerTasks();
+    return () => { cancelled = true; };
+  }, [persistTasks]);
 
   const stopTaskStream = useCallback(({ clearStorage = false } = {}) => {
     streamGenerationRef.current += 1;
@@ -640,12 +683,19 @@ export function OneClickCreativePage() {
     if (!confirmed) return;
 
     setDeletingWorkflowId(task.workflow_id);
+    let deleteOk = false;
     try {
-      await api.deleteCreativeWorkflow(task.workflow_id);
-    } catch {
-      // 即使后端删除失败也继续清理前端状态
+      const result = await api.deleteCreativeWorkflow(task.workflow_id);
+      deleteOk = result?.success !== false;
+    } catch (error) {
+      deleteOk = error?.status === 404; // 后端已不存在，视为删除成功
     } finally {
       setDeletingWorkflowId('');
+    }
+
+    if (!deleteOk) {
+      window.alert('删除任务失败，请稍后重试。该任务仍保留在列表中。');
+      return;
     }
 
     persistTasks(prev => prev.filter(item => item.workflow_id !== task.workflow_id));
@@ -666,12 +716,20 @@ export function OneClickCreativePage() {
     setDeletingWorkflowId(id);
     setStatus('deleting');
     setMessage('正在停止并删除任务...');
+    let deleteOk = false;
     try {
-      await api.deleteCreativeWorkflow(id);
-    } catch {
-      // 删除中的任务可能已经被后台清理，前端仍按停止删除完成处理。
+      const result = await api.deleteCreativeWorkflow(id);
+      deleteOk = result?.success !== false;
+    } catch (error) {
+      deleteOk = error?.status === 404; // 已不存在，视为删除成功
     } finally {
       setDeletingWorkflowId('');
+    }
+
+    if (!deleteOk) {
+      setStatus('failed');
+      setMessage('停止并删除任务失败，请稍后重试。');
+      return;
     }
 
     persistTasks(prev => prev.filter(item => item.workflow_id !== id));
@@ -701,7 +759,6 @@ export function OneClickCreativePage() {
       workflow_id: targetWorkflowId,
       status: 'running',
       message: '正在修复并重试...',
-      workflow,
       updated_at: new Date().toISOString(),
     }));
 
@@ -721,7 +778,6 @@ export function OneClickCreativePage() {
           workflow_id: targetWorkflowId,
           status: 'failed',
           message: noTaskMessage,
-          workflow,
           updated_at: new Date().toISOString(),
         }));
         return;
@@ -736,7 +792,6 @@ export function OneClickCreativePage() {
         workflow_id: nextWorkflowId,
         status: 'running',
         message: '正在修复并重试...',
-        workflow,
         updated_at: new Date().toISOString(),
       }));
     } catch (error) {
@@ -749,7 +804,6 @@ export function OneClickCreativePage() {
         workflow_id: targetWorkflowId,
         status: 'failed',
         message: errorMessage,
-        workflow,
         updated_at: new Date().toISOString(),
       }));
       if (planChanged) {
@@ -767,13 +821,7 @@ export function OneClickCreativePage() {
 
   async function submitCreativeWorkflow(event) {
     event.preventDefault();
-    if (submitDisabled) {
-      if (mode === 'expert') {
-        setStatus('idle');
-        setMessage('专家模式正在开发中，请先使用快速模式创建任务。');
-      }
-      return;
-    }
+    if (submitDisabled) return;
 
     const trimmed = input.trim();
     if (!trimmed) {
@@ -893,6 +941,8 @@ export function OneClickCreativePage() {
     let cancelled = false;
 
     async function pollWorkflow() {
+      // SSE 已连接时由事件流驱动状态；轮询仅作为断线兜底，避免与 SSE 双写打架。
+      if (activeStreamRef.current) return;
       try {
         const json = await api.getCreativeWorkflow(workflowId);
         if (cancelled) return;
@@ -939,15 +989,19 @@ export function OneClickCreativePage() {
 
         setMessage(nextMessage);
       } catch (error) {
-        if (!cancelled) {
+        if (cancelled) return;
+        if (error?.status === 404) {
           setStatus('failed');
-          setMessage(getErrorMessage(error, '获取创作任务状态失败，请稍后重试。'));
+          setMessage(getErrorMessage(error, '未找到创作任务。'));
+          return;
         }
+        // 网络抖动/服务临时不可用：后台任务可能仍在运行，保持轮询，不误判为失败。
+        setMessage('任务状态刷新失败，正在重试...');
       }
     }
 
     pollWorkflow();
-    const timer = window.setInterval(pollWorkflow, 1800);
+    const timer = window.setInterval(pollWorkflow, 3000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);

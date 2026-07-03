@@ -154,6 +154,9 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  listCreativeWorkflows() {
+    return requestJson('/api/creative-workflows');
+  },
   getCreativeWorkflow(workflowId) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}`);
   },

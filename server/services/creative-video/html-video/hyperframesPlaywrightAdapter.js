@@ -91,7 +91,12 @@ async function render(input = {}, ctx = {}, deps = {}) {
     cleanupPrepared = prepared.cleanup;
 
     // 对应 html-video 源码段：page.goto(file://..., domcontentloaded)。
-    await page.goto(pathToFileURL(prepared.loadPath).href, { waitUntil: 'domcontentloaded' });
+    // 显式 45s 超时，避免模板异常时卡在默认导航等待里拖垮整条渲染任务。
+    try {
+      await page.goto(pathToFileURL(prepared.loadPath).href, { waitUntil: 'domcontentloaded', timeout: 45000 });
+    } catch (error) {
+      throw createRenderError('render-goto-timeout', `加载 html-video 模板超时或失败：${error.message}`);
+    }
 
     // 对应 html-video 源码段：等待 stylesheet、逐个 fonts.load、fonts.ready。
     report(ctx, 32, '正在加载字体和样式...');

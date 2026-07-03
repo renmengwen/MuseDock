@@ -52,3 +52,7 @@ docs/handoff-*.md
 # Local debug files that may contain account cookies or temporary code
 scripts/debug/test-douyin.js
 server/scraper/*.backup
+
+# Crash dumps
+bash.exe.stackdump
+*.stackdump

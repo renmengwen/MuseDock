@@ -151,18 +151,31 @@ function canvasSize(win) {
   };
 }
 
+function readCanvasContract(doc) {
+  const el = doc.querySelector('[data-hv-canvas]') || doc.body || doc.documentElement;
+  const width = Number(el?.getAttribute?.('data-width'));
+  const height = Number(el?.getAttribute?.('data-height'));
+  if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+    return { width, height };
+  }
+  return null;
+}
+
 function installCanvasViewport(doc) {
   const win = doc.defaultView;
   const viewport = viewportSize(win);
   const body = doc.body;
-  const designWidth = Math.max(
+  // 画布尺寸优先读渲染契约（data-hv-canvas / data-width / data-height），与 Playwright 渲染端同源，
+  // 契约缺失时才回退到 DOM 尺寸估算，避免二次编辑拖拽定位「所见非所得」。
+  const contract = readCanvasContract(doc);
+  const designWidth = contract?.width ?? Math.max(
     doc.documentElement.scrollWidth,
     doc.documentElement.clientWidth,
     body?.scrollWidth || 0,
     body?.offsetWidth || 0,
     1,
   );
-  const designHeight = Math.max(
+  const designHeight = contract?.height ?? Math.max(
     doc.documentElement.scrollHeight,
     doc.documentElement.clientHeight,
     body?.scrollHeight || 0,
@@ -277,6 +290,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
   const editingReadyRef = useRef(false);
   const frameLoadRequestRef = useRef(0);
   const dragRef = useRef(null);
+  const undoStackRef = useRef([]);
   const [html, setHtml] = useState('');
   const [loadedFrameId, setLoadedFrameId] = useState('');
   const [iframeKey, setIframeKey] = useState(0);
@@ -287,6 +301,8 @@ export function HtmlVideoCanvasEditor({ editor }) {
   const [editingReady, setEditingReady] = useState(false);
   const [playbackState, setPlaybackState] = useState('idle');
   const [elementInfo, setElementInfo] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
 
   const frame = editor.selectedFrame;
   const frameId = frameIdOf(frame);
@@ -301,6 +317,29 @@ export function HtmlVideoCanvasEditor({ editor }) {
   function clearPlaybackTimer() {
     if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
     playbackTimerRef.current = null;
+  }
+
+  function snapshotBeforeEdit() {
+    const doc = iframeRef.current?.contentDocument;
+    if (!doc?.body) return;
+    const snapshot = doc.body.innerHTML;
+    if (undoStackRef.current.at(-1) === snapshot) return;
+    undoStackRef.current.push(snapshot);
+    if (undoStackRef.current.length > 30) undoStackRef.current.shift();
+    setCanUndo(true);
+  }
+
+  function undoEdit() {
+    const doc = iframeRef.current?.contentDocument;
+    const prev = undoStackRef.current.pop();
+    if (!doc?.body || prev === undefined) return;
+    doc.body.innerHTML = prev;
+    doc.querySelectorAll('[data-hv-canvas-selected]').forEach(node => node.removeAttribute('data-hv-canvas-selected'));
+    selectedElementRef.current = null;
+    dragRef.current = null;
+    setElementInfo(null);
+    setCanUndo(undoStackRef.current.length > 0);
+    setDirty(true);
   }
 
   useEffect(() => {
@@ -332,6 +371,9 @@ export function HtmlVideoCanvasEditor({ editor }) {
     setPlaybackState('idle');
     setElementInfo(null);
     selectedElementRef.current = null;
+    undoStackRef.current = [];
+    setCanUndo(false);
+    setDirty(false);
     if (frameId && rawHtml) {
       Promise.resolve()
         .then(() => editor.loadFrameHtml(frameId))
@@ -369,6 +411,16 @@ export function HtmlVideoCanvasEditor({ editor }) {
     clearPlaybackTimer();
     if (iframeLoadTimerRef.current) clearTimeout(iframeLoadTimerRef.current);
   }, []);
+
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const handler = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
 
   function beginPlayback() {
     clearPlaybackTimer();
@@ -443,6 +495,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
       if (!isEditableElement(target)) return;
       event.preventDefault();
       event.stopPropagation();
+      snapshotBeforeEdit();
       selectedElementRef.current = target;
       setElementInfo(selectElement(target));
       const rect = target.getBoundingClientRect();
@@ -493,6 +546,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
       if (drag?.element) {
         drag.element.releasePointerCapture?.(event.pointerId);
         setElementInfo(readElementInfo(drag.element));
+        setDirty(true);
       }
       dragRef.current = null;
     }
@@ -506,26 +560,31 @@ export function HtmlVideoCanvasEditor({ editor }) {
     if (!element) return;
     writeElementText(element, text);
     setElementInfo(readElementInfo(element));
+    setDirty(true);
   }
 
   function resetSelectedPosition() {
     const element = selectedElementRef.current;
     if (!element) return;
+    snapshotBeforeEdit();
     element.style.left = '';
     element.style.top = '';
     element.style.position = '';
     element.style.margin = '';
     setElementInfo(readElementInfo(element));
+    setDirty(true);
   }
 
   function deleteSelectedElement() {
     const element = selectedElementRef.current;
     if (!element) return;
+    snapshotBeforeEdit();
     const deletedInfo = { ...(elementInfo || readElementInfo(element)), deleted: true, text: '', width: 0, height: 0 };
     element.remove();
     selectedElementRef.current = null;
     dragRef.current = null;
     setElementInfo(deletedInfo);
+    setDirty(true);
   }
 
   async function saveEdit() {
@@ -545,6 +604,9 @@ export function HtmlVideoCanvasEditor({ editor }) {
         setPreviewError('保存修改失败，请稍后重试。');
         return null;
       }
+      setDirty(false);
+      undoStackRef.current = [];
+      setCanUndo(false);
       return result;
     } catch (_) {
       setPreviewError('保存修改失败，请稍后重试。');
@@ -557,6 +619,12 @@ export function HtmlVideoCanvasEditor({ editor }) {
   function patchFrame(payload) {
     if (payload?.type === 'frame_patch') return editor.saveFrame(payload.frame_id, payload);
     return editor.saveTemplateInputs(payload);
+  }
+
+  function handleSelectFrame(nextId) {
+    if (String(nextId) === String(frameId)) return;
+    if (dirty && !window.confirm('当前镜头有未保存的画布修改，切换镜头将丢失，确定继续？')) return;
+    editor.selectFrame(nextId);
   }
 
   if (!frame) {
@@ -604,6 +672,9 @@ export function HtmlVideoCanvasEditor({ editor }) {
             editingReady={editingReady}
             disabled={disabled}
             saving={saving}
+            dirty={dirty}
+            canUndo={canUndo}
+            onUndo={undoEdit}
             onTextChange={updateSelectedText}
             onResetPosition={resetSelectedPosition}
             onSaveEdit={saveEdit}
@@ -633,7 +704,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
         frames={editor.frames}
         selectedFrameId={editor.selectedFrameId}
         disabled={disabled}
-        onSelect={editor.selectFrame}
+        onSelect={handleSelectFrame}
       />
     </section>
   );

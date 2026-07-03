@@ -3,6 +3,10 @@ const express = require('express');
 const defaultCreativeWorkflows = require('../services/creative/creativeWorkflows');
 const defaultCreativeWorkflowTasks = require('../services/creative/creativeWorkflowTasks');
 const { formatSseEvent, normalizeSinceSeq } = require('../services/creative/creativeTaskEvents');
+const {
+  normalizeCreativeWorkflowDto,
+  normalizeCreativeWorkflowSummary,
+} = require('../services/creative/creativeWorkflowDto');
 
 const router = express.Router();
 const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;
@@ -55,6 +59,7 @@ function getStatusCode(result) {
     || result?.code === 'FRAME_NOT_FOUND'
     || result?.code === 'DRAFT_NOT_FOUND'
     || result?.code === 'EDIT_PLAN_NOT_FOUND'
+    || /未找到|不存在/.test(getMessage(result, ''))
   ) return 404;
   return 400;
 }
@@ -115,6 +120,30 @@ router.post('/', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: `创建创作任务失败：${error.message}`,
+    });
+  }
+});
+
+// 列出本地已有创作任务，供前端在换设备/清缓存后仍能恢复任务列表（不再只依赖 localStorage）。
+router.get('/', async (req, res) => {
+  const service = getService(req);
+  if (typeof service.listCreativeWorkflowRecords !== 'function') {
+    return res.status(501).json({
+      success: false,
+      message: '当前服务暂不支持读取创作任务列表。',
+    });
+  }
+
+  try {
+    const records = await service.listCreativeWorkflowRecords();
+    const workflows = (Array.isArray(records) ? records : [])
+      .map(normalizeCreativeWorkflowSummary)
+      .sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
+    return res.json({ success: true, workflows });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: `读取创作任务列表失败：${error.message}`,
     });
   }
 });
@@ -886,8 +915,13 @@ router.post('/:workflow_id/events', async (req, res) => {
   let streamWriteFailed = false;
   let closed = false;
   let unsubscribed = false;
+  let heartbeatTimer = null;
   const cleanup = ({ end = false } = {}) => {
     closed = true;
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
     if (!unsubscribed && subscriptionResult?.unsubscribe) {
       unsubscribed = true;
       subscriptionResult.unsubscribe();
@@ -918,6 +952,16 @@ router.post('/:workflow_id/events', async (req, res) => {
   res.on('close', () => cleanup());
   res.on('error', () => cleanup());
   res.on('finish', () => cleanup());
+
+  // 定期发送 SSE 注释帧作为心跳，避免渲染等长阶段无事件时被代理/浏览器判超时断开。
+  heartbeatTimer = setInterval(() => {
+    if (closed || res.writableEnded || res.destroyed) return;
+    try {
+      res.write(': heartbeat\n\n');
+    } catch {
+      cleanup();
+    }
+  }, 15000);
 
   try {
     subscriptionResult = await getTaskService(req).subscribeCreativeWorkflowEvents({
@@ -1091,17 +1135,14 @@ router.get('/:workflow_id', async (req, res) => {
       taskRegistry: getTaskRegistry(req),
     });
     if (!result || result.success === false) {
-      const message = getMessage(result, '未找到创作任务。');
-      const statusCode = /未找到|不存在/.test(message) ? 404 : 400;
-      return res.status(statusCode).json({
+      return res.status(getStatusCode(result)).json({
         success: false,
-        ...(result || {}),
-        workflow_id: result?.workflow_id || workflowId,
-        message,
+        workflow_id: workflowId,
+        message: getMessage(result, '创作任务不存在。'),
       });
     }
 
-    return res.json(result);
+    return res.json(normalizeCreativeWorkflowDto(result.data || result.workflow || result));
   } catch (error) {
     return res.status(500).json({
       success: false,

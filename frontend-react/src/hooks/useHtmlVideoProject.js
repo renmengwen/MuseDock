@@ -72,7 +72,7 @@ const STATUS_MESSAGES = {
   editing: '正在应用编辑...',
   materializing: '正在重新生成 HTML...',
   rendering: '正在渲染单帧预览...',
-  exporting: '正在导出成片...',
+  exporting: '正在导出成片（合成较慢，请保持页面打开）...',
   tts: '正在重新生成旁白...',
   loading_source: '正在加载当前帧源码...',
   saving_source: '正在保存帧源码草稿...',
@@ -203,7 +203,11 @@ export function useHtmlVideoProject({ workflowId, api }) {
     applyResult = true,
     onSuccess,
   }) => {
-    if (!workflowId || !api || mutatingRef.current || loadingRef.current) return null;
+    if (!workflowId || !api) return null;
+    if (mutatingRef.current || loadingRef.current) {
+      setMessage('正在处理其他操作，请稍候…');
+      return null;
+    }
     mutatingRef.current = true;
     setIsMutating(true);
     setStatus(nextStatus);
@@ -274,7 +278,12 @@ export function useHtmlVideoProject({ workflowId, api }) {
       setFailure(new Error('保存修改失败：未获取到草稿 id。'), '保存修改失败。');
       return null;
     }
-    return acceptFrameDraft(frameId, draftId);
+    const accepted = await acceptFrameDraft(frameId, draftId);
+    if (!accepted || accepted.success === false) {
+      // 草稿已写入但应用失败，明确告知用户处于中间态，避免误以为改动全部丢失。
+      setMessage('修改已保存为草稿，但应用到成片失败，请重试“保存修改”。');
+    }
+    return accepted;
   }, [saveFrameHtmlDraft, acceptFrameDraft, setFailure]);
 
   const discardFrameDraft = useCallback((frameId, draftId) => (

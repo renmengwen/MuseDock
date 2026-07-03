@@ -371,7 +371,7 @@ async function runIsolatedRouterTests() {
     const getResponse = await requestJson(server, 'GET', `/api/creative-workflows/${fake.workflowId}`);
     assert.strictEqual(getResponse.statusCode, 200);
     assert.strictEqual(getResponse.body.success, true);
-    assert.strictEqual(getResponse.body.data.workflow_id, fake.workflowId);
+    assert.strictEqual(getResponse.body.workflow_id, fake.workflowId);
 
     const sseResponse = await requestSse(server, `/api/creative-workflows/${fake.workflowId}/events`, {
       task_id: 'creative-task-route',
@@ -407,6 +407,78 @@ async function runIsolatedRouterTests() {
     assert.match(thrownResponse.body.message, /创建创作任务失败/);
   } finally {
     await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function testCreativeWorkflowListEndpointUsesBackendRecords() {
+  const app = express();
+  app.use(express.json());
+  app.locals.creativeWorkflows = {
+    listCreativeWorkflowRecords: async () => [
+      {
+        workflow_id: '202607031200000002',
+        status: 'running',
+        message: '正在生成工程...',
+        created_at: '2026-07-03T12:00:00.000Z',
+        updated_at: '2026-07-03T12:02:00.000Z',
+        creative_context: { input: { raw_text: '第二个任务' } },
+      },
+      {
+        workflow_id: '202607031200000001',
+        status: 'done',
+        message: '视频生成完成。',
+        created_at: '2026-07-03T11:00:00.000Z',
+        updated_at: '2026-07-03T11:05:00.000Z',
+        creative_context: { input: { raw_text: '第一个任务' } },
+        result: { hyperframes_freeform: { render: { output_url: '/api/output.mp4' } } },
+      },
+    ],
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+  const server = await listen(app);
+
+  try {
+    const { statusCode, body } = await requestJson(server, 'GET', '/api/creative-workflows');
+    assert.equal(statusCode, 200);
+    assert.equal(body.success, true);
+    assert.equal(body.workflows.length, 2);
+    assert.equal(body.workflows[0].workflow_id, '202607031200000002');
+    assert.equal(body.workflows[0].input, '第二个任务');
+    assert.equal(body.workflows[1].output_url, '/api/output.mp4');
+  } finally {
+    server.close();
+  }
+}
+
+async function testCreativeWorkflowDetailUsesNormalizedDto() {
+  const app = express();
+  app.use(express.json());
+  app.locals.creativeWorkflows = {
+    getCreativeWorkflow: async () => ({
+      success: true,
+      data: {
+        workflow_id: '202607031200000001',
+        status: 'done',
+        message: '视频生成完成。',
+        creative_context: { input: { raw_text: '详情任务' } },
+        result: { hyperframes_freeform: { title: '详情标题', render: { output_url: '/api/detail.mp4' } } },
+      },
+    }),
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+  const server = await listen(app);
+
+  try {
+    const { statusCode, body } = await requestJson(server, 'GET', '/api/creative-workflows/202607031200000001');
+    assert.equal(statusCode, 200);
+    assert.equal(body.success, true);
+    assert.equal(body.workflow_id, '202607031200000001');
+    assert.equal(body.title, '详情标题');
+    assert.equal(body.input, '详情任务');
+    assert.equal(body.result.render.output_url, '/api/detail.mp4');
+    assert.equal(body.workflow.workflow_id, '202607031200000001');
+  } finally {
+    server.close();
   }
 }
 
@@ -733,7 +805,7 @@ async function runCustomWorkflowServiceWithoutRegistryDoesNotUseDefaultRegistryT
     const response = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}`);
     assert.strictEqual(response.statusCode, 200);
     assert.strictEqual(response.body.success, true);
-    assert.strictEqual(response.body.data.workflow_id, workflowId);
+    assert.strictEqual(response.body.workflow_id, workflowId);
     assert.ok(!capturedTaskRegistry, 'custom creativeWorkflows service should not receive default global task registry');
   } finally {
     await new Promise(resolve => server.close(resolve));
@@ -950,6 +1022,8 @@ async function runRetryRouteTests() {
 
 async function run() {
   await runIsolatedRouterTests();
+  await testCreativeWorkflowListEndpointUsesBackendRecords();
+  await testCreativeWorkflowDetailUsesNormalizedDto();
   await runRealAppMountTest();
   await runCreateRouteReturnsBeforeBackgroundResearchSettlesTest();
   await runCreateRouteWithCustomWorkflowServiceWithoutRegistryFailsTest();
@@ -1027,11 +1101,11 @@ async function runGetWorkflowUsesActiveRegistryTest() {
     const response = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}`);
     assert.strictEqual(response.statusCode, 200);
     assert.strictEqual(response.body.success, true);
-    assert.strictEqual(response.body.data.status, 'running');
-    assert.strictEqual(response.body.data.task_status, 'running');
-    assert.strictEqual(response.body.data.active_task_id, 'creative-task-route-active');
-    assert.strictEqual(response.body.data.active_task.task_id, 'creative-task-route-active');
-    assert.strictEqual(response.body.data.stages.find(stage => stage.id === 'project').status, 'running');
+    assert.strictEqual(response.body.status, 'running');
+    assert.strictEqual(response.body.workflow.task_status, 'running');
+    assert.strictEqual(response.body.workflow.active_task_id, 'creative-task-route-active');
+    assert.strictEqual(response.body.active_task.task_id, 'creative-task-route-active');
+    assert.strictEqual(response.body.workflow.stages.find(stage => stage.id === 'project').status, 'running');
 
     const persisted = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
     assert.strictEqual(persisted.status, 'running');
