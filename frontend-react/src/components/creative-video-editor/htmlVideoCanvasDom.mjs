@@ -10,6 +10,22 @@ const editableParts = [
   '.badge',
   '.chip',
   '.output',
+  '.card',
+  '.panel',
+  '.visual',
+  '.media',
+  '.asset',
+  '.shape',
+  '.background',
+  '[data-asset-id]',
+  '[data-hv-editable]',
+  'img',
+  'video',
+  'svg',
+  'canvas',
+  'figure',
+  'section',
+  'article',
   'h1',
   'h2',
   'h3',
@@ -27,6 +43,9 @@ const excludedParts = [
   'meta',
   '.hv-caption-layer',
   '.hv-caption-item',
+  '[data-hv-canvas]',
+  '[data-hv-editor-overlay]',
+  '[data-hv-editor-handle]',
   '[data-hv-managed="true"]',
   '[data-role="subtitle-caption"]',
 ];
@@ -48,6 +67,7 @@ export function parsePx(value) {
 export function formatElementLabel(info = {}) {
   if (info.textKey) return String(info.textKey);
   if (info.role) return String(info.role);
+  if (info.assetId) return String(info.assetId);
   if (info.editId) return String(info.editId);
   const firstClass = String(info.className || '').trim().split(/\s+/).filter(Boolean)[0];
   if (firstClass) return `.${firstClass}`;

@@ -23,9 +23,14 @@ const assert = require('assert');
 
   assert.ok(editableSelector.includes('[data-text-key]'));
   assert.ok(editableSelector.includes('[data-role]'));
+  assert.ok(editableSelector.includes('[data-asset-id]'));
+  assert.ok(editableSelector.includes('[data-hv-editable]'));
+  assert.ok(editableSelector.includes('img'));
+  assert.ok(editableSelector.includes('.card'));
   assert.ok(editableSelector.includes('.output'));
   assert.ok(excludedSelector.includes('.hv-caption-layer'));
   assert.ok(excludedSelector.includes('[data-hv-managed="true"]'));
+  assert.ok(excludedSelector.includes('[data-hv-editor-overlay]'));
 
   assert.strictEqual(formatElementLabel({
     textKey: 'headline',
@@ -42,6 +47,15 @@ const assert = require('assert');
     className: 'complaint',
     tagName: 'div',
   }), 'complaint');
+
+  assert.strictEqual(formatElementLabel({
+    textKey: '',
+    role: '',
+    assetId: 'asset_01',
+    editId: 'hv_edit_001',
+    className: 'media',
+    tagName: 'img',
+  }), 'asset_01');
 
   assert.strictEqual(formatElementLabel({
     textKey: '',
