@@ -8,11 +8,7 @@ const mediaPipeline = require('../mediaPipeline');
 const defaultAgentRuns = require('../agent/agentRuns');
 const aiModelConfig = require('../ai/aiModelConfig');
 const appSettings = require('../appSettings');
-const defaultCreativeVideoEditor = require('./creativeVideoEditor');
-const defaultCreativeVideoRerender = require('./creativeVideoRerender');
 const defaultCreativeVideoTtsService = require('../creative-video/ttsService');
-const defaultTtsTimeline = require('../tts/ttsTimeline');
-const sceneSpecService = require('../sceneSpec');
 const aiTextModel = require('../ai/aiTextModel');
 const defaultSourceFetch = require('../source/sourceFetch');
 const defaultSourceAssets = require('../source/sourceAssets');
@@ -1388,91 +1384,50 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     generateCaptions: mediaOptions.generateCaptions,
   };
 
-  const projectStageResult = await runStage(record, 'project', rootDir, async () => ensureSuccess(
-    await services.agentRuns.generateDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
-      workflowId: record.workflow_id,
-      rootDir: mediaRoot,
-      useHtmlVideoLiteWorkflow: true,
-      skipValidation,
-      onProgress: async event => {
-        await emitTaskContextEvent(taskContext, {
-          ...event,
-          type: event?.type || 'stage_progress',
-          stage: 'project',
-          message: event?.message || '正在生成 html-video 工程...',
-        });
-      },
-      projectOptions: mergeProjectOptions(record.target, existingProjectOptions),
-    }),
-    '工程生成失败。',
-    { stage: 'project', sub_stage: 'project', code: 'html_video_project_failed' },
-  ), services, taskContext);
+  const projectStageResult = await runStage(record, 'project', rootDir, async () => {
+    const result = ensureSuccess(
+      await services.agentRuns.generateDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
+        workflowId: record.workflow_id,
+        rootDir: mediaRoot,
+        useHtmlVideoLiteWorkflow: true,
+        skipValidation,
+        onProgress: async event => {
+          await emitTaskContextEvent(taskContext, {
+            ...event,
+            type: event?.type || 'stage_progress',
+            stage: 'project',
+            message: event?.message || '正在生成 html-video 工程...',
+          });
+        },
+        projectOptions: mergeProjectOptions(record.target, existingProjectOptions),
+      }),
+      '工程生成失败。',
+      { stage: 'project', sub_stage: 'project', code: 'html_video_project_failed' },
+    );
+    if (!isHtmlVideoLiteProjectResult(result)) {
+      throw new CreativeWorkflowStageError('html-video production 未返回可用工程。', {
+        stage: 'project',
+        sub_stage: 'project',
+        code: 'html_video_project_missing',
+        project_dir: projectPathFromStageResult(result),
+      });
+    }
+    return result;
+  }, services, taskContext);
   stoppedOrFailed = failIfStoppedOrNull(projectStageResult);
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }
 
-  if (isHtmlVideoLiteProjectResult(projectStageResult)) {
-    const doneAt = getNow(services);
-    await markHtmlVideoLiteFinalStages(record, doneAt, projectStageResult);
-    record.success = true;
-    record.status = 'done';
-    record.message = '创作任务已完成。';
-    record.result = { hyperframes_freeform: projectStageResult.hyperframes_freeform };
-    record.error = null;
-    record.updated_at = doneAt;
-    await syncProjectStageSummariesFromProjectDir(record, extractHtmlVideoProjectPathFromWorkflow(record));
-    const persisted = await persistWorkflow(record, rootDir);
-    return createWorkflowSummary(persisted);
-  }
-
-  if (!skipValidation) {
-    stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'check', rootDir, async () => ensureSuccess(
-      await services.agentRuns.checkDouyinRunHyperframesFreeformProject(record.aweme_id, record.run_id, {
-        rootDir: mediaRoot,
-      }),
-      '工程校验失败。',
-    ), services, taskContext));
-    if (stoppedOrFailed) {
-      return stoppedOrFailed;
-    }
-  }
-
-  stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'render', rootDir, async () => ensureSuccess(
-    await services.agentRuns.renderDouyinRunHyperframesFreeformVideo(record.aweme_id, record.run_id, {
-      rootDir: mediaRoot,
-    }),
-    '视频渲染失败。',
-  ), services, taskContext));
-  if (stoppedOrFailed) {
-    return stoppedOrFailed;
-  }
-
-  let inspectResult = null;
-  if (!skipValidation) {
-    inspectResult = await runStage(record, 'inspect', rootDir, async () => ensureSuccess(
-      await services.agentRuns.inspectDouyinRunHyperframesFreeformVideo(record.aweme_id, record.run_id, {
-        rootDir: mediaRoot,
-      }),
-      '视频巡检失败。',
-    ), services, taskContext);
-    stoppedOrFailed = failIfStoppedOrNull(inspectResult);
-    if (stoppedOrFailed) {
-      return stoppedOrFailed;
-    }
-  }
-
-  if (!await workflowFileExists(workflowId, rootDir)) {
-    return createWorkflowStoppedSummary(workflowId);
-  }
-
   const doneAt = getNow(services);
+  await markHtmlVideoLiteFinalStages(record, doneAt, projectStageResult);
   record.success = true;
   record.status = 'done';
   record.message = '创作任务已完成。';
-  record.result = inspectResult;
+  record.result = { hyperframes_freeform: projectStageResult.hyperframes_freeform };
   record.error = null;
   record.updated_at = doneAt;
+  await syncProjectStageSummariesFromProjectDir(record, extractHtmlVideoProjectPathFromWorkflow(record));
   const persisted = await persistWorkflow(record, rootDir);
   return createWorkflowSummary(persisted);
 }
@@ -1752,11 +1707,6 @@ function extractFrameSpecsFromWorkflow(record) {
     return { frames: [] };
   }
   return frameSpecs;
-}
-
-function extractRenderVersionsFromWorkflow(record) {
-  const versions = record?.result?.hyperframes_freeform?.render?.render_versions;
-  return Array.isArray(versions) ? versions : [];
 }
 
 function projectPathFromStageResult(value) {
@@ -2202,38 +2152,6 @@ async function loadWorkflowWithHtmlVideoProject(workflowId, rootDir) {
       },
     };
   }
-}
-
-async function loadWorkflowWithSceneSpec(workflowId, rootDir) {
-  let record;
-  try {
-    record = await readWorkflow(workflowId, rootDir);
-  } catch {
-    return { record: null, sceneSpec: null, error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
-  }
-  if (!record) {
-    return { record: null, sceneSpec: null, error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
-  }
-  const rawSceneSpec = extractSceneSpecFromWorkflow(record);
-  if (!rawSceneSpec) {
-    return { record, sceneSpec: null, error: { success: false, code: 'NO_SCENE_SPEC', message: '该创作任务尚未生成场景规格。' } };
-  }
-  const sceneSpec = sceneSpecService.normalizeSceneSpec(rawSceneSpec);
-  return { record, sceneSpec, error: null };
-}
-
-async function getCreativeWorkflowVideoSpec(workflowId, options = {}) {
-  const rootDir = options.rootDir || DEFAULT_ROOT;
-  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
-  if (error) return error;
-
-  return {
-    success: true,
-    workflow_id: workflowId,
-    scene_spec: sceneSpec,
-    frame_specs: extractFrameSpecsFromWorkflow(record),
-    render_versions: extractRenderVersionsFromWorkflow(record),
-  };
 }
 
 async function getCreativeWorkflowHtmlVideoProject(workflowId, options = {}) {
@@ -2801,272 +2719,6 @@ async function getCreativeWorkflowAssetFile(workflowId, assetId, options = {}) {
   };
 }
 
-
-async function getCreativeWorkflowSceneSpec(workflowId, options = {}) {
-  const rootDir = options.rootDir || DEFAULT_ROOT;
-  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
-  if (error) return error;
-
-  return {
-    success: true,
-    workflow_id: workflowId,
-    scene_spec: sceneSpec,
-  };
-}
-
-async function patchCreativeWorkflowVideoSpec(workflowId, payload = {}, options = {}) {
-  const rootDir = options.rootDir || DEFAULT_ROOT;
-  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
-  if (error) return error;
-
-  const nextSceneSpec = payload.scene_spec && typeof payload.scene_spec === 'object'
-    ? payload.scene_spec
-    : sceneSpec;
-  const nextFrameSpecs = payload.frame_specs && typeof payload.frame_specs === 'object'
-    ? payload.frame_specs
-    : extractFrameSpecsFromWorkflow(record);
-  const hyperframes = record.result.hyperframes_freeform;
-  hyperframes.project.scene_spec = nextSceneSpec;
-  hyperframes.project.frame_specs = nextFrameSpecs;
-  record.updated_at = new Date().toISOString();
-  await persistWorkflow(record, rootDir);
-
-  return {
-    success: true,
-    workflow_id: workflowId,
-    scene_spec: nextSceneSpec,
-    frame_specs: nextFrameSpecs,
-    render_versions: extractRenderVersionsFromWorkflow(record),
-    requires_tts: !!payload.requires_tts,
-    requires_render: true,
-    message: '视频规格已保存。',
-  };
-}
-
-async function patchCreativeWorkflowSceneSpec(workflowId, edit, options = {}) {
-  const rootDir = options.rootDir || DEFAULT_ROOT;
-  const editor = options.creativeVideoEditor || defaultCreativeVideoEditor;
-  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
-  if (error) return error;
-
-  try {
-    const result = editor.applyEditCommand(sceneSpec, edit);
-    if (!result.success) {
-      return { success: false, code: 'EDIT_FAILED', message: result.message };
-    }
-    const hyperframes = record.result.hyperframes_freeform;
-    hyperframes.project.scene_spec = result.scene_spec;
-    record.updated_at = new Date().toISOString();
-    await persistWorkflow(record, rootDir);
-
-    return {
-      success: true,
-      workflow_id: workflowId,
-      scene_spec: result.scene_spec,
-      edit_type: result.edit_type,
-      requires_tts: result.requires_tts,
-      requires_render: result.requires_render,
-      message: '编辑已保存。',
-    };
-  } catch (error) {
-    return { success: false, code: 'EDIT_FAILED', message: `编辑失败：${error.message}` };
-  }
-}
-
-async function remixCreativeWorkflow(workflowId, payload = {}, options = {}) {
-  const rootDir = options.rootDir || DEFAULT_ROOT;
-  const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
-  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
-  if (error) return error;
-
-  const frameSpecs = extractFrameSpecsFromWorkflow(record);
-  const sourceInput = safeString(payload.input)
-    || safeString(record.input?.raw_text)
-    || safeString(record.creative_context?.input?.raw_text)
-    || `二创 ${workflowId}`;
-  const created = await createCreativeWorkflow({
-    ...(payload || {}),
-    input: sourceInput,
-  }, {
-    rootDir,
-    mediaRoot,
-    services: options.services || {},
-  });
-  if (!created.success) return created;
-
-  const remixRecord = await readWorkflow(created.workflow_id, rootDir);
-  remixRecord.status = 'done';
-  remixRecord.success = true;
-  remixRecord.source_workflow_id = workflowId;
-  remixRecord.message = '二创任务已创建。';
-  remixRecord.result = {
-    ...(record.result || {}),
-    source_workflow_id: workflowId,
-    hyperframes_freeform: {
-      ...(record.result?.hyperframes_freeform || {}),
-      project: {
-        ...(record.result?.hyperframes_freeform?.project || {}),
-        scene_spec: sceneSpec,
-        frame_specs: frameSpecs,
-      },
-    },
-  };
-  remixRecord.updated_at = getNow(options.services || {});
-  await persistWorkflow(remixRecord, rootDir);
-
-  return {
-    success: true,
-    workflow_id: created.workflow_id,
-    source_workflow_id: workflowId,
-    scene_spec: sceneSpec,
-    frame_specs: frameSpecs,
-    message: '二创任务已创建。',
-  };
-}
-
-async function rewriteCreativeWorkflowScene(workflowId, sceneId, payload, options = {}) {
-  const rootDir = options.rootDir || DEFAULT_ROOT;
-  const editor = options.creativeVideoEditor || defaultCreativeVideoEditor;
-  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
-  if (error) return error;
-
-  const scene = (sceneSpec.scenes || []).find(s => s.id === sceneId);
-  if (!scene) {
-    return { success: false, code: 'NOT_FOUND', message: `未找到场景 ${sceneId}。` };
-  }
-
-  try {
-    const result = editor.applyRewriteResult(sceneSpec, sceneId, payload);
-    if (!result.success) {
-      return { success: false, code: 'REWRITE_FAILED', message: result.message };
-    }
-    const hyperframes = record.result.hyperframes_freeform;
-    hyperframes.project.scene_spec = result.scene_spec;
-    record.updated_at = new Date().toISOString();
-    await persistWorkflow(record, rootDir);
-
-    return {
-      success: true,
-      workflow_id: workflowId,
-      scene_spec: result.scene_spec,
-      requires_tts: result.requires_tts,
-      requires_render: result.requires_render,
-      message: '场景已重写。',
-    };
-  } catch (error) {
-    return { success: false, code: 'REWRITE_FAILED', message: `重写失败：${error.message}` };
-  }
-}
-
-async function ttsCreativeWorkflowScene(workflowId, sceneId, payload, options = {}) {
-  const rootDir = options.rootDir || DEFAULT_ROOT;
-  const rerender = options.creativeVideoRerender || defaultCreativeVideoRerender;
-  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
-  if (error) return error;
-
-  const scene = (sceneSpec.scenes || []).find(s => s.id === sceneId);
-  if (!scene) {
-    return { success: false, code: 'NOT_FOUND', message: `未找到场景 ${sceneId}。` };
-  }
-
-  const hyperframes = record.result.hyperframes_freeform;
-  const previousOutputPath = hyperframes?.render?.output_path || '';
-  const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
-  const inputServices = options.services || {};
-  const readAudioDuration = inputServices.readAudioDuration || (async filePath => {
-    const duration = await defaultTtsTimeline.readAudioDuration(filePath, options.audioDurationOptions || {});
-    return duration?.success ? duration.duration : 0;
-  });
-
-  try {
-    const result = await rerender.rerenderSceneWithLocalTts({
-      workflowId,
-      sceneSpec,
-      sceneId,
-      projectDir,
-      outputPath: payload?.outputPath || previousOutputPath,
-      previousOutputPath,
-      services: {
-        ...inputServices,
-        ttsService: inputServices.ttsService || defaultCreativeVideoTtsService,
-        readAudioDuration,
-      },
-    });
-
-    if (result.success) {
-      const requiresRender = result.requires_render === true;
-      hyperframes.render = {
-        ...hyperframes.render,
-        status: requiresRender ? 'needs_render' : 'ready',
-        ...(result.output_path ? { output_path: result.output_path } : {}),
-        message: result.message || (requiresRender ? '场景配音已更新，需要重新导出成片。' : '场景配音已更新。'),
-      };
-      if (result.scene_spec) {
-        hyperframes.project.scene_spec = result.scene_spec;
-      }
-      record.updated_at = new Date().toISOString();
-      await persistWorkflow(record, rootDir);
-    }
-
-    return {
-      success: result.success,
-      workflow_id: workflowId,
-      scene_id: sceneId,
-      scene_spec: result.scene_spec || sceneSpec,
-      output_path: result.output_path || previousOutputPath,
-      previous_output_path: result.previous_output_path,
-      requires_render: result.requires_render === true,
-      message: result.message || (result.success ? '场景配音已更新。' : '场景配音失败。'),
-    };
-  } catch (error) {
-    return { success: false, code: 'TTS_FAILED', message: `场景配音失败：${error.message}` };
-  }
-}
-
-async function rerenderCreativeWorkflow(workflowId, payload, options = {}) {
-  const rootDir = options.rootDir || DEFAULT_ROOT;
-  const rerender = options.creativeVideoRerender || defaultCreativeVideoRerender;
-  const { record, sceneSpec, error } = await loadWorkflowWithSceneSpec(workflowId, rootDir);
-  if (error) return error;
-
-  const hyperframes = record.result.hyperframes_freeform;
-  const previousOutputPath = hyperframes?.render?.output_path || '';
-
-  try {
-    const result = await rerender.rerenderSceneSpecProject({
-      workflowId,
-      sceneSpec,
-      outputPath: payload?.outputPath || previousOutputPath,
-      previousOutputPath,
-      services: options.services || {},
-    });
-
-    if (result.success) {
-      hyperframes.render = {
-        ...hyperframes.render,
-        status: 'ready',
-        output_path: result.output_path,
-        message: '成片已重新渲染。',
-      };
-      if (result.scene_spec) {
-        hyperframes.project.scene_spec = result.scene_spec;
-      }
-      record.updated_at = new Date().toISOString();
-      await persistWorkflow(record, rootDir);
-    }
-
-    return {
-      success: result.success,
-      workflow_id: workflowId,
-      output_path: result.output_path,
-      previous_output_path: result.previous_output_path,
-      message: result.message || (result.success ? '成片已重新渲染。' : '重新渲染失败。'),
-    };
-  } catch (error) {
-    return { success: false, code: 'RENDER_FAILED', message: `重新渲染失败：${error.message}` };
-  }
-}
-
 module.exports = {
   STAGE_IDS,
   STAGE_LABELS,
@@ -3085,7 +2737,6 @@ module.exports = {
   makeLocalCreativeAwemeId,
   appendWorkflowModelCall,
   recoverStaleWorkflowsOnStartup,
-  getCreativeWorkflowVideoSpec,
   getCreativeWorkflowHtmlVideoProject,
   patchCreativeWorkflowHtmlVideoProject,
   renderCreativeWorkflowHtmlVideoProject,
@@ -3108,13 +2759,6 @@ module.exports = {
   getHtmlVideoProjectExportFile,
   getCreativeWorkflowAssetFile,
   extractHtmlVideoProjectPathFromWorkflow,
-  patchCreativeWorkflowVideoSpec,
-  getCreativeWorkflowSceneSpec,
-  patchCreativeWorkflowSceneSpec,
-  rewriteCreativeWorkflowScene,
-  ttsCreativeWorkflowScene,
-  rerenderCreativeWorkflow,
-  remixCreativeWorkflow,
   runResearchProvider,
   defaultResearchProvider,
   defaultWebSearchProvider,

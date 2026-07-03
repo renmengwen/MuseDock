@@ -56,7 +56,7 @@ function getErrorCode(error) {
 
 function getFailureStatus(error) {
   const code = getErrorCode(error);
-  if (error?.status === 404 || code === 'NO_HTML_VIDEO_PROJECT') return 'legacy_fallback';
+  if (code === 'NO_HTML_VIDEO_PROJECT') return 'no_html_video_project';
   if (code === 'HTML_VIDEO_NOT_CONFIGURED' || code === 'ENVIRONMENT_NOT_CONFIGURED' || code === 'environment_not_configured') {
     return 'not_configured';
   }
@@ -87,7 +87,7 @@ const STATUS_MESSAGES = {
   error: '操作失败。',
   not_configured: '渲染环境未配置。',
   needs_validation: '工程需要验证。',
-  legacy_fallback: '未找到 HtmlVideoProject，已切换旧版编辑器。',
+  no_html_video_project: '未找到 html-video 工程。',
 };
 
 export function useHtmlVideoProject({ workflowId, api }) {
@@ -148,8 +148,8 @@ export function useHtmlVideoProject({ workflowId, api }) {
       setMessage(error?.message || '工程需要验证。请先完成工程校验后再继续。');
       return nextStatus;
     }
-    if (nextStatus === 'legacy_fallback') {
-      setMessage('未找到 HtmlVideoProject，已切换旧版编辑器。');
+    if (nextStatus === 'no_html_video_project') {
+      setMessage(STATUS_MESSAGES.no_html_video_project);
       return nextStatus;
     }
     setMessage(error?.data?.message || error?.message || fallbackMessage);

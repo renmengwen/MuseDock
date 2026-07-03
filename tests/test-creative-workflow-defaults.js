@@ -64,19 +64,22 @@ function createServices({
     },
     generateDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
       calls.push({ name: 'project', awemeId, runId, options });
-      return { success: true, status: 'done', message: '工程生成完成。' };
-    },
-    checkDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
-      calls.push({ name: 'check', awemeId, runId, options });
-      return { success: true, status: 'done', message: '工程校验通过。' };
-    },
-    renderDouyinRunHyperframesFreeformVideo: async (awemeId, runId, options) => {
-      calls.push({ name: 'render', awemeId, runId, options });
-      return { success: true, status: 'done', message: '视频渲染完成。' };
-    },
-    inspectDouyinRunHyperframesFreeformVideo: async (awemeId, runId, options) => {
-      calls.push({ name: 'inspect', awemeId, runId, options });
-      return { success: true, status: 'done', message: '视频巡检通过。' };
+      const projectDir = `${options.rootDir || ''}/${awemeId}/agent_runs/${runId}-html-video`;
+      return {
+        success: true,
+        status: 'done',
+        message: 'html-video 成片完成。',
+        hyperframes_freeform: {
+          project_dir: projectDir,
+          project: {
+            status: 'ready',
+            render_mode: 'html-video',
+            html_video_project_path: projectDir,
+          },
+          render: { status: 'rendered' },
+          visual_inspect: { status: 'passed' },
+        },
+      };
     },
     ...agentRunOverrides,
   };
@@ -303,11 +306,6 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
     workflowId,
     defaults,
     systemSettings,
-    agentRuns: {
-      checkDouyinRunHyperframesFreeformProject: async () => {
-        throw new Error('skipValidation=true 时不应运行工程校验');
-      },
-    },
   });
   services.appSettings.getCreativeDefaults = async () => defaults;
   services.appSettings.getEffectiveSystemSettings = async () => systemSettings;
@@ -348,7 +346,7 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   });
 
   assert.equal(run.success, true);
-  assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project', 'render']);
+  assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project']);
   const projectCall = calls.find(call => call.name === 'project');
   assert.equal(projectCall.options.skipValidation, true);
   assert.equal(projectCall.options.projectOptions.aspect_ratio, 'runtime_aspect');

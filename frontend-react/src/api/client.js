@@ -181,61 +181,6 @@ export const api = {
       method: 'DELETE',
     });
   },
-  getCreativeWorkflowSceneSpec(workflowId) {
-    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/scene-spec`);
-  },
-  patchCreativeWorkflowSceneSpec(workflowId, payload) {
-    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/scene-spec`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
-    });
-  },
-  rewriteCreativeWorkflowScene(workflowId, sceneId, payload) {
-    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/scenes/${encodeURIComponent(sceneId)}/rewrite`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
-    });
-  },
-  ttsCreativeWorkflowScene(workflowId, sceneId, payload) {
-    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/scenes/${encodeURIComponent(sceneId)}/tts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
-    });
-  },
-  rerenderCreativeWorkflow(workflowId, payload) {
-    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/rerender`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
-    });
-  },
-  getCreativeVideoSpec(workflowId) {
-    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/video-spec`);
-  },
-  patchCreativeVideoSpec(workflowId, payload) {
-    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/video-spec`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
-    });
-  },
-  rerenderCreativeVideo(workflowId, payload) {
-    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/rerender`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
-    });
-  },
-  remixCreativeVideo(workflowId, payload) {
-    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/remix`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
-    });
-  },
   getHtmlVideoProject(workflowId) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project`);
   },

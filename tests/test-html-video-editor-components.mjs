@@ -247,7 +247,7 @@ assert.match(editor, /selectedFrame\s*=\s*frames\.find/, 'HtmlVideoProjectEditor
 
 assert.ok(shell.includes('useHtmlVideoProject'), 'CreativeVideoEditor should try HtmlVideoProject first');
 assert.ok(shell.includes('HtmlVideoProjectEditor'), 'CreativeVideoEditor should render HtmlVideoProjectEditor');
-assert.match(shell, /NO_HTML_VIDEO_PROJECT|status\s*===\s*404|\.status\s*===\s*404/, 'CreativeVideoEditor should fallback on missing HtmlVideoProject');
+assert.match(shell, /no_html_video_project/, 'CreativeVideoEditor should handle missing HtmlVideoProject');
 
 for (const componentPath of [
   'frontend-react/src/components/creative-video-editor/HtmlVideoProjectEditor.jsx',

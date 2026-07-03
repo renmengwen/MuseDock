@@ -230,54 +230,46 @@ async function testBackwardCompatibleCallWithoutNewParamsSucceeds() {
 }
 
 async function testFacadePassesTemplatePreferenceToHtmlVideoWorkflow() {
-  const previousProductionEnabled = process.env.HTML_VIDEO_PRODUCTION_ENABLED;
-  process.env.HTML_VIDEO_PRODUCTION_ENABLED = 'true';
   let receivedPreferredTemplateId = null;
   let receivedLockTemplate = null;
-  try {
-    const result = await facade.generateCreativeVideoProject({
-      workflowId: 'wf_facade_pass_through',
-      runId: 'run_001',
-      creativeContext: { input: { raw_text: '模板偏好测试' } },
-      target: {
-        preferredTemplateId: 'vertical_template',
-        lockTemplate: true,
-        useHtmlVideoProduction: true,
-      },
-      services: {
-        htmlVideoWorkflow: {
-          generateHtmlVideo: async ({ preferredTemplateId, lockTemplate }) => {
-            receivedPreferredTemplateId = preferredTemplateId;
-            receivedLockTemplate = lockTemplate;
-            return {
-              success: true,
-              message: 'html-video 成片完成。',
-              render_mode: 'html-video',
-              project: { frames: [] },
-              project_dir: 'D:/tmp/html-video-template-pref',
-              html_video_project_path: 'D:/tmp/html-video-template-pref',
-              files: [],
-            };
-          },
-        },
-        aiTextModel: {
-          callTextModel: async () => ({
+  const result = await facade.generateCreativeVideoProject({
+    workflowId: 'wf_facade_pass_through',
+    runId: 'run_001',
+    creativeContext: { input: { raw_text: '模板偏好测试' } },
+    target: {
+      preferredTemplateId: 'vertical_template',
+      lockTemplate: true,
+    },
+    services: {
+      htmlVideoWorkflow: {
+        generateHtmlVideo: async ({ preferredTemplateId, lockTemplate }) => {
+          receivedPreferredTemplateId = preferredTemplateId;
+          receivedLockTemplate = lockTemplate;
+          return {
             success: true,
-            text: JSON.stringify({
-              scene_spec: sceneSpec('9:16'),
-            }),
-          }),
+            message: 'html-video 成片完成。',
+            render_mode: 'html-video',
+            project: { frames: [] },
+            project_dir: 'D:/tmp/html-video-template-pref',
+            html_video_project_path: 'D:/tmp/html-video-template-pref',
+            files: [],
+          };
         },
       },
-    });
+      aiTextModel: {
+        callTextModel: async () => ({
+          success: true,
+          text: JSON.stringify({
+            scene_spec: sceneSpec('9:16'),
+          }),
+        }),
+      },
+    },
+  });
 
-    assert.equal(result.success, true);
-    assert.equal(receivedPreferredTemplateId, 'vertical_template');
-    assert.equal(receivedLockTemplate, true);
-  } finally {
-    if (previousProductionEnabled == null) delete process.env.HTML_VIDEO_PRODUCTION_ENABLED;
-    else process.env.HTML_VIDEO_PRODUCTION_ENABLED = previousProductionEnabled;
-  }
+  assert.equal(result.success, true);
+  assert.equal(receivedPreferredTemplateId, 'vertical_template');
+  assert.equal(receivedLockTemplate, true);
 }
 
 (async () => {

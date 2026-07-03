@@ -21,6 +21,10 @@ function services(now = '2026-06-18T00:00:00.000Z') {
   return {
     idFactory: () => WORKFLOW_ID,
     now: () => now,
+    appSettings: {
+      getCreativeDefaults: async () => ({ sourceImageAnalysisEnabled: false }),
+      getEffectiveSystemSettings: async () => ({ skipValidation: true }),
+    },
     researchService: {
       createResearchContext: async ({ now: n }) => ({ status: 'disabled', query: '', sources: [], summary: '', updated_at: n }),
     },

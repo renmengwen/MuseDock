@@ -89,8 +89,6 @@ node tests/test-html-video-real-render-smoke.js
 | `ASR_LANGUAGE` | MiMo ASR 识别语言，支持 `auto`、`zh`、`en` | `auto` |
 | `FFMPEG_PATH` | 手动指定 ffmpeg 可执行文件路径 | 空 |
 | `FFPROBE_PATH` | 手动指定 ffprobe 可执行文件路径 | 空 |
-| `HTML_VIDEO_PRODUCTION_ENABLED` | 启用 html-video production path | `true` |
-| `HTML_VIDEO_LEGACY_FALLBACK_ENABLED` | 新链路失败时允许 legacy fallback | `false` |
 | `RUN_HTML_VIDEO_REAL_RENDER` | 设置为 `1` 时运行真实渲染烟测 | 空 |
 
 > headless / CI 等无界面场景，也可以用环境变量直接提供凭据：`OPENAI_API_KEY`、`ASR_API_KEY`、`ASR_PROVIDER`、`MIMO_API_KEY`、`MIMO_BASE_URL`、`MIMO_ASR_MODEL`、`MIMO_TTS_MODEL`、`PEXELS_API_KEY`（或 `PEXELS_API_KEYS`）。它们仅在设置中心对应项为空时作为回退生效。

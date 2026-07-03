@@ -16,15 +16,11 @@ const workflowDecision = require('./agentWorkflowDecision');
 const storyboardSchema = require('../storyboard/storyboardSchema');
 const narrationBudget = require('../storyboard/storyboardNarrationBudget');
 const narrationQuality = require('../creative-video/narrationQuality');
-const defaultHyperframesProject = require('../hyperframes/hyperframesProject');
-const defaultHyperframesRenderer = require('../hyperframes/hyperframesRenderer');
 const defaultHyperframesSkillContext = require('../hyperframes/hyperframesSkillContext');
 const defaultHyperframesFreeformAgent = require('../hyperframes/hyperframesFreeformAgent');
-const defaultHyperframesFreeformProject = require('../hyperframes/hyperframesFreeformProject');
-const defaultHyperframesFreeformQuality = require('../hyperframes/hyperframesFreeformQuality');
 const defaultCreativeVideoWorkflowFacade = require('../creative-video/workflowFacade');
 const { createAgentRunsFreeformWorkflow } = require('./agentRunsFreeformWorkflow');
-const { normalizeFreeformNarrationScenes, resolveFreeformTargetDurationSec, replaceFreeformBriefScenes, fitFreeformNarrationToBudget, compressFreeformNarrationWithModel, repairFreeformNarrationWithModel, pathExists, mapFreeformProjectFilesToDir } = require('./agentRunsFreeformHelpers');
+const { normalizeFreeformNarrationScenes, resolveFreeformTargetDurationSec, replaceFreeformBriefScenes, fitFreeformNarrationToBudget, compressFreeformNarrationWithModel, repairFreeformNarrationWithModel, mapFreeformProjectFilesToDir } = require('./agentRunsFreeformHelpers');
 
 const TEMPLATE_VIRAL_REWRITE = 'viral_rewrite';
 const MAX_COMMENTS_CHARS = agentTemplates.MAX_COMMENTS_CHARS;
@@ -114,14 +110,6 @@ function getTtsSegmentFileName(index, format = 'wav') {
 
 function getTtsUrl(awemeId, runId, fileName) {
   return `/api/agents/douyin/${encodeURIComponent(String(awemeId))}/runs/${encodeURIComponent(String(runId))}/tts/${encodeURIComponent(fileName)}`;
-}
-
-function getHyperframesProjectDir(awemeId, runId, rootDir) {
-  return path.join(getAgentRunsDir(awemeId, rootDir), `${runId}-hyperframes`);
-}
-
-function getHyperframesFileUrl(awemeId, runId, fileName) {
-  return `/api/agents/douyin/${encodeURIComponent(String(awemeId))}/runs/${encodeURIComponent(String(runId))}/hyperframes/files/${encodeURIComponent(fileName)}`;
 }
 
 async function readJsonIfExists(filePath) {
@@ -744,9 +732,6 @@ const freeformWorkflow = createAgentRunsFreeformWorkflow({
   defaultSceneTts,
   defaultHyperframesSkillContext,
   defaultHyperframesFreeformAgent,
-  defaultHyperframesFreeformProject,
-  defaultHyperframesFreeformQuality,
-  defaultHyperframesRenderer,
   defaultCreativeVideoWorkflowFacade,
   getLogger,
   logEvent,
@@ -763,7 +748,6 @@ const freeformWorkflow = createAgentRunsFreeformWorkflow({
   fitFreeformNarrationToBudget,
   compressFreeformNarrationWithModel,
   repairFreeformNarrationWithModel,
-  pathExists,
   mapFreeformProjectFilesToDir,
   buildHtmlVideoExportFileUrl,
 });
@@ -776,9 +760,6 @@ const {
   generateDouyinRunHyperframesFreeformBrief,
   synthesizeDouyinRunHyperframesFreeformAudio,
   generateDouyinRunHyperframesFreeformProject,
-  checkDouyinRunHyperframesFreeformProject,
-  renderDouyinRunHyperframesFreeformVideo,
-  inspectDouyinRunHyperframesFreeformVideo,
 } = freeformWorkflow;
 
 async function createDouyinStoryboardPlanRun(awemeId, options = {}) {
@@ -1432,314 +1413,6 @@ async function createDouyinRunStoryboard(awemeId, runId, options = {}) {
   };
 }
 
-async function createDouyinRunHyperframesProject(awemeId, runId, options = {}) {
-  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
-  if (!isSafeRunId(runId)) {
-    return {
-      success: false,
-      aweme_id: String(awemeId || ''),
-      run_id: String(runId || ''),
-      message: '未找到或非法的 Agent 运行记录',
-    };
-  }
-
-  const runPath = getRunPath(awemeId, runId, options.rootDir);
-  const run = await readJsonIfExists(runPath);
-  if (!run) {
-    return {
-      success: false,
-      aweme_id: String(awemeId),
-      run_id: String(runId),
-      message: '未找到该 Agent 运行记录',
-    };
-  }
-  if (!Array.isArray(run?.storyboard?.scenes) || run.storyboard.scenes.length === 0) {
-    return {
-      success: false,
-      aweme_id: String(awemeId),
-      run_id: String(runId),
-      message: '请先生成 AI 分镜。',
-    };
-  }
-  if (run.video?.status === 'rendering') {
-    const video = {
-      ...run.video,
-      message: run.video.message || '视频正在渲染中，请等待当前任务完成后再重新生成视频工程。',
-    };
-    return {
-      success: false,
-      aweme_id: String(awemeId),
-      run_id: String(runId),
-      message: video.message,
-      video,
-    };
-  }
-
-  const projectService = options.hyperframesProject || defaultHyperframesProject;
-  const projectDir = getHyperframesProjectDir(awemeId, runId, options.rootDir);
-  const renderOptions = defaultHyperframesProject.normalizeRenderOptions(options.renderOptions || run.video?.render_options || {});
-  const result = await projectService.createOriginalCaptionProject({ run, projectDir, renderOptions });
-
-  if (!result.success) {
-    const video = {
-      status: 'failed',
-      template: 'ai_storyboard_cards',
-      message: result.message || '视频工程生成失败。',
-      updated_at: new Date().toISOString(),
-    };
-    const nextRun = { ...run, video, updated_at: new Date().toISOString() };
-    nextRun.workflow = workflowDecision.decideNextAction(nextRun);
-    await writeJson(runPath, nextRun);
-    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video, workflow: nextRun.workflow };
-  }
-
-  const video = {
-    status: 'project_ready',
-    template: result.template,
-    project_dir: result.project_dir,
-    index_path: result.index_path,
-    storyboard_path: result.storyboard_path,
-    captions_path: result.captions_path,
-    project_json_path: result.project_json_path,
-    duration: result.duration,
-    render_options: result.render_options || renderOptions,
-    video_quality_report: result.video_quality_report || result.project?.video_quality_report || null,
-    message: result.message || '视频工程已生成。',
-    updated_at: new Date().toISOString(),
-  };
-  const nextRun = { ...run, video, updated_at: new Date().toISOString() };
-  nextRun.workflow = workflowDecision.decideNextAction(nextRun);
-  await writeJson(runPath, nextRun);
-  return { success: true, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video, workflow: nextRun.workflow };
-}
-
-async function updateDouyinRunStoryboard(awemeId, runId, storyboard, options = {}) {
-  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
-  if (!isSafeRunId(runId)) {
-    return {
-      success: false,
-      aweme_id: String(awemeId || ''),
-      run_id: String(runId || ''),
-      message: '未找到或非法的 Agent 运行记录',
-    };
-  }
-
-  const runPath = getRunPath(awemeId, runId, options.rootDir);
-  const run = await readJsonIfExists(runPath);
-  if (!run) {
-    return {
-      success: false,
-      aweme_id: String(awemeId),
-      run_id: String(runId),
-      message: '未找到该 Agent 运行记录',
-    };
-  }
-
-  const captions = Array.isArray(run?.tts?.captions) ? run.tts.captions : [];
-  if (!captions.length) {
-    return {
-      success: false,
-      aweme_id: String(awemeId),
-      run_id: String(runId),
-      message: '请先完成 TTS 合成并生成字幕时间轴。',
-    };
-  }
-
-  const validation = storyboardSchema.validateStoryboardEditableInput({ storyboard, captions });
-  if (!validation.success) {
-    return {
-      success: false,
-      aweme_id: String(awemeId),
-      run_id: String(runId),
-      message: '分镜校验失败，请修正后再保存。',
-      storyboard_schema_validation: validation,
-    };
-  }
-
-  const normalized = storyboardSchema.normalizeStoryboard({ storyboard, captions });
-  const updatedRun = {
-    ...run,
-    storyboard: normalized,
-    storyboard_schema_validation: { success: true, errors: [] },
-    video: null,
-    updated_at: new Date().toISOString(),
-  };
-  updatedRun.workflow = workflowDecision.decideNextAction(updatedRun);
-  await writeJson(runPath, updatedRun);
-
-  return {
-    success: true,
-    aweme_id: String(awemeId),
-    run_id: String(runId),
-    message: '分镜已保存，请重新生成视频工程。',
-    storyboard: normalized,
-    storyboard_schema_validation: updatedRun.storyboard_schema_validation,
-    workflow: updatedRun.workflow,
-  };
-}
-
-async function renderDouyinRunHyperframesVideo(awemeId, runId, options = {}) {
-  if (!isSafeId(awemeId)) return createInvalidAwemeResult(awemeId);
-  if (!isSafeRunId(runId)) {
-    return {
-      success: false,
-      aweme_id: String(awemeId || ''),
-      run_id: String(runId || ''),
-      message: '未找到或非法的 Agent 运行记录',
-    };
-  }
-
-  const runPath = getRunPath(awemeId, runId, options.rootDir);
-  const run = await readJsonIfExists(runPath);
-  if (!run) {
-    return {
-      success: false,
-      aweme_id: String(awemeId),
-      run_id: String(runId),
-      message: '未找到该 Agent 运行记录',
-    };
-  }
-  if (run.video?.status === 'rendering') {
-    const video = {
-      ...run.video,
-      message: run.video.message || '视频正在渲染中，请等待当前任务完成。',
-    };
-    return {
-      success: false,
-      aweme_id: String(awemeId),
-      run_id: String(runId),
-      message: video.message,
-      video,
-    };
-  }
-
-  const projectDir = run.video?.project_dir || getHyperframesProjectDir(awemeId, runId, options.rootDir);
-  const renderer = options.hyperframesRenderer || defaultHyperframesRenderer;
-  const renderOptions = defaultHyperframesProject.normalizeRenderOptions(run.video?.render_options || {});
-  const runQualityReport = run.video?.video_quality_report || null;
-  const projectJsonPath = run.video?.project_json_path || path.join(projectDir, 'project.json');
-  const projectJson = await readJsonIfExists(projectJsonPath);
-  const diskQualityReport = projectJson?.video_quality_report || null;
-  const qualityReport = [runQualityReport, diskQualityReport].find(report => report?.pass === false)
-    || runQualityReport
-    || diskQualityReport
-    || null;
-  if (qualityReport && qualityReport.pass === false) {
-    const firstError = Array.isArray(qualityReport.issues)
-      ? qualityReport.issues.find(issue => issue?.severity === 'error') || qualityReport.issues[0]
-      : null;
-    const video = {
-      ...(run.video || {}),
-      status: 'failed',
-      render_options: renderOptions,
-      video_quality_report: qualityReport,
-      message: firstError?.message
-        ? `视频质量未通过：${firstError.message}`
-        : '视频质量未通过，请先重新生成分镜或调整视频工程。',
-      updated_at: new Date().toISOString(),
-    };
-    const nextRun = { ...run, video, updated_at: new Date().toISOString() };
-    nextRun.workflow = workflowDecision.decideNextAction(nextRun);
-    await writeJson(runPath, nextRun);
-    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video, workflow: nextRun.workflow };
-  }
-  const renderingVideo = {
-    ...(run.video || {}),
-    status: 'rendering',
-    template: run.video?.template || 'ai_storyboard_cards',
-    project_dir: projectDir,
-    render_options: renderOptions,
-    message: '视频正在渲染中，请勿刷新后重复生成视频工程。',
-    updated_at: new Date().toISOString(),
-  };
-  const renderingRun = { ...run, video: renderingVideo, updated_at: new Date().toISOString() };
-  renderingRun.workflow = workflowDecision.decideNextAction(renderingRun);
-  await writeJson(runPath, renderingRun);
-
-  const result = await renderer.renderHyperframesProject({ projectDir, renderOptions });
-
-  if (!result.success) {
-    const video = {
-      ...renderingVideo,
-      status: 'failed',
-      render_options: renderOptions,
-      message: result.message || '视频渲染失败。',
-      updated_at: new Date().toISOString(),
-    };
-    const nextRun = { ...run, video, updated_at: new Date().toISOString() };
-    nextRun.workflow = workflowDecision.decideNextAction(nextRun);
-    await writeJson(runPath, nextRun);
-    return { success: false, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video, workflow: nextRun.workflow };
-  }
-
-  const video = {
-    ...renderingVideo,
-    status: 'rendered',
-    template: run.video?.template || 'ai_storyboard_cards',
-    project_dir: projectDir,
-    output_path: result.output_path,
-    output_url: getHyperframesFileUrl(awemeId, runId, 'output.mp4'),
-    render_options: renderOptions,
-    message: result.message || '视频渲染完成。',
-    updated_at: new Date().toISOString(),
-  };
-  const nextRun = { ...run, video, updated_at: new Date().toISOString() };
-  nextRun.workflow = workflowDecision.decideNextAction(nextRun);
-  await writeJson(runPath, nextRun);
-  return { success: true, aweme_id: String(awemeId), run_id: String(runId), message: video.message, video, workflow: nextRun.workflow };
-}
-
-function resolveDouyinRunHyperframesFile(awemeId, runId, fileName, options = {}) {
-  if (!isSafeId(awemeId) || !isSafeRunId(runId)) {
-    throw new Error('Invalid HyperFrames file request');
-  }
-
-  const name = String(fileName || '');
-  if (!name || path.basename(name) !== name || name !== 'output.mp4') {
-    throw new Error('Invalid HyperFrames file request');
-  }
-
-  const projectDir = path.resolve(getHyperframesProjectDir(awemeId, runId, options.rootDir));
-  const targetPath = path.resolve(projectDir, name);
-  const relative = path.relative(projectDir, targetPath);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error('HyperFrames file is outside project directory');
-  }
-
-  return targetPath;
-}
-
-function resolveDouyinRunHyperframesFreeformFile(awemeId, runId, fileName, options = {}) {
-  if (!isSafeId(awemeId) || !isSafeRunId(runId)) {
-    throw new Error('非法的 HyperFrames 自由工程文件请求。');
-  }
-
-  const projectDir = defaultHyperframesFreeformProject.getFreeformProjectDir(awemeId, runId, options.rootDir);
-  return defaultHyperframesFreeformProject.resolveFreeformFile(projectDir, fileName);
-}
-
-async function saveDouyinRunHyperframesFreeformFile(awemeId, runId, fileName, content, options = {}) {
-  if (!isSafeId(awemeId) || !isSafeRunId(runId)) {
-    throw new Error('非法的 HyperFrames 自由工程文件请求。');
-  }
-
-  const projectDir = defaultHyperframesFreeformProject.getFreeformProjectDir(awemeId, runId, options.rootDir);
-  const nextContent = content && typeof content === 'object' && Object.prototype.hasOwnProperty.call(content, 'content')
-    ? content.content
-    : content;
-  const result = await defaultHyperframesFreeformProject.writeFreeformFile({
-    projectDir,
-    fileName,
-    content: nextContent,
-  });
-
-  return {
-    ...result,
-    aweme_id: String(awemeId),
-    run_id: String(runId),
-  };
-}
-
 async function synthesizeDouyinRunTts(awemeId, runId, options = {}) {
   if (!isSafeId(awemeId)) {
     return createInvalidAwemeResult(awemeId);
@@ -1942,21 +1615,12 @@ module.exports = {
   generateDouyinRunHyperframesFreeformBrief,
   synthesizeDouyinRunHyperframesFreeformAudio,
   generateDouyinRunHyperframesFreeformProject,
-  checkDouyinRunHyperframesFreeformProject,
-  renderDouyinRunHyperframesFreeformVideo,
-  inspectDouyinRunHyperframesFreeformVideo,
   synthesizeDouyinRunTts,
   synthesizeDouyinRunSceneTts,
   compressDouyinRunSceneNarration,
   resolveDouyinRunTtsFile,
   createDouyinRunStoryboard,
   createDouyinRunVisualStoryboard,
-  updateDouyinRunStoryboard,
-  createDouyinRunHyperframesProject,
-  renderDouyinRunHyperframesVideo,
-  resolveDouyinRunHyperframesFile,
-  resolveDouyinRunHyperframesFreeformFile,
-  saveDouyinRunHyperframesFreeformFile,
   decideNextAction: workflowDecision.decideNextAction,
   listAgentTemplates: agentTemplates.listAgentTemplates,
   summarizeComments,

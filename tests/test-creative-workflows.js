@@ -51,19 +51,24 @@ function createFakeServices(overrides = {}) {
     },
     generateDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
       calls.push({ name: 'project', awemeId, runId, options });
-      return { success: true, status: 'done', message: '工程生成完成' };
-    },
-    checkDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
-      calls.push({ name: 'check', awemeId, runId, options });
-      return { success: true, status: 'done', message: '工程校验通过' };
-    },
-    renderDouyinRunHyperframesFreeformVideo: async (awemeId, runId, options) => {
-      calls.push({ name: 'render', awemeId, runId, options });
-      return { success: true, status: 'done', message: '视频渲染完成' };
-    },
-    inspectDouyinRunHyperframesFreeformVideo: async (awemeId, runId, options) => {
-      calls.push({ name: 'inspect', awemeId, runId, options });
-      return { success: true, status: 'done', message: '视频巡检通过', inspect: { status: 'passed' } };
+      const projectDir = path.join(options.rootDir || '', String(awemeId), 'agent_runs', `${runId}-html-video`);
+      return {
+        success: true,
+        status: 'done',
+        message: 'html-video 成片完成。',
+        hyperframes_freeform: {
+          status: 'ready',
+          project_dir: projectDir,
+          project: {
+            status: 'ready',
+            project_dir: projectDir,
+            html_video_project_path: projectDir,
+            render_mode: 'html-video',
+          },
+          render: { status: 'rendered' },
+          visual_inspect: { status: 'passed' },
+        },
+      };
     },
   };
 
@@ -145,7 +150,7 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.equal(run.success, true);
   assert.equal(run.status, 'done');
   assert.equal(run.run_id, 'run-1');
-  assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project', 'check', 'render', 'inspect']);
+  assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project']);
   assert.equal(calls[1].options.briefOptions.creative_context.input.mode, 'text');
   assert.equal(calls[3].options.projectOptions.creative_context.asset_context.status, 'empty');
   assert.equal(calls[3].options.useHtmlVideoLiteWorkflow, true);
@@ -619,13 +624,6 @@ async function testSourceUrlStageEmitsSpecificProgressMessages() {
         }),
       },
     },
-    agentRuns: {
-      generateDouyinRunHyperframesFreeformProject: async () => ({
-        success: true,
-        status: 'done',
-        message: '工程生成完成',
-      }),
-    },
   });
 
   const created = await createCreativeWorkflow({
@@ -992,15 +990,6 @@ async function testHtmlVideoLiteCompletesVisibleFinalStages() {
           },
         };
       },
-      checkDouyinRunHyperframesFreeformProject: async () => {
-        throw new Error('不应调用旧 HyperFrames 工程校验');
-      },
-      renderDouyinRunHyperframesFreeformVideo: async () => {
-        throw new Error('不应调用旧 HyperFrames 渲染');
-      },
-      inspectDouyinRunHyperframesFreeformVideo: async () => {
-        throw new Error('不应调用旧 HyperFrames 巡检');
-      },
     },
   });
 
@@ -1310,9 +1299,8 @@ async function testHtmlVideoExportRestoresMissingNarrationReference() {
   assert.deepEqual(projectSeen.audio.scene_ids, ['scene_01', 'scene_02']);
 }
 
-async function testFallbackProjectDoesNotSkipLegacyStages() {
+async function testNonHtmlVideoProjectResultFails() {
   const { rootDir, mediaRoot } = createTempDirs();
-  const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-rich-fallback');
   const { services, calls } = createFakeServices({
     agentRuns: {
       generateDouyinRunHyperframesFreeformProject: async (awemeId, runId, options) => {
@@ -1320,22 +1308,12 @@ async function testFallbackProjectDoesNotSkipLegacyStages() {
         return {
           success: true,
           status: 'done',
-          message: '创意视频生成完成。（Rich Template 模式）',
+          message: '非 html-video 工程不应继续。',
           hyperframes_freeform: {
             status: 'ready',
-            project_dir: projectDir,
             project: {
               status: 'ready',
-              project_dir: projectDir,
-              html_video_project_path: projectDir,
-              render_mode: 'rich',
-              scene_spec: { title: '测试', scenes: [] },
-              frame_specs: { frames: [] },
-            },
-            render: {
-              status: 'rendered',
-              output_path: path.join(projectDir, 'output.mp4'),
-              render_versions: [{ id: 'run-1-rich', status: 'rendered' }],
+              render_mode: 'legacy',
             },
           },
         };
@@ -1346,8 +1324,9 @@ async function testFallbackProjectDoesNotSkipLegacyStages() {
   await createCreativeWorkflow({ input: '做一个 fallback 测试', useResearch: false, assetIds: [] }, { rootDir, mediaRoot, services });
   const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
 
-  assert.equal(run.success, true);
-  assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project', 'check', 'render', 'inspect']);
+  assert.equal(run.success, false);
+  assert.match(run.message, /html-video production 未返回可用工程/);
+  assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project']);
 }
 
 async function testRejectsEmptyInput() {
@@ -2362,159 +2341,6 @@ async function testMissingWorkflowReturnsChineseMessage() {
   assert.match(missing.message, /未找到创作任务/);
 }
 
-async function testSceneSpecOperations() {
-  const {
-    getCreativeWorkflowSceneSpec,
-    getCreativeWorkflowVideoSpec,
-    patchCreativeWorkflowSceneSpec,
-    patchCreativeWorkflowVideoSpec,
-    rewriteCreativeWorkflowScene,
-    ttsCreativeWorkflowScene,
-    rerenderCreativeWorkflow,
-    remixCreativeWorkflow,
-    getWorkflowPath,
-  } = require('../server/services/creative/creativeWorkflows');
-
-  const { rootDir } = createTempDirs();
-
-  const missingSceneSpec = await getCreativeWorkflowSceneSpec('99999999999999', { rootDir });
-  assert.equal(missingSceneSpec.success, false);
-  assert.match(missingSceneSpec.message, /未找到创作任务/);
-
-  const fakeEditor = {
-    applyEditCommand: (spec, edit) => ({
-      success: true,
-      scene_spec: { ...spec, title: 'edited' },
-      edit_type: edit.type,
-      requires_tts: false,
-      requires_render: true,
-    }),
-    applyRewriteResult: (spec, sceneId, result) => ({
-      success: true,
-      scene_spec: { ...spec, title: 'rewritten' },
-      requires_tts: true,
-      requires_render: true,
-    }),
-  };
-
-  const fakeRerender = {
-    rerenderSceneSpecProject: async () => ({
-      success: true,
-      output_path: '/tmp/output.mp4',
-      message: '渲染完成',
-    }),
-    rerenderSceneWithLocalTts: async () => ({
-      success: true,
-      output_path: '/tmp/output.mp4',
-      message: '配音完成',
-    }),
-  };
-
-  const workflowPath = getWorkflowPath(WORKFLOW_ID, rootDir);
-  fs.mkdirSync(path.dirname(workflowPath), { recursive: true });
-  fs.writeFileSync(workflowPath, JSON.stringify({
-    workflow_id: WORKFLOW_ID,
-    status: 'done',
-    result: {
-      hyperframes_freeform: {
-        project: {
-          scene_spec: {
-            title: '测试',
-            scenes: [{ id: 'scene_01', duration: 5, narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }],
-          },
-          frame_specs: {
-            frames: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 5, template: 'hero_title' }],
-          },
-        },
-        render: {
-          output_path: '/tmp/old.mp4',
-          render_versions: [{ id: 'render_001', status: 'rendered' }],
-        },
-      },
-    },
-  }));
-
-  const gotSpec = await getCreativeWorkflowSceneSpec(WORKFLOW_ID, { rootDir });
-  assert.equal(gotSpec.success, true);
-  assert.equal(gotSpec.scene_spec.title, '测试');
-
-  const gotVideoSpec = await getCreativeWorkflowVideoSpec(WORKFLOW_ID, { rootDir });
-  assert.equal(gotVideoSpec.success, true);
-  assert.equal(gotVideoSpec.scene_spec.title, '测试');
-  assert.equal(gotVideoSpec.frame_specs.frames[0].id, 'frame_01_01');
-  assert.equal(gotVideoSpec.render_versions[0].id, 'render_001');
-
-  const patched = await patchCreativeWorkflowSceneSpec(WORKFLOW_ID, { type: 'caption_text', scene_id: 'scene_01', caption_id: 'cap1', text: '新字幕' }, { rootDir, creativeVideoEditor: fakeEditor });
-  assert.equal(patched.success, true);
-  assert.equal(patched.scene_spec.title, 'edited');
-  assert.equal(patched.requires_render, true);
-
-  const patchedVideoSpec = await patchCreativeWorkflowVideoSpec(WORKFLOW_ID, {
-    scene_spec: { title: '视频规格编辑后', scenes: [{ id: 'scene_01', duration: 5, narration_text: '旁白', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }] },
-    frame_specs: { frames: [{ id: 'frame_01_01', scene_id: 'scene_01', start: 0, duration: 4, template: 'hero_title' }] },
-  }, { rootDir });
-  assert.equal(patchedVideoSpec.success, true);
-  assert.equal(patchedVideoSpec.scene_spec.title, '视频规格编辑后');
-  assert.equal(patchedVideoSpec.frame_specs.frames[0].duration, 4);
-  assert.equal(patchedVideoSpec.requires_render, true);
-
-  const rewritten = await rewriteCreativeWorkflowScene(WORKFLOW_ID, 'scene_01', { narration_text: '新旁白' }, { rootDir, creativeVideoEditor: fakeEditor });
-  assert.equal(rewritten.success, true);
-  assert.equal(rewritten.scene_spec.title, 'rewritten');
-  assert.equal(rewritten.requires_tts, true);
-
-  const rerendered = await rerenderCreativeWorkflow(WORKFLOW_ID, {}, { rootDir, creativeVideoRerender: fakeRerender });
-  assert.equal(rerendered.success, true);
-  assert.equal(rerendered.output_path, '/tmp/output.mp4');
-
-  const ttsResult = await ttsCreativeWorkflowScene(WORKFLOW_ID, 'scene_01', {}, { rootDir, creativeVideoRerender: fakeRerender });
-  assert.equal(ttsResult.success, true);
-  assert.equal(ttsResult.scene_id, 'scene_01');
-  assert.equal(ttsResult.output_path, '/tmp/output.mp4');
-  assert.equal(ttsResult.requires_render, false);
-
-  const fakeTtsNeedsExport = {
-    rerenderSceneWithLocalTts: async () => ({
-      success: true,
-      scene_spec: {
-        title: 'rewritten',
-        scenes: [{ id: 'scene_01', duration: 5, narration_text: '旁白', audio_path: 'tts/scene_01.mp3', captions: [], visual_text: { headline: '标题', keywords: [], cards: [] } }],
-      },
-      requires_render: true,
-      message: '场景配音已更新，需要重新导出成片。',
-    }),
-  };
-  const ttsNeedsExport = await ttsCreativeWorkflowScene(WORKFLOW_ID, 'scene_01', {}, { rootDir, creativeVideoRerender: fakeTtsNeedsExport });
-  assert.equal(ttsNeedsExport.success, true);
-  assert.equal(ttsNeedsExport.requires_render, true);
-  assert.equal(ttsNeedsExport.output_path, '/tmp/output.mp4');
-  assert.equal(ttsNeedsExport.scene_spec.scenes[0].audio_path, 'tts/scene_01.mp3');
-  const savedAfterTts = JSON.parse(fs.readFileSync(workflowPath, 'utf8'));
-  assert.equal(savedAfterTts.result.hyperframes_freeform.render.status, 'needs_render');
-  assert.equal(savedAfterTts.result.hyperframes_freeform.render.output_path, '/tmp/output.mp4');
-
-  const ttsMissingScene = await ttsCreativeWorkflowScene(WORKFLOW_ID, 'nonexistent', {}, { rootDir, creativeVideoRerender: fakeRerender });
-  assert.equal(ttsMissingScene.success, false);
-  assert.match(ttsMissingScene.message, /未找到场景/);
-
-  const remixed = await remixCreativeWorkflow(WORKFLOW_ID, { input: '二创版本' }, {
-    rootDir,
-    mediaRoot: path.join(rootDir, 'media'),
-    services: {
-      now: () => NOW,
-      idFactory: () => '202606121200000002',
-      researchService: {
-        createResearchContext: async () => ({ status: 'disabled', query: '', sources: [], summary: '', updated_at: NOW }),
-      },
-    },
-  });
-  assert.equal(remixed.success, true);
-  assert.equal(remixed.source_workflow_id, WORKFLOW_ID);
-  assert.equal(remixed.workflow_id, '202606121200000002');
-  assert.equal(remixed.scene_spec.title, 'rewritten');
-  assert.equal(remixed.frame_specs.frames[0].duration, 4);
-}
-
 async function testGetWorkflowHydratesAssetUsageReportFromProject() {
   const { rootDir } = createTempDirs();
   const workflowId = WORKFLOW_ID;
@@ -2589,7 +2415,7 @@ async function run() {
   await testLegacyCreativeDefaultsSnapshotFallsBackToRealtimeMediaOptions();
   await testHtmlVideoExportUsesOrchestratorWithTemplateRegistry();
   await testHtmlVideoExportRestoresMissingNarrationReference();
-  await testFallbackProjectDoesNotSkipLegacyStages();
+  await testNonHtmlVideoProjectResultFails();
   await testRejectsEmptyInput();
   await testCreatesDouyinWorkflowWithOriginalAwemeId();
   await testCreatesDouyinWorkflowFromShareTextShortLink();
@@ -2609,7 +2435,6 @@ async function run() {
   await testDoesNotMarkRunningStageStaleWhenActiveTaskExists();
   await testCustomRootDoesNotUseDefaultRegistryActiveTask();
   await testMissingWorkflowReturnsChineseMessage();
-  await testSceneSpecOperations();
   await testGetWorkflowHydratesAssetUsageReportFromProject();
   console.log('creative workflow tests passed');
 }
