@@ -178,10 +178,10 @@ function parseToolCallArguments(toolCall) {
 
 async function runResearchProvider({
   query,
-  aiModelConfig: modelConfigService,
   aiTextModel: textModelService,
   webSearchProvider,
 } = {}) {
+  const normalizedQuery = safeString(query);
   const messages = [
     {
       role: 'system',
@@ -189,59 +189,50 @@ async function runResearchProvider({
     },
     {
       role: 'user',
-      content: `请搜索并研究以下主题：${query}`,
+      content: `请搜索并研究以下主题：${normalizedQuery}`,
     },
   ];
 
-  // 获取模型配置，判断是否为mimo模型
-  const config = await modelConfigService.getRuntimeConfig('text');
-  const modelId = config?.modelId || '';
-  const isMimo = modelId.toLowerCase().startsWith('mimo');
-
-  // 根据模型类型选择工具格式
-  let tools;
-  let toolChoice;
-
-  if (isMimo) {
-    // mimo-v2.5-pro 的 web_search 工具格式
-    tools = [
-      {
-        type: 'web_search',
-        max_keyword: 3,
-        force_search: true,
-        limit: 5,
-      },
-    ];
-    toolChoice = 'auto';
-  } else {
-    // OpenAI 标准格式
-    tools = [
-      {
-        type: 'function',
-        function: {
-          name: 'web_search',
-          description: '搜索互联网获取最新信息',
-          parameters: {
-            type: 'object',
-            properties: {
-              query: {
-                type: 'string',
-                description: '搜索关键词',
-              },
-            },
-            required: ['query'],
-          },
-        },
-      },
-    ];
-    toolChoice = { type: 'function', function: { name: 'web_search' } };
-  }
-
   try {
+    if (typeof webSearchProvider === 'function') {
+      const searchResult = await webSearchProvider({ query: normalizedQuery, limit: 5 });
+      const sources = normalizeSearchResults(searchResult);
+      if (sources.length === 0) {
+        return { summary: '', sources: [] };
+      }
+
+      const finalResult = await textModelService.callTextModel({
+        messages: [
+          messages[0],
+          {
+            role: 'user',
+            content: [
+              `请基于以下联网搜索结果，围绕主题“${normalizedQuery}”输出中文研究摘要。`,
+              '要求：只使用搜索结果中的信息，在正文中保留关键来源 URL，不要编造搜索结果之外的信息。',
+              JSON.stringify({ query: normalizedQuery, results: sources }),
+            ].join('\n'),
+          },
+        ],
+        temperature: 0.3,
+        stream: false,
+        audit: {
+          agent: AGENTS.research,
+          stage: STAGES.research,
+          sub_stage: 'web_search_summary',
+          attempt: 1,
+        },
+      });
+      if (!finalResult.success) {
+        throw new Error(finalResult.message || '文本模型整理搜索结果失败');
+      }
+      return {
+        summary: finalResult.text || '',
+        sources,
+      };
+    }
+
     const result = await textModelService.callTextModel({
       messages,
-      tools,
-      tool_choice: toolChoice,
       temperature: 0.3,
       stream: false,
       audit: {

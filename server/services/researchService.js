@@ -71,11 +71,12 @@ async function createResearchContext({
       updated_at: updatedAt,
     };
   } catch (error) {
+    const message = safeString(error && error.message) || '未知错误';
     return {
       status: 'failed',
       query: normalizedQuery,
       sources: [],
-      summary: `联网研究失败：${safeString(error && error.message) || '未知错误'}`,
+      summary: message.startsWith('联网研究失败：') ? message : `联网研究失败：${message}`,
       updated_at: updatedAt,
     };
   }

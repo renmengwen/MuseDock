@@ -520,6 +520,9 @@ async function testRunWorkflowPersistsResearchModelCalls() {
           };
         },
       },
+      webSearchProvider: async () => ({
+        results: [{ title: '研究报告', url: 'https://example.com/report', summary: 'AI 视频生产资料。' }],
+      }),
     },
   });
 
@@ -539,7 +542,7 @@ async function testRunWorkflowPersistsResearchModelCalls() {
   assert.ok(saved.model_calls.some(call => (
     call.agent === 'ResearchAgent'
     && call.stage === 'research'
-    && call.sub_stage === 'web_search_request'
+    && call.sub_stage === 'web_search_summary'
     && call.model.model_id === 'gpt-test'
     && call.usage.cached_tokens === 0
   )));

@@ -107,6 +107,16 @@ async function run() {
   assert.match(failed.summary, /网络超时/);
   assert.equal(failed.updated_at, now);
 
+  const prefixedFailure = await createResearchContext({
+    enabled: true,
+    query,
+    now,
+    provider: async () => {
+      throw new Error('联网研究失败：provider_1 调用失败：HTTP 400');
+    },
+  });
+  assert.equal(prefixedFailure.summary, '联网研究失败：provider_1 调用失败：HTTP 400');
+
   assert.deepEqual(normalizeSource({}), {
     title: '',
     url: '',

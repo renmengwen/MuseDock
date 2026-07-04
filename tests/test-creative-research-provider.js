@@ -36,6 +36,7 @@ async function run() {
   ]);
 
   const calls = [];
+  let searchCalls = 0;
   const result = await defaultResearchProvider({
     query: 'OpenAI 最新产品新闻',
     aiModelConfig: {
@@ -44,32 +45,9 @@ async function run() {
     aiTextModel: {
       callTextModel: async request => {
         calls.push(request);
-        if (calls.length === 1) {
-          return {
-            success: true,
-            text: '',
-            raw_response: {
-              choices: [{
-                finish_reason: 'tool_calls',
-                message: {
-                  role: 'assistant',
-                  content: '',
-                  tool_calls: [{
-                    id: 'call_1',
-                    type: 'function',
-                    function: {
-                      name: 'web_search',
-                      arguments: JSON.stringify({ query: 'OpenAI latest product news' }),
-                    },
-                  }],
-                },
-              }],
-            },
-          };
-        }
         assert.equal(request.tools, undefined);
         assert.equal(request.tool_choice, undefined);
-        assert.ok(request.messages.some(message => message.role === 'tool' && message.tool_call_id === 'call_1'));
+        assert.ok(request.messages.some(message => message.content.includes('https://openai.com/news/')));
         return {
           success: true,
           text: 'OpenAI 发布了最新产品动态，详见官方来源。',
@@ -78,7 +56,8 @@ async function run() {
       },
     },
     webSearchProvider: async ({ query, limit }) => {
-      assert.equal(query, 'OpenAI latest product news');
+      searchCalls += 1;
+      assert.equal(query, 'OpenAI 最新产品新闻');
       assert.equal(limit, 5);
       return {
         results: [{
@@ -96,8 +75,8 @@ async function run() {
     url: 'https://openai.com/news/',
     summary: 'OpenAI 官方新闻页面。',
   }]);
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].tool_choice.function.name, 'web_search');
+  assert.equal(searchCalls, 1);
+  assert.equal(calls.length, 1);
 
   console.log('creative research provider tests passed');
 }
