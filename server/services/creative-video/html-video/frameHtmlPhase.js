@@ -75,6 +75,53 @@ function frameFallbackDiagnostic(frameId, details = {}) {
   });
 }
 
+function clipText(value, max = 42) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function blockingLayoutIssues(report = {}) {
+  return (Array.isArray(report.issues) ? report.issues : [])
+    .filter(issue => issue && issue.severity !== 'warning' && issue.severity !== 'info');
+}
+
+function summarizeLayoutIssues(issues = []) {
+  return issues.slice(0, 3).map((issue) => {
+    const details = issue.details || {};
+    const pair = details.first?.text && details.second?.text
+      ? `「${clipText(details.first.text)}」与「${clipText(details.second.text)}」互相遮挡`
+      : (details.text ? `「${clipText(details.text)}」` : '');
+    return [issue.message || issue.code, pair].filter(Boolean).join('：');
+  }).join('；');
+}
+
+async function inspectGeneratedFrameLayout({
+  layoutQaService,
+  projectDir,
+  sceneId,
+  node,
+  scene,
+  html,
+  target,
+}) {
+  const safeSceneId = String(sceneId || node.id || 'frame').replace(/[^A-Za-z0-9_.-]+/g, '_') || 'frame';
+  const relativePath = `frames/.qa/${safeSceneId}.html`;
+  const absolutePath = projectStore.resolveProjectPath(projectDir, relativePath);
+  await fsp.mkdir(path.dirname(absolutePath), { recursive: true });
+  await fsp.writeFile(absolutePath, String(html || ''), 'utf8');
+  try {
+    return await layoutQaService.inspectFrameHtmlLayout({
+      htmlPath: absolutePath,
+      frame: { id: node.id || sceneId },
+      resolution: frameHtmlAgent.resolveResolution(target),
+      durationSec: trustedSceneDuration(scene || {}, node),
+    });
+  } catch (error) {
+    // ponytail: QA 基建失败不拦帧，渲染前的 layout gate 仍是最终兜底
+    return { success: true, issues: [], metrics: { skipped: true, error: error.message || String(error) } };
+  }
+}
+
 /**
  * 生成（或复用）每一帧的 HTML，并写盘 + 打 checkpoint。
  * 行为与原 generateHtmlVideo 内联实现 1:1 一致。
@@ -92,6 +139,8 @@ async function runFrameHtmlPhase(ctx) {
     frameHtmlConcurrency,
     resumeAllowed,
     regenerateFrameHtmlRequested,
+    runLayoutQa,
+    layoutQaService,
     onProgress,
     diagnostics,
     // workflow-local 共享助手
@@ -208,6 +257,96 @@ async function runFrameHtmlPhase(ctx) {
           }),
           fallbackDiagnostic: warning,
         };
+      }
+    }
+    if (
+      htmlResult.success
+      && !htmlResult.fallbackDiagnostic
+      && runLayoutQa === true
+      && layoutQaService
+      && typeof layoutQaService.inspectFrameHtmlLayout === 'function'
+    ) {
+      const layoutQaArgs = {
+        layoutQaService,
+        projectDir,
+        sceneId,
+        node,
+        scene,
+        target: templateRenderTarget,
+      };
+      const firstQa = await inspectGeneratedFrameLayout({ ...layoutQaArgs, html: htmlResult.html });
+      const firstBlocking = blockingLayoutIssues(firstQa);
+      if (firstBlocking.length) {
+        await report(onProgress, {
+          type: 'html_video_frame_layout_repair_started',
+          stage: 'project',
+          sub_stage: 'frame_html',
+          message: `第 ${index + 1}/${nodes.length} 帧检测到布局遮挡，正在自动修复...`,
+          frame_id: node.id,
+          data: { frame_id: node.id, issues: firstBlocking.slice(0, 3) },
+        });
+        const repaired = await frameHtmlAgent.generateFrameHtml({
+          model,
+          frameId: node.id || sceneId,
+          attempt: 2,
+          modelOptions: {
+            ...FRAME_HTML_MODEL_OPTIONS,
+            stream: false,
+            audit: {
+              agent: AGENTS.frameHtml,
+              stage: STAGES.frameHtml,
+              sub_stage: 'frame_html',
+              frame_id: node.id || sceneId,
+              node_id: node.id || '',
+              attempt: 2,
+              repair_attempt: 'layout_qa',
+            },
+          },
+          graph: contentGraph,
+          node,
+          index,
+          total: nodes.length,
+          sceneSpec,
+          creativeContext,
+          target: templateRenderTarget,
+          template,
+          visualStyleReferenceHtml: styleReferenceHtml,
+          previousFrameHtml: '',
+          layoutFeedback: summarizeLayoutIssues(firstBlocking),
+        });
+        let unresolved = firstBlocking;
+        if (repaired.success) {
+          const secondQa = await inspectGeneratedFrameLayout({ ...layoutQaArgs, html: repaired.html });
+          const secondBlocking = blockingLayoutIssues(secondQa);
+          if (secondBlocking.length < firstBlocking.length) {
+            htmlResult = { success: true, html: repaired.html, diagnostics: repaired.diagnostics || [] };
+            unresolved = secondBlocking;
+          }
+        }
+        if (unresolved.length) {
+          diagnostics.push(createDiagnostic({
+            code: 'frame_layout_qa_unresolved',
+            stage: 'ai-frame-html',
+            sub_stage: 'frame_html',
+            frame_id: node.id || sceneId,
+            severity: 'warning',
+            retryable: true,
+            repair_action: 'retry_frame_html',
+            fallback_allowed: true,
+            user_message: `第 ${index + 1} 帧自动修复后仍可能存在布局遮挡：${summarizeLayoutIssues(unresolved)}`,
+            details: { frame_id: node.id || sceneId, issues: unresolved.slice(0, 5) },
+          }));
+        }
+        await report(onProgress, {
+          type: 'html_video_frame_layout_repair_done',
+          stage: 'project',
+          sub_stage: 'frame_html',
+          message: unresolved.length
+            ? `第 ${index + 1}/${nodes.length} 帧布局自动修复后仍有疑似遮挡，已记录警告。`
+            : `第 ${index + 1}/${nodes.length} 帧布局遮挡已自动修复。`,
+          frame_id: node.id,
+          data: { frame_id: node.id, resolved: unresolved.length === 0, remaining_issues: unresolved.slice(0, 3) },
+        });
       }
     }
     return { ...job, htmlResult };

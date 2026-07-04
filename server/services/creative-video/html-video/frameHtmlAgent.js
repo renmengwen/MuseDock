@@ -283,6 +283,7 @@ function buildFrameHtmlPrompt({
   template = null,
   visualStyleReferenceHtml = '',
   previousFrameHtml = '',
+  layoutFeedback = '',
 } = {}) {
   const resolution = resolveResolution(target);
   const adjacent = adjacentSummary(graph, index);
@@ -332,6 +333,14 @@ function buildFrameHtmlPrompt({
     '- 不要输出 [object Object]；对象必须提取成有意义的文字或数据。',
     '- 不要发明源素材中没有的精确事实、数字、品牌、机构或时间。',
     '- 不要输出解释，不要在 HTML block 外写任何文字。',
+    ...(String(layoutFeedback || '').trim() ? [
+      '',
+      '布局修复要求（上一版 HTML 经真实浏览器检测存在遮挡/出框，本次必须修复）：',
+      `- 检测到的问题：${compactText(layoutFeedback, 600)}`,
+      '- 保持文案内容不变，只调整布局：把互相重叠的内容块放进各自独立的 grid/flex 区域，或上下错开。',
+      '- 出问题的元素禁止再用 position:absolute 叠放在其他内容块占用的区域之上。',
+      '- 确保动画结束状态（所有元素落位后）任何文字互不遮挡、不超出画面。',
+    ] : []),
     '',
     'Selected template metadata（用于理解模板身份、输入语义和适配边界）：',
     templateStyleReference(template),
@@ -907,6 +916,7 @@ module.exports = {
   buildRetryPrompt,
   readTemplateSourceSnippet,
   frameAssetReferenceSummary,
+  resolveResolution,
   validateFrameAssetUsage,
   validateHtmlTargetResolution,
   validateHtmlContentQuality,

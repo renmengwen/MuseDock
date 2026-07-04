@@ -84,6 +84,21 @@ assert.match(prompt, /position:absolute/);
 assert.match(prompt, /\[object Object\]/);
 assert.match(prompt, /不要发明源素材中没有的精确事实/);
 assert.doesNotMatch(prompt, /第三帧完整旁白不应进入当前帧 prompt/);
+assert.doesNotMatch(prompt, /布局修复要求/);
+
+const layoutRepairPrompt = agent.buildFrameHtmlPrompt({
+  graph,
+  node: graph.nodes[0],
+  index: 0,
+  total: 2,
+  sceneSpec: { title: '价格对比', scenes: [{ id: 'scene_01', narration_text: '先看基础版价格。' }] },
+  creativeContext: {},
+  target: { resolution: { width: 1920, height: 1080 } },
+  layoutFeedback: '检测到文本元素互相重叠：「生成第一条自动化视频」与「从接口开始」互相遮挡',
+});
+assert.match(layoutRepairPrompt, /布局修复要求/);
+assert.match(layoutRepairPrompt, /生成第一条自动化视频/);
+assert.match(layoutRepairPrompt, /保持文案内容不变/);
 
 const dynamicInputIndex = prompt.indexOf('---- 本次动态输入 ----');
 assert.notEqual(dynamicInputIndex, -1);

@@ -423,6 +423,7 @@ async function readProjectJson(projectDir) {
   ]);
 
   const layoutQaCalls = [];
+  const layoutRepairPrompts = [];
   let layoutQaRenderCalled = false;
   const layoutQaFailureResult = await workflow.generateHtmlVideo({
     workflowId: '202606170000000000_layout_qa_failure',
@@ -459,6 +460,9 @@ async function readProjectJson(projectDir) {
               }),
             };
           }
+          if (prompt.includes('布局修复要求')) {
+            layoutRepairPrompts.push(prompt);
+          }
           return {
             success: true,
             text: '<!doctype html><html><head><meta name="viewport" content="width=1920,height=1080,initial-scale=1"><style>html,body{margin:0;width:1920px;height:1080px;overflow:hidden}.stage{width:1920px;height:1080px;display:grid;place-items:center;animation:in .8s ease both}@keyframes in{from{opacity:.2}to{opacity:1}}</style></head><body data-hv-canvas data-width="1920" data-height="1080"><main class="stage" data-frame-id="scene_01"><h1 data-text-key="headline">布局标题</h1><p data-text-key="subtitle">布局旁白</p><section data-text-key="body">布局正文</section></main></body></html>',
@@ -489,8 +493,100 @@ async function readProjectJson(projectDir) {
   assert.equal(layoutQaFailureResult.code, 'layout_qa_failed');
   assert.equal(layoutQaFailureResult.html_video_diagnostics.some(item => item.code === 'layout_qa_failed' && item.repair_action === 'retry_frame_html'), true);
   assert.equal(layoutQaFailureResult.html_video_diagnostics.some(item => item.details?.issues?.[0]?.code === 'text_overlap'), true);
-  assert.equal(layoutQaCalls.length, 1);
+  // 帧生成阶段：首检 + 修复后复检；渲染前 gate 再检一次
+  assert.equal(layoutQaCalls.length, 3);
+  assert.ok(layoutQaCalls[0].htmlPath.includes('.qa'));
+  assert.equal(layoutRepairPrompts.length, 1);
+  assert.match(layoutRepairPrompts[0], /标题覆盖正文/);
+  assert.equal(layoutQaFailureResult.html_video_diagnostics.some(item => item.code === 'frame_layout_qa_unresolved' && item.severity === 'warning'), true);
   assert.equal(layoutQaRenderCalled, false);
+
+  // 线上事故场景：skipValidation=true 关闭阻断式校验，但帧生成阶段的布局自检 + 自动修复仍要生效。
+  const layoutRepairQaCalls = [];
+  const layoutRepairSuccessResult = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000000_layout_repair',
+    runId: 'run_layout_repair',
+    rootDir,
+    sceneSpec: {
+      title: '布局自动修复',
+      aspect_ratio: '16:9',
+      scenes: [
+        { id: 'scene_01', duration: 2, kind: 'text', narration_text: '修复旁白', captions: fullSceneCaption('scene_01', '修复旁白', 2), visual_text: { headline: '修复标题', keywords: [], cards: [] } },
+      ],
+    },
+    creativeContext: { input: { raw_text: '布局遮挡应被自动修复。' } },
+    target: {
+      html_video_generation_mode: 'raw_html',
+      generateAudio: false,
+    },
+    templateRegistry,
+    runLayoutQa: true,
+    skipValidation: true,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配横屏', confidence: 0.9 }) };
+          }
+          if (prompt.startsWith('你是 html-video 的 content graph')) {
+            return {
+              success: true,
+              text: JSON.stringify({
+                synopsis: '一帧布局修复',
+                nodes: [{ id: 'scene_01', kind: 'text', label: '修复标题', durationSec: 2, text: '修复正文' }],
+                edges: [],
+              }),
+            };
+          }
+          const repaired = prompt.includes('布局修复要求');
+          return {
+            success: true,
+            text: `<!doctype html><html><body><main data-frame-id="scene_01"${repaired ? ' data-layout-v2="true"' : ''}><h1 data-text-key="headline">修复标题</h1><p data-text-key="subtitle">修复旁白</p><section data-text-key="body">修复正文</section></main></body></html>`,
+          };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      layoutQaService: {
+        inspectFrameHtmlLayout: async ({ htmlPath, frame }) => {
+          const html = await fs.readFile(htmlPath, 'utf8');
+          const passed = html.includes('data-layout-v2');
+          layoutRepairQaCalls.push({ htmlPath, frameId: frame.id, passed });
+          return passed
+            ? { success: true, issues: [], metrics: {} }
+            : {
+              success: false,
+              issues: [{ code: 'text_overlap', message: 'CTA 覆盖正文卡片。', severity: 'error' }],
+              metrics: {},
+            };
+        },
+      },
+      frameRenderer: {
+        renderFrame: async (frame, options) => ({
+          success: true,
+          frame_id: frame.id,
+          output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+          diagnostics: [],
+        }),
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath, strategy: 'stub' };
+        },
+        concatAudioWithFfmpeg: async () => ({ success: true, skipped: true }),
+        muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+      },
+    },
+  });
+  assert.equal(layoutRepairSuccessResult.success, true);
+  // 首检失败 + 修复后复检通过；skipValidation 下渲染前 gate 不再重复检查
+  assert.equal(layoutRepairQaCalls.length, 2);
+  assert.equal(layoutRepairQaCalls[0].passed, false);
+  assert.equal(layoutRepairQaCalls[1].passed, true);
+  const repairedFrameHtml = await fs.readFile(path.join(layoutRepairSuccessResult.html_video_project_path, layoutRepairSuccessResult.project.frames[0].html_path), 'utf8');
+  assert.ok(repairedFrameHtml.includes('data-layout-v2'));
+  assert.equal(layoutRepairSuccessResult.html_video_diagnostics.some(item => item.code === 'frame_layout_qa_unresolved'), false);
 
   const contentGraphAiFailure = await workflow.generateHtmlVideo({
     workflowId: '202606170000000009_graph_ai_failure',

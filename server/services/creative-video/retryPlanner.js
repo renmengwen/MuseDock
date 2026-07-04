@@ -336,6 +336,7 @@ function createCreativeWorkflowRetryPlan(input = {}) {
     || code === 'html_validation_failed'
     || code === 'frame_html_template_text_leak'
     || code === 'frame_html_content_mismatch'
+    || code === 'layout_qa_failed'
   ) {
     return retryPlan(classification, 'retry_frame_html', 'frame_html', {
       reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
