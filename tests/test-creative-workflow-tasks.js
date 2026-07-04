@@ -301,6 +301,8 @@ async function waitFor(assertion, timeoutMs = 1000) {
   assert.ok(htmlVideoProgressEvent);
   assert.equal(htmlVideoProgressEvent.stage, 'project');
   assert.equal(htmlVideoProgressEvent.message, '正在生成 html-video 工程...');
+  // SSE 事件必须携带与 workflow 记录一致的进度，前端流式期间靠它同步“当前进展”
+  assert.equal(htmlVideoProgressEvent.progress > 0, true);
 
   const failedRootDir = tempRoot();
   await workflows.createCreativeWorkflow({ input: '测试失败状态', useResearch: false }, { rootDir: failedRootDir, services: services() });

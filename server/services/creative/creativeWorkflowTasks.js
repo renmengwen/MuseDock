@@ -215,15 +215,16 @@ async function emitAndPersistTaskEvent({
     return null;
   }
 
+  const progress = taskEventProgress(event || {});
   const emitted = registry.emit(taskId, {
     ...(event || {}),
+    progress,
     operation_id: operationId,
   });
   if (!emitted) {
     return null;
   }
 
-  const progress = taskEventProgress(event || {});
   const patch = {
     active_task_id: taskId,
     active_operation_id: operationId,

@@ -514,6 +514,22 @@ export function OneClickCreativePage() {
       saveActiveCreativeTask({ workflow_id: event.workflow_id, task_id: event.task_id, last_seq: lastSeqRef.current });
     }
     if (event.message) setMessage(event.message);
+    // SSE 活跃期间不轮询 workflow 记录，这里把事件同步进 workflow，
+    // 否则“当前进展”面板会停在上次快照、与底部实时消息脱节。
+    setWorkflow(prev => {
+      if (!prev) return prev;
+      if (prev.workflow_id && event.workflow_id && prev.workflow_id !== event.workflow_id) return prev;
+      if (prev.status === 'done' || prev.status === 'failed') return prev;
+      const seq = Number(event.seq);
+      if (Number.isFinite(seq) && seq > 0 && Number(prev.last_event_seq) >= seq) return prev;
+      return {
+        ...prev,
+        ...(event.stage ? { current_stage: event.stage } : {}),
+        ...(event.message ? { current_stage_message: event.message } : {}),
+        ...(Number.isFinite(event.progress) && event.progress > 0 ? { current_progress: event.progress } : {}),
+        ...(Number.isFinite(seq) && seq > 0 ? { last_event_seq: seq } : {}),
+      };
+    });
     if (event.type === 'stage_progress' || event.type?.startsWith('html_video_')) {
       setStatus('polling');
     }
