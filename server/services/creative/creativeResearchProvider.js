@@ -109,6 +109,21 @@ function normalizeSearchResults(value) {
     .slice(0, 5);
 }
 
+function buildSearchQuery(value) {
+  const text = safeString(value);
+  const firstLine = text.split(/\r?\n/).map(safeString).find(Boolean) || text;
+  return firstLine.length > 120 ? firstLine.slice(0, 120) : firstLine;
+}
+
+function summarizeSearchSources(sources) {
+  return sources
+    .map((source, index) => {
+      const title = source.title || `来源 ${index + 1}`;
+      return `${index + 1}. ${title}\n${source.summary || ''}\n${source.url}`;
+    })
+    .join('\n\n');
+}
+
 async function defaultWebSearchProvider({ query, limit = 5, fetchImpl = global.fetch } = {}) {
   const normalizedQuery = safeString(query);
   if (!normalizedQuery) return { results: [] };
@@ -195,21 +210,15 @@ async function runResearchProvider({
 
   try {
     if (typeof webSearchProvider === 'function') {
-      const searchResult = await webSearchProvider({ query: normalizedQuery, limit: 5 });
-      const sources = normalizeSearchResults(searchResult);
-      if (sources.length === 0) {
-        return { summary: '', sources: [] };
-      }
-
-      const finalResult = await textModelService.callTextModel({
+      const summarize = (searchQuery, sources, attempt) => textModelService.callTextModel({
         messages: [
           messages[0],
           {
             role: 'user',
             content: [
-              `请基于以下联网搜索结果，围绕主题“${normalizedQuery}”输出中文研究摘要。`,
+              `请基于以下联网搜索结果，围绕主题“${searchQuery}”输出中文研究摘要。`,
               '要求：只使用搜索结果中的信息，在正文中保留关键来源 URL，不要编造搜索结果之外的信息。',
-              JSON.stringify({ query: normalizedQuery, results: sources }),
+              JSON.stringify({ query: searchQuery, results: sources }),
             ].join('\n'),
           },
         ],
@@ -219,14 +228,41 @@ async function runResearchProvider({
           agent: AGENTS.research,
           stage: STAGES.research,
           sub_stage: 'web_search_summary',
-          attempt: 1,
+          attempt,
         },
       });
-      if (!finalResult.success) {
-        throw new Error(finalResult.message || '文本模型整理搜索结果失败');
+
+      const searchResult = await webSearchProvider({ query: normalizedQuery, limit: 5 });
+      const sources = normalizeSearchResults(searchResult);
+      if (sources.length > 0) {
+        const finalResult = await summarize(normalizedQuery, sources, 1);
+        if (finalResult.success) {
+          return {
+            summary: finalResult.text || '',
+            sources,
+          };
+        }
+      }
+
+      const searchQuery = buildSearchQuery(normalizedQuery);
+      if (searchQuery && searchQuery !== normalizedQuery) {
+        const retrySearchResult = await webSearchProvider({ query: searchQuery, limit: 5 });
+        const retrySources = normalizeSearchResults(retrySearchResult);
+        if (retrySources.length === 0) {
+          return sources.length > 0 ? { summary: summarizeSearchSources(sources), sources } : { summary: '', sources: [] };
+        }
+        const retryResult = await summarize(searchQuery, retrySources, 2);
+        return {
+          summary: retryResult.success ? (retryResult.text || '') : summarizeSearchSources(retrySources),
+          sources: retrySources,
+        };
+      }
+
+      if (sources.length === 0) {
+        return { summary: '', sources: [] };
       }
       return {
-        summary: finalResult.text || '',
+        summary: summarizeSearchSources(sources),
         sources,
       };
     }

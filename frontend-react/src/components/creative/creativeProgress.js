@@ -11,6 +11,49 @@ export function normalizeWorkflowProgress(workflow) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function getEventStageStatus(event) {
+  if (event?.type === 'stage_done') return 'done';
+  if (event?.type === 'stage_failed' || event?.type === 'task_failed') return 'failed';
+  if (event?.type === 'stage_started' || event?.type === 'stage_progress') return 'running';
+  if (typeof event?.type === 'string' && event.type.startsWith('html_video_')) return 'running';
+  return '';
+}
+
+function isUnfinishedStageStatus(status) {
+  return !status || status === 'waiting' || status === 'pending' || status === 'queued' || status === 'running';
+}
+
+export function applyWorkflowStageEvent(workflow, event) {
+  const stageId = event?.stage;
+  const nextStatus = getEventStageStatus(event);
+  const stages = Array.isArray(workflow?.stages) ? workflow.stages : [];
+  if (!stageId || !nextStatus || stages.length === 0) return workflow;
+
+  const targetIndex = stages.findIndex(stage => stage?.id === stageId);
+  if (targetIndex < 0) return workflow;
+
+  return {
+    ...workflow,
+    stages: stages.map((stage, index) => {
+      if (!stage || typeof stage !== 'object') return stage;
+      if (index === targetIndex) {
+        return {
+          ...stage,
+          status: nextStatus,
+          ...(event.message ? { message: event.message } : {}),
+        };
+      }
+      if (nextStatus === 'running' && index < targetIndex && isUnfinishedStageStatus(stage.status)) {
+        return { ...stage, status: 'done' };
+      }
+      if (nextStatus === 'running' && index !== targetIndex && stage.status === 'running') {
+        return { ...stage, status: index < targetIndex ? 'done' : 'pending' };
+      }
+      return stage;
+    }),
+  };
+}
+
 function formatDuration(ms) {
   if (!Number.isFinite(ms) || ms < 0) return '';
   const seconds = Math.floor(ms / 1000);

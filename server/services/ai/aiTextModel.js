@@ -509,7 +509,9 @@ async function callTextModel(options = {}) {
     const parsedResponse = await readJsonResponse(response, apiKey);
     cleanupResponseTimeout(response);
     const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
-    const detail = sanitizeErrorDetail(getProviderError(rawResponse), apiKey) || `HTTP ${response.status}`;
+    const detail = sanitizeErrorDetail(getProviderError(rawResponse), apiKey)
+      || sanitizeErrorDetail(parsedResponse.rawText, apiKey).slice(0, 500)
+      || `HTTP ${response.status}`;
     return {
       success: false,
       configured: true,

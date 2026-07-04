@@ -52,7 +52,7 @@ export function normalizeWorkflowStages(workflow) {
   return source.map(stage => ({
     ...stage,
     label: stage.label || STAGE_LABELS[stage.id] || stage.id || '未命名阶段',
-    status: workflow?.status === 'running' && workflow?.current_stage === stage.id
+    status: workflow?.status === 'running' && workflow?.current_stage === stage.id && !['done', 'skipped'].includes(stage.status)
       ? 'running'
       : (stage.status || 'waiting'),
     message: workflow?.status === 'running' && workflow?.current_stage === stage.id

@@ -207,6 +207,20 @@ async function run() {
   assert.doesNotMatch(failed.message, /sk-test/);
   assert.doesNotMatch(JSON.stringify(failed.raw_response), /sk-test/);
 
+  const plainTextFailed = await aiTextModel.callTextModel({
+    messages: [{ role: 'user', content: 'plain text fail' }],
+    configPath,
+    fetchImpl: async () => ({
+      ok: false,
+      status: 400,
+      headers: { get: () => 'text/plain; charset=utf-8' },
+      text: async () => 'This chat was flagged for possible cybersecurity risk sk-test',
+    }),
+  });
+  assert.strictEqual(plainTextFailed.success, false);
+  assert.match(plainTextFailed.message, /possible cybersecurity risk/);
+  assert.doesNotMatch(plainTextFailed.message, /sk-test/);
+
   let retryCalls = 0;
   const retried = await aiTextModel.callTextModel({
     messages: [{ role: 'user', content: 'retry timeout' }],

@@ -78,6 +78,41 @@ async function run() {
   assert.equal(searchCalls, 1);
   assert.equal(calls.length, 1);
 
+  const longResearchQuery = '疑似触发供应商风控的话题\n这里是很长的正文，不应该整段拿去搜索。';
+  const fallbackCalls = [];
+  const fallbackSearchQueries = [];
+  const fallback = await defaultResearchProvider({
+    query: longResearchQuery,
+    aiTextModel: {
+      callTextModel: async request => {
+        fallbackCalls.push(request);
+        assert.equal(request.tools, undefined);
+        assert.equal(request.tool_choice, undefined);
+        return { success: false, message: 'provider 调用失败：HTTP 400' };
+      },
+    },
+    webSearchProvider: async ({ query }) => {
+      fallbackSearchQueries.push(query);
+      return {
+        results: [{
+          title: query === longResearchQuery ? '全文搜索结果' : '短主题搜索结果',
+          url: query === longResearchQuery ? 'https://example.com/full' : 'https://example.com/short',
+          summary: '供应商拒绝总结时仍应保留搜索来源。',
+        }],
+      };
+    },
+  });
+  assert.deepEqual(fallbackSearchQueries, [longResearchQuery, '疑似触发供应商风控的话题']);
+  assert.equal(fallbackCalls.length, 2);
+  assert.match(fallbackCalls[0].messages[1].content, /这里是很长的正文/);
+  assert.doesNotMatch(fallbackCalls[1].messages[1].content, /这里是很长的正文/);
+  assert.match(fallback.summary, /短主题搜索结果/);
+  assert.deepEqual(fallback.sources, [{
+    title: '短主题搜索结果',
+    url: 'https://example.com/short',
+    summary: '供应商拒绝总结时仍应保留搜索来源。',
+  }]);
+
   console.log('creative research provider tests passed');
 }
 

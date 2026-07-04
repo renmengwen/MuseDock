@@ -6,6 +6,7 @@ import { CreativeSidebar } from '../components/creative/CreativeSidebar.jsx';
 import { CreativeTaskDetail } from '../components/creative/CreativeTaskDetail.jsx';
 import {
   appendWorkflowProgressEvent,
+  applyWorkflowStageEvent,
   getSidebarTaskTimeSource,
   removeWorkflowProgressEvents,
 } from '../components/creative/creativeProgress.js';
@@ -522,13 +523,13 @@ export function OneClickCreativePage() {
       if (prev.status === 'done' || prev.status === 'failed') return prev;
       const seq = Number(event.seq);
       if (Number.isFinite(seq) && seq > 0 && Number(prev.last_event_seq) >= seq) return prev;
-      return {
+      return applyWorkflowStageEvent({
         ...prev,
         ...(event.stage ? { current_stage: event.stage } : {}),
         ...(event.message ? { current_stage_message: event.message } : {}),
         ...(Number.isFinite(event.progress) && event.progress > 0 ? { current_progress: event.progress } : {}),
         ...(Number.isFinite(seq) && seq > 0 ? { last_event_seq: seq } : {}),
-      };
+      }, event);
     });
     if (event.type === 'stage_progress' || event.type?.startsWith('html_video_')) {
       setStatus('polling');

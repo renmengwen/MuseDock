@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 const {
   appendWorkflowProgressEvent,
+  applyWorkflowStageEvent,
   formatWorkflowDurationLabel,
   getSidebarTaskTimeSource,
   normalizeWorkflowProgress,
@@ -25,6 +26,41 @@ const retryStages = normalizeWorkflowStages({
 });
 assert.equal(retryStages.find(stage => stage.id === 'project').status, 'running');
 assert.equal(retryStages.find(stage => stage.id === 'project').message, '正在生成第 2/6 帧 HTML...');
+
+const stageDoneCurrent = normalizeWorkflowStages({
+  status: 'running',
+  current_stage: 'research',
+  stages: [
+    { id: 'source', label: '准备来源资料', status: 'done' },
+    { id: 'research', label: '联网研究', status: 'done', message: '联网研究资料已准备完成。' },
+  ],
+});
+assert.equal(stageDoneCurrent.find(stage => stage.id === 'research').status, 'done');
+
+const syncedWorkflow = applyWorkflowStageEvent({
+  status: 'running',
+  current_stage: 'research',
+  stages: [
+    { id: 'source', status: 'done' },
+    { id: 'research', status: 'running' },
+    { id: 'assets', status: 'pending' },
+    { id: 'audio', status: 'pending' },
+  ],
+}, {
+  type: 'stage_started',
+  stage: 'audio',
+  message: '正在生成音频轨...',
+});
+assert.equal(syncedWorkflow.stages.find(stage => stage.id === 'research').status, 'done');
+assert.equal(syncedWorkflow.stages.find(stage => stage.id === 'audio').status, 'running');
+
+const audioDoneWorkflow = applyWorkflowStageEvent(syncedWorkflow, {
+  type: 'stage_done',
+  stage: 'audio',
+  message: '分段配音已生成。',
+});
+assert.equal(audioDoneWorkflow.stages.find(stage => stage.id === 'audio').status, 'done');
+assert.equal(audioDoneWorkflow.stages.find(stage => stage.id === 'audio').message, '分段配音已生成。');
 
 assert.equal(
   formatWorkflowDurationLabel({
