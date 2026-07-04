@@ -140,13 +140,13 @@ function storageItem(bytes) {
 }
 
 function defaultRootDir() {
-  return path.resolve(__dirname, '../..');
+  return require('../dataRoot');
 }
 
 function resolveStoragePaths(options = {}) {
   const rootDir = options.rootDir || defaultRootDir();
   const mediaRoot = options.mediaRoot || path.join(rootDir, 'data', 'media');
-  const browserDataRoot = options.browserDataRoot || path.join(rootDir, 'data', 'browser-data');
+  const browserDataRoot = options.browserDataRoot || path.join(rootDir, 'chrome-user-data');
   const cookieFile = options.cookieFile || path.join(rootDir, 'douyin-cookies.json');
   return {
     creativeWorkflows: path.join(rootDir, 'data', 'creative-workflows'),
@@ -473,7 +473,7 @@ async function cleanupTargets(options = {}) {
 
   const rootDir = options.rootDir || defaultRootDir();
   const mediaRoot = options.mediaRoot || path.join(rootDir, 'data', 'media');
-  const browserDataRoot = options.browserDataRoot || path.join(rootDir, 'data', 'browser-data');
+  const browserDataRoot = options.browserDataRoot || path.join(rootDir, 'chrome-user-data');
   const paths = resolveStoragePaths({ ...options, rootDir, mediaRoot, browserDataRoot });
 
   for (const target of targets) {

@@ -1,10 +1,10 @@
-const { app, BrowserWindow, utilityProcess, shell } = require('electron');
+const { app, BrowserWindow, utilityProcess, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const http = require('http');
+const net = require('net');
 
-// 固定冷门端口，避开常见的 3000 冲突；浏览器访问 http://127.0.0.1:38017 同样可用
-const PORT = 38017;
+// 首选冷门端口，被占用时自动换系统分配的空闲端口
+const PREFERRED_PORT = 38017;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -13,7 +13,24 @@ if (!app.requestSingleInstanceLock()) {
 let serverProc = null;
 let mainWindow = null;
 
-function startServer() {
+function getFreePort(preferred) {
+  return new Promise((resolve, reject) => {
+    const probe = net.createServer();
+    probe.once('error', () => {
+      const fallback = net.createServer();
+      fallback.once('error', reject);
+      fallback.listen(0, '127.0.0.1', () => {
+        const port = fallback.address().port;
+        fallback.close(() => resolve(port));
+      });
+    });
+    probe.listen(preferred, '127.0.0.1', () => {
+      probe.close(() => resolve(preferred));
+    });
+  });
+}
+
+function startServer(port) {
   const dataDir = app.getPath('userData');
   fs.mkdirSync(path.join(dataDir, 'logs'), { recursive: true });
   const logStream = fs.createWriteStream(path.join(dataDir, 'logs', 'server.log'), { flags: 'a' });
@@ -22,7 +39,8 @@ function startServer() {
     env: {
       ...process.env,
       MUSEDOCK_DATA_DIR: dataDir,
-      MUSEDOCK_PORT: String(PORT),
+      MUSEDOCK_PORT: String(port),
+      MUSEDOCK_HOST: '127.0.0.1',
     },
     stdio: 'pipe',
   });
@@ -30,23 +48,29 @@ function startServer() {
   serverProc.stderr.on('data', (chunk) => logStream.write(chunk));
 }
 
-function waitForServer(retries = 150) {
+// 等 server 子进程通过 IPC 握手，而不是 HTTP 探测——端口被别的程序占用时不会误判
+function waitForServerReady(proc, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
-    const attempt = (left) => {
-      const req = http.get(`http://127.0.0.1:${PORT}/`, (res) => {
-        res.resume();
+    const timer = setTimeout(() => reject(new Error('server 启动超时')), timeoutMs);
+    proc.on('message', (msg) => {
+      if (msg && msg.type === 'server-ready') {
+        clearTimeout(timer);
         resolve();
-      });
-      req.on('error', () => {
-        if (left <= 0) return reject(new Error('server 启动超时'));
-        setTimeout(() => attempt(left - 1), 200);
-      });
-    };
-    attempt(retries);
+      }
+    });
+    proc.on('exit', (code) => {
+      clearTimeout(timer);
+      reject(new Error(`server 进程异常退出（code ${code}），详见日志 logs/server.log`));
+    });
   });
 }
 
 async function createWindow() {
+  const port = await getFreePort(PREFERRED_PORT);
+  const origin = `http://127.0.0.1:${port}`;
+
+  startServer(port);
+
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -54,12 +78,15 @@ async function createWindow() {
     autoHideMenuBar: true,
   });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith(origin)) event.preventDefault();
+  });
 
-  await waitForServer();
-  mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
+  await waitForServerReady(serverProc);
+  mainWindow.loadURL(origin);
   mainWindow.once('ready-to-show', () => mainWindow.show());
 }
 
@@ -71,9 +98,8 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(() => {
-  startServer();
   createWindow().catch((err) => {
-    console.error(err);
+    dialog.showErrorBox('MuseDock 启动失败', err.message);
     app.quit();
   });
 });

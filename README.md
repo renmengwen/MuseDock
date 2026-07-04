@@ -28,7 +28,7 @@ npm run dev                        # 打开 http://localhost:5173
 npm run dist   # 产物：dist-electron/MuseDock Setup <version>.exe
 ```
 
-- 桌面版和浏览器模式共用同一个 Express server：Electron 内部跑在 `http://127.0.0.1:38017`，用浏览器访问该地址同样可用；`npm start` 的浏览器模式不受影响。
+- 桌面版和浏览器模式共用同一个 Express server：Electron 内部默认跑在 `http://127.0.0.1:38017`（端口被占用时自动换空闲端口），只监听本机回环地址，不对局域网开放；`npm start` 的浏览器模式不受影响，仍默认 `0.0.0.0:3000`。
 - 桌面版数据（数据库、Cookie、素材、配置、日志）写入 `%APPDATA%/musedock`，与开发模式的仓库目录互相独立。
 - 依赖系统安装的 Google Chrome；ffmpeg 已内置在安装包里。
 - 打包时 electron-builder 会把 `node_modules` 里的 `better-sqlite3` 原地换成 Electron ABI，`postdist` 钩子会自动 `npm rebuild better-sqlite3` 恢复；打包前先停掉本地 server，否则文件占用会导致 EPERM 失败。
@@ -100,7 +100,8 @@ node tests/test-html-video-real-render-smoke.js
 | --- | --- | --- |
 | `MEDIACRAWLER_DB_PATH` | SQLite 数据库路径 | `data/mediacrawler.db` |
 | `MUSEDOCK_DATA_DIR` | 所有可写数据（DB/Cookie/素材/配置）的根目录，Electron 打包后指向 `%APPDATA%/musedock` | 仓库根目录 |
-| `MUSEDOCK_PORT` | 后端监听端口 | `3000`（Electron 内为 `38017`） |
+| `MUSEDOCK_PORT` | 后端监听端口 | `3000`（Electron 内默认 `38017`，被占用自动换） |
+| `MUSEDOCK_HOST` | 后端监听地址 | `0.0.0.0`（Electron 内为 `127.0.0.1`） |
 | `ASR_LANGUAGE` | MiMo ASR 识别语言，支持 `auto`、`zh`、`en` | `auto` |
 | `FFMPEG_PATH` | 手动指定 ffmpeg 可执行文件路径 | 空 |
 | `FFPROBE_PATH` | 手动指定 ffprobe 可执行文件路径 | 空 |
