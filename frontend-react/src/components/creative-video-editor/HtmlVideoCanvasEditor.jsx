@@ -1026,6 +1026,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
             canUndo={canUndo}
             onUndo={undoEdit}
             onTextChange={updateSelectedText}
+            onTextEditStart={snapshotBeforeEdit}
             onGeometryChange={updateSelectedGeometry}
             onResetPosition={resetSelectedPosition}
             onSaveEdit={saveEdit}

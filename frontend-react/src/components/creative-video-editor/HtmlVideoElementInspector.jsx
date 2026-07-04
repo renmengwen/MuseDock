@@ -51,6 +51,7 @@ export function HtmlVideoElementInspector({
   canUndo,
   onUndo,
   onTextChange,
+  onTextEditStart,
   onGeometryChange,
   onResetPosition,
   onSaveEdit,
@@ -152,6 +153,7 @@ export function HtmlVideoElementInspector({
               disabled={disabled || deleted || locked || !textEditable}
               rows={4}
               className="w-full resize-y rounded-md border border-slate-700 bg-slate-950/35 p-2 text-sm text-slate-100 outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/20 disabled:cursor-not-allowed disabled:opacity-60"
+              onFocus={() => onTextEditStart?.()}
               onChange={event => onTextChange?.(event.target.value)}
             />
             {!textEditable && !deleted ? (

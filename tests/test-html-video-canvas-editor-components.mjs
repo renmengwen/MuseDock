@@ -100,6 +100,8 @@ assert.match(canvasEditor, /if \(!drag\.changed\) \{\s*snapshotBeforeEdit\(\);\s
 assert.match(canvasEditor, /front: current > max \? current : max \+ 1/, '置顶不应无限膨胀 z-index');
 assert.match(canvasEditor, /!canEditText\(element\)/, '容器元素不允许整体改文案');
 assert.match(inspector, /textEditable/);
+assert.match(canvasEditor, /onTextEditStart=\{snapshotBeforeEdit\}/, '文案编辑开始时需建撤销快照（快照已不在 pointerdown）');
+assert.match(inspector, /onFocus=\{\(\) => onTextEditStart\?\.\(\)\}/, 'textarea 聚焦即开始一轮文案编辑');
 
 // canEditText：容器/图形元素禁止整体文案编辑，叶子文本元素允许
 assert.equal(canEditText({ tagName: 'H1', childNodes: [{ nodeType: 3 }], children: [] }), true);
