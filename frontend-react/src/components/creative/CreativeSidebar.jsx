@@ -143,12 +143,12 @@ export function CreativeSidebar({
       </Button>
 
       <div className="px-2.5 text-xs font-bold text-[#98a2b3]">创作任务</div>
-      <div className="grid min-h-0 content-start gap-1 overflow-auto pr-0.5" aria-label="创作任务列表">
+      <div className="grid min-h-0 content-start gap-2 overflow-auto pr-0.5" aria-label="创作任务列表">
         {tasks.length ? tasks.map(task => (
           <div
             className={cn(
-              'group flex min-h-11 w-full cursor-pointer items-center gap-1.5 rounded-lg border border-transparent px-2.5 py-2 text-left text-[#1f2937] transition-[background-color,border-color,color,transform] duration-150 hover:border-[#e5e7eb] hover:bg-white',
-              task.workflow_id === selectedWorkflowId && 'border-[#d1d5db] bg-white text-[#111827] shadow-[inset_3px_0_0_#111827]',
+              'group grid w-full cursor-pointer gap-2 rounded-lg border border-[#e7e9ee] bg-white/70 px-3 py-2.5 text-left text-[#1f2937] transition-[background-color,border-color,color,box-shadow] duration-150 hover:border-[#cfd6e2] hover:bg-white hover:shadow-[0_8px_20px_rgba(15,23,42,.06)]',
+              task.workflow_id === selectedWorkflowId && 'border-[#111827] bg-white text-[#111827] shadow-[inset_3px_0_0_#111827,0_10px_24px_rgba(15,23,42,.08)]',
             )}
             key={task.workflow_id}
             role="button"
@@ -160,21 +160,29 @@ export function CreativeSidebar({
               onSelectTask(task);
             }}
           >
-            <div className="grid min-w-0 flex-1 gap-1">
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap text-sm leading-snug">{task.title}</span>
-              <small className="overflow-hidden text-ellipsis whitespace-nowrap text-xs text-[#8a93a2]">{STATUS_TEXT[task.status] || task.status || '等待中'} · {task.timeLabel}</small>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+              <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-sm leading-snug">{task.title}</strong>
+              <span className="shrink-0 rounded-full bg-[#f1f5f9] px-2 py-0.5 text-[11px] font-bold leading-5 text-[#475569] ring-1 ring-[#e2e8f0]">
+                {STATUS_TEXT[task.status] || task.status || '等待中'}
+              </span>
             </div>
-            <Button
-              type="button"
-              className="size-[26px] shrink-0 rounded-md bg-transparent p-0 text-[#98a2b3] opacity-0 transition hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 focus-visible:opacity-100"
-              variant="ghost"
-              size="icon"
-              aria-label={`删除任务 ${task.title}`}
-              title="删除任务"
-              onClick={event => { event.stopPropagation(); onDeleteTask(task); }}
-            >
-              <Trash2 size={14} />
-            </Button>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+              <small className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a93a2]">{task.workflow_id}</small>
+              <div className="inline-flex items-center gap-1.5">
+                <small className="whitespace-nowrap text-xs text-[#8a93a2]">{task.timeLabel}</small>
+                <Button
+                  type="button"
+                  className="size-[26px] shrink-0 rounded-md bg-transparent p-0 text-[#98a2b3] opacity-0 transition hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 focus-visible:opacity-100"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`删除任务 ${task.title}`}
+                  title="删除任务"
+                  onClick={event => { event.stopPropagation(); onDeleteTask(task); }}
+                >
+                  <Trash2 size={14} />
+                </Button>
+              </div>
+            </div>
           </div>
         )) : (
           <div className="grid justify-items-start gap-2 px-2.5 py-4 text-[13px] leading-6 text-[#98a2b3]">

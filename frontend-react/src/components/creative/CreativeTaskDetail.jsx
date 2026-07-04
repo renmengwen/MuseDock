@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Copy, Eye, Loader2, RefreshCcw, Trash2, X } from 'lucide-react';
+import { Check, Copy, Eye, Loader2, PencilLine, RefreshCcw, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import {
   Dialog,
@@ -16,6 +16,7 @@ import { CreativeProgressPanel } from './CreativeProgressPanel.jsx';
 import { CreativeStatusMessage } from './CreativeStatusMessage.jsx';
 import { CreativeVideoPreview } from './CreativeVideoPreview.jsx';
 import { CreativeWorkflowStepper } from './CreativeWorkflowStepper.jsx';
+import { formatWorkflowDurationLabel } from './creativeProgress.js';
 
 const RETRY_ACTION_TEXT = {
   retry_frame_html: '只重试失败帧，复用已生成内容',
@@ -235,7 +236,7 @@ function CreativeTitlePanel({ workflow }) {
   const visibleCandidates = mainTitle ? candidates : candidates.slice(1);
 
   return (
-    <section className="grid gap-3 rounded-lg border border-[#e7e9ee] bg-white p-4" aria-label="视频标题">
+    <div className="grid min-w-0 gap-2 border-t border-[#edf0f4] pt-3">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <span className="text-xs font-bold text-[#8a93a2]">视频标题</span>
         <strong className="min-w-0 break-words text-[15px] leading-snug text-[#111827]">{mainTitle || candidates[0]}</strong>
@@ -249,7 +250,7 @@ function CreativeTitlePanel({ workflow }) {
           ))}
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }
 
@@ -374,7 +375,7 @@ function SourceImageAssetsDialog({ assets, diagnostics, usageById, workflowId })
   );
 }
 
-function SourceImageAssetsPanel({ workflow }) {
+function SourceImageAssetsPanel({ workflow, compact = false }) {
   const assetContext = workflow?.asset_context || workflow?.creative_context?.asset_context || null;
   const assets = Array.isArray(assetContext?.assets) ? assetContext.assets : [];
   const diagnostics = Array.isArray(assetContext?.diagnostics) ? assetContext.diagnostics : [];
@@ -398,9 +399,41 @@ function SourceImageAssetsPanel({ workflow }) {
     const usedInFrames = Array.isArray(usage?.used_in_frames) ? usage.used_in_frames.filter(Boolean) : [];
     return usage?.used === true || usedInFrames.length > 0 || Number(usage?.usage_count || 0) > 0;
   }).length;
+  const rootClass = compact
+    ? 'grid gap-3 border-t border-[#edf0f4] pt-3'
+    : 'grid gap-3.5 rounded-lg border border-[#e7e9ee] bg-white p-4';
+  const statsClass = compact
+    ? 'grid grid-cols-3 gap-3 text-[13px] max-[640px]:grid-cols-1'
+    : 'grid grid-cols-3 gap-3 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] max-[640px]:grid-cols-1';
+
+  if (compact) {
+    const usedLabel = hasUsageReport ? `已用于镜头 ${usedAssetCount} 张` : '已用于镜头 未生成';
+    return (
+      <section className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-[#edf0f4] pt-3" aria-label="来源图片素材">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-[13px]">
+          <span className="font-bold text-[#111827]">来源图片素材</span>
+          <span className="text-[#69717e]">{assets.length} 张 · {usedLabel} · 诊断 {diagnostics.length} 条</span>
+        </div>
+        <div className="inline-flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <span className={cn('rounded-full px-3 py-1 text-xs font-bold ring-1', IMAGE_ANALYSIS_STATUS_CLASS[contextStatus] || IMAGE_ANALYSIS_STATUS_CLASS.default)}>
+            图片分析：{formatImageAnalysisStatus(contextStatus)}
+          </span>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="secondary" size="sm" type="button">
+                <Eye size={14} />
+                <span>{assets.length ? `查看图片列表（${assets.length}）` : '查看素材诊断'}</span>
+              </Button>
+            </DialogTrigger>
+            <SourceImageAssetsDialog assets={assets} diagnostics={diagnostics} usageById={usageById} workflowId={assetWorkflowId} />
+          </Dialog>
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <section className="grid gap-3.5 rounded-lg border border-[#e7e9ee] bg-white p-4" aria-label="来源图片素材">
+    <section className={rootClass} aria-label="来源图片素材">
       <div className="flex items-start justify-between gap-3 max-[720px]:flex-col">
         <div className="min-w-0">
           <h3 className="m-0 text-[15px] font-bold leading-snug text-[#111827]">来源图片素材</h3>
@@ -425,7 +458,7 @@ function SourceImageAssetsPanel({ workflow }) {
       </div>
 
       {assets.length ? (
-        <div className="grid grid-cols-3 gap-3 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] max-[640px]:grid-cols-1">
+        <div className={statsClass}>
           <div className="min-w-0">
             <div className="text-xs font-bold text-[#8a93a2]">图片素材</div>
             <div className="mt-1 font-semibold text-[#111827]">{assets.length} 张</div>
@@ -440,7 +473,7 @@ function SourceImageAssetsPanel({ workflow }) {
           </div>
         </div>
       ) : (
-        <div className="rounded-lg border border-dashed border-[#d9dde5] bg-[#fafbfc] px-3 py-2 text-[13px] text-[#69717e]">暂无来源图片素材。</div>
+        <div className={compact ? 'text-[13px] text-[#69717e]' : 'rounded-lg border border-dashed border-[#d9dde5] bg-[#fafbfc] px-3 py-2 text-[13px] text-[#69717e]'}>暂无来源图片素材。</div>
       )}
     </section>
   );
@@ -471,6 +504,8 @@ export function CreativeTaskDetail({
   const promptInput = workflow?.creative_context?.input || {};
   const promptText = (promptInput.raw_text || promptInput.douyin_url || promptInput.source_url || promptInput.aweme_id || '').trim();
   const editableWorkflowId = workflowId || workflow?.workflow_id || workflow?.id || '';
+  const isDone = workflow?.status === 'done';
+  const durationLabel = formatWorkflowDurationLabel(workflow);
 
   async function copyPrompt() {
     if (!promptText) return;
@@ -491,75 +526,100 @@ export function CreativeTaskDetail({
 
   return (
     <div className={cn('grid w-full min-w-0 gap-6 px-1 pb-0 pt-1', workflow?.status === 'done' && videoUrl && 'min-h-[calc(100vh-176px)]')}>
-      <div className="flex min-w-0 items-start justify-between gap-4 rounded-lg border border-[#e7e9ee] bg-white p-4 max-[720px]:flex-col">
-        <div className="grid min-w-0 gap-1">
-          <span className="text-xs font-bold text-[#8a93a2]">任务 ID</span>
-          <strong className="min-w-0 break-words font-mono text-base leading-snug text-[#111827]">{workflowId || '尚未创建'}</strong>
-        </div>
-        <strong className={cn('shrink-0 rounded-full px-3 py-1 text-xs font-bold ring-1', STATUS_CHIP_CLASS[statusClass])}>
-          {getWorkflowStatusText(workflow, status)}
-        </strong>
-        <div className="inline-flex shrink-0 flex-wrap items-center justify-end gap-2 max-[720px]:justify-start">
-          <Dialog open={promptModalOpen} onOpenChange={setPromptModalOpen}>
-            <DialogTrigger asChild>
-              <Button variant="secondary" size="sm" type="button" className="min-h-[30px] flex-none gap-1.5 rounded-lg border border-[#d6e4ff] bg-[#f5f8ff] px-2.5 py-1.5 text-xs font-bold text-[#1d4ed8] hover:border-[#b8cdf8] hover:bg-[#eaf1ff]">
-                <Eye size={14} />
-                <span>查看提示词</span>
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="grid max-h-[min(82vh,640px)] w-[min(92vw,680px)] max-w-[680px] grid-rows-[auto_1fr] overflow-hidden rounded-[14px] border border-[#e5e7eb] bg-white shadow-[0_24px_70px_rgba(15,23,42,.24)]" showCloseButton={false}>
-              <DialogHeader>
-                <DialogTitle>当前任务提示词</DialogTitle>
-              </DialogHeader>
-              <DialogClose asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  type="button"
-                  className="absolute right-4 top-4"
-                  aria-label="关闭提示词弹框"
-                >
-                  <X size={16} />
-                  <span className="sr-only">关闭提示词弹框</span>
-                </Button>
-              </DialogClose>
-              <pre className="m-0 overflow-auto whitespace-pre-wrap break-words bg-[#f8fafc] p-[18px] text-sm leading-[1.7] text-[#111827] [font-family:inherit]">{promptText || '暂无可显示的提示词。'}</pre>
+      <section className="grid gap-4 rounded-lg border border-[#e7e9ee] bg-white p-4" aria-label="任务摘要">
+        <div className="flex min-w-0 items-start justify-between gap-4 max-[720px]:flex-col">
+          <div className="grid min-w-0 gap-1">
+            <span className="text-xs font-bold text-[#8a93a2]">任务 ID</span>
+            <strong className="min-w-0 break-words font-mono text-base leading-snug text-[#111827]">{workflowId || '尚未创建'}</strong>
+          </div>
+          <div className="inline-flex shrink-0 flex-wrap items-center justify-end gap-2 max-[720px]:justify-start">
+            {durationLabel ? (
+              <span className="rounded-full bg-[#f8fafc] px-3 py-1 text-xs font-bold text-[#4b5563] ring-1 ring-[#e7e9ee]">
+                {durationLabel}
+              </span>
+            ) : null}
+            <strong className={cn('rounded-full px-3 py-1 text-xs font-bold ring-1', STATUS_CHIP_CLASS[statusClass])}>
+              {getWorkflowStatusText(workflow, status)}
+            </strong>
+            {isDone ? (
               <Button
-                variant="secondary"
+                type="button"
+                size="sm"
+                className="min-h-[30px] flex-none gap-1.5 rounded-lg bg-[#111827] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#020617]"
+                disabled={!editableWorkflowId}
+                title={editableWorkflowId ? '二次编辑视频' : '缺少创作任务 ID，无法进入编辑器。'}
+                onClick={continueEdit}
+              >
+                <PencilLine size={14} />
+                <span>二次编辑</span>
+              </Button>
+            ) : null}
+            <Dialog open={promptModalOpen} onOpenChange={setPromptModalOpen}>
+              <DialogTrigger asChild>
+                <Button variant="secondary" size="sm" type="button" className="min-h-[30px] flex-none gap-1.5 rounded-lg border border-[#d6e4ff] bg-[#f5f8ff] px-2.5 py-1.5 text-xs font-bold text-[#1d4ed8] hover:border-[#b8cdf8] hover:bg-[#eaf1ff]">
+                  <Eye size={14} />
+                  <span>查看提示词</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="grid max-h-[min(82vh,640px)] w-[min(92vw,680px)] max-w-[680px] grid-rows-[auto_1fr] overflow-hidden rounded-[14px] border border-[#e5e7eb] bg-white shadow-[0_24px_70px_rgba(15,23,42,.24)]" showCloseButton={false}>
+                <DialogHeader>
+                  <DialogTitle>当前任务提示词</DialogTitle>
+                </DialogHeader>
+                <DialogClose asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    type="button"
+                    className="absolute right-4 top-4"
+                    aria-label="关闭提示词弹框"
+                  >
+                    <X size={16} />
+                    <span className="sr-only">关闭提示词弹框</span>
+                  </Button>
+                </DialogClose>
+                <pre className="m-0 overflow-auto whitespace-pre-wrap break-words bg-[#f8fafc] p-[18px] text-sm leading-[1.7] text-[#111827] [font-family:inherit]">{promptText || '暂无可显示的提示词。'}</pre>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  type="button"
+                  onClick={copyPrompt}
+                  disabled={!promptText}
+                >
+                  {promptCopyStatus === 'copied' ? <Check size={14} /> : <Copy size={14} />}
+                  <span>{promptCopyStatus === 'copied' ? '已复制' : promptCopyStatus === 'failed' ? '复制失败' : '复制提示词'}</span>
+                </Button>
+              </DialogContent>
+            </Dialog>
+            {canStopAndDelete ? (
+              <Button
+                variant="destructive"
                 size="sm"
                 type="button"
-                onClick={copyPrompt}
-                disabled={!promptText}
+                className="bg-red-600 text-white hover:bg-red-700"
+                disabled={deletingWorkflowId === workflowId}
+                onClick={() => onStopAndDelete(workflowId)}
               >
-                {promptCopyStatus === 'copied' ? <Check size={14} /> : <Copy size={14} />}
-                <span>{promptCopyStatus === 'copied' ? '已复制' : promptCopyStatus === 'failed' ? '复制失败' : '复制提示词'}</span>
+                {deletingWorkflowId === workflowId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                <span>{deletingWorkflowId === workflowId ? '正在删除' : '停止并删除'}</span>
               </Button>
-            </DialogContent>
-          </Dialog>
-          {canStopAndDelete ? (
-            <Button
-              variant="destructive"
-              size="sm"
-              type="button"
-              className="bg-red-600 text-white hover:bg-red-700"
-              disabled={deletingWorkflowId === workflowId}
-              onClick={() => onStopAndDelete(workflowId)}
-            >
-              {deletingWorkflowId === workflowId ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-              <span>{deletingWorkflowId === workflowId ? '正在删除' : '停止并删除'}</span>
-            </Button>
-          ) : null}
+            ) : null}
+          </div>
         </div>
-      </div>
-      <CreativeTitlePanel workflow={workflow} />
-      <CreativeWorkflowStepper workflow={workflow} />
-      <CreativeProgressPanel
-        workflow={workflow}
-        status={status}
-        message={message}
-        progressEvents={progressEvents}
-      />
-      <SourceImageAssetsPanel workflow={workflow} />
+        <CreativeTitlePanel workflow={workflow} />
+        {isDone ? <SourceImageAssetsPanel workflow={workflow} compact /> : null}
+      </section>
+      {!isDone ? (
+        <>
+          <CreativeWorkflowStepper workflow={workflow} />
+          <CreativeProgressPanel
+            workflow={workflow}
+            status={status}
+            message={message}
+            progressEvents={progressEvents}
+          />
+        </>
+      ) : null}
+      {!isDone ? <SourceImageAssetsPanel workflow={workflow} /> : null}
       {workflow?.status === 'failed' ? (
         <CreativeRetryPlan
           retryPlan={retryPlan}
@@ -572,9 +632,6 @@ export function CreativeTaskDetail({
       {workflow?.status === 'done' && videoUrl ? (
         <CreativeVideoPreview
           videoUrl={videoUrl}
-          onEdit={continueEdit}
-          disabled={!editableWorkflowId}
-          title={editableWorkflowId ? '继续编辑视频' : '缺少创作任务 ID，无法进入编辑器。'}
         />
       ) : (
         <CreativeStatusMessage status={status} message={message} />
