@@ -90,21 +90,23 @@ async function run() {
   assert.match(messages[1].content, /A vs B/);
   assert.match(messages[1].content, /Frame Profile：creative_brutalist/);
   assert.doesNotMatch(messages[1].content, /tech_neon/);
-  assert.match(messages[1].content, /完整 Frame\.md 参考/);
-  assert.match(messages[1].content, /Creative Mode/);
-  assert.match(messages[1].content, /warm cream canvas/);
-  assert.match(messages[1].content, /4px ink/);
-  assert.match(messages[1].content, /hard offset shadows/);
-  assert.match(messages[1].content, /Motion is out of scope/);
-  assert.match(messages[1].content, /text_card.*核心观点/);
-  assert.match(messages[1].content, /contrast_card.*对比/);
+  // docs/frame/*.frame.md 已在 679f44c 删除，默认路径走内置 fallback brief
   assert.match(messages[1].content, /AI 必须根据每个 scene 的语义任务自动抉择 visual_type/);
   assert.match(messages[1].content, /不要按固定优先级选择 visual_type/);
   assert.doesNotMatch(messages[1].content, /visual_type 优先/);
-  assert.match(messages[1].content, /no blur/);
-  assert.match(messages[1].content, /rounded: "0"/);
+  assert.match(messages[1].content, /text_card.*核心观点/);
+  assert.match(messages[1].content, /contrast_card.*对比/);
   assert.match(messages[1].content, /DOM\/CSS\/GSAP/);
-  assert.match(messages[1].content, /Frame\.md 只能作为视觉设计参考/);
+
+  // 显式传 frameDocText 时才启用“完整 Frame.md 参考”分支
+  const docMessages = storyboardAgent.buildStoryboardMessages({
+    rewriteScript: 'test script',
+    captions: [{ index: 1, start: 0, end: 2, duration: 2, text: 'first line' }],
+    frameDocText: 'Creative Mode: warm cream canvas, 4px ink borders, hard offset shadows.',
+  });
+  assert.match(docMessages[1].content, /完整 Frame\.md 参考/);
+  assert.match(docMessages[1].content, /warm cream canvas/);
+  assert.match(docMessages[1].content, /Frame\.md 只能作为视觉设计参考/);
   assert.match(messages[1].content, /business style/);
   assert.match(messages[1].content, /abstract data background/);
   assert.match(messages[1].content, /no real people/);

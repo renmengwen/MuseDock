@@ -129,9 +129,6 @@ for (const text of [
 }
 
 for (const text of [
-  zh.quickMode,
-  zh.expertMode,
-  zh.expertDeveloping,
   zh.inputLabel,
   zh.researchToggle,
   zh.submitButton,
@@ -184,7 +181,6 @@ for (const symbol of [
 
 for (const symbol of [
   'CreativeHeroHeader',
-  'CreativeModeSwitch',
   'CreativePromptComposer',
   'CreativeInputForm',
 ]) {
@@ -369,8 +365,6 @@ assert.match(creativeSidebar, /onClick=\{\(\) => selectSearchTask\(task\)\}/, 'T
 assert.match(creativeSidebar, /return sidebarCollapsed \? \(\s*<aside className="[^"]*" aria-label="已收起的创作任务栏"/, 'Collapsed sidebar should render a minimal rail instead of compressed full sidebar content');
 assert.match(creativeSidebar, /aria-label="展开任务列表"/, 'Collapsed sidebar should expose only one top-left expand button');
 assert.ok(!page.includes('creativeFloatingExpand'), 'Collapsed sidebar should not render a floating expand pill over the rail');
-assert.match(creativeComposer, /group-data-\[mode=expert\]:translate-x-full/, 'Mode switch should use an animated thumb instead of button borders');
-assert.ok(creativeComposer.includes('data-mode={mode}'), 'Mode switch should expose mode state for thumb animation');
 assert.doesNotMatch(shell, /<header className="header"/, 'AppShell should not render the removed top intro bar');
 assert.doesNotMatch(shell, /creativeHeaderSettings/, 'AppShell should not keep the removed header settings action');
 assert.doesNotMatch(styles, /\.header\s*\{/, 'styles.css should not keep the removed top intro bar styles');
@@ -380,15 +374,11 @@ assert.match(page, /max-\[760px\]:grid-cols-1/, 'Creative shell should collapse 
 assert.match(page, /<section className="min-h-0 min-w-0 overflow-auto bg-white">/, 'Creative detail pane should be the scroll container');
 assert.doesNotMatch(page, /<Bot\s+size=\{15\}/, 'Prompt quick actions should remove the smart video pill in every mode');
 assert.ok(!page.includes('智能成片'), 'Prompt quick actions should not render smart video copy');
-assert.match(page, /const submitDisabled = isBusy \|\| mode === 'expert'/, 'Expert mode should contribute to submit disabled state');
+assert.match(page, /const submitDisabled = isBusy \|\| !input\.trim\(\)/, 'Submit should be disabled while busy or when input is empty');
 assert.match(creativeComposer, /disabled=\{submitDisabled\}/, 'Submit button should use the combined disabled state');
-assert.match(creativeComposer, /w-fit max-w-full rounded-full border border-\[#fed7aa\]/, 'Expert mode should show a developing hint');
-assert.ok(page.includes(zh.expertDeveloping), 'Expert mode developing hint should use Chinese copy');
 assert.ok(!page.includes(zh.assetNotice), 'Expert mode should not show the future asset-context notice copy');
 assert.doesNotMatch(page, /AssetContextNotice/, 'Expert mode should not render a second asset-context notice below the developing hint');
 assert.match(creativeComposer, /useResearch[\s\S]*?border-\[#e5e7eb\] bg-white text-\[#667085\]/, 'Research button should have an explicit inactive state');
-assert.ok(creativeComposer.includes('<div className="grid min-h-[72px] content-start gap-2 overflow-hidden">'), 'Expert-only notice should live in a stable reserved slot');
-assert.match(creativeComposer, /mode === 'expert' \? \(\s*<div className="grid min-h-\[72px\] content-start/, 'Expert notice slot should only render in expert mode to avoid quick-mode empty space');
 assert.match(page, /assetIds:\s*\[\]/, 'OneClickCreativePage payload should preserve empty assetIds');
 assert.match(creativeComposer, /disabled=\{isBusy\}/, 'CreativeComposer should disable controls while busy');
 assert.match(page, /grid h-screen min-h-screen overflow-hidden bg-white/, 'OneClickCreativePage should use a dedicated chat shell');
