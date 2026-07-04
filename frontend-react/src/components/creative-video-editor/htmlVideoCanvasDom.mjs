@@ -87,6 +87,15 @@ export function createDraftSummary(label = '') {
   return `画布调整：${safe || '元素位置'}`;
 }
 
+const textlessTags = new Set(['IMG', 'VIDEO', 'CANVAS', 'SVG', 'AUDIO', 'IFRAME', 'HR', 'BR', 'INPUT']);
+
+// 文案编辑把整段文本写进第一个文本节点：若后代元素自带文本（如选中 section），
+// 会造成内容整份复制。只有全部可见文本都在自身文本节点里的元素才允许改文案。
+export function canEditText(element) {
+  if (!element || textlessTags.has(String(element.tagName || '').toUpperCase())) return false;
+  return !Array.from(element.children || []).some(child => (child.textContent || '').trim());
+}
+
 export function previewAspectRatio(project = {}) {
   const resolution = project?.output?.resolution || project?.resolution || {};
   const width = Number(resolution.width ?? project?.width);

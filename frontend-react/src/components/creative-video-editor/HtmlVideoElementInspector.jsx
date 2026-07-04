@@ -64,6 +64,7 @@ export function HtmlVideoElementInspector({
   const deleted = Boolean(elementInfo?.deleted);
   const locked = Boolean(elementInfo?.locked);
   const hidden = Boolean(elementInfo?.hidden);
+  const textEditable = elementInfo?.textEditable !== false;
   const selectedId = elementInfo?.editId || '';
 
   return (
@@ -148,11 +149,14 @@ export function HtmlVideoElementInspector({
             文案
             <textarea
               value={elementInfo.text || ''}
-              disabled={disabled || deleted || locked}
+              disabled={disabled || deleted || locked || !textEditable}
               rows={4}
               className="w-full resize-y rounded-md border border-slate-700 bg-slate-950/35 p-2 text-sm text-slate-100 outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/20 disabled:cursor-not-allowed disabled:opacity-60"
               onChange={event => onTextChange?.(event.target.value)}
             />
+            {!textEditable && !deleted ? (
+              <p className="m-0 text-xs leading-relaxed text-slate-400">该元素的文案分布在子元素中，请在图层列表中选中具体文本元素后编辑。</p>
+            ) : null}
           </label>
           <div className="grid grid-cols-2 gap-1.5">
             <button className={toolButtonClass} type="button" disabled={disabled || saving || deleted} onClick={onToggleLocked}>

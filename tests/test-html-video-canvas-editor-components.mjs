@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { fitPreviewBox, previewAspectRatio } from '../frontend-react/src/components/creative-video-editor/htmlVideoCanvasDom.mjs';
+import { canEditText, fitPreviewBox, previewAspectRatio } from '../frontend-react/src/components/creative-video-editor/htmlVideoCanvasDom.mjs';
 
 const frameStrip = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoFrameStrip.jsx', 'utf-8');
 const canvasEditor = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoCanvasEditor.jsx', 'utf-8');
@@ -87,6 +87,26 @@ assert.match(canvasEditor, /left: \$\{Math\.round\(offsetLeft\)\}px !important/)
 assert.deepEqual(fitPreviewBox({ width: 1600, height: 480 }, 16 / 9), { width: 853, height: 480 });
 assert.deepEqual(fitPreviewBox({ width: 500, height: 1000 }, 16 / 9), { width: 500, height: 281 });
 assert.equal(previewAspectRatio({ output: { resolution: { width: 1080, height: 1920 } } }), 1080 / 1920);
+
+// 二次编辑修复回归断言
+assert.match(canvasEditor, /\[data-hv-canvas-selected\],\[data-hv-edit-id\]/, '保存时应剥离 data-hv-edit-id');
+assert.match(canvasEditor, /Object\.assign\(existing\.style, rectStyle\)/, 'overlay 应原地更新以保住 pointer capture');
+assert.match(canvasEditor, /nextLeft = drag\.startLeft \+ \(drag\.startWidth - nextWidth\)/, 'w-handle 钳制后需回算 left');
+assert.match(canvasEditor, /nextTop = drag\.startTop \+ \(drag\.startHeight - nextHeight\)/, 'n-handle 钳制后需回算 top');
+assert.match(canvasEditor, /clone\.querySelectorAll\('\[data-hv-editor-overlay\]'\)/, '撤销快照不应包含编辑器覆盖层');
+assert.match(canvasEditor, /\}, \[Boolean\(frame\), rawHtml\]\);/, 'ResizeObserver 需跟随早退分支重挂');
+assert.match(canvasEditor, /if \(!drag\.changed\) ensurePositionedForEdit\(drag\.element\);/, 'static 转 absolute 应推迟到首次拖动');
+assert.match(canvasEditor, /front: current > max \? current : max \+ 1/, '置顶不应无限膨胀 z-index');
+assert.match(canvasEditor, /!canEditText\(element\)/, '容器元素不允许整体改文案');
+assert.match(inspector, /textEditable/);
+
+// canEditText：容器/图形元素禁止整体文案编辑，叶子文本元素允许
+assert.equal(canEditText({ tagName: 'H1', children: [] }), true);
+assert.equal(canEditText({ tagName: 'IMG', children: [] }), false);
+assert.equal(canEditText({ tagName: 'svg', children: [] }), false);
+assert.equal(canEditText({ tagName: 'SECTION', children: [{ textContent: '子元素文本' }] }), false);
+assert.equal(canEditText({ tagName: 'DIV', children: [{ textContent: '  ' }] }), true);
+assert.equal(canEditText(null), false);
 
 assert.match(inspector, /export function HtmlVideoElementInspector/);
 assert.match(inspector, /当前元素/);

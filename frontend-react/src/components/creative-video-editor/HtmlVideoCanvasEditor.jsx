@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 
 import {
+  canEditText,
   clamp,
   createDraftSummary,
   editableSelector,
@@ -30,8 +31,9 @@ function frameDurationMs(frame) {
 function serializeDocument(doc) {
   const root = doc.documentElement.cloneNode(true);
   root.querySelectorAll('[data-hv-canvas-freeze],[data-hv-canvas-editor-style],[data-hv-canvas-viewport-style],[data-hv-editor-overlay]').forEach(node => node.remove());
-  root.querySelectorAll('[data-hv-canvas-selected]').forEach(node => {
+  root.querySelectorAll('[data-hv-canvas-selected],[data-hv-edit-id]').forEach(node => {
     node.removeAttribute('data-hv-canvas-selected');
+    node.removeAttribute('data-hv-edit-id');
   });
   root.removeAttribute('data-hv-canvas-selected');
   const doctype = doc.doctype
@@ -72,6 +74,10 @@ function ensureEditId(element) {
 function cssNumber(value) {
   const number = Number.parseFloat(String(value || ''));
   return Number.isFinite(number) ? number : 0;
+}
+
+function zIndexOf(element) {
+  return cssNumber(element.style.zIndex || element.ownerDocument.defaultView.getComputedStyle(element).zIndex);
 }
 
 const excludedAncestorSelector = [
@@ -283,9 +289,10 @@ function readElementInfo(element) {
     top: position.top,
     width: rect.width / scale,
     height: rect.height / scale,
-    zIndex: cssNumber(element.style.zIndex || element.ownerDocument.defaultView.getComputedStyle(element).zIndex),
+    zIndex: zIndexOf(element),
     locked: element.dataset?.hvEditorLocked === 'true',
     hidden: element.style.display === 'none',
+    textEditable: canEditText(element),
   };
   return {
     ...info,
@@ -377,7 +384,11 @@ export function HtmlVideoCanvasEditor({ editor }) {
   function snapshotBeforeEdit() {
     const doc = iframeRef.current?.contentDocument;
     if (!doc?.body) return;
-    const snapshot = doc.body.innerHTML;
+    // 快照只存文档内容：剥掉覆盖层与选中标记，否则撤销会还原出幽灵选框/handle
+    const clone = doc.body.cloneNode(true);
+    clone.querySelectorAll('[data-hv-editor-overlay]').forEach(node => node.remove());
+    clone.querySelectorAll('[data-hv-canvas-selected]').forEach(node => node.removeAttribute('data-hv-canvas-selected'));
+    const snapshot = clone.innerHTML;
     if (undoStackRef.current.at(-1) === snapshot) return;
     undoStackRef.current.push(snapshot);
     if (undoStackRef.current.length > 30) undoStackRef.current.shift();
@@ -389,10 +400,10 @@ export function HtmlVideoCanvasEditor({ editor }) {
     const prev = undoStackRef.current.pop();
     if (!doc?.body || prev === undefined) return;
     doc.body.innerHTML = prev;
-    doc.querySelectorAll('[data-hv-canvas-selected]').forEach(node => node.removeAttribute('data-hv-canvas-selected'));
     selectedElementRef.current = null;
     dragRef.current = null;
     setElementInfo(null);
+    setElementCandidates([]);
     setCanUndo(undoStackRef.current.length > 0);
     setDirty(true);
     refreshLayerItems(doc);
@@ -443,16 +454,28 @@ export function HtmlVideoCanvasEditor({ editor }) {
       removeEditorOverlay(doc);
       return;
     }
-    removeEditorOverlay(doc);
     const rect = canvasRectFor(element);
+    const rectStyle = {
+      left: `${Math.round(rect.left)}px`,
+      top: `${Math.round(rect.top)}px`,
+      width: `${Math.max(1, Math.round(rect.width))}px`,
+      height: `${Math.max(1, Math.round(rect.height))}px`,
+    };
+    // 原地更新而不重建：resize 时 pointer capture 挂在 handle 按钮上，重建 overlay 会把
+    // capture 目标移出 DOM 导致 capture 丢失（拖出 iframe 松手后出现粘滞拖拽）。
+    const existing = doc.querySelector('[data-hv-editor-overlay]');
+    if (existing) {
+      Object.assign(existing.style, rectStyle);
+      return;
+    }
     const overlay = doc.createElement('div');
     overlay.setAttribute('data-hv-editor-overlay', 'true');
     overlay.style.cssText = [
       'position:absolute',
-      `left:${Math.round(rect.left)}px`,
-      `top:${Math.round(rect.top)}px`,
-      `width:${Math.max(1, Math.round(rect.width))}px`,
-      `height:${Math.max(1, Math.round(rect.height))}px`,
+      `left:${rectStyle.left}`,
+      `top:${rectStyle.top}`,
+      `width:${rectStyle.width}`,
+      `height:${rectStyle.height}`,
       'box-sizing:border-box',
       'border:1px solid #25f4ee',
       'pointer-events:none',
@@ -583,7 +606,8 @@ export function HtmlVideoCanvasEditor({ editor }) {
     const observer = new ResizeObserver(update);
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+    // 预览槽在 !frame / !rawHtml 早退分支下不渲染；分支切换会重建槽位节点，必须重挂观察
+  }, [Boolean(frame), rawHtml]);
 
   useEffect(() => {
     if (!dirty) return undefined;
@@ -653,23 +677,28 @@ export function HtmlVideoCanvasEditor({ editor }) {
     }));
   }
 
-  function ensurePositionedForEdit(element) {
+  function dragGeometryFor(element) {
     const computed = element.ownerDocument.defaultView.getComputedStyle(element);
     const absolutePosition = absolutePositionFor(element);
-    if (computed.position === 'static') {
-      element.style.position = 'absolute';
-      element.style.left = `${Math.round(absolutePosition.left)}px`;
-      element.style.top = `${Math.round(absolutePosition.top)}px`;
-      element.style.margin = '0';
-    }
+    const scale = canvasScale(element.ownerDocument.defaultView);
     return {
-      computed,
       absolutePosition,
       left: stylePxOrFallback(element.style.left || computed.left, absolutePosition.left),
       top: stylePxOrFallback(element.style.top || computed.top, absolutePosition.top),
-      width: element.getBoundingClientRect().width / canvasScale(element.ownerDocument.defaultView),
-      height: element.getBoundingClientRect().height / canvasScale(element.ownerDocument.defaultView),
+      width: element.getBoundingClientRect().width / scale,
+      height: element.getBoundingClientRect().height / scale,
     };
+  }
+
+  // static → absolute 的转换只在真正发生编辑时执行，纯点选不动 DOM
+  function ensurePositionedForEdit(element) {
+    const computed = element.ownerDocument.defaultView.getComputedStyle(element);
+    if (computed.position !== 'static') return;
+    const absolutePosition = absolutePositionFor(element);
+    element.style.position = 'absolute';
+    element.style.left = `${Math.round(absolutePosition.left)}px`;
+    element.style.top = `${Math.round(absolutePosition.top)}px`;
+    element.style.margin = '0';
   }
 
   function handleIframeLoad() {
@@ -694,16 +723,16 @@ export function HtmlVideoCanvasEditor({ editor }) {
     doc.addEventListener('pointerdown', event => {
       if (!editingReadyRef.current) return;
       const handle = event.target?.getAttribute?.('data-hv-editor-handle');
-      const target = handle ? selectedElementRef.current : candidatesFromPoint(doc, event.clientX, event.clientY)[0];
-      const candidates = handle ? elementCandidates : candidatesFromPoint(doc, event.clientX, event.clientY);
+      const candidates = handle ? null : candidatesFromPoint(doc, event.clientX, event.clientY);
+      const target = handle ? selectedElementRef.current : candidates[0];
       if (!isEditableElement(target)) return;
       event.preventDefault();
       event.stopPropagation();
-      if (!handle) setElementCandidates(candidates.map(summarizeElement).filter(Boolean));
+      if (candidates) setElementCandidates(candidates.map(summarizeElement).filter(Boolean));
       selectAndRender(target);
       if (target.dataset?.hvEditorLocked === 'true') return;
       snapshotBeforeEdit();
-      const geometry = ensurePositionedForEdit(target);
+      const geometry = dragGeometryFor(target);
       dragRef.current = {
         element: target,
         mode: handle ? 'resize' : 'move',
@@ -728,6 +757,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
       const drag = dragRef.current;
       if (!drag?.element) return;
       event.preventDefault();
+      if (!drag.changed) ensurePositionedForEdit(drag.element);
       const scale = drag.scale || 1;
       const dx = (event.clientX - drag.startX) / scale;
       const dy = (event.clientY - drag.startY) / scale;
@@ -736,18 +766,21 @@ export function HtmlVideoCanvasEditor({ editor }) {
       let nextWidth = drag.startWidth;
       let nextHeight = drag.startHeight;
       if (drag.mode === 'resize') {
-        if (drag.handle.includes('e')) nextWidth = drag.startWidth + dx;
-        if (drag.handle.includes('s')) nextHeight = drag.startHeight + dy;
+        if (drag.handle.includes('e')) {
+          nextWidth = clamp(drag.startWidth + dx, 16, Math.max(16, drag.maxLeft - drag.startLeft));
+        }
+        if (drag.handle.includes('s')) {
+          nextHeight = clamp(drag.startHeight + dy, 16, Math.max(16, drag.maxTop - drag.startTop));
+        }
         if (drag.handle.includes('w')) {
-          nextLeft = drag.startLeft + dx;
-          nextWidth = drag.startWidth - dx;
+          // 先钳宽度再回算 left：否则宽度到底后 left 仍随 dx 增长，元素会滑走
+          nextWidth = clamp(drag.startWidth - dx, 16, Math.max(16, drag.startLeft + drag.startWidth - drag.minLeft));
+          nextLeft = drag.startLeft + (drag.startWidth - nextWidth);
         }
         if (drag.handle.includes('n')) {
-          nextTop = drag.startTop + dy;
-          nextHeight = drag.startHeight - dy;
+          nextHeight = clamp(drag.startHeight - dy, 16, Math.max(16, drag.startTop + drag.startHeight - drag.minTop));
+          nextTop = drag.startTop + (drag.startHeight - nextHeight);
         }
-        nextWidth = Math.max(16, nextWidth);
-        nextHeight = Math.max(16, nextHeight);
         drag.element.style.width = `${Math.round(nextWidth)}px`;
         drag.element.style.height = `${Math.round(nextHeight)}px`;
       } else {
@@ -787,7 +820,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
 
   function updateSelectedText(text) {
     const element = selectedElementRef.current;
-    if (!element || element.dataset?.hvEditorLocked === 'true') return;
+    if (!element || element.dataset?.hvEditorLocked === 'true' || !canEditText(element)) return;
     writeElementText(element, text);
     setElementInfo(readElementInfo(element));
     renderEditorOverlay(element);
@@ -878,18 +911,19 @@ export function HtmlVideoCanvasEditor({ editor }) {
     if (!element) return;
     snapshotBeforeEdit();
     const doc = element.ownerDocument;
-    const values = editableElements(doc).map(item => readElementInfo(item)?.zIndex || 0);
-    const current = readElementInfo(element)?.zIndex || 0;
+    const values = editableElements(doc).filter(item => item !== element).map(zIndexOf);
+    const current = zIndexOf(element);
     const min = values.length ? Math.min(...values) : 0;
     const max = values.length ? Math.max(...values) : 0;
     if (doc.defaultView.getComputedStyle(element).position === 'static') {
       element.style.position = 'relative';
     }
+    // 已在最顶/最底时保持不变，避免反复点击让 z-index 无限膨胀
     const next = {
       up: current + 1,
       down: current - 1,
-      front: max + 1,
-      back: min - 1,
+      front: current > max ? current : max + 1,
+      back: current < min ? current : min - 1,
     }[direction] ?? current;
     element.style.zIndex = String(next);
     setElementInfo(readElementInfo(element));
