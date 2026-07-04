@@ -86,3 +86,27 @@ export function createDraftSummary(label = '') {
   const safe = String(label || '').trim();
   return `画布调整：${safe || '元素位置'}`;
 }
+
+export function previewAspectRatio(project = {}) {
+  const resolution = project?.output?.resolution || project?.resolution || {};
+  const width = Number(resolution.width ?? project?.width);
+  const height = Number(resolution.height ?? project?.height);
+  return Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0
+    ? width / height
+    : 16 / 9;
+}
+
+export function fitPreviewBox(size = {}, aspectRatio = 16 / 9) {
+  const width = Math.max(0, Number(size.width) || 0);
+  const height = Math.max(0, Number(size.height) || 0);
+  const ratio = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 16 / 9;
+  if (!width || !height) return { width: 0, height: 0 };
+  const byWidth = { width, height: width / ratio };
+  const fitted = byWidth.height <= height
+    ? byWidth
+    : { width: height * ratio, height };
+  return {
+    width: Math.floor(fitted.width),
+    height: Math.floor(fitted.height),
+  };
+}

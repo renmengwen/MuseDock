@@ -6,9 +6,11 @@ import {
   createDraftSummary,
   editableSelector,
   excludedSelector,
+  fitPreviewBox,
   formatElementLabel,
   nextEditId,
   parsePx,
+  previewAspectRatio,
 } from './htmlVideoCanvasDom.mjs';
 import { HtmlVideoElementInspector } from './HtmlVideoElementInspector.jsx';
 import { HtmlVideoFrameStrip } from './HtmlVideoFrameStrip.jsx';
@@ -194,6 +196,10 @@ function installCanvasViewport(doc) {
 
   win.__HV_CANVAS_SCALE__ = scale > 0 ? scale : 1;
   win.__HV_CANVAS_SIZE__ = { width: designWidth, height: designHeight };
+  const canvasWidth = designWidth * win.__HV_CANVAS_SCALE__;
+  const canvasHeight = designHeight * win.__HV_CANVAS_SCALE__;
+  const offsetLeft = Math.max(0, (viewport.width - canvasWidth) / 2);
+  const offsetTop = Math.max(0, (viewport.height - canvasHeight) / 2);
   doc.querySelectorAll('[data-hv-canvas-viewport-style]').forEach(node => node.remove());
   const style = doc.createElement('style');
   style.setAttribute('data-hv-canvas-viewport-style', 'true');
@@ -204,6 +210,10 @@ html {
   overflow: hidden !important;
 }
 body {
+  margin: 0 !important;
+  position: absolute !important;
+  left: ${Math.round(offsetLeft)}px !important;
+  top: ${Math.round(offsetTop)}px !important;
   width: ${Math.round(designWidth)}px !important;
   height: ${Math.round(designHeight)}px !important;
   transform: scale(${win.__HV_CANVAS_SCALE__}) !important;
@@ -317,6 +327,7 @@ const secondaryButtonClass = 'min-h-7 rounded-md border border-slate-700 bg-slat
 
 export function HtmlVideoCanvasEditor({ editor }) {
   const iframeRef = useRef(null);
+  const previewSlotRef = useRef(null);
   const playbackTimerRef = useRef(null);
   const iframeLoadTimerRef = useRef(null);
   const selectedElementRef = useRef(null);
@@ -338,6 +349,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
   const [layerItems, setLayerItems] = useState([]);
   const [dirty, setDirty] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
+  const [previewSlotSize, setPreviewSlotSize] = useState({ width: 0, height: 0 });
 
   const frame = editor.selectedFrame;
   const frameId = frameIdOf(frame);
@@ -348,6 +360,14 @@ export function HtmlVideoCanvasEditor({ editor }) {
   const srcDoc = useMemo(() => (
     htmlReady ? html : '<!doctype html><html><body></body></html>'
   ), [htmlReady, html]);
+  const previewRatio = previewAspectRatio(editor.project);
+  const previewSize = useMemo(
+    () => fitPreviewBox(previewSlotSize, previewRatio),
+    [previewSlotSize, previewRatio],
+  );
+  const previewFrameStyle = previewSize.width && previewSize.height
+    ? { width: `${previewSize.width}px`, height: `${previewSize.height}px` }
+    : { width: '100%', height: '100%' };
 
   function clearPlaybackTimer() {
     if (playbackTimerRef.current) clearTimeout(playbackTimerRef.current);
@@ -543,6 +563,26 @@ export function HtmlVideoCanvasEditor({ editor }) {
   useEffect(() => () => {
     clearPlaybackTimer();
     if (iframeLoadTimerRef.current) clearTimeout(iframeLoadTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    const node = previewSlotRef.current;
+    if (!node) return undefined;
+    const update = () => {
+      const rect = node.getBoundingClientRect();
+      const next = { width: Math.floor(rect.width), height: Math.floor(rect.height) };
+      setPreviewSlotSize(prev => (
+        prev.width === next.width && prev.height === next.height ? prev : next
+      ));
+    };
+    update();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update);
+      return () => window.removeEventListener('resize', update);
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -908,8 +948,8 @@ export function HtmlVideoCanvasEditor({ editor }) {
 
   return (
     <section className="grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] gap-2">
-      <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)_260px] gap-2 max-[1100px]:grid-cols-1">
-        <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 rounded-lg border border-slate-700 bg-slate-950">
+      <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)_260px] gap-2 overflow-hidden max-[1100px]:grid-cols-1">
+        <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
           <div className="flex items-center justify-between gap-2 border-b border-slate-700 bg-slate-800 px-2.5 py-2 max-[720px]:flex-col max-[720px]:items-start">
             <span className="text-xs text-slate-300">{previewError || (playbackState === 'playing' ? '正在播放镜头动画...' : editingReady ? '已停在镜头可编辑帧，可开始编辑。' : '正在准备预览...')}</span>
             <div className="flex flex-wrap justify-end gap-1.5">
@@ -924,11 +964,12 @@ export function HtmlVideoCanvasEditor({ editor }) {
             </div>
           ) : null}
           {!htmlReady && !htmlLoadError ? <p className="m-3 rounded-lg border border-slate-700 bg-slate-800 p-3 text-sm text-slate-300">正在加载当前镜头 HTML...</p> : null}
-          <div className="grid min-h-0 place-items-center px-2 pb-2">
+          <div ref={previewSlotRef} className="grid h-full min-h-0 place-items-center overflow-hidden px-2 pb-2">
             <iframe
               key={iframeKey}
               ref={iframeRef}
-              className="aspect-video h-full max-h-full w-auto max-w-full rounded-md border border-slate-700 bg-slate-950"
+              className="block rounded-md border border-slate-700 bg-slate-950"
+              style={previewFrameStyle}
               title="html-video 当前镜头画布"
               srcDoc={srcDoc}
               sandbox="allow-scripts allow-same-origin"
@@ -937,7 +978,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
             />
           </div>
         </div>
-        <div className="grid min-w-0 content-start gap-3">
+        <div className="grid min-h-0 min-w-0 content-start gap-3 overflow-auto pr-1">
           <HtmlVideoElementInspector
             elementInfo={elementInfo}
             candidates={elementCandidates}

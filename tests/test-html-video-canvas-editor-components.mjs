@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { fitPreviewBox, previewAspectRatio } from '../frontend-react/src/components/creative-video-editor/htmlVideoCanvasDom.mjs';
 
 const frameStrip = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoFrameStrip.jsx', 'utf-8');
 const canvasEditor = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoCanvasEditor.jsx', 'utf-8');
@@ -77,6 +78,15 @@ assert.match(canvasEditor, /function beginPlayback\(\)\s*\{\s*clearPlaybackTimer
 assert.match(canvasEditor, /function finishPlayback/);
 assert.match(canvasEditor, /finishPlayback\(\);/);
 assert.match(canvasEditor, /function replay\(\)\s*\{\s*clearPlaybackTimer\(\);/);
+assert.match(canvasEditor, /ResizeObserver/);
+assert.match(canvasEditor, /fitPreviewBox\(previewSlotSize, previewRatio\)/);
+assert.doesNotMatch(canvasEditor, /aspect-video h-full max-h-full w-auto max-w-full/);
+assert.match(canvasEditor, /content-start gap-3 overflow-auto pr-1/);
+assert.match(canvasEditor, /const offsetLeft = Math\.max\(0, \(viewport\.width - canvasWidth\) \/ 2\)/);
+assert.match(canvasEditor, /left: \$\{Math\.round\(offsetLeft\)\}px !important/);
+assert.deepEqual(fitPreviewBox({ width: 1600, height: 480 }, 16 / 9), { width: 853, height: 480 });
+assert.deepEqual(fitPreviewBox({ width: 500, height: 1000 }, 16 / 9), { width: 500, height: 281 });
+assert.equal(previewAspectRatio({ output: { resolution: { width: 1080, height: 1920 } } }), 1080 / 1920);
 
 assert.match(inspector, /export function HtmlVideoElementInspector/);
 assert.match(inspector, /当前元素/);
