@@ -731,7 +731,6 @@ export function HtmlVideoCanvasEditor({ editor }) {
       if (candidates) setElementCandidates(candidates.map(summarizeElement).filter(Boolean));
       selectAndRender(target);
       if (target.dataset?.hvEditorLocked === 'true') return;
-      snapshotBeforeEdit();
       const geometry = dragGeometryFor(target);
       dragRef.current = {
         element: target,
@@ -757,7 +756,10 @@ export function HtmlVideoCanvasEditor({ editor }) {
       const drag = dragRef.current;
       if (!drag?.element) return;
       event.preventDefault();
-      if (!drag.changed) ensurePositionedForEdit(drag.element);
+      if (!drag.changed) {
+        snapshotBeforeEdit();
+        ensurePositionedForEdit(drag.element);
+      }
       const scale = drag.scale || 1;
       const dx = (event.clientX - drag.startX) / scale;
       const dy = (event.clientY - drag.startY) / scale;

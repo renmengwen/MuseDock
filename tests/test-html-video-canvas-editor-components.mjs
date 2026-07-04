@@ -95,17 +95,19 @@ assert.match(canvasEditor, /nextLeft = drag\.startLeft \+ \(drag\.startWidth - n
 assert.match(canvasEditor, /nextTop = drag\.startTop \+ \(drag\.startHeight - nextHeight\)/, 'n-handle 钳制后需回算 top');
 assert.match(canvasEditor, /clone\.querySelectorAll\('\[data-hv-editor-overlay\]'\)/, '撤销快照不应包含编辑器覆盖层');
 assert.match(canvasEditor, /\}, \[Boolean\(frame\), rawHtml\]\);/, 'ResizeObserver 需跟随早退分支重挂');
-assert.match(canvasEditor, /if \(!drag\.changed\) ensurePositionedForEdit\(drag\.element\);/, 'static 转 absolute 应推迟到首次拖动');
+assert.doesNotMatch(canvasEditor, /selectAndRender\(target\);[^]*?snapshotBeforeEdit\(\);[^]*?const geometry = dragGeometryFor\(target\);/, '纯点选不应创建撤销快照');
+assert.match(canvasEditor, /if \(!drag\.changed\) \{\s*snapshotBeforeEdit\(\);\s*ensurePositionedForEdit\(drag\.element\);/);
 assert.match(canvasEditor, /front: current > max \? current : max \+ 1/, '置顶不应无限膨胀 z-index');
 assert.match(canvasEditor, /!canEditText\(element\)/, '容器元素不允许整体改文案');
 assert.match(inspector, /textEditable/);
 
 // canEditText：容器/图形元素禁止整体文案编辑，叶子文本元素允许
-assert.equal(canEditText({ tagName: 'H1', children: [] }), true);
-assert.equal(canEditText({ tagName: 'IMG', children: [] }), false);
-assert.equal(canEditText({ tagName: 'svg', children: [] }), false);
-assert.equal(canEditText({ tagName: 'SECTION', children: [{ textContent: '子元素文本' }] }), false);
-assert.equal(canEditText({ tagName: 'DIV', children: [{ textContent: '  ' }] }), true);
+assert.equal(canEditText({ tagName: 'H1', childNodes: [{ nodeType: 3 }], children: [] }), true);
+assert.equal(canEditText({ tagName: 'IMG', childNodes: [{ nodeType: 3 }], children: [] }), false);
+assert.equal(canEditText({ tagName: 'svg', childNodes: [{ nodeType: 3 }], children: [] }), false);
+assert.equal(canEditText({ tagName: 'SECTION', childNodes: [{ nodeType: 3 }], children: [{ textContent: '子元素文本' }] }), false);
+assert.equal(canEditText({ tagName: 'DIV', childNodes: [], children: [{ textContent: '  ' }] }), false);
+assert.equal(canEditText({ tagName: 'BUTTON', childNodes: [{ nodeType: 1 }, { nodeType: 3 }], children: [{ textContent: '  ' }] }), true);
 assert.equal(canEditText(null), false);
 
 assert.match(inspector, /export function HtmlVideoElementInspector/);

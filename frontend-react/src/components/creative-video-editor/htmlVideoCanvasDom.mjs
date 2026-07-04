@@ -93,6 +93,7 @@ const textlessTags = new Set(['IMG', 'VIDEO', 'CANVAS', 'SVG', 'AUDIO', 'IFRAME'
 // 会造成内容整份复制。只有全部可见文本都在自身文本节点里的元素才允许改文案。
 export function canEditText(element) {
   if (!element || textlessTags.has(String(element.tagName || '').toUpperCase())) return false;
+  if (!Array.from(element.childNodes || []).some(node => node.nodeType === 3)) return false;
   return !Array.from(element.children || []).some(child => (child.textContent || '').trim());
 }
 
