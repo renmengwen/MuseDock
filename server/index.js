@@ -2,7 +2,7 @@
 const creativeWorkflows = require('./services/creative/creativeWorkflows');
 const creativeWorkflowTasks = require('./services/creative/creativeWorkflowTasks');
 
-const PORT = 3000;
+const PORT = Number(process.env.MUSEDOCK_PORT) || 3000;
 
 async function runStartupRecovery() {
   await creativeWorkflowTasks.recoverOrphanedWorkflows();

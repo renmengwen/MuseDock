@@ -12,6 +12,7 @@ node_modules/
 # Build output
 frontend-dist/
 dist/
+dist-electron/
 build/
 
 # Local runtime data

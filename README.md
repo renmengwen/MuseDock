@@ -13,15 +13,26 @@ MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台：把选�
 
 ## 快速开始
 
-需要 Node.js `>=22 <23`、Google Chrome 或 Playwright Chromium、`ffmpeg`、`ffprobe`。
+需要 Node.js `>=22 <23`、Google Chrome（采集与渲染都复用系统 Chrome，无需下载 Playwright 浏览器）、`ffmpeg`、`ffprobe`。
 
 ```powershell
 npm install
-npx playwright install chromium   # 真实渲染需要
 npm run dev                        # 打开 http://localhost:5173
 ```
 
 切换过 Node 版本时 `better-sqlite3` 可能需要 `npm rebuild better-sqlite3`。`ffmpeg` 查找顺序为 `FFMPEG_PATH` → 项目内置 → 系统 `PATH`；`ffprobe` 建议装进 `PATH` 或用 `FFPROBE_PATH` 指定。
+
+## 桌面版（Electron）
+
+```powershell
+npm run dist   # 产物：dist-electron/MuseDock Setup <version>.exe
+```
+
+- 桌面版和浏览器模式共用同一个 Express server：Electron 内部跑在 `http://127.0.0.1:38017`，用浏览器访问该地址同样可用；`npm start` 的浏览器模式不受影响。
+- 桌面版数据（数据库、Cookie、素材、配置、日志）写入 `%APPDATA%/musedock`，与开发模式的仓库目录互相独立。
+- 依赖系统安装的 Google Chrome；ffmpeg 已内置在安装包里。
+- 打包时 electron-builder 会把 `node_modules` 里的 `better-sqlite3` 原地换成 Electron ABI，`postdist` 钩子会自动 `npm rebuild better-sqlite3` 恢复；打包前先停掉本地 server，否则文件占用会导致 EPERM 失败。
+- `npm run electron`（开发壳）直接用本地 node_modules（node ABI），触发抖音数据存储时会报 ABI 错误；需要时先 `npx electron-rebuild -w better-sqlite3`，用完 `npm rebuild better-sqlite3` 恢复。
 
 ## 主要入口
 
@@ -54,11 +65,11 @@ npm run dev                        # 打开 http://localhost:5173
 
 - 不是通用爬虫控制台，采集只服务本地短视频创作；专家模式仍在建设，稳定入口是 `/creative`。
 - 文章/GitHub 来源只处理正文和图片，不做任意网页截图，也不提取网页里的视频。
-- 真实渲染依赖本机 Chromium、`ffmpeg`、`ffprobe`，缺失时相关烟测或导出会跳过或失败。
+- 真实渲染依赖本机 Chrome、`ffmpeg`、`ffprobe`，缺失时相关烟测或导出会跳过或失败。
 
 ## 技术栈
 
-React 19 + React Router 7 + Vite 8、Tailwind CSS + shadcn/ui；Node.js 22 + Express；SQLite/better-sqlite3 + 本地 JSON；HTML/CSS/GSAP + Playwright/Chromium + ffmpeg/ffprobe；OpenAI-compatible 文本模型 + 小米 MiMo ASR/TTS。
+React 19 + React Router 7 + Vite 8、Tailwind CSS + shadcn/ui；Node.js 22 + Express；SQLite/better-sqlite3 + 本地 JSON；HTML/CSS/GSAP + playwright-core（驱动系统 Chrome）+ ffmpeg/ffprobe；Electron 桌面壳；OpenAI-compatible 文本模型 + 小米 MiMo ASR/TTS。
 
 ## 常用命令
 
@@ -67,6 +78,8 @@ npm run dev            # 后端 + Vite 前端
 npm run dev:frontend   # 只启动前端开发服务
 npm run build:frontend # 构建前端产物到 frontend-dist
 npm run start          # 启动后端并托管 frontend-dist（http://localhost:3000）
+npm run electron       # 用 Electron 壳跑本地代码（需先 build:frontend）
+npm run dist           # 打包 Windows 安装包到 dist-electron/
 npm test               # 完整测试
 npm run test:filter -- creative-workflows  # 按文件名过滤测试
 ```
@@ -86,6 +99,8 @@ node tests/test-html-video-real-render-smoke.js
 | 变量 | 说明 | 默认值 |
 | --- | --- | --- |
 | `MEDIACRAWLER_DB_PATH` | SQLite 数据库路径 | `data/mediacrawler.db` |
+| `MUSEDOCK_DATA_DIR` | 所有可写数据（DB/Cookie/素材/配置）的根目录，Electron 打包后指向 `%APPDATA%/musedock` | 仓库根目录 |
+| `MUSEDOCK_PORT` | 后端监听端口 | `3000`（Electron 内为 `38017`） |
 | `ASR_LANGUAGE` | MiMo ASR 识别语言，支持 `auto`、`zh`、`en` | `auto` |
 | `FFMPEG_PATH` | 手动指定 ffmpeg 可执行文件路径 | 空 |
 | `FFPROBE_PATH` | 手动指定 ffprobe 可执行文件路径 | 空 |
@@ -98,6 +113,7 @@ node tests/test-html-video-real-render-smoke.js
 ```text
 frontend-react/   # React + Vite 前端（pages / components / api）
 server/           # Express 服务：routes / services / templates / resources / scraper
+electron/         # Electron 主进程（桌面壳，复用 server）
 data/             # 本地数据库、配置（config/）、任务和素材（media/）
 tests/            # Node assert 测试脚本
 ```

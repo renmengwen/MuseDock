@@ -36,8 +36,8 @@ const {
 } = htmlVideoProjectApi;
 const { computeSceneSpecSpeechHash } = require('../creative-video/sceneSpecHash');
 
-const DEFAULT_ROOT = path.join(__dirname, '../../../data/creative-workflows');
-const DEFAULT_MEDIA_ROOT = path.join(__dirname, '../../../data/media/douyin');
+const DEFAULT_ROOT = path.join(require('../../dataRoot'), 'data/creative-workflows');
+const DEFAULT_MEDIA_ROOT = path.join(require('../../dataRoot'), 'data/media/douyin');
 const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;
 const DEFAULT_STALE_STAGE_TIMEOUT_MS = 10 * 60 * 1000;
 const WORKFLOW_STOPPED = Symbol('workflow-stopped');

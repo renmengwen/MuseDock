@@ -7,7 +7,7 @@
  * 3. 完全避免 Playwright.launch() 的参数冲突问题
  */
 
-const { chromium } = require('playwright');
+const { chromium } = require('playwright-core');
 const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -17,7 +17,7 @@ const vm = require('vm');
 let storedDouyinCookies = [];
 
 // 持久化 Cookie 到磁盘
-const COOKIE_FILE = path.join(__dirname, '../../douyin-cookies.json');
+const COOKIE_FILE = path.join(require('../dataRoot'), 'douyin-cookies.json');
 
 function loadCookiesFromDisk() {
   try {
@@ -108,7 +108,7 @@ async function startChromeWithCDP(headless = true) {
   }
 
   // 启动新的 Chrome 实例
-  const userDataDir = path.join(__dirname, '../../chrome-user-data');
+  const userDataDir = path.join(require('../dataRoot'), 'chrome-user-data');
   if (!fs.existsSync(userDataDir)) {
     fs.mkdirSync(userDataDir, { recursive: true });
   }

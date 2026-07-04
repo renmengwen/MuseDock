@@ -3,9 +3,9 @@ const path = require('path');
 
 const aiModelConfig = require('./ai/aiModelConfig');
 
-const DEFAULT_CONFIG_PATH = path.join(__dirname, '../../data/config/app-settings.json');
+const DEFAULT_CONFIG_PATH = path.join(require('../dataRoot'), 'data/config/app-settings.json');
 const DEFAULT_AI_CONFIG_PATH = aiModelConfig.DEFAULT_CONFIG_PATH
-  || path.join(__dirname, '../../data/config/ai-models.json');
+  || path.join(require('../dataRoot'), 'data/config/ai-models.json');
 
 const ALLOWED_ASPECT_RATIOS = ['9:16', '16:9', '1:1', '4:5'];
 

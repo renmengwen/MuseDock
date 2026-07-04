@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const Database = require('better-sqlite3');
 
-const DB_PATH = process.env.MEDIACRAWLER_DB_PATH || path.join(__dirname, '../data/mediacrawler.db');
+const DB_PATH = process.env.MEDIACRAWLER_DB_PATH || path.join(require('./dataRoot'), 'data/mediacrawler.db');
 
 function initializeSchema(db) {
   db.pragma('foreign_keys = ON');

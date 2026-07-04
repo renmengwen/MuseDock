@@ -35,7 +35,7 @@ async function diagnoseEnvironment(options = {}) {
 
 async function checkPlaywright(options = {}) {
   try {
-    const mod = options.importPlaywright ? await options.importPlaywright() : await import('playwright');
+    const mod = options.importPlaywright ? await options.importPlaywright() : await import('playwright-core');
     return {
       ok: true,
       code: 'playwright_available',
@@ -54,6 +54,7 @@ async function checkPlaywright(options = {}) {
 async function checkChromium(playwright, options = {}) {
   try {
     const browser = await playwright.chromium.launch({
+      channel: 'chrome',
       headless: true,
       args: ['--no-sandbox'],
     });

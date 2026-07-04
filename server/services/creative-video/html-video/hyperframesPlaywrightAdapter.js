@@ -35,6 +35,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     report(ctx, 15, '正在启动 Playwright Chromium...');
     const playwright = await loadPlaywright(deps.importPlaywright);
     browser = await playwright.chromium.launch({
+      channel: 'chrome',
       headless: true,
       args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
     });
@@ -221,7 +222,7 @@ function normalizeConfig(config) {
 
 async function loadPlaywright(importPlaywright) {
   try {
-    return importPlaywright ? await importPlaywright() : await import('playwright');
+    return importPlaywright ? await importPlaywright() : await import('playwright-core');
   } catch (error) {
     throw createRenderError(
       'environment_not_configured',

@@ -54,7 +54,7 @@ async function loadPlaywright(options = {}) {
     if (typeof options.importPlaywright === 'function') {
       return await options.importPlaywright();
     }
-    return await import('playwright');
+    return await import('playwright-core');
   } catch (error) {
     return { error };
   }
@@ -337,7 +337,7 @@ async function inspectFrameHtmlLayout(options = {}) {
 
   let browser;
   try {
-    browser = await playwright.chromium.launch({ headless: true });
+    browser = await playwright.chromium.launch({ channel: 'chrome', headless: true });
   } catch (error) {
     issues.push(makeIssue({
       code: 'LAYOUT_QA_ENVIRONMENT_NOT_CONFIGURED',

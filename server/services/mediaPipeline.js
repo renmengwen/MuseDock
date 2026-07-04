@@ -4,7 +4,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const aiModelConfig = require('./ai/aiModelConfig');
 
-const DEFAULT_ROOT = path.join(__dirname, '../../data/media/douyin');
+const DEFAULT_ROOT = path.join(require('../dataRoot'), 'data/media/douyin');
 const DEFAULT_MIMO_BASE_URL = 'https://api.xiaomimimo.com/v1';
 const DEFAULT_MIMO_ASR_MODEL = 'mimo-v2.5-asr';
 const MIMO_MAX_BASE64_AUDIO_BYTES = 10 * 1024 * 1024;
