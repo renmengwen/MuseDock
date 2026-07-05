@@ -16,8 +16,6 @@ import {
 import { HtmlVideoElementInspector } from './HtmlVideoElementInspector.jsx';
 import { HtmlVideoFrameStrip } from './HtmlVideoFrameStrip.jsx';
 import { FrameInputsPanel } from './FrameInputsPanel.jsx';
-import { NarrationPanel } from './NarrationPanel.jsx';
-import { CaptionsPanel } from './CaptionsPanel.jsx';
 
 function frameIdOf(frame) {
   return frame?.id || frame?.scene_id || '';
@@ -1039,19 +1037,15 @@ export function HtmlVideoCanvasEditor({ editor }) {
           />
           <Dialog>
             <DialogTrigger asChild>
-              <button className={`${secondaryButtonClass} w-full`} type="button" disabled={disabled}>帧字段 / 旁白 / 字幕</button>
+              <button className={`${secondaryButtonClass} w-full`} type="button" disabled={disabled}>帧字段</button>
             </DialogTrigger>
-            <DialogContent className="grid max-h-[86vh] w-[min(1040px,calc(100vw-32px))] max-w-[1040px] grid-rows-[auto_1fr] gap-0 overflow-hidden rounded-lg border-[#d9dde5] bg-[#f8fafc] p-0 text-[#111827] shadow-[0_24px_70px_rgba(15,23,42,.28)] sm:max-w-[1040px]">
+            <DialogContent className="grid max-h-[86vh] w-[min(760px,calc(100vw-32px))] max-w-[760px] grid-rows-[auto_1fr] gap-0 overflow-hidden rounded-lg border-[#d9dde5] bg-[#f8fafc] p-0 text-[#111827] shadow-[0_24px_70px_rgba(15,23,42,.28)] sm:max-w-[760px]">
               <DialogHeader className="border-b border-[#e7e9ee] bg-white px-5 py-4 pr-12">
-                <DialogTitle className="text-[15px]">帧字段 / 旁白 / 字幕</DialogTitle>
-                <DialogDescription>编辑当前帧的模板字段、全片旁白和字幕文本。</DialogDescription>
+                <DialogTitle className="text-[15px]">帧字段</DialogTitle>
+                <DialogDescription>编辑当前帧的模板字段。字幕和全片旁白在顶部“字幕 / 旁白”入口编辑。</DialogDescription>
               </DialogHeader>
-              <div className="grid min-h-0 gap-3 overflow-auto p-4 md:grid-cols-[minmax(0,1.2fr)_minmax(280px,.8fr)]">
+              <div className="grid min-h-0 gap-3 overflow-auto p-4">
                 <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} />
-                <div className="grid content-start gap-3">
-                  <NarrationPanel narration={editor.project?.narration} disabled={disabled} onSave={editor.saveTemplateInputs} onRegenerate={editor.regenerateNarration} />
-                  <CaptionsPanel captions={frame?.captions || []} selectedFrameId={frameId} disabled={disabled} onSave={patchFrame} />
-                </div>
               </div>
             </DialogContent>
           </Dialog>

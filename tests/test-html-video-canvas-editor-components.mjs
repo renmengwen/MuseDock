@@ -29,10 +29,11 @@ assert.match(canvasEditor, /data-hv-editor-handle/);
 assert.match(canvasEditor, /updateSelectedGeometry/);
 assert.match(canvasEditor, /moveSelectedLayer/);
 assert.match(canvasEditor, /DialogTrigger/);
-assert.match(canvasEditor, /帧字段 \/ 旁白 \/ 字幕/);
+assert.match(canvasEditor, /帧字段/);
+assert.doesNotMatch(canvasEditor, /帧字段 \/ 旁白 \/ 字幕/);
 assert.match(canvasEditor, /grid h-full min-h-0 min-w-0 grid-rows-\[minmax\(0,1fr\)_auto\]/);
-assert.match(canvasEditor, /w-\[min\(1040px,calc\(100vw-32px\)\)\]/);
-assert.match(projectEditor, /grid h-full min-h-0 grid-rows-\[auto_auto_auto_minmax\(0,1fr\)\]/);
+assert.match(canvasEditor, /w-\[min\(760px,calc\(100vw-32px\)\)\]/);
+assert.match(projectEditor, /grid h-full min-h-0 grid-rows-\[auto_auto_minmax\(0,1fr\)\]/);
 assert.doesNotMatch(canvasEditor, /<details/);
 assert.doesNotMatch(canvasEditor, /TemplateInputsPanel/);
 assert.doesNotMatch(canvasEditor, /保存为草稿/);
@@ -122,8 +123,8 @@ assert.match(projectEditor, /Dialog, DialogContent, DialogHeader, DialogTitle, D
 assert.match(projectEditor, /PanelDialog/, 'project editor should have PanelDialog component');
 assert.doesNotMatch(projectEditor, /id: 'canvas', label: '画布'/, 'project editor should no longer have tab definitions');
 
-for (const dialogLabel of ['源码', '草稿', '布局检查', 'AI 修改', '导出记录']) {
-  assert.ok(projectEditor.includes(dialogLabel), `HtmlVideoProjectEditor should expose ${dialogLabel} as a dialog button`);
+for (const dialogLabel of ['字幕 / 旁白', 'AI 修改', '源码', '布局检查', '导出记录']) {
+  assert.ok(projectEditor.includes(dialogLabel), `HtmlVideoProjectEditor should expose ${dialogLabel}`);
 }
 
 console.log('test-html-video-canvas-editor-components passed');

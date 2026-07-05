@@ -125,9 +125,14 @@ assert.doesNotMatch(editor, /ReservedCapabilitiesPanel/, 'advanced reserved pane
 assert.doesNotMatch(editor, /role="tablist"/, 'editor should no longer use a tab bar');
 assert.doesNotMatch(editor, /useState\(['"]canvas['"]\)/, 'editor should not track an active tab');
 assert.ok(editor.includes('ui/dialog'), 'editor should use the shared dialog for secondary panels');
-for (const dialogButton of ['源码', '草稿', '布局检查', 'AI 修改', '导出记录']) {
-  assert.ok(editor.includes(dialogButton), `editor should expose ${dialogButton} as a dialog button`);
+for (const toolbarEntry of ['字幕 / 旁白', 'AI 修改', '更多', '导出成片']) {
+  assert.ok(editor.includes(toolbarEntry), `editor toolbar should expose ${toolbarEntry}`);
 }
+for (const menuPanel of ['源码', '布局检查', '导出记录', '重新生成 HTML', '重新加载']) {
+  assert.ok(editor.includes(menuPanel), `更多 menu should expose ${menuPanel}`);
+}
+assert.ok(editor.includes('DropdownMenuPrimitive'), 'low-frequency panels should live in a dropdown menu');
+assert.ok(editor.includes('HtmlVideoDraftPanel'), 'draft panel should be merged into the AI 修改 dialog');
 assert.doesNotMatch(editor, /ProjectFramesList/, 'editor should drop the left frames list (bottom strip covers selection)');
 
 const sourcePanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoSourcePanel.jsx', 'utf-8');
@@ -268,6 +273,7 @@ assert.ok(canvasEditor.includes('saveAndAcceptFrameEdit'), 'canvas 保存修改 
 assert.doesNotMatch(canvasEditor, /保存为草稿/, 'canvas should no longer expose separate 保存为草稿');
 assert.doesNotMatch(canvasEditor, /onRenderPreview=\{\(\) => \{\}\}/, 'canvas should not wire dead preview actions');
 assert.ok(canvasEditor.includes('FrameInputsPanel'), 'canvas right rail should mount frame fields');
-assert.ok(canvasEditor.includes('CaptionsPanel'), 'canvas right rail should mount captions');
+assert.ok(editor.includes('CaptionsPanel'), 'captions should be a top-level toolbar entry in the project editor');
+assert.ok(editor.includes('NarrationPanel'), 'narration should live next to captions in the project editor');
 
 console.log('html video editor component tests passed');
