@@ -1,6 +1,6 @@
 # MuseDock
 
-MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台：把选题输入、公开来源整理、联网研究、来源图片素材、脚本与分镜、TTS 配音、HTML 帧工程、布局质检和导出放在同一个 Web GUI 里。成片不是一次性黑盒 MP4，而是可检查、可重试、可二次编辑的 HTML 视频工程。
+MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台：把选题输入、公开来源整理、联网研究、来源图片素材、脚本与分镜、TTS 配音、HTML 帧工程、布局质检和导出放在同一个 Web GUI 里。当前阶段成片统一基于 **HyperFrames**（HTML/CSS/GSAP 帧工程）生成——不是一次性黑盒 MP4，而是可检查、可重试、可二次编辑的 HTML 视频工程。
 
 ![MuseDock 一键创作首页](.github/assets/musedock-creative-home.png)
 
@@ -51,7 +51,9 @@ npm run dist   # 产物：dist-electron/MuseDock Setup <version>.exe
 - **失败可恢复**：工程阶段写入 `generation_checkpoint`，失败后复用已完成的来源/研究/素材/音频产物，从失败子阶段继续。
 - **本地优先**：任务、配置、素材、TTS、工程和导出默认存本地目录。
 
-## HTML 视频工程
+## HTML 视频工程（HyperFrames）
+
+当前阶段创作链路已收敛为 HyperFrames 单引擎：分镜 DSL 驱动 AI 生成 HTML/CSS/GSAP 帧，Playwright 驱动系统 Chrome 录制，ffmpeg 合成音视频。
 
 ```text
 输入/来源 -> scene_spec -> content graph -> raw HTML frames
@@ -128,6 +130,10 @@ tests/            # Node assert 测试脚本
 ## 使用须知
 
 本项目仅供个人学习、研究和已获授权范围内的内容创作。使用采集能力时请遵守目标平台服务条款和当地法律法规，只采集你有权访问的内容，不要用于大规模抓取或商业化倒卖；因使用本项目产生的后果由使用者自行承担。
+
+## 友情链接
+
+[Linux.Do](https://linux.do/) — 技术氛围浓厚的开源社区，欢迎大家加入。
 
 ## License
 
