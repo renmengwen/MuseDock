@@ -1,4 +1,5 @@
 import { BringToFront, Eye, EyeOff, Lock, MoveDown, MoveUp, SendToBack, Trash2, Unlock } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const toolButtonClass = 'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55';
 
@@ -17,25 +18,37 @@ function NumberField({ label, value, disabled, onChange }) {
   );
 }
 
-function MiniList({ title, items, selectedId, emptyText, onSelect }) {
-  if (!items?.length) return null;
+function ElementSelect({ title, items, selectedId, emptyText, onSelect }) {
+  const hasItems = Boolean(items?.length);
+  // 恒为受控：无选中时给空串显示 placeholder，避免 controlled/uncontrolled 切换
+  const selectedValue = hasItems && items.some(item => item.editId === selectedId) ? selectedId : '';
+
   return (
     <div className="grid gap-1.5">
       <div className="text-xs font-bold text-slate-300">{title}</div>
-      <div className="grid max-h-36 gap-1 overflow-auto rounded-md border border-slate-700 bg-slate-950/35 p-1">
-        {items.map(item => (
-          <button
-            key={item.editId}
-            type="button"
-            className={`min-h-7 truncate rounded px-2 text-left text-xs transition ${item.editId === selectedId ? 'bg-[#25f4ee] text-slate-950' : 'text-slate-200 hover:bg-slate-700'}`}
-            onClick={() => onSelect?.(item.editId)}
-            title={item.label}
+      {hasItems ? (
+        <Select value={selectedValue} onValueChange={value => onSelect?.(value)}>
+          <SelectTrigger
+            size="sm"
+            className="border-slate-700 bg-slate-950/35 text-xs text-slate-100 focus-visible:border-[#25f4ee] focus-visible:ring-[#25f4ee]/20 data-[placeholder]:text-slate-400"
           >
-            {item.hidden ? '隐藏 · ' : ''}{item.locked ? '锁定 · ' : ''}{item.label}
-          </button>
-        ))}
-      </div>
-      {!items.length ? <p className="m-0 text-xs text-slate-400">{emptyText}</p> : null}
+            <SelectValue placeholder="选择元素" />
+          </SelectTrigger>
+          <SelectContent className="border-slate-700 bg-slate-900 text-slate-100">
+            {items.map(item => (
+              <SelectItem
+                key={item.editId}
+                value={item.editId}
+                className="text-xs focus:bg-slate-700 focus:text-slate-100"
+              >
+                {item.hidden ? '隐藏 · ' : ''}{item.locked ? '锁定 · ' : ''}{item.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <p className="m-0 text-xs text-slate-400">{emptyText}</p>
+      )}
     </div>
   );
 }
@@ -93,7 +106,7 @@ export function HtmlVideoElementInspector({
         <p className="m-0 text-sm leading-relaxed text-slate-300">点击画面中的标题、标签或正文元素开始编辑。</p>
       ) : null}
       {editingReady ? (
-        <MiniList
+        <ElementSelect
           title="当前点击位置"
           items={candidates}
           selectedId={selectedId}
@@ -102,7 +115,7 @@ export function HtmlVideoElementInspector({
         />
       ) : null}
       {editingReady ? (
-        <MiniList
+        <ElementSelect
           title="当前帧图层"
           items={layers}
           selectedId={selectedId}

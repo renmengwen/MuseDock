@@ -68,11 +68,7 @@ export function HtmlVideoAiEditPanel({
   }
 
   return (
-    <EditorPanel>
-      <EditorPanelHeader>
-        <h3>AI 修改</h3>
-      </EditorPanelHeader>
-
+    <EditorPanel aria-label="AI 修改">
       <form onSubmit={submitFrameDraft}>
         <EditorPanelHeader>
           <h4>当前帧</h4>
@@ -131,7 +127,7 @@ export function HtmlVideoAiEditPanel({
               <button type="button" disabled={!canUsePlan || !editPlan.generated_drafts?.length} onClick={() => onDiscardPlan?.(planId)}>放弃计划草稿</button>
             </EditorInlineActions>
           </EditorPanelHeader>
-          <pre>{summarizePlan(editPlan)}</pre>
+          <pre className="whitespace-pre-wrap break-words">{summarizePlan(editPlan)}</pre>
         </div>
       ) : null}
     </EditorPanel>

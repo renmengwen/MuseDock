@@ -14,7 +14,7 @@ export function NarrationPanel({ narration, disabled, onSave, onRegenerate }) {
         <h3>旁白</h3>
         <EditorInlineActions>
           <button type="button" disabled={disabled} onClick={() => onRegenerate({ text: draft })}>重新生成旁白</button>
-          <button type="button" disabled={disabled} onClick={() => onSave({ narration: { text: draft } })}>保存旁白</button>
+          <button type="button" disabled={disabled} onClick={() => onSave({ text: draft })}>保存旁白</button>
         </EditorInlineActions>
       </EditorPanelHeader>
       <textarea value={draft} disabled={disabled} rows={5} onChange={event => setDraft(event.target.value)} />

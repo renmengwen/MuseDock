@@ -90,6 +90,7 @@ function baseProject() {
   assert.equal(result.project.frames[0].inputs.headline, '组合保存标题');
   assert.equal(result.project.frames[0].metadata.visual_text.headline, '组合保存标题');
   assert.equal(result.project.frames[0].narration_text, '组合保存旁白');
+  assert.equal(result.project.frames[0].narration_text_user_edited, true);
   assert.equal(result.requires_tts, true);
   assert.equal(result.requires_render, true);
 
@@ -115,20 +116,34 @@ function baseProject() {
   }
 
   {
-    const result = applyEditPatch(baseProject(), {
+    const project = baseProject();
+    project.frames[0].captions = [{ id: 'manual', start: 0, end: 4, text: '手工字幕' }];
+    const result = applyEditPatch(project, {
       type: 'frame_patch',
       frame_id: 'frame_01',
-      narration_text: '只改旁白时字幕应同步更新',
+      narration_text: '只改旁白时字幕不应覆盖手工字幕',
     });
 
     assert.equal(result.success, true);
     const frame = result.project.frames.find(item => item.id === 'frame_01');
-    assert.equal(frame.narration_text, '只改旁白时字幕应同步更新');
+    assert.equal(frame.narration_text, '只改旁白时字幕不应覆盖手工字幕');
     assert.equal(frame.captions.length, 1);
-    assert.equal(frame.captions[0].text, '只改旁白时字幕应同步更新');
-    assert.equal(frame.captions[0].start, 0);
-    assert.equal(frame.captions[0].end, 4);
+    assert.equal(frame.captions[0].text, '手工字幕');
     assert.equal(result.requires_tts, true);
+  }
+
+  {
+    const result = applyEditPatch(baseProject(), {
+      type: 'frame_patch',
+      frame_id: 'frame_01',
+      narration_text: '明确要求重建字幕',
+      regenerate_captions: true,
+    });
+
+    assert.equal(result.success, true);
+    const frame = result.project.frames.find(item => item.id === 'frame_01');
+    assert.equal(frame.captions.length, 1);
+    assert.equal(frame.captions[0].text, '明确要求重建字幕');
   }
 
   result = applyEditPatch(baseProject(), {

@@ -441,13 +441,17 @@ export function useHtmlVideoProject({ workflowId, api }) {
     })
   ), [api, workflowId, runMutatingAction]);
 
-  const regenerateNarration = useCallback((payload = {}) => (
+  const regenerateNarration = useCallback((frameId, payload = {}) => (
     runMutatingAction({
       nextStatus: 'tts',
       loadingMessage: STATUS_MESSAGES.tts,
-      successMessage: '旁白已重新生成，需要重新导出。',
+      successMessage: '旁白已更新，需要重新导出成片。',
       fallbackMessage: '重新生成旁白失败。',
-      action: () => api.editHtmlVideoProject(workflowId, { type: 'tts', ...payload }),
+      action: () => api.editHtmlVideoProject(workflowId, {
+        type: 'tts',
+        frame_id: frameId,
+        text: payload.text ?? payload.narration_text ?? '',
+      }),
     })
   ), [api, workflowId, runMutatingAction]);
 

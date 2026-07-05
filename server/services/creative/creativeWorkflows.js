@@ -136,6 +136,31 @@ function sceneIdsFromSceneSpec(sceneSpec = {}) {
   return scenes.map((scene, index) => safeString(scene?.id) || `scene_${String(index + 1).padStart(2, '0')}`);
 }
 
+function sceneSpecFromProjectFrames(project = {}, baseSceneSpec = null) {
+  const base = baseSceneSpec && typeof baseSceneSpec === 'object' ? baseSceneSpec : {};
+  const baseScenes = Array.isArray(base.scenes) ? base.scenes : [];
+  const frames = Array.isArray(project.frames) ? project.frames : [];
+  return {
+    ...base,
+    scenes: frames.map((frame, index) => {
+      const id = safeString(frame.scene_id || frame.id) || `scene_${String(index + 1).padStart(2, '0')}`;
+      const matched = baseScenes.find(scene => safeString(scene?.id) === id) || {};
+      // projectSchema 会把缺失的 frame.narration_text 归一化成空串：空串不算「帧改过旁白」，
+      // 回退到 base scene-spec 的文本，避免把旁白只存在 scene-spec 的存量工程整批清空
+      const frameNarration = String(frame.narration_text ?? '');
+      const useFrameNarration = frame.narration_text_user_edited === true || frameNarration.trim();
+      const frameCaptions = Array.isArray(frame.captions) && frame.captions.length ? frame.captions : null;
+      return {
+        ...matched,
+        id,
+        duration_sec: Number(frame.duration_sec || matched.duration_sec || matched.duration || 0) || matched.duration_sec,
+        narration_text: useFrameNarration ? frameNarration : String(matched.narration_text ?? ''),
+        captions: frameCaptions || (Array.isArray(matched.captions) ? matched.captions : frame.captions),
+      };
+    }),
+  };
+}
+
 async function restoreHtmlVideoNarrationReference({ project, projectDir } = {}) {
   if (!project || typeof project !== 'object' || htmlVideoAudioDisabled(project) || hasHtmlVideoNarrationReference(project)) {
     return project;
@@ -2496,7 +2521,119 @@ async function inspectHtmlVideoProjectLayout(workflowId, payload = {}, options =
   };
 }
 
+async function regenerateHtmlVideoProjectNarration(workflowId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+
+  if (htmlVideoAudioDisabled(project)) {
+    return {
+      success: false,
+      code: 'AUDIO_DISABLED',
+      workflow_id: workflowId,
+      message: '该工程生成时已关闭配音，无法重新生成旁白。',
+    };
+  }
+
+  const frameId = safeString(payload.frame_id || payload.frameId);
+  const narrationText = String(payload.text ?? payload.narration_text ?? '');
+  if (frameId && !narrationText.trim()) {
+    return {
+      success: false,
+      code: 'NARRATION_EMPTY',
+      workflow_id: workflowId,
+      message: '旁白文本为空，请先填写旁白再重新生成。',
+    };
+  }
+
+  let nextProject = project;
+  if (frameId) {
+    const patcher = options.htmlVideoEditPatchService || htmlVideoEditPatchService;
+    const patched = patcher.applyEditPatch(nextProject, {
+      type: 'frame_patch',
+      frame_id: frameId,
+      narration_text: narrationText,
+      summary: '旁白已更新并重新生成音频。',
+    });
+    if (!patched.success) {
+      return {
+        success: false,
+        code: patched.code || 'EDIT_FAILED',
+        workflow_id: workflowId,
+        message: patched.message || '保存旁白失败。',
+      };
+    }
+    nextProject = patched.project;
+  }
+
+  const baseSceneSpec = await readHtmlVideoSceneSpec(projectDir);
+  const sceneSpec = sceneSpecFromProjectFrames(nextProject, baseSceneSpec);
+  if (!Array.isArray(sceneSpec.scenes) || sceneSpec.scenes.length === 0) {
+    return {
+      success: false,
+      code: 'SCENE_SPEC_MISSING',
+      workflow_id: workflowId,
+      message: '重新生成旁白失败：未找到可生成音频的场景。',
+    };
+  }
+  if (!sceneSpec.scenes.some(scene => String(scene?.narration_text || '').trim())) {
+    return {
+      success: false,
+      code: 'NARRATION_EMPTY',
+      workflow_id: workflowId,
+      message: '重新生成旁白失败：所有场景的旁白文本都为空。',
+    };
+  }
+
+  // 先落盘文本再合成：TTS 失败时用户的旁白编辑不丢失
+  await htmlVideoProjectStore.saveSceneSpec(projectDir, sceneSpec);
+  nextProject = await htmlVideoProjectStore.saveProject(projectDir, nextProject);
+
+  // 只改一帧时按场景增量合成（manifest 由 ttsService 增量合并），避免整片重跑 TTS
+  const targetFrame = frameId
+    ? (Array.isArray(nextProject.frames) ? nextProject.frames : [])
+      .find(frame => safeString(frame.id) === frameId || safeString(frame.scene_id) === frameId)
+    : null;
+  const sceneId = targetFrame ? safeString(targetFrame.scene_id || targetFrame.id) : '';
+
+  const ttsService = options.htmlVideoServices?.ttsService
+    || options.services?.ttsService
+    || defaultCreativeVideoTtsService;
+  const tts = await ttsService.synthesizeSceneNarration({
+    projectDir,
+    sceneSpec,
+    ...(sceneId ? { sceneId } : {}),
+  });
+  if (!tts.success) {
+    return {
+      success: true,
+      code: 'TTS_FAILED',
+      workflow_id: workflowId,
+      html_video_project: nextProject,
+      requires_tts: true,
+      requires_render: true,
+      message: `${tts.message || '重新生成旁白失败。'}旁白文本已保存，音频生成失败，可稍后重试。`,
+    };
+  }
+
+  defaultCreativeVideoTtsService.applyManifestToProjectAudio(nextProject, sceneSpec, plainObject(tts.audio_manifest));
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, nextProject);
+  return {
+    success: true,
+    workflow_id: workflowId,
+    html_video_project: saved,
+    html_video_project_path: projectDir,
+    audio_manifest: saved.audio?.tts_manifest_path || null,
+    requires_tts: false,
+    requires_render: true,
+    message: tts.message || '旁白音频已重新生成，需要重新导出成片。',
+  };
+}
+
 async function editHtmlVideoProject(workflowId, payload = {}, options = {}) {
+  if (safeString(payload.type) === 'tts') {
+    return regenerateHtmlVideoProjectNarration(workflowId, payload, options);
+  }
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
   if (error) return error;
@@ -2752,6 +2889,7 @@ module.exports = {
   acceptHtmlVideoProjectFrameDraft,
   discardHtmlVideoProjectFrameDraft,
   inspectHtmlVideoProjectLayout,
+  regenerateHtmlVideoProjectNarration,
   editHtmlVideoProject,
   renderHtmlVideoProject,
   exportHtmlVideoProject,

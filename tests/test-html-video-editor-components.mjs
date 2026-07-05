@@ -275,5 +275,9 @@ assert.doesNotMatch(canvasEditor, /onRenderPreview=\{\(\) => \{\}\}/, 'canvas sh
 assert.ok(canvasEditor.includes('FrameInputsPanel'), 'canvas right rail should mount frame fields');
 assert.ok(editor.includes('CaptionsPanel'), 'captions should be a top-level toolbar entry in the project editor');
 assert.ok(editor.includes('NarrationPanel'), 'narration should live next to captions in the project editor');
+assert.match(editor, /narration=\{selectedFrame\?\.narration_text \|\| ''\}/, '旁白面板应编辑当前帧旁白');
+assert.match(editor, /editor\.saveFrame\(selectedFrameId,[^]*narration_text: payload\.text/s, '保存旁白应走当前帧 frame_patch');
+assert.match(hook, /type:\s*'tts'[^]*frame_id:\s*frameId/s, '重新生成旁白应走后端 tts 编辑类型并带当前帧 ID');
+assert.doesNotMatch(hook, /type:\s*'tts',\s*\.\.\.payload/, '重新生成旁白不应再发送无帧 ID 的 tts payload');
 
 console.log('html video editor component tests passed');

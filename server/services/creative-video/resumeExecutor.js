@@ -7,6 +7,7 @@ const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = requi
 const { mapSceneSpecToContentGraph } = require('./html-video/sceneSpecMapper');
 const { repairProjectTimeline, compressNarrationForTarget } = require('./html-video/timelineRepair');
 const { computeSceneSpecSpeechHash } = require('./sceneSpecHash');
+const { applyManifestToProjectAudio } = require('./ttsService');
 const defaultVisualQaService = require('./visualQaService');
 
 function objectOrEmpty(value) {
@@ -359,17 +360,7 @@ async function repairScriptAndTimeline(context) {
   };
   const tts = await ttsService.synthesizeSceneNarration({ projectDir: context.projectDir, sceneSpec });
   if (!tts.success) return tts;
-  const audioManifest = objectOrEmpty(tts.audio_manifest);
-  const scenes = arrayOrEmpty(sceneSpec.scenes);
-  project.audio = {
-    source: 'scene_spec',
-    scene_spec_hash: audioManifest.scene_spec_hash || computeSceneSpecSpeechHash(sceneSpec),
-    scene_count: audioManifest.scene_count || scenes.length,
-    scene_ids: audioManifest.scene_ids || scenes.map(scene => scene.id),
-    status: audioManifest.status || 'ready',
-    narration_path: audioManifest.combined_path || audioManifest.narration_path || audioManifest.narrationPath || null,
-    tts_manifest_path: audioManifest.tts_manifest_path || audioManifest.ttsManifestPath || audioManifest.manifest_path || 'tts/audio_manifest.json',
-  };
+  applyManifestToProjectAudio(project, sceneSpec, objectOrEmpty(tts.audio_manifest));
   const repaired = repairProjectTimeline({
     project,
     sceneSpec,

@@ -28,6 +28,7 @@ const { parseJsonOnlyResponse } = require('./templateInputAgent');
 const defaultVisualQaService = require('../visualQaService');
 const defaultLayoutQaService = require('./layoutQaService');
 const { computeSceneSpecSpeechHash, audioMatchesSceneSpec } = require('../sceneSpecHash');
+const { applyManifestToProjectAudio } = require('../ttsService');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
 const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('./sceneSpecMapper');
 const { resolveNodeSceneId, validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
@@ -1560,28 +1561,7 @@ async function generateHtmlVideo(options = {}) {
           project,
         });
       }
-      const audioManifest = objectOrEmpty(tts.audio_manifest);
-      const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
-      const narrationPath = firstNonEmptyString(
-        audioManifest.combined_path,
-        audioManifest.narration_path,
-        audioManifest.narrationPath,
-        project.audio?.narration_path,
-      );
-      const manifestPath = firstNonEmptyString(
-        audioManifest.tts_manifest_path,
-        audioManifest.ttsManifestPath,
-        audioManifest.manifest_path,
-        audioManifest.manifestPath,
-      );
-      project.audio = objectOrEmpty(project.audio);
-      project.audio.source = 'scene_spec';
-      project.audio.scene_spec_hash = audioManifest.scene_spec_hash || computeSceneSpecSpeechHash(sceneSpec);
-      project.audio.scene_count = audioManifest.scene_count || scenes.length;
-      project.audio.scene_ids = audioManifest.scene_ids || scenes.map(scene => scene.id);
-      project.audio.status = audioManifest.status || 'ready';
-      project.audio.tts_manifest_path = manifestPath || (narrationPath || hasManifestSceneAudio(audioManifest) ? 'tts/audio_manifest.json' : null);
-      project.audio.narration_path = narrationPath || null;
+      applyManifestToProjectAudio(project, sceneSpec, objectOrEmpty(tts.audio_manifest));
     } else if (existingNarrationAudio.path && sceneSpec) {
       return failure('当前音频与字幕脚本不一致，请重新生成旁白后再渲染。', diagnostics, {
         html_video_project_path: projectDir,

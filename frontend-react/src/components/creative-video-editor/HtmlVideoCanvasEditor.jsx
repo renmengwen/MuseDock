@@ -5,10 +5,9 @@ import {
   canEditText,
   clamp,
   createDraftSummary,
-  editableSelector,
-  excludedSelector,
   fitPreviewBox,
   formatElementLabel,
+  isCanvasEditableElement,
   nextEditId,
   parsePx,
   previewAspectRatio,
@@ -16,6 +15,8 @@ import {
 import { HtmlVideoElementInspector } from './HtmlVideoElementInspector.jsx';
 import { HtmlVideoFrameStrip } from './HtmlVideoFrameStrip.jsx';
 import { FrameInputsPanel } from './FrameInputsPanel.jsx';
+
+const DARK_SCROLLBAR_CLASS = '[scrollbar-width:thin] [scrollbar-color:#64748b_#020617] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-slate-950 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-600 [&::-webkit-scrollbar-thumb:hover]:bg-slate-500';
 
 function frameIdOf(frame) {
   return frame?.id || frame?.scene_id || '';
@@ -64,7 +65,10 @@ function collectExistingEditIds(doc) {
 function ensureEditId(element) {
   if (!element || element.dataset?.hvEditId) return element?.dataset?.hvEditId || '';
   const doc = element.ownerDocument;
-  const id = nextEditId(collectExistingEditIds(doc));
+  // 文档级缓存已分配 id：避免每个新元素都全文档扫一遍（O(n²)），iframe 重载后自然重建
+  if (!doc.__hvEditIdSet) doc.__hvEditIdSet = collectExistingEditIds(doc);
+  const id = nextEditId(doc.__hvEditIdSet);
+  doc.__hvEditIdSet.add(id);
   element.dataset.hvEditId = id;
   return id;
 }
@@ -86,10 +90,9 @@ const excludedAncestorSelector = [
 ].join(',');
 
 function isEditableElement(element) {
-  if (!element || element.nodeType !== 1) return false;
-  if (element.matches(excludedSelector)) return false;
+  if (!isCanvasEditableElement(element)) return false;
   if (element.closest(excludedAncestorSelector)) return false;
-  return element.matches(editableSelector);
+  return true;
 }
 
 function freezeFrame(win, targetTimeMs) {
@@ -309,9 +312,10 @@ function selectElement(element) {
 
 function summarizeElement(element) {
   const info = readElementInfo(element);
+  const text = String(info?.text || '').replace(/\s+/g, ' ').trim();
   return info ? {
     editId: info.editId,
-    label: info.label,
+    label: text && text !== info.label ? `${info.label} · ${text.slice(0, 32)}` : info.label,
     selector: info.selector,
     locked: info.locked,
     hidden: info.hidden,
@@ -413,7 +417,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
 
   function editableElements(doc) {
     if (!doc?.body) return [];
-    return Array.from(doc.querySelectorAll(editableSelector)).filter(isEditableElement);
+    return Array.from(doc.body.querySelectorAll('*')).filter(isEditableElement);
   }
 
   function refreshLayerItems(doc = selectedDocument()) {
@@ -424,9 +428,17 @@ export function HtmlVideoCanvasEditor({ editor }) {
     setLayerItems(items);
   }
 
+  // 按键/数字微调的热路径只更新选中元素的条目，不全量重扫 DOM
+  function updateLayerItem(element) {
+    const summary = summarizeElement(element);
+    if (!summary) return;
+    setLayerItems(prev => prev.map(item => (item.editId === summary.editId ? summary : item)));
+  }
+
   function findElementByEditId(editId, doc = selectedDocument()) {
     if (!editId || !doc?.body) return null;
-    return editableElements(doc).find(element => element.dataset?.hvEditId === editId) || null;
+    const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(editId) : String(editId).replace(/"/g, '\\"');
+    return doc.body.querySelector(`[data-hv-edit-id="${escaped}"]`);
   }
 
   function removeEditorOverlay(doc = selectedDocument()) {
@@ -824,7 +836,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
     writeElementText(element, text);
     setElementInfo(readElementInfo(element));
     renderEditorOverlay(element);
-    refreshLayerItems(element.ownerDocument);
+    updateLayerItem(element);
     setDirty(true);
   }
 
@@ -839,7 +851,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
     if (Number.isFinite(next.height)) element.style.height = `${Math.max(16, Math.round(next.height))}px`;
     setElementInfo(readElementInfo(element));
     renderEditorOverlay(element);
-    refreshLayerItems(element.ownerDocument);
+    updateLayerItem(element);
     setDirty(true);
   }
 
@@ -1012,7 +1024,7 @@ export function HtmlVideoCanvasEditor({ editor }) {
             />
           </div>
         </div>
-        <div className="grid min-h-0 min-w-0 content-start gap-3 overflow-auto pr-1">
+        <div className={`grid min-h-0 min-w-0 content-start gap-3 overflow-y-auto overflow-x-hidden pr-1 ${DARK_SCROLLBAR_CLASS}`}>
           <HtmlVideoElementInspector
             elementInfo={elementInfo}
             candidates={elementCandidates}

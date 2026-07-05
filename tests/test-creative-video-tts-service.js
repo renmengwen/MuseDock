@@ -61,8 +61,15 @@ const {
     },
   });
   assert.equal(local.success, true);
-  assert.equal(local.audio_manifest.scenes.length, 1);
-  assert.equal(local.audio_manifest.scenes[0].scene_id, 'scene_02');
+  assert.equal(local.audio_manifest.scenes.length, 2);
+  assert.equal(local.audio_manifest.scenes[0].scene_id, 'scene_01');
+  assert.equal(local.audio_manifest.scenes[1].scene_id, 'scene_02');
+  assert.equal(await fs.readFile(local.audio_manifest.scenes[1].path, 'utf8'), 'local:第二段旁白');
+
+  const projectAudio = { audio: { narration_path: 'old-combined.wav' } };
+  tts.applyManifestToProjectAudio(projectAudio, sceneSpec, local.audio_manifest);
+  assert.equal(projectAudio.audio.narration_path, null);
+  assert.equal(projectAudio.audio.tts_manifest_path, 'tts/audio_manifest.json');
 
   await fs.writeFile(path.join(projectDir, 'tts', 'scene_01.mp3'), 'old audio');
   const failed = await tts.synthesizeSceneNarration({

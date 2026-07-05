@@ -82,6 +82,57 @@ async function defaultReadAudioDuration() {
   return 0;
 }
 
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function hasManifestSceneAudio(audioManifest = {}) {
+  return (Array.isArray(audioManifest.scenes) ? audioManifest.scenes : [])
+    .some(scene => firstNonEmptyString(scene?.path, scene?.relative_path, scene?.relativePath));
+}
+
+// TTS manifest -> project.audio 的唯一映射实现，htmlVideoWorkflow / resumeExecutor /
+// creativeWorkflows 三条链路共用，避免各自手抄后漂移。
+function applyManifestToProjectAudio(project, sceneSpec, audioManifest = {}) {
+  const manifest = audioManifest && typeof audioManifest === 'object' ? audioManifest : {};
+  const scenes = Array.isArray(sceneSpec?.scenes) ? sceneSpec.scenes : [];
+  const narrationPath = firstNonEmptyString(
+    manifest.combined_path,
+    manifest.narration_path,
+    manifest.narrationPath,
+  );
+  const manifestPath = firstNonEmptyString(
+    manifest.tts_manifest_path,
+    manifest.ttsManifestPath,
+    manifest.manifest_path,
+    manifest.manifestPath,
+  );
+  project.audio = project.audio && typeof project.audio === 'object' ? project.audio : {};
+  project.audio.source = 'scene_spec';
+  project.audio.scene_spec_hash = manifest.scene_spec_hash || computeSceneSpecSpeechHash(sceneSpec || {});
+  project.audio.scene_count = manifest.scene_count || scenes.length;
+  project.audio.scene_ids = Array.isArray(manifest.scene_ids) && manifest.scene_ids.length
+    ? manifest.scene_ids
+    : scenes.map(scene => scene.id);
+  project.audio.status = manifest.status || 'ready';
+  project.audio.tts_manifest_path = manifestPath || (narrationPath || hasManifestSceneAudio(manifest) ? 'tts/audio_manifest.json' : null);
+  project.audio.narration_path = narrationPath || null;
+  return project.audio;
+}
+
+async function readExistingManifestScenes(ttsDir) {
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.join(ttsDir, 'audio_manifest.json'), 'utf8'));
+    return Array.isArray(parsed?.scenes) ? parsed.scenes : [];
+  } catch {
+    return [];
+  }
+}
+
 async function synthesizeSceneNarration({
   projectDir,
   sceneSpec,
@@ -150,6 +201,15 @@ async function synthesizeSceneNarration({
       await fs.rm(file.finalPath, { force: true });
       await fs.rename(file.tempPath, file.finalPath);
     }
+    if (sceneId) {
+      // 单场景重生成：把磁盘上已有 manifest 里其他场景的条目并回来，避免整份覆盖丢音频
+      const specIdOrder = new Map(getScenes(sceneSpec).map((scene, index) => [scene.id, index]));
+      const regenerated = new Set(manifest.scenes.map(scene => scene.scene_id));
+      const kept = (await readExistingManifestScenes(ttsDir))
+        .filter(scene => !regenerated.has(scene.scene_id) && specIdOrder.has(scene.scene_id));
+      manifest.scenes = [...kept, ...manifest.scenes]
+        .sort((a, b) => (specIdOrder.get(a.scene_id) ?? 0) - (specIdOrder.get(b.scene_id) ?? 0));
+    }
     await fs.writeFile(path.join(ttsDir, 'audio_manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -164,4 +224,5 @@ async function synthesizeSceneNarration({
 
 module.exports = {
   synthesizeSceneNarration,
+  applyManifestToProjectAudio,
 };

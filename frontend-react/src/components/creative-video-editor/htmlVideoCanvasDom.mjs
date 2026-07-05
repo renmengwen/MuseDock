@@ -93,8 +93,15 @@ const textlessTags = new Set(['IMG', 'VIDEO', 'CANVAS', 'SVG', 'AUDIO', 'IFRAME'
 // 会造成内容整份复制。只有全部可见文本都在自身文本节点里的元素才允许改文案。
 export function canEditText(element) {
   if (!element || textlessTags.has(String(element.tagName || '').toUpperCase())) return false;
-  if (!Array.from(element.childNodes || []).some(node => node.nodeType === 3)) return false;
+  // 文本节点必须有非空白内容：否则 pretty-print 的缩进节点会把纯布局包装误判成可编辑
+  if (!Array.from(element.childNodes || []).some(node => node.nodeType === 3 && String(node.textContent || '').trim())) return false;
   return !Array.from(element.children || []).some(child => (child.textContent || '').trim());
+}
+
+export function isCanvasEditableElement(element) {
+  if (!element || element.nodeType !== 1 || typeof element.matches !== 'function') return false;
+  if (element.matches(excludedSelector)) return false;
+  return element.matches(editableSelector) || canEditText(element);
 }
 
 export function previewAspectRatio(project = {}) {

@@ -15,14 +15,15 @@ import { ProjectStatusBar } from './ProjectStatusBar.jsx';
 const TOOL_BUTTON_CLASS = 'min-h-8 rounded-md border border-slate-700 bg-slate-800 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55';
 const PRIMARY_TOOL_BUTTON_CLASS = 'min-h-8 rounded-md border border-slate-100 bg-slate-100 px-2.5 text-xs font-bold text-slate-950 transition hover:border-white hover:bg-white disabled:cursor-not-allowed disabled:opacity-55';
 const MENU_ITEM_CLASS = 'cursor-pointer rounded px-2.5 py-2 text-xs font-bold text-slate-100 outline-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-55 data-[highlighted]:bg-slate-700';
+const LIGHT_SCROLLBAR_CLASS = '[scrollbar-width:thin] [scrollbar-color:#cbd5e1_#f8fafc] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-[#f8fafc] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb:hover]:bg-slate-400';
 
-function PanelDialog({ label, title, children }) {
+function PanelDialog({ label, title, contentClassName = '', children }) {
   return (
     <Dialog>
       <DialogTrigger asChild>
         <button className={TOOL_BUTTON_CLASS} type="button">{label}</button>
       </DialogTrigger>
-      <DialogContent className="max-h-[84vh] overflow-auto">
+      <DialogContent className={`max-h-[84vh] overflow-y-auto overflow-x-hidden ${LIGHT_SCROLLBAR_CLASS} ${contentClassName}`}>
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         {children}
       </DialogContent>
@@ -66,12 +67,21 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         <PanelDialog label="字幕 / 旁白" title="字幕 / 旁白">
           <div className="grid content-start gap-3">
             <CaptionsPanel captions={selectedFrame?.captions || []} selectedFrameId={selectedFrameId} disabled={disabled} onSave={patchFrame} />
-            <NarrationPanel narration={editor.project?.narration} disabled={disabled} onSave={editor.saveTemplateInputs} onRegenerate={editor.regenerateNarration} />
+            <NarrationPanel
+              narration={selectedFrame?.narration_text || ''}
+              disabled={disabled || !selectedFrameId}
+              onSave={(payload) => editor.saveFrame(selectedFrameId, {
+                type: 'frame_patch',
+                narration_text: payload.text || '',
+              })}
+              onRegenerate={(payload) => editor.regenerateNarration(selectedFrameId, payload)}
+            />
           </div>
         </PanelDialog>
-        <PanelDialog label="AI 修改" title="AI 修改">
+        <PanelDialog label="AI 修改" title="AI 修改" contentClassName="w-[min(720px,calc(100vw-32px))] max-w-[720px] bg-[#f8fafc] text-[#111827] sm:max-w-[720px]">
           <div className="grid content-start gap-3">
             <NaturalLanguageEditBox
+              tone="light"
               disabled={disabled}
               editing={editor.status === 'editing'}
               onSubmit={editor.applyNaturalLanguageEdit}
@@ -117,7 +127,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         </button>
       </div>
       <Dialog open={activePanel === 'layout-qa'} onOpenChange={(open) => { if (!open) setActivePanel(null); }}>
-        <DialogContent className="max-h-[84vh] overflow-auto">
+        <DialogContent className={`max-h-[84vh] overflow-y-auto overflow-x-hidden ${LIGHT_SCROLLBAR_CLASS}`}>
           <DialogHeader><DialogTitle>布局检查</DialogTitle></DialogHeader>
           <HtmlVideoQualityPanel
             frame={selectedFrame}
@@ -132,7 +142,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         </DialogContent>
       </Dialog>
       <Dialog open={activePanel === 'source'} onOpenChange={(open) => { if (!open) setActivePanel(null); }}>
-        <DialogContent className="max-h-[84vh] overflow-auto">
+        <DialogContent className={`max-h-[84vh] overflow-y-auto overflow-x-hidden ${LIGHT_SCROLLBAR_CLASS}`}>
           <DialogHeader><DialogTitle>帧源码</DialogTitle></DialogHeader>
           <HtmlVideoSourcePanel
             frame={selectedFrame}
@@ -145,7 +155,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         </DialogContent>
       </Dialog>
       <Dialog open={activePanel === 'exports'} onOpenChange={(open) => { if (!open) setActivePanel(null); }}>
-        <DialogContent className="max-h-[84vh] overflow-auto">
+        <DialogContent className={`max-h-[84vh] overflow-y-auto overflow-x-hidden ${LIGHT_SCROLLBAR_CLASS}`}>
           <DialogHeader><DialogTitle>导出记录</DialogTitle></DialogHeader>
           <ExportsPanel
             exportsList={editor.exportsList}

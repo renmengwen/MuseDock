@@ -114,7 +114,6 @@ function applyDuration(project, patch) {
 function applyFramePatch(project, patch, flags) {
   const frame = findFrame(project, patch.frame_id);
   if (!frame) return fail(`未找到帧 ${patch.frame_id || ''}。`, 'FRAME_NOT_FOUND');
-  let shouldRegenerateCaptionsFromNarration = false;
 
   if (Object.prototype.hasOwnProperty.call(patch, 'template_id')) {
     const templateId = String(patch.template_id || '').trim();
@@ -131,9 +130,13 @@ function applyFramePatch(project, patch, flags) {
   }
 
   if (Object.prototype.hasOwnProperty.call(patch, 'narration_text') || Object.prototype.hasOwnProperty.call(patch, 'text')) {
-    frame.narration_text = String(patch.narration_text ?? patch.text ?? '');
-    flags.requires_tts = true;
-    shouldRegenerateCaptionsFromNarration = !Array.isArray(patch.captions);
+    const nextNarration = String(patch.narration_text ?? patch.text ?? '');
+    const previousNarration = String(frame.narration_text ?? '');
+    frame.narration_text = nextNarration;
+    frame.narration_text_user_edited = true;
+    if (nextNarration !== previousNarration) {
+      flags.requires_tts = true;
+    }
   }
 
   if (patch.duration_sec != null || patch.duration != null) {
@@ -146,7 +149,7 @@ function applyFramePatch(project, patch, flags) {
       ...frame,
       captions: patch.captions,
     });
-  } else if (shouldRegenerateCaptionsFromNarration) {
+  } else if (patch.regenerate_captions === true) {
     frame.captions = normalizeCaptionsForFrame({
       ...frame,
       captions: [],

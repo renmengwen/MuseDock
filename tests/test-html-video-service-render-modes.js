@@ -8,9 +8,11 @@ const {
   runHtmlVideoProjectEditPlan,
   acceptHtmlVideoProjectEditPlan,
   discardHtmlVideoProjectEditPlan,
+  editHtmlVideoProject,
   renderHtmlVideoProject,
   exportHtmlVideoProject,
   getHtmlVideoProjectExportFile,
+  patchHtmlVideoProjectFrame,
 } = require('../server/services/creative/creativeWorkflows');
 
 const WORKFLOW_ID = '202606171200000001';
@@ -41,10 +43,19 @@ function createFixture() {
     run_id: 'run-1',
     template_id: 'simple',
     template_inputs: {},
-    frames: [{ id: 'frame_01', scene_id: 'scene_01', template_id: 'simple', inputs: {} }],
+    frames: [
+      { id: 'frame_01', scene_id: 'scene_01', template_id: 'simple', inputs: {}, narration_text: '旧旁白' },
+      { id: 'frame_02', scene_id: 'scene_02', template_id: 'simple', inputs: {}, narration_text: '' },
+    ],
     edit_sessions: [{ id: 'edit_plan_0001', kind: 'edit_plan', status: 'planned' }],
     timeline: { tracks: [] },
     exports: [{ id: 'export_001', path: 'exports/output.mp4', format: 'mp4' }],
+  });
+  writeJson(path.join(projectDir, 'scene-spec.json'), {
+    scenes: [
+      { id: 'scene_01', narration_text: '旧旁白', duration_sec: 3 },
+      { id: 'scene_02', narration_text: '第二幕只在 scene-spec 的旁白', duration_sec: 3 },
+    ],
   });
   fs.mkdirSync(path.join(projectDir, 'exports'), { recursive: true });
   fs.writeFileSync(path.join(projectDir, 'exports', 'output.mp4'), 'fake mp4');
@@ -141,6 +152,92 @@ function createFixture() {
   const missingExportFile = await getHtmlVideoProjectExportFile(WORKFLOW_ID, 'missing_export', { rootDir });
   assert.equal(missingExportFile.success, false);
   assert.match(missingExportFile.message, /未找到导出文件记录/);
+
+  let ttsSceneSpec = null;
+  let ttsSceneId = null;
+  const ttsResult = await editHtmlVideoProject(WORKFLOW_ID, { type: 'tts', frame_id: 'frame_01', text: '新旁白' }, {
+    rootDir,
+    htmlVideoServices: {
+      ttsService: {
+        synthesizeSceneNarration: async ({ sceneSpec, sceneId }) => {
+          ttsSceneSpec = sceneSpec;
+          ttsSceneId = sceneId;
+          return {
+            success: true,
+            message: '场景旁白音频已生成。',
+            audio_manifest: {
+              source: 'scene_spec',
+              scene_spec_hash: 'hash-new',
+              scene_count: 2,
+              scene_ids: ['scene_01', 'scene_02'],
+              status: 'ready',
+              scenes: [{ scene_id: 'scene_01', relative_path: 'tts/scene_01.mp3' }],
+            },
+          };
+        },
+      },
+    },
+  });
+  assert.equal(ttsResult.success, true);
+  assert.equal(ttsSceneId, 'scene_01');
+  assert.equal(ttsSceneSpec.scenes[0].narration_text, '新旁白');
+  assert.equal(ttsSceneSpec.scenes[1].narration_text, '第二幕只在 scene-spec 的旁白');
+  assert.equal(ttsResult.html_video_project.frames[0].narration_text, '新旁白');
+  assert.equal(ttsResult.html_video_project.audio.tts_manifest_path, 'tts/audio_manifest.json');
+  assert.equal(ttsResult.html_video_project.audio.narration_path, null);
+
+  const clearNarration = await patchHtmlVideoProjectFrame(WORKFLOW_ID, 'frame_02', {
+    type: 'frame_patch',
+    narration_text: '',
+  }, { rootDir });
+  assert.equal(clearNarration.success, true);
+  assert.equal(clearNarration.html_video_project.frames[1].narration_text_user_edited, true);
+
+  const ttsAfterClear = await editHtmlVideoProject(WORKFLOW_ID, { type: 'tts', frame_id: 'frame_01', text: '清空后新旁白' }, {
+    rootDir,
+    htmlVideoServices: {
+      ttsService: {
+        synthesizeSceneNarration: async ({ sceneSpec }) => {
+          ttsSceneSpec = sceneSpec;
+          return { success: true, audio_manifest: { status: 'ready', scenes: [{ scene_id: 'scene_01', relative_path: 'tts/scene_01.mp3' }] } };
+        },
+      },
+    },
+  });
+  assert.equal(ttsAfterClear.success, true);
+  assert.equal(ttsSceneSpec.scenes[1].narration_text, '');
+
+  const ttsFailure = await editHtmlVideoProject(WORKFLOW_ID, { type: 'tts', frame_id: 'frame_01', text: '失败后仍保存文本' }, {
+    rootDir,
+    htmlVideoServices: {
+      ttsService: {
+        synthesizeSceneNarration: async () => ({ success: false, message: '模拟 TTS 失败。' }),
+      },
+    },
+  });
+  assert.equal(ttsFailure.success, true);
+  assert.equal(ttsFailure.requires_tts, true);
+  assert.equal(ttsFailure.html_video_project.frames[0].narration_text, '失败后仍保存文本');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf8')).frames[0].narration_text, '失败后仍保存文本');
+
+  const disabledProject = JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf8'));
+  disabledProject.audio = { status: 'skipped', reason: 'disabled_by_settings' };
+  writeJson(path.join(projectDir, 'project.json'), disabledProject);
+  let disabledTtsCalled = false;
+  const disabledTts = await editHtmlVideoProject(WORKFLOW_ID, { type: 'tts', frame_id: 'frame_01', text: '不应生成' }, {
+    rootDir,
+    htmlVideoServices: {
+      ttsService: {
+        synthesizeSceneNarration: async () => {
+          disabledTtsCalled = true;
+          return { success: true };
+        },
+      },
+    },
+  });
+  assert.equal(disabledTts.success, false);
+  assert.equal(disabledTts.code, 'AUDIO_DISABLED');
+  assert.equal(disabledTtsCalled, false);
 
   const partialRun = await runHtmlVideoProjectEditPlan(WORKFLOW_ID, 'edit_plan_0001', { confirm: true }, {
     rootDir,

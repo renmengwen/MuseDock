@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { canEditText, fitPreviewBox, previewAspectRatio } from '../frontend-react/src/components/creative-video-editor/htmlVideoCanvasDom.mjs';
+import {
+  canEditText,
+  editableSelector,
+  fitPreviewBox,
+  isCanvasEditableElement,
+  previewAspectRatio,
+} from '../frontend-react/src/components/creative-video-editor/htmlVideoCanvasDom.mjs';
 
 const frameStrip = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoFrameStrip.jsx', 'utf-8');
 const canvasEditor = fs.readFileSync('frontend-react/src/components/creative-video-editor/HtmlVideoCanvasEditor.jsx', 'utf-8');
@@ -70,6 +76,8 @@ assert.match(canvasEditor, /absolutePositionFor/);
 assert.match(canvasEditor, /viewportSize/);
 assert.match(canvasEditor, /writeElementText/);
 assert.match(canvasEditor, /serializeDocument/);
+assert.match(canvasEditor, /querySelectorAll\('\*'\)/, '图层列表应包含未带语义 class 的叶子文本元素');
+assert.match(canvasEditor, /isCanvasEditableElement/, '可编辑判断应复用 DOM helper');
 assert.match(canvasEditor, /function clearPlaybackTimer\(\)\s*\{\s*if \(playbackTimerRef\.current\) clearTimeout\(playbackTimerRef\.current\);\s*playbackTimerRef\.current = null;\s*\}/);
 assert.match(canvasEditor, /function playFrame/);
 assert.match(canvasEditor, /__hvPlayAll/);
@@ -82,7 +90,7 @@ assert.match(canvasEditor, /function replay\(\)\s*\{\s*clearPlaybackTimer\(\);/)
 assert.match(canvasEditor, /ResizeObserver/);
 assert.match(canvasEditor, /fitPreviewBox\(previewSlotSize, previewRatio\)/);
 assert.doesNotMatch(canvasEditor, /aspect-video h-full max-h-full w-auto max-w-full/);
-assert.match(canvasEditor, /content-start gap-3 overflow-auto pr-1/);
+assert.match(canvasEditor, /content-start gap-3 overflow-y-auto overflow-x-hidden pr-1/);
 assert.match(canvasEditor, /const offsetLeft = Math\.max\(0, \(viewport\.width - canvasWidth\) \/ 2\)/);
 assert.match(canvasEditor, /left: \$\{Math\.round\(offsetLeft\)\}px !important/);
 assert.deepEqual(fitPreviewBox({ width: 1600, height: 480 }, 16 / 9), { width: 853, height: 480 });
@@ -105,17 +113,34 @@ assert.match(canvasEditor, /onTextEditStart=\{snapshotBeforeEdit\}/, '文案编�
 assert.match(inspector, /onFocus=\{\(\) => onTextEditStart\?\.\(\)\}/, 'textarea 聚焦即开始一轮文案编辑');
 
 // canEditText：容器/图形元素禁止整体文案编辑，叶子文本元素允许
-assert.equal(canEditText({ tagName: 'H1', childNodes: [{ nodeType: 3 }], children: [] }), true);
-assert.equal(canEditText({ tagName: 'IMG', childNodes: [{ nodeType: 3 }], children: [] }), false);
-assert.equal(canEditText({ tagName: 'svg', childNodes: [{ nodeType: 3 }], children: [] }), false);
-assert.equal(canEditText({ tagName: 'SECTION', childNodes: [{ nodeType: 3 }], children: [{ textContent: '子元素文本' }] }), false);
+assert.equal(canEditText({ tagName: 'H1', childNodes: [{ nodeType: 3, textContent: '标题' }], children: [] }), true);
+assert.equal(canEditText({ tagName: 'IMG', childNodes: [{ nodeType: 3, textContent: '标题' }], children: [] }), false);
+assert.equal(canEditText({ tagName: 'svg', childNodes: [{ nodeType: 3, textContent: '标题' }], children: [] }), false);
+assert.equal(canEditText({ tagName: 'SECTION', childNodes: [{ nodeType: 3, textContent: '标题' }], children: [{ textContent: '子元素文本' }] }), false);
 assert.equal(canEditText({ tagName: 'DIV', childNodes: [], children: [{ textContent: '  ' }] }), false);
-assert.equal(canEditText({ tagName: 'BUTTON', childNodes: [{ nodeType: 1 }, { nodeType: 3 }], children: [{ textContent: '  ' }] }), true);
+assert.equal(canEditText({ tagName: 'DIV', childNodes: [{ nodeType: 3, textContent: '\n  ' }], children: [{ textContent: '  ' }] }), false);
+assert.equal(canEditText({ tagName: 'BUTTON', childNodes: [{ nodeType: 1 }, { nodeType: 3, textContent: '按钮' }], children: [{ textContent: '  ' }] }), true);
 assert.equal(canEditText(null), false);
+assert.equal(isCanvasEditableElement({
+  nodeType: 1,
+  tagName: 'DIV',
+  childNodes: [{ nodeType: 3, textContent: '叶子文本' }],
+  children: [],
+  matches: () => false,
+}), true, '普通叶子文本 div 也应进入可编辑候选');
+assert.equal(isCanvasEditableElement({
+  nodeType: 1,
+  tagName: 'DIV',
+  childNodes: [{ nodeType: 3, textContent: '容器文本' }],
+  children: [{ textContent: '子元素文本' }],
+  matches: selector => selector === editableSelector,
+}), true, '已有语义选择器的容器仍应可选中做位置编辑');
 
 assert.match(inspector, /export function HtmlVideoElementInspector/);
 assert.match(inspector, /当前元素/);
 assert.match(inspector, /文案/);
+assert.match(inspector, /SelectTrigger/);
+assert.doesNotMatch(inspector, /function MiniList/);
 
 assert.match(projectEditor, /HtmlVideoCanvasEditor/);
 assert.doesNotMatch(projectEditor, /useState\(['"]canvas['"]\)/, 'project editor should not have canvas tab state');
