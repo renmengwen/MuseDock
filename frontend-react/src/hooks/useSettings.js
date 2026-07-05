@@ -11,21 +11,6 @@ const MODEL_TYPE_INFO = {
   tts:        { title: 'TTS 语音合成', placeholder: 'mimo-v2.5-tts' },
 };
 
-function emptyProvider(id) {
-  const models = {};
-  for (const type of MODEL_TYPES) {
-    models[type] = { enabled: false, modelId: '', note: '' };
-    if (type === 'text') {
-      models[type].supportsMultimodal = false;
-    }
-    if (type === 'tts') {
-      models[type].ttsConcurrency = 1;
-      models[type].ttsQueueIntervalMs = 1800;
-    }
-  }
-  return { id, name: '', apiKey: '', baseUrl: '', models };
-}
-
 function normalizeServerData(json) {
   const providers = {};
   const raw = json.providers || {};
@@ -139,37 +124,11 @@ export function useSettings() {
     }
   }, [state]);
 
-  const updateProvider = useCallback((providerId, field, value) => {
+  const saveProvider = useCallback((provider) => {
+    if (!provider?.id) return;
     setState(prev => ({
       ...prev,
-      providers: {
-        ...prev.providers,
-        [providerId]: { ...prev.providers[providerId], [field]: value },
-      },
-    }));
-  }, []);
-
-  const updateProviderModel = useCallback((providerId, modelType, field, value) => {
-    setState(prev => ({
-      ...prev,
-      providers: {
-        ...prev.providers,
-        [providerId]: {
-          ...prev.providers[providerId],
-          models: {
-            ...prev.providers[providerId].models,
-            [modelType]: { ...prev.providers[providerId].models[modelType], [field]: value },
-          },
-        },
-      },
-    }));
-  }, []);
-
-  const addProvider = useCallback(() => {
-    const id = 'provider_' + Date.now();
-    setState(prev => ({
-      ...prev,
-      providers: { ...prev.providers, [id]: emptyProvider(id) },
+      providers: { ...prev.providers, [provider.id]: provider },
     }));
   }, []);
 
@@ -207,8 +166,7 @@ export function useSettings() {
     state, providerList, activeModels, enabledCount,
     status, loading, saving,
     load, save,
-    updateProvider, updateProviderModel,
-    addProvider, removeProvider,
+    saveProvider, removeProvider,
     setActive, setSkipValidation,
     MODEL_TYPES, MODEL_TYPE_INFO,
   };
