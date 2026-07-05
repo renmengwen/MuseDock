@@ -24,7 +24,7 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
   assert.deepEqual(defaultSampleTimes(0), [0.1]);
   assert.deepEqual(defaultSampleTimes(1), [0.5]);
   assert.deepEqual(defaultSampleTimes(1.2), [0.78, 0.9]);
-  assert.deepEqual(defaultSampleTimes(10), [0.8, 1.8, 6.5, 9.7]);
+  assert.deepEqual(defaultSampleTimes(10), [1.2, 1.8, 6.5, 9.7]);
   assert.deepEqual(defaultSampleTimes(1.25), [0.8, 0.95]);
 
   const overlay = await inspectFixture('overlay-valuation.html', { id: 'scene_06', duration_sec: 1 });
@@ -75,6 +75,18 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
   assert.ok(
     divRoleOverflow.issues.some(issue => issue.code === 'text_out_of_container'),
     'div-role-overflow.html 应报告 text_out_of_container',
+  );
+
+  const decorativeOverflow = await inspectFixture('decorative-overflow.html', { id: 'scene_10', duration_sec: 1 });
+  assert.equal(decorativeOverflow.success, true);
+  assert.ok(
+    decorativeOverflow.issues.every(issue => issue.severity === 'warning'),
+    '装饰编号或允许溢出的品牌字不应触发阻断式修复',
+  );
+  assert.equal(
+    decorativeOverflow.issues.some(issue => issue.details?.text === '忽略的背景字'),
+    false,
+    'data-layout-ignore 元素应跳过布局检查',
   );
 
   const importFailure = await inspectFrameHtmlLayout({

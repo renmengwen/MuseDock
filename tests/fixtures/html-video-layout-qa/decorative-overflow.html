@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>装饰文本溢出不阻断</title>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;width:1920px;height:1080px;overflow:hidden;font-family:Arial,"Microsoft YaHei",sans-serif;background:#10141f;color:#fff}
+    main{position:relative;width:1920px;height:1080px;overflow:hidden;padding:120px}
+    .section-no{position:absolute;right:80px;top:70px;width:96px;height:64px;font-size:52px;font-weight:900;line-height:1}
+    .section-no span{position:absolute;left:58px;top:34px;font-size:42px;color:#8aa0bd}
+    .brand{position:absolute;right:-80px;bottom:180px;font-size:72px;font-weight:900;letter-spacing:0;color:#2dd4bf}
+    .ignored{position:absolute;left:200px;top:210px;width:520px;height:160px;font-size:64px;line-height:1.1;color:#f97316}
+    .card{position:absolute;left:120px;top:260px;width:980px;padding:52px;border:3px solid #38bdf8;background:#172033}
+    h1{margin:0 0 24px;font-size:72px}
+    p{margin:0;font-size:40px;line-height:1.35}
+  </style>
+</head>
+<body>
+  <main data-role="scene_10">
+    <div class="section-no" data-role="section-number">07<span>/08</span></div>
+    <div class="brand" data-role="brand" data-layout-allow-overflow>ENGINE</div>
+    <div class="ignored" data-layout-ignore>忽略的背景字</div>
+    <section class="card" data-role="content-card">
+      <h1 data-text-key="headline">核心标题完整可见</h1>
+      <p data-text-key="body">正文内容在卡片内部，不应因为编号和品牌装饰触发阻断式修复。</p>
+    </section>
+  </main>
+</body>
+</html>

@@ -23,7 +23,7 @@ function defaultSampleTimes(durationSec) {
   if (!Number.isFinite(duration) || duration <= 0) return [0.1];
   if (duration < 1.2) return [Number(Math.max(0.1, duration * 0.5).toFixed(3))];
   return normalizeSampleTimes([
-    0.8,
+    duration < 2 ? 0.8 : 1.2,
     1.8,
     duration * 0.65,
     Math.max(0, duration - 0.3),
@@ -95,20 +95,33 @@ function isPrimaryText(candidate) {
     || name.includes('subtitle');
 }
 
+function isDecorativeText(candidate) {
+  const name = [
+    candidate.key,
+    candidate.role,
+    candidate.selector,
+    candidate.container?.role,
+    candidate.container?.selector,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /section|scene|counter|number|decorative|ornament|background|watermark|brand|footer|kicker|eyebrow|label|badge|chip|meta|signal|engine/.test(name);
+}
+
 function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
   const issues = [];
   const tolerance = 12;
 
   for (const candidate of candidates) {
     const box = candidate.box;
-    if (
+    const decorative = isDecorativeText(candidate);
+    if (!candidate.allowOverflow && (
       box.left < -tolerance
       || box.top < -tolerance
       || box.right > resolution.width + tolerance
       || box.bottom > resolution.height + tolerance
-    ) {
+    )) {
       issues.push(makeIssue({
         code: 'text_out_of_viewport',
+        severity: decorative ? 'warning' : 'error',
         frameId,
         sampleTimeSec,
         message: '文本超出画面边界。',
@@ -122,7 +135,7 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
     }
 
     const container = candidate.container;
-    if (container && container.box) {
+    if (!candidate.allowOverflow && container && container.box) {
       const cbox = container.box;
       if (
         box.left < cbox.left - tolerance
@@ -132,6 +145,7 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
       ) {
         issues.push(makeIssue({
           code: 'text_out_of_container',
+          severity: decorative ? 'warning' : 'error',
           frameId,
           sampleTimeSec,
           message: '文本超出语义容器边界。',
@@ -254,8 +268,13 @@ async function collectCandidates(page) {
       };
     }
 
+    function hasLayoutFlag(element, selector) {
+      return Boolean(element.closest(selector));
+    }
+
     const records = Array.from(document.querySelectorAll(selector))
       .map((element) => {
+        if (hasLayoutFlag(element, '[data-layout-ignore], [aria-hidden="true"]')) return null;
         const rect = element.getBoundingClientRect();
         const direct = directText(element);
         const text = (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim();
@@ -272,6 +291,7 @@ async function collectCandidates(page) {
             text,
             box: serializeBox(rect),
             container: containerFor(element),
+            allowOverflow: hasLayoutFlag(element, '[data-layout-allow-overflow]'),
           },
         };
       })
