@@ -39,6 +39,25 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
   const overlayFixed = await inspectFixture('overlay-valuation-fixed.html', { id: 'scene_06', duration_sec: 1 });
   assert.equal(overlayFixed.success, true);
 
+  const overlayTwoSamples = await inspectFixture(
+    'overlay-valuation.html',
+    { id: 'scene_06', duration_sec: 1 },
+    { sampleTimesSec: [0.1, 0.4] },
+  );
+  assert.equal(overlayTwoSamples.metrics.samples.length, 2);
+  assert.equal(
+    overlayTwoSamples.issues.length,
+    overlay.issues.length,
+    '同一问题在多个采样点应只报告一次',
+  );
+
+  const decorativeOverlap = await inspectFixture('decorative-overlap.html', { id: 'scene_11', duration_sec: 1 });
+  assert.equal(decorativeOverlap.success, true, '装饰大数字垫底标题不应触发阻断式修复');
+  assert.ok(
+    decorativeOverlap.issues.some(issue => issue.code === 'decorative_overlay_text' && issue.severity === 'warning'),
+    'decorative-overlap.html 应报告 warning 级 decorative_overlay_text',
+  );
+
   const overlayFixedDefaultSamples = await inspectFixture(
     'overlay-valuation-fixed.html',
     { scene_id: 'scene_06', duration_sec: 1 },

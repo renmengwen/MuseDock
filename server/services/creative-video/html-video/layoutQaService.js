@@ -82,6 +82,22 @@ function isBlockingIssue(issue) {
   return issue.severity !== 'warning' && issue.severity !== 'info';
 }
 
+function dedupeIssues(issues) {
+  const seen = new Set();
+  return issues.filter((issue) => {
+    const details = issue.details || {};
+    const key = [
+      issue.code,
+      details.selector, details.text,
+      details.first?.selector, details.first?.text,
+      details.second?.selector, details.second?.text,
+    ].join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function intersects(a, b) {
   const width = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
   const height = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
@@ -103,7 +119,7 @@ function isDecorativeText(candidate) {
     candidate.container?.role,
     candidate.container?.selector,
   ].filter(Boolean).join(' ').toLowerCase();
-  return /section|scene|counter|number|decorative|ornament|background|watermark|brand|footer|kicker|eyebrow|label|badge|chip|meta|signal|engine/.test(name);
+  return /section|scene|counter|number|decorative|ornament|background|watermark|brand|footer|kicker|eyebrow|label|badge|chip|meta|signal|engine|date|time|stamp|dim|tick/.test(name);
 }
 
 function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
@@ -177,13 +193,14 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
       if (intersection.area <= 0) continue;
 
       const smallerArea = Math.min(a.box.width * a.box.height, b.box.width * b.box.height);
-      if (smallerArea <= 0 || intersection.area / smallerArea <= 0.08) continue;
+      if (smallerArea <= 0 || intersection.area / smallerArea <= 0.25) continue;
 
       const code = isPrimaryText(a) || isPrimaryText(b)
         ? 'decorative_overlay_text'
         : 'text_overlap';
       issues.push(makeIssue({
         code,
+        severity: isDecorativeText(a) || isDecorativeText(b) ? 'warning' : 'error',
         frameId,
         sampleTimeSec,
         message: '检测到文本元素互相重叠。',
@@ -439,9 +456,10 @@ async function inspectFrameHtmlLayout(options = {}) {
     await browser.close().catch(() => {});
   }
 
+  const dedupedIssues = dedupeIssues(issues);
   return {
-    success: !issues.some(isBlockingIssue),
-    issues,
+    success: !dedupedIssues.some(isBlockingIssue),
+    issues: dedupedIssues,
     metrics,
   };
 }
