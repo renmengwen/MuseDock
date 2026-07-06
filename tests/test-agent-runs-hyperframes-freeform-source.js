@@ -33,6 +33,7 @@ async function run() {
 
   const result = await agentRuns.createDouyinHyperframesFreeformRun(awemeId, {
     rootDir,
+    targetDurationSec: 120,
     getLocalComments: async () => ({
       success: true,
       count: 1,
@@ -42,6 +43,7 @@ async function run() {
 
   assert.equal(result.success, true);
   assert.equal(result.run.input_summary.comment_count, 1);
+  assert.equal(result.run.result.video_brief.target_duration_sec, 120);
   assert.match(result.run.result.comments_text, /真实用户痛点/);
   assert.equal(result.run.steps.find(step => step.id === 'comments').status, 'done');
   console.log('agent runs hyperframes freeform source tests passed');

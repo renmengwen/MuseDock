@@ -718,6 +718,18 @@ function mergeProjectOptions(recordTarget = {}, incoming = {}) {
   };
 }
 
+function buildFreeformTargetOptions(target = {}) {
+  const durationSec = Number(target.duration_sec ?? target.durationSec ?? target.targetDurationSec ?? target.target_duration_sec);
+  const aspectRatio = safeString(target.aspect_ratio || target.aspectRatio);
+  return {
+    ...(Number.isFinite(durationSec) && durationSec > 0 ? {
+      targetDurationSec: durationSec,
+      target_duration_sec: durationSec,
+    } : {}),
+    ...(aspectRatio ? { aspectRatio, aspect_ratio: aspectRatio } : {}),
+  };
+}
+
 function buildHtmlVideoExportFileUrl(workflowId, exportId) {
   return `/api/creative-workflows/${encodeURIComponent(String(workflowId))}/html-video-project/exports/${encodeURIComponent(String(exportId))}/file`;
 }
@@ -1344,7 +1356,10 @@ async function runCreativeWorkflow(workflowId, options = {}) {
 
   stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'agent_run', rootDir, async () => {
     const result = ensureSuccess(
-      await services.agentRuns.createDouyinHyperframesFreeformRun(record.aweme_id, { rootDir: mediaRoot }),
+      await services.agentRuns.createDouyinHyperframesFreeformRun(record.aweme_id, {
+        rootDir: mediaRoot,
+        ...buildFreeformTargetOptions(record.target),
+      }),
       '导演改写任务创建失败。',
     );
     record.run_id = safeString(result.run_id);
@@ -1361,6 +1376,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     await services.agentRuns.generateDouyinRunHyperframesFreeformBrief(record.aweme_id, record.run_id, {
       rootDir: mediaRoot,
       briefOptions: {
+        ...buildFreeformTargetOptions(record.target),
         creative_context: record.creative_context,
       },
     }),
@@ -1386,6 +1402,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     return ensureSuccess(
       await services.agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(record.aweme_id, record.run_id, {
         rootDir: mediaRoot,
+        ...buildFreeformTargetOptions(record.target),
         stylePrompt,
       }),
       '音频轨生成失败。',

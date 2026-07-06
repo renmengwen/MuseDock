@@ -563,6 +563,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
 async function createDouyinHyperframesFreeformRun(awemeId, options = {}) {
   const rootDir = options.rootDir;
   const steps = [];
+  const targetDurationSec = Number(options.targetDurationSec ?? options.target_duration_sec);
 
   if (!isSafeId(awemeId)) {
     return createInvalidAwemeResult(awemeId);
@@ -632,7 +633,7 @@ async function createDouyinHyperframesFreeformRun(awemeId, options = {}) {
       comments_text: commentsText,
       video_brief: {
         title: analysisInput?.video?.title || '',
-        target_duration_sec: 60,
+        target_duration_sec: Number.isFinite(targetDurationSec) && targetDurationSec > 0 ? targetDurationSec : 60,
         beats: [],
       },
     },

@@ -347,6 +347,15 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
 
   assert.equal(run.success, true);
   assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project']);
+  const createRunCall = calls.find(call => call.name === 'createRun');
+  const briefCall = calls.find(call => call.name === 'brief');
+  const audioCall = calls.find(call => call.name === 'audio');
+  assert.equal(createRunCall.options.targetDurationSec, 90);
+  assert.equal(createRunCall.options.aspectRatio, '16:9');
+  assert.equal(briefCall.options.briefOptions.targetDurationSec, 90);
+  assert.equal(briefCall.options.briefOptions.aspectRatio, '16:9');
+  assert.equal(audioCall.options.targetDurationSec, 90);
+  assert.equal(audioCall.options.aspectRatio, '16:9');
   const projectCall = calls.find(call => call.name === 'project');
   assert.equal(projectCall.options.skipValidation, true);
   assert.equal(projectCall.options.projectOptions.aspect_ratio, 'runtime_aspect');
