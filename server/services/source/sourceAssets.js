@@ -18,15 +18,27 @@ function safeString(value) {
 function extractMarkdownImages(markdown = '', baseUrl = '') {
   const images = [];
   const seen = new Set();
+  const addImage = (rawUrl, alt = '') => {
+    const resolved = resolvePublicImageUrl(rawUrl, baseUrl);
+    if (!resolved || seen.has(resolved)) return;
+    seen.add(resolved);
+    images.push({ url: resolved, alt: safeString(alt), source: 'article' });
+  };
   const pattern = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
   for (const match of String(markdown || '').matchAll(pattern)) {
-    const alt = safeString(match[1]);
-    const resolved = resolvePublicImageUrl(match[2], baseUrl);
-    if (!resolved || seen.has(resolved)) continue;
-    seen.add(resolved);
-    images.push({ url: resolved, alt, source: 'article' });
+    addImage(match[2], match[1]);
+  }
+  const imgPattern = /<img\b[^>]*>/gi;
+  for (const match of String(markdown || '').matchAll(imgPattern)) {
+    addImage(extractHtmlAttribute(match[0], 'src'), extractHtmlAttribute(match[0], 'alt'));
   }
   return images;
+}
+
+function extractHtmlAttribute(tag = '', name = '') {
+  const pattern = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i');
+  const match = String(tag || '').match(pattern);
+  return safeString(match?.[1] || match?.[2] || match?.[3]);
 }
 
 function resolvePublicImageUrl(rawUrl, baseUrl = '') {
@@ -194,6 +206,22 @@ async function downloadImageAsset(image, index, assetDir, deps = {}) {
     break;
   }
   if (!response || !response.ok) {
+    if (response?.status === 429) {
+      const fallbackUrl = githubApiContentUrlFromRaw(currentUrl);
+      if (fallbackUrl) {
+        response = await fetchImpl(fallbackUrl, {
+          headers: {
+            'user-agent': UA,
+            accept: 'application/vnd.github.raw,image/*;q=0.8',
+          },
+          redirect: 'manual',
+          signal: deps.signal || AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+        });
+        currentUrl = fallbackUrl;
+      }
+    }
+  }
+  if (!response || !response.ok) {
     return { success: false, message: `图片下载失败：HTTP ${response ? response.status : 'NO_RESPONSE'}` };
   }
   const mime = getHeader(response.headers, 'content-type').split(';')[0].trim().toLowerCase();
@@ -275,6 +303,20 @@ function githubRawBaseUrl(sourceMaterial = {}) {
   if (!owner || !repo) return '';
   const branch = encodeURIComponent(safeString(metadata.default_branch) || 'main');
   return `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${branch}/`;
+}
+
+function githubApiContentUrlFromRaw(rawUrl = '') {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return '';
+  }
+  if (url.hostname !== 'raw.githubusercontent.com') return '';
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (parts.length < 4) return '';
+  const [owner, repo, branch, ...fileParts] = parts;
+  return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${fileParts.map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(branch)}`;
 }
 
 async function searchPexelsImages(sourceMaterial = {}, deps = {}) {

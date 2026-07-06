@@ -27,6 +27,17 @@ async function testExtractMarkdownImagesResolvesAndDedupes() {
   ]);
 }
 
+async function testExtractMarkdownImagesIncludesHtmlImgTags() {
+  const images = sourceAssets.extractMarkdownImages(
+    '<table><tr><td><img src=".github/assets/detail.png" alt="任务详情"></td><td><img src="/editor.png"></td></tr></table>',
+    'https://example.com/readme',
+  );
+  assert.deepEqual(images, [
+    { url: 'https://example.com/.github/assets/detail.png', alt: '任务详情', source: 'article' },
+    { url: 'https://example.com/editor.png', alt: '', source: 'article' },
+  ]);
+}
+
 async function testPrepareDownloadsArticleImageWithoutPexelsBackfill() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'source-assets-test-'));
   const requested = [];
@@ -285,6 +296,37 @@ async function testGithubRelativeImagesUseRawUrl() {
   assert.equal(result.assets[0].url, requested[0]);
 }
 
+async function testGithubRaw429FallsBackToApiRaw() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'source-assets-github-api-test-'));
+  const requested = [];
+  const result = await sourceAssets.prepareSourceAssets({
+    sourceMaterial: {
+      kind: 'github_repo',
+      url: 'https://github.com/owner/repo',
+      markdown: '![demo](.github/assets/demo.png)',
+      metadata: { owner: 'owner', repo: 'repo', default_branch: 'main' },
+    },
+    assetDir: path.join(dir, 'assets'),
+    maxSearchImages: 0,
+    deps: {
+      fetchImpl: async (url) => {
+        requested.push(url);
+        if (String(url).startsWith('https://raw.githubusercontent.com/')) {
+          return new Response('', { status: 429 });
+        }
+        return makeImageResponse();
+      },
+      lookupHost: publicLookup,
+    },
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(requested, [
+    'https://raw.githubusercontent.com/owner/repo/main/.github/assets/demo.png',
+    'https://api.github.com/repos/owner/repo/contents/.github/assets/demo.png?ref=main',
+  ]);
+}
+
 async function testSearchFallbackWhenArticleImagesAllFail() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'source-assets-fallback-test-'));
   const result = await sourceAssets.prepareSourceAssets({
@@ -319,6 +361,7 @@ async function testSearchFallbackWhenArticleImagesAllFail() {
 
 (async () => {
   await testExtractMarkdownImagesResolvesAndDedupes();
+  await testExtractMarkdownImagesIncludesHtmlImgTags();
   await testPrepareDownloadsArticleImageWithoutPexelsBackfill();
   await testPrepareDownloadsPexelsWhenNoArticleImages();
   await testMissingPexelsKeyDoesNotFail();
@@ -328,6 +371,7 @@ async function testSearchFallbackWhenArticleImagesAllFail() {
   await testRejectsOversizedImageByHeader();
   await testKeepsAvifExtension();
   await testGithubRelativeImagesUseRawUrl();
+  await testGithubRaw429FallsBackToApiRaw();
   await testSearchFallbackWhenArticleImagesAllFail();
   console.log('source assets tests passed');
 })();

@@ -2,7 +2,9 @@
 
 MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台：把选题输入、公开来源整理、联网研究、来源图片素材、脚本与分镜、TTS 配音、HTML 帧工程、布局质检和导出放在同一个 Web GUI 里。当前阶段成片统一基于 **HyperFrames**（HTML/CSS/GSAP 帧工程）生成——不是一次性黑盒 MP4，而是可检查、可重试、可二次编辑的 HTML 视频工程。
 
-![MuseDock 一键创作首页](.github/assets/musedock-creative-home.png)
+<p align="center">
+  <img src=".github/assets/musedock-creative-home.png" width="100%" alt="MuseDock 一键创作首页">
+</p>
 
 <table>
   <tr>
