@@ -993,8 +993,8 @@ export function HtmlVideoCanvasEditor({ editor }) {
   }
 
   return (
-    <section className="grid h-full min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] gap-2">
-      <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)_260px] gap-2 overflow-hidden max-[1100px]:grid-cols-1">
+    <section className="grid h-full min-h-0 min-w-0 grid-cols-[minmax(0,1fr)_260px] gap-2 overflow-hidden max-[1100px]:grid-cols-1 max-[1100px]:grid-rows-[minmax(0,1fr)_minmax(220px,40vh)]">
+      <div className="grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] gap-2 overflow-hidden">
         <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
           <div className="flex items-center justify-between gap-2 border-b border-slate-700 bg-slate-800 px-2.5 py-2 max-[720px]:flex-col max-[720px]:items-start">
             <span className="text-xs text-slate-300">{previewError || (playbackState === 'playing' ? '正在播放镜头动画...' : editingReady ? '已停在镜头可编辑帧，可开始编辑。' : '正在准备预览...')}</span>
@@ -1024,7 +1024,15 @@ export function HtmlVideoCanvasEditor({ editor }) {
             />
           </div>
         </div>
-        <div className={`grid min-h-0 min-w-0 content-start gap-3 overflow-y-auto overflow-x-hidden pr-1 ${DARK_SCROLLBAR_CLASS}`}>
+        <HtmlVideoFrameStrip
+          frames={editor.frames}
+          selectedFrameId={editor.selectedFrameId}
+          disabled={disabled}
+          onSelect={handleSelectFrame}
+        />
+      </div>
+      <div className={`grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)_auto] gap-3 overflow-hidden pr-1 ${DARK_SCROLLBAR_CLASS}`}>
+        <div className={`min-h-0 overflow-y-auto overflow-x-hidden ${DARK_SCROLLBAR_CLASS}`}>
           <HtmlVideoElementInspector
             elementInfo={elementInfo}
             candidates={elementCandidates}
@@ -1047,28 +1055,22 @@ export function HtmlVideoCanvasEditor({ editor }) {
             onToggleHidden={toggleSelectedHidden}
             onMoveLayer={moveSelectedLayer}
           />
-          <Dialog>
-            <DialogTrigger asChild>
-              <button className={`${secondaryButtonClass} w-full`} type="button" disabled={disabled}>帧字段</button>
-            </DialogTrigger>
-            <DialogContent className="grid max-h-[86vh] w-[min(760px,calc(100vw-32px))] max-w-[760px] grid-rows-[auto_1fr] gap-0 overflow-hidden rounded-lg border-[#d9dde5] bg-[#f8fafc] p-0 text-[#111827] shadow-[0_24px_70px_rgba(15,23,42,.28)] sm:max-w-[760px]">
-              <DialogHeader className="border-b border-[#e7e9ee] bg-white px-5 py-4 pr-12">
-                <DialogTitle className="text-[15px]">帧字段</DialogTitle>
-                <DialogDescription>编辑当前帧的模板字段。字幕和全片旁白在顶部“字幕 / 旁白”入口编辑。</DialogDescription>
-              </DialogHeader>
-              <div className="grid min-h-0 gap-3 overflow-auto p-4">
-                <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} />
-              </div>
-            </DialogContent>
-          </Dialog>
         </div>
+        <Dialog>
+          <DialogTrigger asChild>
+            <button className={`${secondaryButtonClass} w-full`} type="button" disabled={disabled}>帧字段</button>
+          </DialogTrigger>
+          <DialogContent className="grid max-h-[86vh] w-[min(760px,calc(100vw-32px))] max-w-[760px] grid-rows-[auto_1fr] gap-0 overflow-hidden rounded-lg border-[#d9dde5] bg-[#f8fafc] p-0 text-[#111827] shadow-[0_24px_70px_rgba(15,23,42,.28)] sm:max-w-[760px]">
+            <DialogHeader className="border-b border-[#e7e9ee] bg-white px-5 py-4 pr-12">
+              <DialogTitle className="text-[15px]">帧字段</DialogTitle>
+              <DialogDescription>编辑当前帧的模板字段。字幕和全片旁白在顶部“字幕 / 旁白”入口编辑。</DialogDescription>
+            </DialogHeader>
+            <div className="grid min-h-0 gap-3 overflow-auto p-4">
+              <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} />
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
-      <HtmlVideoFrameStrip
-        frames={editor.frames}
-        selectedFrameId={editor.selectedFrameId}
-        disabled={disabled}
-        onSelect={handleSelectFrame}
-      />
     </section>
   );
 }

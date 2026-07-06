@@ -1,17 +1,17 @@
 import { BringToFront, Eye, EyeOff, Lock, MoveDown, MoveUp, SendToBack, Trash2, Unlock } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-const toolButtonClass = 'inline-flex min-h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55';
+const toolButtonClass = 'inline-flex min-h-8 min-w-0 items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-slate-900 px-2 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55';
 
 function NumberField({ label, value, disabled, onChange }) {
   return (
-    <label className="grid gap-1 text-[12px] text-slate-400">
+    <label className="grid min-w-0 gap-1 text-[12px] text-slate-400">
       {label}
       <input
         type="number"
         value={Number.isFinite(Number(value)) ? Math.round(Number(value)) : 0}
         disabled={disabled}
-        className="h-8 rounded-md border border-slate-700 bg-slate-950/35 px-2 text-[13px] font-semibold text-slate-100 outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/20 disabled:cursor-not-allowed disabled:opacity-60"
+        className="h-8 min-w-0 rounded-md border border-slate-700 bg-slate-950/35 px-2 text-[13px] font-semibold text-slate-100 outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/20 disabled:cursor-not-allowed disabled:opacity-60"
         onChange={event => onChange?.(Number(event.target.value))}
       />
     </label>
@@ -24,13 +24,13 @@ function ElementSelect({ title, items, selectedId, emptyText, onSelect }) {
   const selectedValue = hasItems && items.some(item => item.editId === selectedId) ? selectedId : '';
 
   return (
-    <div className="grid gap-1.5">
+    <div className="grid min-w-0 gap-1.5">
       <div className="text-xs font-bold text-slate-300">{title}</div>
       {hasItems ? (
         <Select value={selectedValue} onValueChange={value => onSelect?.(value)}>
           <SelectTrigger
             size="sm"
-            className="border-slate-700 bg-slate-950/35 text-xs text-slate-100 focus-visible:border-[#25f4ee] focus-visible:ring-[#25f4ee]/20 data-[placeholder]:text-slate-400"
+            className="min-w-0 border-slate-700 bg-slate-950/35 text-xs text-slate-100 focus-visible:border-[#25f4ee] focus-visible:ring-[#25f4ee]/20 data-[placeholder]:text-slate-400"
           >
             <SelectValue placeholder="选择元素" />
           </SelectTrigger>
@@ -82,7 +82,7 @@ export function HtmlVideoElementInspector({
   const selectedId = elementInfo?.editId || '';
 
   return (
-    <aside className="grid min-w-0 content-start gap-2 rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-100" aria-label="元素属性">
+    <aside className="grid min-w-0 content-start gap-2 overflow-hidden rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-100 [&>*]:min-w-0" aria-label="元素属性">
       <div className="flex items-center justify-between gap-2">
         <h3 className="m-0 text-sm font-bold">当前元素</h3>
         <div className="flex items-center gap-2">
@@ -153,19 +153,19 @@ export function HtmlVideoElementInspector({
               </dd>
             </div>
           </dl>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid min-w-0 grid-cols-2 gap-2">
             <NumberField label="X" value={elementInfo.left} disabled={disabled || deleted || locked} onChange={value => onGeometryChange?.({ left: value })} />
             <NumberField label="Y" value={elementInfo.top} disabled={disabled || deleted || locked} onChange={value => onGeometryChange?.({ top: value })} />
             <NumberField label="宽" value={elementInfo.width} disabled={disabled || deleted || locked} onChange={value => onGeometryChange?.({ width: value })} />
             <NumberField label="高" value={elementInfo.height} disabled={disabled || deleted || locked} onChange={value => onGeometryChange?.({ height: value })} />
           </div>
-          <label className="grid gap-1.5 text-[13px] text-slate-300">
+          <label className="grid min-w-0 gap-1.5 text-[13px] text-slate-300">
             文案
             <textarea
               value={elementInfo.text || ''}
               disabled={disabled || deleted || locked || !textEditable}
               rows={4}
-              className="w-full resize-y rounded-md border border-slate-700 bg-slate-950/35 p-2 text-sm text-slate-100 outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/20 disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-w-0 max-w-full resize-y rounded-md border border-slate-700 bg-slate-950/35 p-2 text-sm text-slate-100 outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/20 disabled:cursor-not-allowed disabled:opacity-60"
               onFocus={() => onTextEditStart?.()}
               onChange={event => onTextChange?.(event.target.value)}
             />
@@ -173,7 +173,7 @@ export function HtmlVideoElementInspector({
               <p className="m-0 text-xs leading-relaxed text-slate-400">该元素的文案分布在子元素中，请在图层列表中选中具体文本元素后编辑。</p>
             ) : null}
           </label>
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid min-w-0 grid-cols-2 gap-1.5">
             <button className={toolButtonClass} type="button" disabled={disabled || saving || deleted} onClick={onToggleLocked}>
               {locked ? <Unlock size={14} aria-hidden="true" /> : <Lock size={14} aria-hidden="true" />}
               {locked ? '解锁' : '锁定'}
@@ -199,15 +199,15 @@ export function HtmlVideoElementInspector({
               置底
             </button>
           </div>
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="sticky bottom-0 z-10 -mx-2 -mb-2 grid min-w-0 grid-cols-2 gap-2 border-t border-slate-700 bg-slate-800 p-2">
             {!deleted ? (
-              <button className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-red-500/50 bg-red-500/10 px-3 text-xs font-bold text-red-100 transition hover:border-red-400 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled || saving} onClick={onDeleteSelected}>
+              <button className="inline-flex min-h-8 min-w-0 items-center justify-center gap-1.5 rounded-md border border-red-500/50 bg-red-500/10 px-2 text-xs font-bold text-red-100 transition hover:border-red-400 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled || saving} onClick={onDeleteSelected}>
                 <Trash2 size={14} aria-hidden="true" />
                 删除元素
               </button>
             ) : null}
-            <button className="min-h-8 rounded-md border border-slate-700 bg-slate-900 px-3 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled || saving || deleted} onClick={onResetPosition}>重置位置</button>
-            <button className="min-h-8 rounded-md border border-slate-100 bg-slate-100 px-3 text-xs font-bold text-slate-950 transition hover:border-white hover:bg-white disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled || saving} onClick={onSaveEdit}>
+            <button className="min-h-8 min-w-0 rounded-md border border-slate-700 bg-slate-900 px-2 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled || saving || deleted} onClick={onResetPosition}>重置位置</button>
+            <button className="col-span-2 min-h-8 min-w-0 rounded-md border border-slate-100 bg-slate-100 px-2 text-xs font-bold text-slate-950 transition hover:border-white hover:bg-white disabled:cursor-not-allowed disabled:opacity-55" type="button" disabled={disabled || saving} onClick={onSaveEdit}>
               {saving ? '正在保存...' : '保存修改'}
             </button>
           </div>
