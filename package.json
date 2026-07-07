@@ -1,7 +1,7 @@
 {
   "name": "musedock",
-  "version": "1.0.0",
-  "description": "抖音/小红书内容抓取工具 - Web GUI",
+  "version": "0.0.1",
+  "description": "本地优先的 AI 短视频创作与编辑工作台",
   "main": "electron/main.js",
   "license": "Apache-2.0",
   "engines": {
