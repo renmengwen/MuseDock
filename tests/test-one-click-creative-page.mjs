@@ -108,6 +108,10 @@ for (const text of [
   '复制提示词',
   '已复制',
   '复制失败',
+  '查看错误日志',
+  '当前任务错误日志',
+  '复制错误日志',
+  '关闭错误日志弹框',
   '缺少创作任务 ID，无法进入编辑器。',
   '视频标题',
   '备选标题',
@@ -229,6 +233,12 @@ assert.match(creativeTaskDetail, /DialogClose/, 'Prompt modal should import and 
 assert.match(creativeTaskDetail, /<DialogContent className="[^"]*" showCloseButton=\{false\}>[\s\S]*<DialogTitle>当前任务提示词<\/DialogTitle>/, 'Prompt modal should disable the default English shadcn close button and render a Chinese title');
 assert.match(creativeTaskDetail, /<DialogClose asChild>[\s\S]*aria-label="关闭提示词弹框"[\s\S]*<span className="sr-only">关闭提示词弹框<\/span>/, 'Prompt modal close button should use a Chinese accessible label and sr-only text');
 assert.match(creativeTaskDetail, /<pre className="[^"]*">\{promptText \|\| '暂无可显示的提示词。'\}<\/pre>/, 'Prompt modal should show the original prompt with a Chinese empty state');
+assert.match(creativeTaskDetail, /function\s+buildWorkflowErrorLog\(\{[\s\S]*lastFailure[\s\S]*projectSubstages[\s\S]*failedModelCalls/, 'Creative task detail should build a readable error log from existing workflow failure fields');
+assert.match(creativeTaskDetail, /workflow\?\.status === 'failed' \? \([\s\S]*<FileText size=\{14\} \/>[\s\S]*<span>查看错误日志<\/span>/, 'Failed task detail should render an error log button');
+assert.match(creativeTaskDetail, /<DialogTitle>当前任务错误日志<\/DialogTitle>[\s\S]*<DialogDescription>用于排查无法恢复的创作失败，可复制后发送给开发者。<\/DialogDescription>/, 'Error log dialog should explain the log purpose in Chinese');
+assert.match(creativeTaskDetail, /aria-label="关闭错误日志弹框"[\s\S]*<span className="sr-only">关闭错误日志弹框<\/span>/, 'Error log dialog should use a Chinese accessible close label');
+assert.match(creativeTaskDetail, /navigator\.clipboard\.writeText\(errorLogText\)/, 'Error log dialog should copy the prepared log text');
+assert.match(creativeTaskDetail, /<span>\{errorLogCopyStatus === 'copied' \? '已复制' : errorLogCopyStatus === 'failed' \? '复制失败' : '复制错误日志'\}<\/span>/, 'Error log copy button should expose localized copy states');
 assert.doesNotMatch(creativeTaskDetail, /creativePromptModalOverlay/, 'CreativeTaskDetail should not render the old hand-written prompt modal overlay');
 assert.doesNotMatch(creativeTaskDetail, /role="dialog"[\s\S]*aria-modal="true"/, 'CreativeTaskDetail should rely on shadcn Dialog accessibility instead of a hand-written dialog');
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');
