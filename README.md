@@ -97,6 +97,19 @@ node tests/test-html-video-vertical-mvp-smoke.js
 node tests/test-html-video-real-render-smoke.js
 ```
 
+## 质量评测闭环
+
+固定选题集批量跑一键创作，自动指标（时长偏差、抽帧视觉质检）+ 视觉模型看抽帧拼图打分，输出单次报告和跨 run 曲线，用来度量每次 prompt / 规则改动对成片质量的影响：
+
+```powershell
+npm run dev                                        # 先启动后端
+npm run eval:quality -- --label baseline           # 全量跑（选题集见 scripts/quality-eval/topics.json）
+npm run eval:quality -- --filter howto-sleep       # 只跑部分选题
+npm run eval:quality -- --rescore baseline         # 不重新生成，只重新打分出报告
+```
+
+结果写入 `data/quality-eval/<label>/report.md`，跨 run 曲线在 `data/quality-eval/history.md`。同标签重跑会跳过已完成选题（断点续跑）；视觉打分复用设置中心的分析模型（需支持图片输入），不可用时自动降级为纯自动指标。
+
 ## 重要环境变量
 
 模型、ASR/TTS、Pexels 补图这些**优先在设置中心（`/settings`）配置**，会写入本地 `data/config/`。下面这些没有界面入口，只能用环境变量控制：

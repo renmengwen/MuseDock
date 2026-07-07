@@ -1,0 +1,71 @@
+{
+  "comment": "质量评测固定选题集。除标注 override 外，统一使用 defaults（60 秒 / 9:16 / 关闭联网研究）保证跨 run 可比；带研究或外链的选题天然有波动，报告里单独看。",
+  "defaults": {
+    "targetDurationSec": 60,
+    "aspectRatio": "9:16",
+    "useResearch": false
+  },
+  "topics": [
+    {
+      "id": "tech-ai-coding",
+      "label": "科技解读",
+      "input": "AI 编程助手正在改变程序员的工作方式，讲讲它带来的变化和对普通开发者的建议"
+    },
+    {
+      "id": "howto-sleep",
+      "label": "生活建议",
+      "input": "如何科学改善睡眠质量：给经常熬夜的上班族 5 个可以直接执行的建议"
+    },
+    {
+      "id": "finance-index-fund",
+      "label": "财经科普",
+      "input": "什么是指数基金定投？给完全没接触过投资的新手讲明白原理、优点和常见误区"
+    },
+    {
+      "id": "concept-quantum",
+      "label": "概念科普",
+      "input": "用大白话解释量子计算机和普通电脑的区别，以及它现在到底能干什么、不能干什么"
+    },
+    {
+      "id": "rank-free-tools",
+      "label": "盘点清单",
+      "input": "盘点 5 个免费但被严重低估的效率工具，分别说明适合什么人用"
+    },
+    {
+      "id": "health-coffee",
+      "label": "健康知识",
+      "input": "每天喝咖啡到底是健康还是伤身？把目前比较靠谱的研究结论讲清楚"
+    },
+    {
+      "id": "history-silkroad",
+      "label": "历史人文",
+      "input": "丝绸之路对今天的世界贸易格局留下了什么影响？讲两三个具体的例子"
+    },
+    {
+      "id": "workplace-weekly",
+      "label": "职场技巧",
+      "input": "职场新人怎么写周报：三个常见误区和一个能直接套用的结构"
+    },
+    {
+      "id": "data-ev-market",
+      "label": "数据叙事",
+      "input": "中国新能源汽车渗透率这几年的变化说明了什么？用数据讲一个有观点的故事"
+    },
+    {
+      "id": "opinion-shortvideo",
+      "label": "观点评论",
+      "input": "短视频正在改变我们的注意力吗？正反两面都讲一讲，最后给出自己的看法"
+    },
+    {
+      "id": "research-domestic-chips",
+      "label": "联网研究",
+      "input": "2026 年国产芯片的最新进展和面临的挑战",
+      "override": { "useResearch": true }
+    },
+    {
+      "id": "source-github-vscode",
+      "label": "链接来源",
+      "input": "https://github.com/microsoft/vscode 介绍这个项目是做什么的、为什么这么流行、适合谁用"
+    }
+  ]
+}

@@ -25,7 +25,8 @@
     "postdist": "npm rebuild better-sqlite3",
     "test": "node tests/run-all.js",
     "test:filter": "node tests/run-all.js",
-    "test:ai-text": "node tests/test-ai-text-model.js"
+    "test:ai-text": "node tests/test-ai-text-model.js",
+    "eval:quality": "node scripts/quality-eval/index.js"
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
