@@ -136,9 +136,7 @@ const defaultIndex = registry.buildCompactIndex();
 for (const id of ['bold_signal', 'glitch_title', 'news_signal_vertical']) {
   assert.ok(defaultIndex.some(item => item.id === id), `default index should include ${id}`);
 }
-if (require('fs').existsSync(registry.DEFAULT_EXTERNAL_ROOT_DIR)) {
-  assert.ok(defaultIndex.some(item => item.id === 'frame-bold-signal'), 'default index should include adjacent html-video templates');
-}
+assert.ok(!defaultIndex.some(item => item.id === 'frame-bold-signal'), 'default index should not include adjacent html-video templates');
 const defaultRegistry = registry.createTemplateRegistry();
 const verticalTemplates = defaultRegistry.buildCompactIndex({ aspect_ratio: '9:16' }).map(item => item.id);
 assert.ok(verticalTemplates.includes('news_signal_vertical'));

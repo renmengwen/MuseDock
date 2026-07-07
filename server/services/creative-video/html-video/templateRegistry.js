@@ -20,8 +20,7 @@ const DEFAULT_OPTIONS = {
 };
 
 const DEFAULT_ROOT_DIR = path.resolve(__dirname, '../../../templates');
-const DEFAULT_EXTERNAL_ROOT_DIR = path.resolve(DEFAULT_ROOT_DIR, '../../../html-video/templates');
-const DEFAULT_ROOT_DIRS = [DEFAULT_ROOT_DIR, DEFAULT_EXTERNAL_ROOT_DIR];
+const DEFAULT_ROOT_DIRS = [DEFAULT_ROOT_DIR];
 
 function normalizeEngine(engine) {
   return String(engine || '').trim();
@@ -309,7 +308,6 @@ function createTemplateRegistry({ rootDir = DEFAULT_ROOT_DIRS } = {}) {
 module.exports = {
   INTERNAL_ENGINE_MAP,
   DEFAULT_ROOT_DIR,
-  DEFAULT_EXTERNAL_ROOT_DIR,
   DEFAULT_ROOT_DIRS,
   scanTemplateManifests,
   buildCompactIndex,

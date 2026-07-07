@@ -115,15 +115,35 @@ function loadStoredTasks() {
   if (typeof window === 'undefined') return [];
   try {
     const parsed = JSON.parse(window.localStorage.getItem(CREATIVE_TASKS_STORAGE_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.filter(task => task?.workflow_id).slice(0, 30) : [];
+    return Array.isArray(parsed) ? parsed.map(compactStoredTask).filter(task => task.workflow_id).slice(0, 30) : [];
   } catch {
     return [];
   }
 }
 
+function compactStoredTask(task) {
+  return {
+    workflow_id: String(task?.workflow_id || '').trim(),
+    title: String(task?.title || ''),
+    input: String(task?.input || ''),
+    status: String(task?.status || 'queued'),
+    message: String(task?.message || ''),
+    created_at: String(task?.created_at || ''),
+    updated_at: String(task?.updated_at || ''),
+  };
+}
+
 function saveStoredTasks(tasks) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(CREATIVE_TASKS_STORAGE_KEY, JSON.stringify(tasks.slice(0, 30)));
+  try {
+    const storedTasks = (Array.isArray(tasks) ? tasks : [])
+      .map(compactStoredTask)
+      .filter(task => task.workflow_id)
+      .slice(0, 30);
+    window.localStorage.setItem(CREATIVE_TASKS_STORAGE_KEY, JSON.stringify(storedTasks));
+  } catch {
+    window.localStorage.removeItem(CREATIVE_TASKS_STORAGE_KEY);
+  }
 }
 
 function normalizeLastSeq(value) {
@@ -134,16 +154,20 @@ function normalizeLastSeq(value) {
 
 function saveActiveCreativeTask(value) {
   if (typeof window === 'undefined') return;
-  if (!value?.workflow_id || !value?.task_id) {
+  try {
+    if (!value?.workflow_id || !value?.task_id) {
+      window.localStorage.removeItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY);
+      return;
+    }
+    window.localStorage.setItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY, JSON.stringify({
+      workflow_id: value.workflow_id,
+      task_id: value.task_id,
+      last_seq: normalizeLastSeq(value.last_seq),
+      updated_at: new Date().toISOString(),
+    }));
+  } catch {
     window.localStorage.removeItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY);
-    return;
   }
-  window.localStorage.setItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY, JSON.stringify({
-    workflow_id: value.workflow_id,
-    task_id: value.task_id,
-    last_seq: normalizeLastSeq(value.last_seq),
-    updated_at: new Date().toISOString(),
-  }));
 }
 
 function loadActiveCreativeTask() {
