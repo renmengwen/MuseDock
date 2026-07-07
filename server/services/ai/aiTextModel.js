@@ -251,7 +251,7 @@ function createTimeoutSignal(timeoutMs) {
 
   const controller = new AbortController();
   const timer = setTimeout(() => {
-    controller.abort(new Error(`文本模型请求超时：${Math.round(ms / 1000)} 秒内未返回结果。`));
+    controller.abort(new Error(`分析模型请求超时：${Math.round(ms / 1000)} 秒内未返回结果。`));
   }, ms);
   if (typeof timer.unref === 'function') timer.unref();
   return {
@@ -265,7 +265,7 @@ function getAbortErrorMessage(error, timeoutMs) {
   if (reasonMessage && !/^This operation was aborted$/i.test(reasonMessage)) {
     return reasonMessage;
   }
-  return `文本模型请求超时：${Math.round(Number(timeoutMs) / 1000)} 秒内未返回结果。`;
+  return `分析模型请求超时：${Math.round(Number(timeoutMs) / 1000)} 秒内未返回结果。`;
 }
 
 async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl, timeoutMs, tools, tool_choice, response_format }) {
@@ -359,7 +359,7 @@ async function callTextModel(options = {}) {
     return {
       success: false,
       configured: false,
-      message: '文本模型未配置，请先在 AI 模型配置中填写文本模型的 API Key、Base URL 和模型 ID。',
+      message: '分析模型未配置，请先在 AI 模型配置中填写分析模型的 API Key、Base URL 和模型 ID。',
     };
   }
 
@@ -367,7 +367,7 @@ async function callTextModel(options = {}) {
     return {
       success: false,
       configured: true,
-      message: '文本模型请求失败：当前运行环境缺少 fetch 实现。',
+      message: '分析模型请求失败：当前运行环境缺少 fetch 实现。',
       model: toModelInfo(provider, modelId),
     };
   }
@@ -422,7 +422,7 @@ async function callTextModel(options = {}) {
         return {
           success: false,
           configured: true,
-          message: `文本模型调用失败：${detail}`,
+          message: `分析模型调用失败：${detail}`,
           model: toModelInfo(provider, modelId),
         };
       }
@@ -463,7 +463,7 @@ async function callTextModel(options = {}) {
       return {
         success: false,
         configured: true,
-        message: `文本模型调用失败：${detail}`,
+        message: `分析模型调用失败：${detail}`,
         model: toModelInfo(provider, modelId),
         fallback: {
           from_stream: true,
@@ -500,7 +500,7 @@ async function callTextModel(options = {}) {
     return {
       success: false,
       configured: true,
-      message: `文本模型调用失败：${detail}`,
+      message: `分析模型调用失败：${detail}`,
       model: toModelInfo(provider, modelId),
     };
   }
@@ -515,7 +515,7 @@ async function callTextModel(options = {}) {
     return {
       success: false,
       configured: true,
-      message: `${provider || '文本模型'} 调用失败：${detail}`,
+      message: `${provider || '分析模型'} 调用失败：${detail}`,
       model: toModelInfo(provider, modelId),
       raw_response: rawResponse,
     };
@@ -572,7 +572,7 @@ async function callTextModel(options = {}) {
           return {
             success: false,
             configured: true,
-            message: `文本模型调用失败：${detail}`,
+            message: `分析模型调用失败：${detail}`,
             model: toModelInfo(provider, modelId),
             fallback: {
               from_stream: true,
@@ -587,7 +587,7 @@ async function callTextModel(options = {}) {
       return {
         success: false,
         configured: true,
-        message: `${provider || '文本模型'} 流式响应读取失败：${detail}`,
+        message: `${provider || '分析模型'} 流式响应读取失败：${detail}`,
         model: toModelInfo(provider, modelId),
       };
     }
@@ -596,7 +596,7 @@ async function callTextModel(options = {}) {
       return {
         success: false,
         configured: true,
-        message: `${provider || '文本模型'} 流式响应解析失败：${getProviderError(streamResult.raw_response) || '响应格式无效'}`,
+        message: `${provider || '分析模型'} 流式响应解析失败：${getProviderError(streamResult.raw_response) || '响应格式无效'}`,
         model: toModelInfo(provider, modelId),
         raw_response: streamResult.raw_response,
       };
@@ -605,7 +605,7 @@ async function callTextModel(options = {}) {
       return {
         success: false,
         configured: true,
-        message: `${provider || '文本模型'} 流式返回结果缺少文本内容。`,
+        message: `${provider || '分析模型'} 流式返回结果缺少文本内容。`,
         model: toModelInfo(provider, modelId),
         raw_response: streamResult.raw_response,
       };
@@ -630,7 +630,7 @@ async function callTextModel(options = {}) {
     return {
       success: false,
       configured: true,
-      message: `${provider || '文本模型'} 返回了非 JSON 响应，请检查 Base URL 是否指向兼容接口地址。`,
+      message: `${provider || '分析模型'} 返回了非 JSON 响应，请检查 Base URL 是否指向兼容接口地址。`,
       model: toModelInfo(provider, modelId),
       raw_response: {
         content_type: parsedResponse.contentType,
@@ -665,7 +665,7 @@ async function callTextModel(options = {}) {
       return {
         success: false,
         configured: true,
-        message: `文本模型调用失败：${detail}`,
+        message: `分析模型调用失败：${detail}`,
         model: toModelInfo(provider, modelId),
       };
     }
@@ -685,7 +685,7 @@ async function callTextModel(options = {}) {
     return {
       success: false,
       configured: true,
-      message: `${provider || '文本模型'} 返回结果缺少文本内容。`,
+      message: `${provider || '分析模型'} 返回结果缺少文本内容。`,
       model: toModelInfo(provider, modelId),
       raw_response: rawResponse,
     };

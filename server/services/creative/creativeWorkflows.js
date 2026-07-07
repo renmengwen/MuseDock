@@ -33,6 +33,7 @@ const {
   syncRawHtmlFrameTextPatch,
   findFrameByAnyId,
   createTemplateRegistry: createHtmlVideoTemplateRegistry,
+  sfxEventService,
 } = htmlVideoProjectApi;
 const { computeSceneSpecSpeechHash } = require('../creative-video/sceneSpecHash');
 
@@ -637,6 +638,9 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
     generateAudio: typeof overrideSource.generateAudio === 'boolean'
       ? overrideSource.generateAudio
       : defaultsSource.generateAudio !== false,
+    autoSfxEnabled: typeof overrideSource.autoSfxEnabled === 'boolean'
+      ? overrideSource.autoSfxEnabled
+      : defaultsSource.autoSfxEnabled !== false,
     generateCaptions: typeof overrideSource.generateCaptions === 'boolean'
       ? overrideSource.generateCaptions
       : defaultsSource.generateCaptions !== false,
@@ -686,6 +690,7 @@ function buildWorkflowTarget(snapshot = {}) {
     preferredTemplateId: safeString(snapshot.templateId),
     lockTemplate: snapshot.lockTemplate === true,
     generateAudio: snapshot.generateAudio !== false,
+    autoSfxEnabled: snapshot.autoSfxEnabled !== false,
     generateCaptions: snapshot.generateCaptions !== false,
     emotionalVoice: snapshot.emotionalVoice === true,
     extractDouyinFrames: snapshot.extractDouyinFrames === true,
@@ -2290,6 +2295,37 @@ async function patchHtmlVideoProjectFrame(workflowId, frameId, payload = {}, opt
   }, options);
 }
 
+async function patchHtmlVideoProjectSfxEvent(workflowId, eventId, payload = {}, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  if (payload.enabled !== false) {
+    return {
+      success: false,
+      code: 'SFX_EVENT_PATCH_UNSUPPORTED',
+      workflow_id: workflowId,
+      message: '首版只支持删除音效。',
+    };
+  }
+  const result = sfxEventService.disableSfxEvent({ project, eventId });
+  if (!result.success) {
+    return { ...result, workflow_id: workflowId };
+  }
+  // 先落权威 project.json 再写镜像：save 失败时镜像不会先说"已删"（spec §4.3 同步要求）
+  const saved = await htmlVideoProjectStore.saveProject(projectDir, result.project);
+  await sfxEventService.persistProjectSfxMirror(projectDir, saved);
+  return {
+    success: true,
+    workflow_id: workflowId,
+    message: '音效已删除，重新导出后生效。',
+    html_video_project: saved,
+    html_video_project_path: projectDir,
+    requires_render: true,
+    requires_export: true,
+    render_scope: 'export_only',
+  };
+}
+
 async function createHtmlVideoProjectEditPlan(workflowId, payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
@@ -2896,6 +2932,7 @@ module.exports = {
   renderCreativeWorkflowHtmlVideoProject,
   patchHtmlVideoProjectInputs,
   patchHtmlVideoProjectFrame,
+  patchHtmlVideoProjectSfxEvent,
   createHtmlVideoProjectEditPlan,
   runHtmlVideoProjectEditPlan,
   acceptHtmlVideoProjectEditPlan,

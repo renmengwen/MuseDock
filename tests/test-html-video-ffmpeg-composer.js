@@ -85,7 +85,7 @@ const composer = require('../server/services/creative-video/html-video/ffmpegCom
   assert.ok(filterComplex.includes('afade=t=in:st=0:d=0.2'));
   assert.ok(filterComplex.includes('afade=t=out:st=4.5:d=1.5'));
   assert.ok(filterComplex.includes('amix=inputs=2:duration=longest:dropout_transition=0[mixed]'));
-  assert.ok(filterComplex.includes('[mixed]apad=whole_dur=6[aout]'));
+  assert.ok(filterComplex.includes('[mixed]apad[aout]'));
   assert.deepEqual(commands[2].args.slice(-9), [
     '-map', '0:v',
     '-map', '[aout]',
@@ -96,6 +96,41 @@ const composer = require('../server/services/creative-video/html-video/ffmpegCom
     muxOutput,
   ].slice(-9));
   assert.ok(commands[2].args.includes('-shortest'));
+
+  const muxWithSfxOutput = path.join(workDir, 'exports/muxed-sfx.mp4');
+  const muxWithSfx = await composer.muxAudioWithFfmpeg({
+    videoPath: filterOutput,
+    outputPath: muxWithSfxOutput,
+    musicPath: path.join(workDir, 'music.mp3'),
+    narrationPath: path.join(workDir, 'narration.wav'),
+    sfxEvents: [
+      { path: path.join(workDir, 'sfx1.wav'), global_time_sec: 0.18, volume_db: -16 },
+      { path: path.join(workDir, 'sfx2.wav'), global_time_sec: 1.2, volume_db: -18 },
+    ],
+    videoDurationSec: 6,
+    runCommand,
+  });
+  assert.equal(muxWithSfx.success, true);
+  const sfxArgs = commands.at(-1).args;
+  const expectedSfxInputs = [
+    '-y',
+    '-i', filterOutput,
+    '-i', path.join(workDir, 'narration.wav'),
+    '-i', path.join(workDir, 'music.mp3'),
+    '-i', path.join(workDir, 'sfx1.wav'),
+    '-i', path.join(workDir, 'sfx2.wav'),
+  ];
+  assert.deepEqual(sfxArgs.slice(0, expectedSfxInputs.length), expectedSfxInputs);
+  const sfxFilter = sfxArgs[sfxArgs.indexOf('-filter_complex') + 1];
+  assert.ok(sfxFilter.includes('[3:a]volume=-16dB,adelay=180|180[sfx2]'));
+  assert.ok(sfxFilter.includes('[4:a]volume=-18dB,adelay=1200|1200'));
+  // 两级混音：旁白+音乐先按原响度 amix，音效用旧版 ffmpeg 兼容的预增益叠加
+  assert.ok(sfxFilter.includes('[narration0][music1]amix=inputs=2:duration=longest:dropout_transition=0[base]'));
+  assert.ok(sfxFilter.includes('[base]volume=3,apad[mix0]'));
+  assert.ok(sfxFilter.includes('[sfx2]volume=3,apad[mix1]'));
+  assert.ok(sfxFilter.includes('[sfx3]volume=3,apad[mix2]'));
+  assert.ok(sfxFilter.includes('[mix0][mix1][mix2]amix=inputs=3:duration=longest:dropout_transition=0[mixed]'));
+  assert.doesNotMatch(sfxFilter, /normalize=0|whole_dur/);
 
   const noAudio = await composer.muxAudioWithFfmpeg({
     videoPath: filterOutput,
@@ -161,7 +196,7 @@ const composer = require('../server/services/creative-video/html-video/ffmpegCom
     { path: path.join(workDir, 'tts/scene_02.mp3') },
   ], path.join(workDir, 'exports/narration.mp3'), workDir, { runCommand });
   assert.equal(narrationTrack.success, true);
-  assert.deepEqual(commands[3].args, [
+  assert.deepEqual(commands.at(-1).args, [
     '-y',
     '-f', 'concat',
     '-safe', '0',

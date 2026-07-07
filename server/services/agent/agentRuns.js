@@ -515,7 +515,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   }
 
   if (!modelResult.success) {
-    steps.push(makeStep('generate', '请求文本模型', 'failed', modelResult.message || '模型调用失败'));
+    steps.push(makeStep('generate', '请求分析模型', 'failed', modelResult.message || '模型调用失败'));
     return createFailureRun(awemeId, template, modelResult.message || '模型调用失败', {
       rootDir,
       steps,
@@ -528,7 +528,7 @@ async function createDouyinAgentRun(awemeId, options = {}) {
   }
 
   const parsed = parseModelText(modelResult.text, templateDefinition);
-  steps.push(makeStep('generate', '请求文本模型', 'done'));
+  steps.push(makeStep('generate', '请求分析模型', 'done'));
   steps.push(makeStep(
     'parse',
     '解析结构化结果',

@@ -311,10 +311,19 @@ async function concatFramesWithFfmpeg(frameMp4s, outputPath, workDir, opts = {})
   return { success: true, strategy, output_path: outputPath, args };
 }
 
-function audioInputs({ narrationPath, musicPath }) {
+function audioInputs({ narrationPath, musicPath, sfxEvents = [] }) {
   const inputs = [];
   if (narrationPath) inputs.push({ role: 'narration', path: narrationPath });
   if (musicPath) inputs.push({ role: 'music', path: musicPath });
+  for (const event of Array.isArray(sfxEvents) ? sfxEvents : []) {
+    if (!event?.path) continue;
+    inputs.push({
+      role: 'sfx',
+      path: event.path,
+      global_time_sec: Number(event.global_time_sec || 0),
+      volume_db: Number.isFinite(Number(event.volume_db)) ? Number(event.volume_db) : -18,
+    });
+  }
   return inputs;
 }
 
@@ -323,19 +332,53 @@ function buildAudioFilter(inputs, options) {
   const duration = Number(options.videoDurationSec || 0);
   inputs.forEach((input, index) => {
     const streamIndex = index + 1;
-    const label = input.role === 'music' ? 'music' : 'narration';
-    const volume = input.role === 'music' ? options.musicVolumeDb : options.narrationVolumeDb;
-    const fadeIn = Number(options.fadeInSec || 0);
-    const fadeOut = Number(options.fadeOutSec || 0);
+    const label = input.role === 'music' ? 'music' : input.role === 'sfx' ? 'sfx' : 'narration';
+    const volume = input.role === 'music'
+      ? options.musicVolumeDb
+      : input.role === 'sfx'
+        ? input.volume_db
+        : options.narrationVolumeDb;
+    const fadeIn = input.role === 'sfx' ? 0 : Number(options.fadeInSec || 0);
+    const fadeOut = input.role === 'sfx' ? 0 : Number(options.fadeOutSec || 0);
     const outLabel = `${label}${index}`;
     const filters = [`volume=${Number(volume || 0)}dB`];
+    if (input.role === 'sfx') {
+      const delayMs = Math.max(0, Math.round(Number(input.global_time_sec || 0) * 1000));
+      filters.push(`adelay=${delayMs}|${delayMs}`);
+    }
     if (fadeIn > 0) filters.push(`afade=t=in:st=0:d=${fadeIn}`);
     if (fadeOut > 0 && duration > fadeOut) filters.push(`afade=t=out:st=${Math.max(0, duration - fadeOut)}:d=${fadeOut}`);
     chains.push(`[${streamIndex}:a]${filters.join(',')}[${outLabel}]`);
   });
-  const mixInputs = inputs.map((input, index) => `[${input.role === 'music' ? 'music' : 'narration'}${index}]`).join('');
-  chains.push(`${mixInputs}amix=inputs=${inputs.length}:duration=longest:dropout_transition=0[mixed]`);
-  chains.push(duration > 0 ? `[mixed]apad=whole_dur=${duration}[aout]` : '[mixed]anull[aout]');
+  const labelFor = (input, index) => {
+    const label = input.role === 'music' ? 'music' : input.role === 'sfx' ? 'sfx' : 'narration';
+    return `[${label}${index}]`;
+  };
+  const baseLabels = [];
+  const sfxLabels = [];
+  inputs.forEach((input, index) => {
+    (input.role === 'sfx' ? sfxLabels : baseLabels).push(labelFor(input, index));
+  });
+  const compensateLegacyAmix = labels => labels.map((label, offset) => {
+    const out = `mix${offset}`;
+    // ponytail: bundled ffmpeg is old; pad + pre-gain keeps amix normalization from ducking SFX mixes.
+    chains.push(`${label}volume=${labels.length},apad[${out}]`);
+    return `[${out}]`;
+  });
+
+  // 两级混音：旁白/音乐先按原有 amix（响度与无音效版本一致），音效再叠加。
+  // 旧版 bundled ffmpeg 没有 amix normalize 参数，用 apad 保持输入存活并用预增益抵消默认归一化。
+  if (!sfxLabels.length) {
+    chains.push(`${baseLabels.join('')}amix=inputs=${baseLabels.length}:duration=longest:dropout_transition=0[mixed]`);
+  } else if (!baseLabels.length) {
+    const finalLabels = compensateLegacyAmix(sfxLabels);
+    chains.push(`${finalLabels.join('')}amix=inputs=${finalLabels.length}:duration=longest:dropout_transition=0[mixed]`);
+  } else {
+    chains.push(`${baseLabels.join('')}amix=inputs=${baseLabels.length}:duration=longest:dropout_transition=0[base]`);
+    const finalLabels = compensateLegacyAmix(['[base]', ...sfxLabels]);
+    chains.push(`${finalLabels.join('')}amix=inputs=${finalLabels.length}:duration=longest:dropout_transition=0[mixed]`);
+  }
+  chains.push(duration > 0 ? '[mixed]apad[aout]' : '[mixed]anull[aout]');
   return chains.join(';');
 }
 
@@ -348,11 +391,12 @@ async function muxAudioWithFfmpeg({
   narrationVolumeDb = 0,
   fadeInSec = 0,
   fadeOutSec = 1.5,
+  sfxEvents = [],
   videoDurationSec = 0,
   runCommand: runCommandImpl = runCommand,
   ffmpegPath,
 } = {}) {
-  const inputs = audioInputs({ narrationPath, musicPath });
+  const inputs = audioInputs({ narrationPath, musicPath, sfxEvents });
   if (!inputs.length) {
     return { success: true, skipped: true, output_path: videoPath, message: '无音频文件，跳过混流。' };
   }

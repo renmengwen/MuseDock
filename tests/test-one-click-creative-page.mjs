@@ -422,6 +422,7 @@ assert.match(creativeDisplay, /stage\.status === 'skipped'[\s\S]*return 'done'/,
 assert.match(creativeDisplay, /stage\.status === 'running'[\s\S]*return 'active'/, 'Workflow stepper should treat only running stages as the active visual step');
 assert.match(creativeDisplay, /stage\.status === 'queued' \|\| stage\.status === 'pending'[\s\S]*return 'queued'/, 'Workflow stepper should keep queued stages visually quieter than the running step');
 assert.match(creativeStatusMessage, /getStatusMessageClass/, 'CreativeStatusMessage should use the shared status message class helper');
+assert.match(creativeStatusMessage, /模型未配置[\s\S]*to="\/settings\?section=models"/, 'CreativeStatusMessage should link to model settings when the message reports an unconfigured model');
 assert.match(creativeTaskDetail, /<CreativeStatusMessage\s+status=\{status\}\s+message=\{message\}\s+\/>/, 'CreativeTaskDetail should render the extracted status message component while waiting');
 const videoPreviewStart = creativeTaskDetail.indexOf('<CreativeVideoPreview');
 assert.ok(videoPreviewStart > 0, 'Creative task detail should render CreativeVideoPreview when a video URL is available');

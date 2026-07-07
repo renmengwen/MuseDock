@@ -13,6 +13,7 @@ const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { findFrameByAnyId, canonicalFrameId, sanitizePathSegment } = require('./frameIdentity');
 const { findDraft } = require('./htmlVideoDraftService');
 const { analyzeTimelineMismatch } = require('./timelineRepair');
+const sfxEventService = require('./sfxEventService');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -752,14 +753,40 @@ async function composeHtmlVideoProject({
   let audioTrackCheck = null;
   if (!audioDisabled) {
     const narrationPath = await resolveNarrationPath(nextProject, resolvedProjectDir, ffmpegComposer, diagnostics);
-    const mux = await ffmpegComposer.muxAudioWithFfmpeg({
+    const { events: sfxEvents, dropped: sfxDropped } = sfxEventService.resolveProjectSfxEventsForMux({
+      project: nextProject,
+      projectDir: resolvedProjectDir,
+    });
+    if (sfxDropped.length) {
+      diagnostics.push(createDiagnostic({
+        code: 'sfx_event_dropped',
+        stage: 'compose',
+        sub_stage: 'compose',
+        severity: 'warning',
+        user_message: `${sfxDropped.length} 条自动音效素材不可用，导出时已跳过。`,
+        details: { dropped: sfxDropped },
+      }));
+    }
+    const muxOptions = {
       videoPath: finalOutput,
       outputPath: path.join(resolvedProjectDir, 'exports', 'output-audio.mp4'),
       narrationPath,
       musicPath: nextProject.audio?.music_path,
       videoDurationSec: expectedDurationSec(nextProject),
       ...(nextProject.audio?.mix || {}),
-    });
+    };
+    let mux = await ffmpegComposer.muxAudioWithFfmpeg({ ...muxOptions, sfxEvents });
+    if (!mux.success && sfxEvents.length) {
+      diagnostics.push(createDiagnostic({
+        code: 'sfx_mix_failed',
+        stage: 'compose',
+        sub_stage: 'compose',
+        severity: 'warning',
+        user_message: '自动音效混入失败，已尝试导出无音效版本。',
+        details: { stderr: mux.stderr },
+      }));
+      mux = await ffmpegComposer.muxAudioWithFfmpeg({ ...muxOptions, sfxEvents: [] });
+    }
     if (!mux.success) {
       nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
         markComposeCheckpoint(current, {

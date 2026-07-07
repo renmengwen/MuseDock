@@ -10,6 +10,7 @@ const diagnostics = require('./html-video/diagnostics');
 const rawHtmlTextPatch = require('./html-video/rawHtmlTextPatch');
 const frameIdentity = require('./html-video/frameIdentity');
 const templateRegistry = require('./html-video/templateRegistry');
+const sfxEventService = require('./html-video/sfxEventService');
 
 module.exports = {
   projectStore,
@@ -25,4 +26,5 @@ module.exports = {
   syncRawHtmlFrameTextPatch: rawHtmlTextPatch.syncRawHtmlFrameTextPatch,
   findFrameByAnyId: frameIdentity.findFrameByAnyId,
   createTemplateRegistry: templateRegistry.createTemplateRegistry,
+  sfxEventService,
 };

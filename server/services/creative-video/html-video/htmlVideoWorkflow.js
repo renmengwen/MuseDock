@@ -32,6 +32,9 @@ const { applyManifestToProjectAudio } = require('../ttsService');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
 const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('./sceneSpecMapper');
 const { resolveNodeSceneId, validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
+const sfxLibrary = require('./sfxLibrary');
+const sfxPlannerAgent = require('./sfxPlannerAgent');
+const sfxEventService = require('./sfxEventService');
 const { AGENTS, STAGES } = require('../agentStages');
 
 function objectOrEmpty(value) {
@@ -1517,6 +1520,15 @@ async function generateHtmlVideo(options = {}) {
   });
   project = await projectStore.saveProject(projectDir, project);
 
+  // 已编排过（含用户在编辑器里的删除标记）就不再重跑 AI，避免恢复/重试时覆盖用户改动；
+  // 脚本（scene_spec）变了则时间点已失效，重新编排
+  const sfxEnabledForRun = target.autoSfxEnabled !== false && mediaOptions.generateAudio !== false;
+  const reusableSfx = [
+    objectOrEmpty(objectOrEmpty(project.audio).sfx),
+    objectOrEmpty(objectOrEmpty(resumeProject?.audio).sfx),
+  ].find(sfx => sfx.status === 'ready'
+    && sfx.scene_spec_hash === currentSceneSpecHash
+    && Array.isArray(sfx.events) && sfx.events.length > 0) || null;
   if (mediaOptions.generateAudio === false) {
     project.audio = {
       ...(project.audio || {}),
@@ -1570,7 +1582,103 @@ async function generateHtmlVideo(options = {}) {
       });
     }
   }
-  await projectStore.saveProject(projectDir, project);
+  if (sfxEnabledForRun && reusableSfx) {
+    project.audio = objectOrEmpty(project.audio);
+    project.audio.sfx = reusableSfx;
+    await report(onProgress, {
+      type: 'html_video_sfx_planning_reused',
+      stage: 'audio',
+      sub_stage: 'sfx',
+      message: '复用已有自动音效编排。',
+      data: { count: reusableSfx.events.length },
+    });
+  } else if (sfxEnabledForRun) {
+    try {
+      await report(onProgress, {
+        type: 'html_video_sfx_planning_started',
+        stage: 'audio',
+        sub_stage: 'sfx',
+        message: '正在编排自动音效...',
+        data: {},
+      });
+      const library = sfxLibrary.loadSfxLibrary();
+      const librarySummary = sfxLibrary.getSfxLibrarySummary({ library });
+      if (!librarySummary.length) {
+        const emptyLibraryError = new Error('本地音效素材库为空。');
+        emptyLibraryError.code = 'sfx_library_missing';
+        throw emptyLibraryError;
+      }
+      const planned = await (services.sfxPlannerAgent || sfxPlannerAgent).planSfxEvents({
+        model,
+        target: templateRenderTarget,
+        rules: sfxEventService.getPlanningRules(project, sceneSpec),
+        sfxLibrary: librarySummary,
+        scenes: sfxEventService.buildSfxPlanningScenes({ project, sceneSpec }),
+      });
+      if (!planned || planned.success === false) {
+        const plannedError = new Error(planned?.message || '自动音效编排失败，已跳过音效增强。');
+        plannedError.code = planned?.code;
+        throw plannedError;
+      }
+      const applied = await sfxEventService.applyPlannedSfxEvents({
+        projectDir,
+        project,
+        sceneSpec,
+        library,
+        aiEvents: planned.events,
+      });
+      project = applied.project;
+      project.audio.sfx.scene_spec_hash = currentSceneSpecHash;
+      if (!applied.events.length) {
+        diagnostics.push(createDiagnostic({
+          code: 'sfx_no_valid_events',
+          stage: 'audio',
+          sub_stage: 'sfx',
+          user_message: '自动音效编排未产生可用事件，已跳过音效增强。',
+          details: {},
+          severity: 'warning',
+        }));
+      }
+      if (applied.dropped.length) {
+        diagnostics.push(createDiagnostic({
+          code: 'sfx_asset_missing',
+          stage: 'audio',
+          sub_stage: 'sfx',
+          user_message: `部分自动音效素材不可用，已丢弃 ${applied.dropped.length} 条。`,
+          details: { dropped: applied.dropped },
+          severity: 'warning',
+        }));
+      }
+      await report(onProgress, {
+        type: 'html_video_sfx_planning_done',
+        stage: 'audio',
+        sub_stage: 'sfx',
+        message: '自动音效编排完成。',
+        data: { count: applied.events.length, dropped: applied.dropped.length },
+      });
+    } catch (error) {
+      const diagnosticCode = error?.code === 'ENOENT' ? 'sfx_library_missing' : (error?.code || 'sfx_planning_failed');
+      const reason = error?.message || '自动音效编排失败，已跳过音效增强。';
+      sfxEventService.markSfxSkipped(project, reason);
+      await sfxEventService.persistProjectSfxMirror(projectDir, project).catch(() => {});
+      diagnostics.push(createDiagnostic({
+        code: diagnosticCode,
+        stage: 'audio',
+        sub_stage: 'sfx',
+        user_message: '自动音效编排失败，已跳过音效增强。',
+        details: { reason },
+        severity: 'warning',
+      }));
+      await report(onProgress, {
+        type: 'html_video_sfx_planning_skipped',
+        stage: 'audio',
+        sub_stage: 'sfx',
+        message: '自动音效编排失败，已跳过音效增强。',
+        data: { code: diagnosticCode, reason },
+      });
+    }
+  }
+  project = await projectStore.saveProject(projectDir, project);
   const rendered = await projectOrchestrator.renderHtmlVideoProject({
     rootDir,
     workflowId,

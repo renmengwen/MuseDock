@@ -32,6 +32,9 @@ function createDefaults(overrides = {}) {
     },
     lockTemplate: true,
     useResearch: false,
+    generateAudio: true,
+    generateCaptions: true,
+    autoSfxEnabled: true,
     emotionalVoice: false,
     sourceImageAnalysisEnabled: false,
     extractDouyinFrames: false,
@@ -121,6 +124,9 @@ function assertSnapshotRecord(record, {
   templateId = 'bold_signal',
   lockTemplate = true,
   useResearch = false,
+  generateAudio = true,
+  generateCaptions = true,
+  autoSfxEnabled = true,
   emotionalVoice = false,
   sourceImageAnalysisEnabled = false,
   extractDouyinFrames = false,
@@ -132,6 +138,9 @@ function assertSnapshotRecord(record, {
   assert.equal(record.creative_defaults_snapshot.templateId, templateId);
   assert.equal(record.creative_defaults_snapshot.lockTemplate, lockTemplate);
   assert.equal(record.creative_defaults_snapshot.useResearch, useResearch);
+  assert.equal(record.creative_defaults_snapshot.generateAudio, generateAudio);
+  assert.equal(record.creative_defaults_snapshot.generateCaptions, generateCaptions);
+  assert.equal(record.creative_defaults_snapshot.autoSfxEnabled, autoSfxEnabled);
   assert.equal(record.creative_defaults_snapshot.emotionalVoice, emotionalVoice);
   assert.equal(record.creative_defaults_snapshot.sourceImageAnalysisEnabled, sourceImageAnalysisEnabled);
   assert.equal(record.creative_defaults_snapshot.extractDouyinFrames, extractDouyinFrames);
@@ -141,6 +150,9 @@ function assertSnapshotRecord(record, {
   assert.equal(record.target.duration_sec, durationSec);
   assert.equal(record.target.preferredTemplateId, templateId);
   assert.equal(record.target.lockTemplate, lockTemplate);
+  assert.equal(record.target.generateAudio, generateAudio);
+  assert.equal(record.target.generateCaptions, generateCaptions);
+  assert.equal(record.target.autoSfxEnabled, autoSfxEnabled);
   assert.equal(record.target.emotionalVoice, emotionalVoice);
   assert.equal(record.target.extractDouyinFrames, extractDouyinFrames);
   assert.equal(record.target.frameHtmlConcurrency, frameHtmlConcurrency);
@@ -227,6 +239,30 @@ async function testMissingDefaultUseResearchDefaultsToTrue() {
   delete defaults.useResearch;
   const { record } = await createAndRead({}, { defaults });
   assertSnapshotRecord(record, { useResearch: true });
+}
+
+async function testAutoSfxDefaultAndOverrideReachWorkflowTarget() {
+  const defaultOff = await createAndRead({}, {
+    defaults: createDefaults({ autoSfxEnabled: false }),
+    workflowId: '202606230000000006',
+  });
+  assertSnapshotRecord(defaultOff.record, { autoSfxEnabled: false });
+
+  const overrideOn = await createAndRead({
+    creativeDefaultsOverride: { autoSfxEnabled: true },
+  }, {
+    defaults: createDefaults({ autoSfxEnabled: false }),
+    workflowId: '202606230000000007',
+  });
+  assertSnapshotRecord(overrideOn.record, { autoSfxEnabled: true });
+
+  const overrideOff = await createAndRead({
+    creativeDefaultsOverride: { autoSfxEnabled: false },
+  }, {
+    defaults: createDefaults({ autoSfxEnabled: true }),
+    workflowId: '202606230000000008',
+  });
+  assertSnapshotRecord(overrideOff.record, { autoSfxEnabled: false });
 }
 
 async function testEmotionalVoiceDefaultPassesToAudioStage() {
@@ -375,6 +411,7 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   await testCreativeDefaultsOverrideBeatsLegacyUseResearch();
   await testCreativeDefaultsOverrideSourceImageAnalysisWins();
   await testMissingDefaultUseResearchDefaultsToTrue();
+  await testAutoSfxDefaultAndOverrideReachWorkflowTarget();
   await testEmotionalVoiceDefaultPassesToAudioStage();
   await testDisabledEmotionalVoicePassesNeutralAudioStyle();
   await testMiniMaxSpeech28KeepsEmotionalVoiceStyle();

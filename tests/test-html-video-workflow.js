@@ -1590,7 +1590,7 @@ async function readProjectJson(projectDir) {
     }],
   };
   const originalRenderForNoAudio = projectOrchestrator.renderHtmlVideoProject;
-  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
+  const mockRenderSuccess = async ({ project, projectDir }) => ({
     success: true,
     message: 'mock render success',
     project,
@@ -1599,8 +1599,32 @@ async function readProjectJson(projectDir) {
     output_path: path.join(projectDir, 'exports', 'output.mp4'),
     diagnostics: [],
   });
+  const rawHtmlTextModel = ({ synopsis, label, text }) => ({
+    callTextModel: async ({ messages }) => {
+      const prompt = messages.map(item => item.content).join('\n');
+      if (prompt.includes('"template_id"')) {
+        return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配横屏', confidence: 0.9 }) };
+      }
+      if (prompt.startsWith('你是 html-video 的 content graph')) {
+        return {
+          success: true,
+          text: JSON.stringify({
+            synopsis,
+            nodes: [{ id: 'scene_01', kind: 'text', label, durationSec: 4, text }],
+            edges: [],
+          }),
+        };
+      }
+      return {
+        success: true,
+        text: `<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">${label}</h1><section data-text-key="body">画面</section></main></body></html>`,
+      };
+    },
+  });
+  projectOrchestrator.renderHtmlVideoProject = mockRenderSuccess;
   try {
     let noAudioTtsCalls = 0;
+    let noAudioSfxCalls = 0;
     const noAudioResult = await workflow.generateHtmlVideoProject({
       workflowId: 'wf-no-audio',
       runId: 'run-no-audio',
@@ -1619,28 +1643,7 @@ async function readProjectJson(projectDir) {
       },
       templateRegistry,
       services: {
-        aiTextModel: {
-          callTextModel: async ({ messages }) => {
-            const prompt = messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配横屏', confidence: 0.9 }) };
-            }
-            if (prompt.startsWith('你是 html-video 的 content graph')) {
-              return {
-                success: true,
-                text: JSON.stringify({
-                  synopsis: '禁用音频测试',
-                  nodes: [{ id: 'scene_01', kind: 'text', label: '禁用音频', durationSec: 4, text: '这段旁白不应该生成音频。' }],
-                  edges: [],
-                }),
-              };
-            }
-            return {
-              success: true,
-              text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">禁用音频</h1><section data-text-key="body">画面</section></main></body></html>',
-            };
-          },
-        },
+        aiTextModel: rawHtmlTextModel({ synopsis: '禁用音频测试', label: '禁用音频', text: '这段旁白不应该生成音频。' }),
         environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
         ttsService: {
           synthesizeSceneNarration: async () => {
@@ -1648,26 +1651,25 @@ async function readProjectJson(projectDir) {
             return { success: true };
           },
         },
+        sfxPlannerAgent: {
+          planSfxEvents: async () => {
+            noAudioSfxCalls += 1;
+            return { success: false, events: [] };
+          },
+        },
       },
     });
 
     assert.equal(noAudioResult.success, true);
     assert.equal(noAudioTtsCalls, 0);
+    assert.equal(noAudioSfxCalls, 0);
     assert.equal(noAudioResult.project.audio.status, 'skipped');
     assert.equal(noAudioResult.project.audio.reason, 'disabled_by_settings');
   } finally {
     projectOrchestrator.renderHtmlVideoProject = originalRenderForNoAudio;
   }
 
-  projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
-    success: true,
-    message: 'mock render success',
-    project,
-    project_dir: projectDir,
-    html_video_project_path: projectDir,
-    output_path: path.join(projectDir, 'exports', 'output.mp4'),
-    diagnostics: [],
-  });
+  projectOrchestrator.renderHtmlVideoProject = mockRenderSuccess;
   try {
     let targetMediaTtsCalls = 0;
     const targetMediaResult = await workflow.generateHtmlVideo({
@@ -1684,28 +1686,7 @@ async function readProjectJson(projectDir) {
       templateRegistry,
       skipValidation: true,
       services: {
-        aiTextModel: {
-          callTextModel: async ({ messages }) => {
-            const prompt = messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'simple', reason: '匹配横屏', confidence: 0.9 }) };
-            }
-            if (prompt.startsWith('你是 html-video 的 content graph')) {
-              return {
-                success: true,
-                text: JSON.stringify({
-                  synopsis: 'target 关闭音频和字幕',
-                  nodes: [{ id: 'scene_01', kind: 'text', label: '禁用音频', durationSec: 4, text: '这段旁白不应该生成音频。' }],
-                  edges: [],
-                }),
-              };
-            }
-            return {
-              success: true,
-              text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">禁用音频</h1><section data-text-key="body">画面</section></main></body></html>',
-            };
-          },
-        },
+        aiTextModel: rawHtmlTextModel({ synopsis: 'target 关闭音频和字幕', label: '禁用音频', text: '这段旁白不应该生成音频。' }),
         environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
         ttsService: {
           synthesizeSceneNarration: async () => {
@@ -1726,19 +1707,88 @@ async function readProjectJson(projectDir) {
     projectOrchestrator.renderHtmlVideoProject = originalRenderForNoAudio;
   }
 
+  projectOrchestrator.renderHtmlVideoProject = mockRenderSuccess;
+  try {
+    let disabledSfxCalls = 0;
+    const disabledSfxResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-auto-sfx-disabled',
+      runId: 'run-auto-sfx-disabled',
+      rootDir,
+      sceneSpec: sceneSpecWithNarration,
+      creativeContext: { input: { raw_text: '关闭自动音效' } },
+      target: {
+        html_video_generation_mode: 'raw_html',
+        autoSfxEnabled: false,
+      },
+      templateRegistry,
+      skipValidation: true,
+      services: {
+        aiTextModel: rawHtmlTextModel({ synopsis: '关闭自动音效', label: '关闭自动音效', text: '这段旁白会生成音频。' }),
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        ttsService: {
+          synthesizeSceneNarration: async () => ({ success: true, audio_manifest: { scenes: [] } }),
+        },
+        sfxPlannerAgent: {
+          planSfxEvents: async () => {
+            disabledSfxCalls += 1;
+            return { success: true, events: [] };
+          },
+        },
+      },
+    });
+
+    assert.equal(disabledSfxResult.success, true);
+    assert.equal(disabledSfxCalls, 0);
+    assert.equal(disabledSfxResult.project.audio.sfx.status, 'pending');
+    assert.equal(disabledSfxResult.project.audio.sfx.events.length, 0);
+  } finally {
+    projectOrchestrator.renderHtmlVideoProject = originalRenderForNoAudio;
+  }
+
+  {
+    let ttsFailureSfxCalls = 0;
+    const ttsFailureResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-sfx-after-tts-failure',
+      runId: 'run-sfx-after-tts-failure',
+      rootDir,
+      sceneSpec: sceneSpecWithNarration,
+      creativeContext: { input: { raw_text: '旁白失败不应编排音效' } },
+      target: { html_video_generation_mode: 'raw_html' },
+      templateRegistry,
+      skipValidation: true,
+      services: {
+        aiTextModel: rawHtmlTextModel({ synopsis: '旁白失败', label: '旁白失败', text: '这段不会进入渲染。' }),
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        ttsService: {
+          synthesizeSceneNarration: async () => ({ success: false, message: '旁白音频生成失败。' }),
+        },
+        sfxPlannerAgent: {
+          planSfxEvents: async () => {
+            ttsFailureSfxCalls += 1;
+            return { success: true, events: [] };
+          },
+        },
+      },
+    });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(ttsFailureResult.success, false);
+    assert.equal(ttsFailureSfxCalls, 0);
+  }
+
   const calls = [];
+  const mainSceneSpec = {
+    title: '产品发布',
+    aspect_ratio: '9:16',
+    scenes: [
+      { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: fullSceneCaption('scene_01', '旁白一', 4), visual_text: { headline: '首版标题', keywords: [], cards: [] } },
+      { id: 'scene_02', duration: 3, kind: 'text', narration_text: '旁白二', captions: fullSceneCaption('scene_02', '旁白二', 3), visual_text: { headline: '第二幕', keywords: [], cards: [] } },
+    ],
+  };
   const result = await workflow.generateHtmlVideo({
     workflowId: '202606170000000001',
     runId: 'run_001',
     rootDir,
-    sceneSpec: {
-      title: '产品发布',
-      aspect_ratio: '9:16',
-      scenes: [
-        { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: fullSceneCaption('scene_01', '旁白一', 4), visual_text: { headline: '首版标题', keywords: [], cards: [] } },
-        { id: 'scene_02', duration: 3, kind: 'text', narration_text: '旁白二', captions: fullSceneCaption('scene_02', '旁白二', 3), visual_text: { headline: '第二幕', keywords: [], cards: [] } },
-      ],
-    },
+    sceneSpec: mainSceneSpec,
     creativeContext: { input: { raw_text: '产品发布' } },
     target: { html_video_generation_mode: 'template_inputs' },
     templateRegistry,
@@ -1780,6 +1830,21 @@ async function readProjectJson(projectDir) {
               ],
               combined_path: null,
             },
+          };
+        },
+      },
+      sfxPlannerAgent: {
+        planSfxEvents: async ({ rules }) => {
+          assert.equal(rules.min_strong_gap_sec, 3);
+          calls.push('sfx');
+          return {
+            success: true,
+            events: [{
+              scene_id: 'scene_01',
+              time_sec: 0.2,
+              sfx_id: 'mixkit-whoosh-fast-transition',
+              confidence: 0.8,
+            }],
           };
         },
       },
@@ -1832,15 +1897,95 @@ async function readProjectJson(projectDir) {
   assert.equal(result.project.output.fps, 24);
   assert.equal(result.project.template_schema.properties.headline.type, 'string');
   assert.equal(result.project.audio.tts_manifest_path, 'tts/audio_manifest.json');
+  assert.equal(result.project.audio.sfx.status, 'ready');
+  assert.equal(result.project.audio.sfx.events.length, 1);
+  assert.ok(result.project.audio.sfx.events[0].asset_path);
+  assert.ok(result.project.audio.sfx.scene_spec_hash);
   assert.equal(result.output_path, path.join(result.html_video_project_path, 'exports', 'output.mp4'));
-  assert.deepEqual(calls.slice(-6), [
+  assert.deepEqual(calls.slice(-7), [
     `tts:${path.basename(result.html_video_project_path)}`,
+    'sfx',
     'render:scene_01',
     'render:scene_02',
     'concat:2',
     'audio:scene_01.mp3',
     'mux:narration-track.mp3',
   ]);
+
+  // 恢复/重试同一工程时复用已有编排：planner 不再被调用，用户删除标记（enabled:false）保留
+  {
+    const projectJsonPath = path.join(result.html_video_project_path, 'project.json');
+    const savedProject = JSON.parse(await fs.readFile(projectJsonPath, 'utf8'));
+    savedProject.audio.sfx.events[0].enabled = false;
+    await fs.writeFile(projectJsonPath, JSON.stringify(savedProject, null, 2), 'utf8');
+
+    let resumeSfxPlannerCalls = 0;
+    const resumeResult = await workflow.generateHtmlVideo({
+      workflowId: '202606170000000001',
+      runId: 'run_001',
+      rootDir,
+      sceneSpec: mainSceneSpec,
+      creativeContext: { input: { raw_text: '产品发布' } },
+      target: { html_video_generation_mode: 'template_inputs' },
+      templateRegistry,
+      services: {
+        aiTextModel: {
+          callTextModel: async ({ messages }) => {
+            const prompt = messages.map(item => item.content).join('\n');
+            if (prompt.includes('"template_id"')) {
+              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+            }
+            return { success: true, text: JSON.stringify({ headline: '首版标题' }) };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        ttsService: {
+          synthesizeSceneNarration: async ({ projectDir }) => ({
+            success: true,
+            audio_manifest: {
+              scenes: [
+                { scene_id: 'scene_01', relative_path: 'tts/scene_01.mp3' },
+                { scene_id: 'scene_02', relative_path: 'tts/scene_02.mp3' },
+              ],
+              combined_path: null,
+            },
+          }),
+        },
+        sfxPlannerAgent: {
+          planSfxEvents: async () => {
+            resumeSfxPlannerCalls += 1;
+            return { success: true, events: [] };
+          },
+        },
+        frameRenderer: {
+          renderFrame: async (frame, options) => ({
+            success: true,
+            frame_id: frame.id,
+            output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+            diagnostics: [],
+          }),
+        },
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async (frames, outputPath) => {
+            await writeFile(outputPath, 'mp4');
+            return { success: true, output_path: outputPath, strategy: 'stub' };
+          },
+          concatAudioWithFfmpeg: async (files, outputPath) => {
+            await writeFile(outputPath, 'audio');
+            return { success: true, output_path: outputPath };
+          },
+          muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: false, output_path: videoPath }),
+        },
+        visualQaService: {
+          inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+        },
+      },
+    });
+    assert.equal(resumeResult.success, true);
+    assert.equal(resumeSfxPlannerCalls, 0);
+    assert.equal(resumeResult.project.audio.sfx.status, 'ready');
+    assert.equal(resumeResult.project.audio.sfx.events[0].enabled, false);
+  }
 
   const existingAudioPath = path.join(rootDir, 'existing-narration.wav');
   const generatedAudioPath = path.join(rootDir, 'generated-narration.wav');

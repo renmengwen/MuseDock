@@ -16,6 +16,7 @@ const DEFAULT_CREATIVE_DEFAULTS = {
   lockTemplate: false,
   useResearch: true,
   generateAudio: true,
+  autoSfxEnabled: true,
   generateCaptions: true,
   emotionalVoice: false,
   sourceImageAnalysisEnabled: false,
@@ -323,6 +324,23 @@ export function CreativeDefaultsSettings({
           <span className={cn('min-w-[42px]', creativeDefaults.generateAudio !== false ? 'text-[#111827]' : 'text-[#69717e]')}>{creativeDefaults.generateAudio !== false ? '已开启' : '已关闭'}</span>
           <span>生成旁白音频</span>
         </label>
+
+        <div className="rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3">
+          <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 text-[13px] font-semibold text-[#30343b]">
+            <Switch
+              checked={creativeDefaults.autoSfxEnabled !== false}
+              disabled={disabled}
+              onChange={event => updateCreativeDefaults({ autoSfxEnabled: event.target.checked })}
+            />
+            <span className={cn('min-w-[42px]', creativeDefaults.autoSfxEnabled !== false ? 'text-[#111827]' : 'text-[#69717e]')}>
+              {creativeDefaults.autoSfxEnabled !== false ? '已开启' : '已关闭'}
+            </span>
+            <span>自动音效增强</span>
+          </label>
+          <p className="mt-2 whitespace-normal text-xs font-normal leading-relaxed text-[#69717e]">
+            生成视频时自动为文字入场、重点提示、转场、打字效果和结论强调添加短音效。关闭旁白音频后不会添加自动音效，开启后可能会略微增加生成时间。
+          </p>
+        </div>
 
         <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
           <Switch

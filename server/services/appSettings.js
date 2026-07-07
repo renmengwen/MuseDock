@@ -23,6 +23,7 @@ const DEFAULT_CONFIG = {
     lockTemplate: false,
     useResearch: true,
     generateAudio: true,
+    autoSfxEnabled: true,
     generateCaptions: true,
     emotionalVoice: false,
     sourceImageAnalysisEnabled: false,
@@ -80,6 +81,9 @@ function normalizeCreativeDefaults(input = {}) {
     generateAudio: typeof source.generateAudio === 'boolean'
       ? source.generateAudio
       : DEFAULT_CONFIG.creativeDefaults.generateAudio,
+    autoSfxEnabled: typeof source.autoSfxEnabled === 'boolean'
+      ? source.autoSfxEnabled
+      : DEFAULT_CONFIG.creativeDefaults.autoSfxEnabled,
     generateCaptions: typeof source.generateCaptions === 'boolean'
       ? source.generateCaptions
       : DEFAULT_CONFIG.creativeDefaults.generateCaptions,

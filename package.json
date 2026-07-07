@@ -66,7 +66,8 @@
       "server/**/*",
       "!server/**/*.backup",
       "frontend-dist/**/*",
-      "docs/frame/**/*"
+      "docs/frame/**/*",
+      "assets/**/*"
     ],
     "win": {
       "target": "nsis"

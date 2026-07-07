@@ -45,14 +45,17 @@ assert.match(overviewSource, /Pexels 补图/);
 assert.match(pageSource, /modelSettingsLoading=\{modelSettings\.loading\}/);
 assert.match(pageSource, /disabled=\{loadingApp \|\| savingApp \|\| modelSettings\.loading\}/);
 assert.match(creativeDefaultsSource, /生成旁白音频/);
+assert.match(creativeDefaultsSource, /自动音效增强/);
 assert.match(creativeDefaultsSource, /情绪化配音/);
 assert.match(creativeDefaultsSource, /生成字幕/);
 assert.match(creativeDefaultsSource, /来源图片多模态分析/);
 assert.match(creativeDefaultsSource, /generateAudio/);
+assert.match(creativeDefaultsSource, /autoSfxEnabled/);
 assert.match(creativeDefaultsSource, /emotionalVoice/);
 assert.match(creativeDefaultsSource, /generateCaptions/);
 assert.match(creativeDefaultsSource, /sourceImageAnalysisEnabled/);
 assert.match(creativeDefaultsSource, /sourceImageAnalysisUnavailable/);
 assert.match(creativeDefaultsSource, /disabled=\{disabled \|\| \(!sourceImageAnalysisEnabled && sourceImageAnalysisUnavailable\)\}/);
+assert.match(creativeDefaultsSource, /关闭旁白音频后不会添加自动音效/);
 
 console.log('system settings ui tests passed');

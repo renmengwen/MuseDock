@@ -11,6 +11,7 @@ import { HtmlVideoSourcePanel } from './HtmlVideoSourcePanel.jsx';
 import { NarrationPanel } from './NarrationPanel.jsx';
 import { NaturalLanguageEditBox } from './NaturalLanguageEditBox.jsx';
 import { ProjectStatusBar } from './ProjectStatusBar.jsx';
+import { SfxPanel } from './SfxPanel.jsx';
 
 const TOOL_BUTTON_CLASS = 'min-h-8 rounded-md border border-slate-700 bg-slate-800 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55';
 const PRIMARY_TOOL_BUTTON_CLASS = 'min-h-8 rounded-md border border-slate-100 bg-slate-100 px-2.5 text-xs font-bold text-slate-950 transition hover:border-white hover:bg-white disabled:cursor-not-allowed disabled:opacity-55';
@@ -114,6 +115,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
               <DropdownMenuPrimitive.Item className={MENU_ITEM_CLASS} onSelect={(event) => openPanel(event, 'layout-qa')}>布局检查</DropdownMenuPrimitive.Item>
               <DropdownMenuPrimitive.Item className={MENU_ITEM_CLASS} onSelect={(event) => openPanel(event, 'source')}>源码</DropdownMenuPrimitive.Item>
               <DropdownMenuPrimitive.Item className={MENU_ITEM_CLASS} onSelect={(event) => openPanel(event, 'exports')}>导出记录</DropdownMenuPrimitive.Item>
+              <DropdownMenuPrimitive.Item className={MENU_ITEM_CLASS} onSelect={(event) => openPanel(event, 'sfx')}>音效</DropdownMenuPrimitive.Item>
               <DropdownMenuPrimitive.Separator className="my-1 h-px bg-slate-700" />
               <DropdownMenuPrimitive.Item className={MENU_ITEM_CLASS} onSelect={() => editor.materializeProject({})}>
                 {editor.status === 'materializing' ? '正在重新生成 HTML...' : '重新生成 HTML'}
@@ -164,6 +166,18 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
             onExport={handleExport}
             onRefresh={editor.refreshExports}
             getExportPlaybackUrl={editor.getExportPlaybackUrl}
+          />
+        </DialogContent>
+      </Dialog>
+      <Dialog open={activePanel === 'sfx'} onOpenChange={(open) => { if (!open) setActivePanel(null); }}>
+        <DialogContent className={`max-h-[84vh] w-[min(560px,calc(100vw-32px))] max-w-[560px] overflow-y-auto overflow-x-hidden bg-[#f8fafc] text-[#111827] sm:max-w-[560px] ${LIGHT_SCROLLBAR_CLASS}`}>
+          <DialogHeader><DialogTitle>自动音效</DialogTitle></DialogHeader>
+          <SfxPanel
+            project={editor.project}
+            frames={frames}
+            disabled={disabled}
+            deletingSfxEventId={editor.deletingSfxEventId}
+            onDisableEvent={editor.disableSfxEvent}
           />
         </DialogContent>
       </Dialog>

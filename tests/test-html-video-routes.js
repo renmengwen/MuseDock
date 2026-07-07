@@ -89,6 +89,18 @@ async function listen(app) {
       calls.push(['patch-frame', id, frameId, payload.frame_inputs_patch?.headline]);
       return { success: true, workflow_id: id, requires_render: true, message: '帧字段已保存，需要重新渲染。' };
     },
+    patchHtmlVideoProjectSfxEvent: async (id, eventId, payload) => {
+      calls.push(['sfx', id, eventId, payload]);
+      return {
+        success: true,
+        workflow_id: id,
+        message: '音效已删除，重新导出后生效。',
+        html_video_project: { audio: { sfx: { events: [{ id: eventId, enabled: false }] } } },
+        requires_render: true,
+        requires_export: true,
+        render_scope: 'export_only',
+      };
+    },
     getHtmlVideoProjectFrameHtml: async (id, frameId, payload) => {
       calls.push(['get-frame-html', id, frameId, payload?.format || 'json']);
       return { success: true, workflow_id: id, frame_id: frameId, resolved_frame_id: 'frame_01', html: '<!doctype html><html></html>', html_path: 'frames/frame_01.html' };
@@ -248,6 +260,11 @@ async function listen(app) {
 
     assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/inputs`, { patch: { headline: '模板' } })).statusCode, 200);
     assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01`, { patch: { headline: '帧' } })).statusCode, 200);
+    const disabledSfx = await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/sfx/events/sfx_001`, { enabled: false });
+    assert.equal(disabledSfx.statusCode, 200);
+    assert.equal(disabledSfx.body.message, '音效已删除，重新导出后生效。');
+    assert.equal(disabledSfx.body.render_scope, 'export_only');
+    assert.deepEqual(calls.find(call => call[0] === 'sfx'), ['sfx', workflowId, 'sfx_001', { enabled: false }]);
     assert.equal((await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit`, { instruction: '标题更狠' })).statusCode, 200);
     const createdEditPlan = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/html-video-project/edit-plan`, {
       instruction: '全片改成财经杂志风',
@@ -373,7 +390,7 @@ async function listen(app) {
     assert.equal(invalidDiscardPlanId.statusCode, 400);
     assert.match(invalidDiscardPlanId.body.message, /编辑计划 ID 无效/);
 
-    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'edit', 'create-edit-plan', 'run-edit-plan', 'accept-edit-plan', 'discard-edit-plan', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
+    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'sfx', 'edit', 'create-edit-plan', 'run-edit-plan', 'accept-edit-plan', 'discard-edit-plan', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
     assert.deepEqual(calls.find(item => item[0] === 'create-edit-plan'), ['create-edit-plan', workflowId, '全片改成财经杂志风']);
     assert.deepEqual(calls.find(item => item[0] === 'run-edit-plan'), ['run-edit-plan', workflowId, 'edit_plan_0001', true]);
     assert.deepEqual(calls.find(item => item[0] === 'accept-edit-plan'), ['accept-edit-plan', workflowId, 'edit_plan_0001']);

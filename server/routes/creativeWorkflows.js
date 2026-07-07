@@ -229,6 +229,35 @@ router.patch('/:workflow_id/html-video-project/frames/:frame_id', async (req, re
   }
 });
 
+router.patch('/:workflow_id/html-video-project/sfx/events/:event_id', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+  const eventId = String(req.params.event_id || '').trim();
+  if (!eventId) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, message: '音效 ID 无效。' });
+  }
+
+  try {
+    const service = getService(req);
+    const result = await service.patchHtmlVideoProjectSfxEvent(workflowId, eventId, req.body || {});
+    if (!result || result.success === false) {
+      const message = getMessage(result, '删除音效失败，请重试。');
+      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, event_id: eventId, message, code: result?.code });
+    }
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      event_id: eventId,
+      message: `删除音效失败：${error.message}`,
+    });
+  }
+});
+
 router.get('/:workflow_id/html-video-project/frames/:frame_id/html', async (req, res) => {
   const validation = validateWorkflowId(req.params.workflow_id);
   if (!validation.success) {

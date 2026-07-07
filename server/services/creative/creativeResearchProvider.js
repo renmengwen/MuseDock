@@ -280,7 +280,7 @@ async function runResearchProvider({
     });
 
     if (!result.success) {
-      throw new Error(result.message || '文本模型调用失败');
+      throw new Error(result.message || '分析模型调用失败');
     }
 
     // 从响应中提取搜索结果
@@ -330,7 +330,7 @@ async function runResearchProvider({
         },
       });
       if (!finalResult.success) {
-        throw new Error(finalResult.message || '文本模型整理搜索结果失败');
+        throw new Error(finalResult.message || '分析模型整理搜索结果失败');
       }
       return {
         summary: finalResult.text || '',

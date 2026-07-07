@@ -40,6 +40,16 @@ assert.deepEqual(project.audio, {
     fade_in_sec: 0,
     fade_out_sec: 1.5,
   },
+  sfx: {
+    enabled: false,
+    source: null,
+    library_path: null,
+    events_path: null,
+    asset_dir: null,
+    status: 'pending',
+    message: '',
+    events: [],
+  },
 });
 assert.deepEqual(project.overrides, { html: { enabled: false, frames: {} }, elements: {}, transitions: {} });
 assert.deepEqual(project.revisions, []);
@@ -99,6 +109,53 @@ assert.equal(audioHashProject.audio.mix.music_volume_db, -12);
 assert.equal(audioHashProject.audio.mix.narration_volume_db, 1);
 assert.equal(audioHashProject.audio.mix.fade_in_sec, 0);
 assert.equal(audioHashProject.audio.mix.fade_out_sec, 1.5);
+
+const sfxProject = schema.normalizeProject({
+  project_id: 'sfx_project',
+  audio: {
+    sfx: {
+      enabled: true,
+      source: 'ai',
+      library_path: 'assets/sfx/library.json',
+      events_path: 'audio/sfx-events.json',
+      asset_dir: 'audio/sfx',
+      status: 'ready',
+      events: [{
+        scene_id: 'scene_01',
+        time_sec: 0.2,
+        global_time_sec: 0.2,
+        sfx_id: 'mixkit-whoosh-fast-transition',
+        label_zh: '嗖入场',
+        reason: '主标题入场',
+        intensity: 'medium',
+        volume_db: -16,
+        asset_path: 'audio/sfx/foo.wav',
+        enabled: true,
+        confidence: 0.8,
+      }],
+    },
+  },
+});
+
+assert.equal(sfxProject.audio.sfx.enabled, true);
+assert.equal(sfxProject.audio.sfx.status, 'ready');
+assert.equal(sfxProject.audio.sfx.events[0].id, 'sfx_001');
+assert.equal(sfxProject.audio.sfx.events[0].frame_id, 'scene_01');
+assert.equal(sfxProject.audio.sfx.events[0].enabled, true);
+assert.equal(sfxProject.audio.sfx.events[0].label_zh, '嗖入场');
+assert.equal(sfxProject.audio.sfx.events[0].asset_path, 'audio/sfx/foo.wav');
+
+const normalizedSfxEvent = schema.normalizeSfxEvent({
+  scene_id: 'scene_02',
+  intensity: 'loud',
+  confidence: 2,
+});
+assert.equal(normalizedSfxEvent.frame_id, 'scene_02');
+assert.equal(normalizedSfxEvent.global_time_sec, 0);
+assert.equal(normalizedSfxEvent.intensity, 'medium');
+assert.equal(normalizedSfxEvent.confidence, 1);
+assert.equal(schema.normalizeSfxEvent({ volume_db: 20 }).volume_db, -10);
+assert.equal(schema.normalizeSfxEvent({ volume_db: -99 }).volume_db, -28);
 
 {
   const checkpointProject = schema.normalizeProject({

@@ -28,6 +28,7 @@ async function run() {
     lockTemplate: false,
     useResearch: true,
     generateAudio: true,
+    autoSfxEnabled: true,
     generateCaptions: true,
     emotionalVoice: false,
     sourceImageAnalysisEnabled: false,
@@ -54,6 +55,7 @@ async function run() {
       lockTemplate: true,
       useResearch: false,
       generateAudio: false,
+      autoSfxEnabled: false,
       generateCaptions: false,
       emotionalVoice: true,
       sourceImageAnalysisEnabled: true,
@@ -79,6 +81,7 @@ async function run() {
     lockTemplate: true,
     useResearch: false,
     generateAudio: false,
+    autoSfxEnabled: false,
     generateCaptions: false,
     emotionalVoice: true,
     sourceImageAnalysisEnabled: true,
@@ -145,6 +148,9 @@ async function run() {
   assert.equal(appSettings.normalizeCreativeDefaults({ frameHtmlConcurrency: 0 }).frameHtmlConcurrency, 1);
   assert.equal(appSettings.normalizeCreativeDefaults({ frameHtmlConcurrency: 3.6 }).frameHtmlConcurrency, 4);
   assert.equal(appSettings.normalizeCreativeDefaults({ frameHtmlConcurrency: 9 }).frameHtmlConcurrency, 5);
+  assert.equal(appSettings.normalizeCreativeDefaults({}).autoSfxEnabled, true);
+  assert.equal(appSettings.normalizeCreativeDefaults({ autoSfxEnabled: false }).autoSfxEnabled, false);
+  assert.equal(appSettings.normalizeCreativeDefaults({ autoSfxEnabled: 'false' }).autoSfxEnabled, true);
 }
 
 run().then(() => {

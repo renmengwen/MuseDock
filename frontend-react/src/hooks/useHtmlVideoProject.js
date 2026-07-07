@@ -74,6 +74,7 @@ const STATUS_MESSAGES = {
   rendering: '正在渲染单帧预览...',
   exporting: '正在导出成片（合成较慢，请保持页面打开）...',
   tts: '正在重新生成旁白...',
+  sfx: '正在更新自动音效...',
   loading_source: '正在加载当前帧源码...',
   saving_source: '正在保存帧源码草稿...',
   accepting_draft: '正在接受草稿...',
@@ -101,6 +102,7 @@ export function useHtmlVideoProject({ workflowId, api }) {
   const [frameHtml, setFrameHtml] = useState('');
   const [layoutQa, setLayoutQa] = useState(null);
   const [editPlan, setEditPlan] = useState(null);
+  const [deletingSfxEventId, setDeletingSfxEventId] = useState('');
   const [dirtyRequiresRender, setDirtyRequiresRender] = useState(false);
   const mountedRef = useRef(true);
   const loadingRef = useRef(false);
@@ -455,6 +457,22 @@ export function useHtmlVideoProject({ workflowId, api }) {
     })
   ), [api, workflowId, runMutatingAction]);
 
+  const disableSfxEvent = useCallback((eventId) => {
+    const id = String(eventId || '').trim();
+    if (!id) return null;
+    setDeletingSfxEventId(id);
+    return runMutatingAction({
+      nextStatus: 'sfx',
+      loadingMessage: STATUS_MESSAGES.sfx,
+      successMessage: '音效已删除，重新导出后生效。',
+      fallbackMessage: '删除音效失败，请重试。',
+      action: () => api.patchHtmlVideoProjectSfxEvent(workflowId, id, { enabled: false }),
+      onSuccess: () => setDeletingSfxEventId(''),
+    }).finally(() => {
+      if (mountedRef.current) setDeletingSfxEventId('');
+    });
+  }, [api, workflowId, runMutatingAction]);
+
   const refreshExports = useCallback(async () => {
     if (!workflowId || !api?.listHtmlVideoProjectExports || loadingRef.current) return null;
     loadingRef.current = true;
@@ -517,6 +535,7 @@ export function useHtmlVideoProject({ workflowId, api }) {
     frameHtml,
     layoutQa,
     editPlan,
+    deletingSfxEventId,
     disabled: loading || isMutating,
     dirtyRequiresRender,
     load,
@@ -538,6 +557,7 @@ export function useHtmlVideoProject({ workflowId, api }) {
     materializeProject,
     renderFramePreview,
     regenerateNarration,
+    disableSfxEvent,
     exportProject,
     refreshExports,
     getExportPlaybackUrl,

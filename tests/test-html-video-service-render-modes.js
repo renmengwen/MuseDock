@@ -13,6 +13,7 @@ const {
   exportHtmlVideoProject,
   getHtmlVideoProjectExportFile,
   patchHtmlVideoProjectFrame,
+  patchHtmlVideoProjectSfxEvent,
 } = require('../server/services/creative/creativeWorkflows');
 
 const WORKFLOW_ID = '202606171200000001';
@@ -47,6 +48,14 @@ function createFixture() {
       { id: 'frame_01', scene_id: 'scene_01', template_id: 'simple', inputs: {}, narration_text: '旧旁白' },
       { id: 'frame_02', scene_id: 'scene_02', template_id: 'simple', inputs: {}, narration_text: '' },
     ],
+    audio: {
+      sfx: {
+        enabled: true,
+        status: 'ready',
+        events_path: 'audio/sfx-events.json',
+        events: [{ id: 'sfx_001', sfx_id: 'mixkit-whoosh-fast-transition', enabled: true }],
+      },
+    },
     edit_sessions: [{ id: 'edit_plan_0001', kind: 'edit_plan', status: 'planned' }],
     timeline: { tracks: [] },
     exports: [{ id: 'export_001', path: 'exports/output.mp4', format: 'mp4' }],
@@ -193,6 +202,17 @@ function createFixture() {
   assert.equal(clearNarration.success, true);
   assert.equal(clearNarration.html_video_project.frames[1].narration_text_user_edited, true);
 
+  const disabledSfx = await patchHtmlVideoProjectSfxEvent(WORKFLOW_ID, 'sfx_001', { enabled: false }, options);
+  assert.equal(disabledSfx.success, true);
+  assert.equal(disabledSfx.message, '音效已删除，重新导出后生效。');
+  assert.equal(disabledSfx.requires_export, true);
+  assert.equal(disabledSfx.render_scope, 'export_only');
+  assert.equal(disabledSfx.html_video_project.audio.sfx.events[0].enabled, false);
+
+  const missingSfx = await patchHtmlVideoProjectSfxEvent(WORKFLOW_ID, 'missing', { enabled: false }, options);
+  assert.equal(missingSfx.success, false);
+  assert.equal(missingSfx.code, 'SFX_EVENT_NOT_FOUND');
+
   const ttsAfterClear = await editHtmlVideoProject(WORKFLOW_ID, { type: 'tts', frame_id: 'frame_01', text: '清空后新旁白' }, {
     rootDir,
     htmlVideoServices: {
@@ -297,5 +317,5 @@ function createFixture() {
   assert.equal(partialDiscard.html_video_project.edit_sessions[0].discarded_drafts[0].draft_id, 'draft_0001');
   assert.equal(JSON.parse(fs.readFileSync(path.join(projectDir, 'project.json'), 'utf8')).edit_sessions[0].discarded_drafts[0].draft_id, 'draft_0001');
 
-  console.log('html-video service render mode tests passed');
+  console.log('html-video service render modes tests passed');
 })();

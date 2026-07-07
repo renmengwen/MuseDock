@@ -1,6 +1,6 @@
 # MuseDock
 
-MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台：把选题输入、公开来源整理、联网研究、来源图片素材、脚本与分镜、TTS 配音、HTML 帧工程、布局质检和导出放在同一个 Web GUI 里。当前阶段成片统一基于 **HyperFrames**（HTML/CSS/GSAP 帧工程）生成——不是一次性黑盒 MP4，而是可检查、可重试、可二次编辑的 HTML 视频工程。
+MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台：把选题输入、公开来源整理、联网研究、来源图片素材、脚本与分镜、TTS 配音、自动短音效、HTML 帧工程、布局质检和导出放在同一个 Web GUI 里。当前阶段成片统一基于 **HyperFrames**（HTML/CSS/GSAP 帧工程）生成——不是一次性黑盒 MP4，而是可检查、可重试、可二次编辑的 HTML 视频工程。
 
 <p align="center">
   <img src=".github/assets/musedock-creative-home.png" width="100%" alt="MuseDock 一键创作首页">
@@ -50,6 +50,7 @@ npm run dist   # 产物：dist-electron/MuseDock Setup <version>.exe
 - **一键创作闭环**：用创作方向、文本、抖音/文章/公众号/GitHub 链接创建本地任务，后台依次准备来源、研究、素材、脚本分镜、TTS、HTML 工程、渲染和巡检，全程 SSE 跟踪进度。
 - **来源可追踪**：链接来源整理成 `source_context`，文章/GitHub 图片下载成 `asset_context` 并追踪是否被镜头引用；抖音来源复用本地视频、音频和关键帧。Pexels 只作视觉补充，不当来源证据。
 - **HTML 视频工程优先**：成片由 `scene_spec`、内容图、HTML 帧、音频、时间轴、质检和导出版本组成，可在 `/editor` 改文案、拖位置、跑布局质检、AI 改帧并重新导出。
+- **自动音效增强**：生成时可按分镜、字幕和画面语义从本地 `assets/sfx` 白名单自动编排短音效，导出时由 ffmpeg 混入最终音轨；编辑器里可查看并删除单条音效，编排或混音失败会降级为无音效成片。
 - **失败可恢复**：工程阶段写入 `generation_checkpoint`，失败后复用已完成的来源/研究/素材/音频产物，从失败子阶段继续。
 - **本地优先**：任务、配置、素材、TTS、工程和导出默认存本地目录。
 
@@ -59,7 +60,7 @@ npm run dist   # 产物：dist-electron/MuseDock Setup <version>.exe
 
 ```text
 输入/来源 -> scene_spec -> content graph -> raw HTML frames
--> frame canvas contract -> Playwright render -> ffmpeg compose
+-> TTS / 自动音效 -> frame canvas contract -> Playwright render -> ffmpeg compose
 -> duration / visual QA -> exports
 ```
 
@@ -119,6 +120,7 @@ node tests/test-html-video-real-render-smoke.js
 frontend-react/   # React + Vite 前端（pages / components / api）
 server/           # Express 服务：routes / services / templates / resources / scraper
 electron/         # Electron 主进程（桌面壳，复用 server）
+assets/sfx/       # 自动音效增强使用的本地短音效白名单与素材
 data/             # 本地数据库、配置（config/）、任务和素材（media/）
 tests/            # Node assert 测试脚本
 ```

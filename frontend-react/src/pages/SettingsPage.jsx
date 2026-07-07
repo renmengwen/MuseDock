@@ -24,7 +24,10 @@ function getFailureMessage(label, result) {
 }
 
 export function SettingsPage() {
-  const [activeSection, setActiveSection] = useState('overview');
+  const [activeSection, setActiveSection] = useState(() => {
+    const section = new URLSearchParams(window.location.search).get('section');
+    return SECTIONS.some(item => item.id === section) ? section : 'overview';
+  });
   const [appSettings, setAppSettings] = useState(null);
   const [templates, setTemplates] = useState([]);
   const [systemHealth, setSystemHealth] = useState(null);

@@ -82,7 +82,7 @@ async function iterateFrameHtml({
     return fail('FRAME_HTML_NOT_AVAILABLE', '当前帧没有可迭代的 HTML 源码。');
   }
   if (!model || typeof model.callTextModel !== 'function') {
-    return fail('AI_MODEL_NOT_CONFIGURED', 'AI 文本模型未配置，无法生成当前帧草稿。');
+    return fail('AI_MODEL_NOT_CONFIGURED', 'AI 分析模型未配置，无法生成当前帧草稿。');
   }
 
   let htmlPath;

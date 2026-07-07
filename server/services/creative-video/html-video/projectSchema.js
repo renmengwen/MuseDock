@@ -4,6 +4,10 @@ const { normalizeCaptionsForFrame } = require('./captionLayer');
 const SCHEMA_VERSION = 1;
 const DEFAULT_ENGINE = 'hyperframes-playwright';
 const DEFAULT_OUTPUT_RESOLUTION = { width: 1920, height: 1080 };
+const SFX_INTENSITIES = new Set(['low', 'medium', 'high']);
+// 持久层统一钳制音效音量（spec §5.4 硬限制），编排/混音层不再各自设防
+const SFX_VOLUME_MIN_DB = -28;
+const SFX_VOLUME_MAX_DB = -10;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -60,6 +64,20 @@ function defaultAudio() {
       fade_in_sec: 0,
       fade_out_sec: 1.5,
     },
+    sfx: defaultSfx(),
+  };
+}
+
+function defaultSfx() {
+  return {
+    enabled: false,
+    source: null,
+    library_path: null,
+    events_path: null,
+    asset_dir: null,
+    status: 'pending',
+    message: '',
+    events: [],
   };
 }
 
@@ -239,6 +257,50 @@ function normalizeAudio(value) {
       ...defaults.mix,
       ...mix,
     },
+    sfx: normalizeSfx(input.sfx),
+  };
+}
+
+function normalizeSfxEvent(value, index = 0) {
+  const input = objectOrEmpty(value);
+  const sceneId = firstNonEmptyString(input.scene_id, input.sceneId);
+  const timeSec = Number(input.time_sec ?? input.timeSec);
+  const globalTimeSec = Number(input.global_time_sec ?? input.globalTimeSec);
+  const volumeDb = Number(input.volume_db ?? input.volumeDb);
+  const confidence = Number(input.confidence);
+  const intensity = firstNonEmptyString(input.intensity, 'medium');
+  return {
+    ...input,
+    id: firstNonEmptyString(input.id, `sfx_${String(index + 1).padStart(3, '0')}`),
+    scene_id: sceneId,
+    frame_id: firstNonEmptyString(input.frame_id, input.frameId, sceneId),
+    time_sec: Number.isFinite(timeSec) ? timeSec : 0,
+    global_time_sec: Number.isFinite(globalTimeSec) ? globalTimeSec : 0,
+    sfx_id: firstNonEmptyString(input.sfx_id, input.sfxId),
+    label_zh: stringField(input.label_zh),
+    reason: stringField(input.reason),
+    intensity: SFX_INTENSITIES.has(intensity) ? intensity : 'medium',
+    volume_db: Number.isFinite(volumeDb) ? Math.min(SFX_VOLUME_MAX_DB, Math.max(SFX_VOLUME_MIN_DB, volumeDb)) : -18,
+    enabled: input.enabled === false ? false : true,
+    created_by: firstNonEmptyString(input.created_by, input.createdBy, 'ai'),
+    confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
+  };
+}
+
+function normalizeSfx(value) {
+  const input = objectOrEmpty(value);
+  const defaults = defaultSfx();
+  return {
+    ...defaults,
+    ...input,
+    enabled: input.enabled === true,
+    source: input.source || defaults.source,
+    library_path: input.library_path || input.libraryPath || defaults.library_path,
+    events_path: input.events_path || input.eventsPath || defaults.events_path,
+    asset_dir: input.asset_dir || input.assetDir || defaults.asset_dir,
+    status: input.status || defaults.status,
+    message: stringField(input.message),
+    events: arrayOrEmpty(input.events).map(normalizeSfxEvent),
   };
 }
 
@@ -579,6 +641,10 @@ module.exports = {
   validateProject,
   DEFAULT_OUTPUT_RESOLUTION,
   defaultTimeline,
+  defaultSfx,
   defaultEnhancement,
+  normalizeSfxEvent,
+  SFX_VOLUME_MIN_DB,
+  SFX_VOLUME_MAX_DB,
   clone,
 };

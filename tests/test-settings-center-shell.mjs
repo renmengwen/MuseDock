@@ -16,5 +16,6 @@ assert.match(page, /系统/);
 assert.match(page, /正在加载设置中心/);
 assert.match(page, /SettingsOverview/);
 assert.match(page, /ModelSettings/);
+assert.match(page, /URLSearchParams\(window\.location\.search\)\.get\('section'\)/, 'SettingsPage should open the section named in the ?section= query param');
 
 console.log('settings center shell tests passed');

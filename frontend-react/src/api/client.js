@@ -198,6 +198,13 @@ export const api = {
       body: JSON.stringify(payload || {}),
     });
   },
+  patchHtmlVideoProjectSfxEvent(workflowId, eventId, payload) {
+    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/sfx/events/${encodeURIComponent(eventId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+  },
   getHtmlVideoProjectFrameHtml(workflowId, frameId) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/frames/${encodeURIComponent(frameId)}/html`);
   },

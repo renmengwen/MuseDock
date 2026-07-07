@@ -638,5 +638,84 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     assert.equal(composed.project.generation_checkpoint.stages.duration_verify.actual_duration_sec, 4.8);
   }
 
+  {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-sfx-fallback-'));
+    const sfxDir = path.join(projectDir, 'audio', 'sfx');
+    await fs.mkdir(sfxDir, { recursive: true });
+    await fs.writeFile(path.join(sfxDir, 'hit.wav'), 'sfx');
+    await fs.writeFile(path.join(sfxDir, 'skip.wav'), 'sfx');
+    const muxCalls = [];
+    const project = {
+      project_id: 'compose-sfx-fallback',
+      template_id: 'raw-html',
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 2 },
+      frames: [
+        { id: 'scene_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
+      ],
+      timeline: { tracks: [{ id: 'main', type: 'video', items: [{ frame_id: 'scene_01', duration_sec: 2 }] }] },
+      audio: {
+        status: 'ready',
+        narration_path: 'audio/narration.wav',
+        sfx: {
+          enabled: true,
+          status: 'ready',
+          events: [
+            { id: 'enabled', sfx_id: 'mixkit-impact-blow', asset_path: 'audio/sfx/hit.wav', global_time_sec: 0.4, volume_db: -12, confidence: 0.9 },
+            { id: 'disabled', sfx_id: 'mixkit-impact-blow', asset_path: 'audio/sfx/skip.wav', global_time_sec: 0.8, confidence: 0.9, enabled: false },
+            { id: 'missing', sfx_id: 'mixkit-impact-blow', asset_path: 'audio/sfx/gone.wav', global_time_sec: 1.2, confidence: 0.9 },
+          ],
+        },
+      },
+    };
+
+    const rendered = await projectOrchestrator.renderHtmlVideoFrames({
+      project,
+      projectDir,
+      services: {
+        frameRenderer: {
+          renderFrame: async frame => ({
+            success: true,
+            output_path: path.join(projectDir, 'frames', `${frame.id}.mp4`),
+            output_hash: `${frame.id}-hash`,
+            meta: { encoding: 'h264' },
+            diagnostics: [],
+          }),
+        },
+      },
+    });
+
+    const composed = await projectOrchestrator.composeHtmlVideoProject({
+      projectDir,
+      project: rendered.project,
+      services: {
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async (frames, outputPath) => {
+            assert.equal(frames.length, 1);
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, 'mp4');
+            return { success: true, output_path: outputPath };
+          },
+          concatAudioWithFfmpeg: async () => ({ success: true, output_path: path.join(projectDir, 'audio', 'narration.wav') }),
+          muxAudioWithFfmpeg: async options => {
+            muxCalls.push(options);
+            if (muxCalls.length === 1) return { success: false, stderr: 'sfx boom' };
+            await fs.writeFile(options.outputPath, 'mp4');
+            return { success: true, output_path: options.outputPath };
+          },
+        },
+      },
+    });
+
+    assert.equal(composed.success, true);
+    assert.equal(muxCalls.length, 2);
+    assert.equal(muxCalls[0].sfxEvents.length, 1);
+    assert.equal(muxCalls[0].sfxEvents[0].id, 'enabled');
+    assert.equal(muxCalls[0].sfxEvents[0].path, path.join(projectDir, 'audio', 'sfx', 'hit.wav'));
+    assert.deepEqual(muxCalls[1].sfxEvents, []);
+    assert.equal(composed.diagnostics.some(item => item.code === 'sfx_mix_failed' && item.severity === 'warning'), true);
+    // 素材缺失的事件被丢弃时要有 warning 诊断（spec §7.2），不能静默
+    assert.equal(composed.diagnostics.some(item => item.code === 'sfx_event_dropped' && item.severity === 'warning'), true);
+  }
+
   console.log('html-video project orchestrator tests passed');
 })();

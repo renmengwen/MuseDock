@@ -28,7 +28,7 @@ async function run() {
   });
   assert.strictEqual(missing.success, false);
   assert.strictEqual(missing.configured, false);
-  assert.match(missing.message, /文本模型未配置/);
+  assert.match(missing.message, /分析模型未配置/);
 
   await aiModelConfig.saveConfig({
     models: {
@@ -347,7 +347,7 @@ async function run() {
     fetchImpl: async () => {
       timeoutCalls += 1;
       if (timeoutCalls <= 2) {
-        const err = new Error('文本模型请求超时：0 秒内未返回结果。');
+        const err = new Error('分析模型请求超时：0 秒内未返回结果。');
         err.name = 'AbortError';
         throw err;
       }
@@ -374,7 +374,7 @@ async function run() {
     requestTimeoutMs: 50,
     fetchImpl: async () => {
       timeoutExhaustedCalls += 1;
-      const err = new Error('文本模型请求超时：0 秒内未返回结果。');
+      const err = new Error('分析模型请求超时：0 秒内未返回结果。');
       err.name = 'AbortError';
       throw err;
     },
@@ -396,7 +396,7 @@ async function run() {
       timeoutFallbackCalls += 1;
       const body = JSON.parse(options.body);
       if (timeoutFallbackCalls <= 2 && body.stream !== false) {
-        const err = new Error('文本模型请求超时：0 秒内未返回结果。');
+        const err = new Error('分析模型请求超时：0 秒内未返回结果。');
         err.name = 'AbortError';
         throw err;
       }
@@ -434,7 +434,7 @@ async function run() {
             controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'));
           },
           pull() {
-            const err = new Error('文本模型请求超时：0 秒内未返回结果。');
+            const err = new Error('分析模型请求超时：0 秒内未返回结果。');
             err.name = 'AbortError';
             throw err;
           },
@@ -503,7 +503,7 @@ async function run() {
   assert.strictEqual(networkFailed.configured, true);
   assert.strictEqual(networkFailed.model.provider, 'OpenAI');
   assert.strictEqual(networkFailed.model.model_id, 'gpt-test');
-  assert.match(networkFailed.message, /文本模型调用失败/);
+  assert.match(networkFailed.message, /分析模型调用失败/);
   assert.match(networkFailed.message, /ECONNRESET/);
   assert.match(networkFailed.message, /connect ECONNRESET/);
   assert.doesNotMatch(networkFailed.message, /sk-test/);
