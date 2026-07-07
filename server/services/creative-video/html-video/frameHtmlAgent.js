@@ -323,6 +323,8 @@ function buildFrameHtmlPrompt({
     '  - 正文/要点元素必须带 data-text-key="body"',
     '  - 不允许只把可见文案写进 canvas 或伪元素',
     '  - 字幕可由系统注入，但 HTML 不得阻挡底部字幕层',
+    '- 画面文字必须是提炼后的短文案：subtitle 放一句不超过 20 字的支撑短句；body 优先使用 scene_spec visual_text.keywords/cards 里的关键词、数据点或要点短语。',
+    '- 禁止把 narration_text 或 captions 的原句、近似原句搬进画面任何位置；旁白全文由系统注入底部字幕层，画面再复述就是内容重复。',
     '- 不要让每一帧都使用相同主布局；相邻帧必须有清晰不同的主视觉、层级或构图。',
     '- 不要只改底部 caption；主画面、数据、标题或视觉结构必须服务当前 frame content。',
     '- 不要保留与内容无关的模板导航标签，例如 Search / GitHub / Tech Forums / Docs / Issues，除非这些词就是当前内容事实。',
@@ -469,6 +471,17 @@ function expectedContentTexts(args = {}) {
   return [...new Set(values.map(item => compactText(item, 600)).filter(Boolean))];
 }
 
+// 画面内容匹配打分只用提炼素材（headline/keywords/cards/label）；
+// narration/captions 留在 expectedContentTexts 里只做模板泄漏白名单，避免奖励画面照抄旁白。
+function overlapExpectedTexts(args = {}) {
+  const scene = resolveSceneForFrame(args.sceneSpec || {}, args.node || {}, args.frameId || args.node?.id || '');
+  const values = [];
+  flattenTextValues(scene?.visual_text, values);
+  flattenTextValues(scene?.title, values);
+  flattenTextValues(args.node?.label, values);
+  return [...new Set(values.map(item => compactText(item, 600)).filter(Boolean))];
+}
+
 function primaryExpectedText(args = {}) {
   const scene = resolveSceneForFrame(args.sceneSpec || {}, args.node || {}, args.frameId || args.node?.id || '');
   return compactText(
@@ -563,7 +576,7 @@ function validateHtmlContentQuality(html, args = {}) {
   const primary = primaryExpectedText(args);
   const primaryComparable = normalizedComparableText(primary);
   if (primaryComparable && !htmlComparable.includes(primaryComparable)) {
-    const overlap = contentOverlapScore(htmlComparable, expectedTexts);
+    const overlap = contentOverlapScore(htmlComparable, overlapExpectedTexts(args));
     if (overlap < 2) {
       return {
         success: true,
@@ -646,6 +659,8 @@ function buildShortFrameHtmlPrompt({
   const title = compactText(scene.visual_text?.headline || node.label || scene.title || sceneId, 160);
   const narration = compactText(scene.narration_text || node.text || node.data || '', 420);
   const captions = compactText(scene.captions || [], 360);
+  const visualKeywords = compactText(scene.visual_text?.keywords || [], 200);
+  const visualCards = compactText(scene.visual_text?.cards || [], 240);
   const assetSummary = frameAssetReferenceSummary(node, creativeContext);
   return [
     '你是 html-video 单帧 HTML 生成器。只返回完整 HTML document，不要解释。',
@@ -653,6 +668,9 @@ function buildShortFrameHtmlPrompt({
     `scene title：${title || sceneId}`,
     `当前 scene narration：${narration || '无'}`,
     `当前 scene captions：${captions || '无'}`,
+    `画面关键词：${visualKeywords || '无'}`,
+    `画面要点卡：${visualCards || '无'}`,
+    '画面文字用提炼后的关键词、要点短语或数据点，不要照抄 narration/captions 原句；旁白全文由系统注入底部字幕层。',
     assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
     `Target resolution：${resolution.width}x${resolution.height}`,
     `必须生成 full-bleed ${resolution.width}x${resolution.height} 完整 HTML，包含 <!doctype html>、html、head、body、style。`,
@@ -685,10 +703,13 @@ function extractRawHtmlDocument(raw) {
 function buildRetryPrompt(args = {}) {
   const resolution = resolveResolution(args.target || {});
   const validationMessage = compactText(args.validationMessage || args.validation_message || '', 260);
-  const expectedTexts = expectedContentTexts(args).slice(0, 8);
+  const expectedTexts = overlapExpectedTexts(args).slice(0, 8);
   const expectedHeadline = primaryExpectedText(args);
   const scene = resolveSceneForFrame(args.sceneSpec || {}, args.node || {}, args.frameId || args.node?.id || '');
-  const frameText = compactText(args.node?.text || scene?.narration_text || '', 260);
+  // ponytail: 只有旧 scene-spec 没有 keywords/cards 时才兜底给旁白，且要求提炼后再用
+  const frameText = expectedTexts.length > 1
+    ? ''
+    : compactText(args.node?.text || scene?.narration_text || '', 260);
   const templateName = compactText(args.template?.name || args.template?.id || '', 80);
   const assetSummary = frameAssetReferenceSummary(args.node || {}, args.creativeContext || {});
   return [
@@ -697,8 +718,9 @@ function buildRetryPrompt(args = {}) {
     `目标尺寸：${resolution.width}x${resolution.height}`,
     validationMessage ? `上一次失败原因：${validationMessage}` : '',
     expectedHeadline ? `当前镜头核心标题：${expectedHeadline}` : '',
-    frameText ? `当前镜头正文：${frameText}` : '',
+    frameText ? `当前镜头正文（提炼成关键词/短语再上画面，不要整句照抄）：${frameText}` : '',
     expectedTexts.length ? `当前镜头允许使用的内容文案：${expectedTexts.join(' / ')}` : '',
+    '画面文字必须是提炼后的关键词、要点短语或数据点；禁止照抄旁白或字幕原句，旁白全文由系统注入底部字幕层。',
     assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
     templateName ? `视觉风格参考：延续模板「${templateName}」的配色、字体、形状和动效；不要保留模板默认主体文案。` : '',
     `必须包含 body data-hv-canvas data-width="${resolution.width}" data-height="${resolution.height}"。`,

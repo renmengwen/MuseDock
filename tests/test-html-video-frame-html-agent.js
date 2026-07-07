@@ -83,6 +83,8 @@ assert.match(prompt, /装饰层、遮罩、扫描线/);
 assert.match(prompt, /position:absolute/);
 assert.match(prompt, /\[object Object\]/);
 assert.match(prompt, /不要发明源素材中没有的精确事实/);
+assert.match(prompt, /visual_text\.keywords\/cards/);
+assert.match(prompt, /禁止把 narration_text 或 captions 的原句、近似原句搬进画面/);
 assert.doesNotMatch(prompt, /第三帧完整旁白不应进入当前帧 prompt/);
 assert.doesNotMatch(prompt, /布局修复要求/);
 
@@ -236,6 +238,22 @@ assert.match(retryPrompt, /animation timeline/i);
 assert.match(retryPrompt, /window\.__hvPlayAll|GSAP|@keyframes|animation/);
 assert.match(retryPrompt, /HTML skeleton|<!doctype html>/i);
 assert.doesNotMatch(retryPrompt, /Template HTML|Visual continuity lock|Source context summary/);
+assert.match(retryPrompt, /提炼成关键词\/短语再上画面/);
+assert.match(retryPrompt, /禁止照抄旁白或字幕原句/);
+
+const retryPromptWithKeywords = agent.buildRetryPrompt({
+  node: { id: 'scene_01' },
+  target: { resolution: { width: 1920, height: 1080 } },
+  sceneSpec: {
+    scenes: [{
+      id: 'scene_01',
+      visual_text: { headline: '基础版', keywords: ['价格', '对比'], cards: ['基础版 12 元'] },
+      narration_text: '价格说明的完整旁白原句',
+    }],
+  },
+});
+assert.doesNotMatch(retryPromptWithKeywords, /价格说明的完整旁白原句/);
+assert.match(retryPromptWithKeywords, /基础版 12 元/);
 
 const fenced = agent.extractHtmlDocument([
   '说明',

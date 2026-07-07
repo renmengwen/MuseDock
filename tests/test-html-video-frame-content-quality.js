@@ -92,6 +92,25 @@ function validHtml(headline, body = '正文') {
   assert.equal(softMismatch.diagnostics.some(item => item.code === 'frame_html_content_mismatch'), true);
   assert.equal(softMismatch.diagnostics.find(item => item.code === 'frame_html_content_mismatch').severity, 'warning');
 
+  // 画面照抄旁白（无 headline）不再被 narration overlap 兜底放行，必须报 content mismatch
+  let narrationCopyCalls = 0;
+  const narrationCopy = await frameHtmlAgent.generateFrameHtml({
+    ...baseArgs,
+    template: null,
+    model: {
+      callTextModel: async () => {
+        narrationCopyCalls += 1;
+        return {
+          success: true,
+          text: validHtml('完全不同的标题', '写 Card、Popover 或 Modal 时，边缘发灰通常来自 border 和 shadow 的语义冲突。'),
+        };
+      },
+    },
+  });
+  assert.equal(narrationCopy.success, true);
+  assert.equal(narrationCopyCalls, 1);
+  assert.equal(narrationCopy.diagnostics.some(item => item.code === 'frame_html_content_mismatch'), true);
+
   const failed = await frameHtmlAgent.generateFrameHtml({
     ...baseArgs,
     model: {
