@@ -74,7 +74,7 @@ npm run dist   # 产物：dist-electron/MuseDock Setup <version>.exe
 
 ## 技术栈
 
-React 19 + React Router 7 + Vite 8、Tailwind CSS + shadcn/ui；Node.js 22 + Express；SQLite/better-sqlite3 + 本地 JSON；HTML/CSS/GSAP + playwright-core（驱动系统 Chrome）+ ffmpeg/ffprobe；Electron 桌面壳；OpenAI-compatible 文本模型 + 小米 MiMo ASR/TTS。
+React 19 + React Router 7 + Vite 8、Tailwind CSS + shadcn/ui；Node.js 22 + Express；SQLite/better-sqlite3 + 本地 JSON；HTML/CSS/GSAP + playwright-core（驱动系统 Chrome）+ ffmpeg/ffprobe；Electron 桌面壳；OpenAI Responses / Anthropic Messages 分析模型 + 小米 MiMo ASR/TTS。
 
 ## 常用命令
 
@@ -112,7 +112,7 @@ npm run eval:quality -- --rescore baseline         # 不重新生成，只重新
 
 ## 重要环境变量
 
-模型、ASR/TTS、Pexels 补图这些**优先在设置中心（`/settings`）配置**，会写入本地 `data/config/`。下面这些没有界面入口，只能用环境变量控制：
+模型、ASR/TTS、Pexels 补图这些**优先在设置中心（`/settings`）配置**，会写入本地 `data/config/`。分析模型仅支持 OpenAI Responses（`/v1/responses`）和 Anthropic Messages（`/v1/messages`）协议；OpenAI-compatible Chat Completions 网关不再作为分析模型入口。下面这些没有界面入口，只能用环境变量控制：
 
 | 变量 | 说明 | 默认值 |
 | --- | --- | --- |

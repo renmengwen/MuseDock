@@ -1,4 +1,4 @@
-const aiModelConfig = require('./aiModelConfig');
+﻿const aiModelConfig = require('./aiModelConfig');
 
 function normalizeBaseUrl(value) {
   return typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
@@ -155,11 +155,21 @@ function sanitizeRawResponse(value, apiKey) {
   return value;
 }
 
-function toModelInfo(provider, modelId) {
+function toModelInfo(provider, modelId, protocol) {
   return {
     provider,
     model_id: modelId,
+    protocol,
   };
+}
+
+function attachNormalizedToolCalls(rawResponse) {
+  if (!rawResponse || typeof rawResponse !== 'object') return rawResponse;
+  const normalized = normalizeToolCalls(rawResponse);
+  if (normalized.length > 0) {
+    rawResponse.normalized_tool_calls = normalized;
+  }
+  return rawResponse;
 }
 
 function extractContentText(value) {
@@ -195,6 +205,8 @@ function extractResponseText(rawResponse) {
   if (typeof chatText === 'string') return chatText;
   const outputText = extractContentText(rawResponse?.output_text);
   if (typeof outputText === 'string') return outputText;
+  const contentText = extractContentText(rawResponse?.content);
+  if (typeof contentText === 'string') return contentText;
   return extractOutputArrayText(rawResponse?.output);
 }
 
@@ -231,15 +243,227 @@ function shouldRetryStatus(status) {
   return [502, 503, 504].includes(Number(status));
 }
 
-function buildChatCompletionsBody({ modelId, messages, temperature, stream, tools, tool_choice, response_format }) {
+function normalizeProtocol(value) {
+  return aiModelConfig.MODEL_PROTOCOLS?.includes(value) ? value : aiModelConfig.DEFAULT_MODEL_PROTOCOL || 'openai-responses';
+}
+
+function parseDataUrl(value) {
+  const match = normalizeString(value).match(/^data:([^;,]+);base64,(.+)$/);
+  return match ? { mediaType: match[1], data: match[2] } : null;
+}
+
+function parseMaybeJson(value) {
+  try {
+    return JSON.parse(value || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function normalizeToolCalls(rawResponse = {}) {
+  const calls = [];
+  const chatCalls = rawResponse?.choices?.[0]?.message?.tool_calls;
+  if (Array.isArray(chatCalls)) calls.push(...chatCalls);
+
+  if (Array.isArray(rawResponse?.output)) {
+    for (const item of rawResponse.output) {
+      if (item?.type !== 'function_call') continue;
+      calls.push({
+        id: item.call_id || item.id || '',
+        type: 'function',
+        function: {
+          name: item.name || '',
+          arguments: typeof item.arguments === 'string' ? item.arguments : JSON.stringify(item.arguments || {}),
+        },
+      });
+    }
+  }
+
+  if (Array.isArray(rawResponse?.content)) {
+    for (const item of rawResponse.content) {
+      if (item?.type !== 'tool_use') continue;
+      calls.push({
+        id: item.id || '',
+        type: 'function',
+        function: {
+          name: item.name || '',
+          arguments: JSON.stringify(item.input || {}),
+        },
+      });
+    }
+  }
+
+  return calls.filter(call => call?.function?.name);
+}
+
+function normalizeToolsForOpenAi(tools) {
+  if (!Array.isArray(tools) || tools.length === 0) return undefined;
+  return tools.map(tool => {
+    if (tool?.type === 'function' && tool.function) {
+      return {
+        type: 'function',
+        name: tool.function.name,
+        description: tool.function.description || '',
+        parameters: tool.function.parameters || {},
+      };
+    }
+    return tool;
+  });
+}
+
+function normalizeToolsForAnthropic(tools) {
+  if (!Array.isArray(tools) || tools.length === 0) return undefined;
+  return tools.map(tool => {
+    const fn = tool?.type === 'function' ? tool.function : tool;
+    return {
+      name: fn?.name || '',
+      description: fn?.description || '',
+      input_schema: fn?.parameters || fn?.input_schema || { type: 'object' },
+    };
+  }).filter(tool => tool.name);
+}
+
+function contentToText(value) {
+  const text = extractContentText(value);
+  return typeof text === 'string' ? text : '';
+}
+
+function toOpenAiContent(content, role) {
+  if (typeof content === 'string') {
+    return [{ type: role === 'assistant' ? 'output_text' : 'input_text', text: content }];
+  }
+  if (!Array.isArray(content)) return [];
+  return content.map(item => {
+    if (typeof item === 'string') return { type: role === 'assistant' ? 'output_text' : 'input_text', text: item };
+    if (item?.type === 'text') return { type: role === 'assistant' ? 'output_text' : 'input_text', text: item.text || '' };
+    if (item?.type === 'image_url') return { type: 'input_image', image_url: item.image_url?.url || '' };
+    return item;
+  }).filter(item => item.type !== 'input_image' || item.image_url);
+}
+
+function toOpenAiInput(messages = []) {
+  const input = [];
+  const instructions = [];
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    if (message.role === 'system') {
+      const text = contentToText(message.content);
+      if (text) instructions.push(text);
+      continue;
+    }
+    if (message.role === 'tool') {
+      input.push({
+        type: 'function_call_output',
+        call_id: message.tool_call_id || message.id || '',
+        output: typeof message.content === 'string' ? message.content : JSON.stringify(message.content || ''),
+      });
+      continue;
+    }
+    const role = message.role === 'assistant' ? 'assistant' : 'user';
+    const content = toOpenAiContent(message.content, role);
+    if (content.length) input.push({ role, content });
+    if (Array.isArray(message.tool_calls)) {
+      for (const toolCall of message.tool_calls) {
+        input.push({
+          type: 'function_call',
+          call_id: toolCall.id || '',
+          name: toolCall.function?.name || '',
+          arguments: toolCall.function?.arguments || '{}',
+        });
+      }
+    }
+  }
+  return { input, instructions: instructions.join('\n\n') };
+}
+
+function toAnthropicContent(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map(item => {
+    if (typeof item === 'string') return { type: 'text', text: item };
+    if (item?.type === 'text') return { type: 'text', text: item.text || '' };
+    if (item?.type === 'image_url') {
+      const dataUrl = parseDataUrl(item.image_url?.url);
+      if (dataUrl) {
+        return {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: dataUrl.mediaType,
+            data: dataUrl.data,
+          },
+        };
+      }
+      return { type: 'text', text: item.image_url?.url || '' };
+    }
+    return item;
+  });
+}
+
+function toAnthropicMessages(messages = [], response_format) {
+  const result = [];
+  const system = [];
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    if (message.role === 'system') {
+      const text = contentToText(message.content);
+      if (text) system.push(text);
+      continue;
+    }
+    if (message.role === 'tool') {
+      result.push({
+        role: 'user',
+        content: [{
+          type: 'tool_result',
+          tool_use_id: message.tool_call_id || message.id || '',
+          content: typeof message.content === 'string' ? message.content : JSON.stringify(message.content || ''),
+        }],
+      });
+      continue;
+    }
+    const role = message.role === 'assistant' ? 'assistant' : 'user';
+    const content = toAnthropicContent(message.content);
+    const normalizedContent = Array.isArray(content) ? content : (content ? [{ type: 'text', text: content }] : []);
+    if (Array.isArray(message.tool_calls)) {
+      for (const toolCall of message.tool_calls) {
+        normalizedContent.push({
+          type: 'tool_use',
+          id: toolCall.id || '',
+          name: toolCall.function?.name || '',
+          input: parseMaybeJson(toolCall.function?.arguments),
+        });
+      }
+    }
+    if (normalizedContent.length) result.push({ role, content: normalizedContent });
+  }
+  if (response_format?.type === 'json_object') {
+    system.push('请只输出有效 JSON，不要包含 Markdown 代码围栏或额外说明。');
+  }
+  return { messages: result, system: system.join('\n\n') };
+}
+
+function buildOpenAiResponsesBody({ modelId, messages, temperature, tools, tool_choice, response_format }) {
+  const { input, instructions } = toOpenAiInput(messages);
   return JSON.stringify({
     model: modelId,
-    messages,
+    input,
+    ...(instructions ? { instructions } : {}),
     temperature,
-    ...(stream ? { stream: true } : {}),
-    ...(tools ? { tools } : {}),
+    ...(tools ? { tools: normalizeToolsForOpenAi(tools) } : {}),
     ...(tool_choice ? { tool_choice } : {}),
-    ...(response_format ? { response_format } : {}),
+    ...(response_format ? { text: { format: response_format } } : {}),
+  });
+}
+
+function buildAnthropicMessagesBody({ modelId, messages, temperature, tools, response_format, maxTokens }) {
+  const mapped = toAnthropicMessages(messages, response_format);
+  return JSON.stringify({
+    model: modelId,
+    max_tokens: Math.max(1, Number(maxTokens) || 4096),
+    messages: mapped.messages,
+    ...(mapped.system ? { system: mapped.system } : {}),
+    ...(Number.isFinite(Number(temperature)) ? { temperature } : {}),
+    ...(tools ? { tools: normalizeToolsForAnthropic(tools) } : {}),
   });
 }
 
@@ -268,16 +492,24 @@ function getAbortErrorMessage(error, timeoutMs) {
   return `分析模型请求超时：${Math.round(Number(timeoutMs) / 1000)} 秒内未返回结果。`;
 }
 
-async function postChatCompletions({ baseUrl, apiKey, modelId, messages, temperature, stream, fetchImpl, timeoutMs, tools, tool_choice, response_format }) {
+async function postModelRequest({ protocol, baseUrl, apiKey, modelId, messages, temperature, fetchImpl, timeoutMs, tools, tool_choice, response_format, maxTokens }) {
   const timeout = createTimeoutSignal(timeoutMs);
+  const resolvedProtocol = normalizeProtocol(protocol);
+  const isAnthropic = resolvedProtocol === 'anthropic-messages';
   try {
-    const response = await fetchImpl(`${baseUrl}/chat/completions`, {
+    const response = await fetchImpl(`${baseUrl}${isAnthropic ? '/messages' : '/responses'}`, {
       method: 'POST',
-      headers: {
+      headers: isAnthropic ? {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      } : {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: buildChatCompletionsBody({ modelId, messages, temperature, stream, tools, tool_choice, response_format }),
+      body: isAnthropic
+        ? buildAnthropicMessagesBody({ modelId, messages, temperature, tools, response_format, maxTokens })
+        : buildOpenAiResponsesBody({ modelId, messages, temperature, tools, tool_choice, response_format }),
       signal: timeout.signal,
     });
     if (response && typeof response === 'object') {
@@ -345,12 +577,14 @@ async function callTextModel(options = {}) {
     tools,
     tool_choice,
     response_format,
+    maxTokens,
   } = options;
 
   const log = logger && typeof logger === 'object' ? logger : null;
 
   const config = textConfig || await aiModelConfig.getRuntimeConfig('text', { configPath });
   const provider = normalizeString(config && config.provider);
+  const protocol = normalizeProtocol(config && config.protocol);
   const apiKey = normalizeString(config && config.apiKey);
   const baseUrl = normalizeBaseUrl(config && config.baseUrl);
   const modelId = normalizeString(config && config.modelId);
@@ -368,12 +602,13 @@ async function callTextModel(options = {}) {
       success: false,
       configured: true,
       message: '分析模型请求失败：当前运行环境缺少 fetch 实现。',
-      model: toModelInfo(provider, modelId),
+      model: toModelInfo(provider, modelId, protocol),
     };
   }
 
   const totalMessageChars = messages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
-  const requestLabel = `[AI] ${provider}/${modelId} stream=${stream} msgs=${messages.length} chars=${totalMessageChars} timeout=${Math.round(requestTimeoutMs / 1000)}s`;
+  const effectiveStream = false;
+  const requestLabel = `[AI] ${provider}/${modelId} protocol=${protocol} stream=${effectiveStream} msgs=${messages.length} chars=${totalMessageChars} timeout=${Math.round(requestTimeoutMs / 1000)}s`;
   if (log) log.info(`${requestLabel} — 开始请求`);
 
   let response;
@@ -383,18 +618,19 @@ async function callTextModel(options = {}) {
   const t0 = Date.now();
   while (attempt <= retryLimit) {
     try {
-      response = await postChatCompletions({
+      response = await postModelRequest({
+        protocol,
         baseUrl,
         apiKey,
         modelId,
         messages,
         temperature,
-        stream,
         fetchImpl,
         timeoutMs: requestTimeoutMs,
         tools,
         tool_choice,
         response_format,
+        maxTokens,
       });
       lastFetchError = null;
     } catch (error) {
@@ -423,7 +659,7 @@ async function callTextModel(options = {}) {
           success: false,
           configured: true,
           message: `分析模型调用失败：${detail}`,
-          model: toModelInfo(provider, modelId),
+          model: toModelInfo(provider, modelId, protocol),
         };
       }
       // All retries exhausted on timeout — break to try fallback below
@@ -438,25 +674,26 @@ async function callTextModel(options = {}) {
   }
 
   const timedOut = isAbortLikeError(lastFetchError);
-  const canFallbackToNonStream = stream && fallbackToNonStreamOnGatewayTimeout
+  const canFallbackToNonStream = effectiveStream && fallbackToNonStreamOnGatewayTimeout
     && (shouldRetryStatus(response?.status) || timedOut);
   if (canFallbackToNonStream) {
     if (log) log.warn(`${requestLabel} — 流式请求失败${timedOut ? '(超时)' : '(HTTP ' + response?.status + ')'}，降级为非流式重试`);
     if (response) cleanupResponseTimeout(response);
     await wait(retryDelayMs * (attempt + 1));
     try {
-      response = await postChatCompletions({
+      response = await postModelRequest({
+        protocol,
         baseUrl,
         apiKey,
         modelId,
         messages,
         temperature,
-        stream: false,
         fetchImpl,
         timeoutMs: requestTimeoutMs,
         tools,
         tool_choice,
         response_format,
+        maxTokens,
       });
     } catch (error) {
       const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
@@ -464,7 +701,7 @@ async function callTextModel(options = {}) {
         success: false,
         configured: true,
         message: `分析模型调用失败：${detail}`,
-        model: toModelInfo(provider, modelId),
+        model: toModelInfo(provider, modelId, protocol),
         fallback: {
           from_stream: true,
           reason: timedOut ? 'stream_timeout' : 'gateway_timeout',
@@ -474,14 +711,14 @@ async function callTextModel(options = {}) {
     if (response.ok) {
       const parsedResponse = await readJsonResponse(response, apiKey);
       cleanupResponseTimeout(response);
-      const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
+      const rawResponse = attachNormalizedToolCalls(sanitizeRawResponse(parsedResponse.data, apiKey));
       const text = extractResponseText(rawResponse);
       if (typeof text === 'string') {
         return {
           success: true,
           configured: true,
           text,
-          model: toModelInfo(provider, modelId),
+          model: toModelInfo(provider, modelId, protocol),
           raw_response: rawResponse,
           usage: extractUsage(rawResponse),
           fallback: {
@@ -501,14 +738,14 @@ async function callTextModel(options = {}) {
       success: false,
       configured: true,
       message: `分析模型调用失败：${detail}`,
-      model: toModelInfo(provider, modelId),
+      model: toModelInfo(provider, modelId, protocol),
     };
   }
 
   if (!response.ok) {
     const parsedResponse = await readJsonResponse(response, apiKey);
     cleanupResponseTimeout(response);
-    const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
+    const rawResponse = attachNormalizedToolCalls(sanitizeRawResponse(parsedResponse.data, apiKey));
     const detail = sanitizeErrorDetail(getProviderError(rawResponse), apiKey)
       || sanitizeErrorDetail(parsedResponse.rawText, apiKey).slice(0, 500)
       || `HTTP ${response.status}`;
@@ -516,12 +753,12 @@ async function callTextModel(options = {}) {
       success: false,
       configured: true,
       message: `${provider || '分析模型'} 调用失败：${detail}`,
-      model: toModelInfo(provider, modelId),
+      model: toModelInfo(provider, modelId, protocol),
       raw_response: rawResponse,
     };
   }
 
-  if (stream) {
+  if (effectiveStream) {
     let streamResult;
     try {
       streamResult = await readStreamResponse(response, apiKey, {
@@ -532,30 +769,31 @@ async function callTextModel(options = {}) {
       if (fallbackToNonStreamOnGatewayTimeout && isAbortLikeError(error)) {
         if (log) log.warn(`${requestLabel} — 流式响应读取超时，降级为非流式重试`);
         try {
-          const fallbackResponse = await postChatCompletions({
+          const fallbackResponse = await postModelRequest({
+            protocol,
             baseUrl,
             apiKey,
             modelId,
             messages,
             temperature,
-            stream: false,
             fetchImpl,
             timeoutMs: requestTimeoutMs,
             tools,
             tool_choice,
             response_format,
+            maxTokens,
           });
           if (fallbackResponse.ok) {
             const parsedResponse = await readJsonResponse(fallbackResponse, apiKey);
             cleanupResponseTimeout(fallbackResponse);
-            const rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
+            const rawResponse = attachNormalizedToolCalls(sanitizeRawResponse(parsedResponse.data, apiKey));
             const text = extractResponseText(rawResponse);
             if (typeof text === 'string') {
               return {
                 success: true,
                 configured: true,
                 text,
-                model: toModelInfo(provider, modelId),
+                model: toModelInfo(provider, modelId, protocol),
                 raw_response: rawResponse,
                 usage: extractUsage(rawResponse),
                 fallback: {
@@ -573,7 +811,7 @@ async function callTextModel(options = {}) {
             success: false,
             configured: true,
             message: `分析模型调用失败：${detail}`,
-            model: toModelInfo(provider, modelId),
+            model: toModelInfo(provider, modelId, protocol),
             fallback: {
               from_stream: true,
               reason: 'stream_timeout',
@@ -588,7 +826,7 @@ async function callTextModel(options = {}) {
         success: false,
         configured: true,
         message: `${provider || '分析模型'} 流式响应读取失败：${detail}`,
-        model: toModelInfo(provider, modelId),
+        model: toModelInfo(provider, modelId, protocol),
       };
     }
     cleanupResponseTimeout(response);
@@ -597,7 +835,7 @@ async function callTextModel(options = {}) {
         success: false,
         configured: true,
         message: `${provider || '分析模型'} 流式响应解析失败：${getProviderError(streamResult.raw_response) || '响应格式无效'}`,
-        model: toModelInfo(provider, modelId),
+        model: toModelInfo(provider, modelId, protocol),
         raw_response: streamResult.raw_response,
       };
     }
@@ -606,7 +844,7 @@ async function callTextModel(options = {}) {
         success: false,
         configured: true,
         message: `${provider || '分析模型'} 流式返回结果缺少文本内容。`,
-        model: toModelInfo(provider, modelId),
+        model: toModelInfo(provider, modelId, protocol),
         raw_response: streamResult.raw_response,
       };
     }
@@ -616,7 +854,7 @@ async function callTextModel(options = {}) {
       success: true,
       configured: true,
       text: streamResult.text,
-      model: toModelInfo(provider, modelId),
+      model: toModelInfo(provider, modelId, protocol),
       raw_response: streamResult.raw_response,
       usage: extractUsage(streamResult.raw_response),
     };
@@ -624,14 +862,14 @@ async function callTextModel(options = {}) {
 
   const parsedResponse = await readJsonResponse(response, apiKey);
   cleanupResponseTimeout(response);
-  let rawResponse = sanitizeRawResponse(parsedResponse.data, apiKey);
+  let rawResponse = attachNormalizedToolCalls(sanitizeRawResponse(parsedResponse.data, apiKey));
 
   if (parsedResponse.parseError && parsedResponse.rawText) {
     return {
       success: false,
       configured: true,
-      message: `${provider || '分析模型'} 返回了非 JSON 响应，请检查 Base URL 是否指向兼容接口地址。`,
-      model: toModelInfo(provider, modelId),
+      message: `${provider || '分析模型'} 返回了非 JSON 响应，请检查 Base URL 是否指向所选协议地址。`,
+      model: toModelInfo(provider, modelId, protocol),
       raw_response: {
         content_type: parsedResponse.contentType,
         parse_error: sanitizeErrorDetail(parsedResponse.parseError, apiKey),
@@ -647,18 +885,19 @@ async function callTextModel(options = {}) {
     await wait(retryDelayMs * (missingTextRetry + 1));
     let retryResponse;
     try {
-      retryResponse = await postChatCompletions({
+      retryResponse = await postModelRequest({
+        protocol,
         baseUrl,
         apiKey,
         modelId,
         messages,
         temperature,
-        stream: false,
         fetchImpl,
         timeoutMs: requestTimeoutMs,
         tools,
         tool_choice,
         response_format,
+        maxTokens,
       });
     } catch (error) {
       const detail = getFetchErrorDetail(error, apiKey) || '网络请求异常';
@@ -666,18 +905,18 @@ async function callTextModel(options = {}) {
         success: false,
         configured: true,
         message: `分析模型调用失败：${detail}`,
-        model: toModelInfo(provider, modelId),
+        model: toModelInfo(provider, modelId, protocol),
       };
     }
     if (!retryResponse.ok) {
       const retryParsed = await readJsonResponse(retryResponse, apiKey);
       cleanupResponseTimeout(retryResponse);
-      rawResponse = sanitizeRawResponse(retryParsed.data, apiKey);
+      rawResponse = attachNormalizedToolCalls(sanitizeRawResponse(retryParsed.data, apiKey));
       break;
     }
     const retryParsed = await readJsonResponse(retryResponse, apiKey);
     cleanupResponseTimeout(retryResponse);
-    rawResponse = sanitizeRawResponse(retryParsed.data, apiKey);
+    rawResponse = attachNormalizedToolCalls(sanitizeRawResponse(retryParsed.data, apiKey));
     text = extractResponseText(rawResponse);
   }
 
@@ -686,7 +925,7 @@ async function callTextModel(options = {}) {
       success: false,
       configured: true,
       message: `${provider || '分析模型'} 返回结果缺少文本内容。`,
-      model: toModelInfo(provider, modelId),
+      model: toModelInfo(provider, modelId, protocol),
       raw_response: rawResponse,
     };
   }
@@ -697,7 +936,7 @@ async function callTextModel(options = {}) {
     success: true,
     configured: true,
     text,
-    model: toModelInfo(provider, modelId),
+    model: toModelInfo(provider, modelId, protocol),
     raw_response: rawResponse,
     usage: extractUsage(rawResponse),
   };

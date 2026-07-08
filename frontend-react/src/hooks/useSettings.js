@@ -11,6 +11,11 @@ const MODEL_TYPE_INFO = {
   tts:        { title: 'TTS 语音合成', placeholder: 'mimo-v2.5-tts' },
 };
 
+const MODEL_PROTOCOLS = [
+  { id: 'openai-responses', label: 'OpenAI Responses（/v1/responses）' },
+  { id: 'anthropic-messages', label: 'Anthropic Messages（/v1/messages）' },
+];
+
 function normalizeServerData(json) {
   const providers = {};
   const raw = json.providers || {};
@@ -30,6 +35,7 @@ function normalizeServerData(json) {
     providers[id] = {
       id,
       name: p.name || id,
+      protocol: p.protocol || 'openai-responses',
       apiKey: '',
       apiKeyMasked: p.apiKeyMasked || '',
       hasApiKey: !!p.hasApiKey,
@@ -61,6 +67,7 @@ function toServerPayload(state) {
     }
     providers[id] = {
       name: p.name || id,
+      protocol: p.protocol || 'openai-responses',
       apiKey: p.apiKey || '',
       baseUrl: p.baseUrl || '',
       models,
@@ -169,5 +176,6 @@ export function useSettings() {
     saveProvider, removeProvider,
     setActive, setSkipValidation,
     MODEL_TYPES, MODEL_TYPE_INFO,
+    MODEL_PROTOCOLS,
   };
 }

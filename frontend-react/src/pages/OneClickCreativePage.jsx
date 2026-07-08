@@ -522,6 +522,41 @@ export function OneClickCreativePage() {
     }
   }, [persistTasks]);
 
+  const refreshWorkflowSnapshot = useCallback(async ({ workflowId: nextWorkflowId, taskId: expectedTaskId = '', message: fallbackMessage = '' } = {}) => {
+    const targetWorkflowId = String(nextWorkflowId || '').trim();
+    if (!targetWorkflowId) return;
+    const expectedGeneration = streamGenerationRef.current;
+    try {
+      const json = await api.getCreativeWorkflow(targetWorkflowId);
+      const currentWorkflowId = currentWorkflowRef.current.routeWorkflowId
+        || currentWorkflowRef.current.workflowId
+        || currentWorkflowRef.current.selectedWorkflowId;
+      const activeTaskMatches = activeTaskRef.current?.workflow_id === targetWorkflowId
+        && (!expectedTaskId || activeTaskRef.current?.task_id === expectedTaskId);
+      if (currentWorkflowId !== targetWorkflowId && !activeTaskMatches) return;
+      if (streamGenerationRef.current !== expectedGeneration && !activeTaskMatches) return;
+
+      const nextWorkflow = getWorkflowPayload(json);
+      const nextStatus = nextWorkflow?.status || (json?.success === false ? 'failed' : 'running');
+      const nextMessage = getWorkflowDisplayMessage(nextWorkflow, json?.message || fallbackMessage);
+      setWorkflow(nextWorkflow);
+      setStatus(nextStatus === 'done' ? 'done' : nextStatus === 'failed' ? 'failed' : 'polling');
+      setMessage(nextMessage);
+      persistTasks(prev => updateTask(prev, {
+        workflow_id: targetWorkflowId,
+        title: getTaskDisplayTitle(nextWorkflow, nextWorkflow?.creative_context?.input?.raw_text, prev.find(task => task.workflow_id === targetWorkflowId)?.title),
+        input: prev.find(task => task.workflow_id === targetWorkflowId)?.input || nextWorkflow?.creative_context?.input?.raw_text || '',
+        status: nextStatus,
+        message: nextMessage,
+        workflow: nextWorkflow,
+        created_at: prev.find(task => task.workflow_id === targetWorkflowId)?.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }));
+    } catch {
+      if (fallbackMessage) setMessage(fallbackMessage);
+    }
+  }, [persistTasks]);
+
   const applyTaskEvent = useCallback((event) => {
     if (!event) return;
     const currentWorkflowId = currentWorkflowRef.current.routeWorkflowId
@@ -557,6 +592,13 @@ export function OneClickCreativePage() {
     });
     if (event.type === 'stage_progress' || event.type?.startsWith('html_video_')) {
       setStatus('polling');
+    }
+    if (event.type === 'stage_done' && ['assets', 'project'].includes(event.stage)) {
+      refreshWorkflowSnapshot({
+        workflowId: event.workflow_id,
+        taskId: event.task_id,
+        message: event.message,
+      });
     }
     if (event.type === 'task_failed') {
       setRetrying(false);
@@ -626,7 +668,7 @@ export function OneClickCreativePage() {
         navigate('/creative');
       }
     }
-  }, [fetchFinalWorkflow, appendProgressEvent, navigate, persistTasks, stopTaskStream]);
+  }, [fetchFinalWorkflow, refreshWorkflowSnapshot, appendProgressEvent, navigate, persistTasks, stopTaskStream]);
 
   useEffect(() => {
     currentWorkflowRef.current = { routeWorkflowId, workflowId, selectedWorkflowId };
@@ -983,7 +1025,7 @@ export function OneClickCreativePage() {
 
     async function pollWorkflow() {
       // SSE 已连接时由事件流驱动状态；轮询仅作为断线兜底，避免与 SSE 双写打架。
-      if (activeStreamRef.current) return;
+      if (activeStreamRef.current && workflow?.workflow_id === workflowId) return;
       try {
         const json = await api.getCreativeWorkflow(workflowId);
         if (cancelled) return;
@@ -1047,7 +1089,7 @@ export function OneClickCreativePage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [status, workflowId, persistTasks, stopTaskStream, subscribeTaskEvents]);
+  }, [status, workflowId, workflow?.workflow_id, persistTasks, stopTaskStream, subscribeTaskEvents]);
 
   useEffect(() => {
     const targetWorkflowId = String(workflow?.workflow_id || selectedWorkflowId || workflowId || '').trim();

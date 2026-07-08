@@ -24,11 +24,21 @@ function emptyProvider(id, modelTypes) {
       models[type].ttsQueueIntervalMs = 1800;
     }
   }
-  return { id, name: '', apiKey: '', baseUrl: '', models };
+  return { id, name: '', protocol: 'openai-responses', apiKey: '', baseUrl: '', models };
 }
 
-function ProviderDetail({ provider, modelTypes, modelTypeInfo, onUpdate, onUpdateModel }) {
+function protocolLabel(provider, modelProtocols) {
+  return modelProtocols.find(item => item.id === provider.protocol)?.label || 'OpenAI Responses（/v1/responses）';
+}
+
+function ProviderDetail({ provider, modelTypes, modelTypeInfo, modelProtocols = [], onUpdate, onUpdateModel }) {
   const p = provider;
+  const setProtocol = (protocol) => {
+    onUpdate('protocol', protocol);
+    if (!p.baseUrl) {
+      onUpdate('baseUrl', protocol === 'anthropic-messages' ? 'https://api.anthropic.com/v1' : 'https://api.openai.com/v1');
+    }
+  };
   return (
     <div className="grid gap-4">
       <div className="grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
@@ -40,6 +50,18 @@ function ProviderDetail({ provider, modelTypes, modelTypeInfo, onUpdate, onUpdat
             onChange={e => onUpdate('name', e.target.value)}
             placeholder="供应商名称"
           />
+        </label>
+        <label className="grid gap-1.5">
+          <span className="text-xs font-semibold text-[#5f6876]">分析模型协议</span>
+          <select
+            className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15"
+            value={p.protocol || 'openai-responses'}
+            onChange={e => setProtocol(e.target.value)}
+          >
+            {modelProtocols.map(protocol => (
+              <option key={protocol.id} value={protocol.id}>{protocol.label}</option>
+            ))}
+          </select>
         </label>
         <label className="grid gap-1.5">
           <span className="text-xs font-semibold text-[#5f6876]">Base URL</span>
@@ -62,6 +84,7 @@ function ProviderDetail({ provider, modelTypes, modelTypeInfo, onUpdate, onUpdat
           />
         </label>
       </div>
+      <p className="m-0 text-xs font-semibold text-[#69717e]">协议仅影响分析模型；ASR、TTS 等语音接口仍按各自供应商配置调用。</p>
 
       <div className="grid grid-cols-2 gap-3 max-[1100px]:grid-cols-1">
         {modelTypes.map(type => (
@@ -78,7 +101,7 @@ function ProviderDetail({ provider, modelTypes, modelTypeInfo, onUpdate, onUpdat
   );
 }
 
-export function ProviderList({ providerList, modelTypes, modelTypeInfo, onSaveProvider, onRemove }) {
+export function ProviderList({ providerList, modelTypes, modelTypeInfo, modelProtocols = [], onSaveProvider, onRemove }) {
   const [draft, setDraft] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [toast, setToast] = useState('');
@@ -147,7 +170,7 @@ export function ProviderList({ providerList, modelTypes, modelTypeInfo, onSavePr
               <div className="min-w-0">
                 <strong className="block overflow-hidden text-ellipsis whitespace-nowrap text-sm text-[#30343b]">{p.name || p.id}</strong>
                 <span className="mt-1 block overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-[#69717e]">
-                  {enabledModelSummary(p, modelTypes, modelTypeInfo)}
+                  {protocolLabel(p, modelProtocols)} · {enabledModelSummary(p, modelTypes, modelTypeInfo)}
                 </span>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -186,6 +209,7 @@ export function ProviderList({ providerList, modelTypes, modelTypeInfo, onSavePr
               provider={draft}
               modelTypes={modelTypes}
               modelTypeInfo={modelTypeInfo}
+              modelProtocols={modelProtocols}
               onUpdate={(field, value) => setDraft(prev => ({ ...prev, [field]: value }))}
               onUpdateModel={(type, field, value) => setDraft(prev => ({
                 ...prev,

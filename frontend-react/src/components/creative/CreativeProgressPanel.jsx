@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { STAGE_LABELS, getWorkflowStatusText, normalizeWorkflowStages } from './creativeDisplay.js';
+import { normalizeWorkflowStages } from './creativeDisplay.js';
 import {
-  formatWorkflowDurationLabel,
   normalizeWorkflowProgress,
   summarizeProgressEvent,
 } from './creativeProgress.js';
@@ -35,10 +34,8 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
   const stageId = workflow.status === 'failed'
     ? (workflow.last_failure?.stage || workflow.error?.stage || workflow.current_stage || activeStage?.id || '')
     : (workflow.current_stage || activeStage?.id || '');
-  const stageLabel = STAGE_LABELS[stageId] || activeStage?.label || '创作任务';
   const progress = normalizeWorkflowProgress(workflow);
   const isActiveProgress = !['done', 'failed'].includes(workflow.status) && progress < 100;
-  const durationLabel = formatWorkflowDurationLabel(workflow);
   const currentMessage = workflow.current_stage_message
     || activeStage?.message
     || message
@@ -62,22 +59,6 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
           style={{ width: `${progress}%` }}
         />
       </div>
-      <dl className="m-0 grid grid-cols-3 gap-x-3 gap-y-2 max-[720px]:grid-cols-1">
-        <div className="min-w-0 rounded-md border border-[#edf0f4] bg-white p-3">
-          <dt className="mb-1 text-xs font-bold text-[#8a93a2]">当前阶段</dt>
-          <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{stageLabel}</dd>
-        </div>
-        <div className="min-w-0 rounded-md border border-[#edf0f4] bg-white p-3">
-          <dt className="mb-1 text-xs font-bold text-[#8a93a2]">当前状态</dt>
-          <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{getWorkflowStatusText(workflow, status)}</dd>
-        </div>
-        {durationLabel ? (
-          <div className="min-w-0 rounded-md border border-[#edf0f4] bg-white p-3">
-            <dt className="mb-1 text-xs font-bold text-[#8a93a2]">最终用时</dt>
-            <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{durationLabel}</dd>
-          </div>
-        ) : null}
-      </dl>
       <button className="inline-flex w-fit items-center gap-1.5 border-0 bg-transparent p-0 text-[13px] font-bold text-[#30343b] transition hover:text-[#111827]" type="button" onClick={() => setExpanded(value => !value)}>
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         <span>{expanded ? '收起详细进度' : '展开详细进度'}</span>

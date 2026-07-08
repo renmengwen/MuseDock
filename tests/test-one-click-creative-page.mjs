@@ -256,6 +256,8 @@ assert.match(page, /const\s+(fetchFinalWorkflow|refreshFinalWorkflow)\s*=\s*useC
 assert.match(page, /(fetchFinalWorkflow|refreshFinalWorkflow)\(\{[\s\S]*workflowId:[\s\S]*event\.workflow_id[\s\S]*taskId:[\s\S]*event\.task_id[\s\S]*generation:/, 'Terminal task events should trigger a guarded final workflow refresh');
 assert.match(page, /task_stream_closed[\s\S]*(fetchFinalWorkflow|refreshFinalWorkflow)\(\{[\s\S]*status:[\s\S]*event\.status/, 'task_stream_closed should trigger final refresh for terminal done or failed statuses');
 assert.match(page, /const json = await api\.getCreativeWorkflow\(targetWorkflowId\);[\s\S]*persistTasks\(prev => updateTask\(prev, \{/, 'Final workflow refresh should fetch the current workflow and update the final task snapshot without reordering the sidebar');
+assert.match(page, /const\s+refreshWorkflowSnapshot\s*=\s*useCallback\(\s*async\s*\(/, 'OneClickCreativePage should define a non-terminal workflow snapshot refresh helper');
+assert.match(page, /event\.type === 'stage_done' && \['assets', 'project'\]\.includes\(event\.stage\)[\s\S]*refreshWorkflowSnapshot\(\{/, 'Assets and project stage completion should refresh source images and usage reports before terminal completion');
 assert.match(page, /finalWorkflowRefreshRef/, 'Final workflow refresh should keep a ref token for dedupe and stale guards');
 assert.match(page, /finalWorkflowRefreshRef\.current[\s\S]*(started|inFlight)[\s\S]*(settled|completed)/, 'Final workflow refresh should remember in-flight and settled identity keys to avoid duplicate fetches');
 assert.match(page, /const\s+refreshKey\s*=[\s\S]*targetWorkflowId[\s\S]*expectedTaskId/, 'Final workflow refresh should dedupe by workflow and task identity');
@@ -266,9 +268,9 @@ assert.match(page, /expectedIdentityRef|finalWorkflowIdentityRef|expectedWorkflo
 assert.match(page, /finalWorkflowRefreshRef\.current\?\.key !== refreshKey/, 'Final workflow refresh should allow the same terminal token to settle after stopTaskStream clears activeTaskRef, while blocking stale tasks');
 assert.match(page, /currentWorkflowRef\.current[\s\S]*targetWorkflowId/, 'Final workflow refresh should guard against stale selected or routed workflow ids');
 const finalRefreshStart = page.indexOf('const fetchFinalWorkflow');
-const applyTaskEventStart = page.indexOf('const applyTaskEvent', finalRefreshStart);
-assert.ok(finalRefreshStart > 0 && applyTaskEventStart > finalRefreshStart, 'OneClickCreativePage should define final refresh before task event handling');
-const finalRefreshBlock = page.slice(finalRefreshStart, applyTaskEventStart);
+const snapshotRefreshStart = page.indexOf('const refreshWorkflowSnapshot', finalRefreshStart);
+assert.ok(finalRefreshStart > 0 && snapshotRefreshStart > finalRefreshStart, 'OneClickCreativePage should define final refresh before non-terminal snapshot refresh');
+const finalRefreshBlock = page.slice(finalRefreshStart, snapshotRefreshStart);
 assert.doesNotMatch(finalRefreshBlock, /streamGenerationRef\.current !== expectedGeneration\s*&&\s*activeTaskRef\.current/, 'Final workflow refresh should not allow generation mismatch only because activeTaskRef was cleared');
 assert.match(finalRefreshBlock, /const\s+hasClosedGeneration\s*=[\s\S]*closedGeneration\s*!==\s*null[\s\S]*closedGeneration\s*!==\s*undefined[\s\S]*Number\.isFinite\(Number\(closedGeneration\)\)/, 'Final workflow refresh should explicitly check closedGeneration before numeric conversion');
 assert.doesNotMatch(finalRefreshBlock, /const\s+terminalGeneration\s*=\s*Number\.isFinite\(Number\(closedGeneration\)\)/, 'Final workflow refresh should not treat Number(null) as a valid closed generation');
@@ -338,7 +340,8 @@ assert.match(page, /if \(isDifferentTask\) \{[\s\S]*lastSeqRef\.current = normal
 assert.match(page, /else if \(sinceSeq !== undefined\) \{[\s\S]*lastSeqRef\.current = normalizeLastSeq\(sinceSeq\)/, 'Reusing task stream subscriptions should normalize explicit sinceSeq');
 assert.match(page, /if \(nextWorkflow\?\.status === 'done'\) \{[\s\S]*if \(activeTaskRef\.current\?\.workflow_id === workflowId\) \{[\s\S]*stopTaskStream\(\{ clearStorage: true \}\);[\s\S]*\}[\s\S]*setStatus\('done'\);[\s\S]*setMessage\('视频生成完成。'\);/, 'Polling fallback should stop only the current workflow stream before setting done UI state');
 assert.match(page, /if \(nextWorkflow\?\.status === 'failed' \|\| json\?\.success === false\) \{[\s\S]*if \(activeTaskRef\.current\?\.workflow_id === workflowId\) \{[\s\S]*stopTaskStream\(\{ clearStorage: true \}\);[\s\S]*\}[\s\S]*setStatus\('failed'\);[\s\S]*setMessage\(nextMessage \|\| '视频生成失败，请查看任务详情。'\);/, 'Polling fallback should stop only the current workflow stream before setting failed UI state');
-assert.match(page, /\}, \[status, workflowId, persistTasks, stopTaskStream, subscribeTaskEvents\]\);/, 'Polling effect should declare stable stream callback dependencies');
+assert.match(page, /if \(activeStreamRef\.current && workflow\?\.workflow_id === workflowId\) return;/, 'Polling should still fetch a full workflow snapshot when returning to a streamed task with no detail data loaded');
+assert.match(page, /\}, \[status, workflowId, workflow\?\.workflow_id, persistTasks, stopTaskStream, subscribeTaskEvents\]\);/, 'Polling effect should declare stable stream callback dependencies');
 assert.match(page, /\}, \[workflowId, routeWorkflowId, selectedWorkflowId, stopTaskStream, subscribeTaskEvents\]\);/, 'Active task recovery effect should declare stream callback dependencies');
 const routeLeaveStart = page.indexOf('if (!routeWorkflowId) {');
 const routeLeaveEnd = page.indexOf('if (activeTaskRef.current?.workflow_id', routeLeaveStart);

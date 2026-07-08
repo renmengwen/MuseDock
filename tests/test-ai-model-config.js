@@ -22,6 +22,7 @@ async function run() {
     providers: {
       openai: {
         name: 'OpenAI',
+        protocol: 'openai-responses',
         apiKey: 'sk-openai-secret-1234',
         baseUrl: 'https://api.openai.com/v1/',
         models: {
@@ -32,6 +33,7 @@ async function run() {
       },
       mimo: {
         name: '小米 MiMo',
+        protocol: 'anthropic-messages',
         apiKey: 'mimo-secret',
         baseUrl: 'https://api.xiaomimimo.com/v1',
         models: {
@@ -51,6 +53,8 @@ async function run() {
 
   // Verify public config masks API keys
   assert.strictEqual(saved.providers.openai.hasApiKey, true);
+  assert.strictEqual(saved.providers.openai.protocol, 'openai-responses');
+  assert.strictEqual(saved.providers.mimo.protocol, 'anthropic-messages');
   assert.strictEqual(saved.providers.openai.apiKeyMasked, 'sk-****1234');
   assert.strictEqual(saved.providers.openai.apiKey, undefined);
   assert.strictEqual(saved.providers.mimo.apiKeyMasked, '****cret');
@@ -70,6 +74,7 @@ async function run() {
   // Test 3: runtime config resolves active provider
   const textRuntime = await aiModelConfig.getRuntimeConfig('text', { configPath });
   assert.strictEqual(textRuntime.provider, 'mimo');
+  assert.strictEqual(textRuntime.protocol, 'anthropic-messages');
   assert.strictEqual(textRuntime.apiKey, 'mimo-secret');
   assert.strictEqual(textRuntime.baseUrl, 'https://api.xiaomimimo.com/v1');
   assert.strictEqual(textRuntime.modelId, 'mimo-v2.5-pro');
@@ -98,6 +103,7 @@ async function run() {
     providers: {
       openai: {
         name: 'OpenAI',
+        protocol: 'unknown-protocol',
         apiKey: '',
         baseUrl: 'https://api.openai.com/v1/',
         models: {
@@ -110,6 +116,7 @@ async function run() {
 
   const afterUpdate = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
   assert.strictEqual(afterUpdate.providers.openai.apiKey, 'sk-openai-secret-1234'); // blank key preserves old
+  assert.strictEqual(afterUpdate.providers.openai.protocol, 'openai-responses');
   assert.strictEqual(afterUpdate.active.text, 'openai/text');
 
   // Test 6: getSkipValidation
@@ -128,6 +135,7 @@ async function run() {
   assert.strictEqual(Object.keys(migrated.providers).length, 1);
   const migProvider = migrated.providers[Object.keys(migrated.providers)[0]];
   assert.strictEqual(migProvider.models.text.enabled, true);
+  assert.strictEqual(migProvider.protocol, 'openai-responses');
   assert.strictEqual(migProvider.models.text.modelId, 'mimo-v2.5-pro');
   assert.strictEqual(migrated.active.text?.includes('/text'), true);
 }

@@ -41,6 +41,7 @@ export function ModelSettings({ modelSettings }) {
         providerList={modelSettings.providerList}
         modelTypes={modelSettings.MODEL_TYPES}
         modelTypeInfo={modelSettings.MODEL_TYPE_INFO}
+        modelProtocols={modelSettings.MODEL_PROTOCOLS}
         onSaveProvider={modelSettings.saveProvider}
         onRemove={modelSettings.removeProvider}
       />

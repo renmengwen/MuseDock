@@ -13,12 +13,20 @@ const MODEL_TYPE_LABELS = {
   tts: 'TTS 语音合成',
 };
 
+const MODEL_PROTOCOLS = ['openai-responses', 'anthropic-messages'];
+const DEFAULT_MODEL_PROTOCOL = 'openai-responses';
+
 function normalizeString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
 function normalizeBaseUrl(value) {
   return normalizeString(value).replace(/\/+$/, '');
+}
+
+function normalizeProtocol(value) {
+  const protocol = normalizeString(value);
+  return MODEL_PROTOCOLS.includes(protocol) ? protocol : DEFAULT_MODEL_PROTOCOL;
 }
 
 function normalizeInteger(value, fallback, min, max) {
@@ -61,6 +69,7 @@ function normalizeProvider(id, input = {}) {
   return {
     id,
     name: normalizeString(input.name) || id,
+    protocol: normalizeProtocol(input.protocol),
     apiKey: normalizeString(input.apiKey),
     baseUrl: normalizeBaseUrl(input.baseUrl),
     models,
@@ -154,6 +163,7 @@ function toPublicConfig(stored) {
     }
     publicProviders[id] = {
       name: provider.name,
+      protocol: provider.protocol,
       baseUrl: provider.baseUrl,
       hasApiKey: !!provider.apiKey,
       apiKeyMasked: maskApiKey(provider.apiKey),
@@ -208,6 +218,7 @@ function resolveActiveConfig(type, stored) {
     enabled: true,
     provider: providerId,
     providerName: provider.name,
+    protocol: provider.protocol,
     apiKey,
     baseUrl,
     modelId: model.modelId,
@@ -269,6 +280,8 @@ module.exports = {
   DEFAULT_CONFIG_PATH,
   MODEL_TYPES,
   MODEL_TYPE_LABELS,
+  MODEL_PROTOCOLS,
+  DEFAULT_MODEL_PROTOCOL,
   getPublicConfig,
   saveConfig,
   getRuntimeConfig,

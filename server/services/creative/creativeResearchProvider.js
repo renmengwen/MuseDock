@@ -178,9 +178,10 @@ function getFirstAssistantMessage(rawResponse = {}) {
 }
 
 function getWebSearchToolCalls(rawResponse = {}) {
+  const normalized = Array.isArray(rawResponse?.normalized_tool_calls) ? rawResponse.normalized_tool_calls : [];
   const message = getFirstAssistantMessage(rawResponse);
   const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
-  return toolCalls.filter(toolCall => toolCall?.function?.name === 'web_search');
+  return [...normalized, ...toolCalls].filter(toolCall => toolCall?.function?.name === 'web_search');
 }
 
 function parseToolCallArguments(toolCall) {
@@ -340,7 +341,24 @@ async function runResearchProvider({
 
     // 尝试从raw_response中提取搜索结果
     let sources = [];
-    if (rawResponse.choices && rawResponse.choices[0] && rawResponse.choices[0].message) {
+    const normalizedToolCalls = Array.isArray(rawResponse.normalized_tool_calls) ? rawResponse.normalized_tool_calls : [];
+    if (normalizedToolCalls.length > 0) {
+      for (const toolCall of normalizedToolCalls) {
+        if (toolCall.function && toolCall.function.name === 'web_search') {
+          try {
+            const searchResult = JSON.parse(toolCall.function.arguments);
+            if (searchResult.results) {
+              sources = searchResult.results.map(item => ({
+                title: item.title || '',
+                url: item.url || item.link || '',
+                summary: item.snippet || item.description || '',
+              }));
+            }
+          } catch {}
+        }
+      }
+    }
+    if (sources.length === 0 && rawResponse.choices && rawResponse.choices[0] && rawResponse.choices[0].message) {
       const message = rawResponse.choices[0].message;
       // mimo的搜索结果可能在message的某个字段中
       if (message.tool_calls) {
