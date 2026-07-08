@@ -163,6 +163,7 @@ function fitFreeformNarrationToBudget(brief = {}, scenes = [], targetDurationSec
 }
 
 function buildFreeformNarrationCompressionMessages({ scenes = [], budget = {}, transcriptText = '', targetDurationSec = 60 } = {}) {
+  const maxChars = budget.max_recommended_chars || Math.floor(Number(targetDurationSec || 60) * narrationBudget.DEFAULT_CHARS_PER_SECOND);
   return [
     {
       role: 'system',
@@ -178,7 +179,7 @@ function buildFreeformNarrationCompressionMessages({ scenes = [], budget = {}, t
         '请压缩以下 storyboard 旁白。',
         '',
         `目标总时长：${targetDurationSec} 秒。`,
-        `建议总字数上限：${budget.max_recommended_chars || Math.floor(Number(targetDurationSec || 60) * narrationBudget.DEFAULT_CHARS_PER_SECOND)} 字。`,
+        `硬性总字数上限：${maxChars} 字。所有 narration_text 去空白后的总字数必须不超过 ${maxChars} 字，否则视为失败。`,
         '',
         '当前预算：',
         JSON.stringify(budget, null, 2),
@@ -199,6 +200,7 @@ function buildFreeformNarrationCompressionMessages({ scenes = [], budget = {}, t
         '2. 每段 narration_text 必须是完整中文口播，不能出现半句、残词、文件名截断或只有铺垫没有落点。',
         '3. 不要只按字符截断；必须改写压缩，保留主要信息和观点。',
         '4. 不要写镜头说明、音效、停顿或语速指令。',
+        `5. 最终返回的所有 narration_text 总字数必须不超过 ${maxChars} 字。`,
       ].join('\n'),
     },
   ];
@@ -273,27 +275,38 @@ function applyFreeformNarrationRepairs(scenes = [], repairs = []) {
 }
 
 async function compressFreeformNarrationWithModel({ modelService, freeformAgent, scenes, budget, transcriptText, targetDurationSec } = {}) {
-  const messages = buildFreeformNarrationCompressionMessages({ scenes, budget, transcriptText, targetDurationSec });
-  const response = await modelService.callTextModel({ messages });
-  if (!response || response.success === false) {
-    return { success: false, message: response?.message || '旁白压缩失败。' };
+  let currentScenes = scenes;
+  let currentBudget = budget;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const messages = buildFreeformNarrationCompressionMessages({
+      scenes: currentScenes,
+      budget: currentBudget,
+      transcriptText,
+      targetDurationSec,
+    });
+    const response = await modelService.callTextModel({ messages });
+    if (!response || response.success === false) {
+      return { success: false, message: response?.message || '旁白压缩失败。' };
+    }
+    const parsed = freeformAgent.parseFreeformBriefResponse(response.text || response.content || '');
+    if (!parsed.success) return parsed;
+    const applied = applyFreeformNarrationRepairs(currentScenes, extractRepairScenes(parsed.brief));
+    if (!applied.changed) return { success: false, message: '旁白压缩结果缺少可用 scenes。' };
+    const validation = narrationQuality.validateNarrationScenes(applied.scenes);
+    if (!validation.ok) return { success: false, message: validation.message, issues: validation.issues };
+    const nextPlan = freeformStoryboardPlanForBudget({}, applied.scenes, targetDurationSec);
+    const nextBudget = narrationBudget.buildNarrationBudget(nextPlan);
+    if (nextBudget.status !== 'too_long') {
+      return { success: true, scenes: applied.scenes, budget: nextBudget };
+    }
+    currentScenes = applied.scenes;
+    currentBudget = nextBudget;
   }
-  const parsed = freeformAgent.parseFreeformBriefResponse(response.text || response.content || '');
-  if (!parsed.success) return parsed;
-  const applied = applyFreeformNarrationRepairs(scenes, extractRepairScenes(parsed.brief));
-  if (!applied.changed) return { success: false, message: '旁白压缩结果缺少可用 scenes。' };
-  const validation = narrationQuality.validateNarrationScenes(applied.scenes);
-  if (!validation.ok) return { success: false, message: validation.message, issues: validation.issues };
-  const nextPlan = freeformStoryboardPlanForBudget({}, applied.scenes, targetDurationSec);
-  const nextBudget = narrationBudget.buildNarrationBudget(nextPlan);
-  if (nextBudget.status === 'too_long') {
-    return {
-      success: false,
-      message: `压缩后的旁白仍超过目标时长：预计 ${nextBudget.estimated_total_duration_sec} 秒，目标 ${nextBudget.target_duration_sec} 秒。`,
-      budget: nextBudget,
-    };
-  }
-  return { success: true, scenes: applied.scenes, budget: nextBudget };
+  return {
+    success: false,
+    message: `压缩后的旁白仍超过目标时长：预计 ${currentBudget.estimated_total_duration_sec} 秒，目标 ${currentBudget.target_duration_sec} 秒。`,
+    budget: currentBudget,
+  };
 }
 
 async function repairFreeformNarrationWithModel({ modelService, freeformAgent, scenes, issues, transcriptText, targetDurationSec } = {}) {

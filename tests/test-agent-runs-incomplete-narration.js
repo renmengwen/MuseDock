@@ -314,6 +314,92 @@ const agentRuns = require('../server/services/agent/agentRuns');
   assert.notEqual(overBudgetCaptured[0].narration_text, 'ClaudeCode之父自己的CLAUDE.m。');
   assert.notEqual(overBudgetCaptured[1].narration_text, '我看到这个的时候第一反应是。');
 
+  const retryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-runs-compression-retry-'));
+  const retryAwemeId = '20260626184011009512';
+  const retryRunId = 'run-compression-retry';
+  const retryRunDir = path.join(retryRoot, retryAwemeId, 'agent_runs');
+  fs.mkdirSync(retryRunDir, { recursive: true });
+  fs.writeFileSync(path.join(retryRunDir, `${retryRunId}.json`), JSON.stringify({
+    success: true,
+    run_id: retryRunId,
+    template: 'hyperframes_freeform',
+    aweme_id: retryAwemeId,
+    status: 'ready',
+    result: { video_brief: { target_duration_sec: 60 } },
+    hyperframes_freeform: {
+      status: 'ready',
+      brief: {
+        status: 'ready',
+        data: {
+          title: '压缩重试测试',
+          target_duration_sec: 60,
+          storyboard: {
+            scenes: [
+              { index: 1, narration_text: '这是一段很长的测试旁白，用来模拟导演策划生成了超过目标时长的内容，需要压缩到更短，同时保持完整语义和自然口播。'.repeat(4) },
+              { index: 2, narration_text: '第二段同样很长，包含大量解释、铺垫和总结，系统应该先让模型压缩，压缩仍然过长时再继续压一次。'.repeat(4) },
+            ],
+          },
+        },
+      },
+    },
+  }, null, 2));
+
+  let retryCompressionCalls = 0;
+  let retryCaptured = null;
+  const retryResult = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(retryAwemeId, retryRunId, {
+    rootDir: retryRoot,
+    aiTextModel: {
+      callTextModel: async ({ messages }) => {
+        retryCompressionCalls += 1;
+        const prompt = messages.map(item => item.content).join('\n');
+        assert.match(prompt, /硬性总字数上限：270 字/);
+        if (retryCompressionCalls === 1) {
+          return {
+            success: true,
+            text: JSON.stringify({
+              scenes: [
+                { index: 1, narration_text: '第一次压缩仍然太长，但句子完整。'.repeat(9) },
+                { index: 2, narration_text: '第一次压缩仍然太长，所以需要二次压缩。'.repeat(9) },
+              ],
+            }),
+          };
+        }
+        return {
+          success: true,
+          text: JSON.stringify({
+            scenes: [
+              { index: 1, narration_text: '第一段保留核心：内容过长时先压缩，仍超时就继续压。' },
+              { index: 2, narration_text: '第二段保留结论：压到预算内再生成配音，避免后续失败。' },
+            ],
+          }),
+        };
+      },
+    },
+    sceneTtsService: {
+      synthesizeSceneTts: async ({ scenes }) => {
+        retryCaptured = scenes;
+        return {
+          success: true,
+          scene_tts: {
+            status: 'done',
+            duration: 20,
+            scenes: scenes.map(scene => ({
+              index: scene.index,
+              duration: 10,
+              speech_duration_sec: 10,
+              narration_text: scene.narration_text,
+              captions: [{ start: 0, end: 10, text: scene.narration_text }],
+            })),
+          },
+        };
+      },
+    },
+  });
+
+  assert.equal(retryResult.success, true);
+  assert.equal(retryCompressionCalls, 2);
+  assert.equal(retryCaptured[0].narration_text, '第一段保留核心：内容过长时先压缩，仍超时就继续压。');
+
   console.log('agent runs incomplete narration tests passed');
 })().catch(error => {
   console.error(error);
