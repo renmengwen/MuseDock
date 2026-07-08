@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Edit3, Plus, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog.jsx';
 import { ModelConfigForm } from './ModelConfigForm.jsx';
 
 function enabledModelSummary(provider, modelTypes, modelTypeInfo) {
@@ -139,10 +140,9 @@ export function ProviderList({ providerList, modelTypes, modelTypeInfo, modelPro
     setToast('已保存到当前页面。点击顶部「保存模型配置」后，才会真正写入配置。');
   };
 
+  const [pendingDelete, setPendingDelete] = useState(null);
   const removeProvider = (provider) => {
-    const name = provider.name || provider.id;
-    if (!window.confirm(`确认删除「${name}」吗？删除后仍需点击顶部「保存模型配置」才会真正写入配置。`)) return;
-    onRemove(provider.id);
+    setPendingDelete(provider);
   };
   const dialogTitle = draft && providerList.some(p => p.id === draft.id)
     ? draft.name || draft.id
@@ -238,6 +238,21 @@ export function ProviderList({ providerList, modelTypes, modelTypeInfo, modelPro
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmDialog
+        open={Boolean(pendingDelete)}
+        onOpenChange={value => {
+          if (!value) setPendingDelete(null);
+        }}
+        title={`确认删除「${pendingDelete?.name || pendingDelete?.id || ''}」`}
+        description="删除后仍需点击顶部「保存模型配置」才会真正写入配置。"
+        destructive
+        confirmText="删除"
+        onConfirm={() => {
+          if (pendingDelete) onRemove(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+      />
 
       {toast ? (
         <div

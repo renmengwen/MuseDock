@@ -1,39 +1,47 @@
+/* 设计 token 单一事实源：opendesign/design-systems/tech-minimal-product */
+@import '../../opendesign/design-systems/tech-minimal-product/tokens/colors_and_type.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 220 20% 97%;
-    --foreground: 220 12% 19%;
-    --card: 0 0% 100%;
-    --card-foreground: 220 12% 19%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 220 12% 19%;
-    --primary: 222 47% 11%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 220 16% 95%;
-    --secondary-foreground: 220 12% 21%;
-    --muted: 210 25% 98%;
-    --muted-foreground: 219 10% 42%;
-    --accent: 220 16% 95%;
-    --accent-foreground: 220 12% 19%;
-    --destructive: 0 68% 47%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 220 18% 90%;
-    --input: 220 18% 90%;
-    --ring: 178 91% 55%;
-    --radius: 8px;
+    /*
+     * shadcn 变量层（HSL 裸值）。Tailwind 的透明度修饰符（如 bg-primary/90）
+     * 要求裸 HSL 三元组，无法 var() 直引上面 token 的 hex 值。
+     * 因此这里逐项手工换算并用注释锁定映射：改色先改 opendesign token，再同步此处。
+     */
+    --background: 220 20% 97%; /* = --bg-3 #f6f7f9 */
+    --foreground: 221 39% 11%; /* = --fg-1 #111827 */
+    --card: 0 0% 100%; /* = --surface-1 #ffffff */
+    --card-foreground: 221 39% 11%; /* = --fg-1 #111827 */
+    --popover: 0 0% 100%; /* = --surface-1 #ffffff */
+    --popover-foreground: 221 39% 11%; /* = --fg-1 #111827 */
+    --primary: 221 39% 11%; /* = --accent-1 #111827（主操作＝深墨，无蓝色） */
+    --primary-foreground: 0 0% 100%; /* = --fg-inverse-1 #ffffff */
+    --secondary: 210 40% 98%; /* = --surface-2 #f8fafc */
+    --secondary-foreground: 215 14% 34%; /* = --fg-2 #4b5563 */
+    --muted: 210 40% 98%; /* = --surface-2 #f8fafc */
+    --muted-foreground: 217 9% 45%; /* = --fg-3 #69717e */
+    --accent: 220 21% 95%; /* = --bg-4 #eef0f4（hover 面） */
+    --accent-foreground: 221 39% 11%; /* = --fg-1 #111827 */
+    --destructive: 0 72% 51%; /* = --danger-1 #dc2626 */
+    --destructive-foreground: 0 0% 100%; /* = --fg-inverse-1 #ffffff */
+    --border: 223 17% 92%; /* = --line-1 #e7e9ee */
+    --input: 220 19% 87%; /* = --line-2 #d9dde5 */
+    --ring: 178 90% 55%; /* = --accent-2 #25f4ee（青色只做 focus 信号） */
+    --radius: var(--radius-lg);
   }
 
   body {
-    background: #f6f7f9;
-    color: #2b2f36;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--page-bg);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
   }
 
   a {
-    color: #30343b;
+    color: var(--text-primary);
     text-decoration: none;
   }
 }

@@ -3,6 +3,7 @@
   --bg-1: #ffffff;
   --bg-2: #f8fafc;
   --bg-3: #f6f7f9;
+  --bg-4: #eef0f4;
   --surface-1: #ffffff;
   --surface-2: #f8fafc;
   --surface-dark-1: #111827;
@@ -15,6 +16,7 @@
   --line-1: #e7e9ee;
   --line-2: #d9dde5;
   --accent-1: #111827;
+  --accent-1-strong: #020617;
   --accent-2: #25f4ee;
   --warn-1: #f59e0b;
   --danger-1: #dc2626;
@@ -41,6 +43,7 @@
   --page-bg-dark: var(--surface-dark-1);
   --surface-primary: var(--surface-1);
   --surface-secondary: var(--surface-2);
+  --surface-hover: var(--bg-4);
   --surface-command: var(--surface-2);
   --surface-command-raised: var(--surface-1);
   --text-primary: var(--fg-1);
@@ -51,6 +54,7 @@
   --border-subtle: var(--line-1);
   --border-command: var(--line-1);
   --accent-primary: var(--accent-1);
+  --accent-primary-strong: var(--accent-1-strong);
   --accent-secondary: var(--accent-2);
   --status-warning: var(--warn-1);
   --status-danger: var(--danger-1);

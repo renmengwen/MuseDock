@@ -45,7 +45,7 @@ export function CreativeSidebar({
   return sidebarCollapsed ? (
     <aside className="relative block min-w-0 overflow-hidden border-r border-[#eef1f5] bg-white pl-[18px] pt-[18px] max-[760px]:max-h-[280px] max-[760px]:border-b max-[760px]:border-b-[#eef1f5] max-[760px]:border-r-0" aria-label="已收起的创作任务栏">
       <Button
-        className="size-[34px] rounded-lg bg-white text-[#1f2937] shadow-[0_8px_20px_rgba(15,23,42,.08)] transition hover:-translate-y-px hover:bg-[#eef4ff] hover:text-[#2563eb] hover:shadow-[0_10px_24px_rgba(37,99,235,.14)]"
+        className="size-[34px] rounded-lg bg-white text-[#1f2937] shadow-[0_8px_20px_rgba(15,23,42,.08)] transition hover:-translate-y-px hover:bg-surface-hover hover:text-fg-1 hover:shadow-[0_10px_24px_rgba(15,23,42,.12)]"
         type="button"
         variant="ghost"
         size="icon"
@@ -119,7 +119,7 @@ export function CreativeSidebar({
             </DialogContent>
           </Dialog>
           <Button
-            className="size-8 rounded-md bg-transparent text-inherit transition hover:bg-[#eef4ff] hover:text-[#2563eb]"
+            className="size-8 rounded-md bg-transparent text-inherit transition hover:bg-surface-hover hover:text-fg-1"
             type="button"
             variant="ghost"
             size="icon"

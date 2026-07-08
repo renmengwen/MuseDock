@@ -4,6 +4,7 @@ import { api } from '../api/client.js';
 import { CreativeComposer } from '../components/creative/CreativeComposer.jsx';
 import { CreativeSidebar } from '../components/creative/CreativeSidebar.jsx';
 import { CreativeTaskDetail } from '../components/creative/CreativeTaskDetail.jsx';
+import { ConfirmDialog } from '../components/ui/confirm-dialog.jsx';
 import {
   appendWorkflowProgressEvent,
   applyWorkflowStageEvent,
@@ -254,6 +255,9 @@ export function OneClickCreativePage() {
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
   const [deletingWorkflowId, setDeletingWorkflowId] = useState('');
+  // { kind: 'delete-task', task } | { kind: 'stop-delete', id }
+  const [pendingConfirm, setPendingConfirm] = useState(null);
+  const [confirmError, setConfirmError] = useState('');
   const [retryPlan, setRetryPlan] = useState(null);
   const [retryPlanStatus, setRetryPlanStatus] = useState('idle');
   const [retryPlanMessage, setRetryPlanMessage] = useState('');
@@ -761,10 +765,12 @@ export function OneClickCreativePage() {
     navigate(`/editor/${encodeURIComponent(id)}`);
   }
 
-  async function deleteTask(task) {
-    const confirmed = window.confirm(`确定删除任务「${task.title}」吗？此操作不可恢复。`);
-    if (!confirmed) return;
+  function requestDeleteTask(task) {
+    setConfirmError('');
+    setPendingConfirm({ kind: 'delete-task', task });
+  }
 
+  async function performDeleteTask(task) {
     setDeletingWorkflowId(task.workflow_id);
     let deleteOk = false;
     try {
@@ -777,10 +783,11 @@ export function OneClickCreativePage() {
     }
 
     if (!deleteOk) {
-      window.alert('删除任务失败，请稍后重试。该任务仍保留在列表中。');
+      setConfirmError('删除任务失败，请稍后重试。该任务仍保留在列表中。');
       return;
     }
 
+    setPendingConfirm(null);
     persistTasks(prev => prev.filter(item => item.workflow_id !== task.workflow_id));
     setProgressEventsByWorkflow(prev => removeWorkflowProgressEvents(prev, task.workflow_id));
 
@@ -789,13 +796,14 @@ export function OneClickCreativePage() {
     }
   }
 
-  async function stopAndDeleteTask(targetWorkflowId) {
+  function requestStopAndDeleteTask(targetWorkflowId) {
     const id = String(targetWorkflowId || '').trim();
     if (!id || deletingWorkflowId) return;
+    setConfirmError('');
+    setPendingConfirm({ kind: 'stop-delete', id });
+  }
 
-    const confirmed = window.confirm('确定停止并删除当前任务吗？任务记录和已生成资源都会被删除，此操作不可恢复。');
-    if (!confirmed) return;
-
+  async function performStopAndDeleteTask(id) {
     setDeletingWorkflowId(id);
     setStatus('deleting');
     setMessage('正在停止并删除任务...');
@@ -809,6 +817,7 @@ export function OneClickCreativePage() {
       setDeletingWorkflowId('');
     }
 
+    setPendingConfirm(null);
     if (!deleteOk) {
       setStatus('failed');
       setMessage('停止并删除任务失败，请稍后重试。');
@@ -1130,7 +1139,7 @@ export function OneClickCreativePage() {
         onToggleSidebar={() => setSidebarCollapsed(value => !value)}
         onNewTask={startNewTask}
         onSelectTask={selectTask}
-        onDeleteTask={deleteTask}
+        onDeleteTask={requestDeleteTask}
       />
 
       <section className="min-h-0 min-w-0 overflow-auto bg-white">
@@ -1168,13 +1177,39 @@ export function OneClickCreativePage() {
             retryPlanMessage={retryPlanMessage}
             retrying={retrying}
             progressEvents={progressEventsByWorkflow[selectedWorkflowId] || []}
-            onStopAndDelete={stopAndDeleteTask}
+            onStopAndDelete={requestStopAndDeleteTask}
             onContinueEdit={continueEdit}
             onRetryWorkflow={handleRetryWorkflow}
             getWorkflowVideoUrl={getWorkflowVideoUrl}
           />
         </div>
       </section>
+
+      <ConfirmDialog
+        open={Boolean(pendingConfirm)}
+        onOpenChange={value => {
+          if (!value) {
+            setPendingConfirm(null);
+            setConfirmError('');
+          }
+        }}
+        title={pendingConfirm?.kind === 'stop-delete'
+          ? '停止并删除当前任务'
+          : `删除任务「${pendingConfirm?.task?.title || ''}」`}
+        description={pendingConfirm?.kind === 'stop-delete'
+          ? '任务记录和已生成资源都会被删除，此操作不可恢复。'
+          : '此操作不可恢复。'}
+        destructive
+        loading={Boolean(deletingWorkflowId)}
+        confirmText={pendingConfirm?.kind === 'stop-delete' ? '停止并删除' : '删除任务'}
+        onConfirm={() => {
+          if (!pendingConfirm) return;
+          if (pendingConfirm.kind === 'stop-delete') performStopAndDeleteTask(pendingConfirm.id);
+          else performDeleteTask(pendingConfirm.task);
+        }}
+      >
+        {confirmError ? <p className="m-0 text-sm font-semibold text-danger">{confirmError}</p> : null}
+      </ConfirmDialog>
     </main>
   );
 }

@@ -5,7 +5,7 @@
 ## 来源
 
 - `frontend-react/src/App.jsx`：路由结构，确认首页指向 `/creative`。
-- `frontend-react/src/components/AppShell.jsx`：全局顶部栏和设置入口。
+- `frontend-react/src/components/AppShell.jsx`：路由容器（空壳，无全局顶栏）。全局导航由创作侧栏承担（侧栏即导航），设置入口固定在侧栏底部。
 - `frontend-react/src/pages/OneClickCreativePage.jsx`：首页与任务详情的真实信息流。
 - `frontend-react/src/components/creative/CreativeComposer.jsx`：首页输入区和模式切换。
 - `frontend-react/src/components/creative/CreativeSidebar.jsx`：任务侧栏和任务历史。
@@ -30,6 +30,13 @@
 - `tokens/colors_and_type.css`：颜色、字体、语义色、间距和阴影 token。
 - `brand/voice-and-tone.md`：文案语气和状态提示规范。
 - `brand/style-notes.md`：页面布局、组件、状态和动效规则。
+
+## 落地状态（2026-07）
+
+- token 已接入实现：`frontend-react/src/styles.css` 顶部 `@import` 本系统的 `tokens/colors_and_type.css`，并在 `frontend-react/tailwind.config.js` 注册了语义色类（`ink`、`ink-strong`、`signal`、`page`、`surface-1/2`、`surface-hover`、`fg-1/2/3`、`line-1/2`、`warn`、`danger`、`success`）与 `font-sans`/`font-mono`。新代码颜色一律走这些 token 类或 CSS 变量，不再新增任意值 hex。
+- `styles.css` 中 shadcn 的 HSL 变量层是本系统 token 的换算副本（Tailwind 透明度修饰符要求裸 HSL），每行注释标明来源 token；改色先改 token，再同步该处。
+- 主操作色为深墨 `--accent-primary`（#111827），按压/hover 加深用 `--accent-primary-strong`（#020617）。界面不使用蓝色作为操作色、链接色或选中态。
+- 确认类交互统一使用 `frontend-react/src/components/ui/confirm-dialog.jsx`（Radix Dialog，具备焦点陷阱与 ESC 关闭），不使用 `window.confirm`/`window.alert` 或手写 fixed 弹层。
 
 ## 待确认
 

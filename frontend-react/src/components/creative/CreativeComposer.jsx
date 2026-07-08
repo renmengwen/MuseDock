@@ -48,8 +48,8 @@ function CreativePromptComposer({
             className={cn(
               'inline-flex min-h-[34px] items-center gap-1.5 rounded-full px-3 text-[13px] transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-[.62]',
               useResearch
-                ? '-translate-y-px border-[#bcd0ff] bg-[#e6efff] text-[#2563eb] shadow-[inset_0_0_0_1px_#8fb0ff] hover:bg-[#e6efff] hover:text-[#2563eb]'
-                : 'border-[#e5e7eb] bg-white text-[#667085] hover:bg-white hover:text-[#667085]',
+                ? '-translate-y-px border-ink bg-surface-2 text-ink shadow-[inset_0_0_0_1px_var(--accent-primary)] hover:bg-surface-2 hover:text-ink'
+                : 'border-line-1 bg-white text-fg-3 hover:bg-white hover:text-fg-3',
             )}
             variant="outline"
             disabled={isBusy}
@@ -61,7 +61,7 @@ function CreativePromptComposer({
         </div>
 
         <Button
-          className="flex-none rounded-full bg-[#2563eb] text-white hover:-translate-y-px hover:bg-[#1d4ed8] disabled:opacity-[.64]"
+          className="flex-none rounded-full bg-ink text-white hover:-translate-y-px hover:bg-ink-strong disabled:opacity-[.64]"
           size="icon"
           type="submit"
           disabled={submitDisabled}
