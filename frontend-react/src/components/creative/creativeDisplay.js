@@ -75,3 +75,11 @@ export function getStepState(stage, index, stages) {
   ));
   return hasActiveBefore ? 'waiting' : '';
 }
+
+export function firstText(...values) {
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text) return text;
+  }
+  return '';
+}
