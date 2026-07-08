@@ -311,4 +311,6 @@ module.exports = {
   mapSceneSpecToContentGraph,
   buildFramesFromGraph,
   buildFrameInputs,
+  firstMetric,
+  trustedSceneDuration,
 };

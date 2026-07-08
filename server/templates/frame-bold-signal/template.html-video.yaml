@@ -1,0 +1,112 @@
+spec_version: 1
+id: frame-bold-signal
+name: Bold Signal
+description: >
+  Bold colored card on a dark gradient — a big section number rolls in, a nav breadcrumb
+  fades, a vibrant orange card slides in from the right and the title rises. Confident,
+  high-impact, modern. Distilled from the frontend-slides "Bold Signal" preset.
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: source/index.html
+
+category: presentation
+subcategory: section-title
+tags: [bold, card, dark, orange, section, signal, high-impact]
+
+best_for:
+  - "Section / chapter divider"
+  - "Bold launch statement"
+  - "High-impact title card"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9", "9:16", "1:1"]
+  fps:
+    default: 60
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 3
+    max_sec: 6
+  alpha: false
+  audio:
+    supported: true
+    expected_inputs: [bgm]
+
+inputs:
+  schema:
+    type: object
+    required: [title]
+    properties:
+      section:
+        type: "string"
+        maxLength: 8
+        description: "Section number, e.g. 01/04"
+      nav:
+        type: "array"
+        items: { type: "string" }
+        description: "Breadcrumb items; first is active"
+      card_label:
+        type: "string"
+        maxLength: 40
+        description: "Small uppercase label on the orange card"
+      title:
+        type: "string"
+        maxLength: 48
+        description: "Big card title (1-2 lines)"
+      duration_sec:
+        type: "number"
+        minimum: 3
+        maximum: 6
+        default: 4
+  examples:
+    - {"section": "01/04", "nav": ["Signal", "Build", "Ship", "Scale"], "card_label": "Launch · 2026", "title": "Bring your own agent."}
+
+license:
+  spdx: Apache-2.0
+  attribution_required: true
+  redistribution_allowed: true
+  commercial_use: true
+
+provenance:
+  # L1 — original design inspiration (real world)
+  origin:
+    name: none (original preset by the L2 skill author)
+    kind: none
+    reference: "No specific real-world studio; the 'Bold Signal' look is an original preset composed by the frontend-slides author"
+  # L2 — the open-source skill we actually transformed from (license governs here)
+  via_skill:
+    name: frontend-slides
+    author: "Zara Zhang"
+    url: https://github.com/zarazhangrui/frontend-slides
+    license: MIT
+    source_file: STYLE_PRESETS.md (preset "Bold Signal")
+  # L3 — what this template does
+  transformation: >
+    Static slide preset → animated hyperframes timeline (section number rolls in, nav
+    breadcrumb fades, #FF5722 focal card slides in from the right, title rises) built as
+    original CSS keyframes. Original sample data. No upstream source code copied verbatim.
+
+author:
+  name: nexu-io
+  url: https://github.com/nexu-io
+  contact: open-design@nexu.io
+
+version: 0.1.0
+changelog:
+  - version: 0.1.0
+    date: 2026-06-03
+    notes: Distilled from the frontend-slides Bold Signal preset into an animated html-video template.
+
+preview:
+  poster: preview.png
+
+performance:
+  reference_render:
+    duration_sec: 4
+    render_wall_clock_sec: 8
+    machine: "M2 MacBook Air"

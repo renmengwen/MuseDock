@@ -1,0 +1,63 @@
+spec_version: 1
+id: frame-decision-tree
+name: Decision Tree
+description: >
+  Animated flowchart with branching paths
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: index.html
+
+category: explainer
+subcategory: flowchart
+tags: [explainer, flowchart, decision, branching, diagram]
+
+best_for:
+  - "How-to flow"
+  - "Decision branching"
+  - "Process diagram"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9"]
+  fps:
+    default: 30
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 3
+    max_sec: 30
+    default_sec: 15
+  alpha: false
+  audio: { supported: false }
+
+inputs:
+  schema:
+    type: object
+    properties: {}
+  examples: []
+
+license:
+  spdx: Apache-2.0
+  attribution_required: true
+  redistribution_allowed: true
+  commercial_use: true
+  notes: "Forked from heygen-com/hyperframes registry/examples/decision-tree (Apache-2.0)."
+
+assets_attribution:
+  - name: "hyperframes registry/examples/decision-tree"
+    license: "Apache-2.0"
+    author: "heygen-com / Hyperframes"
+    url: "https://github.com/heygen-com/hyperframes/tree/main/registry/examples/decision-tree"
+
+author:
+  name: "heygen-com / Hyperframes"
+  url: "https://github.com/heygen-com/hyperframes"
+
+version: "0.1.0"
+
+preview:
+  poster: poster.svg

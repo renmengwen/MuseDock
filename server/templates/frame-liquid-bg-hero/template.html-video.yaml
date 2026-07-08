@@ -1,0 +1,87 @@
+spec_version: 1
+id: frame-liquid-bg-hero
+name: Liquid Background Hero
+description: >
+  Hero card over a flowing liquid mesh-gradient background — magazine-style cover with editorial typography.
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: source/index.html
+
+category: marketing
+subcategory: hero
+tags: [hero, liquid, gradient, mesh, editorial, cover]
+
+best_for:
+  - "Product launch hero"
+  - "SaaS landing video"
+  - "Editorial cover"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9", "9:16", "1:1"]
+  fps:
+    default: 60
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 4
+    max_sec: 12
+  alpha: false
+  audio:
+    supported: true
+    expected_inputs: [bgm]
+
+inputs:
+  schema:
+    type: object
+    required: [headline]
+    properties:
+      headline:
+        type: "string"
+        maxLength: 120
+        description: "Main headline"
+      subheadline:
+        type: "string"
+        maxLength: 200
+        description: "Supporting subheadline"
+      cta:
+        type: "string"
+        maxLength: 40
+        description: "Call to action label"
+      duration_sec:
+        type: "number"
+        minimum: 4
+        maximum: 12
+        default: 6
+  examples:
+    - {"headline": "Design that evolves itself", "subheadline": "The first self-evolving design agent", "cta": "Try it", "duration_sec": 6}
+
+license:
+  spdx: Apache-2.0
+  attribution_required: false
+  redistribution_allowed: true
+  commercial_use: true
+
+author:
+  name: nexu-io
+  url: https://github.com/nexu-io
+  contact: open-design@nexu.io
+
+version: 0.1.0
+changelog:
+  - version: 0.1.0
+    date: 2026-05-27
+    notes: Cherry-picked from open-design/repo/skills/frame-liquid-bg-hero/example.html
+
+preview:
+  poster: preview.png
+
+performance:
+  reference_render:
+    duration_sec: 6
+    render_wall_clock_sec: 11
+    machine: "M2 MacBook Air"

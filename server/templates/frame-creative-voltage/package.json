@@ -1,0 +1,8 @@
+{
+  "name": "@html-video/template-frame-creative-voltage",
+  "version": "0.1.0",
+  "description": "html-video template: frame-creative-voltage (electric split + script accent, distilled from frontend-slides Creative Voltage preset, MIT)",
+  "license": "Apache-2.0",
+  "private": true,
+  "files": ["template.html-video.yaml", "source", "SKILL.md", "example.md", "preview.png"]
+}

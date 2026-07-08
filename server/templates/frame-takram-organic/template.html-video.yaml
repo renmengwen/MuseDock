@@ -1,0 +1,115 @@
+spec_version: 1
+id: frame-takram-organic
+name: Takram Organic
+description: >
+  Soft-tech radial node graph as art — a frosted rounded card holds the message while
+  curved links draw and eight nodes pop outward around an evolving core, then everything
+  gently floats. Warm, natural, organic. Distilled from the huashu-design "Takram" philosophy.
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: source/index.html
+
+category: explainer
+subcategory: concept-diagram
+tags: [organic, soft-tech, radial, node-graph, takram, beige, diagram]
+
+best_for:
+  - "System / architecture concept reveal"
+  - "Warm, human product story"
+  - "Network or memory-graph explainer"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9", "1:1"]
+  fps:
+    default: 60
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 4
+    max_sec: 7
+  alpha: false
+  audio:
+    supported: true
+    expected_inputs: [bgm]
+
+inputs:
+  schema:
+    type: object
+    required: [title]
+    properties:
+      eyebrow:
+        type: "string"
+        maxLength: 48
+        description: "Green uppercase eyebrow on the card"
+      title:
+        type: "string"
+        maxLength: 60
+        description: "Card headline; wrap one accent word in warm terracotta"
+      caption:
+        type: "string"
+        maxLength: 160
+        description: "Supporting paragraph under the title"
+      node_count:
+        type: "number"
+        minimum: 4
+        maximum: 8
+        default: 8
+        description: "Number of radial nodes around the core"
+      duration_sec:
+        type: "number"
+        minimum: 4
+        maximum: 7
+        default: 5
+  examples:
+    - {"eyebrow": "Context · Memory · Evolution", "title": "A design agent that remembers.", "caption": "Eight context nodes feed one evolving core — every project makes the next one sharper."}
+
+license:
+  spdx: Apache-2.0
+  attribution_required: true
+  redistribution_allowed: true
+  commercial_use: true
+
+provenance:
+  # L1 — original design inspiration (real world)
+  origin:
+    name: Takram
+    kind: design-studio
+    reference: "Japanese design firm — speculative, organic soft-tech; data-as-art visualisation"
+  # L2 — the open-source skill we actually transformed from (license governs here)
+  via_skill:
+    name: huashu-design
+    author: "alchaincyf (花叔 · 花生)"
+    url: https://github.com/alchaincyf/huashu-design
+    license: MIT
+    source_file: assets/showcases/ppt/ppt-takram.html
+  # L3 — what this template does
+  transformation: >
+    Static PPT showcase → animated hyperframes timeline (frosted rounded card holds the
+    message while curved SVG links draw and radial nodes pop outward around an evolving
+    core, then everything gently floats) built as original CSS/SVG keyframes. Re-coloured
+    palette; original sample data. No upstream source code copied verbatim.
+
+author:
+  name: nexu-io
+  url: https://github.com/nexu-io
+  contact: open-design@nexu.io
+
+version: 0.1.0
+changelog:
+  - version: 0.1.0
+    date: 2026-06-03
+    notes: Distilled from huashu-design Takram showcase into an animated html-video template.
+
+preview:
+  poster: preview.png
+
+performance:
+  reference_render:
+    duration_sec: 5
+    render_wall_clock_sec: 10
+    machine: "M2 MacBook Air"

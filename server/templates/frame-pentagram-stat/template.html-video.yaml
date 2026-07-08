@@ -1,0 +1,113 @@
+spec_version: 1
+id: frame-pentagram-stat
+name: Pentagram Stat
+description: >
+  Swiss-grid statistic anchor — a giant number bleeds off the edge while grid rules
+  sweep in, a bar chart grows, and a black data bar slides up. Rational, editorial,
+  high-contrast. Distilled from the huashu-design "Pentagram" design philosophy.
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: source/index.html
+
+category: data-viz
+subcategory: stat-card
+tags: [stat, swiss-grid, editorial, data, pentagram, number, benchmark]
+
+best_for:
+  - "Single hero metric / benchmark reveal"
+  - "Editorial data slide"
+  - "Rational, high-contrast brand moment"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9", "1:1"]
+  fps:
+    default: 60
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 3
+    max_sec: 6
+  alpha: false
+  audio:
+    supported: true
+    expected_inputs: [bgm]
+
+inputs:
+  schema:
+    type: object
+    required: [headline]
+    properties:
+      label:
+        type: "string"
+        maxLength: 40
+        description: "Small red eyebrow label (uppercase)"
+      headline:
+        type: "string"
+        maxLength: 12
+        description: "The giant stat / number anchor"
+      subtitle:
+        type: "string"
+        maxLength: 120
+        description: "Supporting line under the stat"
+      anchor:
+        type: "string"
+        maxLength: 4
+        description: "Faint oversized number that bleeds off the right edge"
+      duration_sec:
+        type: "number"
+        minimum: 3
+        maximum: 6
+        default: 4
+  examples:
+    - {"label": "Benchmark · Coding", "headline": "95.7", "subtitle": "AIME score — new SOTA for open coding models", "anchor": "95"}
+
+license:
+  spdx: Apache-2.0
+  attribution_required: true
+  redistribution_allowed: true
+  commercial_use: true
+
+provenance:
+  # L1 — original design inspiration (real world)
+  origin:
+    name: Pentagram (Michael Bierut)
+    kind: design-studio
+    reference: "pentagram.com — Swiss-grid editorial typography; Hillary Clinton logo system"
+  # L2 — the open-source skill we actually transformed from (license governs here)
+  via_skill:
+    name: huashu-design
+    author: "alchaincyf (花叔 · 花生)"
+    url: https://github.com/alchaincyf/huashu-design
+    license: MIT
+    source_file: assets/showcases/ppt/ppt-pentagram.html
+  # L3 — what this template does
+  transformation: >
+    Static PPT showcase → animated hyperframes timeline (Swiss grid sweeps in, giant
+    typographic anchor bleeds off-edge, bar chart grows, black data bar slides up) built
+    as original CSS keyframes. Pentagram's signature #E63946 red is retained as the
+    recognisable brand cue; original sample data. No upstream source code copied verbatim.
+
+author:
+  name: nexu-io
+  url: https://github.com/nexu-io
+  contact: open-design@nexu.io
+
+version: 0.1.0
+changelog:
+  - version: 0.1.0
+    date: 2026-06-03
+    notes: Distilled from huashu-design Pentagram showcase into an animated html-video template.
+
+preview:
+  poster: preview.png
+
+performance:
+  reference_render:
+    duration_sec: 4
+    render_wall_clock_sec: 8
+    machine: "M2 MacBook Air"

@@ -1,0 +1,85 @@
+spec_version: 1
+id: vfx-text-cursor
+name: Text + Cursor VFX
+description: >
+  Typewriter text effect with blinking terminal cursor — perfect for code-style reveals or tech demos.
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: source/index.html
+
+category: presentation
+subcategory: text-card
+tags: [text, typewriter, cursor, terminal, code, reveal]
+
+best_for:
+  - "Code demo intro"
+  - "Tech narrative"
+  - "Terminal vibe"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9", "9:16", "1:1"]
+  fps:
+    default: 60
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 3
+    max_sec: 10
+  alpha: false
+  audio:
+    supported: true
+    expected_inputs: [bgm]
+
+inputs:
+  schema:
+    type: object
+    required: [text]
+    properties:
+      text:
+        type: "string"
+        maxLength: 240
+        description: "Text to type out"
+      speed_cps:
+        type: "number"
+        minimum: 5
+        maximum: 40
+        default: 15
+        description: "Characters per second"
+      duration_sec:
+        type: "number"
+        minimum: 3
+        maximum: 10
+        default: 5
+  examples:
+    - {"text": "$ html-video render --template frame-logo-outro", "speed_cps": 15, "duration_sec": 5}
+
+license:
+  spdx: Apache-2.0
+  attribution_required: false
+  redistribution_allowed: true
+  commercial_use: true
+
+author:
+  name: nexu-io
+  url: https://github.com/nexu-io
+  contact: open-design@nexu.io
+
+version: 0.1.0
+changelog:
+  - version: 0.1.0
+    date: 2026-05-27
+    notes: Cherry-picked from open-design/repo/skills/vfx-text-cursor/example.html
+
+preview:
+  poster: preview.png
+
+performance:
+  reference_render:
+    duration_sec: 5
+    render_wall_clock_sec: 9
+    machine: "M2 MacBook Air"

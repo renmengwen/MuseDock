@@ -346,7 +346,7 @@ async function readProjectJson(projectDir) {
       ],
     },
     creativeContext: { input: { raw_text: '默认应该生成完整 HTML。' } },
-    target: {},
+    target: { html_video_generation_mode: 'raw_html' },
     templateRegistry,
     skipValidation: true,
     services: {
@@ -1286,7 +1286,7 @@ async function readProjectJson(projectDir) {
       scenes: [{ id: 'scene_01', duration: 2, kind: 'text', narration_text: '旁白', captions: fullSceneCaption('scene_01', '旁白', 2), visual_text: { headline: '进度' } }],
     },
     creativeContext: { input: { raw_text: '进度测试' } },
-    target: {},
+    target: { html_video_generation_mode: 'raw_html' },
     templateRegistry,
     skipValidation: true,
     onProgress: async event => {
@@ -1363,7 +1363,7 @@ async function readProjectJson(projectDir) {
     rootDir,
     sceneSpec: reuseSceneSpec,
     creativeContext: { input: { raw_text: '内容图复用测试' } },
-    target: { preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
+    target: { html_video_generation_mode: 'raw_html', preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
     templateRegistry,
     skipValidation: true,
     services: {
@@ -1387,7 +1387,7 @@ async function readProjectJson(projectDir) {
     rootDir,
     sceneSpec: reuseSceneSpec,
     creativeContext: { input: { raw_text: '内容图复用测试' } },
-    target: { preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
+    target: { html_video_generation_mode: 'raw_html', preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
     templateRegistry,
     skipValidation: true,
     services: {
@@ -1427,7 +1427,7 @@ async function readProjectJson(projectDir) {
     rootDir,
     // sceneSpec intentionally omitted to mimic the retry path
     creativeContext: { input: { raw_text: '内容图复用测试' } },
-    target: { preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
+    target: { html_video_generation_mode: 'raw_html', preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
     templateRegistry,
     skipValidation: true,
     reuseContentGraph: true,
@@ -1459,7 +1459,7 @@ async function readProjectJson(projectDir) {
     sceneSpec: reuseSceneSpec,
     creativeContext: { input: { raw_text: '内容图复用测试' } },
     projectOptions: { reuseContentGraph: true, regenerateFrameHtml: true },
-    target: { preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
+    target: { html_video_generation_mode: 'raw_html', preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
     templateRegistry,
     skipValidation: true,
     services: {
@@ -1490,7 +1490,7 @@ async function readProjectJson(projectDir) {
     sceneSpec: reuseSceneSpec,
     creativeContext: { input: { raw_text: '内容图复用测试' } },
     projectOptions: { reuseContentGraph: true },
-    target: { preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
+    target: { html_video_generation_mode: 'raw_html', preferredTemplateId: 'simple', lockTemplate: true, generateAudio: false },
     templateRegistry,
     skipValidation: true,
     services: {
@@ -2356,6 +2356,7 @@ async function readProjectJson(projectDir) {
     runId: 'run_002',
     rootDir,
     creativeContext: {},
+    target: { html_video_generation_mode: 'raw_html' },
     templateRegistry,
     services: {
       aiTextModel: {

@@ -305,4 +305,6 @@ module.exports = {
   injectCaptionOverlay,
   normalizeCaptions,
   trustedSceneDuration,
+  defaultFrameFields,
+  resolveOutput,
 };

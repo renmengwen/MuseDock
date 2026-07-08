@@ -1,0 +1,83 @@
+spec_version: 1
+id: frame-light-leak-cinema
+name: Light Leak Cinema
+description: >
+  Cinematic light leak frame — film grain, lens flare, and editorial 35mm warmth over a hero shot.
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: source/index.html
+
+category: ambient
+subcategory: cinematic
+tags: [cinema, light-leak, film, 35mm, grain, lens-flare]
+
+best_for:
+  - "Cinematic intro"
+  - "Documentary cold open"
+  - "Mood / b-roll"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9", "9:16", "1:1"]
+  fps:
+    default: 60
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 4
+    max_sec: 10
+  alpha: false
+  audio:
+    supported: true
+    expected_inputs: [bgm]
+
+inputs:
+  schema:
+    type: object
+    required: [title]
+    properties:
+      title:
+        type: "string"
+        maxLength: 120
+        description: "Cinematic headline / quote"
+      subtitle:
+        type: "string"
+        maxLength: 120
+        description: "Director / location / date"
+      duration_sec:
+        type: "number"
+        minimum: 4
+        maximum: 10
+        default: 6
+  examples:
+    - {"title": "The first frame is everything", "subtitle": "— directed by html-video, 2026", "duration_sec": 6}
+
+license:
+  spdx: Apache-2.0
+  attribution_required: false
+  redistribution_allowed: true
+  commercial_use: true
+
+author:
+  name: nexu-io
+  url: https://github.com/nexu-io
+  contact: open-design@nexu.io
+
+version: 0.1.0
+changelog:
+  - version: 0.1.0
+    date: 2026-05-27
+    notes: Cherry-picked from open-design/repo/skills/frame-light-leak-cinema/example.html
+
+preview:
+  poster: preview.png
+
+performance:
+  reference_render:
+    duration_sec: 6
+    render_wall_clock_sec: 11
+    machine: "M2 MacBook Air"

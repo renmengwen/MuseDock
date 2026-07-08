@@ -90,6 +90,15 @@ function validateValue(value, schema = {}, path = 'value') {
     }
   }
 
+  if (Array.isArray(value)) {
+    if (schema.minItems != null && value.length < Number(schema.minItems)) {
+      errors.push(`${path} 数量不能少于 ${schema.minItems}`);
+    }
+    if (schema.maxItems != null && value.length > Number(schema.maxItems)) {
+      errors.push(`${path} 数量不能超过 ${schema.maxItems}`);
+    }
+  }
+
   if (typeof value === 'number') {
     if (schema.minimum != null && value < Number(schema.minimum)) {
       errors.push(`${path} 不能小于 ${schema.minimum}`);
@@ -137,6 +146,8 @@ function normalizeFieldSchema(field = {}) {
   if (field.minimum != null) schema.minimum = field.minimum;
   if (field.maximum != null) schema.maximum = field.maximum;
   if (field.items) schema.items = field.items;
+  if (field.minItems != null) schema.minItems = field.minItems;
+  if (field.maxItems != null) schema.maxItems = field.maxItems;
   if (field.properties) schema.properties = field.properties;
   if (field.required && Array.isArray(field.required)) schema.required = field.required;
   return schema;
@@ -211,5 +222,6 @@ module.exports = {
   parseJsonOnlyResponse,
   parseTemplateInputResponse,
   validateTemplateInputs,
+  validateValue,
   getTemplateInputSchema,
 };

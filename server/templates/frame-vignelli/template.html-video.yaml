@@ -1,0 +1,63 @@
+spec_version: 1
+id: frame-vignelli
+name: Vignelli
+description: >
+  Bold typography with red accents
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: index.html
+
+category: social-shorts
+subcategory: portrait-bold
+tags: [vignelli, red, bold, portrait, 9:16]
+
+best_for:
+  - "Portrait social"
+  - "Bold statement card"
+  - "Red-accent promo"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1080, height: 1920 }
+    supported_aspects: ["9:16"]
+  fps:
+    default: 30
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 3
+    max_sec: 30
+    default_sec: 10
+  alpha: false
+  audio: { supported: false }
+
+inputs:
+  schema:
+    type: object
+    properties: {}
+  examples: []
+
+license:
+  spdx: Apache-2.0
+  attribution_required: true
+  redistribution_allowed: true
+  commercial_use: true
+  notes: "Forked from heygen-com/hyperframes registry/examples/vignelli (Apache-2.0)."
+
+assets_attribution:
+  - name: "hyperframes registry/examples/vignelli"
+    license: "Apache-2.0"
+    author: "heygen-com / Hyperframes"
+    url: "https://github.com/heygen-com/hyperframes/tree/main/registry/examples/vignelli"
+
+author:
+  name: "heygen-com / Hyperframes"
+  url: "https://github.com/heygen-com/hyperframes"
+
+version: "0.1.0"
+
+preview:
+  poster: poster.svg

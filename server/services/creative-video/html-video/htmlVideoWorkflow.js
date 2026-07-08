@@ -12,6 +12,7 @@ const frameHtmlAgent = require('./frameHtmlAgent');
 const frameFallbackBuilder = require('./frameFallbackBuilder');
 const { runFrameHtmlPhase, isProviderMissingText } = require('./frameHtmlPhase');
 const { buildRawHtmlFrameProject } = require('./rawHtmlFrameBuilder');
+const { buildMixedFrameProject } = require('./mixedFrameBuilder');
 const environmentDoctor = require('./environmentDoctor');
 const projectStore = require('./projectStore');
 const {
@@ -31,6 +32,7 @@ const { computeSceneSpecSpeechHash, audioMatchesSceneSpec } = require('../sceneS
 const { applyManifestToProjectAudio } = require('../ttsService');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
 const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('./sceneSpecMapper');
+const { matchScenesToTemplates } = require('./sceneTemplateMatcher');
 const { resolveNodeSceneId, validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
 const sfxLibrary = require('./sfxLibrary');
 const sfxPlannerAgent = require('./sfxPlannerAgent');
@@ -800,7 +802,7 @@ function resolveGenerationMode(target = {}) {
   return target.html_video_generation_mode
     || target.htmlVideoGenerationMode
     || target.generation_mode
-    || 'raw_html';
+    || 'per_scene';
 }
 
 function hasSceneSpecScenes(sceneSpec) {
@@ -1107,6 +1109,7 @@ async function generateHtmlVideo(options = {}) {
   const diagnostics = [];
   let model = getModel(services);
   const renderTarget = resolveRenderTarget(target, sceneSpec || {});
+  const generationMode = resolveGenerationMode(renderTarget);
   const templateIndexOptions = buildTemplateIndexOptions(renderTarget, sceneSpec || {});
   const effectivePreferredTemplateId = resolvePreferredTemplateId(preferredTemplateId, target);
   const effectiveLockTemplate = resolveLockTemplate(options, target);
@@ -1154,7 +1157,7 @@ async function generateHtmlVideo(options = {}) {
     compactIndex = reorderCompactIndex(compactIndex, effectivePreferredTemplateId);
   }
 
-  if (!compactIndex.length) {
+  if (!compactIndex.length && generationMode !== 'per_scene') {
     return failure('没有可用的 html-video 模板。', [
       createDiagnostic({ code: 'template_missing', stage: 'template', sub_stage: 'template_select', user_message: '没有可用的 html-video 模板。' }),
     ]);
@@ -1170,43 +1173,87 @@ async function generateHtmlVideo(options = {}) {
     await projectStore.saveSceneSpec(projectDir, sceneSpec);
   }
 
-  const selection = await requestTemplateSelection({
-    model,
-    compactIndex,
-    creativeContext,
-    target: renderTarget,
-    sceneSpec,
-    preferredTemplateId: preferredTemplate.compatible ? effectivePreferredTemplateId : '',
-    lockTemplate: effectiveLockTemplate,
-  });
-  if (!selection.success) {
-    const selectionDiagnostics = selection.diagnostics || [];
-    const code = selectionDiagnostics.some(item => String(item).includes('unknown_template_id'))
-      ? 'template_missing'
-      : 'ai_response_invalid';
-    const message = selection.user_message || selection.message || '模板选择失败。';
-    return failure(`html-video ${message}`, [
-      createDiagnostic({
-        code,
-        stage: 'ai-template-selection',
-        sub_stage: 'template_select',
-        user_message: `html-video ${message}`,
-        details: { diagnostics: selectionDiagnostics },
-      }),
-    ]);
-  }
+  let selection = { success: true, template_id: null, reason: '' };
+  let template = null;
+  let perSceneDecisions = null;
+  if (generationMode === 'per_scene') {
+    if (!hasSceneSpecScenes(sceneSpec)) {
+      return failure('缺少 scene_spec，无法逐场景匹配模板。', [
+        createDiagnostic({
+          code: 'scene_spec_missing',
+          stage: 'project',
+          sub_stage: 'template_select',
+          user_message: '缺少 scene_spec，无法逐场景匹配模板。',
+          details: { generation_mode: generationMode },
+          fallback_allowed: false,
+        }),
+      ], {
+        html_video_project_path: projectDir,
+        project_dir: projectDir,
+      });
+    }
+    const styleTemplateId = preferredTemplate.compatible
+      ? effectivePreferredTemplateId
+      : (compactIndex[0]?.id || '');
+    template = styleTemplateId ? registry.getTemplate(styleTemplateId) : {};
+    perSceneDecisions = matchScenesToTemplates({
+      scenes: sceneSpec.scenes,
+      registry,
+      renderTarget,
+    });
+    for (const decision of perSceneDecisions.values()) {
+      if (decision.source_mode === 'raw_html') {
+        diagnostics.push(createDiagnostic({
+          code: decision.diagnostic?.code || 'scene_template_fallback',
+          stage: 'template',
+          sub_stage: 'template_select',
+          frame_id: decision.scene_id,
+          severity: 'warning',
+          fallback_allowed: true,
+          user_message: decision.fallback_reason || '该场景未匹配到合适模板，已用自由生成兜底。',
+          details: decision.diagnostic?.details || {},
+        }));
+      }
+    }
+  } else {
+    selection = await requestTemplateSelection({
+      model,
+      compactIndex,
+      creativeContext,
+      target: renderTarget,
+      sceneSpec,
+      preferredTemplateId: preferredTemplate.compatible ? effectivePreferredTemplateId : '',
+      lockTemplate: effectiveLockTemplate,
+    });
+    if (!selection.success) {
+      const selectionDiagnostics = selection.diagnostics || [];
+      const code = selectionDiagnostics.some(item => String(item).includes('unknown_template_id'))
+        ? 'template_missing'
+        : 'ai_response_invalid';
+      const message = selection.user_message || selection.message || '模板选择失败。';
+      return failure(`html-video ${message}`, [
+        createDiagnostic({
+          code,
+          stage: 'ai-template-selection',
+          sub_stage: 'template_select',
+          user_message: `html-video ${message}`,
+          details: { diagnostics: selectionDiagnostics },
+        }),
+      ]);
+    }
 
-  const template = registry.getTemplate(selection.template_id);
-  if (!template) {
-    return failure(`未找到 html-video 模板：${selection.template_id}。`, [
-      createDiagnostic({
-        code: 'template_missing',
-        stage: 'template',
-        sub_stage: 'template_select',
-        user_message: `未找到 html-video 模板：${selection.template_id}。`,
-        details: { template_id: selection.template_id },
-      }),
-    ]);
+    template = registry.getTemplate(selection.template_id);
+    if (!template) {
+      return failure(`未找到 html-video 模板：${selection.template_id}。`, [
+        createDiagnostic({
+          code: 'template_missing',
+          stage: 'template',
+          sub_stage: 'template_select',
+          user_message: `未找到 html-video 模板：${selection.template_id}。`,
+          details: { template_id: selection.template_id },
+        }),
+      ]);
+    }
   }
   const templateRenderTarget = resolveTemplateRenderTarget(renderTarget, template);
   const currentSceneSpecHash = computeSceneSpecCheckpointHash(sceneSpec || {});
@@ -1219,9 +1266,12 @@ async function generateHtmlVideo(options = {}) {
     type: 'html_video_template_selected',
     stage: 'project',
     sub_stage: 'template_select',
-    message: `已选择 html-video 模板：${template.name || template.id}。`,
+    message: generationMode === 'per_scene'
+      ? '已启用逐场景模板匹配，未设置全片主模板。'
+      : `已选择 html-video 模板：${template.name || template.id}。`,
     data: {
-      template_id: template.id,
+      template_id: generationMode === 'per_scene' ? null : template.id,
+      style_reference_template_id: generationMode === 'per_scene' ? (template.id || null) : null,
       template_name: template.name || '',
       reason: selection.reason || '',
     },
@@ -1229,7 +1279,6 @@ async function generateHtmlVideo(options = {}) {
 
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
   await materializeCreativeContextAssets(projectDir, creativeContext);
-  const generationMode = resolveGenerationMode(templateRenderTarget);
   if (generationMode === 'raw_html' && !hasSceneSpecScenes(sceneSpec)) {
     return failure('缺少 scene_spec，无法生成 raw_html 帧。', [
       createDiagnostic({
@@ -1288,7 +1337,7 @@ async function generateHtmlVideo(options = {}) {
     const reusedContentGraph = Boolean(contentGraph);
     if (contentGraph) {
       project = await projectStore.writeProjectJson(projectDir, current => {
-        current.template_id = template.id || current.template_id;
+        current.template_id = generationMode === 'per_scene' ? null : (template.id || current.template_id);
         current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
         current.content_graph = contentGraph;
         markCheckpointStage(current, 'content_graph', {
@@ -1399,7 +1448,7 @@ async function generateHtmlVideo(options = {}) {
       const contentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
       project = await projectStore.writeProjectJson(projectDir, current => {
         if (!reusedContentGraph) invalidateFrameHtmlResumeState(current);
-        current.template_id = template.id || current.template_id;
+        current.template_id = generationMode === 'per_scene' ? null : (template.id || current.template_id);
         current.content_graph = contentGraph;
         current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
         current.generation_checkpoint.target = {
@@ -1442,21 +1491,35 @@ async function generateHtmlVideo(options = {}) {
       failure,
       shouldReuseFrameHtml,
       invalidateFrameHtmlDependents,
+      templateRoutingDecisions: perSceneDecisions,
     });
     if (!frameHtmlResult.ok) return frameHtmlResult.failure;
     project = frameHtmlResult.project;
     contentGraph = frameHtmlResult.contentGraph;
     try {
-      project = await buildRawHtmlFrameProject({
-        projectDir,
-        workflowId,
-        runId,
-        graph: contentGraph,
-        sceneSpec,
-        target: templateRenderTarget,
-        template,
-        mediaOptions,
-      });
+      project = generationMode === 'per_scene'
+        ? await buildMixedFrameProject({
+          projectDir,
+          workflowId,
+          runId,
+          graph: contentGraph,
+          sceneSpec,
+          target: templateRenderTarget,
+          registry,
+          decisions: perSceneDecisions,
+          mediaOptions,
+          generationCheckpoint: project?.generation_checkpoint,
+        })
+        : await buildRawHtmlFrameProject({
+          projectDir,
+          workflowId,
+          runId,
+          graph: contentGraph,
+          sceneSpec,
+          target: templateRenderTarget,
+          template,
+          mediaOptions,
+        });
       project.generation_checkpoint = objectOrEmpty(project.generation_checkpoint);
       project.generation_checkpoint.agent_pipeline = [
         { agent: AGENTS.contentGraph, stage: STAGES.contentGraph, artifact: 'content-graph.json' },
@@ -1756,8 +1819,8 @@ async function generateHtmlVideo(options = {}) {
     success: true,
     message: 'html-video 成片完成。',
     render_mode: 'html-video',
-    template_id: template.id,
-    template_reason: selection.reason,
+    template_id: generationMode === 'per_scene' ? null : template.id,
+    template_reason: generationMode === 'per_scene' ? '逐场景模板匹配。' : selection.reason,
     template_inputs: templateInputs,
     project: rendered.project,
     project_dir: projectDir,
@@ -1889,6 +1952,7 @@ module.exports = {
   callTextModel,
   generateContentGraphWithRetry,
   buildInitialProject,
+  resolveGenerationMode,
   buildAssetUsageReport,
   shouldReuseFrameHtml,
   resolveRenderTarget,

@@ -1,0 +1,139 @@
+spec_version: 1
+id: frame-data-rollup
+name: Data Rollup
+description: >
+  A native Remotion data-animation frame: bars grow from zero by real data via
+  spring physics while the figures roll up from 0 to their target in sync. The
+  first template that uses Remotion's frame clock directly (useCurrentFrame +
+  interpolate + spring) rather than the HTML bridge — this is what makes numbers
+  visibly come alive, which a static HTML chart can't. Meant to be dropped onto a
+  single data frame inside an otherwise hyperframes video, as a user-chosen
+  motion enhancement.
+
+engine: remotion
+engine_version: ^4.0.0
+source_entry: source/entry.ts
+native:
+  compositionId: DataRollup
+
+category: data-viz
+subcategory: bar-chart
+tags: [data, chart, bar, rollup, count-up, remotion, native, animated, kpi]
+
+best_for:
+  - "A data frame where the numbers should animate, not sit static"
+  - "Weekly metrics / growth bars driven by real values"
+  - "Enhancing one data segment of an otherwise hyperframes video"
+
+not_for:
+  - "Decorative title cards or brand intros (use a hyperframes template)"
+  - "Datasets with more than ~7 bars (they get cramped)"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9", "9:16", "1:1"]
+  fps:
+    default: 30
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 3
+    max_sec: 8
+  alpha: true
+  audio:
+    supported: false
+    expected_inputs: []
+
+inputs:
+  schema:
+    type: object
+    required: [data]
+    properties:
+      data:
+        type: object
+        required: [items]
+        properties:
+          title:
+            type: "string"
+            maxLength: 48
+            description: "Optional heading shown top-left"
+          unit:
+            type: "string"
+            maxLength: 4
+            description: "Optional suffix after each rolled number, e.g. K or %"
+          items:
+            type: "array"
+            maxItems: 7
+            description: "The bars; each grows to value and rolls 0→value"
+            items:
+              type: object
+              required: [label, value]
+              properties:
+                label: { type: "string", maxLength: 16 }
+                value: { type: "number" }
+      accent:
+        type: "string"
+        description: "Bar + number color (hex). Default #FF5A2C"
+      background:
+        type: "string"
+        description: "Background color (hex). Default #0E0E10"
+      foreground:
+        type: "string"
+        description: "Title / label / baseline color (hex). Default #F5F5F2"
+  examples:
+    - {"data": {"title": "This week on GitHub", "items": [{"label": "Mon", "value": 1200}, {"label": "Tue", "value": 2400}, {"label": "Wed", "value": 1800}, {"label": "Thu", "value": 4200}, {"label": "Fri", "value": 3600}]}}
+    - {"data": {"title": "Stars by month", "unit": "K", "items": [{"label": "Mar", "value": 12}, {"label": "Apr", "value": 28}, {"label": "May", "value": 47}]}, "accent": "#34D399", "background": "#0B1120"}
+
+license:
+  spdx: Apache-2.0
+  attribution_required: true
+  redistribution_allowed: true
+  commercial_use: true
+
+provenance:
+  # L1 — no external design lineage; this is an original component.
+  origin:
+    name: "none"
+    kind: none
+    reference: >
+      Original work. Standard animated-bar-chart vocabulary (count-up figures,
+      spring-grown bars) implemented from scratch as React-tsx for Remotion; not
+      derived from any specific studio or upstream template.
+  # L2 — no upstream skill; written directly against the Remotion API.
+  via_skill:
+    name: "none"
+    author: "nexu-io"
+    url: https://github.com/nexu-io/html-video
+    license: Apache-2.0
+    source_file: "(original — packages/adapter-remotion native template, written for html-video)"
+  # L3 — what this template does
+  transformation: >
+    Original Remotion React-tsx composition. Bars grow with spring() on a staggered
+    per-bar delay; figures roll 0→value via interpolate tracking the same growth
+    curve so number and bar settle together. All layout is computed off the live
+    canvas size (useVideoConfig) so 16:9 / 9:16 / 1:1 all render correctly. System
+    font stack only — no external fonts or assets, keeping the headless render
+    deterministic and offline-safe.
+
+author:
+  name: nexu-io
+  url: https://github.com/nexu-io
+  contact: open-design@nexu.io
+
+version: 0.1.0
+changelog:
+  - version: 0.1.0
+    date: 2026-06-07
+    notes: First native Remotion template (RFC-08 Phase 2) — data-driven bar growth + number rollup.
+
+preview:
+  poster: preview.png
+
+performance:
+  reference_render:
+    duration_sec: 5
+    render_wall_clock_sec: 45
+    machine: "M2 MacBook Air"

@@ -3,7 +3,7 @@ const { analyzeTimelineMismatch } = require('./html-video/timelineRepair');
 
 const MODE = 'repair_and_resume';
 const ENVIRONMENT_CODES = new Set(['ffmpeg_not_configured', 'playwright_not_configured']);
-const RETRY_META_FAILURE_CODES = new Set(['resume_action_not_configured', 'retry_executor_failed']);
+const RETRY_META_FAILURE_CODES = new Set(['resume_action_not_configured', 'retry_executor_failed', 'project_dir_missing']);
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -198,6 +198,20 @@ function classifyCreativeWorkflowFailure(input = {}) {
     };
   }
 
+  const lastFailureMessageCode = safeString(lastFailure.message)
+    ? inferCodeFromText(lastFailure.stage || lastFailure.sub_stage, lastFailure.message)
+    : '';
+  if (lastFailureMessageCode) {
+    return {
+      code: lastFailureMessageCode,
+      sub_stage: safeString(lastFailure.sub_stage),
+      frame_id: safeString(lastFailure.frame_id),
+      message: safeString(lastFailure.message),
+      diagnostics,
+      source: 'last_failure_message',
+    };
+  }
+
   if (checkpoint) {
     return { ...checkpoint, diagnostics };
   }
@@ -282,6 +296,7 @@ function retryPlan(classification, repairAction, retryFrom, patch = {}) {
 
 function createCreativeWorkflowRetryPlan(input = {}) {
   const workflow = objectOrEmpty(input.workflow);
+  const hasProject = input.project && typeof input.project === 'object' && !Array.isArray(input.project);
   const project = objectOrEmpty(input.project);
   const classification = classifyCreativeWorkflowFailure(input);
   const code = classification.code;
@@ -347,6 +362,13 @@ function createCreativeWorkflowRetryPlan(input = {}) {
   }
 
   if (code === 'timeline_duration_unreasonable') {
+    if (!hasProject) {
+      return basePlan(classification, {
+        can_retry: false,
+        fallback_allowed: false,
+        user_message: classification.message || '口播或时间轴超过目标时长，但尚未生成 html-video 工程，无法自动恢复。请缩短旁白或调高目标时长后重新创建任务。',
+      });
+    }
     const analysis = analyzeTimelineMismatch({ project });
     const repairAction = analysis.repair_action || 'repair_timeline';
     return retryPlan(classification, repairAction, 'timeline_check', {

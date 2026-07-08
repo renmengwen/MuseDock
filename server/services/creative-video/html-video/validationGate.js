@@ -229,22 +229,26 @@ async function validateHtmlVideoProject({
   const diagnostics = [];
   const frames = arrayOrEmpty(input.frames);
 
-  validateTemplate({
-    diagnostics,
-    templateRegistry,
-    templateId: input.template_id,
-    inputs: input.template_inputs,
-    ref: 'project',
-    stage: 'template',
-    options,
-    validateInputs: frames.some(frame => frame.source_mode !== 'raw_html'),
-  });
-
-  frames.forEach(frame => {
+  if (input.template_id) {
     validateTemplate({
       diagnostics,
       templateRegistry,
-      templateId: frame.template_id || input.template_id,
+      templateId: input.template_id,
+      inputs: input.template_inputs,
+      ref: 'project',
+      stage: 'template',
+      options,
+      validateInputs: frames.some(frame => frame.source_mode !== 'raw_html'),
+    });
+  }
+
+  frames.forEach(frame => {
+    const frameTemplateId = frame.template_id || input.template_id;
+    if (frame.source_mode === 'raw_html' && !frameTemplateId) return;
+    validateTemplate({
+      diagnostics,
+      templateRegistry,
+      templateId: frameTemplateId,
       inputs: { ...objectOrEmpty(input.template_inputs), ...objectOrEmpty(frame.inputs) },
       ref: frame.id || frame.scene_id,
       stage: 'frame',

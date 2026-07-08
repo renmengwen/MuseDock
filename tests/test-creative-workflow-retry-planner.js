@@ -249,6 +249,51 @@ function project(overrides = {}) {
   });
   assert.equal(audioTooLongPlan.repair_action, 'repair_script_and_timeline');
 
+  const audioTooLongBeforeProjectPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      result: null,
+      error: {
+        stage: 'audio',
+        message: '口播超过目标时长，自动压缩失败：压缩后的旁白仍超过目标时长：预计 143.1 秒，目标 120 秒。',
+      },
+      last_failure: {
+        stage: 'audio',
+        message: '口播超过目标时长，自动压缩失败：压缩后的旁白仍超过目标时长：预计 143.1 秒，目标 120 秒。',
+      },
+    }),
+    project: null,
+  });
+  assert.equal(audioTooLongBeforeProjectPlan.can_retry, false);
+  assert.equal(audioTooLongBeforeProjectPlan.code, 'timeline_duration_unreasonable');
+  assert.match(audioTooLongBeforeProjectPlan.user_message, /口播超过目标时长/);
+
+  const projectDirMissingMetaPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      result: null,
+      error: {
+        code: 'project_dir_missing',
+        message: '未找到 html-video 工程目录，无法恢复。',
+      },
+      last_failure: {
+        code: 'project_dir_missing',
+        message: '未找到 html-video 工程目录，无法恢复。',
+      },
+      retry: {
+        attempts: [{
+          status: 'failed',
+          previous_failure: {
+            stage: 'audio',
+            message: '口播超过目标时长，自动压缩失败：压缩后的旁白仍超过目标时长：预计 143.1 秒，目标 120 秒。',
+          },
+        }],
+      },
+    }),
+    project: null,
+  });
+  assert.equal(projectDirMissingMetaPlan.can_retry, false);
+  assert.equal(projectDirMissingMetaPlan.code, 'timeline_duration_unreasonable');
+  assert.match(projectDirMissingMetaPlan.user_message, /口播超过目标时长/);
+
   const renderProject = project();
   markCheckpointFrame(renderProject, 'render', 'scene_01', { status: 'done', mp4_path: 'frames/scene_01.mp4' });
   markCheckpointFrame(renderProject, 'render', 'scene_04', { status: 'failed', diagnostic_code: 'render_failed_timeout' });
