@@ -13,6 +13,8 @@ const frameFallbackBuilder = require('./frameFallbackBuilder');
 const { runFrameHtmlPhase, isProviderMissingText } = require('./frameHtmlPhase');
 const { buildRawHtmlFrameProject } = require('./rawHtmlFrameBuilder');
 const { buildMixedFrameProject } = require('./mixedFrameBuilder');
+const { buildVisualPlan } = require('./visualPlanService');
+const { matchVisualBeatsToRenderers } = require('./visualRouteMatcher');
 const {
   runGeneratedImagePhase,
   hydrateGeneratedAssetsFromProject,
@@ -1183,6 +1185,10 @@ async function generateHtmlVideo(options = {}) {
   let selection = { success: true, template_id: null, reason: '' };
   let template = null;
   let perSceneDecisions = null;
+  // beat 级视觉计划（Task 4 建帧路由会用内存版 visualPlan，含 source_scene）
+  let visualPlan = null;
+  let persistableVisualPlan = null;
+  let renderDecisions = null;
   if (generationMode === 'per_scene') {
     if (!hasSceneSpecScenes(sceneSpec)) {
       return failure('缺少 scene_spec，无法逐场景匹配模板。', [
@@ -1208,6 +1214,14 @@ async function generateHtmlVideo(options = {}) {
       registry,
       renderTarget,
     });
+    visualPlan = buildVisualPlan({ sceneSpec, workflowId });
+    const visualDecisions = matchVisualBeatsToRenderers({ visualPlan, registry, renderTarget });
+    renderDecisions = Array.from(visualDecisions.values());
+    // 持久化版剥离 source_scene，防止 project.json 膨胀
+    persistableVisualPlan = {
+      ...visualPlan,
+      beats: visualPlan.beats.map(({ source_scene, ...beat }) => beat),
+    };
     for (const decision of perSceneDecisions.values()) {
       if (decision.source_mode === 'raw_html') {
         diagnostics.push(createDiagnostic({
@@ -1417,6 +1431,10 @@ async function generateHtmlVideo(options = {}) {
     if (contentGraph) {
       project = await projectStore.writeProjectJson(projectDir, current => {
         current.template_id = generationMode === 'per_scene' ? null : (template.id || current.template_id);
+        if (generationMode === 'per_scene' && persistableVisualPlan) {
+          current.visual_plan = persistableVisualPlan;
+          current.render_decisions = renderDecisions;
+        }
         current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
         current.content_graph = contentGraph;
         markCheckpointStage(current, 'content_graph', {
@@ -1529,6 +1547,10 @@ async function generateHtmlVideo(options = {}) {
       project = await projectStore.writeProjectJson(projectDir, current => {
         if (!reusedContentGraph) invalidateFrameHtmlResumeState(current);
         current.template_id = generationMode === 'per_scene' ? null : (template.id || current.template_id);
+        if (generationMode === 'per_scene' && persistableVisualPlan) {
+          current.visual_plan = persistableVisualPlan;
+          current.render_decisions = renderDecisions;
+        }
         current.content_graph = contentGraph;
         current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
         current.generation_checkpoint.target = {
@@ -1607,6 +1629,11 @@ async function generateHtmlVideo(options = {}) {
           template,
           mediaOptions,
         });
+      // buildMixedFrameProject 会重建 project，这里要重新挂上视觉计划与路由决策
+      if (generationMode === 'per_scene' && persistableVisualPlan) {
+        project.visual_plan = persistableVisualPlan;
+        project.render_decisions = renderDecisions;
+      }
       project.generation_checkpoint = objectOrEmpty(project.generation_checkpoint);
       project.generation_checkpoint.agent_pipeline = [
         { agent: AGENTS.contentGraph, stage: STAGES.contentGraph, artifact: 'content-graph.json' },

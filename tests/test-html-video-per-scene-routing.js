@@ -3,6 +3,13 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 
+const aiImageModel = require('../server/services/ai/aiImageModel');
+
+// 测试隔离：本机若配置了 image 模型，生图链路会混入本测试的 mock 计数，统一按未配置处理。
+aiImageModel.isConfigured = async () => false;
+
+const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
+const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 const { matchScenesToTemplates } = require('../server/services/creative-video/html-video/sceneTemplateMatcher');
 const { buildMixedFrameProject } = require('../server/services/creative-video/html-video/mixedFrameBuilder');
@@ -125,6 +132,91 @@ const { resolveGenerationMode } = require('../server/services/creative-video/htm
   const rawSource = resolveFrameRenderSource({ projectDir, project, frame: freeFrame });
   assert.equal(rawSource.needs_materialize, false);
   assert.equal(rawSource.html_path, 'frames/03-scene_free.html');
+
+  // 端到端：generateHtmlVideo（per_scene）必须把 beat 级视觉计划与路由决策持久化进 project。
+  const workflowRootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-per-scene-workflow-'));
+  const workflowSceneSpec = {
+    title: '逐场景视觉计划',
+    aspect_ratio: '16:9',
+    scenes: sceneSpec.scenes,
+  };
+  const originalRenderHtmlVideoProject = projectOrchestrator.renderHtmlVideoProject;
+  projectOrchestrator.renderHtmlVideoProject = async ({ project: renderProject, projectDir: renderProjectDir }) => ({
+    success: true,
+    message: 'mock render success',
+    project: renderProject,
+    project_dir: renderProjectDir,
+    html_video_project_path: renderProjectDir,
+    output_path: path.join(renderProjectDir, 'exports', 'output.mp4'),
+    diagnostics: [],
+  });
+  let result;
+  try {
+    result = await workflow.generateHtmlVideo({
+      workflowId: 'wf-per-scene-visual-plan',
+      runId: 'run-per-scene-visual-plan',
+      rootDir: workflowRootDir,
+      sceneSpec: workflowSceneSpec,
+      creativeContext: { input: { raw_text: '逐场景视觉计划' } },
+      target: { generateAudio: false, generateCaptions: false },
+      templateRegistry: registry,
+      skipValidation: true,
+      services: {
+        aiTextModel: {
+          callTextModel: async request => {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: '逐场景视觉计划',
+                  nodes: workflowSceneSpec.scenes.map(scene => ({
+                    id: scene.id,
+                    kind: scene.kind,
+                    label: scene.visual_text.headline,
+                    durationSec: scene.duration_sec,
+                    text: scene.narration_text,
+                  })),
+                  edges: workflowSceneSpec.scenes.slice(1).map((scene, index) => ({
+                    from: workflowSceneSpec.scenes[index].id,
+                    to: scene.id,
+                    kind: 'sequence',
+                  })),
+                }),
+              };
+            }
+            const frameId = request.audit?.frame_id || 'scene_free';
+            return {
+              success: true,
+              text: `<!doctype html><html><body><main data-frame-id="${frameId}"><h1 data-text-key="headline">自由内容</h1><p data-text-key="subtitle">字幕</p><section data-text-key="body">正文</section></main></body></html>`,
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      },
+    });
+  } finally {
+    projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
+  }
+  assert.equal(result.success, true, JSON.stringify({
+    message: result.message,
+    diagnostics: result.html_video_diagnostics,
+  }, null, 2));
+  assert.ok(result.project.visual_plan);
+  assert.ok(Array.isArray(result.project.visual_plan.beats));
+  assert.ok(result.project.visual_plan.beats.length >= workflowSceneSpec.scenes.length);
+  assert.ok(result.project.visual_plan.beats.every(beat => !('source_scene' in beat)));
+  assert.ok(result.project.visual_plan.style_profile && result.project.visual_plan.style_profile.id);
+  assert.ok(Array.isArray(result.project.render_decisions));
+  assert.ok(result.project.render_decisions.length >= result.project.frames.length);
+  assert.ok(result.project.render_decisions.every(item => item.beat_id || item.scene_id));
+
+  // 持久化校验：project.json 落盘后经 normalizeProject 仍保留两个新字段。
+  const savedProject = JSON.parse(await fs.readFile(path.join(result.html_video_project_path, 'project.json'), 'utf8'));
+  assert.ok(Array.isArray(savedProject.visual_plan.beats));
+  assert.ok(savedProject.visual_plan.beats.every(beat => !('source_scene' in beat)));
+  assert.ok(Array.isArray(savedProject.render_decisions));
+  assert.ok(savedProject.render_decisions.length >= savedProject.frames.length);
 
   console.log('html-video per-scene routing tests passed');
 })().catch(error => {

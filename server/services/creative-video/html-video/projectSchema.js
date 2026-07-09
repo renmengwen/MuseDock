@@ -560,6 +560,8 @@ function normalizeProject(project = {}) {
     output: normalizeOutput(input.output),
     template_schema: objectOrEmpty(input.template_schema),
     content_graph: normalizeContentGraph(input.content_graph),
+    visual_plan: objectOrEmpty(input.visual_plan),
+    render_decisions: Array.isArray(input.render_decisions) ? input.render_decisions : [],
     frames: arrayOrEmpty(input.frames).map(normalizeFrame),
     timeline: normalizeTimeline(input.timeline),
     assets: arrayOrEmpty(input.assets).map(asset => ({ ...objectOrEmpty(asset) })),
