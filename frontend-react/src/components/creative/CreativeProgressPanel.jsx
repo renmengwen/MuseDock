@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { normalizeWorkflowStages } from './creativeDisplay.js';
+import { STAGE_LABELS, normalizeWorkflowStages } from './creativeDisplay.js';
 import {
   normalizeWorkflowProgress,
   summarizeProgressEvent,
@@ -35,11 +35,15 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
     ? (workflow.last_failure?.stage || workflow.error?.stage || workflow.current_stage || activeStage?.id || '')
     : (workflow.current_stage || activeStage?.id || '');
   const progress = normalizeWorkflowProgress(workflow);
+  const isFailed = workflow.status === 'failed';
   const isActiveProgress = !['done', 'failed'].includes(workflow.status) && progress < 100;
-  const currentMessage = workflow.current_stage_message
-    || activeStage?.message
-    || message
-    || '正在获取最新进度...';
+  // 失败时错误详情由恢复建议面板承载，这里只说明中断位置，避免同一句错误全页重复
+  const currentMessage = isFailed
+    ? `创作已在「${STAGE_LABELS[stageId] || stageId || '未知阶段'}」阶段中断，详情见下方恢复建议。`
+    : (workflow.current_stage_message
+      || activeStage?.message
+      || message
+      || '正在获取最新进度...');
 
   return (
     <section className="grid gap-3 rounded-lg border border-[#e7e9ee] bg-[#f8fafc] p-4" aria-label="当前进展">
@@ -55,7 +59,7 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
         aria-label={`总进度 ${progress}%`}
       >
         <span
-          className={`block h-full rounded-full bg-[#111827] transition-[width] duration-200 ${isActiveProgress ? 'shadow-[0_0_0_4px_rgba(17,24,39,.12)]' : ''}`}
+          className={`block h-full rounded-full transition-[width] duration-200 ${isFailed ? 'bg-red-500' : 'bg-[#111827]'} ${isActiveProgress ? 'shadow-[0_0_0_4px_rgba(17,24,39,.12)]' : ''}`}
           style={{ width: `${progress}%` }}
         />
       </div>

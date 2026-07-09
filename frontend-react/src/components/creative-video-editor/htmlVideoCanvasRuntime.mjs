@@ -20,9 +20,10 @@ export function frameDurationMs(frame) {
 export function serializeDocument(doc) {
   const root = doc.documentElement.cloneNode(true);
   root.querySelectorAll('[data-hv-canvas-freeze],[data-hv-canvas-editor-style],[data-hv-canvas-viewport-style],[data-hv-editor-overlay]').forEach(node => node.remove());
-  root.querySelectorAll('[data-hv-canvas-selected],[data-hv-edit-id]').forEach(node => {
+  root.querySelectorAll('[data-hv-canvas-selected],[data-hv-edit-id],[data-hv-canvas-hover]').forEach(node => {
     node.removeAttribute('data-hv-canvas-selected');
     node.removeAttribute('data-hv-edit-id');
+    node.removeAttribute('data-hv-canvas-hover');
   });
   root.removeAttribute('data-hv-canvas-selected');
   const doctype = doc.doctype

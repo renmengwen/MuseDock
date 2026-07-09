@@ -233,7 +233,7 @@ export function ProviderList({ providerList, modelTypes, modelTypeInfo, modelPro
               type="button"
               onClick={saveDraft}
             >
-              保存
+              应用到列表
             </button>
           </DialogFooter>
         </DialogContent>

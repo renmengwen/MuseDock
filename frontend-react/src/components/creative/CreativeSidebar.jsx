@@ -58,6 +58,7 @@ export function CreativeSidebar({
       <Link
         className="inline-flex size-[34px] items-center justify-center rounded-lg bg-white text-[#4b5563] shadow-[0_8px_20px_rgba(15,23,42,.08)] transition hover:bg-[#f3f4f6] hover:text-[#111827]"
         to="/settings"
+        state={{ from: `${window.location.pathname}` }}
         aria-label="打开设置"
       >
         <Settings2 size={16} aria-hidden="true" />
@@ -195,6 +196,7 @@ export function CreativeSidebar({
         <Link
           className="grid min-h-11 grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-lg px-2.5 py-2 text-[#30343b] transition hover:bg-white hover:text-[#111827]"
           to="/settings"
+          state={{ from: `${window.location.pathname}` }}
         >
           <Settings2 size={16} aria-hidden="true" />
           <span className="grid min-w-0 gap-0.5">

@@ -87,16 +87,15 @@ export function HtmlVideoElementInspector({
         <h3 className="m-0 text-sm font-bold">当前元素</h3>
         <div className="flex items-center gap-2">
           {dirty ? <span className="text-xs font-bold text-amber-300">● 未保存</span> : null}
-          {canUndo ? (
-            <button
-              type="button"
-              className="min-h-7 rounded-md border border-slate-600 bg-slate-900 px-2 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55"
-              disabled={disabled}
-              onClick={onUndo}
-            >
-              撤销
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="min-h-7 rounded-md border border-slate-600 bg-slate-900 px-2 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55"
+            disabled={disabled || !canUndo}
+            title="撤销上一步画布修改（Ctrl+Z）"
+            onClick={onUndo}
+          >
+            撤销
+          </button>
         </div>
       </div>
       {!editingReady ? (

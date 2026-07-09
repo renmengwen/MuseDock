@@ -10,8 +10,8 @@ const DARK_SCROLLBAR_CLASS = '[scrollbar-width:thin] [scrollbar-color:#64748b_#0
 
 const secondaryButtonClass = 'min-h-7 rounded-md border border-slate-700 bg-slate-900 px-2.5 text-xs font-bold text-slate-100 transition hover:border-[#25f4ee]/60 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-55';
 
-export function HtmlVideoCanvasEditor({ editor }) {
-  const canvas = useCanvasEditing(editor);
+export function HtmlVideoCanvasEditor({ editor, onDirtyChange }) {
+  const canvas = useCanvasEditing(editor, { onDirtyChange });
   const {
     frame,
     rawHtml,
@@ -37,6 +37,9 @@ export function HtmlVideoCanvasEditor({ editor }) {
     setPendingFrameId,
     replay,
     jumpToEnd,
+    pauseAndEdit,
+    autoEditOnLoad,
+    setAutoEditOnLoad,
     reloadHtml,
     handleIframeLoad,
     undoEdit,
@@ -68,8 +71,20 @@ export function HtmlVideoCanvasEditor({ editor }) {
         <div className="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2.5 overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
           <div className="flex items-center justify-between gap-2 border-b border-slate-700 bg-slate-800 px-2.5 py-2 max-[720px]:flex-col max-[720px]:items-start">
             <span className="text-xs text-slate-300">{previewError || (playbackState === 'playing' ? '正在播放镜头动画...' : editingReady ? '已停在镜头可编辑帧，可开始编辑。' : '正在准备预览...')}</span>
-            <div className="flex flex-wrap justify-end gap-1.5">
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <label className="inline-flex cursor-pointer select-none items-center gap-1.5 text-xs text-slate-300">
+                <input
+                  type="checkbox"
+                  className="size-3.5 accent-[#25f4ee]"
+                  checked={autoEditOnLoad}
+                  onChange={event => setAutoEditOnLoad(event.target.checked)}
+                />
+                <span>切帧后直接编辑</span>
+              </label>
               <button className={secondaryButtonClass} type="button" disabled={disabled} onClick={replay}>重新播放</button>
+              {playbackState === 'playing' ? (
+                <button className={secondaryButtonClass} type="button" disabled={disabled} onClick={pauseAndEdit}>停在当前画面</button>
+              ) : null}
               <button className={secondaryButtonClass} type="button" disabled={disabled} onClick={jumpToEnd}>跳到结尾并编辑</button>
             </div>
           </div>

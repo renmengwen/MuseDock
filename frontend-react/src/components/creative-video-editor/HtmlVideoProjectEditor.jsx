@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { DropdownMenu as DropdownMenuPrimitive } from 'radix-ui';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog.jsx';
 import { CaptionsPanel } from './CaptionsPanel.jsx';
 import { ExportsPanel } from './ExportsPanel.jsx';
 import { HtmlVideoAiEditPanel } from './HtmlVideoAiEditPanel.jsx';
@@ -43,6 +44,10 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
   // 低频面板收进“更多”菜单，菜单项打开受控 Dialog；
   // onSelect 必须 preventDefault，否则菜单关闭的焦点归还会和 Dialog 焦点陷阱竞态
   const [activePanel, setActivePanel] = useState(null);
+  // 画布未保存状态（由 HtmlVideoCanvasEditor 上报）：导出/重建前用于拦截提示
+  const [canvasDirty, setCanvasDirty] = useState(false);
+  // 'export'（画布有未保存修改时的导出确认）| 'materialize'（重新生成 HTML 确认）
+  const [pendingAction, setPendingAction] = useState(null);
 
   function openPanel(event, panel) {
     event.preventDefault();
@@ -56,6 +61,19 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
     if (result) onExported?.(result);
   }
 
+  function requestExport() {
+    if (canvasDirty) {
+      setPendingAction('export');
+      return;
+    }
+    handleExport({});
+  }
+
+  function requestMaterialize(event) {
+    event.preventDefault();
+    setPendingAction('materialize');
+  }
+
   function patchFrame(payload) {
     if (payload?.type === 'frame_patch') return editor.saveFrame(payload.frame_id, payload);
     return editor.saveTemplateInputs(payload);
@@ -63,7 +81,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
 
   return (
     <section className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 rounded-lg border border-slate-700 bg-slate-900 p-2 text-slate-100 shadow-[0_18px_48px_rgba(15,23,42,.18)]">
-      <ProjectStatusBar status={editor.status} message={editor.message} dirtyRequiresRender={editor.dirtyRequiresRender} />
+      <ProjectStatusBar status={editor.status} message={editor.message} dirtyRequiresRender={editor.dirtyRequiresRender} canvasDirty={canvasDirty} />
       <div className="flex flex-wrap items-center gap-2">
         <PanelDialog label="字幕 / 旁白" title="字幕 / 旁白">
           <div className="grid content-start gap-3">
@@ -81,12 +99,10 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         </PanelDialog>
         <PanelDialog label="AI 修改" title="AI 修改" contentClassName="w-[min(720px,calc(100vw-32px))] max-w-[720px] bg-[#f8fafc] text-[#111827] sm:max-w-[720px]">
           <div className="grid content-start gap-3">
-            <NaturalLanguageEditBox
-              tone="light"
-              disabled={disabled}
-              editing={editor.status === 'editing'}
-              onSubmit={editor.applyNaturalLanguageEdit}
-            />
+            <p className="m-0 text-xs leading-relaxed text-[#69717e]">「当前帧」只作用于所选镜头；「全片」会处理所有镜头。生成结果先进入草稿，接受后才会生效。</p>
+            {canvasDirty ? (
+              <p className="m-0 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">画布有未保存的修改，AI 生成的草稿不会包含这些修改。建议先回画布点「保存修改」。</p>
+            ) : null}
             <HtmlVideoDraftPanel
               frame={selectedFrame}
               disabled={disabled}
@@ -104,6 +120,13 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
               onAcceptPlan={editor.acceptEditPlan}
               onDiscardPlan={editor.discardEditPlan}
             />
+            <NaturalLanguageEditBox
+              tone="light"
+              title="全片 · 自然语言修改"
+              disabled={disabled}
+              editing={editor.status === 'editing'}
+              onSubmit={editor.applyNaturalLanguageEdit}
+            />
           </div>
         </PanelDialog>
         <DropdownMenuPrimitive.Root>
@@ -117,17 +140,41 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
               <DropdownMenuPrimitive.Item className={MENU_ITEM_CLASS} onSelect={(event) => openPanel(event, 'exports')}>导出记录</DropdownMenuPrimitive.Item>
               <DropdownMenuPrimitive.Item className={MENU_ITEM_CLASS} onSelect={(event) => openPanel(event, 'sfx')}>音效</DropdownMenuPrimitive.Item>
               <DropdownMenuPrimitive.Separator className="my-1 h-px bg-slate-700" />
-              <DropdownMenuPrimitive.Item className={MENU_ITEM_CLASS} onSelect={() => editor.materializeProject({})}>
+              <DropdownMenuPrimitive.Item className={MENU_ITEM_CLASS} onSelect={requestMaterialize}>
                 {editor.status === 'materializing' ? '正在重新生成 HTML...' : '重新生成 HTML'}
               </DropdownMenuPrimitive.Item>
               <DropdownMenuPrimitive.Item className={MENU_ITEM_CLASS} onSelect={editor.load}>重新加载</DropdownMenuPrimitive.Item>
             </DropdownMenuPrimitive.Content>
           </DropdownMenuPrimitive.Portal>
         </DropdownMenuPrimitive.Root>
-        <button className={`${PRIMARY_TOOL_BUTTON_CLASS} ml-auto`} type="button" disabled={disabled} onClick={() => handleExport({})}>
+        <button
+          className={`${PRIMARY_TOOL_BUTTON_CLASS} ml-auto ${editor.dirtyRequiresRender && editor.status !== 'exporting' ? 'ring-2 ring-amber-300' : ''}`}
+          type="button"
+          disabled={disabled}
+          title={editor.dirtyRequiresRender ? '有已保存的修改尚未导出到成片' : undefined}
+          onClick={requestExport}
+        >
           {editor.status === 'exporting' ? '正在导出成片...' : '导出成片'}
         </button>
       </div>
+      <ConfirmDialog
+        open={pendingAction !== null}
+        onOpenChange={value => {
+          if (!value) setPendingAction(null);
+        }}
+        title={pendingAction === 'materialize' ? '重新生成 HTML' : '画布有未保存的修改'}
+        description={pendingAction === 'materialize'
+          ? '将根据工程数据重建全部镜头页面，画布中未保存的修改会丢失，已保存的编辑以工程数据为准。'
+          : '导出的成片不会包含画布中未保存的修改。可先回画布点「保存修改」，或仍按已保存内容导出。'}
+        destructive={pendingAction === 'materialize'}
+        confirmText={pendingAction === 'materialize' ? '重新生成' : '仍要导出'}
+        onConfirm={() => {
+          const action = pendingAction;
+          setPendingAction(null);
+          if (action === 'materialize') editor.materializeProject({});
+          else if (action === 'export') handleExport({});
+        }}
+      />
       <Dialog open={activePanel === 'layout-qa'} onOpenChange={(open) => { if (!open) setActivePanel(null); }}>
         <DialogContent className={`max-h-[84vh] overflow-y-auto overflow-x-hidden ${LIGHT_SCROLLBAR_CLASS}`}>
           <DialogHeader><DialogTitle>布局检查</DialogTitle></DialogHeader>
@@ -182,7 +229,7 @@ export function HtmlVideoProjectEditor({ editor, onExported }) {
         </DialogContent>
       </Dialog>
       <div className="grid min-h-0 min-w-0 grid-cols-1">
-        <HtmlVideoCanvasEditor editor={editor} />
+        <HtmlVideoCanvasEditor editor={editor} onDirtyChange={setCanvasDirty} />
       </div>
     </section>
   );

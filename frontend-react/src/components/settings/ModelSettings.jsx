@@ -12,7 +12,10 @@ export function ModelSettings({ modelSettings }) {
         </div>
       ) : null}
 
-      <div className="mb-4 flex justify-end gap-2">
+      <div className="mb-4 flex items-center justify-end gap-2">
+        {modelSettings.dirty && !modelSettings.saving ? (
+          <span className="text-xs font-bold text-amber-600">有未保存的修改</span>
+        ) : null}
         <button
           className="min-h-9 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827] disabled:cursor-not-allowed disabled:opacity-55"
           disabled={modelSettings.loading || modelSettings.saving}
@@ -21,7 +24,7 @@ export function ModelSettings({ modelSettings }) {
           重新加载模型配置
         </button>
         <button
-          className="min-h-9 rounded-lg bg-[#111827] px-4 text-sm font-bold text-white transition hover:bg-[#020617] disabled:cursor-not-allowed disabled:opacity-55"
+          className={`min-h-9 rounded-lg bg-[#111827] px-4 text-sm font-bold text-white transition hover:bg-[#020617] disabled:cursor-not-allowed disabled:opacity-55 ${modelSettings.dirty ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}
           disabled={modelSettings.loading || modelSettings.saving}
           onClick={modelSettings.save}
         >

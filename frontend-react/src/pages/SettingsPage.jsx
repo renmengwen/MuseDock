@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Status } from '../components/Status.jsx';
+import { ConfirmDialog } from '../components/ui/confirm-dialog.jsx';
 import { CreativeDefaultsSettings } from '../components/settings/CreativeDefaultsSettings.jsx';
 import { ModelSettings } from '../components/settings/ModelSettings.jsx';
 import { SettingsOverview } from '../components/settings/SettingsOverview.jsx';
@@ -24,6 +25,8 @@ function getFailureMessage(label, result) {
 }
 
 export function SettingsPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [activeSection, setActiveSection] = useState(() => {
     const section = new URLSearchParams(window.location.search).get('section');
     return SECTIONS.some(item => item.id === section) ? section : 'overview';
@@ -34,7 +37,48 @@ export function SettingsPage() {
   const [loadingApp, setLoadingApp] = useState(true);
   const [savingApp, setSavingApp] = useState(false);
   const [status, setStatus] = useState(null);
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
   const modelSettings = useSettings();
+
+  // 从编辑器等页面进入时（Link state.from），返回按钮回到来路而不是固定回创作台
+  const backTarget = typeof location.state?.from === 'string' && location.state.from ? location.state.from : '/creative';
+  const backLabel = backTarget.startsWith('/editor/') ? '返回编辑器' : '返回创作台';
+
+  // 分区切换写回 ?section=，刷新/分享不丢当前位置
+  const selectSection = useCallback((sectionId) => {
+    setActiveSection(sectionId);
+    const url = new URL(window.location.href);
+    url.searchParams.set('section', sectionId);
+    window.history.replaceState(null, '', url);
+  }, []);
+
+  // 成功提示自动消失，避免“设置中心已加载”永久驻留
+  useEffect(() => {
+    if (status?.type !== 'success') return undefined;
+    const timer = window.setTimeout(() => {
+      setStatus(current => (current?.type === 'success' ? null : current));
+    }, 4000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
+
+  // 模型配置有未保存草稿时，关闭/刷新页面前提醒
+  useEffect(() => {
+    if (!modelSettings.dirty) return undefined;
+    const handler = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [modelSettings.dirty]);
+
+  function requestLeave() {
+    if (modelSettings.dirty) {
+      setConfirmLeaveOpen(true);
+      return;
+    }
+    navigate(backTarget);
+  }
 
   const loadSystemHealth = useCallback(async (refresh = false) => {
     setStatus({
@@ -127,7 +171,7 @@ export function SettingsPage() {
           appSettings={appSettings}
           modelSettings={modelSettings}
           systemHealth={systemHealth}
-          onNavigate={setActiveSection}
+          onNavigate={selectSection}
         />
       );
     }
@@ -176,9 +220,13 @@ export function SettingsPage() {
             <strong className="block text-xl leading-none text-[#111827]">{modelSettings.enabledCount}</strong>
             <span className="text-xs text-[#69717e]">已启用</span>
           </div>
-          <Link className="inline-flex min-h-10 items-center rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827]" to="/creative">
-            返回创作台
-          </Link>
+          <button
+            className="inline-flex min-h-10 items-center rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827]"
+            type="button"
+            onClick={requestLeave}
+          >
+            {backLabel}
+          </button>
         </div>
       </div>
 
@@ -192,7 +240,7 @@ export function SettingsPage() {
               key={section.id}
               type="button"
               className={`min-h-10 w-full rounded-lg border px-3 py-2 text-left text-sm leading-snug transition max-[900px]:text-center ${activeSection === section.id ? 'border-[#111827] bg-[#111827] font-bold text-white' : 'border-[#d9dde5] bg-white text-[#30343b] hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827]'}`}
-              onClick={() => setActiveSection(section.id)}
+              onClick={() => selectSection(section.id)}
             >
               {section.label}
             </button>
@@ -202,6 +250,20 @@ export function SettingsPage() {
           {renderSection()}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmLeaveOpen}
+        onOpenChange={setConfirmLeaveOpen}
+        title="模型配置有未保存的修改"
+        description="离开设置中心将丢失这些修改。可先点击「保存模型配置」写入配置文件。"
+        destructive
+        confirmText="放弃修改并离开"
+        cancelText="留在设置中心"
+        onConfirm={() => {
+          setConfirmLeaveOpen(false);
+          navigate(backTarget);
+        }}
+      />
     </main>
   );
 }

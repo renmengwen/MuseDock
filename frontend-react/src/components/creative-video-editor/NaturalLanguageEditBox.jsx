@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-export function NaturalLanguageEditBox({ disabled, editing, onSubmit, tone = 'dark' }) {
+export function NaturalLanguageEditBox({ disabled, editing, onSubmit, tone = 'dark', title = '自然语言编辑' }) {
   const [instruction, setInstruction] = useState('');
   const [localMessage, setLocalMessage] = useState('');
   const light = tone === 'light';
@@ -21,7 +21,7 @@ export function NaturalLanguageEditBox({ disabled, editing, onSubmit, tone = 'da
 
   return (
     <form className={`grid gap-2 rounded-lg border p-2 min-[900px]:grid-cols-[auto_minmax(0,1fr)_auto] min-[900px]:items-center ${light ? 'border-[#e5e7eb] bg-[#fbfdff] text-[#111827]' : 'border-slate-700 bg-slate-800 text-slate-100'}`} onSubmit={submitEdit}>
-      <h3 className="m-0 text-sm font-bold">自然语言编辑</h3>
+      <h3 className="m-0 text-sm font-bold">{title}</h3>
       <textarea
         value={instruction}
         disabled={disabled}

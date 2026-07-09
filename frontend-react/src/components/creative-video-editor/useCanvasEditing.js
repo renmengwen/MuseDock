@@ -54,9 +54,19 @@ function usePreviewSlotSize(frame, rawHtml) {
   return { previewSlotRef, previewSlotSize };
 }
 
+const AUTO_EDIT_STORAGE_KEY = 'hv-canvas-auto-edit';
+
+function readAutoEditPreference() {
+  try {
+    return window.localStorage.getItem(AUTO_EDIT_STORAGE_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
 // HtmlVideoCanvasEditor 的交互核心：iframe 加载与播放控制、画布点选/拖拽/撤销、
 // 元素编辑回调与保存。从组件里整体搬出，逻辑与搬出前保持一致。
-export function useCanvasEditing(editor) {
+export function useCanvasEditing(editor, { onDirtyChange } = {}) {
   const iframeRef = useRef(null);
   const playbackTimerRef = useRef(null);
   const iframeLoadTimerRef = useRef(null);
@@ -65,6 +75,7 @@ export function useCanvasEditing(editor) {
   const frameLoadRequestRef = useRef(0);
   const dragRef = useRef(null);
   const undoStackRef = useRef([]);
+  const hoverThrottleRef = useRef(0);
   const [html, setHtml] = useState('');
   const [loadedFrameId, setLoadedFrameId] = useState('');
   const [iframeKey, setIframeKey] = useState(0);
@@ -80,6 +91,17 @@ export function useCanvasEditing(editor) {
   const [dirty, setDirty] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [pendingFrameId, setPendingFrameId] = useState(null);
+  // 切帧后直接停在可编辑帧（跳过整段动画播放）；偏好持久化到 localStorage
+  const [autoEditOnLoad, setAutoEditOnLoadState] = useState(readAutoEditPreference);
+  const autoEditRef = useRef(autoEditOnLoad);
+
+  function setAutoEditOnLoad(value) {
+    autoEditRef.current = value;
+    setAutoEditOnLoadState(value);
+    try {
+      window.localStorage.setItem(AUTO_EDIT_STORAGE_KEY, value ? 'on' : 'off');
+    } catch {}
+  }
 
   const frame = editor.selectedFrame;
   const frameId = frameIdOf(frame);
@@ -109,10 +131,11 @@ export function useCanvasEditing(editor) {
   function snapshotBeforeEdit() {
     const doc = iframeRef.current?.contentDocument;
     if (!doc?.body) return;
-    // 快照只存文档内容：剥掉覆盖层与选中标记，否则撤销会还原出幽灵选框/handle
+    // 快照只存文档内容：剥掉覆盖层与选中/悬停标记，否则撤销会还原出幽灵选框/handle
     const clone = doc.body.cloneNode(true);
     clone.querySelectorAll('[data-hv-editor-overlay]').forEach(node => node.remove());
     clone.querySelectorAll('[data-hv-canvas-selected]').forEach(node => node.removeAttribute('data-hv-canvas-selected'));
+    clone.querySelectorAll('[data-hv-canvas-hover]').forEach(node => node.removeAttribute('data-hv-canvas-hover'));
     const snapshot = clone.innerHTML;
     if (undoStackRef.current.at(-1) === snapshot) return;
     undoStackRef.current.push(snapshot);
@@ -249,6 +272,70 @@ export function useCanvasEditing(editor) {
     refreshLayerItems(element.ownerDocument);
   }
 
+  function updateHoverHighlight(doc, event) {
+    if (!editingReadyRef.current) return;
+    const now = Date.now();
+    if (now - hoverThrottleRef.current < 48) return;
+    hoverThrottleRef.current = now;
+    const target = candidatesFromPoint(doc, event.clientX, event.clientY)[0] || null;
+    doc.querySelectorAll('[data-hv-canvas-hover]').forEach(node => {
+      if (node !== target) delete node.dataset.hvCanvasHover;
+    });
+    if (target) target.dataset.hvCanvasHover = 'true';
+  }
+
+  function nudgeSelected(dx, dy) {
+    const element = selectedElementRef.current;
+    if (!element || element.dataset?.hvEditorLocked === 'true') return false;
+    const info = readElementInfo(element);
+    if (!info) return false;
+    updateSelectedGeometry({ left: info.left + dx, top: info.top + dy });
+    return true;
+  }
+
+  function handleCanvasHotkey(event) {
+    const key = event.key;
+    if ((event.ctrlKey || event.metaKey) && (key === 'z' || key === 'Z')) {
+      if (!undoStackRef.current.length) return;
+      event.preventDefault();
+      undoEdit();
+      return;
+    }
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (key === 'Delete' || key === 'Backspace') {
+      if (!selectedElementRef.current) return;
+      event.preventDefault();
+      deleteSelectedElement();
+      return;
+    }
+    const step = event.shiftKey ? 10 : 1;
+    const nudge = {
+      ArrowLeft: [-step, 0],
+      ArrowRight: [step, 0],
+      ArrowUp: [0, -step],
+      ArrowDown: [0, step],
+    }[key];
+    if (nudge && selectedElementRef.current) {
+      if (nudgeSelected(nudge[0], nudge[1])) event.preventDefault();
+    }
+  }
+
+  // 画布快捷键：Ctrl/Cmd+Z 撤销、Delete 删除选中元素、方向键微调（Shift ×10）。
+  // 不设依赖数组：每次渲染重挂，保证 handler 闭包始终是最新版本。
+  useEffect(() => {
+    function isTypingTarget(target) {
+      const tag = target?.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable;
+    }
+    function handleKeyDown(event) {
+      if (!editingReadyRef.current) return;
+      if (isTypingTarget(event.target)) return;
+      handleCanvasHotkey(event);
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
+
   useEffect(() => {
     if (!rawHtml || !htmlReady) return undefined;
     setPreviewError('');
@@ -264,6 +351,11 @@ export function useCanvasEditing(editor) {
   useEffect(() => {
     editingReadyRef.current = editingReady;
   }, [editingReady]);
+
+  // 画布未保存状态上报给工程编辑器：导出/重建等全局操作需要感知
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   useEffect(() => {
     const requestId = frameLoadRequestRef.current + 1;
@@ -361,6 +453,10 @@ export function useCanvasEditing(editor) {
     finishPlayback(frameDurationMs(frame));
   }
 
+  function pauseAndEdit() {
+    finishPlayback();
+  }
+
   function replay() {
     clearPlaybackTimer();
     setEditingReady(false);
@@ -430,8 +526,17 @@ export function useCanvasEditing(editor) {
     outline-offset: 4px !important;
     cursor: move !important;
   }
+  [data-hv-canvas-hover="true"]:not([data-hv-canvas-selected="true"]) {
+    outline: 1px dashed rgba(37, 244, 238, .6) !important;
+    outline-offset: 2px !important;
+    cursor: pointer !important;
+  }
 `;
     doc.head.appendChild(editorStyle);
+    doc.addEventListener('keydown', event => {
+      if (!editingReadyRef.current) return;
+      handleCanvasHotkey(event);
+    }, true);
     doc.addEventListener('pointerdown', event => {
       if (!editingReadyRef.current) return;
       const handle = event.target?.getAttribute?.('data-hv-editor-handle');
@@ -466,7 +571,10 @@ export function useCanvasEditing(editor) {
     }, true);
     doc.addEventListener('pointermove', event => {
       const drag = dragRef.current;
-      if (!drag?.element) return;
+      if (!drag?.element) {
+        updateHoverHighlight(doc, event);
+        return;
+      }
       event.preventDefault();
       if (!drag.changed) {
         snapshotBeforeEdit();
@@ -530,6 +638,10 @@ export function useCanvasEditing(editor) {
     doc.addEventListener('pointerup', endDrag, true);
     doc.addEventListener('pointercancel', endDrag, true);
     beginPlayback();
+    // 「切帧后直接编辑」：动画启动后立即冻结到结尾帧，省去等整段播放
+    if (autoEditRef.current) {
+      finishPlayback(frameDurationMs(frame));
+    }
   }
 
   function updateSelectedText(text) {
@@ -715,6 +827,9 @@ export function useCanvasEditing(editor) {
     setPendingFrameId,
     replay,
     jumpToEnd,
+    pauseAndEdit,
+    autoEditOnLoad,
+    setAutoEditOnLoad,
     reloadHtml,
     handleIframeLoad,
     undoEdit,

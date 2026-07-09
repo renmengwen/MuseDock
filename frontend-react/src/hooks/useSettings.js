@@ -81,6 +81,17 @@ export function useSettings() {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // 页面草稿是否有未写入配置文件的改动（供应商/启用模型/跳过校验）
+  const [dirty, setDirty] = useState(false);
+
+  // 成功提示自动消失，避免“配置已加载”这类信息永久驻留
+  useEffect(() => {
+    if (status?.type !== 'success') return undefined;
+    const timer = window.setTimeout(() => {
+      setStatus(current => (current?.type === 'success' ? null : current));
+    }, 4000);
+    return () => window.clearTimeout(timer);
+  }, [status]);
 
   const providerList = useMemo(() => Object.values(state.providers), [state.providers]);
 
@@ -108,6 +119,7 @@ export function useSettings() {
     try {
       const json = await api.getAiModels();
       setState(normalizeServerData(json));
+      setDirty(false);
       setStatus({ type: 'success', message: '配置已加载' });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
@@ -123,6 +135,7 @@ export function useSettings() {
       const payload = toServerPayload(state);
       const json = await api.saveAiModels(payload);
       setState(normalizeServerData(json));
+      setDirty(false);
       setStatus({ type: 'success', message: '配置已保存' });
     } catch (error) {
       setStatus({ type: 'error', message: error.message });
@@ -133,6 +146,7 @@ export function useSettings() {
 
   const saveProvider = useCallback((provider) => {
     if (!provider?.id) return;
+    setDirty(true);
     setState(prev => ({
       ...prev,
       providers: { ...prev.providers, [provider.id]: provider },
@@ -140,6 +154,7 @@ export function useSettings() {
   }, []);
 
   const removeProvider = useCallback((providerId) => {
+    setDirty(true);
     setState(prev => {
       const newProviders = { ...prev.providers };
       delete newProviders[providerId];
@@ -154,6 +169,7 @@ export function useSettings() {
   }, []);
 
   const setActive = useCallback((modelType, providerId, modelTypeKey) => {
+    setDirty(true);
     setState(prev => ({
       ...prev,
       active: {
@@ -164,6 +180,7 @@ export function useSettings() {
   }, []);
 
   const setSkipValidation = useCallback((value) => {
+    setDirty(true);
     setState(prev => ({ ...prev, skipValidation: !!value }));
   }, []);
 
@@ -171,7 +188,7 @@ export function useSettings() {
 
   return {
     state, providerList, activeModels, enabledCount,
-    status, loading, saving,
+    status, loading, saving, dirty,
     load, save,
     saveProvider, removeProvider,
     setActive, setSkipValidation,

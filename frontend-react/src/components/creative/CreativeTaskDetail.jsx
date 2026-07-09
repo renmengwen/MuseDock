@@ -67,7 +67,8 @@ export function CreativeTaskDetail({
         <CreativeVideoPreview
           videoUrl={videoUrl}
         />
-      ) : (
+      ) : workflow?.status === 'failed' ? null : (
+        // 失败时错误信息已由进度面板和恢复建议承载，不再重复渲染底部状态条
         <CreativeStatusMessage status={status} message={message} />
       )}
     </div>

@@ -1,4 +1,5 @@
-import { Loader2, RefreshCcw } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Loader2, RefreshCcw, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { RETRY_ACTION_TEXT, RETRY_CODE_TEXT, formatRetryItem, formatRetryList } from './creativeRetryDisplay.js';
 
@@ -35,8 +36,19 @@ export function CreativeRetryPlan({
       ) : null}
 
       {cannotRetry ? (
-        <div className="text-[13px] leading-normal text-amber-800">
-          {retryPlan?.user_message || retryPlanMessage || '当前失败暂不支持自动恢复。'}
+        <div className="grid gap-2.5">
+          {/* 错误详情已显示在上方描述行，这里只给结论和下一步，避免同一句话重复出现 */}
+          <div className="text-[13px] leading-normal text-amber-800">当前失败暂不支持自动恢复。</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-[#d9dde5] bg-white px-2.5 text-xs font-bold text-[#30343b] transition hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827]"
+              to="/settings?section=creative"
+            >
+              <Settings2 size={13} />
+              <span>调整创作默认值</span>
+            </Link>
+            <span className="text-xs leading-normal text-[#8a93a2]">可调整目标时长等默认值后，重新发起创作。</span>
+          </div>
         </div>
       ) : null}
 

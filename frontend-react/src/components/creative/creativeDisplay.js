@@ -49,16 +49,24 @@ export function getWorkflowStatusText(workflow, fallbackStatus = 'idle') {
 
 export function normalizeWorkflowStages(workflow) {
   const source = Array.isArray(workflow?.stages) && workflow.stages.length ? workflow.stages : DEFAULT_STAGES;
-  return source.map(stage => ({
-    ...stage,
-    label: stage.label || STAGE_LABELS[stage.id] || stage.id || '未命名阶段',
-    status: workflow?.status === 'running' && workflow?.current_stage === stage.id && !['done', 'skipped'].includes(stage.status)
+  const workflowFailed = workflow?.status === 'failed';
+  return source.map(stage => {
+    // 任务整体已失败时，阶段残留的 running/queued 会让用户误以为还在推进：
+    // running（中断点）显示为失败，排队中的显示为等待。
+    let status = workflow?.status === 'running' && workflow?.current_stage === stage.id && !['done', 'skipped'].includes(stage.status)
       ? 'running'
-      : (stage.status || 'waiting'),
-    message: workflow?.status === 'running' && workflow?.current_stage === stage.id
-      ? (workflow.current_stage_message || stage.message || '')
-      : stage.message,
-  }));
+      : (stage.status || 'waiting');
+    if (workflowFailed && status === 'running') status = 'failed';
+    if (workflowFailed && ['queued', 'pending'].includes(status)) status = 'waiting';
+    return {
+      ...stage,
+      label: stage.label || STAGE_LABELS[stage.id] || stage.id || '未命名阶段',
+      status,
+      message: workflow?.status === 'running' && workflow?.current_stage === stage.id
+        ? (workflow.current_stage_message || stage.message || '')
+        : stage.message,
+    };
+  });
 }
 
 export function getStepState(stage, index, stages) {

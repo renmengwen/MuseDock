@@ -105,6 +105,7 @@ export function CreativeEditorPage() {
           <Link
             className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[#d9dde5] bg-white px-4 text-sm font-semibold text-[#30343b] transition hover:border-[#cbd5e1] hover:bg-[#f8fafc] hover:text-[#111827] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#25f4ee]"
             to="/settings"
+            state={{ from: workflowId ? `/editor/${encodeURIComponent(workflowId)}` : '/creative' }}
           >
             <Settings2 size={16} />
             设置
