@@ -49,6 +49,7 @@ npm run dist   # 产物：dist-electron/MuseDock Setup <version>.exe
 
 - **一键创作闭环**：用创作方向、文本、抖音/文章/公众号/GitHub 链接创建本地任务，后台依次准备来源、研究、素材、脚本分镜、TTS、HTML 工程、渲染和巡检，全程 SSE 跟踪进度。
 - **来源可追踪**：链接来源整理成 `source_context`，文章/GitHub 图片下载成 `asset_context` 并追踪是否被镜头引用；抖音来源复用本地视频、音频和关键帧。Pexels 只作视觉补充，不当来源证据。
+- **图片/视频优先 v1**：一键创作可开启 `asset_first`，在 html-video 工程内按配置的 image 模型为关键场景生成 Seedream 主视觉，并让 HTML 负责标注、拆解和强调。
 - **HTML 视频工程优先**：成片由 `scene_spec`、内容图、HTML 帧、音频、时间轴、质检和导出版本组成，可在 `/editor` 改文案、拖位置、跑布局质检、AI 改帧并重新导出。
 - **自动音效增强**：生成时可按分镜、字幕和画面语义从本地 `assets/sfx` 白名单自动编排短音效，导出时由 ffmpeg 混入最终音轨；编辑器里可查看并删除单条音效，编排或混音失败会降级为无音效成片。
 - **失败可恢复**：工程阶段写入 `generation_checkpoint`，失败后复用已完成的来源/研究/素材/音频产物，从失败子阶段继续。

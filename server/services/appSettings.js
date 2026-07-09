@@ -8,6 +8,7 @@ const DEFAULT_AI_CONFIG_PATH = aiModelConfig.DEFAULT_CONFIG_PATH
   || path.join(require('../dataRoot'), 'data/config/ai-models.json');
 
 const ALLOWED_ASPECT_RATIOS = ['9:16', '16:9', '1:1', '4:5'];
+const VISUAL_STRATEGIES = ['hf_first', 'asset_first'];
 
 const DEFAULT_CONFIG = {
   version: 1,
@@ -28,6 +29,7 @@ const DEFAULT_CONFIG = {
     emotionalVoice: false,
     sourceImageAnalysisEnabled: false,
     extractDouyinFrames: false,
+    visualStrategy: 'hf_first',
     frameHtmlConcurrency: 1,
   },
   system: {
@@ -90,6 +92,9 @@ function normalizeCreativeDefaults(input = {}) {
     emotionalVoice: source.emotionalVoice === true,
     sourceImageAnalysisEnabled: source.sourceImageAnalysisEnabled === true,
     extractDouyinFrames: source.extractDouyinFrames === true,
+    visualStrategy: VISUAL_STRATEGIES.includes(source.visualStrategy)
+      ? source.visualStrategy
+      : DEFAULT_CONFIG.creativeDefaults.visualStrategy,
     frameHtmlConcurrency: normalizeSmallInteger(
       source.frameHtmlConcurrency,
       DEFAULT_CONFIG.creativeDefaults.frameHtmlConcurrency,

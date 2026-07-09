@@ -44,6 +44,7 @@ const DEFAULT_STALE_STAGE_TIMEOUT_MS = 10 * 60 * 1000;
 const WORKFLOW_STOPPED = Symbol('workflow-stopped');
 const NEUTRAL_VOICE_STYLE_PROMPT = '请使用自然、清晰、语速稳定的短视频口播风格；避免夸张表演、过长间隔、深呼吸或拖慢语速。';
 const EMOTIONAL_VOICE_STYLE_PROMPT = '请使用自然、有情绪起伏的短视频口播风格；关键句加强语气，适度停顿，保持清晰表达，不要过度拖慢语速。';
+const VISUAL_STRATEGIES = ['hf_first', 'asset_first'];
 
 const STAGE_IDS = ['source', 'research', 'assets', 'agent_run', 'brief', 'audio', 'project', 'check', 'render', 'inspect'];
 const STAGE_LABELS = {
@@ -64,6 +65,11 @@ function safeString(value) {
     return '';
   }
   return String(value).trim();
+}
+
+function normalizeVisualStrategy(value) {
+  const text = safeString(value);
+  return VISUAL_STRATEGIES.includes(text) ? text : '';
 }
 
 function supportsEmotionalTtsRuntime(config) {
@@ -578,6 +584,8 @@ async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, medi
     sceneSpec,
     creativeContext: {
       ...plainObject(workflow?.result?.hyperframes_freeform),
+      visual_strategy: normalizeVisualStrategy(workflow?.creative_context?.visual_strategy) || 'hf_first',
+      asset_context: plainObject(workflow?.creative_context?.asset_context),
       scene_spec: sceneSpec,
       frame_specs: extractFrameSpecsFromWorkflow(workflow),
     },
@@ -653,10 +661,22 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
     extractDouyinFrames: typeof overrideSource.extractDouyinFrames === 'boolean'
       ? overrideSource.extractDouyinFrames
       : defaultsSource.extractDouyinFrames === true,
+    visualStrategy: normalizeVisualStrategy(overrideSource.visualStrategy)
+      || normalizeVisualStrategy(defaultsSource.visualStrategy)
+      || 'hf_first',
     frameHtmlConcurrency: Number.isFinite(frameHtmlConcurrency)
       ? Math.min(5, Math.max(1, Math.round(frameHtmlConcurrency)))
       : 1,
   };
+}
+
+function applyVisualStrategyToCreativeContext(record, snapshot = {}) {
+  const visualStrategy = normalizeVisualStrategy(snapshot.visualStrategy) || 'hf_first';
+  record.creative_context = {
+    ...(record.creative_context || {}),
+    visual_strategy: visualStrategy,
+  };
+  return record;
 }
 
 async function validateSourceImageAnalysisConfigIfNeeded(normalizedInput, snapshot, services) {
@@ -694,6 +714,7 @@ function buildWorkflowTarget(snapshot = {}) {
     generateCaptions: snapshot.generateCaptions !== false,
     emotionalVoice: snapshot.emotionalVoice === true,
     extractDouyinFrames: snapshot.extractDouyinFrames === true,
+    visual_strategy: normalizeVisualStrategy(snapshot.visualStrategy) || 'hf_first',
     frameHtmlConcurrency: Number.isFinite(Number(snapshot.frameHtmlConcurrency))
       ? Math.min(5, Math.max(1, Math.round(Number(snapshot.frameHtmlConcurrency))))
       : 1,
@@ -1358,6 +1379,8 @@ async function runCreativeWorkflow(workflowId, options = {}) {
   if (stoppedOrFailed) {
     return stoppedOrFailed;
   }
+
+  applyVisualStrategyToCreativeContext(record, record.creative_defaults_snapshot || {});
 
   stoppedOrFailed = failIfStoppedOrNull(await runStage(record, 'agent_run', rootDir, async () => {
     const result = ensureSuccess(
@@ -2954,4 +2977,9 @@ module.exports = {
   runResearchProvider,
   defaultResearchProvider,
   defaultWebSearchProvider,
+  buildCreativeDefaultsSnapshot,
+  buildWorkflowTarget,
+  applyVisualStrategyToCreativeContext,
+  normalizeVisualStrategy,
+  defaultRetryFrameHtmlAction,
 };

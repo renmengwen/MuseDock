@@ -13,6 +13,11 @@ const frameFallbackBuilder = require('./frameFallbackBuilder');
 const { runFrameHtmlPhase, isProviderMissingText } = require('./frameHtmlPhase');
 const { buildRawHtmlFrameProject } = require('./rawHtmlFrameBuilder');
 const { buildMixedFrameProject } = require('./mixedFrameBuilder');
+const {
+  runGeneratedImagePhase,
+  hydrateGeneratedAssetsFromProject,
+  enforceAssetFirstRawHtmlRouting,
+} = require('./generatedImagePhase');
 const environmentDoctor = require('./environmentDoctor');
 const projectStore = require('./projectStore');
 const {
@@ -923,6 +928,7 @@ function projectAssetsFromCreativeContext(creativeContext = {}) {
     url: asset.url || '',
     alt: asset.alt || '',
     attribution: asset.attribution || null,
+    generation: asset.generation || null,
   })).filter(asset => asset.path);
 }
 
@@ -1080,7 +1086,7 @@ async function generateHtmlVideo(options = {}) {
     runId,
     rootDir,
     sceneSpec: inputSceneSpec = null,
-    creativeContext = {},
+    creativeContext: inputCreativeContext = {},
     target = {},
     templateRegistry,
     services = {},
@@ -1090,6 +1096,7 @@ async function generateHtmlVideo(options = {}) {
     preferredTemplateId = '',
     projectOptions = {},
   } = options;
+  let creativeContext = inputCreativeContext || {};
   let sceneSpec = inputSceneSpec
     || objectOrEmpty(creativeContext).scene_spec
     || objectOrEmpty(creativeContext).sceneSpec
@@ -1278,9 +1285,80 @@ async function generateHtmlVideo(options = {}) {
   });
 
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
-  await materializeCreativeContextAssets(projectDir, creativeContext);
+  creativeContext = await materializeCreativeContextAssets(projectDir, creativeContext);
+  const existingProjectForGeneration = resumeProject || await loadExistingProject(projectDir);
+  if (generationMode === 'template_inputs') {
+    if (creativeContext?.visual_strategy === 'asset_first') {
+      diagnostics.push(createDiagnostic({
+        code: 'generated_image_unsupported_mode',
+        stage: 'project',
+        sub_stage: 'gen_images',
+        user_message: '当前为整片模板模式（template_inputs），不支持图片/视频优先的主视觉生成，已跳过。',
+        severity: 'warning',
+      }));
+    }
+  } else {
+    creativeContext = hydrateGeneratedAssetsFromProject({
+      project: existingProjectForGeneration,
+      creativeContext,
+      projectDir,
+    });
+    let skipGeneration = false;
+    let requiredSceneIds = [];
+    if (reuseContentGraphRequested) {
+      const reusedNodes = Array.isArray(existingProjectForGeneration?.content_graph?.nodes)
+        ? existingProjectForGeneration.content_graph.nodes
+        : [];
+      const referencedGeneratedIds = new Set(reusedNodes
+        .flatMap(node => (Array.isArray(node?.asset_refs) ? node.asset_refs : []))
+        .map(ref => String(ref?.asset_id || ''))
+        .filter(id => id.startsWith('gen_')));
+      const hydratedGeneratedIds = new Set((creativeContext.asset_context?.assets || [])
+        .filter(asset => asset?.source === 'generated')
+        .map(asset => asset.id));
+      requiredSceneIds = [...referencedGeneratedIds]
+        .filter(id => !hydratedGeneratedIds.has(id))
+        .map(id => id.replace(/^gen_/, ''));
+      skipGeneration = requiredSceneIds.length === 0;
+    }
+    const generatedImageResult = skipGeneration
+      ? { creativeContext, generated_count: 0, failures: [], diagnostics: [] }
+      : await runGeneratedImagePhase({
+        sceneSpec,
+        creativeContext,
+        projectDir,
+        aspectRatio: renderTarget.aspect_ratio || renderTarget.aspectRatio || '',
+        requiredSceneIds,
+        services: { ...services, aiTextModel: model },
+        onProgress,
+        now: new Date().toISOString(),
+      });
+    creativeContext = generatedImageResult.creativeContext;
+    if (generatedImageResult.diagnostics?.length) diagnostics.push(...generatedImageResult.diagnostics);
+    if (generatedImageResult.generated_count > 0) {
+      await projectStore.writeProjectJson(projectDir, current => {
+        const generatedAssets = (creativeContext.asset_context?.assets || [])
+          .filter(asset => asset?.source === 'generated')
+          .map(asset => ({
+            id: asset.id,
+            type: 'image',
+            path: asset.path,
+            source: asset.source,
+            url: asset.url || '',
+            alt: asset.alt || '',
+            attribution: null,
+            generation: asset.generation || null,
+          }));
+        const byId = new Map((current.assets || []).map(asset => [asset.id, asset]));
+        generatedAssets.forEach(asset => byId.set(asset.id, { ...(byId.get(asset.id) || {}), ...asset }));
+        current.assets = Array.from(byId.values()).filter(asset => asset.path);
+        return current;
+      });
+    }
+  }
   if (generationMode === 'raw_html' && !hasSceneSpecScenes(sceneSpec)) {
     return failure('缺少 scene_spec，无法生成 raw_html 帧。', [
+      ...diagnostics,
       createDiagnostic({
         code: 'scene_spec_missing',
         stage: 'project',
@@ -1306,6 +1384,7 @@ async function generateHtmlVideo(options = {}) {
     });
     if (!inputResult.success) {
       return failure(inputResult.user_message || inputResult.message || 'html-video 模板字段填写失败。', [
+        ...diagnostics,
         createDiagnostic({
           code: 'template_inputs_invalid',
           stage: 'ai-template-inputs',
@@ -1351,6 +1430,7 @@ async function generateHtmlVideo(options = {}) {
       if (reuseContentGraphRequested) {
         const message = '未找到可复用的内容图，请先完整生成一次视频。';
         return failure(message, [
+          ...diagnostics,
           createDiagnostic({
             code: 'content_graph_reuse_missing',
             stage: 'project',
@@ -1398,7 +1478,7 @@ async function generateHtmlVideo(options = {}) {
           });
           return current;
         });
-        return failure(graphResult.message || 'content graph 生成失败。', graphDiagnostics, {
+        return failure(graphResult.message || 'content graph 生成失败。', [...diagnostics, ...graphDiagnostics], {
           html_video_project_path: projectDir,
           project_dir: projectDir,
           project,
@@ -1466,6 +1546,13 @@ async function generateHtmlVideo(options = {}) {
         return current;
       });
     }
+    if (generationMode === 'per_scene') {
+      enforceAssetFirstRawHtmlRouting({
+        decisions: perSceneDecisions,
+        contentGraph,
+        creativeContext,
+      });
+    }
     const frameHtmlResult = await runFrameHtmlPhase({
       model,
       projectDir,
@@ -1530,6 +1617,7 @@ async function generateHtmlVideo(options = {}) {
       const frameId = rawHtmlBuildFrameIdFromError(error);
       const message = error?.message || 'raw HTML 工程构建失败。';
       return failure(message, [
+        ...diagnostics,
         createDiagnostic({
           code: 'raw_html_build_failed',
           stage: 'project',

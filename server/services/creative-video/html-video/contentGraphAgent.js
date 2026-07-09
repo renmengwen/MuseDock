@@ -45,7 +45,17 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
     const text = compactText(value, maxLength);
     if (text) lines.push(`${label}：${text}`);
   });
-  const assets = Array.isArray(assetContext.assets) ? assetContext.assets.slice(0, 8) : [];
+  const allAssets = Array.isArray(assetContext.assets) ? assetContext.assets : [];
+  const generatedAssets = allAssets.filter(asset => asset.source === 'generated');
+  const nonGenerated = allAssets.filter(asset => asset.source !== 'generated');
+  const articleFirst = [
+    ...nonGenerated.filter(asset => asset.source !== 'search'),
+    ...nonGenerated.filter(asset => asset.source === 'search'),
+  ];
+  const assets = [
+    ...generatedAssets.slice(0, 4),
+    ...articleFirst.slice(0, Math.max(0, 8 - Math.min(generatedAssets.length, 4))),
+  ];
   if (assets.length) {
     const usableAssets = assets.filter(isAssetUsableForFrames);
     const blockedAssets = assets.filter(asset => !isAssetUsableForFrames(asset));
@@ -54,6 +64,9 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
       const src = compactText(asset.frame_src || asset.path, 160);
       const label = compactText(asset.alt || asset.title || asset.url || `图片${index + 1}`, 120);
       const source = compactText(asset.source || 'article', 30);
+      const generatedFor = asset.source === 'generated' && asset.generation?.scene_id
+        ? `；为场景 ${compactText(asset.generation.scene_id, 80)} 生成；不是来源证据`
+        : '';
       const analysis = objectOrEmpty(asset.image_analysis);
       const analysisParts = [
         ['类型', analysis.visual_type],
@@ -67,7 +80,7 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
         return text ? `${key}=${text}` : '';
       }).filter(Boolean);
       const analysisText = analysisParts.length ? `；图片分析：${analysisParts.join('；')}` : '';
-      if (src) lines.push(`- ${index + 1}. ${label}；asset_id=${compactText(asset.id, 80)}；来源=${source}；HTML引用=${src}${analysisText}`);
+      if (src) lines.push(`- ${index + 1}. ${label}；asset_id=${compactText(asset.id, 80)}；来源=${source}${generatedFor}；HTML引用=${src}${analysisText}`);
     });
     if (!usableAssets.length) lines.push('- 无适合直接进入成片的图片。');
     if (blockedAssets.length) {
@@ -77,7 +90,7 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
         .join('；');
       if (blockedText) lines.push(`不建议用于成片的图片素材：${blockedText}`);
     }
-    lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；每个 node 最多引用 1 张图片；不适合当前叙事时可以不用。优先使用 article 来源图片；search/Pexels 图片只作补充背景或氛围图，不要当来源证据；不要做纯图片轮播；含文字的文章截图必须完整展示，使用 object-fit: contain；图片应与关键词、字幕、数据卡或讲解节点混排。');
+    lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；每个 node 最多引用 1 张图片；不适合当前叙事时可以不用。优先使用 article 来源图片；generated 生成图是可用主视觉素材但不是来源证据；search/Pexels 图片只作补充背景或氛围图，不要当来源证据；不要做纯图片轮播；含文字的文章截图必须完整展示，使用 object-fit: contain；图片应与关键词、字幕、数据卡或讲解节点混排。');
   }
   return lines.join('\n');
 }
@@ -100,12 +113,20 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
   const language = target.language || target.lang || 'zh-CN';
   const isSourceUrl = creativeContext?.input?.mode === 'source_url'
     || creativeContext?.source_context?.kind === 'source_url';
+  const isAssetFirst = creativeContext?.visual_strategy === 'asset_first'
+    || target?.visual_strategy === 'asset_first';
   const sourceUrlGroundingRequirements = isSourceUrl ? [
     '- 如果源素材来自 source_url，SOURCE MATERIAL 是视频真正主题，不是装饰信息。',
     '- 每个节点都必须引用或改写来源材料里的具体事实、名字、数字、产品、项目能力、术语或主张。',
     '- 禁止输出可套用到任何文章或任何仓库的泛泛句子。',
     '- GitHub repo 只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。',
     '- 如果 SOURCE MATERIAL 提供可用图片素材，内容图可以在适合的节点使用 showcase、图文卡、证据截图或对比说明；不适合当前叙事时不要硬塞图片，也不要把图片当作视频主题本身。',
+  ] : [];
+  const assetFirstRequirements = isAssetFirst ? [
+    '- 当前为素材主导（asset_first）模式：图片/视频素材负责画面主体和质感，HTML 动画负责重点标注、拆解、强调和数据表达。',
+    '- 优先级：article 来源图 > generated 生成图 > search/Pexels 图。来源图优先做证据和主体；generated 图片是为具体场景生成的主视觉，usage 应为 subject；search 图片只能做 background。',
+    '- 每个具象叙事场景尽量绑定一张主视觉图片（usage=subject 或 evidence）；数据、流程、结构类场景可以不绑图片，由 HTML 动画做主体。',
+    '- generated 图片的 generation.scene_id 标明了它为哪个场景生成，优先绑定到对应场景。',
   ] : [];
   return [
     '你是 html-video 的 content graph 规划器。请只输出严格 JSON，不要输出 Markdown、解释或额外文本。',
@@ -130,7 +151,10 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
     `- nodes 的 id 必须逐一严格等于 scene_spec.scenes 的 id：${expectedSceneIds.join(' -> ') || '（无）'}。`,
     '- 禁止新增、删除、合并、拆分或重排序 scene_spec.scenes。',
     '- 每个 node 必须包含 id、kind、label、durationSec，并且根据 kind 包含 text 或 data。',
-    '- 每个 node 可以输出 asset_refs，每帧最多 1 张，字段为 asset_id、usage、reason；只把 article 图片当来源证据，search/Pexels 只作补充。',
+    isAssetFirst
+      ? '- 每个 node 可以输出 asset_refs，每帧最多 1 张，字段为 asset_id、usage、reason；usage 取值 subject|showcase|evidence|background。'
+      : '- 每个 node 可以输出 asset_refs，每帧最多 1 张，字段为 asset_id、usage、reason；只把 article 图片当来源证据；generated 生成图是为本片生成的可用素材，适合的场景可以绑定为配图或主视觉（不强制，HTML 动画仍是表达主体），但它不是来源证据；search/Pexels 只作补充。',
+    ...assetFirstRequirements,
     '- kind 只能是 text、data、entity；优先使用 text 和 data。',
     '- data node 的 data 必须形如 {"title":"string","unit":"optional shared unit","items":[{"label":"string","value":123}]}。',
     '- 数据帧必须使用可比较的同一单位，数值要合理；不能把不同口径的数据强行放进同一组。',
@@ -154,7 +178,7 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
             unit: 'optional shared unit',
             items: [{ label: 'string', value: 123 }],
           },
-          asset_refs: [{ asset_id: 'article_01', usage: 'showcase|evidence|background', reason: 'string' }],
+          asset_refs: [{ asset_id: 'article_01', usage: 'subject|showcase|evidence|background', reason: 'string' }],
         },
       ],
       edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence|dependency' }],
@@ -217,18 +241,28 @@ function summarizeScenesForRetry(sceneSpec = {}) {
 }
 
 function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, originalPrompt = '', attempt = 1) {
+  if (sceneSpec && typeof sceneSpec === 'object' && sceneSpec.sceneSpec) {
+    const args = sceneSpec;
+    return buildRetryPrompt(args.sceneSpec, args.creativeContext, args.target, args.originalPrompt || '', args.attempt || 1);
+  }
   const scenes = summarizeScenesForRetry(sceneSpec);
   const expectedSceneIds = sceneIdsFromSpec(sceneSpec);
+  const isAssetFirst = creativeContext?.visual_strategy === 'asset_first'
+    || target?.visual_strategy === 'asset_first';
+  const assetSummary = summarizeCreativeContextForPrompt(creativeContext);
   const contractLines = [
     `scene ids: ${expectedSceneIds.join(', ') || 'none'}`,
     `nodes.length must equal ${expectedSceneIds.length}`,
     'nodes[i].id must equal scene ids in the same order; do not add, remove, merge, split, or reorder scenes.',
-    'nodes[i].asset_refs optional; max 1 item with asset_id, usage, reason.',
+    isAssetFirst
+      ? 'nodes[i].asset_refs optional; max 1 item with asset_id, usage=subject|showcase|evidence|background, reason. generated assets should keep scene_id binding and are not evidence.'
+      : 'nodes[i].asset_refs optional; max 1 item with asset_id, usage, reason. generated assets are usable but are not source evidence.',
   ];
   if (Number(attempt) >= 2) {
     return [
       '只输出严格 JSON，不要 Markdown。',
       ...contractLines,
+      assetSummary.includes('gen_') ? '若素材列表中有 gen_* 推荐图，必须继续为对应场景输出 asset_refs，且不要把 generated 当来源证据。' : '',
       'schema: {"nodes":[{"id":"string","kind":"text","label":"string","durationSec":2,"text":"string"}]}',
     ].join('\n');
   }
@@ -239,6 +273,8 @@ function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, ori
     `目标：aspect ratio=${target.aspect_ratio || target.aspectRatio || sceneSpec.aspect_ratio || ''}，duration=${target.duration_sec || target.durationSec || sceneSpec.target_duration_sec || ''}。`,
     '场景摘要：',
     JSON.stringify(scenes, null, 2),
+    assetSummary ? `素材摘要：\n${assetSummary}` : '',
+    isAssetFirst ? 'asset_first 规则：generated 图片优先绑定 generation.scene_id 对应场景，usage 使用 subject；article 仍是证据优先。' : '',
     'JSON schema：',
     JSON.stringify({
       synopsis: 'string',

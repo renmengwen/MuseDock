@@ -33,6 +33,7 @@ async function run() {
     emotionalVoice: false,
     sourceImageAnalysisEnabled: false,
     extractDouyinFrames: false,
+    visualStrategy: 'hf_first',
     frameHtmlConcurrency: 1,
   });
   assert.strictEqual(defaults.creativeDefaults.templateByAspectRatio['9:16'], 'news_signal_vertical');
@@ -60,6 +61,7 @@ async function run() {
       emotionalVoice: true,
       sourceImageAnalysisEnabled: true,
       extractDouyinFrames: true,
+      visualStrategy: 'asset_first',
       frameHtmlConcurrency: 99,
     },
     system: {
@@ -86,6 +88,7 @@ async function run() {
     emotionalVoice: true,
     sourceImageAnalysisEnabled: true,
     extractDouyinFrames: true,
+    visualStrategy: 'asset_first',
     frameHtmlConcurrency: 5,
   });
   assert.deepStrictEqual(saved.system, { skipValidation: true, pexelsApiKey: 'pexels-test-key' });
@@ -137,6 +140,9 @@ async function run() {
   assert.equal(appSettings.normalizeCreativeDefaults({}).emotionalVoice, false);
   assert.equal(appSettings.normalizeCreativeDefaults({}).sourceImageAnalysisEnabled, false);
   assert.equal(appSettings.normalizeCreativeDefaults({}).extractDouyinFrames, false);
+  assert.equal(appSettings.normalizeCreativeDefaults({}).visualStrategy, 'hf_first');
+  assert.equal(appSettings.normalizeCreativeDefaults({ visualStrategy: 'asset_first' }).visualStrategy, 'asset_first');
+  assert.equal(appSettings.normalizeCreativeDefaults({ visualStrategy: 'banana' }).visualStrategy, 'hf_first');
   assert.equal(appSettings.normalizeCreativeDefaults({}).frameHtmlConcurrency, 1);
   assert.equal(appSettings.normalizeCreativeDefaults({ generateAudio: false }).generateAudio, false);
   assert.equal(appSettings.normalizeCreativeDefaults({ generateCaptions: false }).generateCaptions, false);

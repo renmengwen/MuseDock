@@ -149,8 +149,9 @@ function frameAssetReferenceSummary(node = {}, creativeContext = {}) {
   if (!expected) return '';
   const { ref, asset } = expected;
   const analysis = asset.image_analysis || {};
+  const isGenerated = asset.source === 'generated';
   const lines = [
-    '本帧推荐来源图片：',
+    isGenerated ? '本帧推荐生成图片（AI 主视觉素材）：' : '本帧推荐来源图片：',
     `- asset_id：${compactText(ref.asset_id, 160)}`,
     `- src：${compactText(asset.frame_src || asset.path, 260)}`,
     `- 类型：${compactText(analysis.visual_type || asset.type || asset.source || 'image', 80)}`,
@@ -158,7 +159,21 @@ function frameAssetReferenceSummary(node = {}, creativeContext = {}) {
     `- 建议用法：${compactText(ref.usage || analysis.best_usage, 180) || '（无）'}`,
     `- 推荐原因：${compactText(ref.reason, 260) || '（无）'}`,
   ];
+  if (isGenerated) {
+    lines.push('- 注意：这是 AI 生成素材，不是来源证据，不要用作事实证明或截图展示。');
+  }
   return lines.join('\n');
+}
+
+function assetFirstFrameRequirements(creativeContext = {}) {
+  if (creativeContext?.visual_strategy !== 'asset_first') return [];
+  return [
+    '- 当前为素材主导（asset_first）模式：如果本帧有推荐图片，图片必须作为画面主体（占据主要视觉面积，可全出血或大图卡），不是小配图。',
+    '- 在图片主体之上叠加 HTML 表达层：标题、关键词浮层、框选高亮、箭头标注、局部放大、步骤编号、数据卡或字幕节奏点，至少使用其中 2 种。',
+    '- 表达层必须服务旁白重点：标注/放大图片中与旁白直接相关的区域，不要做无意义装饰。',
+    '- 图片上叠加文字时必须加渐变遮罩或半透明底色保证可读性；主体图片使用 object-fit: cover 时不得裁掉关键主体，含文字的截图仍用 object-fit: contain。',
+    '- 禁止退化成纯图片轮播：没有表达层的帧不合格。',
+  ];
 }
 
 function normalizeAssetToken(value = '') {
@@ -243,10 +258,11 @@ function validateFrameAssetUsage(html = '', { node = {}, creativeContext = {} } 
   if (!expected) return { success: true };
   const tokens = assetReferenceTokens(expected.asset);
   if (htmlReferencesAsset(references, tokens)) return { success: true };
+  const missingLabel = expected.asset.source === 'generated' ? '本帧推荐生成图片' : '本帧推荐来源图片';
   return {
     success: false,
     code: 'frame_html_required_source_asset_missing',
-    message: `HTML 未引用本帧推荐来源图片：${expected.ref.asset_id}。`,
+    message: `HTML 未引用${missingLabel}：${expected.ref.asset_id}。`,
     details: {
       asset_id: expected.ref.asset_id,
       required_src: expected.asset.frame_src || expected.asset.path || '',
@@ -328,7 +344,8 @@ function buildFrameHtmlPrompt({
     '- 不要让每一帧都使用相同主布局；相邻帧必须有清晰不同的主视觉、层级或构图。',
     '- 不要只改底部 caption；主画面、数据、标题或视觉结构必须服务当前 frame content。',
     '- 不要保留与内容无关的模板导航标签，例如 Search / GitHub / Tech Forums / Docs / Issues，除非这些词就是当前内容事实。',
-    '- 如果本帧提供“本帧推荐来源图片”，必须在 HTML 中引用该图片的 src；没有推荐图片时，才从 Source context summary 的可用图片素材中选择。',
+    '- 如果本帧提供“本帧推荐来源图片”或“本帧推荐生成图片”，必须在 HTML 中引用该图片的 src；没有推荐图片时，才从 Source context summary 的可用图片素材中选择。',
+    ...assetFirstFrameRequirements(creativeContext),
     '- 如果 Source context summary 提供“可用图片素材”，本帧内容适合引用时，可以使用其中的 HTML引用路径，例如 <img src="../assets/source-image-01.jpg">；禁止引用外部图片 URL。',
     '- 文章截图或含文字图片必须完整展示，使用 object-fit: contain；不要裁切成不可读背景。图库/search 图片只适合做弱背景或氛围层，必须加遮罩保证文字可读。',
     '- 不要做纯图片轮播；图片必须和本帧关键词、字幕、数据卡、框选、高亮或解释文案混排。',
@@ -671,6 +688,7 @@ function buildShortFrameHtmlPrompt({
     `画面关键词：${visualKeywords || '无'}`,
     `画面要点卡：${visualCards || '无'}`,
     '画面文字用提炼后的关键词、要点短语或数据点，不要照抄 narration/captions 原句；旁白全文由系统注入底部字幕层。',
+    ...assetFirstFrameRequirements(creativeContext),
     assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
     `Target resolution：${resolution.width}x${resolution.height}`,
     `必须生成 full-bleed ${resolution.width}x${resolution.height} 完整 HTML，包含 <!doctype html>、html、head、body、style。`,
@@ -721,6 +739,7 @@ function buildRetryPrompt(args = {}) {
     frameText ? `当前镜头正文（提炼成关键词/短语再上画面，不要整句照抄）：${frameText}` : '',
     expectedTexts.length ? `当前镜头允许使用的内容文案：${expectedTexts.join(' / ')}` : '',
     '画面文字必须是提炼后的关键词、要点短语或数据点；禁止照抄旁白或字幕原句，旁白全文由系统注入底部字幕层。',
+    ...assetFirstFrameRequirements(args.creativeContext),
     assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
     templateName ? `视觉风格参考：延续模板「${templateName}」的配色、字体、形状和动效；不要保留模板默认主体文案。` : '',
     `必须包含 body data-hv-canvas data-width="${resolution.width}" data-height="${resolution.height}"。`,
