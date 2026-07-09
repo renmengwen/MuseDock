@@ -4,6 +4,12 @@ const os = require('os');
 const path = require('path');
 
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
+const aiImageModel = require('../server/services/ai/aiImageModel');
+
+// 测试隔离：生图 phase 的前置检查默认读全局模型配置，本机若配置了 image 模型会让生图链路
+// 混入这些集成测试（多一次 planner 的 text 调用，打乱 mock 计数）。统一按未配置处理。
+aiImageModel.isConfigured = async () => false;
+
 const facade = require('../server/services/creative-video/workflowFacade');
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 

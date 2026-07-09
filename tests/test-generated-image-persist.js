@@ -70,6 +70,37 @@ async function run() {
   assert.ok(generated2[0].path.includes('newhash'));
   assert.strictEqual(generated2[0].generation.scene_id, 'scene_01');
 
+  // 场景三：复用旧 content graph + 其引用的 generated 文件丢失 → requiredSceneIds 兜底按同 id 补回
+  // 手工注入引用 gen_scene_01 的 content_graph，删掉图片文件，再以 reuseContentGraph 重跑；
+  // planner 故意返回空计划，验证补回走的是 requiredSceneIds 兜底而不是 planner
+  const project3Before = JSON.parse(fs.readFileSync(projectJsonPath, 'utf8'));
+  project3Before.content_graph = {
+    synopsis: 't',
+    nodes: [{
+      id: 'scene_01',
+      kind: 'text',
+      label: '深夜骑手',
+      durationSec: 5,
+      text: '深夜骑手',
+      asset_refs: [{ asset_id: 'gen_scene_01', usage: 'subject', reason: 'r' }],
+    }],
+    edges: [],
+  };
+  fs.writeFileSync(projectJsonPath, JSON.stringify(project3Before));
+  fs.unlinkSync(path.join(rootDir, 'wf-test', 'agent_runs', 'run-test-html-video', generated2[0].path));
+  const args3 = buildArgs('generated-image-01-refill.png');
+  args3.reuseContentGraph = true;
+  args3.services.generatedImagePlanner = {
+    planGeneratedImages: async () => ({ success: true, plans: [] }),
+  };
+  await htmlVideoWorkflow.generateHtmlVideo(args3);
+  const project3 = JSON.parse(fs.readFileSync(projectJsonPath, 'utf8'));
+  const generated3 = (project3.assets || []).filter(asset => asset.source === 'generated');
+  assert.strictEqual(generated3.length, 1);
+  assert.strictEqual(generated3[0].id, 'gen_scene_01');
+  assert.ok(generated3[0].path.includes('refill'), `path 应指向补回的新文件，实际 ${generated3[0].path}`);
+  assert.strictEqual(generated3[0].generation.scene_id, 'scene_01');
+
   console.log('test-generated-image-persist passed');
 }
 

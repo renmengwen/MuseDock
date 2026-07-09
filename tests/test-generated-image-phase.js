@@ -147,6 +147,165 @@ async function run() {
   assert.strictEqual(hydrated.asset_context.assets[0].id, 'gen_scene_01');
   assert.ok(hydrated.asset_context.assets[0].local_path.endsWith('generated-image-01-abc.png'));
 
+  const plannerFailed = await phase.runGeneratedImagePhase({
+    sceneSpec,
+    creativeContext: baseContext(),
+    projectDir,
+    services: {
+      generatedImagePlanner: { planGeneratedImages: async () => ({ success: false, plans: [], message: '模型超时' }) },
+      aiImageModel: stubModelNoCheck,
+    },
+  });
+  assert.strictEqual(plannerFailed.generated_count, 0);
+  assert.strictEqual(plannerFailed.diagnostics.length, 1);
+  assert.strictEqual(plannerFailed.diagnostics[0].severity, 'warning');
+  assert.match(plannerFailed.diagnostics[0].user_message, /主视觉规划失败/);
+
+  const plannerThrow = await phase.runGeneratedImagePhase({
+    sceneSpec,
+    creativeContext: baseContext(),
+    projectDir,
+    services: {
+      generatedImagePlanner: { planGeneratedImages: async () => { throw new Error('text 模型崩了'); } },
+      aiImageModel: stubModelNoCheck,
+    },
+  });
+  assert.strictEqual(plannerThrow.generated_count, 0);
+  assert.match(plannerThrow.diagnostics[0].user_message, /主视觉规划异常/);
+
+  let sizeSeen = '';
+  await phase.runGeneratedImagePhase({
+    sceneSpec: { scenes: [{ id: 'scene_01', narration_text: 'a' }] },
+    creativeContext: baseContext(),
+    projectDir,
+    aspectRatio: '16:9',
+    services: {
+      generatedImagePlanner: { planGeneratedImages: async () => ({ success: true, plans: [{ scene_id: 'scene_01', generation_prompt: 'x' }] }) },
+      aiImageModel: {
+        generateImages: async ({ size }) => { sizeSeen = size; return { success: false, configured: true, images: [], message: '只验 size' }; },
+        downloadGeneratedImages: async () => ({ success: false, files: [], failures: [] }),
+      },
+    },
+  });
+  assert.strictEqual(sizeSeen, '2848x1600');
+
+  let refillStartIndex = -1;
+  const refill = await phase.runGeneratedImagePhase({
+    sceneSpec: {
+      aspect_ratio: '9:16',
+      scenes: [
+        { id: 'scene_01', narration_text: 'a' },
+        { id: 'scene_02', narration_text: 'b' },
+      ],
+    },
+    creativeContext: {
+      visual_strategy: 'asset_first',
+      asset_context: { assets: [{ id: 'gen_scene_01', source: 'generated', path: 'assets/x.png', generation: { scene_id: 'scene_01' } }] },
+    },
+    projectDir,
+    services: {
+      generatedImagePlanner: {
+        planGeneratedImages: async () => ({
+          success: true,
+          plans: [
+            { scene_id: 'scene_01', generation_prompt: '已生成过' },
+            { scene_id: 'scene_02', generation_prompt: '补齐场景二' },
+          ],
+        }),
+      },
+      aiImageModel: {
+        generateImages: async ({ prompt }) => {
+          assert.strictEqual(prompt, '补齐场景二');
+          return { success: true, configured: true, images: [{ url: 'https://cdn.example.com/img-2.png' }] };
+        },
+        downloadGeneratedImages: async ({ assetDir, startIndex }) => {
+          refillStartIndex = startIndex;
+          fs.mkdirSync(assetDir, { recursive: true });
+          const localPath = path.join(assetDir, 'generated-image-02-def.png');
+          fs.writeFileSync(localPath, 'png');
+          return {
+            success: true,
+            files: [{ url: 'https://cdn.example.com/img-2.png', local_path: localPath, file_name: 'generated-image-02-def.png', bytes: 3, mime: 'image/png' }],
+            failures: [],
+          };
+        },
+      },
+    },
+  });
+  assert.strictEqual(refillStartIndex, 1);
+  assert.strictEqual(refill.generated_count, 1);
+  const refillIds = refill.creativeContext.asset_context.assets.map(item => item.id);
+  assert.ok(refillIds.includes('gen_scene_02'));
+  assert.strictEqual(refillIds.filter(id => id === 'gen_scene_01').length, 1);
+
+  const hfDecisions = new Map([['scene_01', { source_mode: 'template_inputs' }]]);
+  phase.enforceAssetFirstRawHtmlRouting({
+    decisions: hfDecisions,
+    contentGraph: { nodes: [{ id: 'scene_01', asset_refs: [{ asset_id: 'gen_scene_01', usage: 'showcase' }] }] },
+    creativeContext: {
+      visual_strategy: 'hf_first',
+      asset_context: { assets: [{ id: 'gen_scene_01', source: 'generated' }] },
+    },
+  });
+  assert.strictEqual(hfDecisions.get('scene_01').source_mode, 'raw_html');
+
+  const hfUntouched = new Map([['scene_01', { source_mode: 'template_inputs' }]]);
+  phase.enforceAssetFirstRawHtmlRouting({
+    decisions: hfUntouched,
+    contentGraph: { nodes: [{ id: 'scene_01', asset_refs: [{ asset_id: 'article_01', usage: 'subject' }] }] },
+    creativeContext: {
+      visual_strategy: 'hf_first',
+      asset_context: { assets: [{ id: 'article_01', source: 'article' }] },
+    },
+  });
+  assert.strictEqual(hfUntouched.get('scene_01').source_mode, 'template_inputs');
+
+  const metaDecisions = new Map([['scene_04', { source_mode: 'template_inputs' }]]);
+  phase.enforceAssetFirstRawHtmlRouting({
+    decisions: metaDecisions,
+    contentGraph: { nodes: [{ id: 'node_4', metadata: { scene_id: 'scene_04' }, asset_refs: [{ asset_id: 'gen_scene_04', usage: 'showcase' }] }] },
+    creativeContext: {
+      visual_strategy: 'asset_first',
+      asset_context: { assets: [{ id: 'gen_scene_04', source: 'generated' }] },
+    },
+  });
+  assert.strictEqual(metaDecisions.get('scene_04').source_mode, 'raw_html');
+
+  const hydrateFiltered = phase.hydrateGeneratedAssetsFromProject({
+    project: {
+      assets: [
+        { id: 'gen_scene_01', source: 'generated', path: 'assets/generated-image-01-abc.png', generation: { scene_id: 'scene_01' } },
+        { id: 'gen_scene_09', source: 'generated', path: 'assets/missing.png', generation: { scene_id: 'scene_09' } },
+        { id: 'gen_scene_10', source: 'generated', path: '../escape.png', generation: { scene_id: 'scene_10' } },
+        { id: 'article_01', source: 'article', path: 'assets/a.jpg' },
+      ],
+    },
+    creativeContext: {
+      visual_strategy: 'asset_first',
+      asset_context: { assets: [{ id: 'gen_scene_01', source: 'generated', path: 'assets/dup.png', generation: { scene_id: 'scene_01' } }] },
+    },
+    projectDir: hydrateDir,
+  });
+  const hydratedIds = hydrateFiltered.asset_context.assets.map(item => item.id);
+  assert.deepStrictEqual(hydratedIds, ['gen_scene_01']);
+  assert.strictEqual(hydrateFiltered.asset_context.assets[0].path, 'assets/dup.png');
+
+  let hydratedGenerateCalled = false;
+  const afterHydrate = await phase.runGeneratedImagePhase({
+    sceneSpec,
+    creativeContext: hydrated,
+    projectDir: hydrateDir,
+    services: {
+      generatedImagePlanner: { planGeneratedImages: async () => ({ success: true, plans: [{ scene_id: 'scene_01', generation_prompt: '重复' }] }) },
+      aiImageModel: {
+        generateImages: async () => { hydratedGenerateCalled = true; return { success: false, images: [] }; },
+        downloadGeneratedImages: async () => ({ success: false, files: [], failures: [] }),
+      },
+    },
+  });
+  assert.strictEqual(afterHydrate.generated_count, 0);
+  assert.strictEqual(hydratedGenerateCalled, false);
+
   console.log('test-generated-image-phase passed');
 }
 
