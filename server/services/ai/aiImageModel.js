@@ -25,6 +25,17 @@ function extensionFromMime(mime) {
   return '.png';
 }
 
+function isGptImageModel(modelId = '') {
+  return safeString(modelId).toLowerCase().startsWith('gpt-image-');
+}
+
+function normalizeGptImageSize(size = '') {
+  const text = safeString(size);
+  if (text === '1600x2848') return '1024x1536';
+  if (text === '2848x1600') return '1536x1024';
+  return text || '1024x1024';
+}
+
 async function readLimitedImageBuffer(response, maxBytes = MAX_IMAGE_BYTES) {
   const contentLength = Number(response.headers?.get?.('content-length'));
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
@@ -78,16 +89,26 @@ async function generateImages(request = {}) {
   const referenceImages = Array.isArray(request.referenceImages)
     ? request.referenceImages.map(safeString).filter(Boolean).slice(0, 10)
     : [];
-  const body = {
-    model: runtime.modelId,
-    prompt,
-    size: safeString(request.size) || '2K',
-    watermark: false,
-    output_format: 'png',
-    response_format: 'url',
-  };
+  const isGptImage = isGptImageModel(runtime.modelId);
+  const body = isGptImage
+    ? {
+      model: runtime.modelId,
+      prompt,
+      size: normalizeGptImageSize(request.size),
+      quality: safeString(request.quality) || 'high',
+      output_format: 'png',
+      n: maxImages,
+    }
+    : {
+      model: runtime.modelId,
+      prompt,
+      size: safeString(request.size) || '2K',
+      watermark: false,
+      output_format: 'png',
+      response_format: 'url',
+    };
   if (referenceImages.length) body.image = referenceImages;
-  if (maxImages > 1) {
+  if (!isGptImage && maxImages > 1) {
     body.sequential_image_generation = 'auto';
     body.sequential_image_generation_options = { max_images: maxImages };
   }
@@ -128,8 +149,14 @@ async function generateImages(request = {}) {
     };
   }
   const images = (Array.isArray(data?.data) ? data.data : [])
-    .map(item => ({ url: safeString(item?.url), size: safeString(item?.size) }))
-    .filter(item => item.url);
+    .map(item => ({
+      url: safeString(item?.url),
+      b64_json: safeString(item?.b64_json),
+      size: safeString(item?.size),
+      revised_prompt: safeString(item?.revised_prompt),
+      mime: `image/${safeString(data?.output_format) || 'png'}`,
+    }))
+    .filter(item => item.url || item.b64_json);
   if (!images.length) {
     return { success: false, configured: true, images: [], message: '生图模型未返回任何图片。' };
   }
@@ -154,6 +181,24 @@ async function downloadGeneratedImages({ images = [], assetDir, fetchImpl, start
   const files = [];
   const failures = [];
   for (let index = 0; index < images.length; index += 1) {
+    const b64Json = safeString(images[index]?.b64_json);
+    if (b64Json) {
+      try {
+        const buffer = Buffer.from(b64Json, 'base64');
+        if (!buffer.length) throw new Error('base64 内容为空。');
+        if (buffer.length > MAX_IMAGE_BYTES) throw new Error('图片超过大小限制（30MB）。');
+        const mime = safeString(images[index]?.mime).startsWith('image/') ? safeString(images[index].mime) : 'image/png';
+        if (mime === 'image/svg+xml') throw new Error('不支持 SVG 图片。');
+        const hash = crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 10);
+        const fileName = `generated-image-${String(startIndex + index + 1).padStart(2, '0')}-${hash}${extensionFromMime(mime)}`;
+        const localPath = path.join(assetDir, fileName);
+        await fsp.writeFile(localPath, buffer);
+        files.push({ url: '', local_path: localPath, file_name: fileName, bytes: buffer.length, mime });
+      } catch (error) {
+        failures.push({ message: `base64 图片落盘失败：${safeString(error?.message) || '未知错误'}` });
+      }
+      continue;
+    }
     const url = safeString(images[index]?.url);
     if (!url) continue;
     let parsed;

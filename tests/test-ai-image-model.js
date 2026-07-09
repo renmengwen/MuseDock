@@ -9,6 +9,7 @@ const aiImageModel = require('../server/services/ai/aiImageModel');
 async function run() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-image-model-test-'));
   const configPath = path.join(root, 'ai-models.json');
+  const assetDir = path.join(root, 'assets');
 
   assert.strictEqual(await aiImageModel.isConfigured({ configPath }), false);
   const missing = await aiImageModel.generateImages({ prompt: '一张测试图', configPath });
@@ -77,6 +78,77 @@ async function run() {
   assert.strictEqual(singleBody.sequential_image_generation, undefined);
   assert.strictEqual(singleBody.image, undefined);
 
+  await aiModelConfig.saveConfig({
+    providers: {
+      openai: {
+        name: 'OpenAI',
+        protocol: 'openai-responses',
+        apiKey: 'sk-openai-test',
+        baseUrl: 'https://api.openai.example.com/v1/',
+        models: {
+          image: { enabled: true, modelId: 'gpt-image-2' },
+        },
+      },
+    },
+    active: { image: 'openai/image' },
+  }, { configPath });
+  const openaiFetch = async (url, options) => {
+    requestedUrl = url;
+    requestedOptions = options;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      text: async () => JSON.stringify({
+        data: [{ b64_json: Buffer.from([137, 80, 78, 71]).toString('base64') }],
+      }),
+    };
+  };
+  const openaiOk = await aiImageModel.generateImages({
+    prompt: '儿童绘本风格兽医',
+    size: '1600x2848',
+    configPath,
+    fetchImpl: openaiFetch,
+  });
+  assert.strictEqual(openaiOk.success, true);
+  assert.strictEqual(openaiOk.images.length, 1);
+  assert.ok(openaiOk.images[0].b64_json);
+  assert.strictEqual(requestedUrl, 'https://api.openai.example.com/v1/images/generations');
+  assert.strictEqual(requestedOptions.headers.authorization, 'Bearer sk-openai-test');
+  const openaiBody = JSON.parse(requestedOptions.body);
+  assert.strictEqual(openaiBody.model, 'gpt-image-2');
+  assert.strictEqual(openaiBody.size, '1024x1536');
+  assert.strictEqual(openaiBody.quality, 'high');
+  assert.strictEqual(openaiBody.output_format, 'png');
+  assert.strictEqual(openaiBody.n, 1);
+  assert.strictEqual(openaiBody.response_format, undefined);
+  assert.strictEqual(openaiBody.watermark, undefined);
+  assert.strictEqual(openaiBody.sequential_image_generation, undefined);
+
+  const b64Saved = await aiImageModel.downloadGeneratedImages({
+    images: openaiOk.images,
+    assetDir,
+  });
+  assert.strictEqual(b64Saved.success, true);
+  assert.strictEqual(b64Saved.files.length, 1);
+  assert.ok(fs.existsSync(b64Saved.files[0].local_path));
+  assert.strictEqual(b64Saved.files[0].mime, 'image/png');
+
+  await aiModelConfig.saveConfig({
+    providers: {
+      volcark: {
+        name: '火山方舟',
+        protocol: 'openai-responses',
+        apiKey: 'ark-test-key',
+        baseUrl: 'https://ark.example.com/api/v3/',
+        models: {
+          image: { enabled: true, modelId: 'doubao-seedream-5-0-260128' },
+        },
+      },
+    },
+    active: { image: 'volcark/image' },
+  }, { configPath });
+
   const failFetch = async () => ({
     ok: false,
     status: 429,
@@ -87,7 +159,6 @@ async function run() {
   assert.strictEqual(failed.success, false);
   assert.ok(!failed.message.includes('ark-test-key'));
 
-  const assetDir = path.join(root, 'assets');
   const downloadFetch = async () => ({
     ok: true,
     status: 200,
