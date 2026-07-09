@@ -33,4 +33,31 @@ assert.deepEqual(plan.beats.map(beat => beat.order), [1, 2, 3, 4]);
 assert.equal(plan.beats[0].intent, 'definition');
 assert.equal(plan.beats[3].intent, 'steps');
 
+// 边界：空输入不抛错，返回空 beats
+const emptyPlan = buildVisualPlan({});
+assert.deepEqual(emptyPlan.beats, []);
+assert.equal(emptyPlan.version, 1);
+
+// 边界：无 id 场景生成的 beat id 全局唯一且非空
+const noIdPlan = buildVisualPlan({
+  sceneSpec: {
+    scenes: [
+      { kind: 'text', speech_duration_sec: 18, narration_text: '第一段' },
+      { kind: 'text', speech_duration_sec: 18, narration_text: '第二段' },
+    ],
+  },
+  workflowId: '20260709000000000001',
+});
+const noIdBeatIds = noIdPlan.beats.map(beat => beat.id);
+assert.ok(noIdBeatIds.every(id => typeof id === 'string' && id.length > 0));
+assert.equal(new Set(noIdBeatIds).size, noIdBeatIds.length);
+
+// 边界：缺时长字段回落为 1 个 6s beat
+const noDurationPlan = buildVisualPlan({
+  sceneSpec: { scenes: [{ id: 'scene_x', kind: 'text', narration_text: '无时长' }] },
+  workflowId: '20260709000000000002',
+});
+assert.equal(noDurationPlan.beats.length, 1);
+assert.equal(noDurationPlan.beats[0].duration_sec, 6);
+
 console.log('test-html-video-visual-plan passed');

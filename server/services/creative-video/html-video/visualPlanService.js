@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { resolveSceneDurationSec } = require('./sceneTemplateMatcher');
 
 const STYLE_PROFILES = [
   {
@@ -35,14 +36,6 @@ function safeString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function positiveNumber(...values) {
-  for (const value of values) {
-    const number = Number(value);
-    if (Number.isFinite(number) && number > 0) return number;
-  }
-  return 6;
-}
-
 function hashIndex(input, length) {
   const hash = crypto.createHash('sha1').update(String(input || '')).digest();
   return length ? hash[0] % length : 0;
@@ -59,24 +52,20 @@ function inferIntent(scene = {}) {
   return 'definition';
 }
 
-function splitScene(scene = {}, startOrder = 1) {
-  const sceneId = safeString(scene.id || scene.scene_id);
-  const duration = positiveNumber(
-    scene.speech_duration_sec,
-    scene.duration_sec,
-    scene.durationSec,
-    scene.target_duration_sec,
-    scene.duration,
-  );
+function splitScene(scene = {}, startOrder = 1, sceneIndex = 0) {
+  const sceneId = safeString(scene.id || scene.scene_id)
+    || `scene_${String(sceneIndex + 1).padStart(2, '0')}`;
+  const duration = resolveSceneDurationSec(scene) || 6;
   const count = Math.max(1, Math.ceil(duration / 7));
   const beatDuration = Math.round((duration / count) * 100) / 100;
+  const lastBeatDuration = Math.round((duration - beatDuration * (count - 1)) * 100) / 100;
   return Array.from({ length: count }, (_, index) => ({
     id: count === 1 ? sceneId : `${sceneId}_b${index + 1}`,
     scene_id: sceneId,
     order: startOrder + index,
     beat_index: index + 1,
     beat_count: count,
-    duration_sec: beatDuration,
+    duration_sec: index === count - 1 ? lastBeatDuration : beatDuration,
     intent: inferIntent(scene),
     kind: safeString(scene.kind) || 'text',
     narration_text: safeString(scene.narration_text),
@@ -88,10 +77,10 @@ function splitScene(scene = {}, startOrder = 1) {
 function buildVisualPlan({ sceneSpec = {}, workflowId = '' } = {}) {
   const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
   const beats = [];
-  for (const scene of scenes) {
-    const next = splitScene(scene, beats.length + 1);
+  scenes.forEach((scene, sceneIndex) => {
+    const next = splitScene(scene, beats.length + 1, sceneIndex);
     beats.push(...next);
-  }
+  });
   return {
     version: 1,
     style_profile: chooseStyleProfile({ sceneSpec, workflowId }),
