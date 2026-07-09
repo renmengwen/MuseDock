@@ -86,6 +86,12 @@ const creativeWorkflowStepper = fs.readFileSync(creativeWorkflowStepperPath, 'ut
 const creativeProgressPanel = fs.readFileSync(creativeProgressPanelPath, 'utf-8');
 const creativeVideoPreview = fs.readFileSync(creativeVideoPreviewPath, 'utf-8');
 const creativeTaskDetail = fs.readFileSync(creativeTaskDetailPath, 'utf-8');
+// 任务详情已拆分为 CreativeTaskDetail -> CreativeTaskSummary -> CreativeTitlePanel 三层，
+// 摘要卡/提示词与错误日志弹框/标题面板的能力断言针对组合源
+const creativeTaskSummary = fs.readFileSync(path.join(__dirname, '../frontend-react/src/components/creative/CreativeTaskSummary.jsx'), 'utf-8');
+const creativeTitlePanel = fs.readFileSync(path.join(__dirname, '../frontend-react/src/components/creative/CreativeTitlePanel.jsx'), 'utf-8');
+const creativeErrorLog = fs.readFileSync(path.join(__dirname, '../frontend-react/src/components/creative/creativeErrorLog.js'), 'utf-8');
+const taskDetailUnit = creativeTaskDetail + creativeTaskSummary + creativeTitlePanel + creativeErrorLog;
 const app = fs.readFileSync(appPath, 'utf-8');
 const shell = fs.readFileSync(shellPath, 'utf-8');
 const styles = fs.readFileSync(stylesPath, 'utf-8');
@@ -116,10 +122,10 @@ for (const text of [
   '视频标题',
   '备选标题',
 ]) {
-  assert.ok(creativeTaskDetail.includes(text), `CreativeTaskDetail.jsx should include normal Chinese text: ${text}`);
+  assert.ok(taskDetailUnit.includes(text), `CreativeTaskDetail.jsx should include normal Chinese text: ${text}`);
 }
 
-assert.ok(creativeTaskDetail.includes(zh.continueEdit), `CreativeTaskDetail.jsx should include normal Chinese text: ${zh.continueEdit}`);
+assert.ok(taskDetailUnit.includes(zh.continueEdit), `CreativeTaskDetail.jsx should include normal Chinese text: ${zh.continueEdit}`);
 
 for (const text of [
   zh.creativeTitle,
@@ -209,38 +215,40 @@ assert.doesNotMatch(page, /editorOpen/, 'OneClickCreativePage should not track e
 assert.match(page, /continueEdit/, 'OneClickCreativePage should expose a continue edit action');
 assert.ok(page.includes('navigate(`/editor/${encodeURIComponent(id)}`)'), 'Continue edit should navigate to the editor route');
 assert.match(
-  creativeTaskDetail,
+  taskDetailUnit,
   /const\s+editableWorkflowId\s*=\s*workflowId\s*\|\|\s*workflow\?\.workflow_id\s*\|\|\s*workflow\?\.id\s*\|\|\s*''/,
   'Creative task detail should fall back to workflow IDs when the prop workflowId is missing',
 );
-assert.match(creativeTaskDetail, /onContinueEdit\?\.\(editableWorkflowId\)/, 'Creative task detail should continue editing with the editable workflow ID');
+assert.match(taskDetailUnit, /onContinueEdit\?\.\(editableWorkflowId\)/, 'Creative task detail should continue editing with the editable workflow ID');
 assert.match(page, /getCreativeWorkflow/, 'OneClickCreativePage should poll creative workflows');
-assert.match(page, /stopAndDeleteTask/, 'OneClickCreativePage should expose a stop-and-delete action for the current task');
-assert.match(page, /onStopAndDelete=\{stopAndDeleteTask\}/, 'Creative task detail should receive the current task stop-and-delete handler');
+// 停止并删除已改为"确认弹窗（request）+ 执行（perform）"两段式
+assert.match(page, /requestStopAndDeleteTask/, 'OneClickCreativePage should expose a stop-and-delete action for the current task');
+assert.match(page, /performStopAndDeleteTask/, 'OneClickCreativePage should perform stop-and-delete after confirmation');
+assert.match(page, /onStopAndDelete=\{requestStopAndDeleteTask\}/, 'Creative task detail should receive the current task stop-and-delete handler');
 assert.match(page, /getWorkflowVideoUrl=\{getWorkflowVideoUrl\}/, 'Creative task detail should receive the workflow video URL resolver');
-assert.match(creativeTaskDetail, /onStopAndDelete\(workflowId\)/, 'Creative task detail stop button should delete the currently opened task');
-assert.match(creativeTaskDetail, /disabled=\{deletingWorkflowId === workflowId\}/, 'Current task stop-and-delete button should be disabled while deleting');
-assert.match(creativeTaskDetail, /const\s+promptText\s*=\s*\(promptInput\.raw_text\s*\|\|\s*promptInput\.douyin_url/, 'Creative task detail should show the original prompt and fall back to stored source URLs');
-assert.match(creativeTaskDetail, /function\s+getWorkflowTitleInfo\(workflow\)/, 'Creative task detail should derive generated title data from the workflow scene spec');
-assert.match(creativeTaskDetail, /title_candidates/, 'Creative task detail should read generated title candidates');
-assert.match(creativeTaskDetail, /<CreativeTitlePanel workflow=\{workflow\} \/>[\s\S]*isDone \? <SourceImageAssetsPanel workflow=\{workflow\} compact \/> : null/, 'Creative task summary should merge generated title and completed source assets into the top card');
-assert.match(creativeTaskDetail, /const\s+durationLabel\s*=\s*formatWorkflowDurationLabel\(workflow\)/, 'Creative task summary should derive the final duration label');
-assert.match(creativeTaskDetail, /const\s+\[promptModalOpen,\s*setPromptModalOpen\]\s*=\s*useState\(false\)/, 'Creative task detail should track whether the prompt modal is open');
-assert.match(creativeTaskDetail, /<DialogTrigger asChild>\s*<Button variant="secondary" size="sm" type="button"[^>]*>\s*<Eye size=\{14\} \/>\s*<span>查看提示词/, 'Creative task detail should render a prompt viewing button beside task actions');
-assert.match(creativeTaskDetail, /<Dialog\s+open=\{promptModalOpen\}\s+onOpenChange=\{setPromptModalOpen\}>/, 'Prompt modal should use shadcn Dialog state');
-assert.match(creativeTaskDetail, /<DialogTrigger asChild>/, 'Prompt view button should be the shadcn Dialog trigger');
-assert.match(creativeTaskDetail, /DialogClose/, 'Prompt modal should import and render DialogClose for a localized close button');
-assert.match(creativeTaskDetail, /<DialogContent className="[^"]*" showCloseButton=\{false\}>[\s\S]*<DialogTitle>当前任务提示词<\/DialogTitle>/, 'Prompt modal should disable the default English shadcn close button and render a Chinese title');
-assert.match(creativeTaskDetail, /<DialogClose asChild>[\s\S]*aria-label="关闭提示词弹框"[\s\S]*<span className="sr-only">关闭提示词弹框<\/span>/, 'Prompt modal close button should use a Chinese accessible label and sr-only text');
-assert.match(creativeTaskDetail, /<pre className="[^"]*">\{promptText \|\| '暂无可显示的提示词。'\}<\/pre>/, 'Prompt modal should show the original prompt with a Chinese empty state');
-assert.match(creativeTaskDetail, /function\s+buildWorkflowErrorLog\(\{[\s\S]*lastFailure[\s\S]*projectSubstages[\s\S]*failedModelCalls/, 'Creative task detail should build a readable error log from existing workflow failure fields');
-assert.match(creativeTaskDetail, /workflow\?\.status === 'failed' \? \([\s\S]*<FileText size=\{14\} \/>[\s\S]*<span>查看错误日志<\/span>/, 'Failed task detail should render an error log button');
-assert.match(creativeTaskDetail, /<DialogTitle>当前任务错误日志<\/DialogTitle>[\s\S]*<DialogDescription>用于排查无法恢复的创作失败，可复制后发送给开发者。<\/DialogDescription>/, 'Error log dialog should explain the log purpose in Chinese');
-assert.match(creativeTaskDetail, /aria-label="关闭错误日志弹框"[\s\S]*<span className="sr-only">关闭错误日志弹框<\/span>/, 'Error log dialog should use a Chinese accessible close label');
-assert.match(creativeTaskDetail, /navigator\.clipboard\.writeText\(errorLogText\)/, 'Error log dialog should copy the prepared log text');
-assert.match(creativeTaskDetail, /<span>\{errorLogCopyStatus === 'copied' \? '已复制' : errorLogCopyStatus === 'failed' \? '复制失败' : '复制错误日志'\}<\/span>/, 'Error log copy button should expose localized copy states');
-assert.doesNotMatch(creativeTaskDetail, /creativePromptModalOverlay/, 'CreativeTaskDetail should not render the old hand-written prompt modal overlay');
-assert.doesNotMatch(creativeTaskDetail, /role="dialog"[\s\S]*aria-modal="true"/, 'CreativeTaskDetail should rely on shadcn Dialog accessibility instead of a hand-written dialog');
+assert.match(taskDetailUnit, /onStopAndDelete\(workflowId\)/, 'Creative task detail stop button should delete the currently opened task');
+assert.match(taskDetailUnit, /disabled=\{deletingWorkflowId === workflowId\}/, 'Current task stop-and-delete button should be disabled while deleting');
+assert.match(taskDetailUnit, /const\s+promptText\s*=\s*\(promptInput\.raw_text\s*\|\|\s*promptInput\.douyin_url/, 'Creative task detail should show the original prompt and fall back to stored source URLs');
+assert.match(taskDetailUnit, /function\s+getWorkflowTitleInfo\(workflow\)/, 'Creative task detail should derive generated title data from the workflow scene spec');
+assert.match(taskDetailUnit, /title_candidates/, 'Creative task detail should read generated title candidates');
+assert.match(taskDetailUnit, /<CreativeTitlePanel workflow=\{workflow\} \/>[\s\S]*isDone \? <SourceImageAssetsPanel workflow=\{workflow\} compact \/> : null/, 'Creative task summary should merge generated title and completed source assets into the top card');
+assert.match(taskDetailUnit, /const\s+durationLabel\s*=\s*formatWorkflowDurationLabel\(workflow\)/, 'Creative task summary should derive the final duration label');
+assert.match(taskDetailUnit, /const\s+\[promptModalOpen,\s*setPromptModalOpen\]\s*=\s*useState\(false\)/, 'Creative task detail should track whether the prompt modal is open');
+assert.match(taskDetailUnit, /<DialogTrigger asChild>\s*<Button variant="secondary" size="sm" type="button"[^>]*>\s*<Eye size=\{14\} \/>\s*<span>查看提示词/, 'Creative task detail should render a prompt viewing button beside task actions');
+assert.match(taskDetailUnit, /<Dialog\s+open=\{promptModalOpen\}\s+onOpenChange=\{setPromptModalOpen\}>/, 'Prompt modal should use shadcn Dialog state');
+assert.match(taskDetailUnit, /<DialogTrigger asChild>/, 'Prompt view button should be the shadcn Dialog trigger');
+assert.match(taskDetailUnit, /DialogClose/, 'Prompt modal should import and render DialogClose for a localized close button');
+assert.match(taskDetailUnit, /<DialogContent className="[^"]*" showCloseButton=\{false\}>[\s\S]*<DialogTitle>当前任务提示词<\/DialogTitle>/, 'Prompt modal should disable the default English shadcn close button and render a Chinese title');
+assert.match(taskDetailUnit, /<DialogClose asChild>[\s\S]*aria-label="关闭提示词弹框"[\s\S]*<span className="sr-only">关闭提示词弹框<\/span>/, 'Prompt modal close button should use a Chinese accessible label and sr-only text');
+assert.match(taskDetailUnit, /<pre className="[^"]*">\{promptText \|\| '暂无可显示的提示词。'\}<\/pre>/, 'Prompt modal should show the original prompt with a Chinese empty state');
+assert.match(taskDetailUnit, /function\s+buildWorkflowErrorLog\(\{[\s\S]*lastFailure[\s\S]*projectSubstages[\s\S]*failedModelCalls/, 'Creative task detail should build a readable error log from existing workflow failure fields');
+assert.match(taskDetailUnit, /workflow\?\.status === 'failed' \? \([\s\S]*<FileText size=\{14\} \/>[\s\S]*<span>查看错误日志<\/span>/, 'Failed task detail should render an error log button');
+assert.match(taskDetailUnit, /<DialogTitle>当前任务错误日志<\/DialogTitle>[\s\S]*<DialogDescription>用于排查无法恢复的创作失败，可复制后发送给开发者。<\/DialogDescription>/, 'Error log dialog should explain the log purpose in Chinese');
+assert.match(taskDetailUnit, /aria-label="关闭错误日志弹框"[\s\S]*<span className="sr-only">关闭错误日志弹框<\/span>/, 'Error log dialog should use a Chinese accessible close label');
+assert.match(taskDetailUnit, /navigator\.clipboard\.writeText\(errorLogText\)/, 'Error log dialog should copy the prepared log text');
+assert.match(taskDetailUnit, /<span>\{errorLogCopyStatus === 'copied' \? '已复制' : errorLogCopyStatus === 'failed' \? '复制失败' : '复制错误日志'\}<\/span>/, 'Error log copy button should expose localized copy states');
+assert.doesNotMatch(taskDetailUnit, /creativePromptModalOverlay/, 'CreativeTaskDetail should not render the old hand-written prompt modal overlay');
+assert.doesNotMatch(taskDetailUnit, /role="dialog"[\s\S]*aria-modal="true"/, 'CreativeTaskDetail should rely on shadcn Dialog accessibility instead of a hand-written dialog');
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');
 assert.match(page, /ACTIVE_CREATIVE_TASK_STORAGE_KEY/, 'OneClickCreativePage should persist active creative task stream state');
 assert.match(page, /streamCreativeWorkflowEvents/, 'OneClickCreativePage should subscribe to creative workflow event stream');
@@ -394,7 +402,8 @@ assert.match(page, /const submitDisabled = isBusy \|\| !input\.trim\(\)/, 'Submi
 assert.match(creativeComposer, /disabled=\{submitDisabled\}/, 'Submit button should use the combined disabled state');
 assert.ok(!page.includes(zh.assetNotice), 'Expert mode should not show the future asset-context notice copy');
 assert.doesNotMatch(page, /AssetContextNotice/, 'Expert mode should not render a second asset-context notice below the developing hint');
-assert.match(creativeComposer, /useResearch[\s\S]*?border-\[#e5e7eb\] bg-white text-\[#667085\]/, 'Research button should have an explicit inactive state');
+// 未激活态样式已迁移到 opendesign token（border-line-1 / text-fg-3），不再用 hex
+assert.match(creativeComposer, /useResearch[\s\S]*?border-line-1 bg-white text-fg-3/, 'Research button should have an explicit inactive state');
 assert.match(page, /assetIds:\s*\[\]/, 'OneClickCreativePage payload should preserve empty assetIds');
 assert.match(creativeComposer, /disabled=\{isBusy\}/, 'CreativeComposer should disable controls while busy');
 assert.match(page, /grid h-screen min-h-screen overflow-hidden bg-white/, 'OneClickCreativePage should use a dedicated chat shell');
@@ -407,7 +416,7 @@ assert.match(creativeSidebar, /<aside className="relative grid[^"]*overflow-hidd
 assert.ok(!styles.includes('.creativeFloatingExpand'), 'styles.css should not keep a floating expand button over collapsed sidebar');
 assert.ok(!page.includes('<div className="agentStatusList">'), 'WorkflowStatusPanel should not render li elements inside a div.agentStatusList');
 assert.doesNotMatch(page, /<WorkflowStatusPanel/, 'Creative task detail should not render the old current-task card');
-assert.match(creativeTaskDetail, /aria-label="任务摘要"/, 'Creative task detail should show task id, status, duration, and title in one summary card');
+assert.match(taskDetailUnit, /aria-label="任务摘要"/, 'Creative task detail should show task id, status, duration, and title in one summary card');
 assert.match(creativeWorkflowStepper, /grid-cols-\[repeat\(10,minmax\(72px,1fr\)\)\]/, 'Creative task detail should render a horizontal workflow stepper');
 assert.match(creativeWorkflowStepper, /absolute right-\[calc\(50%\+18px\)\] top-\[13px\]/, 'Creative workflow stepper should render connectors between steps');
 assert.match(creativeWorkflowStepper, /aria-current=\{stepState === 'active' \? 'step' : undefined\}/, 'Active workflow step should be exposed and visually highlighted');
@@ -428,7 +437,7 @@ assert.ok(!styles.includes('.creativePromptModalClose'), 'styles.css should remo
 assert.ok(!styles.includes('.creativeDetailCard'), 'styles.css should remove unreferenced creative detail card styles');
 assert.ok(!styles.includes('.creativeStagePanel'), 'styles.css should remove unreferenced creative stage panel styles');
 assert.ok(!styles.includes('.creativeAssetNotice'), 'styles.css should remove unreferenced creative asset notice styles');
-assert.match(creativeTaskDetail, /getWorkflowVideoUrl/, 'Creative task detail should resolve rendered video URL from workflow data');
+assert.match(taskDetailUnit, /getWorkflowVideoUrl/, 'Creative task detail should resolve rendered video URL from workflow data');
 assert.match(page, /workflow\?\.stages\?\.find\(stage => stage\.id === 'render'\)\?\.result/, 'Creative task detail should read video URL from render stage result');
 assert.match(page, /getWorkflowDisplayMessage/, 'Creative task detail should derive the visible status message from workflow progress');
 assert.match(page, /find\(stage => \['running', 'queued', 'pending'\]\.includes\(stage\.status\)\)/, 'Creative task detail should surface the current active stage message while polling');
@@ -439,22 +448,22 @@ assert.match(creativeDisplay, /stage\.status === 'running'[\s\S]*return 'active'
 assert.match(creativeDisplay, /stage\.status === 'queued' \|\| stage\.status === 'pending'[\s\S]*return 'queued'/, 'Workflow stepper should keep queued stages visually quieter than the running step');
 assert.match(creativeStatusMessage, /getStatusMessageClass/, 'CreativeStatusMessage should use the shared status message class helper');
 assert.match(creativeStatusMessage, /模型未配置[\s\S]*to="\/settings\?section=models"/, 'CreativeStatusMessage should link to model settings when the message reports an unconfigured model');
-assert.match(creativeTaskDetail, /<CreativeStatusMessage\s+status=\{status\}\s+message=\{message\}\s+\/>/, 'CreativeTaskDetail should render the extracted status message component while waiting');
-const videoPreviewStart = creativeTaskDetail.indexOf('<CreativeVideoPreview');
+assert.match(taskDetailUnit, /<CreativeStatusMessage\s+status=\{status\}\s+message=\{message\}\s+\/>/, 'CreativeTaskDetail should render the extracted status message component while waiting');
+const videoPreviewStart = taskDetailUnit.indexOf('<CreativeVideoPreview');
 assert.ok(videoPreviewStart > 0, 'Creative task detail should render CreativeVideoPreview when a video URL is available');
-const videoPreviewEnd = creativeTaskDetail.indexOf('/>', videoPreviewStart);
+const videoPreviewEnd = taskDetailUnit.indexOf('/>', videoPreviewStart);
 assert.ok(videoPreviewEnd > videoPreviewStart, 'CreativeVideoPreview JSX should be self-closing');
-const videoPreviewBlock = creativeTaskDetail.slice(videoPreviewStart, videoPreviewEnd);
+const videoPreviewBlock = taskDetailUnit.slice(videoPreviewStart, videoPreviewEnd);
 assert.ok(videoPreviewBlock.includes('videoUrl={videoUrl}'), 'CreativeVideoPreview should receive the rendered video URL');
 assert.doesNotMatch(videoPreviewBlock, /onEdit|disabled|title=/, 'CreativeVideoPreview should not own the completed edit action');
-assert.match(creativeTaskDetail, /<PencilLine size=\{14\} \/>[\s\S]*<span>二次编辑<\/span>/, 'Completed task detail should show the secondary edit action in the top summary card');
-assert.match(creativeTaskDetail, /disabled=\{!editableWorkflowId\}[\s\S]*title=\{editableWorkflowId \? '二次编辑视频' : '缺少创作任务 ID，无法进入编辑器。'\}[\s\S]*onClick=\{continueEdit\}/, 'Top secondary edit action should keep the existing edit navigation guard');
+assert.match(taskDetailUnit, /<PencilLine size=\{14\} \/>[\s\S]*<span>二次编辑<\/span>/, 'Completed task detail should show the secondary edit action in the top summary card');
+assert.match(taskDetailUnit, /disabled=\{!editableWorkflowId\}[\s\S]*title=\{editableWorkflowId \? '二次编辑视频' : '缺少创作任务 ID，无法进入编辑器。'\}[\s\S]*onClick=\{continueEdit\}/, 'Top secondary edit action should keep the existing edit navigation guard');
 assert.match(creativeVideoPreview, /CreativeVideoPreview\(\{ videoUrl \}\)/, 'CreativeVideoPreview should only accept the rendered video URL');
 assert.match(creativeVideoPreview, /<video className="[^"]*" src=\{videoUrl\} controls/, 'Creative video preview should render a native controls video element');
 assert.doesNotMatch(creativeVideoPreview, /<Button|继续编辑|二次编辑/, 'Creative video preview should stay focused on playback only');
-assert.match(creativeTaskDetail, /workflow\?\.status === 'done' && videoUrl/, 'Creative video preview should render after workflow is done');
-assert.match(creativeTaskDetail, /!\s*isDone\s*\? \([\s\S]*<CreativeWorkflowStepper workflow=\{workflow\} \/>[\s\S]*<CreativeProgressPanel/, 'Creative detail should hide stepper and current progress after a task is done');
-assert.match(creativeTaskDetail, /!\s*isDone \? <SourceImageAssetsPanel workflow=\{workflow\} \/> : null/, 'Creative detail should keep source assets outside the video area only before completion');
+assert.match(taskDetailUnit, /workflow\?\.status === 'done' && videoUrl/, 'Creative video preview should render after workflow is done');
+assert.match(taskDetailUnit, /!\s*isDone\s*\? \([\s\S]*<CreativeWorkflowStepper workflow=\{workflow\} \/>[\s\S]*<CreativeProgressPanel/, 'Creative detail should hide stepper and current progress after a task is done');
+assert.match(taskDetailUnit, /!\s*isDone \? <SourceImageAssetsPanel workflow=\{workflow\} \/> : null/, 'Creative detail should keep source assets outside the video area only before completion');
 assert.ok(!styles.includes('.creativeDetailMeta'), 'compact task meta row should be inline Tailwind, not styles.css');
 assert.match(creativeWorkflowStepper, /top-\[13px\] h-0\.5 w-\[calc\(100%-36px\)\]/, 'horizontal step connectors should be inline Tailwind');
 assert.ok(!styles.includes('@keyframes activeStepPulse'), 'Active workflow step animation should not add custom global CSS');

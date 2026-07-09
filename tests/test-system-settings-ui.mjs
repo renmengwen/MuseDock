@@ -5,13 +5,17 @@ import path from 'node:path';
 const root = process.cwd();
 const systemSettingsPath = path.join(root, 'frontend-react/src/components/settings/SystemSettings.jsx');
 const cleanupDialogPath = path.join(root, 'frontend-react/src/components/settings/CleanupConfirmDialog.jsx');
+const confirmDialogPath = path.join(root, 'frontend-react/src/components/ui/confirm-dialog.jsx');
+const uiDialogPath = path.join(root, 'frontend-react/src/components/ui/dialog.jsx');
 const settingsPagePath = path.join(root, 'frontend-react/src/pages/SettingsPage.jsx');
 const creativeDefaultsPath = path.join(root, 'frontend-react/src/components/settings/CreativeDefaultsSettings.jsx');
 const settingsOverviewPath = path.join(root, 'frontend-react/src/components/settings/SettingsOverview.jsx');
 
-const [systemSource, dialogSource, pageSource, creativeDefaultsSource, overviewSource] = await Promise.all([
+const [systemSource, dialogSource, confirmDialogSource, uiDialogSource, pageSource, creativeDefaultsSource, overviewSource] = await Promise.all([
   readFile(systemSettingsPath, 'utf8'),
   readFile(cleanupDialogPath, 'utf8'),
+  readFile(confirmDialogPath, 'utf8'),
+  readFile(uiDialogPath, 'utf8'),
   readFile(settingsPagePath, 'utf8'),
   readFile(creativeDefaultsPath, 'utf8'),
   readFile(settingsOverviewPath, 'utf8'),
@@ -37,8 +41,12 @@ assert.doesNotMatch(systemSource, /清理全部/);
 assert.match(dialogSource, /确认清理/);
 assert.match(dialogSource, /正在清理/);
 assert.match(dialogSource, /此操作不可恢复/);
-assert.match(dialogSource, /fixed inset-0/);
-assert.match(dialogSource, /role="dialog"/);
+// 清理确认弹窗已改为复用全站统一的 ConfirmDialog（Radix Dialog）：
+// 遮罩层在 ui/dialog.jsx，dialog 语义由 Radix 运行时提供，不再手写 fixed 弹层
+assert.match(dialogSource, /ConfirmDialog/);
+assert.doesNotMatch(dialogSource, /fixed inset-0/);
+assert.match(confirmDialogSource, /DialogContent/);
+assert.match(uiDialogSource, /fixed inset-0/);
 assert.doesNotMatch(dialogSource, /modalOverlay/);
 assert.match(pageSource, /SystemSettings/);
 assert.match(overviewSource, /Pexels 补图/);
