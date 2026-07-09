@@ -1,11 +1,4 @@
-const { orderedCandidates, passCandidate } = require('./sceneTemplateMatcher');
-
-function getTemplate(registry, id) {
-  if (!registry) return null;
-  if (typeof registry.getTemplate === 'function') return registry.getTemplate(id);
-  if (registry instanceof Map) return registry.get(id);
-  return null;
-}
+const { orderedCandidates, passCandidate, getTemplate } = require('./sceneTemplateMatcher');
 
 function beatAsScene(beat = {}) {
   return {
@@ -14,6 +7,12 @@ function beatAsScene(beat = {}) {
     scene_id: beat.scene_id,
     kind: beat.kind,
     duration_sec: beat.duration_sec,
+    speech_duration_sec: beat.duration_sec,
+    speechDurationSec: undefined,
+    duration: beat.duration_sec,
+    durationSec: undefined,
+    target_duration_sec: undefined,
+    targetDurationSec: undefined,
     narration_text: beat.narration_text,
     visual_text: beat.visual_text,
   };
@@ -41,13 +40,15 @@ function matchVisualBeatsToRenderers({ visualPlan = {}, registry, renderTarget =
   const decisions = new Map();
   const beats = Array.isArray(visualPlan.beats) ? visualPlan.beats : [];
   for (const beat of beats) {
-    const candidates = orderedCandidates(beatAsScene(beat));
+    if (!beat.id || decisions.has(beat.id)) continue;
+    const scene = beatAsScene(beat);
+    const candidates = orderedCandidates(scene);
     const failures = [];
     let picked = null;
     for (const id of candidates) {
       const result = passCandidate({
         template: getTemplate(registry, id),
-        scene: beatAsScene(beat),
+        scene,
         renderTarget,
         confidence: candidates[0] === id ? 0.9 : 0.7,
       });

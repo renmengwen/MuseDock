@@ -159,4 +159,5 @@ module.exports = {
   resolveSceneDurationSec,
   orderedCandidates,
   passCandidate,
+  getTemplate,
 };

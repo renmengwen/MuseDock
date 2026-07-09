@@ -42,6 +42,7 @@ const plan = {
       scene_id: 'scene_01',
       kind: 'text',
       duration_sec: 6,
+      source_scene: { speech_duration_sec: 12, duration: 12 },
       visual_text: { headline: '概念开场' },
       narration_text: '先定义概念。',
     },
@@ -50,6 +51,7 @@ const plan = {
       scene_id: 'scene_02',
       kind: 'text',
       duration_sec: 12,
+      source_scene: { speech_duration_sec: 12, duration: 12 },
       visual_text: { headline: '过长段落' },
       narration_text: '这一段仍然太长。',
     },
@@ -64,6 +66,7 @@ const decisions = matchVisualBeatsToRenderers({
 
 assert.equal(decisions.get('scene_01_b1').source_mode, 'template_inputs');
 assert.equal(decisions.get('scene_01_b1').duration_strategy, 'fit');
+assert.ok(decisions.get('scene_01_b1').inputs.duration_sec <= 8, 'beat 时长应压过场景时长别名');
 assert.equal(decisions.get('scene_02_b1').source_mode, 'raw_html');
 assert.match(decisions.get('scene_02_b1').fallback_reason, /模板不支持目标时长/);
 
