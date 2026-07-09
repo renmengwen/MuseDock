@@ -157,4 +157,6 @@ module.exports = {
   KIND_TEMPLATE_CANDIDATES,
   matchScenesToTemplates,
   resolveSceneDurationSec,
+  orderedCandidates,
+  passCandidate,
 };
