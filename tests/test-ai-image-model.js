@@ -68,13 +68,15 @@ async function run() {
   assert.strictEqual(body.model, 'doubao-seedream-5-0-260128');
   assert.strictEqual(body.size, '1600x2848');
   assert.strictEqual(body.watermark, false);
+  assert.strictEqual(body.output_format, undefined);
   assert.strictEqual(body.response_format, 'url');
   assert.strictEqual(body.sequential_image_generation, 'auto');
   assert.strictEqual(body.sequential_image_generation_options.max_images, 2);
   assert.deepStrictEqual(body.image, ['data:image/png;base64,AAAA']);
 
-  await aiImageModel.generateImages({ prompt: '单图', configPath, fetchImpl });
+  await aiImageModel.generateImages({ prompt: '单图', outputFormat: 'jpeg', configPath, fetchImpl });
   const singleBody = JSON.parse(requestedOptions.body);
+  assert.strictEqual(singleBody.output_format, 'jpeg');
   assert.strictEqual(singleBody.sequential_image_generation, undefined);
   assert.strictEqual(singleBody.image, undefined);
 
@@ -119,7 +121,7 @@ async function run() {
   assert.strictEqual(openaiBody.model, 'gpt-image-2');
   assert.strictEqual(openaiBody.size, '1024x1536');
   assert.strictEqual(openaiBody.quality, 'high');
-  assert.strictEqual(openaiBody.output_format, 'png');
+  assert.strictEqual(openaiBody.output_format, undefined);
   assert.strictEqual(openaiBody.n, 1);
   assert.strictEqual(openaiBody.response_format, undefined);
   assert.strictEqual(openaiBody.watermark, undefined);

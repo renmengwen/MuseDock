@@ -36,6 +36,12 @@ function normalizeGptImageSize(size = '') {
   return text || '1024x1024';
 }
 
+function mimeFromOutputFormat(format = '') {
+  const value = safeString(format).toLowerCase();
+  if (!value) return '';
+  return `image/${value === 'jpg' ? 'jpeg' : value}`;
+}
+
 async function readLimitedImageBuffer(response, maxBytes = MAX_IMAGE_BYTES) {
   const contentLength = Number(response.headers?.get?.('content-length'));
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
@@ -90,13 +96,13 @@ async function generateImages(request = {}) {
     ? request.referenceImages.map(safeString).filter(Boolean).slice(0, 10)
     : [];
   const isGptImage = isGptImageModel(runtime.modelId);
+  const outputFormat = safeString(request.outputFormat);
   const body = isGptImage
     ? {
       model: runtime.modelId,
       prompt,
       size: normalizeGptImageSize(request.size),
       quality: safeString(request.quality) || 'high',
-      output_format: 'png',
       n: maxImages,
     }
     : {
@@ -104,9 +110,9 @@ async function generateImages(request = {}) {
       prompt,
       size: safeString(request.size) || '2K',
       watermark: false,
-      output_format: 'png',
       response_format: 'url',
     };
+  if (outputFormat) body.output_format = outputFormat;
   if (referenceImages.length) body.image = referenceImages;
   if (!isGptImage && maxImages > 1) {
     body.sequential_image_generation = 'auto';
@@ -154,7 +160,7 @@ async function generateImages(request = {}) {
       b64_json: safeString(item?.b64_json),
       size: safeString(item?.size),
       revised_prompt: safeString(item?.revised_prompt),
-      mime: `image/${safeString(data?.output_format) || 'png'}`,
+      mime: mimeFromOutputFormat(data?.output_format) || mimeFromOutputFormat(outputFormat),
     }))
     .filter(item => item.url || item.b64_json);
   if (!images.length) {

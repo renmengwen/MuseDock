@@ -1,3 +1,8 @@
+const MODEL_SELECTOR_HELP_TEXT = {
+  image: '当前图片生成仅支持火山方舟 Seedream 4.0-5.0 以及 OpenAI gpt-image-2。',
+  tts: '当前 TTS 功能仅支持小米 MiMo 和 MiniMax 供应商。',
+};
+
 export function GlobalModelSelector({ modelTypes, modelTypeInfo, providerList, activeModels, onChange }) {
   return (
     <section className="mb-4 rounded-lg border border-[#e7e9ee] bg-white p-4">
@@ -38,6 +43,11 @@ export function GlobalModelSelector({ modelTypes, modelTypeInfo, providerList, a
               </select>
               {current ? (
                 <span className="text-xs text-[#69717e]">{current.providerName} / {current.modelId}</span>
+              ) : null}
+              {MODEL_SELECTOR_HELP_TEXT[type] ? (
+                <span className="text-[11px] font-semibold leading-5 text-[#69717e]">
+                  {MODEL_SELECTOR_HELP_TEXT[type]}
+                </span>
               ) : null}
             </label>
           );
