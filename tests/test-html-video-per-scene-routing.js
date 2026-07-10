@@ -484,6 +484,19 @@ const stubAiImageModel = { isConfigured: async () => false };
     }
   }
 
+  // R4：帧统计必须活过 attachVisualRouting 的覆盖，出现在最终 project.json
+  {
+    const persisted = JSON.parse(
+      await fs.readFile(path.join(assetFirstResult.html_video_project_path, 'project.json'), 'utf8'),
+    );
+    const withStats = (persisted.render_decisions || [])
+      .filter(d => d.overlay_check || Number.isFinite(d.text_blocks));
+    assert.ok(
+      withStats.length > 0,
+      `render_decisions 统计字段在最终 project.json 中必须存在（不被 attachVisualRouting 抹掉）：${JSON.stringify(persisted.render_decisions, null, 2)}`,
+    );
+  }
+
   // 绑定 helper：不改入参（保证 scene_spec_hash 稳定）、结果确定性、不重复写入
   {
     const bindSpec = {

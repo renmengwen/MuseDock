@@ -6,6 +6,7 @@ const { validateProject } = require('./projectSchema');
 const { mappedEngine } = require('./templateRegistry');
 const { validateTemplateInputs } = require('./templateInputAgent');
 const { validateHtmlCanvasContract } = require('./frameCanvasContract');
+const { validateOverlayHtml } = require('./motionPrimitiveCatalog');
 const { validateSceneSpecTimelineConsistency } = require('./timelineConsistency');
 const { normalizeCaptionsForFrame } = require('./captionLayer');
 
@@ -189,9 +190,24 @@ async function readFrameHtmlForValidation(projectDir, frame, diagnostics) {
   }
 }
 
+// asset_first 专属：raw_html 帧的 motion overlay 确定性校验（warning 级，不阻断）。
+// hf_first 或无 overlay 的 HTML 不产生任何 issue（硬约束 A）。
+function assetFirstOverlayIssues(html, { visualStrategy, frameHeight = 1920 } = {}) {
+  if (visualStrategy !== 'asset_first') return [];
+  if (!/data-mp-overlay/.test(String(html || ''))) return [];
+  const result = validateOverlayHtml(html, { height: frameHeight });
+  if (result.valid) return [];
+  return [{
+    code: result.reason_code,
+    severity: 'warning',
+    message: result.message,
+  }];
+}
+
 async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames }) {
   const output = objectOrEmpty(project.output);
   const resolution = objectOrEmpty(output.resolution);
+  const visualStrategy = project.visual_strategy || null;
   for (const frame of frames) {
     const html = await readFrameHtmlForValidation(projectDir, frame, diagnostics);
     if (html == null) continue;
@@ -213,6 +229,14 @@ async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames 
       frame_id: frame.id,
       missing_keys: missing,
     });
+    }
+    for (const issue of assetFirstOverlayIssues(html, {
+      visualStrategy,
+      frameHeight: Number(resolution.height) || 1920,
+    })) {
+      warningDiagnostic(diagnostics, issue.code, 'frame', issue.message || 'motion overlay 不符合安全区约束。', {
+        frame_id: frame.id,
+      });
     }
   }
 }
@@ -338,4 +362,5 @@ async function validateHtmlVideoProject({
 module.exports = {
   validateHtmlVideoProject,
   collectMissingTextKeys,
+  assetFirstOverlayIssues,
 };

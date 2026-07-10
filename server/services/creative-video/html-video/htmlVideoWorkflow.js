@@ -448,6 +448,18 @@ function fanOutAssetFirstOverridesToBeats({ perSceneDecisions, visualPlan, visua
   return changed;
 }
 
+// R4：帧统计（overlay_check/text_blocks/cards/graphics）必须合并进 attachVisualRouting
+// 闭包引用的 visualDecisions/renderDecisions 源对象，直接写 project.render_decisions
+// 会在下一次 attachVisualRouting 重挂时被覆盖抹掉。
+function mergeFrameStatsIntoDecisions({ visualDecisions, renderDecisions, statsByBeatId = {} }) {
+  const applyTo = decision => {
+    const stats = decision && statsByBeatId[decision.beat_id];
+    if (stats) Object.assign(decision, stats); // { overlay_check, text_blocks, cards, graphics }
+  };
+  if (visualDecisions instanceof Map) for (const decision of visualDecisions.values()) applyTo(decision);
+  if (Array.isArray(renderDecisions)) for (const decision of renderDecisions) applyTo(decision);
+}
+
 /**
  * 把已产出的生成图确定性地绑定到场景 asset_refs（返回克隆，不改入参）：
  * 仅用于路由输入（模板匹配/视觉计划），不回写原始 sceneSpec，
@@ -1978,6 +1990,12 @@ async function generateHtmlVideo(options = {}) {
     if (!frameHtmlResult.ok) return frameHtmlResult.failure;
     project = frameHtmlResult.project;
     contentGraph = frameHtmlResult.contentGraph;
+    // R4：在 attachVisualRouting 重挂之前，把帧统计合并进闭包引用的决策源对象
+    mergeFrameStatsIntoDecisions({
+      visualDecisions,
+      renderDecisions,
+      statsByBeatId: frameHtmlResult.stats_by_beat_id || {},
+    });
     try {
       project = generationMode === 'per_scene'
         ? await buildMixedFrameProject({

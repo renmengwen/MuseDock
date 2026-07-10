@@ -8,7 +8,7 @@ const { markCheckpointStage, markCheckpointFrame } = require('./projectSchema');
 const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
-const { loadOverlaySnippet, loadDiagramSkeleton } = require('./motionPrimitiveCatalog');
+const { loadOverlaySnippet, loadDiagramSkeleton, validateOverlayHtml } = require('./motionPrimitiveCatalog');
 const { AGENTS, STAGES } = require('../agentStages');
 
 const FRAME_HTML_MODEL_OPTIONS = { requestTimeoutMs: 180000, maxRetries: 1 };
@@ -51,6 +51,17 @@ function resolveAssetFirstMotionArgs(node, creativeContext) {
   const diagramSkeleton = beat.visual_base?.type === 'diagram' ? safeLoad(loadDiagramSkeleton) : '';
   // previousBeatSummary 由 Task 4.1、hasCaptions 由 Task 5.2 后续接入
   return { beat, primitiveSnippet, diagramSkeleton };
+}
+
+// asset_first 帧 HTML 的静态结构统计（简单启发式，供 QA/路由决策观测用）
+function computeFrameHtmlStats(html = '') {
+  const text = String(html);
+  const count = re => (text.match(re) || []).length;
+  return {
+    text_blocks: count(/<(h1|h2|h3|h4|p|li)\b/gi),
+    cards: count(/class="[^"]*card[^"]*"/gi),
+    graphics: count(/<(svg|canvas|img)\b/gi),
+  };
 }
 
 function firstExplicitDiagnosticCode(diagnostics) {
@@ -176,6 +187,10 @@ async function runFrameHtmlPhase(ctx) {
   let { project, contentGraph } = ctx;
 
   const styleProfile = objectOrEmpty(project.visual_plan?.style_profile);
+  // asset_first 时按 beat 收集帧 HTML 静态统计与 overlay 确定性校验结果；
+  // hf_first 保持空对象（硬约束 A：不产生任何新 issue/统计）。
+  const isAssetFirst = creativeContext?.visual_strategy === 'asset_first';
+  const statsByBeatId = {};
   const nodes = contentGraph.nodes || [];
   const scenes = new Map((Array.isArray(sceneSpec?.scenes) ? sceneSpec.scenes : []).map(scene => [scene.id, scene]));
   let visualStyleReferenceHtml = '';
@@ -573,6 +588,15 @@ async function runFrameHtmlPhase(ctx) {
     if (Array.isArray(htmlResult.diagnostics) && htmlResult.diagnostics.length) {
       diagnostics.push(...normalizeDiagnostics(htmlResult.diagnostics));
     }
+    if (isAssetFirst) {
+      const frameHeight = Number(frameHtmlAgent.resolveResolution(templateRenderTarget)?.height) || 1920;
+      statsByBeatId[frameKey || node.id || sceneId] = {
+        ...computeFrameHtmlStats(htmlResult.html),
+        overlay_check: /data-mp-overlay/.test(String(htmlResult.html || ''))
+          ? validateOverlayHtml(htmlResult.html, { height: frameHeight })
+          : null,
+      };
+    }
     const durationSec = trustedSceneDuration(scene || {}, node);
     const captions = mediaOptions.generateCaptions !== false && scene
       ? normalizeCaptions(scene, durationSec)
@@ -662,12 +686,13 @@ async function runFrameHtmlPhase(ctx) {
     return current;
   });
 
-  return { ok: true, project, contentGraph };
+  return { ok: true, project, contentGraph, stats_by_beat_id: statsByBeatId };
 }
 
 module.exports = {
   runFrameHtmlPhase,
   isProviderMissingText,
+  computeFrameHtmlStats,
   FRAME_HTML_CONCURRENCY,
   FRAME_HTML_MODEL_OPTIONS,
 };
