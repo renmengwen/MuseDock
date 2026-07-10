@@ -337,6 +337,11 @@ const stubAiImageModel = { isConfigured: async () => false };
   assert.ok(Array.isArray(result.project.render_decisions));
   assert.ok(result.project.render_decisions.length >= result.project.frames.length);
   assert.ok(result.project.render_decisions.every(item => item.beat_id || item.scene_id));
+  // 硬约束 A 回归：未设置 visual_strategy（hf_first 链路）时决策对象不得带 route_role 字段
+  assert.ok(
+    result.project.render_decisions.every(item => !('route_role' in item)),
+    `hf_first 链路的 render_decisions 不应带 route_role：${JSON.stringify(result.project.render_decisions, null, 2)}`,
+  );
 
   // 持久化校验：project.json 落盘后经 normalizeProject 仍保留两个新字段。
   const savedProject = JSON.parse(await fs.readFile(path.join(result.html_video_project_path, 'project.json'), 'utf8'));
@@ -452,6 +457,20 @@ const stubAiImageModel = { isConfigured: async () => false };
     assetFirstDecisions.every(item => item.source_mode === 'raw_html'),
     `带生成图的场景不应走 template_inputs：${JSON.stringify(assetFirstDecisions, null, 2)}`,
   );
+
+  // 模块1：asset_first 下 render_decisions 必须带 route_role 且不含标题模板
+  {
+    const decisionsAll = assetFirstResult.project.render_decisions || [];
+    assert.ok(decisionsAll.length > 0, '应产生 render_decisions');
+    for (const d of decisionsAll) {
+      assert.ok(
+        typeof d.route_role === 'string' && d.route_role.length > 0,
+        `asset_first 决策必须带 route_role：${JSON.stringify(d)}`,
+      );
+      assert.notStrictEqual(d.template_id, 'frame-glitch-title');
+      assert.notStrictEqual(d.template_id, 'frame-build-minimal');
+    }
+  }
 
   // 绑定 helper：不改入参（保证 scene_spec_hash 稳定）、结果确定性、不重复写入
   {

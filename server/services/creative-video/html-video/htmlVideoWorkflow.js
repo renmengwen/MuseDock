@@ -1627,7 +1627,12 @@ async function generateHtmlVideo(options = {}) {
       renderTarget,
     });
     visualPlan = buildVisualPlan({ sceneSpec: routingSceneSpec, workflowId });
-    visualDecisions = matchVisualBeatsToRenderers({ visualPlan, registry, renderTarget });
+    visualDecisions = matchVisualBeatsToRenderers({
+      visualPlan,
+      registry,
+      renderTarget,
+      options: { visualStrategy: creativeContext?.visual_strategy || null },
+    });
     renderDecisions = Array.from(visualDecisions.values());
     // 持久化版剥离 source_scene，防止 project.json 膨胀
     persistableVisualPlan = {
