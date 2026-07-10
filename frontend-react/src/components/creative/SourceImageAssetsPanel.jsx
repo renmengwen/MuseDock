@@ -186,12 +186,14 @@ function SourceImageAssetsDialog({ assets, diagnostics, usageById, workflowId })
   const defaultTab = visibleTabs[0] || '';
 
   return (
-    <DialogContent className="max-h-[86vh] w-[min(1080px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-auto sm:max-w-[1080px]">
+    <DialogContent className="flex max-h-[86vh] w-[min(1080px,calc(100vw-32px))] max-w-[calc(100vw-32px)] flex-col overflow-hidden sm:max-w-[1080px]">
       <DialogHeader>
         <DialogTitle>视觉素材列表</DialogTitle>
         <DialogDescription>查看来源图、AI 生图、搜索补图和最终引用情况。</DialogDescription>
       </DialogHeader>
 
+      {/* 滚动收在正文内部，标题和右上角关闭按钮保持固定可见 */}
+      <div className="grid min-h-0 flex-1 content-start gap-3 overflow-y-auto pr-1">
       {sharedAnalysisMessage ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] leading-relaxed text-[#92400e]">
           分析说明：{sharedAnalysisMessage}
@@ -241,6 +243,7 @@ function SourceImageAssetsDialog({ assets, diagnostics, usageById, workflowId })
           })}
         </div>
       ) : null}
+      </div>
     </DialogContent>
   );
 }
