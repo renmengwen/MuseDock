@@ -64,12 +64,14 @@ export function CreativeTaskDetail({
           />
         </>
       ) : null}
-      {!isDone ? <SourceImageAssetsPanel workflow={workflow} /> : null}
+      <SourceImageAssetsPanel workflow={workflow} />
       {workflow?.status === 'failed' ? (
         <CreativeRetryPlan
+          workflow={workflow}
           retryPlan={retryPlan}
           retryPlanStatus={retryPlanStatus}
           retryPlanMessage={retryPlanMessage}
+          message={message}
           retrying={retrying}
           onRetryWorkflow={onRetryWorkflow}
         />

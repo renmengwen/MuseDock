@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { STAGE_LABELS, normalizeWorkflowStages } from './creativeDisplay.js';
+import { STAGE_LABELS, firstText, normalizeWorkflowStages } from './creativeDisplay.js';
 import {
   normalizeWorkflowProgress,
   summarizeProgressEvent,
@@ -37,9 +37,15 @@ export function CreativeProgressPanel({ workflow, status, message, progressEvent
   const progress = normalizeWorkflowProgress(workflow);
   const isFailed = workflow.status === 'failed';
   const isActiveProgress = !['done', 'failed'].includes(workflow.status) && progress < 100;
-  // 失败时错误详情由恢复建议面板承载，这里只说明中断位置，避免同一句错误全页重复
+  const failureMessage = firstText(
+    workflow.last_failure?.message,
+    workflow.error?.message,
+    workflow.current_stage_message,
+    message,
+    activeStage?.message,
+  );
   const currentMessage = isFailed
-    ? `创作已在「${STAGE_LABELS[stageId] || stageId || '未知阶段'}」阶段中断，详情见下方恢复建议。`
+    ? `创作已在「${STAGE_LABELS[stageId] || stageId || '未知阶段'}」阶段中断${failureMessage ? `：${failureMessage}` : '。'}`
     : (workflow.current_stage_message
       || activeStage?.message
       || message

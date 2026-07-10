@@ -11,6 +11,7 @@ const creativeComposerPath = path.join(__dirname, '../frontend-react/src/compone
 const creativeStatusMessagePath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeStatusMessage.jsx');
 const creativeWorkflowStepperPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeWorkflowStepper.jsx');
 const creativeProgressPanelPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeProgressPanel.jsx');
+const creativeRetryPlanPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeRetryPlan.jsx');
 const creativeVideoPreviewPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeVideoPreview.jsx');
 const creativeTaskDetailPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeTaskDetail.jsx');
 const appPath = path.join(__dirname, '../frontend-react/src/App.jsx');
@@ -84,6 +85,7 @@ const creativeComposer = fs.readFileSync(creativeComposerPath, 'utf-8');
 const creativeStatusMessage = fs.readFileSync(creativeStatusMessagePath, 'utf-8');
 const creativeWorkflowStepper = fs.readFileSync(creativeWorkflowStepperPath, 'utf-8');
 const creativeProgressPanel = fs.readFileSync(creativeProgressPanelPath, 'utf-8');
+const creativeRetryPlan = fs.readFileSync(creativeRetryPlanPath, 'utf-8');
 const creativeVideoPreview = fs.readFileSync(creativeVideoPreviewPath, 'utf-8');
 const creativeTaskDetail = fs.readFileSync(creativeTaskDetailPath, 'utf-8');
 // 任务详情已拆分为 CreativeTaskDetail -> CreativeTaskSummary -> CreativeTitlePanel 三层，
@@ -91,7 +93,7 @@ const creativeTaskDetail = fs.readFileSync(creativeTaskDetailPath, 'utf-8');
 const creativeTaskSummary = fs.readFileSync(path.join(__dirname, '../frontend-react/src/components/creative/CreativeTaskSummary.jsx'), 'utf-8');
 const creativeTitlePanel = fs.readFileSync(path.join(__dirname, '../frontend-react/src/components/creative/CreativeTitlePanel.jsx'), 'utf-8');
 const creativeErrorLog = fs.readFileSync(path.join(__dirname, '../frontend-react/src/components/creative/creativeErrorLog.js'), 'utf-8');
-const taskDetailUnit = creativeTaskDetail + creativeTaskSummary + creativeTitlePanel + creativeErrorLog;
+const taskDetailUnit = creativeTaskDetail + creativeTaskSummary + creativeTitlePanel + creativeRetryPlan + creativeErrorLog;
 const app = fs.readFileSync(appPath, 'utf-8');
 const shell = fs.readFileSync(shellPath, 'utf-8');
 const styles = fs.readFileSync(stylesPath, 'utf-8');
@@ -247,6 +249,12 @@ assert.match(taskDetailUnit, /<DialogTitle>当前任务错误日志<\/DialogTitl
 assert.match(taskDetailUnit, /aria-label="关闭错误日志弹框"[\s\S]*<span className="sr-only">关闭错误日志弹框<\/span>/, 'Error log dialog should use a Chinese accessible close label');
 assert.match(taskDetailUnit, /navigator\.clipboard\.writeText\(errorLogText\)/, 'Error log dialog should copy the prepared log text');
 assert.match(taskDetailUnit, /<span>\{errorLogCopyStatus === 'copied' \? '已复制' : errorLogCopyStatus === 'failed' \? '复制失败' : '复制错误日志'\}<\/span>/, 'Error log copy button should expose localized copy states');
+assert.match(creativeProgressPanel, /workflow\.last_failure\?\.message[\s\S]*workflow\.current_stage_message/, 'Failed progress panel should show the actual workflow failure reason');
+assert.doesNotMatch(creativeProgressPanel, /详情见下方恢复建议/, 'Failed progress panel should not hide the reason behind recovery advice');
+assert.match(taskDetailUnit, /失败原因：/, 'Failed retry panel should label the failure reason explicitly');
+assert.match(taskDetailUnit, /恢复动作：/, 'Failed retry panel should separate recovery action from failure reason');
+assert.match(taskDetailUnit, /视觉巡检问题/, 'Failed retry panel should surface visual QA issues directly');
+assert.match(taskDetailUnit, /collectVisualIssues/, 'Failed retry panel should collect visual QA issues from existing workflow diagnostics');
 assert.doesNotMatch(taskDetailUnit, /creativePromptModalOverlay/, 'CreativeTaskDetail should not render the old hand-written prompt modal overlay');
 assert.doesNotMatch(taskDetailUnit, /role="dialog"[\s\S]*aria-modal="true"/, 'CreativeTaskDetail should rely on shadcn Dialog accessibility instead of a hand-written dialog');
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');
@@ -464,7 +472,8 @@ assert.match(creativeVideoPreview, /<video className="[^"]*" src=\{videoUrl\} co
 assert.doesNotMatch(creativeVideoPreview, /<Button|继续编辑|二次编辑/, 'Creative video preview should stay focused on playback only');
 assert.match(taskDetailUnit, /workflow\?\.status === 'done' && videoUrl/, 'Creative video preview should render after workflow is done');
 assert.match(taskDetailUnit, /!\s*isDone\s*\? \([\s\S]*<CreativeWorkflowStepper workflow=\{workflow\} \/>[\s\S]*<CreativeProgressPanel/, 'Creative detail should hide stepper and current progress after a task is done');
-assert.match(taskDetailUnit, /!\s*isDone \? <SourceImageAssetsPanel workflow=\{workflow\} \/> : null/, 'Creative detail should keep source assets outside the video area only before completion');
+assert.match(taskDetailUnit, /<SourceImageAssetsPanel workflow=\{workflow\} \/>/, 'Creative detail should keep visual assets visible after workflow completion');
+assert.doesNotMatch(taskDetailUnit, /!\s*isDone \? <SourceImageAssetsPanel workflow=\{workflow\} \/> : null/, 'Creative detail should not hide visual assets after completion');
 assert.ok(!styles.includes('.creativeDetailMeta'), 'compact task meta row should be inline Tailwind, not styles.css');
 assert.match(creativeWorkflowStepper, /top-\[13px\] h-0\.5 w-\[calc\(100%-36px\)\]/, 'horizontal step connectors should be inline Tailwind');
 assert.ok(!styles.includes('@keyframes activeStepPulse'), 'Active workflow step animation should not add custom global CSS');

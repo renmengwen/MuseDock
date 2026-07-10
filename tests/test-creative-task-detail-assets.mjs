@@ -9,12 +9,15 @@ const source = `${detail}\n${panel}`;
 
 assert.match(detail, /SourceImageAssetsPanel/);
 assert.match(detail, /<SourceImageAssetsPanel/);
+assert.doesNotMatch(detail, /!\s*isDone\s*\?\s*<SourceImageAssetsPanel/);
 assert.match(source, /视觉路由/);
 assert.match(source, /模板帧/);
 assert.match(source, /自由 HTML/);
 assert.match(source, /风格/);
 
-assert.match(panel, /来源图片素材/);
+assert.match(panel, /视觉素材/);
+assert.match(panel, /AI 生图/);
+assert.match(panel, /mergeVisualAssets/);
 assert.match(panel, /image_analysis/);
 assert.match(panel, /asset_usage_report/);
 assert.match(panel, /最终未引用/);
@@ -23,7 +26,7 @@ assert.match(panel, /未生成/);
 assert.match(panel, /assetContext\?\.image_analysis\?\.status \|\| assetContext\?\.status/);
 assert.match(panel, /SourceImageThumbnail/);
 assert.match(panel, /<img[\s\S]*src=\{src\}/);
-assert.match(panel, /查看图片列表/);
+assert.match(panel, /查看视觉素材/);
 assert.match(panel, /\/api\/creative-workflows\/\$\{encodeURIComponent\(workflowId\)\}\/assets\/\$\{encodeURIComponent\(assetId\)\}\/file/);
 assert.match(panel, /w-\[min\(1080px,calc\(100vw-32px\)\)\]/);
 assert.match(panel, /sharedAnalysisMessage/);

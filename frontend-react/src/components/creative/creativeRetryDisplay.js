@@ -41,6 +41,7 @@ export const RETRY_CODE_TEXT = {
   compose_failed: '成片合成失败',
   duration_mismatch: '成片时长不匹配',
   visual_inspect_failed: '视觉巡检失败',
+  visual_qa_warning: '视觉安全检查未通过',
 };
 
 export function formatRetryItem(value) {
