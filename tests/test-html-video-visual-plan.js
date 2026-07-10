@@ -1,5 +1,6 @@
 const assert = require('assert');
 const { buildVisualPlan } = require('../server/services/creative-video/html-video/visualPlanService');
+const { expandContentGraphToVisualBeats } = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
 
 const sceneSpec = {
   title: 'UI/UE/UX',
@@ -32,6 +33,32 @@ assert.ok(plan.beats.every(beat => beat.duration_sec >= 3 && beat.duration_sec <
 assert.deepEqual(plan.beats.map(beat => beat.order), [1, 2, 3, 4]);
 assert.equal(plan.beats[0].intent, 'definition');
 assert.equal(plan.beats[3].intent, 'steps');
+assert.deepEqual(plan.beats.filter(beat => beat.scene_id === 'scene_01').map(beat => beat.visual_text.cards), [['UI'], ['UE'], ['UX']]);
+
+const expandedGraph = expandContentGraphToVisualBeats({
+  graph: {
+    nodes: [{
+      id: 'scene_01',
+      scene_id: 'scene_01',
+      kind: 'text',
+      label: '三个概念',
+      text: 'UI UE UX',
+      html_path: 'frames/old-scene.html',
+    }],
+    edges: [],
+  },
+  visualPlan: {
+    beats: plan.beats.filter(beat => beat.scene_id === 'scene_01'),
+  },
+  visualDecisions: new Map(plan.beats
+    .filter(beat => beat.scene_id === 'scene_01')
+    .map(beat => [beat.id, { beat_id: beat.id, scene_id: beat.scene_id, source_mode: 'raw_html' }])),
+});
+assert.deepEqual(expandedGraph.nodes.map(node => node.id), ['scene_01_b1', 'scene_01_b2', 'scene_01_b3']);
+assert.deepEqual(expandedGraph.nodes.map(node => node.data.visual_text.cards), [['UI'], ['UE'], ['UX']]);
+assert.ok(expandedGraph.nodes.every(node => node.beat_id === node.id));
+assert.ok(expandedGraph.nodes.every(node => node.html_path === ''));
+assert.equal(expandedGraph.edges.length, 2);
 
 // 边界：空输入不抛错，返回空 beats
 const emptyPlan = buildVisualPlan({});
@@ -59,5 +86,44 @@ const noDurationPlan = buildVisualPlan({
 });
 assert.equal(noDurationPlan.beats.length, 1);
 assert.equal(noDurationPlan.beats[0].duration_sec, 6);
+
+// beat.asset_refs 为空数组时不应吞掉 base 节点已有的素材引用；非空时用 beat refs 覆盖
+{
+  const baseGraph = {
+    nodes: [{
+      id: 'scene_01',
+      scene_id: 'scene_01',
+      kind: 'text',
+      label: '三个概念',
+      asset_refs: [{ asset_id: 'gen_scene_01', usage: 'subject' }],
+    }],
+    edges: [],
+  };
+  const beats = plan.beats.filter(beat => beat.scene_id === 'scene_01');
+  const emptyRefsGraph = expandContentGraphToVisualBeats({
+    graph: baseGraph,
+    visualPlan: { beats: beats.map(beat => ({ ...beat, asset_refs: [] })) },
+    visualDecisions: null,
+  });
+  assert.ok(
+    emptyRefsGraph.nodes.every(node => (node.asset_refs || []).some(ref => ref.asset_id === 'gen_scene_01')),
+    'beat.asset_refs 为空数组时应回落 base 节点的素材引用',
+  );
+  const overrideRefsGraph = expandContentGraphToVisualBeats({
+    graph: baseGraph,
+    visualPlan: {
+      beats: beats.map((beat, index) => ({
+        ...beat,
+        asset_refs: index === 0 ? [{ asset_id: 'gen_other', usage: 'subject' }] : [],
+      })),
+    },
+    visualDecisions: null,
+  });
+  assert.deepEqual(
+    overrideRefsGraph.nodes[0].asset_refs.map(ref => ref.asset_id),
+    ['gen_other'],
+    'beat.asset_refs 非空时应覆盖 base 节点的素材引用',
+  );
+}
 
 console.log('test-html-video-visual-plan passed');

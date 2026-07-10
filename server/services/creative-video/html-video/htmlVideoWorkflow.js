@@ -1070,6 +1070,9 @@ function expandContentGraphToVisualBeats({ graph = {}, visualPlan = {}, visualDe
     if (!base) continue;
     const decision = visualDecisions instanceof Map ? visualDecisions.get(beat.id) : null;
     const metadata = objectOrEmpty(base.metadata);
+    // beat refs 为空数组时回落 base 节点素材引用，避免空数组吞掉 content graph/scene 上已绑定的素材
+    const beatAssetRefs = Array.isArray(beat.asset_refs) ? beat.asset_refs.filter(Boolean) : [];
+    const baseAssetRefs = Array.isArray(base.asset_refs) ? base.asset_refs.filter(Boolean) : [];
     nodes.push({
       ...cloneJson(base),
       id: beat.id,
@@ -1088,7 +1091,7 @@ function expandContentGraphToVisualBeats({ graph = {}, visualPlan = {}, visualDe
       },
       durationSec: beat.duration_sec,
       duration_sec: beat.duration_sec,
-      asset_refs: Array.isArray(beat.asset_refs) ? cloneJson(beat.asset_refs) : cloneJson(base.asset_refs || []),
+      asset_refs: cloneJson(beatAssetRefs.length ? beatAssetRefs : baseAssetRefs),
       metadata: {
         ...metadata,
         scene_id: sceneId,
