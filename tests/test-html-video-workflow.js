@@ -2598,5 +2598,44 @@ async function readProjectJson(projectDir) {
   const savedProject = JSON.parse(await fs.readFile(path.join(result.html_video_project_path, 'project.json'), 'utf8'));
   assert.equal(savedProject.template_inputs.headline, '最终版标题');
 
+  // ===== 决策2：visual_strategy 顶层持久化 + schema roundtrip =====
+  const { normalizeProject } = require('../server/services/creative-video/html-video/projectSchema');
+
+  // (1) normalizeProject 白名单必须保留新顶层字段
+  {
+    const normalized = normalizeProject({
+      project_id: 'p1',
+      visual_strategy: 'asset_first',
+      continuity_mode: 'scene_html',
+    });
+    assert.strictEqual(normalized.visual_strategy, 'asset_first',
+      'normalizeProject 不得裁掉 visual_strategy——二次渲染/质检掉策略的最大隐患');
+    assert.strictEqual(normalized.continuity_mode, 'scene_html');
+    // 缺省值：未设置时不得凭空变成 asset_first
+    const empty = normalizeProject({ project_id: 'p2' });
+    assert.strictEqual(empty.visual_strategy, null);
+    assert.strictEqual(empty.continuity_mode, 'beat_mp4');
+  }
+
+  // (2) saveProject / loadProject 往返不丢（用测试临时目录，projectStore 真实读写）
+  {
+    const roundtripDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hv-strategy-roundtrip-'));
+    const savedRoundtrip = await projectStore.saveProject(roundtripDir, normalizeProject({
+      project_id: 'p3', visual_strategy: 'asset_first', continuity_mode: 'beat_mp4',
+    }));
+    assert.strictEqual(savedRoundtrip.visual_strategy, 'asset_first');
+    const loadedRoundtrip = await projectStore.loadProject(roundtripDir);
+    assert.strictEqual(loadedRoundtrip.visual_strategy, 'asset_first', 'load 后字段必须原样保留');
+    assert.strictEqual(loadedRoundtrip.continuity_mode, 'beat_mp4');
+    await fs.rm(roundtripDir, { recursive: true, force: true });
+  }
+
+  // (3) workflow 端到端：asset_first 用例（missingRequiredAssetBlocking，creativeContext.visual_strategy = 'asset_first'）
+  assert.strictEqual(missingRequiredAssetBlocking.project.visual_strategy, 'asset_first',
+    'project.json 顶层必须持久化 visual_strategy，供 resume/materializer/QA 二次执行读取');
+  // hf_first（或未设置策略）用例（result 为主 template_inputs 成功用例，creativeContext 未设置策略）
+  assert.ok(result.project.visual_strategy === 'hf_first' || result.project.visual_strategy == null,
+    '非 asset_first 工程按 creativeContext 原值持久化（无策略则为 null），不得被误写成 asset_first');
+
   console.log('html-video workflow tests passed');
 })();

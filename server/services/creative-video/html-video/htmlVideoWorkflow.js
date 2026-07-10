@@ -246,6 +246,13 @@ function htmlHasTextKey(html, key) {
   return tags.some(tag => pattern.test(tag));
 }
 
+function attachVisualStrategy(project, creativeContext) {
+  if (!project) return project;
+  project.visual_strategy = creativeContext?.visual_strategy || project.visual_strategy || null;
+  project.continuity_mode = creativeContext?.continuity_mode || project.continuity_mode || 'beat_mp4';
+  return project;
+}
+
 function resumeArtifactsMatch(project = {}, sceneSpec = null, template = {}, generationMode = '') {
   const currentHash = computeSceneSpecCheckpointHash(sceneSpec || {});
   const checkpointHash = String(project.generation_checkpoint?.scene_spec_hash || '').trim();
@@ -1987,6 +1994,7 @@ async function generateHtmlVideo(options = {}) {
         });
       // buildMixedFrameProject 会重建 project，这里要重新挂上视觉计划与路由决策
       attachVisualRouting(project);
+      attachVisualStrategy(project, creativeContext);
       project.generation_checkpoint = objectOrEmpty(project.generation_checkpoint);
       project.generation_checkpoint.agent_pipeline = [
         { agent: AGENTS.contentGraph, stage: STAGES.contentGraph, artifact: 'content-graph.json' },
@@ -2016,6 +2024,8 @@ async function generateHtmlVideo(options = {}) {
     }
   }
   project = applyMediaOptionsToProject(project, mediaOptions);
+  // 首次 saveProject 之前统一挂上视觉策略：template_inputs / raw_html / per_scene 三条路径在此汇合
+  attachVisualStrategy(project, creativeContext);
   const sourceProjectAssets = projectAssetsFromCreativeContext(creativeContext);
   if (sourceProjectAssets.length) {
     const byPath = new Map((Array.isArray(project.assets) ? project.assets : []).map(asset => [String(asset.path || ''), asset]));

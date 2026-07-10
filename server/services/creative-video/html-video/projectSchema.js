@@ -564,6 +564,8 @@ function normalizeProject(project = {}) {
     visual_plan: objectOrEmpty(input.visual_plan),
     render_decisions: Array.isArray(input.render_decisions) ? input.render_decisions : [],
     visual_route_summary: objectOrEmpty(input.visual_route_summary),
+    visual_strategy: input.visual_strategy || null,
+    continuity_mode: input.continuity_mode || 'beat_mp4',
     frames: arrayOrEmpty(input.frames).map(normalizeFrame),
     timeline: normalizeTimeline(input.timeline),
     assets: arrayOrEmpty(input.assets).map(asset => ({ ...objectOrEmpty(asset) })),
