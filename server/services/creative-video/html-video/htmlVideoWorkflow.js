@@ -41,6 +41,7 @@ const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = requi
 const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('./sceneSpecMapper');
 const { matchScenesToTemplates } = require('./sceneTemplateMatcher');
 const { resolveNodeSceneId, validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
+const { topoSort } = require('./contentGraph');
 const sfxLibrary = require('./sfxLibrary');
 const sfxPlannerAgent = require('./sfxPlannerAgent');
 const sfxEventService = require('./sfxEventService');
@@ -56,6 +57,10 @@ function firstNonEmptyString(...values) {
     if (text) return text;
   }
   return '';
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value || {}));
 }
 
 function hasManifestSceneAudio(audioManifest = {}) {
@@ -241,11 +246,18 @@ function htmlHasTextKey(html, key) {
   return tags.some(tag => pattern.test(tag));
 }
 
-function resumeArtifactsMatch(project = {}, sceneSpec = null, template = {}) {
+function resumeArtifactsMatch(project = {}, sceneSpec = null, template = {}, generationMode = '') {
   const currentHash = computeSceneSpecCheckpointHash(sceneSpec || {});
   const checkpointHash = String(project.generation_checkpoint?.scene_spec_hash || '').trim();
   if (!checkpointHash || !currentHash || checkpointHash !== currentHash) return false;
   const projectTemplateId = String(project.template_id || '').trim();
+  if (generationMode === 'per_scene') {
+    // per_scene 不设全片模板（template_id 恒为 null），复用按 scene_spec_hash 判定；
+    // 工程若记录了全片模板 id 或别的 generation_mode，说明发生了模式切换，禁止复用
+    const projectMode = String(project.generation_mode || '').trim();
+    if (projectMode && projectMode !== 'per_scene') return false;
+    return !projectTemplateId;
+  }
   const templateId = String(template?.id || '').trim();
   return Boolean(projectTemplateId && templateId && projectTemplateId === templateId);
 }
@@ -401,7 +413,8 @@ function fanOutAssetFirstOverridesToBeats({ perSceneDecisions, visualPlan, visua
   if (!beats.length) return false;
   const overriddenSceneIds = new Set();
   for (const [sceneId, decision] of perSceneDecisions) {
-    if (decision?.source_mode === 'raw_html' && decision?.override_reason === 'asset_first_generated_subject') {
+    if (decision?.source_mode === 'raw_html'
+      && ['asset_first_generated_subject', 'required_asset_ref'].includes(decision?.override_reason)) {
       overriddenSceneIds.add(sceneId);
     }
   }
@@ -420,8 +433,8 @@ function fanOutAssetFirstOverridesToBeats({ perSceneDecisions, visualPlan, visua
       template_id: null,
       duration_strategy: 'raw_html',
       ...(beatDecision?.source_mode === 'template_inputs' ? { fallback_from: 'template_inputs' } : {}),
-      fallback_reason: '图片优先策略要求该场景使用生成主视觉的自由 HTML，已覆写模板路由。',
-      override_reason: 'asset_first_generated_subject',
+      fallback_reason: '该场景已选择视觉素材，已改用自由 HTML 以确保素材进入画面。',
+      override_reason: 'required_asset_ref',
     });
     changed = true;
   }
@@ -430,7 +443,21 @@ function fanOutAssetFirstOverridesToBeats({ perSceneDecisions, visualPlan, visua
 
 function contentGraphMatchesSceneSpec(graph = {}, sceneSpec = null) {
   if (!sceneSpec) return true;
-  return validateGraphMatchesSceneSpec(graph, sceneSpec).ok;
+  const direct = validateGraphMatchesSceneSpec(graph, sceneSpec);
+  if (direct.ok) return true;
+  const expected = (Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [])
+    .map(scene => String(scene?.id || '').trim())
+    .filter(Boolean);
+  if (!expected.length || !Array.isArray(graph?.nodes)) return false;
+  const actual = [];
+  for (const nodeId of (() => {
+    try { return topoSort(graph); } catch { return graph.nodes.map(node => node.id); }
+  })()) {
+    const node = (graph.nodes || []).find(item => item?.id === nodeId) || {};
+    const sceneId = resolveNodeSceneId(node);
+    if (sceneId && actual[actual.length - 1] !== sceneId) actual.push(sceneId);
+  }
+  return expected.length === actual.length && expected.every((sceneId, index) => sceneId === actual[index]);
 }
 
 function loadCheckpointContentGraph(projectDir, project = {}) {
@@ -446,9 +473,9 @@ function loadCheckpointContentGraph(projectDir, project = {}) {
   }
 }
 
-function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null, template = {}) {
+function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null, template = {}, generationMode = '') {
   if (!project) return null;
-  if (!resumeArtifactsMatch(project, sceneSpec, template)) return null;
+  if (!resumeArtifactsMatch(project, sceneSpec, template, generationMode)) return null;
   if (hasUsableContentGraph(project.content_graph) && contentGraphMatchesSceneSpec(project.content_graph, sceneSpec)) {
     return project.content_graph;
   }
@@ -1019,12 +1046,94 @@ function normalizeAssetToken(value = '') {
   return String(value || '').replace(/\\/g, '/').trim();
 }
 
+function expandContentGraphToVisualBeats({ graph = {}, visualPlan = {}, visualDecisions = null } = {}) {
+  const beats = Array.isArray(visualPlan?.beats) ? visualPlan.beats.filter(beat => beat && beat.id) : [];
+  if (!beats.length || !Array.isArray(graph?.nodes) || !graph.nodes.length) return graph;
+  const orderedNodeIds = (() => {
+    try {
+      return topoSort(graph);
+    } catch {
+      return graph.nodes.map(node => node.id);
+    }
+  })();
+  const nodeById = new Map(graph.nodes.map(node => [String(node.id || ''), node]));
+  const nodeBySceneId = new Map();
+  for (const nodeId of orderedNodeIds) {
+    const node = nodeById.get(String(nodeId)) || {};
+    const sceneId = resolveNodeSceneId(node);
+    if (sceneId && !nodeBySceneId.has(sceneId)) nodeBySceneId.set(sceneId, node);
+  }
+  const nodes = [];
+  for (const beat of beats) {
+    const sceneId = String(beat.scene_id || '').trim();
+    const base = nodeBySceneId.get(sceneId);
+    if (!base) continue;
+    const decision = visualDecisions instanceof Map ? visualDecisions.get(beat.id) : null;
+    const metadata = objectOrEmpty(base.metadata);
+    nodes.push({
+      ...cloneJson(base),
+      id: beat.id,
+      scene_id: sceneId,
+      beat_id: beat.id,
+      kind: beat.kind || base.kind || 'text',
+      label: firstNonEmptyString(beat.visual_text?.headline, base.label, sceneId),
+      text: firstNonEmptyString(
+        Array.isArray(beat.visual_text?.cards) ? beat.visual_text.cards.join(' / ') : '',
+        Array.isArray(beat.visual_text?.keywords) ? beat.visual_text.keywords.join(' / ') : '',
+        base.text,
+      ),
+      data: {
+        ...objectOrEmpty(base.data),
+        visual_text: cloneJson(beat.visual_text || {}),
+      },
+      durationSec: beat.duration_sec,
+      duration_sec: beat.duration_sec,
+      asset_refs: Array.isArray(beat.asset_refs) ? cloneJson(beat.asset_refs) : cloneJson(base.asset_refs || []),
+      metadata: {
+        ...metadata,
+        scene_id: sceneId,
+        beat_id: beat.id,
+        beat_index: beat.beat_index,
+        beat_count: beat.beat_count,
+        visual_text: cloneJson(beat.visual_text || {}),
+        source_mode: decision?.source_mode || '',
+      },
+      html_path: '',
+      htmlPath: '',
+    });
+  }
+  if (!nodes.length) return graph;
+  const edges = nodes.slice(1).map((node, index) => ({
+    from: nodes[index].id,
+    to: node.id,
+    kind: 'sequence',
+  }));
+  return {
+    ...graph,
+    nodes,
+    edges,
+    expanded_from_scene_graph: true,
+  };
+}
+
+function referenceVariants(value = '') {
+  const normalized = normalizeHtmlAssetReference(value);
+  if (!normalized) return [];
+  const variants = new Set([normalized]);
+  if (normalized.startsWith('./')) variants.add(normalized.slice(2));
+  if (!normalized.startsWith('../') && !normalized.startsWith('/') && !/^[a-z][a-z0-9+.-]*:/i.test(normalized)) {
+    variants.add(`../${normalized}`);
+  }
+  return [...variants];
+}
+
 function assetReferenceTokens(asset = {}) {
   const assetPath = normalizeAssetToken(asset.path);
   return [...new Set([
     normalizeAssetToken(asset.frame_src),
     assetPath,
     assetPath ? `../${assetPath}` : '',
+    normalizeAssetToken(asset.url),
   ].filter(Boolean))];
 }
 
@@ -1056,11 +1165,13 @@ function extractHtmlAssetReferences(html = '') {
 }
 
 function htmlReferencesAsset(referenceSet, tokens = []) {
+  const references = new Set();
+  for (const ref of referenceSet) {
+    for (const variant of referenceVariants(ref)) references.add(variant);
+  }
   for (const rawToken of tokens) {
-    const token = normalizeHtmlAssetReference(rawToken);
-    if (!token) continue;
-    for (const ref of referenceSet) {
-      if (ref === token || ref.endsWith(`/${token.replace(/^\.\.\//, '')}`)) return true;
+    for (const token of referenceVariants(rawToken)) {
+      if (references.has(token)) return true;
     }
   }
   return false;
@@ -1078,18 +1189,58 @@ function readFrameHtml(projectDir, frame = {}) {
   }
 }
 
+function mergedTrackableAssets(project = {}, creativeContext = {}) {
+  const seen = new Set();
+  const result = [];
+  const push = asset => {
+    const id = firstNonEmptyString(asset?.id, asset?.asset_id);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    result.push({ ...asset, id });
+  };
+  (Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : []).forEach(push);
+  (Array.isArray(project?.assets) ? project.assets : []).forEach(push);
+  return result;
+}
+
+function requiredAssetRefsById(project = {}, assets = []) {
+  const byId = new Map();
+  const ensure = (assetId, sceneId, usage) => {
+    if (!assetId) return;
+    const current = byId.get(assetId) || { asset_id: assetId, expected_in_frames: [], usages: [] };
+    if (sceneId && !current.expected_in_frames.includes(sceneId)) current.expected_in_frames.push(sceneId);
+    if (usage && !current.usages.includes(usage)) current.usages.push(usage);
+    byId.set(assetId, current);
+  };
+  for (const asset of assets) {
+    if (asset?.source !== 'generated') continue;
+    ensure(firstNonEmptyString(asset.id, asset.asset_id), firstNonEmptyString(asset.generation?.scene_id), 'generated');
+  }
+  for (const node of (Array.isArray(project?.content_graph?.nodes) ? project.content_graph.nodes : [])) {
+    const sceneId = firstNonEmptyString(resolveNodeSceneId(node), node?.id);
+    for (const ref of (Array.isArray(node?.asset_refs) ? node.asset_refs : [])) {
+      const assetId = firstNonEmptyString(ref?.asset_id, ref?.id);
+      ensure(assetId, sceneId, firstNonEmptyString(ref?.usage));
+    }
+  }
+  return byId;
+}
+
 function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext = {} } = {}) {
-  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
+  const assets = mergedTrackableAssets(project, creativeContext);
   if (!assets.length) {
     return {
       status: 'empty',
       assets: [],
       used_asset_ids: [],
       unused_asset_ids: [],
-      summary: '没有可追踪的来源图片。',
+      required_asset_ids: [],
+      missing_required_asset_ids: [],
+      summary: '没有可追踪的视觉素材。',
     };
   }
   const frames = Array.isArray(project.frames) ? project.frames : [];
+  const requiredById = requiredAssetRefsById(project, assets);
   const frameHtmlEntries = frames.map(frame => ({
     id: firstNonEmptyString(frame.scene_id, frame.id),
     references: extractHtmlAssetReferences(readFrameHtml(projectDir, frame)),
@@ -1097,6 +1248,7 @@ function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext 
   const reportAssets = assets.map((asset, index) => {
     const assetId = firstNonEmptyString(asset.id, `asset_${index + 1}`);
     const tokens = assetReferenceTokens(asset);
+    const required = requiredById.get(assetId) || null;
     const usedInFrames = frameHtmlEntries
       .filter(frame => frame.id && htmlReferencesAsset(frame.references, tokens))
       .map(frame => frame.id);
@@ -1104,6 +1256,10 @@ function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext 
       asset_id: assetId,
       path: asset.path || '',
       frame_src: asset.frame_src || '',
+      source: asset.source || '',
+      required: Boolean(required),
+      expected_in_frames: required?.expected_in_frames || [],
+      usage: required?.usages || [],
       used: usedInFrames.length > 0,
       used_in_frames: usedInFrames,
       usage_count: usedInFrames.length,
@@ -1111,14 +1267,22 @@ function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext 
   });
   const usedAssetIds = reportAssets.filter(asset => asset.used).map(asset => asset.asset_id);
   const unusedAssetIds = reportAssets.filter(asset => !asset.used).map(asset => asset.asset_id);
+  const requiredAssetIds = reportAssets.filter(asset => asset.required).map(asset => asset.asset_id);
+  const missingRequiredAssetIds = reportAssets
+    .filter(asset => asset.required && !asset.used)
+    .map(asset => asset.asset_id);
   return {
     status: 'ready',
     assets: reportAssets,
     used_asset_ids: usedAssetIds,
     unused_asset_ids: unusedAssetIds,
-    summary: usedAssetIds.length
-      ? `最终 HTML 使用了 ${usedAssetIds.length} 张来源图片。`
-      : '最终 HTML 未引用已准备的来源图片。',
+    required_asset_ids: requiredAssetIds,
+    missing_required_asset_ids: missingRequiredAssetIds,
+    summary: missingRequiredAssetIds.length
+      ? `有 ${missingRequiredAssetIds.length} 个必用视觉素材未进入最终 HTML。`
+      : (usedAssetIds.length
+        ? `最终 HTML 使用了 ${usedAssetIds.length} 张视觉素材。`
+        : '最终 HTML 未引用已准备的视觉素材。'),
   };
 }
 
@@ -1127,6 +1291,16 @@ async function attachAssetUsageReport({ project = {}, projectDir = '', creativeC
   project.asset_usage_report = assetUsageReport;
   if (creativeContext.asset_context) creativeContext.asset_context.asset_usage_report = assetUsageReport;
   return projectDir ? projectStore.saveProject(projectDir, project) : project;
+}
+
+function missingRequiredAssetIds(project = {}) {
+  return Array.isArray(project?.asset_usage_report?.missing_required_asset_ids)
+    ? project.asset_usage_report.missing_required_asset_ids.filter(Boolean)
+    : [];
+}
+
+function isBlockingVisualQaIssue(issue = {}) {
+  return ['blank_opening_frame', 'blank_segment_boundary'].includes(String(issue.code || ''));
 }
 
 function applyMediaOptionsToProject(project, mediaOptions = {}) {
@@ -1288,6 +1462,10 @@ async function generateHtmlVideo(options = {}) {
   // per_scene 工程重建/重写 project.json 时统一挂载视觉计划与路由决策；
   // renderDecisions 在 asset-first 覆写扇出后会重算，这里始终读取最新值
   const attachVisualRouting = target => {
+    if (generationMode === 'per_scene' && target) {
+      // 持久化生成模式：重试恢复时 resumeArtifactsMatch 依赖它区分 per_scene 与整片模板工程
+      target.generation_mode = 'per_scene';
+    }
     if (generationMode === 'per_scene' && persistableVisualPlan && target) {
       target.scene_spec = objectOrEmpty(sceneSpec);
       target.visual_plan = persistableVisualPlan;
@@ -1532,8 +1710,8 @@ async function generateHtmlVideo(options = {}) {
       project.generation_checkpoint.model_calls = checkpointProject.generation_checkpoint.model_calls;
     }
   } else {
-    const resumeAllowed = resumeArtifactsMatch(resumeProject || {}, sceneSpec, template);
-    let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec, template);
+    const resumeAllowed = resumeArtifactsMatch(resumeProject || {}, sceneSpec, template, generationMode);
+    let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec, template, generationMode);
     const reusedContentGraph = Boolean(contentGraph);
     if (contentGraph) {
       project = await projectStore.writeProjectJson(projectDir, current => {
@@ -1686,6 +1864,20 @@ async function generateHtmlVideo(options = {}) {
         renderDecisions = Array.from(visualDecisions.values());
         project = await projectStore.writeProjectJson(projectDir, current => attachVisualRouting(current));
       }
+      contentGraph = expandContentGraphToVisualBeats({ graph: contentGraph, visualPlan, visualDecisions });
+      const expandedContentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
+      project = await projectStore.writeProjectJson(projectDir, current => {
+        current.content_graph = contentGraph;
+        current.generation_checkpoint = objectOrEmpty(current.generation_checkpoint);
+        current.generation_checkpoint.stages = objectOrEmpty(current.generation_checkpoint.stages);
+        current.generation_checkpoint.stages.content_graph = {
+          ...(current.generation_checkpoint.stages.content_graph || {}),
+          path: expandedContentGraphPath,
+          output_hash: sha256(JSON.stringify(contentGraph)),
+        };
+        attachVisualRouting(current);
+        return current;
+      });
     }
     const frameHtmlResult = await runFrameHtmlPhase({
       model,
@@ -1712,10 +1904,8 @@ async function generateHtmlVideo(options = {}) {
       failure,
       shouldReuseFrameHtml,
       invalidateFrameHtmlDependents,
-      // per_scene 时按“该场景全部 beat 决策”聚合成 scene 级跳过判断：
-      // 只有全部 beat 均为 template_inputs 的场景才跳过场景 HTML 生成
       templateRoutingDecisions: generationMode === 'per_scene'
-        ? aggregateBeatRoutingByScene(visualPlan, visualDecisions)
+        ? visualDecisions
         : perSceneDecisions,
     });
     if (!frameHtmlResult.ok) return frameHtmlResult.failure;
@@ -1999,50 +2189,81 @@ async function generateHtmlVideo(options = {}) {
   }
 
   let visualReport = { success: true, issues: [], metrics: {} };
-  if (!skipValidation) {
-    const visualQaService = services.visualQaService || defaultVisualQaService;
-    await report(onProgress, {
-      type: 'html_video_visual_inspect_started',
-      stage: 'project',
+  const visualQaService = services.visualQaService || defaultVisualQaService;
+  await report(onProgress, {
+    type: 'html_video_visual_inspect_started',
+    stage: 'project',
+    sub_stage: 'visual_inspect',
+    message: skipValidation ? '正在执行 html-video 成片轻量安全检查...' : '正在巡检 html-video 成片画面...',
+    data: { safety_only: skipValidation === true },
+  });
+  visualReport = await visualQaService.inspectRenderedVideo({
+    projectDir,
+    outputPath: rendered.output_path,
+    project: rendered.project,
+    expectedAspectRatio: templateRenderTarget.aspect_ratio || sceneSpec?.aspect_ratio,
+    safetyOnly: skipValidation === true,
+  });
+  const visualReportPath = visualReport.report_path || visualReport.reportPath || 'inspect/visual-report.json';
+  const visualIssues = Array.isArray(visualReport.issues) ? visualReport.issues : [];
+  const blockingVisualIssues = visualIssues.filter(isBlockingVisualQaIssue);
+  if (!visualReport.success) {
+    diagnostics.push(createDiagnostic({
+      code: 'visual_qa_warning',
+      stage: 'inspect',
       sub_stage: 'visual_inspect',
-      message: '正在巡检 html-video 成片画面...',
-      data: {},
-    });
-    visualReport = await visualQaService.inspectRenderedVideo({
-      projectDir,
-      outputPath: rendered.output_path,
-      expectedAspectRatio: templateRenderTarget.aspect_ratio || sceneSpec?.aspect_ratio,
-    });
-    const visualReportPath = visualReport.report_path || visualReport.reportPath || 'inspect/visual-report.json';
-    if (!visualReport.success) {
-      diagnostics.push(createDiagnostic({
-        code: 'visual_qa_warning',
-        stage: 'inspect',
-        sub_stage: 'visual_inspect',
-        user_message: visualReport.message || 'html-video 视觉质检未通过，仅记录为参考报告。',
-        details: { issues: visualReport.issues || [], metrics: visualReport.metrics || {} },
-        severity: 'warning',
-      }));
-    }
-    markCheckpointStage(rendered.project, 'visual_inspect', {
-      status: visualReport.success ? 'done' : 'warning',
-      report_path: visualReportPath,
-      diagnostic_code: visualReport.success ? '' : 'visual_qa_warning',
-    });
-    rendered.project = await projectStore.saveProject(projectDir, rendered.project);
-    await report(onProgress, {
-      type: 'html_video_visual_inspect_done',
-      stage: 'project',
-      sub_stage: 'visual_inspect',
-      message: visualReport.success ? 'html-video 成片画面巡检完成。' : 'html-video 成片画面巡检发现问题。',
-      data: visualReport,
-    });
+      user_message: visualReport.message || (blockingVisualIssues.length
+        ? 'html-video 成片画面存在开头或镜头边界白屏，未通过视觉安全检查。'
+        : 'html-video 视觉质检未通过，仅记录为参考报告。'),
+      details: { issues: visualIssues, metrics: visualReport.metrics || {} },
+      severity: blockingVisualIssues.length ? 'error' : 'warning',
+    }));
   }
+  markCheckpointStage(rendered.project, 'visual_inspect', {
+    status: visualReport.success ? 'done' : (blockingVisualIssues.length ? 'failed' : 'warning'),
+    report_path: visualReportPath,
+    diagnostic_code: visualReport.success ? '' : 'visual_qa_warning',
+  });
+  rendered.project = await projectStore.saveProject(projectDir, rendered.project);
+  await report(onProgress, {
+    type: 'html_video_visual_inspect_done',
+    stage: 'project',
+    sub_stage: 'visual_inspect',
+    message: visualReport.success ? 'html-video 成片画面巡检完成。' : 'html-video 成片画面巡检发现问题。',
+    data: visualReport,
+  });
   rendered.project = await attachAssetUsageReport({
     project: rendered.project,
     projectDir,
     creativeContext,
   });
+  const missingRequiredAssets = missingRequiredAssetIds(rendered.project);
+  if (missingRequiredAssets.length) {
+    diagnostics.push(createDiagnostic({
+      code: 'required_visual_asset_missing',
+      stage: 'project',
+      sub_stage: 'asset_usage',
+      severity: 'warning',
+      retryable: true,
+      repair_action: 'retry_frame_html',
+      user_message: `有 ${missingRequiredAssets.length} 个必用视觉素材未进入最终画面，已记录为质量警告。`,
+      details: {
+        missing_required_asset_ids: missingRequiredAssets,
+        required_asset_ids: rendered.project.asset_usage_report?.required_asset_ids || [],
+      },
+    }));
+  }
+  if (blockingVisualIssues.length) {
+    rendered.project = await projectStore.saveProject(projectDir, rendered.project);
+    return failure('html-video 成片画面存在开头或镜头边界白屏，未通过视觉安全检查。', diagnostics, {
+      code: 'visual_qa_blocking_failure',
+      html_video_project_path: projectDir,
+      project_dir: projectDir,
+      project: rendered.project,
+      output_path: rendered.output_path,
+      visual_report: visualReport,
+    });
+  }
 
   return {
     success: true,
@@ -2184,8 +2405,10 @@ module.exports = {
   resolveGenerationMode,
   buildAssetUsageReport,
   shouldReuseFrameHtml,
+  resumeArtifactsMatch,
   resolveRenderTarget,
   resolveTemplateRenderTarget,
   buildTemplateIndexOptions,
   reorderCompactIndex,
+  expandContentGraphToVisualBeats,
 };

@@ -253,6 +253,9 @@ async function runWorkflow({ rootDir, workflowId, runId, templateRegistry, aiTex
     services: {
       aiTextModel,
       environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      visualQaService: {
+        inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+      },
       ...services,
     },
   });
@@ -295,8 +298,8 @@ function assertDownstreamInvalidated(project, sceneId = 'scene_03') {
   assert.equal(checkpoint.stages.compose.output_audio_path, '');
   assert.equal(checkpoint.stages.duration_verify.status, 'pending');
   assert.notEqual(checkpoint.stages.duration_verify.actual_duration_sec, 6);
-  assert.equal(checkpoint.stages.visual_inspect.status, 'pending');
-  assert.equal(checkpoint.stages.visual_inspect.report_path, null);
+  assert.equal(checkpoint.stages.visual_inspect.status, 'done');
+  assert.equal(checkpoint.stages.visual_inspect.report_path, 'inspect/visual-report.json');
   assert.deepEqual(project.exports, []);
   assert.notEqual(project.status, 'rendered');
 }
@@ -316,6 +319,45 @@ async function main() {
   });
 
   try {
+    // resumeArtifactsMatch：per_scene 模式不设全片模板，复用只看 scene_spec_hash + generation_mode
+    {
+      const { resumeArtifactsMatch } = workflow;
+      const spec = sceneSpec();
+      const hash = computeSceneSpecCheckpointHash(spec);
+      const perSceneProject = {
+        template_id: null,
+        generation_mode: 'per_scene',
+        generation_checkpoint: { scene_spec_hash: hash },
+      };
+      assert.equal(
+        resumeArtifactsMatch(perSceneProject, spec, {}, 'per_scene'),
+        true,
+        'per_scene 工程 template_id 为 null 时应按 scene_spec_hash 判定可复用',
+      );
+      // 旧版 per_scene 工程没有 generation_mode 字段：template_id 为空即视为 per_scene 工程，允许复用
+      assert.equal(
+        resumeArtifactsMatch({ template_id: null, generation_checkpoint: { scene_spec_hash: hash } }, spec, {}, 'per_scene'),
+        true,
+        '旧版 per_scene 工程（无 generation_mode 且 template_id 为空）应允许复用',
+      );
+      // 工程记录了全片模板（整片模式产物），当前却是 per_scene：模式切换，禁止复用
+      assert.equal(
+        resumeArtifactsMatch({ template_id: 'vertical', generation_checkpoint: { scene_spec_hash: hash } }, spec, {}, 'per_scene'),
+        false,
+        '整片模板工程切到 per_scene 模式时不应复用',
+      );
+      // scene_spec 变化：禁止复用
+      assert.equal(
+        resumeArtifactsMatch(perSceneProject, { ...spec, scenes: [] }, {}, 'per_scene'),
+        false,
+        'per_scene 模式 scene_spec_hash 不一致时不应复用',
+      );
+      // 非 per_scene 模式：维持原有 template_id 严格匹配行为
+      const templateProject = { template_id: 'vertical', generation_checkpoint: { scene_spec_hash: hash } };
+      assert.equal(resumeArtifactsMatch(templateProject, spec, { id: 'vertical' }), true, '整片模式 template_id 相同应复用');
+      assert.equal(resumeArtifactsMatch(templateProject, spec, { id: 'other' }), false, '整片模式 template_id 不同不应复用');
+      assert.equal(resumeArtifactsMatch({ template_id: null, generation_checkpoint: { scene_spec_hash: hash } }, spec, { id: 'vertical' }), false, '整片模式工程缺 template_id 不应复用');
+    }
     {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-resume-'));
       const workflowId = '202606260000000001_frame_resume';
