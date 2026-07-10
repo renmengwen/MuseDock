@@ -3,11 +3,6 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 
-const aiImageModel = require('../server/services/ai/aiImageModel');
-
-// 测试隔离：本机若配置了 image 模型，生图链路会混入本测试的 mock 计数，统一按未配置处理。
-aiImageModel.isConfigured = async () => false;
-
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
@@ -17,6 +12,13 @@ const { validateHtmlVideoProject } = require('../server/services/creative-video/
 const { validateTemplateInputs } = require('../server/services/creative-video/html-video/templateInputAgent');
 const { resolveFrameRenderSource } = require('../server/services/creative-video/html-video/frameRenderSource');
 const { resolveGenerationMode } = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
+const { buildVisualPlan } = require('../server/services/creative-video/html-video/visualPlanService');
+const { matchVisualBeatsToRenderers } = require('../server/services/creative-video/html-video/visualRouteMatcher');
+const { normalizeCaptions } = require('../server/services/creative-video/html-video/rawHtmlFrameBuilder');
+
+// 测试隔离：本机若配置了 image 模型，生图链路会混入本测试的 mock 计数，
+// 通过 services 注入未配置的 aiImageModel（generatedImagePhase 优先取 services.aiImageModel）。
+const stubAiImageModel = { isConfigured: async () => false };
 
 (async () => {
   assert.equal(resolveGenerationMode({}), 'per_scene');
@@ -133,12 +135,136 @@ const { resolveGenerationMode } = require('../server/services/creative-video/htm
   assert.equal(rawSource.needs_materialize, false);
   assert.equal(rawSource.html_path, 'frames/03-scene_free.html');
 
-  // 端到端：generateHtmlVideo（per_scene）必须把 beat 级视觉计划与路由决策持久化进 project。
+  // beat 展开：传入 visualPlan 时按 beat 建帧，字幕按 beat 窗口切片（局部时间）。
+  const longNarration = '第一句讲清楚问题的来龙去脉与背景。第二句给出核心的判断标准和依据。第三句展开关键的执行步骤细节。第四句总结行动建议并给出提醒。';
+  const beatSpec = {
+    scenes: [
+      {
+        id: 'scene_free',
+        kind: 'unknown',
+        duration_sec: 3,
+        narration_text: '没有对应模板的自由场景。',
+        visual_text: { headline: '自由内容' },
+      },
+      {
+        id: 'scene_long',
+        kind: 'unknown',
+        speech_duration_sec: 18,
+        narration_text: longNarration,
+        visual_text: { headline: '长场景' },
+      },
+    ],
+  };
+  await fs.writeFile(
+    path.join(projectDir, 'frames/04-scene_long.html'),
+    '<!doctype html><html><head><style>body{width:1920px;height:1080px}</style></head><body><main data-text-key="headline">长场景</main><p data-text-key="subtitle">字幕</p><p data-text-key="body">正文</p></body></html>',
+    'utf8',
+  );
+  const beatGraph = {
+    nodes: [
+      { id: 'node_free', scene_id: 'scene_free', durationSec: 3, html_path: 'frames/03-scene_free.html' },
+      { id: 'node_long', scene_id: 'scene_long', durationSec: 18, html_path: 'frames/04-scene_long.html' },
+    ],
+    edges: [
+      { from: 'node_free', to: 'node_long', kind: 'sequence' },
+    ],
+  };
+  const visualPlan = buildVisualPlan({ sceneSpec: beatSpec, workflowId: 'wf' });
+  const visualDecisions = matchVisualBeatsToRenderers({
+    visualPlan,
+    registry,
+    renderTarget: { aspectRatio: '16:9' },
+  });
+  const beatProject = await buildMixedFrameProject({
+    projectDir,
+    workflowId: 'wf',
+    runId: 'run-beats',
+    graph: beatGraph,
+    sceneSpec: beatSpec,
+    target: { aspect_ratio: '16:9', resolution: { width: 1920, height: 1080 }, fps: 30 },
+    registry,
+    decisions: visualDecisions,
+    visualPlan,
+    mediaOptions: { generateCaptions: true },
+  });
+
+  assert.equal(beatProject.frames.length, 4);
+  const longFrames = beatProject.frames.filter(frame => frame.scene_id === 'scene_long');
+  assert.equal(longFrames.length, 3);
+  assert.deepEqual(longFrames.map(frame => frame.beat_id), ['scene_long_b1', 'scene_long_b2', 'scene_long_b3']);
+  assert.ok(longFrames.every(frame => frame.duration_sec <= 8));
+  assert.ok(longFrames.every(frame => frame.graph_node_id === 'node_long'));
+  // 同场景 raw beat 共享该场景 graph node 生成的同一份 HTML（本期已接受的行为）
+  assert.ok(longFrames.every(frame => frame.source_mode === 'raw_html' && frame.html_path === 'frames/04-scene_long.html'));
+  assert.ok(longFrames.every(frame => frame.metadata.visual_beat && !('source_scene' in frame.metadata.visual_beat)));
+  const singleBeatFrame = beatProject.frames.find(frame => frame.scene_id === 'scene_free');
+  assert.equal(singleBeatFrame.beat_id, 'scene_free');
+  assert.equal(singleBeatFrame.id, 'scene_free');
+
+  // 时间轴守恒：帧时长总和 == 各场景时长总和
+  const beatFrameTotal = beatProject.frames.reduce((total, frame) => total + frame.duration_sec, 0);
+  assert.ok(Math.abs(beatFrameTotal - 21) < 1e-6);
+  assert.ok(Math.abs(beatProject.output.duration - 21) < 1e-6);
+  assert.equal(beatProject.timeline.tracks[0].items.length, 4);
+
+  // 字幕切窗：beat 帧字幕不是整场景字幕的简单复制，且时间为 beat 局部时间
+  const sceneLongCaptions = normalizeCaptions(beatSpec.scenes[1], 18);
+  assert.ok(sceneLongCaptions.length >= 2, '长场景字幕应被拆成多段，测试前提不成立');
+  for (const frame of longFrames) {
+    assert.ok(frame.captions.length >= 1);
+    assert.notEqual(JSON.stringify(frame.captions), JSON.stringify(sceneLongCaptions));
+    for (const caption of frame.captions) {
+      assert.ok(caption.start >= -1e-3 && caption.end <= frame.duration_sec + 1e-3, '字幕应落在 beat 窗口内的局部时间');
+    }
+  }
+  // 还原偏移后拼接：覆盖时段与原场景字幕一致、无重复
+  const restored = [];
+  longFrames.forEach((frame, frameIndex) => {
+    const offset = longFrames.slice(0, frameIndex).reduce((total, item) => total + item.duration_sec, 0);
+    for (const caption of frame.captions) {
+      restored.push({ start: caption.start + offset, end: caption.end + offset, text: caption.text });
+    }
+  });
+  restored.sort((a, b) => a.start - b.start);
+  for (let index = 1; index < restored.length; index += 1) {
+    assert.ok(restored[index].start >= restored[index - 1].end - 1e-3, '还原偏移后的字幕时段不应重叠');
+  }
+  const restoredCovered = restored.reduce((total, item) => total + (item.end - item.start), 0);
+  const sceneCovered = sceneLongCaptions.reduce((total, item) => total + (item.end - item.start), 0);
+  assert.ok(Math.abs(restoredCovered - sceneCovered) < 0.02, '还原偏移后的字幕覆盖时长应与原场景字幕一致');
+  const restoredMaxEnd = Math.max(...restored.map(item => item.end));
+  const sceneMaxEnd = Math.max(...sceneLongCaptions.map(item => item.end));
+  assert.ok(Math.abs(restoredMaxEnd - sceneMaxEnd) < 1e-3);
+  for (const caption of sceneLongCaptions) {
+    assert.ok(restored.some(item => item.text === caption.text), `原字幕文本「${caption.text}」应出现在 beat 字幕中`);
+  }
+  // beat 帧工程也要过校验 gate（frames:nodes 不再 1:1）
+  const beatValidation = await validateHtmlVideoProject({
+    project: beatProject,
+    projectDir,
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+    sceneSpec: beatSpec,
+    mediaOptions: { generateCaptions: true, generateAudio: false },
+    options: { commercialOnly: true },
+  });
+  assert.equal(beatValidation.ok, true, JSON.stringify(beatValidation.diagnostics, null, 2));
+
+  // 端到端：generateHtmlVideo（per_scene）必须按 beat 展开帧，并把 beat 级视觉计划与路由决策持久化进 project。
   const workflowRootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-per-scene-workflow-'));
   const workflowSceneSpec = {
     title: '逐场景视觉计划',
     aspect_ratio: '16:9',
-    scenes: sceneSpec.scenes,
+    scenes: [
+      ...sceneSpec.scenes,
+      {
+        id: 'scene_long',
+        kind: 'text',
+        speech_duration_sec: 18,
+        narration_text: longNarration,
+        visual_text: { headline: '长场景' },
+      },
+    ],
   };
   const originalRenderHtmlVideoProject = projectOrchestrator.renderHtmlVideoProject;
   projectOrchestrator.renderHtmlVideoProject = async ({ project: renderProject, projectDir: renderProjectDir }) => ({
@@ -162,6 +288,7 @@ const { resolveGenerationMode } = require('../server/services/creative-video/htm
       templateRegistry: registry,
       skipValidation: true,
       services: {
+        aiImageModel: stubAiImageModel,
         aiTextModel: {
           callTextModel: async request => {
             const prompt = request.messages.map(item => item.content).join('\n');

@@ -169,6 +169,14 @@ function markRenderCheckpoint(project, sceneId, patch = {}) {
   return markCheckpointFrame(project, 'render', sceneId, patch);
 }
 
+// 渲染检查点键：旧工程帧与场景 1:1（frame.id === scene_id），沿用 scene_id 优先；
+// beat 展开帧同场景有多帧，必须按帧（beat）唯一键控，否则合成会重复取同一段 mp4
+function renderCheckpointKey(frame = {}) {
+  const beatId = String(frame.beat_id || frame.beatId || '').trim();
+  if (beatId) return String(frame.id || beatId).trim();
+  return String(frame.scene_id || frame.id || '').trim();
+}
+
 function markComposeCheckpoint(project, patch = {}) {
   return markCheckpointStage(project, 'compose', patch);
 }
@@ -410,7 +418,7 @@ function collectRenderedFramesFromProject(project, projectDir) {
   const checkpointFrames = objectOrEmpty(project?.generation_checkpoint?.stages?.render?.frames);
   for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
     const frameId = frame.id || frame.scene_id || '';
-    const checkpointKey = frame.scene_id || frame.id || '';
+    const checkpointKey = renderCheckpointKey(frame);
     const checkpoint = objectOrEmpty(checkpointFrames[checkpointKey] || checkpointFrames[frameId]);
     if (checkpoint.status !== 'done') continue;
     const mp4Path = String(checkpoint.mp4_path || frame.mp4_path || frame.preview_mp4_path || '').trim();
@@ -430,7 +438,7 @@ function missingRenderedFrameIds(project) {
   const checkpointFrames = objectOrEmpty(project?.generation_checkpoint?.stages?.render?.frames);
   for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
     const frameId = frame.id || frame.scene_id || '';
-    const checkpointKey = frame.scene_id || frame.id || '';
+    const checkpointKey = renderCheckpointKey(frame);
     const checkpoint = objectOrEmpty(checkpointFrames[checkpointKey] || checkpointFrames[frameId]);
     const mp4Path = String(checkpoint.mp4_path || frame.mp4_path || frame.preview_mp4_path || '').trim();
     if (checkpoint.status !== 'done' || !mp4Path) {
@@ -558,7 +566,7 @@ async function renderHtmlVideoFrames({
     const allFrameIndex = allFrames.indexOf(frame);
     const progressIndex = allFrameIndex >= 0 ? allFrameIndex : index;
     const frameId = frame.id || frame.scene_id || `frame_${progressIndex + 1}`;
-    const checkpointKey = frame.scene_id || frame.id || frameId;
+    const checkpointKey = renderCheckpointKey(frame) || frameId;
     const outputName = frame.id || frame.scene_id || frameId;
     const frameOutput = path.join(resolvedProjectDir, 'frames', `${outputName}.mp4`);
     const rendered = await frameRenderer.renderFrame(frame, {

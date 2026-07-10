@@ -172,6 +172,44 @@ function normalizeCaptionsForFrame(frame = {}) {
   });
 }
 
+const CAPTION_WINDOW_EPSILON_SEC = 0.001;
+
+/**
+ * 把场景级字幕切到 [offsetSec, offsetSec + durationSec) 窗口内，并平移为窗口局部时间。
+ * 跨窗口边界的字幕段会被裁剪到窗口内（同一段字幕可能在相邻窗口各出现一次，时间上不重叠）。
+ */
+function sliceCaptionsToWindow(captions = [], offsetSec = 0, durationSec = 0) {
+  const windowStart = finiteNonNegativeNumber(offsetSec, 0);
+  const windowDuration = finitePositiveNumber(durationSec, 0);
+  if (!windowDuration) return [];
+  const windowEnd = windowStart + windowDuration;
+  const sliced = [];
+  for (const caption of Array.isArray(captions) ? captions : []) {
+    if (!caption || typeof caption !== 'object') continue;
+    const start = finiteNonNegativeNumber(caption.start ?? caption.start_sec, 0);
+    const rawEnd = Number(caption.end ?? caption.end_sec);
+    const end = Number.isFinite(rawEnd)
+      ? rawEnd
+      : start + finitePositiveNumber(caption.duration ?? caption.duration_sec, 0);
+    if (end <= windowStart + CAPTION_WINDOW_EPSILON_SEC) continue;
+    if (start >= windowEnd - CAPTION_WINDOW_EPSILON_SEC) continue;
+    const localStart = roundCaptionTime(Math.max(start, windowStart) - windowStart);
+    const localEnd = roundCaptionTime(Math.min(end, windowEnd) - windowStart);
+    if (localEnd - localStart <= CAPTION_WINDOW_EPSILON_SEC) continue;
+    const next = {
+      ...caption,
+      start: localStart,
+      end: localEnd,
+      duration: roundCaptionTime(localEnd - localStart),
+    };
+    delete next.start_sec;
+    delete next.end_sec;
+    delete next.duration_sec;
+    sliced.push(next);
+  }
+  return sliced;
+}
+
 function renderCaptionLayer(captions = [], options = {}) {
   const normalizedCaptions = Array.isArray(captions)
     ? captions
@@ -457,4 +495,5 @@ module.exports = {
   htmlEscape,
   normalizeCaptionsForFrame,
   renderCaptionLayer,
+  sliceCaptionsToWindow,
 };

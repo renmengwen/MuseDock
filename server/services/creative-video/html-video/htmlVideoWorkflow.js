@@ -281,12 +281,22 @@ function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target
 
 function invalidateFrameHtmlDependents(project, sceneId) {
   if (!project) return project;
-  markCheckpointFrame(project, 'render', sceneId, {
-    status: 'pending',
-    mp4_path: '',
-    output_hash: '',
-    diagnostic_code: '',
-  });
+  // beat 展开后同一场景可能对应多个帧（渲染检查点按帧键控），场景 HTML 变更需要一并失效
+  const dependentFrameIds = new Set([sceneId]);
+  for (const frame of Array.isArray(project.frames) ? project.frames : []) {
+    if (!frame) continue;
+    if (frame.scene_id === sceneId || frame.id === sceneId) {
+      dependentFrameIds.add(String(frame.id || sceneId));
+    }
+  }
+  for (const frameId of dependentFrameIds) {
+    markCheckpointFrame(project, 'render', frameId, {
+      status: 'pending',
+      mp4_path: '',
+      output_hash: '',
+      diagnostic_code: '',
+    });
+  }
   markCheckpointStage(project, 'compose', {
     status: 'pending',
     output_path: '',
@@ -345,6 +355,77 @@ function invalidateFrameHtmlResumeState(project) {
 
 function hasUsableContentGraph(graph = {}) {
   return Array.isArray(graph.nodes) && graph.nodes.length > 0;
+}
+
+/**
+ * 把 beat 级路由决策按 scene 聚合成 frame_html 阶段可用的跳过判断：
+ * 只有场景内全部 beat 都是 template_inputs 才算 template_inputs（可跳过场景 HTML 生成），
+ * 任一 beat 走 raw_html 或决策缺失，该场景都需要生成 HTML 供 raw beat 复用。
+ */
+function aggregateBeatRoutingByScene(visualPlan, visualDecisions) {
+  const bySceneId = new Map();
+  const beats = Array.isArray(visualPlan?.beats) ? visualPlan.beats : [];
+  for (const beat of beats) {
+    if (!beat || !beat.id) continue;
+    const sceneId = String(beat.scene_id || '').trim();
+    if (!sceneId) continue;
+    const decision = visualDecisions instanceof Map ? visualDecisions.get(beat.id) : null;
+    const isTemplateBeat = decision?.source_mode === 'template_inputs' && Boolean(decision.template_id);
+    const current = bySceneId.get(sceneId) || {
+      scene_id: sceneId,
+      source_mode: 'template_inputs',
+      template_id: null,
+      beat_count: 0,
+      template_beat_count: 0,
+    };
+    current.beat_count += 1;
+    if (isTemplateBeat) {
+      current.template_beat_count += 1;
+      if (!current.template_id) current.template_id = decision.template_id;
+    } else {
+      current.source_mode = 'raw_html';
+    }
+    bySceneId.set(sceneId, current);
+  }
+  return bySceneId;
+}
+
+/**
+ * enforceAssetFirstRawHtmlRouting 只覆写 scene 级决策；
+ * 这里把覆写扇出到该场景的全部 beat（template beat 或缺决策 beat 改为 raw_html 并带覆写原因），
+ * 已经是 raw_html 的 beat 保留原有 fallback 信息。返回是否有变更。
+ */
+function fanOutAssetFirstOverridesToBeats({ perSceneDecisions, visualPlan, visualDecisions } = {}) {
+  if (!(perSceneDecisions instanceof Map) || !(visualDecisions instanceof Map)) return false;
+  const beats = Array.isArray(visualPlan?.beats) ? visualPlan.beats : [];
+  if (!beats.length) return false;
+  const overriddenSceneIds = new Set();
+  for (const [sceneId, decision] of perSceneDecisions) {
+    if (decision?.source_mode === 'raw_html' && decision?.override_reason === 'asset_first_generated_subject') {
+      overriddenSceneIds.add(sceneId);
+    }
+  }
+  if (!overriddenSceneIds.size) return false;
+  let changed = false;
+  for (const beat of beats) {
+    if (!beat || !beat.id || !overriddenSceneIds.has(String(beat.scene_id || '').trim())) continue;
+    const beatDecision = visualDecisions.get(beat.id) || null;
+    if (beatDecision && beatDecision.source_mode !== 'template_inputs') continue;
+    const { inputs: _inputs, ...rest } = beatDecision || {};
+    visualDecisions.set(beat.id, {
+      beat_id: beat.id,
+      scene_id: beat.scene_id,
+      ...rest,
+      source_mode: 'raw_html',
+      template_id: null,
+      duration_strategy: 'raw_html',
+      ...(beatDecision?.source_mode === 'template_inputs' ? { fallback_from: 'template_inputs' } : {}),
+      fallback_reason: '图片优先策略要求该场景使用生成主视觉的自由 HTML，已覆写模板路由。',
+      override_reason: 'asset_first_generated_subject',
+    });
+    changed = true;
+  }
+  return changed;
 }
 
 function contentGraphMatchesSceneSpec(graph = {}, sceneSpec = null) {
@@ -1185,10 +1266,21 @@ async function generateHtmlVideo(options = {}) {
   let selection = { success: true, template_id: null, reason: '' };
   let template = null;
   let perSceneDecisions = null;
-  // beat 级视觉计划（Task 4 建帧路由会用内存版 visualPlan，含 source_scene）
+  // beat 级视觉计划：内存版 visualPlan 含 source_scene 供建帧/路由消费，持久化版剥离 source_scene
   let visualPlan = null;
   let persistableVisualPlan = null;
+  // beat 级路由决策（Map，键为 beat.id），per_scene 分支赋值，建帧与持久化共用
+  let visualDecisions = null;
   let renderDecisions = null;
+  // per_scene 工程重建/重写 project.json 时统一挂载视觉计划与路由决策；
+  // renderDecisions 在 asset-first 覆写扇出后会重算，这里始终读取最新值
+  const attachVisualRouting = target => {
+    if (generationMode === 'per_scene' && persistableVisualPlan && target) {
+      target.visual_plan = persistableVisualPlan;
+      target.render_decisions = renderDecisions;
+    }
+    return target;
+  };
   if (generationMode === 'per_scene') {
     if (!hasSceneSpecScenes(sceneSpec)) {
       return failure('缺少 scene_spec，无法逐场景匹配模板。', [
@@ -1215,7 +1307,7 @@ async function generateHtmlVideo(options = {}) {
       renderTarget,
     });
     visualPlan = buildVisualPlan({ sceneSpec, workflowId });
-    const visualDecisions = matchVisualBeatsToRenderers({ visualPlan, registry, renderTarget });
+    visualDecisions = matchVisualBeatsToRenderers({ visualPlan, registry, renderTarget });
     renderDecisions = Array.from(visualDecisions.values());
     // 持久化版剥离 source_scene，防止 project.json 膨胀
     persistableVisualPlan = {
@@ -1431,10 +1523,7 @@ async function generateHtmlVideo(options = {}) {
     if (contentGraph) {
       project = await projectStore.writeProjectJson(projectDir, current => {
         current.template_id = generationMode === 'per_scene' ? null : (template.id || current.template_id);
-        if (generationMode === 'per_scene' && persistableVisualPlan) {
-          current.visual_plan = persistableVisualPlan;
-          current.render_decisions = renderDecisions;
-        }
+        attachVisualRouting(current);
         current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
         current.content_graph = contentGraph;
         markCheckpointStage(current, 'content_graph', {
@@ -1547,10 +1636,7 @@ async function generateHtmlVideo(options = {}) {
       project = await projectStore.writeProjectJson(projectDir, current => {
         if (!reusedContentGraph) invalidateFrameHtmlResumeState(current);
         current.template_id = generationMode === 'per_scene' ? null : (template.id || current.template_id);
-        if (generationMode === 'per_scene' && persistableVisualPlan) {
-          current.visual_plan = persistableVisualPlan;
-          current.render_decisions = renderDecisions;
-        }
+        attachVisualRouting(current);
         current.content_graph = contentGraph;
         current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
         current.generation_checkpoint.target = {
@@ -1574,6 +1660,17 @@ async function generateHtmlVideo(options = {}) {
         contentGraph,
         creativeContext,
       });
+      // asset-first 覆写按 scene 生效，这里扇出到该场景全部 beat，并重算持久化的 render_decisions，
+      // 消除“盘上 render_decisions 与实际建帧路由不一致”的时序缺陷
+      const fannedOut = fanOutAssetFirstOverridesToBeats({
+        perSceneDecisions,
+        visualPlan,
+        visualDecisions,
+      });
+      if (fannedOut) {
+        renderDecisions = Array.from(visualDecisions.values());
+        project = await projectStore.writeProjectJson(projectDir, current => attachVisualRouting(current));
+      }
     }
     const frameHtmlResult = await runFrameHtmlPhase({
       model,
@@ -1600,7 +1697,11 @@ async function generateHtmlVideo(options = {}) {
       failure,
       shouldReuseFrameHtml,
       invalidateFrameHtmlDependents,
-      templateRoutingDecisions: perSceneDecisions,
+      // per_scene 时按“该场景全部 beat 决策”聚合成 scene 级跳过判断：
+      // 只有全部 beat 均为 template_inputs 的场景才跳过场景 HTML 生成
+      templateRoutingDecisions: generationMode === 'per_scene'
+        ? aggregateBeatRoutingByScene(visualPlan, visualDecisions)
+        : perSceneDecisions,
     });
     if (!frameHtmlResult.ok) return frameHtmlResult.failure;
     project = frameHtmlResult.project;
@@ -1615,7 +1716,8 @@ async function generateHtmlVideo(options = {}) {
           sceneSpec,
           target: templateRenderTarget,
           registry,
-          decisions: perSceneDecisions,
+          decisions: visualDecisions,
+          visualPlan,
           mediaOptions,
           generationCheckpoint: project?.generation_checkpoint,
         })
@@ -1630,10 +1732,7 @@ async function generateHtmlVideo(options = {}) {
           mediaOptions,
         });
       // buildMixedFrameProject 会重建 project，这里要重新挂上视觉计划与路由决策
-      if (generationMode === 'per_scene' && persistableVisualPlan) {
-        project.visual_plan = persistableVisualPlan;
-        project.render_decisions = renderDecisions;
-      }
+      attachVisualRouting(project);
       project.generation_checkpoint = objectOrEmpty(project.generation_checkpoint);
       project.generation_checkpoint.agent_pipeline = [
         { agent: AGENTS.contentGraph, stage: STAGES.contentGraph, artifact: 'content-graph.json' },

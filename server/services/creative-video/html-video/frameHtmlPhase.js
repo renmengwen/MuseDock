@@ -357,9 +357,13 @@ async function runFrameHtmlPhase(ctx) {
     const node = nodes[index];
     const sceneId = resolveNodeSceneId(node) || node.id;
     const scene = scenes.get(sceneId);
+    // per_scene 模式下 workflow 传入的是 beat 决策按 scene 聚合后的结构：
+    // 仅当该场景全部 beat 都是 template_inputs 时 source_mode 才是 template_inputs（跳过场景 HTML 生成）；
+    // 任一 beat 是 raw_html（或缺决策）都会生成场景 HTML，供同场景 raw beat 共享
+    const beatId = String(node.beat_id || node.beatId || '').trim();
     const routingDecision = templateRoutingDecisions instanceof Map
-      ? templateRoutingDecisions.get(sceneId)
-      : objectOrEmpty(templateRoutingDecisions)[sceneId];
+      ? (beatId ? templateRoutingDecisions.get(beatId) : null) || templateRoutingDecisions.get(sceneId)
+      : (beatId ? objectOrEmpty(templateRoutingDecisions)[beatId] : null) || objectOrEmpty(templateRoutingDecisions)[sceneId];
     if (routingDecision?.source_mode === 'template_inputs') {
       const durationSec = trustedSceneDuration(scene || {}, node);
       nodes[index] = { ...node, durationSec };

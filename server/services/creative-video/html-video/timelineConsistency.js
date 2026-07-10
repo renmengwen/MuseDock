@@ -3,7 +3,7 @@ const {
   audioMatchesSceneSpec,
   computeSceneSpecSpeechHash,
 } = require('../sceneSpecHash');
-const { normalizeCaptionsForFrame } = require('./captionLayer');
+const { normalizeCaptionsForFrame, sliceCaptionsToWindow } = require('./captionLayer');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -106,12 +106,35 @@ function hasAudioPath(audio) {
   return Boolean(getAudioPath(audio));
 }
 
+function frameBeatId(frame = {}) {
+  return firstNonEmptyString(frame.beat_id, frame.beatId);
+}
+
+function frameDurationSec(frame = {}) {
+  const number = Number(frame.duration_sec ?? frame.durationSec ?? frame.duration);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+// 帧按 scene 分组（保持出现顺序）；beat 展开后同一场景允许多帧，但必须连续出现
+function groupFramesByScene(frames = []) {
+  const groups = [];
+  frames.forEach((frame, index) => {
+    const sceneId = firstNonEmptyString(frame.scene_id, frame.sceneId, frame.id);
+    const last = groups[groups.length - 1];
+    if (last && last.scene_id === sceneId) {
+      last.entries.push({ frame, index });
+      return;
+    }
+    groups.push({ scene_id: sceneId, entries: [{ frame, index }] });
+  });
+  return groups;
+}
+
 function validateSceneSpecTimelineConsistency({ sceneSpec, project, audio, mediaOptions = {} } = {}) {
   const diagnostics = [];
   const scenes = arrayOrEmpty(objectOrEmpty(sceneSpec).scenes);
   const frames = arrayOrEmpty(objectOrEmpty(project).frames);
   const scenesById = new Map(scenes.map(scene => [String(scene.id || ''), scene]));
-  const matchedFrameCounts = new Map();
   const checkCaptions = mediaOptions?.generateCaptions !== false;
   const checkAudio = mediaOptions?.generateAudio !== false;
 
@@ -124,73 +147,136 @@ function validateSceneSpecTimelineConsistency({ sceneSpec, project, audio, media
     return { ok: false, diagnostics };
   }
 
-  if (frames.length !== scenes.length) {
+  const groups = groupFramesByScene(frames);
+  const seenSceneIds = new Set();
+
+  if (groups.length !== scenes.length) {
     add(diagnostics, 'frame_scene_count_mismatch', '画面帧与字幕脚本数量不一致，无法继续渲染。', {
       expected_count: scenes.length,
-      actual_count: frames.length,
+      actual_count: groups.length,
+      frame_count: frames.length,
     });
   }
 
-  frames.forEach((frame, index) => {
-    const sceneId = firstNonEmptyString(frame.scene_id, frame.sceneId, frame.id);
-    const scene = scenesById.get(sceneId);
-    if (!scene) {
-      add(diagnostics, 'frame_scene_missing', '画面帧与字幕脚本不一致，无法继续渲染。', {
-        frame_id: frame.id,
+  groups.forEach((group, groupIndex) => {
+    const sceneId = group.scene_id;
+    const firstEntry = group.entries[0];
+    if (seenSceneIds.has(sceneId)) {
+      add(diagnostics, 'frame_scene_duplicate', '画面帧重复绑定同一个字幕场景，无法继续渲染。', {
+        frame_id: firstEntry.frame.id,
         scene_id: sceneId,
-        index,
+        index: firstEntry.index,
       });
       return;
     }
-    const matchedCount = matchedFrameCounts.get(sceneId) || 0;
-    if (matchedCount > 0) {
-      add(diagnostics, 'frame_scene_duplicate', '画面帧重复绑定同一个字幕场景，无法继续渲染。', {
-        frame_id: frame.id,
-        scene_id: sceneId,
-        index,
+    seenSceneIds.add(sceneId);
+
+    const scene = scenesById.get(sceneId);
+    if (!scene) {
+      for (const { frame, index } of group.entries) {
+        add(diagnostics, 'frame_scene_missing', '画面帧与字幕脚本不一致，无法继续渲染。', {
+          frame_id: frame.id,
+          scene_id: sceneId,
+          index,
+        });
+      }
+      return;
+    }
+
+    // 同一场景多帧仅允许 beat 展开帧（每帧带唯一 beat_id），否则视为重复绑定
+    if (group.entries.length > 1) {
+      const beatIds = new Set();
+      group.entries.forEach(({ frame, index }, entryIndex) => {
+        const beatId = frameBeatId(frame);
+        if ((!beatId && entryIndex > 0) || (beatId && beatIds.has(beatId))) {
+          add(diagnostics, 'frame_scene_duplicate', '画面帧重复绑定同一个字幕场景，无法继续渲染。', {
+            frame_id: frame.id,
+            scene_id: sceneId,
+            index,
+            ...(beatId ? { beat_id: beatId } : {}),
+          });
+        }
+        if (beatId) beatIds.add(beatId);
       });
     }
-    matchedFrameCounts.set(sceneId, matchedCount + 1);
 
-    const expectedSceneAtIndex = scenes[index];
+    const expectedSceneAtIndex = scenes[groupIndex];
     const expectedSceneId = firstNonEmptyString(expectedSceneAtIndex && expectedSceneAtIndex.id);
     if (expectedSceneId && expectedSceneId !== sceneId) {
       add(diagnostics, 'frame_scene_order_mismatch', '画面帧顺序与字幕脚本顺序不一致，无法继续渲染。', {
-        index,
+        index: firstEntry.index,
         expected_scene_id: expectedSceneId,
         actual_scene_id: sceneId,
-        frame_id: frame.id,
+        frame_id: firstEntry.frame.id,
       });
     }
 
-    const actualNarration = String(getNarrationText(frame));
     const expectedNarration = String(getNarrationText(scene));
-    if (actualNarration !== expectedNarration) {
-      add(diagnostics, 'frame_narration_mismatch', '画面帧旁白与字幕脚本不一致，无法继续渲染。', {
-        frame_id: frame.id,
-        scene_id: sceneId,
-        expected_narration_length: expectedNarration.length,
-        actual_narration_length: actualNarration.length,
-      });
+    for (const { frame } of group.entries) {
+      const actualNarration = String(getNarrationText(frame));
+      if (actualNarration !== expectedNarration) {
+        add(diagnostics, 'frame_narration_mismatch', '画面帧旁白与字幕脚本不一致，无法继续渲染。', {
+          frame_id: frame.id,
+          scene_id: sceneId,
+          expected_narration_length: expectedNarration.length,
+          actual_narration_length: actualNarration.length,
+        });
+      }
     }
 
     if (checkCaptions) {
-      const actualCaptions = comparableFrameCaptions(frame, scene);
-      const expectedCaptions = comparableSceneCaptions(scene, frame);
-      if (normalizeCaptions(actualCaptions) !== normalizeCaptions(expectedCaptions)) {
-        add(diagnostics, 'frame_captions_mismatch', '画面帧字幕与字幕脚本不一致，无法继续渲染。', {
-          frame_id: frame.id,
+      const beatExpanded = group.entries.some(({ frame }) => Boolean(frameBeatId(frame)));
+      if (!beatExpanded) {
+        const frame = firstEntry.frame;
+        const actualCaptions = comparableFrameCaptions(frame, scene);
+        const expectedCaptions = comparableSceneCaptions(scene, frame);
+        if (normalizeCaptions(actualCaptions) !== normalizeCaptions(expectedCaptions)) {
+          add(diagnostics, 'frame_captions_mismatch', '画面帧字幕与字幕脚本不一致，无法继续渲染。', {
+            frame_id: frame.id,
+            scene_id: sceneId,
+            expected_caption_count: expectedCaptions.length,
+            actual_caption_count: actualCaptions.length,
+          });
+        }
+      } else {
+        // beat 展开帧：整场景字幕按 beat 窗口切片后应与各帧字幕一致（与建帧侧共用同一切窗算法）
+        const sceneDurationSec = group.entries.reduce((total, { frame }) => total + frameDurationSec(frame), 0);
+        const sceneCaptions = normalizeCaptionsForFrame({
+          id: scene.id || sceneId,
           scene_id: sceneId,
-          expected_caption_count: expectedCaptions.length,
-          actual_caption_count: actualCaptions.length,
+          duration_sec: sceneDurationSec,
+          narration_text: scene.narration_text,
+          captions: scene.captions,
         });
+        let offsetSec = 0;
+        for (const { frame } of group.entries) {
+          const durationSec = frameDurationSec(frame);
+          const expectedCaptions = normalizeCaptionsForFrame({
+            id: frame.id || sceneId,
+            scene_id: sceneId,
+            duration_sec: durationSec,
+            narration_text: scene.narration_text,
+            captions: sliceCaptionsToWindow(sceneCaptions, offsetSec, durationSec),
+          });
+          const actualCaptions = comparableFrameCaptions(frame, scene);
+          if (normalizeCaptions(actualCaptions) !== normalizeCaptions(expectedCaptions)) {
+            add(diagnostics, 'frame_captions_mismatch', '画面帧字幕与字幕脚本不一致，无法继续渲染。', {
+              frame_id: frame.id,
+              scene_id: sceneId,
+              beat_id: frameBeatId(frame),
+              expected_caption_count: expectedCaptions.length,
+              actual_caption_count: actualCaptions.length,
+            });
+          }
+          offsetSec += durationSec;
+        }
       }
     }
   });
 
   scenes.forEach((scene, index) => {
     const sceneId = String(scene.id || '');
-    if ((matchedFrameCounts.get(sceneId) || 0) === 0) {
+    if (!seenSceneIds.has(sceneId)) {
       add(diagnostics, 'frame_scene_missing', '字幕脚本场景缺少对应画面帧，无法继续渲染。', {
         scene_id: sceneId,
         scene_index: index,
