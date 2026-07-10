@@ -4,6 +4,8 @@ const { analyzeTimelineMismatch } = require('./html-video/timelineRepair');
 const MODE = 'repair_and_resume';
 const ENVIRONMENT_CODES = new Set(['ffmpeg_not_configured', 'playwright_not_configured']);
 const RETRY_META_FAILURE_CODES = new Set(['resume_action_not_configured', 'retry_executor_failed', 'project_dir_missing']);
+const NON_FAILURE_DIAGNOSTIC_CODES = new Set(['materialized', 'frame_rendered']);
+const BLOCKING_VISUAL_QA_CODES = new Set(['blank_opening_frame', 'blank_segment_boundary']);
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -36,8 +38,11 @@ function collectDiagnostics(input = {}) {
 }
 
 function chooseDiagnostic(diagnostics) {
-  return diagnostics.find(item => item.severity !== 'warning' && safeString(item.code))
-    || diagnostics.find(item => safeString(item.code))
+  const coded = diagnostics.filter(item => safeString(item.code) && !NON_FAILURE_DIAGNOSTIC_CODES.has(safeString(item.code)));
+  return coded.find(item => item.severity === 'error')
+    || coded.find(item => item.severity !== 'warning' && (item.retryable === true || safeString(item.repair_action)))
+    || coded.find(item => item.severity !== 'warning')
+    || coded.find(item => safeString(item.code))
     || diagnostics.find(item => safeString(item.stage) || safeString(item.message) || safeString(item.user_message))
     || null;
 }
@@ -267,6 +272,107 @@ function failedRenderFrameIds(project = {}, preferredFrameId = '') {
     .map(([frameId]) => frameId);
 }
 
+function uniqueStrings(values = []) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    const text = safeString(value);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    result.push(text);
+  }
+  return result;
+}
+
+function collectDiagnosticVisualIssues(classification = {}) {
+  const diagnostics = [
+    classification.diagnostic,
+    ...arrayOrEmpty(classification.diagnostics),
+  ].filter(item => item && typeof item === 'object');
+  return diagnostics.flatMap(item => [
+    ...arrayOrEmpty(item.issues),
+    ...arrayOrEmpty(objectOrEmpty(item.details).issues),
+  ]).filter(issue => issue && typeof issue === 'object');
+}
+
+function blockingVisualQaIssues(classification = {}) {
+  return collectDiagnosticVisualIssues(classification)
+    .filter(issue => BLOCKING_VISUAL_QA_CODES.has(safeString(issue.code)));
+}
+
+function frameTimeline(project = {}) {
+  let cursor = 0;
+  return arrayOrEmpty(project.frames).map((frame, index) => {
+    const duration = Number(frame.duration_sec ?? frame.durationSec ?? frame.duration);
+    const start = cursor;
+    const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+    cursor += safeDuration;
+    return {
+      id: firstNonEmpty(frame.id, frame.frame_id, frame.scene_id, `frame_${index + 1}`),
+      scene_id: safeString(frame.scene_id),
+      start,
+      end: cursor,
+      index,
+    };
+  }).filter(frame => frame.id);
+}
+
+function frameAtTime(frames, time, { preferNextAtBoundary = false } = {}) {
+  const number = Number(time);
+  if (!Number.isFinite(number) || !frames.length) return null;
+  const epsilon = 0.05;
+  if (preferNextAtBoundary) {
+    const next = frames.find(frame => Math.abs(frame.start - number) <= epsilon || frame.start > number);
+    if (next) return next;
+  }
+  return frames.find(frame => number >= frame.start - epsilon && number < frame.end - epsilon)
+    || frames.find(frame => number >= frame.start - epsilon && number <= frame.end + epsilon)
+    || null;
+}
+
+/**
+ * 从 required_visual_asset_missing 诊断的 missing_required_asset_ids（gen_<sceneId>）
+ * 反解出场景 id，映射到该场景全部帧，用于按帧重试。
+ */
+function missingAssetFrameIds(project = {}, classification = {}) {
+  const diagnostics = [
+    classification.diagnostic,
+    ...arrayOrEmpty(classification.diagnostics),
+  ].filter(item => item && typeof item === 'object');
+  const sceneIds = new Set(diagnostics
+    .flatMap(item => arrayOrEmpty(objectOrEmpty(item.details).missing_required_asset_ids))
+    .map(id => safeString(id).replace(/^gen_/, ''))
+    .filter(Boolean));
+  if (!sceneIds.size) return [];
+  return uniqueStrings(arrayOrEmpty(project.frames)
+    .filter(frame => sceneIds.has(safeString(frame?.scene_id)))
+    .map(frame => safeString(frame?.id)));
+}
+
+function visualQaIssueFrameIds(project = {}, classification = {}) {  const frames = frameTimeline(project);
+  const issues = blockingVisualQaIssues(classification);
+  const ids = [];
+  for (const issue of issues) {
+    const code = safeString(issue.code);
+    if (code === 'blank_opening_frame') {
+      const first = frames[0];
+      if (first) ids.push(first.id);
+      continue;
+    }
+    if (code === 'blank_segment_boundary') {
+      const boundary = Number(issue.boundary_sec ?? issue.boundarySec);
+      const frame = frameAtTime(frames, boundary, { preferNextAtBoundary: true });
+      if (frame) ids.push(frame.id);
+      continue;
+    }
+    for (const time of arrayOrEmpty(issue.times)) {
+      const frame = frameAtTime(frames, time);
+      if (frame) ids.push(frame.id);
+    }
+  }
+  return uniqueStrings(ids);
+}
+
 function basePlan(classification, patch = {}) {
   return {
     version: 1,
@@ -392,6 +498,39 @@ function createCreativeWorkflowRetryPlan(input = {}) {
       discard: frameIds.map(frameId => `render:${frameId}`),
       executor_options: { frame_ids: frameIds },
       user_message: '将只重渲染失败镜头，并重新合成成片。',
+    });
+  }
+
+  if (code === 'required_visual_asset_missing') {
+    const frameIds = missingAssetFrameIds(project, classification);
+    return retryPlan(classification, 'retry_frame_html', 'frame_html', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
+      discard: frameIds.length
+        ? [...frameIds.map(frameId => `frames:${frameId}`), 'render_outputs', 'exports', 'visual_inspect']
+        : ['frame_html', 'render_outputs', 'exports', 'visual_inspect'],
+      executor_options: {
+        regenerate_frame_html: true,
+        ...(frameIds.length ? { frame_ids: frameIds } : {}),
+      },
+      user_message: frameIds.length
+        ? `必用视觉素材未进入画面，将重新生成 ${frameIds.length} 个相关镜头并重新渲染、合成。`
+        : '必用视觉素材未进入画面，将重新生成镜头 HTML 并重新渲染、合成。',
+    });
+  }
+
+  if (code === 'visual_qa_warning') {    const frameIds = visualQaIssueFrameIds(project, classification);
+    return retryPlan(classification, 'retry_frame_html', 'frame_html', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
+      discard: frameIds.length
+        ? [...frameIds.map(frameId => `frames:${frameId}`), 'render_outputs', 'exports', 'visual_inspect']
+        : ['frame_html', 'render_outputs', 'exports', 'visual_inspect'],
+      executor_options: {
+        regenerate_frame_html: true,
+        ...(frameIds.length ? { frame_ids: frameIds } : {}),
+      },
+      user_message: frameIds.length
+        ? `视觉巡检发现开头或镜头边界白屏，将重新生成 ${frameIds.length} 个疑似问题镜头并重新渲染、合成、巡检。`
+        : '视觉巡检发现开头或镜头边界白屏，将重新生成镜头 HTML 并重新渲染、合成、巡检。',
     });
   }
 

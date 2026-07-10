@@ -92,6 +92,88 @@ function project(overrides = {}) {
   assert.equal(layoutQaPlan.retry_from, 'frame_html');
   assert.ok(layoutQaPlan.discard.includes('frames:scene_07'));
 
+  const visualQaPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        stage: 'project',
+        sub_stage: 'visual_inspect',
+        code: 'visual_qa_warning',
+        message: 'html-video 成片画面存在开头或镜头边界白屏，未通过视觉安全检查。',
+        diagnostics: [
+          createDiagnostic({ code: 'materialized', stage: 'materialize', frame_id: 'scene_01' }),
+          createDiagnostic({ code: 'frame_rendered', stage: 'render', sub_stage: 'render', frame_id: 'scene_01' }),
+          createDiagnostic({
+            code: 'visual_qa_warning',
+            stage: 'inspect',
+            sub_stage: 'visual_inspect',
+            severity: 'error',
+            user_message: '视觉质检失败。',
+            details: {
+              issues: [
+                { code: 'blank_opening_frame', message: '开头抽样帧接近空白。' },
+                { code: 'blank_segment_boundary', message: '镜头边界 4s 附近出现连续空白帧。', boundary_sec: 4 },
+              ],
+            },
+          }),
+        ],
+      },
+    }),
+    project: project({
+      frames: [
+        { id: 'scene_01_b1', scene_id: 'scene_01', duration_sec: 4 },
+        { id: 'scene_02_b1', scene_id: 'scene_02', duration_sec: 4 },
+      ],
+    }),
+  });
+  assert.equal(visualQaPlan.can_retry, true);
+  assert.equal(visualQaPlan.code, 'visual_qa_warning');
+  assert.equal(visualQaPlan.repair_action, 'retry_frame_html');
+  assert.equal(visualQaPlan.retry_from, 'frame_html');
+  assert.deepEqual(visualQaPlan.executor_options.frame_ids, ['scene_01_b1', 'scene_02_b1']);
+  assert.equal(visualQaPlan.executor_options.regenerate_frame_html, true);
+  assert.ok(visualQaPlan.discard.includes('frames:scene_01_b1'));
+  assert.ok(visualQaPlan.discard.includes('frames:scene_02_b1'));
+
+  // asset_first 必用素材缺失：按缺失素材对应场景重生成帧
+  const missingAssetPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        stage: 'project',
+        sub_stage: 'asset_usage',
+        code: 'required_visual_asset_missing',
+        message: '有 1 个必用视觉素材未进入最终画面，已停止导出。',
+        diagnostics: [
+          createDiagnostic({
+            code: 'required_visual_asset_missing',
+            stage: 'project',
+            sub_stage: 'asset_usage',
+            severity: 'error',
+            retryable: true,
+            repair_action: 'retry_frame_html',
+            user_message: '必用视觉素材未进入最终画面。',
+            details: { missing_required_asset_ids: ['gen_scene_02'] },
+          }),
+        ],
+      },
+    }),
+    project: project({
+      frames: [
+        { id: 'scene_01_b1', scene_id: 'scene_01', duration_sec: 4 },
+        { id: 'scene_02_b1', scene_id: 'scene_02', duration_sec: 4 },
+        { id: 'scene_02_b2', scene_id: 'scene_02', duration_sec: 4 },
+      ],
+    }),
+  });
+  assert.equal(missingAssetPlan.can_retry, true);
+  assert.equal(missingAssetPlan.code, 'required_visual_asset_missing');
+  assert.equal(missingAssetPlan.repair_action, 'retry_frame_html');
+  assert.equal(missingAssetPlan.retry_from, 'frame_html');
+  assert.equal(missingAssetPlan.executor_options.regenerate_frame_html, true);
+  assert.deepEqual(missingAssetPlan.executor_options.frame_ids, ['scene_02_b1', 'scene_02_b2']);
+  assert.ok(missingAssetPlan.discard.includes('frames:scene_02_b1'));
+  assert.ok(missingAssetPlan.discard.includes('frames:scene_02_b2'));
+  assert.ok(missingAssetPlan.reuse.includes('content_graph'));
+
   const workflowErrorFramePlan = createCreativeWorkflowRetryPlan({
     workflow: workflow({
       error: { code: 'provider_missing_text' },

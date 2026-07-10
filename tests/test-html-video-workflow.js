@@ -104,6 +104,7 @@ async function readProjectJson(projectDir) {
   templateRegistry.scanTemplates();
   assert.ok(templateRegistry.getTemplate('vertical'));
 
+  const auditedVisualQaCalls = [];
   const auditedRawResult = await workflow.generateHtmlVideo({
     workflowId: '202606170000000020_audit_raw',
     runId: 'run_audit_raw',
@@ -164,10 +165,18 @@ async function readProjectJson(projectDir) {
         },
         muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
       },
-      visualQaService: { inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }) },
+      visualQaService: {
+        inspectRenderedVideo: async input => {
+          auditedVisualQaCalls.push(input);
+          return { success: true, issues: [], metrics: {}, report_path: 'inspect/visual-report.json' };
+        },
+      },
     },
   });
   assert.equal(auditedRawResult.success, true);
+  assert.equal(auditedVisualQaCalls.length, 1);
+  assert.equal(auditedVisualQaCalls[0].safetyOnly, true);
+  assert.ok(auditedVisualQaCalls[0].project);
   const auditedRawProject = await readProjectJson(auditedRawResult.html_video_project_path);
   const auditedRawCalls = auditedRawProject.generation_checkpoint.model_calls;
   const contentGraphAudit = auditedRawCalls.find(call => call.agent === 'ContentGraphAgent' && call.stage === 'content_graph');
@@ -2356,6 +2365,199 @@ async function readProjectJson(projectDir) {
   assert.ok(visualQaWarning.html_video_diagnostics.some(item => item.code === 'visual_qa_warning'));
   assert.equal(visualQaWarning.project.generation_checkpoint.stages.visual_inspect.status, 'warning');
   assert.equal(visualQaWarning.project.generation_checkpoint.stages.visual_inspect.diagnostic_code, 'visual_qa_warning');
+
+  const missingRequiredAssetPath = path.join(rootDir, 'fixtures', 'generated-image-01.jpg');
+  await writeFile(missingRequiredAssetPath, 'image');
+  const missingRequiredAssetWarning = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000001_missing_asset_warning',
+    runId: 'run_missing_asset_warning',
+    rootDir,
+    sceneSpec: {
+      title: '必用素材未引用',
+      aspect_ratio: '9:16',
+      scenes: [
+        { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: fullSceneCaption('scene_01', '旁白一', 4), visual_text: { headline: '必用素材', keywords: [], cards: [] } },
+      ],
+    },
+    creativeContext: {
+      input: { raw_text: '必用素材未引用' },
+      asset_context: {
+        assets: [{
+          id: 'gen_scene_01',
+          source: 'generated',
+          path: 'assets/generated-image-01.jpg',
+          local_path: missingRequiredAssetPath,
+          frame_src: '../assets/generated-image-01.jpg',
+          generation: { scene_id: 'scene_01' },
+        }],
+      },
+    },
+    target: { html_video_generation_mode: 'template_inputs' },
+    templateRegistry,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          }
+          return { success: true, text: JSON.stringify({ headline: '必用素材' }) };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      frameRenderer: {
+        renderFrame: async (frame, options) => ({
+          success: true,
+          frame_id: frame.id,
+          output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+          diagnostics: [],
+        }),
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath, strategy: 'stub' };
+        },
+        concatAudioWithFfmpeg: async () => ({ success: true, skipped: true }),
+        muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+      },
+      visualQaService: {
+        inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+      },
+    },
+  });
+  assert.equal(missingRequiredAssetWarning.success, true);
+  assert.deepEqual(missingRequiredAssetWarning.project.asset_usage_report.missing_required_asset_ids, ['gen_scene_01']);
+  assert.ok(missingRequiredAssetWarning.html_video_diagnostics.some(item => item.code === 'required_visual_asset_missing'));
+
+  // asset_first 策略下，必用生成图没有进入最终画面必须失败（可重试），不能 warning 成功
+  const missingRequiredAssetBlocking = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000001_missing_asset_blocking',
+    runId: 'run_missing_asset_blocking',
+    rootDir,
+    sceneSpec: {
+      title: '必用素材未引用阻断',
+      aspect_ratio: '9:16',
+      scenes: [
+        { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: fullSceneCaption('scene_01', '旁白一', 4), visual_text: { headline: '必用素材', keywords: [], cards: [] } },
+      ],
+    },
+    creativeContext: {
+      input: { raw_text: '必用素材未引用阻断' },
+      visual_strategy: 'asset_first',
+      asset_context: {
+        assets: [{
+          id: 'gen_scene_01',
+          source: 'generated',
+          path: 'assets/generated-image-01.jpg',
+          local_path: missingRequiredAssetPath,
+          frame_src: '../assets/generated-image-01.jpg',
+          generation: { scene_id: 'scene_01' },
+        }],
+      },
+    },
+    target: { html_video_generation_mode: 'template_inputs' },
+    templateRegistry,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          }
+          return { success: true, text: JSON.stringify({ headline: '必用素材' }) };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      frameRenderer: {
+        renderFrame: async (frame, options) => ({
+          success: true,
+          frame_id: frame.id,
+          output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+          diagnostics: [],
+        }),
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath, strategy: 'stub' };
+        },
+        concatAudioWithFfmpeg: async () => ({ success: true, skipped: true }),
+        muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+      },
+      visualQaService: {
+        inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+      },
+    },
+  });
+  assert.equal(missingRequiredAssetBlocking.success, false, 'asset_first 必用素材缺失应失败');
+  const blockingAssetDiagnostic = missingRequiredAssetBlocking.html_video_diagnostics
+    .find(item => item.code === 'required_visual_asset_missing');
+  assert.ok(blockingAssetDiagnostic, '失败结果应包含 required_visual_asset_missing 诊断');
+  assert.equal(blockingAssetDiagnostic.retryable, true);
+  assert.equal(blockingAssetDiagnostic.repair_action, 'retry_frame_html');
+  assert.notEqual(blockingAssetDiagnostic.severity, 'warning');
+  assert.deepEqual(
+    missingRequiredAssetBlocking.project.asset_usage_report.missing_required_asset_ids,
+    ['gen_scene_01'],
+    '失败前应已保存 asset_usage_report 供前端展示',
+  );
+
+  const visualQaBlocking = await workflow.generateHtmlVideo({
+    workflowId: '202606170000000001_visual_blocking',
+    runId: 'run_visual_blocking',
+    rootDir,
+    sceneSpec: {
+      title: '开头白屏',
+      aspect_ratio: '9:16',
+      scenes: [
+        { id: 'scene_01', duration: 4, kind: 'text', narration_text: '旁白一', captions: fullSceneCaption('scene_01', '旁白一', 4), visual_text: { headline: '开头白屏', keywords: [], cards: [] } },
+      ],
+    },
+    creativeContext: { input: { raw_text: '开头白屏' } },
+    target: { html_video_generation_mode: 'template_inputs' },
+    templateRegistry,
+    services: {
+      aiTextModel: {
+        callTextModel: async ({ messages }) => {
+          const prompt = messages.map(item => item.content).join('\n');
+          if (prompt.includes('"template_id"')) {
+            return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
+          }
+          return { success: true, text: JSON.stringify({ headline: '开头白屏' }) };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      frameRenderer: {
+        renderFrame: async (frame, options) => ({
+          success: true,
+          frame_id: frame.id,
+          output_path: path.join(options.projectDir, 'frames', `${frame.id}.mp4`),
+          diagnostics: [],
+        }),
+      },
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          await writeFile(outputPath, 'mp4');
+          return { success: true, output_path: outputPath, strategy: 'stub' };
+        },
+        concatAudioWithFfmpeg: async () => ({ success: true, skipped: true }),
+        muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+      },
+      visualQaService: {
+        inspectRenderedVideo: async () => ({
+          success: false,
+          message: '检测到开头白屏。',
+          issues: [{ code: 'blank_opening_frame', message: '开头抽样帧接近空白。' }],
+          metrics: { opening_blank_count: 2 },
+        }),
+      },
+    },
+  });
+  assert.equal(visualQaBlocking.success, false);
+  assert.equal(visualQaBlocking.code, 'visual_qa_blocking_failure');
+  assert.ok(visualQaBlocking.html_video_diagnostics.some(item => item.code === 'visual_qa_warning' && item.severity === 'error'));
+  assert.equal(visualQaBlocking.project.generation_checkpoint.stages.visual_inspect.status, 'failed');
 
   const fallback = await workflow.generateHtmlVideo({
     workflowId: '202606170000000002',

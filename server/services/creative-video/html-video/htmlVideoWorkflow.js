@@ -2280,19 +2280,34 @@ async function generateHtmlVideo(options = {}) {
   });
   const missingRequiredAssets = missingRequiredAssetIds(rendered.project);
   if (missingRequiredAssets.length) {
+    // asset_first 是用户显式选择"素材必须进画面"，缺引用要阻断并触发帧重试；
+    // 其他策略维持 warning，避免历史任务批量翻车
+    const assetFirstBlocking = creativeContext?.visual_strategy === 'asset_first';
     diagnostics.push(createDiagnostic({
       code: 'required_visual_asset_missing',
       stage: 'project',
       sub_stage: 'asset_usage',
-      severity: 'warning',
+      severity: assetFirstBlocking ? 'error' : 'warning',
       retryable: true,
       repair_action: 'retry_frame_html',
-      user_message: `有 ${missingRequiredAssets.length} 个必用视觉素材未进入最终画面，已记录为质量警告。`,
+      user_message: assetFirstBlocking
+        ? `有 ${missingRequiredAssets.length} 个必用视觉素材未进入最终画面，已停止导出，可重试重新生成对应镜头。`
+        : `有 ${missingRequiredAssets.length} 个必用视觉素材未进入最终画面，已记录为质量警告。`,
       details: {
         missing_required_asset_ids: missingRequiredAssets,
         required_asset_ids: rendered.project.asset_usage_report?.required_asset_ids || [],
       },
     }));
+    if (assetFirstBlocking) {
+      rendered.project = await projectStore.saveProject(projectDir, rendered.project);
+      return failure(`有 ${missingRequiredAssets.length} 个必用视觉素材未进入最终画面，已停止导出。`, diagnostics, {
+        code: 'required_visual_asset_missing',
+        html_video_project_path: projectDir,
+        project_dir: projectDir,
+        project: rendered.project,
+        output_path: rendered.output_path,
+      });
+    }
   }
   if (blockingVisualIssues.length) {
     rendered.project = await projectStore.saveProject(projectDir, rendered.project);
