@@ -2365,9 +2365,9 @@ async function testMissingWorkflowReturnsChineseMessage() {
 }
 
 async function testGetWorkflowHydratesAssetUsageReportFromProject() {
-  const { rootDir } = createTempDirs();
+  const { rootDir, mediaRoot } = createTempDirs();
   const workflowId = WORKFLOW_ID;
-  const projectDir = path.join(rootDir, 'html-video-project');
+  const projectDir = path.join(mediaRoot, workflowId, 'agent_runs', 'html-video-project');
   fs.mkdirSync(path.join(projectDir, 'frames'), { recursive: true });
   fs.writeFileSync(
     path.join(projectDir, 'frames', '01.html'),
@@ -2406,6 +2406,7 @@ async function testGetWorkflowHydratesAssetUsageReportFromProject() {
 
   const fetched = await getCreativeWorkflow(workflowId, {
     rootDir,
+    mediaRoot,
     services: { now: () => NOW },
   });
   assert.equal(fetched.success, true);
@@ -2413,6 +2414,121 @@ async function testGetWorkflowHydratesAssetUsageReportFromProject() {
   assert.equal(fetched.data.result.hyperframes_freeform.project.asset_usage_report.used_asset_ids[0], 'article_01');
   const persisted = readJson(getWorkflowPath(workflowId, rootDir));
   assert.equal(persisted.asset_context.asset_usage_report.used_asset_ids[0], 'article_01');
+}
+
+async function testGetWorkflowHydratesGeneratedProjectAssets() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const workflowId = WORKFLOW_ID;
+  const projectDir = path.join(mediaRoot, workflowId, 'agent_runs', 'html-video-project-generated');
+  fs.mkdirSync(path.join(projectDir, 'frames'), { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, 'frames', '01.html'),
+    '<!doctype html><html><body><img src="../assets/generated-image-01.jpg"></body></html>',
+    'utf8',
+  );
+  fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({
+    workflow_id: workflowId,
+    frames: [{ id: 'scene_01', scene_id: 'scene_01', html_path: 'frames/01.html' }],
+    assets: [
+      { id: 'gen_scene_01', source: 'generated', path: 'assets/generated-image-01.jpg', generation: { scene_id: 'scene_01' } },
+      { id: 'search_01', source: 'search', path: 'assets/search-image-01.webp' },
+    ],
+  }, null, 2), 'utf8');
+  const assetContext = {
+    status: 'ready',
+    assets: [{ id: 'search_01', type: 'image', source: 'search', path: 'assets/search-image-01.webp' }],
+  };
+  fs.writeFileSync(getWorkflowPath(workflowId, rootDir), JSON.stringify({
+    success: true,
+    workflow_id: workflowId,
+    aweme_id: workflowId,
+    status: 'done',
+    message: 'done',
+    stages: [],
+    asset_context: assetContext,
+    creative_context: { asset_context: assetContext },
+    result: {
+      hyperframes_freeform: {
+        project: {
+          render_mode: 'html-video',
+          html_video_project_path: projectDir,
+          project_dir: projectDir,
+        },
+        render: { status: 'rendered', output_path: '' },
+      },
+    },
+  }, null, 2), 'utf8');
+
+  const fetched = await getCreativeWorkflow(workflowId, {
+    rootDir,
+    mediaRoot,
+    services: { now: () => NOW },
+  });
+  assert.equal(fetched.success, true);
+  assert.deepEqual(
+    fetched.data.asset_context.assets.map(asset => asset.id),
+    ['search_01', 'gen_scene_01'],
+  );
+  assert.equal(fetched.data.asset_context.assets.find(asset => asset.id === 'gen_scene_01').source, 'generated');
+  assert.equal(fetched.data.asset_context.asset_usage_report.used_asset_ids[0], 'gen_scene_01');
+  const persisted = readJson(getWorkflowPath(workflowId, rootDir));
+  assert.equal(persisted.creative_context.asset_context.assets.find(asset => asset.id === 'gen_scene_01').source, 'generated');
+}
+
+async function testGetWorkflowDoesNotHydrateProjectOutsideMediaRoot() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const workflowId = WORKFLOW_ID;
+  const projectDir = path.join(rootDir, 'outside-html-video-project');
+  fs.mkdirSync(path.join(projectDir, 'frames'), { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, 'frames', '01.html'),
+    '<!doctype html><html><body><img src="../assets/external.png"></body></html>',
+    'utf8',
+  );
+  fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({
+    workflow_id: workflowId,
+    frames: [{ id: 'scene_01', scene_id: 'scene_01', html_path: 'frames/01.html' }],
+    assets: [{
+      id: 'external_asset',
+      source: 'generated',
+      path: 'assets/external.png',
+      local_path: path.join(rootDir, 'secrets', 'external.png'),
+      generation: { scene_id: 'scene_01' },
+    }],
+  }, null, 2), 'utf8');
+  const assetContext = { status: 'ready', assets: [] };
+  fs.writeFileSync(getWorkflowPath(workflowId, rootDir), JSON.stringify({
+    success: true,
+    workflow_id: workflowId,
+    aweme_id: workflowId,
+    status: 'done',
+    message: 'done',
+    stages: [],
+    asset_context: assetContext,
+    creative_context: { asset_context: assetContext },
+    result: {
+      hyperframes_freeform: {
+        project: {
+          render_mode: 'html-video',
+          html_video_project_path: projectDir,
+          project_dir: projectDir,
+        },
+        render: { status: 'rendered', output_path: '' },
+      },
+    },
+  }, null, 2), 'utf8');
+
+  const fetched = await getCreativeWorkflow(workflowId, {
+    rootDir,
+    mediaRoot,
+    services: { now: () => NOW },
+  });
+  assert.equal(fetched.success, true);
+  assert.deepEqual(fetched.data.asset_context.assets, []);
+  assert.equal(fetched.data.asset_context.asset_usage_report, undefined);
+  const persisted = readJson(getWorkflowPath(workflowId, rootDir));
+  assert.deepEqual(persisted.asset_context.assets, []);
+  assert.equal(persisted.asset_context.asset_usage_report, undefined);
 }
 
 async function run() {
@@ -2459,6 +2575,8 @@ async function run() {
   await testCustomRootDoesNotUseDefaultRegistryActiveTask();
   await testMissingWorkflowReturnsChineseMessage();
   await testGetWorkflowHydratesAssetUsageReportFromProject();
+  await testGetWorkflowHydratesGeneratedProjectAssets();
+  await testGetWorkflowDoesNotHydrateProjectOutsideMediaRoot();
   console.log('creative workflow tests passed');
 }
 

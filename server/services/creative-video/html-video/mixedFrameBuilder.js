@@ -103,10 +103,13 @@ async function buildMixedFrameProject({
 
   if (visualBeats) {
     // 有视觉计划：帧按 beat 展开（帧数可能多于内容图节点数），
-    // 同场景的多个 raw beat 共享该场景 graph node 生成的同一份 HTML（本期已接受的行为）。
+    // raw_html beat 优先消费 beat 级 graph node，避免长场景拆分后重复同一份 HTML。
     const nodeIdByScene = new Map();
+    const nodeIdByBeat = new Map();
     for (const nodeId of orderedNodeIds) {
       const node = getNode(graph, nodeId) || {};
+      const nodeBeatId = String(node.beat_id || node.beatId || '').trim();
+      if (nodeBeatId && !nodeIdByBeat.has(nodeBeatId)) nodeIdByBeat.set(nodeBeatId, nodeId);
       const nodeSceneId = resolveNodeSceneId(node);
       if (nodeSceneId && !nodeIdByScene.has(nodeSceneId)) nodeIdByScene.set(nodeSceneId, nodeId);
     }
@@ -124,7 +127,7 @@ async function buildMixedFrameProject({
       const sceneId = String(beat.scene_id || '').trim();
       const scene = scenes.get(sceneId);
       if (!scene) throw new Error(`视觉 beat ${beat.id} 未匹配到 scene_spec 场景 ${sceneId || '未指定'}。`);
-      const nodeId = nodeIdByScene.get(sceneId);
+      const nodeId = nodeIdByBeat.get(beat.id) || nodeIdByScene.get(sceneId);
       const node = nodeId ? (getNode(graph, nodeId) || {}) : null;
       if (!nodeId || !node) throw new Error(`视觉 beat ${beat.id} 未匹配到场景 ${sceneId} 的内容图节点。`);
       const durationSec = positiveNumber(beat.duration_sec) || DEFAULT_FRAME_DURATION_SEC;
@@ -158,7 +161,7 @@ async function buildMixedFrameProject({
         generate_captions: includeCaptions,
         metadata: {
           frame_intent: node.kind || scene.kind || 'text',
-          visual_text: clone(scene.visual_text),
+          visual_text: clone(beat.visual_text || scene.visual_text),
           graph_node: clone({ ...node, durationSec }),
           visual_beat: stripBeatSourceScene(beat),
           scene_snapshot: {

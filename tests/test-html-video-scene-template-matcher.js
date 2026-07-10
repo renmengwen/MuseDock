@@ -48,6 +48,29 @@ function decision(scene) {
 
 {
   const d = decision({
+    id: 'explainer',
+    kind: 'text',
+    duration_sec: 6,
+    visual_text: { headline: '再讲 UE', keywords: ['交互', '流程', '反馈'], cards: ['操作路径', '入口清晰', '反馈及时'] },
+  });
+  assert.equal(d.source_mode, 'template_inputs');
+  assert.notEqual(d.template_id, 'frame-glitch-title');
+}
+
+{
+  const d = decision({
+    id: 'asset-bound',
+    kind: 'text',
+    duration_sec: 6,
+    visual_text: { headline: 'AI 主视觉' },
+    asset_refs: [{ asset_id: 'gen_scene_01', usage: 'showcase' }],
+  });
+  assert.equal(d.source_mode, 'raw_html');
+  assert.ok(d.reason.includes('视觉素材'));
+}
+
+{
+  const d = decision({
     id: 'freeform',
     kind: 'unknown',
     duration_sec: 5,

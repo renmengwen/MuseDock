@@ -1311,10 +1311,20 @@ async function runAssetFileRouteTest() {
   const workflowId = '202606121200000081';
   const assetDir = path.join(mediaRoot, workflowId, 'assets');
   const assetPath = path.join(assetDir, 'source-image-01.png');
+  const projectDir = path.join(mediaRoot, workflowId, 'agent_runs', 'run-1-html-video');
+  const generatedPath = path.join(projectDir, 'assets', 'generated-image-01.jpg');
   const outsidePath = path.join(rootDir, 'outside.png');
   fs.mkdirSync(assetDir, { recursive: true });
+  fs.mkdirSync(path.dirname(generatedPath), { recursive: true });
   fs.writeFileSync(assetPath, Buffer.from('local asset bytes'));
+  fs.writeFileSync(generatedPath, Buffer.from('generated asset bytes'));
   fs.writeFileSync(outsidePath, Buffer.from('outside bytes'));
+  fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({
+    workflow_id: workflowId,
+    assets: [
+      { id: 'gen_scene_01', source: 'generated', path: 'assets/generated-image-01.jpg' },
+    ],
+  }, null, 2), 'utf-8');
   fs.writeFileSync(workflows.getWorkflowPath(workflowId, rootDir), JSON.stringify({
     workflow_id: workflowId,
     asset_context: {
@@ -1322,6 +1332,15 @@ async function runAssetFileRouteTest() {
         { id: 'article_01', type: 'image', local_path: assetPath, path: 'assets/source-image-01.png' },
         { id: 'bad_01', type: 'image', local_path: outsidePath },
       ],
+    },
+    result: {
+      hyperframes_freeform: {
+        project: {
+          render_mode: 'html-video',
+          html_video_project_path: projectDir,
+          project_dir: projectDir,
+        },
+      },
     },
   }, null, 2), 'utf-8');
 
@@ -1336,6 +1355,10 @@ async function runAssetFileRouteTest() {
     const ok = await requestBuffer(server, 'GET', `/api/creative-workflows/${workflowId}/assets/article_01/file`);
     assert.strictEqual(ok.statusCode, 200);
     assert.strictEqual(ok.body.toString(), 'local asset bytes');
+
+    const generated = await requestBuffer(server, 'GET', `/api/creative-workflows/${workflowId}/assets/gen_scene_01/file`);
+    assert.strictEqual(generated.statusCode, 200);
+    assert.strictEqual(generated.body.toString(), 'generated asset bytes');
 
     const blocked = await requestJson(server, 'GET', `/api/creative-workflows/${workflowId}/assets/bad_01/file`);
     assert.strictEqual(blocked.statusCode, 404);

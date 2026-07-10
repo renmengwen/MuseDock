@@ -52,6 +52,22 @@ function inferIntent(scene = {}) {
   return 'definition';
 }
 
+function chunkForBeat(items, index, count) {
+  if (!Array.isArray(items) || count <= 1) return items;
+  const size = Math.max(1, Math.ceil(items.length / count));
+  const chunk = items.slice(index * size, (index + 1) * size);
+  return chunk.length ? chunk : items.slice(-1);
+}
+
+function visualTextForBeat(visualText = {}, index, count) {
+  if (!visualText || typeof visualText !== 'object' || Array.isArray(visualText)) return {};
+  return {
+    ...visualText,
+    keywords: chunkForBeat(visualText.keywords, index, count),
+    cards: chunkForBeat(visualText.cards, index, count),
+  };
+}
+
 function splitScene(scene = {}, startOrder = 1, sceneIndex = 0) {
   const sceneId = safeString(scene.id || scene.scene_id)
     || `scene_${String(sceneIndex + 1).padStart(2, '0')}`;
@@ -69,7 +85,8 @@ function splitScene(scene = {}, startOrder = 1, sceneIndex = 0) {
     intent: inferIntent(scene),
     kind: safeString(scene.kind) || 'text',
     narration_text: safeString(scene.narration_text),
-    visual_text: scene.visual_text || {},
+    visual_text: visualTextForBeat(scene.visual_text || {}, index, count),
+    asset_refs: Array.isArray(scene.asset_refs) ? scene.asset_refs : [],
     source_scene: scene,
   }));
 }

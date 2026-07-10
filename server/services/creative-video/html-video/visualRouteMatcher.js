@@ -15,6 +15,7 @@ function beatAsScene(beat = {}) {
     targetDurationSec: undefined,
     narration_text: beat.narration_text,
     visual_text: beat.visual_text,
+    asset_refs: beat.asset_refs,
   };
 }
 

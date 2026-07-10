@@ -7,6 +7,7 @@ const { mappedEngine } = require('./templateRegistry');
 const { validateTemplateInputs } = require('./templateInputAgent');
 const { validateHtmlCanvasContract } = require('./frameCanvasContract');
 const { validateSceneSpecTimelineConsistency } = require('./timelineConsistency');
+const { normalizeCaptionsForFrame } = require('./captionLayer');
 
 const SUPPORTED_ENGINES = new Set(['hyperframes', 'hyperframes-playwright']);
 
@@ -216,6 +217,25 @@ async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames 
   }
 }
 
+function validateNarrationCaptionSafety({ diagnostics, frames, mediaOptions = {} }) {
+  const captionsDisabledByMedia = mediaOptions.generateCaptions === false;
+  for (const frame of frames) {
+    const narration = String(frame?.narration_text || frame?.narrationText || '').trim();
+    if (!narration) continue;
+    if (captionsDisabledByMedia || frame.generate_captions === false || frame.generateCaptions === false) {
+      warningDiagnostic(diagnostics, 'caption_generation_disabled_for_narration', 'frame', '该镜头有旁白，但字幕生成已关闭。', {
+        frame_id: frame.id || frame.scene_id,
+      });
+      continue;
+    }
+    if (!normalizeCaptionsForFrame(frame).length) {
+      warningDiagnostic(diagnostics, 'caption_missing_for_narration', 'frame', '该镜头有旁白，但未能生成有效字幕层。', {
+        frame_id: frame.id || frame.scene_id,
+      });
+    }
+  }
+}
+
 async function validateHtmlVideoProject({
   project,
   projectDir,
@@ -265,6 +285,7 @@ async function validateHtmlVideoProject({
   });
 
   await validateRawHtmlFrames({ diagnostics, projectDir, project: input, frames });
+  validateNarrationCaptionSafety({ diagnostics, frames, mediaOptions });
 
   const schemaValidation = validateProject(input);
   for (const error of schemaValidation.errors || []) {

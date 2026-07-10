@@ -195,6 +195,100 @@ const qa = require('../server/services/creative-video/visualQaService');
     });
     assert.equal(report.success, false);
     assert.ok(report.issues.some(issue => issue.code === 'aspect_ratio_mismatch'));
+    assert.equal(report.report_path, 'inspect/visual-report.json');
+    await fs.access(path.join(projectDir, report.report_path));
+  }
+
+  {
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      expectedAspectRatio: '16:9',
+      services: {
+        probeVideo: async () => ({ width: 1920, height: 1080, duration: 4 }),
+        sampleFrames: async () => [
+          { id: 'frame_0', time_sec: 0, average_luma: 245, luma_stddev: 2, edge_score: 1, color_variance: 1, fingerprint: 'blank' },
+          { id: 'frame_1', time_sec: 0.5, average_luma: 246, luma_stddev: 2, edge_score: 1, color_variance: 1, fingerprint: 'blank_2' },
+          { id: 'frame_2', time_sec: 1, average_luma: 100, luma_stddev: 31, edge_score: 19, color_variance: 31, fingerprint: 'b' },
+          { id: 'frame_3', time_sec: 1.5, average_luma: 110, luma_stddev: 32, edge_score: 20, color_variance: 32, fingerprint: 'c' },
+          { id: 'frame_4', time_sec: 2, average_luma: 120, luma_stddev: 33, edge_score: 21, color_variance: 33, fingerprint: 'd' },
+          { id: 'frame_5', time_sec: 2.5, average_luma: 130, luma_stddev: 34, edge_score: 22, color_variance: 34, fingerprint: 'e' },
+          { id: 'frame_6', time_sec: 3, average_luma: 140, luma_stddev: 35, edge_score: 23, color_variance: 35, fingerprint: 'f' },
+          { id: 'frame_7', time_sec: 3.5, average_luma: 150, luma_stddev: 36, edge_score: 24, color_variance: 36, fingerprint: 'g' },
+          { id: 'frame_8', time_sec: 4, average_luma: 160, luma_stddev: 37, edge_score: 25, color_variance: 37, fingerprint: 'h' },
+          { id: 'frame_9', time_sec: 4.5, average_luma: 170, luma_stddev: 38, edge_score: 26, color_variance: 38, fingerprint: 'i' },
+        ],
+      },
+    });
+    assert.equal(report.success, false);
+    assert.ok(report.issues.some(issue => issue.code === 'blank_opening_frame'));
+    assert.ok(!report.issues.some(issue => issue.code === 'too_many_blank_frames'));
+  }
+
+  {
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      project: { frames: [{ id: 'a', duration_sec: 2 }, { id: 'b', duration_sec: 2 }] },
+      expectedAspectRatio: '16:9',
+      safetyOnly: true,
+      services: {
+        probeVideo: async () => ({ width: 1920, height: 1080, duration: 4 }),
+        sampleFrames: async () => [
+          { id: 'frame_0', time_sec: 0, average_luma: 90, luma_stddev: 30, edge_score: 18, color_variance: 30, fingerprint: 'a' },
+          { id: 'frame_1', time_sec: 0.5, average_luma: 100, luma_stddev: 31, edge_score: 19, color_variance: 31, fingerprint: 'b' },
+          { id: 'frame_2', time_sec: 1, average_luma: 110, luma_stddev: 32, edge_score: 20, color_variance: 32, fingerprint: 'c' },
+          { id: 'frame_3', time_sec: 2, average_luma: 250, luma_stddev: 2, edge_score: 1, color_variance: 1, fingerprint: 'd' },
+          { id: 'frame_4', time_sec: 2.5, average_luma: 251, luma_stddev: 2, edge_score: 1, color_variance: 1, fingerprint: 'e' },
+          { id: 'frame_5', time_sec: 3, average_luma: 120, luma_stddev: 35, edge_score: 20, color_variance: 35, fingerprint: 'f' },
+        ],
+      },
+    });
+    assert.equal(report.success, false);
+    assert.equal(report.safety_only, true);
+    assert.ok(report.issues.some(issue => issue.code === 'blank_segment_boundary'));
+  }
+
+  {
+    let rawvideoCalls = 0;
+    let frameLimit = 0;
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      project: {
+        frames: Array.from({ length: 100 }, (_, index) => ({ id: `f${index}`, duration_sec: 1 })),
+      },
+      expectedAspectRatio: '16:9',
+      safetyOnly: true,
+      runCommand: async (command, args) => {
+        if (args.includes('-show_entries')) {
+          return { ok: true, stdout: JSON.stringify({ streams: [{ width: 1920, height: 1080, duration: 180 }] }), stderr: '' };
+        }
+        if (args.includes('rawvideo')) {
+          rawvideoCalls += 1;
+          const frameArgIndex = args.indexOf('-frames:v');
+          frameLimit = Number(args[frameArgIndex + 1]);
+          const target = args[args.length - 1];
+          const raw = Buffer.alloc(160 * 90 * 3 * frameLimit);
+          const frameSize = 160 * 90 * 3;
+          for (let frame = 0; frame < frameLimit; frame += 1) {
+            const value = 80 + (frame % 80);
+            for (let i = frame * frameSize; i < (frame + 1) * frameSize; i += 3) {
+              raw[i] = value;
+              raw[i + 1] = (value + 50) % 255;
+              raw[i + 2] = (value + 100) % 255;
+            }
+          }
+          await fs.writeFile(target, raw);
+          return { ok: true, stdout: '', stderr: '' };
+        }
+        return { ok: true, stdout: '', stderr: '' };
+      },
+    });
+    assert.equal(report.success, true);
+    assert.equal(rawvideoCalls, 1);
+    assert.ok(frameLimit <= 120);
+    assert.equal(report.metrics.sampled_boundary_count, 39);
   }
 
   {

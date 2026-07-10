@@ -100,7 +100,7 @@ async function writeJson(filePath, data) {
 
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'creative-workflow-last-failure-'));
   const mediaRoot = path.join(rootDir, 'media');
-  const projectDir = path.join(rootDir, 'project');
+  const projectDir = path.join(mediaRoot, '202606250000000001', 'agent_runs', 'project');
   const checkpointProject = createEmptyProject({
     workflowId: '202606250000000001',
     runId: 'run-last-failure',
@@ -271,7 +271,7 @@ async function writeJson(filePath, data) {
   });
   const warningFirstRootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'creative-workflow-warning-first-'));
   const warningFirstMediaRoot = path.join(warningFirstRootDir, 'media');
-  const warningFirstProjectDir = path.join(warningFirstRootDir, 'project');
+  const warningFirstProjectDir = path.join(warningFirstMediaRoot, '202606250000000002', 'agent_runs', 'project');
   const warningFirstServices = {
     now: () => now,
     idFactory: () => '202606250000000002',

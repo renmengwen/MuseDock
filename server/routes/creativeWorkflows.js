@@ -721,7 +721,7 @@ router.get('/:workflow_id/assets/:asset_id/file', async (req, res) => {
     }
     const result = await service.getCreativeWorkflowAssetFile(workflowId, assetId);
     if (!result || result.success === false) {
-      const message = getMessage(result, '读取来源图片素材失败。');
+      const message = getMessage(result, '读取视觉素材失败。');
       return res.status(result?.code === 'ASSET_NOT_FOUND' ? 404 : getStatusCode(result)).json({ success: false, workflow_id: workflowId, asset_id: assetId, message });
     }
     return res.sendFile(result.file_path);
@@ -730,7 +730,7 @@ router.get('/:workflow_id/assets/:asset_id/file', async (req, res) => {
       success: false,
       workflow_id: workflowId,
       asset_id: assetId,
-      message: `读取来源图片素材失败：${error.message}`,
+      message: `读取视觉素材失败：${error.message}`,
     });
   }
 });

@@ -189,6 +189,30 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   assert.equal(pass.ok, true);
   assert.deepEqual(pass.diagnostics, []);
 
+  const captionFallbackPass = await validateHtmlVideoProject({
+    project: {
+      template_id: 'valid',
+      template_inputs: { headline: '标题' },
+      frames: [{ id: 'caption_fallback', template_id: 'valid', inputs: { headline: '帧标题' }, narration_text: '这句旁白会自动生成字幕。' }],
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(captionFallbackPass.ok, true);
+  assertLacksDiagnostic(captionFallbackPass, 'caption_missing_for_narration');
+
+  const captionDisabledWarning = await validateHtmlVideoProject({
+    project: {
+      template_id: 'valid',
+      template_inputs: { headline: '标题' },
+      frames: [{ id: 'caption_disabled', template_id: 'valid', inputs: { headline: '帧标题' }, narration_text: '有旁白但关闭字幕。', generate_captions: false }],
+    },
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(captionDisabledWarning.ok, true);
+  assertHasDiagnostic(captionDisabledWarning, 'caption_generation_disabled_for_narration');
+
   const emptySceneSpec = await validateHtmlVideoProject({
     projectDir: rootDir,
     project: timelineGateProject({

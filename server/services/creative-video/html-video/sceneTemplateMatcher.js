@@ -56,6 +56,53 @@ function numericCount(scene) {
   return sceneTextItems(scene).filter(item => /[$￥¥]?\d|%/.test(item)).length;
 }
 
+function listCount(value) {
+  return Array.isArray(value) ? value.filter(Boolean).length : 0;
+}
+
+function sceneInformationLoad(scene = {}) {
+  return {
+    cards: listCount(scene.visual_text?.cards),
+    keywords: listCount(scene.visual_text?.keywords),
+    assetRefs: listCount(scene.asset_refs),
+    kind: scene.kind || 'text',
+  };
+}
+
+function templateCapabilities(template = {}) {
+  const capabilities = template.capabilities && typeof template.capabilities === 'object'
+    ? template.capabilities
+    : {};
+  if (template.id === 'frame-glitch-title') {
+    return {
+      information_capacity: 'low',
+      accepts_image: false,
+      accepts_video: false,
+      ...capabilities,
+    };
+  }
+  return {
+    information_capacity: capabilities.information_capacity || 'medium',
+    accepts_image: capabilities.accepts_image === true,
+    accepts_video: capabilities.accepts_video === true,
+    ...capabilities,
+  };
+}
+
+function rejectsSceneLoad(template, scene) {
+  const load = sceneInformationLoad(scene);
+  const capabilities = templateCapabilities(template);
+  if (load.assetRefs > 0 && !capabilities.accepts_image && !capabilities.accepts_video) {
+    return '场景已绑定视觉素材，模板不支持图片或视频槽位';
+  }
+  if (template.id === 'frame-glitch-title') {
+    if (load.cards >= 2) return '标题模板无法承载多张信息卡片';
+    if (load.keywords >= 3) return '标题模板无法承载多个重点关键词';
+    if (['steps', 'comparison', 'data'].includes(load.kind)) return '标题模板不适合步骤、对比或数据场景';
+  }
+  return '';
+}
+
 function orderedCandidates(scene = {}) {
   const kind = scene.kind || 'text';
   const base = [...(KIND_TEMPLATE_CANDIDATES[kind] || [])];
@@ -89,6 +136,8 @@ function failDecision(sceneId, reason, details = {}) {
 
 function passCandidate({ template, scene, renderTarget, confidence }) {
   if (!template) return { ok: false, reason: '未找到候选模板' };
+  const loadRejection = rejectsSceneLoad(template, scene);
+  if (loadRejection) return { ok: false, reason: loadRejection };
   if (!supportsTemplateInputs(template)) return { ok: false, reason: '模板未接线变量' };
   if (!PARAMETERIZED_TEMPLATES.has(template.id)) return { ok: false, reason: '模板尚未参数化' };
   const compatibility = validateTemplateCompatibility(template, {
