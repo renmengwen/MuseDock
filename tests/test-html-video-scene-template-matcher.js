@@ -156,3 +156,41 @@ for (const d of matchScenesToTemplates({
 }
 
 console.log('html-video scene template matcher tests passed');
+
+// ===== 模块1：asset_first 能力字段 =====
+const { templateCapabilities, blocksAssetFirstFullFrame } = require('../server/services/creative-video/html-video/sceneTemplateMatcher');
+
+// 缺省能力：未声明的模板视为 full_frame、不兼容 asset_first
+{
+  const caps = templateCapabilities({ id: 'frame-build-minimal' });
+  assert.strictEqual(caps.render_role, 'full_frame');
+  assert.strictEqual(caps.asset_first_compatible, false);
+  assert.strictEqual(caps.overlay_safe, false);
+  assert.strictEqual(caps.caption_safe, 'unknown');
+}
+
+// 模板 manifest 显式声明可覆盖缺省
+{
+  const caps = templateCapabilities({
+    id: 'frame-anything',
+    capabilities: { render_role: 'overlay', asset_first_compatible: true, overlay_safe: true, caption_safe: true },
+  });
+  assert.strictEqual(caps.render_role, 'overlay');
+  assert.strictEqual(caps.asset_first_compatible, true);
+}
+
+// asset_first 阻断判断：full_frame 且不兼容 => 返回原因；兼容 => 空串
+assert.ok(blocksAssetFirstFullFrame({ id: 'frame-glitch-title' }).length > 0);
+assert.ok(blocksAssetFirstFullFrame({ id: 'frame-build-minimal' }).length > 0);
+assert.strictEqual(
+  blocksAssetFirstFullFrame({ id: 'frame-x', capabilities: { asset_first_compatible: true } }),
+  '',
+);
+
+// 硬约束 A 回归：hf_first 路径使用的旧字段语义完全不变
+{
+  const caps = templateCapabilities({ id: 'frame-glitch-title' });
+  assert.strictEqual(caps.information_capacity, 'low');
+  assert.strictEqual(caps.accepts_image, false);
+}
+console.log('scene-template-matcher asset_first capability tests passed');

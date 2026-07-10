@@ -69,12 +69,20 @@ function sceneInformationLoad(scene = {}) {
   };
 }
 
+const ASSET_FIRST_CAPABILITY_DEFAULTS = {
+  render_role: 'full_frame',
+  asset_first_compatible: false,
+  overlay_safe: false,
+  caption_safe: 'unknown',
+};
+
 function templateCapabilities(template = {}) {
   const capabilities = template.capabilities && typeof template.capabilities === 'object'
     ? template.capabilities
     : {};
   if (template.id === 'frame-glitch-title') {
     return {
+      ...ASSET_FIRST_CAPABILITY_DEFAULTS,
       information_capacity: 'low',
       accepts_image: false,
       accepts_video: false,
@@ -82,11 +90,21 @@ function templateCapabilities(template = {}) {
     };
   }
   return {
+    ...ASSET_FIRST_CAPABILITY_DEFAULTS,
     information_capacity: capabilities.information_capacity || 'medium',
     accepts_image: capabilities.accepts_image === true,
     accepts_video: capabilities.accepts_video === true,
     ...capabilities,
   };
+}
+
+function blocksAssetFirstFullFrame(template = {}) {
+  const caps = templateCapabilities(template);
+  if (caps.asset_first_compatible === true) return '';
+  if (caps.render_role === 'full_frame') {
+    return `asset_first 下禁止 full_frame 模板 ${template.id || '(unknown)'} 接管主画面`;
+  }
+  return '';
 }
 
 function rejectsSceneLoad(template, scene) {
@@ -209,4 +227,6 @@ module.exports = {
   orderedCandidates,
   passCandidate,
   getTemplate,
+  templateCapabilities,
+  blocksAssetFirstFullFrame,
 };
