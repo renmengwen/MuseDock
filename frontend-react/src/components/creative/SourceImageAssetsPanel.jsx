@@ -9,6 +9,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog.jsx';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx';
 import { cn } from '@/lib/utils.js';
 import { firstText } from './creativeDisplay.js';
 
@@ -57,6 +58,33 @@ function inferAssetSource(asset, assetId) {
 function sourceLabel(asset, assetId) {
   const key = inferAssetSource(asset, assetId);
   return SOURCE_LABEL_TEXT[key] || key || '视觉素材';
+}
+
+const ASSET_TAB_ORDER = ['real', 'generated', 'search', 'video'];
+
+const ASSET_TAB_LABEL_TEXT = {
+  real: '真实素材',
+  generated: 'AI生图',
+  search: '补图',
+  video: '视频',
+};
+
+function inferAssetTabKey(asset, assetId) {
+  const type = String(asset?.type || asset?.media_type || asset?.asset_type || '').trim().toLowerCase();
+  if (type === 'video') return 'video';
+  const source = inferAssetSource(asset, assetId).toLowerCase();
+  if (source === 'generated' || source === 'ai_generated') return 'generated';
+  if (source === 'search' || source === 'pexels') return 'search';
+  return 'real';
+}
+
+function groupAssetsByTab(assets) {
+  const groups = { real: [], generated: [], search: [], video: [] };
+  assets.forEach((asset, index) => {
+    const assetId = firstText(asset.id, asset.asset_id, `asset_${index + 1}`);
+    groups[inferAssetTabKey(asset, assetId)].push({ asset, assetId, index });
+  });
+  return groups;
 }
 
 function mergeVisualAssets(assets, usageAssets) {
@@ -110,12 +138,52 @@ function SourceImageThumbnail({ asset, assetId, workflowId, className }) {
   );
 }
 
+function SourceImageAssetCard({ asset, assetId, workflowId, usageById, sharedAnalysisMessage }) {
+  const analysis = asset.image_analysis || {};
+  const usage = usageById.get(assetId);
+  const usedInFrames = Array.isArray(usage?.used_in_frames) ? usage.used_in_frames.filter(Boolean) : [];
+  const used = usage?.used === true || usedInFrames.length > 0 || Number(usage?.usage_count || 0) > 0;
+  const status = analysis.status || '';
+  const title = firstText(asset.alt, asset.title, asset.name, asset.path, asset.url, assetId);
+  const metaLine = [analysis.visual_type, analysis.best_usage, analysis.fit]
+    .map(item => String(item || '').trim())
+    .filter(Boolean)
+    .join(' / ');
+
+  return (
+    <article className="grid grid-cols-[132px_minmax(0,1fr)] gap-3 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 max-[640px]:grid-cols-1">
+      <div className="aspect-[16/10] w-full overflow-hidden rounded-md border border-[#d9dde5] bg-white">
+        <SourceImageThumbnail asset={asset} assetId={assetId} workflowId={workflowId} />
+      </div>
+      <div className="min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <strong className="min-w-0 break-words text-[13px] leading-snug text-[#111827]">{title}</strong>
+          <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-[#5f6876] ring-1 ring-[#e1e5eb]">{sourceLabel(asset, assetId)}</span>
+          <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold ring-1', IMAGE_ANALYSIS_STATUS_CLASS[status] || IMAGE_ANALYSIS_STATUS_CLASS.default)}>
+            {formatImageAnalysisStatus(status)}
+          </span>
+          <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold ring-1', used ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-slate-100 text-slate-700 ring-slate-200')}>
+            {usage ? (used ? '已用于镜头' : '最终未引用') : '未生成引用报告'}
+          </span>
+        </div>
+        {analysis.summary ? <p className="mt-2 text-[13px] leading-relaxed text-[#30343b]">{analysis.summary}</p> : null}
+        {metaLine ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">类型/用途/适配：{metaLine}</p> : null}
+        {usedInFrames.length ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">引用镜头：{usedInFrames.join('、')}</p> : null}
+        {analysis.message && analysis.message !== sharedAnalysisMessage ? <p className="mt-1 text-xs leading-relaxed text-[#b45309]">分析说明：{analysis.message}</p> : null}
+      </div>
+    </article>
+  );
+}
+
 function SourceImageAssetsDialog({ assets, diagnostics, usageById, workflowId }) {
   const sharedAnalysisMessage = Array.from(new Set(assets
     .map(asset => firstText(asset.image_analysis?.message))
     .filter(Boolean))).length === 1
     ? firstText(assets[0]?.image_analysis?.message)
     : '';
+  const assetGroups = groupAssetsByTab(assets);
+  const visibleTabs = ASSET_TAB_ORDER.filter(key => assetGroups[key].length > 0);
+  const defaultTab = visibleTabs[0] || '';
 
   return (
     <DialogContent className="max-h-[86vh] w-[min(1080px,calc(100vw-32px))] max-w-[calc(100vw-32px)] overflow-auto sm:max-w-[1080px]">
@@ -131,45 +199,29 @@ function SourceImageAssetsDialog({ assets, diagnostics, usageById, workflowId })
       ) : null}
 
       {assets.length ? (
-        <div className="grid gap-3">
-          {assets.map((asset, index) => {
-            const assetId = firstText(asset.id, asset.asset_id, `asset_${index + 1}`);
-            const analysis = asset.image_analysis || {};
-            const usage = usageById.get(assetId);
-            const usedInFrames = Array.isArray(usage?.used_in_frames) ? usage.used_in_frames.filter(Boolean) : [];
-            const used = usage?.used === true || usedInFrames.length > 0 || Number(usage?.usage_count || 0) > 0;
-            const status = analysis.status || '';
-            const title = firstText(asset.alt, asset.title, asset.name, asset.path, asset.url, assetId);
-            const metaLine = [analysis.visual_type, analysis.best_usage, analysis.fit]
-              .map(item => String(item || '').trim())
-              .filter(Boolean)
-              .join(' / ');
-
-            return (
-              <article key={`${assetId}-${index}`} className="grid grid-cols-[132px_minmax(0,1fr)] gap-3 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 max-[640px]:grid-cols-1">
-                <div className="aspect-[16/10] w-full overflow-hidden rounded-md border border-[#d9dde5] bg-white">
-                  <SourceImageThumbnail asset={asset} assetId={assetId} workflowId={workflowId} />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <strong className="min-w-0 break-words text-[13px] leading-snug text-[#111827]">{title}</strong>
-                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-[#5f6876] ring-1 ring-[#e1e5eb]">{sourceLabel(asset, assetId)}</span>
-                    <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold ring-1', IMAGE_ANALYSIS_STATUS_CLASS[status] || IMAGE_ANALYSIS_STATUS_CLASS.default)}>
-                      {formatImageAnalysisStatus(status)}
-                    </span>
-                    <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold ring-1', used ? 'bg-green-50 text-green-700 ring-green-200' : 'bg-slate-100 text-slate-700 ring-slate-200')}>
-                      {usage ? (used ? '已用于镜头' : '最终未引用') : '未生成引用报告'}
-                    </span>
-                  </div>
-                  {analysis.summary ? <p className="mt-2 text-[13px] leading-relaxed text-[#30343b]">{analysis.summary}</p> : null}
-                  {metaLine ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">类型/用途/适配：{metaLine}</p> : null}
-                  {usedInFrames.length ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">引用镜头：{usedInFrames.join('、')}</p> : null}
-                  {analysis.message && analysis.message !== sharedAnalysisMessage ? <p className="mt-1 text-xs leading-relaxed text-[#b45309]">分析说明：{analysis.message}</p> : null}
-                </div>
-              </article>
-            );
-          })}
-        </div>
+        <Tabs defaultValue={defaultTab} className="gap-3">
+          <TabsList className="max-w-full flex-wrap">
+            {visibleTabs.map(key => (
+              <TabsTrigger key={key} value={key}>
+                {`${ASSET_TAB_LABEL_TEXT[key]} (${assetGroups[key].length})`}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {visibleTabs.map(key => (
+            <TabsContent key={key} value={key} className="grid gap-3">
+              {assetGroups[key].map(({ asset, assetId, index }) => (
+                <SourceImageAssetCard
+                  key={`${assetId}-${index}`}
+                  asset={asset}
+                  assetId={assetId}
+                  workflowId={workflowId}
+                  usageById={usageById}
+                  sharedAnalysisMessage={sharedAnalysisMessage}
+                />
+              ))}
+            </TabsContent>
+          ))}
+        </Tabs>
       ) : (
         <div className="rounded-lg border border-dashed border-[#d9dde5] bg-[#fafbfc] px-3 py-2 text-[13px] text-[#69717e]">暂无视觉素材。</div>
       )}
