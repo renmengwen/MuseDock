@@ -154,6 +154,7 @@ async function runFrameHtmlPhase(ctx) {
   } = ctx;
   let { project, contentGraph } = ctx;
 
+  const styleProfile = objectOrEmpty(project.visual_plan?.style_profile);
   const nodes = contentGraph.nodes || [];
   const scenes = new Map((Array.isArray(sceneSpec?.scenes) ? sceneSpec.scenes : []).map(scene => [scene.id, scene]));
   let visualStyleReferenceHtml = '';
@@ -204,6 +205,7 @@ async function runFrameHtmlPhase(ctx) {
       creativeContext,
       target: templateRenderTarget,
       template,
+      styleProfile,
       visualStyleReferenceHtml: styleReferenceHtml,
       previousFrameHtml: '',
     });
@@ -235,6 +237,7 @@ async function runFrameHtmlPhase(ctx) {
         creativeContext,
         target: templateRenderTarget,
         template,
+        styleProfile,
         visualStyleReferenceHtml: styleReferenceHtml,
         previousFrameHtml: '',
       });
@@ -311,6 +314,7 @@ async function runFrameHtmlPhase(ctx) {
           creativeContext,
           target: templateRenderTarget,
           template,
+          styleProfile,
           visualStyleReferenceHtml: styleReferenceHtml,
           previousFrameHtml: '',
           layoutFeedback: summarizeLayoutIssues(firstBlocking),

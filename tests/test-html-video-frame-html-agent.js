@@ -190,6 +190,27 @@ assert.match(continuityPrompt, /保持同一套调色板、字体、背景语言
 assert.match(continuityPrompt, /允许当前帧更换构图/);
 assert.match(continuityPrompt, /不要切换到新的蓝紫科技风|不要另起一套视觉主题/);
 
+const styleProfilePrompt = agent.buildFrameHtmlPrompt({
+  frameId: 'scene_01_b1',
+  graph: { nodes: [{ id: 'scene_01_b1', kind: 'text' }] },
+  node: { id: 'scene_01_b1', kind: 'text', label: '概念开场' },
+  index: 0,
+  total: 1,
+  sceneSpec: { scenes: [] },
+  creativeContext: {},
+  target: { aspect_ratio: '16:9' },
+  template: { id: 'frame-glitch-title', name: 'Glitch Title' },
+  styleProfile: {
+    id: 'clean_education',
+    palette: ['#F7F4EA', '#222222', '#2F80ED'],
+    layout_language: 'annotated_diagram',
+    motion_language: 'draw_reveal',
+  },
+});
+assert.match(styleProfilePrompt, /clean_education/);
+assert.match(styleProfilePrompt, /#2F80ED/);
+assert.doesNotMatch(styleProfilePrompt, /延续模板「Glitch Title」/);
+
 const templateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'frame-html-template-'));
 const templateSourcePath = path.join(templateDir, 'source.html');
 fs.writeFileSync(templateSourcePath, [
@@ -254,6 +275,15 @@ const retryPromptWithKeywords = agent.buildRetryPrompt({
 });
 assert.doesNotMatch(retryPromptWithKeywords, /价格说明的完整旁白原句/);
 assert.match(retryPromptWithKeywords, /基础版 12 元/);
+
+const styleProfileRetryPrompt = agent.buildRetryPrompt({
+  node: { id: 'scene_01' },
+  target: { resolution: { width: 1920, height: 1080 } },
+  template: { id: 'frame-glitch-title', name: 'Glitch Title' },
+  styleProfile: { id: 'clean_education' },
+});
+assert.match(styleProfileRetryPrompt, /style_profile「clean_education」/);
+assert.doesNotMatch(styleProfileRetryPrompt, /延续模板「Glitch Title」/);
 
 const fenced = agent.extractHtmlDocument([
   '说明',

@@ -144,6 +144,21 @@ function buildVisualContinuitySection({ visualStyleReferenceHtml = '', previousF
   ];
 }
 
+function buildStyleProfileSection(styleProfile = {}) {
+  if (!styleProfile || !styleProfile.id) return [];
+  return [
+    '',
+    'Task style profile（本任务视觉签名，不要复用失败模板的默认视觉）：',
+    JSON.stringify({
+      id: styleProfile.id,
+      family: styleProfile.family,
+      palette: styleProfile.palette,
+      layout_language: styleProfile.layout_language,
+      motion_language: styleProfile.motion_language,
+    }, null, 2),
+  ];
+}
+
 function frameAssetReferenceSummary(node = {}, creativeContext = {}) {
   const expected = resolveExpectedFrameAsset(node, creativeContext);
   if (!expected) return '';
@@ -297,6 +312,7 @@ function buildFrameHtmlPrompt({
   creativeContext = {},
   target = {},
   template = null,
+  styleProfile = null,
   visualStyleReferenceHtml = '',
   previousFrameHtml = '',
   layoutFeedback = '',
@@ -373,6 +389,7 @@ function buildFrameHtmlPrompt({
       '',
       'Template HTML：未能读取模板源码时，仍必须继承所选模板 metadata 描述的视觉方向和 motion vocabulary，不能退化为静态信息图。',
     ]),
+    ...buildStyleProfileSection(styleProfile),
     ...continuitySection,
     '',
     '---- 本次动态输入 ----',
@@ -729,6 +746,7 @@ function buildRetryPrompt(args = {}) {
     ? ''
     : compactText(args.node?.text || scene?.narration_text || '', 260);
   const templateName = compactText(args.template?.name || args.template?.id || '', 80);
+  const styleProfile = objectOrEmpty(args.styleProfile);
   const assetSummary = frameAssetReferenceSummary(args.node || {}, args.creativeContext || {});
   return [
     '上一次没有得到可用 HTML。只返回一个完整 HTML document，不要解释。',
@@ -741,7 +759,9 @@ function buildRetryPrompt(args = {}) {
     '画面文字必须是提炼后的关键词、要点短语或数据点；禁止照抄旁白或字幕原句，旁白全文由系统注入底部字幕层。',
     ...assetFirstFrameRequirements(args.creativeContext),
     assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
-    templateName ? `视觉风格参考：延续模板「${templateName}」的配色、字体、形状和动效；不要保留模板默认主体文案。` : '',
+    styleProfile?.id
+      ? `视觉风格参考：遵循本任务 style_profile「${styleProfile.id}」；不要复用模板默认主体文案。`
+      : (templateName ? `视觉风格参考：延续模板「${templateName}」的配色、字体、形状和动效；不要保留模板默认主体文案。` : ''),
     `必须包含 body data-hv-canvas data-width="${resolution.width}" data-height="${resolution.height}"。`,
     `meta viewport、html/body 必须使用 ${resolution.width}x${resolution.height}；不能使用 ${resolution.height}x${resolution.width}。`,
     '必须包含 CSS @keyframes/animation、GSAP timeline 或 window.__hvPlayAll 至少一种 animation timeline。',
