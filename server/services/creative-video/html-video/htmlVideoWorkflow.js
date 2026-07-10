@@ -441,8 +441,42 @@ function fanOutAssetFirstOverridesToBeats({ perSceneDecisions, visualPlan, visua
   return changed;
 }
 
-function contentGraphMatchesSceneSpec(graph = {}, sceneSpec = null) {
-  if (!sceneSpec) return true;
+/**
+ * 把已产出的生成图确定性地绑定到场景 asset_refs（返回克隆，不改入参）：
+ * 仅用于路由输入（模板匹配/视觉计划），不回写原始 sceneSpec，
+ * 以免影响 scene_spec_hash 的重试复用判定。绑定按 asset id 排序保证确定性。
+ */
+function bindGeneratedAssetsToSceneSpec(sceneSpec = {}, creativeContext = {}) {
+  const assets = Array.isArray(creativeContext?.asset_context?.assets)
+    ? creativeContext.asset_context.assets
+    : [];
+  const bySceneId = new Map();
+  for (const asset of assets) {
+    if (asset?.source !== 'generated') continue;
+    const sceneId = String(asset?.generation?.scene_id || '').trim();
+    const assetId = String(asset?.id || asset?.asset_id || '').trim();
+    if (!sceneId || !assetId) continue;
+    if (!bySceneId.has(sceneId)) bySceneId.set(sceneId, []);
+    bySceneId.get(sceneId).push(assetId);
+  }
+  if (!bySceneId.size || !Array.isArray(sceneSpec?.scenes)) return sceneSpec;
+  return {
+    ...sceneSpec,
+    scenes: sceneSpec.scenes.map(scene => {
+      const sceneId = String(scene?.id || scene?.scene_id || '').trim();
+      const assetIds = (bySceneId.get(sceneId) || []).slice().sort();
+      if (!assetIds.length) return scene;
+      const refs = Array.isArray(scene.asset_refs) ? [...scene.asset_refs] : [];
+      for (const assetId of assetIds) {
+        if (refs.some(ref => String(ref?.asset_id || ref?.id || '') === assetId)) continue;
+        refs.push({ asset_id: assetId, usage: 'subject', reason: 'AI 生图主视觉' });
+      }
+      return { ...scene, asset_refs: refs };
+    }),
+  };
+}
+
+function contentGraphMatchesSceneSpec(graph = {}, sceneSpec = null) {  if (!sceneSpec) return true;
   const direct = validateGraphMatchesSceneSpec(graph, sceneSpec);
   if (direct.ok) return true;
   const expected = (Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [])
@@ -1477,6 +1511,79 @@ async function generateHtmlVideo(options = {}) {
     }
     return target;
   };
+  // 生图/素材水合必须在模板匹配与 beat 路由之前完成，否则路由决策看不到生成图，
+  // 会把已有主视觉的场景误路由到不支持图片的 template_inputs 模板。
+  creativeContext = await materializeCreativeContextAssets(projectDir, creativeContext);
+  const existingProjectForGeneration = resumeProject || await loadExistingProject(projectDir);
+  if (generationMode === 'template_inputs') {
+    if (creativeContext?.visual_strategy === 'asset_first') {
+      diagnostics.push(createDiagnostic({
+        code: 'generated_image_unsupported_mode',
+        stage: 'project',
+        sub_stage: 'gen_images',
+        user_message: '当前为整片模板模式（template_inputs），不支持图片/视频优先的主视觉生成，已跳过。',
+        severity: 'warning',
+      }));
+    }
+  } else {
+    creativeContext = hydrateGeneratedAssetsFromProject({
+      project: existingProjectForGeneration,
+      creativeContext,
+      projectDir,
+    });
+    let skipGeneration = false;
+    let requiredSceneIds = [];
+    if (reuseContentGraphRequested) {
+      const reusedNodes = Array.isArray(existingProjectForGeneration?.content_graph?.nodes)
+        ? existingProjectForGeneration.content_graph.nodes
+        : [];
+      const referencedGeneratedIds = new Set(reusedNodes
+        .flatMap(node => (Array.isArray(node?.asset_refs) ? node.asset_refs : []))
+        .map(ref => String(ref?.asset_id || ''))
+        .filter(id => id.startsWith('gen_')));
+      const hydratedGeneratedIds = new Set((creativeContext.asset_context?.assets || [])
+        .filter(asset => asset?.source === 'generated')
+        .map(asset => asset.id));
+      requiredSceneIds = [...referencedGeneratedIds]
+        .filter(id => !hydratedGeneratedIds.has(id))
+        .map(id => id.replace(/^gen_/, ''));
+      skipGeneration = requiredSceneIds.length === 0;
+    }
+    const generatedImageResult = skipGeneration
+      ? { creativeContext, generated_count: 0, failures: [], diagnostics: [] }
+      : await runGeneratedImagePhase({
+        sceneSpec,
+        creativeContext,
+        projectDir,
+        aspectRatio: renderTarget.aspect_ratio || renderTarget.aspectRatio || '',
+        requiredSceneIds,
+        services: { ...services, aiTextModel: model },
+        onProgress,
+        now: new Date().toISOString(),
+      });
+    creativeContext = generatedImageResult.creativeContext;
+    if (generatedImageResult.diagnostics?.length) diagnostics.push(...generatedImageResult.diagnostics);
+    if (generatedImageResult.generated_count > 0) {
+      await projectStore.writeProjectJson(projectDir, current => {
+        const generatedAssets = (creativeContext.asset_context?.assets || [])
+          .filter(asset => asset?.source === 'generated')
+          .map(asset => ({
+            id: asset.id,
+            type: 'image',
+            path: asset.path,
+            source: asset.source,
+            url: asset.url || '',
+            alt: asset.alt || '',
+            attribution: null,
+            generation: asset.generation || null,
+          }));
+        const byId = new Map((current.assets || []).map(asset => [asset.id, asset]));
+        generatedAssets.forEach(asset => byId.set(asset.id, { ...(byId.get(asset.id) || {}), ...asset }));
+        current.assets = Array.from(byId.values()).filter(asset => asset.path);
+        return current;
+      });
+    }
+  }
   if (generationMode === 'per_scene') {
     if (!hasSceneSpecScenes(sceneSpec)) {
       return failure('缺少 scene_spec，无法逐场景匹配模板。', [
@@ -1497,12 +1604,14 @@ async function generateHtmlVideo(options = {}) {
       ? effectivePreferredTemplateId
       : (compactIndex[0]?.id || '');
     template = styleTemplateId ? registry.getTemplate(styleTemplateId) : {};
+    // 路由输入用绑定生成图后的克隆 spec；原始 sceneSpec 保持不变以稳定 scene_spec_hash
+    const routingSceneSpec = bindGeneratedAssetsToSceneSpec(sceneSpec, creativeContext);
     perSceneDecisions = matchScenesToTemplates({
-      scenes: sceneSpec.scenes,
+      scenes: routingSceneSpec.scenes,
       registry,
       renderTarget,
     });
-    visualPlan = buildVisualPlan({ sceneSpec, workflowId });
+    visualPlan = buildVisualPlan({ sceneSpec: routingSceneSpec, workflowId });
     visualDecisions = matchVisualBeatsToRenderers({ visualPlan, registry, renderTarget });
     renderDecisions = Array.from(visualDecisions.values());
     // 持久化版剥离 source_scene，防止 project.json 膨胀
@@ -1587,77 +1696,6 @@ async function generateHtmlVideo(options = {}) {
   });
 
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
-  creativeContext = await materializeCreativeContextAssets(projectDir, creativeContext);
-  const existingProjectForGeneration = resumeProject || await loadExistingProject(projectDir);
-  if (generationMode === 'template_inputs') {
-    if (creativeContext?.visual_strategy === 'asset_first') {
-      diagnostics.push(createDiagnostic({
-        code: 'generated_image_unsupported_mode',
-        stage: 'project',
-        sub_stage: 'gen_images',
-        user_message: '当前为整片模板模式（template_inputs），不支持图片/视频优先的主视觉生成，已跳过。',
-        severity: 'warning',
-      }));
-    }
-  } else {
-    creativeContext = hydrateGeneratedAssetsFromProject({
-      project: existingProjectForGeneration,
-      creativeContext,
-      projectDir,
-    });
-    let skipGeneration = false;
-    let requiredSceneIds = [];
-    if (reuseContentGraphRequested) {
-      const reusedNodes = Array.isArray(existingProjectForGeneration?.content_graph?.nodes)
-        ? existingProjectForGeneration.content_graph.nodes
-        : [];
-      const referencedGeneratedIds = new Set(reusedNodes
-        .flatMap(node => (Array.isArray(node?.asset_refs) ? node.asset_refs : []))
-        .map(ref => String(ref?.asset_id || ''))
-        .filter(id => id.startsWith('gen_')));
-      const hydratedGeneratedIds = new Set((creativeContext.asset_context?.assets || [])
-        .filter(asset => asset?.source === 'generated')
-        .map(asset => asset.id));
-      requiredSceneIds = [...referencedGeneratedIds]
-        .filter(id => !hydratedGeneratedIds.has(id))
-        .map(id => id.replace(/^gen_/, ''));
-      skipGeneration = requiredSceneIds.length === 0;
-    }
-    const generatedImageResult = skipGeneration
-      ? { creativeContext, generated_count: 0, failures: [], diagnostics: [] }
-      : await runGeneratedImagePhase({
-        sceneSpec,
-        creativeContext,
-        projectDir,
-        aspectRatio: renderTarget.aspect_ratio || renderTarget.aspectRatio || '',
-        requiredSceneIds,
-        services: { ...services, aiTextModel: model },
-        onProgress,
-        now: new Date().toISOString(),
-      });
-    creativeContext = generatedImageResult.creativeContext;
-    if (generatedImageResult.diagnostics?.length) diagnostics.push(...generatedImageResult.diagnostics);
-    if (generatedImageResult.generated_count > 0) {
-      await projectStore.writeProjectJson(projectDir, current => {
-        const generatedAssets = (creativeContext.asset_context?.assets || [])
-          .filter(asset => asset?.source === 'generated')
-          .map(asset => ({
-            id: asset.id,
-            type: 'image',
-            path: asset.path,
-            source: asset.source,
-            url: asset.url || '',
-            alt: asset.alt || '',
-            attribution: null,
-            generation: asset.generation || null,
-          }));
-        const byId = new Map((current.assets || []).map(asset => [asset.id, asset]));
-        generatedAssets.forEach(asset => byId.set(asset.id, { ...(byId.get(asset.id) || {}), ...asset }));
-        current.assets = Array.from(byId.values()).filter(asset => asset.path);
-        return current;
-      });
-    }
-  }
   if (generationMode === 'raw_html' && !hasSceneSpecScenes(sceneSpec)) {
     return failure('缺少 scene_spec，无法生成 raw_html 帧。', [
       ...diagnostics,
@@ -2414,4 +2452,5 @@ module.exports = {
   buildTemplateIndexOptions,
   reorderCompactIndex,
   expandContentGraphToVisualBeats,
+  bindGeneratedAssetsToSceneSpec,
 };

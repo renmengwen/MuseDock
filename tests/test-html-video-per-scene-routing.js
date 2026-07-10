@@ -347,6 +347,141 @@ const stubAiImageModel = { isConfigured: async () => false };
   assert.ok(savedProject.render_decisions.length >= savedProject.frames.length);
   assert.equal(savedProject.visual_route_summary.style_profile_id, savedProject.visual_plan.style_profile.id);
 
+  // 端到端：asset_first 下生图必须发生在路由之前——生成图要绑定进 beat 的 asset_refs，
+  // 且带素材的场景不再走不支持图片的 template_inputs 模板。
+  const assetFirstRootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-per-scene-asset-first-'));
+  const generatingImageModel = {
+    isConfigured: async () => true,
+    generateImages: async () => ({
+      success: true,
+      images: [{ url: 'mock://generated-image' }],
+      model_info: { model: 'mock-image-model' },
+    }),
+    downloadGeneratedImages: async ({ assetDir, startIndex }) => {
+      await fs.mkdir(assetDir, { recursive: true });
+      const fileName = `generated-${String(startIndex + 1).padStart(2, '0')}.png`;
+      const localPath = path.join(assetDir, fileName);
+      await fs.writeFile(localPath, Buffer.alloc(128, 7));
+      return {
+        success: true,
+        files: [{ file_name: fileName, local_path: localPath, url: 'mock://generated-image', mime: 'image/png', bytes: 128 }],
+        failures: [],
+      };
+    },
+  };
+  projectOrchestrator.renderHtmlVideoProject = async ({ project: renderProject, projectDir: renderProjectDir }) => ({
+    success: true,
+    message: 'mock render success',
+    project: renderProject,
+    project_dir: renderProjectDir,
+    html_video_project_path: renderProjectDir,
+    output_path: path.join(renderProjectDir, 'exports', 'output.mp4'),
+    diagnostics: [],
+  });
+  let assetFirstResult;
+  try {
+    assetFirstResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-per-scene-asset-first',
+      runId: 'run-per-scene-asset-first',
+      rootDir: assetFirstRootDir,
+      sceneSpec: workflowSceneSpec,
+      creativeContext: { input: { raw_text: '图片优先逐场景' }, visual_strategy: 'asset_first' },
+      target: { generateAudio: false, generateCaptions: false },
+      templateRegistry: registry,
+      skipValidation: true,
+      services: {
+        aiImageModel: generatingImageModel,
+        generatedImagePlanner: {
+          planGeneratedImages: async () => ({
+            success: true,
+            plans: [{ scene_id: 'scene_data', generation_prompt: '核心指标主视觉插画' }],
+          }),
+        },
+        aiTextModel: {
+          callTextModel: async request => {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: '图片优先逐场景',
+                  nodes: workflowSceneSpec.scenes.map(scene => ({
+                    id: scene.id,
+                    kind: scene.kind,
+                    label: scene.visual_text.headline,
+                    durationSec: scene.duration_sec,
+                    text: scene.narration_text,
+                  })),
+                  edges: workflowSceneSpec.scenes.slice(1).map((scene, index) => ({
+                    from: workflowSceneSpec.scenes[index].id,
+                    to: scene.id,
+                    kind: 'sequence',
+                  })),
+                }),
+              };
+            }
+            const frameId = request.audit?.frame_id || 'scene_free';
+            const imageTag = String(frameId).startsWith('scene_data')
+              ? '<img src="../assets/generated-01.png" alt="主视觉">'
+              : '';
+            return {
+              success: true,
+              text: `<!doctype html><html><body><main data-frame-id="${frameId}">${imageTag}<h1 data-text-key="headline">自由内容</h1><p data-text-key="subtitle">字幕</p><section data-text-key="body">正文</section></main></body></html>`,
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      },
+    });
+  } finally {
+    projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
+  }
+  assert.equal(assetFirstResult.success, true, JSON.stringify({
+    message: assetFirstResult.message,
+    diagnostics: assetFirstResult.html_video_diagnostics,
+  }, null, 2));
+  const assetFirstBeats = assetFirstResult.project.visual_plan.beats.filter(beat => beat.scene_id === 'scene_data');
+  assert.ok(assetFirstBeats.length >= 1);
+  assert.ok(
+    assetFirstBeats.every(beat => (beat.asset_refs || []).some(ref => ref.asset_id === 'gen_scene_data')),
+    `生成图应在路由前绑定进 scene_data 的 beat asset_refs：${JSON.stringify(assetFirstBeats, null, 2)}`,
+  );
+  const assetFirstDecisions = assetFirstResult.project.render_decisions.filter(item => item.scene_id === 'scene_data');
+  assert.ok(assetFirstDecisions.length >= 1);
+  assert.ok(
+    assetFirstDecisions.every(item => item.source_mode === 'raw_html'),
+    `带生成图的场景不应走 template_inputs：${JSON.stringify(assetFirstDecisions, null, 2)}`,
+  );
+
+  // 绑定 helper：不改入参（保证 scene_spec_hash 稳定）、结果确定性、不重复写入
+  {
+    const bindSpec = {
+      scenes: [
+        { id: 'scene_data', asset_refs: [{ asset_id: 'gen_scene_data', usage: 'subject' }] },
+        { id: 'scene_quote' },
+      ],
+    };
+    const bindContext = {
+      asset_context: {
+        assets: [
+          { id: 'gen_scene_quote', source: 'generated', generation: { scene_id: 'scene_quote' } },
+          { id: 'gen_scene_data', source: 'generated', generation: { scene_id: 'scene_data' } },
+        ],
+      },
+    };
+    const before = JSON.stringify(bindSpec);
+    const boundOnce = workflow.bindGeneratedAssetsToSceneSpec(bindSpec, bindContext);
+    const boundTwice = workflow.bindGeneratedAssetsToSceneSpec(bindSpec, bindContext);
+    assert.equal(JSON.stringify(bindSpec), before, '绑定不得修改原始 sceneSpec');
+    assert.deepEqual(boundOnce, boundTwice, '绑定结果必须确定性');
+    assert.equal(boundOnce.scenes[0].asset_refs.length, 1, '已有引用不重复写入');
+    assert.deepEqual(
+      boundOnce.scenes[1].asset_refs.map(ref => ref.asset_id),
+      ['gen_scene_quote'],
+      '生成图应绑定到对应场景',
+    );
+  }
+
   console.log('html-video per-scene routing tests passed');
 })().catch(error => {
   console.error(error);
