@@ -1,4 +1,45 @@
-const { orderedCandidates, passCandidate, getTemplate } = require('./sceneTemplateMatcher');
+const { orderedCandidates, passCandidate, getTemplate, blocksAssetFirstFullFrame } = require('./sceneTemplateMatcher');
+
+const DIAGRAM_KINDS = new Set(['text', 'quote', 'steps', 'comparison']);
+
+// 决策 3：asset_first 下 template_inputs 归零，兼容模板白名单不实现（见开放设计决策 1）。
+function assetFirstDecision(beat) {
+  const hasAsset = Array.isArray(beat.asset_refs) && beat.asset_refs.length > 0;
+  if (hasAsset) {
+    return {
+      beat_id: beat.id,
+      scene_id: beat.scene_id,
+      source_mode: 'raw_html',
+      route_role: 'asset_overlay',
+      template_id: null,
+      duration_strategy: 'raw_html',
+      confidence: 1,
+      template_blocked_reason: 'asset_first_prefers_visual_base',
+      reason: 'asset_first：素材做主视觉，HTML 仅做局部 overlay。',
+    };
+  }
+  return {
+    beat_id: beat.id,
+    scene_id: beat.scene_id,
+    source_mode: 'raw_html',
+    route_role: DIAGRAM_KINDS.has(beat.kind || 'text') ? 'diagram_motion' : 'caption_motion',
+    template_id: null,
+    duration_strategy: 'raw_html',
+    confidence: 0.9,
+    template_blocked_reason: 'asset_first_blocks_full_frame_templates',
+    reason: '无图场景按统一 diagram/局部动效生成，不回退整帧标题模板。',
+    diagnostic: {
+      code: 'asset_first_template_blocked',
+      user_message: 'asset_first 下已阻断整帧模板，使用统一 diagram。',
+      details: {
+        beat_id: beat.id,
+        scene_id: beat.scene_id,
+        blocked_candidates: ['frame-glitch-title', 'frame-build-minimal']
+          .map(id => `${id}: ${blocksAssetFirstFullFrame({ id })}`),
+      },
+    },
+  };
+}
 
 function beatAsScene(beat = {}) {
   return {
@@ -40,8 +81,15 @@ function failDecision(beat, reason, failures = []) {
 function matchVisualBeatsToRenderers({ visualPlan = {}, registry, renderTarget = {}, options = {} } = {}) {
   const decisions = new Map();
   const beats = Array.isArray(visualPlan.beats) ? visualPlan.beats : [];
+  const visualStrategy = options.visualStrategy
+    || (options.creativeContext && options.creativeContext.visual_strategy)
+    || null;
   for (const beat of beats) {
     if (!beat.id || decisions.has(beat.id)) continue;
+    if (visualStrategy === 'asset_first') {
+      decisions.set(beat.id, assetFirstDecision(beat));
+      continue;
+    }
     const scene = beatAsScene(beat);
     const candidates = orderedCandidates(scene);
     const failures = [];
