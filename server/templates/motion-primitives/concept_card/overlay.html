@@ -1,0 +1,15 @@
+<div data-mp-overlay="concept_card" data-mp-placement="right_panel"
+     style="position:absolute;right:48px;top:280px;width:420px;bottom:360px;pointer-events:none">
+  <style>
+    [data-mp-overlay="concept_card"] .mp-cc-card { border-radius:18px; padding:28px;
+      background:var(--mp-surface, rgba(18,16,14,.82)); color:var(--mp-foreground, #F4EFE7);
+      border-left:6px solid var(--mp-accent, #FF5A36); animation:mp-cc-in .55s ease-out both; }
+    [data-mp-overlay="concept_card"] .mp-cc-term { font-size:40px; font-weight:800; margin-bottom:12px; }
+    [data-mp-overlay="concept_card"] .mp-cc-def { font-size:28px; line-height:1.5; }
+    @keyframes mp-cc-in { from { transform:translateX(32px); opacity:0; } to { transform:none; opacity:1; } }
+  </style>
+  <div class="mp-cc-card">
+    <div class="mp-cc-term" data-mp-slot="term">术语</div>
+    <div class="mp-cc-def" data-mp-slot="definition">术语解释文本</div>
+  </div>
+</div>

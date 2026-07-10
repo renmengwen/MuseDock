@@ -1,0 +1,17 @@
+<div data-mp-overlay="stat_compare" data-mp-placement="lower_third"
+     style="position:absolute;left:48px;right:48px;bottom:220px;height:200px;pointer-events:none">
+  <style>
+    [data-mp-overlay="stat_compare"] .mp-sc { display:flex; gap:16px; }
+    [data-mp-overlay="stat_compare"] .mp-sc-side { flex:1; padding:20px; border-radius:14px; text-align:center;
+      background:var(--mp-surface, rgba(18,16,14,.82)); color:var(--mp-foreground, #F4EFE7);
+      animation:mp-sc-in .5s ease-out both; }
+    [data-mp-overlay="stat_compare"] .mp-sc-side:nth-child(2) { animation-delay:.25s; }
+    [data-mp-overlay="stat_compare"] .mp-sc-value { font-size:52px; font-weight:800; color:var(--mp-accent, #FF5A36); }
+    [data-mp-overlay="stat_compare"] .mp-sc-label { font-size:26px; margin-top:8px; }
+    @keyframes mp-sc-in { from { transform:translateY(20px); opacity:0; } to { transform:none; opacity:1; } }
+  </style>
+  <div class="mp-sc">
+    <div class="mp-sc-side"><div class="mp-sc-value" data-mp-slot="value_a">A</div><div class="mp-sc-label" data-mp-slot="label_a">对象 A</div></div>
+    <div class="mp-sc-side"><div class="mp-sc-value" data-mp-slot="value_b">B</div><div class="mp-sc-label" data-mp-slot="label_b">对象 B</div></div>
+  </div>
+</div>

@@ -1,0 +1,16 @@
+<div data-mp-overlay="key_marker" data-mp-placement="lower_third"
+     style="position:absolute;left:48px;right:48px;bottom:200px;height:200px;pointer-events:none">
+  <style>
+    [data-mp-overlay="key_marker"] .mp-km-bar { position:absolute; left:0; bottom:0; display:flex; align-items:center;
+      gap:16px; padding:20px 28px; border-radius:14px; background:var(--mp-surface, rgba(18,16,14,.82));
+      color:var(--mp-foreground, #F4EFE7); animation:mp-km-in .5s cubic-bezier(.2,.9,.3,1) both; }
+    [data-mp-overlay="key_marker"] .mp-km-kicker { font-size:26px; font-weight:700; padding:6px 14px; border-radius:8px;
+      background:var(--mp-accent, #FF5A36); color:#fff; }
+    [data-mp-overlay="key_marker"] .mp-km-point { font-size:34px; font-weight:600; line-height:1.3; }
+    @keyframes mp-km-in { from { transform:translateY(24px); opacity:0; } to { transform:none; opacity:1; } }
+  </style>
+  <div class="mp-km-bar">
+    <span class="mp-km-kicker" data-mp-slot="kicker">重点</span>
+    <span class="mp-km-point" data-mp-slot="point">重点内容文本</span>
+  </div>
+</div>

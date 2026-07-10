@@ -1,0 +1,20 @@
+<div data-mp-overlay="cause_chain" data-mp-placement="center_band"
+     style="position:absolute;left:48px;right:48px;top:760px;height:180px;pointer-events:none">
+  <style>
+    [data-mp-overlay="cause_chain"] .mp-cch { display:flex; align-items:center; gap:10px; }
+    [data-mp-overlay="cause_chain"] .mp-cch-node { flex:1; padding:16px; border-radius:12px; text-align:center;
+      background:var(--mp-surface, rgba(18,16,14,.82)); color:var(--mp-foreground, #F4EFE7);
+      font-size:26px; opacity:0; animation:mp-cch-in .4s ease-out forwards; }
+    [data-mp-overlay="cause_chain"] .mp-cch-node:nth-of-type(2) { animation-delay:.45s; }
+    [data-mp-overlay="cause_chain"] .mp-cch-node:nth-of-type(3) { animation-delay:.9s; }
+    [data-mp-overlay="cause_chain"] .mp-cch-arrow { color:var(--mp-accent, #FF5A36); font-size:34px; font-weight:800; }
+    @keyframes mp-cch-in { from { transform:scale(.92); opacity:0; } to { transform:none; opacity:1; } }
+  </style>
+  <div class="mp-cch">
+    <div class="mp-cch-node" data-mp-slot="cause">原因</div>
+    <div class="mp-cch-arrow">→</div>
+    <div class="mp-cch-node" data-mp-slot="mechanism">机制</div>
+    <div class="mp-cch-arrow">→</div>
+    <div class="mp-cch-node" data-mp-slot="result">结果</div>
+  </div>
+</div>

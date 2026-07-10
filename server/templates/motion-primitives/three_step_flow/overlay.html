@@ -1,0 +1,18 @@
+<div data-mp-overlay="three_step_flow" data-mp-placement="top_band"
+     style="position:absolute;left:48px;right:48px;top:220px;height:170px;pointer-events:none">
+  <style>
+    [data-mp-overlay="three_step_flow"] .mp-tsf { display:flex; gap:14px; }
+    [data-mp-overlay="three_step_flow"] .mp-tsf-step { flex:1; padding:18px; border-radius:12px;
+      background:var(--mp-surface, rgba(18,16,14,.82)); color:var(--mp-foreground, #F4EFE7);
+      font-size:26px; line-height:1.35; opacity:0; animation:mp-tsf-in .4s ease-out forwards; }
+    [data-mp-overlay="three_step_flow"] .mp-tsf-step:nth-child(2) { animation-delay:.35s; }
+    [data-mp-overlay="three_step_flow"] .mp-tsf-step:nth-child(3) { animation-delay:.7s; }
+    [data-mp-overlay="three_step_flow"] .mp-tsf-index { color:var(--mp-accent, #FF5A36); font-weight:800; margin-right:8px; }
+    @keyframes mp-tsf-in { from { transform:translateY(-16px); opacity:0; } to { transform:none; opacity:1; } }
+  </style>
+  <div class="mp-tsf">
+    <div class="mp-tsf-step"><span class="mp-tsf-index">1</span><span data-mp-slot="step_1">第一步</span></div>
+    <div class="mp-tsf-step"><span class="mp-tsf-index">2</span><span data-mp-slot="step_2">第二步</span></div>
+    <div class="mp-tsf-step"><span class="mp-tsf-index">3</span><span data-mp-slot="step_3">第三步</span></div>
+  </div>
+</div>
