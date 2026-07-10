@@ -13,7 +13,7 @@ const frameFallbackBuilder = require('./frameFallbackBuilder');
 const { runFrameHtmlPhase, isProviderMissingText } = require('./frameHtmlPhase');
 const { buildRawHtmlFrameProject } = require('./rawHtmlFrameBuilder');
 const { buildMixedFrameProject } = require('./mixedFrameBuilder');
-const { buildVisualPlan } = require('./visualPlanService');
+const { buildVisualPlan, assignMotionOrchestration } = require('./visualPlanService');
 const { matchVisualBeatsToRenderers } = require('./visualRouteMatcher');
 const {
   runGeneratedImagePhase,
@@ -1627,6 +1627,10 @@ async function generateHtmlVideo(options = {}) {
       renderTarget,
     });
     visualPlan = buildVisualPlan({ sceneSpec: routingSceneSpec, workflowId });
+    assignMotionOrchestration(visualPlan, {
+      visualStrategy: creativeContext?.visual_strategy || null,
+      styleProfile: visualPlan.style_profile || null,
+    });
     visualDecisions = matchVisualBeatsToRenderers({
       visualPlan,
       registry,

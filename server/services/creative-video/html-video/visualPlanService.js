@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { resolveSceneDurationSec } = require('./sceneTemplateMatcher');
+const { selectMotionPrimitive, CAPTION_SAFE_BOTTOM_PX } = require('./motionPrimitiveCatalog');
 
 const STYLE_PROFILES = [
   {
@@ -105,4 +106,84 @@ function buildVisualPlan({ sceneSpec = {}, workflowId = '' } = {}) {
   };
 }
 
-module.exports = { STYLE_PROFILES, buildVisualPlan, chooseStyleProfile, splitScene };
+function generatedAssetIdForBeat(beat = {}) {
+  const refs = Array.isArray(beat.asset_refs) ? beat.asset_refs : [];
+  const subject = refs.find(ref => ref && (ref.usage === 'subject' || ref.usage === 'evidence' || ref.usage === 'showcase'));
+  return (subject || refs[0] || {}).asset_id || null;
+}
+
+// 只增强 visual_plan 上的 beat；绝不写 scene_spec（scene_spec_hash 稳定）。
+const DEFAULT_THEME_TOKENS = {
+  accent: '#FF5A36',
+  foreground: '#F4EFE7',
+  surface: 'rgba(18,16,14,.82)',
+  background: '#12100E',
+};
+
+function resolveThemeTokens(styleProfile = null) {
+  const palette = styleProfile?.palette;
+  // 真实 STYLE_PROFILES.palette 是数组，索引语义 [background, foreground, accent]
+  if (Array.isArray(palette)) {
+    const [background, foreground, accent] = palette;
+    return {
+      accent: accent || DEFAULT_THEME_TOKENS.accent,
+      foreground: foreground || DEFAULT_THEME_TOKENS.foreground,
+      // surface = 背景色 + 85% 不透明度（6 位 hex 追加 alpha；非 hex 则退默认）
+      surface: /^#[0-9a-fA-F]{6}$/.test(String(background || '')) ? `${background}D9` : DEFAULT_THEME_TOKENS.surface,
+      background: background || DEFAULT_THEME_TOKENS.background,
+    };
+  }
+  if (palette && typeof palette === 'object') {
+    return {
+      accent: palette.accent || DEFAULT_THEME_TOKENS.accent,
+      foreground: palette.foreground || DEFAULT_THEME_TOKENS.foreground,
+      surface: palette.surface || DEFAULT_THEME_TOKENS.surface,
+      background: palette.background || DEFAULT_THEME_TOKENS.background,
+    };
+  }
+  return { ...DEFAULT_THEME_TOKENS };
+}
+
+function assignMotionOrchestration(visualPlan = {}, { visualStrategy = null, styleProfile = null } = {}) {
+  if (visualStrategy !== 'asset_first') return visualPlan; // hf_first 完全不动
+  const themeTokens = resolveThemeTokens(styleProfile);
+  const beats = Array.isArray(visualPlan.beats) ? visualPlan.beats : [];
+  const bySceneCount = new Map();
+  for (const beat of beats) {
+    bySceneCount.set(beat.scene_id, (bySceneCount.get(beat.scene_id) || 0) + 1);
+  }
+  const sceneIndex = new Map();
+  for (const beat of beats) {
+    const index = (sceneIndex.get(beat.scene_id) || 0) + 1;
+    sceneIndex.set(beat.scene_id, index);
+    const assetId = generatedAssetIdForBeat(beat);
+    beat.visual_base = assetId
+      ? { type: 'generated_image', asset_id: assetId, fit: 'contain', role: 'main_visual', continuity_group: beat.scene_id }
+      : { type: 'diagram', asset_id: null, fit: 'contain', role: 'main_visual', continuity_group: beat.scene_id };
+    const pick = selectMotionPrimitive(beat);
+    beat.motion_overlay = {
+      preset: pick.preset,
+      placement: pick.placement,
+      density: 'medium',
+      max_items: pick.max_items,
+      avoid_caption_bottom_px: CAPTION_SAFE_BOTTOM_PX,
+      theme_tokens: { ...themeTokens },
+    };
+    beat.continuity = {
+      group_id: beat.scene_id,
+      reuse_base_layout: true,
+      beat_index: index,
+      beat_count: bySceneCount.get(beat.scene_id) || 1,
+    };
+  }
+  return visualPlan;
+}
+
+module.exports = {
+  STYLE_PROFILES,
+  buildVisualPlan,
+  chooseStyleProfile,
+  splitScene,
+  resolveThemeTokens,
+  assignMotionOrchestration,
+};

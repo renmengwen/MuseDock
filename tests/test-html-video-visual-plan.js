@@ -126,4 +126,62 @@ assert.equal(noDurationPlan.beats[0].duration_sec, 6);
   );
 }
 
+// ===== 模块2：asset_first motion 编排字段 =====
+const { assignMotionOrchestration } = require('../server/services/creative-video/html-video/visualPlanService');
+
+{
+  const visualPlan = {
+    beats: [
+      { id: 'scene_02_b1', scene_id: 'scene_02', kind: 'text', duration_sec: 5.67,
+        asset_refs: [{ asset_id: 'gen_scene_02', usage: 'subject' }] },
+      { id: 'scene_02_b2', scene_id: 'scene_02', kind: 'text', duration_sec: 5.67,
+        asset_refs: [{ asset_id: 'gen_scene_02', usage: 'subject' }] },
+      { id: 'scene_04_b1', scene_id: 'scene_04', kind: 'text', duration_sec: 5.97, asset_refs: [] },
+    ],
+  };
+  // R5：用真实 buildVisualPlan 产出的 style_profile（palette 是数组，索引语义 [background, foreground, accent]）
+  const realPlan = buildVisualPlan({
+    sceneSpec: { title: 'UI/UE/UX', scenes: [{ id: 'scene_02', kind: 'text', duration_sec: 6, narration_text: 'x' }] },
+    workflowId: 'wf-test',
+  });
+  assignMotionOrchestration(visualPlan, {
+    visualStrategy: 'asset_first',
+    styleProfile: realPlan.style_profile,
+  });
+
+  const b1 = visualPlan.beats[0];
+  assert.strictEqual(b1.visual_base.type, 'generated_image');
+  assert.strictEqual(b1.visual_base.asset_id, 'gen_scene_02');
+  assert.strictEqual(b1.visual_base.continuity_group, 'scene_02');
+  assert.ok(b1.motion_overlay.preset, '每个 beat 必须有 motion_overlay.preset');
+  assert.strictEqual(b1.motion_overlay.avoid_caption_bottom_px, 140);
+  const [bg, fg, accent] = realPlan.style_profile.palette;
+  assert.strictEqual(b1.motion_overlay.theme_tokens.background, bg);
+  assert.strictEqual(b1.motion_overlay.theme_tokens.foreground, fg);
+  assert.strictEqual(b1.motion_overlay.theme_tokens.accent, accent);
+  assert.ok(typeof b1.motion_overlay.theme_tokens.surface === 'string' && b1.motion_overlay.theme_tokens.surface.length > 0);
+  assert.notStrictEqual(b1.motion_overlay.theme_tokens.accent, '#FF5A36', '真实 palette 不得被默认色覆盖（R5 回归）');
+  assert.deepStrictEqual(
+    { ...b1.continuity },
+    { group_id: 'scene_02', reuse_base_layout: true, beat_index: 1, beat_count: 2 },
+  );
+  assert.strictEqual(visualPlan.beats[1].continuity.beat_index, 2);
+
+  // 无图 beat：visual_base.type = diagram，不能留空
+  const b3 = visualPlan.beats[2];
+  assert.strictEqual(b3.visual_base.type, 'diagram');
+  assert.strictEqual(b3.visual_base.asset_id, null);
+  assert.ok(b3.motion_overlay.preset);
+}
+
+// 硬约束 A + B 回归：hf_first 不写任何新字段
+{
+  const visualPlan = { beats: [{ id: 's1_b1', scene_id: 's1', kind: 'text', duration_sec: 5 }] };
+  assignMotionOrchestration(visualPlan, { visualStrategy: 'hf_first' });
+  assert.strictEqual(visualPlan.beats[0].visual_base, undefined);
+  assert.strictEqual(visualPlan.beats[0].motion_overlay, undefined);
+  assert.strictEqual(visualPlan.beats[0].continuity, undefined);
+}
+console.log('visual plan motion orchestration tests passed');
+
 console.log('test-html-video-visual-plan passed');
