@@ -5,9 +5,14 @@ import fs from 'fs';
 // detail 只断言组合关系，面板能力断言针对面板源码
 const detail = fs.readFileSync('frontend-react/src/components/creative/CreativeTaskDetail.jsx', 'utf8');
 const panel = fs.readFileSync('frontend-react/src/components/creative/SourceImageAssetsPanel.jsx', 'utf8');
+const source = `${detail}\n${panel}`;
 
 assert.match(detail, /SourceImageAssetsPanel/);
 assert.match(detail, /<SourceImageAssetsPanel/);
+assert.match(source, /视觉路由/);
+assert.match(source, /模板帧/);
+assert.match(source, /自由 HTML/);
+assert.match(source, /风格/);
 
 assert.match(panel, /来源图片素材/);
 assert.match(panel, /image_analysis/);

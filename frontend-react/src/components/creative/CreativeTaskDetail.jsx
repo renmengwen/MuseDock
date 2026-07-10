@@ -27,6 +27,7 @@ export function CreativeTaskDetail({
 
   const videoUrl = getWorkflowVideoUrl?.(workflow) || '';
   const isDone = workflow?.status === 'done';
+  const visualRouteSummary = workflow?.result?.hyperframes_freeform?.project?.visual_route_summary;
 
   return (
     <div className={cn('grid w-full min-w-0 gap-6 px-1 pb-0 pt-1', workflow?.status === 'done' && videoUrl && 'min-h-[calc(100vh-176px)]')}>
@@ -42,6 +43,15 @@ export function CreativeTaskDetail({
         onStopAndDelete={onStopAndDelete}
         onContinueEdit={onContinueEdit}
       />
+      {visualRouteSummary ? (
+        <div className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">
+          <div className="font-medium text-slate-900">视觉路由</div>
+          <div className="mt-1">
+            模板帧 {visualRouteSummary.template_inputs || 0} / 自由 HTML {visualRouteSummary.raw_html || 0}
+            {visualRouteSummary.style_profile_id ? ` / 风格 ${visualRouteSummary.style_profile_id}` : ''}
+          </div>
+        </div>
+      ) : null}
       {!isDone ? (
         <>
           <CreativeWorkflowStepper workflow={workflow} />
