@@ -340,10 +340,12 @@ const stubAiImageModel = { isConfigured: async () => false };
 
   // 持久化校验：project.json 落盘后经 normalizeProject 仍保留两个新字段。
   const savedProject = JSON.parse(await fs.readFile(path.join(result.html_video_project_path, 'project.json'), 'utf8'));
+  assert.equal(savedProject.visual_plan.beats.length > savedProject.scene_spec.scenes.length, true);
   assert.ok(Array.isArray(savedProject.visual_plan.beats));
   assert.ok(savedProject.visual_plan.beats.every(beat => !('source_scene' in beat)));
   assert.ok(Array.isArray(savedProject.render_decisions));
   assert.ok(savedProject.render_decisions.length >= savedProject.frames.length);
+  assert.equal(savedProject.visual_route_summary.style_profile_id, savedProject.visual_plan.style_profile.id);
 
   console.log('html-video per-scene routing tests passed');
 })().catch(error => {

@@ -1153,6 +1153,19 @@ function normalizeFrameHtmlConcurrency(target = {}, projectOptions = {}) {
   return Math.min(5, Math.max(1, Math.round(number)));
 }
 
+function summarizeVisualRoute(project = {}) {
+  const frames = Array.isArray(project.frames) ? project.frames : [];
+  const decisions = Array.isArray(project.render_decisions) ? project.render_decisions : [];
+  const styleProfile = objectOrEmpty(project.visual_plan?.style_profile);
+  return {
+    total_beats: Array.isArray(project.visual_plan?.beats) ? project.visual_plan.beats.length : frames.length,
+    template_inputs: frames.filter(frame => frame.source_mode === 'template_inputs').length,
+    raw_html: frames.filter(frame => frame.source_mode === 'raw_html').length,
+    fallback: decisions.filter(decision => decision.fallback_from || decision.fallback_reason).length,
+    style_profile_id: styleProfile.id || '',
+  };
+}
+
 function resolveRegistry(input) {
   if (input) return input;
   return createTemplateRegistry({ rootDir: DEFAULT_ROOT_DIR });
@@ -1276,8 +1289,10 @@ async function generateHtmlVideo(options = {}) {
   // renderDecisions 在 asset-first 覆写扇出后会重算，这里始终读取最新值
   const attachVisualRouting = target => {
     if (generationMode === 'per_scene' && persistableVisualPlan && target) {
+      target.scene_spec = objectOrEmpty(sceneSpec);
       target.visual_plan = persistableVisualPlan;
       target.render_decisions = renderDecisions;
+      target.visual_route_summary = summarizeVisualRoute(target);
     }
     return target;
   };
