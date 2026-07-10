@@ -10,6 +10,9 @@ const {
   renderHtmlVideoFrames,
   composeHtmlVideoProject,
 } = require('../server/services/creative-video/html-video/projectOrchestrator');
+const {
+  validateSceneSpecTimelineConsistency,
+} = require('../server/services/creative-video/html-video/timelineConsistency');
 
 async function writeFile(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -353,6 +356,60 @@ async function createTemplate(rootDir, options = {}) {
   assert.equal(rawNoRegistryResult.project.frames[0].captions[0].text, 'raw 无 registry 旁白');
   const rawNoRegistryHtml = await fs.readFile(path.join(rawNoRegistryProjectDir, 'frames/01-raw.html'), 'utf8');
   assert.match(rawNoRegistryHtml, /raw 无 registry 旁白/);
+
+  const sharedRawBeatProjectDir = path.join(rootDir, 'shared-raw-beat-project');
+  await writeFile(
+    path.join(sharedRawBeatProjectDir, 'frames/shared.html'),
+    '<!doctype html><html><body><main>shared raw</main></body></html>',
+  );
+  const sharedRawBeatResult = await materializeProject({
+    projectDir: sharedRawBeatProjectDir,
+    project: normalizeProject({
+      project_id: 'project_shared_raw_beat',
+      frames: [
+        {
+          id: 'scene_long_b1',
+          scene_id: 'scene_long',
+          beat_id: 'scene_long_b1',
+          order: 1,
+          source_mode: 'raw_html',
+          html_path: 'frames/shared.html',
+          duration_sec: 3,
+          captions: [{ start: 0, end: 3, text: '第一段字幕' }],
+        },
+        {
+          id: 'scene_long_b2',
+          scene_id: 'scene_long',
+          beat_id: 'scene_long_b2',
+          order: 2,
+          source_mode: 'raw_html',
+          html_path: 'frames/shared.html',
+          duration_sec: 3,
+          captions: [{ start: 0, end: 3, text: '第二段字幕' }],
+        },
+      ],
+    }),
+  });
+  const [firstBeatFrame, secondBeatFrame] = sharedRawBeatResult.project.frames;
+  assert.notEqual(firstBeatFrame.html_path, secondBeatFrame.html_path);
+  const firstBeatHtml = await fs.readFile(path.join(sharedRawBeatProjectDir, firstBeatFrame.html_path), 'utf8');
+  const secondBeatHtml = await fs.readFile(path.join(sharedRawBeatProjectDir, secondBeatFrame.html_path), 'utf8');
+  assert.match(firstBeatHtml, /第一段字幕/);
+  assert.doesNotMatch(firstBeatHtml, /第二段字幕/);
+  assert.match(secondBeatHtml, /第二段字幕/);
+  assert.doesNotMatch(secondBeatHtml, /第一段字幕/);
+  const mixedBeatValidation = validateSceneSpecTimelineConsistency({
+    sceneSpec: { scenes: [{ id: 'scene_long', narration_text: '旁白' }] },
+    project: {
+      frames: [
+        { id: 'scene_long', scene_id: 'scene_long', duration_sec: 3, narration_text: '旁白' },
+        { id: 'scene_long_b2', scene_id: 'scene_long', beat_id: 'scene_long_b2', duration_sec: 3, narration_text: '旁白' },
+      ],
+    },
+    mediaOptions: { generateCaptions: false, generateAudio: false },
+  });
+  assert.equal(mixedBeatValidation.ok, false);
+  assert.ok(mixedBeatValidation.diagnostics.some(item => item.code === 'frame_scene_duplicate' && item.frame_id === 'scene_long'));
 
   const beatRenderProjectDir = path.join(rootDir, 'beat-render-project');
   await fs.mkdir(beatRenderProjectDir, { recursive: true });

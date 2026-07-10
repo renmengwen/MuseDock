@@ -188,7 +188,7 @@ function validateSceneSpecTimelineConsistency({ sceneSpec, project, audio, media
       const beatIds = new Set();
       group.entries.forEach(({ frame, index }, entryIndex) => {
         const beatId = frameBeatId(frame);
-        if ((!beatId && entryIndex > 0) || (beatId && beatIds.has(beatId))) {
+        if (!beatId || beatIds.has(beatId)) {
           add(diagnostics, 'frame_scene_duplicate', '画面帧重复绑定同一个字幕场景，无法继续渲染。', {
             frame_id: frame.id,
             scene_id: sceneId,

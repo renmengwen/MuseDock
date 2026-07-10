@@ -62,6 +62,10 @@ function frameOutputPath(frame, index) {
   return `frames/${String(index + 1).padStart(2, '0')}-${frameId}.html`;
 }
 
+function frameBeatId(frame = {}) {
+  return String(frame.beat_id || frame.beatId || '').trim();
+}
+
 function materializeTemplate(sourceHtml, vars, durationSec, sceneData = {}) {
   const replaced = sourceHtml.replace(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g, (match, key) => {
     if (!Object.prototype.hasOwnProperty.call(vars, key)) return '';
@@ -86,7 +90,7 @@ function recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame) {
   });
 }
 
-async function materializeFrame({ projectDir, project, frame, index, templateRegistry }) {
+async function materializeFrame({ projectDir, project, frame, index, templateRegistry, rawHtmlPathCounts }) {
   const diagnostics = [];
   if (frame.source_mode === 'raw_html') {
     if (!frame.html_path) {
@@ -97,10 +101,14 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
       });
       return diagnostics;
     }
-    const outputPath = resolveProjectPath(projectDir, frame.html_path);
+    const originalHtmlPath = toPosixPath(frame.html_path);
+    const sharedBeatRawHtml = frameBeatId(frame) && (rawHtmlPathCounts?.get(originalHtmlPath) || 0) > 1;
+    const relativePath = sharedBeatRawHtml ? frameOutputPath(frame, index) : originalHtmlPath;
+    const sourcePath = resolveProjectPath(projectDir, originalHtmlPath);
+    const outputPath = resolveProjectPath(projectDir, relativePath);
     try {
-      await fs.access(outputPath);
-      const html = await fs.readFile(outputPath, 'utf8');
+      await fs.access(sourcePath);
+      const html = await fs.readFile(sourcePath, 'utf8');
       const captions = normalizeCaptionsForFrame(frame);
       frame.captions = captions;
       const generateCaptions = frame.generate_captions !== false && frame.generateCaptions !== false;
@@ -109,15 +117,19 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
       }
       const nextHtml = ensureCaptionLayer(html, captions, { generateCaptions });
       if (nextHtml !== html) {
+        await fs.mkdir(path.dirname(outputPath), { recursive: true });
         await fs.writeFile(outputPath, nextHtml, 'utf8');
         diagnostics.push({
           code: 'raw_html_caption_injected',
           frame_id: frame.id,
-          html_path: toPosixPath(frame.html_path),
+          html_path: toPosixPath(relativePath),
           message: 'raw_html 帧已补充字幕层。',
         });
+      } else if (sharedBeatRawHtml && relativePath !== originalHtmlPath) {
+        await fs.mkdir(path.dirname(outputPath), { recursive: true });
+        await fs.writeFile(outputPath, html, 'utf8');
       }
-      frame.html_path = toPosixPath(frame.html_path);
+      frame.html_path = toPosixPath(relativePath);
       diagnostics.push({
         code: 'raw_html_preserved',
         frame_id: frame.id,
@@ -219,6 +231,12 @@ async function materializeProject({ projectDir, project, templateRegistry }) {
     throw new Error('缺少 templateRegistry。');
   }
   const diagnostics = [];
+  const rawHtmlPathCounts = new Map();
+  for (const frame of normalized.frames) {
+    if (frame.source_mode !== 'raw_html' || !frameBeatId(frame) || !frame.html_path) continue;
+    const htmlPath = toPosixPath(frame.html_path);
+    rawHtmlPathCounts.set(htmlPath, (rawHtmlPathCounts.get(htmlPath) || 0) + 1);
+  }
   for (let index = 0; index < normalized.frames.length; index += 1) {
     const frameDiagnostics = await materializeFrame({
       projectDir,
@@ -226,6 +244,7 @@ async function materializeProject({ projectDir, project, templateRegistry }) {
       frame: normalized.frames[index],
       index,
       templateRegistry,
+      rawHtmlPathCounts,
     });
     diagnostics.push(...frameDiagnostics);
   }
