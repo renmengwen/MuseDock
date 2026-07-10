@@ -102,6 +102,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     // 对应 html-video 源码段：等待 stylesheet、逐个 fonts.load、fonts.ready。
     report(ctx, 32, '正在加载字体和样式...');
     await waitForStylesAndFonts(page);
+    await waitForRenderReady(page, config);
 
     await page.waitForTimeout(100);
 
@@ -156,7 +157,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
   const ffmpegPath = deps.ffmpegPath || await resolveFfmpegPath(deps);
   const probeDeps = { ...deps, ffmpegPath };
   const inputDurationSec = await probeMediaDurationSec(webmPath, probeDeps);
-  const ffmpegArgs = buildFfmpegArgs({
+  const ffmpegBuild = buildFfmpegArgs({
     webmPath,
     outputPath: config.outputPath,
     fps: config.fps,
@@ -165,7 +166,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     leadInMs,
     inputDurationSec,
   });
-  const ffmpegResult = await runFfmpegCommand(ffmpegPath, ffmpegArgs, deps.runFfmpeg);
+  const ffmpegResult = await runFfmpegCommand(ffmpegPath, ffmpegBuild.args, deps.runFfmpeg);
   if (!ffmpegResult.ok) {
     throw createRenderError(
       'render-failed',
@@ -186,6 +187,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     output_path: config.outputPath,
     meta: {
       durationSec: totalDuration,
+      leadTrim: ffmpegBuild.seek,
       fileSizeBytes: stat.size,
       actualResolution: { width: config.width, height: config.height },
       fps: config.fps,
@@ -199,7 +201,20 @@ async function render(input = {}, ctx = {}, deps = {}) {
       stage: 'render',
       message: '已通过 Playwright/Chromium 录制并使用 ffmpeg libx264 编码。',
       fallback_allowed: false,
-    }],
+    },
+    ...(ffmpegBuild.seek.clamped || ffmpegBuild.seek.skipped ? [{
+      code: 'lead_in_trim_degraded',
+      stage: 'render',
+      severity: 'warning',
+      message: `录制前导裁剪不完整（请求 ${ffmpegBuild.seek.requested_sec}s，实际 ${ffmpegBuild.seek.applied_sec}s），画面开头可能残留空白帧。`,
+      details: {
+        lead_in_ms: leadInMs,
+        webm_duration_sec: inputDurationSec ?? null,
+        requested_seek_sec: ffmpegBuild.seek.requested_sec,
+        applied_seek_sec: ffmpegBuild.seek.applied_sec,
+      },
+      fallback_allowed: true,
+    }] : [])],
   };
 }
 
@@ -328,18 +343,47 @@ async function waitWithProgress(page, ctx, durationSec) {
   }
 }
 
+async function waitForRenderReady(page, config = {}) {
+  if (typeof page?.waitForFunction !== 'function') return;
+  await page.waitForFunction(({ width, height }) => new Promise(resolve => {
+    const ready = () => {
+      const body = document.body;
+      const root = document.querySelector('[data-hv-canvas], #root, main, body');
+      const rect = root?.getBoundingClientRect?.();
+      const fontsReady = !document.fonts || document.fonts.status !== 'loading';
+      return document.readyState !== 'loading'
+        && fontsReady
+        && body
+        && body.scrollWidth > 0
+        && body.scrollHeight > 0
+        && rect
+        && rect.width >= Math.min(64, width || 64)
+        && rect.height >= Math.min(64, height || 64);
+    };
+    const check = () => {
+      if (!ready()) {
+        requestAnimationFrame(check);
+        return;
+      }
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)));
+    };
+    check();
+  }), { width: config.width, height: config.height }, { timeout: 5000 }).catch(() => {});
+}
+
 function buildFfmpegArgs({ webmPath, outputPath, fps, duration, explicit, leadInMs, inputDurationSec }) {
-  const proposedSeekSec = leadInMs > 200 ? Math.max(0, (leadInMs - 120) / 1000) : 0;
+  const requestedSeekSec = leadInMs > 200 ? Math.max(0, (leadInMs - 120) / 1000) : 0;
   const outputDurationSec = Number(duration);
   const sourceDurationSec = Number(inputDurationSec);
-  const seekSafe = proposedSeekSec > 0
-    && Number.isFinite(outputDurationSec)
-    && outputDurationSec > 0
-    && Number.isFinite(sourceDurationSec)
-    && sourceDurationSec > 0
-    && proposedSeekSec + outputDurationSec <= sourceDurationSec - 0.1;
-  const seekSec = seekSafe ? proposedSeekSec : 0;
-  return [
+  let seekSec = 0;
+  if (requestedSeekSec > 0
+    && Number.isFinite(outputDurationSec) && outputDurationSec > 0
+    && Number.isFinite(sourceDurationSec) && sourceDurationSec > 0) {
+    // 裁掉录制前导白帧；webm 余量不足时钳制到最大安全 seek，而不是静默放弃
+    const maxSafeSeekSec = sourceDurationSec - outputDurationSec - 0.1;
+    seekSec = Math.max(0, Math.min(requestedSeekSec, maxSafeSeekSec));
+  }
+  const args = [
     '-y',
     ...(seekSec > 0 ? ['-ss', seekSec.toFixed(3)] : []),
     '-i', webmPath,
@@ -353,6 +397,15 @@ function buildFfmpegArgs({ webmPath, outputPath, fps, duration, explicit, leadIn
     '-movflags', '+faststart',
     outputPath,
   ];
+  return {
+    args,
+    seek: {
+      requested_sec: Number(requestedSeekSec.toFixed(3)),
+      applied_sec: Number(seekSec.toFixed(3)),
+      clamped: requestedSeekSec > 0 && seekSec > 0 && seekSec < requestedSeekSec,
+      skipped: requestedSeekSec > 0 && seekSec === 0,
+    },
+  };
 }
 
 async function probeMediaDurationSec(videoPath, deps = {}) {

@@ -16,7 +16,8 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     const outputPath = path.join(workDir, 'frame.mp4');
     await fsp.writeFile(sourcePath, '<html><body><h1>帧</h1></body></html>', 'utf8');
 
-    const unsafeSeekArgs = buildFfmpegArgs({
+    // webm 余量不足时不再静默放弃裁剪，而是钳制到最大安全 seek：10.6 - 2.56 - 0.1 = 7.94
+    const clampedSeek = buildFfmpegArgs({
       webmPath: path.join(workDir, 'capture.webm'),
       outputPath,
       fps: 24,
@@ -24,7 +25,21 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
       duration: 2.56,
       inputDurationSec: 10.6,
     });
-    assert.equal(unsafeSeekArgs.includes('-ss'), false, 'seek + duration 超过 webm 时长安全余量时不应生成 -ss');
+    assertIncludesPair(clampedSeek.args, '-ss', '7.940');
+    assert.equal(clampedSeek.seek.clamped, true, '余量不足时应标记 clamped');
+    assert.ok(clampedSeek.seek.requested_sec > clampedSeek.seek.applied_sec, 'clamp 后 applied 应小于 requested');
+
+    // webm 比目标时长还短：无法裁剪，seek 归零并标记 skipped
+    const skippedSeek = buildFfmpegArgs({
+      webmPath: path.join(workDir, 'capture.webm'),
+      outputPath,
+      fps: 24,
+      leadInMs: 19936,
+      duration: 2.56,
+      inputDurationSec: 2.0,
+    });
+    assert.equal(skippedSeek.args.includes('-ss'), false, 'webm 短于目标时长时不应生成 -ss');
+    assert.equal(skippedSeek.seek.skipped, true, '无法裁剪时应标记 skipped');
 
     const calls = {
       launches: [],
@@ -98,6 +113,11 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     );
     assert.equal(renderResult.diagnostics[0].code, 'frame_rendered');
     assert.match(renderResult.diagnostics[0].message, /Playwright\/Chromium/);
+    assert.equal(
+      renderResult.diagnostics.some(item => item.code === 'lead_in_trim_degraded'),
+      false,
+      '正常裁剪不应产生降级诊断',
+    );
 
     assert.equal(calls.launches.length, 1);
     assert.equal(calls.launches[0].headless, true);
