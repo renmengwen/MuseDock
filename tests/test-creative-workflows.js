@@ -64,6 +64,19 @@ function createFakeServices(overrides = {}) {
             project_dir: projectDir,
             html_video_project_path: projectDir,
             render_mode: 'html-video',
+            visual_plan: {
+              beats: [{ id: 'beat_1' }, { id: 'beat_2' }, { id: 'beat_3' }],
+              style_profile: { id: 'clean_education' },
+            },
+            frames: [
+              { id: 'frame_1', source_mode: 'template_inputs' },
+              { id: 'frame_2', source_mode: 'raw_html' },
+              { id: 'frame_3', source_mode: 'raw_html' },
+            ],
+            render_decisions: [
+              { frame_id: 'frame_2', fallback_from: 'template_inputs' },
+              { frame_id: 'frame_3', fallback_reason: 'missing_template' },
+            ],
           },
           render: { status: 'rendered' },
           visual_inspect: { status: 'passed' },
@@ -169,6 +182,13 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.equal(fetched.success, true);
   assert.equal(fetched.data.status, 'done');
   assert.equal(fetched.data.stages.find(stage => stage.id === 'render').status, 'done');
+  assert.deepEqual(fetched.data.result.hyperframes_freeform.project.visual_route_summary, {
+    total_beats: 3,
+    template_inputs: 1,
+    raw_html: 2,
+    fallback: 2,
+    style_profile_id: 'clean_education',
+  });
 }
 
 async function testCreatesAndRunsSourceUrlWorkflow() {

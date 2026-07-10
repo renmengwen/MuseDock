@@ -364,6 +364,19 @@ function normalizeStages(stages) {
   return createStages();
 }
 
+function summarizeVisualRoute(project = {}) {
+  const frames = Array.isArray(project.frames) ? project.frames : [];
+  const decisions = Array.isArray(project.render_decisions) ? project.render_decisions : [];
+  const styleProfile = project.visual_plan?.style_profile || {};
+  return {
+    total_beats: Array.isArray(project.visual_plan?.beats) ? project.visual_plan.beats.length : frames.length,
+    template_inputs: frames.filter(frame => frame.source_mode === 'template_inputs').length,
+    raw_html: frames.filter(frame => frame.source_mode === 'raw_html').length,
+    fallback: decisions.filter(decision => decision.fallback_from || decision.fallback_reason).length,
+    style_profile_id: styleProfile.id || '',
+  };
+}
+
 function updateStage(record, stageId, patch = {}) {
   record.stages = normalizeStages(record.stages);
   record.stages = record.stages.map(stage => (
@@ -1482,6 +1495,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
         project_dir: projectPathFromStageResult(result),
       });
     }
+    result.hyperframes_freeform.project.visual_route_summary = summarizeVisualRoute(result.hyperframes_freeform.project);
     return result;
   }, services, taskContext);
   stoppedOrFailed = failIfStoppedOrNull(projectStageResult);
@@ -1994,6 +2008,7 @@ function buildHtmlVideoLiteProjectStageResult({ project, projectDir, renderResul
         html_video_project_path: projectDir,
         project_dir: projectDir,
         ...(project?.asset_usage_report ? { asset_usage_report: project.asset_usage_report } : {}),
+        ...(project && typeof project === 'object' ? { visual_route_summary: summarizeVisualRoute(project) } : {}),
       },
       render: {
         status: 'rendered',
