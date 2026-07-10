@@ -235,14 +235,13 @@ async function runGeneratedImagePhase({
 
 function enforceAssetFirstRawHtmlRouting({ decisions, contentGraph, creativeContext } = {}) {
   if (!decisions) return decisions;
-  const isAssetFirst = creativeContext?.visual_strategy === 'asset_first';
   const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
-  const generatedIds = new Set(assets
-    .filter(asset => asset?.source === 'generated')
-    .map(asset => safeString(asset?.id))
-    .filter(Boolean));
-  if (!generatedIds.size && !isAssetFirst) return decisions;
+  const assetById = new Map(assets
+    .map(asset => [safeString(asset?.id || asset?.asset_id), asset])
+    .filter(([id]) => id));
+  if (!assetById.size) return decisions;
   const isMap = decisions instanceof Map;
+  const isAssetFirst = creativeContext?.visual_strategy === 'asset_first';
   const getDecision = id => (isMap ? decisions.get(id) : decisions[id]);
   const setDecision = (id, value) => {
     if (isMap) decisions.set(id, value);
@@ -250,13 +249,26 @@ function enforceAssetFirstRawHtmlRouting({ decisions, contentGraph, creativeCont
   };
   for (const node of (Array.isArray(contentGraph?.nodes) ? contentGraph.nodes : [])) {
     const refs = Array.isArray(node?.asset_refs) ? node.asset_refs : [];
-    const needsRawHtml = refs.some(ref => generatedIds.has(safeString(ref?.asset_id))
-      || (isAssetFirst && ref?.usage === 'subject'));
+    // asset_first 是用户显式要求素材必进画面，任何被引用素材都覆写；
+    // 其他策略只有"必用"素材（AI 生成主视觉或显式 subject 用途）才强制 raw_html，
+    // 装饰性/背景引用不覆写路由，保留 accepts_image 模板的 template_inputs 路径
+    const needsRawHtml = refs.some(ref => {
+      const asset = assetById.get(safeString(ref?.asset_id));
+      if (!asset) return false;
+      return isAssetFirst || asset.source === 'generated' || safeString(ref?.usage) === 'subject';
+    });
     if (!needsRawHtml) continue;
     const sceneId = safeString(resolveNodeSceneId(node));
     const decision = sceneId ? getDecision(sceneId) : null;
     if (decision?.source_mode === 'template_inputs') {
-      setDecision(sceneId, { ...decision, source_mode: 'raw_html', override_reason: 'asset_first_generated_subject' });
+      setDecision(sceneId, {
+        ...decision,
+        source_mode: 'raw_html',
+        template_id: null,
+        override_reason: 'required_asset_ref',
+        fallback_from: 'template_inputs',
+        fallback_reason: '该场景已选择视觉素材，模板变量路径无法保证素材进入画面，已改用自由 HTML。',
+      });
     }
   }
   return decisions;

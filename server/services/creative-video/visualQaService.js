@@ -24,6 +24,7 @@ const THRESHOLDS = {
   lowMotionChangedPixelRatio: 0.015,
   lowMotionRatio: 0.75,
 };
+const MAX_TIMED_SAMPLES = 120;
 
 function ratio(count, total) {
   return total > 0 ? count / total : 0;
@@ -128,13 +129,24 @@ function withAdditionalIssues(result, { videoInfo, expectedAspectRatio, frames }
   };
 }
 
-function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
-  const total = frames.length;
-  const isLowInformationFrame = frame => (
+function isLowInformationFrame(frame = {}) {
+  return (
     Number(frame.luma_stddev) < THRESHOLDS.lowInfoLumaStddev
     && Number(frame.edge_score) < THRESHOLDS.lowInfoEdgeScore
     && Number(frame.color_variance) < THRESHOLDS.lowInfoColorVariance
   );
+}
+
+function isBlankFrameMetric(frame = {}) {
+  return (
+    (Number(frame.average_luma) > THRESHOLDS.nearWhiteLuma
+      || Number(frame.average_luma) < THRESHOLDS.nearBlackLuma)
+    && isLowInformationFrame(frame)
+  );
+}
+
+function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
+  const total = frames.length;
   const nearWhite = frames.filter(frame => Number(frame.average_luma) > THRESHOLDS.nearWhiteLuma && isLowInformationFrame(frame)).length;
   const nearBlack = frames.filter(frame => Number(frame.average_luma) < THRESHOLDS.nearBlackLuma && isLowInformationFrame(frame)).length;
   const lowInformation = frames.filter(frame => (
@@ -180,7 +192,8 @@ function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
       value: metrics.blank_ratio,
     });
   }
-  if (Number(contact_sheet_size) < THRESHOLDS.contactSheetMinBytes) {
+  // contact_sheet_size 为 null 表示本次巡检没有真实接触表（注入采样/安全检查模式），跳过该项检查
+  if (contact_sheet_size != null && Number(contact_sheet_size) < THRESHOLDS.contactSheetMinBytes) {
     issues.push({
       code: 'contact_sheet_too_small',
       message: '接触表文件过小，可能没有有效画面。',
@@ -216,6 +229,163 @@ function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
   };
 }
 
+function projectBoundarySampleGroups(project = {}, duration = 0) {
+  const frames = Array.isArray(project?.frames) ? project.frames : [];
+  const groups = [];
+  let cursor = 0;
+  for (let index = 0; index < frames.length - 1; index += 1) {
+    const frameDuration = Number(frames[index]?.duration_sec || frames[index]?.durationSec);
+    if (!Number.isFinite(frameDuration) || frameDuration <= 0) continue;
+    cursor += frameDuration;
+    const times = [cursor, cursor + 0.5, cursor + 1.0]
+      .filter(time => time > 0 && (!Number.isFinite(duration) || duration <= 0 || time < duration));
+    if (times.length) groups.push({ boundary_sec: Math.round(cursor * 100) / 100, times });
+  }
+  return groups;
+}
+
+function uniqueTimes(values = []) {
+  const seen = new Set();
+  return values
+    .map(value => Math.round(Number(value) * 1000) / 1000)
+    .filter(value => Number.isFinite(value) && value >= 0)
+    .filter(value => {
+      const key = value.toFixed(3);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function buildTimedSamplePlan({ project = {}, videoInfo = {} } = {}) {
+  const opening = [0, 0.5, 1.0].filter(time => (
+    !Number.isFinite(videoInfo.duration) || !videoInfo.duration || time < videoInfo.duration
+  ));
+  const boundaryGroups = projectBoundarySampleGroups(project, videoInfo.duration);
+  const cappedBoundaryGroups = [];
+  let sampleCount = opening.length;
+  for (const group of boundaryGroups) {
+    if (sampleCount + group.times.length > MAX_TIMED_SAMPLES) break;
+    cappedBoundaryGroups.push(group);
+    sampleCount += group.times.length;
+  }
+  return {
+    opening,
+    boundaryGroups: cappedBoundaryGroups,
+    total_boundary_count: boundaryGroups.length,
+    sampled_boundary_count: cappedBoundaryGroups.length,
+    times: uniqueTimes([...opening, ...cappedBoundaryGroups.flatMap(group => group.times)]),
+  };
+}
+
+async function extractTimedFrameMetrics({ projectDir, workDir, videoPath, runCommand, times = [], fps = 30, width = 160, height = 90 }) {
+  const safeFps = Number.isFinite(fps) && fps > 0 ? fps : 30;
+  const selections = uniqueTimes(times)
+    .map(time => ({ time, frameIndex: Math.max(0, Math.round(time * safeFps)) }));
+  if (!selections.length) return [];
+  const byIndex = new Map();
+  for (const item of selections) {
+    if (!byIndex.has(item.frameIndex)) byIndex.set(item.frameIndex, item.time);
+  }
+  const ordered = [...byIndex.entries()].sort((left, right) => left[0] - right[0]);
+  const rawPath = path.join(workDir, 'timed-frames.rgb');
+  await fsp.mkdir(workDir, { recursive: true });
+  await fsp.rm(rawPath, { force: true });
+  const selectExpr = ordered.map(([index]) => `eq(n\\,${index})`).join('+');
+  const result = await runFfmpeg([
+    '-y',
+    '-i',
+    videoPath,
+    '-vf',
+    `select=${selectExpr},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
+    '-vsync',
+    '0',
+    '-frames:v',
+    String(ordered.length),
+    '-f',
+    'rawvideo',
+    '-pix_fmt',
+    'rgb24',
+    rawPath,
+  ], projectDir, runCommand);
+  if (!result.ok || !fs.existsSync(rawPath) || fs.statSync(rawPath).size < width * height * 3) return [];
+  const raw = await fsp.readFile(rawPath);
+  const frameSize = width * height * 3;
+  const frames = [];
+  for (let offset = 0, index = 0; offset + frameSize <= raw.length && index < ordered.length; offset += frameSize, index += 1) {
+    const time = ordered[index][1];
+    frames.push({
+      ...readRgbFrameMetrics(raw.subarray(offset, offset + frameSize), width, height, `time_${time}`),
+      time_sec: time,
+    });
+  }
+  return frames;
+}
+
+function closestFrameAt(frames, time, tolerance = 0.26) {
+  let best = null;
+  let bestDiff = Infinity;
+  for (const frame of frames) {
+    const diff = Math.abs(Number(frame.time_sec) - Number(time));
+    if (diff < bestDiff) {
+      best = frame;
+      bestDiff = diff;
+    }
+  }
+  return best && bestDiff <= tolerance ? best : null;
+}
+
+function analyzeTimedSafetyMetrics({ frames = [], opening = [], boundaryGroups = [] } = {}) {
+  const issues = [];
+  const openingBlank = opening
+    .map(time => closestFrameAt(frames, time))
+    .filter(Boolean)
+    .filter(isBlankFrameMetric);
+  if (openingBlank.length >= 2) {
+    issues.push({
+      code: 'blank_opening_frame',
+      message: '开头抽样帧接近空白，可能录入了页面加载白屏。',
+      times: openingBlank.map(frame => frame.time_sec),
+    });
+  }
+  for (const group of boundaryGroups) {
+    const blank = group.times
+      .map(time => closestFrameAt(frames, time))
+      .filter(Boolean)
+      .filter(isBlankFrameMetric);
+    if (blank.length >= 2) {
+      issues.push({
+        code: 'blank_segment_boundary',
+        message: `镜头边界 ${group.boundary_sec}s 附近出现连续空白帧。`,
+        boundary_sec: group.boundary_sec,
+        times: blank.map(frame => frame.time_sec),
+      });
+    }
+  }
+  return {
+    issues,
+    metrics: {
+      timed_sample_count: frames.length,
+      blank_timed_sample_count: frames.filter(isBlankFrameMetric).length,
+      sampled_boundary_count: boundaryGroups.length,
+    },
+  };
+}
+
+async function writeVisualReport(projectDir, report) {
+  if (!projectDir) return report;
+  const relativePath = 'inspect/visual-report.json';
+  const absolutePath = path.join(projectDir, relativePath);
+  try {
+    await fsp.mkdir(path.dirname(absolutePath), { recursive: true });
+    await fsp.writeFile(absolutePath, JSON.stringify(report, null, 2), 'utf8');
+  } catch (error) {
+    // 报告落盘失败不应把只读巡检变成整条工作流失败，降级为无 report_path
+    return { ...report, report_path: '', report_write_error: `视觉巡检报告写入失败：${error?.message || '未知错误'}` };
+  }
+  return { ...report, report_path: relativePath };
+}
+
 function getFfmpegCommand() {
   if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
   if (bundledFfmpegPath) return bundledFfmpegPath;
@@ -247,7 +417,7 @@ async function probeVideo({ videoPath, runCommand }) {
       '-select_streams',
       'v:0',
       '-show_entries',
-      'stream=width,height,duration',
+      'stream=width,height,duration,avg_frame_rate,r_frame_rate',
       '-of',
       'json',
       videoPath,
@@ -259,10 +429,20 @@ async function probeVideo({ videoPath, runCommand }) {
       width: Number(stream.width) || undefined,
       height: Number(stream.height) || undefined,
       duration: Number(stream.duration) || undefined,
+      fps: parseFps(stream.avg_frame_rate || stream.r_frame_rate),
     };
   } catch {
     return probeVideoWithFfmpeg({ videoPath, runCommand });
   }
+}
+
+function parseFps(value) {
+  const text = String(value || '').trim();
+  if (!text) return undefined;
+  const [left, right] = text.split('/').map(Number);
+  if (Number.isFinite(left) && Number.isFinite(right) && right > 0) return left / right;
+  const direct = Number(text);
+  return Number.isFinite(direct) && direct > 0 ? direct : undefined;
 }
 
 function parseFfmpegVideoInfo(text = '') {
@@ -270,6 +450,7 @@ function parseFfmpegVideoInfo(text = '') {
   const videoLine = source.split(/\r?\n/).find(line => /Video:/i.test(line)) || source;
   const dimensions = videoLine.match(/(?:^|[,\s])(\d{2,5})x(\d{2,5})(?:\s|,|\[|$)/);
   const durationMatch = source.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i);
+  const fpsMatch = source.match(/,\s*(\d+(?:\.\d+)?)\s*fps\b/i);
   const duration = durationMatch
     ? (Number(durationMatch[1]) * 3600) + (Number(durationMatch[2]) * 60) + Number(durationMatch[3])
     : undefined;
@@ -277,6 +458,7 @@ function parseFfmpegVideoInfo(text = '') {
     width: dimensions ? Number(dimensions[1]) : undefined,
     height: dimensions ? Number(dimensions[2]) : undefined,
     duration,
+    fps: fpsMatch ? Number(fpsMatch[1]) : undefined,
   };
 }
 
@@ -352,7 +534,7 @@ function measureRgbFrameMotion(previous, current, width, height) {
   };
 }
 
-async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand, width = 160, height = 90 }) {
+async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand, width = 160, height = 90, fps = 2, maxFrames = 24 }) {
   const rawPath = path.join(workDir, 'frames.rgb');
   await fsp.mkdir(workDir, { recursive: true });
   await fsp.rm(rawPath, { force: true });
@@ -361,9 +543,9 @@ async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runComma
     '-i',
     videoPath,
     '-vf',
-    `fps=2,scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
+    `fps=${fps},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
     '-frames:v',
-    '24',
+    String(maxFrames),
     '-f',
     'rawvideo',
     '-pix_fmt',
@@ -383,6 +565,7 @@ async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runComma
   for (let offset = 0, index = 0; offset + frameSize <= raw.length; offset += frameSize, index += 1) {
     const frameBuffer = raw.subarray(offset, offset + frameSize);
     const frame = readRgbFrameMetrics(frameBuffer, width, height, `frame_${index}`);
+    frame.time_sec = Math.round((index / fps) * 1000) / 1000;
     const motion = measureRgbFrameMotion(previousFrameBuffer, frameBuffer, width, height);
     if (motion) frame.motion_from_previous = motion;
     frames.push(frame);
@@ -412,9 +595,11 @@ async function createContactSheet({ projectDir, workDir, videoPath, runCommand }
 async function inspectRenderedVideo({
   projectDir,
   outputPath,
+  project = {},
   runCommand = defaultRunCommand,
   expectedAspectRatio = '',
   expected_aspect_ratio = '',
+  safetyOnly = false,
   services = {},
 } = {}) {
   const videoPath = outputPath || (projectDir ? path.join(projectDir, 'output.mp4') : '');
@@ -432,48 +617,93 @@ async function inspectRenderedVideo({
   const videoInfo = services.probeVideo
     ? await services.probeVideo({ projectDir, outputPath: videoPath, videoPath })
     : await probeVideo({ videoPath, runCommand });
+  const timedPlan = buildTimedSamplePlan({ project, videoInfo });
   if (services.sampleFrames) {
     const frames = await services.sampleFrames({ projectDir, outputPath: videoPath, videoPath, workDir });
-    const result = analyzeFrameMetrics({
+    const result = safetyOnly ? {
+      success: true,
+      issues: [],
+      metrics: { frame_count: frames.length, contact_sheet_size: null },
+      message: '视觉质检通过。',
+    } : analyzeFrameMetrics({
       frames,
-      contact_sheet_size: 45000,
+      contact_sheet_size: null,
     });
-    return withAdditionalIssues(result, {
+    const timed = analyzeTimedSafetyMetrics({ frames, ...timedPlan });
+    const finalResult = withAdditionalIssues({
+      ...result,
+      issues: [...(result.issues || []), ...timed.issues],
+      metrics: { ...(result.metrics || {}), ...timed.metrics },
+    }, {
       videoInfo,
       expectedAspectRatio: expectedAspectRatio || expected_aspect_ratio,
       frames,
     });
+    return writeVisualReport(projectDir, {
+      ...finalResult,
+      frames,
+      safety_only: safetyOnly,
+    });
   }
-  const contactSheet = await createContactSheet({ projectDir, workDir, videoPath, runCommand });
-  const extracted = await extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand });
+  const contactSheet = safetyOnly
+    ? { success: true, path: '', size: null, diagnostics: null }
+    : await createContactSheet({ projectDir, workDir, videoPath, runCommand });
+  const safetyFrames = safetyOnly
+    ? await extractTimedFrameMetrics({ projectDir, workDir, videoPath, runCommand, times: timedPlan.times, fps: videoInfo.fps })
+    : [];
+  const extracted = safetyOnly
+    ? {
+      success: timedPlan.times.length === 0 || safetyFrames.length > 0,
+      frames: safetyFrames,
+    }
+    : await extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand });
   if (!extracted.success) {
-    return {
+    return writeVisualReport(projectDir, {
       success: false,
       issues: [{ code: 'frame_extract_failed', message: '抽帧失败。' }],
       metrics: {},
       message: '视觉质检失败：抽帧失败。',
       diagnostics: extracted.diagnostics,
       contact_sheet_path: contactSheet.path,
-    };
+      safety_only: safetyOnly,
+    });
   }
-  const result = analyzeFrameMetrics({
+  const result = safetyOnly ? {
+    success: true,
+    issues: [],
+    metrics: { frame_count: extracted.frames.length, contact_sheet_size: contactSheet.size },
+    message: '视觉质检通过。',
+  } : analyzeFrameMetrics({
     frames: extracted.frames,
     contact_sheet_size: contactSheet.size,
   });
-  const finalResult = withAdditionalIssues(result, {
+  const timedFrames = safetyOnly
+    ? extracted.frames
+    : [
+      ...extracted.frames,
+      ...await extractTimedFrameMetrics({ projectDir, workDir, videoPath, runCommand, times: timedPlan.times, fps: videoInfo.fps }),
+    ];
+  const timed = analyzeTimedSafetyMetrics({ frames: timedFrames, ...timedPlan });
+  const finalResult = withAdditionalIssues({
+    ...result,
+    issues: [...(result.issues || []), ...timed.issues],
+    metrics: { ...(result.metrics || {}), ...timed.metrics },
+  }, {
     videoInfo,
     expectedAspectRatio: expectedAspectRatio || expected_aspect_ratio,
     frames: extracted.frames,
   });
-  return {
+  return writeVisualReport(projectDir, {
     ...finalResult,
     frames: extracted.frames,
     contact_sheet_path: contactSheet.path,
-  };
+    safety_only: safetyOnly,
+  });
 }
 
 module.exports = {
   analyzeFrameMetrics,
   inspectRenderedVideo,
   aspectFromDimensions,
+  isBlankFrameMetric,
 };

@@ -242,7 +242,11 @@ async function runFrameHtmlPhase(ctx) {
         previousFrameHtml: '',
       });
       if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
-        const failedHtmlPath = await writeFailedFrameHtml(projectDir, sceneId, htmlResult.failed_html || previousFailedHtml);
+        const failedHtmlPath = await writeFailedFrameHtml(
+          projectDir,
+          String(node.beat_id || node.beatId || node.id || sceneId || '').trim() || sceneId,
+          htmlResult.failed_html || previousFailedHtml,
+        );
         const warning = frameFallbackDiagnostic(node.id || sceneId, {
           ...(failedHtmlPath ? { failed_html_path: failedHtmlPath } : {}),
           diagnostics: [
@@ -360,10 +364,8 @@ async function runFrameHtmlPhase(ctx) {
   for (let index = 0; index < nodes.length; index += 1) {
     const node = nodes[index];
     const sceneId = resolveNodeSceneId(node) || node.id;
+    const frameKey = String(node.beat_id || node.beatId || node.id || sceneId || '').trim();
     const scene = scenes.get(sceneId);
-    // per_scene 模式下 workflow 传入的是 beat 决策按 scene 聚合后的结构：
-    // 仅当该场景全部 beat 都是 template_inputs 时 source_mode 才是 template_inputs（跳过场景 HTML 生成）；
-    // 任一 beat 是 raw_html（或缺决策）都会生成场景 HTML，供同场景 raw beat 共享
     const beatId = String(node.beat_id || node.beatId || '').trim();
     const routingDecision = templateRoutingDecisions instanceof Map
       ? (beatId ? templateRoutingDecisions.get(beatId) : null) || templateRoutingDecisions.get(sceneId)
@@ -375,7 +377,7 @@ async function runFrameHtmlPhase(ctx) {
       project = await projectStore.writeProjectJson(projectDir, current => {
         current.content_graph = contentGraph;
         markCheckpointStage(current, 'frame_html', { status: 'partial' });
-        markCheckpointFrame(current, 'frame_html', sceneId, {
+        markCheckpointFrame(current, 'frame_html', frameKey || sceneId, {
           status: 'skipped',
           diagnostic_code: '',
         });
@@ -398,7 +400,11 @@ async function runFrameHtmlPhase(ctx) {
       });
       continue;
     }
-    const checkpointFrame = objectOrEmpty(project.generation_checkpoint?.stages?.frame_html?.frames?.[sceneId]);
+    // 兼容旧版按 sceneId 键控的 checkpoint：beat 键 miss 时回退场景键（场景 HTML 由同场景 beat 共享）
+    const checkpointFrames = objectOrEmpty(project.generation_checkpoint?.stages?.frame_html?.frames);
+    const checkpointFrame = objectOrEmpty(
+      checkpointFrames[frameKey || sceneId] || checkpointFrames[sceneId] || checkpointFrames[node.id],
+    );
     const reuse = shouldReuseFrameHtml({
       projectDir,
       checkpointFrame,
@@ -481,8 +487,9 @@ async function runFrameHtmlPhase(ctx) {
 
   for (const frameResult of frameResults.sort((a, b) => a.index - b.index)) {
     const { index, node, sceneId, scene, htmlResult } = frameResult;
+    const frameKey = String(node.beat_id || node.beatId || node.id || sceneId || '').trim();
     if (!htmlResult.success) {
-      const failedHtmlPath = await writeFailedFrameHtml(projectDir, sceneId, htmlResult.failed_html);
+      const failedHtmlPath = await writeFailedFrameHtml(projectDir, frameKey || sceneId, htmlResult.failed_html);
       const explicitDiagnosticCode = firstExplicitDiagnosticCode(htmlResult.diagnostics);
       const diagnosticCode = explicitDiagnosticCode || (isProviderMissingText(htmlResult.message) ? 'provider_missing_text' : 'frame_html_invalid');
       let rawDiagnostics = diagnosticCode === 'provider_missing_text' && !explicitDiagnosticCode
@@ -512,9 +519,11 @@ async function runFrameHtmlPhase(ctx) {
       });
       const checkpointDiagnosticCode = normalizedFrameDiagnostics[0]?.code || diagnosticCode;
       project = await projectStore.writeProjectJson(projectDir, current => {
+        // 场景 HTML 变更需按 scene_id 扇出失效（覆盖旧版 scene 键与全部 beat 帧），再补 beat 键自身
         invalidateFrameHtmlDependents(current, sceneId);
+        if (frameKey && frameKey !== sceneId) invalidateFrameHtmlDependents(current, frameKey);
         markCheckpointStage(current, 'frame_html', { status: 'partial' });
-        markCheckpointFrame(current, 'frame_html', sceneId, {
+        markCheckpointFrame(current, 'frame_html', frameKey || sceneId, {
           status: 'failed',
           diagnostic_code: checkpointDiagnosticCode,
         });
@@ -547,7 +556,7 @@ async function runFrameHtmlPhase(ctx) {
     try {
       written = await projectStore.writeRawFrameHtml({
         projectDir,
-        sceneId,
+        sceneId: frameKey || sceneId,
         order: index + 1,
         html: htmlResult.html,
         captions,
@@ -555,9 +564,11 @@ async function runFrameHtmlPhase(ctx) {
       });
     } catch (error) {
       project = await projectStore.writeProjectJson(projectDir, current => {
+        // 场景 HTML 变更需按 scene_id 扇出失效（覆盖旧版 scene 键与全部 beat 帧），再补 beat 键自身
         invalidateFrameHtmlDependents(current, sceneId);
+        if (frameKey && frameKey !== sceneId) invalidateFrameHtmlDependents(current, frameKey);
         markCheckpointStage(current, 'frame_html', { status: 'partial' });
-        markCheckpointFrame(current, 'frame_html', sceneId, {
+        markCheckpointFrame(current, 'frame_html', frameKey || sceneId, {
           status: 'failed',
           diagnostic_code: 'frame_html_write_failed',
         });
@@ -589,10 +600,12 @@ async function runFrameHtmlPhase(ctx) {
       nodes,
     };
     project = await projectStore.writeProjectJson(projectDir, current => {
+      // 场景 HTML 变更需按 scene_id 扇出失效（覆盖旧版 scene 键与全部 beat 帧），再补 beat 键自身
       invalidateFrameHtmlDependents(current, sceneId);
+      if (frameKey && frameKey !== sceneId) invalidateFrameHtmlDependents(current, frameKey);
       current.content_graph = contentGraph;
       markCheckpointStage(current, 'frame_html', { status: 'partial' });
-      markCheckpointFrame(current, 'frame_html', sceneId, {
+      markCheckpointFrame(current, 'frame_html', frameKey || sceneId, {
         status: 'done',
         html_path: written.html_path,
         input_hash: sha256(htmlResult.html),

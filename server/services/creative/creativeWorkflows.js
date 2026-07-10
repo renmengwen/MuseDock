@@ -330,6 +330,11 @@ function isPathInside(child, parent) {
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
+function isPathSameOrInside(child, parent) {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return !relative || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 function createStages() {
   return STAGE_IDS.map(id => ({
       id,
@@ -566,7 +571,7 @@ function resolveServices(options = {}) {
   return resolved;
 }
 
-async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, mediaRoot, services, taskContext } = {}) {
+async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, mediaRoot, services, taskContext, plan } = {}) {
   const workflowId = safeString(workflow?.workflow_id || workflow?.id || project?.workflow_id);
   const runId = safeString(project?.run_id || project?.runId);
   if (!workflowId || !runId) {
@@ -588,6 +593,14 @@ async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, medi
     ...plainObject(project?.target),
     ...plainObject(workflow?.target),
   };
+  const executorOptions = plainObject(plan?.executor_options);
+  // 计划带定向 frame_ids 时，由 resumeExecutor 定向失效目标帧 checkpoint 驱动重生成；
+  // 不再全局禁用复用，避免把未受影响的帧一并重生成
+  const scopedFrameIds = Array.isArray(executorOptions.frame_ids)
+    ? executorOptions.frame_ids.filter(Boolean)
+    : [];
+  const regenerateFrameHtml = !scopedFrameIds.length
+    && (executorOptions.regenerate_frame_html === true || executorOptions.regenerateFrameHtml === true);
   const storedTemplateId = safeString(project?.template_id);
   const workflowService = services.htmlVideoWorkflow || htmlVideoWorkflow;
   return workflowService.generateHtmlVideo({
@@ -606,8 +619,10 @@ async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, medi
     preferredTemplateId: safeString(target.preferredTemplateId) || storedTemplateId || '',
     lockTemplate: target.lockTemplate === true || Boolean(storedTemplateId),
     reuseContentGraph: true,
+    regenerateFrameHtml,
     projectOptions: {
       reuseContentGraph: true,
+      regenerateFrameHtml,
     },
     services: {
       ...services,
@@ -1096,6 +1111,57 @@ function syncProjectStageSummariesFromCheckpoint(record, generationCheckpoint) {
   return record;
 }
 
+function assetKey(asset, fallback = '') {
+  return safeString(asset?.id || asset?.asset_id || fallback);
+}
+
+function normalizeProjectVisualAsset(asset, projectDir) {
+  if (!asset || typeof asset !== 'object' || Array.isArray(asset)) return null;
+  const id = assetKey(asset);
+  if (!id) return null;
+  const normalized = { ...asset, id };
+  const relativePath = safeString(asset.path);
+  if (relativePath && projectDir) {
+    try {
+      normalized.local_path = htmlVideoProjectStore.resolveProjectPath(projectDir, relativePath);
+      normalized.frame_src = safeString(asset.frame_src) || `../${relativePath.replace(/\\/g, '/')}`;
+    } catch {}
+  }
+  return normalized;
+}
+
+function mergeProjectVisualAssets(assetContext, project, projectDir) {
+  const context = plainObject(assetContext);
+  const assets = Array.isArray(context.assets) ? context.assets : [];
+  const seen = new Set(assets.map((asset, index) => assetKey(asset, `asset_${index + 1}`)).filter(Boolean));
+  const additions = [];
+  for (const asset of (Array.isArray(project?.assets) ? project.assets : [])) {
+    const normalized = normalizeProjectVisualAsset(asset, projectDir);
+    const id = assetKey(normalized);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    additions.push(normalized);
+  }
+  if (!additions.length) return context;
+  return {
+    ...context,
+    status: context.status || 'ready',
+    assets: [...assets, ...additions],
+  };
+}
+
+function applyProjectVisualAssetsToRecord(record, project, projectDir) {
+  if (!record || !Array.isArray(project?.assets) || !project.assets.length) return record;
+  record.asset_context = mergeProjectVisualAssets(record.asset_context, project, projectDir);
+  if (record.creative_context && typeof record.creative_context === 'object' && !Array.isArray(record.creative_context)) {
+    record.creative_context = {
+      ...record.creative_context,
+      asset_context: mergeProjectVisualAssets(record.creative_context.asset_context, project, projectDir),
+    };
+  }
+  return record;
+}
+
 function applyAssetUsageReportToRecord(record, assetUsageReport) {
   if (!record || !assetUsageReport || !Array.isArray(assetUsageReport.assets)) return record;
   if (record.asset_context && typeof record.asset_context === 'object' && !Array.isArray(record.asset_context)) {
@@ -1124,7 +1190,9 @@ function applyAssetUsageReportToRecord(record, assetUsageReport) {
 
 function buildProjectAssetUsageReport(project, projectDir, record) {
   if (!project || typeof project !== 'object' || Array.isArray(project)) return null;
-  if (project?.asset_usage_report && Array.isArray(project.asset_usage_report.assets)) {
+  if (project?.asset_usage_report
+    && Array.isArray(project.asset_usage_report.assets)
+    && Array.isArray(project.asset_usage_report.required_asset_ids)) {
     return project.asset_usage_report;
   }
   if (htmlVideoWorkflow && typeof htmlVideoWorkflow.buildAssetUsageReport === 'function') {
@@ -1137,14 +1205,33 @@ function buildProjectAssetUsageReport(project, projectDir, record) {
   return null;
 }
 
-async function syncProjectStageSummariesFromProjectDir(record, projectDir) {
+async function resolveTrustedHtmlVideoProjectDir(record, projectDir, options = {}) {
+  const resolvedProjectDir = safeString(projectDir);
+  const workflowId = safeString(record?.workflow_id || record?.aweme_id);
+  if (!resolvedProjectDir || !workflowId) return '';
+  const realProjectDir = await fsp.realpath(resolvedProjectDir).catch(() => '');
+  if (!realProjectDir) return '';
+  const mediaRoot = safeString(options.mediaRoot || DEFAULT_MEDIA_ROOT);
+  const allowedRoots = [];
+  if (mediaRoot) {
+    const workflowDir = path.resolve(mediaRoot, workflowId);
+    const realWorkflowDir = await fsp.realpath(workflowDir).catch(() => '');
+    if (realWorkflowDir) allowedRoots.push(realWorkflowDir);
+  }
+  return allowedRoots.some(root => isPathSameOrInside(realProjectDir, root)) ? realProjectDir : '';
+}
+
+async function syncProjectStageSummariesFromProjectDir(record, projectDir, options = {}) {
   const resolvedProjectDir = safeString(projectDir);
   if (!resolvedProjectDir) return record;
   try {
-    const projectPath = htmlVideoProjectStore.resolveProjectPath(resolvedProjectDir, 'project.json');
+    const trustedProjectDir = await resolveTrustedHtmlVideoProjectDir(record, resolvedProjectDir, options);
+    if (!trustedProjectDir) return record;
+    const projectPath = htmlVideoProjectStore.resolveProjectPath(trustedProjectDir, 'project.json');
     const project = JSON.parse(await fsp.readFile(projectPath, 'utf8'));
     syncProjectStageSummariesFromCheckpoint(record, project.generation_checkpoint);
-    const assetUsageReport = buildProjectAssetUsageReport(project, resolvedProjectDir, record);
+    applyProjectVisualAssetsToRecord(record, project, trustedProjectDir);
+    const assetUsageReport = buildProjectAssetUsageReport(project, trustedProjectDir, record);
     applyAssetUsageReportToRecord(record, assetUsageReport);
   } catch {
     // checkpoint 只是辅助恢复状态，读取失败不能覆盖主阶段错误。
@@ -1241,6 +1328,7 @@ async function runStage(record, stageId, rootDir, handler, services, taskContext
       await syncProjectStageSummariesFromProjectDir(
         record,
         projectPathFromStageResult(result),
+        { mediaRoot: services.mediaRoot },
       );
       if (result?.project?.generation_checkpoint) {
         syncProjectStageSummariesFromCheckpoint(record, result.project.generation_checkpoint);
@@ -1279,7 +1367,7 @@ async function runStage(record, stageId, rootDir, handler, services, taskContext
     };
     if (error?.name === 'CreativeWorkflowStageError') {
       record.last_failure = createLastFailureFromError(error, stageId, failedAt);
-      await syncProjectStageSummariesFromProjectDir(record, record.last_failure.project_dir);
+      await syncProjectStageSummariesFromProjectDir(record, record.last_failure.project_dir, { mediaRoot: services.mediaRoot });
     }
     record.updated_at = failedAt;
     await persistWorkflow(record, rootDir);
@@ -1297,7 +1385,7 @@ async function runStage(record, stageId, rootDir, handler, services, taskContext
 async function runCreativeWorkflow(workflowId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
-  const services = resolveServices(options);
+  const services = { ...resolveServices(options), mediaRoot };
   const taskContext = options.taskContext || null;
   let record;
   try {
@@ -1511,20 +1599,21 @@ async function runCreativeWorkflow(workflowId, options = {}) {
   record.result = { hyperframes_freeform: projectStageResult.hyperframes_freeform };
   record.error = null;
   record.updated_at = doneAt;
-  await syncProjectStageSummariesFromProjectDir(record, extractHtmlVideoProjectPathFromWorkflow(record));
+  await syncProjectStageSummariesFromProjectDir(record, extractHtmlVideoProjectPathFromWorkflow(record), { mediaRoot });
   const persisted = await persistWorkflow(record, rootDir);
   return createWorkflowSummary(persisted);
 }
 
 async function getCreativeWorkflow(workflowId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
+  const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
   const services = resolveServices(options);
   try {
     const record = await readWorkflow(workflowId, rootDir);
     const nextRecord = await markStaleRunningStageFailed(record, rootDir, services, options);
-    const beforeHydrate = JSON.stringify(nextRecord.asset_context?.asset_usage_report || nextRecord.result?.hyperframes_freeform?.project?.asset_usage_report || null);
-    await syncProjectStageSummariesFromProjectDir(nextRecord, extractHtmlVideoProjectPathFromWorkflow(nextRecord));
-    const afterHydrate = JSON.stringify(nextRecord.asset_context?.asset_usage_report || nextRecord.result?.hyperframes_freeform?.project?.asset_usage_report || null);
+    const beforeHydrate = assetHydrationFingerprint(nextRecord);
+    await syncProjectStageSummariesFromProjectDir(nextRecord, extractHtmlVideoProjectPathFromWorkflow(nextRecord), { mediaRoot });
+    const afterHydrate = assetHydrationFingerprint(nextRecord);
     if (afterHydrate !== beforeHydrate) {
       nextRecord.updated_at = getNow(services);
       await persistWorkflow(nextRecord, rootDir);
@@ -1841,6 +1930,18 @@ function extractHtmlVideoProjectPathFromWorkflow(record) {
   );
 }
 
+function assetHydrationFingerprint(record) {
+  return JSON.stringify({
+    asset_ids: (Array.isArray(record?.asset_context?.assets) ? record.asset_context.assets : [])
+      .map((asset, index) => assetKey(asset, `asset_${index + 1}`)),
+    creative_asset_ids: (Array.isArray(record?.creative_context?.asset_context?.assets) ? record.creative_context.asset_context.assets : [])
+      .map((asset, index) => assetKey(asset, `asset_${index + 1}`)),
+    usage_report: record?.asset_context?.asset_usage_report
+      || record?.result?.hyperframes_freeform?.project?.asset_usage_report
+      || null,
+  });
+}
+
 function normalizeComparablePath(value) {
   const text = safeString(value);
   if (!text) return '';
@@ -2001,6 +2102,11 @@ function makeRetryAttemptId(now) {
 
 function buildHtmlVideoLiteProjectStageResult({ project, projectDir, renderResult, visualInspectResult } = {}) {
   const outputPath = safeString(renderResult?.output_path || renderResult?.outputPath);
+  const inspectStatus = visualInspectResult?.skipped === true
+    ? 'skipped'
+    : (visualInspectResult?.success === false ? 'warning' : 'done');
+  const inspectMessage = safeString(visualInspectResult?.message)
+    || (inspectStatus === 'warning' ? 'html-video production 视觉质检发现问题。' : 'html-video production 视觉质检完成。');
   return {
     hyperframes_freeform: {
       project: {
@@ -2017,9 +2123,11 @@ function buildHtmlVideoLiteProjectStageResult({ project, projectDir, renderResul
         project_status: project?.status || '',
       },
       visual_inspect: {
-        status: 'done',
-        message: 'html-video production 视觉质检通过。',
+        status: inspectStatus,
+        message: inspectMessage,
         report_path: visualInspectResult?.report_path || visualInspectResult?.reportPath || null,
+        issues: Array.isArray(visualInspectResult?.issues) ? visualInspectResult.issues : [],
+        metrics: plainObject(visualInspectResult?.metrics),
       },
     },
   };
@@ -2801,7 +2909,9 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
     });
   }
 
-  await syncProjectStageSummariesFromProjectDir(record, result.html_video_project_path || projectDir);
+  await syncProjectStageSummariesFromProjectDir(record, result.html_video_project_path || projectDir, {
+    mediaRoot: options.mediaRoot || DEFAULT_MEDIA_ROOT,
+  });
   if (result.project?.generation_checkpoint) {
     syncProjectStageSummariesFromCheckpoint(record, result.project.generation_checkpoint);
   }
@@ -2912,30 +3022,57 @@ async function getCreativeWorkflowAssetFile(workflowId, assetId, options = {}) {
       code: 'ASSET_NOT_FOUND',
       workflow_id: workflowId,
       asset_id: id,
-      message: '未找到来源图片素材文件。',
+      message: '未找到视觉素材文件。',
     };
+  }
+  const workflowDir = path.resolve(mediaRoot, safeString(workflowId));
+  const realWorkflowDir = workflowDir ? await fsp.realpath(workflowDir).catch(() => '') : '';
+  const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
+  const realProjectDir = projectDir ? await fsp.realpath(projectDir).catch(() => '') : '';
+  const allowProjectDir = realProjectDir && realWorkflowDir
+    && (realProjectDir === realWorkflowDir || isPathInside(realProjectDir, realWorkflowDir));
+  let projectAssets = [];
+  if (allowProjectDir) {
+    try {
+      const projectPath = htmlVideoProjectStore.resolveProjectPath(realProjectDir, 'project.json');
+      const project = JSON.parse(await fsp.readFile(projectPath, 'utf8'));
+      projectAssets = (Array.isArray(project.assets) ? project.assets : [])
+        .map(asset => normalizeProjectVisualAsset(asset, realProjectDir))
+        .filter(Boolean);
+    } catch {}
   }
   const assets = [
     ...(Array.isArray(record.asset_context?.assets) ? record.asset_context.assets : []),
     ...(Array.isArray(record.creative_context?.asset_context?.assets) ? record.creative_context.asset_context.assets : []),
+    ...projectAssets,
   ];
   const asset = assets.find((item, index) => (
     safeString(item?.id) === id
     || safeString(item?.asset_id) === id
     || `asset_${index + 1}` === id
   ));
-  const workflowDir = path.resolve(mediaRoot, safeString(workflowId));
-  const rawPath = safeString(asset?.local_path) || (safeString(asset?.path) ? path.join(workflowDir, asset.path) : '');
-  const filePath = rawPath ? path.resolve(rawPath) : '';
-  const realWorkflowDir = workflowDir ? await fsp.realpath(workflowDir).catch(() => '') : '';
-  const realFilePath = filePath ? await fsp.realpath(filePath).catch(() => '') : '';
-  if (!asset || !realFilePath || !realWorkflowDir || !isPathInside(realFilePath, realWorkflowDir) || !await fileExists(realFilePath)) {
+  const allowedRoots = [realWorkflowDir, allowProjectDir ? realProjectDir : ''].filter(Boolean);
+  const rawPathCandidates = [
+    safeString(asset?.local_path),
+    safeString(asset?.path) ? path.join(workflowDir, asset.path) : '',
+    allowProjectDir && safeString(asset?.path) ? path.join(realProjectDir, asset.path) : '',
+  ].filter(Boolean);
+  let realFilePath = '';
+  for (const candidate of rawPathCandidates) {
+    const resolved = path.resolve(candidate);
+    const realCandidate = await fsp.realpath(resolved).catch(() => '');
+    if (!realCandidate || !await fileExists(realCandidate)) continue;
+    if (!allowedRoots.some(root => isPathInside(realCandidate, root))) continue;
+    realFilePath = realCandidate;
+    break;
+  }
+  if (!asset || !realFilePath) {
     return {
       success: false,
       code: 'ASSET_NOT_FOUND',
       workflow_id: workflowId,
       asset_id: id,
-      message: '未找到来源图片素材文件。',
+      message: '未找到视觉素材文件。',
     };
   }
   return {

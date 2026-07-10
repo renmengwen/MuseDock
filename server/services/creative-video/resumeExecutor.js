@@ -2,6 +2,7 @@ const fs = require('fs/promises');
 const path = require('path');
 
 const projectStore = require('./html-video/projectStore');
+const { markCheckpointFrame } = require('./html-video/projectSchema');
 const projectOrchestrator = require('./html-video/projectOrchestrator');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./html-video/diagnostics');
 const { mapSceneSpecToContentGraph } = require('./html-video/sceneSpecMapper');
@@ -98,6 +99,7 @@ async function inspectVisual({ projectDir, project, outputPath, services, taskCo
   const visualInspectResult = await visualQaService.inspectRenderedVideo({
     projectDir,
     outputPath,
+    project,
     expectedAspectRatio: expectedAspectRatio(project),
   });
   const reportPath = visualInspectResult.report_path || visualInspectResult.reportPath || 'inspect/visual-report.json';
@@ -231,6 +233,32 @@ async function retryFrameHtml(context) {
     })]);
   }
   let nextProject = project;
+  const executorOptions = objectOrEmpty(plan?.executor_options);
+  const regenerateRequested = executorOptions.regenerate_frame_html === true
+    || executorOptions.regenerateFrameHtml === true;
+  const scopedFrameIds = arrayOrEmpty(executorOptions.frame_ids).filter(Boolean);
+  if (regenerateRequested && scopedFrameIds.length) {
+    // 定向失效目标帧的 frame_html/render checkpoint：后续 generateHtmlVideo 复用其余帧、
+    // 只重生成这些帧，替代全局 regenerateFrameHtml 的全量重生成
+    nextProject = await projectStore.writeProjectJson(projectDir, current => {
+      for (const frameId of ids) {
+        markCheckpointFrame(current, 'frame_html', frameId, {
+          status: 'pending',
+          html_path: '',
+          input_hash: '',
+          output_hash: '',
+          diagnostic_code: '',
+        });
+        markCheckpointFrame(current, 'render', frameId, {
+          status: 'pending',
+          mp4_path: '',
+          output_hash: '',
+          diagnostic_code: '',
+        });
+      }
+      return current;
+    });
+  }
   for (const frameId of ids) {
     const actionResult = await callConfiguredProjectAction({
       name: 'retryFrameHtml',

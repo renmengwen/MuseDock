@@ -134,7 +134,28 @@ async function run() {
     },
   });
   assert.strictEqual(decisions.get('scene_01').source_mode, 'raw_html');
-  assert.strictEqual(decisions.get('scene_02').source_mode, 'template_inputs');
+  assert.strictEqual(decisions.get('scene_02').source_mode, 'raw_html');
+  assert.strictEqual(decisions.get('scene_02').override_reason, 'required_asset_ref');
+
+  // 非 asset_first 策略：装饰性引用不覆写模板路由，生成图/subject 仍覆写
+  const templateFirstDecisions = new Map([
+    ['scene_01', { source_mode: 'template_inputs', template_id: 'frame-bold-poster' }],
+    ['scene_02', { source_mode: 'template_inputs', template_id: 'frame-bold-signal' }],
+  ]);
+  phase.enforceAssetFirstRawHtmlRouting({
+    decisions: templateFirstDecisions,
+    contentGraph: {
+      nodes: [
+        { id: 'scene_01', asset_refs: [{ asset_id: 'gen_scene_01', usage: 'subject' }] },
+        { id: 'scene_02', asset_refs: [{ asset_id: 'article_01', usage: 'evidence' }] },
+      ],
+    },
+    creativeContext: {
+      asset_context: { assets: [{ id: 'gen_scene_01', source: 'generated' }, { id: 'article_01', source: 'article' }] },
+    },
+  });
+  assert.strictEqual(templateFirstDecisions.get('scene_01').source_mode, 'raw_html', '生成图引用应覆写');
+  assert.strictEqual(templateFirstDecisions.get('scene_02').source_mode, 'template_inputs', '非 asset_first 的装饰性引用不应覆写模板路由');
 
   const hydrateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-image-hydrate-test-'));
   fs.mkdirSync(path.join(hydrateDir, 'assets'), { recursive: true });
@@ -249,16 +270,27 @@ async function run() {
   });
   assert.strictEqual(hfDecisions.get('scene_01').source_mode, 'raw_html');
 
-  const hfUntouched = new Map([['scene_01', { source_mode: 'template_inputs' }]]);
+  const hfAssetRef = new Map([['scene_01', { source_mode: 'template_inputs' }]]);
   phase.enforceAssetFirstRawHtmlRouting({
-    decisions: hfUntouched,
+    decisions: hfAssetRef,
     contentGraph: { nodes: [{ id: 'scene_01', asset_refs: [{ asset_id: 'article_01', usage: 'subject' }] }] },
     creativeContext: {
       visual_strategy: 'hf_first',
       asset_context: { assets: [{ id: 'article_01', source: 'article' }] },
     },
   });
-  assert.strictEqual(hfUntouched.get('scene_01').source_mode, 'template_inputs');
+  assert.strictEqual(hfAssetRef.get('scene_01').source_mode, 'raw_html');
+
+  const unknownAssetRef = new Map([['scene_01', { source_mode: 'template_inputs' }]]);
+  phase.enforceAssetFirstRawHtmlRouting({
+    decisions: unknownAssetRef,
+    contentGraph: { nodes: [{ id: 'scene_01', asset_refs: [{ asset_id: 'missing_01', usage: 'subject' }] }] },
+    creativeContext: {
+      visual_strategy: 'asset_first',
+      asset_context: { assets: [{ id: 'article_01', source: 'article' }] },
+    },
+  });
+  assert.strictEqual(unknownAssetRef.get('scene_01').source_mode, 'template_inputs');
 
   const metaDecisions = new Map([['scene_04', { source_mode: 'template_inputs' }]]);
   phase.enforceAssetFirstRawHtmlRouting({

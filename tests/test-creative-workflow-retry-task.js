@@ -279,6 +279,79 @@ async function createVisualInspectFailureFixture(rootDir) {
   return { projectDir, videoPath, audioPath };
 }
 
+async function createVisualQaWarningFailureFixture(rootDir) {
+  const projectDir = path.join(rootDir, 'media', WORKFLOW_ID, 'agent_runs', 'visual-qa-warning-html-video');
+  const project = createRetryProject();
+  const videoPath = path.join(projectDir, 'exports', 'output.mp4');
+  markCheckpointFrame(project, 'frame_html', 'scene_01', {
+    status: 'done',
+    html_path: 'frames/01-scene_01.html',
+    diagnostic_code: '',
+  });
+  markCheckpointFrame(project, 'render', 'scene_01', {
+    status: 'done',
+    mp4_path: 'frames/scene_01.mp4',
+    diagnostic_code: '',
+  });
+  markCheckpointStage(project, 'render', { status: 'done' });
+  markCheckpointStage(project, 'compose', {
+    status: 'done',
+    output_path: 'exports/output.mp4',
+    diagnostic_code: '',
+  });
+  markCheckpointStage(project, 'visual_inspect', {
+    status: 'failed',
+    report_path: 'inspect/visual-report.json',
+    diagnostic_code: 'visual_qa_warning',
+  });
+  await fs.mkdir(path.join(projectDir, 'exports'), { recursive: true });
+  await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
+  await fs.mkdir(path.join(projectDir, 'inspect'), { recursive: true });
+  await fs.writeFile(videoPath, 'video', 'utf8');
+  await fs.writeFile(path.join(projectDir, 'frames', '01-scene_01.html'), '<html><body>old</body></html>', 'utf8');
+  await projectStore.saveProject(projectDir, project);
+
+  const record = {
+    workflow_id: WORKFLOW_ID,
+    success: false,
+    status: 'failed',
+    message: 'html-video 成片画面存在开头或镜头边界白屏，未通过视觉安全检查。',
+    stages: workflowStages('failed'),
+    result: {
+      hyperframes_freeform: {
+        project: {
+          render_mode: 'html-video',
+          html_video_project_path: projectDir,
+          project_dir: projectDir,
+          scene_spec: baseSceneSpec(),
+        },
+      },
+    },
+    retry: { version: 1, attempts: [], latest_plan: {} },
+    last_failure: {
+      stage: 'project',
+      sub_stage: 'visual_inspect',
+      code: 'visual_qa_warning',
+      project_dir: projectDir,
+      message: 'html-video 成片画面存在开头或镜头边界白屏，未通过视觉安全检查。',
+      diagnostics: [createDiagnostic({
+        code: 'visual_qa_warning',
+        stage: 'inspect',
+        sub_stage: 'visual_inspect',
+        severity: 'error',
+        user_message: '视觉质检失败。',
+        details: {
+          issues: [{ code: 'blank_opening_frame', message: '开头抽样帧接近空白。' }],
+          metrics: { blank_timed_sample_count: 2 },
+        },
+      })],
+      updated_at: '2026-06-25T00:00:00.000Z',
+    },
+  };
+  await writeJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir), record);
+  return { projectDir, videoPath };
+}
+
 function fakeHtmlVideoServices(calls = {}) {
   return {
     resumeActions: {
@@ -589,6 +662,66 @@ function fakeHtmlVideoServices(calls = {}) {
     assert.notEqual(path.resolve(calls.visualInspectArgs.outputPath), path.resolve(audioPath));
     assert.equal(calls.renderFrame || 0, 0);
     assert.equal(calls.compose || 0, 0);
+  }
+
+  {
+    const rootDir = await tempRoot();
+    const { projectDir } = await createVisualQaWarningFailureFixture(rootDir);
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
+    assert.equal(plan.success, true);
+    assert.equal(plan.plan.code, 'visual_qa_warning');
+    assert.equal(plan.plan.repair_action, 'retry_frame_html');
+    assert.equal(plan.plan.executor_options.regenerate_frame_html, true);
+
+    const calls = {};
+    const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: plan.plan.code,
+    }, {
+      rootDir,
+      retryAttemptId: 'retry_attempt_visual_qa_warning',
+      services: {
+        now: () => '2026-06-25T04:30:00.000Z',
+        htmlVideoWorkflow: {
+          generateHtmlVideo: async args => {
+            calls.generateHtmlVideo = (calls.generateHtmlVideo || 0) + 1;
+            calls.generateArgs = args;
+            const project = await projectStore.loadProject(projectDir);
+            markCheckpointStage(project, 'visual_inspect', {
+              status: 'done',
+              report_path: 'inspect/visual-report.json',
+              diagnostic_code: '',
+            });
+            await projectStore.saveProject(projectDir, project);
+            return {
+              success: true,
+              project,
+              project_dir: projectDir,
+              html_video_project_path: projectDir,
+              output_path: path.join(projectDir, 'exports', 'output.mp4'),
+              visualInspectResult: { success: true, issues: [], metrics: {}, report_path: 'inspect/visual-report.json' },
+            };
+          },
+        },
+      },
+    });
+    assert.equal(result.success, true);
+    assert.equal(calls.generateHtmlVideo, 1);
+    assert.equal(calls.generateArgs.reuseContentGraph, true);
+    // 计划带定向 frame_ids：不再全局禁用复用，由定向失效的 checkpoint 驱动只重生成目标帧
+    assert.equal(calls.generateArgs.regenerateFrameHtml, false);
+    assert.equal(calls.generateArgs.projectOptions.regenerateFrameHtml, false);
+    const retriedProject = await projectStore.loadProject(projectDir);
+    assert.equal(
+      retriedProject.generation_checkpoint.stages.frame_html.frames.scene_01.status,
+      'pending',
+      '目标帧的 frame_html checkpoint 应被定向失效',
+    );
+    assert.equal(
+      retriedProject.generation_checkpoint.stages.render.frames.scene_01.status,
+      'pending',
+      '目标帧的 render checkpoint 应被定向失效',
+    );
   }
 
   {
