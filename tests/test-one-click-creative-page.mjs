@@ -448,7 +448,8 @@ assert.match(creativeDisplay, /stage\.status === 'running'[\s\S]*return 'active'
 assert.match(creativeDisplay, /stage\.status === 'queued' \|\| stage\.status === 'pending'[\s\S]*return 'queued'/, 'Workflow stepper should keep queued stages visually quieter than the running step');
 assert.match(creativeStatusMessage, /getStatusMessageClass/, 'CreativeStatusMessage should use the shared status message class helper');
 assert.match(creativeStatusMessage, /模型未配置[\s\S]*to="\/settings\?section=models"/, 'CreativeStatusMessage should link to model settings when the message reports an unconfigured model');
-assert.match(taskDetailUnit, /<CreativeStatusMessage\s+status=\{status\}\s+message=\{message\}\s+\/>/, 'CreativeTaskDetail should render the extracted status message component while waiting');
+assert.match(taskDetailUnit, /const shouldShowStatusMessage = status === 'failed' && workflow\?\.status !== 'failed';/, 'CreativeTaskDetail should reserve the bottom status message for page-level errors');
+assert.match(taskDetailUnit, /shouldShowStatusMessage \? \([\s\S]*<CreativeStatusMessage\s+status=\{status\}\s+message=\{message\}\s+\/>[\s\S]*\) : null/, 'CreativeTaskDetail should hide the duplicate bottom status message during normal progress');
 const videoPreviewStart = taskDetailUnit.indexOf('<CreativeVideoPreview');
 assert.ok(videoPreviewStart > 0, 'Creative task detail should render CreativeVideoPreview when a video URL is available');
 const videoPreviewEnd = taskDetailUnit.indexOf('/>', videoPreviewStart);
