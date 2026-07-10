@@ -209,7 +209,10 @@ const styleProfilePrompt = agent.buildFrameHtmlPrompt({
 });
 assert.match(styleProfilePrompt, /clean_education/);
 assert.match(styleProfilePrompt, /#2F80ED/);
+assert.match(styleProfilePrompt, /style_profile「clean_education」/);
 assert.doesNotMatch(styleProfilePrompt, /延续模板「Glitch Title」/);
+assert.doesNotMatch(styleProfilePrompt, /REQUIRED visual style/i);
+assert.doesNotMatch(styleProfilePrompt, /继承所选模板 metadata/);
 
 const templateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'frame-html-template-'));
 const templateSourcePath = path.join(templateDir, 'source.html');
@@ -248,6 +251,26 @@ assert.match(sourceBackedPrompt, /超过 6 秒|长于 6 秒/);
 assert.match(sourceBackedPrompt, /sub-beats/);
 assert.match(sourceBackedPrompt, /主体/);
 assert.match(sourceBackedPrompt, /禁止只有角落|不要只有角落/);
+
+const styleProfileSourceBackedPrompt = agent.buildFrameHtmlPrompt({
+  graph,
+  node: { ...graph.nodes[0], durationSec: 8 },
+  index: 0,
+  total: 2,
+  target: { resolution: { width: 1920, height: 1080 } },
+  template: {
+    id: 'source_backed_template',
+    name: '带源码模板',
+    description: '模板源码内有主体入场动画。',
+    __dir: templateDir,
+    source_entry: 'source.html',
+  },
+  styleProfile: { id: 'clean_education' },
+});
+assert.match(styleProfileSourceBackedPrompt, /style_profile「clean_education」/);
+assert.doesNotMatch(styleProfileSourceBackedPrompt, /REQUIRED visual style/i);
+assert.doesNotMatch(styleProfileSourceBackedPrompt, /继承所选模板 metadata/);
+assert.doesNotMatch(styleProfileSourceBackedPrompt, /@keyframes heroEnter/);
 
 const retryPrompt = agent.buildRetryPrompt({
   node: { id: 'scene_01', durationSec: 8 },

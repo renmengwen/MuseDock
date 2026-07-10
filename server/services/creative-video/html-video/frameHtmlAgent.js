@@ -149,6 +149,7 @@ function buildStyleProfileSection(styleProfile = {}) {
   return [
     '',
     'Task style profile（本任务视觉签名，不要复用失败模板的默认视觉）：',
+    `视觉风格参考：遵循本任务 style_profile「${styleProfile.id}」；不要复用模板默认主体文案。`,
     JSON.stringify({
       id: styleProfile.id,
       family: styleProfile.family,
@@ -320,6 +321,7 @@ function buildFrameHtmlPrompt({
   const resolution = resolveResolution(target);
   const adjacent = adjacentSummary(graph, index);
   const templateSource = readTemplateSourceSnippet(template);
+  const hasStyleProfile = Boolean(styleProfile?.id);
   const continuitySection = buildVisualContinuitySection({
     visualStyleReferenceHtml,
     previousFrameHtml,
@@ -379,16 +381,16 @@ function buildFrameHtmlPrompt({
     '',
     'Selected template metadata（用于理解模板身份、输入语义和适配边界）：',
     templateStyleReference(template),
-    ...(templateSource ? [
+    ...(!hasStyleProfile && templateSource ? [
       '',
       'Template HTML — this is the REQUIRED visual style for THIS frame. Reuse its palette, background, typography, layout structure and animation approach; only swap in this frame text/data. Do NOT invent a different theme:',
       '```html',
       templateSource,
       '```',
-    ] : [
+    ] : (!hasStyleProfile ? [
       '',
       'Template HTML：未能读取模板源码时，仍必须继承所选模板 metadata 描述的视觉方向和 motion vocabulary，不能退化为静态信息图。',
-    ]),
+    ] : [])),
     ...buildStyleProfileSection(styleProfile),
     ...continuitySection,
     '',
