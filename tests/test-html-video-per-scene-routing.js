@@ -472,6 +472,18 @@ const stubAiImageModel = { isConfigured: async () => false };
     }
   }
 
+  // R3：展开后的 content graph node 必须带完整 visual_beat 元数据
+  {
+    const graphNodes = assetFirstResult.project.content_graph?.nodes || [];
+    assert.ok(graphNodes.length > 0, 'asset_first 工程应有 content_graph.nodes');
+    for (const node of graphNodes) {
+      const vb = node.metadata?.visual_beat;
+      assert.ok(vb && vb.id === node.beat_id, 'node.metadata.visual_beat 必须存在且与 beat_id 一致');
+      assert.ok(vb.motion_overlay?.preset, 'asset_first 下 visual_beat 必须含 motion_overlay');
+      assert.ok(!vb.source_scene, 'visual_beat 不得携带 source_scene（体积与序列化考虑）');
+    }
+  }
+
   // 绑定 helper：不改入参（保证 scene_spec_hash 稳定）、结果确定性、不重复写入
   {
     const bindSpec = {

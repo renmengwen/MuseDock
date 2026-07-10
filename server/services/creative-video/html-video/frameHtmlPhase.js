@@ -8,6 +8,7 @@ const { markCheckpointStage, markCheckpointFrame } = require('./projectSchema');
 const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
+const { loadOverlaySnippet, loadDiagramSkeleton } = require('./motionPrimitiveCatalog');
 const { AGENTS, STAGES } = require('../agentStages');
 
 const FRAME_HTML_MODEL_OPTIONS = { requestTimeoutMs: 180000, maxRetries: 1 };
@@ -30,6 +31,26 @@ async function mapLimit(items, limit, mapper) {
 
 function isProviderMissingText(message) {
   return /返回结果缺少文本内容|流式返回结果缺少文本内容/.test(String(message || ''));
+}
+
+function safeLoad(loader, ...args) {
+  try {
+    return loader(...args);
+  } catch {
+    return '';
+  }
+}
+
+// asset_first 时从 node.metadata.visual_beat（R3 唯一下传通道）取 beat 编排并加载 primitive 参考片段；
+// hf_first 返回空对象，agent 侧不追加任何新 prompt 段。
+function resolveAssetFirstMotionArgs(node, creativeContext) {
+  if (creativeContext?.visual_strategy !== 'asset_first') return {};
+  const beat = node?.metadata?.visual_beat || {};
+  if (!beat.motion_overlay) return {};
+  const primitiveSnippet = beat.motion_overlay?.preset ? safeLoad(loadOverlaySnippet, beat.motion_overlay.preset) : '';
+  const diagramSkeleton = beat.visual_base?.type === 'diagram' ? safeLoad(loadDiagramSkeleton) : '';
+  // previousBeatSummary 由 Task 4.1、hasCaptions 由 Task 5.2 后续接入
+  return { beat, primitiveSnippet, diagramSkeleton };
 }
 
 function firstExplicitDiagnosticCode(diagnostics) {
@@ -165,6 +186,7 @@ async function runFrameHtmlPhase(ctx) {
   const frameHtmlRunsInParallel = concurrency > 1;
   const generateFrameJob = async job => {
     const { index, node, sceneId, scene, styleReferenceHtml } = job;
+    const assetFirstMotionArgs = resolveAssetFirstMotionArgs(node, creativeContext);
     await report(onProgress, {
       type: 'html_video_frame_html_started',
       stage: 'project',
@@ -208,6 +230,7 @@ async function runFrameHtmlPhase(ctx) {
       styleProfile,
       visualStyleReferenceHtml: styleReferenceHtml,
       previousFrameHtml: '',
+      ...assetFirstMotionArgs,
     });
     if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
       const previousFailedHtml = htmlResult.failed_html;
@@ -240,6 +263,7 @@ async function runFrameHtmlPhase(ctx) {
         styleProfile,
         visualStyleReferenceHtml: styleReferenceHtml,
         previousFrameHtml: '',
+        ...assetFirstMotionArgs,
       });
       if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
         const failedHtmlPath = await writeFailedFrameHtml(
@@ -322,6 +346,7 @@ async function runFrameHtmlPhase(ctx) {
           visualStyleReferenceHtml: styleReferenceHtml,
           previousFrameHtml: '',
           layoutFeedback: summarizeLayoutIssues(firstBlocking),
+          ...assetFirstMotionArgs,
         });
         let unresolved = firstBlocking;
         if (repaired.success) {

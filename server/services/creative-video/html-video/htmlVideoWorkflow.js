@@ -1141,6 +1141,8 @@ function expandContentGraphToVisualBeats({ graph = {}, visualPlan = {}, visualDe
         beat_count: beat.beat_count,
         visual_text: cloneJson(beat.visual_text || {}),
         source_mode: decision?.source_mode || '',
+        // R3：剥离 source_scene 后整 beat 下传（含 visual_base/motion_overlay/continuity，模块 2 已写入）
+        visual_beat: cloneJson((({ source_scene, ...rest }) => rest)(beat)),
       },
       html_path: '',
       htmlPath: '',

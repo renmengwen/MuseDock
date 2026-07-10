@@ -122,6 +122,38 @@ async function run() {
   });
   assert.ok(retryPrompt.includes('画面主体'));
 
+  // ===== 模块3：motion overlay prompt 约束 =====
+  {
+    const beat = {
+      id: 'scene_02_b2', scene_id: 'scene_02', kind: 'text', duration_sec: 5.67,
+      visual_base: { type: 'generated_image', asset_id: 'gen_scene_02', fit: 'contain', continuity_group: 'scene_02' },
+      motion_overlay: { preset: 'key_marker', placement: 'lower_third', max_items: 1, avoid_caption_bottom_px: 140 },
+      continuity: { group_id: 'scene_02', reuse_base_layout: true, beat_index: 2, beat_count: 3 },
+    };
+    const prompt = frameHtmlAgent.buildAssetFirstFramePrompt({ beat, primitiveSnippet: '<div data-mp-overlay="key_marker"></div>' });
+    assert.ok(prompt.includes('key_marker'), 'prompt 必须点名选中的 motion primitive');
+    assert.ok(prompt.includes('data-mp-overlay'), 'prompt 必须内嵌 primitive 参考片段');
+    assert.ok(prompt.includes('140'), 'prompt 必须声明底部 140px 字幕安全区');
+    assert.ok(/主视觉|main_visual/.test(prompt), '必须声明图片是主视觉、overlay 只做局部');
+    assert.ok(/复用上一/.test(prompt), 'continuity beat_index>1 时必须要求复用上一 beat 布局');
+    assert.ok(/禁止.*(入场|重新开场)/.test(prompt), '非首 beat 禁止 base 层入场动画');
+  }
+  // 无图 beat：要求统一 diagram，禁止标题页
+  {
+    const beat = {
+      id: 'scene_04_b1', scene_id: 'scene_04', kind: 'text', duration_sec: 5.97,
+      visual_base: { type: 'diagram', asset_id: null, continuity_group: 'scene_04' },
+      motion_overlay: { preset: 'concept_card', placement: 'right_panel', max_items: 1, avoid_caption_bottom_px: 140 },
+      continuity: { group_id: 'scene_04', reuse_base_layout: true, beat_index: 1, beat_count: 3 },
+    };
+    const prompt = frameHtmlAgent.buildAssetFirstFramePrompt({ beat, primitiveSnippet: '' });
+    assert.ok(/diagram|结构化/.test(prompt), '无图 beat 必须要求生成统一 diagram');
+    assert.ok(/禁止.*标题页/.test(prompt));
+  }
+  // 硬约束 A 回归：hf_first 的 prompt 构造输出不含 motion primitive 词汇
+  assert.ok(!hfGenPrompt.includes('data-mp-overlay'), 'hf_first prompt 不得包含 motion primitive 片段词汇');
+  console.log('asset-first prompt motion overlay tests passed');
+
   console.log('test-html-video-asset-first-prompts passed');
 }
 
