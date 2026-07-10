@@ -1483,6 +1483,14 @@ async function generateHtmlVideo(options = {}) {
     projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
   }
   model = createAuditedModel(model, projectDir);
+  // 尽早广播工程目录：任务运行中前端轮询依赖它水合生成图等工程内素材
+  await report(onProgress, {
+    type: 'html_video_project_dir_ready',
+    stage: 'project',
+    sub_stage: 'validate_project',
+    message: 'html-video 工程目录已就绪。',
+    data: { html_video_project_path: projectDir, project_dir: projectDir },
+  });
   if (hasSceneSpecScenes(sceneSpec)) {
     await projectStore.saveSceneSpec(projectDir, sceneSpec);
   }

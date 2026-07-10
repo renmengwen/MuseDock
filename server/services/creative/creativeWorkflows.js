@@ -1707,6 +1707,7 @@ async function patchCreativeWorkflowTaskSummaryUnlocked(workflowId, patch = {}, 
     if (Object.prototype.hasOwnProperty.call(patch, 'operation')) record.operation = safeString(patch.operation);
     if (Object.prototype.hasOwnProperty.call(patch, 'retry_attempt_id')) record.retry_attempt_id = safeString(patch.retry_attempt_id);
     record.task_status = safeString(patch.task_status ?? record.task_status);
+    if (safeString(patch.active_project_dir)) record.active_project_dir = safeString(patch.active_project_dir);
     record.current_stage = safeString(patch.current_stage ?? record.current_stage);
     record.current_stage_message = safeString(patch.current_stage_message ?? record.current_stage_message);
     const progress = Number(patch.current_progress ?? record.current_progress);
@@ -1926,6 +1927,8 @@ function extractHtmlVideoProjectPathFromWorkflow(record) {
     || project.project_dir
     || hyperframes.html_video_project_path
     || hyperframes.project_dir
+    // 运行中任务：进度事件广播的工程目录，供轮询时水合生成图等工程内素材
+    || record?.active_project_dir
     || extractStageHtmlVideoProjectPath(record),
   );
 }

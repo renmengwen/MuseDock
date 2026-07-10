@@ -234,6 +234,10 @@ async function emitAndPersistTaskEvent({
     current_progress: progress,
     last_event_seq: emitted.seq,
   };
+  const eventProjectDir = String(
+    event?.data?.html_video_project_path || event?.data?.project_dir || '',
+  ).trim();
+  if (eventProjectDir) patch.active_project_dir = eventProjectDir;
 
   await patchTaskSummaryOrEmitFailure({
     registry,
