@@ -10,6 +10,8 @@ const { resolveFfmpegPath } = require('./environmentDoctor');
 
 const ADAPTER_VERSION = '0.1.0-playwright';
 const DEFAULT_RENDER_RESOLUTION = { width: 1920, height: 1080 };
+// 录制尾部缓冲：保证 webm 长度 ≥ leadIn + duration + 余量，避免 -ss 前导裁剪被安全检查钳制
+const RECORD_TAIL_BUFFER_MS = 800;
 
 async function render(input = {}, ctx = {}, deps = {}) {
   const startedAt = Date.now();
@@ -135,6 +137,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
 
     report(ctx, 40, `正在录制 ${totalDuration}s html-video 帧...`);
     await waitWithProgress(page, ctx, totalDuration);
+    await page.waitForTimeout(RECORD_TAIL_BUFFER_MS).catch(() => {});
 
     report(ctx, 85, '正在结束浏览器录制...');
     await context.close();

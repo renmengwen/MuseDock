@@ -48,6 +48,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
       initScripts: 0,
       progress: [],
       ffmpeg: [],
+      waits: [],
     };
 
     const mockPlaywright = {
@@ -68,7 +69,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
                     if (source.includes('__hvPlayAll')) return true;
                     return undefined;
                   },
-                  waitForTimeout: async () => {},
+                  waitForTimeout: async ms => { calls.waits.push(ms); },
                 }),
                 close: async () => {
                   await fsp.writeFile(path.join(recordDir, 'capture.webm'), 'webm');
@@ -124,6 +125,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     assert.deepEqual(calls.contexts[0].recordVideo.size, { width: 640, height: 360 });
     assert.equal(calls.initScripts, 1);
     assert.equal(calls.gotos[0].options.waitUntil, 'domcontentloaded');
+    assert.ok(calls.waits.includes(800), '录制结束前应有 800ms 尾部缓冲，保证 -ss 裁剪安全余量');
 
     assert.equal(calls.ffmpeg.length, 1);
     assert.equal(calls.ffmpeg[0].command, 'ffmpeg-mock');
