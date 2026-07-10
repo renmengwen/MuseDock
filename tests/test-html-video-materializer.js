@@ -6,6 +6,10 @@ const path = require('path');
 const { normalizeProject } = require('../server/services/creative-video/html-video/projectSchema');
 const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 const { materializeProject } = require('../server/services/creative-video/html-video/materializer');
+const {
+  renderHtmlVideoFrames,
+  composeHtmlVideoProject,
+} = require('../server/services/creative-video/html-video/projectOrchestrator');
 
 async function writeFile(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -349,6 +353,58 @@ async function createTemplate(rootDir, options = {}) {
   assert.equal(rawNoRegistryResult.project.frames[0].captions[0].text, 'raw 无 registry 旁白');
   const rawNoRegistryHtml = await fs.readFile(path.join(rawNoRegistryProjectDir, 'frames/01-raw.html'), 'utf8');
   assert.match(rawNoRegistryHtml, /raw 无 registry 旁白/);
+
+  const beatRenderProjectDir = path.join(rootDir, 'beat-render-project');
+  await fs.mkdir(beatRenderProjectDir, { recursive: true });
+  const beatProject = normalizeProject({
+    project_id: 'beat_render_project',
+    output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 18 },
+    audio: { status: 'skipped', reason: 'disabled_by_settings' },
+    frames: [
+      { id: 'scene_long_b1', scene_id: 'scene_long', beat_id: 'scene_long_b1', order: 1, duration_sec: 6, engine: 'hyperframes-playwright', html_path: 'frames/long.html' },
+      { id: 'scene_long_b2', scene_id: 'scene_long', beat_id: 'scene_long_b2', order: 2, duration_sec: 6, engine: 'hyperframes-playwright', html_path: 'frames/long.html' },
+      { id: 'scene_long_b3', scene_id: 'scene_long', beat_id: 'scene_long_b3', order: 3, duration_sec: 6, engine: 'hyperframes-playwright', html_path: 'frames/long.html' },
+    ],
+  });
+  await writeFile(path.join(beatRenderProjectDir, 'frames/long.html'), '<!doctype html><html><body>long</body></html>');
+  const renderedBeatPaths = [];
+  const renderResult = await renderHtmlVideoFrames({
+    projectDir: beatRenderProjectDir,
+    project: beatProject,
+    services: {
+      frameRenderer: {
+        renderFrame: async (_frame, { outputPath }) => {
+          await writeFile(outputPath, `mp4:${path.basename(outputPath)}`);
+          renderedBeatPaths.push(outputPath);
+          return { success: true, output_path: outputPath, output_hash: path.basename(outputPath), meta: {} };
+        },
+      },
+    },
+  });
+  assert.equal(renderResult.success, true);
+  assert.deepEqual(Object.keys(renderResult.project.generation_checkpoint.stages.render.frames).sort(), [
+    'scene_long_b1',
+    'scene_long_b2',
+    'scene_long_b3',
+  ]);
+  assert.equal(new Set(renderedBeatPaths.map(item => path.basename(item))).size, 3);
+  const composeResult = await composeHtmlVideoProject({
+    projectDir: beatRenderProjectDir,
+    project: renderResult.project,
+    services: {
+      ffmpegComposer: {
+        concatFramesWithFfmpeg: async (frames, outputPath) => {
+          const basenames = frames.map(frame => path.basename(frame.path));
+          assert.deepEqual(basenames, ['scene_long_b1.mp4', 'scene_long_b2.mp4', 'scene_long_b3.mp4']);
+          assert.equal(new Set(basenames).size, 3);
+          await writeFile(outputPath, 'combined');
+          return { success: true, output_path: outputPath };
+        },
+        muxAudioWithFfmpeg: async () => ({ success: true }),
+      },
+    },
+  });
+  assert.equal(composeResult.success, true);
 
   console.log('html-video materializer tests passed');
 })();
