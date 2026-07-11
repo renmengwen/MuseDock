@@ -82,6 +82,23 @@ function materializeTemplate(sourceHtml, vars, durationSec, sceneData = {}) {
   return `${injection}\n${replaced}`;
 }
 
+const CAPTION_GUARD_STYLE = `<style data-hv-caption-guard>
+.hv-caption-layer {
+  z-index: 2147483647 !important;
+  pointer-events: none !important;
+}
+.hv-caption-layer * { pointer-events: none !important; }
+</style>`;
+
+function injectCaptionLayerGuard(html = '', { visualStrategy = null } = {}) {
+  if (visualStrategy !== 'asset_first') return html; // 硬约束：共享路径默认行为不变
+  const text = String(html);
+  if (text.includes('data-hv-caption-guard')) return text; // 幂等
+  if (text.includes('</head>')) return text.replace('</head>', `${CAPTION_GUARD_STYLE}</head>`);
+  if (text.includes('<body')) return text.replace(/<body([^>]*)>/, `<body$1>${CAPTION_GUARD_STYLE}`);
+  return CAPTION_GUARD_STYLE + text;
+}
+
 function recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame) {
   diagnostics.push({
     code: 'unmanaged_caption_layer_preserved',
@@ -115,7 +132,10 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
       if (hasUnmanagedCaptionLayer(html)) {
         recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame);
       }
-      const nextHtml = ensureCaptionLayer(html, captions, { generateCaptions });
+      const nextHtml = injectCaptionLayerGuard(
+        ensureCaptionLayer(html, captions, { generateCaptions }),
+        { visualStrategy: project?.visual_strategy || null }
+      );
       if (nextHtml !== html) {
         await fs.mkdir(path.dirname(outputPath), { recursive: true });
         await fs.writeFile(outputPath, nextHtml, 'utf8');
@@ -205,7 +225,10 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
   if (hasUnmanagedCaptionLayer(materializedHtml)) {
     recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame);
   }
-  const html = ensureCaptionLayer(materializedHtml, captions, { generateCaptions });
+  const html = injectCaptionLayerGuard(
+    ensureCaptionLayer(materializedHtml, captions, { generateCaptions }),
+    { visualStrategy: project?.visual_strategy || null }
+  );
   const relativePath = frameOutputPath(frame, index);
   const outputPath = resolveProjectPath(projectDir, relativePath);
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
@@ -258,6 +281,7 @@ async function materializeProject({ projectDir, project, templateRegistry }) {
 module.exports = {
   materializeProject,
   materializeTemplate,
+  injectCaptionLayerGuard,
   htmlEscape,
   safeJson,
 };
