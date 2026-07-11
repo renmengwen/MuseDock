@@ -525,3 +525,36 @@ function project(overrides = {}) {
 
   console.log('creative workflow retry planner tests passed');
 })();
+
+// ===== 模块7：asset_first QA code 的修复映射 =====
+const { repairActionForQaIssue } = require('../server/services/creative-video/retryPlanner');
+
+// 可修复：定向 retry_frame_html
+{
+  const action = repairActionForQaIssue({
+    code: 'asset_first_boundary_refresh',
+    details: { scene_id: 'scene_05', boundary_sec: 69.71 },
+  }, { boundaryToFrameIds: { 'scene_05@69.71': ['scene_05_b2'] } });
+  assert.strictEqual(action.type, 'retry_frame_html');
+  assert.deepStrictEqual(action.frame_ids, ['scene_05_b2']);
+}
+{
+  const action = repairActionForQaIssue({ code: 'asset_first_asset_missing', details: { beat_id: 'scene_02_b1' } }, {});
+  assert.strictEqual(action.type, 'retry_frame_html');
+  assert.deepStrictEqual(action.frame_ids, ['scene_02_b1']);
+}
+// R6：asset_missing 拿不到 frame（beat_id=null）时不产生定向重试，返回 null
+assert.strictEqual(
+  repairActionForQaIssue({ code: 'asset_first_asset_missing', details: { asset_id: 'gen_x', beat_id: null } }, {}),
+  null,
+);
+// 不可修复（硬约束 C）：路由 takeover 绝不能映射为 retry_frame_html（会无限循环）
+{
+  assert.strictEqual(repairActionForQaIssue({ code: 'asset_first_template_takeover' }, {}), null);
+  assert.strictEqual(repairActionForQaIssue({ code: 'asset_first_title_template_used' }, {}), null);
+  assert.strictEqual(repairActionForQaIssue({ code: 'asset_first_style_drift' }, {}), null);
+  assert.strictEqual(repairActionForQaIssue({ code: 'asset_first_caption_invisible' }, {}), null);
+}
+// 回归：未知 code 返回 null，不影响既有重试计划
+assert.strictEqual(repairActionForQaIssue({ code: 'too_many_blank_frames' }, {}), null);
+console.log('retry planner asset_first qa mapping tests passed');

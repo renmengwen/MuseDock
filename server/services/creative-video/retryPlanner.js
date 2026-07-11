@@ -585,8 +585,32 @@ function resolveRetryFrameIds(frameIds = [], { continuityMode = 'beat_mp4', beat
   return [...resolved];
 }
 
+const QA_REPAIRABLE_BY_FRAME = new Set([
+  'asset_first_asset_missing',
+  'asset_first_low_information',
+  'asset_first_overlay_caption_overlap',
+  'asset_first_boundary_refresh',
+]);
+
+// 模块 7：asset_first QA warning 的定向修复映射（只建立能力，不自动接入重试计划——
+// 升阻断需在真实任务验证 retry_frame_html 有效后另行提交，见计划开放决策 2）。
+// takeover 类路由问题不映射：同路由下重生成 HTML 得到同样决策，retry_frame_html 会无限循环。
+function repairActionForQaIssue(issue = {}, { boundaryToFrameIds = {} } = {}) {
+  if (!QA_REPAIRABLE_BY_FRAME.has(issue.code)) return null;
+  let frameIds = [];
+  if (issue.code === 'asset_first_boundary_refresh') {
+    const key = `${issue.details?.scene_id}@${issue.details?.boundary_sec}`;
+    frameIds = boundaryToFrameIds[key] || [];
+  } else if (issue.details?.beat_id) {
+    frameIds = [issue.details.beat_id];
+  }
+  if (!frameIds.length) return null;
+  return { type: 'retry_frame_html', frame_ids: frameIds, reason: issue.message || issue.code };
+}
+
 module.exports = {
   classifyCreativeWorkflowFailure,
   createCreativeWorkflowRetryPlan,
   resolveRetryFrameIds,
+  repairActionForQaIssue,
 };
