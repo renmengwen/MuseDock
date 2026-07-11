@@ -50,8 +50,71 @@ function resolveAssetFirstMotionArgs(node, creativeContext) {
   if (!beat.motion_overlay) return {};
   const primitiveSnippet = beat.motion_overlay?.preset ? safeLoad(loadOverlaySnippet, beat.motion_overlay.preset) : '';
   const diagramSkeleton = beat.visual_base?.type === 'diagram' ? safeLoad(loadDiagramSkeleton) : '';
-  // previousBeatSummary 由 Task 4.1、hasCaptions 由 Task 5.2 后续接入
+  // previousBeatSummary 由分桶调度侧透传（见 runBucketsWithContinuity）、hasCaptions 由 Task 5.2 后续接入
   return { beat, primitiveSnippet, diagramSkeleton };
+}
+
+// 前一 beat 帧 HTML 的 base 布局摘要：剥离 overlay 节点与脚本，保留 body 结构与内联样式要点并限长，
+// 供同 continuity group 的后续 beat 复用布局（asset_first 专用）。
+function summarizeBaseLayout(html = '') {
+  const withoutOverlays = String(html)
+    .replace(/<div[^>]*data-mp-overlay[^>]*>[\s\S]*?<\/div>\s*<\/div>/g, '')
+    .replace(/<div[^>]*data-mp-overlay[^>]*>[\s\S]*?<\/div>/g, '')
+    .replace(/<script[\s\S]*?<\/script>/g, '')
+    .replace(/\s+/g, ' ');
+  const bodyMatch = withoutOverlays.match(/<body[^>]*>([\s\S]*)<\/body>/);
+  const body = bodyMatch ? bodyMatch[1] : withoutOverlays;
+  return body.trim().slice(0, 1600);
+}
+
+// R3：continuity group 只从展开阶段写入的 node.metadata.visual_beat 读，不做查表兜底
+function continuityGroupId(job) {
+  const beat = job.node?.metadata?.visual_beat || {};
+  return beat.continuity?.group_id || null;
+}
+
+// 按 continuity group 分桶：同组 beat 同桶（桶内串行），无组 job 各自独立桶（保持可并发）
+function bucketJobsByContinuityGroup(jobs = []) {
+  const buckets = [];
+  const byGroup = new Map();
+  for (const job of jobs) {
+    const groupId = continuityGroupId(job);
+    if (!groupId) {
+      buckets.push([job]);
+      continue;
+    }
+    let bucket = byGroup.get(groupId);
+    if (!bucket) {
+      bucket = [];
+      byGroup.set(groupId, bucket);
+      buckets.push(bucket);
+    }
+    bucket.push(job);
+  }
+  return buckets;
+}
+
+// 桶间并发、桶内严格串行，并把前帧 HTML 摘要向后传给同组后续 beat（beat_index>1 才注入）。
+// initialHtmlByGroup：分桶前已生成的帧（如串行首帧）HTML，按 group_id 作为对应桶的初始 previousHtml。
+async function runBucketsWithContinuity({ buckets = [], concurrency = 1, runJob, initialHtmlByGroup = new Map() } = {}) {
+  const bucketResults = await mapLimit(buckets, concurrency, async bucket => {
+    const results = [];
+    const groupId = bucket.length ? continuityGroupId(bucket[0]) : null;
+    let previousHtml = (groupId && initialHtmlByGroup.get(groupId)) || '';
+    for (const job of bucket) {
+      const beat = job.node?.metadata?.visual_beat || {};
+      const result = await runJob({
+        ...job,
+        previousBeatSummary: (beat.continuity?.beat_index || 1) > 1 && previousHtml
+          ? summarizeBaseLayout(previousHtml)
+          : '',
+      });
+      if (result?.htmlResult?.success) previousHtml = result.htmlResult.html;
+      results.push(result);
+    }
+    return results;
+  });
+  return bucketResults.flat();
 }
 
 // 从 beat 的文案信息派生各 primitive slot 的默认取值（overlay 兜底注入用）
@@ -264,7 +327,11 @@ async function runFrameHtmlPhase(ctx) {
   const frameHtmlRunsInParallel = concurrency > 1;
   const generateFrameJob = async job => {
     const { index, node, sceneId, scene, styleReferenceHtml } = job;
-    const assetFirstMotionArgs = resolveAssetFirstMotionArgs(node, creativeContext);
+    // previousBeatSummary 仅 asset_first 分桶路径会写入（hf_first 恒为 undefined，不改变原展开形态）
+    const assetFirstMotionArgs = {
+      ...resolveAssetFirstMotionArgs(node, creativeContext),
+      ...(job.previousBeatSummary ? { previousBeatSummary: job.previousBeatSummary } : {}),
+    };
     await report(onProgress, {
       type: 'html_video_frame_html_started',
       stage: 'project',
@@ -591,20 +658,41 @@ async function runFrameHtmlPhase(ctx) {
 
   if (frameJobs.length) {
     let remainingJobs = frameJobs;
+    // 首帧串行生成时记录其所属 continuity group 的 HTML，作为 asset_first 分桶的初始 previousHtml
+    const initialHtmlByGroup = new Map();
     if (!visualStyleReferenceHtml) {
       const firstResult = await generateFrameJob({
         ...frameJobs[0],
         styleReferenceHtml: '',
       });
       frameResults.push(firstResult);
-      if (firstResult.htmlResult.success) visualStyleReferenceHtml = firstResult.htmlResult.html;
+      if (firstResult.htmlResult.success) {
+        visualStyleReferenceHtml = firstResult.htmlResult.html;
+        if (isAssetFirst) {
+          const firstGroupId = continuityGroupId(frameJobs[0]);
+          if (firstGroupId) initialHtmlByGroup.set(firstGroupId, firstResult.htmlResult.html);
+        }
+      }
       remainingJobs = frameJobs.slice(1);
     }
-    frameResults.push(...await mapLimit(
-      remainingJobs.map(job => ({ ...job, styleReferenceHtml: visualStyleReferenceHtml })),
-      concurrency,
-      generateFrameJob,
-    ));
+    if (isAssetFirst) {
+      // asset_first：按 continuity group 分桶，桶间沿用并发上限、桶内串行传前帧布局摘要
+      const buckets = bucketJobsByContinuityGroup(
+        remainingJobs.map(job => ({ ...job, styleReferenceHtml: visualStyleReferenceHtml })),
+      );
+      frameResults.push(...await runBucketsWithContinuity({
+        buckets,
+        concurrency,
+        runJob: generateFrameJob,
+        initialHtmlByGroup,
+      }));
+    } else {
+      frameResults.push(...await mapLimit(
+        remainingJobs.map(job => ({ ...job, styleReferenceHtml: visualStyleReferenceHtml })),
+        concurrency,
+        generateFrameJob,
+      ));
+    }
   }
 
   for (const frameResult of frameResults.sort((a, b) => a.index - b.index)) {
@@ -776,6 +864,9 @@ module.exports = {
   isProviderMissingText,
   computeFrameHtmlStats,
   ensureMotionOverlay,
+  summarizeBaseLayout,
+  bucketJobsByContinuityGroup,
+  runBucketsWithContinuity,
   FRAME_HTML_CONCURRENCY,
   FRAME_HTML_MODEL_OPTIONS,
 };

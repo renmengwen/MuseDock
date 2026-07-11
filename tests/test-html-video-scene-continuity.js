@@ -47,3 +47,87 @@ const { ensureMotionOverlay } = require('../server/services/creative-video/html-
   assert.strictEqual(result.html, html);
 }
 console.log('ensure motion overlay tests passed');
+
+const { summarizeBaseLayout } = require('../server/services/creative-video/html-video/frameHtmlPhase');
+
+// 摘要：剥离 overlay 节点，保留 base 结构与内联样式要点，限长
+{
+  const html = `<html><body>
+    <div class="hero" style="position:absolute;inset:0;background:#12100e">
+      <img src="assets/generated-image-02.jpg" style="width:100%;height:70%;object-fit:contain">
+    </div>
+    <div data-mp-overlay="key_marker" style="position:absolute;bottom:200px">重点</div>
+  </body></html>`;
+  const summary = summarizeBaseLayout(html);
+  assert.ok(summary.includes('generated-image-02'), '摘要应包含主视觉引用');
+  assert.ok(!summary.includes('data-mp-overlay'), '摘要必须剥离 overlay 节点');
+  assert.ok(summary.length <= 1600, '摘要必须限长');
+}
+console.log('scene continuity phase1 tests passed');
+
+const { bucketJobsByContinuityGroup } = require('../server/services/creative-video/html-video/frameHtmlPhase');
+
+// 分桶不变量：同 scene 的 b2 必须与 b1 同桶（串行、能拿到 summary），不同 scene 不同桶（可并发）
+{
+  const jobs = [
+    { index: 1, node: { metadata: { visual_beat: { id: 's2_b1', continuity: { group_id: 'scene_02', beat_index: 1 } } } } },
+    { index: 2, node: { metadata: { visual_beat: { id: 's2_b2', continuity: { group_id: 'scene_02', beat_index: 2 } } } } },
+    { index: 3, node: { metadata: { visual_beat: { id: 's3_b1', continuity: { group_id: 'scene_03', beat_index: 1 } } } } },
+    { index: 4, node: { metadata: {} } }, // 无组：独立桶（hf_first 形态回归）
+  ];
+  const buckets = bucketJobsByContinuityGroup(jobs);
+  assert.strictEqual(buckets.length, 3);
+  assert.deepStrictEqual(buckets[0].map(j => j.index), [1, 2], '同 scene beat 必须同桶串行');
+  assert.deepStrictEqual(buckets[1].map(j => j.index), [3]);
+  assert.deepStrictEqual(buckets[2].map(j => j.index), [4]);
+}
+console.log('bucket jobs by continuity group tests passed');
+
+const { runBucketsWithContinuity } = require('../server/services/creative-video/html-video/frameHtmlPhase');
+
+// 集成：桶内串行传摘要、桶间可并发（用注入 runJob 验证）
+(async () => {
+  const calls = [];
+  const buckets = bucketJobsByContinuityGroup([
+    { index: 1, node: { metadata: { visual_beat: { id: 's2_b1', continuity: { group_id: 'scene_02', beat_index: 1 } } } } },
+    { index: 2, node: { metadata: { visual_beat: { id: 's2_b2', continuity: { group_id: 'scene_02', beat_index: 2 } } } } },
+    { index: 3, node: { metadata: { visual_beat: { id: 's3_b1', continuity: { group_id: 'scene_03', beat_index: 1 } } } } },
+  ]);
+  const results = await runBucketsWithContinuity({
+    buckets,
+    concurrency: 2,
+    runJob: async job => {
+      calls.push({ id: job.node.metadata.visual_beat.id, summary: job.previousBeatSummary || '' });
+      return { htmlResult: { success: true, html: `<html><body><div class="hero">${job.node.metadata.visual_beat.id}</div></body></html>` } };
+    },
+  });
+  assert.strictEqual(results.length, 3);
+  const b2Call = calls.find(c => c.id === 's2_b2');
+  assert.ok(b2Call.summary.includes('s2_b1'), 's2_b2 必须拿到 s2_b1 的布局摘要');
+  const b1Pos = calls.findIndex(c => c.id === 's2_b1');
+  const b2Pos = calls.findIndex(c => c.id === 's2_b2');
+  assert.ok(b1Pos < b2Pos, '同桶串行：b1 先于 b2');
+
+  // 首帧属于某 continuity group 时：其 HTML 作为该桶初始 previousHtml（分桶前串行生成的首帧场景）
+  const seededCalls = [];
+  const seededBuckets = bucketJobsByContinuityGroup([
+    { index: 2, node: { metadata: { visual_beat: { id: 's1_b2', continuity: { group_id: 'scene_01', beat_index: 2 } } } } },
+  ]);
+  await runBucketsWithContinuity({
+    buckets: seededBuckets,
+    concurrency: 1,
+    initialHtmlByGroup: new Map([
+      ['scene_01', '<html><body><div class="hero">s1_b1-first-frame</div></body></html>'],
+    ]),
+    runJob: async job => {
+      seededCalls.push({ id: job.node.metadata.visual_beat.id, summary: job.previousBeatSummary || '' });
+      return { htmlResult: { success: true, html: '<html><body><div class="hero">s1_b2</div></body></html>' } };
+    },
+  });
+  assert.ok(seededCalls[0].summary.includes('s1_b1-first-frame'), '首帧 HTML 必须作为同组桶的初始摘要来源');
+
+  console.log('run buckets with continuity tests passed');
+})().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
