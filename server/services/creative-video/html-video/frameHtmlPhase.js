@@ -7,6 +7,8 @@ const frameFallbackBuilder = require('./frameFallbackBuilder');
 const { markCheckpointStage, markCheckpointFrame } = require('./projectSchema');
 const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
+const { sliceCaptionsToWindow } = require('./captionLayer');
+const { DEFAULT_FRAME_DURATION_SEC } = require('./contentGraph');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
 const { loadOverlaySnippet, loadDiagramSkeleton, validateOverlayHtml } = require('./motionPrimitiveCatalog');
 const { htmlEscape } = require('./materializer');
@@ -72,23 +74,33 @@ function isSceneHtmlNode(node = {}) {
     || (Array.isArray(node?.metadata?.beat_windows) && node.metadata.beat_windows.length > 0);
 }
 
-// R8：判定某 beat 的时间窗口内是否有系统字幕（与 mixedFrameBuilder 建帧的字幕切窗派生路径完全一致：
-// 整场景字幕轨 normalizeCaptions 后按 beat 前缀时长偏移切窗）。beat 上没有 caption_text 字段，
-// 字幕是建帧阶段从 scene 派生的，因此这里复用同一对函数计算，不新造字段。
+// R8：判定某 beat 的时间窗口内是否有系统字幕，派生路径与 mixedFrameBuilder 建帧侧对齐：
+// 整场景字幕轨 normalizeCaptions（rawHtmlFrameBuilder）后按 beat 前缀时长偏移 sliceCaptionsToWindow
+//（captionLayer）切窗。beat 上没有 caption_text 字段，字幕是建帧阶段从 scene 派生的，
+// 因此这里复用同一对函数计算，不新造字段。
 function hasCaptionsForBeat({ scene = {}, beats = [], beatId = '', mediaOptions = {} } = {}) {
   if (mediaOptions.generateCaptions === false) return false;
-  // 延迟 require 规避循环依赖：mixedFrameBuilder 顶部已 require 本模块（groupBeatsForSceneHtml），
-  // 顶层反向 require 会成环，CommonJS 下可能拿到不完整导出；函数体内加载时双方均已初始化完毕。
-  const { normalizeCaptions: normalizeSceneCaptions, sliceCaptionsToWindow } = require('./mixedFrameBuilder');
-  const sceneBeats = beats.filter(b => b && b.scene_id === (scene.id || scene.scene_id));
+  const sceneId = String(scene.id || scene.scene_id || '').trim();
+  // 与建帧侧一致：无 id 的损坏 beat 跳过（不推进 offset），scene_id 按 String().trim() 对齐比较
+  const sceneBeats = beats.filter(b => b && b.id && String(b.scene_id || '').trim() === sceneId);
   const index = sceneBeats.findIndex(b => b.id === beatId);
   if (index < 0) return false;
+  // 与建帧侧一致：窗口时长/偏移推进用 positiveNumber || DEFAULT_FRAME_DURATION_SEC 兜底
+  const beatWindowSec = b => positiveDurationSec(b.duration_sec) || DEFAULT_FRAME_DURATION_SEC;
   const offsetSec = sceneBeats.slice(0, index)
-    .reduce((sum, b) => sum + (Number(b.duration_sec) || 0), 0);
-  const beatDuration = Number(sceneBeats[index].duration_sec) || 0;
-  const sceneDuration = sceneBeats.reduce((sum, b) => sum + (Number(b.duration_sec) || 0), 0);
-  const track = normalizeSceneCaptions(scene, sceneDuration);
+    .reduce((sum, b) => sum + beatWindowSec(b), 0);
+  const beatDuration = beatWindowSec(sceneBeats[index]);
+  // 与建帧侧一致：场景总时长先取各 beat 时长累计（无效计 0），再退 trustedSceneDuration 兜底
+  const sceneDuration = sceneBeats.reduce((sum, b) => sum + (positiveDurationSec(b.duration_sec) || 0), 0)
+    || trustedSceneDuration(scene);
+  const track = normalizeCaptions(scene, sceneDuration);
   return sliceCaptionsToWindow(track, offsetSec, beatDuration).length > 0;
+}
+
+// 与 mixedFrameBuilder.positiveNumber 同语义的小工具（正有限数或 null）
+function positiveDurationSec(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
 }
 
 // scene_html 的 scene 级 prompt 约束段：data-mp-beat-scope 约定 + CSS 可见性规则示例 +

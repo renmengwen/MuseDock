@@ -354,11 +354,4 @@ async function buildMixedFrameProject({
   });
 }
 
-module.exports = {
-  buildMixedFrameProject,
-  buildSceneRenderEntries,
-  // 建帧用的字幕派生函数（normalizeCaptions 来自 rawHtmlFrameBuilder、sliceCaptionsToWindow 来自 captionLayer），
-  // re-export 供 frameHtmlPhase.hasCaptionsForBeat 走与建帧完全一致的派生路径；实现不动，仅导出。
-  normalizeCaptions,
-  sliceCaptionsToWindow,
-};
+module.exports = { buildMixedFrameProject, buildSceneRenderEntries };
