@@ -76,4 +76,20 @@ const { loadDiagramSkeleton } = require('../server/services/creative-video/html-
   assert.strictEqual(bad.valid, false);
   assert.strictEqual(bad.reason_code, 'overlay_covers_full_frame');
 }
+
+// P1-B 回归：全部内置 primitive 的真实 overlay.html 必须通过安全区校验
+// （缺失 bottom 的 top+height 布局不得被 pxNumber('')===0 误判为 bottom:0）
+for (const id of Object.keys(MOTION_PRIMITIVES)) {
+  const result = validateOverlayHtml(loadOverlaySnippet(id), { height: 1920 });
+  assert.strictEqual(result.valid, true, `内置 primitive ${id} 不得被误判：${JSON.stringify(result)}`);
+}
+// top+height 越界仍要拦：top:1700px + height:200px（1900 > 1920-140）
+{
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="x" style="position:absolute;left:48px;right:48px;top:1700px;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false);
+  assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
+}
 console.log('motion primitive catalog tests passed');

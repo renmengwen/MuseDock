@@ -770,5 +770,90 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   assert.equal(overlayHfFirst.diagnostics.some(item => item.code === 'overlay_in_caption_safe_area'), false, 'hf_first 下 gate 不得产生 overlay issue');
   console.log('validation gate overlay tests passed');
 
+  // ===== P2-B：无图 diagram beat 的骨架确定性校验（warning 级，不阻断）=====
+  await writeFile(path.join(rawHtmlProjectDir, 'frames', 'diagram-missing-base.html'), [
+    '<!doctype html>',
+    '<html><body>',
+    '<main>',
+    '<h1 data-text-key="headline">大标题</h1>',
+    "<p data-text-key='subtitle'>短字幕</p>",
+    '<section data-text-key="body">正文</section>',
+    '</main>',
+    '<div data-mp-overlay="key_marker" style="position:absolute;left:48px;right:48px;bottom:200px;height:200px"></div>',
+    '</body></html>',
+  ].join('\n'));
+  await writeFile(path.join(rawHtmlProjectDir, 'frames', 'diagram-with-base.html'), [
+    '<!doctype html>',
+    '<html><body>',
+    '<main data-mp-diagram-base="diagram">',
+    '<h1 data-text-key="headline">大标题</h1>',
+    "<p data-text-key='subtitle'>短字幕</p>",
+    '<section data-text-key="body">正文</section>',
+    '</main>',
+    '</body></html>',
+  ].join('\n'));
+  const diagramProject = (strategy, { htmlPath, beatVisualBaseType } = {}) => ({
+    template_id: 'valid',
+    template_inputs: {},
+    visual_strategy: strategy,
+    visual_plan: {
+      beats: [
+        {
+          id: 'scene_07_b1',
+          scene_id: 'scene_07',
+          visual_base: beatVisualBaseType ? { type: beatVisualBaseType } : null,
+        },
+      ],
+    },
+    frames: [
+      {
+        id: 'scene_07_b1',
+        beat_id: 'scene_07_b1',
+        scene_id: 'scene_07',
+        template_id: 'valid',
+        source_mode: 'raw_html',
+        inputs: {},
+        html_path: htmlPath,
+      },
+    ],
+    timeline: { tracks: [{ id: 'main', items: [{ id: 'scene_07_b1', kind: 'frame' }] }] },
+  });
+  // diagram beat + 无 data-mp-diagram-base → warning 存在且不阻断
+  const diagramMissing = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: diagramProject('asset_first', { htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'diagram' }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(diagramMissing.ok, true, 'diagram 骨架校验为 warning 级，不得阻断');
+  const diagramDiagnostic = diagramMissing.diagnostics.find(item => item.code === 'diagram_base_missing');
+  assert.ok(diagramDiagnostic, 'diagram beat 缺骨架应产生 diagram_base_missing 警告');
+  assert.equal(diagramDiagnostic.severity, 'warning');
+  // diagram beat + 含骨架 HTML → 无该 warning
+  const diagramPresent = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: diagramProject('asset_first', { htmlPath: 'frames/diagram-with-base.html', beatVisualBaseType: 'diagram' }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(diagramPresent.diagnostics.some(item => item.code === 'diagram_base_missing'), false, '含骨架 HTML 不得报 diagram_base_missing');
+  // 非 diagram beat → 无该 warning
+  const diagramNotDiagramBeat = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: diagramProject('asset_first', { htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'asset' }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(diagramNotDiagramBeat.diagnostics.some(item => item.code === 'diagram_base_missing'), false, '非 diagram beat 不得报 diagram_base_missing');
+  // hf_first → 无该 warning（硬约束 A）
+  const diagramHfFirst = await validateHtmlVideoProject({
+    projectDir: rawHtmlProjectDir,
+    project: diagramProject('hf_first', { htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'diagram' }),
+    templateRegistry: registry,
+    environment: { ok: true, diagnostics: [] },
+  });
+  assert.equal(diagramHfFirst.diagnostics.some(item => item.code === 'diagram_base_missing'), false, 'hf_first 不得报 diagram_base_missing');
+  console.log('validation gate diagram base tests passed');
+
   console.log('html-video validation gate tests passed');
 })();

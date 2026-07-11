@@ -497,6 +497,95 @@ const stubAiImageModel = { isConfigured: async () => false };
     );
   }
 
+  // P1-A（决策2）：resume 二次执行不带 creativeContext.visual_strategy 时，
+  // 必须从落盘 project.json 回填策略，render_decisions 仍全是 raw_html + route_role。
+  {
+    projectOrchestrator.renderHtmlVideoProject = async ({ project: renderProject, projectDir: renderProjectDir }) => ({
+      success: true,
+      message: 'mock render success',
+      project: renderProject,
+      project_dir: renderProjectDir,
+      html_video_project_path: renderProjectDir,
+      output_path: path.join(renderProjectDir, 'exports', 'output.mp4'),
+      diagnostics: [],
+    });
+    let resumeResult;
+    try {
+      resumeResult = await workflow.generateHtmlVideo({
+        workflowId: 'wf-per-scene-asset-first',
+        runId: 'run-per-scene-asset-first',
+        rootDir: assetFirstRootDir,
+        sceneSpec: workflowSceneSpec,
+        // 关键：retry/resume 调用不带 visual_strategy，模拟只带 projectDir/workflowId/runId/sceneSpec 的重试入口
+        creativeContext: { input: { raw_text: '图片优先逐场景' } },
+        target: { generateAudio: false, generateCaptions: false },
+        templateRegistry: registry,
+        skipValidation: true,
+        services: {
+          aiImageModel: generatingImageModel,
+          generatedImagePlanner: {
+            planGeneratedImages: async () => ({
+              success: true,
+              plans: [{ scene_id: 'scene_data', generation_prompt: '核心指标主视觉插画' }],
+            }),
+          },
+          aiTextModel: {
+            callTextModel: async request => {
+              const prompt = request.messages.map(item => item.content).join('\n');
+              if (prompt.startsWith('你是 html-video 的 content graph')) {
+                return {
+                  success: true,
+                  text: JSON.stringify({
+                    synopsis: '图片优先逐场景',
+                    nodes: workflowSceneSpec.scenes.map(scene => ({
+                      id: scene.id,
+                      kind: scene.kind,
+                      label: scene.visual_text.headline,
+                      durationSec: scene.duration_sec,
+                      text: scene.narration_text,
+                    })),
+                    edges: workflowSceneSpec.scenes.slice(1).map((scene, index) => ({
+                      from: workflowSceneSpec.scenes[index].id,
+                      to: scene.id,
+                      kind: 'sequence',
+                    })),
+                  }),
+                };
+              }
+              const frameId = request.audit?.frame_id || 'scene_free';
+              const imageTag = String(frameId).startsWith('scene_data')
+                ? '<img src="../assets/generated-01.png" alt="主视觉">'
+                : '';
+              return {
+                success: true,
+                text: `<!doctype html><html><body><main data-frame-id="${frameId}">${imageTag}<h1 data-text-key="headline">自由内容</h1><p data-text-key="subtitle">字幕</p><section data-text-key="body">正文</section></main></body></html>`,
+              };
+            },
+          },
+          environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        },
+      });
+    } finally {
+      projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
+    }
+    assert.equal(resumeResult.success, true, JSON.stringify({
+      message: resumeResult.message,
+      diagnostics: resumeResult.html_video_diagnostics,
+    }, null, 2));
+    assert.strictEqual(resumeResult.project.visual_strategy, 'asset_first',
+      'resume 后 project.visual_strategy 不得被 creativeContext 缺省值冲掉');
+    const resumeDecisions = resumeResult.project.render_decisions || [];
+    assert.ok(resumeDecisions.length > 0, 'resume 应产生 render_decisions');
+    for (const d of resumeDecisions) {
+      assert.ok(
+        typeof d.route_role === 'string' && d.route_role.length > 0,
+        `resume 后 asset_first 决策必须仍带 route_role（策略需从落盘 project 回填）：${JSON.stringify(d)}`,
+      );
+      assert.strictEqual(d.source_mode, 'raw_html',
+        `resume 后 asset_first 决策必须仍为 raw_html：${JSON.stringify(d)}`);
+    }
+  }
+
   // 绑定 helper：不改入参（保证 scene_spec_hash 稳定）、结果确定性、不重复写入
   {
     const bindSpec = {

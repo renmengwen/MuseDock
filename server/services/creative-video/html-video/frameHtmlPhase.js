@@ -327,6 +327,37 @@ async function inspectGeneratedFrameLayout({
   }
 }
 
+// P2-A：复用帧也要进入连续性与统计链路（asset_first 专用）：
+// (1) 复用 HTML 产生与新生成帧同构的 stats/overlay_check，避免全复用/半复用时 render_decisions 统计丢失；
+// (2) 按 continuity group 记录复用 HTML 作为桶初始 previousHtml，同组 beat_index 大者覆盖小者
+//（组内靠后的帧对后续定向重试的 beat 更准）。空 HTML 容错跳过。
+function collectReusedFrameContext({
+  node,
+  html,
+  frameKey,
+  frameHeight = 1920,
+  statsByBeatId = {},
+  initialHtmlByGroup = new Map(),
+  reusedBeatIndexByGroup = new Map(),
+} = {}) {
+  const text = String(html || '');
+  if (!text.trim() || !frameKey) return;
+  statsByBeatId[frameKey] = {
+    ...computeFrameHtmlStats(text),
+    overlay_check: /data-mp-overlay/.test(text)
+      ? validateOverlayHtml(text, { height: frameHeight })
+      : null,
+  };
+  const groupId = continuityGroupId({ node });
+  if (!groupId) return;
+  const beatIndex = Number(node?.metadata?.visual_beat?.continuity?.beat_index) || 1;
+  const currentIndex = reusedBeatIndexByGroup.get(groupId);
+  if (currentIndex === undefined || beatIndex >= currentIndex) {
+    reusedBeatIndexByGroup.set(groupId, beatIndex);
+    initialHtmlByGroup.set(groupId, text);
+  }
+}
+
 /**
  * 生成（或复用）每一帧的 HTML，并写盘 + 打 checkpoint。
  * 行为与原 generateHtmlVideo 内联实现 1:1 一致。
@@ -369,6 +400,10 @@ async function runFrameHtmlPhase(ctx) {
   let visualStyleReferenceHtml = '';
   const frameResults = [];
   const frameJobs = [];
+  // asset_first：复用帧与串行首帧共同维护「按 continuity group 的初始 previousHtml」，
+  // 供分桶调度作为同组后续 beat 的布局摘要来源（hf_first 恒为空 Map，不参与）。
+  const initialHtmlByGroup = new Map();
+  const reusedBeatIndexByGroup = new Map();
   let completedFrameHtmlCount = 0;
   const concurrency = Math.min(5, Math.max(1, Math.round(Number(frameHtmlConcurrency) || FRAME_HTML_CONCURRENCY)));
   const frameHtmlRunsInParallel = concurrency > 1;
@@ -667,6 +702,18 @@ async function runFrameHtmlPhase(ctx) {
         return current;
       });
       if (!visualStyleReferenceHtml) visualStyleReferenceHtml = reuse.html;
+      // P2-A：复用帧进入统计与连续性链路（仅 asset_first；hf_first 不产生任何新统计/上下文）
+      if (isAssetFirst) {
+        collectReusedFrameContext({
+          node,
+          html: reuse.html,
+          frameKey: frameKey || node.id || sceneId,
+          frameHeight: Number(frameHtmlAgent.resolveResolution(templateRenderTarget)?.height) || 1920,
+          statsByBeatId,
+          initialHtmlByGroup,
+          reusedBeatIndexByGroup,
+        });
+      }
       completedFrameHtmlCount += 1;
       await report(onProgress, {
         type: 'html_video_frame_html_done',
@@ -706,8 +753,7 @@ async function runFrameHtmlPhase(ctx) {
 
   if (frameJobs.length) {
     let remainingJobs = frameJobs;
-    // 首帧串行生成时记录其所属 continuity group 的 HTML，作为 asset_first 分桶的初始 previousHtml
-    const initialHtmlByGroup = new Map();
+    // 首帧串行生成时记录其所属 continuity group 的 HTML（复用帧已在上方循环写入 initialHtmlByGroup）
     if (!visualStyleReferenceHtml) {
       const firstResult = await generateFrameJob({
         ...frameJobs[0],
@@ -964,6 +1010,7 @@ module.exports = {
   computeFrameHtmlStats,
   ensureMotionOverlay,
   summarizeBaseLayout,
+  collectReusedFrameContext,
   buildSceneBeatsBrief,
   bucketJobsByContinuityGroup,
   runBucketsWithContinuity,

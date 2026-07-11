@@ -151,3 +151,29 @@ const textBeatWithAsset = {
   assert.strictEqual(d.diagnostic.code, 'visual_route_fallback');
 }
 console.log('visual-route-matcher asset_first routing tests passed');
+
+// 5) P3：route_role 无图语义与 visual_base 对齐——所有无 asset 的 beat（含 kind:'data' 等）
+// 统一 diagram_motion，与 visual plan 给全部无图 beat visual_base.type='diagram' 一致。
+{
+  const dataBeatNoAsset = {
+    id: 'scene_05_b1', scene_id: 'scene_05', kind: 'data', duration_sec: 4.2,
+    narration_text: '核心指标达到 88.6%。', visual_text: { headline: '核心指标 88.6%' },
+    asset_refs: [],
+  };
+  const unknownKindBeatNoAsset = {
+    id: 'scene_06_b1', scene_id: 'scene_06', kind: 'unknown', duration_sec: 3,
+    narration_text: '自由场景。', visual_text: { headline: '自由内容' },
+    asset_refs: [],
+  };
+  const decisions = matchVisualBeatsToRenderers({
+    visualPlan: { beats: [dataBeatNoAsset, unknownKindBeatNoAsset] },
+    registry: fakeRegistry(),
+    renderTarget: { aspectRatio: '9:16' },
+    options: { visualStrategy: 'asset_first' },
+  });
+  assert.strictEqual(decisions.get('scene_05_b1').route_role, 'diagram_motion',
+    'kind:data 无图 beat 必须 diagram_motion，与 visual_base.type=diagram 语义一致');
+  assert.strictEqual(decisions.get('scene_06_b1').route_role, 'diagram_motion',
+    '任何 kind 的无图 beat 都统一 diagram_motion');
+}
+console.log('visual-route-matcher diagram_motion unification tests passed');

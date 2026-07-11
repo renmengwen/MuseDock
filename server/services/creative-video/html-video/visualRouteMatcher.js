@@ -1,6 +1,8 @@
 const { orderedCandidates, passCandidate, getTemplate, blocksAssetFirstFullFrame } = require('./sceneTemplateMatcher');
 
-const DIAGRAM_KINDS = new Set(['text', 'quote', 'steps', 'comparison']);
+// P3：route_role 无图语义与 visual_base 对齐——visual plan 对所有无 asset 的 beat 统一给
+// visual_base.type='diagram'，路由侧同样统一 diagram_motion，不再按 kind 分叉。
+// caption_motion 枚举保留不用，预留给未来明确不需要结构图的极小信息 beat。
 
 // 决策 3：asset_first 下 template_inputs 归零，兼容模板白名单不实现（见开放设计决策 1）。
 function assetFirstDecision(beat) {
@@ -22,7 +24,7 @@ function assetFirstDecision(beat) {
     beat_id: beat.id,
     scene_id: beat.scene_id,
     source_mode: 'raw_html',
-    route_role: DIAGRAM_KINDS.has(beat.kind || 'text') ? 'diagram_motion' : 'caption_motion',
+    route_role: 'diagram_motion',
     template_id: null,
     duration_strategy: 'raw_html',
     confidence: 0.9,

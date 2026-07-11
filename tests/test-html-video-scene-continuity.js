@@ -242,6 +242,79 @@ const { resolveRetryFrameIds } = require('../server/services/creative-video/retr
   assert.deepStrictEqual(ids, ['scene_05_b2']); // 缺省行为不变
 }
 
+// P2-A：复用帧必须进入连续性与统计链路（collectReusedFrameContext）
+const { collectReusedFrameContext } = require('../server/services/creative-video/html-video/frameHtmlPhase');
+{
+  const statsByBeatId = {};
+  const initialHtmlByGroup = new Map();
+  const reusedBeatIndexByGroup = new Map();
+  const b1Html = '<html><body><div class="hero card">s2_b1-reused</div><div data-mp-overlay="key_marker" style="position:absolute;left:48px;right:48px;bottom:200px;height:200px"></div></body></html>';
+  collectReusedFrameContext({
+    node: { id: 's2_b1', beat_id: 'scene_02_b1', metadata: { visual_beat: { id: 'scene_02_b1', continuity: { group_id: 'scene_02', beat_index: 1 } } } },
+    html: b1Html,
+    frameKey: 'scene_02_b1',
+    frameHeight: 1920,
+    statsByBeatId,
+    initialHtmlByGroup,
+    reusedBeatIndexByGroup,
+  });
+  // (1) 复用 HTML 必须产生统计与 overlay 校验结果
+  const stats = statsByBeatId.scene_02_b1;
+  assert.ok(stats, '复用帧必须写入 statsByBeatId');
+  assert.ok(Number.isFinite(stats.text_blocks), '复用帧必须有静态结构统计');
+  assert.ok(stats.overlay_check && stats.overlay_check.valid === true, '含 overlay 的复用帧必须有 overlay_check');
+  // (2) initialHtmlByGroup 拿到该组 HTML
+  assert.strictEqual(initialHtmlByGroup.get('scene_02'), b1Html, '复用帧 HTML 必须按 continuity group 写入 initialHtmlByGroup');
+  // (3) 同组多帧复用：beat_index 大者覆盖小者（组内靠后的帧对后续 beat 更准）
+  const b2Html = '<html><body><div class="hero">s2_b2-reused</div></body></html>';
+  collectReusedFrameContext({
+    node: { id: 's2_b2', beat_id: 'scene_02_b2', metadata: { visual_beat: { id: 'scene_02_b2', continuity: { group_id: 'scene_02', beat_index: 2 } } } },
+    html: b2Html,
+    frameKey: 'scene_02_b2',
+    frameHeight: 1920,
+    statsByBeatId,
+    initialHtmlByGroup,
+    reusedBeatIndexByGroup,
+  });
+  assert.strictEqual(initialHtmlByGroup.get('scene_02'), b2Html, '同组 beat_index 更大的复用帧必须覆盖');
+  assert.strictEqual(statsByBeatId.scene_02_b2.overlay_check, null, '无 overlay 的复用帧 overlay_check 为 null');
+  // (4) 逆序不覆盖：beat_index 小者不得盖掉大者
+  collectReusedFrameContext({
+    node: { id: 's2_b1x', beat_id: 'scene_02_b1', metadata: { visual_beat: { id: 'scene_02_b1', continuity: { group_id: 'scene_02', beat_index: 1 } } } },
+    html: b1Html,
+    frameKey: 'scene_02_b1',
+    frameHeight: 1920,
+    statsByBeatId,
+    initialHtmlByGroup,
+    reusedBeatIndexByGroup,
+  });
+  assert.strictEqual(initialHtmlByGroup.get('scene_02'), b2Html, 'beat_index 小的复用帧不得覆盖大的');
+  // (5) 无 continuity group 的节点：只写统计，不动 initialHtmlByGroup
+  collectReusedFrameContext({
+    node: { id: 'scene_09', metadata: {} },
+    html: '<html><body><p>free</p></body></html>',
+    frameKey: 'scene_09',
+    frameHeight: 1920,
+    statsByBeatId,
+    initialHtmlByGroup,
+    reusedBeatIndexByGroup,
+  });
+  assert.ok(statsByBeatId.scene_09, '无组复用帧也要有统计');
+  assert.strictEqual(initialHtmlByGroup.size, 1, '无组复用帧不写 initialHtmlByGroup');
+  // (6) 空 HTML 容错跳过
+  collectReusedFrameContext({
+    node: { id: 'scene_10', metadata: {} },
+    html: '',
+    frameKey: 'scene_10',
+    frameHeight: 1920,
+    statsByBeatId,
+    initialHtmlByGroup,
+    reusedBeatIndexByGroup,
+  });
+  assert.ok(!('scene_10' in statsByBeatId), '空 HTML 不产生统计条目');
+}
+console.log('collect reused frame context tests passed');
+
 // R2：renderCheckpointKey 对 scene frame 必须返回 frame.id
 const { renderCheckpointKey } = require('../server/services/creative-video/html-video/projectOrchestrator');
 assert.strictEqual(

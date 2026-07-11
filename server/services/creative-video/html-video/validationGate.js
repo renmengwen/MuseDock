@@ -208,6 +208,13 @@ async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames 
   const output = objectOrEmpty(project.output);
   const resolution = objectOrEmpty(output.resolution);
   const visualStrategy = project.visual_strategy || null;
+  // P2-B：无图 diagram beat 的骨架确定性校验（asset_first 专属，warning 级不阻断）。
+  // beat 信息从 project.visual_plan.beats 按 frame.beat_id 查（gate 现有可达上下文）。
+  const beatsById = new Map(
+    arrayOrEmpty(objectOrEmpty(project.visual_plan).beats)
+      .filter(beat => beat && beat.id)
+      .map(beat => [beat.id, beat]),
+  );
   for (const frame of frames) {
     const html = await readFrameHtmlForValidation(projectDir, frame, diagnostics);
     if (html == null) continue;
@@ -237,6 +244,16 @@ async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames 
       warningDiagnostic(diagnostics, issue.code, 'frame', issue.message || 'motion overlay 不符合安全区约束。', {
         frame_id: frame.id,
       });
+    }
+    // 无图 diagram beat 的 HTML 必须使用统一骨架（data-mp-diagram-base）；缺失只告警不阻断
+    if (visualStrategy === 'asset_first') {
+      const beat = beatsById.get(String(frame.beat_id || frame.beatId || '').trim());
+      if (beat && objectOrEmpty(beat.visual_base).type === 'diagram' && !html.includes('data-mp-diagram-base')) {
+        warningDiagnostic(diagnostics, 'diagram_base_missing', 'frame', '无图 beat 未使用统一 diagram 骨架（缺少 data-mp-diagram-base）。', {
+          frame_id: frame.id,
+          beat_id: beat.id,
+        });
+      }
     }
   }
 }

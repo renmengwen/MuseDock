@@ -82,7 +82,10 @@ function parseStyle(styleText = '') {
 }
 
 function pxNumber(value) {
-  const number = Number(String(value || '').replace(/px$/, ''));
+  const text = String(value ?? '').trim();
+  // 缺失/空值不折算成 0：Number('')===0 会把无 bottom 的 top 布局误判成 bottom:0
+  if (!text) return null;
+  const number = Number(text.replace(/px$/, ''));
   return Number.isFinite(number) ? number : null;
 }
 
@@ -95,14 +98,27 @@ function validateOverlayHtml(html = '', { height = 1920 } = {}) {
     return { valid: false, reason_code: 'overlay_covers_full_frame', message: 'overlay 不允许整屏覆盖主视觉' };
   }
   const bottom = pxNumber(style.bottom);
-  if (bottom !== null && bottom < CAPTION_SAFE_BOTTOM_PX) {
-    return {
-      valid: false,
-      reason_code: 'overlay_in_caption_safe_area',
-      message: `overlay 底边距 ${bottom}px 侵入字幕安全区（需 >= ${CAPTION_SAFE_BOTTOM_PX}px）`,
-    };
-  }
+  const top = pxNumber(style.top);
   const overlayHeight = pxNumber(style.height);
+  if (bottom !== null) {
+    if (bottom < CAPTION_SAFE_BOTTOM_PX) {
+      return {
+        valid: false,
+        reason_code: 'overlay_in_caption_safe_area',
+        message: `overlay 底边距 ${bottom}px 侵入字幕安全区（需 >= ${CAPTION_SAFE_BOTTOM_PX}px）`,
+      };
+    }
+  } else if (top !== null && overlayHeight !== null) {
+    // 无 bottom 的 top+height 布局：下边缘 top+height 不得进入底部字幕安全区
+    if (top + overlayHeight > height - CAPTION_SAFE_BOTTOM_PX) {
+      return {
+        valid: false,
+        reason_code: 'overlay_in_caption_safe_area',
+        message: `overlay 下边缘 ${top + overlayHeight}px 侵入字幕安全区（需 <= ${height - CAPTION_SAFE_BOTTOM_PX}px）`,
+      };
+    }
+  }
+  // bottom/top+height 都取不到时不判定该项，保持 valid
   if (overlayHeight !== null && overlayHeight > height * 0.6) {
     return { valid: false, reason_code: 'overlay_too_tall', message: 'overlay 高度超过画面 60%，会遮挡主体' };
   }

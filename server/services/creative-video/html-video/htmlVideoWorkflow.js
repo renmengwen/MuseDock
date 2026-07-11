@@ -1553,6 +1553,15 @@ async function generateHtmlVideo(options = {}) {
   if (!resumeProject) {
     projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
   }
+  // 决策2：resume 时以落盘 project 的策略为兜底，保证二次执行（retry/resume 不带 creativeContext 策略）
+  // 不掉 asset_first；creativeContext 显式值优先，hf_first 工程（落盘为 null）合并后仍为 null。
+  if (resumeProject) {
+    creativeContext = {
+      ...creativeContext,
+      visual_strategy: creativeContext?.visual_strategy || resumeProject.visual_strategy || null,
+      continuity_mode: creativeContext?.continuity_mode || resumeProject.continuity_mode || null,
+    };
+  }
   model = createAuditedModel(model, projectDir);
   // 尽早广播工程目录：任务运行中前端轮询依赖它水合生成图等工程内素材
   await report(onProgress, {
