@@ -452,13 +452,18 @@ function fanOutAssetFirstOverridesToBeats({ perSceneDecisions, visualPlan, visua
 // 闭包引用的 visualDecisions/renderDecisions 源对象，直接写 project.render_decisions
 // 会在下一次 attachVisualRouting 重挂时被覆盖抹掉。
 // scene_html 模式下 statsByBeatId 的键是 scene:<scene_id>（决策仍按 beat_id 键控），
-// beat 键 miss 时按 scene 键回落，把整场景 HTML 的统计展开到该 scene 全部 beat 决策上。
+// beat 键 miss 时按 scene 键回落，把整场景 HTML 的统计展开到该 scene 全部 beat 决策上，
+// 并打 stats_scope:'scene' 标记（下游 QA 对 scene 维度统计按 scene 去重，避免 N 倍重复告警）。
 function mergeFrameStatsIntoDecisions({ visualDecisions, renderDecisions, statsByBeatId = {} }) {
   const applyTo = decision => {
     if (!decision) return;
-    const stats = statsByBeatId[decision.beat_id]
-      || statsByBeatId[`scene:${String(decision.scene_id || '').trim()}`];
-    if (stats) Object.assign(decision, stats); // { overlay_check, text_blocks, cards, graphics }
+    const beatStats = statsByBeatId[decision.beat_id];
+    if (beatStats) {
+      Object.assign(decision, beatStats); // { overlay_check, text_blocks, cards, graphics }
+      return;
+    }
+    const sceneStats = statsByBeatId[`scene:${String(decision.scene_id || '').trim()}`];
+    if (sceneStats) Object.assign(decision, sceneStats, { stats_scope: 'scene' });
   };
   if (visualDecisions instanceof Map) for (const decision of visualDecisions.values()) applyTo(decision);
   if (Array.isArray(renderDecisions)) for (const decision of renderDecisions) applyTo(decision);

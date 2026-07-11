@@ -463,8 +463,20 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(warnings[0].code, 'asset_first_overlay_caption_overlap');
     assert.strictEqual(warnings[0].details.beat_id, 'scene_04_b1');
     assert.deepStrictEqual(mapOverlayChecksToQaWarnings(decisions, { visualStrategy: 'hf_first' }), []);
+    // scene_html 回落展开（stats_scope:'scene'）：同 scene 复制的整场景 overlay_check 只报一条；
+    // beat 级（无标记）仍逐条报
+    const sceneScoped = [
+      { beat_id: 'scene_07_b1', scene_id: 'scene_07', stats_scope: 'scene', overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area' } },
+      { beat_id: 'scene_07_b2', scene_id: 'scene_07', stats_scope: 'scene', overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area' } },
+      { beat_id: 'scene_08_b1', scene_id: 'scene_08', overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area' } },
+      { beat_id: 'scene_08_b2', scene_id: 'scene_08', overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area' } },
+    ];
+    const dedup = mapOverlayChecksToQaWarnings(sceneScoped, { visualStrategy: 'asset_first' });
+    assert.strictEqual(dedup.length, 3, 'scene scope 去重为 1 条 + beat 级 2 条');
+    assert.strictEqual(dedup.filter(w => w.details.scene_id === 'scene_07').length, 1);
   }
-  // 边界成对采样：pairedSampling 开启时 times = [cursor-0.3, cursor+0.3]；缺省与现状一致
+  // 边界成对采样（Important 1 修正）：pairedSampling 只对 same_scene 边界给 [∓0.3s]，
+  // 跨 scene 边界保留 [b, b+0.5, b+1.0]（blank_segment_boundary 检测口径不变）；缺省与现状一致
   {
     const project = { frames: [
       { scene_id: 'scene_05', duration_sec: 6.33 },
@@ -476,11 +488,17 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(paired[0].same_scene, true);
     const legacy = projectBoundarySampleGroups(project, 12.66);
     assert.deepStrictEqual(legacy[0].times, [6.33, 6.83, 7.33], '缺省采样与现状完全一致（硬约束 A）');
-    const crossScene = projectBoundarySampleGroups({ frames: [
+    // 混合序列：same_scene 边界成对采样，跨 scene 边界维持旧三点采样
+    const mixed = projectBoundarySampleGroups({ frames: [
+      { scene_id: 'scene_01', duration_sec: 4 },
       { scene_id: 'scene_01', duration_sec: 4 },
       { scene_id: 'scene_02', duration_sec: 4 },
-    ] }, 8, { pairedSampling: true });
-    assert.strictEqual(crossScene[0].same_scene, false, '跨 scene 边界 same_scene=false');
+    ] }, 12, { pairedSampling: true });
+    assert.strictEqual(mixed.length, 2);
+    assert.strictEqual(mixed[0].same_scene, true);
+    assert.deepStrictEqual(mixed[0].times, [3.7, 4.3], 'same_scene 边界 => 成对采样');
+    assert.strictEqual(mixed[1].same_scene, false, '跨 scene 边界 same_scene=false');
+    assert.deepStrictEqual(mixed[1].times, [8, 8.5, 9], '跨 scene 边界保留旧采样，空白检测不降敏');
   }
   // 7.1 Minor 顺手修：before/after 指标非有限值（如缺帧兜底对象）跳过该组，不误报
   {
@@ -491,6 +509,68 @@ const qa = require('../server/services/creative-video/visualQaService');
         before: { average_luma: 200, edge_score: 0.3 }, after: { average_luma: 40, edge_score: undefined } },
     ], { visualStrategy: 'asset_first', diffThreshold: 0.25 });
     assert.deepStrictEqual(warnings, [], '非有限指标与缺帧同语义：跳过不误报');
+  }
+  // Important 6：中间层接线 —— 以 asset_first 真实调用 inspectRenderedVideo（注入 probeVideo/sampleFrames），
+  // 断言 warnings 汇总进报告且 success 不受影响；同输入 hf_first 时无 warnings 字段
+  {
+    const assetFirstProject = {
+      visual_strategy: 'asset_first',
+      frames: [
+        { id: 'scene_01_b1', scene_id: 'scene_01', duration_sec: 2, captions: [{ start: 0, end: 1.5, text: '旁白' }] },
+        { id: 'scene_02_b1', scene_id: 'scene_02', duration_sec: 2, captions: [] },
+      ],
+      render_decisions: [
+        {
+          beat_id: 'scene_01_b1', scene_id: 'scene_01', source_mode: 'raw_html', route_role: 'diagram_motion',
+          text_blocks: 1, cards: 0, graphics: 0,
+          overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'overlay 落入字幕安全区' },
+        },
+        {
+          beat_id: 'scene_02_b1', scene_id: 'scene_02', source_mode: 'raw_html', route_role: 'asset_overlay',
+          text_blocks: 5, cards: 1, graphics: 2,
+          overlay_check: { valid: true },
+        },
+      ],
+      asset_usage_report: {
+        assets: [
+          { asset_id: 'gen_scene_02', required: true, used: false, used_in_frames: [], expected_in_frames: ['scene_02_b1'] },
+        ],
+        required_asset_ids: ['gen_scene_02'],
+        missing_required_asset_ids: ['gen_scene_02'],
+      },
+    };
+    const healthySamples = [
+      { id: 'frame_0', time_sec: 0, average_luma: 100, luma_stddev: 40, edge_score: 20, color_variance: 30, fingerprint: 'a' },
+      { id: 'frame_1', time_sec: 1, average_luma: 110, luma_stddev: 41, edge_score: 21, color_variance: 31, fingerprint: 'b' },
+      { id: 'frame_2', time_sec: 2, average_luma: 120, luma_stddev: 42, edge_score: 22, color_variance: 32, fingerprint: 'c' },
+      { id: 'frame_3', time_sec: 3, average_luma: 130, luma_stddev: 43, edge_score: 23, color_variance: 33, fingerprint: 'd' },
+    ];
+    const injectedServices = {
+      probeVideo: async () => ({ width: 1080, height: 1920, duration: 4 }),
+      sampleFrames: async () => healthySamples,
+    };
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      project: assetFirstProject,
+      visualStrategy: 'asset_first',
+      services: injectedServices,
+    });
+    assert.strictEqual(report.success, true, 'warnings 不得影响 success');
+    assert.deepStrictEqual(report.issues, []);
+    const codes = new Set((report.warnings || []).map(w => w.code));
+    assert.ok(codes.has('asset_first_asset_missing'), `缺失素材应映射为 warning，实际：${[...codes].join(',')}`);
+    assert.ok(codes.has('asset_first_overlay_caption_overlap'), `overlay 越界应映射为 warning，实际：${[...codes].join(',')}`);
+    assert.ok(codes.has('asset_first_low_information'), `无图低密度 beat 应映射为 warning，实际：${[...codes].join(',')}`);
+    const hfReport = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      project: assetFirstProject,
+      visualStrategy: 'hf_first',
+      services: injectedServices,
+    });
+    assert.strictEqual(hfReport.success, true);
+    assert.strictEqual(hfReport.warnings, undefined, 'hf_first 报告不得出现 warnings 字段（硬约束 A）');
   }
   console.log('visual qa asset_first density/drift tests passed');
 

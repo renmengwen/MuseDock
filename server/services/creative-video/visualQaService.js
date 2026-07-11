@@ -232,7 +232,10 @@ function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
   };
 }
 
-// pairedSampling（asset_first 专用）：边界前后各取一帧（∓0.3s）供同 scene 边界差分；
+// pairedSampling（asset_first 专用）：仅对 same_scene===true 的边界改为成对采样（∓0.3s）供差分；
+// 跨 scene 边界保留 [b, b+0.5, b+1.0]，blank_segment_boundary 检测口径不变。
+// 代价：same_scene 边界的 blank_segment_boundary 降敏（成对两点需同时空白，边界后白屏闪现难命中），
+// 该类边界的整帧重刷/白屏改由 asset_first_boundary_refresh 差分检测覆盖。
 // 缺省（hf_first/safetyOnly）采样时间逐值与原实现一致（硬约束 A）。
 function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSampling = false } = {}) {
   const frames = Array.isArray(project?.frames) ? project.frames : [];
@@ -242,15 +245,15 @@ function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSamplin
     const frameDuration = Number(frames[index]?.duration_sec || frames[index]?.durationSec);
     if (!Number.isFinite(frameDuration) || frameDuration <= 0) continue;
     cursor += frameDuration;
-    const candidates = pairedSampling === true
+    const sceneId = String(frames[index]?.scene_id || '').trim();
+    const nextSceneId = String(frames[index + 1]?.scene_id || '').trim();
+    const sameScene = Boolean(sceneId) && sceneId === nextSceneId;
+    const candidates = pairedSampling === true && sameScene
       ? [cursor - 0.3, cursor + 0.3].map(time => Math.round(time * 1000) / 1000)
       : [cursor, cursor + 0.5, cursor + 1.0];
     const times = candidates
       .filter(time => time > 0 && (!Number.isFinite(duration) || duration <= 0 || time < duration));
     if (!times.length) continue;
-    const sceneId = String(frames[index]?.scene_id || '').trim();
-    const nextSceneId = String(frames[index + 1]?.scene_id || '').trim();
-    const sameScene = Boolean(sceneId) && sceneId === nextSceneId;
     groups.push({
       boundary_sec: Math.round(cursor * 100) / 100,
       times,
@@ -934,21 +937,33 @@ function mapAssetUsageToQaWarnings(report = {}, { visualStrategy = null } = {}) 
   });
 }
 
-// overlay 越界：透传 render_decisions[].overlay_check 的字幕安全区违规（validationGate 已落盘）
+// overlay 越界：透传 render_decisions[].overlay_check 的字幕安全区违规（validationGate 已落盘）。
+// scene_html 回落展开会把整场景 stats 复制到组内每个 beat（stats_scope:'scene' 标记，
+// 见 mergeFrameStatsIntoDecisions），该类决策按 scene_id+reason_code 去重只报一条，避免 N 倍重复。
 function mapOverlayChecksToQaWarnings(decisions = [], { visualStrategy = null } = {}) {
   if (visualStrategy !== 'asset_first') return [];
   const warnings = [];
+  const seenSceneScoped = new Set();
   for (const decision of Array.isArray(decisions) ? decisions : []) {
     const check = decision?.overlay_check;
     if (!check || check.valid !== false || check.reason_code !== 'overlay_in_caption_safe_area') continue;
+    const sceneScoped = decision.stats_scope === 'scene';
+    if (sceneScoped) {
+      const key = `${String(decision.scene_id || '')}:${check.reason_code}`;
+      if (seenSceneScoped.has(key)) continue;
+      seenSceneScoped.add(key);
+    }
     warnings.push({
       code: 'asset_first_overlay_caption_overlap',
       severity: 'warning',
-      message: `beat ${decision.beat_id} 的 motion overlay 落入字幕安全区。`,
+      message: sceneScoped
+        ? `scene ${decision.scene_id} 的 motion overlay 落入字幕安全区。`
+        : `beat ${decision.beat_id} 的 motion overlay 落入字幕安全区。`,
       details: {
         beat_id: decision.beat_id,
         reason_code: check.reason_code,
         reason: check.message || '',
+        ...(sceneScoped ? { stats_scope: 'scene', scene_id: decision.scene_id } : {}),
       },
     });
   }
@@ -988,39 +1003,51 @@ function assembleBoundaryGroupsForDiff(boundaryGroups = [], frames = []) {
     }));
 }
 
-// 字幕区帧视图：采样帧时间对 voice window 求交得 caption_active，携带底部条带统计
+// 字幕区帧视图：采样帧时间对 voice window 求交得 caption_active，携带底部条带统计；
+// timedFrames 与 fps 网格可能在同一时间点各出一帧，按 time_sec（毫秒精度）去重避免成对重复告警
 function captionRegionFramesFromSamples(frames = [], voiceWindows = []) {
   const windows = Array.isArray(voiceWindows) ? voiceWindows : [];
-  return (Array.isArray(frames) ? frames : [])
-    .filter(frame => frame && frame.bottom_region && Number.isFinite(Number(frame.time_sec)))
-    .map(frame => {
-      const time = Number(frame.time_sec);
-      return {
-        time,
-        caption_active: windows.some(window => time >= window.start && time <= window.end),
-        bottom_region: frame.bottom_region,
-      };
+  const seenTimes = new Set();
+  const result = [];
+  for (const frame of Array.isArray(frames) ? frames : []) {
+    if (!frame || !frame.bottom_region || !Number.isFinite(Number(frame.time_sec))) continue;
+    const time = Number(frame.time_sec);
+    const key = (Math.round(time * 1000) / 1000).toFixed(3);
+    if (seenTimes.has(key)) continue;
+    seenTimes.add(key);
+    result.push({
+      time,
+      caption_active: windows.some(window => time >= window.start && time <= window.end),
+      bottom_region: frame.bottom_region,
     });
+  }
+  return result;
 }
 
 // asset_first 巡检警告汇总：全部经 attachAssetFirstWarnings 挂 result.warnings，
 // 不进入 issues / 不影响 success（硬约束 C）。
+// 整体 try/catch：观测通道绝不阻断巡检——任何汇总异常时放弃 warnings，原 result 原样返回。
 function collectAssetFirstWarnings({ project = {}, timedPlan = {}, timedFrames = [], sequentialFrames = [] } = {}) {
-  const options = { visualStrategy: 'asset_first' };
-  const decisions = Array.isArray(project.render_decisions) ? project.render_decisions : [];
-  const voiceWindows = buildVoiceWindowsFromProject(project);
-  return [
-    ...analyzeAssetFirstRouting(decisions, options),
-    ...analyzeAssetFirstBoundaries(
-      assembleBoundaryGroupsForDiff(timedPlan.boundaryGroups || [], timedFrames),
-      options,
-    ),
-    ...analyzeAssetFirstCaptionRegion(captionRegionFramesFromSamples(timedFrames, voiceWindows), options),
-    ...analyzeAssetFirstInformation(beatsInfoFromRenderDecisions(decisions), options),
-    ...analyzeAssetFirstStyleDrift(sequentialFrames, options),
-    ...mapAssetUsageToQaWarnings(project.asset_usage_report || {}, options),
-    ...mapOverlayChecksToQaWarnings(decisions, options),
-  ];
+  try {
+    const options = { visualStrategy: 'asset_first' };
+    const decisions = Array.isArray(project.render_decisions) ? project.render_decisions : [];
+    const voiceWindows = buildVoiceWindowsFromProject(project);
+    return [
+      ...analyzeAssetFirstRouting(decisions, options),
+      ...analyzeAssetFirstBoundaries(
+        assembleBoundaryGroupsForDiff(timedPlan.boundaryGroups || [], timedFrames),
+        options,
+      ),
+      ...analyzeAssetFirstCaptionRegion(captionRegionFramesFromSamples(timedFrames, voiceWindows), options),
+      ...analyzeAssetFirstInformation(beatsInfoFromRenderDecisions(decisions), options),
+      ...analyzeAssetFirstStyleDrift(sequentialFrames, options),
+      ...mapAssetUsageToQaWarnings(project.asset_usage_report || {}, options),
+      ...mapOverlayChecksToQaWarnings(decisions, options),
+    ];
+  } catch (error) {
+    console.warn(`asset_first 视觉观测通道汇总失败，已跳过 warnings：${error?.message || error}`);
+    return [];
+  }
 }
 
 // warnings 独立于 issues，绝不影响 success / withAdditionalIssues / checkpoint 语义
