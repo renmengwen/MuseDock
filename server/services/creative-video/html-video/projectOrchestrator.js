@@ -767,7 +767,7 @@ async function composeHtmlVideoProject({
   let audioTrackCheck = null;
   if (!audioDisabled) {
     const narrationPath = await resolveNarrationPath(nextProject, resolvedProjectDir, ffmpegComposer, diagnostics);
-    const { events: sfxEvents, dropped: sfxDropped } = sfxEventService.resolveProjectSfxEventsForMux({
+    const { events: sfxEvents, dropped: sfxDropped, avoidance_dropped: sfxAvoided = [] } = sfxEventService.resolveProjectSfxEventsForMux({
       project: nextProject,
       projectDir: resolvedProjectDir,
       // 仅 asset_first 启用旁白避让；hf_first 不传 voiceWindows，混音输出与现状逐字节一致
@@ -775,6 +775,18 @@ async function composeHtmlVideoProject({
         ? sfxEventService.buildVoiceWindowsFromProject(nextProject)
         : [],
     });
+    if (sfxAvoided.length) {
+      // 避让移除是预期行为而非素材故障，与 sfx_event_dropped 分开出诊断；
+      // 诊断体系只把 severity=warning 视为非阻断（validationGate/retryPlanner 无 info 档），故用 warning
+      diagnostics.push(createDiagnostic({
+        code: 'sfx_event_avoided',
+        stage: 'compose',
+        sub_stage: 'compose',
+        severity: 'warning',
+        user_message: `${sfxAvoided.length} 条自动音效为避让旁白已自动移除。`,
+        details: { avoided: sfxAvoided },
+      }));
+    }
     if (sfxDropped.length) {
       diagnostics.push(createDiagnostic({
         code: 'sfx_event_dropped',

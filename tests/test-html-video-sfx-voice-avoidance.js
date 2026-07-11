@@ -100,6 +100,8 @@ console.log('sfx voice avoidance tests passed');
 
 // (4) resolveProjectSfxEventsForMux 增加可选 voiceWindows：避让发生在白名单/置信度/文件校验之前，
 // 产出的 mux 事件 volume_db 已含 ducking；不传 voiceWindows 时输出与现状完全一致（硬约束 A）。
+// 避让丢弃走独立 avoidance_dropped（dropped 仅保留既有校验类丢弃）；
+// enabled===false 的事件在避让前过滤：不进 avoidance_dropped、不占 high 限额。
 const { resolveProjectSfxEventsForMux } = require('../server/services/creative-video/html-video/sfxEventService');
 const os = require('os');
 const fs = require('fs');
@@ -111,7 +113,17 @@ const path = require('path');
   const project = {
     audio: { sfx: { enabled: true, status: 'ready', events: [
       { id: 'sfx_001', scene_id: 'scene_04', time_sec: 2.5, global_time_sec: 48.0, sfx_id: 'whoosh_soft',
-        intensity: 'medium', volume_db: -18, enabled: true, confidence: 0.9 },
+        intensity: 'medium', volume_db: -18, enabled: true, confidence: 0.9 }, // 旁白活跃 => duck -8
+      { id: 'sfx_002', scene_id: 'scene_04', time_sec: 0.03, global_time_sec: 45.5, sfx_id: 'whoosh_soft',
+        intensity: 'medium', volume_db: -18, enabled: true, confidence: 0.9 }, // 旁白起始 ±0.35s => avoidance_dropped
+      { id: 'sfx_003', scene_id: 'scene_04', time_sec: 6.5, global_time_sec: 52.0, sfx_id: 'whoosh_soft',
+        intensity: 'high', volume_db: -14, enabled: false, confidence: 0.9 }, // 用户停用 => 静默跳过，不占 high 限额
+      { id: 'sfx_004', scene_id: 'scene_04', time_sec: 7.5, global_time_sec: 53.0, sfx_id: 'whoosh_soft',
+        intensity: 'high', volume_db: -14, enabled: true, confidence: 0.9 },
+      { id: 'sfx_005', scene_id: 'scene_04', time_sec: 8.5, global_time_sec: 54.0, sfx_id: 'whoosh_soft',
+        intensity: 'high', volume_db: -14, enabled: true, confidence: 0.9 }, // 若停用事件误占限额，此条会被丢
+      { id: 'sfx_006', scene_id: 'scene_04', time_sec: 9.5, global_time_sec: 55.0, sfx_id: 'not_in_library',
+        intensity: 'medium', volume_db: -18, enabled: true, confidence: 0.9 }, // 白名单外 => 既有校验 dropped
     ] } },
     frames: [{ id: 'f1', duration_sec: 60, captions: [{ start: 45.47, end: 51.2, text: 'n' }] }],
   };
@@ -120,9 +132,22 @@ const path = require('path');
     project, projectDir: dir, library,
     voiceWindows: [{ start: 45.47, end: 51.2 }],
   });
-  assert.strictEqual(withAvoidance.events[0].volume_db, -26, '旁白活跃期 mux 事件必须已 duck -8dB');
+  assert.strictEqual(withAvoidance.events.find(e => e.id === 'sfx_001').volume_db, -26, '旁白活跃期 mux 事件必须已 duck -8dB');
+  assert.deepStrictEqual(withAvoidance.events.map(e => e.id), ['sfx_001', 'sfx_004', 'sfx_005'],
+    '停用事件不占 high 限额：两条 enabled high 全保留');
+  // 避让丢弃走独立 avoidance_dropped：只有命中旁白起点的 enabled 事件，reason 为避让文案
+  assert.deepStrictEqual(withAvoidance.avoidance_dropped.map(d => d.id), ['sfx_002']);
+  assert.ok(/旁白起始/.test(withAvoidance.avoidance_dropped[0].reason), 'avoidance_dropped.reason 是避让文案');
+  assert.deepStrictEqual(Object.keys(withAvoidance.avoidance_dropped[0]).sort(), ['id', 'reason', 'scene_id', 'sfx_id']);
+  assert.ok(!withAvoidance.avoidance_dropped.some(d => d.id === 'sfx_003'), '停用事件不得进 avoidance_dropped');
+  // dropped 恢复为仅既有校验类丢弃（白名单/置信度/文件缺失），不再混入避让条目
+  assert.deepStrictEqual(withAvoidance.dropped.map(d => d.id), ['sfx_006']);
+  assert.ok(/白名单/.test(withAvoidance.dropped[0].reason));
   const withoutAvoidance = resolveProjectSfxEventsForMux({ project, projectDir: dir, library });
-  assert.strictEqual(withoutAvoidance.events[0].volume_db, -18, '不传 voiceWindows 时行为与现状一致');
+  assert.strictEqual(withoutAvoidance.events.find(e => e.id === 'sfx_001').volume_db, -18, '不传 voiceWindows 时行为与现状一致');
+  assert.deepStrictEqual(withoutAvoidance.events.map(e => e.id), ['sfx_001', 'sfx_002', 'sfx_004', 'sfx_005']);
+  assert.deepStrictEqual(withoutAvoidance.dropped.map(d => d.id), ['sfx_006']);
+  assert.deepStrictEqual(withoutAvoidance.avoidance_dropped, []);
   fs.rmSync(dir, { recursive: true, force: true });
 }
 console.log('sfx mux wiring tests passed');

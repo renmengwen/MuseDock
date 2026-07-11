@@ -294,9 +294,11 @@ async function applyPlannedSfxEvents({ projectDir, project, sceneSpec, library, 
 function resolveProjectSfxEventsForMux({ project = {}, projectDir, library, voiceWindows = [] } = {}) {
   const sfx = objectOrEmpty(project.audio?.sfx);
   let events = sfx.enabled === false ? [] : (Array.isArray(sfx.events) ? sfx.events : []);
-  // 旁白避让发生在 mux 输入侧（白名单/置信度/文件校验之前），不触碰 project.audio.sfx.events 原始计划
+  // 旁白避让发生在 mux 输入侧（白名单/置信度/文件校验之前），不触碰 project.audio.sfx.events 原始计划。
+  // 用户停用的事件先过滤：不进 avoidance_dropped 触发误导诊断、不占 high 限额（下方循环的 enabled 检查保留作防御）
   const avoidanceDropped = [];
   if (Array.isArray(voiceWindows) && voiceWindows.length && events.length) {
+    events = events.filter(event => event?.enabled !== false);
     const avoidance = applyVoiceAvoidance(events, voiceWindows, {});
     events = avoidance.kept;
     avoidanceDropped.push(...avoidance.dropped);
@@ -353,7 +355,9 @@ function resolveProjectSfxEventsForMux({ project = {}, projectDir, library, voic
       dropped.push({ id: String(event.id || ''), sfx_id: sfxId, reason: error.message || String(error) });
     }
   }
-  return { events: resolved, dropped: [...avoidanceDropped, ...dropped] };
+  // dropped 仅含既有校验类丢弃（白名单/置信度/文件缺失），避让丢弃走独立 avoidance_dropped，
+  // 便于调用方分别给出「素材不可用」与「避让旁白移除」两类不同文案的诊断
+  return { events: resolved, dropped, avoidance_dropped: avoidanceDropped };
 }
 
 // 从 project.frames[].captions 推导全片旁白窗口：caption 时间为帧内相对，需加帧起点累计偏移
