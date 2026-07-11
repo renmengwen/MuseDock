@@ -345,6 +345,70 @@ function resolveProjectSfxEventsForMux({ project = {}, projectDir, library } = {
   return { events: resolved, dropped };
 }
 
+// 从 project.frames[].captions 推导全片旁白窗口：caption 时间为帧内相对，需加帧起点累计偏移
+// 累计偏移会引入浮点误差（如 6.38+5.9=12.280000000000001），窗口边界统一取整到毫秒
+function roundMs(value) {
+  return Math.round(value * 1000) / 1000;
+}
+
+function buildVoiceWindowsFromProject(project = {}) {
+  const windows = [];
+  let cursor = 0;
+  for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
+    const duration = Number(frame?.duration_sec ?? frame?.durationSec) || 0;
+    for (const caption of Array.isArray(frame?.captions) ? frame.captions : []) {
+      const start = Number(caption?.start);
+      const end = Number(caption?.end);
+      if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+        windows.push({ start: roundMs(cursor + start), end: roundMs(cursor + end) });
+      }
+    }
+    cursor += duration;
+  }
+  return windows;
+}
+
+// 旁白避让纯函数：起始 ±avoidStartSec 内移除、旁白活跃期 duck、每 scene 强音效限额。
+// voiceWindows 为空时完全直通（兼容旧调用形态）。
+function applyVoiceAvoidance(events = [], voiceWindows = [], {
+  avoidStartSec = 0.35,
+  duckDb = 8,
+  maxHighPerScene = 2,
+} = {}) {
+  const windows = (Array.isArray(voiceWindows) ? voiceWindows : [])
+    .filter(w => Number.isFinite(w?.start) && Number.isFinite(w?.end) && w.end > w.start);
+  if (!windows.length) {
+    return { kept: Array.isArray(events) ? [...events] : [], dropped: [] };
+  }
+  const kept = [];
+  const dropped = [];
+  const highCount = new Map();
+  for (const event of Array.isArray(events) ? events : []) {
+    const at = Number(event.global_time_sec ?? event.globalTimeSec) || 0;
+    if (windows.some(w => Math.abs(at - w.start) <= avoidStartSec)) {
+      dropped.push({ ...event, reason: `与旁白起始点间隔小于 ${avoidStartSec}s，移除避免压过人声` });
+      continue;
+    }
+    if (event.intensity === 'high') {
+      const count = (highCount.get(event.scene_id) || 0) + 1;
+      highCount.set(event.scene_id, count);
+      if (count > maxHighPerScene) {
+        dropped.push({ ...event, reason: `scene ${event.scene_id} 强音效（intensity=high）超过上限 ${maxHighPerScene}` });
+        continue;
+      }
+    }
+    const voiceActive = windows.some(w => at >= w.start && at <= w.end);
+    const baseVolume = Number.isFinite(Number(event.volume_db)) ? Number(event.volume_db) : -18;
+    kept.push({
+      ...event,
+      volume_db: voiceActive
+        ? clamp(baseVolume - duckDb, SFX_VOLUME_MIN_DB, SFX_VOLUME_MAX_DB)
+        : baseVolume,
+    });
+  }
+  return { kept, dropped };
+}
+
 module.exports = {
   normalizeSfxEvents,
   disableSfxEvent,
@@ -355,4 +419,6 @@ module.exports = {
   buildSfxPlanningScenes,
   getPlanningRules,
   resolveProjectSfxEventsForMux,
+  buildVoiceWindowsFromProject,
+  applyVoiceAvoidance,
 };
