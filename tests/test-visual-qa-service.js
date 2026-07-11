@@ -329,5 +329,74 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.ok(report.issues.some(issue => issue.code === 'repeated_frames'));
   }
 
+  // ===== 模块7：asset_first QA =====
+  const {
+    analyzeAssetFirstRouting,
+    analyzeAssetFirstBoundaries,
+    analyzeAssetFirstCaptionRegion,
+    attachAssetFirstWarnings,
+  } = require('../server/services/creative-video/visualQaService');
+
+  // 1) 路由类：takeover 按归零语义（决策 3）——任何 template_inputs 决策即报，不看占比阈值
+  {
+    const decisions = [
+      { beat_id: 'b1', source_mode: 'template_inputs', template_id: 'frame-build-minimal' },
+      { beat_id: 'b2', source_mode: 'template_inputs', template_id: 'frame-glitch-title' },
+      { beat_id: 'b3', source_mode: 'raw_html', template_id: null, route_role: 'asset_overlay' },
+    ];
+    const warnings = analyzeAssetFirstRouting(decisions, { visualStrategy: 'asset_first' });
+    assert.ok(warnings.some(i => i.code === 'asset_first_template_takeover' && i.severity === 'warning'));
+    assert.ok(warnings.some(i => i.code === 'asset_first_title_template_used' && i.severity === 'warning'));
+    const single = analyzeAssetFirstRouting(
+      [{ beat_id: 'x1', source_mode: 'template_inputs', template_id: 'frame-swiss-grid' },
+       ...Array.from({ length: 17 }, (_, i) => ({ beat_id: `r${i}`, source_mode: 'raw_html', template_id: null }))],
+      { visualStrategy: 'asset_first' },
+    );
+    assert.ok(single.some(i => i.code === 'asset_first_template_takeover'), '占比再低也必须报（归零语义）');
+    assert.deepStrictEqual(analyzeAssetFirstRouting(decisions, { visualStrategy: 'hf_first' }), []);
+  }
+
+  // 2) 边界重刷：同 scene 相邻条目边界前后成对采样差分（真实指标字段 average_luma / edge_score）
+  {
+    const boundaryGroups = [
+      { scene_id: 'scene_05', boundary_sec: 69.71, same_scene: true,
+        before: { average_luma: 158, edge_score: 0.31 }, after: { average_luma: 46, edge_score: 0.05 } },
+      { scene_id: 'scene_05', boundary_sec: 76.04, same_scene: true,
+        before: { average_luma: 153, edge_score: 0.30 }, after: { average_luma: 150, edge_score: 0.29 } },
+      { scene_id: 'x', boundary_sec: 12.75, same_scene: false,
+        before: { average_luma: 230, edge_score: 0.9 }, after: { average_luma: 25, edge_score: 0.1 } },
+    ];
+    const warnings = analyzeAssetFirstBoundaries(boundaryGroups, { visualStrategy: 'asset_first', diffThreshold: 0.25 });
+    assert.strictEqual(warnings.length, 1);
+    assert.strictEqual(warnings[0].code, 'asset_first_boundary_refresh');
+    assert.strictEqual(warnings[0].severity, 'warning');
+    assert.ok(warnings[0].details.boundary_sec === 69.71);
+  }
+
+  // 3) 字幕区可读性：底部区域方差过低 = 无内容
+  {
+    const frames = [
+      { time: 47.0, caption_active: true, bottom_region: { variance: 0.001, luma: 0.02 } },
+      { time: 49.0, caption_active: true, bottom_region: { variance: 0.12, luma: 0.4 } },
+      { time: 61.0, caption_active: false, bottom_region: { variance: 0.0, luma: 0.0 } },
+    ];
+    const warnings = analyzeAssetFirstCaptionRegion(frames, { visualStrategy: 'asset_first', minVariance: 0.01 });
+    assert.strictEqual(warnings.length, 1);
+    assert.strictEqual(warnings[0].code, 'asset_first_caption_invisible');
+  }
+
+  // 4) QA warning 双向断言：warnings 不改变 success/issues；空 warnings 不加字段
+  {
+    const base = { success: true, issues: [], metrics: {} };
+    const attached = attachAssetFirstWarnings(base, [{ code: 'asset_first_style_drift', severity: 'warning', message: 'x' }]);
+    assert.strictEqual(attached.success, true, 'warnings 绝不能把 success 置 false');
+    assert.deepStrictEqual(attached.issues, []);
+    assert.strictEqual(attached.warnings.length, 1);
+    const failed = attachAssetFirstWarnings({ success: false, issues: [{ code: 'blank_opening_frame' }], metrics: {} }, []);
+    assert.strictEqual(failed.success, false, '空 warnings 不得翻转既有失败结果');
+    assert.strictEqual(attachAssetFirstWarnings(base, []).warnings, undefined, '无 warning 时不添加字段，报告结构与现状一致');
+  }
+  console.log('visual qa asset_first tests passed');
+
   console.log('visual qa service tests passed');
 })();

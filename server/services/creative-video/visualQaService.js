@@ -701,9 +701,92 @@ async function inspectRenderedVideo({
   });
 }
 
+const TITLE_TEMPLATES = new Set(['frame-glitch-title', 'frame-build-minimal']);
+
+// 归零语义（决策 3）：asset_first 下任何 template_inputs 决策都是 takeover，无占比阈值。
+function analyzeAssetFirstRouting(decisions = [], { visualStrategy = null } = {}) {
+  if (visualStrategy !== 'asset_first') return [];
+  const warnings = [];
+  const list = Array.isArray(decisions) ? decisions : [];
+  if (!list.length) return warnings;
+  const takeovers = list.filter(d => d.source_mode === 'template_inputs');
+  if (takeovers.length) {
+    warnings.push({
+      code: 'asset_first_template_takeover',
+      severity: 'warning',
+      message: `asset_first 下出现 ${takeovers.length} 条整帧模板决策（应为 0，见决策 3 归零语义）。`,
+      details: { beats: takeovers.map(d => ({ beat_id: d.beat_id, template_id: d.template_id })) },
+    });
+  }
+  const titles = list.filter(d => TITLE_TEMPLATES.has(d.template_id));
+  if (titles.length) {
+    warnings.push({
+      code: 'asset_first_title_template_used',
+      severity: 'warning',
+      message: 'asset_first 下出现标题类整帧模板主路由。',
+      details: { beats: titles.map(d => ({ beat_id: d.beat_id, template_id: d.template_id })) },
+    });
+  }
+  return warnings;
+}
+
+// 差分用真实指标字段（readRgbFrameMetrics 产出）：average_luma（0-255 标度）与 edge_score
+function boundaryDiffScore(before = {}, after = {}) {
+  const luma = Math.abs((Number(after.average_luma) || 0) - (Number(before.average_luma) || 0)) / 255;
+  const edges = Math.abs((Number(after.edge_score) || 0) - (Number(before.edge_score) || 0));
+  return Math.max(luma, edges);
+}
+
+function analyzeAssetFirstBoundaries(boundaryGroups = [], { visualStrategy = null, diffThreshold = 0.25 } = {}) {
+  if (visualStrategy !== 'asset_first') return [];
+  const warnings = [];
+  for (const group of Array.isArray(boundaryGroups) ? boundaryGroups : []) {
+    if (group.same_scene !== true) continue;
+    if (!group.before || !group.after) continue; // 成对采样缺帧时跳过，不误报
+    const score = boundaryDiffScore(group.before, group.after);
+    if (score > diffThreshold) {
+      warnings.push({
+        code: 'asset_first_boundary_refresh',
+        severity: 'warning',
+        message: `同 scene 边界 ${group.boundary_sec}s 前后画面差异 ${score.toFixed(2)}，疑似整帧重刷。`,
+        details: { scene_id: group.scene_id, boundary_sec: group.boundary_sec, score },
+      });
+    }
+  }
+  return warnings;
+}
+
+function analyzeAssetFirstCaptionRegion(frames = [], { visualStrategy = null, minVariance = 0.01 } = {}) {
+  if (visualStrategy !== 'asset_first') return [];
+  const warnings = [];
+  for (const frame of Array.isArray(frames) ? frames : []) {
+    if (frame.caption_active !== true) continue;
+    const variance = Number(frame.bottom_region?.variance) || 0;
+    if (variance < minVariance) {
+      warnings.push({
+        code: 'asset_first_caption_invisible',
+        severity: 'warning',
+        message: `${frame.time}s 字幕应显示但底部字幕区无可读内容。`,
+        details: { time: frame.time, variance },
+      });
+    }
+  }
+  return warnings;
+}
+
+// warnings 独立于 issues，绝不影响 success / withAdditionalIssues / checkpoint 语义
+function attachAssetFirstWarnings(result, warnings = []) {
+  if (!Array.isArray(warnings) || !warnings.length) return result;
+  return { ...result, warnings: [...(result.warnings || []), ...warnings] };
+}
+
 module.exports = {
   analyzeFrameMetrics,
   inspectRenderedVideo,
   aspectFromDimensions,
   isBlankFrameMetric,
+  analyzeAssetFirstRouting,
+  analyzeAssetFirstBoundaries,
+  analyzeAssetFirstCaptionRegion,
+  attachAssetFirstWarnings,
 };
