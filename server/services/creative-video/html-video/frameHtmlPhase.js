@@ -9,6 +9,7 @@ const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
 const { loadOverlaySnippet, loadDiagramSkeleton, validateOverlayHtml } = require('./motionPrimitiveCatalog');
+const { htmlEscape } = require('./materializer');
 const { AGENTS, STAGES } = require('../agentStages');
 
 const FRAME_HTML_MODEL_OPTIONS = { requestTimeoutMs: 180000, maxRetries: 1 };
@@ -51,6 +52,68 @@ function resolveAssetFirstMotionArgs(node, creativeContext) {
   const diagramSkeleton = beat.visual_base?.type === 'diagram' ? safeLoad(loadDiagramSkeleton) : '';
   // previousBeatSummary 由 Task 4.1、hasCaptions 由 Task 5.2 后续接入
   return { beat, primitiveSnippet, diagramSkeleton };
+}
+
+// 从 beat 的文案信息派生各 primitive slot 的默认取值（overlay 兜底注入用）
+function overlaySlotValues(beat = {}) {
+  const headline = String(beat.visual_text?.headline || '').trim();
+  const keywords = Array.isArray(beat.visual_text?.keywords) ? beat.visual_text.keywords.filter(Boolean) : [];
+  const cards = Array.isArray(beat.visual_text?.cards) ? beat.visual_text.cards.filter(Boolean) : [];
+  const narration = String(beat.narration_text || '').trim();
+  const point = headline || narration.slice(0, 18) || '重点';
+  const items = (cards.length ? cards : keywords).map(item => (typeof item === 'object' ? JSON.stringify(item) : String(item)));
+  return {
+    kicker: keywords[0] || '重点',
+    point,
+    term: headline || keywords[0] || '概念',
+    definition: narration.slice(0, 40) || point,
+    step_1: items[0] || '第一步', step_2: items[1] || '第二步', step_3: items[2] || '第三步',
+    cause: items[0] || '原因', mechanism: items[1] || '机制', result: items[2] || '结果',
+    item_1: items[0] || point, item_2: items[1] || '', item_3: items[2] || '',
+    value_a: items[0] || 'A', label_a: keywords[0] || '对象 A',
+    value_b: items[1] || 'B', label_b: keywords[1] || '对象 B',
+  };
+}
+
+// 用 beat 派生文案替换 primitive 片段中 data-mp-slot 占位文本（R7：值必须 htmlEscape）
+function fillOverlaySlots(snippet, slots) {
+  return snippet.replace(/(data-mp-slot="([a-z0-9_]+)"[^>]*>)([^<]*)/g, (match, open, key, current) => {
+    const value = slots[key];
+    return value === undefined || value === '' ? match : `${open}${htmlEscape(String(value))}`;
+  });
+}
+
+// beat.motion_overlay.theme_tokens 转成 :root CSS 变量，供 primitive 片段内 var(--mp-*) 消费
+function themeTokenStyle(tokens = {}) {
+  const entries = [
+    ['--mp-accent', tokens.accent], ['--mp-foreground', tokens.foreground],
+    ['--mp-surface', tokens.surface], ['--mp-background', tokens.background],
+  ].filter(([, value]) => value);
+  if (!entries.length) return '';
+  return `<style data-mp-theme>:root{${entries.map(([k, v]) => `${k}:${v}`).join(';')}}</style>`;
+}
+
+// asset_first 时若模型漏写 overlay（无 data-mp-overlay），确定性注入 primitive 兜底片段；
+// hf_first 或已有 overlay 时原样返回（硬约束 A）。
+function ensureMotionOverlay(html = '', beat = {}, { visualStrategy = null } = {}) {
+  if (visualStrategy !== 'asset_first') return { html, injected: false };
+  const preset = beat.motion_overlay?.preset;
+  if (!preset) return { html, injected: false };
+  const text = String(html);
+  if (text.includes('data-mp-overlay')) return { html: text, injected: false };
+  let snippet;
+  try {
+    snippet = loadOverlaySnippet(preset);
+  } catch {
+    return { html: text, injected: false };
+  }
+  const filled = fillOverlaySlots(snippet, overlaySlotValues(beat));
+  const theme = themeTokenStyle(beat.motion_overlay.theme_tokens);
+  const payload = `${theme}${filled}`;
+  const next = text.includes('</body>')
+    ? text.replace('</body>', `${payload}</body>`)
+    : text + payload;
+  return { html: next, injected: true };
 }
 
 // asset_first 帧 HTML 的静态结构统计（简单启发式，供 QA/路由决策观测用）
@@ -398,6 +461,25 @@ async function runFrameHtmlPhase(ctx) {
         });
       }
     }
+    // raw_html 帧校验通过后、写盘前：asset_first 且模型漏写 overlay 时确定性注入 primitive 兜底片段
+    if (htmlResult.success && assetFirstMotionArgs.beat) {
+      const overlayResult = ensureMotionOverlay(htmlResult.html, assetFirstMotionArgs.beat, {
+        visualStrategy: creativeContext?.visual_strategy || null,
+      });
+      if (overlayResult.injected) {
+        htmlResult = { ...htmlResult, html: overlayResult.html };
+        diagnostics.push(createDiagnostic({
+          code: 'overlay_primitive_injected',
+          stage: 'ai-frame-html',
+          sub_stage: 'frame_html',
+          frame_id: node.id || sceneId,
+          severity: 'warning',
+          retryable: false,
+          user_message: '模型未按 primitive 落 overlay，已确定性注入兜底片段。',
+          details: { frame_id: node.id || sceneId, preset: assetFirstMotionArgs.beat.motion_overlay?.preset || '' },
+        }));
+      }
+    }
     return { ...job, htmlResult };
   };
 
@@ -693,6 +775,7 @@ module.exports = {
   runFrameHtmlPhase,
   isProviderMissingText,
   computeFrameHtmlStats,
+  ensureMotionOverlay,
   FRAME_HTML_CONCURRENCY,
   FRAME_HTML_MODEL_OPTIONS,
 };
