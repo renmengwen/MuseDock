@@ -2,6 +2,9 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { runCommand: defaultRunCommand } = require('../hyperframes/hyperframesRenderer');
+// caption 活跃窗口与 sfxEventService.buildVoiceWindowsFromProject 同口径（帧起点累计偏移 + 毫秒取整）。
+// 直接复用该实现：sfxEventService 仅依赖 projectStore/projectSchema/sfxLibrary，与本模块无 require 环。
+const { buildVoiceWindowsFromProject } = require('./html-video/sfxEventService');
 
 let bundledFfmpegPath = '';
 try {
@@ -229,7 +232,9 @@ function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
   };
 }
 
-function projectBoundarySampleGroups(project = {}, duration = 0) {
+// pairedSampling（asset_first 专用）：边界前后各取一帧（∓0.3s）供同 scene 边界差分；
+// 缺省（hf_first/safetyOnly）采样时间逐值与原实现一致（硬约束 A）。
+function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSampling = false } = {}) {
   const frames = Array.isArray(project?.frames) ? project.frames : [];
   const groups = [];
   let cursor = 0;
@@ -237,9 +242,21 @@ function projectBoundarySampleGroups(project = {}, duration = 0) {
     const frameDuration = Number(frames[index]?.duration_sec || frames[index]?.durationSec);
     if (!Number.isFinite(frameDuration) || frameDuration <= 0) continue;
     cursor += frameDuration;
-    const times = [cursor, cursor + 0.5, cursor + 1.0]
+    const candidates = pairedSampling === true
+      ? [cursor - 0.3, cursor + 0.3].map(time => Math.round(time * 1000) / 1000)
+      : [cursor, cursor + 0.5, cursor + 1.0];
+    const times = candidates
       .filter(time => time > 0 && (!Number.isFinite(duration) || duration <= 0 || time < duration));
-    if (times.length) groups.push({ boundary_sec: Math.round(cursor * 100) / 100, times });
+    if (!times.length) continue;
+    const sceneId = String(frames[index]?.scene_id || '').trim();
+    const nextSceneId = String(frames[index + 1]?.scene_id || '').trim();
+    const sameScene = Boolean(sceneId) && sceneId === nextSceneId;
+    groups.push({
+      boundary_sec: Math.round(cursor * 100) / 100,
+      times,
+      same_scene: sameScene,
+      ...(sameScene ? { scene_id: sceneId } : {}),
+    });
   }
   return groups;
 }
@@ -257,11 +274,13 @@ function uniqueTimes(values = []) {
     });
 }
 
-function buildTimedSamplePlan({ project = {}, videoInfo = {} } = {}) {
+function buildTimedSamplePlan({ project = {}, videoInfo = {}, pairedBoundarySampling = false } = {}) {
   const opening = [0, 0.5, 1.0].filter(time => (
     !Number.isFinite(videoInfo.duration) || !videoInfo.duration || time < videoInfo.duration
   ));
-  const boundaryGroups = projectBoundarySampleGroups(project, videoInfo.duration);
+  const boundaryGroups = projectBoundarySampleGroups(project, videoInfo.duration, {
+    pairedSampling: pairedBoundarySampling === true,
+  });
   const cappedBoundaryGroups = [];
   let sampleCount = opening.length;
   for (const group of boundaryGroups) {
@@ -476,6 +495,15 @@ function readRgbFrameMetrics(buffer, width, height, id) {
   const lumas = new Array(pixels);
   let lumaSum = 0;
   let colorSum = 0;
+  let redSum = 0;
+  let greenSum = 0;
+  let blueSum = 0;
+  // 底部字幕区条带：按 1920 高对应 140px 的比例折算到缩放帧，同一遍历中累计 sum/sumSq 求方差
+  const bottomRows = Math.max(1, Math.round(height * (140 / 1920)));
+  const bottomStart = Math.max(0, (height - bottomRows) * width);
+  let bottomLumaSum = 0;
+  let bottomLumaSquareSum = 0;
+  let bottomCount = 0;
   for (let i = 0; i < pixels; i += 1) {
     const offset = i * 3;
     const r = buffer[offset];
@@ -485,6 +513,14 @@ function readRgbFrameMetrics(buffer, width, height, id) {
     lumas[i] = luma;
     lumaSum += luma;
     colorSum += Math.max(r, g, b) - Math.min(r, g, b);
+    redSum += r;
+    greenSum += g;
+    blueSum += b;
+    if (i >= bottomStart) {
+      bottomLumaSum += luma;
+      bottomLumaSquareSum += luma * luma;
+      bottomCount += 1;
+    }
   }
   const average = pixels ? lumaSum / pixels : 0;
   const variance = pixels
@@ -499,12 +535,26 @@ function readRgbFrameMetrics(buffer, width, height, id) {
       edgeCount += 1;
     }
   }
+  const bottomMean = bottomCount ? bottomLumaSum / bottomCount : 0;
+  const bottomVariance = bottomCount
+    ? Math.max(0, (bottomLumaSquareSum / bottomCount) - (bottomMean * bottomMean))
+    : 0;
   return {
     id,
     average_luma: Math.round(average * 100) / 100,
     luma_stddev: Math.round(Math.sqrt(variance) * 100) / 100,
     edge_score: Math.round((edgeCount ? edgeTotal / edgeCount : 0) * 100) / 100,
     color_variance: Math.round((pixels ? colorSum / pixels : 0) * 100) / 100,
+    // 以下为新增只读观测字段（不参与既有 issue 判定）：帧平均色（0-255）与底部字幕区归一化统计（0-1）
+    mean_rgb: [
+      Math.round((pixels ? redSum / pixels : 0) * 100) / 100,
+      Math.round((pixels ? greenSum / pixels : 0) * 100) / 100,
+      Math.round((pixels ? blueSum / pixels : 0) * 100) / 100,
+    ],
+    bottom_region: {
+      luma: Math.round((bottomMean / 255) * 10000) / 10000,
+      variance: Math.round((bottomVariance / (255 * 255)) * 10000) / 10000,
+    },
   };
 }
 
@@ -600,6 +650,7 @@ async function inspectRenderedVideo({
   expectedAspectRatio = '',
   expected_aspect_ratio = '',
   safetyOnly = false,
+  visualStrategy = null,
   services = {},
 } = {}) {
   const videoPath = outputPath || (projectDir ? path.join(projectDir, 'output.mp4') : '');
@@ -617,7 +668,10 @@ async function inspectRenderedVideo({
   const videoInfo = services.probeVideo
     ? await services.probeVideo({ projectDir, outputPath: videoPath, videoPath })
     : await probeVideo({ videoPath, runCommand });
-  const timedPlan = buildTimedSamplePlan({ project, videoInfo });
+  // asset_first 且非 safetyOnly 才启用成对边界采样与 warnings 通道；
+  // hf_first / safetyOnly 的采样与报告结构保持现状（硬约束 A）。
+  const assetFirstQa = visualStrategy === 'asset_first' && safetyOnly !== true;
+  const timedPlan = buildTimedSamplePlan({ project, videoInfo, pairedBoundarySampling: assetFirstQa });
   if (services.sampleFrames) {
     const frames = await services.sampleFrames({ projectDir, outputPath: videoPath, videoPath, workDir });
     const result = safetyOnly ? {
@@ -639,8 +693,16 @@ async function inspectRenderedVideo({
       expectedAspectRatio: expectedAspectRatio || expected_aspect_ratio,
       frames,
     });
+    const reportBody = assetFirstQa
+      ? attachAssetFirstWarnings(finalResult, collectAssetFirstWarnings({
+        project,
+        timedPlan,
+        timedFrames: frames,
+        sequentialFrames: frames,
+      }))
+      : finalResult;
     return writeVisualReport(projectDir, {
-      ...finalResult,
+      ...reportBody,
       frames,
       safety_only: safetyOnly,
     });
@@ -693,8 +755,16 @@ async function inspectRenderedVideo({
     expectedAspectRatio: expectedAspectRatio || expected_aspect_ratio,
     frames: extracted.frames,
   });
+  const reportBody = assetFirstQa
+    ? attachAssetFirstWarnings(finalResult, collectAssetFirstWarnings({
+      project,
+      timedPlan,
+      timedFrames,
+      sequentialFrames: extracted.frames,
+    }))
+    : finalResult;
   return writeVisualReport(projectDir, {
-    ...finalResult,
+    ...reportBody,
     frames: extracted.frames,
     contact_sheet_path: contactSheet.path,
     safety_only: safetyOnly,
@@ -740,9 +810,14 @@ function boundaryDiffScore(before = {}, after = {}) {
 function analyzeAssetFirstBoundaries(boundaryGroups = [], { visualStrategy = null, diffThreshold = 0.25 } = {}) {
   if (visualStrategy !== 'asset_first') return [];
   const warnings = [];
+  const hasFiniteMetrics = frame => (
+    Number.isFinite(Number(frame?.average_luma)) && Number.isFinite(Number(frame?.edge_score))
+  );
   for (const group of Array.isArray(boundaryGroups) ? boundaryGroups : []) {
     if (group.same_scene !== true) continue;
     if (!group.before || !group.after) continue; // 成对采样缺帧时跳过，不误报
+    // 指标非有限值（如兜底空对象）与缺帧同语义：跳过该组
+    if (!hasFiniteMetrics(group.before) || !hasFiniteMetrics(group.after)) continue;
     const score = boundaryDiffScore(group.before, group.after);
     if (score > diffThreshold) {
       warnings.push({
@@ -774,6 +849,180 @@ function analyzeAssetFirstCaptionRegion(frames = [], { visualStrategy = null, mi
   return warnings;
 }
 
+// 信息密度：无图 beat（has_asset !== true）的帧内元素统计低于阈值 => warning
+function analyzeAssetFirstInformation(beatsInfo = [], { visualStrategy = null, minElements = 3 } = {}) {
+  if (visualStrategy !== 'asset_first') return [];
+  const warnings = [];
+  for (const beat of Array.isArray(beatsInfo) ? beatsInfo : []) {
+    if (!beat || beat.has_asset === true) continue;
+    const elements = (Number(beat.text_blocks) || 0) + (Number(beat.cards) || 0) + (Number(beat.graphics) || 0);
+    if (elements < minElements) {
+      warnings.push({
+        code: 'asset_first_low_information',
+        severity: 'warning',
+        message: `无图 beat ${beat.beat_id} 画面元素仅 ${elements} 个（< ${minElements}），信息密度不足。`,
+        details: { beat_id: beat.beat_id, elements, min_elements: minElements },
+      });
+    }
+  }
+  return warnings;
+}
+
+// 风格漂移：相邻帧平均色任一通道突变超过阈值 => 单条 warning（取全片最大突变点）
+function analyzeAssetFirstStyleDrift(frames = [], { visualStrategy = null, maxMeanShift = 96 } = {}) {
+  if (visualStrategy !== 'asset_first') return [];
+  const list = (Array.isArray(frames) ? frames : []).filter(frame => (
+    Array.isArray(frame?.mean_rgb)
+    && frame.mean_rgb.length >= 3
+    && frame.mean_rgb.slice(0, 3).every(value => Number.isFinite(Number(value)))
+  ));
+  let worst = null;
+  for (let index = 1; index < list.length; index += 1) {
+    const previous = list[index - 1].mean_rgb;
+    const current = list[index].mean_rgb;
+    const shift = Math.max(
+      Math.abs(Number(current[0]) - Number(previous[0])),
+      Math.abs(Number(current[1]) - Number(previous[1])),
+      Math.abs(Number(current[2]) - Number(previous[2])),
+    );
+    if (shift > maxMeanShift && (!worst || shift > worst.shift)) {
+      worst = {
+        shift,
+        time: list[index].time ?? list[index].time_sec ?? null,
+        from_time: list[index - 1].time ?? list[index - 1].time_sec ?? null,
+      };
+    }
+  }
+  if (!worst) return [];
+  return [{
+    code: 'asset_first_style_drift',
+    severity: 'warning',
+    message: `帧平均色在 ${worst.time}s 附近突变（差值 ${Math.round(worst.shift)} > ${maxMeanShift}），疑似整体风格漂移。`,
+    details: {
+      time: worst.time,
+      from_time: worst.from_time,
+      shift: Math.round(worst.shift * 100) / 100,
+      max_mean_shift: maxMeanShift,
+    },
+  }];
+}
+
+// 素材缺失：复用 workflow 级 asset_usage_report（R6：真实结构无 report.missing 字段）。
+// beat_id 取 expected_in_frames 首个作为定向重试目标；拿不到 frame 信息时置 null，不伪造。
+function mapAssetUsageToQaWarnings(report = {}, { visualStrategy = null } = {}) {
+  if (visualStrategy !== 'asset_first') return [];
+  const missing = Array.isArray(report?.missing_required_asset_ids)
+    ? report.missing_required_asset_ids.filter(Boolean)
+    : [];
+  if (!missing.length) return [];
+  const assetsById = new Map((Array.isArray(report?.assets) ? report.assets : [])
+    .filter(asset => asset && asset.asset_id)
+    .map(asset => [String(asset.asset_id), asset]));
+  return missing.map(assetId => {
+    const asset = assetsById.get(String(assetId)) || {};
+    const expected = Array.isArray(asset.expected_in_frames) ? asset.expected_in_frames.filter(Boolean) : [];
+    return {
+      code: 'asset_first_asset_missing',
+      severity: 'warning',
+      message: `必用素材 ${assetId} 未进入最终画面。`,
+      details: {
+        asset_id: assetId,
+        expected_in_frames: expected,
+        beat_id: expected.length ? expected[0] : null,
+      },
+    };
+  });
+}
+
+// overlay 越界：透传 render_decisions[].overlay_check 的字幕安全区违规（validationGate 已落盘）
+function mapOverlayChecksToQaWarnings(decisions = [], { visualStrategy = null } = {}) {
+  if (visualStrategy !== 'asset_first') return [];
+  const warnings = [];
+  for (const decision of Array.isArray(decisions) ? decisions : []) {
+    const check = decision?.overlay_check;
+    if (!check || check.valid !== false || check.reason_code !== 'overlay_in_caption_safe_area') continue;
+    warnings.push({
+      code: 'asset_first_overlay_caption_overlap',
+      severity: 'warning',
+      message: `beat ${decision.beat_id} 的 motion overlay 落入字幕安全区。`,
+      details: {
+        beat_id: decision.beat_id,
+        reason_code: check.reason_code,
+        reason: check.message || '',
+      },
+    });
+  }
+  return warnings;
+}
+
+// beatsInfo 从 render_decisions 构造（R4 已把 text_blocks/cards/graphics 合并进决策）。
+// has_asset 按 route_role==='asset_overlay' 判定：asset_first 路由仅在 beat 携带 asset_refs
+// 时给该角色，语义等价于回查 visual_plan 且实现更简单。无任何统计字段的决策跳过
+//（stats 未合并时不对该 beat 做密度判断，避免误报）。
+function beatsInfoFromRenderDecisions(decisions = []) {
+  const beatsInfo = [];
+  for (const decision of Array.isArray(decisions) ? decisions : []) {
+    if (!decision || !decision.beat_id) continue;
+    const hasStats = ['text_blocks', 'cards', 'graphics']
+      .some(key => Number.isFinite(Number(decision[key])));
+    if (!hasStats) continue;
+    beatsInfo.push({
+      beat_id: decision.beat_id,
+      has_asset: decision.route_role === 'asset_overlay',
+      text_blocks: Number(decision.text_blocks) || 0,
+      cards: Number(decision.cards) || 0,
+      graphics: Number(decision.graphics) || 0,
+    });
+  }
+  return beatsInfo;
+}
+
+// 成对边界组装：同 scene 边界前后（∓0.3s）各取最近采样帧供差分；缺帧留空由分析函数跳过
+function assembleBoundaryGroupsForDiff(boundaryGroups = [], frames = []) {
+  return (Array.isArray(boundaryGroups) ? boundaryGroups : [])
+    .filter(group => group.same_scene === true)
+    .map(group => ({
+      ...group,
+      before: closestFrameAt(frames, group.boundary_sec - 0.3),
+      after: closestFrameAt(frames, group.boundary_sec + 0.3),
+    }));
+}
+
+// 字幕区帧视图：采样帧时间对 voice window 求交得 caption_active，携带底部条带统计
+function captionRegionFramesFromSamples(frames = [], voiceWindows = []) {
+  const windows = Array.isArray(voiceWindows) ? voiceWindows : [];
+  return (Array.isArray(frames) ? frames : [])
+    .filter(frame => frame && frame.bottom_region && Number.isFinite(Number(frame.time_sec)))
+    .map(frame => {
+      const time = Number(frame.time_sec);
+      return {
+        time,
+        caption_active: windows.some(window => time >= window.start && time <= window.end),
+        bottom_region: frame.bottom_region,
+      };
+    });
+}
+
+// asset_first 巡检警告汇总：全部经 attachAssetFirstWarnings 挂 result.warnings，
+// 不进入 issues / 不影响 success（硬约束 C）。
+function collectAssetFirstWarnings({ project = {}, timedPlan = {}, timedFrames = [], sequentialFrames = [] } = {}) {
+  const options = { visualStrategy: 'asset_first' };
+  const decisions = Array.isArray(project.render_decisions) ? project.render_decisions : [];
+  const voiceWindows = buildVoiceWindowsFromProject(project);
+  return [
+    ...analyzeAssetFirstRouting(decisions, options),
+    ...analyzeAssetFirstBoundaries(
+      assembleBoundaryGroupsForDiff(timedPlan.boundaryGroups || [], timedFrames),
+      options,
+    ),
+    ...analyzeAssetFirstCaptionRegion(captionRegionFramesFromSamples(timedFrames, voiceWindows), options),
+    ...analyzeAssetFirstInformation(beatsInfoFromRenderDecisions(decisions), options),
+    ...analyzeAssetFirstStyleDrift(sequentialFrames, options),
+    ...mapAssetUsageToQaWarnings(project.asset_usage_report || {}, options),
+    ...mapOverlayChecksToQaWarnings(decisions, options),
+  ];
+}
+
 // warnings 独立于 issues，绝不影响 success / withAdditionalIssues / checkpoint 语义
 function attachAssetFirstWarnings(result, warnings = []) {
   if (!Array.isArray(warnings) || !warnings.length) return result;
@@ -785,8 +1034,13 @@ module.exports = {
   inspectRenderedVideo,
   aspectFromDimensions,
   isBlankFrameMetric,
+  projectBoundarySampleGroups,
   analyzeAssetFirstRouting,
   analyzeAssetFirstBoundaries,
   analyzeAssetFirstCaptionRegion,
+  analyzeAssetFirstInformation,
+  analyzeAssetFirstStyleDrift,
+  mapAssetUsageToQaWarnings,
+  mapOverlayChecksToQaWarnings,
   attachAssetFirstWarnings,
 };

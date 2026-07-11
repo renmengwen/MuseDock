@@ -268,6 +268,17 @@ function computeFrameHtmlStats(html = '') {
   };
 }
 
+// statsByBeatId 条目的统一构造：复用帧与新生成帧共用，保证两路统计结构同构
+function frameHtmlStatsEntry(html, frameHeight = 1920) {
+  const text = String(html || '');
+  return {
+    ...computeFrameHtmlStats(text),
+    overlay_check: /data-mp-overlay/.test(text)
+      ? validateOverlayHtml(text, { height: frameHeight })
+      : null,
+  };
+}
+
 function firstExplicitDiagnosticCode(diagnostics) {
   if (!Array.isArray(diagnostics)) return '';
   for (const item of diagnostics) {
@@ -373,12 +384,7 @@ function collectReusedFrameContext({
 } = {}) {
   const text = String(html || '');
   if (!text.trim() || !frameKey) return;
-  statsByBeatId[frameKey] = {
-    ...computeFrameHtmlStats(text),
-    overlay_check: /data-mp-overlay/.test(text)
-      ? validateOverlayHtml(text, { height: frameHeight })
-      : null,
-  };
+  statsByBeatId[frameKey] = frameHtmlStatsEntry(text, frameHeight);
   const groupId = continuityGroupId({ node });
   if (!groupId) return;
   const beatIndex = Number(node?.metadata?.visual_beat?.continuity?.beat_index) || 1;
@@ -426,6 +432,8 @@ async function runFrameHtmlPhase(ctx) {
   // hf_first 保持空对象（硬约束 A：不产生任何新 issue/统计）。
   const isAssetFirst = creativeContext?.visual_strategy === 'asset_first';
   const statsByBeatId = {};
+  // overlay 校验用的帧高在整个 phase 内不变，循环外算一次
+  const frameHeight = Number(frameHtmlAgent.resolveResolution(templateRenderTarget)?.height) || 1920;
   const nodes = contentGraph.nodes || [];
   const scenes = new Map((Array.isArray(sceneSpec?.scenes) ? sceneSpec.scenes : []).map(scene => [scene.id, scene]));
   let visualStyleReferenceHtml = '';
@@ -752,7 +760,7 @@ async function runFrameHtmlPhase(ctx) {
           node,
           html: reuse.html,
           frameKey: frameKey || node.id || sceneId,
-          frameHeight: Number(frameHtmlAgent.resolveResolution(templateRenderTarget)?.height) || 1920,
+          frameHeight,
           statsByBeatId,
           initialHtmlByGroup,
           reusedBeatIndexByGroup,
@@ -907,13 +915,7 @@ async function runFrameHtmlPhase(ctx) {
       htmlResult = { ...htmlResult, html: withTimeline };
     }
     if (isAssetFirst) {
-      const frameHeight = Number(frameHtmlAgent.resolveResolution(templateRenderTarget)?.height) || 1920;
-      statsByBeatId[frameKey || node.id || sceneId] = {
-        ...computeFrameHtmlStats(htmlResult.html),
-        overlay_check: /data-mp-overlay/.test(String(htmlResult.html || ''))
-          ? validateOverlayHtml(htmlResult.html, { height: frameHeight })
-          : null,
-      };
+      statsByBeatId[frameKey || node.id || sceneId] = frameHtmlStatsEntry(htmlResult.html, frameHeight);
     }
     const durationSec = trustedSceneDuration(scene || {}, node);
     const captions = mediaOptions.generateCaptions !== false && scene

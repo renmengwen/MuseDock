@@ -398,5 +398,101 @@ const qa = require('../server/services/creative-video/visualQaService');
   }
   console.log('visual qa asset_first tests passed');
 
+  // ===== Task 7.2：asset_first 信息密度 / 风格漂移 / 素材缺失映射 / overlay 越界映射 / 成对边界采样 =====
+  const {
+    analyzeAssetFirstInformation,
+    analyzeAssetFirstStyleDrift,
+    mapAssetUsageToQaWarnings,
+    mapOverlayChecksToQaWarnings,
+    projectBoundarySampleGroups,
+  } = require('../server/services/creative-video/visualQaService');
+
+  // 信息密度：无图 beat 帧元素统计不足 => warning
+  {
+    const beatsInfo = [
+      { beat_id: 'scene_04_b1', has_asset: false, text_blocks: 1, cards: 0, graphics: 0 },
+      { beat_id: 'scene_02_b1', has_asset: true, text_blocks: 1, cards: 0, graphics: 0 },
+    ];
+    const warnings = analyzeAssetFirstInformation(beatsInfo, { visualStrategy: 'asset_first', minElements: 3 });
+    assert.strictEqual(warnings.length, 1);
+    assert.strictEqual(warnings[0].code, 'asset_first_low_information');
+    assert.strictEqual(warnings[0].details.beat_id, 'scene_04_b1');
+    assert.deepStrictEqual(analyzeAssetFirstInformation(beatsInfo, { visualStrategy: 'hf_first', minElements: 3 }), []);
+  }
+  // 风格漂移：帧平均色序列突变 => warning
+  {
+    const frames = [
+      { time: 1, mean_rgb: [220, 220, 215] }, { time: 30, mean_rgb: [222, 219, 214] },
+      { time: 47, mean_rgb: [10, 10, 12] },   { time: 60, mean_rgb: [12, 9, 10] },
+    ];
+    const warnings = analyzeAssetFirstStyleDrift(frames, { visualStrategy: 'asset_first', maxMeanShift: 96 });
+    assert.strictEqual(warnings.length, 1);
+    assert.strictEqual(warnings[0].code, 'asset_first_style_drift');
+    assert.deepStrictEqual(analyzeAssetFirstStyleDrift(frames, { visualStrategy: 'hf_first', maxMeanShift: 96 }), []);
+  }
+  // asset_missing 复用 workflow 级 asset usage 报告（真实结构，R6：无 report.missing）
+  {
+    const report = {
+      status: 'ready',
+      assets: [
+        { asset_id: 'gen_scene_02', required: true, used: false, used_in_frames: [], expected_in_frames: ['scene_02_b1', 'scene_02_b2'] },
+        { asset_id: 'gen_scene_03', required: true, used: true, used_in_frames: ['scene_03_b1'], expected_in_frames: ['scene_03_b1'] },
+        { asset_id: 'gen_x', required: true, used: false, used_in_frames: [], expected_in_frames: [] },
+      ],
+      required_asset_ids: ['gen_scene_02', 'gen_scene_03', 'gen_x'],
+      missing_required_asset_ids: ['gen_scene_02', 'gen_x'],
+    };
+    const warnings = mapAssetUsageToQaWarnings(report, { visualStrategy: 'asset_first' });
+    assert.strictEqual(warnings.length, 2);
+    const w1 = warnings.find(w => w.details.asset_id === 'gen_scene_02');
+    assert.strictEqual(w1.code, 'asset_first_asset_missing');
+    assert.deepStrictEqual(w1.details.expected_in_frames, ['scene_02_b1', 'scene_02_b2']);
+    assert.strictEqual(w1.details.beat_id, 'scene_02_b1', '定向重试目标取 expected_in_frames 首个');
+    const w2 = warnings.find(w => w.details.asset_id === 'gen_x');
+    assert.strictEqual(w2.details.beat_id, null, '拿不到 frame 信息时只给 asset_id，不伪造 beat_id（R6）');
+    assert.deepStrictEqual(mapAssetUsageToQaWarnings(report, { visualStrategy: 'hf_first' }), []);
+  }
+  // overlay_caption_overlap 透传 render_decisions[].overlay_check
+  {
+    const decisions = [
+      { beat_id: 'scene_04_b1', overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'x' } },
+      { beat_id: 'scene_04_b2', overlay_check: { valid: true } },
+    ];
+    const warnings = mapOverlayChecksToQaWarnings(decisions, { visualStrategy: 'asset_first' });
+    assert.strictEqual(warnings.length, 1);
+    assert.strictEqual(warnings[0].code, 'asset_first_overlay_caption_overlap');
+    assert.strictEqual(warnings[0].details.beat_id, 'scene_04_b1');
+    assert.deepStrictEqual(mapOverlayChecksToQaWarnings(decisions, { visualStrategy: 'hf_first' }), []);
+  }
+  // 边界成对采样：pairedSampling 开启时 times = [cursor-0.3, cursor+0.3]；缺省与现状一致
+  {
+    const project = { frames: [
+      { scene_id: 'scene_05', duration_sec: 6.33 },
+      { scene_id: 'scene_05', duration_sec: 6.33 },
+    ] };
+    const paired = projectBoundarySampleGroups(project, 12.66, { pairedSampling: true });
+    assert.strictEqual(paired.length, 1);
+    assert.deepStrictEqual(paired[0].times, [6.03, 6.63], '成对采样 = 边界前 0.3s + 边界后 0.3s');
+    assert.strictEqual(paired[0].same_scene, true);
+    const legacy = projectBoundarySampleGroups(project, 12.66);
+    assert.deepStrictEqual(legacy[0].times, [6.33, 6.83, 7.33], '缺省采样与现状完全一致（硬约束 A）');
+    const crossScene = projectBoundarySampleGroups({ frames: [
+      { scene_id: 'scene_01', duration_sec: 4 },
+      { scene_id: 'scene_02', duration_sec: 4 },
+    ] }, 8, { pairedSampling: true });
+    assert.strictEqual(crossScene[0].same_scene, false, '跨 scene 边界 same_scene=false');
+  }
+  // 7.1 Minor 顺手修：before/after 指标非有限值（如缺帧兜底对象）跳过该组，不误报
+  {
+    const warnings = qa.analyzeAssetFirstBoundaries([
+      { scene_id: 'scene_05', boundary_sec: 10, same_scene: true,
+        before: { average_luma: NaN, edge_score: 0.3 }, after: { average_luma: 40, edge_score: 0.1 } },
+      { scene_id: 'scene_05', boundary_sec: 20, same_scene: true,
+        before: { average_luma: 200, edge_score: 0.3 }, after: { average_luma: 40, edge_score: undefined } },
+    ], { visualStrategy: 'asset_first', diffThreshold: 0.25 });
+    assert.deepStrictEqual(warnings, [], '非有限指标与缺帧同语义：跳过不误报');
+  }
+  console.log('visual qa asset_first density/drift tests passed');
+
   console.log('visual qa service tests passed');
 })();

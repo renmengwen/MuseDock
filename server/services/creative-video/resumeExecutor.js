@@ -120,6 +120,8 @@ async function inspectVisual({ projectDir, project, outputPath, services, taskCo
     outputPath,
     project,
     expectedAspectRatio: expectedAspectRatio(project),
+    // asset_first 工程 resume 重巡检时同样走 warnings 观测通道（策略取落盘 project，Task 1.0 已持久化）
+    visualStrategy: project?.visual_strategy || null,
   });
   const reportPath = visualInspectResult.report_path || visualInspectResult.reportPath || 'inspect/visual-report.json';
   const nextProject = await projectStore.writeProjectJson(projectDir, current => {

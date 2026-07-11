@@ -213,7 +213,7 @@ async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames 
   const beatsById = new Map(
     arrayOrEmpty(objectOrEmpty(project.visual_plan).beats)
       .filter(beat => beat && beat.id)
-      .map(beat => [beat.id, beat]),
+      .map(beat => [String(beat.id).trim(), beat]),
   );
   for (const frame of frames) {
     const html = await readFrameHtmlForValidation(projectDir, frame, diagnostics);

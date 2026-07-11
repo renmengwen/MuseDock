@@ -451,11 +451,13 @@ function fanOutAssetFirstOverridesToBeats({ perSceneDecisions, visualPlan, visua
 // R4：帧统计（overlay_check/text_blocks/cards/graphics）必须合并进 attachVisualRouting
 // 闭包引用的 visualDecisions/renderDecisions 源对象，直接写 project.render_decisions
 // 会在下一次 attachVisualRouting 重挂时被覆盖抹掉。
-// 已知局限：scene_html 模式下 statsByBeatId 的键是 scene:<scene_id>，而决策仍按 beat_id 键控，
-// 此处查找会 miss（scene 级帧统计暂不进 render_decisions），Task 7 QA 接线时统一处理。
+// scene_html 模式下 statsByBeatId 的键是 scene:<scene_id>（决策仍按 beat_id 键控），
+// beat 键 miss 时按 scene 键回落，把整场景 HTML 的统计展开到该 scene 全部 beat 决策上。
 function mergeFrameStatsIntoDecisions({ visualDecisions, renderDecisions, statsByBeatId = {} }) {
   const applyTo = decision => {
-    const stats = decision && statsByBeatId[decision.beat_id];
+    if (!decision) return;
+    const stats = statsByBeatId[decision.beat_id]
+      || statsByBeatId[`scene:${String(decision.scene_id || '').trim()}`];
     if (stats) Object.assign(decision, stats); // { overlay_check, text_blocks, cards, graphics }
   };
   if (visualDecisions instanceof Map) for (const decision of visualDecisions.values()) applyTo(decision);
@@ -2359,6 +2361,9 @@ async function generateHtmlVideo(options = {}) {
     project: rendered.project,
     expectedAspectRatio: templateRenderTarget.aspect_ratio || sceneSpec?.aspect_ratio,
     safetyOnly: skipValidation === true,
+    // asset_first 时 QA 侧启用 warnings 通道与成对边界采样；策略以落盘 project 为准，
+    // creativeContext 兜底（resume/retry 场景二者已在入口合并，见决策 2）
+    visualStrategy: rendered.project?.visual_strategy || creativeContext?.visual_strategy || null,
   });
   const visualReportPath = visualReport.report_path || visualReport.reportPath || 'inspect/visual-report.json';
   const visualIssues = Array.isArray(visualReport.issues) ? visualReport.issues : [];

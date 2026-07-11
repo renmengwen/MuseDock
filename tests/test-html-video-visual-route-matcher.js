@@ -133,7 +133,8 @@ const textBeatWithAsset = {
   for (const d of decisions.values()) {
     assert.strictEqual(d.source_mode, 'raw_html');
     assert.strictEqual(d.template_id, null);
-    assert.ok(['asset_overlay', 'diagram_motion', 'caption_motion'].includes(d.route_role));
+    assert.ok(['asset_overlay', 'diagram_motion'].includes(d.route_role),
+      'P3 后无图 beat 统一 diagram_motion，caption_motion 枚举保留不用');
   }
 }
 

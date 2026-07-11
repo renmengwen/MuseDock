@@ -2642,6 +2642,7 @@ async function readProjectJson(projectDir) {
   // frame_html/render checkpoint 全部按 scene:<id> 键控。
   {
     const sceneHtmlNarration = '第一句讲清楚问题的来龙去脉与背景。第二句给出核心的判断标准和依据。第三句展开关键的执行步骤细节。第四句总结行动建议并给出提醒。';
+    let sceneHtmlQaInput = null;
     const sceneHtmlSpec = {
       title: 'scene_html 连续性',
       aspect_ratio: '16:9',
@@ -2723,7 +2724,21 @@ async function readProjectJson(projectDir) {
           muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
         },
         visualQaService: {
-          inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+          // Task 7.2：模拟 asset_first QA 报告——success 通过但携带 warnings（非阻断观测通道）
+          inspectRenderedVideo: async input => {
+            sceneHtmlQaInput = input;
+            return {
+              success: true,
+              issues: [],
+              metrics: {},
+              warnings: [{
+                code: 'asset_first_low_information',
+                severity: 'warning',
+                message: '无图 beat 画面元素过少。',
+                details: { beat_id: 'scene_long_b1' },
+              }],
+            };
+          },
         },
       },
     });
@@ -2769,6 +2784,18 @@ async function readProjectJson(projectDir) {
     assert.ok(renderEntries.length >= 2, 'render checkpoint 应有 scene 级完成条目');
     assert.ok(renderEntries.every(([key]) => key.startsWith('scene:')),
       `render checkpoint 完成条目必须按 scene:<id> 键控（R2）：${JSON.stringify(Object.keys(sceneHtmlStages.render?.frames || {}))}`);
+
+    // ===== Task 7.2：QA warnings 通道双向断言 =====
+    // 正向：asset_first 工程只有 warnings（无 blocking issue）时，success 不变、不触发 visual_qa_warning 诊断
+    assert.strictEqual(sceneHtmlQaInput.visualStrategy, 'asset_first',
+      'workflow 必须把 visual_strategy 透传给 inspectRenderedVideo');
+    assert.strictEqual(sceneHtmlResult.visual_report.success, true, 'warnings 不得改变 visual_report.success');
+    assert.strictEqual(sceneHtmlResult.visual_report.warnings.length, 1, 'warnings 数组应原样透传到 visual_report');
+    assert.ok(!sceneHtmlResult.html_video_diagnostics.some(d => d.code === 'visual_qa_warning'),
+      'asset_first warnings 不得触发 visual_qa_warning 诊断');
+    assert.equal(sceneHtmlStages.visual_inspect.status, 'done', 'warnings 不得改变 visual_inspect checkpoint 状态');
+    assert.equal(sceneHtmlStages.visual_inspect.diagnostic_code, '', 'warnings 不得写入 checkpoint 诊断码');
+    // 反向（blocking issue 仍记 visual_qa_warning）由既有 visualQaWarning / visualQaBlocking 用例覆盖
   }
 
   console.log('html-video workflow tests passed');
