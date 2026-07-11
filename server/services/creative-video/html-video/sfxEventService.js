@@ -15,6 +15,10 @@ const MAX_TOTAL_EVENTS = 18;
 const NARRATION_DENSE_CPS = 5;
 const NARRATION_DENSE_DUCK_DB = 3;
 const INTENSITIES = new Set(['low', 'medium', 'high']);
+// 旁白避让默认参数：起始避让窗、旁白活跃期 duck 量、每 scene 强音效上限
+const SFX_AVOID_START_SEC = 0.35;
+const SFX_VOICE_DUCK_DB = 8;
+const SFX_MAX_HIGH_PER_SCENE = 2;
 
 function numberOrNull(value) {
   const number = Number(value);
@@ -355,7 +359,7 @@ function buildVoiceWindowsFromProject(project = {}) {
   const windows = [];
   let cursor = 0;
   for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
-    const duration = Number(frame?.duration_sec ?? frame?.durationSec) || 0;
+    const duration = Number(frame?.duration_sec ?? frame?.durationSec ?? frame?.duration) || 0;
     for (const caption of Array.isArray(frame?.captions) ? frame.captions : []) {
       const start = Number(caption?.start);
       const end = Number(caption?.end);
@@ -371,29 +375,37 @@ function buildVoiceWindowsFromProject(project = {}) {
 // 旁白避让纯函数：起始 ±avoidStartSec 内移除、旁白活跃期 duck、每 scene 强音效限额。
 // voiceWindows 为空时完全直通（兼容旧调用形态）。
 function applyVoiceAvoidance(events = [], voiceWindows = [], {
-  avoidStartSec = 0.35,
-  duckDb = 8,
-  maxHighPerScene = 2,
+  avoidStartSec = SFX_AVOID_START_SEC,
+  duckDb = SFX_VOICE_DUCK_DB,
+  maxHighPerScene = SFX_MAX_HIGH_PER_SCENE,
 } = {}) {
   const windows = (Array.isArray(voiceWindows) ? voiceWindows : [])
     .filter(w => Number.isFinite(w?.start) && Number.isFinite(w?.end) && w.end > w.start);
   if (!windows.length) {
     return { kept: Array.isArray(events) ? [...events] : [], dropped: [] };
   }
+  const eventTime = event => Number(event?.global_time_sec ?? event?.globalTimeSec) || 0;
+  // 按全片时间稳定升序处理：high 限额确定性保留时间最早的 N 个（kept/dropped 输出随之为时间序）
+  const ordered = (Array.isArray(events) ? [...events] : []).sort((a, b) => eventTime(a) - eventTime(b));
   const kept = [];
   const dropped = [];
   const highCount = new Map();
-  for (const event of Array.isArray(events) ? events : []) {
-    const at = Number(event.global_time_sec ?? event.globalTimeSec) || 0;
+  // dropped 保持最小契约（对齐 resolveProjectSfxEventsForMux）：不展开原事件，
+  // 避免覆盖事件自带的 AI reason、避免 enabled 等字段被下游误持久化后事件复活
+  const dropEvent = (event, reason) => {
+    dropped.push({ id: event.id, scene_id: event.scene_id, sfx_id: event.sfx_id, reason });
+  };
+  for (const event of ordered) {
+    const at = eventTime(event);
     if (windows.some(w => Math.abs(at - w.start) <= avoidStartSec)) {
-      dropped.push({ ...event, reason: `与旁白起始点间隔小于 ${avoidStartSec}s，移除避免压过人声` });
+      dropEvent(event, `与旁白起始点间隔不大于 ${avoidStartSec}s，移除避免压过人声`);
       continue;
     }
     if (event.intensity === 'high') {
       const count = (highCount.get(event.scene_id) || 0) + 1;
       highCount.set(event.scene_id, count);
       if (count > maxHighPerScene) {
-        dropped.push({ ...event, reason: `scene ${event.scene_id} 强音效（intensity=high）超过上限 ${maxHighPerScene}` });
+        dropEvent(event, `scene ${event.scene_id} 强音效（intensity=high）超过上限 ${maxHighPerScene}`);
         continue;
       }
     }
