@@ -131,3 +131,34 @@ const { runBucketsWithContinuity } = require('../server/services/creative-video/
   console.error(err);
   process.exit(1);
 });
+
+const { buildSceneTimelineScript, groupBeatsForSceneHtml } = require('../server/services/creative-video/html-video/frameHtmlPhase');
+
+// beat 分组：同 scene 合一，start/end 为组内相对时间
+{
+  const beats = [
+    { id: 'scene_05_b1', scene_id: 'scene_05', duration_sec: 6.33 },
+    { id: 'scene_05_b2', scene_id: 'scene_05', duration_sec: 6.33 },
+    { id: 'scene_06_b1', scene_id: 'scene_06', duration_sec: 5.99 },
+  ];
+  const groups = groupBeatsForSceneHtml(beats);
+  assert.strictEqual(groups.length, 2);
+  assert.strictEqual(groups[0].scene_id, 'scene_05');
+  assert.ok(Math.abs(groups[0].duration_sec - 12.66) < 1e-6);
+  assert.deepStrictEqual(
+    groups[0].beats.map(b => [b.id, b.start_sec, b.end_sec]),
+    [['scene_05_b1', 0, 6.33], ['scene_05_b2', 6.33, 12.66]],
+  );
+}
+
+// 时间线脚本：注入 window.__MP_BEATS__ 并随时间切 body[data-mp-beat]
+{
+  const script = buildSceneTimelineScript([
+    { id: 'scene_05_b1', start_sec: 0, end_sec: 6.33 },
+    { id: 'scene_05_b2', start_sec: 6.33, end_sec: 12.66 },
+  ]);
+  assert.ok(script.includes('__MP_BEATS__'));
+  assert.ok(script.includes('data-mp-beat'));
+  assert.ok(script.includes('scene_05_b2'));
+}
+console.log('scene continuity phase2 timeline tests passed');

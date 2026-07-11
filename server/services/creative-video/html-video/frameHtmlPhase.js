@@ -859,6 +859,47 @@ async function runFrameHtmlPhase(ctx) {
   return { ok: true, project, contentGraph, stats_by_beat_id: statsByBeatId };
 }
 
+function groupBeatsForSceneHtml(beats = []) {
+  const groups = [];
+  const byScene = new Map();
+  for (const beat of beats) {
+    let group = byScene.get(beat.scene_id);
+    if (!group) {
+      group = { scene_id: beat.scene_id, duration_sec: 0, beats: [] };
+      byScene.set(beat.scene_id, group);
+      groups.push(group);
+    }
+    const start = group.duration_sec;
+    const duration = Number(beat.duration_sec) || 0;
+    group.beats.push({ ...beat, start_sec: start, end_sec: start + duration });
+    group.duration_sec = start + duration;
+  }
+  return groups;
+}
+
+function buildSceneTimelineScript(beatWindows = []) {
+  const payload = JSON.stringify(beatWindows.map(b => ({ id: b.id, start: b.start_sec, end: b.end_sec })));
+  return `<script>
+(function () {
+  window.__MP_BEATS__ = ${payload};
+  var beats = window.__MP_BEATS__;
+  var origin = null;
+  function tick(now) {
+    if (origin === null) origin = now;
+    var t = (now - origin) / 1000;
+    var active = null;
+    for (var i = 0; i < beats.length; i++) {
+      if (t >= beats[i].start && t < beats[i].end) { active = beats[i]; break; }
+    }
+    if (!active && beats.length) active = beats[beats.length - 1];
+    if (active) document.body.setAttribute('data-mp-beat', active.id);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+<\/script>`;
+}
+
 module.exports = {
   runFrameHtmlPhase,
   isProviderMissingText,
@@ -867,6 +908,8 @@ module.exports = {
   summarizeBaseLayout,
   bucketJobsByContinuityGroup,
   runBucketsWithContinuity,
+  groupBeatsForSceneHtml,
+  buildSceneTimelineScript,
   FRAME_HTML_CONCURRENCY,
   FRAME_HTML_MODEL_OPTIONS,
 };
