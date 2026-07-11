@@ -154,6 +154,22 @@ async function run() {
   assert.ok(!hfGenPrompt.includes('data-mp-overlay'), 'hf_first prompt 不得包含 motion primitive 片段词汇');
   console.log('asset-first prompt motion overlay tests passed');
 
+  // ===== 模块5 + R8：无字幕 beat 的画面兜底 =====
+  {
+    const beat = {
+      id: 'scene_04_b2', scene_id: 'scene_04', kind: 'text', duration_sec: 5.97,
+      narration_text: 'UX 关注用户为什么来',
+      visual_base: { type: 'diagram', asset_id: null, continuity_group: 'scene_04' },
+      motion_overlay: { preset: 'concept_card', placement: 'right_panel', max_items: 1, avoid_caption_bottom_px: 140 },
+      continuity: { group_id: 'scene_04', reuse_base_layout: true, beat_index: 2, beat_count: 3 },
+    };
+    const noCaption = frameHtmlAgent.buildAssetFirstFramePrompt({ beat, primitiveSnippet: '', hasCaptions: false });
+    assert.ok(/重点短句/.test(noCaption), '无字幕 beat 必须要求画面内有重点短句，避免只有旁白');
+    const withCaption = frameHtmlAgent.buildAssetFirstFramePrompt({ beat, primitiveSnippet: '', hasCaptions: true });
+    assert.ok(!/重点短句/.test(withCaption));
+  }
+  console.log('asset-first prompt no-caption fallback tests passed');
+
   console.log('test-html-video-asset-first-prompts passed');
 }
 

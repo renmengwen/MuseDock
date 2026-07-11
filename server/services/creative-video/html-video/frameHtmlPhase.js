@@ -72,6 +72,25 @@ function isSceneHtmlNode(node = {}) {
     || (Array.isArray(node?.metadata?.beat_windows) && node.metadata.beat_windows.length > 0);
 }
 
+// R8：判定某 beat 的时间窗口内是否有系统字幕（与 mixedFrameBuilder 建帧的字幕切窗派生路径完全一致：
+// 整场景字幕轨 normalizeCaptions 后按 beat 前缀时长偏移切窗）。beat 上没有 caption_text 字段，
+// 字幕是建帧阶段从 scene 派生的，因此这里复用同一对函数计算，不新造字段。
+function hasCaptionsForBeat({ scene = {}, beats = [], beatId = '', mediaOptions = {} } = {}) {
+  if (mediaOptions.generateCaptions === false) return false;
+  // 延迟 require 规避循环依赖：mixedFrameBuilder 顶部已 require 本模块（groupBeatsForSceneHtml），
+  // 顶层反向 require 会成环，CommonJS 下可能拿到不完整导出；函数体内加载时双方均已初始化完毕。
+  const { normalizeCaptions: normalizeSceneCaptions, sliceCaptionsToWindow } = require('./mixedFrameBuilder');
+  const sceneBeats = beats.filter(b => b && b.scene_id === (scene.id || scene.scene_id));
+  const index = sceneBeats.findIndex(b => b.id === beatId);
+  if (index < 0) return false;
+  const offsetSec = sceneBeats.slice(0, index)
+    .reduce((sum, b) => sum + (Number(b.duration_sec) || 0), 0);
+  const beatDuration = Number(sceneBeats[index].duration_sec) || 0;
+  const sceneDuration = sceneBeats.reduce((sum, b) => sum + (Number(b.duration_sec) || 0), 0);
+  const track = normalizeSceneCaptions(scene, sceneDuration);
+  return sliceCaptionsToWindow(track, offsetSec, beatDuration).length > 0;
+}
+
 // scene_html 的 scene 级 prompt 约束段：data-mp-beat-scope 约定 + CSS 可见性规则示例 +
 // 每个 beat 的时间窗口与文案要点（一份 HTML 覆盖整场景，base 层稳定、overlay 分 beat 显隐）。
 function buildSceneBeatsBrief(node = {}) {
@@ -410,9 +429,22 @@ async function runFrameHtmlPhase(ctx) {
   const generateFrameJob = async job => {
     const { index, node, sceneId, scene, styleReferenceHtml } = job;
     // previousBeatSummary 仅 asset_first 分桶路径会写入（hf_first 恒为 undefined，不改变原展开形态）
+    const jobBeatId = String(node.beat_id || node.beatId || '').trim();
     const assetFirstMotionArgs = {
       ...resolveAssetFirstMotionArgs(node, creativeContext),
       ...(job.previousBeatSummary ? { previousBeatSummary: job.previousBeatSummary } : {}),
+      // R8：仅 asset_first 的 beat_mp4 帧计算 hasCaptions（硬约束 A：hf_first 不计算不传；
+      // scene_html 的 scene 级帧 beat 粒度不适用，保持 undefined，agent 侧缺省 true 不追加要求行）
+      ...(isAssetFirst && jobBeatId && node?.metadata?.visual_beat && !isSceneHtmlNode(node)
+        ? {
+          hasCaptions: hasCaptionsForBeat({
+            scene,
+            beats: project.visual_plan?.beats || [],
+            beatId: jobBeatId,
+            mediaOptions,
+          }),
+        }
+        : {}),
     };
     await report(onProgress, {
       type: 'html_video_frame_html_started',
@@ -1012,6 +1044,7 @@ module.exports = {
   summarizeBaseLayout,
   collectReusedFrameContext,
   buildSceneBeatsBrief,
+  hasCaptionsForBeat,
   bucketJobsByContinuityGroup,
   runBucketsWithContinuity,
   groupBeatsForSceneHtml,

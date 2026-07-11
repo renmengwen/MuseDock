@@ -22,4 +22,21 @@ const { injectCaptionLayerGuard } = require('../server/services/creative-video/h
   const twice = injectCaptionLayerGuard(once, { visualStrategy: 'asset_first' });
   assert.strictEqual(once, twice);
 }
+// 分支覆盖：无 head 有 body（含大写标签/带属性）→ 守卫注入 body 开标签之后
+{
+  const html = '<HTML><BODY class="stage" data-x="1"><div>content</div></BODY></HTML>';
+  const out = injectCaptionLayerGuard(html, { visualStrategy: 'asset_first' });
+  assert.ok(out.includes('data-hv-caption-guard'), '无 head 时也必须注入守卫样式');
+  assert.ok(
+    /<BODY class="stage" data-x="1"><style data-hv-caption-guard>/i.test(out),
+    '守卫必须紧跟 body 开标签之后注入',
+  );
+}
+// 分支覆盖：head/body 都无 → 守卫前置
+{
+  const html = '<div>fragment</div>';
+  const out = injectCaptionLayerGuard(html, { visualStrategy: 'asset_first' });
+  assert.ok(out.startsWith('<style data-hv-caption-guard>'), '无 head/body 时守卫必须前置');
+  assert.ok(out.endsWith('<div>fragment</div>'), '原始片段必须完整保留在守卫之后');
+}
 console.log('caption safety tests passed');

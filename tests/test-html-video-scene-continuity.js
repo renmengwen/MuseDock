@@ -348,3 +348,23 @@ const { expandContentGraphToSceneEntries } = require('../server/services/creativ
   assert.strictEqual(node.metadata.visual_beats.length, 2, '组内全部 beat 编排字段随 node 传递');
 }
 console.log('scene continuity phase2 render/retry tests passed');
+
+// 模块5 R8：hasCaptionsForBeat 用 scene 字幕切窗结果判定（真实派生路径）
+const { hasCaptionsForBeat } = require('../server/services/creative-video/html-video/frameHtmlPhase');
+{
+  const scene = { id: 'scene_04', duration_sec: 12, narration_text: '前半段有旁白字幕',
+    captions: [{ start: 0, end: 5, text: '前半段字幕' }] };
+  const beats = [
+    { id: 'scene_04_b1', scene_id: 'scene_04', duration_sec: 6 },
+    { id: 'scene_04_b2', scene_id: 'scene_04', duration_sec: 6 },
+  ];
+  // b1 窗口 [0,6)：命中字幕；b2 窗口 [6,12)：无字幕
+  assert.strictEqual(hasCaptionsForBeat({ scene, beats, beatId: 'scene_04_b1', mediaOptions: {} }), true);
+  assert.strictEqual(hasCaptionsForBeat({ scene, beats, beatId: 'scene_04_b2', mediaOptions: {} }), false);
+  // 全局关闭字幕：一律 false
+  assert.strictEqual(
+    hasCaptionsForBeat({ scene, beats, beatId: 'scene_04_b1', mediaOptions: { generateCaptions: false } }),
+    false,
+  );
+}
+console.log('has captions for beat tests passed');

@@ -231,7 +231,7 @@ function buildAssetFirstFramePrompt({ beat = {}, primitiveSnippet = '', diagramS
       if (previousBeatSummary) lines.push(`上一 beat 布局摘要：\n${previousBeatSummary}`);
     }
     if (hasCaptions === false) {
-      // 预留：Task 5.2 会启用此分支（本任务实现签名即可，不强制测试）
+      lines.push('本 beat 没有系统字幕文本：overlay 必须包含一条与旁白对应的画面重点短句（不超过 18 字），避免观众只听到旁白而画面无文字表达。');
     }
   }
   // scene_html 的 scene 级约束段：独立段落输出（不与 primitive 参考片段混在一起，

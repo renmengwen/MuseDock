@@ -94,8 +94,8 @@ function injectCaptionLayerGuard(html = '', { visualStrategy = null } = {}) {
   if (visualStrategy !== 'asset_first') return html; // 硬约束：共享路径默认行为不变
   const text = String(html);
   if (text.includes('data-hv-caption-guard')) return text; // 幂等
-  if (text.includes('</head>')) return text.replace('</head>', `${CAPTION_GUARD_STYLE}</head>`);
-  if (text.includes('<body')) return text.replace(/<body([^>]*)>/, `<body$1>${CAPTION_GUARD_STYLE}`);
+  if (/<\/head>/i.test(text)) return text.replace(/<\/head>/i, `${CAPTION_GUARD_STYLE}</head>`);
+  if (/<body\b/i.test(text)) return text.replace(/<body\b([^>]*)>/i, `<body$1>${CAPTION_GUARD_STYLE}`);
   return CAPTION_GUARD_STYLE + text;
 }
 
