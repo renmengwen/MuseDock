@@ -163,26 +163,69 @@ const { buildSceneTimelineScript, groupBeatsForSceneHtml } = require('../server/
 }
 console.log('scene continuity phase2 timeline tests passed');
 
-const { buildRenderEntries } = require('../server/services/creative-video/html-video/mixedFrameBuilder');
+const { buildSceneRenderEntries } = require('../server/services/creative-video/html-video/mixedFrameBuilder');
 
 // scene_html 模式：一个 scene 一条渲染条目，checkpoint 键为 scene:<id>
+// （beat_mp4 缺省模式不经过本函数，走 buildMixedFrameProject 原有 beat 循环，
+// 其回归由 test-html-video-per-scene-routing.js / test-html-video-workflow.js 覆盖）
 {
   const beats = [
     { id: 'scene_05_b1', scene_id: 'scene_05', duration_sec: 6.33 },
     { id: 'scene_05_b2', scene_id: 'scene_05', duration_sec: 6.33 },
   ];
-  const entries = buildRenderEntries({ beats, continuityMode: 'scene_html', visualStrategy: 'asset_first' });
+  const entries = buildSceneRenderEntries(beats);
   assert.strictEqual(entries.length, 1);
   assert.strictEqual(entries[0].frame_id, 'scene:scene_05');
   assert.strictEqual(entries[0].scene_id, 'scene_05');
   assert.deepStrictEqual(entries[0].beat_ids, ['scene_05_b1', 'scene_05_b2']);
   assert.ok(Math.abs(entries[0].duration_sec - 12.66) < 1e-6);
+  assert.strictEqual(entries[0].route_role, 'scene_html');
 }
-// 缺省模式：per-beat 条目与现状一致（硬约束 A/D 回归）
+
+// scene 级 prompt 约束段：必须含各 beat_id、时间窗口、data-mp-beat-scope 约定与 CSS 可见性规则示例
+const { buildSceneBeatsBrief } = require('../server/services/creative-video/html-video/frameHtmlPhase');
 {
-  const beats = [{ id: 'scene_05_b1', scene_id: 'scene_05', duration_sec: 6.33 }];
-  const entries = buildRenderEntries({ beats, continuityMode: 'beat_mp4', visualStrategy: 'asset_first' });
-  assert.strictEqual(entries[0].frame_id, 'scene_05_b1');
+  const node = {
+    id: 'scene:scene_05',
+    metadata: {
+      beat_windows: [
+        { id: 'scene_05_b1', start_sec: 0, end_sec: 6.33 },
+        { id: 'scene_05_b2', start_sec: 6.33, end_sec: 12.66 },
+      ],
+      visual_beats: [
+        { id: 'scene_05_b1', visual_text: { headline: '要点一', keywords: ['关键词A'] }, motion_overlay: { preset: 'key_marker' } },
+        { id: 'scene_05_b2', visual_text: { headline: '要点二' } },
+      ],
+    },
+  };
+  const brief = buildSceneBeatsBrief(node);
+  assert.ok(brief.includes('scene_05_b1') && brief.includes('scene_05_b2'), 'brief 必须含各 beat_id');
+  assert.ok(brief.includes('0s - 6.33s') && brief.includes('6.33s - 12.66s'), 'brief 必须含各 beat 时间窗口');
+  assert.ok(brief.includes('data-mp-beat-scope="<beat_id>"'), 'brief 必须声明 data-mp-beat-scope 约定');
+  assert.ok(brief.includes('[data-mp-beat-scope]{opacity:0'), 'brief 必须给出隐藏态 CSS 规则示例');
+  assert.ok(/body\[data-mp-beat=.*\] \[data-mp-beat-scope=.*\]\{opacity:1\}/.test(brief), 'brief 必须给出按 beat 显示的 CSS 规则示例');
+  assert.ok(brief.includes('要点一') && brief.includes('要点二'), 'brief 必须含各 beat 文案要点');
+  // 非 scene 节点（无 beat_windows）返回空串
+  assert.strictEqual(buildSceneBeatsBrief({ id: 'scene_05_b1', metadata: {} }), '');
+}
+
+// frameHtmlAgent：sceneBeatsBrief 作为独立段落进入 prompt（不与 primitive 参考片段混在一起）
+const frameHtmlAgentForBrief = require('../server/services/creative-video/html-video/frameHtmlAgent');
+{
+  const brief = '本帧是同场景多 beat 的连续 HTML（scene_html 模式）\n- scene_05_b1：0s - 6.33s';
+  const prompt = frameHtmlAgentForBrief.buildAssetFirstFramePrompt({
+    beat: { motion_overlay: { preset: 'key_marker', placement: 'lower_third', max_items: 1, avoid_caption_bottom_px: 140 } },
+    primitiveSnippet: '<div data-mp-overlay="key_marker"></div>',
+    sceneBeatsBrief: brief,
+  });
+  assert.ok(prompt.includes(brief), 'sceneBeatsBrief 必须整段进入 prompt');
+  const snippetIndex = prompt.indexOf('<div data-mp-overlay="key_marker"></div>');
+  const briefIndex = prompt.indexOf('本帧是同场景多 beat 的连续 HTML');
+  assert.ok(snippetIndex >= 0 && briefIndex > snippetIndex, 'brief 必须在 primitive 参考片段之后独立成段，不混入片段标签下');
+  // 组内全无 motion_overlay 时（Minor4 解耦）：brief 仍单独输出，且不产生 undefined 的 overlay 行
+  const briefOnly = frameHtmlAgentForBrief.buildAssetFirstFramePrompt({ beat: {}, sceneBeatsBrief: brief });
+  assert.ok(briefOnly.includes(brief));
+  assert.ok(!briefOnly.includes('undefined'), '无 motion_overlay 时不得输出 undefined 的 beat 编排行');
 }
 
 // retryPlanner：scene_html 模式下 beat 级 frame_ids 归并为 scene 级

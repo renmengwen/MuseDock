@@ -200,36 +200,45 @@ const MOTION_PRIMITIVE_GUIDE = `可用 motion primitive（只能作为局部 ove
 - checklist：三条总结清单。
 - stat_compare：两个数据/对象对比。`;
 
-function buildAssetFirstFramePrompt({ beat = {}, primitiveSnippet = '', diagramSkeleton = '', previousBeatSummary = '', hasCaptions = true } = {}) {
+function buildAssetFirstFramePrompt({ beat = {}, primitiveSnippet = '', diagramSkeleton = '', previousBeatSummary = '', hasCaptions = true, sceneBeatsBrief = '' } = {}) {
   const base = beat.visual_base || {};
   const overlay = beat.motion_overlay || {};
   const continuity = beat.continuity || {};
   const lines = [MOTION_PRIMITIVE_GUIDE, ''];
-  if (base.type === 'diagram') {
-    lines.push('本 beat 无图片素材：必须生成统一风格的结构化 diagram 作为主视觉（main_visual），禁止输出标题页式整屏大字。');
-    if (diagramSkeleton) {
-      lines.push('base 层必须以以下 diagram 骨架为起点（保留 data-mp-diagram-base 结构与 --mp-* 主题变量，在 stage 区域内绘制结构图）：');
-      lines.push(diagramSkeleton);
+  // beat 级 overlay 编排段：只有 motion_overlay 存在时输出（scene_html 组内全无 overlay 时仅剩 brief 段）
+  if (beat.motion_overlay) {
+    if (base.type === 'diagram') {
+      lines.push('本 beat 无图片素材：必须生成统一风格的结构化 diagram 作为主视觉（main_visual），禁止输出标题页式整屏大字。');
+      if (diagramSkeleton) {
+        lines.push('base 层必须以以下 diagram 骨架为起点（保留 data-mp-diagram-base 结构与 --mp-* 主题变量，在 stage 区域内绘制结构图）：');
+        lines.push(diagramSkeleton);
+      }
+    } else {
+      lines.push(`图片 ${base.asset_id} 是主视觉（main_visual），必须占据画面主体，fit=${base.fit || 'contain'}；局部 overlay 不得覆盖图片主体。`);
     }
-  } else {
-    lines.push(`图片 ${base.asset_id} 是主视觉（main_visual），必须占据画面主体，fit=${base.fit || 'contain'}；局部 overlay 不得覆盖图片主体。`);
+    lines.push(`本 beat 选定 motion primitive：${overlay.preset}，placement=${overlay.placement}，最多 ${overlay.max_items || 1} 条内容。`);
+    if (overlay.theme_tokens) {
+      lines.push(`主题 token（在 :root 或根容器上设置 CSS 变量）：--mp-accent:${overlay.theme_tokens.accent}；--mp-foreground:${overlay.theme_tokens.foreground}；--mp-surface:${overlay.theme_tokens.surface}；--mp-background:${overlay.theme_tokens.background}。全帧配色必须从这些 token 派生。`);
+    }
+    lines.push(`底部 ${overlay.avoid_caption_bottom_px || 140}px 是系统字幕安全区，任何 overlay 元素不得进入该区域。`);
+    if (primitiveSnippet) {
+      lines.push('overlay 必须基于以下片段落地（保留 data-mp-overlay 根节点与 data-mp-slot 槽位，可按主题 token 调整 --mp-accent/--mp-surface/--mp-foreground）：');
+      lines.push(primitiveSnippet);
+    }
+    if (continuity.beat_index > 1) {
+      lines.push(`本 beat 是 continuity group ${continuity.group_id} 的第 ${continuity.beat_index}/${continuity.beat_count} 段：必须复用上一 beat 的主视觉布局（图片位置、背景、主卡片区域、主题色），只替换局部 overlay/焦点框/箭头/标签。`);
+      lines.push('禁止 base 层任何入场动画或重新开场效果：base 层元素初始状态即为最终位置与不透明度，只有 overlay 允许动画。');
+      if (previousBeatSummary) lines.push(`上一 beat 布局摘要：\n${previousBeatSummary}`);
+    }
+    if (hasCaptions === false) {
+      // 预留：Task 5.2 会启用此分支（本任务实现签名即可，不强制测试）
+    }
   }
-  lines.push(`本 beat 选定 motion primitive：${overlay.preset}，placement=${overlay.placement}，最多 ${overlay.max_items || 1} 条内容。`);
-  if (overlay.theme_tokens) {
-    lines.push(`主题 token（在 :root 或根容器上设置 CSS 变量）：--mp-accent:${overlay.theme_tokens.accent}；--mp-foreground:${overlay.theme_tokens.foreground}；--mp-surface:${overlay.theme_tokens.surface}；--mp-background:${overlay.theme_tokens.background}。全帧配色必须从这些 token 派生。`);
-  }
-  lines.push(`底部 ${overlay.avoid_caption_bottom_px || 140}px 是系统字幕安全区，任何 overlay 元素不得进入该区域。`);
-  if (primitiveSnippet) {
-    lines.push('overlay 必须基于以下片段落地（保留 data-mp-overlay 根节点与 data-mp-slot 槽位，可按主题 token 调整 --mp-accent/--mp-surface/--mp-foreground）：');
-    lines.push(primitiveSnippet);
-  }
-  if (continuity.beat_index > 1) {
-    lines.push(`本 beat 是 continuity group ${continuity.group_id} 的第 ${continuity.beat_index}/${continuity.beat_count} 段：必须复用上一 beat 的主视觉布局（图片位置、背景、主卡片区域、主题色），只替换局部 overlay/焦点框/箭头/标签。`);
-    lines.push('禁止 base 层任何入场动画或重新开场效果：base 层元素初始状态即为最终位置与不透明度，只有 overlay 允许动画。');
-    if (previousBeatSummary) lines.push(`上一 beat 布局摘要：\n${previousBeatSummary}`);
-  }
-  if (hasCaptions === false) {
-    // 预留：Task 5.2 会启用此分支（本任务实现签名即可，不强制测试）
+  // scene_html 的 scene 级约束段：独立段落输出（不与 primitive 参考片段混在一起，
+  // 否则 base 稳定/beat-scope 约定/时间窗口会被当成「参考 HTML 片段」照抄或降权）
+  if (sceneBeatsBrief) {
+    lines.push('');
+    lines.push(sceneBeatsBrief);
   }
   lines.push('禁止把参考动效全屏照搬，只取核心动效区域做局部编排。');
   return lines.join('\n');
@@ -365,6 +374,7 @@ function buildFrameHtmlPrompt({
   diagramSkeleton = '',
   previousBeatSummary = '',
   hasCaptions = true,
+  sceneBeatsBrief = '',
 } = {}) {
   const resolution = resolveResolution(target);
   const adjacent = adjacentSummary(graph, index);
@@ -412,8 +422,8 @@ function buildFrameHtmlPrompt({
     '- 不要保留与内容无关的模板导航标签，例如 Search / GitHub / Tech Forums / Docs / Issues，除非这些词就是当前内容事实。',
     '- 如果本帧提供“本帧推荐来源图片”或“本帧推荐生成图片”，必须在 HTML 中引用该图片的 src；没有推荐图片时，才从 Source context summary 的可用图片素材中选择。',
     ...assetFirstFrameRequirements(creativeContext),
-    ...(creativeContext?.visual_strategy === 'asset_first' && beat?.motion_overlay
-      ? [buildAssetFirstFramePrompt({ beat, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions })]
+    ...(creativeContext?.visual_strategy === 'asset_first' && (beat?.motion_overlay || sceneBeatsBrief)
+      ? [buildAssetFirstFramePrompt({ beat: beat || {}, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
       : []),
     '- 如果 Source context summary 提供“可用图片素材”，本帧内容适合引用时，可以使用其中的 HTML引用路径，例如 <img src="../assets/source-image-01.jpg">；禁止引用外部图片 URL。',
     '- 文章截图或含文字图片必须完整展示，使用 object-fit: contain；不要裁切成不可读背景。图库/search 图片只适合做弱背景或氛围层，必须加遮罩保证文字可读。',
@@ -744,6 +754,7 @@ function buildShortFrameHtmlPrompt({
   diagramSkeleton = '',
   previousBeatSummary = '',
   hasCaptions = true,
+  sceneBeatsBrief = '',
 } = {}) {
   const resolution = resolveResolution(target);
   const sceneId = frameId || node.id || '';
@@ -764,8 +775,8 @@ function buildShortFrameHtmlPrompt({
     `画面要点卡：${visualCards || '无'}`,
     '画面文字用提炼后的关键词、要点短语或数据点，不要照抄 narration/captions 原句；旁白全文由系统注入底部字幕层。',
     ...assetFirstFrameRequirements(creativeContext),
-    ...(creativeContext?.visual_strategy === 'asset_first' && beat?.motion_overlay
-      ? [buildAssetFirstFramePrompt({ beat, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions })]
+    ...(creativeContext?.visual_strategy === 'asset_first' && (beat?.motion_overlay || sceneBeatsBrief)
+      ? [buildAssetFirstFramePrompt({ beat: beat || {}, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
       : []),
     assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
     `Target resolution：${resolution.width}x${resolution.height}`,
@@ -819,13 +830,14 @@ function buildRetryPrompt(args = {}) {
     expectedTexts.length ? `当前镜头允许使用的内容文案：${expectedTexts.join(' / ')}` : '',
     '画面文字必须是提炼后的关键词、要点短语或数据点；禁止照抄旁白或字幕原句，旁白全文由系统注入底部字幕层。',
     ...assetFirstFrameRequirements(args.creativeContext),
-    ...(args.creativeContext?.visual_strategy === 'asset_first' && args.beat?.motion_overlay
+    ...(args.creativeContext?.visual_strategy === 'asset_first' && (args.beat?.motion_overlay || args.sceneBeatsBrief)
       ? [buildAssetFirstFramePrompt({
-        beat: args.beat,
+        beat: args.beat || {},
         primitiveSnippet: args.primitiveSnippet || '',
         diagramSkeleton: args.diagramSkeleton || '',
         previousBeatSummary: args.previousBeatSummary || '',
         hasCaptions: args.hasCaptions !== false,
+        sceneBeatsBrief: args.sceneBeatsBrief || '',
       })]
       : []),
     assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',

@@ -44,23 +44,25 @@ function safeLoad(loader, ...args) {
 
 // asset_first 时从 node.metadata.visual_beat（R3 唯一下传通道）取 beat 编排并加载 primitive 参考片段；
 // scene_html 的 scene 级节点（metadata.visual_beats）聚合组内 beat：以首个带 motion_overlay 的 beat
-// 为 prompt 基础，并把 data-mp-beat-scope 约定与各 beat 时间窗口/文案要点拼进 primitive 片段之后；
-// hf_first 返回空对象，agent 侧不追加任何新 prompt 段。
+// 为 prompt 基础，scene 级约束（data-mp-beat-scope 约定/时间窗口）经 sceneBeatsBrief 独立字段下传，
+// 由 frameHtmlAgent 作为独立段落输出（不混入 primitive 参考片段）；brief 只依赖 beat_windows 存在，
+// 与 motion_overlay 解耦（与时间线脚本注入条件一致）。hf_first 返回空对象，agent 侧不追加任何新 prompt 段。
 function resolveAssetFirstMotionArgs(node, creativeContext) {
   if (creativeContext?.visual_strategy !== 'asset_first') return {};
+  const sceneBeatsBrief = buildSceneBeatsBrief(node);
   const visualBeats = Array.isArray(node?.metadata?.visual_beats) ? node.metadata.visual_beats : null;
   const beat = visualBeats && visualBeats.length
     ? (visualBeats.find(item => item?.motion_overlay) || visualBeats[0])
     : (node?.metadata?.visual_beat || {});
-  if (!beat?.motion_overlay) return {};
+  if (!beat?.motion_overlay) return sceneBeatsBrief ? { sceneBeatsBrief } : {};
   const primitiveSnippet = beat.motion_overlay?.preset ? safeLoad(loadOverlaySnippet, beat.motion_overlay.preset) : '';
   const diagramSkeleton = beat.visual_base?.type === 'diagram' ? safeLoad(loadDiagramSkeleton) : '';
-  const sceneBeatsBrief = visualBeats && visualBeats.length ? buildSceneBeatsBrief(node) : '';
   // previousBeatSummary 由分桶调度侧透传（见 runBucketsWithContinuity）、hasCaptions 由 Task 5.2 后续接入
   return {
     beat,
-    primitiveSnippet: [primitiveSnippet, sceneBeatsBrief].filter(Boolean).join('\n\n'),
+    primitiveSnippet,
     diagramSkeleton,
+    ...(sceneBeatsBrief ? { sceneBeatsBrief } : {}),
   };
 }
 
@@ -962,6 +964,7 @@ module.exports = {
   computeFrameHtmlStats,
   ensureMotionOverlay,
   summarizeBaseLayout,
+  buildSceneBeatsBrief,
   bucketJobsByContinuityGroup,
   runBucketsWithContinuity,
   groupBeatsForSceneHtml,

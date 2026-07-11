@@ -451,6 +451,8 @@ function fanOutAssetFirstOverridesToBeats({ perSceneDecisions, visualPlan, visua
 // R4：帧统计（overlay_check/text_blocks/cards/graphics）必须合并进 attachVisualRouting
 // 闭包引用的 visualDecisions/renderDecisions 源对象，直接写 project.render_decisions
 // 会在下一次 attachVisualRouting 重挂时被覆盖抹掉。
+// 已知局限：scene_html 模式下 statsByBeatId 的键是 scene:<scene_id>，而决策仍按 beat_id 键控，
+// 此处查找会 miss（scene 级帧统计暂不进 render_decisions），Task 7 QA 接线时统一处理。
 function mergeFrameStatsIntoDecisions({ visualDecisions, renderDecisions, statsByBeatId = {} }) {
   const applyTo = decision => {
     const stats = decision && statsByBeatId[decision.beat_id];

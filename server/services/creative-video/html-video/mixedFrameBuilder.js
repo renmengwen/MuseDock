@@ -39,24 +39,18 @@ function stripBeatSourceScene(beat = {}) {
   return clone(rest);
 }
 
-// scene 级渲染条目（纯函数）：asset_first + scene_html 时同 scene 的 beat 归并为一条渲染条目
-// （frame_id = scene:<scene_id>，checkpoint/重试同键）；其余模式保持 per-beat 条目与现状一致。
-function buildRenderEntries({ beats = [], continuityMode = 'beat_mp4', visualStrategy = null } = {}) {
-  if (visualStrategy === 'asset_first' && continuityMode === 'scene_html') {
-    return groupBeatsForSceneHtml(beats).map(group => ({
-      frame_id: `scene:${group.scene_id}`,
-      scene_id: group.scene_id,
-      beat_ids: group.beats.map(b => b.id),
-      beat_windows: group.beats.map(b => ({ id: b.id, start_sec: b.start_sec, end_sec: b.end_sec })),
-      duration_sec: group.duration_sec,
-      source_mode: 'raw_html',
-      route_role: 'scene_html',
-    }));
-  }
-  return beats.map(beat => ({
-    frame_id: beat.id,
-    scene_id: beat.scene_id,
-    duration_sec: Number(beat.duration_sec) || 0,
+// scene 级渲染条目（纯函数，仅 scene_html 分支消费）：同 scene 的 beat 归并为一条渲染条目，
+// frame_id = scene:<scene_id>，与 frame_html/render checkpoint 及重试归并同键。
+// beat_mp4（缺省）不经过本函数，走下方原有 beat 循环，行为逐字段不变。
+function buildSceneRenderEntries(beats = []) {
+  return groupBeatsForSceneHtml(beats).map(group => ({
+    frame_id: `scene:${group.scene_id}`,
+    scene_id: group.scene_id,
+    beat_ids: group.beats.map(b => b.id),
+    beat_windows: group.beats.map(b => ({ id: b.id, start_sec: b.start_sec, end_sec: b.end_sec })),
+    duration_sec: group.duration_sec,
+    source_mode: 'raw_html',
+    route_role: 'scene_html',
   }));
 }
 
@@ -129,7 +123,7 @@ async function buildMixedFrameProject({
   if (sceneHtmlMode) {
     // scene_html：一个 scene 一帧（scene:<scene_id>），字幕用整场景字幕轨（场景相对时间，不切窗），
     // HTML 由 frameHtmlPhase 生成后回写 scene node，节点缺 html_path 直接抛错。
-    for (const entry of buildRenderEntries({ beats: visualBeats, continuityMode, visualStrategy })) {
+    for (const entry of buildSceneRenderEntries(visualBeats)) {
       const scene = scenes.get(entry.scene_id);
       if (!scene) throw new Error(`scene_html 条目 ${entry.frame_id} 未匹配到 scene_spec 场景 ${entry.scene_id || '未指定'}。`);
       const node = getNode(graph, entry.frame_id);
@@ -360,4 +354,4 @@ async function buildMixedFrameProject({
   });
 }
 
-module.exports = { buildMixedFrameProject, buildRenderEntries };
+module.exports = { buildMixedFrameProject, buildSceneRenderEntries };
