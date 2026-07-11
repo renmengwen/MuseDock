@@ -566,7 +566,27 @@ function createCreativeWorkflowRetryPlan(input = {}) {
   });
 }
 
+/**
+ * scene_html 模式下把 beat 级 frame_ids 归并为 scene 级渲染条目键（scene:<scene_id>），
+ * 与 renderCheckpointKey/frameHtmlPhase 的 scene node 键位对齐；
+ * beat_mp4（缺省）原样返回，行为不变（硬约束 A/D）。
+ */
+function resolveRetryFrameIds(frameIds = [], { continuityMode = 'beat_mp4', beatToScene = {} } = {}) {
+  if (continuityMode !== 'scene_html') return [...frameIds];
+  const resolved = new Set();
+  for (const id of frameIds) {
+    if (String(id).startsWith('scene:')) {
+      resolved.add(id);
+      continue;
+    }
+    const sceneId = beatToScene[id];
+    resolved.add(sceneId ? `scene:${sceneId}` : id);
+  }
+  return [...resolved];
+}
+
 module.exports = {
   classifyCreativeWorkflowFailure,
   createCreativeWorkflowRetryPlan,
+  resolveRetryFrameIds,
 };

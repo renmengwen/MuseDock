@@ -162,3 +162,73 @@ const { buildSceneTimelineScript, groupBeatsForSceneHtml } = require('../server/
   assert.ok(script.includes('scene_05_b2'));
 }
 console.log('scene continuity phase2 timeline tests passed');
+
+const { buildRenderEntries } = require('../server/services/creative-video/html-video/mixedFrameBuilder');
+
+// scene_html 模式：一个 scene 一条渲染条目，checkpoint 键为 scene:<id>
+{
+  const beats = [
+    { id: 'scene_05_b1', scene_id: 'scene_05', duration_sec: 6.33 },
+    { id: 'scene_05_b2', scene_id: 'scene_05', duration_sec: 6.33 },
+  ];
+  const entries = buildRenderEntries({ beats, continuityMode: 'scene_html', visualStrategy: 'asset_first' });
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].frame_id, 'scene:scene_05');
+  assert.strictEqual(entries[0].scene_id, 'scene_05');
+  assert.deepStrictEqual(entries[0].beat_ids, ['scene_05_b1', 'scene_05_b2']);
+  assert.ok(Math.abs(entries[0].duration_sec - 12.66) < 1e-6);
+}
+// 缺省模式：per-beat 条目与现状一致（硬约束 A/D 回归）
+{
+  const beats = [{ id: 'scene_05_b1', scene_id: 'scene_05', duration_sec: 6.33 }];
+  const entries = buildRenderEntries({ beats, continuityMode: 'beat_mp4', visualStrategy: 'asset_first' });
+  assert.strictEqual(entries[0].frame_id, 'scene_05_b1');
+}
+
+// retryPlanner：scene_html 模式下 beat 级 frame_ids 归并为 scene 级
+const { resolveRetryFrameIds } = require('../server/services/creative-video/retryPlanner');
+{
+  const ids = resolveRetryFrameIds(['scene_05_b2'], {
+    continuityMode: 'scene_html',
+    beatToScene: { scene_05_b2: 'scene_05' },
+  });
+  assert.deepStrictEqual(ids, ['scene:scene_05']);
+}
+{
+  const ids = resolveRetryFrameIds(['scene_05_b2'], { continuityMode: 'beat_mp4', beatToScene: {} });
+  assert.deepStrictEqual(ids, ['scene_05_b2']); // 缺省行为不变
+}
+
+// R2：renderCheckpointKey 对 scene frame 必须返回 frame.id
+const { renderCheckpointKey } = require('../server/services/creative-video/html-video/projectOrchestrator');
+assert.strictEqual(
+  renderCheckpointKey({ id: 'scene:scene_05', scene_id: 'scene_05', beat_id: null }),
+  'scene:scene_05',
+);
+// 现状行为回归：
+assert.strictEqual(renderCheckpointKey({ id: 'scene_02_b1', scene_id: 'scene_02', beat_id: 'scene_02_b1' }), 'scene_02_b1');
+assert.strictEqual(renderCheckpointKey({ id: 'scene_01', scene_id: 'scene_01' }), 'scene_01');
+
+// R1：expand 阶段的 scene 级 content graph
+const { expandContentGraphToSceneEntries } = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
+{
+  const graph = { nodes: [
+    { id: 'n1', scene_id: 'scene_05', kind: 'text', label: 'L', asset_refs: [] },
+  ], edges: [] };
+  const visualPlan = { beats: [
+    { id: 'scene_05_b1', scene_id: 'scene_05', duration_sec: 6.33,
+      visual_text: { headline: 'A' }, continuity: { group_id: 'scene_05', beat_index: 1, beat_count: 2 } },
+    { id: 'scene_05_b2', scene_id: 'scene_05', duration_sec: 6.33,
+      visual_text: { headline: 'B' }, continuity: { group_id: 'scene_05', beat_index: 2, beat_count: 2 } },
+  ] };
+  const expanded = expandContentGraphToSceneEntries(graph, visualPlan);
+  assert.strictEqual(expanded.nodes.length, 1, '一个 scene 一个 node');
+  const node = expanded.nodes[0];
+  assert.strictEqual(node.id, 'scene:scene_05');
+  assert.strictEqual(node.scene_id, 'scene_05');
+  assert.ok(Math.abs(node.duration_sec - 12.66) < 1e-6);
+  assert.strictEqual(node.html_path, '', '展开时 html_path 为空，由 frameHtmlPhase 生成后回写');
+  assert.deepStrictEqual(node.metadata.beat_windows.map(w => w.id), ['scene_05_b1', 'scene_05_b2']);
+  assert.strictEqual(node.metadata.visual_beats.length, 2, '组内全部 beat 编排字段随 node 传递');
+}
+console.log('scene continuity phase2 render/retry tests passed');

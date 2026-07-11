@@ -2,6 +2,7 @@ const { normalizeProject } = require('./projectSchema');
 const { topoSort, getNode, DEFAULT_FRAME_DURATION_SEC } = require('./contentGraph');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
 const { sliceCaptionsToWindow } = require('./captionLayer');
+const { groupBeatsForSceneHtml } = require('./frameHtmlPhase');
 const projectStore = require('./projectStore');
 const {
   defaultFrameFields,
@@ -36,6 +37,27 @@ function positiveNumber(value) {
 function stripBeatSourceScene(beat = {}) {
   const { source_scene: _sourceScene, ...rest } = beat;
   return clone(rest);
+}
+
+// scene 级渲染条目（纯函数）：asset_first + scene_html 时同 scene 的 beat 归并为一条渲染条目
+// （frame_id = scene:<scene_id>，checkpoint/重试同键）；其余模式保持 per-beat 条目与现状一致。
+function buildRenderEntries({ beats = [], continuityMode = 'beat_mp4', visualStrategy = null } = {}) {
+  if (visualStrategy === 'asset_first' && continuityMode === 'scene_html') {
+    return groupBeatsForSceneHtml(beats).map(group => ({
+      frame_id: `scene:${group.scene_id}`,
+      scene_id: group.scene_id,
+      beat_ids: group.beats.map(b => b.id),
+      beat_windows: group.beats.map(b => ({ id: b.id, start_sec: b.start_sec, end_sec: b.end_sec })),
+      duration_sec: group.duration_sec,
+      source_mode: 'raw_html',
+      route_role: 'scene_html',
+    }));
+  }
+  return beats.map(beat => ({
+    frame_id: beat.id,
+    scene_id: beat.scene_id,
+    duration_sec: Number(beat.duration_sec) || 0,
+  }));
 }
 
 // 按路由决策把基础帧字段落成 template_inputs 帧或 raw_html 帧；
@@ -90,6 +112,8 @@ async function buildMixedFrameProject({
   visualPlan = null,
   mediaOptions = {},
   generationCheckpoint = null,
+  continuityMode = 'beat_mp4',
+  visualStrategy = null,
 } = {}) {
   if (!projectDir) throw new Error('缺少 projectDir。');
   const orderedNodeIds = topoSort(graph);
@@ -100,8 +124,68 @@ async function buildMixedFrameProject({
   let cursor = 0;
 
   const visualBeats = Array.isArray(visualPlan?.beats) && visualPlan.beats.length ? visualPlan.beats : null;
+  const sceneHtmlMode = visualStrategy === 'asset_first' && continuityMode === 'scene_html' && Boolean(visualBeats);
 
-  if (visualBeats) {
+  if (sceneHtmlMode) {
+    // scene_html：一个 scene 一帧（scene:<scene_id>），字幕用整场景字幕轨（场景相对时间，不切窗），
+    // HTML 由 frameHtmlPhase 生成后回写 scene node，节点缺 html_path 直接抛错。
+    for (const entry of buildRenderEntries({ beats: visualBeats, continuityMode, visualStrategy })) {
+      const scene = scenes.get(entry.scene_id);
+      if (!scene) throw new Error(`scene_html 条目 ${entry.frame_id} 未匹配到 scene_spec 场景 ${entry.scene_id || '未指定'}。`);
+      const node = getNode(graph, entry.frame_id);
+      if (!node) throw new Error(`scene_html 条目 ${entry.frame_id} 未匹配到内容图节点。`);
+      if (!String(node.html_path || node.htmlPath || '').trim()) {
+        throw new Error(`scene_html 帧 ${entry.frame_id} 缺少 html_path（frameHtmlPhase 未回写场景 HTML）。`);
+      }
+      const durationSec = positiveNumber(entry.duration_sec) || DEFAULT_FRAME_DURATION_SEC;
+      const captions = includeCaptions ? normalizeCaptions(scene, durationSec) : [];
+      const base = {
+        id: entry.frame_id,
+        scene_id: entry.scene_id,
+        beat_id: null,
+        graph_node_id: entry.frame_id,
+        order: frames.length + 1,
+        engine: 'hyperframes-playwright',
+        preview_mp4_path: null,
+        duration_sec: durationSec,
+        narration_text: scene.narration_text || '',
+        captions,
+        generate_captions: includeCaptions,
+        metadata: {
+          frame_intent: node.kind || scene.kind || 'text',
+          visual_text: clone(scene.visual_text),
+          graph_node: clone({ ...node, durationSec }),
+          beat_windows: clone(entry.beat_windows),
+          beat_ids: [...entry.beat_ids],
+          scene_snapshot: {
+            id: scene.id,
+            order: scene.order,
+            narration_text: scene.narration_text || '',
+            captions: clone(scene.captions),
+          },
+        },
+        ...defaultFrameFields(),
+      };
+      const frame = resolveFrameByDecision({
+        base,
+        decision: { source_mode: 'raw_html', route_role: 'scene_html', template_id: null },
+        scene,
+        node,
+        nodeId: entry.frame_id,
+        registry,
+        projectDir,
+      });
+      frames.push(frame);
+      items.push({
+        id: `item_${frame.id}`,
+        kind: 'frame',
+        frame_id: frame.id,
+        start_sec: cursor,
+        duration_sec: frame.duration_sec,
+      });
+      cursor += frame.duration_sec;
+    }
+  } else if (visualBeats) {
     // 有视觉计划：帧按 beat 展开（帧数可能多于内容图节点数），
     // raw_html beat 优先消费 beat 级 graph node，避免长场景拆分后重复同一份 HTML。
     const nodeIdByScene = new Map();
@@ -276,4 +360,4 @@ async function buildMixedFrameProject({
   });
 }
 
-module.exports = { buildMixedFrameProject };
+module.exports = { buildMixedFrameProject, buildRenderEntries };

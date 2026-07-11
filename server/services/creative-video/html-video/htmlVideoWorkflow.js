@@ -10,7 +10,7 @@ const templateInputAgent = require('./templateInputAgent');
 const contentGraphAgent = require('./contentGraphAgent');
 const frameHtmlAgent = require('./frameHtmlAgent');
 const frameFallbackBuilder = require('./frameFallbackBuilder');
-const { runFrameHtmlPhase, isProviderMissingText } = require('./frameHtmlPhase');
+const { runFrameHtmlPhase, isProviderMissingText, groupBeatsForSceneHtml } = require('./frameHtmlPhase');
 const { buildRawHtmlFrameProject } = require('./rawHtmlFrameBuilder');
 const { buildMixedFrameProject } = require('./mixedFrameBuilder');
 const { buildVisualPlan, assignMotionOrchestration } = require('./visualPlanService');
@@ -1174,6 +1174,54 @@ function expandContentGraphToVisualBeats({ graph = {}, visualPlan = {}, visualDe
   };
 }
 
+// scene_html（asset_first 专用）：按 scene 分组把 content graph 展开为 scene 级节点，
+// 一个 scene 一个 node（id = scene:<scene_id>），组内 beat 编排字段整体挂在 metadata 下随 node 传递；
+// html_path 置空，由 frameHtmlPhase 生成整场景 HTML 后回写（与 beat 节点同一回写路径）。
+function expandContentGraphToSceneEntries(graph = {}, visualPlan = {}) {
+  const beats = Array.isArray(visualPlan?.beats) ? visualPlan.beats.filter(beat => beat && beat.id) : [];
+  if (!beats.length || !Array.isArray(graph?.nodes) || !graph.nodes.length) return graph;
+  const baseBySceneId = new Map();
+  for (const node of graph.nodes) {
+    const sceneId = String(resolveNodeSceneId(node) || node?.id || '').trim();
+    if (sceneId && !baseBySceneId.has(sceneId)) baseBySceneId.set(sceneId, node);
+  }
+  const nodes = [];
+  for (const group of groupBeatsForSceneHtml(beats)) {
+    const base = baseBySceneId.get(group.scene_id) || {};
+    nodes.push({
+      ...cloneJson(base),
+      id: `scene:${group.scene_id}`,
+      scene_id: group.scene_id,
+      beat_id: '',
+      kind: base.kind || group.beats[0]?.kind || 'text',
+      duration_sec: group.duration_sec,
+      durationSec: group.duration_sec,
+      asset_refs: cloneJson(group.beats.flatMap(beat => (Array.isArray(beat.asset_refs) ? beat.asset_refs.filter(Boolean) : []))),
+      metadata: {
+        ...objectOrEmpty(base.metadata),
+        scene_id: group.scene_id,
+        beat_windows: group.beats.map(beat => ({ id: beat.id, start_sec: beat.start_sec, end_sec: beat.end_sec })),
+        visual_beats: cloneJson(group.beats.map(({ source_scene, ...rest }) => rest)),
+        source_mode: 'raw_html',
+      },
+      html_path: '',
+      htmlPath: '',
+    });
+  }
+  if (!nodes.length) return graph;
+  const edges = nodes.slice(1).map((node, index) => ({
+    from: nodes[index].id,
+    to: node.id,
+    kind: 'sequence',
+  }));
+  return {
+    ...graph,
+    nodes,
+    edges,
+    expanded_from_scene_graph: true,
+  };
+}
+
 function referenceVariants(value = '') {
   const normalized = normalizeHtmlAssetReference(value);
   if (!normalized) return [];
@@ -1943,7 +1991,12 @@ async function generateHtmlVideo(options = {}) {
         renderDecisions = Array.from(visualDecisions.values());
         project = await projectStore.writeProjectJson(projectDir, current => attachVisualRouting(current));
       }
-      contentGraph = expandContentGraphToVisualBeats({ graph: contentGraph, visualPlan, visualDecisions });
+      // scene_html 分支只在 asset_first + scene_html 生效；此时 project.visual_strategy 尚未挂载
+      // （attachVisualStrategy 在建帧后才调用），用 creativeContext 判断等价条件。
+      contentGraph = (creativeContext?.visual_strategy === 'asset_first'
+        && (creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html')
+        ? expandContentGraphToSceneEntries(contentGraph, visualPlan)
+        : expandContentGraphToVisualBeats({ graph: contentGraph, visualPlan, visualDecisions });
       const expandedContentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
       project = await projectStore.writeProjectJson(projectDir, current => {
         current.content_graph = contentGraph;
@@ -2010,6 +2063,10 @@ async function generateHtmlVideo(options = {}) {
           visualPlan,
           mediaOptions,
           generationCheckpoint: project?.generation_checkpoint,
+          // 与 attachVisualStrategy 同优先级（creativeContext 优先）：此时 project 尚未挂策略，
+          // 且 normalizeProject 会把 continuity_mode 缺省成 beat_mp4，不能反过来盖掉 creativeContext
+          continuityMode: creativeContext?.continuity_mode || project?.continuity_mode || 'beat_mp4',
+          visualStrategy: creativeContext?.visual_strategy || project?.visual_strategy || null,
         })
         : await buildRawHtmlFrameProject({
           projectDir,
@@ -2514,5 +2571,6 @@ module.exports = {
   buildTemplateIndexOptions,
   reorderCompactIndex,
   expandContentGraphToVisualBeats,
+  expandContentGraphToSceneEntries,
   bindGeneratedAssetsToSceneSpec,
 };

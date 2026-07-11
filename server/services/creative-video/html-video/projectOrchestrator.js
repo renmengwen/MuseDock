@@ -170,8 +170,12 @@ function markRenderCheckpoint(project, sceneId, patch = {}) {
 }
 
 // 渲染检查点键：旧工程帧与场景 1:1（frame.id === scene_id），沿用 scene_id 优先；
-// beat 展开帧同场景有多帧，必须按帧（beat）唯一键控，否则合成会重复取同一段 mp4
+// beat 展开帧同场景有多帧，必须按帧（beat）唯一键控，否则合成会重复取同一段 mp4；
+// scene_html 的 scene 级帧（id = scene:<scene_id>、beat_id 为空）必须按 frame.id 键控，
+// 否则会错位成 scene_id 与 frameHtmlPhase/retry 的 scene:<id> 键对不上（R2）。
 function renderCheckpointKey(frame = {}) {
+  const frameId = String(frame.id || '').trim();
+  if (frameId.startsWith('scene:')) return frameId;
   const beatId = String(frame.beat_id || frame.beatId || '').trim();
   if (beatId) return String(frame.id || beatId).trim();
   return String(frame.scene_id || frame.id || '').trim();
@@ -567,7 +571,9 @@ async function renderHtmlVideoFrames({
     const progressIndex = allFrameIndex >= 0 ? allFrameIndex : index;
     const frameId = frame.id || frame.scene_id || `frame_${progressIndex + 1}`;
     const checkpointKey = renderCheckpointKey(frame) || frameId;
-    const outputName = frame.id || frame.scene_id || frameId;
+    // scene_html 的帧 id 带 ':'（scene:<id>），Windows 文件名非法，落盘名统一净化；
+    // 既有 beat/scene id 只含字母数字下划线，sanitize 为恒等变换，输出文件名不变
+    const outputName = sanitizePathSegment(frame.id || frame.scene_id || frameId);
     const frameOutput = path.join(resolvedProjectDir, 'frames', `${outputName}.mp4`);
     const rendered = await frameRenderer.renderFrame(frame, {
       projectDir: resolvedProjectDir,
@@ -1363,6 +1369,7 @@ module.exports = {
   markComposeCheckpoint,
   markDurationVerifyCheckpoint,
   markVisualInspectCheckpoint,
+  renderCheckpointKey,
   renderProject: renderHtmlVideoProject,
   exportProject: exportHtmlVideoProject,
   rerenderProject: renderHtmlVideoProject,

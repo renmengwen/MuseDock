@@ -9,6 +9,7 @@ const { mapSceneSpecToContentGraph } = require('./html-video/sceneSpecMapper');
 const { repairProjectTimeline, compressNarrationForTarget } = require('./html-video/timelineRepair');
 const { computeSceneSpecSpeechHash } = require('./sceneSpecHash');
 const { applyManifestToProjectAudio } = require('./ttsService');
+const { resolveRetryFrameIds } = require('./retryPlanner');
 const defaultVisualQaService = require('./visualQaService');
 
 function objectOrEmpty(value) {
@@ -63,6 +64,24 @@ function planFrameIds(plan, project, stageId) {
     safeString(options.frame_id),
   ].filter(Boolean);
   return ids.length ? ids : failedFrameIds(project, stageId);
+}
+
+// scene_html 工程：定向失效/重渲染前把 beat 级 frame_ids 归并为 scene:<scene_id> 键；
+// beat_mp4（缺省）下 resolveRetryFrameIds 原样返回，行为不变。
+function resolveProjectRetryFrameIds(project, frameIds) {
+  const beatToScene = {};
+  for (const frame of arrayOrEmpty(project?.frames)) {
+    const sceneId = safeString(frame?.scene_id);
+    if (!sceneId) continue;
+    for (const window of arrayOrEmpty(frame?.metadata?.beat_windows)) {
+      const beatId = safeString(window?.id);
+      if (beatId) beatToScene[beatId] = sceneId;
+    }
+  }
+  return resolveRetryFrameIds(frameIds, {
+    continuityMode: safeString(project?.continuity_mode) || 'beat_mp4',
+    beatToScene,
+  });
 }
 
 function actionFailure(message, diagnostics = [], extra = {}) {
@@ -223,7 +242,7 @@ async function callConfiguredProjectAction({ name, workflow, project, projectDir
 async function retryFrameHtml(context) {
   const { workflowId, rootDir, mediaRoot, workflow, projectDir, plan, services, taskContext } = context;
   const project = context.project;
-  const ids = planFrameIds(plan, project, 'frame_html');
+  const ids = resolveProjectRetryFrameIds(project, planFrameIds(plan, project, 'frame_html'));
   if (!ids.length) {
     return actionFailure('未找到需要重试的 HTML 帧。', [createDiagnostic({
       code: 'frame_not_found',
@@ -550,7 +569,7 @@ async function executeCreativeWorkflowRetryPlan({
         rootDir,
         projectDir: resolvedProjectDir,
         project,
-        frameIds: planFrameIds(plan, project, 'render'),
+        frameIds: resolveProjectRetryFrameIds(project, planFrameIds(plan, project, 'render')),
         materialize: false,
         services,
         taskContext,

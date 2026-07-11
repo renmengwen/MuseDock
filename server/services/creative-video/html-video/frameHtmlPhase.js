@@ -43,15 +43,60 @@ function safeLoad(loader, ...args) {
 }
 
 // asset_first 时从 node.metadata.visual_beat（R3 唯一下传通道）取 beat 编排并加载 primitive 参考片段；
+// scene_html 的 scene 级节点（metadata.visual_beats）聚合组内 beat：以首个带 motion_overlay 的 beat
+// 为 prompt 基础，并把 data-mp-beat-scope 约定与各 beat 时间窗口/文案要点拼进 primitive 片段之后；
 // hf_first 返回空对象，agent 侧不追加任何新 prompt 段。
 function resolveAssetFirstMotionArgs(node, creativeContext) {
   if (creativeContext?.visual_strategy !== 'asset_first') return {};
-  const beat = node?.metadata?.visual_beat || {};
-  if (!beat.motion_overlay) return {};
+  const visualBeats = Array.isArray(node?.metadata?.visual_beats) ? node.metadata.visual_beats : null;
+  const beat = visualBeats && visualBeats.length
+    ? (visualBeats.find(item => item?.motion_overlay) || visualBeats[0])
+    : (node?.metadata?.visual_beat || {});
+  if (!beat?.motion_overlay) return {};
   const primitiveSnippet = beat.motion_overlay?.preset ? safeLoad(loadOverlaySnippet, beat.motion_overlay.preset) : '';
   const diagramSkeleton = beat.visual_base?.type === 'diagram' ? safeLoad(loadDiagramSkeleton) : '';
+  const sceneBeatsBrief = visualBeats && visualBeats.length ? buildSceneBeatsBrief(node) : '';
   // previousBeatSummary 由分桶调度侧透传（见 runBucketsWithContinuity）、hasCaptions 由 Task 5.2 后续接入
-  return { beat, primitiveSnippet, diagramSkeleton };
+  return {
+    beat,
+    primitiveSnippet: [primitiveSnippet, sceneBeatsBrief].filter(Boolean).join('\n\n'),
+    diagramSkeleton,
+  };
+}
+
+// scene_html：scene 级节点判定（展开阶段写入 metadata.beat_windows / id 前缀 scene:）
+function isSceneHtmlNode(node = {}) {
+  return String(node?.id || '').startsWith('scene:')
+    || (Array.isArray(node?.metadata?.beat_windows) && node.metadata.beat_windows.length > 0);
+}
+
+// scene_html 的 scene 级 prompt 约束段：data-mp-beat-scope 约定 + CSS 可见性规则示例 +
+// 每个 beat 的时间窗口与文案要点（一份 HTML 覆盖整场景，base 层稳定、overlay 分 beat 显隐）。
+function buildSceneBeatsBrief(node = {}) {
+  const windows = Array.isArray(node?.metadata?.beat_windows) ? node.metadata.beat_windows : [];
+  if (!windows.length) return '';
+  const beats = Array.isArray(node?.metadata?.visual_beats) ? node.metadata.visual_beats : [];
+  const beatById = new Map(beats.filter(beat => beat && beat.id).map(beat => [beat.id, beat]));
+  const lines = [
+    '本帧是同场景多 beat 的连续 HTML（scene_html 模式），一份 HTML 覆盖整个场景时长：',
+    '- base 层（主视觉/背景/主卡片）不带 data-mp-beat-scope，整场景全程稳定可见，禁止中途重排或重新开场。',
+    '- 每个 beat 的局部 overlay 元素必须带 data-mp-beat-scope="<beat_id>"，并用 CSS 控制可见性，示例：',
+    '  [data-mp-beat-scope]{opacity:0;pointer-events:none;transition:opacity .35s}',
+    '  body[data-mp-beat="scene_x_b1"] [data-mp-beat-scope="scene_x_b1"]{opacity:1}（按下方每个 beat_id 逐个写出选择器）',
+    '- 系统会在 </body> 前注入时间线脚本，按时间把 body 的 data-mp-beat 切到当前 beat_id；HTML 不要自己实现切换逻辑。',
+    '各 beat 时间窗口与文案要点：',
+  ];
+  for (const window of windows) {
+    const beat = beatById.get(window.id) || {};
+    const headline = String(beat.visual_text?.headline || '').trim();
+    const keywords = Array.isArray(beat.visual_text?.keywords)
+      ? beat.visual_text.keywords.filter(Boolean).join(' / ')
+      : '';
+    const preset = beat.motion_overlay?.preset ? `overlay=${beat.motion_overlay.preset}` : '';
+    const summary = [headline, keywords, preset].filter(Boolean).join('；');
+    lines.push(`- ${window.id}：${window.start_sec}s - ${window.end_sec}s${summary ? `，${summary}` : ''}`);
+  }
+  return lines.join('\n');
 }
 
 // 前一 beat 帧 HTML 的 base 布局摘要：剥离 overlay 节点与脚本，保留 body 结构与内联样式要点并限长，
@@ -528,8 +573,9 @@ async function runFrameHtmlPhase(ctx) {
         });
       }
     }
-    // raw_html 帧校验通过后、写盘前：asset_first 且模型漏写 overlay 时确定性注入 primitive 兜底片段
-    if (htmlResult.success && assetFirstMotionArgs.beat) {
+    // raw_html 帧校验通过后、写盘前：asset_first 且模型漏写 overlay 时确定性注入 primitive 兜底片段；
+    // scene_html 的 scene 级节点跳过兜底（单 beat 片段无 scope，注入会全程常显破坏分 beat 显隐）
+    if (htmlResult.success && assetFirstMotionArgs.beat && !isSceneHtmlNode(node)) {
       const overlayResult = ensureMotionOverlay(htmlResult.html, assetFirstMotionArgs.beat, {
         visualStrategy: creativeContext?.visual_strategy || null,
       });
@@ -696,7 +742,8 @@ async function runFrameHtmlPhase(ctx) {
   }
 
   for (const frameResult of frameResults.sort((a, b) => a.index - b.index)) {
-    const { index, node, sceneId, scene, htmlResult } = frameResult;
+    const { index, node, sceneId, scene } = frameResult;
+    let { htmlResult } = frameResult;
     const frameKey = String(node.beat_id || node.beatId || node.id || sceneId || '').trim();
     if (!htmlResult.success) {
       const failedHtmlPath = await writeFailedFrameHtml(projectDir, frameKey || sceneId, htmlResult.failed_html);
@@ -757,6 +804,15 @@ async function runFrameHtmlPhase(ctx) {
     }
     if (Array.isArray(htmlResult.diagnostics) && htmlResult.diagnostics.length) {
       diagnostics.push(...normalizeDiagnostics(htmlResult.diagnostics));
+    }
+    // scene_html：scene 级节点写盘前注入时间线脚本（按时间切 body[data-mp-beat]，驱动分 beat overlay 显隐）
+    const sceneBeatWindows = Array.isArray(node?.metadata?.beat_windows) ? node.metadata.beat_windows : [];
+    if (sceneBeatWindows.length) {
+      const timelineScript = buildSceneTimelineScript(sceneBeatWindows);
+      const withTimeline = String(htmlResult.html || '').includes('</body>')
+        ? String(htmlResult.html).replace('</body>', `${timelineScript}</body>`)
+        : `${htmlResult.html || ''}${timelineScript}`;
+      htmlResult = { ...htmlResult, html: withTimeline };
     }
     if (isAssetFirst) {
       const frameHeight = Number(frameHtmlAgent.resolveResolution(templateRenderTarget)?.height) || 1920;
