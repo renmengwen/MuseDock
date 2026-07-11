@@ -97,3 +97,32 @@ assert.strictEqual(events.find(e => e.id === 'sfx_001').reason, 'AI 放置理由
   assert.strictEqual(passthrough.dropped.length, 0);
 }
 console.log('sfx voice avoidance tests passed');
+
+// (4) resolveProjectSfxEventsForMux 增加可选 voiceWindows：避让发生在白名单/置信度/文件校验之前，
+// 产出的 mux 事件 volume_db 已含 ducking；不传 voiceWindows 时输出与现状完全一致（硬约束 A）。
+const { resolveProjectSfxEventsForMux } = require('../server/services/creative-video/html-video/sfxEventService');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hv-sfx-mux-'));
+  fs.mkdirSync(path.join(dir, 'audio', 'sfx'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'audio', 'sfx', 'whoosh_soft.wav'), 'x'); // 占位文件，只为通过存在性检查
+  const project = {
+    audio: { sfx: { enabled: true, status: 'ready', events: [
+      { id: 'sfx_001', scene_id: 'scene_04', time_sec: 2.5, global_time_sec: 48.0, sfx_id: 'whoosh_soft',
+        intensity: 'medium', volume_db: -18, enabled: true, confidence: 0.9 },
+    ] } },
+    frames: [{ id: 'f1', duration_sec: 60, captions: [{ start: 45.47, end: 51.2, text: 'n' }] }],
+  };
+  const library = { items: [{ id: 'whoosh_soft', default_volume_db: -18 }] };
+  const withAvoidance = resolveProjectSfxEventsForMux({
+    project, projectDir: dir, library,
+    voiceWindows: [{ start: 45.47, end: 51.2 }],
+  });
+  assert.strictEqual(withAvoidance.events[0].volume_db, -26, '旁白活跃期 mux 事件必须已 duck -8dB');
+  const withoutAvoidance = resolveProjectSfxEventsForMux({ project, projectDir: dir, library });
+  assert.strictEqual(withoutAvoidance.events[0].volume_db, -18, '不传 voiceWindows 时行为与现状一致');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+console.log('sfx mux wiring tests passed');

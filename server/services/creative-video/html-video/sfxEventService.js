@@ -291,9 +291,16 @@ async function applyPlannedSfxEvents({ projectDir, project, sceneSpec, library, 
   return { success: true, events, dropped, project };
 }
 
-function resolveProjectSfxEventsForMux({ project = {}, projectDir, library } = {}) {
+function resolveProjectSfxEventsForMux({ project = {}, projectDir, library, voiceWindows = [] } = {}) {
   const sfx = objectOrEmpty(project.audio?.sfx);
-  const events = sfx.enabled === false ? [] : (Array.isArray(sfx.events) ? sfx.events : []);
+  let events = sfx.enabled === false ? [] : (Array.isArray(sfx.events) ? sfx.events : []);
+  // 旁白避让发生在 mux 输入侧（白名单/置信度/文件校验之前），不触碰 project.audio.sfx.events 原始计划
+  const avoidanceDropped = [];
+  if (Array.isArray(voiceWindows) && voiceWindows.length && events.length) {
+    const avoidance = applyVoiceAvoidance(events, voiceWindows, {});
+    events = avoidance.kept;
+    avoidanceDropped.push(...avoidance.dropped);
+  }
   const resolved = [];
   const dropped = [];
   let libraryIds = new Set();
@@ -346,7 +353,7 @@ function resolveProjectSfxEventsForMux({ project = {}, projectDir, library } = {
       dropped.push({ id: String(event.id || ''), sfx_id: sfxId, reason: error.message || String(error) });
     }
   }
-  return { events: resolved, dropped };
+  return { events: resolved, dropped: [...avoidanceDropped, ...dropped] };
 }
 
 // 从 project.frames[].captions 推导全片旁白窗口：caption 时间为帧内相对，需加帧起点累计偏移
