@@ -54,6 +54,12 @@ async function render(input = {}, ctx = {}, deps = {}) {
     });
     const page = await context.newPage();
 
+    // goto 之前置受控标志：scene_html 时间线脚本据此不挂 5s 兜底自启，
+    // 避免预加载 >5s 时兜底抢先起钟、adapter 的显式启动被幂等吞掉导致 origin 偏移。
+    await page.addInitScript(() => {
+      window.__mpAdapterControlled = true;
+    });
+
     // 对应 html-video 源码段：page.addInitScript 冻结 CSS/SMIL 动画。
     await page.addInitScript(() => {
       const style = document.createElement('style');

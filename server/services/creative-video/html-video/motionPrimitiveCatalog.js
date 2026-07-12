@@ -89,12 +89,14 @@ function pxNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-// 剥离注释与 <style>/<script> 内容：属性选择器、注释里的 data-mp-* 字样不算真实元素（P1-8）
+// 剥离注释与 <style>/<script> 内容：属性选择器、注释里的 data-mp-* 字样不算真实元素（P1-8）。
+// 未闭合的 <style>/<script> 按浏览器语义吞掉其后全部内容，一并剥到字符串末尾。
 function stripNonElementHtml(html) {
   return String(html || '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
-    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, '');
+    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, '')
+    .replace(/<(?:script|style)\b[\s\S]*$/i, '');
 }
 
 // 是否存在带 data-mp-overlay 属性的真实 opening tag（供兜底注入与 validationGate 共用）
@@ -168,4 +170,5 @@ module.exports = {
   loadDiagramSkeleton,
   validateOverlayHtml,
   hasRealOverlayElement,
+  stripNonElementHtml,
 };

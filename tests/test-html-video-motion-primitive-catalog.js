@@ -127,4 +127,15 @@ for (const id of Object.keys(MOTION_PRIMITIVES)) {
   assert.strictEqual(styleOnly.valid, false);
   assert.strictEqual(styleOnly.reason_code, 'overlay_root_missing');
 }
+// 未闭合 <style>/<script>：其后的 tag 形文本按浏览器语义属于样式/脚本内容，不算真实元素
+const { hasRealOverlayElement } = require('../server/services/creative-video/html-video/motionPrimitiveCatalog');
+{
+  const unclosedStyle = '<div class="hero"></div><style>[data-mp-overlay]{opacity:0} <div data-mp-overlay="key_marker"></div>';
+  assert.strictEqual(hasRealOverlayElement(unclosedStyle), false, '未闭合 <style> 内的 tag 形文本不算真实 overlay');
+  const unclosedScript = '<div class="hero"></div><script>var s = \'<div data-mp-overlay="x"></div>\';';
+  assert.strictEqual(hasRealOverlayElement(unclosedScript), false, '未闭合 <script> 内的 tag 形文本不算真实 overlay');
+  // 未闭合 style 之前的真实节点仍要认
+  const realBefore = '<div data-mp-overlay="key_marker" style="position:absolute;bottom:180px"></div><style>.x{}';
+  assert.strictEqual(hasRealOverlayElement(realBefore), true);
+}
 console.log('motion primitive catalog tests passed');

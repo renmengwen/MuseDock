@@ -6,7 +6,7 @@ const { validateProject } = require('./projectSchema');
 const { mappedEngine } = require('./templateRegistry');
 const { validateTemplateInputs } = require('./templateInputAgent');
 const { validateHtmlCanvasContract } = require('./frameCanvasContract');
-const { validateOverlayHtml, hasRealOverlayElement } = require('./motionPrimitiveCatalog');
+const { validateOverlayHtml, hasRealOverlayElement, stripNonElementHtml } = require('./motionPrimitiveCatalog');
 const { validateSceneSpecTimelineConsistency } = require('./timelineConsistency');
 const { normalizeCaptionsForFrame } = require('./captionLayer');
 
@@ -75,15 +75,9 @@ function isBlockingDiagnostic(diagnostic = {}) {
   return true;
 }
 
-function stripIgnoredHtmlRegions(html) {
-  return String(html || '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
-    .replace(/<style\b[\s\S]*?<\/style\s*>/gi, '');
-}
-
+// 注释/<style>/<script> 剥离统一复用 motionPrimitiveCatalog.stripNonElementHtml（单向依赖，无环）
 function hasTextKey(html, key) {
-  const cleaned = stripIgnoredHtmlRegions(html);
+  const cleaned = stripNonElementHtml(html);
   const tags = cleaned.match(/<[A-Za-z][^>]*>/g) || [];
   const pattern = new RegExp(`\\bdata-text-key\\s*=\\s*(['"])${key}\\1`, 'i');
   return tags.some(tag => pattern.test(tag));
@@ -209,7 +203,7 @@ function assetFirstOverlayIssues(html, { visualStrategy, frameHeight = 1920 } = 
 // data-mp-beat-scope="<beat_id>" 真实元素，缺失只告警（scene_html 不做确定性注入，维持现状）。
 function sceneBeatScopeIssues(html, beatWindows = []) {
   if (!Array.isArray(beatWindows) || !beatWindows.length) return [];
-  const tags = stripIgnoredHtmlRegions(html).match(/<[A-Za-z][^>]*>/g) || [];
+  const tags = stripNonElementHtml(html).match(/<[A-Za-z][^>]*>/g) || [];
   const missing = [];
   for (const window of beatWindows) {
     const id = String(window?.id || '').trim();

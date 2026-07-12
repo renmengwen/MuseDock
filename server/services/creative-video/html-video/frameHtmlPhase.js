@@ -1033,7 +1033,9 @@ function buildSceneTimelineScript(beatWindows = []) {
   // P1-3：beat 时钟不随页面加载自启——预加载（字体/render-ready/动画探测）耗时会被 ffmpeg 按
   // leadInMs 裁掉，但页面内部时钟不会回拨，导致成片 t=0 已跳过首 beat。改为暴露
   // __mpStartBeatClock，由渲染 adapter 在正式录制起点（__hvUnfreeze 之后）显式调用；
-  // 非 adapter 环境（本地预览）5s 兜底自启。启动前 body 已同步置首 beat，预加载期间画面即 beat1 状态。
+  // 非 adapter 环境（本地预览，无 __mpAdapterControlled 标志）才挂 5s 兜底自启——
+  // adapter 受控时不挂，避免预加载 >5s 时兜底抢先起钟偏移 origin。
+  // 启动前 body 已同步置首 beat，预加载期间画面即 beat1 状态。
   return `<script>
 (function () {
   window.__MP_BEATS__ = ${payload};
@@ -1057,7 +1059,9 @@ function buildSceneTimelineScript(beatWindows = []) {
     started = true;
     requestAnimationFrame(tick);
   };
-  setTimeout(function () { window.__mpStartBeatClock(); }, 5000);
+  if (!window.__mpAdapterControlled) {
+    setTimeout(function () { window.__mpStartBeatClock(); }, 5000);
+  }
 })();
 <\/script>`;
 }

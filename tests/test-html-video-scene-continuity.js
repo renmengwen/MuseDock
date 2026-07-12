@@ -250,14 +250,37 @@ const { buildSceneTimelineScript, groupBeatsForSceneHtml } = require('../server/
   assert.strictEqual(pending.length, 1, '重复启动不得叠加第二条 rAF 循环');
   pending[0](18000); // 仍相对 origin=10000 → t=8s → b2
   assert.strictEqual(attrs['data-mp-beat'], 'scene_05_b2');
+
+  // 竞态修复：adapter 受控环境（__mpAdapterControlled）不挂 5s 兜底——
+  // 预加载 >5s 时兜底不得抢先起钟偏移 origin
+  const attrs2 = {};
+  const rafs2 = [];
+  const timers2 = [];
+  const win2 = { __mpAdapterControlled: true };
+  const doc2 = { body: { setAttribute: (key, value) => { attrs2[key] = value; } } };
+  new Function('window', 'document', 'requestAnimationFrame', 'setTimeout', code)(
+    win2, doc2, cb => rafs2.push(cb), (cb, ms) => timers2.push({ cb, ms }),
+  );
+  assert.strictEqual(timers2.length, 0, 'adapter 受控时不得注册兜底定时器');
+  assert.strictEqual(rafs2.length, 0);
+  // 模拟预加载 6s 后 adapter 才调用：origin 必须是调用时刻
+  win2.__mpStartBeatClock();
+  rafs2.shift()(6000); // origin = 6000
+  assert.strictEqual(attrs2['data-mp-beat'], 'scene_05_b1', '预加载 >5s 时 t=0 仍必须是首 beat');
+  rafs2.shift()(13000); // t = 7s → b2
+  assert.strictEqual(attrs2['data-mp-beat'], 'scene_05_b2');
 }
-// adapter 侧：正式录制起点显式调用 __mpStartBeatClock（源码级弱断言）
+// adapter 侧：正式录制起点显式调用 __mpStartBeatClock，且 goto 前置 __mpAdapterControlled 标志（源码级弱断言）
 {
   const adapterSource = fs.readFileSync(
     path.join(__dirname, '..', 'server', 'services', 'creative-video', 'html-video', 'hyperframesPlaywrightAdapter.js'),
     'utf8',
   );
   assert.ok(adapterSource.includes('__mpStartBeatClock'), 'adapter 必须在正式播放处显式启动 beat 时钟');
+  const flagIndex = adapterSource.indexOf('__mpAdapterControlled');
+  const gotoIndex = adapterSource.indexOf('page.goto(');
+  assert.ok(flagIndex >= 0, 'adapter 必须置 __mpAdapterControlled 受控标志');
+  assert.ok(gotoIndex > flagIndex, '__mpAdapterControlled 必须在 page.goto 之前注入（addInitScript）');
 }
 console.log('scene continuity phase2 timeline tests passed');
 
