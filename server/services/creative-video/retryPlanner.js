@@ -596,12 +596,18 @@ const QA_REPAIRABLE_BY_FRAME = new Set([
 // 模块 7：asset_first QA warning 的定向修复映射（只建立能力，不自动接入重试计划——
 // 升阻断需在真实任务验证 retry_frame_html 有效后另行提交，见计划开放决策 2）。
 // takeover 类路由问题不映射：同路由下重生成 HTML 得到同样决策，retry_frame_html 会无限循环。
-function repairActionForQaIssue(issue = {}, { boundaryToFrameIds = {} } = {}) {
+// review P2-6：asset_missing 的 details.scene_id 才是真实语义（expected_in_frames 写的是 scene_id），
+// 经 caller 提供的 sceneToFrameIds（scene_id => 该 scene 全部 beat 的 frame_ids，与 boundaryToFrameIds
+// 同模式）解析；查不到返回 null，不再把 scene_id 直接当 frame_id 用（真实 checkpoint 键不会命中）。
+function repairActionForQaIssue(issue = {}, { boundaryToFrameIds = {}, sceneToFrameIds = {} } = {}) {
   if (!QA_REPAIRABLE_BY_FRAME.has(issue.code)) return null;
   let frameIds = [];
   if (issue.code === 'asset_first_boundary_refresh') {
     const key = `${issue.details?.scene_id}@${issue.details?.boundary_sec}`;
     frameIds = boundaryToFrameIds[key] || [];
+  } else if (issue.code === 'asset_first_asset_missing') {
+    const sceneId = issue.details?.scene_id;
+    frameIds = (sceneId && sceneToFrameIds[sceneId]) || [];
   } else if (issue.details?.beat_id) {
     frameIds = [issue.details.beat_id];
   }

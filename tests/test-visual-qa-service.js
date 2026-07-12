@@ -430,6 +430,19 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(warnings[0].code, 'asset_first_low_information');
     assert.strictEqual(warnings[0].details.beat_id, 'scene_04_b1');
     assert.deepStrictEqual(analyzeAssetFirstInformation(beatsInfo, { visualStrategy: 'hf_first', minElements: 3 }), []);
+    // P2-3(b)：scene_html 回落展开把整 scene 统计复制到每 beat（stats_scope:'scene'），
+    // 低信息告警按 scene 去重只报一条，message 说明是 scene 级聚合观察；beat 级仍逐条报
+    const sceneScoped = [
+      { beat_id: 'scene_06_b1', scene_id: 'scene_06', stats_scope: 'scene', has_asset: false, text_blocks: 1, cards: 0, graphics: 0 },
+      { beat_id: 'scene_06_b2', scene_id: 'scene_06', stats_scope: 'scene', has_asset: false, text_blocks: 1, cards: 0, graphics: 0 },
+      { beat_id: 'scene_07_b1', has_asset: false, text_blocks: 0, cards: 0, graphics: 0 },
+    ];
+    const dedupInfo = analyzeAssetFirstInformation(sceneScoped, { visualStrategy: 'asset_first', minElements: 3 });
+    assert.strictEqual(dedupInfo.length, 2, 'scene scope 去重为 1 条 + beat 级 1 条');
+    const sceneWarning = dedupInfo.find(w => w.details.scene_id === 'scene_06');
+    assert.ok(sceneWarning, 'scene 级告警必须带 scene_id');
+    assert.strictEqual(sceneWarning.details.stats_scope, 'scene');
+    assert.ok(sceneWarning.message.includes('scene 级聚合'), 'message 必须说明是 scene 级聚合观察');
   }
   // 风格漂移：帧平均色序列突变 => warning
   {
@@ -474,13 +487,15 @@ const qa = require('../server/services/creative-video/visualQaService');
     });
     assert.strictEqual(farCut.length, 1, '无关边界不得吞掉真实漂移');
   }
-  // asset_missing 复用 workflow 级 asset usage 报告（真实结构，R6：无 report.missing）
+  // asset_missing 复用 workflow 级 asset usage 报告（真实结构，R6：无 report.missing）。
+  // review P2-6 契约变更：生产端 expected_in_frames 实际写的是 scene_id（见 htmlVideoWorkflow
+  // asset usage 报告构造），映射层按真实语义暴露 details.scene_id，不再把它伪装成 beat_id（恒 null）。
   {
     const report = {
       status: 'ready',
       assets: [
-        { asset_id: 'gen_scene_02', required: true, used: false, used_in_frames: [], expected_in_frames: ['scene_02_b1', 'scene_02_b2'] },
-        { asset_id: 'gen_scene_03', required: true, used: true, used_in_frames: ['scene_03_b1'], expected_in_frames: ['scene_03_b1'] },
+        { asset_id: 'gen_scene_02', required: true, used: false, used_in_frames: [], expected_in_frames: ['scene_02'] },
+        { asset_id: 'gen_scene_03', required: true, used: true, used_in_frames: ['scene_03_b1'], expected_in_frames: ['scene_03'] },
         { asset_id: 'gen_x', required: true, used: false, used_in_frames: [], expected_in_frames: [] },
       ],
       required_asset_ids: ['gen_scene_02', 'gen_scene_03', 'gen_x'],
@@ -490,10 +505,12 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(warnings.length, 2);
     const w1 = warnings.find(w => w.details.asset_id === 'gen_scene_02');
     assert.strictEqual(w1.code, 'asset_first_asset_missing');
-    assert.deepStrictEqual(w1.details.expected_in_frames, ['scene_02_b1', 'scene_02_b2']);
-    assert.strictEqual(w1.details.beat_id, 'scene_02_b1', '定向重试目标取 expected_in_frames 首个');
+    assert.deepStrictEqual(w1.details.expected_in_frames, ['scene_02']);
+    assert.strictEqual(w1.details.scene_id, 'scene_02', 'expected_in_frames 首个按真实语义放 scene_id');
+    assert.strictEqual(w1.details.beat_id, null, '不得把 scene_id 伪装成 beat_id（P2-6）');
     const w2 = warnings.find(w => w.details.asset_id === 'gen_x');
-    assert.strictEqual(w2.details.beat_id, null, '拿不到 frame 信息时只给 asset_id，不伪造 beat_id（R6）');
+    assert.strictEqual(w2.details.scene_id, null, '拿不到 frame 信息时只给 asset_id，不伪造 scene_id');
+    assert.strictEqual(w2.details.beat_id, null);
     assert.deepStrictEqual(mapAssetUsageToQaWarnings(report, { visualStrategy: 'hf_first' }), []);
   }
   // overlay_caption_overlap 透传 render_decisions[].overlay_check
@@ -547,6 +564,32 @@ const qa = require('../server/services/creative-video/visualQaService');
     // 语义：边界后 0-0.6s 白屏时，times 必须覆盖 b 与 b+0.5 两个空白检测点（≥2 张空白可命中阻断）
     assert.ok(mixed[0].times.includes(4) && mixed[0].times.includes(4.5) && mixed[0].times.includes(5),
       'same_scene 边界白屏阻断点位（b / b+0.5 / b+1.0）必须保留');
+    // P2-3(c)：scene_html 单 frame 的内部 beat 边界（metadata.beat_windows 相接处）
+    // 在 pairedSampling 下按 same_scene=true 边界产出采样组（排除最后一个 window 末尾）
+    const sceneFrameProject = { frames: [
+      {
+        id: 'scene:scene_05', scene_id: 'scene_05', duration_sec: 12.66,
+        metadata: { beat_windows: [
+          { id: 'scene_05_b1', start_sec: 0, end_sec: 6.33 },
+          { id: 'scene_05_b2', start_sec: 6.33, end_sec: 12.66 },
+        ] },
+      },
+    ] };
+    const internal = projectBoundarySampleGroups(sceneFrameProject, 12.66, { pairedSampling: true });
+    assert.strictEqual(internal.length, 1, '两个 beat_windows => 1 个内部边界组（末尾窗口不产出）');
+    assert.strictEqual(internal[0].same_scene, true);
+    assert.strictEqual(internal[0].scene_id, 'scene_05');
+    assert.strictEqual(internal[0].boundary_sec, 6.33);
+    assert.deepStrictEqual(internal[0].times, [6.03, 6.33, 6.63, 6.83, 7.33], '内部边界用与 same_scene 相同的 5 点并集');
+    // 缺省（不传 pairedSampling）不产出内部边界
+    assert.deepStrictEqual(projectBoundarySampleGroups(sceneFrameProject, 12.66), [], '缺省不产出内部边界（硬约束 A）');
+    // beat_mp4 帧无 beat_windows：pairedSampling 下行为不变
+    const noWindows = projectBoundarySampleGroups({ frames: [
+      { scene_id: 'scene_05', duration_sec: 6.33 },
+      { scene_id: 'scene_05', duration_sec: 6.33 },
+    ] }, 12.66, { pairedSampling: true });
+    assert.strictEqual(noWindows.length, 1);
+    assert.deepStrictEqual(noWindows[0].times, [6.03, 6.33, 6.63, 6.83, 7.33]);
   }
   // P1-7 语义回归：asset_first 成对采样下，same_scene 边界后白屏（b 与 b+0.5 两点空白）
   // 仍能命中 blank_segment_boundary 阻断（issues，而非 warning）

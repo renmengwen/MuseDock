@@ -95,9 +95,9 @@ function safeLoad(loader, ...args) {
 // 为 prompt 基础，scene 级约束（data-mp-beat-scope 约定/时间窗口）经 sceneBeatsBrief 独立字段下传，
 // 由 frameHtmlAgent 作为独立段落输出（不混入 primitive 参考片段）；brief 只依赖 beat_windows 存在，
 // 与 motion_overlay 解耦（与时间线脚本注入条件一致）。hf_first 返回空对象，agent 侧不追加任何新 prompt 段。
-function resolveAssetFirstMotionArgs(node, creativeContext) {
+function resolveAssetFirstMotionArgs(node, creativeContext, { scene = null, beats = [], mediaOptions = {} } = {}) {
   if (creativeContext?.visual_strategy !== 'asset_first') return {};
-  const sceneBeatsBrief = buildSceneBeatsBrief(node);
+  const sceneBeatsBrief = buildSceneBeatsBrief(node, { scene, beats, mediaOptions });
   const visualBeats = Array.isArray(node?.metadata?.visual_beats) ? node.metadata.visual_beats : null;
   const beat = visualBeats && visualBeats.length
     ? (visualBeats.find(item => item?.motion_overlay) || visualBeats[0])
@@ -151,11 +151,14 @@ function positiveDurationSec(value) {
 
 // scene_html 的 scene 级 prompt 约束段：data-mp-beat-scope 约定 + CSS 可见性规则示例 +
 // 每个 beat 的时间窗口与文案要点（一份 HTML 覆盖整场景，base 层稳定、overlay 分 beat 显隐）。
-function buildSceneBeatsBrief(node = {}) {
+// review P2-3(a)：传入 scene/beats/mediaOptions 时按 beat 计算 hasCaptionsForBeat，
+// 无系统字幕的 beat 行追加「补画面重点短句」要求（与 beat_mp4 路径的 hasCaptions 契约对齐）；
+// 未传 scene（旧调用形态/单测）不做字幕判定，行为不变。
+function buildSceneBeatsBrief(node = {}, { scene = null, beats = [], mediaOptions = {} } = {}) {
   const windows = Array.isArray(node?.metadata?.beat_windows) ? node.metadata.beat_windows : [];
   if (!windows.length) return '';
-  const beats = Array.isArray(node?.metadata?.visual_beats) ? node.metadata.visual_beats : [];
-  const beatById = new Map(beats.filter(beat => beat && beat.id).map(beat => [beat.id, beat]));
+  const visualBeats = Array.isArray(node?.metadata?.visual_beats) ? node.metadata.visual_beats : [];
+  const beatById = new Map(visualBeats.filter(beat => beat && beat.id).map(beat => [beat.id, beat]));
   const lines = [
     '本帧是同场景多 beat 的连续 HTML（scene_html 模式），一份 HTML 覆盖整个场景时长：',
     '- base 层（主视觉/背景/主卡片）不带 data-mp-beat-scope，整场景全程稳定可见，禁止中途重排或重新开场。',
@@ -173,7 +176,10 @@ function buildSceneBeatsBrief(node = {}) {
       : '';
     const preset = beat.motion_overlay?.preset ? `overlay=${beat.motion_overlay.preset}` : '';
     const summary = [headline, keywords, preset].filter(Boolean).join('；');
-    lines.push(`- ${window.id}：${window.start_sec}s - ${window.end_sec}s${summary ? `，${summary}` : ''}`);
+    const captionNote = scene && !hasCaptionsForBeat({ scene, beats, beatId: window.id, mediaOptions })
+      ? '（无系统字幕：该 beat 的 overlay 必须含一条画面重点短句，不超过 18 字）'
+      : '';
+    lines.push(`- ${window.id}：${window.start_sec}s - ${window.end_sec}s${summary ? `，${summary}` : ''}${captionNote}`);
   }
   return lines.join('\n');
 }
@@ -219,17 +225,25 @@ function bucketJobsByContinuityGroup(jobs = []) {
 }
 
 // 桶间并发、桶内严格串行，并把前帧 HTML 摘要向后传给同组后续 beat（beat_index>1 才注入）。
-// initialHtmlByGroup：分桶前已生成的帧（如串行首帧）HTML，按 group_id 作为对应桶的初始 previousHtml。
+// initialHtmlByGroup：分桶前已就绪的帧 HTML（复用帧/串行首帧），Map<group_id, Map<beat_index, html>>；
+// P2-1：桶内首个待生成 job 的初始 previousHtml 取「beat_index 小于当前的最近前驱」，
+// 避免定向重试中间 beat 时把组内更靠后（未来）的复用帧当作上一帧；
+// 桶内后续 job 仍串行传递前一个生成结果（生成结果比复用前驱更近时优先，逻辑保持不变）。
 async function runBucketsWithContinuity({ buckets = [], concurrency = 1, runJob, initialHtmlByGroup = new Map() } = {}) {
   const bucketResults = await mapLimit(buckets, concurrency, async bucket => {
     const results = [];
     const groupId = bucket.length ? continuityGroupId(bucket[0]) : null;
-    let previousHtml = (groupId && initialHtmlByGroup.get(groupId)) || '';
+    let previousHtml = '';
     for (const job of bucket) {
       const beat = job.node?.metadata?.visual_beat || {};
+      const beatIndex = Number(beat.continuity?.beat_index) || 1;
+      // 桶内尚无生成结果时按当前 beat 的前驱选取初始值（生成失败也会为下一个 job 重查前驱）
+      if (!previousHtml && groupId) {
+        previousHtml = predecessorHtmlForBeat(initialHtmlByGroup, groupId, beatIndex);
+      }
       const result = await runJob({
         ...job,
-        previousBeatSummary: (beat.continuity?.beat_index || 1) > 1 && previousHtml
+        previousBeatSummary: beatIndex > 1 && previousHtml
           ? summarizeBaseLayout(previousHtml)
           : '',
       });
@@ -418,8 +432,8 @@ async function inspectGeneratedFrameLayout({
 
 // P2-A：复用帧也要进入连续性与统计链路（asset_first 专用）：
 // (1) 复用 HTML 产生与新生成帧同构的 stats/overlay_check，避免全复用/半复用时 render_decisions 统计丢失；
-// (2) 按 continuity group 记录复用 HTML 作为桶初始 previousHtml，同组 beat_index 大者覆盖小者
-//（组内靠后的帧对后续定向重试的 beat 更准）。空 HTML 容错跳过。
+// (2) 按 continuity group + beat_index 全量记录复用 HTML（P2-1：不再只留组内最大者，
+//     定向重试任意中间 beat 时可查其真实前驱）。空 HTML 容错跳过。
 function collectReusedFrameContext({
   node,
   html,
@@ -427,7 +441,6 @@ function collectReusedFrameContext({
   frameHeight = 1920,
   statsByBeatId = {},
   initialHtmlByGroup = new Map(),
-  reusedBeatIndexByGroup = new Map(),
 } = {}) {
   const text = String(html || '');
   if (!text.trim() || !frameKey) return;
@@ -435,11 +448,34 @@ function collectReusedFrameContext({
   const groupId = continuityGroupId({ node });
   if (!groupId) return;
   const beatIndex = Number(node?.metadata?.visual_beat?.continuity?.beat_index) || 1;
-  const currentIndex = reusedBeatIndexByGroup.get(groupId);
-  if (currentIndex === undefined || beatIndex >= currentIndex) {
-    reusedBeatIndexByGroup.set(groupId, beatIndex);
-    initialHtmlByGroup.set(groupId, text);
+  recordGroupHtml(initialHtmlByGroup, groupId, beatIndex, text);
+}
+
+// P2-1：向 Map<group_id, Map<beat_index, html>> 记录一帧已就绪 HTML
+function recordGroupHtml(initialHtmlByGroup, groupId, beatIndex, html) {
+  if (!groupId) return;
+  let byIndex = initialHtmlByGroup.get(groupId);
+  if (!(byIndex instanceof Map)) {
+    byIndex = new Map();
+    initialHtmlByGroup.set(groupId, byIndex);
   }
+  byIndex.set(Number(beatIndex) || 1, html);
+}
+
+// P2-1：查组内「beat_index 严格小于当前的最近前驱」HTML；无前驱/未知组返回空串
+function predecessorHtmlForBeat(initialHtmlByGroup, groupId, beatIndex) {
+  const byIndex = groupId ? initialHtmlByGroup.get(groupId) : null;
+  if (!(byIndex instanceof Map)) return '';
+  const current = Number(beatIndex) || 1;
+  let bestIndex = -Infinity;
+  let bestHtml = '';
+  for (const [index, html] of byIndex) {
+    if (index < current && index > bestIndex) {
+      bestIndex = index;
+      bestHtml = html;
+    }
+  }
+  return bestHtml;
 }
 
 /**
@@ -486,10 +522,9 @@ async function runFrameHtmlPhase(ctx) {
   let visualStyleReferenceHtml = '';
   const frameResults = [];
   const frameJobs = [];
-  // asset_first：复用帧与串行首帧共同维护「按 continuity group 的初始 previousHtml」，
-  // 供分桶调度作为同组后续 beat 的布局摘要来源（hf_first 恒为空 Map，不参与）。
+  // asset_first：复用帧与串行首帧共同维护「按 continuity group + beat_index 的已就绪 HTML」，
+  // 供分桶调度按前驱选取同组后续 beat 的布局摘要来源（hf_first 恒为空 Map，不参与）。
   const initialHtmlByGroup = new Map();
-  const reusedBeatIndexByGroup = new Map();
   let completedFrameHtmlCount = 0;
   const concurrency = Math.min(5, Math.max(1, Math.round(Number(frameHtmlConcurrency) || FRAME_HTML_CONCURRENCY)));
   const frameHtmlRunsInParallel = concurrency > 1;
@@ -498,7 +533,13 @@ async function runFrameHtmlPhase(ctx) {
     // previousBeatSummary 仅 asset_first 分桶路径会写入（hf_first 恒为 undefined，不改变原展开形态）
     const jobBeatId = String(node.beat_id || node.beatId || '').trim();
     const assetFirstMotionArgs = {
-      ...resolveAssetFirstMotionArgs(node, creativeContext),
+      // P2-3(a)：scene/beats/mediaOptions 下传给 buildSceneBeatsBrief，
+      // 供 scene_html 节点按 beat 判定字幕、给无字幕 beat 追加画面重点短句要求
+      ...resolveAssetFirstMotionArgs(node, creativeContext, {
+        scene,
+        beats: project.visual_plan?.beats || [],
+        mediaOptions,
+      }),
       ...(job.previousBeatSummary ? { previousBeatSummary: job.previousBeatSummary } : {}),
       // R8：仅 asset_first 的 beat_mp4 帧计算 hasCaptions（硬约束 A：hf_first 不计算不传；
       // scene_html 的 scene 级帧 beat 粒度不适用，保持 undefined，agent 侧缺省 true 不追加要求行）
@@ -819,7 +860,6 @@ async function runFrameHtmlPhase(ctx) {
           frameHeight,
           statsByBeatId,
           initialHtmlByGroup,
-          reusedBeatIndexByGroup,
         });
       }
       completedFrameHtmlCount += 1;
@@ -872,7 +912,10 @@ async function runFrameHtmlPhase(ctx) {
         visualStyleReferenceHtml = firstResult.htmlResult.html;
         if (isAssetFirst) {
           const firstGroupId = continuityGroupId(frameJobs[0]);
-          if (firstGroupId) initialHtmlByGroup.set(firstGroupId, firstResult.htmlResult.html);
+          if (firstGroupId) {
+            const firstBeatIndex = Number(frameJobs[0].node?.metadata?.visual_beat?.continuity?.beat_index) || 1;
+            recordGroupHtml(initialHtmlByGroup, firstGroupId, firstBeatIndex, firstResult.htmlResult.html);
+          }
         }
       }
       remainingJobs = frameJobs.slice(1);
@@ -1135,6 +1178,7 @@ module.exports = {
   ensureMotionOverlay,
   summarizeBaseLayout,
   collectReusedFrameContext,
+  predecessorHtmlForBeat,
   buildSceneBeatsBrief,
   hasCaptionsForBeat,
   bucketJobsByContinuityGroup,

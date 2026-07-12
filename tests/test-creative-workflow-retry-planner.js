@@ -538,14 +538,24 @@ const { repairActionForQaIssue } = require('../server/services/creative-video/re
   assert.strictEqual(action.type, 'retry_frame_html');
   assert.deepStrictEqual(action.frame_ids, ['scene_05_b2']);
 }
+// review P2-6 契约变更：asset_missing 的 details.scene_id 才是真实语义（生产端 expected_in_frames
+// 写的是 scene_id），修复映射改为经 sceneToFrameIds 查该 scene 的全部 beat（与 boundaryToFrameIds 同模式）
 {
-  const action = repairActionForQaIssue({ code: 'asset_first_asset_missing', details: { beat_id: 'scene_02_b1' } }, {});
+  const action = repairActionForQaIssue(
+    { code: 'asset_first_asset_missing', details: { asset_id: 'gen_scene_02', scene_id: 'scene_02', beat_id: null } },
+    { sceneToFrameIds: { scene_02: ['scene_02_b1', 'scene_02_b2'] } },
+  );
   assert.strictEqual(action.type, 'retry_frame_html');
-  assert.deepStrictEqual(action.frame_ids, ['scene_02_b1']);
+  assert.deepStrictEqual(action.frame_ids, ['scene_02_b1', 'scene_02_b2'], 'asset_missing 按 scene 查全部 beat');
 }
-// R6：asset_missing 拿不到 frame（beat_id=null）时不产生定向重试，返回 null
+// scene_id 查不到映射（caller 未提供或 scene 不存在）：返回 null，不伪造 frame_ids
 assert.strictEqual(
-  repairActionForQaIssue({ code: 'asset_first_asset_missing', details: { asset_id: 'gen_x', beat_id: null } }, {}),
+  repairActionForQaIssue({ code: 'asset_first_asset_missing', details: { asset_id: 'gen_scene_02', scene_id: 'scene_02', beat_id: null } }, {}),
+  null,
+);
+// R6：asset_missing 拿不到 frame（scene_id=null）时不产生定向重试，返回 null
+assert.strictEqual(
+  repairActionForQaIssue({ code: 'asset_first_asset_missing', details: { asset_id: 'gen_x', scene_id: null, beat_id: null } }, { sceneToFrameIds: { scene_02: ['scene_02_b1'] } }),
   null,
 );
 // 不可修复（硬约束 C）：路由 takeover 绝不能映射为 retry_frame_html（会无限循环）

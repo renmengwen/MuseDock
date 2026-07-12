@@ -237,23 +237,48 @@ function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
 // 的 ≥2 空白阻断能力不降级），额外增加 ∓0.3s 成对差分点供 boundary_refresh 检测；
 // 跨 scene 边界保留 [b, b+0.5, b+1.0]。采样总量由 buildTimedSamplePlan 的
 // MAX_TIMED_SAMPLES 封顶（典型 17 边界 ×5 点 + 开头 3 点 = 88 < 120，不会超）。
+// review P2-3(c)：scene_html 单 frame 的内部 beat 边界（frame.metadata.beat_windows 相接处）
+// 仅在显式 pairedSampling 时按 same_scene=true 边界产出采样组（boundary_sec = frame 起点 +
+// window.end_sec，排除最后一个 window 末尾）；缺省不产出（硬约束 A，hf_first 无 beat_windows 天然不受影响）。
 // 缺省（hf_first/safetyOnly）采样时间逐值与原实现一致（硬约束 A）。
 function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSampling = false } = {}) {
   const frames = Array.isArray(project?.frames) ? project.frames : [];
   const groups = [];
+  const withinVideo = time => time > 0 && (!Number.isFinite(duration) || duration <= 0 || time < duration);
+  const pairedTimes = boundary => [boundary - 0.3, boundary, boundary + 0.3, boundary + 0.5, boundary + 1.0]
+    .map(time => Math.round(time * 1000) / 1000)
+    .filter(withinVideo);
   let cursor = 0;
-  for (let index = 0; index < frames.length - 1; index += 1) {
+  for (let index = 0; index < frames.length; index += 1) {
     const frameDuration = Number(frames[index]?.duration_sec || frames[index]?.durationSec);
     if (!Number.isFinite(frameDuration) || frameDuration <= 0) continue;
-    cursor += frameDuration;
     const sceneId = String(frames[index]?.scene_id || '').trim();
+    // 内部 beat 边界（scene_html 单 frame）：仅显式 pairedSampling 启用
+    if (pairedSampling === true) {
+      const windows = Array.isArray(frames[index]?.metadata?.beat_windows)
+        ? frames[index].metadata.beat_windows
+        : [];
+      for (let w = 0; w < windows.length - 1; w += 1) {
+        const endSec = Number(windows[w]?.end_sec);
+        if (!Number.isFinite(endSec) || endSec <= 0) continue;
+        const boundary = cursor + endSec;
+        const times = pairedTimes(boundary);
+        if (!times.length) continue;
+        groups.push({
+          boundary_sec: Math.round(boundary * 100) / 100,
+          times,
+          same_scene: true,
+          ...(sceneId ? { scene_id: sceneId } : {}),
+        });
+      }
+    }
+    cursor += frameDuration;
+    if (index >= frames.length - 1) break;
     const nextSceneId = String(frames[index + 1]?.scene_id || '').trim();
     const sameScene = Boolean(sceneId) && sceneId === nextSceneId;
-    const candidates = pairedSampling === true && sameScene
-      ? [cursor - 0.3, cursor, cursor + 0.3, cursor + 0.5, cursor + 1.0].map(time => Math.round(time * 1000) / 1000)
-      : [cursor, cursor + 0.5, cursor + 1.0];
-    const times = candidates
-      .filter(time => time > 0 && (!Number.isFinite(duration) || duration <= 0 || time < duration));
+    const times = pairedSampling === true && sameScene
+      ? pairedTimes(cursor)
+      : [cursor, cursor + 0.5, cursor + 1.0].filter(withinVideo);
     if (!times.length) continue;
     groups.push({
       boundary_sec: Math.round(cursor * 100) / 100,
@@ -862,19 +887,36 @@ function analyzeAssetFirstCaptionRegion(frames = [], { visualStrategy = null, mi
   return warnings;
 }
 
-// 信息密度：无图 beat（has_asset !== true）的帧内元素统计低于阈值 => warning
+// 信息密度：无图 beat（has_asset !== true）的帧内元素统计低于阈值 => warning。
+// review P2-3(b)：scene_html 回落展开把整 scene 统计复制到组内每个 beat（stats_scope:'scene'），
+// 该类条目按 scene 去重只报一条、message 说明是 scene 级聚合观察，避免被 scene 总数掩盖/重复。
+// TODO(P2-3b)：真正的逐 beat 密度分析需要渲染期分 beat 截帧统计，本轮不做。
 function analyzeAssetFirstInformation(beatsInfo = [], { visualStrategy = null, minElements = 3 } = {}) {
   if (visualStrategy !== 'asset_first') return [];
   const warnings = [];
+  const seenScenes = new Set();
   for (const beat of Array.isArray(beatsInfo) ? beatsInfo : []) {
     if (!beat || beat.has_asset === true) continue;
+    const sceneScoped = beat.stats_scope === 'scene';
+    if (sceneScoped) {
+      const sceneKey = String(beat.scene_id || '');
+      if (seenScenes.has(sceneKey)) continue;
+      seenScenes.add(sceneKey);
+    }
     const elements = (Number(beat.text_blocks) || 0) + (Number(beat.cards) || 0) + (Number(beat.graphics) || 0);
     if (elements < minElements) {
       warnings.push({
         code: 'asset_first_low_information',
         severity: 'warning',
-        message: `无图 beat ${beat.beat_id} 画面元素仅 ${elements} 个（< ${minElements}），信息密度不足。`,
-        details: { beat_id: beat.beat_id, elements, min_elements: minElements },
+        message: sceneScoped
+          ? `scene ${beat.scene_id} 画面元素仅 ${elements} 个（< ${minElements}），信息密度不足（scene 级聚合观察，非逐 beat 统计）。`
+          : `无图 beat ${beat.beat_id} 画面元素仅 ${elements} 个（< ${minElements}），信息密度不足。`,
+        details: {
+          beat_id: beat.beat_id,
+          elements,
+          min_elements: minElements,
+          ...(sceneScoped ? { stats_scope: 'scene', scene_id: beat.scene_id } : {}),
+        },
       });
     }
   }
@@ -958,7 +1000,9 @@ function mergeStyleDriftObservationFrames(sequentialFrames = [], timedFrames = [
 }
 
 // 素材缺失：复用 workflow 级 asset_usage_report（R6：真实结构无 report.missing 字段）。
-// beat_id 取 expected_in_frames 首个作为定向重试目标；拿不到 frame 信息时置 null，不伪造。
+// review P2-6：生产端 expected_in_frames 实际写的是 scene_id（htmlVideoWorkflow 的 asset usage
+// 报告按 sceneId 收集），首个值按真实语义放 details.scene_id，beat_id 不再伪装（恒 null）；
+// 定向重试由 repairActionForQaIssue 按 scene_id 查该 scene 的全部 beat。拿不到时置 null，不伪造。
 function mapAssetUsageToQaWarnings(report = {}, { visualStrategy = null } = {}) {
   if (visualStrategy !== 'asset_first') return [];
   const missing = Array.isArray(report?.missing_required_asset_ids)
@@ -978,7 +1022,8 @@ function mapAssetUsageToQaWarnings(report = {}, { visualStrategy = null } = {}) 
       details: {
         asset_id: assetId,
         expected_in_frames: expected,
-        beat_id: expected.length ? expected[0] : null,
+        scene_id: expected.length ? expected[0] : null,
+        beat_id: null,
       },
     };
   });
@@ -1034,6 +1079,8 @@ function beatsInfoFromRenderDecisions(decisions = []) {
       text_blocks: Number(decision.text_blocks) || 0,
       cards: Number(decision.cards) || 0,
       graphics: Number(decision.graphics) || 0,
+      // P2-3(b)：scene_html 回落展开标记透传，供信息密度分析按 scene 去重
+      ...(decision.stats_scope === 'scene' ? { stats_scope: 'scene', scene_id: decision.scene_id } : {}),
     });
   }
   return beatsInfo;
