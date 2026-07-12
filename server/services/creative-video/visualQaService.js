@@ -1074,11 +1074,6 @@ function mapOverlayChecksToQaWarnings(decisions = [], { visualStrategy = null } 
     const check = decision?.overlay_check;
     if (!check || check.valid !== false || check.reason_code !== 'overlay_in_caption_safe_area') continue;
     const sceneScoped = decision.stats_scope === 'scene';
-    if (sceneScoped) {
-      const key = `${String(decision.scene_id || '')}:${check.reason_code}`;
-      if (seenSceneScoped.has(key)) continue;
-      seenSceneScoped.add(key);
-    }
     // P2-7：scene_html 下整 scene stats 复制 + 按 scene 去重后，decision.beat_id 是复制组
     // 首个 beat 而非真实越界 beat——真实定位在 validateOverlayHtml 的 details.beat_scope
     //（frameHtmlStatsEntry 原样存整个返回值，details 已保留）。scene 级条目 beat_id 用
@@ -1086,6 +1081,12 @@ function mapOverlayChecksToQaWarnings(decisions = [], { visualStrategy = null } 
     const beatScope = check.details && typeof check.details === 'object'
       ? (check.details.beat_scope || null)
       : null;
+    if (sceneScoped) {
+      // 去重键纳入 beat_scope：同 scene 不同越界 beat 是不同问题，不得被静默吞掉
+      const key = `${String(decision.scene_id || '')}:${check.reason_code}:${String(beatScope || '')}`;
+      if (seenSceneScoped.has(key)) continue;
+      seenSceneScoped.add(key);
+    }
     warnings.push({
       code: 'asset_first_overlay_caption_overlap',
       severity: 'warning',
@@ -1128,15 +1129,22 @@ function beatsInfoFromRenderDecisions(decisions = []) {
   return beatsInfo;
 }
 
-// 成对边界组装：同 scene 边界前后（∓0.3s）各取最近采样帧供差分；缺帧留空由分析函数跳过
+// 成对边界组装：同 scene 边界前后各取最近采样帧供差分；缺帧留空由分析函数跳过。
+// 优先消费组内 diff_times（pairedGroupFields 产出的差分点，单一事实来源），
+// 旧形态组（无 diff_times）回落 boundary_sec∓0.3 重算，避免偏移量双处硬编码漂移。
 function assembleBoundaryGroupsForDiff(boundaryGroups = [], frames = []) {
   return (Array.isArray(boundaryGroups) ? boundaryGroups : [])
     .filter(group => group.same_scene === true)
-    .map(group => ({
-      ...group,
-      before: closestFrameAt(frames, group.boundary_sec - 0.3),
-      after: closestFrameAt(frames, group.boundary_sec + 0.3),
-    }));
+    .map(group => {
+      const diffTimes = Array.isArray(group.diff_times) && group.diff_times.length
+        ? group.diff_times
+        : [group.boundary_sec - 0.3, group.boundary_sec + 0.3];
+      return {
+        ...group,
+        before: closestFrameAt(frames, Math.min(...diffTimes)),
+        after: closestFrameAt(frames, Math.max(...diffTimes)),
+      };
+    });
 }
 
 // 字幕区帧视图：采样帧时间对 voice window 求交得 caption_active，携带底部条带统计；

@@ -549,6 +549,15 @@ const qa = require('../server/services/creative-video/visualQaService');
           overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'z' } },
       ], { visualStrategy: 'asset_first' });
       assert.strictEqual(legacyScoped[0].details.beat_id, null, '无 beat_scope 时不伪造 beat_id');
+      // 去重键纳入 beat_scope：同 scene 两个不同越界 beat 的 scene 级条目必须各报一条
+      const multiBeat = mapOverlayChecksToQaWarnings([
+        { beat_id: 'b1', scene_id: 'scene_12', stats_scope: 'scene',
+          overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'x', details: { beat_scope: 'b1' } } },
+        { beat_id: 'b2', scene_id: 'scene_12', stats_scope: 'scene',
+          overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'y', details: { beat_scope: 'b2' } } },
+      ], { visualStrategy: 'asset_first' });
+      assert.strictEqual(multiBeat.length, 2, '同 scene 不同 beat_scope 不得被去重吞掉');
+      assert.deepStrictEqual(multiBeat.map(w => w.details.beat_id).sort(), ['b1', 'b2']);
       // 摘要投影保留 overlay_beat_scope 定位字段
       const { summarizeVisualQaWarnings } = require('../server/services/creative-video/visualQaCodes');
       const summary = summarizeVisualQaWarnings(scopedWarnings);
@@ -629,6 +638,11 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.deepStrictEqual(internal[0].diff_times, [6.03, 6.63]);
     assert.strictEqual(legacy[0].safety_times, undefined, '缺省路径不加新字段（逐值行为不变）');
     assert.strictEqual(mixed[1].safety_times, undefined, '跨 scene 边界组不加新字段');
+    // 锁住派生关系：成对边界组 times 严格等于 safety_times ∪ diff_times 的去重排序并集
+    for (const group of [paired[0], mixed[0], internal[0], noWindows[0]]) {
+      const union = [...new Set([...group.safety_times, ...group.diff_times])].sort((a, b) => a - b);
+      assert.deepStrictEqual(group.times, union, 'times 必须是 safety_times ∪ diff_times 去重排序并集');
+    }
   }
   // P2-3：白屏阻断口径只看安全点——安全点仅 1 张空白 + 差分点 2 张空白时不得阻断
   {
