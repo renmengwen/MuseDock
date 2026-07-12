@@ -358,11 +358,18 @@ function closestFrameAt(frames, time, tolerance = 0.26) {
   return best && bestDiff <= tolerance ? best : null;
 }
 
+// 同帧去重：组内相邻查询点间距可小于 2×closestFrameAt 容差（0.26×2=0.52），某点位帧缺失时
+// （ffmpeg 末尾丢帧、注入网格帧稀疏）两个查询会命中同一物理帧；blank≥2 阻断按帧身份
+// （time_sec/time/id）去重计数，避免单帧空白满足阻断条件（issues 通道过敏）
+function uniqueMatchedFrames(frames = []) {
+  return [...new Map(frames.map(frame => [frame.time_sec ?? frame.time ?? frame.id, frame])).values()];
+}
+
 function analyzeTimedSafetyMetrics({ frames = [], opening = [], boundaryGroups = [] } = {}) {
   const issues = [];
-  const openingBlank = opening
+  const openingBlank = uniqueMatchedFrames(opening
     .map(time => closestFrameAt(frames, time))
-    .filter(Boolean)
+    .filter(Boolean))
     .filter(isBlankFrameMetric);
   if (openingBlank.length >= 2) {
     issues.push({
@@ -372,9 +379,9 @@ function analyzeTimedSafetyMetrics({ frames = [], opening = [], boundaryGroups =
     });
   }
   for (const group of boundaryGroups) {
-    const blank = group.times
+    const blank = uniqueMatchedFrames(group.times
       .map(time => closestFrameAt(frames, time))
-      .filter(Boolean)
+      .filter(Boolean))
       .filter(isBlankFrameMetric);
     if (blank.length >= 2) {
       issues.push({

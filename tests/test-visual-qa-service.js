@@ -580,6 +580,38 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.ok(report.issues.some(issue => issue.code === 'blank_segment_boundary'),
       'asset_first 成对采样不得吞掉 blank_segment_boundary 阻断');
   }
+  // Important 1 修正：新增点位后组内相邻查询间距（0.2/0.3）小于 2×closestFrameAt 容差（0.52），
+  // 某点位帧缺失时两个查询可命中同一物理帧——blank 计数必须按帧身份去重，单帧不得满足 ≥2 阻断
+  {
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      project: {
+        frames: [
+          { id: 'scene_01_b1', scene_id: 'scene_01', duration_sec: 2 },
+          { id: 'scene_01_b2', scene_id: 'scene_01', duration_sec: 2 },
+        ],
+      },
+      visualStrategy: 'asset_first',
+      expectedAspectRatio: '16:9',
+      services: {
+        probeVideo: async () => ({ width: 1920, height: 1080, duration: 4 }),
+        // 采样点位 [1.7, 2, 2.3, 2.5, 3]：2.3 与 2.5 两个查询都最近命中同一张 2.4s 空白帧
+        sampleFrames: async () => [
+          { id: 'frame_0', time_sec: 0, average_luma: 90, luma_stddev: 30, edge_score: 18, color_variance: 30, fingerprint: 'a' },
+          { id: 'frame_1', time_sec: 0.5, average_luma: 100, luma_stddev: 31, edge_score: 19, color_variance: 31, fingerprint: 'b' },
+          { id: 'frame_2', time_sec: 1, average_luma: 110, luma_stddev: 32, edge_score: 20, color_variance: 32, fingerprint: 'c' },
+          { id: 'frame_3', time_sec: 1.7, average_luma: 115, luma_stddev: 33, edge_score: 20, color_variance: 33, fingerprint: 'c2' },
+          { id: 'frame_4', time_sec: 2.4, average_luma: 250, luma_stddev: 2, edge_score: 1, color_variance: 1, fingerprint: 'd' },
+          { id: 'frame_5', time_sec: 3, average_luma: 120, luma_stddev: 35, edge_score: 20, color_variance: 35, fingerprint: 'f' },
+          { id: 'frame_6', time_sec: 3.5, average_luma: 125, luma_stddev: 36, edge_score: 21, color_variance: 36, fingerprint: 'g' },
+        ],
+      },
+    });
+    assert.ok(!report.issues.some(issue => issue.code === 'blank_segment_boundary'),
+      '两个查询命中同一物理空白帧只计 1，不得满足 ≥2 阻断');
+    assert.strictEqual(report.success, true, '单帧空白不得触发边界阻断');
+  }
   // 7.1 Minor 顺手修：before/after 指标非有限值（如缺帧兜底对象）跳过该组，不误报
   {
     const warnings = qa.analyzeAssetFirstBoundaries([
