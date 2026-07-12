@@ -1,4 +1,6 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 const { ensureMotionOverlay } = require('../server/services/creative-video/html-video/frameHtmlPhase');
 
@@ -46,7 +48,62 @@ const { ensureMotionOverlay } = require('../server/services/creative-video/html-
   assert.strictEqual(result.injected, false);
   assert.strictEqual(result.html, html);
 }
+// P1-8：字符串 includes 可被 CSS 选择器/注释绕过——必须按真实 opening tag 判定
+{
+  const beat = {
+    id: 'scene_04_b1', scene_id: 'scene_04',
+    visual_text: { headline: '要点' },
+    motion_overlay: { preset: 'key_marker', placement: 'lower_third', max_items: 1, avoid_caption_bottom_px: 140 },
+  };
+  // 仅 <style> 内出现 data-mp-overlay 选择器：无真实节点，必须注入
+  const styleOnly = '<html><head><style>[data-mp-overlay]{opacity:0}</style></head><body><div class="hero">base</div></body></html>';
+  const styleResult = ensureMotionOverlay(styleOnly, beat, { visualStrategy: 'asset_first' });
+  assert.strictEqual(styleResult.injected, true, 'CSS 选择器不算真实 overlay 节点，必须注入兜底');
+  // 仅注释里出现：同样必须注入
+  const commentOnly = '<html><body><!-- data-mp-overlay 由系统兜底 --><div class="hero">base</div></body></html>';
+  const commentResult = ensureMotionOverlay(commentOnly, beat, { visualStrategy: 'asset_first' });
+  assert.strictEqual(commentResult.injected, true, '注释里出现不算真实 overlay 节点，必须注入兜底');
+  // 真实节点存在：原样返回
+  const real = '<html><body><div data-mp-overlay="key_marker">重点</div></body></html>';
+  const realResult = ensureMotionOverlay(real, beat, { visualStrategy: 'asset_first' });
+  assert.strictEqual(realResult.injected, false);
+  assert.strictEqual(realResult.html, real);
+}
 console.log('ensure motion overlay tests passed');
+
+// P1-8：validationGate 的 overlay 校验与 scene beat scope 完整性检查
+const { assetFirstOverlayIssues, sceneBeatScopeIssues } = require('../server/services/creative-video/html-video/validationGate');
+{
+  // style-only HTML：无真实 overlay 节点，不得产生 overlay issue（含误报 overlay_root_missing）
+  const styleOnly = '<html><head><style>[data-mp-overlay]{opacity:0}</style></head><body></body></html>';
+  assert.deepStrictEqual(assetFirstOverlayIssues(styleOnly, { visualStrategy: 'asset_first' }), []);
+  // 真实越界 overlay：仍要报
+  const bad = '<html><body><div data-mp-overlay="key_marker" style="position:absolute;bottom:0;height:200px"></div></body></html>';
+  const issues = assetFirstOverlayIssues(bad, { visualStrategy: 'asset_first', frameHeight: 1920 });
+  assert.strictEqual(issues.length, 1);
+  assert.strictEqual(issues[0].code, 'overlay_in_caption_safe_area');
+}
+{
+  // scene beat scope 缺失 → scene_beat_scope_missing warning，列出缺失 beat
+  const html = '<html><body><div data-mp-beat-scope="scene_05_b1">A</div></body></html>';
+  const windows = [
+    { id: 'scene_05_b1', start_sec: 0, end_sec: 6.33 },
+    { id: 'scene_05_b2', start_sec: 6.33, end_sec: 12.66 },
+  ];
+  const issues = sceneBeatScopeIssues(html, windows);
+  assert.strictEqual(issues.length, 1);
+  assert.strictEqual(issues[0].code, 'scene_beat_scope_missing');
+  assert.deepStrictEqual(issues[0].missing_beat_ids, ['scene_05_b2']);
+  // 全部齐备 → 无 issue
+  const full = '<html><body><div data-mp-beat-scope="scene_05_b1">A</div><div data-mp-beat-scope="scene_05_b2">B</div></body></html>';
+  assert.deepStrictEqual(sceneBeatScopeIssues(full, windows), []);
+  // 只有 CSS 选择器不算：仍缺失
+  const cssOnly = '<html><head><style>[data-mp-beat-scope="scene_05_b1"]{opacity:1}</style></head><body></body></html>';
+  assert.strictEqual(sceneBeatScopeIssues(cssOnly, windows)[0].missing_beat_ids.length, 2);
+  // 非 scene 帧（无 beat_windows）不产生 issue
+  assert.deepStrictEqual(sceneBeatScopeIssues(html, []), []);
+}
+console.log('overlay real-element detection & beat scope tests passed');
 
 const { summarizeBaseLayout } = require('../server/services/creative-video/html-video/frameHtmlPhase');
 
@@ -151,7 +208,7 @@ const { buildSceneTimelineScript, groupBeatsForSceneHtml } = require('../server/
   );
 }
 
-// 时间线脚本：注入 window.__MP_BEATS__ 并随时间切 body[data-mp-beat]
+// 时间线脚本：注入 window.__MP_BEATS__，beat 时钟由 __mpStartBeatClock 显式启动（P1-3）
 {
   const script = buildSceneTimelineScript([
     { id: 'scene_05_b1', start_sec: 0, end_sec: 6.33 },
@@ -160,6 +217,47 @@ const { buildSceneTimelineScript, groupBeatsForSceneHtml } = require('../server/
   assert.ok(script.includes('__MP_BEATS__'));
   assert.ok(script.includes('data-mp-beat'));
   assert.ok(script.includes('scene_05_b2'));
+  assert.ok(script.includes('__mpStartBeatClock'), '必须暴露显式启动入口');
+
+  // 行为验证：在沙箱里执行脚本体
+  const code = script.replace(/^<script>/, '').replace(/<\/script>$/, '');
+  const attrs = {};
+  const rafs = [];
+  const timers = [];
+  const win = {};
+  const doc = { body: { setAttribute: (key, value) => { attrs[key] = value; } } };
+  new Function('window', 'document', 'requestAnimationFrame', 'setTimeout', code)(
+    win, doc, cb => rafs.push(cb), (cb, ms) => timers.push({ cb, ms }),
+  );
+  // 注入即同步置首 beat：预加载期间画面就是 beat1 状态
+  assert.strictEqual(attrs['data-mp-beat'], 'scene_05_b1', '脚本执行时必须同步设置首 beat id');
+  // 未被显式启动前不得自行起钟
+  assert.strictEqual(rafs.length, 0, '页面加载不得自行 rAF 起钟');
+  assert.strictEqual(typeof win.__mpStartBeatClock, 'function');
+  // 兜底自启：存在延时定时器（非 adapter 环境预览）
+  assert.ok(timers.some(t => t.ms >= 1000), '必须有兜底自启定时器');
+  // 显式启动后：时钟以启动时刻为 origin 推进
+  win.__mpStartBeatClock();
+  assert.ok(rafs.length >= 1, '启动后必须开始 rAF 推进');
+  rafs.shift()(10000); // origin = 10000（模拟预加载耗时 10s 后才正式开始）
+  assert.strictEqual(attrs['data-mp-beat'], 'scene_05_b1', '正式起点 t=0 必须仍是首 beat');
+  rafs.shift()(17000); // t = 7s → 第二个 beat
+  assert.strictEqual(attrs['data-mp-beat'], 'scene_05_b2');
+  // 幂等：重复启动（兜底定时器再触发）不得重置 origin
+  win.__mpStartBeatClock();
+  timers.forEach(t => t.cb());
+  const pending = rafs.splice(0);
+  assert.strictEqual(pending.length, 1, '重复启动不得叠加第二条 rAF 循环');
+  pending[0](18000); // 仍相对 origin=10000 → t=8s → b2
+  assert.strictEqual(attrs['data-mp-beat'], 'scene_05_b2');
+}
+// adapter 侧：正式录制起点显式调用 __mpStartBeatClock（源码级弱断言）
+{
+  const adapterSource = fs.readFileSync(
+    path.join(__dirname, '..', 'server', 'services', 'creative-video', 'html-video', 'hyperframesPlaywrightAdapter.js'),
+    'utf8',
+  );
+  assert.ok(adapterSource.includes('__mpStartBeatClock'), 'adapter 必须在正式播放处显式启动 beat 时钟');
 }
 console.log('scene continuity phase2 timeline tests passed');
 

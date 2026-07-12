@@ -128,8 +128,11 @@ async function render(input = {}, ctx = {}, deps = {}) {
     }).catch(() => false);
 
     // 对应 html-video 源码段：调用 window.__hvUnfreeze()。
+    // 同时显式启动 scene_html beat 时钟（__mpStartBeatClock）：此处紧邻 leadInMs 采样点，
+    // 即成片经 ffmpeg 裁剪后的 t=0，保证首 beat 不被预加载耗时吃掉（P1-3）。
     await page.evaluate(() => {
       if (typeof window.__hvUnfreeze === 'function') window.__hvUnfreeze();
+      if (typeof window.__mpStartBeatClock === 'function') window.__mpStartBeatClock();
     }).catch(() => {});
 
     // 对应 html-video 源码段：记录 leadInMs，后续由 ffmpeg -ss 裁剪。

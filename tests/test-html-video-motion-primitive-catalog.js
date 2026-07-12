@@ -92,4 +92,39 @@ for (const id of Object.keys(MOTION_PRIMITIVES)) {
   assert.strictEqual(bad.valid, false);
   assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
 }
+// P2-2：多 overlay 必须逐个校验（scene_html 标准结构就是多 overlay）
+{
+  // 第一个安全、第二个 bottom:0 → invalid，并带上失败元素的 beat scope 定位
+  const bad = validateOverlayHtml(
+    [
+      '<div data-mp-overlay="key_marker" data-mp-beat-scope="scene_x_b1" style="position:absolute;left:48px;right:48px;bottom:180px;height:220px"></div>',
+      '<div data-mp-overlay="key_marker" data-mp-beat-scope="scene_x_b2" style="position:absolute;left:48px;right:48px;bottom:0;height:220px"></div>',
+    ].join(''),
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, '第二个 overlay 越界必须判 invalid');
+  assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
+  assert.strictEqual(bad.details && bad.details.beat_scope, 'scene_x_b2', '失败结果必须带该元素的 beat scope');
+  assert.ok(String(bad.message).includes('scene_x_b2'), 'message 必须能定位到出错 beat');
+}
+{
+  // 双 overlay 均安全 → valid
+  const ok = validateOverlayHtml(
+    [
+      '<div data-mp-overlay="key_marker" data-mp-beat-scope="scene_x_b1" style="position:absolute;left:48px;right:48px;bottom:180px;height:220px"></div>',
+      '<div data-mp-overlay="concept_card" data-mp-beat-scope="scene_x_b2" style="position:absolute;left:48px;right:48px;top:200px;height:300px"></div>',
+    ].join(''),
+    { height: 1920 },
+  );
+  assert.strictEqual(ok.valid, true, JSON.stringify(ok));
+}
+{
+  // P1-8 联动：<style>/注释里的 data-mp-overlay 不算根节点
+  const styleOnly = validateOverlayHtml(
+    '<style>[data-mp-overlay]{opacity:0}</style><!-- data-mp-overlay --><div class="hero"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(styleOnly.valid, false);
+  assert.strictEqual(styleOnly.reason_code, 'overlay_root_missing');
+}
 console.log('motion primitive catalog tests passed');

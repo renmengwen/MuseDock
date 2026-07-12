@@ -10,7 +10,7 @@ const { normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuild
 const { sliceCaptionsToWindow } = require('./captionLayer');
 const { DEFAULT_FRAME_DURATION_SEC } = require('./contentGraph');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
-const { loadOverlaySnippet, loadDiagramSkeleton, validateOverlayHtml } = require('./motionPrimitiveCatalog');
+const { loadOverlaySnippet, loadDiagramSkeleton, validateOverlayHtml, hasRealOverlayElement } = require('./motionPrimitiveCatalog');
 const { htmlEscape } = require('./materializer');
 const { AGENTS, STAGES } = require('../agentStages');
 
@@ -241,7 +241,8 @@ function ensureMotionOverlay(html = '', beat = {}, { visualStrategy = null } = {
   const preset = beat.motion_overlay?.preset;
   if (!preset) return { html, injected: false };
   const text = String(html);
-  if (text.includes('data-mp-overlay')) return { html: text, injected: false };
+  // P1-8：按真实 opening tag 判定，<style> 选择器/注释里的字样不算已有 overlay
+  if (hasRealOverlayElement(text)) return { html: text, injected: false };
   let snippet;
   try {
     snippet = loadOverlaySnippet(preset);
@@ -273,7 +274,7 @@ function frameHtmlStatsEntry(html, frameHeight = 1920) {
   const text = String(html || '');
   return {
     ...computeFrameHtmlStats(text),
-    overlay_check: /data-mp-overlay/.test(text)
+    overlay_check: hasRealOverlayElement(text)
       ? validateOverlayHtml(text, { height: frameHeight })
       : null,
   };
@@ -1029,10 +1030,16 @@ function groupBeatsForSceneHtml(beats = []) {
 
 function buildSceneTimelineScript(beatWindows = []) {
   const payload = JSON.stringify(beatWindows.map(b => ({ id: b.id, start: b.start_sec, end: b.end_sec })));
+  // P1-3：beat 时钟不随页面加载自启——预加载（字体/render-ready/动画探测）耗时会被 ffmpeg 按
+  // leadInMs 裁掉，但页面内部时钟不会回拨，导致成片 t=0 已跳过首 beat。改为暴露
+  // __mpStartBeatClock，由渲染 adapter 在正式录制起点（__hvUnfreeze 之后）显式调用；
+  // 非 adapter 环境（本地预览）5s 兜底自启。启动前 body 已同步置首 beat，预加载期间画面即 beat1 状态。
   return `<script>
 (function () {
   window.__MP_BEATS__ = ${payload};
   var beats = window.__MP_BEATS__;
+  if (beats.length) document.body.setAttribute('data-mp-beat', beats[0].id);
+  var started = false;
   var origin = null;
   function tick(now) {
     if (origin === null) origin = now;
@@ -1045,7 +1052,12 @@ function buildSceneTimelineScript(beatWindows = []) {
     if (active) document.body.setAttribute('data-mp-beat', active.id);
     requestAnimationFrame(tick);
   }
-  requestAnimationFrame(tick);
+  window.__mpStartBeatClock = function () {
+    if (started) return;
+    started = true;
+    requestAnimationFrame(tick);
+  };
+  setTimeout(function () { window.__mpStartBeatClock(); }, 5000);
 })();
 <\/script>`;
 }

@@ -6,7 +6,7 @@ const { validateProject } = require('./projectSchema');
 const { mappedEngine } = require('./templateRegistry');
 const { validateTemplateInputs } = require('./templateInputAgent');
 const { validateHtmlCanvasContract } = require('./frameCanvasContract');
-const { validateOverlayHtml } = require('./motionPrimitiveCatalog');
+const { validateOverlayHtml, hasRealOverlayElement } = require('./motionPrimitiveCatalog');
 const { validateSceneSpecTimelineConsistency } = require('./timelineConsistency');
 const { normalizeCaptionsForFrame } = require('./captionLayer');
 
@@ -194,13 +194,36 @@ async function readFrameHtmlForValidation(projectDir, frame, diagnostics) {
 // hf_first 或无 overlay 的 HTML 不产生任何 issue（硬约束 A）。
 function assetFirstOverlayIssues(html, { visualStrategy, frameHeight = 1920 } = {}) {
   if (visualStrategy !== 'asset_first') return [];
-  if (!/data-mp-overlay/.test(String(html || ''))) return [];
+  // P1-8：按真实 opening tag 判定，<style> 选择器/注释里的字样不触发校验（也不误报缺根节点）
+  if (!hasRealOverlayElement(html)) return [];
   const result = validateOverlayHtml(html, { height: frameHeight });
   if (result.valid) return [];
   return [{
     code: result.reason_code,
     severity: 'warning',
     message: result.message,
+  }];
+}
+
+// scene_html：scene 帧 beat scope 完整性检查——每个 beat_windows 条目须有对应
+// data-mp-beat-scope="<beat_id>" 真实元素，缺失只告警（scene_html 不做确定性注入，维持现状）。
+function sceneBeatScopeIssues(html, beatWindows = []) {
+  if (!Array.isArray(beatWindows) || !beatWindows.length) return [];
+  const tags = stripIgnoredHtmlRegions(html).match(/<[A-Za-z][^>]*>/g) || [];
+  const missing = [];
+  for (const window of beatWindows) {
+    const id = String(window?.id || '').trim();
+    if (!id) continue;
+    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`\\bdata-mp-beat-scope\\s*=\\s*(['"])${escaped}\\1`, 'i');
+    if (!tags.some(tag => pattern.test(tag))) missing.push(id);
+  }
+  if (!missing.length) return [];
+  return [{
+    code: 'scene_beat_scope_missing',
+    severity: 'warning',
+    message: `scene_html 帧缺少 ${missing.join('、')} 对应的 data-mp-beat-scope 元素，这些 beat 期间画面无局部变化。`,
+    missing_beat_ids: missing,
   }];
 }
 
@@ -243,6 +266,13 @@ async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames 
     })) {
       warningDiagnostic(diagnostics, issue.code, 'frame', issue.message || 'motion overlay 不符合安全区约束。', {
         frame_id: frame.id,
+      });
+    }
+    // scene_html：scene 帧（metadata.beat_windows）逐 beat 检查 data-mp-beat-scope 元素完整性
+    for (const issue of sceneBeatScopeIssues(html, arrayOrEmpty(objectOrEmpty(frame.metadata).beat_windows))) {
+      warningDiagnostic(diagnostics, issue.code, 'frame', issue.message, {
+        frame_id: frame.id,
+        missing_beat_ids: issue.missing_beat_ids,
       });
     }
     // 无图 diagram beat 的 HTML 必须使用统一骨架（data-mp-diagram-base）；缺失只告警不阻断
@@ -380,4 +410,5 @@ module.exports = {
   validateHtmlVideoProject,
   collectMissingTextKeys,
   assetFirstOverlayIssues,
+  sceneBeatScopeIssues,
 };
