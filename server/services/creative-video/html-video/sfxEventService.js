@@ -37,6 +37,10 @@ function getSceneId(value) {
   return String(value && (value.scene_id || value.id || value.sceneId) || '').trim();
 }
 
+// 已知缺陷（规划期口径，本轮不改动以免影响规划行为）：
+// 1) 不读 speech_duration_sec / actual_duration_sec / target_duration_sec；
+// 2) 同 scene 多个 beat frame 只保留第一帧时长，不求和。
+// mux 侧的全片时间已由 recomputeEventGlobalTimes 基于最终 project.frames 重算，不再依赖这里。
 function getSceneDurations(project = {}, sceneSpec = {}) {
   const durations = new Map();
   for (const scene of Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : []) {
@@ -291,19 +295,37 @@ async function applyPlannedSfxEvents({ projectDir, project, sceneSpec, library, 
   return { success: true, events, dropped, project };
 }
 
+// P1-4：SFX 的 global_time_sec 是规划期按 scene 起点算的；之后 fitFrameDurationsToCaptions
+// 可能延长前序帧并重排 timeline，导致旧值与最终成片时间轴脱节。mux 前基于最终 project.frames
+// 用 scene_id + time_sec 重算事件绝对时间：同 scene 多帧求和（scene 起点 = 该 scene 第一帧
+// 前所有帧时长累计），帧时长回退链与 buildVoiceWindowsFromProject 同口径。
+// 纯函数：返回局部副本，不回写原始事件；查不到 scene 或 time_sec 无效的事件保留原值（容错不丢）。
+function recomputeEventGlobalTimes(events = [], project = {}) {
+  const sceneStarts = new Map();
+  let cursor = 0;
+  for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
+    const sceneId = getSceneId(frame);
+    if (sceneId && !sceneStarts.has(sceneId)) sceneStarts.set(sceneId, cursor);
+    cursor += Number(frame?.duration_sec ?? frame?.durationSec ?? frame?.duration) || 0;
+  }
+  return (Array.isArray(events) ? events : []).map(event => {
+    const sceneId = String(event?.scene_id || event?.sceneId || '').trim();
+    const start = sceneStarts.get(sceneId);
+    const timeSec = Number(event?.time_sec ?? event?.timeSec);
+    if (start == null || !Number.isFinite(timeSec) || timeSec < 0) return event;
+    return { ...event, global_time_sec: roundMs(start + timeSec) };
+  });
+}
+
 function resolveProjectSfxEventsForMux({ project = {}, projectDir, library, voiceWindows = [] } = {}) {
   const sfx = objectOrEmpty(project.audio?.sfx);
-  let events = sfx.enabled === false ? [] : (Array.isArray(sfx.events) ? sfx.events : []);
-  // 旁白避让发生在 mux 输入侧（白名单/置信度/文件校验之前），不触碰 project.audio.sfx.events 原始计划。
-  // 用户停用的事件先过滤：不进 avoidance_dropped 触发误导诊断、不占 high 限额（下方循环的 enabled 检查保留作防御）
-  const avoidanceDropped = [];
-  if (Array.isArray(voiceWindows) && voiceWindows.length && events.length) {
-    events = events.filter(event => event?.enabled !== false);
-    const avoidance = applyVoiceAvoidance(events, voiceWindows, {});
-    events = avoidance.kept;
-    avoidanceDropped.push(...avoidance.dropped);
-  }
-  const resolved = [];
+  const planned = sfx.enabled === false ? [] : (Array.isArray(sfx.events) ? sfx.events : []);
+  // 无条件重算全片时间：fit 之后旧 global_time_sec 本来就不可信；无 frames 匹配时重算是恒等变换。
+  // 只改局部副本，不触碰 project.audio.sfx.events 原始计划。
+  const events = recomputeEventGlobalTimes(planned, project);
+  // P2-7：先执行基础校验（白名单/置信度/文件存在/时间有效）得到候选，再对候选做旁白避让，
+  // 避免必然被丢的无效 high 事件先占用限额、挤掉后续有效事件。
+  const candidates = []; // { event, path }
   const dropped = [];
   let libraryIds = new Set();
   let libraryError = null;
@@ -318,6 +340,7 @@ function resolveProjectSfxEventsForMux({ project = {}, projectDir, library, voic
     }
   }
   for (const event of events) {
+    // 用户停用的事件静默跳过：不进 dropped/avoidance_dropped、不占 high 限额
     if (event?.enabled === false) continue;
     const sfxId = String(event.sfx_id || event.sfxId || '').trim();
     if (libraryError) {
@@ -345,16 +368,28 @@ function resolveProjectSfxEventsForMux({ project = {}, projectDir, library, voic
         dropped.push({ id: String(event.id || ''), sfx_id: sfxId, reason: '全片时间点无效。' });
         continue;
       }
-      resolved.push({
-        id: String(event.id || ''),
-        path: filePath,
-        global_time_sec: globalTime,
-        volume_db: clamp(Number.isFinite(Number(event.volume_db)) ? Number(event.volume_db) : -18, SFX_VOLUME_MIN_DB, SFX_VOLUME_MAX_DB),
-      });
+      candidates.push({ event, path: filePath });
     } catch (error) {
       dropped.push({ id: String(event.id || ''), sfx_id: sfxId, reason: error.message || String(error) });
     }
   }
+  // 旁白避让在通过校验的候选事件上执行（ducking 用重算后的时间），再映射为 mux 形态
+  const avoidanceDropped = [];
+  let keptEvents = candidates.map(candidate => candidate.event);
+  if (Array.isArray(voiceWindows) && voiceWindows.length && keptEvents.length) {
+    const avoidance = applyVoiceAvoidance(keptEvents, voiceWindows, {});
+    keptEvents = avoidance.kept;
+    avoidanceDropped.push(...avoidance.dropped);
+  }
+  const pathByEvent = new Map(candidates.map(candidate => [candidate.event, candidate.path]));
+  // 避让后的 kept 是事件副本，按 id 回查素材路径（同批事件 id 由规划期保证唯一）
+  const pathById = new Map(candidates.map(candidate => [String(candidate.event.id || ''), candidate.path]));
+  const resolved = keptEvents.map(event => ({
+    id: String(event.id || ''),
+    path: pathByEvent.get(event) || pathById.get(String(event.id || '')),
+    global_time_sec: Number(event.global_time_sec ?? event.globalTimeSec),
+    volume_db: clamp(Number.isFinite(Number(event.volume_db)) ? Number(event.volume_db) : -18, SFX_VOLUME_MIN_DB, SFX_VOLUME_MAX_DB),
+  }));
   // dropped 仅含既有校验类丢弃（白名单/置信度/文件缺失），避让丢弃走独立 avoidance_dropped，
   // 便于调用方分别给出「素材不可用」与「避让旁白移除」两类不同文案的诊断
   return { events: resolved, dropped, avoidance_dropped: avoidanceDropped };
@@ -371,12 +406,20 @@ function buildVoiceWindowsFromProject(project = {}) {
   let cursor = 0;
   for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
     const duration = Number(frame?.duration_sec ?? frame?.durationSec ?? frame?.duration) || 0;
+    let frameWindowCount = 0;
     for (const caption of Array.isArray(frame?.captions) ? frame.captions : []) {
       const start = Number(caption?.start);
       const end = Number(caption?.end);
       if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
         windows.push({ start: roundMs(cursor + start), end: roundMs(cursor + end) });
+        frameWindowCount += 1;
       }
+    }
+    // P1-5：generateCaptions=false 会清空 frame.captions，但旁白音频仍在成片里。
+    // 帧无 captions 窗口但 narration_text 非空时，用整帧近似窗口兜底避让；
+    // 有 captions 时维持精确窗口，避免过度避让。
+    if (!frameWindowCount && String(frame?.narration_text || frame?.narrationText || '').trim() && duration > 0) {
+      windows.push({ start: roundMs(cursor), end: roundMs(cursor + duration) });
     }
     cursor += duration;
   }
@@ -442,6 +485,7 @@ module.exports = {
   buildSfxPlanningScenes,
   getPlanningRules,
   resolveProjectSfxEventsForMux,
+  recomputeEventGlobalTimes,
   buildVoiceWindowsFromProject,
   applyVoiceAvoidance,
 };

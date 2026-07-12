@@ -151,3 +151,85 @@ const path = require('path');
   fs.rmSync(dir, { recursive: true, force: true });
 }
 console.log('sfx mux wiring tests passed');
+
+// (5) P1-4：mux 前基于最终 project timeline 重算事件绝对时间。
+// scene_01 由三个 6s beat frame 组成（共 18s），scene_02 事件 time_sec=1，
+// 规划期旧值 global_time_sec=7（只算了第一帧 6s），重算后必须为 19（18+1）。
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hv-sfx-recompute-'));
+  fs.mkdirSync(path.join(dir, 'audio', 'sfx'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'audio', 'sfx', 'whoosh_soft.wav'), 'x');
+  const project = {
+    frames: [
+      { id: 'scene_01_b1', scene_id: 'scene_01', duration_sec: 6 },
+      { id: 'scene_01_b2', scene_id: 'scene_01', duration_sec: 6 },
+      { id: 'scene_01_b3', scene_id: 'scene_01', duration: 6 }, // duration 键锁定回退链
+      { id: 'scene_02_b1', scene_id: 'scene_02', duration_sec: 5 },
+    ],
+    audio: { sfx: { enabled: true, status: 'ready', events: [
+      { id: 'sfx_001', scene_id: 'scene_02', time_sec: 1, global_time_sec: 7, sfx_id: 'whoosh_soft',
+        intensity: 'medium', volume_db: -18, enabled: true, confidence: 0.9 }, // 旧错误值 7 => 重算 19
+      { id: 'sfx_002', scene_id: 'scene_missing', time_sec: 1, global_time_sec: 3.5, sfx_id: 'whoosh_soft',
+        intensity: 'medium', volume_db: -18, enabled: true, confidence: 0.9 }, // 查不到 scene => 保留原值
+    ] } },
+  };
+  const library = { items: [{ id: 'whoosh_soft', default_volume_db: -18 }] };
+  const result = resolveProjectSfxEventsForMux({ project, projectDir: dir, library });
+  assert.strictEqual(result.events.find(e => e.id === 'sfx_001').global_time_sec, 19,
+    '重算：scene_02 起点 = 三个 beat 帧求和 18s，事件绝对时间 = 18+1 = 19');
+  assert.strictEqual(result.events.find(e => e.id === 'sfx_002').global_time_sec, 3.5,
+    '查不到 scene 的事件保留原 global_time_sec（容错不丢）');
+  // 不回写原始事件计划
+  assert.strictEqual(project.audio.sfx.events[0].global_time_sec, 7, '原始计划事件 global_time_sec 不被回写');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+console.log('sfx global time recompute tests passed');
+
+// (6) P1-5：generateCaptions=false 时 voice windows 兜底。
+// 帧 captions 为空但 narration_text 非空 => 整帧近似窗口 [帧起点, 帧起点+帧时长]；
+// 有 captions 时维持精确窗口；无 narration 无 captions => 无窗口。
+{
+  const project = {
+    frames: [
+      { id: 'f1', duration_sec: 6, narration_text: 'x', captions: [] }, // 兜底 => [0,6]
+      { id: 'f2', duration_sec: 4, narration_text: 'y', captions: [{ start: 1, end: 2, text: 'c' }] }, // 精确 => [7,8]
+      { id: 'f3', duration_sec: 3, narration_text: '', captions: [] }, // 无信号 => 无窗口
+    ],
+  };
+  const windows = buildVoiceWindowsFromProject(project);
+  assert.deepStrictEqual(windows, [
+    { start: 0, end: 6 },
+    { start: 7, end: 8 },
+  ]);
+}
+console.log('sfx narration fallback window tests passed');
+
+// (7) P2-7：无效 high 不得先占限额。基础校验（白名单/置信度/文件/时间）先行，
+// 避让只在通过校验的候选上执行：2 个白名单外 high + 1 个有效 high =>
+// 有效 high 保留，bad1/bad2 进 dropped（白名单原因），avoidance_dropped 为空。
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hv-sfx-order-'));
+  fs.mkdirSync(path.join(dir, 'audio', 'sfx'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'audio', 'sfx', 'whoosh_soft.wav'), 'x');
+  const project = {
+    audio: { sfx: { enabled: true, status: 'ready', events: [
+      { id: 'bad1', scene_id: 'scene_01', time_sec: 1, global_time_sec: 1, sfx_id: 'nope_a',
+        intensity: 'high', volume_db: -14, enabled: true, confidence: 0.9 },
+      { id: 'bad2', scene_id: 'scene_01', time_sec: 2, global_time_sec: 2, sfx_id: 'nope_b',
+        intensity: 'high', volume_db: -14, enabled: true, confidence: 0.9 },
+      { id: 'good', scene_id: 'scene_01', time_sec: 3, global_time_sec: 3, sfx_id: 'whoosh_soft',
+        intensity: 'high', volume_db: -14, enabled: true, confidence: 0.9 },
+    ] } },
+  };
+  const library = { items: [{ id: 'whoosh_soft', default_volume_db: -18 }] };
+  const result = resolveProjectSfxEventsForMux({
+    project, projectDir: dir, library,
+    voiceWindows: [{ start: 10, end: 12 }],
+  });
+  assert.deepStrictEqual(result.events.map(e => e.id), ['good'], '有效 high 不得被无效 high 占额挤掉');
+  assert.deepStrictEqual(result.dropped.map(d => d.id).sort(), ['bad1', 'bad2']);
+  assert.ok(result.dropped.every(d => /白名单/.test(d.reason)), 'bad1/bad2 以白名单原因进 dropped');
+  assert.deepStrictEqual(result.avoidance_dropped, [], '不得再有超限避让丢弃');
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+console.log('sfx validation-before-avoidance tests passed');
