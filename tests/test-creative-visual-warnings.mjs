@@ -9,7 +9,7 @@ const componentPath = path.join(root, 'frontend-react/src/components/creative/Cr
 const detailPath = path.join(root, 'frontend-react/src/components/creative/CreativeTaskDetail.jsx');
 const retryPlanPath = path.join(root, 'frontend-react/src/components/creative/CreativeRetryPlan.jsx');
 
-const { collectVisualWarnings, shouldShowVisualWarnings } = await import(pathToFileURL(modulePath));
+const { collectVisualWarnings, shouldShowVisualWarnings, visibleWarnings, VISUAL_WARNINGS_COLLAPSED_LIMIT } = await import(pathToFileURL(modulePath));
 
 // 1) 读取链：visual_inspect.warnings 直读
 const doneWorkflow = {
@@ -50,7 +50,16 @@ assert.equal(shouldShowVisualWarnings({ status: 'done', result: {} }), false);
 assert.equal(shouldShowVisualWarnings(null), false);
 assert.equal(shouldShowVisualWarnings({ result: { hyperframes_freeform: { visual_inspect: { warnings: ['bad-string'] } } } }), false);
 
-// 4) 组件与挂载点接线（字符串断言，随 tests/test-html-video-sfx-panel.mjs 模式）
+// 4) 折叠/展开纯函数：6 条内全显、超 6 折叠、展开全显
+const eightWarnings = Array.from({ length: 8 }, (_, i) => ({ code: `w${i}`, message: `告警 ${i}` }));
+assert.equal(VISUAL_WARNINGS_COLLAPSED_LIMIT, 6);
+assert.equal(visibleWarnings(eightWarnings.slice(0, 6), false).length, 6);
+assert.equal(visibleWarnings(eightWarnings, false).length, 6);
+assert.deepEqual(visibleWarnings(eightWarnings, false), eightWarnings.slice(0, 6));
+assert.equal(visibleWarnings(eightWarnings, true).length, 8);
+assert.deepEqual(visibleWarnings(null, false), []);
+
+// 5) 组件与挂载点接线（字符串断言，随 tests/test-html-video-sfx-panel.mjs 模式）
 const [component, detail, retryPlan] = await Promise.all([
   readFile(componentPath, 'utf8'),
   readFile(detailPath, 'utf8'),
@@ -64,6 +73,15 @@ assert.match(component, /视觉观察告警 \{visualWarnings\.length\} 条（不
 assert.match(component, /text-fg-1/);
 assert.match(component, /border-line-2/);
 assert.doesNotMatch(component, /#[0-9a-fA-F]{3,6}/);
+// 折叠/展开按钮取代死提示文案，且带屏幕阅读器语义
+assert.doesNotMatch(component, /视觉报告中查看/);
+assert.match(component, /useState\(false\)/);
+assert.match(component, /visibleWarnings/);
+assert.match(component, /展开其余/);
+assert.match(component, /'收起'/);
+assert.match(component, /role="status"/);
+assert.match(component, /aria-live="polite"/);
+assert.match(component, /aria-label="视觉观察告警"/);
 
 // 成功（非失败）路径由 CreativeTaskDetail 挂载
 assert.match(detail, /CreativeVisualWarnings/);
@@ -71,5 +89,18 @@ assert.match(detail, /workflow\?\.status !== 'failed'/);
 // 失败路径复用同一组件，且不再保留本地 collectVisualWarnings 副本
 assert.match(retryPlan, /<CreativeVisualWarnings workflow=\{workflow\} \/>/);
 assert.doesNotMatch(retryPlan, /function collectVisualWarnings/);
+
+// 6) esbuild 转译语法校验组件（仓库未装 esbuild 时跳过，不新增依赖）
+try {
+  const { transform } = await import('esbuild');
+  await transform(component, { loader: 'jsx', jsx: 'automatic' });
+  console.log('esbuild jsx transform passed');
+} catch (error) {
+  if (error?.code === 'ERR_MODULE_NOT_FOUND') {
+    console.log('esbuild 未安装，跳过 JSX 转译校验');
+  } else {
+    throw error;
+  }
+}
 
 console.log('creative visual warnings tests passed');
