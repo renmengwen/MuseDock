@@ -69,6 +69,17 @@ const { ensureMotionOverlay } = require('../server/services/creative-video/html-
   assert.strictEqual(realResult.injected, false);
   assert.strictEqual(realResult.html, real);
 }
+// P2-5：其他属性值中的 " data-mp-overlay " 子串不算真实 overlay，必须注入兜底
+{
+  const beat = {
+    id: 'scene_04_b1', scene_id: 'scene_04',
+    visual_text: { headline: '要点' },
+    motion_overlay: { preset: 'key_marker', placement: 'lower_third', max_items: 1, avoid_caption_bottom_px: 140 },
+  };
+  const probe = '<html><body><div title=" data-mp-overlay ">base</div></body></html>';
+  const result = ensureMotionOverlay(probe, beat, { visualStrategy: 'asset_first' });
+  assert.strictEqual(result.injected, true, 'title 属性值内的子串不算真实 overlay，必须注入兜底');
+}
 console.log('ensure motion overlay tests passed');
 
 // P1-8：validationGate 的 overlay 校验与 scene beat scope 完整性检查
@@ -205,6 +216,76 @@ const { runBucketsWithContinuity } = require('../server/services/creative-video/
   });
   assert.ok(midCalls[0].summary.includes('s2_b1-reused'), '重试中间 beat 的初始摘要必须来自更小 beat_index 的前驱');
   assert.ok(!midCalls[0].summary.includes('s2_b3-reused'), '不得把未来 beat（更大 beat_index）当作上一帧');
+
+  // P2-2：同组多个非相邻 beat 同批重试。b1(1)、b3(3) 复用，待生成 [b2(2), b4(4)]：
+  // 每个 job 的前驱 = max_by_beat_index(桶内已生成的最近前驱, 复用帧里 index 更小的最近前驱)
+  // => b2 前驱是 b1；b4 的候选是 generated b2(2) 与 reused b3(3)，取更近的 b3。
+  const multiRetryReused = new Map([
+    ['scene_02', new Map([
+      [1, '<html><body><div class="hero">s2_b1-reused</div></body></html>'],
+      [3, '<html><body><div class="hero">s2_b3-reused</div></body></html>'],
+    ])],
+  ]);
+  const multiRetryJobs = bucketJobsByContinuityGroup([
+    { index: 2, node: { metadata: { visual_beat: { id: 's2_b2', continuity: { group_id: 'scene_02', beat_index: 2 } } } } },
+    { index: 4, node: { metadata: { visual_beat: { id: 's2_b4', continuity: { group_id: 'scene_02', beat_index: 4 } } } } },
+  ]);
+  const multiCalls = [];
+  await runBucketsWithContinuity({
+    buckets: multiRetryJobs,
+    concurrency: 1,
+    initialHtmlByGroup: multiRetryReused,
+    runJob: async job => {
+      const id = job.node.metadata.visual_beat.id;
+      multiCalls.push({ id, summary: job.previousBeatSummary || '' });
+      return { htmlResult: { success: true, html: `<html><body><div class="hero">${id}-generated</div></body></html>` } };
+    },
+  });
+  const multiB2 = multiCalls.find(c => c.id === 's2_b2');
+  const multiB4 = multiCalls.find(c => c.id === 's2_b4');
+  assert.ok(multiB2.summary.includes('s2_b1-reused'), 'b2 的前驱必须是复用的 b1');
+  assert.ok(multiB4.summary.includes('s2_b3-reused'), 'b4 的前驱必须是更近的复用帧 b3');
+  assert.ok(!multiB4.summary.includes('s2_b2-generated'), 'b4 不得拿更旧的 b2 生成结果当前驱');
+
+  // 变体：复用只有 b1，待生成 [b2, b4]：b4 候选 = generated b2(2) vs reused b1(1) => 取 b2-generated（桶内传递语义保留）
+  const singleReusedCalls = [];
+  await runBucketsWithContinuity({
+    buckets: bucketJobsByContinuityGroup([
+      { index: 2, node: { metadata: { visual_beat: { id: 's2_b2', continuity: { group_id: 'scene_02', beat_index: 2 } } } } },
+      { index: 4, node: { metadata: { visual_beat: { id: 's2_b4', continuity: { group_id: 'scene_02', beat_index: 4 } } } } },
+    ]),
+    concurrency: 1,
+    initialHtmlByGroup: new Map([
+      ['scene_02', new Map([[1, '<html><body><div class="hero">s2_b1-reused</div></body></html>']])],
+    ]),
+    runJob: async job => {
+      const id = job.node.metadata.visual_beat.id;
+      singleReusedCalls.push({ id, summary: job.previousBeatSummary || '' });
+      return { htmlResult: { success: true, html: `<html><body><div class="hero">${id}-generated</div></body></html>` } };
+    },
+  });
+  const singleB4 = singleReusedCalls.find(c => c.id === 's2_b4');
+  assert.ok(singleB4.summary.includes('s2_b2-generated'), '仅 b1 复用时，b4 的前驱是刚生成的 b2（更近）');
+
+  // b2 生成失败：b4 前驱回落到复用的 b3
+  const failCalls = [];
+  await runBucketsWithContinuity({
+    buckets: bucketJobsByContinuityGroup([
+      { index: 2, node: { metadata: { visual_beat: { id: 's2_b2', continuity: { group_id: 'scene_02', beat_index: 2 } } } } },
+      { index: 4, node: { metadata: { visual_beat: { id: 's2_b4', continuity: { group_id: 'scene_02', beat_index: 4 } } } } },
+    ]),
+    concurrency: 1,
+    initialHtmlByGroup: multiRetryReused,
+    runJob: async job => {
+      const id = job.node.metadata.visual_beat.id;
+      failCalls.push({ id, summary: job.previousBeatSummary || '' });
+      if (id === 's2_b2') return { htmlResult: { success: false } };
+      return { htmlResult: { success: true, html: `<html><body><div class="hero">${id}-generated</div></body></html>` } };
+    },
+  });
+  const failB4 = failCalls.find(c => c.id === 's2_b4');
+  assert.ok(failB4.summary.includes('s2_b3-reused'), 'b2 失败时 b4 前驱回落到复用的 b3');
+  assert.ok(!failB4.summary.includes('s2_b1-reused'), 'b2 失败时 b4 不得回落到过旧的 b1');
 
   console.log('run buckets with continuity tests passed');
 })().catch(err => {

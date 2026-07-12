@@ -138,4 +138,62 @@ const { hasRealOverlayElement } = require('../server/services/creative-video/htm
   const realBefore = '<div data-mp-overlay="key_marker" style="position:absolute;bottom:180px"></div><style>.x{}';
   assert.strictEqual(hasRealOverlayElement(realBefore), true);
 }
+// P2-5：其他属性值中的 " data-mp-overlay " 子串不算真实属性——必须按属性 token 解析
+{
+  assert.strictEqual(
+    hasRealOverlayElement('<div title=" data-mp-overlay ">base</div>'),
+    false,
+    'title 属性值内的子串不算 data-mp-overlay 属性',
+  );
+  // 单引号属性值正常识别
+  assert.strictEqual(hasRealOverlayElement("<div data-mp-overlay='key_marker'>x</div>"), true);
+  // 无引号属性值
+  assert.strictEqual(hasRealOverlayElement('<div data-mp-overlay=key_marker>x</div>'), true);
+  // 布尔属性（无值）
+  assert.strictEqual(hasRealOverlayElement('<div data-mp-overlay>x</div>'), true);
+  // 属性名大写
+  assert.strictEqual(hasRealOverlayElement('<div DATA-MP-OVERLAY="x">x</div>'), true);
+  // class 值里包含该子串同样不算
+  assert.strictEqual(hasRealOverlayElement('<div class="data-mp-overlay">x</div>'), false);
+}
+// P2-6：单引号 style / 大写 STYLE / 等号空白 / CSS 键大写 都要参与安全区校验
+{
+  const bad = validateOverlayHtml(
+    "<div data-mp-overlay='key_marker' style='position:absolute;left:0;right:0;bottom:0;height:200px'></div>",
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, '单引号 style 的越界 overlay 必须判 invalid');
+  assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
+}
+{
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" STYLE = "position:absolute;left:0;right:0;BOTTOM:0;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, 'STYLE 大写 + 等号空白 + CSS 键大写也必须判定');
+  assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
+}
+{
+  // 单引号 data-mp-beat-scope 也要能定位出错 beat
+  const bad = validateOverlayHtml(
+    "<div data-mp-overlay='k' data-mp-beat-scope='scene_y_b2' style='position:absolute;bottom:0;height:200px'></div>",
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false);
+  assert.strictEqual(bad.details && bad.details.beat_scope, 'scene_y_b2');
+}
+{
+  // 属性值含裸 >：引号感知 tag 扫描不得截断 opening tag
+  const ok = validateOverlayHtml(
+    '<div data-mp-overlay="k" title="a > b" style="position:absolute;left:48px;right:48px;bottom:180px;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(ok.valid, true, JSON.stringify(ok));
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" title="a > b" style="position:absolute;bottom:0;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, '含裸 > 属性值的越界 overlay 仍要拦');
+  assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
+}
 console.log('motion primitive catalog tests passed');

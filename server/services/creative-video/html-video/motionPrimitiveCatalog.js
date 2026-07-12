@@ -76,9 +76,74 @@ function parseStyle(styleText = '') {
   const style = {};
   for (const part of String(styleText).split(';')) {
     const [key, value] = part.split(':');
-    if (key && value !== undefined) style[key.trim()] = value.trim();
+    // CSS property 大小写不敏感：key 小写归一，BOTTOM:0 也要参与安全区判定（P2-6）
+    if (key && value !== undefined) style[key.trim().toLowerCase()] = value.trim();
   }
   return style;
+}
+
+// P2-5/P2-6：按属性 token 解析 opening tag，返回 属性名(小写)→值 的 Map。
+// 支持 name、name=unquoted、name="..."、name='...'；引号内内容整体跳过，
+// 其他属性值中的 " data-mp-overlay " 子串不会被误认成属性。
+function parseTagAttributes(tagText) {
+  const attrs = new Map();
+  const text = String(tagText || '');
+  // 跳过 '<' 与 tag 名
+  let i = text.search(/[\s/>]/);
+  if (i === -1) return attrs;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '>') break;
+    if (/[\s/]/.test(ch)) { i++; continue; }
+    // 属性名
+    let start = i;
+    while (i < text.length && !/[\s=/>]/.test(text[i])) i++;
+    const name = text.slice(start, i).toLowerCase();
+    // 可选的 = 值（等号两侧允许空白）
+    let j = i;
+    while (j < text.length && /\s/.test(text[j])) j++;
+    let value = '';
+    if (text[j] === '=') {
+      j++;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      const quote = text[j];
+      if (quote === '"' || quote === "'") {
+        const close = text.indexOf(quote, j + 1);
+        value = text.slice(j + 1, close === -1 ? text.length : close);
+        i = close === -1 ? text.length : close + 1;
+      } else {
+        start = j;
+        while (j < text.length && !/[\s>]/.test(text[j])) j++;
+        value = text.slice(start, j);
+        i = j;
+      }
+    }
+    if (name && !attrs.has(name)) attrs.set(name, value);
+  }
+  return attrs;
+}
+
+// 引号感知的 opening tag 提取：属性值内的裸 > 不截断 tag（P2-6 边界）。
+// 未闭合的 tag（扫到文本末尾仍无未在引号内的 >）按无效丢弃。
+function extractOpeningTags(html) {
+  const text = String(html || '');
+  const tags = [];
+  const startRe = /<[a-z]/gi;
+  let match;
+  while ((match = startRe.exec(text))) {
+    let i = match.index + 1;
+    let quote = null;
+    for (; i < text.length; i++) {
+      const ch = text[i];
+      if (quote) { if (ch === quote) quote = null; }
+      else if (ch === '"' || ch === "'") quote = ch;
+      else if (ch === '>') break;
+    }
+    if (i >= text.length) break;
+    tags.push(text.slice(match.index, i + 1));
+    startRe.lastIndex = i + 1;
+  }
+  return tags;
 }
 
 function pxNumber(value) {
@@ -105,8 +170,9 @@ function hasRealOverlayElement(html) {
 }
 
 function collectOverlayRootTags(html) {
-  const tags = stripNonElementHtml(html).match(/<[a-z][^>]*>/gi) || [];
-  return tags.filter(tag => /\sdata-mp-overlay(?:[\s=>/]|$)/i.test(tag));
+  // P2-5：属性存在性按属性 token 解析判定，其他属性值中的子串不误命中
+  return extractOpeningTags(stripNonElementHtml(html))
+    .filter(tag => parseTagAttributes(tag).has('data-mp-overlay'));
 }
 
 function validateOverlayHtml(html = '', { height = 1920 } = {}) {
@@ -116,8 +182,7 @@ function validateOverlayHtml(html = '', { height = 1920 } = {}) {
   for (const tag of rootTags) {
     const result = validateOverlayRootTag(tag, height);
     if (result.valid) continue;
-    const scopeMatch = tag.match(/data-mp-beat-scope\s*=\s*(['"])([^'"]*)\1/i);
-    const beatScope = scopeMatch ? scopeMatch[2] : '';
+    const beatScope = parseTagAttributes(tag).get('data-mp-beat-scope') || '';
     return {
       ...result,
       message: beatScope ? `${result.message}（beat：${beatScope}）` : result.message,
@@ -129,8 +194,8 @@ function validateOverlayHtml(html = '', { height = 1920 } = {}) {
 
 // 单个 overlay opening tag 的安全区校验（原单元素逻辑不变）
 function validateOverlayRootTag(rootTag, height) {
-  const styleMatch = rootTag.match(/style="([^"]*)"/);
-  const style = parseStyle(styleMatch ? styleMatch[1] : '');
+  // P2-6：style 属性经属性解析取值，兼容单引号/大写 STYLE/等号空白/无引号
+  const style = parseStyle(parseTagAttributes(rootTag).get('style') || '');
   if (style.inset === '0' || (style.top === '0' && style.bottom === '0' && style.left === '0' && style.right === '0')) {
     return { valid: false, reason_code: 'overlay_covers_full_frame', message: 'overlay 不允许整屏覆盖主视觉' };
   }
