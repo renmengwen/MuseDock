@@ -4,6 +4,7 @@ import { CreativeStatusMessage } from './CreativeStatusMessage.jsx';
 import { CreativeVideoPreview } from './CreativeVideoPreview.jsx';
 import { CreativeWorkflowStepper } from './CreativeWorkflowStepper.jsx';
 import { CreativeRetryPlan } from './CreativeRetryPlan.jsx';
+import { CreativeVisualWarnings } from './CreativeVisualWarnings.jsx';
 import { CreativeTaskSummary } from './CreativeTaskSummary.jsx';
 import { SourceImageAssetsPanel } from './SourceImageAssetsPanel.jsx';
 
@@ -65,6 +66,10 @@ export function CreativeTaskDetail({
         </>
       ) : null}
       <SourceImageAssetsPanel workflow={workflow} />
+      {/* 失败任务的视觉观察告警由 CreativeRetryPlan 内部渲染，这里只补成功等非失败路径 */}
+      {workflow?.status !== 'failed' ? (
+        <CreativeVisualWarnings workflow={workflow} />
+      ) : null}
       {workflow?.status === 'failed' ? (
         <CreativeRetryPlan
           workflow={workflow}
