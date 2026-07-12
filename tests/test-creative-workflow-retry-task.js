@@ -858,5 +858,158 @@ function fakeHtmlVideoServices(calls = {}) {
       'P1-1b：retry 必须透传落盘 continuity_mode');
   }
 
+  // P1-6：默认 retryFrameHtml 返回 generateHtmlVideo 结果（字段名 visual_report）时，
+  // retry 汇总必须能读到并把 warnings 透出到 record.result 的 visual_inspect。
+  {
+    const rootDir = await tempRoot();
+    const { projectDir } = await createVisualQaWarningFailureFixture(rootDir);
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
+    const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: plan.plan.code,
+    }, {
+      rootDir,
+      retryAttemptId: 'retry_attempt_visual_report_warnings',
+      services: {
+        now: () => '2026-06-25T05:00:00.000Z',
+        htmlVideoWorkflow: {
+          generateHtmlVideo: async () => {
+            const project = await projectStore.loadProject(projectDir);
+            markCheckpointStage(project, 'visual_inspect', {
+              status: 'done',
+              report_path: 'inspect/visual-report.json',
+              diagnostic_code: '',
+            });
+            await projectStore.saveProject(projectDir, project);
+            return {
+              success: true,
+              project,
+              project_dir: projectDir,
+              html_video_project_path: projectDir,
+              output_path: path.join(projectDir, 'exports', 'output.mp4'),
+              visual_report: {
+                success: true,
+                issues: [],
+                metrics: {},
+                report_path: 'inspect/visual-report.json',
+                warnings: [{
+                  code: 'asset_first_style_drift',
+                  severity: 'warning',
+                  message: '相邻画面风格漂移超过阈值。',
+                  details: { scene_id: 'scene_01', time: 1.2, score: 0.6 },
+                }],
+              },
+            };
+          },
+        },
+      },
+    });
+    assert.equal(result.success, true);
+    const record = await readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));
+    const inspect = record.result.hyperframes_freeform.visual_inspect;
+    assert.equal(inspect.status, 'done', 'warnings 非阻断，status 不降级');
+    assert.equal(inspect.warnings.length, 1, 'visual_report.warnings 必须透出到汇总');
+    assert.equal(inspect.warnings[0].code, 'asset_first_style_drift');
+    assert.equal(inspect.warnings[0].details.scene_id, 'scene_01');
+    assert.match(inspect.message, /1 条观察告警/);
+  }
+
+  // 既有 P1：resume 的 rerun_visual_inspect 巡检出阻断白屏时必须返回失败，
+  // 不能把白屏成片标成"恢复完成"。
+  {
+    const rootDir = await tempRoot();
+    const { projectDir } = await createVisualInspectFailureFixture(rootDir);
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
+    assert.equal(plan.plan.repair_action, 'rerun_visual_inspect');
+    const calls = {};
+    const services = fakeHtmlVideoServices(calls);
+    services.visualQaService = {
+      inspectRenderedVideo: async () => ({
+        success: false,
+        message: '开头抽样帧接近空白。',
+        issues: [{ code: 'blank_opening_frame', message: '开头抽样帧接近空白。', times: [0.2] }],
+        metrics: { blank_timed_sample_count: 2 },
+        report_path: 'inspect/visual-report.json',
+      }),
+    };
+    const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: plan.plan.code,
+    }, {
+      rootDir,
+      retryAttemptId: 'retry_attempt_blocking_inspect',
+      services: { now: () => '2026-06-25T06:00:00.000Z', ...services },
+    });
+    assert.equal(result.success, false, '阻断白屏不能返回成功');
+    const record = await readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));
+    assert.equal(record.status, 'failed');
+    assert.equal(record.last_failure.code, 'visual_qa_blocking_failure');
+    assert.equal(record.retry.attempts.at(-1).status, 'failed');
+    const project = await projectStore.loadProject(projectDir);
+    assert.equal(
+      project.generation_checkpoint.stages.visual_inspect.status,
+      'failed',
+      '阻断白屏时 checkpoint 应写 failed 而不是 warning',
+    );
+  }
+
+  // 既有 P1：compose 后巡检（composeAndInspect 路径）阻断白屏同样返回失败
+  {
+    const rootDir = await tempRoot();
+    const { projectDir } = await createFailedWorkflowFixture(rootDir);
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
+    const calls = {};
+    const services = fakeHtmlVideoServices(calls);
+    services.visualQaService = {
+      inspectRenderedVideo: async () => ({
+        success: false,
+        issues: [{ code: 'blank_segment_boundary', message: '镜头边界抽样帧接近空白。', boundary_sec: 1.9 }],
+        metrics: {},
+        report_path: 'inspect/visual-report.json',
+      }),
+    };
+    const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: plan.plan.code,
+    }, {
+      rootDir,
+      retryAttemptId: 'retry_attempt_blocking_compose',
+      services: { now: () => '2026-06-25T06:30:00.000Z', ...services },
+    });
+    assert.equal(result.success, false);
+    const record = await readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));
+    assert.equal(record.last_failure.code, 'visual_qa_blocking_failure');
+    const project = await projectStore.loadProject(projectDir);
+    assert.equal(project.generation_checkpoint.stages.visual_inspect.status, 'failed');
+  }
+
+  // 回归：巡检 success=false 但不含阻断 code（仅参考性问题）时，resume 仍按 warning 语义成功
+  {
+    const rootDir = await tempRoot();
+    const { projectDir } = await createVisualInspectFailureFixture(rootDir);
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
+    const calls = {};
+    const services = fakeHtmlVideoServices(calls);
+    services.visualQaService = {
+      inspectRenderedVideo: async () => ({
+        success: false,
+        issues: [{ code: 'aspect_ratio_mismatch', message: '成片宽高比与目标不一致。' }],
+        metrics: {},
+        report_path: 'inspect/visual-report.json',
+      }),
+    };
+    const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: plan.plan.code,
+    }, {
+      rootDir,
+      retryAttemptId: 'retry_attempt_nonblocking_inspect',
+      services: { now: () => '2026-06-25T07:00:00.000Z', ...services },
+    });
+    assert.equal(result.success, true, '非阻断的巡检失败维持 warning 语义，不阻断恢复');
+    const project = await projectStore.loadProject(projectDir);
+    assert.equal(project.generation_checkpoint.stages.visual_inspect.status, 'warning');
+  }
+
   console.log('creative workflow retry task tests passed');
 })();

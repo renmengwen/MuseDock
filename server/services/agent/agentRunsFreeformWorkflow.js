@@ -1554,13 +1554,8 @@
 
           ...current.visual_inspect,
 
-          status: 'passed',
-
-          report: result.visual_report,
-
-          issues: result.visual_report?.issues || [],
-
-          message: '视觉质检通过。',
+          // P1-6：warnings 非阻断透出——有观察告警时 status/message/warnings 一并投影
+          ...buildFreeformVisualInspectProjection(result.visual_report),
 
         },
 
@@ -1619,7 +1614,7 @@
     const status = state?.[section]?.status || '';
     if (section === 'checks') return status === 'passed';
     if (section === 'render') return status === 'rendered';
-    if (section === 'visual_inspect') return status === 'passed';
+    if (section === 'visual_inspect') return status === 'passed' || status === 'passed_with_warnings';
     return status === 'ready' || status === 'done' || status === 'passed';
   }
 
@@ -1651,4 +1646,52 @@
 
 module.exports = {
   createAgentRunsFreeformWorkflow,
+  summarizeVisualQaWarnings,
+  buildFreeformVisualInspectProjection,
 };
+
+// P1-6：视觉质检 warnings（asset_first 观测通道）非阻断透出。
+// details 只保留定位字段（beat_id/scene_id/time 等）控制投影体积。
+function summarizeVisualQaWarnings(warnings) {
+  if (!Array.isArray(warnings)) return [];
+  return warnings
+    .filter(item => item && typeof item === 'object')
+    .map(item => {
+      const details = item.details && typeof item.details === 'object' && !Array.isArray(item.details)
+        ? item.details
+        : {};
+      const summary = {};
+      for (const key of ['beat_id', 'scene_id', 'frame_id', 'time', 'boundary_sec']) {
+        if (details[key] !== undefined) summary[key] = details[key];
+      }
+      if (Array.isArray(details.beats)) {
+        const beatIds = details.beats.map(beat => beat?.beat_id).filter(Boolean).slice(0, 20);
+        if (beatIds.length) summary.beat_ids = beatIds;
+      }
+      if (Array.isArray(details.missing_required_asset_ids)) {
+        summary.missing_required_asset_ids = details.missing_required_asset_ids.slice(0, 20);
+      }
+      return {
+        code: String(item.code || ''),
+        severity: String(item.severity || 'warning'),
+        message: String(item.message || ''),
+        ...(Object.keys(summary).length ? { details: summary } : {}),
+      };
+    });
+}
+
+// P1-6：视觉质检状态投影——warnings 非阻断（成片仍算通过），
+// 但 status 用 passed_with_warnings + message 带告警条数，让用户在任务状态里看得到。
+// isHyperframesFreeformSectionSuccessful 已同步把 passed_with_warnings 视为成功。
+function buildFreeformVisualInspectProjection(visualReport) {
+  const warnings = summarizeVisualQaWarnings(visualReport?.warnings);
+  return {
+    status: warnings.length ? 'passed_with_warnings' : 'passed',
+    report: visualReport,
+    issues: Array.isArray(visualReport?.issues) ? visualReport.issues : [],
+    warnings,
+    message: warnings.length
+      ? `视觉质检通过（${warnings.length} 条观察告警）。`
+      : '视觉质检通过。',
+  };
+}

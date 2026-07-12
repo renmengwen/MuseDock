@@ -107,6 +107,45 @@ async function saveActionProject(projectDir, result, fallbackProject) {
   return projectStore.saveProject(projectDir, project);
 }
 
+// 与主工作流 htmlVideoWorkflow.isBlockingVisualQaIssue 对齐：
+// 开头白屏 / 镜头边界白屏属于阻断问题，resume 路径也必须返回失败而不是标成恢复完成。
+const BLOCKING_VISUAL_QA_CODES = ['blank_opening_frame', 'blank_segment_boundary'];
+
+function blockingVisualIssuesOf(visualInspectResult) {
+  return arrayOrEmpty(visualInspectResult?.issues)
+    .filter(issue => BLOCKING_VISUAL_QA_CODES.includes(safeString(issue?.code)));
+}
+
+// 巡检结果为失败且含阻断问题时，构造与主流程对齐的 visual_qa_blocking_failure 失败返回；
+// 非阻断的 success=false 维持现状（warning 语义），返回 null 表示不阻断。
+function visualInspectBlockingFailure(inspected, { projectDir, outputPath } = {}) {
+  const visualInspectResult = inspected?.visualInspectResult;
+  if (visualInspectResult?.success !== false) return null;
+  const blockingIssues = blockingVisualIssuesOf(visualInspectResult);
+  if (!blockingIssues.length) return null;
+  const message = 'html-video 成片画面存在开头或镜头边界白屏，未通过视觉安全检查。';
+  return actionFailure(message, [createDiagnostic({
+    code: 'visual_qa_blocking_failure',
+    stage: 'inspect',
+    sub_stage: 'visual_inspect',
+    severity: 'error',
+    retryable: true,
+    repair_action: 'retry_frame_html',
+    user_message: message,
+    details: {
+      issues: arrayOrEmpty(visualInspectResult.issues),
+      metrics: objectOrEmpty(visualInspectResult.metrics),
+    },
+  })], {
+    code: 'visual_qa_blocking_failure',
+    project: inspected.project,
+    project_dir: projectDir,
+    html_video_project_path: projectDir,
+    output_path: outputPath,
+    visualInspectResult,
+  });
+}
+
 async function inspectVisual({ projectDir, project, outputPath, services, taskContext }) {
   const visualQaService = services.visualQaService || defaultVisualQaService;
   await emit(taskContext, {
@@ -124,9 +163,12 @@ async function inspectVisual({ projectDir, project, outputPath, services, taskCo
     visualStrategy: project?.visual_strategy || null,
   });
   const reportPath = visualInspectResult.report_path || visualInspectResult.reportPath || 'inspect/visual-report.json';
+  // 阻断问题（白屏）checkpoint 写 failed，与主工作流对齐；其余失败维持 warning
+  const hasBlockingIssues = visualInspectResult.success === false
+    && blockingVisualIssuesOf(visualInspectResult).length > 0;
   const nextProject = await projectStore.writeProjectJson(projectDir, current => {
     projectOrchestrator.markVisualInspectCheckpoint(current, {
-      status: visualInspectResult.success === false ? 'warning' : 'done',
+      status: visualInspectResult.success === false ? (hasBlockingIssues ? 'failed' : 'warning') : 'done',
       report_path: reportPath,
       diagnostic_code: visualInspectResult.success === false ? 'visual_qa_warning' : '',
     });
@@ -161,6 +203,11 @@ async function composeAndInspect({ workflowId, rootDir, projectDir, project, ser
     services,
     taskContext,
   });
+  const blockingFailure = visualInspectBlockingFailure(inspected, {
+    projectDir,
+    outputPath: composed.output_path,
+  });
+  if (blockingFailure) return blockingFailure;
   return {
     success: true,
     project: inspected.project,
@@ -464,6 +511,11 @@ async function rerunVisualInspect(context) {
     services: context.services,
     taskContext: context.taskContext,
   });
+  const blockingFailure = visualInspectBlockingFailure(inspected, {
+    projectDir: context.projectDir,
+    outputPath,
+  });
+  if (blockingFailure) return blockingFailure;
   return {
     success: true,
     project: inspected.project,

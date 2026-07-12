@@ -2117,13 +2117,46 @@ function makeRetryAttemptId(now) {
   return `retry_${stamp}`;
 }
 
+// P1-6：视觉质检 warnings（asset_first 观测通道）非阻断透出到 retry 汇总，
+// details 只保留定位字段控制体积（与 agentRunsFreeformWorkflow.summarizeVisualQaWarnings 语义一致）。
+function summarizeVisualQaWarningsForStage(warnings) {
+  if (!Array.isArray(warnings)) return [];
+  return warnings
+    .filter(item => item && typeof item === 'object')
+    .map(item => {
+      const details = plainObject(item.details);
+      const summary = {};
+      for (const key of ['beat_id', 'scene_id', 'frame_id', 'time', 'boundary_sec']) {
+        if (details[key] !== undefined) summary[key] = details[key];
+      }
+      if (Array.isArray(details.beats)) {
+        const beatIds = details.beats.map(beat => beat?.beat_id).filter(Boolean).slice(0, 20);
+        if (beatIds.length) summary.beat_ids = beatIds;
+      }
+      if (Array.isArray(details.missing_required_asset_ids)) {
+        summary.missing_required_asset_ids = details.missing_required_asset_ids.slice(0, 20);
+      }
+      return {
+        code: safeString(item.code),
+        severity: safeString(item.severity) || 'warning',
+        message: safeString(item.message),
+        ...(Object.keys(summary).length ? { details: summary } : {}),
+      };
+    });
+}
+
 function buildHtmlVideoLiteProjectStageResult({ project, projectDir, renderResult, visualInspectResult } = {}) {
   const outputPath = safeString(renderResult?.output_path || renderResult?.outputPath);
   const inspectStatus = visualInspectResult?.skipped === true
     ? 'skipped'
     : (visualInspectResult?.success === false ? 'warning' : 'done');
-  const inspectMessage = safeString(visualInspectResult?.message)
+  const inspectWarnings = summarizeVisualQaWarningsForStage(visualInspectResult?.warnings);
+  const baseInspectMessage = safeString(visualInspectResult?.message)
     || (inspectStatus === 'warning' ? 'html-video production 视觉质检发现问题。' : 'html-video production 视觉质检完成。');
+  // warnings 非阻断：status 不降级，但 message 带上告警条数，避免用户只看到"质检完成"
+  const inspectMessage = inspectWarnings.length && inspectStatus === 'done'
+    ? `${baseInspectMessage.replace(/。$/, '')}（${inspectWarnings.length} 条观察告警）。`
+    : baseInspectMessage;
   return {
     hyperframes_freeform: {
       project: {
@@ -2144,6 +2177,7 @@ function buildHtmlVideoLiteProjectStageResult({ project, projectDir, renderResul
         message: inspectMessage,
         report_path: visualInspectResult?.report_path || visualInspectResult?.reportPath || null,
         issues: Array.isArray(visualInspectResult?.issues) ? visualInspectResult.issues : [],
+        warnings: inspectWarnings,
         metrics: plainObject(visualInspectResult?.metrics),
       },
     },
@@ -2272,7 +2306,9 @@ async function retryCreativeWorkflow(workflowId, payload = {}, options = {}) {
       project: latestProject,
       projectDir,
       renderResult: execution.renderResult || execution,
-      visualInspectResult: execution.visualInspectResult,
+      // 默认 retryFrameHtml 动作直接返回 generateHtmlVideo 结果（字段名 visual_report），
+      // resumeExecutor 自身路径返回 visualInspectResult——两个字段名都要读，避免 warnings/issues 丢失
+      visualInspectResult: execution.visualInspectResult || execution.visual_report,
     });
     record.result = record.result || {};
     const existingHyperframes = record.result.hyperframes_freeform || {};

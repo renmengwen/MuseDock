@@ -52,6 +52,24 @@ function collectVisualIssues(workflow) {
   });
 }
 
+function collectVisualWarnings(workflow) {
+  const rawWorkflow = plainObject(workflow?.workflow);
+  const hyperframes = plainObject(workflow?.result?.hyperframes_freeform || rawWorkflow.result?.hyperframes_freeform);
+  const visualInspect = plainObject(hyperframes.visual_inspect);
+  const warnings = [
+    ...arrayOrEmpty(visualInspect.warnings),
+    ...arrayOrEmpty(plainObject(visualInspect.report).warnings),
+  ];
+  const seen = new Set();
+  return warnings.filter(warning => {
+    if (!warning || typeof warning !== 'object') return false;
+    const key = [warning.code, warning.message].join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function collectVisualMetrics(workflow) {
   const rawWorkflow = plainObject(workflow?.workflow);
   const hyperframes = plainObject(workflow?.result?.hyperframes_freeform || rawWorkflow.result?.hyperframes_freeform);
@@ -100,6 +118,7 @@ export function CreativeRetryPlan({
   const cannotRetry = retryPlanStatus === 'ready' && retryPlan?.can_retry === false;
   const failureSummary = getFailureSummary(workflow, retryPlan, message);
   const visualIssues = collectVisualIssues(workflow);
+  const visualWarnings = collectVisualWarnings(workflow);
   const visualMetrics = collectVisualMetrics(workflow);
   const recoveryMessage = retryPlanMessage || retryPlan?.user_message || '系统会优先复用已完成内容，减少重复生成。';
   const metricSummary = [
@@ -135,6 +154,23 @@ export function CreativeRetryPlan({
           ) : null}
           {metricSummary ? (
             <div className="text-xs leading-normal text-[#8a6a20]">{metricSummary}</div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {visualWarnings.length ? (
+        <div className="grid gap-2 border-l-2 border-line-2 pl-3">
+          <div className="text-[13px] font-bold leading-normal text-fg-1">视觉观察告警 {visualWarnings.length} 条（不影响成片，仅供参考）</div>
+          <ol className="m-0 grid list-decimal gap-1 pl-4 text-[13px] leading-relaxed text-fg-2">
+            {visualWarnings.slice(0, 6).map((warning, index) => (
+              <li key={`${warning.code || 'warning'}-${index}`}>
+                {warning.code ? <span className="font-mono text-xs text-fg-3">[{warning.code}] </span> : null}
+                {firstText(warning.message, warning.code, '视觉观察告警。')}
+              </li>
+            ))}
+          </ol>
+          {visualWarnings.length > 6 ? (
+            <div className="text-xs leading-normal text-fg-3">其余 {visualWarnings.length - 6} 条可在视觉报告中查看。</div>
           ) : null}
         </div>
       ) : null}
