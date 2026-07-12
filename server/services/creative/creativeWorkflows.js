@@ -571,6 +571,20 @@ function resolveServices(options = {}) {
   return resolved;
 }
 
+// P1-1b：真实 retry 的策略解析——workflow 显式值优先，其次落盘 project 的策略，
+// 两边都没有时返回 null；绝不用 'hf_first' 字面量覆盖非空落盘值，
+// 否则 asset_first 工程在首次建帧失败后 retry 会被降级成 hf_first。
+function resolveRetryVisualStrategy(workflow = {}, project = {}) {
+  return {
+    visual_strategy: normalizeVisualStrategy(workflow?.creative_context?.visual_strategy)
+      || normalizeVisualStrategy(project?.visual_strategy)
+      || null,
+    continuity_mode: safeString(workflow?.creative_context?.continuity_mode)
+      || safeString(project?.continuity_mode)
+      || null,
+  };
+}
+
 async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, mediaRoot, services, taskContext, plan } = {}) {
   const workflowId = safeString(workflow?.workflow_id || workflow?.id || project?.workflow_id);
   const runId = safeString(project?.run_id || project?.runId);
@@ -610,7 +624,7 @@ async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, medi
     sceneSpec,
     creativeContext: {
       ...plainObject(workflow?.result?.hyperframes_freeform),
-      visual_strategy: normalizeVisualStrategy(workflow?.creative_context?.visual_strategy) || 'hf_first',
+      ...resolveRetryVisualStrategy(workflow, project),
       asset_context: plainObject(workflow?.creative_context?.asset_context),
       scene_spec: sceneSpec,
       frame_specs: extractFrameSpecsFromWorkflow(workflow),
@@ -3136,5 +3150,6 @@ module.exports = {
   buildWorkflowTarget,
   applyVisualStrategyToCreativeContext,
   normalizeVisualStrategy,
+  resolveRetryVisualStrategy,
   defaultRetryFrameHtmlAction,
 };

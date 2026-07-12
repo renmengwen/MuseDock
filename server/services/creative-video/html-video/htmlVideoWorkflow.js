@@ -1569,6 +1569,11 @@ async function generateHtmlVideo(options = {}) {
       continuity_mode: creativeContext?.continuity_mode || resumeProject.continuity_mode || null,
     };
   }
+  // P1-1a：在进入任何可失败阶段（生图/内容图/Frame HTML）之前先把策略落盘。
+  // 否则首次执行在建帧阶段失败提前返回时，落盘工程 visual_strategy 为 null，
+  // 真实 retry（不带 creativeContext 策略）会把 asset_first 工程降级成 hf_first。
+  // 后续 attachVisualStrategy 调用幂等，成功路径行为不变。
+  await projectStore.writeProjectJson(projectDir, current => attachVisualStrategy(current, creativeContext));
   model = createAuditedModel(model, projectDir);
   // 尽早广播工程目录：任务运行中前端轮询依赖它水合生成图等工程内素材
   await report(onProgress, {

@@ -586,6 +586,68 @@ const stubAiImageModel = { isConfigured: async () => false };
     }
   }
 
+  // P1-1a：Frame HTML 阶段失败提前返回后，落盘 project.json 必须已带 visual_strategy，
+  // 否则真实 retry（不带 creativeContext 策略）会把 asset_first 工程降级成 hf_first。
+  {
+    const failRootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-per-scene-strategy-fail-'));
+    let failResult;
+    projectOrchestrator.renderHtmlVideoProject = async () => {
+      throw new Error('frame html 失败后不应进入渲染');
+    };
+    try {
+      failResult = await workflow.generateHtmlVideo({
+        workflowId: 'wf-per-scene-strategy-fail',
+        runId: 'run-per-scene-strategy-fail',
+        rootDir: failRootDir,
+        sceneSpec: workflowSceneSpec,
+        creativeContext: { input: { raw_text: '图片优先建帧失败' }, visual_strategy: 'asset_first' },
+        target: { generateAudio: false, generateCaptions: false },
+        templateRegistry: registry,
+        skipValidation: true,
+        services: {
+          aiImageModel: stubAiImageModel,
+          aiTextModel: {
+            callTextModel: async request => {
+              const prompt = request.messages.map(item => item.content).join('\n');
+              if (prompt.startsWith('你是 html-video 的 content graph')) {
+                return {
+                  success: true,
+                  text: JSON.stringify({
+                    synopsis: '图片优先建帧失败',
+                    nodes: workflowSceneSpec.scenes.map(scene => ({
+                      id: scene.id,
+                      kind: scene.kind,
+                      label: scene.visual_text.headline,
+                      durationSec: scene.duration_sec,
+                      text: scene.narration_text,
+                    })),
+                    edges: workflowSceneSpec.scenes.slice(1).map((scene, index) => ({
+                      from: workflowSceneSpec.scenes[index].id,
+                      to: scene.id,
+                      kind: 'sequence',
+                    })),
+                  }),
+                };
+              }
+              // Frame HTML 阶段必然失败
+              return { success: false, message: 'mock frame html failure' };
+            },
+          },
+          environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        },
+      });
+    } finally {
+      projectOrchestrator.renderHtmlVideoProject = originalRenderHtmlVideoProject;
+    }
+    assert.equal(failResult.success, false, 'frame html 必然失败的用例应返回失败');
+    const failProjectDir = failResult.html_video_project_path || failResult.project_dir;
+    assert.ok(failProjectDir, '失败返回必须带工程目录');
+    const failedProject = JSON.parse(await fs.readFile(path.join(failProjectDir, 'project.json'), 'utf8'));
+    assert.strictEqual(failedProject.visual_strategy, 'asset_first',
+      'P1-1a：frame html 失败提前返回后，落盘 project.visual_strategy 必须已是 asset_first');
+    console.log('per-scene strategy persisted before failure test passed');
+  }
+
   // 绑定 helper：不改入参（保证 scene_spec_hash 稳定）、结果确定性、不重复写入
   {
     const bindSpec = {

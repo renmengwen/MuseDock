@@ -154,6 +154,38 @@ async function run() {
   assert.ok(!hfGenPrompt.includes('data-mp-overlay'), 'hf_first prompt 不得包含 motion primitive 片段词汇');
   console.log('asset-first prompt motion overlay tests passed');
 
+  // ===== P2-8 硬约束 A：metadata 内部编排字段不得进入 Frame HTML prompt =====
+  {
+    const pollutedNode = {
+      ...frameNode,
+      metadata: {
+        scene_id: 'scene_01',
+        source_headline: '深夜骑手',
+        visual_beat: { id: 'scene_01_b1', motion_overlay: { preset: 'key_marker' } },
+        visual_beats: [{ id: 'scene_01_b1' }],
+        beat_windows: [{ id: 'scene_01_b1', start_sec: 0, end_sec: 2 }],
+      },
+    };
+    const hfPollutedPrompt = frameHtmlAgent.buildFrameHtmlPrompt({
+      node: pollutedNode,
+      creativeContext: { visual_strategy: 'hf_first' },
+      sceneSpec,
+    });
+    assert.ok(!hfPollutedPrompt.includes('visual_beat'), 'hf_first prompt 不得包含 metadata.visual_beat/visual_beats');
+    assert.ok(!hfPollutedPrompt.includes('beat_windows'), 'hf_first prompt 不得包含 metadata.beat_windows');
+    assert.ok(!hfPollutedPrompt.includes('key_marker'), 'hf_first prompt 不得泄漏 motion overlay 编排细节');
+    assert.ok(hfPollutedPrompt.includes('source_headline'), '剥离编排字段后其余 metadata 应保留');
+
+    const shortPolluted = frameHtmlAgent.buildShortFrameHtmlPrompt({
+      node: pollutedNode,
+      creativeContext: { visual_strategy: 'hf_first' },
+      sceneSpec,
+    });
+    assert.ok(!shortPolluted.includes('visual_beat'), '短 prompt 同样不得包含 visual_beat');
+    assert.ok(!shortPolluted.includes('beat_windows'), '短 prompt 同样不得包含 beat_windows');
+    console.log('frame html prompt metadata strip tests passed');
+  }
+
   // ===== 模块5 + R8：无字幕 beat 的画面兜底 =====
   {
     const beat = {

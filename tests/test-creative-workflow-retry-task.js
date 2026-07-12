@@ -810,5 +810,53 @@ function fakeHtmlVideoServices(calls = {}) {
     assert.equal(record.project_substages.some(stage => stage.id === 'frame_html' && stage.status === 'failed'), true);
   }
 
+  // P1-1b：workflow 无 creative_context 策略时，defaultRetryFrameHtmlAction
+  // 必须从落盘 project 回填 visual_strategy / continuity_mode，禁止用 'hf_first' 字面量覆盖。
+  {
+    assert.equal(
+      workflows.resolveRetryVisualStrategy(
+        { creative_context: { visual_strategy: 'hf_first' } },
+        { visual_strategy: 'asset_first' },
+      ).visual_strategy,
+      'hf_first',
+      'workflow 显式策略优先',
+    );
+    assert.deepEqual(
+      workflows.resolveRetryVisualStrategy({}, { visual_strategy: 'asset_first', continuity_mode: 'scene_html' }),
+      { visual_strategy: 'asset_first', continuity_mode: 'scene_html' },
+      'workflow 缺策略时回填落盘 project 的策略',
+    );
+    assert.deepEqual(
+      workflows.resolveRetryVisualStrategy({}, {}),
+      { visual_strategy: null, continuity_mode: null },
+      '两边都没有时为 null，不得兜底 hf_first',
+    );
+
+    let captured = null;
+    const result = await workflows.defaultRetryFrameHtmlAction({
+      workflow: { workflow_id: 'wf-retry-strategy' },
+      project: {
+        run_id: 'run-retry-strategy',
+        visual_strategy: 'asset_first',
+        continuity_mode: 'scene_html',
+      },
+      projectDir: path.join(os.tmpdir(), 'wf-retry-strategy', 'agent_runs', 'run-retry-strategy-html-video'),
+      services: {
+        htmlVideoWorkflow: {
+          generateHtmlVideo: async args => {
+            captured = args;
+            return { success: true, project: {}, message: 'ok' };
+          },
+        },
+      },
+    });
+    assert.equal(result.success, true);
+    assert.ok(captured, '应调用 generateHtmlVideo');
+    assert.equal(captured.creativeContext.visual_strategy, 'asset_first',
+      'P1-1b：retry 传下去的策略必须是落盘的 asset_first，而不是 hf_first 字面量');
+    assert.equal(captured.creativeContext.continuity_mode, 'scene_html',
+      'P1-1b：retry 必须透传落盘 continuity_mode');
+  }
+
   console.log('creative workflow retry task tests passed');
 })();

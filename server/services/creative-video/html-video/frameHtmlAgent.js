@@ -42,7 +42,13 @@ function nodeSummary(node = {}) {
   };
   if (node.data) summary.data = node.data;
   if (node.text) summary.text = node.text;
-  if (node.metadata) summary.metadata = node.metadata;
+  if (node.metadata) {
+    // 硬约束 A：visual_beat/visual_beats/beat_windows 是展开阶段写入的内部编排快照，
+    // asset_first 的编排信息已由 buildAssetFirstFramePrompt 显式注入，
+    // 原始 JSON 进 prompt 只会污染 hf_first 的模型输入并浪费 token，这里统一剥离。
+    const { visual_beat, visual_beats, beat_windows, ...rest } = node.metadata;
+    if (Object.keys(rest).length) summary.metadata = rest;
+  }
   return JSON.stringify(summary, null, 2);
 }
 
