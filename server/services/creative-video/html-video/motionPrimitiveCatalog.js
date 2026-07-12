@@ -146,19 +146,30 @@ function extractOpeningTags(html) {
   return tags;
 }
 
+// CSS 值预处理：剥离尾部 !important（大小写不敏感、允许前置空白）
+function stripImportant(value) {
+  return String(value ?? '').replace(/\s*!\s*important\s*$/i, '').trim();
+}
+
 function pxNumber(value) {
-  const text = String(value ?? '').trim();
+  const text = stripImportant(value);
   // 缺失/空值不折算成 0：Number('')===0 会把无 bottom 的 top 布局误判成 bottom:0
   if (!text) return null;
-  const number = Number(text.replace(/px$/, ''));
+  const number = Number(text.replace(/px$/i, '').trim());
   return Number.isFinite(number) ? number : null;
 }
 
+// 零长度归一判定：0 / 0px / 0PX / 0.0px / 0px !important 视为同一个零
+function isZeroLength(value) {
+  return pxNumber(value) === 0;
+}
+
 // 剥离注释与 <style>/<script> 内容：属性选择器、注释里的 data-mp-* 字样不算真实元素（P1-8）。
-// 未闭合的 <style>/<script> 按浏览器语义吞掉其后全部内容，一并剥到字符串末尾。
+// 未闭合的 <style>/<script>/<!-- 按浏览器语义吞掉其后全部内容，一并剥到字符串末尾。
 function stripNonElementHtml(html) {
   return String(html || '')
     .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!--[\s\S]*$/, '')
     .replace(/<script\b[\s\S]*?<\/script\s*>/gi, '')
     .replace(/<style\b[\s\S]*?<\/style\s*>/gi, '')
     .replace(/<(?:script|style)\b[\s\S]*$/i, '');
@@ -196,7 +207,7 @@ function validateOverlayHtml(html = '', { height = 1920 } = {}) {
 function validateOverlayRootTag(rootTag, height) {
   // P2-6：style 属性经属性解析取值，兼容单引号/大写 STYLE/等号空白/无引号
   const style = parseStyle(parseTagAttributes(rootTag).get('style') || '');
-  if (style.inset === '0' || (style.top === '0' && style.bottom === '0' && style.left === '0' && style.right === '0')) {
+  if (isZeroLength(style.inset) || (isZeroLength(style.top) && isZeroLength(style.bottom) && isZeroLength(style.left) && isZeroLength(style.right))) {
     return { valid: false, reason_code: 'overlay_covers_full_frame', message: 'overlay 不允许整屏覆盖主视觉' };
   }
   const bottom = pxNumber(style.bottom);

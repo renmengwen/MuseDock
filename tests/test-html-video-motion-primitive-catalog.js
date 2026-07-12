@@ -196,4 +196,80 @@ const { hasRealOverlayElement } = require('../server/services/creative-video/htm
   assert.strictEqual(bad.valid, false, '含裸 > 属性值的越界 overlay 仍要拦');
   assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
 }
+// Finding 1：CSS 值归一化——大写 px / !important / inset:0px 等合法写法不得绕过安全区校验
+{
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:0PX;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, 'bottom:0PX（大写 px）必须判 invalid');
+  assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
+}
+{
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:0px !important;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, 'bottom:0px !important 必须判 invalid');
+  assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
+}
+{
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;inset:0px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, 'inset:0px 必须判整屏覆盖');
+  assert.strictEqual(bad.reason_code, 'overlay_covers_full_frame');
+}
+{
+  // 变体：大写键 + 大写 px + 大写 !IMPORTANT
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;BOTTOM:0PX !IMPORTANT;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, 'BOTTOM:0PX !IMPORTANT 必须判 invalid');
+  assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
+}
+{
+  // 变体：inset 值带空白
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;inset: 0px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, 'inset: 0px（带空白）必须判整屏覆盖');
+  assert.strictEqual(bad.reason_code, 'overlay_covers_full_frame');
+}
+{
+  // 变体：四边零（混合写法）等价整屏覆盖
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;top:0;bottom:0px;left:0PX;right:0"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, '四边零（混合 0/0px/0PX）必须判整屏覆盖');
+  assert.strictEqual(bad.reason_code, 'overlay_covers_full_frame');
+}
+{
+  // 回归：正常值不受影响；!important 剥离后正常值不误伤
+  const ok1 = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:180px;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(ok1.valid, true, JSON.stringify(ok1));
+  const ok2 = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:200px !important;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(ok2.valid, true, 'bottom:200px !important 剥离后为正常值，不得误伤：' + JSON.stringify(ok2));
+}
+// Finding 5：未闭合 HTML 注释吞到文本末尾——注释内伪 overlay 不算真实元素
+{
+  const unclosedComment = '<div class="hero">base</div><!-- fallback: <div data-mp-overlay="key_marker"></div>';
+  assert.strictEqual(hasRealOverlayElement(unclosedComment), false, '未闭合注释内的 tag 形文本不算真实 overlay');
+  // 未闭合注释之前的真实 overlay 仍要认
+  const realBeforeComment = '<div data-mp-overlay="key_marker" style="position:absolute;bottom:180px"></div><!-- todo';
+  assert.strictEqual(hasRealOverlayElement(realBeforeComment), true, '未闭合注释之前的真实 overlay 必须识别');
+  // 完整注释行为回归：注释剥除后，后续真实节点仍要认
+  const afterClosedComment = '<!-- note --><div data-mp-overlay="key_marker"></div>';
+  assert.strictEqual(hasRealOverlayElement(afterClosedComment), true, '完整注释之后的真实 overlay 必须识别');
+}
 console.log('motion primitive catalog tests passed');

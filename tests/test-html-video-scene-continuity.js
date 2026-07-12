@@ -69,6 +69,17 @@ const { ensureMotionOverlay } = require('../server/services/creative-video/html-
   assert.strictEqual(realResult.injected, false);
   assert.strictEqual(realResult.html, real);
 }
+// Finding 5：未闭合 HTML 注释里的伪 overlay 按浏览器语义不存在，必须注入兜底
+{
+  const beat = {
+    id: 'scene_04_b1', scene_id: 'scene_04',
+    visual_text: { headline: '要点' },
+    motion_overlay: { preset: 'key_marker', placement: 'lower_third', max_items: 1, avoid_caption_bottom_px: 140 },
+  };
+  const probe = '<html><body><div class="hero">base</div><!-- fallback: <div data-mp-overlay="key_marker">重点</div></body></html>';
+  const result = ensureMotionOverlay(probe, beat, { visualStrategy: 'asset_first' });
+  assert.strictEqual(result.injected, true, '未闭合注释内的伪 overlay 不算真实节点，必须注入兜底');
+}
 // P2-5：其他属性值中的 " data-mp-overlay " 子串不算真实 overlay，必须注入兜底
 {
   const beat = {
