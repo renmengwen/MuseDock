@@ -226,28 +226,40 @@ function bucketJobsByContinuityGroup(jobs = []) {
 
 // 桶间并发、桶内严格串行，并把前帧 HTML 摘要向后传给同组后续 beat（beat_index>1 才注入）。
 // initialHtmlByGroup：分桶前已就绪的帧 HTML（复用帧/串行首帧），Map<group_id, Map<beat_index, html>>；
-// P2-1：桶内首个待生成 job 的初始 previousHtml 取「beat_index 小于当前的最近前驱」，
-// 避免定向重试中间 beat 时把组内更靠后（未来）的复用帧当作上一帧；
-// 桶内后续 job 仍串行传递前一个生成结果（生成结果比复用前驱更近时优先，逻辑保持不变）。
+// P2-2：每个待生成 job 的前驱 = max_by_beat_index(
+//   桶内已成功生成的最近前驱, initialHtmlByGroup 中 beat_index 小于当前的最近复用前驱 )，
+// 两个候选都要求 beat_index 严格小于当前 job，比较后取更近（beat_index 更大）者。
+// 覆盖场景：同组非相邻多 beat 同批重试（复用 b1/b3、待生成 b2/b4）时，b4 取更近的复用帧 b3
+// 而不是刚生成的 b2；b2 失败时 b4 仍回落到 b3；只有 b1 复用时 b4 沿用生成的 b2（桶内传递语义保留）。
 async function runBucketsWithContinuity({ buckets = [], concurrency = 1, runJob, initialHtmlByGroup = new Map() } = {}) {
   const bucketResults = await mapLimit(buckets, concurrency, async bucket => {
     const results = [];
     const groupId = bucket.length ? continuityGroupId(bucket[0]) : null;
-    let previousHtml = '';
+    let previousGeneratedBeatIndex = null;
+    let previousGeneratedHtml = '';
     for (const job of bucket) {
       const beat = job.node?.metadata?.visual_beat || {};
-      const beatIndex = Number(beat.continuity?.beat_index) || 1;
-      // 桶内尚无生成结果时按当前 beat 的前驱选取初始值（生成失败也会为下一个 job 重查前驱）
-      if (!previousHtml && groupId) {
-        previousHtml = predecessorHtmlForBeat(initialHtmlByGroup, groupId, beatIndex);
-      }
+      const currentIndex = Number(beat.continuity?.beat_index) || 1;
+      const reusedPredecessor = groupId
+        ? predecessorForBeat(initialHtmlByGroup, groupId, currentIndex)
+        : null;
+      const generatedPredecessor = previousGeneratedBeatIndex !== null && previousGeneratedBeatIndex < currentIndex
+        ? { index: previousGeneratedBeatIndex, html: previousGeneratedHtml }
+        : null;
+      const chosen = [reusedPredecessor, generatedPredecessor]
+        .filter(Boolean)
+        .sort((a, b) => b.index - a.index)[0] || null;
+      const previousHtml = chosen?.html || '';
       const result = await runJob({
         ...job,
-        previousBeatSummary: beatIndex > 1 && previousHtml
+        previousBeatSummary: currentIndex > 1 && previousHtml
           ? summarizeBaseLayout(previousHtml)
           : '',
       });
-      if (result?.htmlResult?.success) previousHtml = result.htmlResult.html;
+      if (result?.htmlResult?.success) {
+        previousGeneratedBeatIndex = currentIndex;
+        previousGeneratedHtml = result.htmlResult.html;
+      }
       results.push(result);
     }
     return results;
@@ -462,20 +474,23 @@ function recordGroupHtml(initialHtmlByGroup, groupId, beatIndex, html) {
   byIndex.set(Number(beatIndex) || 1, html);
 }
 
-// P2-1：查组内「beat_index 严格小于当前的最近前驱」HTML；无前驱/未知组返回空串
-function predecessorHtmlForBeat(initialHtmlByGroup, groupId, beatIndex) {
+// P2-2：查组内「beat_index 严格小于当前的最近前驱」，返回 { index, html } 或 null（无前驱/未知组）
+function predecessorForBeat(initialHtmlByGroup, groupId, beatIndex) {
   const byIndex = groupId ? initialHtmlByGroup.get(groupId) : null;
-  if (!(byIndex instanceof Map)) return '';
+  if (!(byIndex instanceof Map)) return null;
   const current = Number(beatIndex) || 1;
-  let bestIndex = -Infinity;
-  let bestHtml = '';
+  let best = null;
   for (const [index, html] of byIndex) {
-    if (index < current && index > bestIndex) {
-      bestIndex = index;
-      bestHtml = html;
+    if (index < current && (!best || index > best.index)) {
+      best = { index, html };
     }
   }
-  return bestHtml;
+  return best;
+}
+
+// P2-1 兼容导出：仅返回前驱 HTML（既有单测/调用方沿用旧签名）
+function predecessorHtmlForBeat(initialHtmlByGroup, groupId, beatIndex) {
+  return predecessorForBeat(initialHtmlByGroup, groupId, beatIndex)?.html || '';
 }
 
 /**
