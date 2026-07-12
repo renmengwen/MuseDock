@@ -245,9 +245,18 @@ function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSamplin
   const frames = Array.isArray(project?.frames) ? project.frames : [];
   const groups = [];
   const withinVideo = time => time > 0 && (!Number.isFinite(duration) || duration <= 0 || time < duration);
-  const pairedTimes = boundary => [boundary - 0.3, boundary, boundary + 0.3, boundary + 0.5, boundary + 1.0]
-    .map(time => Math.round(time * 1000) / 1000)
-    .filter(withinVideo);
+  const roundTimes = values => values.map(time => Math.round(time * 1000) / 1000).filter(withinVideo);
+  // P2-3：成对采样组结构拆分——safety_times（旧安全三点，白屏阻断专用口径）与
+  // diff_times（∓0.3s 差分点，boundary_refresh 专用）分开存放；times 保留并集供抽帧计划。
+  const pairedGroupFields = (boundary) => {
+    const safety = roundTimes([boundary, boundary + 0.5, boundary + 1.0]);
+    const diff = roundTimes([boundary - 0.3, boundary + 0.3]);
+    return {
+      safety_times: safety,
+      diff_times: diff,
+      times: uniqueTimes([...safety, ...diff]).sort((left, right) => left - right),
+    };
+  };
   let cursor = 0;
   for (let index = 0; index < frames.length; index += 1) {
     const frameDuration = Number(frames[index]?.duration_sec || frames[index]?.durationSec);
@@ -262,11 +271,11 @@ function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSamplin
         const endSec = Number(windows[w]?.end_sec);
         if (!Number.isFinite(endSec) || endSec <= 0) continue;
         const boundary = cursor + endSec;
-        const times = pairedTimes(boundary);
-        if (!times.length) continue;
+        const fields = pairedGroupFields(boundary);
+        if (!fields.times.length) continue;
         groups.push({
           boundary_sec: Math.round(boundary * 100) / 100,
-          times,
+          ...fields,
           same_scene: true,
           ...(sceneId ? { scene_id: sceneId } : {}),
         });
@@ -276,13 +285,14 @@ function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSamplin
     if (index >= frames.length - 1) break;
     const nextSceneId = String(frames[index + 1]?.scene_id || '').trim();
     const sameScene = Boolean(sceneId) && sceneId === nextSceneId;
-    const times = pairedSampling === true && sameScene
-      ? pairedTimes(cursor)
-      : [cursor, cursor + 0.5, cursor + 1.0].filter(withinVideo);
-    if (!times.length) continue;
+    // 缺省路径 / 跨 scene 边界：仅 times 三点，不加新字段（逐值行为与现状一致，硬约束 A）
+    const fields = pairedSampling === true && sameScene
+      ? pairedGroupFields(cursor)
+      : { times: [cursor, cursor + 0.5, cursor + 1.0].filter(withinVideo) };
+    if (!fields.times.length) continue;
     groups.push({
       boundary_sec: Math.round(cursor * 100) / 100,
-      times,
+      ...fields,
       same_scene: sameScene,
       ...(sameScene ? { scene_id: sceneId } : {}),
     });
@@ -317,12 +327,32 @@ function buildTimedSamplePlan({ project = {}, videoInfo = {}, pairedBoundarySamp
     cappedBoundaryGroups.push(group);
     sampleCount += group.times.length;
   }
+  // P2-4：asset_first（pairedBoundarySampling）下补均匀 style observation 采样点——
+  // 边界/opening 点不足以覆盖全片时（如 60s 单 scene 单 beat 无边界组），按 duration/8
+  // 间隔补最多 7 个均匀点，跳过与既有采样点 <0.5s 重叠的；共用 MAX_TIMED_SAMPLES 预算
+  //（边界组优先）。这些点进入抽帧计划（自带 mean_rgb），流入 style_drift 观测合并输入。
+  // 缺省 / hf_first / safetyOnly 不加（行为不变，硬约束 A）。
+  const observation = [];
+  const duration = Number(videoInfo.duration);
+  if (pairedBoundarySampling === true && Number.isFinite(duration) && duration > 0) {
+    const existing = uniqueTimes([...opening, ...cappedBoundaryGroups.flatMap(group => group.times)]);
+    const interval = duration / 8;
+    for (let step = 1; step <= 7; step += 1) {
+      if (sampleCount + 1 > MAX_TIMED_SAMPLES) break;
+      const time = Math.round(step * interval * 1000) / 1000;
+      if (time <= 0 || time >= duration) continue;
+      if ([...existing, ...observation].some(other => Math.abs(other - time) < 0.5)) continue;
+      observation.push(time);
+      sampleCount += 1;
+    }
+  }
   return {
     opening,
     boundaryGroups: cappedBoundaryGroups,
+    observation,
     total_boundary_count: boundaryGroups.length,
     sampled_boundary_count: cappedBoundaryGroups.length,
-    times: uniqueTimes([...opening, ...cappedBoundaryGroups.flatMap(group => group.times)]),
+    times: uniqueTimes([...opening, ...cappedBoundaryGroups.flatMap(group => group.times), ...observation]),
   };
 }
 
@@ -404,7 +434,10 @@ function analyzeTimedSafetyMetrics({ frames = [], opening = [], boundaryGroups =
     });
   }
   for (const group of boundaryGroups) {
-    const blank = uniqueMatchedFrames(group.times
+    // P2-3：白屏阻断只消费安全点（safety_times）；差分专用点（diff_times）落在
+    // 空白区不应改变安全检查口径。旧形态组（无 safety_times）回落 times，向后兼容。
+    const safetyTimes = Array.isArray(group.safety_times) ? group.safety_times : group.times;
+    const blank = uniqueMatchedFrames(safetyTimes
       .map(time => closestFrameAt(frames, time))
       .filter(Boolean))
       .filter(isBlankFrameMetric);
@@ -709,7 +742,8 @@ async function inspectRenderedVideo({
   const assetFirstQa = visualStrategy === 'asset_first' && safetyOnly !== true;
   const timedPlan = buildTimedSamplePlan({ project, videoInfo, pairedBoundarySampling: assetFirstQa });
   if (services.sampleFrames) {
-    const frames = await services.sampleFrames({ projectDir, outputPath: videoPath, videoPath, workDir });
+    // times：生产采样计划（P2-4 起含全片均匀观测点），注入实现可按需取用
+    const frames = await services.sampleFrames({ projectDir, outputPath: videoPath, videoPath, workDir, times: timedPlan.times });
     const result = safetyOnly ? {
       success: true,
       issues: [],
@@ -1045,6 +1079,13 @@ function mapOverlayChecksToQaWarnings(decisions = [], { visualStrategy = null } 
       if (seenSceneScoped.has(key)) continue;
       seenSceneScoped.add(key);
     }
+    // P2-7：scene_html 下整 scene stats 复制 + 按 scene 去重后，decision.beat_id 是复制组
+    // 首个 beat 而非真实越界 beat——真实定位在 validateOverlayHtml 的 details.beat_scope
+    //（frameHtmlStatsEntry 原样存整个返回值，details 已保留）。scene 级条目 beat_id 用
+    // beat_scope（拿不到置 null，不伪造）；beat 级条目维持 decision.beat_id（本就准确）。
+    const beatScope = check.details && typeof check.details === 'object'
+      ? (check.details.beat_scope || null)
+      : null;
     warnings.push({
       code: 'asset_first_overlay_caption_overlap',
       severity: 'warning',
@@ -1052,7 +1093,8 @@ function mapOverlayChecksToQaWarnings(decisions = [], { visualStrategy = null } 
         ? `scene ${decision.scene_id} 的 motion overlay 落入字幕安全区。`
         : `beat ${decision.beat_id} 的 motion overlay 落入字幕安全区。`,
       details: {
-        beat_id: decision.beat_id,
+        beat_id: sceneScoped ? beatScope : decision.beat_id,
+        overlay_beat_scope: beatScope,
         reason_code: check.reason_code,
         reason: check.message || '',
         ...(sceneScoped ? { stats_scope: 'scene', scene_id: decision.scene_id } : {}),
@@ -1166,6 +1208,7 @@ module.exports = {
   aspectFromDimensions,
   isBlankFrameMetric,
   projectBoundarySampleGroups,
+  buildTimedSamplePlan,
   analyzeAssetFirstRouting,
   analyzeAssetFirstBoundaries,
   analyzeAssetFirstCaptionRegion,

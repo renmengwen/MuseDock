@@ -20,7 +20,7 @@ function summarizeVisualQaWarnings(warnings) {
         ? item.details
         : {};
       const summary = {};
-      for (const key of ['beat_id', 'scene_id', 'frame_id', 'time', 'boundary_sec']) {
+      for (const key of ['beat_id', 'scene_id', 'frame_id', 'time', 'boundary_sec', 'overlay_beat_scope']) {
         if (details[key] !== undefined) summary[key] = details[key];
       }
       if (Array.isArray(details.beats)) {

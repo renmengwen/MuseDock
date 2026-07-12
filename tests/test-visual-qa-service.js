@@ -524,6 +524,37 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(warnings[0].code, 'asset_first_overlay_caption_overlap');
     assert.strictEqual(warnings[0].details.beat_id, 'scene_04_b1');
     assert.deepStrictEqual(mapOverlayChecksToQaWarnings(decisions, { visualStrategy: 'hf_first' }), []);
+    // P2-7：scene_html 下整 scene stats 复制导致 decision.beat_id 是首个 beat，
+    // 真实越界 beat 在 overlay_check.details.beat_scope——scene 级条目 beat_id 必须用 beat_scope，
+    // 并结构化透出 details.overlay_beat_scope；beat 级条目维持 decision.beat_id
+    {
+      const scoped = [
+        { beat_id: 'b1', scene_id: 'scene_09', stats_scope: 'scene',
+          overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'x（beat：b2）', details: { beat_scope: 'b2' } } },
+        { beat_id: 'b2', scene_id: 'scene_09', stats_scope: 'scene',
+          overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'x（beat：b2）', details: { beat_scope: 'b2' } } },
+        { beat_id: 'scene_10_b1', scene_id: 'scene_10',
+          overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'y', details: { beat_scope: 'scene_10_b1' } } },
+      ];
+      const scopedWarnings = mapOverlayChecksToQaWarnings(scoped, { visualStrategy: 'asset_first' });
+      assert.strictEqual(scopedWarnings.length, 2);
+      const sceneWarning = scopedWarnings.find(w => w.details.scene_id === 'scene_09');
+      assert.strictEqual(sceneWarning.details.beat_id, 'b2', 'scene 级条目 beat_id 必须定位真实越界 beat（beat_scope）');
+      assert.strictEqual(sceneWarning.details.overlay_beat_scope, 'b2');
+      const beatWarning = scopedWarnings.find(w => !w.details.stats_scope);
+      assert.strictEqual(beatWarning.details.beat_id, 'scene_10_b1', 'beat 级条目维持 decision.beat_id');
+      // overlay_check 无 details（旧数据）时 scene 级 beat_id 置 null，不伪造首个 beat
+      const legacyScoped = mapOverlayChecksToQaWarnings([
+        { beat_id: 'b1', scene_id: 'scene_11', stats_scope: 'scene',
+          overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'z' } },
+      ], { visualStrategy: 'asset_first' });
+      assert.strictEqual(legacyScoped[0].details.beat_id, null, '无 beat_scope 时不伪造 beat_id');
+      // 摘要投影保留 overlay_beat_scope 定位字段
+      const { summarizeVisualQaWarnings } = require('../server/services/creative-video/visualQaCodes');
+      const summary = summarizeVisualQaWarnings(scopedWarnings);
+      assert.strictEqual(summary.find(w => w.details?.scene_id === 'scene_09').details.overlay_beat_scope, 'b2',
+        '摘要必须保留 overlay_beat_scope');
+    }
     // scene_html 回落展开（stats_scope:'scene'）：同 scene 复制的整场景 overlay_check 只报一条；
     // beat 级（无标记）仍逐条报
     const sceneScoped = [
@@ -590,6 +621,105 @@ const qa = require('../server/services/creative-video/visualQaService');
     ] }, 12.66, { pairedSampling: true });
     assert.strictEqual(noWindows.length, 1);
     assert.deepStrictEqual(noWindows[0].times, [6.03, 6.33, 6.63, 6.83, 7.33]);
+    // P2-3：成对采样组结构拆分——safety_times 只含旧安全三点（白屏阻断口径），
+    // diff_times 只含 ∓0.3s 差分点，times 保留并集供抽帧计划
+    assert.deepStrictEqual(paired[0].safety_times, [6.33, 6.83, 7.33], 'safety_times = 旧安全三点');
+    assert.deepStrictEqual(paired[0].diff_times, [6.03, 6.63], 'diff_times = ∓0.3s 差分点');
+    assert.deepStrictEqual(internal[0].safety_times, [6.33, 6.83, 7.33], '内部 beat 边界组同样拆分');
+    assert.deepStrictEqual(internal[0].diff_times, [6.03, 6.63]);
+    assert.strictEqual(legacy[0].safety_times, undefined, '缺省路径不加新字段（逐值行为不变）');
+    assert.strictEqual(mixed[1].safety_times, undefined, '跨 scene 边界组不加新字段');
+  }
+  // P2-3：白屏阻断口径只看安全点——安全点仅 1 张空白 + 差分点 2 张空白时不得阻断
+  {
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      project: {
+        frames: [
+          { id: 'scene_01_b1', scene_id: 'scene_01', duration_sec: 2 },
+          { id: 'scene_01_b2', scene_id: 'scene_01', duration_sec: 2 },
+        ],
+      },
+      visualStrategy: 'asset_first',
+      expectedAspectRatio: '16:9',
+      services: {
+        probeVideo: async () => ({ width: 1920, height: 1080, duration: 4 }),
+        // 边界 2s：安全点 [2, 2.5, 3] 仅 2s 一张空白；差分点 [1.7, 2.3] 均空白。
+        // 原口径（遍历全部 5 点）会数出 3 张空白误升级阻断；新口径只看安全点 => 不阻断
+        sampleFrames: async () => [
+          { id: 'frame_0', time_sec: 0, average_luma: 90, luma_stddev: 30, edge_score: 18, color_variance: 30, fingerprint: 'a' },
+          { id: 'frame_1', time_sec: 0.5, average_luma: 100, luma_stddev: 31, edge_score: 19, color_variance: 31, fingerprint: 'b' },
+          { id: 'frame_2', time_sec: 1, average_luma: 110, luma_stddev: 32, edge_score: 20, color_variance: 32, fingerprint: 'c' },
+          { id: 'frame_2b', time_sec: 1.2, average_luma: 112, luma_stddev: 32, edge_score: 20, color_variance: 32, fingerprint: 'c1' },
+          { id: 'frame_3', time_sec: 1.7, average_luma: 250, luma_stddev: 2, edge_score: 1, color_variance: 1, fingerprint: 'd' },
+          { id: 'frame_4', time_sec: 2, average_luma: 251, luma_stddev: 2, edge_score: 1, color_variance: 1, fingerprint: 'e' },
+          { id: 'frame_5', time_sec: 2.3, average_luma: 252, luma_stddev: 2, edge_score: 1, color_variance: 1, fingerprint: 'f' },
+          { id: 'frame_6', time_sec: 2.5, average_luma: 120, luma_stddev: 33, edge_score: 20, color_variance: 33, fingerprint: 'g' },
+          { id: 'frame_7', time_sec: 3, average_luma: 125, luma_stddev: 34, edge_score: 21, color_variance: 34, fingerprint: 'h' },
+          { id: 'frame_8', time_sec: 3.5, average_luma: 130, luma_stddev: 35, edge_score: 22, color_variance: 35, fingerprint: 'i' },
+          { id: 'frame_9', time_sec: 3.8, average_luma: 135, luma_stddev: 36, edge_score: 23, color_variance: 36, fingerprint: 'j' },
+        ],
+      },
+    });
+    assert.ok(!report.issues.some(issue => issue.code === 'blank_segment_boundary'),
+      '差分专用采样点不得参与白屏阻断计数（安全点仅 1 张空白）');
+    assert.strictEqual(report.success, true);
+  }
+  // P2-4：asset_first 下 style 观测采样点必须覆盖全片——60s 无边界 project 补均匀观测点
+  {
+    const { buildTimedSamplePlan } = require('../server/services/creative-video/visualQaService');
+    const longProject = { frames: [{ id: 'scene:scene_01', scene_id: 'scene_01', duration_sec: 60 }] };
+    const plan = buildTimedSamplePlan({
+      project: longProject,
+      videoInfo: { width: 1080, height: 1920, duration: 60 },
+      pairedBoundarySampling: true,
+    });
+    assert.strictEqual(plan.boundaryGroups.length, 0, '单 scene 单帧无边界组');
+    const lateTimes = plan.times.filter(time => time > 12);
+    assert.ok(lateTimes.length >= 5, `11.5s 后必须有观测点，实际 ${JSON.stringify(plan.times)}`);
+    assert.ok(plan.times.some(time => time > 48), '观测点需覆盖片尾段');
+    assert.ok(plan.times.length <= 120, '共用 MAX_TIMED_SAMPLES 预算');
+    // 缺省（hf_first/safetyOnly）不补观测点：times 仅 opening 三点，行为不变
+    const hfPlan = buildTimedSamplePlan({
+      project: longProject,
+      videoInfo: { width: 1080, height: 1920, duration: 60 },
+    });
+    assert.deepStrictEqual(hfPlan.times, [0, 0.5, 1.0], '缺省路径采样点逐值不变（硬约束 A）');
+  }
+  // P2-4：生产链路——采样请求携带全片观测点，45s 突变可被 style_drift 检出
+  {
+    const sampleRequests = [];
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      project: { frames: [{ id: 'scene:scene_01', scene_id: 'scene_01', duration_sec: 60 }] },
+      visualStrategy: 'asset_first',
+      services: {
+        probeVideo: async () => ({ width: 1080, height: 1920, duration: 60 }),
+        sampleFrames: async (request) => {
+          sampleRequests.push(request);
+          const times = Array.isArray(request.times) && request.times.length
+            ? request.times
+            : [0, 0.5, 1.0];
+          return times.map((time, index) => ({
+            id: `frame_${index}`,
+            time_sec: time,
+            average_luma: 120,
+            luma_stddev: 40,
+            edge_score: 20,
+            color_variance: 30,
+            fingerprint: `fp_${index}`,
+            mean_rgb: time >= 45 ? [10, 10, 12] : [220, 220, 215],
+          }));
+        },
+      },
+    });
+    assert.ok(sampleRequests[0] && Array.isArray(sampleRequests[0].times), 'sampleFrames 必须收到生产采样计划 times');
+    assert.ok(sampleRequests[0].times.some(time => time > 12), '采样请求必须含 11.5s 之后的观测点');
+    assert.strictEqual(report.success, true);
+    assert.ok((report.warnings || []).some(w => w.code === 'asset_first_style_drift'),
+      '45s 级风格断裂必须经生产采样计划检出');
   }
   // P1-7 语义回归：asset_first 成对采样下，same_scene 边界后白屏（b 与 b+0.5 两点空白）
   // 仍能命中 blank_segment_boundary 阻断（issues，而非 warning）
