@@ -371,6 +371,18 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(warnings[0].code, 'asset_first_boundary_refresh');
     assert.strictEqual(warnings[0].severity, 'warning');
     assert.ok(warnings[0].details.boundary_sec === 69.71);
+    // P2-5：edge_score 是 0-255 级原始梯度标度，差分必须 /255 归一后再与 diffThreshold 比较。
+    // 亮度不变、edge 差 8（真实产物常见量级）=> 8/255≈0.031，不得触发；
+    // edge 差 200 => 200/255≈0.78，才触发。
+    const edgeOnly = analyzeAssetFirstBoundaries([
+      { scene_id: 'scene_01', boundary_sec: 10, same_scene: true,
+        before: { average_luma: 120, edge_score: 20 }, after: { average_luma: 120, edge_score: 28 } },
+      { scene_id: 'scene_02', boundary_sec: 20, same_scene: true,
+        before: { average_luma: 120, edge_score: 20 }, after: { average_luma: 120, edge_score: 220 } },
+    ], { visualStrategy: 'asset_first', diffThreshold: 0.25 });
+    assert.strictEqual(edgeOnly.length, 1, 'edge 微小原始差值（未归一前 >0.25）不得单独触发');
+    assert.strictEqual(edgeOnly[0].details.boundary_sec, 20);
+    assert.ok(Math.abs(edgeOnly[0].details.score - 200 / 255) < 0.001, 'edge 分量按 /255 归一计分');
   }
 
   // 3) 字幕区可读性：底部区域方差过低 = 无内容
@@ -430,6 +442,38 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(warnings[0].code, 'asset_first_style_drift');
     assert.deepStrictEqual(analyzeAssetFirstStyleDrift(frames, { visualStrategy: 'hf_first', maxMeanShift: 96 }), []);
   }
+  // P2-4：style_drift 观测窗口 = 顺序帧（0-11.5s）∪ timed 边界采样帧（覆盖全片），
+  // 合并去重按时间排序后 45s 级断裂可命中；横跨跨 scene 边界 ±0.35s 的帧对跳过（硬切合法）
+  {
+    const { mergeStyleDriftObservationFrames } = require('../server/services/creative-video/visualQaService');
+    const sequential = Array.from({ length: 24 }, (_, i) => ({
+      time_sec: i * 0.5,
+      mean_rgb: [220, 220, 215],
+    }));
+    const timed = [
+      { time_sec: 0, mean_rgb: [220, 220, 215] }, // 与顺序帧同时间点，应去重
+      { time_sec: 45.17, mean_rgb: [221, 219, 214] },
+      { time_sec: 45.77, mean_rgb: [12, 10, 11] }, // 45.47s 断裂点后
+      { time_sec: 60, mean_rgb: [11, 9, 12] },
+    ];
+    const merged = mergeStyleDriftObservationFrames(sequential, timed);
+    assert.strictEqual(merged.filter(f => Number(f.time_sec) === 0).length, 1, '同时间点帧去重');
+    const sortedTimes = merged.map(f => Number(f.time_sec));
+    assert.deepStrictEqual(sortedTimes, [...sortedTimes].sort((a, b) => a - b), '合并后按时间排序');
+    const warnings = analyzeAssetFirstStyleDrift(merged, { visualStrategy: 'asset_first', maxMeanShift: 96 });
+    assert.strictEqual(warnings.length, 1, '45s 级断裂必须在扩窗后命中');
+    assert.strictEqual(warnings[0].details.time, 45.77);
+    // 同一断裂点若正好横跨跨 scene 边界（45.47s），该帧对应跳过，不误报硬切
+    const skipped = analyzeAssetFirstStyleDrift(merged, {
+      visualStrategy: 'asset_first', maxMeanShift: 96, sceneCutTimes: [45.47],
+    });
+    assert.deepStrictEqual(skipped, [], '横跨跨 scene 边界 ±0.35s 的帧对跳过');
+    // 边界远离突变点时不影响检测
+    const farCut = analyzeAssetFirstStyleDrift(merged, {
+      visualStrategy: 'asset_first', maxMeanShift: 96, sceneCutTimes: [20],
+    });
+    assert.strictEqual(farCut.length, 1, '无关边界不得吞掉真实漂移');
+  }
   // asset_missing 复用 workflow 级 asset usage 报告（真实结构，R6：无 report.missing）
   {
     const report = {
@@ -475,8 +519,9 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(dedup.length, 3, 'scene scope 去重为 1 条 + beat 级 2 条');
     assert.strictEqual(dedup.filter(w => w.details.scene_id === 'scene_07').length, 1);
   }
-  // 边界成对采样（Important 1 修正）：pairedSampling 只对 same_scene 边界给 [∓0.3s]，
-  // 跨 scene 边界保留 [b, b+0.5, b+1.0]（blank_segment_boundary 检测口径不变）；缺省与现状一致
+  // 边界成对采样（P1-7 修正）：pairedSampling 对 same_scene 边界取并集
+  // [b-0.3, b, b+0.3, b+0.5, b+1.0]——保留旧安全采样三点（白屏阻断能力不降级），
+  // 额外增加 ∓0.3s 差分点；跨 scene 边界保留 [b, b+0.5, b+1.0]；缺省与现状一致
   {
     const project = { frames: [
       { scene_id: 'scene_05', duration_sec: 6.33 },
@@ -484,11 +529,11 @@ const qa = require('../server/services/creative-video/visualQaService');
     ] };
     const paired = projectBoundarySampleGroups(project, 12.66, { pairedSampling: true });
     assert.strictEqual(paired.length, 1);
-    assert.deepStrictEqual(paired[0].times, [6.03, 6.63], '成对采样 = 边界前 0.3s + 边界后 0.3s');
+    assert.deepStrictEqual(paired[0].times, [6.03, 6.33, 6.63, 6.83, 7.33], '成对采样 = 旧安全三点 ∪ ∓0.3s 差分点');
     assert.strictEqual(paired[0].same_scene, true);
     const legacy = projectBoundarySampleGroups(project, 12.66);
     assert.deepStrictEqual(legacy[0].times, [6.33, 6.83, 7.33], '缺省采样与现状完全一致（硬约束 A）');
-    // 混合序列：same_scene 边界成对采样，跨 scene 边界维持旧三点采样
+    // 混合序列：same_scene 边界并集采样，跨 scene 边界维持旧三点采样
     const mixed = projectBoundarySampleGroups({ frames: [
       { scene_id: 'scene_01', duration_sec: 4 },
       { scene_id: 'scene_01', duration_sec: 4 },
@@ -496,9 +541,44 @@ const qa = require('../server/services/creative-video/visualQaService');
     ] }, 12, { pairedSampling: true });
     assert.strictEqual(mixed.length, 2);
     assert.strictEqual(mixed[0].same_scene, true);
-    assert.deepStrictEqual(mixed[0].times, [3.7, 4.3], 'same_scene 边界 => 成对采样');
+    assert.deepStrictEqual(mixed[0].times, [3.7, 4, 4.3, 4.5, 5], 'same_scene 边界 => 并集采样，含旧安全三点');
     assert.strictEqual(mixed[1].same_scene, false, '跨 scene 边界 same_scene=false');
     assert.deepStrictEqual(mixed[1].times, [8, 8.5, 9], '跨 scene 边界保留旧采样，空白检测不降敏');
+    // 语义：边界后 0-0.6s 白屏时，times 必须覆盖 b 与 b+0.5 两个空白检测点（≥2 张空白可命中阻断）
+    assert.ok(mixed[0].times.includes(4) && mixed[0].times.includes(4.5) && mixed[0].times.includes(5),
+      'same_scene 边界白屏阻断点位（b / b+0.5 / b+1.0）必须保留');
+  }
+  // P1-7 语义回归：asset_first 成对采样下，same_scene 边界后白屏（b 与 b+0.5 两点空白）
+  // 仍能命中 blank_segment_boundary 阻断（issues，而非 warning）
+  {
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      project: {
+        frames: [
+          { id: 'scene_01_b1', scene_id: 'scene_01', duration_sec: 2 },
+          { id: 'scene_01_b2', scene_id: 'scene_01', duration_sec: 2 },
+        ],
+      },
+      visualStrategy: 'asset_first',
+      expectedAspectRatio: '16:9',
+      services: {
+        probeVideo: async () => ({ width: 1920, height: 1080, duration: 4 }),
+        sampleFrames: async () => [
+          { id: 'frame_0', time_sec: 0, average_luma: 90, luma_stddev: 30, edge_score: 18, color_variance: 30, fingerprint: 'a' },
+          { id: 'frame_1', time_sec: 0.5, average_luma: 100, luma_stddev: 31, edge_score: 19, color_variance: 31, fingerprint: 'b' },
+          { id: 'frame_2', time_sec: 1, average_luma: 110, luma_stddev: 32, edge_score: 20, color_variance: 32, fingerprint: 'c' },
+          { id: 'frame_3', time_sec: 1.7, average_luma: 115, luma_stddev: 33, edge_score: 20, color_variance: 33, fingerprint: 'c2' },
+          { id: 'frame_4', time_sec: 2, average_luma: 250, luma_stddev: 2, edge_score: 1, color_variance: 1, fingerprint: 'd' },
+          { id: 'frame_5', time_sec: 2.5, average_luma: 251, luma_stddev: 2, edge_score: 1, color_variance: 1, fingerprint: 'e' },
+          { id: 'frame_6', time_sec: 3, average_luma: 120, luma_stddev: 35, edge_score: 20, color_variance: 35, fingerprint: 'f' },
+          { id: 'frame_7', time_sec: 3.5, average_luma: 125, luma_stddev: 36, edge_score: 21, color_variance: 36, fingerprint: 'g' },
+        ],
+      },
+    });
+    assert.strictEqual(report.success, false, '边界后白屏必须仍是阻断项');
+    assert.ok(report.issues.some(issue => issue.code === 'blank_segment_boundary'),
+      'asset_first 成对采样不得吞掉 blank_segment_boundary 阻断');
   }
   // 7.1 Minor 顺手修：before/after 指标非有限值（如缺帧兜底对象）跳过该组，不误报
   {

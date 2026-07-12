@@ -232,10 +232,11 @@ function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
   };
 }
 
-// pairedSampling（asset_first 专用）：仅对 same_scene===true 的边界改为成对采样（∓0.3s）供差分；
-// 跨 scene 边界保留 [b, b+0.5, b+1.0]，blank_segment_boundary 检测口径不变。
-// 代价：same_scene 边界的 blank_segment_boundary 降敏（成对两点需同时空白，边界后白屏闪现难命中），
-// 该类边界的整帧重刷/白屏改由 asset_first_boundary_refresh 差分检测覆盖。
+// pairedSampling（asset_first 专用）：same_scene===true 的边界取并集
+// [b-0.3, b, b+0.3, b+0.5, b+1.0]——保留旧安全采样 [b, b+0.5, b+1.0]（blank_segment_boundary
+// 的 ≥2 空白阻断能力不降级），额外增加 ∓0.3s 成对差分点供 boundary_refresh 检测；
+// 跨 scene 边界保留 [b, b+0.5, b+1.0]。采样总量由 buildTimedSamplePlan 的
+// MAX_TIMED_SAMPLES 封顶（典型 17 边界 ×5 点 + 开头 3 点 = 88 < 120，不会超）。
 // 缺省（hf_first/safetyOnly）采样时间逐值与原实现一致（硬约束 A）。
 function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSampling = false } = {}) {
   const frames = Array.isArray(project?.frames) ? project.frames : [];
@@ -249,7 +250,7 @@ function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSamplin
     const nextSceneId = String(frames[index + 1]?.scene_id || '').trim();
     const sameScene = Boolean(sceneId) && sceneId === nextSceneId;
     const candidates = pairedSampling === true && sameScene
-      ? [cursor - 0.3, cursor + 0.3].map(time => Math.round(time * 1000) / 1000)
+      ? [cursor - 0.3, cursor, cursor + 0.3, cursor + 0.5, cursor + 1.0].map(time => Math.round(time * 1000) / 1000)
       : [cursor, cursor + 0.5, cursor + 1.0];
     const times = candidates
       .filter(time => time > 0 && (!Number.isFinite(duration) || duration <= 0 || time < duration));
@@ -803,10 +804,12 @@ function analyzeAssetFirstRouting(decisions = [], { visualStrategy = null } = {}
   return warnings;
 }
 
-// 差分用真实指标字段（readRgbFrameMetrics 产出）：average_luma（0-255 标度）与 edge_score
+// 差分用真实指标字段（readRgbFrameMetrics 产出）：average_luma 与 edge_score 均为 0-255 标度
+//（edge_score = 相邻像素亮度差平均，累计的是 0-255 亮度差），两分量统一 /255 归一到 0-1
+// 后共用 diffThreshold，避免 edge 原始梯度微小变化（量级几十）单独触发（P2-5）。
 function boundaryDiffScore(before = {}, after = {}) {
   const luma = Math.abs((Number(after.average_luma) || 0) - (Number(before.average_luma) || 0)) / 255;
-  const edges = Math.abs((Number(after.edge_score) || 0) - (Number(before.edge_score) || 0));
+  const edges = Math.abs((Number(after.edge_score) || 0) - (Number(before.edge_score) || 0)) / 255;
   return Math.max(luma, edges);
 }
 
@@ -871,9 +874,15 @@ function analyzeAssetFirstInformation(beatsInfo = [], { visualStrategy = null, m
   return warnings;
 }
 
-// 风格漂移：相邻帧平均色任一通道突变超过阈值 => 单条 warning（取全片最大突变点）
-function analyzeAssetFirstStyleDrift(frames = [], { visualStrategy = null, maxMeanShift = 96 } = {}) {
+// 风格漂移：相邻帧平均色任一通道突变超过阈值 => 单条 warning（取全片最大突变点）。
+// sceneCutTimes（跨 scene 边界秒列表）给出时，横跨任一边界 ±0.35s 的帧对跳过——
+// 跨 scene 硬切是合法设计，style_drift 语义是同场景内漂移/整体断裂（P2-4）。
+function analyzeAssetFirstStyleDrift(frames = [], { visualStrategy = null, maxMeanShift = 96, sceneCutTimes = [] } = {}) {
   if (visualStrategy !== 'asset_first') return [];
+  const cuts = (Array.isArray(sceneCutTimes) ? sceneCutTimes : [])
+    .map(Number)
+    .filter(Number.isFinite);
+  const frameTime = frame => Number(frame.time ?? frame.time_sec);
   const list = (Array.isArray(frames) ? frames : []).filter(frame => (
     Array.isArray(frame?.mean_rgb)
     && frame.mean_rgb.length >= 3
@@ -881,6 +890,13 @@ function analyzeAssetFirstStyleDrift(frames = [], { visualStrategy = null, maxMe
   ));
   let worst = null;
   for (let index = 1; index < list.length; index += 1) {
+    const previousTime = frameTime(list[index - 1]);
+    const currentTime = frameTime(list[index]);
+    // 帧对时间区间与任一跨 scene 边界 ±0.35s 相交 => 该对差分归因于合法硬切，跳过
+    if (
+      Number.isFinite(previousTime) && Number.isFinite(currentTime)
+      && cuts.some(cut => previousTime <= cut + 0.35 && currentTime >= cut - 0.35)
+    ) continue;
     const previous = list[index - 1].mean_rgb;
     const current = list[index].mean_rgb;
     const shift = Math.max(
@@ -908,6 +924,30 @@ function analyzeAssetFirstStyleDrift(frames = [], { visualStrategy = null, maxMe
       max_mean_shift: maxMeanShift,
     },
   }];
+}
+
+// style_drift 观测窗口（P2-4）：生产顺序抽帧 fps=2/maxFrames=24 只覆盖前 ~12s，
+// timed 采样帧（opening + 边界组）覆盖全片时间点且同样携带 mean_rgb。
+// 二者合并、按时间排序、同一时间点（毫秒精度）去重后作为 style_drift 输入，
+// 使 40s+ 级的整体断裂也可观测。无时间戳的帧（人工注入等）保留在末尾原顺序。
+function mergeStyleDriftObservationFrames(sequentialFrames = [], timedFrames = []) {
+  const seen = new Set();
+  const timeless = [];
+  const timestamped = [];
+  for (const frame of [...(Array.isArray(sequentialFrames) ? sequentialFrames : []), ...(Array.isArray(timedFrames) ? timedFrames : [])]) {
+    if (!frame) continue;
+    const time = Number(frame.time ?? frame.time_sec);
+    if (!Number.isFinite(time)) {
+      timeless.push(frame);
+      continue;
+    }
+    const key = (Math.round(time * 1000) / 1000).toFixed(3);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    timestamped.push({ frame, time });
+  }
+  timestamped.sort((left, right) => left.time - right.time);
+  return [...timestamped.map(item => item.frame), ...timeless];
 }
 
 // 素材缺失：复用 workflow 级 asset_usage_report（R6：真实结构无 report.missing 字段）。
@@ -1040,7 +1080,17 @@ function collectAssetFirstWarnings({ project = {}, timedPlan = {}, timedFrames =
       ),
       ...analyzeAssetFirstCaptionRegion(captionRegionFramesFromSamples(timedFrames, voiceWindows), options),
       ...analyzeAssetFirstInformation(beatsInfoFromRenderDecisions(decisions), options),
-      ...analyzeAssetFirstStyleDrift(sequentialFrames, options),
+      // style_drift 输入 = 顺序帧 ∪ timed 采样帧（覆盖全片），跨 scene 边界 ±0.35s 的帧对跳过
+      ...analyzeAssetFirstStyleDrift(
+        mergeStyleDriftObservationFrames(sequentialFrames, timedFrames),
+        {
+          ...options,
+          sceneCutTimes: (timedPlan.boundaryGroups || [])
+            .filter(group => group.same_scene !== true)
+            .map(group => Number(group.boundary_sec))
+            .filter(Number.isFinite),
+        },
+      ),
       ...mapAssetUsageToQaWarnings(project.asset_usage_report || {}, options),
       ...mapOverlayChecksToQaWarnings(decisions, options),
     ];
@@ -1067,6 +1117,7 @@ module.exports = {
   analyzeAssetFirstCaptionRegion,
   analyzeAssetFirstInformation,
   analyzeAssetFirstStyleDrift,
+  mergeStyleDriftObservationFrames,
   mapAssetUsageToQaWarnings,
   mapOverlayChecksToQaWarnings,
   attachAssetFirstWarnings,
