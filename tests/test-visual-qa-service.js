@@ -871,6 +871,139 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(hfReport.success, true);
     assert.strictEqual(hfReport.warnings, undefined, 'hf_first 报告不得出现 warnings 字段（硬约束 A）');
   }
+  // Finding 2（P2）：style observation 固定预留预算 + boundary 预算按全局唯一时间点计数
+  // 探针 1：30×5s 同 scene 帧（150s）——旧逻辑 boundaryGroups 23/29 截断、observation 只到 37.5s，
+  // 最后 34s 无观测。修复后 observation 必须覆盖尾段（预留 OBSERVATION_RESERVE=7）。
+  {
+    const { buildTimedSamplePlan } = require('../server/services/creative-video/visualQaService');
+    const project = { frames: Array.from({ length: 30 }, (_, i) => ({
+      id: `scene_01_b${i}`, scene_id: 'scene_01', duration_sec: 5,
+    })) };
+    const plan = buildTimedSamplePlan({
+      project,
+      videoInfo: { width: 1080, height: 1920, duration: 150 },
+      pairedBoundarySampling: true,
+    });
+    assert.ok(plan.times.length <= 120, '共用 MAX_TIMED_SAMPLES 预算');
+    assert.ok(plan.observation.length > 0, 'observation 必须有预留配额，不得被 boundary 组耗尽');
+    assert.ok(Math.max(...plan.observation) >= (150 * 7) / 8 - 0.001,
+      `observation 必须覆盖片尾段（≥131.25s），实际 ${JSON.stringify(plan.observation)}`);
+    assert.ok(plan.times.some(time => time > 120),
+      `最后 30s 必须有采样观测点，实际最大 ${Math.max(...plan.times)}`);
+  }
+  // 探针 2：60s scene_html + 80 个 0.1s 密集 beat window——旧逻辑相邻组采样点大量重复
+  // 却按 group.times.length 重复扣预算：23 组即"耗尽"但唯一 times 只有 ~35 个、observation=[]。
+  // 修复后预算按全局唯一时间点计数：全部 79 组纳入且 observation 非空含尾段点。
+  {
+    const { buildTimedSamplePlan } = require('../server/services/creative-video/visualQaService');
+    const windows = Array.from({ length: 80 }, (_, i) => ({
+      id: `scene_01_b${i}`,
+      start_sec: Math.round(i * 0.1 * 1000) / 1000,
+      end_sec: Math.round((i + 1) * 0.1 * 1000) / 1000,
+    }));
+    const project = { frames: [{
+      id: 'scene:scene_01', scene_id: 'scene_01', duration_sec: 60,
+      metadata: { beat_windows: windows },
+    }] };
+    const plan = buildTimedSamplePlan({
+      project,
+      videoInfo: { width: 1080, height: 1920, duration: 60 },
+      pairedBoundarySampling: true,
+    });
+    assert.strictEqual(plan.total_boundary_count, 79);
+    assert.ok(plan.sampled_boundary_count > 23,
+      `唯一时间点计费后纳入组数必须显著大于旧逻辑的 23，实际 ${plan.sampled_boundary_count}`);
+    assert.strictEqual(plan.sampled_boundary_count, 79, '密集重叠组全部可纳入（唯一点仅 ~89 个）');
+    assert.ok(plan.observation.length > 0, '预算不再被重复计费虚耗，observation 非空');
+    assert.ok(plan.observation.some(time => time > 48), 'observation 含尾段点');
+    assert.ok(plan.times.length <= 120, '唯一采样点总量仍受 MAX_TIMED_SAMPLES 封顶');
+    // 缺省路径逐值回归：同 project 不开 pairedBoundarySampling 时无内部边界组、无 observation
+    const defaultPlan = buildTimedSamplePlan({
+      project,
+      videoInfo: { width: 1080, height: 1920, duration: 60 },
+    });
+    assert.deepStrictEqual(defaultPlan.times, [0, 0.5, 1.0], '缺省路径采样点逐值不变（硬约束 A）');
+    assert.deepStrictEqual(defaultPlan.observation, []);
+  }
+  // Finding 3（P2）：sceneCutTimes 与截断后的采样组解耦——从 project.frames 完整推导
+  {
+    const { sceneCutTimesFromProject } = require('../server/services/creative-video/visualQaService');
+    assert.strictEqual(typeof sceneCutTimesFromProject, 'function', '必须导出 sceneCutTimesFromProject');
+    // 基本：scene1 20s + scene2 80s => 唯一 cut = 20
+    const cuts = sceneCutTimesFromProject({ frames: [
+      { id: 'scene:scene_01', scene_id: 'scene_01', duration_sec: 20 },
+      { id: 'scene:scene_02', scene_id: 'scene_02', duration_sec: 80 },
+    ] });
+    assert.deepStrictEqual(cuts, [20], '相邻帧 scene_id 不同处产出 cut');
+    // 同 scene 内部边界不是 cut；scene_html 内部 beat 边界（同 frame）天然不产出
+    const sameScene = sceneCutTimesFromProject({ frames: [
+      { id: 'scene_01_b1', scene_id: 'scene_01', duration_sec: 2 },
+      { id: 'scene_01_b2', scene_id: 'scene_01', duration_sec: 2 },
+      { id: 'scene:scene_02', scene_id: 'scene_02', duration_sec: 6,
+        metadata: { beat_windows: [{ end_sec: 3 }, { end_sec: 6 }] } },
+    ] });
+    assert.deepStrictEqual(sameScene, [4], '同 scene 边界与 frame 内部 beat 边界不进 cut 列表');
+    // 无效时长帧跳过（与 projectBoundarySampleGroups 帧时长口径一致）
+    assert.deepStrictEqual(sceneCutTimesFromProject({ frames: [
+      { scene_id: 'scene_01', durationSec: 20 },
+      { scene_id: 'scene_02', duration_sec: 0 },
+      { scene_id: 'scene_02', duration_sec: 80 },
+    ] }), [20], 'durationSec 回退与无效时长跳过同口径');
+  }
+  // Finding 3 接线：scene1(20s 密集 beat 耗尽预算) + scene2(80s)——真实 cut=20s 即使
+  // boundaryGroups 截断也必须豁免 20s 硬切，同时远处真实漂移仍报
+  {
+    const windows = Array.from({ length: 200 }, (_, i) => ({
+      id: `scene_01_b${i}`,
+      start_sec: Math.round(i * 0.1 * 1000) / 1000,
+      end_sec: Math.round((i + 1) * 0.1 * 1000) / 1000,
+    }));
+    const project = {
+      frames: [
+        { id: 'scene:scene_01', scene_id: 'scene_01', duration_sec: 20,
+          metadata: { beat_windows: windows } },
+        { id: 'scene:scene_02', scene_id: 'scene_02', duration_sec: 80 },
+      ],
+    };
+    const meanRgbAt = time => {
+      if (time < 20) return [220, 220, 215]; // scene_01 亮色
+      if (time < 70) return [10, 10, 12]; // scene_02 前段暗色（20s 硬切合法）
+      return [220, 220, 215]; // 70s 附近真实漂移（无 scene cut）
+    };
+    const report = await qa.inspectRenderedVideo({
+      projectDir,
+      outputPath,
+      project,
+      visualStrategy: 'asset_first',
+      services: {
+        probeVideo: async () => ({ width: 1080, height: 1920, duration: 100 }),
+        sampleFrames: async (request) => (request.times || []).map((time, index) => ({
+          id: `frame_${index}`,
+          time_sec: time,
+          average_luma: 100 + (index % 40),
+          luma_stddev: 40,
+          edge_score: 20,
+          color_variance: 30,
+          fingerprint: `fp_${index}`,
+          mean_rgb: meanRgbAt(time),
+        })),
+      },
+    });
+    // 采样计划验证：密集 beat 确实截断了 boundaryGroups（20s 跨 scene 组不在采样组里）
+    const { buildTimedSamplePlan } = require('../server/services/creative-video/visualQaService');
+    const plan = buildTimedSamplePlan({
+      project,
+      videoInfo: { width: 1080, height: 1920, duration: 100 },
+      pairedBoundarySampling: true,
+    });
+    assert.ok(plan.sampled_boundary_count < plan.total_boundary_count, '前置条件：boundaryGroups 已截断');
+    assert.ok(!plan.boundaryGroups.some(group => group.same_scene !== true),
+      '前置条件：20s 跨 scene 组已被截断挤出采样组');
+    const drifts = (report.warnings || []).filter(w => w.code === 'asset_first_style_drift');
+    assert.strictEqual(drifts.length, 1, `远处真实漂移（70s 附近）必须仍报，实际 ${JSON.stringify(drifts)}`);
+    assert.ok(Number(drifts[0].details.time) > 60,
+      `20s 合法跨 scene 硬切不得误报 style_drift，报警点应在 70s 附近，实际 ${drifts[0].details.time}`);
+  }
   console.log('visual qa asset_first density/drift tests passed');
 
   console.log('visual qa service tests passed');

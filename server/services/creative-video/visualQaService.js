@@ -28,6 +28,9 @@ const THRESHOLDS = {
   lowMotionRatio: 0.75,
 };
 const MAX_TIMED_SAMPLES = 120;
+// Finding 2：pairedBoundarySampling 下从 MAX_TIMED_SAMPLES 里固定预留给全片均匀
+// style observation 的采样配额，避免密集边界组把观测预算全部耗尽（最多补 7 个点）。
+const OBSERVATION_RESERVE = 7;
 
 function ratio(count, total) {
   return total > 0 ? count / total : 0;
@@ -300,6 +303,28 @@ function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSamplin
   return groups;
 }
 
+// Finding 3：完整跨 scene 硬切时间列表——直接从 project.frames 推导，不依赖（可能被
+// MAX_TIMED_SAMPLES 截断的）timedPlan.boundaryGroups。帧时长回退链（duration_sec ->
+// durationSec，无效跳过）与 projectBoundarySampleGroups 同口径；相邻帧 scene_id 不同
+//（含任一为空）处产出 cut。scene_html 内部 beat 边界在同一 frame 内无 scene_id 变化，
+// 天然不进该列表。仅供 style_drift 硬切豁免使用；boundaryGroups 继续只管抽帧。
+function sceneCutTimesFromProject(project = {}) {
+  const frames = Array.isArray(project?.frames) ? project.frames : [];
+  const cuts = [];
+  let cursor = 0;
+  for (let index = 0; index < frames.length; index += 1) {
+    const frameDuration = Number(frames[index]?.duration_sec || frames[index]?.durationSec);
+    if (!Number.isFinite(frameDuration) || frameDuration <= 0) continue;
+    cursor += frameDuration;
+    if (index >= frames.length - 1) break;
+    const sceneId = String(frames[index]?.scene_id || '').trim();
+    const nextSceneId = String(frames[index + 1]?.scene_id || '').trim();
+    const sameScene = Boolean(sceneId) && sceneId === nextSceneId;
+    if (!sameScene) cuts.push(Math.round(cursor * 100) / 100);
+  }
+  return cuts;
+}
+
 function uniqueTimes(values = []) {
   const seen = new Set();
   return values
@@ -322,15 +347,34 @@ function buildTimedSamplePlan({ project = {}, videoInfo = {}, pairedBoundarySamp
   });
   const cappedBoundaryGroups = [];
   let sampleCount = opening.length;
-  for (const group of boundaryGroups) {
-    if (sampleCount + group.times.length > MAX_TIMED_SAMPLES) break;
-    cappedBoundaryGroups.push(group);
-    sampleCount += group.times.length;
+  if (pairedBoundarySampling === true) {
+    // Finding 2：paired 采样下相邻边界组的采样点大量重叠（密集 beat window 场景），
+    // 预算改按「全局唯一时间点」计数：每组仍整组原子纳入（部分纳入会破坏 safety/diff 语义），
+    // 但扣费额 = 该组 times 中尚未出现过的唯一点数（毫秒键，与 uniqueTimes 同精度）。
+    // 同时预留 OBSERVATION_RESERVE 给全片均匀观测点，boundary 组只用剩余预算。
+    // 缺省路径（else 分支）保持原始按 group.times.length 扣费，逐值行为不变（硬约束 A）。
+    const seen = new Set(opening.map(time => (Math.round(time * 1000) / 1000).toFixed(3)));
+    const boundaryBudget = MAX_TIMED_SAMPLES - OBSERVATION_RESERVE;
+    for (const group of boundaryGroups) {
+      const newKeys = [...new Set(group.times
+        .map(time => (Math.round(time * 1000) / 1000).toFixed(3)))]
+        .filter(key => !seen.has(key));
+      if (sampleCount + newKeys.length > boundaryBudget) break;
+      for (const key of newKeys) seen.add(key);
+      cappedBoundaryGroups.push(group);
+      sampleCount += newKeys.length;
+    }
+  } else {
+    for (const group of boundaryGroups) {
+      if (sampleCount + group.times.length > MAX_TIMED_SAMPLES) break;
+      cappedBoundaryGroups.push(group);
+      sampleCount += group.times.length;
+    }
   }
   // P2-4：asset_first（pairedBoundarySampling）下补均匀 style observation 采样点——
   // 边界/opening 点不足以覆盖全片时（如 60s 单 scene 单 beat 无边界组），按 duration/8
-  // 间隔补最多 7 个均匀点，跳过与既有采样点 <0.5s 重叠的；共用 MAX_TIMED_SAMPLES 预算
-  //（边界组优先）。这些点进入抽帧计划（自带 mean_rgb），流入 style_drift 观测合并输入。
+  // 间隔补最多 7 个均匀点，跳过与既有采样点 <0.5s 重叠的；预算 = OBSERVATION_RESERVE
+  // 固定预留 + boundary 组没用完的余量（总量仍受 MAX_TIMED_SAMPLES 封顶）。这些点进入抽帧计划（自带 mean_rgb），流入 style_drift 观测合并输入。
   // 缺省 / hf_first / safetyOnly 不加（行为不变，硬约束 A）。
   const observation = [];
   const duration = Number(videoInfo.duration);
@@ -1184,15 +1228,14 @@ function collectAssetFirstWarnings({ project = {}, timedPlan = {}, timedFrames =
       ),
       ...analyzeAssetFirstCaptionRegion(captionRegionFramesFromSamples(timedFrames, voiceWindows), options),
       ...analyzeAssetFirstInformation(beatsInfoFromRenderDecisions(decisions), options),
-      // style_drift 输入 = 顺序帧 ∪ timed 采样帧（覆盖全片），跨 scene 边界 ±0.35s 的帧对跳过
+      // style_drift 输入 = 顺序帧 ∪ timed 采样帧（覆盖全片），跨 scene 边界 ±0.35s 的帧对跳过；
+      // Finding 3：豁免边界来自 project.frames 完整推导（sceneCutTimesFromProject），
+      // 不再从可能被预算截断的 timedPlan.boundaryGroups 过滤，避免合法硬切被误报 drift
       ...analyzeAssetFirstStyleDrift(
         mergeStyleDriftObservationFrames(sequentialFrames, timedFrames),
         {
           ...options,
-          sceneCutTimes: (timedPlan.boundaryGroups || [])
-            .filter(group => group.same_scene !== true)
-            .map(group => Number(group.boundary_sec))
-            .filter(Number.isFinite),
+          sceneCutTimes: sceneCutTimesFromProject(project),
         },
       ),
       ...mapAssetUsageToQaWarnings(project.asset_usage_report || {}, options),
@@ -1216,6 +1259,7 @@ module.exports = {
   aspectFromDimensions,
   isBlankFrameMetric,
   projectBoundarySampleGroups,
+  sceneCutTimesFromProject,
   buildTimedSamplePlan,
   analyzeAssetFirstRouting,
   analyzeAssetFirstBoundaries,
