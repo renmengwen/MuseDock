@@ -46,6 +46,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
       contexts: [],
       gotos: [],
       initScripts: 0,
+      initScriptSources: [],
       progress: [],
       ffmpeg: [],
       waits: [],
@@ -61,7 +62,10 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
               const recordDir = options.recordVideo.dir;
               return {
                 newPage: async () => ({
-                  addInitScript: async () => { calls.initScripts += 1; },
+                  addInitScript: async fn => {
+                    calls.initScripts += 1;
+                    calls.initScriptSources.push(String(fn));
+                  },
                   goto: async (url, options) => { calls.gotos.push({ url, options }); },
                   evaluate: async fn => {
                     const source = String(fn);
@@ -123,7 +127,12 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     assert.equal(calls.launches.length, 1);
     assert.equal(calls.launches[0].headless, true);
     assert.deepEqual(calls.contexts[0].recordVideo.size, { width: 640, height: 360 });
-    assert.equal(calls.initScripts, 1);
+    // 冻结动画 + __mpAdapterControlled 受控标志两条 initScript（后者供 scene_html beat 时钟禁用兜底自启）
+    assert.equal(calls.initScripts, 2);
+    assert.ok(
+      calls.initScriptSources.some(source => source.includes('__mpAdapterControlled')),
+      '必须在 goto 前注入 __mpAdapterControlled 受控标志',
+    );
     assert.equal(calls.gotos[0].options.waitUntil, 'domcontentloaded');
     assert.ok(calls.waits.includes(800), '录制结束前应有 800ms 尾部缓冲，保证 -ss 裁剪安全余量');
 
