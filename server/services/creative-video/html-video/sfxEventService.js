@@ -300,10 +300,14 @@ async function applyPlannedSfxEvents({ projectDir, project, sceneSpec, library, 
 // 用 scene_id + time_sec 重算事件绝对时间：同 scene 多帧求和（scene 起点 = 该 scene 第一帧
 // 前所有帧时长累计），帧时长回退链与 buildVoiceWindowsFromProject 同口径。
 // 纯函数：返回局部副本，不回写原始事件；查不到 scene 或 time_sec 无效的事件保留原值（容错不丢）。
+// 假设同 scene 的帧在 timeline 上连续排列（beat 帧不与其他 scene 交错），scene 起点取第一帧起点。
 function recomputeEventGlobalTimes(events = [], project = {}) {
   const sceneStarts = new Map();
   let cursor = 0;
   for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
+    // 帧侧沿用 getSceneId（scene_id 缺失时回退 frame.id）：normalizeFrame 保证 scene_id=id 兜底，
+    // 未归一化的旧 project 只有 id。事件侧只认 scene_id/sceneId——事件 id（sfx_xxx）不是 scene 键，
+    // 回退会误配；两侧口径不对称是有意为之。
     const sceneId = getSceneId(frame);
     if (sceneId && !sceneStarts.has(sceneId)) sceneStarts.set(sceneId, cursor);
     cursor += Number(frame?.duration_sec ?? frame?.durationSec ?? frame?.duration) || 0;
@@ -373,20 +377,19 @@ function resolveProjectSfxEventsForMux({ project = {}, projectDir, library, voic
       dropped.push({ id: String(event.id || ''), sfx_id: sfxId, reason: error.message || String(error) });
     }
   }
-  // 旁白避让在通过校验的候选事件上执行（ducking 用重算后的时间），再映射为 mux 形态
+  // 旁白避让在通过校验的候选事件上执行（ducking 用重算后的时间）。素材路径提前附在事件副本的
+  // __sfx_path 临时字段上：applyVoiceAvoidance 的 {...event} spread 会自然带过去，
+  // 构造 mux 条目时取用并剥离，避免按引用/id 回查在 id 重复或为空时串路径。
   const avoidanceDropped = [];
-  let keptEvents = candidates.map(candidate => candidate.event);
+  let keptEvents = candidates.map(candidate => ({ ...candidate.event, __sfx_path: candidate.path }));
   if (Array.isArray(voiceWindows) && voiceWindows.length && keptEvents.length) {
     const avoidance = applyVoiceAvoidance(keptEvents, voiceWindows, {});
     keptEvents = avoidance.kept;
     avoidanceDropped.push(...avoidance.dropped);
   }
-  const pathByEvent = new Map(candidates.map(candidate => [candidate.event, candidate.path]));
-  // 避让后的 kept 是事件副本，按 id 回查素材路径（同批事件 id 由规划期保证唯一）
-  const pathById = new Map(candidates.map(candidate => [String(candidate.event.id || ''), candidate.path]));
   const resolved = keptEvents.map(event => ({
     id: String(event.id || ''),
-    path: pathByEvent.get(event) || pathById.get(String(event.id || '')),
+    path: event.__sfx_path,
     global_time_sec: Number(event.global_time_sec ?? event.globalTimeSec),
     volume_db: clamp(Number.isFinite(Number(event.volume_db)) ? Number(event.volume_db) : -18, SFX_VOLUME_MIN_DB, SFX_VOLUME_MAX_DB),
   }));

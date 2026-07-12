@@ -233,3 +233,34 @@ console.log('sfx narration fallback window tests passed');
   fs.rmSync(dir, { recursive: true, force: true });
 }
 console.log('sfx validation-before-avoidance tests passed');
+
+// (8) 路径不靠 id 回查：两个空 id、不同素材路径的事件经过避让（副本化）后各自拿到正确路径，
+// 且 mux 条目不泄漏内部临时字段（只含 id/path/global_time_sec/volume_db）。
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hv-sfx-path-'));
+  fs.mkdirSync(path.join(dir, 'audio', 'sfx'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'audio', 'sfx', 'whoosh_soft.wav'), 'x');
+  fs.writeFileSync(path.join(dir, 'audio', 'sfx', 'ui_pop.wav'), 'x');
+  const project = {
+    audio: { sfx: { enabled: true, status: 'ready', events: [
+      { id: '', scene_id: 'scene_01', time_sec: 1, global_time_sec: 1, sfx_id: 'whoosh_soft',
+        intensity: 'medium', volume_db: -18, enabled: true, confidence: 0.9 },
+      { id: '', scene_id: 'scene_01', time_sec: 3, global_time_sec: 3, sfx_id: 'ui_pop',
+        intensity: 'medium', volume_db: -18, enabled: true, confidence: 0.9 },
+    ] } },
+  };
+  const library = { items: [{ id: 'whoosh_soft' }, { id: 'ui_pop' }] };
+  const result = resolveProjectSfxEventsForMux({
+    project, projectDir: dir, library,
+    voiceWindows: [{ start: 10, end: 12 }],
+  });
+  assert.strictEqual(result.events.length, 2);
+  assert.ok(/whoosh_soft\.wav$/.test(result.events[0].path), '空 id 事件 1 拿到自己的素材路径');
+  assert.ok(/ui_pop\.wav$/.test(result.events[1].path), '空 id 事件 2 拿到自己的素材路径，不被串路径');
+  for (const entry of result.events) {
+    assert.deepStrictEqual(Object.keys(entry).sort(), ['global_time_sec', 'id', 'path', 'volume_db'],
+      'mux 条目不得泄漏内部临时字段');
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+console.log('sfx path attachment tests passed');
