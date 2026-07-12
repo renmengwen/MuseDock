@@ -943,7 +943,8 @@ function fakeHtmlVideoServices(calls = {}) {
     assert.equal(result.success, false, '阻断白屏不能返回成功');
     const record = await readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));
     assert.equal(record.status, 'failed');
-    assert.equal(record.last_failure.code, 'visual_qa_blocking_failure');
+    // 诊断 code 与主流程字面一致（visual_qa_warning），retryPlanner 才会给出重生成镜头的计划
+    assert.equal(record.last_failure.code, 'visual_qa_warning');
     assert.equal(record.retry.attempts.at(-1).status, 'failed');
     const project = await projectStore.loadProject(projectDir);
     assert.equal(
@@ -951,6 +952,11 @@ function fakeHtmlVideoServices(calls = {}) {
       'failed',
       '阻断白屏时 checkpoint 应写 failed 而不是 warning',
     );
+    // 阻断失败后的下一轮 retry plan 必须是 retry_frame_html（重生成镜头），
+    // 而不是 rerun_visual_inspect（对同一份白屏成片反复巡检不收敛）
+    const nextPlan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
+    assert.equal(nextPlan.success, true);
+    assert.equal(nextPlan.plan.repair_action, 'retry_frame_html', '阻断白屏后应重生成镜头而不是死循环重巡检');
   }
 
   // 既有 P1：compose 后巡检（composeAndInspect 路径）阻断白屏同样返回失败
@@ -978,9 +984,12 @@ function fakeHtmlVideoServices(calls = {}) {
     });
     assert.equal(result.success, false);
     const record = await readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));
-    assert.equal(record.last_failure.code, 'visual_qa_blocking_failure');
+    assert.equal(record.last_failure.code, 'visual_qa_warning');
     const project = await projectStore.loadProject(projectDir);
     assert.equal(project.generation_checkpoint.stages.visual_inspect.status, 'failed');
+    // 阻断失败后下一轮 retry plan 收敛到重生成镜头
+    const nextPlan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
+    assert.equal(nextPlan.plan.repair_action, 'retry_frame_html');
   }
 
   // 回归：巡检 success=false 但不含阻断 code（仅参考性问题）时，resume 仍按 warning 语义成功

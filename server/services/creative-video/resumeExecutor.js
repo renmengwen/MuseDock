@@ -11,6 +11,7 @@ const { computeSceneSpecSpeechHash } = require('./sceneSpecHash');
 const { applyManifestToProjectAudio } = require('./ttsService');
 const { resolveRetryFrameIds } = require('./retryPlanner');
 const defaultVisualQaService = require('./visualQaService');
+const { isBlockingVisualQaCode } = require('./visualQaCodes');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -107,13 +108,11 @@ async function saveActionProject(projectDir, result, fallbackProject) {
   return projectStore.saveProject(projectDir, project);
 }
 
-// 与主工作流 htmlVideoWorkflow.isBlockingVisualQaIssue 对齐：
+// 与主工作流 htmlVideoWorkflow.isBlockingVisualQaIssue 对齐（共享常量，见 visualQaCodes.js）：
 // 开头白屏 / 镜头边界白屏属于阻断问题，resume 路径也必须返回失败而不是标成恢复完成。
-const BLOCKING_VISUAL_QA_CODES = ['blank_opening_frame', 'blank_segment_boundary'];
-
 function blockingVisualIssuesOf(visualInspectResult) {
   return arrayOrEmpty(visualInspectResult?.issues)
-    .filter(issue => BLOCKING_VISUAL_QA_CODES.includes(safeString(issue?.code)));
+    .filter(issue => isBlockingVisualQaCode(issue?.code));
 }
 
 // 巡检结果为失败且含阻断问题时，构造与主流程对齐的 visual_qa_blocking_failure 失败返回；
@@ -125,7 +124,9 @@ function visualInspectBlockingFailure(inspected, { projectDir, outputPath } = {}
   if (!blockingIssues.length) return null;
   const message = 'html-video 成片画面存在开头或镜头边界白屏，未通过视觉安全检查。';
   return actionFailure(message, [createDiagnostic({
-    code: 'visual_qa_blocking_failure',
+    // 诊断 code 与主流程字面一致（htmlVideoWorkflow 阻断失败也是 visual_qa_warning 诊断）：
+    // retryPlanner 按该 code 才会给出 retry_frame_html，否则下一轮 retry 会陷入只重新巡检的死循环
+    code: 'visual_qa_warning',
     stage: 'inspect',
     sub_stage: 'visual_inspect',
     severity: 'error',
@@ -143,6 +144,8 @@ function visualInspectBlockingFailure(inspected, { projectDir, outputPath } = {}
     html_video_project_path: projectDir,
     output_path: outputPath,
     visualInspectResult,
+    // 与主流程 generateHtmlVideo 阻断失败返回的字段名统一，消费方双读兜底
+    visual_report: visualInspectResult,
   });
 }
 

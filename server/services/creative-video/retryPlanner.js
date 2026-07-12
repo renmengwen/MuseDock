@@ -5,7 +5,8 @@ const MODE = 'repair_and_resume';
 const ENVIRONMENT_CODES = new Set(['ffmpeg_not_configured', 'playwright_not_configured']);
 const RETRY_META_FAILURE_CODES = new Set(['resume_action_not_configured', 'retry_executor_failed', 'project_dir_missing']);
 const NON_FAILURE_DIAGNOSTIC_CODES = new Set(['materialized', 'frame_rendered']);
-const BLOCKING_VISUAL_QA_CODES = new Set(['blank_opening_frame', 'blank_segment_boundary']);
+// 阻断性视觉 QA code 共享常量（与 htmlVideoWorkflow / resumeExecutor 字面一致）
+const BLOCKING_VISUAL_QA_CODES = new Set(require('./visualQaCodes').BLOCKING_VISUAL_QA_CODES);
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};

@@ -1644,41 +1644,16 @@
   };
 }
 
+// P1-6：视觉质检 warnings（asset_first 观测通道）非阻断透出。
+// 摘要逻辑收敛到共享模块 visualQaCodes（details 只保留定位字段控制投影体积），此处再导出保持既有引用方式。
+const { summarizeVisualQaWarnings } = require('../creative-video/visualQaCodes');
+
 module.exports = {
   createAgentRunsFreeformWorkflow,
   summarizeVisualQaWarnings,
   buildFreeformVisualInspectProjection,
 };
 
-// P1-6：视觉质检 warnings（asset_first 观测通道）非阻断透出。
-// details 只保留定位字段（beat_id/scene_id/time 等）控制投影体积。
-function summarizeVisualQaWarnings(warnings) {
-  if (!Array.isArray(warnings)) return [];
-  return warnings
-    .filter(item => item && typeof item === 'object')
-    .map(item => {
-      const details = item.details && typeof item.details === 'object' && !Array.isArray(item.details)
-        ? item.details
-        : {};
-      const summary = {};
-      for (const key of ['beat_id', 'scene_id', 'frame_id', 'time', 'boundary_sec']) {
-        if (details[key] !== undefined) summary[key] = details[key];
-      }
-      if (Array.isArray(details.beats)) {
-        const beatIds = details.beats.map(beat => beat?.beat_id).filter(Boolean).slice(0, 20);
-        if (beatIds.length) summary.beat_ids = beatIds;
-      }
-      if (Array.isArray(details.missing_required_asset_ids)) {
-        summary.missing_required_asset_ids = details.missing_required_asset_ids.slice(0, 20);
-      }
-      return {
-        code: String(item.code || ''),
-        severity: String(item.severity || 'warning'),
-        message: String(item.message || ''),
-        ...(Object.keys(summary).length ? { details: summary } : {}),
-      };
-    });
-}
 
 // P1-6：视觉质检状态投影——warnings 非阻断（成片仍算通过），
 // 但 status 用 passed_with_warnings + message 带告警条数，让用户在任务状态里看得到。

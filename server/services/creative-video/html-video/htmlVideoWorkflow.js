@@ -1415,7 +1415,8 @@ function missingRequiredAssetIds(project = {}) {
 }
 
 function isBlockingVisualQaIssue(issue = {}) {
-  return ['blank_opening_frame', 'blank_segment_boundary'].includes(String(issue.code || ''));
+  // 阻断 code 共享常量：与 resumeExecutor / retryPlanner 保持字面一致
+  return require('../visualQaCodes').isBlockingVisualQaCode(issue.code);
 }
 
 function applyMediaOptionsToProject(project, mediaOptions = {}) {

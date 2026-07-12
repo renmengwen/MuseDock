@@ -2118,32 +2118,8 @@ function makeRetryAttemptId(now) {
 }
 
 // P1-6：视觉质检 warnings（asset_first 观测通道）非阻断透出到 retry 汇总，
-// details 只保留定位字段控制体积（与 agentRunsFreeformWorkflow.summarizeVisualQaWarnings 语义一致）。
-function summarizeVisualQaWarningsForStage(warnings) {
-  if (!Array.isArray(warnings)) return [];
-  return warnings
-    .filter(item => item && typeof item === 'object')
-    .map(item => {
-      const details = plainObject(item.details);
-      const summary = {};
-      for (const key of ['beat_id', 'scene_id', 'frame_id', 'time', 'boundary_sec']) {
-        if (details[key] !== undefined) summary[key] = details[key];
-      }
-      if (Array.isArray(details.beats)) {
-        const beatIds = details.beats.map(beat => beat?.beat_id).filter(Boolean).slice(0, 20);
-        if (beatIds.length) summary.beat_ids = beatIds;
-      }
-      if (Array.isArray(details.missing_required_asset_ids)) {
-        summary.missing_required_asset_ids = details.missing_required_asset_ids.slice(0, 20);
-      }
-      return {
-        code: safeString(item.code),
-        severity: safeString(item.severity) || 'warning',
-        message: safeString(item.message),
-        ...(Object.keys(summary).length ? { details: summary } : {}),
-      };
-    });
-}
+// 摘要逻辑收敛到共享模块 visualQaCodes（details 只保留定位字段控制体积）。
+const { summarizeVisualQaWarnings: summarizeVisualQaWarningsForStage } = require('../creative-video/visualQaCodes');
 
 function buildHtmlVideoLiteProjectStageResult({ project, projectDir, renderResult, visualInspectResult } = {}) {
   const outputPath = safeString(renderResult?.output_path || renderResult?.outputPath);
