@@ -269,10 +269,21 @@ function resumeArtifactsMatch(project = {}, sceneSpec = null, template = {}, gen
   return Boolean(projectTemplateId && templateId && projectTemplateId === templateId);
 }
 
-function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target, resumeAllowed = true } = {}) {
+function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target, resumeAllowed = true, inputFingerprint = '', visualStrategy = '' } = {}) {
   if (!resumeAllowed) return { reuse: false };
   const frame = objectOrEmpty(checkpointFrame);
   if (frame.status !== 'done' || !frame.html_path) return { reuse: false };
+  // P1-2：真实输入指纹判定——checkpoint 有指纹且与当前输入指纹不一致（策略/beat/素材/
+  // 主题/画幅/prompt 版本任一变化）时不复用；旧 checkpoint 无指纹时向后兼容：
+  // hf_first（及无策略语义的旧链路）维持现状复用，asset_first 属新链路，旧 HTML 必然是
+  // 旧链路产物，直接重新生成。
+  const checkpointFingerprint = String(frame.input_fingerprint || '').trim();
+  const currentFingerprint = String(inputFingerprint || '').trim();
+  if (checkpointFingerprint) {
+    if (currentFingerprint && checkpointFingerprint !== currentFingerprint) return { reuse: false };
+  } else if (visualStrategy === 'asset_first') {
+    return { reuse: false };
+  }
   let html;
   try {
     const absolutePath = projectStore.resolveProjectPath(projectDir, frame.html_path);

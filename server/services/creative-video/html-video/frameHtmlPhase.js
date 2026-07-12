@@ -1,5 +1,6 @@
 const fsp = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 
 const projectStore = require('./projectStore');
 const frameHtmlAgent = require('./frameHtmlAgent');
@@ -16,6 +17,51 @@ const { AGENTS, STAGES } = require('../agentStages');
 
 const FRAME_HTML_MODEL_OPTIONS = { requestTimeoutMs: 180000, maxRetries: 1 };
 const FRAME_HTML_CONCURRENCY = 1;
+
+// Frame HTML 生成提示词/primitive 结构版本号：当 frameHtmlAgent 的 prompt 结构、primitive
+// 参考片段语义或帧 HTML 约定发生会影响产物的变化时手动 +1，使旧 checkpoint 指纹失配、
+// resume 时强制重新生成，避免代码升级后静默复用旧版产物。
+const FRAME_PROMPT_VERSION = 1;
+
+// 确定性 JSON 序列化（对象键递归排序），保证同一输入结构得到稳定字符串
+function stableJsonValue(value) {
+  if (Array.isArray(value)) return value.map(stableJsonValue);
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((result, key) => {
+      result[key] = stableJsonValue(value[key]);
+      return result;
+    }, {});
+  }
+  return value;
+}
+
+function stableJsonStringify(value) {
+  return JSON.stringify(stableJsonValue(value));
+}
+
+/**
+ * P1-2：计算单帧 HTML 生成的真实输入指纹。覆盖会改变产物的全部关键输入：
+ * 视觉策略、连续性模式、画幅、beat 编排（含 visual_base/motion_overlay(theme_tokens)/visual_text）、
+ * 素材绑定、scene_html 时间窗口与提示词版本。resume 复用时与 checkpoint 持久化的指纹比较，
+ * 任一维度变化即重新生成，杜绝「切策略/换素材后静默复用旧 HTML」。纯函数，可独立测试。
+ */
+function computeFrameInputFingerprint({ node, visualStrategy, continuityMode, target } = {}) {
+  const resolution = frameHtmlAgent.resolveResolution(target || {}) || {};
+  const assetRefs = (Array.isArray(node?.asset_refs) ? node.asset_refs : [])
+    .filter(Boolean)
+    .map(ref => stableJsonValue(ref))
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  const signature = {
+    visual_strategy: visualStrategy || null,
+    continuity_mode: continuityMode || 'beat_mp4',
+    resolution: { width: resolution.width ?? null, height: resolution.height ?? null },
+    beat: node?.metadata?.visual_beats ?? node?.metadata?.visual_beat ?? null,
+    asset_refs: assetRefs,
+    beat_windows: node?.metadata?.beat_windows || null,
+    prompt_version: FRAME_PROMPT_VERSION,
+  };
+  return crypto.createHash('sha256').update(stableJsonStringify(signature)).digest('hex');
+}
 
 async function mapLimit(items, limit, mapper) {
   const list = Array.isArray(items) ? items : [];
@@ -737,6 +783,15 @@ async function runFrameHtmlPhase(ctx) {
       node,
       target: templateRenderTarget,
       resumeAllowed: resumeAllowed && !regenerateFrameHtmlRequested,
+      // P1-2：真实输入指纹比较——checkpoint 有指纹且不匹配则重新生成；
+      // 无指纹的旧工程按 visualStrategy 兜底（asset_first 不复用旧链路产物）
+      inputFingerprint: computeFrameInputFingerprint({
+        node,
+        visualStrategy: creativeContext?.visual_strategy,
+        continuityMode: creativeContext?.continuity_mode,
+        target: templateRenderTarget,
+      }),
+      visualStrategy: creativeContext?.visual_strategy,
     });
     if (reuse.reuse) {
       const durationSec = trustedSceneDuration(scene || {}, node);
@@ -979,6 +1034,13 @@ async function runFrameHtmlPhase(ctx) {
         status: 'done',
         html_path: written.html_path,
         input_hash: sha256(htmlResult.html),
+        // P1-2：持久化真实输入指纹（input_hash 是历史遗留的输出 hash，保留不动）
+        input_fingerprint: computeFrameInputFingerprint({
+          node,
+          visualStrategy: creativeContext?.visual_strategy,
+          continuityMode: creativeContext?.continuity_mode,
+          target: templateRenderTarget,
+        }),
         output_hash: written.output_hash,
         diagnostic_code: htmlResult.fallbackDiagnostic?.code || '',
       });
@@ -1079,6 +1141,8 @@ module.exports = {
   runBucketsWithContinuity,
   groupBeatsForSceneHtml,
   buildSceneTimelineScript,
+  computeFrameInputFingerprint,
+  FRAME_PROMPT_VERSION,
   FRAME_HTML_CONCURRENCY,
   FRAME_HTML_MODEL_OPTIONS,
 };

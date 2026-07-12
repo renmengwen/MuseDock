@@ -12,6 +12,7 @@ const aiImageModel = require('../server/services/ai/aiImageModel');
 aiImageModel.isConfigured = async () => false;
 
 const frameHtmlAgent = require('../server/services/creative-video/html-video/frameHtmlAgent');
+const frameHtmlPhase = require('../server/services/creative-video/html-video/frameHtmlPhase');
 const frameFallbackBuilder = require('../server/services/creative-video/html-video/frameFallbackBuilder');
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
@@ -319,6 +320,107 @@ async function main() {
   });
 
   try {
+    // P1-2：Frame HTML 输入指纹纯函数——同输入同指纹，任一策略/主题/素材/文案维度变化即指纹变化
+    {
+      const { computeFrameInputFingerprint, FRAME_PROMPT_VERSION } = frameHtmlPhase;
+      assert.equal(FRAME_PROMPT_VERSION, 1, 'FRAME_PROMPT_VERSION 初始值应为 1');
+      const target = { resolution: { width: 1080, height: 1920 } };
+      const makeNode = () => ({
+        id: 'scene_01',
+        asset_refs: [{ asset_id: 'gen_02', usage: 'subject' }, { asset_id: 'gen_01', usage: 'background' }],
+        metadata: {
+          visual_beat: {
+            visual_base: { type: 'diagram' },
+            motion_overlay: { preset: 'count_up', theme_tokens: { accent: '#ff5a00' } },
+            continuity: { group_id: 'g1', beat_index: 1 },
+            visual_text: { headline: '第一幕' },
+          },
+        },
+      });
+      const args = () => ({ node: makeNode(), visualStrategy: 'asset_first', continuityMode: 'beat_mp4', target });
+      const base = computeFrameInputFingerprint(args());
+      assert.ok(/^[0-9a-f]{64}$/.test(base), '指纹应为 sha256 hex');
+      assert.equal(computeFrameInputFingerprint(args()), base, '同输入应得到同指纹');
+      // asset_refs 顺序不影响指纹（排序稳定）
+      const swapped = args();
+      swapped.node.asset_refs.reverse();
+      assert.equal(computeFrameInputFingerprint(swapped), base, 'asset_refs 顺序不同不应改变指纹');
+      // 策略变化 → 指纹变化
+      assert.notEqual(computeFrameInputFingerprint({ ...args(), visualStrategy: 'hf_first' }), base, '策略变化应改变指纹');
+      // continuity_mode 变化 → 指纹变化
+      assert.notEqual(computeFrameInputFingerprint({ ...args(), continuityMode: 'scene_html' }), base, 'continuity_mode 变化应改变指纹');
+      // theme token 变化 → 指纹变化
+      const themeChanged = args();
+      themeChanged.node.metadata.visual_beat.motion_overlay.theme_tokens.accent = '#00ff5a';
+      assert.notEqual(computeFrameInputFingerprint(themeChanged), base, 'theme token 变化应改变指纹');
+      // asset_refs 内容变化 → 指纹变化
+      const assetChanged = args();
+      assetChanged.node.asset_refs[0].asset_id = 'gen_03';
+      assert.notEqual(computeFrameInputFingerprint(assetChanged), base, 'asset_refs 内容变化应改变指纹');
+      // beat 文案变化 → 指纹变化
+      const textChanged = args();
+      textChanged.node.metadata.visual_beat.visual_text.headline = '第一幕已修改';
+      assert.notEqual(computeFrameInputFingerprint(textChanged), base, 'beat 文案变化应改变指纹');
+      // 画幅变化 → 指纹变化
+      assert.notEqual(
+        computeFrameInputFingerprint({ ...args(), target: { resolution: { width: 1920, height: 1080 } } }),
+        base,
+        '画幅变化应改变指纹',
+      );
+    }
+
+    // P1-2：shouldReuseFrameHtml 指纹判定——匹配复用 / 不匹配重生成 / 无指纹按策略向后兼容
+    {
+      const { computeFrameInputFingerprint } = frameHtmlPhase;
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-fingerprint-reuse-'));
+      const projectDir = path.join(rootDir, 'proj');
+      await writeFile(path.join(projectDir, 'frames/01-scene_01.html'), validHtml('scene_01'));
+      const target = { resolution: { width: 1080, height: 1920 } };
+      const node = { id: 'scene_01', metadata: { visual_beat: { visual_text: { headline: '第一幕' } } } };
+      const fingerprint = computeFrameInputFingerprint({ node, visualStrategy: 'asset_first', continuityMode: 'beat_mp4', target });
+      const baseArgs = {
+        projectDir,
+        scene: { id: 'scene_01' },
+        node,
+        target,
+        resumeAllowed: true,
+      };
+      const doneFrame = { status: 'done', html_path: 'frames/01-scene_01.html' };
+      // 指纹匹配 → 复用
+      assert.equal(workflow.shouldReuseFrameHtml({
+        ...baseArgs,
+        checkpointFrame: { ...doneFrame, input_fingerprint: fingerprint },
+        inputFingerprint: fingerprint,
+        visualStrategy: 'asset_first',
+      }).reuse, true, 'checkpoint 指纹与当前指纹一致应复用');
+      // 指纹不匹配 → 不复用
+      assert.equal(workflow.shouldReuseFrameHtml({
+        ...baseArgs,
+        checkpointFrame: { ...doneFrame, input_fingerprint: 'deadbeef' },
+        inputFingerprint: fingerprint,
+        visualStrategy: 'asset_first',
+      }).reuse, false, 'checkpoint 指纹与当前指纹不一致不应复用');
+      // 无指纹（旧工程）+ hf_first / 无策略 → 维持现状复用
+      assert.equal(workflow.shouldReuseFrameHtml({
+        ...baseArgs,
+        checkpointFrame: { ...doneFrame },
+        inputFingerprint: fingerprint,
+        visualStrategy: 'hf_first',
+      }).reuse, true, '旧 checkpoint 无指纹且 hf_first 应维持现状复用');
+      assert.equal(workflow.shouldReuseFrameHtml({
+        ...baseArgs,
+        checkpointFrame: { ...doneFrame },
+        inputFingerprint: fingerprint,
+      }).reuse, true, '旧 checkpoint 无指纹且无策略语义应维持现状复用');
+      // 无指纹（旧工程）+ asset_first → 不复用（旧 HTML 必然是旧链路产物）
+      assert.equal(workflow.shouldReuseFrameHtml({
+        ...baseArgs,
+        checkpointFrame: { ...doneFrame },
+        inputFingerprint: fingerprint,
+        visualStrategy: 'asset_first',
+      }).reuse, false, '旧 checkpoint 无指纹且当前为 asset_first 不应复用');
+    }
+
     // resumeArtifactsMatch：per_scene 模式不设全片模板，复用只看 scene_spec_hash + generation_mode
     {
       const { resumeArtifactsMatch } = workflow;
@@ -395,6 +497,11 @@ async function main() {
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_01.html_path, 'frames/01-scene_01.html');
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_02.html_path, 'frames/02-scene_02.html');
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_03.status, 'done');
+      // P1-2：新生成帧应写入输入指纹，供后续 resume 比较
+      assert.ok(
+        String(project.generation_checkpoint.stages.frame_html.frames.scene_03.input_fingerprint || '').length === 64,
+        '新生成帧的 checkpoint 应持久化 input_fingerprint',
+      );
     }
 
     {

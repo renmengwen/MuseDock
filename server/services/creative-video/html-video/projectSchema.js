@@ -378,6 +378,9 @@ function normalizeCheckpointFrames(value, type) {
         ? { mp4_path: failed ? '' : stringField(input.mp4_path) }
         : { html_path: failed ? '' : stringField(input.html_path) }),
       ...(type === 'render' ? {} : { input_hash: failed ? '' : stringField(input.input_hash) }),
+      // P1-2：帧 HTML 输入指纹（真实输入维度的 sha256），resume 复用时与当前输入比较；
+      // input_hash 是历史遗留的输出内容 hash，语义不同，两者并存
+      ...(type === 'render' ? {} : { input_fingerprint: failed ? '' : stringField(input.input_fingerprint) }),
       output_hash: failed ? '' : stringField(input.output_hash),
       diagnostic_code: stringField(input.diagnostic_code),
     };

@@ -219,6 +219,7 @@ assert.equal(schema.normalizeSfxEvent({ volume_db: -99 }).volume_db, -28);
             status: 'done',
             html_path: 'frames/01-scene_01.html',
             input_hash: 'frame-input',
+            input_fingerprint: '',
             output_hash: 'frame-output',
             diagnostic_code: '',
           },
