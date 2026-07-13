@@ -261,6 +261,115 @@ const { hasRealOverlayElement } = require('../server/services/creative-video/htm
   );
   assert.strictEqual(ok2.valid, true, 'bottom:200px !important 剥离后为正常值，不得误伤：' + JSON.stringify(ok2));
 }
+// Finding 1（P2）：0% 与多值 inset 等合法零长度写法不得绕过校验
+{
+  // 生产探针 1：bottom:0%（零长度任意单位）实际贴底边，必须判侵入字幕安全区
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:0%;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, 'bottom:0% 必须判 invalid');
+  assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area');
+}
+{
+  // 生产探针 2：inset:0px 0px（双值全零）等价整屏覆盖
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;inset:0px 0px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, 'inset:0px 0px 必须判整屏覆盖');
+  assert.strictEqual(bad.reason_code, 'overlay_covers_full_frame');
+}
+{
+  // 生产探针 3：inset:0 0 0 0（四值全零）等价整屏覆盖
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;inset:0 0 0 0"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, 'inset:0 0 0 0 必须判整屏覆盖');
+  assert.strictEqual(bad.reason_code, 'overlay_covers_full_frame');
+}
+{
+  // -0px 也是零：inset:-0px 判整屏覆盖
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;inset:-0px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false, 'inset:-0px 必须判整屏覆盖');
+  assert.strictEqual(bad.reason_code, 'overlay_covers_full_frame');
+}
+{
+  // 0.5px 不得误判为零：四边中一边 0.5px 就不是整屏覆盖（bottom:0 仍按安全区拦）
+  const bad = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;top:0;bottom:0;left:0.5px;right:0"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(bad.valid, false);
+  assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area', '0.5px 不是零，不得判整屏覆盖');
+  // inset 分量含 0.5px / -10px 时不是全零，也不是 indeterminate（px 可解析）
+  const halfPx = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;inset:0 0 0.5px 0"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(halfPx.valid, true, JSON.stringify(halfPx));
+  assert.ok(!halfPx.indeterminate, 'px 可解析的 inset 分量不得标 indeterminate');
+  const negPx = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;inset:0 0 -10px 0"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(negPx.valid, true, JSON.stringify(negPx));
+  assert.ok(!negPx.indeterminate, '-10px 不是零，也不是 indeterminate');
+}
+{
+  // 非 px 非零定位值（bottom:5%）无法静态确认：valid 不变但要带 indeterminate 标记
+  const result = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:5%;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(result.valid, true, 'indeterminate 不改变 valid 语义（非阻断）');
+  assert.strictEqual(result.indeterminate, true, 'bottom:5% 必须标记 indeterminate');
+  assert.ok(
+    result.details && Array.isArray(result.details.indeterminate_props)
+      && result.details.indeterminate_props.includes('bottom'),
+    `details.indeterminate_props 必须含 bottom：${JSON.stringify(result)}`,
+  );
+  assert.ok(String(result.message).includes('bottom:5%'), 'message 必须带出无法确认的值');
+  // calc(...) 同样 indeterminate
+  const calc = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;bottom:calc(10% + 20px);height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(calc.valid, true);
+  assert.strictEqual(calc.indeterminate, true, 'bottom:calc(...) 必须标记 indeterminate');
+  // 正常 px 值不得带 indeterminate
+  const normal = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:180px;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(normal.valid, true);
+  assert.ok(!normal.indeterminate, '正常 px 值不得标 indeterminate');
+}
+{
+  // validationGate 接线：indeterminate → overlay_position_indeterminate warning（asset_first 专属）
+  const { assetFirstOverlayIssues } = require('../server/services/creative-video/html-video/validationGate');
+  const html = '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:5%;height:200px"></div>';
+  const issues = assetFirstOverlayIssues(html, { visualStrategy: 'asset_first' });
+  assert.ok(
+    issues.some(issue => issue.code === 'overlay_position_indeterminate' && issue.severity === 'warning'),
+    `asset_first 下 indeterminate 必须产生 warning 级 issue：${JSON.stringify(issues)}`,
+  );
+  assert.deepStrictEqual(
+    assetFirstOverlayIssues(html, { visualStrategy: 'hf_first' }),
+    [],
+    'hf_first 不产生任何 issue（硬约束 A）',
+  );
+  const normalHtml = '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:180px;height:200px"></div>';
+  assert.deepStrictEqual(
+    assetFirstOverlayIssues(normalHtml, { visualStrategy: 'asset_first' }),
+    [],
+    '正常 px 值不得产生 indeterminate issue',
+  );
+}
 // Finding 5：未闭合 HTML 注释吞到文本末尾——注释内伪 overlay 不算真实元素
 {
   const unclosedComment = '<div class="hero">base</div><!-- fallback: <div data-mp-overlay="key_marker"></div>';

@@ -377,7 +377,17 @@ function buildTimedSamplePlan({ project = {}, videoInfo = {}, pairedBoundarySamp
   // 固定预留 + boundary 组没用完的余量（总量仍受 MAX_TIMED_SAMPLES 封顶）。这些点进入抽帧计划（自带 mean_rgb），流入 style_drift 观测合并输入。
   // 缺省 / hf_first / safetyOnly 不加（行为不变，硬约束 A）。
   const observation = [];
-  const duration = Number(videoInfo.duration);
+  // Finding 3：videoInfo.duration 无效（如 ffprobe 未取到）时，用 project.frames
+  // 的帧时长有效值总和兜底（回退链 duration_sec -> durationSec，与
+  // sceneCutTimesFromProject 同口径）；总和 <=0 维持现状不生成 observation。
+  let duration = Number(videoInfo.duration);
+  if (!Number.isFinite(duration) || duration <= 0) {
+    const frames = Array.isArray(project?.frames) ? project.frames : [];
+    duration = frames.reduce((sum, frame) => {
+      const frameDuration = Number(frame?.duration_sec || frame?.durationSec);
+      return Number.isFinite(frameDuration) && frameDuration > 0 ? sum + frameDuration : sum;
+    }, 0);
+  }
   if (pairedBoundarySampling === true && Number.isFinite(duration) && duration > 0) {
     const existing = uniqueTimes([...opening, ...cappedBoundaryGroups.flatMap(group => group.times)]);
     const interval = duration / 8;
@@ -549,7 +559,8 @@ async function probeVideo({ videoPath, runCommand }) {
       '-select_streams',
       'v:0',
       '-show_entries',
-      'stream=width,height,duration,avg_frame_rate,r_frame_rate',
+      // Finding 3：部分容器（如 webm/mkv）stream 段无 duration，同时读 format=duration 兜底
+      'stream=width,height,duration,avg_frame_rate,r_frame_rate:format=duration',
       '-of',
       'json',
       videoPath,
@@ -557,10 +568,12 @@ async function probeVideo({ videoPath, runCommand }) {
     if (!result.ok) return probeVideoWithFfmpeg({ videoPath, runCommand });
     const parsed = JSON.parse(result.stdout || '{}');
     const stream = Array.isArray(parsed.streams) ? parsed.streams[0] : {};
+    const format = parsed.format && typeof parsed.format === 'object' ? parsed.format : {};
     return {
       width: Number(stream.width) || undefined,
       height: Number(stream.height) || undefined,
-      duration: Number(stream.duration) || undefined,
+      // duration 优先 stream，再回退 format
+      duration: Number(stream.duration) || Number(format.duration) || undefined,
       fps: parseFps(stream.avg_frame_rate || stream.r_frame_rate),
     };
   } catch {
@@ -1261,6 +1274,7 @@ module.exports = {
   projectBoundarySampleGroups,
   sceneCutTimesFromProject,
   buildTimedSamplePlan,
+  probeVideo,
   analyzeAssetFirstRouting,
   analyzeAssetFirstBoundaries,
   analyzeAssetFirstCaptionRegion,

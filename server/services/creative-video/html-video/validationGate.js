@@ -191,7 +191,17 @@ function assetFirstOverlayIssues(html, { visualStrategy, frameHeight = 1920 } = 
   // P1-8：按真实 opening tag 判定，<style> 选择器/注释里的字样不触发校验（也不误报缺根节点）
   if (!hasRealOverlayElement(html)) return [];
   const result = validateOverlayHtml(html, { height: frameHeight });
-  if (result.valid) return [];
+  if (result.valid) {
+    // Finding 1：非 px 非零定位值无法静态确认安全区合规——warning 级提示人工复核（不阻断）
+    if (result.indeterminate) {
+      return [{
+        code: 'overlay_position_indeterminate',
+        severity: 'warning',
+        message: result.message || 'overlay 定位值无法静态确认安全区合规，请人工复核',
+      }];
+    }
+    return [];
+  }
   return [{
     code: result.reason_code,
     severity: 'warning',

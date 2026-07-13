@@ -1006,5 +1006,80 @@ const qa = require('../server/services/creative-video/visualQaService');
   }
   console.log('visual qa asset_first density/drift tests passed');
 
+  // Finding 3（P3）：videoInfo.duration 缺失时 observation 不得失效
+  {
+    const { buildTimedSamplePlan } = require('../server/services/creative-video/visualQaService');
+    // review 探针：ffprobe 未取到 duration（仅 fps）——用 frames duration_sec 总和兜底
+    const plan = buildTimedSamplePlan({
+      project: { frames: [{ scene_id: 'scene_01', duration_sec: 60 }] },
+      videoInfo: { fps: 30 },
+      pairedBoundarySampling: true,
+    });
+    assert.ok(plan.observation.length > 0,
+      `duration 缺失时 observation 必须用 frames 时长兜底，实际 ${JSON.stringify(plan.observation)}`);
+    assert.ok(Math.max(...plan.observation) >= (60 * 7) / 8 - 0.001,
+      `observation 必须覆盖尾段（≥52.5s），实际 ${JSON.stringify(plan.observation)}`);
+    assert.ok(plan.observation.every(time => time < 60), '兜底时长下采样点不得越过片尾');
+    // 兜底链：durationSec 回退 + 无效值跳过
+    const fallbackChain = buildTimedSamplePlan({
+      project: { frames: [
+        { scene_id: 'scene_01', durationSec: 30 },
+        { scene_id: 'scene_01', duration_sec: 0 },
+        { scene_id: 'scene_01', duration_sec: 30 },
+      ] },
+      videoInfo: {},
+      pairedBoundarySampling: true,
+    });
+    assert.ok(fallbackChain.observation.length > 0, 'durationSec 回退链同样生效');
+    assert.ok(Math.max(...fallbackChain.observation) >= (60 * 7) / 8 - 0.001,
+      `回退链兜底时长应为 60s，实际 ${JSON.stringify(fallbackChain.observation)}`);
+    // duration 与 frames 都无效：observation 空且不抛错（维持现状）
+    const emptyPlan = buildTimedSamplePlan({
+      project: { frames: [{ scene_id: 'scene_01' }] },
+      videoInfo: { fps: 30 },
+      pairedBoundarySampling: true,
+    });
+    assert.deepStrictEqual(emptyPlan.observation, [], 'duration 与 frames 时长都无效时 observation 保持为空');
+    // videoInfo.duration 有效时兜底不介入（与探针 1 等价输入回归）
+    const withDuration = buildTimedSamplePlan({
+      project: { frames: [{ scene_id: 'scene_01', duration_sec: 60 }] },
+      videoInfo: { fps: 30, duration: 60 },
+      pairedBoundarySampling: true,
+    });
+    assert.deepStrictEqual(plan.observation, withDuration.observation, '兜底结果与真实 duration 一致');
+  }
+  // Finding 3（P3）双保险：probeVideo 同时读 format=duration，stream 优先、format 兜底
+  {
+    const { probeVideo } = require('../server/services/creative-video/visualQaService');
+    assert.strictEqual(typeof probeVideo, 'function', '必须导出 probeVideo 供单测');
+    const makeRunCommand = payload => async (command, args) => {
+      // ffprobe 命令必须请求 format 段的 duration
+      const entries = args[args.indexOf('-show_entries') + 1];
+      assert.ok(/format\s*=\s*duration|format=duration/.test(entries),
+        `ffprobe -show_entries 必须包含 format=duration，实际 ${entries}`);
+      return { ok: true, stdout: JSON.stringify(payload), stderr: '' };
+    };
+    // stream.duration 缺失（如 mkv/webm 容器）→ 取 format.duration
+    const fromFormat = await probeVideo({
+      videoPath: 'x.mp4',
+      runCommand: makeRunCommand({
+        streams: [{ width: 1080, height: 1920, avg_frame_rate: '30/1' }],
+        format: { duration: '83.6' },
+      }),
+    });
+    assert.strictEqual(fromFormat.duration, 83.6, 'stream 无 duration 时必须回退 format.duration');
+    assert.strictEqual(fromFormat.fps, 30);
+    // stream.duration 存在 → 优先 stream
+    const fromStream = await probeVideo({
+      videoPath: 'x.mp4',
+      runCommand: makeRunCommand({
+        streams: [{ width: 1080, height: 1920, duration: '10.0', avg_frame_rate: '30/1' }],
+        format: { duration: '20.0' },
+      }),
+    });
+    assert.strictEqual(fromStream.duration, 10, 'stream.duration 必须优先于 format.duration');
+  }
+  console.log('visual qa duration fallback tests passed');
+
   console.log('visual qa service tests passed');
 })();

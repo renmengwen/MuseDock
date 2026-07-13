@@ -159,9 +159,19 @@ function pxNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-// 零长度归一判定：0 / 0px / 0PX / 0.0px / 0px !important 视为同一个零
+// 零长度归一判定：数值部分为 0 时任何长度单位（无单位/px/%/em/vh/...）都是零长度。
+// Finding 1：bottom:0%、inset:0 0 等合法零写法不得因单位非 px 而绕过校验。
+// 0.5px / -10px 数值非零不在此列；-0px 也是零。
 function isZeroLength(value) {
-  return pxNumber(value) === 0;
+  const text = stripImportant(value);
+  const match = text.match(/^(-?[\d.]+)\s*([a-z%]*)$/i);
+  return Boolean(match) && Number(match[1]) === 0;
+}
+
+// 定位值折算：零长度（任意单位）折 0，其余按 px 解析；解析不了返回 null
+function positionPx(value) {
+  if (isZeroLength(value)) return 0;
+  return pxNumber(value);
 }
 
 // 剥离注释与 <style>/<script> 内容：属性选择器、注释里的 data-mp-* 字样不算真实元素（P1-8）。
@@ -190,14 +200,27 @@ function validateOverlayHtml(html = '', { height = 1920 } = {}) {
   const rootTags = collectOverlayRootTags(html);
   if (!rootTags.length) return { valid: false, reason_code: 'overlay_root_missing', message: '缺少 data-mp-overlay 根节点' };
   // P2-2：scene_html 标准结构是多 overlay，必须逐个校验，任一越界即整体 invalid
+  const indeterminatePairs = [];
   for (const tag of rootTags) {
     const result = validateOverlayRootTag(tag, height);
-    if (result.valid) continue;
+    if (result.valid) {
+      // Finding 1：非 px 非零定位值无法静态确认，收集为非阻断的 indeterminate 标记
+      if (Array.isArray(result.indeterminate_pairs)) indeterminatePairs.push(...result.indeterminate_pairs);
+      continue;
+    }
     const beatScope = parseTagAttributes(tag).get('data-mp-beat-scope') || '';
     return {
       ...result,
       message: beatScope ? `${result.message}（beat：${beatScope}）` : result.message,
       details: { beat_scope: beatScope || null },
+    };
+  }
+  if (indeterminatePairs.length) {
+    return {
+      valid: true,
+      indeterminate: true,
+      message: `overlay 定位值无法静态确认安全区合规（${[...new Set(indeterminatePairs)].join('、')}），请人工复核`,
+      details: { indeterminate_props: [...new Set(indeterminatePairs.map(pair => pair.split(':')[0]))] },
     };
   }
   return { valid: true };
@@ -207,12 +230,15 @@ function validateOverlayHtml(html = '', { height = 1920 } = {}) {
 function validateOverlayRootTag(rootTag, height) {
   // P2-6：style 属性经属性解析取值，兼容单引号/大写 STYLE/等号空白/无引号
   const style = parseStyle(parseTagAttributes(rootTag).get('style') || '');
-  if (isZeroLength(style.inset) || (isZeroLength(style.top) && isZeroLength(style.bottom) && isZeroLength(style.left) && isZeroLength(style.right))) {
+  // Finding 1：inset 简写按空白拆 1~4 分量，全部分量为零即四边全零 = 整屏覆盖
+  const insetParts = stripImportant(style.inset).split(/\s+/).filter(Boolean);
+  const insetAllZero = insetParts.length > 0 && insetParts.every(isZeroLength);
+  if (insetAllZero || (isZeroLength(style.top) && isZeroLength(style.bottom) && isZeroLength(style.left) && isZeroLength(style.right))) {
     return { valid: false, reason_code: 'overlay_covers_full_frame', message: 'overlay 不允许整屏覆盖主视觉' };
   }
-  const bottom = pxNumber(style.bottom);
-  const top = pxNumber(style.top);
-  const overlayHeight = pxNumber(style.height);
+  const bottom = positionPx(style.bottom);
+  const top = positionPx(style.top);
+  const overlayHeight = positionPx(style.height);
   if (bottom !== null) {
     if (bottom < CAPTION_SAFE_BOTTOM_PX) {
       return {
@@ -235,6 +261,17 @@ function validateOverlayRootTag(rootTag, height) {
   if (overlayHeight !== null && overlayHeight > height * 0.6) {
     return { valid: false, reason_code: 'overlay_too_tall', message: 'overlay 高度超过画面 60%，会遮挡主体' };
   }
+  // Finding 1：定位关键属性（bottom/top/height/inset 分量）出现非 px 非零值时，
+  // 不再静默当安全——标记 indeterminate（非阻断，valid 语义不变）
+  const indeterminatePairs = [];
+  for (const prop of ['bottom', 'top', 'height']) {
+    const value = stripImportant(style[prop]);
+    if (value && positionPx(value) === null) indeterminatePairs.push(`${prop}:${value}`);
+  }
+  if (insetParts.some(part => positionPx(part) === null)) {
+    indeterminatePairs.push(`inset:${stripImportant(style.inset)}`);
+  }
+  if (indeterminatePairs.length) return { valid: true, indeterminate_pairs: indeterminatePairs };
   return { valid: true };
 }
 
