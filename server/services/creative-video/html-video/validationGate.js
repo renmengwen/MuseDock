@@ -3,14 +3,10 @@ const path = require('path');
 
 const { createDiagnostic } = require('./diagnostics');
 const { validateProject } = require('./projectSchema');
-const { mappedEngine } = require('./templateRegistry');
-const { validateTemplateInputs } = require('./templateInputAgent');
 const { validateHtmlCanvasContract } = require('./frameCanvasContract');
 const { validateOverlayHtml, hasRealOverlayElement, stripNonElementHtml } = require('./motionPrimitiveCatalog');
 const { validateSceneSpecTimelineConsistency } = require('./timelineConsistency');
 const { normalizeCaptionsForFrame } = require('./captionLayer');
-
-const SUPPORTED_ENGINES = new Set(['hyperframes', 'hyperframes-playwright']);
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -18,10 +14,6 @@ function objectOrEmpty(value) {
 
 function arrayOrEmpty(value) {
   return Array.isArray(value) ? value : [];
-}
-
-function isHtmlEntry(value) {
-  return /\.html?$/i.test(String(value || '').trim());
 }
 
 function isSafeRelativePath(value) {
@@ -63,7 +55,6 @@ function add(diagnostics, code, stage, user_message, details = {}, fallback_allo
 function sub_stage_for_diagnostic(stage, code) {
   if (stage === 'frame' || String(code || '').startsWith('raw_html_')) return 'frame_html';
   if (stage === 'timeline') return 'timeline_check';
-  if (stage === 'template') return 'template_select';
   if (['environment', 'assets', 'overrides'].includes(stage)) return 'validate_project';
   return stage === 'project' ? 'validate_project' : '';
 }
@@ -88,57 +79,6 @@ function warningDiagnostic(diagnostics, code, stage, user_message, details = {})
     ...details,
     blocking: false,
   }, true, { severity: 'warning' });
-}
-
-function validateTemplate({
-  diagnostics,
-  templateRegistry,
-  templateId,
-  inputs,
-  ref,
-  stage,
-  options,
-  validateInputs = true,
-}) {
-  const manifest = templateRegistry && templateRegistry.getTemplate(templateId);
-  if (!manifest) {
-    add(diagnostics, 'template_missing', stage, `未找到 html-video 模板：${templateId || '未指定'}。`, { template_id: templateId, ref });
-    return null;
-  }
-
-  const engine = manifest.engine || '';
-  if (!SUPPORTED_ENGINES.has(engine) && !SUPPORTED_ENGINES.has(mappedEngine(engine))) {
-    add(diagnostics, 'unsupported_engine', stage, `模板 ${templateId} 使用的引擎暂不支持。`, { template_id: templateId, engine, ref });
-  }
-
-  if (mappedEngine(engine) === 'hyperframes-playwright' && !isHtmlEntry(manifest.source_entry)) {
-    add(diagnostics, 'source_entry_not_html', stage, `模板 ${templateId} 的入口不是 HTML 文件。`, {
-      template_id: templateId,
-      source_entry: manifest.source_entry,
-      ref,
-    });
-  }
-
-  if (options.commercialOnly !== false && !(manifest.license && manifest.license.commercial_use === true)) {
-    add(diagnostics, 'license_not_allowed', stage, `模板 ${templateId} 授权不允许本次使用。`, {
-      template_id: templateId,
-      license: manifest.license || {},
-      ref,
-    }, false);
-  }
-
-  if (validateInputs) {
-    const inputValidation = validateTemplateInputs(objectOrEmpty(inputs), manifest);
-    if (!inputValidation.success) {
-      add(diagnostics, 'template_inputs_invalid', stage, inputValidation.user_message || '模板字段校验失败。', {
-        template_id: templateId,
-        ref,
-        diagnostics: inputValidation.diagnostics || [],
-      });
-    }
-  }
-
-  return manifest;
 }
 
 function validateEnvironment(diagnostics, environment) {
@@ -314,50 +254,13 @@ function validateNarrationCaptionSafety({ diagnostics, frames, mediaOptions = {}
 async function validateHtmlVideoProject({
   project,
   projectDir,
-  templateRegistry,
   environment,
   sceneSpec,
   mediaOptions = {},
-  options = {},
 } = {}) {
   const input = objectOrEmpty(project);
   const diagnostics = [];
   const frames = arrayOrEmpty(input.frames);
-
-  if (input.template_id) {
-    validateTemplate({
-      diagnostics,
-      templateRegistry,
-      templateId: input.template_id,
-      inputs: input.template_inputs,
-      ref: 'project',
-      stage: 'template',
-      options,
-      validateInputs: frames.some(frame => frame.source_mode !== 'raw_html'),
-    });
-  }
-
-  frames.forEach(frame => {
-    const frameTemplateId = frame.template_id || input.template_id;
-    if (frame.source_mode === 'raw_html' && !frameTemplateId) return;
-    validateTemplate({
-      diagnostics,
-      templateRegistry,
-      templateId: frameTemplateId,
-      inputs: { ...objectOrEmpty(input.template_inputs), ...objectOrEmpty(frame.inputs) },
-      ref: frame.id || frame.scene_id,
-      stage: 'frame',
-      options,
-      validateInputs: frame.source_mode !== 'raw_html',
-    });
-
-    if (frame.engine && !SUPPORTED_ENGINES.has(frame.engine) && !SUPPORTED_ENGINES.has(mappedEngine(frame.engine))) {
-      add(diagnostics, 'unsupported_engine', 'frame', `帧 ${frame.id || ''} 使用的引擎暂不支持。`, {
-        frame_id: frame.id,
-        engine: frame.engine,
-      });
-    }
-  });
 
   await validateRawHtmlFrames({ diagnostics, projectDir, project: input, frames });
   validateNarrationCaptionSafety({ diagnostics, frames, mediaOptions });

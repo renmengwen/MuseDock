@@ -2,7 +2,6 @@ const fs = require('fs/promises');
 const path = require('path');
 
 const { normalizeProject } = require('./projectSchema');
-const { resolveSourceEntryPath } = require('./templateRegistry');
 const { ensureCaptionLayer, hasUnmanagedCaptionLayer, normalizeCaptionsForFrame } = require('./captionLayer');
 
 function objectOrEmpty(value) {
@@ -16,15 +15,6 @@ function htmlEscape(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-function safeJson(value) {
-  return JSON.stringify(value)
-    .replace(/</g, '\\u003C')
-    .replace(/>/g, '\\u003E')
-    .replace(/&/g, '\\u0026')
-    .replace(/\u2028/g, '\\u2028')
-    .replace(/\u2029/g, '\\u2029');
 }
 
 function safeFilePart(value, fallback) {
@@ -66,22 +56,6 @@ function frameBeatId(frame = {}) {
   return String(frame.beat_id || frame.beatId || '').trim();
 }
 
-function materializeTemplate(sourceHtml, vars, durationSec, sceneData = {}) {
-  const replaced = sourceHtml.replace(/\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}/g, (match, key) => {
-    if (!Object.prototype.hasOwnProperty.call(vars, key)) return '';
-    return htmlEscape(vars[key]);
-  });
-
-  const injection = `<script>window.__HV_VARS__ = ${safeJson(vars)}; window.__HV_DURATION__ = ${safeJson(durationSec)}; window.__HV_SCENE__ = ${safeJson(sceneData)};</script>`;
-  if (/<head\b[^>]*>/i.test(replaced)) {
-    return replaced.replace(/<head\b([^>]*)>/i, `<head$1>\n${injection}`);
-  }
-  if (/<html\b[^>]*>/i.test(replaced)) {
-    return replaced.replace(/<html\b([^>]*)>/i, `<html$1>\n<head>${injection}</head>`);
-  }
-  return `${injection}\n${replaced}`;
-}
-
 const CAPTION_GUARD_STYLE = `<style data-hv-caption-guard>
 .hv-caption-layer {
   z-index: 2147483647 !important;
@@ -107,7 +81,7 @@ function recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame) {
   });
 }
 
-async function materializeFrame({ projectDir, project, frame, index, templateRegistry, rawHtmlPathCounts }) {
+async function materializeFrame({ projectDir, project, frame, index, rawHtmlPathCounts }) {
   const diagnostics = [];
   if (frame.source_mode === 'raw_html') {
     if (!frame.html_path) {
@@ -181,78 +155,22 @@ async function materializeFrame({ projectDir, project, frame, index, templateReg
     return diagnostics;
   }
 
-  const templateId = frame.template_id || project.template_id;
-  const manifest = templateRegistry && templateRegistry.getTemplate(templateId);
-  if (!manifest) {
-    diagnostics.push({
-      code: 'template_not_found',
-      frame_id: frame.id,
-      template_id: templateId,
-      message: '未找到帧对应的 html-video 模板。',
-    });
-    return diagnostics;
-  }
-
-  const sourcePath = resolveSourceEntryPath(manifest);
-  if (!sourcePath) {
-    diagnostics.push({
-      code: 'template_source_invalid',
-      frame_id: frame.id,
-      template_id: templateId,
-      message: '模板 source_entry 不合法。',
-    });
-    return diagnostics;
-  }
-
-  const vars = {
-    ...objectOrEmpty(project.template_inputs),
-    ...objectOrEmpty(frame.inputs),
-  };
-  const durationSec = Number(frame.duration_sec || vars.duration_sec || objectOrEmpty(manifest.output).duration || 6);
-  vars.duration_sec = Number.isFinite(Number(vars.duration_sec)) ? Number(vars.duration_sec) : durationSec;
-
-  const captions = normalizeCaptionsForFrame(frame);
-  frame.captions = captions;
-  const generateCaptions = frame.generate_captions !== false && frame.generateCaptions !== false;
-  const sourceHtml = await fs.readFile(sourcePath, 'utf8');
-  const sceneData = {
-    id: frame.scene_id || frame.id,
-    narration_text: frame.narration_text || '',
-    captions,
-    metadata: objectOrEmpty(frame.metadata),
-  };
-  const materializedHtml = materializeTemplate(sourceHtml, vars, durationSec, sceneData);
-  if (hasUnmanagedCaptionLayer(materializedHtml)) {
-    recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame);
-  }
-  const html = injectCaptionLayerGuard(
-    ensureCaptionLayer(materializedHtml, captions, { generateCaptions }),
-    { visualStrategy: project?.visual_strategy || null }
-  );
-  const relativePath = frameOutputPath(frame, index);
-  const outputPath = resolveProjectPath(projectDir, relativePath);
-  await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await fs.writeFile(outputPath, html, 'utf8');
-  frame.html_path = relativePath;
-
+  // 模板物化路径已删除（asset_first 收敛）：非 raw_html 且无 override 的帧只可能来自旧工程，
+  // 统一按模板不可用诊断处理，不再尝试物化。
   diagnostics.push({
-    code: 'materialized',
+    code: 'template_not_found',
     frame_id: frame.id,
-    html_path: relativePath,
-    message: '已生成帧 HTML。',
+    template_id: frame.template_id || project.template_id,
+    message: '未找到帧对应的 html-video 模板。',
   });
   return diagnostics;
 }
 
-async function materializeProject({ projectDir, project, templateRegistry }) {
+async function materializeProject({ projectDir, project }) {
   if (!projectDir) {
     throw new Error('缺少 projectDir。');
   }
   const normalized = normalizeProject(project);
-  const needsTemplateRegistry = normalized.frames.some(frame => frame.source_mode !== 'raw_html' && !getFrameOverride(normalized, frame));
-  if (!templateRegistry && needsTemplateRegistry) {
-    throw new Error('缺少 templateRegistry。');
-  }
   const diagnostics = [];
   const rawHtmlPathCounts = new Map();
   for (const frame of normalized.frames) {
@@ -266,7 +184,6 @@ async function materializeProject({ projectDir, project, templateRegistry }) {
       project: normalized,
       frame: normalized.frames[index],
       index,
-      templateRegistry,
       rawHtmlPathCounts,
     });
     diagnostics.push(...frameDiagnostics);
@@ -280,8 +197,6 @@ async function materializeProject({ projectDir, project, templateRegistry }) {
 
 module.exports = {
   materializeProject,
-  materializeTemplate,
   injectCaptionLayerGuard,
   htmlEscape,
-  safeJson,
 };

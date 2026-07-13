@@ -3,7 +3,6 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 
-const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 const { validateHtmlVideoProject } = require('../server/services/creative-video/html-video/validationGate');
 const { ensureCaptionLayer } = require('../server/services/creative-video/html-video/captionLayer');
 
@@ -12,75 +11,8 @@ async function writeFile(filePath, content) {
   await fs.writeFile(filePath, content, 'utf8');
 }
 
-async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
-  const dir = path.join(rootDir, name);
-  await writeFile(path.join(dir, 'template.html-video.yaml'), yaml);
-  await writeFile(path.join(dir, sourceName), '<html><body>{{headline}}</body></html>');
-}
-
 (async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-gate-'));
-  const templateRoot = path.join(rootDir, 'templates');
-
-  await createTemplate(templateRoot, 'valid', [
-    'id: valid',
-    'name: 可用模板',
-    'engine: hyperframes',
-    'source_entry: index.html',
-    'inputs:',
-    '  schema:',
-    '    type: object',
-    '    required: [headline]',
-    '    properties:',
-    '      headline:',
-    '        type: string',
-    'license:',
-    '  name: Apache-2.0',
-    '  commercial_use: true',
-    '',
-  ].join('\n'));
-
-  await createTemplate(templateRoot, 'bad_engine', [
-    'id: bad_engine',
-    'name: 不支持引擎',
-    'engine: remotion',
-    'source_entry: index.html',
-    'inputs:',
-    '  schema:',
-    '    type: object',
-    'license:',
-    '  commercial_use: true',
-    '',
-  ].join('\n'));
-
-  await createTemplate(templateRoot, 'script_source', [
-    'id: script_source',
-    'name: 非 HTML 入口',
-    'engine: hyperframes',
-    'source_entry: index.js',
-    'inputs:',
-    '  schema:',
-    '    type: object',
-    'license:',
-    '  commercial_use: true',
-    '',
-  ].join('\n'), 'index.js');
-
-  await createTemplate(templateRoot, 'noncommercial', [
-    'id: noncommercial',
-    'name: 不可商用',
-    'engine: hyperframes',
-    'source_entry: index.html',
-    'inputs:',
-    '  schema:',
-    '    type: object',
-    'license:',
-    '  commercial_use: false',
-    '',
-  ].join('\n'));
-
-  const registry = createTemplateRegistry({ rootDir: templateRoot });
-  registry.scanTemplates();
 
   const timelineSceneSpec = {
     scenes: [
@@ -132,7 +64,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
 
   const result = await validateHtmlVideoProject({
     project,
-    templateRegistry: registry,
     environment: {
       ok: false,
       diagnostics: [
@@ -145,11 +76,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   assert.equal(result.ok, false);
   const codes = result.diagnostics.map(item => item.code);
   for (const code of [
-    'template_missing',
-    'unsupported_engine',
-    'source_entry_not_html',
-    'license_not_allowed',
-    'template_inputs_invalid',
     'timeline_item_kind_unsupported',
     'asset_path_invalid',
     'playwright_not_configured',
@@ -158,7 +84,16 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   ]) {
     assert.ok(codes.includes(code), `缺少诊断 ${code}`);
   }
-  assert.equal(result.diagnostics.find(item => item.code === 'license_not_allowed').fallback_allowed, false);
+  // 模板工程校验已删除：旧工程仍带 template_id/engine 字段时不得再产生模板类诊断
+  for (const code of [
+    'template_missing',
+    'unsupported_engine',
+    'source_entry_not_html',
+    'license_not_allowed',
+    'template_inputs_invalid',
+  ]) {
+    assert.ok(!codes.includes(code), `不应再产生模板诊断 ${code}`);
+  }
   const playwrightDiagnostic = result.diagnostics.find(item => item.code === 'playwright_not_configured');
   const ffmpegDiagnostic = result.diagnostics.find(item => item.code === 'ffmpeg_not_configured');
   assert.equal(playwrightDiagnostic.sub_stage, 'validate_project');
@@ -183,7 +118,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       assets: [{ id: 'a1', path: 'assets/a.png' }],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'f1', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(pass.ok, true);
@@ -195,7 +129,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       template_inputs: { headline: '标题' },
       frames: [{ id: 'caption_fallback', template_id: 'valid', inputs: { headline: '帧标题' }, narration_text: '这句旁白会自动生成字幕。' }],
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(captionFallbackPass.ok, true);
@@ -207,7 +140,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       template_inputs: { headline: '标题' },
       frames: [{ id: 'caption_disabled', template_id: 'valid', inputs: { headline: '帧标题' }, narration_text: '有旁白但关闭字幕。', generate_captions: false }],
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(captionDisabledWarning.ok, true);
@@ -222,7 +154,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       scene_ids: [],
       status: 'ready',
     }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
     sceneSpec: { scenes: [] },
   });
@@ -239,7 +170,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       narration_path: 'tts/legacy.wav',
       status: 'ready',
     }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
     sceneSpec: timelineSceneSpec,
   });
@@ -256,7 +186,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       narration_path: 'tts/legacy.wav',
       status: 'ready',
     }, { narration_text: '错误旁白' }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
     sceneSpec: timelineSceneSpec,
   });
@@ -278,7 +207,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const structuralBeforeTimeline = await validateHtmlVideoProject({
     projectDir: rootDir,
     project: structuralBeforeTimelineProject,
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
     sceneSpec: timelineSceneSpec,
   });
@@ -298,7 +226,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       path: 'tts/legacy.wav',
       status: 'ready',
     }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
     sceneSpec: timelineSceneSpec,
   });
@@ -315,7 +242,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       narrationPath: 'tts/legacy.wav',
       status: 'ready',
     }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
     sceneSpec: timelineSceneSpec,
   });
@@ -332,7 +258,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       combined_path: 'tts/legacy.wav',
       status: 'ready',
     }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
     sceneSpec: timelineSceneSpec,
   });
@@ -348,7 +273,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       scene_ids: ['scene_01'],
       status: 'ready',
     }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
     sceneSpec: timelineSceneSpec,
   });
@@ -370,7 +294,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_01', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlPass.ok, true);
@@ -402,7 +325,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_missing_keys', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlMissingKeys.ok, true);
@@ -438,7 +360,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_valid_keys', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlValidKeys.ok, true);
@@ -470,7 +391,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_comment_fake_key', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlCommentFakeKey.ok, true);
@@ -502,7 +422,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_managed_caption_layer', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlManagedCaptionLayer.ok, true);
@@ -543,7 +462,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_decorative_frame', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlDecorativeFrame.ok, true);
@@ -578,7 +496,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_root_container', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlRootContainer.ok, true);
@@ -613,7 +530,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_wrong_resolution', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlWrongResolution.ok, false);
@@ -638,7 +554,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_missing_file', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlMissingFile.diagnostics.some(item => item.code === 'raw_html_text_keys_missing'), false);
@@ -659,7 +574,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_path_escape', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(rawHtmlPathEscape.ok, false);
@@ -684,7 +598,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
       ],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'template_inputs_missing_file', kind: 'frame' }] }] },
     },
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(templateInputsSkipRawHtmlCheck.ok, true);
@@ -754,7 +667,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const overlayAssetFirst = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: overlayProject('asset_first'),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(overlayAssetFirst.ok, true, 'overlay 校验为 warning 级，不得阻断');
@@ -764,7 +676,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const overlayHfFirst = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: overlayProject('hf_first'),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(overlayHfFirst.diagnostics.some(item => item.code === 'overlay_in_caption_safe_area'), false, 'hf_first 下 gate 不得产生 overlay issue');
@@ -822,7 +733,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const diagramMissing = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: diagramProject('asset_first', { htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'diagram' }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(diagramMissing.ok, true, 'diagram 骨架校验为 warning 级，不得阻断');
@@ -833,7 +743,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const diagramPresent = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: diagramProject('asset_first', { htmlPath: 'frames/diagram-with-base.html', beatVisualBaseType: 'diagram' }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(diagramPresent.diagnostics.some(item => item.code === 'diagram_base_missing'), false, '含骨架 HTML 不得报 diagram_base_missing');
@@ -841,7 +750,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const diagramNotDiagramBeat = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: diagramProject('asset_first', { htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'asset' }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(diagramNotDiagramBeat.diagnostics.some(item => item.code === 'diagram_base_missing'), false, '非 diagram beat 不得报 diagram_base_missing');
@@ -849,7 +757,6 @@ async function createTemplate(rootDir, name, yaml, sourceName = 'index.html') {
   const diagramHfFirst = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: diagramProject('hf_first', { htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'diagram' }),
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(diagramHfFirst.diagnostics.some(item => item.code === 'diagram_base_missing'), false, 'hf_first 不得报 diagram_base_missing');
