@@ -1,4 +1,4 @@
-import { ArrowUp, Globe2, ImageIcon, Loader2 } from 'lucide-react';
+import { ArrowUp, Globe2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Textarea } from '@/components/ui/textarea.jsx';
 import { cn } from '@/lib/utils.js';
@@ -19,8 +19,6 @@ function CreativePromptComposer({
   mode,
   useResearch,
   setUseResearch,
-  assetFirst,
-  setAssetFirst,
   isBusy,
   submitDisabled,
   onSubmit,
@@ -59,23 +57,6 @@ function CreativePromptComposer({
           >
             <Globe2 size={15} />
             <span>联网获取最新资料</span>
-          </Button>
-          <Button
-            type="button"
-            className={cn(
-              'inline-flex min-h-[34px] items-center gap-1.5 rounded-full px-3 text-[13px] transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-[.62]',
-              assetFirst
-                ? '-translate-y-px border-ink bg-surface-2 text-ink shadow-[inset_0_0_0_1px_var(--accent-primary)] hover:bg-surface-2 hover:text-ink'
-                : 'border-line-1 bg-white text-fg-3 hover:bg-white hover:text-fg-3',
-            )}
-            variant="outline"
-            disabled={isBusy}
-            onClick={() => setAssetFirst(!assetFirst)}
-            aria-pressed={assetFirst}
-            title="开启后以图片/视频为画面主体（最多为 4 个场景生成主视觉），HTML 动画负责重点标注、拆解和说明；关闭时仍会为少量关键场景补生图。需要在设置中配置生图模型，未配置则不生图。"
-          >
-            <ImageIcon size={15} />
-            <span>图片/视频优先</span>
           </Button>
         </div>
 

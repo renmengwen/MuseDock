@@ -239,7 +239,6 @@ export function OneClickCreativePage() {
   const streamClosedNormallyRef = useRef(false);
   const streamGenerationRef = useRef(0);
   const useResearchTouchedRef = useRef(false);
-  const assetFirstTouchedRef = useRef(false);
   const retryPlanRequestRef = useRef({ workflowId: '', inFlight: false });
   const retryPlanLoadedRef = useRef('');
   const retryPlanSeqRef = useRef(0);
@@ -247,8 +246,6 @@ export function OneClickCreativePage() {
   const [mode, setMode] = useState('quick');
   const [useResearch, setUseResearch] = useState(true);
   const [useResearchTouched, setUseResearchTouched] = useState(false);
-  const [assetFirst, setAssetFirst] = useState(false);
-  const [assetFirstTouched, setAssetFirstTouched] = useState(false);
   const [workflow, setWorkflow] = useState(null);
   const [workflowId, setWorkflowId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
@@ -739,9 +736,6 @@ export function OneClickCreativePage() {
     setUseResearch(true);
     useResearchTouchedRef.current = false;
     setUseResearchTouched(false);
-    setAssetFirst(false);
-    assetFirstTouchedRef.current = false;
-    setAssetFirstTouched(false);
     setWorkflow(null);
     setWorkflowId('');
     setSelectedWorkflowId('');
@@ -937,7 +931,6 @@ export function OneClickCreativePage() {
     try {
       const overrideEntries = {
         ...(useResearchTouched ? { useResearch } : {}),
-        ...(assetFirstTouched ? { visualStrategy: assetFirst ? 'asset_first' : 'hf_first' } : {}),
       };
       const requestPayload = {
         input: trimmed,
@@ -1169,12 +1162,6 @@ export function OneClickCreativePage() {
                   useResearchTouchedRef.current = true;
                   setUseResearchTouched(true);
                   setUseResearch(value);
-                }}
-                assetFirst={assetFirst}
-                setAssetFirst={(value) => {
-                  assetFirstTouchedRef.current = true;
-                  setAssetFirstTouched(true);
-                  setAssetFirst(value);
                 }}
                 isBusy={isBusy}
                 submitDisabled={submitDisabled}
