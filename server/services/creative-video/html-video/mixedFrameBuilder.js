@@ -10,8 +10,6 @@ const {
   trustedSceneDuration,
   resolveOutput,
 } = require('./rawHtmlFrameBuilder');
-const { mapSceneToTemplateInputs } = require('./templateInputMappers');
-const { validateTemplateInputs } = require('./templateInputAgent');
 
 const MISSING_BEAT_DECISION_REASON = 'beat 决策缺失，已用场景 HTML 兜底。';
 
@@ -54,7 +52,7 @@ function buildSceneRenderEntries(beats = []) {
   }));
 }
 
-// 按路由决策把基础帧字段落成 template_inputs 帧或 raw_html 帧；
+// 按路由决策把基础帧字段落成 raw_html 帧；
 // 决策缺失时按 raw_html 兜底（决策 Map 可能跳过损坏 beat，消费侧必须判空）。
 function resolveFrameByDecision({
   base,
@@ -63,29 +61,13 @@ function resolveFrameByDecision({
   scene,
   node,
   nodeId,
-  registry,
   projectDir,
 }) {
-  if (decision.source_mode === 'template_inputs' && decision.template_id) {
-    const template = registry.getTemplate(decision.template_id);
-    if (!template) throw new Error(`未找到逐场景模板：${decision.template_id}。`);
-    const inputs = decision.inputs || mapSceneToTemplateInputs(template.id, scene, template.inputs?.schema || {});
-    const validation = validateTemplateInputs(inputs, template);
-    if (!validation.success) throw new Error(validation.user_message || '模板字段校验失败。');
-    return {
-      ...base,
-      template_id: template.id,
-      source_mode: 'template_inputs',
-      html_path: null,
-      inputs,
-    };
-  }
   const htmlPath = String(node.html_path || '').trim();
   if (!htmlPath) throw new Error(`缺少帧 ${nodeId} 的 raw HTML 路径。`);
   projectStore.resolveProjectPath(projectDir, htmlPath);
   return {
     ...base,
-    template_id: null,
     source_mode: 'raw_html',
     html_path: htmlPath,
     inputs: {},
@@ -101,7 +83,6 @@ async function buildMixedFrameProject({
   graph,
   sceneSpec = {},
   target = {},
-  registry,
   decisions,
   visualPlan = null,
   mediaOptions = {},
@@ -162,11 +143,10 @@ async function buildMixedFrameProject({
       };
       const frame = resolveFrameByDecision({
         base,
-        decision: { source_mode: 'raw_html', route_role: 'scene_html', template_id: null },
+        decision: { source_mode: 'raw_html', route_role: 'scene_html' },
         scene,
         node,
         nodeId: entry.frame_id,
-        registry,
         projectDir,
       });
       frames.push(frame);
@@ -259,7 +239,6 @@ async function buildMixedFrameProject({
         scene,
         node,
         nodeId,
-        registry,
         projectDir,
       });
       frames.push(frame);
@@ -314,7 +293,6 @@ async function buildMixedFrameProject({
         scene,
         node,
         nodeId,
-        registry,
         projectDir,
       });
 
@@ -334,13 +312,10 @@ async function buildMixedFrameProject({
     project_id: `${workflowId || 'workflow'}_${runId || 'run'}`,
     workflow_id: workflowId || null,
     run_id: runId || null,
-    template_id: null,
-    template_inputs: {},
     output: {
       ...resolveOutput(target, {}),
       duration: cursor,
     },
-    template_schema: {},
     content_graph: graph,
     frames,
     timeline: {

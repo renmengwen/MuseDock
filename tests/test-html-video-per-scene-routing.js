@@ -75,66 +75,6 @@ const stubAiImageModel = { isConfigured: async () => false };
     ],
   };
 
-  const decisions = matchScenesToTemplates({
-    scenes: sceneSpec.scenes,
-    registry,
-    renderTarget: { aspectRatio: '16:9' },
-  });
-  assert.equal(decisions.get('scene_data').source_mode, 'template_inputs');
-  assert.equal(decisions.get('scene_data').template_id, 'frame-pentagram-stat');
-  assert.equal(decisions.get('scene_quote').source_mode, 'template_inputs');
-  assert.equal(decisions.get('scene_quote').template_id, 'frame-electric-studio');
-  assert.equal(decisions.get('scene_free').source_mode, 'raw_html');
-
-  const project = await buildMixedFrameProject({
-    projectDir,
-    workflowId: 'wf',
-    runId: 'run',
-    graph,
-    sceneSpec,
-    target: { aspect_ratio: '16:9', resolution: { width: 1920, height: 1080 }, fps: 30 },
-    registry,
-    decisions,
-    mediaOptions: { generateCaptions: false },
-  });
-
-  assert.equal(project.template_id, null);
-  const dataFrame = project.frames.find(frame => frame.id === 'scene_data');
-  const quoteFrame = project.frames.find(frame => frame.id === 'scene_quote');
-  const freeFrame = project.frames.find(frame => frame.id === 'scene_free');
-
-  assert.equal(dataFrame.source_mode, 'template_inputs');
-  assert.equal(dataFrame.template_id, 'frame-pentagram-stat');
-  assert.equal(dataFrame.html_path, null);
-  assert.equal(validateTemplateInputs(dataFrame.inputs, registry.getTemplate(dataFrame.template_id)).success, true);
-
-  assert.equal(quoteFrame.source_mode, 'template_inputs');
-  assert.equal(quoteFrame.template_id, 'frame-electric-studio');
-  assert.equal(quoteFrame.html_path, null);
-  assert.equal(validateTemplateInputs(quoteFrame.inputs, registry.getTemplate(quoteFrame.template_id)).success, true);
-
-  assert.equal(freeFrame.source_mode, 'raw_html');
-  assert.equal(freeFrame.template_id, null);
-  assert.equal(freeFrame.html_path, 'frames/03-scene_free.html');
-  assert.ok(freeFrame.fallback_reason);
-
-  const validation = await validateHtmlVideoProject({
-    project,
-    projectDir,
-    templateRegistry: registry,
-    environment: { ok: true, diagnostics: [] },
-    options: { commercialOnly: true },
-  });
-  assert.equal(validation.ok, true);
-  assert.ok(!validation.diagnostics.some(item => item.code === 'template_missing'));
-
-  const templateSource = resolveFrameRenderSource({ projectDir, project, frame: dataFrame });
-  assert.equal(templateSource.needs_materialize, true);
-  assert.equal(templateSource.template_id, 'frame-pentagram-stat');
-  const rawSource = resolveFrameRenderSource({ projectDir, project, frame: freeFrame });
-  assert.equal(rawSource.needs_materialize, false);
-  assert.equal(rawSource.html_path, 'frames/03-scene_free.html');
-
   // beat 展开：传入 visualPlan 时按 beat 建帧，字幕按 beat 窗口切片（局部时间）。
   const longNarration = '第一句讲清楚问题的来龙去脉与背景。第二句给出核心的判断标准和依据。第三句展开关键的执行步骤细节。第四句总结行动建议并给出提醒。';
   const beatSpec = {
