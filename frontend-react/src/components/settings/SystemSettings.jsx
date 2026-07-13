@@ -21,14 +21,6 @@ function getDiagnosticDetail(item) {
   return item?.detail || item?.path || '无更多诊断信息';
 }
 
-function getTemplateStatus(systemHealth) {
-  const templates = systemHealth?.templates;
-  const items = Array.isArray(templates?.items) ? templates.items : [];
-  if (!templates) return '待检测';
-  const compatibleCount = items.filter(item => item.compatible).length;
-  return `共 ${items.length} 个模板，${compatibleCount} 个兼容当前默认配置`;
-}
-
 function getStorageEstimate(systemHealth, item) {
   return systemHealth?.storage?.[item.storageKey] || null;
 }
@@ -109,7 +101,7 @@ export function SystemSettings({
       <div className="mb-4 flex items-start justify-between gap-3 max-[520px]:flex-col">
         <div>
           <h3 className="m-0 text-lg font-bold">系统</h3>
-          <p className="mt-1 text-[13px] text-[#69717e]">管理质检、html-video 环境、模板状态和本地数据维护。</p>
+          <p className="mt-1 text-[13px] text-[#69717e]">管理质检、html-video 环境和本地数据维护。</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -140,7 +132,7 @@ export function SystemSettings({
           />
           <div className="flex flex-col gap-0.5">
             <span className={cn('min-w-[42px]', appSettings?.system?.skipValidation ? 'text-[#111827]' : 'text-[#69717e]')}>质检状态：{appSettings?.system?.skipValidation ? '已跳过' : '已启用'}</span>
-            <span className="text-xs font-normal text-[#69717e]">跳过质检后会直接进入渲染流程，请仅在确认素材和模板稳定时使用。</span>
+            <span className="text-xs font-normal text-[#69717e]">跳过质检后会直接进入渲染流程，请仅在确认素材稳定时使用。</span>
           </div>
         </label>
 
@@ -179,11 +171,6 @@ export function SystemSettings({
               <p className="mt-2 text-sm text-[#69717e]">无更多诊断信息</p>
             )}
           </details>
-        </section>
-
-        <section className="rounded-lg border border-[#edf0f4] bg-white p-4">
-          <h4 className="m-0 text-base font-bold">模板状态</h4>
-          <p className="mt-1 text-sm text-[#4b5563]">{getTemplateStatus(systemHealth)}</p>
         </section>
 
         <section className="rounded-lg border border-[#edf0f4] bg-white p-4">

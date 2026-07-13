@@ -7,13 +7,6 @@ export const ASPECT_RATIOS = ['9:16', '16:9', '1:1', '4:5'];
 const DEFAULT_CREATIVE_DEFAULTS = {
   aspectRatio: '9:16',
   targetDurationSec: 60,
-  templateByAspectRatio: {
-    '9:16': '',
-    '16:9': '',
-    '1:1': '',
-    '4:5': '',
-  },
-  lockTemplate: false,
   useResearch: true,
   generateAudio: true,
   autoSfxEnabled: true,
@@ -24,86 +17,17 @@ const DEFAULT_CREATIVE_DEFAULTS = {
   frameHtmlConcurrency: 1,
 };
 
-const TEMPLATE_NAME_ZH = {
-  bold_signal: '信号卡片',
-  glitch_title: '故障风格标题',
-  news_signal_vertical: '竖屏财经信号',
-  'frame-bold-poster': '醒目海报',
-  'frame-bold-signal': '强信号卡片',
-  'frame-build-minimal': '极简构建',
-  'frame-creative-voltage': '创意电压',
-  'frame-data-chart-nyt': '数据图表',
-  'frame-data-rollup': '数据汇总',
-  'frame-decision-tree': '决策树',
-  'frame-electric-studio': '电光工作室',
-  'frame-glitch-title': '故障标题',
-  'frame-kinetic-type': '动态文字',
-  'frame-light-leak-cinema': '漏光电影',
-  'frame-liquid-bg-hero': '液态背景主视觉',
-  'frame-logo-outro': 'Logo 片尾',
-  'frame-nyt-graph': '新闻图表',
-  'frame-pentagram-stat': '醒目数据',
-  'frame-play-mode': '播放模式',
-  'frame-product-promo': '产品推广',
-  'frame-product-promo-30s': '产品推广 30 秒',
-  'frame-swiss-grid': '瑞士网格',
-  'frame-takram-organic': '有机视觉',
-  'frame-vignelli': '维涅利版式',
-  'frame-warm-grain': '暖色颗粒',
-  'vfx-text-cursor': '文字光标特效',
-};
-
 function getCreativeDefaults(appSettings) {
   return {
     ...DEFAULT_CREATIVE_DEFAULTS,
     ...(appSettings?.creativeDefaults || {}),
-    templateByAspectRatio: {
-      ...DEFAULT_CREATIVE_DEFAULTS.templateByAspectRatio,
-      ...(appSettings?.creativeDefaults?.templateByAspectRatio || {}),
-    },
   };
-}
-
-function getTemplateAspect(template) {
-  return template?.aspect_ratio || template?.aspectRatio || template?.aspect || '';
-}
-
-function getTemplateAspects(template) {
-  const aspects = template?.supported_aspects || template?.supportedAspects;
-  if (Array.isArray(aspects)) return aspects.map(item => String(item || '').trim()).filter(Boolean);
-  const aspect = getTemplateAspect(template);
-  return aspect ? [aspect] : [];
-}
-
-function getTemplateId(template) {
-  return typeof template?.id === 'string' ? template.id : '';
-}
-
-function isTemplateShownForAspect(template, aspectRatio) {
-  const aspects = getTemplateAspects(template);
-  return !aspects.length || aspects.includes(aspectRatio);
-}
-
-function hasBlockingCompatibilityReason(template) {
-  const reasons = Array.isArray(template?.compatibility_reasons) ? template.compatibility_reasons : [];
-  return reasons.some(reason => reason?.code && reason.code !== 'unsupported-aspect');
-}
-
-function getTemplateDisplayName(template) {
-  const id = getTemplateId(template);
-  return TEMPLATE_NAME_ZH[id] || template?.name || id;
-}
-
-function optionLabel(template, aspectRatio) {
-  const compatible = isTemplateShownForAspect(template, aspectRatio) && !hasBlockingCompatibilityReason(template);
-  return `${getTemplateDisplayName(template)}${compatible ? '' : '（不兼容）'}`;
 }
 
 export function CreativeDefaultsSettings({
   appSettings,
   activeModels,
   modelSettingsLoading = false,
-  templates,
   disabled,
   saving,
   onChange,
@@ -111,7 +35,6 @@ export function CreativeDefaultsSettings({
 }) {
   const [sourceImageAnalysisMessage, setSourceImageAnalysisMessage] = useState('');
   const creativeDefaults = getCreativeDefaults(appSettings);
-  const safeTemplates = Array.isArray(templates) ? templates : [];
   const sourceImageAnalysisEnabled = creativeDefaults.sourceImageAnalysisEnabled === true;
   const canUseSourceImageAnalysis = activeModels?.text?.enabled === true
     && activeModels?.text?.modelId
@@ -140,15 +63,6 @@ export function CreativeDefaultsSettings({
     });
   }
 
-  function updateTemplate(aspectRatio, templateId) {
-    updateCreativeDefaults({
-      templateByAspectRatio: {
-        ...creativeDefaults.templateByAspectRatio,
-        [aspectRatio]: typeof templateId === 'string' ? templateId : '',
-      },
-    });
-  }
-
   function handleSave() {
     onSave({
       ...(appSettings || {}),
@@ -170,7 +84,7 @@ export function CreativeDefaultsSettings({
       <div className="mb-4 flex items-start justify-between gap-3 max-[520px]:flex-col">
         <div>
           <h3 className="m-0 text-lg font-bold">创作默认值</h3>
-          <p className="mt-1 text-[13px] text-[#69717e]">设置一键创作默认使用的画面比例、目标时长、模板策略和联网研究开关。</p>
+          <p className="mt-1 text-[13px] text-[#69717e]">设置一键创作默认使用的画面比例、目标时长和联网研究开关。</p>
         </div>
         <button
           type="button"
@@ -227,54 +141,6 @@ export function CreativeDefaultsSettings({
               frameHtmlConcurrency: event.target.value === '' ? '' : Number(event.target.value),
             })}
           />
-        </label>
-
-        <div className="grid gap-2.5 md:col-span-2">
-          <span className="text-xs font-semibold text-[#5f6876]">按比例默认模板</span>
-          {ASPECT_RATIOS.map(aspectRatio => {
-            const value = typeof creativeDefaults.templateByAspectRatio?.[aspectRatio] === 'string'
-              ? creativeDefaults.templateByAspectRatio[aspectRatio]
-              : '';
-            const aspectTemplates = safeTemplates.filter(template => (
-              getTemplateId(template) && isTemplateShownForAspect(template, aspectRatio)
-            ));
-
-            return (
-              <label
-                key={aspectRatio}
-                className="grid grid-cols-[72px_minmax(0,1fr)] items-center gap-2.5"
-              >
-                <span className="text-xs font-semibold text-[#5f6876]">{aspectRatio}</span>
-                <select
-                  value={value}
-                  disabled={disabled}
-                  onChange={event => updateTemplate(aspectRatio, event.target.value)}
-                  className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <option value="">不指定模板</option>
-                  {aspectTemplates.map(template => (
-                    <option
-                      key={`${aspectRatio}-${getTemplateId(template)}`}
-                      value={getTemplateId(template)}
-                      disabled={!isTemplateShownForAspect(template, aspectRatio) || hasBlockingCompatibilityReason(template)}
-                    >
-                      {optionLabel(template, aspectRatio)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            );
-          })}
-        </div>
-
-        <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
-          <Switch
-            checked={creativeDefaults.lockTemplate === true}
-            disabled={disabled}
-            onChange={event => updateCreativeDefaults({ lockTemplate: event.target.checked })}
-          />
-          <span className={cn('min-w-[42px]', creativeDefaults.lockTemplate ? 'text-[#111827]' : 'text-[#69717e]')}>{creativeDefaults.lockTemplate ? '已锁定' : '未锁定'}</span>
-          <span>锁定模板</span>
         </label>
 
         <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">

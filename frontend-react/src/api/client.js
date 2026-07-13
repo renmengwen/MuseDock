@@ -134,9 +134,6 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  getConfigTemplates() {
-    return requestJson('/api/config/templates');
-  },
   getSystemHealth(refresh = false) {
     return requestJson(`/api/config/system-health${refresh ? '?refresh=1' : ''}`);
   },

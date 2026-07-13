@@ -13,8 +13,6 @@ function getStorageDisplay(storage = {}) {
 
 export function SettingsOverview({ appSettings, modelSettings, systemHealth, onNavigate }) {
   const creativeDefaults = appSettings?.creativeDefaults || {};
-  const templateMap = creativeDefaults.templateByAspectRatio || {};
-  const activeTemplate = templateMap[creativeDefaults.aspectRatio] || '';
   const environmentOk = systemHealth?.environment?.ok;
 
   const cards = [
@@ -31,13 +29,6 @@ export function SettingsOverview({ appSettings, modelSettings, systemHealth, onN
     {
       title: '默认画面比例',
       value: creativeDefaults.aspectRatio || '未设置',
-      action: 'creative',
-    },
-    {
-      title: '默认模板策略',
-      value: creativeDefaults.lockTemplate
-        ? `锁定 ${activeTemplate || '未选择模板'}`
-        : activeTemplate || '按画幅自动选择',
       action: 'creative',
     },
     {

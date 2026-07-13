@@ -32,7 +32,6 @@ export function SettingsPage() {
     return SECTIONS.some(item => item.id === section) ? section : 'overview';
   });
   const [appSettings, setAppSettings] = useState(null);
-  const [templates, setTemplates] = useState([]);
   const [systemHealth, setSystemHealth] = useState(null);
   const [loadingApp, setLoadingApp] = useState(true);
   const [savingApp, setSavingApp] = useState(false);
@@ -106,20 +105,17 @@ export function SettingsPage() {
     async function loadSettingsCenter() {
       setLoadingApp(true);
       setStatus({ type: 'loading', message: '正在加载设置中心...' });
-      const [appResult, templatesResult, healthResult] = await Promise.allSettled([
+      const [appResult, healthResult] = await Promise.allSettled([
         api.getAppSettings(),
-        api.getConfigTemplates(),
         api.getSystemHealth(),
       ]);
       if (!mounted) return;
 
       if (appResult.status === 'fulfilled') setAppSettings(unwrapData(appResult.value));
-      if (templatesResult.status === 'fulfilled') setTemplates(unwrapData(templatesResult.value) || []);
       if (healthResult.status === 'fulfilled') setSystemHealth(unwrapData(healthResult.value));
 
       const failures = [];
       if (appResult.status === 'rejected') failures.push(getFailureMessage('应用配置', appResult));
-      if (templatesResult.status === 'rejected') failures.push(getFailureMessage('模板列表', templatesResult));
       if (healthResult.status === 'rejected') failures.push(getFailureMessage('系统状态', healthResult));
 
       setStatus(failures.length
@@ -182,7 +178,6 @@ export function SettingsPage() {
           appSettings={appSettings}
           activeModels={modelSettings.activeModels}
           modelSettingsLoading={modelSettings.loading}
-          templates={templates}
           disabled={loadingApp || savingApp || modelSettings.loading}
           saving={savingApp}
           onChange={setAppSettings}
