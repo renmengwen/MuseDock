@@ -8,7 +8,7 @@ const {
 
 async function run() {
   const defaultSnapshot = buildCreativeDefaultsSnapshot({}, {}, {});
-  assert.strictEqual(defaultSnapshot.visualStrategy, 'hf_first');
+  assert.strictEqual(defaultSnapshot.visualStrategy, 'asset_first');
 
   const overridden = buildCreativeDefaultsSnapshot(
     { visualStrategy: 'hf_first' },
@@ -21,12 +21,12 @@ async function run() {
   assert.strictEqual(fromDefaults.visualStrategy, 'asset_first');
 
   const invalid = buildCreativeDefaultsSnapshot({}, { visualStrategy: 'banana' }, {});
-  assert.strictEqual(invalid.visualStrategy, 'hf_first');
+  assert.strictEqual(invalid.visualStrategy, 'asset_first');
 
   const target = buildWorkflowTarget({ visualStrategy: 'asset_first' });
   assert.strictEqual(target.visual_strategy, 'asset_first');
   const targetDefault = buildWorkflowTarget({});
-  assert.strictEqual(targetDefault.visual_strategy, 'hf_first');
+  assert.strictEqual(targetDefault.visual_strategy, 'asset_first');
 
   const record = { creative_context: { source_context: { kind: 'text' } } };
   applyVisualStrategyToCreativeContext(record, { visualStrategy: 'asset_first' });

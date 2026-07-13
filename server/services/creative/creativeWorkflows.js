@@ -705,7 +705,7 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
       : defaultsSource.extractDouyinFrames === true,
     visualStrategy: normalizeVisualStrategy(overrideSource.visualStrategy)
       || normalizeVisualStrategy(defaultsSource.visualStrategy)
-      || 'hf_first',
+      || 'asset_first',
     frameHtmlConcurrency: Number.isFinite(frameHtmlConcurrency)
       ? Math.min(5, Math.max(1, Math.round(frameHtmlConcurrency)))
       : 1,
@@ -713,7 +713,7 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
 }
 
 function applyVisualStrategyToCreativeContext(record, snapshot = {}) {
-  const visualStrategy = normalizeVisualStrategy(snapshot.visualStrategy) || 'hf_first';
+  const visualStrategy = normalizeVisualStrategy(snapshot.visualStrategy) || 'asset_first';
   record.creative_context = {
     ...(record.creative_context || {}),
     visual_strategy: visualStrategy,
@@ -756,7 +756,7 @@ function buildWorkflowTarget(snapshot = {}) {
     generateCaptions: snapshot.generateCaptions !== false,
     emotionalVoice: snapshot.emotionalVoice === true,
     extractDouyinFrames: snapshot.extractDouyinFrames === true,
-    visual_strategy: normalizeVisualStrategy(snapshot.visualStrategy) || 'hf_first',
+    visual_strategy: normalizeVisualStrategy(snapshot.visualStrategy) || 'asset_first',
     frameHtmlConcurrency: Number.isFinite(Number(snapshot.frameHtmlConcurrency))
       ? Math.min(5, Math.max(1, Math.round(Number(snapshot.frameHtmlConcurrency))))
       : 1,

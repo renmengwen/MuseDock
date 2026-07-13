@@ -29,7 +29,7 @@ const DEFAULT_CONFIG = {
     emotionalVoice: false,
     sourceImageAnalysisEnabled: false,
     extractDouyinFrames: false,
-    visualStrategy: 'hf_first',
+    visualStrategy: 'asset_first',
     frameHtmlConcurrency: 1,
   },
   system: {
