@@ -306,19 +306,233 @@ const { hasRealOverlayElement } = require('../server/services/creative-video/htm
   );
   assert.strictEqual(bad.valid, false);
   assert.strictEqual(bad.reason_code, 'overlay_in_caption_safe_area', '0.5px 不是零，不得判整屏覆盖');
-  // inset 分量含 0.5px / -10px 时不是全零，也不是 indeterminate（px 可解析）
+  // inset 四值的第三项是 bottom：0.5px / -10px 都侵入字幕安全区
   const halfPx = validateOverlayHtml(
     '<div data-mp-overlay="k" style="position:absolute;inset:0 0 0.5px 0"></div>',
     { height: 1920 },
   );
-  assert.strictEqual(halfPx.valid, true, JSON.stringify(halfPx));
-  assert.ok(!halfPx.indeterminate, 'px 可解析的 inset 分量不得标 indeterminate');
+  assert.strictEqual(halfPx.valid, false, JSON.stringify(halfPx));
+  assert.strictEqual(halfPx.reason_code, 'overlay_in_caption_safe_area');
   const negPx = validateOverlayHtml(
     '<div data-mp-overlay="k" style="position:absolute;inset:0 0 -10px 0"></div>',
     { height: 1920 },
   );
-  assert.strictEqual(negPx.valid, true, JSON.stringify(negPx));
-  assert.ok(!negPx.indeterminate, '-10px 不是零，也不是 indeterminate');
+  assert.strictEqual(negPx.valid, false, JSON.stringify(negPx));
+  assert.strictEqual(negPx.reason_code, 'overlay_in_caption_safe_area');
+  const autoTop = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;inset:auto 48px 0 48px;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(autoTop.valid, false, JSON.stringify(autoTop));
+  assert.strictEqual(autoTop.reason_code, 'overlay_in_caption_safe_area');
+}
+{
+  // CSS number 支持显式正号与指数；两者在浏览器中都等价 inset:0
+  for (const inset of ['+0px', '0e0px']) {
+    const bad = validateOverlayHtml(
+      `<div data-mp-overlay="k" style="position:absolute;inset:${inset}"></div>`,
+      { height: 1920 },
+    );
+    assert.strictEqual(bad.valid, false, `${inset} 必须判整屏覆盖：${JSON.stringify(bad)}`);
+    assert.strictEqual(bad.reason_code, 'overlay_covers_full_frame');
+  }
+}
+{
+  // style 声明遵循 CSS 注释和 !important 级联
+  const commented = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;/*x*/bottom:0;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(commented.valid, false, JSON.stringify(commented));
+  assert.strictEqual(commented.reason_code, 'overlay_in_caption_safe_area');
+  const importantUnsafe = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;bottom:0 !important;bottom:180px;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(importantUnsafe.valid, false, JSON.stringify(importantUnsafe));
+  assert.strictEqual(importantUnsafe.reason_code, 'overlay_in_caption_safe_area');
+  const importantSafe = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;bottom:180px !important;bottom:0;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(importantSafe.valid, true, JSON.stringify(importantSafe));
+}
+{
+  // inset shorthand 必须原子生效：任一非法分量使整条声明失效，不得局部覆盖 longhand
+  const invalidInsetAfterSafeBottom = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;bottom:180px;inset:200px bogus 0 200px;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(invalidInsetAfterSafeBottom.valid, true, JSON.stringify(invalidInsetAfterSafeBottom));
+  assert.ok(!invalidInsetAfterSafeBottom.indeterminate, '非法 inset 应整条忽略，保留 bottom:180px');
+  const invalidImportantInset = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;inset:bogus !important;bottom:0;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(invalidImportantInset.valid, false, JSON.stringify(invalidImportantInset));
+  assert.strictEqual(invalidImportantInset.reason_code, 'overlay_in_caption_safe_area');
+  // var() 可能替换成 1~4 个值，无法确定时不得局部展开，也不得静默采用后续非 important longhand
+  const unresolvedImportantInset = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;inset:var(--unknown) !important;bottom:0;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(unresolvedImportantInset.valid, true, '无法确定的 important shorthand 保持非阻断');
+  assert.strictEqual(unresolvedImportantInset.indeterminate, true, JSON.stringify(unresolvedImportantInset));
+}
+{
+  // CSS 注释相当于 token 间空白，不能把 1/**/80px 拼成 180px
+  const splitLength = validateOverlayHtml(
+    '<style>.unsafe{position:absolute;bottom:0;height:200px}</style><div data-mp-overlay="k" class="unsafe" style="bottom:1/**/80px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(splitLength.valid, true, '无法静态确认外部 class 时保持非阻断');
+  assert.strictEqual(splitLength.indeterminate, true, JSON.stringify(splitLength));
+}
+{
+  // height 不接受负长度；声明被浏览器忽略后可能由 class 决定，不能把 -1px 当作安全高度
+  const negativeHeight = validateOverlayHtml(
+    '<style>.unsafe{height:1900px}</style><div data-mp-overlay="k" class="unsafe" style="position:absolute;bottom:180px;height:-1px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(negativeHeight.valid, true, '无法静态确认高度时保持非阻断');
+  assert.strictEqual(negativeHeight.indeterminate, true, JSON.stringify(negativeHeight));
+}
+{
+  // class / <style> 定位无法在静态 opening tag 中确认，不得静默标为安全
+  const classPositioned = validateOverlayHtml(
+    '<style>.unsafe{position:absolute;bottom:0;height:200px}</style><div data-mp-overlay="k" class="unsafe"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(classPositioned.valid, true, '无法静态确认仍保持非阻断');
+  assert.strictEqual(classPositioned.indeterminate, true, JSON.stringify(classPositioned));
+}
+{
+  // 外部 class 的 !important 可覆盖完整内联定位；带 class 的安全结论必须降级人工复核
+  const classOverride = validateOverlayHtml(
+    '<style>.unsafe{position:absolute;bottom:0 !important;height:200px}</style><div data-mp-overlay="k" class="unsafe" style="position:absolute;bottom:180px;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(classOverride.valid, true, '外部样式不确定性保持非阻断');
+  assert.strictEqual(classOverride.indeterminate, true, JSON.stringify(classOverride));
+  const classMakesUnsafeInlineSafe = validateOverlayHtml(
+    '<style>.safe{position:absolute;bottom:180px !important;height:200px}</style><div data-mp-overlay="k" class="safe" style="position:absolute;bottom:0;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(classMakesUnsafeInlineSafe.valid, true, '外部样式可能覆盖危险内联值时不得确定性误报');
+  assert.strictEqual(classMakesUnsafeInlineSafe.indeterminate, true, JSON.stringify(classMakesUnsafeInlineSafe));
+}
+{
+  // CSS escape 会在浏览器 tokenizer 中解码；静态子集不解码时必须整体降级，不能静默忽略危险声明
+  for (const style of [
+    'position:absolute;bottom:0 !\\69mportant;bottom:180px;height:200px',
+    'position:absolute;bottom:180px;bott\\6fm:0;height:200px',
+    'position:absolute;bottom:180px;bottom:0p\\78;height:200px',
+  ]) {
+    const result = validateOverlayHtml(`<div data-mp-overlay="k" style="${style}"></div>`, { height: 1920 });
+    assert.strictEqual(result.valid, true, 'CSS escape 保持非阻断');
+    assert.strictEqual(result.indeterminate, true, `CSS escape 不得静默返回确定安全：${JSON.stringify(result)}`);
+  }
+}
+{
+  // HTML character reference 会先于 CSS 解析解码，静态子集未解码时必须降级
+  const encodedQuote = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;bottom:180px;--note:&quot;/*&quot;;bottom:0;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(encodedQuote.valid, true, 'HTML 引用不确定性保持非阻断');
+  assert.strictEqual(encodedQuote.indeterminate, true, JSON.stringify(encodedQuote));
+}
+{
+  // CSS 字符串中的注释标记和分号不是语法分隔符
+  const stringComment = validateOverlayHtml(
+    '<div data-mp-overlay="k" style=\'position:absolute;bottom:180px;--note:"/*";bottom:0;height:200px\'></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(stringComment.valid, false, '字符串里的 /* 不得吞掉后续 bottom:0');
+  assert.strictEqual(stringComment.reason_code, 'overlay_in_caption_safe_area');
+  const stringSemicolon = validateOverlayHtml(
+    '<div data-mp-overlay="k" style=\'position:absolute;bottom:180px;--note:"x;bottom:0;z";height:200px\'></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(stringSemicolon.valid, true, JSON.stringify(stringSemicolon));
+  assert.ok(!stringSemicolon.indeterminate, '字符串里的伪 bottom 声明不得影响安全定位');
+  for (const block of ['{foo;bottom:0;z}', '[foo;bottom:0;z]']) {
+    const simpleBlock = validateOverlayHtml(
+      `<div data-mp-overlay="k" style="position:absolute;bottom:180px;--x:${block};height:200px"></div>`,
+      { height: 1920 },
+    );
+    assert.strictEqual(simpleBlock.valid, true, `${block} 内分号不得生成伪声明：${JSON.stringify(simpleBlock)}`);
+    assert.ok(!simpleBlock.indeterminate, `${block} 不影响可确定的内联定位`);
+  }
+}
+{
+  // Chromium 支持的 root font-relative 单位必须识别为合法但静态不可换算的长度
+  for (const unit of ['rex', 'rch', 'ric', 'rcap']) {
+    const result = validateOverlayHtml(
+      `<div data-mp-overlay="k" style="position:absolute;bottom:180px;bottom:1${unit};height:200px"></div>`,
+      { height: 1920 },
+    );
+    assert.strictEqual(result.valid, true, `${unit} 保持非阻断`);
+    assert.strictEqual(result.indeterminate, true, `${unit} 不得被当作无效声明静默保留 bottom:180px：${JSON.stringify(result)}`);
+  }
+}
+{
+  // all 会重置此前的定位 longhand；静态子集按级联降级，不得继续沿用旧 bottom:0
+  const resetByAll = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;bottom:0;all:initial;top:200px;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(resetByAll.valid, true, JSON.stringify(resetByAll));
+  assert.strictEqual(resetByAll.indeterminate, true, 'all:initial 后应降级人工复核');
+}
+{
+  // CSS 数字语法合法但超过 JS 有限数范围时，浏览器会钳制；不得静默忽略
+  const overflowExponent = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;bottom:180px;height:1e999px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(overflowExponent.valid, true, '超范围数值保持非阻断');
+  assert.strictEqual(overflowExponent.indeterminate, true, JSON.stringify(overflowExponent));
+}
+{
+  // height 的 intrinsic sizing 值合法但依赖内容，静态子集必须降级而不是当成无效声明忽略
+  for (const heightValue of ['max-content', 'min-content', 'fit-content', 'fit-content(300px)', 'stretch']) {
+    const intrinsicHeight = validateOverlayHtml(
+      `<div data-mp-overlay="k" style="position:absolute;bottom:180px;height:${heightValue}"></div>`,
+      { height: 1920 },
+    );
+    assert.strictEqual(intrinsicHeight.valid, true, `${heightValue} 保持非阻断`);
+    assert.strictEqual(intrinsicHeight.indeterminate, true,
+      `${heightValue} 不得被静默忽略：${JSON.stringify(intrinsicHeight)}`);
+  }
+}
+{
+  // 逻辑定位/尺寸及 min/max-height 会改变最终物理布局；当前子集不换算时统一降级
+  for (const declaration of [
+    'inset-block-end:0',
+    'inset-block:0 180px',
+    'block-size:1900px',
+    'min-height:1900px',
+    'max-height:100px',
+    'writing-mode:vertical-rl',
+  ]) {
+    const logicalLayout = validateOverlayHtml(
+      `<div data-mp-overlay="k" style="position:absolute;bottom:180px;height:200px;${declaration}"></div>`,
+      { height: 1920 },
+    );
+    assert.strictEqual(logicalLayout.valid, true, `${declaration} 保持非阻断`);
+    assert.strictEqual(logicalLayout.indeterminate, true,
+      `${declaration} 不得静默保留旧物理值：${JSON.stringify(logicalLayout)}`);
+  }
+}
+{
+  // 浏览器会忽略未知长度单位；不得把 0foo 当作 bottom:0 误报
+  const invalidUnit = validateOverlayHtml(
+    '<div data-mp-overlay="k" style="position:absolute;bottom:0foo;top:200px;height:200px"></div>',
+    { height: 1920 },
+  );
+  assert.strictEqual(invalidUnit.valid, true, JSON.stringify(invalidUnit));
+  assert.ok(!invalidUnit.indeterminate, '无效 bottom 声明应忽略，由有效 top+height 完成静态判断');
 }
 {
   // 非 px 非零定位值（bottom:5%）无法静态确认：valid 不变但要带 indeterminate 标记

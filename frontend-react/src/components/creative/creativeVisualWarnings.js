@@ -10,6 +10,15 @@ export function arrayOrEmpty(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function warningIdentity(warning) {
+  return [warning?.code ?? null, warning?.message ?? null];
+}
+
+export function visualWarningsSignature(warnings) {
+  const list = arrayOrEmpty(warnings);
+  return list.length ? JSON.stringify(list.map(warningIdentity)) : '';
+}
+
 export function collectVisualWarnings(workflow) {
   const rawWorkflow = plainObject(workflow?.workflow);
   const hyperframes = plainObject(workflow?.result?.hyperframes_freeform || rawWorkflow.result?.hyperframes_freeform);
@@ -21,7 +30,7 @@ export function collectVisualWarnings(workflow) {
   const seen = new Set();
   return warnings.filter(warning => {
     if (!warning || typeof warning !== 'object') return false;
-    const key = [warning.code, warning.message].join('|');
+    const key = JSON.stringify(warningIdentity(warning));
     if (seen.has(key)) return false;
     seen.add(key);
     return true;

@@ -9,7 +9,13 @@ const componentPath = path.join(root, 'frontend-react/src/components/creative/Cr
 const detailPath = path.join(root, 'frontend-react/src/components/creative/CreativeTaskDetail.jsx');
 const retryPlanPath = path.join(root, 'frontend-react/src/components/creative/CreativeRetryPlan.jsx');
 
-const { collectVisualWarnings, shouldShowVisualWarnings, visibleWarnings, VISUAL_WARNINGS_COLLAPSED_LIMIT } = await import(pathToFileURL(modulePath));
+const {
+  collectVisualWarnings,
+  shouldShowVisualWarnings,
+  visibleWarnings,
+  visualWarningsSignature,
+  VISUAL_WARNINGS_COLLAPSED_LIMIT,
+} = await import(pathToFileURL(modulePath));
 
 // 1) 读取链：visual_inspect.warnings 直读
 const doneWorkflow = {
@@ -58,6 +64,14 @@ assert.equal(visibleWarnings(eightWarnings, false).length, 6);
 assert.deepEqual(visibleWarnings(eightWarnings, false), eightWarnings.slice(0, 6));
 assert.equal(visibleWarnings(eightWarnings, true).length, 8);
 assert.deepEqual(visibleWarnings(null, false), []);
+assert.equal(typeof visualWarningsSignature, 'function', '必须导出无歧义告警签名函数');
+assert.notEqual(
+  visualWarningsSignature([{ code: 'a|b', message: 'c' }]),
+  visualWarningsSignature([{ code: 'a', message: 'b|c' }]),
+  'code/message 变化不得因分隔符碰撞得到相同签名',
+);
+assert.equal(visualWarningsSignature([]), '', '空告警必须保留 falsy 签名，避免播报“0 条”');
+assert.equal(visualWarningsSignature(null), '', '缺失告警必须与空告警使用同一 falsy 签名');
 
 // 5) 组件与挂载点接线（字符串断言，随 tests/test-html-video-sfx-panel.mjs 模式）
 const [component, detail, retryPlan] = await Promise.all([
@@ -75,8 +89,21 @@ assert.match(component, /视觉观察告警 \$\{visualWarnings\.length\} 条/);
 // 可见内容（标题+列表+按钮）整体条件渲染：无告警时不渲染任何参与布局的元素
 assert.match(component, /\{visualWarnings\.length \? \(/);
 assert.match(component, /视觉观察告警 \{visualWarnings\.length\} 条（不影响成片，仅供参考）/);
-// 告警集合变化时通过 useEffect 重置展开态（组件内 hooks 无法在 node 直跑，退化为源码字符串断言）
-assert.match(component, /useEffect\(\(\) => \{\s*setExpanded\(false\);\s*\}, \[warningsSignature\]\);/);
+// 告警集合变化时重置展开态，并让 live region 先清空、下一任务再写回摘要；
+// 即使条数不变，code/message 变化也会产生可播报的 DOM 文本变化。
+assert.match(component, /const \[announcement, setAnnouncement\] = useState\(''\)/);
+assert.match(component, /setExpanded\(false\)/);
+assert.match(component, /\[warningsSignature\]/);
+assert.match(component, /\{announcement\}/);
+assert.match(component, /visualWarningsSignature/);
+const effectStart = component.indexOf('useEffect(() => {');
+const effectEnd = component.indexOf('}, [warningsSignature]);', effectStart);
+const announcementEffect = component.slice(effectStart, effectEnd + '}, [warningsSignature]);'.length);
+assert.match(
+  announcementEffect,
+  /setAnnouncement\(''\);[\s\S]*const timer = window\.setTimeout\(\(\) => \{[\s\S]*setAnnouncement\(`视觉观察告警 \$\{visualWarnings\.length\} 条`\);[\s\S]*return \(\) => window\.clearTimeout\(timer\)/,
+  'effect 必须先清空、异步写回摘要，并返回 timer cleanup',
+);
 // 展开/收起按钮位于 sr-only aria-live 容器之外（在可见 wrapper 内），避免点击展开触发整段重播
 const liveRegionEnd = component.indexOf('</div>', component.indexOf('aria-live'));
 const buttonStart = component.indexOf('<button');

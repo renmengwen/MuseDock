@@ -1,17 +1,28 @@
 import { useEffect, useState } from 'react';
 import { firstText } from './creativeDisplay.js';
-import { collectVisualWarnings, visibleWarnings, VISUAL_WARNINGS_COLLAPSED_LIMIT } from './creativeVisualWarnings.js';
+import {
+  collectVisualWarnings,
+  visibleWarnings,
+  visualWarningsSignature,
+  VISUAL_WARNINGS_COLLAPSED_LIMIT,
+} from './creativeVisualWarnings.js';
 
 // 视觉观察告警摘要：成功与失败任务共用。
 // aria-live 区域始终挂载（sr-only 脱离布局流，空态不占父级 grid 间距），
 // 否则区域与内容同时插入 DOM 时多数屏幕阅读器不会播报；区域内只播报摘要文案，完整列表放在可见 wrapper 中。
 export function CreativeVisualWarnings({ workflow }) {
   const [expanded, setExpanded] = useState(false);
+  const [announcement, setAnnouncement] = useState('');
   const visualWarnings = collectVisualWarnings(workflow);
-  // 告警集合变化时重置展开态，避免旧列表的展开状态残留到新列表。
-  const warningsSignature = visualWarnings.map(warning => `${warning.code}|${warning.message}`).join('\n');
+  const warningsSignature = visualWarningsSignature(visualWarnings);
   useEffect(() => {
     setExpanded(false);
+    setAnnouncement('');
+    if (!warningsSignature) return undefined;
+    const timer = window.setTimeout(() => {
+      setAnnouncement(`视觉观察告警 ${visualWarnings.length} 条`);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [warningsSignature]);
 
   const shownWarnings = visibleWarnings(visualWarnings, expanded);
@@ -20,7 +31,7 @@ export function CreativeVisualWarnings({ workflow }) {
   return (
     <>
       <div role="status" aria-live="polite" className="sr-only">
-        {visualWarnings.length ? `视觉观察告警 ${visualWarnings.length} 条` : null}
+        {announcement}
       </div>
       {/* 可见内容整体条件渲染：无告警时不产生任何参与布局的元素，父级 grid 不残留空 item */}
       {visualWarnings.length ? (

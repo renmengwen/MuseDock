@@ -262,8 +262,8 @@ function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSamplin
   };
   let cursor = 0;
   for (let index = 0; index < frames.length; index += 1) {
-    const frameDuration = Number(frames[index]?.duration_sec || frames[index]?.durationSec);
-    if (!Number.isFinite(frameDuration) || frameDuration <= 0) continue;
+    const frameDuration = positiveFrameDuration(frames[index]);
+    if (!frameDuration) continue;
     const sceneId = String(frames[index]?.scene_id || '').trim();
     // 内部 beat 边界（scene_html 单 frame）：仅显式 pairedSampling 启用
     if (pairedSampling === true) {
@@ -313,8 +313,8 @@ function sceneCutTimesFromProject(project = {}) {
   const cuts = [];
   let cursor = 0;
   for (let index = 0; index < frames.length; index += 1) {
-    const frameDuration = Number(frames[index]?.duration_sec || frames[index]?.durationSec);
-    if (!Number.isFinite(frameDuration) || frameDuration <= 0) continue;
+    const frameDuration = positiveFrameDuration(frames[index]);
+    if (!frameDuration) continue;
     cursor += frameDuration;
     if (index >= frames.length - 1) break;
     const sceneId = String(frames[index]?.scene_id || '').trim();
@@ -338,11 +338,25 @@ function uniqueTimes(values = []) {
     });
 }
 
+function positiveNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function positiveFrameDuration(frame) {
+  return positiveNumber(frame?.duration_sec) || positiveNumber(frame?.durationSec);
+}
+
 function buildTimedSamplePlan({ project = {}, videoInfo = {}, pairedBoundarySampling = false } = {}) {
+  const frames = Array.isArray(project?.frames) ? project.frames : [];
+  const duration = positiveNumber(videoInfo.duration) || frames.reduce((sum, frame) => {
+    const frameDuration = positiveFrameDuration(frame);
+    return frameDuration ? sum + frameDuration : sum;
+  }, 0);
   const opening = [0, 0.5, 1.0].filter(time => (
-    !Number.isFinite(videoInfo.duration) || !videoInfo.duration || time < videoInfo.duration
+    !duration || time < duration
   ));
-  const boundaryGroups = projectBoundarySampleGroups(project, videoInfo.duration, {
+  const boundaryGroups = projectBoundarySampleGroups(project, duration, {
     pairedSampling: pairedBoundarySampling === true,
   });
   const cappedBoundaryGroups = [];
@@ -377,17 +391,8 @@ function buildTimedSamplePlan({ project = {}, videoInfo = {}, pairedBoundarySamp
   // 固定预留 + boundary 组没用完的余量（总量仍受 MAX_TIMED_SAMPLES 封顶）。这些点进入抽帧计划（自带 mean_rgb），流入 style_drift 观测合并输入。
   // 缺省 / hf_first / safetyOnly 不加（行为不变，硬约束 A）。
   const observation = [];
-  // Finding 3：videoInfo.duration 无效（如 ffprobe 未取到）时，用 project.frames
-  // 的帧时长有效值总和兜底（回退链 duration_sec -> durationSec，与
-  // sceneCutTimesFromProject 同口径）；总和 <=0 维持现状不生成 observation。
-  let duration = Number(videoInfo.duration);
-  if (!Number.isFinite(duration) || duration <= 0) {
-    const frames = Array.isArray(project?.frames) ? project.frames : [];
-    duration = frames.reduce((sum, frame) => {
-      const frameDuration = Number(frame?.duration_sec || frame?.durationSec);
-      return Number.isFinite(frameDuration) && frameDuration > 0 ? sum + frameDuration : sum;
-    }, 0);
-  }
+  // probe duration 无效时用 project.frames 总时长兜底；opening、boundary 与
+  // observation 共用上方的有效时长，避免不同采样通道口径分裂。
   if (pairedBoundarySampling === true && Number.isFinite(duration) && duration > 0) {
     const existing = uniqueTimes([...opening, ...cappedBoundaryGroups.flatMap(group => group.times)]);
     const interval = duration / 8;
@@ -569,11 +574,13 @@ async function probeVideo({ videoPath, runCommand }) {
     const parsed = JSON.parse(result.stdout || '{}');
     const stream = Array.isArray(parsed.streams) ? parsed.streams[0] : {};
     const format = parsed.format && typeof parsed.format === 'object' ? parsed.format : {};
+    const streamDuration = positiveNumber(stream.duration);
+    const formatDuration = positiveNumber(format.duration);
     return {
       width: Number(stream.width) || undefined,
       height: Number(stream.height) || undefined,
       // duration 优先 stream，再回退 format
-      duration: Number(stream.duration) || Number(format.duration) || undefined,
+      duration: streamDuration || formatDuration || undefined,
       fps: parseFps(stream.avg_frame_rate || stream.r_frame_rate),
     };
   } catch {
@@ -1120,7 +1127,7 @@ function mapAssetUsageToQaWarnings(report = {}, { visualStrategy = null } = {}) 
   });
 }
 
-// overlay 越界：透传 render_decisions[].overlay_check 的字幕安全区违规（validationGate 已落盘）。
+// overlay 校验：透传 render_decisions[].overlay_check 的字幕安全区违规与人工复核项。
 // scene_html 回落展开会把整场景 stats 复制到组内每个 beat（stats_scope:'scene' 标记，
 // 见 mergeFrameStatsIntoDecisions），该类决策按 scene_id+reason_code 去重只报一条，避免 N 倍重复。
 function mapOverlayChecksToQaWarnings(decisions = [], { visualStrategy = null } = {}) {
@@ -1129,7 +1136,12 @@ function mapOverlayChecksToQaWarnings(decisions = [], { visualStrategy = null } 
   const seenSceneScoped = new Set();
   for (const decision of Array.isArray(decisions) ? decisions : []) {
     const check = decision?.overlay_check;
-    if (!check || check.valid !== false || check.reason_code !== 'overlay_in_caption_safe_area') continue;
+    const captionOverlap = check?.valid === false && check.reason_code === 'overlay_in_caption_safe_area';
+    const positionIndeterminate = check?.indeterminate === true;
+    if (!captionOverlap && !positionIndeterminate) continue;
+    const warningCode = captionOverlap
+      ? 'asset_first_overlay_caption_overlap'
+      : 'asset_first_overlay_position_indeterminate';
     const sceneScoped = decision.stats_scope === 'scene';
     // P2-7：scene_html 下整 scene stats 复制 + 按 scene 去重后，decision.beat_id 是复制组
     // 首个 beat 而非真实越界 beat——真实定位在 validateOverlayHtml 的 details.beat_scope
@@ -1140,20 +1152,22 @@ function mapOverlayChecksToQaWarnings(decisions = [], { visualStrategy = null } 
       : null;
     if (sceneScoped) {
       // 去重键纳入 beat_scope：同 scene 不同越界 beat 是不同问题，不得被静默吞掉
-      const key = `${String(decision.scene_id || '')}:${check.reason_code}:${String(beatScope || '')}`;
+      const key = `${String(decision.scene_id || '')}:${warningCode}:${String(beatScope || '')}`;
       if (seenSceneScoped.has(key)) continue;
       seenSceneScoped.add(key);
     }
     warnings.push({
-      code: 'asset_first_overlay_caption_overlap',
+      code: warningCode,
       severity: 'warning',
-      message: sceneScoped
-        ? `scene ${decision.scene_id} 的 motion overlay 落入字幕安全区。`
-        : `beat ${decision.beat_id} 的 motion overlay 落入字幕安全区。`,
+      message: positionIndeterminate
+        ? (check.message || 'motion overlay 定位值无法静态确认安全区合规，请人工复核。')
+        : (sceneScoped
+          ? `scene ${decision.scene_id} 的 motion overlay 落入字幕安全区。`
+          : `beat ${decision.beat_id} 的 motion overlay 落入字幕安全区。`),
       details: {
         beat_id: sceneScoped ? beatScope : decision.beat_id,
         overlay_beat_scope: beatScope,
-        reason_code: check.reason_code,
+        reason_code: check.reason_code || (positionIndeterminate ? 'overlay_position_indeterminate' : ''),
         reason: check.message || '',
         ...(sceneScoped ? { stats_scope: 'scene', scene_id: decision.scene_id } : {}),
       },

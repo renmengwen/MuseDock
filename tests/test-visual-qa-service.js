@@ -524,6 +524,28 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(warnings[0].code, 'asset_first_overlay_caption_overlap');
     assert.strictEqual(warnings[0].details.beat_id, 'scene_04_b1');
     assert.deepStrictEqual(mapOverlayChecksToQaWarnings(decisions, { visualStrategy: 'hf_first' }), []);
+    // 静态无法确认的定位值也必须进入成功任务的 visual_inspect.warnings，而不是只留在 gate diagnostics
+    const indeterminate = mapOverlayChecksToQaWarnings([{
+      beat_id: 'scene_04_b3',
+      overlay_check: {
+        valid: true,
+        indeterminate: true,
+        message: 'overlay 定位值无法静态确认安全区合规（bottom:5%），请人工复核',
+        details: { indeterminate_props: ['bottom'] },
+      },
+    }], { visualStrategy: 'asset_first' });
+    assert.strictEqual(indeterminate.length, 1);
+    assert.strictEqual(indeterminate[0].code, 'asset_first_overlay_position_indeterminate');
+    assert.strictEqual(indeterminate[0].details.beat_id, 'scene_04_b3');
+    assert.match(indeterminate[0].message, /人工复核/);
+    assert.deepStrictEqual(
+      mapOverlayChecksToQaWarnings([{
+        beat_id: 'scene_04_b3',
+        overlay_check: { valid: true, indeterminate: true },
+      }], { visualStrategy: 'hf_first' }),
+      [],
+      'hf_first 不增加 asset_first overlay 观察告警',
+    );
     // P2-7：scene_html 下整 scene stats 复制导致 decision.beat_id 是首个 beat，
     // 真实越界 beat 在 overlay_check.details.beat_scope——scene 级条目 beat_id 必须用 beat_scope，
     // 并结构化透出 details.overlay_beat_scope；beat 级条目维持 decision.beat_id
@@ -949,6 +971,10 @@ const qa = require('../server/services/creative-video/visualQaService');
       { scene_id: 'scene_02', duration_sec: 0 },
       { scene_id: 'scene_02', duration_sec: 80 },
     ] }), [20], 'durationSec 回退与无效时长跳过同口径');
+    assert.deepStrictEqual(sceneCutTimesFromProject({ frames: [
+      { scene_id: 'scene_01', duration_sec: -1, durationSec: 20 },
+      { scene_id: 'scene_02', duration_sec: 80 },
+    ] }), [20], '无效 duration_sec 不得阻断有效 durationSec 回退');
   }
   // Finding 3 接线：scene1(20s 密集 beat 耗尽预算) + scene2(80s)——真实 cut=20s 即使
   // boundaryGroups 截断也必须豁免 20s 硬切，同时远处真实漂移仍报
@@ -1020,19 +1046,63 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.ok(Math.max(...plan.observation) >= (60 * 7) / 8 - 0.001,
       `observation 必须覆盖尾段（≥52.5s），实际 ${JSON.stringify(plan.observation)}`);
     assert.ok(plan.observation.every(time => time < 60), '兜底时长下采样点不得越过片尾');
+    // 负的有限 probe duration 同样无效：opening / boundary / observation 必须共用帧时长兜底
+    const negativeDurationPlan = buildTimedSamplePlan({
+      project: { frames: [{ scene_id: 'scene_01', duration_sec: 60 }] },
+      videoInfo: { fps: 30, duration: -1 },
+      pairedBoundarySampling: true,
+    });
+    assert.deepStrictEqual(
+      negativeDurationPlan.opening,
+      [0, 0.5, 1],
+      '负 duration 不得清空开头白屏安全采样点',
+    );
+    assert.deepStrictEqual(
+      negativeDurationPlan.observation,
+      plan.observation,
+      '负 duration 必须与缺失 duration 使用同一个有效时长口径',
+    );
+    const boundaryProject = { frames: [
+      { scene_id: 'scene_01', duration_sec: -1, durationSec: 1 },
+      { scene_id: 'scene_01', duration_sec: 1 },
+    ] };
+    const boundaryPlanOptions = {
+      project: boundaryProject,
+      pairedBoundarySampling: true,
+    };
+    const missingBoundaryDuration = buildTimedSamplePlan({
+      ...boundaryPlanOptions,
+      videoInfo: { fps: 30 },
+    });
+    const negativeBoundaryDuration = buildTimedSamplePlan({
+      ...boundaryPlanOptions,
+      videoInfo: { fps: 30, duration: -1 },
+    });
+    const validBoundaryDuration = buildTimedSamplePlan({
+      ...boundaryPlanOptions,
+      videoInfo: { fps: 30, duration: 2 },
+    });
+    assert.strictEqual(missingBoundaryDuration.boundaryGroups.length, 1,
+      'duration_sec 无效但 durationSec 有效的相邻帧仍应产出 boundary group');
+    assert.deepStrictEqual(negativeBoundaryDuration.boundaryGroups, missingBoundaryDuration.boundaryGroups,
+      '负 duration 与缺失 duration 的 boundary 采样必须使用同一帧时长兜底');
+    assert.deepStrictEqual(validBoundaryDuration.boundaryGroups, missingBoundaryDuration.boundaryGroups,
+      '帧时长兜底与有效 probe duration 的 boundary 采样必须一致');
+    assert.ok(negativeBoundaryDuration.times.every(time => time < 2),
+      `负 duration 兜底后的采样点不得越过有效总时长，实际 ${JSON.stringify(negativeBoundaryDuration.times)}`);
     // 兜底链：durationSec 回退 + 无效值跳过
     const fallbackChain = buildTimedSamplePlan({
       project: { frames: [
         { scene_id: 'scene_01', durationSec: 30 },
-        { scene_id: 'scene_01', duration_sec: 0 },
+        { scene_id: 'scene_01', duration_sec: -1, durationSec: 30 },
         { scene_id: 'scene_01', duration_sec: 30 },
       ] },
       videoInfo: {},
       pairedBoundarySampling: true,
     });
     assert.ok(fallbackChain.observation.length > 0, 'durationSec 回退链同样生效');
-    assert.ok(Math.max(...fallbackChain.observation) >= (60 * 7) / 8 - 0.001,
-      `回退链兜底时长应为 60s，实际 ${JSON.stringify(fallbackChain.observation)}`);
+    assert.ok(Math.max(...fallbackChain.observation) >= (90 * 7) / 8 - 0.001,
+      `无效 duration_sec 后必须继续回退 durationSec，兜底时长应为 90s，实际 ${JSON.stringify(fallbackChain.observation)}`);
     // duration 与 frames 都无效：observation 空且不抛错（维持现状）
     const emptyPlan = buildTimedSamplePlan({
       project: { frames: [{ scene_id: 'scene_01' }] },
@@ -1078,6 +1148,15 @@ const qa = require('../server/services/creative-video/visualQaService');
       }),
     });
     assert.strictEqual(fromStream.duration, 10, 'stream.duration 必须优先于 format.duration');
+    // stream.duration 为负数时无效，不得抢占有效的 format.duration
+    const negativeStream = await probeVideo({
+      videoPath: 'x.mp4',
+      runCommand: makeRunCommand({
+        streams: [{ width: 1080, height: 1920, duration: '-1', avg_frame_rate: '30/1' }],
+        format: { duration: '20.0' },
+      }),
+    });
+    assert.strictEqual(negativeStream.duration, 20, '负的 stream.duration 必须回退 format.duration');
   }
   console.log('visual qa duration fallback tests passed');
 
