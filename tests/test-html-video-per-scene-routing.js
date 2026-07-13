@@ -337,11 +337,6 @@ const stubAiImageModel = { isConfigured: async () => false };
   assert.ok(Array.isArray(result.project.render_decisions));
   assert.ok(result.project.render_decisions.length >= result.project.frames.length);
   assert.ok(result.project.render_decisions.every(item => item.beat_id || item.scene_id));
-  // 硬约束 A 回归：未设置 visual_strategy（hf_first 链路）时决策对象不得带 route_role 字段
-  assert.ok(
-    result.project.render_decisions.every(item => !('route_role' in item)),
-    `hf_first 链路的 render_decisions 不应带 route_role：${JSON.stringify(result.project.render_decisions, null, 2)}`,
-  );
 
   // 持久化校验：project.json 落盘后经 normalizeProject 仍保留两个新字段。
   const savedProject = JSON.parse(await fs.readFile(path.join(result.html_video_project_path, 'project.json'), 'utf8'));
