@@ -67,8 +67,16 @@ const [component, detail, retryPlan] = await Promise.all([
 ]);
 
 assert.match(component, /collectVisualWarnings/);
-assert.match(component, /if \(!visualWarnings\.length\) return null;/);
+// aria-live 容器始终挂载：不再空态提前 return null，空态时容器内部不渲染任何可见内容
+assert.doesNotMatch(component, /return null;/);
+assert.match(component, /\{visualWarnings\.length \? \(/);
 assert.match(component, /视觉观察告警 \{visualWarnings\.length\} 条（不影响成片，仅供参考）/);
+// 告警集合变化时通过 useEffect 重置展开态（组件内 hooks 无法在 node 直跑，退化为源码字符串断言）
+assert.match(component, /useEffect\(\(\) => \{\s*setExpanded\(false\);\s*\}, \[warningsSignature\]\);/);
+// 展开/收起按钮位于 aria-live 容器之外（作为兄弟节点），避免点击展开触发整段重播
+const liveRegionEnd = component.indexOf('</div>', component.indexOf('aria-live'));
+const buttonStart = component.indexOf('<button');
+assert.ok(buttonStart > liveRegionEnd, '展开/收起按钮应在 aria-live 容器之外');
 // token 类，不新增 hex
 assert.match(component, /text-fg-1/);
 assert.match(component, /border-line-2/);
