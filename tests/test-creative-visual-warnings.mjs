@@ -67,16 +67,22 @@ const [component, detail, retryPlan] = await Promise.all([
 ]);
 
 assert.match(component, /collectVisualWarnings/);
-// aria-live 容器始终挂载：不再空态提前 return null，空态时容器内部不渲染任何可见内容
+// aria-live 容器始终挂载且为 sr-only（absolute 定位脱离布局流，空态不占父级 grid 间距）
 assert.doesNotMatch(component, /return null;/);
+assert.match(component, /role="status" aria-live="polite" className="sr-only"/);
+// sr-only 区域只播报摘要文案，不放完整列表
+assert.match(component, /视觉观察告警 \$\{visualWarnings\.length\} 条/);
+// 可见内容（标题+列表+按钮）整体条件渲染：无告警时不渲染任何参与布局的元素
 assert.match(component, /\{visualWarnings\.length \? \(/);
 assert.match(component, /视觉观察告警 \{visualWarnings\.length\} 条（不影响成片，仅供参考）/);
 // 告警集合变化时通过 useEffect 重置展开态（组件内 hooks 无法在 node 直跑，退化为源码字符串断言）
 assert.match(component, /useEffect\(\(\) => \{\s*setExpanded\(false\);\s*\}, \[warningsSignature\]\);/);
-// 展开/收起按钮位于 aria-live 容器之外（作为兄弟节点），避免点击展开触发整段重播
+// 展开/收起按钮位于 sr-only aria-live 容器之外（在可见 wrapper 内），避免点击展开触发整段重播
 const liveRegionEnd = component.indexOf('</div>', component.indexOf('aria-live'));
 const buttonStart = component.indexOf('<button');
 assert.ok(buttonStart > liveRegionEnd, '展开/收起按钮应在 aria-live 容器之外');
+// 按钮携带 aria-expanded 表达展开态
+assert.match(component, /aria-expanded=\{expanded\}/);
 // token 类，不新增 hex
 assert.match(component, /text-fg-1/);
 assert.match(component, /border-line-2/);
@@ -89,7 +95,6 @@ assert.match(component, /展开其余/);
 assert.match(component, /'收起'/);
 assert.match(component, /role="status"/);
 assert.match(component, /aria-live="polite"/);
-assert.match(component, /aria-label="视觉观察告警"/);
 
 // 成功（非失败）路径由 CreativeTaskDetail 挂载
 assert.match(detail, /CreativeVisualWarnings/);
