@@ -785,36 +785,6 @@ async function runFrameHtmlPhase(ctx) {
     const routingDecision = templateRoutingDecisions instanceof Map
       ? (beatId ? templateRoutingDecisions.get(beatId) : null) || templateRoutingDecisions.get(sceneId)
       : (beatId ? objectOrEmpty(templateRoutingDecisions)[beatId] : null) || objectOrEmpty(templateRoutingDecisions)[sceneId];
-    if (routingDecision?.source_mode === 'template_inputs') {
-      const durationSec = trustedSceneDuration(scene || {}, node);
-      nodes[index] = { ...node, durationSec };
-      contentGraph = { ...contentGraph, nodes };
-      project = await projectStore.writeProjectJson(projectDir, current => {
-        current.content_graph = contentGraph;
-        markCheckpointStage(current, 'frame_html', { status: 'partial' });
-        markCheckpointFrame(current, 'frame_html', frameKey || sceneId, {
-          status: 'skipped',
-          diagnostic_code: '',
-        });
-        return current;
-      });
-      completedFrameHtmlCount += 1;
-      await report(onProgress, {
-        type: 'html_video_frame_template_inputs_selected',
-        stage: 'project',
-        sub_stage: 'frame_html',
-        message: `第 ${index + 1}/${nodes.length} 帧已匹配模板变量，跳过自由 HTML 生成。`,
-        frame_id: node.id,
-        data: {
-          frame_id: node.id,
-          template_id: routingDecision.template_id,
-          index,
-          total: nodes.length,
-          completed: completedFrameHtmlCount,
-        },
-      });
-      continue;
-    }
     // 兼容旧版按 sceneId 键控的 checkpoint：beat 键 miss 时回退场景键（场景 HTML 由同场景 beat 共享）
     const checkpointFrames = objectOrEmpty(project.generation_checkpoint?.stages?.frame_html?.frames);
     const checkpointFrame = objectOrEmpty(

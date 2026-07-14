@@ -9,7 +9,6 @@ const source = fs.readFileSync(clientPath, 'utf-8');
 
 const expectedMethods = [
   'getHtmlVideoProject(workflowId)',
-  'patchHtmlVideoProjectInputs(workflowId, payload)',
   'patchHtmlVideoProjectFrame(workflowId, frameId, payload)',
   'editHtmlVideoProject(workflowId, payload)',
   'renderHtmlVideoProject(workflowId, payload)',
@@ -34,7 +33,6 @@ for (const method of expectedMethods) {
 
 for (const segment of [
   '/html-video-project',
-  '/html-video-project/inputs',
   '/html-video-project/frames/',
   '/html-video-project/frames/${encodeURIComponent(frameId)}/html',
   '/drafts/${encodeURIComponent(draftId)}/accept',
@@ -54,7 +52,8 @@ for (const segment of [
   assert.ok(source.includes(segment), `client should call ${segment}`);
 }
 
-assert.match(source, /patchHtmlVideoProjectInputs\([^]*?method:\s*'PATCH'/);
+assert.ok(!source.includes('patchHtmlVideoProjectInputs'), 'client should not expose patchHtmlVideoProjectInputs');
+assert.ok(!source.includes('/html-video-project/inputs'), 'client should not call /html-video-project/inputs');
 assert.match(source, /patchHtmlVideoProjectFrame\([^]*?method:\s*'PATCH'/);
 assert.match(source, /saveHtmlVideoProjectFrameHtml\([^]*?method:\s*'PUT'/);
 assert.match(source, /acceptHtmlVideoProjectFrameDraft\([^]*?method:\s*'POST'/);

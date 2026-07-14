@@ -382,8 +382,7 @@ const stubAiImageModel = { isConfigured: async () => false };
         typeof d.route_role === 'string' && d.route_role.length > 0,
         `asset_first 决策必须带 route_role：${JSON.stringify(d)}`,
       );
-      assert.notStrictEqual(d.template_id, 'frame-glitch-title');
-      assert.notStrictEqual(d.template_id, 'frame-build-minimal');
+      assert.strictEqual(Object.prototype.hasOwnProperty.call(d, 'template_id'), false, `asset_first 决策不应再携带 template_id：${JSON.stringify(d)}`);
     }
   }
 

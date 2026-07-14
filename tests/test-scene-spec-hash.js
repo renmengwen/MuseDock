@@ -16,7 +16,7 @@ function sceneSpec(overrides = {}) {
         narration_text: '第一段旁白',
         captions: [{ start: 0, end: 1.2, text: '第一段字幕' }],
         visual_text: { headline: '视觉标题 A' },
-        template_id: 'visual-template-a',
+        visual_variant: 'visual-template-a',
       },
       {
         id: 'scene_02',
@@ -24,7 +24,7 @@ function sceneSpec(overrides = {}) {
         narration_text: '第二段旁白',
         captions: [{ start: 0, end: 1.4, text: '第二段字幕' }],
         visual_text: { headline: '视觉标题 B' },
-        template_id: 'visual-template-b',
+        visual_variant: 'visual-template-b',
       },
     ],
     ...overrides,
@@ -130,7 +130,7 @@ function matchingAudio(spec) {
     scenes: base.scenes.map(scene => ({
       ...scene,
       visual_text: { headline: `${scene.id} 新视觉标题`, cards: ['只改画面'] },
-      template_id: 'another-visual-template',
+      visual_variant: 'another-visual-template',
       inputs: { accent: 'red' },
     })),
   });

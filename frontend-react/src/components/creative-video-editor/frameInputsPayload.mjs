@@ -14,7 +14,6 @@ export function buildFrameSavePayload(draft = {}) {
   const headline = draft.headline || draft.title || '';
   const inputs = updateHeadline(draft.inputs, headline);
   const duration = Number(draft.duration_sec);
-  const templateId = String(draft.template_id || draft.template || '').trim();
   const payload = {
     type: 'frame_patch',
     frame_id: draft.id || draft.scene_id,
@@ -26,9 +25,6 @@ export function buildFrameSavePayload(draft = {}) {
       },
     },
   };
-  if (templateId) {
-    payload.template_id = templateId;
-  }
   if (draft.duration_sec !== '' && Number.isFinite(duration) && duration > 0) {
     payload.duration_sec = duration;
   }

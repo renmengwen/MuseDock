@@ -4,15 +4,6 @@ const defaultAdapter = require('./hyperframesPlaywrightAdapter');
 const { resolveFrameRenderSource } = require('./frameRenderSource');
 const { DEFAULT_OUTPUT_RESOLUTION } = require('./projectSchema');
 
-function resolveFrameHtmlPath(frame, options = {}) {
-  const source = resolveFrameRenderSource({
-    projectDir: options.projectDir || options.workDir,
-    project: options.project || {},
-    frame,
-  });
-  return source.absolute_html_path;
-}
-
 async function renderFrame(frame = {}, options = {}) {
   const adapter = options.adapter || defaultAdapter;
   const state = options.state || {};
@@ -98,5 +89,4 @@ async function renderFrame(frame = {}, options = {}) {
 
 module.exports = {
   renderFrame,
-  resolveFrameHtmlPath,
 };

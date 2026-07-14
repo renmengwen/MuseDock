@@ -24,7 +24,7 @@ const workflows = require('../server/services/creative/creativeWorkflows');
         code: 'sample_warning_a',
         severity: 'warning',
         message: '抽样观察到 2 个 beat 画面异常。',
-        details: { beats: [{ beat_id: 'b1', template_id: 't1' }, { beat_id: 'b2', template_id: 't2' }] },
+        details: { beats: [{ beat_id: 'b1', extra: 't1' }, { beat_id: 'b2', extra: 't2' }] },
       },
       {
         code: 'asset_first_boundary_refresh',

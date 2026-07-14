@@ -1210,7 +1210,6 @@ function summarizeVisualRoute(project = {}) {
   const styleProfile = objectOrEmpty(project.visual_plan?.style_profile);
   return {
     total_beats: Array.isArray(project.visual_plan?.beats) ? project.visual_plan.beats.length : frames.length,
-    template_inputs: frames.filter(frame => frame.source_mode === 'template_inputs').length,
     raw_html: frames.filter(frame => frame.source_mode === 'raw_html').length,
     fallback: decisions.filter(decision => decision.fallback_from || decision.fallback_reason).length,
     style_profile_id: styleProfile.id || '',
@@ -1974,9 +1973,6 @@ async function generateHtmlVideo(options = {}) {
     success: true,
     message: 'html-video 成片完成。',
     render_mode: 'html-video',
-    template_id: null,
-    template_reason: '逐场景生成。',
-    template_inputs: {},
     project: rendered.project,
     project_dir: projectDir,
     html_video_project_path: projectDir,
@@ -2009,12 +2005,9 @@ async function parseEditInstruction({ model, project, instruction }) {
         '标题写入 frame_patch.metadata_patch.visual_text.headline；旁白写入 frame_patch.narration_text；时长写入 frame_patch.duration_sec。',
         '当前 project 摘要：',
         JSON.stringify({
-          template_id: project.template_id,
-          template_inputs: project.template_inputs,
           frames: (project.frames || []).map(frame => ({
             id: frame.id,
             scene_id: frame.scene_id,
-            template_id: frame.template_id,
             source_mode: frame.source_mode,
             inputs: frame.inputs,
             visual_text: frame.metadata?.visual_text || {},

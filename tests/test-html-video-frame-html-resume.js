@@ -524,9 +524,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               throw new Error('resume 不应重新生成 content graph。');
             }
@@ -565,9 +562,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               throw new Error('音频恢复场景不应重新生成 content graph。');
             }
@@ -609,9 +603,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               throw new Error('音频候选选择场景不应重新生成 content graph。');
             }
@@ -651,9 +642,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               throw new Error('合法空格锚点复用场景不应重新生成 content graph。');
             }
@@ -684,9 +672,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               throw new Error('注释假锚点场景不应重新生成 content graph。');
             }
@@ -719,9 +704,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               contentGraphCalls += 1;
               return { success: true, text: JSON.stringify(contentGraph('脚本已修改')) };
@@ -758,9 +740,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               contentGraphCalls += 1;
               return { success: true, text: JSON.stringify(contentGraph('视觉字段已修改')) };
@@ -804,9 +783,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               contentGraphCalls += 1;
               return { success: true, text: JSON.stringify(contentGraph('中断新图')) };
@@ -846,9 +822,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               contentGraphCalls += 1;
               return { success: true, text: JSON.stringify(contentGraph('缺 hash 重新生成')) };
@@ -881,9 +854,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               throw new Error('坏 HTML 复用场景不应重新生成 content graph。');
             }
@@ -915,9 +885,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               contentGraphCalls += 1;
               return { success: true, text: JSON.stringify(contentGraph('重新生成内容图')) };
@@ -962,9 +929,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               throw new Error('诊断优先级测试不应重新生成 content graph。');
             }
@@ -1049,9 +1013,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               contentGraphCalls += 1;
               throw new Error('resume fallback 不应重新生成 content graph。');
@@ -1174,9 +1135,6 @@ async function main() {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               throw new Error('mixed fallback 不应重新生成 content graph。');
             }

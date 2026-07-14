@@ -74,7 +74,6 @@ function resolveFrameRenderSource({ projectDir, project = {}, frame = {} } = {})
     absolute_html_path: resolveProjectPath(projectDir, frameHtmlPath),
     duration_sec: durationSec,
     variables,
-    needs_materialize: false,
   };
 }
 

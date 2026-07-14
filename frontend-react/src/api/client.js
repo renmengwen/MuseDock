@@ -181,13 +181,6 @@ export const api = {
   getHtmlVideoProject(workflowId) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project`);
   },
-  patchHtmlVideoProjectInputs(workflowId, payload) {
-    return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/inputs`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
-    });
-  },
   patchHtmlVideoProjectFrame(workflowId, frameId, payload) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/html-video-project/frames/${encodeURIComponent(frameId)}`, {
       method: 'PATCH',

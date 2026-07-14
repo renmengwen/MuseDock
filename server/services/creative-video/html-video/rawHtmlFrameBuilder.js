@@ -13,12 +13,11 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value || {}));
 }
 
-function resolveOutput(target = {}, template = {}) {
-  const templateOutput = objectOrEmpty(template.output);
-  const resolution = objectOrEmpty(target.resolution || templateOutput.resolution);
+function resolveOutput(target = {}) {
+  const resolution = objectOrEmpty(target.resolution);
   const width = Number(target.width || resolution.width || 1920);
   const height = Number(target.height || resolution.height || 1080);
-  const fps = Number(target.fps || templateOutput.fps || 30);
+  const fps = Number(target.fps || 30);
   return {
     resolution: {
       width: Number.isFinite(width) && width > 0 ? width : 1920,
@@ -115,7 +114,6 @@ async function buildRawHtmlFrameProject({
   graph,
   sceneSpec = {},
   target = {},
-  template = {},
   mediaOptions = {},
 } = {}) {
   if (!projectDir) throw new Error('缺少 projectDir。');
@@ -153,7 +151,6 @@ async function buildRawHtmlFrameProject({
       scene_id: scene.id,
       graph_node_id: nodeId,
       order: index + 1,
-      template_id: template.id || null,
       engine: 'hyperframes-playwright',
       source_mode: 'raw_html',
       html_path: htmlPath,
@@ -204,13 +201,10 @@ async function buildRawHtmlFrameProject({
     project_id: `${workflowId || 'workflow'}_${runId || 'run'}`,
     workflow_id: workflowId || null,
     run_id: runId || null,
-    template_id: template.id || null,
-    template_inputs: {},
     output: {
-      ...resolveOutput(target, template),
+      ...resolveOutput(target),
       duration: cursor,
     },
-    template_schema: {},
     content_graph: trustedGraph,
     frames,
     timeline: {
@@ -236,7 +230,6 @@ async function buildRawHtmlFrameProjectFromMemory({
   frameHtmlByNodeId,
   sceneSpec = {},
   target = {},
-  template = {},
   mediaOptions = {},
 } = {}) {
   if (!projectDir) throw new Error('缺少 projectDir。');
@@ -294,7 +287,6 @@ async function buildRawHtmlFrameProjectFromMemory({
     graph: trustedGraph,
     sceneSpec,
     target,
-    template,
     mediaOptions,
   });
 }

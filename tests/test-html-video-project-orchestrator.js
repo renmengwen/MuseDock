@@ -28,7 +28,6 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     let muxCalls = 0;
     const project = {
       project_id: 'timing-fit-no-errors-field',
-      template_id: 'raw-html',
       output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
       frames: [{
         id: 'scene_01',
@@ -147,7 +146,6 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     let renderFrameCalls = 0;
     const project = {
       project_id: 'timeline-duration-real-render',
-      template_id: 'raw-html',
       output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 329 },
       target: { duration_sec: 60 },
       frames: [
@@ -228,7 +226,6 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     let composeCalls = 0;
     const project = {
       project_id: 'render-subset',
-      template_id: 'raw-html',
       output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
       frames: [
         { id: 'scene_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
@@ -292,7 +289,6 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     let renderCalls = 0;
     const project = {
       project_id: 'render-scene-key',
-      template_id: 'raw-html',
       output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 2 },
       frames: [
         { id: 'frame_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
@@ -371,7 +367,6 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     let renderCalls = 0;
     const project = {
       project_id: 'render-failure',
-      template_id: 'raw-html',
       output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
       frames: [
         { id: 'scene_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
@@ -449,7 +444,6 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     let verifyCalls = 0;
     const project = {
       project_id: 'compose-success',
-      template_id: 'raw-html',
       output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
       frames: [
         { id: 'scene_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
@@ -571,7 +565,6 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-duration-failure-'));
     const project = {
       project_id: 'compose-duration-failure',
-      template_id: 'raw-html',
       output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
       frames: [
         { id: 'scene_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },
@@ -647,7 +640,6 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     const muxCalls = [];
     const project = {
       project_id: 'compose-sfx-fallback',
-      template_id: 'raw-html',
       output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 2 },
       frames: [
         { id: 'scene_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 2 },

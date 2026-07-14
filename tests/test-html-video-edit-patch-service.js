@@ -4,12 +4,9 @@ const { applyEditPatch } = require('../server/services/creative-video/html-video
 
 function baseProject() {
   return {
-    template_id: 'base',
-    template_inputs: { headline: '旧标题', subtitle: '旧副标题' },
     frames: [
       {
         id: 'frame_01',
-        template_id: 'base',
         inputs: { headline: '帧标题' },
         duration_sec: 4,
         html_path: 'frames/frame_01.html',

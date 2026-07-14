@@ -22,14 +22,11 @@ async function writeFile(filePath, content) {
 
   function timelineGateProject(audio, frameOverrides = {}) {
     return {
-      template_id: 'valid',
-      template_inputs: { headline: '标题' },
       output: { resolution: { width: 1920, height: 1080 }, fps: 30 },
       frames: [
         {
           id: 'scene_01',
           scene_id: 'scene_01',
-          template_id: 'valid',
           inputs: { headline: '帧标题' },
           narration_text: '第一段',
           captions: [{ text: '字幕一' }],
@@ -50,7 +47,6 @@ async function writeFile(filePath, content) {
 
   const project = {
     template_id: 'missing',
-    template_inputs: {},
     frames: [
       { id: 'f1', template_id: 'valid', inputs: {}, engine: 'unknown-engine', html_path: 'frames/f1.html' },
       { id: 'f2', template_id: 'script_source', inputs: {}, html_path: 'frames/f2.html' },
@@ -112,9 +108,7 @@ async function writeFile(filePath, content) {
 
   const pass = await validateHtmlVideoProject({
     project: {
-      template_id: 'valid',
-      template_inputs: { headline: '标题' },
-      frames: [{ id: 'f1', template_id: 'valid', inputs: { headline: '帧标题' }, html_path: 'frames/f1.html' }],
+      frames: [{ id: 'f1', inputs: { headline: '帧标题' }, html_path: 'frames/f1.html' }],
       assets: [{ id: 'a1', path: 'assets/a.png' }],
       timeline: { tracks: [{ id: 'main', items: [{ id: 'f1', kind: 'frame' }] }] },
     },
@@ -125,9 +119,7 @@ async function writeFile(filePath, content) {
 
   const captionFallbackPass = await validateHtmlVideoProject({
     project: {
-      template_id: 'valid',
-      template_inputs: { headline: '标题' },
-      frames: [{ id: 'caption_fallback', template_id: 'valid', inputs: { headline: '帧标题' }, narration_text: '这句旁白会自动生成字幕。' }],
+      frames: [{ id: 'caption_fallback', inputs: { headline: '帧标题' }, narration_text: '这句旁白会自动生成字幕。' }],
     },
     environment: { ok: true, diagnostics: [] },
   });
@@ -136,9 +128,7 @@ async function writeFile(filePath, content) {
 
   const captionDisabledWarning = await validateHtmlVideoProject({
     project: {
-      template_id: 'valid',
-      template_inputs: { headline: '标题' },
-      frames: [{ id: 'caption_disabled', template_id: 'valid', inputs: { headline: '帧标题' }, narration_text: '有旁白但关闭字幕。', generate_captions: false }],
+      frames: [{ id: 'caption_disabled', inputs: { headline: '帧标题' }, narration_text: '有旁白但关闭字幕。', generate_captions: false }],
     },
     environment: { ok: true, diagnostics: [] },
   });
@@ -281,12 +271,9 @@ async function writeFile(filePath, content) {
 
   const rawHtmlPass = await validateHtmlVideoProject({
     project: {
-      template_id: 'valid',
-      template_inputs: {},
       frames: [
         {
           id: 'raw_01',
-          template_id: 'valid',
           source_mode: 'raw_html',
           inputs: {},
           html_path: 'frames/raw_01.html',
@@ -312,12 +299,9 @@ async function writeFile(filePath, content) {
   const rawHtmlMissingKeys = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {
-      template_id: 'valid',
-      template_inputs: {},
       frames: [
         {
           id: 'raw_missing_keys',
-          template_id: 'valid',
           source_mode: 'raw_html',
           inputs: {},
           html_path: 'frames/missing-keys.html',
@@ -347,12 +331,9 @@ async function writeFile(filePath, content) {
   const rawHtmlValidKeys = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {
-      template_id: 'valid',
-      template_inputs: {},
       frames: [
         {
           id: 'raw_valid_keys',
-          template_id: 'valid',
           source_mode: 'raw_html',
           inputs: {},
           html_path: 'frames/valid-keys.html',
@@ -378,12 +359,9 @@ async function writeFile(filePath, content) {
   const rawHtmlCommentFakeKey = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {
-      template_id: 'valid',
-      template_inputs: {},
       frames: [
         {
           id: 'raw_comment_fake_key',
-          template_id: 'valid',
           source_mode: 'raw_html',
           inputs: {},
           html_path: 'frames/comment-fake-key.html',
@@ -409,12 +387,9 @@ async function writeFile(filePath, content) {
   const rawHtmlManagedCaptionLayer = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {
-      template_id: 'valid',
-      template_inputs: {},
       frames: [
         {
           id: 'raw_managed_caption_layer',
-          template_id: 'valid',
           source_mode: 'raw_html',
           inputs: {},
           html_path: 'frames/managed-caption-layer.html',
@@ -448,13 +423,10 @@ async function writeFile(filePath, content) {
   const rawHtmlDecorativeFrame = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {
-      template_id: 'valid',
-      template_inputs: {},
       output: { resolution: { width: 1920, height: 1080 }, fps: 30 },
       frames: [
         {
           id: 'raw_decorative_frame',
-          template_id: 'valid',
           source_mode: 'raw_html',
           inputs: {},
           html_path: 'frames/decorative-frame.html',
@@ -482,13 +454,10 @@ async function writeFile(filePath, content) {
   const rawHtmlRootContainer = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {
-      template_id: 'valid',
-      template_inputs: {},
       output: { resolution: { width: 1920, height: 1080 }, fps: 30 },
       frames: [
         {
           id: 'raw_root_container',
-          template_id: 'valid',
           source_mode: 'raw_html',
           inputs: {},
           html_path: 'frames/root-container-with-body-contract.html',
@@ -516,13 +485,10 @@ async function writeFile(filePath, content) {
   const rawHtmlWrongResolution = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {
-      template_id: 'valid',
-      template_inputs: {},
       output: { resolution: { width: 1080, height: 1920 }, fps: 30 },
       frames: [
         {
           id: 'raw_wrong_resolution',
-          template_id: 'valid',
           source_mode: 'raw_html',
           inputs: {},
           html_path: 'frames/wrong-resolution.html',
@@ -541,12 +507,9 @@ async function writeFile(filePath, content) {
   const rawHtmlMissingFile = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {
-      template_id: 'valid',
-      template_inputs: {},
       frames: [
         {
           id: 'raw_missing_file',
-          template_id: 'valid',
           source_mode: 'raw_html',
           inputs: {},
           html_path: 'frames/not-found.html',
@@ -561,12 +524,9 @@ async function writeFile(filePath, content) {
   const rawHtmlPathEscape = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {
-      template_id: 'valid',
-      template_inputs: {},
       frames: [
         {
           id: 'raw_path_escape',
-          template_id: 'valid',
           source_mode: 'raw_html',
           inputs: {},
           html_path: '../escape.html',
@@ -585,12 +545,9 @@ async function writeFile(filePath, content) {
   const templateInputsSkipRawHtmlCheck = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
     project: {
-      template_id: 'valid',
-      template_inputs: { headline: '标题' },
       frames: [
         {
           id: 'template_inputs_missing_file',
-          template_id: 'valid',
           source_mode: 'template_inputs',
           inputs: { headline: '帧标题' },
           html_path: 'frames/not-found.html',
@@ -648,12 +605,9 @@ async function writeFile(filePath, content) {
     '</body></html>',
   ].join('\n'));
   const overlayProject = () => ({
-    template_id: 'valid',
-    template_inputs: {},
     frames: [
       {
         id: 'raw_overlay_unsafe',
-        template_id: 'valid',
         source_mode: 'raw_html',
         inputs: {},
         html_path: 'frames/overlay-unsafe.html',
@@ -695,8 +649,6 @@ async function writeFile(filePath, content) {
     '</body></html>',
   ].join('\n'));
   const diagramProject = ({ htmlPath, beatVisualBaseType } = {}) => ({
-    template_id: 'valid',
-    template_inputs: {},
     visual_plan: {
       beats: [
         {
@@ -711,7 +663,6 @@ async function writeFile(filePath, content) {
         id: 'scene_07_b1',
         beat_id: 'scene_07_b1',
         scene_id: 'scene_07',
-        template_id: 'valid',
         source_mode: 'raw_html',
         inputs: {},
         html_path: htmlPath,

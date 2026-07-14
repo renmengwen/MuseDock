@@ -69,13 +69,13 @@ function createFakeServices(overrides = {}) {
               style_profile: { id: 'clean_education' },
             },
             frames: [
-              { id: 'frame_1', source_mode: 'template_inputs' },
+              { id: 'frame_1', source_mode: 'raw_html' },
               { id: 'frame_2', source_mode: 'raw_html' },
               { id: 'frame_3', source_mode: 'raw_html' },
             ],
             render_decisions: [
-              { frame_id: 'frame_2', fallback_from: 'template_inputs' },
-              { frame_id: 'frame_3', fallback_reason: 'missing_template' },
+              { frame_id: 'frame_2', fallback_from: 'scene_html' },
+              { frame_id: 'frame_3', fallback_reason: 'missing_asset' },
             ],
           },
           render: { status: 'rendered' },
@@ -177,8 +177,7 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.equal(fetched.data.stages.find(stage => stage.id === 'render').status, 'done');
   assert.deepEqual(fetched.data.result.hyperframes_freeform.project.visual_route_summary, {
     total_beats: 3,
-    template_inputs: 1,
-    raw_html: 2,
+    raw_html: 3,
     fallback: 2,
     style_profile_id: 'clean_education',
   });
@@ -1027,8 +1026,6 @@ async function testHtmlVideoLiteCompletesVisibleFinalStages() {
     project_id: 'p1',
     workflow_id: WORKFLOW_ID,
     run_id: 'run-1',
-    template_id: 'simple',
-    template_inputs: {},
     frames: [],
     timeline: { tracks: [] },
   }, null, 2));
@@ -1186,14 +1183,11 @@ async function testHtmlVideoExportUsesOrchestrator() {
     project_id: 'p1',
     workflow_id: WORKFLOW_ID,
     run_id: 'run-1',
-    template_id: 'simple',
-    template_inputs: { headline: '旧标题' },
     output: { fps: 24 },
     frames: [
       {
         id: 'frame_01',
         scene_id: 'scene_01',
-        template_id: 'simple',
         html_path: 'frames/stale.html',
         inputs: { headline: '旧帧标题' },
         duration_sec: 2,
@@ -1268,7 +1262,6 @@ async function testHtmlVideoExportRestoresMissingNarrationReference() {
     project_id: 'p1',
     workflow_id: WORKFLOW_ID,
     run_id: runId,
-    template_id: 'simple',
     output: { fps: 24 },
     frames: [],
     timeline: { tracks: [] },

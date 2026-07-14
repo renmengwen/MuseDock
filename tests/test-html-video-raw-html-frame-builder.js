@@ -42,7 +42,7 @@ const projectStore = require('../server/services/creative-video/html-video/proje
 
   assert.equal(project.workflow_id, 'wf_001');
   assert.equal(project.run_id, 'run_001');
-  assert.equal(project.template_id, null);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(project, 'template_id'), false);
   assert.equal(project.output.resolution.width, 1920);
   assert.equal(project.output.resolution.height, 1080);
   assert.equal(project.output.fps, 30);

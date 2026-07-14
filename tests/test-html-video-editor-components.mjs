@@ -43,7 +43,7 @@ for (const status of [
 for (const message of [
   '正在加载可编辑成片工程',
   '可编辑成片工程已加载',
-  '正在保存模板字段',
+  '正在保存帧字段',
   '正在应用编辑',
   '正在重新生成 HTML',
   '正在渲染单帧预览',
@@ -67,7 +67,6 @@ for (const message of [
 
 for (const method of [
   'getHtmlVideoProject',
-  'patchHtmlVideoProjectInputs',
   'patchHtmlVideoProjectFrame',
   'editHtmlVideoProject',
   'renderHtmlVideoProject',
@@ -193,7 +192,7 @@ assert.match(frameInputsPanel, /buildFrameSavePayload/, 'FrameInputsPanel should
 assert.doesNotMatch(frameInputsPanel, /template_id:\s*draft\.template_id\s*\|\|\s*draft\.template\s*\|\|\s*''/, 'FrameInputsPanel should not send empty template_id values');
 assert.match(frameInputsPayload, /type:\s*'frame_patch'/, 'Frame payload helper should send explicit frame_patch payloads');
 assert.match(frameInputsPayload, /frame_id:\s*draft\.id\s*\|\|\s*draft\.scene_id/, 'Frame payload helper should include the edited frame id');
-assert.match(frameInputsPayload, /if\s*\(templateId\)/, 'Frame payload helper should only include non-empty template_id values');
+assert.doesNotMatch(frameInputsPayload, /template_id/, 'Frame payload helper should not send template_id at all');
 assert.doesNotMatch(frameInputsPanel, /duration_sec:\s*Number\(draft\.duration_sec\)/, 'FrameInputsPanel should not always send empty duration as 0');
 assert.match(frameInputsPayload, /duration\s*>\s*0/, 'Frame payload helper should only include duration_sec when the draft duration is positive');
 assert.match(frameInputsPayload, /metadata_patch:\s*\{[^]*visual_text:\s*\{[^]*headline/s, 'Frame payload helper should save headline through frame metadata_patch');
@@ -219,13 +218,12 @@ assert.match(frameInputsPayload, /metadata_patch:\s*\{[^]*visual_text:\s*\{[^]*h
 {
   const payload = buildFrameSavePayload({
     scene_id: 'scene_01',
-    template_id: ' template_a ',
     duration_sec: 2.5,
     headline: '标题',
     inputs: {},
   });
   assert.equal(payload.frame_id, 'scene_01');
-  assert.equal(payload.template_id, 'template_a');
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, 'template_id'), false);
   assert.equal(payload.duration_sec, 2.5);
   assert.equal(payload.metadata_patch.visual_text.headline, '标题');
 }

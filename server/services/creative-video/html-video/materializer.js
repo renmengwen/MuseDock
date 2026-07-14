@@ -158,7 +158,6 @@ async function materializeFrame({ projectDir, project, frame, index, rawHtmlPath
   diagnostics.push({
     code: 'template_not_found',
     frame_id: frame.id,
-    template_id: frame.template_id || project.template_id,
     message: '未找到帧对应的 html-video 模板。',
   });
   return diagnostics;

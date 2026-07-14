@@ -788,8 +788,7 @@ export function useCanvasEditing(editor, { onDirtyChange } = {}) {
   }
 
   function patchFrame(payload) {
-    if (payload?.type === 'frame_patch') return editor.saveFrame(payload.frame_id, payload);
-    return editor.saveTemplateInputs(payload);
+    return editor.saveFrame(payload.frame_id, payload);
   }
 
   function handleSelectFrame(nextId) {

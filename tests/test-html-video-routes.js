@@ -20,7 +20,11 @@ async function requestJson(server, method, pathName, body) {
       let text = '';
       res.setEncoding('utf8');
       res.on('data', chunk => { text += chunk; });
-      res.on('end', () => resolve({ statusCode: res.statusCode, body: text ? JSON.parse(text) : null }));
+      res.on('end', () => {
+        let parsed = null;
+        try { parsed = text ? JSON.parse(text) : null; } catch (_) { parsed = null; }
+        resolve({ statusCode: res.statusCode, body: parsed });
+      });
     });
     req.on('error', reject);
     if (body !== undefined) req.write(JSON.stringify(body));
@@ -66,7 +70,7 @@ async function listen(app) {
       return {
         success: true,
         workflow_id: id,
-        html_video_project: { project_id: 'p1', template_id: 'simple', template_inputs: { headline: '标题' } },
+        html_video_project: { project_id: 'p1', frames: [{ id: 'frame_01', inputs: { headline: '标题' } }] },
         html_video_project_path: '/tmp/project',
       };
     },
@@ -75,15 +79,11 @@ async function listen(app) {
       return {
         success: true,
         workflow_id: id,
-        html_video_project: { project_id: 'p1', template_id: 'simple', template_inputs: payload.patch || {} },
+        html_video_project: { project_id: 'p1', frames: [{ id: payload.frame_id || 'frame_01', inputs: payload.patch || {} }] },
         requires_tts: false,
         requires_render: true,
         message: 'html-video 工程已保存。',
       };
-    },
-    patchHtmlVideoProjectInputs: async (id, payload) => {
-      calls.push(['patch-inputs', id, payload.template_inputs_patch?.headline]);
-      return { success: true, workflow_id: id, requires_render: true, message: '模板字段已保存，需要重新渲染。' };
     },
     patchHtmlVideoProjectFrame: async (id, frameId, payload) => {
       calls.push(['patch-frame', id, frameId, payload.frame_inputs_patch?.headline]);
@@ -181,7 +181,7 @@ async function listen(app) {
       return {
         success: true,
         workflow_id: id,
-        html_video_project: { project_id: 'p1', template_id: 'simple' },
+        html_video_project: { project_id: 'p1' },
         html_video_project_path: '/tmp/project',
         output_path: '/tmp/project/exports/output.mp4',
         message: 'HTML 已重新生成。',
@@ -192,7 +192,7 @@ async function listen(app) {
       return {
         success: true,
         workflow_id: id,
-        html_video_project: { project_id: 'p1', template_id: 'simple' },
+        html_video_project: { project_id: 'p1' },
         html_video_project_path: '/tmp/project',
         output_path: payload?.mode === 'materialize' ? undefined : '/tmp/project/frames/frame_01.mp4',
         preview_draft_id: payload?.draft_id || null,
@@ -209,7 +209,7 @@ async function listen(app) {
       return {
         success: true,
         workflow_id: id,
-        html_video_project: { project_id: 'p1', template_id: 'simple' },
+        html_video_project: { project_id: 'p1' },
         html_video_project_path: '/tmp/project',
         output_path: '/tmp/project/exports/output.mp4',
         message: '成片已导出。',
@@ -240,11 +240,11 @@ async function listen(app) {
     assert.equal(got.body.success, true);
     assert.ok(got.body.html_video_project);
     assert.equal(got.body.html_video_project_path, '/tmp/project');
-    assert.equal(got.body.html_video_project.template_id, 'simple');
-    assert.equal(got.body.html_video_project.template_inputs.headline, '标题');
+    assert.equal(got.body.html_video_project.frames[0].inputs.headline, '标题');
 
     const patched = await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project`, {
-      type: 'template_inputs_patch',
+      type: 'frame_patch',
+      frame_id: 'frame_01',
       patch: { headline: '新标题' },
     });
     assert.equal(patched.statusCode, 200);
@@ -258,7 +258,7 @@ async function listen(app) {
     assert.equal(rendered.body.message, 'HTML 已重新生成。');
     assert.equal(rendered.body.output_path, '/tmp/project/exports/output.mp4');
 
-    assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/inputs`, { patch: { headline: '模板' } })).statusCode, 200);
+    assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/inputs`, { patch: { headline: '模板' } })).statusCode, 404);
     assert.equal((await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01`, { patch: { headline: '帧' } })).statusCode, 200);
     const disabledSfx = await requestJson(server, 'PATCH', `/api/creative-workflows/${workflowId}/html-video-project/sfx/events/sfx_001`, { enabled: false });
     assert.equal(disabledSfx.statusCode, 200);
@@ -375,7 +375,7 @@ async function listen(app) {
     assert.equal(invalidDiscardPlanId.statusCode, 400);
     assert.match(invalidDiscardPlanId.body.message, /编辑计划 ID 无效/);
 
-    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-inputs', 'patch-frame', 'sfx', 'edit', 'create-edit-plan', 'run-edit-plan', 'accept-edit-plan', 'discard-edit-plan', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
+    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-frame', 'sfx', 'edit', 'create-edit-plan', 'run-edit-plan', 'accept-edit-plan', 'discard-edit-plan', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
     assert.deepEqual(calls.find(item => item[0] === 'create-edit-plan'), ['create-edit-plan', workflowId, '全片改成财经杂志风']);
     assert.deepEqual(calls.find(item => item[0] === 'run-edit-plan'), ['run-edit-plan', workflowId, 'edit_plan_0001', true]);
     assert.deepEqual(calls.find(item => item[0] === 'accept-edit-plan'), ['accept-edit-plan', workflowId, 'edit_plan_0001']);

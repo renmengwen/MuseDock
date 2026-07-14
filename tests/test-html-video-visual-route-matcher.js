@@ -18,11 +18,11 @@ const beatNoAsset = {
   const withAsset = decisions.get('scene_02_b1');
   assert.strictEqual(withAsset.source_mode, 'raw_html');
   assert.strictEqual(withAsset.route_role, 'asset_overlay');
-  assert.strictEqual(withAsset.template_id, null);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(withAsset, 'template_id'), false);
   const noAsset = decisions.get('scene_04_b1');
   assert.strictEqual(noAsset.source_mode, 'raw_html');
   assert.strictEqual(noAsset.route_role, 'diagram_motion');
-  assert.strictEqual(noAsset.template_id, null);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(noAsset, 'template_id'), false);
 }
 // 空/重复 beat 容错
 {

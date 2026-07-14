@@ -27,15 +27,12 @@ const assetStore = require('../server/services/creative-video/html-video/assetSt
     projectId: 'project_001',
     workflowId: 'workflow_001',
     runId: 'run_001',
-    templateId: 'basic',
-    templateInputs: { title: '测试标题' },
   });
   project.frames.push({
     id: 'frame_01',
     scene_id: 'scene_01',
     graph_node_id: 'node_01',
     order: 1,
-    template_id: 'basic',
     inputs: { title: '测试标题' },
     html_path: 'frames/frame_01.html',
     duration_sec: 3,

@@ -176,30 +176,6 @@ router.get('/:workflow_id/html-video-project', async (req, res) => {
   }
 });
 
-router.patch('/:workflow_id/html-video-project/inputs', async (req, res) => {
-  const validation = validateWorkflowId(req.params.workflow_id);
-  if (!validation.success) {
-    return res.status(400).json(validation);
-  }
-  const workflowId = validation.workflow_id;
-
-  try {
-    const service = getService(req);
-    const result = await service.patchHtmlVideoProjectInputs(workflowId, req.body || {});
-    if (!result || result.success === false) {
-      const message = getMessage(result, '保存模板字段失败。');
-      return res.status(getStatusCode(result)).json({ success: false, workflow_id: workflowId, message });
-    }
-    return res.json(result);
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      workflow_id: workflowId,
-      message: `保存模板字段失败：${error.message}`,
-    });
-  }
-});
-
 router.patch('/:workflow_id/html-video-project/frames/:frame_id', async (req, res) => {
   const validation = validateWorkflowId(req.params.workflow_id);
   if (!validation.success) {

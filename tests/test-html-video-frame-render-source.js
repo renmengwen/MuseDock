@@ -7,7 +7,7 @@ const projectDir = path.resolve(__dirname, '..', 'tmp-html-video-render-source')
 {
   const source = resolveFrameRenderSource({
     projectDir,
-    project: { template_id: 'tpl', template_inputs: { brand: 'A' } },
+    project: {},
     frame: {
       id: 'scene_01',
       source_mode: 'raw_html',
@@ -21,13 +21,12 @@ const projectDir = path.resolve(__dirname, '..', 'tmp-html-video-render-source')
   assert.equal(source.duration_sec, 5);
   assert.equal(source.html_path, 'frames/01-scene_01.html');
   assert.equal(source.absolute_html_path, path.join(projectDir, 'frames', '01-scene_01.html'));
-  assert.equal(source.needs_materialize, false);
 }
 
 {
   const source = resolveFrameRenderSource({
     projectDir,
-    project: { template_id: 'tpl' },
+    project: {},
     frame: {
       id: 'scene_camel',
       source_mode: 'raw_html',
@@ -42,7 +41,7 @@ const projectDir = path.resolve(__dirname, '..', 'tmp-html-video-render-source')
 
 assert.throws(() => resolveFrameRenderSource({
   projectDir,
-  project: { template_id: 'tpl' },
+  project: {},
   frame: {
     id: 'scene_undefined',
     source_mode: 'raw_html',
@@ -54,7 +53,7 @@ assert.throws(() => resolveFrameRenderSource({
 
 assert.throws(() => resolveFrameRenderSource({
   projectDir,
-  project: { template_id: 'tpl' },
+  project: {},
   frame: {
     id: 'scene_absolute_html_path',
     source_mode: 'raw_html',
@@ -64,7 +63,7 @@ assert.throws(() => resolveFrameRenderSource({
 
 assert.throws(() => resolveFrameRenderSource({
   projectDir,
-  project: { template_id: 'tpl' },
+  project: {},
   frame: {
     id: 'scene_absolute_htmlPath',
     source_mode: 'raw_html',
@@ -75,7 +74,7 @@ assert.throws(() => resolveFrameRenderSource({
 {
   const absoluteSourcePath = path.join(projectDir, 'external', 'absolute.html');
   const source = resolveFrameRenderSource({
-    project: { template_id: 'tpl' },
+    project: {},
     frame: {
       id: 'scene_abs',
       source_mode: 'raw_html',

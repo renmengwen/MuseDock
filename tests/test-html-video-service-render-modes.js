@@ -42,11 +42,9 @@ function createFixture() {
     project_id: 'p1',
     workflow_id: WORKFLOW_ID,
     run_id: 'run-1',
-    template_id: 'simple',
-    template_inputs: {},
     frames: [
-      { id: 'frame_01', scene_id: 'scene_01', template_id: 'simple', inputs: {}, narration_text: '旧旁白' },
-      { id: 'frame_02', scene_id: 'scene_02', template_id: 'simple', inputs: {}, narration_text: '' },
+      { id: 'frame_01', scene_id: 'scene_01', inputs: {}, narration_text: '旧旁白' },
+      { id: 'frame_02', scene_id: 'scene_02', inputs: {}, narration_text: '' },
     ],
     audio: {
       sfx: {

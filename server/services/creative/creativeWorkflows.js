@@ -368,7 +368,6 @@ function summarizeVisualRoute(project = {}) {
   const styleProfile = project.visual_plan?.style_profile || {};
   return {
     total_beats: Array.isArray(project.visual_plan?.beats) ? project.visual_plan.beats.length : frames.length,
-    template_inputs: frames.filter(frame => frame.source_mode === 'template_inputs').length,
     raw_html: frames.filter(frame => frame.source_mode === 'raw_html').length,
     fallback: decisions.filter(decision => decision.fallback_from || decision.fallback_reason).length,
     style_profile_id: styleProfile.id || '',
@@ -2385,15 +2384,6 @@ async function patchCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, o
   };
 }
 
-async function patchHtmlVideoProjectInputs(workflowId, payload = {}, options = {}) {
-  const patch = payload.template_inputs_patch || payload.patch || payload.inputs || payload.template_inputs || {};
-  return patchCreativeWorkflowHtmlVideoProject(workflowId, {
-    type: 'template_inputs_patch',
-    patch,
-    summary: payload.summary || '模板字段已保存，需要重新渲染。',
-  }, options);
-}
-
 async function patchHtmlVideoProjectFrame(workflowId, frameId, payload = {}, options = {}) {
   const patch = payload.frame_inputs_patch || payload.patch || payload.inputs || {};
   if (payload.type === 'frame_patch') {
@@ -3083,7 +3073,6 @@ module.exports = {
   getCreativeWorkflowHtmlVideoProject,
   patchCreativeWorkflowHtmlVideoProject,
   renderCreativeWorkflowHtmlVideoProject,
-  patchHtmlVideoProjectInputs,
   patchHtmlVideoProjectFrame,
   patchHtmlVideoProjectSfxEvent,
   createHtmlVideoProjectEditPlan,

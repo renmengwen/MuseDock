@@ -68,7 +68,7 @@ const STATUS_MESSAGES = {
   idle: '等待加载可编辑成片工程。',
   loading: '正在加载可编辑成片工程...',
   ready: '可编辑成片工程已加载。',
-  saving: '正在保存模板字段...',
+  saving: '正在保存帧字段...',
   editing: '正在应用编辑...',
   materializing: '正在重新生成 HTML...',
   rendering: '正在渲染单帧预览...',
@@ -393,20 +393,10 @@ export function useHtmlVideoProject({ workflowId, api }) {
     })
   ), [api, workflowId, runMutatingAction, applySecondaryResult]);
 
-  const saveTemplateInputs = useCallback((payload) => (
-    runMutatingAction({
-      nextStatus: 'saving',
-      loadingMessage: STATUS_MESSAGES.saving,
-      successMessage: '模板字段已保存，需要重新导出后才会更新成片。',
-      fallbackMessage: '保存模板字段失败。',
-      action: () => api.patchHtmlVideoProjectInputs(workflowId, payload),
-    })
-  ), [api, workflowId, runMutatingAction]);
-
   const saveFrame = useCallback((frameId, payload) => (
     runMutatingAction({
       nextStatus: 'saving',
-      loadingMessage: '正在保存帧字段...',
+      loadingMessage: STATUS_MESSAGES.saving,
       successMessage: '帧字段已保存，需要重新导出后才会更新成片。',
       fallbackMessage: '保存帧字段失败。',
       action: () => api.patchHtmlVideoProjectFrame(workflowId, frameId, payload),
@@ -551,7 +541,6 @@ export function useHtmlVideoProject({ workflowId, api }) {
     runEditPlan,
     acceptEditPlan,
     discardEditPlan,
-    saveTemplateInputs,
     saveFrame,
     applyNaturalLanguageEdit,
     materializeProject,
