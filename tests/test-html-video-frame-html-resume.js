@@ -13,6 +13,8 @@ aiImageModel.isConfigured = async () => false;
 
 const frameHtmlAgent = require('../server/services/creative-video/html-video/frameHtmlAgent');
 const frameHtmlPhase = require('../server/services/creative-video/html-video/frameHtmlPhase');
+const visualPlanService = require('../server/services/creative-video/html-video/visualPlanService');
+const { matchVisualBeatsToRenderers } = require('../server/services/creative-video/html-video/visualRouteMatcher');
 const frameFallbackBuilder = require('../server/services/creative-video/html-video/frameFallbackBuilder');
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
@@ -173,11 +175,6 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
     runId,
     contentGraph: graph,
   });
-  // per_scene 工程不设全片模板（template_id 恒为 null）；
-  // 传入 templateId 用于模拟旧整片模板工程（resume 应拒绝复用）。
-  if (options.templateId) {
-    project.template_id = options.templateId;
-  }
   await writeFile(path.join(projectDir, 'content-graph.json'), `${JSON.stringify(graph, null, 2)}\n`);
   if (!options.omitSceneSpecHash) {
     project.generation_checkpoint.scene_spec_hash = options.sceneSpecHash || computeSceneSpecCheckpointHash(sceneSpec());
@@ -187,16 +184,40 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
     path: 'content-graph.json',
     output_hash: 'graph-out',
   });
+  // P1-2 语义：checkpoint 无指纹一律不复用——fixture 按生产展开路径（visualPlan 编排 + beat 展开）
+  // 现算各 scene 的输入指纹，与 resume 时 frameHtmlPhase 现算值逐字节一致
+  const fingerprintBySceneId = (() => {
+    const spec = sceneSpec();
+    const visualPlan = visualPlanService.buildVisualPlan({ sceneSpec: spec, workflowId });
+    visualPlanService.assignMotionOrchestration(visualPlan, { styleProfile: visualPlan.style_profile || null });
+    const visualDecisions = matchVisualBeatsToRenderers({ visualPlan });
+    const expanded = workflow.expandContentGraphToVisualBeats({ graph: contentGraph(), visualPlan, visualDecisions });
+    const renderTarget = workflow.applyRenderTargetDefaults(workflow.resolveRenderTarget({ generate_audio: false }, spec));
+    const map = new Map();
+    for (const node of (expanded.nodes || [])) {
+      const sceneId = String(node.scene_id || node.id || '');
+      if (sceneId && !map.has(sceneId)) {
+        map.set(sceneId, frameHtmlPhase.computeFrameInputFingerprint({
+          node,
+          continuityMode: 'beat_mp4',
+          target: renderTarget,
+        }));
+      }
+    }
+    return map;
+  })();
   markCheckpointFrame(project, 'frame_html', 'scene_01', {
     status: 'done',
     html_path: 'frames/01-scene_01.html',
     input_hash: 'in-1',
+    input_fingerprint: fingerprintBySceneId.get('scene_01') || '',
     output_hash: 'out-1',
   });
   markCheckpointFrame(project, 'frame_html', 'scene_02', {
     status: 'done',
     html_path: 'frames/02-scene_02.html',
     input_hash: 'in-2',
+    input_fingerprint: fingerprintBySceneId.get('scene_02') || '',
     output_hash: 'out-2',
   });
   markCheckpointFrame(project, 'frame_html', 'scene_03', {
@@ -339,7 +360,7 @@ async function main() {
           },
         },
       });
-      const args = () => ({ node: makeNode(), visualStrategy: 'asset_first', continuityMode: 'beat_mp4', target });
+      const args = () => ({ node: makeNode(), continuityMode: 'beat_mp4', target });
       const base = computeFrameInputFingerprint(args());
       assert.ok(/^[0-9a-f]{64}$/.test(base), '指纹应为 sha256 hex');
       assert.equal(computeFrameInputFingerprint(args()), base, '同输入应得到同指纹');
@@ -347,8 +368,6 @@ async function main() {
       const swapped = args();
       swapped.node.asset_refs.reverse();
       assert.equal(computeFrameInputFingerprint(swapped), base, 'asset_refs 顺序不同不应改变指纹');
-      // 策略变化 → 指纹变化
-      assert.notEqual(computeFrameInputFingerprint({ ...args(), visualStrategy: 'hf_first' }), base, '策略变化应改变指纹');
       // continuity_mode 变化 → 指纹变化
       assert.notEqual(computeFrameInputFingerprint({ ...args(), continuityMode: 'scene_html' }), base, 'continuity_mode 变化应改变指纹');
       // theme token 变化 → 指纹变化
@@ -371,7 +390,7 @@ async function main() {
       );
     }
 
-    // P1-2：shouldReuseFrameHtml 指纹判定——匹配复用 / 不匹配重生成 / 无指纹按策略向后兼容
+    // P1-2：shouldReuseFrameHtml 指纹判定——匹配复用 / 不匹配重生成 / 无指纹一律不复用
     {
       const { computeFrameInputFingerprint } = frameHtmlPhase;
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-fingerprint-reuse-'));
@@ -379,7 +398,7 @@ async function main() {
       await writeFile(path.join(projectDir, 'frames/01-scene_01.html'), validHtml('scene_01'));
       const target = { resolution: { width: 1080, height: 1920 } };
       const node = { id: 'scene_01', metadata: { visual_beat: { visual_text: { headline: '第一幕' } } } };
-      const fingerprint = computeFrameInputFingerprint({ node, visualStrategy: 'asset_first', continuityMode: 'beat_mp4', target });
+      const fingerprint = computeFrameInputFingerprint({ node, continuityMode: 'beat_mp4', target });
       const baseArgs = {
         projectDir,
         scene: { id: 'scene_01' },
@@ -393,34 +412,19 @@ async function main() {
         ...baseArgs,
         checkpointFrame: { ...doneFrame, input_fingerprint: fingerprint },
         inputFingerprint: fingerprint,
-        visualStrategy: 'asset_first',
       }).reuse, true, 'checkpoint 指纹与当前指纹一致应复用');
       // 指纹不匹配 → 不复用
       assert.equal(workflow.shouldReuseFrameHtml({
         ...baseArgs,
         checkpointFrame: { ...doneFrame, input_fingerprint: 'deadbeef' },
         inputFingerprint: fingerprint,
-        visualStrategy: 'asset_first',
       }).reuse, false, 'checkpoint 指纹与当前指纹不一致不应复用');
-      // 无指纹（旧工程）+ hf_first / 无策略 → 维持现状复用
+      // 无指纹（旧工程）→ 一律不复用（旧 HTML 必然是旧链路产物）
       assert.equal(workflow.shouldReuseFrameHtml({
         ...baseArgs,
         checkpointFrame: { ...doneFrame },
         inputFingerprint: fingerprint,
-        visualStrategy: 'hf_first',
-      }).reuse, true, '旧 checkpoint 无指纹且 hf_first 应维持现状复用');
-      assert.equal(workflow.shouldReuseFrameHtml({
-        ...baseArgs,
-        checkpointFrame: { ...doneFrame },
-        inputFingerprint: fingerprint,
-      }).reuse, true, '旧 checkpoint 无指纹且无策略语义应维持现状复用');
-      // 无指纹（旧工程）+ asset_first → 不复用（旧 HTML 必然是旧链路产物）
-      assert.equal(workflow.shouldReuseFrameHtml({
-        ...baseArgs,
-        checkpointFrame: { ...doneFrame },
-        inputFingerprint: fingerprint,
-        visualStrategy: 'asset_first',
-      }).reuse, false, '旧 checkpoint 无指纹且当前为 asset_first 不应复用');
+      }).reuse, false, '旧 checkpoint 无指纹不应复用');
     }
 
     // resumeArtifactsMatch：per_scene 模式不设全片模板，复用只看 scene_spec_hash + generation_mode
@@ -817,44 +821,6 @@ async function main() {
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               contentGraphCalls += 1;
               return { success: true, text: JSON.stringify(contentGraph('缺 hash 重新生成')) };
-            }
-            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
-          },
-        },
-      });
-
-      assert.equal(result.success, true);
-      assert.equal(contentGraphCalls, 1);
-      assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_02', 'scene_03']);
-    }
-
-    {
-      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-legacy-template-project-'));
-      const workflowId = '202606260000000010_legacy_template_project';
-      const runId = 'run_legacy_template_project';
-      // 旧整片模板工程（template_id 非空）切到 per_scene：模式切换，禁止复用，全部重建
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { templateId: 'vertical' });
-      const calls = [];
-      let contentGraphCalls = 0;
-      frameHtmlAgent.generateFrameHtml = async args => {
-        calls.push(args);
-        return { success: true, html: validHtml(args.node.id, args.node.id) };
-      };
-
-      const result = await runWorkflow({
-        rootDir,
-        workflowId,
-        runId,
-        templateRegistry,
-        aiTextModel: {
-          async callTextModel(request) {
-            const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
-            if (prompt.startsWith('你是 html-video 的 content graph')) {
-              contentGraphCalls += 1;
-              return { success: true, text: JSON.stringify(contentGraph('缺模板重新生成')) };
             }
             throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
           },

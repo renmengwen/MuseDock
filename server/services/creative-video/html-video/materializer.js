@@ -64,8 +64,7 @@ const CAPTION_GUARD_STYLE = `<style data-hv-caption-guard>
 .hv-caption-layer * { pointer-events: none !important; }
 </style>`;
 
-function injectCaptionLayerGuard(html = '', { visualStrategy = null } = {}) {
-  if (visualStrategy !== 'asset_first') return html; // 硬约束：共享路径默认行为不变
+function injectCaptionLayerGuard(html = '') {
   const text = String(html);
   if (text.includes('data-hv-caption-guard')) return text; // 幂等
   if (/<\/head>/i.test(text)) return text.replace(/<\/head>/i, `${CAPTION_GUARD_STYLE}</head>`);
@@ -107,8 +106,7 @@ async function materializeFrame({ projectDir, project, frame, index, rawHtmlPath
         recordUnmanagedCaptionLayerDiagnostic(diagnostics, frame);
       }
       const nextHtml = injectCaptionLayerGuard(
-        ensureCaptionLayer(html, captions, { generateCaptions }),
-        { visualStrategy: project?.visual_strategy || null }
+        ensureCaptionLayer(html, captions, { generateCaptions })
       );
       if (nextHtml !== html) {
         await fs.mkdir(path.dirname(outputPath), { recursive: true });

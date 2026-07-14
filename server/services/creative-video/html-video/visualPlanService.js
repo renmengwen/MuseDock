@@ -144,8 +144,7 @@ function resolveThemeTokens(styleProfile = null) {
   return { ...DEFAULT_THEME_TOKENS };
 }
 
-function assignMotionOrchestration(visualPlan = {}, { visualStrategy = null, styleProfile = null } = {}) {
-  if (visualStrategy !== 'asset_first') return visualPlan; // hf_first 完全不动
+function assignMotionOrchestration(visualPlan = {}, { styleProfile = null } = {}) {
   const themeTokens = resolveThemeTokens(styleProfile);
   const beats = Array.isArray(visualPlan.beats) ? visualPlan.beats : [];
   const bySceneCount = new Map();

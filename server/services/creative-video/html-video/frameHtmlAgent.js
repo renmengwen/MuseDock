@@ -42,8 +42,8 @@ function nodeSummary(node = {}) {
   if (node.text) summary.text = node.text;
   if (node.metadata) {
     // 硬约束 A：visual_beat/visual_beats/beat_windows 是展开阶段写入的内部编排快照，
-    // asset_first 的编排信息已由 buildAssetFirstFramePrompt 显式注入，
-    // 原始 JSON 进 prompt 只会污染 hf_first 的模型输入并浪费 token，这里统一剥离。
+    // 编排信息已由 buildAssetFirstFramePrompt 显式注入，
+    // 原始 JSON 进 prompt 只会污染模型输入并浪费 token，这里统一剥离。
     const { visual_beat, visual_beats, beat_windows, ...rest } = node.metadata;
     if (Object.keys(rest).length) summary.metadata = rest;
   }
@@ -152,8 +152,7 @@ function frameAssetReferenceSummary(node = {}, creativeContext = {}) {
   return lines.join('\n');
 }
 
-function assetFirstFrameRequirements(creativeContext = {}) {
-  if (creativeContext?.visual_strategy !== 'asset_first') return [];
+function assetFirstFrameRequirements() {
   return [
     '- 当前为素材主导（asset_first）模式：如果本帧有推荐图片，图片必须作为画面主体（占据主要视觉面积，可全出血或大图卡），不是小配图。',
     '- 在图片主体之上叠加 HTML 表达层：标题、关键词浮层、框选高亮、箭头标注、局部放大、步骤编号、数据卡或字幕节奏点，至少使用其中 2 种。',
@@ -389,8 +388,8 @@ function buildFrameHtmlPrompt({
     '- 不要只改底部 caption；主画面、数据、标题或视觉结构必须服务当前 frame content。',
     '- 不要保留与内容无关的模板导航标签，例如 Search / GitHub / Tech Forums / Docs / Issues，除非这些词就是当前内容事实。',
     '- 如果本帧提供“本帧推荐来源图片”或“本帧推荐生成图片”，必须在 HTML 中引用该图片的 src；没有推荐图片时，才从 Source context summary 的可用图片素材中选择。',
-    ...assetFirstFrameRequirements(creativeContext),
-    ...(creativeContext?.visual_strategy === 'asset_first' && (beat?.motion_overlay || sceneBeatsBrief)
+    ...assetFirstFrameRequirements(),
+    ...((beat?.motion_overlay || sceneBeatsBrief)
       ? [buildAssetFirstFramePrompt({ beat: beat || {}, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
       : []),
     '- 如果 Source context summary 提供“可用图片素材”，本帧内容适合引用时，可以使用其中的 HTML引用路径，例如 <img src="../assets/source-image-01.jpg">；禁止引用外部图片 URL。',
@@ -670,8 +669,8 @@ function buildShortFrameHtmlPrompt({
     `画面关键词：${visualKeywords || '无'}`,
     `画面要点卡：${visualCards || '无'}`,
     '画面文字用提炼后的关键词、要点短语或数据点，不要照抄 narration/captions 原句；旁白全文由系统注入底部字幕层。',
-    ...assetFirstFrameRequirements(creativeContext),
-    ...(creativeContext?.visual_strategy === 'asset_first' && (beat?.motion_overlay || sceneBeatsBrief)
+    ...assetFirstFrameRequirements(),
+    ...((beat?.motion_overlay || sceneBeatsBrief)
       ? [buildAssetFirstFramePrompt({ beat: beat || {}, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
       : []),
     assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
@@ -724,8 +723,8 @@ function buildRetryPrompt(args = {}) {
     frameText ? `当前镜头正文（提炼成关键词/短语再上画面，不要整句照抄）：${frameText}` : '',
     expectedTexts.length ? `当前镜头允许使用的内容文案：${expectedTexts.join(' / ')}` : '',
     '画面文字必须是提炼后的关键词、要点短语或数据点；禁止照抄旁白或字幕原句，旁白全文由系统注入底部字幕层。',
-    ...assetFirstFrameRequirements(args.creativeContext),
-    ...(args.creativeContext?.visual_strategy === 'asset_first' && (args.beat?.motion_overlay || args.sceneBeatsBrief)
+    ...assetFirstFrameRequirements(),
+    ...((args.beat?.motion_overlay || args.sceneBeatsBrief)
       ? [buildAssetFirstFramePrompt({
         beat: args.beat || {},
         primitiveSnippet: args.primitiveSnippet || '',

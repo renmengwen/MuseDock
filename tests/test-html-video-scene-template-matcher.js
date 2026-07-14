@@ -187,7 +187,7 @@ assert.strictEqual(
   '',
 );
 
-// 硬约束 A 回归：hf_first 路径使用的旧字段语义完全不变
+// 旧字段语义回归：capability 元数据字段语义完全不变
 {
   const caps = templateCapabilities({ id: 'frame-glitch-title' });
   assert.strictEqual(caps.information_capacity, 'low');

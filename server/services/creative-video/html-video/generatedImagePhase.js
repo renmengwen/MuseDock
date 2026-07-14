@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const defaultAiImageModel = require('../../ai/aiImageModel');
 const defaultPlanner = require('../../creative/generatedImagePlanner');
-const { resolveNodeSceneId } = require('./sceneGraphBinding');
 const projectStore = require('./projectStore');
 const { createDiagnostic } = require('./diagnostics');
 
@@ -77,7 +76,6 @@ async function runGeneratedImagePhase({
   now = '',
 } = {}) {
   const base = { creativeContext, generated_count: 0, failures: [], diagnostics: [] };
-  const isAssetFirst = creativeContext?.visual_strategy === 'asset_first';
   const planner = services.generatedImagePlanner || defaultPlanner;
   const aiImageModel = services.aiImageModel || defaultAiImageModel;
   const report = async message => {
@@ -96,7 +94,6 @@ async function runGeneratedImagePhase({
     }
   }
   if (!configured) {
-    if (!isAssetFirst) return { ...base, skipped: true, message: '未配置生图模型，跳过主视觉生成。' };
     await report('已开启图片/视频优先，但未配置生图模型，已跳过主视觉生成。');
     return {
       ...base,
@@ -123,7 +120,7 @@ async function runGeneratedImagePhase({
     plan = await planner.planGeneratedImages({
       sceneSpec,
       assetContext,
-      maxScenes: isAssetFirst ? 4 : 2,
+      maxScenes: 4,
       services,
     });
   } catch (error) {
@@ -233,47 +230,6 @@ async function runGeneratedImagePhase({
   };
 }
 
-function enforceAssetFirstRawHtmlRouting({ decisions, contentGraph, creativeContext } = {}) {
-  if (!decisions) return decisions;
-  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
-  const assetById = new Map(assets
-    .map(asset => [safeString(asset?.id || asset?.asset_id), asset])
-    .filter(([id]) => id));
-  if (!assetById.size) return decisions;
-  const isMap = decisions instanceof Map;
-  const isAssetFirst = creativeContext?.visual_strategy === 'asset_first';
-  const getDecision = id => (isMap ? decisions.get(id) : decisions[id]);
-  const setDecision = (id, value) => {
-    if (isMap) decisions.set(id, value);
-    else decisions[id] = value;
-  };
-  for (const node of (Array.isArray(contentGraph?.nodes) ? contentGraph.nodes : [])) {
-    const refs = Array.isArray(node?.asset_refs) ? node.asset_refs : [];
-    // asset_first 是用户显式要求素材必进画面，任何被引用素材都覆写；
-    // 其他策略只有"必用"素材（AI 生成主视觉或显式 subject 用途）才强制 raw_html，
-    // 装饰性/背景引用不覆写路由，保留 accepts_image 模板的 template_inputs 路径
-    const needsRawHtml = refs.some(ref => {
-      const asset = assetById.get(safeString(ref?.asset_id));
-      if (!asset) return false;
-      return isAssetFirst || asset.source === 'generated' || safeString(ref?.usage) === 'subject';
-    });
-    if (!needsRawHtml) continue;
-    const sceneId = safeString(resolveNodeSceneId(node));
-    const decision = sceneId ? getDecision(sceneId) : null;
-    if (decision?.source_mode === 'template_inputs') {
-      setDecision(sceneId, {
-        ...decision,
-        source_mode: 'raw_html',
-        template_id: null,
-        override_reason: 'required_asset_ref',
-        fallback_from: 'template_inputs',
-        fallback_reason: '该场景已选择视觉素材，模板变量路径无法保证素材进入画面，已改用自由 HTML。',
-      });
-    }
-  }
-  return decisions;
-}
-
 function hydrateGeneratedAssetsFromProject({ project, creativeContext = {}, projectDir } = {}) {
   const generated = (Array.isArray(project?.assets) ? project.assets : [])
     .filter(asset => asset?.source === 'generated' && safeString(asset?.generation?.scene_id));
@@ -313,6 +269,5 @@ function hydrateGeneratedAssetsFromProject({ project, creativeContext = {}, proj
 module.exports = {
   runGeneratedImagePhase,
   buildGeneratedAsset,
-  enforceAssetFirstRawHtmlRouting,
   hydrateGeneratedAssetsFromProject,
 };

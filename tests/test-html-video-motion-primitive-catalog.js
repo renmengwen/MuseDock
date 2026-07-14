@@ -564,22 +564,17 @@ const { hasRealOverlayElement } = require('../server/services/creative-video/htm
   assert.ok(!normal.indeterminate, '正常 px 值不得标 indeterminate');
 }
 {
-  // validationGate 接线：indeterminate → overlay_position_indeterminate warning（asset_first 专属）
+  // validationGate 接线：indeterminate → overlay_position_indeterminate warning
   const { assetFirstOverlayIssues } = require('../server/services/creative-video/html-video/validationGate');
   const html = '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:5%;height:200px"></div>';
-  const issues = assetFirstOverlayIssues(html, { visualStrategy: 'asset_first' });
+  const issues = assetFirstOverlayIssues(html);
   assert.ok(
     issues.some(issue => issue.code === 'overlay_position_indeterminate' && issue.severity === 'warning'),
-    `asset_first 下 indeterminate 必须产生 warning 级 issue：${JSON.stringify(issues)}`,
-  );
-  assert.deepStrictEqual(
-    assetFirstOverlayIssues(html, { visualStrategy: 'hf_first' }),
-    [],
-    'hf_first 不产生任何 issue（硬约束 A）',
+    `indeterminate 必须产生 warning 级 issue：${JSON.stringify(issues)}`,
   );
   const normalHtml = '<div data-mp-overlay="k" style="position:absolute;left:48px;right:48px;bottom:180px;height:200px"></div>';
   assert.deepStrictEqual(
-    assetFirstOverlayIssues(normalHtml, { visualStrategy: 'asset_first' }),
+    assetFirstOverlayIssues(normalHtml),
     [],
     '正常 px 值不得产生 indeterminate issue',
   );

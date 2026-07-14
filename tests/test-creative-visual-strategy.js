@@ -1,49 +1,42 @@
 const assert = require('assert');
 const {
-  buildCreativeDefaultsSnapshot,
-  buildWorkflowTarget,
-  applyVisualStrategyToCreativeContext,
+  resolveRetryContinuityMode,
   defaultRetryFrameHtmlAction,
 } = require('../server/services/creative/creativeWorkflows');
 
 async function run() {
-  const defaultSnapshot = buildCreativeDefaultsSnapshot({}, {}, {});
-  assert.strictEqual(defaultSnapshot.visualStrategy, 'asset_first');
-
-  const overridden = buildCreativeDefaultsSnapshot(
-    { visualStrategy: 'hf_first' },
-    { visualStrategy: 'asset_first' },
-    {},
+  // workflow 显式 continuity_mode 优先
+  assert.deepStrictEqual(
+    resolveRetryContinuityMode(
+      { creative_context: { continuity_mode: 'scene_html' } },
+      { continuity_mode: 'beat_mp4' },
+    ),
+    { continuity_mode: 'scene_html' },
   );
-  assert.strictEqual(overridden.visualStrategy, 'asset_first');
 
-  const fromDefaults = buildCreativeDefaultsSnapshot({ visualStrategy: 'asset_first' }, {}, {});
-  assert.strictEqual(fromDefaults.visualStrategy, 'asset_first');
+  // workflow 缺失时回填落盘 project 的 continuity_mode
+  assert.deepStrictEqual(
+    resolveRetryContinuityMode({}, { continuity_mode: 'scene_html' }),
+    { continuity_mode: 'scene_html' },
+  );
 
-  const invalid = buildCreativeDefaultsSnapshot({}, { visualStrategy: 'banana' }, {});
-  assert.strictEqual(invalid.visualStrategy, 'asset_first');
+  // 两边都没有时为 null，交由下游默认 beat_mp4
+  assert.deepStrictEqual(resolveRetryContinuityMode({}, {}), { continuity_mode: null });
 
-  const target = buildWorkflowTarget({ visualStrategy: 'asset_first' });
-  assert.strictEqual(target.visual_strategy, 'asset_first');
-  const targetDefault = buildWorkflowTarget({});
-  assert.strictEqual(targetDefault.visual_strategy, 'asset_first');
+  // 空白字符串视同缺失
+  assert.deepStrictEqual(
+    resolveRetryContinuityMode({ creative_context: { continuity_mode: '  ' } }, {}),
+    { continuity_mode: null },
+  );
 
-  const record = { creative_context: { source_context: { kind: 'text' } } };
-  applyVisualStrategyToCreativeContext(record, { visualStrategy: 'asset_first' });
-  assert.strictEqual(record.creative_context.visual_strategy, 'asset_first');
-  assert.strictEqual(record.creative_context.source_context.kind, 'text');
-
-  const emptyRecord = {};
-  applyVisualStrategyToCreativeContext(emptyRecord, { visualStrategy: 'hf_first' });
-  assert.strictEqual(emptyRecord.creative_context.visual_strategy, 'hf_first');
-
+  // retry 透传：continuity_mode 与 asset_context 必须进入 generateHtmlVideo 的 creativeContext
   let capturedCreativeContext = null;
   const retryResult = await defaultRetryFrameHtmlAction({
     workflow: {
       workflow_id: '12345',
       target: {},
       creative_context: {
-        visual_strategy: 'asset_first',
+        continuity_mode: 'scene_html',
         asset_context: { assets: [{ id: 'gen_scene_01', source: 'generated' }] },
       },
       result: {
@@ -65,7 +58,7 @@ async function run() {
     },
   });
   assert.strictEqual(retryResult.success, true);
-  assert.strictEqual(capturedCreativeContext.visual_strategy, 'asset_first');
+  assert.strictEqual(capturedCreativeContext.continuity_mode, 'scene_html');
   assert.strictEqual(capturedCreativeContext.asset_context.assets[0].id, 'gen_scene_01');
 
   console.log('test-creative-visual-strategy passed');

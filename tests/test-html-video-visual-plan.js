@@ -145,7 +145,6 @@ const { assignMotionOrchestration } = require('../server/services/creative-video
     workflowId: 'wf-test',
   });
   assignMotionOrchestration(visualPlan, {
-    visualStrategy: 'asset_first',
     styleProfile: realPlan.style_profile,
   });
 
@@ -174,14 +173,6 @@ const { assignMotionOrchestration } = require('../server/services/creative-video
   assert.ok(b3.motion_overlay.preset);
 }
 
-// 硬约束 A + B 回归：hf_first 不写任何新字段
-{
-  const visualPlan = { beats: [{ id: 's1_b1', scene_id: 's1', kind: 'text', duration_sec: 5 }] };
-  assignMotionOrchestration(visualPlan, { visualStrategy: 'hf_first' });
-  assert.strictEqual(visualPlan.beats[0].visual_base, undefined);
-  assert.strictEqual(visualPlan.beats[0].motion_overlay, undefined);
-  assert.strictEqual(visualPlan.beats[0].continuity, undefined);
-}
 console.log('visual plan motion orchestration tests passed');
 
 console.log('test-html-video-visual-plan passed');

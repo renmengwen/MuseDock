@@ -88,7 +88,6 @@ async function buildMixedFrameProject({
   mediaOptions = {},
   generationCheckpoint = null,
   continuityMode = 'beat_mp4',
-  visualStrategy = null,
 } = {}) {
   if (!projectDir) throw new Error('缺少 projectDir。');
   const orderedNodeIds = topoSort(graph);
@@ -99,7 +98,7 @@ async function buildMixedFrameProject({
   let cursor = 0;
 
   const visualBeats = Array.isArray(visualPlan?.beats) && visualPlan.beats.length ? visualPlan.beats : null;
-  const sceneHtmlMode = visualStrategy === 'asset_first' && continuityMode === 'scene_html' && Boolean(visualBeats);
+  const sceneHtmlMode = continuityMode === 'scene_html' && Boolean(visualBeats);
 
   if (sceneHtmlMode) {
     // scene_html：一个 scene 一帧（scene:<scene_id>），字幕用整场景字幕轨（场景相对时间，不切窗），

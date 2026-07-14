@@ -618,26 +618,24 @@ async function writeFile(filePath, content) {
   assert.equal(renderInfo[0].code, 'frame_rendered');
   assert.doesNotMatch(renderInfo[0].user_message, /处理失败/);
 
-  // ===== 模块3：asset_first overlay 校验 =====
+  // ===== 模块3：overlay 校验 =====
   // runGateOnHtml：按 validationGate 导出的 assetFirstOverlayIssues 真实签名调用，
-  // 把 HTML 与策略传入并返回 issues 数组。
+  // 把 HTML 传入并返回 issues 数组。
   const { assetFirstOverlayIssues } = require('../server/services/creative-video/html-video/validationGate');
-  function runGateOnHtml(html, { visualStrategy } = {}) {
-    return assetFirstOverlayIssues(html, { visualStrategy });
+  function runGateOnHtml(html) {
+    return assetFirstOverlayIssues(html);
   }
   {
     const html = '<html><body><div data-mp-overlay="key_marker" style="position:absolute;left:0;right:0;bottom:0;height:300px"></div></body></html>';
-    const issuesAssetFirst = runGateOnHtml(html, { visualStrategy: 'asset_first' });
-    assert.ok(issuesAssetFirst.some(i => i.code === 'overlay_in_caption_safe_area' && i.severity === 'warning'));
-    const issuesHfFirst = runGateOnHtml(html, { visualStrategy: 'hf_first' });
-    assert.ok(!issuesHfFirst.some(i => i.code === 'overlay_in_caption_safe_area'));
+    const issues = runGateOnHtml(html);
+    assert.ok(issues.some(i => i.code === 'overlay_in_caption_safe_area' && i.severity === 'warning'));
   }
   // 无 overlay 的 HTML 不产生 issue（warning 级，不阻断）
   {
     const plainHtml = '<html><body><h1>标题</h1></body></html>';
-    assert.deepEqual(runGateOnHtml(plainHtml, { visualStrategy: 'asset_first' }), []);
+    assert.deepEqual(runGateOnHtml(plainHtml), []);
   }
-  // 端到端：raw_html 帧带违规 overlay 时，asset_first 工程 gate 产生 warning 且不阻断
+  // 端到端：raw_html 帧带违规 overlay 时，gate 产生 warning 且不阻断
   await writeFile(path.join(rawHtmlProjectDir, 'frames', 'overlay-unsafe.html'), [
     '<!doctype html>',
     '<html><body>',
@@ -649,10 +647,9 @@ async function writeFile(filePath, content) {
     '<div data-mp-overlay="key_marker" style="position:absolute;left:0;right:0;bottom:0;height:300px"></div>',
     '</body></html>',
   ].join('\n'));
-  const overlayProject = strategy => ({
+  const overlayProject = () => ({
     template_id: 'valid',
     template_inputs: {},
-    visual_strategy: strategy,
     frames: [
       {
         id: 'raw_overlay_unsafe',
@@ -664,21 +661,15 @@ async function writeFile(filePath, content) {
     ],
     timeline: { tracks: [{ id: 'main', items: [{ id: 'raw_overlay_unsafe', kind: 'frame' }] }] },
   });
-  const overlayAssetFirst = await validateHtmlVideoProject({
+  const overlayResult = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
-    project: overlayProject('asset_first'),
+    project: overlayProject(),
     environment: { ok: true, diagnostics: [] },
   });
-  assert.equal(overlayAssetFirst.ok, true, 'overlay 校验为 warning 级，不得阻断');
-  const overlayDiagnostic = overlayAssetFirst.diagnostics.find(item => item.code === 'overlay_in_caption_safe_area');
-  assert.ok(overlayDiagnostic, 'asset_first 下应产生 overlay_in_caption_safe_area 警告');
+  assert.equal(overlayResult.ok, true, 'overlay 校验为 warning 级，不得阻断');
+  const overlayDiagnostic = overlayResult.diagnostics.find(item => item.code === 'overlay_in_caption_safe_area');
+  assert.ok(overlayDiagnostic, '违规 overlay 应产生 overlay_in_caption_safe_area 警告');
   assert.equal(overlayDiagnostic.severity, 'warning');
-  const overlayHfFirst = await validateHtmlVideoProject({
-    projectDir: rawHtmlProjectDir,
-    project: overlayProject('hf_first'),
-    environment: { ok: true, diagnostics: [] },
-  });
-  assert.equal(overlayHfFirst.diagnostics.some(item => item.code === 'overlay_in_caption_safe_area'), false, 'hf_first 下 gate 不得产生 overlay issue');
   console.log('validation gate overlay tests passed');
 
   // ===== P2-B：无图 diagram beat 的骨架确定性校验（warning 级，不阻断）=====
@@ -703,10 +694,9 @@ async function writeFile(filePath, content) {
     '</main>',
     '</body></html>',
   ].join('\n'));
-  const diagramProject = (strategy, { htmlPath, beatVisualBaseType } = {}) => ({
+  const diagramProject = ({ htmlPath, beatVisualBaseType } = {}) => ({
     template_id: 'valid',
     template_inputs: {},
-    visual_strategy: strategy,
     visual_plan: {
       beats: [
         {
@@ -732,7 +722,7 @@ async function writeFile(filePath, content) {
   // diagram beat + 无 data-mp-diagram-base → warning 存在且不阻断
   const diagramMissing = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
-    project: diagramProject('asset_first', { htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'diagram' }),
+    project: diagramProject({ htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'diagram' }),
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(diagramMissing.ok, true, 'diagram 骨架校验为 warning 级，不得阻断');
@@ -742,24 +732,17 @@ async function writeFile(filePath, content) {
   // diagram beat + 含骨架 HTML → 无该 warning
   const diagramPresent = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
-    project: diagramProject('asset_first', { htmlPath: 'frames/diagram-with-base.html', beatVisualBaseType: 'diagram' }),
+    project: diagramProject({ htmlPath: 'frames/diagram-with-base.html', beatVisualBaseType: 'diagram' }),
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(diagramPresent.diagnostics.some(item => item.code === 'diagram_base_missing'), false, '含骨架 HTML 不得报 diagram_base_missing');
   // 非 diagram beat → 无该 warning
   const diagramNotDiagramBeat = await validateHtmlVideoProject({
     projectDir: rawHtmlProjectDir,
-    project: diagramProject('asset_first', { htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'asset' }),
+    project: diagramProject({ htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'asset' }),
     environment: { ok: true, diagnostics: [] },
   });
   assert.equal(diagramNotDiagramBeat.diagnostics.some(item => item.code === 'diagram_base_missing'), false, '非 diagram beat 不得报 diagram_base_missing');
-  // hf_first → 无该 warning（硬约束 A）
-  const diagramHfFirst = await validateHtmlVideoProject({
-    projectDir: rawHtmlProjectDir,
-    project: diagramProject('hf_first', { htmlPath: 'frames/diagram-missing-base.html', beatVisualBaseType: 'diagram' }),
-    environment: { ok: true, diagnostics: [] },
-  });
-  assert.equal(diagramHfFirst.diagnostics.some(item => item.code === 'diagram_base_missing'), false, 'hf_first 不得报 diagram_base_missing');
   console.log('validation gate diagram base tests passed');
 
   console.log('html-video validation gate tests passed');

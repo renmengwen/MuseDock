@@ -255,8 +255,6 @@ async function generateCreativeVideoProject({
       sceneSpec: sceneParsed.scene_spec,
       creativeContext: sceneCreativeContext,
       target,
-      preferredTemplateId: target.preferredTemplateId || '',
-      lockTemplate: target.lockTemplate === true,
       rootDir,
       services: {
         ...services,

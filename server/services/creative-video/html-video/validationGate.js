@@ -124,10 +124,9 @@ async function readFrameHtmlForValidation(projectDir, frame, diagnostics) {
   }
 }
 
-// asset_first 专属：raw_html 帧的 motion overlay 确定性校验（warning 级，不阻断）。
-// hf_first 或无 overlay 的 HTML 不产生任何 issue（硬约束 A）。
-function assetFirstOverlayIssues(html, { visualStrategy, frameHeight = 1920 } = {}) {
-  if (visualStrategy !== 'asset_first') return [];
+// raw_html 帧的 motion overlay 确定性校验（warning 级，不阻断）。
+// 无 overlay 的 HTML 不产生任何 issue（硬约束 A）。
+function assetFirstOverlayIssues(html, { frameHeight = 1920 } = {}) {
   // P1-8：按真实 opening tag 判定，<style> 选择器/注释里的字样不触发校验（也不误报缺根节点）
   if (!hasRealOverlayElement(html)) return [];
   const result = validateOverlayHtml(html, { height: frameHeight });
@@ -174,8 +173,7 @@ function sceneBeatScopeIssues(html, beatWindows = []) {
 async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames }) {
   const output = objectOrEmpty(project.output);
   const resolution = objectOrEmpty(output.resolution);
-  const visualStrategy = project.visual_strategy || null;
-  // P2-B：无图 diagram beat 的骨架确定性校验（asset_first 专属，warning 级不阻断）。
+  // P2-B：无图 diagram beat 的骨架确定性校验（warning 级不阻断）。
   // beat 信息从 project.visual_plan.beats 按 frame.beat_id 查（gate 现有可达上下文）。
   const beatsById = new Map(
     arrayOrEmpty(objectOrEmpty(project.visual_plan).beats)
@@ -205,7 +203,6 @@ async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames 
     });
     }
     for (const issue of assetFirstOverlayIssues(html, {
-      visualStrategy,
       frameHeight: Number(resolution.height) || 1920,
     })) {
       warningDiagnostic(diagnostics, issue.code, 'frame', issue.message || 'motion overlay 不符合安全区约束。', {
@@ -220,7 +217,7 @@ async function validateRawHtmlFrames({ diagnostics, projectDir, project, frames 
       });
     }
     // 无图 diagram beat 的 HTML 必须使用统一骨架（data-mp-diagram-base）；缺失只告警不阻断
-    if (visualStrategy === 'asset_first') {
+    {
       const beat = beatsById.get(String(frame.beat_id || frame.beatId || '').trim());
       if (beat && objectOrEmpty(beat.visual_base).type === 'diagram' && !html.includes('data-mp-diagram-base')) {
         warningDiagnostic(diagnostics, 'diagram_base_missing', 'frame', '无图 beat 未使用统一 diagram 骨架（缺少 data-mp-diagram-base）。', {

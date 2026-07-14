@@ -41,18 +41,17 @@ function stableJsonStringify(value) {
 
 /**
  * P1-2：计算单帧 HTML 生成的真实输入指纹。覆盖会改变产物的全部关键输入：
- * 视觉策略、连续性模式、画幅、beat 编排（含 visual_base/motion_overlay(theme_tokens)/visual_text）、
+ * 连续性模式、画幅、beat 编排（含 visual_base/motion_overlay(theme_tokens)/visual_text）、
  * 素材绑定、scene_html 时间窗口与提示词版本。resume 复用时与 checkpoint 持久化的指纹比较，
- * 任一维度变化即重新生成，杜绝「切策略/换素材后静默复用旧 HTML」。纯函数，可独立测试。
+ * 任一维度变化即重新生成，杜绝「换素材/换编排后静默复用旧 HTML」。纯函数，可独立测试。
  */
-function computeFrameInputFingerprint({ node, visualStrategy, continuityMode, target } = {}) {
+function computeFrameInputFingerprint({ node, continuityMode, target } = {}) {
   const resolution = frameHtmlAgent.resolveResolution(target || {}) || {};
   const assetRefs = (Array.isArray(node?.asset_refs) ? node.asset_refs : [])
     .filter(Boolean)
     .map(ref => stableJsonValue(ref))
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   const signature = {
-    visual_strategy: visualStrategy || null,
     continuity_mode: continuityMode || 'beat_mp4',
     resolution: { width: resolution.width ?? null, height: resolution.height ?? null },
     beat: node?.metadata?.visual_beats ?? node?.metadata?.visual_beat ?? null,
@@ -90,13 +89,12 @@ function safeLoad(loader, ...args) {
   }
 }
 
-// asset_first 时从 node.metadata.visual_beat（R3 唯一下传通道）取 beat 编排并加载 primitive 参考片段；
+// 从 node.metadata.visual_beat（R3 唯一下传通道）取 beat 编排并加载 primitive 参考片段；
 // scene_html 的 scene 级节点（metadata.visual_beats）聚合组内 beat：以首个带 motion_overlay 的 beat
 // 为 prompt 基础，scene 级约束（data-mp-beat-scope 约定/时间窗口）经 sceneBeatsBrief 独立字段下传，
 // 由 frameHtmlAgent 作为独立段落输出（不混入 primitive 参考片段）；brief 只依赖 beat_windows 存在，
-// 与 motion_overlay 解耦（与时间线脚本注入条件一致）。hf_first 返回空对象，agent 侧不追加任何新 prompt 段。
-function resolveAssetFirstMotionArgs(node, creativeContext, { scene = null, beats = [], mediaOptions = {} } = {}) {
-  if (creativeContext?.visual_strategy !== 'asset_first') return {};
+// 与 motion_overlay 解耦（与时间线脚本注入条件一致）。
+function resolveAssetFirstMotionArgs(node, { scene = null, beats = [], mediaOptions = {} } = {}) {
   const sceneBeatsBrief = buildSceneBeatsBrief(node, { scene, beats, mediaOptions });
   const visualBeats = Array.isArray(node?.metadata?.visual_beats) ? node.metadata.visual_beats : null;
   const beat = visualBeats && visualBeats.length
@@ -306,10 +304,9 @@ function themeTokenStyle(tokens = {}) {
   return `<style data-mp-theme>:root{${entries.map(([k, v]) => `${k}:${v}`).join(';')}}</style>`;
 }
 
-// asset_first 时若模型漏写 overlay（无 data-mp-overlay），确定性注入 primitive 兜底片段；
-// hf_first 或已有 overlay 时原样返回（硬约束 A）。
-function ensureMotionOverlay(html = '', beat = {}, { visualStrategy = null } = {}) {
-  if (visualStrategy !== 'asset_first') return { html, injected: false };
+// 模型漏写 overlay（无 data-mp-overlay）时，确定性注入 primitive 兜底片段；
+// 已有 overlay 时原样返回（硬约束 A）。
+function ensureMotionOverlay(html = '', beat = {}) {
   const preset = beat.motion_overlay?.preset;
   if (!preset) return { html, injected: false };
   const text = String(html);
@@ -525,9 +522,7 @@ async function runFrameHtmlPhase(ctx) {
   let { project, contentGraph } = ctx;
 
   const styleProfile = objectOrEmpty(project.visual_plan?.style_profile);
-  // asset_first 时按 beat 收集帧 HTML 静态统计与 overlay 确定性校验结果；
-  // hf_first 保持空对象（硬约束 A：不产生任何新 issue/统计）。
-  const isAssetFirst = creativeContext?.visual_strategy === 'asset_first';
+  // 按 beat 收集帧 HTML 静态统计与 overlay 确定性校验结果
   const statsByBeatId = {};
   // overlay 校验用的帧高在整个 phase 内不变，循环外算一次
   const frameHeight = Number(frameHtmlAgent.resolveResolution(templateRenderTarget)?.height) || 1920;
@@ -536,28 +531,28 @@ async function runFrameHtmlPhase(ctx) {
   let visualStyleReferenceHtml = '';
   const frameResults = [];
   const frameJobs = [];
-  // asset_first：复用帧与串行首帧共同维护「按 continuity group + beat_index 的已就绪 HTML」，
-  // 供分桶调度按前驱选取同组后续 beat 的布局摘要来源（hf_first 恒为空 Map，不参与）。
+  // 复用帧与串行首帧共同维护「按 continuity group + beat_index 的已就绪 HTML」，
+  // 供分桶调度按前驱选取同组后续 beat 的布局摘要来源。
   const initialHtmlByGroup = new Map();
   let completedFrameHtmlCount = 0;
   const concurrency = Math.min(5, Math.max(1, Math.round(Number(frameHtmlConcurrency) || FRAME_HTML_CONCURRENCY)));
   const frameHtmlRunsInParallel = concurrency > 1;
   const generateFrameJob = async job => {
     const { index, node, sceneId, scene, styleReferenceHtml } = job;
-    // previousBeatSummary 仅 asset_first 分桶路径会写入（hf_first 恒为 undefined，不改变原展开形态）
+    // previousBeatSummary 仅分桶路径会写入
     const jobBeatId = String(node.beat_id || node.beatId || '').trim();
     const assetFirstMotionArgs = {
       // P2-3(a)：scene/beats/mediaOptions 下传给 buildSceneBeatsBrief，
       // 供 scene_html 节点按 beat 判定字幕、给无字幕 beat 追加画面重点短句要求
-      ...resolveAssetFirstMotionArgs(node, creativeContext, {
+      ...resolveAssetFirstMotionArgs(node, {
         scene,
         beats: project.visual_plan?.beats || [],
         mediaOptions,
       }),
       ...(job.previousBeatSummary ? { previousBeatSummary: job.previousBeatSummary } : {}),
-      // R8：仅 asset_first 的 beat_mp4 帧计算 hasCaptions（硬约束 A：hf_first 不计算不传；
-      // scene_html 的 scene 级帧 beat 粒度不适用，保持 undefined，agent 侧缺省 true 不追加要求行）
-      ...(isAssetFirst && jobBeatId && node?.metadata?.visual_beat && !isSceneHtmlNode(node)
+      // R8：仅 beat_mp4 帧计算 hasCaptions（scene_html 的 scene 级帧 beat 粒度不适用，
+      // 保持 undefined，agent 侧缺省 true 不追加要求行）
+      ...(jobBeatId && node?.metadata?.visual_beat && !isSceneHtmlNode(node)
         ? {
           hasCaptions: hasCaptionsForBeat({
             scene,
@@ -763,9 +758,7 @@ async function runFrameHtmlPhase(ctx) {
     // raw_html 帧校验通过后、写盘前：asset_first 且模型漏写 overlay 时确定性注入 primitive 兜底片段；
     // scene_html 的 scene 级节点跳过兜底（单 beat 片段无 scope，注入会全程常显破坏分 beat 显隐）
     if (htmlResult.success && assetFirstMotionArgs.beat && !isSceneHtmlNode(node)) {
-      const overlayResult = ensureMotionOverlay(htmlResult.html, assetFirstMotionArgs.beat, {
-        visualStrategy: creativeContext?.visual_strategy || null,
-      });
+      const overlayResult = ensureMotionOverlay(htmlResult.html, assetFirstMotionArgs.beat);
       if (overlayResult.injected) {
         htmlResult = { ...htmlResult, html: overlayResult.html };
         diagnostics.push(createDiagnostic({
@@ -834,15 +827,12 @@ async function runFrameHtmlPhase(ctx) {
       node,
       target: templateRenderTarget,
       resumeAllowed: resumeAllowed && !regenerateFrameHtmlRequested,
-      // P1-2：真实输入指纹比较——checkpoint 有指纹且不匹配则重新生成；
-      // 无指纹的旧工程按 visualStrategy 兜底（asset_first 不复用旧链路产物）
+      // P1-2：真实输入指纹比较——checkpoint 有指纹且不匹配则重新生成；无指纹的旧工程不复用
       inputFingerprint: computeFrameInputFingerprint({
         node,
-        visualStrategy: creativeContext?.visual_strategy,
         continuityMode: creativeContext?.continuity_mode,
         target: templateRenderTarget,
       }),
-      visualStrategy: creativeContext?.visual_strategy,
     });
     if (reuse.reuse) {
       const durationSec = trustedSceneDuration(scene || {}, node);
@@ -861,17 +851,15 @@ async function runFrameHtmlPhase(ctx) {
         return current;
       });
       if (!visualStyleReferenceHtml) visualStyleReferenceHtml = reuse.html;
-      // P2-A：复用帧进入统计与连续性链路（仅 asset_first；hf_first 不产生任何新统计/上下文）
-      if (isAssetFirst) {
-        collectReusedFrameContext({
-          node,
-          html: reuse.html,
-          frameKey: frameKey || node.id || sceneId,
-          frameHeight,
-          statsByBeatId,
-          initialHtmlByGroup,
-        });
-      }
+      // P2-A：复用帧进入统计与连续性链路
+      collectReusedFrameContext({
+        node,
+        html: reuse.html,
+        frameKey: frameKey || node.id || sceneId,
+        frameHeight,
+        statsByBeatId,
+        initialHtmlByGroup,
+      });
       completedFrameHtmlCount += 1;
       await report(onProgress, {
         type: 'html_video_frame_html_done',
@@ -920,34 +908,24 @@ async function runFrameHtmlPhase(ctx) {
       frameResults.push(firstResult);
       if (firstResult.htmlResult.success) {
         visualStyleReferenceHtml = firstResult.htmlResult.html;
-        if (isAssetFirst) {
-          const firstGroupId = continuityGroupId(frameJobs[0]);
-          if (firstGroupId) {
-            const firstBeatIndex = Number(frameJobs[0].node?.metadata?.visual_beat?.continuity?.beat_index) || 1;
-            recordGroupHtml(initialHtmlByGroup, firstGroupId, firstBeatIndex, firstResult.htmlResult.html);
-          }
+        const firstGroupId = continuityGroupId(frameJobs[0]);
+        if (firstGroupId) {
+          const firstBeatIndex = Number(frameJobs[0].node?.metadata?.visual_beat?.continuity?.beat_index) || 1;
+          recordGroupHtml(initialHtmlByGroup, firstGroupId, firstBeatIndex, firstResult.htmlResult.html);
         }
       }
       remainingJobs = frameJobs.slice(1);
     }
-    if (isAssetFirst) {
-      // asset_first：按 continuity group 分桶，桶间沿用并发上限、桶内串行传前帧布局摘要
-      const buckets = bucketJobsByContinuityGroup(
-        remainingJobs.map(job => ({ ...job, styleReferenceHtml: visualStyleReferenceHtml })),
-      );
-      frameResults.push(...await runBucketsWithContinuity({
-        buckets,
-        concurrency,
-        runJob: generateFrameJob,
-        initialHtmlByGroup,
-      }));
-    } else {
-      frameResults.push(...await mapLimit(
-        remainingJobs.map(job => ({ ...job, styleReferenceHtml: visualStyleReferenceHtml })),
-        concurrency,
-        generateFrameJob,
-      ));
-    }
+    // 按 continuity group 分桶，桶间沿用并发上限、桶内串行传前帧布局摘要
+    const buckets = bucketJobsByContinuityGroup(
+      remainingJobs.map(job => ({ ...job, styleReferenceHtml: visualStyleReferenceHtml })),
+    );
+    frameResults.push(...await runBucketsWithContinuity({
+      buckets,
+      concurrency,
+      runJob: generateFrameJob,
+      initialHtmlByGroup,
+    }));
   }
 
   for (const frameResult of frameResults.sort((a, b) => a.index - b.index)) {
@@ -1023,9 +1001,7 @@ async function runFrameHtmlPhase(ctx) {
         : `${htmlResult.html || ''}${timelineScript}`;
       htmlResult = { ...htmlResult, html: withTimeline };
     }
-    if (isAssetFirst) {
-      statsByBeatId[frameKey || node.id || sceneId] = frameHtmlStatsEntry(htmlResult.html, frameHeight);
-    }
+    statsByBeatId[frameKey || node.id || sceneId] = frameHtmlStatsEntry(htmlResult.html, frameHeight);
     const durationSec = trustedSceneDuration(scene || {}, node);
     const captions = mediaOptions.generateCaptions !== false && scene
       ? normalizeCaptions(scene, durationSec)
@@ -1090,7 +1066,6 @@ async function runFrameHtmlPhase(ctx) {
         // P1-2：持久化真实输入指纹（input_hash 是历史遗留的输出 hash，保留不动）
         input_fingerprint: computeFrameInputFingerprint({
           node,
-          visualStrategy: creativeContext?.visual_strategy,
           continuityMode: creativeContext?.continuity_mode,
           target: templateRenderTarget,
         }),

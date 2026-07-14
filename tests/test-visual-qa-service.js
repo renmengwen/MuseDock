@@ -329,34 +329,14 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.ok(report.issues.some(issue => issue.code === 'repeated_frames'));
   }
 
-  // ===== 模块7：asset_first QA =====
+  // ===== 模块7：观测通道 QA =====
   const {
-    analyzeAssetFirstRouting,
     analyzeAssetFirstBoundaries,
     analyzeAssetFirstCaptionRegion,
     attachAssetFirstWarnings,
   } = require('../server/services/creative-video/visualQaService');
 
-  // 1) 路由类：takeover 按归零语义（决策 3）——任何 template_inputs 决策即报，不看占比阈值
-  {
-    const decisions = [
-      { beat_id: 'b1', source_mode: 'template_inputs', template_id: 'frame-build-minimal' },
-      { beat_id: 'b2', source_mode: 'template_inputs', template_id: 'frame-glitch-title' },
-      { beat_id: 'b3', source_mode: 'raw_html', template_id: null, route_role: 'asset_overlay' },
-    ];
-    const warnings = analyzeAssetFirstRouting(decisions, { visualStrategy: 'asset_first' });
-    assert.ok(warnings.some(i => i.code === 'asset_first_template_takeover' && i.severity === 'warning'));
-    assert.ok(warnings.some(i => i.code === 'asset_first_title_template_used' && i.severity === 'warning'));
-    const single = analyzeAssetFirstRouting(
-      [{ beat_id: 'x1', source_mode: 'template_inputs', template_id: 'frame-swiss-grid' },
-       ...Array.from({ length: 17 }, (_, i) => ({ beat_id: `r${i}`, source_mode: 'raw_html', template_id: null }))],
-      { visualStrategy: 'asset_first' },
-    );
-    assert.ok(single.some(i => i.code === 'asset_first_template_takeover'), '占比再低也必须报（归零语义）');
-    assert.deepStrictEqual(analyzeAssetFirstRouting(decisions, { visualStrategy: 'hf_first' }), []);
-  }
-
-  // 2) 边界重刷：同 scene 相邻条目边界前后成对采样差分（真实指标字段 average_luma / edge_score）
+  // 1) 边界重刷：同 scene 相邻条目边界前后成对采样差分（真实指标字段 average_luma / edge_score）
   {
     const boundaryGroups = [
       { scene_id: 'scene_05', boundary_sec: 69.71, same_scene: true,
@@ -366,7 +346,7 @@ const qa = require('../server/services/creative-video/visualQaService');
       { scene_id: 'x', boundary_sec: 12.75, same_scene: false,
         before: { average_luma: 230, edge_score: 0.9 }, after: { average_luma: 25, edge_score: 0.1 } },
     ];
-    const warnings = analyzeAssetFirstBoundaries(boundaryGroups, { visualStrategy: 'asset_first', diffThreshold: 0.25 });
+    const warnings = analyzeAssetFirstBoundaries(boundaryGroups, { diffThreshold: 0.25 });
     assert.strictEqual(warnings.length, 1);
     assert.strictEqual(warnings[0].code, 'asset_first_boundary_refresh');
     assert.strictEqual(warnings[0].severity, 'warning');
@@ -379,7 +359,7 @@ const qa = require('../server/services/creative-video/visualQaService');
         before: { average_luma: 120, edge_score: 20 }, after: { average_luma: 120, edge_score: 28 } },
       { scene_id: 'scene_02', boundary_sec: 20, same_scene: true,
         before: { average_luma: 120, edge_score: 20 }, after: { average_luma: 120, edge_score: 220 } },
-    ], { visualStrategy: 'asset_first', diffThreshold: 0.25 });
+    ], { diffThreshold: 0.25 });
     assert.strictEqual(edgeOnly.length, 1, 'edge 微小原始差值（未归一前 >0.25）不得单独触发');
     assert.strictEqual(edgeOnly[0].details.boundary_sec, 20);
     assert.ok(Math.abs(edgeOnly[0].details.score - 200 / 255) < 0.001, 'edge 分量按 /255 归一计分');
@@ -392,12 +372,12 @@ const qa = require('../server/services/creative-video/visualQaService');
       { time: 49.0, caption_active: true, bottom_region: { variance: 0.12, luma: 0.4 } },
       { time: 61.0, caption_active: false, bottom_region: { variance: 0.0, luma: 0.0 } },
     ];
-    const warnings = analyzeAssetFirstCaptionRegion(frames, { visualStrategy: 'asset_first', minVariance: 0.01 });
+    const warnings = analyzeAssetFirstCaptionRegion(frames, { minVariance: 0.01 });
     assert.strictEqual(warnings.length, 1);
     assert.strictEqual(warnings[0].code, 'asset_first_caption_invisible');
   }
 
-  // 4) QA warning 双向断言：warnings 不改变 success/issues；空 warnings 不加字段
+  // 3) QA warning 双向断言：warnings 不改变 success/issues；空 warnings 不加字段
   {
     const base = { success: true, issues: [], metrics: {} };
     const attached = attachAssetFirstWarnings(base, [{ code: 'asset_first_style_drift', severity: 'warning', message: 'x' }]);
@@ -425,11 +405,10 @@ const qa = require('../server/services/creative-video/visualQaService');
       { beat_id: 'scene_04_b1', has_asset: false, text_blocks: 1, cards: 0, graphics: 0 },
       { beat_id: 'scene_02_b1', has_asset: true, text_blocks: 1, cards: 0, graphics: 0 },
     ];
-    const warnings = analyzeAssetFirstInformation(beatsInfo, { visualStrategy: 'asset_first', minElements: 3 });
+    const warnings = analyzeAssetFirstInformation(beatsInfo, { minElements: 3 });
     assert.strictEqual(warnings.length, 1);
     assert.strictEqual(warnings[0].code, 'asset_first_low_information');
     assert.strictEqual(warnings[0].details.beat_id, 'scene_04_b1');
-    assert.deepStrictEqual(analyzeAssetFirstInformation(beatsInfo, { visualStrategy: 'hf_first', minElements: 3 }), []);
     // P2-3(b)：scene_html 回落展开把整 scene 统计复制到每 beat（stats_scope:'scene'），
     // 低信息告警按 scene 去重只报一条，message 说明是 scene 级聚合观察；beat 级仍逐条报
     const sceneScoped = [
@@ -437,7 +416,7 @@ const qa = require('../server/services/creative-video/visualQaService');
       { beat_id: 'scene_06_b2', scene_id: 'scene_06', stats_scope: 'scene', has_asset: false, text_blocks: 1, cards: 0, graphics: 0 },
       { beat_id: 'scene_07_b1', has_asset: false, text_blocks: 0, cards: 0, graphics: 0 },
     ];
-    const dedupInfo = analyzeAssetFirstInformation(sceneScoped, { visualStrategy: 'asset_first', minElements: 3 });
+    const dedupInfo = analyzeAssetFirstInformation(sceneScoped, { minElements: 3 });
     assert.strictEqual(dedupInfo.length, 2, 'scene scope 去重为 1 条 + beat 级 1 条');
     const sceneWarning = dedupInfo.find(w => w.details.scene_id === 'scene_06');
     assert.ok(sceneWarning, 'scene 级告警必须带 scene_id');
@@ -450,10 +429,9 @@ const qa = require('../server/services/creative-video/visualQaService');
       { time: 1, mean_rgb: [220, 220, 215] }, { time: 30, mean_rgb: [222, 219, 214] },
       { time: 47, mean_rgb: [10, 10, 12] },   { time: 60, mean_rgb: [12, 9, 10] },
     ];
-    const warnings = analyzeAssetFirstStyleDrift(frames, { visualStrategy: 'asset_first', maxMeanShift: 96 });
+    const warnings = analyzeAssetFirstStyleDrift(frames, { maxMeanShift: 96 });
     assert.strictEqual(warnings.length, 1);
     assert.strictEqual(warnings[0].code, 'asset_first_style_drift');
-    assert.deepStrictEqual(analyzeAssetFirstStyleDrift(frames, { visualStrategy: 'hf_first', maxMeanShift: 96 }), []);
   }
   // P2-4：style_drift 观测窗口 = 顺序帧（0-11.5s）∪ timed 边界采样帧（覆盖全片），
   // 合并去重按时间排序后 45s 级断裂可命中；横跨跨 scene 边界 ±0.35s 的帧对跳过（硬切合法）
@@ -473,17 +451,17 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.strictEqual(merged.filter(f => Number(f.time_sec) === 0).length, 1, '同时间点帧去重');
     const sortedTimes = merged.map(f => Number(f.time_sec));
     assert.deepStrictEqual(sortedTimes, [...sortedTimes].sort((a, b) => a - b), '合并后按时间排序');
-    const warnings = analyzeAssetFirstStyleDrift(merged, { visualStrategy: 'asset_first', maxMeanShift: 96 });
+    const warnings = analyzeAssetFirstStyleDrift(merged, { maxMeanShift: 96 });
     assert.strictEqual(warnings.length, 1, '45s 级断裂必须在扩窗后命中');
     assert.strictEqual(warnings[0].details.time, 45.77);
     // 同一断裂点若正好横跨跨 scene 边界（45.47s），该帧对应跳过，不误报硬切
     const skipped = analyzeAssetFirstStyleDrift(merged, {
-      visualStrategy: 'asset_first', maxMeanShift: 96, sceneCutTimes: [45.47],
+      maxMeanShift: 96, sceneCutTimes: [45.47],
     });
     assert.deepStrictEqual(skipped, [], '横跨跨 scene 边界 ±0.35s 的帧对跳过');
     // 边界远离突变点时不影响检测
     const farCut = analyzeAssetFirstStyleDrift(merged, {
-      visualStrategy: 'asset_first', maxMeanShift: 96, sceneCutTimes: [20],
+      maxMeanShift: 96, sceneCutTimes: [20],
     });
     assert.strictEqual(farCut.length, 1, '无关边界不得吞掉真实漂移');
   }
@@ -501,7 +479,7 @@ const qa = require('../server/services/creative-video/visualQaService');
       required_asset_ids: ['gen_scene_02', 'gen_scene_03', 'gen_x'],
       missing_required_asset_ids: ['gen_scene_02', 'gen_x'],
     };
-    const warnings = mapAssetUsageToQaWarnings(report, { visualStrategy: 'asset_first' });
+    const warnings = mapAssetUsageToQaWarnings(report);
     assert.strictEqual(warnings.length, 2);
     const w1 = warnings.find(w => w.details.asset_id === 'gen_scene_02');
     assert.strictEqual(w1.code, 'asset_first_asset_missing');
@@ -511,7 +489,6 @@ const qa = require('../server/services/creative-video/visualQaService');
     const w2 = warnings.find(w => w.details.asset_id === 'gen_x');
     assert.strictEqual(w2.details.scene_id, null, '拿不到 frame 信息时只给 asset_id，不伪造 scene_id');
     assert.strictEqual(w2.details.beat_id, null);
-    assert.deepStrictEqual(mapAssetUsageToQaWarnings(report, { visualStrategy: 'hf_first' }), []);
   }
   // overlay_caption_overlap 透传 render_decisions[].overlay_check
   {
@@ -519,11 +496,10 @@ const qa = require('../server/services/creative-video/visualQaService');
       { beat_id: 'scene_04_b1', overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'x' } },
       { beat_id: 'scene_04_b2', overlay_check: { valid: true } },
     ];
-    const warnings = mapOverlayChecksToQaWarnings(decisions, { visualStrategy: 'asset_first' });
+    const warnings = mapOverlayChecksToQaWarnings(decisions);
     assert.strictEqual(warnings.length, 1);
     assert.strictEqual(warnings[0].code, 'asset_first_overlay_caption_overlap');
     assert.strictEqual(warnings[0].details.beat_id, 'scene_04_b1');
-    assert.deepStrictEqual(mapOverlayChecksToQaWarnings(decisions, { visualStrategy: 'hf_first' }), []);
     // 静态无法确认的定位值也必须进入成功任务的 visual_inspect.warnings，而不是只留在 gate diagnostics
     const indeterminate = mapOverlayChecksToQaWarnings([{
       beat_id: 'scene_04_b3',
@@ -533,19 +509,11 @@ const qa = require('../server/services/creative-video/visualQaService');
         message: 'overlay 定位值无法静态确认安全区合规（bottom:5%），请人工复核',
         details: { indeterminate_props: ['bottom'] },
       },
-    }], { visualStrategy: 'asset_first' });
+    }]);
     assert.strictEqual(indeterminate.length, 1);
     assert.strictEqual(indeterminate[0].code, 'asset_first_overlay_position_indeterminate');
     assert.strictEqual(indeterminate[0].details.beat_id, 'scene_04_b3');
     assert.match(indeterminate[0].message, /人工复核/);
-    assert.deepStrictEqual(
-      mapOverlayChecksToQaWarnings([{
-        beat_id: 'scene_04_b3',
-        overlay_check: { valid: true, indeterminate: true },
-      }], { visualStrategy: 'hf_first' }),
-      [],
-      'hf_first 不增加 asset_first overlay 观察告警',
-    );
     // P2-7：scene_html 下整 scene stats 复制导致 decision.beat_id 是首个 beat，
     // 真实越界 beat 在 overlay_check.details.beat_scope——scene 级条目 beat_id 必须用 beat_scope，
     // 并结构化透出 details.overlay_beat_scope；beat 级条目维持 decision.beat_id
@@ -558,7 +526,7 @@ const qa = require('../server/services/creative-video/visualQaService');
         { beat_id: 'scene_10_b1', scene_id: 'scene_10',
           overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'y', details: { beat_scope: 'scene_10_b1' } } },
       ];
-      const scopedWarnings = mapOverlayChecksToQaWarnings(scoped, { visualStrategy: 'asset_first' });
+      const scopedWarnings = mapOverlayChecksToQaWarnings(scoped);
       assert.strictEqual(scopedWarnings.length, 2);
       const sceneWarning = scopedWarnings.find(w => w.details.scene_id === 'scene_09');
       assert.strictEqual(sceneWarning.details.beat_id, 'b2', 'scene 级条目 beat_id 必须定位真实越界 beat（beat_scope）');
@@ -569,7 +537,7 @@ const qa = require('../server/services/creative-video/visualQaService');
       const legacyScoped = mapOverlayChecksToQaWarnings([
         { beat_id: 'b1', scene_id: 'scene_11', stats_scope: 'scene',
           overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'z' } },
-      ], { visualStrategy: 'asset_first' });
+      ]);
       assert.strictEqual(legacyScoped[0].details.beat_id, null, '无 beat_scope 时不伪造 beat_id');
       // 去重键纳入 beat_scope：同 scene 两个不同越界 beat 的 scene 级条目必须各报一条
       const multiBeat = mapOverlayChecksToQaWarnings([
@@ -577,7 +545,7 @@ const qa = require('../server/services/creative-video/visualQaService');
           overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'x', details: { beat_scope: 'b1' } } },
         { beat_id: 'b2', scene_id: 'scene_12', stats_scope: 'scene',
           overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area', message: 'y', details: { beat_scope: 'b2' } } },
-      ], { visualStrategy: 'asset_first' });
+      ]);
       assert.strictEqual(multiBeat.length, 2, '同 scene 不同 beat_scope 不得被去重吞掉');
       assert.deepStrictEqual(multiBeat.map(w => w.details.beat_id).sort(), ['b1', 'b2']);
       // 摘要投影保留 overlay_beat_scope 定位字段
@@ -594,7 +562,7 @@ const qa = require('../server/services/creative-video/visualQaService');
       { beat_id: 'scene_08_b1', scene_id: 'scene_08', overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area' } },
       { beat_id: 'scene_08_b2', scene_id: 'scene_08', overlay_check: { valid: false, reason_code: 'overlay_in_caption_safe_area' } },
     ];
-    const dedup = mapOverlayChecksToQaWarnings(sceneScoped, { visualStrategy: 'asset_first' });
+    const dedup = mapOverlayChecksToQaWarnings(sceneScoped);
     assert.strictEqual(dedup.length, 3, 'scene scope 去重为 1 条 + beat 级 2 条');
     assert.strictEqual(dedup.filter(w => w.details.scene_id === 'scene_07').length, 1);
   }
@@ -677,7 +645,6 @@ const qa = require('../server/services/creative-video/visualQaService');
           { id: 'scene_01_b2', scene_id: 'scene_01', duration_sec: 2 },
         ],
       },
-      visualStrategy: 'asset_first',
       expectedAspectRatio: '16:9',
       services: {
         probeVideo: async () => ({ width: 1920, height: 1080, duration: 4 }),
@@ -716,12 +683,12 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.ok(lateTimes.length >= 5, `11.5s 后必须有观测点，实际 ${JSON.stringify(plan.times)}`);
     assert.ok(plan.times.some(time => time > 48), '观测点需覆盖片尾段');
     assert.ok(plan.times.length <= 120, '共用 MAX_TIMED_SAMPLES 预算');
-    // 缺省（hf_first/safetyOnly）不补观测点：times 仅 opening 三点，行为不变
-    const hfPlan = buildTimedSamplePlan({
+    // 缺省（非 pairedBoundarySampling / safetyOnly）不补观测点：times 仅 opening 三点，行为不变
+    const defaultPlan = buildTimedSamplePlan({
       project: longProject,
       videoInfo: { width: 1080, height: 1920, duration: 60 },
     });
-    assert.deepStrictEqual(hfPlan.times, [0, 0.5, 1.0], '缺省路径采样点逐值不变（硬约束 A）');
+    assert.deepStrictEqual(defaultPlan.times, [0, 0.5, 1.0], '缺省路径采样点逐值不变（硬约束 A）');
   }
   // P2-4：生产链路——采样请求携带全片观测点，45s 突变可被 style_drift 检出
   {
@@ -730,7 +697,6 @@ const qa = require('../server/services/creative-video/visualQaService');
       projectDir,
       outputPath,
       project: { frames: [{ id: 'scene:scene_01', scene_id: 'scene_01', duration_sec: 60 }] },
-      visualStrategy: 'asset_first',
       services: {
         probeVideo: async () => ({ width: 1080, height: 1920, duration: 60 }),
         sampleFrames: async (request) => {
@@ -769,7 +735,6 @@ const qa = require('../server/services/creative-video/visualQaService');
           { id: 'scene_01_b2', scene_id: 'scene_01', duration_sec: 2 },
         ],
       },
-      visualStrategy: 'asset_first',
       expectedAspectRatio: '16:9',
       services: {
         probeVideo: async () => ({ width: 1920, height: 1080, duration: 4 }),
@@ -801,7 +766,6 @@ const qa = require('../server/services/creative-video/visualQaService');
           { id: 'scene_01_b2', scene_id: 'scene_01', duration_sec: 2 },
         ],
       },
-      visualStrategy: 'asset_first',
       expectedAspectRatio: '16:9',
       services: {
         probeVideo: async () => ({ width: 1920, height: 1080, duration: 4 }),
@@ -828,14 +792,13 @@ const qa = require('../server/services/creative-video/visualQaService');
         before: { average_luma: NaN, edge_score: 0.3 }, after: { average_luma: 40, edge_score: 0.1 } },
       { scene_id: 'scene_05', boundary_sec: 20, same_scene: true,
         before: { average_luma: 200, edge_score: 0.3 }, after: { average_luma: 40, edge_score: undefined } },
-    ], { visualStrategy: 'asset_first', diffThreshold: 0.25 });
+    ], { diffThreshold: 0.25 });
     assert.deepStrictEqual(warnings, [], '非有限指标与缺帧同语义：跳过不误报');
   }
-  // Important 6：中间层接线 —— 以 asset_first 真实调用 inspectRenderedVideo（注入 probeVideo/sampleFrames），
-  // 断言 warnings 汇总进报告且 success 不受影响；同输入 hf_first 时无 warnings 字段
+  // Important 6：中间层接线 —— 真实调用 inspectRenderedVideo（注入 probeVideo/sampleFrames），
+  // 断言 warnings 汇总进报告且 success 不受影响；safetyOnly 时无 warnings 字段
   {
     const assetFirstProject = {
-      visual_strategy: 'asset_first',
       frames: [
         { id: 'scene_01_b1', scene_id: 'scene_01', duration_sec: 2, captions: [{ start: 0, end: 1.5, text: '旁白' }] },
         { id: 'scene_02_b1', scene_id: 'scene_02', duration_sec: 2, captions: [] },
@@ -874,7 +837,6 @@ const qa = require('../server/services/creative-video/visualQaService');
       projectDir,
       outputPath,
       project: assetFirstProject,
-      visualStrategy: 'asset_first',
       services: injectedServices,
     });
     assert.strictEqual(report.success, true, 'warnings 不得影响 success');
@@ -883,15 +845,15 @@ const qa = require('../server/services/creative-video/visualQaService');
     assert.ok(codes.has('asset_first_asset_missing'), `缺失素材应映射为 warning，实际：${[...codes].join(',')}`);
     assert.ok(codes.has('asset_first_overlay_caption_overlap'), `overlay 越界应映射为 warning，实际：${[...codes].join(',')}`);
     assert.ok(codes.has('asset_first_low_information'), `无图低密度 beat 应映射为 warning，实际：${[...codes].join(',')}`);
-    const hfReport = await qa.inspectRenderedVideo({
+    const safetyOnlyReport = await qa.inspectRenderedVideo({
       projectDir,
       outputPath,
       project: assetFirstProject,
-      visualStrategy: 'hf_first',
+      safetyOnly: true,
       services: injectedServices,
     });
-    assert.strictEqual(hfReport.success, true);
-    assert.strictEqual(hfReport.warnings, undefined, 'hf_first 报告不得出现 warnings 字段（硬约束 A）');
+    assert.strictEqual(safetyOnlyReport.success, true);
+    assert.strictEqual(safetyOnlyReport.warnings, undefined, 'safetyOnly 报告不得出现 warnings 字段（硬约束 A）');
   }
   // Finding 2（P2）：style observation 固定预留预算 + boundary 预算按全局唯一时间点计数
   // 探针 1：30×5s 同 scene 帧（150s）——旧逻辑 boundaryGroups 23/29 截断、observation 只到 37.5s，
@@ -1000,7 +962,6 @@ const qa = require('../server/services/creative-video/visualQaService');
       projectDir,
       outputPath,
       project,
-      visualStrategy: 'asset_first',
       services: {
         probeVideo: async () => ({ width: 1080, height: 1920, duration: 100 }),
         sampleFrames: async (request) => (request.times || []).map((time, index) => ({

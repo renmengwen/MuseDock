@@ -242,8 +242,8 @@ function analyzeFrameMetrics({ frames = [], contact_sheet_size = 0 } = {}) {
 // MAX_TIMED_SAMPLES 封顶（典型 17 边界 ×5 点 + 开头 3 点 = 88 < 120，不会超）。
 // review P2-3(c)：scene_html 单 frame 的内部 beat 边界（frame.metadata.beat_windows 相接处）
 // 仅在显式 pairedSampling 时按 same_scene=true 边界产出采样组（boundary_sec = frame 起点 +
-// window.end_sec，排除最后一个 window 末尾）；缺省不产出（硬约束 A，hf_first 无 beat_windows 天然不受影响）。
-// 缺省（hf_first/safetyOnly）采样时间逐值与原实现一致（硬约束 A）。
+// window.end_sec，排除最后一个 window 末尾）；缺省不产出（硬约束 A，无 beat_windows 的旧工程天然不受影响）。
+// 缺省（safetyOnly）采样时间逐值与原实现一致（硬约束 A）。
 function projectBoundarySampleGroups(project = {}, duration = 0, { pairedSampling = false } = {}) {
   const frames = Array.isArray(project?.frames) ? project.frames : [];
   const groups = [];
@@ -389,7 +389,7 @@ function buildTimedSamplePlan({ project = {}, videoInfo = {}, pairedBoundarySamp
   // 边界/opening 点不足以覆盖全片时（如 60s 单 scene 单 beat 无边界组），按 duration/8
   // 间隔补最多 7 个均匀点，跳过与既有采样点 <0.5s 重叠的；预算 = OBSERVATION_RESERVE
   // 固定预留 + boundary 组没用完的余量（总量仍受 MAX_TIMED_SAMPLES 封顶）。这些点进入抽帧计划（自带 mean_rgb），流入 style_drift 观测合并输入。
-  // 缺省 / hf_first / safetyOnly 不加（行为不变，硬约束 A）。
+  // 缺省 / safetyOnly 不加（行为不变，硬约束 A）。
   const observation = [];
   // probe duration 无效时用 project.frames 总时长兜底；opening、boundary 与
   // observation 共用上方的有效时长，避免不同采样通道口径分裂。
@@ -783,7 +783,6 @@ async function inspectRenderedVideo({
   expectedAspectRatio = '',
   expected_aspect_ratio = '',
   safetyOnly = false,
-  visualStrategy = null,
   services = {},
 } = {}) {
   const videoPath = outputPath || (projectDir ? path.join(projectDir, 'output.mp4') : '');
@@ -801,9 +800,9 @@ async function inspectRenderedVideo({
   const videoInfo = services.probeVideo
     ? await services.probeVideo({ projectDir, outputPath: videoPath, videoPath })
     : await probeVideo({ videoPath, runCommand });
-  // asset_first 且非 safetyOnly 才启用成对边界采样与 warnings 通道；
-  // hf_first / safetyOnly 的采样与报告结构保持现状（硬约束 A）。
-  const assetFirstQa = visualStrategy === 'asset_first' && safetyOnly !== true;
+  // 非 safetyOnly 才启用成对边界采样与 warnings 通道；
+  // safetyOnly 的采样与报告结构保持现状（硬约束 A）。
+  const assetFirstQa = safetyOnly !== true;
   const timedPlan = buildTimedSamplePlan({ project, videoInfo, pairedBoundarySampling: assetFirstQa });
   if (services.sampleFrames) {
     // times：生产采样计划（P2-4 起含全片均匀观测点），注入实现可按需取用
@@ -905,35 +904,6 @@ async function inspectRenderedVideo({
   });
 }
 
-const TITLE_TEMPLATES = new Set(['frame-glitch-title', 'frame-build-minimal']);
-
-// 归零语义（决策 3）：asset_first 下任何 template_inputs 决策都是 takeover，无占比阈值。
-function analyzeAssetFirstRouting(decisions = [], { visualStrategy = null } = {}) {
-  if (visualStrategy !== 'asset_first') return [];
-  const warnings = [];
-  const list = Array.isArray(decisions) ? decisions : [];
-  if (!list.length) return warnings;
-  const takeovers = list.filter(d => d.source_mode === 'template_inputs');
-  if (takeovers.length) {
-    warnings.push({
-      code: 'asset_first_template_takeover',
-      severity: 'warning',
-      message: `asset_first 下出现 ${takeovers.length} 条整帧模板决策（应为 0，见决策 3 归零语义）。`,
-      details: { beats: takeovers.map(d => ({ beat_id: d.beat_id, template_id: d.template_id })) },
-    });
-  }
-  const titles = list.filter(d => TITLE_TEMPLATES.has(d.template_id));
-  if (titles.length) {
-    warnings.push({
-      code: 'asset_first_title_template_used',
-      severity: 'warning',
-      message: 'asset_first 下出现标题类整帧模板主路由。',
-      details: { beats: titles.map(d => ({ beat_id: d.beat_id, template_id: d.template_id })) },
-    });
-  }
-  return warnings;
-}
-
 // 差分用真实指标字段（readRgbFrameMetrics 产出）：average_luma 与 edge_score 均为 0-255 标度
 //（edge_score = 相邻像素亮度差平均，累计的是 0-255 亮度差），两分量统一 /255 归一到 0-1
 // 后共用 diffThreshold，避免 edge 原始梯度微小变化（量级几十）单独触发（P2-5）。
@@ -943,8 +913,7 @@ function boundaryDiffScore(before = {}, after = {}) {
   return Math.max(luma, edges);
 }
 
-function analyzeAssetFirstBoundaries(boundaryGroups = [], { visualStrategy = null, diffThreshold = 0.25 } = {}) {
-  if (visualStrategy !== 'asset_first') return [];
+function analyzeAssetFirstBoundaries(boundaryGroups = [], { diffThreshold = 0.25 } = {}) {
   const warnings = [];
   const hasFiniteMetrics = frame => (
     Number.isFinite(Number(frame?.average_luma)) && Number.isFinite(Number(frame?.edge_score))
@@ -967,8 +936,7 @@ function analyzeAssetFirstBoundaries(boundaryGroups = [], { visualStrategy = nul
   return warnings;
 }
 
-function analyzeAssetFirstCaptionRegion(frames = [], { visualStrategy = null, minVariance = 0.01 } = {}) {
-  if (visualStrategy !== 'asset_first') return [];
+function analyzeAssetFirstCaptionRegion(frames = [], { minVariance = 0.01 } = {}) {
   const warnings = [];
   for (const frame of Array.isArray(frames) ? frames : []) {
     if (frame.caption_active !== true) continue;
@@ -989,8 +957,7 @@ function analyzeAssetFirstCaptionRegion(frames = [], { visualStrategy = null, mi
 // review P2-3(b)：scene_html 回落展开把整 scene 统计复制到组内每个 beat（stats_scope:'scene'），
 // 该类条目按 scene 去重只报一条、message 说明是 scene 级聚合观察，避免被 scene 总数掩盖/重复。
 // TODO(P2-3b)：真正的逐 beat 密度分析需要渲染期分 beat 截帧统计，本轮不做。
-function analyzeAssetFirstInformation(beatsInfo = [], { visualStrategy = null, minElements = 3 } = {}) {
-  if (visualStrategy !== 'asset_first') return [];
+function analyzeAssetFirstInformation(beatsInfo = [], { minElements = 3 } = {}) {
   const warnings = [];
   const seenScenes = new Set();
   for (const beat of Array.isArray(beatsInfo) ? beatsInfo : []) {
@@ -1024,8 +991,7 @@ function analyzeAssetFirstInformation(beatsInfo = [], { visualStrategy = null, m
 // 风格漂移：相邻帧平均色任一通道突变超过阈值 => 单条 warning（取全片最大突变点）。
 // sceneCutTimes（跨 scene 边界秒列表）给出时，横跨任一边界 ±0.35s 的帧对跳过——
 // 跨 scene 硬切是合法设计，style_drift 语义是同场景内漂移/整体断裂（P2-4）。
-function analyzeAssetFirstStyleDrift(frames = [], { visualStrategy = null, maxMeanShift = 96, sceneCutTimes = [] } = {}) {
-  if (visualStrategy !== 'asset_first') return [];
+function analyzeAssetFirstStyleDrift(frames = [], { maxMeanShift = 96, sceneCutTimes = [] } = {}) {
   const cuts = (Array.isArray(sceneCutTimes) ? sceneCutTimes : [])
     .map(Number)
     .filter(Number.isFinite);
@@ -1101,8 +1067,7 @@ function mergeStyleDriftObservationFrames(sequentialFrames = [], timedFrames = [
 // review P2-6：生产端 expected_in_frames 实际写的是 scene_id（htmlVideoWorkflow 的 asset usage
 // 报告按 sceneId 收集），首个值按真实语义放 details.scene_id，beat_id 不再伪装（恒 null）；
 // 定向重试由 repairActionForQaIssue 按 scene_id 查该 scene 的全部 beat。拿不到时置 null，不伪造。
-function mapAssetUsageToQaWarnings(report = {}, { visualStrategy = null } = {}) {
-  if (visualStrategy !== 'asset_first') return [];
+function mapAssetUsageToQaWarnings(report = {}) {
   const missing = Array.isArray(report?.missing_required_asset_ids)
     ? report.missing_required_asset_ids.filter(Boolean)
     : [];
@@ -1130,8 +1095,7 @@ function mapAssetUsageToQaWarnings(report = {}, { visualStrategy = null } = {}) 
 // overlay 校验：透传 render_decisions[].overlay_check 的字幕安全区违规与人工复核项。
 // scene_html 回落展开会把整场景 stats 复制到组内每个 beat（stats_scope:'scene' 标记，
 // 见 mergeFrameStatsIntoDecisions），该类决策按 scene_id+reason_code 去重只报一条，避免 N 倍重复。
-function mapOverlayChecksToQaWarnings(decisions = [], { visualStrategy = null } = {}) {
-  if (visualStrategy !== 'asset_first') return [];
+function mapOverlayChecksToQaWarnings(decisions = []) {
   const warnings = [];
   const seenSceneScoped = new Set();
   for (const decision of Array.isArray(decisions) ? decisions : []) {
@@ -1244,32 +1208,28 @@ function captionRegionFramesFromSamples(frames = [], voiceWindows = []) {
 // 整体 try/catch：观测通道绝不阻断巡检——任何汇总异常时放弃 warnings，原 result 原样返回。
 function collectAssetFirstWarnings({ project = {}, timedPlan = {}, timedFrames = [], sequentialFrames = [] } = {}) {
   try {
-    const options = { visualStrategy: 'asset_first' };
     const decisions = Array.isArray(project.render_decisions) ? project.render_decisions : [];
     const voiceWindows = buildVoiceWindowsFromProject(project);
     return [
-      ...analyzeAssetFirstRouting(decisions, options),
       ...analyzeAssetFirstBoundaries(
         assembleBoundaryGroupsForDiff(timedPlan.boundaryGroups || [], timedFrames),
-        options,
       ),
-      ...analyzeAssetFirstCaptionRegion(captionRegionFramesFromSamples(timedFrames, voiceWindows), options),
-      ...analyzeAssetFirstInformation(beatsInfoFromRenderDecisions(decisions), options),
+      ...analyzeAssetFirstCaptionRegion(captionRegionFramesFromSamples(timedFrames, voiceWindows)),
+      ...analyzeAssetFirstInformation(beatsInfoFromRenderDecisions(decisions)),
       // style_drift 输入 = 顺序帧 ∪ timed 采样帧（覆盖全片），跨 scene 边界 ±0.35s 的帧对跳过；
       // Finding 3：豁免边界来自 project.frames 完整推导（sceneCutTimesFromProject），
       // 不再从可能被预算截断的 timedPlan.boundaryGroups 过滤，避免合法硬切被误报 drift
       ...analyzeAssetFirstStyleDrift(
         mergeStyleDriftObservationFrames(sequentialFrames, timedFrames),
         {
-          ...options,
           sceneCutTimes: sceneCutTimesFromProject(project),
         },
       ),
-      ...mapAssetUsageToQaWarnings(project.asset_usage_report || {}, options),
-      ...mapOverlayChecksToQaWarnings(decisions, options),
+      ...mapAssetUsageToQaWarnings(project.asset_usage_report || {}),
+      ...mapOverlayChecksToQaWarnings(decisions),
     ];
   } catch (error) {
-    console.warn(`asset_first 视觉观测通道汇总失败，已跳过 warnings：${error?.message || error}`);
+    console.warn(`视觉观测通道汇总失败，已跳过 warnings：${error?.message || error}`);
     return [];
   }
 }
@@ -1289,7 +1249,6 @@ module.exports = {
   sceneCutTimesFromProject,
   buildTimedSamplePlan,
   probeVideo,
-  analyzeAssetFirstRouting,
   analyzeAssetFirstBoundaries,
   analyzeAssetFirstCaptionRegion,
   analyzeAssetFirstInformation,

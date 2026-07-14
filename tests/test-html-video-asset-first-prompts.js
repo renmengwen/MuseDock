@@ -8,14 +8,6 @@ const frameHtmlAgent = require('../server/services/creative-video/html-video/fra
 const sceneSpec = { title: 't', scenes: [{ id: 'scene_01', narration_text: '深夜骑手' }] };
 
 async function run() {
-  const hfPrompt = buildContentGraphPrompt({
-    sceneSpec,
-    creativeContext: { visual_strategy: 'hf_first' },
-    target: {},
-  });
-  assert.ok(!hfPrompt.includes('素材主导'));
-  assert.ok(hfPrompt.includes('usage'));
-
   const generatedAsset = {
     id: 'gen_scene_01',
     source: 'generated',
@@ -24,20 +16,11 @@ async function run() {
     alt: '深夜骑手主视觉',
     generation: { scene_id: 'scene_01' },
   };
-  const hfWithGenPrompt = buildContentGraphPrompt({
-    sceneSpec,
-    creativeContext: { visual_strategy: 'hf_first', asset_context: { assets: [generatedAsset] } },
-    target: {},
-  });
-  assert.ok(hfWithGenPrompt.includes('gen_scene_01'));
-  assert.ok(hfWithGenPrompt.includes('不强制'));
-  assert.ok(hfWithGenPrompt.includes('不是来源证据'));
-  assert.ok(!hfWithGenPrompt.includes('素材主导'));
 
   const assetPrompt = buildContentGraphPrompt({
     sceneSpec,
-    creativeContext: { visual_strategy: 'asset_first', asset_context: { assets: [generatedAsset] } },
-    target: { visual_strategy: 'asset_first' },
+    creativeContext: { asset_context: { assets: [generatedAsset] } },
+    target: {},
   });
   assert.ok(assetPrompt.includes('素材主导'));
   assert.ok(assetPrompt.includes('subject'));
@@ -62,16 +45,16 @@ async function run() {
   ];
   const truncatedPrompt = buildContentGraphPrompt({
     sceneSpec,
-    creativeContext: { visual_strategy: 'asset_first', asset_context: { assets: manyAssets } },
-    target: { visual_strategy: 'asset_first' },
+    creativeContext: { asset_context: { assets: manyAssets } },
+    target: {},
   });
   ['gen_scene_01', 'gen_scene_02', 'gen_scene_03', 'gen_scene_04', 'article_01', 'article_02', 'article_03', 'article_04']
     .forEach(id => assert.ok(truncatedPrompt.includes(id), `${id} 应出现在 prompt 中`));
 
   const graphRetryPrompt = buildGraphRetryPrompt({
     sceneSpec,
-    creativeContext: { visual_strategy: 'asset_first', asset_context: { assets: [generatedAsset] } },
-    target: { visual_strategy: 'asset_first' },
+    creativeContext: { asset_context: { assets: [generatedAsset] } },
+    target: {},
     attempt: 1,
   });
   assert.ok(graphRetryPrompt.includes('gen_scene_01'));
@@ -84,7 +67,6 @@ async function run() {
     asset_refs: [{ asset_id: 'gen_scene_01', usage: 'subject', reason: '主视觉' }],
   };
   const assetFirstContext = {
-    visual_strategy: 'asset_first',
     asset_context: { assets: [generatedAsset] },
   };
   const framePrompt = frameHtmlAgent.buildFrameHtmlPrompt({
@@ -98,14 +80,6 @@ async function run() {
   assert.ok(framePrompt.includes('生成图片'));
   assert.ok(framePrompt.includes('不是来源证据'));
   assert.ok(!framePrompt.includes('本帧推荐来源图片：'));
-
-  const hfGenPrompt = frameHtmlAgent.buildFrameHtmlPrompt({
-    node: frameNode,
-    creativeContext: { ...assetFirstContext, visual_strategy: 'hf_first' },
-    sceneSpec,
-  });
-  assert.ok(!hfGenPrompt.includes('素材主导'));
-  assert.ok(hfGenPrompt.includes('生成图片'));
 
   const shortPrompt = frameHtmlAgent.buildShortFrameHtmlPrompt({
     node: frameNode,
@@ -150,8 +124,8 @@ async function run() {
     assert.ok(/diagram|结构化/.test(prompt), '无图 beat 必须要求生成统一 diagram');
     assert.ok(/禁止.*标题页/.test(prompt));
   }
-  // 硬约束 A 回归：hf_first 的 prompt 构造输出不含 motion primitive 词汇
-  assert.ok(!hfGenPrompt.includes('data-mp-overlay'), 'hf_first prompt 不得包含 motion primitive 片段词汇');
+  // 无 beat 编排参数时，帧 prompt 不含 motion primitive 片段词汇
+  assert.ok(!framePrompt.includes('data-mp-overlay'), '无 beat 编排时 prompt 不得包含 motion primitive 片段词汇');
   console.log('asset-first prompt motion overlay tests passed');
 
   // ===== P2-8 硬约束 A：metadata 内部编排字段不得进入 Frame HTML prompt =====
@@ -166,19 +140,19 @@ async function run() {
         beat_windows: [{ id: 'scene_01_b1', start_sec: 0, end_sec: 2 }],
       },
     };
-    const hfPollutedPrompt = frameHtmlAgent.buildFrameHtmlPrompt({
+    const pollutedPrompt = frameHtmlAgent.buildFrameHtmlPrompt({
       node: pollutedNode,
-      creativeContext: { visual_strategy: 'hf_first' },
+      creativeContext: {},
       sceneSpec,
     });
-    assert.ok(!hfPollutedPrompt.includes('visual_beat'), 'hf_first prompt 不得包含 metadata.visual_beat/visual_beats');
-    assert.ok(!hfPollutedPrompt.includes('beat_windows'), 'hf_first prompt 不得包含 metadata.beat_windows');
-    assert.ok(!hfPollutedPrompt.includes('key_marker'), 'hf_first prompt 不得泄漏 motion overlay 编排细节');
-    assert.ok(hfPollutedPrompt.includes('source_headline'), '剥离编排字段后其余 metadata 应保留');
+    assert.ok(!pollutedPrompt.includes('visual_beat'), 'prompt 不得包含 metadata.visual_beat/visual_beats');
+    assert.ok(!pollutedPrompt.includes('beat_windows'), 'prompt 不得包含 metadata.beat_windows');
+    assert.ok(!pollutedPrompt.includes('key_marker'), 'prompt 不得泄漏 motion overlay 编排细节');
+    assert.ok(pollutedPrompt.includes('source_headline'), '剥离编排字段后其余 metadata 应保留');
 
     const shortPolluted = frameHtmlAgent.buildShortFrameHtmlPrompt({
       node: pollutedNode,
-      creativeContext: { visual_strategy: 'hf_first' },
+      creativeContext: {},
       sceneSpec,
     });
     assert.ok(!shortPolluted.includes('visual_beat'), '短 prompt 同样不得包含 visual_beat');
@@ -206,7 +180,7 @@ async function run() {
   {
     const prompt = frameHtmlAgent.buildFrameHtmlPrompt({
       node: frameNode,
-      creativeContext: { visual_strategy: 'asset_first' },
+      creativeContext: {},
       sceneSpec,
       target: { aspect_ratio: '9:16' },
       styleProfile: { id: 'sp1', palette: ['#111', '#eee', '#f50'] },

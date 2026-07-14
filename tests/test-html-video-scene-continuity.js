@@ -17,7 +17,7 @@ const { ensureMotionOverlay } = require('../server/services/creative-video/html-
     },
   };
   const html = '<html><head></head><body><div class="hero">base</div></body></html>';
-  const result = ensureMotionOverlay(html, beat, { visualStrategy: 'asset_first' });
+  const result = ensureMotionOverlay(html, beat);
   assert.strictEqual(result.injected, true);
   assert.ok(result.html.includes('data-mp-overlay="key_marker"'));
   assert.ok(result.html.includes('UX 的整体视角'), 'slot 必须填 beat 的 headline');
@@ -30,21 +30,14 @@ const { ensureMotionOverlay } = require('../server/services/creative-video/html-
     visual_text: { headline: 'A < B & C' },
     motion_overlay: { preset: 'key_marker', placement: 'lower_third', max_items: 1, avoid_caption_bottom_px: 140 },
   };
-  const result = ensureMotionOverlay('<html><body></body></html>', beat, { visualStrategy: 'asset_first' });
+  const result = ensureMotionOverlay('<html><body></body></html>', beat);
   assert.ok(result.html.includes('A &lt; B &amp; C'), 'slot 文案必须经 htmlEscape');
   assert.ok(!result.html.includes('A < B & C'), '未转义原文不得出现在 HTML 中');
 }
 // 已有 overlay：原样返回
 {
   const html = '<html><body><div data-mp-overlay="concept_card"></div></body></html>';
-  const result = ensureMotionOverlay(html, { motion_overlay: { preset: 'concept_card' } }, { visualStrategy: 'asset_first' });
-  assert.strictEqual(result.injected, false);
-  assert.strictEqual(result.html, html);
-}
-// 硬约束 A：hf_first 不注入
-{
-  const html = '<html><body></body></html>';
-  const result = ensureMotionOverlay(html, { motion_overlay: { preset: 'key_marker' } }, { visualStrategy: 'hf_first' });
+  const result = ensureMotionOverlay(html, { motion_overlay: { preset: 'concept_card' } });
   assert.strictEqual(result.injected, false);
   assert.strictEqual(result.html, html);
 }
@@ -57,15 +50,15 @@ const { ensureMotionOverlay } = require('../server/services/creative-video/html-
   };
   // 仅 <style> 内出现 data-mp-overlay 选择器：无真实节点，必须注入
   const styleOnly = '<html><head><style>[data-mp-overlay]{opacity:0}</style></head><body><div class="hero">base</div></body></html>';
-  const styleResult = ensureMotionOverlay(styleOnly, beat, { visualStrategy: 'asset_first' });
+  const styleResult = ensureMotionOverlay(styleOnly, beat);
   assert.strictEqual(styleResult.injected, true, 'CSS 选择器不算真实 overlay 节点，必须注入兜底');
   // 仅注释里出现：同样必须注入
   const commentOnly = '<html><body><!-- data-mp-overlay 由系统兜底 --><div class="hero">base</div></body></html>';
-  const commentResult = ensureMotionOverlay(commentOnly, beat, { visualStrategy: 'asset_first' });
+  const commentResult = ensureMotionOverlay(commentOnly, beat);
   assert.strictEqual(commentResult.injected, true, '注释里出现不算真实 overlay 节点，必须注入兜底');
   // 真实节点存在：原样返回
   const real = '<html><body><div data-mp-overlay="key_marker">重点</div></body></html>';
-  const realResult = ensureMotionOverlay(real, beat, { visualStrategy: 'asset_first' });
+  const realResult = ensureMotionOverlay(real, beat);
   assert.strictEqual(realResult.injected, false);
   assert.strictEqual(realResult.html, real);
 }
@@ -77,7 +70,7 @@ const { ensureMotionOverlay } = require('../server/services/creative-video/html-
     motion_overlay: { preset: 'key_marker', placement: 'lower_third', max_items: 1, avoid_caption_bottom_px: 140 },
   };
   const probe = '<html><body><div class="hero">base</div><!-- fallback: <div data-mp-overlay="key_marker">重点</div></body></html>';
-  const result = ensureMotionOverlay(probe, beat, { visualStrategy: 'asset_first' });
+  const result = ensureMotionOverlay(probe, beat);
   assert.strictEqual(result.injected, true, '未闭合注释内的伪 overlay 不算真实节点，必须注入兜底');
 }
 // P2-5：其他属性值中的 " data-mp-overlay " 子串不算真实 overlay，必须注入兜底
@@ -88,7 +81,7 @@ const { ensureMotionOverlay } = require('../server/services/creative-video/html-
     motion_overlay: { preset: 'key_marker', placement: 'lower_third', max_items: 1, avoid_caption_bottom_px: 140 },
   };
   const probe = '<html><body><div title=" data-mp-overlay ">base</div></body></html>';
-  const result = ensureMotionOverlay(probe, beat, { visualStrategy: 'asset_first' });
+  const result = ensureMotionOverlay(probe, beat);
   assert.strictEqual(result.injected, true, 'title 属性值内的子串不算真实 overlay，必须注入兜底');
 }
 console.log('ensure motion overlay tests passed');
@@ -98,10 +91,10 @@ const { assetFirstOverlayIssues, sceneBeatScopeIssues } = require('../server/ser
 {
   // style-only HTML：无真实 overlay 节点，不得产生 overlay issue（含误报 overlay_root_missing）
   const styleOnly = '<html><head><style>[data-mp-overlay]{opacity:0}</style></head><body></body></html>';
-  assert.deepStrictEqual(assetFirstOverlayIssues(styleOnly, { visualStrategy: 'asset_first' }), []);
+  assert.deepStrictEqual(assetFirstOverlayIssues(styleOnly), []);
   // 真实越界 overlay：仍要报
   const bad = '<html><body><div data-mp-overlay="key_marker" style="position:absolute;bottom:0;height:200px"></div></body></html>';
-  const issues = assetFirstOverlayIssues(bad, { visualStrategy: 'asset_first', frameHeight: 1920 });
+  const issues = assetFirstOverlayIssues(bad, { frameHeight: 1920 });
   assert.strictEqual(issues.length, 1);
   assert.strictEqual(issues[0].code, 'overlay_in_caption_safe_area');
 }
@@ -152,7 +145,7 @@ const { bucketJobsByContinuityGroup } = require('../server/services/creative-vid
     { index: 1, node: { metadata: { visual_beat: { id: 's2_b1', continuity: { group_id: 'scene_02', beat_index: 1 } } } } },
     { index: 2, node: { metadata: { visual_beat: { id: 's2_b2', continuity: { group_id: 'scene_02', beat_index: 2 } } } } },
     { index: 3, node: { metadata: { visual_beat: { id: 's3_b1', continuity: { group_id: 'scene_03', beat_index: 1 } } } } },
-    { index: 4, node: { metadata: {} } }, // 无组：独立桶（hf_first 形态回归）
+    { index: 4, node: { metadata: {} } }, // 无组：独立桶（无 continuity 元数据的节点形态回归）
   ];
   const buckets = bucketJobsByContinuityGroup(jobs);
   assert.strictEqual(buckets.length, 3);

@@ -184,22 +184,21 @@ function fullSceneCaption(sceneId, text, duration) {
     projectOrchestrator.renderHtmlVideoProject = originalRenderForNoAudio;
   }
 
-  // ===== 决策2：visual_strategy 顶层持久化 + schema roundtrip =====
+  // ===== 决策2：continuity_mode 顶层持久化 + schema roundtrip =====
   const { normalizeProject } = require('../server/services/creative-video/html-video/projectSchema');
 
-  // (1) normalizeProject 白名单必须保留新顶层字段
+  // (1) normalizeProject 白名单必须保留 continuity_mode 且裁掉已删除的 visual_strategy
   {
     const normalized = normalizeProject({
       project_id: 'p1',
       visual_strategy: 'asset_first',
       continuity_mode: 'scene_html',
     });
-    assert.strictEqual(normalized.visual_strategy, 'asset_first',
-      'normalizeProject 不得裁掉 visual_strategy——二次渲染/质检掉策略的最大隐患');
+    assert.strictEqual('visual_strategy' in normalized, false,
+      'visual_strategy 概念已删除，normalizeProject 不得保留该字段');
     assert.strictEqual(normalized.continuity_mode, 'scene_html');
-    // 缺省值：未设置时不得凭空变成 asset_first
+    // 缺省值：未设置时 continuity_mode 默认 beat_mp4
     const empty = normalizeProject({ project_id: 'p2' });
-    assert.strictEqual(empty.visual_strategy, null);
     assert.strictEqual(empty.continuity_mode, 'beat_mp4');
   }
 
@@ -207,18 +206,17 @@ function fullSceneCaption(sceneId, text, duration) {
   {
     const roundtripDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hv-strategy-roundtrip-'));
     const savedRoundtrip = await projectStore.saveProject(roundtripDir, normalizeProject({
-      project_id: 'p3', visual_strategy: 'asset_first', continuity_mode: 'beat_mp4',
+      project_id: 'p3', continuity_mode: 'scene_html',
     }));
-    assert.strictEqual(savedRoundtrip.visual_strategy, 'asset_first');
+    assert.strictEqual(savedRoundtrip.continuity_mode, 'scene_html');
     const loadedRoundtrip = await projectStore.loadProject(roundtripDir);
-    assert.strictEqual(loadedRoundtrip.visual_strategy, 'asset_first', 'load 后字段必须原样保留');
-    assert.strictEqual(loadedRoundtrip.continuity_mode, 'beat_mp4');
+    assert.strictEqual(loadedRoundtrip.continuity_mode, 'scene_html', 'load 后字段必须原样保留');
     await fs.rm(roundtripDir, { recursive: true, force: true });
   }
-  // (3) workflow 端到端的 asset_first 持久化由下方 scene_html 用例覆盖
-  // （sceneHtmlProject.visual_strategy === 'asset_first'）。
+  // (3) workflow 端到端的 continuity_mode 持久化由下方 scene_html 用例覆盖
+  // （sceneHtmlProject.continuity_mode === 'scene_html'）。
 
-  // ===== Task 4.3：scene_html 端到端（asset_first + continuity_mode=scene_html）=====
+  // ===== Task 4.3：scene_html 端到端（continuity_mode=scene_html）=====
   // R1/R2：帧按 scene 归并（id = scene:<scene_id>）、frameHtmlPhase 回写 html_path、
   // frame_html/render checkpoint 全部按 scene:<id> 键控。
   {
@@ -253,7 +251,6 @@ function fullSceneCaption(sceneId, text, duration) {
       sceneSpec: sceneHtmlSpec,
       creativeContext: {
         input: { raw_text: 'scene_html 连续性' },
-        visual_strategy: 'asset_first',
         continuity_mode: 'scene_html',
       },
       target: { generateAudio: false, generateCaptions: true },
@@ -329,7 +326,6 @@ function fullSceneCaption(sceneId, text, duration) {
     const sceneHtmlProject = JSON.parse(
       await fs.readFile(path.join(sceneHtmlResult.html_video_project_path, 'project.json'), 'utf8'),
     );
-    assert.equal(sceneHtmlProject.visual_strategy, 'asset_first');
     assert.equal(sceneHtmlProject.continuity_mode, 'scene_html');
     assert.equal(sceneHtmlProject.frames.length, 2, '两个 scene 应归并成两帧（不按 beat 展开）');
     // R1/R2 端到端：最终 project.json 的 scene frame 必须有非空 html_path 且 checkpoint 同键
@@ -366,13 +362,13 @@ function fullSceneCaption(sceneId, text, duration) {
       `render checkpoint 完成条目必须按 scene:<id> 键控（R2）：${JSON.stringify(Object.keys(sceneHtmlStages.render?.frames || {}))}`);
 
     // ===== Task 7.2：QA warnings 通道双向断言 =====
-    // 正向：asset_first 工程只有 warnings（无 blocking issue）时，success 不变、不触发 visual_qa_warning 诊断
-    assert.strictEqual(sceneHtmlQaInput.visualStrategy, 'asset_first',
-      'workflow 必须把 visual_strategy 透传给 inspectRenderedVideo');
+    // 正向：工程只有 warnings（无 blocking issue）时，success 不变、不触发 visual_qa_warning 诊断
+    assert.strictEqual('visualStrategy' in sceneHtmlQaInput, false,
+      '策略概念已删除，workflow 不得再向 inspectRenderedVideo 传 visualStrategy');
     assert.strictEqual(sceneHtmlResult.visual_report.success, true, 'warnings 不得改变 visual_report.success');
     assert.strictEqual(sceneHtmlResult.visual_report.warnings.length, 1, 'warnings 数组应原样透传到 visual_report');
     assert.ok(!sceneHtmlResult.html_video_diagnostics.some(d => d.code === 'visual_qa_warning'),
-      'asset_first warnings 不得触发 visual_qa_warning 诊断');
+      'warnings 不得触发 visual_qa_warning 诊断');
     assert.equal(sceneHtmlStages.visual_inspect.status, 'done', 'warnings 不得改变 visual_inspect checkpoint 状态');
     assert.equal(sceneHtmlStages.visual_inspect.diagnostic_code, '', 'warnings 不得写入 checkpoint 诊断码');
     // 反向（blocking issue 仍记 visual_qa_warning）原由死模式用例覆盖，随死模式下线，待 per_scene 用例补齐。

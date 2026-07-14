@@ -306,7 +306,7 @@ const stubAiImageModel = { isConfigured: async () => false };
       runId: 'run-per-scene-asset-first',
       rootDir: assetFirstRootDir,
       sceneSpec: workflowSceneSpec,
-      creativeContext: { input: { raw_text: '图片优先逐场景' }, visual_strategy: 'asset_first' },
+      creativeContext: { input: { raw_text: '图片优先逐场景' } },
       target: { generateAudio: false, generateCaptions: false },
       skipValidation: true,
       services: {
@@ -412,8 +412,8 @@ const stubAiImageModel = { isConfigured: async () => false };
     );
   }
 
-  // P1-A（决策2）：resume 二次执行不带 creativeContext.visual_strategy 时，
-  // 必须从落盘 project.json 回填策略，render_decisions 仍全是 raw_html + route_role。
+  // P1-A（决策2）：resume 二次执行（仅带 projectDir/workflowId/runId/sceneSpec 的重试入口），
+  // render_decisions 仍全是 raw_html + route_role。
   {
     projectOrchestrator.renderHtmlVideoProject = async ({ project: renderProject, projectDir: renderProjectDir }) => ({
       success: true,
@@ -431,7 +431,7 @@ const stubAiImageModel = { isConfigured: async () => false };
         runId: 'run-per-scene-asset-first',
         rootDir: assetFirstRootDir,
         sceneSpec: workflowSceneSpec,
-        // 关键：retry/resume 调用不带 visual_strategy，模拟只带 projectDir/workflowId/runId/sceneSpec 的重试入口
+        // 关键：retry/resume 调用只带 projectDir/workflowId/runId/sceneSpec，模拟真实重试入口
         creativeContext: { input: { raw_text: '图片优先逐场景' } },
         target: { generateAudio: false, generateCaptions: false },
         skipValidation: true,
@@ -486,22 +486,22 @@ const stubAiImageModel = { isConfigured: async () => false };
       message: resumeResult.message,
       diagnostics: resumeResult.html_video_diagnostics,
     }, null, 2));
-    assert.strictEqual(resumeResult.project.visual_strategy, 'asset_first',
-      'resume 后 project.visual_strategy 不得被 creativeContext 缺省值冲掉');
+    assert.strictEqual(resumeResult.project.continuity_mode, 'beat_mp4',
+      'resume 后 project.continuity_mode 不得被 creativeContext 缺省值冲掉');
     const resumeDecisions = resumeResult.project.render_decisions || [];
     assert.ok(resumeDecisions.length > 0, 'resume 应产生 render_decisions');
     for (const d of resumeDecisions) {
       assert.ok(
         typeof d.route_role === 'string' && d.route_role.length > 0,
-        `resume 后 asset_first 决策必须仍带 route_role（策略需从落盘 project 回填）：${JSON.stringify(d)}`,
+        `resume 后决策必须仍带 route_role：${JSON.stringify(d)}`,
       );
       assert.strictEqual(d.source_mode, 'raw_html',
-        `resume 后 asset_first 决策必须仍为 raw_html：${JSON.stringify(d)}`);
+        `resume 后决策必须仍为 raw_html：${JSON.stringify(d)}`);
     }
   }
 
-  // P1-1a：Frame HTML 阶段失败提前返回后，落盘 project.json 必须已带 visual_strategy，
-  // 否则真实 retry（不带 creativeContext 策略）会把 asset_first 工程降级成 hf_first。
+  // P1-1a：Frame HTML 阶段失败提前返回后，落盘 project.json 必须已带 continuity_mode，
+  // 否则真实 retry（不带 creativeContext）会丢失连续性模式选择。
   {
     const failRootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-per-scene-strategy-fail-'));
     let failResult;
@@ -514,7 +514,7 @@ const stubAiImageModel = { isConfigured: async () => false };
         runId: 'run-per-scene-strategy-fail',
         rootDir: failRootDir,
         sceneSpec: workflowSceneSpec,
-        creativeContext: { input: { raw_text: '图片优先建帧失败' }, visual_strategy: 'asset_first' },
+        creativeContext: { input: { raw_text: '图片优先建帧失败' } },
         target: { generateAudio: false, generateCaptions: false },
         skipValidation: true,
         services: {
@@ -556,9 +556,9 @@ const stubAiImageModel = { isConfigured: async () => false };
     const failProjectDir = failResult.html_video_project_path || failResult.project_dir;
     assert.ok(failProjectDir, '失败返回必须带工程目录');
     const failedProject = JSON.parse(await fs.readFile(path.join(failProjectDir, 'project.json'), 'utf8'));
-    assert.strictEqual(failedProject.visual_strategy, 'asset_first',
-      'P1-1a：frame html 失败提前返回后，落盘 project.visual_strategy 必须已是 asset_first');
-    console.log('per-scene strategy persisted before failure test passed');
+    assert.strictEqual(failedProject.continuity_mode, 'beat_mp4',
+      'P1-1a：frame html 失败提前返回后，落盘 project.continuity_mode 必须已写入');
+    console.log('per-scene continuity persisted before failure test passed');
   }
 
   // 绑定 helper：不改入参（保证 scene_spec_hash 稳定）、结果确定性、不重复写入

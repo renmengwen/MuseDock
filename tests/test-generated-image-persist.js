@@ -20,7 +20,7 @@ async function run() {
     runId: 'run-test',
     rootDir,
     sceneSpec,
-    creativeContext: { visual_strategy: 'asset_first', asset_context: { assets: [] } },
+    creativeContext: { asset_context: { assets: [] } },
     target: { aspect_ratio: '9:16' },
     skipValidation: true,
     services: {

@@ -12,8 +12,14 @@ assert.equal(project.project_id, 'project_001');
 assert.equal(project.workflow_id, 'workflow_001');
 assert.equal(project.run_id, 'run_001');
 assert.equal(project.schema_version, 1);
-assert.equal(project.template_id, null);
-assert.deepEqual(project.template_inputs, {});
+{
+  // roundtrip：策略/模板字段已从 schema 白名单删除，normalize 后不得残留
+  const roundtrip = schema.normalizeProject({ project_id: 'p1', visual_strategy: 'asset_first', template_id: 'x', template_inputs: { a: 1 } });
+  assert.strictEqual('visual_strategy' in roundtrip, false);
+  assert.strictEqual('template_id' in roundtrip, false);
+  assert.strictEqual('template_inputs' in roundtrip, false);
+  assert.strictEqual(roundtrip.continuity_mode, 'beat_mp4');
+}
 assert.deepEqual(project.content_graph, { schemaVersion: 1, intent: 'promo', synopsis: '', nodes: [], edges: [] });
 assert.deepEqual(project.output.resolution, { width: 1920, height: 1080 });
 assert.equal(project.output.fps, 30);
@@ -79,7 +85,7 @@ const outputProject = schema.normalizeProject({
 assert.deepEqual(outputProject.output.resolution, { width: 1080, height: 1920 });
 assert.equal(outputProject.output.fps, 24);
 assert.equal(outputProject.output.duration, 7);
-assert.equal(outputProject.template_schema.properties.headline.label, '标题');
+assert.strictEqual('template_schema' in outputProject, false);
 
 const audioHashProject = schema.normalizeProject({
   project_id: 'audio_hash_project',
@@ -328,7 +334,6 @@ const normalized = schema.normalizeProject({
       id: 'frame_01',
       scene_id: 'scene_01',
       order: 1,
-      template_id: 'basic',
       duration_sec: 4,
       captions: [{ text: '保留字幕' }],
       metadata: { visual_text: { headline: '保留元数据' } },

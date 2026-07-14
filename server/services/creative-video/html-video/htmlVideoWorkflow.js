@@ -240,9 +240,8 @@ function htmlHasTextKey(html, key) {
   return tags.some(tag => pattern.test(tag));
 }
 
-function attachVisualStrategy(project, creativeContext) {
+function attachContinuityMode(project, creativeContext) {
   if (!project) return project;
-  project.visual_strategy = creativeContext?.visual_strategy || project.visual_strategy || null;
   project.continuity_mode = creativeContext?.continuity_mode || project.continuity_mode || 'beat_mp4';
   return project;
 }
@@ -263,21 +262,16 @@ function resumeArtifactsMatch(project = {}, sceneSpec = null, template = {}, gen
   return Boolean(projectTemplateId && templateId && projectTemplateId === templateId);
 }
 
-function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target, resumeAllowed = true, inputFingerprint = '', visualStrategy = '' } = {}) {
+function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target, resumeAllowed = true, inputFingerprint = '' } = {}) {
   if (!resumeAllowed) return { reuse: false };
   const frame = objectOrEmpty(checkpointFrame);
   if (frame.status !== 'done' || !frame.html_path) return { reuse: false };
-  // P1-2：真实输入指纹判定——checkpoint 有指纹且与当前输入指纹不一致（策略/beat/素材/
-  // 主题/画幅/prompt 版本任一变化）时不复用；旧 checkpoint 无指纹时向后兼容：
-  // hf_first（及无策略语义的旧链路）维持现状复用，asset_first 属新链路，旧 HTML 必然是
-  // 旧链路产物，直接重新生成。
+  // P1-2：真实输入指纹判定——checkpoint 无指纹（旧链路产物）一律不复用；
+  // 有指纹但与当前输入指纹不一致（beat/素材/主题/画幅/prompt 版本任一变化）时不复用。
   const checkpointFingerprint = String(frame.input_fingerprint || '').trim();
   const currentFingerprint = String(inputFingerprint || '').trim();
-  if (checkpointFingerprint) {
-    if (currentFingerprint && checkpointFingerprint !== currentFingerprint) return { reuse: false };
-  } else if (visualStrategy === 'asset_first') {
-    return { reuse: false };
-  }
+  if (!checkpointFingerprint) return { reuse: false };
+  if (currentFingerprint && checkpointFingerprint !== currentFingerprint) return { reuse: false };
   let html;
   try {
     const absolutePath = projectStore.resolveProjectPath(projectDir, frame.html_path);
@@ -437,7 +431,7 @@ function mergeFrameStatsIntoDecisions({ visualDecisions, renderDecisions, statsB
 
 /**
  * 把已产出的生成图确定性地绑定到场景 asset_refs（返回克隆，不改入参）：
- * 仅用于路由输入（模板匹配/视觉计划），不回写原始 sceneSpec，
+ * 仅用于路由输入（视觉计划），不回写原始 sceneSpec，
  * 以免影响 scene_spec_hash 的重试复用判定。绑定按 asset id 排序保证确定性。
  */
 function bindGeneratedAssetsToSceneSpec(sceneSpec = {}, creativeContext = {}) {
@@ -1263,20 +1257,18 @@ async function generateHtmlVideo(options = {}) {
   if (!resumeProject) {
     projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
   }
-  // 决策2：resume 时以落盘 project 的策略为兜底，保证二次执行（retry/resume 不带 creativeContext 策略）
-  // 不掉 asset_first；creativeContext 显式值优先，hf_first 工程（落盘为 null）合并后仍为 null。
+  // 决策2：resume 时以落盘 project 的 continuity_mode 为兜底，保证二次执行
+  // （retry/resume 不带 creativeContext）不掉 scene_html；creativeContext 显式值优先。
   if (resumeProject) {
     creativeContext = {
       ...creativeContext,
-      visual_strategy: creativeContext?.visual_strategy || resumeProject.visual_strategy || null,
       continuity_mode: creativeContext?.continuity_mode || resumeProject.continuity_mode || null,
     };
   }
-  // P1-1a：在进入任何可失败阶段（生图/内容图/Frame HTML）之前先把策略落盘。
-  // 否则首次执行在建帧阶段失败提前返回时，落盘工程 visual_strategy 为 null，
-  // 真实 retry（不带 creativeContext 策略）会把 asset_first 工程降级成 hf_first。
-  // 后续 attachVisualStrategy 调用幂等，成功路径行为不变。
-  await projectStore.writeProjectJson(projectDir, current => attachVisualStrategy(current, creativeContext));
+  // P1-1a：在进入任何可失败阶段（生图/内容图/Frame HTML）之前先把 continuity_mode 落盘。
+  // 否则首次执行在建帧阶段失败提前返回时，真实 retry（不带 creativeContext）会丢失 scene_html 选择。
+  // 后续 attachContinuityMode 调用幂等，成功路径行为不变。
+  await projectStore.writeProjectJson(projectDir, current => attachContinuityMode(current, creativeContext));
   model = createAuditedModel(model, projectDir);
   // 尽早广播工程目录：任务运行中前端轮询依赖它水合生成图等工程内素材
   await report(onProgress, {
@@ -1384,7 +1376,6 @@ async function generateHtmlVideo(options = {}) {
   const routingSceneSpec = bindGeneratedAssetsToSceneSpec(sceneSpec, creativeContext);
   visualPlan = buildVisualPlan({ sceneSpec: routingSceneSpec, workflowId });
   assignMotionOrchestration(visualPlan, {
-    visualStrategy: creativeContext?.visual_strategy || null,
     styleProfile: visualPlan.style_profile || null,
   });
   visualDecisions = matchVisualBeatsToRenderers({ visualPlan });
@@ -1547,10 +1538,9 @@ async function generateHtmlVideo(options = {}) {
       return current;
     });
   }
-  // scene_html 分支只在 asset_first + scene_html 生效；此时 project.visual_strategy 尚未挂载
-  // （attachVisualStrategy 在建帧后才调用），用 creativeContext 判断等价条件。
-  contentGraph = (creativeContext?.visual_strategy === 'asset_first'
-    && (creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html')
+  // scene_html 分支只在 continuity_mode = scene_html 生效；此时 project.continuity_mode 尚未挂载
+  // （attachContinuityMode 在建帧后才调用），用 creativeContext 判断等价条件。
+  contentGraph = ((creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html')
     ? expandContentGraphToSceneEntries(contentGraph, visualPlan)
     : expandContentGraphToVisualBeats({ graph: contentGraph, visualPlan, visualDecisions });
   const expandedContentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
@@ -1613,14 +1603,13 @@ async function generateHtmlVideo(options = {}) {
       visualPlan,
       mediaOptions,
       generationCheckpoint: project?.generation_checkpoint,
-      // 与 attachVisualStrategy 同优先级（creativeContext 优先）：此时 project 尚未挂策略，
+      // 与 attachContinuityMode 同优先级（creativeContext 优先）：此时 project 尚未挂载，
       // 且 normalizeProject 会把 continuity_mode 缺省成 beat_mp4，不能反过来盖掉 creativeContext
       continuityMode: creativeContext?.continuity_mode || project?.continuity_mode || 'beat_mp4',
-      visualStrategy: creativeContext?.visual_strategy || project?.visual_strategy || null,
     });
     // buildMixedFrameProject 会重建 project，这里要重新挂上视觉计划与路由决策
     attachVisualRouting(project);
-    attachVisualStrategy(project, creativeContext);
+    attachContinuityMode(project, creativeContext);
     project.generation_checkpoint = objectOrEmpty(project.generation_checkpoint);
     project.generation_checkpoint.agent_pipeline = [
       { agent: AGENTS.contentGraph, stage: STAGES.contentGraph, artifact: 'content-graph.json' },
@@ -1649,8 +1638,8 @@ async function generateHtmlVideo(options = {}) {
     });
   }
   project = applyMediaOptionsToProject(project, mediaOptions);
-  // 首次 saveProject 之前统一挂上视觉策略
-  attachVisualStrategy(project, creativeContext);
+  // 首次 saveProject 之前统一挂上 continuity_mode
+  attachContinuityMode(project, creativeContext);
   const sourceProjectAssets = projectAssetsFromCreativeContext(creativeContext);
   if (sourceProjectAssets.length) {
     const byPath = new Map((Array.isArray(project.assets) ? project.assets : []).map(asset => [String(asset.path || ''), asset]));
@@ -1885,9 +1874,6 @@ async function generateHtmlVideo(options = {}) {
     project: rendered.project,
     expectedAspectRatio: templateRenderTarget.aspect_ratio || sceneSpec?.aspect_ratio,
     safetyOnly: skipValidation === true,
-    // asset_first 时 QA 侧启用 warnings 通道与成对边界采样；策略以落盘 project 为准，
-    // creativeContext 兜底（resume/retry 场景二者已在入口合并，见决策 2）
-    visualStrategy: rendered.project?.visual_strategy || creativeContext?.visual_strategy || null,
   });
   const visualReportPath = visualReport.report_path || visualReport.reportPath || 'inspect/visual-report.json';
   const visualIssues = Array.isArray(visualReport.issues) ? visualReport.issues : [];
@@ -1924,19 +1910,15 @@ async function generateHtmlVideo(options = {}) {
   });
   const missingRequiredAssets = missingRequiredAssetIds(rendered.project);
   if (missingRequiredAssets.length) {
-    // asset_first 是用户显式选择"素材必须进画面"，缺引用要阻断并触发帧重试；
-    // 其他策略维持 warning，避免历史任务批量翻车
-    const assetFirstBlocking = creativeContext?.visual_strategy === 'asset_first';
+    // 素材必须进画面：缺引用要阻断并触发帧重试
     diagnostics.push(createDiagnostic({
       code: 'required_visual_asset_missing',
       stage: 'project',
       sub_stage: 'asset_usage',
-      severity: assetFirstBlocking ? 'error' : 'warning',
+      severity: 'error',
       retryable: true,
       repair_action: 'retry_frame_html',
-      user_message: assetFirstBlocking
-        ? `有 ${missingRequiredAssets.length} 个必用视觉素材未进入最终画面，已停止导出，可重试重新生成对应镜头。`
-        : `有 ${missingRequiredAssets.length} 个必用视觉素材未进入最终画面，已记录为质量警告。`,
+      user_message: `有 ${missingRequiredAssets.length} 个必用视觉素材未进入最终画面，已停止导出，可重试重新生成对应镜头。`,
       details: {
         missing_required_asset_ids: missingRequiredAssets,
         required_asset_ids: rendered.project.asset_usage_report?.required_asset_ids || [],

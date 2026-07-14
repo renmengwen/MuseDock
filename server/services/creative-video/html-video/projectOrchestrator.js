@@ -770,10 +770,8 @@ async function composeHtmlVideoProject({
     const { events: sfxEvents, dropped: sfxDropped, avoidance_dropped: sfxAvoided = [] } = sfxEventService.resolveProjectSfxEventsForMux({
       project: nextProject,
       projectDir: resolvedProjectDir,
-      // 仅 asset_first 启用旁白避让；hf_first 不传 voiceWindows，混音输出与现状逐字节一致
-      voiceWindows: nextProject.visual_strategy === 'asset_first'
-        ? sfxEventService.buildVoiceWindowsFromProject(nextProject)
-        : [],
+      // 旁白避让：混音时传 voiceWindows，避免自动音效压过旁白
+      voiceWindows: sfxEventService.buildVoiceWindowsFromProject(nextProject),
     });
     if (sfxAvoided.length) {
       // 避让移除是预期行为而非素材故障，与 sfx_event_dropped 分开出诊断；

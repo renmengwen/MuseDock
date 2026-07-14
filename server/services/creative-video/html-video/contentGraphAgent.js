@@ -113,8 +113,6 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
   const language = target.language || target.lang || 'zh-CN';
   const isSourceUrl = creativeContext?.input?.mode === 'source_url'
     || creativeContext?.source_context?.kind === 'source_url';
-  const isAssetFirst = creativeContext?.visual_strategy === 'asset_first'
-    || target?.visual_strategy === 'asset_first';
   const sourceUrlGroundingRequirements = isSourceUrl ? [
     '- 如果源素材来自 source_url，SOURCE MATERIAL 是视频真正主题，不是装饰信息。',
     '- 每个节点都必须引用或改写来源材料里的具体事实、名字、数字、产品、项目能力、术语或主张。',
@@ -122,12 +120,12 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
     '- GitHub repo 只能基于 README、仓库描述、语言、目录结构和 topics，不要假装读过全量源码。',
     '- 如果 SOURCE MATERIAL 提供可用图片素材，内容图可以在适合的节点使用 showcase、图文卡、证据截图或对比说明；不适合当前叙事时不要硬塞图片，也不要把图片当作视频主题本身。',
   ] : [];
-  const assetFirstRequirements = isAssetFirst ? [
+  const assetFirstRequirements = [
     '- 当前为素材主导（asset_first）模式：图片/视频素材负责画面主体和质感，HTML 动画负责重点标注、拆解、强调和数据表达。',
     '- 优先级：article 来源图 > generated 生成图 > search/Pexels 图。来源图优先做证据和主体；generated 图片是为具体场景生成的主视觉，usage 应为 subject；search 图片只能做 background。',
     '- 每个具象叙事场景尽量绑定一张主视觉图片（usage=subject 或 evidence）；数据、流程、结构类场景可以不绑图片，由 HTML 动画做主体。',
     '- generated 图片的 generation.scene_id 标明了它为哪个场景生成，优先绑定到对应场景。',
-  ] : [];
+  ];
   return [
     '你是 html-video 的 content graph 规划器。请只输出严格 JSON，不要输出 Markdown、解释或额外文本。',
     '',
@@ -151,9 +149,7 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
     `- nodes 的 id 必须逐一严格等于 scene_spec.scenes 的 id：${expectedSceneIds.join(' -> ') || '（无）'}。`,
     '- 禁止新增、删除、合并、拆分或重排序 scene_spec.scenes。',
     '- 每个 node 必须包含 id、kind、label、durationSec，并且根据 kind 包含 text 或 data。',
-    isAssetFirst
-      ? '- 每个 node 可以输出 asset_refs，每帧最多 1 张，字段为 asset_id、usage、reason；usage 取值 subject|showcase|evidence|background。'
-      : '- 每个 node 可以输出 asset_refs，每帧最多 1 张，字段为 asset_id、usage、reason；只把 article 图片当来源证据；generated 生成图是为本片生成的可用素材，适合的场景可以绑定为配图或主视觉（不强制，HTML 动画仍是表达主体），但它不是来源证据；search/Pexels 只作补充。',
+    '- 每个 node 可以输出 asset_refs，每帧最多 1 张，字段为 asset_id、usage、reason；usage 取值 subject|showcase|evidence|background。',
     ...assetFirstRequirements,
     '- kind 只能是 text、data、entity；优先使用 text 和 data。',
     '- data node 的 data 必须形如 {"title":"string","unit":"optional shared unit","items":[{"label":"string","value":123}]}。',
@@ -247,16 +243,12 @@ function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, ori
   }
   const scenes = summarizeScenesForRetry(sceneSpec);
   const expectedSceneIds = sceneIdsFromSpec(sceneSpec);
-  const isAssetFirst = creativeContext?.visual_strategy === 'asset_first'
-    || target?.visual_strategy === 'asset_first';
   const assetSummary = summarizeCreativeContextForPrompt(creativeContext);
   const contractLines = [
     `scene ids: ${expectedSceneIds.join(', ') || 'none'}`,
     `nodes.length must equal ${expectedSceneIds.length}`,
     'nodes[i].id must equal scene ids in the same order; do not add, remove, merge, split, or reorder scenes.',
-    isAssetFirst
-      ? 'nodes[i].asset_refs optional; max 1 item with asset_id, usage=subject|showcase|evidence|background, reason. generated assets should keep scene_id binding and are not evidence.'
-      : 'nodes[i].asset_refs optional; max 1 item with asset_id, usage, reason. generated assets are usable but are not source evidence.',
+    'nodes[i].asset_refs optional; max 1 item with asset_id, usage=subject|showcase|evidence|background, reason. generated assets should keep scene_id binding and are not evidence.',
   ];
   if (Number(attempt) >= 2) {
     return [
@@ -274,7 +266,7 @@ function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, ori
     '场景摘要：',
     JSON.stringify(scenes, null, 2),
     assetSummary ? `素材摘要：\n${assetSummary}` : '',
-    isAssetFirst ? 'asset_first 规则：generated 图片优先绑定 generation.scene_id 对应场景，usage 使用 subject；article 仍是证据优先。' : '',
+    'asset_first 规则：generated 图片优先绑定 generation.scene_id 对应场景，usage 使用 subject；article 仍是证据优先。',
     'JSON schema：',
     JSON.stringify({
       synopsis: 'string',
