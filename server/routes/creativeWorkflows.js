@@ -838,27 +838,6 @@ router.post('/:workflow_id/html-video-project/frames/:frame_id/layout-qa', async
   }
 });
 
-function sendHtmlVideoReserved(req, res) {
-  const validation = validateWorkflowId(req.params.workflow_id);
-  if (!validation.success) {
-    return res.status(400).json(validation);
-  }
-  return res.status(501).json({
-    success: false,
-    workflow_id: validation.workflow_id,
-    feature: req.params.feature,
-    message: 'html-video 首版暂未开放该能力，后续版本会接入。',
-  });
-}
-
-router.patch('/:workflow_id/html-video-project/timeline', sendHtmlVideoReserved);
-router.patch('/:workflow_id/html-video-project/frames/:frame_id/html', sendHtmlVideoReserved);
-router.patch('/:workflow_id/html-video-project/frames/:frame_id/elements/:element_id', sendHtmlVideoReserved);
-router.patch('/:workflow_id/html-video-project/frames/:frame_id/transition', sendHtmlVideoReserved);
-router.post('/:workflow_id/html-video-project/frames/:frame_id/enhance', sendHtmlVideoReserved);
-router.post('/:workflow_id/html-video-project/frames/:frame_id/unenhance', sendHtmlVideoReserved);
-router.all('/:workflow_id/html-video-project/:feature(timeline|html|elements|transition|enhance|unenhance)', sendHtmlVideoReserved);
-
 router.post('/:workflow_id/events', async (req, res) => {
   const validation = validateWorkflowId(req.params.workflow_id);
   if (!validation.success) return res.status(400).json(validation);

@@ -360,21 +360,6 @@ async function listen(app) {
     assert.equal(missingExportFile.statusCode, 404);
     assert.match(missingExportFile.body.message, /未找到导出文件记录/);
 
-    const reservedRequests = [
-      ['PATCH', 'timeline'],
-      ['PATCH', 'frames/frame_01/elements/headline'],
-      ['PATCH', 'frames/frame_01/transition'],
-      ['POST', 'frames/frame_01/enhance'],
-      ['POST', 'frames/frame_01/unenhance'],
-    ];
-    for (const [method, suffix] of reservedRequests) {
-      const response = await requestJson(server, method, `/api/creative-workflows/${workflowId}/html-video-project/${suffix}`, {});
-      assert.equal(response.statusCode, 501, suffix);
-      assert.equal(response.body.success, false);
-      assert.match(response.body.message, /首版暂未开放/);
-      assert.doesNotMatch(response.body.message, /not implemented/i);
-    }
-
     const invalid = await requestJson(server, 'GET', '/api/creative-workflows/bad!/html-video-project');
     assert.equal(invalid.statusCode, 400);
     assert.match(invalid.body.message, /创作任务 ID 无效/);
