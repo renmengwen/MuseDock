@@ -4,7 +4,6 @@ const os = require('os');
 const path = require('path');
 
 const orchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
-const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 
 async function writeFile(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -13,30 +12,21 @@ async function writeFile(filePath, content) {
 
 (async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-modes-'));
-  const templateRoot = path.join(rootDir, 'templates');
-  await writeFile(path.join(templateRoot, 'simple', 'template.html-video.yaml'), [
-    'id: simple',
-    'name: 简单模板',
-    'engine: hyperframes',
-    'source_entry: index.html',
-    'license:',
-    '  commercial_use: true',
-    '',
-  ].join('\n'));
-  await writeFile(path.join(templateRoot, 'simple', 'index.html'), '<html><body>{{headline}}</body></html>');
-  const templateRegistry = createTemplateRegistry({ rootDir: templateRoot });
-  templateRegistry.scanTemplates();
+  // rootDir/workflowId/runId 模式的工程目录布局与 projectStore.createProjectDir 一致
+  // （同 test-agent-runs-html-video-project-failure-meta.js 的既有约定）
+  const runProjectDirFor = runId => path.join(rootDir, 'wf', 'agent_runs', `${runId}-html-video`);
+  const rawFrameHtml = label => `<html><body><main>${label}</main></body></html>`;
+  await writeFile(path.join(runProjectDirFor('run'), 'frames/frame_01.html'), rawFrameHtml('帧一'));
+  await writeFile(path.join(runProjectDirFor('run'), 'frames/frame_02.html'), rawFrameHtml('帧二'));
 
   const project = {
     project_id: 'wf_run',
     workflow_id: 'wf',
     run_id: 'run',
-    template_id: 'simple',
-    template_inputs: { headline: '标题' },
     output: { resolution: { width: 1080, height: 1920 }, fps: 24 },
     frames: [
-      { id: 'frame_01', scene_id: 'scene_01', template_id: 'simple', inputs: { headline: '一' }, duration_sec: 2 },
-      { id: 'frame_02', scene_id: 'scene_02', template_id: 'simple', inputs: { headline: '二' }, duration_sec: 2 },
+      { id: 'frame_01', scene_id: 'scene_01', source_mode: 'raw_html', html_path: 'frames/frame_01.html', duration_sec: 2 },
+      { id: 'frame_02', scene_id: 'scene_02', source_mode: 'raw_html', html_path: 'frames/frame_02.html', duration_sec: 2 },
     ],
     timeline: { tracks: [{ id: 'main', type: 'video', items: [] }] },
   };
@@ -72,7 +62,6 @@ async function writeFile(filePath, content) {
     workflowId: 'wf',
     runId: 'run',
     project,
-    templateRegistry,
     services,
   });
   assert.equal(materialized.success, true);
@@ -84,7 +73,6 @@ async function writeFile(filePath, content) {
     workflowId: 'wf',
     runId: 'run',
     project: materialized.project,
-    templateRegistry,
     frameId: 'frame_02',
     services,
   });
@@ -93,6 +81,7 @@ async function writeFile(filePath, content) {
   assert.equal(preview.preview_frame_id, 'frame_02');
 
   const autoFitRenderCalls = [];
+  await writeFile(path.join(runProjectDirFor('auto-fit'), 'frames/frame_auto_fit.html'), rawFrameHtml('自动延长'));
   const autoFitExport = await orchestrator.exportHtmlVideoProject({
     rootDir,
     workflowId: 'wf',
@@ -105,15 +94,14 @@ async function writeFile(filePath, content) {
         {
           id: 'frame_auto_fit',
           scene_id: 'scene_auto_fit',
-          template_id: 'simple',
-          inputs: { headline: '越界字幕' },
+          source_mode: 'raw_html',
+          html_path: 'frames/frame_auto_fit.html',
           duration_sec: 2,
           captions: [{ id: 'cap_01', start: 0, end: 3.2, text: '这句字幕超过画面时长' }],
         },
       ],
       timeline: { tracks: [{ id: 'main', type: 'video', items: [{ id: 'item_auto_fit', kind: 'frame', frame_id: 'frame_auto_fit', start_sec: 0, duration_sec: 2 }] }] },
     },
-    templateRegistry,
     services: {
       frameRenderer: {
         renderFrame: async (frame, options) => {
@@ -132,6 +120,7 @@ async function writeFile(filePath, content) {
   assert.ok(autoFitExport.diagnostics.some(item => item.code === 'frame_duration_auto_extended'));
 
   const lockedRenderCalls = [];
+  await writeFile(path.join(runProjectDirFor('locked'), 'frames/frame_locked.html'), rawFrameHtml('锁定时长'));
   const lockedExport = await orchestrator.exportHtmlVideoProject({
     rootDir,
     workflowId: 'wf',
@@ -145,15 +134,14 @@ async function writeFile(filePath, content) {
         {
           id: 'frame_locked',
           scene_id: 'scene_locked',
-          template_id: 'simple',
-          inputs: { headline: '锁定时长' },
+          source_mode: 'raw_html',
+          html_path: 'frames/frame_locked.html',
           duration_sec: 2,
           captions: [{ id: 'cap_01', start: 0, end: 3.2, text: '锁定后不能自动延长' }],
         },
       ],
       timeline: { tracks: [{ id: 'main', type: 'video', items: [] }] },
     },
-    templateRegistry,
     services: {
       frameRenderer: {
         renderFrame: async () => {
@@ -170,6 +158,7 @@ async function writeFile(filePath, content) {
   assert.ok(lockedExport.diagnostics.some(item => item.code === 'caption_duration_exceeds_frame'));
 
   const renderFailureDir = path.join(rootDir, 'render-failure-project');
+  await writeFile(path.join(renderFailureDir, 'frames/frame_failed.html'), rawFrameHtml('失败'));
   const renderFailure = await orchestrator.exportHtmlVideoProject({
     projectDir: renderFailureDir,
     project: {
@@ -177,11 +166,10 @@ async function writeFile(filePath, content) {
       project_id: 'wf_render_failure',
       run_id: 'render-failure',
       frames: [
-        { id: 'frame_failed', scene_id: 'scene_failed', template_id: 'simple', inputs: { headline: '失败' }, duration_sec: 2 },
+        { id: 'frame_failed', scene_id: 'scene_failed', source_mode: 'raw_html', html_path: 'frames/frame_failed.html', duration_sec: 2 },
       ],
       timeline: { tracks: [{ id: 'main', type: 'video', items: [] }] },
     },
-    templateRegistry,
     services: {
       frameRenderer: {
         renderFrame: async () => ({ success: false, code: 'render_timeout', message: '单帧渲染超时。', diagnostics: [] }),
@@ -199,7 +187,6 @@ async function writeFile(filePath, content) {
     workflowId: 'wf',
     runId: 'run',
     project: preview.project,
-    templateRegistry,
     services,
     onProgress: async event => {
       await new Promise(resolve => setImmediate(resolve));
@@ -225,6 +212,8 @@ async function writeFile(filePath, content) {
   assert.equal(exportedProjectJson.generation_checkpoint.stages.duration_verify.expected_duration_sec, 4);
   assert.equal(exportedProjectJson.generation_checkpoint.stages.duration_verify.actual_duration_sec, 4);
 
+  await writeFile(path.join(runProjectDirFor('missing-manifest'), 'frames/frame_01.html'), rawFrameHtml('帧一'));
+  await writeFile(path.join(runProjectDirFor('missing-manifest'), 'frames/frame_02.html'), rawFrameHtml('帧二'));
   const missingManifestExport = await orchestrator.exportHtmlVideoProject({
     rootDir,
     workflowId: 'wf',
@@ -235,7 +224,6 @@ async function writeFile(filePath, content) {
       run_id: 'missing-manifest',
       audio: { status: 'ready', tts_manifest_path: 'tts/missing-manifest.json' },
     },
-    templateRegistry,
     services,
   });
   assert.equal(missingManifestExport.success, true);
