@@ -9,7 +9,7 @@ function createOperationId(workflowId) {
 
 function htmlVideoProjectProgress(event = {}) {
   const data = event.data || {};
-  if (event.type === 'html_video_template_selected') {
+  if (event.type === 'html_video_routing_ready') {
     return calculateProjectProgress({ step: 'template', stepProgress: 100 });
   }
   if (event.type === 'html_video_graph_started') {

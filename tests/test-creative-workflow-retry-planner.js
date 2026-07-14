@@ -100,7 +100,6 @@ function project(overrides = {}) {
         code: 'visual_qa_warning',
         message: 'html-video 成片画面存在开头或镜头边界白屏，未通过视觉安全检查。',
         diagnostics: [
-          createDiagnostic({ code: 'materialized', stage: 'materialize', frame_id: 'scene_01' }),
           createDiagnostic({ code: 'frame_rendered', stage: 'render', sub_stage: 'render', frame_id: 'scene_01' }),
           createDiagnostic({
             code: 'visual_qa_warning',
@@ -558,10 +557,10 @@ assert.strictEqual(
   repairActionForQaIssue({ code: 'asset_first_asset_missing', details: { asset_id: 'gen_x', scene_id: null, beat_id: null } }, { sceneToFrameIds: { scene_02: ['scene_02_b1'] } }),
   null,
 );
-// 不可修复（硬约束 C）：路由 takeover 绝不能映射为 retry_frame_html（会无限循环）
+// 不可修复（硬约束 C）：无映射的观察类 code 绝不能映射为 retry_frame_html（会无限循环）
 {
-  assert.strictEqual(repairActionForQaIssue({ code: 'asset_first_template_takeover' }, {}), null);
-  assert.strictEqual(repairActionForQaIssue({ code: 'asset_first_title_template_used' }, {}), null);
+  assert.strictEqual(repairActionForQaIssue({ code: 'sample_warning_a' }, {}), null);
+  assert.strictEqual(repairActionForQaIssue({ code: 'sample_warning_b' }, {}), null);
   assert.strictEqual(repairActionForQaIssue({ code: 'asset_first_style_drift' }, {}), null);
   assert.strictEqual(repairActionForQaIssue({ code: 'asset_first_caption_invisible' }, {}), null);
 }

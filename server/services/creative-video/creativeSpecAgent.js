@@ -526,9 +526,8 @@ function buildSelectTemplatePrompt({ sceneSpec, compactIndex }) {
 /**
  * Legacy fallback only.
  *
- * The default production path must use html-video/templateSelectorAgent and
- * html-video/templateInputAgent so AI only selects a template and fills JSON
- * inputs. This HTML prompt is retained for manual rollback/debug scenarios.
+ * 模板选择/填充 agent 已随模板生成链路删除；生产路径为逐场景 raw_html 单链路。
+ * This HTML prompt is retained for manual rollback/debug scenarios.
  */
 function buildFillTemplatePrompt({ sceneSpec, frameSpecs, templateHtml, templateManifest }) {
   const scenes = (sceneSpec.scenes || []);

@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const { resolveSceneDurationSec } = require('./sceneTemplateMatcher');
 const { selectMotionPrimitive, CAPTION_SAFE_BOTTOM_PX } = require('./motionPrimitiveCatalog');
 
 const STYLE_PROFILES = [
@@ -35,6 +34,26 @@ const STYLE_PROFILES = [
 
 function safeString(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return null;
+}
+
+function resolveSceneDurationSec(scene = {}) {
+  return firstPositiveNumber(
+    scene.speech_duration_sec,
+    scene.speechDurationSec,
+    scene.duration_sec,
+    scene.durationSec,
+    scene.target_duration_sec,
+    scene.targetDurationSec,
+    scene.duration,
+  );
 }
 
 function hashIndex(input, length) {

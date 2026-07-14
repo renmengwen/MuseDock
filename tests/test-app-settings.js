@@ -37,7 +37,6 @@ async function run() {
     creativeDefaults: {
       aspectRatio: '3:2',
       targetDurationSec: 999,
-      lockTemplate: true,
       useResearch: false,
       generateAudio: false,
       autoSfxEnabled: false,

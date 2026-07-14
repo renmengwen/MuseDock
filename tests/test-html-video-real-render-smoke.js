@@ -13,12 +13,13 @@ if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
   process.exit(0);
 }
 
-const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('../server/services/creative-video/html-video/sceneSpecMapper');
 const { createEmptyProject } = require('../server/services/creative-video/html-video/projectSchema');
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
-const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 const { materializeProject } = require('../server/services/creative-video/html-video/materializer');
 const { renderFrame } = require('../server/services/creative-video/html-video/frameRenderer');
+
+const RESOLUTION = { width: 1920, height: 1080 };
+const FPS = 24;
 
 function optionalPngReader() {
   try {
@@ -34,6 +35,19 @@ async function resolveFfmpegPath() {
   } catch {
     return process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
   }
+}
+
+function rawFrameHtml(headline) {
+  return [
+    '<!doctype html>',
+    '<html>',
+    '<head><meta charset="utf-8"><style>',
+    'html,body{margin:0;width:100%;height:100%;background:#101820;color:#fff;font-family:"Microsoft YaHei",Arial,sans-serif;}',
+    'main{position:absolute;inset:0;display:grid;place-items:center;font-size:64px;font-weight:700;}',
+    '</style></head>',
+    `<body><main data-text-key="headline">${headline}</main></body>`,
+    '</html>',
+  ].join('');
 }
 
 async function assertCaptionPixelsIfEnabled({ outputPath, projectDir }) {
@@ -85,132 +99,73 @@ async function assertCaptionPixelsIfEnabled({ outputPath, projectDir }) {
   const workflowId = 'workflow_real_render';
   const runId = 'run_001';
   const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
-  const templateRegistry = createTemplateRegistry({ rootDir: path.resolve(__dirname, '../server/templates') });
-  templateRegistry.scanTemplates();
-  const template = templateRegistry.getTemplate('glitch_title');
-  assert.ok(template, '应能读取 glitch_title production-ready 模板');
-
-  const sceneSpec = {
-    title: 'AI 只填结构化字段',
-    aspect_ratio: '16:9',
-    scenes: [{
-      id: 'scene_01',
-      order: 1,
-      start: 0,
-      duration: 4,
-      kind: 'text',
-      narration_text: 'AI 负责选择模板和填写字段，系统负责确定性生成视频。',
-      captions: [{ id: 'cap_01', start: 0, end: 3.8, text: 'AI 只填 JSON，系统生成 HTML' }],
-      visual_text: {
-        headline: 'JSON 成片',
-        keywords: ['模板', '字段', '重渲'],
-        cards: ['可编辑工程', '可追踪导出'],
-      },
-    }],
-  };
-  const contentGraph = mapSceneSpecToContentGraph(sceneSpec);
-  const inputs = {
-    title: 'JSON 成片',
-    subtitle: '模板字段驱动 Playwright 渲染',
-    channel_info: 'HTML_VIDEO · SMOKE',
-    footer_text: '可编辑生产链路',
-    duration_sec: 4,
-  };
 
   const project = createEmptyProject({
     projectId: 'project_real_render',
     workflowId,
     runId,
-    templateId: 'glitch_title',
-    templateInputs: inputs,
-    contentGraph,
-  });
-  project.frames = buildFramesFromGraph({
-    sceneSpec,
-    contentGraph,
-    templateId: 'glitch_title',
-    templateInputs: inputs,
   });
   const rawFrameHtmlPath = 'frames/raw-caption-smoke.html';
   await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
-  await fs.writeFile(path.join(projectDir, rawFrameHtmlPath), [
-    '<!doctype html>',
-    '<html>',
-    '<head><meta charset="utf-8"><style>',
-    'html,body{margin:0;width:100%;height:100%;background:#101820;color:#fff;font-family:"Microsoft YaHei",Arial,sans-serif;}',
-    'main{position:absolute;inset:0;display:grid;place-items:center;font-size:64px;font-weight:700;}',
-    '</style></head>',
-    '<body><main data-text-key="headline">RAW HTML</main></body>',
-    '</html>',
-  ].join(''), 'utf8');
-  project.frames.push({
+  await fs.writeFile(path.join(projectDir, rawFrameHtmlPath), rawFrameHtml('RAW HTML'), 'utf8');
+  project.frames = [{
     id: 'raw_caption_smoke',
     scene_id: 'raw_caption_smoke',
-    order: 2,
+    order: 1,
     source_mode: 'raw_html',
     html_path: rawFrameHtmlPath,
     duration_sec: 4,
     narration_text: '旁白文本应自动生成底部字幕层。',
+    captions: [{ id: 'cap_01', start: 0, end: 3.8, text: '旁白文本应自动生成底部字幕层。' }],
     inputs: {},
     metadata: { visual_text: { headline: 'RAW HTML' } },
-  });
+  }];
   projectStore.addRevision(project, {
     summary: '首次生成',
     author: 'smoke',
     change: { type: 'initial_generate' },
   });
 
-  let materialized = await materializeProject({ projectDir, project, templateRegistry });
+  let materialized = await materializeProject({ projectDir, project });
   await projectStore.saveProject(projectDir, materialized.project);
   const rawFrame = materialized.project.frames.find(frame => frame.id === 'raw_caption_smoke');
   assert.ok(rawFrame, '应包含 raw_html 字幕烟测帧');
   const rawHtml = await fs.readFile(path.join(projectDir, rawFrame.html_path), 'utf8');
   assert.match(rawHtml, /data-hv-layer="captions"|data-role="subtitle-caption"/);
 
-  const rawOutput = path.join(projectDir, 'exports', 'real-render-raw-caption.mp4');
-  const rawRender = await renderFrame(rawFrame, {
-    projectDir,
-    outputPath: rawOutput,
-    resolution: template.output.resolution,
-    fps: template.output.fps,
-    duration: 4,
-  });
-  assert.equal(rawRender.success, true, rawRender.message || 'raw_html 字幕帧渲染失败');
-  const rawStat = await fs.stat(rawOutput);
-  assert.ok(rawStat.size > 0, 'raw_html 字幕帧 MP4 应非空');
-  await assertCaptionPixelsIfEnabled({ outputPath: rawOutput, projectDir });
-
   const firstOutput = path.join(projectDir, 'exports', 'real-render-first.mp4');
-  const firstRender = await renderFrame(materialized.project.frames[0], {
+  const firstRender = await renderFrame(rawFrame, {
     projectDir,
     outputPath: firstOutput,
-    resolution: template.output.resolution,
-    fps: template.output.fps,
+    resolution: RESOLUTION,
+    fps: FPS,
     duration: 4,
   });
   assert.equal(firstRender.success, true, firstRender.message || '首次渲染失败');
   const firstStat = await fs.stat(firstOutput);
   assert.ok(firstStat.size > 0, '首次 MP4 应非空');
-  assert.equal(firstRender.meta.actualResolution.width, 1920);
-  assert.equal(firstRender.meta.actualResolution.height, 1080);
+  assert.equal(firstRender.meta.actualResolution.width, RESOLUTION.width);
+  assert.equal(firstRender.meta.actualResolution.height, RESOLUTION.height);
   assert.ok(firstRender.meta.durationSec >= 4);
+  await assertCaptionPixelsIfEnabled({ outputPath: firstOutput, projectDir });
 
+  // 编辑 raw HTML 后重物化并重渲，验证编辑重渲与导出记账
   const edited = materialized.project;
-  edited.template_inputs.title = '重渲成功';
-  edited.frames[0].inputs.title = '重渲成功';
+  await fs.writeFile(path.join(projectDir, rawFrameHtmlPath), rawFrameHtml('重渲成功'), 'utf8');
+  edited.frames[0].html_path = rawFrameHtmlPath;
   projectStore.addRevision(edited, {
     summary: '编辑标题并重渲',
     author: 'smoke',
-    change: { type: 'template_inputs_patch', patch: { title: '重渲成功' } },
+    change: { type: 'raw_html_edit', patch: { headline: '重渲成功' } },
   });
-  materialized = await materializeProject({ projectDir, project: edited, templateRegistry });
+  materialized = await materializeProject({ projectDir, project: edited });
   await projectStore.saveProject(projectDir, materialized.project);
   const rerenderOutput = path.join(projectDir, 'exports', 'real-render-rerender.mp4');
   const rerender = await renderFrame(materialized.project.frames[0], {
     projectDir,
     outputPath: rerenderOutput,
-    resolution: template.output.resolution,
-    fps: template.output.fps,
+    resolution: RESOLUTION,
+    fps: FPS,
     duration: 4,
   });
   assert.equal(rerender.success, true, rerender.message || '编辑重渲失败');

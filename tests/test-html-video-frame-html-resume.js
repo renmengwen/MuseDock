@@ -18,33 +18,12 @@ const { matchVisualBeatsToRenderers } = require('../server/services/creative-vid
 const frameFallbackBuilder = require('../server/services/creative-video/html-video/frameFallbackBuilder');
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
-const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 const { createEmptyProject, markCheckpointStage, markCheckpointFrame } = require('../server/services/creative-video/html-video/projectSchema');
 const { computeSceneSpecSpeechHash } = require('../server/services/creative-video/sceneSpecHash');
 
 async function writeFile(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, content, 'utf8');
-}
-
-async function createTemplate(rootDir) {
-  const dir = path.join(rootDir, 'vertical');
-  await writeFile(path.join(dir, 'template.html-video.yaml'), [
-    'id: vertical',
-    'name: 竖屏模板',
-    'engine: hyperframes',
-    'source_entry: index.html',
-    'output:',
-    '  resolution:',
-    '    width: 1080',
-    '    height: 1920',
-    '  fps: 24',
-    '  duration: 6',
-    'license:',
-    '  commercial_use: true',
-    '',
-  ].join('\n'));
-  await writeFile(path.join(dir, 'index.html'), '<html><body>{{headline}}</body></html>');
 }
 
 function validHtml(id, text = id) {
@@ -159,11 +138,6 @@ function commentOnlyAnchorHtml() {
 }
 
 async function setupProject(rootDir, workflowId, runId, options = {}) {
-  const templateRoot = path.join(rootDir, 'templates');
-  await createTemplate(templateRoot);
-  const templateRegistry = createTemplateRegistry({ rootDir: templateRoot });
-  templateRegistry.scanTemplates();
-
   const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
   const scene01Html = options.scene01Html || (options.badScene01Html ? invalidCheckpointHtml() : validHtml('scene_01', '已完成一'));
   await writeFile(path.join(projectDir, 'frames/01-scene_01.html'), scene01Html);
@@ -261,10 +235,10 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
     project.status = 'rendered';
   }
   await projectStore.saveProject(projectDir, project);
-  return { projectDir, templateRegistry };
+  return { projectDir };
 }
 
-async function runWorkflow({ rootDir, workflowId, runId, templateRegistry, aiTextModel, target = {}, services = {}, sceneSpecOverride = null, creativeContextOverride = null }) {
+async function runWorkflow({ rootDir, workflowId, runId, aiTextModel, target = {}, services = {}, sceneSpecOverride = null, creativeContextOverride = null }) {
   return workflow.generateHtmlVideo({
     workflowId,
     runId,
@@ -272,7 +246,6 @@ async function runWorkflow({ rootDir, workflowId, runId, templateRegistry, aiTex
     sceneSpec: sceneSpecOverride || sceneSpec(),
     creativeContext: creativeContextOverride || { input: { raw_text: '三帧恢复测试' } },
     target: { generate_audio: false, ...target },
-    templateRegistry,
     skipValidation: true,
     services: {
       aiTextModel,
@@ -537,7 +510,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-resume-'));
       const workflowId = '202606260000000001_frame_resume';
       const runId = 'run_resume';
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId);
+      await setupProject(rootDir, workflowId, runId);
       const calls = [];
       frameHtmlAgent.generateFrameHtml = async (args) => {
         calls.push(args);
@@ -548,7 +521,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
@@ -581,7 +553,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-audio-resume-'));
       const workflowId = '202606260000000005_audio_resume';
       const runId = 'run_audio_resume';
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { audio: matchingAudio() });
+      await setupProject(rootDir, workflowId, runId, { audio: matchingAudio() });
       let ttsCalls = 0;
       frameHtmlAgent.generateFrameHtml = async args => ({ success: true, html: validHtml(args.node.id, args.node.id) });
 
@@ -589,7 +561,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         target: { generate_audio: true },
         aiTextModel: {
           async callTextModel(request) {
@@ -622,7 +593,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-audio-current-mismatch-'));
       const workflowId = '202606260000000012_audio_current_mismatch';
       const runId = 'run_audio_current_mismatch';
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { audio: matchingAudio() });
+      await setupProject(rootDir, workflowId, runId, { audio: matchingAudio() });
       let ttsCalls = 0;
       frameHtmlAgent.generateFrameHtml = async args => ({ success: true, html: validHtml(args.node.id, args.node.id) });
 
@@ -630,7 +601,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         target: { generate_audio: true },
         creativeContextOverride: {
           input: { raw_text: '三帧恢复测试' },
@@ -667,7 +637,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-spaced-anchor-'));
       const workflowId = '202606260000000006_spaced_anchor';
       const runId = 'run_spaced_anchor';
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { scene01Html: spacedAnchorHtml() });
+      await setupProject(rootDir, workflowId, runId, { scene01Html: spacedAnchorHtml() });
       const calls = [];
       frameHtmlAgent.generateFrameHtml = async args => {
         calls.push(args);
@@ -678,7 +648,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
@@ -701,7 +670,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-comment-anchor-'));
       const workflowId = '202606260000000007_comment_anchor';
       const runId = 'run_comment_anchor';
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { scene01Html: commentOnlyAnchorHtml() });
+      await setupProject(rootDir, workflowId, runId, { scene01Html: commentOnlyAnchorHtml() });
       const calls = [];
       frameHtmlAgent.generateFrameHtml = async args => {
         calls.push(args);
@@ -712,7 +681,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
@@ -735,7 +703,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-changed-script-'));
       const workflowId = '202606260000000008_changed_script';
       const runId = 'run_changed_script';
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId);
+      await setupProject(rootDir, workflowId, runId);
       const calls = [];
       let contentGraphCalls = 0;
       frameHtmlAgent.generateFrameHtml = async args => {
@@ -747,7 +715,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         sceneSpecOverride: changedSceneSpec(),
         aiTextModel: {
           async callTextModel(request) {
@@ -775,7 +742,7 @@ async function main() {
       const runId = 'run_changed_visual';
       const visualSpec = changedVisualSceneSpec();
       assert.equal(computeSceneSpecSpeechHash(sceneSpec()), computeSceneSpecSpeechHash(visualSpec));
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId);
+      await setupProject(rootDir, workflowId, runId);
       const calls = [];
       let contentGraphCalls = 0;
       frameHtmlAgent.generateFrameHtml = async args => {
@@ -787,7 +754,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         sceneSpecOverride: visualSpec,
         aiTextModel: {
           async callTextModel(request) {
@@ -814,7 +780,7 @@ async function main() {
       const workflowId = '202606260000000013_rewrite_interrupt';
       const runId = 'run_rewrite_interrupt';
       const visualSpec = changedVisualSceneSpec();
-      const { templateRegistry, projectDir } = await setupProject(rootDir, workflowId, runId, { downstreamDone: true });
+      const { projectDir } = await setupProject(rootDir, workflowId, runId, { downstreamDone: true });
       let contentGraphCalls = 0;
       frameHtmlAgent.generateFrameHtml = async args => ({
         success: false,
@@ -834,7 +800,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         sceneSpecOverride: visualSpec,
         aiTextModel: {
           async callTextModel(request) {
@@ -866,7 +831,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-missing-hash-'));
       const workflowId = '202606260000000009_missing_hash';
       const runId = 'run_missing_hash';
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { omitSceneSpecHash: true });
+      await setupProject(rootDir, workflowId, runId, { omitSceneSpecHash: true });
       const calls = [];
       let contentGraphCalls = 0;
       frameHtmlAgent.generateFrameHtml = async args => {
@@ -878,7 +843,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
@@ -903,7 +867,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-bad-reuse-'));
       const workflowId = '202606260000000003_bad_frame_reuse';
       const runId = 'run_bad_reuse';
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { badScene01Html: true });
+      await setupProject(rootDir, workflowId, runId, { badScene01Html: true });
       const calls = [];
       frameHtmlAgent.generateFrameHtml = async (args) => {
         calls.push(args);
@@ -914,7 +878,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
@@ -937,7 +900,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-stale-graph-'));
       const workflowId = '202606260000000004_stale_graph';
       const runId = 'run_stale_graph';
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { contentGraph: staleContentGraph() });
+      await setupProject(rootDir, workflowId, runId, { contentGraph: staleContentGraph() });
       const calls = [];
       let contentGraphCalls = 0;
       frameHtmlAgent.generateFrameHtml = async (args) => {
@@ -949,7 +912,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
@@ -974,7 +936,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-invalid-message-'));
       const workflowId = '202606260000000014_invalid_message';
       const runId = 'run_invalid_message';
-      const { templateRegistry, projectDir } = await setupProject(rootDir, workflowId, runId);
+      const { projectDir } = await setupProject(rootDir, workflowId, runId);
       const calls = [];
       frameHtmlAgent.generateFrameHtml = async (args) => {
         calls.push(args);
@@ -997,7 +959,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
@@ -1056,7 +1017,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-fallback-'));
       const workflowId = '202606260000000002_frame_fallback';
       const runId = 'run_fallback';
-      const { templateRegistry, projectDir } = await setupProject(rootDir, workflowId, runId, { downstreamDone: true });
+      const { projectDir } = await setupProject(rootDir, workflowId, runId, { downstreamDone: true });
       const calls = [];
       let contentGraphCalls = 0;
       const fallbackCalls = [];
@@ -1085,7 +1046,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
@@ -1161,7 +1121,7 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-mixed-fallback-'));
       const workflowId = '202606260000000003_mixed_fallback';
       const runId = 'run_mixed_fallback';
-      const { templateRegistry, projectDir } = await setupProject(rootDir, workflowId, runId, { downstreamDone: true });
+      const { projectDir } = await setupProject(rootDir, workflowId, runId, { downstreamDone: true });
       const calls = [];
       const failedHtml = [
         '<!doctype html><html><head>',
@@ -1211,7 +1171,6 @@ async function main() {
         rootDir,
         workflowId,
         runId,
-        templateRegistry,
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');

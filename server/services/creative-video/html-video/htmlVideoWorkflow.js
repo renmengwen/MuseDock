@@ -27,7 +27,6 @@ const { validateHtmlVideoProject } = require('./validationGate');
 const projectOrchestrator = require('./projectOrchestrator');
 const editPatchService = require('./editPatchService');
 const { syncRawHtmlFrameTextPatch } = require('./rawHtmlTextPatch');
-const { parseJsonOnlyResponse } = require('./templateInputAgent');
 const defaultVisualQaService = require('../visualQaService');
 const defaultLayoutQaService = require('./layoutQaService');
 const { computeSceneSpecSpeechHash, audioMatchesSceneSpec } = require('../sceneSpecHash');
@@ -103,6 +102,38 @@ function failure(message, diagnostics, extra = {}) {
     render_mode: 'html-video',
     ...extra,
   });
+}
+
+function parseJsonOnlyResponse(text) {
+  const fail = (userMessage, diagnostics = []) => ({
+    success: false,
+    user_message: userMessage,
+    message: userMessage,
+    fallback_allowed: true,
+    diagnostics: diagnostics.length ? diagnostics : [userMessage],
+  });
+  const raw = String(text || '').trim();
+  if (!raw) {
+    return fail('AI 返回为空，无法解析 JSON。', ['empty_response']);
+  }
+  if (/<\s*html\b|<!doctype\b|<\s*script\b/i.test(raw)) {
+    return fail('AI 返回包含 HTML、DOCTYPE 或 script，模板字段必须只返回 JSON。', ['response_contains_html']);
+  }
+  if (/^```/m.test(raw) || /```/.test(raw)) {
+    return fail('AI 返回必须是纯 JSON，不能包含 Markdown 代码块。', ['response_contains_markdown']);
+  }
+  if (!raw.startsWith('{') || !raw.endsWith('}')) {
+    return fail('AI 返回必须是一个 JSON object，不能包含解释、Markdown 或其他文本。', ['response_is_not_json_object']);
+  }
+  try {
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return fail('AI 返回必须是一个 JSON object。', ['parsed_value_is_not_object']);
+    }
+    return { success: true, data };
+  } catch (error) {
+    return fail(`AI 返回不是有效 JSON：${error.message}`, [error.message]);
+  }
 }
 
 function sha256(value) {
@@ -379,39 +410,6 @@ function invalidateFrameHtmlResumeState(project) {
 
 function hasUsableContentGraph(graph = {}) {
   return Array.isArray(graph.nodes) && graph.nodes.length > 0;
-}
-
-/**
- * 把 beat 级路由决策按 scene 聚合成 frame_html 阶段可用的跳过判断：
- * 只有场景内全部 beat 都是 template_inputs 才算 template_inputs（可跳过场景 HTML 生成），
- * 任一 beat 走 raw_html 或决策缺失，该场景都需要生成 HTML 供 raw beat 复用。
- */
-function aggregateBeatRoutingByScene(visualPlan, visualDecisions) {
-  const bySceneId = new Map();
-  const beats = Array.isArray(visualPlan?.beats) ? visualPlan.beats : [];
-  for (const beat of beats) {
-    if (!beat || !beat.id) continue;
-    const sceneId = String(beat.scene_id || '').trim();
-    if (!sceneId) continue;
-    const decision = visualDecisions instanceof Map ? visualDecisions.get(beat.id) : null;
-    const isTemplateBeat = decision?.source_mode === 'template_inputs' && Boolean(decision.template_id);
-    const current = bySceneId.get(sceneId) || {
-      scene_id: sceneId,
-      source_mode: 'template_inputs',
-      template_id: null,
-      beat_count: 0,
-      template_beat_count: 0,
-    };
-    current.beat_count += 1;
-    if (isTemplateBeat) {
-      current.template_beat_count += 1;
-      if (!current.template_id) current.template_id = decision.template_id;
-    } else {
-      current.source_mode = 'raw_html';
-    }
-    bySceneId.set(sceneId, current);
-  }
-  return bySceneId;
 }
 
 // R4：帧统计（overlay_check/text_blocks/cards/graphics）必须合并进 attachVisualRouting
@@ -1388,7 +1386,7 @@ async function generateHtmlVideo(options = {}) {
       createDiagnostic({
         code: 'scene_spec_missing',
         stage: 'project',
-        sub_stage: 'template_select',
+        sub_stage: 'route_decision',
         user_message: '缺少 scene_spec，无法逐场景生成。',
         fallback_allowed: false,
       }),
@@ -1418,9 +1416,9 @@ async function generateHtmlVideo(options = {}) {
     templateRenderTarget.duration,
   );
   await report(onProgress, {
-    type: 'html_video_template_selected',
+    type: 'html_video_routing_ready',
     stage: 'project',
-    sub_stage: 'template_select',
+    sub_stage: 'route_decision',
     message: '已启用逐场景生成。',
     data: {},
   });

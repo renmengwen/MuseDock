@@ -16,11 +16,6 @@ function stripDiagnosticDetailKeys(details) {
 }
 
 const DEFAULT_MESSAGES = {
-  template_missing: '未找到可用的 html-video 模板。',
-  unsupported_engine: '当前模板引擎暂不支持。',
-  source_entry_not_html: '首版 html-video 只支持 HTML 模板入口。',
-  license_not_allowed: '模板授权不符合本次使用要求。',
-  template_inputs_invalid: '模板字段校验失败。',
   timeline_item_kind_unsupported: '首版时间线只支持 frame 类型条目。',
   asset_path_invalid: '素材路径不合法。',
   playwright_not_configured: 'Playwright Chromium 未配置，无法渲染 html-video。',

@@ -3,7 +3,7 @@ const path = require('path');
 
 const projectStore = require('./projectStore');
 
-// 只读素材随代码打包，按 __dirname 定位仓库根（对齐 templateRegistry），不依赖 process.cwd()
+// 只读素材随代码打包，按 __dirname 定位仓库根，不依赖 process.cwd()
 const DEFAULT_ROOT_DIR = path.resolve(__dirname, '../../../..');
 const DEFAULT_LIBRARY_RELATIVE_PATH = path.join('assets', 'sfx', 'library.json');
 const SAFE_ID = /^[A-Za-z0-9_.-]+$/;

@@ -108,13 +108,6 @@ function createFakeServices(overrides = {}) {
         getCreativeDefaults: async () => ({
           aspectRatio: '9:16',
           targetDurationSec: 60,
-          templateByAspectRatio: {
-            '9:16': 'news_signal_vertical',
-            '16:9': 'bold_signal',
-            '1:1': '',
-            '4:5': '',
-          },
-          lockTemplate: false,
           useResearch: true,
           generateAudio: true,
           generateCaptions: true,
@@ -202,13 +195,6 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
         getCreativeDefaults: async () => ({
           aspectRatio: '9:16',
           targetDurationSec: 60,
-          templateByAspectRatio: {
-            '9:16': 'news_signal_vertical',
-            '16:9': 'bold_signal',
-            '1:1': '',
-            '4:5': '',
-          },
-          lockTemplate: false,
           useResearch: true,
           generateAudio: true,
           generateCaptions: true,
@@ -1179,7 +1165,7 @@ async function testLegacyCreativeDefaultsSnapshotFallsBackToRealtimeMediaOptions
   assert.equal(projectOptionsSeen.generateCaptions, false);
 }
 
-async function testHtmlVideoExportUsesOrchestratorWithTemplateRegistry() {
+async function testHtmlVideoExportUsesOrchestrator() {
   const { rootDir, mediaRoot } = createTempDirs();
   const workflowPath = getWorkflowPath(WORKFLOW_ID, rootDir);
   const projectDir = path.join(mediaRoot, '12345', 'agent_runs', 'run-1-html-video');
@@ -1222,7 +1208,6 @@ async function testHtmlVideoExportUsesOrchestratorWithTemplateRegistry() {
     htmlVideoProjectOrchestrator: {
       exportHtmlVideoProject: async options => {
         calls.push(options);
-        assert.ok(options.templateRegistry);
         assert.equal(options.projectDir, projectDir);
         assert.equal(options.project.frames[0].html_path, 'frames/stale.html');
         return {
@@ -2552,7 +2537,7 @@ async function run() {
   await testHtmlVideoLiteCompletesVisibleFinalStages();
   await testCreativeDefaultsDisableAudioAndCaptionsInWorkflow();
   await testLegacyCreativeDefaultsSnapshotFallsBackToRealtimeMediaOptions();
-  await testHtmlVideoExportUsesOrchestratorWithTemplateRegistry();
+  await testHtmlVideoExportUsesOrchestrator();
   await testHtmlVideoExportRestoresMissingNarrationReference();
   await testNonHtmlVideoProjectResultFails();
   await testRejectsEmptyInput();

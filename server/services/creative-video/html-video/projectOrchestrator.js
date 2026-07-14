@@ -481,7 +481,6 @@ async function materializeProject({
   runId,
   projectDir,
   project,
-  templateRegistry,
   services = {},
 } = {}) {
   const materializer = services.materializer || defaultMaterializer;
@@ -489,7 +488,6 @@ async function materializeProject({
   const materialized = await materializer.materializeProject({
     projectDir: resolvedProjectDir,
     project: normalizeProject(project),
-    templateRegistry,
   });
   const nextProject = normalizeProject(materialized.project);
   await saveProject(resolvedProjectDir, nextProject);
@@ -509,7 +507,6 @@ async function renderHtmlVideoFrames({
   projectDir,
   project,
   frameIds,
-  templateRegistry,
   services = {},
   onProgress = null,
   materialize = false,
@@ -524,7 +521,6 @@ async function renderHtmlVideoFrames({
     const materialized = await materializer.materializeProject({
       projectDir: resolvedProjectDir,
       project: nextProject,
-      templateRegistry,
     });
     nextProject = normalizeProject(materialized.project);
     diagnostics.push(...normalizeDiagnostics(materialized.diagnostics, { stage: 'materialize' }));
@@ -1076,7 +1072,6 @@ async function renderHtmlVideoProject({
   runId,
   projectDir,
   project,
-  templateRegistry,
   services = {},
   skipRender = false,
   runLayoutQa = false,
@@ -1092,7 +1087,6 @@ async function renderHtmlVideoProject({
   const materialized = await materializer.materializeProject({
     projectDir: resolvedProjectDir,
     project: nextProject,
-    templateRegistry,
   });
   nextProject = normalizeProject(materialized.project);
   diagnostics.push(...normalizeDiagnostics(materialized.diagnostics, { stage: 'materialize' }));
@@ -1187,7 +1181,6 @@ async function renderHtmlVideoProject({
     runId,
     projectDir: resolvedProjectDir,
     project: nextProject,
-    templateRegistry,
     services,
     onProgress,
     materialize: false,

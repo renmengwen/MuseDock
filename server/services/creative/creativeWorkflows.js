@@ -32,7 +32,6 @@ const {
   normalizeDiagnostics,
   syncRawHtmlFrameTextPatch,
   findFrameByAnyId,
-  createTemplateRegistry: createHtmlVideoTemplateRegistry,
   sfxEventService,
 } = htmlVideoProjectApi;
 const { computeSceneSpecSpeechHash } = require('../creative-video/sceneSpecHash');
@@ -639,16 +638,6 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
     ? creativeDefaultsOverride
     : {};
   const payloadSource = payload && typeof payload === 'object' ? payload : {};
-  const defaultTemplates = defaultsSource.templateByAspectRatio && typeof defaultsSource.templateByAspectRatio === 'object'
-    ? defaultsSource.templateByAspectRatio
-    : {};
-  const overrideTemplates = overrideSource.templateByAspectRatio && typeof overrideSource.templateByAspectRatio === 'object'
-    ? overrideSource.templateByAspectRatio
-    : {};
-  const templateByAspectRatio = {
-    ...defaultTemplates,
-    ...overrideTemplates,
-  };
 
   const aspectRatio = safeString(overrideSource.aspectRatio) || safeString(defaultsSource.aspectRatio);
   const targetDurationSec = Number.isFinite(Number(overrideSource.targetDurationSec))
@@ -658,7 +647,6 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
   const useResearch = typeof overrideSource.useResearch === 'boolean'
     ? overrideSource.useResearch
     : (typeof payloadSource.useResearch === 'boolean' ? payloadSource.useResearch : useResearchFromDefaults);
-  const templateId = safeString(overrideSource.templateId) || safeString(templateByAspectRatio[aspectRatio]);
   const frameHtmlConcurrency = Number.isFinite(Number(overrideSource.frameHtmlConcurrency))
     ? Number(overrideSource.frameHtmlConcurrency)
     : Number(defaultsSource.frameHtmlConcurrency);
@@ -666,11 +654,6 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
   return {
     aspectRatio,
     targetDurationSec,
-    templateByAspectRatio,
-    templateId,
-    lockTemplate: typeof overrideSource.lockTemplate === 'boolean'
-      ? overrideSource.lockTemplate
-      : defaultsSource.lockTemplate === true,
     useResearch,
     generateAudio: typeof overrideSource.generateAudio === 'boolean'
       ? overrideSource.generateAudio
@@ -753,8 +736,6 @@ function mergeProjectOptions(recordTarget = {}, incoming = {}) {
   return {
     ...target,
     ...incomingOptions,
-    preferredTemplateId: safeString(target.preferredTemplateId) || safeString(incomingOptions.preferredTemplateId),
-    lockTemplate: target.lockTemplate === true,
   };
 }
 
@@ -2875,7 +2856,6 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
   if (error) return error;
   project = await restoreHtmlVideoNarrationReference({ project, projectDir });
 
-  const templateRegistry = options.htmlVideoTemplateRegistry || createHtmlVideoTemplateRegistry(options.htmlVideoTemplateOptions || {});
   const orchestrator = options.htmlVideoProjectOrchestrator || htmlVideoProjectOrchestrator;
   const baseOptions = {
     rootDir,
@@ -2883,7 +2863,6 @@ async function renderCreativeWorkflowHtmlVideoProject(workflowId, payload = {}, 
     runId: project.run_id || safeString(payload.run_id) || 'manual',
     projectDir,
     project,
-    templateRegistry,
     services: {
       ...(options.services || {}),
       ...(options.htmlVideoServices || {}),

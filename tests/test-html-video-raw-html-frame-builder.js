@@ -38,12 +38,11 @@ const projectStore = require('../server/services/creative-video/html-video/proje
       ],
     },
     target: { aspect_ratio: '16:9', resolution: { width: 1920, height: 1080 }, fps: 30 },
-    template: { id: 'bold_signal', output: { resolution: { width: 1280, height: 720 }, fps: 24 } },
   });
 
   assert.equal(project.workflow_id, 'wf_001');
   assert.equal(project.run_id, 'run_001');
-  assert.equal(project.template_id, 'bold_signal');
+  assert.equal(project.template_id, null);
   assert.equal(project.output.resolution.width, 1920);
   assert.equal(project.output.resolution.height, 1080);
   assert.equal(project.output.fps, 30);
@@ -100,7 +99,6 @@ const projectStore = require('../server/services/creative-video/html-video/proje
         ],
       },
       target: {},
-      template: { id: 'template-a' },
     });
   }, /内容图节点 scene_02 未匹配到 scene_spec 场景/);
 
@@ -124,7 +122,6 @@ const projectStore = require('../server/services/creative-video/html-video/proje
         ],
       },
       target: {},
-      template: { id: 'template-a' },
     });
     assert.equal(boundProject.frames.length, 1);
     assert.equal(boundProject.frames[0].id, 'scene_01');
@@ -174,7 +171,6 @@ const projectStore = require('../server/services/creative-video/html-video/proje
           scenes: [{ id: 'scene_01', narration_text: '失败帧不应恢复。' }],
         },
         target: {},
-        template: { id: 'template-a' },
       });
     }, /缺少帧 scene_01 的 raw HTML 路径/);
   }

@@ -48,26 +48,6 @@ async function run() {
         ],
       };
     },
-    appSettings: {
-      getCreativeDefaults: async () => ({
-        aspectRatio: '9:16',
-        targetDurationSec: 60,
-        templateByAspectRatio: {
-          '9:16': 'news_signal_vertical',
-          '16:9': 'bold_signal',
-        },
-      }),
-    },
-    templateRegistry: {
-      scanTemplateManifests: () => [
-        { id: 'news_signal_vertical', name: '竖屏新闻', output: { resolution: { width: 1080, height: 1920 } } },
-        { id: 'bold_signal', name: '横屏信号', output: { resolution: { width: 1920, height: 1080 } } },
-      ],
-      validateTemplateCompatibility: (manifest, options) => ({
-        ok: manifest.id === 'news_signal_vertical' && options.aspectRatio === '9:16',
-        reasons: manifest.id === 'news_signal_vertical' ? [] : [{ code: 'unsupported-aspect', message: '模板不支持目标画幅' }],
-      }),
-    },
     aiModelConfig: {
       getPublicConfig: async () => ({
         providers: {
@@ -178,12 +158,7 @@ async function run() {
     },
   });
 
-  assert.deepStrictEqual(Object.keys(first).sort(), ['environment', 'models', 'storage', 'templates']);
-  assert.strictEqual(first.templates.defaults.aspectRatio, '9:16');
-  assert.strictEqual(first.templates.defaults.templateByAspectRatio['9:16'], 'news_signal_vertical');
-  assert.strictEqual(first.templates.items.length, 2);
-  assert.strictEqual(first.templates.items[0].compatible, true);
-  assert.strictEqual(first.templates.items[1].compatible, false);
+  assert.deepStrictEqual(Object.keys(first).sort(), ['environment', 'models', 'storage']);
 
   const throwing = await getSystemHealth({
     rootDir,

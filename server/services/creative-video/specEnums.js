@@ -1,5 +1,3 @@
-const templateRegistry = require('./templateRegistry');
-
 const KINDS = ['text', 'data', 'quote', 'steps', 'comparison', 'cta'];
 
 // Legacy templates (hardcoded)
@@ -15,11 +13,10 @@ function includes(list, value) {
 }
 
 /**
- * Get all allowed template IDs (legacy + rich from filesystem).
+ * Get all allowed template IDs.
  */
 function getAllTemplateIds() {
-  const richIds = templateRegistry.getRichTemplateIds();
-  return [...new Set([...LEGACY_TEMPLATES, ...richIds])];
+  return [...LEGACY_TEMPLATES];
 }
 
 module.exports = {
@@ -30,13 +27,7 @@ module.exports = {
   MOTIONS,
   VISUAL_LAYER_TYPES,
   isAllowedKind: value => includes(KINDS, value),
-  isAllowedTemplate: value => {
-    const id = String(value || '').trim();
-    // Check legacy templates first
-    if (LEGACY_TEMPLATES.includes(id)) return true;
-    // Check rich templates from filesystem
-    return templateRegistry.hasTemplate(id);
-  },
+  isAllowedTemplate: value => LEGACY_TEMPLATES.includes(String(value || '').trim()),
   isAllowedLayout: value => includes(LAYOUTS, value),
   isAllowedBackground: value => includes(BACKGROUNDS, value),
   isAllowedMotion: value => includes(MOTIONS, value),

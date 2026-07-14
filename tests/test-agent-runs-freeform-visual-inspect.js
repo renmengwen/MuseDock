@@ -21,9 +21,9 @@ const workflows = require('../server/services/creative/creativeWorkflows');
     issues: [],
     warnings: [
       {
-        code: 'asset_first_template_takeover',
+        code: 'sample_warning_a',
         severity: 'warning',
-        message: 'asset_first 下出现 2 条整帧模板决策。',
+        message: '抽样观察到 2 个 beat 画面异常。',
         details: { beats: [{ beat_id: 'b1', template_id: 't1' }, { beat_id: 'b2', template_id: 't2' }] },
       },
       {
@@ -38,7 +38,7 @@ const workflows = require('../server/services/creative/creativeWorkflows');
   assert.equal(projected.message, '视觉质检通过（2 条观察告警）。');
   assert.notEqual(projected.message, '视觉质检通过。');
   assert.equal(projected.warnings.length, 2);
-  assert.equal(projected.warnings[0].code, 'asset_first_template_takeover');
+  assert.equal(projected.warnings[0].code, 'sample_warning_a');
   assert.deepEqual(projected.warnings[0].details.beat_ids, ['b1', 'b2']);
   assert.equal(projected.warnings[1].details.scene_id, 'scene_02');
   assert.equal(projected.warnings[1].details.boundary_sec, 3.2);

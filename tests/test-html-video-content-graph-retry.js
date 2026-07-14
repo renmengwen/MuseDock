@@ -12,38 +12,6 @@ const aiImageModel = require('../server/services/ai/aiImageModel');
 aiImageModel.isConfigured = async () => false;
 
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
-const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
-
-async function writeFile(filePath, content) {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, content, 'utf8');
-}
-
-async function createTemplate(rootDir) {
-  const dir = path.join(rootDir, 'vertical');
-  await writeFile(path.join(dir, 'template.html-video.yaml'), [
-    'id: vertical',
-    'name: 竖屏模板',
-    'engine: hyperframes',
-    'source_entry: index.html',
-    'output:',
-    '  resolution:',
-    '    width: 1080',
-    '    height: 1920',
-    '  fps: 24',
-    '  duration: 4',
-    'inputs:',
-    '  schema:',
-    '    type: object',
-    '    properties:',
-    '      headline:',
-    '        type: string',
-    'license:',
-    '  commercial_use: true',
-    '',
-  ].join('\n'));
-  await writeFile(path.join(dir, 'index.html'), '<html><body>{{headline}}</body></html>');
-}
 
 function sceneSpec() {
   return {
@@ -64,11 +32,7 @@ function sceneSpec() {
 
 async function createRegistry() {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-content-graph-retry-'));
-  const templateRoot = path.join(rootDir, 'templates');
-  await createTemplate(templateRoot);
-  const templateRegistry = createTemplateRegistry({ rootDir: templateRoot });
-  templateRegistry.scanTemplates();
-  return { rootDir, templateRegistry };
+  return { rootDir };
 }
 
 async function main() {
@@ -166,15 +130,11 @@ async function main() {
       sceneSpec: sceneSpec(),
       creativeContext: { input: { raw_text: '空内容需要重试后 fallback' } },
       target: { generate_audio: false },
-      templateRegistry: retrySetup.templateRegistry,
       skipValidation: true,
       services: {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.includes('当前帧：scene_01')) {
               return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">第一幕</h1></main></body></html>' };
             }
@@ -220,15 +180,11 @@ async function main() {
       sceneSpec: sceneSpec(),
       creativeContext: { input: { raw_text: '首次普通 mismatch 只 warning' } },
       target: { generate_audio: false },
-      templateRegistry: mismatchSetup.templateRegistry,
       skipValidation: true,
       services: {
         aiTextModel: {
           async callTextModel(request) {
             const prompt = request.messages.map(item => item.content).join('\n');
-            if (prompt.includes('"template_id"')) {
-              return { success: true, text: JSON.stringify({ template_id: 'vertical', reason: '匹配竖屏', confidence: 0.9 }) };
-            }
             if (prompt.startsWith('你是 html-video 的 content graph')) {
               return {
                 success: true,

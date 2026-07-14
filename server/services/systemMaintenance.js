@@ -3,8 +3,6 @@ const fsp = require('fs/promises');
 const path = require('path');
 
 const defaultEnvironmentDoctor = require('./creative-video/html-video/environmentDoctor');
-const defaultTemplateRegistry = require('./creative-video/html-video/templateRegistry');
-const defaultAppSettings = require('./appSettings');
 const defaultAiModelConfig = require('./ai/aiModelConfig');
 
 const HEALTH_CACHE_TTL_MS = 60 * 1000;
@@ -567,51 +565,6 @@ async function getCachedEnvironment(options = {}) {
   return value;
 }
 
-function compactTemplate(manifest, compatibility) {
-  const output = manifest.output || {};
-  return {
-    id: manifest.id,
-    name: manifest.name || manifest.id,
-    description: manifest.description || '',
-    category: manifest.category || '',
-    tags: Array.isArray(manifest.tags) ? manifest.tags : [],
-    engine: manifest.engine || '',
-    source_entry: manifest.source_entry || '',
-    output,
-    compatible: compatibility.ok,
-    compatibility_reasons: Array.isArray(compatibility.reasons) ? compatibility.reasons : [],
-  };
-}
-
-async function getTemplateOverview(options = {}) {
-  const services = options.services || {};
-  const settings = services.appSettings || defaultAppSettings;
-  const registry = services.templateRegistry || defaultTemplateRegistry;
-  const defaults = await settings.getCreativeDefaults();
-  const templateRoot = options.templateRoot
-    || registry.DEFAULT_ROOT_DIRS
-    || registry.DEFAULT_ROOT_DIR
-    || defaultTemplateRegistry.DEFAULT_ROOT_DIRS
-    || defaultTemplateRegistry.DEFAULT_ROOT_DIR;
-  const manifests = typeof registry.scanTemplateManifests === 'function'
-    ? registry.scanTemplateManifests(templateRoot)
-    : [];
-  const compatibilityOptions = {
-    aspectRatio: defaults?.aspectRatio,
-    durationSec: defaults?.targetDurationSec,
-  };
-
-  return {
-    defaults,
-    items: manifests.map(manifest => {
-      const compatibility = typeof registry.validateTemplateCompatibility === 'function'
-        ? registry.validateTemplateCompatibility(manifest, compatibilityOptions)
-        : { ok: true, reasons: [] };
-      return compactTemplate(manifest, compatibility);
-    }),
-  };
-}
-
 function resolveActiveModel(publicConfig, type) {
   const activeRef = publicConfig?.active?.[type] || '';
   const [providerId, modelType = type] = String(activeRef).split('/');
@@ -640,16 +593,14 @@ async function getModelOverview(options = {}) {
 }
 
 async function getSystemHealth(options = {}) {
-  const [environment, templates, models, storage] = await Promise.all([
+  const [environment, models, storage] = await Promise.all([
     getCachedEnvironment(options),
-    getTemplateOverview(options),
     getModelOverview(options),
     getCachedStorage(options),
   ]);
 
   return {
     environment,
-    templates,
     models,
     storage,
   };

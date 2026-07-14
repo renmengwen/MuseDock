@@ -24,13 +24,6 @@ function createDefaults(overrides = {}) {
   return {
     aspectRatio: '16:9',
     targetDurationSec: 90,
-    templateByAspectRatio: {
-      '16:9': 'bold_signal',
-      '9:16': 'news_signal_vertical',
-      '1:1': '',
-      '4:5': '',
-    },
-    lockTemplate: true,
     useResearch: false,
     generateAudio: true,
     generateCaptions: true,
@@ -121,8 +114,6 @@ function createServices({
 function assertSnapshotRecord(record, {
   aspectRatio = '16:9',
   durationSec = 90,
-  templateId = 'bold_signal',
-  lockTemplate = true,
   useResearch = false,
   generateAudio = true,
   generateCaptions = true,
@@ -135,8 +126,6 @@ function assertSnapshotRecord(record, {
   assert.ok(record.creative_defaults_snapshot, 'snapshot fields missing');
   assert.equal(record.creative_defaults_snapshot.aspectRatio, aspectRatio);
   assert.equal(record.creative_defaults_snapshot.targetDurationSec, durationSec);
-  assert.equal(record.creative_defaults_snapshot.templateId, templateId);
-  assert.equal(record.creative_defaults_snapshot.lockTemplate, lockTemplate);
   assert.equal(record.creative_defaults_snapshot.useResearch, useResearch);
   assert.equal(record.creative_defaults_snapshot.generateAudio, generateAudio);
   assert.equal(record.creative_defaults_snapshot.generateCaptions, generateCaptions);
@@ -148,8 +137,6 @@ function assertSnapshotRecord(record, {
   assert.ok(record.target, 'target fields missing');
   assert.equal(record.target.aspect_ratio, aspectRatio);
   assert.equal(record.target.duration_sec, durationSec);
-  assert.equal(record.target.preferredTemplateId, templateId);
-  assert.equal(record.target.lockTemplate, lockTemplate);
   assert.equal(record.target.generateAudio, generateAudio);
   assert.equal(record.target.generateCaptions, generateCaptions);
   assert.equal(record.target.autoSfxEnabled, autoSfxEnabled);
@@ -196,19 +183,7 @@ async function testCreativeDefaultsOverrideWins() {
   });
   assertSnapshotRecord(record, {
     aspectRatio: '9:16',
-    templateId: 'news_signal_vertical',
     useResearch: true,
-  });
-}
-
-async function testCreativeDefaultsOverrideTemplateIdWins() {
-  const { record } = await createAndRead({
-    creativeDefaultsOverride: {
-      templateId: 'manual_template',
-    },
-  });
-  assertSnapshotRecord(record, {
-    templateId: 'manual_template',
   });
 }
 
@@ -358,13 +333,6 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   defaults = createDefaults({
     aspectRatio: '9:16',
     targetDurationSec: 30,
-    templateByAspectRatio: {
-      '16:9': 'runtime_should_not_apply',
-      '9:16': 'runtime_vertical',
-      '1:1': '',
-      '4:5': '',
-    },
-    lockTemplate: false,
     useResearch: true,
   });
   systemSettings = { skipValidation: false };
@@ -375,8 +343,6 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
     services,
     projectOptions: {
       aspect_ratio: 'runtime_aspect',
-      preferredTemplateId: 'runtime_override',
-      lockTemplate: false,
       runtimeFlag: 'kept',
     },
   });
@@ -396,8 +362,6 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   assert.equal(projectCall.options.skipValidation, true);
   assert.equal(projectCall.options.projectOptions.aspect_ratio, 'runtime_aspect');
   assert.equal(projectCall.options.projectOptions.duration_sec, 90);
-  assert.equal(projectCall.options.projectOptions.preferredTemplateId, 'bold_signal');
-  assert.equal(projectCall.options.projectOptions.lockTemplate, true);
   assert.equal(projectCall.options.projectOptions.frameHtmlConcurrency, 1);
   assert.equal(projectCall.options.projectOptions.runtimeFlag, 'kept');
   assert.equal(projectCall.options.projectOptions.creative_context.input.raw_text, '运行期默认值快照测试');
@@ -407,7 +371,6 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   await testCreateUsesAppDefaultsSnapshot();
   await testLegacyUseResearchOverridesDefaults();
   await testCreativeDefaultsOverrideWins();
-  await testCreativeDefaultsOverrideTemplateIdWins();
   await testCreativeDefaultsOverrideBeatsLegacyUseResearch();
   await testCreativeDefaultsOverrideSourceImageAnalysisWins();
   await testMissingDefaultUseResearchDefaultsToTrue();
