@@ -5,10 +5,8 @@ const path = require('path');
 
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
-const { createTemplateRegistry } = require('../server/services/creative-video/html-video/templateRegistry');
 const { buildMixedFrameProject } = require('../server/services/creative-video/html-video/mixedFrameBuilder');
 const { validateHtmlVideoProject } = require('../server/services/creative-video/html-video/validationGate');
-const { resolveGenerationMode } = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
 const { buildVisualPlan } = require('../server/services/creative-video/html-video/visualPlanService');
 const { matchVisualBeatsToRenderers } = require('../server/services/creative-video/html-video/visualRouteMatcher');
 const { normalizeCaptions } = require('../server/services/creative-video/html-video/rawHtmlFrameBuilder');
@@ -18,13 +16,6 @@ const { normalizeCaptions } = require('../server/services/creative-video/html-vi
 const stubAiImageModel = { isConfigured: async () => false };
 
 (async () => {
-  assert.equal(resolveGenerationMode({}), 'per_scene');
-  assert.equal(resolveGenerationMode({ html_video_generation_mode: 'per_scene' }), 'per_scene');
-  assert.equal(resolveGenerationMode({ html_video_generation_mode: 'raw_html' }), 'raw_html');
-  assert.equal(resolveGenerationMode({ htmlVideoGenerationMode: 'template_inputs' }), 'template_inputs');
-
-  const registry = createTemplateRegistry();
-  registry.scanTemplates();
   const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-per-scene-'));
 
   const sceneSpec = {
@@ -107,11 +98,7 @@ const stubAiImageModel = { isConfigured: async () => false };
     ],
   };
   const visualPlan = buildVisualPlan({ sceneSpec: beatSpec, workflowId: 'wf' });
-  const visualDecisions = matchVisualBeatsToRenderers({
-    visualPlan,
-    registry,
-    renderTarget: { aspectRatio: '16:9' },
-  });
+  const visualDecisions = matchVisualBeatsToRenderers({ visualPlan });
   const beatProject = await buildMixedFrameProject({
     projectDir,
     workflowId: 'wf',
@@ -119,7 +106,6 @@ const stubAiImageModel = { isConfigured: async () => false };
     graph: beatGraph,
     sceneSpec: beatSpec,
     target: { aspect_ratio: '16:9', resolution: { width: 1920, height: 1080 }, fps: 30 },
-    registry,
     decisions: visualDecisions,
     visualPlan,
     mediaOptions: { generateCaptions: true },
@@ -179,7 +165,6 @@ const stubAiImageModel = { isConfigured: async () => false };
   const beatValidation = await validateHtmlVideoProject({
     project: beatProject,
     projectDir,
-    templateRegistry: registry,
     environment: { ok: true, diagnostics: [] },
     sceneSpec: beatSpec,
     mediaOptions: { generateCaptions: true, generateAudio: false },
@@ -222,7 +207,6 @@ const stubAiImageModel = { isConfigured: async () => false };
       sceneSpec: workflowSceneSpec,
       creativeContext: { input: { raw_text: '逐场景视觉计划' } },
       target: { generateAudio: false, generateCaptions: false },
-      templateRegistry: registry,
       skipValidation: true,
       services: {
         aiImageModel: stubAiImageModel,
@@ -324,7 +308,6 @@ const stubAiImageModel = { isConfigured: async () => false };
       sceneSpec: workflowSceneSpec,
       creativeContext: { input: { raw_text: '图片优先逐场景' }, visual_strategy: 'asset_first' },
       target: { generateAudio: false, generateCaptions: false },
-      templateRegistry: registry,
       skipValidation: true,
       services: {
         aiImageModel: generatingImageModel,
@@ -451,7 +434,6 @@ const stubAiImageModel = { isConfigured: async () => false };
         // 关键：retry/resume 调用不带 visual_strategy，模拟只带 projectDir/workflowId/runId/sceneSpec 的重试入口
         creativeContext: { input: { raw_text: '图片优先逐场景' } },
         target: { generateAudio: false, generateCaptions: false },
-        templateRegistry: registry,
         skipValidation: true,
         services: {
           aiImageModel: generatingImageModel,
@@ -534,7 +516,6 @@ const stubAiImageModel = { isConfigured: async () => false };
         sceneSpec: workflowSceneSpec,
         creativeContext: { input: { raw_text: '图片优先建帧失败' }, visual_strategy: 'asset_first' },
         target: { generateAudio: false, generateCaptions: false },
-        templateRegistry: registry,
         skipValidation: true,
         services: {
           aiImageModel: stubAiImageModel,

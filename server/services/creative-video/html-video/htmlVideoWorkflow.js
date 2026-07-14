@@ -4,21 +4,16 @@ const path = require('path');
 const crypto = require('crypto');
 
 const aiTextModel = require('../../ai/aiTextModel');
-const { createTemplateRegistry, DEFAULT_ROOT_DIR, validateTemplateCompatibility } = require('./templateRegistry');
-const templateSelectorAgent = require('./templateSelectorAgent');
-const templateInputAgent = require('./templateInputAgent');
 const contentGraphAgent = require('./contentGraphAgent');
 const frameHtmlAgent = require('./frameHtmlAgent');
 const frameFallbackBuilder = require('./frameFallbackBuilder');
 const { runFrameHtmlPhase, isProviderMissingText, groupBeatsForSceneHtml } = require('./frameHtmlPhase');
-const { buildRawHtmlFrameProject } = require('./rawHtmlFrameBuilder');
 const { buildMixedFrameProject } = require('./mixedFrameBuilder');
 const { buildVisualPlan, assignMotionOrchestration } = require('./visualPlanService');
 const { matchVisualBeatsToRenderers } = require('./visualRouteMatcher');
 const {
   runGeneratedImagePhase,
   hydrateGeneratedAssetsFromProject,
-  enforceAssetFirstRawHtmlRouting,
 } = require('./generatedImagePhase');
 const environmentDoctor = require('./environmentDoctor');
 const projectStore = require('./projectStore');
@@ -38,8 +33,7 @@ const defaultLayoutQaService = require('./layoutQaService');
 const { computeSceneSpecSpeechHash, audioMatchesSceneSpec } = require('../sceneSpecHash');
 const { applyManifestToProjectAudio } = require('../ttsService');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
-const { mapSceneSpecToContentGraph, buildFramesFromGraph } = require('./sceneSpecMapper');
-const { matchScenesToTemplates } = require('./sceneTemplateMatcher');
+const { mapSceneSpecToContentGraph } = require('./sceneSpecMapper');
 const { resolveNodeSceneId, validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
 const { topoSort } = require('./contentGraph');
 const sfxLibrary = require('./sfxLibrary');
@@ -420,45 +414,6 @@ function aggregateBeatRoutingByScene(visualPlan, visualDecisions) {
   return bySceneId;
 }
 
-/**
- * enforceAssetFirstRawHtmlRouting 只覆写 scene 级决策；
- * 这里把覆写扇出到该场景的全部 beat（template beat 或缺决策 beat 改为 raw_html 并带覆写原因），
- * 已经是 raw_html 的 beat 保留原有 fallback 信息。返回是否有变更。
- */
-function fanOutAssetFirstOverridesToBeats({ perSceneDecisions, visualPlan, visualDecisions } = {}) {
-  if (!(perSceneDecisions instanceof Map) || !(visualDecisions instanceof Map)) return false;
-  const beats = Array.isArray(visualPlan?.beats) ? visualPlan.beats : [];
-  if (!beats.length) return false;
-  const overriddenSceneIds = new Set();
-  for (const [sceneId, decision] of perSceneDecisions) {
-    if (decision?.source_mode === 'raw_html'
-      && ['asset_first_generated_subject', 'required_asset_ref'].includes(decision?.override_reason)) {
-      overriddenSceneIds.add(sceneId);
-    }
-  }
-  if (!overriddenSceneIds.size) return false;
-  let changed = false;
-  for (const beat of beats) {
-    if (!beat || !beat.id || !overriddenSceneIds.has(String(beat.scene_id || '').trim())) continue;
-    const beatDecision = visualDecisions.get(beat.id) || null;
-    if (beatDecision && beatDecision.source_mode !== 'template_inputs') continue;
-    const { inputs: _inputs, ...rest } = beatDecision || {};
-    visualDecisions.set(beat.id, {
-      beat_id: beat.id,
-      scene_id: beat.scene_id,
-      ...rest,
-      source_mode: 'raw_html',
-      template_id: null,
-      duration_strategy: 'raw_html',
-      ...(beatDecision?.source_mode === 'template_inputs' ? { fallback_from: 'template_inputs' } : {}),
-      fallback_reason: '该场景已选择视觉素材，已改用自由 HTML 以确保素材进入画面。',
-      override_reason: 'required_asset_ref',
-    });
-    changed = true;
-  }
-  return changed;
-}
-
 // R4：帧统计（overlay_check/text_blocks/cards/graphics）必须合并进 attachVisualRouting
 // 闭包引用的 visualDecisions/renderDecisions 源对象，直接写 project.render_decisions
 // 会在下一次 attachVisualRouting 重挂时被覆盖抹掉。
@@ -794,96 +749,6 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
   };
 }
 
-function reorderCompactIndex(compactIndex = [], preferredTemplateId = '') {
-  const preferredId = String(preferredTemplateId || '').trim();
-  const items = Array.isArray(compactIndex) ? compactIndex : [];
-  if (!preferredId) return items;
-  const preferred = items.find(item => item && item.id === preferredId);
-  if (!preferred) return items;
-  return [
-    preferred,
-    ...items.filter(item => item && item.id !== preferredId),
-  ];
-}
-
-async function requestTemplateSelection({
-  model,
-  compactIndex,
-  creativeContext,
-  target,
-  sceneSpec,
-  preferredTemplateId = '',
-  lockTemplate = false,
-} = {}) {
-  const preferredId = firstNonEmptyString(preferredTemplateId, target?.preferredTemplateId, target?.preferred_template_id);
-  const preferred = (Array.isArray(compactIndex) ? compactIndex : [])
-    .find(item => item && item.id === preferredId);
-  const selectionIndex = preferred ? reorderCompactIndex(compactIndex, preferredId) : compactIndex;
-
-  if (lockTemplate === true && preferred) {
-    return {
-      success: true,
-      template_id: preferred.id,
-      reason: '使用锁定模板。',
-      confidence: 1,
-    };
-  }
-
-  const promptTarget = preferred && lockTemplate !== true
-    ? {
-      ...objectOrEmpty(target),
-      preferredTemplateId: preferredId,
-      templateSelectionPolicy: '优先选择该模板，除非内容明显不适合。',
-    }
-    : target;
-  const prompt = templateSelectorAgent.buildTemplateSelectionPrompt({
-    sceneSpec: sceneSpec || {
-      title: creativeContext?.brief?.title || creativeContext?.input?.raw_text || creativeContext?.input?.title || 'html-video',
-      creative_context_summary: creativeContext?.brief?.summary || creativeContext?.source_context?.summary || '',
-    },
-    compactIndex: selectionIndex,
-    target: promptTarget,
-  });
-  const ai = await callTextModel(model, prompt, {
-    audit: {
-      agent: AGENTS.templateSelector,
-      stage: STAGES.templateSelection,
-      sub_stage: 'template_select',
-      attempt: 1,
-    },
-  });
-  if (!ai.success) return ai;
-  return templateSelectorAgent.parseTemplateSelectionResponse(ai.text, { compactIndex: selectionIndex });
-}
-
-async function requestTemplateInputs({ model, template, creativeContext, sceneSpec }) {
-  const prompt = templateInputAgent.buildTemplateInputPrompt({
-    sceneSpec: sceneSpec || {
-      title: creativeContext?.brief?.title || creativeContext?.input?.raw_text || creativeContext?.input?.title || 'html-video',
-      brief: creativeContext?.brief || {},
-    },
-    template,
-    creativeContext,
-  });
-  const ai = await callTextModel(model, prompt, {
-    audit: {
-      agent: AGENTS.templateInput,
-      stage: STAGES.templateInputs,
-      sub_stage: 'template_inputs',
-      attempt: 1,
-    },
-  });
-  if (!ai.success) return ai;
-  return templateInputAgent.parseTemplateInputResponse(ai.text, { template });
-}
-
-function durationFromTarget(target, template) {
-  const output = objectOrEmpty(template.output);
-  const value = target.duration_sec ?? target.durationSec ?? target.duration ?? output.duration_sec ?? output.duration ?? 6;
-  const duration = Number(value);
-  return Number.isFinite(duration) && duration > 0 ? duration : 6;
-}
-
 function firstPositiveNumber(...values) {
   for (const value of values) {
     const number = Number(value);
@@ -915,139 +780,26 @@ function resolveRenderTarget(target = {}, sceneSpec = {}) {
   };
 }
 
-function resolveTemplateRenderTarget(target = {}, template = {}) {
-  const output = objectOrEmpty(template.output);
-  const outputResolution = objectOrEmpty(output.resolution);
+const RENDER_TARGET_DEFAULTS = {
+  '9:16': { width: 1080, height: 1920 },
+  '16:9': { width: 1920, height: 1080 },
+  '1:1': { width: 1080, height: 1080 },
+  '4:5': { width: 1080, height: 1350 },
+};
+const DEFAULT_RENDER_FPS = 30;
+
+function applyRenderTargetDefaults(target = {}) {
+  const aspect = String(target.aspect_ratio || target.aspectRatio || '9:16').trim();
+  const fallback = RENDER_TARGET_DEFAULTS[aspect] || RENDER_TARGET_DEFAULTS['9:16'];
   const targetResolution = objectOrEmpty(target.resolution);
-  const width = firstPositiveNumber(target.width, targetResolution.width, outputResolution.width);
-  const height = firstPositiveNumber(target.height, targetResolution.height, outputResolution.height);
-  const fps = firstPositiveNumber(target.fps, output.fps);
-  const durationSec = firstPositiveNumber(
-    target.duration_sec,
-    target.durationSec,
-    target.duration,
-    output.duration_sec,
-    output.duration,
-  );
-  return {
-    ...target,
-    ...(width && height ? {
-      width,
-      height,
-      resolution: { width, height },
-    } : {}),
-    ...(fps ? { fps } : {}),
-    ...(durationSec ? {
-      duration_sec: durationSec,
-      durationSec,
-    } : {}),
-  };
-}
-
-function buildTemplateIndexOptions(renderTarget = {}, sceneSpec = {}) {
-  const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
-  const isMultiScene = scenes.length > 1;
-  return {
-    aspectRatio: renderTarget.aspect_ratio || renderTarget.aspectRatio,
-    durationSec: isMultiScene
-      ? undefined
-      : (renderTarget.duration_sec || renderTarget.durationSec || renderTarget.duration),
-  };
-}
-
-function hasOwn(object, key) {
-  return Object.prototype.hasOwnProperty.call(object || {}, key);
-}
-
-function resolveLockTemplate(options = {}, target = {}) {
-  if (hasOwn(options, 'lockTemplate')) return options.lockTemplate === true;
-  if (hasOwn(options, 'lock_template')) return options.lock_template === true;
-  return target.lockTemplate === true || target.lock_template === true;
-}
-
-function resolvePreferredTemplateId(preferredTemplateId, target = {}) {
-  return firstNonEmptyString(preferredTemplateId, target.preferredTemplateId, target.preferred_template_id);
-}
-
-function validatePreferredTemplate({ registry, preferredTemplateId, options }) {
-  const id = String(preferredTemplateId || '').trim();
-  if (!id) return { id: '', template: null, compatible: false, missing: false, validation: null };
-  const template = registry.getTemplate(id);
-  if (!template) {
-    return { id, template: null, compatible: false, missing: true, validation: null };
-  }
-  const validation = validateTemplateCompatibility(template, options);
-  return {
-    id,
-    template,
-    compatible: validation.ok,
-    missing: false,
-    validation,
-  };
-}
-
-function resolveGenerationMode(target = {}) {
-  return target.html_video_generation_mode
-    || target.htmlVideoGenerationMode
-    || target.generation_mode
-    || 'per_scene';
+  const width = firstPositiveNumber(target.width, targetResolution.width, fallback.width);
+  const height = firstPositiveNumber(target.height, targetResolution.height, fallback.height);
+  const fps = firstPositiveNumber(target.fps, DEFAULT_RENDER_FPS);
+  return { ...target, width, height, resolution: { width, height }, fps };
 }
 
 function hasSceneSpecScenes(sceneSpec) {
   return Boolean(sceneSpec && Array.isArray(sceneSpec.scenes) && sceneSpec.scenes.length > 0);
-}
-
-function buildInitialProject({ workflowId, runId, sceneSpec, template, templateInputs, target }) {
-  const duration = durationFromTarget(target, template);
-  const output = objectOrEmpty(template.output);
-  const templateSchema = objectOrEmpty(objectOrEmpty(template.inputs).schema);
-  const contentGraph = mapSceneSpecToContentGraph(sceneSpec || {});
-  const mappedFrames = buildFramesFromGraph({
-    sceneSpec: sceneSpec || {},
-    contentGraph,
-    templateId: template.id,
-    templateInputs,
-    templateSchema,
-  });
-  const frames = mappedFrames.length ? mappedFrames : [{
-    id: 'frame_01',
-    scene_id: 'scene_01',
-    order: 1,
-    template_id: template.id,
-    inputs: templateInputs,
-    duration_sec: duration,
-  }];
-  let cursor = 0;
-  const items = frames.map(frame => {
-    const durationSec = Number(frame.duration_sec || duration);
-    const item = {
-      id: `item_${frame.id}`,
-      kind: 'frame',
-      frame_id: frame.id,
-      start_sec: cursor,
-      duration_sec: durationSec,
-    };
-    cursor += durationSec;
-    return item;
-  });
-  return normalizeProject({
-    project_id: `${workflowId}_${runId}`,
-    workflow_id: workflowId,
-    run_id: runId,
-    template_id: template.id,
-    template_inputs: templateInputs,
-    output,
-    template_schema: templateSchema,
-    content_graph: contentGraph,
-    frames,
-    timeline: {
-      tracks: [
-        { id: 'main', type: 'video', items },
-        { id: 'voice', type: 'audio', items: [] },
-        { id: 'music', type: 'audio', items: [] },
-      ],
-    },
-  });
 }
 
 async function materializeCreativeContextAssets(projectDir, creativeContext = {}) {
@@ -1467,11 +1219,6 @@ function summarizeVisualRoute(project = {}) {
   };
 }
 
-function resolveRegistry(input) {
-  if (input) return input;
-  return createTemplateRegistry({ rootDir: DEFAULT_ROOT_DIR });
-}
-
 async function runEnvironmentDoctor(services) {
   const doctor = services.environmentDoctor || environmentDoctor.diagnoseEnvironment;
   return doctor();
@@ -1485,12 +1232,10 @@ async function generateHtmlVideo(options = {}) {
     sceneSpec: inputSceneSpec = null,
     creativeContext: inputCreativeContext = {},
     target = {},
-    templateRegistry,
     services = {},
     skipValidation = false,
     runLayoutQa = false,
     onProgress = null,
-    preferredTemplateId = '',
     projectOptions = {},
   } = options;
   let creativeContext = inputCreativeContext || {};
@@ -1509,63 +1254,9 @@ async function generateHtmlVideo(options = {}) {
   const frameHtmlConcurrency = normalizeFrameHtmlConcurrency(target, projectOptions);
   const reuseContentGraphRequested = options.reuseContentGraph === true || projectOptions?.reuseContentGraph === true;
   const regenerateFrameHtmlRequested = options.regenerateFrameHtml === true || projectOptions?.regenerateFrameHtml === true;
-  const registry = resolveRegistry(templateRegistry);
   const diagnostics = [];
   let model = getModel(services);
   const renderTarget = resolveRenderTarget(target, sceneSpec || {});
-  const generationMode = resolveGenerationMode(renderTarget);
-  const templateIndexOptions = buildTemplateIndexOptions(renderTarget, sceneSpec || {});
-  const effectivePreferredTemplateId = resolvePreferredTemplateId(preferredTemplateId, target);
-  const effectiveLockTemplate = resolveLockTemplate(options, target);
-  const preferredTemplate = validatePreferredTemplate({
-    registry,
-    preferredTemplateId: effectivePreferredTemplateId,
-    options: templateIndexOptions,
-  });
-  if (effectiveLockTemplate && effectivePreferredTemplateId && !preferredTemplate.compatible) {
-    const aspectRatio = templateIndexOptions.aspectRatio || renderTarget.aspect_ratio || renderTarget.aspectRatio || '未指定';
-    const message = `默认模板 ${effectivePreferredTemplateId} 不支持当前画面比例 ${aspectRatio}。`;
-    return failure(message, [
-      createDiagnostic({
-        code: 'locked_template_invalid',
-        stage: 'template',
-        sub_stage: 'template_select',
-        user_message: message,
-        details: {
-          template_id: effectivePreferredTemplateId,
-          aspect_ratio: aspectRatio,
-          missing: preferredTemplate.missing,
-          reasons: preferredTemplate.validation?.reasons || [],
-        },
-        fallback_allowed: false,
-      }),
-    ]);
-  }
-
-  let compactIndex = registry.buildCompactIndex(templateIndexOptions);
-  if (effectivePreferredTemplateId && !effectiveLockTemplate && !preferredTemplate.compatible) {
-    diagnostics.push(createDiagnostic({
-      code: 'preferred_template_unavailable',
-      stage: 'template',
-      sub_stage: 'template_select',
-      user_message: `首选模板 ${effectivePreferredTemplateId} 不可用，已回退为普通模板选择。`,
-      details: {
-        template_id: effectivePreferredTemplateId,
-        missing: preferredTemplate.missing,
-        reasons: preferredTemplate.validation?.reasons || [],
-      },
-      severity: 'warning',
-      fallback_allowed: true,
-    }));
-  } else if (effectivePreferredTemplateId && preferredTemplate.compatible) {
-    compactIndex = reorderCompactIndex(compactIndex, effectivePreferredTemplateId);
-  }
-
-  if (!compactIndex.length && generationMode !== 'per_scene') {
-    return failure('没有可用的 html-video 模板。', [
-      createDiagnostic({ code: 'template_missing', stage: 'template', sub_stage: 'template_select', user_message: '没有可用的 html-video 模板。' }),
-    ]);
-  }
 
   let projectDir = existingProjectDir(rootDir, workflowId, runId);
   const resumeProject = await loadExistingProject(projectDir);
@@ -1599,23 +1290,15 @@ async function generateHtmlVideo(options = {}) {
     await projectStore.saveSceneSpec(projectDir, sceneSpec);
   }
 
-  let selection = { success: true, template_id: null, reason: '' };
-  let template = null;
-  let perSceneDecisions = null;
   // beat 级视觉计划：内存版 visualPlan 含 source_scene 供建帧/路由消费，持久化版剥离 source_scene
   let visualPlan = null;
   let persistableVisualPlan = null;
-  // beat 级路由决策（Map，键为 beat.id），per_scene 分支赋值，建帧与持久化共用
+  // beat 级路由决策（Map，键为 beat.id），建帧与持久化共用
   let visualDecisions = null;
   let renderDecisions = null;
-  // per_scene 工程重建/重写 project.json 时统一挂载视觉计划与路由决策；
-  // renderDecisions 在 asset-first 覆写扇出后会重算，这里始终读取最新值
+  // per_scene 工程重建/重写 project.json 时统一挂载视觉计划与路由决策，始终读取最新值
   const attachVisualRouting = target => {
-    if (generationMode === 'per_scene' && target) {
-      // 持久化生成模式：重试恢复时 resumeArtifactsMatch 依赖它区分 per_scene 与整片模板工程
-      target.generation_mode = 'per_scene';
-    }
-    if (generationMode === 'per_scene' && persistableVisualPlan && target) {
+    if (persistableVisualPlan && target) {
       target.scene_spec = objectOrEmpty(sceneSpec);
       target.visual_plan = persistableVisualPlan;
       target.render_decisions = renderDecisions;
@@ -1623,178 +1306,95 @@ async function generateHtmlVideo(options = {}) {
     }
     return target;
   };
-  // 生图/素材水合必须在模板匹配与 beat 路由之前完成，否则路由决策看不到生成图，
-  // 会把已有主视觉的场景误路由到不支持图片的 template_inputs 模板。
+  // 生图/素材水合必须在 beat 路由之前完成，否则路由决策看不到生成图。
   creativeContext = await materializeCreativeContextAssets(projectDir, creativeContext);
   const existingProjectForGeneration = resumeProject || await loadExistingProject(projectDir);
-  if (generationMode === 'template_inputs') {
-    if (creativeContext?.visual_strategy === 'asset_first') {
-      diagnostics.push(createDiagnostic({
-        code: 'generated_image_unsupported_mode',
-        stage: 'project',
-        sub_stage: 'gen_images',
-        user_message: '当前为整片模板模式（template_inputs），不支持图片/视频优先的主视觉生成，已跳过。',
-        severity: 'warning',
-      }));
-    }
-  } else {
-    creativeContext = hydrateGeneratedAssetsFromProject({
-      project: existingProjectForGeneration,
+  creativeContext = hydrateGeneratedAssetsFromProject({
+    project: existingProjectForGeneration,
+    creativeContext,
+    projectDir,
+  });
+  let skipGeneration = false;
+  let requiredSceneIds = [];
+  if (reuseContentGraphRequested) {
+    const reusedNodes = Array.isArray(existingProjectForGeneration?.content_graph?.nodes)
+      ? existingProjectForGeneration.content_graph.nodes
+      : [];
+    const referencedGeneratedIds = new Set(reusedNodes
+      .flatMap(node => (Array.isArray(node?.asset_refs) ? node.asset_refs : []))
+      .map(ref => String(ref?.asset_id || ''))
+      .filter(id => id.startsWith('gen_')));
+    const hydratedGeneratedIds = new Set((creativeContext.asset_context?.assets || [])
+      .filter(asset => asset?.source === 'generated')
+      .map(asset => asset.id));
+    requiredSceneIds = [...referencedGeneratedIds]
+      .filter(id => !hydratedGeneratedIds.has(id))
+      .map(id => id.replace(/^gen_/, ''));
+    skipGeneration = requiredSceneIds.length === 0;
+  }
+  const generatedImageResult = skipGeneration
+    ? { creativeContext, generated_count: 0, failures: [], diagnostics: [] }
+    : await runGeneratedImagePhase({
+      sceneSpec,
       creativeContext,
       projectDir,
+      aspectRatio: renderTarget.aspect_ratio || renderTarget.aspectRatio || '',
+      requiredSceneIds,
+      services: { ...services, aiTextModel: model },
+      onProgress,
+      now: new Date().toISOString(),
     });
-    let skipGeneration = false;
-    let requiredSceneIds = [];
-    if (reuseContentGraphRequested) {
-      const reusedNodes = Array.isArray(existingProjectForGeneration?.content_graph?.nodes)
-        ? existingProjectForGeneration.content_graph.nodes
-        : [];
-      const referencedGeneratedIds = new Set(reusedNodes
-        .flatMap(node => (Array.isArray(node?.asset_refs) ? node.asset_refs : []))
-        .map(ref => String(ref?.asset_id || ''))
-        .filter(id => id.startsWith('gen_')));
-      const hydratedGeneratedIds = new Set((creativeContext.asset_context?.assets || [])
+  creativeContext = generatedImageResult.creativeContext;
+  if (generatedImageResult.diagnostics?.length) diagnostics.push(...generatedImageResult.diagnostics);
+  if (generatedImageResult.generated_count > 0) {
+    await projectStore.writeProjectJson(projectDir, current => {
+      const generatedAssets = (creativeContext.asset_context?.assets || [])
         .filter(asset => asset?.source === 'generated')
-        .map(asset => asset.id));
-      requiredSceneIds = [...referencedGeneratedIds]
-        .filter(id => !hydratedGeneratedIds.has(id))
-        .map(id => id.replace(/^gen_/, ''));
-      skipGeneration = requiredSceneIds.length === 0;
-    }
-    const generatedImageResult = skipGeneration
-      ? { creativeContext, generated_count: 0, failures: [], diagnostics: [] }
-      : await runGeneratedImagePhase({
-        sceneSpec,
-        creativeContext,
-        projectDir,
-        aspectRatio: renderTarget.aspect_ratio || renderTarget.aspectRatio || '',
-        requiredSceneIds,
-        services: { ...services, aiTextModel: model },
-        onProgress,
-        now: new Date().toISOString(),
-      });
-    creativeContext = generatedImageResult.creativeContext;
-    if (generatedImageResult.diagnostics?.length) diagnostics.push(...generatedImageResult.diagnostics);
-    if (generatedImageResult.generated_count > 0) {
-      await projectStore.writeProjectJson(projectDir, current => {
-        const generatedAssets = (creativeContext.asset_context?.assets || [])
-          .filter(asset => asset?.source === 'generated')
-          .map(asset => ({
-            id: asset.id,
-            type: 'image',
-            path: asset.path,
-            source: asset.source,
-            url: asset.url || '',
-            alt: asset.alt || '',
-            attribution: null,
-            generation: asset.generation || null,
-          }));
-        const byId = new Map((current.assets || []).map(asset => [asset.id, asset]));
-        generatedAssets.forEach(asset => byId.set(asset.id, { ...(byId.get(asset.id) || {}), ...asset }));
-        current.assets = Array.from(byId.values()).filter(asset => asset.path);
-        return current;
-      });
-    }
-  }
-  if (generationMode === 'per_scene') {
-    if (!hasSceneSpecScenes(sceneSpec)) {
-      return failure('缺少 scene_spec，无法逐场景匹配模板。', [
-        createDiagnostic({
-          code: 'scene_spec_missing',
-          stage: 'project',
-          sub_stage: 'template_select',
-          user_message: '缺少 scene_spec，无法逐场景匹配模板。',
-          details: { generation_mode: generationMode },
-          fallback_allowed: false,
-        }),
-      ], {
-        html_video_project_path: projectDir,
-        project_dir: projectDir,
-      });
-    }
-    const styleTemplateId = preferredTemplate.compatible
-      ? effectivePreferredTemplateId
-      : (compactIndex[0]?.id || '');
-    template = styleTemplateId ? registry.getTemplate(styleTemplateId) : {};
-    // 路由输入用绑定生成图后的克隆 spec；原始 sceneSpec 保持不变以稳定 scene_spec_hash
-    const routingSceneSpec = bindGeneratedAssetsToSceneSpec(sceneSpec, creativeContext);
-    perSceneDecisions = matchScenesToTemplates({
-      scenes: routingSceneSpec.scenes,
-      registry,
-      renderTarget,
-    });
-    visualPlan = buildVisualPlan({ sceneSpec: routingSceneSpec, workflowId });
-    assignMotionOrchestration(visualPlan, {
-      visualStrategy: creativeContext?.visual_strategy || null,
-      styleProfile: visualPlan.style_profile || null,
-    });
-    visualDecisions = matchVisualBeatsToRenderers({
-      visualPlan,
-      registry,
-      renderTarget,
-      options: { visualStrategy: creativeContext?.visual_strategy || null },
-    });
-    renderDecisions = Array.from(visualDecisions.values());
-    // 持久化版剥离 source_scene，防止 project.json 膨胀
-    persistableVisualPlan = {
-      ...visualPlan,
-      beats: visualPlan.beats.map(({ source_scene, ...beat }) => beat),
-    };
-    for (const decision of perSceneDecisions.values()) {
-      if (decision.source_mode === 'raw_html') {
-        diagnostics.push(createDiagnostic({
-          code: decision.diagnostic?.code || 'scene_template_fallback',
-          stage: 'template',
-          sub_stage: 'template_select',
-          frame_id: decision.scene_id,
-          severity: 'warning',
-          fallback_allowed: true,
-          user_message: decision.fallback_reason || '该场景未匹配到合适模板，已用自由生成兜底。',
-          details: decision.diagnostic?.details || {},
+        .map(asset => ({
+          id: asset.id,
+          type: 'image',
+          path: asset.path,
+          source: asset.source,
+          url: asset.url || '',
+          alt: asset.alt || '',
+          attribution: null,
+          generation: asset.generation || null,
         }));
-      }
-    }
-  } else {
-    selection = await requestTemplateSelection({
-      model,
-      compactIndex,
-      creativeContext,
-      target: renderTarget,
-      sceneSpec,
-      preferredTemplateId: preferredTemplate.compatible ? effectivePreferredTemplateId : '',
-      lockTemplate: effectiveLockTemplate,
+      const byId = new Map((current.assets || []).map(asset => [asset.id, asset]));
+      generatedAssets.forEach(asset => byId.set(asset.id, { ...(byId.get(asset.id) || {}), ...asset }));
+      current.assets = Array.from(byId.values()).filter(asset => asset.path);
+      return current;
     });
-    if (!selection.success) {
-      const selectionDiagnostics = selection.diagnostics || [];
-      const code = selectionDiagnostics.some(item => String(item).includes('unknown_template_id'))
-        ? 'template_missing'
-        : 'ai_response_invalid';
-      const message = selection.user_message || selection.message || '模板选择失败。';
-      return failure(`html-video ${message}`, [
-        createDiagnostic({
-          code,
-          stage: 'ai-template-selection',
-          sub_stage: 'template_select',
-          user_message: `html-video ${message}`,
-          details: { diagnostics: selectionDiagnostics },
-        }),
-      ]);
-    }
-
-    template = registry.getTemplate(selection.template_id);
-    if (!template) {
-      return failure(`未找到 html-video 模板：${selection.template_id}。`, [
-        createDiagnostic({
-          code: 'template_missing',
-          stage: 'template',
-          sub_stage: 'template_select',
-          user_message: `未找到 html-video 模板：${selection.template_id}。`,
-          details: { template_id: selection.template_id },
-        }),
-      ]);
-    }
   }
-  const templateRenderTarget = resolveTemplateRenderTarget(renderTarget, template);
+  if (!hasSceneSpecScenes(sceneSpec)) {
+    return failure('缺少 scene_spec，无法逐场景生成。', [
+      createDiagnostic({
+        code: 'scene_spec_missing',
+        stage: 'project',
+        sub_stage: 'template_select',
+        user_message: '缺少 scene_spec，无法逐场景生成。',
+        fallback_allowed: false,
+      }),
+    ], {
+      html_video_project_path: projectDir,
+      project_dir: projectDir,
+    });
+  }
+  // 路由输入用绑定生成图后的克隆 spec；原始 sceneSpec 保持不变以稳定 scene_spec_hash
+  const routingSceneSpec = bindGeneratedAssetsToSceneSpec(sceneSpec, creativeContext);
+  visualPlan = buildVisualPlan({ sceneSpec: routingSceneSpec, workflowId });
+  assignMotionOrchestration(visualPlan, {
+    visualStrategy: creativeContext?.visual_strategy || null,
+    styleProfile: visualPlan.style_profile || null,
+  });
+  visualDecisions = matchVisualBeatsToRenderers({ visualPlan });
+  renderDecisions = Array.from(visualDecisions.values());
+  // 持久化版剥离 source_scene，防止 project.json 膨胀
+  persistableVisualPlan = {
+    ...visualPlan,
+    beats: visualPlan.beats.map(({ source_scene, ...beat }) => beat),
+  };
+  const templateRenderTarget = applyRenderTargetDefaults(renderTarget);
   const currentSceneSpecHash = computeSceneSpecCheckpointHash(sceneSpec || {});
   const trustedTargetDurationSec = firstPositiveNumber(
     templateRenderTarget.duration_sec,
@@ -1805,347 +1405,251 @@ async function generateHtmlVideo(options = {}) {
     type: 'html_video_template_selected',
     stage: 'project',
     sub_stage: 'template_select',
-    message: generationMode === 'per_scene'
-      ? '已启用逐场景模板匹配，未设置全片主模板。'
-      : `已选择 html-video 模板：${template.name || template.id}。`,
-    data: {
-      template_id: generationMode === 'per_scene' ? null : template.id,
-      style_reference_template_id: generationMode === 'per_scene' ? (template.id || null) : null,
-      template_name: template.name || '',
-      reason: selection.reason || '',
-    },
+    message: '已启用逐场景生成。',
+    data: {},
   });
 
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
-  if (generationMode === 'raw_html' && !hasSceneSpecScenes(sceneSpec)) {
-    return failure('缺少 scene_spec，无法生成 raw_html 帧。', [
-      ...diagnostics,
-      createDiagnostic({
-        code: 'scene_spec_missing',
-        stage: 'project',
-        sub_stage: 'raw_html_build',
-        user_message: '缺少 scene_spec，无法生成 raw_html 帧。',
-        details: { generation_mode: generationMode },
-        fallback_allowed: false,
-      }),
-    ], {
-      html_video_project_path: projectDir,
-      project_dir: projectDir,
-    });
-  }
   let project = resumeProject || undefined;
-  let templateInputs = {};
 
-  if (generationMode === 'template_inputs') {
-    const inputResult = await requestTemplateInputs({
-      model,
-      template,
-      creativeContext,
-      sceneSpec,
+  const resumeAllowed = resumeArtifactsMatch(resumeProject || {}, sceneSpec, {}, 'per_scene');
+  let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec, {}, 'per_scene');
+  const reusedContentGraph = Boolean(contentGraph);
+  if (contentGraph) {
+    project = await projectStore.writeProjectJson(projectDir, current => {
+      attachVisualRouting(current);
+      current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
+      current.content_graph = contentGraph;
+      markCheckpointStage(current, 'content_graph', {
+        status: 'done',
+        reused: true,
+        diagnostic_code: '',
+      });
+      return current;
     });
-    if (!inputResult.success) {
-      return failure(inputResult.user_message || inputResult.message || 'html-video 模板字段填写失败。', [
+  } else {
+    if (reuseContentGraphRequested) {
+      const message = '未找到可复用的内容图，请先完整生成一次视频。';
+      return failure(message, [
         ...diagnostics,
         createDiagnostic({
-          code: 'template_inputs_invalid',
-          stage: 'ai-template-inputs',
-          sub_stage: 'template_inputs',
-          user_message: inputResult.user_message || inputResult.message || 'html-video 模板字段填写失败。',
-          details: { diagnostics: inputResult.diagnostics || [] },
+          code: 'content_graph_reuse_missing',
+          stage: 'project',
+          sub_stage: 'content_graph',
+          user_message: message,
+          retryable: false,
+          fallback_allowed: false,
         }),
       ], {
         html_video_project_path: projectDir,
         project_dir: projectDir,
+        project,
       });
     }
-    templateInputs = inputResult.inputs;
-    project = buildInitialProject({
-      workflowId,
-      runId,
-      sceneSpec,
-      template,
-      templateInputs,
-      target: templateRenderTarget,
+    await report(onProgress, {
+      type: 'html_video_graph_started',
+      stage: 'project',
+      sub_stage: 'content_graph',
+      message: '正在生成 html-video 内容图...',
+      data: {},
     });
-    const checkpointProject = await loadExistingProject(projectDir);
-    if (checkpointProject?.generation_checkpoint?.model_calls?.length) {
-      project.generation_checkpoint.model_calls = checkpointProject.generation_checkpoint.model_calls;
-    }
-  } else {
-    const resumeAllowed = resumeArtifactsMatch(resumeProject || {}, sceneSpec, template, generationMode);
-    let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec, template, generationMode);
-    const reusedContentGraph = Boolean(contentGraph);
-    if (contentGraph) {
+    const graphResult = await generateContentGraphWithRetry({
+      model,
+      sceneSpec,
+      creativeContext,
+      target: templateRenderTarget,
+      onProgress,
+      project,
+      projectDir,
+    });
+    if (!graphResult.success) {
+      const graphDiagnostics = normalizeDiagnostics(graphResult.diagnostics, {
+        code: 'content_graph_failed',
+        stage: 'ai-content-graph',
+        sub_stage: 'content_graph',
+        user_message: graphResult.message || 'content graph 生成失败。',
+        retryable: true,
+        repair_action: 'retry_content_graph',
+      });
       project = await projectStore.writeProjectJson(projectDir, current => {
-        current.template_id = generationMode === 'per_scene' ? null : (template.id || current.template_id);
-        attachVisualRouting(current);
-        current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
-        current.content_graph = contentGraph;
         markCheckpointStage(current, 'content_graph', {
-          status: 'done',
-          reused: true,
-          diagnostic_code: '',
+          status: 'failed',
+          input_hash: graphResult.inputHash || '',
+          diagnostic_code: graphDiagnostics[0]?.code || 'content_graph_failed',
         });
         return current;
       });
-    } else {
-      if (reuseContentGraphRequested) {
-        const message = '未找到可复用的内容图，请先完整生成一次视频。';
-        return failure(message, [
-          ...diagnostics,
-          createDiagnostic({
-            code: 'content_graph_reuse_missing',
-            stage: 'project',
-            sub_stage: 'content_graph',
-            user_message: message,
-            retryable: false,
-            fallback_allowed: false,
-          }),
-        ], {
-          html_video_project_path: projectDir,
-          project_dir: projectDir,
-          project,
-        });
-      }
-      await report(onProgress, {
-        type: 'html_video_graph_started',
-        stage: 'project',
-        sub_stage: 'content_graph',
-        message: '正在生成 html-video 内容图...',
-        data: {},
-      });
-      const graphResult = await generateContentGraphWithRetry({
-        model,
-        sceneSpec,
-        creativeContext,
-        target: templateRenderTarget,
-        onProgress,
+      return failure(graphResult.message || 'content graph 生成失败。', [...diagnostics, ...graphDiagnostics], {
+        html_video_project_path: projectDir,
+        project_dir: projectDir,
         project,
-        projectDir,
       });
-      if (!graphResult.success) {
-        const graphDiagnostics = normalizeDiagnostics(graphResult.diagnostics, {
-          code: 'content_graph_failed',
-          stage: 'ai-content-graph',
+    }
+    diagnostics.push(...normalizeDiagnostics(graphResult.diagnostics));
+    contentGraph = graphResult.contentGraph;
+    if (sceneSpec) {
+      const graphBinding = validateGraphMatchesSceneSpec(contentGraph, sceneSpec);
+      if (!graphBinding.ok) {
+        const graphDiagnostics = [
+          ...diagnostics,
+          contentGraphSceneSpecMismatchDiagnostic(graphBinding),
+        ];
+        await report(onProgress, {
+          type: 'html_video_graph_scene_spec_mismatch',
+          stage: 'project',
           sub_stage: 'content_graph',
-          user_message: graphResult.message || 'content graph 生成失败。',
-          retryable: true,
-          repair_action: 'retry_content_graph',
+          message: CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
+          data: graphBinding,
         });
         project = await projectStore.writeProjectJson(projectDir, current => {
           markCheckpointStage(current, 'content_graph', {
             status: 'failed',
             input_hash: graphResult.inputHash || '',
-            diagnostic_code: graphDiagnostics[0]?.code || 'content_graph_failed',
+            diagnostic_code: 'content_graph_scene_spec_mismatch',
           });
           return current;
         });
-        return failure(graphResult.message || 'content graph 生成失败。', [...diagnostics, ...graphDiagnostics], {
+        return failure(CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE, graphDiagnostics, {
           html_video_project_path: projectDir,
           project_dir: projectDir,
           project,
         });
       }
-      diagnostics.push(...normalizeDiagnostics(graphResult.diagnostics));
-      contentGraph = graphResult.contentGraph;
-      if (sceneSpec) {
-        const graphBinding = validateGraphMatchesSceneSpec(contentGraph, sceneSpec);
-        if (!graphBinding.ok) {
-          const graphDiagnostics = [
-            ...diagnostics,
-            contentGraphSceneSpecMismatchDiagnostic(graphBinding),
-          ];
-          await report(onProgress, {
-            type: 'html_video_graph_scene_spec_mismatch',
-            stage: 'project',
-            sub_stage: 'content_graph',
-            message: CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
-            data: graphBinding,
-          });
-          project = await projectStore.writeProjectJson(projectDir, current => {
-            markCheckpointStage(current, 'content_graph', {
-              status: 'failed',
-              input_hash: graphResult.inputHash || '',
-              diagnostic_code: 'content_graph_scene_spec_mismatch',
-            });
-            return current;
-          });
-          return failure(CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE, graphDiagnostics, {
-            html_video_project_path: projectDir,
-            project_dir: projectDir,
-            project,
-          });
-        }
-      }
-      await report(onProgress, {
-        type: 'html_video_graph_done',
-        stage: 'project',
-        sub_stage: 'content_graph',
-        message: 'html-video 内容图已生成。',
-        data: {
-          node_count: contentGraph.nodes?.length || 0,
-          edge_count: contentGraph.edges?.length || 0,
-        },
-      });
-      const contentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
-      project = await projectStore.writeProjectJson(projectDir, current => {
-        if (!reusedContentGraph) invalidateFrameHtmlResumeState(current);
-        current.template_id = generationMode === 'per_scene' ? null : (template.id || current.template_id);
-        attachVisualRouting(current);
-        current.content_graph = contentGraph;
-        current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
-        current.generation_checkpoint.target = {
-          duration_sec: firstPositiveNumber(templateRenderTarget.duration_sec, templateRenderTarget.durationSec, templateRenderTarget.duration),
-          aspect_ratio: templateRenderTarget.aspect_ratio || templateRenderTarget.aspectRatio || '',
-        };
-        markCheckpointStage(current, 'content_graph', {
-          status: 'done',
-          path: contentGraphPath,
-          input_hash: graphResult.inputHash || '',
-          output_hash: sha256(JSON.stringify(contentGraph)),
-          diagnostic_code: '',
-          reused: false,
-        });
-        return current;
-      });
     }
-    if (generationMode === 'per_scene') {
-      enforceAssetFirstRawHtmlRouting({
-        decisions: perSceneDecisions,
-        contentGraph,
-        creativeContext,
+    await report(onProgress, {
+      type: 'html_video_graph_done',
+      stage: 'project',
+      sub_stage: 'content_graph',
+      message: 'html-video 内容图已生成。',
+      data: {
+        node_count: contentGraph.nodes?.length || 0,
+        edge_count: contentGraph.edges?.length || 0,
+      },
+    });
+    const contentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
+    project = await projectStore.writeProjectJson(projectDir, current => {
+      if (!reusedContentGraph) invalidateFrameHtmlResumeState(current);
+      attachVisualRouting(current);
+      current.content_graph = contentGraph;
+      current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
+      current.generation_checkpoint.target = {
+        duration_sec: firstPositiveNumber(templateRenderTarget.duration_sec, templateRenderTarget.durationSec, templateRenderTarget.duration),
+        aspect_ratio: templateRenderTarget.aspect_ratio || templateRenderTarget.aspectRatio || '',
+      };
+      markCheckpointStage(current, 'content_graph', {
+        status: 'done',
+        path: contentGraphPath,
+        input_hash: graphResult.inputHash || '',
+        output_hash: sha256(JSON.stringify(contentGraph)),
+        diagnostic_code: '',
+        reused: false,
       });
-      // asset-first 覆写按 scene 生效，这里扇出到该场景全部 beat，并重算持久化的 render_decisions，
-      // 消除“盘上 render_decisions 与实际建帧路由不一致”的时序缺陷
-      const fannedOut = fanOutAssetFirstOverridesToBeats({
-        perSceneDecisions,
-        visualPlan,
-        visualDecisions,
-      });
-      if (fannedOut) {
-        renderDecisions = Array.from(visualDecisions.values());
-        project = await projectStore.writeProjectJson(projectDir, current => attachVisualRouting(current));
-      }
-      // scene_html 分支只在 asset_first + scene_html 生效；此时 project.visual_strategy 尚未挂载
-      // （attachVisualStrategy 在建帧后才调用），用 creativeContext 判断等价条件。
-      contentGraph = (creativeContext?.visual_strategy === 'asset_first'
-        && (creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html')
-        ? expandContentGraphToSceneEntries(contentGraph, visualPlan)
-        : expandContentGraphToVisualBeats({ graph: contentGraph, visualPlan, visualDecisions });
-      const expandedContentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
-      project = await projectStore.writeProjectJson(projectDir, current => {
-        current.content_graph = contentGraph;
-        current.generation_checkpoint = objectOrEmpty(current.generation_checkpoint);
-        current.generation_checkpoint.stages = objectOrEmpty(current.generation_checkpoint.stages);
-        current.generation_checkpoint.stages.content_graph = {
-          ...(current.generation_checkpoint.stages.content_graph || {}),
-          path: expandedContentGraphPath,
-          output_hash: sha256(JSON.stringify(contentGraph)),
-        };
-        attachVisualRouting(current);
-        return current;
-      });
-    }
-    const frameHtmlResult = await runFrameHtmlPhase({
-      model,
+      return current;
+    });
+  }
+  // scene_html 分支只在 asset_first + scene_html 生效；此时 project.visual_strategy 尚未挂载
+  // （attachVisualStrategy 在建帧后才调用），用 creativeContext 判断等价条件。
+  contentGraph = (creativeContext?.visual_strategy === 'asset_first'
+    && (creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html')
+    ? expandContentGraphToSceneEntries(contentGraph, visualPlan)
+    : expandContentGraphToVisualBeats({ graph: contentGraph, visualPlan, visualDecisions });
+  const expandedContentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
+  project = await projectStore.writeProjectJson(projectDir, current => {
+    current.content_graph = contentGraph;
+    current.generation_checkpoint = objectOrEmpty(current.generation_checkpoint);
+    current.generation_checkpoint.stages = objectOrEmpty(current.generation_checkpoint.stages);
+    current.generation_checkpoint.stages.content_graph = {
+      ...(current.generation_checkpoint.stages.content_graph || {}),
+      path: expandedContentGraphPath,
+      output_hash: sha256(JSON.stringify(contentGraph)),
+    };
+    attachVisualRouting(current);
+    return current;
+  });
+  const frameHtmlResult = await runFrameHtmlPhase({
+    model,
+    projectDir,
+    project,
+    contentGraph,
+    sceneSpec,
+    creativeContext,
+    templateRenderTarget,
+    mediaOptions,
+    frameHtmlConcurrency,
+    resumeAllowed,
+    regenerateFrameHtmlRequested,
+    // 帧生成阶段的布局自检不跟随 skipValidation：skipValidation 只跳过阻断式校验，
+    // 而这里是生成质量自修复，关掉它就会重现“元素互相遮挡”的成片。
+    runLayoutQa: runLayoutQa === true,
+    layoutQaService: services.layoutQaService || defaultLayoutQaService,
+    onProgress,
+    diagnostics,
+    report,
+    objectOrEmpty,
+    sha256,
+    failure,
+    shouldReuseFrameHtml,
+    invalidateFrameHtmlDependents,
+    templateRoutingDecisions: visualDecisions,
+  });
+  if (!frameHtmlResult.ok) return frameHtmlResult.failure;
+  project = frameHtmlResult.project;
+  contentGraph = frameHtmlResult.contentGraph;
+  // R4：在 attachVisualRouting 重挂之前，把帧统计合并进闭包引用的决策源对象
+  mergeFrameStatsIntoDecisions({
+    visualDecisions,
+    renderDecisions,
+    statsByBeatId: frameHtmlResult.stats_by_beat_id || {},
+  });
+  try {
+    project = await buildMixedFrameProject({
       projectDir,
-      project,
-      contentGraph,
+      workflowId,
+      runId,
+      graph: contentGraph,
       sceneSpec,
-      creativeContext,
-      templateRenderTarget,
-      template,
+      target: templateRenderTarget,
+      decisions: visualDecisions,
+      visualPlan,
       mediaOptions,
-      frameHtmlConcurrency,
-      resumeAllowed,
-      regenerateFrameHtmlRequested,
-      // 帧生成阶段的布局自检不跟随 skipValidation：skipValidation 只跳过阻断式校验，
-      // 而这里是生成质量自修复，关掉它就会重现“元素互相遮挡”的成片。
-      runLayoutQa: runLayoutQa === true,
-      layoutQaService: services.layoutQaService || defaultLayoutQaService,
-      onProgress,
-      diagnostics,
-      report,
-      objectOrEmpty,
-      sha256,
-      failure,
-      shouldReuseFrameHtml,
-      invalidateFrameHtmlDependents,
-      templateRoutingDecisions: generationMode === 'per_scene'
-        ? visualDecisions
-        : perSceneDecisions,
+      generationCheckpoint: project?.generation_checkpoint,
+      // 与 attachVisualStrategy 同优先级（creativeContext 优先）：此时 project 尚未挂策略，
+      // 且 normalizeProject 会把 continuity_mode 缺省成 beat_mp4，不能反过来盖掉 creativeContext
+      continuityMode: creativeContext?.continuity_mode || project?.continuity_mode || 'beat_mp4',
+      visualStrategy: creativeContext?.visual_strategy || project?.visual_strategy || null,
     });
-    if (!frameHtmlResult.ok) return frameHtmlResult.failure;
-    project = frameHtmlResult.project;
-    contentGraph = frameHtmlResult.contentGraph;
-    // R4：在 attachVisualRouting 重挂之前，把帧统计合并进闭包引用的决策源对象
-    mergeFrameStatsIntoDecisions({
-      visualDecisions,
-      renderDecisions,
-      statsByBeatId: frameHtmlResult.stats_by_beat_id || {},
+    // buildMixedFrameProject 会重建 project，这里要重新挂上视觉计划与路由决策
+    attachVisualRouting(project);
+    attachVisualStrategy(project, creativeContext);
+    project.generation_checkpoint = objectOrEmpty(project.generation_checkpoint);
+    project.generation_checkpoint.agent_pipeline = [
+      { agent: AGENTS.contentGraph, stage: STAGES.contentGraph, artifact: 'content-graph.json' },
+      { agent: AGENTS.frameHtml, stage: STAGES.frameHtml, artifact: 'frames' },
+    ];
+    project = await projectStore.saveProject(projectDir, project);
+  } catch (error) {
+    const frameId = rawHtmlBuildFrameIdFromError(error);
+    const message = error?.message || 'raw HTML 工程构建失败。';
+    return failure(message, [
+      ...diagnostics,
+      createDiagnostic({
+        code: 'raw_html_build_failed',
+        stage: 'project',
+        sub_stage: 'raw_html_build',
+        ...(frameId ? { frame_id: frameId } : {}),
+        user_message: message,
+        retryable: true,
+        repair_action: 'retry_frame_html',
+        details: { message },
+      }),
+    ], {
+      html_video_project_path: projectDir,
+      project_dir: projectDir,
+      project,
     });
-    try {
-      project = generationMode === 'per_scene'
-        ? await buildMixedFrameProject({
-          projectDir,
-          workflowId,
-          runId,
-          graph: contentGraph,
-          sceneSpec,
-          target: templateRenderTarget,
-          registry,
-          decisions: visualDecisions,
-          visualPlan,
-          mediaOptions,
-          generationCheckpoint: project?.generation_checkpoint,
-          // 与 attachVisualStrategy 同优先级（creativeContext 优先）：此时 project 尚未挂策略，
-          // 且 normalizeProject 会把 continuity_mode 缺省成 beat_mp4，不能反过来盖掉 creativeContext
-          continuityMode: creativeContext?.continuity_mode || project?.continuity_mode || 'beat_mp4',
-          visualStrategy: creativeContext?.visual_strategy || project?.visual_strategy || null,
-        })
-        : await buildRawHtmlFrameProject({
-          projectDir,
-          workflowId,
-          runId,
-          graph: contentGraph,
-          sceneSpec,
-          target: templateRenderTarget,
-          template,
-          mediaOptions,
-        });
-      // buildMixedFrameProject 会重建 project，这里要重新挂上视觉计划与路由决策
-      attachVisualRouting(project);
-      attachVisualStrategy(project, creativeContext);
-      project.generation_checkpoint = objectOrEmpty(project.generation_checkpoint);
-      project.generation_checkpoint.agent_pipeline = [
-        { agent: AGENTS.contentGraph, stage: STAGES.contentGraph, artifact: 'content-graph.json' },
-        { agent: AGENTS.frameHtml, stage: STAGES.frameHtml, artifact: 'frames' },
-      ];
-      project = await projectStore.saveProject(projectDir, project);
-    } catch (error) {
-      const frameId = rawHtmlBuildFrameIdFromError(error);
-      const message = error?.message || 'raw HTML 工程构建失败。';
-      return failure(message, [
-        ...diagnostics,
-        createDiagnostic({
-          code: 'raw_html_build_failed',
-          stage: 'project',
-          sub_stage: 'raw_html_build',
-          ...(frameId ? { frame_id: frameId } : {}),
-          user_message: message,
-          retryable: true,
-          repair_action: 'retry_frame_html',
-          details: { message },
-        }),
-      ], {
-        html_video_project_path: projectDir,
-        project_dir: projectDir,
-        project,
-      });
-    }
   }
   project = applyMediaOptionsToProject(project, mediaOptions);
-  // 首次 saveProject 之前统一挂上视觉策略：template_inputs / raw_html / per_scene 三条路径在此汇合
+  // 首次 saveProject 之前统一挂上视觉策略
   attachVisualStrategy(project, creativeContext);
   const sourceProjectAssets = projectAssetsFromCreativeContext(creativeContext);
   if (sourceProjectAssets.length) {
@@ -2157,7 +1661,6 @@ async function generateHtmlVideo(options = {}) {
   const validation = await validateHtmlVideoProject({
     project,
     projectDir,
-    templateRegistry: registry,
     environment: env,
     sceneSpec: skipValidation ? null : sceneSpec,
     mediaOptions,
@@ -2347,7 +1850,6 @@ async function generateHtmlVideo(options = {}) {
     runId,
     projectDir,
     project,
-    templateRegistry: registry,
     services,
     onProgress,
     runLayoutQa: runLayoutQa === true && !skipValidation,
@@ -2467,9 +1969,9 @@ async function generateHtmlVideo(options = {}) {
     success: true,
     message: 'html-video 成片完成。',
     render_mode: 'html-video',
-    template_id: generationMode === 'per_scene' ? null : template.id,
-    template_reason: generationMode === 'per_scene' ? '逐场景模板匹配。' : selection.reason,
-    template_inputs: templateInputs,
+    template_id: null,
+    template_reason: '逐场景生成。',
+    template_inputs: {},
     project: rendered.project,
     project_dir: projectDir,
     html_video_project_path: projectDir,
@@ -2595,19 +2097,13 @@ module.exports = {
   renderOrExport,
   rerender,
   applyEdit,
-  requestTemplateSelection,
-  requestTemplateInputs,
   callTextModel,
   generateContentGraphWithRetry,
-  buildInitialProject,
-  resolveGenerationMode,
   buildAssetUsageReport,
   shouldReuseFrameHtml,
   resumeArtifactsMatch,
   resolveRenderTarget,
-  resolveTemplateRenderTarget,
-  buildTemplateIndexOptions,
-  reorderCompactIndex,
+  applyRenderTargetDefaults,
   expandContentGraphToVisualBeats,
   expandContentGraphToSceneEntries,
   bindGeneratedAssetsToSceneSpec,

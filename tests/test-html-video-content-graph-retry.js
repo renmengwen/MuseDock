@@ -165,7 +165,7 @@ async function main() {
       rootDir: retrySetup.rootDir,
       sceneSpec: sceneSpec(),
       creativeContext: { input: { raw_text: '空内容需要重试后 fallback' } },
-      target: { html_video_generation_mode: 'raw_html', generate_audio: false },
+      target: { generate_audio: false },
       templateRegistry: retrySetup.templateRegistry,
       skipValidation: true,
       services: {
@@ -219,7 +219,7 @@ async function main() {
       rootDir: mismatchSetup.rootDir,
       sceneSpec: sceneSpec(),
       creativeContext: { input: { raw_text: '首次普通 mismatch 只 warning' } },
-      target: { html_video_generation_mode: 'raw_html', generate_audio: false },
+      target: { generate_audio: false },
       templateRegistry: mismatchSetup.templateRegistry,
       skipValidation: true,
       services: {

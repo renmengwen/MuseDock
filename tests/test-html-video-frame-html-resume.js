@@ -173,8 +173,10 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
     runId,
     contentGraph: graph,
   });
-  if (!options.omitTemplateId) {
-    project.template_id = options.templateId || 'vertical';
+  // per_scene 工程不设全片模板（template_id 恒为 null）；
+  // 传入 templateId 用于模拟旧整片模板工程（resume 应拒绝复用）。
+  if (options.templateId) {
+    project.template_id = options.templateId;
   }
   await writeFile(path.join(projectDir, 'content-graph.json'), `${JSON.stringify(graph, null, 2)}\n`);
   if (!options.omitSceneSpecHash) {
@@ -248,7 +250,7 @@ async function runWorkflow({ rootDir, workflowId, runId, templateRegistry, aiTex
     rootDir,
     sceneSpec: sceneSpecOverride || sceneSpec(),
     creativeContext: creativeContextOverride || { input: { raw_text: '三帧恢复测试' } },
-    target: { html_video_generation_mode: 'raw_html', generate_audio: false, ...target },
+    target: { generate_audio: false, ...target },
     templateRegistry,
     skipValidation: true,
     services: {
@@ -827,10 +829,11 @@ async function main() {
     }
 
     {
-      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-missing-template-'));
-      const workflowId = '202606260000000010_missing_template';
-      const runId = 'run_missing_template';
-      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { omitTemplateId: true });
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-legacy-template-project-'));
+      const workflowId = '202606260000000010_legacy_template_project';
+      const runId = 'run_legacy_template_project';
+      // 旧整片模板工程（template_id 非空）切到 per_scene：模式切换，禁止复用，全部重建
+      const { templateRegistry } = await setupProject(rootDir, workflowId, runId, { templateId: 'vertical' });
       const calls = [];
       let contentGraphCalls = 0;
       frameHtmlAgent.generateFrameHtml = async args => {
