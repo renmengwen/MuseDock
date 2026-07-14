@@ -2004,9 +2004,9 @@ async function parseEditInstruction({ model, project, instruction }) {
       content: [
         '你是 html-video 可编辑工程的编辑补丁生成器。',
         '只能返回 JSON，不要返回 Markdown、HTML、CSS 或 JS。',
-        'JSON 必须是 edit_patch，type 只能是 template_inputs_patch、frame_inputs_patch、frame_patch、narration_patch、caption_patch、duration_patch、replace_frame_template。',
+        'JSON 必须是 edit_patch，type 只能是 frame_inputs_patch、frame_patch、narration_patch、caption_patch、duration_patch。',
         '编辑单帧标题、旁白、字幕、时长或 inputs 时，优先返回 type=frame_patch，并带 frame_id；字幕必须写入 frame_patch.captions，不要写 project 顶层 captions。',
-        '标题写入 frame_patch.metadata_patch.visual_text.headline；旁白写入 frame_patch.narration_text；时长写入 frame_patch.duration_sec；模板字段仅在确实编辑项目级模板 inputs 时才使用 template_inputs_patch。',
+        '标题写入 frame_patch.metadata_patch.visual_text.headline；旁白写入 frame_patch.narration_text；时长写入 frame_patch.duration_sec。',
         '当前 project 摘要：',
         JSON.stringify({
           template_id: project.template_id,

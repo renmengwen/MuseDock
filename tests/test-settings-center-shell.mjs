@@ -6,7 +6,6 @@ const client = fs.readFileSync('frontend-react/src/api/client.js', 'utf-8');
 
 assert.match(client, /getAppSettings\(\)/);
 assert.match(client, /saveAppSettings\(payload\)/);
-assert.match(client, /getConfigTemplates\(\)/);
 assert.match(client, /getSystemHealth\(refresh/);
 assert.match(client, /cleanupSystemData\(targets\)/);
 assert.match(page, /总览/);

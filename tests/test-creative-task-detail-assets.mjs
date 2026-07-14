@@ -11,8 +11,7 @@ assert.match(detail, /SourceImageAssetsPanel/);
 assert.match(detail, /<SourceImageAssetsPanel/);
 assert.doesNotMatch(detail, /!\s*isDone\s*\?\s*<SourceImageAssetsPanel/);
 assert.match(source, /视觉路由/);
-assert.match(source, /模板帧/);
-assert.match(source, /自由 HTML/);
+assert.match(source, /画面帧/);
 assert.match(source, /风格/);
 
 assert.match(panel, /视觉素材/);

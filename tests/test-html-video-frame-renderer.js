@@ -19,6 +19,7 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   const result = await renderFrame(
     {
       id: 'scene_01',
+      source_mode: 'raw_html',
       html_path: 'frames/01-scene_01.html',
       duration_sec: 4,
     },
@@ -50,6 +51,7 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   const defaultResolutionResult = await renderFrame(
     {
       id: 'scene_default_resolution',
+      source_mode: 'raw_html',
       html_path: 'frames/01-scene_01.html',
       duration_sec: 4,
     },
@@ -115,14 +117,15 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   );
   assert.equal(unmaterializedResult.success, false);
   assert.equal(unmaterializedAdapterCalled, false);
-  assert.match(unmaterializedResult.message, /template_inputs 帧尚未生成 html_path，请先 materialize。/);
-  assert.equal(unmaterializedResult.diagnostics[0].code, 'frame_not_materialized');
+  assert.match(unmaterializedResult.message, /旧版模板帧不支持再编辑或重渲染/);
+  assert.equal(unmaterializedResult.diagnostics[0].code, 'legacy_template_frame');
 
   const asyncProgressEvents = [];
   const asyncProgressState = {};
   const asyncProgressResult = await renderFrame(
     {
       id: 'scene_02',
+      source_mode: 'raw_html',
       html_path: 'frames/01-scene_01.html',
       duration_sec: 4,
     },
@@ -159,6 +162,7 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   const rejectingProgressResult = await renderFrame(
     {
       id: 'scene_03',
+      source_mode: 'raw_html',
       html_path: 'frames/01-scene_01.html',
       duration_sec: 4,
     },
@@ -191,6 +195,7 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   const failedProgressResult = await renderFrame(
     {
       id: 'scene_04',
+      source_mode: 'raw_html',
       html_path: 'frames/01-scene_01.html',
       duration_sec: 4,
     },

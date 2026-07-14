@@ -86,23 +86,16 @@ assert.throws(() => resolveFrameRenderSource({
   assert.equal(source.absolute_html_path, absoluteSourcePath);
 }
 
-{
-  const source = resolveFrameRenderSource({
-    projectDir,
-    project: { template_id: 'tpl', template_inputs: { brand: 'A', headline: '旧标题' } },
-    frame: {
-      id: 'scene_02',
-      source_mode: 'template_inputs',
-      duration_sec: 4,
-      inputs: { headline: '标题' },
-    },
-  });
-  assert.equal(source.source_mode, 'template_inputs');
-  assert.equal(source.template_id, 'tpl');
-  assert.equal(source.variables.brand, 'A');
-  assert.equal(source.variables.headline, '标题');
-  assert.equal(source.needs_materialize, true);
-}
+assert.throws(() => resolveFrameRenderSource({
+  projectDir,
+  project: { template_id: 'tpl', template_inputs: { brand: 'A', headline: '旧标题' } },
+  frame: {
+    id: 'scene_02',
+    source_mode: 'template_inputs',
+    duration_sec: 4,
+    inputs: { headline: '标题' },
+  },
+}), /旧版模板帧不支持再编辑或重渲染/);
 
 assert.throws(() => resolveFrameRenderSource({
   project: {},

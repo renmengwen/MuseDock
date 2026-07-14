@@ -148,7 +148,7 @@ export function HtmlVideoCanvasEditor({ editor, onDirtyChange }) {
           <DialogContent className="grid max-h-[86vh] w-[min(760px,calc(100vw-32px))] max-w-[760px] grid-rows-[auto_1fr] gap-0 overflow-hidden rounded-lg border-[#d9dde5] bg-[#f8fafc] p-0 text-[#111827] shadow-[0_24px_70px_rgba(15,23,42,.28)] sm:max-w-[760px]">
             <DialogHeader className="border-b border-[#e7e9ee] bg-white px-5 py-4 pr-12">
               <DialogTitle className="text-[15px]">帧字段</DialogTitle>
-              <DialogDescription>编辑当前帧的模板字段。字幕和全片旁白在顶部“字幕 / 旁白”入口编辑。</DialogDescription>
+              <DialogDescription>编辑当前帧的文案字段。字幕和全片旁白在顶部“字幕 / 旁白”入口编辑。</DialogDescription>
             </DialogHeader>
             <div className="grid min-h-0 gap-3 overflow-auto p-4">
               <FrameInputsPanel frame={frame} disabled={disabled} onSave={patchFrame} />

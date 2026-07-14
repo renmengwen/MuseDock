@@ -63,10 +63,6 @@ export function FrameInputsPanel({ frame, disabled, onSave, onRenderPreview }) {
         </EditorInlineActions>
       </EditorPanelHeader>
       <label>
-        <span>模板</span>
-        <input value={draft.template_id || draft.template || ''} disabled={disabled} onChange={event => setDraft({ ...draft, template_id: event.target.value })} />
-      </label>
-      <label>
         <span>时长（秒）</span>
         <input type="number" min="0" step="0.1" value={draft.duration_sec || ''} disabled={disabled} onChange={event => setDraft({ ...draft, duration_sec: event.target.value === '' ? '' : Number(event.target.value) })} />
       </label>

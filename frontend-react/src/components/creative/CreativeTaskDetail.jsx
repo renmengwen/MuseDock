@@ -49,7 +49,7 @@ export function CreativeTaskDetail({
         <div className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-700">
           <div className="font-medium text-slate-900">视觉路由</div>
           <div className="mt-1">
-            模板帧 {visualRouteSummary.template_inputs || 0} / 自由 HTML {visualRouteSummary.raw_html || 0}
+            画面帧 {visualRouteSummary.raw_html || 0}
             {visualRouteSummary.style_profile_id ? ` / 风格 ${visualRouteSummary.style_profile_id}` : ''}
           </div>
         </div>

@@ -52,43 +52,29 @@ function getFrameHtmlPath(frame) {
 function resolveFrameRenderSource({ projectDir, project = {}, frame = {} } = {}) {
   if (!frame || typeof frame !== 'object') throw new Error('缺少 frame。');
 
-  const sourceMode = frame.source_mode === 'raw_html' ? 'raw_html' : 'template_inputs';
-  const duration = Number(frame.duration_sec || frame.durationSec || 3);
-  const durationSec = Number.isFinite(duration) && duration > 0 ? duration : 3;
-  const templateId = frame.template_id || project.template_id || null;
-  const engine = frame.engine || 'hyperframes-playwright';
-  const variables = {
-    ...objectOrEmpty(project.template_inputs),
-    ...objectOrEmpty(frame.inputs),
-  };
-  const frameHtmlPath = getFrameHtmlPath(frame);
-
-  if (sourceMode === 'raw_html') {
-    if (!frameHtmlPath.value) throw new Error(`raw_html 帧 ${frame.id || ''} 缺少 html_path。`);
-    const htmlPath = toPosixPath(frameHtmlPath.value);
-    return {
-      frame_id: frame.id || frame.scene_id || null,
-      source_mode: sourceMode,
-      engine,
-      template_id: templateId,
-      html_path: htmlPath,
-      absolute_html_path: resolveProjectPath(projectDir, frameHtmlPath),
-      duration_sec: durationSec,
-      variables,
-      needs_materialize: false,
-    };
+  if (frame.source_mode !== 'raw_html') {
+    const error = new Error('旧版模板帧不支持再编辑或重渲染，请重新发起任务。');
+    error.code = 'legacy_template_frame';
+    throw error;
   }
 
+  const duration = Number(frame.duration_sec || frame.durationSec || 3);
+  const durationSec = Number.isFinite(duration) && duration > 0 ? duration : 3;
+  const engine = frame.engine || 'hyperframes-playwright';
+  const variables = objectOrEmpty(frame.inputs);
+  const frameHtmlPath = getFrameHtmlPath(frame);
+
+  if (!frameHtmlPath.value) throw new Error(`raw_html 帧 ${frame.id || ''} 缺少 html_path。`);
+  const htmlPath = toPosixPath(frameHtmlPath.value);
   return {
     frame_id: frame.id || frame.scene_id || null,
-    source_mode: sourceMode,
+    source_mode: 'raw_html',
     engine,
-    template_id: templateId,
-    html_path: frameHtmlPath.value ? toPosixPath(frameHtmlPath.value) : null,
-    absolute_html_path: frameHtmlPath.value ? resolveProjectPath(projectDir, frameHtmlPath) : null,
+    html_path: htmlPath,
+    absolute_html_path: resolveProjectPath(projectDir, frameHtmlPath),
     duration_sec: durationSec,
     variables,
-    needs_materialize: true,
+    needs_materialize: false,
   };
 }
 

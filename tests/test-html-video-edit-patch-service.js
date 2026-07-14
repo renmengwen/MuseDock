@@ -30,11 +30,9 @@ function baseProject() {
     patch: { headline: '新标题' },
     author: 'test',
   });
-  assert.equal(result.success, true);
-  assert.equal(result.project.template_inputs.headline, '新标题');
-  assert.equal(result.requires_tts, false);
-  assert.equal(result.requires_render, true);
-  assert.equal(result.revision.requires_render, true);
+  assert.equal(result.success, false);
+  assert.equal(result.code, 'EDIT_TYPE_UNSUPPORTED');
+  assert.match(result.message, /不支持/);
 
   result = applyEditPatch(baseProject(), {
     type: 'frame_inputs_patch',
@@ -78,7 +76,6 @@ function baseProject() {
     type: 'frame_patch',
     frame_id: 'frame_01',
     duration_sec: 7,
-    template_id: 'base',
     inputs: { headline: '组合保存标题' },
     metadata_patch: { visual_text: { headline: '组合保存标题' } },
     narration_text: '组合保存旁白',
@@ -86,7 +83,6 @@ function baseProject() {
   assert.equal(result.success, true);
   assert.equal(result.project.frames[0].duration_sec, 7);
   assert.equal(result.project.timeline.tracks[0].items[0].duration_sec, 7);
-  assert.equal(result.project.frames[0].template_id, 'base');
   assert.equal(result.project.frames[0].inputs.headline, '组合保存标题');
   assert.equal(result.project.frames[0].metadata.visual_text.headline, '组合保存标题');
   assert.equal(result.project.frames[0].narration_text, '组合保存旁白');
@@ -152,10 +148,9 @@ function baseProject() {
     template_id: 'next',
     inputs: { headline: '替换后' },
   });
-  assert.equal(result.success, true);
-  assert.equal(result.project.frames[0].template_id, 'next');
-  assert.equal(result.project.frames[0].html_path, null);
-  assert.equal(result.requires_render, true);
+  assert.equal(result.success, false);
+  assert.equal(result.code, 'EDIT_TYPE_UNSUPPORTED');
+  assert.match(result.message, /不支持/);
 
   const unsafeHtml = applyEditPatch(baseProject(), {
     type: 'frame_inputs_patch',
@@ -166,7 +161,8 @@ function baseProject() {
   assert.match(unsafeHtml.message, /不允许/);
 
   const unsafePath = applyEditPatch(baseProject(), {
-    type: 'template_inputs_patch',
+    type: 'frame_inputs_patch',
+    frame_id: 'frame_01',
     patch: { poster_path: '../secret.png' },
   });
   assert.equal(unsafePath.success, false);

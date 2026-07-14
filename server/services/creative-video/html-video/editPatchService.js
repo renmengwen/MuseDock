@@ -115,12 +115,6 @@ function applyFramePatch(project, patch, flags) {
   const frame = findFrame(project, patch.frame_id);
   if (!frame) return fail(`未找到帧 ${patch.frame_id || ''}。`, 'FRAME_NOT_FOUND');
 
-  if (Object.prototype.hasOwnProperty.call(patch, 'template_id')) {
-    const templateId = String(patch.template_id || '').trim();
-    if (!templateId) return fail('缺少新模板 ID。', 'TEMPLATE_ID_REQUIRED');
-    frame.template_id = templateId;
-  }
-
   if (patch.patch || patch.inputs) {
     frame.inputs = mergePatch(frame.inputs, patch.patch || patch.inputs);
   }
@@ -174,9 +168,7 @@ function applyEditPatch(project, patch = {}) {
   const flags = { requires_tts: false, requires_render: true };
   let error = null;
 
-  if (edit.type === 'template_inputs_patch') {
-    nextProject.template_inputs = mergePatch(nextProject.template_inputs, edit.patch);
-  } else if (edit.type === 'frame_inputs_patch') {
+  if (edit.type === 'frame_inputs_patch') {
     const frame = findFrame(nextProject, edit.frame_id);
     if (!frame) error = fail(`未找到帧 ${edit.frame_id || ''}。`, 'FRAME_NOT_FOUND');
     else frame.inputs = mergePatch(frame.inputs, edit.patch);
@@ -190,15 +182,6 @@ function applyEditPatch(project, patch = {}) {
     error = applyDuration(nextProject, edit);
   } else if (edit.type === 'frame_patch') {
     error = applyFramePatch(nextProject, edit, flags);
-  } else if (edit.type === 'replace_frame_template') {
-    const frame = findFrame(nextProject, edit.frame_id);
-    if (!frame) error = fail(`未找到帧 ${edit.frame_id || ''}。`, 'FRAME_NOT_FOUND');
-    else {
-      frame.template_id = String(edit.template_id || '').trim();
-      if (!frame.template_id) error = fail('缺少新模板 ID。', 'TEMPLATE_ID_REQUIRED');
-      frame.inputs = objectOrEmpty(edit.inputs);
-      frame.html_path = null;
-    }
   } else {
     error = fail(`暂不支持的 html-video 编辑类型：${edit.type || '未指定'}。`, 'EDIT_TYPE_UNSUPPORTED');
   }

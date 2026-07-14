@@ -42,15 +42,10 @@ async function renderFrame(frame = {}, options = {}) {
       project: options.project || {},
       frame,
     });
-    if (!source.absolute_html_path) {
-      const error = new Error('template_inputs 帧尚未生成 html_path，请先 materialize。');
-      error.code = 'frame_not_materialized';
-      throw error;
-    }
     const result = await adapter.render(
       {
         template: {
-          id: source.template_id || source.frame_id || 'frame',
+          id: source.frame_id || 'frame',
           engine: source.engine,
           sourcePath: source.absolute_html_path,
         },
