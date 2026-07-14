@@ -246,20 +246,26 @@ function attachContinuityMode(project, creativeContext) {
   return project;
 }
 
-function resumeArtifactsMatch(project = {}, sceneSpec = null, template = {}, generationMode = '') {
+// 旧链路（hf_first/模板/整片模式）产物标记：命中任一即不再支持续跑，只能查看。
+// 注意：normalizeProject 已把这些旧字段裁出白名单，判定必须基于原始 project.json（见调用处）。
+function detectLegacyPipelineMarkers(rawProject = {}) {
+  const project = rawProject && typeof rawProject === 'object' ? rawProject : {};
+  if (String(project.template_id || '').trim()) return { legacy: true, marker: 'template_id' };
+  const strategy = String(project.visual_strategy || '').trim();
+  if (strategy && strategy !== 'asset_first') return { legacy: true, marker: 'visual_strategy' };
+  const frames = Array.isArray(project.frames) ? project.frames : [];
+  if (frames.some(frame => frame && frame.source_mode === 'template_inputs')) {
+    return { legacy: true, marker: 'template_frames' };
+  }
+  return { legacy: false, marker: '' };
+}
+
+// 复用判定只看 scene_spec_hash；legacy 工程一律不复用
+function resumeArtifactsMatch(project = {}, sceneSpec = null) {
+  if (detectLegacyPipelineMarkers(project).legacy) return false;
   const currentHash = computeSceneSpecCheckpointHash(sceneSpec || {});
   const checkpointHash = String(project.generation_checkpoint?.scene_spec_hash || '').trim();
-  if (!checkpointHash || !currentHash || checkpointHash !== currentHash) return false;
-  const projectTemplateId = String(project.template_id || '').trim();
-  if (generationMode === 'per_scene') {
-    // per_scene 不设全片模板（template_id 恒为 null），复用按 scene_spec_hash 判定；
-    // 工程若记录了全片模板 id 或别的 generation_mode，说明发生了模式切换，禁止复用
-    const projectMode = String(project.generation_mode || '').trim();
-    if (projectMode && projectMode !== 'per_scene') return false;
-    return !projectTemplateId;
-  }
-  const templateId = String(template?.id || '').trim();
-  return Boolean(projectTemplateId && templateId && projectTemplateId === templateId);
+  return Boolean(checkpointHash && currentHash && checkpointHash === currentHash);
 }
 
 function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target, resumeAllowed = true, inputFingerprint = '' } = {}) {
@@ -495,9 +501,9 @@ function loadCheckpointContentGraph(projectDir, project = {}) {
   }
 }
 
-function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null, template = {}, generationMode = '') {
+function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null) {
   if (!project) return null;
-  if (!resumeArtifactsMatch(project, sceneSpec, template, generationMode)) return null;
+  if (!resumeArtifactsMatch(project, sceneSpec)) return null;
   if (hasUsableContentGraph(project.content_graph) && contentGraphMatchesSceneSpec(project.content_graph, sceneSpec)) {
     return project.content_graph;
   }
@@ -1257,6 +1263,25 @@ async function generateHtmlVideo(options = {}) {
   if (!resumeProject) {
     projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
   }
+  // 旧链路工程直接拒绝续跑：normalizeProject 会裁掉 template_id/visual_strategy 等旧字段，
+  // 因此从原始 project.json 判定。必须在任何写盘/阶段开始之前拦下。
+  if (resumeProject) {
+    const rawResumeProject = await projectStore.readRawProjectJson(projectDir);
+    const legacyMarkers = detectLegacyPipelineMarkers(rawResumeProject || {});
+    if (legacyMarkers.legacy) {
+      return failure('该任务由旧版链路生成，已不支持续跑重试，请重新发起任务。', [
+        createDiagnostic({
+          code: 'legacy_pipeline_project',
+          stage: 'project',
+          sub_stage: 'validate_project',
+          user_message: '该任务由旧版链路生成，已不支持续跑重试，请重新发起任务。',
+          details: { marker: legacyMarkers.marker },
+          retryable: false,
+          fallback_allowed: false,
+        }),
+      ], { html_video_project_path: projectDir, project_dir: projectDir });
+    }
+  }
   // 决策2：resume 时以落盘 project 的 continuity_mode 为兜底，保证二次执行
   // （retry/resume 不带 creativeContext）不掉 scene_html；creativeContext 显式值优先。
   if (resumeProject) {
@@ -1403,8 +1428,8 @@ async function generateHtmlVideo(options = {}) {
   const env = skipValidation ? { ok: true, diagnostics: [] } : await runEnvironmentDoctor(services);
   let project = resumeProject || undefined;
 
-  const resumeAllowed = resumeArtifactsMatch(resumeProject || {}, sceneSpec, {}, 'per_scene');
-  let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec, {}, 'per_scene');
+  const resumeAllowed = resumeArtifactsMatch(resumeProject || {}, sceneSpec);
+  let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec);
   const reusedContentGraph = Boolean(contentGraph);
   if (contentGraph) {
     project = await projectStore.writeProjectJson(projectDir, current => {
@@ -2083,6 +2108,7 @@ module.exports = {
   generateContentGraphWithRetry,
   buildAssetUsageReport,
   shouldReuseFrameHtml,
+  detectLegacyPipelineMarkers,
   resumeArtifactsMatch,
   resolveRenderTarget,
   applyRenderTargetDefaults,

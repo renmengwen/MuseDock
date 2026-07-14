@@ -427,44 +427,111 @@ async function main() {
       }).reuse, false, '旧 checkpoint 无指纹不应复用');
     }
 
-    // resumeArtifactsMatch：per_scene 模式不设全片模板，复用只看 scene_spec_hash + generation_mode
+    // 旧链路识别：template_id / 旧策略字段 / 模板帧 任一命中即 legacy
+    {
+      const { detectLegacyPipelineMarkers } = workflow;
+      assert.strictEqual(detectLegacyPipelineMarkers({ template_id: 'vertical' }).legacy, true, 'template_id 非空应判为 legacy');
+      assert.strictEqual(detectLegacyPipelineMarkers({ template_id: 'bold_signal' }).legacy, true, '存量 bold_signal 工程应判为 legacy');
+      assert.strictEqual(detectLegacyPipelineMarkers({ visual_strategy: 'hf_first' }).legacy, true, '旧策略字段 hf_first 应判为 legacy');
+      assert.strictEqual(detectLegacyPipelineMarkers({ frames: [{ source_mode: 'template_inputs' }] }).legacy, true, '含模板帧应判为 legacy');
+      assert.strictEqual(detectLegacyPipelineMarkers({ visual_strategy: 'asset_first', frames: [{ source_mode: 'raw_html' }] }).legacy, false, 'asset_first 工程不应判为 legacy');
+      assert.strictEqual(detectLegacyPipelineMarkers({}).legacy, false, '三字段全空的工程不应判为 legacy');
+    }
+
+    // resumeArtifactsMatch：复用判定只看 scene_spec_hash；legacy 工程一律 false
     {
       const { resumeArtifactsMatch } = workflow;
       const spec = sceneSpec();
       const hash = computeSceneSpecCheckpointHash(spec);
-      const perSceneProject = {
-        template_id: null,
-        generation_mode: 'per_scene',
-        generation_checkpoint: { scene_spec_hash: hash },
+      assert.strictEqual(
+        resumeArtifactsMatch({ generation_checkpoint: { scene_spec_hash: hash } }, spec),
+        true,
+        'scene_spec_hash 一致应复用',
+      );
+      assert.strictEqual(
+        resumeArtifactsMatch({ generation_checkpoint: { scene_spec_hash: 'other' } }, spec),
+        false,
+        'scene_spec_hash 不一致不应复用',
+      );
+      assert.strictEqual(
+        resumeArtifactsMatch({ template_id: 'vertical', generation_checkpoint: { scene_spec_hash: hash } }, spec),
+        false,
+        'legacy 工程即使 hash 一致也不应复用',
+      );
+    }
+
+    // 旧链路续跑 guard（e2e）：resume 读原始 project.json 判定 legacy，在任何写盘/阶段前拒绝；
+    // 无 legacy 标记的工程照常穿过 guard 走后续阶段
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-legacy-guard-'));
+      const workflowId = '202606260000000015_legacy_guard';
+
+      // legacy 工程：绕过 projectStore.saveProject 的 normalize，直接写含 template_id 的原始 project.json
+      const legacyRunId = 'run_legacy_guard';
+      const legacyProjectDir = path.join(rootDir, workflowId, 'agent_runs', `${legacyRunId}-html-video`);
+      await writeFile(path.join(legacyProjectDir, 'project.json'), `${JSON.stringify({
+        project_id: `${workflowId}_${legacyRunId}`,
+        workflow_id: workflowId,
+        run_id: legacyRunId,
+        template_id: 'bold_signal',
+        generation_checkpoint: { scene_spec_hash: 'legacy-hash' },
+      }, null, 2)}\n`);
+      frameHtmlAgent.generateFrameHtml = async () => {
+        throw new Error('legacy guard 应在建帧阶段前拦下，不应调用帧生成。');
       };
-      assert.equal(
-        resumeArtifactsMatch(perSceneProject, spec, {}, 'per_scene'),
-        true,
-        'per_scene 工程 template_id 为 null 时应按 scene_spec_hash 判定可复用',
+
+      const legacyResult = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId: legacyRunId,
+        aiTextModel: {
+          async callTextModel() {
+            throw new Error('legacy guard 应在任何模型调用前拦下。');
+          },
+        },
+      });
+
+      assert.strictEqual(legacyResult.success, false, 'legacy 工程续跑应失败');
+      assert.match(String(legacyResult.message || ''), /旧版链路/, '失败文案应说明旧版链路不支持续跑');
+      const legacyDiag = (legacyResult.diagnostics || []).find(item => item.code === 'legacy_pipeline_project');
+      assert.ok(legacyDiag, '诊断应含 legacy_pipeline_project');
+      assert.strictEqual(legacyDiag.details.marker, 'template_id', '诊断应携带命中的 legacy 标记');
+      // guard 在任何写盘之前返回：原始 project.json 不应被 normalize 重写（旧字段仍在）
+      const persistedRaw = JSON.parse(await fs.readFile(path.join(legacyProjectDir, 'project.json'), 'utf8'));
+      assert.strictEqual(persistedRaw.template_id, 'bold_signal', 'guard 拦截后不应覆写原始 project.json');
+
+      // 对照：三个 legacy 标记全无的原始 project.json 应穿过 guard，走到后续阶段
+      const cleanRunId = 'run_clean_guard';
+      const cleanProjectDir = path.join(rootDir, workflowId, 'agent_runs', `${cleanRunId}-html-video`);
+      await writeFile(path.join(cleanProjectDir, 'project.json'), `${JSON.stringify({
+        project_id: `${workflowId}_${cleanRunId}`,
+        workflow_id: workflowId,
+        run_id: cleanRunId,
+        generation_checkpoint: { scene_spec_hash: 'stale-hash' },
+      }, null, 2)}\n`);
+      frameHtmlAgent.generateFrameHtml = async args => ({ success: true, html: validHtml(args.node.id, args.node.id) });
+
+      const cleanResult = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId: cleanRunId,
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return { success: true, text: JSON.stringify(contentGraph('穿过 guard 重新生成')) };
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+
+      assert.ok(
+        !(cleanResult.diagnostics || []).some(item => item.code === 'legacy_pipeline_project'),
+        '无 legacy 标记的工程不应被 guard 拒绝',
       );
-      // 旧版 per_scene 工程没有 generation_mode 字段：template_id 为空即视为 per_scene 工程，允许复用
-      assert.equal(
-        resumeArtifactsMatch({ template_id: null, generation_checkpoint: { scene_spec_hash: hash } }, spec, {}, 'per_scene'),
-        true,
-        '旧版 per_scene 工程（无 generation_mode 且 template_id 为空）应允许复用',
-      );
-      // 工程记录了全片模板（整片模式产物），当前却是 per_scene：模式切换，禁止复用
-      assert.equal(
-        resumeArtifactsMatch({ template_id: 'vertical', generation_checkpoint: { scene_spec_hash: hash } }, spec, {}, 'per_scene'),
-        false,
-        '整片模板工程切到 per_scene 模式时不应复用',
-      );
-      // scene_spec 变化：禁止复用
-      assert.equal(
-        resumeArtifactsMatch(perSceneProject, { ...spec, scenes: [] }, {}, 'per_scene'),
-        false,
-        'per_scene 模式 scene_spec_hash 不一致时不应复用',
-      );
-      // 非 per_scene 模式：维持原有 template_id 严格匹配行为
-      const templateProject = { template_id: 'vertical', generation_checkpoint: { scene_spec_hash: hash } };
-      assert.equal(resumeArtifactsMatch(templateProject, spec, { id: 'vertical' }), true, '整片模式 template_id 相同应复用');
-      assert.equal(resumeArtifactsMatch(templateProject, spec, { id: 'other' }), false, '整片模式 template_id 不同不应复用');
-      assert.equal(resumeArtifactsMatch({ template_id: null, generation_checkpoint: { scene_spec_hash: hash } }, spec, { id: 'vertical' }), false, '整片模式工程缺 template_id 不应复用');
+      assert.strictEqual(cleanResult.success, true, '无 legacy 标记的工程应穿过 guard 正常跑完');
+      await fs.rm(rootDir, { recursive: true, force: true });
     }
     {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-resume-'));

@@ -78,6 +78,17 @@ async function loadProject(projectDir) {
   return normalizeProject(JSON.parse(text));
 }
 
+// 读原始 project.json（不经 normalizeProject）：旧链路字段（template_id/visual_strategy 等）
+// 已被 normalize 白名单裁掉，legacy 判定必须看原始落盘内容。读失败（缺文件/坏 JSON）返回 null。
+async function readRawProjectJson(projectDir) {
+  try {
+    const text = await fs.readFile(resolveProjectPath(projectDir, 'project.json'), 'utf8');
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 async function writeProjectJson(projectDir, updater) {
   const project = await loadProject(projectDir);
   const updated = typeof updater === 'function' ? await updater(project) : project;
@@ -213,6 +224,7 @@ module.exports = {
   createProjectDir,
   saveProject,
   loadProject,
+  readRawProjectJson,
   writeProjectJson,
   saveContentGraph,
   saveSceneSpec,
