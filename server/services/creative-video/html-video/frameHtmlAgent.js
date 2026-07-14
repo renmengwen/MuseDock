@@ -1,5 +1,3 @@
-const fs = require('fs');
-const { resolveSourceEntryPath } = require('./templateRegistry');
 const { summarizeCreativeContextForPrompt } = require('./contentGraphAgent');
 const { createDiagnostic } = require('./diagnostics');
 const {
@@ -79,39 +77,6 @@ function frameSceneSpecSummary(sceneSpec = {}, node = {}, frameId = '', index = 
     previous_scene: sceneIndex > 0 ? sceneLightSummary(scenes[sceneIndex - 1]) : null,
     next_scene: sceneIndex >= 0 && sceneIndex < scenes.length - 1 ? sceneLightSummary(scenes[sceneIndex + 1]) : null,
   };
-}
-
-function templateStyleReference(template = {}) {
-  if (!template || typeof template !== 'object') return '（无模板，仅自由生成完整 HTML）';
-  const examples = template.inputs?.examples || template.examples || [];
-  return JSON.stringify({
-    id: template.id,
-    name: template.name,
-    description: template.description,
-    category: template.category,
-    tags: template.tags,
-    example_inputs: examples,
-  }, null, 2);
-}
-
-function readTemplateSourceSnippet(template = {}, maxLength = 4000) {
-  if (!template || typeof template !== 'object') return '';
-  const inlineSource = template.sourceHtml || template.source_html || template.templateHtml || template.template_html;
-  if (inlineSource) return compactTemplateSource(inlineSource, maxLength);
-
-  const sourcePath = resolveSourceEntryPath(template);
-  if (!sourcePath || !fs.existsSync(sourcePath)) return '';
-  try {
-    return compactTemplateSource(fs.readFileSync(sourcePath, 'utf8'), maxLength);
-  } catch {
-    return '';
-  }
-}
-
-function compactTemplateSource(source, maxLength = 4000) {
-  const text = String(source || '').trim();
-  if (!text) return '';
-  return text.length > maxLength ? text.slice(0, maxLength).trimEnd() : text;
 }
 
 function compactHtmlReference(source, maxLength = 2600) {
@@ -370,7 +335,6 @@ function buildFrameHtmlPrompt({
   sceneSpec = {},
   creativeContext = {},
   target = {},
-  template = null,
   styleProfile = null,
   visualStyleReferenceHtml = '',
   previousFrameHtml = '',
@@ -384,8 +348,6 @@ function buildFrameHtmlPrompt({
 } = {}) {
   const resolution = resolveResolution(target);
   const adjacent = adjacentSummary(graph, index);
-  const templateSource = readTemplateSourceSnippet(template);
-  const hasStyleProfile = Boolean(styleProfile?.id);
   const continuitySection = buildVisualContinuitySection({
     visualStyleReferenceHtml,
     previousFrameHtml,
@@ -445,19 +407,6 @@ function buildFrameHtmlPrompt({
       '- 出问题的元素禁止再用 position:absolute 叠放在其他内容块占用的区域之上。',
       '- 确保动画结束状态（所有元素落位后）任何文字互不遮挡、不超出画面。',
     ] : []),
-    '',
-    'Selected template metadata（用于理解模板身份、输入语义和适配边界）：',
-    templateStyleReference(template),
-    ...(!hasStyleProfile && templateSource ? [
-      '',
-      'Template HTML — this is the REQUIRED visual style for THIS frame. Reuse its palette, background, typography, layout structure and animation approach; only swap in this frame text/data. Do NOT invent a different theme:',
-      '```html',
-      templateSource,
-      '```',
-    ] : (!hasStyleProfile ? [
-      '',
-      'Template HTML：未能读取模板源码时，仍必须继承所选模板 metadata 描述的视觉方向和 motion vocabulary，不能退化为静态信息图。',
-    ] : [])),
     ...buildStyleProfileSection(styleProfile),
     ...continuitySection,
     '',
@@ -561,21 +510,7 @@ function resolveSceneForFrame(sceneSpec = {}, node = {}, frameId = '') {
     || (scenes.length === 1 ? scenes[0] : {});
 }
 
-function expectedContentTexts(args = {}) {
-  const scene = resolveSceneForFrame(args.sceneSpec || {}, args.node || {}, args.frameId || args.node?.id || '');
-  const values = [];
-  flattenTextValues(scene?.visual_text, values);
-  flattenTextValues(scene?.title, values);
-  flattenTextValues(scene?.narration_text, values);
-  flattenTextValues(scene?.captions, values);
-  flattenTextValues(args.node?.label, values);
-  flattenTextValues(args.node?.text, values);
-  flattenTextValues(args.node?.data, values);
-  return [...new Set(values.map(item => compactText(item, 600)).filter(Boolean))];
-}
-
-// 画面内容匹配打分只用提炼素材（headline/keywords/cards/label）；
-// narration/captions 留在 expectedContentTexts 里只做模板泄漏白名单，避免奖励画面照抄旁白。
+// 画面内容匹配打分只用提炼素材（headline/keywords/cards/label），避免奖励画面照抄旁白。
 function overlapExpectedTexts(args = {}) {
   const scene = resolveSceneForFrame(args.sceneSpec || {}, args.node || {}, args.frameId || args.node?.id || '');
   const values = [];
@@ -605,30 +540,6 @@ function textLengthScore(text = '') {
   return chinese + latin;
 }
 
-function templateVisiblePhrases(template = {}) {
-  const source = readTemplateSourceSnippet(template, 12000);
-  if (!source) return [];
-  const leakSource = stripTemplateChromeForLeakCheck(source);
-  const phrases = [];
-  for (const segment of htmlVisibleSegments(leakSource)) {
-    String(segment || '')
-      .split(/[\s|/\\,，。.!！?？:：;；、()[\]{}<>]+/)
-      .map(item => item.trim())
-      .filter(Boolean)
-      .forEach(item => {
-        const comparable = normalizedComparableText(item);
-        if (textLengthScore(comparable) >= 4) phrases.push(item);
-      });
-  }
-  return [...new Set(phrases)];
-}
-
-function stripTemplateChromeForLeakCheck(html = '') {
-  return String(html || '')
-    .replace(/<(nav|footer)\b[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<([a-z][\w:-]*)\b[^>]*(?:class|id|data-hv-bind|data-hv-element-id)=["'][^"']*(?:nav|footer|breadcrumb|kicker|card[-_ ]?label|section[-_ ]?no)[^"']*["'][^>]*>[\s\S]*?<\/\1>/gi, ' ');
-}
-
 function contentOverlapScore(htmlComparable, expectedTexts) {
   const tokens = new Set();
   for (const text of expectedTexts) {
@@ -653,28 +564,7 @@ function contentOverlapScore(htmlComparable, expectedTexts) {
 }
 
 function validateHtmlContentQuality(html, args = {}) {
-  const expectedTexts = expectedContentTexts(args);
-  const expectedComparable = normalizedComparableText(expectedTexts.join(' '));
   const htmlComparable = normalizedComparableText(visibleHtmlText(html));
-  const leakedPhrases = templateVisiblePhrases(args.template)
-    .filter(phrase => {
-      const comparable = normalizedComparableText(phrase);
-      return comparable
-        && htmlComparable.includes(comparable)
-        && !expectedComparable.includes(comparable);
-    });
-  if (leakedPhrases.length) {
-    const shown = leakedPhrases.slice(0, 3);
-    return {
-      success: false,
-      code: 'frame_html_template_text_leak',
-      message: `HTML 保留了模板默认文案：${shown.join('、')}。请只继承模板视觉风格，替换为当前镜头内容。`,
-      details: {
-        leaked_text: shown,
-        expected_headline: primaryExpectedText(args),
-      },
-    };
-  }
 
   const primary = primaryExpectedText(args);
   const primaryComparable = normalizedComparableText(primary);
@@ -823,7 +713,6 @@ function buildRetryPrompt(args = {}) {
   const frameText = expectedTexts.length > 1
     ? ''
     : compactText(args.node?.text || scene?.narration_text || '', 260);
-  const templateName = compactText(args.template?.name || args.template?.id || '', 80);
   const styleProfile = objectOrEmpty(args.styleProfile);
   const assetSummary = frameAssetReferenceSummary(args.node || {}, args.creativeContext || {});
   return [
@@ -849,7 +738,7 @@ function buildRetryPrompt(args = {}) {
     assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
     styleProfile?.id
       ? `视觉风格参考：遵循本任务 style_profile「${styleProfile.id}」；不要复用模板默认主体文案。`
-      : (templateName ? `视觉风格参考：延续模板「${templateName}」的配色、字体、形状和动效；不要保留模板默认主体文案。` : ''),
+      : '',
     `必须包含 body data-hv-canvas data-width="${resolution.width}" data-height="${resolution.height}"。`,
     `meta viewport、html/body 必须使用 ${resolution.width}x${resolution.height}；不能使用 ${resolution.height}x${resolution.width}。`,
     '必须包含 CSS @keyframes/animation、GSAP timeline 或 window.__hvPlayAll 至少一种 animation timeline。',
@@ -1064,7 +953,6 @@ module.exports = {
   generateFrameHtml,
   callModel,
   buildRetryPrompt,
-  readTemplateSourceSnippet,
   frameAssetReferenceSummary,
   resolveResolution,
   validateFrameAssetUsage,

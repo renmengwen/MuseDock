@@ -456,7 +456,6 @@ function createCreativeWorkflowRetryPlan(input = {}) {
     || code === 'frame_html_invalid'
     || code === 'html_document_extract_failed'
     || code === 'html_validation_failed'
-    || code === 'frame_html_template_text_leak'
     || code === 'frame_html_content_mismatch'
     || code === 'layout_qa_failed'
   ) {

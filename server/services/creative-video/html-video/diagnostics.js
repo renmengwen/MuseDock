@@ -28,7 +28,6 @@ const DEFAULT_MESSAGES = {
   html_override_active: '当前工程启用了 HTML 改写，自动生成与渲染需要谨慎处理。',
   render_failed: 'html-video 渲染失败。',
   compose_failed: 'html-video 合成失败。',
-  frame_html_template_text_leak: '单帧 HTML 保留了模板默认文案。',
   frame_html_content_mismatch: '单帧 HTML 主画面内容与当前镜头不匹配。',
   html_document_extract_failed: 'AI 未返回完整 HTML document。',
   html_validation_failed: '单帧 HTML 未通过校验。',

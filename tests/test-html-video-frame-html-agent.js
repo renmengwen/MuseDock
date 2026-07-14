@@ -52,8 +52,8 @@ assert.match(prompt, /两帧讲清价格差异/);
 assert.match(prompt, /下一帧/);
 assert.match(prompt, /专业版/);
 assert.match(prompt, /1920x1080/);
-assert.match(prompt, /信号卡片/);
-assert.match(prompt, /深色背景和橙色焦点卡片滑入/);
+assert.doesNotMatch(prompt, /信号卡片/);
+assert.doesNotMatch(prompt, /深色背景和橙色焦点卡片滑入/);
 assert.match(prompt, /来源摘要/);
 assert.match(prompt, /原始内容/);
 assert.match(prompt, /简短解释价格/);
@@ -107,7 +107,6 @@ assert.notEqual(dynamicInputIndex, -1);
 [
   '固定系统规则：',
   '硬性要求：',
-  'Selected template metadata',
 ].forEach(label => {
   const index = prompt.indexOf(label);
   assert.notEqual(index, -1);
@@ -241,10 +240,12 @@ const sourceBackedPrompt = agent.buildFrameHtmlPrompt({
   },
 });
 
-assert.match(sourceBackedPrompt, /Template HTML/);
-assert.match(sourceBackedPrompt, /REQUIRED visual style/i);
-assert.match(sourceBackedPrompt, /@keyframes heroEnter/);
-assert.match(sourceBackedPrompt, /模板源码动效/);
+// 模板穿线已删除：即使传入带可读源码的 template，prompt 也不得包含模板身份与源码段
+assert.doesNotMatch(sourceBackedPrompt, /Selected template metadata/);
+assert.doesNotMatch(sourceBackedPrompt, /Template HTML/);
+assert.doesNotMatch(sourceBackedPrompt, /REQUIRED visual style/i);
+assert.doesNotMatch(sourceBackedPrompt, /@keyframes heroEnter/);
+assert.doesNotMatch(sourceBackedPrompt, /模板源码动效/);
 assert.match(sourceBackedPrompt, /opens with an animation timeline/i);
 assert.match(sourceBackedPrompt, /window\.__hvPlayAll|GSAP|@keyframes|animation/);
 assert.match(sourceBackedPrompt, /超过 6 秒|长于 6 秒/);

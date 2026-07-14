@@ -202,6 +202,20 @@ async function run() {
   }
   console.log('asset-first prompt no-caption fallback tests passed');
 
+  // ===== 模板穿线删除：帧 prompt 不得再携带模板身份与模板源码段 =====
+  {
+    const prompt = frameHtmlAgent.buildFrameHtmlPrompt({
+      node: frameNode,
+      creativeContext: { visual_strategy: 'asset_first' },
+      sceneSpec,
+      target: { aspect_ratio: '9:16' },
+      styleProfile: { id: 'sp1', palette: ['#111', '#eee', '#f50'] },
+    });
+    assert.ok(!prompt.includes('Selected template metadata'), 'prompt 不得再携带模板 metadata 段');
+    assert.ok(!prompt.includes('Template HTML'), 'prompt 不得再携带模板源码段');
+    console.log('frame prompt template-free tests passed');
+  }
+
   console.log('test-html-video-asset-first-prompts passed');
 }
 
