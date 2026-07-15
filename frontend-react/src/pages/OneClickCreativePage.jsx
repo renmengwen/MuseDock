@@ -11,219 +11,26 @@ import {
   getSidebarTaskTimeSource,
   removeWorkflowProgressEvents,
 } from '../components/creative/creativeProgress.js';
-
-const CREATIVE_TASKS_STORAGE_KEY = 'musedock.creative.tasks.v1';
-const ACTIVE_CREATIVE_TASK_STORAGE_KEY = 'musedock.creative.activeTask.v1';
-
-function getWorkflowDisplayMessage(workflow, fallback = '') {
-  const stages = Array.isArray(workflow?.stages) ? workflow.stages : [];
-  const failedStage = stages.find(stage => stage.status === 'failed');
-  const activeStage = stages.find(stage => ['running', 'queued', 'pending'].includes(stage.status));
-  if (workflow?.current_stage_message) return workflow.current_stage_message;
-  if (workflow?.status === 'failed' && failedStage?.message) return failedStage.message;
-  if (activeStage?.message) return activeStage.message;
-  if (workflow?.status === 'running') {
-    return workflow?.message
-      || fallback
-      || '创作任务已创建，正在生成视频...';
-  }
-
-  return workflow?.error?.message
-    || workflow?.message
-    || fallback
-    || '创作任务已创建，正在生成视频...';
-}
-
-function getWorkflowVideoUrl(workflow) {
-  // 优先读后端归一的稳定字段；旧任务无此字段时回退到历史多版本嵌套结构。
-  if (typeof workflow?.render_output_url === 'string' && workflow.render_output_url.trim()) {
-    return workflow.render_output_url;
-  }
-  const renderResult = workflow?.stages?.find(stage => stage.id === 'render')?.result;
-  const candidates = [
-    workflow?.result?.video?.output_url,
-    workflow?.result?.render?.output_url,
-    workflow?.result?.hyperframes_freeform?.render?.output_url,
-    workflow?.render?.output_url,
-    workflow?.hyperframes_freeform?.render?.output_url,
-    renderResult?.video?.output_url,
-    renderResult?.render?.output_url,
-    renderResult?.hyperframes_freeform?.render?.output_url,
-    renderResult?.output_url,
-  ];
-  const directUrl = candidates.find(value => typeof value === 'string' && value.trim());
-  if (directUrl) return directUrl;
-  return '';
-}
-
-function getWorkflowPayload(json) {
-  return json?.data || json?.workflow || json || null;
-}
-
-function getWorkflowId(json) {
-  const workflow = getWorkflowPayload(json);
-  return json?.workflow_id || workflow?.workflow_id || workflow?.id || '';
-}
-
-function getErrorMessage(error, fallback) {
-  return error?.data?.message || error?.message || fallback;
-}
-
-function getTaskTitle(input) {
-  const trimmed = String(input || '').trim();
-  if (!trimmed) return '未命名创作任务';
-  return trimmed.length > 22 ? `${trimmed.slice(0, 22)}...` : trimmed;
-}
-
-function firstText(...values) {
-  for (const value of values) {
-    const text = String(value ?? '').trim();
-    if (text) return text;
-  }
-  return '';
-}
-
-function getWorkflowGeneratedTitle(workflow) {
-  const sceneSpec = workflow?.result?.hyperframes_freeform?.project?.scene_spec
-    || workflow?.result?.hyperframes_freeform?.scene_spec
-    || workflow?.result?.scene_spec
-    || workflow?.scene_spec
-    || null;
-  return firstText(
-    sceneSpec?.title,
-    workflow?.result?.hyperframes_freeform?.project?.title,
-    workflow?.result?.hyperframes_freeform?.title,
-  );
-}
-
-function getTaskDisplayTitle(workflow, input, fallbackTitle = '') {
-  return getWorkflowGeneratedTitle(workflow) || fallbackTitle || getTaskTitle(input);
-}
-
-function getTaskTimeLabel(value) {
-  if (!value) return '刚刚';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '刚刚';
-  return date.toLocaleString('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function loadStoredTasks() {
-  if (typeof window === 'undefined') return [];
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(CREATIVE_TASKS_STORAGE_KEY) || '[]');
-    return Array.isArray(parsed) ? parsed.map(compactStoredTask).filter(task => task.workflow_id).slice(0, 30) : [];
-  } catch {
-    return [];
-  }
-}
-
-function compactStoredTask(task) {
-  return {
-    workflow_id: String(task?.workflow_id || '').trim(),
-    title: String(task?.title || ''),
-    input: String(task?.input || ''),
-    status: String(task?.status || 'queued'),
-    message: String(task?.message || ''),
-    created_at: String(task?.created_at || ''),
-    updated_at: String(task?.updated_at || ''),
-  };
-}
-
-function saveStoredTasks(tasks) {
-  if (typeof window === 'undefined') return;
-  try {
-    const storedTasks = (Array.isArray(tasks) ? tasks : [])
-      .map(compactStoredTask)
-      .filter(task => task.workflow_id)
-      .slice(0, 30);
-    window.localStorage.setItem(CREATIVE_TASKS_STORAGE_KEY, JSON.stringify(storedTasks));
-  } catch {
-    window.localStorage.removeItem(CREATIVE_TASKS_STORAGE_KEY);
-  }
-}
-
-function normalizeLastSeq(value) {
-  const nextValue = Number(value);
-  if (!Number.isFinite(nextValue) || nextValue < 0) return 0;
-  return Math.floor(nextValue);
-}
-
-function saveActiveCreativeTask(value) {
-  if (typeof window === 'undefined') return;
-  try {
-    if (!value?.workflow_id || !value?.task_id) {
-      window.localStorage.removeItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY);
-      return;
-    }
-    window.localStorage.setItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY, JSON.stringify({
-      workflow_id: value.workflow_id,
-      task_id: value.task_id,
-      last_seq: normalizeLastSeq(value.last_seq),
-      updated_at: new Date().toISOString(),
-    }));
-  } catch {
-    window.localStorage.removeItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY);
-  }
-}
-
-function loadActiveCreativeTask() {
-  if (typeof window === 'undefined') return null;
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY) || 'null');
-    if (!parsed?.workflow_id || !parsed?.task_id) {
-      window.localStorage.removeItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY);
-      return null;
-    }
-    return {
-      workflow_id: parsed.workflow_id,
-      task_id: parsed.task_id,
-      last_seq: normalizeLastSeq(parsed.last_seq),
-    };
-  } catch {
-    window.localStorage.removeItem(ACTIVE_CREATIVE_TASK_STORAGE_KEY);
-    return null;
-  }
-}
-
-function mergeServerTasks(localTasks, serverItems) {
-  const byId = new Map(localTasks.map(task => [task.workflow_id, task]));
-  for (const item of Array.isArray(serverItems) ? serverItems : []) {
-    const id = String(item?.workflow_id || '').trim();
-    if (!id) continue;
-    const prev = byId.get(id) || {};
-    byId.set(id, {
-      ...prev,
-      workflow_id: id,
-      title: prev.title || item.title || getTaskTitle(item.input),
-      input: prev.input || item.input || '',
-      status: item.status || prev.status || 'queued',
-      message: item.message || prev.message || '',
-      workflow: prev.workflow || null,
-      created_at: prev.created_at || item.created_at || item.updated_at || '',
-      updated_at: item.updated_at || prev.updated_at || item.created_at || '',
-    });
-  }
-  return Array.from(byId.values())
-    .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime())
-    .slice(0, 30);
-}
-
-function upsertTask(tasks, task) {
-  const next = [task, ...tasks.filter(item => item.workflow_id !== task.workflow_id)];
-  return next.slice(0, 30);
-}
-
-function updateTask(tasks, task) {
-  if (!tasks.some(item => item.workflow_id === task.workflow_id)) {
-    return upsertTask(tasks, task);
-  }
-  return tasks.map(item => item.workflow_id === task.workflow_id ? { ...item, ...task } : item);
-}
+import {
+  loadActiveCreativeTask,
+  loadStoredTasks,
+  mergeServerTasks,
+  normalizeLastSeq,
+  saveActiveCreativeTask,
+  saveStoredTasks,
+  updateTask,
+  upsertTask,
+} from './oneClickCreative/creativeTaskStorage.js';
+import {
+  getErrorMessage,
+  getTaskDisplayTitle,
+  getTaskTimeLabel,
+  getTaskTitle,
+  getWorkflowDisplayMessage,
+  getWorkflowId,
+  getWorkflowPayload,
+  getWorkflowVideoUrl,
+} from './oneClickCreative/workflowDisplay.js';
 
 export function OneClickCreativePage() {
   const navigate = useNavigate();

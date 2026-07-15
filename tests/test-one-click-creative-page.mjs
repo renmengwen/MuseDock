@@ -14,6 +14,8 @@ const creativeProgressPanelPath = path.join(__dirname, '../frontend-react/src/co
 const creativeRetryPlanPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeRetryPlan.jsx');
 const creativeVideoPreviewPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeVideoPreview.jsx');
 const creativeTaskDetailPath = path.join(__dirname, '../frontend-react/src/components/creative/CreativeTaskDetail.jsx');
+const creativeTaskStoragePath = path.join(__dirname, '../frontend-react/src/pages/oneClickCreative/creativeTaskStorage.js');
+const workflowDisplayPath = path.join(__dirname, '../frontend-react/src/pages/oneClickCreative/workflowDisplay.js');
 const appPath = path.join(__dirname, '../frontend-react/src/App.jsx');
 const shellPath = path.join(__dirname, '../frontend-react/src/components/AppShell.jsx');
 const stylesPath = path.join(__dirname, '../frontend-react/src/styles.css');
@@ -66,6 +68,8 @@ const zh = {
 
 assert.ok(fs.existsSync(pagePath), 'missing page frontend-react/src/pages/OneClickCreativePage.jsx');
 assert.ok(fs.existsSync(creativeDisplayPath), 'creative display helpers should be extracted');
+assert.ok(fs.existsSync(creativeTaskStoragePath), 'creative task storage helpers should be extracted');
+assert.ok(fs.existsSync(workflowDisplayPath), 'workflow display helpers should be extracted');
 for (const componentPath of [
   '../frontend-react/src/components/creative/CreativeSidebar.jsx',
   '../frontend-react/src/components/creative/CreativeComposer.jsx',
@@ -79,6 +83,8 @@ for (const componentPath of [
 }
 
 const page = fs.readFileSync(pagePath, 'utf-8');
+const creativeTaskStorage = fs.readFileSync(creativeTaskStoragePath, 'utf-8');
+const workflowDisplay = fs.readFileSync(workflowDisplayPath, 'utf-8');
 const creativeDisplay = fs.readFileSync(creativeDisplayPath, 'utf-8');
 const creativeSidebar = fs.readFileSync(creativeSidebarPath, 'utf-8');
 const creativeComposer = fs.readFileSync(creativeComposerPath, 'utf-8');
@@ -258,7 +264,7 @@ assert.match(taskDetailUnit, /collectVisualIssues/, 'Failed retry panel should c
 assert.doesNotMatch(taskDetailUnit, /creativePromptModalOverlay/, 'CreativeTaskDetail should not render the old hand-written prompt modal overlay');
 assert.doesNotMatch(taskDetailUnit, /role="dialog"[\s\S]*aria-modal="true"/, 'CreativeTaskDetail should rely on shadcn Dialog accessibility instead of a hand-written dialog');
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');
-assert.match(page, /ACTIVE_CREATIVE_TASK_STORAGE_KEY/, 'OneClickCreativePage should persist active creative task stream state');
+assert.match(creativeTaskStorage, /ACTIVE_CREATIVE_TASK_STORAGE_KEY/, 'creativeTaskStorage should persist active creative task stream state');
 assert.match(page, /streamCreativeWorkflowEvents/, 'OneClickCreativePage should subscribe to creative workflow event stream');
 assert.match(page, /lastSeqRef/, 'OneClickCreativePage should track last received task event sequence');
 assert.match(page, /activeTaskRef/, 'OneClickCreativePage should compare stream events against the active task ref');
@@ -344,13 +350,13 @@ assert.match(deletedBranchBlock, /navigate\('\/creative'\)/, 'Deleted stream clo
 assert.doesNotMatch(deletedBranchBlock, /if\s*\(\s*routeWorkflowId\s*\)\s*navigate\('\/creative'\)/, 'Deleted stream close navigation should not depend on a stale routeWorkflowId closure');
 assert.match(page, /function selectTask\(task\) \{[\s\S]*stopTaskStream\(\{ clearStorage: true \}\)/, 'Selecting another task should stop the previous task stream');
 assert.match(page, /saveActiveCreativeTask\(null\)/, 'Normal close and stop paths should clear active task stream storage');
-const loadActiveStart = page.indexOf('function loadActiveCreativeTask() {');
-const upsertTaskStart = page.indexOf('function upsertTask', loadActiveStart);
-assert.ok(loadActiveStart > 0 && upsertTaskStart > loadActiveStart, 'OneClickCreativePage should define loadActiveCreativeTask before upsertTask');
-const loadActiveBlock = page.slice(loadActiveStart, upsertTaskStart);
+const loadActiveStart = creativeTaskStorage.indexOf('function loadActiveCreativeTask() {');
+const upsertTaskStart = creativeTaskStorage.indexOf('function upsertTask', loadActiveStart);
+assert.ok(loadActiveStart > 0 && upsertTaskStart > loadActiveStart, 'creativeTaskStorage should define loadActiveCreativeTask before upsertTask');
+const loadActiveBlock = creativeTaskStorage.slice(loadActiveStart, upsertTaskStart);
 assert.match(loadActiveBlock, /window\.localStorage\.removeItem\(ACTIVE_CREATIVE_TASK_STORAGE_KEY\);[\s\S]*return null;/, 'loadActiveCreativeTask should delete invalid active task storage values');
 assert.match(loadActiveBlock, /catch\s*\{[\s\S]*window\.localStorage\.removeItem\(ACTIVE_CREATIVE_TASK_STORAGE_KEY\);[\s\S]*return null;[\s\S]*\}/, 'loadActiveCreativeTask should delete active task storage when JSON parsing fails');
-assert.match(page, /function\s+normalizeLastSeq\(value\)\s*\{[\s\S]*Number\.isFinite\(nextValue\)[\s\S]*Math\.floor\(nextValue\)[\s\S]*\}/, 'OneClickCreativePage should normalize last_seq through a shared helper');
+assert.match(creativeTaskStorage, /function\s+normalizeLastSeq\(value\)\s*\{[\s\S]*Number\.isFinite\(nextValue\)[\s\S]*Math\.floor\(nextValue\)[\s\S]*\}/, 'creativeTaskStorage should normalize last_seq through a shared helper');
 assert.match(loadActiveBlock, /last_seq:\s*normalizeLastSeq\(parsed\.last_seq\)/, 'loadActiveCreativeTask should normalize missing or invalid last_seq to 0 without deleting otherwise valid storage');
 assert.match(page, /if \(isDifferentTask\) \{[\s\S]*lastSeqRef\.current = normalizeLastSeq\(sinceSeq\)/, 'Switching task stream subscriptions should normalize lastSeq');
 assert.match(page, /else if \(sinceSeq !== undefined\) \{[\s\S]*lastSeqRef\.current = normalizeLastSeq\(sinceSeq\)/, 'Reusing task stream subscriptions should normalize explicit sinceSeq');
@@ -370,20 +376,20 @@ assert.ok(startNewTaskStart > 0 && selectTaskStart > startNewTaskStart, 'OneClic
 const startNewTaskBlock = page.slice(startNewTaskStart, selectTaskStart);
 assert.match(startNewTaskBlock, /setUseResearch\(true\)/, 'Starting a new creative task should restore the default research-enabled state');
 assert.doesNotMatch(startNewTaskBlock, /setUseResearch\(false\)/, 'Starting a new creative task should not turn off research by default');
-assert.match(page, /CREATIVE_TASKS_STORAGE_KEY/, 'OneClickCreativePage should persist submitted creative tasks locally');
-assert.match(page, /function\s+compactStoredTask\(task\)\s*\{[\s\S]*workflow_id:[\s\S]*updated_at:/, 'Stored creative task cache should keep only compact sidebar fields');
-assert.match(page, /function\s+saveStoredTasks\(tasks\)\s*\{[\s\S]*map\(compactStoredTask\)[\s\S]*window\.localStorage\.setItem[\s\S]*catch\s*\{[\s\S]*window\.localStorage\.removeItem\(CREATIVE_TASKS_STORAGE_KEY\)/, 'Saving task cache should not crash the page when localStorage quota is full');
-assert.match(page, /function\s+saveActiveCreativeTask\(value\)\s*\{[\s\S]*try\s*\{[\s\S]*window\.localStorage\.setItem[\s\S]*catch\s*\{[\s\S]*window\.localStorage\.removeItem\(ACTIVE_CREATIVE_TASK_STORAGE_KEY\)/, 'Saving active task state should not crash the page when localStorage quota is full');
-assert.match(page, /function\s+getWorkflowGeneratedTitle\(workflow\)/, 'OneClickCreativePage should derive sidebar titles from generated scene spec titles');
+assert.match(creativeTaskStorage, /CREATIVE_TASKS_STORAGE_KEY/, 'creativeTaskStorage should persist submitted creative tasks locally');
+assert.match(creativeTaskStorage, /function\s+compactStoredTask\(task\)\s*\{[\s\S]*workflow_id:[\s\S]*updated_at:/, 'Stored creative task cache should keep only compact sidebar fields');
+assert.match(creativeTaskStorage, /function\s+saveStoredTasks\(tasks\)\s*\{[\s\S]*map\(compactStoredTask\)[\s\S]*window\.localStorage\.setItem[\s\S]*catch\s*\{[\s\S]*window\.localStorage\.removeItem\(CREATIVE_TASKS_STORAGE_KEY\)/, 'Saving task cache should not crash the page when localStorage quota is full');
+assert.match(creativeTaskStorage, /function\s+saveActiveCreativeTask\(value\)\s*\{[\s\S]*try\s*\{[\s\S]*window\.localStorage\.setItem[\s\S]*catch\s*\{[\s\S]*window\.localStorage\.removeItem\(ACTIVE_CREATIVE_TASK_STORAGE_KEY\)/, 'Saving active task state should not crash the page when localStorage quota is full');
+assert.match(workflowDisplay, /function\s+getWorkflowGeneratedTitle\(workflow\)/, 'workflowDisplay should derive sidebar titles from generated scene spec titles');
 assert.match(page, /getTaskDisplayTitle\(nextWorkflow,\s*nextWorkflow\?\.creative_context\?\.input\?\.raw_text,\s*prev\.find\(task => task\.workflow_id === workflowId\)\?\.title\)/, 'Task list refresh should replace the prompt-derived title once a generated main title exists');
-assert.match(page, /window\.localStorage\.setItem/, 'OneClickCreativePage should save submitted tasks to localStorage');
+assert.match(creativeTaskStorage, /window\.localStorage\.setItem/, 'creativeTaskStorage should save submitted tasks to localStorage');
 assert.match(page, /setSelectedWorkflowId\(nextWorkflowId\)/, 'Submitting should automatically enter the created task detail');
 assert.match(page, /useNavigate/, 'OneClickCreativePage should use router navigation for creative tasks');
 assert.match(page, /useParams/, 'OneClickCreativePage should read the workflow id from route params');
 assert.match(page, /navigate\(`\/creative\/\$\{encodeURIComponent\(nextWorkflowId\)\}`/, 'Submitting should route to the created workflow detail URL');
 assert.match(page, /navigate\(`\/creative\/\$\{encodeURIComponent\(task\.workflow_id\)\}`/, 'Selecting a sidebar task should route to its workflow detail URL');
 assert.match(page, /navigate\('\/creative'\)/, 'Starting a new task should route back to the creative home URL');
-assert.match(page, /function updateTask\(tasks, task\) \{[\s\S]*return tasks\.map\(item => item\.workflow_id === task\.workflow_id \? \{ \.\.\.item, \.\.\.task \} : item\);[\s\S]*\}/, 'Task refreshes should update existing sidebar tasks in place so identical titles do not jump');
+assert.match(creativeTaskStorage, /function updateTask\(tasks, task\) \{[\s\S]*return tasks\.map\(item => item\.workflow_id === task\.workflow_id \? \{ \.\.\.item, \.\.\.task \} : item\);[\s\S]*\}/, 'Task refreshes should update existing sidebar tasks in place so identical titles do not jump');
 assert.match(page, /async function pollWorkflow\(\) \{[\s\S]*persistTasks\(prev => updateTask\(prev, \{/, 'Polling workflow refreshes should preserve the sidebar order');
 assert.doesNotMatch(page, /async function pollWorkflow\(\) \{[\s\S]*persistTasks\(prev => upsertTask\(prev, \{/, 'Polling workflow refreshes should not move the selected task to the top');
 assert.match(page, /const isDetailRoute = Boolean\(routeWorkflowId\)/, 'Creative detail mode should be derived from the route workflow id');
@@ -446,9 +452,9 @@ assert.ok(!styles.includes('.creativeDetailCard'), 'styles.css should remove unr
 assert.ok(!styles.includes('.creativeStagePanel'), 'styles.css should remove unreferenced creative stage panel styles');
 assert.ok(!styles.includes('.creativeAssetNotice'), 'styles.css should remove unreferenced creative asset notice styles');
 assert.match(taskDetailUnit, /getWorkflowVideoUrl/, 'Creative task detail should resolve rendered video URL from workflow data');
-assert.match(page, /workflow\?\.stages\?\.find\(stage => stage\.id === 'render'\)\?\.result/, 'Creative task detail should read video URL from render stage result');
+assert.match(workflowDisplay, /workflow\?\.stages\?\.find\(stage => stage\.id === 'render'\)\?\.result/, 'workflowDisplay should read video URL from render stage result');
 assert.match(page, /getWorkflowDisplayMessage/, 'Creative task detail should derive the visible status message from workflow progress');
-assert.match(page, /find\(stage => \['running', 'queued', 'pending'\]\.includes\(stage\.status\)\)/, 'Creative task detail should surface the current active stage message while polling');
+assert.match(workflowDisplay, /find\(stage => \['running', 'queued', 'pending'\]\.includes\(stage\.status\)\)/, 'workflowDisplay should surface the current active stage message while polling');
 assert.match(page, /if \(storedTask\) \{[\s\S]*setStatus\('polling'\);/, 'Stored creative tasks should refresh from backend instead of freezing stale local workflow data');
 assert.match(creativeDisplay, /skipped:\s*'已跳过'/, 'Workflow progress should show skipped stages as 已跳过');
 assert.match(creativeDisplay, /stage\.status === 'skipped'[\s\S]*return 'done'/, 'Workflow stepper should render skipped stages as non-active completed steps');
