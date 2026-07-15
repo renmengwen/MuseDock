@@ -374,5 +374,118 @@ function fullSceneCaption(sceneId, text, duration) {
     // 反向（blocking issue 仍记 visual_qa_warning）原由死模式用例覆盖，随死模式下线，待 per_scene 用例补齐。
   }
 
+  // ===== 回归：必用生成素材未进画面必须阻断导出（required_visual_asset_missing）=====
+  // 谱系：e8000f4 展平策略概念时，阻断分支残留未定义变量 assetFirstBlocking，
+  // missingRequiredAssets 命中时抛 ReferenceError、被上游吞成通用 html_video_error。
+  // 语义：asset_context 带 source='generated' 必用资产（其 generation.scene_id 已不在当前
+  // scene_spec，帧级 asset_refs 校验兜不住），帧 HTML 又未引用该素材路径 → 工作流终检必须
+  // 返回结构化阻断失败，且阻断前工程已落盘。
+  {
+    const missingAssetSourceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hv-missing-asset-src-'));
+    const missingAssetSourcePath = path.join(missingAssetSourceDir, 'gen-hero.png');
+    await fs.writeFile(missingAssetSourcePath, 'fake-png-bytes', 'utf8');
+    const missingAssetNarration = '生成主视觉必须进入最终画面。';
+    const missingAssetSpec = {
+      title: '必用素材缺失阻断',
+      aspect_ratio: '16:9',
+      scenes: [{
+        id: 'scene_01',
+        kind: 'text',
+        duration_sec: 4,
+        narration_text: missingAssetNarration,
+        captions: fullSceneCaption('scene_01', missingAssetNarration, 4),
+        visual_text: { headline: '画面标题', keywords: [], cards: [] },
+      }],
+    };
+    const missingAssetResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-missing-required-asset',
+      runId: 'run-missing-required-asset',
+      rootDir,
+      sceneSpec: missingAssetSpec,
+      creativeContext: {
+        input: { raw_text: '必用素材缺失阻断' },
+        continuity_mode: 'scene_html',
+        asset_context: {
+          assets: [{
+            id: 'gen_scene_removed',
+            type: 'image',
+            source: 'generated',
+            path: 'assets/gen-hero.png',
+            frame_src: '../assets/gen-hero.png',
+            local_path: missingAssetSourcePath,
+            alt: '生成主视觉',
+            generation: { scene_id: 'scene_removed', prompt: '生成主视觉' },
+          }],
+        },
+      },
+      target: { generateAudio: false, generateCaptions: true },
+      skipValidation: true,
+      services: {
+        aiImageModel: { isConfigured: async () => false },
+        aiTextModel: {
+          callTextModel: async request => {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: '必用素材缺失阻断',
+                  nodes: [{ id: 'scene_01', kind: 'text', label: '画面标题', durationSec: 4, text: missingAssetNarration }],
+                  edges: [],
+                }),
+              };
+            }
+            // 故意不引用 assets/gen-hero.png：必用素材缺引用
+            const frameId = request.audit?.frame_id || 'scene:scene_01';
+            return {
+              success: true,
+              text: `<!doctype html><html><body><main data-frame-id="${frameId}"><h1 data-text-key="headline">画面标题</h1><p data-text-key="subtitle">支撑短句</p><section data-text-key="body">要点</section></main></body></html>`,
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        frameRenderer: {
+          renderFrame: async (frame, options) => ({
+            success: true,
+            frame_id: frame.id,
+            output_path: options.outputPath,
+            diagnostics: [],
+          }),
+        },
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async (frames, outputPath) => {
+            await writeFile(outputPath, 'mp4');
+            return { success: true, output_path: outputPath, strategy: 'stub' };
+          },
+          concatAudioWithFfmpeg: async () => ({ success: true, skipped: true }),
+          muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+        },
+        visualQaService: {
+          inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+        },
+      },
+    });
+    assert.strictEqual(missingAssetResult.success, false, '必用素材缺引用时导出必须失败');
+    assert.strictEqual(missingAssetResult.code, 'required_visual_asset_missing');
+    assert.ok(missingAssetResult.message.includes('必用视觉素材'),
+      `失败信息必须指明必用视觉素材缺失：${missingAssetResult.message}`);
+    const missingAssetDiag = (missingAssetResult.diagnostics || [])
+      .find(item => item.code === 'required_visual_asset_missing');
+    assert.ok(missingAssetDiag, '诊断必须携带 required_visual_asset_missing 结构化明细');
+    assert.ok(Array.isArray(missingAssetDiag.details?.missing_required_asset_ids)
+      && missingAssetDiag.details.missing_required_asset_ids.length > 0);
+    assert.deepEqual(missingAssetDiag.details.missing_required_asset_ids, ['gen_scene_removed']);
+    assert.strictEqual(missingAssetDiag.retryable, true, '阻断诊断必须标记可重试');
+    assert.strictEqual(missingAssetDiag.repair_action, 'retry_frame_html');
+    assert.ok(missingAssetResult.project, '阻断返回必须携带已落盘工程');
+    // 阻断前 saveProject：落盘 project.json 必须已带 asset_usage_report 缺失明细
+    const blockedProjectJson = JSON.parse(await fs.readFile(
+      path.join(missingAssetResult.project_dir, 'project.json'),
+      'utf8',
+    ));
+    assert.deepEqual(blockedProjectJson.asset_usage_report?.missing_required_asset_ids, ['gen_scene_removed'],
+      '阻断前必须把带缺失明细的工程落盘');
+  }
+
   console.log('html-video workflow tests passed');
 })();

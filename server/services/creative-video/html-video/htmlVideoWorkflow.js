@@ -1230,16 +1230,14 @@ async function generateHtmlVideo(options = {}) {
         required_asset_ids: rendered.project.asset_usage_report?.required_asset_ids || [],
       },
     }));
-    if (assetFirstBlocking) {
-      rendered.project = await projectStore.saveProject(projectDir, rendered.project);
-      return failure(`有 ${missingRequiredAssets.length} 个必用视觉素材未进入最终画面，已停止导出。`, diagnostics, {
-        code: 'required_visual_asset_missing',
-        html_video_project_path: projectDir,
-        project_dir: projectDir,
-        project: rendered.project,
-        output_path: rendered.output_path,
-      });
-    }
+    rendered.project = await projectStore.saveProject(projectDir, rendered.project);
+    return failure(`有 ${missingRequiredAssets.length} 个必用视觉素材未进入最终画面，已停止导出。`, diagnostics, {
+      code: 'required_visual_asset_missing',
+      html_video_project_path: projectDir,
+      project_dir: projectDir,
+      project: rendered.project,
+      output_path: rendered.output_path,
+    });
   }
   if (blockingVisualIssues.length) {
     rendered.project = await projectStore.saveProject(projectDir, rendered.project);
