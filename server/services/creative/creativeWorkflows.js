@@ -1,6 +1,5 @@
 const fsp = require('fs/promises');
 const path = require('path');
-const crypto = require('crypto');
 
 const creativeContext = require('./creativeContext');
 const defaultResearchService = require('../researchService');
@@ -36,34 +35,56 @@ const {
 } = htmlVideoProjectApi;
 const { computeSceneSpecSpeechHash } = require('../creative-video/sceneSpecHash');
 
-const DEFAULT_ROOT = path.join(require('../../dataRoot'), 'data/creative-workflows');
-const DEFAULT_MEDIA_ROOT = path.join(require('../../dataRoot'), 'data/media/douyin');
-const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;
+// 持久化、阶段执行、工程同步已拆分为独立模块（同目录）
+const {
+  DEFAULT_ROOT,
+  DEFAULT_MEDIA_ROOT,
+  WORKFLOW_ID_PATTERN,
+  STAGE_IDS,
+  STAGE_LABELS,
+  safeString,
+  plainObject,
+  getNow,
+  makeId,
+  appendWorkflowModelCall,
+  makeLocalCreativeAwemeId,
+  getWorkflowPath,
+  isPathInside,
+  createStages,
+  normalizeStages,
+  withWorkflowFileQueue,
+  readJson,
+  readWorkflow,
+  workflowFileExists,
+  persistWorkflow,
+  persistWorkflowUnlocked,
+  parseDateMs,
+  isDefaultWorkflowRoot,
+} = require('./workflowStore');
+const {
+  ensureSuccess,
+  selectFailureDiagnostic,
+  createLastFailureFromError,
+  syncProjectStageSummariesFromCheckpoint,
+  emitTaskContextEvent,
+} = require('./workflowStageRunner');
+const {
+  normalizeProjectVisualAsset,
+  applyAssetUsageReportToRecord,
+  buildProjectAssetUsageReport,
+  syncProjectStageSummariesFromProjectDir,
+  projectPathFromStageResult,
+  extractHtmlVideoProjectPathFromWorkflow,
+  assetHydrationFingerprint,
+  enrichWorkflowVideoUrls,
+  readWorkflowAndHtmlVideoProject,
+  loadWorkflowWithHtmlVideoProject,
+} = require('./workflowProjectSync');
+
 const DEFAULT_STALE_STAGE_TIMEOUT_MS = 10 * 60 * 1000;
 const WORKFLOW_STOPPED = Symbol('workflow-stopped');
 const NEUTRAL_VOICE_STYLE_PROMPT = '请使用自然、清晰、语速稳定的短视频口播风格；避免夸张表演、过长间隔、深呼吸或拖慢语速。';
 const EMOTIONAL_VOICE_STYLE_PROMPT = '请使用自然、有情绪起伏的短视频口播风格；关键句加强语气，适度停顿，保持清晰表达，不要过度拖慢语速。';
-
-const STAGE_IDS = ['source', 'research', 'assets', 'agent_run', 'brief', 'audio', 'project', 'check', 'render', 'inspect'];
-const STAGE_LABELS = {
-  source: '准备来源资料',
-  research: '联网研究',
-  assets: '素材分析',
-  agent_run: '导演改写',
-  brief: '成片策划',
-  audio: '生成音频轨',
-  project: '生成工程',
-  check: '校验工程',
-  render: '渲染视频',
-  inspect: '巡检视频',
-};
-
-function safeString(value) {
-  if (value === null || value === undefined) {
-    return '';
-  }
-  return String(value).trim();
-}
 
 function supportsEmotionalTtsRuntime(config) {
   const provider = safeString(config?.provider).toLowerCase();
@@ -86,10 +107,6 @@ async function resolveVoiceStylePrompt(record, services) {
     if (supportsEmotionalTtsRuntime(config)) return EMOTIONAL_VOICE_STYLE_PROMPT;
   } catch {}
   return NEUTRAL_VOICE_STYLE_PROMPT;
-}
-
-function plainObject(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
 function inferMediaRootFromProjectDir(projectDir, workflowId) {
@@ -188,69 +205,6 @@ async function restoreHtmlVideoNarrationReference({ project, projectDir } = {}) 
   return project;
 }
 
-
-function getNow(services = {}) {
-  if (typeof services.now === 'function') {
-    return safeString(services.now()) || new Date().toISOString();
-  }
-  return new Date().toISOString();
-}
-
-function nullableNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
-}
-
-function normalizeModelUsage(value) {
-  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  return {
-    prompt_tokens: nullableNumber(input.prompt_tokens),
-    completion_tokens: nullableNumber(input.completion_tokens),
-    total_tokens: nullableNumber(input.total_tokens),
-    cached_tokens: nullableNumber(input.cached_tokens),
-  };
-}
-
-function makeId(now = new Date().toISOString()) {
-  const stamp = safeString(now).replace(/\D/g, '').slice(0, 14)
-    || new Date().toISOString().replace(/\D/g, '').slice(0, 14);
-  const random = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-  return `${stamp}${random}`;
-}
-
-function appendWorkflowModelCall(record, modelCall = {}) {
-  if (!record || typeof record !== 'object') return record;
-  const input = modelCall && typeof modelCall === 'object' && !Array.isArray(modelCall) ? modelCall : {};
-  const attempt = Number(input.attempt);
-  const repairAttempt = Number(input.repair_attempt ?? input.repairAttempt);
-  const durationMs = Number(input.duration_ms);
-  const existingCount = Array.isArray(record.model_calls) ? record.model_calls.length : 0;
-  const call = {
-    id: safeString(input.id) || `model_call_${String(existingCount + 1).padStart(4, '0')}`,
-    agent: safeString(input.agent),
-    stage: safeString(input.stage),
-    sub_stage: safeString(input.sub_stage),
-    frame_id: safeString(input.frame_id),
-    node_id: safeString(input.node_id),
-    attempt: Number.isFinite(attempt) ? attempt : null,
-    repair_attempt: Number.isFinite(repairAttempt) ? repairAttempt : null,
-    model: {
-      provider: safeString(input.model?.provider),
-      model_id: safeString(input.model?.model_id),
-    },
-    usage: normalizeModelUsage(input.usage),
-    duration_ms: Number.isFinite(durationMs) ? durationMs : null,
-    success: input.success !== false,
-    error: safeString(input.error),
-    created_at: safeString(input.created_at) || new Date().toISOString(),
-  };
-  record.model_calls = [
-    ...(Array.isArray(record.model_calls) ? record.model_calls : []),
-    call,
-  ].slice(-500);
-  return record;
-}
-
 function createAuditedWorkflowTextModel(record, textModel) {
   if (!textModel || typeof textModel.callTextModel !== 'function') return textModel;
   return {
@@ -294,74 +248,6 @@ function createAuditedResearchProvider(record, provider, services = {}) {
   });
 }
 
-function makeLocalCreativeAwemeId(seed) {
-  const numeric = safeString(seed).replace(/\D/g, '');
-  if (WORKFLOW_ID_PATTERN.test(numeric)) {
-    return numeric;
-  }
-
-  return makeId().slice(0, 20);
-}
-
-function getWorkflowPath(workflowId, rootDir = DEFAULT_ROOT) {
-  const id = safeString(workflowId);
-  if (!WORKFLOW_ID_PATTERN.test(id)) {
-    throw new Error('非法或无效的创作任务 ID。');
-  }
-
-  const rootPath = path.resolve(rootDir || DEFAULT_ROOT);
-  const filePath = path.resolve(rootPath, `${id}.json`);
-  const relative = path.relative(rootPath, filePath);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error('创作任务路径越界。');
-  }
-  return filePath;
-}
-
-function isPathInside(child, parent) {
-  const relative = path.relative(path.resolve(parent), path.resolve(child));
-  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
-}
-
-function isPathSameOrInside(child, parent) {
-  const relative = path.relative(path.resolve(parent), path.resolve(child));
-  return !relative || (!relative.startsWith('..') && !path.isAbsolute(relative));
-}
-
-function createStages() {
-  return STAGE_IDS.map(id => ({
-      id,
-      label: STAGE_LABELS[id],
-      status: 'pending',
-      message: '',
-  }));
-}
-
-function normalizeStages(stages) {
-  if (Array.isArray(stages)) {
-    const byId = new Map(stages.map(stage => [stage && stage.id, stage]));
-    return STAGE_IDS.map(id => ({
-      id,
-      label: STAGE_LABELS[id],
-      status: 'pending',
-      message: '',
-      ...(byId.get(id) || {}),
-    }));
-  }
-
-  if (stages && typeof stages === 'object') {
-    return STAGE_IDS.map(id => ({
-      id,
-      label: STAGE_LABELS[id],
-      status: 'pending',
-      message: '',
-      ...(stages[id] || {}),
-    }));
-  }
-
-  return createStages();
-}
-
 function summarizeVisualRoute(project = {}) {
   const frames = Array.isArray(project.frames) ? project.frames : [];
   const decisions = Array.isArray(project.render_decisions) ? project.render_decisions : [];
@@ -388,76 +274,6 @@ function updateStage(record, stageId, patch = {}) {
   ));
 }
 
-const workflowFileQueues = new Map();
-
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function isTransientRenameError(error) {
-  return error?.syscall === 'rename' && ['EPERM', 'EBUSY', 'EACCES'].includes(error?.code);
-}
-
-async function renameWithRetry(tempPath, filePath) {
-  const delays = [25, 75, 150, 300];
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      await fsp.rename(tempPath, filePath);
-      return;
-    } catch (error) {
-      if (!isTransientRenameError(error) || attempt >= delays.length) throw error;
-      await delay(delays[attempt]);
-    }
-  }
-}
-
-function withWorkflowFileQueue(filePath, task) {
-  const key = path.resolve(filePath);
-  const previous = workflowFileQueues.get(key) || Promise.resolve();
-  const current = previous.catch(() => {}).then(task);
-  workflowFileQueues.set(key, current);
-  current.finally(() => {
-    if (workflowFileQueues.get(key) === current) workflowFileQueues.delete(key);
-  }).catch(() => {});
-  return current;
-}
-
-async function writeJson(filePath, data) {
-  const dir = path.dirname(filePath);
-  await fsp.mkdir(dir, { recursive: true });
-  const tempPath = path.join(
-    dir,
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${crypto.randomBytes(4).toString('hex')}.tmp`,
-  );
-  try {
-    await fsp.writeFile(tempPath, JSON.stringify(data, null, 2), 'utf-8');
-    await renameWithRetry(tempPath, filePath);
-  } catch (error) {
-    await fsp.rm(tempPath, { force: true }).catch(() => {});
-    throw error;
-  }
-}
-
-async function readJson(filePath) {
-  return JSON.parse(await fsp.readFile(filePath, 'utf-8'));
-}
-
-async function readWorkflow(workflowId, rootDir) {
-  const filePath = getWorkflowPath(workflowId, rootDir);
-  const record = await readJson(filePath);
-  record.stages = normalizeStages(record.stages);
-  return record;
-}
-
-async function workflowFileExists(workflowId, rootDir) {
-  try {
-    await fsp.access(getWorkflowPath(workflowId, rootDir));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function createWorkflowStoppedSummary(workflowId) {
   return {
     success: false,
@@ -465,21 +281,6 @@ function createWorkflowStoppedSummary(workflowId) {
     status: 'deleted',
     message: '创作任务已停止并删除。',
   };
-}
-
-async function persistWorkflow(record, rootDir) {
-  const filePath = getWorkflowPath(record.workflow_id, rootDir);
-  return withWorkflowFileQueue(filePath, () => persistWorkflowUnlocked(record, rootDir, filePath));
-}
-
-async function persistWorkflowUnlocked(record, rootDir, filePath = getWorkflowPath(record.workflow_id, rootDir)) {
-  record.stages = normalizeStages(record.stages);
-  const nextRecord = {
-    ...record,
-    path: filePath,
-  };
-  await writeJson(filePath, nextRecord);
-  return nextRecord;
 }
 
 function normalizeFailureResult(normalized, payload = {}) {
@@ -750,10 +551,6 @@ function buildFreeformTargetOptions(target = {}) {
   };
 }
 
-function buildHtmlVideoExportFileUrl(workflowId, exportId) {
-  return `/api/creative-workflows/${encodeURIComponent(String(workflowId))}/html-video-project/exports/${encodeURIComponent(String(exportId))}/file`;
-}
-
 function createWorkflowSummary(record) {
   return {
     success: record.success !== false,
@@ -868,343 +665,6 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
   return createWorkflowSummary(persisted);
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-function ensureSuccess(result, fallbackMessage, context = {}) {
-  if (!result || result.success === false) {
-    const diagnostics = normalizeDiagnostics(selectFailureDiagnostics(result));
-    const failureDiagnostic = selectFailureDiagnostic(diagnostics);
-    throw new CreativeWorkflowStageError(safeString(result && result.message) || fallbackMessage, {
-      stage: context.stage || '',
-      sub_stage: failureDiagnostic.sub_stage || context.sub_stage || '',
-      code: failureDiagnostic.code || context.code || '',
-      frame_id: failureDiagnostic.frame_id || '',
-      project_dir: result?.project_dir || result?.html_video_project_path || context.project_dir || '',
-      diagnostics,
-      retryable: result?.retryable === true || failureDiagnostic.retryable === true,
-      fallback_allowed: result?.fallback_allowed !== false && failureDiagnostic.fallback_allowed !== false,
-    });
-  }
-  return result;
-}
-
-
-
-
-function selectFailureDiagnostics(result = {}) {
-  const diagnostics = Array.isArray(result?.diagnostics) ? result.diagnostics : [];
-  if (diagnostics.length > 0) return diagnostics;
-  const htmlVideoDiagnostics = Array.isArray(result?.html_video_diagnostics) ? result.html_video_diagnostics : [];
-  return htmlVideoDiagnostics.length > 0 ? htmlVideoDiagnostics : [];
-}
-
-function selectFailureDiagnostic(diagnostics = []) {
-  const items = Array.isArray(diagnostics) ? diagnostics : [];
-  if (!items.length) return {};
-  const nonWarnings = items.filter(item => item?.severity !== 'warning');
-  if (nonWarnings.length) {
-    return nonWarnings.find(item => item?.retryable === true || safeString(item?.repair_action))
-      || nonWarnings[nonWarnings.length - 1]
-      || {};
-  }
-  return items[0] || {};
-}
-
-function createLastFailureFromError(error, stageId, updatedAt) {
-  const diagnostics = normalizeDiagnostics(error?.diagnostics || []);
-  const failureDiagnostic = selectFailureDiagnostic(diagnostics);
-  return {
-    stage: safeString(error?.stage) || stageId,
-    sub_stage: safeString(error?.sub_stage) || safeString(failureDiagnostic.sub_stage),
-    code: safeString(error?.code) || safeString(failureDiagnostic.code),
-    frame_id: safeString(error?.frame_id) || safeString(failureDiagnostic.frame_id),
-    project_dir: safeString(error?.project_dir),
-    message: safeString(error?.message) || `${STAGE_LABELS[stageId]}失败。`,
-    diagnostics,
-    updated_at: updatedAt,
-  };
-}
-
-function normalizeProjectStageSummary(summary = {}) {
-  const input = summary && typeof summary === 'object' ? summary : {};
-  const next = {
-    id: safeString(input.id),
-    status: safeString(input.status),
-    message: safeString(input.message),
-    artifacts: Array.isArray(input.artifacts)
-      ? input.artifacts
-      : input.artifacts && typeof input.artifacts === 'object'
-      ? input.artifacts
-      : {},
-    diagnostics: normalizeDiagnostics(input.diagnostics || []),
-  };
-  return next.id ? next : null;
-}
-
-function upsertProjectStageSummary(record, summary) {
-  const next = normalizeProjectStageSummary(summary);
-  if (!next) return record;
-  const existing = Array.isArray(record.project_substages) ? record.project_substages : [];
-  const index = existing.findIndex(item => item?.id === next.id);
-  record.project_substages = index >= 0
-    ? existing.map((item, itemIndex) => (itemIndex === index ? next : item))
-    : [...existing, next];
-  return record;
-}
-
-function checkpointStageSummaries(generationCheckpoint = {}) {
-  const stages = generationCheckpoint?.stages;
-  if (Array.isArray(stages)) return stages;
-  if (!stages || typeof stages !== 'object') return [];
-  return Object.entries(stages).map(([id, stage]) => checkpointStageSummary(id, stage));
-}
-
-function checkpointDiagnostic(code, sub_stage, frame_id = '') {
-  return safeString(code) ? createDiagnostic({ code, sub_stage, frame_id }) : null;
-}
-
-function compactFrameStageSummary(id, stage = {}, sub_stage, pathKey, kind) {
-  const frames = stage?.frames && typeof stage.frames === 'object' ? stage.frames : {};
-  const artifacts = [];
-  const diagnostics = [];
-  let hasDone = false;
-  let hasFailed = false;
-  for (const [frameId, frame] of Object.entries(frames)) {
-    if (frame?.status === 'done') {
-      hasDone = true;
-      if (safeString(frame[pathKey])) {
-        artifacts.push({
-          kind,
-          frame_id: frameId,
-          path: safeString(frame[pathKey]),
-          ...(safeString(frame.output_hash) ? { hash: safeString(frame.output_hash) } : {}),
-        });
-      }
-    } else if (frame?.status === 'failed') {
-      hasFailed = true;
-      const diagnostic = checkpointDiagnostic(frame.diagnostic_code, sub_stage, frameId);
-      if (diagnostic) diagnostics.push(diagnostic);
-    }
-  }
-  return {
-    id,
-    status: hasFailed ? 'failed' : hasDone ? 'done' : safeString(stage?.status),
-    artifacts,
-    diagnostics,
-  };
-}
-
-function checkpointStageSummary(id, stage = {}) {
-  if (id === 'content_graph') {
-    return {
-      id,
-      status: safeString(stage?.status),
-      artifacts: safeString(stage?.path) ? {
-        kind: 'content_graph',
-        path: safeString(stage.path),
-        ...(safeString(stage.output_hash) ? { hash: safeString(stage.output_hash) } : {}),
-      } : {},
-      diagnostics: [checkpointDiagnostic(stage?.diagnostic_code, 'content_graph')].filter(Boolean),
-    };
-  }
-  if (id === 'frame_html') {
-    return compactFrameStageSummary(id, stage, 'frame_html', 'html_path', 'frame_html');
-  }
-  if (id === 'render') {
-    return compactFrameStageSummary(id, stage, 'render', 'mp4_path', 'render_frame');
-  }
-  if (id === 'compose') {
-    return {
-      id,
-      status: safeString(stage?.status),
-      artifacts: [
-        safeString(stage?.output_path) ? { kind: 'compose_output', path: safeString(stage.output_path) } : null,
-        safeString(stage?.output_audio_path) ? { kind: 'compose_audio_output', path: safeString(stage.output_audio_path) } : null,
-      ].filter(Boolean),
-      diagnostics: [checkpointDiagnostic(stage?.diagnostic_code, 'compose')].filter(Boolean),
-    };
-  }
-  if (id === 'duration_verify') {
-    return {
-      id,
-      status: safeString(stage?.status),
-      artifacts: {
-        kind: 'duration_verify',
-        expected_duration_sec: stage?.expected_duration_sec ?? null,
-        actual_duration_sec: stage?.actual_duration_sec ?? null,
-      },
-      diagnostics: stage?.status === 'failed'
-        ? [checkpointDiagnostic(stage?.diagnostic_code || 'duration_mismatch', 'duration_verify')].filter(Boolean)
-        : [],
-    };
-  }
-  if (id === 'visual_inspect') {
-    return {
-      id,
-      status: safeString(stage?.status),
-      artifacts: safeString(stage?.report_path) ? { kind: 'visual_report', path: safeString(stage.report_path) } : {},
-      diagnostics: [checkpointDiagnostic(stage?.diagnostic_code, 'visual_inspect')].filter(Boolean),
-    };
-  }
-  return {
-    id,
-    status: stage?.status || '',
-    message: stage?.message || '',
-    artifacts: stage?.artifacts && typeof stage.artifacts === 'object' ? stage.artifacts : {},
-    diagnostics: stage?.diagnostics || [],
-  };
-}
-
-function syncProjectStageSummariesFromCheckpoint(record, generationCheckpoint) {
-  for (const summary of checkpointStageSummaries(generationCheckpoint)) {
-    upsertProjectStageSummary(record, summary);
-  }
-  return record;
-}
-
-function assetKey(asset, fallback = '') {
-  return safeString(asset?.id || asset?.asset_id || fallback);
-}
-
-function normalizeProjectVisualAsset(asset, projectDir) {
-  if (!asset || typeof asset !== 'object' || Array.isArray(asset)) return null;
-  const id = assetKey(asset);
-  if (!id) return null;
-  const normalized = { ...asset, id };
-  const relativePath = safeString(asset.path);
-  if (relativePath && projectDir) {
-    try {
-      normalized.local_path = htmlVideoProjectStore.resolveProjectPath(projectDir, relativePath);
-      normalized.frame_src = safeString(asset.frame_src) || `../${relativePath.replace(/\\/g, '/')}`;
-    } catch {}
-  }
-  return normalized;
-}
-
-function mergeProjectVisualAssets(assetContext, project, projectDir) {
-  const context = plainObject(assetContext);
-  const assets = Array.isArray(context.assets) ? context.assets : [];
-  const seen = new Set(assets.map((asset, index) => assetKey(asset, `asset_${index + 1}`)).filter(Boolean));
-  const additions = [];
-  for (const asset of (Array.isArray(project?.assets) ? project.assets : [])) {
-    const normalized = normalizeProjectVisualAsset(asset, projectDir);
-    const id = assetKey(normalized);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    additions.push(normalized);
-  }
-  if (!additions.length) return context;
-  return {
-    ...context,
-    status: context.status || 'ready',
-    assets: [...assets, ...additions],
-  };
-}
-
-function applyProjectVisualAssetsToRecord(record, project, projectDir) {
-  if (!record || !Array.isArray(project?.assets) || !project.assets.length) return record;
-  record.asset_context = mergeProjectVisualAssets(record.asset_context, project, projectDir);
-  if (record.creative_context && typeof record.creative_context === 'object' && !Array.isArray(record.creative_context)) {
-    record.creative_context = {
-      ...record.creative_context,
-      asset_context: mergeProjectVisualAssets(record.creative_context.asset_context, project, projectDir),
-    };
-  }
-  return record;
-}
-
-function applyAssetUsageReportToRecord(record, assetUsageReport) {
-  if (!record || !assetUsageReport || !Array.isArray(assetUsageReport.assets)) return record;
-  if (record.asset_context && typeof record.asset_context === 'object' && !Array.isArray(record.asset_context)) {
-    record.asset_context = {
-      ...record.asset_context,
-      asset_usage_report: assetUsageReport,
-    };
-  }
-  if (record.creative_context?.asset_context && typeof record.creative_context.asset_context === 'object' && !Array.isArray(record.creative_context.asset_context)) {
-    record.creative_context = {
-      ...record.creative_context,
-      asset_context: {
-        ...record.creative_context.asset_context,
-        asset_usage_report: assetUsageReport,
-      },
-    };
-  }
-  if (record.result?.hyperframes_freeform) {
-    record.result.hyperframes_freeform.project = {
-      ...(record.result.hyperframes_freeform.project || {}),
-      asset_usage_report: assetUsageReport,
-    };
-  }
-  return record;
-}
-
-function buildProjectAssetUsageReport(project, projectDir, record) {
-  if (!project || typeof project !== 'object' || Array.isArray(project)) return null;
-  if (project?.asset_usage_report
-    && Array.isArray(project.asset_usage_report.assets)
-    && Array.isArray(project.asset_usage_report.required_asset_ids)) {
-    return project.asset_usage_report;
-  }
-  if (htmlVideoWorkflow && typeof htmlVideoWorkflow.buildAssetUsageReport === 'function') {
-    return htmlVideoWorkflow.buildAssetUsageReport({
-      project,
-      projectDir,
-      creativeContext: project?.creative_context || record?.creative_context || {},
-    });
-  }
-  return null;
-}
-
-async function resolveTrustedHtmlVideoProjectDir(record, projectDir, options = {}) {
-  const resolvedProjectDir = safeString(projectDir);
-  const workflowId = safeString(record?.workflow_id || record?.aweme_id);
-  if (!resolvedProjectDir || !workflowId) return '';
-  const realProjectDir = await fsp.realpath(resolvedProjectDir).catch(() => '');
-  if (!realProjectDir) return '';
-  const mediaRoot = safeString(options.mediaRoot || DEFAULT_MEDIA_ROOT);
-  const allowedRoots = [];
-  if (mediaRoot) {
-    const workflowDir = path.resolve(mediaRoot, workflowId);
-    const realWorkflowDir = await fsp.realpath(workflowDir).catch(() => '');
-    if (realWorkflowDir) allowedRoots.push(realWorkflowDir);
-  }
-  return allowedRoots.some(root => isPathSameOrInside(realProjectDir, root)) ? realProjectDir : '';
-}
-
-async function syncProjectStageSummariesFromProjectDir(record, projectDir, options = {}) {
-  const resolvedProjectDir = safeString(projectDir);
-  if (!resolvedProjectDir) return record;
-  try {
-    const trustedProjectDir = await resolveTrustedHtmlVideoProjectDir(record, resolvedProjectDir, options);
-    if (!trustedProjectDir) return record;
-    const projectPath = htmlVideoProjectStore.resolveProjectPath(trustedProjectDir, 'project.json');
-    const project = JSON.parse(await fsp.readFile(projectPath, 'utf8'));
-    syncProjectStageSummariesFromCheckpoint(record, project.generation_checkpoint);
-    applyProjectVisualAssetsToRecord(record, project, trustedProjectDir);
-    const assetUsageReport = buildProjectAssetUsageReport(project, trustedProjectDir, record);
-    applyAssetUsageReportToRecord(record, assetUsageReport);
-  } catch {
-    // checkpoint 只是辅助恢复状态，读取失败不能覆盖主阶段错误。
-  }
-  return record;
-}
-
 function isHtmlVideoLiteProjectResult(result) {
   const hyperframes = result?.hyperframes_freeform || {};
   const project = hyperframes.project || {};
@@ -1241,17 +701,6 @@ async function markHtmlVideoLiteFinalStages(record, now, projectStageResult = {}
       visual_inspect: hyperframes.visual_inspect || null,
     },
   });
-}
-
-async function emitTaskContextEvent(taskContext, event) {
-  if (!taskContext || typeof taskContext.emit !== 'function') {
-    return;
-  }
-  try {
-    await taskContext.emit(event);
-  } catch {
-    // 后台任务事件是辅助状态通道，不能改变主 workflow 阶段成败。
-  }
 }
 
 async function runStage(record, stageId, rootDir, handler, services, taskContext = null) {
@@ -1595,15 +1044,6 @@ async function getCreativeWorkflow(workflowId, options = {}) {
   }
 }
 
-function parseDateMs(value) {
-  const time = Date.parse(safeString(value));
-  return Number.isFinite(time) ? time : 0;
-}
-
-function isDefaultWorkflowRoot(rootDir) {
-  return path.resolve(rootDir || DEFAULT_ROOT) === path.resolve(DEFAULT_ROOT);
-}
-
 function resolveTaskRegistry(rootDir, options = {}) {
   if (Object.prototype.hasOwnProperty.call(options, 'taskRegistry')) {
     return options.taskRegistry;
@@ -1845,177 +1285,6 @@ function extractFrameSpecsFromWorkflow(record) {
     return { frames: [] };
   }
   return frameSpecs;
-}
-
-function projectPathFromStageResult(value) {
-  if (!value || typeof value !== 'object') return '';
-  const hyperframes = value.hyperframes_freeform || {};
-  return safeString(
-    value.html_video_project_path
-    || value.project_dir
-    || value.project?.html_video_project_path
-    || value.project?.project_dir
-    || value.result?.html_video_project_path
-    || value.result?.project_dir
-    || value.result?.project?.html_video_project_path
-    || value.result?.project?.project_dir
-    || hyperframes.html_video_project_path
-    || hyperframes.project_dir
-    || hyperframes.project?.html_video_project_path
-    || hyperframes.project?.project_dir,
-  );
-}
-
-function extractStageHtmlVideoProjectPath(record) {
-  const stages = Array.isArray(record?.stages) ? record.stages : [];
-  for (const stage of stages) {
-    const found = projectPathFromStageResult(stage?.result || stage?.data || stage);
-    if (found) return found;
-  }
-  const stageResults = record?.stage_results;
-  if (stageResults && typeof stageResults === 'object') {
-    for (const result of Object.values(stageResults)) {
-      const found = projectPathFromStageResult(result);
-      if (found) return found;
-    }
-  }
-  return '';
-}
-
-function extractHtmlVideoProjectPathFromWorkflow(record) {
-  const hyperframes = record?.result?.hyperframes_freeform || {};
-  const project = hyperframes.project || {};
-  return safeString(
-    record?.last_failure?.project_dir
-    || project.html_video_project_path
-    || project.project_dir
-    || hyperframes.html_video_project_path
-    || hyperframes.project_dir
-    // 运行中任务：进度事件广播的工程目录，供轮询时水合生成图等工程内素材
-    || record?.active_project_dir
-    || extractStageHtmlVideoProjectPath(record),
-  );
-}
-
-function assetHydrationFingerprint(record) {
-  return JSON.stringify({
-    asset_ids: (Array.isArray(record?.asset_context?.assets) ? record.asset_context.assets : [])
-      .map((asset, index) => assetKey(asset, `asset_${index + 1}`)),
-    creative_asset_ids: (Array.isArray(record?.creative_context?.asset_context?.assets) ? record.creative_context.asset_context.assets : [])
-      .map((asset, index) => assetKey(asset, `asset_${index + 1}`)),
-    usage_report: record?.asset_context?.asset_usage_report
-      || record?.result?.hyperframes_freeform?.project?.asset_usage_report
-      || null,
-  });
-}
-
-function normalizeComparablePath(value) {
-  const text = safeString(value);
-  if (!text) return '';
-  const normalized = path.normalize(text);
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
-}
-
-function findMatchingHtmlVideoExport(project, projectDir, outputPath) {
-  const output = normalizeComparablePath(outputPath);
-  if (!output || !Array.isArray(project?.exports)) return null;
-  return project.exports.find(item => {
-    const exportPath = safeString(item?.path);
-    const candidates = [
-      item?.absolute_path,
-      exportPath && projectDir ? path.resolve(projectDir, exportPath) : '',
-      exportPath,
-    ].map(normalizeComparablePath).filter(Boolean);
-    return safeString(item?.id) && candidates.includes(output);
-  }) || null;
-}
-
-function pickWorkflowRenderOutputUrl(record) {
-  const renderStageUrl = Array.isArray(record?.stages)
-    ? record.stages.find(stage => stage?.id === 'render')?.result?.render?.output_url
-    : '';
-  const candidates = [
-    record?.render_output_url,
-    record?.result?.video?.output_url,
-    record?.result?.render?.output_url,
-    record?.result?.hyperframes_freeform?.render?.output_url,
-    record?.render?.output_url,
-    record?.hyperframes_freeform?.render?.output_url,
-    renderStageUrl,
-  ];
-  return candidates.find(value => typeof value === 'string' && value.trim()) || '';
-}
-
-async function enrichWorkflowVideoUrls(record) {
-  const workflowId = safeString(record?.workflow_id);
-  const render = record?.result?.hyperframes_freeform?.render;
-  const outputPath = safeString(render?.output_path || render?.outputPath);
-  if (workflowId && render && !safeString(render.output_url) && outputPath) {
-    const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
-    if (projectDir) {
-      try {
-        const project = await htmlVideoProjectStore.loadProject(projectDir);
-        const exportItem = findMatchingHtmlVideoExport(project, projectDir, outputPath);
-        if (exportItem) render.output_url = buildHtmlVideoExportFileUrl(workflowId, exportItem.id);
-      } catch {}
-    }
-  }
-  // 归一：提供稳定顶层 render_output_url，前端优先读它，减少对多层嵌套结构的猜测。
-  const canonicalUrl = pickWorkflowRenderOutputUrl(record);
-  if (canonicalUrl) record.render_output_url = canonicalUrl;
-  return record;
-}
-
-async function readWorkflowAndHtmlVideoProject(workflowId, rootDir) {
-  let record;
-  try {
-    record = await readWorkflow(workflowId, rootDir);
-  } catch {
-    return { record: null, project: null, projectDir: '', error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
-  }
-  const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
-  if (!projectDir) {
-    return { record, project: null, projectDir: '', error: null };
-  }
-  try {
-    const project = await htmlVideoProjectStore.loadProject(projectDir);
-    return { record, project, projectDir, error: null };
-  } catch (error) {
-    try {
-      const stat = await fsp.stat(projectDir);
-      if (stat.isDirectory()) {
-        return {
-          record,
-          project: {
-            workflow_id: safeString(workflowId),
-            generation_checkpoint: {
-              stages: {
-                validate_project: {
-                  status: 'failed',
-                  diagnostic_code: 'project_read_failed',
-                },
-              },
-            },
-          },
-          projectDir,
-          projectLoadError: error,
-          error: null,
-        };
-      }
-    } catch {
-      // fall through to the existing hard failure when the project directory itself is gone
-    }
-    return {
-      record,
-      project: null,
-      projectDir,
-      error: {
-        success: false,
-        code: 'NO_HTML_VIDEO_PROJECT',
-        message: `读取 html-video 工程失败：${error.message}`,
-      },
-    };
-  }
 }
 
 async function getCreativeWorkflowRetryPlan(workflowId, options = {}) {
@@ -2296,34 +1565,6 @@ async function retryCreativeWorkflow(workflowId, payload = {}, options = {}) {
     message: record.message,
     diagnostics: record.last_failure.diagnostics,
   };
-}
-
-async function loadWorkflowWithHtmlVideoProject(workflowId, rootDir) {
-  let record;
-  try {
-    record = await readWorkflow(workflowId, rootDir);
-  } catch {
-    return { record: null, project: null, projectDir: '', error: { success: false, code: 'NOT_FOUND', message: '未找到创作任务。' } };
-  }
-  const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
-  if (!projectDir) {
-    return { record, project: null, projectDir: '', error: { success: false, code: 'NO_HTML_VIDEO_PROJECT', message: '该创作任务尚未生成 html-video 工程。' } };
-  }
-  try {
-    const project = await htmlVideoProjectStore.loadProject(projectDir);
-    return { record, project, projectDir, error: null };
-  } catch (error) {
-    return {
-      record,
-      project: null,
-      projectDir,
-      error: {
-        success: false,
-        code: 'NO_HTML_VIDEO_PROJECT',
-        message: `读取 html-video 工程失败：${error.message}`,
-      },
-    };
-  }
 }
 
 async function getCreativeWorkflowHtmlVideoProject(workflowId, options = {}) {
