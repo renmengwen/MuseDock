@@ -1,13 +1,9 @@
 const fs = require('fs');
-const fsp = require('fs/promises');
 const path = require('path');
-const crypto = require('crypto');
 
 const aiTextModel = require('../../ai/aiTextModel');
-const contentGraphAgent = require('./contentGraphAgent');
 const frameHtmlAgent = require('./frameHtmlAgent');
-const frameFallbackBuilder = require('./frameFallbackBuilder');
-const { runFrameHtmlPhase, isProviderMissingText, groupBeatsForSceneHtml } = require('./frameHtmlPhase');
+const { runFrameHtmlPhase } = require('./frameHtmlPhase');
 const { buildMixedFrameProject } = require('./mixedFrameBuilder');
 const { buildVisualPlan, assignMotionOrchestration } = require('./visualPlanService');
 const { matchVisualBeatsToRenderers } = require('./visualRouteMatcher');
@@ -18,7 +14,6 @@ const {
 const environmentDoctor = require('./environmentDoctor');
 const projectStore = require('./projectStore');
 const {
-  normalizeProject,
   markCheckpointStage,
   markCheckpointFrame,
   appendCheckpointModelCall,
@@ -29,37 +24,37 @@ const editPatchService = require('./editPatchService');
 const { syncRawHtmlFrameTextPatch } = require('./rawHtmlTextPatch');
 const defaultVisualQaService = require('../visualQaService');
 const defaultLayoutQaService = require('./layoutQaService');
-const { computeSceneSpecSpeechHash, audioMatchesSceneSpec } = require('../sceneSpecHash');
+const { audioMatchesSceneSpec } = require('../sceneSpecHash');
 const { applyManifestToProjectAudio } = require('../ttsService');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
-const { mapSceneSpecToContentGraph } = require('./sceneSpecMapper');
 const { resolveNodeSceneId, validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
-const { topoSort } = require('./contentGraph');
 const sfxLibrary = require('./sfxLibrary');
 const sfxPlannerAgent = require('./sfxPlannerAgent');
 const sfxEventService = require('./sfxEventService');
 const { AGENTS, STAGES } = require('../agentStages');
-
-function objectOrEmpty(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-}
-
-function firstNonEmptyString(...values) {
-  for (const value of values) {
-    const text = String(value ?? '').trim();
-    if (text) return text;
-  }
-  return '';
-}
-
-function cloneJson(value) {
-  return JSON.parse(JSON.stringify(value || {}));
-}
-
-function hasManifestSceneAudio(audioManifest = {}) {
-  return (Array.isArray(audioManifest.scenes) ? audioManifest.scenes : [])
-    .some(scene => firstNonEmptyString(scene?.path, scene?.relative_path, scene?.relativePath));
-}
+const {
+  callTextModel,
+  report,
+  sha256,
+  hasUsableContentGraph,
+  contentGraphMatchesSceneSpec,
+  loadCheckpointContentGraph,
+  CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
+  contentGraphSceneSpecMismatchDiagnostic,
+  generateContentGraphWithRetry,
+  expandContentGraphToVisualBeats,
+  expandContentGraphToSceneEntries,
+} = require('./contentGraphPhase');
+const {
+  objectOrEmpty,
+  firstNonEmptyString,
+  bindGeneratedAssetsToSceneSpec,
+  materializeCreativeContextAssets,
+  projectAssetsFromCreativeContext,
+  buildAssetUsageReport,
+  attachAssetUsageReport,
+  missingRequiredAssetIds,
+} = require('./assetUsagePhase');
 
 function resolveExistingNarrationAudio(creativeContext = {}, sceneSpec = null) {
   const audio = objectOrEmpty(creativeContext.audio);
@@ -136,10 +131,6 @@ function parseJsonOnlyResponse(text) {
   }
 }
 
-function sha256(value) {
-  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
-}
-
 function stableSceneSpecValue(value) {
   if (Array.isArray(value)) return value.map(stableSceneSpecValue);
   if (!value || typeof value !== 'object') return value;
@@ -159,15 +150,6 @@ function rawHtmlBuildFrameIdFromError(error) {
   return message.match(/缺少帧\s+([^\s]+)\s+的 raw HTML 路径/)?.[1]
     || message.match(/内容图节点\s+([^\s]+)\s+未匹配到 scene_spec/)?.[1]
     || '';
-}
-
-async function report(onProgress, event) {
-  if (typeof onProgress !== 'function') return;
-  try {
-    await onProgress(event);
-  } catch (_) {
-    // 进度回调不能影响主生成流程。
-  }
 }
 
 function getModel(services = {}) {
@@ -222,21 +204,6 @@ function createAuditedModel(model, projectDir) {
       }
     },
   };
-}
-
-async function callTextModel(model, prompt, options = {}) {
-  const response = await model.callTextModel({
-    ...objectOrEmpty(options),
-    messages: [{ role: 'user', content: prompt }],
-  });
-  if (!response || response.success === false) {
-    return {
-      success: false,
-      message: response?.message || 'AI 调用失败。',
-      text: '',
-    };
-  }
-  return { success: true, text: response.text || response.content || '' };
 }
 
 const SAFE_PROJECT_ID = /^[A-Za-z0-9_.-]+$/;
@@ -408,10 +375,6 @@ function invalidateFrameHtmlResumeState(project) {
   return project;
 }
 
-function hasUsableContentGraph(graph = {}) {
-  return Array.isArray(graph.nodes) && graph.nodes.length > 0;
-}
-
 // R4：帧统计（overlay_check/text_blocks/cards/graphics）必须合并进 attachVisualRouting
 // 闭包引用的 visualDecisions/renderDecisions 源对象，直接写 project.render_decisions
 // 会在下一次 attachVisualRouting 重挂时被覆盖抹掉。
@@ -433,72 +396,6 @@ function mergeFrameStatsIntoDecisions({ visualDecisions, renderDecisions, statsB
   if (Array.isArray(renderDecisions)) for (const decision of renderDecisions) applyTo(decision);
 }
 
-/**
- * 把已产出的生成图确定性地绑定到场景 asset_refs（返回克隆，不改入参）：
- * 仅用于路由输入（视觉计划），不回写原始 sceneSpec，
- * 以免影响 scene_spec_hash 的重试复用判定。绑定按 asset id 排序保证确定性。
- */
-function bindGeneratedAssetsToSceneSpec(sceneSpec = {}, creativeContext = {}) {
-  const assets = Array.isArray(creativeContext?.asset_context?.assets)
-    ? creativeContext.asset_context.assets
-    : [];
-  const bySceneId = new Map();
-  for (const asset of assets) {
-    if (asset?.source !== 'generated') continue;
-    const sceneId = String(asset?.generation?.scene_id || '').trim();
-    const assetId = String(asset?.id || asset?.asset_id || '').trim();
-    if (!sceneId || !assetId) continue;
-    if (!bySceneId.has(sceneId)) bySceneId.set(sceneId, []);
-    bySceneId.get(sceneId).push(assetId);
-  }
-  if (!bySceneId.size || !Array.isArray(sceneSpec?.scenes)) return sceneSpec;
-  return {
-    ...sceneSpec,
-    scenes: sceneSpec.scenes.map(scene => {
-      const sceneId = String(scene?.id || scene?.scene_id || '').trim();
-      const assetIds = (bySceneId.get(sceneId) || []).slice().sort();
-      if (!assetIds.length) return scene;
-      const refs = Array.isArray(scene.asset_refs) ? [...scene.asset_refs] : [];
-      for (const assetId of assetIds) {
-        if (refs.some(ref => String(ref?.asset_id || ref?.id || '') === assetId)) continue;
-        refs.push({ asset_id: assetId, usage: 'subject', reason: 'AI 生图主视觉' });
-      }
-      return { ...scene, asset_refs: refs };
-    }),
-  };
-}
-
-function contentGraphMatchesSceneSpec(graph = {}, sceneSpec = null) {  if (!sceneSpec) return true;
-  const direct = validateGraphMatchesSceneSpec(graph, sceneSpec);
-  if (direct.ok) return true;
-  const expected = (Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [])
-    .map(scene => String(scene?.id || '').trim())
-    .filter(Boolean);
-  if (!expected.length || !Array.isArray(graph?.nodes)) return false;
-  const actual = [];
-  for (const nodeId of (() => {
-    try { return topoSort(graph); } catch { return graph.nodes.map(node => node.id); }
-  })()) {
-    const node = (graph.nodes || []).find(item => item?.id === nodeId) || {};
-    const sceneId = resolveNodeSceneId(node);
-    if (sceneId && actual[actual.length - 1] !== sceneId) actual.push(sceneId);
-  }
-  return expected.length === actual.length && expected.every((sceneId, index) => sceneId === actual[index]);
-}
-
-function loadCheckpointContentGraph(projectDir, project = {}) {
-  const graphPath = String(project.generation_checkpoint?.stages?.content_graph?.path || '').trim();
-  if (!graphPath) return null;
-  try {
-    const absolutePath = projectStore.resolveProjectPath(projectDir, graphPath);
-    if (!fs.existsSync(absolutePath)) return null;
-    const graph = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
-    return hasUsableContentGraph(graph) ? graph : null;
-  } catch {
-    return null;
-  }
-}
-
 function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null) {
   if (!project) return null;
   if (!resumeArtifactsMatch(project, sceneSpec)) return null;
@@ -507,244 +404,6 @@ function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null) {
   }
   const checkpointGraph = loadCheckpointContentGraph(projectDir, project);
   return checkpointGraph && contentGraphMatchesSceneSpec(checkpointGraph, sceneSpec) ? checkpointGraph : null;
-}
-
-function providerMissingTextDiagnostic() {
-  return createDiagnostic({
-    code: 'provider_missing_text',
-    stage: 'ai-content-graph',
-    sub_stage: 'content_graph',
-    retryable: true,
-    repair_action: 'retry_content_graph',
-    fallback_allowed: true,
-    user_message: 'content graph 生成时模型返回空内容，将重试内容图生成。',
-  });
-}
-
-const CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE = '画面结构与旁白脚本不一致，已停止渲染。请重新生成画面结构后再导出。';
-
-function contentGraphSceneSpecMismatchDiagnostic(graphBinding = {}, options = {}) {
-  return createDiagnostic({
-    code: 'content_graph_scene_spec_mismatch',
-    stage: 'ai-content-graph',
-    sub_stage: 'content_graph',
-    user_message: options.user_message || CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
-    details: graphBinding,
-    fallback_allowed: false,
-    retryable: options.retryable !== false,
-    repair_action: 'retry_content_graph',
-    ...(options.severity ? { severity: options.severity } : {}),
-  });
-}
-
-function graphAiFailureDiagnostic(graphAi) {
-  if (isProviderMissingText(graphAi?.message)) {
-    return providerMissingTextDiagnostic();
-  }
-  return createDiagnostic({
-    code: 'content_graph_failed',
-    stage: 'ai-content-graph',
-    sub_stage: 'content_graph',
-    user_message: graphAi?.message || 'content graph 生成失败。',
-    retryable: true,
-    repair_action: 'retry_content_graph',
-  });
-}
-
-function ensureGraphAiHasText(graphAi) {
-  if (graphAi?.success && !String(graphAi.text || '').trim()) {
-    return { success: false, message: '返回结果缺少文本内容。', text: '' };
-  }
-  return graphAi;
-}
-
-async function retryContentGraphAfterMismatch({
-  model,
-  sceneSpec,
-  creativeContext,
-  target,
-  originalPrompt,
-  diagnostics,
-  graphBinding,
-  onProgress,
-} = {}) {
-  diagnostics.push(contentGraphSceneSpecMismatchDiagnostic(graphBinding, {
-    severity: 'warning',
-    user_message: 'content graph 与字幕脚本不一致，已丢弃该结果并重试。',
-  }));
-  await report(onProgress, {
-    type: 'html_video_graph_scene_spec_mismatch',
-    stage: 'project',
-    sub_stage: 'content_graph',
-    message: 'content graph 与字幕脚本不一致，正在按脚本结构重试内容图生成...',
-    data: graphBinding,
-  });
-  const retryPrompt = contentGraphAgent.buildRetryPrompt(sceneSpec, creativeContext, target, originalPrompt, 1);
-  return ensureGraphAiHasText(await callTextModel(model, retryPrompt, {
-    stream: false,
-    audit: {
-      agent: AGENTS.contentGraph,
-      stage: STAGES.contentGraph,
-      sub_stage: 'content_graph',
-      attempt: 2,
-    },
-  }));
-}
-
-async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext, target, onProgress, project, projectDir } = {}) {
-  const originalPrompt = contentGraphAgent.buildContentGraphPrompt({
-    sceneSpec,
-    creativeContext,
-    target,
-  });
-  let graphAi = ensureGraphAiHasText(await callTextModel(model, originalPrompt, {
-    audit: {
-      agent: AGENTS.contentGraph,
-      stage: STAGES.contentGraph,
-      sub_stage: 'content_graph',
-      attempt: 1,
-    },
-  }));
-  const diagnostics = [];
-  let retriedForProviderMissing = false;
-
-  if (!graphAi.success && isProviderMissingText(graphAi.message)) {
-    diagnostics.push(providerMissingTextDiagnostic());
-    await report(onProgress, {
-      type: 'html_video_graph_retry_started',
-      stage: 'project',
-      sub_stage: 'content_graph',
-      message: 'content graph 生成时模型返回空内容，正在使用短提示词重试...',
-      data: {},
-    });
-    const retryPrompt = contentGraphAgent.buildRetryPrompt(sceneSpec, creativeContext, target, originalPrompt, 1);
-    graphAi = ensureGraphAiHasText(await callTextModel(model, retryPrompt, {
-      stream: false,
-      audit: {
-        agent: AGENTS.contentGraph,
-        stage: STAGES.contentGraph,
-        sub_stage: 'content_graph',
-        attempt: 2,
-      },
-    }));
-    retriedForProviderMissing = true;
-    if (!graphAi.success && sceneSpec) {
-      await report(onProgress, {
-        type: 'html_video_graph_fallback_scene_spec',
-        stage: 'project',
-        sub_stage: 'content_graph',
-        message: 'content graph 重试仍为空，已使用字幕脚本生成内容图。',
-        data: {},
-      });
-      return {
-        success: true,
-        contentGraph: mapSceneSpecToContentGraph(sceneSpec),
-        diagnostics,
-        inputHash: sha256(originalPrompt),
-      };
-    }
-  }
-
-  if (!graphAi.success) {
-    return {
-      success: false,
-      message: graphAi.message || 'content graph 生成失败。',
-      diagnostics: [graphAiFailureDiagnostic(graphAi)],
-      inputHash: sha256(originalPrompt),
-    };
-  }
-
-  let graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec, { creativeContext });
-  if (!graphParsed.success) {
-    if (retriedForProviderMissing && sceneSpec) {
-      await report(onProgress, {
-        type: 'html_video_graph_fallback_scene_spec',
-        stage: 'project',
-        sub_stage: 'content_graph',
-        message: 'content graph 重试仍无效，已使用字幕脚本生成内容图。',
-        data: {},
-      });
-      return {
-        success: true,
-        contentGraph: mapSceneSpecToContentGraph(sceneSpec),
-        diagnostics,
-        inputHash: sha256(originalPrompt),
-      };
-    }
-    return {
-      ...graphParsed,
-      diagnostics: normalizeDiagnostics(graphParsed.diagnostics, {
-        code: 'content_graph_invalid',
-        stage: 'ai-content-graph',
-        sub_stage: 'content_graph',
-        user_message: graphParsed.message || 'content graph 解析失败。',
-        details: { errors: graphParsed.errors || [] },
-        retryable: true,
-        repair_action: 'retry_content_graph',
-      }),
-      inputHash: sha256(originalPrompt),
-    };
-  }
-  if (sceneSpec) {
-    const graphBinding = validateGraphMatchesSceneSpec(graphParsed.graph, sceneSpec);
-    if (!graphBinding.ok) {
-      graphAi = await retryContentGraphAfterMismatch({
-        model,
-        sceneSpec,
-        creativeContext,
-        target,
-        originalPrompt,
-        diagnostics,
-        graphBinding,
-        onProgress,
-      });
-      if (!graphAi.success) {
-        return {
-          success: false,
-          message: graphAi.message || CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
-          diagnostics: [
-            ...diagnostics,
-            contentGraphSceneSpecMismatchDiagnostic(graphBinding),
-          ],
-          inputHash: sha256(originalPrompt),
-        };
-      }
-      graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec, { creativeContext });
-      if (!graphParsed.success) {
-        return {
-          ...graphParsed,
-          diagnostics: normalizeDiagnostics(graphParsed.diagnostics, {
-            code: 'content_graph_invalid',
-            stage: 'ai-content-graph',
-            sub_stage: 'content_graph',
-            user_message: graphParsed.message || 'content graph 重试解析失败。',
-            details: { errors: graphParsed.errors || [] },
-            retryable: true,
-            repair_action: 'retry_content_graph',
-          }),
-          inputHash: sha256(originalPrompt),
-        };
-      }
-      const retryBinding = validateGraphMatchesSceneSpec(graphParsed.graph, sceneSpec);
-      if (!retryBinding.ok) {
-        return {
-          success: false,
-          message: CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
-          diagnostics: [
-            ...diagnostics,
-            contentGraphSceneSpecMismatchDiagnostic(retryBinding),
-          ],
-          inputHash: sha256(originalPrompt),
-        };
-      }
-    }
-  }
-  return {
-    success: true,
-    contentGraph: graphParsed.graph,
-    diagnostics,
-    inputHash: sha256(originalPrompt),
-  };
 }
 
 function firstPositiveNumber(...values) {
@@ -798,381 +457,6 @@ function applyRenderTargetDefaults(target = {}) {
 
 function hasSceneSpecScenes(sceneSpec) {
   return Boolean(sceneSpec && Array.isArray(sceneSpec.scenes) && sceneSpec.scenes.length > 0);
-}
-
-async function materializeCreativeContextAssets(projectDir, creativeContext = {}) {
-  const assetContext = objectOrEmpty(creativeContext.asset_context);
-  const assets = Array.isArray(assetContext.assets) ? assetContext.assets : [];
-  if (!assets.length) return creativeContext;
-  await fsp.mkdir(path.join(projectDir, 'assets'), { recursive: true });
-  const nextAssets = [];
-  const diagnostics = Array.isArray(assetContext.diagnostics) ? [...assetContext.diagnostics] : [];
-  for (const asset of assets) {
-    const sourcePath = String(asset.local_path || '').trim();
-    const hasSourceFile = Boolean(sourcePath && fs.existsSync(sourcePath));
-    const fallbackName = path.posix.basename(String(asset.path || `asset-${nextAssets.length + 1}.jpg`).replace(/\\/g, '/'));
-    const fileName = fallbackName && !fallbackName.includes('..') ? fallbackName : `asset-${nextAssets.length + 1}.jpg`;
-    const targetRelative = `assets/${fileName}`;
-    const targetPath = projectStore.resolveProjectPath(projectDir, targetRelative);
-    if (hasSourceFile) {
-      await fsp.copyFile(sourcePath, targetPath).catch(error => {
-        diagnostics.push(createDiagnostic({
-          code: 'source_asset_materialize_failed',
-          stage: 'project',
-          sub_stage: 'assets',
-          user_message: `来源图片 ${asset.id || asset.path || ''} 复制到 html-video 工程失败：${error.message}`,
-          severity: 'warning',
-        }));
-      });
-    }
-    if (!fs.existsSync(targetPath)) {
-      diagnostics.push(createDiagnostic({
-        code: 'source_asset_materialize_missing',
-        stage: 'project',
-        sub_stage: 'assets',
-        user_message: hasSourceFile
-          ? `来源图片 ${asset.id || asset.path || ''} 未进入 html-video 工程。`
-          : `来源图片 ${asset.id || asset.path || ''} 缺少本地文件，未进入 html-video 工程。`,
-        severity: 'warning',
-      }));
-      continue;
-    }
-    nextAssets.push({
-      ...asset,
-      path: targetRelative,
-      frame_src: `../${targetRelative}`,
-    });
-  }
-  creativeContext.asset_context = {
-    ...assetContext,
-    assets: nextAssets,
-    diagnostics,
-  };
-  return creativeContext;
-}
-
-function projectAssetsFromCreativeContext(creativeContext = {}) {
-  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
-  return assets.map((asset, index) => ({
-    id: asset.id || `source_asset_${index + 1}`,
-    type: asset.type || 'image',
-    path: asset.path,
-    source: asset.source || '',
-    url: asset.url || '',
-    alt: asset.alt || '',
-    attribution: asset.attribution || null,
-    generation: asset.generation || null,
-  })).filter(asset => asset.path);
-}
-
-function normalizeAssetToken(value = '') {
-  return String(value || '').replace(/\\/g, '/').trim();
-}
-
-function expandContentGraphToVisualBeats({ graph = {}, visualPlan = {}, visualDecisions = null } = {}) {
-  const beats = Array.isArray(visualPlan?.beats) ? visualPlan.beats.filter(beat => beat && beat.id) : [];
-  if (!beats.length || !Array.isArray(graph?.nodes) || !graph.nodes.length) return graph;
-  const orderedNodeIds = (() => {
-    try {
-      return topoSort(graph);
-    } catch {
-      return graph.nodes.map(node => node.id);
-    }
-  })();
-  const nodeById = new Map(graph.nodes.map(node => [String(node.id || ''), node]));
-  const nodeBySceneId = new Map();
-  for (const nodeId of orderedNodeIds) {
-    const node = nodeById.get(String(nodeId)) || {};
-    const sceneId = resolveNodeSceneId(node);
-    if (sceneId && !nodeBySceneId.has(sceneId)) nodeBySceneId.set(sceneId, node);
-  }
-  const nodes = [];
-  for (const beat of beats) {
-    const sceneId = String(beat.scene_id || '').trim();
-    const base = nodeBySceneId.get(sceneId);
-    if (!base) continue;
-    const decision = visualDecisions instanceof Map ? visualDecisions.get(beat.id) : null;
-    const metadata = objectOrEmpty(base.metadata);
-    // beat refs 为空数组时回落 base 节点素材引用，避免空数组吞掉 content graph/scene 上已绑定的素材
-    const beatAssetRefs = Array.isArray(beat.asset_refs) ? beat.asset_refs.filter(Boolean) : [];
-    const baseAssetRefs = Array.isArray(base.asset_refs) ? base.asset_refs.filter(Boolean) : [];
-    nodes.push({
-      ...cloneJson(base),
-      id: beat.id,
-      scene_id: sceneId,
-      beat_id: beat.id,
-      kind: beat.kind || base.kind || 'text',
-      label: firstNonEmptyString(beat.visual_text?.headline, base.label, sceneId),
-      text: firstNonEmptyString(
-        Array.isArray(beat.visual_text?.cards) ? beat.visual_text.cards.join(' / ') : '',
-        Array.isArray(beat.visual_text?.keywords) ? beat.visual_text.keywords.join(' / ') : '',
-        base.text,
-      ),
-      data: {
-        ...objectOrEmpty(base.data),
-        visual_text: cloneJson(beat.visual_text || {}),
-      },
-      durationSec: beat.duration_sec,
-      duration_sec: beat.duration_sec,
-      asset_refs: cloneJson(beatAssetRefs.length ? beatAssetRefs : baseAssetRefs),
-      metadata: {
-        ...metadata,
-        scene_id: sceneId,
-        beat_id: beat.id,
-        beat_index: beat.beat_index,
-        beat_count: beat.beat_count,
-        visual_text: cloneJson(beat.visual_text || {}),
-        source_mode: decision?.source_mode || '',
-        // R3：剥离 source_scene 后整 beat 下传（含 visual_base/motion_overlay/continuity，模块 2 已写入）
-        visual_beat: cloneJson((({ source_scene, ...rest }) => rest)(beat)),
-      },
-      html_path: '',
-      htmlPath: '',
-    });
-  }
-  if (!nodes.length) return graph;
-  const edges = nodes.slice(1).map((node, index) => ({
-    from: nodes[index].id,
-    to: node.id,
-    kind: 'sequence',
-  }));
-  return {
-    ...graph,
-    nodes,
-    edges,
-    expanded_from_scene_graph: true,
-  };
-}
-
-// scene_html（asset_first 专用）：按 scene 分组把 content graph 展开为 scene 级节点，
-// 一个 scene 一个 node（id = scene:<scene_id>），组内 beat 编排字段整体挂在 metadata 下随 node 传递；
-// html_path 置空，由 frameHtmlPhase 生成整场景 HTML 后回写（与 beat 节点同一回写路径）。
-function expandContentGraphToSceneEntries(graph = {}, visualPlan = {}) {
-  const beats = Array.isArray(visualPlan?.beats) ? visualPlan.beats.filter(beat => beat && beat.id) : [];
-  if (!beats.length || !Array.isArray(graph?.nodes) || !graph.nodes.length) return graph;
-  const baseBySceneId = new Map();
-  for (const node of graph.nodes) {
-    const sceneId = String(resolveNodeSceneId(node) || node?.id || '').trim();
-    if (sceneId && !baseBySceneId.has(sceneId)) baseBySceneId.set(sceneId, node);
-  }
-  const nodes = [];
-  for (const group of groupBeatsForSceneHtml(beats)) {
-    const base = baseBySceneId.get(group.scene_id) || {};
-    nodes.push({
-      ...cloneJson(base),
-      id: `scene:${group.scene_id}`,
-      scene_id: group.scene_id,
-      beat_id: '',
-      kind: base.kind || group.beats[0]?.kind || 'text',
-      duration_sec: group.duration_sec,
-      durationSec: group.duration_sec,
-      asset_refs: cloneJson(group.beats.flatMap(beat => (Array.isArray(beat.asset_refs) ? beat.asset_refs.filter(Boolean) : []))),
-      metadata: {
-        ...objectOrEmpty(base.metadata),
-        scene_id: group.scene_id,
-        beat_windows: group.beats.map(beat => ({ id: beat.id, start_sec: beat.start_sec, end_sec: beat.end_sec })),
-        visual_beats: cloneJson(group.beats.map(({ source_scene, ...rest }) => rest)),
-        source_mode: 'raw_html',
-      },
-      html_path: '',
-      htmlPath: '',
-    });
-  }
-  if (!nodes.length) return graph;
-  const edges = nodes.slice(1).map((node, index) => ({
-    from: nodes[index].id,
-    to: node.id,
-    kind: 'sequence',
-  }));
-  return {
-    ...graph,
-    nodes,
-    edges,
-    expanded_from_scene_graph: true,
-  };
-}
-
-function referenceVariants(value = '') {
-  const normalized = normalizeHtmlAssetReference(value);
-  if (!normalized) return [];
-  const variants = new Set([normalized]);
-  if (normalized.startsWith('./')) variants.add(normalized.slice(2));
-  if (!normalized.startsWith('../') && !normalized.startsWith('/') && !/^[a-z][a-z0-9+.-]*:/i.test(normalized)) {
-    variants.add(`../${normalized}`);
-  }
-  return [...variants];
-}
-
-function assetReferenceTokens(asset = {}) {
-  const assetPath = normalizeAssetToken(asset.path);
-  return [...new Set([
-    normalizeAssetToken(asset.frame_src),
-    assetPath,
-    assetPath ? `../${assetPath}` : '',
-    normalizeAssetToken(asset.url),
-  ].filter(Boolean))];
-}
-
-function normalizeHtmlAssetReference(value = '') {
-  const text = normalizeAssetToken(value).split(/[?#]/)[0];
-  try {
-    return decodeURIComponent(text);
-  } catch {
-    return text;
-  }
-}
-
-function extractHtmlAssetReferences(html = '') {
-  const references = new Set();
-  const searchable = String(html || '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<script\b[\s\S]*?<\/script>/gi, '');
-  const attrPattern = /\b(?:src|href|poster|data-src)=["']([^"']+)["']/gi;
-  for (const match of searchable.matchAll(attrPattern)) {
-    const value = normalizeHtmlAssetReference(match[1]);
-    if (value) references.add(value);
-  }
-  const cssPattern = /url\(["']?([^"')]+)["']?\)/gi;
-  for (const match of searchable.matchAll(cssPattern)) {
-    const value = normalizeHtmlAssetReference(match[1]);
-    if (value) references.add(value);
-  }
-  return references;
-}
-
-function htmlReferencesAsset(referenceSet, tokens = []) {
-  const references = new Set();
-  for (const ref of referenceSet) {
-    for (const variant of referenceVariants(ref)) references.add(variant);
-  }
-  for (const rawToken of tokens) {
-    for (const token of referenceVariants(rawToken)) {
-      if (references.has(token)) return true;
-    }
-  }
-  return false;
-}
-
-function readFrameHtml(projectDir, frame = {}) {
-  const htmlPath = firstNonEmptyString(frame.html_path, frame.htmlPath);
-  if (!htmlPath) return '';
-  try {
-    const absolutePath = projectStore.resolveProjectPath(projectDir, htmlPath);
-    if (!fs.existsSync(absolutePath)) return '';
-    return fs.readFileSync(absolutePath, 'utf8').replace(/\\/g, '/');
-  } catch {
-    return '';
-  }
-}
-
-function mergedTrackableAssets(project = {}, creativeContext = {}) {
-  const seen = new Set();
-  const result = [];
-  const push = asset => {
-    const id = firstNonEmptyString(asset?.id, asset?.asset_id);
-    if (!id || seen.has(id)) return;
-    seen.add(id);
-    result.push({ ...asset, id });
-  };
-  (Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : []).forEach(push);
-  (Array.isArray(project?.assets) ? project.assets : []).forEach(push);
-  return result;
-}
-
-function requiredAssetRefsById(project = {}, assets = []) {
-  const byId = new Map();
-  const ensure = (assetId, sceneId, usage) => {
-    if (!assetId) return;
-    const current = byId.get(assetId) || { asset_id: assetId, expected_in_frames: [], usages: [] };
-    if (sceneId && !current.expected_in_frames.includes(sceneId)) current.expected_in_frames.push(sceneId);
-    if (usage && !current.usages.includes(usage)) current.usages.push(usage);
-    byId.set(assetId, current);
-  };
-  for (const asset of assets) {
-    if (asset?.source !== 'generated') continue;
-    ensure(firstNonEmptyString(asset.id, asset.asset_id), firstNonEmptyString(asset.generation?.scene_id), 'generated');
-  }
-  for (const node of (Array.isArray(project?.content_graph?.nodes) ? project.content_graph.nodes : [])) {
-    const sceneId = firstNonEmptyString(resolveNodeSceneId(node), node?.id);
-    for (const ref of (Array.isArray(node?.asset_refs) ? node.asset_refs : [])) {
-      const assetId = firstNonEmptyString(ref?.asset_id, ref?.id);
-      ensure(assetId, sceneId, firstNonEmptyString(ref?.usage));
-    }
-  }
-  return byId;
-}
-
-function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext = {} } = {}) {
-  const assets = mergedTrackableAssets(project, creativeContext);
-  if (!assets.length) {
-    return {
-      status: 'empty',
-      assets: [],
-      used_asset_ids: [],
-      unused_asset_ids: [],
-      required_asset_ids: [],
-      missing_required_asset_ids: [],
-      summary: '没有可追踪的视觉素材。',
-    };
-  }
-  const frames = Array.isArray(project.frames) ? project.frames : [];
-  const requiredById = requiredAssetRefsById(project, assets);
-  const frameHtmlEntries = frames.map(frame => ({
-    id: firstNonEmptyString(frame.scene_id, frame.id),
-    references: extractHtmlAssetReferences(readFrameHtml(projectDir, frame)),
-  }));
-  const reportAssets = assets.map((asset, index) => {
-    const assetId = firstNonEmptyString(asset.id, `asset_${index + 1}`);
-    const tokens = assetReferenceTokens(asset);
-    const required = requiredById.get(assetId) || null;
-    const usedInFrames = frameHtmlEntries
-      .filter(frame => frame.id && htmlReferencesAsset(frame.references, tokens))
-      .map(frame => frame.id);
-    return {
-      asset_id: assetId,
-      path: asset.path || '',
-      frame_src: asset.frame_src || '',
-      source: asset.source || '',
-      required: Boolean(required),
-      expected_in_frames: required?.expected_in_frames || [],
-      usage: required?.usages || [],
-      used: usedInFrames.length > 0,
-      used_in_frames: usedInFrames,
-      usage_count: usedInFrames.length,
-    };
-  });
-  const usedAssetIds = reportAssets.filter(asset => asset.used).map(asset => asset.asset_id);
-  const unusedAssetIds = reportAssets.filter(asset => !asset.used).map(asset => asset.asset_id);
-  const requiredAssetIds = reportAssets.filter(asset => asset.required).map(asset => asset.asset_id);
-  const missingRequiredAssetIds = reportAssets
-    .filter(asset => asset.required && !asset.used)
-    .map(asset => asset.asset_id);
-  return {
-    status: 'ready',
-    assets: reportAssets,
-    used_asset_ids: usedAssetIds,
-    unused_asset_ids: unusedAssetIds,
-    required_asset_ids: requiredAssetIds,
-    missing_required_asset_ids: missingRequiredAssetIds,
-    summary: missingRequiredAssetIds.length
-      ? `有 ${missingRequiredAssetIds.length} 个必用视觉素材未进入最终 HTML。`
-      : (usedAssetIds.length
-        ? `最终 HTML 使用了 ${usedAssetIds.length} 张视觉素材。`
-        : '最终 HTML 未引用已准备的视觉素材。'),
-  };
-}
-
-async function attachAssetUsageReport({ project = {}, projectDir = '', creativeContext = {} } = {}) {
-  const assetUsageReport = buildAssetUsageReport({ project, projectDir, creativeContext });
-  project.asset_usage_report = assetUsageReport;
-  if (creativeContext.asset_context) creativeContext.asset_context.asset_usage_report = assetUsageReport;
-  return projectDir ? projectStore.saveProject(projectDir, project) : project;
-}
-
-function missingRequiredAssetIds(project = {}) {
-  return Array.isArray(project?.asset_usage_report?.missing_required_asset_ids)
-    ? project.asset_usage_report.missing_required_asset_ids.filter(Boolean)
-    : [];
 }
 
 function isBlockingVisualQaIssue(issue = {}) {
