@@ -2160,64 +2160,60 @@ Pexels/search 负责背景、氛围和通用场景
 
 ## 24. Loop Engineering（Agent Loop）介绍
 
-本任务跨越素材入库、覆盖判断、多图编排、焦点分析、Scene HTML、渲染 QA、定向修复和断点恢复，不能交给一个持续增长上下文的“总导演 Agent”一次完成。推荐采用 **Artifact-Centered Bounded Agent Loop（以结构化产物为中心的有界 Agent 循环）**。
+这里的 Loop Engineering 指 **Codex 如何用一个根指令持续完成整个超大任务**，不是把 MuseDock 产品运行时改造成通用 Agent Runtime，也不是只为第一阶段写计划后让用户手工串联后续窗口。
 
-核心循环：
+一个指令启动的是多轮交付循环，而不是把全部内容塞进一次模型调用：
 
 ```mermaid
 flowchart LR
-    A["确定性 Orchestrator"] --> B["组装当前阶段最小 Context Packet"]
-    B --> C["短生命周期阶段 Agent"]
-    C --> D["结构化 Artifact 候选"]
-    D --> E["Schema、业务不变量和 QA"]
-    E -->|"通过"| F["Artifact + Checkpoint"]
-    E -->|"可修复"| G["精简 Repair Packet"]
-    G --> C
-    E -->|"可降级"| H["确定性安全降级"]
-    H --> E
-    E -->|"不可降级或超预算"| I["阻断并保留现场"]
-    F --> A
+    A["用户一次根指令"] --> B["Coordinator 持有总目标"]
+    B --> C["选择下一项依赖已满足的任务"]
+    C --> D["Worker 实现"]
+    D --> E["测试"]
+    E --> F["规格 Review"]
+    F --> G["代码质量 Review"]
+    G -->|"有问题"| D
+    G -->|"通过"| H["中文提交 + 更新 Goal Ledger"]
+    H --> I{"总目标完成？"}
+    I -->|"否"| C
+    I -->|"是"| J["最终端到端验收与一次性报告"]
 ```
 
-上下文不通过完整聊天历史传递，而通过版本化产物传递：
+计划完成、单个任务完成、单个 Phase 完成、Review 通过、一次提交完成或上下文即将过长，都只是内部 checkpoint。Coordinator 必须更新 Goal Ledger、压缩上下文并自动继续下一任务，不能把阶段调度责任重新交给用户。
+
+Loop 可以组合三类 Codex 协作：
+
+1. 主任务内子 Agent，处理短期探索、测试和 Review；
+2. 相互独立的并行顶层任务，处理长期且互不重叠的实现；
+3. 跨任务消息和交接，由 Coordinator 读取状态、发送后续要求和收敛结果。
+
+上下文不依赖一个无限增长的聊天窗口，而通过以下锚点传递：
 
 ```text
-asset_context
-→ asset_coverage.v1
-→ image_sequence_plan.v1
-→ focus_regions.v1 / focus_cues.v1
-→ camera_plan.v1
-→ Scene HTML
-→ scene_qa.v1
-→ asset_usage_report / visual-report.json
+Goal Ledger
++ 当前分支和工作区状态
++ 规格与需求覆盖矩阵
++ 独立 Git 提交
++ 测试和 Review 证据
++ 每个任务的短 Handoff Packet
 ```
 
-每次 Agent 调用默认使用新上下文，只读取：
+主任务只保留总目标、当前进度、未完成需求、阻塞和最近交接摘要；代码搜索输出、完整日志、大段 diff 和独立分析留在 Worker Thread 或文件中。不同 Agent 可以使用新的短上下文，但必须继承同一目标和验收门。
 
-- 当前任务和 Scene 的必要字段；
-- 当前阶段所需的 Artifact 引用；
-- 本轮允许修改的范围；
-- 输出契约、预算和停止条件；
-- 当前尚未解决的最小问题集合。
-
-不传上一轮完整聊天、其他 Scene 完整 HTML、全部工具日志或完整 QA 历史。修复轮次重新压缩为“当前有效产物 + 未解决问题 + 已尝试动作 + 禁止重复动作”，避免上下文随重试线性增长。
-
-职责边界固定为：
+本任务的统一 Goal Loop 覆盖：
 
 ```text
-Agent 负责语义提议
-确定性代码负责引用、时间、坐标、预算和质量门
-Orchestrator 负责状态转换、失效传播、降级、阻断和完成判定
+实时基线审计
+→ 统一视觉素材
+→ 多图编排和 Scene 连续时间线
+→ focus_regions / focus_cues / Camera Plan
+→ QA、定向修复和恢复
+→ 最终真实任务端到端验收
 ```
 
-采用两层 Loop：
+这些阶段全部在同一根指令授权下自动推进。只有出现真实需求歧义、缺少外部授权、不可逆操作或无法安全保留的重叠用户改动时才停下询问；普通测试失败、实现困难、上下文变长或 Phase 完成都不算阻塞。
 
-1. 任务级 Loop 继续复用 `source → research → assets → agent_run → brief → audio → project → check → render → inspect`；
-2. Scene 级 Loop 独立执行 `plan → focus → HTML → static QA → preview → visual QA → repair/fallback → accepted/blocked`。
-
-Codex 协助实施时，可以使用三类协作：主任务内子 Agent、相互独立的并行顶层任务，以及任务间显式消息/交接。它们都不共享一个无限上下文；应使用短交接摘要、文件、提交和 Artifact 传递结果，并坚持同一产物单写者。MuseDock 产品运行时不依赖 Codex 的任务协作能力，而是在自身工作流内实现同样的 Context Packet、Artifact 和 Checkpoint 原则。
-
-第一版不增加通用 Agent 总线、递归 Agent 树、共享向量记忆、多 Agent 投票或第二套工作流引擎。详细状态机、Agent 权限、契约、预算、恢复和测试要求见独立设计规格 [`2026-07-16-asset-first-agent-loop-design.md`](../specs/2026-07-16-asset-first-agent-loop-design.md)。
+可直接使用的根指令、Coordinator/Worker/Reviewer 权限、上下文压缩、双 Review、Git 边界、自动继续和完成条件见独立设计规格 [`2026-07-16-asset-first-agent-loop-design.md`](../specs/2026-07-16-asset-first-agent-loop-design.md)。
 
 ## 25. 最终判断
 
