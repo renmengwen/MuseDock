@@ -78,7 +78,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
 | B-06a GitHub 页面截图 producer | `complete` | B-01、B-02 | `32a51c5` | 双 Review PASS，dev 目标测试通过；真实 Chromium smoke 留在 B-07b |
 | B-06b 受控 derived 素材登记 | `complete` | B-01 | `ca45e1d` | 双 Review PASS，已在 dev 重跑目标测试并释放租约 |
-| B-07a requirement 分类语义 | `in_progress` | B-01 | - | 新规格/质量 Review findings 正在修复 |
+| B-07a requirement 分类语义 | `frozen_for_review` | B-01 | - | 全部已知 Review findings 修复版已冻结；最终双复审进行中 |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
@@ -184,8 +184,8 @@ resolved_findings:
 
 ```yaml
 task_id: B-07a
-status: in_progress
-owner: /root/b06b_spec_review_v2
+status: frozen_for_review
+owner: unassigned
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b07a
 branch: codex/asset-first-b07a
@@ -201,6 +201,7 @@ allowed_paths:
   - tests/test-visual-asset-contract.js
   - tests/test-generated-image-planner.js
   - tests/test-generated-image-phase.js
+  - tests/test-generated-image-persist.js
   - tests/test-html-video-asset-usage.js
   - tests/test-html-video-content-graph-agent.js
   - tests/test-html-video-frame-html-agent.js
@@ -214,7 +215,9 @@ exclusive_resources:
 previous_invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
 invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:d2a84d2926eb1a9250a8de6d22301d957acb4a26
 invalidated_review_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4817900a2d68a60083eb02eed9d8f7f9cad8068a
-revision_valid: false
+previous_invalidated_review_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:0e3a886ef9d38910dfe4de4924748d3f1b8dda91
+frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:654d1063be9431cf55c8eacce9c0a1b9e3ad07e1
+revision_valid: true
 changed_paths:
   - server/services/creative/visualAssetContract.js
   - server/services/creative/generatedImagePlanner.js
@@ -227,12 +230,13 @@ changed_paths:
   - tests/test-visual-asset-contract.js
   - tests/test-generated-image-planner.js
   - tests/test-generated-image-phase.js
+  - tests/test-generated-image-persist.js
   - tests/test-html-video-asset-usage.js
   - tests/test-html-video-content-graph-agent.js
   - tests/test-html-video-frame-html-agent.js
   - tests/test-html-video-workflow.js
 workspace_state:
-  staged_tree: 4817900a2d68a60083eb02eed9d8f7f9cad8068a
+  staged_tree: 654d1063be9431cf55c8eacce9c0a1b9e3ad07e1
   unstaged_paths: 0
   untracked_paths: 0
   diff_check: pass
@@ -249,15 +253,16 @@ verification:
   - node tests/test-generated-image-persist.js
   - node tests/test-creative-workflow-retry-planner.js
 review:
-  spec: changes_requested
-  quality: changes_requested_in_progress
-blocking_findings:
+  spec: in_progress
+  quality: in_progress
+resolved_findings:
   - evidence/source/citation/proof 必须按 evidence_class 而非 origin 判定，direct_source/derived_source 允许
   - stock_search 分类必须 formal origin 优先，不能误入真实来源区
   - frame 早期门必须检查本帧全部 required refs
   - generated hydrate 同 ID 必须把 project 正式字段补回旧 context
   - 同 ID project 非字符串正式字段不得覆盖 context 有效 required/origin
-resolved_findings:
+  - formal origin 必须压过同 ID runtime 中冲突的 legacy source，hydrate 不得抛来源冲突
+  - 生图后的早期 project.json 持久化必须写入完整正式视觉素材字段
   - 帧级 HTML 素材校验必须与 requirement 单一真值一致，测试不得在视觉 QA 阶段晚注入 graph refs
   - formal-first 生成素材身份必须覆盖 Content Graph、Prompt、Frame 检查、生成图恢复与 workflow 复用
   - 同 ID 的 creativeContext/project 素材必须补齐正式字段，不能因旧 context 先到而丢失 required
@@ -410,6 +415,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase B Task 6B derived 完成 | `ca45e1d`；冻结 revision `0675e733e7b9105927ec0ac4fad0f6aa3824c122`；真实签名、严格幂等、plain JSON-like、junction 逃逸与安全清理通过；规格 Review PASS；代码质量 Review PASS；dev 两组测试通过 |
 | Phase B Task 7A requirement 修复 Candidate | revision `d2a84d2926eb1a9250a8de6d22301d957acb4a26`；usage/workflow/generated persist/generated phase/project store 五组测试通过；等待双复审 |
 | Phase B Task 7A 根因修复工作树 | B-07a Agent 中止前保留 15 个未暂存允许路径，`341 insertions/63 deletions`，`git diff --check` 无 whitespace error；未收到最终测试或新 revision，不得按完成处理 |
+| Phase B Task 7A 最终复审 Candidate | revision `654d1063be9431cf55c8eacce9c0a1b9e3ad07e1`；16 条允许路径；formal identity/evidence/stock/hydrate、全部 required refs、合法枚举合并与早期 project 正式字段持久化已覆盖；Ledger 10 项测试通过；等待最终双复审 |
 | Phase C 只读实现前审计 | 基线 `857dee2`；content graph、visual plan、scene continuity、asset usage、workflow 五组测试通过；C-01～C-05 Task Packet 已准备，写门仍依赖 B-07b |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
