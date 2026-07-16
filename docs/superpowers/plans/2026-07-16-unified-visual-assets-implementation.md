@@ -33,7 +33,7 @@
 - Create: `server/services/creative/visualAssetContract.js`
 - Create: `tests/test-visual-asset-contract.js`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 测试必须覆盖：六种 `origin`、三种 `requirement`、五种 `evidence_class`；旧 `source` 推导；用户上传默认 preferred；系统素材默认 optional；重复 ID 后者更新但保留旧文件字段；非法枚举拒绝；derived 必须有父 ID。
 
@@ -64,13 +64,13 @@ assert.throws(() => normalizeVisualAsset({ id: 'bad', origin: 'unknown' }), /素
 assert.throws(() => normalizeVisualAsset({ id: 'crop', origin: 'derived' }), /父素材/);
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run: `node tests/test-visual-asset-contract.js`
 
 Expected: FAIL，模块不存在。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 实现并导出：
 
@@ -135,13 +135,13 @@ function mergeVisualAssetContexts(base = {}, incoming = {}) {
 
 保留旧 `source` 字段供旧消费方兼容，但所有新逻辑读取正式字段。
 
-- [ ] **Step 4: 验证 GREEN**
+- [x] **Step 4: 验证 GREEN**
 
 Run: `node tests/test-visual-asset-contract.js`
 
 Expected: PASS。
 
-- [ ] **Step 5: 规格 Review、质量 Review、修复和提交**
+- [x] **Step 5: 规格 Review、质量 Review、修复和提交**
 
 Run: `node tests/test-visual-asset-contract.js && node tests/test-creative-context.js`
 

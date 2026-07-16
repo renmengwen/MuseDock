@@ -32,7 +32,7 @@
 | Phase | 状态 | 说明 |
 |---|---|---|
 | A. 实时代码与需求覆盖审计 | `complete` | 三个独立新上下文只读 Agent 已返回压缩 Handoff；现有基线测试通过 |
-| B. 统一视觉素材 | `pending` | 等 Phase A 精确代码地图 |
+| B. 统一视觉素材 | `in_progress` | Task 1 统一资产契约与幂等合并已通过双 Review；继续接入现有 producer |
 | C. 多图编排与 Scene 连续时间线 | `pending` | 依赖统一素材协议 |
 | D. 焦点、摄影机与字幕同步 | `pending` | 依赖 Image Sequence Plan 和 Caption 绑定 |
 | E. QA、定向修复与恢复 | `pending` | 依赖 Camera Plan 和渲染产物 |
@@ -154,5 +154,7 @@
 |---|---|
 | overlay P0 完成基线 | `3a23622` 及其前置 P0 提交 |
 | Delivery Loop 设计纠正 | `7512979` |
+| Phase A 审计与 Phase B 计划 | `b48fcf6` |
+| Phase B Task 1 统一资产契约 | `tests/test-visual-asset-contract.js` 与 `tests/test-creative-context.js` 通过；规格 Review PASS；代码质量 Review PASS |
 
 后续每个任务完成后追加：需求、提交、验证命令、Review 结论和剩余风险；不记录完整日志或 Agent 对话。
