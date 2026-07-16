@@ -100,28 +100,6 @@ function summarizeLayoutIssues(issues = []) {
   }).join('；');
 }
 
-function unresolvedLayoutFailure({ htmlResult = {}, unresolved = [], index = 0, node = {}, sceneId = '' } = {}) {
-  const frameId = node.id || sceneId;
-  const message = `第 ${index + 1} 帧自动修复后仍存在布局遮挡：${summarizeLayoutIssues(unresolved)}`;
-  return {
-    success: false,
-    message,
-    failed_html: htmlResult.html,
-    diagnostics: [createDiagnostic({
-      code: 'frame_layout_qa_unresolved',
-      stage: 'ai-frame-html',
-      sub_stage: 'frame_html',
-      frame_id: frameId,
-      severity: 'error',
-      retryable: true,
-      repair_action: 'retry_frame_html',
-      fallback_allowed: false,
-      user_message: message,
-      details: { frame_id: frameId, issues: unresolved.slice(0, 5) },
-    })],
-  };
-}
-
 async function inspectGeneratedFrameLayout({
   layoutQaService,
   projectDir,
@@ -426,7 +404,25 @@ async function runFrameHtmlPhase(ctx) {
           }
         }
         if (unresolved.length) {
-          htmlResult = unresolvedLayoutFailure({ htmlResult, unresolved, index, node, sceneId });
+          const frameId = node.id || sceneId;
+          const message = `第 ${index + 1} 帧自动修复后仍存在布局遮挡：${summarizeLayoutIssues(unresolved)}`;
+          htmlResult = {
+            success: false,
+            message,
+            failed_html: htmlResult.html,
+            diagnostics: [createDiagnostic({
+              code: 'frame_layout_qa_unresolved',
+              stage: 'ai-frame-html',
+              sub_stage: 'frame_html',
+              frame_id: frameId,
+              severity: 'error',
+              retryable: true,
+              repair_action: 'retry_frame_html',
+              fallback_allowed: false,
+              user_message: message,
+              details: { frame_id: frameId, issues: unresolved.slice(0, 5) },
+            })],
+          };
         }
         await report(onProgress, {
           type: 'html_video_frame_layout_repair_done',
@@ -769,7 +765,6 @@ module.exports = {
   runBucketsWithContinuity,
   groupBeatsForSceneHtml,
   buildSceneTimelineScript,
-  unresolvedLayoutFailure,
   computeFrameInputFingerprint,
   FRAME_PROMPT_VERSION,
   FRAME_HTML_CONCURRENCY,

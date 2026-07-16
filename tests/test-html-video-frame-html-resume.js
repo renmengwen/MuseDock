@@ -319,7 +319,7 @@ async function main() {
     // P1-2：Frame HTML 输入指纹纯函数——同输入同指纹，任一策略/主题/素材/文案维度变化即指纹变化
     {
       const { computeFrameInputFingerprint, FRAME_PROMPT_VERSION } = frameHtmlPhase;
-      assert.equal(FRAME_PROMPT_VERSION, 1, 'FRAME_PROMPT_VERSION 初始值应为 1');
+      assert.equal(FRAME_PROMPT_VERSION, 2, 'P0 prompt 语义变化必须使旧 checkpoint 失效');
       const target = { resolution: { width: 1080, height: 1920 } };
       const makeNode = () => ({
         id: 'scene_01',

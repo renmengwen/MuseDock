@@ -161,7 +161,8 @@ assert.match(assetPrompt, /展示会员价格表与套餐限制/);
 assert.match(assetPrompt, /匹配价格表截图说明/);
 assert.match(assetPrompt, /禁止引用外部图片 URL/);
 assert.match(assetPrompt, /object-fit: contain/);
-assert.match(assetPrompt, /不要做纯图片轮播/);
+assert.doesNotMatch(assetPrompt, /不要做纯图片轮播|图片应与.*混排/);
+assert.match(assetPrompt, /不要求额外框选、高亮或数据卡/);
 assert.match(assetPrompt, /必须在 HTML 中引用该图片的 src/);
 
 const continuityPrompt = agent.buildFrameHtmlPrompt({

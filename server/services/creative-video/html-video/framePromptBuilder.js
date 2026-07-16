@@ -267,12 +267,11 @@ function buildFrameHtmlPrompt({
     '- 不要保留与内容无关的模板导航标签，例如 Search / GitHub / Tech Forums / Docs / Issues，除非这些词就是当前内容事实。',
     '- 如果本帧提供“本帧推荐来源图片”或“本帧推荐生成图片”，必须在 HTML 中引用该图片的 src；没有推荐图片时，才从 Source context summary 的可用图片素材中选择。',
     ...assetFirstFrameRequirements(),
-    ...((beat?.motion_overlay || sceneBeatsBrief)
+    ...((beat || sceneBeatsBrief)
       ? [buildAssetFirstFramePrompt({ beat: beat || {}, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
       : []),
     '- 如果 Source context summary 提供“可用图片素材”，本帧内容适合引用时，可以使用其中的 HTML引用路径，例如 <img src="../assets/source-image-01.jpg">；禁止引用外部图片 URL。',
     '- 文章截图或含文字图片必须完整展示，使用 object-fit: contain；不要裁切成不可读背景。图库/search 图片只适合做弱背景或氛围层，必须加遮罩保证文字可读。',
-    '- 不要做纯图片轮播；图片必须和本帧关键词、字幕、数据卡、框选、高亮或解释文案混排。',
     '- 不要输出 [object Object]；对象必须提取成有意义的文字或数据。',
     '- 不要发明源素材中没有的精确事实、数字、品牌、机构或时间。',
     '- 不要输出解释，不要在 HTML block 外写任何文字。',
@@ -349,10 +348,10 @@ function buildShortFrameHtmlPrompt({
     `画面要点卡：${visualCards || '无'}`,
     '画面文字用提炼后的关键词、要点短语或数据点，不要照抄 narration/captions 原句；旁白全文由系统注入底部字幕层。',
     ...assetFirstFrameRequirements(),
-    ...((beat?.motion_overlay || sceneBeatsBrief)
+    ...((beat || sceneBeatsBrief)
       ? [buildAssetFirstFramePrompt({ beat: beat || {}, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
       : []),
-    assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
+    assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并作为画面主体。` : '',
     `Target resolution：${resolution.width}x${resolution.height}`,
     `必须生成 full-bleed ${resolution.width}x${resolution.height} 完整 HTML，包含 <!doctype html>、html、head、body、style。`,
     `body 或 #root 必须带 data-hv-canvas、data-width="${resolution.width}"、data-height="${resolution.height}"。`,
@@ -384,7 +383,7 @@ function buildRetryPrompt(args = {}) {
     expectedTexts.length ? `当前镜头允许使用的内容文案：${expectedTexts.join(' / ')}` : '',
     '画面文字必须是提炼后的关键词、要点短语或数据点；禁止照抄旁白或字幕原句，旁白全文由系统注入底部字幕层。',
     ...assetFirstFrameRequirements(),
-    ...((args.beat?.motion_overlay || args.sceneBeatsBrief)
+    ...((args.beat || args.sceneBeatsBrief)
       ? [buildAssetFirstFramePrompt({
         beat: args.beat || {},
         primitiveSnippet: args.primitiveSnippet || '',
@@ -394,7 +393,7 @@ function buildRetryPrompt(args = {}) {
         sceneBeatsBrief: args.sceneBeatsBrief || '',
       })]
       : []),
-    assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并与文字说明混排。` : '',
+    assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并作为画面主体。` : '',
     styleProfile?.id
       ? `视觉风格参考：遵循本任务 style_profile「${styleProfile.id}」；不要复用模板默认主体文案。`
       : '',

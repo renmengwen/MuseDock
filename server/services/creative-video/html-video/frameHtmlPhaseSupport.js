@@ -8,7 +8,7 @@ const { validateOverlayHtml, hasRealOverlayElement } = require('./motionPrimitiv
 // Frame HTML 生成提示词/primitive 结构版本号：当 frameHtmlAgent 的 prompt 结构、primitive
 // 参考片段语义或帧 HTML 约定发生会影响产物的变化时手动 +1，使旧 checkpoint 指纹失配、
 // resume 时强制重新生成，避免代码升级后静默复用旧版产物。
-const FRAME_PROMPT_VERSION = 1;
+const FRAME_PROMPT_VERSION = 2;
 
 // 确定性 JSON 序列化（对象键递归排序），保证同一输入结构得到稳定字符串
 function stableJsonValue(value) {

@@ -90,7 +90,7 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
         .join('；');
       if (blockedText) lines.push(`不建议用于成片的图片素材：${blockedText}`);
     }
-    lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；每个 node 最多引用 1 张图片；不适合当前叙事时可以不用。优先使用 article 来源图片；generated 生成图是可用主视觉素材但不是来源证据；search/Pexels 图片只作补充背景或氛围图，不要当来源证据；不要做纯图片轮播；含文字的文章截图必须完整展示，使用 object-fit: contain；图片应与关键词、字幕、数据卡或讲解节点混排。');
+    lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；每个 node 最多引用 1 张图片；不适合当前叙事时可以不用。优先使用 article 来源图片；generated 生成图是可用主视觉素材但不是来源证据；search/Pexels 图片只作补充背景或氛围图，不要当来源证据；含文字的文章截图必须完整展示，使用 object-fit: contain；图片被选中时应作为画面主体，不要求额外框选、高亮或数据卡。');
   }
   return lines.join('\n');
 }

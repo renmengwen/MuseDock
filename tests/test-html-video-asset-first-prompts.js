@@ -4,6 +4,7 @@ const {
   buildRetryPrompt: buildGraphRetryPrompt,
 } = require('../server/services/creative-video/html-video/contentGraphAgent');
 const frameHtmlAgent = require('../server/services/creative-video/html-video/frameHtmlAgent');
+const { resolveAssetFirstMotionArgs } = require('../server/services/creative-video/html-video/motionOverlayPhase');
 
 const sceneSpec = { title: 't', scenes: [{ id: 'scene_01', narration_text: '深夜骑手' }] };
 
@@ -82,6 +83,7 @@ async function run() {
   assert.ok(!framePrompt.includes('本帧推荐来源图片：'));
   assert.ok(!framePrompt.includes('至少使用其中 2 种'), '不得再强制至少两种表达');
   assert.ok(!framePrompt.includes('没有表达层的帧不合格'), '不得再判无表达层不合格');
+  assert.ok(!framePrompt.includes('不要做纯图片轮播'), '不得保留要求混排框选/高亮的旧约束');
   assert.ok(/禁止.*(方框|focus-box)/.test(framePrompt), '必须禁止无坐标画框');
 
   const shortPrompt = frameHtmlAgent.buildShortFrameHtmlPrompt({
@@ -102,6 +104,18 @@ async function run() {
   // ===== 模块3：motion overlay prompt 约束 =====
   // P0-2：base 指令与 overlay 指令解耦
   {
+    const diagramArgs = resolveAssetFirstMotionArgs({
+      metadata: {
+        visual_beat: {
+          id: 'scene_01_b1',
+          visual_base: { type: 'diagram', asset_id: null },
+          motion_overlay: null,
+        },
+      },
+    });
+    assert.equal(diagramArgs.beat?.id, 'scene_01_b1', 'null overlay 仍必须下传 beat');
+    assert.ok(diagramArgs.diagramSkeleton.includes('data-mp-diagram-base'), 'diagram skeleton 不应依赖 overlay');
+
     const imageNull = frameHtmlAgent.buildAssetFirstFramePrompt({
       beat: {
         visual_base: { type: 'generated_image', asset_id: 'asset_main', fit: 'contain' },
@@ -121,6 +135,23 @@ async function run() {
     assert.ok(/diagram|结构化/.test(diagramNull), 'null overlay 的无图 beat 仍必须输出 diagram 指令');
     assert.ok(diagramNull.includes('data-mp-diagram-base'), 'diagram skeleton 不应依赖 overlay');
     assert.ok(!diagramNull.includes('可用 motion primitive'));
+
+    const entryArgs = {
+      beat: {
+        visual_base: { type: 'generated_image', asset_id: 'asset_main', fit: 'contain' },
+        motion_overlay: null,
+        continuity: { group_id: 'scene_01', beat_index: 2, beat_count: 3 },
+      },
+      node: { id: 'scene_01_b2' },
+    };
+    for (const [name, prompt] of [
+      ['full', frameHtmlAgent.buildFrameHtmlPrompt(entryArgs)],
+      ['short', frameHtmlAgent.buildShortFrameHtmlPrompt(entryArgs)],
+      ['retry', frameHtmlAgent.buildRetryPrompt(entryArgs)],
+    ]) {
+      assert.ok(prompt.includes('图片 asset_main 是主视觉'), `${name} prompt 必须保留 null-overlay base 指令`);
+      assert.ok(prompt.includes('复用上一 beat'), `${name} prompt 必须保留 null-overlay continuity 指令`);
+    }
   }
   {
     const beat = {

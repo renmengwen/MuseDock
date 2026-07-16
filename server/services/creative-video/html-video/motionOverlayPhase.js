@@ -40,7 +40,7 @@ function resolveAssetFirstMotionArgs(node, { scene = null, beats = [], mediaOpti
   const beat = visualBeats && visualBeats.length
     ? (visualBeats.find(item => item?.motion_overlay) || visualBeats[0])
     : (node?.metadata?.visual_beat || {});
-  if (!beat?.motion_overlay) return sceneBeatsBrief ? { sceneBeatsBrief } : {};
+  if (!Object.keys(beat).length) return sceneBeatsBrief ? { sceneBeatsBrief } : {};
   const primitiveSnippet = beat.motion_overlay?.preset ? safeLoad(loadOverlaySnippet, beat.motion_overlay.preset) : '';
   const diagramSkeleton = beat.visual_base?.type === 'diagram' ? safeLoad(loadDiagramSkeleton) : '';
   // previousBeatSummary 由分桶调度侧透传（见 runBucketsWithContinuity）、hasCaptions 由 Task 5.2 后续接入
