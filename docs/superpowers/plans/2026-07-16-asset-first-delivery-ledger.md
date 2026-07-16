@@ -65,7 +65,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-02 现有 producer 统一接入 | `complete` | B-01 | `b3b4fe2` | - |
 | B-03 上传暂存与任务认领 | `complete` | B-01 | `769d178` | - |
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
-| B-04b 上传 UI、缩略图、required 控件与 loading | `leased` | B-04a | - | Worker TDD 实现；冻结后双 Review |
+| B-04b 上传 UI、缩略图、required 控件与 loading | `frozen_for_review` | B-04a | - | Candidate 已冻结；等待同 revision 双 Review |
 | B-05 素材面板正式协议 | `queued` | B-02、B-03 | - | B-04b 后串行实现 |
 | B-06 页面截图与衍生素材 producer | `queued` | B-01、B-02 | - | B-05 后串行实现 |
 | B-07 requirement 语义与 Phase B 门禁 | `queued` | B-04b、B-05、B-06 | - | Phase B 全量验证 |
@@ -78,7 +78,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: B-04b
-status: leased
+status: frozen_for_review
 owner: /root/dependency_boundary_audit
 base_commit: 6bab504579a59ce8f98ed5a6013943d855060a94
 worktree: D:\code3\MuseDock-worktrees\asset-first-b04b
@@ -98,7 +98,20 @@ state_owners:
 exclusive_resources:
   - musedock-frontend-build
   - B-04b frontend source tests run serially inside the worker worktree
-frozen_revision: null
+frozen_revision: git-index-tree-v1:6bab504579a59ce8f98ed5a6013943d855060a94:15a07a0ec323ef58db9e34c8915dc0032ad972c0
+changed_paths:
+  - frontend-react/src/api/client.js
+  - frontend-react/src/components/creative/CreativeComposer.jsx
+  - frontend-react/src/pages/OneClickCreativePage.jsx
+  - tests/test-creative-upload-ui.mjs
+  - tests/test-one-click-creative-page.mjs
+verification:
+  - node tests/test-creative-upload-ui.mjs
+  - node tests/test-one-click-creative-page.mjs
+  - npm run build:frontend
+review:
+  spec: pending
+  quality: pending
 ```
 
 Worker 禁止修改本 Ledger 和 B-04a 后端路径。发现响应契约不匹配或需要租约外文件时返回 `scope_expansion_required`。前端构建必须持有本租约并串行运行。
