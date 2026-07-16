@@ -100,6 +100,28 @@ function summarizeLayoutIssues(issues = []) {
   }).join('；');
 }
 
+function unresolvedLayoutFailure({ htmlResult = {}, unresolved = [], index = 0, node = {}, sceneId = '' } = {}) {
+  const frameId = node.id || sceneId;
+  const message = `第 ${index + 1} 帧自动修复后仍存在布局遮挡：${summarizeLayoutIssues(unresolved)}`;
+  return {
+    success: false,
+    message,
+    failed_html: htmlResult.html,
+    diagnostics: [createDiagnostic({
+      code: 'frame_layout_qa_unresolved',
+      stage: 'ai-frame-html',
+      sub_stage: 'frame_html',
+      frame_id: frameId,
+      severity: 'error',
+      retryable: true,
+      repair_action: 'retry_frame_html',
+      fallback_allowed: false,
+      user_message: message,
+      details: { frame_id: frameId, issues: unresolved.slice(0, 5) },
+    })],
+  };
+}
+
 async function inspectGeneratedFrameLayout({
   layoutQaService,
   projectDir,
@@ -404,25 +426,14 @@ async function runFrameHtmlPhase(ctx) {
           }
         }
         if (unresolved.length) {
-          diagnostics.push(createDiagnostic({
-            code: 'frame_layout_qa_unresolved',
-            stage: 'ai-frame-html',
-            sub_stage: 'frame_html',
-            frame_id: node.id || sceneId,
-            severity: 'warning',
-            retryable: true,
-            repair_action: 'retry_frame_html',
-            fallback_allowed: true,
-            user_message: `第 ${index + 1} 帧自动修复后仍可能存在布局遮挡：${summarizeLayoutIssues(unresolved)}`,
-            details: { frame_id: node.id || sceneId, issues: unresolved.slice(0, 5) },
-          }));
+          htmlResult = unresolvedLayoutFailure({ htmlResult, unresolved, index, node, sceneId });
         }
         await report(onProgress, {
           type: 'html_video_frame_layout_repair_done',
           stage: 'project',
           sub_stage: 'frame_html',
           message: unresolved.length
-            ? `第 ${index + 1}/${nodes.length} 帧布局自动修复后仍有疑似遮挡，已记录警告。`
+            ? `第 ${index + 1}/${nodes.length} 帧布局自动修复后仍有遮挡，判为生成失败。`
             : `第 ${index + 1}/${nodes.length} 帧布局遮挡已自动修复。`,
           frame_id: node.id,
           data: { frame_id: node.id, resolved: unresolved.length === 0, remaining_issues: unresolved.slice(0, 3) },
@@ -758,6 +769,7 @@ module.exports = {
   runBucketsWithContinuity,
   groupBeatsForSceneHtml,
   buildSceneTimelineScript,
+  unresolvedLayoutFailure,
   computeFrameInputFingerprint,
   FRAME_PROMPT_VERSION,
   FRAME_HTML_CONCURRENCY,
