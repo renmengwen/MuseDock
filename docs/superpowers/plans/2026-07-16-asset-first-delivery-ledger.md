@@ -64,7 +64,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-01 统一视觉素材契约 | `complete` | A-01 | `9abb219` | - |
 | B-02 现有 producer 统一接入 | `complete` | B-01 | `b3b4fe2` | - |
 | B-03 上传暂存与任务认领 | `complete` | B-01 | `769d178` | - |
-| B-04a 暂存素材 requirement 更新接口 | `queued` | B-03 | - | TDD、双 Review、中文提交 |
+| B-04a 暂存素材 requirement 更新接口 | `leased` | B-03 | - | Worker TDD 实现；冻结后双 Review |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `queued` | B-04a | - | TDD、双 Review、中文提交 |
 | B-05 素材面板正式协议 | `queued` | B-02、B-03 | - | B-04b 后串行实现 |
 | B-06 页面截图与衍生素材 producer | `queued` | B-01、B-02 | - | B-05 后串行实现 |
@@ -76,7 +76,28 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ## 当前写租约
 
-当前无业务代码写租约。Coordinator 正在校准控制文档；完成提交后为 B-04a 创建独立 worktree/功能分支，并在 Task 行的附属控制记录中写入 owner、base commit、允许路径、状态所有权、排他资源和 frozen revision。Worker 禁止修改本 Ledger。每次 `frozen_for_review` 必须先形成 Coordinator Ledger 控制提交，Reviewer 只接受该 Ledger commit。
+```yaml
+task_id: B-04a
+status: leased
+owner: /root/context_control_audit
+base_commit: a8b8220ae6de3b8423d9c185f68e8ff411afc8c3
+worktree: D:\code3\MuseDock-worktrees\asset-first-b04a
+branch: codex/asset-first-b04a
+allowed_paths:
+  - server/services/creative/visualAssetUploads.js
+  - server/routes/creativeWorkflows.js
+  - tests/test-creative-workflow-upload-assets.js
+  - tests/test-creative-workflow-routes.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+state_owners:
+  - staged_visual_asset.requirement
+exclusive_resources:
+  - B-04a upload service and route tests run serially inside the worker worktree
+frozen_revision: null
+```
+
+Worker 禁止修改本 Ledger。发现需要修改租约外路径时返回 `scope_expansion_required`。进入 `frozen_for_review` 前由 Coordinator 校验并写入 `git-index-tree-v1` revision，形成独立 Ledger 控制提交；Reviewer 只接受该 Ledger commit。
 
 ## Phase A 审计分工
 
