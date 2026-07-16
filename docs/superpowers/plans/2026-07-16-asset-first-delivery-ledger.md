@@ -67,8 +67,8 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
-| B-06a GitHub 页面截图 producer | `changes_requested` | B-01、B-02 | - | 旧 revision 失效；原 Worker 修复安全与 fake 边界 |
-| B-06b 受控 derived 素材登记 | `leased` | B-01 | - | 独立 worktree TDD；冻结后双 Review |
+| B-06a GitHub 页面截图 producer | `frozen_for_review` | B-01、B-02 | - | 安全修复后 Candidate 已冻结；等待双复审 |
+| B-06b 受控 derived 素材登记 | `frozen_for_review` | B-01 | - | Candidate 已冻结；等待双 Review |
 | B-07a requirement 分类语义 | `frozen_for_review` | B-01 | - | Candidate 已冻结；等待同 revision 双 Review |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
@@ -80,7 +80,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: B-06a
-status: changes_requested
+status: frozen_for_review
 owner: /root/task4_readonly_spec
 base_commit: 7a377550669a91fc9616dd4befda56cf7ad1a985
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06a
@@ -97,8 +97,9 @@ state_owners:
 exclusive_resources:
   - B-06a fake Playwright tests run serially inside the worker worktree
   - no real Chromium, ports, ffmpeg or frontend build
-frozen_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:f76f3afdf92619def2791ae2515c89ab81d006ff
-revision_valid: false
+invalidated_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:f76f3afdf92619def2791ae2515c89ab81d006ff
+frozen_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:faad0ec07e46ef2ffa9d8978633492f7a418d1ba
+revision_valid: true
 changed_paths:
   - server/services/creative/pageCaptureAssets.js
   - server/services/creative/creativeSourcePrep.js
@@ -107,9 +108,9 @@ verification:
   - node tests/test-page-capture-assets.js
   - node tests/test-creative-workflows.js
 review:
-  spec: pass
-  quality: changes_requested
-review_findings:
+  spec: pending_re_review
+  quality: pending_re_review
+resolved_findings:
   - source prep 捕获同步 throw、rejected Promise 与缺方法
   - allowlist 限制默认 HTTPS 端口、credentials、lookalike 与 redirect document
   - fake 驱动真实 route/redirect/2xx 生命周期并证明 route 先于 goto
@@ -119,7 +120,7 @@ review_findings:
 
 ```yaml
 task_id: B-06b
-status: leased
+status: frozen_for_review
 owner: /root/loop_spec_review
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06b
@@ -131,7 +132,16 @@ state_owners:
   - asset_context.assets.derived_registration
 exclusive_resources:
   - B-06b filesystem tests use independent temp directories
-frozen_revision: null
+frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:79231ef01d2203892330dffff4c46dd0bc2e3217
+changed_paths:
+  - server/services/creative/derivedVisualAssets.js
+  - tests/test-derived-visual-assets.js
+verification:
+  - node tests/test-derived-visual-assets.js
+  - node tests/test-visual-asset-contract.js
+review:
+  spec: pending
+  quality: pending
 ```
 
 ```yaml
