@@ -65,7 +65,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-02 现有 producer 统一接入 | `complete` | B-01 | `b3b4fe2` | - |
 | B-03 上传暂存与任务认领 | `complete` | B-01 | `769d178` | - |
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
-| B-04b 上传 UI、缩略图、required 控件与 loading | `changes_requested` | B-04a | - | 运行时代码通过；测试清理时机断言需修正后重新冻结 |
+| B-04b 上传 UI、缩略图、required 控件与 loading | `frozen_for_review` | B-04a | - | 测试修正后新 Candidate 已冻结；等待双复审 |
 | B-05 素材面板正式协议 | `queued` | B-02、B-03 | - | B-04b 后串行实现 |
 | B-06 页面截图与衍生素材 producer | `queued` | B-01、B-02 | - | B-05 后串行实现 |
 | B-07 requirement 语义与 Phase B 门禁 | `queued` | B-04b、B-05、B-06 | - | Phase B 全量验证 |
@@ -78,7 +78,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: B-04b
-status: changes_requested
+status: frozen_for_review
 owner: /root/dependency_boundary_audit
 base_commit: 6bab504579a59ce8f98ed5a6013943d855060a94
 worktree: D:\code3\MuseDock-worktrees\asset-first-b04b
@@ -98,9 +98,11 @@ state_owners:
 exclusive_resources:
   - musedock-frontend-build
   - B-04b frontend source tests run serially inside the worker worktree
-invalidated_revision: git-index-tree-v1:6bab504579a59ce8f98ed5a6013943d855060a94:15a07a0ec323ef58db9e34c8915dc0032ad972c0
-frozen_revision: git-index-tree-v1:6bab504579a59ce8f98ed5a6013943d855060a94:b89e077ae0c49932f77a644cea2348b8f6824648
-revision_valid: false
+invalidated_revisions:
+  - git-index-tree-v1:6bab504579a59ce8f98ed5a6013943d855060a94:15a07a0ec323ef58db9e34c8915dc0032ad972c0
+  - git-index-tree-v1:6bab504579a59ce8f98ed5a6013943d855060a94:b89e077ae0c49932f77a644cea2348b8f6824648
+frozen_revision: git-index-tree-v1:6bab504579a59ce8f98ed5a6013943d855060a94:675f1ca41a4d72eb2fcef69c385f5cde6da72b94
+revision_valid: true
 changed_paths:
   - frontend-react/src/api/client.js
   - frontend-react/src/components/creative/CreativeComposer.jsx
@@ -112,15 +114,15 @@ verification:
   - node tests/test-one-click-creative-page.mjs
   - npm run build:frontend
 review:
-  spec: pass
-  quality: changes_requested
+  spec: pending_re_review
+  quality: pending_re_review
 resolved_findings:
   - create 失败按 workflow_id 区分清理已认领素材或保留可重试素材
   - 上传响应缺少 upload_id 进入 failed
   - 三种 loading 使用 live status，错误继续 alert
   - 测试分别覆盖 checkbox/delete 禁用及 workflow ID 前后的清理时机
-remaining_finding:
-  - 完整截取 missing workflow ID 分支并断言不含 clear，再证明正常 clear 位于整个分支之后
+resolved_test_finding:
+  - missing workflow ID 完整分支不含 clear，正常 clear 位于分支之后，并用 mutation fixture 证明断言有效
 ```
 
 Worker 禁止修改本 Ledger 和 B-04a 后端路径。发现响应契约不匹配或需要租约外文件时返回 `scope_expansion_required`。前端构建必须持有本租约并串行运行。
