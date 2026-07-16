@@ -68,9 +68,10 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
 | B-06a GitHub 页面截图 producer | `frozen_for_review` | B-01、B-02 | - | Candidate 已冻结；等待同 revision 双 Review |
-| B-06b 受控 derived 素材登记 | `queued` | B-01、B-06a | - | B-06a 后串行实现 |
-| B-07 requirement 语义与 Phase B 门禁 | `queued` | B-04b、B-05、B-06a、B-06b | - | Phase B 全量验证 |
-| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07 | - | Phase C 计划与逐任务门 |
+| B-06b 受控 derived 素材登记 | `leased` | B-01 | - | 独立 worktree TDD；冻结后双 Review |
+| B-07a requirement 分类语义 | `leased` | B-01 | - | 独立 worktree TDD；冻结后双 Review |
+| B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
+| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
@@ -109,7 +110,43 @@ review:
   quality: pending
 ```
 
-Worker 仅实现 GitHub 仓库页截图登记与来源阶段合并；真实 Chromium smoke 不在本写租约内。失败只追加 diagnostic，不得伪造素材或清空既有资产。
+```yaml
+task_id: B-06b
+status: leased
+owner: /root/loop_spec_review
+base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
+worktree: D:\code3\MuseDock-worktrees\asset-first-b06b
+branch: codex/asset-first-b06b
+allowed_paths:
+  - server/services/creative/derivedVisualAssets.js
+  - tests/test-derived-visual-assets.js
+state_owners:
+  - asset_context.assets.derived_registration
+exclusive_resources:
+  - B-06b filesystem tests use independent temp directories
+frozen_revision: null
+```
+
+```yaml
+task_id: B-07a
+status: leased
+owner: /root/context_control_audit
+base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
+worktree: D:\code3\MuseDock-worktrees\asset-first-b07a
+branch: codex/asset-first-b07a
+allowed_paths:
+  - server/services/creative-video/html-video/assetUsagePhase.js
+  - tests/test-html-video-asset-usage.js
+  - tests/test-html-video-workflow.js
+state_owners:
+  - asset_usage.required_classification
+exclusive_resources:
+  - B-07a usage/workflow tests run serially inside the worker worktree
+  - no browser, ports, ffmpeg or network
+frozen_revision: null
+```
+
+三个 worktree 的文件与状态所有权不重叠，可以并行写；Coordinator 仍串行冻结、Review 和集成。B-06a 真实 Chromium smoke 与 Phase B 全量门留到 B-07b。
 
 ## Phase A 审计分工
 
@@ -173,7 +210,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-B-06 | `verified` | `origin/origin_detail/requirement/evidence_class` 分维协议 | B-01 |
 | REQ-B-07 | `verified` | direct source、synthetic、stock/search 的证据边界 | B-01、B-02 |
 | REQ-B-08 | `pending` | 任何可引用图片必须先登记 | B-06a、B-06b、B-07 |
-| REQ-B-09 | `pending` | required 素材无真实可见 Shot 时阻断 | B-07、C-04 |
+| REQ-B-09 | `pending` | required 素材无真实可见 Shot 时阻断 | B-07a、B-07b、C-04 |
 | REQ-B-10 | `pending` | Asset Usage Report 与素材面板一致 | B-05、C-04 |
 
 ### C. 多图编排
