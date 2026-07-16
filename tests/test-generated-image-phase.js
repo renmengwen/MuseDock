@@ -88,6 +88,11 @@ async function run() {
   const asset = result.creativeContext.asset_context.assets[0];
   assert.strictEqual(asset.id, 'gen_scene_01');
   assert.strictEqual(asset.source, 'generated');
+  assert.strictEqual(asset.origin, 'ai_generated');
+  assert.strictEqual(asset.origin_detail, 'scene_main_visual');
+  assert.strictEqual(asset.requirement, 'optional');
+  assert.strictEqual(asset.evidence_class, 'synthetic');
+  assert.strictEqual(asset.status, 'ready');
   assert.strictEqual(asset.path, 'assets/generated-image-01-abc.png');
   assert.strictEqual(asset.frame_src, '../assets/generated-image-01-abc.png');
   assert.strictEqual(asset.generation.scene_id, 'scene_01');

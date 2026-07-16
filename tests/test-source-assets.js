@@ -76,6 +76,10 @@ async function testPrepareDownloadsArticleImageWithoutPexelsBackfill() {
   assert.equal(result.status, 'ready');
   assert.equal(result.assets.length, 1);
   assert.equal(result.assets[0].source, 'article');
+  assert.equal(result.assets[0].origin, 'source_extract');
+  assert.equal(result.assets[0].origin_detail, 'article_embedded');
+  assert.equal(result.assets[0].requirement, 'optional');
+  assert.equal(result.assets[0].evidence_class, 'direct_source');
   assert.equal(result.assets[0].alt, '架构图');
   assert.ok(fs.existsSync(result.assets[0].local_path));
   assert.equal(result.search, null);
@@ -119,6 +123,11 @@ async function testPrepareDownloadsPexelsWhenNoArticleImages() {
   assert.equal(result.status, 'ready');
   assert.equal(result.assets.length, 1);
   assert.equal(result.assets[0].source, 'search');
+  assert.equal(result.assets[0].origin, 'stock_search');
+  assert.equal(result.assets[0].origin_detail, 'pexels');
+  assert.equal(result.assets[0].provider, 'pexels');
+  assert.equal(result.assets[0].requirement, 'optional');
+  assert.equal(result.assets[0].evidence_class, 'contextual');
   assert.equal(result.assets[0].attribution.provider, 'Pexels');
   assert.ok(fs.existsSync(result.assets[0].local_path));
   assert.ok(requested.some(url => String(url).startsWith('https://api.pexels.com/')));
@@ -294,6 +303,8 @@ async function testGithubRelativeImagesUseRawUrl() {
   assert.equal(result.status, 'ready');
   assert.equal(requested[0], 'https://raw.githubusercontent.com/owner/repo/develop/docs/demo.png');
   assert.equal(result.assets[0].url, requested[0]);
+  assert.equal(result.assets[0].origin_detail, 'github_readme');
+  assert.equal(result.assets[0].provider, 'github');
 }
 
 async function testGithubRaw429FallsBackToApiRaw() {

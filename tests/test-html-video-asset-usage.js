@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
+const assetUsagePhase = require('../server/services/creative-video/html-video/assetUsagePhase');
 
 const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'html-video-asset-usage-'));
 fs.mkdirSync(path.join(projectDir, 'frames'), { recursive: true });
@@ -58,6 +59,33 @@ assert.deepEqual(report.assets.find(asset => asset.asset_id === 'article_03').us
 assert.deepEqual(report.used_asset_ids, ['article_01', 'article_03']);
 assert.deepEqual(report.unused_asset_ids, ['article_02']);
 assert.match(report.summary, /最终 HTML 使用了 2 张视觉素材/);
+
+const projectAssets = assetUsagePhase.projectAssetsFromCreativeContext({
+  asset_context: {
+    assets: [{
+      id: 'upload_01',
+      type: 'image',
+      media_type: 'image',
+      source: 'upload',
+      origin: 'user_upload',
+      origin_detail: 'creative_input',
+      provider: 'local',
+      requirement: 'preferred',
+      evidence_class: 'user_supplied',
+      status: 'ready',
+      path: 'assets/upload.png',
+      mime: 'image/png',
+      bytes: 123,
+      width: 1080,
+      height: 1920,
+      created_at: '2026-07-16T00:00:00.000Z',
+    }],
+  },
+});
+assert.equal(projectAssets[0].origin, 'user_upload');
+assert.equal(projectAssets[0].requirement, 'preferred');
+assert.equal(projectAssets[0].evidence_class, 'user_supplied');
+assert.equal(projectAssets[0].bytes, 123);
 
 const requiredReport = workflow.buildAssetUsageReport({
   projectDir,

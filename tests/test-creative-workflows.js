@@ -264,6 +264,26 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
     ...(staleWorkflow.creative_context || {}),
     source_context: staleWorkflow.source_context,
   };
+  const uploadedPath = path.join(mediaRoot, 'fake-upload-image.png');
+  fs.mkdirSync(mediaRoot, { recursive: true });
+  fs.writeFileSync(uploadedPath, 'upload-image', 'utf8');
+  const uploadedAssetContext = {
+    status: 'ready',
+    assets: [{
+      id: 'upload_01',
+      source: 'upload',
+      origin: 'user_upload',
+      origin_detail: 'creative_input',
+      provider: 'local',
+      requirement: 'preferred',
+      evidence_class: 'user_supplied',
+      status: 'ready',
+      path: 'assets/upload-image.png',
+      local_path: uploadedPath,
+    }],
+  };
+  staleWorkflow.asset_context = { status: 'ready', assets: [] };
+  staleWorkflow.creative_context.asset_context = uploadedAssetContext;
   fs.writeFileSync(workflowPath, JSON.stringify(staleWorkflow, null, 2), 'utf-8');
 
   const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
@@ -303,10 +323,15 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
   assert.equal(analysisInput.creative_context.asset_context.status, 'ready');
   assert.equal(run.asset_context.image_analysis.status, 'disabled');
   assert.equal(run.asset_context.assets[0].image_analysis.status, 'disabled');
+  assert.deepEqual(
+    run.asset_context.assets.map(asset => asset.id).filter(id => ['upload_01', 'article_01'].includes(id)),
+    ['upload_01', 'article_01'],
+  );
+  assert.equal(run.asset_context.assets.find(asset => asset.id === 'upload_01').requirement, 'preferred');
   assert.equal(analysisInput.creative_context.asset_context.image_analysis.status, 'disabled');
-  assert.equal(analysisInput.creative_context.asset_context.assets[0].image_analysis.status, 'disabled');
-  assert.equal(analysisInput.creative_context.asset_context.assets[0].path, 'assets/source-image-01.png');
-  assert.deepEqual(analysisInput.local_assets.images, [path.join(mediaRoot, 'fake-source-image-01.png')]);
+  assert.equal(analysisInput.creative_context.asset_context.assets.find(asset => asset.id === 'article_01').image_analysis.status, 'disabled');
+  assert.equal(analysisInput.creative_context.asset_context.assets.find(asset => asset.id === 'article_01').path, 'assets/source-image-01.png');
+  assert.deepEqual(analysisInput.local_assets.images, [uploadedPath, path.join(mediaRoot, 'fake-source-image-01.png')]);
   assert.equal(analysisInput.video.aweme_url, '');
 }
 

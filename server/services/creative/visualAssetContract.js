@@ -136,6 +136,18 @@ function definedObject(input = {}) {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined && value !== ''));
 }
 
+function normalizeMergedVisualAsset(input) {
+  if (safeString(input.origin || input.source)) return normalizeVisualAsset(input);
+  if (!safeString(input.path || input.local_path || input.url)) return normalizeVisualAsset(input);
+  return normalizeVisualAsset({
+    ...input,
+    origin: 'source_extract',
+    origin_detail: 'legacy_unclassified',
+    requirement: 'optional',
+    evidence_class: 'contextual',
+  });
+}
+
 function mergeVisualAssets(...lists) {
   const order = [];
   const byId = new Map();
@@ -153,7 +165,7 @@ function mergeVisualAssets(...lists) {
       throw new Error(`视觉素材 ${id} 的来源冲突。`);
     }
     const combined = { ...(current || {}), ...definedObject(input), id };
-    byId.set(id, normalizeVisualAsset(combined));
+    byId.set(id, normalizeMergedVisualAsset(combined));
   }
   return order.map(id => byId.get(id));
 }

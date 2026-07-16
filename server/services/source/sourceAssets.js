@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const dns = require('dns/promises');
 const net = require('net');
+const { normalizeVisualAsset } = require('../creative/visualAssetContract');
 
 const DEFAULT_MAX_ARTICLE_IMAGES = 6;
 const DEFAULT_MAX_SEARCH_IMAGES = 3;
@@ -244,10 +245,12 @@ async function downloadImageAsset(image, index, assetDir, deps = {}) {
   await fsp.writeFile(filePath, buffer);
   return {
     success: true,
-    asset: {
+    asset: normalizeVisualAsset({
       id: `${source}_${String(index + 1).padStart(2, '0')}`,
       type: 'image',
       source,
+      origin_detail: safeString(image.origin_detail),
+      provider: safeString(image.provider),
       url: currentUrl,
       path: `assets/${fileName}`,
       local_path: filePath,
@@ -256,7 +259,7 @@ async function downloadImageAsset(image, index, assetDir, deps = {}) {
       bytes: buffer.length,
       title: safeString(image.title || image.alt),
       attribution: image.attribution || null,
-    },
+    }),
   };
 }
 
@@ -394,8 +397,13 @@ async function prepareSourceAssets({
 } = {}) {
   const targetAssetDir = assetDir || path.join(projectDir, 'assets');
   const diagnostics = [];
+  const articleOriginDetail = safeString(sourceMaterial.kind) === 'github_repo'
+    ? 'github_readme'
+    : 'article_embedded';
+  const articleProvider = safeString(sourceMaterial.kind) === 'github_repo' ? 'github' : '';
   const articleImages = extractMarkdownImages(sourceMaterial.markdown, githubRawBaseUrl(sourceMaterial) || sourceMaterial.url)
-    .slice(0, maxArticleImages);
+    .slice(0, maxArticleImages)
+    .map(image => ({ ...image, origin_detail: articleOriginDetail, provider: articleProvider }));
   let candidates = [...articleImages];
   let searchResult = null;
   const runSearch = async () => {

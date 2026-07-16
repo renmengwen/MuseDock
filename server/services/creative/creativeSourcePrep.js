@@ -6,6 +6,7 @@ const mediaPipeline = require('../mediaPipeline');
 const defaultSourceAssets = require('../source/sourceAssets');
 const defaultSourceImageAnalysis = require('../source/sourceImageAnalysis');
 const defaultAiTextModel = require('../ai/aiTextModel');
+const { mergeVisualAssetContexts } = require('./visualAssetContract');
 
 // ponytail: 纯小助手与 creativeWorkflows 各持一份，避免为 safeString(159处)/readJson/writeJson 改全局
 function safeString(value) {
@@ -845,6 +846,13 @@ function createFailedImageAnalysisResult(assets = [], error) {
   };
 }
 
+function existingVisualAssetContext(record = {}) {
+  return mergeVisualAssetContexts(
+    record.creative_context?.asset_context || {},
+    record.asset_context || {},
+  );
+}
+
 async function applySourceImageAnalysis(assetContext = {}, record = {}, services = {}) {
   const assets = Array.isArray(assetContext.assets) ? assetContext.assets : [];
   const enabled = isSourceImageAnalysisEnabled(record);
@@ -891,11 +899,13 @@ async function resolvePexelsApiKey(services = {}) {
 async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, reportStage = null) {
   const sourceMaterial = buildSourceMaterialForAssets(record);
   if (!sourceMaterial?.markdown && !sourceMaterial?.title && !sourceMaterial?.description) {
-    const assetContext = await applySourceImageAnalysis({
+    const mergedAssetContext = mergeVisualAssetContexts(existingVisualAssetContext(record), {
       ...creativeContext.createDisabledAssetContext({ now }),
       status: 'empty',
       summary: '没有可用于提取或搜索图片的来源内容。',
-    }, record, services);
+    });
+    if (mergedAssetContext.assets.length) mergedAssetContext.status = 'ready';
+    const assetContext = await applySourceImageAnalysis(mergedAssetContext, record, services);
     record.asset_context = assetContext;
     record.creative_context = {
       ...(record.creative_context || {}),
@@ -925,7 +935,12 @@ async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, 
       pexelsApiKey,
     },
   });
-  const assetContext = await applySourceImageAnalysis(preparedAssetContext, record, services);
+  const mergedAssetContext = mergeVisualAssetContexts(
+    existingVisualAssetContext(record),
+    preparedAssetContext,
+  );
+  if (mergedAssetContext.assets.length) mergedAssetContext.status = 'ready';
+  const assetContext = await applySourceImageAnalysis(mergedAssetContext, record, services);
   record.asset_context = assetContext;
   record.creative_context = {
     ...(record.creative_context || {}),

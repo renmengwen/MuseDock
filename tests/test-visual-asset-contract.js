@@ -133,6 +133,15 @@ function testContextMergePreservesAssetsAndDiagnostics() {
   assert.deepEqual(repeated.assets, merged.assets);
   assert.deepEqual(repeated.diagnostics, merged.diagnostics);
   assert.equal(repeated.status, 'ready');
+
+  const legacy = mergeVisualAssetContexts(
+    { assets: [{ id: 'legacy_01', path: 'assets/legacy.png' }] },
+    { assets: [] },
+  ).assets[0];
+  assert.equal(legacy.origin, 'source_extract');
+  assert.equal(legacy.origin_detail, 'legacy_unclassified');
+  assert.equal(legacy.requirement, 'optional');
+  assert.equal(legacy.evidence_class, 'contextual');
 }
 
 testLegacySourceCompatibility();

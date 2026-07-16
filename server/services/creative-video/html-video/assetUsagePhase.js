@@ -111,10 +111,23 @@ function projectAssetsFromCreativeContext(creativeContext = {}) {
     type: asset.type || 'image',
     path: asset.path,
     source: asset.source || '',
+    media_type: asset.media_type || asset.type || 'image',
+    origin: asset.origin || '',
+    origin_detail: asset.origin_detail || '',
+    provider: asset.provider || '',
+    requirement: asset.requirement || '',
+    evidence_class: asset.evidence_class || '',
+    status: asset.status || '',
+    parent_asset_id: asset.parent_asset_id || '',
     url: asset.url || '',
     alt: asset.alt || '',
     attribution: asset.attribution || null,
     generation: asset.generation || null,
+    mime: asset.mime || '',
+    bytes: Number(asset.bytes) || 0,
+    width: Number(asset.width) || 0,
+    height: Number(asset.height) || 0,
+    created_at: asset.created_at || '',
   })).filter(asset => asset.path);
 }
 

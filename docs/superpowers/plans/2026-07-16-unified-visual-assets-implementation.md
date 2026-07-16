@@ -159,7 +159,7 @@ Commit: `功能：建立统一视觉素材契约`
 - Modify: `tests/test-generated-image-phase.js`
 - Modify: `tests/test-html-video-project-store.js`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 断言：
 
@@ -174,13 +174,13 @@ assert.deepEqual(result.asset_context.assets.map(item => item.id), ['upload_01',
 assert.equal(roundTrippedProject.assets[0].origin, 'user_upload');
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run: `node tests/test-source-assets.js && node tests/test-creative-workflows.js && node tests/test-generated-image-phase.js && node tests/test-html-video-project-store.js`
 
 Expected: 新正式字段或上传素材保留断言失败。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 - `prepareSourceAssetContext()` 使用 `mergeVisualAssetContexts(record.asset_context, prepared)`；无来源内容时只更新 summary/status，不清空既有资产。
 - `sourceAssets` 为文章/GitHub README/Pexels 填充正式字段。
@@ -188,11 +188,11 @@ Expected: 新正式字段或上传素材保留断言失败。
 - `runGeneratedImagePhase()` 和 hydrate 使用统一 merge。
 - `projectAssetsFromCreativeContext()` 保留 `media_type/origin/origin_detail/provider/requirement/evidence_class/status/parent_asset_id/mime/bytes/width/height/created_at`。
 
-- [ ] **Step 4: 验证 GREEN**
+- [x] **Step 4: 验证 GREEN**
 
 运行 Step 2 四条测试，Expected: PASS。
 
-- [ ] **Step 5: 双 Review、修复和提交**
+- [x] **Step 5: 双 Review、修复和提交**
 
 Commit: `功能：统一现有视觉素材写入协议`
 

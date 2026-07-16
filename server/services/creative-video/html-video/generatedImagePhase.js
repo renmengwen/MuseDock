@@ -4,6 +4,7 @@ const defaultAiImageModel = require('../../ai/aiImageModel');
 const defaultPlanner = require('../../creative/generatedImagePlanner');
 const projectStore = require('./projectStore');
 const { createDiagnostic } = require('./diagnostics');
+const { mergeVisualAssets, normalizeVisualAsset } = require('../../creative/visualAssetContract');
 
 const SIZE_BY_ASPECT_RATIO = {
   '9:16': '1600x2848',
@@ -20,10 +21,16 @@ function objectOrEmpty(value) {
 
 function buildGeneratedAsset({ file, plan, modelInfo, now }) {
   const prompt = safeString(plan.generation_prompt);
-  return {
+  return normalizeVisualAsset({
     id: `gen_${safeString(plan.scene_id)}`,
     type: 'image',
     source: 'generated',
+    origin: 'ai_generated',
+    origin_detail: 'scene_main_visual',
+    provider: safeString(modelInfo?.provider || modelInfo?.provider_name || modelInfo?.model_id),
+    requirement: 'optional',
+    evidence_class: 'synthetic',
+    status: 'ready',
     url: file.url,
     path: `assets/${file.file_name}`,
     frame_src: `../assets/${file.file_name}`,
@@ -39,7 +46,7 @@ function buildGeneratedAsset({ file, plan, modelInfo, now }) {
       model_info: modelInfo || null,
       generated_at: now || '',
     },
-  };
+  });
 }
 
 function warningDiagnostic(code, userMessage, details = {}) {
@@ -220,7 +227,7 @@ async function runGeneratedImagePhase({
       asset_context: {
         ...assetContext,
         status: 'ready',
-        assets: [...newAssets, ...existingAssets],
+        assets: mergeVisualAssets(existingAssets, newAssets),
       },
     },
     generated_count: newAssets.length,
@@ -261,7 +268,7 @@ function hydrateGeneratedAssetsFromProject({ project, creativeContext = {}, proj
     ...creativeContext,
     asset_context: {
       ...assetContext,
-      assets: [...hydrated, ...existing],
+      assets: mergeVisualAssets(existing, hydrated),
     },
   };
 }

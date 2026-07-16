@@ -156,5 +156,6 @@
 | Delivery Loop 设计纠正 | `7512979` |
 | Phase A 审计与 Phase B 计划 | `b48fcf6` |
 | Phase B Task 1 统一资产契约 | `tests/test-visual-asset-contract.js` 与 `tests/test-creative-context.js` 通过；规格 Review PASS；代码质量 Review PASS |
+| Phase B Task 2 现有 producer 统一接入 | source/generated/workflow/usage/project-store 共七组测试通过；规格 Review PASS；代码质量 Review PASS |
 
 后续每个任务完成后追加：需求、提交、验证命令、Review 结论和剩余风险；不记录完整日志或 Agent 对话。

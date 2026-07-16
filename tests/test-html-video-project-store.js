@@ -6,6 +6,7 @@ const path = require('path');
 const schema = require('../server/services/creative-video/html-video/projectSchema');
 const store = require('../server/services/creative-video/html-video/projectStore');
 const assetStore = require('../server/services/creative-video/html-video/assetStore');
+const assetUsagePhase = require('../server/services/creative-video/html-video/assetUsagePhase');
 
 (async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-project-'));
@@ -27,6 +28,25 @@ const assetStore = require('../server/services/creative-video/html-video/assetSt
     projectId: 'project_001',
     workflowId: 'workflow_001',
     runId: 'run_001',
+  });
+  project.assets = assetUsagePhase.projectAssetsFromCreativeContext({
+    asset_context: {
+      assets: [{
+        id: 'upload_01',
+        type: 'image',
+        media_type: 'image',
+        source: 'upload',
+        origin: 'user_upload',
+        origin_detail: 'creative_input',
+        provider: 'local',
+        requirement: 'preferred',
+        evidence_class: 'user_supplied',
+        status: 'ready',
+        path: 'assets/upload.png',
+        mime: 'image/png',
+        bytes: 123,
+      }],
+    },
   });
   project.frames.push({
     id: 'frame_01',
@@ -55,6 +75,10 @@ const assetStore = require('../server/services/creative-video/html-video/assetSt
   const loaded = await store.loadProject(projectDir);
   assert.deepEqual(loaded, savedProject);
   assert.equal(loaded.generation_checkpoint.version, 1);
+  assert.equal(loaded.assets[0].origin, 'user_upload');
+  assert.equal(loaded.assets[0].requirement, 'preferred');
+  assert.equal(loaded.assets[0].evidence_class, 'user_supplied');
+  assert.equal(loaded.assets[0].bytes, 123);
   await assert.rejects(
     fs.access(path.join(projectDir, 'project.json.tmp')),
     /ENOENT/
