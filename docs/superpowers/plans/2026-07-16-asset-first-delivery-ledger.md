@@ -20,9 +20,9 @@
 - 用户于 2026-07-17 重启后恢复执行；B-07a 已完成串行集成
 - 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 当前为 `agents.max_threads = 20`，新任务/重启后读取
 - 实际并发：第 4 个 sub-agent 创建返回 `agent thread limit reached`；当前产品层仍为主 Agent + 3 个 sub-agent
-- 当前主工作区：`dev`；B-07a 最终 Candidate 已由提交 `fda1c71` 集成
-- 当前顺序：执行 B-07b Phase B 全量门与真实 Chromium smoke → Phase C
-- Phase C：只读 Task Packet 已完成，B-07b 完成前不得开启 C-01 写租约
+- 当前主工作区：`dev`；B-07b 最终 reviewed tree 已由提交 `218fbf9` squash 集成
+- 当前顺序：Phase B 集成门已通过 → 执行 Phase C C-01～C-05
+- Phase C：只读 Task Packet 已完成，C-01 写租约可以开启；REQ-B-09/10 继续依赖真实 Shot 与正数可见时长
 
 ## Goal 基线与用户改动清单
 
@@ -76,10 +76,10 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
-| B-06a GitHub 页面截图 producer | `complete` | B-01、B-02 | `32a51c5` | 双 Review PASS，dev 目标测试通过；真实 Chromium smoke 留在 B-07b |
+| B-06a GitHub 页面截图 producer | `complete` | B-01、B-02 | `32a51c5` | 双 Review PASS；真实 Chromium smoke 已在 B-07b 通过 |
 | B-06b 受控 derived 素材登记 | `complete` | B-01 | `ca45e1d` | 双 Review PASS，已在 dev 重跑目标测试并释放租约 |
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
-| B-07b Phase B 集成门禁验证 | `in_progress` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke 正在执行 |
+| B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
@@ -340,7 +340,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-B-05 | `verified` | 运行中持续追加素材与中文诊断 | B-02、B-06a、B-06b |
 | REQ-B-06 | `verified` | `origin/origin_detail/requirement/evidence_class` 分维协议 | B-01 |
 | REQ-B-07 | `verified` | direct source、synthetic、stock/search 的证据边界 | B-01、B-02 |
-| REQ-B-08 | `pending` | 任何可引用图片必须先登记 | B-06a、B-06b、B-07 |
+| REQ-B-08 | `verified` | 任何可引用图片必须先登记 | B-06a、B-06b、B-07 |
 | REQ-B-09 | `pending` | required 素材无真实可见 Shot 时阻断 | B-07a、B-07b、C-04 |
 | REQ-B-10 | `pending` | Asset Usage Report 与素材面板一致 | B-05、C-04 |
 
@@ -422,6 +422,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase B Task 7A requirement 修复 Candidate | revision `d2a84d2926eb1a9250a8de6d22301d957acb4a26`；usage/workflow/generated persist/generated phase/project store 五组测试通过；等待双复审 |
 | Phase B Task 7A 根因修复工作树 | B-07a Agent 中止前保留 15 个未暂存允许路径，`341 insertions/63 deletions`，`git diff --check` 无 whitespace error；未收到最终测试或新 revision，不得按完成处理 |
 | Phase B Task 7A requirement 语义完成 | `fda1c71`；冻结 revision `654d1063be9431cf55c8eacce9c0a1b9e3ad07e1`；16 条允许路径；formal identity/evidence/stock/hydrate、全部 required refs、合法枚举合并与早期 project 正式字段持久化已覆盖；规格 Review PASS；代码质量 Review PASS；dev 10 项串行验证通过 |
-| Phase C 只读实现前审计 | 基线 `857dee2`；content graph、visual plan、scene continuity、asset usage、workflow 五组测试通过；C-01～C-05 Task Packet 已准备，写门仍依赖 B-07b |
+| Phase B Task 7B 集成门完成 | `218fbf9`；最终冻结 revision `9589958ba933261b292cc89b6589440fe5540d62`、tree `9634192c39763f50a0bdf9e8fc58951e76e1a003`；规格 Review PASS、普通代码质量 Review PASS、本地真实 Chrome QA PASS；dev 38 组 Node 测试与 `npm run build:frontend` 通过，仅保留既有 >500kB chunk warning；真实 GitHub `https://github.com/openai/codex` 页面截图 smoke 通过，Chrome `150.0.7871.124`、Playwright `1.60.0`、PNG `1440x900`/`72497` bytes，Node 仅转发 1 个 document 与 19 个 stylesheet，临时目录无残留；REQ-B-08 verified，REQ-B-09/10 继续 pending |
+| Phase C 只读实现前审计 | 基线 `857dee2`；content graph、visual plan、scene continuity、asset usage、workflow 五组测试通过；C-01～C-05 Task Packet 已准备，B-07b 写门已解除 |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
