@@ -76,9 +76,9 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
-| B-06a GitHub 页面截图 producer | `changes_requested` | B-01、B-02 | - | redirect 已 fail-closed；仍需避免 route.fetch 完整缓冲无界响应 |
-| B-06b 受控 derived 素材登记 | `in_progress` | B-01 | - | 新规格复审要求 path/bytes 正式字段严格一致；正在修复 |
-| B-07a requirement 分类语义 | `frozen_for_review` | B-01 | - | 根因修复已冻结；等待新 revision 双复审 |
+| B-06a GitHub 页面截图 producer | `frozen_for_review` | B-01、B-02 | - | 有界 Node 流式网络修复已冻结；等待新 revision 双复审 |
+| B-06b 受控 derived 素材登记 | `frozen_for_review` | B-01 | - | 严格幂等、JSON-like 与测试清理修复已冻结；等待双复审 |
+| B-07a requirement 分类语义 | `in_progress` | B-01 | - | 新规格/质量 Review findings 正在修复 |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
@@ -89,7 +89,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: B-06a
-status: changes_requested
+status: frozen_for_review
 owner: unassigned
 base_commit: 7a377550669a91fc9616dd4befda56cf7ad1a985
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06a
@@ -108,8 +108,9 @@ exclusive_resources:
   - no real Chromium, ports, ffmpeg or frontend build
 previous_invalidated_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:f76f3afdf92619def2791ae2515c89ab81d006ff
 invalidated_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:faad0ec07e46ef2ffa9d8978633492f7a418d1ba
-frozen_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:eb725288cf30de67c36b3c17b060dc7400062efd
-revision_valid: false
+previous_frozen_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:eb725288cf30de67c36b3c17b060dc7400062efd
+frozen_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:bfb0c1354d2cb79e80d9e8fc94c1f7e607fec9f5
+revision_valid: true
 changed_paths:
   - server/services/creative/pageCaptureAssets.js
   - server/services/creative/creativeSourcePrep.js
@@ -118,14 +119,8 @@ verification:
   - node tests/test-page-capture-assets.js
   - node tests/test-creative-workflows.js
 review:
-  spec: pass
-  spec_reviewed_ledger_commit: 45a8a8b
-  spec_reviewed_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:eb725288cf30de67c36b3c17b060dc7400062efd
-  quality: changes_requested_non_independent_audit
-  quality_independence: invalid_same_agent_as_worker
-blocking_findings:
-  - route.fetch 会在 Playwright 1.60 内完整缓冲允许响应；截图 8MB 上限不能约束 document/CSS/image/font 的网络内存峰值
-  - 下次必须选择真正有界的网络读取方案，覆盖单响应与页面总预算、缺失或伪造 Content-Length，并及时释放拒绝响应
+  spec: in_progress
+  quality: pending_re_review
 resolved_findings:
   - source prep 捕获同步 throw、rejected Promise 与缺方法
   - 首跳 allowlist 限制默认 HTTPS 端口、credentials、lookalike，并证明 route 先于 goto
@@ -133,12 +128,14 @@ resolved_findings:
   - 默认 writer 覆盖 rename 临时文件清理与 symlink/junction 越界；Buffer 不重复复制
   - document 与允许静态资源使用 route.fetch({ maxRedirects: 0 })；所有首跳 3xx 在下一跳前 abort
   - fake 按 Playwright 1.60 单次 route 回调建模，并证明 redirect 下一跳未请求
+  - 删除 route.fetch，使用 Node https 流式限制单响应 2 MiB 与单 capture 8 MiB
+  - 拒绝远端 image/font、压缩编码与非法 Content-Length，阻断 service worker 并清理超时/超限请求
 ```
 
 ```yaml
 task_id: B-06b
-status: in_progress
-owner: /root/b06b_spec_review_v2
+status: frozen_for_review
+owner: unassigned
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06b
 branch: codex/asset-first-b06b
@@ -149,9 +146,10 @@ state_owners:
   - asset_context.assets.derived_registration
 exclusive_resources:
   - B-06b filesystem tests use independent temp directories
-invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:79231ef01d2203892330dffff4c46dd0bc2e3217
-frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:bf9475b98d8f338c409ee76a60265ec019843815
-revision_valid: false
+previous_invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:79231ef01d2203892330dffff4c46dd0bc2e3217
+invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:404ad1819de7fb935655272b179e50788dfa8abf
+frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:0675e733e7b9105927ec0ac4fad0f6aa3824c122
+revision_valid: true
 changed_paths:
   - server/services/creative/derivedVisualAssets.js
   - tests/test-derived-visual-assets.js
@@ -159,23 +157,21 @@ verification:
   - node tests/test-derived-visual-assets.js
   - node tests/test-visual-asset-contract.js
 review:
-  spec: changes_requested
-  spec_reviewed_ledger_commit: 6ddd60a
-  spec_reviewed_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:bf9475b98d8f338c409ee76a60265ec019843815
-  quality: in_progress
-blocking_findings:
-  - 幂等比较必须对已登记正式 path 和 bytes 的原始类型和值严格一致；不得把 assets/./child.png 或字符串 bytes 静默规范化
+  spec: pending_re_review
+  quality: pending_re_review
 resolved_findings:
   - 子素材必须验证与扩展名一致的真实 PNG、JPEG 或 WebP 文件签名
   - 同 ID、同 parent 只有 child path、origin_detail 与 derivation 全部一致时才幂等，否则必须冲突
   - derivation 必须深拷贝，嵌套输入与返回资产不得共享引用
   - 测试必须锁住 assets root、parent 与 child 的静态 junction/symlink 逃逸防护；平台不支持时明确 skip
+  - 幂等比较对正式 path、bytes 原始类型和值严格一致
+  - JSON-like 递归验证只接受 plain data 并保留 -0，测试临时根与链接在 finally 中安全清理
 ```
 
 ```yaml
 task_id: B-07a
-status: frozen_for_review
-owner: unassigned
+status: in_progress
+owner: /root/b06b_spec_review_v2
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b07a
 branch: codex/asset-first-b07a
@@ -203,8 +199,8 @@ exclusive_resources:
   - no browser, ports, ffmpeg or network
 previous_invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
 invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:d2a84d2926eb1a9250a8de6d22301d957acb4a26
-frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4817900a2d68a60083eb02eed9d8f7f9cad8068a
-revision_valid: true
+invalidated_review_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4817900a2d68a60083eb02eed9d8f7f9cad8068a
+revision_valid: false
 changed_paths:
   - server/services/creative/visualAssetContract.js
   - server/services/creative/generatedImagePlanner.js
@@ -239,8 +235,14 @@ verification:
   - node tests/test-generated-image-persist.js
   - node tests/test-creative-workflow-retry-planner.js
 review:
-  spec: pending_re_review
-  quality: pending_re_review
+  spec: changes_requested
+  quality: changes_requested_in_progress
+blocking_findings:
+  - evidence/source/citation/proof 必须按 evidence_class 而非 origin 判定，direct_source/derived_source 允许
+  - stock_search 分类必须 formal origin 优先，不能误入真实来源区
+  - frame 早期门必须检查本帧全部 required refs
+  - generated hydrate 同 ID 必须把 project 正式字段补回旧 context
+  - 同 ID project 非字符串正式字段不得覆盖 context 有效 required/origin
 resolved_findings:
   - 帧级 HTML 素材校验必须与 requirement 单一真值一致，测试不得在视觉 QA 阶段晚注入 graph refs
   - formal-first 生成素材身份必须覆盖 Content Graph、Prompt、Frame 检查、生成图恢复与 workflow 复用
