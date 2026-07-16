@@ -18,7 +18,7 @@
 ## 重启续接状态
 
 - 用户要求当前 Agent 收尾后暂停并重启电脑；B-06a/B-06b 已收尾，B-07a 长时间未返回后已安全中止
-- 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 已设置 `agents.max_threads = 12`，新任务/重启后读取
+- 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 当前为 `agents.max_threads = 20`，新任务/重启后读取
 - 当前主工作区：`dev`；业务 Candidate 均保留在独立 worktree 的 Git index 中
 - 恢复顺序：先恢复并验证 B-07a 未冻结修改 → 解决 B-06a 有界网络读取 → B-06b/B-07a 双复审 → 按双 PASS 顺序串行集成 → B-07b
 - Phase C：只读 Task Packet 已完成，B-07b 完成前不得开启 C-01 写租约
