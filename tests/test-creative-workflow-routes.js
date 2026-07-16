@@ -984,6 +984,75 @@ async function runRetryRouteTests() {
 
   {
     const app = express();
+    const workflowId = '202606250800000006';
+    const startCalls = [];
+    app.use(express.json());
+    app.locals.creativeWorkflows = {
+      refreshCreativeWorkflowRetryPlan: async id => ({
+        success: true,
+        workflow_id: id,
+        plan: { can_retry: true, code: 'frame_layout_qa_unresolved', mode: 'repair_and_resume' },
+      }),
+    };
+    app.locals.creativeWorkflowTasks = {
+      startCreativeWorkflowRetryTask: async (id, options = {}) => {
+        startCalls.push({ id, options });
+        return { success: true, workflow_id: id, task_id: 'creative-task-ignore-layout-qa' };
+      },
+    };
+    app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+    const server = await listen(app);
+    try {
+      const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/retry`, {
+        mode: 'repair_and_resume',
+        confirm_plan_code: 'frame_layout_qa_unresolved',
+        ignore_layout_qa_once: true,
+      });
+      assert.strictEqual(response.statusCode, 202);
+      assert.strictEqual(startCalls[0].options.payload.ignore_layout_qa_once, true);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+
+  {
+    const app = express();
+    const workflowId = '202606250800000007';
+    let retryTaskCalls = 0;
+    app.use(express.json());
+    app.locals.creativeWorkflows = {
+      refreshCreativeWorkflowRetryPlan: async id => ({
+        success: true,
+        workflow_id: id,
+        plan: { can_retry: true, code: 'provider_missing_text', mode: 'repair_and_resume' },
+      }),
+    };
+    app.locals.creativeWorkflowTasks = {
+      startCreativeWorkflowRetryTask: async () => {
+        retryTaskCalls += 1;
+        return { success: true, workflow_id: workflowId, task_id: 'should-not-start' };
+      },
+    };
+    app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+    const server = await listen(app);
+    try {
+      const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/retry`, {
+        mode: 'repair_and_resume',
+        confirm_plan_code: 'provider_missing_text',
+        ignore_layout_qa_once: true,
+      });
+      assert.strictEqual(response.statusCode, 400);
+      assert.match(response.body.message, /只有布局自动修复后仍失败的任务/);
+      assert.strictEqual(retryTaskCalls, 0);
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+
+  {
+    const app = express();
     const workflowId = '202606250800000005';
     const activeTask = { task_id: 'creative-task-running', workflow_id: workflowId, status: 'running' };
     app.use(express.json());

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>文本容器空白区不应算重叠</title>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;width:1920px;height:1080px;overflow:hidden;font-family:Arial,"Microsoft YaHei",sans-serif}
+    .copy{position:absolute;left:100px;top:100px;width:600px;height:500px}
+    .copy p{margin:0 0 30px;font-size:40px;line-height:1.4}
+    .fine-print{position:absolute;left:100px;top:500px;width:900px;font-size:28px;line-height:1.4}
+  </style>
+</head>
+<body>
+  <section class="copy" data-role="body" data-text-key="body">
+    <p data-text-key="subtitle">反馈驱动决策</p>
+    <p data-text-key="body">把循环中的新信息，转成可执行选择。</p>
+  </section>
+  <p class="fine-print" data-text-key="body">行动结果进入循环，决策随状态更新。</p>
+</body>
+</html>

@@ -965,6 +965,7 @@ router.post('/:workflow_id/retry', async (req, res) => {
   const payload = req.body || {};
   const mode = safeString(payload.mode);
   const confirmPlanCode = safeString(payload.confirm_plan_code);
+  const ignoreLayoutQaOnce = payload.ignore_layout_qa_once === true;
 
   if (mode !== 'repair_and_resume') {
     return res.status(400).json({
@@ -1003,12 +1004,21 @@ router.post('/:workflow_id/retry', async (req, res) => {
         message: plan.user_message || '当前任务无法自动重试。',
       });
     }
+    if (ignoreLayoutQaOnce && plan.code !== 'frame_layout_qa_unresolved') {
+      return res.status(400).json({
+        success: false,
+        workflow_id: workflowId,
+        plan,
+        message: '只有布局自动修复后仍失败的任务，才能忽略本次布局警告。',
+      });
+    }
 
     const started = await getTaskService(req).startCreativeWorkflowRetryTask(workflowId, {
       registry: getTaskRegistry(req),
       payload: {
         mode: 'repair_and_resume',
         confirm_plan_code: confirmPlanCode,
+        ...(ignoreLayoutQaOnce ? { ignore_layout_qa_once: true } : {}),
       },
       services: { creativeWorkflows: service },
     });

@@ -516,6 +516,7 @@ async function generateHtmlVideo(options = {}) {
     services = {},
     skipValidation = false,
     runLayoutQa = false,
+    ignoreLayoutQaFrameIds = [],
     onProgress = null,
     projectOptions = {},
   } = options;
@@ -877,6 +878,7 @@ async function generateHtmlVideo(options = {}) {
     // 帧生成阶段的布局自检不跟随 skipValidation：skipValidation 只跳过阻断式校验，
     // 而这里是生成质量自修复，关掉它就会重现“元素互相遮挡”的成片。
     runLayoutQa: runLayoutQa === true,
+    ignoreLayoutQaFrameIds,
     layoutQaService: services.layoutQaService || defaultLayoutQaService,
     onProgress,
     diagnostics,
@@ -1148,6 +1150,7 @@ async function generateHtmlVideo(options = {}) {
     services,
     onProgress,
     runLayoutQa: runLayoutQa === true && !skipValidation,
+    ignoreLayoutQaFrameIds,
     targetDurationSec: trustedTargetDurationSec,
   });
   rendered.project = await attachAssetUsageReport({

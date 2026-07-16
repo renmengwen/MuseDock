@@ -18,6 +18,7 @@ export function CreativeTaskDetail({
   retryPlanStatus = 'idle',
   retryPlanMessage = '',
   retrying = false,
+  retryMode = '',
   progressEvents = [],
   onStopAndDelete,
   onContinueEdit,
@@ -78,6 +79,7 @@ export function CreativeTaskDetail({
           retryPlanMessage={retryPlanMessage}
           message={message}
           retrying={retrying}
+          retryMode={retryMode}
           onRetryWorkflow={onRetryWorkflow}
         />
       ) : null}

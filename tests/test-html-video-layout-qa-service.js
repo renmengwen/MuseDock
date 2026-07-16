@@ -89,6 +89,9 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
   const richTextNested = await inspectFixture('rich-text-nested.html', { id: 'scene_08', duration_sec: 1 });
   assert.equal(richTextNested.success, true);
 
+  const textContainerSibling = await inspectFixture('text-container-sibling.html', { id: 'scene_12', duration_sec: 1 });
+  assert.equal(textContainerSibling.success, true, '文本容器的空白区域不应与兄弟文本产生遮挡误报');
+
   const divRoleOverflow = await inspectFixture('div-role-overflow.html', { id: 'scene_09', duration_sec: 1 });
   assert.equal(divRoleOverflow.success, false);
   assert.ok(

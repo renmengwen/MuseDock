@@ -79,6 +79,58 @@ const validHtml = '<!doctype html><html><head><meta name="viewport" content="wid
   assert.equal(checkpoint.status, 'failed');
   assert.equal(checkpoint.diagnostic_code, 'frame_layout_qa_unresolved');
 
+  const ignoredProjectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-layout-ignored-'));
+  const ignoredProject = createEmptyProject({
+    projectId: 'layout-ignored',
+    workflowId: 'wf-layout-ignored',
+    runId: 'run-layout-ignored',
+    contentGraph,
+  });
+  ignoredProject.visual_plan = { beats: [], style_profile: null };
+  await projectStore.saveProject(ignoredProjectDir, ignoredProject);
+  modelCalls = 0;
+  qaCalls = 0;
+  const ignoredResult = await runFrameHtmlPhase({
+    model: {
+      async callTextModel() {
+        modelCalls += 1;
+        return { success: true, text: validHtml };
+      },
+    },
+    projectDir: ignoredProjectDir,
+    project: ignoredProject,
+    contentGraph,
+    sceneSpec: {
+      scenes: [{ id: 'scene_01', duration_sec: 2, narration_text: '旁白', visual_text: { headline: '标题' } }],
+    },
+    creativeContext: {},
+    templateRenderTarget: { resolution: { width: 1920, height: 1080 } },
+    mediaOptions: { generateCaptions: false },
+    frameHtmlConcurrency: 1,
+    resumeAllowed: false,
+    regenerateFrameHtmlRequested: false,
+    runLayoutQa: true,
+    ignoreLayoutQaFrameIds: ['scene_01'],
+    layoutQaService: {
+      async inspectFrameHtmlLayout() {
+        qaCalls += 1;
+        return { success: false, issues: [{ code: 'text_overlap', severity: 'error' }] };
+      },
+    },
+    onProgress: null,
+    diagnostics: [],
+    report: async () => {},
+    objectOrEmpty: value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {}),
+    sha256: value => crypto.createHash('sha256').update(String(value || '')).digest('hex'),
+    failure: (message, diagnostics, extra = {}) => ({ success: false, message, diagnostics, ...extra }),
+    shouldReuseFrameHtml: () => ({ reuse: false }),
+    invalidateFrameHtmlDependents: () => {},
+    templateRoutingDecisions: new Map(),
+  });
+  assert.equal(ignoredResult.ok, true);
+  assert.equal(modelCalls, 1, '被忽略的失败帧只需生成一次，不进入布局自动修复');
+  assert.equal(qaCalls, 0, '只跳过明确指定帧的布局 QA');
+
   console.log('html-video unresolved layout blocking integration tests passed');
 })().catch(error => {
   console.error(error);

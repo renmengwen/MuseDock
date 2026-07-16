@@ -92,6 +92,29 @@ function project(overrides = {}) {
   assert.equal(layoutQaPlan.retry_from, 'frame_html');
   assert.ok(layoutQaPlan.discard.includes('frames:scene_07'));
 
+  const unresolvedLayoutQaPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        stage: 'project',
+        sub_stage: 'frame_html',
+        code: 'frame_layout_qa_unresolved',
+        frame_id: 'scene_02_b3',
+        diagnostics: [createDiagnostic({
+          code: 'frame_layout_qa_unresolved',
+          stage: 'ai-frame-html',
+          sub_stage: 'frame_html',
+          frame_id: 'scene_02_b3',
+          retryable: true,
+          repair_action: 'retry_frame_html',
+        })],
+      },
+    }),
+    project: project(),
+  });
+  assert.equal(unresolvedLayoutQaPlan.can_retry, true);
+  assert.equal(unresolvedLayoutQaPlan.repair_action, 'retry_frame_html');
+  assert.deepEqual(unresolvedLayoutQaPlan.executor_options, { frame_id: 'scene_02_b3' });
+
   const visualQaPlan = createCreativeWorkflowRetryPlan({
     workflow: workflow({
       last_failure: {

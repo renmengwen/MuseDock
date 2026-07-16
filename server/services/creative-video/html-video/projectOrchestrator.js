@@ -463,6 +463,7 @@ async function renderHtmlVideoProject({
   services = {},
   skipRender = false,
   runLayoutQa = false,
+  ignoreLayoutQaFrameIds = [],
   onProgress = null,
   targetDurationSec,
 } = {}) {
@@ -547,6 +548,7 @@ async function renderHtmlVideoProject({
       project: nextProject,
       services,
       onProgress,
+      ignoreFrameIds: ignoreLayoutQaFrameIds,
     });
     diagnostics.push(...layoutQa.diagnostics);
     if (!layoutQa.success) {

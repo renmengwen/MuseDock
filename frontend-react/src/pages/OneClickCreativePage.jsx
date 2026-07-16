@@ -69,6 +69,7 @@ export function OneClickCreativePage() {
   const [retryPlanStatus, setRetryPlanStatus] = useState('idle');
   const [retryPlanMessage, setRetryPlanMessage] = useState('');
   const [retrying, setRetrying] = useState(false);
+  const [retryMode, setRetryMode] = useState('');
   // activeTaskRef holds the value; this state only forces stream connect/stop rerenders.
   const [, setActiveTask] = useState(null);
   const isBusy = status === 'creating' || status === 'polling' || status === 'deleting';
@@ -143,6 +144,7 @@ export function OneClickCreativePage() {
     setRetryPlanStatus('idle');
     setRetryPlanMessage('');
     setRetrying(false);
+    setRetryMode('');
   }, []);
 
   const appendProgressEvent = useCallback((event) => {
@@ -638,7 +640,7 @@ export function OneClickCreativePage() {
     }
   }
 
-  async function handleRetryWorkflow() {
+  async function handleRetryWorkflow(ignoreLayoutQaOnce = false) {
     const targetWorkflowId = String(workflow?.workflow_id || selectedWorkflowId || workflowId || '').trim();
     if (!targetWorkflowId) {
       setRetryPlanStatus('failed');
@@ -651,13 +653,17 @@ export function OneClickCreativePage() {
     }
     if (retrying) return;
 
+    const actionMessage = ignoreLayoutQaOnce
+      ? '正在忽略布局警告并继续...'
+      : '正在修复并重试...';
     setRetrying(true);
+    setRetryMode(ignoreLayoutQaOnce ? 'ignore_layout_qa' : 'repair');
     setStatus('polling');
-    setMessage('正在修复并重试...');
+    setMessage(actionMessage);
     persistTasks(prev => updateTask(prev, {
       workflow_id: targetWorkflowId,
       status: 'running',
-      message: '正在修复并重试...',
+      message: actionMessage,
       updated_at: new Date().toISOString(),
     }));
 
@@ -665,12 +671,14 @@ export function OneClickCreativePage() {
       const json = await api.retryCreativeWorkflow(targetWorkflowId, {
         mode: 'repair_and_resume',
         confirm_plan_code: retryPlan.code,
+        ignore_layout_qa_once: ignoreLayoutQaOnce,
       });
       const nextWorkflowId = json?.workflow_id || targetWorkflowId;
       const taskId = json?.task_id || json?.active_task?.task_id || '';
       if (!taskId) {
         const noTaskMessage = '恢复重试已启动，但未返回任务 ID，请稍后刷新任务。';
         setRetrying(false);
+        setRetryMode('');
         setStatus('failed');
         setMessage(noTaskMessage);
         persistTasks(prev => updateTask(prev, {
@@ -686,17 +694,18 @@ export function OneClickCreativePage() {
       subscribeTaskEvents(nextTask, { sinceSeq: 0 });
       setWorkflowId(nextWorkflowId);
       setSelectedWorkflowId(nextWorkflowId);
-      setMessage('正在修复并重试...');
+      setMessage(actionMessage);
       persistTasks(prev => updateTask(prev, {
         workflow_id: nextWorkflowId,
         status: 'running',
-        message: '正在修复并重试...',
+        message: actionMessage,
         updated_at: new Date().toISOString(),
       }));
     } catch (error) {
       const errorMessage = getErrorMessage(error, '启动恢复重试失败，请稍后重试。');
       const planChanged = error?.data?.code === 'RETRY_PLAN_CODE_CHANGED' || errorMessage.includes('恢复计划已变化');
       setRetrying(false);
+      setRetryMode('');
       setStatus('failed');
       setMessage(errorMessage);
       persistTasks(prev => updateTask(prev, {
@@ -986,6 +995,7 @@ export function OneClickCreativePage() {
             retryPlanStatus={retryPlanStatus}
             retryPlanMessage={retryPlanMessage}
             retrying={retrying}
+            retryMode={retryMode}
             progressEvents={progressEventsByWorkflow[selectedWorkflowId] || []}
             onStopAndDelete={requestStopAndDeleteTask}
             onContinueEdit={continueEdit}

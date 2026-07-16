@@ -181,6 +181,7 @@ async function runFrameHtmlPhase(ctx) {
     resumeAllowed,
     regenerateFrameHtmlRequested,
     runLayoutQa,
+    ignoreLayoutQaFrameIds,
     layoutQaService,
     onProgress,
     diagnostics,
@@ -201,6 +202,9 @@ async function runFrameHtmlPhase(ctx) {
   // overlay 校验用的帧高在整个 phase 内不变，循环外算一次
   const frameHeight = Number(frameHtmlAgent.resolveResolution(templateRenderTarget)?.height) || 1920;
   const nodes = contentGraph.nodes || [];
+  const ignoredLayoutQaFrames = new Set((Array.isArray(ignoreLayoutQaFrameIds) ? ignoreLayoutQaFrameIds : [])
+    .map(value => String(value || '').trim())
+    .filter(Boolean));
   const scenes = new Map((Array.isArray(sceneSpec?.scenes) ? sceneSpec.scenes : []).map(scene => [scene.id, scene]));
   let visualStyleReferenceHtml = '';
   const frameResults = [];
@@ -342,6 +346,8 @@ async function runFrameHtmlPhase(ctx) {
       htmlResult.success
       && !htmlResult.fallbackDiagnostic
       && runLayoutQa === true
+      && ![node.id, node.beat_id, node.beatId, sceneId]
+        .some(value => ignoredLayoutQaFrames.has(String(value || '').trim()))
       && layoutQaService
       && typeof layoutQaService.inspectFrameHtmlLayout === 'function'
     ) {

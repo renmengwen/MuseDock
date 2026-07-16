@@ -38,6 +38,7 @@ async function inspectProjectLayoutBeforeRender({
   project,
   services = {},
   onProgress = null,
+  ignoreFrameIds = [],
 } = {}) {
   const layoutQaService = services.layoutQaService || defaultLayoutQaService;
   const outputConfig = getOutputConfig(project);
@@ -45,10 +46,14 @@ async function inspectProjectLayoutBeforeRender({
   const frames = Array.isArray(project.frames) ? project.frames : [];
   const diagnostics = [];
   const reports = [];
+  const ignoredFrames = new Set((Array.isArray(ignoreFrameIds) ? ignoreFrameIds : [])
+    .map(value => String(value || '').trim())
+    .filter(Boolean));
 
   for (let index = 0; index < frames.length; index += 1) {
     const frame = frames[index];
     const frameId = frame.id || frame.scene_id || `frame_${index + 1}`;
+    if (ignoredFrames.has(String(frameId))) continue;
     const htmlPath = frameHtmlAbsolutePath(projectDir, frame);
     await report(onProgress, {
       type: 'html_video_layout_qa_started',

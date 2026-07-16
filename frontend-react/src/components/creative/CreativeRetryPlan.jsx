@@ -95,10 +95,13 @@ export function CreativeRetryPlan({
   retryPlanMessage,
   message = '',
   retrying,
+  retryMode,
   onRetryWorkflow,
 }) {
   const canRetry = retryPlanStatus === 'ready' && retryPlan?.can_retry === true;
   const cannotRetry = retryPlanStatus === 'ready' && retryPlan?.can_retry === false;
+  const canIgnoreLayoutQa = canRetry && retryPlan?.code === 'frame_layout_qa_unresolved';
+  const ignoringLayoutQa = retrying && retryMode === 'ignore_layout_qa';
   const failureSummary = getFailureSummary(workflow, retryPlan, message);
   const visualIssues = collectVisualIssues(workflow);
   const visualMetrics = collectVisualMetrics(workflow);
@@ -196,16 +199,33 @@ export function CreativeRetryPlan({
               <dd className="m-0 break-words text-[13px] leading-normal text-[#1f2937]">{formatRetryList(retryPlan.discard)}</dd>
             </div>
           </dl>
-          <Button
-            type="button"
-            size="sm"
-            className="w-fit bg-[#111827] text-white hover:bg-[#020617]"
-            disabled={retrying}
-            onClick={onRetryWorkflow}
-          >
-            {retrying ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
-            <span>{retrying ? '正在修复并重试...' : '修复并重试'}</span>
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              className="w-fit bg-[#111827] text-white hover:bg-[#020617]"
+              disabled={retrying}
+              onClick={() => onRetryWorkflow?.(false)}
+            >
+              {retrying && !ignoringLayoutQa ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
+              <span>{retrying && !ignoringLayoutQa ? '正在修复并重试...' : '修复并重试'}</span>
+            </Button>
+            {canIgnoreLayoutQa ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={retrying}
+                onClick={() => onRetryWorkflow?.(true)}
+              >
+                {ignoringLayoutQa ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
+                <span>{ignoringLayoutQa ? '正在忽略布局警告并继续...' : '忽略本次布局警告并继续'}</span>
+              </Button>
+            ) : null}
+          </div>
+          {canIgnoreLayoutQa ? (
+            <p className="m-0 text-xs leading-normal text-fg-3">仅跳过本次失败帧的布局检查，后续仍会执行渲染和视觉巡检。</p>
+          ) : null}
         </>
       ) : null}
     </section>

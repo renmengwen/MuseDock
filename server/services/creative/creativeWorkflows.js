@@ -404,6 +404,9 @@ async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, medi
     : [];
   const regenerateFrameHtml = !scopedFrameIds.length
     && (executorOptions.regenerate_frame_html === true || executorOptions.regenerateFrameHtml === true);
+  const ignoreLayoutQaFrameIds = executorOptions.ignore_layout_qa_once === true
+    ? [...scopedFrameIds, safeString(executorOptions.frame_id)].filter(Boolean)
+    : [];
   const workflowService = services.htmlVideoWorkflow || htmlVideoWorkflow;
   return workflowService.generateHtmlVideo({
     workflowId,
@@ -418,6 +421,8 @@ async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, medi
       frame_specs: extractFrameSpecsFromWorkflow(workflow),
     },
     target,
+    runLayoutQa: true,
+    ignoreLayoutQaFrameIds,
     reuseContentGraph: true,
     regenerateFrameHtml,
     projectOptions: {
@@ -1429,6 +1434,25 @@ async function retryCreativeWorkflow(workflowId, payload = {}, options = {}) {
       message: plan.user_message || '当前任务无法自动重试。',
     };
   }
+  const ignoreLayoutQaOnce = payload.ignore_layout_qa_once === true;
+  if (ignoreLayoutQaOnce && plan.code !== 'frame_layout_qa_unresolved') {
+    return {
+      success: false,
+      workflow_id: safeString(workflowId),
+      code: 'LAYOUT_QA_IGNORE_NOT_ALLOWED',
+      plan,
+      message: '只有布局自动修复后仍失败的任务，才能忽略本次布局警告。',
+    };
+  }
+  const executionPlan = ignoreLayoutQaOnce
+    ? {
+      ...plan,
+      executor_options: {
+        ...plainObject(plan.executor_options),
+        ignore_layout_qa_once: true,
+      },
+    }
+    : plan;
 
   const loaded = await readWorkflowAndHtmlVideoProject(workflowId, rootDir);
   if (loaded.error) return loaded.error;
@@ -1447,6 +1471,7 @@ async function retryCreativeWorkflow(workflowId, payload = {}, options = {}) {
     status: 'running',
     message: plan.user_message || '正在修复并重试。',
     previous_failure: record.last_failure || null,
+    ...(ignoreLayoutQaOnce ? { ignore_layout_qa_once: true } : {}),
   };
   record.retry = {
     ...(record.retry || {}),
@@ -1466,7 +1491,7 @@ async function retryCreativeWorkflow(workflowId, payload = {}, options = {}) {
       workflowId: safeString(workflowId),
       workflow: record,
       projectDir,
-      plan,
+      plan: executionPlan,
       rootDir,
       mediaRoot,
       services,

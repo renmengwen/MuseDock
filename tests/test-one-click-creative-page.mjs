@@ -261,6 +261,12 @@ assert.match(taskDetailUnit, /失败原因：/, 'Failed retry panel should label
 assert.match(taskDetailUnit, /恢复动作：/, 'Failed retry panel should separate recovery action from failure reason');
 assert.match(taskDetailUnit, /视觉巡检问题/, 'Failed retry panel should surface visual QA issues directly');
 assert.match(taskDetailUnit, /collectVisualIssues/, 'Failed retry panel should collect visual QA issues from existing workflow diagnostics');
+assert.match(creativeRetryPlan, /retryPlan\?\.code === 'frame_layout_qa_unresolved'/, 'Layout QA unresolved failures should expose a one-time ignore action');
+assert.match(creativeRetryPlan, /忽略本次布局警告并继续/, 'Layout QA ignore action should use explicit Chinese copy');
+assert.match(creativeRetryPlan, /仅跳过本次失败帧的布局检查，后续仍会执行渲染和视觉巡检。/, 'Layout QA ignore action should explain its safety boundary');
+assert.match(page, /ignore_layout_qa_once: ignoreLayoutQaOnce/, 'Retry request should send the one-time layout QA ignore flag');
+assert.match(page, /正在忽略布局警告并继续\.\.\./, 'Ignoring layout QA should expose an action-specific loading message');
+assert.match(taskDetailUnit, /retryMode=\{retryMode\}/, 'Creative task detail should pass the active retry action to the recovery panel');
 assert.doesNotMatch(taskDetailUnit, /creativePromptModalOverlay/, 'CreativeTaskDetail should not render the old hand-written prompt modal overlay');
 assert.doesNotMatch(taskDetailUnit, /role="dialog"[\s\S]*aria-modal="true"/, 'CreativeTaskDetail should rely on shadcn Dialog accessibility instead of a hand-written dialog');
 assert.match(page, /setInterval/, 'OneClickCreativePage should poll with setInterval');

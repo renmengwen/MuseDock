@@ -300,6 +300,7 @@ async function collectCandidates(page) {
         if (!isVisible(element, rect)) return null;
         return {
           element,
+          hasDirectText: Boolean(direct),
           candidate: {
             key: element.getAttribute('data-text-key') || null,
             role: element.getAttribute('data-role') || null,
@@ -314,10 +315,15 @@ async function collectCandidates(page) {
       })
       .filter(Boolean);
 
-    return records.map((record, index) => ({
+    const textRecords = records.filter(record => (
+      record.hasDirectText
+      || !records.some(other => other !== record && record.element.contains(other.element))
+    ));
+
+    return textRecords.map((record, index) => ({
       ...record.candidate,
       index,
-      ancestorIndexes: records
+      ancestorIndexes: textRecords
         .map((other, otherIndex) => (
           otherIndex !== index && other.element.contains(record.element) ? otherIndex : null
         ))

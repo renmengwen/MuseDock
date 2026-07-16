@@ -152,6 +152,35 @@ async function createFailedWorkflowFixture(rootDir) {
   return { projectDir, previousFailure: record.last_failure };
 }
 
+async function createLayoutQaFailureFixture(rootDir) {
+  const fixture = await createFailedWorkflowFixture(rootDir);
+  const diagnostic = createDiagnostic({
+    code: 'frame_layout_qa_unresolved',
+    stage: 'ai-frame-html',
+    sub_stage: 'frame_html',
+    frame_id: 'scene_01',
+    retryable: true,
+    repair_action: 'retry_frame_html',
+    user_message: '第 1 帧自动修复后仍存在布局遮挡。',
+  });
+  const workflowPath = workflows.getWorkflowPath(WORKFLOW_ID, rootDir);
+  const record = await readJson(workflowPath);
+  record.last_failure = {
+    ...record.last_failure,
+    code: 'frame_layout_qa_unresolved',
+    message: '第 1 帧自动修复后仍存在布局遮挡。',
+    diagnostics: [diagnostic],
+  };
+  await writeJson(workflowPath, record);
+  const project = await projectStore.loadProject(fixture.projectDir);
+  markCheckpointFrame(project, 'frame_html', 'scene_01', {
+    status: 'failed',
+    diagnostic_code: 'frame_layout_qa_unresolved',
+  });
+  await projectStore.saveProject(fixture.projectDir, project);
+  return fixture;
+}
+
 async function createMissingProjectArtifactFixture(rootDir, options = {}) {
   const projectDir = path.join(rootDir, 'media', WORKFLOW_ID, 'agent_runs', 'missing-project-json');
   await fs.mkdir(projectDir, { recursive: true });
@@ -616,6 +645,46 @@ function fakeHtmlVideoServices(calls = {}) {
     assert.equal(calls.renderFrame, 1);
     assert.equal(calls.compose, 1);
     assert.equal(calls.visualInspect, 1);
+  }
+
+  {
+    const rootDir = await tempRoot();
+    const { projectDir } = await createLayoutQaFailureFixture(rootDir);
+    const calls = {};
+    const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: 'frame_layout_qa_unresolved',
+      ignore_layout_qa_once: true,
+    }, {
+      rootDir,
+      retryAttemptId: 'retry_attempt_ignore_layout_qa',
+      services: {
+        now: () => '2026-06-25T03:30:00.000Z',
+        htmlVideoWorkflow: {
+          generateHtmlVideo: async args => {
+            calls.generateArgs = args;
+            const project = await projectStore.loadProject(projectDir);
+            markCheckpointFrame(project, 'frame_html', 'scene_01', {
+              status: 'done',
+              html_path: 'frames/01-scene_01.html',
+              diagnostic_code: '',
+            });
+            return {
+              success: true,
+              project,
+              project_dir: projectDir,
+              html_video_project_path: projectDir,
+              output_path: path.join(projectDir, 'exports', 'output.mp4'),
+            };
+          },
+        },
+      },
+    });
+    assert.equal(result.success, true);
+    assert.equal(calls.generateArgs.runLayoutQa, true);
+    assert.deepEqual(calls.generateArgs.ignoreLayoutQaFrameIds, ['scene_01']);
+    const record = await readJson(workflows.getWorkflowPath(WORKFLOW_ID, rootDir));
+    assert.equal(record.retry.attempts.at(-1).ignore_layout_qa_once, true);
   }
 
   {
