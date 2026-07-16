@@ -17,8 +17,9 @@
 
 ## 重启续接状态
 
-- 用户要求当前 Agent 收尾后暂停并重启电脑；B-06a/B-06b 已收尾，B-07a 长时间未返回后已安全中止
+- 用户已再次重启并恢复执行；B-07a 未冻结 working tree 已由新 Worker 接管
 - 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 当前为 `agents.max_threads = 20`，新任务/重启后读取
+- 实际并发：第 4 个 sub-agent 创建返回 `agent thread limit reached`；当前产品层仍为主 Agent + 3 个 sub-agent
 - 当前主工作区：`dev`；业务 Candidate 均保留在独立 worktree 的 Git index 中
 - 恢复顺序：先恢复并验证 B-07a 未冻结修改 → 解决 B-06a 有界网络读取 → B-06b/B-07a 双复审 → 按双 PASS 顺序串行集成 → B-07b
 - Phase C：只读 Task Packet 已完成，B-07b 完成前不得开启 C-01 写租约
@@ -169,8 +170,8 @@ resolved_findings:
 
 ```yaml
 task_id: B-07a
-status: in_progress_interrupted
-owner: unassigned
+status: in_progress
+owner: /root/b07a_resume_freeze
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b07a
 branch: codex/asset-first-b07a
