@@ -32,6 +32,8 @@ import {
   getWorkflowVideoUrl,
 } from './oneClickCreative/workflowDisplay.js';
 
+const CREATIVE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+
 export function OneClickCreativePage() {
   const navigate = useNavigate();
   const params = useParams();
@@ -49,6 +51,9 @@ export function OneClickCreativePage() {
   const retryPlanRequestRef = useRef({ workflowId: '', inFlight: false });
   const retryPlanLoadedRef = useRef('');
   const retryPlanSeqRef = useRef(0);
+  const uploadClientIdRef = useRef(0);
+  const uploadedAssetsRef = useRef([]);
+  const assetMutationLockedRef = useRef(false);
   const [input, setInput] = useState('');
   const [mode, setMode] = useState('quick');
   const [useResearch, setUseResearch] = useState(true);
@@ -70,10 +75,12 @@ export function OneClickCreativePage() {
   const [retryPlanMessage, setRetryPlanMessage] = useState('');
   const [retrying, setRetrying] = useState(false);
   const [retryMode, setRetryMode] = useState('');
+  const [uploadedAssets, setUploadedAssets] = useState([]);
   // activeTaskRef holds the value; this state only forces stream connect/stop rerenders.
   const [, setActiveTask] = useState(null);
   const isBusy = status === 'creating' || status === 'polling' || status === 'deleting';
-  const submitDisabled = isBusy || !input.trim();
+  const hasPendingAssetRequest = uploadedAssets.some(asset => ['uploading', 'updating_requirement', 'deleting'].includes(asset.status));
+  const submitDisabled = isBusy || !input.trim() || hasPendingAssetRequest;
   const sidebarTasks = useMemo(() => tasks.map(task => ({
     ...task,
     timeLabel: getTaskTimeLabel(getSidebarTaskTimeSource(task)),
@@ -105,6 +112,139 @@ export function OneClickCreativePage() {
       return next;
     });
   }, []);
+
+  const updateUploadedAssets = useCallback((updater) => {
+    const next = typeof updater === 'function' ? updater(uploadedAssetsRef.current) : updater;
+    uploadedAssetsRef.current = next;
+    setUploadedAssets(next);
+    return next;
+  }, []);
+
+  const clearUploadedAssets = useCallback(({ deleteStaged = false } = {}) => {
+    const current = uploadedAssetsRef.current;
+    uploadedAssetsRef.current = [];
+    setUploadedAssets([]);
+    current.forEach(asset => URL.revokeObjectURL(asset.previewUrl));
+    if (deleteStaged) {
+      current
+        .filter(asset => asset.status === 'ready' && asset.upload_id)
+        .forEach(asset => api.deleteCreativeVisualAsset(asset.upload_id).catch(() => {}));
+    }
+  }, []);
+
+  async function uploadCreativeAsset(clientId, file) {
+    try {
+      const response = await api.uploadCreativeVisualAsset(file, 'preferred');
+      const uploadId = String(response?.upload_id || '').trim();
+      if (!uploadId) {
+        throw new Error('上传成功响应未返回暂存 ID，请删除后重新上传。');
+      }
+      if (!uploadedAssetsRef.current.some(asset => asset.clientId === clientId)) {
+        if (uploadId) api.deleteCreativeVisualAsset(uploadId).catch(() => {});
+        return;
+      }
+      updateUploadedAssets(assets => assets.map(asset => asset.clientId === clientId
+        ? {
+          ...asset,
+          upload_id: uploadId,
+          requirement: response?.asset?.requirement || 'preferred',
+          status: 'ready',
+          error: '',
+        }
+        : asset));
+    } catch (error) {
+      updateUploadedAssets(assets => assets.map(asset => asset.clientId === clientId
+        ? {
+          ...asset,
+          status: 'failed',
+          error: getErrorMessage(error, '上传图片失败，请检查图片格式或网络后重试。'),
+        }
+        : asset));
+    }
+  }
+
+  function selectCreativeAssets(event) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length || assetMutationLockedRef.current || isBusy) return;
+    const entries = files.map(file => {
+      uploadClientIdRef.current += 1;
+      return {
+        clientId: `creative_asset_${Date.now()}_${uploadClientIdRef.current}`,
+        fileName: file.name,
+        previewUrl: URL.createObjectURL(file),
+        requirement: 'preferred',
+        status: CREATIVE_IMAGE_TYPES.has(file.type) ? 'uploading' : 'failed',
+        upload_id: '',
+        error: CREATIVE_IMAGE_TYPES.has(file.type) ? '' : '仅支持 PNG、JPEG 或 WebP 图片。',
+        file,
+      };
+    });
+    updateUploadedAssets(assets => [...assets, ...entries]);
+    entries
+      .filter(asset => asset.status === 'uploading')
+      .forEach(asset => { uploadCreativeAsset(asset.clientId, asset.file); });
+  }
+
+  async function updateCreativeAssetRequirement(clientId, checked) {
+    if (assetMutationLockedRef.current || isBusy) return;
+    const asset = uploadedAssetsRef.current.find(item => item.clientId === clientId);
+    if (!asset || asset.status !== 'ready' || !asset.upload_id) return;
+    const previousRequirement = asset.requirement;
+    const nextRequirement = checked ? 'required' : 'preferred';
+    if (previousRequirement === nextRequirement) return;
+    updateUploadedAssets(assets => assets.map(item => item.clientId === clientId
+      ? { ...item, status: 'updating_requirement', error: '' }
+      : item));
+    try {
+      const response = await api.updateCreativeVisualAssetRequirement(asset.upload_id, nextRequirement);
+      updateUploadedAssets(assets => assets.map(item => item.clientId === clientId
+        ? {
+          ...item,
+          requirement: response?.asset?.requirement || nextRequirement,
+          status: 'ready',
+          error: '',
+        }
+        : item));
+    } catch (error) {
+      updateUploadedAssets(assets => assets.map(item => item.clientId === clientId
+        ? {
+          ...item,
+          requirement: previousRequirement,
+          status: 'ready',
+          error: getErrorMessage(error, '更新图片使用约束失败，请重试。'),
+        }
+        : item));
+    }
+  }
+
+  async function deleteCreativeAsset(clientId) {
+    if (assetMutationLockedRef.current || isBusy) return;
+    const asset = uploadedAssetsRef.current.find(item => item.clientId === clientId);
+    if (!asset) return;
+    if (asset.status === 'failed' && !asset.upload_id) {
+      updateUploadedAssets(assets => assets.filter(item => item.clientId !== clientId));
+      URL.revokeObjectURL(asset.previewUrl);
+      return;
+    }
+    if (asset.status !== 'ready' || !asset.upload_id) return;
+    updateUploadedAssets(assets => assets.map(item => item.clientId === clientId
+      ? { ...item, status: 'deleting', error: '' }
+      : item));
+    try {
+      await api.deleteCreativeVisualAsset(asset.upload_id);
+      updateUploadedAssets(assets => assets.filter(item => item.clientId !== clientId));
+      URL.revokeObjectURL(asset.previewUrl);
+    } catch (error) {
+      updateUploadedAssets(assets => assets.map(item => item.clientId === clientId
+        ? {
+          ...item,
+          status: 'ready',
+          error: getErrorMessage(error, '删除图片失败，请重试。'),
+        }
+        : item));
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -538,6 +678,8 @@ export function OneClickCreativePage() {
 
   function startNewTask() {
     finalWorkflowRefreshRef.current = null;
+    clearUploadedAssets({ deleteStaged: true });
+    assetMutationLockedRef.current = false;
     navigate('/creative');
     stopTaskStream({ clearStorage: true });
     setInput('');
@@ -729,14 +871,16 @@ export function OneClickCreativePage() {
 
   async function submitCreativeWorkflow(event) {
     event.preventDefault();
-    if (submitDisabled) return;
-
     const trimmed = input.trim();
-    if (!trimmed) {
-      setStatus('failed');
-      setMessage('请输入视频方向、抖音链接、文章链接或 GitHub 仓库链接');
+    if (isBusy || !trimmed || uploadedAssetsRef.current.some(asset => ['uploading', 'updating_requirement', 'deleting'].includes(asset.status))) {
+      if (!isBusy && !trimmed) {
+        setStatus('failed');
+        setMessage('请输入视频方向、抖音链接、文章链接或 GitHub 仓库链接');
+      }
       return;
     }
+    if (assetMutationLockedRef.current) return;
+    assetMutationLockedRef.current = true;
 
     setStatus('creating');
     setMessage('正在创建创作任务...');
@@ -750,7 +894,9 @@ export function OneClickCreativePage() {
       };
       const requestPayload = {
         input: trimmed,
-        assetIds: [],
+        assetIds: uploadedAssetsRef.current
+          .filter(asset => asset.status === 'ready' && asset.upload_id)
+          .map(asset => asset.upload_id),
         renderOptions: {},
         workflowOptions: {},
         ...(Object.keys(overrideEntries).length ? { creativeDefaultsOverride: overrideEntries } : {}),
@@ -760,10 +906,14 @@ export function OneClickCreativePage() {
       const nextWorkflowId = getWorkflowId(json);
       setWorkflow(nextWorkflow);
       if (!nextWorkflowId) {
+        assetMutationLockedRef.current = false;
         setStatus('failed');
         setMessage('创作任务已创建，但未返回任务 ID，请稍后在后端日志中检查。');
         return;
       }
+
+      clearUploadedAssets({ deleteStaged: false });
+      assetMutationLockedRef.current = false;
 
       const task = {
         workflow_id: nextWorkflowId,
@@ -787,6 +937,15 @@ export function OneClickCreativePage() {
         subscribeTaskEvents(nextTask, { sinceSeq: 0 });
       }
     } catch (error) {
+      const persistedWorkflowId = String(error?.data?.workflow_id || '').trim();
+      if (persistedWorkflowId) {
+        clearUploadedAssets({ deleteStaged: false });
+        assetMutationLockedRef.current = false;
+        setStatus('failed');
+        setMessage(`任务已创建，但后台启动失败（任务 ID：${persistedWorkflowId}）。请稍后打开任务详情。`);
+        return;
+      }
+      assetMutationLockedRef.current = false;
       setStatus('failed');
       setMessage(getErrorMessage(error, '创建创作任务失败，请稍后重试。'));
     }
@@ -949,6 +1108,11 @@ export function OneClickCreativePage() {
     stopTaskStream();
   }, [stopTaskStream]);
 
+  useEffect(() => () => {
+    uploadedAssetsRef.current.forEach(asset => URL.revokeObjectURL(asset.previewUrl));
+    uploadedAssetsRef.current = [];
+  }, []);
+
   return (
     <main className={`grid h-screen min-h-screen overflow-hidden bg-white transition-[grid-template-columns] duration-200 max-[760px]:h-auto max-[760px]:min-h-0 max-[760px]:grid-cols-1 max-[760px]:overflow-visible ${sidebarCollapsed ? 'grid-cols-[76px_minmax(0,1fr)]' : 'grid-cols-[260px_minmax(0,1fr)]'}`}>
       <CreativeSidebar
@@ -956,7 +1120,9 @@ export function OneClickCreativePage() {
         selectedWorkflowId={selectedWorkflowId}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed(value => !value)}
-        onNewTask={startNewTask}
+        onNewTask={() => {
+          if (!assetMutationLockedRef.current && !hasPendingAssetRequest) startNewTask();
+        }}
         onSelectTask={selectTask}
         onDeleteTask={requestDeleteTask}
       />
@@ -982,6 +1148,10 @@ export function OneClickCreativePage() {
                 isBusy={isBusy}
                 submitDisabled={submitDisabled}
                 onSubmit={submitCreativeWorkflow}
+                uploadedAssets={uploadedAssets}
+                onSelectAssets={selectCreativeAssets}
+                onRequirementChange={updateCreativeAssetRequirement}
+                onDeleteAsset={deleteCreativeAsset}
               />
             </>
           )}

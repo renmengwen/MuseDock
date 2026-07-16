@@ -151,6 +151,29 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  uploadCreativeVisualAsset(file, requirement = 'preferred') {
+    return requestJson('/api/creative-workflows/assets/uploads', {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type,
+        'X-File-Name': encodeURIComponent(file.name),
+        'X-Asset-Requirement': requirement,
+      },
+      body: file,
+    });
+  },
+  updateCreativeVisualAssetRequirement(uploadId, requirement) {
+    return requestJson(`/api/creative-workflows/assets/uploads/${encodeURIComponent(uploadId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requirement }),
+    });
+  },
+  deleteCreativeVisualAsset(uploadId) {
+    return requestJson(`/api/creative-workflows/assets/uploads/${encodeURIComponent(uploadId)}`, {
+      method: 'DELETE',
+    });
+  },
   listCreativeWorkflows() {
     return requestJson('/api/creative-workflows');
   },

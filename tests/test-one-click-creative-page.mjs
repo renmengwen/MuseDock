@@ -418,13 +418,15 @@ assert.match(page, /max-\[760px\]:grid-cols-1/, 'Creative shell should collapse 
 assert.match(page, /<section className="min-h-0 min-w-0 overflow-auto bg-white">/, 'Creative detail pane should be the scroll container');
 assert.doesNotMatch(page, /<Bot\s+size=\{15\}/, 'Prompt quick actions should remove the smart video pill in every mode');
 assert.ok(!page.includes('智能成片'), 'Prompt quick actions should not render smart video copy');
-assert.match(page, /const submitDisabled = isBusy \|\| !input\.trim\(\)/, 'Submit should be disabled while busy or when input is empty');
+assert.match(page, /const hasPendingAssetRequest = uploadedAssets\.some\(asset => \['uploading', 'updating_requirement', 'deleting'\]\.includes\(asset\.status\)\)/, 'Upload, PATCH, and DELETE requests should participate in submit gating');
+assert.match(page, /const submitDisabled = isBusy \|\| !input\.trim\(\) \|\| hasPendingAssetRequest/, 'Submit should be disabled while busy, input is empty, or an asset request is pending');
 assert.match(creativeComposer, /disabled=\{submitDisabled\}/, 'Submit button should use the combined disabled state');
 assert.ok(!page.includes(zh.assetNotice), 'Expert mode should not show the future asset-context notice copy');
 assert.doesNotMatch(page, /AssetContextNotice/, 'Expert mode should not render a second asset-context notice below the developing hint');
 // 未激活态样式已迁移到 opendesign token（border-line-1 / text-fg-3），不再用 hex
 assert.match(creativeComposer, /useResearch[\s\S]*?border-line-1 bg-white text-fg-3/, 'Research button should have an explicit inactive state');
-assert.match(page, /assetIds:\s*\[\]/, 'OneClickCreativePage payload should preserve empty assetIds');
+assert.match(page, /if \(isBusy \|\| !trimmed \|\| uploadedAssetsRef\.current\.some\(asset => \['uploading', 'updating_requirement', 'deleting'\]\.includes\(asset\.status\)\)\) \{/, 'Submit handler should independently reject busy, empty, and pending-asset races');
+assert.match(page, /assetIds: uploadedAssetsRef\.current[\s\S]*filter\(asset => asset\.status === 'ready' && asset\.upload_id\)[\s\S]*map\(asset => asset\.upload_id\)/, 'Create payload should include only ready staged upload ids');
 assert.match(creativeComposer, /disabled=\{isBusy\}/, 'CreativeComposer should disable controls while busy');
 assert.match(page, /grid h-screen min-h-screen overflow-hidden bg-white/, 'OneClickCreativePage should use a dedicated chat shell');
 assert.match(creativeSidebar, /<aside className="relative grid[^"]*grid-rows-\[auto_auto_auto_minmax\(0,1fr\)_auto\]/, 'CreativeSidebar should render a left task sidebar');

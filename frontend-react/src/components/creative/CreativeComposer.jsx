@@ -1,4 +1,5 @@
-import { ArrowUp, Globe2, Loader2 } from 'lucide-react';
+import { useRef } from 'react';
+import { ArrowUp, Globe2, ImagePlus, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Textarea } from '@/components/ui/textarea.jsx';
 import { cn } from '@/lib/utils.js';
@@ -22,7 +23,13 @@ function CreativePromptComposer({
   isBusy,
   submitDisabled,
   onSubmit,
+  uploadedAssets = [],
+  onSelectAssets,
+  onRequirementChange,
+  onDeleteAsset,
 }) {
+  const fileInputRef = useRef(null);
+
   return (
     <form
       className="grid min-h-0 w-[min(100%,776px)] gap-2.5 rounded-[20px] border border-[#dfe3ea] bg-white px-3 pb-2.5 pt-[17px] shadow-[0_16px_38px_rgba(15,23,42,.07)] max-[760px]:w-full"
@@ -41,8 +48,74 @@ function CreativePromptComposer({
         rows={4}
       />
 
+      <input
+        ref={fileInputRef}
+        className="sr-only"
+        type="file"
+        multiple
+        accept="image/png,image/jpeg,image/webp"
+        disabled={isBusy}
+        onChange={onSelectAssets}
+      />
+
+      {uploadedAssets.length ? (
+        <div className="grid gap-2" aria-label="已选择的创作图片">
+          {uploadedAssets.map(asset => (
+            <div key={asset.clientId} className="grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border border-line-1 bg-surface-1 p-2 max-[560px]:grid-cols-[56px_minmax(0,1fr)]">
+              <img
+                className="h-14 w-16 rounded-md border border-line-1 object-cover max-[560px]:h-12 max-[560px]:w-14"
+                src={asset.previewUrl}
+                alt={`${asset.fileName} 缩略图`}
+              />
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-ink">{asset.fileName}</div>
+                <div className="mt-1 text-xs text-fg-3" role={asset.error ? 'alert' : 'status'} aria-live="polite">
+                  {asset.status === 'uploading' ? '正在上传图片…' : null}
+                  {asset.status === 'updating_requirement' ? '正在更新使用约束…' : null}
+                  {asset.status === 'deleting' ? '正在删除图片…' : null}
+                  {asset.status === 'ready' ? (asset.error || '图片已暂存') : null}
+                  {asset.status === 'failed' ? (asset.error || '图片上传失败，请重试。') : null}
+                </div>
+                <label className="mt-2 inline-flex items-center gap-2 text-xs font-medium text-ink">
+                  <input
+                    type="checkbox"
+                    checked={asset.requirement === 'required'}
+                    disabled={isBusy || asset.status !== 'ready'}
+                    aria-label={`将 ${asset.fileName} 设为必须使用`}
+                    onChange={event => onRequirementChange(asset.clientId, event.target.checked)}
+                  />
+                  <span>必须使用</span>
+                </label>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-danger max-[560px]:col-start-2 max-[560px]:justify-self-start"
+                disabled={isBusy || !['ready', 'failed'].includes(asset.status)}
+                aria-label={`删除图片 ${asset.fileName}`}
+                onClick={() => onDeleteAsset(asset.clientId)}
+              >
+                <Trash2 size={14} />
+                <span>删除图片</span>
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <div className="flex items-center justify-between gap-3 max-[720px]:items-end">
         <div className="flex min-w-0 flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="inline-flex min-h-[34px] items-center gap-1.5 rounded-full border-line-1 bg-white px-3 text-[13px] text-fg-3"
+            disabled={isBusy}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <ImagePlus size={15} />
+            <span>添加图片</span>
+          </Button>
           <Button
             type="button"
             className={cn(
