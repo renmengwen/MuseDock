@@ -17,10 +17,10 @@
 
 ## 重启续接状态
 
-- 用户已重启并明确要求从本检查点继续；当前会话已恢复执行
+- 用户要求当前 Agent 收尾后暂停并重启电脑；B-06a/B-06b 已收尾，B-07a 长时间未返回后已安全中止
 - 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 已设置 `agents.max_threads = 12`，新任务/重启后读取
 - 当前主工作区：`dev`；业务 Candidate 均保留在独立 worktree 的 Git index 中
-- 恢复顺序：修复 B-06a redirect fail-closed → B-07a 双复审 → B-06b 双 Review → 按双 PASS 顺序串行集成 → B-07b
+- 恢复顺序：先恢复并验证 B-07a 未冻结修改 → 解决 B-06a 有界网络读取 → B-06b/B-07a 双复审 → 按双 PASS 顺序串行集成 → B-07b
 - Phase C：只读 Task Packet 已完成，B-07b 完成前不得开启 C-01 写租约
 
 ## Goal 基线与用户改动清单
@@ -75,9 +75,9 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
-| B-06a GitHub 页面截图 producer | `frozen_for_review` | B-01、B-02 | - | redirect fail-closed 修复版已冻结；等待同 revision 双复审 |
-| B-06b 受控 derived 素材登记 | `in_progress` | B-01 | - | 规格 Review 要求真实图片签名与严格幂等冲突；正在修复 |
-| B-07a requirement 分类语义 | `changes_requested` | B-01 | - | 规格复审 PASS；质量复审要求统一早期门、formal-first 全链与同 ID 字段合并 |
+| B-06a GitHub 页面截图 producer | `changes_requested` | B-01、B-02 | - | redirect 已 fail-closed；仍需避免 route.fetch 完整缓冲无界响应 |
+| B-06b 受控 derived 素材登记 | `frozen_for_review` | B-01 | - | Review 修复版已冻结；等待新 revision 双复审 |
+| B-07a requirement 分类语义 | `in_progress` | B-01 | - | 根因修复保存在未冻结 working tree；重启后先完成测试与冻结 |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
@@ -88,7 +88,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: B-06a
-status: frozen_for_review
+status: changes_requested
 owner: unassigned
 base_commit: 7a377550669a91fc9616dd4befda56cf7ad1a985
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06a
@@ -108,7 +108,7 @@ exclusive_resources:
 previous_invalidated_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:f76f3afdf92619def2791ae2515c89ab81d006ff
 invalidated_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:faad0ec07e46ef2ffa9d8978633492f7a418d1ba
 frozen_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:eb725288cf30de67c36b3c17b060dc7400062efd
-revision_valid: true
+revision_valid: false
 changed_paths:
   - server/services/creative/pageCaptureAssets.js
   - server/services/creative/creativeSourcePrep.js
@@ -117,8 +117,14 @@ verification:
   - node tests/test-page-capture-assets.js
   - node tests/test-creative-workflows.js
 review:
-  spec: in_progress
-  quality: pending_re_review
+  spec: pass
+  spec_reviewed_ledger_commit: 45a8a8b
+  spec_reviewed_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:eb725288cf30de67c36b3c17b060dc7400062efd
+  quality: changes_requested_non_independent_audit
+  quality_independence: invalid_same_agent_as_worker
+blocking_findings:
+  - route.fetch 会在 Playwright 1.60 内完整缓冲允许响应；截图 8MB 上限不能约束 document/CSS/image/font 的网络内存峰值
+  - 下次必须选择真正有界的网络读取方案，覆盖单响应与页面总预算、缺失或伪造 Content-Length，并及时释放拒绝响应
 resolved_findings:
   - source prep 捕获同步 throw、rejected Promise 与缺方法
   - 首跳 allowlist 限制默认 HTTPS 端口、credentials、lookalike，并证明 route 先于 goto
@@ -130,8 +136,8 @@ resolved_findings:
 
 ```yaml
 task_id: B-06b
-status: in_progress
-owner: /root/b07a_spec_review
+status: frozen_for_review
+owner: unassigned
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06b
 branch: codex/asset-first-b06b
@@ -142,8 +148,9 @@ state_owners:
   - asset_context.assets.derived_registration
 exclusive_resources:
   - B-06b filesystem tests use independent temp directories
-frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:79231ef01d2203892330dffff4c46dd0bc2e3217
-revision_valid: false
+invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:79231ef01d2203892330dffff4c46dd0bc2e3217
+frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:bf9475b98d8f338c409ee76a60265ec019843815
+revision_valid: true
 changed_paths:
   - server/services/creative/derivedVisualAssets.js
   - tests/test-derived-visual-assets.js
@@ -151,13 +158,9 @@ verification:
   - node tests/test-derived-visual-assets.js
   - node tests/test-visual-asset-contract.js
 review:
-  spec: changes_requested
-  spec_reviewed_ledger_commit: 45a8a8b
-  spec_reviewed_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:79231ef01d2203892330dffff4c46dd0bc2e3217
-  quality: changes_requested
-  quality_reviewed_ledger_commit: 45a8a8b
-  quality_reviewed_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:79231ef01d2203892330dffff4c46dd0bc2e3217
-blocking_findings:
+  spec: pending_re_review
+  quality: pending_re_review
+resolved_findings:
   - 子素材必须验证与扩展名一致的真实 PNG、JPEG 或 WebP 文件签名
   - 同 ID、同 parent 只有 child path、origin_detail 与 derivation 全部一致时才幂等，否则必须冲突
   - derivation 必须深拷贝，嵌套输入与返回资产不得共享引用
@@ -166,27 +169,60 @@ blocking_findings:
 
 ```yaml
 task_id: B-07a
-status: changes_requested
+status: in_progress_interrupted
 owner: unassigned
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b07a
 branch: codex/asset-first-b07a
 allowed_paths:
+  - server/services/creative/visualAssetContract.js
+  - server/services/creative/generatedImagePlanner.js
   - server/services/creative-video/html-video/assetUsagePhase.js
+  - server/services/creative-video/html-video/contentGraphAgent.js
+  - server/services/creative-video/html-video/frameHtmlInspection.js
+  - server/services/creative-video/html-video/framePromptBuilder.js
+  - server/services/creative-video/html-video/generatedImagePhase.js
+  - server/services/creative-video/html-video/htmlVideoWorkflow.js
+  - tests/test-visual-asset-contract.js
+  - tests/test-generated-image-planner.js
+  - tests/test-generated-image-phase.js
   - tests/test-html-video-asset-usage.js
+  - tests/test-html-video-content-graph-agent.js
+  - tests/test-html-video-frame-html-agent.js
   - tests/test-html-video-workflow.js
+  - tests/test-html-video-project-store.js
 state_owners:
   - asset_usage.required_classification
 exclusive_resources:
   - B-07a usage/workflow tests run serially inside the worker worktree
   - no browser, ports, ffmpeg or network
-invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
-frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:d2a84d2926eb1a9250a8de6d22301d957acb4a26
+previous_invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
+invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:d2a84d2926eb1a9250a8de6d22301d957acb4a26
+working_tree_revision: unfrozen
 revision_valid: false
 changed_paths:
+  - server/services/creative/visualAssetContract.js
+  - server/services/creative/generatedImagePlanner.js
   - server/services/creative-video/html-video/assetUsagePhase.js
+  - server/services/creative-video/html-video/contentGraphAgent.js
+  - server/services/creative-video/html-video/frameHtmlInspection.js
+  - server/services/creative-video/html-video/framePromptBuilder.js
+  - server/services/creative-video/html-video/generatedImagePhase.js
+  - server/services/creative-video/html-video/htmlVideoWorkflow.js
+  - tests/test-visual-asset-contract.js
+  - tests/test-generated-image-planner.js
+  - tests/test-generated-image-phase.js
   - tests/test-html-video-asset-usage.js
+  - tests/test-html-video-content-graph-agent.js
+  - tests/test-html-video-frame-html-agent.js
   - tests/test-html-video-workflow.js
+workspace_state:
+  staged_tree: d2a84d2926eb1a9250a8de6d22301d957acb4a26
+  unstaged_paths: 15
+  untracked_paths: 0
+  diff_check: pass_with_line_ending_warnings
+  final_tests: not_reported_agent_interrupted
+  resume_rule: 不得把旧 staged tree 当作新 Candidate；先审查未暂存 diff、运行完整目标测试，再一次性 stage 和 write-tree
 verification:
   - node tests/test-html-video-asset-usage.js
   - node tests/test-html-video-workflow.js
@@ -346,7 +382,10 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase B Task 4B 上传 UI | `f9ae697`；冻结 revision `git-index-tree-v1:6bab504:675f1ca41a4d72eb2fcef69c385f5cde6da72b94`；两组前端源码测试与 `npm run build:frontend` 在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；既有 >500kB chunk warning 保留 |
 | Phase B Task 5 素材面板正式协议 | `9a7c0e2`；冻结 revision `git-index-tree-v1:16a01ad:f0391bc76966782f6476958de97c23cadda83565`；素材面板测试与 `npm run build:frontend` 在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；既有 >500kB chunk warning 保留 |
 | Phase B Task 6A 页面截图复审 | revision `faad0ec…` 规格 PASS、质量 CHANGES_REQUESTED；目标测试通过但 Playwright 1.60 redirect 运行时契约证明 fake 假阳性，旧 revision 已失效 |
+| Phase B Task 6A redirect 修复 Candidate | revision `eb725288cf30de67c36b3c17b060dc7400062efd`；document 与三类静态资源 3xx 首跳 fail-closed 测试通过；独立规格复审 PASS；非独立质量审计发现 route.fetch 无界缓冲，Candidate 不得集成 |
+| Phase B Task 6B derived 修复 Candidate | revision `bf9475b98d8f338c409ee76a60265ec019843815`；真实 PNG/JPEG/WebP 签名、严格幂等、derivation 深拷贝与三类 junction 逃逸测试通过；等待新 revision 双复审 |
 | Phase B Task 7A requirement 修复 Candidate | revision `d2a84d2926eb1a9250a8de6d22301d957acb4a26`；usage/workflow/generated persist/generated phase/project store 五组测试通过；等待双复审 |
+| Phase B Task 7A 根因修复工作树 | B-07a Agent 中止前保留 15 个未暂存允许路径，`341 insertions/63 deletions`，`git diff --check` 无 whitespace error；未收到最终测试或新 revision，不得按完成处理 |
 | Phase C 只读实现前审计 | 基线 `857dee2`；content graph、visual plan、scene continuity、asset usage、workflow 五组测试通过；C-01～C-05 Task Packet 已准备，写门仍依赖 B-07b |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
