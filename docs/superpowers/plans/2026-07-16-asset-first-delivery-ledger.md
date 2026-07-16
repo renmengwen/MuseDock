@@ -80,12 +80,38 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-06b 受控 derived 素材登记 | `complete` | B-01 | `ca45e1d` | 双 Review PASS，已在 dev 重跑目标测试并释放租约 |
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
-| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
+| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `in_progress` | B-07b | - | C-01 Content Graph 多素材候选契约正在执行 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
 
 ## 当前写租约
+
+```yaml
+task_id: C-01
+status: in_progress
+owner: /root/phase_c01_writer
+lease_released: false
+base_commit: 857b5515e60c5473233116329dfe79c6c23be62e
+worktree: D:\code3\MuseDock-worktrees\asset-first-c01
+branch: codex/asset-first-c01
+allowed_paths:
+  - server/services/creative-video/html-video/contentGraphAgent.js
+  - tests/test-html-video-content-graph-agent.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+state_owners:
+  - content_graph.nodes[].asset_refs
+exclusive_resources:
+  - C-01 content graph tests run serially inside the worker worktree
+  - no browser, ports, ffmpeg, network or frontend build
+verification:
+  - node tests/test-html-video-content-graph-agent.js
+  - node tests/test-html-video-workflow.js
+review:
+  spec: pending
+  quality: pending
+```
 
 ```yaml
 task_id: B-06a
