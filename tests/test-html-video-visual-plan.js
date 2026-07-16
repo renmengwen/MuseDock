@@ -134,7 +134,7 @@ const { assignMotionOrchestration } = require('../server/services/creative-video
 {
   const plan = { beats: [
     { id: 'b_text', scene_id: 's1', kind: 'text', asset_refs: [{ asset_id: 'gen_s1' }] },
-    { id: 'b_steps', scene_id: 's2', kind: 'steps', asset_refs: [{ asset_id: 'gen_s2' }] },
+    { id: 'b_steps', scene_id: 's2', kind: 'steps', visual_text: { cards: ['一', '二', '三'] }, asset_refs: [{ asset_id: 'gen_s2' }] },
   ] };
   assignMotionOrchestration(plan, { styleProfile: null });
   assert.strictEqual(plan.beats[0].motion_overlay, null, '普通图片 text beat overlay 应为 null');
@@ -148,7 +148,7 @@ const { assignMotionOrchestration } = require('../server/services/creative-video
 {
   const visualPlan = {
     beats: [
-      { id: 'scene_02_b1', scene_id: 'scene_02', kind: 'steps', duration_sec: 5.67,
+      { id: 'scene_02_b1', scene_id: 'scene_02', kind: 'steps', duration_sec: 5.67, visual_text: { cards: ['一', '二', '三'] },
         asset_refs: [{ asset_id: 'gen_scene_02', usage: 'subject' }] },
       // P0-1：同场景普通图片 text beat 不再强制叠卡
       { id: 'scene_02_b2', scene_id: 'scene_02', kind: 'text', duration_sec: 5.67,

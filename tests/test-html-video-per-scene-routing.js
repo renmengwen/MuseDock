@@ -25,7 +25,7 @@ const stubAiImageModel = { isConfigured: async () => false };
         kind: 'data',
         duration_sec: 4,
         narration_text: '核心指标达到 88.6%。',
-        visual_text: { headline: '核心指标 88.6%', keywords: ['核心指标'], cards: ['核心指标 88.6%'] },
+        visual_text: { headline: '核心指标 88.6%', keywords: ['核心指标', '对照值'], cards: ['核心指标 88.6%', '对照值 72.4%'] },
       },
       {
         id: 'scene_quote',

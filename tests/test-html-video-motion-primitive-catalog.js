@@ -18,22 +18,22 @@ for (const id of ['concept_card', 'key_marker', 'three_step_flow', 'cause_chain'
 }
 
 // 选择规则：确定性映射（同输入必同输出）
-assert.strictEqual(selectMotionPrimitive({ kind: 'steps' }).preset, 'three_step_flow');
-assert.strictEqual(selectMotionPrimitive({ kind: 'comparison' }).preset, 'stat_compare');
-assert.strictEqual(selectMotionPrimitive({ kind: 'quote' }).preset, 'key_marker');
+assert.strictEqual(selectMotionPrimitive({ kind: 'steps', visual_text: { cards: ['一', '二', '三'] } }).preset, 'three_step_flow');
+assert.strictEqual(selectMotionPrimitive({ kind: 'comparison', visual_text: { cards: ['A', 'B'] } }).preset, 'stat_compare');
+assert.strictEqual(selectMotionPrimitive({ kind: 'quote', visual_text: { headline: '金句' } }).preset, 'key_marker');
 assert.strictEqual(
   selectMotionPrimitive({ kind: 'text', visual_text: { cards: ['a', 'b', 'c'] } }).preset,
   'checklist',
 );
 assert.strictEqual(
-  selectMotionPrimitive({ kind: 'text', narration_text: '为什么会这样？因为……所以……' }).preset,
+  selectMotionPrimitive({ kind: 'text', narration_text: '为什么会这样？因为……所以……', visual_text: { keywords: ['原因', '机制', '结果'] } }).preset,
   'cause_chain',
 );
 // P0-1：普通 text 不再兜底 concept_card，返回 null（下方专项用例覆盖全部分支）
 assert.strictEqual(selectMotionPrimitive({ kind: 'text' }), null);
 // placement 必须来自该 primitive 的合法 placements
 {
-  const pick = selectMotionPrimitive({ kind: 'steps' });
+  const pick = selectMotionPrimitive({ kind: 'steps', visual_text: { cards: ['一', '二', '三'] } });
   assert.ok(MOTION_PRIMITIVES[pick.preset].placements.includes(pick.placement));
 }
 
@@ -594,13 +594,13 @@ const { hasRealOverlayElement } = require('../server/services/creative-video/htm
 // P0-1：只有明确结构类型才给 primitive，普通图片讲解与已表达 diagram 返回 null
 {
   const { selectMotionPrimitive } = require('../server/services/creative-video/html-video/motionPrimitiveCatalog');
-  assert.strictEqual(selectMotionPrimitive({ kind: 'steps' }).preset, 'three_step_flow');
-  assert.strictEqual(selectMotionPrimitive({ kind: 'comparison' }).preset, 'stat_compare');
-  assert.strictEqual(selectMotionPrimitive({ kind: 'data' }).preset, 'stat_compare');
-  assert.strictEqual(selectMotionPrimitive({ kind: 'quote' }).preset, 'key_marker');
+  assert.strictEqual(selectMotionPrimitive({ kind: 'steps', visual_text: { cards: ['一', '二', '三'] } }).preset, 'three_step_flow');
+  assert.strictEqual(selectMotionPrimitive({ kind: 'comparison', visual_text: { cards: ['A', 'B'] } }).preset, 'stat_compare');
+  assert.strictEqual(selectMotionPrimitive({ kind: 'data', visual_text: { cards: ['10', '20'] } }).preset, 'stat_compare');
+  assert.strictEqual(selectMotionPrimitive({ kind: 'quote', visual_text: { headline: '金句' } }).preset, 'key_marker');
   assert.strictEqual(selectMotionPrimitive({ kind: 'text', visual_text: { cards: ['a', 'b', 'c'] } }).preset, 'checklist');
   assert.strictEqual(
-    selectMotionPrimitive({ kind: 'text', narration_text: '为什么会这样，因为原因', base_type: 'generated_image' }).preset,
+    selectMotionPrimitive({ kind: 'text', narration_text: '为什么会这样，因为原因', visual_text: { keywords: ['原因', '机制', '结果'] }, base_type: 'generated_image' }).preset,
     'cause_chain',
   );
   assert.strictEqual(
@@ -609,6 +609,21 @@ const { hasRealOverlayElement } = require('../server/services/creative-video/htm
   );
   assert.strictEqual(selectMotionPrimitive({ kind: 'text' }), null);
   assert.strictEqual(selectMotionPrimitive({ kind: 'text', base_type: 'diagram' }), null);
+  for (const beat of [
+    { kind: 'steps', visual_text: { cards: ['一', '二', '三'] } },
+    { kind: 'comparison', visual_text: { cards: ['A', 'B'] } },
+    { kind: 'data', visual_text: { cards: ['10', '20'] } },
+    { kind: 'quote', visual_text: { headline: '金句' } },
+    { kind: 'text', visual_text: { cards: ['一', '二', '三'] } },
+  ]) {
+    assert.strictEqual(selectMotionPrimitive({ ...beat, base_type: 'diagram' }), null, `diagram base 不得叠 ${beat.kind} primitive`);
+  }
+  assert.strictEqual(selectMotionPrimitive({ kind: 'steps' }), null);
+  assert.strictEqual(selectMotionPrimitive({ kind: 'steps', visual_text: { cards: ['一', '二'] } }), null);
+  assert.strictEqual(selectMotionPrimitive({ kind: 'comparison', visual_text: { cards: ['A'] } }), null);
+  assert.strictEqual(selectMotionPrimitive({ kind: 'data' }), null);
+  assert.strictEqual(selectMotionPrimitive({ kind: 'quote' }), null);
+  assert.strictEqual(selectMotionPrimitive({ kind: 'text', narration_text: '因为所以' }), null);
   console.log('P0-1 selectMotionPrimitive optional tests passed');
 }
 console.log('motion primitive catalog tests passed');

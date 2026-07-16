@@ -48,13 +48,21 @@ const CAUSE_HINT = /(为什么|因为|所以|导致|原因|机制)/;
 function selectMotionPrimitive(beat = {}) {
   const kind = beat.kind || 'text';
   const isDiagramBase = beat.base_type === 'diagram';
-  const cards = Array.isArray(beat.visual_text?.cards) ? beat.visual_text.cards.filter(Boolean) : [];
+  if (isDiagramBase) return null;
+  const textItems = items => (Array.isArray(items) ? items : [])
+    .filter(item => typeof item === 'string' && item.trim())
+    .map(item => item.trim());
+  const cards = textItems(beat.visual_text?.cards);
+  const keywords = textItems(beat.visual_text?.keywords);
+  const items = cards.length ? cards : keywords;
+  const headline = String(beat.visual_text?.headline || '').trim();
+  const narration = String(beat.narration_text || '').trim();
   let preset = null;
-  if (kind === 'steps') preset = 'three_step_flow';
-  else if (kind === 'comparison' || kind === 'data') preset = 'stat_compare';
-  else if (kind === 'quote') preset = 'key_marker';
+  if (kind === 'steps' && items.length >= 3) preset = 'three_step_flow';
+  else if ((kind === 'comparison' || kind === 'data') && items.length >= 2) preset = 'stat_compare';
+  else if (kind === 'quote' && (headline || cards[0] || narration)) preset = 'key_marker';
   else if (cards.length >= 3) preset = 'checklist';
-  else if (!isDiagramBase && CAUSE_HINT.test(String(beat.narration_text || ''))) preset = 'cause_chain';
+  else if (items.length >= 3 && CAUSE_HINT.test(narration)) preset = 'cause_chain';
   // 普通图片讲解 / 已由 diagram 表达的 beat：不叠 primitive
   if (!preset) return null;
   return {
