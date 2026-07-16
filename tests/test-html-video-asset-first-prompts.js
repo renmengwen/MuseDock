@@ -80,6 +80,9 @@ async function run() {
   assert.ok(framePrompt.includes('生成图片'));
   assert.ok(framePrompt.includes('不是来源证据'));
   assert.ok(!framePrompt.includes('本帧推荐来源图片：'));
+  assert.ok(!framePrompt.includes('至少使用其中 2 种'), '不得再强制至少两种表达');
+  assert.ok(!framePrompt.includes('没有表达层的帧不合格'), '不得再判无表达层不合格');
+  assert.ok(/禁止.*(方框|focus-box)/.test(framePrompt), '必须禁止无坐标画框');
 
   const shortPrompt = frameHtmlAgent.buildShortFrameHtmlPrompt({
     node: frameNode,
@@ -97,6 +100,28 @@ async function run() {
   assert.ok(retryPrompt.includes('画面主体'));
 
   // ===== 模块3：motion overlay prompt 约束 =====
+  // P0-2：base 指令与 overlay 指令解耦
+  {
+    const imageNull = frameHtmlAgent.buildAssetFirstFramePrompt({
+      beat: {
+        visual_base: { type: 'generated_image', asset_id: 'asset_main', fit: 'contain' },
+        motion_overlay: null,
+        continuity: { group_id: 'scene_01', beat_index: 2, beat_count: 3 },
+      },
+    });
+    assert.ok(imageNull.includes('图片 asset_main 是主视觉'), 'null overlay 仍必须输出图片 base 指令');
+    assert.ok(imageNull.includes('复用上一 beat'), 'null overlay 仍必须输出 continuity 指令');
+    assert.ok(!imageNull.includes('可用 motion primitive'), 'null overlay 不得输出 primitive guide');
+    assert.ok(/不得自创.*(方框|箭头|卡片)/.test(imageNull), 'null overlay 必须明确禁止自创表达层');
+
+    const diagramNull = frameHtmlAgent.buildAssetFirstFramePrompt({
+      beat: { visual_base: { type: 'diagram', asset_id: null }, motion_overlay: null },
+      diagramSkeleton: '<div data-mp-diagram-base></div>',
+    });
+    assert.ok(/diagram|结构化/.test(diagramNull), 'null overlay 的无图 beat 仍必须输出 diagram 指令');
+    assert.ok(diagramNull.includes('data-mp-diagram-base'), 'diagram skeleton 不应依赖 overlay');
+    assert.ok(!diagramNull.includes('可用 motion primitive'));
+  }
   {
     const beat = {
       id: 'scene_02_b2', scene_id: 'scene_02', kind: 'text', duration_sec: 5.67,

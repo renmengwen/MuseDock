@@ -142,10 +142,10 @@ function frameAssetReferenceSummary(node = {}, creativeContext = {}) {
 function assetFirstFrameRequirements() {
   return [
     '- 当前为素材主导（asset_first）模式：如果本帧有推荐图片，图片必须作为画面主体（占据主要视觉面积，可全出血或大图卡），不是小配图。',
-    '- 在图片主体之上叠加 HTML 表达层：标题、关键词浮层、框选高亮、箭头标注、局部放大、步骤编号、数据卡或字幕节奏点，至少使用其中 2 种。',
-    '- 表达层必须服务旁白重点：标注/放大图片中与旁白直接相关的区域，不要做无意义装饰。',
     '- 图片上叠加文字时必须加渐变遮罩或半透明底色保证可读性；主体图片使用 object-fit: cover 时不得裁掉关键主体，含文字的截图仍用 object-fit: contain。',
-    '- 禁止退化成纯图片轮播：没有表达层的帧不合格。',
+    '- 禁止在图片上自行画方框、focus-box、focus-ring、callout 气泡、指向箭头或局部放大框：当前没有可靠图片坐标，无法保证标中旁白重点。',
+    '- 只有本帧明确提供受管 motion primitive 时才生成对应表达元素；没有提供时只渲染主视觉与系统字幕，不要自创第二套标注体系。',
+    '- 允许没有额外表达层：干净的全屏主视觉配系统字幕是合格输出，不要为了动效硬加装饰。',
   ];
 }
 
@@ -161,18 +161,24 @@ function buildAssetFirstFramePrompt({ beat = {}, primitiveSnippet = '', diagramS
   const base = beat.visual_base || {};
   const overlay = beat.motion_overlay || {};
   const continuity = beat.continuity || {};
-  const lines = [MOTION_PRIMITIVE_GUIDE, ''];
-  // beat 级 overlay 编排段：只有 motion_overlay 存在时输出（scene_html 组内全无 overlay 时仅剩 brief 段）
-  if (beat.motion_overlay) {
-    if (base.type === 'diagram') {
-      lines.push('本 beat 无图片素材：必须生成统一风格的结构化 diagram 作为主视觉（main_visual），禁止输出标题页式整屏大字。');
-      if (diagramSkeleton) {
-        lines.push('base 层必须以以下 diagram 骨架为起点（保留 data-mp-diagram-base 结构与 --mp-* 主题变量，在 stage 区域内绘制结构图）：');
-        lines.push(diagramSkeleton);
-      }
-    } else {
-      lines.push(`图片 ${base.asset_id} 是主视觉（main_visual），必须占据画面主体，fit=${base.fit || 'contain'}；局部 overlay 不得覆盖图片主体。`);
+  const lines = [];
+  if (base.type === 'diagram') {
+    lines.push('本 beat 无图片素材：必须生成统一风格的结构化 diagram 作为主视觉（main_visual），禁止输出标题页式整屏大字。');
+    if (diagramSkeleton) {
+      lines.push('base 层必须以以下 diagram 骨架为起点（保留 data-mp-diagram-base 结构与 --mp-* 主题变量，在 stage 区域内绘制结构图）：');
+      lines.push(diagramSkeleton);
     }
+  } else if (base.asset_id) {
+    lines.push(`图片 ${base.asset_id} 是主视觉（main_visual），必须占据画面主体，fit=${base.fit || 'contain'}；额外元素不得覆盖图片主体。`);
+  }
+  if (continuity.beat_index > 1) {
+    lines.push(`本 beat 是 continuity group ${continuity.group_id} 的第 ${continuity.beat_index}/${continuity.beat_count} 段：必须复用上一 beat 的主视觉布局（图片位置、背景、主卡片区域、主题色）。`);
+    lines.push('禁止 base 层任何入场动画或重新开场效果：base 层元素初始状态即为最终位置与不透明度。');
+    if (previousBeatSummary) lines.push(`上一 beat 布局摘要：\n${previousBeatSummary}`);
+  }
+  // 只有明确选中受管 overlay 时才提供 primitive 目录和片段。
+  if (beat.motion_overlay) {
+    lines.push(MOTION_PRIMITIVE_GUIDE, '');
     lines.push(`本 beat 选定 motion primitive：${overlay.preset}，placement=${overlay.placement}，最多 ${overlay.max_items || 1} 条内容。`);
     if (overlay.theme_tokens) {
       lines.push(`主题 token（在 :root 或根容器上设置 CSS 变量）：--mp-accent:${overlay.theme_tokens.accent}；--mp-foreground:${overlay.theme_tokens.foreground}；--mp-surface:${overlay.theme_tokens.surface}；--mp-background:${overlay.theme_tokens.background}。全帧配色必须从这些 token 派生。`);
@@ -182,14 +188,11 @@ function buildAssetFirstFramePrompt({ beat = {}, primitiveSnippet = '', diagramS
       lines.push('overlay 必须基于以下片段落地（保留 data-mp-overlay 根节点与 data-mp-slot 槽位，可按主题 token 调整 --mp-accent/--mp-surface/--mp-foreground）：');
       lines.push(primitiveSnippet);
     }
-    if (continuity.beat_index > 1) {
-      lines.push(`本 beat 是 continuity group ${continuity.group_id} 的第 ${continuity.beat_index}/${continuity.beat_count} 段：必须复用上一 beat 的主视觉布局（图片位置、背景、主卡片区域、主题色），只替换局部 overlay/焦点框/箭头/标签。`);
-      lines.push('禁止 base 层任何入场动画或重新开场效果：base 层元素初始状态即为最终位置与不透明度，只有 overlay 允许动画。');
-      if (previousBeatSummary) lines.push(`上一 beat 布局摘要：\n${previousBeatSummary}`);
-    }
-    if (hasCaptions === false) {
-      lines.push('本 beat 没有系统字幕文本：overlay 必须包含一条与旁白对应的画面重点短句（不超过 18 字），避免观众只听到旁白而画面无文字表达。');
-    }
+  } else if (base.type === 'diagram' || base.asset_id) {
+    lines.push('本 beat 不使用额外 motion primitive：不得自创方框、箭头、callout、卡片或局部放大框。');
+  }
+  if (hasCaptions === false) {
+    lines.push('本 beat 没有系统字幕文本：画面必须包含一条与旁白对应的重点短句（不超过 18 字），避免观众只听到旁白而画面无文字表达。');
   }
   // scene_html 的 scene 级约束段：独立段落输出（不与 primitive 参考片段混在一起，
   // 否则 base 稳定/beat-scope 约定/时间窗口会被当成「参考 HTML 片段」照抄或降权）
@@ -197,7 +200,7 @@ function buildAssetFirstFramePrompt({ beat = {}, primitiveSnippet = '', diagramS
     lines.push('');
     lines.push(sceneBeatsBrief);
   }
-  lines.push('禁止把参考动效全屏照搬，只取核心动效区域做局部编排。');
+  if (beat.motion_overlay) lines.push('禁止把参考动效全屏照搬，只取核心动效区域做局部编排。');
   return lines.join('\n');
 }
 
