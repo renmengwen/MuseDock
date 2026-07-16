@@ -15,6 +15,14 @@
 - 提交：每个独立任务通过验证和 Review 后使用中文提交
 - 停止：只有总目标完成或出现真实用户授权阻塞
 
+## 重启续接检查点
+
+- 用户要求：当前三个 Agent 收尾后停止任务，由用户重启 Codex；本检查点之后未派发新任务
+- 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 已设置 `agents.max_threads = 12`，新任务/重启后读取
+- 当前主工作区：`dev`；业务 Candidate 均保留在独立 worktree 的 Git index 中
+- 恢复顺序：修复 B-06a redirect fail-closed → B-07a 双复审 → B-06b 双 Review → 按双 PASS 顺序串行集成 → B-07b
+- Phase C：只读 Task Packet 已完成，B-07b 完成前不得开启 C-01 写租约
+
 ## Goal 基线与用户改动清单
 
 - Goal ID：`asset-first-camera`
@@ -67,9 +75,9 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
-| B-06a GitHub 页面截图 producer | `frozen_for_review` | B-01、B-02 | - | 修复版规格复审 PASS；等待同 revision 质量复审 |
+| B-06a GitHub 页面截图 producer | `changes_requested` | B-01、B-02 | - | 质量复审发现 Playwright redirect 绕过 allowlist；必须首跳 fail-closed 后重新冻结 |
 | B-06b 受控 derived 素材登记 | `frozen_for_review` | B-01 | - | Candidate 已冻结；等待双 Review |
-| B-07a requirement 分类语义 | `changes_requested` | B-01 | - | 质量 Review 要求补正式字段、formal-first 与非阻断 workflow 证据；正在修复 |
+| B-07a requirement 分类语义 | `frozen_for_review` | B-01 | - | Review 修复版已冻结；等待新 revision 双复审 |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
@@ -80,8 +88,8 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: B-06a
-status: frozen_for_review
-owner: /root/task4_readonly_spec
+status: changes_requested
+owner: unassigned
 base_commit: 7a377550669a91fc9616dd4befda56cf7ad1a985
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06a
 branch: codex/asset-first-b06a
@@ -99,7 +107,7 @@ exclusive_resources:
   - no real Chromium, ports, ffmpeg or frontend build
 invalidated_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:f76f3afdf92619def2791ae2515c89ab81d006ff
 frozen_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:faad0ec07e46ef2ffa9d8978633492f7a418d1ba
-revision_valid: true
+revision_valid: false
 changed_paths:
   - server/services/creative/pageCaptureAssets.js
   - server/services/creative/creativeSourcePrep.js
@@ -111,11 +119,15 @@ review:
   spec: pass
   spec_reviewed_ledger_commit: 1692ee1e5a78e7177be02bcc4f40322e88244ff2
   spec_reviewed_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:faad0ec07e46ef2ffa9d8978633492f7a418d1ba
-  quality: in_progress
+  quality: changes_requested
+  quality_reviewed_ledger_commit: 1692ee1e5a78e7177be02bcc4f40322e88244ff2
+  quality_reviewed_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:faad0ec07e46ef2ffa9d8978633492f7a418d1ba
+blocking_findings:
+  - Playwright 1.60 的 route handler 只处理首个 URL；route.continue 后的 redirect 下一跳会绕过 allowlist
+  - fake 不得再次调用 redirect route；应以 route.fetch({ maxRedirects: 0 }) 等首跳 fail-closed 方案覆盖 document 与静态资源
 resolved_findings:
   - source prep 捕获同步 throw、rejected Promise 与缺方法
-  - allowlist 限制默认 HTTPS 端口、credentials、lookalike 与 redirect document
-  - fake 驱动真实 route/redirect/2xx 生命周期并证明 route 先于 goto
+  - 首跳 allowlist 限制默认 HTTPS 端口、credentials、lookalike，并证明 route 先于 goto
   - 截图前有界等待 load，超时仍 finally 清理
   - 默认 writer 覆盖 rename 临时文件清理与 symlink/junction 越界；Buffer 不重复复制
 ```
@@ -148,8 +160,8 @@ review:
 
 ```yaml
 task_id: B-07a
-status: changes_requested
-owner: /root/task4_readonly_spec
+status: frozen_for_review
+owner: unassigned
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b07a
 branch: codex/asset-first-b07a
@@ -162,8 +174,9 @@ state_owners:
 exclusive_resources:
   - B-07a usage/workflow tests run serially inside the worker worktree
   - no browser, ports, ffmpeg or network
-frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
-revision_valid: false
+invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
+frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:d2a84d2926eb1a9250a8de6d22301d957acb4a26
+revision_valid: true
 changed_paths:
   - server/services/creative-video/html-video/assetUsagePhase.js
   - tests/test-html-video-asset-usage.js
@@ -174,10 +187,8 @@ verification:
   - node tests/test-generated-image-persist.js
 review:
   spec: pending
-  quality: changes_requested
-  quality_reviewed_ledger_commit: f9e2753330f1ab96a46ccb719b55eb530ca47099
-  quality_reviewed_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
-blocking_findings:
+  quality: pending_re_review
+resolved_findings:
   - asset_usage_report.assets 必须保留统一视觉素材正式字段
   - AI 生成素材识别必须 formal origin 优先、legacy source 仅回退
   - 完整 workflow 必须证明 preferred、optional 与缺 requirement 的 legacy 素材未引用时不阻断
@@ -320,5 +331,8 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase B Task 4A 暂存 requirement 更新 | `c63ac1b`；冻结 revision `git-index-tree-v1:a8b8220:12383438760a1e56c2329d77e129ca9a02f5e0dc`；upload service 与 route 测试在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；旧 revision `dd1744aa…` 已失效 |
 | Phase B Task 4B 上传 UI | `f9ae697`；冻结 revision `git-index-tree-v1:6bab504:675f1ca41a4d72eb2fcef69c385f5cde6da72b94`；两组前端源码测试与 `npm run build:frontend` 在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；既有 >500kB chunk warning 保留 |
 | Phase B Task 5 素材面板正式协议 | `9a7c0e2`；冻结 revision `git-index-tree-v1:16a01ad:f0391bc76966782f6476958de97c23cadda83565`；素材面板测试与 `npm run build:frontend` 在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；既有 >500kB chunk warning 保留 |
+| Phase B Task 6A 页面截图复审 | revision `faad0ec…` 规格 PASS、质量 CHANGES_REQUESTED；目标测试通过但 Playwright 1.60 redirect 运行时契约证明 fake 假阳性，旧 revision 已失效 |
+| Phase B Task 7A requirement 修复 Candidate | revision `d2a84d2926eb1a9250a8de6d22301d957acb4a26`；usage/workflow/generated persist/generated phase/project store 五组测试通过；等待双复审 |
+| Phase C 只读实现前审计 | 基线 `857dee2`；content graph、visual plan、scene continuity、asset usage、workflow 五组测试通过；C-01～C-05 Task Packet 已准备，写门仍依赖 B-07b |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
