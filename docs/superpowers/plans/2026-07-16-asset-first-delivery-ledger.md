@@ -15,9 +15,9 @@
 - 提交：每个独立任务通过验证和 Review 后使用中文提交
 - 停止：只有总目标完成或出现真实用户授权阻塞
 
-## 重启续接检查点
+## 重启续接状态
 
-- 用户要求：当前三个 Agent 收尾后停止任务，由用户重启 Codex；本检查点之后未派发新任务
+- 用户已重启并明确要求从本检查点继续；当前会话已恢复执行
 - 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 已设置 `agents.max_threads = 12`，新任务/重启后读取
 - 当前主工作区：`dev`；业务 Candidate 均保留在独立 worktree 的 Git index 中
 - 恢复顺序：修复 B-06a redirect fail-closed → B-07a 双复审 → B-06b 双 Review → 按双 PASS 顺序串行集成 → B-07b
@@ -75,9 +75,9 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
-| B-06a GitHub 页面截图 producer | `changes_requested` | B-01、B-02 | - | 质量复审发现 Playwright redirect 绕过 allowlist；必须首跳 fail-closed 后重新冻结 |
+| B-06a GitHub 页面截图 producer | `in_progress` | B-01、B-02 | - | 正在按 Playwright 1.60 真实 redirect 语义实现首跳 fail-closed |
 | B-06b 受控 derived 素材登记 | `frozen_for_review` | B-01 | - | Candidate 已冻结；等待双 Review |
-| B-07a requirement 分类语义 | `frozen_for_review` | B-01 | - | Review 修复版已冻结；等待新 revision 双复审 |
+| B-07a requirement 分类语义 | `frozen_for_review` | B-01 | - | Review 修复版已冻结；同 revision 规格与质量复审进行中 |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
@@ -88,8 +88,8 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: B-06a
-status: changes_requested
-owner: unassigned
+status: in_progress
+owner: /root/b06a_redirect_fix
 base_commit: 7a377550669a91fc9616dd4befda56cf7ad1a985
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06a
 branch: codex/asset-first-b06a
@@ -186,8 +186,8 @@ verification:
   - node tests/test-html-video-workflow.js
   - node tests/test-generated-image-persist.js
 review:
-  spec: pending
-  quality: pending_re_review
+  spec: in_progress
+  quality: in_progress
 resolved_findings:
   - asset_usage_report.assets 必须保留统一视觉素材正式字段
   - AI 生成素材识别必须 formal origin 优先、legacy source 仅回退
