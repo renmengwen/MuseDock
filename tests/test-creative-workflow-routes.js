@@ -1133,6 +1133,7 @@ async function run() {
   await runRetryRouteTests();
   await runAssetFileRouteTest();
   await runUploadAssetRoutesTest();
+  await runUploadRequirementPersistenceFailureRouteTest();
   await runUploadThenCreateUsesSameRootTest();
   await runUploadRequestGuardTests();
 }
@@ -1215,6 +1216,58 @@ async function runUploadAssetRoutesTest() {
     assert.equal(uploaded.body.asset.requirement, 'required');
     assert.match(uploaded.body.message, /上传|暂存/);
 
+    const updated = await requestJson(
+      server,
+      'PATCH',
+      `/api/creative-workflows/assets/uploads/${uploaded.body.upload_id}`,
+      { requirement: 'preferred' },
+    );
+    assert.equal(updated.statusCode, 200);
+    assert.equal(updated.body.success, true);
+    assert.equal(updated.body.asset.requirement, 'preferred');
+    assert.match(updated.body.message, /使用约束已更新/);
+
+    for (const body of [{}, { requirement: null }, { requirement: '' }]) {
+      const missingRequirement = await requestJson(
+        server,
+        'PATCH',
+        `/api/creative-workflows/assets/uploads/${uploaded.body.upload_id}`,
+        body,
+      );
+      assert.equal(missingRequirement.statusCode, 400);
+      assert.equal(missingRequirement.body.success, false);
+      assert.match(missingRequirement.body.message, /使用约束.*不能为空/);
+      const manifest = JSON.parse(fs.readFileSync(path.join(uploadRoot, uploaded.body.upload_id, 'upload.json'), 'utf8'));
+      assert.equal(manifest.requirement, 'preferred');
+    }
+
+    const invalidRequirement = await requestJson(
+      server,
+      'PATCH',
+      `/api/creative-workflows/assets/uploads/${uploaded.body.upload_id}`,
+      { requirement: 'optional' },
+    );
+    assert.equal(invalidRequirement.statusCode, 400);
+    assert.match(invalidRequirement.body.message, /required|preferred/);
+
+    const invalidId = await requestJson(
+      server,
+      'PATCH',
+      '/api/creative-workflows/assets/uploads/bad-id',
+      { requirement: 'required' },
+    );
+    assert.equal(invalidId.statusCode, 400);
+    assert.match(invalidId.body.message, /上传素材 ID 无效/);
+
+    const missing = await requestJson(
+      server,
+      'PATCH',
+      '/api/creative-workflows/assets/uploads/upload_missing1234',
+      { requirement: 'required' },
+    );
+    assert.equal(missing.statusCode, 404);
+    assert.match(missing.body.message, /不存在|损坏/);
+
     const removed = await requestJson(
       server,
       'DELETE',
@@ -1222,6 +1275,27 @@ async function runUploadAssetRoutesTest() {
     );
     assert.equal(removed.statusCode, 200);
     assert.equal(removed.body.success, true);
+
+    const claimedUpload = await visualAssetUploads.stageVisualAsset({
+      stream: require('stream').Readable.from(MINIMAL_PNG),
+      fileName: '已认领.png',
+      mime: 'image/png',
+      rootDir: uploadRoot,
+    });
+    await visualAssetUploads.claimVisualAssets({
+      uploadIds: [claimedUpload.upload_id],
+      workflowId: '202607161200000006',
+      targetDir: tempRoot(),
+      rootDir: uploadRoot,
+    });
+    const claimedUpdate = await requestJson(
+      server,
+      'PATCH',
+      `/api/creative-workflows/assets/uploads/${claimedUpload.upload_id}`,
+      { requirement: 'required' },
+    );
+    assert.equal(claimedUpdate.statusCode, 409);
+    assert.match(claimedUpdate.body.message, /已认领/);
 
     const invalid = await requestRaw(
       server,
@@ -1248,6 +1322,33 @@ async function runUploadAssetRoutesTest() {
     assert.equal(oversized.statusCode, 413);
     assert.equal(oversized.body.success, false);
     assert.match(oversized.body.message, /8MB/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runUploadRequirementPersistenceFailureRouteTest() {
+  const app = express();
+  app.use(express.json());
+  app.locals.creativeVisualAssetUploads = {
+    updateStagedVisualAssetRequirement: async () => {
+      throw new Error('磁盘写入失败');
+    },
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+  const server = await listen(app);
+
+  try {
+    const response = await requestJson(
+      server,
+      'PATCH',
+      '/api/creative-workflows/assets/uploads/upload_writefail1',
+      { requirement: 'required' },
+    );
+    assert.equal(response.statusCode, 500);
+    assert.equal(response.body.success, false);
+    assert.match(response.body.message, /更新暂存图片使用约束失败/);
+    assert.match(response.body.message, /请重试/);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }

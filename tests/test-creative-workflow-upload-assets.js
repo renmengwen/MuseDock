@@ -135,6 +135,100 @@ async function testClaimsOnceAndPreflightsTheWholeBatch() {
   await assert.rejects(() => uploads.removeStagedVisualAsset({ uploadId: first.upload_id, rootDir }), /已认领/);
 }
 
+async function testUpdatesStagedRequirementAtomicallyAndSerializesMutations() {
+  const rootDir = tempDir('creative-upload-requirement-');
+  const targetDir = tempDir('creative-upload-requirement-target-');
+  const staged = await uploads.stageVisualAsset({
+    stream: Readable.from(IMAGE_BYTES['image/png']),
+    fileName: '待更新.png',
+    mime: 'image/png',
+    rootDir,
+  });
+
+  const updated = await uploads.updateStagedVisualAssetRequirement({
+    uploadId: staged.upload_id,
+    requirement: 'required',
+    rootDir,
+  });
+  assert.equal(updated.asset.requirement, 'required');
+  const claimed = await uploads.claimVisualAssets({
+    uploadIds: [staged.upload_id],
+    workflowId: '202607161200000005',
+    targetDir,
+    rootDir,
+  });
+  assert.equal(claimed.assets[0].requirement, 'required');
+
+  await assert.rejects(() => uploads.updateStagedVisualAssetRequirement({
+    uploadId: 'bad-id',
+    requirement: 'required',
+    rootDir,
+  }), /上传素材 ID 无效/);
+  await assert.rejects(() => uploads.updateStagedVisualAssetRequirement({
+    uploadId: 'upload_missing1234',
+    requirement: 'required',
+    rootDir,
+  }), /不存在|损坏/);
+  await assert.rejects(() => uploads.updateStagedVisualAssetRequirement({
+    uploadId: staged.upload_id,
+    requirement: 'required',
+    rootDir,
+  }), /已认领/);
+
+  const rollbackRoot = tempDir('creative-upload-requirement-rollback-');
+  const rollbackStaged = await uploads.stageVisualAsset({
+    stream: Readable.from(IMAGE_BYTES['image/png']),
+    fileName: '保持原值.png',
+    mime: 'image/png',
+    rootDir: rollbackRoot,
+  });
+  for (const requirement of [undefined, null, '']) {
+    await assert.rejects(() => uploads.updateStagedVisualAssetRequirement({
+      uploadId: rollbackStaged.upload_id,
+      requirement,
+      rootDir: rollbackRoot,
+    }), /使用约束.*不能为空/);
+    const manifest = JSON.parse(fs.readFileSync(path.join(rollbackRoot, rollbackStaged.upload_id, 'upload.json'), 'utf8'));
+    assert.equal(manifest.requirement, 'preferred');
+  }
+  await assert.rejects(() => uploads.updateStagedVisualAssetRequirement({
+    uploadId: rollbackStaged.upload_id,
+    requirement: 'required',
+    rootDir: rollbackRoot,
+    writeManifest: async () => { throw new Error('disk full'); },
+  }), /请重试/);
+  const unchanged = JSON.parse(fs.readFileSync(path.join(rollbackRoot, rollbackStaged.upload_id, 'upload.json'), 'utf8'));
+  assert.equal(unchanged.requirement, 'preferred');
+
+  let releaseWrite;
+  let markWriteStarted;
+  const writeStarted = new Promise(resolve => { markWriteStarted = resolve; });
+  const writeGate = new Promise(resolve => { releaseWrite = resolve; });
+  const queuedUpdate = uploads.updateStagedVisualAssetRequirement({
+    uploadId: rollbackStaged.upload_id,
+    requirement: 'required',
+    rootDir: rollbackRoot,
+    writeManifest: async (filePath, manifest) => {
+      markWriteStarted();
+      await writeGate;
+      await fs.promises.writeFile(filePath, JSON.stringify(manifest, null, 2), 'utf8');
+    },
+  });
+  await writeStarted;
+  const queuedDelete = uploads.removeStagedVisualAsset({
+    uploadId: rollbackStaged.upload_id,
+    rootDir: rollbackRoot,
+  });
+  const deleteRace = await Promise.race([
+    queuedDelete.then(() => 'done'),
+    new Promise(resolve => setTimeout(() => resolve('waiting'), 30)),
+  ]);
+  assert.equal(deleteRace, 'waiting');
+  releaseWrite();
+  await queuedUpdate;
+  await queuedDelete;
+}
+
 async function testRollsBackBatchWhenSecondManifestWriteFails() {
   const rootDir = tempDir('creative-upload-manifest-rollback-');
   const targetDir = tempDir('creative-upload-manifest-target-');
@@ -303,6 +397,7 @@ async function run() {
   await testStagesSupportedImagesAndSanitizesFileNames();
   await testRejectsUnsupportedAndOversizedUploadsWhileReading();
   await testClaimsOnceAndPreflightsTheWholeBatch();
+  await testUpdatesStagedRequirementAtomicallyAndSerializesMutations();
   await testRollsBackBatchWhenSecondManifestWriteFails();
   await testCleansExpiredUploadsAndEnforcesStagedQuotas();
   await testUnfinishedOversizedUploadDoesNotBlockClaimOrRemove();

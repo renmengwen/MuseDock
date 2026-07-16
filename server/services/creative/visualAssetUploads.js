@@ -319,6 +319,30 @@ async function claimVisualAssets({
   });
 }
 
+async function updateStagedVisualAssetRequirement({
+  uploadId,
+  requirement,
+  rootDir = DEFAULT_ROOT,
+  writeManifest = writeJsonAtomic,
+} = {}) {
+  return withMutationQueue(async () => {
+    const id = String(uploadId || '').trim();
+    if (!UPLOAD_ID_PATTERN.test(id)) throw new Error(`上传素材 ID 无效：${id || '空值'}。`);
+    if (requirement == null || String(requirement).trim() === '') {
+      throw new Error('上传图片的使用约束不能为空，只能选择 required 或 preferred。');
+    }
+    const normalizedRequirement = normalizeRequirement(requirement);
+    const { uploadDir, manifest } = await readStagedUpload(rootDir, id);
+    const updated = { ...manifest, requirement: normalizedRequirement };
+    try {
+      await writeManifest(path.join(uploadDir, 'upload.json'), updated);
+    } catch (error) {
+      throw new Error(`更新暂存图片使用约束失败：${error.message || '未知错误'}，请重试。`);
+    }
+    return { success: true, upload_id: id, status: 'staged', asset: { ...updated, id } };
+  });
+}
+
 async function releaseClaimedVisualAssets({ claim = {}, rootDir = DEFAULT_ROOT, writeManifest = writeJsonAtomic } = {}) {
   return withMutationQueue(async () => {
     const ids = Array.isArray(claim.upload_ids) ? claim.upload_ids : [];
@@ -381,6 +405,7 @@ module.exports = {
   ALLOWED_MIME,
   UPLOAD_ID_PATTERN,
   stageVisualAsset,
+  updateStagedVisualAssetRequirement,
   claimVisualAssets,
   releaseClaimedVisualAssets,
   finalizeClaimedVisualAssets,

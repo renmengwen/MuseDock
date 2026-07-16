@@ -132,6 +132,28 @@ router.post('/assets/uploads', async (req, res) => {
   }
 });
 
+router.patch('/assets/uploads/:uploadId', async (req, res) => {
+  try {
+    const result = await getVisualAssetUploadService(req).updateStagedVisualAssetRequirement({
+      uploadId: req.params.uploadId,
+      requirement: req.body?.requirement,
+      rootDir: getVisualAssetUploadRoot(req),
+    });
+    return res.json({
+      ...result,
+      success: true,
+      message: '暂存图片使用约束已更新。',
+    });
+  } catch (error) {
+    const detail = safeString(error?.message);
+    const message = /不存在|损坏/.test(detail)
+      ? `${detail} 请重新上传。`
+      : (/^上传|^更新/.test(detail) ? detail : `更新暂存图片使用约束失败：${detail || '未知错误'}，请重试。`);
+    const status = /已认领/.test(message) ? 409 : (/不存在|损坏/.test(message) ? 404 : (/更新暂存图片使用约束失败/.test(message) ? 500 : 400));
+    return res.status(status).json({ success: false, message });
+  }
+});
+
 router.delete('/assets/uploads/:uploadId', async (req, res) => {
   try {
     const result = await getVisualAssetUploadService(req).removeStagedVisualAsset({
