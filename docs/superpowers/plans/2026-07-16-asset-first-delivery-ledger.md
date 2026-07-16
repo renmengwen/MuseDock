@@ -66,7 +66,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-03 上传暂存与任务认领 | `complete` | B-01 | `769d178` | - |
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
-| B-05 素材面板正式协议 | `frozen_for_review` | B-02、B-03 | - | merge 测试修正后新 Candidate 已冻结；等待双复审 |
+| B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
 | B-06 页面截图与衍生素材 producer | `queued` | B-01、B-02 | - | B-05 后串行实现 |
 | B-07 requirement 语义与 Phase B 门禁 | `queued` | B-04b、B-05、B-06 | - | Phase B 全量验证 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07 | - | Phase C 计划与逐任务门 |
@@ -76,47 +76,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ## 当前写租约
 
-```yaml
-task_id: B-05
-status: frozen_for_review
-owner: /root/context_control_audit
-base_commit: 16a01ad806424430f9ef95ef9ee8fb36bd9c10a5
-worktree: D:\code3\MuseDock-worktrees\asset-first-b05
-branch: codex/asset-first-b05
-allowed_paths:
-  - frontend-react/src/components/creative/SourceImageAssetsPanel.jsx
-  - tests/test-creative-task-detail-assets.mjs
-forbidden_paths:
-  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
-state_owners:
-  - creative_asset_panel.protocol_metadata
-exclusive_resources:
-  - musedock-frontend-build
-  - B-05 frontend source test runs serially inside the worker worktree
-invalidated_revisions:
-  - git-index-tree-v1:16a01ad806424430f9ef95ef9ee8fb36bd9c10a5:a6184ff29ef41e42d3c40b9864229bd01a5e7bda
-  - git-index-tree-v1:16a01ad806424430f9ef95ef9ee8fb36bd9c10a5:2834eabf7e15e582b9457eaad2c3ccd9f17111cd
-frozen_revision: git-index-tree-v1:16a01ad806424430f9ef95ef9ee8fb36bd9c10a5:f0391bc76966782f6476958de97c23cadda83565
-revision_valid: true
-changed_paths:
-  - frontend-react/src/components/creative/SourceImageAssetsPanel.jsx
-  - tests/test-creative-task-detail-assets.mjs
-verification:
-  - node tests/test-creative-task-detail-assets.mjs
-  - npm run build:frontend
-review:
-  spec: pending_re_review
-  quality: pending_re_review
-resolved_findings:
-  - 正式文案使用“AI 生图”“AI 合成”并锁定 map entry
-  - TabsList 与 trigger 使用 h-auto，窄屏可换行
-  - parent_asset_id 安全归一化并允许长 ID 断行
-  - 测试锁定 formal/legacy/video/fallback 与 base+usage 合并优先级
-resolved_test_finding:
-  - merge mutation fixture 覆盖 duplicate return、base/usage 顺序和 usage-only push；formal return 不再过拟合格式
-```
-
-Worker 只更新现有面板映射与展示，不新增接口、registry、状态容器或依赖。前端构建必须持有本租约并串行运行。
+当前无业务代码写租约。B-05 已集成到 `dev` 并释放前端构建资源；下一写任务为 B-06。
 
 ## Phase A 审计分工
 
@@ -252,5 +212,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase B Task 3 上传暂存与任务认领 | `769d178`；真实 PNG/JPEG/WebP、HTTP 413、Douyin 路径、原子回滚、TTL/配额测试通过；规格 Review PASS；代码质量 Review PASS |
 | Phase B Task 4A 暂存 requirement 更新 | `c63ac1b`；冻结 revision `git-index-tree-v1:a8b8220:12383438760a1e56c2329d77e129ca9a02f5e0dc`；upload service 与 route 测试在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；旧 revision `dd1744aa…` 已失效 |
 | Phase B Task 4B 上传 UI | `f9ae697`；冻结 revision `git-index-tree-v1:6bab504:675f1ca41a4d72eb2fcef69c385f5cde6da72b94`；两组前端源码测试与 `npm run build:frontend` 在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；既有 >500kB chunk warning 保留 |
+| Phase B Task 5 素材面板正式协议 | `9a7c0e2`；冻结 revision `git-index-tree-v1:16a01ad:f0391bc76966782f6476958de97c23cadda83565`；素材面板测试与 `npm run build:frontend` 在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；既有 >500kB chunk warning 保留 |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
