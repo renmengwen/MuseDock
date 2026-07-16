@@ -7,11 +7,13 @@ const path = require('path');
 
 const creativeWorkflowsRouter = require('../server/routes/creativeWorkflows');
 const workflows = require('../server/services/creative/creativeWorkflows');
+const visualAssetUploads = require('../server/services/creative/visualAssetUploads');
 const { createCreativeTaskRegistry, defaultRegistry } = require('../server/services/creative/creativeTaskRegistry');
 const { createDiagnostic } = require('../server/services/creative-video/html-video/diagnostics');
 const { createEmptyProject } = require('../server/services/creative-video/html-video/projectSchema');
 
 const SSE_HELPER_TIMEOUT_MS = 1000;
+const MINIMAL_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
 function normalizeTimeoutMs(value) {
   const number = Number(value);
@@ -75,6 +77,27 @@ async function requestBuffer(server, method, pathName) {
       });
     });
     req.on('error', reject);
+    req.end();
+  });
+}
+
+async function requestRaw(server, method, pathName, body, headers = {}) {
+  const { port } = server.address();
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathName,
+      method,
+      headers,
+    }, res => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', chunk => { text += chunk; });
+      res.on('end', () => resolve({ statusCode: res.statusCode, body: text ? JSON.parse(text) : null }));
+    });
+    req.on('error', reject);
+    if (body) req.write(body);
     req.end();
   });
 }
@@ -1109,6 +1132,185 @@ async function run() {
   await runSseRouteCleanupStaticTest();
   await runRetryRouteTests();
   await runAssetFileRouteTest();
+  await runUploadAssetRoutesTest();
+  await runUploadThenCreateUsesSameRootTest();
+  await runUploadRequestGuardTests();
+}
+
+async function runUploadRequestGuardTests() {
+  const oversizedApp = express();
+  let stageCalls = 0;
+  oversizedApp.locals.creativeVisualAssetUploads = {
+    stageVisualAsset: async () => {
+      stageCalls += 1;
+      throw new Error('Content-Length 超限时不应调用 stage');
+    },
+  };
+  oversizedApp.use('/api/creative-workflows', creativeWorkflowsRouter);
+  const oversizedServer = await listen(oversizedApp);
+  try {
+    const body = Buffer.concat([MINIMAL_PNG, Buffer.alloc(9 * 1024 * 1024)]);
+    const result = await requestRaw(oversizedServer, 'POST', '/api/creative-workflows/assets/uploads', body, {
+      'Content-Type': 'image/png',
+      'Content-Length': String(body.length),
+      'X-File-Name': 'content-length.png',
+    });
+    assert.equal(result.statusCode, 413);
+    assert.match(result.body.message, /8MB/);
+    assert.equal(stageCalls, 0);
+  } finally {
+    await new Promise(resolve => oversizedServer.close(resolve));
+  }
+
+  const chunkedApp = express();
+  let socketTimeout = 0;
+  chunkedApp.locals.creativeAssetUploadTimeoutMs = 1234;
+  chunkedApp.locals.creativeVisualAssetUploads = {
+    stageVisualAsset: async ({ stream }) => {
+      socketTimeout = stream.socket.timeout;
+      for await (const _chunk of stream) {}
+      return { success: true, upload_id: 'upload_timeouttest', status: 'staged', asset: {} };
+    },
+  };
+  chunkedApp.use('/api/creative-workflows', creativeWorkflowsRouter);
+  const chunkedServer = await listen(chunkedApp);
+  try {
+    const result = await requestRaw(chunkedServer, 'POST', '/api/creative-workflows/assets/uploads', MINIMAL_PNG, {
+      'Content-Type': 'image/png',
+      'Transfer-Encoding': 'chunked',
+      'X-File-Name': 'chunked.png',
+    });
+    assert.equal(result.statusCode, 201);
+    assert.equal(socketTimeout, 1234);
+  } finally {
+    await new Promise(resolve => chunkedServer.close(resolve));
+  }
+}
+
+async function runUploadAssetRoutesTest() {
+  const app = express();
+  const uploadRoot = tempRoot();
+  app.use(express.json());
+  app.locals.creativeVisualAssetUploads = visualAssetUploads;
+  app.locals.creativeAssetUploadRoot = uploadRoot;
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+  const server = await listen(app);
+
+  try {
+    const uploaded = await requestRaw(
+      server,
+      'POST',
+      '/api/creative-workflows/assets/uploads',
+      MINIMAL_PNG,
+      {
+        'Content-Type': 'image/png',
+        'Content-Length': String(MINIMAL_PNG.length),
+        'X-File-Name': encodeURIComponent('../路由封面.png'),
+        'X-Asset-Requirement': 'required',
+      },
+    );
+    assert.equal(uploaded.statusCode, 201);
+    assert.equal(uploaded.body.success, true);
+    assert.equal(uploaded.body.status, 'staged');
+    assert.equal(uploaded.body.asset.requirement, 'required');
+    assert.match(uploaded.body.message, /上传|暂存/);
+
+    const removed = await requestJson(
+      server,
+      'DELETE',
+      `/api/creative-workflows/assets/uploads/${uploaded.body.upload_id}`,
+    );
+    assert.equal(removed.statusCode, 200);
+    assert.equal(removed.body.success, true);
+
+    const invalid = await requestRaw(
+      server,
+      'POST',
+      '/api/creative-workflows/assets/uploads',
+      Buffer.from('plain'),
+      { 'Content-Type': 'text/plain', 'X-File-Name': 'notes.txt' },
+    );
+    assert.equal(invalid.statusCode, 400);
+    assert.match(invalid.body.message, /图片格式|PNG|JPEG|WebP/);
+
+    const oversizedBody = Buffer.concat([MINIMAL_PNG, Buffer.alloc(9 * 1024 * 1024)]);
+    const oversized = await requestRaw(
+      server,
+      'POST',
+      '/api/creative-workflows/assets/uploads',
+      oversizedBody,
+      {
+        'Content-Type': 'image/png',
+        'Content-Length': String(oversizedBody.length),
+        'X-File-Name': 'oversized.png',
+      },
+    );
+    assert.equal(oversized.statusCode, 413);
+    assert.equal(oversized.body.success, false);
+    assert.match(oversized.body.message, /8MB/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+async function runUploadThenCreateUsesSameRootTest() {
+  const app = express();
+  const rootDir = tempRoot();
+  const mediaRoot = path.join(rootDir, 'media');
+  const uploadRoot = path.join(rootDir, 'uploads');
+  const services = {
+    ...routeWorkflowServices(),
+    appSettings: {
+      getCreativeDefaults: async () => ({
+        aspectRatio: '9:16',
+        targetDurationSec: 60,
+        useResearch: false,
+        generateAudio: true,
+        generateCaptions: true,
+      }),
+      getEffectiveSystemSettings: async () => ({ skipValidation: false }),
+    },
+  };
+  let receivedCreateOptions = null;
+
+  app.use(express.json());
+  app.locals.creativeAssetUploadRoot = uploadRoot;
+  app.locals.creativeWorkflows = {
+    createCreativeWorkflow: (payload, options = {}) => {
+      receivedCreateOptions = options;
+      return workflows.createCreativeWorkflow(payload, { ...options, rootDir, mediaRoot, services });
+    },
+  };
+  app.locals.creativeWorkflowTasks = {
+    startCreativeWorkflowTask: async workflowId => ({
+      success: true,
+      workflow_id: workflowId,
+      task_id: 'creative-task-upload-create',
+      active_task: { task_id: 'creative-task-upload-create', workflow_id: workflowId, status: 'running' },
+    }),
+  };
+  app.use('/api/creative-workflows', creativeWorkflowsRouter);
+  const server = await listen(app);
+
+  try {
+    const uploaded = await requestRaw(server, 'POST', '/api/creative-workflows/assets/uploads', MINIMAL_PNG, {
+      'Content-Type': 'image/png',
+      'Content-Length': String(MINIMAL_PNG.length),
+      'X-File-Name': 'route-create.png',
+    });
+    assert.equal(uploaded.statusCode, 201);
+
+    const created = await requestJson(server, 'POST', '/api/creative-workflows', {
+      input: '路由上传后立即创建任务',
+      assetIds: [uploaded.body.upload_id],
+    });
+    assert.equal(created.statusCode, 202);
+    assert.equal(created.body.asset_context.assets[0].id, uploaded.body.upload_id);
+    assert.equal(receivedCreateOptions.uploadRoot, uploadRoot);
+    assert.equal(fs.existsSync(path.join(uploadRoot, uploaded.body.upload_id)), false);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
 }
 
 async function runGetWorkflowUsesActiveRegistryTest() {

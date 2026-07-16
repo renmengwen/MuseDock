@@ -2,6 +2,7 @@ const express = require('express');
 
 const defaultCreativeWorkflows = require('../services/creative/creativeWorkflows');
 const defaultCreativeWorkflowTasks = require('../services/creative/creativeWorkflowTasks');
+const defaultVisualAssetUploads = require('../services/creative/visualAssetUploads');
 const { formatSseEvent, normalizeSinceSeq } = require('../services/creative/creativeTaskEvents');
 const {
   normalizeCreativeWorkflowDto,
@@ -10,6 +11,7 @@ const {
 
 const router = express.Router();
 const WORKFLOW_ID_PATTERN = /^\d{5,32}$/;
+const DEFAULT_UPLOAD_TIMEOUT_MS = 30 * 1000;
 
 function getService(req) {
   return req.app?.locals?.creativeWorkflows || defaultCreativeWorkflows;
@@ -17,6 +19,14 @@ function getService(req) {
 
 function getTaskService(req) {
   return req.app?.locals?.creativeWorkflowTasks || defaultCreativeWorkflowTasks;
+}
+
+function getVisualAssetUploadService(req) {
+  return req.app?.locals?.creativeVisualAssetUploads || defaultVisualAssetUploads;
+}
+
+function getVisualAssetUploadRoot(req) {
+  return req.app?.locals?.creativeAssetUploadRoot;
 }
 
 function hasLocal(req, key) {
@@ -80,11 +90,73 @@ function safeString(value) {
   return String(value || '').trim();
 }
 
+function decodeFileNameHeader(value) {
+  const fileName = safeString(value);
+  if (!fileName) return '';
+  try {
+    return decodeURIComponent(fileName);
+  } catch {
+    return fileName;
+  }
+}
+
+router.post('/assets/uploads', async (req, res) => {
+  const contentLength = Number(req.headers['content-length']);
+  if (Number.isFinite(contentLength) && contentLength > defaultVisualAssetUploads.MAX_UPLOAD_BYTES) {
+    req.resume();
+    return res.status(413).json({ success: false, message: '上传失败：单张图片不能超过 8MB。' });
+  }
+  if (!Number.isFinite(contentLength)) {
+    req.setTimeout(Number(req.app?.locals?.creativeAssetUploadTimeoutMs) || DEFAULT_UPLOAD_TIMEOUT_MS);
+  }
+  try {
+    const result = await getVisualAssetUploadService(req).stageVisualAsset({
+      stream: req,
+      fileName: decodeFileNameHeader(req.headers['x-file-name']),
+      mime: req.headers['content-type'],
+      requirement: req.headers['x-asset-requirement'],
+      rootDir: getVisualAssetUploadRoot(req),
+    });
+    return res.status(201).json({
+      ...result,
+      success: true,
+      message: '图片已上传并暂存，创建任务后将自动认领。',
+    });
+  } catch (error) {
+    const detail = safeString(error?.message);
+    const message = /^上传/.test(detail) ? detail : `上传图片失败：${detail || '请重试。'}`;
+    return res.status(/8MB/.test(message) ? 413 : 400).json({
+      success: false,
+      message,
+    });
+  }
+});
+
+router.delete('/assets/uploads/:uploadId', async (req, res) => {
+  try {
+    const result = await getVisualAssetUploadService(req).removeStagedVisualAsset({
+      uploadId: req.params.uploadId,
+      rootDir: getVisualAssetUploadRoot(req),
+    });
+    return res.json({
+      ...result,
+      success: true,
+      message: '暂存图片已删除。',
+    });
+  } catch (error) {
+    const detail = safeString(error?.message);
+    const message = /^上传|^删除/.test(detail) ? detail : `删除暂存图片失败：${detail || '请重试。'}`;
+    return res.status(/已认领/.test(message) ? 409 : 400).json({ success: false, message });
+  }
+});
+
 router.post('/', async (req, res) => {
   const service = getService(req);
 
   try {
-    const result = await service.createCreativeWorkflow(req.body || {});
+    const result = await service.createCreativeWorkflow(req.body || {}, {
+      uploadRoot: getVisualAssetUploadRoot(req),
+    });
     if (!result || result.success === false) {
       return res.status(400).json({
         success: false,

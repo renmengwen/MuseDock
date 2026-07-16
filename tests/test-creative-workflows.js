@@ -5,6 +5,8 @@ const path = require('path');
 
 const mediaPipeline = require('../server/services/mediaPipeline');
 const researchService = require('../server/services/researchService');
+const visualAssetUploads = require('../server/services/creative/visualAssetUploads');
+const { Readable } = require('stream');
 const { defaultRegistry } = require('../server/services/creative/creativeTaskRegistry');
 const {
   STAGE_IDS,
@@ -13,6 +15,7 @@ const {
   runCreativeWorkflow,
   getCreativeWorkflow,
   getCreativeWorkflowHtmlVideoProject,
+  getCreativeWorkflowAssetFile,
   getWorkflowPath,
   makeLocalCreativeAwemeId,
   exportHtmlVideoProject,
@@ -23,6 +26,7 @@ const { computeSceneSpecSpeechHash } = require('../server/services/creative-vide
 
 const NOW = '2026-06-12T12:00:00.000Z';
 const WORKFLOW_ID = '202606121200000001';
+const MINIMAL_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 
 function createTempDirs() {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'creative-workflows-test-'));
@@ -181,6 +185,159 @@ async function testCreatesAndRunsTextWorkflow() {
     fallback: 2,
     style_profile_id: 'clean_education',
   });
+}
+
+async function testCreatesWorkflowWithClaimedUploadAndPreservesItThroughSourceStage() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const uploadRoot = path.join(rootDir, 'uploads');
+  const staged = await visualAssetUploads.stageVisualAsset({
+    stream: Readable.from(MINIMAL_PNG),
+    fileName: '用户封面.png',
+    mime: 'image/png',
+    requirement: 'required',
+    rootDir: uploadRoot,
+  });
+  const { services } = createFakeServices();
+
+  const created = await createCreativeWorkflow({
+    input: '用上传图片做一期本地 AI 视频',
+    useResearch: false,
+    assetIds: [staged.upload_id],
+  }, { rootDir, mediaRoot, uploadRoot, services });
+
+  assert.equal(created.success, true);
+  assert.deepEqual(created.creative_context.input.asset_ids, [staged.upload_id]);
+  assert.deepEqual(created.asset_context.assets.map(asset => asset.id), [staged.upload_id]);
+  assert.equal(created.asset_context.assets[0].origin, 'user_upload');
+  assert.equal(created.asset_context.assets[0].requirement, 'required');
+  assert.equal(fs.existsSync(created.asset_context.assets[0].local_path), true);
+  assert.equal(fs.existsSync(path.join(uploadRoot, staged.upload_id)), false);
+
+  const run = await runCreativeWorkflow(WORKFLOW_ID, { rootDir, mediaRoot, services });
+  assert.equal(run.success, true);
+  assert.deepEqual(run.asset_context.assets.map(asset => asset.id), [staged.upload_id]);
+  assert.equal(run.asset_context.assets[0].origin, 'user_upload');
+}
+
+async function testDouyinUploadUsesAwemeMediaDirectory() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const uploadRoot = path.join(rootDir, 'uploads');
+  const awemeId = '7345678901234567890';
+  const staged = await visualAssetUploads.stageVisualAsset({
+    stream: Readable.from(MINIMAL_PNG),
+    fileName: '抖音封面.png',
+    mime: 'image/png',
+    rootDir: uploadRoot,
+  });
+  const { services } = createFakeServices();
+
+  const created = await createCreativeWorkflow({
+    input: awemeId,
+    useResearch: false,
+    assetIds: [staged.upload_id],
+  }, { rootDir, mediaRoot, uploadRoot, services });
+
+  assert.equal(created.success, true);
+  const expectedDir = mediaPipeline.getMediaDir(awemeId, mediaRoot);
+  assert.equal(path.dirname(path.dirname(created.asset_context.assets[0].local_path)), expectedDir);
+  const served = await getCreativeWorkflowAssetFile(WORKFLOW_ID, staged.upload_id, { rootDir, mediaRoot });
+  assert.equal(served.success, true);
+  assert.equal(served.file_path, created.asset_context.assets[0].local_path);
+}
+
+async function testPersistFailureReleasesClaimForReuse() {
+  const { rootDir: parentDir, mediaRoot } = createTempDirs();
+  const uploadRoot = path.join(parentDir, 'uploads');
+  const invalidRoot = path.join(parentDir, 'workflow-root-is-file');
+  fs.writeFileSync(invalidRoot, 'not a directory', 'utf8');
+  const staged = await visualAssetUploads.stageVisualAsset({
+    stream: Readable.from(MINIMAL_PNG),
+    fileName: '可重试.png',
+    mime: 'image/png',
+    rootDir: uploadRoot,
+  });
+  const { services } = createFakeServices();
+
+  await assert.rejects(() => createCreativeWorkflow({
+    input: '持久化失败后可重试',
+    assetIds: [staged.upload_id],
+  }, { rootDir: invalidRoot, mediaRoot, uploadRoot, services }), /EEXIST|ENOTDIR|directory/);
+
+  const manifest = readJson(path.join(uploadRoot, staged.upload_id, 'upload.json'));
+  assert.equal(manifest.status, 'staged');
+  assert.equal(manifest.workflow_id, undefined);
+  assert.equal(fs.existsSync(path.join(mediaPipeline.getMediaDir(WORKFLOW_ID, mediaRoot), 'assets')), true);
+  assert.deepEqual(fs.readdirSync(path.join(mediaPipeline.getMediaDir(WORKFLOW_ID, mediaRoot), 'assets')), []);
+
+  const retryRoot = path.join(parentDir, 'retry-workflows');
+  const retried = await createCreativeWorkflow({
+    input: '持久化失败后可重试',
+    assetIds: [staged.upload_id],
+  }, { rootDir: retryRoot, mediaRoot, uploadRoot, services });
+  assert.equal(retried.success, true);
+}
+
+async function testPersistFailureReportsReleaseFailureAndDeletesCopies() {
+  const { rootDir: parentDir, mediaRoot } = createTempDirs();
+  const uploadRoot = path.join(parentDir, 'uploads');
+  const invalidRoot = path.join(parentDir, 'workflow-root-is-file-release-fails');
+  fs.writeFileSync(invalidRoot, 'not a directory', 'utf8');
+  const staged = await visualAssetUploads.stageVisualAsset({
+    stream: Readable.from(MINIMAL_PNG),
+    fileName: '释放失败.png',
+    mime: 'image/png',
+    rootDir: uploadRoot,
+  });
+  const base = createFakeServices().services;
+  const services = {
+    ...base,
+    visualAssetUploads: {
+      ...visualAssetUploads,
+      releaseClaimedVisualAssets: async () => { throw new Error('release injected failure'); },
+    },
+  };
+
+  await assert.rejects(() => createCreativeWorkflow({
+    input: '持久化和释放都失败',
+    assetIds: [staged.upload_id],
+  }, { rootDir: invalidRoot, mediaRoot, uploadRoot, services }), /释放上传素材失败.*release injected failure/);
+
+  const assetsDir = path.join(mediaPipeline.getMediaDir(WORKFLOW_ID, mediaRoot), 'assets');
+  assert.equal(fs.existsSync(assetsDir), true);
+  assert.deepEqual(fs.readdirSync(assetsDir), []);
+}
+
+async function testFinalizeFailurePersistsWarningDiagnostic() {
+  const { rootDir, mediaRoot } = createTempDirs();
+  const uploadRoot = path.join(rootDir, 'uploads');
+  const staged = await visualAssetUploads.stageVisualAsset({
+    stream: Readable.from(MINIMAL_PNG),
+    fileName: '清理失败.png',
+    mime: 'image/png',
+    rootDir: uploadRoot,
+  });
+  const base = createFakeServices().services;
+  const services = {
+    ...base,
+    visualAssetUploads: {
+      ...visualAssetUploads,
+      finalizeClaimedVisualAssets: async () => { throw new Error('finalize injected failure'); },
+    },
+  };
+
+  const created = await createCreativeWorkflow({
+    input: '成功持久化但暂存清理失败',
+    assetIds: [staged.upload_id],
+  }, { rootDir, mediaRoot, uploadRoot, services });
+
+  assert.equal(created.success, true);
+  const warning = created.asset_context.diagnostics.find(item => item.code === 'upload_finalize_failed');
+  assert.equal(warning.severity, 'warning');
+  assert.match(warning.message, /暂存清理失败.*finalize injected failure/);
+  const persisted = readJson(getWorkflowPath(WORKFLOW_ID, rootDir));
+  assert.equal(persisted.asset_context.diagnostics.some(item => item.code === 'upload_finalize_failed'), true);
+  assert.equal(persisted.creative_context.asset_context.diagnostics.some(item => item.code === 'upload_finalize_failed'), true);
+  assert.equal(fs.existsSync(path.join(uploadRoot, staged.upload_id)), true);
 }
 
 async function testCreatesAndRunsSourceUrlWorkflow() {
@@ -2539,6 +2696,11 @@ async function run() {
   await testRunResearchProviderAddsAuditMetadata();
   await testRunWorkflowPersistsResearchModelCalls();
   await testCreatesAndRunsTextWorkflow();
+  await testCreatesWorkflowWithClaimedUploadAndPreservesItThroughSourceStage();
+  await testDouyinUploadUsesAwemeMediaDirectory();
+  await testPersistFailureReleasesClaimForReuse();
+  await testPersistFailureReportsReleaseFailureAndDeletesCopies();
+  await testFinalizeFailurePersistsWarningDiagnostic();
   await testCreatesAndRunsSourceUrlWorkflow();
   await testSourceUrlWorkflowRunsSourceImageAnalysisWhenEnabled();
   await testRejectsSourceImageAnalysisWithoutMultimodalTextModel();

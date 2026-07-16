@@ -5,6 +5,7 @@ const DOUYIN_SHORT_LINK_TIMEOUT_MS = 8000;
 const DOUYIN_SHORT_LINK_MAX_REDIRECTS = 5;
 const DOUYIN_SHORT_LINK_RESOLVE_FAILED_MESSAGE = '暂时无法解析抖音短链，请稍后重试，或粘贴跳转后的完整视频链接。';
 const sourceFetch = require('../source/sourceFetch');
+const { UPLOAD_ID_PATTERN } = require('./visualAssetUploads');
 
 function safeString(value) {
   if (value === null || value === undefined) {
@@ -243,18 +244,34 @@ function countSourceUrlOccurrences(text) {
   return count;
 }
 
+function normalizeUploadAssetIds(value) {
+  if (value === undefined || value === null) return { success: true, assetIds: [] };
+  if (!Array.isArray(value)) return { success: false, message: '上传素材 ID 列表无效。' };
+  const assetIds = [];
+  const seen = new Set();
+  for (const item of value) {
+    const id = safeString(item);
+    if (!UPLOAD_ID_PATTERN.test(id)) return { success: false, message: `上传素材 ID 无效：${id || '空值'}。` };
+    if (!seen.has(id)) {
+      seen.add(id);
+      assetIds.push(id);
+    }
+  }
+  return { success: true, assetIds };
+}
+
 function normalizeCreativeInput(payload = {}) {
-  const assetIds = Array.isArray(payload.assetIds) ? [...payload.assetIds] : [];
   const useResearch = payload.useResearch === true;
   const skipValidation = payload.skipValidation === true;
-
-  if (assetIds.length > 0) {
-    return createFailureResponse('暂不支持手动传入 assetIds，请先移除手动素材后重试。文章/GitHub 链接图片会自动尝试提取。', {
+  const normalizedAssetIds = normalizeUploadAssetIds(payload.assetIds);
+  if (!normalizedAssetIds.success) {
+    return createFailureResponse(normalizedAssetIds.message, {
       use_research: useResearch,
       skip_validation: skipValidation,
       asset_ids: [],
     });
   }
+  const assetIds = normalizedAssetIds.assetIds;
 
   const input = safeString(payload.input);
   if (!input) {
@@ -338,7 +355,7 @@ async function normalizeCreativeInputWithDouyinShortLink(payload = {}, options =
           douyin_url: resolvedUrl || shortLink,
           use_research: payload.useResearch === true,
           skip_validation: payload.skipValidation === true,
-          asset_ids: [],
+          asset_ids: normalized.data.asset_ids,
         });
       }
     } catch {}
@@ -347,7 +364,7 @@ async function normalizeCreativeInputWithDouyinShortLink(payload = {}, options =
   return createFailureResponse(DOUYIN_SHORT_LINK_RESOLVE_FAILED_MESSAGE, {
     use_research: payload.useResearch === true,
     skip_validation: payload.skipValidation === true,
-    asset_ids: [],
+    asset_ids: normalized.data.asset_ids,
   });
 }
 
@@ -390,6 +407,18 @@ function createDisabledAssetContext({ now } = {}) {
   return {
     status: 'disabled',
     assets: [],
+    updated_at: now || '',
+  };
+}
+
+function createClaimedAssetContext({ assets, now } = {}) {
+  const claimedAssets = Array.isArray(assets) ? assets : [];
+  if (claimedAssets.length === 0) return createDisabledAssetContext({ now });
+  return {
+    status: 'ready',
+    assets: claimedAssets,
+    summary: `已认领 ${claimedAssets.length} 张用户上传图片。`,
+    diagnostics: [],
     updated_at: now || '',
   };
 }
@@ -453,5 +482,6 @@ module.exports = {
   createDisabledResearchContext,
   createPendingResearchContext,
   createDisabledAssetContext,
+  createClaimedAssetContext,
   buildCreativeContext,
 };

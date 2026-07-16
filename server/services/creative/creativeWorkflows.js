@@ -11,6 +11,7 @@ const defaultCreativeVideoTtsService = require('../creative-video/ttsService');
 const aiTextModel = require('../ai/aiTextModel');
 const defaultSourceFetch = require('../source/sourceFetch');
 const defaultSourceAssets = require('../source/sourceAssets');
+const defaultVisualAssetUploads = require('./visualAssetUploads');
 const { prepareSource, prepareSourceAssetContext } = require('./creativeSourcePrep');
 const htmlVideoProjectApi = require('../creative-video/htmlVideoProjectApi');
 const retryPlanner = require('../creative-video/retryPlanner');
@@ -292,13 +293,6 @@ function normalizeFailureResult(normalized, payload = {}) {
     };
   }
 
-  if (Array.isArray(payload.assetIds) && payload.assetIds.length > 0) {
-    return {
-      ...normalized,
-      message: '暂不支持手动传入 assetIds，请先移除手动素材后重试。文章/GitHub 链接图片会自动尝试提取。',
-    };
-  }
-
   return normalized;
 }
 
@@ -356,6 +350,7 @@ function resolveServices(options = {}) {
     ttsService: services.ttsService || defaultCreativeVideoTtsService,
     sourceFetch: services.sourceFetch || defaultSourceFetch,
     sourceAssets: services.sourceAssets || defaultSourceAssets,
+    visualAssetUploads: services.visualAssetUploads || defaultVisualAssetUploads,
   };
   resolved.resumeActions = {
     retryFrameHtml: context => defaultRetryFrameHtmlAction({ ...context, services: resolved }),
@@ -586,6 +581,7 @@ function createWorkflowSummary(record) {
 
 async function createCreativeWorkflow(payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
+  const mediaRoot = options.mediaRoot || DEFAULT_MEDIA_ROOT;
   const services = resolveServices(options);
   const now = getNow(services);
   const creativeDefaults = await services.appSettings.getCreativeDefaults(options);
@@ -612,6 +608,25 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
   const awemeId = normalized.data.mode === 'douyin'
     ? normalized.data.aweme_id
     : makeLocalCreativeAwemeId(workflowId);
+  let claimedAssets = [];
+  let claimReceipt = null;
+  if (normalized.data.asset_ids.length > 0) {
+    try {
+      const claimed = await services.visualAssetUploads.claimVisualAssets({
+        uploadIds: normalized.data.asset_ids,
+        workflowId,
+        targetDir: services.mediaPipeline.getMediaDir(awemeId, mediaRoot),
+        rootDir: options.uploadRoot,
+      });
+      claimedAssets = claimed.assets;
+      claimReceipt = claimed.claim;
+    } catch (error) {
+      return {
+        success: false,
+        message: `认领上传素材失败：${safeString(error?.message) || '暂存图片不可用，请重新上传。'}`,
+      };
+    }
+  }
   let sourceContext;
   if (normalized.data.mode === 'douyin') {
     sourceContext = createDouyinSourceContext(normalized.data);
@@ -624,7 +639,7 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
   const researchContext = normalized.data.use_research
     ? creativeContext.createPendingResearchContext({ query: researchQuery, now })
     : creativeContext.createDisabledResearchContext({ now });
-  const assetContext = creativeContext.createDisabledAssetContext({ now });
+  const assetContext = creativeContext.createClaimedAssetContext({ assets: claimedAssets, now });
   const creative = creativeContext.buildCreativeContext({
     input: normalized.data,
     sourceContext,
@@ -666,7 +681,50 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
     updated_at: now,
   };
 
-  const persisted = await persistWorkflow(record, rootDir);
+  let persisted;
+  try {
+    persisted = await persistWorkflow(record, rootDir);
+  } catch (error) {
+    if (claimReceipt) {
+      try {
+        await services.visualAssetUploads.releaseClaimedVisualAssets({
+          claim: claimReceipt,
+          rootDir: options.uploadRoot,
+        });
+      } catch (releaseError) {
+        await Promise.all((claimReceipt.copied_paths || []).map(filePath => (
+          fsp.rm(filePath, { force: true }).catch(() => {})
+        )));
+        throw new Error(`创建任务持久化失败：${error.message}；释放上传素材失败：${releaseError.message}`);
+      }
+    }
+    throw error;
+  }
+  if (claimReceipt) {
+    try {
+      await services.visualAssetUploads.finalizeClaimedVisualAssets({
+        claim: claimReceipt,
+        rootDir: options.uploadRoot,
+      });
+    } catch (error) {
+      const warning = {
+        code: 'upload_finalize_failed',
+        severity: 'warning',
+        message: `上传素材暂存清理失败：${error.message}`,
+        created_at: now,
+      };
+      const nextAssetContext = {
+        ...(persisted.asset_context || {}),
+        diagnostics: [...(Array.isArray(persisted.asset_context?.diagnostics) ? persisted.asset_context.diagnostics : []), warning],
+      };
+      persisted.asset_context = nextAssetContext;
+      persisted.creative_context = {
+        ...(persisted.creative_context || {}),
+        asset_context: nextAssetContext,
+      };
+      persisted = await persistWorkflow(persisted, rootDir).catch(() => persisted);
+    }
+  }
   return createWorkflowSummary(persisted);
 }
 
@@ -2259,7 +2317,7 @@ async function getCreativeWorkflowAssetFile(workflowId, assetId, options = {}) {
       message: '未找到视觉素材文件。',
     };
   }
-  const workflowDir = path.resolve(mediaRoot, safeString(workflowId));
+  const workflowDir = mediaPipeline.getMediaDir(safeString(record.aweme_id || workflowId), mediaRoot);
   const realWorkflowDir = workflowDir ? await fsp.realpath(workflowDir).catch(() => '') : '';
   const projectDir = extractHtmlVideoProjectPathFromWorkflow(record);
   const realProjectDir = projectDir ? await fsp.realpath(projectDir).catch(() => '') : '';

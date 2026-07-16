@@ -206,7 +206,7 @@ Commit: `功能：统一现有视觉素材写入协议`
 - Create: `tests/test-creative-workflow-upload-assets.js`
 - Modify: `tests/test-creative-workflow-routes.js`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 覆盖：PNG/JPEG/WebP；非图片拒绝；超过 8MB 在读取时拒绝；文件名净化；默认 preferred；required 保留；同一暂存 ID 只能认领一次；任务创建响应立即含上传图；来源阶段不覆盖。
 
@@ -229,13 +229,13 @@ assert.equal(claimed.assets[0].origin, 'user_upload');
 await assert.rejects(() => uploads.claimVisualAssets({ uploadIds: [staged.upload_id], targetDir, rootDir: uploadRoot }), /已认领/);
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run: `node tests/test-creative-workflow-upload-assets.js`
 
 Expected: FAIL，上传服务不存在。
 
-- [ ] **Step 3: 最小实现上传服务**
+- [x] **Step 3: 最小实现上传服务**
 
 只使用 Node 标准库：
 
@@ -253,20 +253,20 @@ const UPLOAD_ID_PATTERN = /^upload_[a-z0-9_-]{8,80}$/;
 
 暂存目录位于数据根下的 `creative-asset-uploads`，不写进仓库。
 
-- [ ] **Step 4: 接入路由和工作流**
+- [x] **Step 4: 接入路由和工作流**
 
 - `POST /api/creative-workflows/assets/uploads`：请求体为原始 File，读取 `Content-Type`、`X-File-Name`、`X-Asset-Requirement`；返回中文状态和 `upload_id`。
 - `DELETE /api/creative-workflows/assets/uploads/:uploadId`：删除未认领暂存。
 - `normalizeCreativeInput()` 接受去重后的 `assetIds`，拒绝非法 ID，不再返回“暂不支持”。
 - `createCreativeWorkflow()` 在生成 `workflowId/awemeId` 后认领文件并用其构造初始 `asset_context`；认领失败不启动后台任务。
 
-- [ ] **Step 5: 验证路由和工作流**
+- [x] **Step 5: 验证路由和工作流**
 
 Run: `node tests/test-creative-workflow-upload-assets.js && node tests/test-creative-workflow-routes.js && node tests/test-creative-context.js && node tests/test-creative-workflows.js`
 
 Expected: PASS。
 
-- [ ] **Step 6: 双 Review、修复和提交**
+- [x] **Step 6: 双 Review、修复和提交**
 
 Commit: `功能：支持创作图片暂存与任务认领`
 

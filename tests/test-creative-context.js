@@ -338,19 +338,25 @@ function testCountsUrlsSeparatedByChineseBookTitleAndParentheses() {
   assert.equal(result.data.ignored_url_count, 1);
 }
 
-function testRejectsAssetsForPhaseOne() {
+function testNormalizesUploadAssetIds() {
   const result = normalizeCreativeInput({
     input: TEXT_INPUT,
-    assetIds: ['asset-1'],
+    assetIds: ['upload_abcdefgh', ' upload_abcdefgh ', 'upload_12345678'],
     useResearch: true,
     skipValidation: true,
   });
 
-  assert.equal(result.success, false);
-  assert.match(result.message, /暂不支持手动传入 assetIds/);
+  assert.equal(result.success, true);
   assert.equal(result.data.use_research, true);
   assert.equal(result.data.skip_validation, true);
-  assert.deepEqual(result.data.asset_ids, []);
+  assert.deepEqual(result.data.asset_ids, ['upload_abcdefgh', 'upload_12345678']);
+
+  const invalid = normalizeCreativeInput({
+    input: TEXT_INPUT,
+    assetIds: ['../upload_bad'],
+  });
+  assert.equal(invalid.success, false);
+  assert.match(invalid.message, /上传素材 ID 无效/);
 }
 
 function testExtractsAwemeIdFromSupportedInputs() {
@@ -531,7 +537,7 @@ function run() {
   testCountsLargeSourceUrlListWithoutRepeatedExtraction();
   testKeepsUnselectedDuplicateUrlInSourceHint();
   testCountsUrlsSeparatedByChineseBookTitleAndParentheses();
-  testRejectsAssetsForPhaseOne();
+  testNormalizesUploadAssetIds();
   testExtractsAwemeIdFromSupportedInputs();
   testBuildsStableCreativeContext();
   testBuildsDefaultContextsWhenMissing();
