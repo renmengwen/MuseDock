@@ -69,7 +69,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
 | B-06a GitHub 页面截图 producer | `changes_requested` | B-01、B-02 | - | 旧 revision 失效；原 Worker 修复安全与 fake 边界 |
 | B-06b 受控 derived 素材登记 | `leased` | B-01 | - | 独立 worktree TDD；冻结后双 Review |
-| B-07a requirement 分类语义 | `leased` | B-01 | - | 独立 worktree TDD；冻结后双 Review |
+| B-07a requirement 分类语义 | `frozen_for_review` | B-01 | - | Candidate 已冻结；等待同 revision 双 Review |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
@@ -136,7 +136,7 @@ frozen_revision: null
 
 ```yaml
 task_id: B-07a
-status: leased
+status: frozen_for_review
 owner: /root/context_control_audit
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b07a
@@ -150,7 +150,18 @@ state_owners:
 exclusive_resources:
   - B-07a usage/workflow tests run serially inside the worker worktree
   - no browser, ports, ffmpeg or network
-frozen_revision: null
+frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
+changed_paths:
+  - server/services/creative-video/html-video/assetUsagePhase.js
+  - tests/test-html-video-asset-usage.js
+  - tests/test-html-video-workflow.js
+verification:
+  - node tests/test-html-video-asset-usage.js
+  - node tests/test-html-video-workflow.js
+  - node tests/test-generated-image-persist.js
+review:
+  spec: pending
+  quality: pending
 ```
 
 三个 worktree 的文件与状态所有权不重叠，可以并行写；Coordinator 仍串行冻结、Review 和集成。B-06a 真实 Chromium smoke 与 Phase B 全量门留到 B-07b。
