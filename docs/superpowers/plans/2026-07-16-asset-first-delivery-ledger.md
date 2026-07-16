@@ -67,8 +67,9 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
-| B-06 页面截图与衍生素材 producer | `queued` | B-01、B-02 | - | B-05 后串行实现 |
-| B-07 requirement 语义与 Phase B 门禁 | `queued` | B-04b、B-05、B-06 | - | Phase B 全量验证 |
+| B-06a GitHub 页面截图 producer | `leased` | B-01、B-02 | - | Worker TDD 实现；冻结后双 Review |
+| B-06b 受控 derived 素材登记 | `queued` | B-01、B-06a | - | B-06a 后串行实现 |
+| B-07 requirement 语义与 Phase B 门禁 | `queued` | B-04b、B-05、B-06a、B-06b | - | Phase B 全量验证 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07 | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
@@ -76,7 +77,29 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ## 当前写租约
 
-当前无业务代码写租约。B-05 已集成到 `dev` 并释放前端构建资源；下一写任务为 B-06。
+```yaml
+task_id: B-06a
+status: leased
+owner: /root/task4_readonly_spec
+base_commit: 7a377550669a91fc9616dd4befda56cf7ad1a985
+worktree: D:\code3\MuseDock-worktrees\asset-first-b06a
+branch: codex/asset-first-b06a
+allowed_paths:
+  - server/services/creative/pageCaptureAssets.js
+  - server/services/creative/creativeSourcePrep.js
+  - tests/test-page-capture-assets.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative/derivedVisualAssets.js
+state_owners:
+  - asset_context.assets.page_capture
+exclusive_resources:
+  - B-06a fake Playwright tests run serially inside the worker worktree
+  - no real Chromium, ports, ffmpeg or frontend build
+frozen_revision: null
+```
+
+Worker 仅实现 GitHub 仓库页截图登记与来源阶段合并；真实 Chromium smoke 不在本写租约内。失败只追加 diagnostic，不得伪造素材或清空既有资产。
 
 ## Phase A 审计分工
 
@@ -135,11 +158,11 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-B-01 | `verified` | 创作输入区暂存上传、缩略图和 preferred/required 控件 | B-04a、B-04b |
 | REQ-B-02 | `verified` | 创建任务时认领上传素材 | B-03 |
 | REQ-B-03 | `verified` | 任务创建后立即可查看已认领素材 | B-03 |
-| REQ-B-04 | `pending` | 文章图、GitHub/README 图、允许的页面截图、AI 生图、Pexels/search 和衍生图统一进入 `asset_context.assets` | B-02、B-06 |
-| REQ-B-05 | `pending` | 运行中持续追加素材与中文诊断 | B-02、B-06 |
+| REQ-B-04 | `pending` | 文章图、GitHub/README 图、允许的页面截图、AI 生图、Pexels/search 和衍生图统一进入 `asset_context.assets` | B-02、B-06a、B-06b |
+| REQ-B-05 | `pending` | 运行中持续追加素材与中文诊断 | B-02、B-06a、B-06b |
 | REQ-B-06 | `verified` | `origin/origin_detail/requirement/evidence_class` 分维协议 | B-01 |
 | REQ-B-07 | `verified` | direct source、synthetic、stock/search 的证据边界 | B-01、B-02 |
-| REQ-B-08 | `pending` | 任何可引用图片必须先登记 | B-06、B-07 |
+| REQ-B-08 | `pending` | 任何可引用图片必须先登记 | B-06a、B-06b、B-07 |
 | REQ-B-09 | `pending` | required 素材无真实可见 Shot 时阻断 | B-07、C-04 |
 | REQ-B-10 | `pending` | Asset Usage Report 与素材面板一致 | B-05、C-04 |
 
