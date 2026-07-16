@@ -76,7 +76,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
-| B-06a GitHub 页面截图 producer | `frozen_for_review` | B-01、B-02 | - | 有界网络预算与 route 单终态修复已冻结；等待新 revision 双复审 |
+| B-06a GitHub 页面截图 producer | `complete` | B-01、B-02 | `32a51c5` | 双 Review PASS，dev 目标测试通过；真实 Chromium smoke 留在 B-07b |
 | B-06b 受控 derived 素材登记 | `complete` | B-01 | `ca45e1d` | 双 Review PASS，已在 dev 重跑目标测试并释放租约 |
 | B-07a requirement 分类语义 | `in_progress` | B-01 | - | 新规格/质量 Review findings 正在修复 |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
@@ -89,8 +89,10 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: B-06a
-status: frozen_for_review
+status: complete
 owner: unassigned
+lease_released: true
+dev_commit: 32a51c5
 base_commit: 7a377550669a91fc9616dd4befda56cf7ad1a985
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06a
 branch: codex/asset-first-b06a
@@ -119,8 +121,13 @@ verification:
   - node tests/test-page-capture-assets.js
   - node tests/test-creative-workflows.js
 review:
-  spec: in_progress
-  quality: pending_re_review
+  spec: pass
+  spec_reviewed_ledger_commit: d45ccb1
+  spec_reviewed_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:8cfbf2540fca08f978c13e8e51ae4ebb2285841d
+  quality: pass
+  quality_reviewer: /root
+  quality_reviewed_ledger_commit: d45ccb1
+  quality_reviewed_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:8cfbf2540fca08f978c13e8e51ae4ebb2285841d
 resolved_findings:
   - source prep 捕获同步 throw、rejected Promise 与缺方法
   - 首跳 allowlist 限制默认 HTTPS 端口、credentials、lookalike，并证明 route 先于 goto
@@ -318,8 +325,8 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-B-01 | `verified` | 创作输入区暂存上传、缩略图和 preferred/required 控件 | B-04a、B-04b |
 | REQ-B-02 | `verified` | 创建任务时认领上传素材 | B-03 |
 | REQ-B-03 | `verified` | 任务创建后立即可查看已认领素材 | B-03 |
-| REQ-B-04 | `pending` | 文章图、GitHub/README 图、允许的页面截图、AI 生图、Pexels/search 和衍生图统一进入 `asset_context.assets` | B-02、B-06a、B-06b |
-| REQ-B-05 | `pending` | 运行中持续追加素材与中文诊断 | B-02、B-06a、B-06b |
+| REQ-B-04 | `verified` | 文章图、GitHub/README 图、允许的页面截图、AI 生图、Pexels/search 和衍生图统一进入 `asset_context.assets` | B-02、B-06a、B-06b |
+| REQ-B-05 | `verified` | 运行中持续追加素材与中文诊断 | B-02、B-06a、B-06b |
 | REQ-B-06 | `verified` | `origin/origin_detail/requirement/evidence_class` 分维协议 | B-01 |
 | REQ-B-07 | `verified` | direct source、synthetic、stock/search 的证据边界 | B-01、B-02 |
 | REQ-B-08 | `pending` | 任何可引用图片必须先登记 | B-06a、B-06b、B-07 |
@@ -398,6 +405,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase B Task 5 素材面板正式协议 | `9a7c0e2`；冻结 revision `git-index-tree-v1:16a01ad:f0391bc76966782f6476958de97c23cadda83565`；素材面板测试与 `npm run build:frontend` 在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；既有 >500kB chunk warning 保留 |
 | Phase B Task 6A 页面截图复审 | revision `faad0ec…` 规格 PASS、质量 CHANGES_REQUESTED；目标测试通过但 Playwright 1.60 redirect 运行时契约证明 fake 假阳性，旧 revision 已失效 |
 | Phase B Task 6A redirect 修复 Candidate | revision `eb725288cf30de67c36b3c17b060dc7400062efd`；document 与三类静态资源 3xx 首跳 fail-closed 测试通过；独立规格复审 PASS；非独立质量审计发现 route.fetch 无界缓冲，Candidate 不得集成 |
+| Phase B Task 6A 页面截图完成 | `32a51c5`；冻结 revision `8cfbf2540fca08f978c13e8e51ae4ebb2285841d`；Node 流式单响应/总预算、redirect、Content-Length、encoding、单终态与资源清理通过；规格 Review PASS；代码质量 Review PASS；dev 两组测试通过；真实 Chromium smoke 待 B-07b |
 | Phase B Task 6B derived 修复 Candidate | revision `bf9475b98d8f338c409ee76a60265ec019843815`；真实 PNG/JPEG/WebP 签名、严格幂等、derivation 深拷贝与三类 junction 逃逸测试通过；等待新 revision 双复审 |
 | Phase B Task 6B derived 完成 | `ca45e1d`；冻结 revision `0675e733e7b9105927ec0ac4fad0f6aa3824c122`；真实签名、严格幂等、plain JSON-like、junction 逃逸与安全清理通过；规格 Review PASS；代码质量 Review PASS；dev 两组测试通过 |
 | Phase B Task 7A requirement 修复 Candidate | revision `d2a84d2926eb1a9250a8de6d22301d957acb4a26`；usage/workflow/generated persist/generated phase/project store 五组测试通过；等待双复审 |
