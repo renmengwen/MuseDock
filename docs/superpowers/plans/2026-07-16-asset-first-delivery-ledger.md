@@ -67,7 +67,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
-| B-06a GitHub 页面截图 producer | `frozen_for_review` | B-01、B-02 | - | Candidate 已冻结；等待同 revision 双 Review |
+| B-06a GitHub 页面截图 producer | `changes_requested` | B-01、B-02 | - | 旧 revision 失效；原 Worker 修复安全与 fake 边界 |
 | B-06b 受控 derived 素材登记 | `leased` | B-01 | - | 独立 worktree TDD；冻结后双 Review |
 | B-07a requirement 分类语义 | `leased` | B-01 | - | 独立 worktree TDD；冻结后双 Review |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
@@ -80,7 +80,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: B-06a
-status: frozen_for_review
+status: changes_requested
 owner: /root/task4_readonly_spec
 base_commit: 7a377550669a91fc9616dd4befda56cf7ad1a985
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06a
@@ -98,6 +98,7 @@ exclusive_resources:
   - B-06a fake Playwright tests run serially inside the worker worktree
   - no real Chromium, ports, ffmpeg or frontend build
 frozen_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:f76f3afdf92619def2791ae2515c89ab81d006ff
+revision_valid: false
 changed_paths:
   - server/services/creative/pageCaptureAssets.js
   - server/services/creative/creativeSourcePrep.js
@@ -106,8 +107,14 @@ verification:
   - node tests/test-page-capture-assets.js
   - node tests/test-creative-workflows.js
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  quality: changes_requested
+review_findings:
+  - source prep 捕获同步 throw、rejected Promise 与缺方法
+  - allowlist 限制默认 HTTPS 端口、credentials、lookalike 与 redirect document
+  - fake 驱动真实 route/redirect/2xx 生命周期并证明 route 先于 goto
+  - 截图前有界等待 load，超时仍 finally 清理
+  - 默认 writer 覆盖 rename 临时文件清理与 symlink/junction 越界；Buffer 不重复复制
 ```
 
 ```yaml
