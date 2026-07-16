@@ -29,7 +29,8 @@ assert.strictEqual(
   selectMotionPrimitive({ kind: 'text', narration_text: '为什么会这样？因为……所以……' }).preset,
   'cause_chain',
 );
-assert.strictEqual(selectMotionPrimitive({ kind: 'text' }).preset, 'concept_card');
+// P0-1：普通 text 不再兜底 concept_card，返回 null（下方专项用例覆盖全部分支）
+assert.strictEqual(selectMotionPrimitive({ kind: 'text' }), null);
 // placement 必须来自该 primitive 的合法 placements
 {
   const pick = selectMotionPrimitive({ kind: 'steps' });
@@ -589,5 +590,25 @@ const { hasRealOverlayElement } = require('../server/services/creative-video/htm
   // 完整注释行为回归：注释剥除后，后续真实节点仍要认
   const afterClosedComment = '<!-- note --><div data-mp-overlay="key_marker"></div>';
   assert.strictEqual(hasRealOverlayElement(afterClosedComment), true, '完整注释之后的真实 overlay 必须识别');
+}
+// P0-1：只有明确结构类型才给 primitive，普通图片讲解与已表达 diagram 返回 null
+{
+  const { selectMotionPrimitive } = require('../server/services/creative-video/html-video/motionPrimitiveCatalog');
+  assert.strictEqual(selectMotionPrimitive({ kind: 'steps' }).preset, 'three_step_flow');
+  assert.strictEqual(selectMotionPrimitive({ kind: 'comparison' }).preset, 'stat_compare');
+  assert.strictEqual(selectMotionPrimitive({ kind: 'data' }).preset, 'stat_compare');
+  assert.strictEqual(selectMotionPrimitive({ kind: 'quote' }).preset, 'key_marker');
+  assert.strictEqual(selectMotionPrimitive({ kind: 'text', visual_text: { cards: ['a', 'b', 'c'] } }).preset, 'checklist');
+  assert.strictEqual(
+    selectMotionPrimitive({ kind: 'text', narration_text: '为什么会这样，因为原因', base_type: 'generated_image' }).preset,
+    'cause_chain',
+  );
+  assert.strictEqual(
+    selectMotionPrimitive({ kind: 'text', narration_text: '为什么会这样，因为原因', base_type: 'diagram' }),
+    null,
+  );
+  assert.strictEqual(selectMotionPrimitive({ kind: 'text' }), null);
+  assert.strictEqual(selectMotionPrimitive({ kind: 'text', base_type: 'diagram' }), null);
+  console.log('P0-1 selectMotionPrimitive optional tests passed');
 }
 console.log('motion primitive catalog tests passed');

@@ -47,14 +47,16 @@ const CAUSE_HINT = /(为什么|因为|所以|导致|原因|机制)/;
 
 function selectMotionPrimitive(beat = {}) {
   const kind = beat.kind || 'text';
+  const isDiagramBase = beat.base_type === 'diagram';
   const cards = Array.isArray(beat.visual_text?.cards) ? beat.visual_text.cards.filter(Boolean) : [];
-  let preset;
+  let preset = null;
   if (kind === 'steps') preset = 'three_step_flow';
   else if (kind === 'comparison' || kind === 'data') preset = 'stat_compare';
   else if (kind === 'quote') preset = 'key_marker';
   else if (cards.length >= 3) preset = 'checklist';
-  else if (CAUSE_HINT.test(String(beat.narration_text || ''))) preset = 'cause_chain';
-  else preset = 'concept_card';
+  else if (!isDiagramBase && CAUSE_HINT.test(String(beat.narration_text || ''))) preset = 'cause_chain';
+  // 普通图片讲解 / 已由 diagram 表达的 beat：不叠 primitive
+  if (!preset) return null;
   return {
     preset,
     placement: MOTION_PRIMITIVES[preset].placements[0],

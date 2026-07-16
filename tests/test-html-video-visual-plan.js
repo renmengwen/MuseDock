@@ -129,11 +129,28 @@ assert.equal(noDurationPlan.beats[0].duration_sec, 6);
 // ===== 模块2：asset_first motion 编排字段 =====
 const { assignMotionOrchestration } = require('../server/services/creative-video/html-video/visualPlanService');
 
+// P0-1：只有明确结构类型的 beat 有 motion_overlay，普通图片 beat 为 null
+// （原"每个 beat 必须有 preset"契约已废止，规格 §7.3/§16 P0-1）
+{
+  const plan = { beats: [
+    { id: 'b_text', scene_id: 's1', kind: 'text', asset_refs: [{ asset_id: 'gen_s1' }] },
+    { id: 'b_steps', scene_id: 's2', kind: 'steps', asset_refs: [{ asset_id: 'gen_s2' }] },
+  ] };
+  assignMotionOrchestration(plan, { styleProfile: null });
+  assert.strictEqual(plan.beats[0].motion_overlay, null, '普通图片 text beat overlay 应为 null');
+  assert.ok(plan.beats[1].motion_overlay && plan.beats[1].motion_overlay.preset === 'three_step_flow', 'steps beat 仍有 overlay');
+  assert.ok(plan.beats[0].visual_base && plan.beats[0].visual_base.type === 'generated_image');
+  console.log('P0-1 assignMotionOrchestration null tests passed');
+}
+
+// P0-1 补充：结构类型 beat（steps）仍写入 theme_tokens / continuity / visual_base
+// （保留原用例块的 R5 theme_tokens 回归与 continuity 覆盖，仅把承载 overlay 的 beat 换成结构类型）
 {
   const visualPlan = {
     beats: [
-      { id: 'scene_02_b1', scene_id: 'scene_02', kind: 'text', duration_sec: 5.67,
+      { id: 'scene_02_b1', scene_id: 'scene_02', kind: 'steps', duration_sec: 5.67,
         asset_refs: [{ asset_id: 'gen_scene_02', usage: 'subject' }] },
+      // P0-1：同场景普通图片 text beat 不再强制叠卡
       { id: 'scene_02_b2', scene_id: 'scene_02', kind: 'text', duration_sec: 5.67,
         asset_refs: [{ asset_id: 'gen_scene_02', usage: 'subject' }] },
       { id: 'scene_04_b1', scene_id: 'scene_04', kind: 'text', duration_sec: 5.97, asset_refs: [] },
@@ -152,7 +169,7 @@ const { assignMotionOrchestration } = require('../server/services/creative-video
   assert.strictEqual(b1.visual_base.type, 'generated_image');
   assert.strictEqual(b1.visual_base.asset_id, 'gen_scene_02');
   assert.strictEqual(b1.visual_base.continuity_group, 'scene_02');
-  assert.ok(b1.motion_overlay.preset, '每个 beat 必须有 motion_overlay.preset');
+  assert.strictEqual(b1.motion_overlay.preset, 'three_step_flow', 'steps beat 仍有 motion_overlay.preset');
   assert.strictEqual(b1.motion_overlay.avoid_caption_bottom_px, 140);
   const [bg, fg, accent] = realPlan.style_profile.palette;
   assert.strictEqual(b1.motion_overlay.theme_tokens.background, bg);
@@ -166,11 +183,16 @@ const { assignMotionOrchestration } = require('../server/services/creative-video
   );
   assert.strictEqual(visualPlan.beats[1].continuity.beat_index, 2);
 
-  // 无图 beat：visual_base.type = diagram，不能留空
+  // P0-1：普通图片 text beat overlay 为 null，但 visual_base 照常写入
+  const b2 = visualPlan.beats[1];
+  assert.strictEqual(b2.motion_overlay, null, '普通图片 text beat overlay 应为 null');
+  assert.strictEqual(b2.visual_base.type, 'generated_image');
+
+  // 无图 beat：visual_base.type = diagram，不能留空；diagram base 不叠卡 → overlay null
   const b3 = visualPlan.beats[2];
   assert.strictEqual(b3.visual_base.type, 'diagram');
   assert.strictEqual(b3.visual_base.asset_id, null);
-  assert.ok(b3.motion_overlay.preset);
+  assert.strictEqual(b3.motion_overlay, null, 'diagram base beat overlay 应为 null');
 }
 
 console.log('visual plan motion orchestration tests passed');

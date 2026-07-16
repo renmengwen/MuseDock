@@ -393,9 +393,20 @@ const stubAiImageModel = { isConfigured: async () => false };
     for (const node of graphNodes) {
       const vb = node.metadata?.visual_beat;
       assert.ok(vb && vb.id === node.beat_id, 'node.metadata.visual_beat 必须存在且与 beat_id 一致');
-      assert.ok(vb.motion_overlay?.preset, 'asset_first 下 visual_beat 必须含 motion_overlay');
+      // P0-1：motion_overlay 改为可选——结构类型 beat 有 overlay，普通图片/diagram beat 为 null；
+      // 无论如何都不得是 undefined 或缺 preset 的畸形对象（规格 §16 P0-1）
+      assert.ok(
+        vb.motion_overlay === null || (vb.motion_overlay && typeof vb.motion_overlay.preset === 'string' && vb.motion_overlay.preset.length > 0),
+        `motion_overlay 必须为 null 或带合法 preset：${JSON.stringify(vb.motion_overlay)}`,
+      );
       assert.ok(!vb.source_scene, 'visual_beat 不得携带 source_scene（体积与序列化考虑）');
     }
+    // P0-1：结构类型 beat（scene_data=data / scene_quote=quote）仍应叠 overlay，
+    // 证明 overlay 编排在放开可选后没有整体失效
+    assert.ok(
+      graphNodes.some(node => node.metadata?.visual_beat?.motion_overlay?.preset),
+      '结构类型 beat 应仍带 motion_overlay（overlay 编排未整体失效）',
+    );
   }
 
   // R4：帧统计必须活过 attachVisualRouting 的覆盖，出现在最终 project.json

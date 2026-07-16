@@ -178,15 +178,17 @@ function assignMotionOrchestration(visualPlan = {}, { styleProfile = null } = {}
     beat.visual_base = assetId
       ? { type: 'generated_image', asset_id: assetId, fit: 'contain', role: 'main_visual', continuity_group: beat.scene_id }
       : { type: 'diagram', asset_id: null, fit: 'contain', role: 'main_visual', continuity_group: beat.scene_id };
-    const pick = selectMotionPrimitive(beat);
-    beat.motion_overlay = {
-      preset: pick.preset,
-      placement: pick.placement,
-      density: 'medium',
-      max_items: pick.max_items,
-      avoid_caption_bottom_px: CAPTION_SAFE_BOTTOM_PX,
-      theme_tokens: { ...themeTokens },
-    };
+    const pick = selectMotionPrimitive({ ...beat, base_type: beat.visual_base.type === 'diagram' ? 'diagram' : 'image' });
+    beat.motion_overlay = pick
+      ? {
+        preset: pick.preset,
+        placement: pick.placement,
+        density: 'medium',
+        max_items: pick.max_items,
+        avoid_caption_bottom_px: CAPTION_SAFE_BOTTOM_PX,
+        theme_tokens: { ...themeTokens },
+      }
+      : null;
     beat.continuity = {
       group_id: beat.scene_id,
       reuse_base_layout: true,
