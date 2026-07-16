@@ -4,6 +4,17 @@ const path = require('path');
 
 const { ensureMotionOverlay } = require('../server/services/creative-video/html-video/frameHtmlPhase');
 
+// P0-3：未规划 motion overlay 时不得确定性注入 primitive。
+{
+  const html = '<html><body><div class="hero">主视觉</div></body></html>';
+  const nullResult = ensureMotionOverlay(html, { motion_overlay: null });
+  assert.strictEqual(nullResult.injected, false);
+  assert.strictEqual(nullResult.html, html);
+  const missingResult = ensureMotionOverlay(html, {});
+  assert.strictEqual(missingResult.injected, false);
+  assert.strictEqual(missingResult.html, html);
+}
+
 // 缺失 overlay：注入片段 + 填 slot + 设置主题 token 变量
 {
   const beat = {
