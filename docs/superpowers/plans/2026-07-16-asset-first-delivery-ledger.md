@@ -65,7 +65,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-02 现有 producer 统一接入 | `complete` | B-01 | `b3b4fe2` | - |
 | B-03 上传暂存与任务认领 | `complete` | B-01 | `769d178` | - |
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
-| B-04b 上传 UI、缩略图、required 控件与 loading | `frozen_for_review` | B-04a | - | 测试修正后新 Candidate 已冻结；等待双复审 |
+| B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `queued` | B-02、B-03 | - | B-04b 后串行实现 |
 | B-06 页面截图与衍生素材 producer | `queued` | B-01、B-02 | - | B-05 后串行实现 |
 | B-07 requirement 语义与 Phase B 门禁 | `queued` | B-04b、B-05、B-06 | - | Phase B 全量验证 |
@@ -76,56 +76,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ## 当前写租约
 
-```yaml
-task_id: B-04b
-status: frozen_for_review
-owner: /root/dependency_boundary_audit
-base_commit: 6bab504579a59ce8f98ed5a6013943d855060a94
-worktree: D:\code3\MuseDock-worktrees\asset-first-b04b
-branch: codex/asset-first-b04b
-allowed_paths:
-  - frontend-react/src/api/client.js
-  - frontend-react/src/components/creative/CreativeComposer.jsx
-  - frontend-react/src/pages/OneClickCreativePage.jsx
-  - tests/test-creative-upload-ui.mjs
-  - tests/test-one-click-creative-page.mjs
-forbidden_paths:
-  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
-state_owners:
-  - creative_composer.uploaded_assets
-  - creative_composer.asset_request_state
-  - creative_workflow_create.asset_ids
-exclusive_resources:
-  - musedock-frontend-build
-  - B-04b frontend source tests run serially inside the worker worktree
-invalidated_revisions:
-  - git-index-tree-v1:6bab504579a59ce8f98ed5a6013943d855060a94:15a07a0ec323ef58db9e34c8915dc0032ad972c0
-  - git-index-tree-v1:6bab504579a59ce8f98ed5a6013943d855060a94:b89e077ae0c49932f77a644cea2348b8f6824648
-frozen_revision: git-index-tree-v1:6bab504579a59ce8f98ed5a6013943d855060a94:675f1ca41a4d72eb2fcef69c385f5cde6da72b94
-revision_valid: true
-changed_paths:
-  - frontend-react/src/api/client.js
-  - frontend-react/src/components/creative/CreativeComposer.jsx
-  - frontend-react/src/pages/OneClickCreativePage.jsx
-  - tests/test-creative-upload-ui.mjs
-  - tests/test-one-click-creative-page.mjs
-verification:
-  - node tests/test-creative-upload-ui.mjs
-  - node tests/test-one-click-creative-page.mjs
-  - npm run build:frontend
-review:
-  spec: pending_re_review
-  quality: pending_re_review
-resolved_findings:
-  - create 失败按 workflow_id 区分清理已认领素材或保留可重试素材
-  - 上传响应缺少 upload_id 进入 failed
-  - 三种 loading 使用 live status，错误继续 alert
-  - 测试分别覆盖 checkbox/delete 禁用及 workflow ID 前后的清理时机
-resolved_test_finding:
-  - missing workflow ID 完整分支不含 clear，正常 clear 位于分支之后，并用 mutation fixture 证明断言有效
-```
-
-Worker 禁止修改本 Ledger 和 B-04a 后端路径。发现响应契约不匹配或需要租约外文件时返回 `scope_expansion_required`。前端构建必须持有本租约并串行运行。
+当前无业务代码写租约。B-04b 已集成到 `dev` 并释放前端构建资源；下一写任务为 B-05。
 
 ## Phase A 审计分工
 
@@ -181,7 +132,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 
 | ID | 状态 | 要求 | 覆盖 Task |
 |---|---|---|---|
-| REQ-B-01 | `pending` | 创作输入区暂存上传、缩略图和 preferred/required 控件 | B-04a、B-04b |
+| REQ-B-01 | `verified` | 创作输入区暂存上传、缩略图和 preferred/required 控件 | B-04a、B-04b |
 | REQ-B-02 | `verified` | 创建任务时认领上传素材 | B-03 |
 | REQ-B-03 | `verified` | 任务创建后立即可查看已认领素材 | B-03 |
 | REQ-B-04 | `pending` | 文章图、GitHub/README 图、允许的页面截图、AI 生图、Pexels/search 和衍生图统一进入 `asset_context.assets` | B-02、B-06 |
@@ -260,5 +211,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase B Task 2 现有 producer 统一接入 | `b3b4fe2`；source/generated/workflow/usage/project-store 共七组测试通过；规格 Review PASS；代码质量 Review PASS |
 | Phase B Task 3 上传暂存与任务认领 | `769d178`；真实 PNG/JPEG/WebP、HTTP 413、Douyin 路径、原子回滚、TTL/配额测试通过；规格 Review PASS；代码质量 Review PASS |
 | Phase B Task 4A 暂存 requirement 更新 | `c63ac1b`；冻结 revision `git-index-tree-v1:a8b8220:12383438760a1e56c2329d77e129ca9a02f5e0dc`；upload service 与 route 测试在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；旧 revision `dd1744aa…` 已失效 |
+| Phase B Task 4B 上传 UI | `f9ae697`；冻结 revision `git-index-tree-v1:6bab504:675f1ca41a4d72eb2fcef69c385f5cde6da72b94`；两组前端源码测试与 `npm run build:frontend` 在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；既有 >500kB chunk warning 保留 |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
