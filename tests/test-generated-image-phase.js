@@ -75,6 +75,21 @@ async function run() {
   assert.strictEqual(rerun.generated_count, 0);
   assert.strictEqual(generateCalled, false);
 
+  let formalGenerateCalled = false;
+  const formalRerun = await phase.runGeneratedImagePhase({
+    sceneSpec,
+    creativeContext: {
+      asset_context: { assets: [{ id: 'formal_gen_scene_01', origin: 'ai_generated', path: 'assets/formal.png', generation: { scene_id: 'scene_01' } }] },
+    },
+    projectDir,
+    services: {
+      generatedImagePlanner: { planGeneratedImages: async () => ({ success: true, plans: [{ scene_id: 'scene_01', generation_prompt: '重复' }] }) },
+      aiImageModel: { ...stubModelNoCheck, generateImages: async () => { formalGenerateCalled = true; return { success: false, images: [] }; } },
+    },
+  });
+  assert.strictEqual(formalRerun.generated_count, 0);
+  assert.strictEqual(formalGenerateCalled, false);
+
   const result = await phase.runGeneratedImagePhase({
     sceneSpec,
     creativeContext: baseContext(),
@@ -120,6 +135,131 @@ async function run() {
   });
   assert.strictEqual(hydrated.asset_context.assets[0].id, 'gen_scene_01');
   assert.ok(hydrated.asset_context.assets[0].local_path.endsWith('generated-image-01-abc.png'));
+
+  fs.writeFileSync(path.join(hydrateDir, 'assets', 'formal-generated.png'), 'png');
+  fs.writeFileSync(path.join(hydrateDir, 'assets', 'formal-conflict.png'), 'png');
+  const formalHydrated = phase.hydrateGeneratedAssetsFromProject({
+    project: {
+      assets: [
+        { id: 'formal_generated', origin: 'ai_generated', path: 'assets/formal-generated.png', generation: { scene_id: 'scene_01' } },
+        { id: 'formal_conflict', origin: 'source_extract', source: 'generated', path: 'assets/formal-conflict.png', generation: { scene_id: 'scene_02' } },
+      ],
+    },
+    creativeContext: baseContext(),
+    projectDir: hydrateDir,
+  });
+  assert.deepStrictEqual(formalHydrated.asset_context.assets.map(item => item.id), ['formal_generated']);
+
+  fs.writeFileSync(path.join(hydrateDir, 'assets', 'formal-existing.png'), 'png');
+  const existingRuntimePath = path.join(hydrateDir, 'runtime-existing.png');
+  const sameIdHydrated = phase.hydrateGeneratedAssetsFromProject({
+    project: {
+      assets: [{
+        id: 'same_generated',
+        source: 'generated',
+        media_type: 'image',
+        origin: 'ai_generated',
+        origin_detail: 'scene_main_visual',
+        provider: 'openai',
+        requirement: 'required',
+        evidence_class: 'synthetic',
+        status: 'ready',
+        path: 'assets/formal-existing.png',
+        generation: { scene_id: 'scene_01' },
+      }],
+    },
+    creativeContext: {
+      asset_context: {
+        assets: [{
+          id: 'same_generated',
+          source: 'generated',
+          path: 'assets/runtime-existing.png',
+          frame_src: '../assets/runtime-existing.png',
+          local_path: existingRuntimePath,
+          generation: { scene_id: 'scene_01' },
+        }],
+      },
+    },
+    projectDir: hydrateDir,
+  });
+  assert.equal(sameIdHydrated.asset_context.assets.length, 1);
+  assert.equal(sameIdHydrated.asset_context.assets[0].path, 'assets/runtime-existing.png');
+  assert.equal(sameIdHydrated.asset_context.assets[0].frame_src, '../assets/runtime-existing.png');
+  assert.equal(sameIdHydrated.asset_context.assets[0].local_path, existingRuntimePath);
+  assert.equal(sameIdHydrated.asset_context.assets[0].origin, 'ai_generated');
+  assert.equal(sameIdHydrated.asset_context.assets[0].requirement, 'required');
+  assert.equal(sameIdHydrated.asset_context.assets[0].evidence_class, 'synthetic');
+  assert.equal(sameIdHydrated.asset_context.assets[0].status, 'ready');
+
+  fs.writeFileSync(path.join(hydrateDir, 'assets', 'formal-project-conflict.png'), 'png');
+  const formalProjectConflictRuntimePath = path.join(hydrateDir, 'runtime-project-conflict.png');
+  const formalProjectConflict = phase.hydrateGeneratedAssetsFromProject({
+    project: {
+      assets: [{
+        id: 'formal_project_conflict',
+        origin: 'ai_generated',
+        requirement: 'required',
+        evidence_class: 'synthetic',
+        status: 'ready',
+        path: 'assets/formal-project-conflict.png',
+        generation: { scene_id: 'scene_01' },
+      }],
+    },
+    creativeContext: {
+      asset_context: {
+        assets: [{
+          id: 'formal_project_conflict',
+          source: 'article',
+          path: 'assets/runtime-project-conflict.png',
+          frame_src: '../assets/runtime-project-conflict.png',
+          local_path: formalProjectConflictRuntimePath,
+          generation: { scene_id: 'scene_01' },
+        }],
+      },
+    },
+    projectDir: hydrateDir,
+  });
+  assert.equal(formalProjectConflict.asset_context.assets[0].path, 'assets/runtime-project-conflict.png');
+  assert.equal(formalProjectConflict.asset_context.assets[0].frame_src, '../assets/runtime-project-conflict.png');
+  assert.equal(formalProjectConflict.asset_context.assets[0].local_path, formalProjectConflictRuntimePath);
+  assert.equal(formalProjectConflict.asset_context.assets[0].origin, 'ai_generated');
+  assert.equal(formalProjectConflict.asset_context.assets[0].requirement, 'required');
+  assert.equal(formalProjectConflict.asset_context.assets[0].source, undefined);
+
+  fs.writeFileSync(path.join(hydrateDir, 'assets', 'legacy-project-conflict.png'), 'png');
+  const runtimeFormalConflictPath = path.join(hydrateDir, 'runtime-formal-conflict.png');
+  const runtimeFormalConflict = phase.hydrateGeneratedAssetsFromProject({
+    project: {
+      assets: [{
+        id: 'runtime_formal_conflict',
+        source: 'generated',
+        path: 'assets/legacy-project-conflict.png',
+        generation: { scene_id: 'scene_01' },
+      }],
+    },
+    creativeContext: {
+      asset_context: {
+        assets: [{
+          id: 'runtime_formal_conflict',
+          origin: 'source_extract',
+          requirement: 'required',
+          evidence_class: 'direct_source',
+          status: 'ready',
+          path: 'assets/runtime-formal-conflict.png',
+          frame_src: '../assets/runtime-formal-conflict.png',
+          local_path: runtimeFormalConflictPath,
+          generation: { scene_id: 'scene_01' },
+        }],
+      },
+    },
+    projectDir: hydrateDir,
+  });
+  assert.equal(runtimeFormalConflict.asset_context.assets[0].path, 'assets/runtime-formal-conflict.png');
+  assert.equal(runtimeFormalConflict.asset_context.assets[0].frame_src, '../assets/runtime-formal-conflict.png');
+  assert.equal(runtimeFormalConflict.asset_context.assets[0].local_path, runtimeFormalConflictPath);
+  assert.equal(runtimeFormalConflict.asset_context.assets[0].origin, 'source_extract');
+  assert.equal(runtimeFormalConflict.asset_context.assets[0].requirement, 'required');
+  assert.equal(runtimeFormalConflict.asset_context.assets[0].source, undefined);
 
   const plannerFailed = await phase.runGeneratedImagePhase({
     sceneSpec,

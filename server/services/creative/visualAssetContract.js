@@ -17,6 +17,23 @@ const EVIDENCE_CLASSES = new Set([
 ]);
 const MEDIA_TYPES = new Set(['image', 'video']);
 const STATUSES = new Set(['ready', 'rejected']);
+const FORMAL_FIELDS = [
+  'media_type',
+  'origin',
+  'origin_detail',
+  'provider',
+  'requirement',
+  'evidence_class',
+  'status',
+  'parent_asset_id',
+];
+const FORMAL_ENUMS = {
+  media_type: MEDIA_TYPES,
+  origin: ORIGINS,
+  requirement: REQUIREMENTS,
+  evidence_class: EVIDENCE_CLASSES,
+  status: STATUSES,
+};
 
 const PROFILE_BY_ORIGIN = {
   user_upload: {
@@ -73,6 +90,29 @@ const LEGACY_SOURCE_DETAIL = {
 
 function safeString(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isGeneratedVisualAsset(asset = {}) {
+  const origin = safeString(asset.origin);
+  return origin ? origin === 'ai_generated' : safeString(asset.source) === 'generated';
+}
+
+function mergeVisualAssetFormalFields(runtime = {}, formal = {}) {
+  const merged = { ...runtime };
+  for (const field of FORMAL_FIELDS) {
+    const value = safeString(formal[field]);
+    if (!value) continue;
+    const allowed = FORMAL_ENUMS[field];
+    const normalized = field === 'origin' ? value : value.toLowerCase();
+    if (!allowed || allowed.has(normalized)) merged[field] = normalized;
+  }
+  const origin = safeString(merged.origin);
+  const legacySource = safeString(merged.source).toLowerCase();
+  if (ORIGINS.has(origin) && LEGACY_SOURCE_TO_ORIGIN[legacySource]
+    && LEGACY_SOURCE_TO_ORIGIN[legacySource] !== origin) {
+    delete merged.source;
+  }
+  return merged;
 }
 
 function invalidField(assetId, label) {
@@ -206,6 +246,8 @@ module.exports = {
   EVIDENCE_CLASSES,
   MEDIA_TYPES,
   STATUSES,
+  isGeneratedVisualAsset,
+  mergeVisualAssetFormalFields,
   normalizeVisualAsset,
   mergeVisualAssets,
   mergeVisualAssetContexts,

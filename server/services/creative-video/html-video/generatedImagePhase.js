@@ -4,7 +4,12 @@ const defaultAiImageModel = require('../../ai/aiImageModel');
 const defaultPlanner = require('../../creative/generatedImagePlanner');
 const projectStore = require('./projectStore');
 const { createDiagnostic } = require('./diagnostics');
-const { mergeVisualAssets, normalizeVisualAsset } = require('../../creative/visualAssetContract');
+const {
+  isGeneratedVisualAsset,
+  mergeVisualAssetFormalFields,
+  mergeVisualAssets,
+  normalizeVisualAsset,
+} = require('../../creative/visualAssetContract');
 
 const SIZE_BY_ASPECT_RATIO = {
   '9:16': '1600x2848',
@@ -62,7 +67,7 @@ function warningDiagnostic(code, userMessage, details = {}) {
 
 function generatedSceneIdSet(assets = []) {
   return new Set((Array.isArray(assets) ? assets : [])
-    .filter(asset => asset?.source === 'generated')
+    .filter(isGeneratedVisualAsset)
     .map(asset => safeString(asset?.generation?.scene_id))
     .filter(Boolean));
 }
@@ -239,15 +244,15 @@ async function runGeneratedImagePhase({
 
 function hydrateGeneratedAssetsFromProject({ project, creativeContext = {}, projectDir } = {}) {
   const generated = (Array.isArray(project?.assets) ? project.assets : [])
-    .filter(asset => asset?.source === 'generated' && safeString(asset?.generation?.scene_id));
+    .filter(asset => isGeneratedVisualAsset(asset) && safeString(asset?.generation?.scene_id));
   if (!generated.length || !projectDir) return creativeContext;
   const assetContext = objectOrEmpty(creativeContext.asset_context);
   const existing = Array.isArray(assetContext.assets) ? assetContext.assets : [];
-  const existingIds = new Set(existing.map(asset => safeString(asset?.id)).filter(Boolean));
+  const existingById = new Map(existing.map(asset => [safeString(asset?.id), asset]));
   const hydrated = [];
   for (const asset of generated) {
     const id = safeString(asset.id);
-    if (!id || existingIds.has(id)) continue;
+    if (!id) continue;
     const relative = safeString(asset.path);
     if (!relative) continue;
     let localPath;
@@ -257,18 +262,23 @@ function hydrateGeneratedAssetsFromProject({ project, creativeContext = {}, proj
       continue;
     }
     if (!fs.existsSync(localPath)) continue;
-    hydrated.push({
+    const projectAsset = {
       ...asset,
       local_path: localPath,
       frame_src: `../${relative}`,
-    });
+    };
+    const runtimeAsset = existingById.get(id);
+    hydrated.push(runtimeAsset
+      ? mergeVisualAssetFormalFields({ ...projectAsset, ...runtimeAsset, id }, asset)
+      : projectAsset);
   }
   if (!hydrated.length) return creativeContext;
+  const hydratedIds = new Set(hydrated.map(asset => safeString(asset.id)));
   return {
     ...creativeContext,
     asset_context: {
       ...assetContext,
-      assets: mergeVisualAssets(existing, hydrated),
+      assets: mergeVisualAssets(existing.filter(asset => !hydratedIds.has(safeString(asset?.id))), hydrated),
     },
   };
 }

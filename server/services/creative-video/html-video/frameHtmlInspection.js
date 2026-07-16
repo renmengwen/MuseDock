@@ -1,3 +1,5 @@
+const { isGeneratedVisualAsset } = require('../../creative/visualAssetContract');
+
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
@@ -66,12 +68,31 @@ function htmlReferencesAsset(referenceSet, tokens = []) {
 }
 
 function resolveExpectedFrameAsset(node = {}, creativeContext = {}) {
-  const ref = (Array.isArray(node.asset_refs) ? node.asset_refs : []).find(item => item && item.asset_id);
-  if (!ref) return null;
   const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
-  const asset = assets.find(item => String(item?.id || item?.asset_id || '') === String(ref.asset_id || ''));
-  if (!asset) return null;
-  return { ref, asset };
+  const byId = new Map(assets.map(asset => [String(asset?.id || asset?.asset_id || ''), asset]));
+  let first = null;
+  for (const ref of (Array.isArray(node.asset_refs) ? node.asset_refs : [])) {
+    const asset = byId.get(String(ref?.asset_id || ref?.id || ''));
+    if (!asset) continue;
+    if (asset.requirement === 'required') return { ref, asset };
+    if (!first) first = { ref, asset };
+  }
+  return first;
+}
+
+function resolveRequiredFrameAssets(node = {}, creativeContext = {}) {
+  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
+  const byId = new Map(assets.map(asset => [String(asset?.id || asset?.asset_id || ''), asset]));
+  const required = [];
+  for (const ref of (Array.isArray(node.asset_refs) ? node.asset_refs : [])) {
+    const asset = byId.get(String(ref?.asset_id || ref?.id || ''));
+    if (asset?.requirement === 'required') required.push({ ref, asset });
+  }
+  return required;
+}
+
+function resolveRequiredFrameAsset(node = {}, creativeContext = {}) {
+  return resolveRequiredFrameAssets(node, creativeContext)[0] || null;
 }
 
 function validateFrameAssetUsage(html = '', { node = {}, creativeContext = {} } = {}) {
@@ -92,11 +113,11 @@ function validateFrameAssetUsage(html = '', { node = {}, creativeContext = {} } 
     };
   }
 
-  const expected = resolveExpectedFrameAsset(node, creativeContext);
+  const expected = resolveRequiredFrameAssets(node, creativeContext)
+    .find(item => !htmlReferencesAsset(references, assetReferenceTokens(item.asset)));
   if (!expected) return { success: true };
   const tokens = assetReferenceTokens(expected.asset);
-  if (htmlReferencesAsset(references, tokens)) return { success: true };
-  const missingLabel = expected.asset.source === 'generated' ? '本帧推荐生成图片' : '本帧推荐来源图片';
+  const missingLabel = isGeneratedVisualAsset(expected.asset) ? '本帧推荐生成图片' : '本帧推荐来源图片';
   return {
     success: false,
     code: 'frame_html_required_source_asset_missing',
@@ -294,6 +315,7 @@ module.exports = {
   objectOrEmpty,
   compactText,
   resolveExpectedFrameAsset,
+  resolveRequiredFrameAsset,
   validateFrameAssetUsage,
   resolveSceneForFrame,
   overlapExpectedTexts,

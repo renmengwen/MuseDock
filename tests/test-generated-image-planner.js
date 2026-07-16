@@ -18,6 +18,13 @@ async function run() {
       assets: [
         { id: 'article_01', source: 'article', alt: '骑手照片' },
         { id: 'search_01', source: 'search', alt: '城市夜景图库图' },
+        { id: 'formal_generated', origin: 'ai_generated', alt: '正式字段生成图' },
+        { id: 'legacy_generated', source: 'generated', alt: '旧生成图' },
+        { id: 'formal_conflict', origin: 'source_extract', source: 'generated', alt: '正式来源图' },
+        { id: 'formal_stock', origin: 'stock_search', alt: '正式字段图库图' },
+        { id: 'legacy_pexels', source: 'pexels', alt: '旧 Pexels 图库图' },
+        { id: 'formal_source_conflict', origin: 'source_extract', source: 'search', alt: '正式来源优先图' },
+        { id: 'formal_stock_conflict', origin: 'stock_search', source: 'article', alt: '正式图库优先图' },
       ],
     },
     maxScenes: 4,
@@ -28,7 +35,19 @@ async function run() {
   assert.ok(prompt.includes('不要因为存在这些图就跳过生图'));
   const articleSection = prompt.split('已有搜索补图')[0];
   assert.ok(!articleSection.includes('search_01'));
-  assert.ok(prompt.split('已有搜索补图')[1].includes('search_01'));
+  assert.ok(!articleSection.includes('formal_generated'));
+  assert.ok(!articleSection.includes('legacy_generated'));
+  assert.ok(articleSection.includes('formal_conflict'));
+  assert.ok(!articleSection.includes('formal_stock'));
+  assert.ok(!articleSection.includes('legacy_pexels'));
+  assert.ok(articleSection.includes('formal_source_conflict'));
+  assert.ok(!articleSection.includes('formal_stock_conflict'));
+  const searchSection = prompt.split('已有搜索补图')[1];
+  assert.ok(searchSection.includes('search_01'));
+  assert.ok(searchSection.includes('formal_stock'));
+  assert.ok(searchSection.includes('legacy_pexels'));
+  assert.ok(!searchSection.includes('formal_source_conflict'));
+  assert.ok(searchSection.includes('formal_stock_conflict'));
 
   const parsed = planner.parsePlannerResponse(JSON.stringify({
     plans: [

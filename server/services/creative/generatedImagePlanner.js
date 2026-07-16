@@ -1,9 +1,17 @@
 const defaultAiTextModel = require('../ai/aiTextModel');
+const { isGeneratedVisualAsset } = require('./visualAssetContract');
 
 const DEFAULT_MAX_SCENES = 4;
 
 function safeString(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isStockSearchVisualAsset(asset = {}) {
+  const origin = safeString(asset.origin);
+  return origin
+    ? origin === 'stock_search'
+    : ['search', 'pexels'].includes(safeString(asset.source).toLowerCase());
 }
 
 function sceneIdSet(sceneSpec = {}) {
@@ -20,8 +28,8 @@ function buildPlannerPrompt({ sceneSpec = {}, assetContext = {}, maxScenes = DEF
     return `- ${scene.id}：${safeString(scene.narration_text).slice(0, 120)}${headline ? `（画面标题：${headline}）` : ''}`;
   });
   const describeAsset = asset => `- ${safeString(asset.id)}：${safeString(asset.alt || asset.title).slice(0, 80)}`;
-  const articleAssets = assets.filter(asset => asset.source !== 'search' && asset.source !== 'generated');
-  const searchAssets = assets.filter(asset => asset.source === 'search');
+  const articleAssets = assets.filter(asset => !isStockSearchVisualAsset(asset) && !isGeneratedVisualAsset(asset));
+  const searchAssets = assets.filter(isStockSearchVisualAsset);
   const quota = Math.min(DEFAULT_MAX_SCENES, Math.max(0, Math.round(Number(maxScenes) || DEFAULT_MAX_SCENES)));
   return [
     '你是短视频主视觉规划器。请只输出严格 JSON，不要输出 Markdown、解释或额外文本。',

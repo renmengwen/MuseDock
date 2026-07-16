@@ -374,10 +374,170 @@ function fullSceneCaption(sceneId, text, duration) {
     // 反向（blocking issue 仍记 visual_qa_warning）原由死模式用例覆盖，随死模式下线，待 per_scene 用例补齐。
   }
 
+  // ===== 回归：preferred / optional / legacy 未引用不阻断完整生成流程 =====
+  {
+    const assetSourceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hv-non-required-assets-'));
+    const preferredPath = path.join(assetSourceDir, 'preferred-generated.png');
+    const optionalPath = path.join(assetSourceDir, 'optional-source.png');
+    const legacyPath = path.join(assetSourceDir, 'legacy-generated.png');
+    await Promise.all([
+      writeFile(preferredPath, 'preferred-png'),
+      writeFile(optionalPath, 'optional-png'),
+      writeFile(legacyPath, 'legacy-png'),
+    ]);
+    const nonRequiredNarration = '非必用素材未进入画面时仍应正常完成视频。';
+    const nonRequiredSpec = {
+      title: '非必用素材不阻断',
+      aspect_ratio: '16:9',
+      scenes: ['preferred', 'optional', 'legacy'].map((kind, index) => {
+        const sceneId = `scene_0${index + 1}`;
+        return {
+          id: sceneId,
+          kind: 'text',
+          duration_sec: 4,
+          narration_text: `${nonRequiredNarration}${kind}`,
+          captions: fullSceneCaption(sceneId, `${nonRequiredNarration}${kind}`, 4),
+          visual_text: { headline: `正常生成 ${kind}`, keywords: [], cards: [] },
+        };
+      }),
+    };
+    let composeCalls = 0;
+    const nonRequiredResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-non-required-assets',
+      runId: 'run-non-required-assets',
+      rootDir,
+      sceneSpec: nonRequiredSpec,
+      creativeContext: {
+        input: { raw_text: '非必用素材不阻断' },
+        continuity_mode: 'scene_html',
+        asset_context: {
+          assets: [
+            {
+              id: 'preferred_generated',
+              type: 'image',
+              media_type: 'image',
+              source: 'generated',
+              origin: 'ai_generated',
+              origin_detail: 'scene_main_visual',
+              provider: 'openai',
+              requirement: 'preferred',
+              evidence_class: 'synthetic',
+              status: 'ready',
+              path: 'assets/preferred-generated.png',
+              local_path: preferredPath,
+            },
+            {
+              id: 'optional_source',
+              type: 'image',
+              media_type: 'image',
+              source: 'article',
+              origin: 'source_extract',
+              origin_detail: 'github_readme',
+              provider: 'github',
+              requirement: 'optional',
+              evidence_class: 'direct_source',
+              status: 'ready',
+              path: 'assets/optional-source.png',
+              local_path: optionalPath,
+            },
+            {
+              id: 'legacy_generated',
+              type: 'image',
+              source: 'generated',
+              path: 'assets/legacy-generated.png',
+              local_path: legacyPath,
+            },
+          ],
+        },
+      },
+      target: { generateAudio: false, generateCaptions: true },
+      skipValidation: true,
+      services: {
+        aiImageModel: { isConfigured: async () => false },
+        aiTextModel: {
+          callTextModel: async request => {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.includes('你是 html-video 的 content graph')) {
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: '非必用素材不阻断',
+                  nodes: [
+                    { id: 'scene_01', kind: 'text', label: '正常生成 preferred', durationSec: 4, text: `${nonRequiredNarration}preferred`, asset_refs: [{ asset_id: 'preferred_generated', usage: 'subject' }] },
+                    { id: 'scene_02', kind: 'text', label: '正常生成 optional', durationSec: 4, text: `${nonRequiredNarration}optional`, asset_refs: [{ asset_id: 'optional_source', usage: 'showcase' }] },
+                    { id: 'scene_03', kind: 'text', label: '正常生成 legacy', durationSec: 4, text: `${nonRequiredNarration}legacy`, asset_refs: [{ asset_id: 'legacy_generated', usage: 'background' }] },
+                  ],
+                  edges: [],
+                }),
+              };
+            }
+            const frameId = request.audit?.frame_id || 'scene:scene_01';
+            return {
+              success: true,
+              text: `<!doctype html><html><body><main data-frame-id="${frameId}"><h1 data-text-key="headline">正常生成</h1><p data-text-key="subtitle">未使用非必用素材</p><section data-text-key="body">画面继续完成</section></main></body></html>`,
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        frameRenderer: {
+          renderFrame: async (frame, options) => {
+            await writeFile(options.outputPath, `frame:${frame.id}`);
+            return {
+              success: true,
+              frame_id: frame.id,
+              output_path: options.outputPath,
+              diagnostics: [],
+            };
+          },
+        },
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async (_frames, outputPath) => {
+            composeCalls += 1;
+            await writeFile(outputPath, 'mp4');
+            return { success: true, output_path: outputPath, strategy: 'stub' };
+          },
+          concatAudioWithFfmpeg: async () => ({ success: true, skipped: true }),
+          muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+        },
+        visualQaService: {
+          inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }),
+        },
+      },
+    });
+    assert.equal(nonRequiredResult.success, true, JSON.stringify(nonRequiredResult.diagnostics || [], null, 2));
+    assert.equal(composeCalls, 1, '非必用素材未引用时仍应正常合成');
+    assert.ok(!nonRequiredResult.diagnostics?.some(item => item.code === 'required_visual_asset_missing'));
+    assert.deepEqual(
+      nonRequiredResult.project.content_graph.nodes.map(node => node.asset_refs?.[0]?.asset_id),
+      ['preferred_generated', 'optional_source', 'legacy_generated'],
+      '非 required refs 必须由正常 content graph 产出并走过真实帧生成链',
+    );
+    assert.deepEqual(nonRequiredResult.project.asset_usage_report.required_asset_ids, []);
+    assert.deepEqual(nonRequiredResult.project.asset_usage_report.missing_required_asset_ids, []);
+    assert.deepEqual(
+      nonRequiredResult.project.asset_usage_report.unused_asset_ids,
+      ['preferred_generated', 'optional_source', 'legacy_generated'],
+    );
+    assert.equal(
+      nonRequiredResult.project.asset_usage_report.assets.find(asset => asset.asset_id === 'preferred_generated').requirement,
+      'preferred',
+    );
+    assert.equal(nonRequiredResult.project.generation_checkpoint?.stages?.compose?.status, 'done');
+    assert.ok(Object.values(nonRequiredResult.project.generation_checkpoint?.stages?.render?.frames || {})
+      .some(entry => entry?.status === 'done'));
+    const persistedNonRequired = JSON.parse(await fs.readFile(
+      path.join(nonRequiredResult.project_dir, 'project.json'),
+      'utf8',
+    ));
+    assert.deepEqual(persistedNonRequired.asset_usage_report?.required_asset_ids, []);
+    assert.deepEqual(persistedNonRequired.asset_usage_report?.missing_required_asset_ids, []);
+    assert.equal(persistedNonRequired.generation_checkpoint?.stages?.compose?.status, 'done');
+  }
+
   // ===== 回归：必用生成素材未进画面必须阻断导出（required_visual_asset_missing）=====
   // 谱系：e8000f4 展平策略概念时，阻断分支残留未定义变量 assetFirstBlocking，
   // missingRequiredAssets 命中时抛 ReferenceError、被上游吞成通用 html_video_error。
-  // 语义：asset_context 带 source='generated' 必用资产（其 generation.scene_id 已不在当前
+  // 语义：asset_context 带 requirement='required' 的 AI 生成资产（其 generation.scene_id 已不在当前
   // scene_spec，帧级 asset_refs 校验兜不住），帧 HTML 又未引用该素材路径 → 工作流终检必须
   // 返回结构化阻断失败，且阻断前工程已落盘。
   {
@@ -410,6 +570,7 @@ function fullSceneCaption(sceneId, text, duration) {
             id: 'gen_scene_removed',
             type: 'image',
             source: 'generated',
+            requirement: 'required',
             path: 'assets/gen-hero.png',
             frame_src: '../assets/gen-hero.png',
             local_path: missingAssetSourcePath,

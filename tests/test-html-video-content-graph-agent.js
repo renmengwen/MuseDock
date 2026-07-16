@@ -71,6 +71,26 @@ assert.match(prompt, /nodes\.length 必须严格等于 scene_spec\.scenes\.lengt
 assert.match(prompt, /scene_01 -> scene_02/);
 assert.match(prompt, /禁止新增、删除、合并、拆分或重排序/);
 
+const identityPrompt = agent.buildContentGraphPrompt({
+  sceneSpec,
+  creativeContext: {
+    asset_context: {
+      assets: [
+        { id: 'formal_generated', origin: 'ai_generated', path: 'assets/formal.png', generation: { scene_id: 'scene_01' } },
+        { id: 'legacy_generated', source: 'generated', path: 'assets/legacy.png', generation: { scene_id: 'scene_02' } },
+        { id: 'formal_conflict', origin: 'source_extract', source: 'generated', path: 'assets/conflict.png', generation: { scene_id: 'scene_02' } },
+      ],
+    },
+  },
+});
+const identityLines = Object.fromEntries(['formal_generated', 'legacy_generated', 'formal_conflict'].map(id => [
+  id,
+  identityPrompt.split('\n').find(line => line.includes(`asset_id=${id}`)) || '',
+]));
+assert.match(identityLines.formal_generated, /不是来源证据/);
+assert.match(identityLines.legacy_generated, /不是来源证据/);
+assert.doesNotMatch(identityLines.formal_conflict, /不是来源证据/);
+
 const retryPromptAttempt1 = agent.buildRetryPrompt(sceneSpec, creativeContext, { duration_sec: 8 }, prompt, 1);
 assert.match(retryPromptAttempt1, /scene_01/);
 assert.match(retryPromptAttempt1, /基础版价格/);
@@ -178,5 +198,41 @@ const assetFiltered = agent.normalizeContentGraph({
 assert.equal(assetFiltered.success, true);
 assert.deepEqual(assetFiltered.graph.nodes[0].asset_refs, [{ asset_id: 'article_01', usage: '', reason: '' }]);
 assert.equal(assetFiltered.graph.nodes[1].asset_refs, undefined);
+
+const evidenceAssets = [
+  { id: 'formal_direct', origin: 'source_extract', evidence_class: 'direct_source' },
+  { id: 'formal_derived', origin: 'derived', evidence_class: 'derived_source' },
+  { id: 'formal_synthetic', origin: 'source_extract', evidence_class: 'synthetic' },
+  { id: 'formal_contextual', origin: 'page_capture', evidence_class: 'contextual' },
+  { id: 'formal_user_supplied', origin: 'source_extract', evidence_class: 'user_supplied' },
+  { id: 'formal_over_legacy', origin: 'source_extract', source: 'generated', evidence_class: 'direct_source' },
+  { id: 'legacy_article', source: 'article' },
+  { id: 'legacy_generated', source: 'generated' },
+  { id: 'legacy_search', source: 'search' },
+  { id: 'legacy_unknown' },
+];
+const evidenceScenes = evidenceAssets.map((asset, index) => ({ id: `evidence_scene_${index + 1}` }));
+const evidenceResult = agent.normalizeContentGraph({
+  synopsis: '证据类型单一真值',
+  nodes: evidenceAssets.map((asset, index) => ({
+    id: evidenceScenes[index].id,
+    kind: 'text',
+    label: asset.id,
+    durationSec: 2,
+    text: asset.id,
+    asset_refs: [{ asset_id: asset.id, usage: 'evidence' }],
+  })),
+  edges: [],
+}, { scenes: evidenceScenes }, { asset_context: { assets: evidenceAssets } });
+const evidenceRefsByScene = Object.fromEntries(evidenceResult.graph.nodes.map(node => [
+  node.id,
+  node.asset_refs?.[0]?.asset_id || '',
+]));
+for (const index of [0, 1, 5, 6]) {
+  assert.equal(evidenceRefsByScene[evidenceScenes[index].id], evidenceAssets[index].id);
+}
+for (const index of [2, 3, 4, 7, 8, 9]) {
+  assert.equal(evidenceRefsByScene[evidenceScenes[index].id], '');
+}
 
 console.log('html-video content graph agent tests passed');

@@ -1,10 +1,46 @@
 const assert = require('assert');
 
 const {
+  isGeneratedVisualAsset,
+  mergeVisualAssetFormalFields,
   normalizeVisualAsset,
   mergeVisualAssets,
   mergeVisualAssetContexts,
 } = require('../server/services/creative/visualAssetContract');
+
+function testGeneratedIdentityUsesFormalOriginFirst() {
+  assert.equal(isGeneratedVisualAsset({ origin: 'ai_generated' }), true);
+  assert.equal(isGeneratedVisualAsset({ source: 'generated' }), true);
+  assert.equal(isGeneratedVisualAsset({ origin: 'source_extract', source: 'generated' }), false);
+  assert.equal(isGeneratedVisualAsset({ origin: 'ai_generated', source: 'article' }), true);
+}
+
+function testFormalMergeRejectsInvalidEnums() {
+  const runtime = {
+    media_type: 'image',
+    origin: 'user_upload',
+    origin_detail: 'creative_input',
+    provider: 'local',
+    requirement: 'required',
+    evidence_class: 'user_supplied',
+    status: 'ready',
+    parent_asset_id: 'runtime_parent',
+  };
+  assert.deepEqual(mergeVisualAssetFormalFields(runtime, {
+    media_type: 'bogus',
+    origin: 'bogus',
+    origin_detail: '  project_detail  ',
+    provider: {},
+    requirement: 'bogus',
+    evidence_class: 'bogus',
+    status: 'bogus',
+    parent_asset_id: '  project_parent  ',
+  }), {
+    ...runtime,
+    origin_detail: 'project_detail',
+    parent_asset_id: 'project_parent',
+  });
+}
 
 function testLegacySourceCompatibility() {
   const upload = normalizeVisualAsset({ id: 'upload_01', source: 'upload', path: 'assets/upload.png' });
@@ -144,6 +180,8 @@ function testContextMergePreservesAssetsAndDiagnostics() {
   assert.equal(legacy.evidence_class, 'contextual');
 }
 
+testGeneratedIdentityUsesFormalOriginFirst();
+testFormalMergeRejectsInvalidEnums();
 testLegacySourceCompatibility();
 testExplicitContract();
 testInvalidContractRejected();

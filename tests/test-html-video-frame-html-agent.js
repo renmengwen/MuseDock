@@ -692,6 +692,7 @@ assert.equal(noHtmlDocument.code, 'html_document_extract_failed');
       assets: [
         {
           id: 'article_01',
+          requirement: 'required',
           path: 'assets/source-image-01.png',
           frame_src: '../assets/source-image-01.png',
           image_analysis: { should_use: true },
@@ -716,6 +717,125 @@ assert.equal(noHtmlDocument.code, 'html_document_extract_failed');
   assert.equal(missingAssetUsage.success, false);
   assert.equal(missingAssetUsage.code, 'frame_html_required_source_asset_missing');
   assert.equal(missingAssetUsage.details.required_src, '../assets/source-image-01.png');
+
+  const nonRequiredUsage = agent.validateFrameAssetUsage(
+    '<!doctype html><html><body><main>基础版价格</main></body></html>',
+    {
+      node: {
+        ...graph.nodes[0],
+        asset_refs: [
+          { asset_id: 'preferred_01', usage: 'subject' },
+          { asset_id: 'optional_01', usage: 'showcase' },
+          { asset_id: 'legacy_01', usage: 'background' },
+        ],
+      },
+      creativeContext: {
+        asset_context: {
+          assets: [
+            { id: 'preferred_01', requirement: 'preferred', path: 'assets/preferred.png' },
+            { id: 'optional_01', requirement: 'optional', path: 'assets/optional.png' },
+            { id: 'legacy_01', path: 'assets/legacy.png' },
+          ],
+        },
+      },
+    },
+  );
+  assert.equal(nonRequiredUsage.success, true);
+
+  const requiredAfterPreferred = agent.validateFrameAssetUsage(
+    '<!doctype html><html><body><main>基础版价格</main></body></html>',
+    {
+      node: {
+        ...graph.nodes[0],
+        asset_refs: [
+          { asset_id: 'preferred_01', usage: 'subject' },
+          { asset_id: 'formal_generated_required', usage: 'subject' },
+        ],
+      },
+      creativeContext: {
+        asset_context: {
+          assets: [
+            { id: 'preferred_01', requirement: 'preferred', path: 'assets/preferred.png' },
+            { id: 'formal_generated_required', origin: 'ai_generated', requirement: 'required', path: 'assets/formal-required.png' },
+          ],
+        },
+      },
+    },
+  );
+  assert.equal(requiredAfterPreferred.success, false);
+  assert.equal(requiredAfterPreferred.details.asset_id, 'formal_generated_required');
+  assert.match(requiredAfterPreferred.message, /推荐生成图片/);
+  const requiredAfterPreferredPrompt = agent.frameAssetReferenceSummary({
+    asset_refs: [
+      { asset_id: 'preferred_01', usage: 'subject' },
+      { asset_id: 'formal_generated_required', usage: 'subject' },
+    ],
+  }, {
+    asset_context: {
+      assets: [
+        { id: 'preferred_01', requirement: 'preferred', path: 'assets/preferred.png' },
+        { id: 'formal_generated_required', origin: 'ai_generated', requirement: 'required', path: 'assets/formal-required.png' },
+      ],
+    },
+  });
+  assert.match(requiredAfterPreferredPrompt, /formal_generated_required/);
+  assert.match(requiredAfterPreferredPrompt, /推荐生成图片/);
+
+  const twoRequiredAssets = {
+    asset_context: {
+      assets: [
+        { id: 'required_a', requirement: 'required', path: 'assets/required-a.png', frame_src: '../assets/required-a.png' },
+        { id: 'required_b', requirement: 'required', path: 'assets/required-b.png', frame_src: '../assets/required-b.png' },
+      ],
+    },
+  };
+  const twoRequiredNode = {
+    ...graph.nodes[0],
+    asset_refs: [
+      { asset_id: 'required_a', usage: 'subject' },
+      { asset_id: 'required_b', usage: 'showcase' },
+    ],
+  };
+  const oneOfTwoRequired = agent.validateFrameAssetUsage(
+    '<!doctype html><html><body><img src="../assets/required-a.png"></body></html>',
+    { node: twoRequiredNode, creativeContext: twoRequiredAssets },
+  );
+  assert.equal(oneOfTwoRequired.success, false);
+  assert.equal(oneOfTwoRequired.details.asset_id, 'required_b');
+  const allRequired = agent.validateFrameAssetUsage(
+    '<!doctype html><html><body><img src="../assets/required-a.png"><img src="../assets/required-b.png"></body></html>',
+    { node: twoRequiredNode, creativeContext: twoRequiredAssets },
+  );
+  assert.equal(allRequired.success, true);
+
+  const formalConflictRequired = agent.validateFrameAssetUsage(
+    '<!doctype html><html><body><main>基础版价格</main></body></html>',
+    {
+      node: { ...graph.nodes[0], asset_refs: [{ asset_id: 'formal_conflict_required', usage: 'evidence' }] },
+      creativeContext: {
+        asset_context: {
+          assets: [{
+            id: 'formal_conflict_required',
+            origin: 'source_extract',
+            source: 'generated',
+            requirement: 'required',
+            path: 'assets/conflict-required.png',
+          }],
+        },
+      },
+    },
+  );
+  assert.match(formalConflictRequired.message, /推荐来源图片/);
+
+  const formalGeneratedPrompt = agent.frameAssetReferenceSummary({
+    asset_refs: [{ asset_id: 'formal_generated_prompt', usage: 'subject' }],
+  }, {
+    asset_context: {
+      assets: [{ id: 'formal_generated_prompt', origin: 'ai_generated', path: 'assets/formal-prompt.png' }],
+    },
+  });
+  assert.match(formalGeneratedPrompt, /推荐生成图片/);
+  assert.match(formalGeneratedPrompt, /不是来源证据/);
 
   const blockedAssetUsage = agent.validateFrameAssetUsage(
     '<!doctype html><html><body><img src="../assets/avoid-image-02.png"></body></html>',

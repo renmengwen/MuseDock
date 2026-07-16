@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const aiTextModel = require('../../ai/aiTextModel');
+const { isGeneratedVisualAsset } = require('../../creative/visualAssetContract');
 const frameHtmlAgent = require('./frameHtmlAgent');
 const { runFrameHtmlPhase } = require('./frameHtmlPhase');
 const { buildMixedFrameProject } = require('./mixedFrameBuilder');
@@ -624,7 +625,7 @@ async function generateHtmlVideo(options = {}) {
       .map(ref => String(ref?.asset_id || ''))
       .filter(id => id.startsWith('gen_')));
     const hydratedGeneratedIds = new Set((creativeContext.asset_context?.assets || [])
-      .filter(asset => asset?.source === 'generated')
+      .filter(isGeneratedVisualAsset)
       .map(asset => asset.id));
     requiredSceneIds = [...referencedGeneratedIds]
       .filter(id => !hydratedGeneratedIds.has(id))
@@ -647,18 +648,8 @@ async function generateHtmlVideo(options = {}) {
   if (generatedImageResult.diagnostics?.length) diagnostics.push(...generatedImageResult.diagnostics);
   if (generatedImageResult.generated_count > 0) {
     await projectStore.writeProjectJson(projectDir, current => {
-      const generatedAssets = (creativeContext.asset_context?.assets || [])
-        .filter(asset => asset?.source === 'generated')
-        .map(asset => ({
-          id: asset.id,
-          type: 'image',
-          path: asset.path,
-          source: asset.source,
-          url: asset.url || '',
-          alt: asset.alt || '',
-          attribution: null,
-          generation: asset.generation || null,
-        }));
+      const generatedAssets = projectAssetsFromCreativeContext(creativeContext)
+        .filter(isGeneratedVisualAsset);
       const byId = new Map((current.assets || []).map(asset => [asset.id, asset]));
       generatedAssets.forEach(asset => byId.set(asset.id, { ...(byId.get(asset.id) || {}), ...asset }));
       current.assets = Array.from(byId.values()).filter(asset => asset.path);
@@ -847,9 +838,21 @@ async function generateHtmlVideo(options = {}) {
   }
   // scene_html 分支只在 continuity_mode = scene_html 生效；此时 project.continuity_mode 尚未挂载
   // （attachContinuityMode 在建帧后才调用），用 creativeContext 判断等价条件。
-  contentGraph = ((creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html')
-    ? expandContentGraphToSceneEntries(contentGraph, visualPlan)
-    : expandContentGraphToVisualBeats({ graph: contentGraph, visualPlan, visualDecisions });
+  if ((creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html') {
+    const refsBySceneId = new Map(contentGraph.nodes.map(node => [
+      firstNonEmptyString(resolveNodeSceneId(node), node.id),
+      Array.isArray(node.asset_refs) ? node.asset_refs : [],
+    ]));
+    contentGraph = expandContentGraphToSceneEntries(contentGraph, visualPlan);
+    contentGraph.nodes = contentGraph.nodes.map(node => ({
+      ...node,
+      asset_refs: Array.isArray(node.asset_refs) && node.asset_refs.length
+        ? node.asset_refs
+        : (refsBySceneId.get(firstNonEmptyString(resolveNodeSceneId(node), node.id)) || []),
+    }));
+  } else {
+    contentGraph = expandContentGraphToVisualBeats({ graph: contentGraph, visualPlan, visualDecisions });
+  }
   const expandedContentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
   project = await projectStore.writeProjectJson(projectDir, current => {
     current.content_graph = contentGraph;

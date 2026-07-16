@@ -5,6 +5,10 @@ const path = require('path');
 const projectStore = require('./projectStore');
 const { createDiagnostic } = require('./diagnostics');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
+const {
+  isGeneratedVisualAsset,
+  mergeVisualAssetFormalFields,
+} = require('../../creative/visualAssetContract');
 
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -29,7 +33,7 @@ function bindGeneratedAssetsToSceneSpec(sceneSpec = {}, creativeContext = {}) {
     : [];
   const bySceneId = new Map();
   for (const asset of assets) {
-    if (asset?.source !== 'generated') continue;
+    if (!isGeneratedVisualAsset(asset)) continue;
     const sceneId = String(asset?.generation?.scene_id || '').trim();
     const assetId = String(asset?.id || asset?.asset_id || '').trim();
     if (!sceneId || !assetId) continue;
@@ -209,17 +213,25 @@ function readFrameHtml(projectDir, frame = {}) {
 }
 
 function mergedTrackableAssets(project = {}, creativeContext = {}) {
-  const seen = new Set();
-  const result = [];
-  const push = asset => {
+  const order = [];
+  const byId = new Map();
+  const put = (asset, formalOnly = false) => {
     const id = firstNonEmptyString(asset?.id, asset?.asset_id);
-    if (!id || seen.has(id)) return;
-    seen.add(id);
-    result.push({ ...asset, id });
+    if (!id) return;
+    if (!byId.has(id)) {
+      order.push(id);
+      byId.set(id, { ...asset, id });
+      return;
+    }
+    const current = byId.get(id);
+    const merged = formalOnly
+      ? mergeVisualAssetFormalFields({ ...asset, ...current, id }, asset)
+      : { ...current, ...asset, id };
+    byId.set(id, merged);
   };
-  (Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : []).forEach(push);
-  (Array.isArray(project?.assets) ? project.assets : []).forEach(push);
-  return result;
+  (Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : []).forEach(asset => put(asset));
+  (Array.isArray(project?.assets) ? project.assets : []).forEach(asset => put(asset, true));
+  return order.map(id => byId.get(id));
 }
 
 function requiredAssetRefsById(project = {}, assets = []) {
@@ -232,13 +244,18 @@ function requiredAssetRefsById(project = {}, assets = []) {
     byId.set(assetId, current);
   };
   for (const asset of assets) {
-    if (asset?.source !== 'generated') continue;
-    ensure(firstNonEmptyString(asset.id, asset.asset_id), firstNonEmptyString(asset.generation?.scene_id), 'generated');
+    if (asset?.requirement !== 'required') continue;
+    const assetId = firstNonEmptyString(asset.id, asset.asset_id);
+    ensure(assetId);
+    if (isGeneratedVisualAsset(asset)) {
+      ensure(assetId, firstNonEmptyString(asset.generation?.scene_id), 'generated');
+    }
   }
   for (const node of (Array.isArray(project?.content_graph?.nodes) ? project.content_graph.nodes : [])) {
     const sceneId = firstNonEmptyString(resolveNodeSceneId(node), node?.id);
     for (const ref of (Array.isArray(node?.asset_refs) ? node.asset_refs : [])) {
       const assetId = firstNonEmptyString(ref?.asset_id, ref?.id);
+      if (!byId.has(assetId)) continue;
       ensure(assetId, sceneId, firstNonEmptyString(ref?.usage));
     }
   }
@@ -276,6 +293,14 @@ function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext 
       path: asset.path || '',
       frame_src: asset.frame_src || '',
       source: asset.source || '',
+      media_type: asset.media_type || asset.type || 'image',
+      origin: asset.origin || '',
+      origin_detail: asset.origin_detail || '',
+      provider: asset.provider || '',
+      requirement: asset.requirement || '',
+      evidence_class: asset.evidence_class || '',
+      status: asset.status || '',
+      parent_asset_id: asset.parent_asset_id || '',
       required: Boolean(required),
       expected_in_frames: required?.expected_in_frames || [],
       usage: required?.usages || [],

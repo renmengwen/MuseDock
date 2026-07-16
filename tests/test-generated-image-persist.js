@@ -60,6 +60,27 @@ async function run() {
   const generated = (project.assets || []).filter(asset => asset.source === 'generated');
   assert.strictEqual(generated.length, 1);
   assert.strictEqual(generated[0].generation.scene_id, 'scene_01');
+  assert.deepStrictEqual({
+    media_type: generated[0].media_type,
+    origin: generated[0].origin,
+    origin_detail: generated[0].origin_detail,
+    provider: generated[0].provider,
+    requirement: generated[0].requirement,
+    evidence_class: generated[0].evidence_class,
+    status: generated[0].status,
+    mime: generated[0].mime,
+    bytes: generated[0].bytes,
+  }, {
+    media_type: 'image',
+    origin: 'ai_generated',
+    origin_detail: 'scene_main_visual',
+    provider: '',
+    requirement: 'optional',
+    evidence_class: 'synthetic',
+    status: 'ready',
+    mime: 'image/png',
+    bytes: 3,
+  });
 
   fs.unlinkSync(path.join(rootDir, 'wf-test', 'agent_runs', 'run-test-html-video', generated[0].path));
   await htmlVideoWorkflow.generateHtmlVideo(buildArgs('generated-image-01-newhash.png'));

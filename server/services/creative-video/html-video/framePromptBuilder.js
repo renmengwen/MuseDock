@@ -7,6 +7,7 @@ const {
   overlapExpectedTexts,
   primaryExpectedText,
 } = require('./frameHtmlInspection');
+const { isGeneratedVisualAsset } = require('../../creative/visualAssetContract');
 
 function resolveResolution(target = {}) {
   const resolution = objectOrEmpty(target.resolution || target.output?.resolution);
@@ -123,7 +124,7 @@ function frameAssetReferenceSummary(node = {}, creativeContext = {}) {
   if (!expected) return '';
   const { ref, asset } = expected;
   const analysis = asset.image_analysis || {};
-  const isGenerated = asset.source === 'generated';
+  const isGenerated = isGeneratedVisualAsset(asset);
   const lines = [
     isGenerated ? '本帧推荐生成图片（AI 主视觉素材）：' : '本帧推荐来源图片：',
     `- asset_id：${compactText(ref.asset_id, 160)}`,

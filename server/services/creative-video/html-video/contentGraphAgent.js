@@ -1,5 +1,6 @@
 const contentGraph = require('./contentGraph');
 const { createDiagnostic } = require('./diagnostics');
+const { isGeneratedVisualAsset } = require('../../creative/visualAssetContract');
 
 const TRUNCATION_MARKER = '...（已截断）';
 
@@ -46,8 +47,8 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
     if (text) lines.push(`${label}：${text}`);
   });
   const allAssets = Array.isArray(assetContext.assets) ? assetContext.assets : [];
-  const generatedAssets = allAssets.filter(asset => asset.source === 'generated');
-  const nonGenerated = allAssets.filter(asset => asset.source !== 'generated');
+  const generatedAssets = allAssets.filter(isGeneratedVisualAsset);
+  const nonGenerated = allAssets.filter(asset => !isGeneratedVisualAsset(asset));
   const articleFirst = [
     ...nonGenerated.filter(asset => asset.source !== 'search'),
     ...nonGenerated.filter(asset => asset.source === 'search'),
@@ -63,8 +64,8 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
     usableAssets.forEach((asset, index) => {
       const src = compactText(asset.frame_src || asset.path, 160);
       const label = compactText(asset.alt || asset.title || asset.url || `图片${index + 1}`, 120);
-      const source = compactText(asset.source || 'article', 30);
-      const generatedFor = asset.source === 'generated' && asset.generation?.scene_id
+      const source = compactText(asset.origin || asset.source || 'article', 30);
+      const generatedFor = isGeneratedVisualAsset(asset) && asset.generation?.scene_id
         ? `；为场景 ${compactText(asset.generation.scene_id, 80)} 生成；不是来源证据`
         : '';
       const analysis = objectOrEmpty(asset.image_analysis);
@@ -326,8 +327,12 @@ function normalizeAssetRefs(value, creativeContext = {}) {
       const asset = allowedAssets?.get(assetId) || null;
       if (allowedAssets && !asset) return null;
       const usage = compactText(object.usage || object.kind || object.type, 40);
-      const source = compactText(asset?.source || 'article', 30);
-      if (source !== 'article' && isSourceEvidenceUsage(usage)) return null;
+      const evidenceClass = compactText(asset?.evidence_class, 30);
+      const source = compactText(asset?.source, 30);
+      const supportsSourceEvidence = evidenceClass
+        ? ['direct_source', 'derived_source'].includes(evidenceClass)
+        : source === 'article';
+      if (!supportsSourceEvidence && isSourceEvidenceUsage(usage)) return null;
       return {
         asset_id: assetId,
         usage,
