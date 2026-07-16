@@ -66,7 +66,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-03 上传暂存与任务认领 | `complete` | B-01 | `769d178` | - |
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
-| B-05 素材面板正式协议 | `changes_requested` | B-02、B-03 | - | 旧 revision 失效；原 Worker 修复后重新冻结 |
+| B-05 素材面板正式协议 | `frozen_for_review` | B-02、B-03 | - | 修复后新 Candidate 已冻结；等待双复审 |
 | B-06 页面截图与衍生素材 producer | `queued` | B-01、B-02 | - | B-05 后串行实现 |
 | B-07 requirement 语义与 Phase B 门禁 | `queued` | B-04b、B-05、B-06 | - | Phase B 全量验证 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07 | - | Phase C 计划与逐任务门 |
@@ -78,7 +78,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: B-05
-status: changes_requested
+status: frozen_for_review
 owner: /root/context_control_audit
 base_commit: 16a01ad806424430f9ef95ef9ee8fb36bd9c10a5
 worktree: D:\code3\MuseDock-worktrees\asset-first-b05
@@ -93,8 +93,9 @@ state_owners:
 exclusive_resources:
   - musedock-frontend-build
   - B-05 frontend source test runs serially inside the worker worktree
-frozen_revision: git-index-tree-v1:16a01ad806424430f9ef95ef9ee8fb36bd9c10a5:a6184ff29ef41e42d3c40b9864229bd01a5e7bda
-revision_valid: false
+invalidated_revision: git-index-tree-v1:16a01ad806424430f9ef95ef9ee8fb36bd9c10a5:a6184ff29ef41e42d3c40b9864229bd01a5e7bda
+frozen_revision: git-index-tree-v1:16a01ad806424430f9ef95ef9ee8fb36bd9c10a5:2834eabf7e15e582b9457eaad2c3ccd9f17111cd
+revision_valid: true
 changed_paths:
   - frontend-react/src/components/creative/SourceImageAssetsPanel.jsx
   - tests/test-creative-task-detail-assets.mjs
@@ -102,12 +103,12 @@ verification:
   - node tests/test-creative-task-detail-assets.mjs
   - npm run build:frontend
 review:
-  spec: changes_requested
-  quality: changes_requested
-review_findings:
+  spec: pending_re_review
+  quality: pending_re_review
+resolved_findings:
   - 正式文案使用“AI 生图”“AI 合成”并锁定 map entry
-  - TabsList 换行时覆盖固定高度，避免窄屏溢出
-  - parent_asset_id 先安全归一化并允许长 ID 断行
+  - TabsList 与 trigger 使用 h-auto，窄屏可换行
+  - parent_asset_id 安全归一化并允许长 ID 断行
   - 测试锁定 formal/legacy/video/fallback 与 base+usage 合并优先级
 ```
 
