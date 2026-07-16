@@ -15,9 +15,15 @@
 - 提交：每个独立任务通过验证和 Review 后使用中文提交
 - 停止：只有总目标完成或出现真实用户授权阻塞
 
-## Goal 开始时保留的工作区改动
+## Goal 基线与用户改动清单
 
-以下文件不属于本 Goal 已提交基线，执行过程中不得回滚、覆盖、顺手格式化或纳入无关提交：
+- Goal ID：`asset-first-camera`
+- 持久 Goal 绑定时间：2026-07-16
+- 不可变恢复基线：`769d178e6328a85141a8e9dd4bba6744fb96c7d7`
+- 基线分支：`dev`
+- 基线工作区：clean
+
+Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前基线，不再是未提交脏改动：
 
 - `server/services/creative-video/html-video/layoutQaService.js`
 - `server/services/creative-video/retryPlanner.js`
@@ -25,18 +31,52 @@
 - `tests/test-html-video-layout-qa-service.js`
 - `tests/fixtures/html-video-layout-qa/text-container-sibling.html`
 
-若后续任务必须修改同一文件，先审计现有 diff，证明能够保留并兼容这些改动；无法安全合并时才视为用户阻塞。
+后续任务修改这些文件时必须保留 `da95a40` 的布局误报修复与单次忽略恢复语义。每个 Task 开始时重新记录现场 `git status --short`；新出现的用户改动不由本清单自动覆盖。
 
-## 当前执行状态
+## 范围分类
 
-| Phase | 状态 | 说明 |
+| 范围 | 状态 | 说明 |
 |---|---|---|
-| A. 实时代码与需求覆盖审计 | `complete` | 三个独立新上下文只读 Agent 已返回压缩 Handoff；现有基线测试通过 |
-| B. 统一视觉素材 | `in_progress` | Task 1 统一资产契约与幂等合并已通过双 Review；继续接入现有 producer |
-| C. 多图编排与 Scene 连续时间线 | `pending` | 依赖统一素材协议 |
-| D. 焦点、摄影机与字幕同步 | `pending` | 依赖 Image Sequence Plan 和 Caption 绑定 |
-| E. QA、定向修复与恢复 | `pending` | 依赖 Camera Plan 和渲染产物 |
-| F. 最终真实任务端到端验收 | `pending` | 依赖 B～E 全部完成 |
+| overlay P0 | `already_done` | 作为不可回归基线；不重新实现 motion primitive 或恢复自由 overlay |
+| 统一素材、多图连续编排、截图 A/B 级可靠聚焦、Camera QA/恢复 | `in_scope` | summary 第一阶段与完整交付链 |
+| 自然图片 C 级低倍率宽松聚焦 | `in_scope` | summary 第二阶段；依赖第一阶段和真实样本基线，D 级始终不聚焦 |
+| 任意图片像素级准确承诺、逐 beat 新增 LLM 调用、多目标复杂跟踪 | `deferred` | summary 明确暂不进入；不得作为隐含完成条件 |
+| 为少量场景新增沉重 OCR/CV/Agent Runtime/数据库/消息队列 | `rejected` | 优先复用 DOM、人工 fixture、现有 Chromium 与原生能力 |
+
+## Phase 依赖视图
+
+| Phase | 依赖与范围 |
+|---|---|
+| A. 实时代码与需求覆盖审计 | 基线审计与覆盖矩阵 |
+| B. 统一视觉素材 | A 完成后执行 |
+| C. 多图编排与 Scene 连续时间线 | 依赖 B |
+| D. 焦点、摄影机与字幕同步 | 依赖 C 的 Image Sequence Plan 和 Caption 绑定 |
+| E. QA、定向修复与恢复 | 依赖 D 的 Camera Plan 和渲染产物 |
+| F. 最终真实任务端到端验收 | 依赖 B～E 全部完成 |
+
+本表只表达静态依赖，不记录状态。当前执行状态只以下方 Task 行和 Requirement 行为准。
+
+## Task DAG 与唯一状态
+
+| Task | 状态 | 依赖 | 代码提交 | 下一门 |
+|---|---|---|---|---|
+| A-01 实时代码与需求覆盖审计 | `complete` | - | `b48fcf6` | - |
+| B-01 统一视觉素材契约 | `complete` | A-01 | `9abb219` | - |
+| B-02 现有 producer 统一接入 | `complete` | B-01 | `b3b4fe2` | - |
+| B-03 上传暂存与任务认领 | `complete` | B-01 | `769d178` | - |
+| B-04a 暂存素材 requirement 更新接口 | `queued` | B-03 | - | TDD、双 Review、中文提交 |
+| B-04b 上传 UI、缩略图、required 控件与 loading | `queued` | B-04a | - | TDD、双 Review、中文提交 |
+| B-05 素材面板正式协议 | `queued` | B-02、B-03 | - | B-04b 后串行实现 |
+| B-06 页面截图与衍生素材 producer | `queued` | B-01、B-02 | - | B-05 后串行实现 |
+| B-07 requirement 语义与 Phase B 门禁 | `queued` | B-04b、B-05、B-06 | - | Phase B 全量验证 |
+| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07 | - | Phase C 计划与逐任务门 |
+| D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
+| E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
+| F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
+
+## 当前写租约
+
+当前无业务代码写租约。Coordinator 正在校准控制文档；完成提交后为 B-04a 创建独立 worktree/功能分支，并在 Task 行的附属控制记录中写入 owner、base commit、允许路径、状态所有权、排他资源和 frozen revision。Worker 禁止修改本 Ledger。每次 `frozen_for_review` 必须先形成 Coordinator Ledger 控制提交，Reviewer 只接受该 Ledger commit。
 
 ## Phase A 审计分工
 
@@ -84,69 +124,81 @@
 - `node tests/test-source-image-analysis.js`
 - 三个审计 Agent 额外运行的 source、content graph、visual plan、scene continuity、layout QA、validation gate、retry 和 checkpoint 测试均通过。
 
-## 需求覆盖矩阵
+## Requirement 唯一状态表
+
+Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描述步骤，Phase 视图只描述依赖。
 
 ### B. 统一视觉素材
 
-- [ ] 创作输入区暂存上传、缩略图和 preferred/required 控件
-- [ ] 创建任务时认领上传素材
-- [ ] 任务创建后立即可查看已认领素材
-- [ ] 文章图、GitHub/README 图、允许的页面截图、AI 生图、Pexels/search 和衍生图统一进入 `asset_context.assets`
-- [ ] 运行中持续追加素材与中文诊断
-- [ ] `origin/origin_detail/requirement/evidence_class` 分维协议
-- [ ] direct source、synthetic、stock/search 的证据边界
-- [ ] 任何可引用图片必须先登记
-- [ ] required 素材无真实可见 Shot 时阻断
-- [ ] Asset Usage Report 与素材面板一致
+| ID | 状态 | 要求 | 覆盖 Task |
+|---|---|---|---|
+| REQ-B-01 | `pending` | 创作输入区暂存上传、缩略图和 preferred/required 控件 | B-04a、B-04b |
+| REQ-B-02 | `verified` | 创建任务时认领上传素材 | B-03 |
+| REQ-B-03 | `verified` | 任务创建后立即可查看已认领素材 | B-03 |
+| REQ-B-04 | `pending` | 文章图、GitHub/README 图、允许的页面截图、AI 生图、Pexels/search 和衍生图统一进入 `asset_context.assets` | B-02、B-06 |
+| REQ-B-05 | `pending` | 运行中持续追加素材与中文诊断 | B-02、B-06 |
+| REQ-B-06 | `verified` | `origin/origin_detail/requirement/evidence_class` 分维协议 | B-01 |
+| REQ-B-07 | `verified` | direct source、synthetic、stock/search 的证据边界 | B-01、B-02 |
+| REQ-B-08 | `pending` | 任何可引用图片必须先登记 | B-06、B-07 |
+| REQ-B-09 | `pending` | required 素材无真实可见 Shot 时阻断 | B-07、C-04 |
+| REQ-B-10 | `pending` | Asset Usage Report 与素材面板一致 | B-05、C-04 |
 
 ### C. 多图编排
 
-- [ ] 一个 Scene 使用 `1～4` 个 Shot
-- [ ] 单图统一为一个 Shot 的 Image Sequence
-- [ ] 四种主要 Sequence Mode
-- [ ] Shot Role、Caption IDs、最短可见时间
-- [ ] Caption 时间派生入场、保持、退出和重叠
-- [ ] 同 Scene 使用连续 HTML 时间线
-- [ ] Scene 内不经过独立 Beat MP4 裸切
-- [ ] 跨 Scene 转场保持独立
-- [ ] 多图不是强制数量指标
-- [ ] AI 生图补视觉角色，Pexels/search 不为凑数
+| ID | 状态 | 要求 | 覆盖 Task |
+|---|---|---|---|
+| REQ-C-01 | `pending` | 一个 Scene 使用 `1～4` 个 Shot | C-01 |
+| REQ-C-02 | `pending` | 单图统一为一个 Shot 的 Image Sequence | C-01 |
+| REQ-C-03 | `pending` | 四种主要 Sequence Mode | C-01、C-03 |
+| REQ-C-04 | `pending` | Shot Role、Caption IDs、最短可见时间 | C-01、C-02 |
+| REQ-C-05 | `pending` | Caption 时间派生入场、保持、退出和重叠 | C-02、C-03 |
+| REQ-C-06 | `pending` | 同 Scene 使用连续 HTML 时间线 | C-03 |
+| REQ-C-07 | `pending` | Scene 内不经过独立 Beat MP4 裸切 | C-03 |
+| REQ-C-08 | `pending` | 跨 Scene 转场保持独立 | C-03 |
+| REQ-C-09 | `pending` | 多图不是强制数量指标 | C-02 |
+| REQ-C-10 | `pending` | AI 生图补视觉角色，Pexels/search 不为凑数 | C-02 |
 
 ### D. 焦点与摄影机
 
-- [ ] 图片级 `focus_regions`
-- [ ] Scene/Shot 级 `focus_cues`
-- [ ] DOM/manual、OCR/验证、AI-only、歧义失败的信任等级
-- [ ] 语义准确与几何准确分开
-- [ ] A/B 自动聚焦，C 低倍率宽松聚焦，D 不聚焦
-- [ ] cover/contain 和双层截图坐标映射
-- [ ] 安全目标中心、zoom 限幅、位移 clamp 和黑边防护
-- [ ] Caption Cue 同时驱动摄影机和字幕关键词高亮
-- [ ] 同一 Region 连续 Cue 合并并避免抖动
-- [ ] 每张最终使用图片最多分析一次
+| ID | 状态 | 要求 | 覆盖 Task |
+|---|---|---|---|
+| REQ-D-01 | `pending` | 图片级 `focus_regions` | D-01、D-03 |
+| REQ-D-02 | `pending` | Scene/Shot 级 `focus_cues` | D-04 |
+| REQ-D-03 | `pending` | DOM/manual、OCR/验证、AI-only、歧义失败的信任等级 | D-01、D-03 |
+| REQ-D-04 | `pending` | 语义准确与几何准确分开 | D-01、D-03 |
+| REQ-D-05 | `pending` | A/B 自动聚焦，C 低倍率宽松聚焦，D 不聚焦 | D-07、D-08 |
+| REQ-D-06 | `pending` | cover/contain 和双层截图坐标映射 | D-02 |
+| REQ-D-07 | `pending` | 安全目标中心、zoom 限幅、位移 clamp 和黑边防护 | D-02 |
+| REQ-D-08 | `pending` | Caption Cue 同时驱动摄影机和字幕关键词高亮 | D-05 |
+| REQ-D-09 | `pending` | 同一 Region 连续 Cue 合并并避免抖动 | D-04 |
+| REQ-D-10 | `pending` | 每张最终使用图片最多分析一次 | D-03、D-06 |
 
 ### E. QA、修复与恢复
 
-- [ ] 数据契约、引用完整性和 required 门
-- [ ] 摄影机数学测试
-- [ ] Scene 预览渲染测试
-- [ ] 白屏、黑边、裸硬切、字幕遮挡和过度放大检查
-- [ ] 错误焦点与焦点可信度验收
-- [ ] 自动修复后 blocking 问题真正阻断
-- [ ] 定向重试只失效受影响范围
-- [ ] Checkpoint 复用包含真实输入、Prompt 和契约版本
-- [ ] 重启后只恢复失败 Scene/Shot
-- [ ] `skipValidation=false` 进入完整视觉 QA
+| ID | 状态 | 要求 | 覆盖 Task |
+|---|---|---|---|
+| REQ-E-01 | `pending` | 数据契约、引用完整性和 required 门 | E-01 |
+| REQ-E-02 | `pending` | 摄影机数学测试 | D-02、E-01 |
+| REQ-E-03 | `pending` | Scene 预览渲染测试 | E-02 |
+| REQ-E-04 | `pending` | 白屏、黑边、裸硬切、字幕遮挡和过度放大检查 | E-02 |
+| REQ-E-05 | `pending` | 错误焦点与焦点可信度验收 | E-02 |
+| REQ-E-06 | `pending` | 自动修复后 blocking 问题真正阻断 | E-02、E-03 |
+| REQ-E-07 | `pending` | 定向重试只失效受影响范围 | E-03 |
+| REQ-E-08 | `pending` | Checkpoint 复用包含真实输入、Prompt 和契约版本 | D-06、E-04 |
+| REQ-E-09 | `pending` | 重启后只恢复失败 Scene/Shot | E-04 |
+| REQ-E-10 | `pending` | `skipValidation=false` 进入完整视觉 QA | E-05 |
 
 ### F. 最终验收
 
-- [ ] 覆盖截图、UI、终端、图表、照片、AI 图、相似目标和负样本
-- [ ] 运行真实端到端任务
-- [ ] 核对 `project.json`、`asset_usage_report`、Scene 产物和 `visual-report.json`
-- [ ] 相关单测、前端构建和后端验证通过
-- [ ] 规格 Review 无未解决问题
-- [ ] 代码质量 Review 无未解决问题
-- [ ] 最终工作区只保留 Goal 开始前已有的用户改动
+| ID | 状态 | 要求 | 覆盖 Task |
+|---|---|---|---|
+| REQ-F-01 | `pending` | 覆盖截图、UI、终端、图表、照片、AI 图、相似目标和负样本 | F-01 |
+| REQ-F-02 | `pending` | 运行真实端到端任务 | F-01 |
+| REQ-F-03 | `pending` | 核对 `project.json`、`asset_usage_report`、Scene 产物和 `visual-report.json` | F-01 |
+| REQ-F-04 | `pending` | 相关单测、前端构建和后端验证通过 | F-01 |
+| REQ-F-05 | `pending` | 规格 Review 无未解决问题 | F-01 |
+| REQ-F-06 | `pending` | 代码质量 Review 无未解决问题 | F-01 |
+| REQ-F-07 | `pending` | 最终工作区只保留 Goal 开始前已有的用户改动 | F-01 |
 
 ## 证据记录
 
@@ -155,8 +207,8 @@
 | overlay P0 完成基线 | `3a23622` 及其前置 P0 提交 |
 | Delivery Loop 设计纠正 | `7512979` |
 | Phase A 审计与 Phase B 计划 | `b48fcf6` |
-| Phase B Task 1 统一资产契约 | `tests/test-visual-asset-contract.js` 与 `tests/test-creative-context.js` 通过；规格 Review PASS；代码质量 Review PASS |
-| Phase B Task 2 现有 producer 统一接入 | source/generated/workflow/usage/project-store 共七组测试通过；规格 Review PASS；代码质量 Review PASS |
-| Phase B Task 3 上传暂存与任务认领 | 真实 PNG/JPEG/WebP、HTTP 413、Douyin 路径、原子回滚、TTL/配额测试通过；规格 Review PASS；代码质量 Review PASS |
+| Phase B Task 1 统一资产契约 | `9abb219`；`tests/test-visual-asset-contract.js` 与 `tests/test-creative-context.js` 通过；规格 Review PASS；代码质量 Review PASS |
+| Phase B Task 2 现有 producer 统一接入 | `b3b4fe2`；source/generated/workflow/usage/project-store 共七组测试通过；规格 Review PASS；代码质量 Review PASS |
+| Phase B Task 3 上传暂存与任务认领 | `769d178`；真实 PNG/JPEG/WebP、HTTP 413、Douyin 路径、原子回滚、TTL/配额测试通过；规格 Review PASS；代码质量 Review PASS |
 
-后续每个任务完成后追加：需求、提交、验证命令、Review 结论和剩余风险；不记录完整日志或 Agent 对话。
+后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。

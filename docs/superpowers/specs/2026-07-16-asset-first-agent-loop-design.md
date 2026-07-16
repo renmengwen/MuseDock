@@ -192,6 +192,52 @@ blockers: []
 
 不把完整测试日志、完整 diff 或 Agent 对话写进 Ledger，只保存可以重新定位的路径、提交和命令。
 
+### 7.1 Ledger 是唯一控制面
+
+聊天历史、Worker Handoff、Phase 说明和测试日志都不能维护第二份任务状态。以下信息只以 Ledger 为准：
+
+- Goal、稳定 Requirement ID、`in_scope/already_done/deferred/rejected` 范围；
+- 不可变基线 commit、用户改动清单及其后续 resolution；
+- Task DAG、依赖、状态、当前 owner、worktree、branch 和 base commit；
+- 写租约的允许路径、状态所有权和排他资源；
+- 当前冻结 revision、双 Review 对应 revision、代码提交和验证证据；
+- 跨任务决策、授权边界、真实 blocker 和最终完成条件。
+
+Ledger 不保存完整日志、完整 diff、搜索输出、Agent 对话、尝试过程或未验证推测。已完成任务压缩成一行证据索引，详细事实通过 commit、测试文件和必要的 Handoff 定位。
+
+### 7.2 可机械执行的任务状态机
+
+```text
+queued
+→ leased
+→ implementing
+→ frozen_for_review
+├─ Review PASS → verified
+└─ Review FAIL → changes_requested → implementing → frozen_for_review
+→ committed
+→ integrated
+→ complete
+```
+
+任意阶段可以进入 `blocked` 或 `cancelled`。只有 Coordinator 能分配写租约、冻结 Candidate、集成提交、更新 Ledger 并把任务置为 `complete`。Phase 状态从子任务状态派生，不再用容易漂移的自由文本手工维护。
+
+### 7.3 代码提交与 Ledger 提交分离
+
+业务代码提交无法同时记录自己的最终 SHA，因此 Worker 不修改 Ledger。顺序固定为：
+
+```text
+Worker 完成实现和验证
+→ Worker 按冻结算法把完整 Candidate 写入独立 worktree 的 Git index
+→ Coordinator 校验 Candidate，并先把 frozen revision 写入 Ledger 形成控制提交
+→ 双 Review
+→ 修复后重新冻结和复审
+→ 形成业务代码提交
+→ Coordinator 取得最终 SHA
+→ Coordinator 独立更新并提交 Ledger 完成状态
+```
+
+Review Packet 只引用已经提交的 Ledger revision，不从聊天或 Handoff 复制第二份 frozen revision。这样独立 worktree 不会因为都修改 Ledger 而产生必然冲突，Review 期间只有一个权威 Candidate，完成证据也能记录真实提交 SHA。
+
 ## 8. 总目标的自动分解
 
 Coordinator 在第一次执行时根据实时代码生成完整依赖图，但不把“写完计划”作为交付终点。当前任务至少覆盖：
@@ -232,6 +278,8 @@ Coordinator 在第一次执行时根据实时代码生成完整依赖图，但�
 - zoom、平移、安全中心和边界限制；
 - 字幕同步高亮；
 - 不可信目标安全降级。
+- 第一阶段完成可验证截图的 A/B 级可靠聚焦；
+- 第二阶段在真实样本基线上实现自然图片 C 级低倍率宽松聚焦，D 级保持不聚焦。
 
 ### Phase E：QA、修复和恢复
 
@@ -243,7 +291,7 @@ Coordinator 在第一次执行时根据实时代码生成完整依赖图，但�
 - 重启后只恢复失败范围；
 - 最终端到端真实任务验证。
 
-这些 Phase 全部属于同一个 Goal Loop。Phase 之间不需要用户重新确认，也不要求用户复制结果到新窗口。
+这些 Phase 全部属于同一个 Goal Loop。Phase 之间不需要用户重新确认，也不要求用户复制结果到新窗口。任意图片像素级准确承诺、逐 beat 新增 LLM 调用、多目标复杂跟踪和为此引入沉重视觉依赖明确标为 `deferred`，不作为本次 Goal 的隐含扩张项。
 
 ## 9. 多 Agent 和多任务编排
 
@@ -274,13 +322,80 @@ flowchart TD
 
 使用规则：
 
-- 读操作、测试、样本分析和 Review 优先并行；
+- 读操作、样本分析和对同一冻结 revision 的 Review 优先并行；
+- 只有确认使用独立临时目录且无共享副作用的测试可以并行；前端构建、固定端口、真实浏览器、`ffmpeg`、共享 profile 或固定输出目录测试必须串行或声明排他资源；
 - 修改同一文件或同一状态所有权的任务串行；
 - 长期独立代码修改使用 worktree；
 - 同一分支和同一工作区不得由多个写 Agent 并发修改；
 - 子 Agent 只返回结论、文件位置、测试命令和风险；
 - 顶层任务之间通过显式消息、提交和 Artifact 协调；
 - Coordinator 不把原始日志全部复制回主上下文。
+
+### 9.1 写租约
+
+一个物理 worktree 同时最多一个写租约。每个 Worker Task Packet 必须记录：
+
+```yaml
+task_id: B-04a
+base_commit: <sha>
+worktree: <absolute-path>
+branch: codex/asset-first-b04a
+allowed_paths: []
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+state_owners: []
+exclusive_resources: []
+```
+
+Worker 发现根因需要修改租约外路径或状态所有权时，返回 `scope_expansion_required`，不得自行扩大范围。Coordinator 的 `dev` 集成 worktree 只由 Coordinator 写；Worker 在独立 worktree 和功能分支中实现。文件不重叠不代表状态不冲突，集成前还要比较 `state_owners` 和排他资源。
+
+### 9.2 最小 Task Packet
+
+每个新 Agent 使用 `fork_turns: none` 或等价的新上下文，只接收一个自包含 Task Packet：
+
+```yaml
+packet_version: 1
+goal_id: asset-first-camera
+task_id: B-04a
+requirement_ids: []
+objective: <一个可观察行为>
+acceptance: []
+non_goals: []
+source_anchors: []
+dependencies:
+  completed_tasks: []
+  required_commits: []
+workspace:
+  repo: D:\code3\MuseDock
+  worktree: <absolute-path>
+  branch: <branch>
+  base_commit: <sha>
+write_lease:
+  allowed_paths: []
+  state_owners: []
+  exclusive_resources: []
+verification:
+  failing_check: <command and expected failure>
+  required_checks: []
+review:
+  required: [spec, quality]
+```
+
+软拆分门是“一个可观察行为、一个主要状态所有权、一个独立提交、一组可独立验收的测试”。出现两个独立状态所有权或两个可分别交付的结果时必须拆包，文件数和行数只作预警。
+
+### 9.3 Candidate 冻结算法
+
+冻结算法固定为 `git-index-tree-v1`，必须在 Worker 的独立、初始 clean worktree 中执行：
+
+1. 校验 `git rev-parse HEAD` 等于 Task Packet 的 `base_commit`；
+2. 对写租约 `allowed_paths` 执行 `git add --all -- <allowed_paths...>`，新文件、删除、重命名和二进制内容全部进入 index；
+3. 校验 `git status --porcelain=v1` 中不存在租约外路径；
+4. 校验 `git diff --quiet` 成功且 `git ls-files --others --exclude-standard` 为空，拒绝任何未 staged 或未跟踪内容；
+5. 记录 `changed_paths = git diff --cached --name-status`；
+6. 计算 `tree_hash = git write-tree`；
+7. frozen revision 写成 `git-index-tree-v1:<base_commit>:<tree_hash>`。
+
+Reviewer 必须在读取 Candidate 前复算 `git write-tree`，并确认 HEAD、changed paths、工作区 clean 状态和 Ledger 中的 frozen revision 完全一致。任意文件变化、index 变化或租约外路径都会使 revision 失效。Coordinator 在派发 Review 前先把该 revision、changed paths、owner、worktree 和状态 `frozen_for_review` 写入 Ledger 并提交；Review Packet 只携带这个 Ledger commit SHA。
 
 ## 10. 如何避免上下文过长
 
@@ -299,20 +414,24 @@ Coordinator 上下文只保留：
 
 ### 10.2 每个任务结束生成 Handoff Packet
 
-```markdown
-## Task handoff
-
-- 目标：required 素材未使用时阻断
-- 状态：完成
-- 提交：abc1234
-- 修改：projectSchema.js、validationGate.js
-- 验证：node tests/test-required-asset-gate.js
-- Review：规格通过；代码质量通过
-- 剩余风险：无
-- 下一依赖任务：运行中素材增量展示
+```yaml
+task_id: B-04a
+ledger_commit: <Coordinator frozen_for_review control commit>
+outcome: ready_for_review
+base_commit: <sha>
+behavior_delivered: []
+verification:
+  - command: node tests/test-example.js
+    exit_code: 0
+decisions: []
+discovered_facts: []
+residual_risks: []
+scope_requests: []
+resume:
+  first_command: <command>
 ```
 
-下一 Agent 读取 Handoff Packet 和相关文件，不读取上一 Agent 的完整聊天。
+下一 Agent 读取 Task Packet、Handoff Packet、Handoff 引用的 Ledger commit 和相关文件，不读取上一 Agent 的完整聊天。Candidate revision、changed paths 和 Review 状态只从 Ledger 读取；Handoff 只报告局部行为、验证与恢复入口，不能维护第二份任务状态或自行宣布全局完成。
 
 ### 10.3 Commit 是上下文压缩点
 
@@ -337,6 +456,19 @@ Coordinator 上下文只保留：
 - 未完成需求；
 - 测试和 Review 门；
 - 停止条件。
+
+### 10.5 事件触发的压缩和换 Agent
+
+不使用模糊的“感觉上下文变长”作为唯一判断。以下事件必须压缩：
+
+- Explorer 完成：原始搜索结果压成 `source_anchors + discovered_facts`；
+- 测试结束：只保留命令、退出码和失败根因；
+- 进入 `frozen_for_review`：生成 Handoff 和 diff hash；
+- Review/fix 循环结束：新 revision 替换旧 diff 叙述；
+- 业务提交和 Ledger 更新完成：Coordinator 只保留一行证据；
+- 收到上下文告警：在下一次大规模读取或修改前生成 `resume_required` Handoff。
+
+Explorer 切 Worker、Worker 切 Reviewer、Task ID 改变、状态所有权改变或两轮 Review 修复后判断已被旧讨论污染时，必须换新 Agent。中途换 Worker 时先冻结 `base_commit + git status + changed_paths + git-index-tree-v1 revision + 验证结果 + 第一条恢复命令`。
 
 ## 11. Review Loop
 
@@ -365,12 +497,17 @@ Coordinator 上下文只保留：
 
 Reviewer 返回问题后，Coordinator 立即派回原 Worker 修复。修复、重测、复审完成前，不开始依赖该任务的新工作。
 
+### 11.3 Reviewer 绑定冻结版本
+
+两个 Reviewer 只能读取同一个 Ledger control commit 中记录的 `git-index-tree-v1:<base_commit>:<tree_hash>`。Worker 在 Verdict 返回前停止写入；任何代码或 index 变化都会产生新 revision，并使旧 Review 结论自动失效。Reviewer Verdict 必须包含 `reviewed_ledger_commit` 和 `reviewed_revision`，版本不匹配不能作为通过证据。
+
 ## 12. Git 与工作区规则
 
 - 开始任何任务前确认当前分支和 `git status --short`；
 - 日常开发只在 `dev` 或从 `dev` 派生的功能分支；
 - 不清理、不回滚、不格式化无关用户改动；
 - 并行写任务使用不同 worktree 和不同分支；
+- Worker 不修改 Delivery Ledger；Coordinator 串行集成后独立更新 Ledger；
 - 每个可独立验证任务使用中文提交信息；
 - 提交只包含当前任务文件；
 - 一个任务提交后 Coordinator 继续，不要求用户确认提交；
@@ -440,9 +577,12 @@ D:\code3\MuseDock\docs\superpowers\plans\2026-07-16-asset-first-image-camera-foc
 代码审计 → 完整任务分解 → 实现 → 最小必要测试 → 规格 Review →
 代码质量 Review → 修复 Review 问题 → 重测 → 中文提交 → 下一任务。
 
-你可以创建和调度子 Agent、独立 Codex 任务和 worktree。只读探索、测试和
-Review 可并行；同一文件和同一状态所有权保持单写者。不同任务之间使用短
-Handoff Packet、文件、Git 提交和测试证据交接，不转发完整日志。
+你可以创建和调度子 Agent、独立 Codex 任务和 worktree。只读探索和对同一冻结
+revision 的 Review 可并行；只有确认使用独立临时目录且无共享副作用的测试才可
+并行。前端构建、固定端口、真实浏览器、ffmpeg、共享 profile 或固定输出目录的
+测试必须在启动前取得并记录 exclusive_resources 租约，结束后释放。同一文件和
+同一状态所有权保持单写者。不同任务之间使用短 Handoff Packet、文件、Git 提交
+和测试证据交接，不转发完整日志。
 
 不要在计划完成、单个任务完成、单个 Phase 完成、一次 Review 完成或一次提交
 完成后停下来等我确认。它们都只是内部 checkpoint。自动选择下一项依赖已满足

@@ -1,6 +1,6 @@
 # 统一视觉素材 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. 本文件只保存静态实施步骤，不记录实时完成状态；唯一状态以 Delivery Ledger 的 Task/Requirement 行为准。
 
 **Goal:** 在不创建第二套 registry 的前提下，把上传、来源提取、页面截图、AI 生图、Pexels/search 和衍生图片统一到 `asset_context.assets`，并建立用户 requirement、证据边界和 required 可见性门禁。
 
@@ -33,7 +33,7 @@
 - Create: `server/services/creative/visualAssetContract.js`
 - Create: `tests/test-visual-asset-contract.js`
 
-- [x] **Step 1: 写失败测试**
+- **Step 1: 写失败测试**
 
 测试必须覆盖：六种 `origin`、三种 `requirement`、五种 `evidence_class`；旧 `source` 推导；用户上传默认 preferred；系统素材默认 optional；重复 ID 后者更新但保留旧文件字段；非法枚举拒绝；derived 必须有父 ID。
 
@@ -64,13 +64,13 @@ assert.throws(() => normalizeVisualAsset({ id: 'bad', origin: 'unknown' }), /素
 assert.throws(() => normalizeVisualAsset({ id: 'crop', origin: 'derived' }), /父素材/);
 ```
 
-- [x] **Step 2: 验证 RED**
+- **Step 2: 验证 RED**
 
 Run: `node tests/test-visual-asset-contract.js`
 
 Expected: FAIL，模块不存在。
 
-- [x] **Step 3: 最小实现**
+- **Step 3: 最小实现**
 
 实现并导出：
 
@@ -135,13 +135,13 @@ function mergeVisualAssetContexts(base = {}, incoming = {}) {
 
 保留旧 `source` 字段供旧消费方兼容，但所有新逻辑读取正式字段。
 
-- [x] **Step 4: 验证 GREEN**
+- **Step 4: 验证 GREEN**
 
 Run: `node tests/test-visual-asset-contract.js`
 
 Expected: PASS。
 
-- [x] **Step 5: 规格 Review、质量 Review、修复和提交**
+- **Step 5: 规格 Review、质量 Review、修复和提交**
 
 Run: `node tests/test-visual-asset-contract.js && node tests/test-creative-context.js`
 
@@ -159,7 +159,7 @@ Commit: `功能：建立统一视觉素材契约`
 - Modify: `tests/test-generated-image-phase.js`
 - Modify: `tests/test-html-video-project-store.js`
 
-- [x] **Step 1: 写失败测试**
+- **Step 1: 写失败测试**
 
 断言：
 
@@ -174,13 +174,13 @@ assert.deepEqual(result.asset_context.assets.map(item => item.id), ['upload_01',
 assert.equal(roundTrippedProject.assets[0].origin, 'user_upload');
 ```
 
-- [x] **Step 2: 验证 RED**
+- **Step 2: 验证 RED**
 
 Run: `node tests/test-source-assets.js && node tests/test-creative-workflows.js && node tests/test-generated-image-phase.js && node tests/test-html-video-project-store.js`
 
 Expected: 新正式字段或上传素材保留断言失败。
 
-- [x] **Step 3: 最小实现**
+- **Step 3: 最小实现**
 
 - `prepareSourceAssetContext()` 使用 `mergeVisualAssetContexts(record.asset_context, prepared)`；无来源内容时只更新 summary/status，不清空既有资产。
 - `sourceAssets` 为文章/GitHub README/Pexels 填充正式字段。
@@ -188,11 +188,11 @@ Expected: 新正式字段或上传素材保留断言失败。
 - `runGeneratedImagePhase()` 和 hydrate 使用统一 merge。
 - `projectAssetsFromCreativeContext()` 保留 `media_type/origin/origin_detail/provider/requirement/evidence_class/status/parent_asset_id/mime/bytes/width/height/created_at`。
 
-- [x] **Step 4: 验证 GREEN**
+- **Step 4: 验证 GREEN**
 
 运行 Step 2 四条测试，Expected: PASS。
 
-- [x] **Step 5: 双 Review、修复和提交**
+- **Step 5: 双 Review、修复和提交**
 
 Commit: `功能：统一现有视觉素材写入协议`
 
@@ -206,7 +206,7 @@ Commit: `功能：统一现有视觉素材写入协议`
 - Create: `tests/test-creative-workflow-upload-assets.js`
 - Modify: `tests/test-creative-workflow-routes.js`
 
-- [x] **Step 1: 写失败测试**
+- **Step 1: 写失败测试**
 
 覆盖：PNG/JPEG/WebP；非图片拒绝；超过 8MB 在读取时拒绝；文件名净化；默认 preferred；required 保留；同一暂存 ID 只能认领一次；任务创建响应立即含上传图；来源阶段不覆盖。
 
@@ -229,13 +229,13 @@ assert.equal(claimed.assets[0].origin, 'user_upload');
 await assert.rejects(() => uploads.claimVisualAssets({ uploadIds: [staged.upload_id], targetDir, rootDir: uploadRoot }), /已认领/);
 ```
 
-- [x] **Step 2: 验证 RED**
+- **Step 2: 验证 RED**
 
 Run: `node tests/test-creative-workflow-upload-assets.js`
 
 Expected: FAIL，上传服务不存在。
 
-- [x] **Step 3: 最小实现上传服务**
+- **Step 3: 最小实现上传服务**
 
 只使用 Node 标准库：
 
@@ -253,67 +253,94 @@ const UPLOAD_ID_PATTERN = /^upload_[a-z0-9_-]{8,80}$/;
 
 暂存目录位于数据根下的 `creative-asset-uploads`，不写进仓库。
 
-- [x] **Step 4: 接入路由和工作流**
+- **Step 4: 接入路由和工作流**
 
 - `POST /api/creative-workflows/assets/uploads`：请求体为原始 File，读取 `Content-Type`、`X-File-Name`、`X-Asset-Requirement`；返回中文状态和 `upload_id`。
 - `DELETE /api/creative-workflows/assets/uploads/:uploadId`：删除未认领暂存。
 - `normalizeCreativeInput()` 接受去重后的 `assetIds`，拒绝非法 ID，不再返回“暂不支持”。
 - `createCreativeWorkflow()` 在生成 `workflowId/awemeId` 后认领文件并用其构造初始 `asset_context`；认领失败不启动后台任务。
 
-- [x] **Step 5: 验证路由和工作流**
+- **Step 5: 验证路由和工作流**
 
 Run: `node tests/test-creative-workflow-upload-assets.js && node tests/test-creative-workflow-routes.js && node tests/test-creative-context.js && node tests/test-creative-workflows.js`
 
 Expected: PASS。
 
-- [x] **Step 6: 双 Review、修复和提交**
+- **Step 6: 双 Review、修复和提交**
 
 Commit: `功能：支持创作图片暂存与任务认领`
 
-### Task 4: 创作输入区上传 UI 与 loading
+### Task 4A: 暂存素材 requirement 更新接口
+
+只修改前端 requirement 会造成假状态：创建任务认领时仍从暂存 manifest 读取旧值。因此先补最小后端更新契约，再实现 UI。
+
+**Files:**
+- Modify: `server/services/creative/visualAssetUploads.js`
+- Modify: `server/routes/creativeWorkflows.js`
+- Modify: `tests/test-creative-workflow-upload-assets.js`
+- Modify: `tests/test-creative-workflow-routes.js`
+
+- **Step 1: 写失败测试并验证 RED**
+
+断言 `PATCH /api/creative-workflows/assets/uploads/:uploadId` 只接受 `preferred|required`，更新 staged manifest 后认领得到同一 requirement；不存在、已认领、非法值和持久化失败返回中文可操作错误且不产生半更新。
+
+- **Step 2: 最小实现并验证 GREEN**
+
+复用现有上传 mutation queue、manifest 原子写和 ID 校验，不新增依赖。运行上传服务与路由测试。
+
+- **Step 3: 双 Review、修复和提交**
+
+Commit: `功能：支持更新暂存素材使用约束`
+
+### Task 4B: 创作输入区上传 UI 与 loading
 
 **Files:**
 - Modify: `frontend-react/src/api/client.js`
 - Modify: `frontend-react/src/components/creative/CreativeComposer.jsx`
 - Modify: `frontend-react/src/pages/OneClickCreativePage.jsx`
 - Create: `tests/test-creative-upload-ui.mjs`
+- Modify: `tests/test-one-click-creative-page.mjs`
 
-- [ ] **Step 1: 写失败静态与状态测试**
+- **Step 1: 写失败静态与状态测试**
 
-断言存在：`accept="image/png,image/jpeg,image/webp"`、缩略图、“必须使用”文字控件、删除按钮、上传期间中文 loading、上传/创建期间禁用和 `assetIds` 真实传入。
+断言存在：`accept="image/png,image/jpeg,image/webp"`、缩略图、“必须使用”文字控件、删除按钮、上传期间中文 loading、上传/创建期间禁用和 `assetIds` 真实传入。状态测试还必须覆盖：requirement PATCH pending 时显示“正在更新使用约束…”并禁止提交、删除和再次切换；PATCH 成功后才确认本地 requirement；PATCH 失败恢复原值并显示中文可操作错误。
 
-- [ ] **Step 2: 验证 RED**
+- **Step 2: 验证 RED**
 
 Run: `node tests/test-creative-upload-ui.mjs`
 
-Expected: FAIL，上传 UI 不存在。
+Expected: FAIL，上传 UI 与 requirement PATCH 在途/回滚保护不存在。
 
-- [ ] **Step 3: 最小实现 API**
+- **Step 3: 最小实现 API**
 
 ```js
 async uploadCreativeVisualAsset(file, requirement = 'preferred') {
-  return requestRaw('/api/creative-workflows/assets/uploads', {
+  return requestJson('/api/creative-workflows/assets/uploads', {
     method: 'POST',
-    headers: { 'Content-Type': file.type, 'X-File-Name': file.name, 'X-Asset-Requirement': requirement },
+    headers: { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name), 'X-Asset-Requirement': requirement },
     body: file,
   });
 }
 ```
 
-- [ ] **Step 4: 最小实现 UI**
+同时提供 `updateCreativeVisualAssetRequirement(uploadId, requirement)` 的 PATCH 方法和 `deleteCreativeVisualAsset(uploadId)` 的 DELETE 方法；三者统一复用现有 JSON 错误解析。
 
-- 使用隐藏 `<input type="file" multiple>` 和现有 `Button/Checkbox`；不新增依赖。
-- 单图上传状态：`uploading/ready/failed`；loading 文案“正在上传图片…”；失败保留中文可操作提示。
-- required 切换在上传前后均更新；删除已暂存图片调用 DELETE。
-- `submitDisabled` 在任一上传中为 true；创建请求传 `assetIds: uploadedAssets.map(item => item.upload_id)`。
+- **Step 4: 最小实现 UI**
 
-- [ ] **Step 5: 验证**
+- 使用隐藏 `<input type="file" multiple>`、现有 `Button` 和带明文标签的原生受控 checkbox；项目当前没有 Checkbox 组件，不为此新增依赖。
+- 单图状态：`uploading/ready/failed/updating_requirement/deleting`；loading 文案“正在上传图片…”“正在更新使用约束…”或“正在删除图片…”；失败保留中文可操作提示。
+- required 切换调用 Task 4A 的更新接口；PATCH 成功后才确认本地 requirement，失败恢复原值并显示中文可操作错误；更新期间禁止再次切换、删除和创建任务。
+- 创建中禁止选图、切换和删除；上传/删除中禁止提交与重复操作。
+- `submitDisabled` 在任一上传、约束更新或删除中为 true；创建请求只传 ready 项的 `upload_id`。
+- 使用 `URL.createObjectURL` 预览，并在删除、成功创建、清空和卸载时 `URL.revokeObjectURL`。
 
-Run: `node tests/test-creative-upload-ui.mjs && npm run build:frontend`
+- **Step 5: 验证**
+
+Run: `node tests/test-creative-upload-ui.mjs && node tests/test-one-click-creative-page.mjs && npm run build:frontend`
 
 Expected: PASS / build success。
 
-- [ ] **Step 6: 双 Review、修复和提交**
+- **Step 6: 双 Review、修复和提交**
 
 Commit: `界面：增加创作图片上传与必须使用控件`
 
@@ -323,21 +350,21 @@ Commit: `界面：增加创作图片上传与必须使用控件`
 - Modify: `frontend-react/src/components/creative/SourceImageAssetsPanel.jsx`
 - Modify: `tests/test-creative-task-detail-assets.mjs`
 
-- [ ] **Step 1: 写失败测试**
+- **Step 1: 写失败测试**
 
 断言按 `origin` 分组并展示“用户上传/来源提取/页面截图/AI 生图/图库补图/衍生素材”、“必须使用/优先使用/可选”、“来源证据/用户提供/AI 合成/情境素材/来源派生”。旧 `source` 仍可回退。
 
-- [ ] **Step 2: 验证 RED**
+- **Step 2: 验证 RED**
 
 Run: `node tests/test-creative-task-detail-assets.mjs`
 
 Expected: 新文案和正式字段断言失败。
 
-- [ ] **Step 3: 最小实现与 GREEN**
+- **Step 3: 最小实现与 GREEN**
 
 只更新现有映射与 Card 元数据，不新增面板体系；运行 Step 2 和 `npm run build:frontend`。
 
-- [ ] **Step 4: 双 Review、修复和提交**
+- **Step 4: 双 Review、修复和提交**
 
 Commit: `界面：展示统一视觉素材来源与约束`
 
@@ -350,30 +377,30 @@ Commit: `界面：展示统一视觉素材来源与约束`
 - Create: `tests/test-page-capture-assets.js`
 - Create: `tests/test-derived-visual-assets.js`
 
-- [ ] **Step 1: 写失败测试**
+- **Step 1: 写失败测试**
 
 - GitHub 仓库来源允许登记 `page_capture/github_repository_page/chromium/direct_source/optional`。
 - 非允许页面不自动截图。
 - 截图失败只产生 diagnostic，不伪造素材。
 - derived 必须引用存在父素材并继承证据来源，输出 `derived/derived_source/optional`。
 
-- [ ] **Step 2: 验证 RED**
+- **Step 2: 验证 RED**
 
 Run: `node tests/test-page-capture-assets.js && node tests/test-derived-visual-assets.js`
 
 Expected: FAIL，producer 不存在。
 
-- [ ] **Step 3: 最小实现**
+- **Step 3: 最小实现**
 
 复用项目已有 Playwright/Chromium 可执行文件发现与页面加载安全边界；第一版仅支持 GitHub 仓库页面截图，不硬编码目标区域选择器。衍生模块只提供受控文件登记，不实现编辑器裁剪 UI。
 
-- [ ] **Step 4: 接入来源阶段并验证**
+- **Step 4: 接入来源阶段并验证**
 
 成功结果通过 `mergeVisualAssetContexts()` 追加；失败 diagnostic 与现有素材并存。
 
 Run: `node tests/test-page-capture-assets.js && node tests/test-derived-visual-assets.js && node tests/test-creative-workflows.js`
 
-- [ ] **Step 5: 双 Review、修复和提交**
+- **Step 5: 双 Review、修复和提交**
 
 Commit: `功能：统一登记页面截图与衍生素材`
 
@@ -384,9 +411,8 @@ Commit: `功能：统一登记页面截图与衍生素材`
 - Modify: `server/services/creative-video/html-video/htmlVideoWorkflow.js`
 - Modify: `tests/test-html-video-asset-usage.js`
 - Modify: `tests/test-html-video-workflow.js`
-- Modify: `docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md`
 
-- [ ] **Step 1: 写失败测试**
+- **Step 1: 写失败测试**
 
 ```js
 assert.deepEqual(report.required_asset_ids, ['upload_required']);
@@ -397,17 +423,17 @@ assert.deepEqual(report.missing_required_asset_ids, ['upload_required']);
 
 同时断言 preferred/optional 未使用不阻断、正式字段写入 usage report、旧任务缺少 `requirement` 时保持兼容但不把全部自动素材升级为 required。
 
-- [ ] **Step 2: 验证 RED**
+- **Step 2: 验证 RED**
 
 Run: `node tests/test-html-video-asset-usage.js && node tests/test-html-video-workflow.js`
 
 Expected: 当前 generated/content graph 被错误标为 required，测试失败。
 
-- [ ] **Step 3: 最小实现**
+- **Step 3: 最小实现**
 
 `requiredAssetRefsById()` 只把 `asset.requirement==='required'` 的资产加入 required map；content graph 仅提供 expected scene/usage，不改变 requirement。Shot/Caption/正数可见时长门在 Phase C 有稳定 Image Sequence Plan 后补齐，本任务不伪造 HTML 可见性。
 
-- [ ] **Step 4: 验证 Phase B**
+- **Step 4: 验证 Phase B**
 
 Run:
 
@@ -419,6 +445,7 @@ node tests/test-creative-workflow-upload-assets.js
 node tests/test-creative-workflow-routes.js
 node tests/test-creative-workflows.js
 node tests/test-creative-upload-ui.mjs
+node tests/test-one-click-creative-page.mjs
 node tests/test-creative-task-detail-assets.mjs
 node tests/test-page-capture-assets.js
 node tests/test-derived-visual-assets.js
@@ -429,8 +456,10 @@ npm run build:frontend
 
 Expected: 全部 PASS。
 
-- [ ] **Step 5: 双 Review、更新 Ledger、修复和提交**
+- **Step 5: 双 Review、修复和提交**
 
 Commit: `功能：按用户约束执行视觉素材门禁`
+
+业务提交完成后，Coordinator 取得最终 SHA，再独立更新并提交 Delivery Ledger；Worker 不修改 Ledger。
 
 Phase B 完成后，Coordinator 立即生成并执行 Phase C 多图编排计划，不返回用户确认。
