@@ -30,16 +30,39 @@ const IMAGE_ANALYSIS_STATUS_CLASS = {
   default: 'bg-slate-100 text-slate-600 ring-slate-200',
 };
 
-const SOURCE_LABEL_TEXT = {
-  article: '文章图片',
-  generated: 'AI 生图',
+const ORIGIN_LABEL_TEXT = {
+  user_upload: '用户上传',
+  source_extract: '来源提取',
+  page_capture: '页面截图',
   ai_generated: 'AI 生图',
-  github: 'GitHub 图片',
-  github_readme: 'GitHub README',
-  readme: 'README 图片',
-  pexels: 'Pexels 补图',
-  search: '搜索补图',
-  upload: '上传图片',
+  stock_search: '图库补图',
+  derived: '衍生素材',
+};
+
+const REQUIREMENT_LABEL_TEXT = {
+  required: '必须使用',
+  preferred: '优先使用',
+  optional: '可选',
+};
+
+const EVIDENCE_CLASS_LABEL_TEXT = {
+  direct_source: '来源证据',
+  user_supplied: '用户提供',
+  synthetic: 'AI 合成',
+  contextual: '情境素材',
+  derived_source: '来源派生',
+};
+
+const SOURCE_TO_ORIGIN = {
+  upload: 'user_upload',
+  article: 'source_extract',
+  github: 'source_extract',
+  readme: 'source_extract',
+  github_readme: 'source_extract',
+  generated: 'ai_generated',
+  ai_generated: 'ai_generated',
+  pexels: 'stock_search',
+  search: 'stock_search',
 };
 
 function formatImageAnalysisStatus(status) {
@@ -47,7 +70,7 @@ function formatImageAnalysisStatus(status) {
 }
 
 function inferAssetSource(asset, assetId) {
-  const source = String(asset?.source || '').trim();
+  const source = String(asset?.source || '').trim().toLowerCase();
   if (source) return source;
   const id = String(assetId || asset?.id || asset?.asset_id || '').trim();
   if (id.startsWith('gen_')) return 'generated';
@@ -55,9 +78,20 @@ function inferAssetSource(asset, assetId) {
   return '';
 }
 
+function inferAssetOrigin(asset, assetId) {
+  const origin = String(asset?.origin || '').trim().toLowerCase();
+  if (origin) return origin;
+  const source = inferAssetSource(asset, assetId);
+  return SOURCE_TO_ORIGIN[source] || '';
+}
+
 function sourceLabel(asset, assetId) {
-  const key = inferAssetSource(asset, assetId);
-  return SOURCE_LABEL_TEXT[key] || key || '视觉素材';
+  const origin = inferAssetOrigin(asset, assetId);
+  return ORIGIN_LABEL_TEXT[origin] || '视觉素材';
+}
+
+function protocolLabel(labels, value) {
+  return labels[String(value || '').trim().toLowerCase()] || '';
 }
 
 const ASSET_TAB_ORDER = ['real', 'generated', 'search', 'video'];
@@ -70,11 +104,11 @@ const ASSET_TAB_LABEL_TEXT = {
 };
 
 function inferAssetTabKey(asset, assetId) {
-  const type = String(asset?.type || asset?.media_type || asset?.asset_type || '').trim().toLowerCase();
+  const type = String(asset?.media_type || asset?.type || asset?.asset_type || '').trim().toLowerCase();
   if (type === 'video') return 'video';
-  const source = inferAssetSource(asset, assetId).toLowerCase();
-  if (source === 'generated' || source === 'ai_generated') return 'generated';
-  if (source === 'search' || source === 'pexels') return 'search';
+  const origin = inferAssetOrigin(asset, assetId);
+  if (origin === 'ai_generated') return 'generated';
+  if (origin === 'stock_search') return 'search';
   return 'real';
 }
 
@@ -145,6 +179,9 @@ function SourceImageAssetCard({ asset, assetId, workflowId, usageById, sharedAna
   const used = usage?.used === true || usedInFrames.length > 0 || Number(usage?.usage_count || 0) > 0;
   const status = analysis.status || '';
   const title = firstText(asset.alt, asset.title, asset.name, asset.path, asset.url, assetId);
+  const requirement = protocolLabel(REQUIREMENT_LABEL_TEXT, asset?.requirement);
+  const evidenceClass = protocolLabel(EVIDENCE_CLASS_LABEL_TEXT, asset?.evidence_class);
+  const parentAssetId = firstText(asset.parent_asset_id);
   const metaLine = [analysis.visual_type, analysis.best_usage, analysis.fit]
     .map(item => String(item || '').trim())
     .filter(Boolean)
@@ -159,6 +196,8 @@ function SourceImageAssetCard({ asset, assetId, workflowId, usageById, sharedAna
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <strong className="min-w-0 break-words text-[13px] leading-snug text-[#111827]">{title}</strong>
           <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-[#5f6876] ring-1 ring-[#e1e5eb]">{sourceLabel(asset, assetId)}</span>
+          {requirement ? <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-[#5f6876] ring-1 ring-[#e1e5eb]">{requirement}</span> : null}
+          {evidenceClass ? <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-[#5f6876] ring-1 ring-[#e1e5eb]">{evidenceClass}</span> : null}
           <span className={cn('rounded-full px-2 py-0.5 text-xs font-bold ring-1', IMAGE_ANALYSIS_STATUS_CLASS[status] || IMAGE_ANALYSIS_STATUS_CLASS.default)}>
             {formatImageAnalysisStatus(status)}
           </span>
@@ -169,6 +208,7 @@ function SourceImageAssetCard({ asset, assetId, workflowId, usageById, sharedAna
         {analysis.summary ? <p className="mt-2 text-[13px] leading-relaxed text-[#30343b]">{analysis.summary}</p> : null}
         {metaLine ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">类型/用途/适配：{metaLine}</p> : null}
         {usedInFrames.length ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">引用镜头：{usedInFrames.join('、')}</p> : null}
+        {parentAssetId ? <p className="mt-1 break-all font-mono text-xs leading-relaxed text-[#69717e]">父素材：{parentAssetId}</p> : null}
         {analysis.message && analysis.message !== sharedAnalysisMessage ? <p className="mt-1 text-xs leading-relaxed text-[#b45309]">分析说明：{analysis.message}</p> : null}
       </div>
     </article>
@@ -202,9 +242,9 @@ function SourceImageAssetsDialog({ assets, diagnostics, usageById, workflowId })
 
       {assets.length ? (
         <Tabs defaultValue={defaultTab} className="gap-3">
-          <TabsList className="max-w-full flex-wrap">
+          <TabsList className="h-auto max-w-full flex-wrap justify-start">
             {visibleTabs.map(key => (
-              <TabsTrigger key={key} value={key}>
+              <TabsTrigger key={key} value={key} className="h-auto">
                 {`${ASSET_TAB_LABEL_TEXT[key]} (${assetGroups[key].length})`}
               </TabsTrigger>
             ))}
