@@ -6,6 +6,7 @@ const mediaPipeline = require('../mediaPipeline');
 const defaultSourceAssets = require('../source/sourceAssets');
 const defaultSourceImageAnalysis = require('../source/sourceImageAnalysis');
 const defaultAiTextModel = require('../ai/aiTextModel');
+const defaultPageCaptureAssets = require('./pageCaptureAssets');
 const { mergeVisualAssetContexts } = require('./visualAssetContract');
 
 // ponytail: 纯小助手与 creativeWorkflows 各持一份，避免为 safeString(159处)/readJson/writeJson 改全局
@@ -935,9 +936,33 @@ async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, 
       pexelsApiKey,
     },
   });
+  const captureService = services.pageCaptureAssets || defaultPageCaptureAssets;
+  let capturedAssetContext;
+  try {
+    if (typeof captureService.captureGithubRepositoryPage !== 'function') throw new Error('capture service unavailable');
+    capturedAssetContext = await captureService.captureGithubRepositoryPage({
+      sourceMaterial,
+      projectDir: paths.dir,
+      now,
+      deps: { importPlaywright: services.importPlaywright },
+    });
+    if (!capturedAssetContext || typeof capturedAssetContext !== 'object' || Array.isArray(capturedAssetContext)) {
+      throw new Error('capture service returned invalid context');
+    }
+  } catch {
+    capturedAssetContext = {
+      status: 'empty',
+      assets: [],
+      diagnostics: [{
+        code: 'page_capture_failed',
+        message: 'GitHub 仓库页面截图失败，已保留其他视觉素材。',
+        details: { category: 'capture_service_failed' },
+      }],
+    };
+  }
   const mergedAssetContext = mergeVisualAssetContexts(
-    existingVisualAssetContext(record),
-    preparedAssetContext,
+    mergeVisualAssetContexts(existingVisualAssetContext(record), preparedAssetContext),
+    capturedAssetContext,
   );
   if (mergedAssetContext.assets.length) mergedAssetContext.status = 'ready';
   const assetContext = await applySourceImageAnalysis(mergedAssetContext, record, services);
