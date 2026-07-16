@@ -77,8 +77,8 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
 | B-06a GitHub 页面截图 producer | `changes_requested` | B-01、B-02 | - | redirect 已 fail-closed；仍需避免 route.fetch 完整缓冲无界响应 |
-| B-06b 受控 derived 素材登记 | `frozen_for_review` | B-01 | - | Review 修复版已冻结；等待新 revision 双复审 |
-| B-07a requirement 分类语义 | `in_progress` | B-01 | - | 根因修复保存在未冻结 working tree；重启后先完成测试与冻结 |
+| B-06b 受控 derived 素材登记 | `in_progress` | B-01 | - | 新规格复审要求 path/bytes 正式字段严格一致；正在修复 |
+| B-07a requirement 分类语义 | `frozen_for_review` | B-01 | - | 根因修复已冻结；等待新 revision 双复审 |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
@@ -137,8 +137,8 @@ resolved_findings:
 
 ```yaml
 task_id: B-06b
-status: frozen_for_review
-owner: unassigned
+status: in_progress
+owner: /root/b06b_spec_review_v2
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b06b
 branch: codex/asset-first-b06b
@@ -151,7 +151,7 @@ exclusive_resources:
   - B-06b filesystem tests use independent temp directories
 invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:79231ef01d2203892330dffff4c46dd0bc2e3217
 frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:bf9475b98d8f338c409ee76a60265ec019843815
-revision_valid: true
+revision_valid: false
 changed_paths:
   - server/services/creative/derivedVisualAssets.js
   - tests/test-derived-visual-assets.js
@@ -159,8 +159,12 @@ verification:
   - node tests/test-derived-visual-assets.js
   - node tests/test-visual-asset-contract.js
 review:
-  spec: pending_re_review
-  quality: pending_re_review
+  spec: changes_requested
+  spec_reviewed_ledger_commit: 6ddd60a
+  spec_reviewed_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:bf9475b98d8f338c409ee76a60265ec019843815
+  quality: in_progress
+blocking_findings:
+  - 幂等比较必须对已登记正式 path 和 bytes 的原始类型和值严格一致；不得把 assets/./child.png 或字符串 bytes 静默规范化
 resolved_findings:
   - 子素材必须验证与扩展名一致的真实 PNG、JPEG 或 WebP 文件签名
   - 同 ID、同 parent 只有 child path、origin_detail 与 derivation 全部一致时才幂等，否则必须冲突
@@ -170,8 +174,8 @@ resolved_findings:
 
 ```yaml
 task_id: B-07a
-status: in_progress
-owner: /root/b07a_resume_freeze
+status: frozen_for_review
+owner: unassigned
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b07a
 branch: codex/asset-first-b07a
@@ -199,8 +203,8 @@ exclusive_resources:
   - no browser, ports, ffmpeg or network
 previous_invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
 invalidated_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:d2a84d2926eb1a9250a8de6d22301d957acb4a26
-working_tree_revision: unfrozen
-revision_valid: false
+frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4817900a2d68a60083eb02eed9d8f7f9cad8068a
+revision_valid: true
 changed_paths:
   - server/services/creative/visualAssetContract.js
   - server/services/creative/generatedImagePlanner.js
@@ -218,28 +222,29 @@ changed_paths:
   - tests/test-html-video-frame-html-agent.js
   - tests/test-html-video-workflow.js
 workspace_state:
-  staged_tree: d2a84d2926eb1a9250a8de6d22301d957acb4a26
-  unstaged_paths: 15
+  staged_tree: 4817900a2d68a60083eb02eed9d8f7f9cad8068a
+  unstaged_paths: 0
   untracked_paths: 0
-  diff_check: pass_with_line_ending_warnings
-  final_tests: not_reported_agent_interrupted
-  resume_rule: 不得把旧 staged tree 当作新 Candidate；先审查未暂存 diff、运行完整目标测试，再一次性 stage 和 write-tree
+  diff_check: pass
+  final_tests: ten_target_suites_pass
 verification:
+  - node tests/test-visual-asset-contract.js
+  - node tests/test-generated-image-planner.js
+  - node tests/test-generated-image-phase.js
+  - node tests/test-html-video-content-graph-agent.js
+  - node tests/test-html-video-frame-html-agent.js
   - node tests/test-html-video-asset-usage.js
   - node tests/test-html-video-workflow.js
+  - node tests/test-html-video-project-store.js
   - node tests/test-generated-image-persist.js
+  - node tests/test-creative-workflow-retry-planner.js
 review:
-  spec: pass
-  spec_reviewed_ledger_commit: c363bad
-  spec_reviewed_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:d2a84d2926eb1a9250a8de6d22301d957acb4a26
-  quality: changes_requested
-  quality_reviewed_ledger_commit: c363bad
-  quality_reviewed_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:d2a84d2926eb1a9250a8de6d22301d957acb4a26
-blocking_findings:
+  spec: pending_re_review
+  quality: pending_re_review
+resolved_findings:
   - 帧级 HTML 素材校验必须与 requirement 单一真值一致，测试不得在视觉 QA 阶段晚注入 graph refs
   - formal-first 生成素材身份必须覆盖 Content Graph、Prompt、Frame 检查、生成图恢复与 workflow 复用
   - 同 ID 的 creativeContext/project 素材必须补齐正式字段，不能因旧 context 先到而丢失 required
-resolved_findings:
   - asset_usage_report.assets 必须保留统一视觉素材正式字段
   - AI 生成素材识别必须 formal origin 优先、legacy source 仅回退
   - 完整 workflow 必须证明 preferred、optional 与缺 requirement 的 legacy 素材未引用时不阻断
