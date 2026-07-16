@@ -66,7 +66,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-03 上传暂存与任务认领 | `complete` | B-01 | `769d178` | - |
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
-| B-05 素材面板正式协议 | `queued` | B-02、B-03 | - | B-04b 后串行实现 |
+| B-05 素材面板正式协议 | `leased` | B-02、B-03 | - | Worker TDD 实现；冻结后双 Review |
 | B-06 页面截图与衍生素材 producer | `queued` | B-01、B-02 | - | B-05 后串行实现 |
 | B-07 requirement 语义与 Phase B 门禁 | `queued` | B-04b、B-05、B-06 | - | Phase B 全量验证 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07 | - | Phase C 计划与逐任务门 |
@@ -76,7 +76,27 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ## 当前写租约
 
-当前无业务代码写租约。B-04b 已集成到 `dev` 并释放前端构建资源；下一写任务为 B-05。
+```yaml
+task_id: B-05
+status: leased
+owner: /root/context_control_audit
+base_commit: 16a01ad806424430f9ef95ef9ee8fb36bd9c10a5
+worktree: D:\code3\MuseDock-worktrees\asset-first-b05
+branch: codex/asset-first-b05
+allowed_paths:
+  - frontend-react/src/components/creative/SourceImageAssetsPanel.jsx
+  - tests/test-creative-task-detail-assets.mjs
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+state_owners:
+  - creative_asset_panel.protocol_metadata
+exclusive_resources:
+  - musedock-frontend-build
+  - B-05 frontend source test runs serially inside the worker worktree
+frozen_revision: null
+```
+
+Worker 只更新现有面板映射与展示，不新增接口、registry、状态容器或依赖。前端构建必须持有本租约并串行运行。
 
 ## Phase A 审计分工
 
