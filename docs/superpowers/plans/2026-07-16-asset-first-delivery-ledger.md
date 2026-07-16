@@ -79,7 +79,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-06a GitHub 页面截图 producer | `complete` | B-01、B-02 | `32a51c5` | 双 Review PASS，dev 目标测试通过；真实 Chromium smoke 留在 B-07b |
 | B-06b 受控 derived 素材登记 | `complete` | B-01 | `ca45e1d` | 双 Review PASS，已在 dev 重跑目标测试并释放租约 |
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
-| B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
+| B-07b Phase B 集成门禁验证 | `in_progress` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke 正在执行 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
