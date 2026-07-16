@@ -11,6 +11,20 @@ const creativeSourcePrep = require('../server/services/creative/creativeSourcePr
 
 const CANONICAL_URL = 'https://github.com/openai/codex';
 const CAPTURE_BYTES = Buffer.from('fake-png-capture');
+let suiteRoot = '';
+
+async function createTestDir(label) {
+  return fsp.mkdtemp(path.join(suiteRoot, `${label}-`));
+}
+
+async function cleanupSuiteRoot() {
+  const resolvedTemp = path.resolve(os.tmpdir());
+  const resolvedRoot = path.resolve(suiteRoot);
+  const relative = path.relative(resolvedTemp, resolvedRoot);
+  assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative), '清理目标必须位于系统临时目录内');
+  assert.ok(path.basename(resolvedRoot).startsWith('page-capture-suite-'), '清理目标必须属于本测试前缀');
+  await fsp.rm(resolvedRoot, { recursive: true, force: true });
+}
 
 function githubSource(overrides = {}) {
   return {
@@ -179,7 +193,7 @@ async function invokeRoute(handler, url, resourceType = 'document', fake = {}) {
 }
 
 async function testCapturesCanonicalGithubRepositoryPage() {
-  const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-success-'));
+  const projectDir = await createTestDir('success');
   const fake = makeFakePlaywright();
   const result = await pageCaptureAssets.captureGithubRepositoryPage({
     sourceMaterial: githubSource(),
@@ -253,7 +267,7 @@ async function testCapturesCanonicalGithubRepositoryPage() {
 }
 
 async function testRequestInterceptionAllowsOnlyExpectedGithubResources() {
-  const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-routes-'));
+  const projectDir = await createTestDir('routes');
   const fake = makeFakePlaywright();
   await pageCaptureAssets.captureGithubRepositoryPage({
     sourceMaterial: githubSource(),
@@ -285,7 +299,7 @@ async function testRequestInterceptionAllowsOnlyExpectedGithubResources() {
 async function startRoutedCapture(fake) {
   await pageCaptureAssets.captureGithubRepositoryPage({
     sourceMaterial: githubSource(),
-    projectDir: await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-bounded-')),
+    projectDir: await createTestDir('bounded'),
     deps: fake.deps,
   });
   return fake.calls.routeHandler;
@@ -400,7 +414,7 @@ async function testOverflowChunksConsumePageBudgetImmediately() {
 }
 
 async function testFulfillFailureDoesNotAttemptAbort() {
-  const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-fulfill-failure-'));
+  const projectDir = await createTestDir('fulfill-failure');
   const fulfillError = new Error(`fulfill failed ${projectDir} cookie=secret`);
   const fake = makeFakePlaywright({ fulfillError });
   const result = await pageCaptureAssets.captureGithubRepositoryPage({
@@ -434,7 +448,7 @@ async function testNetworkTimeoutDestroysRequestAndAbortsOnce() {
 }
 
 async function testRejectsFirstHopRedirectBeforeBrowserRequestsNextHop() {
-  const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-redirect-'));
+  const projectDir = await createTestDir('redirect');
   const redirectUrl = 'https://github.com/login';
   const fake = makeFakePlaywright({ redirects: { [CANONICAL_URL]: redirectUrl } });
   const result = await pageCaptureAssets.captureGithubRepositoryPage({
@@ -458,7 +472,7 @@ async function testRejectsStaticRedirectsBeforeBrowserRequestsNextHop() {
     const fake = makeFakePlaywright({ redirects: { [url]: redirectUrl } });
     await pageCaptureAssets.captureGithubRepositoryPage({
       sourceMaterial: githubSource(),
-      projectDir: await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-static-redirect-')),
+      projectDir: await createTestDir('static-redirect'),
       deps: fake.deps,
     });
     fake.calls.networkRequests.length = 0;
@@ -495,7 +509,7 @@ async function testFailuresReturnSafeDiagnosticWithoutAssetsOrFiles() {
     ['write_failed', makeFakePlaywright(), { renameFile: async () => { throw new Error(`EPERM ${os.tmpdir()}`); } }],
   ];
   for (const [category, fake, extraDeps] of cases) {
-    const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), `page-capture-${category}-`));
+    const projectDir = await createTestDir(category);
     const result = await pageCaptureAssets.captureGithubRepositoryPage({
       sourceMaterial: githubSource(),
       projectDir,
@@ -520,7 +534,7 @@ async function testFailuresReturnSafeDiagnosticWithoutAssetsOrFiles() {
     assert.equal(fake.calls.browserClosed, true);
   }
 
-  const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-runtime-'));
+  const projectDir = await createTestDir('runtime');
   const missingRuntime = await pageCaptureAssets.captureGithubRepositoryPage({
     sourceMaterial: githubSource(),
     projectDir,
@@ -535,7 +549,7 @@ async function testFailuresReturnSafeDiagnosticWithoutAssetsOrFiles() {
 }
 
 async function testScreenshotBufferReuseAndUint8Fallback() {
-  const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-buffer-'));
+  const projectDir = await createTestDir('buffer');
   let written = null;
   const fake = makeFakePlaywright({ screenshot: CAPTURE_BYTES });
   await pageCaptureAssets.captureGithubRepositoryPage({
@@ -569,7 +583,7 @@ async function testScreenshotBufferReuseAndUint8Fallback() {
 }
 
 async function testDefaultWriterCleansTempAfterRenameFailure() {
-  const projectDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-rename-failure-'));
+  const projectDir = await createTestDir('rename-failure');
   const fake = makeFakePlaywright();
   const result = await pageCaptureAssets.captureGithubRepositoryPage({
     sourceMaterial: githubSource(),
@@ -584,7 +598,7 @@ async function testDefaultWriterCleansTempAfterRenameFailure() {
 }
 
 async function testRejectsEscapingAssetLink() {
-  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-link-'));
+  const root = await createTestDir('link');
   const projectDir = path.join(root, 'project');
   const outsideDir = path.join(root, 'outside');
   const linkPath = path.join(projectDir, 'assets');
@@ -637,7 +651,7 @@ function visualAsset(id, origin, extra = {}) {
 }
 
 async function testSourcePrepMergesCaptureBeforeAnalysisAndDedupesRetry() {
-  const mediaRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-source-prep-'));
+  const mediaRoot = await createTestDir('source-prep');
   const fake = makeFakePlaywright();
   const analyzedOrigins = [];
   const record = {
@@ -699,7 +713,7 @@ async function testSourcePrepMergesCaptureBeforeAnalysisAndDedupesRetry() {
 }
 
 async function testSourcePrepKeepsAssetsWhenCaptureFails() {
-  const mediaRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-source-prep-failure-'));
+  const mediaRoot = await createTestDir('source-prep-failure');
   const record = {
     aweme_id: '202607160000000002',
     creative_context: {
@@ -777,7 +791,7 @@ function sourcePrepServices(pageCaptureService, analyzedIds) {
 }
 
 async function testSourcePrepCatchesAllCaptureServiceFailures() {
-  const mediaRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-service-failures-'));
+  const mediaRoot = await createTestDir('service-failures');
   const services = [
     { captureGithubRepositoryPage() { throw new Error('sync local path'); } },
     { captureGithubRepositoryPage: async () => { throw new Error('rejected secret'); } },
@@ -808,7 +822,7 @@ async function testSourcePrepCatchesAllCaptureServiceFailures() {
 }
 
 async function testSourcePrepAcceptsNonPromiseCaptureContext() {
-  const mediaRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-service-non-promise-'));
+  const mediaRoot = await createTestDir('service-non-promise');
   const analyzedIds = [];
   const record = sourcePrepRecord('202607160000000020');
   const pageAsset = {
@@ -830,23 +844,28 @@ async function testSourcePrepAcceptsNonPromiseCaptureContext() {
 }
 
 (async () => {
-  await testCapturesCanonicalGithubRepositoryPage();
-  await testRequestInterceptionAllowsOnlyExpectedGithubResources();
-  await testBoundedNetworkBodiesAndHeaders();
-  await testOverflowChunksConsumePageBudgetImmediately();
-  await testFulfillFailureDoesNotAttemptAbort();
-  await testNetworkTimeoutDestroysRequestAndAbortsOnce();
-  await testRejectsFirstHopRedirectBeforeBrowserRequestsNextHop();
-  await testRejectsStaticRedirectsBeforeBrowserRequestsNextHop();
-  await testNonGithubAndInvalidMetadataDoNotStartPlaywright();
-  await testFailuresReturnSafeDiagnosticWithoutAssetsOrFiles();
-  await testScreenshotBufferReuseAndUint8Fallback();
-  await testDefaultWriterCleansTempAfterRenameFailure();
-  await testRejectsEscapingAssetLink();
-  await testSourcePrepMergesCaptureBeforeAnalysisAndDedupesRetry();
-  await testSourcePrepKeepsAssetsWhenCaptureFails();
-  await testSourcePrepCatchesAllCaptureServiceFailures();
-  await testSourcePrepAcceptsNonPromiseCaptureContext();
+  suiteRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-suite-'));
+  try {
+    await testCapturesCanonicalGithubRepositoryPage();
+    await testRequestInterceptionAllowsOnlyExpectedGithubResources();
+    await testBoundedNetworkBodiesAndHeaders();
+    await testOverflowChunksConsumePageBudgetImmediately();
+    await testFulfillFailureDoesNotAttemptAbort();
+    await testNetworkTimeoutDestroysRequestAndAbortsOnce();
+    await testRejectsFirstHopRedirectBeforeBrowserRequestsNextHop();
+    await testRejectsStaticRedirectsBeforeBrowserRequestsNextHop();
+    await testNonGithubAndInvalidMetadataDoNotStartPlaywright();
+    await testFailuresReturnSafeDiagnosticWithoutAssetsOrFiles();
+    await testScreenshotBufferReuseAndUint8Fallback();
+    await testDefaultWriterCleansTempAfterRenameFailure();
+    await testRejectsEscapingAssetLink();
+    await testSourcePrepMergesCaptureBeforeAnalysisAndDedupesRetry();
+    await testSourcePrepKeepsAssetsWhenCaptureFails();
+    await testSourcePrepCatchesAllCaptureServiceFailures();
+    await testSourcePrepAcceptsNonPromiseCaptureContext();
+  } finally {
+    await cleanupSuiteRoot();
+  }
   console.log('page capture assets tests passed');
 })().catch(error => {
   console.error(error);

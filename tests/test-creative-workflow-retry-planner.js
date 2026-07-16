@@ -196,6 +196,36 @@ function project(overrides = {}) {
   assert.ok(missingAssetPlan.discard.includes('frames:scene_02_b2'));
   assert.ok(missingAssetPlan.reuse.includes('content_graph'));
 
+  const unregisteredAssetPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        stage: 'project',
+        sub_stage: 'asset_usage',
+        code: 'unregistered_visual_asset_reference',
+        diagnostics: [createDiagnostic({
+          code: 'unregistered_visual_asset_reference',
+          stage: 'project',
+          sub_stage: 'asset_usage',
+          severity: 'error',
+          retryable: true,
+          repair_action: 'retry_frame_html',
+          details: {
+            unregistered_image_references: [
+              { frame_id: 'scene_02_b2', reference: '../assets/evil.png' },
+              { frame_id: 'scene_02_b2', reference: '../assets/evil-2.png' },
+            ],
+          },
+        })],
+      },
+    }),
+    project: project({ frames: [{ id: 'scene_02_b1' }, { id: 'scene_02_b2' }] }),
+  });
+  assert.equal(unregisteredAssetPlan.can_retry, true);
+  assert.equal(unregisteredAssetPlan.repair_action, 'retry_frame_html');
+  assert.deepEqual(unregisteredAssetPlan.executor_options.frame_ids, ['scene_02_b2']);
+  assert.equal(unregisteredAssetPlan.executor_options.regenerate_frame_html, true);
+  assert.ok(unregisteredAssetPlan.discard.includes('frames:scene_02_b2'));
+
   const workflowErrorFramePlan = createCreativeWorkflowRetryPlan({
     workflow: workflow({
       error: { code: 'provider_missing_text' },
@@ -409,6 +439,36 @@ function project(overrides = {}) {
   });
   assert.equal(renderPlan.repair_action, 'rerender_frames');
   assert.deepEqual(renderPlan.executor_options.frame_ids, ['scene_04']);
+
+  const runtimePolicyProject = project();
+  markCheckpointFrame(runtimePolicyProject, 'render', 'scene:scene_04', {
+    status: 'failed',
+    diagnostic_code: 'runtime_visual_asset_policy_violation',
+  });
+  const runtimePolicyPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        code: 'runtime_visual_asset_policy_violation',
+        sub_stage: 'frame_html',
+        frame_id: 'scene:scene_04',
+      },
+    }),
+    project: runtimePolicyProject,
+  });
+  assert.equal(runtimePolicyPlan.repair_action, 'retry_frame_html');
+  assert.deepEqual(runtimePolicyPlan.executor_options, {
+    regenerate_frame_html: true,
+    frame_ids: ['scene:scene_04'],
+  });
+  const revalidationPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({ last_failure: {
+      code: 'runtime_asset_policy_revalidation_required', sub_stage: 'render',
+      diagnostics: [{ code: 'runtime_asset_policy_revalidation_required', details: { frame_ids: ['scene_01', 'scene_02'] } }],
+    } }),
+    project: project(),
+  });
+  assert.equal(revalidationPlan.repair_action, 'rerender_frames');
+  assert.deepEqual(revalidationPlan.executor_options.frame_ids, ['scene_01', 'scene_02']);
 
   const unknownRenderPlan = createCreativeWorkflowRetryPlan({
     workflow: workflow({

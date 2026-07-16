@@ -382,6 +382,9 @@ function normalizeCheckpointFrames(value, type) {
       ...(type === 'render' ? {} : { input_fingerprint: failed ? '' : stringField(input.input_fingerprint) }),
       output_hash: failed ? '' : stringField(input.output_hash),
       diagnostic_code: stringField(input.diagnostic_code),
+      ...(type === 'render' && !failed && input.runtime_asset_policy_attestation
+        ? { runtime_asset_policy_attestation: objectOrEmpty(input.runtime_asset_policy_attestation) }
+        : {}),
     };
     return [sceneId, normalized];
   }));

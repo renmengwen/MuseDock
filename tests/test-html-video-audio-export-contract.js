@@ -2,18 +2,22 @@ const assert = require('assert/strict');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
+const { runtimeAssetPolicyAttestation } = require('../server/services/creative-video/html-video/frameRenderPhase');
 
 async function writeFile(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, content);
 }
 
+let cleanupRoot = '';
 (async () => {
-  const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-audio-contract-'));
+  const rootDir = cleanupRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-audio-contract-'));
   const projectDir = path.join(rootDir, 'project');
   await writeFile(path.join(projectDir, 'frames', 'scene_01.mp4'), 'frame');
+  await writeFile(path.join(projectDir, 'frames', 'scene_01.html'), '<html><body>frame</body></html>');
   await writeFile(path.join(projectDir, 'tts.wav'), 'audio');
 
   const project = {
@@ -22,7 +26,7 @@ async function writeFile(filePath, content) {
     run_id: 'run',
     output: { resolution: { width: 1920, height: 1080 }, fps: 30 },
     frames: [
-      { id: 'scene_01', scene_id: 'scene_01', duration_sec: 2 },
+      { id: 'scene_01', scene_id: 'scene_01', html_path: 'frames/scene_01.html', duration_sec: 2 },
     ],
     generation_checkpoint: {
       stages: {
@@ -38,6 +42,11 @@ async function writeFile(filePath, content) {
       narration_path: path.join(projectDir, 'tts.wav'),
     },
   };
+  const outputHash = crypto.createHash('sha256').update(await fs.readFile(path.join(projectDir, 'frames', 'scene_01.mp4'))).digest('hex');
+  project.generation_checkpoint.stages.render.frames.scene_01.output_hash = outputHash;
+  project.generation_checkpoint.stages.render.frames.scene_01.runtime_asset_policy_attestation = await runtimeAssetPolicyAttestation(
+    projectDir, project, project.frames[0], { checkpoint_key: 'scene_01', mp4_path: 'frames/scene_01.mp4', output_hash: outputHash },
+  );
 
   const result = await projectOrchestrator.composeHtmlVideoProject({
     rootDir,
@@ -77,4 +86,4 @@ async function writeFile(filePath, content) {
 })().catch(error => {
   console.error(error);
   process.exit(1);
-});
+}).finally(() => cleanupRoot && fs.rm(cleanupRoot, { recursive: true, force: true }));

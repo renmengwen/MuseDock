@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const agent = require('../server/services/creative-video/html-video/frameHtmlAgent');
+const inspection = require('../server/services/creative-video/html-video/frameHtmlInspection');
 
 const graph = {
   synopsis: '两帧讲清价格差异',
@@ -843,6 +844,121 @@ assert.equal(noHtmlDocument.code, 'html_document_extract_failed');
   );
   assert.equal(blockedAssetUsage.success, false);
   assert.equal(blockedAssetUsage.code, 'frame_html_blocked_source_asset_used');
+
+  for (const [label, html, offendingReference] of [
+    ['img', '<img src="../assets/unregistered.png">', '../assets/unregistered.png'],
+    ['unquoted img', '<img src=../assets/unregistered-unquoted.png>', '../assets/unregistered-unquoted.png'],
+    ['css background', '<style>.hero{background-image:url("../assets/unregistered-bg.png")}</style><main class="hero"></main>', '../assets/unregistered-bg.png'],
+    ['external image', '<img src="https://evil.example/unregistered.png">', 'https://evil.example/unregistered.png'],
+    ['data image', '<img src="data:image/png;base64,AAAA">', 'data:image/png;base64,AAAA'],
+    ['blob image', '<img src="blob:https://example.com/not-registered">', 'blob:https://example.com/not-registered'],
+  ]) {
+    const unregistered = agent.validateFrameAssetUsage(
+      `<!doctype html><html><body>${html}</body></html>`,
+      { node: graph.nodes[0], creativeContext: assetContextForValidation },
+    );
+    assert.equal(unregistered.success, false, `${label} 必须被反向登记门拒绝`);
+    assert.equal(unregistered.code, 'frame_html_unregistered_visual_asset');
+    assert.equal(unregistered.details.offending_reference, offendingReference);
+    assert.match(unregistered.message, /未登记/);
+  }
+
+  const normalizedRegisteredUsage = agent.validateFrameAssetUsage(
+    '<!doctype html><html><body><img src="./../assets/source-image-01.png?cache=1#hero"></body></html>',
+    { node: assetNode, creativeContext: assetContextForValidation },
+  );
+  assert.equal(normalizedRegisteredUsage.success, true, '已登记素材的等价相对路径必须通过');
+
+  const nonVisualLinks = agent.validateFrameAssetUsage([
+    '<!doctype html><html><head><style>.shape{clip-path:url(#clip)}</style></head><body>',
+    '<a href="../assets/not-a-visual-navigation.html">导航</a>',
+    '<p>{background:url(../assets/code-example.png)}</p>',
+    '<svg><defs><clipPath id="clip"><circle r="10"></circle></clipPath></defs></svg>',
+    '</body></html>',
+  ].join(''), { node: graph.nodes[0], creativeContext: assetContextForValidation });
+  assert.equal(nonVisualLinks.success, true, '锚点 href 与内联 CSS fragment 不得误判为视觉素材');
+
+  const nonVisualResources = agent.validateFrameAssetUsage([
+    '<!doctype html><html><head><style>',
+    '@font-face{font-family:x;src:url(../assets/local.woff2)}',
+    '.example{content:"<img src=../assets/not-real-style-markup.png>"}',
+    '</style></head><body>',
+    '<iframe src="../assets/frame.html"></iframe>',
+    '<object data="../assets/document.svg"></object>',
+    '<embed src="../assets/embed.svg">',
+    '<video src="../assets/movie.mp4"></video>',
+    '<source src="../assets/not-in-picture.png">',
+    '</body></html>',
+  ].join(''), { node: graph.nodes[0], creativeContext: assetContextForValidation });
+  assert.equal(nonVisualResources.success, true, '字体与非图片上下文不得进入视觉素材登记门');
+
+  for (const [label, html] of [
+    ['srcset data URL', '<img srcset="data:image/png;base64,AAAA 1x, ../assets/unregistered-srcset.png 2x">'],
+    ['picture source', '<picture><source srcset="../assets/unregistered-picture.png 1x"></picture>'],
+    ['video poster', '<video poster="../assets/unregistered-poster.png"></video>'],
+    ['image input', '<input type=image src = ../assets/unregistered-input.png>'],
+    ['svg image', '<svg><image xlink:href = ../assets/unregistered-svg.png></image></svg>'],
+    ['css visual property', '<style>.x{mask-image:url(../assets/unregistered-mask.png)}</style>'],
+  ]) {
+    const result = agent.validateFrameAssetUsage(
+      `<!doctype html><html><body>${html}</body></html>`,
+      { node: graph.nodes[0], creativeContext: assetContextForValidation },
+    );
+    assert.equal(result.success, false, `${label} 必须被视觉素材登记门拒绝`);
+    assert.equal(result.code, 'frame_html_unregistered_visual_asset');
+  }
+  const srcsetReferences = inspection.extractVisualAssetReferences(
+    '<img srcset="data:image/png;base64,AAAA 1x, ../assets/unregistered-srcset.png 2x">',
+  ).map(item => item.reference);
+  assert.deepEqual(srcsetReferences, [
+    'data:image/png;base64,AAAA',
+    '../assets/unregistered-srcset.png',
+  ], 'srcset 中 data URL 的逗号不得吞掉后续候选图片');
+  const cssReferences = inspection.extractVisualAssetReferences([
+    '<style>.x{',
+    'background:url(../assets/a.png);background-image:url(../assets/b.png);',
+    'border-image:url(../assets/c.png);mask:url(../assets/d.png);mask-image:url(../assets/e.png);',
+    'list-style-image:url(../assets/f.png);content:url(../assets/g.png);cursor:url(../assets/h.png),auto',
+    '}</style>',
+  ].join('')).map(item => item.reference);
+  assert.deepEqual(cssReferences, 'abcdefgh'.split('').map(name => `../assets/${name}.png`));
+
+  assert.deepEqual(
+    inspection.extractVisualAssetReferences('<img alt=">" src="../assets/evil-after-angle.png">').map(item => item.reference),
+    ['../assets/evil-after-angle.png'],
+    '引号内的 > 不得提前结束标签扫描',
+  );
+  const entityRegistered = agent.validateFrameAssetUsage('<img src="../assets/a&#46;png">', {
+    node: graph.nodes[0],
+    creativeContext: { asset_context: { assets: [{ id: 'a', frame_src: '../assets/a.png' }] } },
+  });
+  assert.equal(entityRegistered.success, true, 'HTML attribute entity 解码后应与登记路径等价');
+  assert.deepEqual(
+    inspection.extractVisualAssetReferences('<img srcset="data:image/png;base64,AAAA, ../assets/evil-after-data.png 2x">')
+      .map(item => item.reference),
+    ['data:image/png;base64,AAAA', '../assets/evil-after-data.png'],
+  );
+  const advancedCssReferences = inspection.extractVisualAssetReferences([
+    '<style>',
+    '@font-face{src:url(../assets/font-must-stay-ignored.woff2)}',
+    ':root{--hero:url(../assets/css-variable.png)}',
+    '.a{background/**/:url(../assets/comment-property.png)}',
+    '.b{background-image:image-set("../assets/image-set-quoted.png" 1x, ../assets/image-set-bare.png 2x)}',
+    '</style>',
+    '<link rel="stylesheet" href="../assets/untrusted.css">',
+  ].join('')).map(item => item.reference);
+  assert.deepEqual(advancedCssReferences.sort(), [
+    '../assets/css-variable.png',
+    '../assets/comment-property.png',
+    '../assets/image-set-quoted.png',
+    '../assets/image-set-bare.png',
+    '../assets/untrusted.css',
+  ].sort());
+  const registeredStylesheet = agent.validateFrameAssetUsage(
+    '<link rel="alternate stylesheet" href="../assets/untrusted.css">',
+    { node: graph.nodes[0], creativeContext: { asset_context: { assets: [{ id: 'css', frame_src: '../assets/untrusted.css' }] } } },
+  );
+  assert.equal(registeredStylesheet.success, false, 'stylesheet 即使路径已登记也必须 fail-closed');
 
   let requiredAssetCallCount = 0;
   const validAssetHtml = src => [

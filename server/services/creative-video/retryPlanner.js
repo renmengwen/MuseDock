@@ -350,6 +350,14 @@ function missingAssetFrameIds(project = {}, classification = {}) {
     .map(frame => safeString(frame?.id)));
 }
 
+function unregisteredAssetFrameIds(classification = {}) {
+  const diagnostics = [classification.diagnostic, ...arrayOrEmpty(classification.diagnostics)]
+    .filter(item => item && typeof item === 'object');
+  return uniqueStrings(diagnostics.flatMap(item => arrayOrEmpty(
+    objectOrEmpty(item.details).unregistered_image_references,
+  )).map(item => item?.frame_id));
+}
+
 function visualQaIssueFrameIds(project = {}, classification = {}) {  const frames = frameTimeline(project);
   const issues = blockingVisualQaIssues(classification);
   const ids = [];
@@ -492,6 +500,34 @@ function createCreativeWorkflowRetryPlan(input = {}) {
     });
   }
 
+  if (code === 'runtime_visual_asset_policy_violation') {
+    const frameIds = uniqueStrings([classification.frame_id]);
+    return retryPlan(classification, 'retry_frame_html', 'frame_html', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
+      discard: frameIds.length
+        ? [...frameIds.map(frameId => `frames:${frameId}`), 'render_outputs', 'exports']
+        : ['frame_html', 'render_outputs', 'exports'],
+      executor_options: {
+        regenerate_frame_html: true,
+        ...(frameIds.length ? { frame_ids: frameIds } : {}),
+      },
+      user_message: '镜头 HTML 引用了未登记图片或不允许的资源，将重新生成对应镜头并重新导出。',
+    });
+  }
+
+  if (code === 'runtime_asset_policy_revalidation_required') {
+    const frameIds = uniqueStrings([
+      ...arrayOrEmpty(classification.diagnostic?.details?.frame_ids),
+      ...arrayOrEmpty(classification.diagnostics?.find(item => item?.code === code)?.details?.frame_ids),
+    ]);
+    return retryPlan(classification, 'rerender_frames', 'render', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph', 'frame_html'],
+      discard: frameIds.map(frameId => `render:${frameId}`),
+      executor_options: { frame_ids: frameIds },
+      user_message: '运行时素材安全证明缺失或已过期，将重新渲染相关镜头后再合成。',
+    });
+  }
+
   if (code.startsWith('render_failed') || subStage === 'render') {
     const frameIds = failedRenderFrameIds(project, classification.frame_id);
     return retryPlan(classification, 'rerender_frames', 'render', {
@@ -516,6 +552,23 @@ function createCreativeWorkflowRetryPlan(input = {}) {
       user_message: frameIds.length
         ? `必用视觉素材未进入画面，将重新生成 ${frameIds.length} 个相关镜头并重新渲染、合成。`
         : '必用视觉素材未进入画面，将重新生成镜头 HTML 并重新渲染、合成。',
+    });
+  }
+
+  if (code === 'unregistered_visual_asset_reference') {
+    const frameIds = unregisteredAssetFrameIds(classification);
+    return retryPlan(classification, 'retry_frame_html', 'frame_html', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
+      discard: frameIds.length
+        ? [...frameIds.map(frameId => `frames:${frameId}`), 'render_outputs', 'exports', 'visual_inspect']
+        : ['frame_html', 'render_outputs', 'exports', 'visual_inspect'],
+      executor_options: {
+        regenerate_frame_html: true,
+        ...(frameIds.length ? { frame_ids: frameIds } : {}),
+      },
+      user_message: frameIds.length
+        ? `最终 HTML 引用了未登记视觉素材，将重新生成 ${frameIds.length} 个相关镜头并重新导出。`
+        : '最终 HTML 引用了未登记视觉素材，将重新生成镜头并重新导出。',
     });
   }
 

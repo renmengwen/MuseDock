@@ -48,6 +48,11 @@ async function renderFrame(frame = {}, options = {}) {
           durationMode: frame.duration_mode || frame.durationMode || 'explicit',
         },
         frame,
+        security: {
+          projectDir: options.projectDir || options.workDir,
+          assets: Array.isArray(options.project?.assets) ? options.project.assets : [],
+          frameId: source.frame_id || frame.id || frame.scene_id || '',
+        },
       },
       {
         onProgress: (percent, message) => {
@@ -71,6 +76,7 @@ async function renderFrame(frame = {}, options = {}) {
     await progressQueue;
     state.status = 'failed';
     state.message = `html-video 帧渲染失败：${error.message}`;
+    const policyFailure = error.code === 'runtime_visual_asset_policy_violation';
     return {
       success: false,
       frame_id: frame.id || null,
@@ -78,8 +84,12 @@ async function renderFrame(frame = {}, options = {}) {
       diagnostics: [{
         code: error.code || 'render_failed',
         stage: 'render',
+        sub_stage: policyFailure ? 'frame_html' : 'render',
+        frame_id: error.frame_id || frame.id || frame.scene_id || null,
         user_message: state.message,
-        details: { message: error.message },
+        retryable: true,
+        repair_action: policyFailure ? 'retry_frame_html' : 'retry_render',
+        details: { message: error.message, ...(error.details || {}) },
       }],
       message: state.message,
       code: error.code || 'render_failed',

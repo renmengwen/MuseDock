@@ -10,6 +10,48 @@ const { normalizeProject, markCheckpointFrame, markCheckpointStage } = require('
 const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { sanitizePathSegment } = require('./frameIdentity');
 const { objectOrEmpty, report, getOutputConfig } = require('./timelineGuards');
+const { buildAssetUsageReport, updateRuntimePolicyViolations } = require('./assetUsagePhase');
+const RUNTIME_ASSET_POLICY_VERSION = 'runtime-asset-policy-v1';
+
+function hashValue(value) {
+  return crypto.createHash('sha256').update(String(value)).digest('hex');
+}
+
+async function runtimeAssetPolicyAttestation(projectDir, project = {}, frame = {}, checkpoint = {}) {
+  const htmlPath = path.resolve(projectDir, String(frame.html_path || frame.htmlPath || ''));
+  const htmlHash = await fileHash(htmlPath);
+  const registry = (Array.isArray(project.assets) ? project.assets : [])
+    .filter(asset => {
+      const type = String(asset?.media_type || asset?.type || '').toLowerCase();
+      return type === 'image' || type.startsWith('image/');
+    })
+    .map(asset => ({ id: String(asset.id || ''), path: String(asset.path || ''), status: String(asset.status || '') }))
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  const registryHash = hashValue(JSON.stringify(registry));
+  const checkpointKey = String(checkpoint.checkpoint_key || renderCheckpointKey(frame));
+  const mp4Path = String(checkpoint.mp4_path || '');
+  const outputHash = String(checkpoint.output_hash || '');
+  const mp4Hash = checkpoint.mp4_hash || await fileHash(path.resolve(projectDir, mp4Path));
+  const frameId = String(frame.id || frame.scene_id || '');
+  return {
+    version: RUNTIME_ASSET_POLICY_VERSION,
+    frame_id: frameId,
+    checkpoint_key: checkpointKey,
+    html_hash: htmlHash,
+    registry_hash: registryHash,
+    mp4_path: mp4Path,
+    output_hash: outputHash,
+    mp4_hash: mp4Hash,
+    fingerprint: hashValue(JSON.stringify([RUNTIME_ASSET_POLICY_VERSION, frameId, checkpointKey, htmlHash, registryHash, mp4Path, outputHash, mp4Hash])),
+  };
+}
+
+function runtimePolicyViolations(result = {}) {
+  if (result.code !== 'runtime_visual_asset_policy_violation') return [];
+  const diagnostic = (Array.isArray(result.diagnostics) ? result.diagnostics : [])
+    .find(item => item?.code === result.code);
+  return Array.isArray(diagnostic?.details?.violations) ? diagnostic.details.violations : [];
+}
 
 async function fileHash(filePath) {
   try {
@@ -86,7 +128,18 @@ async function resolveNarrationPath(project, projectDir, ffmpegComposer, diagnos
   return concat.output_path || outputPath;
 }
 
-function collectRenderedFramesFromProject(project, projectDir) {
+async function formalFrameMp4(projectDir, checkpoint = {}) {
+  const mp4Path = String(checkpoint.mp4_path || '').trim().replace(/\\/g, '/');
+  if (!/^frames\/[^/]+\.mp4$/.test(mp4Path) || path.isAbsolute(mp4Path) || path.posix.normalize(mp4Path) !== mp4Path) return null;
+  const framesRoot = await fs.realpath(path.join(projectDir, 'frames')).catch(() => '');
+  const realPath = await fs.realpath(path.resolve(projectDir, mp4Path)).catch(() => '');
+  if (!framesRoot || !realPath) return null;
+  const relative = path.relative(framesRoot, realPath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  return { relative_path: mp4Path, real_path: realPath, hash: await fileHash(realPath) };
+}
+
+async function collectRenderedFramesFromProject(project, projectDir) {
   const renderedFrames = [];
   const checkpointFrames = objectOrEmpty(project?.generation_checkpoint?.stages?.render?.frames);
   for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
@@ -94,10 +147,10 @@ function collectRenderedFramesFromProject(project, projectDir) {
     const checkpointKey = renderCheckpointKey(frame);
     const checkpoint = objectOrEmpty(checkpointFrames[checkpointKey] || checkpointFrames[frameId]);
     if (checkpoint.status !== 'done') continue;
-    const mp4Path = String(checkpoint.mp4_path || frame.mp4_path || frame.preview_mp4_path || '').trim();
-    if (!mp4Path) continue;
+    const formal = await formalFrameMp4(projectDir, checkpoint);
+    if (!formal || !checkpoint.output_hash || formal.hash !== checkpoint.output_hash) continue;
     renderedFrames.push({
-      path: path.isAbsolute(mp4Path) ? mp4Path : path.join(projectDir, mp4Path),
+      path: formal.real_path,
       engine: frame.engine,
       encoding: frame.encoding || checkpoint.encoding,
       frame_id: frameId,
@@ -106,15 +159,14 @@ function collectRenderedFramesFromProject(project, projectDir) {
   return renderedFrames;
 }
 
-function missingRenderedFrameIds(project) {
+async function missingRenderedFrameIds(project, projectDir) {
   const missing = [];
   const checkpointFrames = objectOrEmpty(project?.generation_checkpoint?.stages?.render?.frames);
   for (const frame of Array.isArray(project?.frames) ? project.frames : []) {
     const frameId = frame.id || frame.scene_id || '';
     const checkpointKey = renderCheckpointKey(frame);
     const checkpoint = objectOrEmpty(checkpointFrames[checkpointKey] || checkpointFrames[frameId]);
-    const mp4Path = String(checkpoint.mp4_path || frame.mp4_path || frame.preview_mp4_path || '').trim();
-    if (checkpoint.status !== 'done' || !mp4Path) {
+    if (checkpoint.status !== 'done') {
       missing.push(checkpointKey || frameId);
     }
   }
@@ -268,26 +320,36 @@ async function renderHtmlVideoFrames({
       details: { frame_id: frameId },
     }));
     if (!rendered.success) {
+      const policyFailure = rendered.code === 'runtime_visual_asset_policy_violation';
+      const policyViolations = runtimePolicyViolations(rendered);
       nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
         markRenderCheckpoint(current, checkpointKey, {
           status: 'failed',
           diagnostic_code: rendered.code || 'render_failed',
         });
         markCheckpointStage(current, 'render', { status: 'failed' });
+        if (policyFailure) {
+          current.asset_usage_report = updateRuntimePolicyViolations(
+            buildAssetUsageReport({ project: current, projectDir: resolvedProjectDir }),
+            frameId,
+            policyViolations,
+          );
+        }
         return current;
       });
       diagnostics.push(createDiagnostic({
-        code: 'render_failed',
+        code: rendered.code || 'render_failed',
         stage: 'render',
-        sub_stage: 'render',
+        sub_stage: policyFailure ? 'frame_html' : 'render',
         frame_id: frameId,
         user_message: rendered.message || 'html-video 帧渲染失败。',
         retryable: true,
-        repair_action: 'retry_render',
-        details: { frame_id: frameId, output_path: rendered.output_path },
+        repair_action: policyFailure ? 'retry_frame_html' : 'retry_render',
+        details: { frame_id: frameId, output_path: rendered.output_path, ...(policyFailure ? { violations: policyViolations } : {}) },
       }));
       return {
         success: false,
+        code: rendered.code || 'render_failed',
         message: rendered.message || 'html-video 帧渲染失败。',
         project: nextProject,
         project_dir: resolvedProjectDir,
@@ -297,17 +359,25 @@ async function renderHtmlVideoFrames({
       };
     }
 
-    const outputHash = rendered.output_hash || rendered.meta?.output_hash || await fileHash(rendered.output_path);
+    const outputHash = await fileHash(rendered.output_path);
+    const mp4Path = relativeProjectPath(resolvedProjectDir, rendered.output_path);
+    const attestation = await runtimeAssetPolicyAttestation(resolvedProjectDir, nextProject, frame, {
+      checkpoint_key: checkpointKey, mp4_path: mp4Path, output_hash: outputHash, mp4_hash: outputHash,
+    });
     nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
       markRenderCheckpoint(current, checkpointKey, {
         status: 'done',
-        mp4_path: relativeProjectPath(resolvedProjectDir, rendered.output_path),
+        mp4_path: mp4Path,
         output_hash: outputHash || '',
         diagnostic_code: '',
+        runtime_asset_policy_attestation: attestation,
       });
       markCheckpointStage(current, 'render', {
         status: requested.size && frames.length !== allFrames.length ? 'partial' : 'done',
       });
+      if (current.asset_usage_report?.runtime_policy_violations) {
+        current.asset_usage_report = updateRuntimePolicyViolations(current.asset_usage_report, frameId, []);
+      }
       return current;
     });
     renderedFrames.push({
@@ -339,4 +409,7 @@ module.exports = {
   createProject,
   materializeProject,
   renderHtmlVideoFrames,
+  runtimeAssetPolicyAttestation,
+  RUNTIME_ASSET_POLICY_VERSION,
+  formalFrameMp4,
 };

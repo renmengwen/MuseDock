@@ -16,6 +16,7 @@ async function writeFile(filePath, content) {
   await writeFile(path.join(projectDir, 'frames', 'scene_01.html'), '<html><body>正式</body></html>');
   await writeFile(path.join(projectDir, 'frames', '.drafts', 'scene_01', 'draft_0001.html'), '<html><body>草稿</body></html>');
   await writeFile(path.join(projectDir, 'frames', '.drafts', 'scene_01', 'draft_accepted.html'), '<html><body>已接受草稿</body></html>');
+  await writeFile(path.join(projectDir, 'frames', '.drafts', 'scene_01', 'draft_unregistered.html'), '<img src="../assets/preview-evil.png">');
 
   const officialHtmlPath = 'frames/scene_01.html';
   const draftHtmlPath = 'frames/.drafts/scene_01/draft_0001.html';
@@ -27,7 +28,7 @@ async function writeFile(filePath, content) {
     output: { resolution: { width: 1080, height: 1920 }, fps: 24 },
     frames: [
       {
-        id: 'scene_01',
+        id: 'beat_01',
         scene_id: 'scene_01',
         source_mode: 'raw_html',
         html_path: officialHtmlPath,
@@ -36,6 +37,7 @@ async function writeFile(filePath, content) {
           { id: 'draft_0001', status: 'ready', html_path: draftHtmlPath },
           { id: 'draft_discarded', status: 'discarded', html_path: 'frames/.drafts/scene_01/draft_discarded.html' },
           { id: 'draft_accepted', status: 'accepted', html_path: acceptedDraftHtmlPath },
+          { id: 'draft_unregistered', status: 'ready', html_path: 'frames/.drafts/scene_01/draft_unregistered.html' },
         ],
       },
     ],
@@ -51,6 +53,18 @@ async function writeFile(filePath, content) {
     frameRenderer: {
       renderFrame: async (frame, options) => {
         renderedFrames.push(frame);
+        if (frame.html_path.includes('draft_unregistered')) {
+          return {
+            success: false,
+            code: 'runtime_visual_asset_policy_violation',
+            message: '运行时素材门禁阻断。',
+            diagnostics: [{
+              code: 'runtime_visual_asset_policy_violation',
+              frame_id: frame.id,
+              details: { violations: [{ source: 'route', kind: 'unregistered_local_image', target: 'assets/preview-evil.png', frame_id: frame.id }] },
+            }],
+          };
+        }
         await writeFile(options.outputPath, 'mp4');
         return { success: true, output_path: options.outputPath, diagnostics: [] };
       },
@@ -111,6 +125,29 @@ async function writeFile(filePath, content) {
   assert.equal(renderedFrames.at(-1).html_path, acceptedDraftHtmlPath);
   assert.match(acceptedDraft.preview_path, /draft_accepted/);
   assert.equal(acceptedDraft.project.frames[0].html_path, officialHtmlPath);
+
+  const renderCountBeforeBlockedDraft = renderedFrames.length;
+  const blockedDraft = await renderHtmlVideoFramePreview({
+    projectDir,
+    project,
+    frameId: 'scene_01',
+    draftId: 'draft_unregistered',
+    services,
+  });
+  assert.equal(blockedDraft.code, 'runtime_visual_asset_policy_violation');
+  assert.equal(renderedFrames.length, renderCountBeforeBlockedDraft + 1, 'preview 必须进入 runtime gate');
+  assert.equal(blockedDraft.preview_frame_id, undefined, '失败响应不伪造成功 preview id');
+  assert.equal(blockedDraft.project.asset_usage_report.runtime_policy_violations[0].frame_id, 'beat_01');
+  assert.equal(blockedDraft.diagnostics.find(item => item.code === 'runtime_visual_asset_policy_violation').frame_id, 'beat_01');
+  assert.notEqual(blockedDraft.project.status, 'failed', 'preview 失败不得污染 workflow/project terminal 状态');
+  const safeDraftAfterFailure = await renderHtmlVideoFramePreview({
+    projectDir, project: blockedDraft.project, frameId: 'scene_01', draftId: 'draft_0001', services,
+  });
+  assert.equal(safeDraftAfterFailure.project.asset_usage_report.runtime_policy_violations.length, 1, '安全 draft 成功不得清理正式帧违规');
+  const safeOfficial = await renderHtmlVideoFramePreview({
+    projectDir, project: safeDraftAfterFailure.project, frameId: 'scene_01', services,
+  });
+  assert.deepEqual(safeOfficial.project.asset_usage_report.runtime_policy_violations, [], '正式 HTML 成功预览才可清理违规');
 
   await fs.rm(rootDir, { recursive: true, force: true });
   console.log('html-video draft frame preview tests passed');

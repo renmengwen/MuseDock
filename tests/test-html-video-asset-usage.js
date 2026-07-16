@@ -5,6 +5,7 @@ const path = require('path');
 
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
 const assetUsagePhase = require('../server/services/creative-video/html-video/assetUsagePhase');
+const { createCreativeWorkflowRetryPlan } = require('../server/services/creative-video/retryPlanner');
 
 const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'html-video-asset-usage-'));
 fs.mkdirSync(path.join(projectDir, 'frames'), { recursive: true });
@@ -26,6 +27,16 @@ fs.writeFileSync(
 fs.writeFileSync(
   path.join(projectDir, 'frames', '04.html'),
   '<!doctype html><html><body><img src="https://cdn.example.com/assets/generated-image-01.jpg"></body></html>',
+  'utf8',
+);
+fs.writeFileSync(
+  path.join(projectDir, 'frames', '05.html'),
+  '<!doctype html><html><head><style>.hero{background-image:url(../assets/unregistered-bg.png)} @font-face{font-family:x;src:url(../assets/local.woff2)}</style></head><body><a href="../assets/not-an-image.png">链接</a><a href="#section">锚点</a><svg><use href="#icon"></use></svg><img src="../assets/a.png"><img src="../assets/unregistered-img.png"><video poster="blob:unregistered-poster"></video><div style="background:url(data:image/png;base64,AAAA)"></div><div style="background:url(#gradient)"></div><div style="font-family:x;background:url(data:font/woff2;base64,AAAA)"></div></body></html>',
+  'utf8',
+);
+fs.writeFileSync(
+  path.join(projectDir, 'frames', '06.html'),
+  '<!doctype html><html><body><img src=../assets/unquoted.png><img src = "../assets/spaced.png"><img src="../assets/disguised.woff2"><img src="data:font/woff2;base64,AAAA"><img src="./../assets/a.png"></body></html>',
   'utf8',
 );
 
@@ -59,6 +70,85 @@ assert.deepEqual(report.assets.find(asset => asset.asset_id === 'article_03').us
 assert.deepEqual(report.used_asset_ids, ['article_01', 'article_03']);
 assert.deepEqual(report.unused_asset_ids, ['article_02']);
 assert.match(report.summary, /最终 HTML 使用了 2 张视觉素材/);
+
+const finalRegistryReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: {
+    frames: [{ id: 'scene_final_edit', html_path: 'frames/05.html' }],
+  },
+  creativeContext: {
+    asset_context: {
+      assets: [{ id: 'article_01', path: 'assets/a.png', frame_src: '../assets/a.png' }],
+    },
+  },
+});
+assert.deepEqual(finalRegistryReport.unregistered_image_references, [
+  { frame_id: 'scene_final_edit', reference: '../assets/unregistered-img.png' },
+  { frame_id: 'scene_final_edit', reference: 'blob:unregistered-poster' },
+  { frame_id: 'scene_final_edit', reference: 'data:image/png;base64,AAAA' },
+  { frame_id: 'scene_final_edit', reference: 'data:font/woff2;base64,AAAA' },
+  { frame_id: 'scene_final_edit', reference: '../assets/unregistered-bg.png' },
+]);
+assert.equal(finalRegistryReport.assets.find(asset => asset.asset_id === 'article_01').used, true);
+assert.doesNotMatch(
+  JSON.stringify(finalRegistryReport.unregistered_image_references),
+  /not-an-image|#section|#icon|#gradient|local\.woff2/,
+  '普通 href、fragment 和 @font-face 字体文件不进入视觉资产差集',
+);
+
+const remoteVisualReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: { frames: [{ id: 'scene_remote', html_path: 'frames/04.html' }] },
+  creativeContext: {
+    asset_context: {
+      assets: [{
+        id: 'remote_registered_by_url',
+        path: 'assets/generated-image-01.jpg',
+        url: 'https://cdn.example.com/assets/generated-image-01.jpg',
+      }],
+    },
+  },
+});
+assert.deepEqual(remoteVisualReport.unregistered_image_references, [{
+  frame_id: 'scene_remote',
+  reference: 'https://cdn.example.com/assets/generated-image-01.jpg',
+}], 'http(s) 图片即使碰巧出现在 asset url 字段中也必须 fail-closed');
+
+const syntaxBoundaryReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: { frames: [{ id: 'scene_syntax', html_path: 'frames/06.html' }] },
+  creativeContext: {
+    asset_context: {
+      assets: [{ id: 'article_01', path: 'assets/a.png', frame_src: '../assets/a.png' }],
+    },
+  },
+});
+assert.deepEqual(syntaxBoundaryReport.unregistered_image_references, [
+  { frame_id: 'scene_syntax', reference: '../assets/unquoted.png' },
+  { frame_id: 'scene_syntax', reference: '../assets/spaced.png' },
+  { frame_id: 'scene_syntax', reference: '../assets/disguised.woff2' },
+  { frame_id: 'scene_syntax', reference: 'data:font/woff2;base64,AAAA' },
+]);
+
+fs.writeFileSync(path.join(projectDir, 'frames', 'beat.html'), '<img src="../assets/beat-evil.png">', 'utf8');
+const beatReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: { frames: [{ id: 'beat_01', beat_id: 'beat_fallback', scene_id: 'scene_01', html_path: 'frames/beat.html' }] },
+  creativeContext: { asset_context: { assets: [] } },
+});
+assert.deepEqual(beatReport.unregistered_image_references, [
+  { frame_id: 'beat_01', reference: '../assets/beat-evil.png' },
+], 'beat_mp4 报告必须优先使用真实 frame.id');
+const beatRetryPlan = createCreativeWorkflowRetryPlan({
+  project: { frames: [{ id: 'beat_01', scene_id: 'scene_01' }] },
+  diagnostics: [{
+    code: 'unregistered_visual_asset_reference',
+    sub_stage: 'asset_usage',
+    severity: 'error',
+    details: { unregistered_image_references: beatReport.unregistered_image_references },
+  }],
+});
+assert.deepEqual(beatRetryPlan.executor_options.frame_ids, ['beat_01']);
 
 const projectAssets = assetUsagePhase.projectAssetsFromCreativeContext({
   asset_context: {
@@ -490,5 +580,6 @@ assert.equal(emptyReport.status, 'empty');
 assert.deepEqual(emptyReport.used_asset_ids, []);
 assert.deepEqual(emptyReport.unused_asset_ids, []);
 assert.deepEqual(emptyReport.missing_required_asset_ids, []);
+assert.deepEqual(emptyReport.unregistered_image_references, []);
 
 console.log('html-video asset usage tests passed');

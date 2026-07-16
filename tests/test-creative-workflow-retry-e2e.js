@@ -1,7 +1,13 @@
 const assert = require('assert/strict');
+const crypto = require('crypto');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const fsSync = require('fs');
+const createdTempDirs = [];
+const mkdtemp = fs.mkdtemp.bind(fs);
+fs.mkdtemp = async (...args) => { const dir = await mkdtemp(...args); createdTempDirs.push(dir); return dir; };
+process.on('exit', () => createdTempDirs.forEach(dir => fsSync.rmSync(dir, { recursive: true, force: true })));
 
 const workflows = require('../server/services/creative/creativeWorkflows');
 const workflowTasks = require('../server/services/creative/creativeWorkflowTasks');
@@ -9,12 +15,15 @@ const { createCreativeTaskRegistry } = require('../server/services/creative/crea
 const { createCreativeWorkflowRetryPlan } = require('../server/services/creative-video/retryPlanner');
 const { parseContentGraphResponse } = require('../server/services/creative-video/html-video/contentGraphAgent');
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
+const { runtimeAssetPolicyAttestation } = require('../server/services/creative-video/html-video/frameRenderPhase');
 const {
   createEmptyProject,
   markCheckpointFrame,
   markCheckpointStage,
 } = require('../server/services/creative-video/html-video/projectSchema');
 const { createDiagnostic } = require('../server/services/creative-video/html-video/diagnostics');
+const { buildAssetUsageReport } = require('../server/services/creative-video/html-video/assetUsagePhase');
+const { executeCreativeWorkflowRetryPlan } = require('../server/services/creative-video/resumeExecutor');
 
 function tempRoot() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'creative-workflow-retry-e2e-'));
@@ -27,6 +36,10 @@ async function readJson(filePath) {
 async function writeJson(filePath, data) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+}
+
+async function fileHash(filePath) {
+  return crypto.createHash('sha256').update(await fs.readFile(filePath)).digest('hex');
 }
 
 async function waitFor(assertion, timeoutMs = 1000) {
@@ -142,7 +155,9 @@ async function createFrameHtmlFailureFixture(rootDir, workflowId = '202606250000
   await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
   await fs.writeFile(path.join(projectDir, 'frames', '01-scene_01.html'), '<html><body>old</body></html>', 'utf8');
   await fs.writeFile(path.join(projectDir, 'frames', '02-scene_02.html'), '<html><body>kept</body></html>', 'utf8');
-  await fs.writeFile(path.join(projectDir, 'frames', 'scene_02.mp4'), 'mp4:scene_02', 'utf8');
+  const mp4Path = 'frames/scene_02.mp4';
+  await fs.writeFile(path.join(projectDir, mp4Path), 'mp4:scene_02', 'utf8');
+  const outputHash = await fileHash(path.join(projectDir, mp4Path));
   markCheckpointFrame(project, 'frame_html', 'scene_01', {
     status: 'failed',
     html_path: 'frames/01-scene_01.html',
@@ -156,9 +171,12 @@ async function createFrameHtmlFailureFixture(rootDir, workflowId = '202606250000
   });
   markCheckpointFrame(project, 'render', 'scene_02', {
     status: 'done',
-    mp4_path: 'frames/scene_02.mp4',
-    output_hash: 'kept-scene-02-mp4',
+    mp4_path: mp4Path,
+    output_hash: outputHash,
     diagnostic_code: '',
+    runtime_asset_policy_attestation: await runtimeAssetPolicyAttestation(projectDir, project, project.frames[1], {
+      checkpoint_key: 'scene_02', mp4_path: mp4Path, output_hash: outputHash,
+    }),
   });
   markCheckpointStage(project, 'render', { status: 'partial' });
   await projectStore.saveProject(projectDir, project);
@@ -202,11 +220,17 @@ async function createRenderFailureFixture(rootDir, workflowId = '202606250000001
       diagnostic_code: '',
     });
   }
-  await fs.writeFile(path.join(projectDir, 'frames', 'scene_01.mp4'), 'mp4:scene_01', 'utf8');
+  const mp4Path = 'frames/scene_01.mp4';
+  await fs.writeFile(path.join(projectDir, mp4Path), 'mp4:scene_01', 'utf8');
+  const outputHash = await fileHash(path.join(projectDir, mp4Path));
   markCheckpointFrame(project, 'render', 'scene_01', {
     status: 'done',
-    mp4_path: 'frames/scene_01.mp4',
+    mp4_path: mp4Path,
+    output_hash: outputHash,
     diagnostic_code: '',
+    runtime_asset_policy_attestation: await runtimeAssetPolicyAttestation(projectDir, project, project.frames[0], {
+      checkpoint_key: 'scene_01', mp4_path: mp4Path, output_hash: outputHash,
+    }),
   });
   markCheckpointFrame(project, 'render', 'scene_02', {
     status: 'failed',
@@ -246,8 +270,10 @@ async function createComposeMismatchFixture(rootDir, workflowId = '2026062500000
   const project = createProject({ workflowId, sceneIds, targetDurationSec: 4 });
   await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
   for (const frame of project.frames) {
+    const mp4Path = `frames/${frame.id}.mp4`;
     await fs.writeFile(path.join(projectDir, frame.html_path), `<html><body>${frame.id}</body></html>`, 'utf8');
-    await fs.writeFile(path.join(projectDir, 'frames', `${frame.id}.mp4`), `mp4:${frame.id}`, 'utf8');
+    await fs.writeFile(path.join(projectDir, mp4Path), `mp4:${frame.id}`, 'utf8');
+    const outputHash = await fileHash(path.join(projectDir, mp4Path));
     markCheckpointFrame(project, 'frame_html', frame.scene_id, {
       status: 'done',
       html_path: frame.html_path,
@@ -255,8 +281,12 @@ async function createComposeMismatchFixture(rootDir, workflowId = '2026062500000
     });
     markCheckpointFrame(project, 'render', frame.scene_id, {
       status: 'done',
-      mp4_path: `frames/${frame.id}.mp4`,
+      mp4_path: mp4Path,
+      output_hash: outputHash,
       diagnostic_code: '',
+      runtime_asset_policy_attestation: await runtimeAssetPolicyAttestation(projectDir, project, frame, {
+        checkpoint_key: frame.scene_id, mp4_path: mp4Path, output_hash: outputHash,
+      }),
     });
   }
   markCheckpointStage(project, 'render', { status: 'done' });
@@ -405,6 +435,69 @@ function plannerProject(overrides = {}) {
 
 (async () => {
   assert.equal(path.basename(__filename).startsWith('test-'), true);
+
+  {
+    const rootDir = await tempRoot();
+    const projectDir = path.join(rootDir, 'beat-checkpoint-project');
+    const runtimeWorkflowId = '202606250000001006';
+    const project = createProject({ workflowId: runtimeWorkflowId, sceneIds: ['scene_01'] });
+    project.frames[0].id = 'beat_01';
+    await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, project.frames[0].html_path), '<img src="../assets/beat-checkpoint-evil.png">', 'utf8');
+    markCheckpointFrame(project, 'frame_html', 'beat_01', { status: 'done', html_path: project.frames[0].html_path });
+    markCheckpointFrame(project, 'render', 'beat_01', { status: 'failed', diagnostic_code: 'runtime_visual_asset_policy_violation' });
+    await projectStore.saveProject(projectDir, project);
+    const report = buildAssetUsageReport({ project, projectDir, creativeContext: { asset_context: { assets: [] } } });
+    const diagnostic = createDiagnostic({
+      code: 'runtime_visual_asset_policy_violation',
+      sub_stage: 'frame_html',
+      frame_id: 'beat_01',
+      severity: 'error',
+      details: { violations: [{ kind: 'unregistered_local_image', target: 'assets/beat-checkpoint-evil.png', frame_id: 'beat_01' }] },
+    });
+    project.asset_usage_report = {
+      ...report,
+      runtime_policy_violations: [{ frame_id: 'beat_01', code: diagnostic.code, violations: diagnostic.details.violations }],
+    };
+    await projectStore.saveProject(projectDir, project);
+    await writeJson(workflows.getWorkflowPath(runtimeWorkflowId, rootDir), {
+      workflow_id: runtimeWorkflowId,
+      status: 'failed',
+      result: { hyperframes_freeform: { project: { project_dir: projectDir, html_video_project_path: projectDir } } },
+      last_failure: {
+        stage: 'project', sub_stage: 'frame_html', code: diagnostic.code, frame_id: 'beat_01',
+        project_dir: projectDir, diagnostics: [diagnostic], message: '运行时素材门禁阻断。',
+      },
+    });
+    const refreshed = await workflows.refreshCreativeWorkflowRetryPlan(runtimeWorkflowId, { rootDir });
+    const plan = refreshed.plan;
+    assert.deepEqual(report.unregistered_image_references, [
+      { frame_id: 'beat_01', reference: '../assets/beat-checkpoint-evil.png' },
+    ]);
+    assert.deepEqual(plan.executor_options.frame_ids, ['beat_01']);
+    assert.equal(plan.executor_options.regenerate_frame_html, true);
+    let invalidated = false;
+    const result = await executeCreativeWorkflowRetryPlan({
+      workflowId: runtimeWorkflowId,
+      workflow: {},
+      projectDir,
+      rootDir,
+      plan,
+      services: {
+        resumeActions: {
+          retryFrameHtml: async ({ project: nextProject, frame_id }) => {
+            assert.equal(frame_id, 'beat_01');
+            assert.equal(nextProject.generation_checkpoint.stages.frame_html.frames.beat_01.status, 'pending');
+            assert.equal(nextProject.generation_checkpoint.stages.render.frames.beat_01.status, 'pending');
+            invalidated = true;
+            return { success: true, project: nextProject, output_path: 'exports/recovered.mp4' };
+          },
+        },
+      },
+    });
+    assert.equal(result.success, true);
+    assert.equal(invalidated, true, 'report 的真实 beat frame_id 必须贯穿至 checkpoint 定向失效');
+  }
 
   {
     const rootDir = await tempRoot();
@@ -591,6 +684,40 @@ function plannerProject(overrides = {}) {
     assert.equal(calls.retryFrameHtml || 0, 0);
     assert.equal(calls.renderFrame || 0, 0);
     assert.equal(calls.compose, 1);
+  }
+
+  {
+    const rootDir = await tempRoot();
+    const { workflowId, projectDir } = await createRenderFailureFixture(rootDir, '202606250000001012');
+    const project = await projectStore.loadProject(projectDir);
+    await fs.writeFile(path.join(projectDir, project.frames[1].html_path), '<img src="../assets/resume-render-evil.png">', 'utf8');
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
+    const calls = {};
+    const retried = await workflows.retryCreativeWorkflow(workflowId, {
+      mode: 'repair_and_resume', confirm_plan_code: plan.plan.code,
+    }, { rootDir, retryAttemptId: 'retry_attempt_render_asset_gate', services: { ...fakeHtmlVideoServices(calls) } });
+    assert.equal(retried.success, true, '静态引用扫描只做早诊断，最终裁决属于真实 renderer');
+    assert.equal(calls.renderFrame, 1);
+    assert.equal(calls.compose, 1);
+    assert.equal(calls.visualInspect, 1);
+  }
+
+  {
+    const rootDir = await tempRoot();
+    const { workflowId, projectDir } = await createComposeMismatchFixture(rootDir, '202606250000001013');
+    const project = await projectStore.loadProject(projectDir);
+    await fs.writeFile(path.join(projectDir, project.frames[0].html_path), '<img src="../assets/resume-compose-evil.png">', 'utf8');
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
+    const calls = {};
+    const retried = await workflows.retryCreativeWorkflow(workflowId, {
+      mode: 'repair_and_resume', confirm_plan_code: plan.plan.code,
+    }, { rootDir, retryAttemptId: 'retry_attempt_compose_asset_gate', services: { ...fakeHtmlVideoServices(calls) } });
+    assert.equal(retried.success, false, 'compose-only 发现 HTML 漂移必须回到 runtime render');
+    assert.equal(calls.compose || 0, 0);
+    assert.equal(calls.visualInspect || 0, 0);
+    const revalidationPlan = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
+    assert.equal(revalidationPlan.plan.repair_action, 'rerender_frames');
+    assert.deepEqual(revalidationPlan.plan.executor_options.frame_ids, ['scene_01']);
   }
 
   {

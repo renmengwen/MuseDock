@@ -11,8 +11,7 @@ const sceneSpec = {
   scenes: [{ id: 'scene_01', order: 1, duration_sec: 5, narration_text: '深夜骑手' }],
 };
 
-async function run() {
-  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-image-persist-test-'));
+async function runWithRoot(rootDir) {
   const projectJsonPath = path.join(rootDir, 'wf-test', 'agent_runs', 'run-test-html-video', 'project.json');
 
   const buildArgs = fileName => ({
@@ -121,7 +120,20 @@ async function run() {
   assert.strictEqual(generated3[0].id, 'gen_scene_01');
   assert.ok(generated3[0].path.includes('refill'), `path 应指向补回的新文件，实际 ${generated3[0].path}`);
   assert.strictEqual(generated3[0].generation.scene_id, 'scene_01');
+}
 
+async function run() {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gen-image-persist-test-'));
+  try {
+    await runWithRoot(rootDir);
+  } finally {
+    const resolvedTemp = path.resolve(os.tmpdir());
+    const resolvedRoot = path.resolve(rootDir);
+    const relative = path.relative(resolvedTemp, resolvedRoot);
+    assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative), '清理目标必须位于系统临时目录内');
+    assert.ok(path.basename(resolvedRoot).startsWith('gen-image-persist-test-'), '清理目标必须属于本测试前缀');
+    fs.rmSync(resolvedRoot, { recursive: true, force: true });
+  }
   console.log('test-generated-image-persist passed');
 }
 

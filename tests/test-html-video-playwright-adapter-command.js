@@ -2,19 +2,118 @@ const assert = require('assert');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const { pathToFileURL } = require('url');
 
 const {
   buildFfmpegArgs,
+  createRuntimeAssetPolicy,
+  createViolationCollector,
+  installRuntimeAssetPolicy,
   render,
 } = require('../server/services/creative-video/html-video/hyperframesPlaywrightAdapter');
 const { diagnoseEnvironment } = require('../server/services/creative-video/html-video/environmentDoctor');
 
 (async () => {
   const workDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'html-video-adapter-'));
+  const outsideDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'html-video-adapter-outside-'));
   try {
     const sourcePath = path.join(workDir, 'frame.html');
     const outputPath = path.join(workDir, 'frame.mp4');
     await fsp.writeFile(sourcePath, '<html><body><h1>帧</h1></body></html>', 'utf8');
+    assert.equal(typeof createRuntimeAssetPolicy, 'function');
+    const assetDir = path.join(workDir, 'assets');
+    await fsp.mkdir(assetDir);
+    const registeredPath = path.join(assetDir, 'registered.png');
+    const unregisteredPath = path.join(assetDir, 'unregistered.png');
+    const stylesheetPath = path.join(assetDir, 'frame.css');
+    await fsp.writeFile(registeredPath, 'png');
+    await fsp.writeFile(unregisteredPath, 'png');
+    await fsp.writeFile(stylesheetPath, 'body{}');
+    const policy = await createRuntimeAssetPolicy({
+      security: {
+        projectDir: workDir,
+        frameId: 'scene_policy',
+        assets: [{ type: 'image', path: 'assets/registered.png', frame_src: '../assets/unregistered.png', url: pathToFileURL(unregisteredPath).href }],
+      },
+      preparedPath: sourcePath,
+    });
+    assert.equal((await policy.decide(pathToFileURL(sourcePath).href, 'document')).allow, true);
+    assert.equal((await policy.decide(`${pathToFileURL(registeredPath).href}?v=1`, 'image')).allow, true);
+    assert.equal((await policy.decide(pathToFileURL(unregisteredPath).href, 'image')).allow, false, 'asset.url 不得进入 allowlist');
+    assert.equal((await policy.decide(pathToFileURL(stylesheetPath).href, 'stylesheet')).allow, true);
+    assert.equal((await policy.decide(pathToFileURL(registeredPath).href, 'stylesheet')).allow, false, '资源类型与扩展名必须匹配');
+    assert.equal((await policy.decide('https://example.invalid/a.png', 'image')).allow, false);
+    const outsideImage = path.join(outsideDir, 'outside.png');
+    const junctionPath = path.join(workDir, 'junction-outside');
+    await fsp.writeFile(outsideImage, 'png');
+    await fsp.symlink(outsideDir, junctionPath, process.platform === 'win32' ? 'junction' : 'dir');
+    const junctionPolicy = await createRuntimeAssetPolicy({
+      security: { projectDir: workDir, frameId: 'scene_policy', assets: [{ type: 'image', path: 'junction-outside/outside.png' }] },
+      preparedPath: sourcePath,
+    });
+    assert.equal((await junctionPolicy.decide(pathToFileURL(path.join(junctionPath, 'outside.png')).href, 'image')).allow, false, 'junction 出根必须拒绝');
+
+    const missingApiCollector = createViolationCollector('scene_policy', workDir);
+    await assert.rejects(
+      () => installRuntimeAssetPolicy({ context: {}, page: {}, policy, collector: missingApiCollector }),
+      error => error.code === 'runtime_visual_asset_policy_violation'
+        && error.details.violations[0].kind === 'route_api_unavailable',
+    );
+
+    let routeHandler;
+    let continued = 0;
+    let aborted = 0;
+    const fakePage = {
+      addInitScript: async () => {}, exposeBinding: async () => {}, on: () => {}, mainFrame: () => null,
+    };
+    await installRuntimeAssetPolicy({
+      context: {
+        route: async (_pattern, handler) => { routeHandler = handler; },
+        routeWebSocket: async () => {},
+        on: () => {},
+      },
+      page: fakePage,
+      policy,
+      collector: createViolationCollector('scene_policy', workDir),
+    });
+    await routeHandler({
+      request: () => ({ url: () => pathToFileURL(unregisteredPath).href, resourceType: () => 'image' }),
+      continue: async () => { continued += 1; },
+      abort: async () => { aborted += 1; },
+    });
+    assert.equal(continued, 0);
+    assert.equal(aborted, 1, 'route 必须只有一个终态');
+
+    const browserCollector = createViolationCollector('scene_browser', workDir);
+    const contextEvents = new Map();
+    const pageEvents = new Map();
+    let websocketHandler;
+    let websocketClosed = 0;
+    const mainFrame = { url: () => 'file:///unexpected.html' };
+    await installRuntimeAssetPolicy({
+      context: {
+        route: async () => {},
+        routeWebSocket: async (_pattern, handler) => { websocketHandler = handler; },
+        on: (name, handler) => contextEvents.set(name, handler),
+      },
+      page: {
+        addInitScript: async () => {}, exposeBinding: async () => {},
+        on: (name, handler) => pageEvents.set(name, handler), mainFrame: () => mainFrame,
+      },
+      policy,
+      collector: browserCollector,
+    });
+    await websocketHandler({ url: () => 'ws://127.0.0.1/socket', close: async () => { websocketClosed += 1; } });
+    contextEvents.get('page')({ url: () => 'file:///popup.html' });
+    pageEvents.get('popup')({ url: () => 'file:///popup.html' });
+    pageEvents.get('download')({ url: () => 'file:///download.bin' });
+    pageEvents.get('crash')();
+    await pageEvents.get('framenavigated')(mainFrame);
+    assert.equal(websocketClosed, 1);
+    assert.deepEqual(
+      new Set(browserCollector.values().map(item => item.kind)),
+      new Set(['websocket_blocked', 'unexpected_page', 'popup_blocked', 'download_blocked', 'page_crash', 'unexpected_navigation']),
+    );
 
     // webm 余量不足时不再静默放弃裁剪，而是钳制到最大安全 seek：10.6 - 2.56 - 0.1 = 7.94
     const clampedSeek = buildFfmpegArgs({
@@ -60,21 +159,29 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
             newContext: async options => {
               calls.contexts.push(options);
               const recordDir = options.recordVideo.dir;
-              return {
-                newPage: async () => ({
-                  addInitScript: async fn => {
+              const pageEvents = new Map();
+              const page = {
+                on: (name, handler) => pageEvents.set(name, handler),
+                mainFrame: () => null,
+                exposeBinding: async () => {},
+                addInitScript: async fn => {
                     calls.initScripts += 1;
                     calls.initScriptSources.push(String(fn));
-                  },
-                  goto: async (url, options) => { calls.gotos.push({ url, options }); },
-                  evaluate: async fn => {
-                    const source = String(fn);
-                    if (source.includes('getComputedStyle')) return 1800;
-                    if (source.includes('__hvPlayAll')) return true;
-                    return undefined;
-                  },
-                  waitForTimeout: async ms => { calls.waits.push(ms); },
-                }),
+                },
+                goto: async (url, gotoOptions) => { calls.gotos.push({ url, options: gotoOptions }); },
+                evaluate: async fn => {
+                  const source = String(fn);
+                  if (source.includes('getComputedStyle')) return 1800;
+                  if (source.includes('__hvPlayAll')) return true;
+                  return undefined;
+                },
+                waitForTimeout: async ms => { calls.waits.push(ms); },
+              };
+              return {
+                newPage: async () => page,
+                route: async () => {},
+                routeWebSocket: async () => {},
+                on: () => {},
                 close: async () => {
                   await fsp.writeFile(path.join(recordDir, 'capture.webm'), 'webm');
                 },
@@ -89,6 +196,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     const renderResult = await render(
       {
         template: { sourcePath },
+        security: { projectDir: workDir, assets: [], frameId: 'scene_01' },
         config: {
           outputPath,
           resolution: { width: 640, height: 360 },
@@ -126,9 +234,13 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
 
     assert.equal(calls.launches.length, 1);
     assert.equal(calls.launches[0].headless, true);
+    assert.equal(calls.launches[0].chromiumSandbox, true);
+    assert.equal((calls.launches[0].args || []).includes('--no-sandbox'), false);
+    assert.equal((calls.launches[0].args || []).includes('--disable-blink-features=AutomationControlled'), false);
     assert.deepEqual(calls.contexts[0].recordVideo.size, { width: 640, height: 360 });
-    // 冻结动画 + __mpAdapterControlled 受控标志两条 initScript（后者供 scene_html beat 时钟禁用兜底自启）
-    assert.equal(calls.initScripts, 2);
+    assert.equal(calls.contexts[0].serviceWorkers, 'block');
+    // 受控标志、动画冻结和 CSP 违规监听三条 initScript
+    assert.equal(calls.initScripts, 3);
     assert.ok(
       calls.initScriptSources.some(source => source.includes('__mpAdapterControlled')),
       '必须在 goto 前注入 __mpAdapterControlled 受控标志',
@@ -149,11 +261,93 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     assert.ok(args.includes('tpad=stop_mode=clone:stop_duration=4'), '显式 duration 应 clone 尾帧补齐');
     assert.ok(args.includes('-ss'), '应按 leadInMs 裁剪 dead lead-in');
 
+    let lateRouteHandler;
+    let lateTriggered = false;
+    let lateFfmpegCalls = 0;
+    const latePage = {
+      addInitScript: async () => {}, exposeBinding: async () => {}, on: () => {}, mainFrame: () => null,
+      goto: async () => {},
+      evaluate: async fn => String(fn).includes('getComputedStyle') ? 0 : undefined,
+      waitForTimeout: async ms => {
+        if (ms === 250 && !lateTriggered) {
+          lateTriggered = true;
+          await lateRouteHandler({
+            request: () => ({ url: () => pathToFileURL(unregisteredPath).href, resourceType: () => 'image' }),
+            continue: async () => { throw new Error('不应放行'); },
+            abort: async () => {},
+          });
+        }
+      },
+    };
+    const latePlaywright = {
+      chromium: { launch: async () => ({
+        newContext: async () => ({
+          newPage: async () => latePage,
+          route: async (_pattern, handler) => { lateRouteHandler = handler; },
+          routeWebSocket: async () => {}, on: () => {}, close: async () => {},
+        }),
+        close: async () => {},
+      }) },
+    };
+    await assert.rejects(
+      () => render({
+        template: { sourcePath },
+        security: { projectDir: workDir, assets: [], frameId: 'scene_late' },
+        config: { outputPath: path.join(workDir, 'late.mp4'), duration: 0.5, durationMode: 'explicit' },
+      }, {}, {
+        importPlaywright: async () => latePlaywright,
+        runFfmpeg: async () => { lateFfmpegCalls += 1; return { ok: true }; },
+        ffmpegPath: 'ffmpeg-mock',
+      }),
+      error => error.code === 'runtime_visual_asset_policy_violation'
+        && error.details.violations.some(item => item.kind === 'unregistered_local_image'),
+    );
+    assert.equal(lateFfmpegCalls, 0, '晚到动态违规必须在 ffmpeg 前停止');
+
+    for (const trigger of ['goto', 'close']) {
+      let handler;
+      let ffmpegCalls = 0;
+      let recordDir;
+      const fireViolation = () => handler({
+        request: () => ({ url: () => pathToFileURL(unregisteredPath).href, resourceType: () => trigger === 'goto' ? 'document' : 'image' }),
+        continue: async () => {}, abort: async () => {},
+      });
+      const page = {
+        addInitScript: async () => {}, exposeBinding: async () => {}, on: () => {}, mainFrame: () => null,
+        goto: async () => { if (trigger === 'goto') { await fireViolation(); throw new Error('ERR_BLOCKED_BY_CLIENT'); } },
+        evaluate: async fn => String(fn).includes('getComputedStyle') ? 0 : undefined,
+        waitForTimeout: async () => {},
+      };
+      const playwrightForTrigger = { chromium: { launch: async () => ({
+        newContext: async options => {
+          recordDir = options.recordVideo.dir;
+          return {
+            newPage: async () => page, route: async (_pattern, next) => { handler = next; },
+            routeWebSocket: async () => {}, on: () => {},
+            close: async () => {
+              if (trigger === 'close') await fireViolation();
+              await fsp.writeFile(path.join(recordDir, 'capture.webm'), 'webm');
+            },
+          };
+        },
+        close: async () => {},
+      }) } };
+      await assert.rejects(() => render({
+        template: { sourcePath }, security: { projectDir: workDir, assets: [], frameId: `scene_${trigger}` },
+        config: { outputPath: path.join(workDir, `${trigger}.mp4`), duration: 0.5, durationMode: 'explicit' },
+      }, {}, {
+        importPlaywright: async () => playwrightForTrigger,
+        runFfmpeg: async () => { ffmpegCalls += 1; return { ok: true }; }, ffmpegPath: 'ffmpeg-mock',
+      }), error => error.code === 'runtime_visual_asset_policy_violation');
+      assert.equal(ffmpegCalls, 0, `${trigger} 期间违规不得调用 ffmpeg`);
+    }
+
     const badOutputPath = path.join(workDir, 'bad-frame.mp4');
     await assert.rejects(
       () => render(
         {
           template: { sourcePath },
+          security: { projectDir: workDir, assets: [], frameId: 'scene_01' },
           config: {
             outputPath: badOutputPath,
             resolution: { width: 640, height: 360 },
@@ -192,6 +386,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     await render(
       {
         template: { sourcePath },
+        security: { projectDir: workDir, assets: [], frameId: 'scene_01' },
         config: {
           outputPath: absoluteFfprobeOutput,
           resolution: { width: 640, height: 360 },
@@ -294,6 +489,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     console.log('html-video playwright adapter command tests passed');
   } finally {
     await fsp.rm(workDir, { recursive: true, force: true });
+    await fsp.rm(outsideDir, { recursive: true, force: true });
   }
 })();
 

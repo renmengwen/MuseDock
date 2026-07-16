@@ -15,6 +15,7 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
   await fs.writeFile(absoluteLegacyHtmlPath, '<html><body>旧路径</body></html>', 'utf8');
 
   let receivedSourcePath = '';
+  let receivedSecurity = null;
   const state = {};
   const result = await renderFrame(
     {
@@ -30,6 +31,7 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
       adapter: {
         render: async input => {
           receivedSourcePath = input.template.sourcePath;
+          receivedSecurity = input.security;
           assert.equal(input.template.id, 'scene_01');
           assert.equal(input.template.engine, 'hyperframes-playwright');
           assert.equal(input.config.duration, 4);
@@ -45,6 +47,9 @@ const { renderFrame } = require('../server/services/creative-video/html-video/fr
 
   assert.equal(result.success, true);
   assert.equal(receivedSourcePath, htmlPath);
+  assert.equal(receivedSecurity.projectDir, projectDir);
+  assert.equal(receivedSecurity.frameId, 'scene_01');
+  assert.deepEqual(receivedSecurity.assets, []);
   assert.equal(state.status, 'done');
 
   let defaultResolution = null;

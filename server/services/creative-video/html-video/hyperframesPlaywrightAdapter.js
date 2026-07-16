@@ -2,7 +2,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const { pathToFileURL } = require('url');
+const { fileURLToPath, pathToFileURL } = require('url');
 const { spawn } = require('child_process');
 
 const { prepareSourceHtml } = require('./prepareSourceHtml');
@@ -12,6 +12,201 @@ const ADAPTER_VERSION = '0.1.0-playwright';
 const DEFAULT_RENDER_RESOLUTION = { width: 1920, height: 1080 };
 // 录制尾部缓冲：保证 webm 长度 ≥ leadIn + duration + 余量，避免 -ss 前导裁剪被安全检查钳制
 const RECORD_TAIL_BUFFER_MS = 800;
+const POLICY_ERROR_CODE = 'runtime_visual_asset_policy_violation';
+const RESOURCE_EXTENSIONS = {
+  script: new Set(['.js', '.mjs', '.cjs']),
+  stylesheet: new Set(['.css']),
+  font: new Set(['.woff', '.woff2', '.ttf', '.otf']),
+  media: new Set(['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.mp4', '.webm', '.mov']),
+};
+
+function pathKey(value) {
+  const resolved = path.resolve(value);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function isContained(root, target) {
+  const relative = path.relative(root, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function sanitizedTarget(rawUrl, projectRoot = '') {
+  if (path.isAbsolute(String(rawUrl || ''))) return path.basename(String(rawUrl));
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol === 'file:') {
+      const filePath = fileURLToPath(parsed);
+      return projectRoot && isContained(projectRoot, filePath)
+        ? path.relative(projectRoot, filePath).replace(/\\/g, '/')
+        : path.basename(filePath);
+    }
+    if (parsed.protocol === 'data:') return 'data:';
+    if (parsed.protocol === 'blob:') return 'blob:';
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return String(rawUrl || '').slice(0, 160);
+  }
+}
+
+function createViolationCollector(frameId, projectRoot = '') {
+  const byKey = new Map();
+  return {
+    add(input = {}) {
+      const violation = {
+        source: input.source || 'route',
+        kind: input.kind || 'disallowed_resource',
+        resource_type: input.resource_type || '',
+        target: sanitizedTarget(input.url || input.target || '', projectRoot),
+        directive: input.directive || '',
+        frame_id: frameId || '',
+      };
+      const key = [violation.source, violation.kind, violation.resource_type, violation.target, violation.directive].join('|');
+      if (!byKey.has(key)) byKey.set(key, violation);
+    },
+    values: () => [...byKey.values()],
+  };
+}
+
+async function createRuntimeAssetPolicy({ security = {}, preparedPath } = {}) {
+  const projectDir = String(security.projectDir || '').trim();
+  if (!projectDir || !preparedPath) {
+    throw createPolicyError(security.frameId, [{ source: 'policy', kind: 'policy_not_configured', target: '' }]);
+  }
+  const projectRoot = await fsp.realpath(projectDir).catch(() => '');
+  const preparedRealPath = await fsp.realpath(preparedPath).catch(() => '');
+  if (!projectRoot || !preparedRealPath || !isContained(projectRoot, preparedRealPath)) {
+    throw createPolicyError(security.frameId, [{ source: 'policy', kind: 'document_outside_project', target: preparedPath }]);
+  }
+  const imagePaths = new Set();
+  for (const asset of (Array.isArray(security.assets) ? security.assets : [])) {
+    const mediaType = String(asset?.media_type || asset?.type || '').trim().toLowerCase();
+    if (mediaType !== 'image' && !mediaType.startsWith('image/')) continue;
+    const relativePath = String(asset?.path || '').trim();
+    if (!relativePath) continue;
+    const lexicalPath = path.resolve(projectRoot, relativePath);
+    if (!isContained(projectRoot, lexicalPath)) continue;
+    const realPath = await fsp.realpath(lexicalPath).catch(() => '');
+    if (realPath && isContained(projectRoot, realPath)) imagePaths.add(pathKey(realPath));
+  }
+  return {
+    projectRoot,
+    preparedPath: preparedRealPath,
+    preparedKey: pathKey(preparedRealPath),
+    frameId: String(security.frameId || '').trim(),
+    imagePaths,
+    async decide(rawUrl, resourceType) {
+      let parsed;
+      try {
+        parsed = new URL(rawUrl);
+      } catch {
+        return { allow: false, kind: 'invalid_url' };
+      }
+      if (parsed.protocol !== 'file:' || (parsed.hostname && parsed.hostname !== 'localhost')) {
+        return { allow: false, kind: parsed.protocol === 'data:' ? 'data_resource' : parsed.protocol === 'blob:' ? 'blob_resource' : 'remote_or_disallowed_scheme' };
+      }
+      let requestedPath;
+      try {
+        requestedPath = await fsp.realpath(fileURLToPath(parsed));
+      } catch {
+        return { allow: false, kind: 'missing_file' };
+      }
+      if (!isContained(projectRoot, requestedPath)) return { allow: false, kind: 'file_outside_project' };
+      const requestedKey = pathKey(requestedPath);
+      if (resourceType === 'document') {
+        return requestedKey === this.preparedKey
+          ? { allow: true }
+          : { allow: false, kind: 'unexpected_document' };
+      }
+      if (resourceType === 'image') {
+        return imagePaths.has(requestedKey)
+          ? { allow: true }
+          : { allow: false, kind: 'unregistered_local_image' };
+      }
+      const extensions = RESOURCE_EXTENSIONS[resourceType];
+      if (extensions && extensions.has(path.extname(requestedPath).toLowerCase())) return { allow: true };
+      return { allow: false, kind: 'disallowed_resource_type' };
+    },
+  };
+}
+
+function createPolicyError(frameId, violations = []) {
+  const error = createRenderError(
+    POLICY_ERROR_CODE,
+    'html-video 引用了未登记图片或不允许的运行时资源，已停止渲染。',
+  );
+  error.frame_id = String(frameId || '');
+  error.details = {
+    frame_id: error.frame_id,
+    violations: violations.map(item => ({ ...item, target: sanitizedTarget(item?.target || item?.url || '') })),
+  };
+  return error;
+}
+
+function throwIfPolicyViolated(collector) {
+  const violations = collector.values();
+  if (violations.length) throw createPolicyError(violations[0]?.frame_id, violations);
+}
+
+async function installRuntimeAssetPolicy({ context, page, policy, collector }) {
+  if (!context?.route || !context?.routeWebSocket || !context?.on || !page?.exposeBinding || !page?.addInitScript || !page?.on) {
+    collector.add({ source: 'policy', kind: 'route_api_unavailable' });
+    throwIfPolicyViolated(collector);
+  }
+  await context.route('**/*', async route => {
+    const request = route.request();
+    let decision = { allow: false, kind: 'route_decision_failed' };
+    try {
+      decision = await policy.decide(request.url(), request.resourceType());
+    } catch {}
+    if (decision.allow) {
+      await route.continue();
+      return;
+    }
+    collector.add({ source: 'route', kind: decision.kind, resource_type: request.resourceType(), url: request.url() });
+    await route.abort('blockedbyclient');
+  });
+  await context.routeWebSocket('**/*', async webSocketRoute => {
+    collector.add({ source: 'websocket', kind: 'websocket_blocked', resource_type: 'websocket', url: webSocketRoute.url?.() || '' });
+    await webSocketRoute.close({ code: 1008, reason: 'html-video 运行时禁止 WebSocket。' });
+  });
+  context.on('page', extraPage => {
+    if (extraPage !== page) collector.add({ source: 'browser', kind: 'unexpected_page', resource_type: 'document', url: extraPage.url?.() || '' });
+  });
+  page.on('popup', popup => collector.add({ source: 'browser', kind: 'popup_blocked', resource_type: 'document', url: popup.url?.() || '' }));
+  page.on('download', download => collector.add({ source: 'browser', kind: 'download_blocked', url: download.url?.() || '' }));
+  page.on('crash', () => collector.add({ source: 'browser', kind: 'page_crash' }));
+  page.on('framenavigated', async frame => {
+    if (frame !== page.mainFrame?.()) return;
+    const decision = await policy.decide(frame.url?.() || '', 'document').catch(() => ({ allow: false }));
+    if (!decision.allow) collector.add({ source: 'browser', kind: 'unexpected_navigation', resource_type: 'document', url: frame.url?.() || '' });
+  });
+  await page.exposeBinding('__hvReportSecurityPolicyViolation', (_source, violation) => {
+    collector.add({
+      source: 'csp',
+      kind: 'csp_violation',
+      resource_type: violation?.effectiveDirective || '',
+      url: violation?.blockedURI || '',
+      directive: violation?.violatedDirective || '',
+    });
+  });
+  await page.addInitScript(() => {
+    const report = window.__hvReportSecurityPolicyViolation;
+    try {
+      Object.defineProperty(window, '__hvReportSecurityPolicyViolation', {
+        value: report,
+        writable: false,
+        configurable: false,
+      });
+    } catch (_) {}
+    document.addEventListener('securitypolicyviolation', event => {
+      report?.({
+        blockedURI: event.blockedURI,
+        violatedDirective: event.violatedDirective,
+        effectiveDirective: event.effectiveDirective,
+      });
+    });
+  });
+}
 
 async function render(input = {}, ctx = {}, deps = {}) {
   const startedAt = Date.now();
@@ -29,6 +224,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
   let webmPath = '';
   let leadInMs = 0;
   let totalDuration = config.duration;
+  let collector;
 
   try {
     report(ctx, 5, '正在准备 html-video 渲染...');
@@ -39,7 +235,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     browser = await playwright.chromium.launch({
       channel: 'chrome',
       headless: true,
-      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+      chromiumSandbox: true,
     });
 
     // 对应 html-video 源码段：recordVideo，context 创建即开始录制。
@@ -47,6 +243,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     const context = await browser.newContext({
       viewport: { width: config.width, height: config.height },
       deviceScaleFactor: 1,
+      serviceWorkers: 'block',
       recordVideo: {
         dir: recordDir,
         size: { width: config.width, height: config.height },
@@ -96,21 +293,27 @@ async function render(input = {}, ctx = {}, deps = {}) {
     });
 
     report(ctx, 30, '正在加载 html-video 模板...');
-    const prepared = await prepareSourceHtml(sourcePath);
+    const prepared = await prepareSourceHtml(sourcePath, { projectDir: input.security?.projectDir });
     cleanupPrepared = prepared.cleanup;
+    const policy = await createRuntimeAssetPolicy({ security: input.security, preparedPath: prepared.loadPath });
+    collector = createViolationCollector(policy.frameId, policy.projectRoot);
+    await installRuntimeAssetPolicy({ context, page, policy, collector });
 
     // 对应 html-video 源码段：page.goto(file://..., domcontentloaded)。
     // 显式 45s 超时，避免模板异常时卡在默认导航等待里拖垮整条渲染任务。
     try {
       await page.goto(pathToFileURL(prepared.loadPath).href, { waitUntil: 'domcontentloaded', timeout: 45000 });
     } catch (error) {
+      throwIfPolicyViolated(collector);
       throw createRenderError('render-goto-timeout', `加载 html-video 模板超时或失败：${error.message}`);
     }
+    throwIfPolicyViolated(collector);
 
     // 对应 html-video 源码段：等待 stylesheet、逐个 fonts.load、fonts.ready。
     report(ctx, 32, '正在加载字体和样式...');
     await waitForStylesAndFonts(page);
     await waitForRenderReady(page, config);
+    throwIfPolicyViolated(collector);
 
     await page.waitForTimeout(100);
 
@@ -122,6 +325,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     } else {
       await probeAnimationDurationMs(page).catch(() => 0);
     }
+    throwIfPolicyViolated(collector);
 
     // 对应 html-video 源码段：调用 window.__hvPlayAll()。
     await page.evaluate(() => {
@@ -145,11 +349,15 @@ async function render(input = {}, ctx = {}, deps = {}) {
     leadInMs = now() - tWebmStart;
 
     report(ctx, 40, `正在录制 ${totalDuration}s html-video 帧...`);
-    await waitWithProgress(page, ctx, totalDuration);
+    await waitWithProgress(page, ctx, totalDuration, () => throwIfPolicyViolated(collector));
     await page.waitForTimeout(RECORD_TAIL_BUFFER_MS).catch(() => {});
+    throwIfPolicyViolated(collector);
 
     report(ctx, 85, '正在结束浏览器录制...');
+    throwIfPolicyViolated(collector);
     await context.close();
+    await new Promise(resolve => setImmediate(resolve));
+    throwIfPolicyViolated(collector);
     webmPath = await findLatestWebm(recordDir);
     if (!webmPath) {
       throw createRenderError('render-failed', 'Playwright 未生成 webm 录制文件。');
@@ -163,38 +371,39 @@ async function render(input = {}, ctx = {}, deps = {}) {
   } finally {
     if (browser) await browser.close().catch(() => {});
     if (cleanupPrepared) await cleanupPrepared().catch(() => {});
+    if (!webmPath) await fsp.rm(recordDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {});
   }
 
-  report(ctx, 90, '正在编码 MP4...');
-  const ffmpegPath = deps.ffmpegPath || await resolveFfmpegPath(deps);
-  const probeDeps = { ...deps, ffmpegPath };
-  const inputDurationSec = await probeMediaDurationSec(webmPath, probeDeps);
-  const ffmpegBuild = buildFfmpegArgs({
-    webmPath,
-    outputPath: config.outputPath,
-    fps: config.fps,
-    duration: totalDuration,
-    explicit: config.durationMode === 'explicit',
-    leadInMs,
-    inputDurationSec,
-  });
-  const ffmpegResult = await runFfmpegCommand(ffmpegPath, ffmpegBuild.args, deps.runFfmpeg);
-  if (!ffmpegResult.ok) {
-    throw createRenderError(
-      'render-failed',
-      `ffmpeg 编码 html-video 失败：${ffmpegResult.stderr || ffmpegResult.error || `exit ${ffmpegResult.code}`}`,
-    );
-  }
+  try {
+    report(ctx, 90, '正在编码 MP4...');
+    const ffmpegPath = deps.ffmpegPath || await resolveFfmpegPath(deps);
+    const probeDeps = { ...deps, ffmpegPath };
+    const inputDurationSec = await probeMediaDurationSec(webmPath, probeDeps);
+    const ffmpegBuild = buildFfmpegArgs({
+      webmPath,
+      outputPath: config.outputPath,
+      fps: config.fps,
+      duration: totalDuration,
+      explicit: config.durationMode === 'explicit',
+      leadInMs,
+      inputDurationSec,
+    });
+    const ffmpegResult = await runFfmpegCommand(ffmpegPath, ffmpegBuild.args, deps.runFfmpeg);
+    if (!ffmpegResult.ok) {
+      throw createRenderError(
+        'render-failed',
+        `ffmpeg 编码 html-video 失败：${ffmpegResult.stderr || ffmpegResult.error || `exit ${ffmpegResult.code}`}`,
+      );
+    }
 
-  await fsp.rm(recordDir, { recursive: true, force: true }).catch(() => {});
-  const stat = await fsp.stat(config.outputPath).catch(() => ({ size: 0 }));
-  const hasValidVideoStream = stat.size > 2048
-    && await outputHasVideoStream(config.outputPath, probeDeps);
-  if (!hasValidVideoStream) {
-    throw createRenderError('render-failed', 'html-video 编码完成但输出视频无有效画面流。');
-  }
-  report(ctx, 100, 'html-video 帧渲染完成。');
-  return {
+    const stat = await fsp.stat(config.outputPath).catch(() => ({ size: 0 }));
+    const hasValidVideoStream = stat.size > 2048
+      && await outputHasVideoStream(config.outputPath, probeDeps);
+    if (!hasValidVideoStream) {
+      throw createRenderError('render-failed', 'html-video 编码完成但输出视频无有效画面流。');
+    }
+    report(ctx, 100, 'html-video 帧渲染完成。');
+    return {
     outputPath: config.outputPath,
     output_path: config.outputPath,
     meta: {
@@ -227,7 +436,10 @@ async function render(input = {}, ctx = {}, deps = {}) {
       },
       fallback_allowed: true,
     }] : [])],
-  };
+    };
+  } finally {
+    await fsp.rm(recordDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {});
+  }
 }
 
 function normalizeConfig(config) {
@@ -344,13 +556,14 @@ async function probeAnimationDurationMs(page) {
   }).catch(() => 0);
 }
 
-async function waitWithProgress(page, ctx, durationSec) {
+async function waitWithProgress(page, ctx, durationSec, checkPolicy = null) {
   const totalMs = Math.round(durationSec * 1000);
   const started = Date.now();
   while (Date.now() - started < totalMs) {
     const remaining = totalMs - (Date.now() - started);
     await page.waitForTimeout(Math.min(250, Math.max(0, remaining)));
     const elapsed = Math.min(totalMs, Date.now() - started);
+    if (checkPolicy) checkPolicy();
     report(ctx, 40 + Math.floor((elapsed / totalMs) * 45), '正在录制 html-video 帧...');
   }
 }
@@ -539,4 +752,8 @@ function report(ctx, percent, message) {
 module.exports = {
   render,
   buildFfmpegArgs,
+  createRuntimeAssetPolicy,
+  createViolationCollector,
+  installRuntimeAssetPolicy,
+  throwIfPolicyViolated,
 };

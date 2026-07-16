@@ -6,6 +6,12 @@ const projectStore = require('./projectStore');
 const { createDiagnostic } = require('./diagnostics');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
 const {
+  assetReferenceTokens,
+  extractVisualAssetReferences,
+  htmlReferencesAsset,
+  unregisteredVisualAssetReferences,
+} = require('./frameHtmlInspection');
+const {
   isGeneratedVisualAsset,
   mergeVisualAssetFormalFields,
 } = require('../../creative/visualAssetContract');
@@ -135,69 +141,36 @@ function projectAssetsFromCreativeContext(creativeContext = {}) {
   })).filter(asset => asset.path);
 }
 
-function normalizeAssetToken(value = '') {
-  return String(value || '').replace(/\\/g, '/').trim();
-}
-
-function referenceVariants(value = '') {
-  const normalized = normalizeHtmlAssetReference(value);
-  if (!normalized) return [];
-  const variants = new Set([normalized]);
-  if (normalized.startsWith('./')) variants.add(normalized.slice(2));
-  if (!normalized.startsWith('../') && !normalized.startsWith('/') && !/^[a-z][a-z0-9+.-]*:/i.test(normalized)) {
-    variants.add(`../${normalized}`);
-  }
-  return [...variants];
-}
-
-function assetReferenceTokens(asset = {}) {
-  const assetPath = normalizeAssetToken(asset.path);
-  return [...new Set([
-    normalizeAssetToken(asset.frame_src),
-    assetPath,
-    assetPath ? `../${assetPath}` : '',
-    normalizeAssetToken(asset.url),
-  ].filter(Boolean))];
-}
-
-function normalizeHtmlAssetReference(value = '') {
-  const text = normalizeAssetToken(value).split(/[?#]/)[0];
-  try {
-    return decodeURIComponent(text);
-  } catch {
-    return text;
-  }
-}
-
-function extractHtmlAssetReferences(html = '') {
-  const references = new Set();
-  const searchable = String(html || '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<script\b[\s\S]*?<\/script>/gi, '');
-  const attrPattern = /\b(?:src|href|poster|data-src)=["']([^"']+)["']/gi;
-  for (const match of searchable.matchAll(attrPattern)) {
-    const value = normalizeHtmlAssetReference(match[1]);
-    if (value) references.add(value);
-  }
-  const cssPattern = /url\(["']?([^"')]+)["']?\)/gi;
-  for (const match of searchable.matchAll(cssPattern)) {
-    const value = normalizeHtmlAssetReference(match[1]);
-    if (value) references.add(value);
-  }
-  return references;
-}
-
-function htmlReferencesAsset(referenceSet, tokens = []) {
-  const references = new Set();
-  for (const ref of referenceSet) {
-    for (const variant of referenceVariants(ref)) references.add(variant);
-  }
-  for (const rawToken of tokens) {
-    for (const token of referenceVariants(rawToken)) {
-      if (references.has(token)) return true;
+function unregisteredImageReferences(frameHtmlEntries = [], assets = []) {
+  const result = [];
+  for (const frame of frameHtmlEntries) {
+    for (const reference of unregisteredVisualAssetReferences(frame.visualReferences, assets)) {
+      result.push({ frame_id: frame.id, reference });
     }
   }
-  return false;
+  return result;
+}
+
+function updateRuntimePolicyViolations(report = {}, frameId = '', violations = []) {
+  const id = String(frameId || '').trim();
+  const retained = (Array.isArray(report.runtime_policy_violations) ? report.runtime_policy_violations : [])
+    .filter(item => String(item?.frame_id || '') !== id);
+  const nextViolations = Array.isArray(violations) ? violations : [];
+  const runtimePolicyViolations = nextViolations.length
+    ? [...retained, { frame_id: id, code: 'runtime_visual_asset_policy_violation', violations: nextViolations }]
+    : retained;
+  const runtimeUnregistered = runtimePolicyViolations.flatMap(item => item.violations || [])
+    .filter(item => item?.kind === 'unregistered_local_image')
+    .map(item => ({ frame_id: item.frame_id || id, reference: item.target || '' }));
+  return {
+    ...report,
+    runtime_policy_violations: runtimePolicyViolations,
+    unregistered_image_references: [
+      ...(Array.isArray(report.unregistered_image_references) ? report.unregistered_image_references : [])
+        .filter(item => item?.source !== 'runtime'),
+      ...runtimeUnregistered.map(item => ({ ...item, source: 'runtime' })),
+    ],
+  };
 }
 
 function readFrameHtml(projectDir, frame = {}) {
@@ -263,7 +236,24 @@ function requiredAssetRefsById(project = {}, assets = []) {
 }
 
 function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext = {} } = {}) {
+  const priorRuntimeViolations = Array.isArray(project?.asset_usage_report?.runtime_policy_violations)
+    ? project.asset_usage_report.runtime_policy_violations
+    : [];
+  const runtimeImageReferences = priorRuntimeViolations.flatMap(entry => (entry?.violations || []))
+    .filter(item => item?.kind === 'unregistered_local_image')
+    .map(item => ({ frame_id: item.frame_id || '', reference: item.target || '', source: 'runtime' }));
   const assets = mergedTrackableAssets(project, creativeContext);
+  const frames = Array.isArray(project.frames) ? project.frames : [];
+  const frameHtmlEntries = frames.map(frame => {
+    const html = readFrameHtml(projectDir, frame);
+    const visualReferences = extractVisualAssetReferences(html);
+    return {
+      id: firstNonEmptyString(frame.id, frame.beat_id, frame.scene_id),
+      references: new Set(visualReferences.map(item => item.reference)),
+      visualReferences,
+    };
+  });
+  const unregisteredVisualReferences = unregisteredImageReferences(frameHtmlEntries, assets);
   if (!assets.length) {
     return {
       status: 'empty',
@@ -272,15 +262,12 @@ function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext 
       unused_asset_ids: [],
       required_asset_ids: [],
       missing_required_asset_ids: [],
+      unregistered_image_references: [...unregisteredVisualReferences, ...runtimeImageReferences],
+      runtime_policy_violations: priorRuntimeViolations,
       summary: '没有可追踪的视觉素材。',
     };
   }
-  const frames = Array.isArray(project.frames) ? project.frames : [];
   const requiredById = requiredAssetRefsById(project, assets);
-  const frameHtmlEntries = frames.map(frame => ({
-    id: firstNonEmptyString(frame.scene_id, frame.id),
-    references: extractHtmlAssetReferences(readFrameHtml(projectDir, frame)),
-  }));
   const reportAssets = assets.map((asset, index) => {
     const assetId = firstNonEmptyString(asset.id, `asset_${index + 1}`);
     const tokens = assetReferenceTokens(asset);
@@ -315,19 +302,22 @@ function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext 
   const missingRequiredAssetIds = reportAssets
     .filter(asset => asset.required && !asset.used)
     .map(asset => asset.asset_id);
-  return {
+  const report = {
     status: 'ready',
     assets: reportAssets,
     used_asset_ids: usedAssetIds,
     unused_asset_ids: unusedAssetIds,
     required_asset_ids: requiredAssetIds,
     missing_required_asset_ids: missingRequiredAssetIds,
+    unregistered_image_references: [...unregisteredVisualReferences, ...runtimeImageReferences],
     summary: missingRequiredAssetIds.length
       ? `有 ${missingRequiredAssetIds.length} 个必用视觉素材未进入最终 HTML。`
       : (usedAssetIds.length
         ? `最终 HTML 使用了 ${usedAssetIds.length} 张视觉素材。`
         : '最终 HTML 未引用已准备的视觉素材。'),
   };
+  report.runtime_policy_violations = priorRuntimeViolations;
+  return report;
 }
 
 async function attachAssetUsageReport({ project = {}, projectDir = '', creativeContext = {} } = {}) {
@@ -352,4 +342,5 @@ module.exports = {
   buildAssetUsageReport,
   attachAssetUsageReport,
   missingRequiredAssetIds,
+  updateRuntimePolicyViolations,
 };

@@ -1,3 +1,5 @@
+const path = require('path');
+
 const { isGeneratedVisualAsset } = require('../../creative/visualAssetContract');
 
 function objectOrEmpty(value) {
@@ -21,9 +23,11 @@ function normalizeAssetToken(value = '') {
 }
 
 function normalizeHtmlAssetReference(value = '') {
-  const text = normalizeAssetToken(value).split(/[?#]/)[0];
+  const text = decodeBasicHtmlEntities(normalizeAssetToken(value)).split(/[?#]/)[0];
   try {
-    return decodeURIComponent(text);
+    const decoded = decodeURIComponent(text);
+    if (!decoded || decoded.startsWith('#') || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(decoded)) return decoded;
+    return path.posix.normalize(decoded);
   } catch {
     return text;
   }
@@ -35,36 +39,250 @@ function assetReferenceTokens(asset = {}) {
     normalizeAssetToken(asset.frame_src),
     assetPath,
     assetPath ? `../${assetPath}` : '',
+    normalizeAssetToken(asset.url),
   ].filter(Boolean))];
 }
 
-function extractHtmlAssetReferences(html = '') {
-  const references = new Set();
+function referenceVariants(value = '') {
+  const normalized = normalizeHtmlAssetReference(value);
+  if (!normalized) return [];
+  const variants = new Set([normalized]);
+  if (!normalized.startsWith('../') && !normalized.startsWith('/') && !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(normalized)) {
+    variants.add(`../${normalized}`);
+  }
+  return [...variants];
+}
+
+function parseAttributes(text = '') {
+  const attributes = new Map();
+  const pattern = /([^\s"'<>\/=]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
+  for (const match of String(text || '').matchAll(pattern)) {
+    attributes.set(match[1].toLowerCase(), match[2] ?? match[3] ?? match[4] ?? '');
+  }
+  return attributes;
+}
+
+function parseSrcset(value = '') {
+  const candidates = [];
+  const text = String(value || '');
+  let index = 0;
+  while (index < text.length) {
+    while (index < text.length && /[\s,]/.test(text[index])) index += 1;
+    if (index >= text.length) break;
+    const start = index;
+    if (/^data:/i.test(text.slice(index))) {
+      let commas = 0;
+      while (index < text.length && !/\s/.test(text[index])) {
+        if (text[index] === ',') {
+          commas += 1;
+          if (commas > 1) break;
+        }
+        index += 1;
+      }
+    } else {
+      while (index < text.length && !/[\s,]/.test(text[index])) index += 1;
+    }
+    const candidate = text.slice(start, index).replace(/,$/, '');
+    if (candidate) candidates.push(candidate);
+    while (index < text.length && text[index] !== ',') index += 1;
+    if (text[index] === ',') index += 1;
+  }
+  return candidates;
+}
+
+function scanHtmlTags(html = '') {
+  const tags = [];
+  const text = String(html || '');
+  let cursor = 0;
+  while (cursor < text.length) {
+    const start = text.indexOf('<', cursor);
+    if (start < 0) break;
+    let index = start + 1;
+    while (/\s/.test(text[index] || '')) index += 1;
+    const closing = text[index] === '/';
+    if (closing) index += 1;
+    while (/\s/.test(text[index] || '')) index += 1;
+    const nameStart = index;
+    while (/[a-z0-9:_-]/i.test(text[index] || '')) index += 1;
+    const name = text.slice(nameStart, index).toLowerCase();
+    if (!name) {
+      cursor = start + 1;
+      continue;
+    }
+    const attributesStart = index;
+    let quote = '';
+    for (; index < text.length; index += 1) {
+      const char = text[index];
+      if (quote) {
+        if (char === quote && text[index - 1] !== '\\') quote = '';
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === '>') {
+        break;
+      }
+    }
+    if (index >= text.length) break;
+    tags.push({ closing, name, attributes: text.slice(attributesStart, index) });
+    cursor = index + 1;
+  }
+  return tags;
+}
+
+function stripCssBlocks(css = '', namePattern = /@font-face\b/gi) {
+  const text = String(css || '');
+  let result = '';
+  let cursor = 0;
+  for (const match of text.matchAll(namePattern)) {
+    if (match.index < cursor) continue;
+    const open = text.indexOf('{', match.index + match[0].length);
+    if (open < 0) continue;
+    let depth = 1;
+    let quote = '';
+    let index = open + 1;
+    for (; index < text.length && depth > 0; index += 1) {
+      const char = text[index];
+      if (quote) {
+        if (char === quote && text[index - 1] !== '\\') quote = '';
+      } else if (char === '"' || char === "'") quote = char;
+      else if (char === '{') depth += 1;
+      else if (char === '}') depth -= 1;
+    }
+    result += text.slice(cursor, match.index);
+    cursor = index;
+  }
+  return result + text.slice(cursor);
+}
+
+function functionArguments(text, pattern) {
+  const results = [];
+  for (const match of text.matchAll(pattern)) {
+    let depth = 1;
+    let quote = '';
+    let index = match.index + match[0].length;
+    const start = index;
+    for (; index < text.length && depth > 0; index += 1) {
+      const char = text[index];
+      if (quote) {
+        if (char === quote && text[index - 1] !== '\\') quote = '';
+      } else if (char === '"' || char === "'") quote = char;
+      else if (char === '(') depth += 1;
+      else if (char === ')') depth -= 1;
+    }
+    if (depth === 0) results.push(text.slice(start, index - 1));
+  }
+  return results;
+}
+
+function splitCssCandidates(value = '') {
+  const candidates = [];
+  let start = 0;
+  let quote = '';
+  let depth = 0;
+  for (let index = 0; index <= value.length; index += 1) {
+    const char = value[index];
+    if (quote) {
+      if (char === quote && value[index - 1] !== '\\') quote = '';
+    } else if (char === '"' || char === "'") quote = char;
+    else if (char === '(') depth += 1;
+    else if (char === ')') depth -= 1;
+    else if ((char === ',' || index === value.length) && depth === 0) {
+      candidates.push(value.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  return candidates;
+}
+
+function extractCssVisualReferences(css = '', add) {
+  const text = stripCssBlocks(css).replace(/\/\*[\s\S]*?\*\//g, '');
+  for (const url of text.matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)/gi)) {
+    add(url[1] ?? url[2] ?? url[3] ?? '', 'css');
+  }
+  for (const imageSet of functionArguments(text, /(?:-webkit-)?image-set\s*\(/gi)) {
+    for (const candidate of splitCssCandidates(imageSet)) {
+      if (/^url\s*\(/i.test(candidate)) continue;
+      const match = candidate.match(/^(?:"([^"]+)"|'([^']+)'|([^\s]+))/);
+      if (match) add(match[1] ?? match[2] ?? match[3] ?? '', 'css-image-set');
+    }
+  }
+}
+
+function extractVisualAssetReferences(html = '') {
+  const entries = [];
+  const seen = new Set();
   const searchable = String(html || '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/<script\b[\s\S]*?<\/script>/gi, '');
-  const attrPattern = /\b(?:src|href|poster|data-src)=["']([^"']+)["']/gi;
-  for (const match of searchable.matchAll(attrPattern)) {
-    const value = normalizeHtmlAssetReference(match[1]);
-    if (value) references.add(value);
+  const add = (rawValue, context) => {
+    const reference = normalizeHtmlAssetReference(rawValue);
+    if (!reference || reference.startsWith('#')) return;
+    const key = `${context}\0${reference}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({ reference, context });
+  };
+  const addAttribute = (attributes, name, context) => {
+    if (attributes.has(name)) add(attributes.get(name), context);
+  };
+  const addSrcset = (attributes, context) => {
+    if (!attributes.has('srcset')) return;
+    parseSrcset(attributes.get('srcset')).forEach(candidate => add(candidate, context));
+  };
+  let pictureDepth = 0;
+  const tagSearchable = searchable.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+  for (const tag of scanHtmlTags(tagSearchable)) {
+    const { closing, name } = tag;
+    if (closing) {
+      if (name === 'picture' && pictureDepth > 0) pictureDepth -= 1;
+      continue;
+    }
+    const attributes = parseAttributes(tag.attributes);
+    if (name === 'picture') pictureDepth += 1;
+    if (name === 'img') {
+      addAttribute(attributes, 'src', 'img');
+      addAttribute(attributes, 'data-src', 'img');
+      addSrcset(attributes, 'img-srcset');
+    } else if (name === 'source' && pictureDepth > 0) {
+      addAttribute(attributes, 'src', 'picture-source');
+      addSrcset(attributes, 'picture-srcset');
+    } else if (name === 'video') {
+      addAttribute(attributes, 'poster', 'video-poster');
+    } else if (name === 'input' && String(attributes.get('type') || '').toLowerCase() === 'image') {
+      addAttribute(attributes, 'src', 'input-image');
+    } else if (name === 'image') {
+      addAttribute(attributes, 'href', 'svg-image');
+      addAttribute(attributes, 'xlink:href', 'svg-image');
+    } else if (name === 'link' && String(attributes.get('rel') || '').toLowerCase().split(/\s+/).includes('stylesheet')) {
+      addAttribute(attributes, 'href', 'stylesheet');
+    }
+    if (attributes.has('style')) extractCssVisualReferences(attributes.get('style'), add);
   }
-  const cssPattern = /url\(["']?([^"')]+)["']?\)/gi;
-  for (const match of searchable.matchAll(cssPattern)) {
-    const value = normalizeHtmlAssetReference(match[1]);
-    if (value) references.add(value);
+  for (const style of searchable.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)) {
+    extractCssVisualReferences(style[1], add);
   }
-  return references;
+  return entries;
+}
+
+function visualReferenceSet(html = '') {
+  return new Set(extractVisualAssetReferences(html).map(item => item.reference));
+}
+
+function unregisteredVisualAssetReferences(references = [], assets = []) {
+  const registered = new Set(assets.flatMap(assetReferenceTokens).flatMap(referenceVariants));
+  const result = [];
+  for (const item of references) {
+    const reference = typeof item === 'string' ? normalizeHtmlAssetReference(item) : item?.reference;
+    if (!reference) continue;
+    const failClosed = item?.context === 'stylesheet' || /^(?:https?:|file:|blob:|data:|\/\/)/i.test(reference);
+    if (!failClosed && referenceVariants(reference).some(variant => registered.has(variant))) continue;
+    if (!result.includes(reference)) result.push(reference);
+  }
+  return result;
 }
 
 function htmlReferencesAsset(referenceSet, tokens = []) {
-  for (const rawToken of tokens) {
-    const token = normalizeHtmlAssetReference(rawToken);
-    if (!token) continue;
-    for (const ref of referenceSet) {
-      if (ref === token || ref.endsWith(`/${token.replace(/^\.\.\//, '')}`)) return true;
-    }
-  }
-  return false;
+  const references = new Set([...referenceSet].flatMap(referenceVariants));
+  return tokens.flatMap(referenceVariants).some(token => references.has(token));
 }
 
 function resolveExpectedFrameAsset(node = {}, creativeContext = {}) {
@@ -96,8 +314,18 @@ function resolveRequiredFrameAsset(node = {}, creativeContext = {}) {
 }
 
 function validateFrameAssetUsage(html = '', { node = {}, creativeContext = {} } = {}) {
-  const references = extractHtmlAssetReferences(html);
+  const visualReferences = extractVisualAssetReferences(html);
+  const references = new Set(visualReferences.map(item => item.reference));
   const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
+  const [unregisteredReference] = unregisteredVisualAssetReferences(visualReferences, assets);
+  if (unregisteredReference) {
+    return {
+      success: false,
+      code: 'frame_html_unregistered_visual_asset',
+      message: `HTML 引用了未登记的视觉素材：${unregisteredReference}。请先登记素材后再生成画面。`,
+      details: { offending_reference: unregisteredReference },
+    };
+  }
   const blockedAsset = assets.find(asset => objectOrEmpty(asset.image_analysis).should_use === false
     && htmlReferencesAsset(references, assetReferenceTokens(asset)));
   if (blockedAsset) {
@@ -314,6 +542,13 @@ function extractRawHtmlDocument(raw) {
 module.exports = {
   objectOrEmpty,
   compactText,
+  normalizeHtmlAssetReference,
+  assetReferenceTokens,
+  referenceVariants,
+  extractVisualAssetReferences,
+  unregisteredVisualAssetReferences,
+  visualReferenceSet,
+  htmlReferencesAsset,
   resolveExpectedFrameAsset,
   resolveRequiredFrameAsset,
   validateFrameAssetUsage,

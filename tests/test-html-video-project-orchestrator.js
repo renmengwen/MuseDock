@@ -2,8 +2,14 @@ const assert = require('assert/strict');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const fsSync = require('fs');
+const createdTempDirs = [];
+const mkdtemp = fs.mkdtemp.bind(fs);
+fs.mkdtemp = async (...args) => { const dir = await mkdtemp(...args); createdTempDirs.push(dir); return dir; };
+process.on('exit', () => createdTempDirs.forEach(dir => fsSync.rmSync(dir, { recursive: true, force: true })));
 
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
+const { runtimeAssetPolicyAttestation } = require('../server/services/creative-video/html-video/frameRenderPhase');
 
 (async () => {
   {
@@ -21,6 +27,80 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     assert.equal(result.ok, false);
     assert.ok(result.diagnostics.some(item => item.code === 'caption_duration_exceeds_reasonable_frame'));
     assert.equal(project.frames[0].duration_sec, 6);
+  }
+
+  {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-asset-gate-'));
+    await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, 'frames', 'scene_01.html'), '<img src=../assets/unregistered.png>');
+    let renderCalls = 0;
+    let composeCalls = 0;
+    const project = {
+      project_id: 'asset-registry-preflight',
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 2 },
+      frames: [{ id: 'scene_01', scene_id: 'scene_01', html_path: 'frames/scene_01.html', duration_sec: 2 }],
+      timeline: { tracks: [{ id: 'main', type: 'video', items: [{ frame_id: 'scene_01', duration_sec: 2 }] }] },
+      audio: { status: 'skipped', reason: 'disabled_by_settings' },
+      assets: [],
+    };
+    const result = await projectOrchestrator.renderHtmlVideoProject({
+      project,
+      projectDir,
+      services: {
+        materializer: { materializeProject: async ({ project }) => ({ project, diagnostics: [] }) },
+        frameRenderer: { renderFrame: async () => {
+          renderCalls += 1;
+          return {
+            success: false,
+            code: 'runtime_visual_asset_policy_violation',
+            message: '运行时素材门禁阻断。',
+            diagnostics: [{
+              code: 'runtime_visual_asset_policy_violation',
+              sub_stage: 'frame_html',
+              frame_id: 'scene_01',
+              details: { violations: [{ source: 'route', kind: 'unregistered_local_image', target: 'assets/unregistered.png', frame_id: 'scene_01' }] },
+            }],
+          };
+        } },
+        ffmpegComposer: { concatFramesWithFfmpeg: async () => { composeCalls += 1; return { success: true }; } },
+      },
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.code, 'runtime_visual_asset_policy_violation');
+    assert.equal(renderCalls, 1, '静态早诊断后必须进入真实 renderer 裁决');
+    assert.equal(composeCalls, 0, '资产登记预检失败后不得调用 compositor');
+    assert.deepEqual(result.project.asset_usage_report.unregistered_image_references, [
+      { frame_id: 'scene_01', reference: '../assets/unregistered.png' },
+      { frame_id: 'scene_01', reference: 'assets/unregistered.png', source: 'runtime' },
+    ]);
+    const saved = JSON.parse(await fs.readFile(path.join(projectDir, 'project.json'), 'utf8'));
+    assert.equal(saved.generation_checkpoint.stages.render.frames.scene_01.diagnostic_code, 'runtime_visual_asset_policy_violation');
+    assert.equal(saved.asset_usage_report.runtime_policy_violations[0].frame_id, 'scene_01');
+
+    renderCalls = 0;
+    const lowLevelRender = await projectOrchestrator.renderHtmlVideoFrames({ project, projectDir, services: {
+      frameRenderer: { renderFrame: async () => { renderCalls += 1; return { success: false, code: 'runtime_visual_asset_policy_violation', diagnostics: [] }; } },
+    } });
+    assert.equal(lowLevelRender.code, 'runtime_visual_asset_policy_violation');
+    assert.equal(renderCalls, 1, '低层 renderHtmlVideoFrames 也必须进入 runtime gate');
+
+    const failedProject = JSON.parse(await fs.readFile(path.join(projectDir, 'project.json'), 'utf8'));
+    const recovered = await projectOrchestrator.renderHtmlVideoFrames({
+      project: failedProject,
+      projectDir,
+      frameIds: ['scene_01'],
+      services: { frameRenderer: { renderFrame: async (_frame, options) => ({ success: true, output_path: options.outputPath, diagnostics: [] }) } },
+    });
+    assert.equal(recovered.success, true);
+    assert.deepEqual(recovered.project.asset_usage_report.runtime_policy_violations, [], '成功重渲染必须清理当前帧活动违规');
+
+    composeCalls = 0;
+    const lowLevelCompose = await projectOrchestrator.composeHtmlVideoProject({ project, projectDir, services: {
+      ffmpegComposer: { concatFramesWithFfmpeg: async () => { composeCalls += 1; return { success: true }; } },
+    } });
+    assert.equal(lowLevelCompose.success, false);
+    assert.equal(composeCalls, 0, '低层 composeHtmlVideoProject 不得绕过资产预检');
+    await fs.rm(projectDir, { recursive: true, force: true });
   }
 
   {
@@ -49,12 +129,12 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
           materializeProject: async ({ project }) => ({ project, diagnostics: [] }),
         },
         frameRenderer: {
-          renderFrame: async frame => ({
-            success: true,
-            output_path: path.join(projectDir, 'frames', `${frame.id}.mp4`),
-            diagnostics: [],
-            meta: { encoding: 'h264' },
-          }),
+          renderFrame: async frame => {
+            const outputPath = path.join(projectDir, 'frames', `${frame.id}.mp4`);
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, 'frame-video');
+            return { success: true, output_path: outputPath, diagnostics: [], meta: { encoding: 'h264' } };
+          },
         },
         ffmpegComposer: {
           concatFramesWithFfmpeg: async () => ({ success: true, output_path: path.join(projectDir, 'exports', 'output.mp4') }),
@@ -296,6 +376,8 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
       timeline: { tracks: [{ id: 'main', type: 'video', items: [{ frame_id: 'frame_01', scene_id: 'scene_01', duration_sec: 2 }] }] },
       audio: { status: 'skipped', reason: 'disabled_by_settings' },
     };
+    await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
+    await fs.writeFile(path.join(projectDir, 'frames', 'scene_01.html'), '<html><head></head><body>frame</body></html>');
 
     const rendered = await projectOrchestrator.renderHtmlVideoFrames({
       project,
@@ -305,6 +387,7 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
         frameRenderer: {
           renderFrame: async frame => {
             renderCalls += 1;
+            await fs.writeFile(path.join(projectDir, 'frames', `${frame.id}.mp4`), 'frame-video');
             return {
               success: true,
               output_path: path.join(projectDir, 'frames', `${frame.id}.mp4`),
@@ -319,6 +402,7 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
     assert.equal(rendered.success, true);
     assert.equal(renderCalls, 1);
     assert.equal(rendered.project.generation_checkpoint.stages.render.frames.scene_01.status, 'done');
+    assert.equal(rendered.project.generation_checkpoint.stages.render.frames.scene_01.runtime_asset_policy_attestation?.version, 'runtime-asset-policy-v1');
     assert.equal(Object.hasOwn(rendered.project.generation_checkpoint.stages.render.frames, 'frame_01'), false);
     const composed = await projectOrchestrator.composeHtmlVideoProject({
       projectDir,
@@ -337,6 +421,80 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
       },
     });
     assert.equal(composed.success, true);
+
+    await fs.writeFile(path.join(projectDir, 'frames', 'scene_01.html'), '<html><head></head><body>changed</body></html>');
+    let driftComposeCalls = 0;
+    const drifted = await projectOrchestrator.composeHtmlVideoProject({
+      projectDir,
+      project: rendered.project,
+      services: { ffmpegComposer: { concatFramesWithFfmpeg: async () => { driftComposeCalls += 1; return { success: true }; } } },
+    });
+    assert.equal(drifted.code, 'runtime_asset_policy_revalidation_required');
+    assert.deepEqual(drifted.diagnostics[0].details.frame_ids, ['frame_01']);
+    assert.equal(driftComposeCalls, 0);
+    await fs.writeFile(path.join(projectDir, 'frames', 'scene_01.html'), '<html><head></head><body>frame</body></html>');
+    const registryDrifted = await projectOrchestrator.composeHtmlVideoProject({
+      projectDir, project: { ...rendered.project, assets: [{ id: 'new', type: 'image', path: 'assets/new.png', status: 'ready' }] },
+      services: { ffmpegComposer: { concatFramesWithFfmpeg: async () => { throw new Error('不得合成'); } } },
+    });
+    assert.equal(registryDrifted.code, 'runtime_asset_policy_revalidation_required');
+    const oldCheckpointProject = JSON.parse(JSON.stringify(rendered.project));
+    delete oldCheckpointProject.generation_checkpoint.stages.render.frames.scene_01.runtime_asset_policy_attestation;
+    const oldCheckpoint = await projectOrchestrator.composeHtmlVideoProject({
+      projectDir, project: oldCheckpointProject,
+      services: { ffmpegComposer: { concatFramesWithFfmpeg: async () => { throw new Error('不得合成'); } } },
+    });
+    assert.equal(oldCheckpoint.code, 'runtime_asset_policy_revalidation_required');
+    const oldPolicyProject = JSON.parse(JSON.stringify(rendered.project));
+    oldPolicyProject.generation_checkpoint.stages.render.frames.scene_01.runtime_asset_policy_attestation.version = 'runtime-asset-policy-v0';
+    const oldPolicy = await projectOrchestrator.composeHtmlVideoProject({
+      projectDir, project: oldPolicyProject,
+      services: { ffmpegComposer: { concatFramesWithFfmpeg: async () => { throw new Error('不得合成'); } } },
+    });
+    assert.equal(oldPolicy.code, 'runtime_asset_policy_revalidation_required');
+    const attacks = [];
+    const absoluteMp4 = JSON.parse(JSON.stringify(rendered.project));
+    absoluteMp4.generation_checkpoint.stages.render.frames.scene_01.mp4_path = path.join(projectDir, 'frames', 'frame_01.mp4');
+    attacks.push(absoluteMp4);
+    const previewFallback = JSON.parse(JSON.stringify(rendered.project));
+    previewFallback.generation_checkpoint.stages.render.frames.scene_01.mp4_path = '';
+    previewFallback.frames[0].preview_mp4_path = 'frames/frame_01.mp4';
+    attacks.push(previewFallback);
+    const swappedPath = JSON.parse(JSON.stringify(rendered.project));
+    swappedPath.generation_checkpoint.stages.render.frames.scene_01.mp4_path = 'frames/other.mp4';
+    attacks.push(swappedPath);
+    const wrongIdentity = JSON.parse(JSON.stringify(rendered.project));
+    wrongIdentity.generation_checkpoint.stages.render.frames.scene_01.runtime_asset_policy_attestation.frame_id = 'evil';
+    attacks.push(wrongIdentity);
+    for (const attacked of attacks) {
+      const blocked = await projectOrchestrator.composeHtmlVideoProject({ projectDir, project: attacked,
+        services: { ffmpegComposer: { concatFramesWithFfmpeg: async () => { throw new Error('不得合成'); } } } });
+      assert.equal(blocked.code, 'runtime_asset_policy_revalidation_required');
+    }
+    const nonMp4 = JSON.parse(JSON.stringify(rendered.project));
+    const nonMp4Checkpoint = nonMp4.generation_checkpoint.stages.render.frames.scene_01;
+    nonMp4Checkpoint.mp4_path = 'frames/not-video.txt';
+    await fs.writeFile(path.join(projectDir, nonMp4Checkpoint.mp4_path), 'frame-video');
+    nonMp4Checkpoint.runtime_asset_policy_attestation = await runtimeAssetPolicyAttestation(
+      projectDir, nonMp4, nonMp4.frames[0], {
+        checkpoint_key: 'scene_01', mp4_path: nonMp4Checkpoint.mp4_path, output_hash: nonMp4Checkpoint.output_hash,
+      },
+    );
+    let nonMp4ComposeCalls = 0;
+    const nonMp4Blocked = await projectOrchestrator.composeHtmlVideoProject({ projectDir, project: nonMp4,
+      services: { ffmpegComposer: {
+        concatFramesWithFfmpeg: async (_frames, outputPath) => {
+          nonMp4ComposeCalls += 1;
+          return { success: true, output_path: outputPath };
+        },
+        verifyDurationWithFfprobe: async () => ({ success: true, duration_sec: 2, expected_duration_sec: 2 }),
+      } } });
+    assert.equal(nonMp4Blocked.code, 'runtime_asset_policy_revalidation_required');
+    assert.equal(nonMp4ComposeCalls, 0, '非 MP4 checkpoint 不得调用 compositor');
+    await fs.writeFile(path.join(projectDir, 'frames', 'frame_01.mp4'), 'tampered');
+    const tampered = await projectOrchestrator.composeHtmlVideoProject({ projectDir, project: rendered.project,
+      services: { ffmpegComposer: { concatFramesWithFfmpeg: async () => { throw new Error('不得合成'); } } } });
+    assert.equal(tampered.code, 'runtime_asset_policy_revalidation_required');
 
     renderCalls = 0;
     const aliasResult = await projectOrchestrator.renderHtmlVideoFrames({
@@ -470,13 +628,12 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
           materializeProject: async ({ project }) => ({ project, diagnostics: [] }),
         },
         frameRenderer: {
-          renderFrame: async frame => ({
-            success: true,
-            output_path: path.join(projectDir, 'frames', `${frame.id}.mp4`),
-            output_hash: `${frame.id}-hash`,
-            meta: { encoding: 'h264' },
-            diagnostics: [],
-          }),
+          renderFrame: async frame => {
+            const outputPath = path.join(projectDir, 'frames', `${frame.id}.mp4`);
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, `frame:${frame.id}`);
+            return { success: true, output_path: outputPath, meta: { encoding: 'h264' }, diagnostics: [] };
+          },
         },
       },
     });
@@ -589,13 +746,12 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
           materializeProject: async ({ project }) => ({ project, diagnostics: [] }),
         },
         frameRenderer: {
-          renderFrame: async frame => ({
-            success: true,
-            output_path: path.join(projectDir, 'frames', `${frame.id}.mp4`),
-            output_hash: `${frame.id}-hash`,
-            meta: { encoding: 'h264' },
-            diagnostics: [],
-          }),
+          renderFrame: async frame => {
+            const outputPath = path.join(projectDir, 'frames', `${frame.id}.mp4`);
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, `frame:${frame.id}`);
+            return { success: true, output_path: outputPath, meta: { encoding: 'h264' }, diagnostics: [] };
+          },
         },
       },
     });
@@ -665,13 +821,12 @@ const projectOrchestrator = require('../server/services/creative-video/html-vide
       projectDir,
       services: {
         frameRenderer: {
-          renderFrame: async frame => ({
-            success: true,
-            output_path: path.join(projectDir, 'frames', `${frame.id}.mp4`),
-            output_hash: `${frame.id}-hash`,
-            meta: { encoding: 'h264' },
-            diagnostics: [],
-          }),
+          renderFrame: async frame => {
+            const outputPath = path.join(projectDir, 'frames', `${frame.id}.mp4`);
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, `frame:${frame.id}`);
+            return { success: true, output_path: outputPath, meta: { encoding: 'h264' }, diagnostics: [] };
+          },
         },
       },
     });

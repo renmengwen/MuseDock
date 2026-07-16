@@ -2,6 +2,11 @@ const assert = require('assert/strict');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const fsSync = require('fs');
+const createdTempDirs = [];
+const mkdtemp = fs.mkdtemp.bind(fs);
+fs.mkdtemp = async (...args) => { const dir = await mkdtemp(...args); createdTempDirs.push(dir); return dir; };
+process.on('exit', () => createdTempDirs.forEach(dir => fsSync.rmSync(dir, { recursive: true, force: true })));
 
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
 const aiImageModel = require('../server/services/ai/aiImageModel');
@@ -285,12 +290,15 @@ function fullSceneCaption(sceneId, text, duration) {
         },
         environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
         frameRenderer: {
-          renderFrame: async (frame, options) => ({
-            success: true,
-            frame_id: frame.id,
-            output_path: options.outputPath,
-            diagnostics: [],
-          }),
+          renderFrame: async (frame, options) => {
+            await writeFile(options.outputPath, `frame:${frame.id}`);
+            return {
+              success: true,
+              frame_id: frame.id,
+              output_path: options.outputPath,
+              diagnostics: [],
+            };
+          },
         },
         ffmpegComposer: {
           concatFramesWithFfmpeg: async (frames, outputPath) => {
@@ -606,12 +614,15 @@ function fullSceneCaption(sceneId, text, duration) {
         },
         environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
         frameRenderer: {
-          renderFrame: async (frame, options) => ({
-            success: true,
-            frame_id: frame.id,
-            output_path: options.outputPath,
-            diagnostics: [],
-          }),
+          renderFrame: async (frame, options) => {
+            await writeFile(options.outputPath, `frame:${frame.id}`);
+            return {
+              success: true,
+              frame_id: frame.id,
+              output_path: options.outputPath,
+              diagnostics: [],
+            };
+          },
         },
         ffmpegComposer: {
           concatFramesWithFfmpeg: async (frames, outputPath) => {
@@ -646,6 +657,146 @@ function fullSceneCaption(sceneId, text, duration) {
     ));
     assert.deepEqual(blockedProjectJson.asset_usage_report?.missing_required_asset_ids, ['gen_scene_removed'],
       '阻断前必须把带缺失明细的工程落盘');
+  }
+
+  // ===== 回归：复用/编辑后的最终 HTML 引用未登记图片必须阻断 =====
+  {
+    const finalGateNarration = '最终工程必须拒绝绕过统一资产登记的图片。';
+    let renderCalls = 0;
+    let composeCalls = 0;
+    let visualQaCalls = 0;
+    const finalGateResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-unregistered-final-asset',
+      runId: 'run-unregistered-final-asset',
+      rootDir,
+      sceneSpec: {
+        title: '最终图片注册门',
+        aspect_ratio: '16:9',
+        scenes: [{
+          id: 'scene_01',
+          kind: 'text',
+          duration_sec: 4,
+          narration_text: finalGateNarration,
+          captions: fullSceneCaption('scene_01', finalGateNarration, 4),
+          visual_text: { headline: '最终图片注册门', keywords: [], cards: [] },
+        }],
+      },
+      creativeContext: {
+        input: { raw_text: '最终图片注册门' },
+        continuity_mode: 'scene_html',
+        asset_context: { assets: [] },
+      },
+      target: { generateAudio: false, generateCaptions: true },
+      skipValidation: true,
+      services: {
+        aiImageModel: { isConfigured: async () => false },
+        aiTextModel: {
+          callTextModel: async request => {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return {
+                success: true,
+                text: JSON.stringify({
+                  synopsis: '最终图片注册门',
+                  nodes: [{ id: 'scene_01', kind: 'text', label: '最终图片注册门', durationSec: 4, text: finalGateNarration }],
+                  edges: [],
+                }),
+              };
+            }
+            return {
+              success: true,
+              text: '<!doctype html><html><body><main data-frame-id="scene:scene_01"><h1 data-text-key="headline">最终图片注册门</h1><section data-text-key="body">正常初稿</section></main></body></html>',
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        materializer: {
+          materializeProject: async ({ project, projectDir }) => {
+            const frame = project.frames[0];
+            await writeFile(path.join(projectDir, frame.html_path), '<!doctype html><html><body><img src=../assets/edited-unregistered.png><video poster="https://example.com/poster.png"></video><div style="background-image:url(data:image/png;base64,AAAA)"></div></body></html>');
+            return { success: true, project, diagnostics: [] };
+          },
+        },
+        frameRenderer: {
+          renderFrame: async (frame, options) => {
+            renderCalls += 1;
+            const violations = [
+              { source: 'route', kind: 'unregistered_local_image', target: 'assets/edited-unregistered.png', frame_id: frame.id },
+              { source: 'route', kind: 'remote_or_disallowed_scheme', target: 'https://example.com/poster.png', frame_id: frame.id },
+              { source: 'csp', kind: 'csp_violation', target: 'data:', frame_id: frame.id },
+            ];
+            return {
+              success: false,
+              code: 'runtime_visual_asset_policy_violation',
+              frame_id: frame.id,
+              message: '运行时素材门禁阻断。',
+              diagnostics: [{ code: 'runtime_visual_asset_policy_violation', frame_id: frame.id, sub_stage: 'frame_html', retryable: true, repair_action: 'retry_frame_html', details: { violations } }],
+            };
+          },
+        },
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async (_frames, outputPath) => {
+            composeCalls += 1;
+            await writeFile(outputPath, 'mp4');
+            return { success: true, output_path: outputPath, strategy: 'stub' };
+          },
+          concatAudioWithFfmpeg: async () => ({ success: true, skipped: true }),
+          muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+        },
+        visualQaService: {
+          inspectRenderedVideo: async () => {
+            visualQaCalls += 1;
+            return { success: true, issues: [], metrics: {} };
+          },
+        },
+      },
+    });
+    assert.equal(finalGateResult.success, false, '最终 HTML 出现未登记图片时必须阻断');
+    assert.equal(finalGateResult.code, 'runtime_visual_asset_policy_violation');
+    const diagnostic = finalGateResult.diagnostics?.find(item => item.code === 'runtime_visual_asset_policy_violation');
+    assert.ok(diagnostic, '必须返回未登记视觉资产结构化诊断');
+    assert.equal(diagnostic.retryable, true);
+    assert.equal(diagnostic.repair_action, 'retry_frame_html');
+    assert.equal(diagnostic.details?.violations.length, 3);
+    assert.equal(finalGateResult.project.asset_usage_report?.runtime_policy_violations[0].frame_id, 'scene:scene_01');
+    assert.equal(renderCalls, 1, '生成链必须进入真实 renderer runtime gate');
+    assert.equal(composeCalls, 0, '生成链资产预检失败后不得调用 compositor');
+    assert.equal(visualQaCalls, 0, '生成链资产预检失败后不得调用 visual QA');
+  }
+
+  for (const method of ['renderOrExport', 'rerender']) {
+    const directProjectDir = await fs.mkdtemp(path.join(os.tmpdir(), `html-video-${method}-asset-gate-`));
+    await writeFile(path.join(directProjectDir, 'frames', 'scene_01.html'), '<img src = ../assets/direct-unregistered.png>');
+    let renderCalls = 0;
+    let composeCalls = 0;
+    const directResult = await workflow[method]({
+      projectDir: directProjectDir,
+      project: {
+        project_id: `${method}-asset-gate`,
+        output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 2 },
+        frames: [{ id: 'scene_01', scene_id: 'scene_01', html_path: 'frames/scene_01.html', duration_sec: 2 }],
+        timeline: { tracks: [{ id: 'main', type: 'video', items: [{ frame_id: 'scene_01', duration_sec: 2 }] }] },
+        audio: { status: 'skipped', reason: 'disabled_by_settings' },
+        assets: [],
+      },
+      services: {
+        materializer: { materializeProject: async ({ project }) => ({ project, diagnostics: [] }) },
+        frameRenderer: { renderFrame: async frame => {
+          renderCalls += 1;
+          return {
+            success: false,
+            code: 'runtime_visual_asset_policy_violation',
+            message: '运行时素材门禁阻断。',
+            diagnostics: [{ code: 'runtime_visual_asset_policy_violation', frame_id: frame.id, details: { violations: [] } }],
+          };
+        } },
+        ffmpegComposer: { concatFramesWithFfmpeg: async () => { composeCalls += 1; return { success: true }; } },
+      },
+    });
+    assert.equal(directResult.code, 'runtime_visual_asset_policy_violation');
+    assert.equal(renderCalls, 1, `${method} 必须进入 runtime gate`);
+    assert.equal(composeCalls, 0, `${method} 预检失败后不得调用 compositor`);
+    await fs.rm(directProjectDir, { recursive: true, force: true });
   }
 
   console.log('html-video workflow tests passed');

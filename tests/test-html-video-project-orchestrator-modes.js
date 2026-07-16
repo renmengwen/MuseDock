@@ -2,6 +2,11 @@ const assert = require('assert/strict');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const fsSync = require('fs');
+const createdTempDirs = [];
+const mkdtemp = fs.mkdtemp.bind(fs);
+fs.mkdtemp = async (...args) => { const dir = await mkdtemp(...args); createdTempDirs.push(dir); return dir; };
+process.on('exit', () => createdTempDirs.forEach(dir => fsSync.rmSync(dir, { recursive: true, force: true })));
 
 const orchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 

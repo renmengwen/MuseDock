@@ -13,6 +13,7 @@ const { findFrameByAnyId, canonicalFrameId, sanitizePathSegment } = require('./f
 const { findDraft } = require('./htmlVideoDraftService');
 const { analyzeTimelineMismatch } = require('./timelineRepair');
 const sfxEventService = require('./sfxEventService');
+const { buildAssetUsageReport, updateRuntimePolicyViolations } = require('./assetUsagePhase');
 const {
   report,
   getOutputConfig,
@@ -32,8 +33,55 @@ const {
   ensureProjectDir,
   createProject,
   materializeProject,
-  renderHtmlVideoFrames,
+  renderHtmlVideoFrames: renderHtmlVideoFramesUnchecked,
+  runtimeAssetPolicyAttestation,
+  formalFrameMp4,
 } = require('./frameRenderPhase');
+
+async function assetRegistryPreflight({ projectDir, project, inspectionProject = project, creativeContext = {} } = {}) {
+  const assetUsageReport = buildAssetUsageReport({ project: inspectionProject, projectDir, creativeContext });
+  project.asset_usage_report = assetUsageReport;
+  const references = Array.isArray(assetUsageReport.unregistered_image_references)
+    ? assetUsageReport.unregistered_image_references
+    : [];
+  const diagnostics = references.length ? [createDiagnostic({
+    code: 'unregistered_visual_asset_reference',
+    stage: 'project',
+    sub_stage: 'asset_usage',
+    severity: 'warning',
+    retryable: false,
+    user_message: `静态检查发现 ${references.length} 个疑似未登记视觉素材引用，将由 Chromium 运行时继续裁决。`,
+    details: { unregistered_image_references: references },
+  })] : [];
+  assetUsageReport.diagnostics = diagnostics;
+  await saveProject(projectDir, project);
+  return { success: true, project, diagnostics };
+}
+
+async function renderHtmlVideoFrames(options = {}) {
+  const materializer = options.services?.materializer || defaultMaterializer;
+  const resolvedProjectDir = await ensureProjectDir(options);
+  let project = normalizeProject(options.project);
+  const diagnostics = [];
+  if (options.materialize) {
+    const materialized = await materializer.materializeProject({ projectDir: resolvedProjectDir, project });
+    project = normalizeProject(materialized.project);
+    diagnostics.push(...normalizeDiagnostics(materialized.diagnostics, { stage: 'materialize' }));
+  }
+  const preflight = await assetRegistryPreflight({
+    projectDir: resolvedProjectDir,
+    project,
+    creativeContext: options.creativeContext,
+  });
+  diagnostics.push(...preflight.diagnostics);
+  const rendered = await renderHtmlVideoFramesUnchecked({
+    ...options,
+    project,
+    projectDir: resolvedProjectDir,
+    materialize: false,
+  });
+  return { ...rendered, diagnostics: [...diagnostics, ...normalizeDiagnostics(rendered.diagnostics)] };
+}
 
 function markComposeCheckpoint(project, patch = {}) {
   return markCheckpointStage(project, 'compose', patch);
@@ -45,6 +93,35 @@ function markDurationVerifyCheckpoint(project, patch = {}) {
 
 function markVisualInspectCheckpoint(project, patch = {}) {
   return markCheckpointStage(project, 'visual_inspect', patch);
+}
+
+async function runtimePolicyRevalidationFrameIds(projectDir, project) {
+  const checkpointFrames = project.generation_checkpoint?.stages?.render?.frames || {};
+  const frameIds = [];
+  for (const frame of (project.frames || [])) {
+    const checkpointKey = renderCheckpointKey(frame);
+    const checkpoint = checkpointFrames[checkpointKey] || checkpointFrames[frame.id] || {};
+    if (checkpoint.status !== 'done') continue;
+    const formal = await formalFrameMp4(projectDir, checkpoint);
+    if (!formal || !checkpoint.output_hash || formal.hash !== checkpoint.output_hash) {
+      frameIds.push(frame.id || frame.scene_id || checkpointKey);
+      continue;
+    }
+    const expected = await runtimeAssetPolicyAttestation(projectDir, project, frame, {
+      checkpoint_key: checkpointKey, mp4_path: checkpoint.mp4_path, output_hash: checkpoint.output_hash,
+    });
+    if (!checkpoint.runtime_asset_policy_attestation
+      || checkpoint.runtime_asset_policy_attestation.version !== expected.version
+      || checkpoint.runtime_asset_policy_attestation.frame_id !== expected.frame_id
+      || checkpoint.runtime_asset_policy_attestation.checkpoint_key !== expected.checkpoint_key
+      || checkpoint.runtime_asset_policy_attestation.mp4_path !== expected.mp4_path
+      || checkpoint.runtime_asset_policy_attestation.output_hash !== expected.output_hash
+      || checkpoint.runtime_asset_policy_attestation.mp4_hash !== expected.mp4_hash
+      || checkpoint.runtime_asset_policy_attestation.fingerprint !== expected.fingerprint) {
+      frameIds.push(frame.id || frame.scene_id || checkpointKey);
+    }
+  }
+  return frameIds;
 }
 
 async function composeHtmlVideoProject({
@@ -61,10 +138,11 @@ async function composeHtmlVideoProject({
   const ffmpegComposer = services.ffmpegComposer || defaultFfmpegComposer;
   const resolvedProjectDir = await ensureProjectDir({ rootDir, workflowId, runId, projectDir });
   let nextProject = normalizeProject(project);
-  await saveProject(resolvedProjectDir, nextProject);
   const diagnostics = [];
+  const preflight = await assetRegistryPreflight({ projectDir: resolvedProjectDir, project: nextProject });
+  diagnostics.push(...preflight.diagnostics);
   const outputConfig = getOutputConfig(nextProject);
-  const missingRendered = missingRenderedFrameIds(nextProject);
+  const missingRendered = await missingRenderedFrameIds(nextProject, resolvedProjectDir);
   if (missingRendered.length) {
     nextProject = await projectStore.writeProjectJson(resolvedProjectDir, current => {
       markComposeCheckpoint(current, {
@@ -94,7 +172,18 @@ async function composeHtmlVideoProject({
       diagnostics: [diagnostic],
     };
   }
-  const renderedFrames = collectRenderedFramesFromProject(nextProject, resolvedProjectDir);
+  const composeRevalidationFrameIds = await runtimePolicyRevalidationFrameIds(resolvedProjectDir, nextProject);
+  if (composeRevalidationFrameIds.length) {
+    const diagnostic = createDiagnostic({
+      code: 'runtime_asset_policy_revalidation_required', stage: 'compose', sub_stage: 'render',
+      retryable: true, repair_action: 'rerender_frames',
+      user_message: '已有渲染帧的运行时素材安全证明缺失或已过期，需要重新渲染后再合成。',
+      details: { frame_ids: composeRevalidationFrameIds },
+    });
+    return { success: false, code: diagnostic.code, message: diagnostic.user_message, project: nextProject,
+      project_dir: resolvedProjectDir, html_video_project_path: resolvedProjectDir, rendered_frames: [], diagnostics: [diagnostic] };
+  }
+  const renderedFrames = await collectRenderedFramesFromProject(nextProject, resolvedProjectDir);
   const videoPath = path.join(resolvedProjectDir, 'exports', 'output.mp4');
   await report(onProgress, {
     type: 'html_video_compose_started',
@@ -466,6 +555,7 @@ async function renderHtmlVideoProject({
   ignoreLayoutQaFrameIds = [],
   onProgress = null,
   targetDurationSec,
+  creativeContext = {},
 } = {}) {
   const materializer = services.materializer || defaultMaterializer;
   const resolvedProjectDir = await ensureProjectDir({ rootDir, workflowId, runId, projectDir });
@@ -490,7 +580,17 @@ async function renderHtmlVideoProject({
       diagnostics,
     };
   }
-
+  const revalidationFrameIds = await runtimePolicyRevalidationFrameIds(resolvedProjectDir, nextProject);
+  if (revalidationFrameIds.length) {
+    const diagnostic = createDiagnostic({
+      code: 'runtime_asset_policy_revalidation_required', stage: 'compose', sub_stage: 'render',
+      retryable: true, repair_action: 'rerender_frames',
+      user_message: '已有渲染帧的运行时素材安全证明缺失或已过期，需要重新渲染后再合成。',
+      details: { frame_ids: revalidationFrameIds },
+    });
+    return { success: false, code: diagnostic.code, message: diagnostic.user_message, project: nextProject,
+      project_dir: resolvedProjectDir, html_video_project_path: resolvedProjectDir, rendered_frames: [], diagnostics: [diagnostic] };
+  }
   const timingFit = fitFrameDurationsToCaptions(nextProject);
   diagnostics.push(...timingFit.diagnostics);
   if (!timingFit.ok) {
@@ -574,11 +674,13 @@ async function renderHtmlVideoProject({
     services,
     onProgress,
     materialize: false,
+    creativeContext,
   });
   diagnostics.push(...normalizeDiagnostics(rendered.diagnostics));
   if (!rendered.success) {
     return {
       success: false,
+      ...(rendered.code ? { code: rendered.code } : {}),
       message: rendered.message || 'html-video 帧渲染失败。',
       project: rendered.project || nextProject,
       project_dir: resolvedProjectDir,
@@ -602,6 +704,7 @@ async function renderHtmlVideoProject({
   if (!composed.success) {
     return {
       success: false,
+      ...(composed.code ? { code: composed.code } : {}),
       message: composed.message || 'html-video 工程渲染失败。',
       project: composed.project || rendered.project,
       project_dir: resolvedProjectDir,
@@ -680,6 +783,17 @@ async function renderHtmlVideoFramePreview(options = {}) {
     frameToRender = { ...targetFrame, html_path: draft.html_path };
     previewName = `${previewName}-${sanitizePathSegment(draft.id)}`;
   }
+  const actualFrameId = canonicalFrameId(targetFrame) || targetFrame.id || frameId;
+  const inspectionProject = {
+    ...nextProject,
+    frames: nextProject.frames.map(frame => (frame === targetFrame ? frameToRender : frame)),
+  };
+  const preflight = await assetRegistryPreflight({
+    projectDir: materialized.project_dir,
+    project: nextProject,
+    inspectionProject,
+  });
+  diagnostics.push(...preflight.diagnostics);
   const outputConfig = getOutputConfig(nextProject);
   const previewPath = path.join(materialized.project_dir, 'inspect', 'previews', `${previewName}.mp4`);
   let layoutQa = null;
@@ -706,28 +820,44 @@ async function renderHtmlVideoFramePreview(options = {}) {
   diagnostics.push(...normalizeDiagnostics(rendered.diagnostics, {
     stage: 'render',
     sub_stage: 'render',
-    frame_id: frameId,
-    details: { frame_id: frameId },
+    frame_id: actualFrameId,
+    details: { frame_id: actualFrameId },
   }));
   if (!rendered.success) {
+    const policyFailure = rendered.code === 'runtime_visual_asset_policy_violation';
+    const policyDiagnostic = (rendered.diagnostics || []).find(item => item?.code === rendered.code);
+    const violations = Array.isArray(policyDiagnostic?.details?.violations) ? policyDiagnostic.details.violations : [];
+    if (policyFailure) {
+      nextProject.asset_usage_report = updateRuntimePolicyViolations(
+        buildAssetUsageReport({ project: nextProject, projectDir: materialized.project_dir }),
+        actualFrameId,
+        violations,
+      );
+      await saveProject(materialized.project_dir, nextProject);
+    }
     diagnostics.push(createDiagnostic({
-      code: 'render_failed',
+      code: rendered.code || 'render_failed',
       stage: 'render',
-      sub_stage: 'render',
-      frame_id: frameId,
+      sub_stage: policyFailure ? 'frame_html' : 'render',
+      frame_id: actualFrameId,
       user_message: rendered.message || 'html-video 帧渲染失败。',
       retryable: true,
-      repair_action: 'retry_render',
-      details: { frame_id: frameId, output_path: rendered.output_path },
+      repair_action: policyFailure ? 'retry_frame_html' : 'retry_render',
+      details: { frame_id: actualFrameId, output_path: rendered.output_path, ...(policyFailure ? { violations } : {}) },
     }));
     return {
       success: false,
+      code: rendered.code || 'render_failed',
       message: rendered.message || 'html-video 帧渲染失败。',
       project: nextProject,
       project_dir: materialized.project_dir,
       html_video_project_path: materialized.html_video_project_path,
       diagnostics,
     };
+  }
+  if (!draftId && nextProject.asset_usage_report?.runtime_policy_violations) {
+    nextProject.asset_usage_report = updateRuntimePolicyViolations(nextProject.asset_usage_report, actualFrameId, []);
+    await saveProject(materialized.project_dir, nextProject);
   }
   return {
     success: true,

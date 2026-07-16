@@ -1155,10 +1155,6 @@ async function generateHtmlVideo(options = {}) {
     runLayoutQa: runLayoutQa === true && !skipValidation,
     ignoreLayoutQaFrameIds,
     targetDurationSec: trustedTargetDurationSec,
-  });
-  rendered.project = await attachAssetUsageReport({
-    project: rendered.project || project,
-    projectDir,
     creativeContext,
   });
   diagnostics.push(...normalizeDiagnostics(rendered.diagnostics));
@@ -1214,11 +1210,6 @@ async function generateHtmlVideo(options = {}) {
     sub_stage: 'visual_inspect',
     message: visualReport.success ? 'html-video 成片画面巡检完成。' : 'html-video 成片画面巡检发现问题。',
     data: visualReport,
-  });
-  rendered.project = await attachAssetUsageReport({
-    project: rendered.project,
-    projectDir,
-    creativeContext,
   });
   const missingRequiredAssets = missingRequiredAssetIds(rendered.project);
   if (missingRequiredAssets.length) {
