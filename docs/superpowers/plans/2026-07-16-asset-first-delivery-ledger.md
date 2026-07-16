@@ -64,7 +64,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-01 统一视觉素材契约 | `complete` | A-01 | `9abb219` | - |
 | B-02 现有 producer 统一接入 | `complete` | B-01 | `b3b4fe2` | - |
 | B-03 上传暂存与任务认领 | `complete` | B-01 | `769d178` | - |
-| B-04a 暂存素材 requirement 更新接口 | `frozen_for_review` | B-03 | - | 修复后新 Candidate 已冻结；等待双复审 |
+| B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `queued` | B-04a | - | TDD、双 Review、中文提交 |
 | B-05 素材面板正式协议 | `queued` | B-02、B-03 | - | B-04b 后串行实现 |
 | B-06 页面截图与衍生素材 producer | `queued` | B-01、B-02 | - | B-05 后串行实现 |
@@ -76,45 +76,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ## 当前写租约
 
-```yaml
-task_id: B-04a
-status: frozen_for_review
-owner: /root/context_control_audit
-base_commit: a8b8220ae6de3b8423d9c185f68e8ff411afc8c3
-worktree: D:\code3\MuseDock-worktrees\asset-first-b04a
-branch: codex/asset-first-b04a
-allowed_paths:
-  - server/services/creative/visualAssetUploads.js
-  - server/routes/creativeWorkflows.js
-  - tests/test-creative-workflow-upload-assets.js
-  - tests/test-creative-workflow-routes.js
-forbidden_paths:
-  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
-state_owners:
-  - staged_visual_asset.requirement
-exclusive_resources:
-  - B-04a upload service and route tests run serially inside the worker worktree
-invalidated_revision: git-index-tree-v1:a8b8220ae6de3b8423d9c185f68e8ff411afc8c3:dd1744aa64223f810ab254eadd09fe2dba4c6165
-frozen_revision: git-index-tree-v1:a8b8220ae6de3b8423d9c185f68e8ff411afc8c3:12383438760a1e56c2329d77e129ca9a02f5e0dc
-revision_valid: true
-changed_paths:
-  - server/services/creative/visualAssetUploads.js
-  - server/routes/creativeWorkflows.js
-  - tests/test-creative-workflow-upload-assets.js
-  - tests/test-creative-workflow-routes.js
-verification:
-  - node tests/test-creative-workflow-upload-assets.js
-  - NODE_PATH=D:\code3\MuseDock\node_modules node tests/test-creative-workflow-routes.js
-review:
-  spec: pending_re_review
-  quality: pending_re_review
-resolved_findings:
-  - PATCH 缺少、null 或空 requirement 返回中文 400 且 manifest 不变
-  - route 测试恢复严格 JSON 解析
-  - route 测试覆盖持久化失败的中文 500 与请重试提示
-```
-
-Worker 禁止修改本 Ledger。发现需要修改租约外路径时返回 `scope_expansion_required`。进入 `frozen_for_review` 前由 Coordinator 校验并写入 `git-index-tree-v1` revision，形成独立 Ledger 控制提交；Reviewer 只接受该 Ledger commit。
+当前无业务代码写租约。B-04a 已集成到 `dev` 并释放租约；下一写任务为 B-04b，必须从包含 `c63ac1b` 的新 `dev` 基线创建独立 worktree 后再登记租约。
 
 ## Phase A 审计分工
 
@@ -248,5 +210,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase B Task 1 统一资产契约 | `9abb219`；`tests/test-visual-asset-contract.js` 与 `tests/test-creative-context.js` 通过；规格 Review PASS；代码质量 Review PASS |
 | Phase B Task 2 现有 producer 统一接入 | `b3b4fe2`；source/generated/workflow/usage/project-store 共七组测试通过；规格 Review PASS；代码质量 Review PASS |
 | Phase B Task 3 上传暂存与任务认领 | `769d178`；真实 PNG/JPEG/WebP、HTTP 413、Douyin 路径、原子回滚、TTL/配额测试通过；规格 Review PASS；代码质量 Review PASS |
+| Phase B Task 4A 暂存 requirement 更新 | `c63ac1b`；冻结 revision `git-index-tree-v1:a8b8220:12383438760a1e56c2329d77e129ca9a02f5e0dc`；upload service 与 route 测试在 `dev` 串行通过；规格 Review PASS；代码质量 Review PASS；旧 revision `dd1744aa…` 已失效 |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
