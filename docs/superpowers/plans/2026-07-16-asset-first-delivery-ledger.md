@@ -67,9 +67,9 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-04a 暂存素材 requirement 更新接口 | `complete` | B-03 | `c63ac1b` | - |
 | B-04b 上传 UI、缩略图、required 控件与 loading | `complete` | B-04a | `f9ae697` | - |
 | B-05 素材面板正式协议 | `complete` | B-02、B-03 | `9a7c0e2` | - |
-| B-06a GitHub 页面截图 producer | `frozen_for_review` | B-01、B-02 | - | 安全修复后 Candidate 已冻结；等待双复审 |
+| B-06a GitHub 页面截图 producer | `frozen_for_review` | B-01、B-02 | - | 修复版规格复审 PASS；等待同 revision 质量复审 |
 | B-06b 受控 derived 素材登记 | `frozen_for_review` | B-01 | - | Candidate 已冻结；等待双 Review |
-| B-07a requirement 分类语义 | `frozen_for_review` | B-01 | - | Candidate 已冻结；等待同 revision 双 Review |
+| B-07a requirement 分类语义 | `changes_requested` | B-01 | - | 质量 Review 要求补正式字段、formal-first 与非阻断 workflow 证据；正在修复 |
 | B-07b Phase B 集成门禁验证 | `queued` | B-06a、B-06b、B-07a | - | Phase B 全量验证与真实 Chromium smoke |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `queued` | B-07b | - | Phase C 计划与逐任务门 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
@@ -108,8 +108,10 @@ verification:
   - node tests/test-page-capture-assets.js
   - node tests/test-creative-workflows.js
 review:
-  spec: pending_re_review
-  quality: pending_re_review
+  spec: pass
+  spec_reviewed_ledger_commit: 1692ee1e5a78e7177be02bcc4f40322e88244ff2
+  spec_reviewed_revision: git-index-tree-v1:7a377550669a91fc9616dd4befda56cf7ad1a985:faad0ec07e46ef2ffa9d8978633492f7a418d1ba
+  quality: in_progress
 resolved_findings:
   - source prep 捕获同步 throw、rejected Promise 与缺方法
   - allowlist 限制默认 HTTPS 端口、credentials、lookalike 与 redirect document
@@ -146,8 +148,8 @@ review:
 
 ```yaml
 task_id: B-07a
-status: frozen_for_review
-owner: /root/context_control_audit
+status: changes_requested
+owner: /root/task4_readonly_spec
 base_commit: 037f6cda728f6448d6d5211b30ceb47d98cee30b
 worktree: D:\code3\MuseDock-worktrees\asset-first-b07a
 branch: codex/asset-first-b07a
@@ -161,6 +163,7 @@ exclusive_resources:
   - B-07a usage/workflow tests run serially inside the worker worktree
   - no browser, ports, ffmpeg or network
 frozen_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
+revision_valid: false
 changed_paths:
   - server/services/creative-video/html-video/assetUsagePhase.js
   - tests/test-html-video-asset-usage.js
@@ -171,7 +174,13 @@ verification:
   - node tests/test-generated-image-persist.js
 review:
   spec: pending
-  quality: pending
+  quality: changes_requested
+  quality_reviewed_ledger_commit: f9e2753330f1ab96a46ccb719b55eb530ca47099
+  quality_reviewed_revision: git-index-tree-v1:037f6cda728f6448d6d5211b30ceb47d98cee30b:4d7d001234085aab9fd92b2612cdff0248083943
+blocking_findings:
+  - asset_usage_report.assets 必须保留统一视觉素材正式字段
+  - AI 生成素材识别必须 formal origin 优先、legacy source 仅回退
+  - 完整 workflow 必须证明 preferred、optional 与缺 requirement 的 legacy 素材未引用时不阻断
 ```
 
 三个 worktree 的文件与状态所有权不重叠，可以并行写；Coordinator 仍串行冻结、Review 和集成。B-06a 真实 Chromium smoke 与 Phase B 全量门留到 B-07b。
