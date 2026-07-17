@@ -172,11 +172,22 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
             const elements = document.elementsFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
             const activeShot = document.querySelector('[data-hv-shot][data-shot-active="true"]');
             const shotStyle = getComputedStyle(activeShot);
+            const caption = document.querySelector('.hv-caption-item[data-hv-active="true"]');
+            const captionRect = caption.getBoundingClientRect();
+            const captionLayer = caption.parentElement;
+            const originalPointerEvents = captionLayer.style.pointerEvents;
+            captionLayer.style.pointerEvents = 'auto';
+            const captionTop = document.elementsFromPoint(captionRect.left + captionRect.width / 2, captionRect.top + captionRect.height / 2)[0];
+            captionLayer.style.pointerEvents = originalPointerEvents;
             return {
               top: elements[0]?.getAttribute('data-test-overlay') || elements[0]?.getAttribute('data-shot-layer') || elements[0]?.tagName,
               shotVisible: shotStyle.visibility === 'visible' && Number(shotStyle.opacity) > 0,
               sequenceZ: getComputedStyle(document.querySelector('[data-hv-image-sequence]')).zIndex,
               overlayZ: getComputedStyle(overlay).zIndex,
+              captionPosition: getComputedStyle(captionLayer).position,
+              captionZ: getComputedStyle(captionLayer).zIndex,
+              captionBottom: Math.round(innerHeight - captionRect.bottom),
+              captionTopmost: captionTop === caption || caption.contains(captionTop),
             };
           });
           throwIfPolicyViolated(collector);
@@ -202,6 +213,10 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
     assert.equal(shotResult.stacking.top, 'overlay');
     assert.equal(shotResult.stacking.shotVisible, true);
     assert.ok(Number(shotResult.stacking.overlayZ) > Number(shotResult.stacking.sequenceZ));
+    assert.equal(shotResult.stacking.captionPosition, 'absolute');
+    assert.equal(shotResult.stacking.captionZ, '9999');
+    assert.ok(shotResult.stacking.captionBottom >= 30 && shotResult.stacking.captionBottom <= 60);
+    assert.equal(shotResult.stacking.captionTopmost, true);
     assert.ok(requestedUrls.every(url => url.startsWith('file:')), `只允许 file: 请求：${requestedUrls.join(', ')}`);
 
     async function adapterPlaywright({ delayPattern = '', delayMs = 0, capture = null } = {}) {
@@ -301,8 +316,20 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
     assert.equal(brokenError?.code, 'render-shot-image-not-ready', JSON.stringify(brokenError?.details || {}));
     assert.equal(brokenFfmpegCalls, 0);
 
+    const hostileDecodeSource = path.join(projectDir, 'frames', 'hostile-decode.html');
+    await fsp.writeFile(hostileDecodeSource, shotHtml.replace('<main>', '<script>window.setTimeout=function(){return 0};HTMLImageElement.prototype.decode=function(){return new Promise(function(){})}</script><main>'), 'utf8');
+    let hostileDecodeFfmpeg = 0;
+    await assert.rejects(() => render({
+      template: { sourcePath: hostileDecodeSource }, security: { projectDir, assets: shotAssets, frameId: 'hostile-decode' },
+      config: { outputPath: path.join(projectDir, 'frames', 'hostile-decode.mp4'), duration: 0.5, durationMode: 'explicit' },
+    }, {}, {
+      importPlaywright: async () => adapterPlaywright(), managedShotImageTimeoutMs: 200,
+      runFfmpeg: async () => { hostileDecodeFfmpeg += 1; return { ok: true }; }, ffmpegPath: 'ffmpeg-mock',
+    }), error => error.code === 'render-shot-image-not-ready');
+    assert.equal(hostileDecodeFfmpeg, 0);
+
     const hostileClockSource = path.join(projectDir, 'frames', 'hostile-clock.html');
-    await fsp.writeFile(hostileClockSource, shotHtml.replace(/<body([^>]*)>/i, '<body$1><script>Object.defineProperty(window,"__hvPlaybackClock",{value:{},writable:false,configurable:false})</script>'), 'utf8');
+    await fsp.writeFile(hostileClockSource, shotHtml.replace(/<body([^>]*)>/i, '<body$1><script>Object.defineProperty(window,"__hvPlaybackClock",{value:{__hvOwner:"musedock-playback-clock-v1",subscribe:function(){},play:function(){},pause:function(){},timeSec:function(){return 0},paused:function(){return true},setTime:function(){}},writable:false,configurable:false})</script>'), 'utf8');
     let hostileClockFfmpeg = 0;
     await assert.rejects(() => render({
       template: { sourcePath: hostileClockSource }, security: { projectDir, assets: shotAssets, frameId: 'hostile-clock' },
@@ -322,6 +349,17 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
       importPlaywright: async () => adapterPlaywright(), runFfmpeg: async () => { throwingPlayFfmpeg += 1; return { ok: true }; }, ffmpegPath: 'ffmpeg-mock',
     }), error => error.code === 'render-playback-start-failed' && /__hvPlayAll/.test(error.message));
     assert.equal(throwingPlayFfmpeg, 0);
+
+    const lateBoomSource = path.join(projectDir, 'frames', 'late-boom.html');
+    await fsp.writeFile(lateBoomSource, '<!doctype html><html><head></head><body><script>window.__hvPlayAll=function(){setTimeout(function(){throw new Error("late-boom")},300)}</script><main>画面</main></body></html>', 'utf8');
+    let lateBoomFfmpeg = 0;
+    await assert.rejects(() => render({
+      template: { sourcePath: lateBoomSource }, security: { projectDir, assets: [], frameId: 'late-boom' },
+      config: { outputPath: path.join(projectDir, 'frames', 'late-boom.mp4'), duration: 0.8, durationMode: 'explicit' },
+    }, {}, {
+      importPlaywright: async () => adapterPlaywright(), runFfmpeg: async () => { lateBoomFfmpeg += 1; return { ok: true }; }, ffmpegPath: 'ffmpeg-mock',
+    }), error => error.code === 'render-playback-runtime-failed' && /late-boom/.test(error.message));
+    assert.equal(lateBoomFfmpeg, 0);
 
     assert.deepEqual(await runCase(
       browser,

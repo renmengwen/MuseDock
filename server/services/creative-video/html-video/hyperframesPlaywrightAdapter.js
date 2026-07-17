@@ -6,6 +6,7 @@ const { fileURLToPath, pathToFileURL } = require('url');
 const { spawn } = require('child_process');
 
 const { prepareSourceHtml } = require('./prepareSourceHtml');
+const { buildPlaybackClockSource } = require('./playbackClock');
 const { resolveFfmpegPath } = require('./environmentDoctor');
 
 const ADAPTER_VERSION = '0.1.0-playwright';
@@ -225,6 +226,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
   let leadInMs = 0;
   let totalDuration = config.duration;
   let collector;
+  const pageErrors = [];
 
   try {
     report(ctx, 5, '正在准备 html-video 渲染...');
@@ -250,14 +252,20 @@ async function render(input = {}, ctx = {}, deps = {}) {
       },
     });
     const page = await context.newPage();
-    const pageErrors = [];
     page.on('pageerror', error => pageErrors.push(error?.message || String(error)));
 
     // goto 之前置受控标志：scene_html 时间线脚本据此不挂 5s 兜底自启，
     // 避免预加载 >5s 时兜底抢先起钟、adapter 的显式启动被幂等吞掉导致 origin 偏移。
-    await page.addInitScript(() => {
+    await page.addInitScript(clockSource => {
       window.__mpAdapterControlled = true;
-    });
+      (0, eval)(clockSource);
+      const clock = window.__hvPlaybackClock;
+      if (!clock || clock.__hvOwner !== 'musedock-playback-clock-v1' || typeof clock.play !== 'function') {
+        throw new Error('无法安装 html-video 共享播放时钟。');
+      }
+      Object.freeze(clock);
+      Object.defineProperty(window, '__hvPlaybackClock', { value: clock, writable: false, configurable: false });
+    }, buildPlaybackClockSource());
 
     // 对应 html-video 源码段：page.addInitScript 冻结 CSS/SMIL 动画。
     await page.addInitScript(() => {
@@ -316,8 +324,9 @@ async function render(input = {}, ctx = {}, deps = {}) {
     report(ctx, 32, '正在加载字体和样式...');
     await waitForStylesAndFonts(page);
     await waitForRenderReady(page, config);
-    await waitForManagedShotImages(page);
+    await waitForManagedShotImages(page, Number(deps.managedShotImageTimeoutMs) || 10000);
     throwIfPolicyViolated(collector);
+    throwIfPageErrored(pageErrors, 'render-playback-start-failed');
 
     await page.waitForTimeout(100);
 
@@ -330,6 +339,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
       await probeAnimationDurationMs(page).catch(() => 0);
     }
     throwIfPolicyViolated(collector);
+    throwIfPageErrored(pageErrors, 'render-playback-start-failed');
 
     // 正式录制起点：animation、解冻和 scene-local 时钟必须在同一个 JS task 启动，
     // 避免多个 evaluate 往返让 Caption/Beat/Shot 产生不同时间原点。
@@ -347,6 +357,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
             throw new Error('检测到不可信共享播放时钟。');
           }
           window.__hvPlaybackClock.play();
+          if (window.__hvPlaybackClock.paused() !== false) throw new Error('共享播放时钟未进入 running 状态。');
         } else if (typeof window.__mpStartBeatClock === 'function') {
           window.__mpStartBeatClock();
         }
@@ -364,15 +375,21 @@ async function render(input = {}, ctx = {}, deps = {}) {
     leadInMs = now() - tWebmStart;
 
     report(ctx, 40, `正在录制 ${totalDuration}s html-video 帧...`);
-    await waitWithProgress(page, ctx, totalDuration, () => throwIfPolicyViolated(collector));
+    await waitWithProgress(page, ctx, totalDuration, () => {
+      throwIfPolicyViolated(collector);
+      throwIfPageErrored(pageErrors);
+    });
     await page.waitForTimeout(RECORD_TAIL_BUFFER_MS).catch(() => {});
     throwIfPolicyViolated(collector);
+    throwIfPageErrored(pageErrors);
 
     report(ctx, 85, '正在结束浏览器录制...');
     throwIfPolicyViolated(collector);
+    throwIfPageErrored(pageErrors);
     await context.close();
     await new Promise(resolve => setImmediate(resolve));
     throwIfPolicyViolated(collector);
+    throwIfPageErrored(pageErrors);
     webmPath = await findLatestWebm(recordDir);
     if (!webmPath) {
       throw createRenderError('render-failed', 'Playwright 未生成 webm 录制文件。');
@@ -390,6 +407,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
   }
 
   try {
+    throwIfPageErrored(pageErrors);
     report(ctx, 90, '正在编码 MP4...');
     const ffmpegPath = deps.ffmpegPath || await resolveFfmpegPath(deps);
     const probeDeps = { ...deps, ffmpegPath };
@@ -611,9 +629,9 @@ async function waitForRenderReady(page, config = {}) {
   }), { width: config.width, height: config.height }, { timeout: 5000 }).catch(() => {});
 }
 
-async function waitForManagedShotImages(page) {
-  const result = await page.evaluate(() => Promise.race([
-    (async () => {
+async function waitForManagedShotImages(page, timeoutMs = 10000) {
+  let timeout;
+  const evaluation = page.evaluate(() => (async () => {
       const marker = 'managed-shot-images';
       const images = Array.from(document.querySelectorAll('[data-hv-shot] img'));
       try {
@@ -625,12 +643,22 @@ async function waitForManagedShotImages(page) {
       } catch (error) {
         return { success: false, count: images.length, message: error?.message || String(error), marker };
       }
-    })(),
-    new Promise(resolve => setTimeout(() => resolve({ success: false, message: '受管 Shot 图片解码超时。', marker: 'managed-shot-images' }), 10000)),
-  ])).catch(error => ({ success: false, message: error?.message || String(error) }));
+    })()).catch(error => ({ success: false, message: error?.message || String(error) }));
+  const result = await Promise.race([
+    evaluation,
+    new Promise(resolve => { timeout = setTimeout(() => resolve({ success: false, message: '受管 Shot 图片解码超时。' }), timeoutMs); }),
+  ]).finally(() => clearTimeout(timeout));
   if (result?.success) return result;
   const error = createRenderError('render-shot-image-not-ready', `html-video 受管 Shot 图片未就绪：${result?.message || '未知错误'}`);
   error.details = { message: result?.message || '', count: Number(result?.count) || 0 };
+  throw error;
+}
+
+function throwIfPageErrored(pageErrors = [], code = 'render-playback-runtime-failed') {
+  if (!pageErrors.length) return;
+  const errors = [...pageErrors];
+  const error = createRenderError(code, `html-video 页面脚本运行失败：${errors.join('；')}`);
+  error.details = { errors };
   throw error;
 }
 

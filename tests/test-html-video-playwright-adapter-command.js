@@ -153,6 +153,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     };
 
     let startupFailureMode = false;
+    let managedImageNeverSettles = false;
     const mockPlaywright = {
       chromium: {
         launch: async options => {
@@ -174,7 +175,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
                 evaluate: async fn => {
                   const source = String(fn);
                   calls.evaluates.push(source);
-                  if (source.includes('managed-shot-images')) return { success: true, count: 0 };
+                  if (source.includes('managed-shot-images')) return managedImageNeverSettles ? new Promise(() => {}) : { success: true, count: 0 };
                   if (source.includes('getComputedStyle')) return 1800;
                   if (source.includes('__hvPlayAll')) return startupFailureMode
                     ? { success: false, errors: ['__hvPlayAll: boom'] }
@@ -290,6 +291,21 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     ), error => error.code === 'render-playback-start-failed');
     assert.equal(startupFailureFfmpegCalls, 0, '播放启动错误不得进入 ffmpeg');
     startupFailureMode = false;
+
+    managedImageNeverSettles = true;
+    let decodeTimeoutFfmpegCalls = 0;
+    await assert.rejects(() => render(
+      {
+        template: { sourcePath }, security: { projectDir: workDir, assets: [], frameId: 'scene_decode_timeout' },
+        config: { outputPath: path.join(workDir, 'decode-timeout.mp4'), duration: 0.5, durationMode: 'explicit' },
+      }, {}, {
+        importPlaywright: async () => mockPlaywright,
+        managedShotImageTimeoutMs: 30,
+        runFfmpeg: async () => { decodeTimeoutFfmpegCalls += 1; return { ok: true }; }, ffmpegPath: 'ffmpeg-mock',
+      },
+    ), error => error.code === 'render-shot-image-not-ready');
+    assert.equal(decodeTimeoutFfmpegCalls, 0);
+    managedImageNeverSettles = false;
 
     let lateRouteHandler;
     let lateTriggered = false;

@@ -1,5 +1,5 @@
 const MODES = new Set(['fullscreen_relay', 'overview_detail', 'semantic_compare', 'rhythm_montage']);
-const { extractVisualAssetReferences, htmlReferencesAsset } = require('./frameHtmlInspection');
+const { extractVisualAssetReferences } = require('./frameHtmlInspection');
 const { buildPlaybackClockSource } = require('./playbackClock');
 const START_MARKER = '<!-- hv-image-sequence:start -->';
 const END_MARKER = '<!-- hv-image-sequence:end -->';
@@ -149,7 +149,9 @@ function normalizeContract(node, creativeContext) {
     const asset = assets.get(assetId);
     const src = registrySrc(asset);
     const mediaType = String(asset?.media_type || asset?.type || '').toLowerCase();
-    if (!asset || (mediaType && mediaType !== 'image' && !mediaType.startsWith('image/')) || asset.status === 'failed' || !src) {
+    const status = String(asset?.status || '').trim();
+    const statusReady = status ? status === 'ready' : true; // legacy 工程可能没有 status；新 registry 必须显式 ready
+    if (!asset || (mediaType && mediaType !== 'image' && !mediaType.startsWith('image/')) || !statusReady || !src) {
       return fail(`Shot ${id} 引用了未登记或不可用的图片素材 ${assetId || '空值'}。`);
     }
     normalized.push({
@@ -226,7 +228,7 @@ function renderDom(contract) {
     START_MARKER,
     '<style data-hv-image-sequence-style="true">',
     '[data-hv-image-sequence]{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none}',
-    'body>:not([data-hv-image-sequence]):not(style):not(script){position:relative;z-index:1}',
+    ':where(body>:not([data-hv-image-sequence]):not([data-hv-layer="captions"]):not(style):not(script)){position:relative;z-index:1}',
     '[data-hv-shot]{position:absolute;inset:0;margin:0;opacity:0;visibility:hidden;transition:opacity .35s ease,transform .35s ease;transform:translate3d(0,8px,0)}',
     '[data-hv-shot][data-shot-active="true"]{opacity:1;visibility:visible;transform:none}',
     '[data-hv-shot] img{position:absolute;inset:0;width:100%;height:100%}',
@@ -259,10 +261,14 @@ function withoutManagedBlock(text, range) {
   return range.start >= 0 ? text.slice(0, range.start) + text.slice(range.end) : text;
 }
 
-function validateNoDuplicateShotReferences(html, range, contract) {
-  const references = new Set(extractVisualAssetReferences(withoutManagedBlock(html, range)).map(item => item.reference));
-  const duplicate = contract.shots.find(shot => htmlReferencesAsset(references, [shot.src]));
-  return duplicate ? fail(`模型美术壳重复引用了 Shot 素材 ${duplicate.asset_id}。`) : { success: true };
+function validateNoDuplicateShotReferences(html, range) {
+  const shell = withoutManagedBlock(html, range);
+  const references = extractVisualAssetReferences(shell);
+  const searchable = shell.replace(/<!--[\s\S]*?-->/g, '').replace(/<script\b[\s\S]*?<\/script>/gi, '');
+  return references.length || /\burl\s*\(|(?:-webkit-)?image-set\s*\(/i.test(searchable)
+    ? fail('Image Sequence 模型美术壳不得输出任何外部视觉素材。', {
+    offending_references: references.map(item => item.reference),
+    }) : { success: true };
 }
 
 function validateSceneImageSequenceDom(html, { node = {}, creativeContext = {} } = {}) {
@@ -272,7 +278,7 @@ function validateSceneImageSequenceDom(html, { node = {}, creativeContext = {} }
   const range = markerRange(text);
   if (!range || range.start < 0) return fail('Frame HTML 缺少受管 Image Sequence DOM。');
   const managed = text.slice(range.start, range.end);
-  const duplicateReferences = validateNoDuplicateShotReferences(text, range, normalized.contract);
+  const duplicateReferences = validateNoDuplicateShotReferences(text, range);
   if (!duplicateReferences.success) return duplicateReferences;
   if ((text.match(/<section\b[^>]*\bdata-hv-image-sequence\s*=/gi) || []).length !== 1) return fail('Frame HTML 的 Image Sequence 根节点数量不等于 1。');
   if ((text.match(/<figure\b[^>]*\bdata-hv-shot\s*=/gi) || []).length !== normalized.contract.shots.length) return fail('Frame HTML 的 Shot DOM 数量与计划不一致。');
@@ -317,7 +323,8 @@ function materializeSceneImageSequenceDom({ html = '', node = {}, creativeContex
   if (/\bdata-hv-shot\s*=|\bdata-hv-image-sequence\s*=/i.test(withoutManaged)) {
     return fail('模型不得自行生成 Shot DOM。');
   }
-  const duplicateReferences = validateNoDuplicateShotReferences(text, range, normalized.contract);
+  if (withoutManaged.includes('__hvPlaybackClock')) return fail('模型不得占用系统保留的 __hvPlaybackClock。');
+  const duplicateReferences = validateNoDuplicateShotReferences(text, range);
   if (!duplicateReferences.success) return duplicateReferences;
   const closingBody = withoutManaged.toLowerCase().lastIndexOf('</body>');
   if (closingBody < 0) return fail('Frame HTML 缺少 closing body，无法注入 Shot DOM。');

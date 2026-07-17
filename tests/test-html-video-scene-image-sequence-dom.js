@@ -45,7 +45,9 @@ const shell = '<!doctype html><html><head></head><body data-hv-canvas><main>美�
 
 for (const duplicateMarkup of [
   '<img src="../assets/a.png">',
+  '<img src="../assets/a&period;png">',
   '<style>.duplicate{background-image:url(../assets/a.png)}</style>',
+  '<style>.duplicate{background-image:url(../assets/a\\2e png)}</style>',
   '<svg><image href="../assets/a.png"></image></svg>',
 ]) {
   const duplicate = materializeSceneImageSequenceDom({
@@ -70,6 +72,15 @@ for (const duplicateMarkup of [
     node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]),
     creativeContext: { asset_context: { assets } },
   }).success, false, '阶段二次物化也必须检查 managed block 外的重复引用');
+}
+
+{
+  const reservedGlobal = materializeSceneImageSequenceDom({
+    html: shell.replace('</main>', '<script>window.__hvPlaybackClock={};</script></main>'),
+    node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]),
+    creativeContext: { asset_context: { assets } },
+  });
+  assert.equal(reservedGlobal.success, false, '模型壳不得占用系统保留的 __hvPlaybackClock');
 }
 
 for (const [mode, shots] of [
@@ -155,6 +166,8 @@ for (const badAssets of [
   assets.map(asset => asset.id === 'a' ? { ...asset, path: 'assets/a.png', frame_src: 'C:/outside.png' } : asset),
   assets.map(asset => asset.id === 'a' ? { ...asset, path: 'assets/a.png', frame_src: 'https://evil.example/a.png' } : asset),
   assets.map(asset => asset.id === 'a' ? { ...asset, path: 'assets/a.png', frame_src: 'assets/a.png' } : asset),
+  assets.map(asset => asset.id === 'a' ? { ...asset, status: 'pending' } : asset),
+  assets.map(asset => asset.id === 'a' ? { ...asset, status: 'rejected' } : asset),
 ]) {
   const result = materializeSceneImageSequenceDom({
     html: shell,
@@ -162,6 +175,15 @@ for (const badAssets of [
     creativeContext: { asset_context: { assets: badAssets } },
   });
   assert.equal(result.success, false, '重复 registry ID 或逃逸 src 必须阻断');
+}
+
+{
+  const legacyAssets = assets.map(asset => asset.id === 'a' ? (({ status, ...legacy }) => legacy)(asset) : asset);
+  assert.equal(materializeSceneImageSequenceDom({
+    html: shell,
+    node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]),
+    creativeContext: { asset_context: { assets: legacyAssets } },
+  }).success, true, 'legacy 素材缺 status 的兼容分支必须显式保留');
 }
 
 {
