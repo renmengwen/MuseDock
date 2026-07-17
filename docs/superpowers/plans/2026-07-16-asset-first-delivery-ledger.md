@@ -101,6 +101,7 @@ allowed_paths:
   - tests/test-html-video-visual-plan.js
   - tests/test-html-video-workflow.js
   - tests/test-html-video-frame-html-resume.js
+  - tests/test-html-video-asset-first-prompts.js
 forbidden_paths:
   - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
   - server/services/creative-video/html-video/captionLayer.js
@@ -119,6 +120,7 @@ verification:
   - node tests/test-html-video-visual-plan.js
   - node tests/test-html-video-frame-html-resume.js
   - node tests/test-html-video-workflow.js
+  - node tests/test-html-video-asset-first-prompts.js
   - node tests/test-html-video-caption-layer.js
   - node tests/test-html-video-scene-continuity.js
 review:
