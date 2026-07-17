@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const aiTextModel = require('../../ai/aiTextModel');
-const { isGeneratedVisualAsset } = require('../../creative/visualAssetContract');
+const { isGeneratedVisualAsset, mergeVisualAssets } = require('../../creative/visualAssetContract');
 const frameHtmlAgent = require('./frameHtmlAgent');
 const { runFrameHtmlPhase } = require('./frameHtmlPhase');
 const { buildMixedFrameProject } = require('./mixedFrameBuilder');
@@ -400,11 +400,29 @@ function mergeFrameStatsIntoDecisions({ visualDecisions, renderDecisions, statsB
 function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null) {
   if (!project) return null;
   if (!resumeArtifactsMatch(project, sceneSpec)) return null;
-  if (hasUsableContentGraph(project.content_graph) && contentGraphMatchesSceneSpec(project.content_graph, sceneSpec)) {
-    return project.content_graph;
-  }
   const checkpointGraph = loadCheckpointContentGraph(projectDir, project);
-  return checkpointGraph && contentGraphMatchesSceneSpec(checkpointGraph, sceneSpec) ? checkpointGraph : null;
+  if (checkpointGraph && checkpointGraph.expanded_from_scene_graph !== true && contentGraphMatchesSceneSpec(checkpointGraph, sceneSpec)) {
+    return checkpointGraph;
+  }
+  return null;
+}
+
+function hydrateProjectAssetsIntoCreativeContext(creativeContext = {}, project = {}) {
+  const projectAssets = Array.isArray(project?.assets) ? project.assets : [];
+  if (!projectAssets.length) return creativeContext;
+  const current = objectOrEmpty(creativeContext);
+  const assetContext = objectOrEmpty(current.asset_context);
+  const hydrated = projectAssets.map(asset => ({
+    ...asset,
+    ...(asset.path && !asset.frame_src ? { frame_src: `../${String(asset.path).replace(/\\/g, '/')}` } : {}),
+  }));
+  return {
+    ...current,
+    asset_context: {
+      ...assetContext,
+      assets: mergeVisualAssets(Array.isArray(assetContext.assets) ? assetContext.assets : [], hydrated),
+    },
+  };
 }
 
 function firstPositiveNumber(...values) {
@@ -606,9 +624,12 @@ async function generateHtmlVideo(options = {}) {
     }
     return target;
   };
+  // resume 必须先从 project.assets 恢复全部正式素材，再走同一 materialize/normalize 链路。
+  // 不能只恢复 generated，否则 upload/article/capture 的 requirement/fit/analysis 会漂移。
+  const existingProjectForGeneration = resumeProject || await loadExistingProject(projectDir);
+  creativeContext = hydrateProjectAssetsIntoCreativeContext(creativeContext, existingProjectForGeneration);
   // 生图/素材水合必须在 beat 路由之前完成，否则路由决策看不到生成图。
   creativeContext = await materializeCreativeContextAssets(projectDir, creativeContext);
-  const existingProjectForGeneration = resumeProject || await loadExistingProject(projectDir);
   creativeContext = hydrateGeneratedAssetsFromProject({
     project: existingProjectForGeneration,
     creativeContext,
@@ -646,12 +667,14 @@ async function generateHtmlVideo(options = {}) {
     });
   creativeContext = generatedImageResult.creativeContext;
   if (generatedImageResult.diagnostics?.length) diagnostics.push(...generatedImageResult.diagnostics);
-  if (generatedImageResult.generated_count > 0) {
+  if ((creativeContext.asset_context?.assets || []).length > 0) {
     await projectStore.writeProjectJson(projectDir, current => {
-      const generatedAssets = projectAssetsFromCreativeContext(creativeContext)
-        .filter(isGeneratedVisualAsset);
+      const runtimeAssets = (Array.isArray(creativeContext.asset_context?.assets) ? creativeContext.asset_context.assets : [])
+        .map(({ local_path, frame_src, ...asset }) => asset);
+      const formalAssets = projectAssetsFromCreativeContext(creativeContext);
+      const persistedAssets = mergeVisualAssets(formalAssets, runtimeAssets);
       const byId = new Map((current.assets || []).map(asset => [asset.id, asset]));
-      generatedAssets.forEach(asset => byId.set(asset.id, { ...(byId.get(asset.id) || {}), ...asset }));
+      persistedAssets.forEach(asset => byId.set(asset.id, { ...(byId.get(asset.id) || {}), ...asset }));
       current.assets = Array.from(byId.values()).filter(asset => asset.path);
       return current;
     });
@@ -670,19 +693,6 @@ async function generateHtmlVideo(options = {}) {
       project_dir: projectDir,
     });
   }
-  // 路由输入用绑定生成图后的克隆 spec；原始 sceneSpec 保持不变以稳定 scene_spec_hash
-  const routingSceneSpec = bindGeneratedAssetsToSceneSpec(sceneSpec, creativeContext);
-  visualPlan = buildVisualPlan({ sceneSpec: routingSceneSpec, workflowId });
-  assignMotionOrchestration(visualPlan, {
-    styleProfile: visualPlan.style_profile || null,
-  });
-  visualDecisions = matchVisualBeatsToRenderers({ visualPlan });
-  renderDecisions = Array.from(visualDecisions.values());
-  // 持久化版剥离 source_scene，防止 project.json 膨胀
-  persistableVisualPlan = {
-    ...visualPlan,
-    beats: visualPlan.beats.map(({ source_scene, ...beat }) => beat),
-  };
   const templateRenderTarget = applyRenderTargetDefaults(renderTarget);
   const currentSceneSpecHash = computeSceneSpecCheckpointHash(sceneSpec || {});
   const trustedTargetDurationSec = firstPositiveNumber(
@@ -836,6 +846,31 @@ async function generateHtmlVideo(options = {}) {
       return current;
     });
   }
+  // C-02：canonical Content Graph 先确定候选，再生成视觉计划；registry 仅补素材属性，不补候选。
+  visualPlan = buildVisualPlan({
+    graph: contentGraph,
+    sceneSpec,
+    creativeContext,
+    workflowId,
+  });
+  assignMotionOrchestration(visualPlan, {
+    styleProfile: visualPlan.style_profile || null,
+  });
+  visualDecisions = matchVisualBeatsToRenderers({ visualPlan });
+  renderDecisions = Array.from(visualDecisions.values());
+  persistableVisualPlan = {
+    ...visualPlan,
+    beats: visualPlan.beats.map(({ source_scene, ...beat }) => beat),
+  };
+  project = await projectStore.writeProjectJson(projectDir, current => {
+    const previousVersion = Number(current.visual_plan?.version) || 0;
+    const previousFingerprint = String(current.visual_plan?.input_fingerprint || '').trim();
+    if (previousVersion !== persistableVisualPlan.version || previousFingerprint !== persistableVisualPlan.input_fingerprint) {
+      invalidateFrameHtmlResumeState(current);
+    }
+    attachVisualRouting(current);
+    return current;
+  });
   // scene_html 分支只在 continuity_mode = scene_html 生效；此时 project.continuity_mode 尚未挂载
   // （attachContinuityMode 在建帧后才调用），用 creativeContext 判断等价条件。
   if ((creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html') {
@@ -853,16 +888,8 @@ async function generateHtmlVideo(options = {}) {
   } else {
     contentGraph = expandContentGraphToVisualBeats({ graph: contentGraph, visualPlan, visualDecisions });
   }
-  const expandedContentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
   project = await projectStore.writeProjectJson(projectDir, current => {
     current.content_graph = contentGraph;
-    current.generation_checkpoint = objectOrEmpty(current.generation_checkpoint);
-    current.generation_checkpoint.stages = objectOrEmpty(current.generation_checkpoint.stages);
-    current.generation_checkpoint.stages.content_graph = {
-      ...(current.generation_checkpoint.stages.content_graph || {}),
-      path: expandedContentGraphPath,
-      output_hash: sha256(JSON.stringify(contentGraph)),
-    };
     attachVisualRouting(current);
     return current;
   });

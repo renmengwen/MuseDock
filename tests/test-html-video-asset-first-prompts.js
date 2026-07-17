@@ -5,6 +5,7 @@ const {
 } = require('../server/services/creative-video/html-video/contentGraphAgent');
 const frameHtmlAgent = require('../server/services/creative-video/html-video/frameHtmlAgent');
 const { resolveAssetFirstMotionArgs } = require('../server/services/creative-video/html-video/motionOverlayPhase');
+const { buildVisualPlan } = require('../server/services/creative-video/html-video/visualPlanService');
 
 const sceneSpec = { title: 't', scenes: [{ id: 'scene_01', narration_text: '深夜骑手' }] };
 
@@ -85,6 +86,87 @@ async function run() {
   assert.ok(!framePrompt.includes('没有表达层的帧不合格'), '不得再判无表达层不合格');
   assert.ok(!framePrompt.includes('不要做纯图片轮播'), '不得保留要求混排框选/高亮的旧约束');
   assert.ok(/禁止.*(方框|focus-box)/.test(framePrompt), '必须禁止无坐标画框');
+
+  // C-02 Review：真实 Visual Plan 的 image_sequence 必须完整进入 Frame Prompt。
+  {
+    const assets = ['a', 'b', 'c'].map((id, index) => ({
+      id,
+      origin: index === 0 ? 'page_capture' : 'source_extract',
+      media_type: 'image',
+      requirement: index === 2 ? 'required' : 'optional',
+      evidence_class: 'direct_source',
+      status: 'ready',
+      path: `assets/${id}.png`,
+      frame_src: `../assets/${id}.png`,
+      image_analysis: { fit: index === 0 ? 'contain' : 'cover' },
+    }));
+    const graph = { nodes: [{ id: 'scene_01', label: '案例并列', asset_refs: assets.map((asset, index) => ({
+      asset_id: asset.id,
+      usage: index === 0 ? 'subject' : 'showcase',
+      reason: `第${index + 1}张案例`,
+    })) }], edges: [] };
+    const plan = buildVisualPlan({
+      graph,
+      sceneSpec: { scenes: [{ id: 'scene_01', kind: 'text', duration_sec: 6, narration_text: '三个案例并列展示。' }] },
+      creativeContext: { asset_context: { assets } },
+      workflowId: 'prompt-sequence',
+    });
+    const sequencePrompt = frameHtmlAgent.buildAssetFirstFramePrompt({
+      beat: plan.beats[0],
+      creativeContext: { asset_context: { assets } },
+    });
+    assert.match(sequencePrompt, /image_sequence/);
+    assert.match(sequencePrompt, /sequence_mode：rhythm_montage/);
+    let previousIndex = -1;
+    for (const [index, asset] of assets.entries()) {
+      const marker = `shot ${index + 1}：asset_id=${asset.id}`;
+      const currentIndex = sequencePrompt.indexOf(marker);
+      assert.ok(currentIndex > previousIndex, `${asset.id} 必须按 Shot 稳定顺序出现`);
+      previousIndex = currentIndex;
+      assert.match(sequencePrompt, new RegExp(`src=\\.\\.\\/assets\\/${asset.id}\\.png`));
+    }
+    assert.match(sequencePrompt, /role=subject/);
+    assert.match(sequencePrompt, /reason=第1张案例/);
+    assert.match(sequencePrompt, /requirement=required/);
+    assert.match(sequencePrompt, /fit=contain/);
+    assert.match(sequencePrompt, /不得换图、少图/);
+    assert.match(sequencePrompt, /不得把 Shot 当作 overlay/);
+    assert.match(sequencePrompt, /缺少 caption timing.*不得发明绝对时间/);
+    assert.doesNotMatch(sequencePrompt, /enter_sec|hold_sec|exit_sec/);
+    for (const [name, wrapperPrompt] of [
+      ['full', frameHtmlAgent.buildFrameHtmlPrompt({ node: graph.nodes[0], beat: plan.beats[0], creativeContext: { asset_context: { assets } }, sceneSpec: { scenes: [{ id: 'scene_01', narration_text: '案例并列' }] } })],
+      ['short', frameHtmlAgent.buildShortFrameHtmlPrompt({ node: graph.nodes[0], beat: plan.beats[0], creativeContext: { asset_context: { assets } }, sceneSpec: { scenes: [{ id: 'scene_01', narration_text: '案例并列' }] } })],
+      ['retry', frameHtmlAgent.buildRetryPrompt({ node: graph.nodes[0], beat: plan.beats[0], creativeContext: { asset_context: { assets } }, sceneSpec: { scenes: [{ id: 'scene_01', narration_text: '案例并列' }] } })],
+    ]) {
+      assert.match(wrapperPrompt, /sequence_mode：rhythm_montage/, `${name} wrapper 必须消费真实 sequence`);
+      assert.ok(wrapperPrompt.indexOf('asset_id=a') < wrapperPrompt.indexOf('asset_id=b'));
+      assert.ok(wrapperPrompt.indexOf('asset_id=b') < wrapperPrompt.indexOf('asset_id=c'));
+      assert.match(wrapperPrompt, /src=\.\.\/assets\/a\.png/);
+    }
+    const movedAssets = assets.map(asset => asset.id === 'a'
+      ? { ...asset, path: 'assets/a-new.png', frame_src: '../assets/a-new.png' }
+      : asset);
+    const movedPlan = buildVisualPlan({
+      graph,
+      sceneSpec: { scenes: [{ id: 'scene_01', kind: 'text', duration_sec: 6, narration_text: '三个案例并列展示。' }] },
+      creativeContext: { asset_context: { assets: movedAssets } },
+      workflowId: 'prompt-sequence',
+    });
+    const movedPrompt = frameHtmlAgent.buildAssetFirstFramePrompt({
+      beat: movedPlan.beats[0],
+      creativeContext: { asset_context: { assets: movedAssets } },
+    });
+    assert.match(movedPrompt, /src=\.\.\/assets\/a-new\.png/);
+    assert.doesNotMatch(movedPrompt, /src=\.\.\/assets\/a\.png/);
+    const tamperedBeat = JSON.parse(JSON.stringify(plan.beats[0]));
+    tamperedBeat.visual_base.shots[0].src = 'https://evil.example/a.png';
+    const verifiedPrompt = frameHtmlAgent.buildAssetFirstFramePrompt({
+      beat: tamperedBeat,
+      creativeContext: { asset_context: { assets } },
+    });
+    assert.match(verifiedPrompt, /src=\.\.\/assets\/a\.png/);
+    assert.doesNotMatch(verifiedPrompt, /evil\.example/);
+  }
 
   const shortPrompt = frameHtmlAgent.buildShortFrameHtmlPrompt({
     node: frameNode,

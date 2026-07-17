@@ -150,6 +150,12 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
     contentGraph: graph,
   });
   await writeFile(path.join(projectDir, 'content-graph.json'), `${JSON.stringify(graph, null, 2)}\n`);
+  if (Array.isArray(options.projectAssets)) {
+    project.assets = options.projectAssets;
+    for (const asset of options.projectAssets) {
+      if (asset.path) await writeFile(path.join(projectDir, asset.path), 'asset');
+    }
+  }
   if (!options.omitSceneSpecHash) {
     project.generation_checkpoint.scene_spec_hash = options.sceneSpecHash || computeSceneSpecCheckpointHash(sceneSpec());
   }
@@ -160,12 +166,17 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
   });
   // P1-2 语义：checkpoint 无指纹一律不复用——fixture 按生产展开路径（visualPlan 编排 + beat 展开）
   // 现算各 scene 的输入指纹，与 resume 时 frameHtmlPhase 现算值逐字节一致
-  const fingerprintBySceneId = (() => {
+  const { fingerprintBySceneId, persistedVisualPlan } = (() => {
     const spec = sceneSpec();
-    const visualPlan = visualPlanService.buildVisualPlan({ sceneSpec: spec, workflowId });
+    const visualPlan = visualPlanService.buildVisualPlan({
+      graph,
+      sceneSpec: spec,
+      creativeContext: options.assetContext || { input: { raw_text: '三帧恢复测试' } },
+      workflowId,
+    });
     visualPlanService.assignMotionOrchestration(visualPlan, { styleProfile: visualPlan.style_profile || null });
     const visualDecisions = matchVisualBeatsToRenderers({ visualPlan });
-    const expanded = workflow.expandContentGraphToVisualBeats({ graph: contentGraph(), visualPlan, visualDecisions });
+    const expanded = workflow.expandContentGraphToVisualBeats({ graph, visualPlan, visualDecisions });
     const renderTarget = workflow.applyRenderTargetDefaults(workflow.resolveRenderTarget({ generate_audio: false }, spec));
     const map = new Map();
     for (const node of (expanded.nodes || [])) {
@@ -178,8 +189,13 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
         }));
       }
     }
-    return map;
+    return {
+      fingerprintBySceneId: map,
+      persistedVisualPlan: { ...visualPlan, beats: visualPlan.beats.map(({ source_scene, ...beat }) => beat) },
+    };
   })();
+  project.visual_plan = persistedVisualPlan;
+  if (options.legacyVisualPlan) project.visual_plan = { ...persistedVisualPlan, version: 1, input_fingerprint: '' };
   markCheckpointFrame(project, 'frame_html', 'scene_01', {
     status: 'done',
     html_path: 'frames/01-scene_01.html',
@@ -544,6 +560,97 @@ async function main() {
         String(project.generation_checkpoint.stages.frame_html.frames.scene_03.input_fingerprint || '').length === 64,
         '新生成帧的 checkpoint 应持久化 input_fingerprint',
       );
+    }
+
+    // Review：resume 不传 creativeContext 时，从 project.assets 恢复全部正式字段并保持 Frame 指纹可复用。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-registry-resume-'));
+      const workflowId = '202606260000000001_registry_resume';
+      const runId = 'run_registry_resume';
+      const graph = contentGraph('正式素材恢复');
+      graph.nodes[0].asset_refs = [{ asset_id: 'capture_01', usage: 'showcase', reason: '页面截图' }];
+      const asset = {
+        id: 'capture_01',
+        media_type: 'image',
+        origin: 'page_capture',
+        origin_detail: 'github_repository_page',
+        provider: 'chromium',
+        requirement: 'required',
+        evidence_class: 'direct_source',
+        status: 'ready',
+        path: 'assets/capture-01.png',
+        frame_src: '../assets/capture-01.png',
+        fit: 'contain',
+        image_analysis: { fit: 'contain', summary: '仓库页面截图', contains_text: true },
+      };
+      await setupProject(rootDir, workflowId, runId, {
+        contentGraph: graph,
+        projectAssets: [asset],
+        assetContext: { asset_context: { assets: [asset] } },
+      });
+      const calls = [];
+      frameHtmlAgent.generateFrameHtml = async args => {
+        calls.push(args.node.id);
+        return { success: true, html: validHtml(args.node.id, args.node.id) };
+      };
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        creativeContextOverride: {
+          asset_context: { assets: [{
+            id: 'capture_01',
+            media_type: 'image',
+            origin: 'page_capture',
+            origin_detail: 'caller_stale',
+            provider: 'caller',
+            requirement: 'optional',
+            evidence_class: 'contextual',
+            status: 'ready',
+            path: 'assets/old.png',
+            frame_src: '../assets/old.png',
+            fit: 'cover',
+            image_analysis: { fit: 'cover', summary: '旧调用方分析' },
+          }] },
+        },
+        aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
+      });
+      assert.equal(result.success, true);
+      assert.deepEqual(calls, ['scene_03'], '正式 registry 水合后已完成 Frame 必须保持复用');
+      const shot = result.project.visual_plan.beats.find(beat => beat.scene_id === 'scene_01').visual_base.shots[0];
+      assert.equal(shot.requirement, 'required');
+      assert.equal(shot.fit, 'contain');
+      assert.equal(shot.analysis.summary, '仓库页面截图');
+      assert.equal(shot.src, '../assets/capture-01.png');
+      const persisted = result.project.assets.find(item => item.id === 'capture_01');
+      assert.equal(persisted.requirement, 'required');
+      assert.equal(persisted.provider, 'chromium');
+      assert.equal(persisted.origin_detail, 'github_repository_page');
+      assert.equal(persisted.evidence_class, 'direct_source');
+      assert.equal(persisted.path, 'assets/capture-01.png');
+    }
+
+    // C-02：旧 visual plan 无法证明 v2 fingerprint 时，所有 Frame HTML fail-closed 重生成。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-plan-version-resume-'));
+      const workflowId = '202606260000000001_plan_version';
+      const runId = 'run_plan_version';
+      await setupProject(rootDir, workflowId, runId, { legacyVisualPlan: true });
+      const calls = [];
+      frameHtmlAgent.generateFrameHtml = async args => {
+        calls.push(args.node.id);
+        return { success: true, html: validHtml(args.node.id, args.node.id) };
+      };
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
+      });
+      assert.equal(result.success, true);
+      assert.deepEqual(calls, ['scene_01', 'scene_02', 'scene_03']);
+      assert.equal(result.project.visual_plan.version, 2);
+      assert.equal(result.project.visual_plan.input_fingerprint.length, 64);
     }
 
     {

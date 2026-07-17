@@ -158,12 +158,32 @@ const MOTION_PRIMITIVE_GUIDE = `可用 motion primitive（只能作为局部 ove
 - checklist：三条总结清单。
 - stat_compare：两个数据/对象对比。`;
 
-function buildAssetFirstFramePrompt({ beat = {}, primitiveSnippet = '', diagramSkeleton = '', previousBeatSummary = '', hasCaptions = true, sceneBeatsBrief = '' } = {}) {
+function buildAssetFirstFramePrompt({ beat = {}, creativeContext = {}, primitiveSnippet = '', diagramSkeleton = '', previousBeatSummary = '', hasCaptions = true, sceneBeatsBrief = '' } = {}) {
   const base = beat.visual_base || {};
   const overlay = beat.motion_overlay || {};
   const continuity = beat.continuity || {};
   const lines = [];
-  if (base.type === 'diagram') {
+  if (base.type === 'image_sequence') {
+    const assets = new Map((Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [])
+      .map(asset => [String(asset?.id || asset?.asset_id || '').trim(), asset]));
+    lines.push(`本 beat 使用 image_sequence，sequence_mode：${base.sequence_mode || 'fullscreen_relay'}。`);
+    (Array.isArray(base.shots) ? base.shots : []).forEach((shot, index) => {
+      const asset = assets.get(String(shot?.asset_id || '').trim()) || {};
+      const registrySrc = asset.frame_src || (asset.path ? `../${String(asset.path).replace(/\\/g, '/')}` : '');
+      const src = registrySrc && shot.src === registrySrc ? shot.src : registrySrc;
+      lines.push([
+        `shot ${index + 1}：asset_id=${shot.asset_id || ''}`,
+        `src=${src}`,
+        `role=${shot.role || ''}`,
+        `reason=${shot.reason || ''}`,
+        `requirement=${shot.requirement || ''}`,
+        `fit=${shot.fit || 'cover'}`,
+      ].join('；'));
+    });
+    lines.push('必须按上述稳定顺序使用全部 Shot；不得换图、少图、补图或调整 asset_id 顺序。');
+    lines.push('每个 Shot 都是 main_visual 的连续候选，不得把 Shot 当作 overlay、角落配图或装饰层。');
+    lines.push('当前阶段只落实素材顺序与布局；缺少 caption timing 时不得发明绝对时间，也不得自行增加 Shot 的 enter/hold/exit 时间字段。');
+  } else if (base.type === 'diagram') {
     lines.push('本 beat 无图片素材：必须生成统一风格的结构化 diagram 作为主视觉（main_visual），禁止输出标题页式整屏大字。');
     if (diagramSkeleton) {
       lines.push('base 层必须以以下 diagram 骨架为起点（保留 data-mp-diagram-base 结构与 --mp-* 主题变量，在 stage 区域内绘制结构图）：');
@@ -189,7 +209,7 @@ function buildAssetFirstFramePrompt({ beat = {}, primitiveSnippet = '', diagramS
       lines.push('overlay 必须基于以下片段落地（保留 data-mp-overlay 根节点与 data-mp-slot 槽位，可按主题 token 调整 --mp-accent/--mp-surface/--mp-foreground）：');
       lines.push(primitiveSnippet);
     }
-  } else if (base.type === 'diagram' || base.asset_id) {
+  } else if (base.type === 'diagram' || base.type === 'image_sequence' || base.asset_id) {
     lines.push('本 beat 不使用额外 motion primitive：不得自创方框、箭头、callout、卡片或局部放大框。');
   }
   if (hasCaptions === false) {
@@ -269,7 +289,7 @@ function buildFrameHtmlPrompt({
     '- 如果本帧提供“本帧推荐来源图片”或“本帧推荐生成图片”，必须在 HTML 中引用该图片的 src；没有推荐图片时，才从 Source context summary 的可用图片素材中选择。',
     ...assetFirstFrameRequirements(),
     ...((beat || sceneBeatsBrief)
-      ? [buildAssetFirstFramePrompt({ beat: beat || {}, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
+      ? [buildAssetFirstFramePrompt({ beat: beat || {}, creativeContext, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
       : []),
     '- 如果 Source context summary 提供“可用图片素材”，本帧内容适合引用时，可以使用其中的 HTML引用路径，例如 <img src="../assets/source-image-01.jpg">；禁止引用外部图片 URL。',
     '- 文章截图或含文字图片必须完整展示，使用 object-fit: contain；不要裁切成不可读背景。图库/search 图片只适合做弱背景或氛围层，必须加遮罩保证文字可读。',
@@ -350,7 +370,7 @@ function buildShortFrameHtmlPrompt({
     '画面文字用提炼后的关键词、要点短语或数据点，不要照抄 narration/captions 原句；旁白全文由系统注入底部字幕层。',
     ...assetFirstFrameRequirements(),
     ...((beat || sceneBeatsBrief)
-      ? [buildAssetFirstFramePrompt({ beat: beat || {}, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
+      ? [buildAssetFirstFramePrompt({ beat: beat || {}, creativeContext, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
       : []),
     assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并作为画面主体。` : '',
     `Target resolution：${resolution.width}x${resolution.height}`,
@@ -387,6 +407,7 @@ function buildRetryPrompt(args = {}) {
     ...((args.beat || args.sceneBeatsBrief)
       ? [buildAssetFirstFramePrompt({
         beat: args.beat || {},
+        creativeContext: args.creativeContext || {},
         primitiveSnippet: args.primitiveSnippet || '',
         diagramSkeleton: args.diagramSkeleton || '',
         previousBeatSummary: args.previousBeatSummary || '',

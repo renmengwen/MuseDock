@@ -1,5 +1,6 @@
 const assert = require('assert');
 const fs = require('fs/promises');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 
@@ -331,6 +332,7 @@ const stubAiImageModel = { isConfigured: async () => false };
                     label: scene.visual_text.headline,
                     durationSec: scene.duration_sec,
                     text: scene.narration_text,
+                    ...(scene.id === 'scene_data' ? { asset_refs: [{ asset_id: 'gen_scene_data', usage: 'subject', reason: '场景主视觉' }] } : {}),
                   })),
                   edges: workflowSceneSpec.scenes.slice(1).map((scene, index) => ({
                     from: workflowSceneSpec.scenes[index].id,
@@ -360,11 +362,19 @@ const stubAiImageModel = { isConfigured: async () => false };
     message: assetFirstResult.message,
     diagnostics: assetFirstResult.html_video_diagnostics,
   }, null, 2));
+  const canonicalGraph = JSON.parse(await fs.readFile(path.join(assetFirstResult.html_video_project_path, 'content-graph.json'), 'utf8'));
+  assert.notEqual(canonicalGraph.expanded_from_scene_graph, true, 'content-graph.json 必须保持 canonical graph');
+  assert.equal(assetFirstResult.project.content_graph.expanded_from_scene_graph, true, 'project.content_graph 可保存展开图');
+  assert.equal(
+    assetFirstResult.project.generation_checkpoint.stages.content_graph.output_hash,
+    crypto.createHash('sha256').update(JSON.stringify(canonicalGraph)).digest('hex'),
+    'content graph checkpoint hash 必须绑定 canonical graph',
+  );
   const assetFirstBeats = assetFirstResult.project.visual_plan.beats.filter(beat => beat.scene_id === 'scene_data');
   assert.ok(assetFirstBeats.length >= 1);
   assert.ok(
-    assetFirstBeats.every(beat => (beat.asset_refs || []).some(ref => ref.asset_id === 'gen_scene_data')),
-    `生成图应在路由前绑定进 scene_data 的 beat asset_refs：${JSON.stringify(assetFirstBeats, null, 2)}`,
+    assetFirstBeats.every(beat => (beat.asset_refs || []).some(ref => ref.asset_id === 'gen_scene_data') && beat.visual_base?.type === 'image_sequence'),
+    `Content Graph 选择的生成图应成为 image_sequence：${JSON.stringify(assetFirstBeats, null, 2)}`,
   );
   const assetFirstDecisions = assetFirstResult.project.render_decisions.filter(item => item.scene_id === 'scene_data');
   assert.ok(assetFirstDecisions.length >= 1);

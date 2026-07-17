@@ -340,8 +340,7 @@ function expandContentGraphToVisualBeats({ graph = {}, visualPlan = {}, visualDe
     if (!base) continue;
     const decision = visualDecisions instanceof Map ? visualDecisions.get(beat.id) : null;
     const metadata = objectOrEmpty(base.metadata);
-    // beat refs 为空数组时回落 base 节点素材引用，避免空数组吞掉 content graph/scene 上已绑定的素材
-    const beatAssetRefs = Array.isArray(beat.asset_refs) ? beat.asset_refs.filter(Boolean) : [];
+    // C-02：canonical Content Graph refs 是候选权威，routing/beat 不得覆盖。
     const baseAssetRefs = Array.isArray(base.asset_refs) ? base.asset_refs.filter(Boolean) : [];
     nodes.push({
       ...cloneJson(base),
@@ -361,7 +360,7 @@ function expandContentGraphToVisualBeats({ graph = {}, visualPlan = {}, visualDe
       },
       durationSec: beat.duration_sec,
       duration_sec: beat.duration_sec,
-      asset_refs: cloneJson(beatAssetRefs.length ? beatAssetRefs : baseAssetRefs),
+      asset_refs: cloneJson(baseAssetRefs),
       metadata: {
         ...metadata,
         scene_id: sceneId,
@@ -405,6 +404,13 @@ function expandContentGraphToSceneEntries(graph = {}, visualPlan = {}) {
   const nodes = [];
   for (const group of groupBeatsForSceneHtml(beats)) {
     const base = baseBySceneId.get(group.scene_id) || {};
+    const seenAssetIds = new Set();
+    const canonicalAssetRefs = (Array.isArray(base.asset_refs) ? base.asset_refs : []).filter(ref => {
+      const id = String(ref?.asset_id || '').trim();
+      if (!id || seenAssetIds.has(id)) return false;
+      seenAssetIds.add(id);
+      return true;
+    });
     nodes.push({
       ...cloneJson(base),
       id: `scene:${group.scene_id}`,
@@ -413,7 +419,7 @@ function expandContentGraphToSceneEntries(graph = {}, visualPlan = {}) {
       kind: base.kind || group.beats[0]?.kind || 'text',
       duration_sec: group.duration_sec,
       durationSec: group.duration_sec,
-      asset_refs: cloneJson(group.beats.flatMap(beat => (Array.isArray(beat.asset_refs) ? beat.asset_refs.filter(Boolean) : []))),
+      asset_refs: cloneJson(canonicalAssetRefs),
       metadata: {
         ...objectOrEmpty(base.metadata),
         scene_id: group.scene_id,

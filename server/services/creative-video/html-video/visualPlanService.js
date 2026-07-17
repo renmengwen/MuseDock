@@ -111,18 +111,149 @@ function splitScene(scene = {}, startOrder = 1, sceneIndex = 0) {
   }));
 }
 
-function buildVisualPlan({ sceneSpec = {}, workflowId = '' } = {}) {
+function stableJsonValue(value) {
+  if (Array.isArray(value)) return value.map(stableJsonValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.keys(value).sort().reduce((result, key) => {
+    result[key] = stableJsonValue(value[key]);
+    return result;
+  }, {});
+}
+
+function assetRegistry(creativeContext = {}) {
+  const assets = Array.isArray(creativeContext?.asset_context?.assets)
+    ? creativeContext.asset_context.assets
+    : [];
+  return new Map(assets.map(asset => [safeString(asset?.id || asset?.asset_id), asset]).filter(([id]) => id));
+}
+
+function nodeForScene(graph = {}, sceneId = '') {
+  return (Array.isArray(graph?.nodes) ? graph.nodes : []).find(node => (
+    safeString(node?.scene_id || node?.metadata?.scene_id || node?.id) === sceneId
+  ));
+}
+
+function sequenceMode({ scene = {}, node = {}, refs = [] } = {}) {
+  const text = [
+    scene.narration_text,
+    JSON.stringify(scene.visual_text || {}),
+    node.label,
+    node.text,
+    ...refs.map(ref => ref?.reason),
+  ].map(value => String(value || '')).join(' ').toLowerCase();
+  const montageDenied = /(?:不是|并非|不要|不使用|无需)\s*(?:做|用|采用)?\s*蒙太奇/i.test(text)
+    || /\b(?:do\s+not|don't)\s+use\s+(?:a\s+)?montage\b/i.test(text)
+    || /\bnot\s+intended\s+as\s+(?:a\s+)?montage\b/i.test(text)
+    || /\bnot\s+(?:a\s+)?montage\b/i.test(text);
+  if (refs.length >= 2 && (safeString(scene.kind) === 'comparison' || /(?:对比|比较|差异|versus|\bvs\.?\b)/i.test(text))) {
+    return 'semantic_compare';
+  }
+  if (refs.length >= 2 && /(?:概览|全貌|整体|overview)/i.test(text) && /(?:细节|局部|特写|detail)/i.test(text)) {
+    return 'overview_detail';
+  }
+  if (!montageDenied && refs.length >= 2 && /(?:并列|案例|合集|蒙太奇|montage)/i.test(text)) {
+    return 'rhythm_montage';
+  }
+  return 'fullscreen_relay';
+}
+
+function selectedRefs(refs = [], registry = new Map(), mode = 'fullscreen_relay') {
+  const unique = [];
+  const seen = new Set();
+  for (const ref of refs) {
+    const assetId = safeString(ref?.asset_id || ref?.id);
+    if (!assetId || seen.has(assetId)) continue;
+    seen.add(assetId);
+    unique.push({ ...ref, asset_id: assetId });
+  }
+  const limit = mode === 'rhythm_montage' ? 4 : 3;
+  if (unique.length <= limit) return unique;
+  const required = unique.filter(ref => safeString(registry.get(ref.asset_id)?.requirement || ref.requirement) === 'required');
+  const selected = new Set(required.slice(0, 4).map(ref => ref.asset_id));
+  for (const ref of unique) {
+    if (selected.size >= Math.max(limit, Math.min(4, required.length))) break;
+    selected.add(ref.asset_id);
+  }
+  return unique.filter(ref => selected.has(ref.asset_id)).slice(0, 4);
+}
+
+function visualBaseForBeat({ beat, scene, node, registry }) {
+  const graphRefs = Array.isArray(node?.asset_refs) ? node.asset_refs : [];
+  const intendedMode = sequenceMode({ scene, node, refs: graphRefs });
+  const compareCandidates = selectedRefs(graphRefs, registry, 'rhythm_montage');
+  const compareRequiredConflict = intendedMode === 'semantic_compare'
+    && compareCandidates.slice(2).some(ref => safeString(registry.get(ref.asset_id)?.requirement || ref.requirement) === 'required');
+  const mode = compareRequiredConflict ? 'fullscreen_relay' : intendedMode;
+  const refs = intendedMode === 'semantic_compare' && !compareRequiredConflict
+    ? compareCandidates.slice(0, 2)
+    : selectedRefs(graphRefs, registry, mode);
+  if (!refs.length) {
+    return { type: 'diagram', asset_id: null, fit: 'contain', role: 'main_visual', continuity_group: beat.scene_id };
+  }
+  return {
+    type: 'image_sequence',
+    sequence_mode: mode,
+    ...(compareRequiredConflict ? { mode_reason: 'compare_conflict_required_candidates' } : {}),
+    continuity_group: beat.scene_id,
+    role: 'main_visual',
+    shots: refs.map((ref, index) => {
+      const asset = registry.get(ref.asset_id) || {};
+      const analysis = asset.image_analysis && typeof asset.image_analysis === 'object' ? asset.image_analysis : {};
+      const src = safeString(asset.frame_src) || (safeString(asset.path) ? `../${safeString(asset.path).replace(/\\/g, '/')}` : '');
+      return {
+        id: `${beat.scene_id}_shot_${String(index + 1).padStart(2, '0')}`,
+        asset_id: ref.asset_id,
+        role: safeString(ref.usage) || 'showcase',
+        reason: safeString(ref.reason),
+        requirement: safeString(asset.requirement || ref.requirement) || 'optional',
+        fit: analysis.contains_text === true ? 'contain' : (safeString(analysis.fit || asset.fit || ref.fit) || 'cover'),
+        src,
+        ...(Object.keys(analysis).length ? { analysis: stableJsonValue(analysis) } : {}),
+      };
+    }),
+  };
+}
+
+function buildVisualPlan({ graph = {}, sceneSpec = {}, creativeContext = {}, workflowId = '' } = {}) {
   const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
+  const registry = assetRegistry(creativeContext);
+  const referencedAssetIds = new Set((Array.isArray(graph?.nodes) ? graph.nodes : [])
+    .flatMap(node => (Array.isArray(node?.asset_refs) ? node.asset_refs : []))
+    .map(ref => safeString(ref?.asset_id || ref?.id))
+    .filter(Boolean));
   const beats = [];
   scenes.forEach((scene, sceneIndex) => {
     const next = splitScene(scene, beats.length + 1, sceneIndex);
+    const node = nodeForScene(graph, safeString(scene.id || scene.scene_id) || `scene_${String(sceneIndex + 1).padStart(2, '0')}`);
+    next.forEach(beat => {
+      beat.asset_refs = Array.isArray(node?.asset_refs) ? node.asset_refs.map(ref => ({ ...ref })) : [];
+      beat.visual_base = visualBaseForBeat({ beat, scene, node, registry });
+    });
     beats.push(...next);
   });
-  return {
-    version: 1,
+  const plan = {
+    version: 2,
     style_profile: chooseStyleProfile({ sceneSpec, workflowId }),
     beats,
   };
+  plan.input_fingerprint = crypto.createHash('sha256').update(JSON.stringify(stableJsonValue({
+    version: plan.version,
+    scene_spec: sceneSpec,
+    graph_refs: (Array.isArray(graph?.nodes) ? graph.nodes : []).map(node => ({
+      scene_id: safeString(node?.scene_id || node?.metadata?.scene_id || node?.id),
+      asset_refs: Array.isArray(node?.asset_refs) ? node.asset_refs : [],
+    })),
+    registered_assets: Array.from(registry.values()).filter(asset => referencedAssetIds.has(safeString(asset.id || asset.asset_id))).sort((a, b) => safeString(a.id || a.asset_id).localeCompare(safeString(b.id || b.asset_id))).map(asset => ({
+      id: asset.id || asset.asset_id,
+      requirement: asset.requirement,
+      fit: asset.fit,
+      image_analysis: asset.image_analysis,
+      path: asset.path,
+      frame_src: asset.frame_src,
+    })),
+    workflow_id: workflowId,
+  }))).digest('hex');
+  return plan;
 }
 
 function generatedAssetIdForBeat(beat = {}) {
@@ -174,10 +305,12 @@ function assignMotionOrchestration(visualPlan = {}, { styleProfile = null } = {}
   for (const beat of beats) {
     const index = (sceneIndex.get(beat.scene_id) || 0) + 1;
     sceneIndex.set(beat.scene_id, index);
-    const assetId = generatedAssetIdForBeat(beat);
-    beat.visual_base = assetId
-      ? { type: 'generated_image', asset_id: assetId, fit: 'contain', role: 'main_visual', continuity_group: beat.scene_id }
-      : { type: 'diagram', asset_id: null, fit: 'contain', role: 'main_visual', continuity_group: beat.scene_id };
+    if (!beat.visual_base) {
+      const assetId = generatedAssetIdForBeat(beat);
+      beat.visual_base = assetId
+        ? { type: 'generated_image', asset_id: assetId, fit: 'contain', role: 'main_visual', continuity_group: beat.scene_id }
+        : { type: 'diagram', asset_id: null, fit: 'contain', role: 'main_visual', continuity_group: beat.scene_id };
+    }
     const pick = selectMotionPrimitive({ ...beat, base_type: beat.visual_base.type === 'diagram' ? 'diagram' : 'image' });
     beat.motion_overlay = pick
       ? {

@@ -1,6 +1,7 @@
 const assert = require('assert');
 const { buildVisualPlan } = require('../server/services/creative-video/html-video/visualPlanService');
 const { expandContentGraphToVisualBeats } = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
+const { computeFrameInputFingerprint } = require('../server/services/creative-video/html-video/frameHtmlPhaseSupport');
 
 const sceneSpec = {
   title: 'UI/UE/UX',
@@ -25,7 +26,7 @@ const sceneSpec = {
 
 const plan = buildVisualPlan({ sceneSpec, workflowId: '20260709000000000000' });
 
-assert.equal(plan.version, 1);
+assert.equal(plan.version, 2);
 assert.ok(plan.style_profile.id);
 assert.equal(plan.beats.filter(beat => beat.scene_id === 'scene_01').length, 3);
 assert.equal(plan.beats.filter(beat => beat.scene_id === 'scene_02').length, 1);
@@ -63,7 +64,7 @@ assert.equal(expandedGraph.edges.length, 2);
 // 边界：空输入不抛错，返回空 beats
 const emptyPlan = buildVisualPlan({});
 assert.deepEqual(emptyPlan.beats, []);
-assert.equal(emptyPlan.version, 1);
+assert.equal(emptyPlan.version, 2);
 
 // 边界：无 id 场景生成的 beat id 全局唯一且非空
 const noIdPlan = buildVisualPlan({
@@ -87,7 +88,7 @@ const noDurationPlan = buildVisualPlan({
 assert.equal(noDurationPlan.beats.length, 1);
 assert.equal(noDurationPlan.beats[0].duration_sec, 6);
 
-// beat.asset_refs 为空数组时不应吞掉 base 节点已有的素材引用；非空时用 beat refs 覆盖
+// Graph refs 是候选权威；routing beat refs 即使冲突也不能覆盖。
 {
   const baseGraph = {
     nodes: [{
@@ -119,11 +120,127 @@ assert.equal(noDurationPlan.beats[0].duration_sec, 6);
     },
     visualDecisions: null,
   });
-  assert.deepEqual(
-    overrideRefsGraph.nodes[0].asset_refs.map(ref => ref.asset_id),
-    ['gen_other'],
-    'beat.asset_refs 非空时应覆盖 base 节点的素材引用',
-  );
+  assert.deepEqual(overrideRefsGraph.nodes[0].asset_refs.map(ref => ref.asset_id), ['gen_scene_01']);
+}
+
+// C-02：Content Graph 候选决定稳定的 Image Sequence；不从 registry 补图。
+{
+  const graph = {
+    nodes: [
+      { id: 'single', asset_refs: [{ asset_id: 'a', usage: 'subject', reason: '主图' }] },
+      { id: 'none', asset_refs: [] },
+      { id: 'ordinary', asset_refs: ['a', 'b', 'c', 'd'].map(asset_id => ({ asset_id, usage: 'showcase', reason: '普通素材' })) },
+      { id: 'required', asset_refs: ['a', 'b', 'c', 'd'].map(asset_id => ({ asset_id, usage: 'showcase', reason: '必用素材' })) },
+      { id: 'compare', asset_refs: ['a', 'b'].map(asset_id => ({ asset_id, usage: 'showcase', reason: '两版对比' })) },
+      { id: 'two_plain', asset_refs: ['a', 'b'].map(asset_id => ({ asset_id, usage: 'showcase', reason: '普通展示' })) },
+      { id: 'overview', asset_refs: [{ asset_id: 'a', usage: 'showcase', reason: '整体概览' }, { asset_id: 'b', usage: 'showcase', reason: '局部细节' }] },
+      { id: 'montage', asset_refs: ['a', 'b', 'c', 'd'].map(asset_id => ({ asset_id, usage: 'showcase', reason: '案例并列 montage' })) },
+    ],
+    edges: [],
+  };
+  const assets = ['a', 'b', 'c', 'd', 'registry_only'].map(id => ({
+    id,
+    requirement: id === 'a' || id === 'b' || id === 'c' || id === 'd' ? 'required' : 'optional',
+    image_analysis: { fit: id === 'a' ? 'contain' : 'cover', summary: `${id}分析` },
+  }));
+  // ordinary 的素材不是 required，用于验证普通默认最多 3。
+  const ordinaryAssets = assets.map(asset => ({ ...asset, requirement: 'optional' }));
+  const scenes = graph.nodes.map(node => ({
+    id: node.id,
+    kind: node.id === 'compare' ? 'comparison' : 'text',
+    duration_sec: 6,
+    narration_text: node.id === 'overview' ? '先看整体概览，再看局部细节。' : node.id === 'montage' ? '四个案例并列展示。' : '普通说明。',
+  }));
+  const ordinaryPlan = buildVisualPlan({ graph, sceneSpec: { scenes }, creativeContext: { asset_context: { assets: ordinaryAssets } }, workflowId: 'wf-c02' });
+  const byScene = new Map(ordinaryPlan.beats.map(beat => [beat.scene_id, beat]));
+  assert.equal(byScene.get('single').visual_base.type, 'image_sequence');
+  assert.equal(byScene.get('single').visual_base.shots[0].id, 'single_shot_01');
+  assert.equal(byScene.get('none').visual_base.type, 'diagram');
+  assert.equal(byScene.get('ordinary').visual_base.shots.length, 3);
+  assert.equal(byScene.get('compare').visual_base.sequence_mode, 'semantic_compare');
+  assert.equal(byScene.get('two_plain').visual_base.sequence_mode, 'fullscreen_relay');
+  assert.equal(byScene.get('overview').visual_base.sequence_mode, 'overview_detail');
+  assert.equal(byScene.get('montage').visual_base.sequence_mode, 'rhythm_montage');
+  assert.equal(byScene.get('montage').visual_base.shots.length, 4);
+  assert.ok(!JSON.stringify(ordinaryPlan).includes('registry_only'));
+  assert.ok(!('caption_ids' in byScene.get('single').visual_base.shots[0]));
+  assert.ok(!('visible_duration_sec' in byScene.get('single').visual_base.shots[0]));
+
+  const requiredPlan = buildVisualPlan({ graph, sceneSpec: { scenes }, creativeContext: { asset_context: { assets } }, workflowId: 'wf-c02' });
+  assert.equal(requiredPlan.beats.find(beat => beat.scene_id === 'required').visual_base.shots.length, 4);
+  assert.equal(requiredPlan.input_fingerprint.length, 64);
+  assert.deepEqual(requiredPlan, buildVisualPlan({ graph, sceneSpec: { scenes }, creativeContext: { asset_context: { assets } }, workflowId: 'wf-c02' }));
+}
+
+// Review：比较语义先选 2；required 冲突时不得静默丢图，明确降级并保留 required。
+{
+  const sceneSpec = { scenes: [{ id: 'compare', kind: 'comparison', duration_sec: 6, narration_text: '明确比较两个方案。' }] };
+  const optionalGraph = { nodes: [{ id: 'compare', asset_refs: ['a', 'b', 'c'].map(asset_id => ({ asset_id, usage: 'showcase', reason: '比较候选' })) }], edges: [] };
+  const optionalAssets = ['a', 'b', 'c'].map(id => ({ id, requirement: 'optional' }));
+  const comparePlan = buildVisualPlan({ graph: optionalGraph, sceneSpec, creativeContext: { asset_context: { assets: optionalAssets } }, workflowId: 'compare' });
+  assert.equal(comparePlan.beats[0].visual_base.sequence_mode, 'semantic_compare');
+  assert.deepEqual(comparePlan.beats[0].visual_base.shots.map(shot => shot.asset_id), ['a', 'b']);
+
+  const conflictAssets = optionalAssets.map(asset => ({ ...asset, requirement: asset.id === 'c' ? 'required' : 'optional' }));
+  const conflictPlan = buildVisualPlan({ graph: optionalGraph, sceneSpec, creativeContext: { asset_context: { assets: conflictAssets } }, workflowId: 'compare' });
+  assert.equal(conflictPlan.beats[0].visual_base.sequence_mode, 'fullscreen_relay');
+  assert.equal(conflictPlan.beats[0].visual_base.mode_reason, 'compare_conflict_required_candidates');
+  assert.deepEqual(conflictPlan.beats[0].visual_base.shots.map(shot => shot.asset_id), ['a', 'b', 'c']);
+}
+
+// Review：只扫描明确字段、识别否定语义；registry 顺序不影响 plan 与 fingerprint。
+{
+  const graph = { nodes: [{ id: 'plain', label: '普通展示', metadata: { unsafe_hint: 'montage overview detail comparison' }, asset_refs: [
+    { asset_id: 'a', usage: 'showcase', reason: '不是蒙太奇' },
+    { asset_id: 'b', usage: 'showcase', reason: '普通素材' },
+  ] }], edges: [] };
+  const sceneSpec = { scenes: [{ id: 'plain', kind: 'text', duration_sec: 6, narration_text: 'not a montage，只看整体概览。' }] };
+  const a = { id: 'a', requirement: 'optional', image_analysis: { fit: 'contain' } };
+  const b = { id: 'b', requirement: 'optional', image_analysis: { fit: 'cover' } };
+  const first = buildVisualPlan({ graph, sceneSpec, creativeContext: { asset_context: { assets: [a, b] } }, workflowId: 'stable' });
+  const second = buildVisualPlan({ graph, sceneSpec, creativeContext: { asset_context: { assets: [b, a] } }, workflowId: 'stable' });
+  assert.equal(first.beats[0].visual_base.sequence_mode, 'fullscreen_relay');
+  assert.deepEqual(first, second);
+}
+
+// Review：否定是高优先级信号，即使句中仍有“案例/并列”也不得触发 montage。
+{
+  const graph = { nodes: [{ id: 'negative', asset_refs: [{ asset_id: 'a', reason: '案例一' }, { asset_id: 'b', reason: '案例二' }] }], edges: [] };
+  for (const narration_text of [
+    '不是蒙太奇，而是两个案例普通展示。',
+    '不要蒙太奇，两个案例依次展示。',
+    'do not use montage; plain relay',
+    'not intended as a montage; two cases side by side',
+  ]) {
+    const result = buildVisualPlan({ graph, sceneSpec: { scenes: [{ id: 'negative', duration_sec: 6, narration_text }] }, workflowId: 'negative' });
+    assert.equal(result.beats[0].visual_base.sequence_mode, 'fullscreen_relay', narration_text);
+  }
+  const positive = buildVisualPlan({
+    graph,
+    sceneSpec: { scenes: [{ id: 'negative', duration_sec: 6, narration_text: '多个案例以蒙太奇形式并列快速展示。' }] },
+    workflowId: 'positive',
+  });
+  assert.equal(positive.beats[0].visual_base.sequence_mode, 'rhythm_montage');
+}
+
+// Review：Shot src 与正式 registry 路径绑定，并进入 plan/frame fingerprint；无关字段不影响。
+{
+  const graph = { nodes: [{ id: 'path', asset_refs: [{ asset_id: 'a', usage: 'subject', reason: '主图' }] }], edges: [] };
+  const sceneSpec = { scenes: [{ id: 'path', duration_sec: 6, narration_text: '展示主图。' }] };
+  const build = asset => buildVisualPlan({ graph, sceneSpec, creativeContext: { asset_context: { assets: [asset] } }, workflowId: 'path' });
+  const oldPlan = build({ id: 'a', requirement: 'required', path: 'assets/old.png', frame_src: '../assets/old.png', image_analysis: { fit: 'contain' } });
+  const newPlan = build({ id: 'a', requirement: 'required', path: 'assets/new.png', frame_src: '../assets/new.png', image_analysis: { fit: 'contain' } });
+  const unrelatedPlan = build({ id: 'a', requirement: 'required', path: 'assets/old.png', frame_src: '../assets/old.png', image_analysis: { fit: 'contain' }, created_at: '2099-01-01', bytes: 999 });
+  assert.equal(oldPlan.beats[0].visual_base.shots[0].src, '../assets/old.png');
+  assert.equal(newPlan.beats[0].visual_base.shots[0].src, '../assets/new.png');
+  assert.notEqual(oldPlan.input_fingerprint, newPlan.input_fingerprint);
+  assert.equal(oldPlan.input_fingerprint, unrelatedPlan.input_fingerprint);
+  const frameFingerprint = plan => computeFrameInputFingerprint({
+    node: { id: 'path', asset_refs: graph.nodes[0].asset_refs, metadata: { visual_beat: plan.beats[0] } },
+    continuityMode: 'beat_mp4',
+    target: { width: 1080, height: 1920 },
+  });
+  assert.notEqual(frameFingerprint(oldPlan), frameFingerprint(newPlan));
 }
 
 // ===== 模块2：asset_first motion 编排字段 =====
@@ -141,6 +258,14 @@ const { assignMotionOrchestration } = require('../server/services/creative-video
   assert.ok(plan.beats[1].motion_overlay && plan.beats[1].motion_overlay.preset === 'three_step_flow', 'steps beat 仍有 overlay');
   assert.ok(plan.beats[0].visual_base && plan.beats[0].visual_base.type === 'generated_image');
   console.log('P0-1 assignMotionOrchestration null tests passed');
+}
+
+// assignMotionOrchestration 保留已规划 sequence，并把它按 image 选择 overlay。
+{
+  const visualBase = { type: 'image_sequence', sequence_mode: 'fullscreen_relay', continuity_group: 's', role: 'main_visual', shots: [{ id: 's_shot_01', asset_id: 'a' }] };
+  const plan = { beats: [{ id: 's', scene_id: 's', kind: 'text', visual_base: visualBase }] };
+  assignMotionOrchestration(plan);
+  assert.deepEqual(plan.beats[0].visual_base, visualBase);
 }
 
 // P0-1 补充：结构类型 beat（steps）仍写入 theme_tokens / continuity / visual_base
