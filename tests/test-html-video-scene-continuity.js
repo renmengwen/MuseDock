@@ -344,7 +344,7 @@ const { buildSceneTimelineScript, groupBeatsForSceneHtml } = require('../server/
   const rafs = [];
   const timers = [];
   const win = {};
-  const doc = { body: { setAttribute: (key, value) => { attrs[key] = value; } } };
+  const doc = { body: { setAttribute: (key, value) => { attrs[key] = value; } }, querySelectorAll: () => [] };
   new Function('window', 'document', 'requestAnimationFrame', 'setTimeout', code)(
     win, doc, cb => rafs.push(cb), (cb, ms) => timers.push({ cb, ms }),
   );
@@ -354,7 +354,7 @@ const { buildSceneTimelineScript, groupBeatsForSceneHtml } = require('../server/
   assert.strictEqual(rafs.length, 0, '页面加载不得自行 rAF 起钟');
   assert.strictEqual(typeof win.__mpStartBeatClock, 'function');
   // 兜底自启：存在延时定时器（非 adapter 环境预览）
-  assert.ok(timers.some(t => t.ms >= 1000), '必须有兜底自启定时器');
+  assert.ok(timers.some(t => t.ms === 250), '本地预览必须与 composition 使用同一 250ms 自动播放点');
   // 显式启动后：时钟以启动时刻为 origin 推进
   win.__mpStartBeatClock();
   assert.ok(rafs.length >= 1, '启动后必须开始 rAF 推进');
@@ -376,7 +376,7 @@ const { buildSceneTimelineScript, groupBeatsForSceneHtml } = require('../server/
   const rafs2 = [];
   const timers2 = [];
   const win2 = { __mpAdapterControlled: true };
-  const doc2 = { body: { setAttribute: (key, value) => { attrs2[key] = value; } } };
+  const doc2 = { body: { setAttribute: (key, value) => { attrs2[key] = value; } }, querySelectorAll: () => [] };
   new Function('window', 'document', 'requestAnimationFrame', 'setTimeout', code)(
     win2, doc2, cb => rafs2.push(cb), (cb, ms) => timers2.push({ cb, ms }),
   );

@@ -327,23 +327,21 @@ async function render(input = {}, ctx = {}, deps = {}) {
     }
     throwIfPolicyViolated(collector);
 
-    // 对应 html-video 源码段：调用 window.__hvPlayAll()。
+    // 正式录制起点：animation、解冻和 scene-local 时钟必须在同一个 JS task 启动，
+    // 避免多个 evaluate 往返让 Caption/Beat/Shot 产生不同时间原点。
     await page.evaluate(() => {
+      window.__hvPlayed = true;
       if (typeof window.__hvPlayAll === 'function') {
-        window.__hvPlayed = true;
         window.__hvPlayAll();
-        return true;
       }
-      return false;
-    }).catch(() => false);
-
-    // 对应 html-video 源码段：调用 window.__hvUnfreeze()。
-    // 同时显式启动 scene_html beat 时钟（__mpStartBeatClock）：此处紧邻 leadInMs 采样点，
-    // 即成片经 ffmpeg 裁剪后的 t=0，保证首 beat 不被预加载耗时吃掉（P1-3）。
-    await page.evaluate(() => {
       if (typeof window.__hvUnfreeze === 'function') window.__hvUnfreeze();
-      if (typeof window.__mpStartBeatClock === 'function') window.__mpStartBeatClock();
-    }).catch(() => {});
+      if (window.__hvPlaybackClock && typeof window.__hvPlaybackClock.play === 'function') {
+        window.__hvPlaybackClock.play();
+      } else if (typeof window.__mpStartBeatClock === 'function') {
+        window.__mpStartBeatClock();
+      }
+      return true;
+    }).catch(() => false);
 
     // 对应 html-video 源码段：记录 leadInMs，后续由 ffmpeg -ss 裁剪。
     leadInMs = now() - tWebmStart;

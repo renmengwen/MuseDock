@@ -407,7 +407,7 @@ function fullSceneCaption(sceneId, text, duration) {
     // 反向（blocking issue 仍记 visual_qa_warning）原由死模式用例覆盖，随死模式下线，待 per_scene 用例补齐。
   }
 
-  // ===== 回归：preferred / optional / legacy 未引用不阻断完整生成流程 =====
+  // ===== C-04：preferred / optional / legacy 被计划选中后由系统确定性注入，且不阻断完整生成流程 =====
   {
     const assetSourceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hv-non-required-assets-'));
     const preferredPath = path.join(assetSourceDir, 'preferred-generated.png');
@@ -418,7 +418,7 @@ function fullSceneCaption(sceneId, text, duration) {
       writeFile(optionalPath, 'optional-png'),
       writeFile(legacyPath, 'legacy-png'),
     ]);
-    const nonRequiredNarration = '非必用素材未进入画面时仍应正常完成视频。';
+    const nonRequiredNarration = '非必用素材被计划选中后应由系统注入画面。';
     const nonRequiredSpec = {
       title: '非必用素材不阻断',
       aspect_ratio: '16:9',
@@ -547,10 +547,12 @@ function fullSceneCaption(sceneId, text, duration) {
     );
     assert.deepEqual(nonRequiredResult.project.asset_usage_report.required_asset_ids, []);
     assert.deepEqual(nonRequiredResult.project.asset_usage_report.missing_required_asset_ids, []);
-    assert.deepEqual(
-      nonRequiredResult.project.asset_usage_report.unused_asset_ids,
-      ['preferred_generated', 'optional_source', 'legacy_generated'],
-    );
+    assert.deepEqual(nonRequiredResult.project.asset_usage_report.unused_asset_ids, []);
+    for (const node of nonRequiredResult.project.content_graph.nodes) {
+      const frameHtml = await fs.readFile(path.join(nonRequiredResult.project_dir, node.html_path), 'utf8');
+      assert.equal((frameHtml.match(/data-hv-shot="true"/g) || []).length, 1);
+      assert.equal((frameHtml.match(/<img data-shot-layer=/g) || []).length, 2);
+    }
     assert.equal(
       nonRequiredResult.project.asset_usage_report.assets.find(asset => asset.asset_id === 'preferred_generated').requirement,
       'preferred',

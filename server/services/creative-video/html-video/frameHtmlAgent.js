@@ -17,6 +17,7 @@ const {
   validateFrameAssetUsage,
   validateHtmlContentQuality,
 } = require('./frameHtmlInspection');
+const { materializeSceneImageSequenceDom } = require('./sceneImageSequenceDom');
 
 function validateHtmlTargetResolution(html, target = {}) {
   return validateHtmlCanvasContract(html, target);
@@ -70,6 +71,29 @@ function validateGeneratedHtml(html, args = {}) {
     };
   }
   return quality;
+}
+
+function prepareGeneratedHtml(html, args = {}) {
+  const targetValidation = validateHtmlTargetResolution(html, args.target || {});
+  const normalizedHtml = normalizeHtmlCanvasContract(html, args.target || {});
+  if (!targetValidation.success) {
+    return { html: normalizedHtml, validation: targetResolutionValidationFailure(targetValidation) };
+  }
+  const materialized = materializeSceneImageSequenceDom({
+    html: normalizedHtml,
+    node: args.node,
+    creativeContext: args.creativeContext,
+  });
+  if (!materialized.success) {
+    return {
+      html: normalizedHtml,
+      validation: {
+        ...materialized,
+        code: 'frame_html_shot_contract_invalid',
+      },
+    };
+  }
+  return { html: materialized.html, validation: validateGeneratedHtml(materialized.html, args) };
 }
 
 async function callModel(model, prompt, options = {}) {
@@ -192,11 +216,9 @@ async function generateFrameHtml({
   const allowInternalRetry = attempt < 2 && shortPrompt !== true;
   const firstExtracted = extractHtmlDocument(first.text);
   if (firstExtracted.success) {
-    const targetValidation = validateHtmlTargetResolution(firstExtracted.html, promptArgs.target || {});
-    const normalizedHtml = normalizeHtmlCanvasContract(firstExtracted.html, promptArgs.target || {});
-    const validation = targetValidation.success
-      ? validateGeneratedHtml(normalizedHtml, promptArgs)
-      : targetResolutionValidationFailure(targetValidation);
+    const prepared = prepareGeneratedHtml(firstExtracted.html, promptArgs);
+    const normalizedHtml = prepared.html;
+    const validation = prepared.validation;
     if (validation.success) return { ...firstExtracted, html: normalizedHtml, diagnostics: validation.diagnostics || [] };
     if (!allowInternalRetry) {
       return frameFailure(validation.code || 'frame_html_invalid', validation.message || '单帧 HTML 内容校验失败。', promptArgs, {
@@ -219,11 +241,9 @@ async function generateFrameHtml({
         diagnostics: [validation.message, retryExtracted.message].filter(Boolean),
       }));
     }
-    const retryTargetValidation = validateHtmlTargetResolution(retryExtracted.html, promptArgs.target || {});
-    const retryHtml = normalizeHtmlCanvasContract(retryExtracted.html, promptArgs.target || {});
-    const retryValidation = retryTargetValidation.success
-      ? validateGeneratedHtml(retryHtml, promptArgs)
-      : targetResolutionValidationFailure(retryTargetValidation);
+    const retryPrepared = prepareGeneratedHtml(retryExtracted.html, promptArgs);
+    const retryHtml = retryPrepared.html;
+    const retryValidation = retryPrepared.validation;
     if (retryValidation.success) return { ...retryExtracted, html: retryHtml, diagnostics: retryValidation.diagnostics || [] };
     return frameFailure(retryValidation.code || 'html_validation_failed', retryValidation.message || '单帧 HTML 内容校验失败。', promptArgs, {
       diagnostics: [validation.message, retryValidation.message].filter(Boolean),
@@ -244,11 +264,9 @@ async function generateFrameHtml({
   }
   const retryExtracted = extractHtmlDocument(retry.text);
   if (retryExtracted.success) {
-    const retryTargetValidation = validateHtmlTargetResolution(retryExtracted.html, promptArgs.target || {});
-    const retryHtml = normalizeHtmlCanvasContract(retryExtracted.html, promptArgs.target || {});
-    const retryValidation = retryTargetValidation.success
-      ? validateGeneratedHtml(retryHtml, promptArgs)
-      : targetResolutionValidationFailure(retryTargetValidation);
+    const retryPrepared = prepareGeneratedHtml(retryExtracted.html, promptArgs);
+    const retryHtml = retryPrepared.html;
+    const retryValidation = retryPrepared.validation;
     if (retryValidation.success) return { ...retryExtracted, html: retryHtml, diagnostics: retryValidation.diagnostics || [] };
     return frameFailure(retryValidation.code || 'html_validation_failed', retryValidation.message || '单帧 HTML 内容校验失败。', promptArgs, {
       diagnostics: [firstExtracted.message, retryValidation.message].filter(Boolean),

@@ -1,6 +1,7 @@
 const DEFAULT_CAPTION_DURATION_SEC = 3;
 const MAX_CAPTION_TEXT_LENGTH = 34;
 const { stripSpeechStageDirections } = require('../../tts/speechText');
+const { buildPlaybackClockSource } = require('./playbackClock');
 const LEADING_PUNCTUATION_RE = /^[，。！？；：,.!?;:]/;
 const VOID_ELEMENTS = new Set([
   'area',
@@ -240,7 +241,7 @@ function renderCaptionLayer(captions = [], options = {}) {
     `<div class="${htmlEscape(className)}" data-hv-layer="captions" data-hv-managed="true" data-role="subtitle-caption">`,
     items,
     '</div>',
-    '<script data-hv-caption-clock="true">(function(){const script=document.currentScript;const layer=script&&script.previousElementSibling;if(!layer)return;const items=Array.from(layer.querySelectorAll(".hv-caption-item"));const start=performance.now();function tick(){const t=(performance.now()-start)/1000;for(const item of items){const a=Number(item.dataset.start||0);const b=Number(item.dataset.end||0);if(Number.isFinite(a)&&Number.isFinite(b)&&t>=a&&t<b){item.dataset.hvActive="true";}else{delete item.dataset.hvActive;}}requestAnimationFrame(tick);}tick();})();</script>',
+    `<script data-hv-caption-clock="true">${buildPlaybackClockSource()}(function(){const script=document.currentScript;const layer=script&&script.previousElementSibling;if(!layer)return;const items=Array.from(layer.querySelectorAll(".hv-caption-item"));window.__hvPlaybackClock.subscribe(function(t){for(const item of items){const a=Number(item.dataset.start||0);const b=Number(item.dataset.end||0);if(Number.isFinite(a)&&Number.isFinite(b)&&t>=a&&t<b){item.dataset.hvActive="true";}else{delete item.dataset.hvActive;}}});})();</script>`,
   ].join('');
 }
 

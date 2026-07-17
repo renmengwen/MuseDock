@@ -116,6 +116,7 @@ const { injectRenderCsp, prepareSourceHtml } = require('../server/services/creat
     assert.ok(inlined.includes('compositions/intro.html'), '应保留 composition src key');
     assert.ok(inlined.includes('组合片段'), '应内联 composition HTML');
     assert.ok(inlined.includes('window.__hvPlayAll = function'), '应注入统一播放入口');
+    assert.match(inlined, /!window\.__mpAdapterControlled\s*&&\s*!window\.__hvPlayed/, 'adapter 受控模式不得触发 250ms auto play');
     assert.ok(inlined.includes('window.__timelines=window.__timelines||{}'), '应初始化 timeline registry');
     assert.match(inlined, /<head>\s*<meta http-equiv="Content-Security-Policy"/i, 'CSP 必须是 head 首个有效节点');
     assert.doesNotMatch(inlined, /data:video\/mp4/, '空视频占位不得产生 data 资源请求');

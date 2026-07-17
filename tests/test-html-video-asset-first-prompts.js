@@ -117,16 +117,22 @@ async function run() {
     });
     assert.match(sequencePrompt, /image_sequence/);
     assert.match(sequencePrompt, /sequence_mode：fullscreen_relay/);
-    assert.match(sequencePrompt, /shot 1：asset_id=c/);
+    assert.match(sequencePrompt, /shot 1：id=scene_01_shot_03；asset_id=c/);
     assert.doesNotMatch(sequencePrompt, /asset_id=[ab]/);
     assert.match(sequencePrompt, /src=\.\.\/assets\/c\.png/);
     assert.match(sequencePrompt, /role=showcase/);
     assert.match(sequencePrompt, /reason=第3张案例/);
     assert.match(sequencePrompt, /requirement=required/);
     assert.match(sequencePrompt, /fit=cover/);
+    assert.match(sequencePrompt, /caption_ids=/);
+    assert.match(sequencePrompt, /active_window=.*scene_local/);
+    assert.match(sequencePrompt, /minimum_visible_duration_sec=/);
     assert.match(sequencePrompt, /不得换图、少图/);
     assert.match(sequencePrompt, /不得把 Shot 当作 overlay/);
-    assert.match(sequencePrompt, /缺少 caption timing.*不得发明绝对时间/);
+    assert.match(sequencePrompt, /系统会.*确定性注入真实图片层/);
+    assert.match(sequencePrompt, /不得自行输出 data-hv-image-sequence、data-hv-shot/);
+    assert.match(sequencePrompt, /不得再次输出这些 Shot 的 img\/src/);
+    assert.doesNotMatch(sequencePrompt, /缺少 caption timing/);
     assert.doesNotMatch(sequencePrompt, /enter_sec|hold_sec|exit_sec/);
     for (const [name, wrapperPrompt] of [
       ['full', frameHtmlAgent.buildFrameHtmlPrompt({ node: graph.nodes[0], beat: plan.beats[0], creativeContext: { asset_context: { assets } }, sceneSpec: { scenes: [{ id: 'scene_01', narration_text: '案例并列' }] } })],
@@ -136,6 +142,8 @@ async function run() {
       assert.match(wrapperPrompt, /sequence_mode：fullscreen_relay/, `${name} wrapper 必须消费裁减后的真实 sequence`);
       assert.match(wrapperPrompt, /asset_id=c/);
       assert.match(wrapperPrompt, /src=\.\.\/assets\/c\.png/);
+      assert.match(wrapperPrompt, /active_window=.*scene_local/);
+      assert.match(wrapperPrompt, /系统 Shot 层注入|唯一图片真值/);
     }
     const movedAssets = assets.map(asset => asset.id === 'a'
       ? { ...asset, path: 'assets/a-new.png', frame_src: '../assets/a-new.png' }

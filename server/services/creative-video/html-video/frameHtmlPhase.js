@@ -8,6 +8,7 @@ const { markCheckpointStage, markCheckpointFrame } = require('./projectSchema');
 const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
+const { materializeSceneImageSequenceDom } = require('./sceneImageSequenceDom');
 const {
   resolveAssetFirstMotionArgs,
   isSceneHtmlNode,
@@ -459,6 +460,33 @@ async function runFrameHtmlPhase(ctx) {
           details: { frame_id: node.id || sceneId, preset: assetFirstMotionArgs.beat.motion_overlay?.preset || '' },
         }));
       }
+    }
+    if (htmlResult.success) {
+      const sequenceDom = materializeSceneImageSequenceDom({
+        html: htmlResult.html,
+        node,
+        creativeContext,
+      });
+      htmlResult = sequenceDom.success
+        ? { ...htmlResult, html: sequenceDom.html }
+        : {
+          success: false,
+          code: sequenceDom.code,
+          message: sequenceDom.message,
+          failed_html: htmlResult.html,
+          diagnostics: [createDiagnostic({
+            code: sequenceDom.code,
+            stage: 'ai-frame-html',
+            sub_stage: 'frame_html',
+            frame_id: node.id || sceneId,
+            severity: 'error',
+            retryable: true,
+            repair_action: 'retry_frame_html',
+            fallback_allowed: false,
+            user_message: sequenceDom.message,
+            details: sequenceDom.details,
+          })],
+        };
     }
     return { ...job, htmlResult };
   };

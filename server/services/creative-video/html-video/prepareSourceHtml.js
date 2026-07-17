@@ -183,7 +183,7 @@ async function prepareSourceHtml(sourcePath, { projectDir } = {}) {
       .call(document.querySelectorAll('[data-composition-src]'))
       .forEach(mountOne);
     setTimeout(function () {
-      if (!window.__hvPlayed) window.__hvPlayAll();
+      if (!window.__mpAdapterControlled && !window.__hvPlayed) window.__hvPlayAll();
     }, 250);
   }
   if (document.readyState === 'loading') {

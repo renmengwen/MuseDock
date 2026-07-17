@@ -171,18 +171,25 @@ function buildAssetFirstFramePrompt({ beat = {}, creativeContext = {}, primitive
       const asset = assets.get(String(shot?.asset_id || '').trim()) || {};
       const registrySrc = asset.frame_src || (asset.path ? `../${String(asset.path).replace(/\\/g, '/')}` : '');
       const src = registrySrc && shot.src === registrySrc ? shot.src : registrySrc;
+      const window = shot.active_window || {};
       lines.push([
-        `shot ${index + 1}：asset_id=${shot.asset_id || ''}`,
+        `shot ${index + 1}：id=${shot.id || ''}`,
+        `asset_id=${shot.asset_id || ''}`,
         `src=${src}`,
         `role=${shot.role || ''}`,
         `reason=${shot.reason || ''}`,
         `requirement=${shot.requirement || ''}`,
         `fit=${shot.fit || 'cover'}`,
+        `caption_ids=${JSON.stringify(Array.isArray(shot.caption_ids) ? shot.caption_ids : [])}`,
+        `active_window=${JSON.stringify({ time_base: window.time_base, start_sec: window.start_sec, end_sec: window.end_sec })}`,
+        `minimum_visible_duration_sec=${shot.minimum_visible_duration_sec ?? ''}`,
       ].join('；'));
     });
     lines.push('必须按上述稳定顺序使用全部 Shot；不得换图、少图、补图或调整 asset_id 顺序。');
     lines.push('每个 Shot 都是 main_visual 的连续候选，不得把 Shot 当作 overlay、角落配图或装饰层。');
-    lines.push('当前阶段只落实素材顺序与布局；缺少 caption timing 时不得发明绝对时间，也不得自行增加 Shot 的 enter/hold/exit 时间字段。');
+    lines.push('系统会根据上述 Shot id、caption_ids、scene-local active_window 与 minimum 确定性注入真实图片层；你只设计外层美术壳，不得自行输出 data-hv-image-sequence、data-hv-shot 或 Shot 计时器。');
+    lines.push('美术壳不得再次输出这些 Shot 的 img/src；系统注入层是唯一图片真值，避免重复图片和不一致布局。');
+    lines.push('不得发明、修改或删除 Shot 时间窗，也不得自行增加 enter/hold/exit、Camera 或其他播放时间字段。');
   } else if (base.type === 'diagram') {
     lines.push('本 beat 无图片素材：必须生成统一风格的结构化 diagram 作为主视觉（main_visual），禁止输出标题页式整屏大字。');
     if (diagramSkeleton) {
@@ -372,7 +379,11 @@ function buildShortFrameHtmlPrompt({
     ...((beat || sceneBeatsBrief)
       ? [buildAssetFirstFramePrompt({ beat: beat || {}, creativeContext, primitiveSnippet, diagramSkeleton, previousBeatSummary, hasCaptions, sceneBeatsBrief })]
       : []),
-    assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并作为画面主体。` : '',
+    assetSummary
+      ? `${assetSummary}\n${beat?.visual_base?.type === 'image_sequence'
+        ? '该 src 由系统 Shot 层注入，美术壳不要再次输出 img。'
+        : '必须引用上面的 src，图片用 object-fit: contain，并作为画面主体。'}`
+      : '',
     `Target resolution：${resolution.width}x${resolution.height}`,
     `必须生成 full-bleed ${resolution.width}x${resolution.height} 完整 HTML，包含 <!doctype html>、html、head、body、style。`,
     `body 或 #root 必须带 data-hv-canvas、data-width="${resolution.width}"、data-height="${resolution.height}"。`,
@@ -415,7 +426,11 @@ function buildRetryPrompt(args = {}) {
         sceneBeatsBrief: args.sceneBeatsBrief || '',
       })]
       : []),
-    assetSummary ? `${assetSummary}\n必须引用上面的 src，图片用 object-fit: contain，并作为画面主体。` : '',
+    assetSummary
+      ? `${assetSummary}\n${args.beat?.visual_base?.type === 'image_sequence'
+        ? '该 src 由系统 Shot 层注入，美术壳不要再次输出 img。'
+        : '必须引用上面的 src，图片用 object-fit: contain，并作为画面主体。'}`
+      : '',
     styleProfile?.id
       ? `视觉风格参考：遵循本任务 style_profile「${styleProfile.id}」；不要复用模板默认主体文案。`
       : '',

@@ -149,6 +149,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
       progress: [],
       ffmpeg: [],
       waits: [],
+      evaluates: [],
     };
 
     const mockPlaywright = {
@@ -171,6 +172,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
                 goto: async (url, gotoOptions) => { calls.gotos.push({ url, options: gotoOptions }); },
                 evaluate: async fn => {
                   const source = String(fn);
+                  calls.evaluates.push(source);
                   if (source.includes('getComputedStyle')) return 1800;
                   if (source.includes('__hvPlayAll')) return true;
                   return undefined;
@@ -246,6 +248,11 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
       '必须在 goto 前注入 __mpAdapterControlled 受控标志',
     );
     assert.equal(calls.gotos[0].options.waitUntil, 'domcontentloaded');
+    const playbackStart = calls.evaluates.find(source => source.includes('__hvPlayAll') && source.includes('__hvUnfreeze'));
+    assert.ok(playbackStart, 'animation、解冻和共享时钟必须在同一次 evaluate 启动');
+    assert.match(playbackStart, /__hvPlaybackClock/);
+    assert.ok(playbackStart.indexOf('__hvPlayAll') < playbackStart.indexOf('__hvUnfreeze'));
+    assert.ok(playbackStart.indexOf('__hvUnfreeze') < playbackStart.indexOf('__hvPlaybackClock'));
     assert.ok(calls.waits.includes(800), '录制结束前应有 800ms 尾部缓冲，保证 -ss 裁剪安全余量');
 
     assert.equal(calls.ffmpeg.length, 1);

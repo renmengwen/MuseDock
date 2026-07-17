@@ -3,12 +3,13 @@
 const crypto = require('crypto');
 
 const frameHtmlAgent = require('./frameHtmlAgent');
+const { buildPlaybackClockSource } = require('./playbackClock');
 const { validateOverlayHtml, hasRealOverlayElement } = require('./motionPrimitiveCatalog');
 
 // Frame HTML 生成提示词/primitive 结构版本号：当 frameHtmlAgent 的 prompt 结构、primitive
 // 参考片段语义或帧 HTML 约定发生会影响产物的变化时手动 +1，使旧 checkpoint 指纹失配、
 // resume 时强制重新生成，避免代码升级后静默复用旧版产物。
-const FRAME_PROMPT_VERSION = 2;
+const FRAME_PROMPT_VERSION = 3;
 
 // 确定性 JSON 序列化（对象键递归排序），保证同一输入结构得到稳定字符串
 function stableJsonValue(value) {
@@ -91,38 +92,24 @@ function groupBeatsForSceneHtml(beats = []) {
 
 function buildSceneTimelineScript(beatWindows = []) {
   const payload = JSON.stringify(beatWindows.map(b => ({ id: b.id, start: b.start_sec, end: b.end_sec })));
-  // P1-3：beat 时钟不随页面加载自启——预加载（字体/render-ready/动画探测）耗时会被 ffmpeg 按
-  // leadInMs 裁掉，但页面内部时钟不会回拨，导致成片 t=0 已跳过首 beat。改为暴露
-  // __mpStartBeatClock，由渲染 adapter 在正式录制起点（__hvUnfreeze 之后）显式调用；
-  // 非 adapter 环境（本地预览，无 __mpAdapterControlled 标志）才挂 5s 兜底自启——
-  // adapter 受控时不挂，避免预加载 >5s 时兜底抢先起钟偏移 origin。
-  // 启动前 body 已同步置首 beat，预加载期间画面即 beat1 状态。
   return `<script>
+${buildPlaybackClockSource()}
 (function () {
   window.__MP_BEATS__ = ${payload};
   var beats = window.__MP_BEATS__;
-  if (beats.length) document.body.setAttribute('data-mp-beat', beats[0].id);
-  var started = false;
-  var origin = null;
-  function tick(now) {
-    if (origin === null) origin = now;
-    var t = (now - origin) / 1000;
+  function render(t) {
     var active = null;
     for (var i = 0; i < beats.length; i++) {
       if (t >= beats[i].start && t < beats[i].end) { active = beats[i]; break; }
     }
     if (!active && beats.length) active = beats[beats.length - 1];
     if (active) document.body.setAttribute('data-mp-beat', active.id);
-    requestAnimationFrame(tick);
   }
   window.__mpStartBeatClock = function () {
-    if (started) return;
-    started = true;
-    requestAnimationFrame(tick);
+    window.__hvPlaybackClock.play();
   };
-  if (!window.__mpAdapterControlled) {
-    setTimeout(function () { window.__mpStartBeatClock(); }, 5000);
-  }
+  window.__mpSetTimelineTime = function (timeSec) { window.__hvPlaybackClock.setTime(timeSec); };
+  window.__hvPlaybackClock.subscribe(render);
 })();
 <\/script>`;
 }
