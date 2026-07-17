@@ -98,15 +98,19 @@ branch: codex/asset-first-c02
 allowed_paths:
   - server/services/creative-video/html-video/visualPlanService.js
   - server/services/creative-video/html-video/htmlVideoWorkflow.js
-  - server/services/creative-video/html-video/framePromptBuilder.js
-  - server/services/creative-video/html-video/frameHtmlPhaseSupport.js
+  - server/services/creative-video/html-video/contentGraphPhase.js
   - tests/test-html-video-visual-plan.js
   - tests/test-html-video-workflow.js
-  - tests/test-html-video-asset-first-prompts.js
+  - tests/test-html-video-per-scene-routing.js
+  - tests/test-html-video-scene-continuity.js
   - tests/test-html-video-frame-html-resume.js
+  - tests/test-html-video-project-schema.js
+  - tests/test-html-video-project-store.js
 forbidden_paths:
   - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
   - server/services/creative-video/html-video/contentGraphAgent.js
+  - server/services/creative-video/html-video/framePromptBuilder.js
+  - server/services/creative-video/html-video/frameHtmlPhaseSupport.js
   - server/services/creative-video/html-video/motionPrimitiveCatalog.js
 state_owners:
   - visual_plan.beats[].visual_base.image_sequence
@@ -116,7 +120,8 @@ exclusive_resources:
   - no browser, ports, ffmpeg, network or frontend build
 verification:
   - node tests/test-html-video-visual-plan.js
-  - node tests/test-html-video-asset-first-prompts.js
+  - node tests/test-html-video-per-scene-routing.js
+  - node tests/test-html-video-scene-continuity.js
   - node tests/test-html-video-frame-html-resume.js
   - node tests/test-html-video-workflow.js
 review:
