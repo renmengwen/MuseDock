@@ -80,7 +80,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-06b 受控 derived 素材登记 | `complete` | B-01 | `ca45e1d` | 双 Review PASS，已在 dev 重跑目标测试并释放租约 |
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
-| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `in_progress` | B-07b | `df9a519`、`fab5167` | C-01、C-02 完成；C-03 Caption 绑定与 Shot 时间派生正在执行 |
+| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `in_progress` | B-07b | `df9a519`、`fab5167`、`6d58460` | C-01～C-03 完成；下一步 C-04 Scene 内连续 Image Sequence |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
@@ -89,9 +89,10 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: C-03
-status: in_progress
-owner: /root/phase_c03_writer
-lease_released: false
+status: complete
+owner: unassigned
+lease_released: true
+dev_commit: 6d58460f03aef36fe1afd1ab0fef380763dc8f8a
 code_base_commit: 87ac80f5ef639587001311c8b0f3e137fae7d849
 worktree: D:\code3\MuseDock-worktrees\asset-first-c03
 branch: codex/asset-first-c03
@@ -124,8 +125,19 @@ verification:
   - node tests/test-html-video-caption-layer.js
   - node tests/test-html-video-scene-continuity.js
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_revision: e17a51e03c5b71e81c9a9c9486bd7ff5f7336f52
+  quality: pass
+  quality_reviewed_revision: e17a51e03c5b71e81c9a9c9486bd7ff5f7336f52
+frozen_revision: e17a51e03c5b71e81c9a9c9486bd7ff5f7336f52
+frozen_tree: 7577efca3f3481e7d1e989e275168332083c40b3
+revision_valid: true
+resolved_findings:
+  - canonical Caption Track 在 normalize 后校验 ID、时间、排序和 Scene 边界
+  - Shot 容量、最终窗口 minimum 与 mode/cardinality 均在规划完成后收口
+  - semantic_compare 使用并行窗口，overview/detail 与 relay/montage 使用各自预算
+  - 全局字幕开关显式进入 Visual Plan，canonical 错误只保留单一根因
+  - 0 Shot 收口为 diagram，1 Shot 收口为 fullscreen_relay，不写 visible_duration_sec
 ```
 
 ```yaml
@@ -491,7 +503,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-C-01 | `verified` | 一个 Scene 使用 `1～4` 个 Shot | C-02 |
 | REQ-C-02 | `verified` | 单图统一为一个 Shot 的 Image Sequence | C-02 |
 | REQ-C-03 | `verified` | 四种主要 Sequence Mode | C-02 |
-| REQ-C-04 | `pending` | Shot Role、Caption IDs、最短可见时间 | C-02、C-03 |
+| REQ-C-04 | `verified` | Shot Role、Caption IDs、最短可见时间 | C-02、C-03 |
 | REQ-C-05 | `pending` | Caption 时间派生入场、保持、退出和重叠 | C-03 |
 | REQ-C-06 | `pending` | 同 Scene 使用连续 HTML 时间线 | C-04 |
 | REQ-C-07 | `pending` | Scene 内不经过独立 Beat MP4 裸切 | C-04 |
@@ -566,5 +578,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase C 只读实现前审计 | 基线 `857dee2`；content graph、visual plan、scene continuity、asset usage、workflow 五组测试通过；C-01～C-05 Task Packet 已准备，B-07b 写门已解除 |
 | Phase C Task 1 多素材候选契约 | `df9a519`；冻结 revision `c0625e81361fba2919d8f9b836c912c841fc95bb`、tree `b3b3999efbc04198ca2358130186131a8aaa0220`；Content Graph 每 scene 只保留已登记、可用、保序去重后最多 4 张候选，不强制凑满；空注册表、generated scene identity、usage 四值和 evidence 边界 fail-closed；规格 Review PASS、代码质量 Review PASS；dev 13 组直接测试与默认 runner 2 组通过；Image Sequence/Shot requirements 继续 pending，留给 C-02 |
 | Phase C Task 2 Image Sequence 规划 | `fab5167`；冻结 revision `8003202db1bf39435f62f13cc3add05c8d16ad3a`、tree `44005cd6851142502756057fb6087efded35867e`；workflow 改为 canonical Graph 后构建 v2 Visual Plan；0 图 diagram、单图和多图统一为 1～4 Shot image_sequence；四种 mode、required 冲突、正式 Shot src、canonical/expanded graph 所有权与 resume 指纹均确定性处理；full/short/retry Prompt 使用 registry 核对后的 Shot 顺序且不发明 timing；规格 Review PASS、代码质量 Review PASS；dev 22 组测试通过；Caption IDs/真实时间窗/visible duration 继续 pending |
+| Phase C Task 3 Shot 字幕与计划时间窗 | `6d58460`；冻结 revision `e17a51e03c5b71e81c9a9c9486bd7ff5f7336f52`、tree `7577efca3f3481e7d1e989e275168332083c40b3`；复用 canonical Caption Track 为 Shot 写入 scene-local `caption_ids`、`active_window` 和 `minimum_visible_duration_sec`；按 mode 派生窗口，optional/preferred 确定性减图，required 冲突在 Frame HTML 前中文阻断；全局字幕开关、normalize 后 ID 冲突、尾部窄窗、无字幕 compare/overview/异质 minimum 与 0/1 Shot 收口均覆盖；不写 `visible_duration_sec`/enter/hold/exit/camera；规格 Review PASS、代码质量 Review PASS，质量审计 2400 个组合不变量无问题；dev 17 组测试通过 |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
