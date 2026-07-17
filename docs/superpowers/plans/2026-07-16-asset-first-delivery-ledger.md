@@ -547,8 +547,8 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-B-06 | `verified` | `origin/origin_detail/requirement/evidence_class` 分维协议 | B-01 |
 | REQ-B-07 | `verified` | direct source、synthetic、stock/search 的证据边界 | B-01、B-02 |
 | REQ-B-08 | `verified` | 任何可引用图片必须先登记 | B-06a、B-06b、B-07 |
-| REQ-B-09 | `pending` | required 素材无真实可见 Shot 时阻断 | B-07a、B-07b、C-04 |
-| REQ-B-10 | `pending` | Asset Usage Report 与素材面板一致 | B-05、C-04 |
+| REQ-B-09 | `pending` | required 素材无真实可见 Shot 时阻断 | B-07a、B-07b、C-04、C-05 |
+| REQ-B-10 | `pending` | Asset Usage Report 与素材面板一致 | B-05、C-05 |
 
 ### C. 多图编排
 
@@ -558,7 +558,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-C-02 | `verified` | 单图统一为一个 Shot 的 Image Sequence | C-02 |
 | REQ-C-03 | `verified` | 四种主要 Sequence Mode | C-02 |
 | REQ-C-04 | `verified` | Shot Role、Caption IDs、最短可见时间 | C-02、C-03 |
-| REQ-C-05 | `pending` | Caption 时间派生入场、保持、退出和重叠 | C-03 |
+| REQ-C-05 | `pending` | Caption 时间派生入场、保持、退出和重叠 | C-03、C-04 |
 | REQ-C-06 | `pending` | 同 Scene 使用连续 HTML 时间线 | C-04 |
 | REQ-C-07 | `pending` | Scene 内不经过独立 Beat MP4 裸切 | C-04 |
 | REQ-C-08 | `pending` | 跨 Scene 转场保持独立 | C-04 |
