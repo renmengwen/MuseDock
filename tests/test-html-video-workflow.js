@@ -58,7 +58,7 @@ function fullSceneCaption(sceneId, text, duration) {
           id: 'scene_01',
           duration: 4,
           narration_text: '这段可以有旁白但不显示字幕。',
-          captions: [{ id: 'c1', start: 0, end: 4, text: '这段可以有旁白但不显示字幕。' }],
+          captions: [null],
           visual_text: { headline: '标题' },
         }],
       },
@@ -98,6 +98,31 @@ function fullSceneCaption(sceneId, text, duration) {
       noCaptionsResult.project.frames[0].html_path,
     ), 'utf8');
     assert.doesNotMatch(html, /data-hv-layer="captions"/);
+
+    const targetDisabledResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-no-captions-target',
+      runId: 'run-no-captions-target',
+      rootDir,
+      sceneSpec: {
+        scenes: [{ id: 'scene_01', duration: 2, narration_text: '旁白', captions: [null], visual_text: { headline: '标题' } }],
+      },
+      creativeContext: { input: { raw_text: 'target 禁用字幕' } },
+      target: { generate_captions: false },
+      services: {
+        aiTextModel: {
+          callTextModel: async ({ messages }) => {
+            const prompt = messages.map(item => item.content).join('\n');
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return { success: true, text: JSON.stringify({ synopsis: '禁用字幕', nodes: [{ id: 'scene_01', text: '标题' }], edges: [] }) };
+            }
+            return { success: true, text: '<!doctype html><html><body><main data-frame-id="scene_01"><h1 data-text-key="headline">标题</h1><p data-text-key="subtitle">副标题</p><section data-text-key="body">正文</section></main></body></html>' };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      },
+    });
+    assert.equal(targetDisabledResult.success, true);
+    assert.equal(targetDisabledResult.diagnostics.some(item => item.code === 'image_sequence_caption_invalid'), false);
   } finally {
     projectOrchestrator.renderHtmlVideoProject = originalRenderForNoCaptions;
   }

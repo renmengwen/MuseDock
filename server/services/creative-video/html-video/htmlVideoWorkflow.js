@@ -852,10 +852,16 @@ async function generateHtmlVideo(options = {}) {
     sceneSpec,
     creativeContext,
     workflowId,
+    mediaOptions,
   });
   assignMotionOrchestration(visualPlan, {
     styleProfile: visualPlan.style_profile || null,
   });
+  const visualPlanDiagnostics = normalizeDiagnostics(visualPlan.diagnostics, {
+    stage: 'project',
+    sub_stage: 'visual_plan',
+  });
+  diagnostics.push(...visualPlanDiagnostics);
   visualDecisions = matchVisualBeatsToRenderers({ visualPlan });
   renderDecisions = Array.from(visualDecisions.values());
   persistableVisualPlan = {
@@ -871,6 +877,16 @@ async function generateHtmlVideo(options = {}) {
     attachVisualRouting(current);
     return current;
   });
+  const blockingVisualPlanDiagnostic = visualPlanDiagnostics.find(item => item.severity === 'error');
+  if (blockingVisualPlanDiagnostic) {
+    return failure(blockingVisualPlanDiagnostic.user_message, diagnostics, {
+      html_video_project_path: projectDir,
+      project_dir: projectDir,
+      project,
+      retryable: false,
+      fallback_allowed: false,
+    });
+  }
   // scene_html 分支只在 continuity_mode = scene_html 生效；此时 project.continuity_mode 尚未挂载
   // （attachContinuityMode 在建帧后才调用），用 creativeContext 判断等价条件。
   if ((creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html') {

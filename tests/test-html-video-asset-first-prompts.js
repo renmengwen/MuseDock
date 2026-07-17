@@ -116,19 +116,14 @@ async function run() {
       creativeContext: { asset_context: { assets } },
     });
     assert.match(sequencePrompt, /image_sequence/);
-    assert.match(sequencePrompt, /sequence_mode：rhythm_montage/);
-    let previousIndex = -1;
-    for (const [index, asset] of assets.entries()) {
-      const marker = `shot ${index + 1}：asset_id=${asset.id}`;
-      const currentIndex = sequencePrompt.indexOf(marker);
-      assert.ok(currentIndex > previousIndex, `${asset.id} 必须按 Shot 稳定顺序出现`);
-      previousIndex = currentIndex;
-      assert.match(sequencePrompt, new RegExp(`src=\\.\\.\\/assets\\/${asset.id}\\.png`));
-    }
-    assert.match(sequencePrompt, /role=subject/);
-    assert.match(sequencePrompt, /reason=第1张案例/);
+    assert.match(sequencePrompt, /sequence_mode：fullscreen_relay/);
+    assert.match(sequencePrompt, /shot 1：asset_id=c/);
+    assert.doesNotMatch(sequencePrompt, /asset_id=[ab]/);
+    assert.match(sequencePrompt, /src=\.\.\/assets\/c\.png/);
+    assert.match(sequencePrompt, /role=showcase/);
+    assert.match(sequencePrompt, /reason=第3张案例/);
     assert.match(sequencePrompt, /requirement=required/);
-    assert.match(sequencePrompt, /fit=contain/);
+    assert.match(sequencePrompt, /fit=cover/);
     assert.match(sequencePrompt, /不得换图、少图/);
     assert.match(sequencePrompt, /不得把 Shot 当作 overlay/);
     assert.match(sequencePrompt, /缺少 caption timing.*不得发明绝对时间/);
@@ -138,10 +133,9 @@ async function run() {
       ['short', frameHtmlAgent.buildShortFrameHtmlPrompt({ node: graph.nodes[0], beat: plan.beats[0], creativeContext: { asset_context: { assets } }, sceneSpec: { scenes: [{ id: 'scene_01', narration_text: '案例并列' }] } })],
       ['retry', frameHtmlAgent.buildRetryPrompt({ node: graph.nodes[0], beat: plan.beats[0], creativeContext: { asset_context: { assets } }, sceneSpec: { scenes: [{ id: 'scene_01', narration_text: '案例并列' }] } })],
     ]) {
-      assert.match(wrapperPrompt, /sequence_mode：rhythm_montage/, `${name} wrapper 必须消费真实 sequence`);
-      assert.ok(wrapperPrompt.indexOf('asset_id=a') < wrapperPrompt.indexOf('asset_id=b'));
-      assert.ok(wrapperPrompt.indexOf('asset_id=b') < wrapperPrompt.indexOf('asset_id=c'));
-      assert.match(wrapperPrompt, /src=\.\.\/assets\/a\.png/);
+      assert.match(wrapperPrompt, /sequence_mode：fullscreen_relay/, `${name} wrapper 必须消费裁减后的真实 sequence`);
+      assert.match(wrapperPrompt, /asset_id=c/);
+      assert.match(wrapperPrompt, /src=\.\.\/assets\/c\.png/);
     }
     const movedAssets = assets.map(asset => asset.id === 'a'
       ? { ...asset, path: 'assets/a-new.png', frame_src: '../assets/a-new.png' }
@@ -156,15 +150,15 @@ async function run() {
       beat: movedPlan.beats[0],
       creativeContext: { asset_context: { assets: movedAssets } },
     });
-    assert.match(movedPrompt, /src=\.\.\/assets\/a-new\.png/);
-    assert.doesNotMatch(movedPrompt, /src=\.\.\/assets\/a\.png/);
+    assert.match(movedPrompt, /src=\.\.\/assets\/c\.png/);
+    assert.doesNotMatch(movedPrompt, /a-new\.png/);
     const tamperedBeat = JSON.parse(JSON.stringify(plan.beats[0]));
-    tamperedBeat.visual_base.shots[0].src = 'https://evil.example/a.png';
+    tamperedBeat.visual_base.shots[0].src = 'https://evil.example/c.png';
     const verifiedPrompt = frameHtmlAgent.buildAssetFirstFramePrompt({
       beat: tamperedBeat,
       creativeContext: { asset_context: { assets } },
     });
-    assert.match(verifiedPrompt, /src=\.\.\/assets\/a\.png/);
+    assert.match(verifiedPrompt, /src=\.\.\/assets\/c\.png/);
     assert.doesNotMatch(verifiedPrompt, /evil\.example/);
   }
 

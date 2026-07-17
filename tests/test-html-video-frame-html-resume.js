@@ -73,6 +73,18 @@ function changedVisualSceneSpec() {
   };
 }
 
+function changedCaptionSceneSpec() {
+  const spec = sceneSpec();
+  return {
+    ...spec,
+    scenes: spec.scenes.map(scene => (
+      scene.id === 'scene_02'
+        ? { ...scene, captions: [{ id: 'scene_02_caption_changed', start: 0, end: 2, text: '第二幕字幕已修改' }] }
+        : scene
+    )),
+  };
+}
+
 function stableSceneSpecValue(value) {
   if (Array.isArray(value)) return value.map(stableSceneSpecValue);
   if (!value || typeof value !== 'object') return value;
@@ -631,6 +643,167 @@ async function main() {
     }
 
     // C-02：旧 visual plan 无法证明 v2 fingerprint 时，所有 Frame HTML fail-closed 重生成。
+    // C-03：required Shot 最短时长冲突必须在 Frame HTML 前阻断，且禁止 fallback/retry。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-shot-timing-conflict-'));
+      const workflowId = '202606260000000015_shot_timing_conflict';
+      const runId = 'run_shot_timing_conflict';
+      const graph = contentGraph('Shot timing conflict');
+      graph.nodes[0].asset_refs = [{ asset_id: 'text_a' }, { asset_id: 'text_b' }];
+      const assets = ['text_a', 'text_b'].map(id => ({
+        id,
+        media_type: 'image',
+        requirement: 'required',
+        status: 'ready',
+        path: `assets/${id}.png`,
+        frame_src: `../assets/${id}.png`,
+        image_analysis: { contains_text: true },
+      }));
+      await setupProject(rootDir, workflowId, runId, {
+        contentGraph: graph,
+        projectAssets: assets,
+        assetContext: { asset_context: { assets } },
+      });
+      let frameHtmlCalls = 0;
+      frameHtmlAgent.generateFrameHtml = async () => {
+        frameHtmlCalls += 1;
+        return { success: true, html: validHtml('scene_01', 'unexpected') };
+      };
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        creativeContextOverride: { asset_context: { assets } },
+        aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
+      });
+      assert.equal(result.success, false);
+      assert.equal(frameHtmlCalls, 0);
+      assert.equal(result.retryable, false);
+      assert.equal(result.fallback_allowed, false);
+      const diagnostic = result.diagnostics.find(item => item.code === 'required_asset_shot_timing_conflict');
+      assert.ok(diagnostic);
+      assert.equal(diagnostic.retryable, false);
+      assert.equal(diagnostic.fallback_allowed, false);
+      assert.match(diagnostic.user_message, /必用图片镜头/);
+    }
+
+    // C-03 Review：raw caption 非对象必须由真实 workflow 结构化阻断，不能抛 TypeError。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-caption-invalid-'));
+      const workflowId = '202606260000000018_caption_invalid';
+      const runId = 'run_caption_invalid';
+      const graph = contentGraph('Invalid caption');
+      graph.nodes[0].asset_refs = [{ asset_id: 'caption_asset' }];
+      const asset = {
+        id: 'caption_asset',
+        media_type: 'image',
+        requirement: 'required',
+        status: 'ready',
+        path: 'assets/caption-asset.png',
+        frame_src: '../assets/caption-asset.png',
+      };
+      await setupProject(rootDir, workflowId, runId, {
+        contentGraph: graph,
+        projectAssets: [asset],
+        assetContext: { asset_context: { assets: [asset] } },
+      });
+      const invalidSpec = sceneSpec();
+      invalidSpec.scenes[0] = { ...invalidSpec.scenes[0], captions: [null] };
+      let frameHtmlCalls = 0;
+      frameHtmlAgent.generateFrameHtml = async () => {
+        frameHtmlCalls += 1;
+        return { success: true, html: validHtml('scene_01', 'unexpected') };
+      };
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        sceneSpecOverride: invalidSpec,
+        creativeContextOverride: { asset_context: { assets: [asset] } },
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.startsWith('你是 html-video 的 content graph')) return { success: true, text: JSON.stringify(graph) };
+            throw new Error(`不应进入 Frame HTML 模型：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+      assert.equal(result.success, false);
+      assert.equal(frameHtmlCalls, 0);
+      assert.ok(result.diagnostics.some(item => item.code === 'image_sequence_caption_invalid'));
+    }
+
+    // C-03：非必用 Shot 因字幕锚点不足而缩减时继续生成，并把 warning 贯穿工作流结果。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-shot-reduced-warning-'));
+      const workflowId = '202606260000000017_shot_reduced_warning';
+      const runId = 'run_shot_reduced_warning';
+      const graph = contentGraph('Shot reduced warning');
+      graph.nodes[0].asset_refs = [{ asset_id: 'optional_a' }, { asset_id: 'optional_b' }];
+      const assets = ['optional_a', 'optional_b'].map(id => ({
+        id,
+        media_type: 'image',
+        requirement: 'optional',
+        status: 'ready',
+        path: `assets/${id}.png`,
+        frame_src: `../assets/${id}.png`,
+        image_analysis: { contains_text: true },
+      }));
+      await setupProject(rootDir, workflowId, runId, {
+        contentGraph: graph,
+        projectAssets: assets,
+        assetContext: { asset_context: { assets } },
+      });
+      frameHtmlAgent.generateFrameHtml = async args => ({ success: true, html: validHtml(args.node.id, args.node.id) });
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        creativeContextOverride: { asset_context: { assets } },
+        aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
+      });
+      assert.equal(result.success, true);
+      const warning = result.diagnostics.find(item => item.code === 'image_sequence_shots_reduced_for_duration');
+      assert.ok(warning);
+      assert.equal(warning.severity, 'warning');
+      assert.equal(warning.retryable, false);
+      assert.equal(warning.fallback_allowed, true);
+    }
+
+    // C-03：只改变 canonical caption track 也必须改变计划指纹并使已完成 Frame HTML 失效。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-caption-resume-'));
+      const workflowId = '202606260000000016_caption_resume';
+      const runId = 'run_caption_resume';
+      const { projectDir } = await setupProject(rootDir, workflowId, runId);
+      const previousFingerprint = (await projectStore.loadProject(projectDir)).visual_plan.input_fingerprint;
+      const calls = [];
+      frameHtmlAgent.generateFrameHtml = async args => {
+        calls.push(args.node.id);
+        return { success: true, html: validHtml(args.node.id, args.node.id) };
+      };
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        sceneSpecOverride: changedCaptionSceneSpec(),
+        aiTextModel: {
+          async callTextModel(request) {
+            const prompt = request.messages.map(item => item.content).join('\n');
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return { success: true, text: JSON.stringify(contentGraph('字幕已修改')) };
+            }
+            throw new Error(`不应调用模型生成帧 HTML：${prompt.slice(0, 40)}`);
+          },
+        },
+      });
+      assert.equal(result.success, true);
+      assert.deepEqual(calls, ['scene_01', 'scene_02', 'scene_03']);
+      const persisted = await projectStore.loadProject(result.html_video_project_path);
+      assert.equal(persisted.visual_plan.input_fingerprint, result.project.visual_plan.input_fingerprint);
+      assert.notEqual(persisted.visual_plan.input_fingerprint, previousFingerprint);
+    }
+
     {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-plan-version-resume-'));
       const workflowId = '202606260000000001_plan_version';

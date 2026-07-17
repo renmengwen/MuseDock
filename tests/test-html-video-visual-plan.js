@@ -156,14 +156,14 @@ assert.equal(noDurationPlan.beats[0].duration_sec, 6);
   assert.equal(byScene.get('single').visual_base.type, 'image_sequence');
   assert.equal(byScene.get('single').visual_base.shots[0].id, 'single_shot_01');
   assert.equal(byScene.get('none').visual_base.type, 'diagram');
-  assert.equal(byScene.get('ordinary').visual_base.shots.length, 3);
+  assert.equal(byScene.get('ordinary').visual_base.shots.length, 1);
   assert.equal(byScene.get('compare').visual_base.sequence_mode, 'semantic_compare');
   assert.equal(byScene.get('two_plain').visual_base.sequence_mode, 'fullscreen_relay');
-  assert.equal(byScene.get('overview').visual_base.sequence_mode, 'overview_detail');
-  assert.equal(byScene.get('montage').visual_base.sequence_mode, 'rhythm_montage');
-  assert.equal(byScene.get('montage').visual_base.shots.length, 4);
+  assert.equal(byScene.get('overview').visual_base.sequence_mode, 'fullscreen_relay');
+  assert.equal(byScene.get('montage').visual_base.sequence_mode, 'fullscreen_relay');
+  assert.equal(byScene.get('montage').visual_base.shots.length, 1);
   assert.ok(!JSON.stringify(ordinaryPlan).includes('registry_only'));
-  assert.ok(!('caption_ids' in byScene.get('single').visual_base.shots[0]));
+  assert.ok('caption_ids' in byScene.get('single').visual_base.shots[0]);
   assert.ok(!('visible_duration_sec' in byScene.get('single').visual_base.shots[0]));
 
   const requiredPlan = buildVisualPlan({ graph, sceneSpec: { scenes }, creativeContext: { asset_context: { assets } }, workflowId: 'wf-c02' });
@@ -185,7 +185,7 @@ assert.equal(noDurationPlan.beats[0].duration_sec, 6);
   const conflictPlan = buildVisualPlan({ graph: optionalGraph, sceneSpec, creativeContext: { asset_context: { assets: conflictAssets } }, workflowId: 'compare' });
   assert.equal(conflictPlan.beats[0].visual_base.sequence_mode, 'fullscreen_relay');
   assert.equal(conflictPlan.beats[0].visual_base.mode_reason, 'compare_conflict_required_candidates');
-  assert.deepEqual(conflictPlan.beats[0].visual_base.shots.map(shot => shot.asset_id), ['a', 'b', 'c']);
+  assert.deepEqual(conflictPlan.beats[0].visual_base.shots.map(shot => shot.asset_id), ['c']);
 }
 
 // Review：只扫描明确字段、识别否定语义；registry 顺序不影响 plan 与 fingerprint。
@@ -220,7 +220,7 @@ assert.equal(noDurationPlan.beats[0].duration_sec, 6);
     sceneSpec: { scenes: [{ id: 'negative', duration_sec: 6, narration_text: '多个案例以蒙太奇形式并列快速展示。' }] },
     workflowId: 'positive',
   });
-  assert.equal(positive.beats[0].visual_base.sequence_mode, 'rhythm_montage');
+  assert.equal(positive.beats[0].visual_base.sequence_mode, 'fullscreen_relay');
 }
 
 // Review：Shot src 与正式 registry 路径绑定，并进入 plan/frame fingerprint；无关字段不影响。
@@ -245,6 +245,299 @@ assert.equal(noDurationPlan.beats[0].duration_sec, 6);
 
 // ===== 模块2：asset_first motion 编排字段 =====
 const { assignMotionOrchestration } = require('../server/services/creative-video/html-video/visualPlanService');
+
+// C-03：caption track 只使用 scene-local 时间，并确定性派生 Shot 窗口。
+{
+  const assets = ['a', 'b', 'c', 'd'].map((id, index) => ({
+    id,
+    requirement: index === 0 ? 'required' : 'optional',
+    image_analysis: { contains_text: id === 'b' },
+  }));
+  const graph = { nodes: [{ id: 'timed', asset_refs: assets.map(asset => ({ asset_id: asset.id, reason: '案例 montage' })) }], edges: [] };
+  const scene = {
+    id: 'timed',
+    start: 10,
+    duration_sec: 8,
+    narration_text: '第一段字幕很长，需要规范化拆分为多个稳定的字幕标识。第二段。第三段。第四段。',
+    captions: [
+      { id: 'long', start: 0, end: 4, text: '第一段字幕非常非常长，需要规范化拆分为多个稳定的字幕标识，并且保持时间连续和标识确定。' },
+      { id: 'c2', start: 4, end: 5.5, text: '第二段' },
+      { id: 'c3', start: 5.5, end: 6.8, text: '第三段' },
+      { id: 'c4', start: 6.8, end: 8, text: '第四段' },
+    ],
+  };
+  const timed = buildVisualPlan({ graph, sceneSpec: { scenes: [scene] }, creativeContext: { asset_context: { assets } }, workflowId: 'c03-timed' });
+  const shots = timed.beats[0].visual_base.shots;
+  assert.equal(timed.beats[0].visual_base.sequence_mode, 'rhythm_montage');
+  assert.equal(shots[0].active_window.start_sec, 0, 'scene.start 不得叠加到 Shot 局部时间');
+  assert.equal(shots.at(-1).active_window.end_sec, 8);
+  assert.ok(shots.flatMap(shot => shot.caption_ids).some(id => id === 'long_01'));
+  assert.ok(shots.flatMap(shot => shot.caption_ids).some(id => id === 'long_02'));
+  assert.ok(shots.slice(1).every((shot, index) => shot.active_window.start_sec <= shots[index].active_window.end_sec));
+  assert.equal(Math.round((shots[0].active_window.end_sec - shots[1].active_window.start_sec) * 100) / 100, 0.35);
+  assert.equal(shots.find(shot => shot.asset_id === 'b').minimum_visible_duration_sec, 2);
+  assert.ok(shots.filter(shot => shot.asset_id !== 'b').every(shot => shot.minimum_visible_duration_sec === 1));
+  const hasForbiddenTiming = value => Boolean(value && typeof value === 'object' && (
+    ['visible_duration_sec', 'enter', 'hold', 'exit', 'camera'].some(key => Object.prototype.hasOwnProperty.call(value, key))
+      || Object.values(value).some(hasForbiddenTiming)
+  ));
+  assert.equal(hasForbiddenTiming(timed), false);
+}
+
+// C-03：单图绑定完整规范化字幕轨；同 scene 多 beat 必须携带深等 sequence。
+{
+  const graph = { nodes: [{ id: 'single-long', asset_refs: [{ asset_id: 'a' }] }], edges: [] };
+  const scene = { id: 'single-long', start: 10, duration_sec: 15, narration_text: '这是一段足够长的旁白，用来让场景切成多个 beat，同时生成规范字幕标识。' };
+  const plan = buildVisualPlan({ graph, sceneSpec: { scenes: [scene] }, creativeContext: { asset_context: { assets: [{ id: 'a' }] } } });
+  assert.ok(plan.beats.length > 1);
+  assert.deepEqual(plan.beats[0].visual_base, plan.beats[1].visual_base);
+  const shot = plan.beats[0].visual_base.shots[0];
+  assert.deepEqual(shot.active_window, { time_base: 'scene_local', start_sec: 0, end_sec: 15 });
+  assert.ok(shot.caption_ids.length >= 1);
+}
+
+// C-03：短场景先移除 optional；无字幕时 optional 缩为单 Shot，required 冲突则 blocking。
+{
+  const graph = { nodes: [{ id: 'short', asset_refs: ['required', 'optional'].map(asset_id => ({ asset_id, reason: '依次展示' })) }], edges: [] };
+  const assets = [
+    { id: 'required', requirement: 'required', image_analysis: { contains_text: true } },
+    { id: 'optional', requirement: 'optional' },
+  ];
+  const short = buildVisualPlan({ graph, sceneSpec: { scenes: [{ id: 'short', duration_sec: 2, narration_text: '短字幕' }] }, creativeContext: { asset_context: { assets } } });
+  assert.deepEqual(short.beats[0].visual_base.shots.map(shot => shot.asset_id), ['required']);
+  assert.ok(short.diagnostics.some(item => item.code === 'image_sequence_shots_reduced_for_duration'));
+
+  const noCaption = buildVisualPlan({ graph, sceneSpec: { scenes: [{ id: 'short', duration_sec: 4, narration_text: '' }] }, creativeContext: { asset_context: { assets: assets.map(asset => ({ ...asset, requirement: 'optional' })) } } });
+  assert.equal(noCaption.beats[0].visual_base.shots.length, 1);
+  assert.deepEqual(noCaption.beats[0].visual_base.shots[0].caption_ids, []);
+
+  const requiredAfterOptional = buildVisualPlan({
+    graph: { nodes: [{ id: 'no-anchor-required', asset_refs: [{ asset_id: 'optional' }, { asset_id: 'required' }] }], edges: [] },
+    sceneSpec: { scenes: [{ id: 'no-anchor-required', duration_sec: 4, narration_text: '' }] },
+    creativeContext: { asset_context: { assets } },
+  });
+  assert.deepEqual(requiredAfterOptional.beats[0].visual_base.shots.map(shot => shot.asset_id), ['required']);
+
+  const conflict = buildVisualPlan({ graph, sceneSpec: { scenes: [{ id: 'short', duration_sec: 2, narration_text: '' }] }, creativeContext: { asset_context: { assets: assets.map(asset => ({ ...asset, requirement: 'required', image_analysis: { contains_text: true } })) } } });
+  assert.ok(conflict.diagnostics.some(item => item.code === 'required_asset_shot_timing_conflict' && item.severity === 'error'));
+}
+
+// C-03：compare 允许共享字幕；overview 保持概览全场，detail 跟随后续字幕。
+{
+  const assets = [{ id: 'a' }, { id: 'b' }];
+  const captions = [{ id: 'intro', start: 0, end: 3, text: '先看整体' }, { id: 'detail', start: 3, end: 6, text: '再看细节' }];
+  const build = (id, kind, narration, reasons) => buildVisualPlan({
+    graph: { nodes: [{ id, asset_refs: reasons.map((reason, index) => ({ asset_id: assets[index].id, reason })) }], edges: [] },
+    sceneSpec: { scenes: [{ id, kind, duration_sec: 6, narration_text: narration, captions }] },
+    creativeContext: { asset_context: { assets } },
+  }).beats[0].visual_base;
+  const compare = build('compare-c03', 'comparison', '比较两种方案', ['方案 A', '方案 B']);
+  assert.equal(compare.sequence_mode, 'semantic_compare');
+  assert.ok(compare.shots[0].caption_ids.some(id => compare.shots[1].caption_ids.includes(id)));
+  const overview = build('overview-c03', 'text', '先看整体概览，再看局部细节', ['整体概览', '局部细节']);
+  assert.equal(overview.sequence_mode, 'overview_detail');
+  assert.deepEqual(overview.shots[0].active_window, { time_base: 'scene_local', start_sec: 0, end_sec: 6 });
+  assert.equal(overview.shots[1].active_window.start_sec, 3);
+}
+
+// C-03：重复 ID、负数、倒序和越界时间必须给出明确 blocking 字幕诊断。
+{
+  const plan = buildVisualPlan({
+    graph: { nodes: [{ id: 'bad-captions', asset_refs: [{ asset_id: 'a' }] }], edges: [] },
+    sceneSpec: { scenes: [{ id: 'bad-captions', duration_sec: 4, captions: [
+      { id: 'dup', start: -1, end: 2, text: '一' },
+      { id: 'dup', start: 3, end: 2, text: '二' },
+      { id: 'late', start: 3, end: 5, text: '三' },
+    ] }] },
+    creativeContext: { asset_context: { assets: [{ id: 'a' }] } },
+  });
+  assert.ok(plan.diagnostics.some(item => item.code === 'image_sequence_caption_invalid' && item.severity === 'error'));
+}
+
+// C-03：caption track 是 plan/frame 输入；仅改字幕也必须改变两级指纹。
+{
+  const graph = { nodes: [{ id: 'caption-fingerprint', asset_refs: [{ asset_id: 'a' }] }], edges: [] };
+  const build = text => buildVisualPlan({
+    graph,
+    sceneSpec: { scenes: [{ id: 'caption-fingerprint', duration_sec: 4, captions: [{ id: 'caption', start: 0, end: 4, text }] }] },
+    creativeContext: { asset_context: { assets: [{ id: 'a' }] } },
+    workflowId: 'caption-fingerprint',
+  });
+  const first = build('旧字幕');
+  const second = build('新字幕');
+  assert.notEqual(first.input_fingerprint, second.input_fingerprint);
+  const frameFingerprint = plan => computeFrameInputFingerprint({
+    node: { id: 'caption-fingerprint', metadata: { visual_beat: plan.beats[0] } },
+    continuityMode: 'beat_mp4',
+    target: { width: 1080, height: 1920 },
+  });
+  assert.notEqual(frameFingerprint(first), frameFingerprint(second));
+}
+
+// C-03 Review：禁用字幕时忽略 raw captions；启用时非对象和规范化 ID 冲突必须 fail-closed。
+{
+  const graph = { nodes: [{ id: 'caption-validation', asset_refs: [{ asset_id: 'a' }, { asset_id: 'b' }] }], edges: [] };
+  const assets = [{ id: 'a' }, { id: 'b' }];
+  const build = scene => buildVisualPlan({ graph, sceneSpec: { scenes: [scene] }, creativeContext: { asset_context: { assets } } });
+  const disabled = build({ id: 'caption-validation', duration_sec: 4, generate_captions: false, captions: [null, 'bad'] });
+  assert.equal(disabled.diagnostics.some(item => item.code === 'image_sequence_caption_invalid'), false);
+  assert.equal(disabled.beats[0].visual_base.shots.length, 1);
+  assert.deepEqual(disabled.beats[0].visual_base.shots[0].caption_ids, []);
+
+  const malformed = build({ id: 'caption-validation', duration_sec: 4, captions: [null] });
+  assert.ok(malformed.diagnostics.some(item => item.code === 'image_sequence_caption_invalid'));
+
+  const collision = build({ id: 'caption-validation', duration_sec: 4, captions: [
+    { id: 'long', start: 0, end: 2, text: '这是一段非常非常长的字幕，需要拆分并生成稳定的子字幕标识，确保能够触发规范化拆分。' },
+    { id: 'long_01', start: 2, end: 4, text: '显式冲突' },
+  ] });
+  assert.ok(collision.diagnostics.some(item => item.code === 'image_sequence_caption_invalid'));
+}
+
+// C-03 Review：非 compare 模式不得复制不足的 caption；optional 先裁减，required 则阻断。
+{
+  const refs = ['a', 'b', 'c', 'd'].map(asset_id => ({ asset_id, reason: '案例 montage' }));
+  const scene = { id: 'caption-capacity', duration_sec: 4, narration_text: '', captions: [{ id: 'only', start: 0, end: 4, text: '唯一字幕' }] };
+  const optional = buildVisualPlan({
+    graph: { nodes: [{ id: 'caption-capacity', asset_refs: refs }], edges: [] },
+    sceneSpec: { scenes: [scene] },
+    creativeContext: { asset_context: { assets: refs.map(ref => ({ id: ref.asset_id, requirement: 'optional' })) } },
+  });
+  assert.equal(optional.beats[0].visual_base.shots.length, 1);
+  assert.ok(optional.diagnostics.some(item => item.code === 'image_sequence_shots_reduced_for_duration'));
+
+  const required = buildVisualPlan({
+    graph: { nodes: [{ id: 'caption-capacity', asset_refs: refs.slice(0, 2) }], edges: [] },
+    sceneSpec: { scenes: [scene] },
+    creativeContext: { asset_context: { assets: refs.slice(0, 2).map(ref => ({ id: ref.asset_id, requirement: 'required' })) } },
+  });
+  assert.ok(required.diagnostics.some(item => item.code === 'required_asset_shot_timing_conflict'));
+}
+
+// C-03 Review：最终窗口必须满足 minimum；尾部窄字幕对 optional 裁减、对 required 阻断。
+{
+  const graph = { nodes: [{ id: 'tail-window', asset_refs: [{ asset_id: 'a' }, { asset_id: 'b' }] }], edges: [] };
+  const scene = { id: 'tail-window', duration_sec: 4, captions: [
+    { id: 'main', start: 0, end: 3.9, text: '主体' },
+    { id: 'tail', start: 3.9, end: 4, text: '尾部' },
+  ] };
+  const optional = buildVisualPlan({ graph, sceneSpec: { scenes: [scene] }, creativeContext: { asset_context: { assets: [{ id: 'a' }, { id: 'b' }] } } });
+  assert.equal(optional.beats[0].visual_base.shots.length, 1);
+  const required = buildVisualPlan({ graph, sceneSpec: { scenes: [scene] }, creativeContext: { asset_context: { assets: [{ id: 'a' }, { id: 'b', requirement: 'required' }] } } });
+  assert.ok(required.diagnostics.some(item => item.code === 'required_asset_shot_timing_conflict'));
+
+  const twoSecond = buildVisualPlan({
+    graph,
+    sceneSpec: { scenes: [{ ...scene, duration_sec: 2, captions: [{ id: 'main', start: 0, end: 1.9, text: '主体' }, { id: 'tail', start: 1.9, end: 2, text: '尾部' }] }] },
+    creativeContext: { asset_context: { assets: [{ id: 'a' }, { id: 'b', requirement: 'required' }] } },
+  });
+  assert.ok(twoSecond.diagnostics.some(item => item.code === 'required_asset_shot_timing_conflict'));
+}
+
+// C-03 Review：semantic_compare 是并行预算；两张 required 文字图可在 2 秒全场共享字幕。
+{
+  const plan = buildVisualPlan({
+    graph: { nodes: [{ id: 'parallel-compare', asset_refs: [{ asset_id: 'a' }, { asset_id: 'b' }] }], edges: [] },
+    sceneSpec: { scenes: [{ id: 'parallel-compare', kind: 'comparison', duration_sec: 2, captions: [{ id: 'compare', start: 0, end: 2, text: '对比' }] }] },
+    creativeContext: { asset_context: { assets: ['a', 'b'].map(id => ({ id, requirement: 'required', image_analysis: { contains_text: true } })) } },
+  });
+  assert.equal(plan.beats[0].visual_base.sequence_mode, 'semantic_compare');
+  assert.equal(plan.beats[0].visual_base.shots.length, 2);
+  assert.equal(plan.diagnostics.some(item => item.code === 'required_asset_shot_timing_conflict'), false);
+  assert.ok(plan.beats[0].visual_base.shots.every(shot => shot.active_window.start_sec === 0 && shot.active_window.end_sec === 2));
+}
+
+// C-03 Review：overview 预算只计算 detail 窗口，overview 自身保持全场。
+{
+  const plan = buildVisualPlan({
+    graph: { nodes: [{ id: 'overview-budget', asset_refs: [{ asset_id: 'a', reason: '整体概览' }, { asset_id: 'b', reason: '局部细节' }] }], edges: [] },
+    sceneSpec: { scenes: [{ id: 'overview-budget', duration_sec: 3, narration_text: '先看整体概览，再看局部细节', captions: [
+      { id: 'overview', start: 0, end: 1, text: '整体' },
+      { id: 'detail', start: 1, end: 3, text: '细节' },
+    ] }] },
+    creativeContext: { asset_context: { assets: ['a', 'b'].map(id => ({ id, requirement: 'required', image_analysis: { contains_text: true } })) } },
+  });
+  assert.equal(plan.diagnostics.some(item => item.code === 'required_asset_shot_timing_conflict'), false);
+  assert.equal(plan.beats[0].visual_base.sequence_mode, 'overview_detail');
+  assert.deepEqual(plan.beats[0].visual_base.shots[0].active_window, { time_base: 'scene_local', start_sec: 0, end_sec: 3 });
+  assert.deepEqual(plan.beats[0].visual_base.shots[1].active_window, { time_base: 'scene_local', start_sec: 1, end_sec: 3 });
+}
+
+// C-03 Review 2：全局字幕开关必须覆盖 scene raw captions，并且 canonical 根因不得产生级联诊断。
+{
+  const graph = { nodes: [{ id: 'global-caption-off', asset_refs: [{ asset_id: 'a' }] }], edges: [] };
+  const disabled = buildVisualPlan({
+    graph,
+    sceneSpec: { scenes: [{ id: 'global-caption-off', duration_sec: 2, captions: [null] }] },
+    creativeContext: { asset_context: { assets: [{ id: 'a' }] } },
+    mediaOptions: { generateCaptions: false },
+  });
+  assert.equal(disabled.diagnostics.some(item => item.code === 'image_sequence_caption_invalid'), false);
+  assert.deepEqual(disabled.beats[0].visual_base.shots[0].caption_ids, []);
+
+  const invalid = buildVisualPlan({
+    graph,
+    sceneSpec: { scenes: [{ id: 'global-caption-off', duration_sec: 0.5, captions: [null] }] },
+    creativeContext: { asset_context: { assets: [{ id: 'a', requirement: 'required', image_analysis: { contains_text: true } }] } },
+  });
+  assert.deepEqual(invalid.diagnostics.map(item => item.code), ['image_sequence_caption_invalid']);
+  assert.equal('active_window' in invalid.beats[0].visual_base.shots[0], false);
+}
+
+// C-03 Review 2：无字幕先尊重 mode；compare 并行，overview required 保持，optional 收口为 relay。
+{
+  const assets = ['a', 'b'].map(id => ({ id, requirement: 'optional' }));
+  const build = (id, kind, narration, reasons, registered = assets, duration = 4) => buildVisualPlan({
+    graph: { nodes: [{ id, asset_refs: reasons.map((reason, index) => ({ asset_id: assets[index].id, reason })) }], edges: [] },
+    sceneSpec: { scenes: [{ id, kind, duration_sec: duration, narration_text: '' }] },
+    creativeContext: { asset_context: { assets: registered } },
+  });
+  const compareOptional = build('compare-no-caption', 'comparison', '', ['方案A', '方案B']);
+  assert.equal(compareOptional.beats[0].visual_base.sequence_mode, 'semantic_compare');
+  assert.equal(compareOptional.beats[0].visual_base.shots.length, 2);
+  assert.ok(compareOptional.beats[0].visual_base.shots.every(shot => shot.active_window.start_sec === 0 && shot.active_window.end_sec === 4));
+
+  const requiredText = ['a', 'b'].map(id => ({ id, requirement: 'required', image_analysis: { contains_text: true } }));
+  const compareRequired = build('compare-required-no-caption', 'comparison', '', ['方案A', '方案B'], requiredText, 2);
+  assert.equal(compareRequired.diagnostics.some(item => item.code === 'required_asset_shot_timing_conflict'), false);
+  assert.equal(compareRequired.beats[0].visual_base.sequence_mode, 'semantic_compare');
+
+  const overviewOptional = build('overview-no-caption', 'text', '', ['整体概览', '局部细节']);
+  assert.equal(overviewOptional.beats[0].visual_base.sequence_mode, 'fullscreen_relay');
+  assert.equal(overviewOptional.beats[0].visual_base.shots.length, 1);
+
+  const overviewRequired = build('overview-required-no-caption', 'text', '', ['整体概览', '局部细节'], requiredText, 4);
+  assert.equal(overviewRequired.beats[0].visual_base.sequence_mode, 'overview_detail');
+  assert.deepEqual(overviewRequired.beats[0].visual_base.shots[0].active_window, { time_base: 'scene_local', start_sec: 0, end_sec: 4 });
+  assert.deepEqual(overviewRequired.beats[0].visual_base.shots[1].active_window, { time_base: 'scene_local', start_sec: 2, end_sec: 4 });
+}
+
+// C-03 Review 2：无字幕 relay 按异质 minimum 分窗；不足 1 秒的单 optional 收口为 diagram。
+{
+  const graph = { nodes: [{ id: 'no-caption-relay', asset_refs: [{ asset_id: 'text' }, { asset_id: 'plain' }] }], edges: [] };
+  const plan = buildVisualPlan({
+    graph,
+    sceneSpec: { scenes: [{ id: 'no-caption-relay', duration_sec: 3, narration_text: '' }] },
+    creativeContext: { asset_context: { assets: [
+      { id: 'text', requirement: 'required', image_analysis: { contains_text: true } },
+      { id: 'plain', requirement: 'required' },
+    ] } },
+  });
+  assert.deepEqual(plan.beats[0].visual_base.shots.map(shot => shot.active_window), [
+    { time_base: 'scene_local', start_sec: 0, end_sec: 2 },
+    { time_base: 'scene_local', start_sec: 2, end_sec: 3 },
+  ]);
+
+  for (const duration_sec of [0.5, 0.999]) {
+    const short = buildVisualPlan({
+      graph: { nodes: [{ id: 'too-short', asset_refs: [{ asset_id: 'optional' }] }], edges: [] },
+      sceneSpec: { scenes: [{ id: 'too-short', duration_sec, narration_text: '' }] },
+      creativeContext: { asset_context: { assets: [{ id: 'optional', requirement: 'optional' }] } },
+    });
+    assert.equal(short.beats[0].visual_base.type, 'diagram');
+    assert.ok(short.diagnostics.some(item => item.code === 'image_sequence_shots_reduced_for_duration'));
+  }
+}
 
 // P0-1：只有明确结构类型的 beat 有 motion_overlay，普通图片 beat 为 null
 // （原"每个 beat 必须有 preset"契约已废止，规格 §7.3/§16 P0-1）
