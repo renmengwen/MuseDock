@@ -117,6 +117,7 @@ allowed_paths:
   - tests/test-html-video-prepare-source-html.js
   - tests/test-creative-workflow-retry-planner.js
   - tests/test-html-video-workflow.js
+  - tests/test-html-video-per-scene-routing.js
   - tests/test-html-video-runtime-asset-policy-chromium.js
 forbidden_paths:
   - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
