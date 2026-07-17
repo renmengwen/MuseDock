@@ -152,6 +152,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
       evaluates: [],
     };
 
+    let startupFailureMode = false;
     const mockPlaywright = {
       chromium: {
         launch: async options => {
@@ -173,8 +174,11 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
                 evaluate: async fn => {
                   const source = String(fn);
                   calls.evaluates.push(source);
+                  if (source.includes('managed-shot-images')) return { success: true, count: 0 };
                   if (source.includes('getComputedStyle')) return 1800;
-                  if (source.includes('__hvPlayAll')) return true;
+                  if (source.includes('__hvPlayAll')) return startupFailureMode
+                    ? { success: false, errors: ['__hvPlayAll: boom'] }
+                    : { success: true, errors: [] };
                   return undefined;
                 },
                 waitForTimeout: async ms => { calls.waits.push(ms); },
@@ -253,6 +257,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     assert.match(playbackStart, /__hvPlaybackClock/);
     assert.ok(playbackStart.indexOf('__hvPlayAll') < playbackStart.indexOf('__hvUnfreeze'));
     assert.ok(playbackStart.indexOf('__hvUnfreeze') < playbackStart.indexOf('__hvPlaybackClock'));
+    assert.ok(calls.evaluates.some(source => source.includes('[data-hv-shot]') && source.includes('decode')), '正式 adapter 必须在启动前等待受管 Shot 图片 decode');
     assert.ok(calls.waits.includes(800), '录制结束前应有 800ms 尾部缓冲，保证 -ss 裁剪安全余量');
 
     assert.equal(calls.ffmpeg.length, 1);
@@ -268,13 +273,31 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     assert.ok(args.includes('tpad=stop_mode=clone:stop_duration=4'), '显式 duration 应 clone 尾帧补齐');
     assert.ok(args.includes('-ss'), '应按 leadInMs 裁剪 dead lead-in');
 
+    startupFailureMode = true;
+    let startupFailureFfmpegCalls = 0;
+    await assert.rejects(() => render(
+      {
+        template: { sourcePath },
+        security: { projectDir: workDir, assets: [], frameId: 'scene_startup_failure' },
+        config: { outputPath: path.join(workDir, 'startup-failure.mp4'), duration: 0.5, durationMode: 'explicit' },
+      },
+      {},
+      {
+        importPlaywright: async () => mockPlaywright,
+        runFfmpeg: async () => { startupFailureFfmpegCalls += 1; return { ok: true }; },
+        ffmpegPath: 'ffmpeg-mock',
+      },
+    ), error => error.code === 'render-playback-start-failed');
+    assert.equal(startupFailureFfmpegCalls, 0, '播放启动错误不得进入 ffmpeg');
+    startupFailureMode = false;
+
     let lateRouteHandler;
     let lateTriggered = false;
     let lateFfmpegCalls = 0;
     const latePage = {
       addInitScript: async () => {}, exposeBinding: async () => {}, on: () => {}, mainFrame: () => null,
       goto: async () => {},
-      evaluate: async fn => String(fn).includes('getComputedStyle') ? 0 : undefined,
+      evaluate: async fn => String(fn).includes('managed-shot-images') ? { success: true, count: 0 } : String(fn).includes('getComputedStyle') ? 0 : { success: true, errors: [] },
       waitForTimeout: async ms => {
         if (ms === 250 && !lateTriggered) {
           lateTriggered = true;
@@ -322,7 +345,7 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
       const page = {
         addInitScript: async () => {}, exposeBinding: async () => {}, on: () => {}, mainFrame: () => null,
         goto: async () => { if (trigger === 'goto') { await fireViolation(); throw new Error('ERR_BLOCKED_BY_CLIENT'); } },
-        evaluate: async fn => String(fn).includes('getComputedStyle') ? 0 : undefined,
+        evaluate: async fn => String(fn).includes('managed-shot-images') ? { success: true, count: 0 } : String(fn).includes('getComputedStyle') ? 0 : { success: true, errors: [] },
         waitForTimeout: async () => {},
       };
       const playwrightForTrigger = { chromium: { launch: async () => ({

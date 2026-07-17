@@ -1,6 +1,10 @@
 function buildPlaybackClockSource() {
   return `(function () {
-  if (window.__hvPlaybackClock) return;
+  function owned(clock) {
+    return clock && clock.__hvOwner === 'musedock-playback-clock-v1'
+      && ['subscribe','play','pause','timeSec','paused','setTime'].every(function (name) { return typeof clock[name] === 'function'; });
+  }
+  if (owned(window.__hvPlaybackClock)) return;
   var subscribers = [];
   var elapsed = 0;
   var origin = null;
@@ -19,6 +23,7 @@ function buildPlaybackClockSource() {
     frame = requestAnimationFrame(tick);
   }
   var clock = {
+    __hvOwner: 'musedock-playback-clock-v1',
     subscribe: function (render) {
       if (typeof render !== 'function') return function () {};
       subscribers.push(render);
@@ -54,7 +59,8 @@ function buildPlaybackClockSource() {
       notify();
     }
   };
-  window.__hvPlaybackClock = clock;
+  try { window.__hvPlaybackClock = clock; } catch (_) {}
+  if (window.__hvPlaybackClock !== clock) throw new Error('html-video 共享播放时钟被不可信全局占用。');
   if (!window.__mpAdapterControlled) setTimeout(function () { clock.play(); }, 250);
 })();`;
 }

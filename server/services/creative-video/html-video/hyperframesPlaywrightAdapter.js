@@ -250,6 +250,8 @@ async function render(input = {}, ctx = {}, deps = {}) {
       },
     });
     const page = await context.newPage();
+    const pageErrors = [];
+    page.on('pageerror', error => pageErrors.push(error?.message || String(error)));
 
     // goto 之前置受控标志：scene_html 时间线脚本据此不挂 5s 兜底自启，
     // 避免预加载 >5s 时兜底抢先起钟、adapter 的显式启动被幂等吞掉导致 origin 偏移。
@@ -276,11 +278,12 @@ async function render(input = {}, ctx = {}, deps = {}) {
         });
       };
       const attach = () => {
+        if (!document.documentElement) return;
         (document.head || document.documentElement).appendChild(style);
         pauseSmil();
+        observer.observe(document.documentElement, { childList: true, subtree: true });
       };
       const observer = new MutationObserver(pauseSmil);
-      observer.observe(document.documentElement, { childList: true, subtree: true });
       if (document.head || document.documentElement) attach();
       else document.addEventListener('DOMContentLoaded', attach, { once: true });
       window.__hvUnfreeze = () => {
@@ -313,6 +316,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     report(ctx, 32, '正在加载字体和样式...');
     await waitForStylesAndFonts(page);
     await waitForRenderReady(page, config);
+    await waitForManagedShotImages(page);
     throwIfPolicyViolated(collector);
 
     await page.waitForTimeout(100);
@@ -329,19 +333,32 @@ async function render(input = {}, ctx = {}, deps = {}) {
 
     // 正式录制起点：animation、解冻和 scene-local 时钟必须在同一个 JS task 启动，
     // 避免多个 evaluate 往返让 Caption/Beat/Shot 产生不同时间原点。
-    await page.evaluate(() => {
+    const startup = await page.evaluate(() => {
+      const errors = [];
+      const attempt = (name, action) => {
+        try { action(); } catch (error) { errors.push(`${name}: ${error?.message || String(error)}`); }
+      };
       window.__hvPlayed = true;
-      if (typeof window.__hvPlayAll === 'function') {
-        window.__hvPlayAll();
-      }
-      if (typeof window.__hvUnfreeze === 'function') window.__hvUnfreeze();
-      if (window.__hvPlaybackClock && typeof window.__hvPlaybackClock.play === 'function') {
-        window.__hvPlaybackClock.play();
-      } else if (typeof window.__mpStartBeatClock === 'function') {
-        window.__mpStartBeatClock();
-      }
-      return true;
-    }).catch(() => false);
+      attempt('__hvPlayAll', () => { if (typeof window.__hvPlayAll === 'function') window.__hvPlayAll(); });
+      attempt('__hvUnfreeze', () => { if (typeof window.__hvUnfreeze === 'function') window.__hvUnfreeze(); });
+      attempt('__hvPlaybackClock', () => {
+        if (window.__hvPlaybackClock) {
+          if (window.__hvPlaybackClock.__hvOwner !== 'musedock-playback-clock-v1' || typeof window.__hvPlaybackClock.play !== 'function') {
+            throw new Error('检测到不可信共享播放时钟。');
+          }
+          window.__hvPlaybackClock.play();
+        } else if (typeof window.__mpStartBeatClock === 'function') {
+          window.__mpStartBeatClock();
+        }
+      });
+      return { success: errors.length === 0, errors };
+    }).catch(error => ({ success: false, errors: [`evaluate: ${error?.message || String(error)}`] }));
+    if (pageErrors.length || !startup?.success) {
+      const errors = [...pageErrors, ...(Array.isArray(startup?.errors) ? startup.errors : [])];
+      const startupError = createRenderError('render-playback-start-failed', `html-video 播放启动失败：${errors.join('；') || '未知错误'}`);
+      startupError.details = { errors };
+      throw startupError;
+    }
 
     // 对应 html-video 源码段：记录 leadInMs，后续由 ffmpeg -ss 裁剪。
     leadInMs = now() - tWebmStart;
@@ -594,6 +611,29 @@ async function waitForRenderReady(page, config = {}) {
   }), { width: config.width, height: config.height }, { timeout: 5000 }).catch(() => {});
 }
 
+async function waitForManagedShotImages(page) {
+  const result = await page.evaluate(() => Promise.race([
+    (async () => {
+      const marker = 'managed-shot-images';
+      const images = Array.from(document.querySelectorAll('[data-hv-shot] img'));
+      try {
+        await Promise.all(images.map(async image => {
+          if (typeof image.decode === 'function') await image.decode();
+          if (!image.complete || image.naturalWidth <= 0) throw new Error(`图片不可解码：${image.getAttribute('src') || ''}`);
+        }));
+        return { success: true, count: images.length, marker };
+      } catch (error) {
+        return { success: false, count: images.length, message: error?.message || String(error), marker };
+      }
+    })(),
+    new Promise(resolve => setTimeout(() => resolve({ success: false, message: '受管 Shot 图片解码超时。', marker: 'managed-shot-images' }), 10000)),
+  ])).catch(error => ({ success: false, message: error?.message || String(error) }));
+  if (result?.success) return result;
+  const error = createRenderError('render-shot-image-not-ready', `html-video 受管 Shot 图片未就绪：${result?.message || '未知错误'}`);
+  error.details = { message: result?.message || '', count: Number(result?.count) || 0 };
+  throw error;
+}
+
 function buildFfmpegArgs({ webmPath, outputPath, fps, duration, explicit, leadInMs, inputDurationSec }) {
   const requestedSeekSec = leadInMs > 200 ? Math.max(0, (leadInMs - 120) / 1000) : 0;
   const outputDurationSec = Number(duration);
@@ -753,5 +793,6 @@ module.exports = {
   createRuntimeAssetPolicy,
   createViolationCollector,
   installRuntimeAssetPolicy,
+  waitForManagedShotImages,
   throwIfPolicyViolated,
 };

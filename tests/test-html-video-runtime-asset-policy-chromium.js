@@ -14,6 +14,7 @@ const {
   installRuntimeAssetPolicy,
   render,
   throwIfPolicyViolated,
+  waitForManagedShotImages,
 } = require('../server/services/creative-video/html-video/hyperframesPlaywrightAdapter');
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
@@ -87,6 +88,7 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
     };
     const shotNode = {
       id: 'scene:scene_shots',
+      duration_sec: 4,
       metadata: {
         visual_beats: [
           { id: 'beat_1', visual_base: visualBase },
@@ -94,7 +96,7 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
         ],
       },
     };
-    const shell = '<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;background:#111}</style></head><body data-hv-canvas data-width="640" data-height="360"><main></main></body></html>';
+    const shell = '<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;background:#111}main{position:relative;width:100%;height:100%}[data-test-overlay]{position:absolute;z-index:5;left:250px;top:150px;width:140px;height:60px;background:#fff;color:#000}</style></head><body data-hv-canvas data-width="640" data-height="360"><main><div data-test-overlay="overlay">模型文字 Overlay</div></main></body></html>';
     const materialized = materializeSceneImageSequenceDom({
       html: shell,
       node: shotNode,
@@ -140,7 +142,7 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
             shots: Array.from(document.querySelectorAll('[data-hv-shot][data-shot-active="true"]')).map(item => item.dataset.shotId),
             captions: Array.from(document.querySelectorAll('.hv-caption-item[data-hv-active="true"]')).map(item => item.dataset.captionId),
           }));
-          await page.waitForFunction(() => Array.from(document.images).every(image => image.complete && image.naturalWidth > 0));
+          await waitForManagedShotImages(page);
           const at = async time => page.evaluate(value => {
             window.__mpSetTimelineTime(value);
             return {
@@ -164,8 +166,21 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
             naturalWidth: image.naturalWidth,
             fit: getComputedStyle(image).objectFit,
           })));
+          const stacking = await page.evaluate(() => {
+            const overlay = document.querySelector('[data-test-overlay]');
+            const rect = overlay.getBoundingClientRect();
+            const elements = document.elementsFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            const activeShot = document.querySelector('[data-hv-shot][data-shot-active="true"]');
+            const shotStyle = getComputedStyle(activeShot);
+            return {
+              top: elements[0]?.getAttribute('data-test-overlay') || elements[0]?.getAttribute('data-shot-layer') || elements[0]?.tagName,
+              shotVisible: shotStyle.visibility === 'visible' && Number(shotStyle.opacity) > 0,
+              sequenceZ: getComputedStyle(document.querySelector('[data-hv-image-sequence]')).zIndex,
+              overlayZ: getComputedStyle(overlay).zIndex,
+            };
+          });
           throwIfPolicyViolated(collector);
-          return { preloaded, overlap, boundary, afterBoundary, tail, pausedBefore, pausedAfter, images };
+          return { preloaded, overlap, boundary, afterBoundary, tail, pausedBefore, pausedAfter, images, stacking };
         },
       },
     );
@@ -184,7 +199,129 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
     assert.equal(shotResult.images.length, 4);
     assert.ok(shotResult.images.every(image => image.complete && image.naturalWidth > 0));
     assert.deepEqual(shotResult.images.map(image => image.fit), ['cover', 'contain', 'cover', 'contain']);
+    assert.equal(shotResult.stacking.top, 'overlay');
+    assert.equal(shotResult.stacking.shotVisible, true);
+    assert.ok(Number(shotResult.stacking.overlayZ) > Number(shotResult.stacking.sequenceZ));
     assert.ok(requestedUrls.every(url => url.startsWith('file:')), `只允许 file: 请求：${requestedUrls.join(', ')}`);
+
+    async function adapterPlaywright({ delayPattern = '', delayMs = 0, capture = null } = {}) {
+      return {
+        chromium: {
+          launch: async options => {
+            const realBrowser = await playwright.chromium.launch(options);
+            return {
+              newContext: async contextOptions => {
+                const realContext = await realBrowser.newContext(contextOptions);
+                let slowRouteInstalled = false;
+                return new Proxy(realContext, {
+                  get(target, property) {
+                    if (property === 'route') return async (pattern, handler) => {
+                      await target.route(pattern, handler);
+                      if (!slowRouteInstalled && delayPattern && pattern === '**/*') {
+                        slowRouteInstalled = true;
+                        await target.route(delayPattern, async route => {
+                          capture && (capture.slow_request_started = true);
+                          await new Promise(resolve => setTimeout(resolve, delayMs));
+                          await route.fallback();
+                        });
+                      }
+                    };
+                    if (property === 'newPage') return async () => {
+                      const realPage = await target.newPage();
+                      return new Proxy(realPage, {
+                        get(pageTarget, pageProperty) {
+                          if (pageProperty === 'evaluate') return async (fn, ...args) => {
+                            if (capture && String(fn).includes('__hvPlayAll') && String(fn).includes('__hvUnfreeze')) {
+                              capture.pre_start = await pageTarget.evaluate(() => ({
+                                paused: window.__hvPlaybackClock?.paused?.(),
+                                time: window.__hvPlaybackClock?.timeSec?.(),
+                                images_ready: Array.from(document.querySelectorAll('[data-hv-shot] img')).every(image => image.complete && image.naturalWidth > 0),
+                              }));
+                            }
+                            return pageTarget.evaluate(fn, ...args);
+                          };
+                          const value = pageTarget[pageProperty];
+                          return typeof value === 'function' ? value.bind(pageTarget) : value;
+                        },
+                      });
+                    };
+                    const value = target[property];
+                    return typeof value === 'function' ? value.bind(target) : value;
+                  },
+                });
+              },
+              close: () => realBrowser.close(),
+            };
+          },
+        },
+      };
+    }
+
+    const productionCapture = {};
+    const productionOutput = path.join(projectDir, 'frames', 'shot-production.mp4');
+    const productionStarted = Date.now();
+    let productionFfmpegAt = 0;
+    const productionResult = await render({
+      template: { sourcePath: path.join(projectDir, 'frames', 'shot-timeline.html') },
+      security: { projectDir, assets: shotAssets, frameId: 'shot-production' },
+      config: { outputPath: productionOutput, resolution: { width: 640, height: 360 }, duration: 0.5, durationMode: 'explicit' },
+    }, {}, {
+      importPlaywright: async () => adapterPlaywright({ delayPattern: '**/shot-*.png', delayMs: 1500, capture: productionCapture }),
+      runFfmpeg: async () => {
+        productionFfmpegAt = Date.now();
+        await fsp.writeFile(productionOutput, Buffer.alloc(4096, 1));
+        return { ok: true, stdout: '', stderr: '' };
+      },
+      probeWebmDurationSec: async () => 5,
+      probeVideoStreams: async () => [{ codec_type: 'video' }],
+      ffmpegPath: 'ffmpeg-mock',
+    });
+    assert.equal(productionResult.diagnostics[0].code, 'frame_rendered');
+    assert.equal(productionCapture.slow_request_started, true);
+    assert.deepEqual(productionCapture.pre_start, { paused: true, time: 0, images_ready: true });
+    assert.ok(productionFfmpegAt - productionStarted >= 1400, 'production adapter 必须等待慢图 decode 后才进入录制/ffmpeg');
+
+    const brokenAsset = { id: 'broken', type: 'image', media_type: 'image', status: 'ready', path: 'assets/broken.png', frame_src: '../assets/broken.png' };
+    await fsp.writeFile(path.join(projectDir, brokenAsset.path), Buffer.from('not-a-png'));
+    const brokenNode = { id: 'scene:broken', duration_sec: 1, metadata: { visual_beat: { visual_base: {
+      type: 'image_sequence', sequence_mode: 'fullscreen_relay', shots: [{ id: 'broken_shot', asset_id: 'broken', role: 'showcase', requirement: 'required', caption_ids: [], minimum_visible_duration_sec: 1, active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 1 } }],
+    } } } };
+    const brokenMaterialized = materializeSceneImageSequenceDom({ html: shell, node: brokenNode, creativeContext: { asset_context: { assets: [brokenAsset] } } });
+    assert.equal(brokenMaterialized.success, true);
+    const brokenSource = path.join(projectDir, 'frames', 'shot-broken.html');
+    await fsp.writeFile(brokenSource, brokenMaterialized.html, 'utf8');
+    let brokenFfmpegCalls = 0;
+    const brokenError = await render({
+      template: { sourcePath: brokenSource }, security: { projectDir, assets: [brokenAsset], frameId: 'shot-broken' },
+      config: { outputPath: path.join(projectDir, 'frames', 'shot-broken.mp4'), duration: 0.5, durationMode: 'explicit' },
+    }, {}, {
+      importPlaywright: async () => adapterPlaywright(),
+      runFfmpeg: async () => { brokenFfmpegCalls += 1; return { ok: true }; }, ffmpegPath: 'ffmpeg-mock',
+    }).then(() => null, error => error);
+    assert.equal(brokenError?.code, 'render-shot-image-not-ready', JSON.stringify(brokenError?.details || {}));
+    assert.equal(brokenFfmpegCalls, 0);
+
+    const hostileClockSource = path.join(projectDir, 'frames', 'hostile-clock.html');
+    await fsp.writeFile(hostileClockSource, shotHtml.replace(/<body([^>]*)>/i, '<body$1><script>Object.defineProperty(window,"__hvPlaybackClock",{value:{},writable:false,configurable:false})</script>'), 'utf8');
+    let hostileClockFfmpeg = 0;
+    await assert.rejects(() => render({
+      template: { sourcePath: hostileClockSource }, security: { projectDir, assets: shotAssets, frameId: 'hostile-clock' },
+      config: { outputPath: path.join(projectDir, 'frames', 'hostile-clock.mp4'), duration: 0.5, durationMode: 'explicit' },
+    }, {}, {
+      importPlaywright: async () => adapterPlaywright(), runFfmpeg: async () => { hostileClockFfmpeg += 1; return { ok: true }; }, ffmpegPath: 'ffmpeg-mock',
+    }), error => error.code === 'render-playback-start-failed');
+    assert.equal(hostileClockFfmpeg, 0);
+
+    const throwingPlaySource = path.join(projectDir, 'frames', 'throwing-play.html');
+    await fsp.writeFile(throwingPlaySource, '<!doctype html><html><head></head><body><script>window.__hvPlayAll=function(){throw new Error("boom")}</script><main>画面</main></body></html>', 'utf8');
+    let throwingPlayFfmpeg = 0;
+    await assert.rejects(() => render({
+      template: { sourcePath: throwingPlaySource }, security: { projectDir, assets: [], frameId: 'throwing-play' },
+      config: { outputPath: path.join(projectDir, 'frames', 'throwing-play.mp4'), duration: 0.5, durationMode: 'explicit' },
+    }, {}, {
+      importPlaywright: async () => adapterPlaywright(), runFfmpeg: async () => { throwingPlayFfmpeg += 1; return { ok: true }; }, ffmpegPath: 'ffmpeg-mock',
+    }), error => error.code === 'render-playback-start-failed' && /__hvPlayAll/.test(error.message));
+    assert.equal(throwingPlayFfmpeg, 0);
 
     assert.deepEqual(await runCase(
       browser,

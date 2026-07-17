@@ -343,12 +343,9 @@ const stubAiImageModel = { isConfigured: async () => false };
               };
             }
             const frameId = request.audit?.frame_id || 'scene_free';
-            const imageTag = String(frameId).startsWith('scene_data')
-              ? '<img src="../assets/generated-01.png" alt="主视觉">'
-              : '';
             return {
               success: true,
-              text: `<!doctype html><html><body><main data-frame-id="${frameId}">${imageTag}<h1 data-text-key="headline">自由内容</h1><p data-text-key="subtitle">字幕</p><section data-text-key="body">正文</section></main></body></html>`,
+              text: `<!doctype html><html><body><main data-frame-id="${frameId}"><h1 data-text-key="headline">自由内容</h1><p data-text-key="subtitle">字幕</p><section data-text-key="body">正文</section></main></body></html>`,
             };
           },
         },
@@ -487,12 +484,9 @@ const stubAiImageModel = { isConfigured: async () => false };
                 };
               }
               const frameId = request.audit?.frame_id || 'scene_free';
-              const imageTag = String(frameId).startsWith('scene_data')
-                ? '<img src="../assets/generated-01.png" alt="主视觉">'
-                : '';
               return {
                 success: true,
-                text: `<!doctype html><html><body><main data-frame-id="${frameId}">${imageTag}<h1 data-text-key="headline">自由内容</h1><p data-text-key="subtitle">字幕</p><section data-text-key="body">正文</section></main></body></html>`,
+                text: `<!doctype html><html><body><main data-frame-id="${frameId}"><h1 data-text-key="headline">自由内容</h1><p data-text-key="subtitle">字幕</p><section data-text-key="body">正文</section></main></body></html>`,
               };
             },
           },

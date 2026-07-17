@@ -45,6 +45,7 @@ const context = {
 };
 context.window = context;
 context.globalThis = context;
+context.__hvPlaybackClock = {};
 
 const sceneScript = buildSceneTimelineScript([
   { id: 'beat_1', start_sec: 0, end_sec: 2 },

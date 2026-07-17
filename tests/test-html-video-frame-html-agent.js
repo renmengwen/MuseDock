@@ -994,6 +994,31 @@ assert.equal(noHtmlDocument.code, 'html_document_extract_failed');
   assert.equal(requiredAssetResult.success, true);
   assert.equal(requiredAssetCallCount, 2);
 
+  let duplicateSequenceCalls = 0;
+  const sequenceAsset = { id: 'sequence_a', media_type: 'image', status: 'ready', path: 'assets/sequence-a.png', frame_src: '../assets/sequence-a.png' };
+  const duplicateSequenceResult = await agent.generateFrameHtml({
+    model: {
+      callTextModel: async () => {
+        duplicateSequenceCalls += 1;
+        return { success: true, text: validAssetHtml('../assets/sequence-a.png') };
+      },
+    },
+    graph,
+    node: {
+      id: 'scene:sequence',
+      duration_sec: 3,
+      metadata: { visual_beat: { visual_base: { type: 'image_sequence', sequence_mode: 'fullscreen_relay', shots: [{
+        id: 'sequence_shot_01', asset_id: 'sequence_a', role: 'showcase', requirement: 'required', caption_ids: ['caption_1'],
+        minimum_visible_duration_sec: 1, active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 3 },
+      }] } } },
+    },
+    creativeContext: { asset_context: { assets: [sequenceAsset] } },
+    target: { resolution: { width: 1920, height: 1080 } },
+  });
+  assert.equal(duplicateSequenceResult.success, false, '首次与内部 retry 的美术壳重复 Shot src 后必须失败');
+  assert.equal(duplicateSequenceCalls, 2);
+  assert.equal(duplicateSequenceResult.diagnostics[0].code, 'frame_html_shot_contract_invalid');
+
   console.log('html-video frame html agent tests passed');
 })().catch(error => {
   console.error(error);

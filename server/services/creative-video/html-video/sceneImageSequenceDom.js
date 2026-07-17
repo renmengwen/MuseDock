@@ -1,4 +1,5 @@
 const MODES = new Set(['fullscreen_relay', 'overview_detail', 'semantic_compare', 'rhythm_montage']);
+const { extractVisualAssetReferences, htmlReferencesAsset } = require('./frameHtmlInspection');
 const { buildPlaybackClockSource } = require('./playbackClock');
 const START_MARKER = '<!-- hv-image-sequence:start -->';
 const END_MARKER = '<!-- hv-image-sequence:end -->';
@@ -58,16 +59,52 @@ function registryMap(creativeContext = {}) {
   const map = new Map();
   for (const asset of entries) {
     const id = String(asset?.id || asset?.asset_id || '').trim();
-    if (!id || map.has(id)) continue;
+    if (!id) continue;
+    if (map.has(id)) return fail(`素材注册表包含重复 ID：${id}。`);
     map.set(id, asset);
   }
-  return map;
+  return { success: true, map };
 }
 
 function registrySrc(asset = {}) {
-  const src = String(asset.frame_src || (asset.path ? `../${asset.path}` : '')).trim().replace(/\\/g, '/');
-  if (!src || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(src) || src.startsWith('/')) return '';
+  const assetPath = String(asset.path || '').trim().replace(/\\/g, '/');
+  const src = String(asset.frame_src || (assetPath ? `../${assetPath}` : '')).trim().replace(/\\/g, '/');
+  let decodedPath = assetPath;
+  let decodedSrc = src;
+  try {
+    decodedPath = decodeURIComponent(assetPath);
+    decodedSrc = decodeURIComponent(src);
+  } catch {
+    return '';
+  }
+  const safePath = decodedPath.startsWith('assets/')
+    && !decodedPath.includes('?')
+    && !decodedPath.includes('#')
+    && decodedPath.split('/').every(segment => segment && segment !== '.' && segment !== '..');
+  if (!safePath || decodedSrc !== `../${decodedPath}`) return '';
   return src;
+}
+
+function sceneDurationSec(node = {}) {
+  const candidates = [];
+  const windows = Array.isArray(node?.metadata?.beat_windows) ? node.metadata.beat_windows : [];
+  const windowEnd = windows.reduce((max, window) => {
+    const end = Number(window?.end_sec);
+    return Number.isFinite(end) && end > max ? end : max;
+  }, 0);
+  if (windowEnd > 0) candidates.push(windowEnd);
+  for (const value of [node.duration_sec, node.durationSec, node?.metadata?.duration_sec, node?.metadata?.scene_duration_sec]) {
+    const duration = Number(value);
+    if (Number.isFinite(duration) && duration > 0) candidates.push(duration);
+  }
+  const beats = Array.isArray(node?.metadata?.visual_beats) ? node.metadata.visual_beats : [];
+  const total = beats.reduce((sum, beat) => {
+    const duration = Number(beat?.duration_sec ?? beat?.durationSec);
+    return sum + (Number.isFinite(duration) && duration > 0 ? duration : 0);
+  }, 0);
+  if (total > 0) candidates.push(total);
+  if (!candidates.length) return 0;
+  return candidates.some(duration => Math.abs(duration - candidates[0]) > 1e-6) ? -1 : candidates[0];
 }
 
 function normalizeContract(node, creativeContext) {
@@ -82,7 +119,12 @@ function normalizeContract(node, creativeContext) {
   if (mode === 'overview_detail' && shots.length < 2) return fail('overview_detail 必须至少包含两个 Shot。');
   if (mode === 'rhythm_montage' && shots.length < 2) return fail('rhythm_montage 必须包含 2～4 个 Shot。');
 
-  const assets = registryMap(creativeContext);
+  const registry = registryMap(creativeContext);
+  if (!registry.success) return registry;
+  const assets = registry.map;
+  const sceneDuration = sceneDurationSec(node);
+  if (sceneDuration < 0) return fail('Image Sequence 的 Scene 时长字段不一致。');
+  if (!sceneDuration) return fail('无法确定 Image Sequence 的 Scene 时长。');
   const ids = new Set();
   const normalized = [];
   for (const shot of shots) {
@@ -96,6 +138,10 @@ function normalizeContract(node, creativeContext) {
     ids.add(id);
     if (window.time_base !== 'scene_local' || !Number.isFinite(start) || start < 0 || !Number.isFinite(end) || end <= start) {
       return fail(`Shot ${id} 的 scene-local active_window 无效。`);
+    }
+    if (end > sceneDuration + 1e-6) return fail(`Shot ${id} 的 active_window 超出 Scene 时长。`);
+    if (normalized.length && start + 1e-6 < normalized[normalized.length - 1].start_sec) {
+      return fail(`Shot ${id} 的 active_window 未按开始时间排序。`);
     }
     if (!Number.isFinite(minimum) || minimum <= 0 || end - start + 1e-6 < minimum) {
       return fail(`Shot ${id} 未满足最短可见时长。`);
@@ -118,20 +164,26 @@ function normalizeContract(node, creativeContext) {
       src,
     });
   }
+  let coveredUntil = 0;
+  for (const shot of normalized) {
+    if (shot.start_sec > coveredUntil + 1e-6) return fail('Image Sequence 的 active_window 存在空档。');
+    coveredUntil = Math.max(coveredUntil, shot.end_sec);
+  }
+  if (coveredUntil < sceneDuration - 1e-6) return fail('Image Sequence 未覆盖完整 Scene 时长。');
   if (mode === 'semantic_compare' && (
-    normalized[0].start_sec !== normalized[1].start_sec
-    || normalized[0].end_sec !== normalized[1].end_sec
-  )) return fail('semantic_compare 的两个 Shot 必须共享同一并行时间窗。');
+    normalized.some(shot => shot.start_sec !== 0 || Math.abs(shot.end_sec - sceneDuration) > 1e-6)
+  )) return fail('semantic_compare 的两个 Shot 必须共享完整 Scene 时间窗。');
   if (mode === 'overview_detail') {
     const overview = normalized[0];
-    if (normalized.slice(1).some(shot => shot.start_sec < overview.start_sec || shot.end_sec > overview.end_sec)) {
-      return fail('overview_detail 的 overview Shot 必须覆盖所有 detail 时间窗。');
+    if (overview.start_sec !== 0 || Math.abs(overview.end_sec - sceneDuration) > 1e-6) {
+      return fail('overview_detail 的 overview Shot 必须覆盖完整 Scene 时间窗。');
     }
   }
   return {
     success: true,
     contract: {
       scene_id: String(node?.scene_id || node?.metadata?.scene_id || node?.id || '').replace(/^scene:/, ''),
+      duration_sec: sceneDuration,
       mode,
       shots: normalized,
     },
@@ -173,7 +225,8 @@ function renderDom(contract) {
   return [
     START_MARKER,
     '<style data-hv-image-sequence-style="true">',
-    '[data-hv-image-sequence]{position:absolute;inset:0;z-index:1;overflow:hidden;pointer-events:none}',
+    '[data-hv-image-sequence]{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none}',
+    'body>:not([data-hv-image-sequence]):not(style):not(script){position:relative;z-index:1}',
     '[data-hv-shot]{position:absolute;inset:0;margin:0;opacity:0;visibility:hidden;transition:opacity .35s ease,transform .35s ease;transform:translate3d(0,8px,0)}',
     '[data-hv-shot][data-shot-active="true"]{opacity:1;visibility:visible;transform:none}',
     '[data-hv-shot] img{position:absolute;inset:0;width:100%;height:100%}',
@@ -202,6 +255,16 @@ function markerRange(html) {
   return { start, end: end + END_MARKER.length };
 }
 
+function withoutManagedBlock(text, range) {
+  return range.start >= 0 ? text.slice(0, range.start) + text.slice(range.end) : text;
+}
+
+function validateNoDuplicateShotReferences(html, range, contract) {
+  const references = new Set(extractVisualAssetReferences(withoutManagedBlock(html, range)).map(item => item.reference));
+  const duplicate = contract.shots.find(shot => htmlReferencesAsset(references, [shot.src]));
+  return duplicate ? fail(`模型美术壳重复引用了 Shot 素材 ${duplicate.asset_id}。`) : { success: true };
+}
+
 function validateSceneImageSequenceDom(html, { node = {}, creativeContext = {} } = {}) {
   const normalized = normalizeContract(node, creativeContext);
   if (!normalized.success || !normalized.contract) return normalized;
@@ -209,6 +272,8 @@ function validateSceneImageSequenceDom(html, { node = {}, creativeContext = {} }
   const range = markerRange(text);
   if (!range || range.start < 0) return fail('Frame HTML 缺少受管 Image Sequence DOM。');
   const managed = text.slice(range.start, range.end);
+  const duplicateReferences = validateNoDuplicateShotReferences(text, range, normalized.contract);
+  if (!duplicateReferences.success) return duplicateReferences;
   if ((text.match(/<section\b[^>]*\bdata-hv-image-sequence\s*=/gi) || []).length !== 1) return fail('Frame HTML 的 Image Sequence 根节点数量不等于 1。');
   if ((text.match(/<figure\b[^>]*\bdata-hv-shot\s*=/gi) || []).length !== normalized.contract.shots.length) return fail('Frame HTML 的 Shot DOM 数量与计划不一致。');
   if (!managed.includes(`data-sequence-mode="${escapeHtml(normalized.contract.mode)}"`)) return fail('Frame HTML 的 Sequence Mode 与计划不一致。');
@@ -248,10 +313,12 @@ function materializeSceneImageSequenceDom({ html = '', node = {}, creativeContex
   const text = String(html || '');
   const range = markerRange(text);
   if (!range) return fail('Frame HTML 中的受管 Image Sequence 标记损坏。');
-  const withoutManaged = range.start >= 0 ? text.slice(0, range.start) + text.slice(range.end) : text;
+  const withoutManaged = withoutManagedBlock(text, range);
   if (/\bdata-hv-shot\s*=|\bdata-hv-image-sequence\s*=/i.test(withoutManaged)) {
     return fail('模型不得自行生成 Shot DOM。');
   }
+  const duplicateReferences = validateNoDuplicateShotReferences(text, range, normalized.contract);
+  if (!duplicateReferences.success) return duplicateReferences;
   const closingBody = withoutManaged.toLowerCase().lastIndexOf('</body>');
   if (closingBody < 0) return fail('Frame HTML 缺少 closing body，无法注入 Shot DOM。');
   const dom = renderDom(normalized.contract);

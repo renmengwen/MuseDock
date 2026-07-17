@@ -31,6 +31,7 @@ function node(mode, shots) {
   const visualBase = { type: 'image_sequence', sequence_mode: mode, shots };
   return {
     id: 'scene:scene_01',
+    duration_sec: 4,
     metadata: {
       visual_beats: [
         { id: 'scene_01_b1', visual_base: visualBase },
@@ -41,6 +42,35 @@ function node(mode, shots) {
 }
 
 const shell = '<!doctype html><html><head></head><body data-hv-canvas><main>美术壳</main></body></html>';
+
+for (const duplicateMarkup of [
+  '<img src="../assets/a.png">',
+  '<style>.duplicate{background-image:url(../assets/a.png)}</style>',
+  '<svg><image href="../assets/a.png"></image></svg>',
+]) {
+  const duplicate = materializeSceneImageSequenceDom({
+    html: shell.replace('<main>美术壳</main>', `<main>美术壳${duplicateMarkup}</main>`),
+    node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]),
+    creativeContext: { asset_context: { assets } },
+  });
+  assert.equal(duplicate.success, false, `美术壳重复 Shot 图片必须阻断：${duplicateMarkup}`);
+  assert.equal(duplicate.code, 'frame_html_shot_contract_invalid');
+}
+
+{
+  const literalsOnly = materializeSceneImageSequenceDom({
+    html: shell.replace('<main>美术壳</main>', '<main>美术壳<!-- <img src="../assets/a.png"> --><script>const fake="../assets/a.png";</script></main>'),
+    node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]),
+    creativeContext: { asset_context: { assets } },
+  });
+  assert.equal(literalsOnly.success, true, '注释和 script 字符串不得产生假阳性');
+  const injectedDuplicate = literalsOnly.html.replace('</main>', '<img src="../assets/a.png"></main>');
+  assert.equal(materializeSceneImageSequenceDom({
+    html: injectedDuplicate,
+    node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]),
+    creativeContext: { asset_context: { assets } },
+  }).success, false, '阶段二次物化也必须检查 managed block 外的重复引用');
+}
 
 for (const [mode, shots] of [
   ['fullscreen_relay', [shot('s1', 'a', 0, 2.2), shot('s2', 'b', 1.8, 4)]],
@@ -104,12 +134,34 @@ for (const bad of [
   node('semantic_compare', [shot('s1', 'a', 0, 4)]),
   node('semantic_compare', [shot('s1', 'a', 0, 4), shot('s2', 'b', 1, 4)]),
   node('overview_detail', [shot('s1', 'a', 0, 3, { role: 'overview' }), shot('s2', 'b', 2, 4, { role: 'detail' })]),
+  { ...node('fullscreen_relay', [shot('s1', 'a', 10, 12)]), duration_sec: 4 },
+  { ...node('fullscreen_relay', [shot('s1', 'a', 0, 1), shot('s2', 'b', 2, 4)]), duration_sec: 4 },
+  { ...node('fullscreen_relay', [shot('s1', 'a', 0, 3), shot('s2', 'b', 2, 4)]), duration_sec: 5 },
+  { ...node('fullscreen_relay', [shot('s1', 'a', 2, 4), shot('s2', 'b', 0, 2)]), duration_sec: 4 },
+  { ...node('semantic_compare', [shot('s1', 'a', 0.5, 4), shot('s2', 'b', 0.5, 4)]), duration_sec: 4 },
+  { ...node('overview_detail', [shot('s1', 'a', 0, 3, { role: 'overview' }), shot('s2', 'b', 1, 3, { role: 'detail' })]), duration_sec: 4 },
+  { ...node('fullscreen_relay', [shot('s1', 'a', 0, 4)]), duration_sec: 5, metadata: { ...node('fullscreen_relay', [shot('s1', 'a', 0, 4)]).metadata, beat_windows: [{ id: 'b1', start_sec: 0, end_sec: 4 }] } },
 ]) {
   const result = materializeSceneImageSequenceDom({ html: shell, node: bad, creativeContext: { asset_context: { assets } } });
   assert.equal(result.success, false);
   assert.equal(result.code, 'frame_html_shot_contract_invalid');
   assert.equal(result.retryable, true);
   assert.equal(result.repair_action, 'retry_frame_html');
+}
+
+for (const badAssets of [
+  [...assets, { ...assets[0] }],
+  assets.map(asset => asset.id === 'a' ? { ...asset, path: '../outside.png', frame_src: '../../outside.png' } : asset),
+  assets.map(asset => asset.id === 'a' ? { ...asset, path: 'assets/a.png', frame_src: 'C:/outside.png' } : asset),
+  assets.map(asset => asset.id === 'a' ? { ...asset, path: 'assets/a.png', frame_src: 'https://evil.example/a.png' } : asset),
+  assets.map(asset => asset.id === 'a' ? { ...asset, path: 'assets/a.png', frame_src: 'assets/a.png' } : asset),
+]) {
+  const result = materializeSceneImageSequenceDom({
+    html: shell,
+    node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]),
+    creativeContext: { asset_context: { assets: badAssets } },
+  });
+  assert.equal(result.success, false, '重复 registry ID 或逃逸 src 必须阻断');
 }
 
 {
