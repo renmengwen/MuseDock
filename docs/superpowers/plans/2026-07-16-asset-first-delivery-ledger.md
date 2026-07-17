@@ -80,12 +80,49 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-06b 受控 derived 素材登记 | `complete` | B-01 | `ca45e1d` | 双 Review PASS，已在 dev 重跑目标测试并释放租约 |
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
-| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `in_progress` | B-07b | `df9a519` | C-01 完成；下一步 C-02 Image Sequence 选择与 workflow 重排 |
+| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `in_progress` | B-07b | `df9a519` | C-01 完成；C-02 Image Sequence 选择与 workflow 重排正在执行 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
 
 ## 当前写租约
+
+```yaml
+task_id: C-02
+status: in_progress
+owner: /root/phase_c02_writer
+lease_released: false
+code_base_commit: a0666dd12995f0ec4db94273f29646fd436cc46b
+worktree: D:\code3\MuseDock-worktrees\asset-first-c02
+branch: codex/asset-first-c02
+allowed_paths:
+  - server/services/creative-video/html-video/visualPlanService.js
+  - server/services/creative-video/html-video/htmlVideoWorkflow.js
+  - server/services/creative-video/html-video/framePromptBuilder.js
+  - server/services/creative-video/html-video/frameHtmlPhaseSupport.js
+  - tests/test-html-video-visual-plan.js
+  - tests/test-html-video-workflow.js
+  - tests/test-html-video-asset-first-prompts.js
+  - tests/test-html-video-frame-html-resume.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative-video/html-video/contentGraphAgent.js
+  - server/services/creative-video/html-video/motionPrimitiveCatalog.js
+state_owners:
+  - visual_plan.beats[].visual_base.image_sequence
+  - visual_plan.input_fingerprint
+exclusive_resources:
+  - C-02 Node tests run serially inside the worker worktree
+  - no browser, ports, ffmpeg, network or frontend build
+verification:
+  - node tests/test-html-video-visual-plan.js
+  - node tests/test-html-video-asset-first-prompts.js
+  - node tests/test-html-video-frame-html-resume.js
+  - node tests/test-html-video-workflow.js
+review:
+  spec: pending
+  quality: pending
+```
 
 ```yaml
 task_id: C-01
