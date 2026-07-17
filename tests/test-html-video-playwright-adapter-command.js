@@ -256,8 +256,12 @@ const { diagnoseEnvironment } = require('../server/services/creative-video/html-
     const playbackStart = calls.evaluates.find(source => source.includes('__hvPlayAll') && source.includes('__hvUnfreeze'));
     assert.ok(playbackStart, 'animation、解冻和共享时钟必须在同一次 evaluate 启动');
     assert.match(playbackStart, /__hvPlaybackClock/);
+    assert.match(playbackStart, /\.pause\(\)/, '正式启动必须先暂停可能提前运行的共享时钟');
+    assert.match(playbackStart, /\.setTime\(0\)/, '正式启动必须把共享时钟归零');
+    assert.match(playbackStart, /timeSec\(\)/, '正式启动必须验证时钟从零开始');
+    assert.ok(playbackStart.indexOf("__hvPlaybackClock.reset") < playbackStart.indexOf('__hvPlayAll'));
     assert.ok(playbackStart.indexOf('__hvPlayAll') < playbackStart.indexOf('__hvUnfreeze'));
-    assert.ok(playbackStart.indexOf('__hvUnfreeze') < playbackStart.indexOf('__hvPlaybackClock'));
+    assert.ok(playbackStart.indexOf('__hvUnfreeze') < playbackStart.lastIndexOf("attempt('__hvPlaybackClock'"));
     assert.ok(calls.evaluates.some(source => source.includes('[data-hv-shot]') && source.includes('decode')), '正式 adapter 必须在启动前等待受管 Shot 图片 decode');
     assert.ok(calls.waits.includes(800), '录制结束前应有 800ms 尾部缓冲，保证 -ss 裁剪安全余量');
 

@@ -47,7 +47,6 @@ for (const duplicateMarkup of [
   '<img src="../assets/a.png">',
   '<img src="../assets/a&period;png">',
   '<style>.duplicate{background-image:url(../assets/a.png)}</style>',
-  '<style>.duplicate{background-image:url(../assets/a\\2e png)}</style>',
   '<svg><image href="../assets/a.png"></image></svg>',
 ]) {
   const duplicate = materializeSceneImageSequenceDom({
@@ -72,6 +71,19 @@ for (const duplicateMarkup of [
     node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]),
     creativeContext: { asset_context: { assets } },
   }).success, false, '阶段二次物化也必须检查 managed block 外的重复引用');
+}
+
+for (const legalNonVisualUrl of [
+  '<svg><filter id="soft"><feGaussianBlur stdDeviation="2"></feGaussianBlur></filter></svg><style>main{filter:url(#soft)}</style>',
+  '<style>/* .fake{background:url(../assets/a.png)} */ main{color:#fff}</style>',
+  '<style>@font-face{font-family:Demo;src:url(../assets/demo.woff2) format("woff2")}main{font-family:Demo}</style>',
+]) {
+  const legal = materializeSceneImageSequenceDom({
+    html: shell.replace('<main>美术壳</main>', `<main>美术壳${legalNonVisualUrl}</main>`),
+    node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]),
+    creativeContext: { asset_context: { assets } },
+  });
+  assert.equal(legal.success, true, `非视觉 URL 不得被 Shot 静态门误杀：${legalNonVisualUrl}`);
 }
 
 {

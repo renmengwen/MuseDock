@@ -319,6 +319,8 @@ async function render(input = {}, ctx = {}, deps = {}) {
       throw createRenderError('render-goto-timeout', `加载 html-video 模板超时或失败：${error.message}`);
     }
     throwIfPolicyViolated(collector);
+    await calibratePlaybackClock(page);
+    await assertManagedVisualRuntime(page);
 
     // 对应 html-video 源码段：等待 stylesheet、逐个 fonts.load、fonts.ready。
     report(ctx, 32, '正在加载字体和样式...');
@@ -326,6 +328,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     await waitForRenderReady(page, config);
     await waitForManagedShotImages(page, Number(deps.managedShotImageTimeoutMs) || 10000);
     throwIfPolicyViolated(collector);
+    await assertManagedVisualRuntime(page);
     throwIfPageErrored(pageErrors, 'render-playback-start-failed');
 
     await page.waitForTimeout(100);
@@ -349,15 +352,29 @@ async function render(input = {}, ctx = {}, deps = {}) {
         try { action(); } catch (error) { errors.push(`${name}: ${error?.message || String(error)}`); }
       };
       window.__hvPlayed = true;
+      attempt('__hvPlaybackClock.reset', () => {
+        if (!window.__hvPlaybackClock) return;
+        if (window.__hvPlaybackClock.__hvOwner !== 'musedock-playback-clock-v1'
+          || typeof window.__hvPlaybackClock.pause !== 'function'
+          || typeof window.__hvPlaybackClock.setTime !== 'function'
+          || typeof window.__hvPlaybackClock.play !== 'function'
+          || typeof window.__hvPlaybackClock.timeSec !== 'function'
+          || typeof window.__hvPlaybackClock.paused !== 'function') {
+          throw new Error('检测到不可信共享播放时钟。');
+        }
+        window.__hvPlaybackClock.pause();
+        window.__hvPlaybackClock.setTime(0);
+        if (window.__hvPlaybackClock.paused() !== true || Math.abs(window.__hvPlaybackClock.timeSec()) > 0.001) {
+          throw new Error('共享播放时钟未归零。');
+        }
+      });
       attempt('__hvPlayAll', () => { if (typeof window.__hvPlayAll === 'function') window.__hvPlayAll(); });
       attempt('__hvUnfreeze', () => { if (typeof window.__hvUnfreeze === 'function') window.__hvUnfreeze(); });
       attempt('__hvPlaybackClock', () => {
         if (window.__hvPlaybackClock) {
-          if (window.__hvPlaybackClock.__hvOwner !== 'musedock-playback-clock-v1' || typeof window.__hvPlaybackClock.play !== 'function') {
-            throw new Error('检测到不可信共享播放时钟。');
-          }
           window.__hvPlaybackClock.play();
           if (window.__hvPlaybackClock.paused() !== false) throw new Error('共享播放时钟未进入 running 状态。');
+          if (Math.abs(window.__hvPlaybackClock.timeSec()) > 0.05) throw new Error('共享播放时钟未从 Scene 起点启动。');
         } else if (typeof window.__mpStartBeatClock === 'function') {
           window.__mpStartBeatClock();
         }
@@ -370,22 +387,26 @@ async function render(input = {}, ctx = {}, deps = {}) {
       startupError.details = { errors };
       throw startupError;
     }
+    await assertManagedVisualRuntime(page);
 
     // 对应 html-video 源码段：记录 leadInMs，后续由 ffmpeg -ss 裁剪。
     leadInMs = now() - tWebmStart;
 
     report(ctx, 40, `正在录制 ${totalDuration}s html-video 帧...`);
-    await waitWithProgress(page, ctx, totalDuration, () => {
+    await waitWithProgress(page, ctx, totalDuration, async () => {
       throwIfPolicyViolated(collector);
       throwIfPageErrored(pageErrors);
+      await assertManagedVisualRuntime(page);
     });
     await page.waitForTimeout(RECORD_TAIL_BUFFER_MS).catch(() => {});
     throwIfPolicyViolated(collector);
     throwIfPageErrored(pageErrors);
+    await assertManagedVisualRuntime(page);
 
     report(ctx, 85, '正在结束浏览器录制...');
     throwIfPolicyViolated(collector);
     throwIfPageErrored(pageErrors);
+    await assertManagedVisualRuntime(page);
     await context.close();
     await new Promise(resolve => setImmediate(resolve));
     throwIfPolicyViolated(collector);
@@ -596,7 +617,7 @@ async function waitWithProgress(page, ctx, durationSec, checkPolicy = null) {
     const remaining = totalMs - (Date.now() - started);
     await page.waitForTimeout(Math.min(250, Math.max(0, remaining)));
     const elapsed = Math.min(totalMs, Date.now() - started);
-    if (checkPolicy) checkPolicy();
+    if (checkPolicy) await checkPolicy();
     report(ctx, 40 + Math.floor((elapsed / totalMs) * 45), '正在录制 html-video 帧...');
   }
 }
@@ -651,6 +672,83 @@ async function waitForManagedShotImages(page, timeoutMs = 10000) {
   if (result?.success) return result;
   const error = createRenderError('render-shot-image-not-ready', `html-video 受管 Shot 图片未就绪：${result?.message || '未知错误'}`);
   error.details = { message: result?.message || '', count: Number(result?.count) || 0 };
+  throw error;
+}
+
+async function calibratePlaybackClock(page) {
+  const result = await page.evaluate(() => {
+    const clock = window.__hvPlaybackClock;
+    if (!clock) return { success: true, applied: false };
+    try {
+      if (clock.__hvOwner !== 'musedock-playback-clock-v1'
+        || typeof clock.pause !== 'function'
+        || typeof clock.setTime !== 'function'
+        || typeof clock.timeSec !== 'function'
+        || typeof clock.paused !== 'function') throw new Error('检测到不可信共享播放时钟。');
+      clock.pause();
+      clock.setTime(0);
+      if (clock.paused() !== true || Math.abs(clock.timeSec()) > 0.001) throw new Error('共享播放时钟未归零。');
+      return { success: true, applied: true };
+    } catch (error) {
+      return { success: false, message: error?.message || String(error) };
+    }
+  }).catch(error => ({ success: false, message: error?.message || String(error) }));
+  if (result?.success !== false) return result;
+  throw createRenderError('render-playback-start-failed', `html-video 播放时钟预加载校准失败：${result.message || '未知错误'}`);
+}
+
+async function assertManagedVisualRuntime(page) {
+  const result = await page.evaluate(() => {
+    const root = document.querySelector('[data-hv-image-sequence]');
+    if (!root) return { success: true, applied: false };
+    const offenders = [];
+    const describe = element => ({
+      tag: element.tagName?.toLowerCase() || '',
+      src: element.currentSrc || element.getAttribute?.('src') || element.getAttribute?.('srcset')
+        || element.getAttribute?.('href') || element.getAttribute?.('xlink:href') || element.getAttribute?.('poster') || '',
+    });
+    for (const element of document.querySelectorAll('img,picture source,svg image,video[poster],input[type="image" i]')) {
+      const layer = element.getAttribute?.('data-shot-layer');
+      const shot = element.parentElement?.matches?.('[data-hv-shot]') ? element.parentElement : null;
+      const managed = element.tagName?.toLowerCase() === 'img'
+        && root.contains(element)
+        && shot
+        && (layer === 'background' || layer === 'foreground');
+      if (!managed) offenders.push({ kind: 'unmanaged_visual_element', ...describe(element) });
+    }
+    const current = new URL(location.href);
+    current.hash = '';
+    const externalUrls = value => {
+      const urls = [];
+      for (const match of String(value || '').matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)/gi)) {
+        const raw = match[1] ?? match[2] ?? match[3] ?? '';
+        try {
+          const target = new URL(raw, location.href);
+          const withoutHash = new URL(target.href);
+          withoutHash.hash = '';
+          if (!target.hash || withoutHash.href !== current.href) urls.push(target.href);
+        } catch {
+          urls.push(raw);
+        }
+      }
+      return urls;
+    };
+    const properties = ['backgroundImage', 'maskImage', 'webkitMaskImage', 'borderImageSource', 'listStyleImage'];
+    for (const element of document.querySelectorAll('*')) {
+      if (root.contains(element)) continue;
+      const style = getComputedStyle(element);
+      for (const property of properties) {
+        const urls = externalUrls(style[property]);
+        if (urls.length) offenders.push({ kind: 'unmanaged_computed_visual', tag: element.tagName.toLowerCase(), property, urls });
+      }
+    }
+    return offenders.length ? { success: false, offenders } : { success: true, applied: true };
+  }).catch(error => ({ success: false, message: error?.message || String(error), offenders: [] }));
+  if (result?.success !== false) return result;
+  const error = createRenderError('frame_html_shot_contract_invalid', `Image Sequence 运行时发现未受管视觉素材：${result.message || '模型美术壳不得创建外部视觉元素。'}`);
+  error.retryable = true;
+  error.repair_action = 'retry_frame_html';
+  error.details = { validation_code: 'frame_html_shot_contract_invalid', offenders: result.offenders || [] };
   throw error;
 }
 
@@ -821,6 +919,7 @@ module.exports = {
   createRuntimeAssetPolicy,
   createViolationCollector,
   installRuntimeAssetPolicy,
+  assertManagedVisualRuntime,
   waitForManagedShotImages,
   throwIfPolicyViolated,
 };

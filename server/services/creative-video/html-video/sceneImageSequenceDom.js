@@ -263,9 +263,9 @@ function withoutManagedBlock(text, range) {
 
 function validateNoDuplicateShotReferences(html, range) {
   const shell = withoutManagedBlock(html, range);
-  const references = extractVisualAssetReferences(shell);
-  const searchable = shell.replace(/<!--[\s\S]*?-->/g, '').replace(/<script\b[\s\S]*?<\/script>/gi, '');
-  return references.length || /\burl\s*\(|(?:-webkit-)?image-set\s*\(/i.test(searchable)
+  const visualShell = shell.replace(/@font-face\s*\{[^{}]*\}/gi, '');
+  const references = extractVisualAssetReferences(visualShell);
+  return references.length
     ? fail('Image Sequence 模型美术壳不得输出任何外部视觉素材。', {
     offending_references: references.map(item => item.reference),
     }) : { success: true };

@@ -253,7 +253,17 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
                                 images_ready: Array.from(document.querySelectorAll('[data-hv-shot] img')).every(image => image.complete && image.naturalWidth > 0),
                               }));
                             }
-                            return pageTarget.evaluate(fn, ...args);
+                            const result = await pageTarget.evaluate(fn, ...args);
+                            if (capture && String(fn).includes('__hvPlayAll') && String(fn).includes('__hvUnfreeze')) {
+                              capture.post_start = await pageTarget.evaluate(() => ({
+                                paused: window.__hvPlaybackClock?.paused?.(),
+                                time: window.__hvPlaybackClock?.timeSec?.(),
+                                beat: document.body.dataset.mpBeat,
+                                shots: Array.from(document.querySelectorAll('[data-hv-shot][data-shot-active="true"]')).map(item => item.dataset.shotId),
+                                captions: Array.from(document.querySelectorAll('.hv-caption-item[data-hv-active="true"]')).map(item => item.dataset.captionId),
+                              }));
+                            }
+                            return result;
                           };
                           const value = pageTarget[pageProperty];
                           return typeof value === 'function' ? value.bind(pageTarget) : value;
@@ -294,7 +304,52 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
     assert.equal(productionResult.diagnostics[0].code, 'frame_rendered');
     assert.equal(productionCapture.slow_request_started, true);
     assert.deepEqual(productionCapture.pre_start, { paused: true, time: 0, images_ready: true });
+    assert.equal(productionCapture.post_start.paused, false);
+    assert.ok(productionCapture.post_start.time >= 0 && productionCapture.post_start.time < 0.1);
+    assert.equal(productionCapture.post_start.beat, 'beat_1');
+    assert.deepEqual(productionCapture.post_start.shots, ['shot_a']);
+    assert.deepEqual(productionCapture.post_start.captions, ['caption_1']);
     assert.ok(productionFfmpegAt - productionStarted >= 1400, 'production adapter 必须等待慢图 decode 后才进入录制/ffmpeg');
+
+    const earlyPlaySource = path.join(projectDir, 'frames', 'shot-early-play.html');
+    await fsp.writeFile(earlyPlaySource, shotHtml.replace('<main>', '<script>window["__hvPlay"+"backClock"].play()</script><main>'), 'utf8');
+    const earlyPlayCapture = {};
+    const earlyPlayOutput = path.join(projectDir, 'frames', 'shot-early-play.mp4');
+    await render({
+      template: { sourcePath: earlyPlaySource }, security: { projectDir, assets: shotAssets, frameId: 'shot-early-play' },
+      config: { outputPath: earlyPlayOutput, resolution: { width: 640, height: 360 }, duration: 0.5, durationMode: 'explicit' },
+    }, {}, {
+      importPlaywright: async () => adapterPlaywright({ delayPattern: '**/shot-*.png', delayMs: 1200, capture: earlyPlayCapture }),
+      runFfmpeg: async () => { await fsp.writeFile(earlyPlayOutput, Buffer.alloc(4096, 1)); return { ok: true }; },
+      probeWebmDurationSec: async () => 5,
+      probeVideoStreams: async () => [{ codec_type: 'video' }],
+      ffmpegPath: 'ffmpeg-mock',
+    });
+    assert.deepEqual(earlyPlayCapture.pre_start, { paused: true, time: 0, images_ready: true }, '长预加载前必须校准 computed-property 提前启动的 Clock');
+    assert.equal(earlyPlayCapture.post_start.paused, false);
+    assert.ok(earlyPlayCapture.post_start.time >= 0 && earlyPlayCapture.post_start.time < 0.1);
+    assert.equal(earlyPlayCapture.post_start.beat, 'beat_1');
+    assert.deepEqual(earlyPlayCapture.post_start.shots, ['shot_a']);
+    assert.deepEqual(earlyPlayCapture.post_start.captions, ['caption_1']);
+
+    for (const [name, attack] of [
+      ['dynamic-managed-visual', '<script>window.__hvPlayAll=function(){const image=new Image();image.src="../assets/shot-a.png";document.body.appendChild(image)}</script>'],
+      ['escaped-css-visual', '<style>.rogue{background-image:u\\72l("../assets/shot-a.png")}</style><div class="rogue">rogue</div>'],
+      ['escaped-css-path', '<style>.rogue{background-image:url(../assets/shot-a\\2e png)}</style><div class="rogue">rogue</div>'],
+    ]) {
+      const source = path.join(projectDir, 'frames', `${name}.html`);
+      await fsp.writeFile(source, shotHtml.replace('<main>', `${attack}<main>`), 'utf8');
+      let ffmpegCalls = 0;
+      await assert.rejects(() => render({
+        template: { sourcePath: source }, security: { projectDir, assets: shotAssets, frameId: name },
+        config: { outputPath: path.join(projectDir, 'frames', `${name}.mp4`), duration: 0.5, durationMode: 'explicit' },
+      }, {}, {
+        importPlaywright: async () => adapterPlaywright(),
+        runFfmpeg: async () => { ffmpegCalls += 1; return { ok: true }; },
+        ffmpegPath: 'ffmpeg-mock',
+      }), error => error.code === 'frame_html_shot_contract_invalid');
+      assert.equal(ffmpegCalls, 0, `${name} 不得进入 ffmpeg`);
+    }
 
     const brokenAsset = { id: 'broken', type: 'image', media_type: 'image', status: 'ready', path: 'assets/broken.png', frame_src: '../assets/broken.png' };
     await fsp.writeFile(path.join(projectDir, brokenAsset.path), Buffer.from('not-a-png'));
