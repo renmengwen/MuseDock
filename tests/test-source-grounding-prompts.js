@@ -198,7 +198,8 @@ assert.match(assetGraphPrompt, /图片分析/);
 assert.match(assetGraphPrompt, /architecture_diagram/);
 assert.match(assetGraphPrompt, /展示系统模块关系/);
 assert.match(assetGraphPrompt, /asset_refs/);
-assert.match(assetGraphPrompt, /每帧最多 1 张/);
+assert.match(assetGraphPrompt, /每帧最多 4 张/);
+assert.match(assetGraphPrompt, /asset_id 必须唯一/);
 assert.match(assetGraphPrompt, /含文字的文章截图必须完整展示/);
 assert.match(assetGraphPrompt, /不适合当前叙事时可以不用/);
 assert.match(assetGraphPrompt, /search\/Pexels 图片只作补充/);
@@ -213,19 +214,23 @@ const normalizedGraphWithAssetRefs = contentGraphAgent.normalizeContentGraph({
     text: '展示系统模块关系',
     asset_refs: [
       { asset_id: 'article_01', usage: 'showcase', reason: '展示系统模块关系' },
-      { asset_id: 'article_02', usage: 'background', reason: '第二张应被裁剪' },
+      { asset_id: 'search_01', usage: 'background', reason: '补充氛围背景' },
     ],
   }],
   edges: [],
 }, {
   title: 'owner/repo',
-});
+}, assetCreativeContext);
 
 assert.equal(normalizedGraphWithAssetRefs.success, true);
 assert.deepEqual(normalizedGraphWithAssetRefs.graph.nodes[0].asset_refs, [{
   asset_id: 'article_01',
   usage: 'showcase',
   reason: '展示系统模块关系',
+}, {
+  asset_id: 'search_01',
+  usage: 'background',
+  reason: '补充氛围背景',
 }]);
 
 const normalizedGraphDropsSearchEvidenceRefs = contentGraphAgent.normalizeContentGraph({

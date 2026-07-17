@@ -91,7 +91,7 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
         .join('；');
       if (blockedText) lines.push(`不建议用于成片的图片素材：${blockedText}`);
     }
-    lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；每个 node 最多引用 1 张图片；不适合当前叙事时可以不用。优先使用 article 来源图片；generated 生成图是可用主视觉素材但不是来源证据；search/Pexels 图片只作补充背景或氛围图，不要当来源证据；含文字的文章截图必须完整展示，使用 object-fit: contain；图片被选中时应作为画面主体，不要求额外框选、高亮或数据卡。');
+    lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；每个 node 最多引用 4 张候选图片，不强制凑满；普通场景默认建议不超过 3 张，确有 montage 候选时才可使用 4 张；asset_id 必须唯一，reason 需要区分每张素材的具体语义，usage 必须是 subject|showcase|evidence|background 之一且允许重复。不适合当前叙事时可以不用。优先使用 article 来源图片；generated 生成图是可用主视觉素材但不是来源证据；search/Pexels 图片只作补充背景或氛围图，不要当来源证据；含文字的文章截图必须完整展示，使用 object-fit: contain；图片被选中时应作为画面主体，不要求额外框选、高亮或数据卡。');
   }
   return lines.join('\n');
 }
@@ -150,7 +150,7 @@ function buildContentGraphPrompt({ sceneSpec = {}, creativeContext = {}, target 
     `- nodes 的 id 必须逐一严格等于 scene_spec.scenes 的 id：${expectedSceneIds.join(' -> ') || '（无）'}。`,
     '- 禁止新增、删除、合并、拆分或重排序 scene_spec.scenes。',
     '- 每个 node 必须包含 id、kind、label、durationSec，并且根据 kind 包含 text 或 data。',
-    '- 每个 node 可以输出 asset_refs，每帧最多 1 张，字段为 asset_id、usage、reason；usage 取值 subject|showcase|evidence|background。',
+    '- 每个 node 可以输出 asset_refs，每帧最多 4 张候选，不强制凑满；普通场景默认建议不超过 3 张，确有 montage 候选时才可 4 张；asset_id 必须唯一，reason 需要区分每张素材的具体语义；usage 允许重复，但只能取 subject|showcase|evidence|background。',
     ...assetFirstRequirements,
     '- kind 只能是 text、data、entity；优先使用 text 和 data。',
     '- data node 的 data 必须形如 {"title":"string","unit":"optional shared unit","items":[{"label":"string","value":123}]}。',
@@ -249,7 +249,7 @@ function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, ori
     `scene ids: ${expectedSceneIds.join(', ') || 'none'}`,
     `nodes.length must equal ${expectedSceneIds.length}`,
     'nodes[i].id must equal scene ids in the same order; do not add, remove, merge, split, or reorder scenes.',
-    'nodes[i].asset_refs optional; max 1 item with asset_id, usage=subject|showcase|evidence|background, reason. generated assets should keep scene_id binding and are not evidence.',
+    'nodes[i].asset_refs optional; max 4 items, do not pad; normally recommend at most 3 unless there is a real montage candidate; require unique asset_id and a semantically distinct reason for each asset; usage may repeat but must be subject|showcase|evidence|background. generated assets should keep scene_id binding and are not evidence.',
   ];
   if (Number(attempt) >= 2) {
     return [
@@ -305,7 +305,6 @@ function normalizeData(data = {}) {
 
 function allowedAssetById(creativeContext = {}) {
   const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
-  if (!assets.length) return null;
   return new Map(assets
     .filter(isAssetUsableForFrames)
     .map(asset => [compactText(asset?.id || asset?.asset_id, 80), asset])
@@ -317,16 +316,22 @@ function isSourceEvidenceUsage(value = '') {
     || /来源|证据|引用/.test(compactText(value, 40));
 }
 
-function normalizeAssetRefs(value, creativeContext = {}) {
+function normalizeAssetRefs(value, creativeContext = {}, nodeId = '') {
   const allowedAssets = allowedAssetById(creativeContext);
+  const seen = new Set();
   return (Array.isArray(value) ? value : [])
     .map(ref => {
       const object = objectOrEmpty(ref);
       const assetId = compactText(object.asset_id || object.assetId || object.id, 80);
       if (!assetId) return null;
-      const asset = allowedAssets?.get(assetId) || null;
-      if (allowedAssets && !asset) return null;
+      const asset = allowedAssets.get(assetId) || null;
+      if (!asset) return null;
       const usage = compactText(object.usage || object.kind || object.type, 40);
+      if (!['subject', 'showcase', 'evidence', 'background'].includes(usage)) return null;
+      const generatedSceneId = isGeneratedVisualAsset(asset)
+        ? compactText(asset?.generation?.scene_id, 80)
+        : '';
+      if (generatedSceneId && generatedSceneId !== nodeId) return null;
       const evidenceClass = compactText(asset?.evidence_class, 30);
       const source = compactText(asset?.source, 30);
       const supportsSourceEvidence = evidenceClass
@@ -340,7 +345,12 @@ function normalizeAssetRefs(value, creativeContext = {}) {
       };
     })
     .filter(Boolean)
-    .slice(0, 1);
+    .filter(ref => {
+      if (seen.has(ref.asset_id)) return false;
+      seen.add(ref.asset_id);
+      return true;
+    })
+    .slice(0, 4);
 }
 
 function normalizeContentGraph(graph, sceneSpec = {}, creativeContext = {}) {
@@ -369,7 +379,7 @@ function normalizeContentGraph(graph, sceneSpec = {}, creativeContext = {}) {
     } else {
       normalized.text = compactText(node?.text || node?.description || node?.label || normalized.label, 500) || normalized.label;
     }
-    const assetRefs = normalizeAssetRefs(node?.asset_refs, creativeContext);
+    const assetRefs = normalizeAssetRefs(node?.asset_refs, creativeContext, id);
     if (assetRefs.length) normalized.asset_refs = assetRefs;
     return normalized;
   });

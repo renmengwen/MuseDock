@@ -70,6 +70,13 @@ assert.match(prompt, /每个 intended frame 对应一个 node/);
 assert.match(prompt, /nodes\.length 必须严格等于 scene_spec\.scenes\.length：2/);
 assert.match(prompt, /scene_01 -> scene_02/);
 assert.match(prompt, /禁止新增、删除、合并、拆分或重排序/);
+assert.match(prompt, /每帧最多 4 张/);
+assert.match(prompt, /普通场景默认建议不超过 3 张/);
+assert.match(prompt, /montage/);
+assert.match(prompt, /asset_id 必须唯一/);
+assert.match(prompt, /reason 需要区分/);
+assert.match(prompt, /subject\|showcase\|evidence\|background/);
+assert.doesNotMatch(prompt, /不同的 usage/);
 
 const identityPrompt = agent.buildContentGraphPrompt({
   sceneSpec,
@@ -114,6 +121,11 @@ assert.doesNotMatch(retryPromptAttempt2, /原始正文里提到基础版 12 元/
 assert.doesNotMatch(retryPromptAttempt2, /16:9/);
 assert.doesNotMatch(retryPromptAttempt2, /duration=8/);
 assert.ok(retryPromptAttempt2.length < retryPromptAttempt1.length);
+assert.match(retryPromptAttempt1, /max 4 items/);
+assert.match(retryPromptAttempt1, /unique asset_id/);
+assert.match(retryPromptAttempt1, /semantically distinct reason/);
+assert.doesNotMatch(retryPromptAttempt1, /different usage/);
+assert.match(retryPromptAttempt2, /max 4 items/);
 
 const fenced = agent.parseContentGraphResponse([
   '```json',
@@ -183,8 +195,8 @@ assert.equal(JSON.stringify(normalized.graph).includes('[object Object]'), false
 const assetFiltered = agent.normalizeContentGraph({
   synopsis: '素材过滤',
   nodes: [
-    { id: 'scene_01', kind: 'text', label: '推荐好图', durationSec: 2, text: '使用好图', asset_refs: [{ asset_id: 'article_01' }] },
-    { id: 'scene_02', kind: 'text', label: '过滤坏图', durationSec: 2, text: '不能用坏图', asset_refs: [{ asset_id: 'article_02' }] },
+    { id: 'scene_01', kind: 'text', label: '推荐好图', durationSec: 2, text: '使用好图', asset_refs: [{ asset_id: 'article_01', usage: 'subject' }] },
+    { id: 'scene_02', kind: 'text', label: '过滤坏图', durationSec: 2, text: '不能用坏图', asset_refs: [{ asset_id: 'article_02', usage: 'subject' }] },
   ],
   edges: [],
 }, sceneSpec, {
@@ -196,7 +208,7 @@ const assetFiltered = agent.normalizeContentGraph({
   },
 });
 assert.equal(assetFiltered.success, true);
-assert.deepEqual(assetFiltered.graph.nodes[0].asset_refs, [{ asset_id: 'article_01', usage: '', reason: '' }]);
+assert.deepEqual(assetFiltered.graph.nodes[0].asset_refs, [{ asset_id: 'article_01', usage: 'subject', reason: '' }]);
 assert.equal(assetFiltered.graph.nodes[1].asset_refs, undefined);
 
 const evidenceAssets = [
@@ -234,5 +246,164 @@ for (const index of [0, 1, 5, 6]) {
 for (const index of [2, 3, 4, 7, 8, 9]) {
   assert.equal(evidenceRefsByScene[evidenceScenes[index].id], '');
 }
+
+const multiAssetContext = {
+  asset_context: {
+    assets: [
+      { id: 'asset_1', evidence_class: 'direct_source' },
+      { id: 'asset_2', evidence_class: 'derived_source' },
+      { id: 'asset_3', evidence_class: 'synthetic' },
+      { id: 'asset_4', evidence_class: 'contextual' },
+      { id: 'asset_5', evidence_class: 'user_supplied' },
+      { id: 'asset_6', source: 'stock' },
+      { id: 'asset_disabled', evidence_class: 'direct_source', image_analysis: { should_use: false } },
+    ],
+  },
+};
+const multiAssetResult = agent.normalizeContentGraph({
+  synopsis: '多素材候选',
+  nodes: [
+    {
+      id: 'scene_many',
+      kind: 'text',
+      label: '五张截断且去重',
+      durationSec: 2,
+      text: '五张截断且去重',
+      asset_refs: [
+        { asset_id: 'asset_1', usage: 'subject', reason: '首图' },
+        { asset_id: 'asset_2', usage: 'showcase', reason: '第二图' },
+        { asset_id: 'asset_1', usage: 'background', reason: '重复项不得覆盖首项' },
+        { asset_id: 'asset_3', usage: 'background', reason: '第三图' },
+        { asset_id: 'asset_4', usage: 'background', reason: '第四图' },
+        { asset_id: 'asset_5', usage: 'background', reason: '第五图应截断' },
+      ],
+    },
+    {
+      id: 'scene_one',
+      kind: 'text',
+      label: '一张保持',
+      durationSec: 2,
+      text: '一张保持',
+      asset_refs: [{ asset_id: 'asset_2', usage: 'subject', reason: '唯一候选' }],
+    },
+    {
+      id: 'scene_filtered',
+      kind: 'text',
+      label: '过滤非法候选',
+      durationSec: 2,
+      text: '过滤非法候选',
+      asset_refs: [
+        { asset_id: 'missing', usage: 'subject', reason: '未登记' },
+        { asset_id: 'asset_disabled', usage: 'subject', reason: '禁用' },
+        { asset_id: 'asset_3', usage: 'evidence', reason: 'synthetic 不能作证据' },
+        { asset_id: 'asset_4', usage: 'source', reason: 'contextual 不能作证据' },
+        { asset_id: 'asset_5', usage: 'citation', reason: 'user supplied 不能作证据' },
+        { asset_id: 'asset_6', usage: 'proof', reason: 'stock 不能作证据' },
+        { asset_id: 'asset_2', usage: 'evidence', reason: 'derived 可作证据' },
+        { asset_id: 'asset_1', usage: 'evidence', reason: 'direct 可作证据' },
+      ],
+    },
+  ],
+  edges: [],
+}, {
+  scenes: [{ id: 'scene_many' }, { id: 'scene_one' }, { id: 'scene_filtered' }],
+}, multiAssetContext);
+assert.equal(multiAssetResult.success, true);
+assert.deepEqual(multiAssetResult.graph.nodes[0].asset_refs, [
+  { asset_id: 'asset_1', usage: 'subject', reason: '首图' },
+  { asset_id: 'asset_2', usage: 'showcase', reason: '第二图' },
+  { asset_id: 'asset_3', usage: 'background', reason: '第三图' },
+  { asset_id: 'asset_4', usage: 'background', reason: '第四图' },
+]);
+assert.deepEqual(multiAssetResult.graph.nodes[1].asset_refs, [
+  { asset_id: 'asset_2', usage: 'subject', reason: '唯一候选' },
+]);
+assert.deepEqual(multiAssetResult.graph.nodes[2].asset_refs, [
+  { asset_id: 'asset_2', usage: 'evidence', reason: 'derived 可作证据' },
+  { asset_id: 'asset_1', usage: 'evidence', reason: 'direct 可作证据' },
+]);
+
+for (const creativeContextWithoutRegistry of [{}, { asset_context: {} }, { asset_context: { assets: [] } }]) {
+  const failClosed = agent.normalizeContentGraph({
+    synopsis: '空注册表拒绝引用',
+    nodes: [{
+      id: 'scene_01',
+      kind: 'text',
+      label: '空注册表',
+      durationSec: 2,
+      text: '空注册表',
+      asset_refs: [{ asset_id: 'unregistered', usage: 'subject', reason: '不得通过' }],
+    }],
+    edges: [],
+  }, { scenes: [{ id: 'scene_01' }] }, creativeContextWithoutRegistry);
+  assert.equal(failClosed.success, true);
+  assert.equal(failClosed.graph.nodes[0].asset_refs, undefined);
+}
+
+const graphWithoutAssetRefs = agent.normalizeContentGraph({
+  synopsis: '无引用仍合法',
+  nodes: [{ id: 'scene_01', kind: 'text', label: '普通场景', durationSec: 2, text: '普通场景' }],
+  edges: [],
+}, { scenes: [{ id: 'scene_01' }] }, {});
+assert.equal(graphWithoutAssetRefs.success, true);
+
+const generatedBinding = agent.normalizeContentGraph({
+  synopsis: '生成图场景绑定',
+  nodes: [
+    {
+      id: 'scene_01',
+      kind: 'text',
+      label: '场景一',
+      durationSec: 2,
+      text: '场景一',
+      asset_refs: [
+        { asset_id: 'formal_same', usage: 'subject', reason: 'formal 同场景' },
+        { asset_id: 'formal_cross', usage: 'subject', reason: 'formal 跨场景' },
+        { asset_id: 'legacy_same', usage: 'subject', reason: 'legacy 同场景' },
+        { asset_id: 'legacy_cross', usage: 'subject', reason: 'legacy 跨场景' },
+      ],
+    },
+  ],
+  edges: [],
+}, { scenes: [{ id: 'scene_01' }] }, {
+  asset_context: {
+    assets: [
+      { id: 'formal_same', origin: 'ai_generated', generation: { scene_id: 'scene_01' } },
+      { id: 'formal_cross', origin: 'ai_generated', generation: { scene_id: 'scene_02' } },
+      { id: 'legacy_same', source: 'generated', generation: { scene_id: 'scene_01' } },
+      { id: 'legacy_cross', source: 'generated', generation: { scene_id: 'scene_02' } },
+    ],
+  },
+});
+assert.deepEqual(generatedBinding.graph.nodes[0].asset_refs.map(ref => ref.asset_id), [
+  'formal_same',
+  'legacy_same',
+]);
+
+const usageAndBackfill = agent.normalizeContentGraph({
+  synopsis: 'usage 校验与补位',
+  nodes: [{
+    id: 'scene_01',
+    kind: 'text',
+    label: '合法重复 usage',
+    durationSec: 2,
+    text: '合法重复 usage',
+    asset_refs: [
+      { asset_id: 'asset_1', usage: 'hero', reason: '非法 usage' },
+      { asset_id: 'asset_1', usage: 'evidence', reason: '非法项后同 ID 合法项应补位' },
+      { asset_id: 'asset_2', usage: 'evidence', reason: '第二张 evidence' },
+      { asset_id: 'asset_3', usage: 'background', reason: '第一张 background' },
+      { asset_id: 'asset_4', usage: 'background', reason: '第二张 background' },
+      { asset_id: 'asset_5', usage: 'subject', reason: '第五张合法项应截断' },
+    ],
+  }],
+  edges: [],
+}, { scenes: [{ id: 'scene_01' }] }, multiAssetContext);
+assert.deepEqual(usageAndBackfill.graph.nodes[0].asset_refs, [
+  { asset_id: 'asset_1', usage: 'evidence', reason: '非法项后同 ID 合法项应补位' },
+  { asset_id: 'asset_2', usage: 'evidence', reason: '第二张 evidence' },
+  { asset_id: 'asset_3', usage: 'background', reason: '第一张 background' },
+  { asset_id: 'asset_4', usage: 'background', reason: '第二张 background' },
+]);
 
 console.log('html-video content graph agent tests passed');
