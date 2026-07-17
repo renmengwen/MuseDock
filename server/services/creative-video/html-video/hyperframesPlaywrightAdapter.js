@@ -265,6 +265,63 @@ async function render(input = {}, ctx = {}, deps = {}) {
       }
       Object.freeze(clock);
       Object.defineProperty(window, '__hvPlaybackClock', { value: clock, writable: false, configurable: false });
+      const earlyViolations = [];
+      const visualSelector = 'img,picture source,svg image,video[poster],input[type="image" i]';
+      const protectedAttributes = [
+        'data-sequence-mode', 'data-scene-id', 'data-shot-id', 'data-asset-id',
+        'data-window-start-sec', 'data-window-end-sec', 'data-time-base', 'data-shot-role',
+        'data-shot-requirement', 'data-caption-ids', 'data-minimum-visible-duration-sec',
+        'data-shot-layer', 'src', 'srcset', 'href', 'xlink:href', 'poster',
+      ];
+      const describe = (kind, element, extra = {}) => ({
+        kind,
+        tag: element?.tagName?.toLowerCase() || '',
+        ...extra,
+      });
+      const isManagedParserImage = element => {
+        if (!(element instanceof Element) || element.tagName.toLowerCase() !== 'img' || !element.isConnected) return false;
+        const shot = element.parentElement;
+        const root = element.closest('[data-hv-image-sequence]');
+        const layer = element.getAttribute('data-shot-layer');
+        return Boolean(root && shot?.matches('[data-hv-shot]') && (layer === 'background' || layer === 'foreground'));
+      };
+      const inspectVisualNodes = (node, action) => {
+        if (!(node instanceof Element)) return;
+        const candidates = [node, ...node.querySelectorAll(visualSelector)].filter(element => element.matches(visualSelector));
+        for (const element of candidates) {
+          if (action === 'added' && isManagedParserImage(element)) continue;
+          earlyViolations.push(describe('early_unmanaged_visual_node', element, { action }));
+        }
+      };
+      const earlyObserver = new MutationObserver(records => {
+        for (const record of records) {
+          if (record.type === 'childList') {
+            record.addedNodes.forEach(node => inspectVisualNodes(node, 'added'));
+            record.removedNodes.forEach(node => inspectVisualNodes(node, 'removed'));
+            continue;
+          }
+          const target = record.target;
+          const root = target instanceof Element ? target.closest('[data-hv-image-sequence]') : null;
+          if (root || target?.matches?.(visualSelector)) {
+            earlyViolations.push(describe('early_protected_attribute_mutation', target, {
+              attribute: record.attributeName || '',
+              old_value: record.oldValue ?? null,
+            }));
+          }
+        }
+      });
+      earlyObserver.observe(document, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeOldValue: true,
+        attributeFilter: protectedAttributes,
+      });
+      Object.defineProperty(window, '__hvEarlyVisualMutationSnapshot', {
+        value: () => earlyViolations.map(item => ({ ...item })),
+        writable: false,
+        configurable: false,
+      });
     }, buildPlaybackClockSource());
 
     // 对应 html-video 源码段：page.addInitScript 冻结 CSS/SMIL 动画。
@@ -731,6 +788,7 @@ async function assertManagedVisualRuntime(page) {
     if (!root) return { success: true, applied: false };
     if (!window.__hvManagedVisualGuardCheck) {
       const violations = [];
+      let earlyViolationCount = 0;
       const dirty = new Set();
       const properties = ['content', 'backgroundImage', 'maskImage', 'webkitMaskImage', 'borderImageSource', 'listStyleImage', 'filter', 'cursor', 'clipPath'];
       const protectedAttributes = new Set([
@@ -742,6 +800,14 @@ async function assertManagedVisualRuntime(page) {
       const current = new URL(location.href);
       current.hash = '';
       const lock = violation => { violations.push(violation); };
+      const mergeEarlyViolations = () => {
+        const entries = typeof window.__hvEarlyVisualMutationSnapshot === 'function'
+          ? window.__hvEarlyVisualMutationSnapshot()
+          : [];
+        for (let index = earlyViolationCount; index < entries.length; index += 1) lock(entries[index]);
+        earlyViolationCount = entries.length;
+      };
+      mergeEarlyViolations();
       const externalUrls = value => {
         const urls = [];
         for (const match of String(value || '').matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)/gi)) {
@@ -859,6 +925,7 @@ async function assertManagedVisualRuntime(page) {
         attributeFilter: [...protectedAttributes, 'class', 'style'],
       });
       const check = () => {
+        mergeEarlyViolations();
         if (!root.isConnected || readContract() !== contractJson) lock({ kind: 'managed_contract_changed' });
         const pending = Array.from(dirty);
         dirty.clear();

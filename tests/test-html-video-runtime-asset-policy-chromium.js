@@ -354,6 +354,8 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
       ['root-background-div', '<script>window.__hvPlayAll=function(){const div=document.createElement("div");div.style.backgroundImage="url(../assets/shot-a.png)";document.querySelector("[data-hv-image-sequence]").appendChild(div)}</script>'],
       ['pseudo-content-visual', '<style>.rogue::before{content:u\\72l("../assets/shot-a.png")}</style><div class="rogue">rogue</div>'],
       ['transient-managed-visual', '<script>window.__hvPlayAll=function(){setTimeout(function(){const image=new Image();image.src="../assets/shot-a.png";document.body.appendChild(image);setTimeout(function(){image.remove()},60)},20)}</script>'],
+      ['domcontentloaded-transient-visual', '<script>document.addEventListener("DOMContentLoaded",function(){const image=new Image();image.src="../assets/shot-a.png";document.body.appendChild(image);setTimeout(function(){image.remove()},0)})</script>'],
+      ['pre-guard-src-restore', '<script>document.addEventListener("DOMContentLoaded",function(){const image=document.querySelector("[data-shot-layer=foreground]");const original=image.getAttribute("src");image.setAttribute("src","../assets/shot-b.png");image.setAttribute("src",original)})</script>'],
     ]) {
       const source = path.join(projectDir, 'frames', `${name}.html`);
       await fsp.writeFile(source, shotHtml.replace('<main>', `${attack}<main>`), 'utf8');
