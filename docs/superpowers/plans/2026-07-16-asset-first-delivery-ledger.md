@@ -93,11 +93,13 @@ status: in_progress
 owner: /root/phase_c01_writer
 lease_released: false
 base_commit: 857b5515e60c5473233116329dfe79c6c23be62e
+worktree_start_commit: 1fa862d8e78141ffd33951c2b83675a97c59d76b
 worktree: D:\code3\MuseDock-worktrees\asset-first-c01
 branch: codex/asset-first-c01
 allowed_paths:
   - server/services/creative-video/html-video/contentGraphAgent.js
   - tests/test-html-video-content-graph-agent.js
+  - tests/test-source-grounding-prompts.js
 forbidden_paths:
   - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
 state_owners:
@@ -107,6 +109,7 @@ exclusive_resources:
   - no browser, ports, ffmpeg, network or frontend build
 verification:
   - node tests/test-html-video-content-graph-agent.js
+  - node tests/test-source-grounding-prompts.js
   - node tests/test-html-video-workflow.js
 review:
   spec: pending
