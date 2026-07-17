@@ -5,6 +5,21 @@ function buildPlaybackClockSource() {
       && ['subscribe','play','pause','timeSec','paused','setTime'].every(function (name) { return typeof clock[name] === 'function'; });
   }
   if (owned(window.__hvPlaybackClock)) return;
+  var nativeNow = typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now.bind(performance)
+    : Date.now.bind(Date);
+  var nativeSetTimeout = typeof setTimeout === 'function'
+    ? setTimeout.bind(window)
+    : function () { return 0; };
+  var nativeClearTimeout = typeof clearTimeout === 'function'
+    ? clearTimeout.bind(window)
+    : function () {};
+  var nativeRequestFrame = typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame.bind(window)
+    : function (callback) { return nativeSetTimeout(function () { callback(nativeNow()); }, 16); };
+  var nativeCancelFrame = typeof cancelAnimationFrame === 'function'
+    ? cancelAnimationFrame.bind(window)
+    : nativeClearTimeout;
   var subscribers = [];
   var elapsed = 0;
   var origin = null;
@@ -20,7 +35,7 @@ function buildPlaybackClockSource() {
     if (origin === null) origin = now - elapsed * 1000;
     elapsed = Math.max(0, (now - origin) / 1000);
     notify();
-    frame = requestAnimationFrame(tick);
+    frame = nativeRequestFrame(tick);
   }
   var clock = {
     __hvOwner: 'musedock-playback-clock-v1',
@@ -37,18 +52,18 @@ function buildPlaybackClockSource() {
       if (running) return;
       running = true;
       origin = null;
-      frame = requestAnimationFrame(tick);
+      frame = nativeRequestFrame(tick);
     },
     pause: function () {
       if (!running) return;
-      if (origin !== null) elapsed = Math.max(0, (performance.now() - origin) / 1000);
+      if (origin !== null) elapsed = Math.max(0, (nativeNow() - origin) / 1000);
       running = false;
-      if (frame) cancelAnimationFrame(frame);
+      if (frame) nativeCancelFrame(frame);
       frame = 0;
       notify();
     },
     timeSec: function () {
-      return running && origin !== null ? Math.max(0, (performance.now() - origin) / 1000) : elapsed;
+      return running && origin !== null ? Math.max(0, (nativeNow() - origin) / 1000) : elapsed;
     },
     paused: function () { return !running; },
     setTime: function (value) {
@@ -61,7 +76,7 @@ function buildPlaybackClockSource() {
   };
   try { window.__hvPlaybackClock = clock; } catch (_) {}
   if (window.__hvPlaybackClock !== clock) throw new Error('html-video 共享播放时钟被不可信全局占用。');
-  if (!window.__mpAdapterControlled) setTimeout(function () { clock.play(); }, 250);
+  if (!window.__mpAdapterControlled) nativeSetTimeout(function () { clock.play(); }, 250);
 })();`;
 }
 

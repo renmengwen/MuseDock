@@ -320,7 +320,6 @@ async function render(input = {}, ctx = {}, deps = {}) {
     }
     throwIfPolicyViolated(collector);
     await calibratePlaybackClock(page);
-    await assertManagedVisualRuntime(page);
 
     // 对应 html-video 源码段：等待 stylesheet、逐个 fonts.load、fonts.ready。
     report(ctx, 32, '正在加载字体和样式...');
@@ -343,6 +342,8 @@ async function render(input = {}, ctx = {}, deps = {}) {
     }
     throwIfPolicyViolated(collector);
     throwIfPageErrored(pageErrors, 'render-playback-start-failed');
+    await preflightPlaybackClock(page, Number(deps.playbackClockPreflightTimeoutMs) || 1000);
+    await calibratePlaybackClock(page);
 
     // 正式录制起点：animation、解冻和 scene-local 时钟必须在同一个 JS task 启动，
     // 避免多个 evaluate 往返让 Caption/Beat/Shot 产生不同时间原点。
@@ -697,52 +698,176 @@ async function calibratePlaybackClock(page) {
   throw createRenderError('render-playback-start-failed', `html-video 播放时钟预加载校准失败：${result.message || '未知错误'}`);
 }
 
+async function preflightPlaybackClock(page, timeoutMs = 1000) {
+  let timeout;
+  const evaluation = page.evaluate(() => new Promise(resolve => {
+    const clock = window.__hvPlaybackClock;
+    if (!clock) { resolve({ success: true, applied: false }); return; }
+    try {
+      clock.pause();
+      clock.setTime(0);
+      let unsubscribe = () => {};
+      unsubscribe = clock.subscribe(time => {
+        if (!(time > 0)) return;
+        unsubscribe();
+        resolve({ success: true, applied: true, time });
+      });
+      clock.play();
+    } catch (error) {
+      resolve({ success: false, message: error?.message || String(error) });
+    }
+  })).catch(error => ({ success: false, message: error?.message || String(error) }));
+  const result = await Promise.race([
+    evaluation,
+    new Promise(resolve => { timeout = setTimeout(() => resolve({ success: false, message: '共享播放时钟未产生真实 tick。' }), timeoutMs); }),
+  ]).finally(() => clearTimeout(timeout));
+  if (result?.success !== false) return result;
+  throw createRenderError('render-playback-start-failed', `html-video 播放时钟自检失败：${result.message || '未知错误'}`);
+}
+
 async function assertManagedVisualRuntime(page) {
   const result = await page.evaluate(() => {
     const root = document.querySelector('[data-hv-image-sequence]');
     if (!root) return { success: true, applied: false };
-    const offenders = [];
-    const describe = element => ({
-      tag: element.tagName?.toLowerCase() || '',
-      src: element.currentSrc || element.getAttribute?.('src') || element.getAttribute?.('srcset')
-        || element.getAttribute?.('href') || element.getAttribute?.('xlink:href') || element.getAttribute?.('poster') || '',
-    });
-    for (const element of document.querySelectorAll('img,picture source,svg image,video[poster],input[type="image" i]')) {
-      const layer = element.getAttribute?.('data-shot-layer');
-      const shot = element.parentElement?.matches?.('[data-hv-shot]') ? element.parentElement : null;
-      const managed = element.tagName?.toLowerCase() === 'img'
-        && root.contains(element)
-        && shot
-        && (layer === 'background' || layer === 'foreground');
-      if (!managed) offenders.push({ kind: 'unmanaged_visual_element', ...describe(element) });
-    }
-    const current = new URL(location.href);
-    current.hash = '';
-    const externalUrls = value => {
-      const urls = [];
-      for (const match of String(value || '').matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)/gi)) {
-        const raw = match[1] ?? match[2] ?? match[3] ?? '';
-        try {
-          const target = new URL(raw, location.href);
-          const withoutHash = new URL(target.href);
-          withoutHash.hash = '';
-          if (!target.hash || withoutHash.href !== current.href) urls.push(target.href);
-        } catch {
-          urls.push(raw);
+    if (!window.__hvManagedVisualGuardCheck) {
+      const violations = [];
+      const dirty = new Set();
+      const properties = ['content', 'backgroundImage', 'maskImage', 'webkitMaskImage', 'borderImageSource', 'listStyleImage', 'filter', 'cursor', 'clipPath'];
+      const protectedAttributes = new Set([
+        'data-sequence-mode', 'data-scene-id', 'data-shot-id', 'data-asset-id',
+        'data-window-start-sec', 'data-window-end-sec', 'data-time-base', 'data-shot-role',
+        'data-shot-requirement', 'data-caption-ids', 'data-minimum-visible-duration-sec',
+        'data-shot-layer', 'src', 'srcset', 'href', 'xlink:href', 'poster',
+      ]);
+      const current = new URL(location.href);
+      current.hash = '';
+      const lock = violation => { violations.push(violation); };
+      const externalUrls = value => {
+        const urls = [];
+        for (const match of String(value || '').matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)/gi)) {
+          const raw = match[1] ?? match[2] ?? match[3] ?? '';
+          try {
+            const target = new URL(raw, location.href);
+            const withoutHash = new URL(target.href);
+            withoutHash.hash = '';
+            if (!target.hash || withoutHash.href !== current.href) urls.push(target.href);
+          } catch {
+            urls.push(raw);
+          }
         }
-      }
-      return urls;
-    };
-    const properties = ['backgroundImage', 'maskImage', 'webkitMaskImage', 'borderImageSource', 'listStyleImage'];
-    for (const element of document.querySelectorAll('*')) {
-      if (root.contains(element)) continue;
-      const style = getComputedStyle(element);
-      for (const property of properties) {
-        const urls = externalUrls(style[property]);
-        if (urls.length) offenders.push({ kind: 'unmanaged_computed_visual', tag: element.tagName.toLowerCase(), property, urls });
-      }
+        return urls;
+      };
+      const shots = Array.from(root.children);
+      const managedImages = new Set();
+      const contract = {
+        mode: root.getAttribute('data-sequence-mode') || '',
+        scene_id: root.getAttribute('data-scene-id') || '',
+        shots: shots.map(shot => {
+          const images = Array.from(shot.children).filter(child => child.tagName?.toLowerCase() === 'img');
+          images.forEach(image => managedImages.add(image));
+          return {
+            tag: shot.tagName?.toLowerCase() || '',
+            id: shot.getAttribute('data-shot-id') || '',
+            asset_id: shot.getAttribute('data-asset-id') || '',
+            start: shot.getAttribute('data-window-start-sec') || '',
+            end: shot.getAttribute('data-window-end-sec') || '',
+            time_base: shot.getAttribute('data-time-base') || '',
+            role: shot.getAttribute('data-shot-role') || '',
+            requirement: shot.getAttribute('data-shot-requirement') || '',
+            caption_ids: shot.getAttribute('data-caption-ids') || '',
+            minimum: shot.getAttribute('data-minimum-visible-duration-sec') || '',
+            child_count: shot.children.length,
+            images: images.map(image => ({
+              layer: image.getAttribute('data-shot-layer') || '',
+              src: image.getAttribute('src') || '',
+              current_src: image.currentSrc || '',
+            })),
+          };
+        }),
+      };
+      const contractJson = JSON.stringify(contract);
+      if (!contract.mode || !contract.scene_id || !contract.shots.length || contract.shots.some(shot => (
+        shot.tag !== 'figure' || !shot.id || !shot.asset_id || !shot.start || !shot.end
+        || shot.time_base !== 'scene_local' || !shot.minimum
+        || shot.child_count !== 2 || shot.images.length !== 2
+        || shot.images[0].layer !== 'background' || shot.images[1].layer !== 'foreground'
+        || !shot.images[0].src || !shot.images[1].src || !shot.images[0].current_src || !shot.images[1].current_src
+      ))) lock({ kind: 'managed_contract_incomplete' });
+      const readContract = () => JSON.stringify({
+        mode: root.getAttribute('data-sequence-mode') || '',
+        scene_id: root.getAttribute('data-scene-id') || '',
+        shots: Array.from(root.children).map(shot => ({
+          tag: shot.tagName?.toLowerCase() || '',
+          id: shot.getAttribute('data-shot-id') || '',
+          asset_id: shot.getAttribute('data-asset-id') || '',
+          start: shot.getAttribute('data-window-start-sec') || '',
+          end: shot.getAttribute('data-window-end-sec') || '',
+          time_base: shot.getAttribute('data-time-base') || '',
+          role: shot.getAttribute('data-shot-role') || '',
+          requirement: shot.getAttribute('data-shot-requirement') || '',
+          caption_ids: shot.getAttribute('data-caption-ids') || '',
+          minimum: shot.getAttribute('data-minimum-visible-duration-sec') || '',
+          child_count: shot.children.length,
+          images: Array.from(shot.children).filter(child => child.tagName?.toLowerCase() === 'img').map(image => ({
+            layer: image.getAttribute('data-shot-layer') || '',
+            src: image.getAttribute('src') || '',
+            current_src: image.currentSrc || '',
+          })),
+        })),
+      });
+      const scanElement = element => {
+        if (!(element instanceof Element)) return;
+        if (element.matches('img,picture source,svg image,video[poster],input[type="image" i]') && !managedImages.has(element)) {
+          lock({ kind: 'unmanaged_visual_element', tag: element.tagName.toLowerCase() });
+        }
+        for (const pseudo of [null, '::before', '::after']) {
+          const style = getComputedStyle(element, pseudo);
+          for (const property of properties) {
+            const urls = externalUrls(style[property]);
+            if (urls.length) lock({ kind: 'unmanaged_computed_visual', tag: element.tagName.toLowerCase(), pseudo: pseudo || '', property, urls });
+          }
+        }
+      };
+      const scanTree = node => {
+        if (node instanceof Element) scanElement(node);
+        node.querySelectorAll?.('*').forEach(scanElement);
+      };
+      scanTree(document.documentElement);
+      const observer = new MutationObserver(records => {
+        for (const record of records) {
+          if (record.type === 'childList') {
+            const touchesRoot = record.target === root || root.contains(record.target)
+              || Array.from(record.addedNodes).some(node => node === root || (node instanceof Element && node.contains(root)))
+              || Array.from(record.removedNodes).some(node => node === root || managedImages.has(node) || (node instanceof Element && Array.from(managedImages).some(image => node.contains(image))));
+            if (touchesRoot) lock({ kind: 'managed_contract_child_mutation' });
+            record.addedNodes.forEach(scanTree);
+            record.removedNodes.forEach(scanTree);
+            if (record.target instanceof Element) dirty.add(record.target);
+          } else if (record.type === 'attributes') {
+            const target = record.target;
+            if ((target === root || root.contains(target)) && protectedAttributes.has(record.attributeName)) {
+              lock({ kind: 'managed_contract_attribute_mutation', attribute: record.attributeName });
+            }
+            dirty.add(target);
+          }
+        }
+      });
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: [...protectedAttributes, 'class', 'style'],
+      });
+      const check = () => {
+        if (!root.isConnected || readContract() !== contractJson) lock({ kind: 'managed_contract_changed' });
+        const pending = Array.from(dirty);
+        dirty.clear();
+        pending.forEach(scanTree);
+        return violations.length ? { success: false, offenders: violations.slice() } : { success: true, applied: true };
+      };
+      Object.defineProperty(window, '__hvManagedVisualGuardCheck', { value: check, writable: false, configurable: false });
     }
-    return offenders.length ? { success: false, offenders } : { success: true, applied: true };
+    return window.__hvManagedVisualGuardCheck();
   }).catch(error => ({ success: false, message: error?.message || String(error), offenders: [] }));
   if (result?.success !== false) return result;
   const error = createRenderError('frame_html_shot_contract_invalid', `Image Sequence 运行时发现未受管视觉素材：${result.message || '模型美术壳不得创建外部视觉元素。'}`);
@@ -920,6 +1045,7 @@ module.exports = {
   createViolationCollector,
   installRuntimeAssetPolicy,
   assertManagedVisualRuntime,
+  preflightPlaybackClock,
   waitForManagedShotImages,
   throwIfPolicyViolated,
 };

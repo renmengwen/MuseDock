@@ -228,6 +228,7 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
               newContext: async contextOptions => {
                 const realContext = await realBrowser.newContext(contextOptions);
                 let slowRouteInstalled = false;
+                let observedPage = null;
                 return new Proxy(realContext, {
                   get(target, property) {
                     if (property === 'route') return async (pattern, handler) => {
@@ -243,6 +244,7 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
                     };
                     if (property === 'newPage') return async () => {
                       const realPage = await target.newPage();
+                      observedPage = realPage;
                       return new Proxy(realPage, {
                         get(pageTarget, pageProperty) {
                           if (pageProperty === 'evaluate') return async (fn, ...args) => {
@@ -269,6 +271,17 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
                           return typeof value === 'function' ? value.bind(pageTarget) : value;
                         },
                       });
+                    };
+                    if (property === 'close') return async () => {
+                      if (capture && observedPage) {
+                        capture.pre_close = await observedPage.evaluate(() => ({
+                          time: window.__hvPlaybackClock?.timeSec?.(),
+                          beat: document.body.dataset.mpBeat,
+                          shots: Array.from(document.querySelectorAll('[data-hv-shot][data-shot-active="true"]')).map(item => item.dataset.shotId),
+                          captions: Array.from(document.querySelectorAll('.hv-caption-item[data-hv-active="true"]')).map(item => item.dataset.captionId),
+                        }));
+                      }
+                      return target.close();
                     };
                     const value = target[property];
                     return typeof value === 'function' ? value.bind(target) : value;
@@ -336,6 +349,11 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
       ['dynamic-managed-visual', '<script>window.__hvPlayAll=function(){const image=new Image();image.src="../assets/shot-a.png";document.body.appendChild(image)}</script>'],
       ['escaped-css-visual', '<style>.rogue{background-image:u\\72l("../assets/shot-a.png")}</style><div class="rogue">rogue</div>'],
       ['escaped-css-path', '<style>.rogue{background-image:url(../assets/shot-a\\2e png)}</style><div class="rogue">rogue</div>'],
+      ['third-foreground', '<script>window.__hvPlayAll=function(){const image=new Image();image.dataset.shotLayer="foreground";image.src="../assets/shot-a.png";document.querySelector("[data-hv-shot]").appendChild(image)}</script>'],
+      ['changed-managed-src', '<script>window.__hvPlayAll=function(){document.querySelector("[data-shot-layer=foreground]").src="../assets/shot-b.png"}</script>'],
+      ['root-background-div', '<script>window.__hvPlayAll=function(){const div=document.createElement("div");div.style.backgroundImage="url(../assets/shot-a.png)";document.querySelector("[data-hv-image-sequence]").appendChild(div)}</script>'],
+      ['pseudo-content-visual', '<style>.rogue::before{content:u\\72l("../assets/shot-a.png")}</style><div class="rogue">rogue</div>'],
+      ['transient-managed-visual', '<script>window.__hvPlayAll=function(){setTimeout(function(){const image=new Image();image.src="../assets/shot-a.png";document.body.appendChild(image);setTimeout(function(){image.remove()},60)},20)}</script>'],
     ]) {
       const source = path.join(projectDir, 'frames', `${name}.html`);
       await fsp.writeFile(source, shotHtml.replace('<main>', `${attack}<main>`), 'utf8');
@@ -350,6 +368,25 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
       }), error => error.code === 'frame_html_shot_contract_invalid');
       assert.equal(ffmpegCalls, 0, `${name} 不得进入 ffmpeg`);
     }
+
+    const hostileSchedulerSource = path.join(projectDir, 'frames', 'hostile-scheduler.html');
+    await fsp.writeFile(hostileSchedulerSource, shotHtml.replace('<main>', '<script>window.__hvPlayAll=function(){window.requestAnimationFrame=function(){return 0};window.cancelAnimationFrame=function(){};try{performance.now=function(){return 0}}catch{}}</script><main>'), 'utf8');
+    const hostileSchedulerCapture = {};
+    const hostileSchedulerOutput = path.join(projectDir, 'frames', 'hostile-scheduler.mp4');
+    await render({
+      template: { sourcePath: hostileSchedulerSource }, security: { projectDir, assets: shotAssets, frameId: 'hostile-scheduler' },
+      config: { outputPath: hostileSchedulerOutput, resolution: { width: 640, height: 360 }, duration: 2.4, durationMode: 'explicit' },
+    }, {}, {
+      importPlaywright: async () => adapterPlaywright({ capture: hostileSchedulerCapture }),
+      runFfmpeg: async () => { await fsp.writeFile(hostileSchedulerOutput, Buffer.alloc(4096, 1)); return { ok: true }; },
+      probeWebmDurationSec: async () => 6,
+      probeVideoStreams: async () => [{ codec_type: 'video' }],
+      ffmpegPath: 'ffmpeg-mock',
+    });
+    assert.ok(hostileSchedulerCapture.pre_close.time > 0, '模型覆写 scheduler 后 Clock 仍必须推进');
+    assert.equal(hostileSchedulerCapture.pre_close.beat, 'beat_2');
+    assert.deepEqual(hostileSchedulerCapture.pre_close.shots, ['shot_b']);
+    assert.deepEqual(hostileSchedulerCapture.pre_close.captions, ['caption_2']);
 
     const brokenAsset = { id: 'broken', type: 'image', media_type: 'image', status: 'ready', path: 'assets/broken.png', frame_src: '../assets/broken.png' };
     await fsp.writeFile(path.join(projectDir, brokenAsset.path), Buffer.from('not-a-png'));

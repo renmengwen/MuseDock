@@ -3,6 +3,7 @@ const vm = require('vm');
 const { buildSceneTimelineScript } = require('../server/services/creative-video/html-video/frameHtmlPhaseSupport');
 const { renderCaptionLayer } = require('../server/services/creative-video/html-video/captionLayer');
 const { buildShotTimelineSource } = require('../server/services/creative-video/html-video/sceneImageSequenceDom');
+const { buildPlaybackClockSource } = require('../server/services/creative-video/html-video/playbackClock');
 
 function datasetElement(dataset = {}) {
   return {
@@ -103,5 +104,31 @@ assert.equal(shots[0].dataset.shotActive, undefined);
 assert.equal(shots[1].dataset.shotActive, 'true');
 context.window.__mpSetTimelineTime(8);
 assert.equal(shots[1].dataset.shotActive, 'true', 'Scene 尾部必须保持最后 Shot');
+
+{
+  const queued = [];
+  let schedulerNow = 0;
+  const schedulerContext = {
+    window: {},
+    performance: { now: () => schedulerNow },
+    requestAnimationFrame(callback) { queued.push(callback); return queued.length; },
+    cancelAnimationFrame() {},
+    setTimeout() {},
+    clearTimeout() {},
+  };
+  schedulerContext.window = schedulerContext;
+  vm.runInNewContext(buildPlaybackClockSource(), schedulerContext);
+  const schedulerClock = schedulerContext.__hvPlaybackClock;
+  schedulerContext.requestAnimationFrame = () => { throw new Error('hostile-raf'); };
+  schedulerContext.cancelAnimationFrame = () => { throw new Error('hostile-cancel'); };
+  schedulerContext.performance.now = () => { throw new Error('hostile-now'); };
+  assert.doesNotThrow(() => schedulerClock.play(), 'Clock 必须使用安装时捕获的 scheduler');
+  schedulerNow = 16;
+  assert.doesNotThrow(() => queued.shift()(schedulerNow), 'tick 不得重新读取被模型覆写的 scheduler');
+  schedulerNow = 32;
+  assert.doesNotThrow(() => queued.shift()(schedulerNow));
+  assert.ok(schedulerClock.timeSec() > 0, '捕获的原生 scheduler 必须实际推进时间');
+  assert.doesNotThrow(() => schedulerClock.pause());
+}
 
 console.log('html-video playback clock tests passed');
