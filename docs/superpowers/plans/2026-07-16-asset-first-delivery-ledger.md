@@ -22,7 +22,7 @@
 - 实际并发：第 4 个 sub-agent 创建返回 `agent thread limit reached`；当前产品层仍为主 Agent + 3 个 sub-agent
 - 当前主工作区：`dev`；B-07b 最终 reviewed tree 已由提交 `218fbf9` squash 集成
 - 当前顺序：Phase B 集成门已通过 → 执行 Phase C C-01～C-05
-- Phase C：只读 Task Packet 已完成，C-01 写租约可以开启；REQ-B-09/10 继续依赖真实 Shot 与正数可见时长
+- Phase C：C-01～C-03 已完成；C-04 三路只读审计完成并已开启单 Writer 写租约；REQ-B-09/10 继续依赖真实 Shot 与正数可见时长
 
 ## Goal 基线与用户改动清单
 
@@ -86,6 +86,60 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
 
 ## 当前写租约
+
+```yaml
+task_id: C-04
+status: in_progress
+owner: c04_writer
+lease_released: false
+code_base_commit: d4af5909b163827da6490df59c11503f86f47f73
+worktree: D:\code3\MuseDock-worktrees\asset-first-c04
+branch: codex/asset-first-c04
+allowed_paths:
+  - server/services/creative-video/html-video/playbackClock.js
+  - server/services/creative-video/html-video/sceneImageSequenceDom.js
+  - server/services/creative-video/html-video/captionLayer.js
+  - server/services/creative-video/html-video/framePromptBuilder.js
+  - server/services/creative-video/html-video/frameHtmlAgent.js
+  - server/services/creative-video/html-video/frameHtmlPhase.js
+  - server/services/creative-video/html-video/frameHtmlPhaseSupport.js
+  - server/services/creative-video/html-video/hyperframesPlaywrightAdapter.js
+  - server/services/creative-video/html-video/prepareSourceHtml.js
+  - server/services/creative-video/retryPlanner.js
+  - tests/test-html-video-playback-clock.js
+  - tests/test-html-video-scene-image-sequence-dom.js
+  - tests/test-html-video-caption-layer.js
+  - tests/test-html-video-asset-first-prompts.js
+  - tests/test-html-video-frame-html-agent.js
+  - tests/test-html-video-scene-continuity.js
+  - tests/test-html-video-frame-html-resume.js
+  - tests/test-html-video-playwright-adapter-command.js
+  - tests/test-html-video-prepare-source-html.js
+  - tests/test-creative-workflow-retry-planner.js
+  - tests/test-html-video-workflow.js
+  - tests/test-html-video-runtime-asset-policy-chromium.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative-video/html-video/visualPlanService.js
+  - server/services/creative-video/html-video/assetUsagePhase.js
+  - server/services/creative-video/html-video/projectSchema.js
+  - server/services/creative-video/html-video/mixedFrameBuilder.js
+  - server/services/creative-video/html-video/ffmpegComposer.js
+state_owners:
+  - frame_html.scene_image_sequence_dom
+  - frame_html.scene_local_playback_clock
+exclusive_resources:
+  - C-04 Node tests run serially inside the worker worktree
+  - C-04 real Chromium QA runs only after Node GREEN
+  - no frontend build, network or real ffmpeg in the writer worktree
+verification:
+  - RED evidence for Shot DOM, shared Clock and adapter-controlled start
+  - target Node suites
+  - real local Chromium Shot timeline QA
+review:
+  spec: pending
+  quality: pending
+```
 
 ```yaml
 task_id: C-03
