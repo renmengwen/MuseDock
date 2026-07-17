@@ -80,7 +80,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-06b 受控 derived 素材登记 | `complete` | B-01 | `ca45e1d` | 双 Review PASS，已在 dev 重跑目标测试并释放租约 |
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
-| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `in_progress` | B-07b | `df9a519` | C-01 完成；C-02 Image Sequence 选择与 workflow 重排正在执行 |
+| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `in_progress` | B-07b | `df9a519`、`fab5167` | C-01、C-02 完成；下一步 C-03 Caption 绑定与 Shot 时间派生 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
@@ -89,9 +89,10 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: C-02
-status: in_progress
-owner: /root/phase_c02_writer
-lease_released: false
+status: complete
+owner: unassigned
+lease_released: true
+dev_commit: fab5167e452afa0c024dbcb4301c259c2f0bd14f
 code_base_commit: a0666dd12995f0ec4db94273f29646fd436cc46b
 worktree: D:\code3\MuseDock-worktrees\asset-first-c02
 branch: codex/asset-first-c02
@@ -129,8 +130,19 @@ verification:
   - node tests/test-html-video-frame-html-agent.js
   - node tests/test-html-video-workflow.js
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_revision: 8003202db1bf39435f62f13cc3add05c8d16ad3a
+  quality: pass
+  quality_reviewed_revision: 8003202db1bf39435f62f13cc3add05c8d16ad3a
+frozen_revision: 8003202db1bf39435f62f13cc3add05c8d16ad3a
+frozen_tree: 44005cd6851142502756057fb6087efded35867e
+revision_valid: true
+resolved_findings:
+  - canonical Content Graph 先于 Visual Plan，routing refs 不得覆盖 graph 候选
+  - 0 图保持 diagram，单图与多图统一为 1～4 Shot 的 image_sequence
+  - comparison required 冲突、montage 否定与 registry 排序均使用确定性规则
+  - project.assets 为 resume 正式权威，Shot 路径变化进入 Plan 与 Frame 指纹
+  - full、short、retry Frame Prompt 均消费正式 registry 核对后的 Shot 顺序与 src
 ```
 
 ```yaml
@@ -435,16 +447,16 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 
 | ID | 状态 | 要求 | 覆盖 Task |
 |---|---|---|---|
-| REQ-C-01 | `pending` | 一个 Scene 使用 `1～4` 个 Shot | C-01 |
-| REQ-C-02 | `pending` | 单图统一为一个 Shot 的 Image Sequence | C-01 |
-| REQ-C-03 | `pending` | 四种主要 Sequence Mode | C-01、C-03 |
-| REQ-C-04 | `pending` | Shot Role、Caption IDs、最短可见时间 | C-01、C-02 |
-| REQ-C-05 | `pending` | Caption 时间派生入场、保持、退出和重叠 | C-02、C-03 |
-| REQ-C-06 | `pending` | 同 Scene 使用连续 HTML 时间线 | C-03 |
-| REQ-C-07 | `pending` | Scene 内不经过独立 Beat MP4 裸切 | C-03 |
-| REQ-C-08 | `pending` | 跨 Scene 转场保持独立 | C-03 |
-| REQ-C-09 | `pending` | 多图不是强制数量指标 | C-02 |
-| REQ-C-10 | `pending` | AI 生图补视觉角色，Pexels/search 不为凑数 | C-02 |
+| REQ-C-01 | `verified` | 一个 Scene 使用 `1～4` 个 Shot | C-02 |
+| REQ-C-02 | `verified` | 单图统一为一个 Shot 的 Image Sequence | C-02 |
+| REQ-C-03 | `verified` | 四种主要 Sequence Mode | C-02 |
+| REQ-C-04 | `pending` | Shot Role、Caption IDs、最短可见时间 | C-02、C-03 |
+| REQ-C-05 | `pending` | Caption 时间派生入场、保持、退出和重叠 | C-03 |
+| REQ-C-06 | `pending` | 同 Scene 使用连续 HTML 时间线 | C-04 |
+| REQ-C-07 | `pending` | Scene 内不经过独立 Beat MP4 裸切 | C-04 |
+| REQ-C-08 | `pending` | 跨 Scene 转场保持独立 | C-04 |
+| REQ-C-09 | `verified` | 多图不是强制数量指标 | C-02 |
+| REQ-C-10 | `verified` | AI 生图补视觉角色，Pexels/search 不为凑数 | C-01、C-02 |
 
 ### D. 焦点与摄影机
 
@@ -512,5 +524,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase B Task 7B 集成门完成 | `218fbf9`；最终冻结 revision `9589958ba933261b292cc89b6589440fe5540d62`、tree `9634192c39763f50a0bdf9e8fc58951e76e1a003`；规格 Review PASS、普通代码质量 Review PASS、本地真实 Chrome QA PASS；dev 38 组 Node 测试与 `npm run build:frontend` 通过，仅保留既有 >500kB chunk warning；真实 GitHub `https://github.com/openai/codex` 页面截图 smoke 通过，Chrome `150.0.7871.124`、Playwright `1.60.0`、PNG `1440x900`/`72497` bytes，Node 仅转发 1 个 document 与 19 个 stylesheet，临时目录无残留；REQ-B-08 verified，REQ-B-09/10 继续 pending |
 | Phase C 只读实现前审计 | 基线 `857dee2`；content graph、visual plan、scene continuity、asset usage、workflow 五组测试通过；C-01～C-05 Task Packet 已准备，B-07b 写门已解除 |
 | Phase C Task 1 多素材候选契约 | `df9a519`；冻结 revision `c0625e81361fba2919d8f9b836c912c841fc95bb`、tree `b3b3999efbc04198ca2358130186131a8aaa0220`；Content Graph 每 scene 只保留已登记、可用、保序去重后最多 4 张候选，不强制凑满；空注册表、generated scene identity、usage 四值和 evidence 边界 fail-closed；规格 Review PASS、代码质量 Review PASS；dev 13 组直接测试与默认 runner 2 组通过；Image Sequence/Shot requirements 继续 pending，留给 C-02 |
+| Phase C Task 2 Image Sequence 规划 | `fab5167`；冻结 revision `8003202db1bf39435f62f13cc3add05c8d16ad3a`、tree `44005cd6851142502756057fb6087efded35867e`；workflow 改为 canonical Graph 后构建 v2 Visual Plan；0 图 diagram、单图和多图统一为 1～4 Shot image_sequence；四种 mode、required 冲突、正式 Shot src、canonical/expanded graph 所有权与 resume 指纹均确定性处理；full/short/retry Prompt 使用 registry 核对后的 Shot 顺序且不发明 timing；规格 Review PASS、代码质量 Review PASS；dev 22 组测试通过；Caption IDs/真实时间窗/visible duration 继续 pending |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
