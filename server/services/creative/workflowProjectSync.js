@@ -11,6 +11,7 @@ const {
   DEFAULT_MEDIA_ROOT,
 } = require('./workflowStore');
 const { syncProjectStageSummariesFromCheckpoint } = require('./workflowStageRunner');
+const { normalizeFocusRegions } = require('./visualAssetContract');
 
 function assetKey(asset, fallback = '') {
   return safeString(asset?.id || asset?.asset_id || fallback);
@@ -21,6 +22,9 @@ function normalizeProjectVisualAsset(asset, projectDir) {
   const id = assetKey(asset);
   if (!id) return null;
   const normalized = { ...asset, id };
+  if (Object.prototype.hasOwnProperty.call(asset, 'focus_regions')) {
+    normalized.focus_regions = normalizeFocusRegions(asset.focus_regions);
+  }
   const relativePath = safeString(asset.path);
   if (relativePath && projectDir) {
     try {
@@ -34,20 +38,35 @@ function normalizeProjectVisualAsset(asset, projectDir) {
 function mergeProjectVisualAssets(assetContext, project, projectDir) {
   const context = plainObject(assetContext);
   const assets = Array.isArray(context.assets) ? context.assets : [];
-  const seen = new Set(assets.map((asset, index) => assetKey(asset, `asset_${index + 1}`)).filter(Boolean));
-  const additions = [];
+  const nextAssets = [...assets];
+  const indexById = new Map(assets
+    .map((asset, index) => [assetKey(asset, `asset_${index + 1}`), index])
+    .filter(([id]) => id));
+  let changed = false;
   for (const asset of (Array.isArray(project?.assets) ? project.assets : [])) {
     const normalized = normalizeProjectVisualAsset(asset, projectDir);
     const id = assetKey(normalized);
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    additions.push(normalized);
+    if (!id) continue;
+    if (indexById.has(id)) {
+      if (Object.prototype.hasOwnProperty.call(normalized, 'focus_regions')) {
+        const index = indexById.get(id);
+        const current = nextAssets[index];
+        if (JSON.stringify(current?.focus_regions) !== JSON.stringify(normalized.focus_regions)) {
+          nextAssets[index] = { ...current, focus_regions: normalized.focus_regions };
+          changed = true;
+        }
+      }
+      continue;
+    }
+    indexById.set(id, nextAssets.length);
+    nextAssets.push(normalized);
+    changed = true;
   }
-  if (!additions.length) return context;
+  if (!changed) return context;
   return {
     ...context,
     status: context.status || 'ready',
-    assets: [...assets, ...additions],
+    assets: nextAssets,
   };
 }
 
@@ -191,11 +210,15 @@ function extractHtmlVideoProjectPathFromWorkflow(record) {
 }
 
 function assetHydrationFingerprint(record) {
+  const focusAssets = assets => (Array.isArray(assets) ? assets : []).map((asset, index) => ({
+    id: assetKey(asset, `asset_${index + 1}`),
+    ...(Object.prototype.hasOwnProperty.call(asset || {}, 'focus_regions')
+      ? { focus_regions: asset.focus_regions }
+      : {}),
+  }));
   return JSON.stringify({
-    asset_ids: (Array.isArray(record?.asset_context?.assets) ? record.asset_context.assets : [])
-      .map((asset, index) => assetKey(asset, `asset_${index + 1}`)),
-    creative_asset_ids: (Array.isArray(record?.creative_context?.asset_context?.assets) ? record.creative_context.asset_context.assets : [])
-      .map((asset, index) => assetKey(asset, `asset_${index + 1}`)),
+    assets: focusAssets(record?.asset_context?.assets),
+    creative_assets: focusAssets(record?.creative_context?.asset_context?.assets),
     usage_report: record?.asset_context?.asset_usage_report
       || record?.result?.hyperframes_freeform?.project?.asset_usage_report
       || null,

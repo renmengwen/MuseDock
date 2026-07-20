@@ -16,6 +16,7 @@ const {
 const {
   isGeneratedVisualAsset,
   mergeVisualAssetFormalFields,
+  normalizeFocusRegions,
 } = require('../../creative/visualAssetContract');
 
 function objectOrEmpty(value) {
@@ -119,7 +120,7 @@ async function materializeCreativeContextAssets(projectDir, creativeContext = {}
 function projectAssetsFromCreativeContext(creativeContext = {}) {
   const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
   return assets.map((asset, index) => ({
-    id: asset.id || `source_asset_${index + 1}`,
+    id: asset.id || asset.asset_id || `source_asset_${index + 1}`,
     type: asset.type || 'image',
     path: asset.path,
     source: asset.source || '',
@@ -140,6 +141,9 @@ function projectAssetsFromCreativeContext(creativeContext = {}) {
     width: Number(asset.width) || 0,
     height: Number(asset.height) || 0,
     created_at: asset.created_at || '',
+    ...(Object.prototype.hasOwnProperty.call(asset, 'focus_regions')
+      ? { focus_regions: normalizeFocusRegions(asset.focus_regions) }
+      : {}),
   })).filter(asset => asset.path);
 }
 

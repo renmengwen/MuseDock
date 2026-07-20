@@ -17,6 +17,9 @@ const EVIDENCE_CLASSES = new Set([
 ]);
 const MEDIA_TYPES = new Set(['image', 'video']);
 const STATUSES = new Set(['ready', 'rejected']);
+const FOCUS_METHODS = new Set(['manual', 'dom', 'ocr', 'detector', 'vision', 'generation_metadata']);
+const FOCUS_VERIFICATION_STATUSES = new Set(['verified', 'candidate', 'rejected']);
+const FOCUS_CONFIDENCE_LEVELS = new Set(['high', 'medium', 'low']);
 const FORMAL_FIELDS = [
   'media_type',
   'origin',
@@ -123,6 +126,84 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function validUnitNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+function normalizeFocusRegion(input) {
+  if (!isPlainObject(input)) return null;
+  const id = safeString(input.id);
+  const label = safeString(input.label);
+  const method = safeString(input.method).toLowerCase();
+  const sourceRegion = input.region;
+  const verification = input.verification;
+  if (!id || !label || !FOCUS_METHODS.has(method) || !isPlainObject(sourceRegion) || !isPlainObject(verification)) return null;
+
+  const { x, y, width, height } = sourceRegion;
+  if (!validUnitNumber(x) || !validUnitNumber(y)
+    || !validUnitNumber(width) || !validUnitNumber(height)
+    || width <= 0 || height <= 0 || x + width > 1 || y + height > 1) return null;
+
+  const status = safeString(verification.status).toLowerCase();
+  if (!FOCUS_VERIFICATION_STATUSES.has(status)) return null;
+  const focusPoint = hasOwn(input, 'focus_point') && input.focus_point !== undefined
+    ? input.focus_point
+    : { x: x + width / 2, y: y + height / 2 };
+  if (!isPlainObject(focusPoint)
+    || !validUnitNumber(focusPoint.x) || !validUnitNumber(focusPoint.y)
+    || focusPoint.x < x || focusPoint.x > x + width
+    || focusPoint.y < y || focusPoint.y > y + height) return null;
+
+  const aliases = [];
+  const seenAliases = new Set();
+  for (const value of (Array.isArray(input.aliases) ? input.aliases : [])) {
+    const alias = safeString(value);
+    const key = alias.toLowerCase();
+    if (!alias || seenAliases.has(key)) continue;
+    seenAliases.add(key);
+    aliases.push(alias);
+  }
+  const confidence = safeString(input.confidence_level).toLowerCase();
+  let trustLevel = 'C';
+  if (status === 'rejected') trustLevel = 'D';
+  else if (status === 'verified' && ['manual', 'dom', 'generation_metadata'].includes(method)) trustLevel = 'A';
+  else if (status === 'verified' && (['ocr', 'detector'].includes(method)
+    || (method === 'vision' && safeString(verification.method).toLowerCase() === 'crop_review'))) trustLevel = 'B';
+
+  return {
+    id,
+    label,
+    aliases,
+    region: { x, y, width, height },
+    focus_point: { x: focusPoint.x, y: focusPoint.y },
+    method,
+    confidence_level: FOCUS_CONFIDENCE_LEVELS.has(confidence) ? confidence : 'low',
+    verification: {
+      status,
+      method: safeString(verification.method),
+      evidence: safeString(verification.evidence),
+    },
+    trust_level: trustLevel,
+  };
+}
+
+function normalizeFocusRegions(input) {
+  if (!Array.isArray(input)) return [];
+  const counts = new Map();
+  for (const region of input) {
+    const id = isPlainObject(region) ? safeString(region.id) : '';
+    if (id) counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  return input
+    .filter(region => counts.get(isPlainObject(region) ? safeString(region.id) : '') === 1)
+    .map(normalizeFocusRegion)
+    .filter(Boolean);
+}
+
 function resolveInputOrigin(input, assetId) {
   const legacySource = safeString(input.source).toLowerCase();
   const legacyOrigin = legacySource ? LEGACY_SOURCE_TO_ORIGIN[legacySource] : '';
@@ -158,7 +239,7 @@ function normalizeVisualAsset(input = {}) {
     throw new Error(`衍生素材 ${id} 缺少父素材。`);
   }
 
-  return {
+  const normalized = {
     ...input,
     id,
     media_type: mediaType,
@@ -170,6 +251,8 @@ function normalizeVisualAsset(input = {}) {
     status,
     ...(parentAssetId ? { parent_asset_id: parentAssetId } : {}),
   };
+  if (hasOwn(input, 'focus_regions')) normalized.focus_regions = normalizeFocusRegions(input.focus_regions);
+  return normalized;
 }
 
 function definedObject(input = {}) {
@@ -246,6 +329,7 @@ module.exports = {
   EVIDENCE_CLASSES,
   MEDIA_TYPES,
   STATUSES,
+  normalizeFocusRegions,
   isGeneratedVisualAsset,
   mergeVisualAssetFormalFields,
   normalizeVisualAsset,

@@ -717,11 +717,36 @@ async function main() {
         frame_src: '../assets/capture-01.png',
         fit: 'contain',
         image_analysis: { fit: 'contain', summary: '仓库页面截图', contains_text: true },
+        focus_regions: [{
+          id: 'region_stars',
+          label: 'Stars 数量',
+          aliases: ['stars'],
+          region: { x: 0.7, y: 0.1, width: 0.2, height: 0.1 },
+          method: 'dom',
+          confidence_level: 'high',
+          verification: { status: 'verified', method: 'dom_match', evidence: '页面元素' },
+          trust_level: 'C',
+        }],
+      };
+      const callerOnlyFocus = {
+        id: 'caller_focus',
+        media_type: 'image',
+        origin: 'source_extract',
+        status: 'ready',
+        path: 'assets/caller-focus.png',
+      };
+      const clearedByProject = {
+        id: 'cleared_focus',
+        media_type: 'image',
+        origin: 'source_extract',
+        status: 'ready',
+        path: 'assets/cleared-focus.png',
+        focus_regions: [],
       };
       await setupProject(rootDir, workflowId, runId, {
         contentGraph: graph,
-        projectAssets: [asset],
-        assetContext: { asset_context: { assets: [asset] } },
+        projectAssets: [asset, callerOnlyFocus, clearedByProject],
+        assetContext: { asset_context: { assets: [asset, callerOnlyFocus, clearedByProject] } },
       });
       const calls = [];
       frameHtmlAgent.generateFrameHtml = async args => {
@@ -746,6 +771,34 @@ async function main() {
             frame_src: '../assets/old.png',
             fit: 'cover',
             image_analysis: { fit: 'cover', summary: '旧调用方分析' },
+            focus_regions: [{
+              id: 'stale',
+              label: '旧区域',
+              aliases: [],
+              region: { x: 0, y: 0, width: 0.2, height: 0.2 },
+              method: 'vision',
+              verification: { status: 'candidate', method: 'model', evidence: '旧调用方' },
+            }],
+          }, {
+            ...callerOnlyFocus,
+            focus_regions: [{
+              id: 'caller_region',
+              label: '调用方区域',
+              aliases: [],
+              region: { x: 0.1, y: 0.1, width: 0.3, height: 0.3 },
+              method: 'vision',
+              verification: { status: 'candidate', method: 'model', evidence: '仅调用方存在' },
+            }],
+          }, {
+            ...clearedByProject,
+            focus_regions: [{
+              id: 'must_clear',
+              label: '应被清空',
+              aliases: [],
+              region: { x: 0.1, y: 0.1, width: 0.3, height: 0.3 },
+              method: 'vision',
+              verification: { status: 'candidate', method: 'model', evidence: '陈旧数据' },
+            }],
           }] },
         },
         aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
@@ -757,12 +810,18 @@ async function main() {
       assert.equal(shot.fit, 'contain');
       assert.equal(shot.analysis.summary, '仓库页面截图');
       assert.equal(shot.src, '../assets/capture-01.png');
+      assert.equal(shot.focus_regions, undefined, 'focus_regions 不得复制到 Visual Plan / Shot');
       const persisted = result.project.assets.find(item => item.id === 'capture_01');
       assert.equal(persisted.requirement, 'required');
       assert.equal(persisted.provider, 'chromium');
       assert.equal(persisted.origin_detail, 'github_repository_page');
       assert.equal(persisted.evidence_class, 'direct_source');
       assert.equal(persisted.path, 'assets/capture-01.png');
+      assert.equal(persisted.image_analysis?.focus_regions, undefined, 'focus_regions 只能位于 asset 顶层');
+      assert.equal(persisted.focus_regions[0].id, 'region_stars', 'resume 必须以 project canonical focus 覆盖陈旧调用方');
+      assert.equal(persisted.focus_regions[0].trust_level, 'A');
+      assert.equal(result.project.assets.find(item => item.id === 'caller_focus').focus_regions[0].id, 'caller_region', 'project 缺失 focus 时保留调用方值');
+      assert.deepEqual(result.project.assets.find(item => item.id === 'cleared_focus').focus_regions, [], 'project 显式空数组应清空调用方值');
     }
 
     // C-04：只改变受管 Shot 消费的当前 registry 路径时，旧 Frame HTML 不得命中 checkpoint。

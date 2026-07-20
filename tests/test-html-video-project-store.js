@@ -45,6 +45,25 @@ const assetUsagePhase = require('../server/services/creative-video/html-video/as
         path: 'assets/upload.png',
         mime: 'image/png',
         bytes: 123,
+        focus_regions: [{
+          id: 'region_stars',
+          label: 'Stars 数量',
+          aliases: [' Stars ', 'stars', '星标'],
+          region: { x: 0.7, y: 0.1, width: 0.2, height: 0.1 },
+          method: 'ocr',
+          confidence_level: 'high',
+          verification: { status: 'verified', method: 'text_match', evidence: 'Stars' },
+          trust_level: 'A',
+        }],
+      }, {
+        asset_id: 'legacy_capture',
+        source: 'article',
+        path: 'assets/legacy.png',
+        focus_regions: null,
+      }, {
+        id: 'legacy_without_focus',
+        source: 'article',
+        path: 'assets/no-focus.png',
       }],
     },
   });
@@ -79,6 +98,13 @@ const assetUsagePhase = require('../server/services/creative-video/html-video/as
   assert.equal(loaded.assets[0].requirement, 'preferred');
   assert.equal(loaded.assets[0].evidence_class, 'user_supplied');
   assert.equal(loaded.assets[0].bytes, 123);
+  assert.deepEqual(loaded.assets[0].focus_regions[0].aliases, ['Stars', '星标']);
+  assert.equal(loaded.assets[0].focus_regions[0].trust_level, 'B');
+  assert.ok(Math.abs(loaded.assets[0].focus_regions[0].focus_point.x - 0.8) < Number.EPSILON);
+  assert.ok(Math.abs(loaded.assets[0].focus_regions[0].focus_point.y - 0.15) < Number.EPSILON);
+  assert.equal(loaded.assets[1].id, 'legacy_capture');
+  assert.deepEqual(loaded.assets[1].focus_regions, []);
+  assert.equal(Object.prototype.hasOwnProperty.call(loaded.assets[2], 'focus_regions'), false);
   await assert.rejects(
     fs.access(path.join(projectDir, 'project.json.tmp')),
     /ENOENT/

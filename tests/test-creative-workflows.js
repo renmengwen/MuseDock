@@ -2588,17 +2588,45 @@ async function testGetWorkflowHydratesGeneratedProjectAssets() {
     '<!doctype html><html><body><img src="../assets/generated-image-01.jpg"></body></html>',
     'utf8',
   );
-  fs.writeFileSync(path.join(projectDir, 'project.json'), JSON.stringify({
+  const projectPath = path.join(projectDir, 'project.json');
+  fs.writeFileSync(projectPath, JSON.stringify({
     workflow_id: workflowId,
     frames: [{ id: 'scene_01', scene_id: 'scene_01', html_path: 'frames/01.html' }],
     assets: [
       { id: 'gen_scene_01', source: 'generated', path: 'assets/generated-image-01.jpg', generation: { scene_id: 'scene_01' } },
-      { id: 'search_01', source: 'search', path: 'assets/search-image-01.webp' },
+      {
+        id: 'search_01',
+        source: 'search',
+        path: 'assets/search-image-01.webp',
+        focus_regions: [{
+          id: 'project_region',
+          label: '项目焦点',
+          aliases: [' focus ', 'FOCUS'],
+          region: { x: 0.2, y: 0.2, width: 0.4, height: 0.4 },
+          method: 'vision',
+          confidence_level: 'high',
+          verification: { status: 'candidate', method: 'model', evidence: '项目 canonical' },
+          trust_level: 'A',
+        }],
+      },
     ],
   }, null, 2), 'utf8');
   const assetContext = {
     status: 'ready',
-    assets: [{ id: 'search_01', type: 'image', source: 'search', path: 'assets/search-image-01.webp' }],
+    assets: [{
+      id: 'search_01',
+      type: 'image',
+      source: 'search',
+      path: 'assets/search-image-01.webp',
+      focus_regions: [{
+        id: 'stale_region',
+        label: '陈旧焦点',
+        aliases: [],
+        region: { x: 0, y: 0, width: 0.2, height: 0.2 },
+        method: 'vision',
+        verification: { status: 'candidate', method: 'model', evidence: 'workflow stale' },
+      }],
+    }],
   };
   fs.writeFileSync(getWorkflowPath(workflowId, rootDir), JSON.stringify({
     success: true,
@@ -2632,9 +2660,43 @@ async function testGetWorkflowHydratesGeneratedProjectAssets() {
     ['search_01', 'gen_scene_01'],
   );
   assert.equal(fetched.data.asset_context.assets.find(asset => asset.id === 'gen_scene_01').source, 'generated');
+  assert.equal(fetched.data.asset_context.assets.find(asset => asset.id === 'search_01').focus_regions[0].id, 'project_region');
+  assert.equal(fetched.data.asset_context.assets.find(asset => asset.id === 'search_01').focus_regions[0].trust_level, 'C');
   assert.equal(fetched.data.asset_context.asset_usage_report.used_asset_ids[0], 'gen_scene_01');
   const persisted = readJson(getWorkflowPath(workflowId, rootDir));
   assert.equal(persisted.creative_context.asset_context.assets.find(asset => asset.id === 'gen_scene_01').source, 'generated');
+  assert.equal(persisted.creative_context.asset_context.assets.find(asset => asset.id === 'search_01').focus_regions[0].id, 'project_region');
+
+  const persistedPath = getWorkflowPath(workflowId, rootDir);
+  const afterFirstHydration = fs.readFileSync(persistedPath, 'utf8');
+  const fetchedAgain = await getCreativeWorkflow(workflowId, {
+    rootDir,
+    mediaRoot,
+    services: { now: () => NOW },
+  });
+  assert.deepEqual(fetchedAgain.data.asset_context.assets, fetched.data.asset_context.assets, '第二次 same-ID 水合必须幂等');
+  assert.equal(fs.readFileSync(persistedPath, 'utf8'), afterFirstHydration);
+
+  const changedProject = readJson(projectPath);
+  changedProject.assets.find(asset => asset.id === 'search_01').focus_regions = [];
+  fs.writeFileSync(projectPath, JSON.stringify(changedProject, null, 2), 'utf8');
+  const focusCleared = await getCreativeWorkflow(workflowId, {
+    rootDir,
+    mediaRoot,
+    services: { now: () => NOW },
+  });
+  assert.deepEqual(focusCleared.data.asset_context.assets.find(asset => asset.id === 'search_01').focus_regions, []);
+  assert.deepEqual(readJson(persistedPath).creative_context.asset_context.assets.find(asset => asset.id === 'search_01').focus_regions, []);
+
+  const afterFocusChange = fs.readFileSync(persistedPath, 'utf8');
+  changedProject.assets.find(asset => asset.id === 'search_01').debug_note = '不相关工程字段';
+  fs.writeFileSync(projectPath, JSON.stringify(changedProject, null, 2), 'utf8');
+  await getCreativeWorkflow(workflowId, {
+    rootDir,
+    mediaRoot,
+    services: { now: () => NOW },
+  });
+  assert.equal(fs.readFileSync(persistedPath, 'utf8'), afterFocusChange, '不相关 project 字段不应触发 workflow 持久化抖动');
 }
 
 async function testGetWorkflowDoesNotHydrateProjectOutsideMediaRoot() {

@@ -180,6 +180,113 @@ function testContextMergePreservesAssetsAndDiagnostics() {
   assert.equal(legacy.evidence_class, 'contextual');
 }
 
+function focusRegion(id, overrides = {}) {
+  return {
+    id,
+    label: `区域 ${id}`,
+    aliases: [' Stars ', 'stars', '', '星标'],
+    region: { x: 0.1, y: 0.2, width: 0.4, height: 0.2 },
+    method: 'vision',
+    confidence_level: 'high',
+    verification: { status: 'candidate', method: 'model', evidence: '候选区域' },
+    trust_level: 'A',
+    unknown: true,
+    ...overrides,
+  };
+}
+
+function focusAsset(focusRegions) {
+  return normalizeVisualAsset({
+    id: 'capture_focus',
+    origin: 'page_capture',
+    path: 'assets/capture.png',
+    focus_regions: focusRegions,
+  });
+}
+
+function testFocusRegionNormalizationAndTrustDerivation() {
+  const asset = focusAsset([
+    focusRegion('manual', {
+      method: 'manual',
+      focus_point: { x: 0.2, y: 0.25 },
+      verification: { status: 'verified', method: 'user_review', evidence: '用户框选' },
+    }),
+    focusRegion('ocr', {
+      method: 'ocr',
+      verification: { status: 'verified', method: 'text_match', evidence: 'Stars' },
+    }),
+    focusRegion('vision_reviewed', {
+      method: 'vision',
+      verification: { status: 'verified', method: 'crop_review', evidence: '裁剪复核通过' },
+    }),
+    focusRegion('detector', {
+      method: 'detector',
+      verification: { status: 'verified', method: 'object_match', evidence: '唯一目标' },
+    }),
+    focusRegion('vision_candidate'),
+    focusRegion('rejected', {
+      method: 'dom',
+      verification: { status: 'rejected', method: 'conflict', evidence: '多个目标冲突' },
+    }),
+  ]);
+
+  assert.deepEqual(asset.focus_regions.map(region => region.trust_level), ['A', 'B', 'B', 'B', 'C', 'D']);
+  assert.deepEqual(asset.focus_regions[0].aliases, ['Stars', '星标']);
+  assert.deepEqual(asset.focus_regions[0].focus_point, { x: 0.2, y: 0.25 });
+  assert.equal(asset.focus_regions[4].confidence_level, 'high', 'producer confidence 只能保留，不能升级 trust');
+  assert.deepEqual(Object.keys(asset.focus_regions[0]), [
+    'id', 'label', 'aliases', 'region', 'focus_point', 'method', 'confidence_level', 'verification', 'trust_level',
+  ]);
+  assert.deepEqual(normalizeVisualAsset(asset), asset, 'focus_regions normalize 必须幂等');
+
+  const missing = normalizeVisualAsset({ id: 'legacy', source: 'article', path: 'assets/legacy.png' });
+  assert.equal(Object.prototype.hasOwnProperty.call(missing, 'focus_regions'), false, '旧资产字段缺失必须保持缺失');
+}
+
+function testInvalidFocusRegionsAreSafelyDropped() {
+  const asset = focusAsset([
+    focusRegion('valid', { confidence_level: undefined }),
+    focusRegion('nan', { region: { x: Number.NaN, y: 0, width: 0.2, height: 0.2 } }),
+    focusRegion('zero', { region: { x: 0, y: 0, width: 0, height: 0.2 } }),
+    focusRegion('overflow', { region: { x: 0.9, y: 0, width: 0.2, height: 0.2 } }),
+    focusRegion('negative', { region: { x: -0.1, y: 0, width: 0.2, height: 0.2 } }),
+    focusRegion('string_geometry', { region: { x: '0.1', y: 0, width: 0.2, height: 0.2 } }),
+    focusRegion('outside_focus', { focus_point: { x: 0.9, y: 0.3 } }),
+    focusRegion('bad_method', { method: 'model_guess' }),
+    focusRegion('bad_status', { verification: { status: 'unknown', method: 'model', evidence: '' } }),
+    focusRegion('duplicate'),
+    focusRegion(' duplicate ', { label: '重复二' }),
+  ]);
+
+  assert.deepEqual(asset.focus_regions.map(region => region.id), ['valid']);
+  assert.equal(asset.focus_regions[0].confidence_level, 'low');
+  for (const invalidContainer of [null, 'bad', { id: 'not-an-array' }]) {
+    assert.deepEqual(focusAsset(invalidContainer).focus_regions, []);
+  }
+}
+
+function testFocusRegionMergePresenceSemantics() {
+  const existing = focusAsset([focusRegion('existing')]);
+  const preserved = mergeVisualAssets([existing], [{ id: existing.id, title: '只更新标题' }])[0];
+  assert.deepEqual(preserved.focus_regions, existing.focus_regions, 'incoming 缺失 focus_regions 时应保留已有值');
+
+  for (const clearValue of [[], null, 'bad', { id: 'not-an-array' }]) {
+    const cleared = mergeVisualAssets([existing], [{ id: existing.id, focus_regions: clearValue }])[0];
+    assert.deepEqual(cleared.focus_regions, [], '显式空数组或非法容器应安全清空');
+  }
+
+  const replacement = mergeVisualAssets([existing], [{
+    id: existing.id,
+    focus_regions: [focusRegion('replacement', {
+      method: 'generation_metadata',
+      verification: { status: 'verified', method: 'generator', evidence: '生成布局坐标' },
+    })],
+  }])[0];
+  assert.deepEqual(replacement.focus_regions.map(region => region.id), ['replacement']);
+  assert.equal(replacement.focus_regions[0].trust_level, 'A');
+  assert.deepEqual(mergeVisualAssets([replacement], [replacement]), [replacement]);
+}
+
 testGeneratedIdentityUsesFormalOriginFirst();
 testFormalMergeRejectsInvalidEnums();
 testLegacySourceCompatibility();
@@ -187,5 +294,8 @@ testExplicitContract();
 testInvalidContractRejected();
 testMergeIsStableAndIdempotent();
 testContextMergePreservesAssetsAndDiagnostics();
+testFocusRegionNormalizationAndTrustDerivation();
+testInvalidFocusRegionsAreSafelyDropped();
+testFocusRegionMergePresenceSemantics();
 
 console.log('visual asset contract tests passed');
