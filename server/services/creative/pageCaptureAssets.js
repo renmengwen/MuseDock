@@ -23,11 +23,6 @@ const STATIC_HOSTS = new Set([
   'user-images.githubusercontent.com',
 ]);
 const FAILURE_MESSAGE = 'GitHub 仓库页面截图失败，已保留其他视觉素材。';
-const DOM_EVIDENCE_FAILURE = {
-  code: 'page_capture_dom_evidence_unavailable',
-  message: '页面 DOM 证据采集失败，已继续保留页面截图。',
-  details: { category: 'evaluate_failed' },
-};
 
 function emptyResult(diagnostic = null) {
   return {
@@ -249,34 +244,49 @@ async function collectPageCaptureEvidence(page) {
         element.children.length ? '' : element.innerText,
       ].map(normalizeText).find(Boolean)?.slice(0, limits.text) || '';
       if (!text) continue;
+      const rect = element.getBoundingClientRect();
+      if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
+        || rect.width <= 0 || rect.height <= 0) continue;
+      let left = Math.max(0, rect.x);
+      let top = Math.max(0, rect.y);
+      let right = Math.min(viewport.width, rect.x + rect.width);
+      let bottom = Math.min(viewport.height, rect.y + rect.height);
+      if (right <= left || bottom <= top) continue;
       let hidden = false;
       for (let current = element; current; current = current.parentElement) {
         const style = getComputedStyle(current);
         if (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
-          || Number(style.opacity) === 0) {
+          || Number(style.opacity) === 0 || style.contentVisibility === 'hidden') {
+          hidden = true;
+          break;
+        }
+        if (current === element) continue;
+        const clipX = ['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowX);
+        const clipY = ['hidden', 'clip', 'auto', 'scroll'].includes(style.overflowY);
+        if (!clipX && !clipY) continue;
+        const ancestorRect = current.getBoundingClientRect();
+        if (clipX) {
+          left = Math.max(left, ancestorRect.x);
+          right = Math.min(right, ancestorRect.x + ancestorRect.width);
+        }
+        if (clipY) {
+          top = Math.max(top, ancestorRect.y);
+          bottom = Math.min(bottom, ancestorRect.y + ancestorRect.height);
+        }
+        if (right <= left || bottom <= top) {
           hidden = true;
           break;
         }
       }
       if (hidden) continue;
-      const rect = element.getBoundingClientRect();
-      if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
-        || rect.width <= 0 || rect.height <= 0) continue;
-      const right = rect.x + rect.width;
-      const bottom = rect.y + rect.height;
-      if (right <= 0 || bottom <= 0 || rect.x >= viewport.width || rect.y >= viewport.height) continue;
-      const left = Math.max(0, rect.x);
-      const top = Math.max(0, rect.y);
-      const clippedRight = Math.min(viewport.width, right);
-      const clippedBottom = Math.min(viewport.height, bottom);
       elements.push({
         tag,
         text,
         region: {
           x: left / viewport.width,
           y: top / viewport.height,
-          width: (clippedRight - left) / viewport.width,
-          height: (clippedBottom - top) / viewport.height,
+          width: (right - left) / viewport.width,
+          height: (bottom - top) / viewport.height,
         },
       });
     }
@@ -354,7 +364,11 @@ async function captureGithubRepositoryPage({ sourceMaterial = {}, projectDir = '
     try {
       pageCaptureEvidence = await collectPageCaptureEvidence(page);
     } catch {
-      evidenceDiagnostic = DOM_EVIDENCE_FAILURE;
+      evidenceDiagnostic = {
+        code: 'page_capture_dom_evidence_unavailable',
+        message: '页面 DOM 证据采集失败，已继续保留页面截图。',
+        details: { category: 'evaluate_failed' },
+      };
     }
 
     category = 'capture_invalid';

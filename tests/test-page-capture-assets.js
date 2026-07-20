@@ -166,12 +166,18 @@ function makeFakePlaywright({
         scrollX: evaluateDom.scroll?.x || 0,
         scrollY: evaluateDom.scroll?.y || 0,
       };
-      global.getComputedStyle = element => ({
-        display: 'block',
-        visibility: 'visible',
-        opacity: '1',
-        ...element.__style,
-      });
+      global.getComputedStyle = element => {
+        const style = element.__style;
+        return {
+          display: 'block',
+          visibility: 'visible',
+          opacity: '1',
+          contentVisibility: 'visible',
+          overflowX: style.overflowX ?? style.overflow ?? 'visible',
+          overflowY: style.overflowY ?? style.overflow ?? 'visible',
+          ...style,
+        };
+      };
       try {
         return callback(argument);
       } finally {
@@ -425,6 +431,60 @@ async function testCollectsBoundedVisibleDomEvidenceBeforeScreenshot() {
   assert.ok(evidence.elements.every(item => !Object.hasOwn(item, 'focus_regions') && !Object.hasOwn(item, 'trust_level')));
 }
 
+async function testClipsEvidenceToVisibleAncestorIntersections() {
+  const parent = (id, rect, style, parentId) => ({
+    id,
+    tag: 'DIV',
+    text: '',
+    rect,
+    style,
+    ...(parentId ? { parent: parentId } : {}),
+  });
+  const item = (text, rect, parentId) => ({ tag: 'SPAN', text, rect, parent: parentId });
+  const fake = makeFakePlaywright({ evaluateDom: { elements: [
+    parent('fully-clipped-parent', { x: 0, y: 0, width: 1, height: 1 }, { overflow: 'hidden' }),
+    item('完全裁剪', { x: 100, y: 100, width: 10, height: 10 }, 'fully-clipped-parent'),
+    parent('x-parent', { x: 100, y: 0, width: 100, height: 900 }, { overflowX: 'hidden' }),
+    item('单轴横向裁剪', { x: 50, y: 50, width: 100, height: 100 }, 'x-parent'),
+    parent('y-parent', { x: 0, y: 100, width: 1440, height: 100 }, { overflowY: 'clip' }),
+    item('单轴纵向裁剪', { x: 300, y: 50, width: 100, height: 100 }, 'y-parent'),
+    parent('nested-x', { x: 400, y: 0, width: 200, height: 900 }, { overflowX: 'auto' }),
+    parent('nested-y', { x: 0, y: 200, width: 1440, height: 200 }, { overflowY: 'scroll' }, 'nested-x'),
+    item('嵌套裁剪', { x: 350, y: 150, width: 200, height: 300 }, 'nested-y'),
+    parent('content-hidden', { x: 0, y: 0, width: 100, height: 100 }, { contentVisibility: 'hidden' }),
+    item('内容可见性隐藏', { x: 10, y: 10, width: 10, height: 10 }, 'content-hidden'),
+    { tag: 'SPAN', text: '可见兄弟', rect: { x: 20, y: 20, width: 20, height: 20 } },
+  ] } });
+  const result = await pageCaptureAssets.captureGithubRepositoryPage({
+    sourceMaterial: githubSource(),
+    projectDir: await createTestDir('ancestor-clipping'),
+    deps: fake.deps,
+  });
+  const byText = new Map(result.assets[0].page_capture_evidence.elements.map(element => [element.text, element]));
+
+  assert.equal(byText.has('完全裁剪'), false, 'overflow shorthand 的 computed X/Y 必须同时裁剪');
+  assert.equal(byText.has('内容可见性隐藏'), false);
+  assert.deepEqual(byText.get('单轴横向裁剪').region, {
+    x: 100 / 1440,
+    y: 50 / 900,
+    width: 50 / 1440,
+    height: 100 / 900,
+  });
+  assert.deepEqual(byText.get('单轴纵向裁剪').region, {
+    x: 300 / 1440,
+    y: 100 / 900,
+    width: 100 / 1440,
+    height: 50 / 900,
+  });
+  assert.deepEqual(byText.get('嵌套裁剪').region, {
+    x: 400 / 1440,
+    y: 200 / 900,
+    width: 150 / 1440,
+    height: 200 / 900,
+  });
+  assert.ok(byText.has('可见兄弟'));
+}
+
 async function testEvaluateFailureKeepsCaptureReadyWithSafeDiagnostic() {
   const projectDir = await createTestDir('evaluate-failure');
   const secret = `DOM failed ${projectDir} token=secret`;
@@ -450,6 +510,22 @@ async function testEvaluateFailureKeepsCaptureReadyWithSafeDiagnostic() {
     details: { category: 'evaluate_failed' },
   }]);
   assert.ok(!JSON.stringify(result).includes(secret));
+
+  const firstDiagnostic = result.diagnostics[0];
+  firstDiagnostic.message = '已被调用方修改';
+  firstDiagnostic.details.category = 'mutated';
+  const second = await pageCaptureAssets.captureGithubRepositoryPage({
+    sourceMaterial: githubSource(),
+    projectDir: await createTestDir('evaluate-failure-second'),
+    deps: makeFakePlaywright({ evaluateError: new Error('second secret') }).deps,
+  });
+  assert.deepEqual(second.diagnostics, [{
+    code: 'page_capture_dom_evidence_unavailable',
+    message: '页面 DOM 证据采集失败，已继续保留页面截图。',
+    details: { category: 'evaluate_failed' },
+  }]);
+  assert.notEqual(second.diagnostics[0], firstDiagnostic);
+  assert.notEqual(second.diagnostics[0].details, firstDiagnostic.details);
 }
 
 async function testRequestInterceptionAllowsOnlyExpectedGithubResources() {
@@ -1034,6 +1110,7 @@ async function testSourcePrepAcceptsNonPromiseCaptureContext() {
   try {
     await testCapturesCanonicalGithubRepositoryPage();
     await testCollectsBoundedVisibleDomEvidenceBeforeScreenshot();
+    await testClipsEvidenceToVisibleAncestorIntersections();
     await testEvaluateFailureKeepsCaptureReadyWithSafeDiagnostic();
     await testRequestInterceptionAllowsOnlyExpectedGithubResources();
     await testBoundedNetworkBodiesAndHeaders();
