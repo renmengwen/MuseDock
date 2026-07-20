@@ -89,12 +89,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-03b
-status: implementing
-owner: d03b_writer
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: 4236bb16b0246e4fecccb5d45cf83023ae779ebc
 worktree: D:\code3\MuseDock-worktrees\asset-first-d03b
 branch: codex/asset-first-d03b
+candidate_commit: 4c60f1fd95242dd24e493fc2e847850e5da467ca
+frozen_revision: 4c60f1fd95242dd24e493fc2e847850e5da467ca
+frozen_tree: 8479660f11a3817379108c47f44045075b1c7554
+revision_valid: true
 allowed_paths:
   - server/services/creative/pageCaptureAssets.js
   - tests/test-page-capture-assets.js
@@ -119,6 +123,8 @@ verification:
   - 同 page/viewport/scroll、裁剪归一化、隐藏/零面积/越界、同名候选与200/160上限闭包
   - evaluate 失败保留截图、空 evidence与中文诊断
   - 现有网络安全、原子写入、资源关闭、source prep合并与retry去重回归
+  - Coordinator page capture 与 creative workflow 回归通过；git diff --check 通过
+  - 真实 Chrome 150 / Playwright 1.60 GitHub smoke：PNG 1440x900、71936 bytes、38 条有限 raw evidence、无诊断并安全清理临时目录
 review:
   spec: pending
   quality: pending
