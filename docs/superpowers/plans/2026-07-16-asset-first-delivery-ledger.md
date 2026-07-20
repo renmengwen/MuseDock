@@ -88,6 +88,43 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 ## 当前写租约
 
 ```yaml
+task_id: D-03b
+status: implementing
+owner: d03b_writer
+lease_released: false
+code_base_commit: 4236bb16b0246e4fecccb5d45cf83023ae779ebc
+worktree: D:\code3\MuseDock-worktrees\asset-first-d03b
+branch: codex/asset-first-d03b
+allowed_paths:
+  - server/services/creative/pageCaptureAssets.js
+  - tests/test-page-capture-assets.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative/visualAssetContract.js
+  - server/services/source/sourceImageAnalysis.js
+  - server/services/creative-video/html-video/**
+  - server/services/ai/**
+  - frontend-react/**
+  - package.json
+  - package-lock.json
+state_owners:
+  - asset_context.assets[].page_capture_evidence
+decisions:
+  - 复用截图时同一 page、viewport 与 DOM 状态，在 screenshot 前采集原始 evidence，不创建第二次导航
+  - page_capture_evidence 固定 version=1，记录 viewport、scroll 与有界 elements 文本/标签/归一化裁剪 region
+  - 最多 200 个元素、每段文本最多 160 字符；隐藏、零面积、完全越界或无文本元素不进入 evidence
+  - 同名元素全部保留为 raw candidates，capture 阶段不消歧、不生成 canonical focus_regions 或 trust_level
+  - DOM evidence 采集失败不丢截图，返回空 elements 和中文非阻断诊断；现有网络 allowlist/预算/重定向边界不变
+verification:
+  - 同 page/viewport/scroll、裁剪归一化、隐藏/零面积/越界、同名候选与200/160上限闭包
+  - evaluate 失败保留截图、空 evidence与中文诊断
+  - 现有网络安全、原子写入、资源关闭、source prep合并与retry去重回归
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
 task_id: D-03a
 status: complete
 owner: unassigned
