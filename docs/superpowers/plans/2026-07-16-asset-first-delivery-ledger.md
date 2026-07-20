@@ -88,6 +88,50 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 ## 当前写租约
 
 ```yaml
+task_id: C-05
+status: implementing
+owner: c05_writer_takeover
+lease_released: false
+code_base_commit: 7e59bce935c442ed9e61640101d83de044dc24c3
+worktree: D:\code3\MuseDock-worktrees\asset-first-c05
+branch: codex/asset-first-c05
+allowed_paths:
+  - server/services/creative-video/html-video/assetUsagePhase.js
+  - frontend-react/src/components/creative/SourceImageAssetsPanel.jsx
+  - tests/test-html-video-asset-usage.js
+  - tests/test-html-video-workflow.js
+  - tests/test-creative-workflows.js
+  - tests/test-creative-task-detail-assets.mjs
+  - tests/test-html-video-runtime-asset-policy-chromium.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative-video/html-video/sceneImageSequenceDom.js
+  - server/services/creative-video/html-video/htmlVideoWorkflow.js
+  - server/services/creative-video/html-video/projectOrchestrator.js
+  - server/services/creative-video/retryPlanner.js
+  - server/services/creative-video/resumeExecutor.js
+state_owners:
+  - asset_usage_report.assets[].shot_usages
+  - asset_usage_report.assets[].used
+  - asset_usage_report.assets[].used_in_frames
+  - asset_usage_report.assets[].usage_count
+  - asset_usage_report.used_asset_ids
+  - asset_usage_report.unused_asset_ids
+  - asset_usage_report.missing_required_asset_ids
+exclusive_resources:
+  - C-05 Node tests run serially inside the worker worktree
+  - C-05 real Chromium runs only after Node GREEN
+  - frontend build runs serially
+verification:
+  - required path-only HTML reference RED
+  - canonical materialized Shot usage and positive visible duration RED
+  - workflow persistence, required gate and UI projection
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
 task_id: C-04
 status: complete
 owner: unassigned
