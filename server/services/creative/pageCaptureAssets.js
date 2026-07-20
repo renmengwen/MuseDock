@@ -230,15 +230,35 @@ async function loadPlaywright(importPlaywright) {
 async function collectPageCaptureEvidence(page) {
   const raw = await page.evaluate(({ viewport, limits }) => {
     const elements = [];
+    const excludedTags = new Set(['html', 'body', 'head', 'script', 'style', 'noscript', 'template', 'meta', 'link', 'base']);
+    const normalizeText = value => String(value || '').replace(/\s+/g, ' ').trim();
     const candidates = document.querySelectorAll('*');
     for (let index = 0; index < Math.min(candidates.length, limits.scan); index += 1) {
       if (elements.length >= limits.elements) break;
       const element = candidates[index];
-      const text = String(element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, limits.text);
+      const tag = String(element.tagName || '').toLowerCase();
+      if (excludedTags.has(tag)) continue;
+      const directText = Array.from(element.childNodes)
+        .filter(node => node.nodeType === 3)
+        .map(node => node.textContent)
+        .join(' ');
+      const text = [
+        element.getAttribute('aria-label'),
+        element.getAttribute('title'),
+        directText,
+        element.children.length ? '' : element.innerText,
+      ].map(normalizeText).find(Boolean)?.slice(0, limits.text) || '';
       if (!text) continue;
-      const style = getComputedStyle(element);
-      if (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
-        || Number(style.opacity) === 0) continue;
+      let hidden = false;
+      for (let current = element; current; current = current.parentElement) {
+        const style = getComputedStyle(current);
+        if (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
+          || Number(style.opacity) === 0) {
+          hidden = true;
+          break;
+        }
+      }
+      if (hidden) continue;
       const rect = element.getBoundingClientRect();
       if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
         || rect.width <= 0 || rect.height <= 0) continue;
@@ -250,7 +270,7 @@ async function collectPageCaptureEvidence(page) {
       const clippedRight = Math.min(viewport.width, right);
       const clippedBottom = Math.min(viewport.height, bottom);
       elements.push({
-        tag: String(element.tagName || '').toLowerCase(),
+        tag,
         text,
         region: {
           x: left / viewport.width,

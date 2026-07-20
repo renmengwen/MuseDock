@@ -142,10 +142,25 @@ function makeFakePlaywright({
       };
       const elements = evaluateDom.elements.map(item => ({
         tagName: item.tag,
-        textContent: item.text,
+        textContent: item.subtreeText ?? item.text,
+        innerText: item.innerText ?? item.text ?? '',
+        childNodes: item.text === undefined ? [] : [{ nodeType: 3, textContent: item.text }],
+        children: [],
+        parentElement: null,
+        getAttribute: name => item.attributes?.[name] ?? null,
         getBoundingClientRect: () => item.rect,
         __style: item.style || {},
       }));
+      const byId = new Map(evaluateDom.elements.flatMap((item, index) => (
+        item.id ? [[item.id, elements[index]]] : []
+      )));
+      evaluateDom.elements.forEach((item, index) => {
+        if (!item.parent) return;
+        const parent = byId.get(item.parent);
+        if (!parent) return;
+        elements[index].parentElement = parent;
+        parent.children.push(elements[index]);
+      });
       global.document = { querySelectorAll: () => elements };
       global.window = {
         scrollX: evaluateDom.scroll?.x || 0,
@@ -329,6 +344,8 @@ async function testCollectsBoundedVisibleDomEvidenceBeforeScreenshot() {
     { tag: 'DIV', text: 'zero', rect: { x: 1, y: 1, width: 0, height: 10 } },
     { tag: 'DIV', text: 'outside', rect: { x: 1440, y: 1, width: 10, height: 10 } },
     { tag: 'DIV', text: '   ', rect: { x: 1, y: 1, width: 10, height: 10 } },
+    { id: 'hidden-parent', tag: 'DIV', text: '', rect: { x: 1, y: 1, width: 10, height: 10 }, style: { display: 'none' } },
+    { tag: 'SPAN', text: '隐藏父级子元素', parent: 'hidden-parent', rect: { x: 1, y: 1, width: 10, height: 10 } },
   ];
   const filler = Array.from({ length: 205 }, (_, index) => ({
     tag: 'P',
@@ -342,6 +359,23 @@ async function testCollectsBoundedVisibleDomEvidenceBeforeScreenshot() {
         { tag: 'BUTTON', text: `  ${'长'.repeat(170)}  `, rect: { x: -144, y: 90, width: 288, height: 180 } },
         repeated,
         { ...repeated, rect: { x: 432, y: 270, width: 144, height: 90 } },
+        {
+          tag: 'BUTTON',
+          text: '直接文本不应胜出',
+          attributes: { 'aria-label': '  无障碍   名称  ', title: '标题不应胜出' },
+          rect: { x: 10, y: 10, width: 10, height: 10 },
+        },
+        {
+          tag: 'A',
+          text: '直接文本不应胜出',
+          attributes: { title: '  标题   名称  ' },
+          rect: { x: 10, y: 10, width: 10, height: 10 },
+        },
+        { tag: 'P', text: '直接   节点', innerText: 'innerText不应胜出', rect: { x: 10, y: 10, width: 10, height: 10 } },
+        { id: 'container', tag: 'DIV', subtreeText: '不应聚合子元素文本', innerText: '不应聚合子元素文本', rect: { x: 10, y: 10, width: 10, height: 10 } },
+        { tag: 'SPAN', text: '直接 子文本', parent: 'container', rect: { x: 10, y: 10, width: 10, height: 10 } },
+        { tag: 'IMG', innerText: '叶节点回退文本', rect: { x: 10, y: 10, width: 10, height: 10 } },
+        { tag: 'STYLE', text: '不得采集的样式文本', rect: { x: 10, y: 10, width: 10, height: 10 } },
         ...hidden,
         ...filler,
       ],
@@ -366,7 +400,25 @@ async function testCollectsBoundedVisibleDomEvidenceBeforeScreenshot() {
     region: { x: 0, y: 0.1, width: 0.1, height: 0.2 },
   });
   assert.equal(evidence.elements.filter(item => item.text === '同名 候选').length, 2);
-  assert.ok(!evidence.elements.some(item => ['display', 'hidden', 'visibility', 'opacity', 'zero', 'outside'].includes(item.text)));
+  assert.ok(evidence.elements.some(item => item.text === '无障碍 名称'));
+  assert.ok(evidence.elements.some(item => item.text === '标题 名称'));
+  assert.ok(evidence.elements.some(item => item.text === '直接 节点'));
+  assert.ok(evidence.elements.some(item => item.text === '直接 子文本'));
+  assert.ok(evidence.elements.some(item => item.text === '叶节点回退文本'));
+  assert.ok(!evidence.elements.some(item => [
+    '直接文本不应胜出',
+    '标题不应胜出',
+    'innerText不应胜出',
+    '不应聚合子元素文本',
+    '不得采集的样式文本',
+    '隐藏父级子元素',
+    'display',
+    'hidden',
+    'visibility',
+    'opacity',
+    'zero',
+    'outside',
+  ].includes(item.text)));
   assert.ok(evidence.elements.every(item => Object.values(item.region).every(value => value >= 0 && value <= 1)));
   assert.equal(Object.hasOwn(evidence, 'focus_regions'), false);
   assert.equal(Object.hasOwn(evidence, 'trust_level'), false);
