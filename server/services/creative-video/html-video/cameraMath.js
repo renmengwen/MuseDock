@@ -64,7 +64,16 @@ function computeCameraTransform(args) {
     (safe.right - safe.left) / baseRegionWidth,
     (safe.bottom - safe.top) / baseRegionHeight,
   ) * fillFactor;
-  const zoom = Math.min(maxZoom, Math.max(1, candidateZoom));
+  const focusOffsetX = focus.x - region.x;
+  const focusOffsetY = focus.y - region.y;
+  const limit = (room, extent) => extent > 0 ? room / (extent * baseScale) : Number.POSITIVE_INFINITY;
+  const safeZoom = Math.min(
+    limit((safe.right - safe.left) / 2, focusOffsetX * iw),
+    limit((safe.right - safe.left) / 2, (region.width - focusOffsetX) * iw),
+    limit((safe.bottom - safe.top) / 2, focusOffsetY * ih),
+    limit((safe.bottom - safe.top) / 2, (region.height - focusOffsetY) * ih),
+  );
+  const zoom = Math.min(maxZoom, safeZoom, Math.max(1, candidateZoom));
   const scale = baseScale * zoom;
   const renderWidth = iw * scale;
   const renderHeight = ih * scale;
@@ -87,9 +96,20 @@ function computeCameraTransform(args) {
     x: left + focus.x * renderWidth,
     y: top + focus.y * renderHeight,
   };
+  const regionCanvas = {
+    left: left + region.x * renderWidth,
+    top: top + region.y * renderHeight,
+    right: left + (region.x + region.width) * renderWidth,
+    bottom: top + (region.y + region.height) * renderHeight,
+  };
   const epsilon = 1e-9;
-  if (focusCanvas.x < safe.left - epsilon || focusCanvas.x > safe.right + epsilon
+  if (zoom < 1
+    || focusCanvas.x < safe.left - epsilon || focusCanvas.x > safe.right + epsilon
     || focusCanvas.y < safe.top - epsilon || focusCanvas.y > safe.bottom + epsilon) {
+    return noOp('focus_outside_safe_rect', fit);
+  }
+  if (regionCanvas.left < safe.left - epsilon || regionCanvas.right > safe.right + epsilon
+    || regionCanvas.top < safe.top - epsilon || regionCanvas.bottom > safe.bottom + epsilon) {
     return noOp('focus_outside_safe_rect', fit);
   }
 

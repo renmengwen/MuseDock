@@ -37,6 +37,20 @@ function assertNoOp(input, reason) {
   assert.equal(isFiniteTree(result), true, 'no-op 不得包含 NaN/Infinity');
 }
 
+function assertRegionInside(result, region, safeRect, label = '') {
+  const mapped = {
+    left: result.image_rect.left + region.x * result.image_rect.width,
+    top: result.image_rect.top + region.y * result.image_rect.height,
+    right: result.image_rect.left + (region.x + region.width) * result.image_rect.width,
+    bottom: result.image_rect.top + (region.y + region.height) * result.image_rect.height,
+  };
+  assert.equal(mapped.left >= safeRect.left - 1e-9, true, `${label} region 左边界必须在 safe rect 内`);
+  assert.equal(mapped.top >= safeRect.top - 1e-9, true, `${label} region 上边界必须在 safe rect 内`);
+  assert.equal(mapped.right <= safeRect.right + 1e-9, true, `${label} region 右边界必须在 safe rect 内`);
+  assert.equal(mapped.bottom <= safeRect.bottom + 1e-9, true, `${label} region 下边界必须在 safe rect 内`);
+  return mapped;
+}
+
 {
   const cover = computeCameraTransform(args({
     image_width: 2000,
@@ -80,6 +94,29 @@ function assertNoOp(input, reason) {
     focus_canvas: { x: 500, y: 500 },
     target_point: { x: 500, y: 500 },
   });
+
+  const biasedFocus = computeCameraTransform(args({
+    image_width: 1000,
+    image_height: 1000,
+    canvas_width: 1000,
+    canvas_height: 1000,
+    fit: 'contain',
+    region: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
+    focus_point: { x: 0.4, y: 0.4 },
+    safe_rect: { left: 200, top: 200, right: 800, bottom: 800 },
+    fill_factor: 0.8,
+    max_zoom: 3,
+  }));
+  assert.equal(biasedFocus.applied, true);
+  assert.equal(biasedFocus.zoom, 1.5, '偏心 focus 必须降低 zoom 以容纳完整 region');
+  const biasedMapped = assertRegionInside(
+    biasedFocus,
+    { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
+    { left: 200, top: 200, right: 800, bottom: 800 },
+    '偏心 focus',
+  );
+  assert.equal(Math.abs(biasedMapped.right - 800) <= 1e-9, true);
+  assert.equal(Math.abs(biasedMapped.bottom - 800) <= 1e-9, true);
 }
 
 const images = [
@@ -117,8 +154,19 @@ for (const fit of ['cover', 'contain']) {
               safe_rect,
             }));
             assert.equal(isFiniteTree(result), true, `${fit}/${imageName}/${regionName} 必须全为有限数`);
-            if (!result.applied) {
-              assert.equal(result.reason, 'focus_outside_safe_rect', `${fit}/${imageName}/${regionName} 只允许因 clamp 不可满足降级`);
+            const coverBaseCannotFit = imageName === '横图' && (
+              regionName === '普通' || (regionName === '中心' && safe_rect === biasedSafe)
+            );
+            const coverBiasedFocusCannotFit = imageName === '方图'
+              && regionName === '普通' && safe_rect === biasedSafe && focus_point;
+            const expectedApplied = fit === 'contain'
+              ? regionName !== '接近全图'
+              : ['中心', '普通', '极小'].includes(regionName)
+                && !coverBaseCannotFit && !coverBiasedFocusCannotFit;
+            const caseLabel = `${fit}/${imageName}/${regionName}/max=${max_zoom}/${safe_rect === standardSafe ? '标准' : '偏置'}/${focus_point ? '显式' : '默认'}`;
+            assert.equal(result.applied, expectedApplied, `${caseLabel} applied 预期必须固定`);
+            if (!expectedApplied) {
+              assert.equal(result.reason, 'focus_outside_safe_rect', `${fit}/${imageName}/${regionName} 必须因完整 region 不可满足降级`);
               continue;
             }
             assert.equal(result.zoom >= 1 && result.zoom <= max_zoom, true);
@@ -130,6 +178,7 @@ for (const fit of ['cover', 'contain']) {
             assert.equal(result.focus_canvas.x <= safe_rect.right + 1e-9, true);
             assert.equal(result.focus_canvas.y >= safe_rect.top - 1e-9, true);
             assert.equal(result.focus_canvas.y <= safe_rect.bottom + 1e-9, true);
+            assertRegionInside(result, region, safe_rect, caseLabel);
             if (fit === 'cover') {
               assert.equal(result.image_rect.left <= 1e-9, true, 'cover 左侧不得露底');
               assert.equal(result.image_rect.top <= 1e-9, true, 'cover 顶部不得露底');
@@ -145,11 +194,23 @@ for (const fit of ['cover', 'contain']) {
 
 {
   const large = computeCameraTransform(args({
+    image_width: 1000,
+    image_height: 1000,
+    canvas_width: 1000,
+    canvas_height: 1000,
     fit: 'contain',
-    region: { x: 0.01, y: 0.01, width: 0.98, height: 0.98 },
+    region: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+    safe_rect: { left: 200, top: 200, right: 800, bottom: 800 },
     max_zoom: 3,
   }));
+  assert.equal(large.applied, true);
   assert.equal(large.zoom, 1, '超大 region 不得反向缩小');
+  assertRegionInside(
+    large,
+    { x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+    { left: 200, top: 200, right: 800, bottom: 800 },
+    'zoom 下限',
+  );
 
   const tiny = computeCameraTransform(args({
     fit: 'contain',
@@ -157,6 +218,25 @@ for (const fit of ['cover', 'contain']) {
     max_zoom: 2.4,
   }));
   assert.equal(tiny.zoom, 2.4, '极小 region 必须受 max_zoom 限制');
+
+  const coverAtLowMax = computeCameraTransform(args({
+    image_width: 1000,
+    image_height: 1000,
+    canvas_width: 1000,
+    canvas_height: 1000,
+    fit: 'cover',
+    region: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
+    safe_rect: { left: 200, top: 200, right: 800, bottom: 800 },
+    max_zoom: 1.5,
+  }));
+  assert.equal(coverAtLowMax.applied, true, 'cover + max_zoom=1.5 的合法样例不得批量降级');
+  assert.equal(coverAtLowMax.zoom, 1.5);
+  assertRegionInside(
+    coverAtLowMax,
+    { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
+    { left: 200, top: 200, right: 800, bottom: 800 },
+    'cover 低 max zoom',
+  );
 
   const backgroundVisible = computeCameraTransform(args({
     image_width: 2000,
