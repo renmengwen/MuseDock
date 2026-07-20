@@ -89,12 +89,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-03a
-status: implementing
-owner: d03a_writer
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: 4ad3a23ebf0382b8186c4ba906f7f9e48c5f39d0
 worktree: D:\code3\MuseDock-worktrees\asset-first-d03a
 branch: codex/asset-first-d03a
+candidate_commit: bff4e56bc22512d3f5a676bf4bc00a10e50f2b30
+frozen_revision: bff4e56bc22512d3f5a676bf4bc00a10e50f2b30
+frozen_tree: 36c8d84057dfed7e01f445ae527540476fdf44e9
+revision_valid: true
 allowed_paths:
   - server/services/creative/visualAssetContract.js
   - tests/test-visual-asset-contract.js
@@ -120,6 +124,8 @@ verification:
   - semantic/geometry verified/candidate/rejected 全组合 truth table
   - manual/dom/generation_metadata、ocr/detector、vision crop-review 与 legacy 兼容矩阵
   - producer 自报 trust 无效、缺轴/非法轴 fail-closed、二次 normalize 幂等
+  - Coordinator contract、project store、frame resume、creative workflow 四组回归通过
+  - git diff --check 通过；Candidate 仅修改 2 个租约路径且工作区 clean
 review:
   spec: pending
   quality: pending
