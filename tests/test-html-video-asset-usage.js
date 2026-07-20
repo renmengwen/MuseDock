@@ -121,7 +121,7 @@ const repeatedShotSequence = {
       requirement: 'required',
       caption_ids: ['cap_01'],
       minimum_visible_duration_sec: 1,
-      active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 2.5 },
+      active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 4 },
     },
     {
       id: 'shot_detail',
@@ -129,8 +129,8 @@ const repeatedShotSequence = {
       role: 'detail',
       requirement: 'required',
       caption_ids: ['cap_02', 'cap_03'],
-      minimum_visible_duration_sec: 1,
-      active_window: { time_base: 'scene_local', start_sec: 2, end_sec: 4 },
+      minimum_visible_duration_sec: 0.2,
+      active_window: { time_base: 'scene_local', start_sec: 0.1, end_sec: 0.3 },
     },
   ],
 };
@@ -148,6 +148,44 @@ const repeatedShotMaterialized = materializeSceneImageSequenceDom({
 });
 assert.equal(repeatedShotMaterialized.success, true);
 fs.writeFileSync(path.join(projectDir, 'frames', 'repeated-shot.html'), repeatedShotMaterialized.html, 'utf8');
+const explicitMissingGraphReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: {
+    frames: [{
+      id: 'frame_explicit_missing_graph',
+      scene_id: repeatedShotNode.scene_id,
+      graph_node_id: 'graph_node_does_not_exist',
+      html_path: 'frames/repeated-shot.html',
+    }],
+    content_graph: { nodes: [repeatedShotNode] },
+  },
+  creativeContext: repeatedShotContext,
+});
+assert.equal(explicitMissingGraphReport.assets[0].used, false, '显式 graph_node_id 未命中时不得回退同 Scene node');
+assert.deepEqual(explicitMissingGraphReport.assets[0].shot_usages, []);
+assert.deepEqual(explicitMissingGraphReport.used_asset_ids, []);
+assert.deepEqual(explicitMissingGraphReport.unused_asset_ids, [repeatedShotAsset.id]);
+assert.deepEqual(explicitMissingGraphReport.missing_required_asset_ids, [repeatedShotAsset.id]);
+
+for (const frame of [
+  { id: 'scene_usage', scene_id: repeatedShotNode.scene_id },
+  { id: 'beat_legacy', beat_id: 'beat_legacy', scene_id: repeatedShotNode.scene_id },
+]) {
+  const legacyIdentityReport = workflow.buildAssetUsageReport({
+    projectDir,
+    project: {
+      frames: [{ ...frame, html_path: 'frames/repeated-shot.html' }],
+      content_graph: { nodes: [repeatedShotNode] },
+    },
+    creativeContext: repeatedShotContext,
+  });
+  assert.equal(legacyIdentityReport.assets[0].used, true, '缺少 graph_node_id 的 scene_html/beat legacy identity 仍应绑定唯一 Scene node');
+  assert.deepEqual(legacyIdentityReport.assets[0].used_in_frames, [frame.id]);
+  assert.equal(legacyIdentityReport.assets[0].usage_count, 2);
+  assert.deepEqual(legacyIdentityReport.used_asset_ids, [repeatedShotAsset.id]);
+  assert.deepEqual(legacyIdentityReport.unused_asset_ids, []);
+  assert.deepEqual(legacyIdentityReport.missing_required_asset_ids, []);
+}
 const firstFrameNode = {
   id: 'graph_scene_usage_first',
   scene_id: 'scene_usage_first',
@@ -217,7 +255,7 @@ assert.deepEqual(repeatedShotReport.assets[0].shot_usages, [
     caption_ids: ['cap_01'],
     role: 'overview',
     sequence_mode: 'fullscreen_relay',
-    visible_duration_sec: 2.5,
+    visible_duration_sec: 4,
   },
   {
     frame_id: 'frame_usage',
@@ -226,7 +264,7 @@ assert.deepEqual(repeatedShotReport.assets[0].shot_usages, [
     caption_ids: ['cap_02', 'cap_03'],
     role: 'detail',
     sequence_mode: 'fullscreen_relay',
-    visible_duration_sec: 2,
+    visible_duration_sec: 0.2,
   },
 ], '同素材多 Shot 与 overlap 必须按 project.frames 和 contract.shots 顺序保留逐 Shot canonical usage');
 assert.deepEqual(repeatedShotReport.assets[0].used_in_frames, ['frame_usage_first', 'frame_usage']);

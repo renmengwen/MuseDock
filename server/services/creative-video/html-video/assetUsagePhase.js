@@ -241,7 +241,7 @@ function resolveFrameNode(frame = {}, nodes = []) {
   const graphNodeId = firstNonEmptyString(frame.graph_node_id);
   if (graphNodeId) {
     const exact = nodes.filter(node => firstNonEmptyString(node?.id) === graphNodeId);
-    if (exact.length !== 0) return exact.length === 1 ? exact[0] : null;
+    return exact.length === 1 ? exact[0] : null;
   }
   const frameProject = { frames: [frame] };
   const compatible = nodes.filter(node => [node?.id, resolveNodeSceneId(node)]
@@ -287,7 +287,7 @@ function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext 
   for (const frame of frameHtmlEntries) {
     if (!frame.id || !frame.contract) continue;
     for (const shot of frame.contract.shots) {
-      const visibleDurationSec = Number(shot.end_sec) - Number(shot.start_sec);
+      const visibleDurationSec = Math.round((Number(shot.end_sec) - Number(shot.start_sec)) * 1000) / 1000;
       if (!Number.isFinite(visibleDurationSec) || visibleDurationSec <= 0) continue;
       const assetId = firstNonEmptyString(shot.asset_id);
       if (!assetId) continue;
