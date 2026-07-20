@@ -89,16 +89,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: C-04
-status: frozen_for_review
-owner: unassigned
-lease_released: true
+status: implementing
+owner: c04_writer_takeover
+lease_released: false
 code_base_commit: d4af5909b163827da6490df59c11503f86f47f73
 worktree: D:\code3\MuseDock-worktrees\asset-first-c04
 branch: codex/asset-first-c04
 candidate_commit: 042788abba88b0143d42db13f54a8b1734e88360
-frozen_revision: 042788abba88b0143d42db13f54a8b1734e88360
-frozen_tree: a89d02f6bd357cf79614efb76624e65c4bfbb6b4
-revision_valid: true
+invalidated_revision: 042788abba88b0143d42db13f54a8b1734e88360
+invalidated_tree: a89d02f6bd357cf79614efb76624e65c4bfbb6b4
+revision_valid: false
 allowed_paths:
   - server/services/creative/creativeContext.js
   - server/services/creative-video/html-video/playbackClock.js
@@ -151,8 +151,13 @@ verification:
   - 真实 Chromium 产品回归通过，77.5 秒
   - git diff --check 通过
 review:
-  spec: pending
-  quality: pending
+  spec: changes_requested
+  spec_reviewed_revision: 042788abba88b0143d42db13f54a8b1734e88360
+  quality: pass
+  quality_reviewed_revision: 042788abba88b0143d42db13f54a8b1734e88360
+requested_changes:
+  - Shot 结束边界必须保留可见退出过渡，不能由 visibility hidden 立即截断
+  - Frame checkpoint 指纹必须覆盖受管 Shot DOM 消费的当前素材注册表字段
 ```
 
 ```yaml
