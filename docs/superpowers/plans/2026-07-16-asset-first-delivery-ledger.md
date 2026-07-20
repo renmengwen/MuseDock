@@ -89,12 +89,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-03c
-status: implementing
-owner: d03c_writer
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: 097c94d96765ff02053affffafcfd1aeb07ec791
 worktree: D:\code3\MuseDock-worktrees\asset-first-d03c
 branch: codex/asset-first-d03c
+candidate_commit: 012dca0c4a9c5c44c459604ba3d0f3cbce5ed9cf
+frozen_revision: 012dca0c4a9c5c44c459604ba3d0f3cbce5ed9cf
+frozen_tree: bfe36ff011fc6603ba3787759d5d50b2d975cfcb
+revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/focusRegionPhase.js
   - server/services/creative-video/html-video/htmlVideoWorkflow.js
@@ -133,6 +137,8 @@ verification:
   - DOM A、vision C、模型注入字段无效、同名歧义、distinct multi-region、非法/失败降级闭包
   - phase后立即project save、Frame HTML后续失败与resume成功region不重复调用
   - sourceImageAnalysisEnabled 从冻结 workflow target 进入真实 html-video consumer
+  - Coordinator phase/page capture/contract/project-store/resume/workflow/defaults 共 8 组回归与 git diff --check 通过
+  - 真实 GitHub Chrome smoke：page_capture_evidence SHA-256 与落盘 PNG bytes 完全一致
 review:
   spec: pending
   quality: pending
