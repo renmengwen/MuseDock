@@ -41,17 +41,15 @@ function computeCameraTransform(args) {
     return noOp('invalid_focus_point', fit);
   }
 
-  const safe = input.safe_rect === undefined
-    ? { left: 0, top: 0, right: width, bottom: height }
-    : input.safe_rect;
+  const safe = input.safe_rect;
   if (!object(safe) || ![safe.left, safe.top, safe.right, safe.bottom].every(finite)
     || safe.left < 0 || safe.top < 0 || safe.right > width || safe.bottom > height
     || safe.left >= safe.right || safe.top >= safe.bottom) {
     return noOp('invalid_safe_rect', fit);
   }
 
-  const fillFactor = input.fill_factor === undefined ? 0.8 : input.fill_factor;
-  const maxZoom = input.max_zoom === undefined ? 3 : input.max_zoom;
+  const fillFactor = input.fill_factor;
+  const maxZoom = input.max_zoom;
   if (!finite(fillFactor) || fillFactor <= 0 || fillFactor >= 1
     || !finite(maxZoom) || maxZoom < 1) {
     return noOp('invalid_zoom_policy', fit);

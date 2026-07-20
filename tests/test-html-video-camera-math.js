@@ -44,7 +44,7 @@ function assertNoOp(input, reason) {
     canvas_width: 1000,
     canvas_height: 1000,
     region: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
-    safe_rect: undefined,
+    safe_rect: { left: 0, top: 0, right: 1000, bottom: 1000 },
     fill_factor: 0.8,
     max_zoom: 3,
   }));
@@ -66,9 +66,9 @@ function assertNoOp(input, reason) {
     canvas_height: 1000,
     fit: 'contain',
     region: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 },
-    safe_rect: undefined,
-    fill_factor: undefined,
-    max_zoom: undefined,
+    safe_rect: { left: 0, top: 0, right: 1000, bottom: 1000 },
+    fill_factor: 0.8,
+    max_zoom: 3,
   }) });
   assert.deepEqual(contain, {
     applied: true,
@@ -195,6 +195,7 @@ for (const focus_point of [
   { x: 0.1, y: 0.5 },
 ]) assertNoOp(args({ focus_point }), 'invalid_focus_point');
 for (const safe_rect of [
+  undefined,
   null,
   { left: Number.NaN, top: 0, right: 100, bottom: 100 },
   { left: 0, top: 0, right: Number.POSITIVE_INFINITY, bottom: 100 },
@@ -206,8 +207,8 @@ for (const safe_rect of [
   { left: 0, top: 100, right: 100, bottom: 100 },
 ]) assertNoOp(args({ safe_rect }), 'invalid_safe_rect');
 for (const [key, values] of Object.entries({
-  fill_factor: [null, Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 1, 1.1],
-  max_zoom: [null, Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 0.99],
+  fill_factor: [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 1, 1.1],
+  max_zoom: [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 0.99],
 })) {
   for (const value of values) assertNoOp(args({ [key]: value }), 'invalid_zoom_policy');
 }
