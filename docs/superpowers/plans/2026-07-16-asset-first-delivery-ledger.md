@@ -89,7 +89,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-02
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: 85bd75079de7cff39aefeecd5ea5fc879f878869
@@ -101,6 +101,7 @@ invalidated_tree: 4920fece609a598f6d41e0961e8aad486e2010fa
 frozen_revision: ae04de6b9cfed0e09647de35d4395084a96aad3a
 frozen_tree: 6de619a6720eed4835dfa47ab8233f418e0dd809
 revision_valid: true
+dev_commit: 123dd16ce7fa0abd6eedfc6dcfbbe240981ef701
 allowed_paths:
   - server/services/creative-video/html-video/cameraMath.js
   - tests/test-html-video-camera-math.js
@@ -125,8 +126,12 @@ verification:
   - git diff --check 通过；Candidate 仅新增 2 个租约路径且工作区 clean
   - 339 组预期成功与 237 组预期不可满足矩阵显式分流，完整 mapped region 安全框断言通过
 review:
-  spec: pending_final_review
-  quality: pending_final_review
+  spec: pass
+  spec_reviewed_ledger_commit: 23677e7db2e53f8942a7a8c4fe0e92218a8ad9c4
+  spec_reviewed_revision: ae04de6b9cfed0e09647de35d4395084a96aad3a
+  quality: pass
+  quality_reviewed_ledger_commit: 23677e7db2e53f8942a7a8c4fe0e92218a8ad9c4
+  quality_reviewed_revision: ae04de6b9cfed0e09647de35d4395084a96aad3a
 resolved_findings:
   - 偏心 focus_point 时必须约束完整映射 region 位于 safe_rect，必要时降 zoom 或 no-op
   - 参数矩阵必须区分预期成功与不可满足场景，能够杀死批量合法输入退化为 no-op 的 mutation
@@ -765,8 +770,8 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-D-03 | `pending` | DOM/manual、OCR/验证、AI-only、歧义失败的信任等级 | D-01、D-03 |
 | REQ-D-04 | `pending` | 语义准确与几何准确分开 | D-01、D-03 |
 | REQ-D-05 | `pending` | A/B 自动聚焦，C 低倍率宽松聚焦，D 不聚焦 | D-07、D-08 |
-| REQ-D-06 | `pending` | cover/contain 和双层截图坐标映射 | D-02 |
-| REQ-D-07 | `pending` | 安全目标中心、zoom 限幅、位移 clamp 和黑边防护 | D-02 |
+| REQ-D-06 | `verified` | cover/contain 和双层截图坐标映射 | D-02 |
+| REQ-D-07 | `verified` | 安全目标中心、zoom 限幅、位移 clamp 和黑边防护 | D-02 |
 | REQ-D-08 | `pending` | Caption Cue 同时驱动摄影机和字幕关键词高亮 | D-05 |
 | REQ-D-09 | `pending` | 同一 Region 连续 Cue 合并并避免抖动 | D-04 |
 | REQ-D-10 | `pending` | 每张最终使用图片最多分析一次 | D-03、D-06 |
@@ -827,5 +832,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase C Task 4 Scene 连续 Image Sequence | `c5e08f0`；冻结 revision `09f19e090d93f1bb1eee844e678a0c04e3b8cf4c`、tree `7b7065881fa507f5ee94b8ee57db14c93e93b8ed`；同 Scene Shot/Caption/Beat 共用 scene-local Playback Clock，一个 Scene 一个 HTML/MP4，跨 Scene 保持独立；受管 Shot DOM、素材注册表、退出淡化、默认 scene_html、定向 retry/checkpoint/fingerprint 与浏览器播放门闭合；规格 Review PASS、代码质量 Review PASS；Candidate 15 组 Node 18.7 秒与真实 Chromium 79.1 秒通过；dev 15 组 Node 20.0 秒与真实 Chromium 78.1 秒通过；REQ-C-05～08 verified，真实 visible_duration_sec/Usage Report 留给 C-05 |
 | Phase C Task 5 canonical Shot Usage Report | `31006f3`；冻结 revision `f844512cbe7419358f456c3eaad67386846638fa`、tree `8a832af9ce11c15cc34a034427ce0e500b793ef9`；直接复用 C-04 物化 contract 生成逐 Shot scene/caption/role/mode/毫秒级正数可见时长；required path-only fail-closed，legacy non-required fallback 保留；used/frames/count 与顶层 used/unused/missing 同源；素材面板展示同一 canonical report；identity 闭包覆盖 raw、normalizeProject、projectStore save/load 共 54 场景；最终双 Review PASS；Candidate 核心回归与真实 Chromium 79.5 秒、Vite build通过；dev 11 组回归和 Vite build通过；REQ-B-09/10 verified，Phase C complete |
 | Phase D Task 1 Focus Region 数据合同 | `4d58c4f`；冻结 revision `d913e73ef1faa4d9b349976934af3d014ca1c577`、tree `3b835f0c2ee59ee5c21b2083be3d1b0719a0466b`；`asset_context.assets[].focus_regions` 成为唯一 canonical owner，A/B/C/D trust 由共享 normalizer保守派生；缺失/空/非法/重复/几何/aliases/merge语义闭合；project save-load、真实 resume、workflow same-ID 查询水合与 focus-only fingerprint闭合；来源或path冲突不嫁接另一张图坐标；最终双 Review PASS；dev 8组集成回归通过；REQ-D-01/03/04 的合同部分完成，producer与双轴验证留给 D-03 |
+| Phase D Task 2 Camera 坐标数学 | `123dd16`；冻结 revision `ae04de6b9cfed0e09647de35d4395084a96aad3a`、tree `6de619a6720eed4835dfa47ab8233f418e0dd809`；纯函数完成 cover/contain、显式 safe rect/fill/max zoom、完整 mapped region 安全约束、cover 防露底与结构化 no-op；339 组预期成功、237 组不可满足矩阵和 mutation 防假阳性通过；最终双 Review PASS；dev 三组集成回归与 diff-check 通过；REQ-D-06/07 verified |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
