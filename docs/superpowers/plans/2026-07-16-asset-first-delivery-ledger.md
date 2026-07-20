@@ -89,12 +89,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: C-05
-status: implementing
-owner: c05_writer_takeover
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: 7e59bce935c442ed9e61640101d83de044dc24c3
 worktree: D:\code3\MuseDock-worktrees\asset-first-c05
 branch: codex/asset-first-c05
+candidate_commit: ecd9f1ea9b87a3a6763eb1639653d788e701ddee
+frozen_revision: ecd9f1ea9b87a3a6763eb1639653d788e701ddee
+frozen_tree: 1b24b65760c40e967eb2c8101155cbb2b1fc7cfc
+revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/assetUsagePhase.js
   - frontend-react/src/components/creative/SourceImageAssetsPanel.jsx
@@ -123,9 +127,11 @@ exclusive_resources:
   - C-05 real Chromium runs only after Node GREEN
   - frontend build runs serially
 verification:
-  - required path-only HTML reference RED
-  - canonical materialized Shot usage and positive visible duration RED
-  - workflow persistence, required gate and UI projection
+  - required path-only HTML reference 与 canonical Shot usage RED→GREEN
+  - 10 组 backend/UI/workflow/QA/retry/persistence 回归通过，8.6 秒
+  - 真实 Chromium 产品回归通过，79.5 秒
+  - Vite 前端构建通过，仅有既有大 chunk warning
+  - git diff --check 通过
 review:
   spec: pending
   quality: pending
