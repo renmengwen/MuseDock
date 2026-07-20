@@ -88,6 +88,44 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 ## 当前写租约
 
 ```yaml
+task_id: D-03a
+status: implementing
+owner: d03a_writer
+lease_released: false
+code_base_commit: 4ad3a23ebf0382b8186c4ba906f7f9e48c5f39d0
+worktree: D:\code3\MuseDock-worktrees\asset-first-d03a
+branch: codex/asset-first-d03a
+allowed_paths:
+  - server/services/creative/visualAssetContract.js
+  - tests/test-visual-asset-contract.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative/pageCaptureAssets.js
+  - server/services/source/sourceImageAnalysis.js
+  - server/services/creative-video/html-video/htmlVideoWorkflow.js
+  - server/services/creative-video/html-video/cameraMath.js
+  - frontend-react/**
+  - package.json
+  - package-lock.json
+state_owners:
+  - asset_context.assets[].focus_regions[].verification.semantic
+  - asset_context.assets[].focus_regions[].verification.geometry
+decisions:
+  - 双轴同时存在时，任一 rejected 得 overall rejected；双 verified 得 verified；其余得 candidate
+  - 双轴必须同时存在且各自结构合法；只提供一轴或非法轴的 region fail-closed 丢弃
+  - legacy 仅有 verification.status/method/evidence 的 D-01 payload 继续按原合同规范化并保持幂等
+  - trust_level 仍只由共享 normalizer 派生；双轴模式只有双 verified 才允许 A/B，其余最高 C，rejected 为 D
+  - raw producer 的真实 method stamping、歧义过滤和 rejected 转空结果归 D-03b/c adapter，不在合同层伪造 provenance
+verification:
+  - semantic/geometry verified/candidate/rejected 全组合 truth table
+  - manual/dom/generation_metadata、ocr/detector、vision crop-review 与 legacy 兼容矩阵
+  - producer 自报 trust 无效、缺轴/非法轴 fail-closed、二次 normalize 幂等
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
 task_id: D-02
 status: complete
 owner: unassigned
