@@ -42,9 +42,9 @@ async function testDomWinsAndUnselectedIsUntouched() {
           page_capture_evidence: {
             version: 1,
             elements: [
-              { text: ' Stars ', region: { x: 0.1, y: 0.2, width: 0.3, height: 0.2 }, trust_level: 'D' },
-              { text: 'Forks', region: { x: 0.5, y: 0.2, width: 0.2, height: 0.2 } },
-              { text: ' forks ', region: { x: 0.5, y: 0.5, width: 0.2, height: 0.2 } },
+              { text: ' Stars   Count ', region: { x: 0.1, y: 0.2, width: 0.3, height: 0.2 }, trust_level: 'D' },
+              { text: 'Forks  Count', region: { x: 0.5, y: 0.2, width: 0.2, height: 0.2 } },
+              { text: ' forks count ', region: { x: 0.5, y: 0.5, width: 0.2, height: 0.2 } },
             ],
           },
         }),
@@ -66,7 +66,7 @@ async function testDomWinsAndUnselectedIsUntouched() {
   assert.equal(modelCalls, 0);
   const regions = result.creativeContext.asset_context.assets[0].focus_regions;
   assert.equal(regions.length, 1, '重复 label 必须全部丢弃');
-  assert.equal(regions[0].label, 'Stars');
+  assert.equal(regions[0].label, 'Stars Count');
   assert.equal(regions[0].method, 'dom');
   assert.equal(regions[0].trust_level, 'A');
   assert.equal(regions[0].verification.method, 'dom_capture');
@@ -80,20 +80,26 @@ async function testVisionDedupesByBytesAndFailsClosed() {
   await fs.writeFile(path.join(projectDir, 'assets', 'same-a.png'), 'same-bytes');
   await fs.writeFile(path.join(projectDir, 'assets', 'same-b.png'), 'same-bytes');
   await fs.writeFile(path.join(projectDir, 'assets', 'bad.png'), 'bad-bytes');
+  const externalA = path.join(projectDir, '..', `external-a-${path.basename(projectDir)}.png`);
+  const externalB = path.join(projectDir, '..', `external-b-${path.basename(projectDir)}.png`);
+  await fs.writeFile(externalA, 'external-a-must-not-be-read');
+  await fs.writeFile(externalB, 'external-b-must-not-be-read');
   let calls = 0;
   const requests = [];
   const result = await runFocusRegionPhase({
     projectDir,
-    visualPlan: selectedPlan('same-a', 'same-a', 'same-b', 'bad', 'missing', 'video'),
+    visualPlan: selectedPlan('same-a', 'same-a', 'same-b', 'bad', 'missing', 'no-path', 'escape', 'video'),
     creativeContext: {
       other: true,
       asset_context: {
         diagnostics: [],
         assets: [
-          asset('same-a', { path: 'assets/same-a.png' }),
-          asset('same-b', { path: 'assets/same-b.png' }),
+          asset('same-a', { path: 'assets/same-a.png', local_path: externalA }),
+          asset('same-b', { path: 'assets/same-b.png', local_path: externalB }),
           asset('bad', { path: 'assets/bad.png' }),
           asset('missing', { path: 'assets/missing.png' }),
+          asset('no-path', { path: '', local_path: externalA }),
+          asset('escape', { path: '../outside.png', local_path: externalB }),
           asset('video', { media_type: 'video', path: 'assets/video.mp4' }),
         ],
       },
@@ -115,6 +121,8 @@ async function testVisionDedupesByBytesAndFailsClosed() {
                 { id: 'raw-id', label: ' Hero ', aliases: ['Main'], region: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 }, method: 'manual', trust_level: 'A' },
                 { label: 'duplicate', region: { x: 0, y: 0, width: 0.2, height: 0.2 } },
                 { label: ' Duplicate ', region: { x: 0.5, y: 0.5, width: 0.2, height: 0.2 } },
+                { label: 'Hero  Main', region: { x: 0, y: 0, width: 0.2, height: 0.2 } },
+                { label: ' hero main ', region: { x: 0.5, y: 0.5, width: 0.2, height: 0.2 } },
               ],
             }),
           };
@@ -126,6 +134,9 @@ async function testVisionDedupesByBytesAndFailsClosed() {
   assert.equal(calls, 2, '相同 bytes 只调用一次；不同 bytes 单独调用');
   assert.equal(requests[0].response_format.type, 'json_object');
   assert.match(requests[0].messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
+  assert.match(requests[0].messages[0].content[1].image_url.url, new RegExp(Buffer.from('same-bytes').toString('base64')));
+  assert.ok(!requests.some(request => ['external-a-must-not-be-read', 'external-b-must-not-be-read']
+    .some(content => request.messages[0].content[1].image_url.url.includes(Buffer.from(content).toString('base64')))));
   assert.deepEqual(requests[0].audit, {
     agent: 'FocusRegionAgent', stage: 'focus_region', sub_stage: 'vision', asset_id: 'same-a',
   });
@@ -138,13 +149,23 @@ async function testVisionDedupesByBytesAndFailsClosed() {
     assert.equal(region.verification.semantic.status, 'candidate');
     assert.equal(region.verification.geometry.status, 'candidate');
   }
+  const sameARegions = result.creativeContext.asset_context.assets.find(item => item.id === 'same-a').focus_regions;
+  const sameBRegions = result.creativeContext.asset_context.assets.find(item => item.id === 'same-b').focus_regions;
+  assert.equal(sameARegions.length, 1, '内部空白不同的同名 vision label 必须全部丢弃');
+  assert.notEqual(sameARegions, sameBRegions);
+  assert.notEqual(sameARegions[0], sameBRegions[0]);
+  sameARegions[0].region.x = 0.9;
+  assert.equal(sameBRegions[0].region.x, 0.1, '相同 bytes 的不同 asset 不得共享 region 对象');
   assert.deepEqual(result.creativeContext.asset_context.assets.find(item => item.id === 'bad').focus_regions, []);
   assert.deepEqual(result.creativeContext.asset_context.assets.find(item => item.id === 'missing').focus_regions, []);
+  assert.deepEqual(result.creativeContext.asset_context.assets.find(item => item.id === 'no-path').focus_regions, []);
+  assert.deepEqual(result.creativeContext.asset_context.assets.find(item => item.id === 'escape').focus_regions, []);
   assert.equal(Object.hasOwn(result.creativeContext.asset_context.assets.find(item => item.id === 'video'), 'focus_regions'), false);
-  assert.equal(result.diagnostics.length, 2);
+  assert.equal(result.diagnostics.length, 4);
   assert.ok(result.diagnostics.every(item => item.severity === 'warning' && /焦点区域/.test(item.user_message)));
   assert.deepEqual(result.creativeContext.asset_context.diagnostics, result.diagnostics);
   await fs.rm(projectDir, { recursive: true, force: true });
+  await Promise.all([fs.rm(externalA, { force: true }), fs.rm(externalB, { force: true })]);
 }
 
 async function testDisabledVisionAndExistingCanonicalSkip() {

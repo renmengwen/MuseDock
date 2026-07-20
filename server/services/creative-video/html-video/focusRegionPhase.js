@@ -13,6 +13,10 @@ function text(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function labelText(value) {
+  return text(value).replace(/\s+/g, ' ');
+}
+
 function selectedAssetIds(visualPlan = {}) {
   const ids = [];
   const seen = new Set();
@@ -37,7 +41,7 @@ function regionId(prefix, label, region) {
 
 function uniqueLabels(items, labelOf) {
   const counts = new Map();
-  const labeled = items.map(item => ({ item, label: text(labelOf(item)) }));
+  const labeled = items.map(item => ({ item, label: labelText(labelOf(item)) }));
   for (const { label } of labeled) {
     if (!label) continue;
     const key = label.toLowerCase();
@@ -98,14 +102,12 @@ function parseVisionRegions(response = {}) {
 function mimeFromAsset(asset = {}) {
   const declared = text(asset.mime).toLowerCase();
   if (declared.startsWith('image/')) return declared;
-  const extension = path.extname(text(asset.local_path) || text(asset.path)).toLowerCase();
+  const extension = path.extname(text(asset.path)).toLowerCase();
   return ({ '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif' })[extension]
     || 'image/jpeg';
 }
 
 function localImagePath(asset, projectDir) {
-  const localPath = text(asset.local_path);
-  if (localPath) return path.resolve(localPath);
   return projectStore.resolveProjectPath(projectDir, text(asset.path));
 }
 
@@ -195,7 +197,7 @@ async function runFocusRegionPhase({
     } catch {
       diagnostics.push(failureDiagnostic(id));
     }
-    updates.set(asset, { ...asset, focus_regions: regions });
+    updates.set(asset, { ...asset, focus_regions: normalizeFocusRegions(regions) });
   }
   if (!updates.size && !diagnostics.length) return { creativeContext, diagnostics };
   const nextAssetContext = {
