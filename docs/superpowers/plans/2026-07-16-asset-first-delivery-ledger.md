@@ -89,12 +89,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-01
-status: implementing
-owner: d01_writer
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: e862e1c6210505f715b45252280c69c5b47777ed
 worktree: D:\code3\MuseDock-worktrees\asset-first-d01
 branch: codex/asset-first-d01
+candidate_commit: 3dc9d189d8656767065699cf6acd570c69287beb
+frozen_revision: 3dc9d189d8656767065699cf6acd570c69287beb
+frozen_tree: 55010754be89f85e61a1c2413533da9c6cb07939
+revision_valid: true
 allowed_paths:
   - server/services/creative/visualAssetContract.js
   - server/services/creative-video/html-video/assetUsagePhase.js
@@ -119,8 +123,10 @@ decisions:
   - D-01 不把 focus_regions 复制到 Visual Plan、Shot、image_analysis 或 UI local state
 verification:
   - contract normalization 与 A/B/C/D trust 闭包 RED→GREEN
-  - project save/load、真实 resume 与 workflow same-ID hydration
-  - raw、normalize、save/load、resume 四层闭包
+  - project save/load、真实 resume 与 workflow same-ID hydration RED→GREEN
+  - Writer 19 组相关回归通过
+  - Coordinator 9 组 contract/project/resume/workflow/producer 回归通过，6.2 秒
+  - git diff --check 通过
 review:
   spec: pending
   quality: pending
