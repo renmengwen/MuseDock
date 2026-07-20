@@ -22,7 +22,7 @@
 - 实际并发：第 4 个 sub-agent 创建返回 `agent thread limit reached`；当前产品层仍为主 Agent + 3 个 sub-agent
 - 当前主工作区：`dev`；B-07b 最终 reviewed tree 已由提交 `218fbf9` squash 集成
 - 当前顺序：Phase B 集成门已通过 → 执行 Phase C C-01～C-05
-- Phase C：C-01～C-03 已完成；C-04 三路只读审计完成并已开启单 Writer 写租约；REQ-B-09/10 继续依赖真实 Shot 与正数可见时长
+- Phase C：C-01～C-04 已完成；下一步 C-05 物化真实可见时长与统一 Usage Report；REQ-B-09/10 由 C-05 收口
 
 ## Goal 基线与用户改动清单
 
@@ -80,7 +80,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-06b 受控 derived 素材登记 | `complete` | B-01 | `ca45e1d` | 双 Review PASS，已在 dev 重跑目标测试并释放租约 |
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
-| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `in_progress` | B-07b | `df9a519`、`fab5167`、`6d58460` | C-01～C-03 完成；下一步 C-04 Scene 内连续 Image Sequence |
+| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `in_progress` | B-07b | `df9a519`、`fab5167`、`6d58460`、`c5e08f0` | C-01～C-04 完成；下一步 C-05 Usage Report 与 required gate |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
@@ -89,7 +89,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: C-04
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: d4af5909b163827da6490df59c11503f86f47f73
@@ -101,6 +101,7 @@ invalidated_tree: a89d02f6bd357cf79614efb76624e65c4bfbb6b4
 frozen_revision: 09f19e090d93f1bb1eee844e678a0c04e3b8cf4c
 frozen_tree: 7b7065881fa507f5ee94b8ee57db14c93e93b8ed
 revision_valid: true
+dev_commit: c5e08f00f855d11e13ed23be0fe2d27d171c5049
 allowed_paths:
   - server/services/creative/creativeContext.js
   - server/services/creative-video/html-video/playbackClock.js
@@ -147,10 +148,16 @@ exclusive_resources:
 verification:
   - 15 组 C-04 Node 检查通过，18.7 秒
   - 真实 Chromium 产品回归通过，79.1 秒
+  - dev 15 组 Node 集成验证通过，20.0 秒
+  - dev 真实 Chromium 集成验证通过，78.1 秒
   - git diff --check 通过
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_ledger_commit: 0c15404b0874358e32e1d1393c6ec3c7ef0fb4b6
+  spec_reviewed_revision: 09f19e090d93f1bb1eee844e678a0c04e3b8cf4c
+  quality: pass
+  quality_reviewed_ledger_commit: 0c15404b0874358e32e1d1393c6ec3c7ef0fb4b6
+  quality_reviewed_revision: 09f19e090d93f1bb1eee844e678a0c04e3b8cf4c
 resolved_findings:
   - Shot 结束边界保留 0.35 秒可见退出过渡，完成后再隐藏并禁用交互
   - Frame checkpoint 指纹覆盖受管 Shot 实际引用素材的状态、类型、path 与 frame_src
@@ -573,10 +580,10 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-C-02 | `verified` | 单图统一为一个 Shot 的 Image Sequence | C-02 |
 | REQ-C-03 | `verified` | 四种主要 Sequence Mode | C-02 |
 | REQ-C-04 | `verified` | Shot Role、Caption IDs、最短可见时间 | C-02、C-03 |
-| REQ-C-05 | `pending` | Caption 时间派生入场、保持、退出和重叠 | C-03、C-04 |
-| REQ-C-06 | `pending` | 同 Scene 使用连续 HTML 时间线 | C-04 |
-| REQ-C-07 | `pending` | Scene 内不经过独立 Beat MP4 裸切 | C-04 |
-| REQ-C-08 | `pending` | 跨 Scene 转场保持独立 | C-04 |
+| REQ-C-05 | `verified` | Caption 时间派生入场、保持、退出和重叠 | C-03、C-04 |
+| REQ-C-06 | `verified` | 同 Scene 使用连续 HTML 时间线 | C-04 |
+| REQ-C-07 | `verified` | Scene 内不经过独立 Beat MP4 裸切 | C-04 |
+| REQ-C-08 | `verified` | 跨 Scene 转场保持独立 | C-04 |
 | REQ-C-09 | `verified` | 多图不是强制数量指标 | C-02 |
 | REQ-C-10 | `verified` | AI 生图补视觉角色，Pexels/search 不为凑数 | C-01、C-02 |
 
@@ -648,5 +655,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase C Task 1 多素材候选契约 | `df9a519`；冻结 revision `c0625e81361fba2919d8f9b836c912c841fc95bb`、tree `b3b3999efbc04198ca2358130186131a8aaa0220`；Content Graph 每 scene 只保留已登记、可用、保序去重后最多 4 张候选，不强制凑满；空注册表、generated scene identity、usage 四值和 evidence 边界 fail-closed；规格 Review PASS、代码质量 Review PASS；dev 13 组直接测试与默认 runner 2 组通过；Image Sequence/Shot requirements 继续 pending，留给 C-02 |
 | Phase C Task 2 Image Sequence 规划 | `fab5167`；冻结 revision `8003202db1bf39435f62f13cc3add05c8d16ad3a`、tree `44005cd6851142502756057fb6087efded35867e`；workflow 改为 canonical Graph 后构建 v2 Visual Plan；0 图 diagram、单图和多图统一为 1～4 Shot image_sequence；四种 mode、required 冲突、正式 Shot src、canonical/expanded graph 所有权与 resume 指纹均确定性处理；full/short/retry Prompt 使用 registry 核对后的 Shot 顺序且不发明 timing；规格 Review PASS、代码质量 Review PASS；dev 22 组测试通过；Caption IDs/真实时间窗/visible duration 继续 pending |
 | Phase C Task 3 Shot 字幕与计划时间窗 | `6d58460`；冻结 revision `e17a51e03c5b71e81c9a9c9486bd7ff5f7336f52`、tree `7577efca3f3481e7d1e989e275168332083c40b3`；复用 canonical Caption Track 为 Shot 写入 scene-local `caption_ids`、`active_window` 和 `minimum_visible_duration_sec`；按 mode 派生窗口，optional/preferred 确定性减图，required 冲突在 Frame HTML 前中文阻断；全局字幕开关、normalize 后 ID 冲突、尾部窄窗、无字幕 compare/overview/异质 minimum 与 0/1 Shot 收口均覆盖；不写 `visible_duration_sec`/enter/hold/exit/camera；规格 Review PASS、代码质量 Review PASS，质量审计 2400 个组合不变量无问题；dev 17 组测试通过 |
+| Phase C Task 4 Scene 连续 Image Sequence | `c5e08f0`；冻结 revision `09f19e090d93f1bb1eee844e678a0c04e3b8cf4c`、tree `7b7065881fa507f5ee94b8ee57db14c93e93b8ed`；同 Scene Shot/Caption/Beat 共用 scene-local Playback Clock，一个 Scene 一个 HTML/MP4，跨 Scene 保持独立；受管 Shot DOM、素材注册表、退出淡化、默认 scene_html、定向 retry/checkpoint/fingerprint 与浏览器播放门闭合；规格 Review PASS、代码质量 Review PASS；Candidate 15 组 Node 18.7 秒与真实 Chromium 79.1 秒通过；dev 15 组 Node 20.0 秒与真实 Chromium 78.1 秒通过；REQ-C-05～08 verified，真实 visible_duration_sec/Usage Report 留给 C-05 |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
