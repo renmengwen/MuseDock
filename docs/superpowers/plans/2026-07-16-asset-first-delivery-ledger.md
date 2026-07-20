@@ -89,16 +89,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: C-05
-status: frozen_for_review
-owner: unassigned
-lease_released: true
+status: implementing
+owner: c05_writer_takeover
+lease_released: false
 code_base_commit: 7e59bce935c442ed9e61640101d83de044dc24c3
 worktree: D:\code3\MuseDock-worktrees\asset-first-c05
 branch: codex/asset-first-c05
 candidate_commit: ecd9f1ea9b87a3a6763eb1639653d788e701ddee
-frozen_revision: ecd9f1ea9b87a3a6763eb1639653d788e701ddee
-frozen_tree: 1b24b65760c40e967eb2c8101155cbb2b1fc7cfc
-revision_valid: true
+invalidated_revision: ecd9f1ea9b87a3a6763eb1639653d788e701ddee
+invalidated_tree: 1b24b65760c40e967eb2c8101155cbb2b1fc7cfc
+revision_valid: false
 allowed_paths:
   - server/services/creative-video/html-video/assetUsagePhase.js
   - frontend-react/src/components/creative/SourceImageAssetsPanel.jsx
@@ -133,8 +133,13 @@ verification:
   - Vite 前端构建通过，仅有既有大 chunk warning
   - git diff --check 通过
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_revision: ecd9f1ea9b87a3a6763eb1639653d788e701ddee
+  quality: changes_requested
+  quality_reviewed_revision: ecd9f1ea9b87a3a6763eb1639653d788e701ddee
+requested_changes:
+  - 显式 graph_node_id 不存在或不唯一时必须 fail-closed，不得退回 scene 猜测
+  - canonical visible_duration_sec 必须在后端按毫秒精度规范化
 ```
 
 ```yaml
