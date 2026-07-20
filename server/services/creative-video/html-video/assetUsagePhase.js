@@ -5,6 +5,8 @@ const path = require('path');
 const projectStore = require('./projectStore');
 const { createDiagnostic } = require('./diagnostics');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
+const { findFrameByAnyId } = require('./frameIdentity');
+const { validateSceneImageSequenceDom } = require('./sceneImageSequenceDom');
 const {
   assetReferenceTokens,
   extractVisualAssetReferences,
@@ -235,6 +237,18 @@ function requiredAssetRefsById(project = {}, assets = []) {
   return byId;
 }
 
+function resolveFrameNode(frame = {}, nodes = []) {
+  const graphNodeId = firstNonEmptyString(frame.graph_node_id);
+  if (graphNodeId) {
+    const exact = nodes.filter(node => firstNonEmptyString(node?.id) === graphNodeId);
+    if (exact.length !== 0) return exact.length === 1 ? exact[0] : null;
+  }
+  const frameProject = { frames: [frame] };
+  const compatible = nodes.filter(node => [node?.id, resolveNodeSceneId(node)]
+    .some(id => id && findFrameByAnyId(frameProject, id)));
+  return compatible.length === 1 ? compatible[0] : null;
+}
+
 function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext = {} } = {}) {
   const priorRuntimeViolations = Array.isArray(project?.asset_usage_report?.runtime_policy_violations)
     ? project.asset_usage_report.runtime_policy_violations
@@ -244,15 +258,51 @@ function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext 
     .map(item => ({ frame_id: item.frame_id || '', reference: item.target || '', source: 'runtime' }));
   const assets = mergedTrackableAssets(project, creativeContext);
   const frames = Array.isArray(project.frames) ? project.frames : [];
+  const nodes = Array.isArray(project?.content_graph?.nodes) ? project.content_graph.nodes : [];
+  const validationContext = {
+    ...creativeContext,
+    asset_context: {
+      ...objectOrEmpty(creativeContext?.asset_context),
+      assets: assets.map(asset => {
+        const assetPath = String(asset.path || '').trim().replace(/\\/g, '/');
+        return { ...asset, frame_src: asset.frame_src || (assetPath ? `../${assetPath}` : '') };
+      }),
+    },
+  };
   const frameHtmlEntries = frames.map(frame => {
     const html = readFrameHtml(projectDir, frame);
     const visualReferences = extractVisualAssetReferences(html);
+    const node = resolveFrameNode(frame, nodes);
+    const validation = node ? validateSceneImageSequenceDom(html, { node, creativeContext: validationContext }) : null;
     return {
       id: firstNonEmptyString(frame.id, frame.beat_id, frame.scene_id),
       references: new Set(visualReferences.map(item => item.reference)),
       visualReferences,
+      contract: validation?.success ? validation.contract || null : null,
+      legacy_reference_fallback: !html.includes('data-hv-image-sequence')
+        && (!validation || (validation.success && !validation.contract)),
     };
   });
+  const shotUsagesByAsset = new Map();
+  for (const frame of frameHtmlEntries) {
+    if (!frame.id || !frame.contract) continue;
+    for (const shot of frame.contract.shots) {
+      const visibleDurationSec = Number(shot.end_sec) - Number(shot.start_sec);
+      if (!Number.isFinite(visibleDurationSec) || visibleDurationSec <= 0) continue;
+      const assetId = firstNonEmptyString(shot.asset_id);
+      if (!assetId) continue;
+      if (!shotUsagesByAsset.has(assetId)) shotUsagesByAsset.set(assetId, []);
+      shotUsagesByAsset.get(assetId).push({
+        frame_id: frame.id,
+        scene_id: frame.contract.scene_id,
+        shot_id: shot.id,
+        caption_ids: shot.caption_ids,
+        role: shot.role,
+        sequence_mode: frame.contract.mode,
+        visible_duration_sec: visibleDurationSec,
+      });
+    }
+  }
   const unregisteredVisualReferences = unregisteredImageReferences(frameHtmlEntries, assets);
   if (!assets.length) {
     return {
@@ -272,9 +322,21 @@ function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext 
     const assetId = firstNonEmptyString(asset.id, `asset_${index + 1}`);
     const tokens = assetReferenceTokens(asset);
     const required = requiredById.get(assetId) || null;
-    const usedInFrames = frameHtmlEntries
-      .filter(frame => frame.id && htmlReferencesAsset(frame.references, tokens))
-      .map(frame => frame.id);
+    const shotUsages = shotUsagesByAsset.get(assetId) || [];
+    const shotFrameIds = new Set(shotUsages.map(item => item.frame_id));
+    const legacyFallback = !required && ['', 'preferred', 'optional'].includes(String(asset.requirement || '').trim());
+    const seenFrames = new Set();
+    const usedInFrames = frameHtmlEntries.filter(frame => {
+      const used = frame.id && (shotFrameIds.has(frame.id) || (
+        legacyFallback
+        && frame.legacy_reference_fallback
+        && htmlReferencesAsset(frame.references, tokens)
+      ));
+      if (!used || seenFrames.has(frame.id)) return false;
+      seenFrames.add(frame.id);
+      return true;
+    }).map(frame => frame.id);
+    const used = shotUsages.length > 0 || (legacyFallback && usedInFrames.length > 0);
     return {
       asset_id: assetId,
       path: asset.path || '',
@@ -291,9 +353,10 @@ function buildAssetUsageReport({ project = {}, projectDir = '', creativeContext 
       required: Boolean(required),
       expected_in_frames: required?.expected_in_frames || [],
       usage: required?.usages || [],
-      used: usedInFrames.length > 0,
+      shot_usages: shotUsages,
+      used,
       used_in_frames: usedInFrames,
-      usage_count: usedInFrames.length,
+      usage_count: shotUsages.length,
     };
   });
   const usedAssetIds = reportAssets.filter(asset => asset.used).map(asset => asset.asset_id);

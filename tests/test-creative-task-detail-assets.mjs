@@ -143,6 +143,13 @@ assert.match(protocolLabelBody, /\|\|\s*['"]['"]/);
 assertMergeSemantics(mergeVisualAssetsBody);
 assert.match(assetCardBody, /const parentAssetId = firstText\(asset\.parent_asset_id\)/);
 assert.match(assetCardBody, /parentAssetId[\s\S]*break-all[\s\S]*父素材：\{parentAssetId\}/);
+assert.match(assetCardBody, /const shotUsages = Array\.isArray\(usage\?\.shot_usages\)/);
+assert.match(assetCardBody, /usage\.shot_usages/);
+assert.match(assetCardBody, /场景：\{shotUsage\.scene_id\}/);
+assert.match(assetCardBody, /镜头：\{shotUsage\.shot_id\}/);
+assert.match(assetCardBody, /字幕：/);
+assert.match(assetCardBody, /可见时长：\{shotUsage\.visible_duration_sec\} 秒/);
+assert.doesNotMatch(assetCardBody, /end_sec\s*-\s*[^\n]*start_sec/, '前端不得重新计算 canonical 可见时长');
 
 assert.throws(() => assertFormalOriginPrecedence(
   'const source = inferAssetSource(asset); const origin = asset?.origin; if (origin) return origin;',

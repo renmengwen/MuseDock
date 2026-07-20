@@ -176,6 +176,7 @@ function SourceImageAssetCard({ asset, assetId, workflowId, usageById, sharedAna
   const analysis = asset.image_analysis || {};
   const usage = usageById.get(assetId);
   const usedInFrames = Array.isArray(usage?.used_in_frames) ? usage.used_in_frames.filter(Boolean) : [];
+  const shotUsages = Array.isArray(usage?.shot_usages) ? usage.shot_usages : [];
   const used = usage?.used === true || usedInFrames.length > 0 || Number(usage?.usage_count || 0) > 0;
   const status = analysis.status || '';
   const title = firstText(asset.alt, asset.title, asset.name, asset.path, asset.url, assetId);
@@ -208,6 +209,11 @@ function SourceImageAssetCard({ asset, assetId, workflowId, usageById, sharedAna
         {analysis.summary ? <p className="mt-2 text-[13px] leading-relaxed text-[#30343b]">{analysis.summary}</p> : null}
         {metaLine ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">类型/用途/适配：{metaLine}</p> : null}
         {usedInFrames.length ? <p className="mt-1 text-xs leading-relaxed text-[#69717e]">引用镜头：{usedInFrames.join('、')}</p> : null}
+        {shotUsages.map((shotUsage, index) => (
+          <p key={`${shotUsage.frame_id}-${shotUsage.shot_id}-${index}`} className="mt-1 text-xs leading-relaxed text-[#69717e]">
+            场景：{shotUsage.scene_id} · 镜头：{shotUsage.shot_id} · 字幕：{shotUsage.caption_ids?.join('、') || '无'} · 可见时长：{shotUsage.visible_duration_sec} 秒
+          </p>
+        ))}
         {parentAssetId ? <p className="mt-1 break-all font-mono text-xs leading-relaxed text-[#69717e]">父素材：{parentAssetId}</p> : null}
         {analysis.message && analysis.message !== sharedAnalysisMessage ? <p className="mt-1 text-xs leading-relaxed text-[#b45309]">分析说明：{analysis.message}</p> : null}
       </div>

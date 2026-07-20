@@ -5,6 +5,7 @@ const path = require('path');
 
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
 const assetUsagePhase = require('../server/services/creative-video/html-video/assetUsagePhase');
+const { materializeSceneImageSequenceDom } = require('../server/services/creative-video/html-video/sceneImageSequenceDom');
 const { createCreativeWorkflowRetryPlan } = require('../server/services/creative-video/retryPlanner');
 
 const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'html-video-asset-usage-'));
@@ -62,7 +63,7 @@ const report = workflow.buildAssetUsageReport({
 
 assert.equal(report.status, 'ready');
 assert.equal(report.assets.find(asset => asset.asset_id === 'article_01').used, true);
-assert.equal(report.assets.find(asset => asset.asset_id === 'article_01').usage_count, 1);
+assert.equal(report.assets.find(asset => asset.asset_id === 'article_01').usage_count, 0, 'legacy HTML fallback 不冒充 canonical Shot usage');
 assert.deepEqual(report.assets.find(asset => asset.asset_id === 'article_01').used_in_frames, ['scene_01']);
 assert.equal(report.assets.find(asset => asset.asset_id === 'article_02').used, false);
 assert.equal(report.assets.find(asset => asset.asset_id === 'article_03').used, true);
@@ -70,6 +71,184 @@ assert.deepEqual(report.assets.find(asset => asset.asset_id === 'article_03').us
 assert.deepEqual(report.used_asset_ids, ['article_01', 'article_03']);
 assert.deepEqual(report.unused_asset_ids, ['article_02']);
 assert.match(report.summary, /最终 HTML 使用了 2 张视觉素材/);
+
+fs.writeFileSync(
+  path.join(projectDir, 'frames', 'required-path-only.html'),
+  '<!doctype html><html><body><img src="../assets/required-path-only.png"></body></html>',
+  'utf8',
+);
+const requiredPathOnlyReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: {
+    frames: [{ id: 'frame_required_path_only', scene_id: 'scene_required_path_only', html_path: 'frames/required-path-only.html' }],
+    content_graph: { nodes: [{ id: 'frame_required_path_only', scene_id: 'scene_required_path_only' }] },
+  },
+  creativeContext: {
+    asset_context: {
+      assets: [{
+        id: 'required_path_only',
+        media_type: 'image',
+        status: 'ready',
+        requirement: 'required',
+        path: 'assets/required-path-only.png',
+        frame_src: '../assets/required-path-only.png',
+      }],
+    },
+  },
+});
+assert.equal(requiredPathOnlyReport.assets[0].used, false, 'required 素材仅在普通 HTML 出现路径不得算作已使用');
+assert.deepEqual(requiredPathOnlyReport.assets[0].shot_usages, []);
+assert.deepEqual(requiredPathOnlyReport.used_asset_ids, []);
+assert.deepEqual(requiredPathOnlyReport.unused_asset_ids, ['required_path_only']);
+assert.deepEqual(requiredPathOnlyReport.missing_required_asset_ids, ['required_path_only']);
+
+const repeatedShotAsset = {
+  id: 'required_repeated_shot',
+  media_type: 'image',
+  status: 'ready',
+  requirement: 'required',
+  path: 'assets/repeated-shot.png',
+  frame_src: '../assets/repeated-shot.png',
+};
+const repeatedShotSequence = {
+  type: 'image_sequence',
+  sequence_mode: 'fullscreen_relay',
+  shots: [
+    {
+      id: 'shot_overview',
+      asset_id: repeatedShotAsset.id,
+      role: 'overview',
+      requirement: 'required',
+      caption_ids: ['cap_01'],
+      minimum_visible_duration_sec: 1,
+      active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 2.5 },
+    },
+    {
+      id: 'shot_detail',
+      asset_id: repeatedShotAsset.id,
+      role: 'detail',
+      requirement: 'required',
+      caption_ids: ['cap_02', 'cap_03'],
+      minimum_visible_duration_sec: 1,
+      active_window: { time_base: 'scene_local', start_sec: 2, end_sec: 4 },
+    },
+  ],
+};
+const repeatedShotNode = {
+  id: 'graph_scene_usage',
+  scene_id: 'scene_usage',
+  duration_sec: 4,
+  metadata: { visual_beat: { visual_base: repeatedShotSequence } },
+};
+const repeatedShotContext = { asset_context: { assets: [repeatedShotAsset] } };
+const repeatedShotMaterialized = materializeSceneImageSequenceDom({
+  html: '<!doctype html><html><body><main>受管画面</main></body></html>',
+  node: repeatedShotNode,
+  creativeContext: repeatedShotContext,
+});
+assert.equal(repeatedShotMaterialized.success, true);
+fs.writeFileSync(path.join(projectDir, 'frames', 'repeated-shot.html'), repeatedShotMaterialized.html, 'utf8');
+const firstFrameNode = {
+  id: 'graph_scene_usage_first',
+  scene_id: 'scene_usage_first',
+  duration_sec: 1,
+  metadata: { visual_beat: { visual_base: {
+    type: 'image_sequence',
+    sequence_mode: 'fullscreen_relay',
+    shots: [{
+      id: 'shot_first_frame',
+      asset_id: repeatedShotAsset.id,
+      role: 'subject',
+      requirement: 'required',
+      caption_ids: [],
+      minimum_visible_duration_sec: 1,
+      active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 1 },
+    }],
+  } } },
+};
+const firstFrameMaterialized = materializeSceneImageSequenceDom({
+  html: '<!doctype html><html><body><main>第一帧受管画面</main></body></html>',
+  node: firstFrameNode,
+  creativeContext: repeatedShotContext,
+});
+assert.equal(firstFrameMaterialized.success, true);
+fs.writeFileSync(path.join(projectDir, 'frames', 'first-frame-shot.html'), firstFrameMaterialized.html, 'utf8');
+const repeatedShotReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: {
+    frames: [
+      {
+        id: 'frame_usage_first',
+        scene_id: 'scene_usage_first',
+        graph_node_id: firstFrameNode.id,
+        html_path: 'frames/first-frame-shot.html',
+      },
+      {
+        id: 'frame_usage',
+        scene_id: 'scene_usage',
+        graph_node_id: repeatedShotNode.id,
+        html_path: 'frames/repeated-shot.html',
+      },
+    ],
+    content_graph: {
+      nodes: [
+        { id: 'frame_usage', scene_id: 'scene_usage' },
+        repeatedShotNode,
+        firstFrameNode,
+      ],
+    },
+  },
+  creativeContext: repeatedShotContext,
+});
+assert.deepEqual(repeatedShotReport.assets[0].shot_usages, [
+  {
+    frame_id: 'frame_usage_first',
+    scene_id: 'scene_usage_first',
+    shot_id: 'shot_first_frame',
+    caption_ids: [],
+    role: 'subject',
+    sequence_mode: 'fullscreen_relay',
+    visible_duration_sec: 1,
+  },
+  {
+    frame_id: 'frame_usage',
+    scene_id: 'scene_usage',
+    shot_id: 'shot_overview',
+    caption_ids: ['cap_01'],
+    role: 'overview',
+    sequence_mode: 'fullscreen_relay',
+    visible_duration_sec: 2.5,
+  },
+  {
+    frame_id: 'frame_usage',
+    scene_id: 'scene_usage',
+    shot_id: 'shot_detail',
+    caption_ids: ['cap_02', 'cap_03'],
+    role: 'detail',
+    sequence_mode: 'fullscreen_relay',
+    visible_duration_sec: 2,
+  },
+], '同素材多 Shot 与 overlap 必须按 project.frames 和 contract.shots 顺序保留逐 Shot canonical usage');
+assert.deepEqual(repeatedShotReport.assets[0].used_in_frames, ['frame_usage_first', 'frame_usage']);
+assert.equal(repeatedShotReport.assets[0].usage_count, 3);
+assert.equal(repeatedShotReport.assets[0].used, true);
+assert.deepEqual(repeatedShotReport.used_asset_ids, [repeatedShotAsset.id]);
+assert.deepEqual(repeatedShotReport.unused_asset_ids, []);
+assert.deepEqual(repeatedShotReport.missing_required_asset_ids, []);
+
+const ambiguousFrameReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: {
+    frames: [{ id: 'ambiguous_frame', scene_id: 'scene_usage', html_path: 'frames/repeated-shot.html' }],
+    content_graph: {
+      nodes: [repeatedShotNode, { ...repeatedShotNode, id: 'graph_scene_usage_duplicate' }],
+    },
+  },
+  creativeContext: repeatedShotContext,
+});
+assert.equal(ambiguousFrameReport.assets[0].used, false, '兼容 identity 同时匹配多个 node 时不得猜 required usage');
+assert.deepEqual(ambiguousFrameReport.assets[0].shot_usages, []);
+assert.deepEqual(ambiguousFrameReport.missing_required_asset_ids, [repeatedShotAsset.id]);
 
 const finalRegistryReport = workflow.buildAssetUsageReport({
   projectDir,
@@ -203,7 +382,7 @@ const requiredReport = workflow.buildAssetUsageReport({
   },
 });
 assert.deepEqual(requiredReport.required_asset_ids, ['article_01', 'gen_scene_02']);
-assert.deepEqual(requiredReport.missing_required_asset_ids, ['gen_scene_02']);
+assert.deepEqual(requiredReport.missing_required_asset_ids, ['article_01', 'gen_scene_02']);
 assert.deepEqual(requiredReport.assets.find(asset => asset.asset_id === 'article_01').expected_in_frames, ['scene_01']);
 assert.equal(requiredReport.assets.find(asset => asset.asset_id === 'gen_scene_02').source, 'generated');
 assert.match(requiredReport.summary, /必用视觉素材未进入/);
