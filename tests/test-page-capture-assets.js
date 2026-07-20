@@ -39,6 +39,8 @@ function githubSource(overrides = {}) {
 
 function makeFakePlaywright({
   screenshot = CAPTURE_BYTES,
+  evaluateDom = { scroll: { x: 0, y: 0 }, elements: [] },
+  evaluateError = null,
   status = 200,
   finalUrl = CANONICAL_URL,
   redirects = {},
@@ -53,6 +55,9 @@ function makeFakePlaywright({
     gotos: [],
     gotoErrors: [],
     screenshots: [],
+    screenshotPages: [],
+    evaluations: [],
+    sequence: [],
     routedDocuments: [],
     networkRequests: [],
     requestOptions: [],
@@ -126,7 +131,43 @@ function makeFakePlaywright({
       };
     },
     url: () => calls.currentUrl,
+    evaluate: async (callback, argument) => {
+      calls.sequence.push('evaluate');
+      calls.evaluations.push({ page, argument });
+      if (evaluateError) throw evaluateError;
+      const previous = {
+        document: global.document,
+        window: global.window,
+        getComputedStyle: global.getComputedStyle,
+      };
+      const elements = evaluateDom.elements.map(item => ({
+        tagName: item.tag,
+        textContent: item.text,
+        getBoundingClientRect: () => item.rect,
+        __style: item.style || {},
+      }));
+      global.document = { querySelectorAll: () => elements };
+      global.window = {
+        scrollX: evaluateDom.scroll?.x || 0,
+        scrollY: evaluateDom.scroll?.y || 0,
+      };
+      global.getComputedStyle = element => ({
+        display: 'block',
+        visibility: 'visible',
+        opacity: '1',
+        ...element.__style,
+      });
+      try {
+        return callback(argument);
+      } finally {
+        global.document = previous.document;
+        global.window = previous.window;
+        global.getComputedStyle = previous.getComputedStyle;
+      }
+    },
     screenshot: async options => {
+      calls.sequence.push('screenshot');
+      calls.screenshotPages.push(page);
       calls.screenshots.push(options);
       return screenshot;
     },
@@ -225,6 +266,8 @@ async function testCapturesCanonicalGithubRepositoryPage() {
   assert.equal(fake.calls.requestOptions[0].headers['Accept-Encoding'], 'identity');
   assert.ok(!Object.keys(fake.calls.requestOptions[0].headers).some(name => /cookie|authorization|referer/i.test(name)));
   assert.deepEqual(fake.calls.screenshots, [{ type: 'png', fullPage: false }]);
+  assert.deepEqual(fake.calls.sequence, ['evaluate', 'screenshot']);
+  assert.equal(fake.calls.evaluations[0].page, fake.calls.screenshotPages[0]);
   assert.equal(result.status, 'ready');
   assert.equal(result.assets.length, 1);
   assert.deepEqual({
@@ -251,6 +294,12 @@ async function testCapturesCanonicalGithubRepositoryPage() {
   assert.match(result.assets[0].path, /^assets\/github-page-[a-f0-9]{16}\.png$/);
   assert.ok(path.resolve(result.assets[0].local_path).startsWith(`${path.resolve(projectDir, 'assets')}${path.sep}`));
   assert.deepEqual(await fsp.readFile(result.assets[0].local_path), CAPTURE_BYTES);
+  assert.deepEqual(result.assets[0].page_capture_evidence, {
+    version: 1,
+    viewport: { width: 1440, height: 900 },
+    scroll: { x: 0, y: 0 },
+    elements: [],
+  });
   assert.equal(fake.calls.pageClosed, true);
   assert.equal(fake.calls.contextClosed, true);
   assert.equal(fake.calls.browserClosed, true);
@@ -264,6 +313,91 @@ async function testCapturesCanonicalGithubRepositoryPage() {
   assert.equal(retried.assets[0].id, result.assets[0].id);
   assert.equal(retried.assets[0].path, result.assets[0].path);
   assert.deepEqual(await fsp.readFile(retried.assets[0].local_path), Buffer.from('updated-png'));
+}
+
+async function testCollectsBoundedVisibleDomEvidenceBeforeScreenshot() {
+  const repeated = {
+    tag: 'SPAN',
+    text: '  同名   候选  ',
+    rect: { x: 144, y: 180, width: 144, height: 90 },
+  };
+  const hidden = [
+    { tag: 'DIV', text: 'display', rect: { x: 1, y: 1, width: 10, height: 10 }, style: { display: 'none' } },
+    { tag: 'DIV', text: 'hidden', rect: { x: 1, y: 1, width: 10, height: 10 }, style: { visibility: 'hidden' } },
+    { tag: 'DIV', text: 'visibility', rect: { x: 1, y: 1, width: 10, height: 10 }, style: { visibility: 'collapse' } },
+    { tag: 'DIV', text: 'opacity', rect: { x: 1, y: 1, width: 10, height: 10 }, style: { opacity: '0' } },
+    { tag: 'DIV', text: 'zero', rect: { x: 1, y: 1, width: 0, height: 10 } },
+    { tag: 'DIV', text: 'outside', rect: { x: 1440, y: 1, width: 10, height: 10 } },
+    { tag: 'DIV', text: '   ', rect: { x: 1, y: 1, width: 10, height: 10 } },
+  ];
+  const filler = Array.from({ length: 205 }, (_, index) => ({
+    tag: 'P',
+    text: `条目 ${index}`,
+    rect: { x: 10, y: 10, width: 10, height: 10 },
+  }));
+  const fake = makeFakePlaywright({
+    evaluateDom: {
+      scroll: { x: 12, y: 34 },
+      elements: [
+        { tag: 'BUTTON', text: `  ${'长'.repeat(170)}  `, rect: { x: -144, y: 90, width: 288, height: 180 } },
+        repeated,
+        { ...repeated, rect: { x: 432, y: 270, width: 144, height: 90 } },
+        ...hidden,
+        ...filler,
+      ],
+    },
+  });
+  const result = await pageCaptureAssets.captureGithubRepositoryPage({
+    sourceMaterial: githubSource(),
+    projectDir: await createTestDir('dom-evidence'),
+    deps: fake.deps,
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(fake.calls.sequence, ['evaluate', 'screenshot']);
+  assert.equal(fake.calls.evaluations.length, 1);
+  const evidence = result.assets[0].page_capture_evidence;
+  assert.deepEqual(evidence.viewport, { width: 1440, height: 900 });
+  assert.deepEqual(evidence.scroll, { x: 12, y: 34 });
+  assert.equal(evidence.elements.length, 200);
+  assert.deepEqual(evidence.elements[0], {
+    tag: 'button',
+    text: '长'.repeat(160),
+    region: { x: 0, y: 0.1, width: 0.1, height: 0.2 },
+  });
+  assert.equal(evidence.elements.filter(item => item.text === '同名 候选').length, 2);
+  assert.ok(!evidence.elements.some(item => ['display', 'hidden', 'visibility', 'opacity', 'zero', 'outside'].includes(item.text)));
+  assert.ok(evidence.elements.every(item => Object.values(item.region).every(value => value >= 0 && value <= 1)));
+  assert.equal(Object.hasOwn(evidence, 'focus_regions'), false);
+  assert.equal(Object.hasOwn(evidence, 'trust_level'), false);
+  assert.ok(evidence.elements.every(item => !Object.hasOwn(item, 'focus_regions') && !Object.hasOwn(item, 'trust_level')));
+}
+
+async function testEvaluateFailureKeepsCaptureReadyWithSafeDiagnostic() {
+  const projectDir = await createTestDir('evaluate-failure');
+  const secret = `DOM failed ${projectDir} token=secret`;
+  const fake = makeFakePlaywright({ evaluateError: new Error(secret) });
+  const result = await pageCaptureAssets.captureGithubRepositoryPage({
+    sourceMaterial: githubSource(),
+    projectDir,
+    deps: fake.deps,
+  });
+
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(fake.calls.sequence, ['evaluate', 'screenshot']);
+  assert.deepEqual(await fsp.readFile(result.assets[0].local_path), CAPTURE_BYTES);
+  assert.deepEqual(result.assets[0].page_capture_evidence, {
+    version: 1,
+    viewport: { width: 1440, height: 900 },
+    scroll: { x: 0, y: 0 },
+    elements: [],
+  });
+  assert.deepEqual(result.diagnostics, [{
+    code: 'page_capture_dom_evidence_unavailable',
+    message: '页面 DOM 证据采集失败，已继续保留页面截图。',
+    details: { category: 'evaluate_failed' },
+  }]);
+  assert.ok(!JSON.stringify(result).includes(secret));
 }
 
 async function testRequestInterceptionAllowsOnlyExpectedGithubResources() {
@@ -847,6 +981,8 @@ async function testSourcePrepAcceptsNonPromiseCaptureContext() {
   suiteRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'page-capture-suite-'));
   try {
     await testCapturesCanonicalGithubRepositoryPage();
+    await testCollectsBoundedVisibleDomEvidenceBeforeScreenshot();
+    await testEvaluateFailureKeepsCaptureReadyWithSafeDiagnostic();
     await testRequestInterceptionAllowsOnlyExpectedGithubResources();
     await testBoundedNetworkBodiesAndHeaders();
     await testOverflowChunksConsumePageBudgetImmediately();

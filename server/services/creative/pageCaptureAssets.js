@@ -11,6 +11,7 @@ const MAX_PAGE_NETWORK_BYTES = 8 * 1024 * 1024;
 const MAX_HEADER_BYTES = 32 * 1024;
 const NETWORK_TIMEOUT_MS = 12000;
 const VIEWPORT = { width: 1440, height: 900 };
+const DOM_EVIDENCE_LIMITS = { scan: 1000, elements: 200, text: 160 };
 const STATIC_HOSTS = new Set([
   'avatars.githubusercontent.com',
   'camo.githubusercontent.com',
@@ -22,6 +23,11 @@ const STATIC_HOSTS = new Set([
   'user-images.githubusercontent.com',
 ]);
 const FAILURE_MESSAGE = 'GitHub 仓库页面截图失败，已保留其他视觉素材。';
+const DOM_EVIDENCE_FAILURE = {
+  code: 'page_capture_dom_evidence_unavailable',
+  message: '页面 DOM 证据采集失败，已继续保留页面截图。',
+  details: { category: 'evaluate_failed' },
+};
 
 function emptyResult(diagnostic = null) {
   return {
@@ -221,6 +227,55 @@ async function loadPlaywright(importPlaywright) {
   return chromium;
 }
 
+async function collectPageCaptureEvidence(page) {
+  const raw = await page.evaluate(({ viewport, limits }) => {
+    const elements = [];
+    const candidates = document.querySelectorAll('*');
+    for (let index = 0; index < Math.min(candidates.length, limits.scan); index += 1) {
+      if (elements.length >= limits.elements) break;
+      const element = candidates[index];
+      const text = String(element.textContent || '').replace(/\s+/g, ' ').trim().slice(0, limits.text);
+      if (!text) continue;
+      const style = getComputedStyle(element);
+      if (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)
+        || Number(style.opacity) === 0) continue;
+      const rect = element.getBoundingClientRect();
+      if (![rect.x, rect.y, rect.width, rect.height].every(Number.isFinite)
+        || rect.width <= 0 || rect.height <= 0) continue;
+      const right = rect.x + rect.width;
+      const bottom = rect.y + rect.height;
+      if (right <= 0 || bottom <= 0 || rect.x >= viewport.width || rect.y >= viewport.height) continue;
+      const left = Math.max(0, rect.x);
+      const top = Math.max(0, rect.y);
+      const clippedRight = Math.min(viewport.width, right);
+      const clippedBottom = Math.min(viewport.height, bottom);
+      elements.push({
+        tag: String(element.tagName || '').toLowerCase(),
+        text,
+        region: {
+          x: left / viewport.width,
+          y: top / viewport.height,
+          width: (clippedRight - left) / viewport.width,
+          height: (clippedBottom - top) / viewport.height,
+        },
+      });
+    }
+    return {
+      scroll: {
+        x: Number.isFinite(window.scrollX) ? window.scrollX : 0,
+        y: Number.isFinite(window.scrollY) ? window.scrollY : 0,
+      },
+      elements,
+    };
+  }, { viewport: VIEWPORT, limits: DOM_EVIDENCE_LIMITS });
+  return {
+    version: 1,
+    viewport: { ...VIEWPORT },
+    scroll: raw.scroll,
+    elements: raw.elements,
+  };
+}
+
 async function captureGithubRepositoryPage({ sourceMaterial = {}, projectDir = '', now = '', deps = {} } = {}) {
   const canonicalUrl = githubRepositoryUrl(sourceMaterial);
   if (!canonicalUrl) return emptyResult();
@@ -269,6 +324,19 @@ async function captureGithubRepositoryPage({ sourceMaterial = {}, projectDir = '
     category = 'redirect_rejected';
     if (!sameRepositoryRoot(page.url(), canonicalUrl)) throw new Error('github page redirected away');
 
+    let pageCaptureEvidence = {
+      version: 1,
+      viewport: { ...VIEWPORT },
+      scroll: { x: 0, y: 0 },
+      elements: [],
+    };
+    let evidenceDiagnostic = null;
+    try {
+      pageCaptureEvidence = await collectPageCaptureEvidence(page);
+    } catch {
+      evidenceDiagnostic = DOM_EVIDENCE_FAILURE;
+    }
+
     category = 'capture_invalid';
     const screenshot = await page.screenshot({ type: 'png', fullPage: false });
     const bytes = Buffer.isBuffer(screenshot)
@@ -300,8 +368,9 @@ async function captureGithubRepositoryPage({ sourceMaterial = {}, projectDir = '
         mime: 'image/png',
         bytes: bytes.length,
         captured_at: now || new Date().toISOString(),
+        page_capture_evidence: pageCaptureEvidence,
       })],
-      diagnostics: [],
+      diagnostics: evidenceDiagnostic ? [evidenceDiagnostic] : [],
       updated_at: now || new Date().toISOString(),
     };
   } catch {
