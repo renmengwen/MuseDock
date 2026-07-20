@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 const { fileURLToPath, pathToFileURL } = require('url');
 const { spawn } = require('child_process');
+const { randomUUID } = require('crypto');
 
 const { prepareSourceHtml } = require('./prepareSourceHtml');
 const { buildPlaybackClockSource } = require('./playbackClock');
@@ -227,6 +228,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
   let totalDuration = config.duration;
   let collector;
   const pageErrors = [];
+  const managedVisualGuardToken = randomUUID();
 
   try {
     report(ctx, 5, '正在准备 html-video 渲染...');
@@ -256,7 +258,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
 
     // goto 之前置受控标志：scene_html 时间线脚本据此不挂 5s 兜底自启，
     // 避免预加载 >5s 时兜底抢先起钟、adapter 的显式启动被幂等吞掉导致 origin 偏移。
-    await page.addInitScript(clockSource => {
+    await page.addInitScript(({ clockSource, guardToken }) => {
       window.__mpAdapterControlled = true;
       (0, eval)(clockSource);
       const clock = window.__hvPlaybackClock;
@@ -266,6 +268,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
       Object.freeze(clock);
       Object.defineProperty(window, '__hvPlaybackClock', { value: clock, writable: false, configurable: false });
       const earlyViolations = [];
+      const earlyCssomCalls = [];
       const visualSelector = 'img,picture source,svg image,video[poster],input[type="image" i]';
       const protectedAttributes = [
         'data-sequence-mode', 'data-scene-id', 'data-shot-id', 'data-asset-id',
@@ -318,11 +321,30 @@ async function render(input = {}, ctx = {}, deps = {}) {
         attributeFilter: protectedAttributes,
       });
       Object.defineProperty(window, '__hvEarlyVisualMutationSnapshot', {
-        value: () => earlyViolations.map(item => ({ ...item })),
+        value: token => token === guardToken ? earlyViolations.map(item => ({ ...item })) : [],
         writable: false,
         configurable: false,
       });
-    }, buildPlaybackClockSource());
+      const sheetPrototype = window.CSSStyleSheet?.prototype;
+      for (const method of ['insertRule', 'deleteRule', 'replace', 'replaceSync']) {
+        const descriptor = sheetPrototype && Object.getOwnPropertyDescriptor(sheetPrototype, method);
+        if (typeof descriptor?.value !== 'function') continue;
+        const original = descriptor.value;
+        Object.defineProperty(sheetPrototype, method, {
+          ...descriptor,
+          value: function (...args) {
+            const result = Reflect.apply(original, this, args);
+            earlyCssomCalls.push({ method, text: String(args[0] ?? '') });
+            return result;
+          },
+        });
+      }
+      Object.defineProperty(window, '__hvEarlyCssomSnapshot', {
+        value: token => token === guardToken ? earlyCssomCalls.map(item => ({ ...item })) : [],
+        writable: false,
+        configurable: false,
+      });
+    }, { clockSource: buildPlaybackClockSource(), guardToken: managedVisualGuardToken });
 
     // 对应 html-video 源码段：page.addInitScript 冻结 CSS/SMIL 动画。
     await page.addInitScript(() => {
@@ -384,7 +406,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
     await waitForRenderReady(page, config);
     await waitForManagedShotImages(page, Number(deps.managedShotImageTimeoutMs) || 10000);
     throwIfPolicyViolated(collector);
-    await assertManagedVisualRuntime(page);
+    await assertManagedVisualRuntime(page, managedVisualGuardToken);
     throwIfPageErrored(pageErrors, 'render-playback-start-failed');
 
     await page.waitForTimeout(100);
@@ -445,7 +467,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
       startupError.details = { errors };
       throw startupError;
     }
-    await assertManagedVisualRuntime(page);
+    await assertManagedVisualRuntime(page, managedVisualGuardToken);
 
     // 对应 html-video 源码段：记录 leadInMs，后续由 ffmpeg -ss 裁剪。
     leadInMs = now() - tWebmStart;
@@ -454,17 +476,17 @@ async function render(input = {}, ctx = {}, deps = {}) {
     await waitWithProgress(page, ctx, totalDuration, async () => {
       throwIfPolicyViolated(collector);
       throwIfPageErrored(pageErrors);
-      await assertManagedVisualRuntime(page);
+      await assertManagedVisualRuntime(page, managedVisualGuardToken);
     });
     await page.waitForTimeout(RECORD_TAIL_BUFFER_MS).catch(() => {});
     throwIfPolicyViolated(collector);
     throwIfPageErrored(pageErrors);
-    await assertManagedVisualRuntime(page);
+    await assertManagedVisualRuntime(page, managedVisualGuardToken);
 
     report(ctx, 85, '正在结束浏览器录制...');
     throwIfPolicyViolated(collector);
     throwIfPageErrored(pageErrors);
-    await assertManagedVisualRuntime(page);
+    await assertManagedVisualRuntime(page, managedVisualGuardToken);
     await context.close();
     await new Promise(resolve => setImmediate(resolve));
     throwIfPolicyViolated(collector);
@@ -782,13 +804,18 @@ async function preflightPlaybackClock(page, timeoutMs = 1000) {
   throw createRenderError('render-playback-start-failed', `html-video 播放时钟自检失败：${result.message || '未知错误'}`);
 }
 
-async function assertManagedVisualRuntime(page) {
-  const result = await page.evaluate(() => {
+async function assertManagedVisualRuntime(page, guardToken) {
+  const result = await page.evaluate(expectedToken => {
     const root = document.querySelector('[data-hv-image-sequence]');
     if (!root) return { success: true, applied: false };
-    if (!window.__hvManagedVisualGuardCheck) {
+    const existingCheck = window.__hvManagedVisualGuardCheck;
+    if (existingCheck && (typeof existingCheck !== 'function' || existingCheck.__hvGuardToken !== expectedToken)) {
+      return { success: false, message: '检测到不可信 Image Sequence 运行时 Guard。', offenders: [{ kind: 'managed_guard_token_mismatch' }] };
+    }
+    if (!existingCheck) {
       const violations = [];
       let earlyViolationCount = 0;
+      let earlyCssomCallCount = 0;
       const dirty = new Set();
       const properties = ['content', 'backgroundImage', 'maskImage', 'webkitMaskImage', 'borderImageSource', 'listStyleImage', 'filter', 'cursor', 'clipPath'];
       const protectedAttributes = new Set([
@@ -802,12 +829,20 @@ async function assertManagedVisualRuntime(page) {
       const lock = violation => { violations.push(violation); };
       const mergeEarlyViolations = () => {
         const entries = typeof window.__hvEarlyVisualMutationSnapshot === 'function'
-          ? window.__hvEarlyVisualMutationSnapshot()
+          ? window.__hvEarlyVisualMutationSnapshot(expectedToken)
           : [];
         for (let index = earlyViolationCount; index < entries.length; index += 1) lock(entries[index]);
         earlyViolationCount = entries.length;
+        const cssomCalls = typeof window.__hvEarlyCssomSnapshot === 'function'
+          ? window.__hvEarlyCssomSnapshot(expectedToken)
+          : [];
+        for (let index = earlyCssomCallCount; index < cssomCalls.length; index += 1) {
+          const call = cssomCalls[index];
+          const urls = externalUrls(call.text);
+          if (urls.length) lock({ kind: 'early_cssom_visual_rule', method: call.method, urls });
+        }
+        earlyCssomCallCount = cssomCalls.length;
       };
-      mergeEarlyViolations();
       const externalUrls = value => {
         const urls = [];
         for (const match of String(value || '').matchAll(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s)]+))\s*\)/gi)) {
@@ -823,6 +858,7 @@ async function assertManagedVisualRuntime(page) {
         }
         return urls;
       };
+      mergeEarlyViolations();
       const shots = Array.from(root.children);
       const managedImages = new Set();
       const contract = {
@@ -932,10 +968,11 @@ async function assertManagedVisualRuntime(page) {
         pending.forEach(scanTree);
         return violations.length ? { success: false, offenders: violations.slice() } : { success: true, applied: true };
       };
+      Object.defineProperty(check, '__hvGuardToken', { value: expectedToken, writable: false, configurable: false });
       Object.defineProperty(window, '__hvManagedVisualGuardCheck', { value: check, writable: false, configurable: false });
     }
     return window.__hvManagedVisualGuardCheck();
-  }).catch(error => ({ success: false, message: error?.message || String(error), offenders: [] }));
+  }, guardToken).catch(error => ({ success: false, message: error?.message || String(error), offenders: [] }));
   if (result?.success !== false) return result;
   const error = createRenderError('frame_html_shot_contract_invalid', `Image Sequence 运行时发现未受管视觉素材：${result.message || '模型美术壳不得创建外部视觉元素。'}`);
   error.retryable = true;

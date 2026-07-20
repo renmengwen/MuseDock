@@ -440,6 +440,36 @@ function project(overrides = {}) {
   assert.equal(renderPlan.repair_action, 'rerender_frames');
   assert.deepEqual(renderPlan.executor_options.frame_ids, ['scene_04']);
 
+  for (const code of ['render-playback-start-failed', 'render-playback-runtime-failed']) {
+    const playbackProject = project();
+    markCheckpointFrame(playbackProject, 'render', 'scene:scene_04', {
+      status: 'failed',
+      diagnostic_code: code,
+    });
+    const playbackPlan = createCreativeWorkflowRetryPlan({
+      workflow: workflow({
+        last_failure: { code, sub_stage: 'render', frame_id: 'scene:scene_04' },
+      }),
+      project: playbackProject,
+    });
+    assert.equal(playbackPlan.repair_action, 'retry_frame_html', `${code} 必须重新生成失败 Frame HTML`);
+    assert.equal(playbackPlan.retry_from, 'frame_html');
+    assert.deepEqual(playbackPlan.executor_options, {
+      regenerate_frame_html: true,
+      frame_ids: ['scene:scene_04'],
+    });
+    assert.deepEqual(playbackPlan.discard, ['frames:scene:scene_04', 'render_outputs']);
+  }
+
+  const imageNotReadyPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: { code: 'render-shot-image-not-ready', sub_stage: 'render', frame_id: 'scene:scene_04' },
+    }),
+    project: project(),
+  });
+  assert.equal(imageNotReadyPlan.repair_action, 'rerender_frames');
+  assert.deepEqual(imageNotReadyPlan.executor_options.frame_ids, ['scene:scene_04']);
+
   const runtimePolicyProject = project();
   markCheckpointFrame(runtimePolicyProject, 'render', 'scene:scene_04', {
     status: 'failed',

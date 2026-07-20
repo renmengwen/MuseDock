@@ -96,7 +96,7 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
         ],
       },
     };
-    const shell = '<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;background:#111}main{position:relative;width:100%;height:100%}[data-test-overlay]{position:absolute;z-index:5;left:250px;top:150px;width:140px;height:60px;background:#fff;color:#000}</style></head><body data-hv-canvas data-width="640" data-height="360"><main><div data-test-overlay="overlay">模型文字 Overlay</div></main></body></html>';
+    const shell = '<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;background:#111}main{position:relative;width:100%;height:100%}[data-test-overlay]{position:absolute;z-index:5;left:250px;top:150px;width:140px;height:60px;background:#fff;color:#000}</style><script>(()=>{const sheet=new CSSStyleSheet();const index=sheet.insertRule(".plain{color:#fff}");sheet.deleteRule(index)})()</script></head><body data-hv-canvas data-width="640" data-height="360"><main><div data-test-overlay="overlay">模型文字 Overlay</div></main></body></html>';
     const materialized = materializeSceneImageSequenceDom({
       html: shell,
       node: shotNode,
@@ -356,6 +356,8 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
       ['transient-managed-visual', '<script>window.__hvPlayAll=function(){setTimeout(function(){const image=new Image();image.src="../assets/shot-a.png";document.body.appendChild(image);setTimeout(function(){image.remove()},60)},20)}</script>'],
       ['domcontentloaded-transient-visual', '<script>document.addEventListener("DOMContentLoaded",function(){const image=new Image();image.src="../assets/shot-a.png";document.body.appendChild(image);setTimeout(function(){image.remove()},0)})</script>'],
       ['pre-guard-src-restore', '<script>document.addEventListener("DOMContentLoaded",function(){const image=document.querySelector("[data-shot-layer=foreground]");const original=image.getAttribute("src");image.setAttribute("src","../assets/shot-b.png");image.setAttribute("src",original)})</script>'],
+      ['preoccupied-guard-name', '<script>Object.defineProperty(window,"__hvManagedVisualGuardCheck",{value:function(){return {success:true,applied:true}},writable:false,configurable:false})</script>'],
+      ['transient-cssom-visual', '<script>(()=>{const sheet=document.styleSheets[0];const index=sheet.insertRule(".rogue{background-image:url(../assets/shot-a.png)}",sheet.cssRules.length);sheet.deleteRule(index)})()</script>'],
     ]) {
       const source = path.join(projectDir, 'frames', `${name}.html`);
       await fsp.writeFile(source, shotHtml.replace('<main>', `${attack}<main>`), 'utf8');

@@ -146,6 +146,7 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.equal(created.workflow_id, WORKFLOW_ID);
   assert.match(created.aweme_id, /^\d{5,32}$/);
   assert.equal(created.creative_context.input.mode, 'text');
+  assert.equal(created.creative_context.continuity_mode, 'scene_html');
   assert.equal(created.research_context.status, 'disabled');
   assert.deepEqual(created.asset_context.assets, []);
   assert.equal(Array.isArray(created.stages), true);
@@ -163,6 +164,7 @@ async function testCreatesAndRunsTextWorkflow() {
   assert.deepEqual(calls.map(call => call.name), ['createRun', 'brief', 'audio', 'project']);
   assert.equal(calls[1].options.briefOptions.creative_context.input.mode, 'text');
   assert.equal(calls[3].options.projectOptions.creative_context.asset_context.status, 'empty');
+  assert.equal(calls[3].options.projectOptions.creative_context.continuity_mode, 'scene_html');
   assert.equal(calls[3].options.useHtmlVideoLiteWorkflow, true);
   assert.equal(calls[3].options.workflowId, WORKFLOW_ID);
   assert.equal(calls[0].options.rootDir, mediaRoot);

@@ -17,6 +17,7 @@ aiImageModel.isConfigured = async () => false;
 
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
+const { buildCreativeContext } = require('../server/services/creative/creativeContext');
 
 async function writeFile(filePath, content) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
@@ -252,6 +253,8 @@ function fullSceneCaption(sceneId, text, duration) {
   {
     const sceneHtmlNarration = '第一句讲清楚问题的来龙去脉与背景。第二句给出核心的判断标准和依据。第三句展开关键的执行步骤细节。第四句总结行动建议并给出提醒。';
     let sceneHtmlQaInput = null;
+    const sceneHtmlRenderCalls = [];
+    let sceneHtmlComposeFrames = [];
     const sceneHtmlSpec = {
       title: 'scene_html 连续性',
       aspect_ratio: '16:9',
@@ -279,10 +282,7 @@ function fullSceneCaption(sceneId, text, duration) {
       runId: 'run_scene_html',
       rootDir,
       sceneSpec: sceneHtmlSpec,
-      creativeContext: {
-        input: { raw_text: 'scene_html 连续性' },
-        continuity_mode: 'scene_html',
-      },
+      creativeContext: buildCreativeContext({ input: { raw_text: 'scene_html 连续性' } }),
       target: { generateAudio: false, generateCaptions: true },
       skipValidation: true,
       services: {
@@ -316,6 +316,7 @@ function fullSceneCaption(sceneId, text, duration) {
         environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
         frameRenderer: {
           renderFrame: async (frame, options) => {
+            sceneHtmlRenderCalls.push({ id: frame.id, outputPath: options.outputPath });
             await writeFile(options.outputPath, `frame:${frame.id}`);
             return {
               success: true,
@@ -327,6 +328,7 @@ function fullSceneCaption(sceneId, text, duration) {
         },
         ffmpegComposer: {
           concatFramesWithFfmpeg: async (frames, outputPath) => {
+            sceneHtmlComposeFrames = frames.map(frame => ({ ...frame }));
             await writeFile(outputPath, 'mp4');
             return { success: true, output_path: outputPath, strategy: 'stub' };
           },
@@ -361,6 +363,11 @@ function fullSceneCaption(sceneId, text, duration) {
     );
     assert.equal(sceneHtmlProject.continuity_mode, 'scene_html');
     assert.equal(sceneHtmlProject.frames.length, 2, '两个 scene 应归并成两帧（不按 beat 展开）');
+    assert.deepEqual(sceneHtmlRenderCalls.map(call => call.id).sort(), ['scene:scene_intro', 'scene:scene_long']);
+    assert.equal(new Set(sceneHtmlRenderCalls.map(call => call.outputPath)).size, 2, '两个 Scene 必须各自生成唯一 MP4 路径');
+    assert.equal(sceneHtmlComposeFrames.length, 2, '合成器只能收到两个 Scene MP4，不得收到 Beat MP4');
+    assert.deepEqual(sceneHtmlComposeFrames.map(frame => frame.frame_id).sort(), ['scene:scene_intro', 'scene:scene_long']);
+    assert.equal(new Set(sceneHtmlComposeFrames.map(frame => frame.path)).size, 2, '合成器输入 MP4 路径必须按 Scene 独立');
     // R1/R2 端到端：最终 project.json 的 scene frame 必须有非空 html_path 且 checkpoint 同键
     for (const frame of sceneHtmlProject.frames) {
       assert.ok(frame.id.startsWith('scene:'), `scene_html 模式下 frames 全部为 scene 条目：${frame.id}`);
@@ -368,6 +375,7 @@ function fullSceneCaption(sceneId, text, duration) {
       assert.ok(Array.isArray(frame.metadata.beat_windows) && frame.metadata.beat_windows.length >= 1);
       assert.equal(frame.beat_id ?? null, null, 'scene frame 不设 beat_id');
     }
+    assert.equal(new Set(sceneHtmlProject.frames.map(frame => frame.html_path)).size, 2, '两个 Scene 必须各自生成唯一 HTML 路径');
     const sceneLongFrame = sceneHtmlProject.frames.find(frame => frame.scene_id === 'scene_long');
     assert.ok(sceneLongFrame.metadata.beat_windows.length >= 2, '长场景应携带多个 beat 窗口');
     assert.ok(Math.abs(sceneHtmlProject.frames.reduce((total, frame) => total + frame.duration_sec, 0) - 22) < 1e-6);

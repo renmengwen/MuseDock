@@ -401,6 +401,7 @@ function testBuildsStableCreativeContext() {
   });
 
   assert.deepEqual(context, {
+    continuity_mode: 'scene_html',
     input: {
       ...input,
       created_at: now,
@@ -445,6 +446,7 @@ function testBuildsDefaultContextsWhenMissing() {
   const context = buildCreativeContext({ input, now });
 
   assert.equal(Object.prototype.hasOwnProperty.call(context, 'created_at'), false);
+  assert.equal(context.continuity_mode, 'scene_html');
   assert.equal(context.input.created_at, now);
   assert.equal(context.source_context.status, 'ready');
   assert.equal(context.source_context.kind, 'text');

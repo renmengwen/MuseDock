@@ -466,6 +466,7 @@ function buildCreativeContext({
   const normalizedInput = createStableCreativeInput(input, createdAt);
 
   return {
+    continuity_mode: 'scene_html',
     input: normalizedInput,
     source_context: sourceContext || createDefaultSourceContext(normalizedInput),
     research_context: researchContext || createDisabledResearchContext({ now: createdAt }),
