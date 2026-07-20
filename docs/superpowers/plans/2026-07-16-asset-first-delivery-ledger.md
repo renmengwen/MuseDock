@@ -88,6 +88,55 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 ## 当前写租约
 
 ```yaml
+task_id: D-03c
+status: implementing
+owner: d03c_writer
+lease_released: false
+code_base_commit: 097c94d96765ff02053affffafcfd1aeb07ec791
+worktree: D:\code3\MuseDock-worktrees\asset-first-d03c
+branch: codex/asset-first-d03c
+allowed_paths:
+  - server/services/creative-video/html-video/focusRegionPhase.js
+  - server/services/creative-video/html-video/htmlVideoWorkflow.js
+  - server/services/creative/creativeWorkflows.js
+  - tests/test-html-video-focus-region-phase.js
+  - tests/test-html-video-workflow.js
+  - tests/test-creative-workflow-defaults.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative/visualAssetContract.js
+  - server/services/creative/pageCaptureAssets.js
+  - server/services/source/sourceImageAnalysis.js
+  - server/services/ai/**
+  - server/services/creative-video/html-video/visualPlanService.js
+  - server/services/creative-video/html-video/assetUsagePhase.js
+  - server/services/creative/workflowProjectSync.js
+  - frontend-react/**
+  - package.json
+  - package-lock.json
+state_owners:
+  - asset_context.assets[].focus_regions producer output
+  - ephemeral focus analysis content-hash map within one run
+decisions:
+  - phase 插在 canonical buildVisualPlan 成功后、Frame HTML 前，只读取最终 shots[].asset_id
+  - 复用 sourceImageAnalysisEnabled；DOM/manual/generation metadata 不受开关限制，只有 vision 调用受开关限制
+  - 同 asset 多 Shot 只处理一次；vision 按实际图片 bytes SHA-256 同 run 复用，不按 ID、URL、路径或文件名
+  - 已有非空 canonical focus_regions 不重复分析；成功结果立即写回 creativeContext 并持久化 project.assets
+  - page_capture_evidence 唯一同名文本才转 DOM 双轴 verified/A；同名歧义全部跳过，不猜目标
+  - vision adapter 强制 method=vision、双轴 candidate、trust最高C，忽略模型自报 method/status/trust
+  - 模型未配置、失败、超时、非JSON、非法几何或空结果均显式 focus_regions=[]并输出中文 warning，workflow继续
+  - durable prompt/provider/model/hash checkpoint 与跨 retry cache 仍归 D-06，本任务只做同 run去重
+verification:
+  - final-shot selection、未选中零读取零调用、same-id与same-bytes一次调用、已有region跳过
+  - DOM A、vision C、模型注入字段无效、同名歧义、distinct multi-region、非法/失败降级闭包
+  - phase后立即project save、Frame HTML后续失败与resume成功region不重复调用
+  - sourceImageAnalysisEnabled 从冻结 workflow target 进入真实 html-video consumer
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
 task_id: D-03b
 status: complete
 owner: unassigned
