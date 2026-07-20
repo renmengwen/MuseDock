@@ -334,7 +334,13 @@ async function render(input = {}, ctx = {}, deps = {}) {
           ...descriptor,
           value: function (...args) {
             const result = Reflect.apply(original, this, args);
-            if (shouldRecord(this, args, result)) earlyCssomCalls.push({ method, text: String(args[0] ?? result ?? '') });
+            const record = shouldRecord(this, args, result);
+            if (record !== false && record !== null && record !== undefined) {
+              earlyCssomCalls.push({
+                method,
+                text: String(record === true ? (args[0] ?? result ?? '') : record),
+              });
+            }
             return result;
           },
         });
@@ -423,8 +429,13 @@ async function render(input = {}, ctx = {}, deps = {}) {
       for (const method of ['appendRule', 'deleteRule']) wrapMethod(window.CSSKeyframesRule?.prototype, method);
       for (const method of ['setProperty', 'removeProperty']) {
         wrapMethod(window.CSSStyleDeclaration?.prototype, method, (declaration, args, result) => {
-          if (!declaration?.parentRule || !visualCssProperties.has(String(args[0] || '').toLowerCase())) return false;
-          return hasVisualUrl(method === 'removeProperty' ? result : visualRuleText(declaration));
+          if (!declaration?.parentRule) return false;
+          const property = String(args[0] || '').toLowerCase();
+          const text = method === 'removeProperty' ? result : args[1];
+          if (property.startsWith('--')) return hasVisualUrl(text) ? text : false;
+          if (!visualCssProperties.has(property)) return false;
+          const visualText = method === 'removeProperty' ? result : visualRuleText(declaration);
+          return hasVisualUrl(visualText) ? visualText : false;
         });
       }
       wrapSetter(window.CSSStyleRule?.prototype, 'selectorText');
