@@ -89,16 +89,18 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: C-04
-status: implementing
-owner: c04_writer_takeover
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: d4af5909b163827da6490df59c11503f86f47f73
 worktree: D:\code3\MuseDock-worktrees\asset-first-c04
 branch: codex/asset-first-c04
-candidate_commit: 042788abba88b0143d42db13f54a8b1734e88360
+candidate_commit: 09f19e090d93f1bb1eee844e678a0c04e3b8cf4c
 invalidated_revision: 042788abba88b0143d42db13f54a8b1734e88360
 invalidated_tree: a89d02f6bd357cf79614efb76624e65c4bfbb6b4
-revision_valid: false
+frozen_revision: 09f19e090d93f1bb1eee844e678a0c04e3b8cf4c
+frozen_tree: 7b7065881fa507f5ee94b8ee57db14c93e93b8ed
+revision_valid: true
 allowed_paths:
   - server/services/creative/creativeContext.js
   - server/services/creative-video/html-video/playbackClock.js
@@ -125,12 +127,8 @@ allowed_paths:
   - tests/test-html-video-playwright-adapter-command.js
   - tests/test-html-video-prepare-source-html.js
   - tests/test-creative-workflow-retry-planner.js
-  - tests/test-creative-workflow-retry-e2e.js
   - tests/test-html-video-workflow.js
-  - tests/test-html-video-per-scene-routing.js
   - tests/test-html-video-runtime-asset-policy-chromium.js
-  - tests/test-creative-context.js
-  - tests/test-creative-workflows.js
 forbidden_paths:
   - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
   - server/services/creative-video/html-video/visualPlanService.js
@@ -147,17 +145,15 @@ exclusive_resources:
   - C-04 real Chromium QA runs only after Node GREEN
   - no frontend build, network or real ffmpeg in the writer worktree
 verification:
-  - 15 组 C-04 Node 检查通过，18.5 秒
-  - 真实 Chromium 产品回归通过，77.5 秒
+  - 15 组 C-04 Node 检查通过，18.7 秒
+  - 真实 Chromium 产品回归通过，79.1 秒
   - git diff --check 通过
 review:
-  spec: changes_requested
-  spec_reviewed_revision: 042788abba88b0143d42db13f54a8b1734e88360
-  quality: pass
-  quality_reviewed_revision: 042788abba88b0143d42db13f54a8b1734e88360
-requested_changes:
-  - Shot 结束边界必须保留可见退出过渡，不能由 visibility hidden 立即截断
-  - Frame checkpoint 指纹必须覆盖受管 Shot DOM 消费的当前素材注册表字段
+  spec: pending
+  quality: pending
+resolved_findings:
+  - Shot 结束边界保留 0.35 秒可见退出过渡，完成后再隐藏并禁用交互
+  - Frame checkpoint 指纹覆盖受管 Shot 实际引用素材的状态、类型、path 与 frame_src
 ```
 
 ```yaml
