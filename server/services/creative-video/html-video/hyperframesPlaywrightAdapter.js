@@ -351,6 +351,38 @@ async function render(input = {}, ctx = {}, deps = {}) {
           },
         });
       };
+      const styleDeclarationProxies = new WeakMap();
+      for (const name of Object.getOwnPropertyNames(window).filter(value => /^CSS.*Rule$/.test(value))) {
+        const prototype = window[name]?.prototype;
+        const descriptor = prototype && Object.getOwnPropertyDescriptor(prototype, 'style');
+        if (!descriptor?.configurable || typeof descriptor.get !== 'function') continue;
+        const original = descriptor.get;
+        Object.defineProperty(prototype, 'style', {
+          ...descriptor,
+          get() {
+            const declaration = Reflect.apply(original, this, []);
+            if (!declaration || typeof declaration !== 'object') return declaration;
+            let proxy = styleDeclarationProxies.get(declaration);
+            if (proxy) return proxy;
+            const boundMethods = new Map();
+            proxy = new Proxy(declaration, {
+              get(target, property) {
+                const value = Reflect.get(target, property, target);
+                if (typeof value !== 'function') return value;
+                if (!boundMethods.has(property)) boundMethods.set(property, value.bind(target));
+                return boundMethods.get(property);
+              },
+              set(target, property, value) {
+                const success = Reflect.set(target, property, value, target);
+                if (success) earlyCssomCalls.push({ method: `style:${String(property)}`, text: String(value ?? '') });
+                return success;
+              },
+            });
+            styleDeclarationProxies.set(declaration, proxy);
+            return proxy;
+          },
+        });
+      }
       for (const method of ['insertRule', 'deleteRule', 'replace', 'replaceSync']) {
         wrapMethod(sheetPrototype, method);
       }

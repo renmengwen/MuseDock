@@ -363,6 +363,8 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
       ['delayed-link-topology', '<script>window.__hvPlayAll=function(){setTimeout(function(){const link=document.createElement("link");link.rel="stylesheet";document.head.appendChild(link);link.remove()},20)}</script>'],
       ['delayed-rule-declaration-visual', '<style id="rule-declaration">body{color:white}</style><script>window.__hvPlayAll=function(){setTimeout(function(){const rule=document.getElementById("rule-declaration").sheet.cssRules[0];rule.style.setProperty("background-image","url(../assets/shot-a.png)");rule.style.removeProperty("background-image")},20)}</script>'],
       ['delayed-rule-idl-visual', '<style id="rule-idl">body{color:white}</style><script>window.__hvPlayAll=function(){setTimeout(function(){document.getElementById("rule-idl").sheet.cssRules[0].style.backgroundImage="url(../assets/shot-a.png)"},20)}</script>'],
+      ['transient-rule-idl-visual', '<style id="rule-idl-restore">body{color:white}</style><script>window.__hvPlayAll=function(){setTimeout(function(){const style=document.getElementById("rule-idl-restore").sheet.cssRules[0].style;const before=style.backgroundImage;style.backgroundImage="url(../assets/shot-a.png)";style.backgroundImage=before},20)}</script>'],
+      ['transient-rule-generic-visual', '<style id="rule-generic-restore">body{color:white}</style><script>window.__hvPlayAll=function(){setTimeout(function(){const rule=document.getElementById("rule-generic-restore").sheet.cssRules[0];const style=rule.style;if(style!==rule.style)throw new Error("rule.style identity changed");const before=style.borderImage;style.borderImage="url(../assets/shot-a.png) 30";style.borderImage=before},20)}</script>'],
       ['delayed-rule-css-text-visual', '<style id="rule-css-text">body{color:white}</style><script>window.__hvPlayAll=function(){setTimeout(function(){document.getElementById("rule-css-text").sheet.cssRules[0].style.cssText="background-image:url(../assets/shot-a.png)"},20)}</script>'],
       ['delayed-grouping-rule-visual', '<style id="grouping-rule">@media (min-width:1px){body{color:white}}</style><script>window.__hvPlayAll=function(){setTimeout(function(){const group=document.getElementById("grouping-rule").sheet.cssRules[0];const index=group.insertRule("body{background-image:url(../assets/shot-a.png)}",group.cssRules.length);group.deleteRule(index)},20)}</script>'],
       ['delayed-adopted-stylesheet', '<script>const adoptedSheet=new CSSStyleSheet();adoptedSheet.replaceSync("body{color:white}");window.__hvPlayAll=function(){setTimeout(function(){const before=document.adoptedStyleSheets;document.adoptedStyleSheets=before.concat(adoptedSheet);document.adoptedStyleSheets=before},20)}</script>'],
@@ -382,6 +384,21 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
       }), error => error.code === 'frame_html_shot_contract_invalid');
       assert.equal(ffmpegCalls, 0, `${name} 不得进入 ffmpeg`);
     }
+
+    const inlineStyleSource = path.join(projectDir, 'frames', 'element-inline-style-animation.html');
+    await fsp.writeFile(inlineStyleSource, shotHtml.replace('<main>', '<script>window.__hvPlayAll=function(){const element=document.body;const transform=element.style.transform;const opacity=element.style.opacity;element.style.transform="translateX(10px)";element.style.opacity=".5";element.style.transform=transform;element.style.opacity=opacity}</script><main>'), 'utf8');
+    const inlineStyleOutput = path.join(projectDir, 'frames', 'element-inline-style-animation.mp4');
+    const inlineStyleResult = await render({
+      template: { sourcePath: inlineStyleSource }, security: { projectDir, assets: shotAssets, frameId: 'element-inline-style-animation' },
+      config: { outputPath: inlineStyleOutput, duration: 0.5, durationMode: 'explicit' },
+    }, {}, {
+      importPlaywright: async () => adapterPlaywright(),
+      runFfmpeg: async () => { await fsp.writeFile(inlineStyleOutput, Buffer.alloc(4096, 1)); return { ok: true }; },
+      probeWebmDurationSec: async () => 5,
+      probeVideoStreams: async () => [{ codec_type: 'video' }],
+      ffmpegPath: 'ffmpeg-mock',
+    });
+    assert.equal(inlineStyleResult.diagnostics[0].code, 'frame_rendered', '普通 element.style 动画仍应允许');
 
     const hostileSchedulerSource = path.join(projectDir, 'frames', 'hostile-scheduler.html');
     await fsp.writeFile(hostileSchedulerSource, shotHtml.replace('<main>', '<script>window.__hvPlayAll=function(){window.requestAnimationFrame=function(){return 0};window.cancelAnimationFrame=function(){};try{performance.now=function(){return 0}}catch{}}</script><main>'), 'utf8');
