@@ -89,12 +89,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-02
-status: implementing
-owner: d02_writer
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: 85bd75079de7cff39aefeecd5ea5fc879f878869
 worktree: D:\code3\MuseDock-worktrees\asset-first-d02
 branch: codex/asset-first-d02
+candidate_commit: 42a5399fe32a6c3d8930997aff62e92a889e8e40
+frozen_revision: 42a5399fe32a6c3d8930997aff62e92a889e8e40
+frozen_tree: 4920fece609a598f6d41e0961e8aad486e2010fa
+revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/cameraMath.js
   - tests/test-html-video-camera-math.js
@@ -114,6 +118,9 @@ decisions:
 verification:
   - cover/contain、横竖方图、中心四角、普通/超大/极小 region 闭包
   - focus point、safe rect、zoom clamp、不可满足与 purity 闭包
+  - Writer 576 组主参数矩阵与非法输入边界 RED→GREEN
+  - Coordinator camera math、visual asset contract、Scene Image Sequence DOM 回归通过
+  - git diff --check 通过；Candidate 仅新增 2 个租约路径且工作区 clean
 review:
   spec: pending
   quality: pending
