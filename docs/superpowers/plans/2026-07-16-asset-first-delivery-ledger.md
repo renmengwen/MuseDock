@@ -89,16 +89,18 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-03b
-status: frozen_for_review
-owner: unassigned
-lease_released: true
+status: changes_requested
+owner: d03b_writer
+lease_released: false
 code_base_commit: 4236bb16b0246e4fecccb5d45cf83023ae779ebc
 worktree: D:\code3\MuseDock-worktrees\asset-first-d03b
 branch: codex/asset-first-d03b
 candidate_commit: 4c60f1fd95242dd24e493fc2e847850e5da467ca
+invalidated_revision: 4c60f1fd95242dd24e493fc2e847850e5da467ca
+invalidated_tree: 8479660f11a3817379108c47f44045075b1c7554
 frozen_revision: 4c60f1fd95242dd24e493fc2e847850e5da467ca
 frozen_tree: 8479660f11a3817379108c47f44045075b1c7554
-revision_valid: true
+revision_valid: false
 allowed_paths:
   - server/services/creative/pageCaptureAssets.js
   - tests/test-page-capture-assets.js
@@ -126,8 +128,15 @@ verification:
   - Coordinator page capture 与 creative workflow 回归通过；git diff --check 通过
   - 真实 Chrome 150 / Playwright 1.60 GitHub smoke：PNG 1440x900、71936 bytes、38 条有限 raw evidence、无诊断并安全清理临时目录
 review:
-  spec: pending
-  quality: pending
+  spec: pass_on_invalidated_revision
+  spec_reviewed_ledger_commit: 58885cf33685af3c8071c738a03383f5d1bf68f2
+  spec_reviewed_revision: 4c60f1fd95242dd24e493fc2e847850e5da467ca
+  quality: changes_requested
+  quality_reviewed_ledger_commit: 58885cf33685af3c8071c738a03383f5d1bf68f2
+  quality_reviewed_revision: 4c60f1fd95242dd24e493fc2e847850e5da467ca
+resolved_findings_pending:
+  - 祖先 overflow hidden/clip/content-visibility 裁剪必须进入实际可见交集，完全裁掉的元素不得进入 evidence
+  - evaluate 失败诊断必须每次调用独立创建，调用方修改前次结果不得污染后续任务
 ```
 
 ```yaml
