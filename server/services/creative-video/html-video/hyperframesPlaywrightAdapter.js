@@ -326,19 +326,44 @@ async function render(input = {}, ctx = {}, deps = {}) {
         configurable: false,
       });
       const sheetPrototype = window.CSSStyleSheet?.prototype;
-      for (const method of ['insertRule', 'deleteRule', 'replace', 'replaceSync']) {
-        const descriptor = sheetPrototype && Object.getOwnPropertyDescriptor(sheetPrototype, method);
-        if (typeof descriptor?.value !== 'function') continue;
+      const wrapMethod = (prototype, method, shouldRecord = () => true) => {
+        const descriptor = prototype && Object.getOwnPropertyDescriptor(prototype, method);
+        if (typeof descriptor?.value !== 'function') return;
         const original = descriptor.value;
-        Object.defineProperty(sheetPrototype, method, {
+        Object.defineProperty(prototype, method, {
           ...descriptor,
           value: function (...args) {
             const result = Reflect.apply(original, this, args);
-            earlyCssomCalls.push({ method, text: String(args[0] ?? '') });
+            if (shouldRecord(this)) earlyCssomCalls.push({ method, text: String(args[0] ?? '') });
             return result;
           },
         });
+      };
+      const wrapSetter = (prototype, property) => {
+        const descriptor = prototype && Object.getOwnPropertyDescriptor(prototype, property);
+        if (typeof descriptor?.set !== 'function') return;
+        const original = descriptor.set;
+        Object.defineProperty(prototype, property, {
+          ...descriptor,
+          set(value) {
+            Reflect.apply(original, this, [value]);
+            earlyCssomCalls.push({ method: `set:${property}`, text: String(value ?? '') });
+          },
+        });
+      };
+      for (const method of ['insertRule', 'deleteRule', 'replace', 'replaceSync']) {
+        wrapMethod(sheetPrototype, method);
       }
+      for (const method of ['insertRule', 'deleteRule']) wrapMethod(window.CSSGroupingRule?.prototype, method);
+      for (const method of ['appendRule', 'deleteRule']) wrapMethod(window.CSSKeyframesRule?.prototype, method);
+      for (const method of ['setProperty', 'removeProperty']) {
+        wrapMethod(window.CSSStyleDeclaration?.prototype, method, declaration => Boolean(declaration?.parentRule));
+      }
+      wrapSetter(window.CSSStyleRule?.prototype, 'selectorText');
+      wrapSetter(window.CSSKeyframeRule?.prototype, 'keyText');
+      wrapSetter(window.CSSMediaRule?.prototype, 'conditionText');
+      wrapSetter(window.Document?.prototype, 'adoptedStyleSheets');
+      wrapSetter(window.ShadowRoot?.prototype, 'adoptedStyleSheets');
       Object.defineProperty(window, '__hvEarlyCssomSnapshot', {
         value: token => token === guardToken ? earlyCssomCalls.map(item => ({ ...item })) : [],
         writable: false,
@@ -816,8 +841,10 @@ async function assertManagedVisualRuntime(page, guardToken) {
       const violations = [];
       let earlyViolationCount = 0;
       let earlyCssomCallCount = 0;
+      let cssomGuardActive = false;
       const dirty = new Set();
       const properties = ['content', 'backgroundImage', 'maskImage', 'webkitMaskImage', 'borderImageSource', 'listStyleImage', 'filter', 'cursor', 'clipPath'];
+      const stylesheetProperties = ['content', 'background-image', 'mask-image', '-webkit-mask-image', 'border-image-source', 'list-style-image', 'filter', 'cursor', 'clip-path'];
       const protectedAttributes = new Set([
         'data-sequence-mode', 'data-scene-id', 'data-shot-id', 'data-asset-id',
         'data-window-start-sec', 'data-window-end-sec', 'data-time-base', 'data-shot-role',
@@ -839,7 +866,7 @@ async function assertManagedVisualRuntime(page, guardToken) {
         for (let index = earlyCssomCallCount; index < cssomCalls.length; index += 1) {
           const call = cssomCalls[index];
           const urls = externalUrls(call.text);
-          if (urls.length) lock({ kind: 'early_cssom_visual_rule', method: call.method, urls });
+          if (cssomGuardActive || urls.length) lock({ kind: 'stylesheet_rule_mutation', method: call.method, urls });
         }
         earlyCssomCallCount = cssomCalls.length;
       };
@@ -859,6 +886,27 @@ async function assertManagedVisualRuntime(page, guardToken) {
         return urls;
       };
       mergeEarlyViolations();
+      cssomGuardActive = true;
+      const stylesheetVisualUrls = sheet => {
+        const urls = [];
+        const visit = rule => {
+          if (rule?.style) {
+            for (const property of stylesheetProperties) urls.push(...externalUrls(rule.style.getPropertyValue(property)));
+          }
+          Array.from(rule?.cssRules || []).forEach(visit);
+          Array.from(rule?.styleSheet?.cssRules || []).forEach(visit);
+        };
+        Array.from(sheet?.cssRules || []).forEach(visit);
+        return urls;
+      };
+      for (const sheet of [...document.styleSheets, ...(document.adoptedStyleSheets || [])]) {
+        try {
+          const urls = stylesheetVisualUrls(sheet);
+          if (urls.length) lock({ kind: 'initial_stylesheet_visual_rule', urls });
+        } catch {
+          lock({ kind: 'stylesheet_rules_unreadable' });
+        }
+      }
       const shots = Array.from(root.children);
       const managedImages = new Set();
       const contract = {
@@ -938,6 +986,15 @@ async function assertManagedVisualRuntime(page, guardToken) {
       const observer = new MutationObserver(records => {
         for (const record of records) {
           if (record.type === 'childList') {
+            if (record.target?.nodeName?.toLowerCase?.() === 'style') {
+              lock({ kind: 'stylesheet_text_mutation' });
+            }
+            const stylesheetNodeChanged = [...record.addedNodes, ...record.removedNodes].some(node => {
+              if (!(node instanceof Element)) return false;
+              if (node.matches('style,link[rel~="stylesheet" i]') && node.id !== '__hv_freeze') return true;
+              return Boolean(node.querySelector('style:not(#__hv_freeze),link[rel~="stylesheet" i]'));
+            });
+            if (stylesheetNodeChanged) lock({ kind: 'stylesheet_topology_mutation' });
             const touchesRoot = record.target === root || root.contains(record.target)
               || Array.from(record.addedNodes).some(node => node === root || (node instanceof Element && node.contains(root)))
               || Array.from(record.removedNodes).some(node => node === root || managedImages.has(node) || (node instanceof Element && Array.from(managedImages).some(image => node.contains(image))));
@@ -950,6 +1007,12 @@ async function assertManagedVisualRuntime(page, guardToken) {
             if ((target === root || root.contains(target)) && protectedAttributes.has(record.attributeName)) {
               lock({ kind: 'managed_contract_attribute_mutation', attribute: record.attributeName });
             }
+            if (target?.matches?.('style,link[rel~="stylesheet" i]')) {
+              lock({ kind: 'stylesheet_topology_mutation', attribute: record.attributeName });
+            }
+            if (record.attributeName === 'style' && externalUrls(record.oldValue).length) {
+              lock({ kind: 'transient_inline_visual_style' });
+            }
             dirty.add(target);
           }
         }
@@ -958,7 +1021,8 @@ async function assertManagedVisualRuntime(page, guardToken) {
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: [...protectedAttributes, 'class', 'style'],
+        attributeOldValue: true,
+        attributeFilter: [...protectedAttributes, 'class', 'style', 'rel', 'media', 'disabled'],
       });
       const check = () => {
         mergeEarlyViolations();

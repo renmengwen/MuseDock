@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
+const creativeWorkflows = require('../server/services/creative/creativeWorkflows');
 const aiImageModel = require('../server/services/ai/aiImageModel');
 
 // 测试隔离：生图 phase 的前置检查默认读全局模型配置，本机若配置了 image 模型会让生图链路
@@ -572,6 +573,97 @@ async function main() {
         String(project.generation_checkpoint.stages.frame_html.frames.scene_03.input_fingerprint || '').length === 64,
         '新生成帧的 checkpoint 应持久化 input_fingerprint',
       );
+    }
+
+    // C-04 retry E2E：必须走生产 defaultRetryFrameHtmlAction → generateHtmlVideo →
+    // shouldReuseFrameHtml；scene_html checkpoint 使用 scene:<scene_id> 键，定向重建目标 Scene。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-default-retry-scene-'));
+      const workflowId = '202606260000000001_default_retry_scene';
+      const runId = 'run_default_retry_scene';
+      const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
+      const retrySceneSpec = {
+        title: 'Scene HTML 定向重试',
+        aspect_ratio: '9:16',
+        scenes: [
+          { id: 'scene_01', duration: 2, narration_text: '第一幕旁白', captions: [], visual_text: { headline: '第一幕' } },
+          { id: 'scene_02', duration: 2, narration_text: '第二幕旁白', captions: [], visual_text: { headline: '第二幕' } },
+        ],
+      };
+      const graph = {
+        synopsis: 'Scene HTML 定向重试',
+        nodes: [
+          { id: 'scene_01', kind: 'text', text: '第一幕' },
+          { id: 'scene_02', kind: 'text', text: '第二幕' },
+        ],
+        edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence' }],
+      };
+      const creativeContext = { continuity_mode: 'scene_html', asset_context: {} };
+      const visualPlan = visualPlanService.buildVisualPlan({ graph, sceneSpec: retrySceneSpec, creativeContext, workflowId });
+      visualPlanService.assignMotionOrchestration(visualPlan, { styleProfile: visualPlan.style_profile || null });
+      const expanded = workflow.expandContentGraphToSceneEntries(graph, visualPlan);
+      const renderTarget = workflow.applyRenderTargetDefaults(workflow.resolveRenderTarget({ generate_audio: false }, retrySceneSpec));
+      const fingerprints = new Map(expanded.nodes.map(node => [
+        node.id,
+        frameHtmlPhase.computeFrameInputFingerprint({ node, continuityMode: 'scene_html', target: renderTarget }),
+      ]));
+      const firstHtmlPath = 'frames/01-scene_01.html';
+      const secondHtmlPath = 'frames/02-scene_02.html';
+      const firstHtml = validHtml('scene:scene_01', '第一幕旧 HTML');
+      const secondHtml = validHtml('scene:scene_02', '第二幕旧 HTML');
+      await writeFile(path.join(projectDir, firstHtmlPath), firstHtml);
+      await writeFile(path.join(projectDir, secondHtmlPath), secondHtml);
+      await writeFile(path.join(projectDir, 'content-graph.json'), `${JSON.stringify(graph, null, 2)}\n`);
+      const project = createEmptyProject({ projectId: `${workflowId}_${runId}`, workflowId, runId, contentGraph: graph });
+      project.scene_spec = retrySceneSpec;
+      project.continuity_mode = 'scene_html';
+      project.target = { duration_sec: 4, aspect_ratio: '9:16', generate_audio: false, autoSfxEnabled: false };
+      project.visual_plan = { ...visualPlan, beats: visualPlan.beats.map(({ source_scene, ...beat }) => beat) };
+      project.generation_checkpoint.scene_spec_hash = computeSceneSpecCheckpointHash(retrySceneSpec);
+      markCheckpointStage(project, 'content_graph', { status: 'done', path: 'content-graph.json', output_hash: 'graph-hash' });
+      markCheckpointFrame(project, 'frame_html', 'scene:scene_01', {
+        status: 'done', html_path: firstHtmlPath, input_fingerprint: fingerprints.get('scene:scene_01'), output_hash: 'first-old-hash',
+      });
+      markCheckpointFrame(project, 'frame_html', 'scene:scene_02', {
+        status: 'pending', html_path: secondHtmlPath, input_fingerprint: fingerprints.get('scene:scene_02'), output_hash: 'second-old-hash',
+      });
+      await projectStore.saveProject(projectDir, project);
+
+      const generated = [];
+      frameHtmlAgent.generateFrameHtml = async args => {
+        generated.push(args.node.id);
+        return { success: true, html: validHtml(args.node.id, '第二幕新 HTML') };
+      };
+      const result = await creativeWorkflows.defaultRetryFrameHtmlAction({
+        workflow: {
+          workflow_id: workflowId,
+          creative_context: creativeContext,
+          result: { hyperframes_freeform: { project: { scene_spec: retrySceneSpec, frame_specs: {} } } },
+          target: project.target,
+        },
+        project,
+        projectDir,
+        plan: { executor_options: { regenerate_frame_html: true, frame_ids: ['scene_02'] } },
+        services: {
+          aiTextModel: { callTextModel: async () => { throw new Error('Frame HTML 已由测试替身接管，不应调用模型。'); } },
+          environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+          layoutQaService: { inspectFrameHtmlLayout: async () => ({ success: true, issues: [] }) },
+        },
+      });
+
+      assert.equal(result.success, true);
+      assert.deepEqual(generated, ['scene:scene_02']);
+      const persisted = await projectStore.loadProject(projectDir);
+      const firstCheckpoint = persisted.generation_checkpoint.stages.frame_html.frames['scene:scene_01'];
+      const secondCheckpoint = persisted.generation_checkpoint.stages.frame_html.frames['scene:scene_02'];
+      assert.equal(firstCheckpoint.html_path, firstHtmlPath);
+      assert.equal(firstCheckpoint.output_hash, 'first-old-hash');
+      assert.equal(firstCheckpoint.input_fingerprint, fingerprints.get('scene:scene_01'));
+      assert.equal(await fs.readFile(path.join(projectDir, firstHtmlPath), 'utf8'), firstHtml);
+      assert.notEqual(secondCheckpoint.output_hash, 'second-old-hash');
+      assert.equal(secondCheckpoint.status, 'done');
+      assert.equal(secondCheckpoint.input_fingerprint, fingerprints.get('scene:scene_02'));
+      assert.match(await fs.readFile(path.join(projectDir, secondCheckpoint.html_path), 'utf8'), /第二幕新 HTML/);
     }
 
     // Review：resume 不传 creativeContext 时，从 project.assets 恢复全部正式字段并保持 Frame 指纹可复用。
