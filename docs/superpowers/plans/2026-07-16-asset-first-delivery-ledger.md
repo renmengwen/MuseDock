@@ -140,10 +140,15 @@ verification:
   - git diff --check 通过
 review:
   spec: pending
-  quality: pending
+  quality: pass
+  quality_reviewed_ledger_commit: e016d1521d0374661396785296cb3e517d814498
+  quality_reviewed_revision: f844512cbe7419358f456c3eaad67386846638fa
 resolved_findings:
   - normalizeProject 自动生成的 graph_node_id=frame.id 保留唯一 legacy identity 匹配
   - identity 闭包覆盖 raw、normalizeProject 与 projectStore save/load 共 54 个场景
+decisions:
+  - graph identity 等于 frame.id 是 projectSchema 的 canonical legacy 默认别名，不追踪输入前的显式性 provenance
+  - 唯一 exact graph node 仍优先；没有 exact 时仅该默认别名允许唯一 legacy identity 匹配
 ```
 
 ```yaml
