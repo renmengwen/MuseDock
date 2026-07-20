@@ -89,7 +89,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-03a
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: 4ad3a23ebf0382b8186c4ba906f7f9e48c5f39d0
@@ -99,6 +99,7 @@ candidate_commit: bff4e56bc22512d3f5a676bf4bc00a10e50f2b30
 frozen_revision: bff4e56bc22512d3f5a676bf4bc00a10e50f2b30
 frozen_tree: 36c8d84057dfed7e01f445ae527540476fdf44e9
 revision_valid: true
+dev_commit: a30a22fe736d51ec235139dfefef922e6f1e1e7a
 allowed_paths:
   - server/services/creative/visualAssetContract.js
   - tests/test-visual-asset-contract.js
@@ -127,8 +128,12 @@ verification:
   - Coordinator contract、project store、frame resume、creative workflow 四组回归通过
   - git diff --check 通过；Candidate 仅修改 2 个租约路径且工作区 clean
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_ledger_commit: 595fa07165fd9208508b6a747550a2e397d91f4d
+  spec_reviewed_revision: bff4e56bc22512d3f5a676bf4bc00a10e50f2b30
+  quality: pass
+  quality_reviewed_ledger_commit: 595fa07165fd9208508b6a747550a2e397d91f4d
+  quality_reviewed_revision: bff4e56bc22512d3f5a676bf4bc00a10e50f2b30
 ```
 
 ```yaml
