@@ -89,16 +89,18 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-01
-status: implementing
-owner: d01_writer
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: e862e1c6210505f715b45252280c69c5b47777ed
 worktree: D:\code3\MuseDock-worktrees\asset-first-d01
 branch: codex/asset-first-d01
-candidate_commit: 3dc9d189d8656767065699cf6acd570c69287beb
+candidate_commit: d913e73ef1faa4d9b349976934af3d014ca1c577
 invalidated_revision: 3dc9d189d8656767065699cf6acd570c69287beb
 invalidated_tree: 55010754be89f85e61a1c2413533da9c6cb07939
-revision_valid: false
+frozen_revision: d913e73ef1faa4d9b349976934af3d014ca1c577
+frozen_tree: 3b835f0c2ee59ee5c21b2083be3d1b0719a0466b
+revision_valid: true
 allowed_paths:
   - server/services/creative/visualAssetContract.js
   - server/services/creative-video/html-video/assetUsagePhase.js
@@ -128,12 +130,10 @@ verification:
   - Coordinator 9 组 contract/project/resume/workflow/producer 回归通过，6.2 秒
   - git diff --check 通过
 review:
-  spec: pass
-  spec_reviewed_revision: 3dc9d189d8656767065699cf6acd570c69287beb
-  quality: changes_requested
-  quality_reviewed_revision: 3dc9d189d8656767065699cf6acd570c69287beb
-requested_changes:
-  - workflow same-ID focus 水合必须先通过共享素材来源冲突门，不得把另一张图的坐标嫁接过来
+  spec: pending
+  quality: pending
+resolved_findings:
+  - workflow same-ID focus 水合复用共享来源冲突门并校验规范化路径，冲突素材不嫁接坐标
 ```
 
 ```yaml
