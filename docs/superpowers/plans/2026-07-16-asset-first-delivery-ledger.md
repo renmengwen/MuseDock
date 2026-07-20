@@ -89,7 +89,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-01
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: e862e1c6210505f715b45252280c69c5b47777ed
@@ -101,6 +101,7 @@ invalidated_tree: 55010754be89f85e61a1c2413533da9c6cb07939
 frozen_revision: d913e73ef1faa4d9b349976934af3d014ca1c577
 frozen_tree: 3b835f0c2ee59ee5c21b2083be3d1b0719a0466b
 revision_valid: true
+dev_commit: 4d58c4f382cf050bf67aacbae22376bc00a3370a
 allowed_paths:
   - server/services/creative/visualAssetContract.js
   - server/services/creative-video/html-video/assetUsagePhase.js
@@ -128,10 +129,15 @@ verification:
   - project save/load、真实 resume 与 workflow same-ID hydration RED→GREEN
   - Writer 19 组相关回归通过
   - Coordinator 9 组 contract/project/resume/workflow/producer 回归通过，6.2 秒
+  - dev 8 组 contract/project/resume/workflow/producer 集成回归通过，11.0 秒
   - git diff --check 通过
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_ledger_commit: 679a45c57ef3ade0dade72046f183434b1ac7fb6
+  spec_reviewed_revision: d913e73ef1faa4d9b349976934af3d014ca1c577
+  quality: pass
+  quality_reviewed_ledger_commit: 679a45c57ef3ade0dade72046f183434b1ac7fb6
+  quality_reviewed_revision: d913e73ef1faa4d9b349976934af3d014ca1c577
 resolved_findings:
   - workflow same-ID focus 水合复用共享来源冲突门并校验规范化路径，冲突素材不嫁接坐标
 ```
@@ -775,5 +781,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase C Task 3 Shot 字幕与计划时间窗 | `6d58460`；冻结 revision `e17a51e03c5b71e81c9a9c9486bd7ff5f7336f52`、tree `7577efca3f3481e7d1e989e275168332083c40b3`；复用 canonical Caption Track 为 Shot 写入 scene-local `caption_ids`、`active_window` 和 `minimum_visible_duration_sec`；按 mode 派生窗口，optional/preferred 确定性减图，required 冲突在 Frame HTML 前中文阻断；全局字幕开关、normalize 后 ID 冲突、尾部窄窗、无字幕 compare/overview/异质 minimum 与 0/1 Shot 收口均覆盖；不写 `visible_duration_sec`/enter/hold/exit/camera；规格 Review PASS、代码质量 Review PASS，质量审计 2400 个组合不变量无问题；dev 17 组测试通过 |
 | Phase C Task 4 Scene 连续 Image Sequence | `c5e08f0`；冻结 revision `09f19e090d93f1bb1eee844e678a0c04e3b8cf4c`、tree `7b7065881fa507f5ee94b8ee57db14c93e93b8ed`；同 Scene Shot/Caption/Beat 共用 scene-local Playback Clock，一个 Scene 一个 HTML/MP4，跨 Scene 保持独立；受管 Shot DOM、素材注册表、退出淡化、默认 scene_html、定向 retry/checkpoint/fingerprint 与浏览器播放门闭合；规格 Review PASS、代码质量 Review PASS；Candidate 15 组 Node 18.7 秒与真实 Chromium 79.1 秒通过；dev 15 组 Node 20.0 秒与真实 Chromium 78.1 秒通过；REQ-C-05～08 verified，真实 visible_duration_sec/Usage Report 留给 C-05 |
 | Phase C Task 5 canonical Shot Usage Report | `31006f3`；冻结 revision `f844512cbe7419358f456c3eaad67386846638fa`、tree `8a832af9ce11c15cc34a034427ce0e500b793ef9`；直接复用 C-04 物化 contract 生成逐 Shot scene/caption/role/mode/毫秒级正数可见时长；required path-only fail-closed，legacy non-required fallback 保留；used/frames/count 与顶层 used/unused/missing 同源；素材面板展示同一 canonical report；identity 闭包覆盖 raw、normalizeProject、projectStore save/load 共 54 场景；最终双 Review PASS；Candidate 核心回归与真实 Chromium 79.5 秒、Vite build通过；dev 11 组回归和 Vite build通过；REQ-B-09/10 verified，Phase C complete |
+| Phase D Task 1 Focus Region 数据合同 | `4d58c4f`；冻结 revision `d913e73ef1faa4d9b349976934af3d014ca1c577`、tree `3b835f0c2ee59ee5c21b2083be3d1b0719a0466b`；`asset_context.assets[].focus_regions` 成为唯一 canonical owner，A/B/C/D trust 由共享 normalizer保守派生；缺失/空/非法/重复/几何/aliases/merge语义闭合；project save-load、真实 resume、workflow same-ID 查询水合与 focus-only fingerprint闭合；来源或path冲突不嫁接另一张图坐标；最终双 Review PASS；dev 8组集成回归通过；REQ-D-01/03/04 的合同部分完成，producer与双轴验证留给 D-03 |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
