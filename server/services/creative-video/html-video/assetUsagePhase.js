@@ -241,7 +241,8 @@ function resolveFrameNode(frame = {}, nodes = []) {
   const graphNodeId = firstNonEmptyString(frame.graph_node_id, frame.graphNodeId);
   if (graphNodeId) {
     const exact = nodes.filter(node => firstNonEmptyString(node?.id) === graphNodeId);
-    return exact.length === 1 ? exact[0] : null;
+    if (exact.length === 1) return exact[0];
+    if (exact.length > 1 || graphNodeId !== firstNonEmptyString(frame.id)) return null;
   }
   const frameProject = { frames: [frame] };
   const compatible = nodes.filter(node => [node?.id, resolveNodeSceneId(node)]

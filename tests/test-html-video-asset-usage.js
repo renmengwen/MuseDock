@@ -6,6 +6,8 @@ const path = require('path');
 const workflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
 const assetUsagePhase = require('../server/services/creative-video/html-video/assetUsagePhase');
 const { materializeSceneImageSequenceDom } = require('../server/services/creative-video/html-video/sceneImageSequenceDom');
+const { normalizeProject } = require('../server/services/creative-video/html-video/projectSchema');
+const projectStore = require('../server/services/creative-video/html-video/projectStore');
 const { createCreativeWorkflowRetryPlan } = require('../server/services/creative-video/retryPlanner');
 
 const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'html-video-asset-usage-'));
@@ -148,6 +150,26 @@ const repeatedShotMaterialized = materializeSceneImageSequenceDom({
 });
 assert.equal(repeatedShotMaterialized.success, true);
 fs.writeFileSync(path.join(projectDir, 'frames', 'repeated-shot.html'), repeatedShotMaterialized.html, 'utf8');
+const rawLegacyProject = {
+  frames: [{
+    id: 'frame_normalized_legacy',
+    scene_id: repeatedShotNode.scene_id,
+    html_path: 'frames/repeated-shot.html',
+  }],
+  content_graph: { nodes: [repeatedShotNode] },
+};
+const normalizedLegacyProject = normalizeProject(rawLegacyProject);
+assert.equal(normalizedLegacyProject.frames[0].graph_node_id, rawLegacyProject.frames[0].id);
+for (const project of [rawLegacyProject, normalizedLegacyProject]) {
+  const legacyReport = workflow.buildAssetUsageReport({ projectDir, project, creativeContext: repeatedShotContext });
+  assert.equal(legacyReport.assets[0].used, true, 'raw 与 normalizeProject 后的 legacy frame 应保持相同素材绑定');
+  assert.deepEqual(legacyReport.assets[0].used_in_frames, ['frame_normalized_legacy']);
+  assert.equal(legacyReport.assets[0].usage_count, 2);
+  assert.deepEqual(legacyReport.used_asset_ids, [repeatedShotAsset.id]);
+  assert.deepEqual(legacyReport.unused_asset_ids, []);
+  assert.deepEqual(legacyReport.missing_required_asset_ids, []);
+}
+
 const explicitMissingGraphReport = workflow.buildAssetUsageReport({
   projectDir,
   project: {
@@ -206,6 +228,24 @@ assert.equal(camelExactGraphReport.assets[0].usage_count, 2);
 assert.deepEqual(camelExactGraphReport.used_asset_ids, [repeatedShotAsset.id]);
 assert.deepEqual(camelExactGraphReport.unused_asset_ids, []);
 assert.deepEqual(camelExactGraphReport.missing_required_asset_ids, []);
+
+const duplicateExactGraphReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: {
+    frames: [{
+      id: 'frame_duplicate_exact_graph',
+      graph_node_id: repeatedShotNode.id,
+      html_path: 'frames/repeated-shot.html',
+    }],
+    content_graph: { nodes: [repeatedShotNode, { ...repeatedShotNode }] },
+  },
+  creativeContext: repeatedShotContext,
+});
+assert.equal(duplicateExactGraphReport.assets[0].used, false, '显式 graph identity exact 多于一个时必须 fail-closed');
+assert.deepEqual(duplicateExactGraphReport.assets[0].shot_usages, []);
+assert.deepEqual(duplicateExactGraphReport.used_asset_ids, []);
+assert.deepEqual(duplicateExactGraphReport.unused_asset_ids, [repeatedShotAsset.id]);
+assert.deepEqual(duplicateExactGraphReport.missing_required_asset_ids, [repeatedShotAsset.id]);
 
 for (const frame of [
   { id: 'scene_usage', scene_id: repeatedShotNode.scene_id },
@@ -839,4 +879,60 @@ assert.deepEqual(emptyReport.unused_asset_ids, []);
 assert.deepEqual(emptyReport.missing_required_asset_ids, []);
 assert.deepEqual(emptyReport.unregistered_image_references, []);
 
-console.log('html-video asset usage tests passed');
+async function runFrameNodeIdentityClosureMatrix() {
+  for (const frameKind of ['scene_html', 'beat_legacy']) {
+    for (const identityKind of ['graph_node_id', 'graphNodeId', 'missing']) {
+      for (const exactCount of [1, 0, 2]) {
+        const frameId = identityKind === 'missing' && exactCount !== 0
+          ? repeatedShotNode.id
+          : `matrix_${frameKind}_${identityKind}_${exactCount}`;
+        const graphIdentity = exactCount === 0 ? `missing_${frameId}` : repeatedShotNode.id;
+        const frame = {
+          id: frameId,
+          scene_id: repeatedShotNode.scene_id,
+          html_path: 'frames/repeated-shot.html',
+          ...(frameKind === 'beat_legacy' ? { beat_id: `beat_${frameId}` } : {}),
+          ...(identityKind === 'graph_node_id' ? { graph_node_id: graphIdentity } : {}),
+          ...(identityKind === 'graphNodeId' ? { graphNodeId: graphIdentity } : {}),
+        };
+        const nodes = exactCount === 2
+          ? [repeatedShotNode, { ...repeatedShotNode }]
+          : [repeatedShotNode];
+        const rawProject = { frames: [frame], content_graph: { nodes } };
+        const normalizedProject = normalizeProject(rawProject);
+        await projectStore.saveProject(projectDir, rawProject);
+        const loadedProject = await projectStore.loadProject(projectDir);
+        const expectedUsed = exactCount === 1 || (identityKind === 'missing' && exactCount === 0);
+
+        for (const [layer, project] of [
+          ['raw', rawProject],
+          ['normalizeProject', normalizedProject],
+          ['save-load', loadedProject],
+        ]) {
+          const descriptor = `${layer}/${frameKind}/${identityKind}/exact=${exactCount}`;
+          if (identityKind === 'missing' && layer !== 'raw') {
+            assert.equal(project.frames[0].graph_node_id, project.frames[0].id, `${descriptor} 应保留 normalize 自动 legacy 别名`);
+          }
+          const matrixReport = workflow.buildAssetUsageReport({
+            projectDir,
+            project,
+            creativeContext: repeatedShotContext,
+          });
+          assert.equal(matrixReport.assets[0].used, expectedUsed, descriptor);
+          assert.deepEqual(matrixReport.assets[0].used_in_frames, expectedUsed ? [frameId] : [], descriptor);
+          assert.equal(matrixReport.assets[0].usage_count, expectedUsed ? 2 : 0, descriptor);
+          assert.deepEqual(matrixReport.used_asset_ids, expectedUsed ? [repeatedShotAsset.id] : [], descriptor);
+          assert.deepEqual(matrixReport.unused_asset_ids, expectedUsed ? [] : [repeatedShotAsset.id], descriptor);
+          assert.deepEqual(matrixReport.missing_required_asset_ids, expectedUsed ? [] : [repeatedShotAsset.id], descriptor);
+        }
+      }
+    }
+  }
+}
+
+runFrameNodeIdentityClosureMatrix()
+  .then(() => console.log('html-video asset usage tests passed'))
+  .catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  });
