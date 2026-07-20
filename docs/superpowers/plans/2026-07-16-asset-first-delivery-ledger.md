@@ -89,12 +89,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: C-04
-status: in_progress
-owner: c04_writer
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: d4af5909b163827da6490df59c11503f86f47f73
 worktree: D:\code3\MuseDock-worktrees\asset-first-c04
 branch: codex/asset-first-c04
+candidate_commit: 042788abba88b0143d42db13f54a8b1734e88360
+frozen_revision: 042788abba88b0143d42db13f54a8b1734e88360
+frozen_tree: a89d02f6bd357cf79614efb76624e65c4bfbb6b4
+revision_valid: true
 allowed_paths:
   - server/services/creative/creativeContext.js
   - server/services/creative-video/html-video/playbackClock.js
@@ -107,6 +111,9 @@ allowed_paths:
   - server/services/creative-video/html-video/hyperframesPlaywrightAdapter.js
   - server/services/creative-video/html-video/prepareSourceHtml.js
   - server/services/creative-video/retryPlanner.js
+  - tests/test-creative-context.js
+  - tests/test-creative-workflow-retry-e2e.js
+  - tests/test-creative-workflows.js
   - tests/test-html-video-playback-clock.js
   - tests/test-html-video-scene-image-sequence-dom.js
   - tests/test-html-video-caption-layer.js
@@ -114,6 +121,7 @@ allowed_paths:
   - tests/test-html-video-frame-html-agent.js
   - tests/test-html-video-scene-continuity.js
   - tests/test-html-video-frame-html-resume.js
+  - tests/test-html-video-per-scene-routing.js
   - tests/test-html-video-playwright-adapter-command.js
   - tests/test-html-video-prepare-source-html.js
   - tests/test-creative-workflow-retry-planner.js
@@ -139,9 +147,9 @@ exclusive_resources:
   - C-04 real Chromium QA runs only after Node GREEN
   - no frontend build, network or real ffmpeg in the writer worktree
 verification:
-  - RED evidence for Shot DOM, shared Clock and adapter-controlled start
-  - target Node suites
-  - real local Chromium Shot timeline QA
+  - 15 组 C-04 Node 检查通过，18.5 秒
+  - 真实 Chromium 产品回归通过，77.5 秒
+  - git diff --check 通过
 review:
   spec: pending
   quality: pending
