@@ -81,11 +81,50 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `complete` | B-07b | `df9a519`、`fab5167`、`6d58460`、`c5e08f0`、`31006f3` | C-01～C-05 完成；canonical Shot Usage、required gate 与素材面板一致 |
-| D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
+| D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `in_progress` | C-05 | - | D-01 Focus Region 数据合同与持久化 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
 
 ## 当前写租约
+
+```yaml
+task_id: D-01
+status: implementing
+owner: d01_writer
+lease_released: false
+code_base_commit: e862e1c6210505f715b45252280c69c5b47777ed
+worktree: D:\code3\MuseDock-worktrees\asset-first-d01
+branch: codex/asset-first-d01
+allowed_paths:
+  - server/services/creative/visualAssetContract.js
+  - server/services/creative-video/html-video/assetUsagePhase.js
+  - server/services/creative/workflowProjectSync.js
+  - tests/test-visual-asset-contract.js
+  - tests/test-html-video-project-store.js
+  - tests/test-html-video-frame-html-resume.js
+  - tests/test-creative-workflows.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/source/sourceImageAnalysis.js
+  - server/services/creative-video/html-video/visualPlanService.js
+  - server/services/creative-video/html-video/projectSchema.js
+  - server/services/creative-video/html-video/projectStore.js
+  - frontend-react/src/components/creative/SourceImageAssetsPanel.jsx
+state_owners:
+  - asset_context.assets[].focus_regions
+  - project.assets[].focus_regions
+decisions:
+  - trust_level 由共享 normalizer 根据 method 与 verification 保守派生，producer 不得自报升级
+  - focus_regions 缺失兼容旧资产；显式空数组清空；非法容器安全归一为空数组
+  - D-01 不把 focus_regions 复制到 Visual Plan、Shot、image_analysis 或 UI local state
+verification:
+  - contract normalization 与 A/B/C/D trust 闭包 RED→GREEN
+  - project save/load、真实 resume 与 workflow same-ID hydration
+  - raw、normalize、save/load、resume 四层闭包
+review:
+  spec: pending
+  quality: pending
+```
 
 ```yaml
 task_id: C-05
