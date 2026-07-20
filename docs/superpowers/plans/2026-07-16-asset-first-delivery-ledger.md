@@ -21,8 +21,8 @@
 - 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 当前为 `agents.max_threads = 20`，新任务/重启后读取
 - 实际并发：第 4 个 sub-agent 创建返回 `agent thread limit reached`；当前产品层仍为主 Agent + 3 个 sub-agent
 - 当前主工作区：`dev`；B-07b 最终 reviewed tree 已由提交 `218fbf9` squash 集成
-- 当前顺序：Phase B 集成门已通过 → 执行 Phase C C-01～C-05
-- Phase C：C-01～C-04 已完成；下一步 C-05 物化真实可见时长与统一 Usage Report；REQ-B-09/10 由 C-05 收口
+- 当前顺序：Phase B、Phase C 已完成 → 执行 Phase D Focus/Camera
+- Phase C：C-01～C-05 全部完成；REQ-B-09/10 已由 canonical Shot Usage Report 收口
 
 ## Goal 基线与用户改动清单
 
@@ -80,7 +80,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-06b 受控 derived 素材登记 | `complete` | B-01 | `ca45e1d` | 双 Review PASS，已在 dev 重跑目标测试并释放租约 |
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
-| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `in_progress` | B-07b | `df9a519`、`fab5167`、`6d58460`、`c5e08f0` | C-01～C-04 完成；下一步 C-05 Usage Report 与 required gate |
+| C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `complete` | B-07b | `df9a519`、`fab5167`、`6d58460`、`c5e08f0`、`31006f3` | C-01～C-05 完成；canonical Shot Usage、required gate 与素材面板一致 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `queued` | C-05 | - | Phase D 计划与真实样本门 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
@@ -89,7 +89,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: C-05
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: 7e59bce935c442ed9e61640101d83de044dc24c3
@@ -105,6 +105,7 @@ latest_invalidated_tree: b6677fc7e2710939a8d30c1032a132775e2e6013
 frozen_revision: f844512cbe7419358f456c3eaad67386846638fa
 frozen_tree: 8a832af9ce11c15cc34a034427ce0e500b793ef9
 revision_valid: true
+dev_commit: 31006f396828855ef0dae3224f57772d348bb445
 allowed_paths:
   - server/services/creative-video/html-video/assetUsagePhase.js
   - frontend-react/src/components/creative/SourceImageAssetsPanel.jsx
@@ -137,11 +138,15 @@ verification:
   - 10 组 backend/UI/workflow/QA/retry/persistence 回归通过，8.6 秒
   - 真实 Chromium 产品回归通过，79.5 秒
   - Vite 前端构建通过，仅有既有大 chunk warning
+  - dev 11 组 identity/Usage/workflow/QA/retry/persistence 回归通过
+  - dev Vite 前端构建通过，1917 modules，5.24 秒，仅有既有大 chunk warning
   - git diff --check 通过
 review:
-  spec: pending
+  spec: pass
+  spec_reviewed_ledger_commit: 5a05320808ed3d0ed30e6649d482a070a75b8e46
+  spec_reviewed_revision: f844512cbe7419358f456c3eaad67386846638fa
   quality: pass
-  quality_reviewed_ledger_commit: e016d1521d0374661396785296cb3e517d814498
+  quality_reviewed_ledger_commit: 5a05320808ed3d0ed30e6649d482a070a75b8e46
   quality_reviewed_revision: f844512cbe7419358f456c3eaad67386846638fa
 resolved_findings:
   - normalizeProject 自动生成的 graph_node_id=frame.id 保留唯一 legacy identity 匹配
@@ -633,8 +638,8 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-B-06 | `verified` | `origin/origin_detail/requirement/evidence_class` 分维协议 | B-01 |
 | REQ-B-07 | `verified` | direct source、synthetic、stock/search 的证据边界 | B-01、B-02 |
 | REQ-B-08 | `verified` | 任何可引用图片必须先登记 | B-06a、B-06b、B-07 |
-| REQ-B-09 | `pending` | required 素材无真实可见 Shot 时阻断 | B-07a、B-07b、C-04、C-05 |
-| REQ-B-10 | `pending` | Asset Usage Report 与素材面板一致 | B-05、C-05 |
+| REQ-B-09 | `verified` | required 素材无真实可见 Shot 时阻断 | B-07a、B-07b、C-04、C-05 |
+| REQ-B-10 | `verified` | Asset Usage Report 与素材面板一致 | B-05、C-05 |
 
 ### C. 多图编排
 
@@ -720,5 +725,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase C Task 2 Image Sequence 规划 | `fab5167`；冻结 revision `8003202db1bf39435f62f13cc3add05c8d16ad3a`、tree `44005cd6851142502756057fb6087efded35867e`；workflow 改为 canonical Graph 后构建 v2 Visual Plan；0 图 diagram、单图和多图统一为 1～4 Shot image_sequence；四种 mode、required 冲突、正式 Shot src、canonical/expanded graph 所有权与 resume 指纹均确定性处理；full/short/retry Prompt 使用 registry 核对后的 Shot 顺序且不发明 timing；规格 Review PASS、代码质量 Review PASS；dev 22 组测试通过；Caption IDs/真实时间窗/visible duration 继续 pending |
 | Phase C Task 3 Shot 字幕与计划时间窗 | `6d58460`；冻结 revision `e17a51e03c5b71e81c9a9c9486bd7ff5f7336f52`、tree `7577efca3f3481e7d1e989e275168332083c40b3`；复用 canonical Caption Track 为 Shot 写入 scene-local `caption_ids`、`active_window` 和 `minimum_visible_duration_sec`；按 mode 派生窗口，optional/preferred 确定性减图，required 冲突在 Frame HTML 前中文阻断；全局字幕开关、normalize 后 ID 冲突、尾部窄窗、无字幕 compare/overview/异质 minimum 与 0/1 Shot 收口均覆盖；不写 `visible_duration_sec`/enter/hold/exit/camera；规格 Review PASS、代码质量 Review PASS，质量审计 2400 个组合不变量无问题；dev 17 组测试通过 |
 | Phase C Task 4 Scene 连续 Image Sequence | `c5e08f0`；冻结 revision `09f19e090d93f1bb1eee844e678a0c04e3b8cf4c`、tree `7b7065881fa507f5ee94b8ee57db14c93e93b8ed`；同 Scene Shot/Caption/Beat 共用 scene-local Playback Clock，一个 Scene 一个 HTML/MP4，跨 Scene 保持独立；受管 Shot DOM、素材注册表、退出淡化、默认 scene_html、定向 retry/checkpoint/fingerprint 与浏览器播放门闭合；规格 Review PASS、代码质量 Review PASS；Candidate 15 组 Node 18.7 秒与真实 Chromium 79.1 秒通过；dev 15 组 Node 20.0 秒与真实 Chromium 78.1 秒通过；REQ-C-05～08 verified，真实 visible_duration_sec/Usage Report 留给 C-05 |
+| Phase C Task 5 canonical Shot Usage Report | `31006f3`；冻结 revision `f844512cbe7419358f456c3eaad67386846638fa`、tree `8a832af9ce11c15cc34a034427ce0e500b793ef9`；直接复用 C-04 物化 contract 生成逐 Shot scene/caption/role/mode/毫秒级正数可见时长；required path-only fail-closed，legacy non-required fallback 保留；used/frames/count 与顶层 used/unused/missing 同源；素材面板展示同一 canonical report；identity 闭包覆盖 raw、normalizeProject、projectStore save/load 共 54 场景；最终双 Review PASS；Candidate 核心回归与真实 Chromium 79.5 秒、Vite build通过；dev 11 组回归和 Vite build通过；REQ-B-09/10 verified，Phase C complete |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
