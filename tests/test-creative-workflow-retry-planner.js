@@ -68,6 +68,29 @@ function project(overrides = {}) {
   assert.equal(framePlan.repair_action, 'retry_frame_html');
   assert.equal(framePlan.retry_from, 'frame_html');
 
+  const shotContractPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        code: 'frame_html_shot_contract_invalid',
+        sub_stage: 'render',
+        frame_id: 'scene:scene_05',
+        diagnostics: [createDiagnostic({
+          code: 'frame_html_shot_contract_invalid',
+          sub_stage: 'render',
+          frame_id: 'scene:scene_05',
+          severity: 'error',
+        })],
+      },
+    }),
+    project: project(),
+  });
+  assert.equal(shotContractPlan.repair_action, 'retry_frame_html');
+  assert.deepEqual(shotContractPlan.executor_options, {
+    regenerate_frame_html: true,
+    frame_ids: ['scene:scene_05'],
+  });
+  assert.deepEqual(shotContractPlan.discard, ['frames:scene:scene_05', 'render_outputs']);
+
   const layoutQaPlan = createCreativeWorkflowRetryPlan({
     workflow: workflow({
       last_failure: {

@@ -147,7 +147,10 @@ for (const [mode, shots] of [
   });
   assert.equal(plan.can_retry, true);
   assert.equal(plan.repair_action, 'retry_frame_html');
-  assert.deepEqual(plan.executor_options, { frame_id: 'scene:scene_01' });
+  assert.deepEqual(plan.executor_options, {
+    regenerate_frame_html: true,
+    frame_ids: ['scene:scene_01'],
+  });
 }
 
 for (const bad of [

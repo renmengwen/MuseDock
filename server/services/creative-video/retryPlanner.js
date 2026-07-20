@@ -480,13 +480,27 @@ function createCreativeWorkflowRetryPlan(input = {}) {
     });
   }
 
+  if (code === 'frame_html_shot_contract_invalid') {
+    const frameIds = uniqueStrings([classification.frame_id]);
+    return retryPlan(classification, 'retry_frame_html', 'frame_html', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
+      discard: frameIds.length
+        ? [...frameIds.map(frameId => `frames:${frameId}`), 'render_outputs']
+        : ['frame_html', 'render_outputs'],
+      executor_options: {
+        regenerate_frame_html: true,
+        ...(frameIds.length ? { frame_ids: frameIds } : {}),
+      },
+      user_message: '镜头运行时合同失败，将重新生成对应镜头 HTML 并重新导出。',
+    });
+  }
+
   if (
     code === 'provider_missing_text'
     || code === 'frame_html_invalid'
     || code === 'html_document_extract_failed'
     || code === 'html_validation_failed'
     || code === 'frame_html_content_mismatch'
-    || code === 'frame_html_shot_contract_invalid'
     || code === 'layout_qa_failed'
     || code === 'frame_layout_qa_unresolved'
   ) {

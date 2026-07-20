@@ -548,6 +548,67 @@ function plannerProject(overrides = {}) {
   }
 
   {
+    const rootDir = await tempRoot();
+    const { workflowId, projectDir } = await createRenderFailureFixture(rootDir, '202606250000001014');
+    const project = await projectStore.loadProject(projectDir);
+    markCheckpointFrame(project, 'render', 'scene_02', {
+      status: 'failed',
+      diagnostic_code: 'frame_html_shot_contract_invalid',
+    });
+    await projectStore.saveProject(projectDir, project);
+    const diagnostic = createDiagnostic({
+      code: 'frame_html_shot_contract_invalid',
+      sub_stage: 'render',
+      frame_id: 'scene_02',
+      severity: 'error',
+      retryable: true,
+      repair_action: 'retry_frame_html',
+    });
+    const record = await readJson(workflows.getWorkflowPath(workflowId, rootDir));
+    record.last_failure = {
+      stage: 'project',
+      sub_stage: 'render',
+      code: 'frame_html_shot_contract_invalid',
+      frame_id: 'scene_02',
+      project_dir: projectDir,
+      message: 'Image Sequence 运行时合同失败。',
+      diagnostics: [diagnostic],
+    };
+    await writeJson(workflows.getWorkflowPath(workflowId, rootDir), record);
+
+    const refreshed = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
+    assert.equal(refreshed.plan.repair_action, 'retry_frame_html');
+    assert.deepEqual(refreshed.plan.executor_options, {
+      regenerate_frame_html: true,
+      frame_ids: ['scene_02'],
+    });
+
+    const calls = {};
+    const services = fakeHtmlVideoServices(calls);
+    const retryFrameHtml = services.resumeActions.retryFrameHtml;
+    services.resumeActions.retryFrameHtml = async args => {
+      assert.equal(args.frame_id, 'scene_02');
+      assert.equal(args.project.generation_checkpoint.stages.frame_html.frames.scene_02.status, 'pending');
+      assert.equal(args.project.generation_checkpoint.stages.render.frames.scene_02.status, 'pending');
+      assert.equal(args.project.generation_checkpoint.stages.frame_html.frames.scene_01.status, 'done');
+      assert.equal(args.project.generation_checkpoint.stages.render.frames.scene_01.status, 'done');
+      return retryFrameHtml(args);
+    };
+    const retried = await workflows.retryCreativeWorkflow(workflowId, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: refreshed.plan.code,
+    }, {
+      rootDir,
+      retryAttemptId: 'retry_attempt_shot_contract',
+      services,
+    });
+    assert.equal(retried.success, true);
+    assert.deepEqual(calls.retryFrameHtmlIds, ['scene_02']);
+    assert.deepEqual(calls.renderFrameIds, ['scene_02']);
+    assert.deepEqual(calls.composeFrameIds, ['scene_01', 'scene_02']);
+  }
+
+  {
     const firstPlan = createCreativeWorkflowRetryPlan({
       workflow: contentGraphFailureWorkflow(),
       project: plannerProject(),
