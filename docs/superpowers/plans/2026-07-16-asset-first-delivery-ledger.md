@@ -96,6 +96,7 @@ code_base_commit: d4af5909b163827da6490df59c11503f86f47f73
 worktree: D:\code3\MuseDock-worktrees\asset-first-c04
 branch: codex/asset-first-c04
 allowed_paths:
+  - server/services/creative/creativeContext.js
   - server/services/creative-video/html-video/playbackClock.js
   - server/services/creative-video/html-video/sceneImageSequenceDom.js
   - server/services/creative-video/html-video/captionLayer.js
@@ -119,6 +120,8 @@ allowed_paths:
   - tests/test-html-video-workflow.js
   - tests/test-html-video-per-scene-routing.js
   - tests/test-html-video-runtime-asset-policy-chromium.js
+  - tests/test-creative-context.js
+  - tests/test-creative-workflows.js
 forbidden_paths:
   - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
   - server/services/creative-video/html-video/visualPlanService.js
@@ -127,6 +130,7 @@ forbidden_paths:
   - server/services/creative-video/html-video/mixedFrameBuilder.js
   - server/services/creative-video/html-video/ffmpegComposer.js
 state_owners:
+  - creative_context.continuity_mode
   - frame_html.scene_image_sequence_dom
   - frame_html.scene_local_playback_clock
 exclusive_resources:
