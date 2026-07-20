@@ -287,6 +287,136 @@ function testFocusRegionMergePresenceSemantics() {
   assert.deepEqual(mergeVisualAssets([replacement], [replacement]), [replacement]);
 }
 
+function axisVerification(status, method = ' model ', evidence = ' 轴证据 ') {
+  return { status, method, evidence };
+}
+
+function dualFocusRegion(id, semanticStatus, geometryStatus, overrides = {}) {
+  return focusRegion(id, {
+    verification: {
+      status: 'rejected',
+      method: ' producer_report ',
+      evidence: ' producer evidence ',
+      semantic: axisVerification(semanticStatus, ' semantic_model ', ' 语义证据 '),
+      geometry: axisVerification(geometryStatus, ' geometry_model ', ' 几何证据 '),
+    },
+    ...overrides,
+  });
+}
+
+function testDualAxisVerificationStatusMatrix() {
+  const expected = {
+    'verified/verified': 'verified',
+    'verified/candidate': 'candidate',
+    'verified/rejected': 'rejected',
+    'candidate/verified': 'candidate',
+    'candidate/candidate': 'candidate',
+    'candidate/rejected': 'rejected',
+    'rejected/verified': 'rejected',
+    'rejected/candidate': 'rejected',
+    'rejected/rejected': 'rejected',
+  };
+  const regions = Object.entries(expected).map(([pair], index) => {
+    const [semantic, geometry] = pair.split('/');
+    return dualFocusRegion(`matrix_${index}`, semantic, geometry);
+  });
+  const normalized = focusAsset(regions).focus_regions;
+
+  assert.deepEqual(normalized.map(region => region.verification.status), Object.values(expected));
+  assert.deepEqual(normalized[0].verification, {
+    status: 'verified',
+    method: 'producer_report',
+    evidence: 'producer evidence',
+    semantic: { status: 'verified', method: 'semantic_model', evidence: '语义证据' },
+    geometry: { status: 'verified', method: 'geometry_model', evidence: '几何证据' },
+  }, '双轴 canonical 应覆盖 producer overall 并 trim 证据字段');
+  assert.deepEqual(normalizeVisualAsset(focusAsset(regions)), focusAsset(regions), '双轴 normalize 必须二次幂等');
+}
+
+function testDualAxisVerificationFailsClosed() {
+  const semantic = axisVerification('verified');
+  const geometry = axisVerification('verified');
+  const asset = focusAsset([
+    focusRegion('semantic_only', { verification: { status: 'verified', method: 'crop_review', evidence: '自报', semantic } }),
+    focusRegion('geometry_only', { verification: { status: 'verified', method: 'crop_review', evidence: '自报', geometry } }),
+    dualFocusRegion('bad_semantic_status', 'unknown', 'verified'),
+    dualFocusRegion('bad_geometry_status', 'verified', 'unknown'),
+    dualFocusRegion('semantic_not_object', 'verified', 'verified', {
+      verification: { status: 'verified', method: 'crop_review', evidence: '自报', semantic: 'verified', geometry },
+    }),
+    dualFocusRegion('geometry_not_object', 'verified', 'verified', {
+      verification: { status: 'verified', method: 'crop_review', evidence: '自报', semantic, geometry: [] },
+    }),
+    dualFocusRegion('missing_axis_field', 'verified', 'verified', {
+      verification: { status: 'verified', method: 'crop_review', evidence: '自报', semantic: { status: 'verified', method: 'model' }, geometry },
+    }),
+    dualFocusRegion('missing_axis_status', 'verified', 'verified', {
+      verification: { status: 'verified', method: 'crop_review', evidence: '自报', semantic: { method: 'model', evidence: '证据' }, geometry },
+    }),
+    dualFocusRegion('non_string_axis_status', 'verified', 'verified', {
+      verification: { status: 'verified', method: 'crop_review', evidence: '自报', semantic: { status: {}, method: 'model', evidence: '证据' }, geometry },
+    }),
+    dualFocusRegion('non_string_axis_method', 'verified', 'verified', {
+      verification: { status: 'verified', method: 'crop_review', evidence: '自报', semantic: { status: 'verified', method: {}, evidence: '证据' }, geometry },
+    }),
+    dualFocusRegion('non_string_axis_evidence', 'verified', 'verified', {
+      verification: { status: 'verified', method: 'crop_review', evidence: '自报', semantic: { status: 'verified', method: 'model', evidence: [] }, geometry },
+    }),
+    dualFocusRegion('extra_axis_field', 'verified', 'verified', {
+      verification: { status: 'verified', method: 'crop_review', evidence: '自报', semantic: { ...semantic, producer: 'raw' }, geometry },
+    }),
+    dualFocusRegion('valid', 'verified', 'verified'),
+  ]);
+
+  assert.deepEqual(asset.focus_regions.map(region => region.id), ['valid']);
+}
+
+function testDualAxisTrustDerivationMatrix() {
+  const verified = (id, method, verificationMethod = 'model', trustLevel = 'A') => dualFocusRegion(
+    id,
+    'verified',
+    'verified',
+    {
+      method,
+      trust_level: trustLevel,
+      verification: {
+        status: 'candidate',
+        method: verificationMethod,
+        evidence: 'producer 自报不可信',
+        semantic: axisVerification('verified'),
+        geometry: axisVerification('verified'),
+      },
+    },
+  );
+  const asset = focusAsset([
+    verified('manual', 'manual', 'model', 'D'),
+    verified('dom', 'dom', 'model', 'D'),
+    verified('generation', 'generation_metadata', 'model', 'D'),
+    verified('ocr', 'ocr', 'model', 'A'),
+    verified('detector', 'detector', 'model', 'A'),
+    verified('vision_reviewed', 'vision', ' crop_review ', 'A'),
+    verified('vision_unreviewed', 'vision', 'model', 'A'),
+    dualFocusRegion('candidate_manual', 'verified', 'candidate', { method: 'manual', trust_level: 'A' }),
+    dualFocusRegion('rejected_manual', 'rejected', 'verified', { method: 'manual', trust_level: 'A' }),
+  ]);
+
+  assert.deepEqual(asset.focus_regions.map(region => region.trust_level), ['A', 'A', 'A', 'B', 'B', 'B', 'C', 'C', 'D']);
+}
+
+function testDualAxisMergePresenceSemantics() {
+  const existing = focusAsset([dualFocusRegion('dual_existing', 'verified', 'verified')]);
+  assert.deepEqual(
+    mergeVisualAssets([existing], [{ id: existing.id, title: '只更新标题' }])[0].focus_regions,
+    existing.focus_regions,
+    '双轴 focus_regions 缺失时应保留',
+  );
+  assert.deepEqual(
+    mergeVisualAssets([existing], [{ id: existing.id, focus_regions: [] }])[0].focus_regions,
+    [],
+    '双轴 focus_regions 显式空数组时应清空',
+  );
+}
+
 testGeneratedIdentityUsesFormalOriginFirst();
 testFormalMergeRejectsInvalidEnums();
 testLegacySourceCompatibility();
@@ -297,5 +427,9 @@ testContextMergePreservesAssetsAndDiagnostics();
 testFocusRegionNormalizationAndTrustDerivation();
 testInvalidFocusRegionsAreSafelyDropped();
 testFocusRegionMergePresenceSemantics();
+testDualAxisVerificationStatusMatrix();
+testDualAxisVerificationFailsClosed();
+testDualAxisTrustDerivationMatrix();
+testDualAxisMergePresenceSemantics();
 
 console.log('visual asset contract tests passed');

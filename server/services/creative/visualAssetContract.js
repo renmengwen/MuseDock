@@ -134,6 +134,15 @@ function validUnitNumber(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
+function normalizeFocusVerificationAxis(input) {
+  if (!isPlainObject(input) || Object.keys(input).length !== 3
+    || !hasOwn(input, 'status') || !hasOwn(input, 'method') || !hasOwn(input, 'evidence')
+    || typeof input.method !== 'string' || typeof input.evidence !== 'string') return null;
+  const status = safeString(input.status).toLowerCase();
+  if (!FOCUS_VERIFICATION_STATUSES.has(status)) return null;
+  return { status, method: safeString(input.method), evidence: safeString(input.evidence) };
+}
+
 function normalizeFocusRegion(input) {
   if (!isPlainObject(input)) return null;
   const id = safeString(input.id);
@@ -148,8 +157,17 @@ function normalizeFocusRegion(input) {
     || !validUnitNumber(width) || !validUnitNumber(height)
     || width <= 0 || height <= 0 || x + width > 1 || y + height > 1) return null;
 
-  const status = safeString(verification.status).toLowerCase();
-  if (!FOCUS_VERIFICATION_STATUSES.has(status)) return null;
+  const hasSemantic = hasOwn(verification, 'semantic');
+  const hasGeometry = hasOwn(verification, 'geometry');
+  const semantic = hasSemantic ? normalizeFocusVerificationAxis(verification.semantic) : null;
+  const geometry = hasGeometry ? normalizeFocusVerificationAxis(verification.geometry) : null;
+  if (hasSemantic !== hasGeometry || (hasSemantic && (!semantic || !geometry))) return null;
+  let status = safeString(verification.status).toLowerCase();
+  if (hasSemantic) {
+    status = [semantic.status, geometry.status].includes('rejected')
+      ? 'rejected'
+      : semantic.status === 'verified' && geometry.status === 'verified' ? 'verified' : 'candidate';
+  } else if (!FOCUS_VERIFICATION_STATUSES.has(status)) return null;
   const focusPoint = hasOwn(input, 'focus_point') && input.focus_point !== undefined
     ? input.focus_point
     : { x: x + width / 2, y: y + height / 2 };
@@ -186,6 +204,7 @@ function normalizeFocusRegion(input) {
       status,
       method: safeString(verification.method),
       evidence: safeString(verification.evidence),
+      ...(hasSemantic ? { semantic, geometry } : {}),
     },
     trust_level: trustLevel,
   };
