@@ -899,14 +899,17 @@ async function assertManagedVisualRuntime(page, guardToken) {
         Array.from(sheet?.cssRules || []).forEach(visit);
         return urls;
       };
-      for (const sheet of [...document.styleSheets, ...(document.adoptedStyleSheets || [])]) {
-        try {
-          const urls = stylesheetVisualUrls(sheet);
-          if (urls.length) lock({ kind: 'initial_stylesheet_visual_rule', urls });
-        } catch {
-          lock({ kind: 'stylesheet_rules_unreadable' });
+      const scanStyleSheets = () => {
+        for (const sheet of [...document.styleSheets, ...(document.adoptedStyleSheets || [])]) {
+          try {
+            const urls = stylesheetVisualUrls(sheet);
+            if (urls.length) lock({ kind: 'stylesheet_visual_rule', urls });
+          } catch {
+            lock({ kind: 'stylesheet_rules_unreadable' });
+          }
         }
-      }
+      };
+      scanStyleSheets();
       const shots = Array.from(root.children);
       const managedImages = new Set();
       const contract = {
@@ -1026,6 +1029,7 @@ async function assertManagedVisualRuntime(page, guardToken) {
       });
       const check = () => {
         mergeEarlyViolations();
+        scanStyleSheets();
         if (!root.isConnected || readContract() !== contractJson) lock({ kind: 'managed_contract_changed' });
         const pending = Array.from(dirty);
         dirty.clear();
