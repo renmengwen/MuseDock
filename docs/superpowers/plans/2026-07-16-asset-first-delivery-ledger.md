@@ -88,6 +88,38 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 ## 当前写租约
 
 ```yaml
+task_id: D-02
+status: implementing
+owner: d02_writer
+lease_released: false
+code_base_commit: 85bd75079de7cff39aefeecd5ea5fc879f878869
+worktree: D:\code3\MuseDock-worktrees\asset-first-d02
+branch: codex/asset-first-d02
+allowed_paths:
+  - server/services/creative-video/html-video/cameraMath.js
+  - tests/test-html-video-camera-math.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative/visualAssetContract.js
+  - server/services/creative-video/html-video/visualPlanService.js
+  - server/services/creative-video/html-video/sceneImageSequenceDom.js
+  - server/services/creative-video/html-video/playbackClock.js
+state_owners:
+  - ephemeral_camera_geometry
+decisions:
+  - 输出画布像素坐标下的最终图片矩形，runtime 后续再转换为 CSS/GSAP
+  - D-02 不解释 trust_level，只消费显式 max_zoom
+  - cover 最终矩形不得露出图外；contain 允许前景露出既有 cover 背景
+  - 无效或不可满足输入返回结构化 no-op，不抛异常或输出部分 transform
+verification:
+  - cover/contain、横竖方图、中心四角、普通/超大/极小 region 闭包
+  - focus point、safe rect、zoom clamp、不可满足与 purity 闭包
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
 task_id: D-01
 status: complete
 owner: unassigned
