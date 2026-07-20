@@ -238,7 +238,7 @@ function requiredAssetRefsById(project = {}, assets = []) {
 }
 
 function resolveFrameNode(frame = {}, nodes = []) {
-  const graphNodeId = firstNonEmptyString(frame.graph_node_id);
+  const graphNodeId = firstNonEmptyString(frame.graph_node_id, frame.graphNodeId);
   if (graphNodeId) {
     const exact = nodes.filter(node => firstNonEmptyString(node?.id) === graphNodeId);
     return exact.length === 1 ? exact[0] : null;

@@ -155,6 +155,7 @@ const explicitMissingGraphReport = workflow.buildAssetUsageReport({
       id: 'frame_explicit_missing_graph',
       scene_id: repeatedShotNode.scene_id,
       graph_node_id: 'graph_node_does_not_exist',
+      graphNodeId: repeatedShotNode.id,
       html_path: 'frames/repeated-shot.html',
     }],
     content_graph: { nodes: [repeatedShotNode] },
@@ -166,6 +167,45 @@ assert.deepEqual(explicitMissingGraphReport.assets[0].shot_usages, []);
 assert.deepEqual(explicitMissingGraphReport.used_asset_ids, []);
 assert.deepEqual(explicitMissingGraphReport.unused_asset_ids, [repeatedShotAsset.id]);
 assert.deepEqual(explicitMissingGraphReport.missing_required_asset_ids, [repeatedShotAsset.id]);
+
+const camelMissingGraphReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: {
+    frames: [{
+      id: 'frame_camel_missing_graph',
+      scene_id: repeatedShotNode.scene_id,
+      graphNodeId: 'camel_graph_node_does_not_exist',
+      html_path: 'frames/repeated-shot.html',
+    }],
+    content_graph: { nodes: [repeatedShotNode] },
+  },
+  creativeContext: repeatedShotContext,
+});
+assert.equal(camelMissingGraphReport.assets[0].used, false, '显式 graphNodeId 未命中时不得回退同 Scene node');
+assert.deepEqual(camelMissingGraphReport.assets[0].shot_usages, []);
+assert.deepEqual(camelMissingGraphReport.used_asset_ids, []);
+assert.deepEqual(camelMissingGraphReport.unused_asset_ids, [repeatedShotAsset.id]);
+assert.deepEqual(camelMissingGraphReport.missing_required_asset_ids, [repeatedShotAsset.id]);
+
+const camelExactGraphReport = workflow.buildAssetUsageReport({
+  projectDir,
+  project: {
+    frames: [{
+      id: 'frame_camel_exact_graph',
+      scene_id: 'scene_alias_must_not_win',
+      graphNodeId: repeatedShotNode.id,
+      html_path: 'frames/repeated-shot.html',
+    }],
+    content_graph: { nodes: [repeatedShotNode] },
+  },
+  creativeContext: repeatedShotContext,
+});
+assert.equal(camelExactGraphReport.assets[0].used, true, '合法 graphNodeId exact 应绑定对应 node');
+assert.deepEqual(camelExactGraphReport.assets[0].used_in_frames, ['frame_camel_exact_graph']);
+assert.equal(camelExactGraphReport.assets[0].usage_count, 2);
+assert.deepEqual(camelExactGraphReport.used_asset_ids, [repeatedShotAsset.id]);
+assert.deepEqual(camelExactGraphReport.unused_asset_ids, []);
+assert.deepEqual(camelExactGraphReport.missing_required_asset_ids, []);
 
 for (const frame of [
   { id: 'scene_usage', scene_id: repeatedShotNode.scene_id },
