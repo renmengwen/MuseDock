@@ -89,18 +89,18 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-02
-status: changes_requested
-owner: d02_writer
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: 85bd75079de7cff39aefeecd5ea5fc879f878869
 worktree: D:\code3\MuseDock-worktrees\asset-first-d02
 branch: codex/asset-first-d02
-candidate_commit: 42a5399fe32a6c3d8930997aff62e92a889e8e40
+candidate_commit: ae04de6b9cfed0e09647de35d4395084a96aad3a
 invalidated_revision: 42a5399fe32a6c3d8930997aff62e92a889e8e40
 invalidated_tree: 4920fece609a598f6d41e0961e8aad486e2010fa
-frozen_revision: 42a5399fe32a6c3d8930997aff62e92a889e8e40
-frozen_tree: 4920fece609a598f6d41e0961e8aad486e2010fa
-revision_valid: false
+frozen_revision: ae04de6b9cfed0e09647de35d4395084a96aad3a
+frozen_tree: 6de619a6720eed4835dfa47ab8233f418e0dd809
+revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/cameraMath.js
   - tests/test-html-video-camera-math.js
@@ -123,14 +123,11 @@ verification:
   - Writer 576 组主参数矩阵与非法输入边界 RED→GREEN
   - Coordinator camera math、visual asset contract、Scene Image Sequence DOM 回归通过
   - git diff --check 通过；Candidate 仅新增 2 个租约路径且工作区 clean
+  - 339 组预期成功与 237 组预期不可满足矩阵显式分流，完整 mapped region 安全框断言通过
 review:
-  spec: pass_on_invalidated_revision
-  spec_reviewed_ledger_commit: fc3f5c7cb6b97596c4a17da2772ba9714159e4aa
-  spec_reviewed_revision: 42a5399fe32a6c3d8930997aff62e92a889e8e40
-  quality: changes_requested
-  quality_reviewed_ledger_commit: fc3f5c7cb6b97596c4a17da2772ba9714159e4aa
-  quality_reviewed_revision: 42a5399fe32a6c3d8930997aff62e92a889e8e40
-resolved_findings_pending:
+  spec: pending_final_review
+  quality: pending_final_review
+resolved_findings:
   - 偏心 focus_point 时必须约束完整映射 region 位于 safe_rect，必要时降 zoom 或 no-op
   - 参数矩阵必须区分预期成功与不可满足场景，能够杀死批量合法输入退化为 no-op 的 mutation
 ```
