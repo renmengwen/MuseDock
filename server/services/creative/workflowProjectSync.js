@@ -11,7 +11,7 @@ const {
   DEFAULT_MEDIA_ROOT,
 } = require('./workflowStore');
 const { syncProjectStageSummariesFromCheckpoint } = require('./workflowStageRunner');
-const { normalizeFocusRegions } = require('./visualAssetContract');
+const { mergeVisualAssets, normalizeFocusRegions } = require('./visualAssetContract');
 
 function assetKey(asset, fallback = '') {
   return safeString(asset?.id || asset?.asset_id || fallback);
@@ -51,10 +51,16 @@ function mergeProjectVisualAssets(assetContext, project, projectDir) {
       if (Object.prototype.hasOwnProperty.call(normalized, 'focus_regions')) {
         const index = indexById.get(id);
         const current = nextAssets[index];
-        if (JSON.stringify(current?.focus_regions) !== JSON.stringify(normalized.focus_regions)) {
-          nextAssets[index] = { ...current, focus_regions: normalized.focus_regions };
-          changed = true;
-        }
+        try {
+          const validated = mergeVisualAssets([current], [normalized])[0];
+          const currentPath = normalizeComparablePath(current?.path);
+          const projectPath = normalizeComparablePath(normalized.path);
+          if (currentPath && projectPath && currentPath !== projectPath) continue;
+          if (JSON.stringify(current?.focus_regions) !== JSON.stringify(validated.focus_regions)) {
+            nextAssets[index] = { ...current, focus_regions: validated.focus_regions };
+            changed = true;
+          }
+        } catch {}
       }
       continue;
     }

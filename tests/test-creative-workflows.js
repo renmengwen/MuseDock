@@ -2589,6 +2589,15 @@ async function testGetWorkflowHydratesGeneratedProjectAssets() {
     'utf8',
   );
   const projectPath = path.join(projectDir, 'project.json');
+  const verifiedProjectFocus = id => ({
+    id,
+    label: '项目已验证焦点',
+    aliases: ['verified'],
+    region: { x: 0.2, y: 0.2, width: 0.4, height: 0.4 },
+    method: 'manual',
+    confidence_level: 'high',
+    verification: { status: 'verified', method: 'user_review', evidence: 'project canonical' },
+  });
   fs.writeFileSync(projectPath, JSON.stringify({
     workflow_id: workflowId,
     frames: [{ id: 'scene_01', scene_id: 'scene_01', html_path: 'frames/01.html' }],
@@ -2609,6 +2618,18 @@ async function testGetWorkflowHydratesGeneratedProjectAssets() {
           trust_level: 'A',
         }],
       },
+      {
+        id: 'source_conflict_01',
+        source: 'generated',
+        path: 'assets/project-source-conflict.png',
+        focus_regions: [verifiedProjectFocus('project_source_conflict_region')],
+      },
+      {
+        id: 'path_conflict_01',
+        source: 'search',
+        path: 'assets/project-path-conflict.png',
+        focus_regions: [verifiedProjectFocus('project_path_conflict_region')],
+      },
     ],
   }, null, 2), 'utf8');
   const assetContext = {
@@ -2626,6 +2647,24 @@ async function testGetWorkflowHydratesGeneratedProjectAssets() {
         method: 'vision',
         verification: { status: 'candidate', method: 'model', evidence: 'workflow stale' },
       }],
+    }, {
+      id: 'source_conflict_01',
+      type: 'image',
+      source: 'upload',
+      path: 'assets/workflow-source-conflict.png',
+      focus_regions: [{
+        id: 'workflow_source_region',
+        label: 'Workflow 原焦点',
+        aliases: [],
+        region: { x: 0, y: 0, width: 0.2, height: 0.2 },
+        method: 'vision',
+        verification: { status: 'candidate', method: 'model', evidence: 'workflow canonical' },
+      }],
+    }, {
+      id: 'path_conflict_01',
+      type: 'image',
+      source: 'search',
+      path: 'assets/workflow-path-conflict.png',
     }],
   };
   fs.writeFileSync(getWorkflowPath(workflowId, rootDir), JSON.stringify({
@@ -2657,15 +2696,34 @@ async function testGetWorkflowHydratesGeneratedProjectAssets() {
   assert.equal(fetched.success, true);
   assert.deepEqual(
     fetched.data.asset_context.assets.map(asset => asset.id),
-    ['search_01', 'gen_scene_01'],
+    ['search_01', 'source_conflict_01', 'path_conflict_01', 'gen_scene_01'],
   );
   assert.equal(fetched.data.asset_context.assets.find(asset => asset.id === 'gen_scene_01').source, 'generated');
   assert.equal(fetched.data.asset_context.assets.find(asset => asset.id === 'search_01').focus_regions[0].id, 'project_region');
   assert.equal(fetched.data.asset_context.assets.find(asset => asset.id === 'search_01').focus_regions[0].trust_level, 'C');
+  assert.equal(fetched.data.asset_context.assets.find(asset => asset.id === 'source_conflict_01').focus_regions[0].id, 'workflow_source_region');
+  assert.equal(fetched.data.asset_context.assets.find(asset => asset.id === 'source_conflict_01').source, 'upload');
+  assert.equal(fetched.data.asset_context.assets.find(asset => asset.id === 'source_conflict_01').path, 'assets/workflow-source-conflict.png');
+  assert.equal(Object.prototype.hasOwnProperty.call(
+    fetched.data.asset_context.assets.find(asset => asset.id === 'path_conflict_01'),
+    'focus_regions',
+  ), false);
   assert.equal(fetched.data.asset_context.asset_usage_report.used_asset_ids[0], 'gen_scene_01');
+  assert.equal(fetched.data.result.hyperframes_freeform.project.asset_usage_report.used_asset_ids[0], 'gen_scene_01');
   const persisted = readJson(getWorkflowPath(workflowId, rootDir));
   assert.equal(persisted.creative_context.asset_context.assets.find(asset => asset.id === 'gen_scene_01').source, 'generated');
   assert.equal(persisted.creative_context.asset_context.assets.find(asset => asset.id === 'search_01').focus_regions[0].id, 'project_region');
+  assert.equal(persisted.asset_context.asset_usage_report.used_asset_ids[0], 'gen_scene_01');
+  assert.equal(persisted.asset_context.assets.find(asset => asset.id === 'source_conflict_01').focus_regions[0].id, 'workflow_source_region');
+  assert.equal(persisted.creative_context.asset_context.assets.find(asset => asset.id === 'source_conflict_01').focus_regions[0].id, 'workflow_source_region');
+  assert.equal(Object.prototype.hasOwnProperty.call(
+    persisted.asset_context.assets.find(asset => asset.id === 'path_conflict_01'),
+    'focus_regions',
+  ), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(
+    persisted.creative_context.asset_context.assets.find(asset => asset.id === 'path_conflict_01'),
+    'focus_regions',
+  ), false);
 
   const persistedPath = getWorkflowPath(workflowId, rootDir);
   const afterFirstHydration = fs.readFileSync(persistedPath, 'utf8');
