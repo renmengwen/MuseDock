@@ -1,4 +1,5 @@
 const assert = require('assert/strict');
+const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -320,6 +321,7 @@ async function testCapturesCanonicalGithubRepositoryPage() {
     viewport: { width: 1440, height: 900 },
     scroll: { x: 0, y: 0 },
     elements: [],
+    image_sha256: crypto.createHash('sha256').update(CAPTURE_BYTES).digest('hex'),
   });
   assert.equal(fake.calls.pageClosed, true);
   assert.equal(fake.calls.contextClosed, true);
@@ -503,6 +505,7 @@ async function testEvaluateFailureKeepsCaptureReadyWithSafeDiagnostic() {
     viewport: { width: 1440, height: 900 },
     scroll: { x: 0, y: 0 },
     elements: [],
+    image_sha256: crypto.createHash('sha256').update(CAPTURE_BYTES).digest('hex'),
   });
   assert.deepEqual(result.diagnostics, [{
     code: 'page_capture_dom_evidence_unavailable',
@@ -829,7 +832,7 @@ async function testScreenshotBufferReuseAndUint8Fallback() {
 
   const uint8 = new Uint8Array([1, 2, 3, 4]);
   const fallback = makeFakePlaywright({ screenshot: uint8 });
-  await pageCaptureAssets.captureGithubRepositoryPage({
+  const fallbackResult = await pageCaptureAssets.captureGithubRepositoryPage({
     sourceMaterial: githubSource(),
     projectDir,
     deps: {
@@ -842,6 +845,10 @@ async function testScreenshotBufferReuseAndUint8Fallback() {
   });
   assert.equal(Buffer.isBuffer(written), true);
   assert.deepEqual(written, Buffer.from(uint8));
+  assert.equal(
+    fallbackResult.assets[0].page_capture_evidence.image_sha256,
+    crypto.createHash('sha256').update(Buffer.from(uint8)).digest('hex'),
+  );
 }
 
 async function testDefaultWriterCleansTempAfterRenameFailure() {

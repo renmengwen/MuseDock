@@ -1,4 +1,5 @@
 const assert = require('assert/strict');
+const crypto = require('crypto');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
@@ -26,6 +27,10 @@ function asset(id, overrides = {}) {
 }
 
 async function testDomWinsAndUnselectedIsUntouched() {
+  const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'focus-region-dom-'));
+  await fs.mkdir(path.join(projectDir, 'assets'));
+  const domBytes = Buffer.from('dom-capture-bytes');
+  await fs.writeFile(path.join(projectDir, 'assets', 'dom.png'), domBytes);
   let modelCalls = 0;
   const unselected = asset('unselected');
   Object.defineProperty(unselected, 'local_path', {
@@ -41,6 +46,7 @@ async function testDomWinsAndUnselectedIsUntouched() {
         asset('dom', {
           page_capture_evidence: {
             version: 1,
+            image_sha256: crypto.createHash('sha256').update(domBytes).digest('hex'),
             elements: [
               { text: ' Stars   Count ', region: { x: 0.1, y: 0.2, width: 0.3, height: 0.2 }, trust_level: 'D' },
               { text: 'Forks  Count', region: { x: 0.5, y: 0.2, width: 0.2, height: 0.2 } },
@@ -55,6 +61,7 @@ async function testDomWinsAndUnselectedIsUntouched() {
   const result = await runFocusRegionPhase({
     visualPlan: selectedPlan('dom'),
     creativeContext: context,
+    projectDir,
     target: { sourceImageAnalysisEnabled: true },
     services: { aiTextModel: { callTextModel: async () => { modelCalls += 1; } } },
   });
@@ -72,6 +79,82 @@ async function testDomWinsAndUnselectedIsUntouched() {
   assert.equal(regions[0].verification.method, 'dom_capture');
   assert.equal(regions[0].verification.semantic.status, 'verified');
   assert.equal(regions[0].verification.geometry.status, 'verified');
+  await fs.rm(projectDir, { recursive: true, force: true });
+}
+
+function domEvidence(imageSha256) {
+  return {
+    version: 1,
+    ...(imageSha256 === undefined ? {} : { image_sha256: imageSha256 }),
+    elements: [{ text: '主体', region: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 } }],
+  };
+}
+
+async function testDomRequiresActualProjectBytesBinding() {
+  const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'focus-region-dom-binding-'));
+  await fs.mkdir(path.join(projectDir, 'assets'));
+  const originalBytes = Buffer.from('original-capture');
+  const replacementBytes = Buffer.from('replacement-project-image');
+  const replacementPath = path.join(projectDir, 'assets', 'replacement.png');
+  await fs.writeFile(replacementPath, replacementBytes);
+  const originalHash = crypto.createHash('sha256').update(originalBytes).digest('hex');
+  let reads = 0;
+  let request = null;
+  const originalReadFile = fs.readFile;
+  fs.readFile = async (...args) => {
+    if (path.resolve(args[0]) === path.resolve(replacementPath)) reads += 1;
+    return originalReadFile(...args);
+  };
+  let downgraded;
+  try {
+    downgraded = await runFocusRegionPhase({
+      projectDir,
+      visualPlan: selectedPlan('replacement'),
+      creativeContext: { asset_context: { assets: [asset('replacement', {
+        path: 'assets/replacement.png',
+        page_capture_evidence: domEvidence(originalHash),
+      })] } },
+      target: { sourceImageAnalysisEnabled: true },
+      services: { aiTextModel: { callTextModel: async input => {
+        request = input;
+        return {
+          success: true,
+          text: JSON.stringify({ regions: [{
+            label: '替换后主体', region: { x: 0.2, y: 0.2, width: 0.4, height: 0.4 },
+          }] }),
+        };
+      } } },
+    });
+  } finally {
+    fs.readFile = originalReadFile;
+  }
+  const downgradedRegion = downgraded.creativeContext.asset_context.assets[0].focus_regions[0];
+  assert.equal(reads, 1, 'DOM 校验与 vision 降级必须共享同一次最终工程文件读取');
+  assert.equal(downgradedRegion.method, 'vision');
+  assert.equal(downgradedRegion.trust_level, 'C');
+  assert.match(request.messages[0].content[1].image_url.url, new RegExp(replacementBytes.toString('base64')));
+
+  const actualBytes = Buffer.from('disabled-dom-image');
+  await Promise.all(['missing', 'bad', 'mismatch'].map(id => (
+    fs.writeFile(path.join(projectDir, 'assets', `${id}.png`), actualBytes)
+  )));
+  const disabled = await runFocusRegionPhase({
+    projectDir,
+    visualPlan: selectedPlan('missing', 'bad', 'mismatch'),
+    creativeContext: { asset_context: { assets: [
+      asset('missing', { page_capture_evidence: domEvidence(undefined) }),
+      asset('bad', { page_capture_evidence: domEvidence('not-a-sha256') }),
+      asset('mismatch', { page_capture_evidence: domEvidence('0'.repeat(64)) }),
+    ] } },
+    target: { sourceImageAnalysisEnabled: false },
+    services: { aiTextModel: { callTextModel: async () => { throw new Error('vision 已关闭'); } } },
+  });
+  assert.ok(disabled.creativeContext.asset_context.assets.every(item => (
+    Array.isArray(item.focus_regions) && item.focus_regions.length === 0
+  )));
+  assert.equal(disabled.diagnostics.length, 3);
+  assert.ok(disabled.diagnostics.every(item => item.severity === 'warning' && /焦点区域/.test(item.user_message)));
+  await fs.rm(projectDir, { recursive: true, force: true });
 }
 
 async function testVisionDedupesByBytesAndFailsClosed() {
@@ -191,6 +274,7 @@ async function testDisabledVisionAndExistingCanonicalSkip() {
 
 (async () => {
   await testDomWinsAndUnselectedIsUntouched();
+  await testDomRequiresActualProjectBytesBinding();
   await testVisionDedupesByBytesAndFailsClosed();
   await testDisabledVisionAndExistingCanonicalSkip();
   console.log('html-video focus region phase tests passed');

@@ -377,6 +377,7 @@ async function captureGithubRepositoryPage({ sourceMaterial = {}, projectDir = '
       ? screenshot
       : screenshot instanceof Uint8Array ? Buffer.from(screenshot) : Buffer.alloc(0);
     if (!bytes.length || bytes.length > MAX_CAPTURE_BYTES) throw new Error('invalid screenshot size');
+    pageCaptureEvidence.image_sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
 
     const hash = crypto.createHash('sha256').update(canonicalUrl).digest('hex').slice(0, 16);
     const fileName = `github-page-${hash}.png`;

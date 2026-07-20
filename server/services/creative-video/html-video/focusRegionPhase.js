@@ -111,6 +111,18 @@ function localImagePath(asset, projectDir) {
   return projectStore.resolveProjectPath(projectDir, text(asset.path));
 }
 
+async function readProjectImage(asset, projectDir) {
+  const filePath = localImagePath(asset, projectDir);
+  const stat = await fs.stat(filePath);
+  if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_IMAGE_BYTES) throw new Error('invalid_file');
+  const bytes = await fs.readFile(filePath);
+  if (!bytes.length || bytes.length > MAX_IMAGE_BYTES) throw new Error('invalid_image_bytes');
+  return {
+    bytes,
+    hash: crypto.createHash('sha256').update(bytes).digest('hex'),
+  };
+}
+
 function failureDiagnostic(assetId) {
   return createDiagnostic({
     code: 'focus_region_analysis_failed',
@@ -122,13 +134,8 @@ function failureDiagnostic(assetId) {
   });
 }
 
-async function visionFocusRegions({ asset, projectDir, model, cache }) {
-  const filePath = localImagePath(asset, projectDir);
-  const stat = await fs.stat(filePath);
-  if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_IMAGE_BYTES) throw new Error('invalid_file');
-  const bytes = await fs.readFile(filePath);
-  if (bytes.length > MAX_IMAGE_BYTES) throw new Error('image_too_large');
-  const hash = crypto.createHash('sha256').update(bytes).digest('hex');
+async function visionFocusRegions({ asset, image, model, cache }) {
+  const { bytes, hash } = image;
   if (!cache.has(hash)) {
     cache.set(hash, (async () => {
       if (!model || typeof model.callTextModel !== 'function') throw new Error('model_missing');
@@ -179,17 +186,43 @@ async function runFocusRegionPhase({
     const asset = firstAssetById.get(id);
     if (!asset || text(asset.media_type || asset.type || 'image').toLowerCase() !== 'image') continue;
     if (normalizeFocusRegions(asset.focus_regions).length) continue;
-    const domRegions = domFocusRegions(asset);
-    if (domRegions.length) {
-      updates.set(asset, { ...asset, focus_regions: domRegions });
-      continue;
+    const evidence = asset.page_capture_evidence;
+    const hasDomEvidence = evidence?.version === 1
+      && Array.isArray(evidence.elements)
+      && evidence.elements.length > 0;
+    const visionEnabled = target.sourceImageAnalysisEnabled === true;
+    let image = null;
+    if (hasDomEvidence || visionEnabled) {
+      try {
+        image = await readProjectImage(asset, projectDir);
+      } catch {
+        diagnostics.push(failureDiagnostic(id));
+        updates.set(asset, { ...asset, focus_regions: [] });
+        continue;
+      }
     }
-    if (target.sourceImageAnalysisEnabled !== true) continue;
+    if (hasDomEvidence) {
+      const evidenceHash = typeof evidence.image_sha256 === 'string' ? evidence.image_sha256 : '';
+      const domBindingValid = /^[a-f0-9]{64}$/i.test(evidenceHash)
+        && evidenceHash.toLowerCase() === image.hash;
+      if (domBindingValid) {
+        const domRegions = domFocusRegions(asset);
+        if (domRegions.length) {
+          updates.set(asset, { ...asset, focus_regions: domRegions });
+          continue;
+        }
+      } else if (!visionEnabled) {
+        diagnostics.push(failureDiagnostic(id));
+        updates.set(asset, { ...asset, focus_regions: [] });
+        continue;
+      }
+    }
+    if (!visionEnabled) continue;
     let regions = [];
     try {
       regions = await visionFocusRegions({
         asset,
-        projectDir,
+        image,
         model: services.aiTextModel,
         cache,
       });
