@@ -89,7 +89,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-03b
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: 4236bb16b0246e4fecccb5d45cf83023ae779ebc
@@ -101,6 +101,7 @@ invalidated_tree: 8479660f11a3817379108c47f44045075b1c7554
 frozen_revision: 62be3330cbc5f039eb0eb71ee231ffd654bf6099
 frozen_tree: b2aa32c02fd143f700b3b00806b8fe3990260e6f
 revision_valid: true
+dev_commit: 2a5c7d8
 allowed_paths:
   - server/services/creative/pageCaptureAssets.js
   - tests/test-page-capture-assets.js
@@ -128,8 +129,12 @@ verification:
   - Coordinator page capture 与 creative workflow 回归通过；git diff --check 通过
   - 真实 Chrome 150 / Playwright 1.60 最终 GitHub smoke：PNG 1440x900、72436 bytes、38 条有限 raw evidence、无诊断并安全清理临时目录
 review:
-  spec: pending_final_review
-  quality: pending_final_review
+  spec: pass
+  spec_reviewed_ledger_commit: ffc189bca763248421d615ac445eb97892ffc091
+  spec_reviewed_revision: 62be3330cbc5f039eb0eb71ee231ffd654bf6099
+  quality: pass
+  quality_reviewed_ledger_commit: ffc189bca763248421d615ac445eb97892ffc091
+  quality_reviewed_revision: 62be3330cbc5f039eb0eb71ee231ffd654bf6099
 resolved_findings:
   - 祖先 overflow hidden/clip/content-visibility 裁剪必须进入实际可见交集，完全裁掉的元素不得进入 evidence
   - evaluate 失败诊断必须每次调用独立创建，调用方修改前次结果不得污染后续任务
