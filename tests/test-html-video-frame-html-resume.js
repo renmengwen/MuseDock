@@ -199,6 +199,7 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
           node,
           continuityMode: 'beat_mp4',
           target: renderTarget,
+          creativeContext: options.assetContext,
         }));
       }
     }
@@ -355,14 +356,29 @@ async function main() {
         asset_refs: [{ asset_id: 'gen_02', usage: 'subject' }, { asset_id: 'gen_01', usage: 'background' }],
         metadata: {
           visual_beat: {
-            visual_base: { type: 'diagram' },
+            visual_base: {
+              type: 'image_sequence',
+              shots: [{ id: 'shot_01', asset_id: 'gen_01' }],
+            },
             motion_overlay: { preset: 'count_up', theme_tokens: { accent: '#ff5a00' } },
             continuity: { group_id: 'g1', beat_index: 1 },
             visual_text: { headline: '第一幕' },
           },
         },
       });
-      const args = () => ({ node: makeNode(), continuityMode: 'beat_mp4', target });
+      const args = () => ({
+        node: makeNode(),
+        continuityMode: 'beat_mp4',
+        target,
+        creativeContext: {
+          asset_context: {
+            assets: [
+              { id: 'gen_01', media_type: 'image', status: 'ready', path: 'assets/gen-01.png', frame_src: '../assets/gen-01.png', provider: 'local' },
+              { id: 'gen_02', media_type: 'image', status: 'ready', path: 'assets/gen-02.png', frame_src: '../assets/gen-02.png' },
+            ],
+          },
+        },
+      });
       const base = computeFrameInputFingerprint(args());
       assert.ok(/^[0-9a-f]{64}$/.test(base), '指纹应为 sha256 hex');
       assert.equal(computeFrameInputFingerprint(args()), base, '同输入应得到同指纹');
@@ -390,6 +406,21 @@ async function main() {
         base,
         '画幅变化应改变指纹',
       );
+      for (const [field, value] of [
+        ['status', 'pending'],
+        ['path', 'assets/gen-01-v2.png'],
+        ['frame_src', '../assets/gen-01-v2.png'],
+      ]) {
+        const registryChanged = args();
+        registryChanged.creativeContext.asset_context.assets[0][field] = value;
+        assert.notEqual(computeFrameInputFingerprint(registryChanged), base, `Shot registry ${field} 变化应改变指纹`);
+      }
+      const unrelatedFieldChanged = args();
+      unrelatedFieldChanged.creativeContext.asset_context.assets[0].provider = 'remote';
+      assert.equal(computeFrameInputFingerprint(unrelatedFieldChanged), base, 'materializer 未消费的 registry 字段不应扩大失效');
+      const unrelatedAssetChanged = args();
+      unrelatedAssetChanged.creativeContext.asset_context.assets[1].path = 'assets/gen-02-v2.png';
+      assert.equal(computeFrameInputFingerprint(unrelatedAssetChanged), base, '未被 Shot 引用的 registry 素材不应扩大失效');
     }
 
     // P1-2：shouldReuseFrameHtml 指纹判定——匹配复用 / 不匹配重生成 / 无指纹一律不复用
@@ -732,6 +763,56 @@ async function main() {
       assert.equal(persisted.origin_detail, 'github_repository_page');
       assert.equal(persisted.evidence_class, 'direct_source');
       assert.equal(persisted.path, 'assets/capture-01.png');
+    }
+
+    // C-04：只改变受管 Shot 消费的当前 registry 路径时，旧 Frame HTML 不得命中 checkpoint。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-shot-registry-fingerprint-'));
+      const workflowId = '202606260000000019_shot_registry_fingerprint';
+      const runId = 'run_shot_registry_fingerprint';
+      const graph = contentGraph('Shot registry fingerprint');
+      graph.nodes[0].asset_refs = [{ asset_id: 'shot_asset', usage: 'showcase' }];
+      const oldAsset = {
+        id: 'shot_asset',
+        media_type: 'image',
+        status: 'ready',
+        path: 'assets/shot-old.png',
+        frame_src: '../assets/shot-old.png',
+      };
+      const { projectDir } = await setupProject(rootDir, workflowId, runId, {
+        contentGraph: graph,
+        projectAssets: [oldAsset],
+        assetContext: { asset_context: { assets: [oldAsset] } },
+      });
+      const currentAsset = {
+        ...oldAsset,
+        path: 'assets/shot-current.png',
+        frame_src: '../assets/shot-current.png',
+      };
+      await writeFile(path.join(projectDir, currentAsset.path), 'asset');
+      const project = await projectStore.loadProject(projectDir);
+      project.assets = [currentAsset];
+      await projectStore.saveProject(projectDir, project);
+      const calls = [];
+      frameHtmlAgent.generateFrameHtml = async args => {
+        calls.push(args.node.id);
+        return { success: true, html: validHtml(args.node.id, args.node.id) };
+      };
+
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        creativeContextOverride: { asset_context: { assets: [currentAsset] } },
+        aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
+      });
+
+      assert.equal(result.success, true);
+      assert.ok(calls.includes('scene_01'), 'registry 路径变化后必须重建引用该 Shot 的 Frame HTML');
+      const persisted = await projectStore.loadProject(projectDir);
+      const html = await fs.readFile(path.join(projectDir, persisted.generation_checkpoint.stages.frame_html.frames.scene_01.html_path), 'utf8');
+      assert.match(html, /src="\.\.\/assets\/shot-current\.png"/, '重建 HTML 必须物化当前 registry 路径');
+      assert.doesNotMatch(html, /shot-old\.png/, '旧 Frame HTML 不得继续复用旧 registry 路径');
     }
 
     // C-02：旧 visual plan 无法证明 v2 fingerprint 时，所有 Frame HTML fail-closed 重生成。

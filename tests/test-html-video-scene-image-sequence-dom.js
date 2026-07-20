@@ -222,4 +222,49 @@ for (const badAssets of [
   assert.equal(validateSceneImageSequenceDom(result.html.replace('data-shot-role="showcase"', 'data-shot-role="detail"'), args).success, false);
 }
 
-console.log('html-video scene image sequence DOM tests passed');
+async function verifyShotExitTransition() {
+  const result = materializeSceneImageSequenceDom({
+    html: shell,
+    node: node('fullscreen_relay', [shot('s1', 'a', 0, 2.2), shot('s2', 'b', 1.8, 4)]),
+    creativeContext: { asset_context: { assets } },
+  });
+  assert.equal(result.success, true);
+  const browser = await require('playwright-core').chromium.launch({ channel: 'chrome', headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(result.html);
+    await page.waitForTimeout(400);
+    const exiting = await page.evaluate(() => {
+      window.__mpSetTimelineTime(2.2);
+      const element = document.querySelector('[data-shot-id="s1"]');
+      const style = getComputedStyle(element);
+      return {
+        active: element.dataset.shotActive,
+        opacity: Number(style.opacity),
+        visibility: style.visibility,
+        pointerEvents: style.pointerEvents,
+      };
+    });
+    assert.equal(exiting.active, undefined, 'Shot 到达 end_sec 必须退出 active_window');
+    assert.ok(exiting.opacity > 0.5, 'Shot 退出淡化开始时仍应可见');
+    assert.equal(exiting.visibility, 'visible', 'visibility 不得抢先截断 0.35s 退出淡化');
+    assert.equal(exiting.pointerEvents, 'none', '退出 Shot 不得响应交互');
+    await page.waitForTimeout(400);
+    const exited = await page.locator('[data-shot-id="s1"]').evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { opacity: Number(style.opacity), visibility: style.visibility, pointerEvents: style.pointerEvents };
+    });
+    assert.equal(exited.opacity, 0, '退出淡化完成后 Shot 应完全透明');
+    assert.equal(exited.visibility, 'hidden', '退出淡化完成后 Shot 应隐藏');
+    assert.equal(exited.pointerEvents, 'none', '隐藏 Shot 不得响应交互');
+  } finally {
+    await browser.close();
+  }
+}
+
+verifyShotExitTransition()
+  .then(() => console.log('html-video scene image sequence DOM tests passed'))
+  .catch(error => {
+    console.error(error);
+    process.exit(1);
+  });

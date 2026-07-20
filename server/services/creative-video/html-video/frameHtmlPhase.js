@@ -517,6 +517,7 @@ async function runFrameHtmlPhase(ctx) {
         node,
         continuityMode: creativeContext?.continuity_mode,
         target: templateRenderTarget,
+        creativeContext,
       }),
     });
     if (reuse.reuse) {
@@ -753,6 +754,7 @@ async function runFrameHtmlPhase(ctx) {
           node,
           continuityMode: creativeContext?.continuity_mode,
           target: templateRenderTarget,
+          creativeContext,
         }),
         output_hash: written.output_hash,
         diagnostic_code: htmlResult.fallbackDiagnostic?.code || '',

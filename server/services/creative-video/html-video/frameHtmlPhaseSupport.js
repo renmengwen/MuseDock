@@ -30,20 +30,45 @@ function stableJsonStringify(value) {
 /**
  * P1-2：计算单帧 HTML 生成的真实输入指纹。覆盖会改变产物的全部关键输入：
  * 连续性模式、画幅、beat 编排（含 visual_base/motion_overlay(theme_tokens)/visual_text）、
- * 素材绑定、scene_html 时间窗口与提示词版本。resume 复用时与 checkpoint 持久化的指纹比较，
+ * 素材绑定、受管 Shot 当前 registry、scene_html 时间窗口与提示词版本。resume 复用时与 checkpoint 持久化的指纹比较，
  * 任一维度变化即重新生成，杜绝「换素材/换编排后静默复用旧 HTML」。纯函数，可独立测试。
  */
-function computeFrameInputFingerprint({ node, continuityMode, target } = {}) {
+function computeFrameInputFingerprint({ node, continuityMode, target, creativeContext } = {}) {
   const resolution = frameHtmlAgent.resolveResolution(target || {}) || {};
   const assetRefs = (Array.isArray(node?.asset_refs) ? node.asset_refs : [])
     .filter(Boolean)
     .map(ref => stableJsonValue(ref))
+    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  const shotAssetIds = new Set((Array.isArray(node?.metadata?.visual_beats)
+    ? node.metadata.visual_beats
+    : [node?.metadata?.visual_beat].filter(Boolean))
+    .flatMap(beat => beat?.visual_base?.type === 'image_sequence' && Array.isArray(beat.visual_base.shots)
+      ? beat.visual_base.shots.map(shot => String(shot?.asset_id || '').trim())
+      : [])
+    .filter(Boolean));
+  const shotAssets = (Array.isArray(creativeContext?.asset_context?.assets)
+    ? creativeContext.asset_context.assets
+    : [])
+    .map((asset) => {
+      const id = String(asset?.id || asset?.asset_id || '').trim();
+      if (!shotAssetIds.has(id)) return null;
+      const assetPath = String(asset?.path || '').trim().replace(/\\/g, '/');
+      return {
+        id,
+        media_type: String(asset?.media_type || asset?.type || '').toLowerCase(),
+        status: String(asset?.status || '').trim() || 'ready',
+        path: assetPath,
+        frame_src: String(asset?.frame_src || (assetPath ? `../${assetPath}` : '')).trim().replace(/\\/g, '/'),
+      };
+    })
+    .filter(Boolean)
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   const signature = {
     continuity_mode: continuityMode || 'beat_mp4',
     resolution: { width: resolution.width ?? null, height: resolution.height ?? null },
     beat: node?.metadata?.visual_beats ?? node?.metadata?.visual_beat ?? null,
     asset_refs: assetRefs,
+    ...(shotAssetIds.size ? { shot_assets: shotAssets } : {}),
     beat_windows: node?.metadata?.beat_windows || null,
     prompt_version: FRAME_PROMPT_VERSION,
   };
