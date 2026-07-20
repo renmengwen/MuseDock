@@ -56,6 +56,7 @@ const {
   attachAssetUsageReport,
   missingRequiredAssetIds,
 } = require('./assetUsagePhase');
+const { runFocusRegionPhase } = require('./focusRegionPhase');
 
 function resolveExistingNarrationAudio(creativeContext = {}, sceneSpec = null) {
   const audio = objectOrEmpty(creativeContext.audio);
@@ -887,6 +888,22 @@ async function generateHtmlVideo(options = {}) {
       fallback_allowed: false,
     });
   }
+  const focusRegionResult = await runFocusRegionPhase({
+    visualPlan,
+    creativeContext,
+    projectDir,
+    target,
+    services: { ...services, aiTextModel: model },
+  });
+  creativeContext = focusRegionResult.creativeContext;
+  diagnostics.push(...focusRegionResult.diagnostics);
+  project = await projectStore.writeProjectJson(projectDir, current => {
+    current.assets = mergeVisualAssets(
+      Array.isArray(current.assets) ? current.assets : [],
+      projectAssetsFromCreativeContext(creativeContext),
+    );
+    return current;
+  });
   // scene_html 分支只在 continuity_mode = scene_html 生效；此时 project.continuity_mode 尚未挂载
   // （attachContinuityMode 在建帧后才调用），用 creativeContext 判断等价条件。
   if ((creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html') {

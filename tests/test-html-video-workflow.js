@@ -37,6 +37,89 @@ function fullSceneCaption(sceneId, text, duration) {
 (async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-workflow-'));
 
+  // D-03c：焦点区域必须在 Frame HTML 前落盘；resume 从 project.assets 水合后不得重调 vision。
+  {
+    const sourceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'focus-region-workflow-source-'));
+    const sourcePath = path.join(sourceDir, 'hero.png');
+    await fs.writeFile(sourcePath, 'focus-region-image-bytes');
+    const sceneSpec = {
+      title: '焦点区域持久化',
+      aspect_ratio: '16:9',
+      scenes: [{
+        id: 'scene_01',
+        duration_sec: 4,
+        narration_text: '焦点区域应在帧生成前持久化。',
+        captions: fullSceneCaption('scene_01', '焦点区域应在帧生成前持久化。', 4),
+        visual_text: { headline: '焦点区域', keywords: [], cards: [] },
+      }],
+    };
+    let visionCalls = 0;
+    const model = {
+      callTextModel: async request => {
+        if (request.audit?.sub_stage === 'vision') {
+          visionCalls += 1;
+          return {
+            success: true,
+            text: JSON.stringify({
+              regions: [{ label: '主体', region: { x: 0.2, y: 0.1, width: 0.5, height: 0.7 } }],
+            }),
+          };
+        }
+        const prompt = request.messages.map(item => (
+          typeof item.content === 'string' ? item.content : JSON.stringify(item.content)
+        )).join('\n');
+        if (prompt.startsWith('你是 html-video 的 content graph')) {
+          return {
+            success: true,
+            text: JSON.stringify({
+              synopsis: '焦点区域持久化',
+              nodes: [{
+                id: 'scene_01', kind: 'text', label: '焦点区域', durationSec: 4,
+                text: '焦点区域应在帧生成前持久化。',
+                asset_refs: [{ asset_id: 'hero', usage: 'subject' }],
+              }],
+              edges: [],
+            }),
+          };
+        }
+        return { success: true, text: 'Frame HTML 故意失败' };
+      },
+    };
+    const options = {
+      workflowId: 'wf-focus-region-persist',
+      runId: 'run-focus-region-persist',
+      rootDir,
+      sceneSpec,
+      creativeContext: {
+        input: { raw_text: '焦点区域持久化' },
+        asset_context: {
+          assets: [{
+            id: 'hero', media_type: 'image', origin: 'source_extract',
+            requirement: 'preferred', evidence_class: 'direct_source', status: 'ready',
+            path: 'assets/hero.png', local_path: sourcePath,
+          }],
+        },
+      },
+      target: { sourceImageAnalysisEnabled: true, generateAudio: false },
+      skipValidation: true,
+      services: { aiTextModel: model, aiImageModel: { isConfigured: async () => false } },
+    };
+    const first = await workflow.generateHtmlVideo(options);
+    assert.equal(first.success, false, 'Frame HTML 故意失败以验证前置持久化');
+    assert.equal(visionCalls, 1);
+    const persisted = await projectStore.loadProject(first.project_dir);
+    const persistedRegion = persisted.assets.find(item => item.id === 'hero')?.focus_regions?.[0];
+    assert.equal(persistedRegion?.label, '主体');
+    assert.equal(persistedRegion?.trust_level, 'C');
+
+    const resumed = await workflow.generateHtmlVideo({
+      ...options,
+      creativeContext: { input: { raw_text: '焦点区域持久化' } },
+    });
+    assert.equal(resumed.success, false);
+    assert.equal(visionCalls, 1, 'resume 应从 project.assets 水合 canonical region 并跳过 vision');
+  }
+
   const originalRenderForNoCaptions = projectOrchestrator.renderHtmlVideoProject;
   projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
     success: true,

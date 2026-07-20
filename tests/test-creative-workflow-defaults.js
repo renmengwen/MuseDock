@@ -141,6 +141,7 @@ function assertSnapshotRecord(record, {
   assert.equal(record.target.generateCaptions, generateCaptions);
   assert.equal(record.target.autoSfxEnabled, autoSfxEnabled);
   assert.equal(record.target.emotionalVoice, emotionalVoice);
+  assert.equal(record.target.sourceImageAnalysisEnabled, sourceImageAnalysisEnabled);
   assert.equal(record.target.extractDouyinFrames, extractDouyinFrames);
   assert.equal(record.target.frameHtmlConcurrency, frameHtmlConcurrency);
   assert.equal(record.input.use_research, useResearch);

@@ -511,6 +511,7 @@ function buildWorkflowTarget(snapshot = {}) {
     autoSfxEnabled: snapshot.autoSfxEnabled !== false,
     generateCaptions: snapshot.generateCaptions !== false,
     emotionalVoice: snapshot.emotionalVoice === true,
+    sourceImageAnalysisEnabled: snapshot.sourceImageAnalysisEnabled === true,
     extractDouyinFrames: snapshot.extractDouyinFrames === true,
     frameHtmlConcurrency: Number.isFinite(Number(snapshot.frameHtmlConcurrency))
       ? Math.min(5, Math.max(1, Math.round(Number(snapshot.frameHtmlConcurrency))))
