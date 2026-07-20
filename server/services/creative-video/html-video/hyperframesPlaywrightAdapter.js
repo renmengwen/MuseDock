@@ -334,7 +334,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
           ...descriptor,
           value: function (...args) {
             const result = Reflect.apply(original, this, args);
-            if (shouldRecord(this)) earlyCssomCalls.push({ method, text: String(args[0] ?? '') });
+            if (shouldRecord(this, args, result)) earlyCssomCalls.push({ method, text: String(args[0] ?? result ?? '') });
             return result;
           },
         });
@@ -351,7 +351,58 @@ async function render(input = {}, ctx = {}, deps = {}) {
           },
         });
       };
-      const styleDeclarationProxies = new WeakMap();
+      const visualStyleProperties = [
+        ['content', 'content'],
+        ['background', 'background'], ['backgroundImage', 'background-image'],
+        ['mask', 'mask'], ['maskImage', 'mask-image'],
+        ['webkitMask', '-webkit-mask'], ['webkitMaskImage', '-webkit-mask-image'],
+        ['borderImage', 'border-image'], ['borderImageSource', 'border-image-source'],
+        ['listStyle', 'list-style'], ['listStyleImage', 'list-style-image'],
+        ['filter', 'filter'], ['cursor', 'cursor'], ['clipPath', 'clip-path'],
+      ];
+      const visualCssProperties = new Set(visualStyleProperties.map(([, cssName]) => cssName));
+      const hasVisualUrl = value => /url\s*\(/i.test(String(value || ''));
+      const styleDeclarationPrototype = window.CSSStyleDeclaration?.prototype;
+      const nativeGetPropertyValue = Object.getOwnPropertyDescriptor(styleDeclarationPrototype, 'getPropertyValue')?.value;
+      const nativeSetProperty = Object.getOwnPropertyDescriptor(styleDeclarationPrototype, 'setProperty')?.value;
+      const nativeCssText = Object.getOwnPropertyDescriptor(styleDeclarationPrototype, 'cssText');
+      const visualRuleText = declaration => visualStyleProperties
+        .map(([, cssName]) => Reflect.apply(nativeGetPropertyValue, declaration, [cssName]))
+        .join(';');
+      const instrumentedStyleDeclarations = new WeakSet();
+      const installCssTextAccessor = declaration => {
+        if (typeof nativeCssText?.get !== 'function' || typeof nativeCssText?.set !== 'function') return;
+        Object.defineProperty(declaration, 'cssText', {
+          configurable: true,
+          enumerable: nativeCssText.enumerable,
+          get() { return Reflect.apply(nativeCssText.get, this, []); },
+          set(value) {
+            Reflect.apply(nativeCssText.set, this, [value]);
+            const text = visualRuleText(this);
+            if (hasVisualUrl(text)) earlyCssomCalls.push({ method: 'style:cssText', text });
+          },
+        });
+      };
+      const instrumentStyleDeclaration = declaration => {
+        if (!declaration || typeof declaration !== 'object' || instrumentedStyleDeclarations.has(declaration)) return declaration;
+        instrumentedStyleDeclarations.add(declaration);
+        for (const [idlName, cssName] of visualStyleProperties) {
+          const descriptor = Object.getOwnPropertyDescriptor(declaration, idlName);
+          if (!descriptor?.configurable) continue;
+          Object.defineProperty(declaration, idlName, {
+            configurable: true,
+            enumerable: descriptor.enumerable,
+            get() { return Reflect.apply(nativeGetPropertyValue, this, [cssName]); },
+            set(value) {
+              Reflect.apply(nativeSetProperty, this, [cssName, value]);
+              const text = visualRuleText(this);
+              if (hasVisualUrl(text)) earlyCssomCalls.push({ method: `style:${idlName}`, text });
+            },
+          });
+        }
+        installCssTextAccessor(declaration);
+        return declaration;
+      };
       for (const name of Object.getOwnPropertyNames(window).filter(value => /^CSS.*Rule$/.test(value))) {
         const prototype = window[name]?.prototype;
         const descriptor = prototype && Object.getOwnPropertyDescriptor(prototype, 'style');
@@ -361,25 +412,7 @@ async function render(input = {}, ctx = {}, deps = {}) {
           ...descriptor,
           get() {
             const declaration = Reflect.apply(original, this, []);
-            if (!declaration || typeof declaration !== 'object') return declaration;
-            let proxy = styleDeclarationProxies.get(declaration);
-            if (proxy) return proxy;
-            const boundMethods = new Map();
-            proxy = new Proxy(declaration, {
-              get(target, property) {
-                const value = Reflect.get(target, property, target);
-                if (typeof value !== 'function') return value;
-                if (!boundMethods.has(property)) boundMethods.set(property, value.bind(target));
-                return boundMethods.get(property);
-              },
-              set(target, property, value) {
-                const success = Reflect.set(target, property, value, target);
-                if (success) earlyCssomCalls.push({ method: `style:${String(property)}`, text: String(value ?? '') });
-                return success;
-              },
-            });
-            styleDeclarationProxies.set(declaration, proxy);
-            return proxy;
+            return instrumentStyleDeclaration(declaration);
           },
         });
       }
@@ -389,7 +422,10 @@ async function render(input = {}, ctx = {}, deps = {}) {
       for (const method of ['insertRule', 'deleteRule']) wrapMethod(window.CSSGroupingRule?.prototype, method);
       for (const method of ['appendRule', 'deleteRule']) wrapMethod(window.CSSKeyframesRule?.prototype, method);
       for (const method of ['setProperty', 'removeProperty']) {
-        wrapMethod(window.CSSStyleDeclaration?.prototype, method, declaration => Boolean(declaration?.parentRule));
+        wrapMethod(window.CSSStyleDeclaration?.prototype, method, (declaration, args, result) => {
+          if (!declaration?.parentRule || !visualCssProperties.has(String(args[0] || '').toLowerCase())) return false;
+          return hasVisualUrl(method === 'removeProperty' ? result : visualRuleText(declaration));
+        });
       }
       wrapSetter(window.CSSStyleRule?.prototype, 'selectorText');
       wrapSetter(window.CSSKeyframeRule?.prototype, 'keyText');
