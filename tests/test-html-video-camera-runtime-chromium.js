@@ -135,8 +135,12 @@ async function transformAt(page, timeSec) {
 
     await page.setContent(html(true, { regionId: 'target_bottom' }));
     await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
+    await page.evaluate(() => window.__mpSetTimelineTime(2));
+    const transformOrigin = await page.locator('img[data-shot-layer="foreground"]').evaluate(image => (
+      getComputedStyle(image).transformOrigin
+    ));
+    assert.equal(transformOrigin, '0px 0px', 'DOMMatrix 映射要求 foreground transform-origin 精确位于左上角');
     const safeRegion = await page.evaluate(() => {
-      window.__mpSetTimelineTime(2);
       const figure = document.querySelector('[data-hv-shot][data-camera-cues]');
       const image = figure.querySelector('img[data-shot-layer="foreground"]');
       const cue = JSON.parse(figure.dataset.cameraCues)[0];
