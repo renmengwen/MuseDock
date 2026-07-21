@@ -1,8 +1,16 @@
+const fs = require('fs');
+const path = require('path');
 const MODES = new Set(['fullscreen_relay', 'overview_detail', 'semantic_compare', 'rhythm_montage']);
 const { extractVisualAssetReferences } = require('./frameHtmlInspection');
 const { buildPlaybackClockSource } = require('./playbackClock');
+const { normalizeCaptionsForFrame } = require('./captionLayer');
+const { CAPTION_SAFE_BOTTOM_PX } = require('./motionPrimitiveCatalog');
 const START_MARKER = '<!-- hv-image-sequence:start -->';
 const END_MARKER = '<!-- hv-image-sequence:end -->';
+// 摄影机聚焦（REQ-D-05 / summary §13.4）：仅 trust A/B 执行 camera_zoom，并按可信度限制最大倍率。
+const CAMERA_MAX_ZOOM_BY_TRUST = { A: 3, B: 2.4 };
+// fillFactor 必须小于 1：region 周围保留上下文，不把目标撑满画面（summary §13.4）。
+const CAMERA_FILL_FACTOR = 0.72;
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -85,6 +93,82 @@ function registrySrc(asset = {}) {
   return src;
 }
 
+function cameraFiniteUnit(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+// 纵深防御：不信任 registry 原始数据，region 几何必须逐字段重新校验；非法则该 cue 按不存在处理。
+// focus_point 缺失或越界时回退 region 中心（与 cameraMath 缺省行为一致）。
+function cameraRegionGeometry(region) {
+  const source = region && typeof region === 'object' ? region.region : null;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
+  const { x, y, width, height } = source;
+  if (![x, y, width, height].every(cameraFiniteUnit)
+    || width <= 0 || height <= 0 || x + width > 1 || y + height > 1) return null;
+  const focus = region.focus_point;
+  const focusValid = focus && typeof focus === 'object' && !Array.isArray(focus)
+    && cameraFiniteUnit(focus.x) && cameraFiniteUnit(focus.y)
+    && focus.x >= x && focus.x <= x + width && focus.y >= y && focus.y <= y + height;
+  return {
+    region: { x, y, width, height },
+    focus_point: focusValid ? { x: focus.x, y: focus.y } : { x: x + width / 2, y: y + height / 2 },
+  };
+}
+
+// 构建期预解析 camera cue 进 DOM data：仅 effect=camera_zoom 且 region trust ∈ {A,B}；
+// highlight_only、C/D/缺失 trust、region_id 解析不到、几何非法、无 caption 的 cue 一律按不存在处理（REQ-D-05）。
+// cue 起止时间在构建期从 canonical caption 数据派生，浏览器只消费已解析的时间与几何。
+function cameraCaptionWindows(node, sceneDuration) {
+  const captions = normalizeCaptionsForFrame({
+    id: String(node?.scene_id || node?.metadata?.scene_id || node?.id || '').replace(/^scene:/, ''),
+    duration_sec: sceneDuration,
+    narration_text: node?.metadata?.narration_text,
+    captions: node?.metadata?.captions,
+  });
+  return new Map(captions
+    .filter(caption => Number.isFinite(caption.start) && Number.isFinite(caption.end)
+      && caption.start >= 0 && caption.end > caption.start && caption.end <= sceneDuration)
+    .map(caption => [String(caption.id), { start: caption.start, end: caption.end }]));
+}
+
+function normalizeCameraCues(shot, asset, captionWindows) {
+  const cues = Array.isArray(shot?.camera?.focus_cues) ? shot.camera.focus_cues : [];
+  if (!cues.length) return [];
+  const regions = new Map();
+  for (const region of Array.isArray(asset?.focus_regions) ? asset.focus_regions : []) {
+    const id = String(region?.id || '').trim();
+    if (id && !regions.has(id)) regions.set(id, region);
+  }
+  const normalized = [];
+  for (const cue of cues) {
+    if (!cue || typeof cue !== 'object' || Array.isArray(cue) || cue.effect !== 'camera_zoom') continue;
+    const region = regions.get(String(cue.region_id || '').trim());
+    const maxZoom = CAMERA_MAX_ZOOM_BY_TRUST[String(region?.trust_level || '').trim().toUpperCase()];
+    if (!maxZoom) continue;
+    const geometry = cameraRegionGeometry(region);
+    if (!geometry) continue;
+    const captionIds = (Array.isArray(cue.caption_ids) ? cue.caption_ids : [])
+      .map(value => String(value).trim())
+      .filter(Boolean);
+    if (!captionIds.length) continue;
+    const windows = captionIds.map(id => captionWindows.get(id));
+    if (windows.some(window => !window)) continue;
+    const startSec = Math.min(...windows.map(window => window.start));
+    const endSec = Math.max(...windows.map(window => window.end));
+    if (startSec < Number(shot?.active_window?.start_sec)
+      || endSec > Number(shot?.active_window?.end_sec) || endSec <= startSec) continue;
+    normalized.push({
+      id: String(cue.id || ''),
+      start_sec: startSec,
+      end_sec: endSec,
+      region: geometry.region,
+      focus_point: geometry.focus_point,
+      max_zoom: maxZoom,
+    });
+  }
+  return normalized;
+}
+
 function sceneDurationSec(node = {}) {
   const candidates = [];
   const windows = Array.isArray(node?.metadata?.beat_windows) ? node.metadata.beat_windows : [];
@@ -125,6 +209,7 @@ function normalizeContract(node, creativeContext) {
   const sceneDuration = sceneDurationSec(node);
   if (sceneDuration < 0) return fail('Image Sequence 的 Scene 时长字段不一致。');
   if (!sceneDuration) return fail('无法确定 Image Sequence 的 Scene 时长。');
+  const captionWindows = cameraCaptionWindows(node, sceneDuration);
   const ids = new Set();
   const normalized = [];
   for (const shot of shots) {
@@ -164,6 +249,7 @@ function normalizeContract(node, creativeContext) {
       start_sec: start,
       end_sec: end,
       src,
+      camera_cues: normalizeCameraCues(shot, asset, captionWindows),
     });
   }
   let coveredUntil = 0;
@@ -217,13 +303,154 @@ function buildShotTimelineSource() {
 })();`;
 }
 
+let cameraMathModuleSource = '';
+// cameraMath 复用 playbackClock 的"Node 源码字符串注入浏览器"模式：整文件读入 + module shim，
+// 包在运行时 IIFE 内不落任何新全局；cameraMath.js 本身只读不改。
+function cameraMathSource() {
+  if (!cameraMathModuleSource) {
+    cameraMathModuleSource = fs.readFileSync(path.join(__dirname, 'cameraMath.js'), 'utf8');
+  }
+  return cameraMathModuleSource;
+}
+
+// 摄影机运行时：订阅 __hvPlaybackClock，transform 是 clock 时间的纯函数（可 seek/暂停确定性重放）。
+// 节奏遵循 summary §14：cue 前 overview、caption start 起 0.45～0.8s 平滑过渡、保持到 cue 结束、
+// 相邻 cue 直接平滑转向、最后一个 cue 结束后剩余窗口足够才回全景；全程 try/catch 不抛异常。
+function buildCameraRuntimeSource() {
+  return `(function () {
+  var module = { exports: {} };
+  var exports = module.exports;
+${cameraMathSource()}
+  var computeCameraTransform = module.exports && module.exports.computeCameraTransform;
+  if (typeof computeCameraTransform !== 'function') return;
+  var SAFE_BOTTOM_PX = ${CAPTION_SAFE_BOTTOM_PX};
+  var FILL_FACTOR = ${CAMERA_FILL_FACTOR};
+  var TRANSITION_MIN_SEC = 0.45;
+  var TRANSITION_MAX_SEC = 0.8;
+  var TRANSITION_WINDOW_RATIO = 0.4;
+  var RETURN_TRANSITION_SEC = 0.6;
+  var TIME_EPSILON = 1e-6;
+  var IDENTITY = { scale: 1, tx: 0, ty: 0 };
+  var shots = [];
+  var figures = document.querySelectorAll('[data-hv-shot][data-camera-cues]');
+  for (var i = 0; i < figures.length; i++) {
+    var cues = null;
+    try { cues = JSON.parse(figures[i].dataset.cameraCues || '[]'); } catch (_) { cues = null; }
+    var image = figures[i].querySelector('img[data-shot-layer="foreground"]');
+    if (!cues || !cues.length || !image) continue;
+    image.style.transformOrigin = '0 0';
+    shots.push({
+      image: image,
+      cues: cues,
+      windowStart: Number(figures[i].dataset.windowStartSec),
+      windowEnd: Number(figures[i].dataset.windowEndSec),
+      metrics: null,
+      applied: ''
+    });
+  }
+  if (!shots.length) return;
+  function clamp01(value) { return value < 0 ? 0 : value > 1 ? 1 : value; }
+  function ease(value) {
+    return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+  }
+  function mix(from, to, progress) {
+    return {
+      scale: from.scale + (to.scale - from.scale) * progress,
+      tx: from.tx + (to.tx - from.tx) * progress,
+      ty: from.ty + (to.ty - from.ty) * progress
+    };
+  }
+  function resolveMetrics(shot) {
+    var imageWidth = shot.image.naturalWidth;
+    var imageHeight = shot.image.naturalHeight;
+    var width = shot.image.clientWidth;
+    var height = shot.image.clientHeight;
+    if (!imageWidth || !imageHeight || !width || !height) return null;
+    var active = [];
+    for (var i = 0; i < shot.cues.length; i++) {
+      var cue = shot.cues[i];
+      var result = computeCameraTransform({
+        image_width: imageWidth,
+        image_height: imageHeight,
+        canvas_width: width,
+        canvas_height: height,
+        fit: 'contain',
+        region: cue.region,
+        focus_point: cue.focus_point,
+        safe_rect: { left: 0, top: 0, right: width, bottom: height - SAFE_BOTTOM_PX },
+        fill_factor: FILL_FACTOR,
+        max_zoom: cue.max_zoom
+      });
+      if (!result || !result.applied || !result.image_rect) continue;
+      var baseScale = Math.min(width / imageWidth, height / imageHeight);
+      var baseLeft = (width - imageWidth * baseScale) / 2;
+      var baseTop = (height - imageHeight * baseScale) / 2;
+      active.push({
+        begin: cue.start_sec,
+        end: cue.end_sec,
+        duration: Math.min(TRANSITION_MAX_SEC, Math.max(TRANSITION_MIN_SEC, (cue.end_sec - cue.start_sec) * TRANSITION_WINDOW_RATIO)),
+        target: {
+          scale: result.zoom,
+          tx: result.image_rect.left - baseLeft * result.zoom,
+          ty: result.image_rect.top - baseTop * result.zoom
+        }
+      });
+    }
+    var from = IDENTITY;
+    for (var k = 0; k < active.length; k++) {
+      active[k].from = from;
+      var nextBegin = k + 1 < active.length ? active[k + 1].begin : Infinity;
+      from = mix(active[k].from, active[k].target, ease(clamp01((nextBegin - active[k].begin) / active[k].duration)));
+    }
+    if (active.length) {
+      var last = active[active.length - 1];
+      if (shot.windowEnd - last.end + TIME_EPSILON >= RETURN_TRANSITION_SEC) {
+        active.push({ begin: last.end, end: last.end, duration: RETURN_TRANSITION_SEC, from: from, target: IDENTITY });
+      }
+    }
+    return { active: active };
+  }
+  function stateAt(shot, timeSec) {
+    var active = shot.metrics.active;
+    for (var i = active.length - 1; i >= 0; i--) {
+      if (timeSec >= active[i].begin) {
+        return mix(active[i].from, active[i].target, ease(clamp01((timeSec - active[i].begin) / active[i].duration)));
+      }
+    }
+    return IDENTITY;
+  }
+  function formatTransform(state) {
+    if (Math.abs(state.scale - 1) < 1e-4 && Math.abs(state.tx) < 1e-2 && Math.abs(state.ty) < 1e-2) return '';
+    return 'translate(' + state.tx.toFixed(2) + 'px, ' + state.ty.toFixed(2) + 'px) scale(' + state.scale.toFixed(4) + ')';
+  }
+  function render(timeSec) {
+    for (var i = 0; i < shots.length; i++) {
+      var shot = shots[i];
+      var transform = '';
+      if (timeSec >= shot.windowStart && timeSec < shot.windowEnd) {
+        if (!shot.metrics) shot.metrics = resolveMetrics(shot);
+        if (shot.metrics) transform = formatTransform(stateAt(shot, timeSec));
+      }
+      if (transform === shot.applied) continue;
+      shot.applied = transform;
+      shot.image.style.transform = transform;
+    }
+  }
+  window.__hvPlaybackClock.subscribe(function (timeSec) {
+    try { render(timeSec); } catch (_) {}
+  });
+})();`;
+}
+
 function renderDom(contract) {
   const figures = contract.shots.map(shot => [
-    `<figure data-hv-shot="true" data-shot-id="${escapeHtml(shot.id)}" data-asset-id="${escapeHtml(shot.asset_id)}" data-window-start-sec="${escapeHtml(shot.start_sec)}" data-window-end-sec="${escapeHtml(shot.end_sec)}" data-time-base="scene_local" data-shot-role="${escapeHtml(shot.role)}" data-shot-requirement="${escapeHtml(shot.requirement)}" data-caption-ids="${escapeHtml(shot.caption_ids.join(','))}" data-minimum-visible-duration-sec="${escapeHtml(shot.minimum_visible_duration_sec)}">`,
+    `<figure data-hv-shot="true" data-shot-id="${escapeHtml(shot.id)}" data-asset-id="${escapeHtml(shot.asset_id)}" data-window-start-sec="${escapeHtml(shot.start_sec)}" data-window-end-sec="${escapeHtml(shot.end_sec)}" data-time-base="scene_local" data-shot-role="${escapeHtml(shot.role)}" data-shot-requirement="${escapeHtml(shot.requirement)}" data-caption-ids="${escapeHtml(shot.caption_ids.join(','))}" data-minimum-visible-duration-sec="${escapeHtml(shot.minimum_visible_duration_sec)}"${shot.camera_cues.length ? ` data-camera-cues="${escapeHtml(JSON.stringify(shot.camera_cues))}"` : ''}>`,
     `<img data-shot-layer="background" src="${escapeHtml(shot.src)}" alt="" aria-hidden="true">`,
     `<img data-shot-layer="foreground" src="${escapeHtml(shot.src)}" alt="">`,
     '</figure>',
   ].join('')).join('');
+  // 摄影机运行时只在存在 camera_zoom cue 时注入：无 cue 场景输出与 D-07 之前字节级一致。
+  const cameraRuntime = contract.shots.some(shot => shot.camera_cues.length) ? buildCameraRuntimeSource() : '';
   return [
     START_MARKER,
     '<style data-hv-image-sequence-style="true">',
@@ -243,7 +470,7 @@ function renderDom(contract) {
     `<section data-hv-image-sequence="true" data-sequence-mode="${escapeHtml(contract.mode)}" data-scene-id="${escapeHtml(contract.scene_id)}">`,
     figures,
     '</section>',
-    `<script data-hv-shot-clock="true">${buildPlaybackClockSource()}${buildShotTimelineSource()}<\/script>`,
+    `<script data-hv-shot-clock="true">${buildPlaybackClockSource()}${buildShotTimelineSource()}${cameraRuntime}<\/script>`,
     END_MARKER,
   ].join('');
 }
@@ -302,6 +529,11 @@ function validateSceneImageSequenceDom(html, { node = {}, creativeContext = {} }
       `data-shot-layer="background" src="${escapeHtml(shot.src)}"`,
       `data-shot-layer="foreground" src="${escapeHtml(shot.src)}"`,
     ];
+    if (shot.camera_cues.length) {
+      required.push(`data-camera-cues="${escapeHtml(JSON.stringify(shot.camera_cues))}"`);
+    } else if (figure.includes('data-camera-cues=')) {
+      return fail(`Frame HTML 的 Shot ${shot.id} 包含计划外摄影机数据。`);
+    }
     const backgroundCount = (figure.match(/data-shot-layer="background"/g) || []).length;
     const foregroundCount = (figure.match(/data-shot-layer="foreground"/g) || []).length;
     if (figureEnd < 0 || backgroundCount !== 1 || foregroundCount !== 1 || required.some(value => !figure.includes(value))) {
