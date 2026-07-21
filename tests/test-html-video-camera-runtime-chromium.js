@@ -1,6 +1,7 @@
 const assert = require('assert/strict');
 
 const { materializeSceneImageSequenceDom } = require('../server/services/creative-video/html-video/sceneImageSequenceDom');
+const { applyCaptionLayer, applyFocusKeywords, focusKeywordsByCaptionId } = require('../server/services/creative-video/html-video/captionLayer');
 
 const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#123"/><circle cx="1200" cy="220" r="100" fill="#fff"/></svg>').toString('base64');
 const imageUrl = `data:image/svg+xml;base64,${svg}`;
@@ -36,6 +37,8 @@ function node(withCue) {
       focus_cues: [{
         id: 'cue_1',
         caption_ids: ['cap_1'],
+        keyword: '目标',
+        keywords_by_caption_id: { cap_1: '目标' },
         region_id: 'target',
         effect: 'camera_zoom',
       }],
@@ -53,13 +56,15 @@ function node(withCue) {
 }
 
 function html(withCue) {
+  const graphNode = node(withCue);
   const result = materializeSceneImageSequenceDom({
     html: shell,
-    node: node(withCue),
+    node: graphNode,
     creativeContext: { asset_context: { assets: [asset] } },
   });
   assert.equal(result.success, true, result.message);
-  return result.html.replaceAll('../assets/a.svg', imageUrl);
+  const captions = applyFocusKeywords(graphNode.metadata.captions, focusKeywordsByCaptionId(graphNode));
+  return applyCaptionLayer(result.html, captions).replaceAll('../assets/a.svg', imageUrl);
 }
 
 async function transformAt(page, timeSec) {
@@ -78,11 +83,21 @@ async function transformAt(page, timeSec) {
 
     const overview = await transformAt(page, 0.5);
     const moving = await transformAt(page, 1.4);
+    assert.equal(overview, '', 'cue 前必须保持全景基线');
+    assert.notEqual(moving, '', 'cue 过渡窗口内 foreground transform 必须变化');
+    const synchronized = await page.evaluate(() => {
+      const caption = document.querySelector('[data-caption-id="cap_1"]');
+      const keyword = caption?.querySelector('.hv-caption-kw');
+      return {
+        active: caption?.dataset.hvActive === 'true',
+        keyword: keyword?.textContent || '',
+        color: keyword ? getComputedStyle(keyword).color : '',
+      };
+    });
+    assert.deepEqual(synchronized, { active: true, keyword: '目标', color: 'rgb(255, 213, 74)' }, '同一 focus cue 必须在摄影机过渡时同步激活字幕原文关键词');
     const heldA = await transformAt(page, 2);
     const heldB = await transformAt(page, 2.8);
     const returned = await transformAt(page, 3.7);
-    assert.equal(overview, '', 'cue 前必须保持全景基线');
-    assert.notEqual(moving, '', 'cue 过渡窗口内 foreground transform 必须变化');
     assert.notEqual(heldA, '', 'cue 保持期必须维持聚焦 transform');
     assert.equal(heldB, heldA, 'cue 保持期 transform 必须稳定');
     assert.equal(returned, '', '末尾时间足够时 cue 外必须回到全景基线');
