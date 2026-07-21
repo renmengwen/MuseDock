@@ -472,7 +472,7 @@ async function main() {
         target,
         creativeContext,
       });
-      const oldV3Fingerprint = 'b99c883d3accbc4888e02a9c105d511a93c919df422063a83ee9413928a6ba33';
+      const oldV3Fingerprint = 'c0fdad5117ebcf48662e3d2fc21517ba0f46be61810f748df92c1a65d464f3cc';
       assert.notEqual(currentFingerprint, oldV3Fingerprint, 'v4 摄影机产物指纹必须与已记录的 v3 指纹不同');
       project.generation_checkpoint.stages.frame_html.frames.scene_01.input_fingerprint = oldV3Fingerprint;
       await projectStore.saveProject(projectDir, project);
