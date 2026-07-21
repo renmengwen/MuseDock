@@ -318,6 +318,15 @@ function regionsResponse(label) {
   };
 }
 
+function visionRegion(id = 'vision_region') {
+  return {
+    id, label: '模型区域', aliases: [],
+    region: { x: 0.1, y: 0.1, width: 0.3, height: 0.3 },
+    method: 'vision', confidence_level: 'high',
+    verification: { status: 'candidate', method: 'vision_model', evidence: '模型分析' },
+  };
+}
+
 function respondByBytes(rules) {
   return request => {
     const dataUrl = request.messages[0].content[1].image_url.url;
@@ -496,7 +505,15 @@ async function testDurableCacheInvalidationTriggersReanalysis() {
     { id: 'stale_provider', bytes: staleBytes.provider, overrides: { focus_regions: [], focus_analysis: focusAnalysisRecord(staleBytes.provider, { provider: 'other-ai' }) } },
     { id: 'injected', bytes: staleBytes.injected, overrides: { focus_regions: [], focus_analysis: { ...focusAnalysisRecord(staleBytes.injected), injected: '模型注入字段' } } },
     { id: 'inconsistent', bytes: staleBytes.inconsistent, overrides: { focus_regions: [], focus_analysis: focusAnalysisRecord(staleBytes.inconsistent, { status: 'success' }) } },
+    { id: 'success_matched', bytes: Buffer.from('success-matched-bytes'), overrides: { focus_regions: [visionRegion('success_matched_region')], focus_analysis: focusAnalysisRecord(Buffer.from('success-matched-bytes'), { status: 'success' }) } },
+    { id: 'success_changed', bytes: Buffer.from('success-changed-new-bytes'), overrides: { focus_regions: [visionRegion()], focus_analysis: focusAnalysisRecord(Buffer.from('success-changed-old-bytes'), { status: 'success' }) } },
+    { id: 'success_stale_prompt', bytes: Buffer.from('success-stale-prompt-bytes'), overrides: { focus_regions: [visionRegion()], focus_analysis: focusAnalysisRecord(Buffer.from('success-stale-prompt-bytes'), { status: 'success', prompt_version: 'stale-prompt-v0' }) } },
+    { id: 'success_stale_contract', bytes: Buffer.from('success-stale-contract-bytes'), overrides: { focus_regions: [visionRegion()], focus_analysis: focusAnalysisRecord(Buffer.from('success-stale-contract-bytes'), { status: 'success', contract_version: 'stale-contract-v0' }) } },
+    { id: 'success_stale_model', bytes: Buffer.from('success-stale-model-bytes'), overrides: { focus_regions: [visionRegion()], focus_analysis: focusAnalysisRecord(Buffer.from('success-stale-model-bytes'), { status: 'success', model: 'vision-mock-0' }) } },
+    { id: 'success_stale_provider', bytes: Buffer.from('success-stale-provider-bytes'), overrides: { focus_regions: [visionRegion()], focus_analysis: focusAnalysisRecord(Buffer.from('success-stale-provider-bytes'), { status: 'success', provider: 'other-ai' }) } },
+    { id: 'legacy_vision', bytes: Buffer.from('legacy-vision-bytes'), overrides: { focus_regions: [visionRegion('legacy_vision_region')] } },
     { id: 'manual_locked', bytes: Buffer.from('cache-manual-bytes'), overrides: { focus_regions: [manualRegion], focus_analysis: focusAnalysisRecord(Buffer.from('cache-manual-bytes')) } },
+    { id: 'dom_locked', bytes: Buffer.from('cache-dom-bytes'), overrides: { focus_regions: [{ ...manualRegion, id: 'dom_region', method: 'dom' }], focus_analysis: focusAnalysisRecord(Buffer.from('cache-dom-bytes'), { status: 'success', prompt_version: 'stale-prompt-v0' }) } },
   ];
   const projectDir = await createDurableProject('focus-region-invalidation-', entries);
   const model = visionModel(regionsRequest => {
@@ -515,10 +532,16 @@ async function testDurableCacheInvalidationTriggersReanalysis() {
     target: { sourceImageAnalysisEnabled: true },
     services: { aiTextModel: model },
   });
-  assert.equal(model.calls.length, 7, '除 matched 与 manual_locked 外全部重析');
+  assert.equal(model.calls.length, 12, 'empty 失效项与非空 success 五项身份变化必须重析');
   const resultAssets = new Map(result.creativeContext.asset_context.assets.map(item => [item.id, item]));
   assert.deepEqual(resultAssets.get('matched').focus_regions, []);
   assert.deepEqual(resultAssets.get('matched').focus_analysis, focusAnalysisRecord(matchedBytes));
+  assert.deepEqual(
+    resultAssets.get('success_matched').focus_regions.map(region => region.id),
+    ['success_matched_region'],
+    '非空 success 记录身份完全匹配时必须复用',
+  );
+  assert.deepEqual(resultAssets.get('legacy_vision').focus_regions.map(region => region.id), ['legacy_vision_region']);
   for (const id of ['changed', 'stale_prompt', 'stale_contract', 'stale_model', 'stale_provider', 'injected', 'inconsistent']) {
     const item = resultAssets.get(id);
     assert.equal(item.focus_regions.length, 1, `${id} 应重析出新 focus_regions`);
@@ -528,11 +551,21 @@ async function testDurableCacheInvalidationTriggersReanalysis() {
       `${id} 重析成功后应覆盖为当前四元组记录`,
     );
   }
+  for (const id of ['success_changed', 'success_stale_prompt', 'success_stale_contract', 'success_stale_model', 'success_stale_provider']) {
+    const item = resultAssets.get(id);
+    assert.equal(item.focus_regions[0].label, '重析主体', `${id} 应覆盖旧 vision 区域`);
+    assert.deepEqual(
+      item.focus_analysis,
+      focusAnalysisRecord(await fs.readFile(path.join(projectDir, 'assets', `${id}.png`)), { status: 'success' }),
+      `${id} 应覆盖为当前分析身份`,
+    );
+  }
   assert.deepEqual(
     resultAssets.get('manual_locked').focus_regions.map(region => region.id),
     ['manual_region'],
     '手工 region 永不被缓存或重析覆盖',
   );
+  assert.deepEqual(resultAssets.get('dom_locked').focus_regions.map(region => region.id), ['dom_region']);
   assert.deepEqual(result.diagnostics, []);
   await fs.rm(projectDir, { recursive: true, force: true });
 }

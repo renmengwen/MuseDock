@@ -159,11 +159,9 @@ async function resolveAnalysisIdentity(model) {
 }
 
 // durable 缓存匹配：focus_analysis 四元组（bytes 哈希 + 契约版本 + provider/model + prompt 版本）全等才命中。
-// 只有 status=empty 的记录会走到这里被复用：status=success 正常伴随非空 focus_regions（上方已跳过素材），
-// 能进入 vision 分支说明 regions 已丢失，视为不一致状态重新分析，避免素材永远失去焦点区域。
 function matchedFocusAnalysis(asset, imageHash, identity) {
   const record = normalizeFocusAnalysis(asset.focus_analysis);
-  if (!record || record.status !== 'empty') return null;
+  if (!record) return null;
   return record.content_sha256 === imageHash
     && record.contract_version === FOCUS_ANALYSIS_CONTRACT_VERSION
     && record.prompt_version === FOCUS_ANALYSIS_PROMPT_VERSION
@@ -250,12 +248,17 @@ async function runFocusRegionPhase({
   for (const id of selectedAssetIds(visualPlan)) {
     const asset = firstAssetById.get(id);
     if (!asset || text(asset.media_type || asset.type || 'image').toLowerCase() !== 'image') continue;
-    if (normalizeFocusRegions(asset.focus_regions).length) continue;
+    const existingRegions = normalizeFocusRegions(asset.focus_regions);
+    const visionEnabled = target.sourceImageAnalysisEnabled === true;
+    if (existingRegions.length) {
+      const isVisionResult = existingRegions.every(region => region.method === 'vision');
+      // manual/DOM 等正式区域优先复用；历史 vision 区域没有版本记录时维持兼容。
+      if (!isVisionResult || !visionEnabled || !Object.hasOwn(asset, 'focus_analysis')) continue;
+    }
     const evidence = asset.page_capture_evidence;
     const hasDomEvidence = evidence?.version === 1
       && Array.isArray(evidence.elements)
       && evidence.elements.length > 0;
-    const visionEnabled = target.sourceImageAnalysisEnabled === true;
     let image = null;
     if (hasDomEvidence || visionEnabled) {
       try {
@@ -284,9 +287,11 @@ async function runFocusRegionPhase({
     }
     if (!visionEnabled) continue;
     const identity = await resolveIdentity();
-    if (identity && matchedFocusAnalysis(asset, image.hash, identity)) {
-      // durable 缓存命中（empty 结果）：跳过 vision 调用，维持 focus_regions=[]，不产生告警。
-      updates.set(asset, { ...asset, focus_regions: [] });
+    const matchedAnalysis = identity && matchedFocusAnalysis(asset, image.hash, identity);
+    const expectedStatus = existingRegions.length ? 'success' : 'empty';
+    if (matchedAnalysis?.status === expectedStatus) {
+      // cache 命中后仍二次 normalize，保持跨 asset 深拷贝隔离。
+      updates.set(asset, { ...asset, focus_regions: normalizeFocusRegions(existingRegions) });
       continue;
     }
     let regions = [];
