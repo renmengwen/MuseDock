@@ -82,7 +82,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `complete` | B-07b | `df9a519`、`fab5167`、`6d58460`、`c5e08f0`、`31006f3` | C-01～C-05 完成；canonical Shot Usage、required gate 与素材面板一致 |
-| D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `in_progress` | C-05 | `4d58c4f`、`123dd16`、`a30a22f`、`2a5c7d8`、`41400fa`、`7933ff6`、`c3db1d8`、`f601bbc`、`7287e96` | D-05/D-06/D-07 完成；下一项 D-08 自然图 C 级宽松聚焦 |
+| D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `complete` | C-05 | `4d58c4f`、`123dd16`、`a30a22f`、`2a5c7d8`、`41400fa`、`7933ff6`、`c3db1d8`、`f601bbc`、`7287e96`、`22e9014` | Phase D 完成；进入 E-01 数据/数学验收与 E-02 Scene Preview QA |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
 
@@ -90,7 +90,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-08
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: 2add472762beb050b9b754dc1d70ec6a0f0a912f
@@ -102,6 +102,7 @@ invalidated_tree: 4c58216b0d49e6c6205fd76bb28f0c9f0520c32d
 frozen_revision: a154be0cd284870ae59dca5d594dc276f137873e
 frozen_tree: ef3d5e1455c769ae3df980079539b05ad8e54ea4
 revision_valid: true
+dev_commit: 22e9014
 allowed_paths:
   - server/services/creative-video/html-video/focusCuePlanner.js
   - server/services/creative-video/html-video/sceneImageSequenceDom.js
@@ -134,8 +135,17 @@ verification:
   - node tests/test-html-video-frame-html-resume.js
   - node tests/test-html-video-workflow.js
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_ledger_commit: 5c61aa5
+  spec_reviewed_revision: a154be0cd284870ae59dca5d594dc276f137873e
+  quality: pass
+  quality_reviewed_ledger_commit: 5c61aa5
+  quality_reviewed_revision: a154be0cd284870ae59dca5d594dc276f137873e
+resolved_findings:
+  - trust C 长窗口复用 camera_zoom + soft，短窗口保持 highlight_only，D 不生成 cue
+  - C region 围绕原中心扩大 1.5x、max_zoom 1.5；只接受 canonical C + soft
+  - C 结果低于 min_zoom 1.15 时整条 segment no-op，不输出 zoom=1 的纯平移
+  - 真实 Chrome 证明 C 倍率在 1.15～1.5 或保持全景，且同 cue 字幕同步；D 不移动
 ```
 
 ```yaml
@@ -1261,7 +1271,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-D-02 | `verified` | Scene/Shot 级 `focus_cues` | D-04 |
 | REQ-D-03 | `verified` | DOM/manual、OCR/验证、AI-only、歧义失败的信任等级 | D-01、D-03 |
 | REQ-D-04 | `verified` | 语义准确与几何准确分开 | D-01、D-03 |
-| REQ-D-05 | `pending` | A/B 自动聚焦，C 低倍率宽松聚焦，D 不聚焦 | D-07、D-08 |
+| REQ-D-05 | `verified` | A/B 自动聚焦，C 低倍率宽松聚焦，D 不聚焦 | D-07、D-08 |
 | REQ-D-06 | `verified` | cover/contain 和双层截图坐标映射 | D-02 |
 | REQ-D-07 | `verified` | 安全目标中心、zoom 限幅、位移 clamp 和黑边防护 | D-02 |
 | REQ-D-08 | `verified` | Caption Cue 同时驱动摄影机和字幕关键词高亮 | D-05、D-07 |
