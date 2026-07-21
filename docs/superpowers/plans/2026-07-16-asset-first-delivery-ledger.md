@@ -89,6 +89,51 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 ## 当前写租约
 
 ```yaml
+task_id: D-04
+status: leased
+owner: claude-worker
+lease_released: false
+code_base_commit: 55c7ae97fab69b256cd4ceaf1bddafc74c16b4da
+worktree: D:\code3\MuseDock-worktrees\asset-first-d04
+branch: codex/asset-first-d04
+allowed_paths:
+  - server/services/creative-video/html-video/focusCuePlanner.js
+  - server/services/creative-video/html-video/htmlVideoWorkflow.js
+  - server/services/creative-video/html-video/visualPlanService.js
+  - tests/test-html-video-focus-cue-planner.js
+  - tests/test-html-video-workflow.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative-video/html-video/focusRegionPhase.js
+  - server/services/creative-video/html-video/cameraMath.js
+  - server/services/creative-video/html-video/sceneImageSequenceDom.js
+  - server/services/creative-video/html-video/captionLayer.js
+  - server/services/creative/visualAssetContract.js
+  - server/services/creative/pageCaptureAssets.js
+  - frontend-react/**
+  - package.json
+  - package-lock.json
+state_owners:
+  - visual_plan.beats[].visual_base.shots[].camera
+decisions:
+  - focus_cues 属于 shot 级 camera（visual_base.shots[].camera.focus_cues）；diagram/无图 beat 不写 camera；motion_overlay 语义不动
+  - planner 在 runFocusRegionPhase 与素材持久化之后、content graph 展开之前对 visualPlan 做确定性 enrich；resume 依赖同输入重算一致，camera 随 visual_beat 进入既有 Frame 指纹
+  - visualPlanService 仅允许追加导出 canonicalCaptionTrack，不改任何规划逻辑
+  - cue 通用匹配：region.label/aliases 与 caption 原文大小写不敏感匹配，中英文均支持；keyword 必须取 caption 原文中真实出现的文本，不发明词；匹配器不含任何业务词硬编码
+  - 唯一匹配且 trust A/B → effect camera_zoom、zoom auto；唯一匹配且 trust C → effect highlight_only（低倍率推近留给 D-08）；trust D、无匹配、caption_id 不存在或多 region 歧义 → 不生成 cue
+  - 同 shot 内相邻 caption 命中同一 region 合并为单 cue（有序 caption_ids ≥1），不重复缩放；合并窗口短于聚焦过渡预算的 camera_zoom 降级为 highlight_only，阈值常量由测试锁定
+  - cue 不写 start_sec/end_sec，时间一律由 caption 数据派生；camera.initial_view 固定 overview
+verification:
+  - node tests/test-html-video-focus-cue-planner.js
+  - node tests/test-html-video-workflow.js
+  - node tests/test-html-video-visual-plan.js
+  - node tests/test-html-video-frame-html-resume.js
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
 task_id: D-03c
 status: complete
 owner: unassigned
