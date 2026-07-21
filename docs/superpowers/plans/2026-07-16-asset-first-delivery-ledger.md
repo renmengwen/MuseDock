@@ -159,11 +159,11 @@ lease_released: true
 code_base_commit: dfd88dde244f7d62c6529be16936f432ccbf27d7
 worktree: D:\code3\MuseDock-worktrees\asset-first-d07
 branch: codex/asset-first-d07
-candidate_commit: 65cb218bc9023ac0e8149c761b9b40b5e7f2ed93
-invalidated_revision: 5bbc1d7c6871724994b1947a9bc531ab804f76e3
-invalidated_tree: 9d3eb6bbb9f51781ed0c63c614f312ac3fb1f910
-frozen_revision: 65cb218bc9023ac0e8149c761b9b40b5e7f2ed93
-frozen_tree: ea4c8a47f96cde6f7b699b424a64dee4725db386
+candidate_commit: 9d574189f4b700259acbe4950b08922fe9e70f12
+invalidated_revision: 65cb218bc9023ac0e8149c761b9b40b5e7f2ed93
+invalidated_tree: ea4c8a47f96cde6f7b699b424a64dee4725db386
+frozen_revision: 9d574189f4b700259acbe4950b08922fe9e70f12
+frozen_tree: 3950209ba510bca6eaabbe7a9536e80e4bc35b05
 revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/sceneImageSequenceDom.js
