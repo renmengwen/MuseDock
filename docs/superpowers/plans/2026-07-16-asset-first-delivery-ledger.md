@@ -96,9 +96,11 @@ lease_released: true
 code_base_commit: dfd88dde244f7d62c6529be16936f432ccbf27d7
 worktree: D:\code3\MuseDock-worktrees\asset-first-d05
 branch: codex/asset-first-d05
-candidate_commit: f42f076b0697bf132d940af10085e60c72914c64
-frozen_revision: f42f076b0697bf132d940af10085e60c72914c64
-frozen_tree: 8a31132e5bd3d65dabc974769900a6cfb8be625a
+candidate_commit: 5943c799cd19b0d5700ac0a474759447a27e3d86
+invalidated_revision: f42f076b0697bf132d940af10085e60c72914c64
+invalidated_tree: 8a31132e5bd3d65dabc974769900a6cfb8be625a
+frozen_revision: 5943c799cd19b0d5700ac0a474759447a27e3d86
+frozen_tree: 7750d3d6924be48db25c1777fd6af258f8e3a994
 revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/captionLayer.js
