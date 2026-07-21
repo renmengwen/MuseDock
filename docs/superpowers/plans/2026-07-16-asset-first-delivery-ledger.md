@@ -96,9 +96,11 @@ lease_released: true
 code_base_commit: 2add472762beb050b9b754dc1d70ec6a0f0a912f
 worktree: D:\code3\MuseDock-worktrees\asset-first-d08
 branch: codex/asset-first-d08
-candidate_commit: fd2b8bb85c5345043eba4784ad2f5804253dee5f
-frozen_revision: fd2b8bb85c5345043eba4784ad2f5804253dee5f
-frozen_tree: 4c58216b0d49e6c6205fd76bb28f0c9f0520c32d
+candidate_commit: a154be0cd284870ae59dca5d594dc276f137873e
+invalidated_revision: fd2b8bb85c5345043eba4784ad2f5804253dee5f
+invalidated_tree: 4c58216b0d49e6c6205fd76bb28f0c9f0520c32d
+frozen_revision: a154be0cd284870ae59dca5d594dc276f137873e
+frozen_tree: ef3d5e1455c769ae3df980079539b05ad8e54ea4
 revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/focusCuePlanner.js
