@@ -298,14 +298,19 @@ async function retryFrameHtml(context) {
     || executorOptions.regenerateFrameHtml === true;
   const scopedFrameIds = arrayOrEmpty(executorOptions.frame_ids).filter(Boolean);
   const fullRegenerate = regenerateRequested && !scopedFrameIds.length;
-  const checkpointFrameIds = Object.keys(objectOrEmpty(
-    project.generation_checkpoint?.stages?.frame_html?.frames,
-  ));
+  const checkpointFrameIds = [...new Set([
+    ...Object.keys(objectOrEmpty(project.generation_checkpoint?.stages?.frame_html?.frames)),
+    ...Object.keys(objectOrEmpty(project.generation_checkpoint?.stages?.render?.frames)),
+  ])];
+  const currentFrameIds = arrayOrEmpty(project.frames)
+    .map(frame => safeString(frame?.id || frame?.scene_id))
+    .filter(Boolean);
   const ids = fullRegenerate
-    ? (checkpointFrameIds.length
-      ? checkpointFrameIds
-      : arrayOrEmpty(project.frames).map(frame => safeString(frame?.id || frame?.scene_id)).filter(Boolean))
+    ? (currentFrameIds.length ? currentFrameIds : checkpointFrameIds)
     : resolveProjectRetryFrameIds(project, planFrameIds(plan, project, 'frame_html'));
+  const invalidationIds = fullRegenerate
+    ? [...new Set([...ids, ...checkpointFrameIds])]
+    : ids;
   if (!ids.length) {
     return actionFailure('未找到需要重试的 HTML 帧。', [createDiagnostic({
       code: 'frame_not_found',
@@ -319,7 +324,7 @@ async function retryFrameHtml(context) {
     // 写盘失效本次全部目标 frame_html/render checkpoint；定向计划只含目标帧，
     // 无 scope 的全量计划使用全部 canonical checkpoint key。
     nextProject = await projectStore.writeProjectJson(projectDir, current => {
-      for (const frameId of ids) {
+      for (const frameId of invalidationIds) {
         markCheckpointFrame(current, 'frame_html', frameId, {
           status: 'pending',
           html_path: '',

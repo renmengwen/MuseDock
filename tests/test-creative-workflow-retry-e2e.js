@@ -973,6 +973,14 @@ function plannerProject(overrides = {}) {
         }),
       });
     }
+    delete fullProject.generation_checkpoint.stages.frame_html.frames.scene_02;
+    delete fullProject.generation_checkpoint.stages.render.frames.scene_02;
+    markCheckpointFrame(fullProject, 'frame_html', 'legacy_scene_alias', {
+      status: 'done', html_path: 'frames/legacy.html', output_hash: 'legacy-html', diagnostic_code: '',
+    });
+    markCheckpointFrame(fullProject, 'render', 'legacy_scene_alias', {
+      status: 'done', mp4_path: 'frames/legacy.mp4', output_hash: 'legacy-mp4', diagnostic_code: '',
+    });
     markCheckpointStage(fullProject, 'frame_html', { status: 'done' });
     markCheckpointStage(fullProject, 'render', { status: 'done' });
     markCheckpointStage(fullProject, 'compose', { status: 'done', output_path: 'exports/old.mp4' });
@@ -1020,6 +1028,10 @@ function plannerProject(overrides = {}) {
         assert.equal(stages.render.frames[frameId].mp4_path, '');
         assert.equal(stages.render.frames[frameId].output_hash, '');
       }
+      assert.equal(stages.frame_html.frames.legacy_scene_alias.status, 'pending');
+      assert.equal(stages.frame_html.frames.legacy_scene_alias.html_path, '');
+      assert.equal(stages.render.frames.legacy_scene_alias.status, 'pending');
+      assert.equal(stages.render.frames.legacy_scene_alias.mp4_path, '');
       assert.equal(stages.compose.status, 'pending');
       assert.equal(stages.duration_verify.status, 'pending');
       assert.equal(stages.visual_inspect.status, 'pending');
@@ -1053,6 +1065,7 @@ function plannerProject(overrides = {}) {
     assert.equal(retried.success, true);
     assert.equal(globalActionCalls, 1);
     assert.deepEqual(calls.renderFrameKeys, ['scene_01', 'scene_02']);
+    assert.equal(calls.renderFrameKeys.includes('legacy_scene_alias'), false);
     assert.deepEqual(calls.composeFrameIds, ['scene_01', 'scene_02']);
   }
 
