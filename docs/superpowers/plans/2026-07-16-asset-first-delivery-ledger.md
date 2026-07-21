@@ -21,7 +21,7 @@
 - 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 当前为 `agents.max_threads = 20`，新任务/重启后读取
 - 实际并发：第 4 个 sub-agent 创建返回 `agent thread limit reached`；当前产品层仍为主 Agent + 3 个 sub-agent
 - 当前主工作区：`dev`；B-07b 最终 reviewed tree 已由提交 `218fbf9` squash 集成
-- 当前顺序：Phase B、Phase C、Phase D 已完成；E-01～E-04 已完成集成，下一任务 E-05 正式视觉 QA 链路
+- 当前顺序：Phase B、Phase C、Phase D、Phase E 已完成；下一任务 F-01 最终真实任务 E2E 与全量回归
 - 当前由 Codex 继续执行；Agent 任务统一使用产品规格、浏览器渲染、素材处理与数据一致性语言，本总账继续为唯一状态表
 - Phase C：C-01～C-05 全部完成；REQ-B-09/10 已由 canonical Shot Usage Report 收口
 
@@ -83,8 +83,8 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `complete` | B-07b | `df9a519`、`fab5167`、`6d58460`、`c5e08f0`、`31006f3` | C-01～C-05 完成；canonical Shot Usage、required gate 与素材面板一致 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `complete` | C-05 | `4d58c4f`、`123dd16`、`a30a22f`、`2a5c7d8`、`41400fa`、`7933ff6`、`c3db1d8`、`f601bbc`、`7287e96`、`22e9014` | Phase D 完成；进入 E-01 数据/数学验收与 E-02 Scene Preview QA |
-| E-01～E-05 Camera QA、定向 retry、checkpoint/resume | `in_progress` | D-08 | `0531f27`、`281550c`、`4a493de`、`fd21b85`、`7d5f0cf`、`53056ad`、`d209bed`、`0a4f000` | E-01～E-04 完成；下一项 E-05 正式 Preview、ffprobe 与完整视觉 QA |
-| F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
+| E-01～E-05 Camera QA、定向 retry、checkpoint/resume | `complete` | D-08 | `0531f27`、`281550c`、`4a493de`、`fd21b85`、`7d5f0cf`、`53056ad`、`d209bed`、`0a4f000`、`5bdfe9f`、`51f906b` | Phase E 完成；正式 Preview、ffprobe、完整视觉 QA 与字幕像素检查通过 |
+| F-01 最终真实任务 E2E 与全量回归 | `in_progress` | E-05 | - | 真实样本任务、全量验证与最终双 Review |
 
 ## 当前写租约
 
@@ -1485,7 +1485,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-E-07 | `verified` | 定向重试只失效受影响范围 | E-03 |
 | REQ-E-08 | `verified` | Checkpoint 复用包含真实输入、Prompt 和契约版本 | D-06、E-04 |
 | REQ-E-09 | `verified` | 重启后只恢复失败 Scene/Shot | E-04 |
-| REQ-E-10 | `pending` | `skipValidation=false` 进入完整视觉 QA | E-05 |
+| REQ-E-10 | `verified` | `skipValidation=false` 进入完整视觉 QA | E-05 |
 
 ### F. 最终验收
 
@@ -1536,5 +1536,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase D Task 4 focus_cues 规划完成 | `7933ff6`；冻结 revision `aa177e06905f1fc7b458138ab4c2a3fd1af7a245`、tree `6f3b3f3fc845b045c520ab946e7a4d3858a45618`；shot 级 camera.focus_cues 确定性规划：通用词边界匹配（拉丁词边界+CJK 子串）、trust A/B→camera_zoom、C→highlight_only、D/歧义/不存在→不生成；同 region 相邻合并防重复缩放，短窗降级；无 cue 不写 camera 保护存量指纹；cue 随 visual_beat 进入 Frame 指纹，fail-open 接入；二轮双 Review PASS（ledger `3f509f2`、revision `aa177e0`）；冻结 worktree 与 dev 各 5 组回归通过；REQ-D-02/09 verified |
 | Phase E Task 3 多 Scene 定向恢复 | `4a493de`、`fd21b85`；冻结 revision `8d19ca3ea1ff8d33e8ab5fc2ed19ccbf94a963dd`、tree `e2ad735ad12747cd06f0cd5b7fbd1b186279c723`；同 code 多来源失败 Scene 保序去重，其他失败原因不混入；恢复前目标 frame_html/render 原子落盘 pending，非目标状态与 hash 不变；规格与质量 Review PASS；dev 五组回归与 diff-check 通过；REQ-E-06/07 verified |
 | Phase E Task 4 Render 身份与重启恢复 | `7d5f0cf`、`53056ad`、`d209bed`、`0a4f000`；冻结 revision `c91f07dc9f566851e3e57a4252338f91d20cdf8b`、tree `aad962a0bf4c252dc5c21f1cdcc0988fa9acdaf7`；Render 身份覆盖 HTML、输出参数、时长、renderer contract、正式素材字节与 MP4；原子失效后磁盘重载只恢复目标 Scene，非目标产物复用且旧下游结果不可复用；新旧 checkpoint key 聚合闭合；双 Review PASS；dev 十一组回归与 diff-check 通过；REQ-E-08/09 verified |
+| Phase E Task 5 正式视觉 QA 链路 | `5bdfe9f`、`51f906b`；冻结 revision `c147d3a0c22f8082ff60ab83c93ed4b827363ff0`、tree `ea98f94f88337bf53d4e2c1fbbdace262644351a`；正式 Preview 与 `generateHtmlVideo(skipValidation:false)` 均使用真实 Chrome、ffmpeg、ffprobe 和完整 Visual QA；真实输出 `640×360/12fps`，Compose/Duration Verify 完成，Contact Sheet 与当前 run 路径、文件非空及字幕 RGB 像素直接验证；共享 blocking issue 投影为失败，明确非阻断 `contact_sheet_too_small` 保留成片；规格与质量 Review PASS；dev 四组普通回归、`RUN_HTML_VIDEO_REAL_RENDER=1 + PIXEL_CHECK=1` 真实烟测与 diff-check 通过；REQ-E-10 verified，Phase E complete |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
