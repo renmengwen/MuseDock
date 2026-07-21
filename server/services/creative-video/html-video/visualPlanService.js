@@ -628,6 +628,7 @@ function assignMotionOrchestration(visualPlan = {}, { styleProfile = null } = {}
 module.exports = {
   STYLE_PROFILES,
   buildVisualPlan,
+  canonicalCaptionTrack,
   chooseStyleProfile,
   splitScene,
   resolveThemeTokens,
