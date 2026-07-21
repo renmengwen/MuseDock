@@ -696,7 +696,8 @@ async function inspectFrameHtmlLayout(options = {}) {
         window.__hvPlayAll();
       }
       if (!trusted) return { continuous: false, reset: true };
-      if (Math.abs(Number(clock.timeSec())) > 0.005) return { continuous: false, reset: false };
+      const resetTime = Number(clock.timeSec());
+      if (!Number.isFinite(resetTime) || Math.abs(resetTime) > 0.005) return { continuous: false, reset: false };
       if (typeof window.__hvUnfreeze === 'function') window.__hvUnfreeze();
       clock.play();
       return { continuous: true, reset: true };

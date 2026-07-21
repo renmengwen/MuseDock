@@ -142,6 +142,26 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.equal(constantClock.success, false);
     assert.ok(constantClock.issues.some(issue => issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE'));
 
+    const nanClockPath = path.join(timelineDir, 'nan-clock.html');
+    await fs.writeFile(nanClockPath, `<!doctype html><html><body><p data-text-key="body">NaN 时钟</p><script>
+      window.__hvPlaybackClock={
+        __hvOwner:'musedock-playback-clock-v1',subscribe:function(){},play:function(){},pause:function(){},
+        timeSec:function(){return NaN},paused:function(){return false},setTime:function(){}
+      };
+      </script></body></html>`, 'utf8');
+    const nanStartedAt = Date.now();
+    const nanClock = await inspectFrameHtmlLayout({
+      htmlPath: nanClockPath,
+      frame: { id: 'scene_nan_clock', duration_sec: 10 },
+      resolution,
+      sampleTimesSec: [9],
+    });
+    assert.ok(Date.now() - nanStartedAt < 5000, 'NaN 时钟必须在归零检查快速失败');
+    assert.equal(nanClock.success, false);
+    assert.equal(nanClock.metrics.skipped, false);
+    assert.deepEqual(nanClock.metrics.samples, []);
+    assert.ok(nanClock.issues.some(issue => issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE'));
+
     const stalledClockPath = path.join(timelineDir, 'stalled-clock.html');
     await fs.writeFile(stalledClockPath, `<!doctype html><html><body>
       <p data-text-key="body">停滞时钟</p><script>
