@@ -725,11 +725,23 @@ async function inspectFrameHtmlLayout(options = {}) {
     let elapsedSec = 0;
     for (const sampleTimeSec of samples) {
       if (continuousPlayback) {
-        const currentTime = await page.evaluate(() => Number(window.__hvPlaybackClock.timeSec())).catch(() => 0);
-        const remainingMs = Math.max(0, sampleTimeSec - (Number.isFinite(currentTime) ? currentTime : 0)) * 1000;
+        const currentTime = await page.evaluate(() => Number(window.__hvPlaybackClock.timeSec())).catch(() => NaN);
+        if (!Number.isFinite(currentTime)) {
+          const issue = makeIssue({
+            code: 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE',
+            frameId,
+            sampleTimeSec,
+            message: '布局 QA 检测到共享播放时钟返回了无效时间。',
+          });
+          return { success: false, issues: [issue], metrics };
+        }
+        const remainingMs = Math.max(0, sampleTimeSec - currentTime) * 1000;
         try {
           await page.waitForFunction(
-            time => window.__hvPlaybackClock.timeSec() >= time,
+            (time) => {
+              const current = Number(window.__hvPlaybackClock.timeSec());
+              return !Number.isFinite(current) || current >= time;
+            },
             sampleTimeSec,
             { timeout: Math.max(500, Math.ceil(remainingMs + 750)) },
           );
@@ -739,7 +751,8 @@ async function inspectFrameHtmlLayout(options = {}) {
             try {
               clock.pause();
               clock.setTime(time);
-              return Math.abs(Number(clock.timeSec()) - time) <= 0.005;
+              const reached = Number(clock.timeSec());
+              return Number.isFinite(reached) && Math.abs(reached - time) <= 0.005;
             } catch (_) {
               return false;
             }
@@ -756,18 +769,54 @@ async function inspectFrameHtmlLayout(options = {}) {
           }
           continuousPlayback = false;
         }
+        if (continuousPlayback) {
+          const reachedTime = await page.evaluate(() => Number(window.__hvPlaybackClock.timeSec())).catch(() => NaN);
+          if (!Number.isFinite(reachedTime)) {
+            const issue = makeIssue({
+              code: 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE',
+              frameId,
+              sampleTimeSec,
+              message: '布局 QA 检测到共享播放时钟在采样时返回了无效时间。',
+            });
+            return { success: false, issues: [issue], metrics };
+          }
+        }
       } else {
-        const timelineSet = await page.evaluate((time) => {
+        const timelinePosition = await page.evaluate((time) => {
           const clock = window.__hvPlaybackClock;
           const ownedClock = clock?.__hvOwner === 'musedock-playback-clock-v1'
             && typeof clock.setTime === 'function' && typeof clock.timeSec === 'function';
-          if (typeof window.__mpSetTimelineTime === 'function') window.__mpSetTimelineTime(time);
-          else if (ownedClock) clock.setTime(time);
-          else return false;
-          if (ownedClock && Math.abs(Number(clock.timeSec()) - time) > 0.005) clock.setTime(time);
-          return !ownedClock || Math.abs(Number(clock.timeSec()) - time) <= 0.005;
-        }, sampleTimeSec).catch(() => false);
-        const waitSec = timelineSet ? 0 : Math.max(0, sampleTimeSec - elapsedSec);
+          const setter = typeof window.__mpSetTimelineTime === 'function' ? window.__mpSetTimelineTime : null;
+          if (!setter && !ownedClock) return { available: false, positioned: false };
+          try {
+            if (setter) setter(time);
+            else clock.setTime(time);
+            if (!ownedClock) return { available: true, positioned: true };
+            let reached = Number(clock.timeSec());
+            if (!Number.isFinite(reached) || Math.abs(reached - time) > 0.005) {
+              clock.setTime(time);
+              reached = Number(clock.timeSec());
+            }
+            return {
+              available: true,
+              positioned: Number.isFinite(reached) && Math.abs(reached - time) <= 0.005,
+              reached,
+            };
+          } catch (error) {
+            return { available: true, positioned: false, error: error?.message || String(error) };
+          }
+        }, sampleTimeSec).catch(error => ({ available: true, positioned: false, error: error?.message || String(error) }));
+        if (timelinePosition.available && !timelinePosition.positioned) {
+          const issue = makeIssue({
+            code: 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE',
+            frameId,
+            sampleTimeSec,
+            message: '布局 QA 无法将共享播放时钟定位到当前采样时间。',
+            details: { error: timelinePosition.error || `reached ${timelinePosition.reached}` },
+          });
+          return { success: false, issues: [issue], metrics };
+        }
+        const waitSec = timelinePosition.available ? 0 : Math.max(0, sampleTimeSec - elapsedSec);
         if (waitSec > 0) {
           await page.waitForTimeout(Math.round(waitSec * 1000));
           elapsedSec += waitSec;

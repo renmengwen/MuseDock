@@ -162,6 +162,24 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.deepEqual(nanClock.metrics.samples, []);
     assert.ok(nanClock.issues.some(issue => issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE'));
 
+    const infinityAfterPlayPath = path.join(timelineDir, 'infinity-after-play.html');
+    await fs.writeFile(infinityAfterPlayPath, `<!doctype html><html><body><p data-text-key="body">播放后无穷时钟</p><script>
+      (function(){var time=0,playing=false;window.__hvPlaybackClock={
+        __hvOwner:'musedock-playback-clock-v1',subscribe:function(){},play:function(){playing=true},pause:function(){playing=false},
+        timeSec:function(){return playing?Infinity:time},paused:function(){return !playing},setTime:function(value){time=Number(value)}
+      };})();
+      </script></body></html>`, 'utf8');
+    const infinityAfterPlay = await inspectFrameHtmlLayout({
+      htmlPath: infinityAfterPlayPath,
+      frame: { id: 'scene_infinity_after_play', duration_sec: 10 },
+      resolution,
+      sampleTimesSec: [9],
+    });
+    assert.equal(infinityAfterPlay.success, false);
+    assert.equal(infinityAfterPlay.metrics.skipped, false);
+    assert.deepEqual(infinityAfterPlay.metrics.samples, []);
+    assert.ok(infinityAfterPlay.issues.some(issue => issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE'));
+
     const stalledClockPath = path.join(timelineDir, 'stalled-clock.html');
     await fs.writeFile(stalledClockPath, `<!doctype html><html><body>
       <p data-text-key="body">停滞时钟</p><script>
@@ -204,6 +222,28 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.equal(midStallClock.success, false);
     assert.deepEqual(midStallClock.metrics.samples.map(sample => sample.sample_time_sec), [0.05]);
     assert.ok(midStallClock.issues.some(issue => (
+      issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE' && issue.sample_time_sec === 0.2
+    )));
+
+    const nanDuringSeekPath = path.join(timelineDir, 'nan-during-seek.html');
+    await fs.writeFile(nanDuringSeekPath, `<!doctype html><html><body><p data-text-key="body">Seek 中途 NaN</p><script>
+      (function(){var time=0,seeks=0;window.__hvPlaybackClock={
+        __hvOwner:'musedock-playback-clock-v1',subscribe:function(){},play:function(){},pause:function(){},
+        timeSec:function(){return time},paused:function(){return true},setTime:function(value){
+          if(Number(value)===0){time=0;return}seeks+=1;time=seeks===1?Number(value):NaN;
+        }
+      };})();
+      </script></body></html>`, 'utf8');
+    const nanDuringSeek = await inspectFrameHtmlLayout({
+      htmlPath: nanDuringSeekPath,
+      frame: { id: 'scene_nan_during_seek', duration_sec: 1 },
+      resolution,
+      sampleTimesSec: [0.1, 0.2],
+    });
+    assert.equal(nanDuringSeek.success, false);
+    assert.equal(nanDuringSeek.metrics.skipped, false);
+    assert.deepEqual(nanDuringSeek.metrics.samples.map(sample => sample.sample_time_sec), [0.1]);
+    assert.ok(nanDuringSeek.issues.some(issue => (
       issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE' && issue.sample_time_sec === 0.2
     )));
 
