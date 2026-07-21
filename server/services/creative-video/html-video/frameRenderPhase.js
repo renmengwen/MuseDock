@@ -448,7 +448,7 @@ async function renderHtmlVideoFrames({
       });
       const checkpointFrames = objectOrEmpty(current.generation_checkpoint?.stages?.render?.frames);
       const frameStatuses = (Array.isArray(current.frames) ? current.frames : [])
-        .map(item => checkpointFrames[renderCheckpointKey(item)]?.status);
+        .map(item => (checkpointFrames[renderCheckpointKey(item)] || checkpointFrames[item.id])?.status);
       const doneCount = frameStatuses.filter(status => status === 'done').length;
       markCheckpointStage(current, 'render', {
         status: frameStatuses.length && doneCount === frameStatuses.length

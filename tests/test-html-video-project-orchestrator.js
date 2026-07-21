@@ -380,6 +380,30 @@ const { runtimeAssetPolicyAttestation } = require('../server/services/creative-v
   }
 
   {
+    const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-legacy-render-key-'));
+    const project = {
+      output: { resolution: { width: 1920, height: 1080 }, fps: 30, duration: 4 },
+      frames: [
+        { id: 'frame_01', scene_id: 'scene_01', html_path: 'frames/scene_01.html', duration_sec: 2 },
+        { id: 'frame_02', scene_id: 'scene_02', html_path: 'frames/scene_02.html', duration_sec: 2 },
+      ],
+      generation_checkpoint: { stages: { render: { status: 'partial', frames: {
+        frame_01: { status: 'done', mp4_path: 'frames/frame_01.mp4', output_hash: 'legacy-frame-01' },
+      } } } },
+    };
+    const completed = await projectOrchestrator.renderHtmlVideoFrames({
+      projectDir, project, frameIds: ['scene_02'],
+      services: { frameRenderer: { renderFrame: async (_frame, { outputPath }) => ({
+        success: true, output_path: outputPath, diagnostics: [],
+      }) } },
+    });
+    assert.equal(completed.success, true);
+    assert.equal(completed.project.generation_checkpoint.stages.render.frames.frame_01.status, 'done');
+    assert.equal(completed.project.generation_checkpoint.stages.render.frames.scene_02.status, 'done');
+    assert.equal(completed.project.generation_checkpoint.stages.render.status, 'done', '旧 frame.id checkpoint 与规范 scene key 均完成时聚合必须完成');
+  }
+
+  {
     const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-orchestrator-render-scene-key-'));
     let renderCalls = 0;
     const project = {
