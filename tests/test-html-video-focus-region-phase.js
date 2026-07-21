@@ -4,7 +4,14 @@ const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
 
-const { runFocusRegionPhase } = require('../server/services/creative-video/html-video/focusRegionPhase');
+const {
+  FOCUS_ANALYSIS_CONTRACT_VERSION,
+  FOCUS_ANALYSIS_PROMPT_VERSION,
+  runFocusRegionPhase,
+} = require('../server/services/creative-video/html-video/focusRegionPhase');
+const { projectAssetsFromCreativeContext } = require('../server/services/creative-video/html-video/assetUsagePhase');
+const projectStore = require('../server/services/creative-video/html-video/projectStore');
+const { mergeVisualAssets } = require('../server/services/creative/visualAssetContract');
 
 function selectedPlan(...assetIds) {
   return {
@@ -272,11 +279,278 @@ async function testDisabledVisionAndExistingCanonicalSkip() {
   assert.deepEqual(result.diagnostics, []);
 }
 
+function sha256Hex(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+function focusAnalysisRecord(bytes, overrides = {}) {
+  return {
+    version: 1,
+    content_sha256: sha256Hex(bytes),
+    contract_version: FOCUS_ANALYSIS_CONTRACT_VERSION,
+    provider: 'mock-ai',
+    model: 'vision-mock-1',
+    prompt_version: FOCUS_ANALYSIS_PROMPT_VERSION,
+    status: 'empty',
+    ...overrides,
+  };
+}
+
+function visionModel(respond) {
+  const calls = [];
+  return {
+    provider: 'mock-ai',
+    modelId: 'vision-mock-1',
+    calls,
+    callTextModel: async request => {
+      calls.push(request);
+      return respond(request);
+    },
+  };
+}
+
+function regionsResponse(label) {
+  return {
+    success: true,
+    text: JSON.stringify({ regions: [{
+      label, region: { x: 0.1, y: 0.1, width: 0.5, height: 0.5 }, confidence_level: 'high',
+    }] }),
+  };
+}
+
+function respondByBytes(rules) {
+  return request => {
+    const dataUrl = request.messages[0].content[1].image_url.url;
+    for (const [bytes, response] of rules) {
+      if (dataUrl.includes(bytes.toString('base64'))) return response();
+    }
+    throw new Error(`意外的 vision 调用：${dataUrl.slice(0, 64)}`);
+  };
+}
+
+async function createDurableProject(prefix, entries) {
+  const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  await fs.mkdir(path.join(projectDir, 'assets'));
+  for (const { id, bytes } of entries) {
+    await fs.writeFile(path.join(projectDir, 'assets', `${id}.png`), bytes);
+  }
+  await projectStore.saveProject(projectDir, {
+    assets: entries.map(({ id, overrides }) => asset(id, overrides)),
+  });
+  return projectDir;
+}
+
+// 复刻 htmlVideoWorkflow focus phase 之后的正式持久化写入（mergeVisualAssets + 白名单投影）。
+async function persistLikeWorkflow(projectDir, creativeContext) {
+  await projectStore.writeProjectJson(projectDir, current => {
+    current.assets = mergeVisualAssets(
+      Array.isArray(current.assets) ? current.assets : [],
+      projectAssetsFromCreativeContext(creativeContext),
+    );
+    return current;
+  });
+}
+
+// 复刻 resume 水合：进程重启后 creativeContext 只能从 project.assets 恢复。
+async function hydrateLikeWorkflow(projectDir) {
+  const project = await projectStore.loadProject(projectDir);
+  return { asset_context: { assets: mergeVisualAssets([], project.assets) } };
+}
+
+async function testDurableCacheSkipsAnalyzedAssetsAcrossRuns() {
+  const successBytes = Buffer.from('durable-success-bytes');
+  const emptyBytes = Buffer.from('durable-empty-bytes');
+  const failBytes = Buffer.from('durable-fail-bytes');
+  const projectDir = await createDurableProject('focus-region-durable-', [
+    { id: 'success', bytes: successBytes },
+    { id: 'empty', bytes: emptyBytes },
+    { id: 'fail', bytes: failBytes },
+  ]);
+  const plan = selectedPlan('success', 'empty', 'fail');
+  const target = { sourceImageAnalysisEnabled: true };
+
+  const model1 = visionModel(respondByBytes([
+    [successBytes, () => regionsResponse('主体')],
+    [emptyBytes, () => ({ success: true, text: JSON.stringify({ regions: [] }) })],
+    [failBytes, () => ({ success: true, text: 'not-json' })],
+  ]));
+  const run1 = await runFocusRegionPhase({
+    visualPlan: plan,
+    creativeContext: { asset_context: { assets: [asset('success'), asset('empty'), asset('fail')] } },
+    projectDir,
+    target,
+    services: { aiTextModel: model1 },
+  });
+  assert.equal(model1.calls.length, 3);
+  const run1Assets = new Map(run1.creativeContext.asset_context.assets.map(item => [item.id, item]));
+  assert.equal(run1Assets.get('success').focus_regions.length, 1);
+  assert.deepEqual(
+    run1Assets.get('success').focus_analysis,
+    focusAnalysisRecord(successBytes, { status: 'success' }),
+  );
+  assert.deepEqual(run1Assets.get('empty').focus_regions, []);
+  assert.deepEqual(run1Assets.get('empty').focus_analysis, focusAnalysisRecord(emptyBytes));
+  assert.deepEqual(run1Assets.get('fail').focus_regions, []);
+  assert.equal(
+    Object.hasOwn(run1Assets.get('fail'), 'focus_analysis'),
+    false,
+    'vision 失败不得写 focus_analysis，跨 run 必须允许重试',
+  );
+  assert.equal(run1.diagnostics.length, 1, 'vision 成功但空结果不再是失败告警');
+  assert.match(run1.diagnostics[0].user_message, /fail/);
+
+  // durable 记录必须在 phase 内落盘，且能扛住 workflow 白名单投影写入。
+  const persistedBefore = await projectStore.loadProject(projectDir);
+  assert.deepEqual(
+    persistedBefore.assets.find(item => item.id === 'empty').focus_analysis,
+    focusAnalysisRecord(emptyBytes),
+  );
+  await persistLikeWorkflow(projectDir, run1.creativeContext);
+  const persisted = await projectStore.loadProject(projectDir);
+  assert.deepEqual(
+    persisted.assets.find(item => item.id === 'success').focus_analysis,
+    focusAnalysisRecord(successBytes, { status: 'success' }),
+  );
+  assert.equal(persisted.assets.find(item => item.id === 'success').focus_regions.length, 1);
+  assert.deepEqual(
+    persisted.assets.find(item => item.id === 'empty').focus_analysis,
+    focusAnalysisRecord(emptyBytes),
+  );
+  assert.equal(Object.hasOwn(persisted.assets.find(item => item.id === 'fail'), 'focus_analysis'), false);
+
+  // 第二次 run：success 靠非空 canonical focus_regions 跳过；empty 靠 durable 记录跳过（核心修复）；
+  // fail 没有记录，必须重试。
+  const model2 = visionModel(respondByBytes([
+    [failBytes, () => regionsResponse('重试主体')],
+  ]));
+  const run2 = await runFocusRegionPhase({
+    visualPlan: plan,
+    creativeContext: await hydrateLikeWorkflow(projectDir),
+    projectDir,
+    target,
+    services: { aiTextModel: model2 },
+  });
+  assert.equal(model2.calls.length, 1, '第二次 run 只允许失败素材重试一次 vision');
+  const run2Assets = new Map(run2.creativeContext.asset_context.assets.map(item => [item.id, item]));
+  assert.equal(run2Assets.get('success').focus_regions.length, 1);
+  assert.deepEqual(run2Assets.get('empty').focus_regions, []);
+  assert.deepEqual(run2Assets.get('empty').focus_analysis, focusAnalysisRecord(emptyBytes));
+  assert.equal(run2Assets.get('fail').focus_regions.length, 1);
+  assert.deepEqual(
+    run2Assets.get('fail').focus_analysis,
+    focusAnalysisRecord(failBytes, { status: 'success' }),
+  );
+  assert.deepEqual(run2.diagnostics, [], '缓存命中与重试成功都不得产生告警');
+
+  // 第三次 run：全部命中（fail 已成功），零调用零告警。
+  const model3 = visionModel(() => { throw new Error('第三次 run 不得调用 vision'); });
+  await persistLikeWorkflow(projectDir, run2.creativeContext);
+  const run3 = await runFocusRegionPhase({
+    visualPlan: plan,
+    creativeContext: await hydrateLikeWorkflow(projectDir),
+    projectDir,
+    target,
+    services: { aiTextModel: model3 },
+  });
+  assert.equal(model3.calls.length, 0);
+  assert.deepEqual(run3.diagnostics, []);
+  await fs.rm(projectDir, { recursive: true, force: true });
+}
+
+async function testDurableCacheInvalidationTriggersReanalysis() {
+  const matchedBytes = Buffer.from('cache-matched-bytes');
+  const changedBytes = Buffer.from('cache-changed-new-bytes');
+  const staleBytes = {
+    prompt: Buffer.from('cache-stale-prompt-bytes'),
+    contract: Buffer.from('cache-stale-contract-bytes'),
+    model: Buffer.from('cache-stale-model-bytes'),
+    provider: Buffer.from('cache-stale-provider-bytes'),
+    injected: Buffer.from('cache-injected-bytes'),
+    inconsistent: Buffer.from('cache-inconsistent-bytes'),
+  };
+  const manualRegion = {
+    id: 'manual_region', label: '手工锁定', aliases: [],
+    region: { x: 0.1, y: 0.1, width: 0.3, height: 0.3 },
+    method: 'manual', confidence_level: 'high',
+    verification: { status: 'verified', method: 'user_review', evidence: '用户框选' },
+  };
+  const entries = [
+    { id: 'matched', bytes: matchedBytes, overrides: { focus_regions: [], focus_analysis: focusAnalysisRecord(matchedBytes) } },
+    { id: 'changed', bytes: changedBytes, overrides: { focus_regions: [], focus_analysis: focusAnalysisRecord(Buffer.from('cache-changed-old-bytes')) } },
+    { id: 'stale_prompt', bytes: staleBytes.prompt, overrides: { focus_regions: [], focus_analysis: focusAnalysisRecord(staleBytes.prompt, { prompt_version: 'stale-prompt-v0' }) } },
+    { id: 'stale_contract', bytes: staleBytes.contract, overrides: { focus_regions: [], focus_analysis: focusAnalysisRecord(staleBytes.contract, { contract_version: 'stale-contract-v0' }) } },
+    { id: 'stale_model', bytes: staleBytes.model, overrides: { focus_regions: [], focus_analysis: focusAnalysisRecord(staleBytes.model, { model: 'vision-mock-0' }) } },
+    { id: 'stale_provider', bytes: staleBytes.provider, overrides: { focus_regions: [], focus_analysis: focusAnalysisRecord(staleBytes.provider, { provider: 'other-ai' }) } },
+    { id: 'injected', bytes: staleBytes.injected, overrides: { focus_regions: [], focus_analysis: { ...focusAnalysisRecord(staleBytes.injected), injected: '模型注入字段' } } },
+    { id: 'inconsistent', bytes: staleBytes.inconsistent, overrides: { focus_regions: [], focus_analysis: focusAnalysisRecord(staleBytes.inconsistent, { status: 'success' }) } },
+    { id: 'manual_locked', bytes: Buffer.from('cache-manual-bytes'), overrides: { focus_regions: [manualRegion], focus_analysis: focusAnalysisRecord(Buffer.from('cache-manual-bytes')) } },
+  ];
+  const projectDir = await createDurableProject('focus-region-invalidation-', entries);
+  const model = visionModel(regionsRequest => {
+    const dataUrl = regionsRequest.messages[0].content[1].image_url.url;
+    assert.ok(
+      !dataUrl.includes(matchedBytes.toString('base64')),
+      '四元组完全匹配的 empty 记录不得再调用 vision',
+    );
+    return regionsResponse('重析主体');
+  });
+  const result = await runFocusRegionPhase({
+    visualPlan: selectedPlan(...entries.map(entry => entry.id)),
+    // 不经水合直接传原始 ctx：非法 injected 记录必须由 phase 自身 normalize 丢弃并安全重析。
+    creativeContext: { asset_context: { assets: entries.map(({ id, overrides }) => asset(id, overrides)) } },
+    projectDir,
+    target: { sourceImageAnalysisEnabled: true },
+    services: { aiTextModel: model },
+  });
+  assert.equal(model.calls.length, 7, '除 matched 与 manual_locked 外全部重析');
+  const resultAssets = new Map(result.creativeContext.asset_context.assets.map(item => [item.id, item]));
+  assert.deepEqual(resultAssets.get('matched').focus_regions, []);
+  assert.deepEqual(resultAssets.get('matched').focus_analysis, focusAnalysisRecord(matchedBytes));
+  for (const id of ['changed', 'stale_prompt', 'stale_contract', 'stale_model', 'stale_provider', 'injected', 'inconsistent']) {
+    const item = resultAssets.get(id);
+    assert.equal(item.focus_regions.length, 1, `${id} 应重析出新 focus_regions`);
+    assert.deepEqual(
+      item.focus_analysis,
+      focusAnalysisRecord(await fs.readFile(path.join(projectDir, 'assets', `${id}.png`)), { status: 'success' }),
+      `${id} 重析成功后应覆盖为当前四元组记录`,
+    );
+  }
+  assert.deepEqual(
+    resultAssets.get('manual_locked').focus_regions.map(region => region.id),
+    ['manual_region'],
+    '手工 region 永不被缓存或重析覆盖',
+  );
+  assert.deepEqual(result.diagnostics, []);
+  await fs.rm(projectDir, { recursive: true, force: true });
+}
+
+async function testMissingModelWritesNoRecord() {
+  const bytes = Buffer.from('no-model-bytes');
+  const projectDir = await createDurableProject('focus-region-no-model-', [{ id: 'plain', bytes }]);
+  const result = await runFocusRegionPhase({
+    visualPlan: selectedPlan('plain'),
+    creativeContext: await hydrateLikeWorkflow(projectDir),
+    projectDir,
+    target: { sourceImageAnalysisEnabled: true },
+    services: {},
+  });
+  const item = result.creativeContext.asset_context.assets[0];
+  assert.deepEqual(item.focus_regions, []);
+  assert.equal(Object.hasOwn(item, 'focus_analysis'), false, '缺模型配置时不得写 focus_analysis');
+  assert.equal(result.diagnostics.length, 1);
+  const persisted = await projectStore.loadProject(projectDir);
+  assert.equal(Object.hasOwn(persisted.assets[0], 'focus_analysis'), false);
+  await fs.rm(projectDir, { recursive: true, force: true });
+}
+
 (async () => {
   await testDomWinsAndUnselectedIsUntouched();
   await testDomRequiresActualProjectBytesBinding();
   await testVisionDedupesByBytesAndFailsClosed();
   await testDisabledVisionAndExistingCanonicalSkip();
+  await testDurableCacheSkipsAnalyzedAssetsAcrossRuns();
+  await testDurableCacheInvalidationTriggersReanalysis();
+  await testMissingModelWritesNoRecord();
   console.log('html-video focus region phase tests passed');
 })().catch(error => {
   console.error(error);

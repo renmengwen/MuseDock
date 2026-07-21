@@ -2,12 +2,17 @@ const crypto = require('crypto');
 const fs = require('fs/promises');
 const path = require('path');
 
-const { normalizeFocusRegions } = require('../../creative/visualAssetContract');
+const aiModelConfig = require('../../ai/aiModelConfig');
+const { normalizeFocusRegions, normalizeFocusAnalysis } = require('../../creative/visualAssetContract');
 const { createDiagnostic } = require('./diagnostics');
 const projectStore = require('./projectStore');
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_REGIONS = 20;
+// 焦点分析缓存契约版本：focus_regions 结构或校验语义变化时必须同步 bump，否则旧缓存会被误判为可复用。
+const FOCUS_ANALYSIS_CONTRACT_VERSION = 'focus-region-contract-v1';
+// 焦点分析 prompt 版本：修改下方 vision prompt 内容时必须同步 bump，否则旧缓存会被误判为可复用。
+const FOCUS_ANALYSIS_PROMPT_VERSION = 'focus-region-prompt-v1';
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -134,6 +139,57 @@ function failureDiagnostic(assetId) {
   });
 }
 
+// 分析身份 = 本次 vision 调用实际使用的 provider/model：优先取注入 model 自带标识（测试替身/自定义模型），
+// 否则读 aiModelConfig 运行时配置（与 aiTextModel.callTextModel 的解析来源一致）。缺配置返回 null，
+// 此时不写 focus_analysis 记录，也不做缓存匹配。
+async function resolveAnalysisIdentity(model) {
+  if (!model || typeof model.callTextModel !== 'function') return null;
+  const declaredProvider = text(model.provider);
+  const declaredModel = text(model.modelId || model.model_id);
+  if (declaredProvider && declaredModel) return { provider: declaredProvider, model: declaredModel };
+  try {
+    const config = await aiModelConfig.getRuntimeConfig('text');
+    const provider = text(config?.provider);
+    const modelId = text(config?.modelId);
+    if (config?.enabled === true && provider && modelId) return { provider, model: modelId };
+  } catch {
+    // 配置读取失败按缺配置处理。
+  }
+  return null;
+}
+
+// durable 缓存匹配：focus_analysis 四元组（bytes 哈希 + 契约版本 + provider/model + prompt 版本）全等才命中。
+// 只有 status=empty 的记录会走到这里被复用：status=success 正常伴随非空 focus_regions（上方已跳过素材），
+// 能进入 vision 分支说明 regions 已丢失，视为不一致状态重新分析，避免素材永远失去焦点区域。
+function matchedFocusAnalysis(asset, imageHash, identity) {
+  const record = normalizeFocusAnalysis(asset.focus_analysis);
+  if (!record || record.status !== 'empty') return null;
+  return record.content_sha256 === imageHash
+    && record.contract_version === FOCUS_ANALYSIS_CONTRACT_VERSION
+    && record.prompt_version === FOCUS_ANALYSIS_PROMPT_VERSION
+    && record.provider === identity.provider
+    && record.model === identity.model
+    ? record : null;
+}
+
+// durable 记录由 phase 直接落盘：workflow 的白名单投影（projectAssetsFromCreativeContext）不含
+// focus_analysis，若只写回 creativeContext，进程重启后记录会丢失。落盘尽力而为：
+// project.json 缺失或写入失败只影响下次复用，不打断 workflow。
+async function persistFocusAnalysisRecords(projectDir, records) {
+  if (!records.size || !text(projectDir)) return;
+  try {
+    await projectStore.writeProjectJson(projectDir, current => {
+      for (const entry of (Array.isArray(current.assets) ? current.assets : [])) {
+        const record = records.get(text(entry?.id || entry?.asset_id));
+        if (record) entry.focus_analysis = { ...record };
+      }
+      return current;
+    });
+  } catch {
+    // 尽力而为，失败时保持静默降级。
+  }
+}
+
 async function visionFocusRegions({ asset, image, model, cache }) {
   const { bytes, hash } = image;
   if (!cache.has(hash)) {
@@ -182,6 +238,13 @@ async function runFocusRegionPhase({
   const updates = new Map();
   const diagnostics = [];
   const cache = new Map();
+  const durableRecords = new Map();
+  // 身份解析懒执行且整个 run 只做一次：DOM 命中或未走 vision 的 run 不读模型配置。
+  let identityPromise = null;
+  const resolveIdentity = () => {
+    if (!identityPromise) identityPromise = resolveAnalysisIdentity(services.aiTextModel);
+    return identityPromise;
+  };
   for (const id of selectedAssetIds(visualPlan)) {
     const asset = firstAssetById.get(id);
     if (!asset || text(asset.media_type || asset.type || 'image').toLowerCase() !== 'image') continue;
@@ -218,7 +281,14 @@ async function runFocusRegionPhase({
       }
     }
     if (!visionEnabled) continue;
+    const identity = await resolveIdentity();
+    if (identity && matchedFocusAnalysis(asset, image.hash, identity)) {
+      // durable 缓存命中（empty 结果）：跳过 vision 调用，维持 focus_regions=[]，不产生告警。
+      updates.set(asset, { ...asset, focus_regions: [] });
+      continue;
+    }
     let regions = [];
+    let analysisStatus = '';
     try {
       regions = await visionFocusRegions({
         asset,
@@ -226,12 +296,30 @@ async function runFocusRegionPhase({
         model: services.aiTextModel,
         cache,
       });
-      if (!regions.length) throw new Error('empty_regions');
+      // vision 成功但空结果是合法分析结论（status=empty），不再按失败告警；失败/超时/非 JSON 仍走 catch。
+      analysisStatus = regions.length ? 'success' : 'empty';
     } catch {
       diagnostics.push(failureDiagnostic(id));
     }
-    updates.set(asset, { ...asset, focus_regions: normalizeFocusRegions(regions) });
+    // 对 cache 命中结果二次 normalizeFocusRegions 是跨 asset 深拷贝隔离：同 bytes 素材不得共享
+    // region 对象（有测试锁定该行为），不可当冗余删除。
+    const nextAsset = { ...asset, focus_regions: normalizeFocusRegions(regions) };
+    if (analysisStatus && identity) {
+      // 只有分析成功（success/empty）才写 durable 记录；失败不写，保证跨 run 可重试。
+      nextAsset.focus_analysis = {
+        version: 1,
+        content_sha256: image.hash,
+        contract_version: FOCUS_ANALYSIS_CONTRACT_VERSION,
+        provider: identity.provider,
+        model: identity.model,
+        prompt_version: FOCUS_ANALYSIS_PROMPT_VERSION,
+        status: analysisStatus,
+      };
+      durableRecords.set(id, nextAsset.focus_analysis);
+    }
+    updates.set(asset, nextAsset);
   }
+  await persistFocusAnalysisRecords(projectDir, durableRecords);
   if (!updates.size && !diagnostics.length) return { creativeContext, diagnostics };
   const nextAssetContext = {
     ...assetContext,
@@ -254,6 +342,8 @@ async function runFocusRegionPhase({
 module.exports = {
   MAX_IMAGE_BYTES,
   MAX_REGIONS,
+  FOCUS_ANALYSIS_CONTRACT_VERSION,
+  FOCUS_ANALYSIS_PROMPT_VERSION,
   selectedAssetIds,
   runFocusRegionPhase,
 };
