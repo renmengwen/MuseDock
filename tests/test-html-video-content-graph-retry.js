@@ -30,6 +30,32 @@ function sceneSpec() {
   };
 }
 
+function bindingSceneSpec() {
+  return {
+    title: '上传素材场景绑定',
+    scenes: Array.from({ length: 8 }, (_, index) => ({
+      id: `scene_${String(index + 1).padStart(2, '0')}`,
+      duration: 2,
+      kind: 'text',
+    })),
+  };
+}
+
+function graphTextFor(spec, assetRefs = {}) {
+  return JSON.stringify({
+    synopsis: '上传素材场景绑定',
+    nodes: spec.scenes.map(scene => ({
+      id: scene.id,
+      kind: 'text',
+      label: scene.id,
+      durationSec: 2,
+      text: scene.id,
+      ...(assetRefs[scene.id] ? { asset_refs: assetRefs[scene.id] } : {}),
+    })),
+    edges: [],
+  });
+}
+
 async function createRegistry() {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-content-graph-retry-'));
   return { rootDir };
@@ -49,6 +75,83 @@ async function main() {
   ].join('\n'), sceneSpec());
   assert.equal(trailingComma.success, true);
   assert.deepEqual(trailingComma.graph.nodes.map(node => node.id), ['scene_01']);
+
+  const explicitSpec = bindingSceneSpec();
+  const explicitAssets = [
+    { id: 'upload_s02', file_name: 'S02.png', requirement: 'required' },
+    { id: 'upload_s07', file_name: 'S07.png', requirement: 'required' },
+    { id: 'upload_s08', file_name: 'S08.png', requirement: 'required' },
+    { id: 'upload_existing', file_name: 'existing.png', requirement: 'required' },
+    { id: 'upload_ambiguous', file_name: 'ambiguous.png', requirement: 'required' },
+    { id: 'upload_missing', file_name: 'missing.png', requirement: 'required' },
+    { id: 'upload_multi', file_name: 'multi.png', requirement: 'required' },
+    { id: 'upload_unknown', file_name: 'unknown.png', requirement: 'required' },
+    { id: 'upload_generated', file_name: 'generated.png', requirement: 'required', generation: { scene_id: 'scene_03' } },
+    { id: 'article_required', file_name: 'article.png', requirement: 'required' },
+  ];
+  const explicitContext = {
+    input: {
+      raw_text: [
+        'S02 使用 S02.png。',
+        'S07 展示 S07.png；Scene 8 展示 S08.png。',
+        'S02 不得覆盖 existing.png。',
+        'S02 与 S07 同时提到 ambiguous.png。',
+        '这里提到 missing.png 但没有场景。',
+        'S02 使用 multi.png；S07 再次使用 multi.png。',
+        'S09 使用 unknown.png。',
+        'S03 使用 generated.png。S04 使用 article.png。',
+      ].join('\n'),
+      source_hint: 'Scene 8 展示 S08.png；Scene 8 展示 S08.png。',
+    },
+    asset_context: { assets: explicitAssets },
+  };
+  const explicitBinding = await workflow.generateContentGraphWithRetry({
+    sceneSpec: explicitSpec,
+    creativeContext: explicitContext,
+    model: {
+      async callTextModel() {
+        return { success: true, text: graphTextFor(explicitSpec, {
+          scene_01: [{ asset_id: 'upload_existing', usage: 'showcase', reason: '模型已有引用' }],
+        }) };
+      },
+    },
+  });
+  assert.equal(explicitBinding.success, true);
+  const refsByScene = Object.fromEntries(explicitBinding.contentGraph.nodes.map(node => [node.id, node.asset_refs || []]));
+  assert.deepEqual(refsByScene.scene_02, [{ asset_id: 'upload_s02', usage: 'subject', reason: '用户明确指定用于该场景' }]);
+  assert.deepEqual(refsByScene.scene_07, [{ asset_id: 'upload_s07', usage: 'subject', reason: '用户明确指定用于该场景' }]);
+  assert.deepEqual(refsByScene.scene_08, [{ asset_id: 'upload_s08', usage: 'subject', reason: '用户明确指定用于该场景' }]);
+  assert.deepEqual(refsByScene.scene_01, [{ asset_id: 'upload_existing', usage: 'showcase', reason: '模型已有引用' }]);
+  assert.deepEqual(
+    explicitBinding.contentGraph.nodes.flatMap(node => node.asset_refs || []).map(ref => ref.asset_id).sort(),
+    ['upload_existing', 'upload_s02', 'upload_s07', 'upload_s08'],
+    '歧义、缺失、跨场景、Scene 不存在、生成素材和非 upload 均不得猜测绑定',
+  );
+
+  for (const fallbackMode of ['provider_failed', 'invalid_json']) {
+    let calls = 0;
+    const fallback = await workflow.generateContentGraphWithRetry({
+      sceneSpec: explicitSpec,
+      creativeContext: {
+        input: { raw_text: 'Scene 8 使用 fallback.png。' },
+        asset_context: { assets: [{ id: `upload_${fallbackMode}`, file_name: 'fallback.png', requirement: 'required' }] },
+      },
+      model: {
+        async callTextModel() {
+          calls += 1;
+          return calls === 1
+            ? { success: false, message: '返回结果缺少文本内容。' }
+            : fallbackMode === 'invalid_json'
+              ? { success: true, text: '{bad json' }
+              : { success: false, message: '返回结果缺少文本内容。' };
+        },
+      },
+    });
+    assert.equal(fallback.success, true);
+    assert.deepEqual(fallback.contentGraph.nodes.find(node => node.id === 'scene_08').asset_refs, [
+      { asset_id: `upload_${fallbackMode}`, usage: 'subject', reason: '用户明确指定用于该场景' },
+    ]);
+  }
 
   const retryInvalidCalls = [];
   const retryInvalid = await workflow.generateContentGraphWithRetry({

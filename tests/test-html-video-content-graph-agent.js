@@ -98,6 +98,31 @@ assert.match(identityLines.formal_generated, /不是来源证据/);
 assert.match(identityLines.legacy_generated, /不是来源证据/);
 assert.doesNotMatch(identityLines.formal_conflict, /不是来源证据/);
 
+const requiredAssets = Array.from({ length: 10 }, (_, index) => ({
+  id: `upload_required_${index + 1}`,
+  file_name: `必用素材-${index + 1}.png`,
+  alt: `不应优先显示的 alt ${index + 1}`,
+  path: `assets/required-${index + 1}.png`,
+  requirement: 'required',
+  ...(index === 9 ? { image_analysis: { should_use: false, avoid_reason: '模型不建议' } } : {}),
+}));
+const optionalAssets = Array.from({ length: 10 }, (_, index) => ({
+  id: `optional_${index + 1}`,
+  file_name: `可选素材-${index + 1}.png`,
+  path: `assets/optional-${index + 1}.png`,
+  source: 'article',
+}));
+const requiredPromptContext = { asset_context: { assets: [...requiredAssets, ...optionalAssets] } };
+const requiredPrompt = agent.buildContentGraphPrompt({ sceneSpec, creativeContext: requiredPromptContext });
+for (const asset of requiredAssets) {
+  assert.match(requiredPrompt, new RegExp(`asset_id=${asset.id}`), '超过 8 张的 required 素材也必须全部进入 Prompt');
+  assert.match(requiredPrompt, new RegExp(asset.file_name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), '素材 label 必须优先 file_name');
+}
+assert.equal(optionalAssets.filter(asset => requiredPrompt.includes(`asset_id=${asset.id}`)).length, 8, '非 required 素材继续限制为 8 张');
+assert.match(requiredPrompt, /requirement=required 的素材必须绑定并实际进入画面，不得因图片分析或叙事偏好省略/);
+const requiredRetryPrompt = agent.buildRetryPrompt(sceneSpec, requiredPromptContext, {}, requiredPrompt, 2);
+for (const asset of requiredAssets) assert.match(requiredRetryPrompt, new RegExp(`asset_id=${asset.id}`));
+
 const retryPromptAttempt1 = agent.buildRetryPrompt(sceneSpec, creativeContext, { duration_sec: 8 }, prompt, 1);
 assert.match(retryPromptAttempt1, /scene_01/);
 assert.match(retryPromptAttempt1, /基础版价格/);

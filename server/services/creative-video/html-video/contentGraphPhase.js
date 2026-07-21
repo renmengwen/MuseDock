@@ -127,6 +127,66 @@ function ensureGraphAiHasText(graphAi) {
   return graphAi;
 }
 
+function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext = {}) {
+  const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
+  const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
+  const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
+  if (!nodes.length || !scenes.length || !assets.length) return graph;
+  const referenced = new Set(nodes.flatMap(node => (
+    Array.isArray(node?.asset_refs) ? node.asset_refs.map(ref => String(ref?.asset_id || '').trim()) : []
+  )).filter(Boolean));
+  const scenesByNumber = new Map();
+  scenes.forEach((scene, index) => {
+    const sceneId = String(scene?.id || '').trim();
+    const numbers = new Set([index + 1]);
+    const suffix = sceneId.match(/(?:scene|s)[_:\s-]*0*(\d+)$/i);
+    if (suffix) numbers.add(Number(suffix[1]));
+    for (const number of numbers) {
+      if (!scenesByNumber.has(number)) scenesByNumber.set(number, new Set());
+      scenesByNumber.get(number).add(sceneId);
+    }
+  });
+  const inputs = [creativeContext?.input?.raw_text, creativeContext?.input?.source_hint]
+    .map(value => String(value || ''))
+    .filter(Boolean);
+  for (const asset of assets) {
+    const assetId = String(asset?.id || asset?.asset_id || '').trim();
+    const fileName = String(asset?.file_name || '').trim();
+    if (!assetId.startsWith('upload_') || asset?.requirement !== 'required' || !fileName
+      || String(asset?.generation?.scene_id || '').trim() || referenced.has(assetId)) continue;
+    const sceneNumbers = new Set();
+    let occurrences = 0;
+    let ambiguous = false;
+    for (const input of inputs) {
+      for (let index = input.indexOf(fileName); index >= 0; index = input.indexOf(fileName, index + fileName.length)) {
+        occurrences += 1;
+        const before = input.slice(0, index).search(/[^。.;；\r\n]*$/);
+        const afterOffset = input.slice(index + fileName.length).search(/[。.;；\r\n]/);
+        const sentence = input.slice(
+          before < 0 ? 0 : before,
+          afterOffset < 0 ? input.length : index + fileName.length + afterOffset,
+        );
+        const numbers = new Set(Array.from(sentence.matchAll(/\bS(?:cene[_:\s-]*)?0*(\d+)\b/gi))
+          .map(match => Number(match[1])));
+        if (numbers.size !== 1) ambiguous = true;
+        else sceneNumbers.add([...numbers][0]);
+      }
+    }
+    if (!occurrences || ambiguous || sceneNumbers.size !== 1) continue;
+    const matchedScenes = scenesByNumber.get([...sceneNumbers][0]);
+    if (!matchedScenes || matchedScenes.size !== 1) continue;
+    const sceneId = [...matchedScenes][0];
+    const node = nodes.find(item => resolveNodeSceneId(item) === sceneId || String(item?.id || '') === sceneId);
+    if (!node) continue;
+    node.asset_refs = [
+      ...(Array.isArray(node.asset_refs) ? node.asset_refs : []),
+      { asset_id: assetId, usage: 'subject', reason: '用户明确指定用于该场景' },
+    ];
+    referenced.add(assetId);
+  }
+  return graph;
+}
+
 async function retryContentGraphAfterMismatch({
   model,
   sceneSpec,
@@ -161,6 +221,7 @@ async function retryContentGraphAfterMismatch({
 }
 
 async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext, target, onProgress, project, projectDir } = {}) {
+  const finalizeGraph = graph => bindExplicitRequiredUploads(graph, sceneSpec, creativeContext);
   const originalPrompt = contentGraphAgent.buildContentGraphPrompt({
     sceneSpec,
     creativeContext,
@@ -207,7 +268,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
       });
       return {
         success: true,
-        contentGraph: mapSceneSpecToContentGraph(sceneSpec),
+        contentGraph: finalizeGraph(mapSceneSpecToContentGraph(sceneSpec)),
         diagnostics,
         inputHash: sha256(originalPrompt),
       };
@@ -235,7 +296,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
       });
       return {
         success: true,
-        contentGraph: mapSceneSpecToContentGraph(sceneSpec),
+        contentGraph: finalizeGraph(mapSceneSpecToContentGraph(sceneSpec)),
         diagnostics,
         inputHash: sha256(originalPrompt),
       };
@@ -310,7 +371,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
   }
   return {
     success: true,
-    contentGraph: graphParsed.graph,
+    contentGraph: finalizeGraph(graphParsed.graph),
     diagnostics,
     inputHash: sha256(originalPrompt),
   };

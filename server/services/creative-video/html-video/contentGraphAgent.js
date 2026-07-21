@@ -47,23 +47,26 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
     if (text) lines.push(`${label}：${text}`);
   });
   const allAssets = Array.isArray(assetContext.assets) ? assetContext.assets : [];
-  const generatedAssets = allAssets.filter(isGeneratedVisualAsset);
-  const nonGenerated = allAssets.filter(asset => !isGeneratedVisualAsset(asset));
+  const requiredAssets = allAssets.filter(asset => asset?.requirement === 'required');
+  const optionalAssets = allAssets.filter(asset => asset?.requirement !== 'required');
+  const generatedAssets = optionalAssets.filter(isGeneratedVisualAsset);
+  const nonGenerated = optionalAssets.filter(asset => !isGeneratedVisualAsset(asset));
   const articleFirst = [
     ...nonGenerated.filter(asset => asset.source !== 'search'),
     ...nonGenerated.filter(asset => asset.source === 'search'),
   ];
   const assets = [
+    ...requiredAssets,
     ...generatedAssets.slice(0, 4),
     ...articleFirst.slice(0, Math.max(0, 8 - Math.min(generatedAssets.length, 4))),
   ];
   if (assets.length) {
-    const usableAssets = assets.filter(isAssetUsableForFrames);
+    const usableAssets = assets.filter(asset => asset?.requirement === 'required' || isAssetUsableForFrames(asset));
     const blockedAssets = assets.filter(asset => !isAssetUsableForFrames(asset));
     lines.push('可用图片素材：');
     usableAssets.forEach((asset, index) => {
       const src = compactText(asset.frame_src || asset.path, 160);
-      const label = compactText(asset.alt || asset.title || asset.url || `图片${index + 1}`, 120);
+      const label = compactText(asset.file_name || asset.alt || asset.title || asset.url || `图片${index + 1}`, 120);
       const source = compactText(asset.origin || asset.source || 'article', 30);
       const generatedFor = isGeneratedVisualAsset(asset) && asset.generation?.scene_id
         ? `；为场景 ${compactText(asset.generation.scene_id, 80)} 生成；不是来源证据`
@@ -81,7 +84,7 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
         return text ? `${key}=${text}` : '';
       }).filter(Boolean);
       const analysisText = analysisParts.length ? `；图片分析：${analysisParts.join('；')}` : '';
-      if (src) lines.push(`- ${index + 1}. ${label}；asset_id=${compactText(asset.id, 80)}；来源=${source}${generatedFor}；HTML引用=${src}${analysisText}`);
+      lines.push(`- ${index + 1}. ${label}；asset_id=${compactText(asset.id, 80)}；来源=${source}${generatedFor}；HTML引用=${src || '（未提供）'}${analysisText}`);
     });
     if (!usableAssets.length) lines.push('- 无适合直接进入成片的图片。');
     if (blockedAssets.length) {
@@ -91,7 +94,7 @@ function summarizeCreativeContextForPrompt(creativeContext = {}) {
         .join('；');
       if (blockedText) lines.push(`不建议用于成片的图片素材：${blockedText}`);
     }
-    lines.push('图片使用规则：图片适合增强来源证据、截图展示或解释效果时优先使用；每个 node 最多引用 4 张候选图片，不强制凑满；普通场景默认建议不超过 3 张，确有 montage 候选时才可使用 4 张；asset_id 必须唯一，reason 需要区分每张素材的具体语义，usage 必须是 subject|showcase|evidence|background 之一且允许重复。不适合当前叙事时可以不用。优先使用 article 来源图片；generated 生成图是可用主视觉素材但不是来源证据；search/Pexels 图片只作补充背景或氛围图，不要当来源证据；含文字的文章截图必须完整展示，使用 object-fit: contain；图片被选中时应作为画面主体，不要求额外框选、高亮或数据卡。');
+    lines.push('图片使用规则：requirement=required 的素材必须绑定并实际进入画面，不得因图片分析或叙事偏好省略；其他图片适合增强来源证据、截图展示或解释效果时优先使用，不适合当前叙事时可以不用。每个 node 最多引用 4 张候选图片，不强制凑满；普通场景默认建议不超过 3 张，确有 montage 候选时才可使用 4 张；asset_id 必须唯一，reason 需要区分每张素材的具体语义，usage 必须是 subject|showcase|evidence|background 之一且允许重复。优先使用 article 来源图片；generated 生成图是可用主视觉素材但不是来源证据；search/Pexels 图片只作补充背景或氛围图，不要当来源证据；含文字的文章截图必须完整展示，使用 object-fit: contain；图片被选中时应作为画面主体，不要求额外框选、高亮或数据卡。');
   }
   return lines.join('\n');
 }
@@ -245,6 +248,7 @@ function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, ori
   const scenes = summarizeScenesForRetry(sceneSpec);
   const expectedSceneIds = sceneIdsFromSpec(sceneSpec);
   const assetSummary = summarizeCreativeContextForPrompt(creativeContext);
+  const retryAssetSummary = summarizeCreativeContextForPrompt({ asset_context: creativeContext?.asset_context });
   const contractLines = [
     `scene ids: ${expectedSceneIds.join(', ') || 'none'}`,
     `nodes.length must equal ${expectedSceneIds.length}`,
@@ -255,7 +259,8 @@ function buildRetryPrompt(sceneSpec = {}, creativeContext = {}, target = {}, ori
     return [
       '只输出严格 JSON，不要 Markdown。',
       ...contractLines,
-      assetSummary.includes('gen_') ? '若素材列表中有 gen_* 推荐图，必须继续为对应场景输出 asset_refs，且不要把 generated 当来源证据。' : '',
+      retryAssetSummary,
+      retryAssetSummary.includes('gen_') ? '若素材列表中有 gen_* 推荐图，必须继续为对应场景输出 asset_refs，且不要把 generated 当来源证据。' : '',
       'schema: {"nodes":[{"id":"string","kind":"text","label":"string","durationSec":2,"text":"string"}]}',
     ].join('\n');
   }
