@@ -381,7 +381,7 @@ async function main() {
         },
       });
       const base = computeFrameInputFingerprint(args());
-      assert.notEqual(base, 'c1483f6d4f2f822a42fff49a2dd50d8640a8f90037751f47a90650e23ea47ec0', 'v3 产物指纹不得在 v4 继续命中');
+      assert.notEqual(base, 'c77e59e0bdeb437abfdcb9b1c8ecde81f350b197b240c619b4ba187e8b810154', 'v3 产物指纹不得在 v4 继续命中');
       assert.ok(/^[0-9a-f]{64}$/.test(base), '指纹应为 sha256 hex');
       assert.equal(computeFrameInputFingerprint(args()), base, '同输入应得到同指纹');
       // asset_refs 顺序不影响指纹（排序稳定）
