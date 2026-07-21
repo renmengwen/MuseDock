@@ -83,7 +83,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `complete` | B-07b | `df9a519`、`fab5167`、`6d58460`、`c5e08f0`、`31006f3` | C-01～C-05 完成；canonical Shot Usage、required gate 与素材面板一致 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `complete` | C-05 | `4d58c4f`、`123dd16`、`a30a22f`、`2a5c7d8`、`41400fa`、`7933ff6`、`c3db1d8`、`f601bbc`、`7287e96`、`22e9014` | Phase D 完成；进入 E-01 数据/数学验收与 E-02 Scene Preview QA |
-| E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
+| E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `in_progress` | D-08 | `0531f27`、`281550c` | E-01/E-02 完成；下一项 E-03a 共享 blocking issue 合同 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
 
 ## 当前写租约
@@ -135,7 +135,7 @@ resolved_findings:
 
 ```yaml
 task_id: E-02
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: c2f7dba
@@ -147,6 +147,7 @@ invalidated_tree: 68f40dcf112f666a17d8490d3c7de47bd6074f2d
 frozen_revision: 38393f4edff8e3d192d7a8ee52ad8d09223b3cef
 frozen_tree: 51acbc6e3cf3141e183b417674d1c421d9414779
 revision_valid: true
+dev_commit: 281550c
 allowed_paths:
   - server/services/creative-video/html-video/layoutQaService.js
   - tests/test-html-video-layout-qa-service.js
@@ -180,8 +181,18 @@ verification:
   - node tests/test-visual-qa-service.js
   - node tests/test-html-video-workflow.js
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_ledger_commit: 120beba
+  spec_reviewed_revision: 38393f4edff8e3d192d7a8ee52ad8d09223b3cef
+  quality: pass
+  quality_reviewed_ledger_commit: 120beba
+  quality_reviewed_revision: 38393f4edff8e3d192d7a8ee52ad8d09223b3cef
+resolved_findings:
+  - 真实 Chrome 受控 seek、默认全场景点和每 cue 过渡/稳定/回全景采样均保留，多 cue 不截断
+  - 只在 focus_stable 后检查安全区、字幕遮挡、倍率与人工 expected region，合法回全景不误阻断
+  - 双 cue 归属切换与 transform 连续无瞬跳；八类 Camera blocking issue 进入既有 Frame QA 门
+  - 自动修复后仍有 blocking issue 时返回 frame_layout_qa_unresolved 且 checkpoint failed
+  - 样本排序 O(n log n)、去重 O(n)，浏览器采样数量随 cue 线性增长
 ```
 
 ```yaml
@@ -1380,9 +1391,9 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 |---|---|---|---|
 | REQ-E-01 | `verified` | 数据契约、引用完整性和 required 门 | E-01 |
 | REQ-E-02 | `verified` | 摄影机数学测试 | D-02、E-01 |
-| REQ-E-03 | `pending` | Scene 预览渲染测试 | E-02 |
-| REQ-E-04 | `pending` | 白屏、黑边、裸硬切、字幕遮挡和过度放大检查 | E-02 |
-| REQ-E-05 | `pending` | 错误焦点与焦点可信度验收 | E-02 |
+| REQ-E-03 | `verified` | Scene 预览渲染测试 | E-02 |
+| REQ-E-04 | `verified` | 白屏、黑边、裸硬切、字幕遮挡和过度放大检查 | E-02 |
+| REQ-E-05 | `verified` | 错误焦点与焦点可信度验收 | E-02 |
 | REQ-E-06 | `pending` | 自动修复后 blocking 问题真正阻断 | E-02、E-03 |
 | REQ-E-07 | `pending` | 定向重试只失效受影响范围 | E-03 |
 | REQ-E-08 | `pending` | Checkpoint 复用包含真实输入、Prompt 和契约版本 | D-06、E-04 |
