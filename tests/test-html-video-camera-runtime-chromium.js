@@ -35,6 +35,13 @@ const asset = {
       focus_point: { x: 0.21, y: 0.11 },
     },
     {
+      id: 'target_bottom',
+      label: '目标',
+      trust_level: 'A',
+      region: { x: 0.68, y: 0.65, width: 0.15, height: 0.12 },
+      focus_point: { x: 0.755, y: 0.71 },
+    },
+    {
       id: 'target_d',
       label: '目标',
       trust_level: 'D',
@@ -125,6 +132,37 @@ async function transformAt(page, timeSec) {
     assert.notEqual(heldA, '', 'cue 保持期必须维持聚焦 transform');
     assert.equal(heldB, heldA, 'cue 保持期 transform 必须稳定');
     assert.equal(returned, '', '末尾时间足够时 cue 外必须回到全景基线');
+
+    await page.setContent(html(true, { regionId: 'target_bottom' }));
+    await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
+    const safeRegion = await page.evaluate(() => {
+      window.__mpSetTimelineTime(2);
+      const figure = document.querySelector('[data-hv-shot][data-camera-cues]');
+      const image = figure.querySelector('img[data-shot-layer="foreground"]');
+      const cue = JSON.parse(figure.dataset.cameraCues)[0];
+      const baseScale = Math.min(image.clientWidth / image.naturalWidth, image.clientHeight / image.naturalHeight);
+      const baseLeft = (image.clientWidth - image.naturalWidth * baseScale) / 2;
+      const baseTop = (image.clientHeight - image.naturalHeight * baseScale) / 2;
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(image).transform);
+      const map = (x, y) => matrix.transformPoint(new DOMPoint(
+        baseLeft + x * image.naturalWidth * baseScale,
+        baseTop + y * image.naturalHeight * baseScale,
+      ));
+      const topLeft = map(cue.region.x, cue.region.y);
+      const bottomRight = map(cue.region.x + cue.region.width, cue.region.y + cue.region.height);
+      return {
+        transform: image.style.transform,
+        safeBottom: image.clientHeight - 140,
+        baseBottom: baseTop + (cue.region.y + cue.region.height) * image.naturalHeight * baseScale,
+        mapped: { left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y },
+        canvas: { width: image.clientWidth, height: image.clientHeight },
+      };
+    });
+    assert.notEqual(safeRegion.transform, '', '靠近字幕区的目标必须应用真实 foreground transform');
+    assert.ok(safeRegion.baseBottom > safeRegion.safeBottom, '夹具目标在全景中必须进入字幕区，确保安全区断言有效');
+    assert.ok(safeRegion.mapped.left >= 0 && safeRegion.mapped.top >= 0, `目标左上角必须在画布安全区内：${JSON.stringify(safeRegion)}`);
+    assert.ok(safeRegion.mapped.right <= safeRegion.canvas.width, `目标右边界必须在画布安全区内：${JSON.stringify(safeRegion)}`);
+    assert.ok(safeRegion.mapped.bottom <= safeRegion.safeBottom, `完整目标必须停留在 height-140 字幕安全区上方：${JSON.stringify(safeRegion)}`);
 
     await page.setContent(html(true, { regionId: 'target_c', zoom: 'soft' }));
     await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
