@@ -7,6 +7,7 @@ const frameHtmlAgent = require('./frameHtmlAgent');
 const { runFrameHtmlPhase } = require('./frameHtmlPhase');
 const { buildMixedFrameProject } = require('./mixedFrameBuilder');
 const { buildVisualPlan, assignMotionOrchestration } = require('./visualPlanService');
+const { planFocusCues } = require('./focusCuePlanner');
 const { matchVisualBeatsToRenderers } = require('./visualRouteMatcher');
 const {
   runGeneratedImagePhase,
@@ -904,6 +905,9 @@ async function generateHtmlVideo(options = {}) {
     );
     return current;
   });
+  // D-04：canonical 焦点区域落盘后、content graph 展开前，为图片镜头确定性规划 camera.focus_cues；
+  // 就地 enrich visualPlan.beats[].visual_base，persistableVisualPlan 共享同一 visual_base 引用随之更新。
+  planFocusCues({ visualPlan, creativeContext, sceneSpec, mediaOptions });
   // scene_html 分支只在 continuity_mode = scene_html 生效；此时 project.continuity_mode 尚未挂载
   // （attachContinuityMode 在建帧后才调用），用 creativeContext 判断等价条件。
   if ((creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html') {

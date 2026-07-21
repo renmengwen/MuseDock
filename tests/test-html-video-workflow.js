@@ -917,5 +917,181 @@ function fullSceneCaption(sceneId, text, duration) {
     await fs.rm(directProjectDir, { recursive: true, force: true });
   }
 
+  // ===== D-04：Scene/Shot 级 focus_cues 摄影机规划端到端 =====
+  // 规则 9：planner enrich 后的 camera 必须随 visualPlan 进入 content graph 展开与持久化 project。
+  {
+    const d04SourceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'hv-focus-cue-src-'));
+    const d04AssetPath = path.join(d04SourceDir, 'repo-hero.png');
+    await fs.writeFile(d04AssetPath, 'focus-cue-image-bytes');
+    const d04Region = {
+      id: 'region_star_button',
+      label: 'Star 按钮',
+      aliases: ['GitHub Star'],
+      region: { x: 0.1, y: 0.1, width: 0.3, height: 0.2 },
+      focus_point: { x: 0.25, y: 0.2 },
+      method: 'dom',
+      confidence_level: 'high',
+      verification: { status: 'verified', method: 'dom_capture', evidence: '测试用固定证据。' },
+      trust_level: 'A',
+    };
+    const d04Scene = {
+      id: 'scene_01',
+      kind: 'text',
+      duration_sec: 4,
+      narration_text: '先看这里的 Star 按钮，再看整体页面布局。',
+      captions: [
+        { id: 'cap_01', start: 0, end: 2, text: '先看这里的 Star 按钮' },
+        { id: 'cap_02', start: 2, end: 4, text: '再看整体页面布局' },
+      ],
+      visual_text: { headline: '仓库页面', keywords: [], cards: [] },
+    };
+    const d04AssetContext = assetId => ({
+      assets: [{
+        id: assetId,
+        type: 'image',
+        media_type: 'image',
+        origin: 'source_extract',
+        origin_detail: 'github_readme',
+        provider: 'github',
+        requirement: 'preferred',
+        evidence_class: 'direct_source',
+        status: 'ready',
+        path: 'assets/repo-hero.png',
+        local_path: d04AssetPath,
+        focus_regions: [d04Region],
+      }],
+    });
+    const d04ContentGraphText = assetId => JSON.stringify({
+      synopsis: '焦点提示词规划',
+      nodes: [{
+        id: 'scene_01',
+        kind: 'text',
+        label: '仓库页面',
+        durationSec: 4,
+        text: d04Scene.narration_text,
+        asset_refs: [{ asset_id: assetId, usage: 'subject' }],
+      }],
+      edges: [],
+    });
+    const assertFocusCue = (shot, label) => {
+      assert.ok(shot.camera, `${label} 必须带 camera`);
+      assert.equal(shot.camera.initial_view, 'overview', label);
+      assert.equal(shot.camera.focus_cues.length, 1, label);
+      const cue = shot.camera.focus_cues[0];
+      assert.deepEqual(cue.caption_ids, ['cap_01'], label);
+      assert.equal(cue.keyword, 'Star 按钮', label);
+      assert.equal(cue.region_id, 'region_star_button', label);
+      assert.equal(cue.effect, 'camera_zoom', label);
+      assert.equal(cue.zoom, 'auto', label);
+      assert.equal(cue.return_policy, 'hold_or_next', label);
+      assert.equal('start_sec' in cue, false, `${label}：cue 不写 start_sec`);
+      assert.equal('end_sec' in cue, false, `${label}：cue 不写 end_sec`);
+    };
+    const imageSequenceShots = beats => (Array.isArray(beats) ? beats : [])
+      .filter(beat => beat?.visual_base?.type === 'image_sequence')
+      .flatMap(beat => beat.visual_base.shots || []);
+
+    // (1) scene_html 分支：真实 workflow 全链路成功后，持久化 project 与展开产物都带 camera.focus_cues。
+    const d04SceneHtmlResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-focus-cue-scene-html',
+      runId: 'run-focus-cue-scene-html',
+      rootDir,
+      sceneSpec: { title: '焦点提示词规划', aspect_ratio: '16:9', scenes: [d04Scene] },
+      creativeContext: {
+        input: { raw_text: '焦点提示词规划' },
+        continuity_mode: 'scene_html',
+        asset_context: d04AssetContext('repo_hero'),
+      },
+      target: { generateAudio: false, generateCaptions: true },
+      skipValidation: true,
+      services: {
+        aiImageModel: { isConfigured: async () => false },
+        aiTextModel: {
+          callTextModel: async request => {
+            const prompt = request.messages.map(item => (
+              typeof item.content === 'string' ? item.content : JSON.stringify(item.content)
+            )).join('\n');
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return { success: true, text: d04ContentGraphText('repo_hero') };
+            }
+            const frameId = request.audit?.frame_id || 'scene:scene_01';
+            return {
+              success: true,
+              text: `<!doctype html><html><body><main data-frame-id="${frameId}"><h1 data-text-key="headline">仓库页面</h1><p data-text-key="subtitle">支撑短句</p><section data-text-key="body">要点</section></main></body></html>`,
+            };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        frameRenderer: {
+          renderFrame: async (frame, options) => {
+            await writeFile(options.outputPath, `frame:${frame.id}`);
+            return { success: true, frame_id: frame.id, output_path: options.outputPath, diagnostics: [] };
+          },
+        },
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async (_frames, outputPath) => {
+            await writeFile(outputPath, 'mp4');
+            return { success: true, output_path: outputPath, strategy: 'stub' };
+          },
+          concatAudioWithFfmpeg: async () => ({ success: true, skipped: true }),
+          muxAudioWithFfmpeg: async ({ videoPath }) => ({ success: true, skipped: true, output_path: videoPath }),
+        },
+        visualQaService: { inspectRenderedVideo: async () => ({ success: true, issues: [], metrics: {} }) },
+      },
+    });
+    assert.equal(d04SceneHtmlResult.success, true, JSON.stringify(d04SceneHtmlResult.diagnostics || [], null, 2));
+    const d04Persisted = JSON.parse(await fs.readFile(
+      path.join(d04SceneHtmlResult.html_video_project_path, 'project.json'),
+      'utf8',
+    ));
+    const d04PlanShots = imageSequenceShots(d04Persisted.visual_plan?.beats);
+    assert.ok(d04PlanShots.length >= 1, '持久化 visual_plan 必须包含 image_sequence shot');
+    d04PlanShots.forEach(shot => assertFocusCue(shot, '持久化 visual_plan shot'));
+    const d04SceneNode = d04Persisted.content_graph.nodes.find(node => node.id === 'scene:scene_01');
+    const d04SceneNodeShots = imageSequenceShots(d04SceneNode?.metadata?.visual_beats);
+    assert.ok(d04SceneNodeShots.length >= 1, 'scene_html 展开节点必须携带 image_sequence shot');
+    d04SceneNodeShots.forEach(shot => assertFocusCue(shot, 'scene_html 展开产物 shot'));
+
+    // (2) beat 分支：expandContentGraphToVisualBeats 展开的节点 metadata.visual_beat 同样带 camera
+    //（Frame HTML 故意失败，验证 camera 展开与持久化发生在帧生成之前）。
+    const d04BeatResult = await workflow.generateHtmlVideo({
+      workflowId: 'wf-focus-cue-beat',
+      runId: 'run-focus-cue-beat',
+      rootDir,
+      sceneSpec: { title: '焦点提示词规划 beat', aspect_ratio: '16:9', scenes: [d04Scene] },
+      creativeContext: {
+        input: { raw_text: '焦点提示词规划 beat' },
+        asset_context: d04AssetContext('repo_hero_beat'),
+      },
+      target: { generateAudio: false, generateCaptions: true },
+      skipValidation: true,
+      services: {
+        aiImageModel: { isConfigured: async () => false },
+        aiTextModel: {
+          callTextModel: async request => {
+            const prompt = request.messages.map(item => (
+              typeof item.content === 'string' ? item.content : JSON.stringify(item.content)
+            )).join('\n');
+            if (prompt.startsWith('你是 html-video 的 content graph')) {
+              return { success: true, text: d04ContentGraphText('repo_hero_beat') };
+            }
+            return { success: true, text: 'Frame HTML 故意失败' };
+          },
+        },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      },
+    });
+    assert.equal(d04BeatResult.success, false, 'beat 分支用例：Frame HTML 故意失败');
+    const d04BeatPersisted = await projectStore.loadProject(d04BeatResult.project_dir);
+    const d04BeatPlanShots = imageSequenceShots(d04BeatPersisted.visual_plan?.beats);
+    assert.ok(d04BeatPlanShots.length >= 1, 'beat 分支持久化 visual_plan 必须包含 image_sequence shot');
+    d04BeatPlanShots.forEach(shot => assertFocusCue(shot, 'beat 分支持久化 visual_plan shot'));
+    const d04BeatNodeShots = imageSequenceShots(
+      d04BeatPersisted.content_graph.nodes.map(node => node.metadata?.visual_beat),
+    );
+    assert.ok(d04BeatNodeShots.length >= 1, 'beat 展开节点必须携带 image_sequence shot');
+    d04BeatNodeShots.forEach(shot => assertFocusCue(shot, 'beat 展开产物 shot'));
+  }
+
   console.log('html-video workflow tests passed');
 })();
