@@ -125,6 +125,23 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.equal(stableSecondBeat.metrics.skipped, false);
     assert.equal(stableSecondBeat.success, true, '连续播放到第二 Beat 稳定点时只能看到活动文本');
 
+    const constantClockPath = path.join(timelineDir, 'constant-clock.html');
+    await fs.writeFile(constantClockPath, `<!doctype html><html><body><p data-text-key="body">恒定非零时钟</p><script>
+      window.__hvPlaybackClock={
+        __hvOwner:'musedock-playback-clock-v1',subscribe:function(){},play:function(){},pause:function(){},
+        timeSec:function(){return .4},paused:function(){return false},setTime:function(){}
+      };
+      </script></body></html>`, 'utf8');
+    const constantClock = await inspectFrameHtmlLayout({
+      htmlPath: constantClockPath,
+      frame: { id: 'scene_constant_clock', duration_sec: 1 },
+      resolution,
+      sampleTimesSec: [0.5],
+    });
+    assert.equal(constantClock.metrics.skipped, false);
+    assert.equal(constantClock.success, false);
+    assert.ok(constantClock.issues.some(issue => issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE'));
+
     const stalledClockPath = path.join(timelineDir, 'stalled-clock.html');
     await fs.writeFile(stalledClockPath, `<!doctype html><html><body>
       <p data-text-key="body">停滞时钟</p><script>
@@ -144,6 +161,31 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.equal(stalledClock.metrics.skipped, false);
     assert.equal(stalledClock.success, false);
     assert.ok(stalledClock.issues.some(issue => issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE'));
+
+    const midStallClockPath = path.join(timelineDir, 'mid-stall-clock.html');
+    await fs.writeFile(midStallClockPath, `<!doctype html><html><body><p data-text-key="body">中途停滞时钟</p><script>
+      (function(){var time=0,origin=0,running=false,stalled=false;window.__hvPlaybackClock={
+        __hvOwner:'musedock-playback-clock-v1',subscribe:function(){},
+        play:function(){if(!running){running=true;origin=performance.now()-time*1000}},
+        pause:function(){this.timeSec();running=false},paused:function(){return !running},
+        timeSec:function(){if(running&&!stalled){time=Math.min(.08,(performance.now()-origin)/1000);if(time>=.08)stalled=true}return time},
+        setTime:function(value){if(stalled)return;time=Number(value);origin=performance.now()-time*1000}
+      };})();
+      </script></body></html>`, 'utf8');
+    const midStallStartedAt = Date.now();
+    const midStallClock = await inspectFrameHtmlLayout({
+      htmlPath: midStallClockPath,
+      frame: { id: 'scene_mid_stall_clock', duration_sec: 1 },
+      resolution,
+      sampleTimesSec: [0.05, 0.2],
+    });
+    assert.ok(Date.now() - midStallStartedAt < 5000, '中途停滞必须按当前采样剩余时间快速失败');
+    assert.equal(midStallClock.metrics.skipped, false);
+    assert.equal(midStallClock.success, false);
+    assert.deepEqual(midStallClock.metrics.samples.map(sample => sample.sample_time_sec), [0.05]);
+    assert.ok(midStallClock.issues.some(issue => (
+      issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE' && issue.sample_time_sec === 0.2
+    )));
 
     const seekableClockPath = path.join(timelineDir, 'seekable-clock.html');
     await fs.writeFile(seekableClockPath, `<!doctype html><html><head><style>

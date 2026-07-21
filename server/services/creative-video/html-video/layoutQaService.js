@@ -682,7 +682,7 @@ async function inspectFrameHtmlLayout(options = {}) {
 
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load' });
     await waitForLayout(page);
-    let continuousPlayback = await page.evaluate(() => {
+    const playbackStartup = await page.evaluate(() => {
       const clock = window.__hvPlaybackClock;
       const trusted = clock?.__hvOwner === 'musedock-playback-clock-v1'
         && ['subscribe', 'play', 'pause', 'timeSec', 'paused', 'setTime']
@@ -695,39 +695,23 @@ async function inspectFrameHtmlLayout(options = {}) {
         window.__hvPlayed = true;
         window.__hvPlayAll();
       }
-      if (!trusted) return false;
+      if (!trusted) return { continuous: false, reset: true };
+      if (Math.abs(Number(clock.timeSec())) > 0.005) return { continuous: false, reset: false };
       if (typeof window.__hvUnfreeze === 'function') window.__hvUnfreeze();
       clock.play();
-      return true;
-    }).catch(() => false);
-    if (continuousPlayback) {
-      await page.waitForTimeout(120);
-      const playbackProbe = await page.evaluate(() => {
-        const clock = window.__hvPlaybackClock;
-        const current = Number(clock.timeSec());
-        if (Number.isFinite(current) && current >= 0.03) return { advancing: true, seekable: true };
-        try {
-          clock.pause();
-          clock.setTime(0.173);
-          const sought = Math.abs(Number(clock.timeSec()) - 0.173) <= 0.005;
-          if (sought) clock.setTime(0);
-          return { advancing: false, seekable: sought };
-        } catch (error) {
-          return { advancing: false, seekable: false, error: error?.message || String(error) };
-        }
-      }).catch(error => ({ advancing: false, seekable: false, error: error?.message || String(error) }));
-      if (!playbackProbe.advancing && !playbackProbe.seekable) {
-        const issue = makeIssue({
-          code: 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE',
-          frameId,
-          sampleTimeSec: null,
-          message: '布局 QA 检测到共享播放时钟无法推进，也无法定位采样时间。',
-          details: { error: playbackProbe.error || 'timeSec did not advance and setTime had no effect' },
-        });
-        return { success: false, issues: [issue], metrics };
-      }
-      continuousPlayback = playbackProbe.advancing;
+      return { continuous: true, reset: true };
+    }).catch(error => ({ continuous: false, reset: false, error: error?.message || String(error) }));
+    if (!playbackStartup.reset) {
+      const issue = makeIssue({
+        code: 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE',
+        frameId,
+        sampleTimeSec: null,
+        message: '布局 QA 检测到共享播放时钟无法归零。',
+        details: { error: playbackStartup.error || 'setTime(0) did not reset timeSec()' },
+      });
+      return { success: false, issues: [issue], metrics };
     }
+    let continuousPlayback = playbackStartup.continuous;
 
     const cueSamples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
       ? []
@@ -740,11 +724,37 @@ async function inspectFrameHtmlLayout(options = {}) {
     let elapsedSec = 0;
     for (const sampleTimeSec of samples) {
       if (continuousPlayback) {
-        await page.waitForFunction(
-          time => window.__hvPlaybackClock.timeSec() >= time,
-          sampleTimeSec,
-          { timeout: Math.max(30000, Math.ceil((sampleTimeSec + 5) * 1000)) },
-        );
+        const currentTime = await page.evaluate(() => Number(window.__hvPlaybackClock.timeSec())).catch(() => 0);
+        const remainingMs = Math.max(0, sampleTimeSec - (Number.isFinite(currentTime) ? currentTime : 0)) * 1000;
+        try {
+          await page.waitForFunction(
+            time => window.__hvPlaybackClock.timeSec() >= time,
+            sampleTimeSec,
+            { timeout: Math.max(500, Math.ceil(remainingMs + 750)) },
+          );
+        } catch (error) {
+          const seeked = await page.evaluate((time) => {
+            const clock = window.__hvPlaybackClock;
+            try {
+              clock.pause();
+              clock.setTime(time);
+              return Math.abs(Number(clock.timeSec()) - time) <= 0.005;
+            } catch (_) {
+              return false;
+            }
+          }, sampleTimeSec).catch(() => false);
+          if (!seeked) {
+            const issue = makeIssue({
+              code: 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE',
+              frameId,
+              sampleTimeSec,
+              message: '布局 QA 检测到共享播放时钟中途停止，且无法定位当前采样时间。',
+              details: { error: error?.message || String(error) },
+            });
+            return { success: false, issues: [issue], metrics };
+          }
+          continuousPlayback = false;
+        }
       } else {
         const timelineSet = await page.evaluate((time) => {
           const clock = window.__hvPlaybackClock;
