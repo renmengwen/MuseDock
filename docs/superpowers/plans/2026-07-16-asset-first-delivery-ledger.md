@@ -90,12 +90,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-06
-status: leased
-owner: claude-worker
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: d922532f77306e1eca6b53444f6d03e5d7f42503
 worktree: D:\code3\MuseDock-worktrees\asset-first-d06
 branch: codex/asset-first-d06
+candidate_commit: 2eab1bd87dc40277af659b7d8446ad3078303483
+frozen_revision: 2eab1bd87dc40277af659b7d8446ad3078303483
+frozen_tree: e4a4f9ae648030d949221e088da638c8ff98b83d
+revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/focusRegionPhase.js
   - server/services/creative/visualAssetContract.js
@@ -123,6 +127,11 @@ decisions:
   - 图片 bytes、契约版本、provider/model、prompt 版本任一变化即失效重析
   - visualAssetContract 新增 focus_analysis 规范化白名单，非法结构安全丢弃；同 run 内存去重保留
   - 顺带落实 D-03c non-blocking：为 cache 命中结果二次 normalizeFocusRegions 的深拷贝隔离补注释
+  - projectAssetsFromCreativeContext（assetUsagePhase，不在租约内）是字段白名单投影会剥离 focus_analysis：phase 末尾用 writeProjectJson 按 asset id 直接合并落盘（尽力而为，失败静默不阻断），测试证明记录扛住白名单后续写与 normalizeProject 透传
+  - success 记录但 focus_regions 为空视为不一致 → 重析自愈；empty 记录四元组匹配即跳过；失败素材保留旧记录仅成功覆盖
+  - 模型身份两级解析：model 对象自带 provider/modelId 优先，否则 aiModelConfig.getRuntimeConfig('text')；懒执行每 run 一次，无模型不写记录
+  - vision 空结果由"失败告警"改为合法 empty 结论：不再输出中文 warning，写 focus_analysis.status=empty
+  - contract 侧 normalizeFocusAnalysis 严格形状匹配（恰好 7 个白名单字段），非法整体丢弃且显式 delete，幂等
 verification:
   - node tests/test-html-video-focus-region-phase.js
   - node tests/test-visual-asset-contract.js
