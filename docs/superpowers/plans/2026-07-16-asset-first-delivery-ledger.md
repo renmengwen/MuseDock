@@ -89,6 +89,95 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 ## 当前写租约
 
 ```yaml
+task_id: D-05
+status: leased
+owner: claude-worker
+lease_released: false
+code_base_commit: dfd88dd7ab9463732b13501a446d3bd6c22a48ac
+worktree: D:\code3\MuseDock-worktrees\asset-first-d05
+branch: codex/asset-first-d05
+allowed_paths:
+  - server/services/creative-video/html-video/captionLayer.js
+  - server/services/creative-video/html-video/focusCuePlanner.js
+  - server/services/creative-video/html-video/frameHtmlPhase.js
+  - server/services/creative-video/html-video/frameHtmlAgent.js
+  - server/services/creative-video/html-video/frameHtmlPhaseSupport.js
+  - tests/test-html-video-caption-layer.js
+  - tests/test-html-video-frame-html-agent.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative-video/html-video/sceneImageSequenceDom.js
+  - server/services/creative-video/html-video/focusRegionPhase.js
+  - server/services/creative-video/html-video/htmlVideoWorkflow.js
+  - server/services/creative-video/html-video/visualPlanService.js
+  - server/services/creative/visualAssetContract.js
+  - frontend-react/**
+  - package.json
+  - package-lock.json
+state_owners:
+  - frame_html.caption_keyword_highlight
+decisions:
+  - 高亮为纯 CSS 门控：caption item 的 data-hv-active 已由 playback clock 控制，keyword span 样式仅在 active 态生效，不新增 JS 订阅
+  - 渲染端复用 focusCuePlanner 的 keywordOccurrence（仅追加导出）在每条 caption 自己的原文上重新定位关键词（合并 cue 的 keyword 形式取自首条 caption，后续 caption 需按大小写不敏感+词边界重定位）；找不到就不高亮，绝不插入旁白中不存在的词
+  - span 包裹必须在原文定位后分段 htmlEscape 拼接，含 &/</> 的 caption 不得错位或双重转义
+  - 高亮样式：强调色+字重提高+轻微放大，布局稳定不跳动；无 cue/无匹配时输出与现状字节级一致
+  - cue 数据从 node 的 visual_beat(s).visual_base.shots[].camera.focus_cues 收集，caption_id → keyword 映射一对一
+verification:
+  - node tests/test-html-video-caption-layer.js
+  - node tests/test-html-video-frame-html-agent.js
+  - node tests/test-html-video-focus-cue-planner.js
+  - node tests/test-html-video-scene-continuity.js
+  - node tests/test-html-video-workflow.js
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
+task_id: D-07
+status: leased
+owner: claude-worker
+lease_released: false
+code_base_commit: dfd88dd7ab9463732b13501a446d3bd6c22a48ac
+worktree: D:\code3\MuseDock-worktrees\asset-first-d07
+branch: codex/asset-first-d07
+allowed_paths:
+  - server/services/creative-video/html-video/sceneImageSequenceDom.js
+  - tests/test-html-video-scene-image-sequence-dom.js
+  - tests/test-html-video-camera-runtime-chromium.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative-video/html-video/cameraMath.js
+  - server/services/creative-video/html-video/playbackClock.js
+  - server/services/creative-video/html-video/captionLayer.js
+  - server/services/creative-video/html-video/focusCuePlanner.js
+  - server/services/creative-video/html-video/frameHtmlPhase.js
+  - server/services/creative-video/html-video/hyperframesPlaywrightAdapter.js
+  - frontend-react/**
+  - package.json
+  - package-lock.json
+state_owners:
+  - frame_html.scene_camera_runtime
+decisions:
+  - 只执行 effect=camera_zoom 的 cue；渲染时对 region 重新校验 trust ∈ {A,B}（纵深防御），region 坐标从 creativeContext.asset_context.assets 的 canonical focus_regions 按 region_id 解析
+  - cue 时间由 caption 数据派生：构建期把每个 cue 的 start/end 与 region 几何预解析进 shot DOM 的 data 属性，运行时脚本只按 playback clock 插值，不在浏览器里查数据
+  - 摄影机数学只用 cameraMath.computeCameraTransform（只读复用，fit=contain 对应 foreground 层），no-op（applied=false）时不动镜头
+  - 字幕安全区 safe_rect = {left:0,top:0,right:width,bottom:height-CAPTION_SAFE_BOTTOM_PX(140)}；画布尺寸随工程分辨率
+  - 节奏遵循 summary §14：cue 前 overview、caption start 起 0.45～0.8s 平滑过渡、保持到 cue 结束、相邻 cue 直接转向、场景末剩余时间足够才回全景；A/B 级以外不聚焦
+  - 图片实际尺寸用运行时 naturalWidth/naturalHeight；cameraMath 以与 playbackClock 相同的源码注入模式进入浏览器（只读引用，不改该文件）
+  - 真实 Chromium 测试为必过门：验证 cue 窗口内 foreground transform 变化、聚焦保持期稳定、cue 外回归基线，无 cue shot 与现状一致
+verification:
+  - node tests/test-html-video-scene-image-sequence-dom.js
+  - node tests/test-html-video-camera-runtime-chromium.js
+  - node tests/test-html-video-caption-layer.js
+  - node tests/test-html-video-scene-continuity.js
+  - node tests/test-html-video-workflow.js
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
 task_id: D-06
 status: frozen_for_review
 owner: unassigned
