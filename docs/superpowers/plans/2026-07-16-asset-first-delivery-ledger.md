@@ -82,7 +82,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `complete` | B-07b | `df9a519`、`fab5167`、`6d58460`、`c5e08f0`、`31006f3` | C-01～C-05 完成；canonical Shot Usage、required gate 与素材面板一致 |
-| D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `in_progress` | C-05 | `4d58c4f`、`123dd16`、`a30a22f`、`2a5c7d8`、`41400fa`、`7933ff6` | D-06 冻结复审；随后 D-05 字幕高亮 / D-07 camera runtime |
+| D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `in_progress` | C-05 | `4d58c4f`、`123dd16`、`a30a22f`、`2a5c7d8`、`41400fa`、`7933ff6`、`c3db1d8`、`f601bbc`、`7287e96` | D-05/D-06/D-07 完成；下一项 D-08 自然图 C 级宽松聚焦 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
 
@@ -153,7 +153,7 @@ resolved_findings:
 
 ```yaml
 task_id: D-07
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: dfd88dde244f7d62c6529be16936f432ccbf27d7
@@ -165,6 +165,7 @@ invalidated_tree: ea4c8a47f96cde6f7b699b424a64dee4725db386
 frozen_revision: 9d574189f4b700259acbe4950b08922fe9e70f12
 frozen_tree: 3950209ba510bca6eaabbe7a9536e80e4bc35b05
 revision_valid: true
+dev_commit: 7287e96
 allowed_paths:
   - server/services/creative-video/html-video/sceneImageSequenceDom.js
   - server/services/creative-video/html-video/frameHtmlPhaseSupport.js
@@ -200,8 +201,17 @@ verification:
   - node tests/test-html-video-scene-continuity.js
   - node tests/test-html-video-workflow.js
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_ledger_commit: e78b5eb
+  spec_reviewed_revision: 9d574189f4b700259acbe4950b08922fe9e70f12
+  quality: pass
+  quality_reviewed_ledger_commit: e78b5eb
+  quality_reviewed_revision: 9d574189f4b700259acbe4950b08922fe9e70f12
+resolved_findings:
+  - 完整受管 Image Sequence 块与 canonical contract 确定性产物绑定，摄影机脚本缺失或提前退出会校验失败
+  - FRAME_PROMPT_VERSION 升至 4，真实 v3 checkpoint 会重建并补入摄影机运行时
+  - UTF-8 基础与 camera 夹具的真实 v3 指纹分别由独立反算锁定，避免任意 mismatch 假阳性
+  - dev 真实 Chrome 同一 focus cue 同时驱动前景 transform 与字幕原文关键词高亮
 ```
 
 ```yaml
@@ -1204,7 +1214,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-D-05 | `pending` | A/B 自动聚焦，C 低倍率宽松聚焦，D 不聚焦 | D-07、D-08 |
 | REQ-D-06 | `verified` | cover/contain 和双层截图坐标映射 | D-02 |
 | REQ-D-07 | `verified` | 安全目标中心、zoom 限幅、位移 clamp 和黑边防护 | D-02 |
-| REQ-D-08 | `pending` | Caption Cue 同时驱动摄影机和字幕关键词高亮 | D-05 |
+| REQ-D-08 | `verified` | Caption Cue 同时驱动摄影机和字幕关键词高亮 | D-05、D-07 |
 | REQ-D-09 | `verified` | 同一 Region 连续 Cue 合并并避免抖动 | D-04 |
 | REQ-D-10 | `verified` | 每张最终使用图片最多分析一次 | D-03、D-06 |
 
