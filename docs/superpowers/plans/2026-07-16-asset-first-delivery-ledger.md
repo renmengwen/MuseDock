@@ -136,16 +136,16 @@ review:
 
 ```yaml
 task_id: D-04
-status: frozen_for_review
-owner: unassigned
-lease_released: true
+status: implementing
+owner: claude-worker
+lease_released: false
 code_base_commit: 55c7ae97fab69b256cd4ceaf1bddafc74c16b4da
 worktree: D:\code3\MuseDock-worktrees\asset-first-d04
 branch: codex/asset-first-d04
 candidate_commit: 2a19d4884e49bee4ad56e699cc2611f9cfcda531
-frozen_revision: 2a19d4884e49bee4ad56e699cc2611f9cfcda531
-frozen_tree: 095db05b0e4102e0a213c07a5d9dc09317333010
-revision_valid: true
+invalidated_revision: 2a19d4884e49bee4ad56e699cc2611f9cfcda531
+invalidated_tree: 095db05b0e4102e0a213c07a5d9dc09317333010
+revision_valid: false
 allowed_paths:
   - server/services/creative-video/html-video/focusCuePlanner.js
   - server/services/creative-video/html-video/htmlVideoWorkflow.js
@@ -177,6 +177,8 @@ decisions:
   - 合并相邻性：未命中/歧义/不存在的 caption 不打断同 region 合并链；命中其他 region 的 caption（含 trust D）打断
   - FOCUS_TRANSITION_BUDGET_SEC=1；防抖窗口取合并 cue 全部 caption 的 max(end)-min(start)，0.001s 容差，严格短于预算才降级 highlight_only
   - cue id 为 sha256(shot.id+region.id+caption_ids) 前 16 位派生的确定性 id，无时间与随机源
+  - 纯 ASCII/拉丁 term 必须词边界匹配（相邻字符非字母数字），杜绝 star→restart 误命中；含 CJK 的 term 保持子串匹配；keyword 仍取原文真实切片
+  - planFocusCues 调用点 fail-open：规划失败输出中文 warning 诊断并继续 workflow，不中断视频生成
 verification:
   - node tests/test-html-video-focus-cue-planner.js
   - node tests/test-html-video-workflow.js
@@ -1108,5 +1110,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase D Task 3a 焦点双轴验证合同 | `a30a22f`；冻结 revision `bff4e56bc22512d3f5a676bf4bc00a10e50f2b30`、tree `36c8d84057dfed7e01f445ae527540476fdf44e9`；semantic/geometry 双轴 truth table、缺轴/非法轴 fail-closed、legacy 兼容与二次 normalize 幂等闭包；双 Review PASS；dev 四组集成回归通过 |
 | Phase D Task 3b 截图 DOM 原始证据 | `2a5c7d8`；冻结 revision `62be3330cbc5f039eb0eb71ee231ffd654bf6099`、tree `b2aa32c02fd143f700b3b00806b8fe3990260e6f`；截图同 page/viewport 采集有界 raw evidence，祖先 overflow 可见交集裁剪、200 元素/160 字符上限、同名候选保留不消歧、evaluate 失败保留截图与独立中文诊断；双 Review PASS；真实 Chrome 150 / Playwright 1.60 GitHub smoke 通过 |
 | Phase D Task 3c 最终使用图片焦点分析 | `41400fa`；冻结 revision `012dca0c4a9c5c44c459604ba3d0f3cbce5ed9cf`、tree `bfe36ff011fc6603ba3787759d5d50b2d975cfcb`；phase 插在 canonical buildVisualPlan 成功后、Frame HTML 前，只读最终 shots[].asset_id；DOM 唯一同名文本 + 截图 bytes SHA-256 与工程图片一致才升 A，vision 强制双轴 candidate 封顶 C，失败/歧义显式安全降级并输出中文 warning；同 run bytes 去重，phase 后立即持久化 project.assets，resume 不重复调用；规格与质量 Review PASS（ledger `736d859`、revision `012dca0`）；冻结 worktree 与 dev 各 8 组回归通过 |
+| Phase D Task 4 第一轮双 Review | revision `2a19d48`（ledger `d922532`）规格 PASS、质量 PASS；质量审计实测子串匹配 star→"restart the server" 误命中会产出错误 camera cue，违反"不聚焦错误"第一原则；Coordinator 修订决策（ASCII 词边界）后判退回，旧 revision 失效，补测试纵深后重新冻结复审 |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
