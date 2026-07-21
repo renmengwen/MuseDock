@@ -320,8 +320,13 @@ function invalidateFrameHtmlDependents(project, sceneId) {
       mp4_path: '',
       output_hash: '',
       diagnostic_code: '',
+      runtime_asset_policy_attestation: null,
     });
   }
+  const renderFrames = Object.values(project.generation_checkpoint?.stages?.render?.frames || {});
+  markCheckpointStage(project, 'render', {
+    status: renderFrames.some(frame => frame?.status === 'done') ? 'partial' : 'pending',
+  });
   markCheckpointStage(project, 'compose', {
     status: 'pending',
     output_path: '',
@@ -1460,4 +1465,5 @@ module.exports = {
   expandContentGraphToVisualBeats,
   expandContentGraphToSceneEntries,
   bindGeneratedAssetsToSceneSpec,
+  invalidateFrameHtmlDependents,
 };

@@ -10,6 +10,7 @@ const { repairProjectTimeline, compressNarrationForTarget } = require('./html-vi
 const { computeSceneSpecSpeechHash } = require('./sceneSpecHash');
 const { applyManifestToProjectAudio } = require('./ttsService');
 const { resolveRetryFrameIds } = require('./retryPlanner');
+const { invalidateFrameHtmlDependents } = require('./html-video/htmlVideoWorkflow');
 const defaultVisualQaService = require('./visualQaService');
 const { isBlockingVisualQaCode } = require('./visualQaCodes');
 
@@ -315,16 +316,16 @@ async function retryFrameHtml(context) {
           status: 'pending',
           html_path: '',
           input_hash: '',
+          input_fingerprint: '',
           output_hash: '',
           diagnostic_code: '',
         });
-        markCheckpointFrame(current, 'render', frameId, {
-          status: 'pending',
-          mp4_path: '',
-          output_hash: '',
-          diagnostic_code: '',
-        });
+        invalidateFrameHtmlDependents(current, frameId);
       }
+      const frameHtmlFrames = Object.values(current.generation_checkpoint?.stages?.frame_html?.frames || {});
+      current.generation_checkpoint.stages.frame_html.status = frameHtmlFrames.some(frame => frame?.status === 'done')
+        ? 'partial'
+        : 'pending';
       return current;
     });
   }

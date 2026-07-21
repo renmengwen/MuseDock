@@ -673,6 +673,103 @@ function plannerProject(overrides = {}) {
 
   {
     const rootDir = await tempRoot();
+    const { workflowId, projectDir } = await createMultiSceneLayoutQaFailureFixture(rootDir, '202606250000001016');
+    let project = await projectStore.loadProject(projectDir);
+    await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
+    for (const frame of project.frames) {
+      await fs.writeFile(path.join(projectDir, frame.html_path), `<html><body>${frame.id}:old</body></html>`, 'utf8');
+    }
+    await fs.writeFile(path.join(projectDir, 'frames', 'scene_01.mp4'), 'mp4:scene_01', 'utf8');
+    const sceneOneHash = await fileHash(path.join(projectDir, 'frames', 'scene_01.mp4'));
+    markCheckpointFrame(project, 'frame_html', 'scene_01', {
+      status: 'done', html_path: project.frames[0].html_path, input_hash: 'scene-01-input',
+      input_fingerprint: 'scene-01-fingerprint', output_hash: 'scene-01-html', diagnostic_code: '',
+    });
+    markCheckpointFrame(project, 'render', 'scene_01', {
+      status: 'done', mp4_path: 'frames/scene_01.mp4', output_hash: sceneOneHash, diagnostic_code: '',
+      runtime_asset_policy_attestation: await runtimeAssetPolicyAttestation(projectDir, project, project.frames[0], {
+        checkpoint_key: 'scene_01', mp4_path: 'frames/scene_01.mp4', output_hash: sceneOneHash,
+      }),
+    });
+    for (const sceneId of ['scene_02', 'scene_03']) {
+      markCheckpointFrame(project, 'frame_html', sceneId, {
+        status: 'done', html_path: `frames/${sceneId}.html`, input_hash: 'stale-input',
+        input_fingerprint: 'stale-fingerprint', output_hash: 'stale-html', diagnostic_code: 'frame_layout_qa_unresolved',
+      });
+      markCheckpointFrame(project, 'render', sceneId, {
+        status: 'done', mp4_path: `frames/${sceneId}.mp4`, output_hash: 'stale-mp4', diagnostic_code: '',
+        runtime_asset_policy_attestation: { version: 'runtime-asset-policy-v1', fingerprint: 'stale' },
+      });
+    }
+    markCheckpointStage(project, 'frame_html', { status: 'failed' });
+    markCheckpointStage(project, 'render', { status: 'done' });
+    markCheckpointStage(project, 'compose', {
+      status: 'done', output_path: 'exports/old.mp4', output_audio_path: 'exports/old-audio.mp4', diagnostic_code: '',
+    });
+    markCheckpointStage(project, 'duration_verify', {
+      status: 'done', expected_duration_sec: 8, actual_duration_sec: 8, diagnostic_code: '',
+    });
+    markCheckpointStage(project, 'visual_inspect', {
+      status: 'done', report_path: 'inspect/old-visual-report.json', diagnostic_code: '',
+    });
+    project.exports = [{ type: 'video', path: 'exports/old.mp4' }];
+    project.render_outputs = [{ path: 'exports/old.mp4' }];
+    project.status = 'ready';
+    await projectStore.saveProject(projectDir, project);
+
+    const before = await projectStore.loadProject(projectDir);
+    const keptFrameHtml = JSON.parse(JSON.stringify(before.generation_checkpoint.stages.frame_html.frames.scene_01));
+    const keptRender = JSON.parse(JSON.stringify(before.generation_checkpoint.stages.render.frames.scene_01));
+    const unrelatedFrameHtml = JSON.parse(JSON.stringify(before.generation_checkpoint.stages.frame_html.frames.scene_04));
+    const unrelatedRender = JSON.parse(JSON.stringify(before.generation_checkpoint.stages.render.frames.scene_04));
+    const refreshed = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
+    const record = await readJson(workflows.getWorkflowPath(workflowId, rootDir));
+    await assert.rejects(() => executeCreativeWorkflowRetryPlan({
+      workflowId, workflow: record, projectDir, rootDir, plan: refreshed.plan,
+      services: { resumeActions: { retryFrameHtml: async () => { throw new Error('模拟失效写盘后的进程中断'); } } },
+    }), /模拟失效写盘后的进程中断/);
+
+    const interruptedRaw = await readJson(path.join(projectDir, 'project.json'));
+    const checkpoint = interruptedRaw.generation_checkpoint.stages;
+    for (const sceneId of ['scene_02', 'scene_03']) {
+      assert.deepEqual(checkpoint.frame_html.frames[sceneId], {
+        status: 'pending', html_path: '', input_hash: '', input_fingerprint: '', output_hash: '', diagnostic_code: '',
+      });
+      assert.deepEqual(checkpoint.render.frames[sceneId], {
+        status: 'pending', mp4_path: '', output_hash: '', diagnostic_code: '',
+      });
+    }
+    assert.equal(checkpoint.frame_html.status, 'partial');
+    assert.equal(checkpoint.render.status, 'partial');
+    assert.deepEqual(checkpoint.frame_html.frames.scene_01, keptFrameHtml);
+    assert.deepEqual(checkpoint.render.frames.scene_01, keptRender);
+    assert.deepEqual(checkpoint.frame_html.frames.scene_04, unrelatedFrameHtml);
+    assert.deepEqual(checkpoint.render.frames.scene_04, unrelatedRender);
+    assert.deepEqual(checkpoint.compose, { status: 'pending', output_path: '', output_audio_path: '', diagnostic_code: '' });
+    assert.equal(checkpoint.duration_verify.status, 'pending');
+    assert.equal(checkpoint.duration_verify.expected_duration_sec, null);
+    assert.equal(checkpoint.duration_verify.actual_duration_sec, null);
+    assert.deepEqual(checkpoint.visual_inspect, { status: 'pending', report_path: null, diagnostic_code: '' });
+    assert.deepEqual(interruptedRaw.exports, []);
+    assert.deepEqual(interruptedRaw.render_outputs || [], []);
+    assert.equal(interruptedRaw.status, 'draft');
+
+    const calls = {};
+    const resumed = await executeCreativeWorkflowRetryPlan({
+      workflowId, workflow: record, projectDir, rootDir, plan: refreshed.plan,
+      services: fakeHtmlVideoServices(calls),
+    });
+    assert.equal(resumed.success, false, '其他错误 Scene 仍未完成时不得误报全工程恢复成功');
+    assert.deepEqual(calls.retryFrameHtmlIds, ['scene_02', 'scene_03']);
+    assert.deepEqual(calls.renderFrameIds, ['scene_02', 'scene_03']);
+    assert.equal(calls.renderFrameIds.includes('scene_01'), false, '有效 Scene 1 MP4 不得重渲染');
+    assert.equal(calls.renderFrameIds.includes('scene_04'), false, '其他失败原因不得混入本次恢复');
+    assert.equal(calls.compose || 0, 0, '旧合成结果不得复用，缺少 Scene 4 时也不得开始新合成');
+    assert.equal(calls.visualInspect || 0, 0, '旧视觉报告不得复用');
+  }
+
+  {
+    const rootDir = await tempRoot();
     const { workflowId, projectDir } = await createRenderFailureFixture(rootDir, '202606250000001014');
     const project = await projectStore.loadProject(projectDir);
     markCheckpointFrame(project, 'render', 'scene_02', {
