@@ -291,6 +291,23 @@ function uniqueStrings(values = []) {
   return result;
 }
 
+function unresolvedLayoutQaFrameIds(project = {}, classification = {}) {
+  const code = 'frame_layout_qa_unresolved';
+  const diagnostics = [classification.diagnostic, ...arrayOrEmpty(classification.diagnostics)]
+    .filter(item => safeString(item?.code) === code);
+  const checkpointFrames = objectOrEmpty(project.generation_checkpoint?.stages?.frame_html?.frames);
+  return uniqueStrings([
+    classification.frame_id,
+    ...diagnostics.flatMap(item => {
+      const details = objectOrEmpty(item.details);
+      return [item.frame_id, details.frame_id, ...arrayOrEmpty(details.issues).map(issue => issue?.frame_id)];
+    }),
+    ...Object.entries(checkpointFrames)
+      .filter(([, frame]) => frame?.status === 'failed' && safeString(frame.diagnostic_code) === code)
+      .map(([frameId]) => frameId),
+  ]);
+}
+
 function collectDiagnosticVisualIssues(classification = {}) {
   const diagnostics = [
     classification.diagnostic,
@@ -502,13 +519,27 @@ function createCreativeWorkflowRetryPlan(input = {}) {
     || code === 'html_validation_failed'
     || code === 'frame_html_content_mismatch'
     || code === 'layout_qa_failed'
-    || code === 'frame_layout_qa_unresolved'
   ) {
     return retryPlan(classification, 'retry_frame_html', 'frame_html', {
       reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
       discard: classification.frame_id ? [`frames:${classification.frame_id}`, 'render_outputs'] : ['frame_html', 'render_outputs'],
       executor_options: classification.frame_id ? { frame_id: classification.frame_id } : {},
       user_message: '将复用已完成内容，只重新生成失败帧并重新导出。',
+    });
+  }
+
+  if (code === 'frame_layout_qa_unresolved') {
+    const frameIds = unresolvedLayoutQaFrameIds(project, classification);
+    return retryPlan(classification, 'retry_frame_html', 'frame_html', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
+      discard: frameIds.length
+        ? [...frameIds.map(frameId => `frames:${frameId}`), 'render_outputs']
+        : ['frame_html', 'render_outputs'],
+      executor_options: {
+        regenerate_frame_html: true,
+        ...(frameIds.length ? { frame_ids: frameIds } : {}),
+      },
+      user_message: '摄影机预览 QA 仍未通过，将只重新生成相关场景并重新导出。',
     });
   }
 

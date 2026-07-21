@@ -207,6 +207,62 @@ async function createFrameHtmlFailureFixture(rootDir, workflowId = '202606250000
   return { workflowId, projectDir };
 }
 
+async function createMultiSceneLayoutQaFailureFixture(rootDir, workflowId = '202606250000001015') {
+  const projectDir = path.join(rootDir, 'media', workflowId, 'agent_runs', 'run-layout-qa-retry');
+  const sceneIds = ['scene_01', 'scene_02', 'scene_03', 'scene_04'];
+  const project = createProject({ workflowId, sceneIds, targetDurationSec: 8 });
+  markCheckpointFrame(project, 'frame_html', 'scene_01', { status: 'done', output_hash: 'scene-01-kept' });
+  markCheckpointFrame(project, 'frame_html', 'scene_02', {
+    status: 'failed', diagnostic_code: 'frame_layout_qa_unresolved',
+  });
+  markCheckpointFrame(project, 'frame_html', 'scene_03', {
+    status: 'failed', diagnostic_code: 'frame_layout_qa_unresolved',
+  });
+  markCheckpointFrame(project, 'frame_html', 'scene_04', {
+    status: 'failed', diagnostic_code: 'provider_missing_text',
+  });
+  markCheckpointFrame(project, 'render', 'scene_01', { status: 'done', output_hash: 'scene-01-render-kept' });
+  markCheckpointFrame(project, 'render', 'scene_02', { status: 'failed', diagnostic_code: 'frame_layout_qa_unresolved' });
+  markCheckpointFrame(project, 'render', 'scene_03', { status: 'failed', diagnostic_code: 'frame_layout_qa_unresolved' });
+  markCheckpointFrame(project, 'render', 'scene_04', { status: 'failed', diagnostic_code: 'provider_missing_text' });
+  await projectStore.saveProject(projectDir, project);
+
+  const diagnostics = [{
+    code: 'frame_layout_qa_unresolved',
+    stage: 'ai-frame-html',
+    sub_stage: 'frame_html',
+    frame_id: 'scene_02',
+    severity: 'error',
+    retryable: true,
+    repair_action: 'retry_frame_html',
+    details: {
+      issues: [{ code: 'camera_jitter', frame_id: 'scene_02', sample_time_sec: 1.25, shot_id: 'shot_02' }],
+    },
+  }, {
+    code: 'frame_layout_qa_unresolved',
+    sub_stage: 'frame_html',
+    details: { frame_id: 'scene_03' },
+  }, {
+    code: 'provider_missing_text',
+    sub_stage: 'frame_html',
+    frame_id: 'scene_04',
+  }];
+  const lastFailure = {
+    stage: 'project',
+    sub_stage: 'frame_html',
+    code: 'frame_layout_qa_unresolved',
+    frame_id: 'scene_02',
+    project_dir: projectDir,
+    message: '场景摄影机预览 QA 仍未通过。',
+    diagnostics,
+  };
+  await writeJson(
+    workflows.getWorkflowPath(workflowId, rootDir),
+    retryWorkflowRecord({ workflowId, projectDir, lastFailure, sceneIds }),
+  );
+  return { workflowId, projectDir };
+}
+
 async function createRenderFailureFixture(rootDir, workflowId = '202606250000001002') {
   const projectDir = path.join(rootDir, 'media', workflowId, 'agent_runs', 'run-render-timeout');
   const sceneIds = ['scene_01', 'scene_02'];
@@ -545,6 +601,47 @@ function plannerProject(overrides = {}) {
     assert.equal(calls.compose, 1);
     assert.equal(calls.visualInspect, 1);
     assert.equal(calls.visualInspectArgs.projectDir, projectDir);
+  }
+
+  {
+    const rootDir = await tempRoot();
+    const { workflowId, projectDir } = await createMultiSceneLayoutQaFailureFixture(rootDir);
+    const refreshed = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
+    assert.deepEqual(refreshed.plan.executor_options, {
+      regenerate_frame_html: true,
+      frame_ids: ['scene_02', 'scene_03'],
+    });
+    const record = await readJson(workflows.getWorkflowPath(workflowId, rootDir));
+    assert.deepEqual(record.last_failure.diagnostics[0].details.issues[0], {
+      code: 'camera_jitter', frame_id: 'scene_02', sample_time_sec: 1.25, shot_id: 'shot_02',
+    });
+
+    const retriedFrameIds = [];
+    const retried = await executeCreativeWorkflowRetryPlan({
+      workflowId,
+      workflow: record,
+      projectDir,
+      rootDir,
+      plan: refreshed.plan,
+      services: {
+        resumeActions: {
+          retryFrameHtml: async ({ project, frame_id }) => {
+            retriedFrameIds.push(frame_id);
+            assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_01.status, 'done');
+            assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_02.status, 'pending');
+            assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_03.status, 'pending');
+            assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_04.diagnostic_code, 'provider_missing_text');
+            return {
+              success: true,
+              project,
+              ...(frame_id === 'scene_03' ? { output_path: 'exports/recovered.mp4' } : {}),
+            };
+          },
+        },
+      },
+    });
+    assert.equal(retried.success, true);
+    assert.deepEqual(retriedFrameIds, ['scene_02', 'scene_03']);
   }
 
   {

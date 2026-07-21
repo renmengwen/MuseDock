@@ -7,6 +7,7 @@ const creativeWorkflows = require('../server/services/creative/creativeWorkflows
 const {
   classifyCreativeWorkflowFailure,
   createCreativeWorkflowRetryPlan,
+  resolveRetryFrameIds,
 } = require('../server/services/creative-video/retryPlanner');
 const { createDiagnostic } = require('../server/services/creative-video/html-video/diagnostics');
 const { createEmptyProject, markCheckpointFrame, markCheckpointStage } = require('../server/services/creative-video/html-video/projectSchema');
@@ -121,22 +122,75 @@ function project(overrides = {}) {
         stage: 'project',
         sub_stage: 'frame_html',
         code: 'frame_layout_qa_unresolved',
-        frame_id: 'scene_02_b3',
-        diagnostics: [createDiagnostic({
+        frame_id: 'scene_02',
+        diagnostics: [{
           code: 'frame_layout_qa_unresolved',
           stage: 'ai-frame-html',
           sub_stage: 'frame_html',
-          frame_id: 'scene_02_b3',
+          frame_id: 'scene_02',
+          severity: 'error',
           retryable: true,
           repair_action: 'retry_frame_html',
+          details: {
+            frame_id: 'scene_02',
+            issues: [{ code: 'camera_jitter', frame_id: 'scene_02', sample_time_sec: 1.25, shot_id: 'shot_02' }],
+          },
+        }, {
+          code: 'frame_layout_qa_unresolved',
+          stage: 'ai-frame-html',
+          sub_stage: 'frame_html',
+          retryable: true,
+          repair_action: 'retry_frame_html',
+          details: { frame_id: 'scene_03' },
+        }, createDiagnostic({
+          code: 'provider_missing_text',
+          stage: 'ai-frame-html',
+          sub_stage: 'frame_html',
+          frame_id: 'scene_04',
         })],
       },
     }),
-    project: project(),
+    project: project({
+      generation_checkpoint: {
+        stages: {
+          frame_html: {
+            frames: {
+              scene_01: { status: 'done', diagnostic_code: '' },
+              scene_02: { status: 'failed', diagnostic_code: 'frame_layout_qa_unresolved' },
+              scene_03: { status: 'failed', diagnostic_code: 'frame_layout_qa_unresolved' },
+              scene_04: { status: 'failed', diagnostic_code: 'provider_missing_text' },
+            },
+          },
+        },
+      },
+    }),
   });
   assert.equal(unresolvedLayoutQaPlan.can_retry, true);
   assert.equal(unresolvedLayoutQaPlan.repair_action, 'retry_frame_html');
-  assert.deepEqual(unresolvedLayoutQaPlan.executor_options, { frame_id: 'scene_02_b3' });
+  assert.deepEqual(unresolvedLayoutQaPlan.executor_options, {
+    regenerate_frame_html: true,
+    frame_ids: ['scene_02', 'scene_03'],
+  });
+  assert.deepEqual(unresolvedLayoutQaPlan.discard, ['frames:scene_02', 'frames:scene_03', 'render_outputs']);
+  assert.deepEqual(resolveRetryFrameIds(['scene_02_b3', 'scene_03_b1'], {
+    continuityMode: 'scene_html',
+    beatToScene: { scene_02_b3: 'scene_02', scene_03_b1: 'scene_03' },
+  }), ['scene:scene_02', 'scene:scene_03']);
+  assert.deepEqual(resolveRetryFrameIds(['scene_02_b3', 'scene_03_b1']), ['scene_02_b3', 'scene_03_b1']);
+  const unresolvedClassification = classifyCreativeWorkflowFailure({
+    workflow: workflow({ last_failure: {
+      code: 'frame_layout_qa_unresolved',
+      diagnostics: [{
+        code: 'frame_layout_qa_unresolved',
+        severity: 'error',
+        details: { issues: [{ frame_id: 'scene_02', sample_time_sec: 1.25, shot_id: 'shot_02' }] },
+      }],
+    } }),
+    project: project(),
+  });
+  assert.deepEqual(unresolvedClassification.diagnostic.details.issues[0], {
+    frame_id: 'scene_02', sample_time_sec: 1.25, shot_id: 'shot_02',
+  });
 
   const visualQaPlan = createCreativeWorkflowRetryPlan({
     workflow: workflow({
