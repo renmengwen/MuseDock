@@ -17,6 +17,7 @@ const {
   isGeneratedVisualAsset,
   mergeVisualAssetFormalFields,
   normalizeFocusRegions,
+  normalizeFocusAnalysis,
 } = require('../../creative/visualAssetContract');
 
 function objectOrEmpty(value) {
@@ -117,6 +118,14 @@ async function materializeCreativeContextAssets(projectDir, creativeContext = {}
   return creativeContext;
 }
 
+// focus_analysis 是焦点分析的跨 run 缓存记录：合法才透传，非法整体丢弃（不产生字段）。
+// 完整 run 的 buildMixedFrameProject 重建 + 本投影落盘是记录的唯一存活通道，删掉透传会让缓存跨 run 失效。
+function projectedFocusAnalysis(asset = {}) {
+  if (!Object.prototype.hasOwnProperty.call(asset, 'focus_analysis')) return {};
+  const focusAnalysis = normalizeFocusAnalysis(asset.focus_analysis);
+  return focusAnalysis ? { focus_analysis: focusAnalysis } : {};
+}
+
 function projectAssetsFromCreativeContext(creativeContext = {}) {
   const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
   return assets.map((asset, index) => ({
@@ -144,6 +153,7 @@ function projectAssetsFromCreativeContext(creativeContext = {}) {
     ...(Object.prototype.hasOwnProperty.call(asset, 'focus_regions')
       ? { focus_regions: normalizeFocusRegions(asset.focus_regions) }
       : {}),
+    ...projectedFocusAnalysis(asset),
   })).filter(asset => asset.path);
 }
 

@@ -340,13 +340,26 @@ async function createDurableProject(prefix, entries) {
   return projectDir;
 }
 
-// 复刻 htmlVideoWorkflow focus phase 之后的正式持久化写入（mergeVisualAssets + 白名单投影）。
+// 复刻 htmlVideoWorkflow focus phase 之后的完整持久化链（保真顺序不可省略）：
+// 1) :900 合并写 mergeVisualAssets(current.assets, 投影)；
+// 2) buildMixedFrameProject 重建 project（normalizeProject 缺省 assets=[]）+ :989 saveProject 直接覆盖磁盘；
+// 3) :1014-1018 用投影按 path 重建 project.assets；4) :1046 saveProject 落盘。
+// 只复刻第 1 步会高估持久性：完整 run 中 phase 落盘的记录会被第 2 步抹掉，必须靠投影透传存活。
 async function persistLikeWorkflow(projectDir, creativeContext) {
   await projectStore.writeProjectJson(projectDir, current => {
     current.assets = mergeVisualAssets(
       Array.isArray(current.assets) ? current.assets : [],
       projectAssetsFromCreativeContext(creativeContext),
     );
+    return current;
+  });
+  await projectStore.saveProject(projectDir, { assets: [] });
+  const sourceProjectAssets = projectAssetsFromCreativeContext(creativeContext);
+  await projectStore.writeProjectJson(projectDir, current => {
+    const byPath = new Map((Array.isArray(current.assets) ? current.assets : [])
+      .map(item => [String(item.path || ''), item]));
+    sourceProjectAssets.forEach(item => byPath.set(item.path, { ...(byPath.get(item.path) || {}), ...item }));
+    current.assets = Array.from(byPath.values()).filter(item => item.path);
     return current;
   });
 }

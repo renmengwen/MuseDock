@@ -172,13 +172,15 @@ function matchedFocusAnalysis(asset, imageHash, identity) {
     ? record : null;
 }
 
-// durable 记录由 phase 直接落盘：workflow 的白名单投影（projectAssetsFromCreativeContext）不含
-// focus_analysis，若只写回 creativeContext，进程重启后记录会丢失。落盘尽力而为：
-// project.json 缺失或写入失败只影响下次复用，不打断 workflow。
+// durable 记录双层落盘的 phase 侧：完整 run 依赖 projectAssetsFromCreativeContext 投影透传
+// （buildMixedFrameProject 重建会覆盖本次写入），这里的直接落盘覆盖“run 在重建前中止”的窗口，
+// 让下次 resume 仍能命中缓存。落盘尽力而为：project.json 缺失或写入失败只影响下次复用，不打断 workflow。
 async function persistFocusAnalysisRecords(projectDir, records) {
   if (!records.size || !text(projectDir)) return;
   try {
     await projectStore.writeProjectJson(projectDir, current => {
+      // 按 id 匹配依赖 project.assets 内 id 唯一（正式链路 mergeVisualAssets 按 id 去重保证）；
+      // 若出现重复 id 条目，同一记录会写到每个同 id 条目上，语义等价、无副作用。
       for (const entry of (Array.isArray(current.assets) ? current.assets : [])) {
         const record = records.get(text(entry?.id || entry?.asset_id));
         if (record) entry.focus_analysis = { ...record };

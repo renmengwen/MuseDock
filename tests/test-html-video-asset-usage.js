@@ -476,6 +476,58 @@ assert.equal(projectAssets[0].evidence_class, 'user_supplied');
 assert.equal(projectAssets[0].parent_asset_id, 'source_upload_batch');
 assert.equal(projectAssets[0].bytes, 123);
 
+// D-06：白名单投影必须透传合法 focus_analysis（durable 缓存记录），否则完整 run 的
+// buildMixedFrameProject 重建 + 投影落盘会抹掉记录，跨 run 复用失效。
+{
+  const focusAnalysisRecord = {
+    version: 1,
+    content_sha256: 'a'.repeat(64),
+    contract_version: 'focus-region-contract-v1',
+    provider: 'mock-ai',
+    model: 'vision-mock-1',
+    prompt_version: 'focus-region-prompt-v1',
+    status: 'empty',
+  };
+  const projectionAsset = overrides => ({
+    id: 'analysis_asset',
+    media_type: 'image',
+    origin: 'source_extract',
+    path: 'assets/analysis.png',
+    ...overrides,
+  });
+  const projected = assetUsagePhase.projectAssetsFromCreativeContext({
+    asset_context: { assets: [projectionAsset({ focus_regions: [], focus_analysis: focusAnalysisRecord })] },
+  })[0];
+  assert.deepEqual(projected.focus_analysis, focusAnalysisRecord, '投影必须原样保留合法 focus_analysis');
+  assert.deepEqual(projected.focus_regions, []);
+
+  const withoutField = assetUsagePhase.projectAssetsFromCreativeContext({
+    asset_context: { assets: [projectionAsset()] },
+  })[0];
+  assert.equal(
+    Object.hasOwn(withoutField, 'focus_analysis'),
+    false,
+    '无 focus_analysis 时投影不得产生该字段',
+  );
+
+  for (const invalid of [
+    null,
+    'bad',
+    { ...focusAnalysisRecord, injected: true },
+    { ...focusAnalysisRecord, status: 'failed' },
+    { ...focusAnalysisRecord, version: 2 },
+  ]) {
+    const dropped = assetUsagePhase.projectAssetsFromCreativeContext({
+      asset_context: { assets: [projectionAsset({ focus_analysis: invalid })] },
+    })[0];
+    assert.equal(
+      Object.hasOwn(dropped, 'focus_analysis'),
+      false,
+      `非法 focus_analysis 必须整体丢弃：${JSON.stringify(invalid)}`,
+    );
+  }
+}
+
 const requiredReport = workflow.buildAssetUsageReport({
   projectDir,
   project: {
