@@ -21,7 +21,8 @@
 - 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 当前为 `agents.max_threads = 20`，新任务/重启后读取
 - 实际并发：第 4 个 sub-agent 创建返回 `agent thread limit reached`；当前产品层仍为主 Agent + 3 个 sub-agent
 - 当前主工作区：`dev`；B-07b 最终 reviewed tree 已由提交 `218fbf9` squash 集成
-- 当前顺序：Phase B、Phase C 已完成 → 执行 Phase D Focus/Camera
+- 当前顺序：Phase B、Phase C 已完成 → Phase D 进行中；D-01、D-02、D-03a、D-03b、D-03c 已完成集成，下一任务 D-04 focus_cues
+- 2026-07-21 起执行环境由 Codex 切换为 Claude Code（Codex 侧因安全分类器误判反复中断）；Loop 规则不变，本总账继续为唯一控制面
 - Phase C：C-01～C-05 全部完成；REQ-B-09/10 已由 canonical Shot Usage Report 收口
 
 ## Goal 基线与用户改动清单
@@ -81,7 +82,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-07a requirement 分类语义 | `complete` | B-01 | `fda1c71` | 最终双 Review PASS；dev 10 项串行验证通过并释放租约 |
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `complete` | B-07b | `df9a519`、`fab5167`、`6d58460`、`c5e08f0`、`31006f3` | C-01～C-05 完成；canonical Shot Usage、required gate 与素材面板一致 |
-| D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `in_progress` | C-05 | - | D-01 Focus Region 数据合同与持久化 |
+| D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `in_progress` | C-05 | `4d58c4f`、`123dd16`、`a30a22f`、`2a5c7d8`、`41400fa` | D-04 focus_cues 规划与同 region 防抖合并 |
 | E-01～E-05 Camera QA、issue code、定向 retry、checkpoint/resume | `queued` | D-08 | - | `skipValidation=false` 真实验收 |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
 
@@ -89,7 +90,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-03c
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: 097c94d96765ff02053affffafcfd1aeb07ec791
@@ -99,6 +100,7 @@ candidate_commit: 012dca0c4a9c5c44c459604ba3d0f3cbce5ed9cf
 frozen_revision: 012dca0c4a9c5c44c459604ba3d0f3cbce5ed9cf
 frozen_tree: bfe36ff011fc6603ba3787759d5d50b2d975cfcb
 revision_valid: true
+dev_commit: 41400fa
 allowed_paths:
   - server/services/creative-video/html-video/focusRegionPhase.js
   - server/services/creative-video/html-video/htmlVideoWorkflow.js
@@ -139,9 +141,19 @@ verification:
   - sourceImageAnalysisEnabled 从冻结 workflow target 进入真实 html-video consumer
   - Coordinator phase/page capture/contract/project-store/resume/workflow/defaults 共 8 组回归与 git diff --check 通过
   - 真实 GitHub Chrome smoke：page_capture_evidence SHA-256 与落盘 PNG bytes 完全一致
+  - dev 集成后 8 组回归（phase/workflow/defaults/page capture/contract/project-store/resume/creative workflows）通过
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_ledger_commit: 736d859
+  spec_reviewed_revision: 012dca0c4a9c5c44c459604ba3d0f3cbce5ed9cf
+  quality: pass
+  quality_reviewed_ledger_commit: 736d859
+  quality_reviewed_revision: 012dca0c4a9c5c44c459604ba3d0f3cbce5ed9cf
+nonblocking_findings:
+  - vision 失败素材落盘 focus_regions=[]，新 run 视空为未分析而重试；跨 retry 持久 cache 归 D-06 收口
+  - DOM 绑定有效但标签全歧义且 vision 关闭时静默跳过，按无可信区域（D 级）处理，属合法语义
+  - focusRegionPhase 对 cache 命中结果二次 normalizeFocusRegions 是跨 asset 深拷贝隔离（有测试锁定），D-06 改造时补注释防止被误删
+  - 分析路径 bare catch 统一吞异常符合 fail-open 约束，可观测性取舍已知
 ```
 
 ```yaml
@@ -924,10 +936,10 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 
 | ID | 状态 | 要求 | 覆盖 Task |
 |---|---|---|---|
-| REQ-D-01 | `pending` | 图片级 `focus_regions` | D-01、D-03 |
+| REQ-D-01 | `verified` | 图片级 `focus_regions` | D-01、D-03 |
 | REQ-D-02 | `pending` | Scene/Shot 级 `focus_cues` | D-04 |
-| REQ-D-03 | `pending` | DOM/manual、OCR/验证、AI-only、歧义失败的信任等级 | D-01、D-03 |
-| REQ-D-04 | `pending` | 语义准确与几何准确分开 | D-01、D-03 |
+| REQ-D-03 | `verified` | DOM/manual、OCR/验证、AI-only、歧义失败的信任等级 | D-01、D-03 |
+| REQ-D-04 | `verified` | 语义准确与几何准确分开 | D-01、D-03 |
 | REQ-D-05 | `pending` | A/B 自动聚焦，C 低倍率宽松聚焦，D 不聚焦 | D-07、D-08 |
 | REQ-D-06 | `verified` | cover/contain 和双层截图坐标映射 | D-02 |
 | REQ-D-07 | `verified` | 安全目标中心、zoom 限幅、位移 clamp 和黑边防护 | D-02 |
@@ -992,5 +1004,8 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase C Task 5 canonical Shot Usage Report | `31006f3`；冻结 revision `f844512cbe7419358f456c3eaad67386846638fa`、tree `8a832af9ce11c15cc34a034427ce0e500b793ef9`；直接复用 C-04 物化 contract 生成逐 Shot scene/caption/role/mode/毫秒级正数可见时长；required path-only fail-closed，legacy non-required fallback 保留；used/frames/count 与顶层 used/unused/missing 同源；素材面板展示同一 canonical report；identity 闭包覆盖 raw、normalizeProject、projectStore save/load 共 54 场景；最终双 Review PASS；Candidate 核心回归与真实 Chromium 79.5 秒、Vite build通过；dev 11 组回归和 Vite build通过；REQ-B-09/10 verified，Phase C complete |
 | Phase D Task 1 Focus Region 数据合同 | `4d58c4f`；冻结 revision `d913e73ef1faa4d9b349976934af3d014ca1c577`、tree `3b835f0c2ee59ee5c21b2083be3d1b0719a0466b`；`asset_context.assets[].focus_regions` 成为唯一 canonical owner，A/B/C/D trust 由共享 normalizer保守派生；缺失/空/非法/重复/几何/aliases/merge语义闭合；project save-load、真实 resume、workflow same-ID 查询水合与 focus-only fingerprint闭合；来源或path冲突不嫁接另一张图坐标；最终双 Review PASS；dev 8组集成回归通过；REQ-D-01/03/04 的合同部分完成，producer与双轴验证留给 D-03 |
 | Phase D Task 2 Camera 坐标数学 | `123dd16`；冻结 revision `ae04de6b9cfed0e09647de35d4395084a96aad3a`、tree `6de619a6720eed4835dfa47ab8233f418e0dd809`；纯函数完成 cover/contain、显式 safe rect/fill/max zoom、完整 mapped region 安全约束、cover 防露底与结构化 no-op；339 组预期成功、237 组不可满足矩阵和 mutation 防假阳性通过；最终双 Review PASS；dev 三组集成回归与 diff-check 通过；REQ-D-06/07 verified |
+| Phase D Task 3a 焦点双轴验证合同 | `a30a22f`；冻结 revision `bff4e56bc22512d3f5a676bf4bc00a10e50f2b30`、tree `36c8d84057dfed7e01f445ae527540476fdf44e9`；semantic/geometry 双轴 truth table、缺轴/非法轴 fail-closed、legacy 兼容与二次 normalize 幂等闭包；双 Review PASS；dev 四组集成回归通过 |
+| Phase D Task 3b 截图 DOM 原始证据 | `2a5c7d8`；冻结 revision `62be3330cbc5f039eb0eb71ee231ffd654bf6099`、tree `b2aa32c02fd143f700b3b00806b8fe3990260e6f`；截图同 page/viewport 采集有界 raw evidence，祖先 overflow 可见交集裁剪、200 元素/160 字符上限、同名候选保留不消歧、evaluate 失败保留截图与独立中文诊断；双 Review PASS；真实 Chrome 150 / Playwright 1.60 GitHub smoke 通过 |
+| Phase D Task 3c 最终使用图片焦点分析 | `41400fa`；冻结 revision `012dca0c4a9c5c44c459604ba3d0f3cbce5ed9cf`、tree `bfe36ff011fc6603ba3787759d5d50b2d975cfcb`；phase 插在 canonical buildVisualPlan 成功后、Frame HTML 前，只读最终 shots[].asset_id；DOM 唯一同名文本 + 截图 bytes SHA-256 与工程图片一致才升 A，vision 强制双轴 candidate 封顶 C，失败/歧义显式安全降级并输出中文 warning；同 run bytes 去重，phase 后立即持久化 project.assets，resume 不重复调用；规格与质量 Review PASS（ledger `736d859`、revision `012dca0`）；冻结 worktree 与 dev 各 8 组回归通过 |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
