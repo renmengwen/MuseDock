@@ -167,8 +167,10 @@ frozen_tree: c091784f81fc0117c0862553976cae8c8c58d5d8
 revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/sceneImageSequenceDom.js
+  - server/services/creative-video/html-video/frameHtmlPhaseSupport.js
   - tests/test-html-video-scene-image-sequence-dom.js
   - tests/test-html-video-camera-runtime-chromium.js
+  - tests/test-html-video-frame-html-resume.js
 forbidden_paths:
   - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
   - server/services/creative-video/html-video/cameraMath.js
@@ -190,6 +192,7 @@ decisions:
   - 节奏遵循 summary §14：cue 前 overview、caption start 起 0.45～0.8s 平滑过渡、保持到 cue 结束、相邻 cue 直接转向、场景末剩余时间足够才回全景；A/B 级以外不聚焦
   - 图片实际尺寸用运行时 naturalWidth/naturalHeight；cameraMath 以与 playbackClock 相同的源码注入模式进入浏览器（只读引用，不改该文件）
   - 真实 Chromium 测试为必过门：验证 cue 窗口内 foreground transform 变化、聚焦保持期稳定、cue 外回归基线，无 cue shot 与现状一致
+  - 摄影机受管运行时改变 Frame HTML 产物结构，FRAME_PROMPT_VERSION 必须升级并由 resume 回归锁定旧 checkpoint 重建
 verification:
   - node tests/test-html-video-scene-image-sequence-dom.js
   - node tests/test-html-video-camera-runtime-chromium.js
