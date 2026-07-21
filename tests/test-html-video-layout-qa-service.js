@@ -180,6 +180,24 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.deepEqual(infinityAfterPlay.metrics.samples, []);
     assert.ok(infinityAfterPlay.issues.some(issue => issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE'));
 
+    const finiteJumpPath = path.join(timelineDir, 'finite-jump.html');
+    await fs.writeFile(finiteJumpPath, `<!doctype html><html><body><p data-text-key="body">有限大跳时钟</p><script>
+      (function(){var time=0,playing=false;window.__hvPlaybackClock={
+        __hvOwner:'musedock-playback-clock-v1',subscribe:function(){},play:function(){playing=true},pause:function(){playing=false},
+        timeSec:function(){return playing?100:time},paused:function(){return !playing},setTime:function(value){time=Number(value)}
+      };})();
+      </script></body></html>`, 'utf8');
+    const finiteJump = await inspectFrameHtmlLayout({
+      htmlPath: finiteJumpPath,
+      frame: { id: 'scene_finite_jump', duration_sec: 1 },
+      resolution,
+      sampleTimesSec: [0.5],
+    });
+    assert.equal(finiteJump.success, false);
+    assert.equal(finiteJump.metrics.skipped, false);
+    assert.deepEqual(finiteJump.metrics.samples, []);
+    assert.ok(finiteJump.issues.some(issue => issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE'));
+
     const stalledClockPath = path.join(timelineDir, 'stalled-clock.html');
     await fs.writeFile(stalledClockPath, `<!doctype html><html><body>
       <p data-text-key="body">停滞时钟</p><script>
@@ -201,7 +219,9 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.ok(stalledClock.issues.some(issue => issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE'));
 
     const midStallClockPath = path.join(timelineDir, 'mid-stall-clock.html');
-    await fs.writeFile(midStallClockPath, `<!doctype html><html><body><p data-text-key="body">中途停滞时钟</p><script>
+    await fs.writeFile(midStallClockPath, `<!doctype html><html><head><style>
+      html,body{width:1920px;height:1080px;margin:0}.overlap{position:absolute;left:100px;top:100px;width:300px}
+      </style></head><body><p class="overlap">首样本重叠一</p><p class="overlap">首样本重叠二</p><script>
       (function(){var time=0,origin=0,running=false,stalled=false;window.__hvPlaybackClock={
         __hvOwner:'musedock-playback-clock-v1',subscribe:function(){},
         play:function(){if(!running){running=true;origin=performance.now()-time*1000}},
@@ -221,6 +241,7 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.equal(midStallClock.metrics.skipped, false);
     assert.equal(midStallClock.success, false);
     assert.deepEqual(midStallClock.metrics.samples.map(sample => sample.sample_time_sec), [0.05]);
+    assert.ok(midStallClock.issues.some(issue => issue.code === 'text_overlap'), '时钟中途失败不得丢弃首样本真实重叠');
     assert.ok(midStallClock.issues.some(issue => (
       issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE' && issue.sample_time_sec === 0.2
     )));

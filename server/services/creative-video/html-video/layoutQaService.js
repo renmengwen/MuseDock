@@ -726,14 +726,14 @@ async function inspectFrameHtmlLayout(options = {}) {
     for (const sampleTimeSec of samples) {
       if (continuousPlayback) {
         const currentTime = await page.evaluate(() => Number(window.__hvPlaybackClock.timeSec())).catch(() => NaN);
-        if (!Number.isFinite(currentTime)) {
+        if (!Number.isFinite(currentTime) || currentTime < 0) {
           const issue = makeIssue({
             code: 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE',
             frameId,
             sampleTimeSec,
             message: '布局 QA 检测到共享播放时钟返回了无效时间。',
           });
-          return { success: false, issues: [issue], metrics };
+          return { success: false, issues: dedupeIssues([...issues, issue]), metrics };
         }
         const remainingMs = Math.max(0, sampleTimeSec - currentTime) * 1000;
         try {
@@ -765,20 +765,25 @@ async function inspectFrameHtmlLayout(options = {}) {
               message: '布局 QA 检测到共享播放时钟中途停止，且无法定位当前采样时间。',
               details: { error: error?.message || String(error) },
             });
-            return { success: false, issues: [issue], metrics };
+            return { success: false, issues: dedupeIssues([...issues, issue]), metrics };
           }
           continuousPlayback = false;
         }
         if (continuousPlayback) {
           const reachedTime = await page.evaluate(() => Number(window.__hvPlaybackClock.timeSec())).catch(() => NaN);
-          if (!Number.isFinite(reachedTime)) {
+          if (
+            !Number.isFinite(reachedTime)
+            || reachedTime < sampleTimeSec
+            || reachedTime - sampleTimeSec >= 0.2
+          ) {
             const issue = makeIssue({
               code: 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE',
               frameId,
               sampleTimeSec,
-              message: '布局 QA 检测到共享播放时钟在采样时返回了无效时间。',
+              message: '布局 QA 检测到共享播放时钟未停留在当前采样时间附近。',
+              details: { reached_time_sec: reachedTime },
             });
-            return { success: false, issues: [issue], metrics };
+            return { success: false, issues: dedupeIssues([...issues, issue]), metrics };
           }
         }
       } else {
@@ -814,7 +819,7 @@ async function inspectFrameHtmlLayout(options = {}) {
             message: '布局 QA 无法将共享播放时钟定位到当前采样时间。',
             details: { error: timelinePosition.error || `reached ${timelinePosition.reached}` },
           });
-          return { success: false, issues: [issue], metrics };
+          return { success: false, issues: dedupeIssues([...issues, issue]), metrics };
         }
         const waitSec = timelinePosition.available ? 0 : Math.max(0, sampleTimeSec - elapsedSec);
         if (waitSec > 0) {
