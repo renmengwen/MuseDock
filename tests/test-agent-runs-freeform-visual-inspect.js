@@ -27,6 +27,12 @@ const workflows = require('../server/services/creative/creativeWorkflows');
   assert.deepEqual(withIssues.issues, nonBlockingIssues);
   assert.deepEqual(withIssues.warnings, []);
 
+  const blockingIssues = [{ code: 'blank_opening_frame', message: '开头出现白屏。' }];
+  const blocked = buildFreeformVisualInspectProjection({ success: false, issues: blockingIssues });
+  assert.equal(blocked.status, 'failed');
+  assert.equal(blocked.message, '视觉质检发现 1 项阻断问题，成片不可用。');
+  assert.deepEqual(blocked.issues, blockingIssues);
+
   // 带 warnings：status 用 passed_with_warnings，message 不是纯"视觉质检通过。"，warnings 投影含 code/message/定位字段
   const report = {
     success: true,

@@ -1646,7 +1646,7 @@
 
 // P1-6：视觉质检 warnings（asset_first 观测通道）非阻断透出。
 // 摘要逻辑收敛到共享模块 visualQaCodes（details 只保留定位字段控制投影体积），此处再导出保持既有引用方式。
-const { summarizeVisualQaWarnings } = require('../creative-video/visualQaCodes');
+const { summarizeVisualQaWarnings, isBlockingVisualQaCode } = require('../creative-video/visualQaCodes');
 
 module.exports = {
   createAgentRunsFreeformWorkflow,
@@ -1661,13 +1661,18 @@ module.exports = {
 function buildFreeformVisualInspectProjection(visualReport) {
   const warnings = summarizeVisualQaWarnings(visualReport?.warnings);
   const issues = Array.isArray(visualReport?.issues) ? visualReport.issues : [];
+  const blockingIssues = issues.filter(issue => isBlockingVisualQaCode(issue?.code));
   const hasReportedIssues = visualReport?.success === false && issues.length > 0;
   return {
-    status: warnings.length || hasReportedIssues ? 'passed_with_warnings' : 'passed',
+    status: blockingIssues.length
+      ? 'failed'
+      : warnings.length || hasReportedIssues ? 'passed_with_warnings' : 'passed',
     report: visualReport,
     issues,
     warnings,
-    message: hasReportedIssues
+    message: blockingIssues.length
+      ? `视觉质检发现 ${blockingIssues.length} 项阻断问题，成片不可用。`
+      : hasReportedIssues
       ? `视觉质检发现 ${issues.length} 项问题，成片仍可使用。`
       : warnings.length
         ? `视觉质检通过（${warnings.length} 条观察告警）。`

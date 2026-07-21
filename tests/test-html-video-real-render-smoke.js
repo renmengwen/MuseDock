@@ -6,6 +6,7 @@ const path = require('path');
 const { promisify } = require('util');
 
 const execFileAsync = promisify(execFile);
+const CHECK_PIXELS = process.env.PIXEL_CHECK === '1';
 
 if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
   console.log('跳过 html-video 真实渲染烟测：未设置 RUN_HTML_VIDEO_REAL_RENDER=1。');
@@ -17,6 +18,7 @@ const environmentDoctor = require('../server/services/creative-video/html-video/
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const { createEmptyProject } = require('../server/services/creative-video/html-video/projectSchema');
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
+const { isBlockingVisualQaCode } = require('../server/services/creative-video/visualQaCodes');
 
 const RESOLUTION = { width: 640, height: 360 };
 const FPS = 12;
@@ -31,6 +33,7 @@ function rawFrameHtml(headline) {
     'main{position:absolute;inset:0;background:linear-gradient(135deg,#17315c,#2d6ca2);}',
     'main::before{content:"";position:absolute;width:42%;aspect-ratio:1;border-radius:50%;left:6%;top:12%;background:linear-gradient(135deg,#4de1ff,#9a6cff);animation:drift 3s ease-in-out infinite alternate;}',
     'h1{position:absolute;left:52%;right:6%;top:22%;margin:0;font-size:42px;line-height:1.15;text-shadow:0 3px 16px #07152e;}',
+    '.hv-caption-layer{bottom:12px!important;font-size:42px!important;}',
     '@keyframes drift{from{transform:translateX(0) scale(.88)}to{transform:translateX(24px) scale(1.08)}}',
     '</style></head>',
     `<body><main><h1 data-text-key="headline">${headline}</h1></main></body>`,
@@ -69,6 +72,35 @@ async function assertRealVideo(outputPath) {
   return { ...stream, size: stat.size };
 }
 
+function assertPathWithin(parentPath, childPath, label) {
+  const absoluteParent = path.resolve(parentPath);
+  const absoluteChild = path.resolve(childPath);
+  const relative = path.relative(absoluteParent, absoluteChild);
+  assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative), `${label} 必须位于本次运行目录内`);
+  return absoluteChild;
+}
+
+async function assertCaptionPixelsIfEnabled(outputPath) {
+  if (!CHECK_PIXELS) {
+    console.log('跳过字幕像素检查：未设置 PIXEL_CHECK=1。');
+    return;
+  }
+  const ffmpegPath = await environmentDoctor.resolveFfmpegPath();
+  const { stdout } = await execFileAsync(ffmpegPath, [
+    '-v', 'error', '-ss', '1', '-i', outputPath,
+    '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1',
+  ], { encoding: 'buffer', maxBuffer: 8 * 1024 * 1024, windowsHide: true });
+  assert.equal(stdout.length, RESOLUTION.width * RESOLUTION.height * 3, '字幕像素检查应读取完整 RGB 帧');
+  let brightPixels = 0;
+  for (let y = Math.floor(RESOLUTION.height * 0.58); y < Math.floor(RESOLUTION.height * 0.92); y += 1) {
+    for (let x = Math.floor(RESOLUTION.width * 0.08); x < Math.floor(RESOLUTION.width * 0.92); x += 1) {
+      const offset = (y * RESOLUTION.width + x) * 3;
+      if (stdout[offset] > 215 && stdout[offset + 1] > 215 && stdout[offset + 2] > 215) brightPixels += 1;
+    }
+  }
+  assert.ok(brightPixels > 200, `字幕区域应包含可读亮色文字像素，实际 ${brightPixels}`);
+}
+
 async function runFormalPreview(rootDir) {
   const workflowId = 'workflow_real_preview';
   const runId = 'run_real_preview';
@@ -88,7 +120,7 @@ async function runFormalPreview(rootDir) {
     html_path: htmlPath,
     duration_sec: DURATION_SEC,
     narration_text: '正式预览会生成真实视频。',
-    captions: [{ id: 'caption_preview', start: 0, end: 2.8, text: '正式预览会生成真实视频。' }],
+    captions: [{ id: 'caption_preview', start: 0, end: DURATION_SEC, text: '正式预览会生成真实视频。' }],
     inputs: {},
   }];
   project.timeline = {
@@ -111,7 +143,12 @@ async function runFormalPreview(rootDir) {
   assert.match(result.preview_path, /[\\/]inspect[\\/]previews[\\/].+\.mp4$/);
   assert.equal(result.layout_qa?.success, true, JSON.stringify(result.layout_qa, null, 2));
   assert.equal(result.layout_qa?.metrics?.skipped, false, '布局 QA 必须由真实 Chrome 执行');
+  const materializedFrame = result.project.frames.find(frame => frame.id === 'scene:scene_preview');
+  const materializedHtml = await fs.readFile(path.join(projectDir, materializedFrame.html_path), 'utf8');
+  assert.match(materializedHtml, /data-hv-layer="captions"|data-role="subtitle-caption"/,
+    'raw_html 物化后必须包含受管字幕层');
   const stream = await assertRealVideo(result.preview_path);
+  await assertCaptionPixelsIfEnabled(result.preview_path);
   return { outputPath: result.preview_path, stream, layoutQa: result.layout_qa };
 }
 
@@ -128,7 +165,7 @@ async function runFormalWorkflow(rootDir) {
       kind: 'text',
       duration_sec: DURATION_SEC,
       narration_text: narration,
-      captions: [{ id: 'caption_01', start: 0, end: 2.8, text: narration }],
+      captions: [{ id: 'caption_01', start: 0, end: DURATION_SEC, text: narration }],
       visual_text: { headline: '真实完整工作流', keywords: [], cards: [] },
     }],
   };
@@ -201,15 +238,33 @@ async function runFormalWorkflow(rootDir) {
   const stream = await assertRealVideo(result.output_path);
   const projectPath = path.join(result.project_dir, 'project.json');
   const persistedProject = JSON.parse(await fs.readFile(projectPath, 'utf8'));
+  assert.equal(persistedProject.workflow_id, workflowId);
+  assert.equal(persistedProject.run_id, runId);
+  const expectedProjectDir = path.join(rootDir, workflowId, 'agent_runs', `${runId}-html-video`);
+  assert.equal(path.resolve(result.project_dir), path.resolve(expectedProjectDir));
+  assertPathWithin(rootDir, result.project_dir, 'project_dir');
+  assertPathWithin(result.project_dir, result.output_path, 'output_path');
   const checkpoint = persistedProject.generation_checkpoint.stages;
   assert.equal(checkpoint.compose.status, 'done');
   assert.equal(checkpoint.duration_verify.status, 'done');
   assert.notEqual(checkpoint.duration_verify.status, 'skipped');
 
-  const reportPath = path.join(result.project_dir, 'inspect', 'visual-report.json');
+  const reportPath = assertPathWithin(
+    result.project_dir,
+    path.resolve(result.project_dir, result.visual_report.report_path),
+    'report_path',
+  );
   const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
   assert.equal(report.safety_only, false);
-  assert.ok(report.contact_sheet_path, '完整视觉 QA 应生成 contact sheet');
+  const contactSheetPath = assertPathWithin(
+    result.project_dir,
+    path.isAbsolute(report.contact_sheet_path)
+      ? report.contact_sheet_path
+      : path.resolve(result.project_dir, report.contact_sheet_path),
+    'contact_sheet_path',
+  );
+  const contactSheetStat = await fs.stat(contactSheetPath);
+  assert.ok(contactSheetStat.size > 0, '完整视觉 QA 的 contact sheet 必须存在且非空');
   assert.ok(Number(report.metrics?.frame_count) > 0, '完整视觉 QA 应包含真实抽帧指标');
   assert.ok((report.warnings || []).some(item => String(item.code).startsWith('asset_first_')),
     '完整视觉 QA 应包含可识别的 asset-first 观测结果');
@@ -217,6 +272,16 @@ async function runFormalWorkflow(rootDir) {
   assert.equal(checkpoint.visual_inspect.status, report.success ? 'done' : 'warning');
   assert.equal(result.visual_report.success, report.success);
   assert.deepEqual(result.visual_report.issues || [], report.issues || []);
+  assert.equal(report.success, false, '真实夹具应稳定产生非阻断 issue，证明工作流仍输出成片');
+  assert.ok(report.issues.some(issue => issue.code === 'contact_sheet_too_small'),
+    '真实夹具应包含明确的非阻断 contact_sheet_too_small');
+  assert.equal(report.issues.some(issue => isBlockingVisualQaCode(issue.code)), false,
+    '真实夹具不得包含共享 blocking issue');
+  if (CHECK_PIXELS) {
+    assert.equal((report.warnings || []).some(issue => issue.code === 'asset_first_caption_invisible'), false,
+      '字幕像素验收开启时不得带着 caption_invisible 告警假通过');
+  }
+  await assertCaptionPixelsIfEnabled(result.output_path);
 
   return {
     outputPath: result.output_path,
