@@ -51,6 +51,17 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     '同一问题在多个采样点应只报告一次',
   );
 
+  const sampleBoundary = await inspectFixture(
+    'overlay-valuation-fixed.html',
+    { id: 'scene_sample_boundary', duration_sec: 1 },
+    { sampleTimesSec: [0.1, 0.149, 0.15, 0.199, 0.2] },
+  );
+  assert.deepEqual(
+    sampleBoundary.metrics.samples.map(sample => sample.sample_time_sec),
+    [0.1, 0.15, 0.2],
+    '相邻采样小于 0.05 秒应去重，恰好相隔 0.05 秒应保留',
+  );
+
   const decorativeOverlap = await inspectFixture('decorative-overlap.html', { id: 'scene_11', duration_sec: 1 });
   assert.equal(decorativeOverlap.success, true, '装饰大数字垫底标题不应触发阻断式修复');
   assert.ok(

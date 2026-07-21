@@ -42,8 +42,10 @@ function normalizeSampleTimes(sampleTimesSec, durationSec) {
 
   const normalized = [];
   for (const time of sorted) {
-    if (normalized.some(existing => Math.abs(existing - time) <= 0.05)) continue;
-    normalized.push(Number(time.toFixed(3)));
+    const rounded = Number(time.toFixed(3));
+    const previous = normalized[normalized.length - 1];
+    if (previous !== undefined && rounded - previous < 0.05 - 1e-9) continue;
+    normalized.push(rounded);
   }
   return normalized;
 }
