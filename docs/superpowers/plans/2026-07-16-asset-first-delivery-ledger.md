@@ -89,6 +89,52 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 ## 当前写租约
 
 ```yaml
+task_id: D-06
+status: leased
+owner: claude-worker
+lease_released: false
+code_base_commit: d922532f77306e1eca6b53444f6d03e5d7f42503
+worktree: D:\code3\MuseDock-worktrees\asset-first-d06
+branch: codex/asset-first-d06
+allowed_paths:
+  - server/services/creative-video/html-video/focusRegionPhase.js
+  - server/services/creative/visualAssetContract.js
+  - tests/test-html-video-focus-region-phase.js
+  - tests/test-visual-asset-contract.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative-video/html-video/htmlVideoWorkflow.js
+  - server/services/creative-video/html-video/focusCuePlanner.js
+  - server/services/creative-video/html-video/visualPlanService.js
+  - server/services/creative/pageCaptureAssets.js
+  - server/services/source/sourceImageAnalysis.js
+  - tests/test-html-video-workflow.js
+  - frontend-react/**
+  - package.json
+  - package-lock.json
+state_owners:
+  - asset_context.assets[].focus_analysis
+decisions:
+  - durable 分析记录挂在 asset 级 focus_analysis 字段，随 project.assets 既有持久化/水合链路走，不新增顶层 project 字段与 projectSchema 白名单
+  - 缓存键四元组：图片 bytes SHA-256 + 分析契约版本 + provider/model 标识 + prompt 版本；全等且记录存在时跳过 vision 调用
+  - 只缓存成功分析（含合法空结果 status=empty）；失败不入 durable 缓存，跨 run retry 允许重试失败素材
+  - focus_regions=[] 且 focus_analysis.status=empty 的素材不再重复分析（收口 D-03c non-blocking finding 1）
+  - manual/DOM 证据路径不受缓存门控；用户手工 focus_regions 优先，不被缓存复用覆盖
+  - 图片 bytes、契约版本、provider/model、prompt 版本任一变化即失效重析
+  - visualAssetContract 新增 focus_analysis 规范化白名单，非法结构安全丢弃；同 run 内存去重保留
+  - 顺带落实 D-03c non-blocking：为 cache 命中结果二次 normalizeFocusRegions 的深拷贝隔离补注释
+verification:
+  - node tests/test-html-video-focus-region-phase.js
+  - node tests/test-visual-asset-contract.js
+  - node tests/test-html-video-project-store.js
+  - node tests/test-html-video-frame-html-resume.js
+  - node tests/test-creative-workflows.js
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
 task_id: D-04
 status: frozen_for_review
 owner: unassigned
