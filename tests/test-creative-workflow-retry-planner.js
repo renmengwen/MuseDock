@@ -122,18 +122,18 @@ function project(overrides = {}) {
         stage: 'project',
         sub_stage: 'frame_html',
         code: 'frame_layout_qa_unresolved',
-        frame_id: 'scene_02',
+        frame_id: 'scene_last_failure',
         diagnostics: [{
           code: 'frame_layout_qa_unresolved',
           stage: 'ai-frame-html',
           sub_stage: 'frame_html',
-          frame_id: 'scene_02',
+          frame_id: 'scene_diagnostic_top',
           severity: 'error',
           retryable: true,
           repair_action: 'retry_frame_html',
           details: {
-            frame_id: 'scene_02',
-            issues: [{ code: 'camera_jitter', frame_id: 'scene_02', sample_time_sec: 1.25, shot_id: 'shot_02' }],
+            frame_id: 'scene_diagnostic_details',
+            issues: [{ code: 'camera_jitter', frame_id: 'scene_diagnostic_issue', sample_time_sec: 1.25, shot_id: 'shot_02' }],
           },
         }, {
           code: 'frame_layout_qa_unresolved',
@@ -141,12 +141,12 @@ function project(overrides = {}) {
           sub_stage: 'frame_html',
           retryable: true,
           repair_action: 'retry_frame_html',
-          details: { frame_id: 'scene_03' },
+          frame_id: 'scene_diagnostics_array',
         }, createDiagnostic({
           code: 'provider_missing_text',
           stage: 'ai-frame-html',
           sub_stage: 'frame_html',
-          frame_id: 'scene_04',
+          frame_id: 'scene_other_code',
         })],
       },
     }),
@@ -169,9 +169,24 @@ function project(overrides = {}) {
   assert.equal(unresolvedLayoutQaPlan.repair_action, 'retry_frame_html');
   assert.deepEqual(unresolvedLayoutQaPlan.executor_options, {
     regenerate_frame_html: true,
-    frame_ids: ['scene_02', 'scene_03'],
+    frame_ids: [
+      'scene_diagnostic_top',
+      'scene_diagnostic_details',
+      'scene_diagnostic_issue',
+      'scene_diagnostics_array',
+      'scene_02',
+      'scene_03',
+    ],
   });
-  assert.deepEqual(unresolvedLayoutQaPlan.discard, ['frames:scene_02', 'frames:scene_03', 'render_outputs']);
+  assert.deepEqual(unresolvedLayoutQaPlan.discard, [
+    'frames:scene_diagnostic_top',
+    'frames:scene_diagnostic_details',
+    'frames:scene_diagnostic_issue',
+    'frames:scene_diagnostics_array',
+    'frames:scene_02',
+    'frames:scene_03',
+    'render_outputs',
+  ]);
   assert.deepEqual(resolveRetryFrameIds(['scene_02_b3', 'scene_03_b1'], {
     continuityMode: 'scene_html',
     beatToScene: { scene_02_b3: 'scene_02', scene_03_b1: 'scene_03' },

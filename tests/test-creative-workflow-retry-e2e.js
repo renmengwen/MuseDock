@@ -627,6 +627,33 @@ function plannerProject(overrides = {}) {
         resumeActions: {
           retryFrameHtml: async ({ project, frame_id }) => {
             retriedFrameIds.push(frame_id);
+            if (frame_id === 'scene_02') {
+              const persisted = await projectStore.loadProject(projectDir);
+              const frameHtml = persisted.generation_checkpoint.stages.frame_html.frames;
+              const render = persisted.generation_checkpoint.stages.render.frames;
+              assert.deepEqual({ status: frameHtml.scene_01.status, output_hash: frameHtml.scene_01.output_hash }, {
+                status: 'done', output_hash: 'scene-01-kept',
+              });
+              assert.deepEqual({ status: render.scene_01.status, output_hash: render.scene_01.output_hash }, {
+                status: 'done', output_hash: 'scene-01-render-kept',
+              });
+              for (const sceneId of ['scene_02', 'scene_03']) {
+                assert.equal(frameHtml[sceneId].status, 'pending');
+                assert.equal(render[sceneId].status, 'pending');
+              }
+              assert.deepEqual({
+                status: frameHtml.scene_04.status,
+                diagnostic_code: frameHtml.scene_04.diagnostic_code,
+              }, {
+                status: 'failed', diagnostic_code: 'provider_missing_text',
+              });
+              assert.deepEqual({
+                status: render.scene_04.status,
+                diagnostic_code: render.scene_04.diagnostic_code,
+              }, {
+                status: 'failed', diagnostic_code: 'provider_missing_text',
+              });
+            }
             assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_01.status, 'done');
             assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_02.status, 'pending');
             assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_03.status, 'pending');
