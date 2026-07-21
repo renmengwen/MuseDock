@@ -14,6 +14,9 @@
     .opacity-zero p { opacity: 1; }
     .visibility-hidden { position: absolute; left: 2000px; top: 400px; visibility: hidden; }
     .visibility-hidden p { visibility: visible; }
+    .scope-leak { position: absolute; left: 700px; top: 600px; width: 320px; opacity: 0; animation: reveal .01s both; }
+    .base-overlap, .base-scope-leak { position: absolute; left: 1250px; top: 600px; width: 320px; }
+    .base-scope-leak { opacity: 0; animation: reveal .01s both; }
   </style>
 </head>
 <body data-mp-beat="first">
@@ -22,6 +25,10 @@
   <div class="beat leaky" data-mp-beat-scope="third"><p data-text-key="subtitle">动画覆盖隐藏态</p></div>
   <div class="opacity-zero"><p data-text-key="body">无 Scope 的透明祖先文本</p></div>
   <div class="visibility-hidden"><p data-text-key="body">后代显式恢复可见</p></div>
+  <div class="scope-leak" data-mp-beat-scope="leak_a"><p data-role="label">泄漏 Beat A</p></div>
+  <div class="scope-leak" data-mp-beat-scope="leak_b"><p data-role="label">泄漏 Beat B</p></div>
+  <p class="base-overlap" data-role="label">稳定 Base 文字</p>
+  <div class="base-scope-leak" data-mp-beat-scope="leak_base"><p data-role="label">压住 Base 的 Beat</p></div>
   <script>
     window.__mpSetTimelineTime = time => document.body.dataset.mpBeat = time < 0.5 ? 'first' : 'second';
   </script>

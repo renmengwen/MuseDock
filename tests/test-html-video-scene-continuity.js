@@ -444,6 +444,8 @@ const { buildSceneBeatsBrief } = require('../server/services/creative-video/html
   assert.ok(brief.includes('data-mp-beat-scope="<beat_id>"'), 'brief 必须声明 data-mp-beat-scope 约定');
   assert.ok(brief.includes('[data-mp-beat-scope]{opacity:0'), 'brief 必须给出隐藏态 CSS 规则示例');
   assert.ok(/body\[data-mp-beat=.*\] \[data-mp-beat-scope=.*\]\{opacity:1\}/.test(brief), 'brief 必须给出按 beat 显示的 CSS 规则示例');
+  assert.ok(brief.includes('本体不得使用会覆盖 opacity 的 animation/fill-mode'), 'brief 必须禁止 Scope 本体动画覆盖显隐');
+  assert.ok(brief.includes('Beat overlay 不得压住 base 层可读文字'), 'brief 必须约束 overlay 与 base 文本避让');
   assert.ok(brief.includes('要点一') && brief.includes('要点二'), 'brief 必须含各 beat 文案要点');
   // 非 scene 节点（无 beat_windows）返回空串
   assert.strictEqual(buildSceneBeatsBrief({ id: 'scene_05_b1', metadata: {} }), '');

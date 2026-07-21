@@ -66,11 +66,8 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
   );
 
   const decorativeOverlap = await inspectFixture('decorative-overlap.html', { id: 'scene_11', duration_sec: 1 });
-  assert.equal(decorativeOverlap.success, true, '装饰大数字垫底标题不应触发阻断式修复');
-  assert.ok(
-    decorativeOverlap.issues.some(issue => issue.code === 'decorative_overlay_text' && issue.severity === 'warning'),
-    'decorative-overlap.html 应报告 warning 级 decorative_overlay_text',
-  );
+  assert.equal(decorativeOverlap.success, true, '显式忽略的装饰大数字不应触发布局修复');
+  assert.equal(decorativeOverlap.issues.some(issue => /overlap/.test(issue.code)), false);
 
   const overlayFixedDefaultSamples = await inspectFixture(
     'overlay-valuation-fixed.html',
@@ -321,6 +318,25 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     inactiveBeat.issues.some(issue => issue.code === 'text_out_of_viewport' && issue.details?.text === '动画覆盖隐藏态'),
     '动画使非活动 Beat Scope 实际可见时仍应进入候选',
   );
+  assert.equal(
+    inactiveBeat.issues.some(issue => issue.details?.text === '第二拍越界文本'),
+    false,
+    '普通非活动 Beat 仍应由真实 opacity 排除',
+  );
+  const leakedBeatOverlap = inactiveBeat.issues.find(issue => (
+    new Set([issue.details?.first?.beat_scope, issue.details?.second?.beat_scope]).has('leak_a')
+    && new Set([issue.details?.first?.beat_scope, issue.details?.second?.beat_scope]).has('leak_b')
+  ));
+  assert.equal(leakedBeatOverlap?.severity, 'error', '不同 Beat 同时泄漏重叠必须阻断');
+  const beatBaseOverlap = inactiveBeat.issues.find(issue => (
+    [issue.details?.first?.text, issue.details?.second?.text].includes('稳定 Base 文字')
+    && [issue.details?.first?.text, issue.details?.second?.text].includes('压住 Base 的 Beat')
+  ));
+  assert.equal(beatBaseOverlap?.severity, 'error', 'Beat overlay 压住稳定 Base 文字必须阻断');
+  assert.deepEqual(
+    new Set([beatBaseOverlap.details.first.beat_scope, beatBaseOverlap.details.second.beat_scope]),
+    new Set([null, 'leak_base']),
+  );
 
   const activatedBeat = await inspectFixture(
     'inactive-beat-scope.html',
@@ -350,6 +366,10 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     decorativeOverflow.issues.some(issue => issue.details?.text === '忽略的背景字'),
     false,
     'data-layout-ignore 元素应跳过布局检查',
+  );
+  assert.ok(
+    decorativeOverflow.issues.some(issue => issue.details?.text === '视觉可见装饰'),
+    'aria-hidden 不能让视觉可见文本跳过布局 QA',
   );
 
   const importFailure = await inspectFrameHtmlLayout({

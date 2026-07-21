@@ -103,6 +103,7 @@ function buildSceneBeatsBrief(node = {}, { scene = null, beats = [], mediaOption
     '- 每个 beat 的局部 overlay 元素必须带 data-mp-beat-scope="<beat_id>"，并用 CSS 控制可见性，示例：',
     '  [data-mp-beat-scope]{opacity:0;pointer-events:none;transition:opacity .35s}',
     '  body[data-mp-beat="scene_x_b1"] [data-mp-beat-scope="scene_x_b1"]{opacity:1}（按下方每个 beat_id 逐个写出选择器）',
+    '- data-mp-beat-scope 本体不得使用会覆盖 opacity 的 animation/fill-mode；入场动画放在内部子元素，Beat overlay 不得压住 base 层可读文字。',
     '- 系统会在 </body> 前注入时间线脚本，按时间把 body 的 data-mp-beat 切到当前 beat_id；HTML 不要自己实现切换逻辑。',
     '各 beat 时间窗口与文案要点：',
   ];

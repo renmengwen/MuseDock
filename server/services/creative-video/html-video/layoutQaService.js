@@ -202,13 +202,13 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
         : 'text_overlap';
       issues.push(makeIssue({
         code,
-        severity: isDecorativeText(a) || isDecorativeText(b) ? 'warning' : 'error',
+        severity: 'error',
         frameId,
         sampleTimeSec,
         message: '检测到文本元素互相重叠。',
         details: {
-          first: { text: a.text, selector: a.selector, box: a.box },
-          second: { text: b.text, selector: b.selector, box: b.box },
+          first: { text: a.text, selector: a.selector, beat_scope: a.beatScope || null, box: a.box },
+          second: { text: b.text, selector: b.selector, beat_scope: b.beatScope || null, box: b.box },
           intersection_area: Math.round(intersection.area),
           smaller_area: Math.round(smallerArea),
         },
@@ -297,7 +297,7 @@ async function collectCandidates(page) {
 
     const records = Array.from(document.querySelectorAll(selector))
       .map((element) => {
-        if (hasLayoutFlag(element, '[data-layout-ignore], [aria-hidden="true"]')) return null;
+        if (hasLayoutFlag(element, '[data-layout-ignore]')) return null;
         const rect = element.getBoundingClientRect();
         const direct = directText(element);
         const text = (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim();
@@ -312,6 +312,7 @@ async function collectCandidates(page) {
             role: element.getAttribute('data-role') || null,
             tag: element.tagName.toLowerCase(),
             selector: selectorFor(element),
+            beatScope: element.closest('[data-mp-beat-scope]')?.getAttribute('data-mp-beat-scope') || null,
             text,
             box: serializeBox(rect),
             container: containerFor(element),
