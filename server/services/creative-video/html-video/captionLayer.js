@@ -31,6 +31,82 @@ function htmlEscape(value) {
     .replace(/'/g, '&#39;');
 }
 
+// 懒加载破环：focusCuePlanner → visualPlanService → captionLayer 存在 require 环，
+// 顶层 require 会让 visualPlanService 拿到尚未初始化完成的 captionLayer 导出。
+function plannerKeywordOccurrence(text, term) {
+  return require('./focusCuePlanner').keywordOccurrence(text, term);
+}
+
+// 在 caption 原文中定位 cue keyword 的首个可接受出现位置（找不到返回 -1）。
+// 候选位置按大小写不敏感顺序枚举，逐个用 planner 的 keywordOccurrence 做唯一边界语义判定：
+// 判定窗口取「候选位置左右各保留一个真实字符」，窗口内该位置的邻接字符（或真实端点）与全文
+// 完全一致，因此接受/拒绝结果与 planner 全文扫描逐位一致（防 "star" 误定位进 "restart"）。
+function locateFocusKeyword(captionText, keyword) {
+  const text = String(captionText || '');
+  const term = String(keyword || '');
+  if (!term) return -1;
+  const haystack = text.toLowerCase();
+  const needle = term.toLowerCase();
+  let from = 0;
+  while (from + needle.length <= haystack.length) {
+    const index = haystack.indexOf(needle, from);
+    if (index < 0) return -1;
+    const window = text.slice(Math.max(0, index - 1), index + needle.length + 1);
+    if (plannerKeywordOccurrence(window, term)) return index;
+    from = index + 1;
+  }
+  return -1;
+}
+
+// 收集 node（或与其同构的 { metadata } 对象）上全部 focus_cues 的 caption_id → keyword 映射。
+// beat_mp4 分支读 metadata.visual_beat，scene_html 分支读 metadata.visual_beats[]；
+// camera_zoom 与 highlight_only 的 cue 都参与字幕高亮；planner 保证每条 caption 至多一个 cue，重复时首个生效。
+function focusKeywordsByCaptionId(node) {
+  const metadata = node?.metadata && typeof node.metadata === 'object' ? node.metadata : {};
+  const beats = Array.isArray(metadata.visual_beats)
+    ? metadata.visual_beats
+    : [metadata.visual_beat].filter(Boolean);
+  const keywordByCaptionId = new Map();
+  for (const beat of beats) {
+    const shots = Array.isArray(beat?.visual_base?.shots) ? beat.visual_base.shots : [];
+    for (const shot of shots) {
+      const cues = Array.isArray(shot?.camera?.focus_cues) ? shot.camera.focus_cues : [];
+      for (const cue of cues) {
+        const keyword = typeof cue?.keyword === 'string' ? cue.keyword.trim() : '';
+        if (!keyword) continue;
+        for (const rawCaptionId of Array.isArray(cue.caption_ids) ? cue.caption_ids : []) {
+          const captionId = String(rawCaptionId || '').trim();
+          if (captionId && !keywordByCaptionId.has(captionId)) keywordByCaptionId.set(captionId, keyword);
+        }
+      }
+    }
+  }
+  return keywordByCaptionId;
+}
+
+// 按 caption_id → keyword 映射为字幕注记高亮关键词（focus_keyword）。
+// 空映射时原样返回同一数组（无 cue 路径零改动），命中的 caption 拷贝注记、其余保持原对象。
+function applyFocusKeywords(captions = [], keywordByCaptionId = new Map()) {
+  const source = Array.isArray(captions) ? captions : [];
+  if (!(keywordByCaptionId instanceof Map) || keywordByCaptionId.size === 0) return source;
+  return source.map(caption => {
+    const keyword = caption && typeof caption === 'object'
+      ? keywordByCaptionId.get(String(caption.id || '').trim())
+      : null;
+    return keyword ? { ...caption, focus_keyword: keyword } : caption;
+  });
+}
+
+// frame 自带 cue 元数据（项目帧的 metadata.visual_beat[s] 直挂与 metadata.graph_node 内嵌两种形态）合并成映射。
+function frameFocusKeywords(frame = {}) {
+  const metadata = frame?.metadata && typeof frame.metadata === 'object' ? frame.metadata : {};
+  const keywordByCaptionId = focusKeywordsByCaptionId({ metadata });
+  for (const [captionId, keyword] of focusKeywordsByCaptionId(metadata.graph_node)) {
+    if (!keywordByCaptionId.has(captionId)) keywordByCaptionId.set(captionId, keyword);
+  }
+  return keywordByCaptionId;
+}
+
 function finitePositiveNumber(value, fallback = null) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : fallback;
@@ -152,25 +228,32 @@ function captionsDisabled(frame = {}) {
 
 function normalizeCaptionsForFrame(frame = {}) {
   if (captionsDisabled(frame)) return [];
+  // focus_keyword 是派生态：每次都先剥离入参里的旧注记，再按 frame 自带 cue 元数据重注记。
+  // 这保证无元数据的比较态（如 timelineConsistency 的 frame vs scene 字幕比较）永远拿到干净字幕。
+  const keywordByCaptionId = frameFocusKeywords(frame);
+  const finalize = captions => applyFocusKeywords(
+    captions.map(({ focus_keyword: _staleFocusKeyword, ...caption }) => caption),
+    keywordByCaptionId,
+  );
   const sourceCaptions = Array.isArray(frame.captions) ? frame.captions : [];
   const captions = sourceCaptions
     .map((caption, index) => normalizeCaption(caption, frame, index))
     .filter(Boolean)
     .flatMap(splitNormalizedCaption);
-  if (captions.length > 0) return captions;
+  if (captions.length > 0) return finalize(captions);
 
   const text = stripSpeechStageDirections(frame.narration_text);
   if (!text) return [];
 
   const duration = frameDurationSec(frame);
   const frameId = frame.id || frame.scene_id || 'frame';
-  return splitNormalizedCaption({
+  return finalize(splitNormalizedCaption({
     id: `${frameId}_caption_01`,
     start: 0,
     end: duration,
     duration,
     text,
-  });
+  }));
 }
 
 const CAPTION_WINDOW_EPSILON_SEC = 0.001;
@@ -211,6 +294,31 @@ function sliceCaptionsToWindow(captions = [], offsetSec = 0, durationSec = 0) {
   return sliced;
 }
 
+// 高亮样式只挂在 active 态选择器下；用 inline-block + transform 放大，不改变行盒排版尺寸，
+// 激活瞬间不触发字幕布局回流（非 active 态 DOM 结构相同且整条隐藏，无样式差异可见）。
+const CAPTION_KEYWORD_STYLE = '.hv-caption-item[data-hv-active="true"] .hv-caption-kw{color:#FFD54A;font-weight:800;display:inline-block;transform:scale(1.08);}';
+
+// caption 文本渲染：带 focus_keyword 注记时先在原文定位（planner 同语义），再按 前段/keyword/后段
+// 分别 htmlEscape 后包裹，保证含 &、<、>、引号的文本不错位、不双重转义；找不到关键词时输出与既有实现逐字节一致。
+function captionItemHtml(caption) {
+  const text = String(caption.text || '').trim();
+  const keyword = typeof caption.focus_keyword === 'string' ? caption.focus_keyword.trim() : '';
+  if (keyword) {
+    const index = locateFocusKeyword(text, keyword);
+    if (index >= 0) {
+      return {
+        highlighted: true,
+        html: [
+          htmlEscape(text.slice(0, index)),
+          `<span class="hv-caption-kw">${htmlEscape(text.slice(index, index + keyword.length))}</span>`,
+          htmlEscape(text.slice(index + keyword.length)),
+        ].join(''),
+      };
+    }
+  }
+  return { highlighted: false, html: htmlEscape(text) };
+}
+
 function renderCaptionLayer(captions = [], options = {}) {
   const normalizedCaptions = Array.isArray(captions)
     ? captions
@@ -221,13 +329,16 @@ function renderCaptionLayer(captions = [], options = {}) {
   if (normalizedCaptions.length === 0) return '';
 
   const className = options.className || 'hv-caption-layer';
+  let hasKeywordHighlight = false;
   const items = normalizedCaptions.map((caption, index) => {
     const id = caption.id || `caption_${String(index + 1).padStart(2, '0')}`;
     const start = finiteNonNegativeNumber(caption.start ?? caption.start_sec, 0);
     const end = finitePositiveNumber(caption.end ?? caption.end_sec, start + finitePositiveNumber(caption.duration ?? caption.duration_sec, DEFAULT_CAPTION_DURATION_SEC));
+    const item = captionItemHtml(caption);
+    if (item.highlighted) hasKeywordHighlight = true;
     return [
       `<span class="hv-caption-item" data-role="subtitle-caption" data-caption-id="${htmlEscape(id)}" data-start="${htmlEscape(start)}" data-end="${htmlEscape(end)}">`,
-      htmlEscape(String(caption.text || '').trim()),
+      item.html,
       '</span>',
     ].join('');
   }).join('');
@@ -237,6 +348,7 @@ function renderCaptionLayer(captions = [], options = {}) {
     '.hv-caption-layer{position:absolute;left:50%;bottom:42px;transform:translateX(-50%);width:max-content;max-width:84%;z-index:9999;pointer-events:none;text-align:center;font:600 34px/1.28 "Noto Sans SC","Microsoft YaHei",Arial,sans-serif;letter-spacing:0;}',
     '.hv-caption-item{display:none;padding:14px 22px;border-radius:8px;background:rgba(0,0,0,.68);color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.55);white-space:normal;overflow-wrap:anywhere;}',
     '.hv-caption-item[data-hv-active="true"]{display:block;}',
+    ...(hasKeywordHighlight ? [CAPTION_KEYWORD_STYLE] : []),
     '</style>',
     `<div class="${htmlEscape(className)}" data-hv-layer="captions" data-hv-managed="true" data-role="subtitle-caption">`,
     items,
@@ -491,7 +603,9 @@ const applyCaptionLayer = ensureCaptionLayer;
 
 module.exports = {
   applyCaptionLayer,
+  applyFocusKeywords,
   ensureCaptionLayer,
+  focusKeywordsByCaptionId,
   hasUnmanagedCaptionLayer,
   htmlEscape,
   normalizeCaptionsForFrame,

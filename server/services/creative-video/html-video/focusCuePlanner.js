@@ -182,5 +182,6 @@ function planFocusCues({ visualPlan = {}, creativeContext = {}, sceneSpec = {}, 
 
 module.exports = {
   FOCUS_TRANSITION_BUDGET_SEC,
+  keywordOccurrence,
   planFocusCues,
 };
