@@ -206,7 +206,7 @@ review:
 
 ```yaml
 task_id: D-06
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: d922532f77306e1eca6b53444f6d03e5d7f42503
@@ -218,6 +218,7 @@ invalidated_tree: 1da6941731b75a89c0d19d6fe24691e3bf3fde73
 frozen_revision: d89c6e36ed5093350579fac4c6a8f48b145f278d
 frozen_tree: 74ca4fcbf85da0c7d4d0e5ef7cc2b3c81af8fc93
 revision_valid: true
+dev_commit: f601bbc
 allowed_paths:
   - server/services/creative-video/html-video/focusRegionPhase.js
   - server/services/creative-video/html-video/assetUsagePhase.js
@@ -262,8 +263,16 @@ verification:
   - node tests/test-html-video-frame-html-resume.js
   - node tests/test-creative-workflows.js
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_ledger_commit: a764139
+  spec_reviewed_revision: d89c6e36ed5093350579fac4c6a8f48b145f278d
+  quality: pass
+  quality_reviewed_ledger_commit: a764139
+  quality_reviewed_revision: d89c6e36ed5093350579fac4c6a8f48b145f278d
+resolved_findings:
+  - 非空 vision success 仅在图片字节、契约、Prompt、provider 和 model 完整一致时复用，任一变化重新分析
+  - 重析失败与图片读取失败都会清除 creativeContext 和 project.assets 两侧失效记录，下一 run 可重试
+  - project-only 旧记录也无条件登记持久删除意图，不依赖 runtime asset 是否携带 focus_analysis
 ```
 
 ```yaml
@@ -1197,7 +1206,7 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-D-07 | `verified` | 安全目标中心、zoom 限幅、位移 clamp 和黑边防护 | D-02 |
 | REQ-D-08 | `pending` | Caption Cue 同时驱动摄影机和字幕关键词高亮 | D-05 |
 | REQ-D-09 | `verified` | 同一 Region 连续 Cue 合并并避免抖动 | D-04 |
-| REQ-D-10 | `pending` | 每张最终使用图片最多分析一次 | D-03、D-06 |
+| REQ-D-10 | `verified` | 每张最终使用图片最多分析一次 | D-03、D-06 |
 
 ### E. QA、修复与恢复
 
