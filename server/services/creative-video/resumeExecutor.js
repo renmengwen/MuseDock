@@ -293,7 +293,19 @@ async function callConfiguredProjectAction({ name, workflow, project, projectDir
 async function retryFrameHtml(context) {
   const { workflowId, rootDir, mediaRoot, workflow, projectDir, plan, services, taskContext } = context;
   const project = context.project;
-  const ids = resolveProjectRetryFrameIds(project, planFrameIds(plan, project, 'frame_html'));
+  const executorOptions = objectOrEmpty(plan?.executor_options);
+  const regenerateRequested = executorOptions.regenerate_frame_html === true
+    || executorOptions.regenerateFrameHtml === true;
+  const scopedFrameIds = arrayOrEmpty(executorOptions.frame_ids).filter(Boolean);
+  const fullRegenerate = regenerateRequested && !scopedFrameIds.length;
+  const checkpointFrameIds = Object.keys(objectOrEmpty(
+    project.generation_checkpoint?.stages?.frame_html?.frames,
+  ));
+  const ids = fullRegenerate
+    ? (checkpointFrameIds.length
+      ? checkpointFrameIds
+      : arrayOrEmpty(project.frames).map(frame => safeString(frame?.id || frame?.scene_id)).filter(Boolean))
+    : resolveProjectRetryFrameIds(project, planFrameIds(plan, project, 'frame_html'));
   if (!ids.length) {
     return actionFailure('未找到需要重试的 HTML 帧。', [createDiagnostic({
       code: 'frame_not_found',
@@ -303,13 +315,9 @@ async function retryFrameHtml(context) {
     })]);
   }
   let nextProject = project;
-  const executorOptions = objectOrEmpty(plan?.executor_options);
-  const regenerateRequested = executorOptions.regenerate_frame_html === true
-    || executorOptions.regenerateFrameHtml === true;
-  const scopedFrameIds = arrayOrEmpty(executorOptions.frame_ids).filter(Boolean);
-  if (regenerateRequested && scopedFrameIds.length) {
-    // 定向失效目标帧的 frame_html/render checkpoint：后续 generateHtmlVideo 复用其余帧、
-    // 只重生成这些帧，替代全局 regenerateFrameHtml 的全量重生成
+  if (regenerateRequested) {
+    // 写盘失效本次全部目标 frame_html/render checkpoint；定向计划只含目标帧，
+    // 无 scope 的全量计划使用全部 canonical checkpoint key。
     nextProject = await projectStore.writeProjectJson(projectDir, current => {
       for (const frameId of ids) {
         markCheckpointFrame(current, 'frame_html', frameId, {
@@ -329,7 +337,7 @@ async function retryFrameHtml(context) {
       return current;
     });
   }
-  for (const frameId of ids) {
+  if (fullRegenerate) {
     const actionResult = await callConfiguredProjectAction({
       name: 'retryFrameHtml',
       workflow,
@@ -340,7 +348,6 @@ async function retryFrameHtml(context) {
       taskContext,
       rootDir,
       mediaRoot,
-      extra: { frame_id: frameId, frameId },
     });
     if (!actionResult.success) return actionResult;
     nextProject = actionResult.project;
@@ -351,6 +358,31 @@ async function retryFrameHtml(context) {
         project_dir: actionResult.project_dir || projectDir,
         html_video_project_path: actionResult.html_video_project_path || projectDir,
       };
+    }
+  } else {
+    for (const frameId of ids) {
+      const actionResult = await callConfiguredProjectAction({
+        name: 'retryFrameHtml',
+        workflow,
+        project: nextProject,
+        projectDir,
+        plan,
+        services,
+        taskContext,
+        rootDir,
+        mediaRoot,
+        extra: { frame_id: frameId, frameId },
+      });
+      if (!actionResult.success) return actionResult;
+      nextProject = actionResult.project;
+      if (hasCompletedRenderOutput(actionResult)) {
+        return {
+          ...actionResult,
+          project: nextProject,
+          project_dir: actionResult.project_dir || projectDir,
+          html_video_project_path: actionResult.html_video_project_path || projectDir,
+        };
+      }
     }
   }
   return renderComposeInspect({

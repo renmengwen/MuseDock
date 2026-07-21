@@ -423,6 +423,7 @@ function fakeHtmlVideoServices(calls = {}) {
       renderFrame: async (frame, { outputPath }) => {
         calls.renderFrame = (calls.renderFrame || 0) + 1;
         calls.renderFrameIds = [...(calls.renderFrameIds || []), frame.scene_id || frame.id];
+        calls.renderFrameKeys = [...(calls.renderFrameKeys || []), frame.id];
         await fs.mkdir(path.dirname(outputPath), { recursive: true });
         await fs.writeFile(outputPath, `mp4:${frame.scene_id || frame.id}`, 'utf8');
         return { success: true, output_path: outputPath, meta: {} };
@@ -835,10 +836,17 @@ function plannerProject(overrides = {}) {
     const projectDir = path.join(rootDir, 'media', workflowId, 'agent_runs', 'run-layout-qa-failed');
     const sceneIds = ['scene_01', 'scene_06'];
     const layoutProject = createProject({ workflowId, sceneIds, targetDurationSec: 4 });
+    layoutProject.continuity_mode = 'scene_html';
+    layoutProject.frames.forEach((frame, index) => {
+      frame.id = `scene:${frame.scene_id}`;
+      layoutProject.content_graph.nodes[index].id = frame.id;
+      layoutProject.content_graph.nodes[index].scene_id = frame.scene_id;
+      layoutProject.timeline.tracks[0].items[index].frame_id = frame.id;
+    });
     await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
     for (const frame of layoutProject.frames) {
       await fs.writeFile(path.join(projectDir, frame.html_path), `<html><body>${frame.id}:old</body></html>`, 'utf8');
-      markCheckpointFrame(layoutProject, 'frame_html', frame.scene_id, {
+      markCheckpointFrame(layoutProject, 'frame_html', frame.id, {
         status: 'done',
         html_path: frame.html_path,
         input_hash: `${frame.scene_id}-input`,
@@ -849,13 +857,13 @@ function plannerProject(overrides = {}) {
       const mp4Path = `frames/${frame.scene_id}.mp4`;
       await fs.writeFile(path.join(projectDir, mp4Path), `mp4:${frame.scene_id}:old`, 'utf8');
       const outputHash = await fileHash(path.join(projectDir, mp4Path));
-      markCheckpointFrame(layoutProject, 'render', frame.scene_id, {
+      markCheckpointFrame(layoutProject, 'render', frame.id, {
         status: 'done',
         mp4_path: mp4Path,
         output_hash: outputHash,
         diagnostic_code: '',
         runtime_asset_policy_attestation: await runtimeAssetPolicyAttestation(projectDir, layoutProject, frame, {
-          checkpoint_key: frame.scene_id,
+          checkpoint_key: frame.id,
           mp4_path: mp4Path,
           output_hash: outputHash,
         }),
@@ -869,7 +877,7 @@ function plannerProject(overrides = {}) {
       code: 'layout_qa_failed',
       stage: 'project',
       sub_stage: 'layout_qa',
-      frame_id: 'scene_06',
+      frame_id: 'scene:scene_06',
       severity: 'error',
       retryable: true,
       repair_action: 'retry_frame_html',
@@ -878,7 +886,7 @@ function plannerProject(overrides = {}) {
       stage: 'project',
       sub_stage: 'layout_qa',
       code: 'layout_qa_failed',
-      frame_id: 'scene_06',
+      frame_id: 'scene:scene_06',
       project_dir: projectDir,
       message: 'Scene 6 布局 QA 未通过。',
       diagnostics: [diagnostic],
@@ -891,18 +899,18 @@ function plannerProject(overrides = {}) {
     const refreshed = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
     assert.deepEqual(refreshed.plan.executor_options, {
       regenerate_frame_html: true,
-      frame_ids: ['scene_06'],
+      frame_ids: ['scene:scene_06'],
     });
     const before = await projectStore.loadProject(projectDir);
-    const nonTargetFrameHtml = structuredClone(before.generation_checkpoint.stages.frame_html.frames.scene_01);
-    const nonTargetRender = structuredClone(before.generation_checkpoint.stages.render.frames.scene_01);
+    const nonTargetFrameHtml = structuredClone(before.generation_checkpoint.stages.frame_html.frames['scene:scene_01']);
+    const nonTargetRender = structuredClone(before.generation_checkpoint.stages.render.frames['scene:scene_01']);
     const calls = {};
     const services = fakeHtmlVideoServices(calls);
     const retryFrameHtml = services.resumeActions.retryFrameHtml;
     services.resumeActions.retryFrameHtml = async args => {
-      assert.equal(args.frame_id, 'scene_06');
+      assert.equal(args.frame_id, 'scene:scene_06');
       const checkpoint = args.project.generation_checkpoint.stages;
-      assert.deepEqual(checkpoint.frame_html.frames.scene_06, {
+      assert.deepEqual(checkpoint.frame_html.frames['scene:scene_06'], {
         status: 'pending',
         html_path: '',
         input_hash: '',
@@ -910,11 +918,11 @@ function plannerProject(overrides = {}) {
         output_hash: '',
         diagnostic_code: '',
       });
-      assert.equal(checkpoint.render.frames.scene_06.status, 'pending');
-      assert.equal(checkpoint.render.frames.scene_06.mp4_path, '');
-      assert.equal(checkpoint.render.frames.scene_06.output_hash, '');
-      assert.deepEqual(checkpoint.frame_html.frames.scene_01, nonTargetFrameHtml);
-      assert.deepEqual(checkpoint.render.frames.scene_01, nonTargetRender);
+      assert.equal(checkpoint.render.frames['scene:scene_06'].status, 'pending');
+      assert.equal(checkpoint.render.frames['scene:scene_06'].mp4_path, '');
+      assert.equal(checkpoint.render.frames['scene:scene_06'].output_hash, '');
+      assert.deepEqual(checkpoint.frame_html.frames['scene:scene_01'], nonTargetFrameHtml);
+      assert.deepEqual(checkpoint.render.frames['scene:scene_01'], nonTargetRender);
       return retryFrameHtml(args);
     };
     const retried = await workflows.retryCreativeWorkflow(workflowId, {
@@ -926,10 +934,126 @@ function plannerProject(overrides = {}) {
       services,
     });
     assert.equal(retried.success, true);
-    assert.deepEqual(calls.retryFrameHtmlIds, ['scene_06']);
+    assert.deepEqual(calls.retryFrameHtmlIds, ['scene:scene_06']);
+    assert.deepEqual(calls.renderFrameKeys, ['scene:scene_06']);
     assert.deepEqual(calls.renderFrameIds, ['scene_06']);
     assert.equal(calls.renderFrameIds.includes('scene_01'), false, '非目标 Scene 不得因布局 QA 恢复而重渲染');
-    assert.deepEqual(calls.composeFrameIds, ['scene_01', 'scene_06']);
+    assert.deepEqual(calls.composeFrameIds, ['scene:scene_01', 'scene:scene_06']);
+  }
+
+  {
+    const rootDir = await tempRoot();
+    const workflowId = '202606250000001017';
+    const projectDir = path.join(rootDir, 'media', workflowId, 'agent_runs', 'run-layout-qa-full-regenerate');
+    const sceneIds = ['scene_01', 'scene_02'];
+    const fullProject = createProject({ workflowId, sceneIds, targetDurationSec: 4 });
+    await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
+    for (const frame of fullProject.frames) {
+      await fs.writeFile(path.join(projectDir, frame.html_path), `<html><body>${frame.id}:old</body></html>`, 'utf8');
+      markCheckpointFrame(fullProject, 'frame_html', frame.id, {
+        status: 'done',
+        html_path: frame.html_path,
+        input_hash: `${frame.id}-input`,
+        input_fingerprint: `${frame.id}-fingerprint`,
+        output_hash: `${frame.id}-html`,
+        diagnostic_code: '',
+      });
+      const mp4Path = `frames/${frame.id}.mp4`;
+      await fs.writeFile(path.join(projectDir, mp4Path), `mp4:${frame.id}:old`, 'utf8');
+      const outputHash = await fileHash(path.join(projectDir, mp4Path));
+      markCheckpointFrame(fullProject, 'render', frame.id, {
+        status: 'done',
+        mp4_path: mp4Path,
+        output_hash: outputHash,
+        diagnostic_code: '',
+        runtime_asset_policy_attestation: await runtimeAssetPolicyAttestation(projectDir, fullProject, frame, {
+          checkpoint_key: frame.id,
+          mp4_path: mp4Path,
+          output_hash: outputHash,
+        }),
+      });
+    }
+    markCheckpointStage(fullProject, 'frame_html', { status: 'done' });
+    markCheckpointStage(fullProject, 'render', { status: 'done' });
+    markCheckpointStage(fullProject, 'compose', { status: 'done', output_path: 'exports/old.mp4' });
+    markCheckpointStage(fullProject, 'duration_verify', {
+      status: 'done', expected_duration_sec: 4, actual_duration_sec: 4,
+    });
+    markCheckpointStage(fullProject, 'visual_inspect', {
+      status: 'done', report_path: 'inspect/old-report.json',
+    });
+    fullProject.exports = [{ id: 'old-export', path: 'exports/old.mp4' }];
+    fullProject.status = 'done';
+    await projectStore.saveProject(projectDir, fullProject);
+
+    const lastFailure = {
+      stage: 'project',
+      sub_stage: 'layout_qa',
+      code: 'layout_qa_failed',
+      project_dir: projectDir,
+      message: '布局 QA 未提供具体 Frame ID。',
+      diagnostics: [createDiagnostic({
+        code: 'layout_qa_failed', stage: 'project', sub_stage: 'layout_qa', retryable: true,
+      })],
+    };
+    await writeJson(
+      workflows.getWorkflowPath(workflowId, rootDir),
+      retryWorkflowRecord({ workflowId, projectDir, lastFailure, sceneIds }),
+    );
+    const refreshed = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
+    assert.deepEqual(refreshed.plan.executor_options, { regenerate_frame_html: true });
+
+    const calls = {};
+    const services = fakeHtmlVideoServices(calls);
+    let globalActionCalls = 0;
+    services.resumeActions.retryFrameHtml = async ({ project, projectDir: actionProjectDir, frame_id }) => {
+      globalActionCalls += 1;
+      assert.equal(frame_id, undefined, '全量重生成不得按每个 Frame 重复调用全局 Action');
+      const stages = project.generation_checkpoint.stages;
+      for (const frameId of sceneIds) {
+        assert.equal(stages.frame_html.frames[frameId].status, 'pending');
+        assert.equal(stages.frame_html.frames[frameId].html_path, '');
+        assert.equal(stages.frame_html.frames[frameId].input_hash, '');
+        assert.equal(stages.frame_html.frames[frameId].input_fingerprint, '');
+        assert.equal(stages.frame_html.frames[frameId].output_hash, '');
+        assert.equal(stages.render.frames[frameId].status, 'pending');
+        assert.equal(stages.render.frames[frameId].mp4_path, '');
+        assert.equal(stages.render.frames[frameId].output_hash, '');
+      }
+      assert.equal(stages.compose.status, 'pending');
+      assert.equal(stages.duration_verify.status, 'pending');
+      assert.equal(stages.visual_inspect.status, 'pending');
+      assert.deepEqual(project.exports, []);
+      assert.equal(project.status, 'draft');
+      for (const frame of project.frames) {
+        const written = await projectStore.writeRawFrameHtml({
+          projectDir: actionProjectDir,
+          sceneId: frame.id,
+          order: frame.order,
+          html: `<html><body>${frame.id}:new</body></html>`,
+          captions: [],
+          durationSec: frame.duration_sec,
+        });
+        frame.html_path = written.html_path;
+        markCheckpointFrame(project, 'frame_html', frame.id, {
+          status: 'done', html_path: written.html_path, output_hash: written.output_hash, diagnostic_code: '',
+        });
+      }
+      markCheckpointStage(project, 'frame_html', { status: 'done' });
+      return { success: true, project };
+    };
+    const retried = await workflows.retryCreativeWorkflow(workflowId, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: refreshed.plan.code,
+    }, {
+      rootDir,
+      retryAttemptId: 'retry_attempt_layout_qa_full_regenerate',
+      services,
+    });
+    assert.equal(retried.success, true);
+    assert.equal(globalActionCalls, 1);
+    assert.deepEqual(calls.renderFrameKeys, ['scene_01', 'scene_02']);
+    assert.deepEqual(calls.composeFrameIds, ['scene_01', 'scene_02']);
   }
 
   {
