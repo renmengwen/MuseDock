@@ -212,11 +212,11 @@ lease_released: true
 code_base_commit: d922532f77306e1eca6b53444f6d03e5d7f42503
 worktree: D:\code3\MuseDock-worktrees\asset-first-d06
 branch: codex/asset-first-d06
-candidate_commit: 75028f82a17e83b4433573aaba225d524bd0372f
-invalidated_revision: fd41f40315eadd13f202ca2326183f95ef4a6c45
-invalidated_tree: b5168527ca5529e77cb5ef8cf1deb345b24dbdb7
-frozen_revision: 75028f82a17e83b4433573aaba225d524bd0372f
-frozen_tree: 1da6941731b75a89c0d19d6fe24691e3bf3fde73
+candidate_commit: d89c6e36ed5093350579fac4c6a8f48b145f278d
+invalidated_revision: 75028f82a17e83b4433573aaba225d524bd0372f
+invalidated_tree: 1da6941731b75a89c0d19d6fe24691e3bf3fde73
+frozen_revision: d89c6e36ed5093350579fac4c6a8f48b145f278d
+frozen_tree: 74ca4fcbf85da0c7d4d0e5ef7cc2b3c81af8fc93
 revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/focusRegionPhase.js
