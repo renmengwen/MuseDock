@@ -5,7 +5,7 @@ const { canonicalCaptionTrack } = require('./visualPlanService');
 // 聚焦过渡预算：合并后 cue 覆盖的字幕总窗口短于该值时，camera_zoom 降级为 highlight_only。
 const FOCUS_TRANSITION_BUDGET_SEC = 1;
 const TIME_EPSILON_SEC = 0.001;
-const ZOOM_TRUST_LEVELS = new Set(['A', 'B']);
+const ZOOM_TRUST_LEVELS = new Set(['A', 'B', 'C']);
 const CUE_TRUST_LEVELS = new Set(['A', 'B', 'C']);
 const LATIN_ALNUM_RE = /[A-Za-z0-9]/;
 
@@ -150,7 +150,7 @@ function focusCuesForShot({ shot, regions, captionById }) {
       keywords_by_caption_id: run.keywords_by_caption_id,
       region_id: text(run.region.id),
       effect: zoomAllowed ? 'camera_zoom' : 'highlight_only',
-      ...(zoomAllowed ? { zoom: 'auto' } : {}),
+      ...(zoomAllowed ? { zoom: trustLevel === 'C' ? 'soft' : 'auto' } : {}),
       return_policy: 'hold_or_next',
     });
   }

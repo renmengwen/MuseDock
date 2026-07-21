@@ -7,8 +7,9 @@ const { normalizeCaptionsForFrame } = require('./captionLayer');
 const { CAPTION_SAFE_BOTTOM_PX } = require('./motionPrimitiveCatalog');
 const START_MARKER = '<!-- hv-image-sequence:start -->';
 const END_MARKER = '<!-- hv-image-sequence:end -->';
-// 摄影机聚焦（REQ-D-05 / summary §13.4）：仅 trust A/B 执行 camera_zoom，并按可信度限制最大倍率。
-const CAMERA_MAX_ZOOM_BY_TRUST = { A: 3, B: 2.4 };
+// 摄影机聚焦（REQ-D-05 / summary §13.4）：C 级仅接受 soft 低倍率宽松聚焦。
+const CAMERA_MAX_ZOOM_BY_TRUST = { A: 3, B: 2.4, C: 1.5 };
+const CAMERA_SOFT_REGION_EXPANSION = 1.5;
 // fillFactor 必须小于 1：region 周围保留上下文，不把目标撑满画面（summary §13.4）。
 const CAMERA_FILL_FACTOR = 0.72;
 
@@ -97,14 +98,29 @@ function cameraFiniteUnit(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
-// 纵深防御：不信任 registry 原始数据，region 几何必须逐字段重新校验；非法则该 cue 按不存在处理。
+// 构建期仅消费逐字段校验通过的 registry region；非法则该 cue 按不存在处理。
 // focus_point 缺失或越界时回退 region 中心（与 cameraMath 缺省行为一致）。
-function cameraRegionGeometry(region) {
+function cameraRegionGeometry(region, trustLevel) {
   const source = region && typeof region === 'object' ? region.region : null;
   if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
   const { x, y, width, height } = source;
   if (![x, y, width, height].every(cameraFiniteUnit)
     || width <= 0 || height <= 0 || x + width > 1 || y + height > 1) return null;
+  if (trustLevel === 'C') {
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    const expandedWidth = Math.min(1, width * CAMERA_SOFT_REGION_EXPANSION);
+    const expandedHeight = Math.min(1, height * CAMERA_SOFT_REGION_EXPANSION);
+    return {
+      region: {
+        x: Math.min(1 - expandedWidth, Math.max(0, centerX - expandedWidth / 2)),
+        y: Math.min(1 - expandedHeight, Math.max(0, centerY - expandedHeight / 2)),
+        width: expandedWidth,
+        height: expandedHeight,
+      },
+      focus_point: { x: centerX, y: centerY },
+    };
+  }
   const focus = region.focus_point;
   const focusValid = focus && typeof focus === 'object' && !Array.isArray(focus)
     && cameraFiniteUnit(focus.x) && cameraFiniteUnit(focus.y)
@@ -115,8 +131,8 @@ function cameraRegionGeometry(region) {
   };
 }
 
-// 构建期预解析 camera cue 进 DOM data：仅 effect=camera_zoom 且 region trust ∈ {A,B}；
-// highlight_only、C/D/缺失 trust、region_id 解析不到、几何非法、无 caption 的 cue 一律按不存在处理（REQ-D-05）。
+// 构建期预解析 camera cue 进 DOM data：A/B 保持既有规则；C 仅接受 zoom=soft，并扩大取景区域。
+// highlight_only、D/缺失 trust、region_id 解析不到、几何非法、无 caption 的 cue 一律按不存在处理（REQ-D-05）。
 // cue 起止时间在构建期从 canonical caption 数据派生，浏览器只消费已解析的时间与几何。
 function cameraCaptionWindows(node, sceneDuration) {
   const captions = normalizeCaptionsForFrame({
@@ -143,9 +159,11 @@ function normalizeCameraCues(shot, asset, captionWindows) {
   for (const cue of cues) {
     if (!cue || typeof cue !== 'object' || Array.isArray(cue) || cue.effect !== 'camera_zoom') continue;
     const region = regions.get(String(cue.region_id || '').trim());
-    const maxZoom = CAMERA_MAX_ZOOM_BY_TRUST[String(region?.trust_level || '').trim().toUpperCase()];
+    const trustLevel = String(region?.trust_level || '').trim().toUpperCase();
+    const maxZoom = CAMERA_MAX_ZOOM_BY_TRUST[trustLevel];
     if (!maxZoom) continue;
-    const geometry = cameraRegionGeometry(region);
+    if (trustLevel === 'C' && cue.zoom !== 'soft') continue;
+    const geometry = cameraRegionGeometry(region, trustLevel);
     if (!geometry) continue;
     const captionIds = (Array.isArray(cue.caption_ids) ? cue.caption_ids : [])
       .map(value => String(value).trim())

@@ -224,14 +224,14 @@ for (const badAssets of [
   assert.equal(validateSceneImageSequenceDom(result.html.replace('data-shot-role="showcase"', 'data-shot-role="detail"'), args).success, false);
 }
 
-// ===== D-07：scene 内摄影机聚焦（REQ-D-05 A/B 级自动聚焦）构建期契约 =====
+// ===== D-07 / D-08：scene 内摄影机聚焦构建期契约 =====
 
-// canonical focus_regions 夹具：trust A/B 可聚焦；C/D/几何非法/缺 region 一律过滤。
+// canonical focus_regions 夹具：A/B 自动聚焦，C 仅 soft 宽松聚焦，D/非法/缺 region 过滤。
 const focusRegions = [
   { id: 'r_a', label: 'Star', region: { x: 0.55, y: 0.1, width: 0.3, height: 0.25 }, focus_point: { x: 0.7, y: 0.225 }, trust_level: 'A' },
   { id: 'r_b', label: 'Price', region: { x: 0.1, y: 0.55, width: 0.25, height: 0.3 }, focus_point: { x: 0.225, y: 0.7 }, trust_level: 'B' },
   { id: 'r_center', label: 'Center', region: { x: 0.3, y: 0.3, width: 0.2, height: 0.2 }, trust_level: 'A' },
-  { id: 'r_c', label: 'Chart', region: { x: 0.2, y: 0.2, width: 0.3, height: 0.3 }, focus_point: { x: 0.35, y: 0.35 }, trust_level: 'C' },
+  { id: 'r_c', label: 'Chart', region: { x: 0.65, y: 0.65, width: 0.3, height: 0.3 }, focus_point: { x: 0.66, y: 0.67 }, trust_level: 'C' },
   { id: 'r_d', label: 'Logo', region: { x: 0.4, y: 0.4, width: 0.2, height: 0.2 }, focus_point: { x: 0.5, y: 0.5 }, trust_level: 'D' },
   { id: 'r_bad', label: 'Broken', region: { x: 0.9, y: 0.9, width: 0.3, height: 0.3 }, focus_point: { x: 0.95, y: 0.95 }, trust_level: 'A' },
 ];
@@ -258,6 +258,8 @@ function focusCue(id, regionId, captionIds, effect = 'camera_zoom') {
         focusCue('cue_a', 'r_a', ['cap_01']),
         focusCue('cue_h', 'r_a', ['cap_01'], 'highlight_only'),
         focusCue('cue_c', 'r_c', ['cap_01']),
+        { ...focusCue('cue_c_soft', 'r_c', ['cap_01']), zoom: 'soft' },
+        { ...focusCue('cue_c_missing_zoom', 'r_c', ['cap_01']), zoom: undefined },
         focusCue('cue_d', 'r_d', ['cap_01']),
         focusCue('cue_missing', 'r_none', ['cap_01']),
         focusCue('cue_bad', 'r_bad', ['cap_01']),
@@ -276,6 +278,7 @@ function focusCue(id, regionId, captionIds, effect = 'camera_zoom') {
   assert.equal(result.success, true, `含 cue 场景物化失败：${result.message || ''}`);
   const expectedCues = [
     { id: 'cue_a', start_sec: 0.5, end_sec: 2, region: { x: 0.55, y: 0.1, width: 0.3, height: 0.25 }, focus_point: { x: 0.7, y: 0.225 }, max_zoom: 3 },
+    { id: 'cue_c_soft', start_sec: 0.5, end_sec: 2, region: { x: 0.55, y: 0.55, width: 0.44999999999999996, height: 0.44999999999999996 }, focus_point: { x: 0.8, y: 0.8 }, max_zoom: 1.5 },
     { id: 'cue_center', start_sec: 2, end_sec: 3.5, region: { x: 0.3, y: 0.3, width: 0.2, height: 0.2 }, focus_point: { x: 0.4, y: 0.4 }, max_zoom: 3 },
     { id: 'cue_b', start_sec: 0.5, end_sec: 3.5, region: { x: 0.1, y: 0.55, width: 0.25, height: 0.3 }, focus_point: { x: 0.225, y: 0.7 }, max_zoom: 2.4 },
   ];
@@ -283,9 +286,14 @@ function focusCue(id, regionId, captionIds, effect = 'camera_zoom') {
     result.html.includes(`data-camera-cues="${htmlEscape(JSON.stringify(expectedCues))}"`),
     'A/B 级 camera_zoom cue 必须按原顺序预解析进 DOM data 属性（时间窗/region 几何/focus_point/max_zoom）',
   );
-  for (const excluded of ['cue_h', 'cue_c', 'cue_d', 'cue_missing', 'cue_bad', 'cue_no_caption']) {
-    assert.ok(!result.html.includes(`&quot;id&quot;:&quot;${excluded}&quot;`), `highlight_only/C/D/解析失败的 cue 不得进入摄影机数据：${excluded}`);
+  for (const excluded of ['cue_h', 'cue_c', 'cue_c_missing_zoom', 'cue_d', 'cue_missing', 'cue_bad', 'cue_no_caption']) {
+    assert.ok(!result.html.includes(`&quot;id&quot;:&quot;${excluded}&quot;`), `highlight_only/C 非 soft/D/解析失败的 cue 不得进入摄影机数据：${excluded}`);
   }
+  const soft = result.contract.shots[0].camera_cues.find(cue => cue.id === 'cue_c_soft');
+  assert.ok(soft.region.width >= focusRegions[3].region.width * 1.5 - 1e-12);
+  assert.ok(soft.region.height >= focusRegions[3].region.height * 1.5 - 1e-12);
+  assert.deepEqual(soft.focus_point, { x: 0.8, y: 0.8 }, 'C 级必须忽略偏心模型点并使用原 region 中心');
+  assert.ok(soft.region.x + soft.region.width <= 1 && soft.region.y + soft.region.height <= 1, 'C 级边缘区域必须平移后保持完整扩大尺寸');
   assert.match(result.html, /computeCameraTransform/, '含 cue 场景必须注入 cameraMath 摄影机运行时');
   assert.equal(validateSceneImageSequenceDom(result.html, args).success, true);
   assert.equal(materializeSceneImageSequenceDom({ ...args, html: result.html }).html, result.html, '摄影机注入必须幂等');
@@ -307,7 +315,7 @@ function focusCue(id, regionId, captionIds, effect = 'camera_zoom') {
 }
 
 {
-  // 全部 cue 被过滤（highlight_only/C/D/缺 region）的场景必须与无 camera 场景零差异，防既有断言与帧产物回归。
+  // 全部 cue 被过滤（highlight_only/C auto/D/缺 region）的场景必须与无 camera 场景零差异。
   const filteredNode = node('fullscreen_relay', [shot('s1', 'a', 0, 4, {
     camera: {
       initial_view: 'overview',

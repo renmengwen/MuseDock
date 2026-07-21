@@ -12,16 +12,32 @@ const asset = {
   status: 'ready',
   path: 'assets/a.svg',
   frame_src: '../assets/a.svg',
-  focus_regions: [{
-    id: 'target',
-    label: '目标',
-    trust_level: 'A',
-    region: { x: 0.68, y: 0.12, width: 0.15, height: 0.18 },
-    focus_point: { x: 0.755, y: 0.21 },
-  }],
+  focus_regions: [
+    {
+      id: 'target',
+      label: '目标',
+      trust_level: 'A',
+      region: { x: 0.68, y: 0.12, width: 0.15, height: 0.18 },
+      focus_point: { x: 0.755, y: 0.21 },
+    },
+    {
+      id: 'target_c',
+      label: '目标',
+      trust_level: 'C',
+      region: { x: 0.68, y: 0.12, width: 0.15, height: 0.18 },
+      focus_point: { x: 0.69, y: 0.13 },
+    },
+    {
+      id: 'target_d',
+      label: '目标',
+      trust_level: 'D',
+      region: { x: 0.68, y: 0.12, width: 0.15, height: 0.18 },
+      focus_point: { x: 0.755, y: 0.21 },
+    },
+  ],
 };
 
-function node(withCue) {
+function node(withCue, { regionId = 'target', zoom } = {}) {
   const shot = {
     id: 'shot_1',
     asset_id: 'a',
@@ -39,8 +55,9 @@ function node(withCue) {
         caption_ids: ['cap_1'],
         keyword: '目标',
         keywords_by_caption_id: { cap_1: '目标' },
-        region_id: 'target',
+        region_id: regionId,
         effect: 'camera_zoom',
+        ...(zoom ? { zoom } : {}),
       }],
     };
   }
@@ -55,8 +72,8 @@ function node(withCue) {
   };
 }
 
-function html(withCue) {
-  const graphNode = node(withCue);
+function html(withCue, options) {
+  const graphNode = node(withCue, options);
   const result = materializeSceneImageSequenceDom({
     html: shell,
     node: graphNode,
@@ -101,6 +118,24 @@ async function transformAt(page, timeSec) {
     assert.notEqual(heldA, '', 'cue 保持期必须维持聚焦 transform');
     assert.equal(heldB, heldA, 'cue 保持期 transform 必须稳定');
     assert.equal(returned, '', '末尾时间足够时 cue 外必须回到全景基线');
+
+    await page.setContent(html(true, { regionId: 'target_c', zoom: 'soft' }));
+    await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
+    const soft = await transformAt(page, 2);
+    assert.notEqual(soft, '', 'C 级 soft cue 必须应用宽松聚焦 transform');
+    const softScale = Number(soft.match(/scale\(([^)]+)\)/)?.[1]);
+    assert.ok(softScale > 1 && softScale <= 1.5, `C 级 scale 必须在 (1, 1.5]，实际 ${softScale}`);
+    const softCaption = await page.evaluate(() => ({
+      active: document.querySelector('[data-caption-id="cap_1"]')?.dataset.hvActive === 'true',
+      keyword: document.querySelector('[data-caption-id="cap_1"] .hv-caption-kw')?.textContent || '',
+    }));
+    assert.deepEqual(softCaption, { active: true, keyword: '目标' }, 'C 级聚焦必须与字幕关键词同步');
+
+    const dHtml = html(true, { regionId: 'target_d', zoom: 'soft' });
+    await page.setContent(dHtml);
+    await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
+    assert.equal(await transformAt(page, 2), '', 'D 级即使伪造 soft cue 也不得移动');
+    assert.ok(!dHtml.includes('computeCameraTransform'), 'D 级 cue 被过滤后不得注入摄影机运行时');
 
     await page.setContent(html(false));
     await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);

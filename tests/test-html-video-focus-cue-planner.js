@@ -135,7 +135,7 @@ function firstShot(visualPlan) {
   assert.equal('camera' in firstShot(input.visualPlan), false, '无命中时不写 camera');
 }
 
-// 规则 3：trust A/B → camera_zoom + zoom auto；trust C → highlight_only（无 zoom）；trust D → 不生成 cue。
+// 规则 3：trust A/B → camera_zoom + zoom auto；足够长的 trust C → camera_zoom + zoom soft；trust D → 不生成 cue。
 {
   const input = fixture({
     captions: [
@@ -154,10 +154,23 @@ function firstShot(visualPlan) {
   planFocusCues(input);
   const cues = firstShot(input.visualPlan).camera.focus_cues;
   assert.deepEqual(cues.map(cue => cue.region_id), ['r_a', 'r_b', 'r_c']);
-  assert.deepEqual(cues.map(cue => cue.effect), ['camera_zoom', 'camera_zoom', 'highlight_only']);
+  assert.deepEqual(cues.map(cue => cue.effect), ['camera_zoom', 'camera_zoom', 'camera_zoom']);
   assert.equal(cues[0].zoom, 'auto');
   assert.equal(cues[1].zoom, 'auto');
-  assert.equal('zoom' in cues[2], false, 'highlight_only 不写 zoom 字段');
+  assert.equal(cues[2].zoom, 'soft');
+}
+
+// trust C 的合并字幕窗仍复用既有过渡预算：短窗只高亮，不写 zoom。
+{
+  const input = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 0.5, text: '看用户评价区' }],
+    regions: [canonicalRegion({ id: 'r_c', label: '用户评价区', trust: 'C' })],
+    duration: 4,
+  });
+  planFocusCues(input);
+  const cue = firstShot(input.visualPlan).camera.focus_cues[0];
+  assert.equal(cue.effect, 'highlight_only');
+  assert.equal('zoom' in cue, false);
 }
 
 // 规则 4a：同一 caption 命中同一 asset 的多个 region（无法消歧）→ 不生成 cue、不报错。
