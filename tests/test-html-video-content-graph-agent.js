@@ -236,6 +236,26 @@ assert.equal(assetFiltered.success, true);
 assert.deepEqual(assetFiltered.graph.nodes[0].asset_refs, [{ asset_id: 'article_01', usage: 'subject', reason: '' }]);
 assert.equal(assetFiltered.graph.nodes[1].asset_refs, undefined);
 
+const requiredBlocked = agent.normalizeContentGraph({
+  synopsis: '必用素材不受 should_use 过滤',
+  nodes: [{
+    id: 'scene_01', kind: 'text', label: '必用素材', durationSec: 2, text: '必用素材',
+    asset_refs: [{ asset_id: 'upload_required_blocked', usage: 'subject', reason: '用户必用' }],
+  }],
+  edges: [],
+}, { scenes: [{ id: 'scene_01' }] }, {
+  asset_context: {
+    assets: [{
+      id: 'upload_required_blocked',
+      requirement: 'required',
+      image_analysis: { should_use: false, avoid_reason: '模型不建议' },
+    }],
+  },
+});
+assert.deepEqual(requiredBlocked.graph.nodes[0].asset_refs, [
+  { asset_id: 'upload_required_blocked', usage: 'subject', reason: '用户必用' },
+]);
+
 const evidenceAssets = [
   { id: 'formal_direct', origin: 'source_extract', evidence_class: 'direct_source' },
   { id: 'formal_derived', origin: 'derived', evidence_class: 'derived_source' },

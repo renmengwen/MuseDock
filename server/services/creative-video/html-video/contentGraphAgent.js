@@ -311,7 +311,7 @@ function normalizeData(data = {}) {
 function allowedAssetById(creativeContext = {}) {
   const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
   return new Map(assets
-    .filter(isAssetUsableForFrames)
+    .filter(asset => asset?.requirement === 'required' || isAssetUsableForFrames(asset))
     .map(asset => [compactText(asset?.id || asset?.asset_id, 80), asset])
     .filter(([id]) => id));
 }

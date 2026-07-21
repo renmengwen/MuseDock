@@ -467,6 +467,14 @@ function createCreativeWorkflowRetryPlan(input = {}) {
     });
   }
 
+  if (code === 'required_asset_scene_capacity_exceeded') {
+    return basePlan(classification, {
+      can_retry: false,
+      fallback_allowed: false,
+      user_message: classification.message || '同一场景的必用素材超过每帧最多 4 张限制，无法自动恢复。',
+    });
+  }
+
   if (code === 'content_graph_invalid' || subStage === 'content_graph') {
     const rawResponse = contentGraphRawResponse(classification.diagnostics);
     const sceneSpec = sceneSpecFromWorkflow(workflow, project);

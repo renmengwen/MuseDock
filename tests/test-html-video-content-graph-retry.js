@@ -88,6 +88,10 @@ async function main() {
     { id: 'upload_unknown', file_name: 'unknown.png', requirement: 'required' },
     { id: 'upload_generated', file_name: 'generated.png', requirement: 'required', generation: { scene_id: 'scene_03' } },
     { id: 'article_required', file_name: 'article.png', requirement: 'required' },
+    { id: 'upload_duplicate_a', file_name: 'duplicate.png', requirement: 'required' },
+    { id: 'upload_duplicate_b', file_name: 'duplicate.png', requirement: 'required' },
+    { id: 'upload_short', file_name: 'chart.png', requirement: 'required' },
+    { id: 'upload_optional_long', file_name: 'dashboard-chart.png', requirement: 'preferred' },
   ];
   const explicitContext = {
     input: {
@@ -100,6 +104,7 @@ async function main() {
         'S02 使用 multi.png；S07 再次使用 multi.png。',
         'S09 使用 unknown.png。',
         'S03 使用 generated.png。S04 使用 article.png。',
+        'S03 使用 duplicate.png。S04 使用 dashboard-chart.png。',
       ].join('\n'),
       source_hint: 'Scene 8 展示 S08.png；Scene 8 展示 S08.png。',
     },
@@ -121,11 +126,12 @@ async function main() {
   assert.deepEqual(refsByScene.scene_02, [{ asset_id: 'upload_s02', usage: 'subject', reason: '用户明确指定用于该场景' }]);
   assert.deepEqual(refsByScene.scene_07, [{ asset_id: 'upload_s07', usage: 'subject', reason: '用户明确指定用于该场景' }]);
   assert.deepEqual(refsByScene.scene_08, [{ asset_id: 'upload_s08', usage: 'subject', reason: '用户明确指定用于该场景' }]);
+  assert.deepEqual(refsByScene.scene_04, [], 'optional 长文件名完整命中时，不得误绑定其内部的 required 短文件名');
   assert.deepEqual(refsByScene.scene_01, [{ asset_id: 'upload_existing', usage: 'showcase', reason: '模型已有引用' }]);
   assert.deepEqual(
     explicitBinding.contentGraph.nodes.flatMap(node => node.asset_refs || []).map(ref => ref.asset_id).sort(),
     ['upload_existing', 'upload_s02', 'upload_s07', 'upload_s08'],
-    '歧义、缺失、跨场景、Scene 不存在、生成素材和非 upload 均不得猜测绑定',
+    '同名、短名包含、Scene 歧义/缺失/不存在、生成素材和非 upload 均不得猜测绑定',
   );
 
   for (const fallbackMode of ['provider_failed', 'invalid_json']) {
@@ -152,6 +158,85 @@ async function main() {
       { asset_id: `upload_${fallbackMode}`, usage: 'subject', reason: '用户明确指定用于该场景' },
     ]);
   }
+
+  const capacityAssets = Array.from({ length: 5 }, (_, index) => ({
+    id: `upload_capacity_${index + 1}`,
+    file_name: `capacity-${index + 1}.png`,
+    requirement: 'required',
+  }));
+  const capacityContext = {
+    input: { raw_text: `S01 使用 ${capacityAssets.map(asset => asset.file_name).join('、')}。` },
+    asset_context: { assets: capacityAssets },
+  };
+  const capacityRefs = capacityAssets.slice(0, 3).map(asset => ({
+    asset_id: asset.id, usage: 'subject', reason: '模型已有引用',
+  }));
+  const modelCapacity = await workflow.generateContentGraphWithRetry({
+    sceneSpec: sceneSpec(),
+    creativeContext: capacityContext,
+    model: { async callTextModel() { return { success: true, text: graphTextFor(sceneSpec(), { scene_01: capacityRefs }) }; } },
+  });
+  assert.equal(modelCapacity.success, false);
+  assert.equal(modelCapacity.contentGraph, undefined, '容量失败不得产出超过 4 张 refs 的 Graph');
+  const modelCapacityDiagnostic = modelCapacity.diagnostics.find(item => item.code === 'required_asset_scene_capacity_exceeded');
+  assert.deepEqual(modelCapacityDiagnostic.details, {
+    scene_id: 'scene_01',
+    asset_ids: capacityAssets.map(asset => asset.id),
+    max_assets: 4,
+  });
+  assert.equal(modelCapacityDiagnostic.retryable, false);
+  assert.equal(modelCapacityDiagnostic.fallback_allowed, false);
+
+  let capacityFallbackCalls = 0;
+  const fallbackCapacity = await workflow.generateContentGraphWithRetry({
+    sceneSpec: sceneSpec(),
+    creativeContext: capacityContext,
+    model: {
+      async callTextModel() {
+        capacityFallbackCalls += 1;
+        return { success: false, message: '返回结果缺少文本内容。' };
+      },
+    },
+  });
+  assert.equal(capacityFallbackCalls, 2);
+  assert.equal(fallbackCapacity.success, false);
+  assert.equal(fallbackCapacity.contentGraph, undefined);
+  assert.equal(fallbackCapacity.diagnostics[0].code, 'required_asset_scene_capacity_exceeded');
+  assert.equal(fallbackCapacity.diagnostics[0].retryable, false);
+  assert.equal(fallbackCapacity.diagnostics[0].fallback_allowed, false);
+
+  const capacitySetup = await createRegistry();
+  const capacityWorkflowAssets = [];
+  for (const asset of capacityAssets) {
+    const localPath = path.join(capacitySetup.rootDir, asset.file_name);
+    await fs.writeFile(localPath, asset.id, 'utf8');
+    capacityWorkflowAssets.push({ ...asset, local_path: localPath });
+  }
+  const capacityWorkflow = await workflow.generateHtmlVideo({
+    workflowId: '202606260000000003_content_graph_capacity',
+    runId: 'run_content_graph_capacity',
+    rootDir: capacitySetup.rootDir,
+    sceneSpec: sceneSpec(),
+    creativeContext: {
+      ...capacityContext,
+      asset_context: { assets: capacityWorkflowAssets },
+    },
+    target: { generate_audio: false },
+    skipValidation: true,
+    services: {
+      aiTextModel: {
+        async callTextModel() {
+          return { success: true, text: graphTextFor(sceneSpec(), { scene_01: capacityRefs }) };
+        },
+      },
+      environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+    },
+  });
+  assert.equal(capacityWorkflow.success, false);
+  const normalizedCapacityDiagnostic = capacityWorkflow.html_video_diagnostics
+    .find(item => item.code === 'required_asset_scene_capacity_exceeded');
+  assert.equal(normalizedCapacityDiagnostic.retryable, false, 'htmlVideoWorkflow normalize 必须保留 retryable=false');
+  assert.equal(normalizedCapacityDiagnostic.fallback_allowed, false, 'htmlVideoWorkflow normalize 必须保留 fallback_allowed=false');
 
   const retryInvalidCalls = [];
   const retryInvalid = await workflow.generateContentGraphWithRetry({

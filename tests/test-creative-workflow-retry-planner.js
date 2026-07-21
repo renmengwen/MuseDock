@@ -464,6 +464,28 @@ function project(overrides = {}) {
   assert.equal(contentGraphPlan.can_retry, true);
   assert.equal(contentGraphPlan.repair_action, 'retry_content_graph');
 
+  const capacityPlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        code: 'required_asset_scene_capacity_exceeded',
+        sub_stage: 'content_graph',
+        diagnostics: [createDiagnostic({
+          code: 'required_asset_scene_capacity_exceeded',
+          sub_stage: 'content_graph',
+          retryable: false,
+          fallback_allowed: false,
+          user_message: '场景 scene_01 的必用素材超过每帧最多 4 张限制。',
+          details: { scene_id: 'scene_01', asset_ids: ['a', 'b', 'c', 'd', 'e'], max_assets: 4 },
+        })],
+      },
+    }),
+    project: project(),
+  });
+  assert.equal(capacityPlan.can_retry, false);
+  assert.equal(capacityPlan.fallback_allowed, false);
+  assert.equal(capacityPlan.repair_action, '');
+  assert.equal(capacityPlan.code, 'required_asset_scene_capacity_exceeded');
+
   const fallbackPlan = createCreativeWorkflowRetryPlan({
     workflow: workflow({
       last_failure: contentGraphFailure,

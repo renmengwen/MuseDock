@@ -131,7 +131,7 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
   const nodes = Array.isArray(graph.nodes) ? graph.nodes : [];
   const scenes = Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [];
   const assets = Array.isArray(creativeContext?.asset_context?.assets) ? creativeContext.asset_context.assets : [];
-  if (!nodes.length || !scenes.length || !assets.length) return graph;
+  if (!nodes.length || !scenes.length || !assets.length) return { success: true, graph };
   const referenced = new Set(nodes.flatMap(node => (
     Array.isArray(node?.asset_refs) ? node.asset_refs.map(ref => String(ref?.asset_id || '').trim()) : []
   )).filter(Boolean));
@@ -149,23 +149,58 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
   const inputs = [creativeContext?.input?.raw_text, creativeContext?.input?.source_hint]
     .map(value => String(value || ''))
     .filter(Boolean);
-  for (const asset of assets) {
+  const uploadFileCandidates = assets.filter(asset => {
     const assetId = String(asset?.id || asset?.asset_id || '').trim();
     const fileName = String(asset?.file_name || '').trim();
-    if (!assetId.startsWith('upload_') || asset?.requirement !== 'required' || !fileName
-      || String(asset?.generation?.scene_id || '').trim() || referenced.has(assetId)) continue;
+    return assetId.startsWith('upload_') && fileName
+      && !String(asset?.generation?.scene_id || '').trim();
+  });
+  const requiredUploads = uploadFileCandidates.filter(asset => asset?.requirement === 'required');
+  const fileNameCounts = new Map();
+  for (const asset of uploadFileCandidates) {
+    const fileName = String(asset.file_name).trim();
+    fileNameCounts.set(fileName, (fileNameCounts.get(fileName) || 0) + 1);
+  }
+  const additions = new Map();
+  for (const asset of requiredUploads) {
+    const assetId = String(asset?.id || asset?.asset_id || '').trim();
+    const fileName = String(asset.file_name).trim();
+    if (referenced.has(assetId) || fileNameCounts.get(fileName) !== 1) continue;
     const sceneNumbers = new Set();
     let occurrences = 0;
     let ambiguous = false;
     for (const input of inputs) {
+      const fileNameIntervals = uploadFileCandidates.flatMap(candidate => {
+        const candidateName = String(candidate?.file_name || '').trim();
+        const intervals = [];
+        for (let start = input.indexOf(candidateName); start >= 0; start = input.indexOf(candidateName, start + candidateName.length)) {
+          intervals.push({ start, end: start + candidateName.length });
+        }
+        return intervals;
+      });
       for (let index = input.indexOf(fileName); index >= 0; index = input.indexOf(fileName, index + fileName.length)) {
+        const containedByLongerFileName = uploadFileCandidates.some(other => {
+          const longer = String(other?.file_name || '').trim();
+          if (longer.length <= fileName.length) return false;
+          for (let longerIndex = input.indexOf(longer); longerIndex >= 0; longerIndex = input.indexOf(longer, longerIndex + longer.length)) {
+            if (longerIndex <= index && longerIndex + longer.length >= index + fileName.length) return true;
+          }
+          return false;
+        });
+        if (containedByLongerFileName) continue;
         occurrences += 1;
-        const before = input.slice(0, index).search(/[^。.;；\r\n]*$/);
-        const afterOffset = input.slice(index + fileName.length).search(/[。.;；\r\n]/);
-        const sentence = input.slice(
-          before < 0 ? 0 : before,
-          afterOffset < 0 ? input.length : index + fileName.length + afterOffset,
-        );
+        const isFileNamePosition = position => fileNameIntervals.some(interval => (
+          position >= interval.start && position < interval.end
+        ));
+        let sentenceStart = index - 1;
+        while (sentenceStart >= 0 && (!/[。.;；\r\n]/.test(input[sentenceStart]) || isFileNamePosition(sentenceStart))) {
+          sentenceStart -= 1;
+        }
+        let sentenceEnd = index + fileName.length;
+        while (sentenceEnd < input.length && (!/[。.;；\r\n]/.test(input[sentenceEnd]) || isFileNamePosition(sentenceEnd))) {
+          sentenceEnd += 1;
+        }
+        const sentence = input.slice(sentenceStart + 1, sentenceEnd);
         const numbers = new Set(Array.from(sentence.matchAll(/\bS(?:cene[_:\s-]*)?0*(\d+)\b/gi))
           .map(match => Number(match[1])));
         if (numbers.size !== 1) ambiguous = true;
@@ -178,13 +213,40 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
     const sceneId = [...matchedScenes][0];
     const node = nodes.find(item => resolveNodeSceneId(item) === sceneId || String(item?.id || '') === sceneId);
     if (!node) continue;
-    node.asset_refs = [
-      ...(Array.isArray(node.asset_refs) ? node.asset_refs : []),
-      { asset_id: assetId, usage: 'subject', reason: '用户明确指定用于该场景' },
-    ];
+    if (!additions.has(node)) additions.set(node, []);
+    additions.get(node).push(assetId);
     referenced.add(assetId);
   }
-  return graph;
+  const capacityDiagnostics = [];
+  for (const [node, assetIds] of additions) {
+    const currentAssetIds = (Array.isArray(node.asset_refs) ? node.asset_refs : [])
+      .map(ref => String(ref?.asset_id || '').trim()).filter(Boolean);
+    if (currentAssetIds.length + assetIds.length <= 4) continue;
+    const sceneId = resolveNodeSceneId(node) || String(node?.id || '').trim();
+    capacityDiagnostics.push(createDiagnostic({
+      code: 'required_asset_scene_capacity_exceeded',
+      stage: 'ai-content-graph',
+      sub_stage: 'content_graph',
+      user_message: `场景 ${sceneId} 的必用素材超过每帧最多 4 张限制。`,
+      details: { scene_id: sceneId, asset_ids: [...currentAssetIds, ...assetIds], max_assets: 4 },
+      retryable: false,
+      fallback_allowed: false,
+    }));
+  }
+  if (capacityDiagnostics.length) {
+    return {
+      success: false,
+      message: capacityDiagnostics[0].user_message,
+      diagnostics: capacityDiagnostics,
+    };
+  }
+  for (const [node, assetIds] of additions) {
+    node.asset_refs = [
+      ...(Array.isArray(node.asset_refs) ? node.asset_refs : []),
+      ...assetIds.map(assetId => ({ asset_id: assetId, usage: 'subject', reason: '用户明确指定用于该场景' })),
+    ];
+  }
+  return { success: true, graph };
 }
 
 async function retryContentGraphAfterMismatch({
@@ -221,7 +283,6 @@ async function retryContentGraphAfterMismatch({
 }
 
 async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext, target, onProgress, project, projectDir } = {}) {
-  const finalizeGraph = graph => bindExplicitRequiredUploads(graph, sceneSpec, creativeContext);
   const originalPrompt = contentGraphAgent.buildContentGraphPrompt({
     sceneSpec,
     creativeContext,
@@ -236,6 +297,12 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
     },
   }));
   const diagnostics = [];
+  const finalizeGraph = graph => {
+    const finalized = bindExplicitRequiredUploads(graph, sceneSpec, creativeContext);
+    return finalized.success
+      ? { success: true, contentGraph: finalized.graph, diagnostics, inputHash: sha256(originalPrompt) }
+      : { ...finalized, diagnostics: [...finalized.diagnostics, ...diagnostics], inputHash: sha256(originalPrompt) };
+  };
   let retriedForProviderMissing = false;
 
   if (!graphAi.success && isProviderMissingText(graphAi.message)) {
@@ -266,12 +333,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
         message: 'content graph 重试仍为空，已使用字幕脚本生成内容图。',
         data: {},
       });
-      return {
-        success: true,
-        contentGraph: finalizeGraph(mapSceneSpecToContentGraph(sceneSpec)),
-        diagnostics,
-        inputHash: sha256(originalPrompt),
-      };
+      return finalizeGraph(mapSceneSpecToContentGraph(sceneSpec));
     }
   }
 
@@ -294,12 +356,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
         message: 'content graph 重试仍无效，已使用字幕脚本生成内容图。',
         data: {},
       });
-      return {
-        success: true,
-        contentGraph: finalizeGraph(mapSceneSpecToContentGraph(sceneSpec)),
-        diagnostics,
-        inputHash: sha256(originalPrompt),
-      };
+      return finalizeGraph(mapSceneSpecToContentGraph(sceneSpec));
     }
     return {
       ...graphParsed,
@@ -369,12 +426,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
       }
     }
   }
-  return {
-    success: true,
-    contentGraph: finalizeGraph(graphParsed.graph),
-    diagnostics,
-    inputHash: sha256(originalPrompt),
-  };
+  return finalizeGraph(graphParsed.graph);
 }
 
 function expandContentGraphToVisualBeats({ graph = {}, visualPlan = {}, visualDecisions = null } = {}) {
