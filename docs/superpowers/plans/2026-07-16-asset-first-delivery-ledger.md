@@ -136,16 +136,18 @@ review:
 
 ```yaml
 task_id: D-04
-status: implementing
-owner: claude-worker
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: 55c7ae97fab69b256cd4ceaf1bddafc74c16b4da
 worktree: D:\code3\MuseDock-worktrees\asset-first-d04
 branch: codex/asset-first-d04
-candidate_commit: 2a19d4884e49bee4ad56e699cc2611f9cfcda531
+candidate_commit: aa177e06905f1fc7b458138ab4c2a3fd1af7a245
 invalidated_revision: 2a19d4884e49bee4ad56e699cc2611f9cfcda531
 invalidated_tree: 095db05b0e4102e0a213c07a5d9dc09317333010
-revision_valid: false
+frozen_revision: aa177e06905f1fc7b458138ab4c2a3fd1af7a245
+frozen_tree: 6f3b3f3fc845b045c520ab946e7a4d3858a45618
+revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/focusCuePlanner.js
   - server/services/creative-video/html-video/htmlVideoWorkflow.js
@@ -178,7 +180,8 @@ decisions:
   - FOCUS_TRANSITION_BUDGET_SEC=1；防抖窗口取合并 cue 全部 caption 的 max(end)-min(start)，0.001s 容差，严格短于预算才降级 highlight_only
   - cue id 为 sha256(shot.id+region.id+caption_ids) 前 16 位派生的确定性 id，无时间与随机源
   - 纯 ASCII/拉丁 term 必须词边界匹配（相邻字符非字母数字），杜绝 star→restart 误命中；含 CJK 的 term 保持子串匹配；keyword 仍取原文真实切片
-  - planFocusCues 调用点 fail-open：规划失败输出中文 warning 诊断并继续 workflow，不中断视频生成
+  - 词边界按 term 端点逐侧启用：端点为 [A-Za-z0-9] 的一侧检查相邻字符，混合 term 的拉丁端点同样受保护；被拒绝位置继续向后扫描
+  - planFocusCues 调用点 fail-open：规划失败输出中文 warning 诊断（focus_cue_planning_failed）并继续 workflow，不中断视频生成
 verification:
   - node tests/test-html-video-focus-cue-planner.js
   - node tests/test-html-video-workflow.js
