@@ -31,7 +31,7 @@ function defaultSampleTimes(durationSec) {
   ], duration).slice(0, 5);
 }
 
-function normalizeSampleTimes(sampleTimesSec, durationSec) {
+function normalizeSampleTimes(sampleTimesSec, durationSec, limit = 5) {
   const duration = Number(durationSec);
   const hasDuration = Number.isFinite(duration) && duration >= 0;
   const sorted = (Array.isArray(sampleTimesSec) ? sampleTimesSec : [])
@@ -44,7 +44,7 @@ function normalizeSampleTimes(sampleTimesSec, durationSec) {
   for (const time of sorted) {
     if (normalized.some(existing => Math.abs(existing - time) <= 0.05)) continue;
     normalized.push(Number(time.toFixed(3)));
-    if (normalized.length >= 5) break;
+    if (normalized.length >= limit) break;
   }
   return normalized;
 }
@@ -373,6 +373,7 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
       const cues = parseJson(shot.dataset.cameraCues) || [];
       let cue = null;
       let cueIndex = -1;
+      let returningToOverview = false;
       for (let index = 0; index < cues.length; index += 1) {
         if (Number(cues[index]?.start_sec) <= timeSec) {
           cue = cues[index];
@@ -384,7 +385,14 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
         const windowEnd = Number(shot.dataset.windowEndSec);
         const returnsToOverview = Number.isFinite(end) && Number.isFinite(windowEnd) && windowEnd - end >= 0.6 - 1e-6;
         if (returnsToOverview && timeSec > end + 0.6) cue = null;
+        else if (returnsToOverview && timeSec > end) returningToOverview = true;
       }
+      const cueStart = Number(cue?.start_sec);
+      const cueEnd = Number(cue?.end_sec);
+      const transitionDuration = Number.isFinite(cueStart) && Number.isFinite(cueEnd)
+        ? Math.min(0.8, Math.max(0.45, (cueEnd - cueStart) * 0.4))
+        : 0;
+      const focusStable = Boolean(cue && !returningToOverview && timeSec >= cueStart + transitionDuration - 1e-6);
       const region = cue?.region;
       let targetBox = null;
       if (ready(foreground) && region && [region.x, region.y, region.width, region.height].every(Number.isFinite)) {
@@ -419,6 +427,8 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
         ty: matrix.f,
         has_transform: Math.abs(scale - 1) > 1e-4 || Math.abs(matrix.e) > 0.01 || Math.abs(matrix.f) > 0.01,
         cue,
+        returning_to_overview: returningToOverview,
+        focus_stable: focusStable,
         target_box: targetBox,
         expected_region: expectedRegion,
         caption_boxes: activeCaptions,
@@ -451,10 +461,16 @@ async function cameraCueSampleTimes(page, durationSec) {
         const start = Number(cue?.start_sec);
         const end = Number(cue?.end_sec);
         if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 0.4) return [];
-        return [0.05, 0.15, 0.25, 0.35].map(offset => start + offset);
+        const transitionDuration = Math.min(0.8, Math.max(0.45, (end - start) * 0.4));
+        const stable = Math.min(end - 0.05, start + transitionDuration);
+        return [
+          ...(start >= 0.1 ? [start - 0.05] : []),
+          ...[0.05, 0.15, 0.25, 0.35].map(offset => start + offset),
+          ...(stable >= start + 0.45 - 1e-6 && stable < end ? [stable] : []),
+        ];
       });
     }));
-  return normalizeSampleTimes(times, durationSec);
+  return normalizeSampleTimes(times, durationSec, 28);
 }
 
 function cameraIssuesForSample(sample, { frameId, sampleTimeSec }) {
@@ -485,8 +501,8 @@ function cameraIssuesForSample(sample, { frameId, sampleTimeSec }) {
       }
     }
     const maxZoom = Number(shot.cue?.max_zoom);
-    if (shot.scale < 1 - 1e-4 || shot.scale > 3 + 1e-4
-      || (Number.isFinite(maxZoom) && shot.scale > maxZoom + 1e-4)) {
+    if ((!shot.cue || shot.focus_stable) && (shot.scale < 1 - 1e-4 || shot.scale > 3 + 1e-4
+      || (Number.isFinite(maxZoom) && shot.scale > maxZoom + 1e-4))) {
       issues.push(makeIssue({
         code: 'camera_zoom_out_of_range', frameId, sampleTimeSec,
         message: '摄影机倍率超出当前焦点允许范围。', details: { ...details, scale: shot.scale, max_zoom: maxZoom },
@@ -498,7 +514,7 @@ function cameraIssuesForSample(sample, { frameId, sampleTimeSec }) {
         message: '图片发生了没有有效焦点 cue 支持的移动。', details: { ...details, scale: shot.scale, tx: shot.tx, ty: shot.ty },
       }));
     }
-    if (shot.target_box) {
+    if (shot.target_box && shot.focus_stable) {
       if (shot.target_box.left < -1 || shot.target_box.top < -1
         || shot.target_box.right > sample.viewport.width + 1
         || shot.target_box.bottom > sample.safe_bottom + 1) {
@@ -515,7 +531,7 @@ function cameraIssuesForSample(sample, { frameId, sampleTimeSec }) {
         }));
       }
     }
-    const expected = shot.expected_region;
+    const expected = shot.focus_stable ? shot.expected_region : null;
     const actual = shot.cue?.region;
     if (expected && actual
       && [expected.x, expected.y, expected.width, expected.height, actual.x, actual.y, actual.width, actual.height].every(Number.isFinite)) {
@@ -671,7 +687,7 @@ async function inspectFrameHtmlLayout(options = {}) {
       : await cameraCueSampleTimes(page, durationSec);
     const samples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
       ? normalizeSampleTimes(sampleTimesSec, durationSec)
-      : cueSamples.length ? cueSamples : defaultSampleTimes(durationSec);
+      : normalizeSampleTimes([...defaultSampleTimes(durationSec), ...cueSamples], durationSec, 32);
 
     let elapsedSec = 0;
     for (const sampleTimeSec of samples) {
