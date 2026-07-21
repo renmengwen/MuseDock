@@ -907,7 +907,18 @@ async function generateHtmlVideo(options = {}) {
   });
   // D-04：canonical 焦点区域落盘后、content graph 展开前，为图片镜头确定性规划 camera.focus_cues；
   // 就地 enrich visualPlan.beats[].visual_base，persistableVisualPlan 共享同一 visual_base 引用随之更新。
-  planFocusCues({ visualPlan, creativeContext, sceneSpec, mediaOptions });
+  // 与 focusRegionPhase 同为 fail-open：规划失败只记警告并继续生成，不阻断整条视频链路。
+  try {
+    planFocusCues({ visualPlan, creativeContext, sceneSpec, mediaOptions });
+  } catch (error) {
+    diagnostics.push(createDiagnostic({
+      code: 'focus_cue_planning_failed',
+      stage: 'project',
+      sub_stage: 'focus_cue',
+      severity: 'warning',
+      user_message: `焦点提示规划失败，已跳过摄影机聚焦：${error?.message || error}`,
+    }));
+  }
   // scene_html 分支只在 continuity_mode = scene_html 生效；此时 project.continuity_mode 尚未挂载
   // （attachContinuityMode 在建帧后才调用），用 creativeContext 判断等价条件。
   if ((creativeContext?.continuity_mode || 'beat_mp4') === 'scene_html') {
