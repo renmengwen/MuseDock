@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { width: 1920px; height: 1080px; margin: 0; overflow: hidden; }
+    .beat { position: absolute; left: 100px; top: 100px; opacity: 0; }
+    body[data-mp-beat="first"] .first,
+    body[data-mp-beat="second"] .second { opacity: 1; }
+    .second { left: 2000px; }
+    @keyframes reveal { to { opacity: 1; } }
+    .leaky { left: 2000px; animation: reveal .01s both; }
+  </style>
+</head>
+<body data-mp-beat="first">
+  <div class="beat first" data-mp-beat-scope="first"><p data-text-key="subtitle">第一拍可见文本</p></div>
+  <div class="beat second" data-mp-beat-scope="second"><p data-text-key="subtitle">第二拍越界文本</p></div>
+  <div class="beat leaky" data-mp-beat-scope="third"><p data-text-key="subtitle">动画覆盖隐藏态</p></div>
+  <script>
+    window.__mpSetTimelineTime = time => document.body.dataset.mpBeat = time < 0.5 ? 'first' : 'second';
+  </script>
+</body>
+</html>

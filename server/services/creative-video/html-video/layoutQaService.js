@@ -247,13 +247,18 @@ async function collectCandidates(page) {
     }
 
     function isVisible(element, box) {
-      const style = window.getComputedStyle(element);
-      return style
-        && style.visibility !== 'hidden'
-        && style.display !== 'none'
-        && Number(style.opacity) !== 0
-        && box.width >= 8
-        && box.height >= 8;
+      let effectiveOpacity = 1;
+      for (let current = element; current; current = current.parentElement) {
+        const beatScope = current.getAttribute('data-mp-beat-scope');
+        const activeBeat = document.body?.dataset?.mpBeat;
+        if (beatScope && activeBeat && beatScope !== activeBeat) return false;
+        const style = window.getComputedStyle(current);
+        if (!style || style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)) return false;
+        const opacity = Number(style.opacity);
+        if (Number.isFinite(opacity)) effectiveOpacity *= opacity;
+        if (effectiveOpacity <= 0.001) return false;
+      }
+      return box.width >= 8 && box.height >= 8;
     }
 
     function serializeBox(rect) {

@@ -103,6 +103,25 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
   const textContainerSibling = await inspectFixture('text-container-sibling.html', { id: 'scene_12', duration_sec: 1 });
   assert.equal(textContainerSibling.success, true, '文本容器的空白区域不应与兄弟文本产生遮挡误报');
 
+  const inactiveBeat = await inspectFixture(
+    'inactive-beat-scope.html',
+    { id: 'scene_13', duration_sec: 1 },
+    { sampleTimesSec: [0.1] },
+  );
+  assert.equal(inactiveBeat.success, true, '父级 opacity=0 的非活动 Beat 文本不应进入布局候选');
+  assert.ok(inactiveBeat.metrics.candidate_count > 0, '活动 Beat 文本仍应进入布局候选');
+
+  const activatedBeat = await inspectFixture(
+    'inactive-beat-scope.html',
+    { id: 'scene_13', duration_sec: 1 },
+    { sampleTimesSec: [0.8] },
+  );
+  assert.equal(activatedBeat.success, false, 'Beat 激活后，其越界文本仍应被布局 QA 阻断');
+  assert.ok(
+    activatedBeat.issues.some(issue => issue.code === 'text_out_of_viewport' && issue.details?.text === '第二拍越界文本'),
+    '切换后的活动 Beat 文本必须重新进入候选',
+  );
+
   const divRoleOverflow = await inspectFixture('div-role-overflow.html', { id: 'scene_09', duration_sec: 1 });
   assert.equal(divRoleOverflow.success, false);
   assert.ok(
