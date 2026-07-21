@@ -90,12 +90,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-05
-status: leased
-owner: claude-worker
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: dfd88dde244f7d62c6529be16936f432ccbf27d7
 worktree: D:\code3\MuseDock-worktrees\asset-first-d05
 branch: codex/asset-first-d05
+candidate_commit: f42f076b0697bf132d940af10085e60c72914c64
+frozen_revision: f42f076b0697bf132d940af10085e60c72914c64
+frozen_tree: 8a31132e5bd3d65dabc974769900a6cfb8be625a
+revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/captionLayer.js
   - server/services/creative-video/html-video/focusCuePlanner.js
@@ -122,6 +126,9 @@ decisions:
   - span 包裹必须在原文定位后分段 htmlEscape 拼接，含 &/</> 的 caption 不得错位或双重转义
   - 高亮样式：强调色+字重提高+轻微放大，布局稳定不跳动；无 cue/无匹配时输出与现状字节级一致
   - cue 数据从 node 的 visual_beat(s).visual_base.shots[].camera.focus_cues 收集，caption_id → keyword 映射一对一
+  - 线程化经 caption 注记字段 focus_keyword（renderCaptionLayer 调用点在租约外 writeRawFrameHtml 内，captions 数组是唯一租约内通道）；normalizeCaptionsForFrame 执行"剥旧注记+按 frame 元数据重注记"的派生态纪律，保证 materializer 重建后高亮仍在且 timelineConsistency 比较不假阳性
+  - keyword 定位用候选位置+局部窗口交给 planner keywordOccurrence 判定（等价于全文扫描），不复制 planner 逻辑；keywordOccurrence 懒加载打破 captionLayer↔visualPlanService require 环
+  - 高亮 CSS 仅在实际产生高亮 span 时追加；transform scale 不参与排版零 reflow；零新增 JS，复用 data-hv-active 时钟
 verification:
   - node tests/test-html-video-caption-layer.js
   - node tests/test-html-video-frame-html-agent.js
