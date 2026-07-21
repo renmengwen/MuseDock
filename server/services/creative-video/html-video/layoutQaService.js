@@ -682,7 +682,7 @@ async function inspectFrameHtmlLayout(options = {}) {
 
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load' });
     await waitForLayout(page);
-    const continuousPlayback = await page.evaluate(() => {
+    let continuousPlayback = await page.evaluate(() => {
       const clock = window.__hvPlaybackClock;
       const trusted = clock?.__hvOwner === 'musedock-playback-clock-v1'
         && ['subscribe', 'play', 'pause', 'timeSec', 'paused', 'setTime']
@@ -700,6 +700,34 @@ async function inspectFrameHtmlLayout(options = {}) {
       clock.play();
       return true;
     }).catch(() => false);
+    if (continuousPlayback) {
+      await page.waitForTimeout(120);
+      const playbackProbe = await page.evaluate(() => {
+        const clock = window.__hvPlaybackClock;
+        const current = Number(clock.timeSec());
+        if (Number.isFinite(current) && current >= 0.03) return { advancing: true, seekable: true };
+        try {
+          clock.pause();
+          clock.setTime(0.173);
+          const sought = Math.abs(Number(clock.timeSec()) - 0.173) <= 0.005;
+          if (sought) clock.setTime(0);
+          return { advancing: false, seekable: sought };
+        } catch (error) {
+          return { advancing: false, seekable: false, error: error?.message || String(error) };
+        }
+      }).catch(error => ({ advancing: false, seekable: false, error: error?.message || String(error) }));
+      if (!playbackProbe.advancing && !playbackProbe.seekable) {
+        const issue = makeIssue({
+          code: 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE',
+          frameId,
+          sampleTimeSec: null,
+          message: '布局 QA 检测到共享播放时钟无法推进，也无法定位采样时间。',
+          details: { error: playbackProbe.error || 'timeSec did not advance and setTime had no effect' },
+        });
+        return { success: false, issues: [issue], metrics };
+      }
+      continuousPlayback = playbackProbe.advancing;
+    }
 
     const cueSamples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
       ? []
@@ -719,9 +747,14 @@ async function inspectFrameHtmlLayout(options = {}) {
         );
       } else {
         const timelineSet = await page.evaluate((time) => {
-          if (typeof window.__mpSetTimelineTime !== 'function') return false;
-          window.__mpSetTimelineTime(time);
-          return true;
+          const clock = window.__hvPlaybackClock;
+          const ownedClock = clock?.__hvOwner === 'musedock-playback-clock-v1'
+            && typeof clock.setTime === 'function' && typeof clock.timeSec === 'function';
+          if (typeof window.__mpSetTimelineTime === 'function') window.__mpSetTimelineTime(time);
+          else if (ownedClock) clock.setTime(time);
+          else return false;
+          if (ownedClock && Math.abs(Number(clock.timeSec()) - time) > 0.005) clock.setTime(time);
+          return !ownedClock || Math.abs(Number(clock.timeSec()) - time) <= 0.005;
         }, sampleTimeSec).catch(() => false);
         const waitSec = timelineSet ? 0 : Math.max(0, sampleTimeSec - elapsedSec);
         if (waitSec > 0) {

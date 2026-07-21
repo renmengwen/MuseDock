@@ -124,6 +124,50 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     });
     assert.equal(stableSecondBeat.metrics.skipped, false);
     assert.equal(stableSecondBeat.success, true, '连续播放到第二 Beat 稳定点时只能看到活动文本');
+
+    const stalledClockPath = path.join(timelineDir, 'stalled-clock.html');
+    await fs.writeFile(stalledClockPath, `<!doctype html><html><body>
+      <p data-text-key="body">停滞时钟</p><script>
+      window.__hvPlaybackClock={
+        __hvOwner:'musedock-playback-clock-v1',subscribe:function(){},play:function(){},pause:function(){},
+        timeSec:function(){return 0},paused:function(){return false},setTime:function(){}
+      };
+      </script></body></html>`, 'utf8');
+    const stalledStartedAt = Date.now();
+    const stalledClock = await inspectFrameHtmlLayout({
+      htmlPath: stalledClockPath,
+      frame: { id: 'scene_stalled_clock', duration_sec: 1 },
+      resolution,
+      sampleTimesSec: [0.5],
+    });
+    assert.ok(Date.now() - stalledStartedAt < 5000, '停滞时钟必须快速失败，不能等待默认 30 秒超时');
+    assert.equal(stalledClock.metrics.skipped, false);
+    assert.equal(stalledClock.success, false);
+    assert.ok(stalledClock.issues.some(issue => issue.code === 'LAYOUT_QA_PLAYBACK_CLOCK_UNRESPONSIVE'));
+
+    const seekableClockPath = path.join(timelineDir, 'seekable-clock.html');
+    await fs.writeFile(seekableClockPath, `<!doctype html><html><head><style>
+      html,body{width:1920px;height:1080px;margin:0;overflow:hidden}
+      body[data-seek="target"] p{position:absolute;left:2000px;top:100px}
+    </style></head><body><p data-text-key="body">Seek 到目标时间</p><script>
+      (function(){var time=0;window.__hvPlaybackClock={
+        __hvOwner:'musedock-playback-clock-v1',subscribe:function(){},play:function(){},pause:function(){},
+        timeSec:function(){return time},paused:function(){return true},setTime:function(value){
+          time=Number(value);document.body.dataset.seek=time>=1?'target':'start';
+        }
+      };})();
+      </script></body></html>`, 'utf8');
+    const seekableClock = await inspectFrameHtmlLayout({
+      htmlPath: seekableClockPath,
+      frame: { id: 'scene_seekable_clock', duration_sec: 1 },
+      resolution,
+      sampleTimesSec: [1],
+    });
+    assert.equal(seekableClock.metrics.skipped, false);
+    assert.ok(
+      seekableClock.issues.some(issue => issue.code === 'text_out_of_viewport' && issue.details?.text === 'Seek 到目标时间'),
+      '不能连续推进但可 Seek 的时钟必须回退并采到目标时间',
+    );
   } finally {
     await fs.rm(timelineDir, { recursive: true, force: true });
   }
