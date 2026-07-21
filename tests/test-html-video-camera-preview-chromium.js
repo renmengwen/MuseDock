@@ -105,9 +105,11 @@ function previewHtml(twoCues = false, targetRegion = { x: 0.68, y: 0.08, width: 
     htmlPath: returnPath,
     frame: { id: 'scene_return', duration_sec: 4 },
     resolution,
-    sampleTimesSec: [3.3],
   });
-  assert.equal(returning.metrics.camera_samples[0].shots[0].returning_to_overview, true);
+  const returnSamples = returning.metrics.camera_samples.filter(sample => [3.15, 3.45].includes(sample.sample_time_sec));
+  assert.deepEqual(returnSamples.map(sample => sample.sample_time_sec), [3.15, 3.45], '默认计划必须包含最后 cue 的两个回全景采样点');
+  assert.ok(returnSamples.every(sample => sample.shots[0].returning_to_overview));
+  assert.notEqual(returnSamples[0].shots[0].scale, returnSamples[1].shots[0].scale, '回全景过程必须可观测到连续变化');
   assert.equal(returning.issues.some(issue => issue.code === 'camera_target_out_of_safe_area'), false, '合法回全景阶段不得继续套用聚焦目标安全区');
 
   const issueReport = await inspectFrameHtmlLayout({
@@ -149,6 +151,24 @@ function previewHtml(twoCues = false, targetRegion = { x: 0.68, y: 0.08, width: 
   assert.deepEqual(jitterTimes.slice(0, 4), [0.05, 0.15, 0.25, 0.35], '默认 Camera 路径必须从 cue 过渡窗派生密集采样');
   assert.ok(jitterTimes.includes(1.2) && jitterTimes.includes(1.8), 'Camera 密采样不得替换既有全场景默认采样');
   assert.ok(jitter.issues.some(issue => issue.code === 'camera_jitter'));
+
+  const sixCues = Array.from({ length: 6 }, (_, index) => ({
+    id: `cue_${index + 1}`,
+    start_sec: 1 + index * 2,
+    end_sec: 2 + index * 2,
+    max_zoom: 1.5,
+  }));
+  const manyCuePath = path.join(tempDir, 'six-cues.html');
+  await fs.writeFile(manyCuePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:0 0}</style></head><body><section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="many" data-window-end-sec="14" data-camera-cues='${JSON.stringify(sixCues)}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>window.__mpSetTimelineTime=function(){}</script></body></html>`, 'utf8');
+  const manyCueReport = await inspectFrameHtmlLayout({
+    htmlPath: manyCuePath,
+    frame: { id: 'six_cues', duration_sec: 14 },
+    resolution,
+  });
+  const manyCueTimes = manyCueReport.metrics.camera_samples.map(sample => sample.sample_time_sec);
+  assert.ok(manyCueTimes.includes(11.45), '6 个 cue 时不得截断最后 cue 的稳定采样点');
+  assert.ok(manyCueTimes.includes(13.7), '6 个 cue 时仍须保留 duration-0.3 全场景尾点');
+  assert.ok(manyCueTimes.includes(12.15) && manyCueTimes.includes(12.45), '最后 cue 的默认回全景采样不得被前序 cue 挤掉');
 
   console.log('html-video camera preview chromium tests passed');
 })().catch(error => {

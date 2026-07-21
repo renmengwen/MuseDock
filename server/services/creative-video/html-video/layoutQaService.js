@@ -28,10 +28,10 @@ function defaultSampleTimes(durationSec) {
     1.8,
     duration * 0.65,
     Math.max(0, duration - 0.3),
-  ], duration).slice(0, 5);
+  ], duration);
 }
 
-function normalizeSampleTimes(sampleTimesSec, durationSec, limit = 5) {
+function normalizeSampleTimes(sampleTimesSec, durationSec) {
   const duration = Number(durationSec);
   const hasDuration = Number.isFinite(duration) && duration >= 0;
   const sorted = (Array.isArray(sampleTimesSec) ? sampleTimesSec : [])
@@ -44,7 +44,6 @@ function normalizeSampleTimes(sampleTimesSec, durationSec, limit = 5) {
   for (const time of sorted) {
     if (normalized.some(existing => Math.abs(existing - time) <= 0.05)) continue;
     normalized.push(Number(time.toFixed(3)));
-    if (normalized.length >= limit) break;
   }
   return normalized;
 }
@@ -457,20 +456,24 @@ async function cameraCueSampleTimes(page, durationSec) {
     .flatMap((shot) => {
       let cues = [];
       try { cues = JSON.parse(shot.dataset.cameraCues || '[]'); } catch (_) {}
-      return cues.flatMap((cue) => {
+      const windowEnd = Number(shot.dataset.windowEndSec);
+      return cues.flatMap((cue, index) => {
         const start = Number(cue?.start_sec);
         const end = Number(cue?.end_sec);
         if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 0.4) return [];
         const transitionDuration = Math.min(0.8, Math.max(0.45, (end - start) * 0.4));
         const stable = Math.min(end - 0.05, start + transitionDuration);
+        const returnsToOverview = index === cues.length - 1
+          && Number.isFinite(windowEnd) && windowEnd - end >= 0.6 - 1e-6;
         return [
           ...(start >= 0.1 ? [start - 0.05] : []),
           ...[0.05, 0.15, 0.25, 0.35].map(offset => start + offset),
           ...(stable >= start + 0.45 - 1e-6 && stable < end ? [stable] : []),
+          ...(returnsToOverview ? [end + 0.15, end + 0.45] : []),
         ];
       });
     }));
-  return normalizeSampleTimes(times, durationSec, 28);
+  return normalizeSampleTimes(times, durationSec);
 }
 
 function cameraIssuesForSample(sample, { frameId, sampleTimeSec }) {
@@ -685,9 +688,10 @@ async function inspectFrameHtmlLayout(options = {}) {
     const cueSamples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
       ? []
       : await cameraCueSampleTimes(page, durationSec);
+    // ponytail: Camera QA cost stays O(cues); only add tiered per-cue quotas after measured browser cost, never truncate later cues.
     const samples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
       ? normalizeSampleTimes(sampleTimesSec, durationSec)
-      : normalizeSampleTimes([...defaultSampleTimes(durationSec), ...cueSamples], durationSec, 32);
+      : normalizeSampleTimes([...defaultSampleTimes(durationSec), ...cueSamples], durationSec);
 
     let elapsedSec = 0;
     for (const sampleTimeSec of samples) {
