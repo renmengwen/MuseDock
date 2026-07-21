@@ -1,4 +1,5 @@
 const assert = require('assert/strict');
+const crypto = require('crypto');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
@@ -118,6 +119,139 @@ function fullSceneCaption(sceneId, text, duration) {
     });
     assert.equal(resumed.success, false);
     assert.equal(visionCalls, 1, 'resume 应从 project.assets 水合 canonical region 并跳过 vision');
+  }
+
+  // D-06：focus_analysis durable 缓存必须扛住“完整成功 run”——buildMixedFrameProject 重建
+  // （assets 清空）+ saveProject 覆盖 + projectAssetsFromCreativeContext 投影重建之后，
+  // 记录全靠投影透传存活；第二次 run 对 empty 结果零 vision 调用（真正的跨 run 复用）。
+  {
+    const {
+      FOCUS_ANALYSIS_CONTRACT_VERSION,
+      FOCUS_ANALYSIS_PROMPT_VERSION,
+    } = require('../server/services/creative-video/html-video/focusRegionPhase');
+    const durableSourceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'focus-analysis-durable-source-'));
+    const durableSourcePath = path.join(durableSourceDir, 'hero-empty.png');
+    const durableImageBytes = 'focus-analysis-empty-image-bytes';
+    await fs.writeFile(durableSourcePath, durableImageBytes);
+    const durableNarration = '空焦点结果应缓存，第二次 run 不再调用 vision。';
+    const durableSpec = {
+      title: '焦点分析缓存',
+      aspect_ratio: '16:9',
+      scenes: [{
+        id: 'scene_01',
+        kind: 'text',
+        duration_sec: 4,
+        narration_text: durableNarration,
+        captions: fullSceneCaption('scene_01', durableNarration, 4),
+        visual_text: { headline: '焦点缓存', keywords: [], cards: [] },
+      }],
+    };
+    let visionCalls = 0;
+    const durableModel = {
+      provider: 'mock-ai',
+      modelId: 'vision-mock-1',
+      callTextModel: async request => {
+        if (request.audit?.sub_stage === 'vision') {
+          visionCalls += 1;
+          return { success: true, text: JSON.stringify({ regions: [] }) };
+        }
+        const prompt = request.messages.map(item => (
+          typeof item.content === 'string' ? item.content : JSON.stringify(item.content)
+        )).join('\n');
+        if (prompt.startsWith('你是 html-video 的 content graph')) {
+          return {
+            success: true,
+            text: JSON.stringify({
+              synopsis: '焦点分析缓存',
+              nodes: [{
+                id: 'scene_01', kind: 'text', label: '焦点缓存', durationSec: 4,
+                text: durableNarration,
+                asset_refs: [{ asset_id: 'hero_empty', usage: 'subject' }],
+              }],
+              edges: [],
+            }),
+          };
+        }
+        const frameId = request.audit?.frame_id || 'scene_01';
+        return {
+          success: true,
+          text: `<!doctype html><html><body><main data-frame-id="${frameId}"><h1 data-text-key="headline">焦点缓存</h1><p data-text-key="subtitle">支撑短句</p><section data-text-key="body">要点</section></main></body></html>`,
+        };
+      },
+    };
+    const durableOptions = {
+      workflowId: 'wf-focus-analysis-durable',
+      runId: 'run-focus-analysis-durable',
+      rootDir,
+      sceneSpec: durableSpec,
+      creativeContext: {
+        input: { raw_text: '焦点分析缓存' },
+        asset_context: {
+          assets: [{
+            id: 'hero_empty', media_type: 'image', origin: 'source_extract',
+            requirement: 'preferred', evidence_class: 'direct_source', status: 'ready',
+            path: 'assets/hero-empty.png', local_path: durableSourcePath,
+          }],
+        },
+      },
+      target: { sourceImageAnalysisEnabled: true, generateAudio: false },
+      skipValidation: true,
+      services: {
+        aiTextModel: durableModel,
+        aiImageModel: { isConfigured: async () => false },
+        environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+      },
+    };
+    const originalRenderForDurable = projectOrchestrator.renderHtmlVideoProject;
+    projectOrchestrator.renderHtmlVideoProject = async ({ project, projectDir }) => ({
+      success: true,
+      message: 'mock render success',
+      project,
+      project_dir: projectDir,
+      html_video_project_path: projectDir,
+      output_path: path.join(projectDir, 'exports', 'output.mp4'),
+      diagnostics: [],
+    });
+    try {
+      const expectedRecord = {
+        version: 1,
+        content_sha256: crypto.createHash('sha256').update(durableImageBytes).digest('hex'),
+        contract_version: FOCUS_ANALYSIS_CONTRACT_VERSION,
+        provider: 'mock-ai',
+        model: 'vision-mock-1',
+        prompt_version: FOCUS_ANALYSIS_PROMPT_VERSION,
+        status: 'empty',
+      };
+      const firstDurable = await workflow.generateHtmlVideo(durableOptions);
+      assert.equal(firstDurable.success, true, JSON.stringify({
+        message: firstDurable.message,
+        diagnostics: firstDurable.diagnostics,
+      }, null, 2));
+      assert.equal(visionCalls, 1);
+      const durablePersisted = await projectStore.loadProject(firstDurable.project_dir);
+      const durableAsset = durablePersisted.assets.find(item => item.id === 'hero_empty');
+      assert.deepEqual(durableAsset?.focus_regions, [], 'empty 分析结论应落盘为空 focus_regions');
+      assert.deepEqual(durableAsset?.focus_analysis, expectedRecord,
+        '完整成功 run 后 focus_analysis 必须仍在磁盘 assets 上');
+
+      const secondDurable = await workflow.generateHtmlVideo({
+        ...durableOptions,
+        creativeContext: { input: { raw_text: '焦点分析缓存' } },
+      });
+      assert.equal(secondDurable.success, true, JSON.stringify({
+        message: secondDurable.message,
+        diagnostics: secondDurable.diagnostics,
+      }, null, 2));
+      assert.equal(visionCalls, 1, '第二次 run 必须命中 durable 缓存，零 vision 调用');
+      const secondPersisted = await projectStore.loadProject(secondDurable.project_dir);
+      assert.deepEqual(
+        secondPersisted.assets.find(item => item.id === 'hero_empty')?.focus_analysis,
+        expectedRecord,
+        '第二次 run 后记录必须继续留在磁盘（可持续复用）',
+      );
+    } finally {
+      projectOrchestrator.renderHtmlVideoProject = originalRenderForDurable;
+    }
   }
 
   const originalRenderForNoCaptions = projectOrchestrator.renderHtmlVideoProject;
