@@ -21,7 +21,7 @@
 - 全局并发配置：`C:\Users\MOVER\.codex\config.toml` 当前为 `agents.max_threads = 20`，新任务/重启后读取
 - 实际并发：第 4 个 sub-agent 创建返回 `agent thread limit reached`；当前产品层仍为主 Agent + 3 个 sub-agent
 - 当前主工作区：`dev`；B-07b 最终 reviewed tree 已由提交 `218fbf9` squash 集成
-- 当前顺序：Phase B、Phase C、Phase D 已完成；E-01～E-03 已完成集成，下一任务 E-04 checkpoint 指纹与真实重启恢复
+- 当前顺序：Phase B、Phase C、Phase D 已完成；E-01～E-04 已完成集成，下一任务 E-05 正式视觉 QA 链路
 - 当前由 Codex 继续执行；Agent 任务统一使用产品规格、浏览器渲染、素材处理与数据一致性语言，本总账继续为唯一状态表
 - Phase C：C-01～C-05 全部完成；REQ-B-09/10 已由 canonical Shot Usage Report 收口
 
@@ -83,7 +83,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 | B-07b Phase B 集成门禁验证 | `complete` | B-06a、B-06b、B-07a | `218fbf9` | 冻结 tree 三路 Review PASS；dev 38 组测试、前端构建与真实 GitHub Chromium smoke 通过 |
 | C-01～C-05 Image Sequence、Caption 绑定、Scene 连续时间线、Usage Report | `complete` | B-07b | `df9a519`、`fab5167`、`6d58460`、`c5e08f0`、`31006f3` | C-01～C-05 完成；canonical Shot Usage、required gate 与素材面板一致 |
 | D-01～D-08 Focus/Camera、统一时钟、截图 A/B 与自然图 C 级聚焦 | `complete` | C-05 | `4d58c4f`、`123dd16`、`a30a22f`、`2a5c7d8`、`41400fa`、`7933ff6`、`c3db1d8`、`f601bbc`、`7287e96`、`22e9014` | Phase D 完成；进入 E-01 数据/数学验收与 E-02 Scene Preview QA |
-| E-01～E-05 Camera QA、定向 retry、checkpoint/resume | `in_progress` | D-08 | `0531f27`、`281550c`、`4a493de`、`fd21b85` | E-01～E-03 完成；下一项 E-04 checkpoint 指纹、原子失效与真实重启恢复 |
+| E-01～E-05 Camera QA、定向 retry、checkpoint/resume | `in_progress` | D-08 | `0531f27`、`281550c`、`4a493de`、`fd21b85`、`7d5f0cf`、`53056ad`、`d209bed`、`0a4f000` | E-01～E-04 完成；下一项 E-05 正式 Preview、ffprobe 与完整视觉 QA |
 | F-01 最终真实任务 E2E 与全量回归 | `queued` | E-05 | - | 最终双 Review |
 
 ## 当前写租约
@@ -234,6 +234,52 @@ resolved_findings:
   - 多来源独立 ID 测试证明 diagnostic 顶层、details、issues、diagnostics 与 checkpoint 均进入计划，异 code 不混入
   - 恢复动作前重新读取 project.json，证明目标 Scene 的 frame_html/render 已落盘 pending，非目标状态与 hash 保持不变
   - sample_time_sec 与 shot_id 定位信息保留；普通 HTML failure 行为不变
+```
+
+```yaml
+task_id: E-04
+status: complete
+owner: unassigned
+lease_released: true
+code_base_commit: ef38babe913a9af413e9780775eb1ab5a80a8cae
+worktree: D:\code3\MuseDock-worktrees\asset-first-e04
+branch: codex/asset-first-e04
+candidate_commit: c91f07dc9f566851e3e57a4252338f91d20cdf8b
+frozen_revision: c91f07dc9f566851e3e57a4252338f91d20cdf8b
+frozen_tree: aad962a0bf4c252dc5c21f1cdcc0988fa9acdaf7
+revision_valid: true
+dev_commits:
+  - 7d5f0cf
+  - 53056ad
+  - d209bed
+  - 0a4f000
+decisions:
+  - 复用 runtimeAssetPolicyAttestation，不新增 Render fingerprint 子系统；Prompt 通过最终 HTML 字节进入 Render 身份
+  - Render 身份绑定 HTML、resolution、fps、逐 Frame duration、renderer contract、正式图片元数据与实际字节、MP4 path/hash
+  - 定向恢复在单次 writeProjectJson 中失效目标 Frame 与全部下游状态；不新增 render_outputs 持久字段或自动启动续跑
+verification:
+  - node tests/test-html-video-project-orchestrator.js
+  - node tests/test-creative-workflow-retry-e2e.js
+  - node tests/test-html-video-project-checkpoint-persistence.js
+  - node tests/test-html-video-frame-renderer.js
+  - node tests/test-html-video-scene-continuity.js
+  - node tests/test-creative-workflow-retry-task.js
+  - node tests/test-creative-workflow-retry-planner.js
+  - node tests/test-html-video-frame-layout-blocking.js
+  - node tests/test-html-video-workflow.js
+  - node tests/test-html-video-service-render-modes.js
+  - node tests/test-html-video-frame-render-source.js
+  - git diff --check
+review:
+  spec: pass
+  spec_reviewed_revision: c91f07dc9f566851e3e57a4252338f91d20cdf8b
+  quality: pass
+  quality_reviewed_revision: c91f07dc9f566851e3e57a4252338f91d20cdf8b
+resolved_findings:
+  - 同路径图片字节变化进入正式证明并触发重渲染；attestation 显式比较必要身份字段，不依赖对象键序
+  - 定向补齐最后一个 Frame 后 render 聚合状态为 done，并兼容存量 frame.id checkpoint key
+  - 原子失效后中断并重读 project.json，目标及下游均 pending/清空，非目标 checkpoint/hash 保持不变
+  - 再次恢复只处理目标 Scene，旧 compose、exports 与 visual report 不复用
 ```
 
 ```yaml
@@ -1437,8 +1483,8 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | REQ-E-05 | `verified` | 错误焦点与焦点可信度验收 | E-02 |
 | REQ-E-06 | `verified` | 自动修复后 blocking 问题真正阻断 | E-02、E-03 |
 | REQ-E-07 | `verified` | 定向重试只失效受影响范围 | E-03 |
-| REQ-E-08 | `pending` | Checkpoint 复用包含真实输入、Prompt 和契约版本 | D-06、E-04 |
-| REQ-E-09 | `pending` | 重启后只恢复失败 Scene/Shot | E-04 |
+| REQ-E-08 | `verified` | Checkpoint 复用包含真实输入、Prompt 和契约版本 | D-06、E-04 |
+| REQ-E-09 | `verified` | 重启后只恢复失败 Scene/Shot | E-04 |
 | REQ-E-10 | `pending` | `skipValidation=false` 进入完整视觉 QA | E-05 |
 
 ### F. 最终验收
@@ -1489,5 +1535,6 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 | Phase D Task 4 第一轮双 Review | revision `2a19d48`（ledger `d922532`）规格 PASS、质量 PASS；质量审计实测子串匹配 star→"restart the server" 误命中会产出错误 camera cue，违反"不聚焦错误"第一原则；Coordinator 修订决策（ASCII 词边界）后判退回，旧 revision 失效，补测试纵深后重新冻结复审 |
 | Phase D Task 4 focus_cues 规划完成 | `7933ff6`；冻结 revision `aa177e06905f1fc7b458138ab4c2a3fd1af7a245`、tree `6f3b3f3fc845b045c520ab946e7a4d3858a45618`；shot 级 camera.focus_cues 确定性规划：通用词边界匹配（拉丁词边界+CJK 子串）、trust A/B→camera_zoom、C→highlight_only、D/歧义/不存在→不生成；同 region 相邻合并防重复缩放，短窗降级；无 cue 不写 camera 保护存量指纹；cue 随 visual_beat 进入 Frame 指纹，fail-open 接入；二轮双 Review PASS（ledger `3f509f2`、revision `aa177e0`）；冻结 worktree 与 dev 各 5 组回归通过；REQ-D-02/09 verified |
 | Phase E Task 3 多 Scene 定向恢复 | `4a493de`、`fd21b85`；冻结 revision `8d19ca3ea1ff8d33e8ab5fc2ed19ccbf94a963dd`、tree `e2ad735ad12747cd06f0cd5b7fbd1b186279c723`；同 code 多来源失败 Scene 保序去重，其他失败原因不混入；恢复前目标 frame_html/render 原子落盘 pending，非目标状态与 hash 不变；规格与质量 Review PASS；dev 五组回归与 diff-check 通过；REQ-E-06/07 verified |
+| Phase E Task 4 Render 身份与重启恢复 | `7d5f0cf`、`53056ad`、`d209bed`、`0a4f000`；冻结 revision `c91f07dc9f566851e3e57a4252338f91d20cdf8b`、tree `aad962a0bf4c252dc5c21f1cdcc0988fa9acdaf7`；Render 身份覆盖 HTML、输出参数、时长、renderer contract、正式素材字节与 MP4；原子失效后磁盘重载只恢复目标 Scene，非目标产物复用且旧下游结果不可复用；新旧 checkpoint key 聚合闭合；双 Review PASS；dev 十一组回归与 diff-check 通过；REQ-E-08/09 verified |
 
 后续业务代码提交不修改本 Ledger；Coordinator 在取得最终代码 SHA 后独立追加：Requirement、代码提交、验证命令、冻结 revision 对应的双 Review 结论和剩余风险。完整日志、diff、搜索输出和 Agent 对话不进入 Ledger。
