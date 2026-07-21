@@ -371,9 +371,20 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
         : new DOMMatrixReadOnly();
       const scale = Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b);
       const cues = parseJson(shot.dataset.cameraCues) || [];
-      const cue = cues.find(item => Number(item?.start_sec) <= timeSec && timeSec <= Number(item?.end_sec))
-        || cues.findLast(item => Number(item?.end_sec) < timeSec && timeSec <= Number(item?.end_sec) + 0.6)
-        || null;
+      let cue = null;
+      let cueIndex = -1;
+      for (let index = 0; index < cues.length; index += 1) {
+        if (Number(cues[index]?.start_sec) <= timeSec) {
+          cue = cues[index];
+          cueIndex = index;
+        }
+      }
+      if (cue && cueIndex === cues.length - 1) {
+        const end = Number(cue.end_sec);
+        const windowEnd = Number(shot.dataset.windowEndSec);
+        const returnsToOverview = Number.isFinite(end) && Number.isFinite(windowEnd) && windowEnd - end >= 0.6 - 1e-6;
+        if (returnsToOverview && timeSec > end + 0.6) cue = null;
+      }
       const region = cue?.region;
       let targetBox = null;
       if (ready(foreground) && region && [region.x, region.y, region.width, region.height].every(Number.isFinite)) {
@@ -417,11 +428,33 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
       mode: sequence.dataset.sequenceMode || '',
       viewport,
       safe_bottom: viewport.height - safeBottomPx,
+      clock_time_sec: typeof window.__hvPlaybackClock?.timeSec === 'function'
+        ? window.__hvPlaybackClock.timeSec()
+        : null,
+      clock_paused: typeof window.__hvPlaybackClock?.paused === 'function'
+        ? window.__hvPlaybackClock.paused()
+        : null,
+      adapter_controlled: window.__mpAdapterControlled === true,
       active_shot_count: activeShots.length,
       visible_shot_count: shots.filter(shot => shot.visible).length,
       shots,
     };
   }, { viewport: resolution, timeSec: sampleTimeSec, safeBottomPx: CAMERA_SAFE_BOTTOM_PX });
+}
+
+async function cameraCueSampleTimes(page, durationSec) {
+  const times = await page.evaluate(() => Array.from(document.querySelectorAll('[data-camera-cues]'))
+    .flatMap((shot) => {
+      let cues = [];
+      try { cues = JSON.parse(shot.dataset.cameraCues || '[]'); } catch (_) {}
+      return cues.flatMap((cue) => {
+        const start = Number(cue?.start_sec);
+        const end = Number(cue?.end_sec);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end - start < 0.4) return [];
+        return [0.05, 0.15, 0.25, 0.35].map(offset => start + offset);
+      });
+    }));
+  return normalizeSampleTimes(times, durationSec);
 }
 
 function cameraIssuesForSample(sample, { frameId, sampleTimeSec }) {
@@ -609,6 +642,7 @@ async function inspectFrameHtmlLayout(options = {}) {
     });
 
     await page.addInitScript(() => {
+      window.__mpAdapterControlled = true;
       window.__layoutQaVisibilityState = {
         initial: document.visibilityState,
         changes: [],
@@ -632,17 +666,18 @@ async function inspectFrameHtmlLayout(options = {}) {
       return false;
     }).catch(() => false);
 
-    const samples = normalizeSampleTimes(
-      Array.isArray(sampleTimesSec) && sampleTimesSec.length
-        ? sampleTimesSec
-        : defaultSampleTimes(durationSec),
-      durationSec,
-    );
+    const cueSamples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
+      ? []
+      : await cameraCueSampleTimes(page, durationSec);
+    const samples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
+      ? normalizeSampleTimes(sampleTimesSec, durationSec)
+      : cueSamples.length ? cueSamples : defaultSampleTimes(durationSec);
 
     let elapsedSec = 0;
     for (const sampleTimeSec of samples) {
       const timelineSet = await page.evaluate((time) => {
         if (typeof window.__mpSetTimelineTime !== 'function') return false;
+        if (typeof window.__hvPlaybackClock?.pause === 'function') window.__hvPlaybackClock.pause();
         window.__mpSetTimelineTime(time);
         return true;
       }, sampleTimeSec).catch(() => false);
