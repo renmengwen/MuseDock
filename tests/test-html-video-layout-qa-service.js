@@ -122,6 +122,44 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.equal(stableSecondBeat.metrics.skipped, false);
     assert.equal(stableSecondBeat.success, true, '连续播放到第二 Beat 稳定点时只能看到活动文本');
 
+    const crossfadingBeats = await inspectFrameHtmlLayout({
+      htmlPath: timelinePath,
+      frame: { id: 'scene_crossfading_beats', duration_sec: 1.5 },
+      resolution,
+      sampleTimesSec: [0.6],
+    });
+    const crossfadeOverlap = crossfadingBeats.issues.find(issue => (
+      new Set([issue.details?.first?.beat_scope, issue.details?.second?.beat_scope]).has('beat_1')
+      && new Set([issue.details?.first?.beat_scope, issue.details?.second?.beat_scope]).has('beat_2')
+    ));
+    assert.equal(crossfadingBeats.success, true, 'Beat 边界后 0.1 秒的合法 opacity transition 不应阻断');
+    assert.equal(crossfadeOverlap?.severity, 'warning', '合法 Crossfade 重叠应保留为 warning');
+    assert.ok(
+      [crossfadeOverlap.details.first.effective_opacity, crossfadeOverlap.details.second.effective_opacity]
+        .some(opacity => opacity > 0.001 && opacity < 0.999),
+      'Crossfade warning 必须由祖先链累计后的部分透明度支持',
+    );
+
+    const partialBeatBasePath = path.join(timelineDir, 'partial-beat-base.html');
+    await fs.writeFile(partialBeatBasePath, `<!doctype html><html><head><style>
+      html,body{width:1920px;height:1080px;margin:0}.same{position:absolute;left:100px;top:100px;width:300px}
+      [data-mp-beat-scope]{opacity:.5}
+    </style></head><body>
+      <p class="same">稳定 Base 文本</p>
+      <div class="same" data-mp-beat-scope="beat_partial"><p>部分透明 Beat 文本</p></div>
+    </body></html>`, 'utf8');
+    const partialBeatBase = await inspectFrameHtmlLayout({
+      htmlPath: partialBeatBasePath,
+      frame: { id: 'scene_partial_beat_base', duration_sec: 1 },
+      resolution,
+      sampleTimesSec: [0.1],
+    });
+    const partialBeatBaseOverlap = partialBeatBase.issues.find(issue => (
+      [issue.details?.first?.text, issue.details?.second?.text].includes('稳定 Base 文本')
+      && [issue.details?.first?.text, issue.details?.second?.text].includes('部分透明 Beat 文本')
+    ));
+    assert.equal(partialBeatBaseOverlap?.severity, 'error', '部分透明 Beat 压住 Base 仍必须阻断');
+
     const constantClockPath = path.join(timelineDir, 'constant-clock.html');
     await fs.writeFile(constantClockPath, `<!doctype html><html><body><p data-text-key="body">恒定非零时钟</p><script>
       window.__hvPlaybackClock={
@@ -328,6 +366,11 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     && new Set([issue.details?.first?.beat_scope, issue.details?.second?.beat_scope]).has('leak_b')
   ));
   assert.equal(leakedBeatOverlap?.severity, 'error', '不同 Beat 同时泄漏重叠必须阻断');
+  assert.deepEqual(
+    [leakedBeatOverlap.details.first.effective_opacity, leakedBeatOverlap.details.second.effective_opacity],
+    [1, 1],
+    'animation-fill 泄漏在稳定 opacity=1 时仍必须阻断',
+  );
   const beatBaseOverlap = inactiveBeat.issues.find(issue => (
     [issue.details?.first?.text, issue.details?.second?.text].includes('稳定 Base 文字')
     && [issue.details?.first?.text, issue.details?.second?.text].includes('压住 Base 的 Beat')

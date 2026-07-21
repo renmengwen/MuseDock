@@ -200,15 +200,23 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
       const code = isPrimaryText(a) || isPrimaryText(b)
         ? 'decorative_overlay_text'
         : 'text_overlap';
+      const crossfadingBeats = a.beatScope && b.beatScope && a.beatScope !== b.beatScope
+        && [a, b].some(candidate => candidate.effectiveOpacity > 0.001 && candidate.effectiveOpacity < 0.999);
       issues.push(makeIssue({
         code,
-        severity: 'error',
+        severity: crossfadingBeats ? 'warning' : 'error',
         frameId,
         sampleTimeSec,
         message: '检测到文本元素互相重叠。',
         details: {
-          first: { text: a.text, selector: a.selector, beat_scope: a.beatScope || null, box: a.box },
-          second: { text: b.text, selector: b.selector, beat_scope: b.beatScope || null, box: b.box },
+          first: {
+            text: a.text, selector: a.selector, beat_scope: a.beatScope || null,
+            effective_opacity: a.effectiveOpacity, box: a.box,
+          },
+          second: {
+            text: b.text, selector: b.selector, beat_scope: b.beatScope || null,
+            effective_opacity: b.effectiveOpacity, box: b.box,
+          },
           intersection_area: Math.round(intersection.area),
           smaller_area: Math.round(smallerArea),
         },
@@ -246,18 +254,21 @@ async function collectCandidates(page) {
         .trim();
     }
 
-    function isVisible(element, box) {
-      const elementStyle = window.getComputedStyle(element);
-      if (!elementStyle || ['hidden', 'collapse'].includes(elementStyle.visibility)) return false;
+    function effectiveOpacityFor(element) {
       let effectiveOpacity = 1;
       for (let current = element; current; current = current.parentElement) {
         const style = window.getComputedStyle(current);
-        if (!style || style.display === 'none') return false;
+        if (!style || style.display === 'none') return 0;
         const opacity = Number(style.opacity);
         if (Number.isFinite(opacity)) effectiveOpacity *= opacity;
-        if (effectiveOpacity <= 0.001) return false;
       }
-      return box.width >= 8 && box.height >= 8;
+      return effectiveOpacity;
+    }
+
+    function isVisible(element, box, effectiveOpacity) {
+      const elementStyle = window.getComputedStyle(element);
+      if (!elementStyle || ['hidden', 'collapse'].includes(elementStyle.visibility)) return false;
+      return effectiveOpacity > 0.001 && box.width >= 8 && box.height >= 8;
     }
 
     function serializeBox(rect) {
@@ -302,8 +313,9 @@ async function collectCandidates(page) {
         const direct = directText(element);
         const text = (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim();
         const isExplicitText = element.matches(explicitTextSelector);
+        const effectiveOpacity = effectiveOpacityFor(element);
         if (!text || (!direct && !isExplicitText)) return null;
-        if (!isVisible(element, rect)) return null;
+        if (!isVisible(element, rect, effectiveOpacity)) return null;
         return {
           element,
           hasDirectText: Boolean(direct),
@@ -313,6 +325,7 @@ async function collectCandidates(page) {
             tag: element.tagName.toLowerCase(),
             selector: selectorFor(element),
             beatScope: element.closest('[data-mp-beat-scope]')?.getAttribute('data-mp-beat-scope') || null,
+            effectiveOpacity,
             text,
             box: serializeBox(rect),
             container: containerFor(element),
