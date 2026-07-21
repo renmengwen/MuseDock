@@ -7,6 +7,7 @@ const frameFallbackBuilder = require('./frameFallbackBuilder');
 const { markCheckpointStage, markCheckpointFrame } = require('./projectSchema');
 const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
+const { applyFocusKeywords, focusKeywordsByCaptionId } = require('./captionLayer');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
 const { materializeSceneImageSequenceDom } = require('./sceneImageSequenceDom');
 const {
@@ -689,8 +690,10 @@ async function runFrameHtmlPhase(ctx) {
     }
     statsByBeatId[frameKey || node.id || sceneId] = frameHtmlStatsEntry(htmlResult.html, frameHeight);
     const durationSec = trustedSceneDuration(scene || {}, node);
+    // D-05：收集本 node 全部 focus_cues 的 caption_id → keyword 映射并注记字幕，
+    // 写盘帧的字幕层据此高亮关键词；无 cue 时映射为空，captions 与输出保持原样。
     const captions = mediaOptions.generateCaptions !== false && scene
-      ? normalizeCaptions(scene, durationSec)
+      ? applyFocusKeywords(normalizeCaptions(scene, durationSec), focusKeywordsByCaptionId(node))
       : [];
     let written;
     try {

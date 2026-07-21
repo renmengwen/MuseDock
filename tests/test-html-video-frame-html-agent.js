@@ -1019,6 +1019,143 @@ assert.equal(noHtmlDocument.code, 'html_document_extract_failed');
   assert.equal(duplicateSequenceCalls, 2);
   assert.equal(duplicateSequenceResult.diagnostics[0].code, 'frame_html_shot_contract_invalid');
 
+  // ===== D-05：frame_html 调用点的 cue 字幕线程化 =====
+  // node 携带 focus_cues 时，写盘帧 HTML 的字幕层必须带 hv-caption-kw 且 keyword 正确；
+  // 无 cue 时写盘产物与改动前逐字节一致（字幕层等于 renderCaptionLayer(普通 captions)）。
+  {
+    const { runFrameHtmlPhase } = require('../server/services/creative-video/html-video/frameHtmlPhase');
+    const {
+      applyFocusKeywords,
+      focusKeywordsByCaptionId,
+      renderCaptionLayer,
+    } = require('../server/services/creative-video/html-video/captionLayer');
+    const { normalizeCaptions, trustedSceneDuration } = require('../server/services/creative-video/html-video/rawHtmlFrameBuilder');
+    const crypto = require('crypto');
+
+    const d05Scene = {
+      id: 'scene_01',
+      kind: 'text',
+      duration_sec: 4,
+      narration_text: '先看这里的 Star 按钮，再看整体页面布局。',
+      captions: [
+        { id: 'cap_01', start: 0, end: 2, text: '先看这里的 Star 按钮' },
+        { id: 'cap_02', start: 2, end: 4, text: '再看整体页面布局' },
+      ],
+      visual_text: { headline: '仓库页面', keywords: [], cards: [] },
+    };
+    const d05FocusCue = {
+      id: 'cue_d05_star',
+      caption_ids: ['cap_01'],
+      keyword: 'Star 按钮',
+      region_id: 'region_star_button',
+      effect: 'camera_zoom',
+      zoom: 'auto',
+      return_policy: 'hold_or_next',
+    };
+    const d05Node = withCue => ({
+      id: 'scene_01_b1',
+      beat_id: 'scene_01_b1',
+      scene_id: 'scene_01',
+      kind: 'text',
+      durationSec: 4,
+      metadata: {
+        visual_beat: {
+          id: 'scene_01_b1',
+          scene_id: 'scene_01',
+          duration_sec: 4,
+          visual_base: {
+            type: 'image_sequence',
+            sequence_mode: 'fullscreen_relay',
+            shots: [{
+              id: 'shot_01',
+              asset_id: 'repo_hero',
+              role: 'showcase',
+              requirement: 'preferred',
+              caption_ids: ['cap_01', 'cap_02'],
+              minimum_visible_duration_sec: 1,
+              active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 4 },
+              ...(withCue ? { camera: { initial_view: 'overview', focus_cues: [d05FocusCue] } } : {}),
+            }],
+          },
+        },
+      },
+    });
+    const d05CreativeContext = {
+      asset_context: {
+        assets: [{
+          id: 'repo_hero',
+          media_type: 'image',
+          status: 'ready',
+          path: 'assets/repo-hero.png',
+          frame_src: '../assets/repo-hero.png',
+        }],
+      },
+    };
+    const d05StubHtml = '<!doctype html><html><body><main data-frame-id="scene_01_b1"><h1 data-text-key="headline">仓库页面</h1><p data-text-key="subtitle">支撑短句</p><section data-text-key="body">要点</section></main></body></html>';
+    const objectOrEmpty = value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+    const runPhaseForNode = async node => {
+      const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hv-d05-frame-phase-'));
+      fs.writeFileSync(path.join(projectDir, 'project.json'), '{}');
+      const diagnostics = [];
+      const result = await runFrameHtmlPhase({
+        model: { callTextModel: async () => ({ success: true, text: d05StubHtml }) },
+        projectDir,
+        sceneSpec: { title: 'D-05 线程化', scenes: [d05Scene] },
+        creativeContext: d05CreativeContext,
+        templateRenderTarget: {},
+        mediaOptions: {},
+        frameHtmlConcurrency: 1,
+        resumeAllowed: false,
+        regenerateFrameHtmlRequested: false,
+        runLayoutQa: false,
+        ignoreLayoutQaFrameIds: [],
+        layoutQaService: null,
+        onProgress: null,
+        diagnostics,
+        report: async () => {},
+        objectOrEmpty,
+        sha256: value => crypto.createHash('sha256').update(String(value || '')).digest('hex'),
+        failure: (message, failureDiagnostics, extra) => ({ message, diagnostics: failureDiagnostics, ...objectOrEmpty(extra) }),
+        shouldReuseFrameHtml: () => ({ reuse: false }),
+        invalidateFrameHtmlDependents: () => {},
+        templateRoutingDecisions: new Map(),
+        project: {},
+        contentGraph: { nodes: [node], edges: [] },
+      });
+      const framePath = path.join(projectDir, 'frames', '01-scene_01_b1.html');
+      const writtenHtml = result.ok && fs.existsSync(framePath) ? fs.readFileSync(framePath, 'utf8') : '';
+      return { result, diagnostics, writtenHtml };
+    };
+
+    const cueRun = await runPhaseForNode(d05Node(true));
+    assert.equal(cueRun.result.ok, true, `cue 帧生成必须成功：${JSON.stringify(cueRun.result.failure || {})}`);
+    const cueNode = d05Node(true);
+    const cueDurationSec = trustedSceneDuration(d05Scene, cueNode);
+    const expectedAnnotatedLayer = renderCaptionLayer(applyFocusKeywords(
+      normalizeCaptions(d05Scene, cueDurationSec),
+      focusKeywordsByCaptionId(cueNode),
+    ));
+    assert.match(cueRun.writtenHtml, /hv-caption-kw/, 'node 带 cue 时写盘帧必须包含关键词高亮');
+    assert.ok(
+      cueRun.writtenHtml.includes('先看这里的 <span class="hv-caption-kw">Star 按钮</span>'),
+      '高亮 keyword 必须是 cue 命中的原文切片');
+    assert.ok(
+      cueRun.writtenHtml.includes(expectedAnnotatedLayer),
+      '写盘字幕层必须等于 renderCaptionLayer(注记后的 captions)');
+    assert.doesNotMatch(
+      cueRun.writtenHtml.replace('先看这里的 <span class="hv-caption-kw">Star 按钮</span>', ''),
+      /class="hv-caption-kw"/,
+      '无 cue 的 caption 不得被误加高亮');
+
+    const plainRun = await runPhaseForNode(d05Node(false));
+    assert.equal(plainRun.result.ok, true, `无 cue 帧生成必须成功：${JSON.stringify(plainRun.result.failure || {})}`);
+    const expectedPlainLayer = renderCaptionLayer(normalizeCaptions(d05Scene, cueDurationSec));
+    assert.doesNotMatch(plainRun.writtenHtml, /hv-caption-kw/, '无 cue 时不得出现高亮标记');
+    assert.ok(
+      plainRun.writtenHtml.includes(expectedPlainLayer),
+      '无 cue 时写盘字幕层必须与改动前（普通 renderCaptionLayer 输出）逐字节一致');
+  }
+
   console.log('html-video frame html agent tests passed');
 })().catch(error => {
   console.error(error);
