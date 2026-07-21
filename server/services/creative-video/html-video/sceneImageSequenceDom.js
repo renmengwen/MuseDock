@@ -10,6 +10,7 @@ const END_MARKER = '<!-- hv-image-sequence:end -->';
 // 摄影机聚焦（REQ-D-05 / summary §13.4）：C 级仅接受 soft 低倍率宽松聚焦。
 const CAMERA_MAX_ZOOM_BY_TRUST = { A: 3, B: 2.4, C: 1.5 };
 const CAMERA_SOFT_REGION_EXPANSION = 1.5;
+const CAMERA_SOFT_MIN_ZOOM = 1.15;
 // fillFactor 必须小于 1：region 周围保留上下文，不把目标撑满画面（summary §13.4）。
 const CAMERA_FILL_FACTOR = 0.72;
 
@@ -182,6 +183,7 @@ function normalizeCameraCues(shot, asset, captionWindows) {
       region: geometry.region,
       focus_point: geometry.focus_point,
       max_zoom: maxZoom,
+      ...(trustLevel === 'C' ? { min_zoom: CAMERA_SOFT_MIN_ZOOM } : {}),
     });
   }
   return normalized;
@@ -399,7 +401,8 @@ ${cameraMathSource()}
         fill_factor: FILL_FACTOR,
         max_zoom: cue.max_zoom
       });
-      if (!result || !result.applied || !result.image_rect) continue;
+      if (!result || !result.applied || !result.image_rect
+        || (Number.isFinite(cue.min_zoom) && result.zoom < cue.min_zoom)) continue;
       var baseScale = Math.min(width / imageWidth, height / imageHeight);
       var baseLeft = (width - imageWidth * baseScale) / 2;
       var baseTop = (height - imageHeight * baseScale) / 2;

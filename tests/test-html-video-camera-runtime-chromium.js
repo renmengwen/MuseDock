@@ -28,6 +28,13 @@ const asset = {
       focus_point: { x: 0.69, y: 0.13 },
     },
     {
+      id: 'target_c_wide',
+      label: '目标',
+      trust_level: 'C',
+      region: { x: 0.2, y: 0.1, width: 0.6, height: 0.3 },
+      focus_point: { x: 0.21, y: 0.11 },
+    },
+    {
       id: 'target_d',
       label: '目标',
       trust_level: 'D',
@@ -124,12 +131,21 @@ async function transformAt(page, timeSec) {
     const soft = await transformAt(page, 2);
     assert.notEqual(soft, '', 'C 级 soft cue 必须应用宽松聚焦 transform');
     const softScale = Number(soft.match(/scale\(([^)]+)\)/)?.[1]);
-    assert.ok(softScale > 1 && softScale <= 1.5, `C 级 scale 必须在 (1, 1.5]，实际 ${softScale}`);
+    assert.ok(softScale >= 1.15 && softScale <= 1.5, `C 级 scale 必须在 [1.15, 1.5]，实际 ${softScale}`);
     const softCaption = await page.evaluate(() => ({
       active: document.querySelector('[data-caption-id="cap_1"]')?.dataset.hvActive === 'true',
       keyword: document.querySelector('[data-caption-id="cap_1"] .hv-caption-kw')?.textContent || '',
     }));
     assert.deepEqual(softCaption, { active: true, keyword: '目标' }, 'C 级聚焦必须与字幕关键词同步');
+
+    await page.setContent(html(true, { regionId: 'target_c_wide', zoom: 'soft' }));
+    await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
+    assert.equal(await transformAt(page, 2), '', '不足 1.15 倍的宽 C 区域必须保持全景，不得只做平移');
+    assert.equal(
+      await page.locator('[data-caption-id="cap_1"]').getAttribute('data-hv-active'),
+      'true',
+      'C 级摄影机 no-op 时字幕关键词仍应按同一 cue 激活',
+    );
 
     const dHtml = html(true, { regionId: 'target_d', zoom: 'soft' });
     await page.setContent(dHtml);

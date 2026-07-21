@@ -278,7 +278,7 @@ function focusCue(id, regionId, captionIds, effect = 'camera_zoom') {
   assert.equal(result.success, true, `含 cue 场景物化失败：${result.message || ''}`);
   const expectedCues = [
     { id: 'cue_a', start_sec: 0.5, end_sec: 2, region: { x: 0.55, y: 0.1, width: 0.3, height: 0.25 }, focus_point: { x: 0.7, y: 0.225 }, max_zoom: 3 },
-    { id: 'cue_c_soft', start_sec: 0.5, end_sec: 2, region: { x: 0.55, y: 0.55, width: 0.44999999999999996, height: 0.44999999999999996 }, focus_point: { x: 0.8, y: 0.8 }, max_zoom: 1.5 },
+    { id: 'cue_c_soft', start_sec: 0.5, end_sec: 2, region: { x: 0.55, y: 0.55, width: 0.44999999999999996, height: 0.44999999999999996 }, focus_point: { x: 0.8, y: 0.8 }, max_zoom: 1.5, min_zoom: 1.15 },
     { id: 'cue_center', start_sec: 2, end_sec: 3.5, region: { x: 0.3, y: 0.3, width: 0.2, height: 0.2 }, focus_point: { x: 0.4, y: 0.4 }, max_zoom: 3 },
     { id: 'cue_b', start_sec: 0.5, end_sec: 3.5, region: { x: 0.1, y: 0.55, width: 0.25, height: 0.3 }, focus_point: { x: 0.225, y: 0.7 }, max_zoom: 2.4 },
   ];
@@ -290,6 +290,9 @@ function focusCue(id, regionId, captionIds, effect = 'camera_zoom') {
     assert.ok(!result.html.includes(`&quot;id&quot;:&quot;${excluded}&quot;`), `highlight_only/C 非 soft/D/解析失败的 cue 不得进入摄影机数据：${excluded}`);
   }
   const soft = result.contract.shots[0].camera_cues.find(cue => cue.id === 'cue_c_soft');
+  const automatic = result.contract.shots[0].camera_cues.find(cue => cue.id === 'cue_a');
+  assert.equal(soft.min_zoom, 1.15, 'C soft cue 必须携带最小有效推近倍率');
+  assert.equal('min_zoom' in automatic, false, 'A/B 自动聚焦不得新增最小倍率字段');
   assert.ok(soft.region.width >= focusRegions[3].region.width * 1.5 - 1e-12);
   assert.ok(soft.region.height >= focusRegions[3].region.height * 1.5 - 1e-12);
   assert.deepEqual(soft.focus_point, { x: 0.8, y: 0.8 }, 'C 级必须忽略偏心模型点并使用原 region 中心');
