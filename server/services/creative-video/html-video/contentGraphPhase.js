@@ -173,6 +173,9 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
     const sceneNumbers = new Set();
     let occurrences = 0;
     let ambiguous = false;
+    const fileNameBoundaryPattern = /[^\x00-\x7F]/.test(fileName)
+      ? /[\p{L}\p{N}\p{M}._-]/u
+      : /[A-Za-z0-9._-]/;
     for (const input of inputs) {
       const fileNameIntervals = uploadFileCandidates.flatMap(candidate => {
         const candidateName = String(candidate?.file_name || '').trim();
@@ -183,8 +186,8 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
         return intervals;
       });
       for (let index = input.indexOf(fileName); index >= 0; index = input.indexOf(fileName, index + fileName.length)) {
-        if (/[A-Za-z0-9._-]/.test(input[index - 1] || '')
-          || /[A-Za-z0-9._-]/.test(input[index + fileName.length] || '')) continue;
+        if (fileNameBoundaryPattern.test(input[index - 1] || '')
+          || fileNameBoundaryPattern.test(input[index + fileName.length] || '')) continue;
         const containedByLongerFileName = uploadFileCandidates.some(other => {
           const longer = String(other?.file_name || '').trim();
           if (longer.length <= fileName.length) return false;

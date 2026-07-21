@@ -154,6 +154,27 @@ async function main() {
     );
   }
 
+  for (const [rawText, shouldBind] of [
+    ['S01 使用大图.png。', false],
+    ['S01 使用 图.png。', true],
+    ['S01 使用“图.png”。', true],
+  ]) {
+    const unicodeTokenBoundary = await workflow.generateContentGraphWithRetry({
+      sceneSpec: sceneSpec(),
+      creativeContext: {
+        input: { raw_text: rawText },
+        asset_context: { assets: [{ id: 'upload_unicode_only', file_name: '图.png', requirement: 'required' }] },
+      },
+      model: { async callTextModel() { return { success: true, text: graphTextFor(sceneSpec()) }; } },
+    });
+    assert.equal(unicodeTokenBoundary.success, true);
+    assert.equal(
+      unicodeTokenBoundary.contentGraph.nodes[0].asset_refs?.[0]?.asset_id || '',
+      shouldBind ? 'upload_unicode_only' : '',
+      '中文 file_name 只有在前后没有紧邻 Unicode 文件名字符时才是独立精确命中',
+    );
+  }
+
   const preferredAssets = Array.from({ length: 4 }, (_, index) => ({ id: `preferred_${index + 1}` }));
   const requiredPriority = await workflow.generateContentGraphWithRetry({
     sceneSpec: sceneSpec(),
