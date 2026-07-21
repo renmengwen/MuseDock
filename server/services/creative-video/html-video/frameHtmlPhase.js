@@ -106,17 +106,18 @@ async function inspectGeneratedFrameLayout({
   layoutQaService,
   projectDir,
   sceneId,
+  index,
   node,
   scene,
   html,
   target,
 }) {
   const safeSceneId = String(sceneId || node.id || 'frame').replace(/[^A-Za-z0-9_.-]+/g, '_') || 'frame';
-  const relativePath = `frames/.qa-${safeSceneId}.html`;
+  const relativePath = `frames/.qa-${index}-${safeSceneId}.html`;
   const absolutePath = projectStore.resolveProjectPath(projectDir, relativePath);
   await fsp.mkdir(path.dirname(absolutePath), { recursive: true });
-  await fsp.writeFile(absolutePath, String(html || ''), 'utf8');
   try {
+    await fsp.writeFile(absolutePath, String(html || ''), 'utf8');
     try {
       return await layoutQaService.inspectFrameHtmlLayout({
         htmlPath: absolutePath,
@@ -361,6 +362,7 @@ async function runFrameHtmlPhase(ctx) {
         layoutQaService,
         projectDir,
         sceneId,
+        index,
         node,
         scene,
         target: templateRenderTarget,

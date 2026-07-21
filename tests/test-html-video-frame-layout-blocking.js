@@ -145,6 +145,64 @@ const validHtml = '<!doctype html><html><head><meta name="viewport" content="wid
   assert.equal(modelCalls, 1, '被忽略的失败帧只需生成一次，不进入布局自动修复');
   assert.equal(qaCalls, 0, '只跳过明确指定帧的布局 QA');
 
+  const concurrentProjectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-layout-concurrent-'));
+  const concurrentGraph = {
+    nodes: [
+      { id: 'scene_first', scene_id: 'scene_first', kind: 'text', durationSec: 2 },
+      { id: 'a:b', scene_id: 'a:b', kind: 'text', durationSec: 2 },
+      { id: 'a/b', scene_id: 'a/b', kind: 'text', durationSec: 2 },
+    ],
+    edges: [],
+  };
+  const concurrentProject = createEmptyProject({
+    projectId: 'layout-concurrent',
+    workflowId: 'wf-layout-concurrent',
+    runId: 'run-layout-concurrent',
+    contentGraph: concurrentGraph,
+  });
+  concurrentProject.visual_plan = { beats: [], style_profile: null };
+  await projectStore.saveProject(concurrentProjectDir, concurrentProject);
+  const qaPathsByFrame = new Map();
+  const concurrentResult = await runFrameHtmlPhase({
+    model: { async callTextModel() { return { success: true, text: validHtml }; } },
+    projectDir: concurrentProjectDir,
+    project: concurrentProject,
+    contentGraph: concurrentGraph,
+    sceneSpec: {
+      scenes: concurrentGraph.nodes.map(node => ({
+        id: node.scene_id,
+        duration_sec: 2,
+        narration_text: '旁白',
+        visual_text: { headline: '标题' },
+      })),
+    },
+    creativeContext: {},
+    templateRenderTarget: { resolution: { width: 1920, height: 1080 } },
+    mediaOptions: { generateCaptions: false },
+    frameHtmlConcurrency: 2,
+    resumeAllowed: false,
+    regenerateFrameHtmlRequested: false,
+    runLayoutQa: true,
+    layoutQaService: {
+      async inspectFrameHtmlLayout({ htmlPath, frame }) {
+        qaPathsByFrame.set(frame.id, htmlPath);
+        return { success: true, issues: [] };
+      },
+    },
+    onProgress: null,
+    diagnostics: [],
+    report: async () => {},
+    objectOrEmpty: value => (value && typeof value === 'object' && !Array.isArray(value) ? value : {}),
+    sha256: value => crypto.createHash('sha256').update(String(value || '')).digest('hex'),
+    failure: (message, diagnostics, extra = {}) => ({ success: false, message, diagnostics, ...extra }),
+    shouldReuseFrameHtml: () => ({ reuse: false }),
+    invalidateFrameHtmlDependents: () => {},
+    templateRoutingDecisions: new Map(),
+  });
+  assert.equal(concurrentResult.ok, true);
+  assert.notEqual(qaPathsByFrame.get('a:b'), qaPathsByFrame.get('a/b'), '并发碰撞 ID 的 QA 文件路径必须不同');
+  for (const htmlPath of qaPathsByFrame.values()) await assert.rejects(fs.access(htmlPath), { code: 'ENOENT' });
+
   console.log('html-video unresolved layout blocking integration tests passed');
 })().catch(error => {
   console.error(error);
