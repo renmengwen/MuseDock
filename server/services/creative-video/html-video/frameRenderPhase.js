@@ -22,18 +22,29 @@ async function runtimeAssetPolicyAttestation(projectDir, project = {}, frame = {
   const htmlPath = path.resolve(projectDir, String(frame.html_path || frame.htmlPath || ''));
   const htmlHash = await fileHash(htmlPath);
   const outputConfig = getOutputConfig(project);
-  const registry = (Array.isArray(project.assets) ? project.assets : [])
+  const registry = await Promise.all((Array.isArray(project.assets) ? project.assets : [])
     .filter(asset => {
       const type = String(asset?.media_type || asset?.type || '').toLowerCase();
       return type === 'image' || type.startsWith('image/');
     })
-    .map(asset => ({
-      id: String(asset.id || ''),
-      media_type: String(asset.media_type || asset.type || ''),
-      status: String(asset.status || ''),
-      path: String(asset.path || ''),
-      frame_src: String(asset.frame_src || ''),
-    }))
+    .map(async asset => {
+      const assetPath = String(asset.path || '');
+      let bytesSha256 = '';
+      try {
+        bytesSha256 = await fileHash(projectStore.resolveProjectPath(projectDir, assetPath));
+      } catch {
+        bytesSha256 = '';
+      }
+      return {
+        id: String(asset.id || ''),
+        media_type: String(asset.media_type || asset.type || ''),
+        status: String(asset.status || ''),
+        path: assetPath,
+        frame_src: String(asset.frame_src || ''),
+        bytes_sha256: bytesSha256,
+      };
+    }));
+  registry
     .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
   const registryHash = hashValue(JSON.stringify(registry));
   const checkpointKey = String(checkpoint.checkpoint_key || renderCheckpointKey(frame));
@@ -75,7 +86,16 @@ async function runtimeAssetPolicyAttestation(projectDir, project = {}, frame = {
 }
 
 function renderAttestationMatches(actual, expected) {
-  return Boolean(actual && expected && JSON.stringify(actual) === JSON.stringify(expected));
+  return Boolean(actual && expected && [
+    'version',
+    'renderer_runtime_contract_version',
+    'fingerprint',
+    'frame_id',
+    'checkpoint_key',
+    'mp4_path',
+    'output_hash',
+    'mp4_hash',
+  ].every(key => actual[key] === expected[key]));
 }
 
 function runtimePolicyViolations(result = {}) {
@@ -426,8 +446,14 @@ async function renderHtmlVideoFrames({
         diagnostic_code: '',
         runtime_asset_policy_attestation: attestation,
       });
+      const checkpointFrames = objectOrEmpty(current.generation_checkpoint?.stages?.render?.frames);
+      const frameStatuses = (Array.isArray(current.frames) ? current.frames : [])
+        .map(item => checkpointFrames[renderCheckpointKey(item)]?.status);
+      const doneCount = frameStatuses.filter(status => status === 'done').length;
       markCheckpointStage(current, 'render', {
-        status: requested.size && frames.length !== allFrames.length ? 'partial' : 'done',
+        status: frameStatuses.length && doneCount === frameStatuses.length
+          ? 'done'
+          : (doneCount ? 'partial' : 'pending'),
       });
       if (current.asset_usage_report?.runtime_policy_violations) {
         current.asset_usage_report = updateRuntimePolicyViolations(current.asset_usage_report, frameId, []);

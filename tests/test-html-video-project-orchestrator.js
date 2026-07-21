@@ -327,7 +327,7 @@ const { runtimeAssetPolicyAttestation } = require('../server/services/creative-v
     const result = await projectOrchestrator.renderHtmlVideoFrames({
       project,
       projectDir,
-      frameIds: ['scene_02'],
+      frameIds: ['scene_01'],
       services: {
         materializer: {
           materializeProject: async ({ project }) => ({ project, diagnostics: [] }),
@@ -335,11 +335,11 @@ const { runtimeAssetPolicyAttestation } = require('../server/services/creative-v
         frameRenderer: {
           renderFrame: async frame => {
             renderCalls += 1;
-            assert.equal(frame.id, 'scene_02');
+            assert.equal(frame.id, 'scene_01');
             return {
               success: true,
-              output_path: path.join(projectDir, 'frames', 'scene_02.mp4'),
-              output_hash: 'scene_02-hash',
+              output_path: path.join(projectDir, 'frames', 'scene_01.mp4'),
+              output_hash: 'scene_01-hash',
               meta: { encoding: 'h264' },
               diagnostics: [],
             };
@@ -358,10 +358,25 @@ const { runtimeAssetPolicyAttestation } = require('../server/services/creative-v
     assert.equal(renderCalls, 1);
     assert.equal(composeCalls, 0);
     assert.equal(result.rendered_frames.length, 1);
-    assert.equal(result.rendered_frames[0].frame_id, 'scene_02');
-    assert.equal(result.project.generation_checkpoint.stages.render.frames.scene_02.status, 'done');
-    assert.equal(result.project.generation_checkpoint.stages.render.frames.scene_02.diagnostic_code, '');
-    assert.equal(Object.hasOwn(result.project.generation_checkpoint.stages.render.frames, 'scene_01'), false);
+    assert.equal(result.rendered_frames[0].frame_id, 'scene_01');
+    assert.equal(result.project.generation_checkpoint.stages.render.frames.scene_01.status, 'done');
+    assert.equal(result.project.generation_checkpoint.stages.render.frames.scene_01.diagnostic_code, '');
+    assert.equal(result.project.generation_checkpoint.stages.render.status, 'partial');
+    assert.equal(Object.hasOwn(result.project.generation_checkpoint.stages.render.frames, 'scene_02'), false);
+
+    const completed = await projectOrchestrator.renderHtmlVideoFrames({
+      project: result.project,
+      projectDir,
+      frameIds: ['scene_02'],
+      services: { frameRenderer: { renderFrame: async frame => {
+        renderCalls += 1;
+        assert.equal(frame.id, 'scene_02');
+        return { success: true, output_path: path.join(projectDir, 'frames', 'scene_02.mp4'), diagnostics: [] };
+      } } },
+    });
+    assert.equal(completed.success, true);
+    assert.equal(renderCalls, 2);
+    assert.equal(completed.project.generation_checkpoint.stages.render.status, 'done', '定向补齐最后一帧后聚合状态必须完成');
   }
 
   {
@@ -375,9 +390,15 @@ const { runtimeAssetPolicyAttestation } = require('../server/services/creative-v
       ],
       timeline: { tracks: [{ id: 'main', type: 'video', items: [{ frame_id: 'frame_01', scene_id: 'scene_01', duration_sec: 2 }] }] },
       audio: { status: 'skipped', reason: 'disabled_by_settings' },
+      assets: [{
+        id: 'formal-image', media_type: 'image/png', status: 'ready',
+        path: 'assets/formal.png', frame_src: '../assets/formal.png',
+      }],
     };
     await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, 'assets'), { recursive: true });
     await fs.writeFile(path.join(projectDir, 'frames', 'scene_01.html'), '<html><head></head><body>frame</body></html>');
+    await fs.writeFile(path.join(projectDir, 'assets', 'formal.png'), 'formal-image-v1');
 
     const rendered = await projectOrchestrator.renderHtmlVideoFrames({
       project,
@@ -445,6 +466,11 @@ const { runtimeAssetPolicyAttestation } = require('../server/services/creative-v
       rendered.project,
       () => fs.writeFile(path.join(projectDir, 'frames', 'frame_01.mp4'), 'tampered-before-render'),
     ), 1, 'MP4 内容 hash 变化时不得复用');
+    assert.equal(await renderWithCheckpoint(
+      rendered.project,
+      () => fs.writeFile(path.join(projectDir, 'assets', 'formal.png'), 'formal-image-v2'),
+    ), 1, '正式图片同路径字节变化时不得复用');
+    await fs.writeFile(path.join(projectDir, 'assets', 'formal.png'), 'formal-image-v1');
 
     const composed = await projectOrchestrator.composeHtmlVideoProject({
       projectDir,
