@@ -15,6 +15,18 @@ const workflows = require('../server/services/creative/creativeWorkflows');
   assert.deepEqual(clean.warnings, []);
   assert.deepEqual(clean.issues, []);
 
+  // 真实质检可能以 issues 表达非阻断问题而不产生 warnings；不能投影成纯通过。
+  const nonBlockingIssues = [{ code: 'repeated_frames', message: '静态画面重复。', details: { count: 3 } }];
+  const withIssues = buildFreeformVisualInspectProjection({
+    success: false,
+    issues: nonBlockingIssues,
+    warnings: [],
+  });
+  assert.equal(withIssues.status, 'passed_with_warnings');
+  assert.equal(withIssues.message, '视觉质检发现 1 项问题，成片仍可使用。');
+  assert.deepEqual(withIssues.issues, nonBlockingIssues);
+  assert.deepEqual(withIssues.warnings, []);
+
   // 带 warnings：status 用 passed_with_warnings，message 不是纯"视觉质检通过。"，warnings 投影含 code/message/定位字段
   const report = {
     success: true,

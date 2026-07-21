@@ -1,4 +1,4 @@
-const assert = require('assert');
+const assert = require('assert/strict');
 const { execFile } = require('child_process');
 const fs = require('fs/promises');
 const os = require('os');
@@ -6,187 +6,242 @@ const path = require('path');
 const { promisify } = require('util');
 
 const execFileAsync = promisify(execFile);
-const SKIP_PIXEL = process.env.PIXEL_CHECK !== '1';
 
 if (process.env.RUN_HTML_VIDEO_REAL_RENDER !== '1') {
   console.log('跳过 html-video 真实渲染烟测：未设置 RUN_HTML_VIDEO_REAL_RENDER=1。');
   process.exit(0);
 }
 
+const htmlVideoWorkflow = require('../server/services/creative-video/html-video/htmlVideoWorkflow');
+const environmentDoctor = require('../server/services/creative-video/html-video/environmentDoctor');
+const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
 const { createEmptyProject } = require('../server/services/creative-video/html-video/projectSchema');
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
-const { materializeProject } = require('../server/services/creative-video/html-video/materializer');
-const { renderFrame } = require('../server/services/creative-video/html-video/frameRenderer');
 
-const RESOLUTION = { width: 1920, height: 1080 };
-const FPS = 24;
-
-function optionalPngReader() {
-  try {
-    return require('pngjs').PNG;
-  } catch {
-    return null;
-  }
-}
-
-async function resolveFfmpegPath() {
-  try {
-    return require('@ffmpeg-installer/ffmpeg').path;
-  } catch {
-    return process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
-  }
-}
+const RESOLUTION = { width: 640, height: 360 };
+const FPS = 12;
+const DURATION_SEC = 3;
 
 function rawFrameHtml(headline) {
   return [
     '<!doctype html>',
     '<html>',
     '<head><meta charset="utf-8"><style>',
-    'html,body{margin:0;width:100%;height:100%;background:#101820;color:#fff;font-family:"Microsoft YaHei",Arial,sans-serif;}',
-    'main{position:absolute;inset:0;display:grid;place-items:center;font-size:64px;font-weight:700;}',
+    'html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#17315c;color:#fff;font-family:"Microsoft YaHei",Arial,sans-serif;}',
+    'main{position:absolute;inset:0;background:linear-gradient(135deg,#17315c,#2d6ca2);}',
+    'main::before{content:"";position:absolute;width:42%;aspect-ratio:1;border-radius:50%;left:6%;top:12%;background:linear-gradient(135deg,#4de1ff,#9a6cff);animation:drift 3s ease-in-out infinite alternate;}',
+    'h1{position:absolute;left:52%;right:6%;top:22%;margin:0;font-size:42px;line-height:1.15;text-shadow:0 3px 16px #07152e;}',
+    '@keyframes drift{from{transform:translateX(0) scale(.88)}to{transform:translateX(24px) scale(1.08)}}',
     '</style></head>',
-    `<body><main data-text-key="headline">${headline}</main></body>`,
+    `<body><main><h1 data-text-key="headline">${headline}</h1></main></body>`,
     '</html>',
   ].join('');
 }
 
-async function assertCaptionPixelsIfEnabled({ outputPath, projectDir }) {
-  if (SKIP_PIXEL) {
-    console.log('跳过字幕像素检查：未设置 PIXEL_CHECK=1。');
-    return;
-  }
+function parseRate(value) {
+  const [numerator, denominator = '1'] = String(value || '').split('/').map(Number);
+  return denominator ? numerator / denominator : 0;
+}
 
-  const PNG = optionalPngReader();
-  if (!PNG || !PNG.sync || typeof PNG.sync.read !== 'function') {
-    console.log('跳过字幕像素检查：未安装稳定 PNG 解析库。');
-    return;
-  }
+async function probeVideo(outputPath) {
+  const ffprobePath = await environmentDoctor.resolveFfprobePath();
+  const { stdout } = await execFileAsync(ffprobePath, [
+    '-v', 'error',
+    '-select_streams', 'v:0',
+    '-show_entries', 'stream=codec_type,width,height,avg_frame_rate,r_frame_rate',
+    '-of', 'json',
+    outputPath,
+  ], { maxBuffer: 8 * 1024 * 1024, windowsHide: true });
+  const stream = JSON.parse(stdout).streams?.[0];
+  assert.ok(stream, `ffprobe 未返回视频流：${outputPath}`);
+  const fps = parseRate(stream.avg_frame_rate) || parseRate(stream.r_frame_rate);
+  return { ...stream, fps };
+}
 
-  const ffmpegPath = await resolveFfmpegPath();
-  const framePath = path.join(projectDir, 'exports', 'caption-pixel-check.png');
-  try {
-    await execFileAsync(ffmpegPath, ['-y', '-ss', '1', '-i', outputPath, '-frames:v', '1', framePath], {
-      maxBuffer: 1024 * 1024 * 8,
-    });
-  } catch (error) {
-    console.log(`跳过字幕像素检查：ffmpeg 抽帧失败：${error.stderr || error.message}`);
-    return;
-  }
+async function assertRealVideo(outputPath) {
+  const stat = await fs.stat(outputPath);
+  assert.ok(stat.size > 0, `真实 MP4 应非空：${outputPath}`);
+  const stream = await probeVideo(outputPath);
+  assert.equal(stream.codec_type, 'video');
+  assert.equal(stream.width, RESOLUTION.width);
+  assert.equal(stream.height, RESOLUTION.height);
+  assert.ok(Math.abs(stream.fps - FPS) < 0.01, `目标帧率 ${FPS}，实际 ${stream.fps}`);
+  return { ...stream, size: stat.size };
+}
 
-  const png = PNG.sync.read(await fs.readFile(framePath));
-  const background = { r: 16, g: 24, b: 32 };
-  const yStart = Math.floor(png.height * 0.72);
-  const yEnd = Math.floor(png.height * 0.9);
-  let sampled = 0;
-  let changed = 0;
-  for (let y = yStart; y < yEnd; y += 4) {
-    for (let x = Math.floor(png.width * 0.08); x < Math.floor(png.width * 0.92); x += 4) {
-      const offset = (png.width * y + x) * 4;
-      const distance = Math.abs(png.data[offset] - background.r)
-        + Math.abs(png.data[offset + 1] - background.g)
-        + Math.abs(png.data[offset + 2] - background.b);
-      sampled += 1;
-      if (distance > 24) changed += 1;
-    }
-  }
+async function runFormalPreview(rootDir) {
+  const workflowId = 'workflow_real_preview';
+  const runId = 'run_real_preview';
+  const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
+  const htmlPath = 'frames/raw-layout-preview.html';
+  await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
+  await fs.writeFile(path.join(projectDir, htmlPath), rawFrameHtml('正式预览'), 'utf8');
 
-  assert.ok(sampled > 0, '字幕像素检查应至少采样到一个像素');
-  assert.ok(changed / sampled > 0.02, '底部字幕区域应存在非背景像素');
+  const project = createEmptyProject({ projectId: 'project_real_preview', workflowId, runId });
+  project.output = { resolution: RESOLUTION, fps: FPS, duration: DURATION_SEC };
+  project.continuity_mode = 'scene_html';
+  project.frames = [{
+    id: 'scene:scene_preview',
+    scene_id: 'scene_preview',
+    graph_node_id: 'scene_preview',
+    source_mode: 'raw_html',
+    html_path: htmlPath,
+    duration_sec: DURATION_SEC,
+    narration_text: '正式预览会生成真实视频。',
+    captions: [{ id: 'caption_preview', start: 0, end: 2.8, text: '正式预览会生成真实视频。' }],
+    inputs: {},
+  }];
+  project.timeline = {
+    tracks: [{
+      id: 'main',
+      type: 'video',
+      items: [{ id: 'preview_item', kind: 'frame', frame_id: 'scene:scene_preview', start_sec: 0, duration_sec: DURATION_SEC }],
+    }],
+  };
+
+  const result = await projectOrchestrator.renderHtmlVideoFramePreview({
+    rootDir,
+    workflowId,
+    runId,
+    project,
+    frameId: 'scene:scene_preview',
+    runLayoutQa: true,
+  });
+  assert.equal(result.success, true, JSON.stringify(result.diagnostics, null, 2));
+  assert.match(result.preview_path, /[\\/]inspect[\\/]previews[\\/].+\.mp4$/);
+  assert.equal(result.layout_qa?.success, true, JSON.stringify(result.layout_qa, null, 2));
+  assert.equal(result.layout_qa?.metrics?.skipped, false, '布局 QA 必须由真实 Chrome 执行');
+  const stream = await assertRealVideo(result.preview_path);
+  return { outputPath: result.preview_path, stream, layoutQa: result.layout_qa };
+}
+
+async function runFormalWorkflow(rootDir) {
+  const workflowId = 'workflow_real_full';
+  const runId = 'run_real_full';
+  const narration = '正式工作流会完成渲染、合成和视觉质检。';
+  const sceneSpec = {
+    title: '真实完整工作流',
+    aspect_ratio: '16:9',
+    target_duration_sec: DURATION_SEC,
+    scenes: [{
+      id: 'scene_01',
+      kind: 'text',
+      duration_sec: DURATION_SEC,
+      narration_text: narration,
+      captions: [{ id: 'caption_01', start: 0, end: 2.8, text: narration }],
+      visual_text: { headline: '真实完整工作流', keywords: [], cards: [] },
+    }],
+  };
+  const progress = [];
+  let modelCalls = 0;
+  const result = await htmlVideoWorkflow.generateHtmlVideo({
+    workflowId,
+    runId,
+    rootDir,
+    sceneSpec,
+    creativeContext: {
+      input: { raw_text: narration },
+      continuity_mode: 'scene_html',
+      asset_context: { assets: [] },
+    },
+    target: {
+      aspect_ratio: '16:9',
+      width: RESOLUTION.width,
+      height: RESOLUTION.height,
+      fps: FPS,
+      duration_sec: DURATION_SEC,
+      generateAudio: false,
+      generateCaptions: true,
+      autoSfxEnabled: false,
+    },
+    skipValidation: false,
+    runLayoutQa: true,
+    services: {
+      aiImageModel: { isConfigured: async () => false },
+      aiTextModel: {
+        callTextModel: async request => {
+          modelCalls += 1;
+          const prompt = request.messages.map(message => (
+            typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
+          )).join('\n');
+          if (prompt.startsWith('你是 html-video 的 content graph')) {
+            return {
+              success: true,
+              text: JSON.stringify({
+                synopsis: '真实完整工作流',
+                nodes: [{
+                  id: 'scene_01',
+                  kind: 'text',
+                  label: '真实完整工作流',
+                  durationSec: DURATION_SEC,
+                  text: narration,
+                  asset_refs: [],
+                }],
+                edges: [],
+              }),
+            };
+          }
+          return { success: true, text: rawFrameHtml('真实完整工作流') };
+        },
+      },
+    },
+    onProgress: event => { progress.push(event); },
+  });
+
+  assert.equal(result.success, true, JSON.stringify({
+    message: result.message,
+    diagnostics: result.diagnostics,
+    visual_report: result.visual_report,
+  }, null, 2));
+  assert.ok(modelCalls >= 2, '正式工作流应生成 content graph 与 Frame HTML');
+  const layoutDone = progress.find(event => event.type === 'html_video_layout_qa_done');
+  assert.ok(layoutDone, '正式工作流必须执行渲染前布局 QA');
+  assert.equal(layoutDone.data?.layout_qa?.metrics?.skipped, false, '正式工作流布局 QA 不得跳过真实 Chrome');
+
+  const stream = await assertRealVideo(result.output_path);
+  const projectPath = path.join(result.project_dir, 'project.json');
+  const persistedProject = JSON.parse(await fs.readFile(projectPath, 'utf8'));
+  const checkpoint = persistedProject.generation_checkpoint.stages;
+  assert.equal(checkpoint.compose.status, 'done');
+  assert.equal(checkpoint.duration_verify.status, 'done');
+  assert.notEqual(checkpoint.duration_verify.status, 'skipped');
+
+  const reportPath = path.join(result.project_dir, 'inspect', 'visual-report.json');
+  const report = JSON.parse(await fs.readFile(reportPath, 'utf8'));
+  assert.equal(report.safety_only, false);
+  assert.ok(report.contact_sheet_path, '完整视觉 QA 应生成 contact sheet');
+  assert.ok(Number(report.metrics?.frame_count) > 0, '完整视觉 QA 应包含真实抽帧指标');
+  assert.ok((report.warnings || []).some(item => String(item.code).startsWith('asset_first_')),
+    '完整视觉 QA 应包含可识别的 asset-first 观测结果');
+  assert.equal(checkpoint.visual_inspect.report_path, 'inspect/visual-report.json');
+  assert.equal(checkpoint.visual_inspect.status, report.success ? 'done' : 'warning');
+  assert.equal(result.visual_report.success, report.success);
+  assert.deepEqual(result.visual_report.issues || [], report.issues || []);
+
+  return {
+    outputPath: result.output_path,
+    stream,
+    report: {
+      success: report.success,
+      issueCodes: (report.issues || []).map(item => item.code),
+      warningCodes: (report.warnings || []).map(item => item.code),
+      checkpointStatus: checkpoint.visual_inspect.status,
+      contactSheetPath: report.contact_sheet_path,
+      frameCount: report.metrics.frame_count,
+    },
+  };
 }
 
 (async () => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-real-render-'));
-  const workflowId = 'workflow_real_render';
-  const runId = 'run_001';
-  const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
-
-  const project = createEmptyProject({
-    projectId: 'project_real_render',
-    workflowId,
-    runId,
-  });
-  const rawFrameHtmlPath = 'frames/raw-caption-smoke.html';
-  await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
-  await fs.writeFile(path.join(projectDir, rawFrameHtmlPath), rawFrameHtml('RAW HTML'), 'utf8');
-  project.frames = [{
-    id: 'raw_caption_smoke',
-    scene_id: 'raw_caption_smoke',
-    order: 1,
-    source_mode: 'raw_html',
-    html_path: rawFrameHtmlPath,
-    duration_sec: 4,
-    narration_text: '旁白文本应自动生成底部字幕层。',
-    captions: [{ id: 'cap_01', start: 0, end: 3.8, text: '旁白文本应自动生成底部字幕层。' }],
-    inputs: {},
-    metadata: { visual_text: { headline: 'RAW HTML' } },
-  }];
-  projectStore.addRevision(project, {
-    summary: '首次生成',
-    author: 'smoke',
-    change: { type: 'initial_generate' },
-  });
-
-  let materialized = await materializeProject({ projectDir, project });
-  await projectStore.saveProject(projectDir, materialized.project);
-  const rawFrame = materialized.project.frames.find(frame => frame.id === 'raw_caption_smoke');
-  assert.ok(rawFrame, '应包含 raw_html 字幕烟测帧');
-  const rawHtml = await fs.readFile(path.join(projectDir, rawFrame.html_path), 'utf8');
-  assert.match(rawHtml, /data-hv-layer="captions"|data-role="subtitle-caption"/);
-
-  const firstOutput = path.join(projectDir, 'exports', 'real-render-first.mp4');
-  const firstRender = await renderFrame(rawFrame, {
-    projectDir,
-    outputPath: firstOutput,
-    resolution: RESOLUTION,
-    fps: FPS,
-    duration: 4,
-  });
-  assert.equal(firstRender.success, true, firstRender.message || '首次渲染失败');
-  const firstStat = await fs.stat(firstOutput);
-  assert.ok(firstStat.size > 0, '首次 MP4 应非空');
-  assert.equal(firstRender.meta.actualResolution.width, RESOLUTION.width);
-  assert.equal(firstRender.meta.actualResolution.height, RESOLUTION.height);
-  assert.ok(firstRender.meta.durationSec >= 4);
-  await assertCaptionPixelsIfEnabled({ outputPath: firstOutput, projectDir });
-
-  // 编辑 raw HTML 后重物化并重渲，验证编辑重渲与导出记账
-  const edited = materialized.project;
-  await fs.writeFile(path.join(projectDir, rawFrameHtmlPath), rawFrameHtml('重渲成功'), 'utf8');
-  edited.frames[0].html_path = rawFrameHtmlPath;
-  projectStore.addRevision(edited, {
-    summary: '编辑标题并重渲',
-    author: 'smoke',
-    change: { type: 'raw_html_edit', patch: { headline: '重渲成功' } },
-  });
-  materialized = await materializeProject({ projectDir, project: edited });
-  await projectStore.saveProject(projectDir, materialized.project);
-  const rerenderOutput = path.join(projectDir, 'exports', 'real-render-rerender.mp4');
-  const rerender = await renderFrame(materialized.project.frames[0], {
-    projectDir,
-    outputPath: rerenderOutput,
-    resolution: RESOLUTION,
-    fps: FPS,
-    duration: 4,
-  });
-  assert.equal(rerender.success, true, rerender.message || '编辑重渲失败');
-  const rerenderStat = await fs.stat(rerenderOutput);
-  assert.ok(rerenderStat.size > 0, '重渲 MP4 应非空');
-  projectStore.addExport(materialized.project, {
-    path: 'exports/real-render-first.mp4',
-    reason: '首次真实渲染',
-    source_revision_id: materialized.project.revisions[0].id,
-  });
-  projectStore.addExport(materialized.project, {
-    path: 'exports/real-render-rerender.mp4',
-    reason: '编辑后重渲',
-    source_revision_id: materialized.project.revisions[1].id,
-  });
-  await projectStore.saveProject(projectDir, materialized.project);
-
-  const loaded = await projectStore.loadProject(projectDir);
-  assert.equal(loaded.exports.length, 2);
-  assert.equal(loaded.revisions.length, 2);
-  assert.notEqual(loaded.exports[0].path, loaded.exports[1].path);
-
-  console.log(`html-video 真实渲染烟测通过：${rerenderOutput}`);
-})();
+  const preview = await runFormalPreview(rootDir);
+  const workflow = await runFormalWorkflow(rootDir);
+  console.log(JSON.stringify({
+    message: 'html-video 正式预览与完整工作流真实烟测通过。',
+    preview,
+    workflow,
+  }, null, 2));
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

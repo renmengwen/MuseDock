@@ -1660,13 +1660,17 @@ module.exports = {
 // isHyperframesFreeformSectionSuccessful 已同步把 passed_with_warnings 视为成功。
 function buildFreeformVisualInspectProjection(visualReport) {
   const warnings = summarizeVisualQaWarnings(visualReport?.warnings);
+  const issues = Array.isArray(visualReport?.issues) ? visualReport.issues : [];
+  const hasReportedIssues = visualReport?.success === false && issues.length > 0;
   return {
-    status: warnings.length ? 'passed_with_warnings' : 'passed',
+    status: warnings.length || hasReportedIssues ? 'passed_with_warnings' : 'passed',
     report: visualReport,
-    issues: Array.isArray(visualReport?.issues) ? visualReport.issues : [],
+    issues,
     warnings,
-    message: warnings.length
-      ? `视觉质检通过（${warnings.length} 条观察告警）。`
-      : '视觉质检通过。',
+    message: hasReportedIssues
+      ? `视觉质检发现 ${issues.length} 项问题，成片仍可使用。`
+      : warnings.length
+        ? `视觉质检通过（${warnings.length} 条观察告警）。`
+        : '视觉质检通过。',
   };
 }
