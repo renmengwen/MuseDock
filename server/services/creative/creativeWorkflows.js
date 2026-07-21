@@ -354,6 +354,7 @@ function resolveServices(options = {}) {
   };
   resolved.resumeActions = {
     retryFrameHtml: context => defaultRetryFrameHtmlAction({ ...context, services: resolved }),
+    retryContentGraph: context => defaultRetryContentGraphAction({ ...context, services: resolved }),
     ...plainObject(services.resumeActions),
   };
   return resolved;
@@ -423,6 +424,66 @@ async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, medi
     projectOptions: {
       reuseContentGraph: true,
       regenerateFrameHtml,
+    },
+    services: {
+      ...services,
+      aiTextModel: createAuditedWorkflowTextModel(workflow, services.aiTextModel || aiTextModel),
+    },
+    onProgress: taskContext?.emit,
+  });
+}
+
+async function defaultRetryContentGraphAction({ workflow, project, projectDir, mediaRoot, services, taskContext } = {}) {
+  const workflowId = safeString(workflow?.workflow_id || workflow?.id || project?.workflow_id);
+  const runId = safeString(project?.run_id || project?.runId);
+  if (!workflowId || !runId) {
+    return {
+      success: false,
+      message: '缺少 workflowId 或 runId，无法重新生成内容图。',
+      diagnostics: [createDiagnostic({
+        code: 'retry_content_graph_context_invalid',
+        sub_stage: 'content_graph',
+        user_message: '缺少 workflowId 或 runId，无法重新生成内容图。',
+        retryable: false,
+      })],
+    };
+  }
+  await htmlVideoProjectStore.writeProjectJson(projectDir, current => {
+    current.content_graph = { nodes: [], edges: [] };
+    current.generation_checkpoint = plainObject(current.generation_checkpoint);
+    current.generation_checkpoint.stages = plainObject(current.generation_checkpoint.stages);
+    current.generation_checkpoint.stages.content_graph = {
+      status: 'pending', path: '', input_hash: '', output_hash: '', diagnostic_code: '', reused: false,
+    };
+    return current;
+  });
+  const sceneSpec = extractSceneSpecFromWorkflow(workflow) || project?.scene_spec || null;
+  const rootDir = inferMediaRootFromProjectDir(projectDir, workflowId) || safeString(mediaRoot) || DEFAULT_MEDIA_ROOT;
+  const target = {
+    ...plainObject(project?.generation_checkpoint?.target),
+    ...plainObject(project?.target),
+    ...plainObject(workflow?.target),
+  };
+  const workflowService = services.htmlVideoWorkflow || htmlVideoWorkflow;
+  return workflowService.generateHtmlVideo({
+    workflowId,
+    runId,
+    rootDir,
+    sceneSpec,
+    creativeContext: {
+      ...plainObject(workflow?.result?.hyperframes_freeform),
+      ...plainObject(workflow?.creative_context),
+      ...resolveRetryContinuityMode(workflow, project),
+      scene_spec: sceneSpec,
+      frame_specs: extractFrameSpecsFromWorkflow(workflow),
+    },
+    target,
+    runLayoutQa: true,
+    reuseContentGraph: false,
+    regenerateFrameHtml: true,
+    projectOptions: {
+      reuseContentGraph: false,
+      regenerateFrameHtml: true,
     },
     services: {
       ...services,
@@ -2425,4 +2486,5 @@ module.exports = {
   buildWorkflowTarget,
   resolveRetryContinuityMode,
   defaultRetryFrameHtmlAction,
+  defaultRetryContentGraphAction,
 };

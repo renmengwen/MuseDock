@@ -413,6 +413,13 @@ async function retryContentGraph(context, actionName) {
     taskContext: context.taskContext,
   });
   if (!actionResult.success) return actionResult;
+  if (hasCompletedRenderOutput(actionResult)) {
+    return {
+      ...actionResult,
+      project_dir: actionResult.project_dir || context.projectDir,
+      html_video_project_path: actionResult.html_video_project_path || context.projectDir,
+    };
+  }
   return renderComposeInspect({
     workflowId: context.workflowId,
     rootDir: context.rootDir,

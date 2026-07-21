@@ -293,6 +293,9 @@ function project(overrides = {}) {
         { id: 'scene_02_b1', scene_id: 'scene_02', duration_sec: 4 },
         { id: 'scene_02_b2', scene_id: 'scene_02', duration_sec: 4 },
       ],
+      asset_usage_report: {
+        assets: [{ asset_id: 'gen_scene_02', expected_in_frames: ['scene_02'] }],
+      },
     }),
   });
   assert.equal(missingAssetPlan.can_retry, true);
@@ -304,6 +307,38 @@ function project(overrides = {}) {
   assert.ok(missingAssetPlan.discard.includes('frames:scene_02_b1'));
   assert.ok(missingAssetPlan.discard.includes('frames:scene_02_b2'));
   assert.ok(missingAssetPlan.reuse.includes('content_graph'));
+
+  for (const [name, missingIds, assets] of [
+    ['expected 为空', ['upload_missing'], [{ asset_id: 'upload_missing', expected_in_frames: [] }]],
+    ['生成图与 upload 混合且 upload 不可映射', ['gen_scene_02', 'upload_missing'], [
+      { asset_id: 'gen_scene_02', expected_in_frames: ['scene_02'] },
+      { asset_id: 'upload_missing', expected_in_frames: [] },
+    ]],
+  ]) {
+    const graphPlan = createCreativeWorkflowRetryPlan({
+      workflow: workflow({
+        last_failure: {
+          code: 'required_visual_asset_missing',
+          sub_stage: 'asset_usage',
+          diagnostics: [createDiagnostic({
+            code: 'required_visual_asset_missing',
+            sub_stage: 'asset_usage',
+            severity: 'error',
+            details: { missing_required_asset_ids: missingIds },
+          })],
+        },
+      }),
+      project: project({
+        frames: [{ id: 'scene_02_b1', scene_id: 'scene_02', duration_sec: 4 }],
+        asset_usage_report: { assets },
+      }),
+    });
+    assert.equal(graphPlan.repair_action, 'retry_content_graph', name);
+    assert.equal(graphPlan.retry_from, 'content_graph');
+    assert.deepEqual(graphPlan.reuse, ['source', 'research', 'brief', 'audio']);
+    assert.deepEqual(graphPlan.discard, ['content_graph', 'frame_html', 'render_outputs', 'exports', 'visual_inspect']);
+    assert.deepEqual(graphPlan.executor_options, {});
+  }
 
   const unregisteredAssetPlan = createCreativeWorkflowRetryPlan({
     workflow: workflow({

@@ -354,23 +354,31 @@ function frameAtTime(frames, time, { preferNextAtBoundary = false } = {}) {
     || null;
 }
 
-/**
- * 从 required_visual_asset_missing 诊断的 missing_required_asset_ids（gen_<sceneId>）
- * 反解出场景 id，映射到该场景全部帧，用于按帧重试。
- */
 function missingAssetFrameIds(project = {}, classification = {}) {
   const diagnostics = [
     classification.diagnostic,
     ...arrayOrEmpty(classification.diagnostics),
   ].filter(item => item && typeof item === 'object');
-  const sceneIds = new Set(diagnostics
+  const missingAssetIds = uniqueStrings(diagnostics
     .flatMap(item => arrayOrEmpty(objectOrEmpty(item.details).missing_required_asset_ids))
-    .map(id => safeString(id).replace(/^gen_/, ''))
-    .filter(Boolean));
-  if (!sceneIds.size) return [];
-  return uniqueStrings(arrayOrEmpty(project.frames)
-    .filter(frame => sceneIds.has(safeString(frame?.scene_id)))
-    .map(frame => safeString(frame?.id)));
+    .map(safeString));
+  if (!missingAssetIds.length) return null;
+  const assets = arrayOrEmpty(project?.asset_usage_report?.assets);
+  const frames = arrayOrEmpty(project.frames);
+  const frameIds = [];
+  for (const assetId of missingAssetIds) {
+    const asset = assets.find(item => safeString(item?.asset_id) === assetId);
+    const expected = uniqueStrings(arrayOrEmpty(asset?.expected_in_frames));
+    if (!expected.length) return null;
+    for (const expectedId of expected) {
+      const matched = frames.filter(frame => (
+        safeString(frame?.id) === expectedId || safeString(frame?.scene_id) === expectedId
+      ));
+      if (!matched.length) return null;
+      frameIds.push(...matched.map(frame => safeString(frame?.id)));
+    }
+  }
+  return uniqueStrings(frameIds);
 }
 
 function unregisteredAssetFrameIds(classification = {}) {
@@ -621,18 +629,21 @@ function createCreativeWorkflowRetryPlan(input = {}) {
 
   if (code === 'required_visual_asset_missing') {
     const frameIds = missingAssetFrameIds(project, classification);
+    if (!frameIds) {
+      return retryPlan(classification, 'retry_content_graph', 'content_graph', {
+        reuse: ['source', 'research', 'brief', 'audio'],
+        discard: ['content_graph', 'frame_html', 'render_outputs', 'exports', 'visual_inspect'],
+        user_message: '必用视觉素材缺少可映射的目标镜头，将重新生成内容图、镜头 HTML 并重新导出。',
+      });
+    }
     return retryPlan(classification, 'retry_frame_html', 'frame_html', {
       reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
-      discard: frameIds.length
-        ? [...frameIds.map(frameId => `frames:${frameId}`), 'render_outputs', 'exports', 'visual_inspect']
-        : ['frame_html', 'render_outputs', 'exports', 'visual_inspect'],
+      discard: [...frameIds.map(frameId => `frames:${frameId}`), 'render_outputs', 'exports', 'visual_inspect'],
       executor_options: {
         regenerate_frame_html: true,
-        ...(frameIds.length ? { frame_ids: frameIds } : {}),
+        frame_ids: frameIds,
       },
-      user_message: frameIds.length
-        ? `必用视觉素材未进入画面，将重新生成 ${frameIds.length} 个相关镜头并重新渲染、合成。`
-        : '必用视觉素材未进入画面，将重新生成镜头 HTML 并重新渲染、合成。',
+      user_message: `必用视觉素材未进入画面，将重新生成 ${frameIds.length} 个相关镜头并重新渲染、合成。`,
     });
   }
 

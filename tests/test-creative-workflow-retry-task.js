@@ -152,6 +152,52 @@ async function createFailedWorkflowFixture(rootDir) {
   return { projectDir, previousFailure: record.last_failure };
 }
 
+async function createMissingRequiredAssetFailureFixture(rootDir) {
+  const fixture = await createFailedWorkflowFixture(rootDir);
+  const project = await projectStore.loadProject(fixture.projectDir);
+  project.asset_usage_report = {
+    assets: [{ asset_id: 'upload_required_scene', expected_in_frames: [] }],
+    missing_required_asset_ids: ['upload_required_scene'],
+  };
+  markCheckpointStage(project, 'content_graph', {
+    status: 'done',
+    path: 'content-graph.json',
+    input_hash: 'old-input',
+    output_hash: 'old-output',
+  });
+  await fs.writeFile(path.join(fixture.projectDir, 'content-graph.json'), JSON.stringify(project.content_graph), 'utf8');
+  await projectStore.saveProject(fixture.projectDir, project);
+
+  const workflowPath = workflows.getWorkflowPath(WORKFLOW_ID, rootDir);
+  const record = await readJson(workflowPath);
+  record.creative_context = {
+    input: { raw_text: 'Scene 1 使用 required.png', source_hint: '保留完整提示' },
+    source_context: { summary: '完整来源上下文' },
+    research_context: { summary: '完整研究上下文' },
+    asset_context: { assets: [{ id: 'upload_required_scene', file_name: 'required.png', requirement: 'required' }] },
+    brief: { summary: '完整策划上下文' },
+    audio: { narration_text: '完整旁白上下文' },
+    custom_nested: { keep: true },
+  };
+  record.last_failure = {
+    stage: 'project',
+    sub_stage: 'asset_usage',
+    code: 'required_visual_asset_missing',
+    project_dir: fixture.projectDir,
+    message: '必用视觉素材未进入画面。',
+    diagnostics: [createDiagnostic({
+      code: 'required_visual_asset_missing',
+      sub_stage: 'asset_usage',
+      severity: 'error',
+      retryable: true,
+      repair_action: 'retry_frame_html',
+      details: { missing_required_asset_ids: ['upload_required_scene'] },
+    })],
+  };
+  await writeJson(workflowPath, record);
+  return fixture;
+}
+
 async function createLayoutQaFailureFixture(rootDir) {
   const fixture = await createFailedWorkflowFixture(rootDir);
   const diagnostic = createDiagnostic({
@@ -978,6 +1024,60 @@ function fakeHtmlVideoServices(calls = {}) {
     assert.equal(inspect.warnings[0].code, 'asset_first_style_drift');
     assert.equal(inspect.warnings[0].details.scene_id, 'scene_01');
     assert.match(inspect.message, /1 条观察告警/);
+  }
+
+  // required 素材无 expected frame 时必须走默认 retryContentGraph：失效旧 Graph、
+  // 透传完整 creative_context，并复用 generateHtmlVideo 的完整成片输出，禁止二次 render/compose。
+  {
+    const rootDir = await tempRoot();
+    const { projectDir } = await createMissingRequiredAssetFailureFixture(rootDir);
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
+    assert.equal(plan.plan.repair_action, 'retry_content_graph');
+    let captured = null;
+    let generateCalls = 0;
+    const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: plan.plan.code,
+    }, {
+      rootDir,
+      retryAttemptId: 'retry_attempt_required_graph',
+      services: {
+        now: () => '2026-06-25T05:30:00.000Z',
+        htmlVideoWorkflow: {
+          generateHtmlVideo: async args => {
+            generateCalls += 1;
+            captured = args;
+            const invalidated = await projectStore.loadProject(projectDir);
+            assert.equal(invalidated.generation_checkpoint.stages.content_graph.status, 'pending');
+            assert.equal(invalidated.generation_checkpoint.stages.content_graph.path, '');
+            assert.deepEqual(invalidated.content_graph.nodes, []);
+            return {
+              success: true,
+              project: invalidated,
+              project_dir: projectDir,
+              html_video_project_path: projectDir,
+              output_path: path.join(projectDir, 'exports', 'output.mp4'),
+              visual_report: { success: true, issues: [], metrics: {}, report_path: 'inspect/visual-report.json' },
+            };
+          },
+        },
+        materializer: { materializeProject: async () => { throw new Error('完整输出后不应再次 materialize'); } },
+        frameRenderer: { renderFrame: async () => { throw new Error('完整输出后不应再次 render'); } },
+        ffmpegComposer: { concatFramesWithFfmpeg: async () => { throw new Error('完整输出后不应再次 compose'); } },
+      },
+    });
+    assert.equal(result.success, true);
+    assert.equal(generateCalls, 1, '默认 retryContentGraph action 必须已注册且只调用一次');
+    assert.equal(captured.reuseContentGraph, false);
+    assert.equal(captured.projectOptions.reuseContentGraph, false);
+    assert.equal(captured.regenerateFrameHtml, true);
+    assert.equal(captured.projectOptions.regenerateFrameHtml, true);
+    assert.equal(captured.creativeContext.input.source_hint, '保留完整提示');
+    assert.equal(captured.creativeContext.source_context.summary, '完整来源上下文');
+    assert.equal(captured.creativeContext.research_context.summary, '完整研究上下文');
+    assert.equal(captured.creativeContext.brief.summary, '完整策划上下文');
+    assert.equal(captured.creativeContext.audio.narration_text, '完整旁白上下文');
+    assert.deepEqual(captured.creativeContext.custom_nested, { keep: true });
   }
 
   // 既有 P1：resume 的 rerun_visual_inspect 巡检出阻断白屏时必须返回失败，
