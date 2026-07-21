@@ -108,8 +108,21 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     { id: 'scene_13', duration_sec: 1 },
     { sampleTimesSec: [0.1] },
   );
-  assert.equal(inactiveBeat.success, true, '父级 opacity=0 的非活动 Beat 文本不应进入布局候选');
+  assert.equal(inactiveBeat.success, false, '浏览器最终可见的越界文本仍应被布局 QA 阻断');
   assert.ok(inactiveBeat.metrics.candidate_count > 0, '活动 Beat 文本仍应进入布局候选');
+  assert.equal(
+    inactiveBeat.issues.some(issue => issue.details?.text === '无 Scope 的透明祖先文本'),
+    false,
+    '无 Scope 的 opacity=0 祖先应让 opacity=1 后代退出候选',
+  );
+  assert.ok(
+    inactiveBeat.issues.some(issue => issue.code === 'text_out_of_viewport' && issue.details?.text === '后代显式恢复可见'),
+    '祖先 visibility:hidden 时，显式 visibility:visible 的后代仍应进入候选',
+  );
+  assert.ok(
+    inactiveBeat.issues.some(issue => issue.code === 'text_out_of_viewport' && issue.details?.text === '动画覆盖隐藏态'),
+    '动画使非活动 Beat Scope 实际可见时仍应进入候选',
+  );
 
   const activatedBeat = await inspectFixture(
     'inactive-beat-scope.html',

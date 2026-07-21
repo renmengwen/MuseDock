@@ -247,13 +247,12 @@ async function collectCandidates(page) {
     }
 
     function isVisible(element, box) {
+      const elementStyle = window.getComputedStyle(element);
+      if (!elementStyle || ['hidden', 'collapse'].includes(elementStyle.visibility)) return false;
       let effectiveOpacity = 1;
       for (let current = element; current; current = current.parentElement) {
-        const beatScope = current.getAttribute('data-mp-beat-scope');
-        const activeBeat = document.body?.dataset?.mpBeat;
-        if (beatScope && activeBeat && beatScope !== activeBeat) return false;
         const style = window.getComputedStyle(current);
-        if (!style || style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)) return false;
+        if (!style || style.display === 'none') return false;
         const opacity = Number(style.opacity);
         if (Number.isFinite(opacity)) effectiveOpacity *= opacity;
         if (effectiveOpacity <= 0.001) return false;

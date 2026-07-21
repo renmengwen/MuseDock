@@ -10,12 +10,18 @@
     .second { left: 2000px; }
     @keyframes reveal { to { opacity: 1; } }
     .leaky { left: 2000px; animation: reveal .01s both; }
+    .opacity-zero { position: absolute; left: 2000px; top: 300px; opacity: 0; }
+    .opacity-zero p { opacity: 1; }
+    .visibility-hidden { position: absolute; left: 2000px; top: 400px; visibility: hidden; }
+    .visibility-hidden p { visibility: visible; }
   </style>
 </head>
 <body data-mp-beat="first">
   <div class="beat first" data-mp-beat-scope="first"><p data-text-key="subtitle">第一拍可见文本</p></div>
   <div class="beat second" data-mp-beat-scope="second"><p data-text-key="subtitle">第二拍越界文本</p></div>
   <div class="beat leaky" data-mp-beat-scope="third"><p data-text-key="subtitle">动画覆盖隐藏态</p></div>
+  <div class="opacity-zero"><p data-text-key="body">无 Scope 的透明祖先文本</p></div>
+  <div class="visibility-hidden"><p data-text-key="body">后代显式恢复可见</p></div>
   <script>
     window.__mpSetTimelineTime = time => document.body.dataset.mpBeat = time < 0.5 ? 'first' : 'second';
   </script>
