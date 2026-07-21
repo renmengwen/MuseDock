@@ -142,12 +142,16 @@ review:
 
 ```yaml
 task_id: D-07
-status: leased
-owner: claude-worker
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: dfd88dde244f7d62c6529be16936f432ccbf27d7
 worktree: D:\code3\MuseDock-worktrees\asset-first-d07
 branch: codex/asset-first-d07
+candidate_commit: 777fb5a345015cb117f517f5e5eb2d372f453b79
+frozen_revision: 777fb5a345015cb117f517f5e5eb2d372f453b79
+frozen_tree: a8f4ca8df054e816332a5679a4bddc485621d862
+revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/sceneImageSequenceDom.js
   - tests/test-html-video-scene-image-sequence-dom.js
