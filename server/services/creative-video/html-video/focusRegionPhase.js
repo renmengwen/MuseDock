@@ -271,8 +271,8 @@ async function runFocusRegionPhase({
         const nextAsset = { ...asset, focus_regions: [] };
         if (Object.hasOwn(nextAsset, 'focus_analysis')) {
           delete nextAsset.focus_analysis;
-          durableRecords.set(id, null);
         }
+        durableRecords.set(id, null);
         updates.set(asset, nextAsset);
         continue;
       }
@@ -331,9 +331,9 @@ async function runFocusRegionPhase({
         status: analysisStatus,
       };
       durableRecords.set(id, nextAsset.focus_analysis);
-    } else if (Object.hasOwn(nextAsset, 'focus_analysis')) {
+    } else {
       // 失效记录触发重析但本次失败时必须清除旧结论，否则下一 run 会把空 regions 与旧 empty 假命中。
-      delete nextAsset.focus_analysis;
+      if (Object.hasOwn(nextAsset, 'focus_analysis')) delete nextAsset.focus_analysis;
       durableRecords.set(id, null);
     }
     updates.set(asset, nextAsset);

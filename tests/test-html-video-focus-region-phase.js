@@ -634,6 +634,66 @@ async function testInconsistentEmptyRecordRetriesAfterFailure() {
   await fs.rm(projectDir, { recursive: true, force: true });
 }
 
+async function testProjectOnlyStaleRecordsAreClearedOnFailure() {
+  const readBytes = Buffer.from('project-only-read-retry-bytes');
+  const readProjectDir = await createDurableProject('focus-region-project-only-read-', [{
+    id: 'read_retry',
+    bytes: readBytes,
+    overrides: { focus_analysis: focusAnalysisRecord(Buffer.from('stale-read-bytes')) },
+  }]);
+  await fs.rm(path.join(readProjectDir, 'assets', 'read_retry.png'));
+  const readModel = visionModel(() => regionsResponse('读取恢复主体'));
+  const readFailure = await runFocusRegionPhase({
+    visualPlan: selectedPlan('read_retry'),
+    creativeContext: { asset_context: { assets: [asset('read_retry')] } },
+    projectDir: readProjectDir,
+    target: { sourceImageAnalysisEnabled: true },
+    services: { aiTextModel: readModel },
+  });
+  assert.equal(Object.hasOwn(readFailure.creativeContext.asset_context.assets[0], 'focus_analysis'), false);
+  assert.equal(Object.hasOwn((await projectStore.loadProject(readProjectDir)).assets[0], 'focus_analysis'), false);
+  await fs.writeFile(path.join(readProjectDir, 'assets', 'read_retry.png'), readBytes);
+  const readRetry = await runFocusRegionPhase({
+    visualPlan: selectedPlan('read_retry'),
+    creativeContext: await hydrateLikeWorkflow(readProjectDir),
+    projectDir: readProjectDir,
+    target: { sourceImageAnalysisEnabled: true },
+    services: { aiTextModel: readModel },
+  });
+  assert.equal(readModel.calls.length, 1, '图片恢复后必须重新分析');
+  assert.equal(readRetry.creativeContext.asset_context.assets[0].focus_regions[0].label, '读取恢复主体');
+  await fs.rm(readProjectDir, { recursive: true, force: true });
+
+  const modelBytes = Buffer.from('project-only-model-retry-bytes');
+  const modelProjectDir = await createDurableProject('focus-region-project-only-model-', [{
+    id: 'model_retry',
+    bytes: modelBytes,
+    overrides: { focus_analysis: focusAnalysisRecord(Buffer.from('stale-model-bytes')) },
+  }]);
+  const model = visionModel(() => (
+    model.calls.length === 1 ? { success: true, text: 'not-json' } : regionsResponse('模型重试主体')
+  ));
+  const modelFailure = await runFocusRegionPhase({
+    visualPlan: selectedPlan('model_retry'),
+    creativeContext: { asset_context: { assets: [asset('model_retry')] } },
+    projectDir: modelProjectDir,
+    target: { sourceImageAnalysisEnabled: true },
+    services: { aiTextModel: model },
+  });
+  assert.equal(Object.hasOwn(modelFailure.creativeContext.asset_context.assets[0], 'focus_analysis'), false);
+  assert.equal(Object.hasOwn((await projectStore.loadProject(modelProjectDir)).assets[0], 'focus_analysis'), false);
+  const modelRetry = await runFocusRegionPhase({
+    visualPlan: selectedPlan('model_retry'),
+    creativeContext: await hydrateLikeWorkflow(modelProjectDir),
+    projectDir: modelProjectDir,
+    target: { sourceImageAnalysisEnabled: true },
+    services: { aiTextModel: model },
+  });
+  assert.equal(model.calls.length, 2, '模型失败后的下一 run 必须重新分析');
+  assert.equal(modelRetry.creativeContext.asset_context.assets[0].focus_regions[0].label, '模型重试主体');
+  await fs.rm(modelProjectDir, { recursive: true, force: true });
+}
+
 async function testDomEvidenceIsNotGatedByDurableRecord() {
   const bytes = Buffer.from('dom-vs-record-bytes');
   const overrides = {
@@ -673,6 +733,7 @@ async function testDomEvidenceIsNotGatedByDurableRecord() {
   await testDurableCacheInvalidationTriggersReanalysis();
   await testMissingModelWritesNoRecord();
   await testInconsistentEmptyRecordRetriesAfterFailure();
+  await testProjectOnlyStaleRecordsAreClearedOnFailure();
   await testDomEvidenceIsNotGatedByDurableRecord();
   console.log('html-video focus region phase tests passed');
 })().catch(error => {
