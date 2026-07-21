@@ -512,13 +512,27 @@ function createCreativeWorkflowRetryPlan(input = {}) {
     });
   }
 
+  if (code === 'layout_qa_failed') {
+    const frameIds = uniqueStrings([classification.frame_id]);
+    return retryPlan(classification, 'retry_frame_html', 'frame_html', {
+      reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],
+      discard: frameIds.length
+        ? [...frameIds.map(frameId => `frames:${frameId}`), 'render_outputs']
+        : ['frame_html', 'render_outputs'],
+      executor_options: {
+        regenerate_frame_html: true,
+        ...(frameIds.length ? { frame_ids: frameIds } : {}),
+      },
+      user_message: '布局 QA 未通过，将重新生成对应镜头 HTML 并重新导出。',
+    });
+  }
+
   if (
     code === 'provider_missing_text'
     || code === 'frame_html_invalid'
     || code === 'html_document_extract_failed'
     || code === 'html_validation_failed'
     || code === 'frame_html_content_mismatch'
-    || code === 'layout_qa_failed'
   ) {
     return retryPlan(classification, 'retry_frame_html', 'frame_html', {
       reuse: ['source', 'research', 'brief', 'audio', 'content_graph'],

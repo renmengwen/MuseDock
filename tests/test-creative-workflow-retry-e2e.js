@@ -830,6 +830,109 @@ function plannerProject(overrides = {}) {
   }
 
   {
+    const rootDir = await tempRoot();
+    const workflowId = '202606250000001016';
+    const projectDir = path.join(rootDir, 'media', workflowId, 'agent_runs', 'run-layout-qa-failed');
+    const sceneIds = ['scene_01', 'scene_06'];
+    const layoutProject = createProject({ workflowId, sceneIds, targetDurationSec: 4 });
+    await fs.mkdir(path.join(projectDir, 'frames'), { recursive: true });
+    for (const frame of layoutProject.frames) {
+      await fs.writeFile(path.join(projectDir, frame.html_path), `<html><body>${frame.id}:old</body></html>`, 'utf8');
+      markCheckpointFrame(layoutProject, 'frame_html', frame.scene_id, {
+        status: 'done',
+        html_path: frame.html_path,
+        input_hash: `${frame.scene_id}-input`,
+        input_fingerprint: `${frame.scene_id}-fingerprint`,
+        output_hash: `${frame.scene_id}-html`,
+        diagnostic_code: frame.scene_id === 'scene_06' ? 'layout_qa_failed' : '',
+      });
+      const mp4Path = `frames/${frame.scene_id}.mp4`;
+      await fs.writeFile(path.join(projectDir, mp4Path), `mp4:${frame.scene_id}:old`, 'utf8');
+      const outputHash = await fileHash(path.join(projectDir, mp4Path));
+      markCheckpointFrame(layoutProject, 'render', frame.scene_id, {
+        status: 'done',
+        mp4_path: mp4Path,
+        output_hash: outputHash,
+        diagnostic_code: '',
+        runtime_asset_policy_attestation: await runtimeAssetPolicyAttestation(projectDir, layoutProject, frame, {
+          checkpoint_key: frame.scene_id,
+          mp4_path: mp4Path,
+          output_hash: outputHash,
+        }),
+      });
+    }
+    markCheckpointStage(layoutProject, 'frame_html', { status: 'done' });
+    markCheckpointStage(layoutProject, 'render', { status: 'done' });
+    await projectStore.saveProject(projectDir, layoutProject);
+
+    const diagnostic = createDiagnostic({
+      code: 'layout_qa_failed',
+      stage: 'project',
+      sub_stage: 'layout_qa',
+      frame_id: 'scene_06',
+      severity: 'error',
+      retryable: true,
+      repair_action: 'retry_frame_html',
+    });
+    const lastFailure = {
+      stage: 'project',
+      sub_stage: 'layout_qa',
+      code: 'layout_qa_failed',
+      frame_id: 'scene_06',
+      project_dir: projectDir,
+      message: 'Scene 6 布局 QA 未通过。',
+      diagnostics: [diagnostic],
+    };
+    await writeJson(
+      workflows.getWorkflowPath(workflowId, rootDir),
+      retryWorkflowRecord({ workflowId, projectDir, lastFailure, sceneIds }),
+    );
+
+    const refreshed = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
+    assert.deepEqual(refreshed.plan.executor_options, {
+      regenerate_frame_html: true,
+      frame_ids: ['scene_06'],
+    });
+    const before = await projectStore.loadProject(projectDir);
+    const nonTargetFrameHtml = structuredClone(before.generation_checkpoint.stages.frame_html.frames.scene_01);
+    const nonTargetRender = structuredClone(before.generation_checkpoint.stages.render.frames.scene_01);
+    const calls = {};
+    const services = fakeHtmlVideoServices(calls);
+    const retryFrameHtml = services.resumeActions.retryFrameHtml;
+    services.resumeActions.retryFrameHtml = async args => {
+      assert.equal(args.frame_id, 'scene_06');
+      const checkpoint = args.project.generation_checkpoint.stages;
+      assert.deepEqual(checkpoint.frame_html.frames.scene_06, {
+        status: 'pending',
+        html_path: '',
+        input_hash: '',
+        input_fingerprint: '',
+        output_hash: '',
+        diagnostic_code: '',
+      });
+      assert.equal(checkpoint.render.frames.scene_06.status, 'pending');
+      assert.equal(checkpoint.render.frames.scene_06.mp4_path, '');
+      assert.equal(checkpoint.render.frames.scene_06.output_hash, '');
+      assert.deepEqual(checkpoint.frame_html.frames.scene_01, nonTargetFrameHtml);
+      assert.deepEqual(checkpoint.render.frames.scene_01, nonTargetRender);
+      return retryFrameHtml(args);
+    };
+    const retried = await workflows.retryCreativeWorkflow(workflowId, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: refreshed.plan.code,
+    }, {
+      rootDir,
+      retryAttemptId: 'retry_attempt_layout_qa_failed',
+      services,
+    });
+    assert.equal(retried.success, true);
+    assert.deepEqual(calls.retryFrameHtmlIds, ['scene_06']);
+    assert.deepEqual(calls.renderFrameIds, ['scene_06']);
+    assert.equal(calls.renderFrameIds.includes('scene_01'), false, '非目标 Scene 不得因布局 QA 恢复而重渲染');
+    assert.deepEqual(calls.composeFrameIds, ['scene_01', 'scene_06']);
+  }
+
+  {
     const firstPlan = createCreativeWorkflowRetryPlan({
       workflow: contentGraphFailureWorkflow(),
       project: plannerProject(),
