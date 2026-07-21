@@ -589,6 +589,51 @@ async function testMissingModelWritesNoRecord() {
   await fs.rm(projectDir, { recursive: true, force: true });
 }
 
+async function testInconsistentEmptyRecordRetriesAfterFailure() {
+  const bytes = Buffer.from('inconsistent-empty-retry-bytes');
+  const overrides = {
+    focus_regions: [visionRegion('stale_region')],
+    focus_analysis: focusAnalysisRecord(bytes),
+  };
+  const projectDir = await createDurableProject('focus-region-inconsistent-retry-', [
+    { id: 'retry', bytes, overrides },
+  ]);
+  const model = visionModel(() => (
+    model.calls.length === 1 ? { success: true, text: 'not-json' } : regionsResponse('重试成功主体')
+  ));
+
+  const run1 = await runFocusRegionPhase({
+    visualPlan: selectedPlan('retry'),
+    creativeContext: { asset_context: { assets: [asset('retry', overrides)] } },
+    projectDir,
+    target: { sourceImageAnalysisEnabled: true },
+    services: { aiTextModel: model },
+  });
+  const failedAsset = run1.creativeContext.asset_context.assets[0];
+  assert.equal(model.calls.length, 1);
+  assert.deepEqual(failedAsset.focus_regions, []);
+  assert.equal(Object.hasOwn(failedAsset, 'focus_analysis'), false, '失败返回不得保留失效 empty 记录');
+  assert.equal(
+    Object.hasOwn((await projectStore.loadProject(projectDir)).assets[0], 'focus_analysis'),
+    false,
+    '失败后 project.assets 必须同步清除失效记录',
+  );
+
+  await persistLikeWorkflow(projectDir, run1.creativeContext);
+  const run2 = await runFocusRegionPhase({
+    visualPlan: selectedPlan('retry'),
+    creativeContext: await hydrateLikeWorkflow(projectDir),
+    projectDir,
+    target: { sourceImageAnalysisEnabled: true },
+    services: { aiTextModel: model },
+  });
+  const retriedAsset = run2.creativeContext.asset_context.assets[0];
+  assert.equal(model.calls.length, 2, '首次失败后第二次 run 必须再次调用 vision');
+  assert.equal(retriedAsset.focus_regions[0].label, '重试成功主体');
+  assert.deepEqual(retriedAsset.focus_analysis, focusAnalysisRecord(bytes, { status: 'success' }));
+  await fs.rm(projectDir, { recursive: true, force: true });
+}
+
 async function testDomEvidenceIsNotGatedByDurableRecord() {
   const bytes = Buffer.from('dom-vs-record-bytes');
   const overrides = {
@@ -627,6 +672,7 @@ async function testDomEvidenceIsNotGatedByDurableRecord() {
   await testDurableCacheSkipsAnalyzedAssetsAcrossRuns();
   await testDurableCacheInvalidationTriggersReanalysis();
   await testMissingModelWritesNoRecord();
+  await testInconsistentEmptyRecordRetriesAfterFailure();
   await testDomEvidenceIsNotGatedByDurableRecord();
   console.log('html-video focus region phase tests passed');
 })().catch(error => {

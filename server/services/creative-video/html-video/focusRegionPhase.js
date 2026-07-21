@@ -178,10 +178,13 @@ async function persistFocusAnalysisRecords(projectDir, records) {
   try {
     await projectStore.writeProjectJson(projectDir, current => {
       // 按 id 匹配依赖 project.assets 内 id 唯一（正式链路 mergeVisualAssets 按 id 去重保证）；
-      // 若出现重复 id 条目，同一记录会写到每个同 id 条目上，语义等价、无副作用。
+      // 若出现重复 id 条目，同一更新会写到每个同 id 条目上，语义等价、无副作用。
       for (const entry of (Array.isArray(current.assets) ? current.assets : [])) {
-        const record = records.get(text(entry?.id || entry?.asset_id));
+        const id = text(entry?.id || entry?.asset_id);
+        if (!records.has(id)) continue;
+        const record = records.get(id);
         if (record) entry.focus_analysis = { ...record };
+        else delete entry.focus_analysis;
       }
       return current;
     });
@@ -265,7 +268,12 @@ async function runFocusRegionPhase({
         image = await readProjectImage(asset, projectDir);
       } catch {
         diagnostics.push(failureDiagnostic(id));
-        updates.set(asset, { ...asset, focus_regions: [] });
+        const nextAsset = { ...asset, focus_regions: [] };
+        if (Object.hasOwn(nextAsset, 'focus_analysis')) {
+          delete nextAsset.focus_analysis;
+          durableRecords.set(id, null);
+        }
+        updates.set(asset, nextAsset);
         continue;
       }
     }
@@ -323,6 +331,10 @@ async function runFocusRegionPhase({
         status: analysisStatus,
       };
       durableRecords.set(id, nextAsset.focus_analysis);
+    } else if (Object.hasOwn(nextAsset, 'focus_analysis')) {
+      // 失效记录触发重析但本次失败时必须清除旧结论，否则下一 run 会把空 regions 与旧 empty 假命中。
+      delete nextAsset.focus_analysis;
+      durableRecords.set(id, null);
     }
     updates.set(asset, nextAsset);
   }
