@@ -89,6 +89,81 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 ## 当前写租约
 
 ```yaml
+task_id: E-01
+status: leased
+owner: codex-worker-e01
+lease_released: false
+code_base_commit: c2f7dba
+worktree: D:\code3\MuseDock-worktrees\asset-first-e01
+branch: codex/asset-first-e01
+allowed_paths:
+  - tests/test-html-video-camera-runtime-chromium.js
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/**
+  - frontend-react/**
+  - package.json
+  - package-lock.json
+state_owners:
+  - REQ-E-01 数据合同与引用完整性验收证据
+  - REQ-E-02 摄影机数学及真实运行时安全区验收证据
+decisions:
+  - 本任务不新增生产行为，只复用现有合同与数学测试矩阵
+  - 补真实 Chrome 下靠近字幕区目标完整停留在 height-140 安全区内的消费方断言
+  - 若验证暴露生产缺陷，停止扩测试并另开根因修复任务
+verification:
+  - E-01 审计列出的统一素材、producer、usage、workflow、camera math、planner、DOM 与真实 Chrome 矩阵
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
+task_id: E-02
+status: leased
+owner: codex-worker-e02
+lease_released: false
+code_base_commit: c2f7dba
+worktree: D:\code3\MuseDock-worktrees\asset-first-e02
+branch: codex/asset-first-e02
+allowed_paths:
+  - server/services/creative-video/html-video/layoutQaService.js
+  - tests/test-html-video-layout-qa-service.js
+  - tests/test-html-video-frame-layout-blocking.js
+  - tests/test-html-video-camera-preview-chromium.js
+  - tests/fixtures/html-video-layout-qa/**
+forbidden_paths:
+  - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
+  - server/services/creative-video/html-video/cameraMath.js
+  - server/services/creative-video/html-video/sceneImageSequenceDom.js
+  - server/services/creative-video/html-video/focusCuePlanner.js
+  - server/services/creative-video/html-video/captionLayer.js
+  - server/services/creative-video/html-video/playbackClock.js
+  - frontend-react/**
+  - package.json
+  - package-lock.json
+state_owners:
+  - Scene Preview Camera layout issues and deterministic sample metrics
+decisions:
+  - 复用现有 layoutQaService 与同一 Chrome page，通过 __mpSetTimelineTime 确定性采样，不新增 renderer
+  - 自动门只判断可测的空画面、图片未就绪、边缘空白、字幕/目标重叠、倍率、可信度、抖动和安全区
+  - 语义 wrong focus 只在 fixture 提供人工 expected region 时比较，不用像素启发式猜测
+  - blocking issue 继续走既有 frame_layout_qa_unresolved 门；本任务证明修复后仍有问题会停止
+  - 新增真实 Chrome Camera QA 测试；若现有 preview 入口可直接复用，不修改 projectOrchestrator
+verification:
+  - node tests/test-html-video-layout-qa-service.js
+  - node tests/test-html-video-camera-runtime-chromium.js
+  - node tests/test-html-video-camera-preview-chromium.js
+  - node tests/test-html-video-frame-layout-blocking.js
+  - node tests/test-html-video-frame-preview-draft.js
+  - node tests/test-visual-qa-service.js
+  - node tests/test-html-video-workflow.js
+review:
+  spec: pending
+  quality: pending
+```
+
+```yaml
 task_id: D-08
 status: complete
 owner: unassigned
