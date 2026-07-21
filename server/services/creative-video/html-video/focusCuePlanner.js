@@ -140,6 +140,7 @@ function focusCuesForShot({ shot, regions, captionById }) {
 
 // 确定性摄影机规划：只 enrich image_sequence shot 的 camera，不做 I/O、不打模型调用，
 // cue 不写 start_sec/end_sec（运行时从 caption 派生），diagram/无图 beat 与 motion_overlay 保持原样。
+// 无 cue 的 shot 不写 camera：帧输入指纹整包哈希 visual_beat，空 camera 会让存量工程 resume 全量失配重生成。
 function planFocusCues({ visualPlan = {}, creativeContext = {}, sceneSpec = {}, mediaOptions = {} } = {}) {
   const beats = Array.isArray(visualPlan?.beats) ? visualPlan.beats : [];
   if (!beats.length) return visualPlan;
@@ -151,14 +152,13 @@ function planFocusCues({ visualPlan = {}, creativeContext = {}, sceneSpec = {}, 
     const captionById = captionMaps.get(text(beat.scene_id)) || new Map();
     for (const shot of base.shots) {
       if (!shot || typeof shot !== 'object') continue;
-      shot.camera = {
-        initial_view: 'overview',
-        focus_cues: focusCuesForShot({
-          shot,
-          regions: usableRegions(assetById.get(text(shot.asset_id))),
-          captionById,
-        }),
-      };
+      const focusCues = focusCuesForShot({
+        shot,
+        regions: usableRegions(assetById.get(text(shot.asset_id))),
+        captionById,
+      });
+      if (!focusCues.length) continue;
+      shot.camera = { initial_view: 'overview', focus_cues: focusCues };
     }
   }
   return visualPlan;

@@ -130,7 +130,7 @@ function firstShot(visualPlan) {
     duration: 4,
   });
   planFocusCues(input);
-  assert.deepEqual(firstShot(input.visualPlan).camera.focus_cues, []);
+  assert.equal('camera' in firstShot(input.visualPlan), false, '无命中时不写 camera');
 }
 
 // 规则 3：trust A/B → camera_zoom + zoom auto；trust C → highlight_only（无 zoom）；trust D → 不生成 cue。
@@ -169,7 +169,7 @@ function firstShot(visualPlan) {
     duration: 4,
   });
   planFocusCues(input);
-  assert.deepEqual(firstShot(input.visualPlan).camera.focus_cues, []);
+  assert.equal('camera' in firstShot(input.visualPlan), false);
 }
 
 // 规则 4b：caption_id 不在 canonical captions 中 → 跳过该条，不报错、不阻断。
@@ -186,15 +186,16 @@ function firstShot(visualPlan) {
   assert.deepEqual(cues[0].caption_ids, ['cap_01']);
 }
 
-// 规则 4c：asset 无 focus_regions 或 asset 不存在 → camera 仍写入且 focus_cues 为空，不报错。
+// 规则 4c：asset 无 focus_regions 或 asset 不存在 → 不写 camera、shot 字节级不变（保护帧指纹与 resume 复用），不报错。
 {
   const noRegions = fixture({
     captions: [{ id: 'cap_01', start: 0, end: 4, text: '价格面板显示三个套餐' }],
     regions: [],
     duration: 4,
   });
+  const shotBefore = JSON.parse(JSON.stringify(firstShot(noRegions.visualPlan)));
   planFocusCues(noRegions);
-  assert.deepEqual(firstShot(noRegions.visualPlan).camera, { initial_view: 'overview', focus_cues: [] });
+  assert.deepEqual(firstShot(noRegions.visualPlan), shotBefore, '无 cue 的 shot 必须原样保留');
 
   const missingAsset = fixture({
     captions: [{ id: 'cap_01', start: 0, end: 4, text: '价格面板显示三个套餐' }],
@@ -203,7 +204,7 @@ function firstShot(visualPlan) {
   });
   missingAsset.visualPlan.beats[0].visual_base.shots[0].asset_id = 'asset_unknown';
   planFocusCues(missingAsset);
-  assert.deepEqual(firstShot(missingAsset.visualPlan).camera, { initial_view: 'overview', focus_cues: [] });
+  assert.equal('camera' in firstShot(missingAsset.visualPlan), false);
 }
 
 // 规则 5a：caption_ids 顺序中相邻多条 caption 命中同一 region → 合并为一个 cue，caption_ids 保序收纳全部。
