@@ -179,20 +179,23 @@ review:
 
 ```yaml
 task_id: D-06
-status: frozen_for_review
-owner: unassigned
-lease_released: true
+status: implementing
+owner: claude-worker
+lease_released: false
 code_base_commit: d922532f77306e1eca6b53444f6d03e5d7f42503
 worktree: D:\code3\MuseDock-worktrees\asset-first-d06
 branch: codex/asset-first-d06
 candidate_commit: 2eab1bd87dc40277af659b7d8446ad3078303483
-frozen_revision: 2eab1bd87dc40277af659b7d8446ad3078303483
-frozen_tree: e4a4f9ae648030d949221e088da638c8ff98b83d
-revision_valid: true
+invalidated_revision: 2eab1bd87dc40277af659b7d8446ad3078303483
+invalidated_tree: e4a4f9ae648030d949221e088da638c8ff98b83d
+revision_valid: false
 allowed_paths:
   - server/services/creative-video/html-video/focusRegionPhase.js
+  - server/services/creative-video/html-video/assetUsagePhase.js
   - server/services/creative/visualAssetContract.js
   - tests/test-html-video-focus-region-phase.js
+  - tests/test-html-video-asset-usage.js
+  - tests/test-html-video-workflow.js
   - tests/test-visual-asset-contract.js
 forbidden_paths:
   - docs/superpowers/plans/2026-07-16-asset-first-delivery-ledger.md
@@ -201,7 +204,6 @@ forbidden_paths:
   - server/services/creative-video/html-video/visualPlanService.js
   - server/services/creative/pageCaptureAssets.js
   - server/services/source/sourceImageAnalysis.js
-  - tests/test-html-video-workflow.js
   - frontend-react/**
   - package.json
   - package-lock.json
@@ -221,6 +223,9 @@ decisions:
   - 模型身份两级解析：model 对象自带 provider/modelId 优先，否则 aiModelConfig.getRuntimeConfig('text')；懒执行每 run 一次，无模型不写记录
   - vision 空结果由"失败告警"改为合法 empty 结论：不再输出中文 warning，写 focus_analysis.status=empty
   - contract 侧 normalizeFocusAnalysis 严格形状匹配（恰好 7 个白名单字段），非法整体丢弃且显式 delete，幂等
+  - 【退回修复】完整 run 的 buildMixedFrameProject 重建 + saveProject 覆盖 + projectAssetsFromCreativeContext 白名单投影会抹掉 focus_analysis：根因修在共享投影层，projectAssetsFromCreativeContext 按 focus_regions 同款条件透传 normalizeFocusAnalysis 后的 focus_analysis
+  - 【退回修复】必须有真实完整 run（跑过 buildMixedFrameProject 与最终投影落盘）后 loadProject 断言 focus_analysis 仍在的端到端用例；模拟持久化 helper 同步提升保真度
+  - 已知窄窗口残留：workflow 重建保存与最终投影保存之间崩溃会丢当次记录，自愈代价为重付该部分 vision，可接受
 verification:
   - node tests/test-html-video-focus-region-phase.js
   - node tests/test-visual-asset-contract.js
