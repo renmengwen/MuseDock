@@ -90,7 +90,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-05
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: dfd88dde244f7d62c6529be16936f432ccbf27d7
@@ -102,6 +102,7 @@ invalidated_tree: 8a31132e5bd3d65dabc974769900a6cfb8be625a
 frozen_revision: 5943c799cd19b0d5700ac0a474759447a27e3d86
 frozen_tree: 7750d3d6924be48db25c1777fd6af258f8e3a994
 revision_valid: true
+dev_commit: c3db1d8
 allowed_paths:
   - server/services/creative-video/html-video/captionLayer.js
   - server/services/creative-video/html-video/focusCuePlanner.js
@@ -138,8 +139,16 @@ verification:
   - node tests/test-html-video-scene-continuity.js
   - node tests/test-html-video-workflow.js
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_ledger_commit: 17c4572
+  spec_reviewed_revision: 5943c799cd19b0d5700ac0a474759447a27e3d86
+  quality: pass
+  quality_reviewed_ledger_commit: 17c4572
+  quality_reviewed_revision: 5943c799cd19b0d5700ac0a474759447a27e3d86
+resolved_findings:
+  - 同一 region 连续字幕通过不同 alias 命中时，保持单一合并 cue，并以 keywords_by_caption_id 保存每段字幕原文关键词
+  - 字幕层优先消费逐 caption 关键词，旧 cue 回退 keyword；不存在于原文的词不插入
+  - 逐字幕关键词进入既有 visual_beat 指纹，变化时正确失效 Frame checkpoint
 ```
 
 ```yaml
