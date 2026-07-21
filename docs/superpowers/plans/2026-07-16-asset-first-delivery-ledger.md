@@ -96,9 +96,11 @@ lease_released: true
 code_base_commit: c2f7dba
 worktree: D:\code3\MuseDock-worktrees\asset-first-e01
 branch: codex/asset-first-e01
-candidate_commit: ce121d70d08a46c13f9fc94b536250ceaa193372
-frozen_revision: ce121d70d08a46c13f9fc94b536250ceaa193372
-frozen_tree: 9aff90ccc6ffd39c7814a649c41e60541d9cffbe
+candidate_commit: ac46e31a4cd1d292bf30b920efe6007f68ec3639
+invalidated_revision: ce121d70d08a46c13f9fc94b536250ceaa193372
+invalidated_tree: 9aff90ccc6ffd39c7814a649c41e60541d9cffbe
+frozen_revision: ac46e31a4cd1d292bf30b920efe6007f68ec3639
+frozen_tree: 38372a802647e91b252e8a9a6940542bcbe1a335
 revision_valid: true
 allowed_paths:
   - tests/test-html-video-camera-runtime-chromium.js
