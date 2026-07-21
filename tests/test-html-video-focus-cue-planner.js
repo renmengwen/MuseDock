@@ -447,4 +447,161 @@ function firstShot(visualPlan) {
   assert.equal(firstShot(cjk.visualPlan).camera.focus_cues[0].keyword, '价格');
 }
 
+// 纵深 1：trust D 的 region 被命中时不生成 cue，但同样打断同 region 合并链
+//（"命中其他 region 即打断"，D 也算命中其他 region——锁定该语义）。
+{
+  const input = fixture({
+    captions: [
+      { id: 'cap_01', start: 0, end: 2, text: 'Star 按钮亮了' },
+      { id: 'cap_02', start: 2, end: 4, text: '底部页脚说明' },
+      { id: 'cap_03', start: 4, end: 6, text: '回到 Star 按钮' },
+    ],
+    regions: [
+      canonicalRegion({ id: 'r_star', label: 'Star 按钮', trust: 'A' }),
+      canonicalRegion({ id: 'r_footer', label: '底部页脚', trust: 'D' }),
+    ],
+    duration: 6,
+  });
+  planFocusCues(input);
+  const cues = firstShot(input.visualPlan).camera.focus_cues;
+  assert.equal(cues.length, 2, 'trust D 命中必须打断合并，产生两个独立 cue');
+  assert.deepEqual(cues.map(cue => cue.region_id), ['r_star', 'r_star']);
+  assert.deepEqual(cues.map(cue => cue.caption_ids), [['cap_01'], ['cap_03']]);
+  assert.ok(cues.every(cue => cue.region_id !== 'r_footer'), 'trust D 不得生成 cue');
+  assert.notEqual(cues[0].id, cues[1].id);
+}
+
+// 纵深 2：一个 beat 含多个 shot 时按 shot 独立 enrich——各用自己的 asset regions 与 caption_ids，
+// 互不串扰；无命中的 shot 不写 camera。
+{
+  const captions = [
+    { id: 'cap_01', start: 0, end: 2, text: 'Star 按钮亮了' },
+    { id: 'cap_02', start: 2, end: 4, text: '看价格面板' },
+    { id: 'cap_03', start: 4, end: 6, text: '总结全部内容' },
+  ];
+  const shotOf = (index, assetId, captionIds) => ({
+    id: `scene_01_shot_${String(index).padStart(2, '0')}`,
+    asset_id: assetId,
+    role: 'showcase',
+    fit: 'cover',
+    caption_ids: captionIds,
+    active_window: { time_base: 'scene_local', start_sec: (index - 1) * 2, end_sec: index * 2 },
+    minimum_visible_duration_sec: 1,
+  });
+  const input = {
+    sceneSpec: { scenes: [{ id: 'scene_01', duration_sec: 6, captions }] },
+    visualPlan: {
+      version: 2,
+      beats: [{
+        id: 'scene_01',
+        scene_id: 'scene_01',
+        duration_sec: 6,
+        visual_base: {
+          type: 'image_sequence',
+          sequence_mode: 'fullscreen_relay',
+          continuity_group: 'scene_01',
+          role: 'main_visual',
+          shots: [
+            shotOf(1, 'asset_a', ['cap_01']),
+            shotOf(2, 'asset_b', ['cap_02']),
+            shotOf(3, 'asset_c', ['cap_03']),
+          ],
+        },
+      }],
+    },
+    creativeContext: {
+      asset_context: {
+        assets: [
+          { id: 'asset_a', media_type: 'image', focus_regions: [canonicalRegion({ id: 'r_a', label: 'Star 按钮', trust: 'A' })] },
+          { id: 'asset_b', media_type: 'image', focus_regions: [canonicalRegion({ id: 'r_b', label: '价格面板', trust: 'A' })] },
+          { id: 'asset_c', media_type: 'image' },
+        ],
+      },
+    },
+    mediaOptions: {},
+  };
+  planFocusCues(input);
+  const [shotA, shotB, shotC] = input.visualPlan.beats[0].visual_base.shots;
+  assert.equal(shotA.camera.focus_cues.length, 1);
+  assert.equal(shotA.camera.focus_cues[0].region_id, 'r_a');
+  assert.deepEqual(shotA.camera.focus_cues[0].caption_ids, ['cap_01'], 'shotA 只消费自己的 caption_ids');
+  assert.equal(shotA.camera.focus_cues[0].keyword, 'Star 按钮');
+  assert.equal(shotB.camera.focus_cues.length, 1);
+  assert.equal(shotB.camera.focus_cues[0].region_id, 'r_b');
+  assert.deepEqual(shotB.camera.focus_cues[0].caption_ids, ['cap_02']);
+  assert.equal('camera' in shotC, false, '无 focus_regions 的 shot 不写 camera');
+  assert.notEqual(shotA.camera.focus_cues[0].id, shotB.camera.focus_cues[0].id, '不同 shot 的 cue id 必须不同');
+}
+
+// 纵深 3：>34 字符长 caption 被 canonicalCaptionTrack 拆分改写 id（id_01/id_02）时，
+// 用真实 buildVisualPlan 验证 cue 与拆分后的 caption id 正确对齐。
+{
+  const longText = '先看这里的价格面板对比三个不同套餐的差异，再看页面底部的常见问题解答和联系方式。';
+  const sceneSpec = {
+    scenes: [{
+      id: 'scene_01',
+      duration_sec: 4,
+      narration_text: longText,
+      captions: [{ id: 'cap_01', start: 0, end: 4, text: longText }],
+      visual_text: { headline: '套餐', keywords: [], cards: [] },
+    }],
+  };
+  const creativeContext = {
+    asset_context: {
+      assets: [{
+        id: 'hero',
+        media_type: 'image',
+        requirement: 'required',
+        path: 'assets/hero.png',
+        focus_regions: [canonicalRegion({ id: 'r_price', label: '价格面板', trust: 'A' })],
+      }],
+    },
+  };
+  const graph = {
+    nodes: [{ id: 'scene_01', scene_id: 'scene_01', kind: 'text', label: '套餐', asset_refs: [{ asset_id: 'hero', usage: 'subject' }] }],
+    edges: [],
+  };
+  const visualPlan = buildVisualPlan({ graph, sceneSpec, creativeContext, workflowId: 'wf-d04-split', mediaOptions: {} });
+  planFocusCues({ visualPlan, creativeContext, sceneSpec, mediaOptions: {} });
+  const shot = visualPlan.beats[0].visual_base.shots[0];
+  assert.deepEqual(shot.caption_ids, ['cap_01_01', 'cap_01_02'], '长 caption 必须真实发生拆分改写 id');
+  assert.equal(shot.camera.focus_cues.length, 1);
+  assert.deepEqual(shot.camera.focus_cues[0].caption_ids, ['cap_01_01'], 'cue 必须绑定拆分后包含关键词的分片 id');
+  assert.equal(shot.camera.focus_cues[0].keyword, '价格面板');
+}
+
+// 纵深 4：scene 缺 duration 时 buildVisualPlan 与 planner 都兜底 6 秒——
+// caption end=6 恰好贴住兜底时长，两侧兜底不一致会导致 canonical 失配、无法生成 cue。
+{
+  const sceneSpec = {
+    scenes: [{
+      id: 'scene_01',
+      narration_text: '价格面板显示三个套餐',
+      captions: [{ id: 'cap_01', start: 0, end: 6, text: '价格面板显示三个套餐' }],
+      visual_text: { headline: '价格', keywords: [], cards: [] },
+    }],
+  };
+  const creativeContext = {
+    asset_context: {
+      assets: [{
+        id: 'hero',
+        media_type: 'image',
+        requirement: 'required',
+        path: 'assets/hero.png',
+        focus_regions: [canonicalRegion({ id: 'r_price', label: '价格面板', trust: 'A' })],
+      }],
+    },
+  };
+  const graph = {
+    nodes: [{ id: 'scene_01', scene_id: 'scene_01', kind: 'text', label: '价格', asset_refs: [{ asset_id: 'hero', usage: 'subject' }] }],
+    edges: [],
+  };
+  const visualPlan = buildVisualPlan({ graph, sceneSpec, creativeContext, workflowId: 'wf-d04-fallback', mediaOptions: {} });
+  planFocusCues({ visualPlan, creativeContext, sceneSpec, mediaOptions: {} });
+  const shot = visualPlan.beats[0].visual_base.shots[0];
+  assert.equal(shot.camera.focus_cues.length, 1, '缺 duration 场景必须按兜底 6 秒对齐 canonical captions');
+  assert.deepEqual(shot.camera.focus_cues[0].caption_ids, ['cap_01']);
+  assert.equal(shot.camera.focus_cues[0].effect, 'camera_zoom');
+}
+
 console.log('html-video focus cue planner tests passed');
