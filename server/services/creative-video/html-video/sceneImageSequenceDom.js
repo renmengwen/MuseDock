@@ -507,6 +507,8 @@ function validateSceneImageSequenceDom(html, { node = {}, creativeContext = {} }
   const managed = text.slice(range.start, range.end);
   const duplicateReferences = validateNoDuplicateShotReferences(text, range);
   if (!duplicateReferences.success) return duplicateReferences;
+  // 受管块由本模块唯一生成，直接绑定确定性产物，避免摄影机数据仍在但运行时被删改时假通过。
+  if (managed !== renderDom(normalized.contract)) return fail('Frame HTML 的受管 Image Sequence DOM 与运行时不完整。');
   if ((text.match(/<section\b[^>]*\bdata-hv-image-sequence\s*=/gi) || []).length !== 1) return fail('Frame HTML 的 Image Sequence 根节点数量不等于 1。');
   if ((text.match(/<figure\b[^>]*\bdata-hv-shot\s*=/gi) || []).length !== normalized.contract.shots.length) return fail('Frame HTML 的 Shot DOM 数量与计划不一致。');
   if (!managed.includes(`data-sequence-mode="${escapeHtml(normalized.contract.mode)}"`)) return fail('Frame HTML 的 Sequence Mode 与计划不一致。');

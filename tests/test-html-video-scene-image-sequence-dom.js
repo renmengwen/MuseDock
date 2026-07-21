@@ -293,6 +293,17 @@ function focusCue(id, regionId, captionIds, effect = 'camera_zoom') {
   const tamperedZoom = result.html.replace('&quot;max_zoom&quot;:3}', '&quot;max_zoom&quot;:30}');
   assert.notEqual(tamperedZoom, result.html, '篡改夹具必须命中 max_zoom 序列化');
   assert.equal(validateSceneImageSequenceDom(tamperedZoom, args).success, false, '篡改摄影机数据必须被校验拒绝');
+
+  const deletedRuntime = result.html.replace('var computeCameraTransform = module.exports && module.exports.computeCameraTransform;', '');
+  assert.notEqual(deletedRuntime, result.html, '删除摄影机运行时夹具必须命中');
+  assert.equal(validateSceneImageSequenceDom(deletedRuntime, args).success, false, '删除摄影机运行时必须被校验拒绝');
+
+  const bypassedRuntime = result.html.replace(
+    'var computeCameraTransform = module.exports && module.exports.computeCameraTransform;',
+    'return;\n  var computeCameraTransform = module.exports && module.exports.computeCameraTransform;',
+  );
+  assert.notEqual(bypassedRuntime, result.html, '提前退出摄影机运行时夹具必须命中');
+  assert.equal(validateSceneImageSequenceDom(bypassedRuntime, args).success, false, '提前退出摄影机运行时必须被校验拒绝');
 }
 
 {
