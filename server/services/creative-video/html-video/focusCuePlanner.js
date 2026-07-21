@@ -122,6 +122,7 @@ function focusCuesForShot({ shot, regions, captionById }) {
     if (!hit) continue;
     if (current && current.region === hit.region) {
       current.caption_ids.push(text(caption.id));
+      current.keywords_by_caption_id[text(caption.id)] = hit.keyword;
       current.captions.push(caption);
       continue;
     }
@@ -129,6 +130,7 @@ function focusCuesForShot({ shot, regions, captionById }) {
       region: hit.region,
       keyword: hit.keyword,
       caption_ids: [text(caption.id)],
+      keywords_by_caption_id: { [text(caption.id)]: hit.keyword },
       captions: [caption],
     };
     runs.push(current);
@@ -145,6 +147,7 @@ function focusCuesForShot({ shot, regions, captionById }) {
       id: cueId(shot, text(run.region.id), run.caption_ids),
       caption_ids: run.caption_ids,
       keyword: run.keyword,
+      keywords_by_caption_id: run.keywords_by_caption_id,
       region_id: text(run.region.id),
       effect: zoomAllowed ? 'camera_zoom' : 'highlight_only',
       ...(zoomAllowed ? { zoom: 'auto' } : {}),

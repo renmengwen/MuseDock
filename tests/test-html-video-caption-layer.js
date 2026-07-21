@@ -492,6 +492,24 @@ const { keywordOccurrence } = require('../server/services/creative-video/html-vi
   assert.equal(sceneMap.get('cap_02'), '价格面板', 'highlight_only 的 cue 同样参与字幕高亮');
   assert.equal(sceneMap.get('cap_03'), '价格面板');
 
+  const aliasCue = {
+    ...zoomCue,
+    caption_ids: ['cap_01', 'cap_02'],
+    keyword: 'Stars',
+    keywords_by_caption_id: { cap_01: 'Stars', cap_02: '星标' },
+  };
+  const aliasMap = focusKeywordsByCaptionId({
+    metadata: { visual_beat: { visual_base: { shots: [{ camera: { focus_cues: [aliasCue] } }] } } },
+  });
+  assert.equal(aliasMap.get('cap_01'), 'Stars');
+  assert.equal(aliasMap.get('cap_02'), '星标', '合并 cue 的后续字幕必须取自己的原文关键词');
+  const aliasLayer = renderCaptionLayer(applyFocusKeywords([
+    { id: 'cap_01', start: 0, end: 2, text: 'Stars 数量持续上涨' },
+    { id: 'cap_02', start: 2, end: 4, text: '点击星标查看收藏' },
+  ], aliasMap));
+  assert.ok(aliasLayer.includes('><span class="hv-caption-kw">Stars</span> 数量持续上涨</span>'));
+  assert.ok(aliasLayer.includes('>点击<span class="hv-caption-kw">星标</span>查看收藏</span>'));
+
   assert.equal(focusKeywordsByCaptionId(null).size, 0);
   assert.equal(focusKeywordsByCaptionId({}).size, 0);
   assert.equal(focusKeywordsByCaptionId({ metadata: { visual_beat: { visual_base: { type: 'image_sequence', shots: [{ id: 's1' }] } } } }).size, 0);

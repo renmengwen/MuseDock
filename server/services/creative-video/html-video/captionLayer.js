@@ -60,7 +60,8 @@ function locateFocusKeyword(captionText, keyword) {
 
 // 收集 node（或与其同构的 { metadata } 对象）上全部 focus_cues 的 caption_id → keyword 映射。
 // beat_mp4 分支读 metadata.visual_beat，scene_html 分支读 metadata.visual_beats[]；
-// camera_zoom 与 highlight_only 的 cue 都参与字幕高亮；planner 保证每条 caption 至多一个 cue，重复时首个生效。
+// camera_zoom 与 highlight_only 的 cue 都参与字幕高亮；新 cue 按 caption 取原文关键词，旧 cue 回退单 keyword；
+// planner 保证每条 caption 至多一个 cue，重复时首个生效。
 function focusKeywordsByCaptionId(node) {
   const metadata = node?.metadata && typeof node.metadata === 'object' ? node.metadata : {};
   const beats = Array.isArray(metadata.visual_beats)
@@ -72,11 +73,17 @@ function focusKeywordsByCaptionId(node) {
     for (const shot of shots) {
       const cues = Array.isArray(shot?.camera?.focus_cues) ? shot.camera.focus_cues : [];
       for (const cue of cues) {
-        const keyword = typeof cue?.keyword === 'string' ? cue.keyword.trim() : '';
-        if (!keyword) continue;
+        const fallbackKeyword = typeof cue?.keyword === 'string' ? cue.keyword.trim() : '';
+        const keywordsByCaptionId = cue?.keywords_by_caption_id && typeof cue.keywords_by_caption_id === 'object'
+          && !Array.isArray(cue.keywords_by_caption_id) ? cue.keywords_by_caption_id : {};
         for (const rawCaptionId of Array.isArray(cue.caption_ids) ? cue.caption_ids : []) {
           const captionId = String(rawCaptionId || '').trim();
-          if (captionId && !keywordByCaptionId.has(captionId)) keywordByCaptionId.set(captionId, keyword);
+          const captionKeyword = typeof keywordsByCaptionId[captionId] === 'string'
+            ? keywordsByCaptionId[captionId].trim()
+            : fallbackKeyword;
+          if (captionId && captionKeyword && !keywordByCaptionId.has(captionId)) {
+            keywordByCaptionId.set(captionId, captionKeyword);
+          }
         }
       }
     }

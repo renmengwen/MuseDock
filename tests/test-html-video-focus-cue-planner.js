@@ -4,6 +4,7 @@ const {
   FOCUS_TRANSITION_BUDGET_SEC,
   planFocusCues,
 } = require('../server/services/creative-video/html-video/focusCuePlanner');
+const { computeFrameInputFingerprint } = require('../server/services/creative-video/html-video/frameHtmlPhaseSupport');
 const { buildVisualPlan } = require('../server/services/creative-video/html-video/visualPlanService');
 
 function canonicalRegion({ id, label, aliases = [], trust = 'A', x = 0.05, y = 0.05 }) {
@@ -92,8 +93,9 @@ function firstShot(visualPlan) {
   // 规则 7：cue 不写 start_sec/end_sec，字段集合完全锁定。
   assert.deepEqual(
     Object.keys(cue).sort(),
-    ['caption_ids', 'effect', 'id', 'keyword', 'region_id', 'return_policy', 'zoom'],
+    ['caption_ids', 'effect', 'id', 'keyword', 'keywords_by_caption_id', 'region_id', 'return_policy', 'zoom'],
   );
+  assert.deepEqual(cue.keywords_by_caption_id, { cap_01: 'GitHub Star' });
 }
 
 // 规则 1b：中文标签包含匹配。
@@ -222,6 +224,35 @@ function firstShot(visualPlan) {
   assert.equal(cues.length, 1, '相邻同 region 命中必须合并，不产生重复缩放 cue');
   assert.deepEqual(cues[0].caption_ids, ['cap_01', 'cap_02']);
   assert.equal(cues[0].effect, 'camera_zoom');
+}
+
+// 同 region 通过不同 alias 连续命中：仍只生成一个摄影机 cue，但每条字幕保留自己的原文关键词。
+{
+  const input = fixture({
+    captions: [
+      { id: 'cap_01', start: 0, end: 2, text: 'Stars 数量持续上涨' },
+      { id: 'cap_02', start: 2, end: 4, text: '点击星标查看收藏' },
+    ],
+    regions: [canonicalRegion({ id: 'r_star', label: '收藏按钮', aliases: ['Stars', '星标'], trust: 'A' })],
+    duration: 4,
+  });
+  planFocusCues(input);
+  const cues = firstShot(input.visualPlan).camera.focus_cues;
+  assert.equal(cues.length, 1, '不同 alias 命中同一 region 仍必须合并为一个摄影机 cue');
+  assert.deepEqual(cues[0].caption_ids, ['cap_01', 'cap_02']);
+  assert.equal(cues[0].keyword, 'Stars', '单 keyword 保留首条值以兼容旧消费方');
+  assert.deepEqual(cues[0].keywords_by_caption_id, { cap_01: 'Stars', cap_02: '星标' });
+
+  const node = { metadata: { visual_beat: input.visualPlan.beats[0] } };
+  const fingerprint = computeFrameInputFingerprint({ node, continuityMode: 'beat_mp4', target: {} });
+  const changedNode = JSON.parse(JSON.stringify(node));
+  changedNode.metadata.visual_beat.visual_base.shots[0].camera.focus_cues[0]
+    .keywords_by_caption_id.cap_02 = 'Stars';
+  assert.notEqual(
+    computeFrameInputFingerprint({ node: changedNode, continuityMode: 'beat_mp4', target: {} }),
+    fingerprint,
+    '字幕关键词变化必须使 Frame checkpoint 指纹失配',
+  );
 }
 
 // 规则 5b：中间隔着命中其他 region 的 caption → 非相邻，不合并。
