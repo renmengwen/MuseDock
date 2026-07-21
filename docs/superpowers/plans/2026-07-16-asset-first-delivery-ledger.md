@@ -90,12 +90,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: D-08
-status: leased
-owner: codex-worker
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: 2add472762beb050b9b754dc1d70ec6a0f0a912f
 worktree: D:\code3\MuseDock-worktrees\asset-first-d08
 branch: codex/asset-first-d08
+candidate_commit: fd2b8bb85c5345043eba4784ad2f5804253dee5f
+frozen_revision: fd2b8bb85c5345043eba4784ad2f5804253dee5f
+frozen_tree: 4c58216b0d49e6c6205fd76bb28f0c9f0520c32d
+revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/focusCuePlanner.js
   - server/services/creative-video/html-video/sceneImageSequenceDom.js
@@ -117,7 +121,7 @@ decisions:
   - 复用现有 camera_zoom cue、cameraMath 与 scene camera runtime，不新增 effect、运行时或依赖
   - trust C 且字幕窗口达到现有过渡预算时写 camera_zoom + zoom soft；短窗口仍 highlight_only
   - 运行时只有 canonical region trust C 且 cue.zoom=soft 才执行，最大倍率 1.5；A/B auto 与 D 不聚焦保持
-  - C 级继续使用较宽上下文与现有安全区，不画框，不承诺像素级准确，不新增模型调用
+  - C 级围绕原 region 中心扩展 1.5x 并强制使用原中心焦点，再复用现有安全区；不画框，不承诺像素级准确，不新增模型调用
   - 同一 cue 继续同时驱动字幕原文关键词高亮；无 cue、D 级与非法几何输出保持
   - 真实 Chromium 必须证明 C 级 transform 生效且 scale 不超过 1.5，D 级不动，字幕同步高亮
 verification:
