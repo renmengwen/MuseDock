@@ -141,11 +141,11 @@ lease_released: true
 code_base_commit: c2f7dba
 worktree: D:\code3\MuseDock-worktrees\asset-first-e02
 branch: codex/asset-first-e02
-candidate_commit: 092066eab1d9e5f1dfd3c24966c4beffdad881da
-invalidated_revision: bcd9864170eb35e8c9fe8cf83a7ef65245539d8c
-invalidated_tree: 37e8a39a43e750d01ab0eac93ab55da206bda1ed
-frozen_revision: 092066eab1d9e5f1dfd3c24966c4beffdad881da
-frozen_tree: f0f7aa82c93801fb5a51ed3f94ad1a854b65a4f5
+candidate_commit: f04f4f83270286b4e5cb7ca77878634ac451572a
+invalidated_revision: 092066eab1d9e5f1dfd3c24966c4beffdad881da
+invalidated_tree: f0f7aa82c93801fb5a51ed3f94ad1a854b65a4f5
+frozen_revision: f04f4f83270286b4e5cb7ca77878634ac451572a
+frozen_tree: 68f40dcf112f666a17d8490d3c7de47bd6074f2d
 revision_valid: true
 allowed_paths:
   - server/services/creative-video/html-video/layoutQaService.js
