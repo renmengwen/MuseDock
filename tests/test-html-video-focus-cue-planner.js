@@ -404,4 +404,47 @@ function firstShot(visualPlan) {
   assert.equal(shot.camera.focus_cues[0].region_id, 'r_price');
 }
 
+// 词边界回归（Review 阻断项）：纯拉丁字母数字 term 必须按词边界匹配（相邻字符不得是 [A-Za-z0-9]），
+// 防止 alias "star" 误命中 "restart"/"starting" 生成指向无关 region 的缩放 cue；CJK term 保持子串匹配。
+{
+  const starRegion = () => canonicalRegion({ id: 'r_star', label: '收藏按钮', aliases: ['star'], trust: 'A' });
+  const noHit = captionText => {
+    const input = fixture({
+      captions: [{ id: 'cap_01', start: 0, end: 2, text: captionText }],
+      regions: [starRegion()],
+      duration: 2,
+    });
+    planFocusCues(input);
+    assert.equal('camera' in firstShot(input.visualPlan), false, `"star" 不得命中 "${captionText}"`);
+  };
+  noHit('please restart the server');
+  noHit('starting the demo now');
+
+  const hit = (captionText, expectedKeyword) => {
+    const input = fixture({
+      captions: [{ id: 'cap_01', start: 0, end: 2, text: captionText }],
+      regions: [starRegion()],
+      duration: 2,
+    });
+    planFocusCues(input);
+    const cues = firstShot(input.visualPlan).camera.focus_cues;
+    assert.equal(cues.length, 1, `"star" 应命中 "${captionText}"`);
+    assert.equal(cues[0].keyword, expectedKeyword);
+    assert.equal(cues[0].region_id, 'r_star');
+  };
+  hit('give it a star please', 'star');
+  hit('Star 数量突破十万', 'Star');
+  // 前部误命中位置被拒绝后必须继续向后扫描，找到合法的词边界出现。
+  hit('restart the star button', 'star');
+
+  // 中文 alias 行为不变：CJK 无词边界，子串包含即命中（"价格" 命中 "看价格面板" 的词中位置）。
+  const cjk = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '看价格面板' }],
+    regions: [canonicalRegion({ id: 'r_price', label: '定价区', aliases: ['价格'], trust: 'A' })],
+    duration: 2,
+  });
+  planFocusCues(cjk);
+  assert.equal(firstShot(cjk.visualPlan).camera.focus_cues[0].keyword, '价格');
+}
+
 console.log('html-video focus cue planner tests passed');
