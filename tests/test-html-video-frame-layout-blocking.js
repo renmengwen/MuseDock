@@ -52,7 +52,7 @@ const validHtml = '<!doctype html><html><head><meta name="viewport" content="wid
         qaCalls += 1;
         return {
           success: false,
-          issues: [{ code: 'text_overlap', message: '文本互相遮挡', severity: 'error' }],
+          issues: [{ code: 'camera_target_out_of_safe_area', message: '摄影机目标离开安全区', severity: 'error' }],
         };
       },
     },

@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    html,body{margin:0;width:640px;height:360px;overflow:hidden;background:#111}
+    [data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;overflow:hidden}
+    img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform-origin:0 0}
+    [data-shot-layer="background"]{object-fit:cover}
+    .caption{position:absolute;left:200px;bottom:20px;width:240px;height:80px;background:#000;color:#fff}
+  </style>
+</head>
+<body>
+  <section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay">
+    <figure data-hv-shot="true" data-shot-active="true" data-shot-id="bad-shot"
+      data-camera-cues='[{"start_sec":0,"end_sec":2,"max_zoom":1.5,"region":{"x":0.42,"y":0.78,"width":0.16,"height":0.18}}]'
+      data-layout-qa-expected-region='{"x":0.05,"y":0.05,"width":0.15,"height":0.15}'>
+      <img data-shot-layer="background" alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='360'%3E%3Crect width='640' height='360' fill='%23123'/%3E%3C/svg%3E">
+      <img data-shot-layer="foreground" alt="" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='360'%3E%3Crect width='640' height='360' fill='%23123'/%3E%3C/svg%3E">
+    </figure>
+  </section>
+  <div class="caption" data-caption-id="cap_1" data-hv-active="true">底部字幕</div>
+</body>
+</html>
