@@ -11,7 +11,8 @@ const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { sanitizePathSegment } = require('./frameIdentity');
 const { objectOrEmpty, report, getOutputConfig } = require('./timelineGuards');
 const { buildAssetUsageReport, updateRuntimePolicyViolations } = require('./assetUsagePhase');
-const RUNTIME_ASSET_POLICY_VERSION = 'runtime-asset-policy-v1';
+const { ADAPTER_VERSION } = require('./hyperframesPlaywrightAdapter');
+const RUNTIME_ASSET_POLICY_VERSION = 'runtime-asset-policy-v2';
 
 function hashValue(value) {
   return crypto.createHash('sha256').update(String(value)).digest('hex');
@@ -20,12 +21,19 @@ function hashValue(value) {
 async function runtimeAssetPolicyAttestation(projectDir, project = {}, frame = {}, checkpoint = {}) {
   const htmlPath = path.resolve(projectDir, String(frame.html_path || frame.htmlPath || ''));
   const htmlHash = await fileHash(htmlPath);
+  const outputConfig = getOutputConfig(project);
   const registry = (Array.isArray(project.assets) ? project.assets : [])
     .filter(asset => {
       const type = String(asset?.media_type || asset?.type || '').toLowerCase();
       return type === 'image' || type.startsWith('image/');
     })
-    .map(asset => ({ id: String(asset.id || ''), path: String(asset.path || ''), status: String(asset.status || '') }))
+    .map(asset => ({
+      id: String(asset.id || ''),
+      media_type: String(asset.media_type || asset.type || ''),
+      status: String(asset.status || ''),
+      path: String(asset.path || ''),
+      frame_src: String(asset.frame_src || ''),
+    }))
     .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
   const registryHash = hashValue(JSON.stringify(registry));
   const checkpointKey = String(checkpoint.checkpoint_key || renderCheckpointKey(frame));
@@ -33,17 +41,41 @@ async function runtimeAssetPolicyAttestation(projectDir, project = {}, frame = {
   const outputHash = String(checkpoint.output_hash || '');
   const mp4Hash = checkpoint.mp4_hash || await fileHash(path.resolve(projectDir, mp4Path));
   const frameId = String(frame.id || frame.scene_id || '');
+  const resolution = {
+    width: Number(outputConfig.resolution?.width) || 0,
+    height: Number(outputConfig.resolution?.height) || 0,
+  };
+  const fps = Number(outputConfig.fps) || 0;
+  const durationSec = Number(frame.duration_sec ?? frame.durationSec) || 0;
+  const rendererRuntimeContractVersion = `hyperframes-playwright@${ADAPTER_VERSION}`;
+  const input = {
+    html_hash: htmlHash,
+    resolution,
+    fps,
+    duration_sec: durationSec,
+    renderer_runtime_contract_version: rendererRuntimeContractVersion,
+    registry,
+  };
   return {
     version: RUNTIME_ASSET_POLICY_VERSION,
     frame_id: frameId,
     checkpoint_key: checkpointKey,
     html_hash: htmlHash,
+    resolution,
+    fps,
+    duration_sec: durationSec,
+    renderer_runtime_contract_version: rendererRuntimeContractVersion,
+    registry,
     registry_hash: registryHash,
     mp4_path: mp4Path,
     output_hash: outputHash,
     mp4_hash: mp4Hash,
-    fingerprint: hashValue(JSON.stringify([RUNTIME_ASSET_POLICY_VERSION, frameId, checkpointKey, htmlHash, registryHash, mp4Path, outputHash, mp4Hash])),
+    fingerprint: hashValue(JSON.stringify([RUNTIME_ASSET_POLICY_VERSION, frameId, checkpointKey, input, mp4Path, outputHash, mp4Hash])),
   };
+}
+
+function renderAttestationMatches(actual, expected) {
+  return Boolean(actual && expected && JSON.stringify(actual) === JSON.stringify(expected));
 }
 
 function runtimePolicyViolations(result = {}) {
@@ -292,6 +324,28 @@ async function renderHtmlVideoFrames({
     // 既有 beat/scene id 只含字母数字下划线，sanitize 为恒等变换，输出文件名不变
     const outputName = sanitizePathSegment(frame.id || frame.scene_id || frameId);
     const frameOutput = path.join(resolvedProjectDir, 'frames', `${outputName}.mp4`);
+    const checkpointFrames = objectOrEmpty(nextProject?.generation_checkpoint?.stages?.render?.frames);
+    const checkpoint = objectOrEmpty(checkpointFrames[checkpointKey] || checkpointFrames[frameId]);
+    if (checkpoint.status === 'done') {
+      const formal = await formalFrameMp4(resolvedProjectDir, checkpoint);
+      if (formal && checkpoint.output_hash && formal.hash === checkpoint.output_hash) {
+        const expected = await runtimeAssetPolicyAttestation(resolvedProjectDir, nextProject, frame, {
+          checkpoint_key: checkpointKey,
+          mp4_path: checkpoint.mp4_path,
+          output_hash: checkpoint.output_hash,
+          mp4_hash: formal.hash,
+        });
+        if (renderAttestationMatches(checkpoint.runtime_asset_policy_attestation, expected)) {
+          renderedFrames.push({
+            path: formal.real_path,
+            engine: frame.engine,
+            encoding: frame.encoding || checkpoint.encoding,
+            frame_id: frameId,
+          });
+          continue;
+        }
+      }
+    }
     const rendered = await frameRenderer.renderFrame(frame, {
       projectDir: resolvedProjectDir,
       project: nextProject,
@@ -410,6 +464,7 @@ module.exports = {
   materializeProject,
   renderHtmlVideoFrames,
   runtimeAssetPolicyAttestation,
+  renderAttestationMatches,
   RUNTIME_ASSET_POLICY_VERSION,
   formalFrameMp4,
 };

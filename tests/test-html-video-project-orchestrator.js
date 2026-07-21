@@ -402,8 +402,50 @@ const { runtimeAssetPolicyAttestation } = require('../server/services/creative-v
     assert.equal(rendered.success, true);
     assert.equal(renderCalls, 1);
     assert.equal(rendered.project.generation_checkpoint.stages.render.frames.scene_01.status, 'done');
-    assert.equal(rendered.project.generation_checkpoint.stages.render.frames.scene_01.runtime_asset_policy_attestation?.version, 'runtime-asset-policy-v1');
+    assert.equal(rendered.project.generation_checkpoint.stages.render.frames.scene_01.runtime_asset_policy_attestation?.version, 'runtime-asset-policy-v2');
     assert.equal(Object.hasOwn(rendered.project.generation_checkpoint.stages.render.frames, 'frame_01'), false);
+
+    const renderWithCheckpoint = async (candidate, beforeRender = async () => {}) => {
+      let calls = 0;
+      await beforeRender();
+      const result = await projectOrchestrator.renderHtmlVideoFrames({
+        projectDir,
+        project: candidate,
+        frameIds: ['scene_01'],
+        services: { frameRenderer: { renderFrame: async (_frame, { outputPath }) => {
+          calls += 1;
+          await fs.writeFile(outputPath, 'frame-video');
+          return { success: true, output_path: outputPath, diagnostics: [] };
+        } } },
+      });
+      assert.equal(result.success, true);
+      return calls;
+    };
+    assert.equal(await renderWithCheckpoint(rendered.project), 0, '输入与 MP4 身份完整一致时必须直接复用');
+    const changedInputs = [
+      candidate => { candidate.output.resolution.width = 1280; },
+      candidate => { candidate.output.fps = 24; },
+      candidate => { candidate.frames[0].duration_sec = 3; },
+      candidate => { candidate.generation_checkpoint.stages.render.frames.scene_01.runtime_asset_policy_attestation.renderer_runtime_contract_version = 'hyperframes-playwright@older'; },
+      candidate => { candidate.assets = [{ id: 'asset-new', media_type: 'image/png', status: 'ready', path: 'assets/new.png', frame_src: '../assets/new.png' }]; },
+      candidate => { candidate.generation_checkpoint.stages.render.frames.scene_01.runtime_asset_policy_attestation.version = 'runtime-asset-policy-v1'; },
+      candidate => { candidate.generation_checkpoint.stages.render.frames.scene_01.status = 'pending'; },
+    ];
+    for (const mutate of changedInputs) {
+      const candidate = JSON.parse(JSON.stringify(rendered.project));
+      mutate(candidate);
+      assert.equal(await renderWithCheckpoint(candidate), 1, '任一渲染输入或旧 checkpoint 变化时只重渲染目标帧');
+    }
+    assert.equal(await renderWithCheckpoint(
+      rendered.project,
+      () => fs.writeFile(path.join(projectDir, 'frames', 'scene_01.html'), '<html><body>changed-render-input</body></html>'),
+    ), 1, 'HTML 字节变化时不得复用');
+    await fs.writeFile(path.join(projectDir, 'frames', 'scene_01.html'), '<html><head></head><body>frame</body></html>');
+    assert.equal(await renderWithCheckpoint(
+      rendered.project,
+      () => fs.writeFile(path.join(projectDir, 'frames', 'frame_01.mp4'), 'tampered-before-render'),
+    ), 1, 'MP4 内容 hash 变化时不得复用');
+
     const composed = await projectOrchestrator.composeHtmlVideoProject({
       projectDir,
       project: rendered.project,

@@ -1290,6 +1290,7 @@ function report(ctx, percent, message) {
 }
 
 module.exports = {
+  ADAPTER_VERSION,
   render,
   buildFfmpegArgs,
   createRuntimeAssetPolicy,

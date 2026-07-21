@@ -35,6 +35,7 @@ const {
   materializeProject,
   renderHtmlVideoFrames: renderHtmlVideoFramesUnchecked,
   runtimeAssetPolicyAttestation,
+  renderAttestationMatches,
   formalFrameMp4,
 } = require('./frameRenderPhase');
 
@@ -110,14 +111,7 @@ async function runtimePolicyRevalidationFrameIds(projectDir, project) {
     const expected = await runtimeAssetPolicyAttestation(projectDir, project, frame, {
       checkpoint_key: checkpointKey, mp4_path: checkpoint.mp4_path, output_hash: checkpoint.output_hash,
     });
-    if (!checkpoint.runtime_asset_policy_attestation
-      || checkpoint.runtime_asset_policy_attestation.version !== expected.version
-      || checkpoint.runtime_asset_policy_attestation.frame_id !== expected.frame_id
-      || checkpoint.runtime_asset_policy_attestation.checkpoint_key !== expected.checkpoint_key
-      || checkpoint.runtime_asset_policy_attestation.mp4_path !== expected.mp4_path
-      || checkpoint.runtime_asset_policy_attestation.output_hash !== expected.output_hash
-      || checkpoint.runtime_asset_policy_attestation.mp4_hash !== expected.mp4_hash
-      || checkpoint.runtime_asset_policy_attestation.fingerprint !== expected.fingerprint) {
+    if (!renderAttestationMatches(checkpoint.runtime_asset_policy_attestation, expected)) {
       frameIds.push(frame.id || frame.scene_id || checkpointKey);
     }
   }
