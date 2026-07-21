@@ -1,5 +1,8 @@
 const assert = require('assert');
+const fs = require('fs/promises');
+const os = require('os');
 const path = require('path');
+const { buildSceneTimelineScript } = require('../server/services/creative-video/html-video/frameHtmlPhaseSupport');
 const {
   defaultSampleTimes,
   inspectFrameHtmlLayout,
@@ -96,6 +99,34 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     playAllOverlap.issues.some(issue => issue.code === 'decorative_overlay_text' || issue.code === 'text_overlap'),
     'playall-overlap.html 应在 __hvPlayAll() 后报告文本重叠',
   );
+
+  const timelineDir = await fs.mkdtemp(path.join(os.tmpdir(), 'layout-qa-continuous-clock-'));
+  try {
+    const timelinePath = path.join(timelineDir, 'scene.html');
+    await fs.writeFile(timelinePath, `<!doctype html><html><head><style>
+      html,body{width:1920px;height:1080px;margin:0;overflow:hidden}
+      [data-mp-beat-scope]{position:absolute;left:100px;top:100px;opacity:0;transition:opacity .35s linear}
+      body[data-mp-beat="beat_1"] [data-mp-beat-scope="beat_1"],
+      body[data-mp-beat="beat_2"] [data-mp-beat-scope="beat_2"]{opacity:1}
+    </style></head><body>
+      <div data-mp-beat-scope="beat_1"><p data-text-key="subtitle">第一拍文本</p></div>
+      <div data-mp-beat-scope="beat_2"><p data-text-key="subtitle">第二拍文本</p></div>
+      ${buildSceneTimelineScript([
+        { id: 'beat_1', start_sec: 0, end_sec: 0.5 },
+        { id: 'beat_2', start_sec: 0.5, end_sec: 1.5 },
+      ])}
+    </body></html>`, 'utf8');
+    const stableSecondBeat = await inspectFrameHtmlLayout({
+      htmlPath: timelinePath,
+      frame: { id: 'scene_continuous_clock', duration_sec: 1.5 },
+      resolution,
+      sampleTimesSec: [1],
+    });
+    assert.equal(stableSecondBeat.metrics.skipped, false);
+    assert.equal(stableSecondBeat.success, true, '连续播放到第二 Beat 稳定点时只能看到活动文本');
+  } finally {
+    await fs.rm(timelineDir, { recursive: true, force: true });
+  }
 
   const richTextNested = await inspectFixture('rich-text-nested.html', { id: 'scene_08', duration_sec: 1 });
   assert.equal(richTextNested.success, true);

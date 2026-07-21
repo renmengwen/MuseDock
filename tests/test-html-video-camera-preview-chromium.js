@@ -67,8 +67,11 @@ function previewHtml(twoCues = false, targetRegion = { x: 0.68, y: 0.08, width: 
   assert.equal(report.success, true, JSON.stringify(report.issues));
   assert.equal(report.metrics.camera_samples.length, 5, '所有采样必须复用同一页面的确定性时间线');
   assert.deepEqual(report.metrics.camera_samples.map(sample => sample.sample_time_sec), [0.5, 1.4, 2, 2.8, 3.7]);
-  assert.ok(report.metrics.camera_samples.every(sample => sample.adapter_controlled && sample.clock_paused));
-  assert.ok(report.metrics.camera_samples.every(sample => Math.abs(sample.clock_time_sec - sample.sample_time_sec) < 1e-6), '浏览器实际共享时钟必须精确停在请求采样点');
+  assert.ok(report.metrics.camera_samples.every(sample => sample.adapter_controlled && !sample.clock_paused));
+  assert.ok(report.metrics.camera_samples.every(sample => (
+    sample.clock_time_sec >= sample.sample_time_sec
+    && sample.clock_time_sec - sample.sample_time_sec < 0.2
+  )), '浏览器共享时钟应连续运行到请求采样点附近');
   assert.ok(report.metrics.camera_samples[1].shots[0].scale > 1, 'caption start 后应采到摄影机推近');
   assert.equal(report.metrics.camera_samples[2].shots[0].caption_boxes.length, 1, '同一采样应采到激活字幕');
 

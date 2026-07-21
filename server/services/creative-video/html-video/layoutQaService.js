@@ -682,13 +682,23 @@ async function inspectFrameHtmlLayout(options = {}) {
 
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load' });
     await waitForLayout(page);
-    await page.evaluate(() => {
+    const continuousPlayback = await page.evaluate(() => {
+      const clock = window.__hvPlaybackClock;
+      const trusted = clock?.__hvOwner === 'musedock-playback-clock-v1'
+        && ['subscribe', 'play', 'pause', 'timeSec', 'paused', 'setTime']
+          .every(name => typeof clock[name] === 'function');
+      if (trusted) {
+        clock.pause();
+        clock.setTime(0);
+      }
       if (typeof window.__hvPlayAll === 'function') {
         window.__hvPlayed = true;
         window.__hvPlayAll();
-        return true;
       }
-      return false;
+      if (!trusted) return false;
+      if (typeof window.__hvUnfreeze === 'function') window.__hvUnfreeze();
+      clock.play();
+      return true;
     }).catch(() => false);
 
     const cueSamples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
@@ -701,16 +711,23 @@ async function inspectFrameHtmlLayout(options = {}) {
 
     let elapsedSec = 0;
     for (const sampleTimeSec of samples) {
-      const timelineSet = await page.evaluate((time) => {
-        if (typeof window.__mpSetTimelineTime !== 'function') return false;
-        if (typeof window.__hvPlaybackClock?.pause === 'function') window.__hvPlaybackClock.pause();
-        window.__mpSetTimelineTime(time);
-        return true;
-      }, sampleTimeSec).catch(() => false);
-      const waitSec = timelineSet ? 0 : Math.max(0, sampleTimeSec - elapsedSec);
-      if (waitSec > 0) {
-        await page.waitForTimeout(Math.round(waitSec * 1000));
-        elapsedSec += waitSec;
+      if (continuousPlayback) {
+        await page.waitForFunction(
+          time => window.__hvPlaybackClock.timeSec() >= time,
+          sampleTimeSec,
+          { timeout: Math.max(30000, Math.ceil((sampleTimeSec + 5) * 1000)) },
+        );
+      } else {
+        const timelineSet = await page.evaluate((time) => {
+          if (typeof window.__mpSetTimelineTime !== 'function') return false;
+          window.__mpSetTimelineTime(time);
+          return true;
+        }, sampleTimeSec).catch(() => false);
+        const waitSec = timelineSet ? 0 : Math.max(0, sampleTimeSec - elapsedSec);
+        if (waitSec > 0) {
+          await page.waitForTimeout(Math.round(waitSec * 1000));
+          elapsedSec += waitSec;
+        }
       }
       await waitForLayout(page);
       const candidates = await collectCandidates(page);
