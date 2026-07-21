@@ -134,6 +134,57 @@ async function main() {
     '同名、短名包含、Scene 歧义/缺失/不存在、生成素材和非 upload 均不得猜测绑定',
   );
 
+  for (const [rawText, shouldBind] of [
+    ['S01 使用 dashboard-chart.png。', false],
+    ['S01 中文使用chart.png。', true],
+  ]) {
+    const tokenBoundary = await workflow.generateContentGraphWithRetry({
+      sceneSpec: sceneSpec(),
+      creativeContext: {
+        input: { raw_text: rawText },
+        asset_context: { assets: [{ id: 'upload_chart_only', file_name: 'chart.png', requirement: 'required' }] },
+      },
+      model: { async callTextModel() { return { success: true, text: graphTextFor(sceneSpec()) }; } },
+    });
+    assert.equal(tokenBoundary.success, true);
+    assert.equal(
+      tokenBoundary.contentGraph.nodes[0].asset_refs?.[0]?.asset_id || '',
+      shouldBind ? 'upload_chart_only' : '',
+      'file_name 只有在前后没有紧邻 ASCII 文件名字符时才是独立精确命中',
+    );
+  }
+
+  const preferredAssets = Array.from({ length: 4 }, (_, index) => ({ id: `preferred_${index + 1}` }));
+  const requiredPriority = await workflow.generateContentGraphWithRetry({
+    sceneSpec: sceneSpec(),
+    creativeContext: {
+      input: { raw_text: 'S01 使用 required-priority.png。' },
+      asset_context: {
+        assets: [
+          ...preferredAssets,
+          { id: 'upload_required_priority', file_name: 'required-priority.png', requirement: 'required' },
+        ],
+      },
+    },
+    model: {
+      async callTextModel() {
+        return {
+          success: true,
+          text: graphTextFor(sceneSpec(), {
+            scene_01: preferredAssets.map(asset => ({
+              asset_id: asset.id, usage: 'showcase', reason: asset.id,
+            })),
+          }),
+        };
+      },
+    },
+  });
+  assert.equal(requiredPriority.success, true);
+  assert.deepEqual(requiredPriority.contentGraph.nodes[0].asset_refs, [
+    { asset_id: 'upload_required_priority', usage: 'subject', reason: '用户明确指定用于该场景' },
+    ...preferredAssets.slice(0, 3).map(asset => ({ asset_id: asset.id, usage: 'showcase', reason: asset.id })),
+  ], 'required 必须优先保留，原有 optional 按模型顺序补位到总计 4 张');
+
   for (const fallbackMode of ['provider_failed', 'invalid_json']) {
     let calls = 0;
     const fallback = await workflow.generateContentGraphWithRetry({

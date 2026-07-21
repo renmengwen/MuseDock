@@ -135,6 +135,10 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
   const referenced = new Set(nodes.flatMap(node => (
     Array.isArray(node?.asset_refs) ? node.asset_refs.map(ref => String(ref?.asset_id || '').trim()) : []
   )).filter(Boolean));
+  const requiredAssetIds = new Set(assets
+    .filter(asset => asset?.requirement === 'required')
+    .map(asset => String(asset?.id || asset?.asset_id || '').trim())
+    .filter(Boolean));
   const scenesByNumber = new Map();
   scenes.forEach((scene, index) => {
     const sceneId = String(scene?.id || '').trim();
@@ -179,6 +183,8 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
         return intervals;
       });
       for (let index = input.indexOf(fileName); index >= 0; index = input.indexOf(fileName, index + fileName.length)) {
+        if (/[A-Za-z0-9._-]/.test(input[index - 1] || '')
+          || /[A-Za-z0-9._-]/.test(input[index + fileName.length] || '')) continue;
         const containedByLongerFileName = uploadFileCandidates.some(other => {
           const longer = String(other?.file_name || '').trim();
           if (longer.length <= fileName.length) return false;
@@ -218,17 +224,38 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
     referenced.add(assetId);
   }
   const capacityDiagnostics = [];
+  const mergedRefsByNode = new Map();
   for (const [node, assetIds] of additions) {
-    const currentAssetIds = (Array.isArray(node.asset_refs) ? node.asset_refs : [])
-      .map(ref => String(ref?.asset_id || '').trim()).filter(Boolean);
-    if (currentAssetIds.length + assetIds.length <= 4) continue;
+    const currentRefs = Array.isArray(node.asset_refs) ? node.asset_refs : [];
+    const seen = new Set();
+    const requiredRefs = currentRefs.filter(ref => {
+      const assetId = String(ref?.asset_id || '').trim();
+      if (!requiredAssetIds.has(assetId) || seen.has(assetId)) return false;
+      seen.add(assetId);
+      return true;
+    });
+    for (const assetId of assetIds) {
+      if (seen.has(assetId)) continue;
+      seen.add(assetId);
+      requiredRefs.push({ asset_id: assetId, usage: 'subject', reason: '用户明确指定用于该场景' });
+    }
+    if (requiredRefs.length <= 4) {
+      const optionalRefs = currentRefs.filter(ref => {
+        const assetId = String(ref?.asset_id || '').trim();
+        if (!assetId || requiredAssetIds.has(assetId) || seen.has(assetId)) return false;
+        seen.add(assetId);
+        return true;
+      });
+      mergedRefsByNode.set(node, [...requiredRefs, ...optionalRefs.slice(0, 4 - requiredRefs.length)]);
+      continue;
+    }
     const sceneId = resolveNodeSceneId(node) || String(node?.id || '').trim();
     capacityDiagnostics.push(createDiagnostic({
       code: 'required_asset_scene_capacity_exceeded',
       stage: 'ai-content-graph',
       sub_stage: 'content_graph',
       user_message: `场景 ${sceneId} 的必用素材超过每帧最多 4 张限制。`,
-      details: { scene_id: sceneId, asset_ids: [...currentAssetIds, ...assetIds], max_assets: 4 },
+      details: { scene_id: sceneId, asset_ids: requiredRefs.map(ref => ref.asset_id), max_assets: 4 },
       retryable: false,
       fallback_allowed: false,
     }));
@@ -240,12 +267,7 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
       diagnostics: capacityDiagnostics,
     };
   }
-  for (const [node, assetIds] of additions) {
-    node.asset_refs = [
-      ...(Array.isArray(node.asset_refs) ? node.asset_refs : []),
-      ...assetIds.map(assetId => ({ asset_id: assetId, usage: 'subject', reason: '用户明确指定用于该场景' })),
-    ];
-  }
+  for (const [node, refs] of mergedRefsByNode) node.asset_refs = refs;
   return { success: true, graph };
 }
 
