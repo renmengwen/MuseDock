@@ -90,7 +90,7 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: E-01
-status: frozen_for_review
+status: complete
 owner: unassigned
 lease_released: true
 code_base_commit: c2f7dba
@@ -102,6 +102,7 @@ invalidated_tree: 9aff90ccc6ffd39c7814a649c41e60541d9cffbe
 frozen_revision: ac46e31a4cd1d292bf30b920efe6007f68ec3639
 frozen_tree: 38372a802647e91b252e8a9a6940542bcbe1a335
 revision_valid: true
+dev_commit: 0531f27
 allowed_paths:
   - tests/test-html-video-camera-runtime-chromium.js
 forbidden_paths:
@@ -120,8 +121,16 @@ decisions:
 verification:
   - E-01 审计列出的统一素材、producer、usage、workflow、camera math、planner、DOM 与真实 Chrome 矩阵
 review:
-  spec: pending
-  quality: pending
+  spec: pass
+  spec_reviewed_ledger_commit: e5ede85
+  spec_reviewed_revision: ac46e31a4cd1d292bf30b920efe6007f68ec3639
+  quality: pass
+  quality_reviewed_ledger_commit: e5ede85
+  quality_reviewed_revision: ac46e31a4cd1d292bf30b920efe6007f68ec3639
+resolved_findings:
+  - 14 组统一素材、producer、引用、required、workflow、camera math 与真实 Chrome 合同矩阵通过
+  - 真实 Chrome 证明靠近字幕区的完整 region 经摄影机变换后位于 height-140 安全区内
+  - computed transform-origin 锁定为 0px 0px，DOMMatrix 四边映射不依赖未验证前提
 ```
 
 ```yaml
@@ -1367,8 +1376,8 @@ Requirement 行与 Task 行是 Ledger 内唯一可写状态。实施计划只描
 
 | ID | 状态 | 要求 | 覆盖 Task |
 |---|---|---|---|
-| REQ-E-01 | `pending` | 数据契约、引用完整性和 required 门 | E-01 |
-| REQ-E-02 | `pending` | 摄影机数学测试 | D-02、E-01 |
+| REQ-E-01 | `verified` | 数据契约、引用完整性和 required 门 | E-01 |
+| REQ-E-02 | `verified` | 摄影机数学测试 | D-02、E-01 |
 | REQ-E-03 | `pending` | Scene 预览渲染测试 | E-02 |
 | REQ-E-04 | `pending` | 白屏、黑边、裸硬切、字幕遮挡和过度放大检查 | E-02 |
 | REQ-E-05 | `pending` | 错误焦点与焦点可信度验收 | E-02 |
