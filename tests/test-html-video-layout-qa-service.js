@@ -135,9 +135,72 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.equal(crossfadingBeats.success, true, 'Beat 边界后 0.1 秒的合法 opacity transition 不应阻断');
     assert.equal(crossfadeOverlap?.severity, 'warning', '合法 Crossfade 重叠应保留为 warning');
     assert.ok(
-      [crossfadeOverlap.details.first.effective_opacity, crossfadeOverlap.details.second.effective_opacity]
+      [crossfadeOverlap.details.first.scope_effective_opacity, crossfadeOverlap.details.second.scope_effective_opacity]
         .some(opacity => opacity > 0.001 && opacity < 0.999),
-      'Crossfade warning 必须由祖先链累计后的部分透明度支持',
+      'Crossfade warning 必须由 Beat Scope 及其外层祖先的累计部分透明度支持',
+    );
+    assert.ok(
+      [crossfadeOverlap.details.first.opacity_transition_running, crossfadeOverlap.details.second.opacity_transition_running]
+        .some(Boolean),
+      'Crossfade warning 必须存在 Scope 本体正在运行的原生 opacity CSSTransition',
+    );
+
+    const falseCrossfadePath = path.join(timelineDir, 'false-crossfade.html');
+    await fs.writeFile(falseCrossfadePath, `<!doctype html><html><head><style>
+      html,body{width:1920px;height:1080px;margin:0}.scope{position:absolute;width:300px}
+      .inner-a,.inner-b{top:100px}.inner-a p{opacity:.8}
+      .permanent-a,.permanent-b{top:300px}.permanent-b{opacity:.5}
+      .half-a,.half-b{top:500px;opacity:.5}
+      .mixed-a,.mixed-b{top:700px}.mixed-a{opacity:.5}.mixed-b{opacity:1;transition:opacity .35s linear 1s}
+      body.ready .mixed-b{opacity:.8}
+    </style></head><body>
+      <div class="scope inner-a" data-mp-beat-scope="inner_a"><p>内部透明 A</p></div>
+      <div class="scope inner-b" data-mp-beat-scope="inner_b"><p>内部透明 B</p></div>
+      <div class="scope permanent-a" data-mp-beat-scope="permanent_a"><p>永久全显</p></div>
+      <div class="scope permanent-b" data-mp-beat-scope="permanent_b"><p>永久半透明</p></div>
+      <div class="scope half-a" data-mp-beat-scope="half_a"><p>半透明 A</p></div>
+      <div class="scope half-b" data-mp-beat-scope="half_b"><p>半透明 B</p></div>
+      <div class="scope mixed-a" data-mp-beat-scope="mixed_a"><p>永久半透明 A</p></div>
+      <div class="scope mixed-b" data-mp-beat-scope="mixed_b"><p>延迟过渡全显 B</p></div>
+      <script>requestAnimationFrame(()=>requestAnimationFrame(()=>document.body.className='ready'))</script>
+    </body></html>`, 'utf8');
+    const falseCrossfades = await inspectFrameHtmlLayout({
+      htmlPath: falseCrossfadePath,
+      frame: { id: 'scene_false_crossfades', duration_sec: 1 },
+      resolution,
+      sampleTimesSec: [0.1],
+    });
+    for (const [firstText, secondText] of [
+      ['内部透明 A', '内部透明 B'],
+      ['永久全显', '永久半透明'],
+      ['半透明 A', '半透明 B'],
+    ]) {
+      const overlap = falseCrossfades.issues.find(issue => (
+        [issue.details?.first?.text, issue.details?.second?.text].includes(firstText)
+        && [issue.details?.first?.text, issue.details?.second?.text].includes(secondText)
+      ));
+      assert.equal(overlap?.severity, 'error', `${firstText}/${secondText} 没有运行中的 Scope opacity transition，必须阻断`);
+      assert.equal(overlap.details.first.opacity_transition_running, false);
+      assert.equal(overlap.details.second.opacity_transition_running, false);
+    }
+    const innerOpacityOverlap = falseCrossfades.issues.find(issue => issue.details?.first?.text === '内部透明 A');
+    assert.deepEqual(
+      [innerOpacityOverlap.details.first.scope_effective_opacity, innerOpacityOverlap.details.second.scope_effective_opacity],
+      [1, 1],
+      '内部文字 opacity:.8 不得伪装成 Beat Scope 交叉淡化',
+    );
+    const mixedEvidenceOverlap = falseCrossfades.issues.find(issue => (
+      [issue.details?.first?.text, issue.details?.second?.text].includes('永久半透明 A')
+      && [issue.details?.first?.text, issue.details?.second?.text].includes('延迟过渡全显 B')
+    ));
+    assert.equal(mixedEvidenceOverlap?.severity, 'error', '部分透明与运行 Transition 来自不同 Scope 时不得拼接证据放行');
+    assert.deepEqual(
+      [mixedEvidenceOverlap.details.first.scope_effective_opacity, mixedEvidenceOverlap.details.second.scope_effective_opacity],
+      [0.5, 1],
+    );
+    assert.deepEqual(
+      [mixedEvidenceOverlap.details.first.opacity_transition_running, mixedEvidenceOverlap.details.second.opacity_transition_running],
+      [false, true],
     );
 
     const partialBeatBasePath = path.join(timelineDir, 'partial-beat-base.html');
@@ -367,10 +430,12 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
   ));
   assert.equal(leakedBeatOverlap?.severity, 'error', '不同 Beat 同时泄漏重叠必须阻断');
   assert.deepEqual(
-    [leakedBeatOverlap.details.first.effective_opacity, leakedBeatOverlap.details.second.effective_opacity],
+    [leakedBeatOverlap.details.first.scope_effective_opacity, leakedBeatOverlap.details.second.scope_effective_opacity],
     [1, 1],
     'animation-fill 泄漏在稳定 opacity=1 时仍必须阻断',
   );
+  assert.equal(leakedBeatOverlap.details.first.opacity_transition_running, false);
+  assert.equal(leakedBeatOverlap.details.second.opacity_transition_running, false);
   const beatBaseOverlap = inactiveBeat.issues.find(issue => (
     [issue.details?.first?.text, issue.details?.second?.text].includes('稳定 Base 文字')
     && [issue.details?.first?.text, issue.details?.second?.text].includes('压住 Base 的 Beat')

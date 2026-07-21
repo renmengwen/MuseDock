@@ -201,7 +201,10 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
         ? 'decorative_overlay_text'
         : 'text_overlap';
       const crossfadingBeats = a.beatScope && b.beatScope && a.beatScope !== b.beatScope
-        && [a, b].some(candidate => candidate.effectiveOpacity > 0.001 && candidate.effectiveOpacity < 0.999);
+        && [a, b].some(candidate => (
+          candidate.scopeEffectiveOpacity > 0.001 && candidate.scopeEffectiveOpacity < 0.999
+          && candidate.opacityTransitionRunning
+        ));
       issues.push(makeIssue({
         code,
         severity: crossfadingBeats ? 'warning' : 'error',
@@ -211,11 +214,17 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
         details: {
           first: {
             text: a.text, selector: a.selector, beat_scope: a.beatScope || null,
-            effective_opacity: a.effectiveOpacity, box: a.box,
+            effective_opacity: a.effectiveOpacity,
+            scope_effective_opacity: a.scopeEffectiveOpacity,
+            opacity_transition_running: a.opacityTransitionRunning,
+            box: a.box,
           },
           second: {
             text: b.text, selector: b.selector, beat_scope: b.beatScope || null,
-            effective_opacity: b.effectiveOpacity, box: b.box,
+            effective_opacity: b.effectiveOpacity,
+            scope_effective_opacity: b.scopeEffectiveOpacity,
+            opacity_transition_running: b.opacityTransitionRunning,
+            box: b.box,
           },
           intersection_area: Math.round(intersection.area),
           smaller_area: Math.round(smallerArea),
@@ -314,6 +323,7 @@ async function collectCandidates(page) {
         const text = (element.innerText || element.textContent || '').replace(/\s+/g, ' ').trim();
         const isExplicitText = element.matches(explicitTextSelector);
         const effectiveOpacity = effectiveOpacityFor(element);
+        const beatScopeElement = element.closest('[data-mp-beat-scope]');
         if (!text || (!direct && !isExplicitText)) return null;
         if (!isVisible(element, rect, effectiveOpacity)) return null;
         return {
@@ -324,8 +334,15 @@ async function collectCandidates(page) {
             role: element.getAttribute('data-role') || null,
             tag: element.tagName.toLowerCase(),
             selector: selectorFor(element),
-            beatScope: element.closest('[data-mp-beat-scope]')?.getAttribute('data-mp-beat-scope') || null,
+            beatScope: beatScopeElement?.getAttribute('data-mp-beat-scope') || null,
             effectiveOpacity,
+            scopeEffectiveOpacity: beatScopeElement ? effectiveOpacityFor(beatScopeElement) : null,
+            opacityTransitionRunning: Boolean(beatScopeElement && Array.from(beatScopeElement.getAnimations()).some(animation => (
+              typeof CSSTransition !== 'undefined'
+              && animation instanceof CSSTransition
+              && animation.playState === 'running'
+              && animation.transitionProperty === 'opacity'
+            ))),
             text,
             box: serializeBox(rect),
             container: containerFor(element),
