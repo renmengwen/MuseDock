@@ -690,7 +690,7 @@ async function inspectFrameHtmlLayout(options = {}) {
     const cueSamples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
       ? []
       : await cameraCueSampleTimes(page, durationSec);
-    // ponytail: Camera QA cost stays O(cues); only add tiered per-cue quotas after measured browser cost, never truncate later cues.
+    // ponytail: sorting is O(n log n); dedupe and browser samples grow linearly with cues. Tier only after measured cost; never truncate later cues.
     const samples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
       ? normalizeSampleTimes(sampleTimesSec, durationSec)
       : normalizeSampleTimes([...defaultSampleTimes(durationSec), ...cueSamples], durationSec);
