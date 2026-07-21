@@ -8,7 +8,7 @@ const { runFrameHtmlPhase } = require('../server/services/creative-video/html-vi
 const projectStore = require('../server/services/creative-video/html-video/projectStore');
 const { createEmptyProject } = require('../server/services/creative-video/html-video/projectSchema');
 
-const validHtml = '<!doctype html><html><head><meta name="viewport" content="width=1920,height=1080"><style>html,body{width:1920px;height:1080px;margin:0}@keyframes enter{from{opacity:0}to{opacity:1}}main{animation:enter .3s}</style></head><body data-hv-canvas data-width="1920" data-height="1080"><main><h1 data-text-key="headline">标题</h1><p data-text-key="subtitle">副标题</p><section data-text-key="body">正文</section></main></body></html>';
+const validHtml = '<!doctype html><html><head><meta name="viewport" content="width=1920,height=1080"><style>html,body{width:1920px;height:1080px;margin:0}@keyframes enter{from{opacity:0}to{opacity:1}}main{animation:enter .3s}</style></head><body data-hv-canvas data-width="1920" data-height="1080"><main><h1 data-text-key="headline">标题</h1><p data-text-key="subtitle">副标题</p><section data-text-key="body">正文</section><!-- layout-source:../assets/layout-source.png --></main></body></html>';
 
 (async () => {
   const projectDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-layout-blocking-'));
@@ -24,9 +24,14 @@ const validHtml = '<!doctype html><html><head><meta name="viewport" content="wid
   });
   project.visual_plan = { beats: [], style_profile: null };
   await projectStore.saveProject(projectDir, project);
+  const assetPath = path.join(projectDir, 'assets', 'layout-source.png');
+  await fs.mkdir(path.dirname(assetPath), { recursive: true });
+  await fs.writeFile(assetPath, 'layout-source');
 
   let modelCalls = 0;
   let qaCalls = 0;
+  const qaHtmlPaths = [];
+  const resolvedAssetPaths = [];
   const result = await runFrameHtmlPhase({
     model: {
       async callTextModel() {
@@ -48,8 +53,14 @@ const validHtml = '<!doctype html><html><head><meta name="viewport" content="wid
     regenerateFrameHtmlRequested: false,
     runLayoutQa: true,
     layoutQaService: {
-      async inspectFrameHtmlLayout() {
+      async inspectFrameHtmlLayout({ htmlPath }) {
         qaCalls += 1;
+        qaHtmlPaths.push(htmlPath);
+        const qaHtml = await fs.readFile(htmlPath, 'utf8');
+        const relativeAssetPath = qaHtml.match(/layout-source:([^\s]+)\s*-->/)?.[1];
+        const resolvedAssetPath = path.resolve(path.dirname(htmlPath), relativeAssetPath);
+        await fs.readFile(resolvedAssetPath);
+        resolvedAssetPaths.push(resolvedAssetPath);
         return {
           success: false,
           issues: [{ code: 'camera_target_out_of_safe_area', message: '摄影机目标离开安全区', severity: 'error' }],
@@ -69,6 +80,9 @@ const validHtml = '<!doctype html><html><head><meta name="viewport" content="wid
 
   assert.equal(modelCalls, 2, '首版和布局修复版应各生成一次');
   assert.equal(qaCalls, 2, '首版和修复版应各检查一次布局');
+  assert.ok(qaHtmlPaths.every(htmlPath => path.dirname(htmlPath) === path.join(projectDir, 'frames')));
+  assert.deepEqual(resolvedAssetPaths, [assetPath, assetPath]);
+  for (const htmlPath of qaHtmlPaths) await assert.rejects(fs.access(htmlPath), { code: 'ENOENT' });
   assert.equal(result.ok, false);
   assert.equal(result.failure.diagnostics[0].code, 'frame_layout_qa_unresolved');
   assert.equal(result.failure.diagnostics[0].severity, 'error');

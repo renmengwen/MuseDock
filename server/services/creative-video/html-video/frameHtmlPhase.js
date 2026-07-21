@@ -112,20 +112,24 @@ async function inspectGeneratedFrameLayout({
   target,
 }) {
   const safeSceneId = String(sceneId || node.id || 'frame').replace(/[^A-Za-z0-9_.-]+/g, '_') || 'frame';
-  const relativePath = `frames/.qa/${safeSceneId}.html`;
+  const relativePath = `frames/.qa-${safeSceneId}.html`;
   const absolutePath = projectStore.resolveProjectPath(projectDir, relativePath);
   await fsp.mkdir(path.dirname(absolutePath), { recursive: true });
   await fsp.writeFile(absolutePath, String(html || ''), 'utf8');
   try {
-    return await layoutQaService.inspectFrameHtmlLayout({
-      htmlPath: absolutePath,
-      frame: { id: node.id || sceneId },
-      resolution: frameHtmlAgent.resolveResolution(target),
-      durationSec: trustedSceneDuration(scene || {}, node),
-    });
-  } catch (error) {
-    // ponytail: QA 基建失败不拦帧，渲染前的 layout gate 仍是最终兜底
-    return { success: true, issues: [], metrics: { skipped: true, error: error.message || String(error) } };
+    try {
+      return await layoutQaService.inspectFrameHtmlLayout({
+        htmlPath: absolutePath,
+        frame: { id: node.id || sceneId },
+        resolution: frameHtmlAgent.resolveResolution(target),
+        durationSec: trustedSceneDuration(scene || {}, node),
+      });
+    } catch (error) {
+      // ponytail: QA 基建失败不拦帧，渲染前的 layout gate 仍是最终兜底
+      return { success: true, issues: [], metrics: { skipped: true, error: error.message || String(error) } };
+    }
+  } finally {
+    await fsp.unlink(absolutePath).catch(() => {});
   }
 }
 
