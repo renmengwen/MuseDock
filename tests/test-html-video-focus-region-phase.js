@@ -543,6 +543,36 @@ async function testMissingModelWritesNoRecord() {
   await fs.rm(projectDir, { recursive: true, force: true });
 }
 
+async function testDomEvidenceIsNotGatedByDurableRecord() {
+  const bytes = Buffer.from('dom-vs-record-bytes');
+  const overrides = {
+    focus_regions: [],
+    // 记录声称 empty，但 DOM 证据免费且确定性，必须先于缓存判定生效并产出 A 级 region。
+    focus_analysis: focusAnalysisRecord(bytes),
+    page_capture_evidence: {
+      version: 1,
+      image_sha256: sha256Hex(bytes),
+      elements: [{ text: 'DOM 主体', region: { x: 0.1, y: 0.1, width: 0.4, height: 0.4 } }],
+    },
+  };
+  const projectDir = await createDurableProject('focus-region-dom-record-', [{ id: 'domrec', bytes, overrides }]);
+  const model = visionModel(() => { throw new Error('DOM 命中后不得调用 vision'); });
+  const result = await runFocusRegionPhase({
+    visualPlan: selectedPlan('domrec'),
+    creativeContext: { asset_context: { assets: [asset('domrec', overrides)] } },
+    projectDir,
+    target: { sourceImageAnalysisEnabled: true },
+    services: { aiTextModel: model },
+  });
+  assert.equal(model.calls.length, 0);
+  const item = result.creativeContext.asset_context.assets[0];
+  assert.equal(item.focus_regions.length, 1);
+  assert.equal(item.focus_regions[0].method, 'dom');
+  assert.equal(item.focus_regions[0].trust_level, 'A');
+  assert.deepEqual(result.diagnostics, []);
+  await fs.rm(projectDir, { recursive: true, force: true });
+}
+
 (async () => {
   await testDomWinsAndUnselectedIsUntouched();
   await testDomRequiresActualProjectBytesBinding();
@@ -551,6 +581,7 @@ async function testMissingModelWritesNoRecord() {
   await testDurableCacheSkipsAnalyzedAssetsAcrossRuns();
   await testDurableCacheInvalidationTriggersReanalysis();
   await testMissingModelWritesNoRecord();
+  await testDomEvidenceIsNotGatedByDurableRecord();
   console.log('html-video focus region phase tests passed');
 })().catch(error => {
   console.error(error);
