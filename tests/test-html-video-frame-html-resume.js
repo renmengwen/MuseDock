@@ -15,6 +15,7 @@ aiImageModel.isConfigured = async () => false;
 const frameHtmlAgent = require('../server/services/creative-video/html-video/frameHtmlAgent');
 const frameHtmlPhase = require('../server/services/creative-video/html-video/frameHtmlPhase');
 const visualPlanService = require('../server/services/creative-video/html-video/visualPlanService');
+const { planFocusCues } = require('../server/services/creative-video/html-video/focusCuePlanner');
 const { matchVisualBeatsToRenderers } = require('../server/services/creative-video/html-video/visualRouteMatcher');
 const frameFallbackBuilder = require('../server/services/creative-video/html-video/frameFallbackBuilder');
 const projectOrchestrator = require('../server/services/creative-video/html-video/projectOrchestrator');
@@ -349,7 +350,7 @@ async function main() {
     // P1-2：Frame HTML 输入指纹纯函数——同输入同指纹，任一策略/主题/素材/文案维度变化即指纹变化
     {
       const { computeFrameInputFingerprint, FRAME_PROMPT_VERSION } = frameHtmlPhase;
-      assert.equal(FRAME_PROMPT_VERSION, 3, 'C-04 Shot DOM 与共享时钟语义变化必须使旧 checkpoint 失效');
+      assert.equal(FRAME_PROMPT_VERSION, 4, 'D-07 摄影机受管运行时结构变化必须使旧 checkpoint 失效');
       const target = { resolution: { width: 1080, height: 1920 } };
       const makeNode = () => ({
         id: 'scene_01',
@@ -380,6 +381,7 @@ async function main() {
         },
       });
       const base = computeFrameInputFingerprint(args());
+      assert.notEqual(base, 'c1483f6d4f2f822a42fff49a2dd50d8640a8f90037751f47a90650e23ea47ec0', 'v3 产物指纹不得在 v4 继续命中');
       assert.ok(/^[0-9a-f]{64}$/.test(base), '指纹应为 sha256 hex');
       assert.equal(computeFrameInputFingerprint(args()), base, '同输入应得到同指纹');
       // asset_refs 顺序不影响指纹（排序稳定）
@@ -421,6 +423,80 @@ async function main() {
       const unrelatedAssetChanged = args();
       unrelatedAssetChanged.creativeContext.asset_context.assets[1].path = 'assets/gen-02-v2.png';
       assert.equal(computeFrameInputFingerprint(unrelatedAssetChanged), base, '未被 Shot 引用的 registry 素材不应扩大失效');
+    }
+
+    // D-07：旧 v3 checkpoint 即使 HTML 文件仍存在，也必须重建并物化摄影机受管运行时。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-camera-v3-resume-'));
+      const workflowId = '202606260000000020_camera_v3';
+      const runId = 'run_camera_v3';
+      const graph = contentGraph('摄影机 v3 恢复');
+      graph.nodes[0].asset_refs = [{ asset_id: 'camera_asset', usage: 'subject' }];
+      graph.nodes[0].metadata = {
+        captions: sceneSpec().scenes[0].captions,
+        narration_text: sceneSpec().scenes[0].narration_text,
+      };
+      const asset = {
+        id: 'camera_asset',
+        media_type: 'image',
+        status: 'ready',
+        requirement: 'preferred',
+        path: 'assets/camera.png',
+        frame_src: '../assets/camera.png',
+        focus_regions: [{
+          id: 'region_1',
+          label: '第一幕旁白',
+          region: { x: 0.2, y: 0.2, width: 0.3, height: 0.2 },
+          focus_point: { x: 0.35, y: 0.3 },
+          method: 'dom',
+          confidence_level: 'high',
+          verification: { status: 'verified', method: 'dom_match', evidence: '测试固定区域。' },
+          trust_level: 'A',
+        }],
+      };
+      const creativeContext = { asset_context: { assets: [asset] } };
+      const { projectDir } = await setupProject(rootDir, workflowId, runId, {
+        contentGraph: graph,
+        projectAssets: [asset],
+        assetContext: creativeContext,
+      });
+      const project = await projectStore.loadProject(projectDir);
+      planFocusCues({ visualPlan: project.visual_plan, creativeContext, sceneSpec: sceneSpec(), mediaOptions: {} });
+      const decisions = matchVisualBeatsToRenderers({ visualPlan: project.visual_plan });
+      const expanded = workflow.expandContentGraphToVisualBeats({ graph, visualPlan: project.visual_plan, visualDecisions: decisions });
+      const target = workflow.applyRenderTargetDefaults(workflow.resolveRenderTarget({ generate_audio: false }, sceneSpec()));
+      const cameraNode = expanded.nodes.find(node => node.scene_id === 'scene_01');
+      const currentFingerprint = frameHtmlPhase.computeFrameInputFingerprint({
+        node: cameraNode,
+        continuityMode: 'beat_mp4',
+        target,
+        creativeContext,
+      });
+      const oldV3Fingerprint = 'b99c883d3accbc4888e02a9c105d511a93c919df422063a83ee9413928a6ba33';
+      assert.notEqual(currentFingerprint, oldV3Fingerprint, 'v4 摄影机产物指纹必须与已记录的 v3 指纹不同');
+      project.generation_checkpoint.stages.frame_html.frames.scene_01.input_fingerprint = oldV3Fingerprint;
+      await projectStore.saveProject(projectDir, project);
+
+      const calls = [];
+      frameHtmlAgent.generateFrameHtml = async args => {
+        calls.push(args.node.id);
+        return { success: true, html: validHtml(args.node.id, args.node.id) };
+      };
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        creativeContextOverride: creativeContext,
+        aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
+      });
+      assert.equal(result.success, true);
+      assert.ok(calls.includes('scene_01'), '旧 v3 摄影机 checkpoint 不得复用');
+      const persisted = await projectStore.loadProject(projectDir);
+      const checkpoint = persisted.generation_checkpoint.stages.frame_html.frames.scene_01;
+      assert.equal(checkpoint.input_fingerprint, currentFingerprint, '重建后必须持久化 v4 指纹');
+      const html = await fs.readFile(path.join(projectDir, checkpoint.html_path), 'utf8');
+      assert.match(html, /data-camera-cues=/, '重建 HTML 必须物化 camera cue 数据');
+      assert.match(html, /computeCameraTransform/, '重建 HTML 必须包含 D-07 摄影机运行时');
     }
 
     // P1-2：shouldReuseFrameHtml 指纹判定——匹配复用 / 不匹配重生成 / 无指纹一律不复用
