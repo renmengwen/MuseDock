@@ -90,12 +90,16 @@ Goal 早期记录的五个用户改动已经由 `da95a40` 保留并进入当前�
 
 ```yaml
 task_id: E-01
-status: leased
-owner: codex-worker-e01
-lease_released: false
+status: frozen_for_review
+owner: unassigned
+lease_released: true
 code_base_commit: c2f7dba
 worktree: D:\code3\MuseDock-worktrees\asset-first-e01
 branch: codex/asset-first-e01
+candidate_commit: ce121d70d08a46c13f9fc94b536250ceaa193372
+frozen_revision: ce121d70d08a46c13f9fc94b536250ceaa193372
+frozen_tree: 9aff90ccc6ffd39c7814a649c41e60541d9cffbe
+revision_valid: true
 allowed_paths:
   - tests/test-html-video-camera-runtime-chromium.js
 forbidden_paths:
