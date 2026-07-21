@@ -20,6 +20,18 @@ const STATUSES = new Set(['ready', 'rejected']);
 const FOCUS_METHODS = new Set(['manual', 'dom', 'ocr', 'detector', 'vision', 'generation_metadata']);
 const FOCUS_VERIFICATION_STATUSES = new Set(['verified', 'candidate', 'rejected']);
 const FOCUS_CONFIDENCE_LEVELS = new Set(['high', 'medium', 'low']);
+const FOCUS_ANALYSIS_VERSION = 1;
+const FOCUS_ANALYSIS_STATUSES = new Set(['success', 'empty']);
+// focus_analysis 是跨 run 复用 vision 结果的缓存凭据：只允许这 7 个字段，缺一多一都整体丢弃。
+const FOCUS_ANALYSIS_FIELDS = [
+  'version',
+  'content_sha256',
+  'contract_version',
+  'provider',
+  'model',
+  'prompt_version',
+  'status',
+];
 const FORMAL_FIELDS = [
   'media_type',
   'origin',
@@ -223,6 +235,32 @@ function normalizeFocusRegions(input) {
     .filter(Boolean);
 }
 
+// 规范化 focus_analysis 缓存记录：非法结构一律返回 null（安全丢弃），幂等且总是返回新对象。
+function normalizeFocusAnalysis(input) {
+  if (!isPlainObject(input)) return null;
+  if (Object.keys(input).length !== FOCUS_ANALYSIS_FIELDS.length
+    || FOCUS_ANALYSIS_FIELDS.some(field => !hasOwn(input, field))) return null;
+  if (input.version !== FOCUS_ANALYSIS_VERSION) return null;
+  const contentSha256 = safeString(input.content_sha256).toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(contentSha256)) return null;
+  const contractVersion = safeString(input.contract_version);
+  const provider = safeString(input.provider);
+  const model = safeString(input.model);
+  const promptVersion = safeString(input.prompt_version);
+  const status = safeString(input.status).toLowerCase();
+  if (!contractVersion || !provider || !model || !promptVersion
+    || !FOCUS_ANALYSIS_STATUSES.has(status)) return null;
+  return {
+    version: FOCUS_ANALYSIS_VERSION,
+    content_sha256: contentSha256,
+    contract_version: contractVersion,
+    provider,
+    model,
+    prompt_version: promptVersion,
+    status,
+  };
+}
+
 function resolveInputOrigin(input, assetId) {
   const legacySource = safeString(input.source).toLowerCase();
   const legacyOrigin = legacySource ? LEGACY_SOURCE_TO_ORIGIN[legacySource] : '';
@@ -271,6 +309,12 @@ function normalizeVisualAsset(input = {}) {
     ...(parentAssetId ? { parent_asset_id: parentAssetId } : {}),
   };
   if (hasOwn(input, 'focus_regions')) normalized.focus_regions = normalizeFocusRegions(input.focus_regions);
+  if (hasOwn(input, 'focus_analysis')) {
+    const focusAnalysis = normalizeFocusAnalysis(input.focus_analysis);
+    // ...input 会把非法记录带进来，必须显式删除，保证输出不含该字段。
+    if (focusAnalysis) normalized.focus_analysis = focusAnalysis;
+    else delete normalized.focus_analysis;
+  }
   return normalized;
 }
 
@@ -349,6 +393,7 @@ module.exports = {
   MEDIA_TYPES,
   STATUSES,
   normalizeFocusRegions,
+  normalizeFocusAnalysis,
   isGeneratedVisualAsset,
   mergeVisualAssetFormalFields,
   normalizeVisualAsset,

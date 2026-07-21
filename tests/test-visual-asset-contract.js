@@ -3,6 +3,7 @@ const assert = require('assert');
 const {
   isGeneratedVisualAsset,
   mergeVisualAssetFormalFields,
+  normalizeFocusAnalysis,
   normalizeVisualAsset,
   mergeVisualAssets,
   mergeVisualAssetContexts,
@@ -417,6 +418,110 @@ function testDualAxisMergePresenceSemantics() {
   );
 }
 
+function focusAnalysisRecord(overrides = {}) {
+  return {
+    version: 1,
+    content_sha256: 'a'.repeat(64),
+    contract_version: 'v1',
+    provider: 'mock-ai',
+    model: 'vision-mock-1',
+    prompt_version: 'v1',
+    status: 'empty',
+    ...overrides,
+  };
+}
+
+function analysisAsset(focusAnalysis) {
+  return normalizeVisualAsset({
+    id: 'analysis_asset',
+    origin: 'page_capture',
+    path: 'assets/analysis.png',
+    focus_analysis: focusAnalysis,
+  });
+}
+
+function testFocusAnalysisWhitelistAndCanonicalization() {
+  const canonical = normalizeFocusAnalysis(focusAnalysisRecord({
+    content_sha256: 'A'.repeat(64),
+    contract_version: ' v1 ',
+    provider: ' mock-ai ',
+    model: ' vision-mock-1 ',
+    prompt_version: ' v1 ',
+    status: ' Empty ',
+  }));
+  assert.deepEqual(canonical, focusAnalysisRecord(), '合法记录应 trim 并统一小写 sha/status');
+  assert.deepEqual(Object.keys(canonical), [
+    'version', 'content_sha256', 'contract_version', 'provider', 'model', 'prompt_version', 'status',
+  ]);
+  assert.deepEqual(normalizeFocusAnalysis(canonical), canonical, 'normalizeFocusAnalysis 必须幂等');
+  assert.notEqual(normalizeFocusAnalysis(canonical), canonical, '每次 normalize 应返回全新对象');
+  assert.equal(normalizeFocusAnalysis(focusAnalysisRecord({ status: 'success' })).status, 'success');
+
+  const asset = analysisAsset(focusAnalysisRecord());
+  assert.deepEqual(asset.focus_analysis, focusAnalysisRecord());
+  assert.deepEqual(normalizeVisualAsset(asset), asset, 'focus_analysis normalize 必须幂等');
+  const missing = normalizeVisualAsset({ id: 'no_analysis', origin: 'page_capture', path: 'assets/a.png' });
+  assert.equal(Object.prototype.hasOwnProperty.call(missing, 'focus_analysis'), false, '字段缺失必须保持缺失');
+}
+
+function testInvalidFocusAnalysisIsSafelyDropped() {
+  const invalidInputs = [
+    null,
+    'bad',
+    42,
+    [focusAnalysisRecord()],
+    { ...focusAnalysisRecord(), extra: 'field' },
+    focusAnalysisRecord({ version: 2 }),
+    focusAnalysisRecord({ version: '1' }),
+    focusAnalysisRecord({ content_sha256: 'a'.repeat(63) }),
+    focusAnalysisRecord({ content_sha256: `z${'a'.repeat(63)}` }),
+    focusAnalysisRecord({ content_sha256: '' }),
+    focusAnalysisRecord({ contract_version: '   ' }),
+    focusAnalysisRecord({ contract_version: 7 }),
+    focusAnalysisRecord({ provider: '' }),
+    focusAnalysisRecord({ model: '' }),
+    focusAnalysisRecord({ prompt_version: '' }),
+    focusAnalysisRecord({ status: 'failed' }),
+    focusAnalysisRecord({ status: '' }),
+  ];
+  for (const field of Object.keys(focusAnalysisRecord())) {
+    const { [field]: _dropped, ...withoutField } = focusAnalysisRecord();
+    invalidInputs.push(withoutField);
+  }
+  for (const input of invalidInputs) {
+    assert.equal(normalizeFocusAnalysis(input), null, `非法记录应返回 null：${JSON.stringify(input)}`);
+    const asset = analysisAsset(input);
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(asset, 'focus_analysis'),
+      false,
+      `非法记录应从 asset 上安全丢弃：${JSON.stringify(input)}`,
+    );
+  }
+}
+
+function testFocusAnalysisMergePresenceSemantics() {
+  const existing = analysisAsset(focusAnalysisRecord());
+  const preserved = mergeVisualAssets([existing], [{ id: existing.id, title: '只更新标题' }])[0];
+  assert.deepEqual(preserved.focus_analysis, focusAnalysisRecord(), 'incoming 缺失 focus_analysis 时应保留已有值');
+
+  const replaced = mergeVisualAssets([existing], [{
+    id: existing.id,
+    focus_analysis: focusAnalysisRecord({ status: 'success', content_sha256: 'b'.repeat(64) }),
+  }])[0];
+  assert.deepEqual(replaced.focus_analysis, focusAnalysisRecord({ status: 'success', content_sha256: 'b'.repeat(64) }));
+  assert.deepEqual(mergeVisualAssets([replaced], [replaced]), [replaced], 'focus_analysis merge 必须幂等');
+
+  const corrupted = mergeVisualAssets([existing], [{
+    id: existing.id,
+    focus_analysis: { ...focusAnalysisRecord(), injected: true },
+  }])[0];
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(corrupted, 'focus_analysis'),
+    false,
+    '注入非法记录时应整体丢弃，避免污染缓存判定',
+  );
+}
+
 testGeneratedIdentityUsesFormalOriginFirst();
 testFormalMergeRejectsInvalidEnums();
 testLegacySourceCompatibility();
@@ -431,5 +536,8 @@ testDualAxisVerificationStatusMatrix();
 testDualAxisVerificationFailsClosed();
 testDualAxisTrustDerivationMatrix();
 testDualAxisMergePresenceSemantics();
+testFocusAnalysisWhitelistAndCanonicalization();
+testInvalidFocusAnalysisIsSafelyDropped();
+testFocusAnalysisMergePresenceSemantics();
 
 console.log('visual asset contract tests passed');
