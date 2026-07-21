@@ -93,7 +93,7 @@ task_id: D-05
 status: leased
 owner: claude-worker
 lease_released: false
-code_base_commit: dfd88dd7ab9463732b13501a446d3bd6c22a48ac
+code_base_commit: dfd88dde244f7d62c6529be16936f432ccbf27d7
 worktree: D:\code3\MuseDock-worktrees\asset-first-d05
 branch: codex/asset-first-d05
 allowed_paths:
@@ -138,7 +138,7 @@ task_id: D-07
 status: leased
 owner: claude-worker
 lease_released: false
-code_base_commit: dfd88dd7ab9463732b13501a446d3bd6c22a48ac
+code_base_commit: dfd88dde244f7d62c6529be16936f432ccbf27d7
 worktree: D:\code3\MuseDock-worktrees\asset-first-d07
 branch: codex/asset-first-d07
 allowed_paths:
