@@ -4,6 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const agentRuns = require('../server/services/agent/agentRuns');
+const sceneTts = require('../server/services/tts/sceneTts');
 
 const requirements = Array.from({ length: 6 }, (_, index) => ({
   scene_id: `S${String(index + 1).padStart(2, '0')}`,
@@ -103,7 +104,8 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
         ttsRunIds.push(ttsRunId);
         ttsCalls += 1;
         const value = ttsResult(duration, scenes, `attempt-${ttsCalls}`);
-        value.scene_tts.path = `${ttsRunId}-tts.wav`;
+        value.scene_tts.path = `${sceneTts.normalizeSceneTtsRunId(ttsRunId)}-tts.wav`;
+        value.scene_tts.file_name = path.basename(value.scene_tts.path);
         if (aggregateDurations[ttsCalls - 1] != null) value.scene_tts.duration = aggregateDurations[ttsCalls - 1];
         if (omitLastScene) value.scene_tts.scenes.pop();
         return value;
@@ -131,7 +133,12 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
   }
   assert.equal(successState.audio.status, 'ready');
   assert.ok(Math.abs(successState.audio.duration - 91.9) < 0.01);
+  assert.equal(successState.audio.file_name, `${sceneTts.normalizeSceneTtsRunId(success.ttsRunIds[1])}-tts.wav`);
   assert.equal(path.basename(agentRuns.resolveDouyinRunTtsFile(success.awemeId, success.runId, successState.audio.file_name, { rootDir: success.rootDir })), successState.audio.file_name);
+  assert.throws(
+    () => agentRuns.resolveDouyinRunTtsFile(success.awemeId, success.runId, `${sceneTts.normalizeSceneTtsRunId(success.ttsRunIds[0])}-tts.wav`, { rootDir: success.rootDir }),
+    /Invalid Agent TTS file request/,
+  );
   assert.throws(
     () => agentRuns.resolveDouyinRunTtsFile(success.awemeId, success.runId, `${success.runId}-audio-foreign-1-tts.wav`, { rootDir: success.rootDir }),
     /Invalid Agent TTS file request/,

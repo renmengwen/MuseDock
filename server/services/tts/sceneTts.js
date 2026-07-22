@@ -32,6 +32,10 @@ function safeFormat(format) {
   return clean || 'wav';
 }
 
+function normalizeSceneTtsRunId(runId) {
+  return String(runId || 'run').replace(/[^A-Za-z0-9_-]/g, '') || 'run';
+}
+
 async function getExistingExecutable(filePath) {
   if (!filePath) return null;
   try {
@@ -100,7 +104,7 @@ function fail(message, extra = {}) {
 async function synthesizeSceneTts(options = {}) {
   const scenes = Array.isArray(options.scenes) ? options.scenes : [];
   const outputDir = typeof options.outputDir === 'string' ? options.outputDir : '';
-  const runId = String(options.runId || 'run').replace(/[^A-Za-z0-9_-]/g, '') || 'run';
+  const runId = normalizeSceneTtsRunId(options.runId);
   const format = safeFormat(options.format || 'wav');
   const voice = normalizeVoice(options.voice);
   const stylePrompt = options.stylePrompt || options.style_prompt || '';
@@ -259,5 +263,6 @@ async function synthesizeSceneTts(options = {}) {
 module.exports = {
   synthesizeSceneTts,
   getSceneAudioFileName,
+  normalizeSceneTtsRunId,
   normalizeVoice,
 };

@@ -1312,10 +1312,13 @@ function resolveDouyinRunTtsFile(awemeId, runId, fileName, options = {}) {
   }
   const isLegacyName = name.startsWith(`${runId}-tts.`);
   const publishedOperationId = String(publishedAudio.operation_id || '');
+  const publishedIsolatedPrefixes = [1, 2].map(attempt => (
+    `${defaultSceneTts.normalizeSceneTtsRunId(`${runId}-audio-${publishedOperationId}-${attempt}`)}-tts.`
+  ));
   const isPublishedIsolatedName = publishedAudio.status === 'ready'
     && name === String(publishedAudio.file_name || '')
     && publishedOperationId
-    && name.startsWith(`${isolatedPrefix}${publishedOperationId}-`);
+    && publishedIsolatedPrefixes.some(prefix => name.startsWith(prefix));
   if (!name || path.basename(name) !== name || (!isLegacyName && !isPublishedIsolatedName)) {
     throw new Error('Invalid Agent TTS file request');
   }
