@@ -234,7 +234,11 @@ function previewHtml(
 
   async function inspectInline(name, body, sampleTimesSec = [0.1], layoutOptions = {}) {
     const inlinePath = path.join(tempDir, name);
-    await fs.writeFile(inlinePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:0 0}</style></head><body>${body}</body></html>`, 'utf8');
+    const productionShapeBody = body.replace(
+      /<figure(?=[^>]*data-shot-requirement="required")(?![^>]*data-window-start-sec)/g,
+      '<figure data-window-start-sec="0" data-window-end-sec="2"',
+    );
+    await fs.writeFile(inlinePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:0 0}</style></head><body>${productionShapeBody}</body></html>`, 'utf8');
     return inspectFrameHtmlLayout({
       htmlPath: inlinePath,
       frame: { id: name, duration_sec: 2 },
@@ -253,7 +257,11 @@ function previewHtml(
     await fs.writeFile(path.join(assetsDir, 'opaque.png'), Buffer.from(opaquePngBase64, 'base64'));
     await fs.writeFile(path.join(assetsDir, 'opaque.jpg'), Buffer.from(opaqueJpegBase64, 'base64'));
     const framePath = path.join(framesDir, name);
-    await fs.writeFile(framePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}</style></head><body>${body}</body></html>`, 'utf8');
+    const productionShapeBody = body.replace(
+      /<figure(?=[^>]*data-shot-requirement="required")(?![^>]*data-window-start-sec)/g,
+      '<figure data-window-start-sec="0" data-window-end-sec="2"',
+    );
+    await fs.writeFile(framePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}</style></head><body>${productionShapeBody}</body></html>`, 'utf8');
     return inspectFrameHtmlLayout({
       htmlPath: framePath,
       frame: { id: name, duration_sec: 2 },
@@ -266,6 +274,66 @@ function previewHtml(
     const style = `filter:sepia(.2)${transitionProperty ? `;transition:${transitionProperty} 10s linear` : ''}`;
     return `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay" style="--fixture:yes;transform:translateZ(0)"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="visibility-${requirement}" data-shot-requirement="${requirement}"><img data-shot-layer="background" style="${style}" src="${source}"><img data-shot-layer="foreground" data-layout-qa-required-layer-probe="fixture-original" style="${style}" src="${source}" srcset="${source}"></figure></section>`;
   };
+
+  const shortRequiredRuntime = (activeAtMidpoint, covered = false) => `
+    <section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay">
+      <figure id="short-required" data-hv-shot="true" data-shot-id="short-required" data-asset-id="asset-short"
+        data-shot-requirement="required" data-window-start-sec="0.1" data-window-end-sec="1.1">
+        <img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}">
+      </figure>
+      <figure id="short-fallback" data-hv-shot="true" data-shot-id="short-fallback" data-shot-requirement="optional">
+        <img data-shot-layer="background" src="${secondImageUrl}"><img data-shot-layer="foreground" src="${secondImageUrl}">
+      </figure>
+    </section>
+    ${covered ? '<div aria-hidden="true" style="position:absolute;inset:0;z-index:9;background:#eee"></div>' : ''}
+    <script>window.__mpSetTimelineTime=function(time){const shot=document.getElementById('short-required');
+      const fallback=document.getElementById('short-fallback');const active=${activeAtMidpoint ? 'time>=.1&&time<1.1' : 'false'};
+      shot.style.display=active?'block':'none';fallback.style.display=active?'none':'block';
+      if(active){shot.setAttribute('data-shot-active','true');fallback.removeAttribute('data-shot-active')}
+      else{shot.removeAttribute('data-shot-active');fallback.setAttribute('data-shot-active','true')}};window.__mpSetTimelineTime(0)</script>`;
+
+  const shortOccluded = await inspectInline(
+    'required-short-window-occluded.html', shortRequiredRuntime(true, true), [1.8],
+  );
+  assert.deepEqual(shortOccluded.metrics.expected_required_shot_ids, ['short-required']);
+  assert.ok(shortOccluded.metrics.samples.some(sample => sample.sample_time_sec === 0.6),
+    '显式 samples 也必须合并 required Shot 稳定中点');
+  assert.ok(shortOccluded.issues.some(issue => (
+    issue.code === 'required_asset_occluded'
+    && issue.details.shot_id === 'short-required'
+    && issue.sample_time_sec === 0.6
+  )), `短窗口 required Shot 被遮挡时必须在中点执行真实像素探针：${JSON.stringify(shortOccluded)}`);
+
+  const shortVisible = await inspectInline(
+    'required-short-window-visible.html', shortRequiredRuntime(true), [1.8],
+  );
+  assert.equal(shortVisible.success, true, JSON.stringify(shortVisible.issues));
+  assert.ok(shortVisible.metrics.image_sequence_visibility_samples.some(sample => (
+    sample.shot_id === 'short-required' && sample.sample_time_sec === 0.6 && sample.passed
+  )), '短窗口 required Shot 可见时必须留下中点通过证据');
+
+  const shortNeverActive = await inspectInline(
+    'required-short-window-never-active.html', shortRequiredRuntime(false), [1.8],
+  );
+  const missingEvidence = shortNeverActive.issues.find(issue => issue.code === 'required_asset_visibility_evidence_missing');
+  assert.equal(shortNeverActive.success, false, 'Runtime 未激活 required Shot 时不得以零证据通过');
+  assert.deepEqual(missingEvidence?.details, {
+    expected: ['short-required'], evidenced: [], missing: ['short-required'], sample_times: [0.6, 1.8],
+  });
+
+  const invalidManifestPath = path.join(tempDir, 'required-invalid-manifest.html');
+  await fs.writeFile(invalidManifestPath, `<!doctype html><html><body><section data-hv-image-sequence="true">
+    <figure data-hv-shot="true" data-shot-requirement="required" data-window-start-sec="0" data-window-end-sec="1"></figure>
+    <figure data-hv-shot="true" data-shot-id="duplicate" data-shot-requirement="required" data-window-start-sec="x" data-window-end-sec="1"></figure>
+    <figure data-hv-shot="true" data-shot-id="duplicate" data-shot-requirement="required" data-window-start-sec="1" data-window-end-sec="1"></figure>
+  </section></body></html>`, 'utf8');
+  const invalidManifest = await inspectFrameHtmlLayout({
+    htmlPath: invalidManifestPath, frame: { id: 'invalid-manifest', duration_sec: 2 }, resolution,
+  });
+  const manifestIssue = invalidManifest.issues.find(issue => issue.code === 'required_asset_visibility_manifest_invalid');
+  assert.equal(invalidManifest.success, false, '缺ID、重复ID及无效窗口必须在采样前阻断');
+  assert.equal(manifestIssue?.details.errors.length, 3);
+  assert.deepEqual(invalidManifest.metrics.samples, []);
   const pauseOpacityTransitionsAtMidpoint = (...ids) => `<script>(()=>{for(const id of ${JSON.stringify(ids)}){const shot=document.getElementById(id);void shot.offsetWidth;shot.style.opacity='1';const transition=shot.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='opacity');if(!transition)throw new Error('fixture opacity transition missing: '+id);transition.pause();transition.playbackRate=.75;transition.currentTime=175}})()</script>`;
   const pauseFilterTransitionsAtMidpoint = () => `<script>(()=>{for(const image of document.querySelectorAll('[data-shot-layer]')){void image.offsetWidth;image.style.filter='sepia(.8)';const transition=image.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='filter');if(!transition)throw new Error('fixture filter transition missing');transition.pause();transition.playbackRate=.6;transition.currentTime=5000}})()</script>`;
 
@@ -299,13 +367,13 @@ function previewHtml(
   const freezeSwitch = await inspectInline(
     'required-freeze-switch.html',
     `<section data-hv-image-sequence="true" data-sequence-mode="semantic_compare">
-      <figure id="freeze-shot-a" data-hv-shot="true" data-shot-active="true" data-shot-id="freeze-a" data-shot-requirement="required"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure>
+      <figure id="freeze-shot-a" data-hv-shot="true" data-shot-active="true" data-shot-id="freeze-a" data-shot-requirement="optional"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure>
       <figure id="freeze-shot-b" data-hv-shot="true" data-shot-id="freeze-b" data-shot-requirement="required"><img data-shot-layer="background" src="${secondImageUrl}"><img data-shot-layer="foreground" src="${secondImageUrl}"></figure>
     </section><script>window.__hvPlaybackClock={__hvOwner:'musedock-playback-clock-v1',_paused:false,pause(){this._paused=true;document.getElementById('freeze-shot-a').removeAttribute('data-shot-active');document.getElementById('freeze-shot-b').setAttribute('data-shot-active','true')},play(){this._paused=false},paused(){return this._paused}}</script>`,
   );
   assert.equal(freezeSwitch.success, true, JSON.stringify(freezeSwitch.issues));
   assert.deepEqual(
-    freezeSwitch.metrics.image_sequence_visibility_samples.map(metric => metric.shot_id),
+    [...new Set(freezeSwitch.metrics.image_sequence_visibility_samples.map(metric => metric.shot_id))],
     ['freeze-b'],
     'pause() 触发 A→B 后只能保存并探测冻结后的 active required Shot B',
   );
@@ -452,8 +520,9 @@ function previewHtml(
   );
   const visibleRequiredMetrics = twoRequired.metrics.image_sequence_visibility_samples.filter(metric => metric.shot_id === 'required-visible');
   const hiddenRequiredMetrics = twoRequired.metrics.image_sequence_visibility_samples.filter(metric => metric.shot_id === 'required-hidden');
-  assert.equal(visibleRequiredMetrics.length, 2);
-  assert.equal(hiddenRequiredMetrics.length, 2);
+  assert.deepEqual(twoRequired.metrics.expected_required_shot_ids, ['required-visible', 'required-hidden']);
+  assert.equal(visibleRequiredMetrics.length, 3);
+  assert.equal(hiddenRequiredMetrics.length, 3);
   assert.ok(visibleRequiredMetrics.every(metric => metric.changed_pixel_ratio >= 0.05), '可见 required Shot 必须在多 sample 中独立通过像素贡献门');
   assert.ok(hiddenRequiredMetrics.every(metric => metric.changed_pixel_ratio < 0.05), '后一 Shot 不得借前一 Shot 恢复 transition 的变化通过');
   assert.ok([...visibleRequiredMetrics, ...hiddenRequiredMetrics].every(metric => (

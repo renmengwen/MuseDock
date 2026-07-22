@@ -671,6 +671,39 @@ async function cameraCueSampleTimes(page, durationSec) {
   return normalizeSampleTimes(times, durationSec);
 }
 
+async function requiredShotManifest(page) {
+  const rawShots = await page.evaluate(() => Array.from(document.querySelectorAll(
+    '[data-hv-shot][data-shot-requirement="required"]',
+  )).map((shot, index) => ({
+    index,
+    shot_id: shot.getAttribute('data-shot-id') || '',
+    window_start_sec: shot.getAttribute('data-window-start-sec'),
+    window_end_sec: shot.getAttribute('data-window-end-sec'),
+  })));
+  const seen = new Set();
+  const shots = [];
+  const errors = [];
+  for (const raw of rawShots) {
+    const shotId = String(raw.shot_id || '').trim();
+    const startText = String(raw.window_start_sec ?? '').trim();
+    const endText = String(raw.window_end_sec ?? '').trim();
+    const startSec = Number(startText);
+    const endSec = Number(endText);
+    const invalidFields = [];
+    if (!shotId) invalidFields.push('data-shot-id');
+    else if (seen.has(shotId)) invalidFields.push('data-shot-id:duplicate');
+    if (!startText || !Number.isFinite(startSec) || startSec < 0) invalidFields.push('data-window-start-sec');
+    if (!endText || !Number.isFinite(endSec) || endSec <= startSec) invalidFields.push('data-window-end-sec');
+    if (invalidFields.length) {
+      errors.push({ index: raw.index, shot_id: shotId, invalid_fields: invalidFields });
+    } else {
+      shots.push({ shot_id: shotId, start_sec: startSec, end_sec: endSec });
+    }
+    if (shotId) seen.add(shotId);
+  }
+  return { shots, errors };
+}
+
 function cameraIssuesForSample(sample, { frameId, sampleTimeSec }) {
   if (!sample) return [];
   const issues = [];
@@ -1261,6 +1294,7 @@ async function inspectFrameHtmlLayout(options = {}) {
     candidate_count: 0,
     camera_samples: [],
     image_sequence_visibility_samples: [],
+    expected_required_shot_ids: [],
   };
 
   const playwright = await loadPlaywright(options);
@@ -1397,13 +1431,30 @@ async function inspectFrameHtmlLayout(options = {}) {
     }
     let continuousPlayback = playbackStartup.continuous;
 
+    const requiredManifest = await requiredShotManifest(page);
+    metrics.expected_required_shot_ids = requiredManifest.shots.map(shot => shot.shot_id);
+    if (requiredManifest.errors.length) {
+      const issue = makeIssue({
+        code: 'required_asset_visibility_manifest_invalid',
+        frameId,
+        sampleTimeSec: null,
+        message: '必需图片 Shot 的标识或活动时间窗无效。',
+        details: { errors: requiredManifest.errors },
+      });
+      return { success: false, issues: [issue], metrics };
+    }
     const cueSamples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
       ? []
       : await cameraCueSampleTimes(page, durationSec);
+    const requiredShotMidpoints = requiredManifest.shots
+      .map(shot => shot.start_sec + (shot.end_sec - shot.start_sec) / 2);
     // ponytail: sorting is O(n log n); dedupe and browser samples grow linearly with cues. Tier only after measured cost; never truncate later cues.
-    const samples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
-      ? normalizeSampleTimes(sampleTimesSec, durationSec)
-      : normalizeSampleTimes([...defaultSampleTimes(durationSec), ...cueSamples], durationSec);
+    const samples = normalizeSampleTimes([
+      ...(Array.isArray(sampleTimesSec) && sampleTimesSec.length
+        ? sampleTimesSec
+        : [...defaultSampleTimes(durationSec), ...cueSamples]),
+      ...requiredShotMidpoints,
+    ], durationSec);
 
     let elapsedSec = 0;
     for (const sampleTimeSec of samples) {
@@ -1574,6 +1625,25 @@ async function inspectFrameHtmlLayout(options = {}) {
       }
     }
     issues.push(...cameraJitterIssues(metrics.camera_samples, frameId));
+    const evidenced = [...new Set(metrics.image_sequence_visibility_samples
+      .map(sample => sample.shot_id)
+      .filter(Boolean))];
+    const evidencedSet = new Set(evidenced);
+    const missing = metrics.expected_required_shot_ids.filter(shotId => !evidencedSet.has(shotId));
+    if (missing.length) {
+      issues.push(makeIssue({
+        code: 'required_asset_visibility_evidence_missing',
+        frameId,
+        sampleTimeSec: null,
+        message: '必需图片 Shot 缺少活动时间窗内的可见性证据。',
+        details: {
+          expected: metrics.expected_required_shot_ids,
+          evidenced,
+          missing,
+          sample_times: samples,
+        },
+      }));
+    }
   } finally {
     await browser.close().catch(() => {});
   }
