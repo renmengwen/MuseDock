@@ -137,7 +137,7 @@ function taskInfoCardOccurrence(captionText, regions) {
   const cardRegions = regions.filter(region => (
     [region.label, ...(Array.isArray(region.aliases) ? region.aliases : [])]
       .map(text)
-      .some(term => /^(?:页面任务信息卡|任务信息卡(?:片)?)$/u.test(term))
+      .some(term => /^(?:页面|顶部|上方)?任务信息卡(?:片)?$/u.test(term))
   ));
   return cardRegions.length === 1 ? { region: cardRegions[0], keyword: occurrence[0] } : null;
 }
@@ -173,6 +173,10 @@ function cueId(shot, regionIdValue, captionIds) {
 }
 
 function focusCuesForShot({ shot, regions, captionById }) {
+  const captions = (Array.isArray(shot.caption_ids) ? shot.caption_ids : [])
+    .map(captionId => captionById.get(text(captionId)))
+    .filter(Boolean);
+  if (captions.some(caption => /不绑定任何(?:同名)?局部对象/u.test(text(caption.text)))) return [];
   // 同 region 连续合并（REQ-D-09）：未命中的 caption 不打断合并，命中其他 region 的 caption 打断。
   const runs = [];
   let current = null;

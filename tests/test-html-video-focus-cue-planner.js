@@ -624,6 +624,37 @@ function firstShot(visualPlan) {
   assert.equal(cue.region_id, 'r_task_card');
   assert.equal(cue.keyword, '任务信息卡片', '任务信息卡 fallback 必须返回 caption 原文关键词');
 
+  const formalTopTaskCard = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '任务信息卡片展示当前进度' }],
+    regions: [{
+      ...canonicalRegion({
+        id: 'r_top_task_card',
+        label: '顶部任务信息卡片',
+        aliases: ['任务详情面板', '视频标题信息'],
+        trust: 'C',
+        x: 0.247,
+        y: 0.051,
+      }),
+      region: { x: 0.247, y: 0.051, width: 0.545, height: 0.205 },
+      focus_point: { x: 0.5195, y: 0.1535 },
+    }],
+    duration: 2,
+  });
+  planFocusCues(formalTopTaskCard);
+  const topCue = firstShot(formalTopTaskCard.visualPlan).camera.focus_cues[0];
+  assert.equal(topCue.region_id, 'r_top_task_card', '真实顶部任务信息卡片必须生成 cue');
+  assert.equal(topCue.zoom, 'soft');
+
+  for (const label of ['任务信息卡', '上方任务信息卡片']) {
+    const input = fixture({
+      captions: [{ id: 'cap_01', start: 0, end: 2, text: '任务信息卡片展示当前进度' }],
+      regions: [canonicalRegion({ id: 'r_task_card', label, trust: 'C' })],
+      duration: 2,
+    });
+    planFocusCues(input);
+    assert.equal(firstShot(input.visualPlan).camera.focus_cues[0].region_id, 'r_task_card', `${label} 必须保留唯一候选匹配`);
+  }
+
   const ambiguous = fixture({
     captions: [{ id: 'cap_01', start: 0, end: 2, text: '任务信息卡片展示当前进度' }],
     regions: [
@@ -644,6 +675,41 @@ function firstShot(visualPlan) {
     planFocusCues(input);
     assert.equal('camera' in firstShot(input.visualPlan), false, `${caption} 不得被任务信息卡 fallback 误绑定`);
   }
+
+  for (const label of ['删除任务信息卡片', '推荐任务信息卡片', '页面顶部任务信息卡片', '底部任务信息卡片', '下方任务信息卡片']) {
+    const input = fixture({
+      captions: [{ id: 'cap_01', start: 0, end: 2, text: '任务信息卡片展示当前进度' }],
+      regions: [canonicalRegion({ id: 'r_task_card', label, trust: 'C' })],
+      duration: 2,
+    });
+    planFocusCues(input);
+    assert.equal('camera' in firstShot(input.visualPlan), false, `${label} 不是受限单一位置前缀，不得被任务信息卡 fallback 误绑定`);
+  }
+}
+
+// 明确要求不绑定局部对象时整 Shot no-op；“全景”本身不是禁用词，后续明确聚焦仍正常生成 cue。
+{
+  for (const text of [
+    '这一段保持图表全景展示，不绑定任何局部对象，',
+    '这一段保持图表全景展示，不绑定任何同名局部对象，',
+  ]) {
+    const input = fixture({
+      captions: [{ id: 'cap_01_01', start: 0, end: 2, text }],
+      regions: [canonicalRegion({ id: 'r_chart', label: '柱状图区域', aliases: ['图表', '主图表', '统计图'], trust: 'C' })],
+      captionIds: ['cap_01_01'],
+      duration: 2,
+    });
+    planFocusCues(input);
+    assert.equal('camera' in firstShot(input.visualPlan), false, `${text} 必须让整个 Shot 保持 no-op`);
+  }
+
+  const panoramaThenFocus = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '先全景再聚焦图表' }],
+    regions: [canonicalRegion({ id: 'r_chart', label: '柱状图区域', aliases: ['图表'], trust: 'C' })],
+    duration: 2,
+  });
+  planFocusCues(panoramaThenFocus);
+  assert.equal(firstShot(panoramaThenFocus.visualPlan).camera.focus_cues[0].region_id, 'r_chart', '仅出现全景不得抑制后续明确聚焦');
 }
 
 // 纵深 2：一个 beat 含多个 shot 时按 shot 独立 enrich——各用自己的 asset regions 与 caption_ids，
