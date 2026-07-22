@@ -805,7 +805,10 @@ async function inspectRequiredAssetVisibility(page, resolution) {
     }
     const probeStyle = document.createElement('style');
     probeStyle.dataset.layoutQaRequiredAssetProbe = 'true';
-    probeStyle.textContent = '[data-layout-qa-required-layer-hidden="true"]{display:none!important}';
+    probeStyle.textContent = [
+      '[data-layout-qa-required-layer-probe="black"]{filter:brightness(0)!important}',
+      '[data-layout-qa-required-layer-probe="white"]{filter:brightness(0) invert(1)!important}',
+    ].join('');
     document.head.appendChild(probeStyle);
     window.__layoutQaRequiredAssetRestore = {
       trustedClock,
@@ -818,7 +821,8 @@ async function inspectRequiredAssetVisibility(page, resolution) {
         shot,
         layers: Array.from(shot.querySelectorAll('[data-shot-layer]')).map(layer => ({
           layer,
-          originalHidden: layer.getAttribute('data-layout-qa-required-layer-hidden'),
+          originalProbe: layer.getAttribute('data-layout-qa-required-layer-probe'),
+          originalStyle: layer.getAttribute('style'),
         })),
         layerStateRestored: true,
       })),
@@ -846,31 +850,38 @@ async function inspectRequiredAssetVisibility(page, resolution) {
   }, { viewport: resolution, safeBottomPx: CAMERA_SAFE_BOTTOM_PX });
   if (!prepared) return null;
 
-  let normalScreenshot;
-  const hiddenScreenshots = [];
+  const blackProbeScreenshots = [];
+  const whiteProbeScreenshots = [];
   let restored = false;
   let restorationDetails = {};
   try {
-    normalScreenshot = await page.screenshot({ type: 'png' });
     for (const target of prepared.targets) {
       try {
-        await page.evaluate((index) => {
+        await page.evaluate(({ index, probe }) => {
           const state = window.__layoutQaRequiredAssetRestore;
           const item = state?.shots?.[index];
           if (!item?.shot) throw new Error('required asset visibility shot state missing');
-          for (const layer of item.layers) layer.layer.setAttribute('data-layout-qa-required-layer-hidden', 'true');
+          for (const layer of item.layers) layer.layer.setAttribute('data-layout-qa-required-layer-probe', probe);
           void item.shot.offsetWidth;
-        }, target.index);
-        hiddenScreenshots.push(await page.screenshot({ type: 'png' }));
+        }, { index: target.index, probe: 'black' });
+        blackProbeScreenshots.push(await page.screenshot({ type: 'png' }));
+        await page.evaluate(({ index, probe }) => {
+          const item = window.__layoutQaRequiredAssetRestore?.shots?.[index];
+          if (!item?.shot) throw new Error('required asset visibility shot state missing');
+          for (const layer of item.layers) layer.layer.setAttribute('data-layout-qa-required-layer-probe', probe);
+          void item.shot.offsetWidth;
+        }, { index: target.index, probe: 'white' });
+        whiteProbeScreenshots.push(await page.screenshot({ type: 'png' }));
       } finally {
         await page.evaluate((index) => {
           const item = window.__layoutQaRequiredAssetRestore?.shots?.[index];
           if (!item?.shot) return;
           for (const layer of item.layers) {
-            if (layer.originalHidden === null) layer.layer.removeAttribute('data-layout-qa-required-layer-hidden');
-            else layer.layer.setAttribute('data-layout-qa-required-layer-hidden', layer.originalHidden);
+            if (layer.originalProbe === null) layer.layer.removeAttribute('data-layout-qa-required-layer-probe');
+            else layer.layer.setAttribute('data-layout-qa-required-layer-probe', layer.originalProbe);
             item.layerStateRestored = item.layerStateRestored
-              && layer.layer.getAttribute('data-layout-qa-required-layer-hidden') === layer.originalHidden;
+              && layer.layer.getAttribute('data-layout-qa-required-layer-probe') === layer.originalProbe
+              && layer.layer.getAttribute('style') === layer.originalStyle;
           }
           void item.shot.offsetWidth;
         }, target.index).catch(() => {});
@@ -883,10 +894,11 @@ async function inspectRequiredAssetVisibility(page, resolution) {
       let restoredStyles = true;
       for (const item of state.shots || []) {
         for (const layer of item.layers) {
-          if (layer.originalHidden === null) layer.layer.removeAttribute('data-layout-qa-required-layer-hidden');
-          else layer.layer.setAttribute('data-layout-qa-required-layer-hidden', layer.originalHidden);
+          if (layer.originalProbe === null) layer.layer.removeAttribute('data-layout-qa-required-layer-probe');
+          else layer.layer.setAttribute('data-layout-qa-required-layer-probe', layer.originalProbe);
           item.layerStateRestored = item.layerStateRestored
-            && layer.layer.getAttribute('data-layout-qa-required-layer-hidden') === layer.originalHidden;
+            && layer.layer.getAttribute('data-layout-qa-required-layer-probe') === layer.originalProbe
+            && layer.layer.getAttribute('style') === layer.originalStyle;
         }
         void item.shot.offsetWidth;
       }
@@ -949,7 +961,7 @@ async function inspectRequiredAssetVisibility(page, resolution) {
     if (!restored) throw new Error(`required asset visibility style restore failed: ${JSON.stringify(restoration)}`);
   }
 
-  const comparisons = await page.evaluate(async ({ normalBase64, targets, hiddenBase64List, pixelThreshold }) => {
+  const comparisons = await page.evaluate(async ({ blackBase64List, whiteBase64List, targets, pixelThreshold }) => {
     async function pixels(base64) {
       const image = new Image();
       image.src = `data:image/png;base64,${base64}`;
@@ -961,21 +973,21 @@ async function inspectRequiredAssetVisibility(page, resolution) {
       context.drawImage(image, 0, 0);
       return context;
     }
-    const normalContext = await pixels(normalBase64);
     return Promise.all(targets.map(async (target, targetIndex) => {
       const region = target.subject_region;
       if (region.width <= 0 || region.height <= 0) return { compared_pixel_count: 0, changed_pixel_count: 0, changed_pixel_ratio: 0 };
-      const hiddenContext = await pixels(hiddenBase64List[targetIndex]);
-      const normal = normalContext.getImageData(region.left, region.top, region.width, region.height).data;
-      const hidden = hiddenContext.getImageData(region.left, region.top, region.width, region.height).data;
+      const blackContext = await pixels(blackBase64List[targetIndex]);
+      const whiteContext = await pixels(whiteBase64List[targetIndex]);
+      const black = blackContext.getImageData(region.left, region.top, region.width, region.height).data;
+      const white = whiteContext.getImageData(region.left, region.top, region.width, region.height).data;
       let changed = 0;
-      for (let index = 0; index < normal.length; index += 4) {
-        const average = (Math.abs(normal[index] - hidden[index])
-          + Math.abs(normal[index + 1] - hidden[index + 1])
-          + Math.abs(normal[index + 2] - hidden[index + 2])) / 3;
+      for (let index = 0; index < black.length; index += 4) {
+        const average = (Math.abs(black[index] - white[index])
+          + Math.abs(black[index + 1] - white[index + 1])
+          + Math.abs(black[index + 2] - white[index + 2])) / 3;
         if (average >= pixelThreshold) changed += 1;
       }
-      const compared = normal.length / 4;
+      const compared = black.length / 4;
       return {
         compared_pixel_count: compared,
         changed_pixel_count: changed,
@@ -983,9 +995,9 @@ async function inspectRequiredAssetVisibility(page, resolution) {
       };
     }));
   }, {
-    normalBase64: normalScreenshot.toString('base64'),
+    blackBase64List: blackProbeScreenshots.map(screenshot => screenshot.toString('base64')),
+    whiteBase64List: whiteProbeScreenshots.map(screenshot => screenshot.toString('base64')),
     targets: prepared.targets,
-    hiddenBase64List: hiddenScreenshots.map(screenshot => screenshot.toString('base64')),
     pixelThreshold: REQUIRED_ASSET_PIXEL_DIFF_THRESHOLD,
   });
 

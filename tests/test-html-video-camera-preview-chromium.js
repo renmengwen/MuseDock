@@ -12,6 +12,8 @@ const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" he
 const imageUrl = `data:image/svg+xml;base64,${svg}`;
 const secondSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#841"/><circle cx="300" cy="500" r="120" fill="#ff0"/></svg>').toString('base64');
 const secondImageUrl = `data:image/svg+xml;base64,${secondSvg}`;
+const nearWhiteSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#fefefe"/></svg>').toString('base64');
+const nearWhiteImageUrl = `data:image/svg+xml;base64,${nearWhiteSvg}`;
 
 function previewHtml(
   twoCues = false,
@@ -221,7 +223,7 @@ function previewHtml(
     });
   }
 
-  const requiredFigure = requirement => `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay" style="--fixture:yes;transform:translateZ(0)"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="visibility-${requirement}" data-shot-requirement="${requirement}"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section>`;
+  const requiredFigure = (requirement, source = imageUrl) => `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay" style="--fixture:yes;transform:translateZ(0)"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="visibility-${requirement}" data-shot-requirement="${requirement}"><img data-shot-layer="background" src="${source}"><img data-shot-layer="foreground" data-layout-qa-required-layer-probe="fixture-original" style="filter:sepia(.2)" src="${source}"></figure></section>`;
   const pauseOpacityTransitionsAtMidpoint = (...ids) => `<script>(()=>{for(const id of ${JSON.stringify(ids)}){const shot=document.getElementById(id);void shot.offsetWidth;shot.style.opacity='1';const transition=shot.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='opacity');if(!transition)throw new Error('fixture opacity transition missing: '+id);transition.pause();transition.playbackRate=.75;transition.currentTime=175}})()</script>`;
   const visibleRequired = await inspectInline('required-visible.html', requiredFigure('required'));
   const visibleMetric = visibleRequired.metrics.image_sequence_visibility_samples[0];
@@ -229,9 +231,20 @@ function previewHtml(
   assert.ok(visibleMetric.changed_pixel_ratio >= 0.05, `required 素材必须贡献大面积真实像素：${JSON.stringify(visibleMetric)}`);
   assert.equal(visibleMetric.style_restored, true, '截图探针必须精确恢复 Image Sequence inline style');
 
+  const nearWhiteRequired = await inspectInline(
+    'required-near-white-visible.html',
+    requiredFigure('required', nearWhiteImageUrl),
+  );
+  const nearWhiteMetric = nearWhiteRequired.metrics.image_sequence_visibility_samples[0];
+  assert.equal(nearWhiteRequired.success, true, JSON.stringify(nearWhiteRequired.issues));
+  assert.ok(nearWhiteMetric.changed_pixel_ratio >= 0.05,
+    `近白 required 素材不得因与页面底色接近而误报遮挡：${JSON.stringify(nearWhiteMetric)}`);
+  assert.ok(nearWhiteMetric.style_restored && nearWhiteMetric.layer_state_restored,
+    '黑白探针必须精确恢复原 data 属性和 inline style');
+
   const occludedRequired = await inspectInline(
     'required-occluded.html',
-    `${requiredFigure('required')}<div aria-hidden="true" style="position:absolute;inset:0;z-index:9;background:#f4f1e8"></div>`,
+    `${requiredFigure('required', nearWhiteImageUrl)}<div aria-hidden="true" style="position:absolute;inset:0;z-index:9;background:#f4f1e8"></div>`,
   );
   assert.equal(occludedRequired.success, false, 'required 素材被全画布不透明壳遮住时必须阻断');
   assert.ok(occludedRequired.issues.some(issue => issue.code === 'required_asset_occluded'));
