@@ -351,7 +351,7 @@ async function main() {
     // P1-2：Frame HTML 输入指纹纯函数——同输入同指纹，任一策略/主题/素材/文案维度变化即指纹变化
     {
       const { computeFrameInputFingerprint, FRAME_PROMPT_VERSION } = frameHtmlPhase;
-      assert.equal(FRAME_PROMPT_VERSION, 4, 'D-07 摄影机受管运行时结构变化必须使旧 checkpoint 失效');
+      assert.equal(FRAME_PROMPT_VERSION, 5, 'overlay-only Frame Prompt 合同变化必须使旧 checkpoint 失效');
       const target = { resolution: { width: 1080, height: 1920 } };
       const makeNode = () => ({
         id: 'scene_01',
@@ -382,7 +382,9 @@ async function main() {
         },
       });
       const base = computeFrameInputFingerprint(args());
-      assert.notEqual(base, 'c77e59e0bdeb437abfdcb9b1c8ecde81f350b197b240c619b4ba187e8b810154', 'v3 产物指纹不得在 v4 继续命中');
+      const oldV4Fingerprint = '07be78cff2675ccd3700d95a556b4632063f5d3fa107fa6af104fb4fde08074b';
+      assert.notEqual(base, oldV4Fingerprint, 'overlay-only v5 产物指纹不得继续命中真实 v4 指纹');
+      assert.notEqual(base, 'c77e59e0bdeb437abfdcb9b1c8ecde81f350b197b240c619b4ba187e8b810154', 'v3 产物指纹不得在当前版本继续命中');
       assert.ok(/^[0-9a-f]{64}$/.test(base), '指纹应为 sha256 hex');
       assert.equal(computeFrameInputFingerprint(args()), base, '同输入应得到同指纹');
       // asset_refs 顺序不影响指纹（排序稳定）
@@ -474,7 +476,7 @@ async function main() {
         creativeContext,
       });
       const oldV3Fingerprint = 'c0fdad5117ebcf48662e3d2fc21517ba0f46be61810f748df92c1a65d464f3cc';
-      assert.notEqual(currentFingerprint, oldV3Fingerprint, 'v4 摄影机产物指纹必须与已记录的 v3 指纹不同');
+      assert.notEqual(currentFingerprint, oldV3Fingerprint, 'v5 摄影机产物指纹必须与已记录的 v3 指纹不同');
       project.generation_checkpoint.stages.frame_html.frames.scene_01.input_fingerprint = oldV3Fingerprint;
       await projectStore.saveProject(projectDir, project);
 
@@ -494,10 +496,43 @@ async function main() {
       assert.ok(calls.includes('scene_01'), '旧 v3 摄影机 checkpoint 不得复用');
       const persisted = await projectStore.loadProject(projectDir);
       const checkpoint = persisted.generation_checkpoint.stages.frame_html.frames.scene_01;
-      assert.equal(checkpoint.input_fingerprint, currentFingerprint, '重建后必须持久化 v4 指纹');
+      assert.equal(checkpoint.input_fingerprint, currentFingerprint, '重建后必须持久化 v5 指纹');
       const html = await fs.readFile(path.join(projectDir, checkpoint.html_path), 'utf8');
       assert.match(html, /data-camera-cues=/, '重建 HTML 必须物化 camera cue 数据');
       assert.match(html, /computeCameraTransform/, '重建 HTML 必须包含 D-07 摄影机运行时');
+    }
+
+    // Overlay-only Prompt 合同升级：已有 v4 done checkpoint/HTML 必须重建并写入 v5 指纹。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-overlay-v4-resume-'));
+      const workflowId = '202606260000000021_overlay_v4';
+      const runId = 'run_overlay_v4';
+      const { projectDir } = await setupProject(rootDir, workflowId, runId);
+      const project = await projectStore.loadProject(projectDir);
+      const oldV4Fingerprint = 'dc32294019ad8803c65b1c69e24cc6b206a1f05482515b8a9c505d3bb25fc136';
+      const currentFingerprint = project.generation_checkpoint.stages.frame_html.frames.scene_01.input_fingerprint;
+      assert.notEqual(currentFingerprint, oldV4Fingerprint, 'v5 Frame Prompt 指纹必须与已记录的真实 v4 指纹不同');
+      project.generation_checkpoint.stages.frame_html.frames.scene_01.input_fingerprint = oldV4Fingerprint;
+      await projectStore.saveProject(projectDir, project);
+
+      const calls = [];
+      frameHtmlAgent.generateFrameHtml = async args => {
+        calls.push(args.node.id);
+        return { success: true, html: validHtml(args.node.id, `${args.node.id} v5`) };
+      };
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
+      });
+
+      assert.equal(result.success, true);
+      assert.deepEqual(calls, ['scene_01', 'scene_03'], 'v4 done Frame 与原失败 Frame 必须重建，当前 v5 done Frame 应复用');
+      const persisted = await projectStore.loadProject(projectDir);
+      const checkpoint = persisted.generation_checkpoint.stages.frame_html.frames.scene_01;
+      assert.equal(checkpoint.input_fingerprint, currentFingerprint, 'v4 Frame 重建后必须持久化 v5 指纹');
+      assert.match(await fs.readFile(path.join(projectDir, checkpoint.html_path), 'utf8'), /scene_01 v5/);
     }
 
     // P1-2：shouldReuseFrameHtml 指纹判定——匹配复用 / 不匹配重生成 / 无指纹一律不复用
