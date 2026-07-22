@@ -324,6 +324,7 @@ function buildTimedSamplePlan({ project = {}, videoInfo = {}, pairedBoundarySamp
     }
   }
   return {
+    duration,
     opening,
     boundaryGroups: cappedBoundaryGroups,
     observation,
@@ -581,7 +582,8 @@ function measureRgbFrameMotion(previous, current, width, height) {
   };
 }
 
-async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand, width = 160, height = 90, fps = 2, maxFrames = 24 }) {
+async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand, width = 160, height = 90, fps = 2, maxFrames = 24, duration = 0 }) {
+  const sampleFps = positiveNumber(duration) ? Math.min(fps, maxFrames / duration) : fps;
   const rawPath = path.join(workDir, 'frames.rgb');
   await fsp.mkdir(workDir, { recursive: true });
   await fsp.rm(rawPath, { force: true });
@@ -590,7 +592,7 @@ async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runComma
     '-i',
     videoPath,
     '-vf',
-    `fps=${fps},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
+    `fps=${sampleFps},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
     '-frames:v',
     String(maxFrames),
     '-f',
@@ -612,7 +614,7 @@ async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runComma
   for (let offset = 0, index = 0; offset + frameSize <= raw.length; offset += frameSize, index += 1) {
     const frameBuffer = raw.subarray(offset, offset + frameSize);
     const frame = readRgbFrameMetrics(frameBuffer, width, height, `frame_${index}`);
-    frame.time_sec = Math.round((index / fps) * 1000) / 1000;
+    frame.time_sec = Math.round((index / sampleFps) * 1000) / 1000;
     const motion = measureRgbFrameMotion(previousFrameBuffer, frameBuffer, width, height);
     if (motion) frame.motion_from_previous = motion;
     frames.push(frame);

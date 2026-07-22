@@ -198,7 +198,7 @@ async function inspectRenderedVideo({
       success: timedPlan.times.length === 0 || safetyFrames.length > 0,
       frames: safetyFrames,
     }
-    : await extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand });
+    : await extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand, duration: timedPlan.duration });
   if (!extracted.success) {
     return writeVisualReport(projectDir, {
       success: false,
