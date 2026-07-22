@@ -14,6 +14,12 @@ const secondSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="16
 const secondImageUrl = `data:image/svg+xml;base64,${secondSvg}`;
 const nearWhiteSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#fefefe"/></svg>').toString('base64');
 const nearWhiteImageUrl = `data:image/svg+xml;base64,${nearWhiteSvg}`;
+const transparentSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"></svg>').toString('base64');
+const transparentImageUrl = `data:image/svg+xml;base64,${transparentSvg}`;
+const lowAlphaCoverageSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="64" height="900" fill="#123"/></svg>').toString('base64');
+const lowAlphaCoverageImageUrl = `data:image/svg+xml;base64,${lowAlphaCoverageSvg}`;
+const translucentSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#123" fill-opacity=".5"/></svg>').toString('base64');
+const translucentImageUrl = `data:image/svg+xml;base64,${translucentSvg}`;
 
 function previewHtml(
   twoCues = false,
@@ -245,6 +251,34 @@ function previewHtml(
     `近白 required 素材不得因与页面底色接近而误报遮挡：${JSON.stringify(nearWhiteMetric)}`);
   assert.ok(nearWhiteMetric.style_restored && nearWhiteMetric.layer_state_restored,
     '黑白探针必须精确恢复原 data 属性和 inline style');
+
+  const transparentRequired = await inspectInline(
+    'required-transparent.html',
+    requiredFigure('required', transparentImageUrl),
+  );
+  const transparentMetric = transparentRequired.metrics.image_sequence_visibility_samples[0];
+  assert.equal(transparentRequired.success, false, '尺寸有效但完全透明的 required 素材必须阻断');
+  assert.ok(transparentMetric.changed_pixel_ratio < 0.05,
+    `完全透明素材不得被不透明探针画实：${JSON.stringify(transparentMetric)}`);
+  assert.ok(transparentRequired.issues.some(issue => issue.code === 'required_asset_occluded'));
+
+  const lowAlphaCoverageRequired = await inspectInline(
+    'required-low-alpha-coverage.html',
+    requiredFigure('required', lowAlphaCoverageImageUrl),
+  );
+  const lowAlphaCoverageMetric = lowAlphaCoverageRequired.metrics.image_sequence_visibility_samples[0];
+  assert.equal(lowAlphaCoverageRequired.success, false, '不透明像素覆盖不足 5% 的 required 素材必须阻断');
+  assert.ok(lowAlphaCoverageMetric.changed_pixel_ratio < 0.05,
+    `alpha mask 覆盖不足 5% 时不得通过：${JSON.stringify(lowAlphaCoverageMetric)}`);
+
+  const translucentRequired = await inspectInline(
+    'required-translucent-visible.html',
+    requiredFigure('required', translucentImageUrl),
+  );
+  const translucentMetric = translucentRequired.metrics.image_sequence_visibility_samples[0];
+  assert.equal(translucentRequired.success, true, JSON.stringify(translucentRequired.issues));
+  assert.ok(translucentMetric.changed_pixel_ratio >= 0.05,
+    `半透明但覆盖充分的 required 素材应保留真实 alpha 并通过：${JSON.stringify(translucentMetric)}`);
 
   for (const transitionProperty of ['filter', 'all']) {
     const filterTransition = await inspectInline(

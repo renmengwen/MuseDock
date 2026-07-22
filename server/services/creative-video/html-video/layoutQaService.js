@@ -786,6 +786,49 @@ async function inspectRequiredAssetVisibility(page, resolution) {
     });
     if (!requiredShots.length) return null;
 
+    function alphaProbeDataUrl(image, color, width, height) {
+      if (!(image instanceof HTMLImageElement)
+        || !Number.isFinite(width) || width <= 0
+        || !Number.isFinite(height) || height <= 0) {
+        throw new Error('required asset visibility image state invalid');
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('required asset visibility canvas unavailable');
+      context.drawImage(image, 0, 0, width, height);
+      context.globalCompositeOperation = 'source-in';
+      context.fillStyle = color;
+      context.fillRect(0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/png');
+      if (!dataUrl.startsWith('data:image/png')) {
+        throw new Error('required asset visibility alpha probe serialization failed');
+      }
+      return dataUrl;
+    }
+
+    const shotStates = requiredShots.map(shot => ({
+      shot,
+      layers: Array.from(shot.querySelectorAll('[data-shot-layer]')).map((layer) => {
+        const naturalWidth = Number(layer.naturalWidth);
+        const naturalHeight = Number(layer.naturalHeight);
+        return {
+          layer,
+          originalSrc: layer.getAttribute('src'),
+          originalSrcset: layer.getAttribute('srcset'),
+          originalCurrentSrc: layer.currentSrc,
+          originalProbe: layer.getAttribute('data-layout-qa-required-layer-probe'),
+          originalStyle: layer.getAttribute('style'),
+          naturalWidth,
+          naturalHeight,
+          blackProbeSrc: alphaProbeDataUrl(layer, 'black', naturalWidth, naturalHeight),
+          whiteProbeSrc: alphaProbeDataUrl(layer, 'white', naturalWidth, naturalHeight),
+        };
+      }),
+      layerStateRestored: true,
+    }));
+
     const clock = window.__hvPlaybackClock;
     const trustedClock = clock?.__hvOwner === 'musedock-playback-clock-v1'
       && typeof clock.pause === 'function' && typeof clock.play === 'function' && typeof clock.paused === 'function';
@@ -809,19 +852,7 @@ async function inspectRequiredAssetVisibility(page, resolution) {
       rafController,
       rafWasPaused,
       animations,
-      shots: requiredShots.map(shot => ({
-        shot,
-        layers: Array.from(shot.querySelectorAll('[data-shot-layer]')).map(layer => ({
-          layer,
-          originalSrc: layer.getAttribute('src'),
-          originalSrcset: layer.getAttribute('srcset'),
-          originalProbe: layer.getAttribute('data-layout-qa-required-layer-probe'),
-          originalStyle: layer.getAttribute('style'),
-          naturalWidth: Number(layer.naturalWidth),
-          naturalHeight: Number(layer.naturalHeight),
-        })),
-        layerStateRestored: true,
-      })),
+      shots: shotStates,
     };
     return {
       targets: requiredShots.map((shot, index) => {
@@ -859,15 +890,9 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           if (!item?.shot) throw new Error('required asset visibility shot state missing');
           for (const layer of item.layers) {
             const image = layer.layer;
-            if (!(image instanceof HTMLImageElement)
-              || !Number.isFinite(layer.naturalWidth) || layer.naturalWidth <= 0
-              || !Number.isFinite(layer.naturalHeight) || layer.naturalHeight <= 0) {
-              throw new Error('required asset visibility image state invalid');
-            }
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layer.naturalWidth}" height="${layer.naturalHeight}" viewBox="0 0 ${layer.naturalWidth} ${layer.naturalHeight}"><rect width="100%" height="100%" fill="${probe}"/></svg>`;
             image.removeAttribute('srcset');
             image.setAttribute('data-layout-qa-required-layer-probe', probe);
-            image.setAttribute('src', `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+            image.setAttribute('src', probe === 'black' ? layer.blackProbeSrc : layer.whiteProbeSrc);
           }
           await Promise.all(item.layers.map(layer => layer.layer.decode()));
           if (item.layers.some(layer => (
@@ -882,9 +907,8 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           if (!item?.shot) throw new Error('required asset visibility shot state missing');
           for (const layer of item.layers) {
             const image = layer.layer;
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layer.naturalWidth}" height="${layer.naturalHeight}" viewBox="0 0 ${layer.naturalWidth} ${layer.naturalHeight}"><rect width="100%" height="100%" fill="${probe}"/></svg>`;
             image.setAttribute('data-layout-qa-required-layer-probe', probe);
-            image.setAttribute('src', `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+            image.setAttribute('src', probe === 'black' ? layer.blackProbeSrc : layer.whiteProbeSrc);
           }
           await Promise.all(item.layers.map(layer => layer.layer.decode()));
           if (item.layers.some(layer => (
@@ -909,9 +933,12 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           }
           await Promise.all(item.layers.map(layer => layer.layer.decode()));
           for (const layer of item.layers) {
+            if (layer.originalStyle === null) layer.layer.removeAttribute('style');
+            else layer.layer.setAttribute('style', layer.originalStyle);
             item.layerStateRestored = item.layerStateRestored
               && layer.layer.getAttribute('src') === layer.originalSrc
               && layer.layer.getAttribute('srcset') === layer.originalSrcset
+              && layer.layer.currentSrc === layer.originalCurrentSrc
               && layer.layer.getAttribute('data-layout-qa-required-layer-probe') === layer.originalProbe
               && layer.layer.getAttribute('style') === layer.originalStyle
               && layer.layer.naturalWidth === layer.naturalWidth
@@ -938,9 +965,12 @@ async function inspectRequiredAssetVisibility(page, resolution) {
         }
         await Promise.all(item.layers.map(layer => layer.layer.decode()));
         for (const layer of item.layers) {
+          if (layer.originalStyle === null) layer.layer.removeAttribute('style');
+          else layer.layer.setAttribute('style', layer.originalStyle);
           item.layerStateRestored = item.layerStateRestored
             && layer.layer.getAttribute('src') === layer.originalSrc
             && layer.layer.getAttribute('srcset') === layer.originalSrcset
+            && layer.layer.currentSrc === layer.originalCurrentSrc
             && layer.layer.getAttribute('data-layout-qa-required-layer-probe') === layer.originalProbe
             && layer.layer.getAttribute('style') === layer.originalStyle
             && layer.layer.naturalWidth === layer.naturalWidth
