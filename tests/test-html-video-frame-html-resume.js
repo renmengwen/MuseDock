@@ -15,6 +15,8 @@ aiImageModel.isConfigured = async () => false;
 const frameHtmlAgent = require('../server/services/creative-video/html-video/frameHtmlAgent');
 const frameHtmlPhase = require('../server/services/creative-video/html-video/frameHtmlPhase');
 const contentGraphPhase = require('../server/services/creative-video/html-video/contentGraphPhase');
+const { materializeCreativeContextAssets } = require('../server/services/creative-video/html-video/assetUsagePhase');
+const { mergeVisualAssets } = require('../server/services/creative/visualAssetContract');
 const { materializeSceneImageSequenceDom } = require('../server/services/creative-video/html-video/sceneImageSequenceDom');
 const visualPlanService = require('../server/services/creative-video/html-video/visualPlanService');
 const { planFocusCues } = require('../server/services/creative-video/html-video/focusCuePlanner');
@@ -158,7 +160,29 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
   const scene01Html = options.scene01Html || (options.badScene01Html ? invalidCheckpointHtml() : validHtml('scene_01', '已完成一'));
   await writeFile(path.join(projectDir, 'frames/01-scene_01.html'), scene01Html);
   await writeFile(path.join(projectDir, 'frames/02-scene_02.html'), validHtml('scene_02', '已完成二'));
+  if (Array.isArray(options.projectAssets)) {
+    for (const asset of options.projectAssets) {
+      if (asset.path) await writeFile(path.join(projectDir, asset.path), 'asset');
+    }
+  }
   const graph = options.contentGraph || contentGraph();
+  const rawGraphCreativeContext = options.assetContext || { input: { raw_text: '三帧恢复测试' } };
+  const graphCreativeContext = await materializeCreativeContextAssets(projectDir, Array.isArray(options.projectAssets)
+    ? {
+      ...rawGraphCreativeContext,
+      asset_context: {
+        ...(rawGraphCreativeContext.asset_context || {}),
+        assets: mergeVisualAssets(
+          rawGraphCreativeContext.asset_context?.assets || [],
+          options.projectAssets.map(asset => ({
+            ...asset,
+            ...(asset.path && !asset.frame_src ? { frame_src: `../${String(asset.path).replace(/\\/g, '/')}` } : {}),
+          })),
+        ),
+      },
+    }
+    : rawGraphCreativeContext);
+  const graphTarget = workflow.applyRenderTargetDefaults(workflow.resolveRenderTarget({ generate_audio: false }, sceneSpec()));
   const project = createEmptyProject({
     projectId: `${workflowId}_${runId}`,
     workflowId,
@@ -168,9 +192,6 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
   await writeFile(path.join(projectDir, 'content-graph.json'), `${JSON.stringify(graph, null, 2)}\n`);
   if (Array.isArray(options.projectAssets)) {
     project.assets = options.projectAssets;
-    for (const asset of options.projectAssets) {
-      if (asset.path) await writeFile(path.join(projectDir, asset.path), 'asset');
-    }
   }
   if (!options.omitSceneSpecHash) {
     project.generation_checkpoint.scene_spec_hash = options.sceneSpecHash || computeSceneSpecCheckpointHash(sceneSpec());
@@ -178,6 +199,9 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
   markCheckpointStage(project, 'content_graph', {
     status: 'done',
     path: 'content-graph.json',
+    input_hash: contentGraphPhase.buildContentGraphInput({
+      sceneSpec: sceneSpec(), creativeContext: graphCreativeContext, target: graphTarget,
+    }).inputHash,
     output_hash: contentGraphPhase.hashContentGraph(graph),
   });
   // P1-2 语义：checkpoint 无指纹一律不复用——fixture 按生产展开路径（visualPlan 编排 + beat 展开）
@@ -350,6 +374,12 @@ async function main() {
   });
 
   try {
+    assert.equal(
+      contentGraphPhase.hashContentGraph({ b: 1, a: { d: 4, c: 3 } }),
+      contentGraphPhase.hashContentGraph({ a: { c: 3, d: 4 }, b: 1 }),
+      'Content Graph hash 不得受对象键顺序影响',
+    );
+
     // P1-2：Frame HTML 输入指纹纯函数——同输入同指纹，任一策略/主题/素材/文案维度变化即指纹变化
     {
       const { computeFrameInputFingerprint, FRAME_PROMPT_VERSION } = frameHtmlPhase;
@@ -807,7 +837,7 @@ async function main() {
       );
     }
 
-    // Content Graph resume：legacy 缺 hash 允许一次兼容，随后补齐 required、canonical 与 checkpoint。
+    // Content Graph resume：现代 hash 下补齐 required，并保持 canonical/project/checkpoint 幂等一致。
     {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-content-graph-finalize-resume-'));
       const workflowId = '202606260000000022_graph_finalize_resume';
@@ -819,6 +849,7 @@ async function main() {
         media_type: 'image',
         status: 'ready',
         path: 'assets/resume-required.png',
+        frame_src: '../assets/resume-required.png',
       };
       const creativeContext = {
         input: { raw_text: 'S01 使用 resume-required.png。' },
@@ -828,10 +859,6 @@ async function main() {
         projectAssets: [asset],
         assetContext: creativeContext,
       });
-      const legacyProject = await projectStore.loadProject(projectDir);
-      markCheckpointStage(legacyProject, 'content_graph', { input_hash: '', output_hash: '' });
-      await projectStore.saveProject(projectDir, legacyProject);
-
       let graphModelCalls = 0;
       frameHtmlAgent.generateFrameHtml = async args => ({ success: true, html: validHtml(args.node.id, args.node.id) });
       const run = () => runWorkflow({
@@ -872,7 +899,7 @@ async function main() {
     }
 
     // Content Graph resume：已记录的 output/input hash 不匹配时拒绝复用。
-    for (const mismatch of ['output', 'input', 'status']) {
+    for (const mismatch of ['output', 'input', 'status', 'legacy_hash']) {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), `html-video-content-graph-${mismatch}-mismatch-`));
       const workflowId = `202606260000000023_graph_${mismatch}_mismatch`;
       const runId = `run_graph_${mismatch}_mismatch`;
@@ -883,7 +910,9 @@ async function main() {
         const project = await projectStore.loadProject(projectDir);
         markCheckpointStage(project, 'content_graph', mismatch === 'input'
           ? { input_hash: 'f'.repeat(64) }
-          : { status: 'pending' });
+          : mismatch === 'status'
+            ? { status: 'pending' }
+            : { input_hash: '', output_hash: '' });
         await projectStore.saveProject(projectDir, project);
       }
       frameHtmlAgent.generateFrameHtml = async () => { throw new Error('hash 不匹配时不得进入 Frame HTML。'); };
@@ -896,6 +925,23 @@ async function main() {
       });
       assert.equal(result.success, false);
       assert.ok((result.diagnostics || []).some(item => item.code === 'content_graph_reuse_missing'));
+      if (mismatch === 'legacy_hash') {
+        let graphCalls = 0;
+        frameHtmlAgent.generateFrameHtml = async args => ({ success: true, html: validHtml(args.node.id, args.node.id) });
+        const regenerated = await runWorkflow({
+          rootDir,
+          workflowId,
+          runId,
+          aiTextModel: {
+            async callTextModel() {
+              graphCalls += 1;
+              return { success: true, text: JSON.stringify(contentGraph('legacy hash 重新生成')) };
+            },
+          },
+        });
+        assert.equal(regenerated.success, true);
+        assert.equal(graphCalls, 1, 'legacy 缺 hash 的普通流程必须重新生成 Content Graph');
+      }
     }
 
     // Content Graph resume：任一旧节点已有 5 张 required 时结构化阻断，原 canonical/checkpoint 保持不变。
@@ -950,7 +996,6 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-default-retry-scene-'));
       const workflowId = '202606260000000001_default_retry_scene';
       const runId = 'run_default_retry_scene';
-      const projectDir = await projectStore.createProjectDir({ rootDir, workflowId, runId });
       const retrySceneSpec = {
         title: 'Scene HTML 定向重试',
         aspect_ratio: '9:16',
@@ -967,37 +1012,35 @@ async function main() {
         ],
         edges: [{ from: 'scene_01', to: 'scene_02', kind: 'sequence' }],
       };
-      const creativeContext = { continuity_mode: 'scene_html', asset_context: {} };
-      const visualPlan = visualPlanService.buildVisualPlan({ graph, sceneSpec: retrySceneSpec, creativeContext, workflowId });
-      visualPlanService.assignMotionOrchestration(visualPlan, { styleProfile: visualPlan.style_profile || null });
-      const expanded = workflow.expandContentGraphToSceneEntries(graph, visualPlan);
-      const renderTarget = workflow.applyRenderTargetDefaults(workflow.resolveRenderTarget({ generate_audio: false }, retrySceneSpec));
-      const fingerprints = new Map(expanded.nodes.map(node => [
-        node.id,
-        frameHtmlPhase.computeFrameInputFingerprint({ node, continuityMode: 'scene_html', target: renderTarget }),
-      ]));
-      const firstHtmlPath = 'frames/01-scene_01.html';
-      const secondHtmlPath = 'frames/02-scene_02.html';
-      const firstHtml = validHtml('scene:scene_01', '第一幕旧 HTML');
-      const secondHtml = validHtml('scene:scene_02', '第二幕旧 HTML');
-      await writeFile(path.join(projectDir, firstHtmlPath), firstHtml);
-      await writeFile(path.join(projectDir, secondHtmlPath), secondHtml);
-      await writeFile(path.join(projectDir, 'content-graph.json'), `${JSON.stringify(graph, null, 2)}\n`);
-      const project = createEmptyProject({ projectId: `${workflowId}_${runId}`, workflowId, runId, contentGraph: graph });
-      project.scene_spec = retrySceneSpec;
-      project.continuity_mode = 'scene_html';
-      project.target = { duration_sec: 4, aspect_ratio: '9:16', generate_audio: false, autoSfxEnabled: false };
-      project.visual_plan = { ...visualPlan, beats: visualPlan.beats.map(({ source_scene, ...beat }) => beat) };
-      project.generation_checkpoint.scene_spec_hash = computeSceneSpecCheckpointHash(retrySceneSpec);
-      markCheckpointStage(project, 'content_graph', {
-        status: 'done', path: 'content-graph.json', output_hash: contentGraphPhase.hashContentGraph(graph),
+      const creativeContext = {
+        continuity_mode: 'scene_html',
+        input: { raw_text: '首次内容图提示', source_hint: '保留原始用户提示' },
+        source_context: { summary: '完整来源上下文' },
+        research_context: { summary: '完整研究上下文' },
+        brief: { summary: '完整策划上下文' },
+        audio: { narration_text: '完整旁白上下文' },
+        asset_context: {},
+      };
+      const retryTarget = { duration_sec: 4, aspect_ratio: '9:16', generate_audio: false, autoSfxEnabled: false };
+      frameHtmlAgent.generateFrameHtml = async args => ({ success: true, html: validHtml(args.node.id, args.node.id) });
+      const fresh = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        sceneSpecOverride: retrySceneSpec,
+        creativeContextOverride: creativeContext,
+        target: retryTarget,
+        aiTextModel: { async callTextModel() { return { success: true, text: JSON.stringify(graph) }; } },
       });
-      markCheckpointFrame(project, 'frame_html', 'scene:scene_01', {
-        status: 'done', html_path: firstHtmlPath, input_fingerprint: fingerprints.get('scene:scene_01'), output_hash: 'first-old-hash',
-      });
-      markCheckpointFrame(project, 'frame_html', 'scene:scene_02', {
-        status: 'pending', html_path: secondHtmlPath, input_fingerprint: fingerprints.get('scene:scene_02'), output_hash: 'second-old-hash',
-      });
+      assert.equal(fresh.success, true);
+      const projectDir = fresh.html_video_project_path;
+      const project = await projectStore.loadProject(projectDir);
+      assert.match(project.generation_checkpoint.stages.content_graph.input_hash, /^[a-f0-9]{64}$/,
+        'fresh 必须写入现代 Content Graph input hash');
+      const firstBefore = { ...project.generation_checkpoint.stages.frame_html.frames['scene:scene_01'] };
+      const secondBefore = { ...project.generation_checkpoint.stages.frame_html.frames['scene:scene_02'] };
+      const firstHtml = await fs.readFile(path.join(projectDir, firstBefore.html_path), 'utf8');
+      markCheckpointFrame(project, 'frame_html', 'scene:scene_02', { status: 'pending' });
       await projectStore.saveProject(projectDir, project);
 
       const generated = [];
@@ -1027,13 +1070,12 @@ async function main() {
       const persisted = await projectStore.loadProject(projectDir);
       const firstCheckpoint = persisted.generation_checkpoint.stages.frame_html.frames['scene:scene_01'];
       const secondCheckpoint = persisted.generation_checkpoint.stages.frame_html.frames['scene:scene_02'];
-      assert.equal(firstCheckpoint.html_path, firstHtmlPath);
-      assert.equal(firstCheckpoint.output_hash, 'first-old-hash');
-      assert.equal(firstCheckpoint.input_fingerprint, fingerprints.get('scene:scene_01'));
-      assert.equal(await fs.readFile(path.join(projectDir, firstHtmlPath), 'utf8'), firstHtml);
-      assert.notEqual(secondCheckpoint.output_hash, 'second-old-hash');
+      assert.equal(firstCheckpoint.html_path, firstBefore.html_path);
+      assert.equal(firstCheckpoint.output_hash, firstBefore.output_hash);
+      assert.equal(firstCheckpoint.input_fingerprint, firstBefore.input_fingerprint);
+      assert.equal(await fs.readFile(path.join(projectDir, firstBefore.html_path), 'utf8'), firstHtml);
+      assert.notEqual(secondCheckpoint.output_hash, secondBefore.output_hash);
       assert.equal(secondCheckpoint.status, 'done');
-      assert.equal(secondCheckpoint.input_fingerprint, fingerprints.get('scene:scene_02'));
       assert.match(await fs.readFile(path.join(projectDir, secondCheckpoint.html_path), 'utf8'), /第二幕新 HTML/);
     }
 
@@ -1203,7 +1245,7 @@ async function main() {
         workflowId,
         runId,
         creativeContextOverride: { asset_context: { assets: [currentAsset] } },
-        aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
+        aiTextModel: { async callTextModel() { return { success: true, text: JSON.stringify(graph) }; } },
       });
 
       assert.equal(result.success, true);

@@ -30,7 +30,7 @@ const defaultLayoutQaService = require('./layoutQaService');
 const { audioMatchesSceneSpec } = require('../sceneSpecHash');
 const { applyManifestToProjectAudio } = require('../ttsService');
 const { createDiagnostic, normalizeDiagnostics, failureFromDiagnostics } = require('./diagnostics');
-const { resolveNodeSceneId, validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
+const { resolveNodeSceneId } = require('./sceneGraphBinding');
 const sfxLibrary = require('./sfxLibrary');
 const sfxPlannerAgent = require('./sfxPlannerAgent');
 const sfxEventService = require('./sfxEventService');
@@ -43,8 +43,6 @@ const {
   hashContentGraph,
   hasUsableContentGraph,
   loadCheckpointContentGraph,
-  CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
-  contentGraphSceneSpecMismatchDiagnostic,
   finalizeContentGraph,
   generateContentGraphWithRetry,
   expandContentGraphToVisualBeats,
@@ -850,35 +848,6 @@ async function generateHtmlVideo(options = {}) {
     }
     diagnostics.push(...normalizeDiagnostics(graphResult.diagnostics));
     contentGraph = graphResult.contentGraph;
-    if (sceneSpec) {
-      const graphBinding = validateGraphMatchesSceneSpec(contentGraph, sceneSpec);
-      if (!graphBinding.ok) {
-        const graphDiagnostics = [
-          ...diagnostics,
-          contentGraphSceneSpecMismatchDiagnostic(graphBinding),
-        ];
-        await report(onProgress, {
-          type: 'html_video_graph_scene_spec_mismatch',
-          stage: 'project',
-          sub_stage: 'content_graph',
-          message: CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
-          data: graphBinding,
-        });
-        project = await projectStore.writeProjectJson(projectDir, current => {
-          markCheckpointStage(current, 'content_graph', {
-            status: 'failed',
-            input_hash: graphResult.inputHash || '',
-            diagnostic_code: 'content_graph_scene_spec_mismatch',
-          });
-          return current;
-        });
-        return failure(CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE, graphDiagnostics, {
-          html_video_project_path: projectDir,
-          project_dir: projectDir,
-          project,
-        });
-      }
-    }
     await report(onProgress, {
       type: 'html_video_graph_done',
       stage: 'project',

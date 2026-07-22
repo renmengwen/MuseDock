@@ -37,10 +37,14 @@ async function run() {
       target: {},
       creative_context: {
         continuity_mode: 'scene_html',
+        input: { raw_text: '完整原始提示' },
+        source_context: { summary: '完整来源上下文' },
         asset_context: { assets: [{ id: 'gen_scene_01', source: 'generated' }] },
       },
       result: {
         hyperframes_freeform: {
+          input: { raw_text: '不得覆盖的新旧值' },
+          source_context: { summary: '不得覆盖的新旧来源' },
           scene_spec: { scenes: [{ id: 'scene_01' }] },
           frame_specs: [],
         },
@@ -59,6 +63,8 @@ async function run() {
   });
   assert.strictEqual(retryResult.success, true);
   assert.strictEqual(capturedCreativeContext.continuity_mode, 'scene_html');
+  assert.strictEqual(capturedCreativeContext.input.raw_text, '完整原始提示');
+  assert.strictEqual(capturedCreativeContext.source_context.summary, '完整来源上下文');
   assert.strictEqual(capturedCreativeContext.asset_context.assets[0].id, 'gen_scene_01');
 
   console.log('test-creative-visual-strategy passed');

@@ -9,6 +9,7 @@ const { mapSceneSpecToContentGraph } = require('./sceneSpecMapper');
 const { resolveNodeSceneId, validateGraphMatchesSceneSpec } = require('./sceneGraphBinding');
 const { topoSort } = require('./contentGraph');
 const { AGENTS, STAGES } = require('../agentStages');
+const { stableStringify } = require('../sceneSpecHash');
 const { objectOrEmpty, firstNonEmptyString } = require('./assetUsagePhase');
 
 function cloneJson(value) {
@@ -25,7 +26,7 @@ function buildContentGraphInput({ sceneSpec = {}, creativeContext = {}, target =
 }
 
 function hashContentGraph(graph = {}) {
-  return sha256(JSON.stringify(graph));
+  return sha256(stableStringify(graph));
 }
 
 async function report(onProgress, event) {
@@ -80,13 +81,13 @@ function loadCheckpointContentGraph(projectDir, project = {}, expectedInputHash 
   const graphPath = String(checkpoint.path || '').trim();
   if (!graphPath) return null;
   const savedInputHash = String(checkpoint.input_hash || '').trim();
-  if (savedInputHash && expectedInputHash && savedInputHash !== expectedInputHash) return null;
+  if (!savedInputHash || !expectedInputHash || savedInputHash !== expectedInputHash) return null;
   try {
     const absolutePath = projectStore.resolveProjectPath(projectDir, graphPath);
     if (!fs.existsSync(absolutePath)) return null;
     const graph = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
     const savedOutputHash = String(checkpoint.output_hash || '').trim();
-    if (savedOutputHash && savedOutputHash !== hashContentGraph(graph)) return null;
+    if (!savedOutputHash || savedOutputHash !== hashContentGraph(graph)) return null;
     return hasUsableContentGraph(graph) ? graph : null;
   } catch {
     return null;

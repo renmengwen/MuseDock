@@ -121,6 +121,7 @@ function audioMatchesSceneSpec(audio = {}, sceneSpec = {}) {
 }
 
 module.exports = {
+  stableStringify,
   getSceneSpecSpeechSignature,
   computeSceneSpecSpeechHash,
   audioMatchesSceneSpec,

@@ -411,6 +411,7 @@ async function defaultRetryFrameHtmlAction({ workflow, project, projectDir, medi
     sceneSpec,
     creativeContext: {
       ...plainObject(workflow?.result?.hyperframes_freeform),
+      ...plainObject(workflow?.creative_context),
       ...resolveRetryContinuityMode(workflow, project),
       asset_context: plainObject(workflow?.creative_context?.asset_context),
       scene_spec: sceneSpec,
