@@ -172,6 +172,7 @@ function previewHtml(
   assert.ok(codes.has('camera_target_out_of_safe_area'));
   assert.ok(codes.has('camera_caption_target_overlap'));
   assert.ok(codes.has('camera_wrong_focus'), 'wrong_focus 只能由 fixture 人工 expected region 触发');
+  assert.equal(codes.has('camera_runtime_unresolved'), false, '显式静态 QA fixture 不得伪报生产 Runtime 缺失');
 
   async function inspectInline(name, body, sampleTimesSec = [0.1]) {
     const inlinePath = path.join(tempDir, name);
@@ -195,7 +196,19 @@ function previewHtml(
   assert.ok(rogue.issues.some(issue => issue.code === 'camera_zoom_out_of_range'));
   assert.ok(rogue.issues.some(issue => issue.code === 'camera_untrusted_motion'));
 
-  const jitter = await inspectInline('jitter.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="jitter" data-camera-cues='[{"start_sec":0,"end_sec":2,"max_zoom":1.5}]'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>window.__mpSetTimelineTime=function(t){var values=[0,10,-10,10];document.querySelector('[data-shot-layer="foreground"]').style.transform='translateX('+(values[Math.round((t-.05)*10)]||0)+'px)'}</script>`, null);
+  const plannedCue = JSON.stringify([{
+    id: 'cue_planned', start_sec: 0, end_sec: 2, max_zoom: 1.5,
+    region: { x: 0.2, y: 0.1, width: 0.2, height: 0.2 },
+  }]);
+  const missingRuntime = await inspectInline('missing-camera-runtime.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="missing-runtime" data-camera-cues='${plannedCue}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section>`, [1]);
+  assert.equal(missingRuntime.success, false, '存在合法 cue 但 Camera runtime 缺失时必须阻断');
+  assert.ok(missingRuntime.issues.some(issue => issue.code === 'camera_runtime_unresolved'));
+
+  const identityRuntime = await inspectInline('identity-camera-runtime.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="identity-runtime" data-camera-cues='${plannedCue}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>document.querySelector('[data-hv-shot]').__hvResolvedCameraCues=${plannedCue}</script>`, [1]);
+  assert.equal(identityRuntime.success, false, 'Runtime 接受 cue 后稳定窗仍为 identity 时必须阻断');
+  assert.ok(identityRuntime.issues.some(issue => issue.code === 'camera_transform_missing'));
+
+  const jitter = await inspectInline('jitter.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="jitter" data-layout-qa-static-camera-cues="true" data-camera-cues='[{"start_sec":0,"end_sec":2,"max_zoom":1.5}]'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>window.__mpSetTimelineTime=function(t){var values=[0,10,-10,10];document.querySelector('[data-shot-layer="foreground"]').style.transform='translateX('+(values[Math.round((t-.05)*10)]||0)+'px)'}</script>`, null);
   const jitterTimes = jitter.metrics.camera_samples.map(sample => sample.sample_time_sec);
   assert.deepEqual(jitterTimes.slice(0, 4), [0.05, 0.15, 0.25, 0.35], '默认 Camera 路径必须从 cue 过渡窗派生密集采样');
   assert.ok(jitterTimes.includes(1.2) && jitterTimes.includes(1.8), 'Camera 密采样不得替换既有全场景默认采样');
@@ -208,7 +221,7 @@ function previewHtml(
     max_zoom: 1.5,
   }));
   const manyCuePath = path.join(tempDir, 'six-cues.html');
-  await fs.writeFile(manyCuePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:0 0}</style></head><body><section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="many" data-window-end-sec="14" data-camera-cues='${JSON.stringify(sixCues)}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>window.__mpSetTimelineTime=function(){}</script></body></html>`, 'utf8');
+  await fs.writeFile(manyCuePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:0 0}</style></head><body><section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="many" data-window-end-sec="14" data-layout-qa-static-camera-cues="true" data-camera-cues='${JSON.stringify(sixCues)}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>window.__mpSetTimelineTime=function(){}</script></body></html>`, 'utf8');
   const manyCueReport = await inspectFrameHtmlLayout({
     htmlPath: manyCuePath,
     frame: { id: 'six_cues', duration_sec: 14 },

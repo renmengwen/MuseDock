@@ -406,10 +406,13 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
         ? new DOMMatrixReadOnly(style.transform)
         : new DOMMatrixReadOnly();
       const scale = Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b);
-      const cues = Object.prototype.hasOwnProperty.call(shot, '__hvResolvedCameraCues')
-        && Array.isArray(shot.__hvResolvedCameraCues)
+      const plannedCues = parseJson(shot.dataset.cameraCues) || [];
+      const runtimeResolved = Object.prototype.hasOwnProperty.call(shot, '__hvResolvedCameraCues')
+        && Array.isArray(shot.__hvResolvedCameraCues);
+      const staticFixture = shot.dataset.layoutQaStaticCameraCues === 'true';
+      const cues = runtimeResolved
         ? shot.__hvResolvedCameraCues
-        : parseJson(shot.dataset.cameraCues) || [];
+        : staticFixture ? plannedCues : [];
       let cue = null;
       let cueIndex = -1;
       let returningToOverview = false;
@@ -465,6 +468,9 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
         tx: matrix.e,
         ty: matrix.f,
         has_transform: Math.abs(scale - 1) > 1e-4 || Math.abs(matrix.e) > 0.01 || Math.abs(matrix.f) > 0.01,
+        camera_plan_present: plannedCues.length > 0,
+        camera_runtime_resolved: runtimeResolved,
+        camera_static_fixture: staticFixture,
         cue,
         returning_to_overview: returningToOverview,
         focus_stable: focusStable,
@@ -527,6 +533,12 @@ function cameraIssuesForSample(sample, { frameId, sampleTimeSec }) {
   }
   for (const shot of sample.shots) {
     const details = { selector: shot.shot_id, shot_id: shot.shot_id };
+    if (shot.camera_plan_present && !shot.camera_runtime_resolved && !shot.camera_static_fixture) {
+      issues.push(makeIssue({
+        code: 'camera_runtime_unresolved', frameId, sampleTimeSec,
+        message: '摄影机运行时未解析当前焦点计划。', details,
+      }));
+    }
     if (!shot.foreground_ready) {
       issues.push(makeIssue({
         code: 'camera_image_not_ready', frameId, sampleTimeSec,
@@ -555,6 +567,13 @@ function cameraIssuesForSample(sample, { frameId, sampleTimeSec }) {
       issues.push(makeIssue({
         code: 'camera_untrusted_motion', frameId, sampleTimeSec,
         message: '图片发生了没有有效焦点 cue 支持的移动。', details: { ...details, scale: shot.scale, tx: shot.tx, ty: shot.ty },
+      }));
+    }
+    if (shot.camera_runtime_resolved && shot.cue && shot.focus_stable && !shot.has_transform) {
+      issues.push(makeIssue({
+        code: 'camera_transform_missing', frameId, sampleTimeSec,
+        message: '摄影机已接受焦点，但稳定时间窗内没有执行画面变换。',
+        details: { ...details, scale: shot.scale, tx: shot.tx, ty: shot.ty },
       }));
     }
     if (shot.target_box && shot.focus_stable) {
