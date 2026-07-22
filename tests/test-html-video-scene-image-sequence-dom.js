@@ -120,6 +120,7 @@ for (const [mode, shots] of [
   assert.match(result.html, /data-shot-layer="foreground"[^>]+src="\.\.\/assets\/a\.png"/);
   assert.match(result.html, /object-fit:cover/);
   assert.match(result.html, /object-fit:contain/);
+  assert.match(result.html, /body>\[data-hv-canvas\],body>#root\)\{background-color:transparent!important\}/, '明确的全画布模型壳纯背景色必须透明');
   assert.equal(validateSceneImageSequenceDom(result.html, args).success, true);
   assert.equal(materializeSceneImageSequenceDom({ ...args, html: result.html }).html, result.html, '注入必须幂等');
 }
