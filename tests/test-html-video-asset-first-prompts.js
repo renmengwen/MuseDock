@@ -132,6 +132,10 @@ async function run() {
     assert.match(sequencePrompt, /系统会.*确定性注入真实图片层/);
     assert.match(sequencePrompt, /不得自行输出 data-hv-image-sequence、data-hv-shot/);
     assert.match(sequencePrompt, /不得再次输出这些 Shot 的 img\/src/);
+    assert.match(sequencePrompt, /overlay-only/);
+    assert.match(sequencePrompt, /HF 根容器.*data-hv-canvas 主舞台.*必须保持透明/);
+    assert.match(sequencePrompt, /不得用实色、渐变、canvas、svg 或 video 覆盖/);
+    assert.match(sequencePrompt, /只允许局部文字、局部卡片和局部装饰/);
     assert.doesNotMatch(sequencePrompt, /缺少 caption timing/);
     assert.doesNotMatch(sequencePrompt, /enter_sec|hold_sec|exit_sec/);
     for (const [name, wrapperPrompt] of [
@@ -144,6 +148,7 @@ async function run() {
       assert.match(wrapperPrompt, /src=\.\.\/assets\/c\.png/);
       assert.match(wrapperPrompt, /active_window=.*scene_local/);
       assert.match(wrapperPrompt, /系统 Shot 层注入|唯一图片真值/);
+      assert.match(wrapperPrompt, /overlay-only/);
     }
     const movedAssets = assets.map(asset => asset.id === 'a'
       ? { ...asset, path: 'assets/a-new.png', frame_src: '../assets/a-new.png' }

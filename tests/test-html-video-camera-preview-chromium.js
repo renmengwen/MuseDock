@@ -222,6 +222,7 @@ function previewHtml(
   }
 
   const requiredFigure = requirement => `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay" style="--fixture:yes;transform:translateZ(0)"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="visibility-${requirement}" data-shot-requirement="${requirement}"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section>`;
+  const pauseOpacityTransitionsAtMidpoint = (...ids) => `<script>(()=>{for(const id of ${JSON.stringify(ids)}){const shot=document.getElementById(id);void shot.offsetWidth;shot.style.opacity='1';const transition=shot.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='opacity');if(!transition)throw new Error('fixture opacity transition missing: '+id);transition.pause();transition.playbackRate=.75;transition.currentTime=175}})()</script>`;
   const visibleRequired = await inspectInline('required-visible.html', requiredFigure('required'));
   const visibleMetric = visibleRequired.metrics.image_sequence_visibility_samples[0];
   assert.equal(visibleRequired.success, true, JSON.stringify(visibleRequired.issues));
@@ -252,23 +253,22 @@ function previewHtml(
 
   const transitioningRequired = await inspectInline(
     'required-mid-transition.html',
-    `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure id="mid-transition-shot" data-hv-shot="true" data-shot-active="true" data-shot-id="mid-transition" data-asset-id="asset-mid" data-shot-requirement="required" style="opacity:0;transition:opacity .35s linear"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>requestAnimationFrame(()=>{document.getElementById('mid-transition-shot').style.opacity='1'})</script>`,
+    `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure id="mid-transition-shot" data-hv-shot="true" data-shot-active="true" data-shot-id="mid-transition" data-asset-id="asset-mid" data-shot-requirement="required" style="opacity:0;transition:opacity .35s linear"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section>${pauseOpacityTransitionsAtMidpoint('mid-transition-shot')}`,
     [0.1],
   );
   const transitioningMetric = transitioningRequired.metrics.image_sequence_visibility_samples[0];
   assert.equal(transitioningRequired.success, true, JSON.stringify(transitioningRequired.issues));
-  assert.ok(transitioningMetric.opacity_before_probe > 0 && transitioningMetric.opacity_before_probe < 1, `探针必须真实进入 .35s opacity transition 中段：${JSON.stringify(transitioningMetric)}`);
-  assert.ok(Math.abs(transitioningMetric.opacity_after_restore - transitioningMetric.opacity_before_probe) <= 0.001);
-  assert.ok(transitioningMetric.layer_state_restored && transitioningMetric.transition_current_time_restored
-    && transitioningMetric.transition_play_state_restored && transitioningMetric.new_running_transition_count === 0,
-  '运行中的 Figure transition 必须连续恢复，图片层临时状态不得残留');
+  assert.ok(transitioningMetric.changed_pixel_ratio >= 0.05, `中段 transition 的 required 素材必须保持真实像素贡献：${JSON.stringify(transitioningMetric)}`);
+  assert.ok(transitioningMetric.layer_state_restored && transitioningMetric.animation_state_restored
+    && transitioningMetric.new_running_transition_count === 0,
+  '暂停在确定性中点的 Figure transition 必须按 currentTime、playState、playbackRate 真实恢复');
 
   const twoRequired = await inspectInline(
     'two-required-one-occluded.html',
     `<section data-hv-image-sequence="true" data-sequence-mode="semantic_compare">
       <figure id="required-visible-shot" data-hv-shot="true" data-shot-active="true" data-shot-id="required-visible" data-asset-id="asset-visible" data-shot-requirement="required" style="z-index:2;opacity:0;transition:opacity .35s linear"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure>
       <figure id="required-hidden-shot" data-hv-shot="true" data-shot-active="true" data-shot-id="required-hidden" data-asset-id="asset-hidden" data-shot-requirement="required" style="z-index:0;opacity:0;transition:opacity .35s linear"><img data-shot-layer="background" src="${secondImageUrl}"><img data-shot-layer="foreground" src="${secondImageUrl}"></figure>
-    </section><div aria-hidden="true" style="position:absolute;inset:0;z-index:1;background:#eee"></div><script>requestAnimationFrame(()=>{document.getElementById('required-visible-shot').style.opacity='1';document.getElementById('required-hidden-shot').style.opacity='1'})</script>`,
+    </section><div aria-hidden="true" style="position:absolute;inset:0;z-index:1;background:#eee"></div>${pauseOpacityTransitionsAtMidpoint('required-visible-shot', 'required-hidden-shot')}`,
     [0.1, 0.2],
   );
   const visibleRequiredMetrics = twoRequired.metrics.image_sequence_visibility_samples.filter(metric => metric.shot_id === 'required-visible');
@@ -278,12 +278,7 @@ function previewHtml(
   assert.ok(visibleRequiredMetrics.every(metric => metric.changed_pixel_ratio >= 0.05), '可见 required Shot 必须在多 sample 中独立通过像素贡献门');
   assert.ok(hiddenRequiredMetrics.every(metric => metric.changed_pixel_ratio < 0.05), '后一 Shot 不得借前一 Shot 恢复 transition 的变化通过');
   assert.ok([...visibleRequiredMetrics, ...hiddenRequiredMetrics].every(metric => (
-    metric.opacity_before_probe > 0 && metric.opacity_before_probe < 1
-    && Math.abs(metric.opacity_after_restore - metric.opacity_before_probe) <= 0.001
-    && metric.opacity_state_restored
-    && metric.layer_state_restored
-    && metric.transition_current_time_restored
-    && metric.transition_play_state_restored
+    metric.layer_state_restored
     && metric.new_running_transition_count === 0
     && metric.style_restored
     && metric.animation_state_restored
@@ -301,7 +296,9 @@ function previewHtml(
   assert.ok(movingShell.issues.some(issue => issue.code === 'required_asset_occluded'), '动态全画布壳完全遮挡素材时仍必须阻断');
   assert.ok(movingMetric.changed_pixel_ratio < 0.05, `冻结后的动态壳不得制造假像素贡献：${JSON.stringify(movingMetric)}`);
   assert.ok(movingMetric.style_restored && movingMetric.animation_state_restored
-    && movingMetric.clock_state_restored && movingMetric.raf_state_restored, '像素探针必须精确恢复 style、CSS 动画、共享时钟与 RAF 状态');
+    && movingMetric.clock_state_restored && movingMetric.raf_state_restored
+    && movingMetric.layer_state_restored && movingMetric.new_running_transition_count === 0,
+  '像素探针必须真实恢复 style、CSS 动画、共享时钟、RAF 与图片层状态，且不得留下新 transition');
 
   const blank = await inspectInline('blank.html', '<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"></section>');
   assert.ok(blank.issues.some(issue => issue.code === 'camera_scene_blank'));

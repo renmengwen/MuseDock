@@ -816,7 +816,6 @@ async function inspectRequiredAssetVisibility(page, resolution) {
       probeStyle,
       shots: requiredShots.map(shot => ({
         shot,
-        originalOpacity: Number(getComputedStyle(shot).opacity),
         layers: Array.from(shot.querySelectorAll('[data-shot-layer]')).map(layer => ({
           layer,
           originalHidden: layer.getAttribute('data-layout-qa-required-layer-hidden'),
@@ -891,12 +890,6 @@ async function inspectRequiredAssetVisibility(page, resolution) {
         }
         void item.shot.offsetWidth;
       }
-      const originalAnimations = new Set((state.animations || []).map(item => item.animation));
-      const newRunningTransitions = (state.shots || []).flatMap(item => item.shot.getAnimations())
-        .filter(animation => (
-          typeof CSSTransition !== 'undefined' && animation instanceof CSSTransition
-          && animation.playState === 'running' && !originalAnimations.has(animation)
-        ));
       for (const item of state.shots || []) {
         restoredStyles = restoredStyles && item.layerStateRestored;
       }
@@ -912,15 +905,27 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           if (item.playState === 'running' || item.playState === 'pending') item.animation.play();
           else if (item.playState === 'paused') item.animation.pause();
           else if (item.playState === 'finished') item.animation.finish();
-          item.playStateRestored = item.playState === 'running' || item.playState === 'pending'
+          else if (item.playState === 'idle') item.animation.cancel();
+          const playbackRateRestored = Math.abs(
+            Number(item.animation.playbackRate) - Number(item.playbackRate),
+          ) <= 1e-9;
+          const currentTimeRestored = item.currentTime === null
+            ? item.animation.currentTime === null
+            : Math.abs(Number(item.animation.currentTime) - Number(item.currentTime)) <= 1;
+          const playStateRestored = item.playState === 'running' || item.playState === 'pending'
             ? ['running', 'pending'].includes(item.animation.playState)
             : item.animation.playState === item.playState;
+          item.restored = playbackRateRestored && currentTimeRestored && playStateRestored;
         } catch (_) { restoredAnimations = false; }
       }
-      for (const item of state.shots || []) {
-        restoredStyles = restoredStyles
-          && Math.abs(Number(getComputedStyle(item.shot).opacity) - item.originalOpacity) <= 0.001;
-      }
+      const originalAnimations = new Set((state.animations || []).map(item => item.animation));
+      const newRunningTransitions = document.getAnimations().filter(animation => (
+        typeof CSSTransition !== 'undefined' && animation instanceof CSSTransition
+        && animation.playState === 'running' && !originalAnimations.has(animation)
+      ));
+      restoredAnimations = restoredAnimations
+        && (state.animations || []).every(item => item.restored === true)
+        && newRunningTransitions.length === 0;
       if (state.trustedClock && !state.clockWasPaused) window.__hvPlaybackClock.play();
       if (!state.rafWasPaused && typeof state.rafController?.resume === 'function') state.rafController.resume();
       const restoredClock = !state.trustedClock || window.__hvPlaybackClock.paused() === state.clockWasPaused;
@@ -936,19 +941,7 @@ async function inspectRequiredAssetVisibility(page, resolution) {
         newRunningTransitionCount: newRunningTransitions.length,
         shotStates: (state.shots || []).map(item => ({
           shotId: item.shot.dataset.shotId || '',
-          opacityBefore: item.originalOpacity,
-          opacity: Number(getComputedStyle(item.shot).opacity),
           layerStateRestored: item.layerStateRestored,
-          transitionCurrentTimeRestored: (state.animations || [])
-            .filter(animation => typeof CSSTransition !== 'undefined'
-              && animation.animation instanceof CSSTransition
-              && animation.animation.effect?.target === item.shot)
-            .every(animation => animation.currentTimeRestored === true),
-          transitionPlayStateRestored: (state.animations || [])
-            .filter(animation => typeof CSSTransition !== 'undefined'
-              && animation.animation instanceof CSSTransition
-              && animation.animation.effect?.target === item.shot)
-            .every(animation => animation.playStateRestored === true),
         })),
       };
     }).catch(error => ({ restored: false, error: error?.message || String(error) }));
@@ -1008,15 +1001,7 @@ async function inspectRequiredAssetVisibility(page, resolution) {
     animation_state_restored: restorationDetails.restoredAnimations === true,
     clock_state_restored: restorationDetails.restoredClock === true,
     raf_state_restored: restorationDetails.restoredRaf === true,
-    opacity_before_probe: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.opacityBefore,
-    opacity_after_restore: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.opacity,
-    opacity_state_restored: Math.abs(
-      Number(restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.opacity)
-      - Number(restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.opacityBefore)
-    ) <= 0.001,
     layer_state_restored: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.layerStateRestored === true,
-    transition_current_time_restored: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.transitionCurrentTimeRestored === true,
-    transition_play_state_restored: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.transitionPlayStateRestored === true,
     new_running_transition_count: restorationDetails.newRunningTransitionCount ?? null,
     passed: comparisons[index].changed_pixel_ratio >= REQUIRED_ASSET_MIN_CHANGED_PIXEL_RATIO,
   }));

@@ -189,6 +189,8 @@ function buildAssetFirstFramePrompt({ beat = {}, creativeContext = {}, primitive
     lines.push('每个 Shot 都是 main_visual 的连续候选，不得把 Shot 当作 overlay、角落配图或装饰层。');
     lines.push('系统会根据上述 Shot id、caption_ids、scene-local active_window 与 minimum 确定性注入真实图片层；你只设计外层美术壳，不得自行输出 data-hv-image-sequence、data-hv-shot 或 Shot 计时器。');
     lines.push('美术壳不得再次输出这些 Shot 的 img/src；系统注入层是唯一图片真值，避免重复图片和不一致布局。');
+    lines.push('外层美术壳必须是 overlay-only：HF 根容器、data-hv-canvas 主舞台、接近全画布的容器及其 ::before/::after 必须保持透明，不得用实色、渐变、canvas、svg 或 video 覆盖系统注入的受管主素材。');
+    lines.push('美术壳只允许局部文字、局部卡片和局部装饰；任何局部 overlay 都不得扩张成接近全画布的遮罩或背景层。');
     lines.push('不得发明、修改或删除 Shot 时间窗，也不得自行增加 enter/hold/exit、Camera 或其他播放时间字段。');
   } else if (base.type === 'diagram') {
     lines.push('本 beat 无图片素材：必须生成统一风格的结构化 diagram 作为主视觉（main_visual），禁止输出标题页式整屏大字。');
