@@ -237,6 +237,7 @@ assert.equal(noDurationPlan.beats[0].duration_sec, 6);
   assert.equal(oldPlan.input_fingerprint, unrelatedPlan.input_fingerprint);
   const frameFingerprint = plan => computeFrameInputFingerprint({
     node: { id: 'path', asset_refs: graph.nodes[0].asset_refs, metadata: { visual_beat: plan.beats[0] } },
+    beat: plan.beats[0],
     continuityMode: 'beat_mp4',
     target: { width: 1080, height: 1920 },
   });
@@ -366,12 +367,14 @@ const { assignMotionOrchestration } = require('../server/services/creative-video
   const first = build('旧字幕');
   const second = build('新字幕');
   assert.notEqual(first.input_fingerprint, second.input_fingerprint);
-  const frameFingerprint = plan => computeFrameInputFingerprint({
+  const frameFingerprint = (plan, text) => computeFrameInputFingerprint({
     node: { id: 'caption-fingerprint', metadata: { visual_beat: plan.beats[0] } },
+    beat: plan.beats[0],
+    sceneSpec: { scenes: [{ id: 'caption-fingerprint', duration_sec: 4, captions: [{ id: 'caption', start: 0, end: 4, text }] }] },
     continuityMode: 'beat_mp4',
     target: { width: 1080, height: 1920 },
   });
-  assert.notEqual(frameFingerprint(first), frameFingerprint(second));
+  assert.notEqual(frameFingerprint(first, '旧字幕'), frameFingerprint(second, '新字幕'));
 }
 
 // C-03 Review：禁用字幕时忽略 raw captions；启用时非对象和规范化 ID 冲突必须 fail-closed。

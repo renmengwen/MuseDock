@@ -28,23 +28,36 @@ function stableJsonStringify(value) {
 }
 
 /**
- * P1-2：计算单帧 HTML 生成的真实输入指纹。覆盖会改变产物的全部关键输入：
- * 连续性模式、画幅、beat 编排（含 visual_base/motion_overlay(theme_tokens)/visual_text）、
- * 素材绑定、受管 Shot 当前 registry、scene_html 时间窗口与提示词版本。resume 复用时与 checkpoint 持久化的指纹比较，
- * 任一维度变化即重新生成，杜绝「换素材/换编排后静默复用旧 HTML」。纯函数，可独立测试。
+ * 单帧 HTML 的真实模型输入指纹：直接签完整 canonical prompt，避免在这里维护第二份字段清单。
+ * 受管 Shot registry 不进入模型提示词、却会改变写盘 HTML，因此保留最小物化签名。
  */
-function computeFrameInputFingerprint({ node, continuityMode, target, creativeContext } = {}) {
-  const resolution = frameHtmlAgent.resolveResolution(target || {}) || {};
-  const assetRefs = (Array.isArray(node?.asset_refs) ? node.asset_refs : [])
-    .filter(Boolean)
-    .map(ref => stableJsonValue(ref))
-    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-  const shotAssetIds = new Set((Array.isArray(node?.metadata?.visual_beats)
+function computeFrameInputFingerprint({
+  graph,
+  node,
+  index,
+  total,
+  sceneSpec,
+  creativeContext,
+  target,
+  styleProfile,
+  visualStyleReferenceHtml,
+  previousFrameHtml,
+  beat,
+  primitiveSnippet,
+  diagramSkeleton,
+  previousBeatSummary,
+  hasCaptions,
+  sceneBeatsBrief,
+  continuityMode,
+} = {}) {
+  const managedShots = (Array.isArray(node?.metadata?.visual_beats)
     ? node.metadata.visual_beats
     : [node?.metadata?.visual_beat].filter(Boolean))
     .flatMap(beat => beat?.visual_base?.type === 'image_sequence' && Array.isArray(beat.visual_base.shots)
-      ? beat.visual_base.shots.map(shot => String(shot?.asset_id || '').trim())
-      : [])
+      ? beat.visual_base.shots
+      : []);
+  const shotAssetIds = new Set(managedShots
+    .map(shot => String(shot?.asset_id || '').trim())
     .filter(Boolean));
   const shotAssets = (Array.isArray(creativeContext?.asset_context?.assets)
     ? creativeContext.asset_context.assets
@@ -65,11 +78,26 @@ function computeFrameInputFingerprint({ node, continuityMode, target, creativeCo
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
   const signature = {
     continuity_mode: continuityMode || 'beat_mp4',
-    resolution: { width: resolution.width ?? null, height: resolution.height ?? null },
-    beat: node?.metadata?.visual_beats ?? node?.metadata?.visual_beat ?? null,
-    asset_refs: assetRefs,
+    prompt: frameHtmlAgent.buildFrameHtmlPrompt({
+      graph,
+      node,
+      index,
+      total,
+      sceneSpec,
+      creativeContext,
+      target,
+      styleProfile,
+      visualStyleReferenceHtml,
+      previousFrameHtml,
+      beat,
+      primitiveSnippet,
+      diagramSkeleton,
+      previousBeatSummary,
+      hasCaptions,
+      sceneBeatsBrief,
+    }),
+    ...(managedShots.length ? { managed_shots: managedShots.map(stableJsonValue) } : {}),
     ...(shotAssetIds.size ? { shot_assets: shotAssets } : {}),
-    beat_windows: node?.metadata?.beat_windows || null,
     prompt_version: FRAME_PROMPT_VERSION,
   };
   return crypto.createHash('sha256').update(stableJsonStringify(signature)).digest('hex');

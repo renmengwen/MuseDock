@@ -259,12 +259,12 @@ function firstShot(visualPlan) {
   assert.deepEqual(cues[0].keywords_by_caption_id, { cap_01: 'Stars', cap_02: '星标' });
 
   const node = { metadata: { visual_beat: input.visualPlan.beats[0] } };
-  const fingerprint = computeFrameInputFingerprint({ node, continuityMode: 'beat_mp4', target: {} });
+  const fingerprint = computeFrameInputFingerprint({ node, beat: node.metadata.visual_beat, continuityMode: 'beat_mp4', target: {} });
   const changedNode = JSON.parse(JSON.stringify(node));
   changedNode.metadata.visual_beat.visual_base.shots[0].camera.focus_cues[0]
     .keywords_by_caption_id.cap_02 = 'Stars';
   assert.notEqual(
-    computeFrameInputFingerprint({ node: changedNode, continuityMode: 'beat_mp4', target: {} }),
+    computeFrameInputFingerprint({ node: changedNode, beat: changedNode.metadata.visual_beat, continuityMode: 'beat_mp4', target: {} }),
     fingerprint,
     '字幕关键词变化必须使 Frame checkpoint 指纹失配',
   );

@@ -222,25 +222,29 @@ async function runFrameHtmlPhase(ctx) {
   let completedFrameHtmlCount = 0;
   const concurrency = Math.min(5, Math.max(1, Math.round(Number(frameHtmlConcurrency) || FRAME_HTML_CONCURRENCY)));
   const frameHtmlRunsInParallel = concurrency > 1;
-  const generateFrameJob = async job => {
-    const { index, node, sceneId, scene, styleReferenceHtml } = job;
-    // previousBeatSummary 仅分桶路径会写入
-    const jobBeatId = String(node.beat_id || node.beatId || '').trim();
-    const assetFirstMotionArgs = {
-      // P2-3(a)：scene/beats/mediaOptions 下传给 buildSceneBeatsBrief，
-      // 供 scene_html 节点按 beat 判定字幕、给无字幕 beat 追加画面重点短句要求
-      ...resolveAssetFirstMotionArgs(node, {
-        scene,
+  const framePromptArgs = (job, styleReferenceHtml = '', previousBeatSummary = '') => {
+    const jobBeatId = String(job.node.beat_id || job.node.beatId || '').trim();
+    return {
+      graph: contentGraph,
+      node: job.node,
+      index: job.index,
+      total: nodes.length,
+      sceneSpec,
+      creativeContext,
+      target: templateRenderTarget,
+      styleProfile,
+      visualStyleReferenceHtml: styleReferenceHtml || '',
+      previousFrameHtml: '',
+      ...resolveAssetFirstMotionArgs(job.node, {
+        scene: job.scene,
         beats: project.visual_plan?.beats || [],
         mediaOptions,
       }),
-      ...(job.previousBeatSummary ? { previousBeatSummary: job.previousBeatSummary } : {}),
-      // R8：仅 beat_mp4 帧计算 hasCaptions（scene_html 的 scene 级帧 beat 粒度不适用，
-      // 保持 undefined，agent 侧缺省 true 不追加要求行）
-      ...(jobBeatId && node?.metadata?.visual_beat && !isSceneHtmlNode(node)
+      ...(previousBeatSummary ? { previousBeatSummary } : {}),
+      ...(jobBeatId && job.node?.metadata?.visual_beat && !isSceneHtmlNode(job.node)
         ? {
           hasCaptions: hasCaptionsForBeat({
-            scene,
+            scene: job.scene,
             beats: project.visual_plan?.beats || [],
             beatId: jobBeatId,
             mediaOptions,
@@ -248,6 +252,14 @@ async function runFrameHtmlPhase(ctx) {
         }
         : {}),
     };
+  };
+  const generateFrameJob = async job => {
+    const { index, node, sceneId, scene, styleReferenceHtml } = job;
+    const promptArgs = framePromptArgs(job, styleReferenceHtml, job.previousBeatSummary);
+    const inputFingerprint = computeFrameInputFingerprint({
+      ...promptArgs,
+      continuityMode: creativeContext?.continuity_mode,
+    });
     await report(onProgress, {
       type: 'html_video_frame_html_started',
       stage: 'project',
@@ -280,17 +292,7 @@ async function runFrameHtmlPhase(ctx) {
           attempt: 1,
         },
       },
-      graph: contentGraph,
-      node,
-      index,
-      total: nodes.length,
-      sceneSpec,
-      creativeContext,
-      target: templateRenderTarget,
-      styleProfile,
-      visualStyleReferenceHtml: styleReferenceHtml,
-      previousFrameHtml: '',
-      ...assetFirstMotionArgs,
+      ...promptArgs,
     });
     if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
       const previousFailedHtml = htmlResult.failed_html;
@@ -312,17 +314,7 @@ async function runFrameHtmlPhase(ctx) {
           },
         },
         shortPrompt: true,
-        graph: contentGraph,
-        node,
-        index,
-        total: nodes.length,
-        sceneSpec,
-        creativeContext,
-        target: templateRenderTarget,
-        styleProfile,
-        visualStyleReferenceHtml: styleReferenceHtml,
-        previousFrameHtml: '',
-        ...assetFirstMotionArgs,
+        ...promptArgs,
       });
       if (!htmlResult.success && isFrameProviderMissingText(htmlResult)) {
         const failedHtmlPath = await writeFailedFrameHtml(
@@ -395,18 +387,8 @@ async function runFrameHtmlPhase(ctx) {
               repair_attempt: 'layout_qa',
             },
           },
-          graph: contentGraph,
-          node,
-          index,
-          total: nodes.length,
-          sceneSpec,
-          creativeContext,
-          target: templateRenderTarget,
-          styleProfile,
-          visualStyleReferenceHtml: styleReferenceHtml,
-          previousFrameHtml: '',
+          ...promptArgs,
           layoutFeedback: summarizeLayoutIssues(firstBlocking),
-          ...assetFirstMotionArgs,
         });
         let unresolved = firstBlocking;
         if (repaired.success) {
@@ -452,8 +434,8 @@ async function runFrameHtmlPhase(ctx) {
     }
     // raw_html 帧校验通过后、写盘前：asset_first 且模型漏写 overlay 时确定性注入 primitive 兜底片段；
     // scene_html 的 scene 级节点跳过兜底（单 beat 片段无 scope，注入会全程常显破坏分 beat 显隐）
-    if (htmlResult.success && assetFirstMotionArgs.beat && !isSceneHtmlNode(node)) {
-      const overlayResult = ensureMotionOverlay(htmlResult.html, assetFirstMotionArgs.beat);
+    if (htmlResult.success && promptArgs.beat && !isSceneHtmlNode(node)) {
+      const overlayResult = ensureMotionOverlay(htmlResult.html, promptArgs.beat);
       if (overlayResult.injected) {
         htmlResult = { ...htmlResult, html: overlayResult.html };
         diagnostics.push(createDiagnostic({
@@ -464,7 +446,7 @@ async function runFrameHtmlPhase(ctx) {
           severity: 'warning',
           retryable: false,
           user_message: '模型未按 primitive 落 overlay，已确定性注入兜底片段。',
-          details: { frame_id: node.id || sceneId, preset: assetFirstMotionArgs.beat.motion_overlay?.preset || '' },
+          details: { frame_id: node.id || sceneId, preset: promptArgs.beat.motion_overlay?.preset || '' },
         }));
       }
     }
@@ -495,9 +477,11 @@ async function runFrameHtmlPhase(ctx) {
           })],
         };
     }
-    return { ...job, htmlResult };
+    return { ...job, htmlResult, inputFingerprint };
   };
 
+  let rebuildTail = false;
+  const rebuildContinuityGroups = new Set();
   for (let index = 0; index < nodes.length; index += 1) {
     const node = nodes[index];
     const sceneId = resolveNodeSceneId(node) || node.id;
@@ -512,7 +496,16 @@ async function runFrameHtmlPhase(ctx) {
     const checkpointFrame = objectOrEmpty(
       checkpointFrames[frameKey || sceneId] || checkpointFrames[sceneId] || checkpointFrames[node.id],
     );
-    const reuse = shouldReuseFrameHtml({
+    const job = { index, node, sceneId, scene };
+    const groupId = continuityGroupId(job);
+    const beatIndex = Number(node?.metadata?.visual_beat?.continuity?.beat_index) || 1;
+    const predecessor = groupId ? predecessorForBeat(initialHtmlByGroup, groupId, beatIndex) : null;
+    const promptArgs = framePromptArgs(job, visualStyleReferenceHtml, predecessor ? summarizeBaseLayout(predecessor.html) : '');
+    const inputFingerprint = computeFrameInputFingerprint({
+      ...promptArgs,
+      continuityMode: creativeContext?.continuity_mode,
+    });
+    const reuse = !rebuildTail && !rebuildContinuityGroups.has(groupId) && shouldReuseFrameHtml({
       projectDir,
       checkpointFrame,
       scene,
@@ -521,12 +514,7 @@ async function runFrameHtmlPhase(ctx) {
       creativeContext,
       resumeAllowed: resumeAllowed && !regenerateFrameHtmlRequested,
       // P1-2：真实输入指纹比较——checkpoint 有指纹且不匹配则重新生成；无指纹的旧工程不复用
-      inputFingerprint: computeFrameInputFingerprint({
-        node,
-        continuityMode: creativeContext?.continuity_mode,
-        target: templateRenderTarget,
-        creativeContext,
-      }),
+      inputFingerprint,
     });
     if (reuse.reuse) {
       const durationSec = trustedSceneDuration(scene || {}, node);
@@ -571,7 +559,9 @@ async function runFrameHtmlPhase(ctx) {
       });
       continue;
     }
-    frameJobs.push({ index, node, sceneId, scene });
+    if (!visualStyleReferenceHtml) rebuildTail = true;
+    if (groupId) rebuildContinuityGroups.add(groupId);
+    frameJobs.push(job);
   }
 
   if (frameJobs.length > 1) {
@@ -623,7 +613,7 @@ async function runFrameHtmlPhase(ctx) {
   }
 
   for (const frameResult of frameResults.sort((a, b) => a.index - b.index)) {
-    const { index, node, sceneId, scene } = frameResult;
+    const { index, node, sceneId, scene, inputFingerprint } = frameResult;
     let { htmlResult } = frameResult;
     const frameKey = String(node.beat_id || node.beatId || node.id || sceneId || '').trim();
     if (!htmlResult.success) {
@@ -760,12 +750,7 @@ async function runFrameHtmlPhase(ctx) {
         html_path: written.html_path,
         input_hash: sha256(htmlResult.html),
         // P1-2：持久化真实输入指纹（input_hash 是历史遗留的输出 hash，保留不动）
-        input_fingerprint: computeFrameInputFingerprint({
-          node,
-          continuityMode: creativeContext?.continuity_mode,
-          target: templateRenderTarget,
-          creativeContext,
-        }),
+        input_fingerprint: inputFingerprint,
         output_hash: written.output_hash,
         diagnostic_code: htmlResult.fallbackDiagnostic?.code || '',
       });

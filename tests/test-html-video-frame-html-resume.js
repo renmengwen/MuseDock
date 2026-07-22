@@ -14,6 +14,7 @@ aiImageModel.isConfigured = async () => false;
 
 const frameHtmlAgent = require('../server/services/creative-video/html-video/frameHtmlAgent');
 const frameHtmlPhase = require('../server/services/creative-video/html-video/frameHtmlPhase');
+const { resolveAssetFirstMotionArgs } = require('../server/services/creative-video/html-video/motionOverlayPhase');
 const contentGraphPhase = require('../server/services/creative-video/html-video/contentGraphPhase');
 const { materializeCreativeContextAssets } = require('../server/services/creative-video/html-video/assetUsagePhase');
 const { mergeVisualAssets } = require('../server/services/creative/visualAssetContract');
@@ -219,15 +220,62 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
     const expanded = workflow.expandContentGraphToVisualBeats({ graph, visualPlan, visualDecisions });
     const renderTarget = workflow.applyRenderTargetDefaults(workflow.resolveRenderTarget({ generate_audio: false }, spec));
     const map = new Map();
-    for (const node of (expanded.nodes || [])) {
+    const initialHtmlByGroup = new Map();
+    let visualStyleReferenceHtml = '';
+    const htmlBySceneId = new Map([
+      ['scene_01', scene01Html],
+      ['scene_02', validHtml('scene_02', '已完成二')],
+    ]);
+    for (const [index, node] of (expanded.nodes || []).entries()) {
       const sceneId = String(node.scene_id || node.id || '');
+      const scene = spec.scenes.find(item => item.id === sceneId);
+      const beatId = String(node.beat_id || node.beatId || '').trim();
+      const groupId = node?.metadata?.visual_beat?.continuity?.group_id || null;
+      const beatIndex = Number(node?.metadata?.visual_beat?.continuity?.beat_index) || 1;
+      const previousBeatSummary = groupId
+        ? frameHtmlPhase.summarizeBaseLayout(frameHtmlPhase.predecessorHtmlForBeat(initialHtmlByGroup, groupId, beatIndex))
+        : '';
+      const motionArgs = resolveAssetFirstMotionArgs(node, {
+        scene,
+        beats: visualPlan.beats || [],
+        mediaOptions: {},
+      });
       if (sceneId && !map.has(sceneId)) {
         map.set(sceneId, frameHtmlPhase.computeFrameInputFingerprint({
+          graph: expanded,
           node,
+          index,
+          total: expanded.nodes.length,
+          sceneSpec: spec,
+          creativeContext: graphCreativeContext,
+          styleProfile: visualPlan.style_profile || null,
+          visualStyleReferenceHtml,
+          previousFrameHtml: '',
+          ...motionArgs,
+          ...(previousBeatSummary ? { previousBeatSummary } : {}),
+          ...(beatId && node?.metadata?.visual_beat
+            ? {
+              hasCaptions: frameHtmlPhase.hasCaptionsForBeat({
+                scene,
+                beats: visualPlan.beats || [],
+                beatId,
+                mediaOptions: {},
+              }),
+            }
+            : {}),
           continuityMode: 'beat_mp4',
           target: renderTarget,
-          creativeContext: options.assetContext,
         }));
+      }
+      const html = htmlBySceneId.get(sceneId);
+      if (html) {
+        if (!visualStyleReferenceHtml) visualStyleReferenceHtml = html;
+        frameHtmlPhase.collectReusedFrameContext({
+          node,
+          html,
+          frameKey: sceneId,
+          initialHtmlByGroup,
+        });
       }
     }
     return {
@@ -380,69 +428,105 @@ async function main() {
       'Content Graph hash 不得受对象键顺序影响',
     );
 
-    // P1-2：Frame HTML 输入指纹纯函数——同输入同指纹，任一策略/主题/素材/文案维度变化即指纹变化
+    // Frame HTML 输入指纹直接覆盖完整 canonical prompt；只忽略 prompt/materializer 都不消费的字段。
     {
       const { computeFrameInputFingerprint, FRAME_PROMPT_VERSION } = frameHtmlPhase;
       assert.equal(FRAME_PROMPT_VERSION, 5, 'overlay-only Frame Prompt 合同变化必须使旧 checkpoint 失效');
-      const target = { resolution: { width: 1080, height: 1920 } };
-      const makeNode = () => ({
-        id: 'scene_01',
-        asset_refs: [{ asset_id: 'gen_02', usage: 'subject' }, { asset_id: 'gen_01', usage: 'background' }],
-        metadata: {
-          visual_beat: {
-            visual_base: {
-              type: 'image_sequence',
-              shots: [{ id: 'shot_01', asset_id: 'gen_01' }],
+      const args = () => {
+        const node = {
+          id: 'scene_01',
+          label: '当前标签',
+          text: '当前正文',
+          data: { value: '当前数据' },
+          asset_refs: [{ asset_id: 'gen_02', usage: 'subject' }, { asset_id: 'gen_01', usage: 'background' }],
+          metadata: {
+            visual_beat: {
+              visual_base: {
+                type: 'image_sequence',
+                shots: [{ id: 'shot_01', asset_id: 'gen_01' }],
+              },
+              motion_overlay: { preset: 'count_up', theme_tokens: { accent: '#ff5a00' } },
+              continuity: { group_id: 'g1', beat_index: 2 },
+              visual_text: { headline: '第一幕' },
             },
-            motion_overlay: { preset: 'count_up', theme_tokens: { accent: '#ff5a00' } },
-            continuity: { group_id: 'g1', beat_index: 1 },
-            visual_text: { headline: '第一幕' },
           },
-        },
-      });
-      const args = () => ({
-        node: makeNode(),
-        continuityMode: 'beat_mp4',
-        target,
-        creativeContext: {
-          asset_context: {
-            assets: [
-              { id: 'gen_01', media_type: 'image', status: 'ready', path: 'assets/gen-01.png', frame_src: '../assets/gen-01.png', provider: 'local' },
-              { id: 'gen_02', media_type: 'image', status: 'ready', path: 'assets/gen-02.png', frame_src: '../assets/gen-02.png' },
+        };
+        const beat = node.metadata.visual_beat;
+        return {
+          graph: {
+            synopsis: '完整视频摘要',
+            nodes: [
+              { id: 'remote_before', label: '远端前帧' },
+              { id: 'previous', label: '相邻前帧' },
+              node,
+              { id: 'next', label: '相邻后帧' },
+              { id: 'remote_after', label: '远端后帧' },
+            ],
+            edges: [],
+          },
+          node,
+          index: 2,
+          total: 5,
+          sceneSpec: {
+            title: '场景规格',
+            scenes: [
+              { id: 'previous', title: '上一场景' },
+              { id: 'scene_01', title: '当前场景', narration_text: '当前旁白' },
+              { id: 'next', title: '下一场景' },
             ],
           },
-        },
-      });
+          creativeContext: {
+            source_context: { summary: '来源摘要' },
+            asset_context: {
+              assets: [
+                { id: 'gen_01', media_type: 'image', status: 'ready', path: 'assets/gen-01.png', frame_src: '../assets/gen-01.png', provider: 'local' },
+                { id: 'gen_02', media_type: 'image', status: 'ready', path: 'assets/gen-02.png', frame_src: '../assets/gen-02.png' },
+              ],
+            },
+          },
+          target: { resolution: { width: 1080, height: 1920 } },
+          styleProfile: { id: 'editorial', family: 'editorial', palette: ['#111'] },
+          visualStyleReferenceHtml: '<main>视觉锚点 A</main>',
+          previousFrameHtml: '',
+          beat,
+          primitiveSnippet: '<div data-mp-overlay>primitive A</div>',
+          diagramSkeleton: '',
+          previousBeatSummary: '上一 beat 布局 A',
+          hasCaptions: true,
+          sceneBeatsBrief: '场景 beat brief A',
+          continuityMode: 'beat_mp4',
+        };
+      };
       const base = computeFrameInputFingerprint(args());
       const oldV4Fingerprint = '07be78cff2675ccd3700d95a556b4632063f5d3fa107fa6af104fb4fde08074b';
       assert.notEqual(base, oldV4Fingerprint, 'overlay-only v5 产物指纹不得继续命中真实 v4 指纹');
       assert.notEqual(base, 'c77e59e0bdeb437abfdcb9b1c8ecde81f350b197b240c619b4ba187e8b810154', 'v3 产物指纹不得在当前版本继续命中');
       assert.ok(/^[0-9a-f]{64}$/.test(base), '指纹应为 sha256 hex');
       assert.equal(computeFrameInputFingerprint(args()), base, '同输入应得到同指纹');
-      // asset_refs 顺序不影响指纹（排序稳定）
-      const swapped = args();
-      swapped.node.asset_refs.reverse();
-      assert.equal(computeFrameInputFingerprint(swapped), base, 'asset_refs 顺序不同不应改变指纹');
-      // continuity_mode 变化 → 指纹变化
-      assert.notEqual(computeFrameInputFingerprint({ ...args(), continuityMode: 'scene_html' }), base, 'continuity_mode 变化应改变指纹');
-      // theme token 变化 → 指纹变化
-      const themeChanged = args();
-      themeChanged.node.metadata.visual_beat.motion_overlay.theme_tokens.accent = '#00ff5a';
-      assert.notEqual(computeFrameInputFingerprint(themeChanged), base, 'theme token 变化应改变指纹');
-      // asset_refs 内容变化 → 指纹变化
-      const assetChanged = args();
-      assetChanged.node.asset_refs[0].asset_id = 'gen_03';
-      assert.notEqual(computeFrameInputFingerprint(assetChanged), base, 'asset_refs 内容变化应改变指纹');
-      // beat 文案变化 → 指纹变化
-      const textChanged = args();
-      textChanged.node.metadata.visual_beat.visual_text.headline = '第一幕已修改';
-      assert.notEqual(computeFrameInputFingerprint(textChanged), base, 'beat 文案变化应改变指纹');
-      // 画幅变化 → 指纹变化
-      assert.notEqual(
-        computeFrameInputFingerprint({ ...args(), target: { resolution: { width: 1920, height: 1080 } } }),
-        base,
-        '画幅变化应改变指纹',
-      );
+      const consumedChanges = [
+        ['node.label', value => { value.node.label = '已改标签'; }],
+        ['node.text', value => { value.node.text = '已改正文'; }],
+        ['node.data', value => { value.node.data.value = '已改数据'; }],
+        ['graph.synopsis', value => { value.graph.synopsis = '已改视频摘要'; }],
+        ['相邻前节点', value => { value.graph.nodes[1].label = '已改相邻前帧'; }],
+        ['相邻后节点', value => { value.graph.nodes[3].label = '已改相邻后帧'; }],
+        ['来源摘要', value => { value.creativeContext.source_context.summary = '已改来源摘要'; }],
+        ['当前 scene', value => { value.sceneSpec.scenes[1].title = '已改当前场景'; }],
+        ['style profile', value => { value.styleProfile.palette = ['#fff']; }],
+        ['hasCaptions', value => { value.hasCaptions = false; }],
+        ['sceneBeatsBrief', value => { value.sceneBeatsBrief = '已改 brief'; }],
+        ['视觉锚点', value => { value.visualStyleReferenceHtml = '<main>视觉锚点 B</main>'; }],
+        ['上一 beat 摘要', value => { value.previousBeatSummary = '上一 beat 布局 B'; }],
+        ['primitive', value => { value.primitiveSnippet = '<div data-mp-overlay>primitive B</div>'; }],
+        ['asset_refs 顺序', value => { value.node.asset_refs.reverse(); }],
+        ['continuity mode', value => { value.continuityMode = 'scene_html'; }],
+        ['画幅', value => { value.target = { resolution: { width: 1920, height: 1080 } }; }],
+      ];
+      for (const [label, change] of consumedChanges) {
+        const changed = args();
+        change(changed);
+        assert.notEqual(computeFrameInputFingerprint(changed), base, `${label} 变化应改变指纹`);
+      }
       for (const [field, value] of [
         ['status', 'pending'],
         ['path', 'assets/gen-01-v2.png'],
@@ -452,12 +536,16 @@ async function main() {
         registryChanged.creativeContext.asset_context.assets[0][field] = value;
         assert.notEqual(computeFrameInputFingerprint(registryChanged), base, `Shot registry ${field} 变化应改变指纹`);
       }
-      const unrelatedFieldChanged = args();
-      unrelatedFieldChanged.creativeContext.asset_context.assets[0].provider = 'remote';
-      assert.equal(computeFrameInputFingerprint(unrelatedFieldChanged), base, 'materializer 未消费的 registry 字段不应扩大失效');
-      const unrelatedAssetChanged = args();
-      unrelatedAssetChanged.creativeContext.asset_context.assets[1].path = 'assets/gen-02-v2.png';
-      assert.equal(computeFrameInputFingerprint(unrelatedAssetChanged), base, '未被 Shot 引用的 registry 素材不应扩大失效');
+      for (const [label, change] of [
+        ['远端节点', value => { value.graph.nodes[0].label = '远端节点变化'; }],
+        ['graph edges', value => { value.graph.edges.push({ from: 'x', to: 'y' }); }],
+        ['模型/审计参数', value => { value.modelOptions = { provider: 'x', audit: { id: 'y' } }; }],
+        ['layout feedback', value => { value.layoutFeedback = '不进入正常生成指纹'; }],
+      ]) {
+        const changed = args();
+        change(changed);
+        assert.equal(computeFrameInputFingerprint(changed), base, `${label} 未被生产 Prompt 消费，不应扩大失效`);
+      }
     }
 
     // D-07：旧 v3 checkpoint 即使 HTML 文件仍存在，也必须重建并物化摄影机受管运行时。
@@ -497,24 +585,13 @@ async function main() {
       });
       const project = await projectStore.loadProject(projectDir);
       planFocusCues({ visualPlan: project.visual_plan, creativeContext, sceneSpec: sceneSpec(), mediaOptions: {} });
-      const decisions = matchVisualBeatsToRenderers({ visualPlan: project.visual_plan });
-      const expanded = workflow.expandContentGraphToVisualBeats({ graph, visualPlan: project.visual_plan, visualDecisions: decisions });
-      const target = workflow.applyRenderTargetDefaults(workflow.resolveRenderTarget({ generate_audio: false }, sceneSpec()));
-      const cameraNode = expanded.nodes.find(node => node.scene_id === 'scene_01');
-      const currentFingerprint = frameHtmlPhase.computeFrameInputFingerprint({
-        node: cameraNode,
-        continuityMode: 'beat_mp4',
-        target,
-        creativeContext,
-      });
       const oldV3Fingerprint = 'c0fdad5117ebcf48662e3d2fc21517ba0f46be61810f748df92c1a65d464f3cc';
-      assert.notEqual(currentFingerprint, oldV3Fingerprint, 'v5 摄影机产物指纹必须与已记录的 v3 指纹不同');
       project.generation_checkpoint.stages.frame_html.frames.scene_01.input_fingerprint = oldV3Fingerprint;
       await projectStore.saveProject(projectDir, project);
 
       const calls = [];
       frameHtmlAgent.generateFrameHtml = async args => {
-        calls.push(args.node.id);
+        calls.push(args);
         return { success: true, html: validHtml(args.node.id, args.node.id) };
       };
       const result = await runWorkflow({
@@ -525,10 +602,15 @@ async function main() {
         aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
       });
       assert.equal(result.success, true);
-      assert.ok(calls.includes('scene_01'), '旧 v3 摄影机 checkpoint 不得复用');
+      assert.ok(calls.some(args => args.node.id === 'scene_01'), '旧 v3 摄影机 checkpoint 不得复用');
       const persisted = await projectStore.loadProject(projectDir);
       const checkpoint = persisted.generation_checkpoint.stages.frame_html.frames.scene_01;
-      assert.equal(checkpoint.input_fingerprint, currentFingerprint, '重建后必须持久化 v5 指纹');
+      const generatedArgs = calls.find(args => args.node.id === 'scene_01');
+      assert.equal(checkpoint.input_fingerprint, frameHtmlPhase.computeFrameInputFingerprint({
+        ...generatedArgs,
+        continuityMode: 'beat_mp4',
+      }), '重建后必须持久化实际模型输入的 v5 指纹');
+      assert.notEqual(checkpoint.input_fingerprint, oldV3Fingerprint, 'v5 摄影机产物指纹必须与已记录的 v3 指纹不同');
       const html = await fs.readFile(path.join(projectDir, checkpoint.html_path), 'utf8');
       assert.match(html, /data-camera-cues=/, '重建 HTML 必须物化 camera cue 数据');
       assert.match(html, /computeCameraTransform/, '重建 HTML 必须包含 D-07 摄影机运行时');
@@ -561,7 +643,7 @@ async function main() {
       });
 
       assert.equal(result.success, true);
-      assert.deepEqual(calls, ['scene_01', 'scene_03'], 'v4 done Frame 与原失败 Frame 必须重建，当前 v5 done Frame 应复用');
+      assert.deepEqual(calls, ['scene_01', 'scene_02', 'scene_03'], '首帧视觉锚点失配后必须保守重建全部尾帧');
       const persisted = await projectStore.loadProject(projectDir);
       const checkpoint = persisted.generation_checkpoint.stages.frame_html.frames.scene_01;
       assert.equal(checkpoint.input_fingerprint, currentFingerprint, 'v4 Frame 重建后必须持久化 v5 指纹');
@@ -1196,7 +1278,7 @@ async function main() {
         aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
       });
       assert.equal(result.success, true);
-      assert.deepEqual(calls, ['scene_01', 'scene_03'], '恢复路径必须同时重建旧受管 DOM 和原失败 Frame');
+      assert.deepEqual(calls, ['scene_01', 'scene_02', 'scene_03'], '首帧旧受管 DOM 重建后必须连同视觉锚点尾帧一起重建');
       const shot = result.project.visual_plan.beats.find(beat => beat.scene_id === 'scene_01').visual_base.shots[0];
       assert.equal(shot.requirement, 'required');
       assert.equal(shot.fit, 'contain');
@@ -1585,7 +1667,7 @@ async function main() {
       });
 
       assert.equal(result.success, true);
-      assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_03']);
+      assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_02', 'scene_03']);
     }
 
     {
@@ -1767,7 +1849,7 @@ async function main() {
       });
 
       assert.equal(result.success, true);
-      assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_03']);
+      assert.deepEqual(calls.map(item => item.node.id), ['scene_01', 'scene_02', 'scene_03']);
     }
 
     {
