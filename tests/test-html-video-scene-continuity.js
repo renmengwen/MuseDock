@@ -587,9 +587,11 @@ const { expandContentGraphToSceneEntries } = require('../server/services/creativ
   ], edges: [] };
   const visualPlan = { beats: [
     { id: 'scene_05_b1', scene_id: 'scene_05', duration_sec: 6.33,
-      asset_refs: [{ asset_id: 'routing_only' }], visual_text: { headline: 'A' }, continuity: { group_id: 'scene_05', beat_index: 1, beat_count: 2 } },
+      asset_refs: [{ asset_id: 'routing_only' }], visual_text: { headline: 'A' }, continuity: { group_id: 'scene_05', beat_index: 1, beat_count: 2 },
+      source_scene: { narration_text: '场景旁白', captions: [{ id: 'cap_01', start: 0, end: 12.66, text: '场景字幕' }] } },
     { id: 'scene_05_b2', scene_id: 'scene_05', duration_sec: 6.33,
-      visual_text: { headline: 'B' }, continuity: { group_id: 'scene_05', beat_index: 2, beat_count: 2 } },
+      visual_text: { headline: 'B' }, continuity: { group_id: 'scene_05', beat_index: 2, beat_count: 2 },
+      source_scene: { narration_text: '场景旁白', captions: [{ id: 'cap_01', start: 0, end: 12.66, text: '场景字幕' }] } },
   ] };
   const expanded = expandContentGraphToSceneEntries(graph, visualPlan);
   assert.strictEqual(expanded.nodes.length, 1, '一个 scene 一个 node');
@@ -600,6 +602,8 @@ const { expandContentGraphToSceneEntries } = require('../server/services/creativ
   assert.strictEqual(node.html_path, '', '展开时 html_path 为空，由 frameHtmlPhase 生成后回写');
   assert.deepStrictEqual(node.metadata.beat_windows.map(w => w.id), ['scene_05_b1', 'scene_05_b2']);
   assert.strictEqual(node.metadata.visual_beats.length, 2, '组内全部 beat 编排字段随 node 传递');
+  assert.strictEqual(node.metadata.narration_text, '场景旁白', 'scene_html 节点必须保留摄影机 cue 的字幕来源');
+  assert.deepStrictEqual(node.metadata.captions, [{ id: 'cap_01', start: 0, end: 12.66, text: '场景字幕' }]);
   assert.deepStrictEqual(node.asset_refs.map(ref => ref.asset_id), ['canonical_a', 'canonical_b'], 'scene_html 只保留 canonical Graph refs 并保序去重');
 }
 console.log('scene continuity phase2 render/retry tests passed');

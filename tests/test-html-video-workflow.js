@@ -1185,6 +1185,10 @@ function fullSceneCaption(sceneId, text, duration) {
     const d04SceneNodeShots = imageSequenceShots(d04SceneNode?.metadata?.visual_beats);
     assert.ok(d04SceneNodeShots.length >= 1, 'scene_html 展开节点必须携带 image_sequence shot');
     d04SceneNodeShots.forEach(shot => assertFocusCue(shot, 'scene_html 展开产物 shot'));
+    const d04Frame = d04Persisted.frames.find(frame => frame.scene_id === 'scene_01');
+    const d04Html = await fs.readFile(path.join(d04SceneHtmlResult.html_video_project_path, d04Frame.html_path), 'utf8');
+    assert.match(d04Html, /data-camera-cues=/, 'scene_html 最终 HTML 必须携带摄影机 cue 数据');
+    assert.match(d04Html, /computeCameraTransform/, 'scene_html 最终 HTML 必须注入摄影机运行时');
 
     // (2) beat 分支：expandContentGraphToVisualBeats 展开的节点 metadata.visual_beat 同样带 camera
     //（Frame HTML 故意失败，验证 camera 展开与持久化发生在帧生成之前）。

@@ -542,6 +542,7 @@ function expandContentGraphToSceneEntries(graph = {}, visualPlan = {}) {
   const nodes = [];
   for (const group of groupBeatsForSceneHtml(beats)) {
     const base = baseBySceneId.get(group.scene_id) || {};
+    const sourceScene = group.beats[0]?.source_scene || {};
     const seenAssetIds = new Set();
     const canonicalAssetRefs = (Array.isArray(base.asset_refs) ? base.asset_refs : []).filter(ref => {
       const id = String(ref?.asset_id || '').trim();
@@ -561,6 +562,8 @@ function expandContentGraphToSceneEntries(graph = {}, visualPlan = {}) {
       metadata: {
         ...objectOrEmpty(base.metadata),
         scene_id: group.scene_id,
+        narration_text: sourceScene.narration_text || '',
+        captions: cloneJson(Array.isArray(sourceScene.captions) ? sourceScene.captions : []),
         beat_windows: group.beats.map(beat => ({ id: beat.id, start_sec: beat.start_sec, end_sec: beat.end_sec })),
         visual_beats: cloneJson(group.beats.map(({ source_scene, ...rest }) => rest)),
         source_mode: 'raw_html',
