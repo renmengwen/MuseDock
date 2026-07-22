@@ -35,7 +35,7 @@ function captionText(scene = {}) {
   return captions.map(item => firstText(item?.text, item)).filter(Boolean).join(' ');
 }
 
-function buildFallbackFrameHtml({ scene, node, target, template } = {}) {
+function buildFallbackFrameHtml({ scene, node, target, template, overlayOnly = false } = {}) {
   const safeScene = objectOrEmpty(scene);
   const safeNode = objectOrEmpty(node);
   const resolution = resolveResolution(target, template);
@@ -51,11 +51,11 @@ function buildFallbackFrameHtml({ scene, node, target, template } = {}) {
     '<meta charset="utf-8">',
     `<meta name="viewport" content="width=${resolution.width},height=${resolution.height},initial-scale=1.0">`,
     '<style>',
-    `html,body{margin:0;width:${resolution.width}px;height:${resolution.height}px;overflow:hidden;background:#101418;color:#f7fafc;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}`,
+    `html,body{margin:0;width:${resolution.width}px;height:${resolution.height}px;overflow:hidden;background:${overlayOnly ? 'transparent' : '#101418'};color:#f7fafc;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}`,
     '*{box-sizing:border-box}',
     '@keyframes fallbackEnter{from{opacity:0;transform:translateY(36px)}to{opacity:1;transform:translateY(0)}}',
     '@keyframes fallbackLine{from{transform:scaleX(0)}to{transform:scaleX(1)}}',
-    '.stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:9%;background:linear-gradient(135deg,#101418 0%,#1d2730 58%,#28323b 100%);}',
+    `.stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:9%;background:${overlayOnly ? 'transparent' : 'linear-gradient(135deg,#101418 0%,#1d2730 58%,#28323b 100%)'};}`,
     '.panel{max-width:78%;animation:fallbackEnter .7s ease-out both}',
     '.kicker{font-size:28px;letter-spacing:0;color:#8fd0ff;margin-bottom:24px}',
     'h1{font-size:84px;line-height:1.08;margin:0 0 28px;font-weight:800}',

@@ -9,7 +9,7 @@ const { createDiagnostic, normalizeDiagnostics } = require('./diagnostics');
 const { normalizeCaptions, trustedSceneDuration } = require('./rawHtmlFrameBuilder');
 const { applyFocusKeywords, focusKeywordsByCaptionId } = require('./captionLayer');
 const { resolveNodeSceneId } = require('./sceneGraphBinding');
-const { materializeSceneImageSequenceDom } = require('./sceneImageSequenceDom');
+const { materializeSceneImageSequenceDom, normalizeContract } = require('./sceneImageSequenceDom');
 const {
   resolveAssetFirstMotionArgs,
   isSceneHtmlNode,
@@ -343,6 +343,7 @@ async function runFrameHtmlPhase(ctx) {
             scene,
             node,
             target: templateRenderTarget,
+            overlayOnly: Boolean(normalizeContract(node, creativeContext).contract),
           }),
           fallbackDiagnostic: warning,
         };

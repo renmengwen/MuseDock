@@ -5,6 +5,7 @@ const {
 } = require('../server/services/creative-video/html-video/sceneImageSequenceDom');
 const { createCreativeWorkflowRetryPlan } = require('../server/services/creative-video/retryPlanner');
 const { htmlEscape } = require('../server/services/creative-video/html-video/captionLayer');
+const { buildFallbackFrameHtml } = require('../server/services/creative-video/html-video/frameFallbackBuilder');
 
 const assets = ['a', 'b', 'c', 'd'].map(id => ({
   id,
@@ -44,6 +45,25 @@ function node(mode, shots) {
 }
 
 const shell = '<!doctype html><html><head></head><body data-hv-canvas><main>美术壳</main></body></html>';
+
+{
+  const managedNode = node('fullscreen_relay', [shot('s1', 'a', 0, 4)]);
+  const fallback = buildFallbackFrameHtml({ node: managedNode, overlayOnly: true });
+  const result = materializeSceneImageSequenceDom({
+    html: fallback,
+    node: managedNode,
+    creativeContext: { asset_context: { assets } },
+  });
+  assert.equal(result.success, true, result.message);
+  assert.match(result.html, /data-hv-image-sequence="true"/);
+  assert.match(result.html, /<section class="panel">/);
+  assert.match(result.html, /html,body\{[^}]*background:transparent/);
+  assert.match(result.html, /\.stage\{[^}]*background:transparent/);
+  assert.doesNotMatch(result.html, /linear-gradient\(135deg,#101418/);
+
+  const opaque = buildFallbackFrameHtml({ node: managedNode });
+  assert.match(opaque, /linear-gradient\(135deg,#101418 0%,#1d2730 58%,#28323b 100%\)/);
+}
 
 for (const duplicateMarkup of [
   '<img src="../assets/a.png">',
@@ -389,6 +409,28 @@ async function verifyShotExitTransition() {
   const browser = await require('playwright-core').chromium.launch({ channel: 'chrome', headless: true });
   try {
     const page = await browser.newPage();
+    const overlayFallback = materializeSceneImageSequenceDom({
+      html: buildFallbackFrameHtml({ node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]), overlayOnly: true }),
+      node: node('fullscreen_relay', [shot('s1', 'a', 0, 4)]),
+      creativeContext: { asset_context: { assets } },
+    });
+    assert.equal(overlayFallback.success, true, overlayFallback.message);
+    await page.setContent(overlayFallback.html);
+    const stacking = await page.evaluate(() => ({
+      htmlBackground: getComputedStyle(document.documentElement).backgroundColor,
+      bodyBackground: getComputedStyle(document.body).backgroundColor,
+      stageBackgroundImage: getComputedStyle(document.querySelector('.stage')).backgroundImage,
+      stageBackgroundColor: getComputedStyle(document.querySelector('.stage')).backgroundColor,
+      sequenceZ: getComputedStyle(document.querySelector('[data-hv-image-sequence]')).zIndex,
+      panelExists: Boolean(document.querySelector('.panel')),
+    }));
+    assert.equal(stacking.htmlBackground, 'rgba(0, 0, 0, 0)', '受管图片 fallback 的 html 必须透明');
+    assert.equal(stacking.bodyBackground, 'rgba(0, 0, 0, 0)', '受管图片 fallback 的 body 必须透明');
+    assert.equal(stacking.stageBackgroundImage, 'none', '受管图片 fallback 的全屏 stage 不得保留渐变');
+    assert.equal(stacking.stageBackgroundColor, 'rgba(0, 0, 0, 0)', '受管图片 fallback 的 stage 必须透明');
+    assert.equal(stacking.sequenceZ, '0', '受管图片层必须保留在底层');
+    assert.equal(stacking.panelExists, true, '透明 fallback 必须保留文字 panel');
+
     await page.setContent(result.html);
     await page.waitForTimeout(400);
     const exiting = await page.evaluate(() => {

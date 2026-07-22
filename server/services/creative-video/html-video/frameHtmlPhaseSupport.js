@@ -41,7 +41,12 @@ function computeFrameInputFingerprint({
   continuityMode,
 } = {}) {
   const managedContract = normalizeContract(node, creativeContext);
-  const fallbackHtml = frameFallbackBuilder.buildFallbackFrameHtml({ scene, node, target });
+  const fallbackHtml = frameFallbackBuilder.buildFallbackFrameHtml({
+    scene,
+    node,
+    target,
+    overlayOnly: Boolean(managedContract.contract),
+  });
   const overlayHtml = beat && !isSceneHtmlNode(node)
     ? ensureMotionOverlay('<!doctype html><html><body></body></html>', beat).html
     : '';
