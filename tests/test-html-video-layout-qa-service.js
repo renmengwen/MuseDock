@@ -143,11 +143,13 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
       .true-a,.true-b{top:180px}
       .hidden-a,.hidden-b{top:310px}.hidden-a span{visibility:hidden;position:absolute;left:0}.hidden-a{text-align:right}
       .complex-a,.complex-b{top:440px}.complex-a{transform:scale(1.01);transform-origin:left top}
+      .zero-a,.zero-b{top:570px}.zero-a{font-size:0;transform:scale(1.01);transform-origin:left top}
     </style></head><body>
       <p class="false-a">片段左端</p><p class="false-b right">片段右端</p>
       <p class="true-a">真实重叠甲</p><p class="true-b">真实重叠乙</p>
       <p class="hidden-a">可见右端<span>隐藏重叠</span></p><p class="hidden-b">隐藏对照</p>
       <p class="complex-a">复杂左端</p><p class="complex-b right">复杂右端</p>
+      <p class="zero-a">零面积文字</p><p class="zero-b">零面积对照</p>
     </body></html>`, 'utf8');
     const fragmentOverlap = await inspectFrameHtmlLayout({
       htmlPath: fragmentPath,
@@ -172,6 +174,7 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     ));
     assert.ok(complexOverlap, '复杂 transform 必须回退候选盒并保守报告');
     assert.deepEqual(complexOverlap.details.first.overlap_box, complexOverlap.details.first.box);
+    assert.equal(hasPair('零面积文字', '零面积对照'), false, '零面积 Range 即使带复杂 transform 也不得回退候选盒');
     const realOverlap = fragmentOverlap.issues.find(issue => (
       [issue.details?.first?.text, issue.details?.second?.text].includes('真实重叠甲')
       && [issue.details?.first?.text, issue.details?.second?.text].includes('真实重叠乙')

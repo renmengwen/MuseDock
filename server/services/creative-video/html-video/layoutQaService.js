@@ -388,7 +388,6 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
     }
 
     function overlapBoxesFor(element, candidateBox) {
-      let hasVisibleRun = false;
       let complexGeometry = false;
       const boxes = [];
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
@@ -420,17 +419,18 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
 
         const text = node.textContent || '';
         for (const match of text.matchAll(/\S+/g)) {
-          hasVisibleRun = true;
-          complexGeometry = complexGeometry || nodeHasComplexGeometry;
           const range = document.createRange();
           range.setStart(node, match.index);
           range.setEnd(node, match.index + match[0].length);
-          for (const rect of range.getClientRects()) {
-            if (rect.width > 0 && rect.height > 0) boxes.push(serializeBox(rect));
-          }
+          const runBoxes = Array.from(range.getClientRects())
+            .filter(rect => rect.width > 0 && rect.height > 0)
+            .map(serializeBox);
+          if (!runBoxes.length) continue;
+          boxes.push(...runBoxes);
+          complexGeometry = complexGeometry || nodeHasComplexGeometry;
         }
       }
-      if (!hasVisibleRun) return [];
+      if (!boxes.length) return [];
       return complexGeometry ? [candidateBox] : boxes;
     }
 
