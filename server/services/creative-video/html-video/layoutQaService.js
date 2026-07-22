@@ -805,10 +805,7 @@ async function inspectRequiredAssetVisibility(page, resolution) {
     }
     const probeStyle = document.createElement('style');
     probeStyle.dataset.layoutQaRequiredAssetProbe = 'true';
-    probeStyle.textContent = [
-      '[data-layout-qa-required-no-motion="true"]{transition:none!important}',
-      '[data-layout-qa-required-hidden="true"]{opacity:0!important}',
-    ].join('');
+    probeStyle.textContent = '[data-layout-qa-required-layer-hidden="true"]{display:none!important}';
     document.head.appendChild(probeStyle);
     window.__layoutQaRequiredAssetRestore = {
       trustedClock,
@@ -819,16 +816,14 @@ async function inspectRequiredAssetVisibility(page, resolution) {
       probeStyle,
       shots: requiredShots.map(shot => ({
         shot,
-        originalHidden: shot.getAttribute('data-layout-qa-required-hidden'),
-        originalNoMotion: shot.getAttribute('data-layout-qa-required-no-motion'),
         originalOpacity: Number(getComputedStyle(shot).opacity),
-        opacityRestored: true,
+        layers: Array.from(shot.querySelectorAll('[data-shot-layer]')).map(layer => ({
+          layer,
+          originalHidden: layer.getAttribute('data-layout-qa-required-layer-hidden'),
+        })),
+        layerStateRestored: true,
       })),
     };
-    for (const item of window.__layoutQaRequiredAssetRestore.shots) {
-      item.shot.setAttribute('data-layout-qa-required-no-motion', 'true');
-      void item.shot.offsetWidth;
-    }
     return {
       targets: requiredShots.map((shot, index) => {
         const rect = shot.getBoundingClientRect();
@@ -864,21 +859,21 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           const state = window.__layoutQaRequiredAssetRestore;
           const item = state?.shots?.[index];
           if (!item?.shot) throw new Error('required asset visibility shot state missing');
-          item.shot.setAttribute('data-layout-qa-required-hidden', 'true');
+          for (const layer of item.layers) layer.layer.setAttribute('data-layout-qa-required-layer-hidden', 'true');
           void item.shot.offsetWidth;
-          void getComputedStyle(item.shot).opacity;
         }, target.index);
         hiddenScreenshots.push(await page.screenshot({ type: 'png' }));
       } finally {
         await page.evaluate((index) => {
           const item = window.__layoutQaRequiredAssetRestore?.shots?.[index];
           if (!item?.shot) return;
-          if (item.originalHidden === null) item.shot.removeAttribute('data-layout-qa-required-hidden');
-          else item.shot.setAttribute('data-layout-qa-required-hidden', item.originalHidden);
+          for (const layer of item.layers) {
+            if (layer.originalHidden === null) layer.layer.removeAttribute('data-layout-qa-required-layer-hidden');
+            else layer.layer.setAttribute('data-layout-qa-required-layer-hidden', layer.originalHidden);
+            item.layerStateRestored = item.layerStateRestored
+              && layer.layer.getAttribute('data-layout-qa-required-layer-hidden') === layer.originalHidden;
+          }
           void item.shot.offsetWidth;
-          const opacity = Number(getComputedStyle(item.shot).opacity);
-          item.opacityRestored = item.opacityRestored
-            && Number.isFinite(opacity) && Math.abs(opacity - item.originalOpacity) <= 0.001;
         }, target.index).catch(() => {});
       }
     }
@@ -888,18 +883,14 @@ async function inspectRequiredAssetVisibility(page, resolution) {
       if (!state) return { restored: false, error: 'state missing' };
       let restoredStyles = true;
       for (const item of state.shots || []) {
-        if (item.originalHidden === null) item.shot.removeAttribute('data-layout-qa-required-hidden');
-        else item.shot.setAttribute('data-layout-qa-required-hidden', item.originalHidden);
+        for (const layer of item.layers) {
+          if (layer.originalHidden === null) layer.layer.removeAttribute('data-layout-qa-required-layer-hidden');
+          else layer.layer.setAttribute('data-layout-qa-required-layer-hidden', layer.originalHidden);
+          item.layerStateRestored = item.layerStateRestored
+            && layer.layer.getAttribute('data-layout-qa-required-layer-hidden') === layer.originalHidden;
+        }
         void item.shot.offsetWidth;
-        const opacity = Number(getComputedStyle(item.shot).opacity);
-        item.opacityRestored = item.opacityRestored
-          && Number.isFinite(opacity) && Math.abs(opacity - item.originalOpacity) <= 0.001;
       }
-      for (const item of state.shots || []) {
-        if (item.originalNoMotion === null) item.shot.removeAttribute('data-layout-qa-required-no-motion');
-        else item.shot.setAttribute('data-layout-qa-required-no-motion', item.originalNoMotion);
-      }
-      void document.documentElement.offsetWidth;
       const originalAnimations = new Set((state.animations || []).map(item => item.animation));
       const newRunningTransitions = (state.shots || []).flatMap(item => item.shot.getAnimations())
         .filter(animation => (
@@ -907,21 +898,28 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           && animation.playState === 'running' && !originalAnimations.has(animation)
         ));
       for (const item of state.shots || []) {
-        restoredStyles = restoredStyles
-          && item.shot.getAttribute('data-layout-qa-required-hidden') === item.originalHidden
-          && item.shot.getAttribute('data-layout-qa-required-no-motion') === item.originalNoMotion
-          && item.opacityRestored;
+        restoredStyles = restoredStyles && item.layerStateRestored;
       }
       state.probeStyle?.remove();
       let restoredAnimations = true;
       for (const item of state.animations || []) {
         try {
           item.animation.playbackRate = item.playbackRate;
-          if (item.currentTime !== null) item.animation.currentTime = item.currentTime;
+          if (item.currentTime !== null) {
+            item.animation.currentTime = item.currentTime;
+            item.currentTimeRestored = Math.abs(Number(item.animation.currentTime) - Number(item.currentTime)) <= 1;
+          } else item.currentTimeRestored = item.animation.currentTime === null;
           if (item.playState === 'running' || item.playState === 'pending') item.animation.play();
           else if (item.playState === 'paused') item.animation.pause();
           else if (item.playState === 'finished') item.animation.finish();
+          item.playStateRestored = item.playState === 'running' || item.playState === 'pending'
+            ? ['running', 'pending'].includes(item.animation.playState)
+            : item.animation.playState === item.playState;
         } catch (_) { restoredAnimations = false; }
+      }
+      for (const item of state.shots || []) {
+        restoredStyles = restoredStyles
+          && Math.abs(Number(getComputedStyle(item.shot).opacity) - item.originalOpacity) <= 0.001;
       }
       if (state.trustedClock && !state.clockWasPaused) window.__hvPlaybackClock.play();
       if (!state.rafWasPaused && typeof state.rafController?.resume === 'function') state.rafController.resume();
@@ -938,8 +936,19 @@ async function inspectRequiredAssetVisibility(page, resolution) {
         newRunningTransitionCount: newRunningTransitions.length,
         shotStates: (state.shots || []).map(item => ({
           shotId: item.shot.dataset.shotId || '',
+          opacityBefore: item.originalOpacity,
           opacity: Number(getComputedStyle(item.shot).opacity),
-          opacityRestored: item.opacityRestored,
+          layerStateRestored: item.layerStateRestored,
+          transitionCurrentTimeRestored: (state.animations || [])
+            .filter(animation => typeof CSSTransition !== 'undefined'
+              && animation.animation instanceof CSSTransition
+              && animation.animation.effect?.target === item.shot)
+            .every(animation => animation.currentTimeRestored === true),
+          transitionPlayStateRestored: (state.animations || [])
+            .filter(animation => typeof CSSTransition !== 'undefined'
+              && animation.animation instanceof CSSTransition
+              && animation.animation.effect?.target === item.shot)
+            .every(animation => animation.playStateRestored === true),
         })),
       };
     }).catch(error => ({ restored: false, error: error?.message || String(error) }));
@@ -999,8 +1008,15 @@ async function inspectRequiredAssetVisibility(page, resolution) {
     animation_state_restored: restorationDetails.restoredAnimations === true,
     clock_state_restored: restorationDetails.restoredClock === true,
     raf_state_restored: restorationDetails.restoredRaf === true,
+    opacity_before_probe: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.opacityBefore,
     opacity_after_restore: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.opacity,
-    opacity_state_restored: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.opacityRestored === true,
+    opacity_state_restored: Math.abs(
+      Number(restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.opacity)
+      - Number(restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.opacityBefore)
+    ) <= 0.001,
+    layer_state_restored: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.layerStateRestored === true,
+    transition_current_time_restored: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.transitionCurrentTimeRestored === true,
+    transition_play_state_restored: restorationDetails.shotStates?.find(item => item.shotId === target.shot_id)?.transitionPlayStateRestored === true,
     new_running_transition_count: restorationDetails.newRunningTransitionCount ?? null,
     passed: comparisons[index].changed_pixel_ratio >= REQUIRED_ASSET_MIN_CHANGED_PIXEL_RATIO,
   }));
