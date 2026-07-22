@@ -24,6 +24,7 @@ const { validateHtmlVideoProject } = require('./validationGate');
 const projectOrchestrator = require('./projectOrchestrator');
 const editPatchService = require('./editPatchService');
 const { syncRawHtmlFrameTextPatch } = require('./rawHtmlTextPatch');
+const { validateSceneImageSequenceDom } = require('./sceneImageSequenceDom');
 const defaultVisualQaService = require('../visualQaService');
 const defaultLayoutQaService = require('./layoutQaService');
 const { audioMatchesSceneSpec } = require('../sceneSpecHash');
@@ -269,7 +270,16 @@ function resumeArtifactsMatch(project = {}, sceneSpec = null) {
   return Boolean(checkpointHash && currentHash && checkpointHash === currentHash);
 }
 
-function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target, resumeAllowed = true, inputFingerprint = '' } = {}) {
+function shouldReuseFrameHtml({
+  projectDir,
+  checkpointFrame,
+  scene,
+  node,
+  target,
+  creativeContext,
+  resumeAllowed = true,
+  inputFingerprint = '',
+} = {}) {
   if (!resumeAllowed) return { reuse: false };
   const frame = objectOrEmpty(checkpointFrame);
   if (frame.status !== 'done' || !frame.html_path) return { reuse: false };
@@ -291,6 +301,7 @@ function shouldReuseFrameHtml({ projectDir, checkpointFrame, scene, node, target
   if (!extracted.success) return { reuse: false };
   const validation = frameHtmlAgent.validateHtmlTargetResolution(extracted.html, target || {});
   if (!validation.success) return { reuse: false };
+  if (!validateSceneImageSequenceDom(extracted.html, { node, creativeContext }).success) return { reuse: false };
   for (const key of ['headline', 'subtitle', 'body']) {
     if (!htmlHasTextKey(extracted.html, key)) {
       return { reuse: false };

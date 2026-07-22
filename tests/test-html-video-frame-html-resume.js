@@ -14,6 +14,7 @@ aiImageModel.isConfigured = async () => false;
 
 const frameHtmlAgent = require('../server/services/creative-video/html-video/frameHtmlAgent');
 const frameHtmlPhase = require('../server/services/creative-video/html-video/frameHtmlPhase');
+const { materializeSceneImageSequenceDom } = require('../server/services/creative-video/html-video/sceneImageSequenceDom');
 const visualPlanService = require('../server/services/creative-video/html-video/visualPlanService');
 const { planFocusCues } = require('../server/services/creative-video/html-video/focusCuePlanner');
 const { matchVisualBeatsToRenderers } = require('../server/services/creative-video/html-video/visualRouteMatcher');
@@ -534,6 +535,92 @@ async function main() {
         checkpointFrame: { ...doneFrame },
         inputFingerprint: fingerprint,
       }).reuse, false, '旧 checkpoint 无指纹不应复用');
+
+      const sequenceNode = {
+        id: 'scene_01',
+        durationSec: 2,
+        metadata: {
+          narration_text: '聚焦输入框',
+          captions: [{ id: 'caption_01', start: 0.2, end: 1.5, text: '聚焦输入框' }],
+          visual_beat: {
+            visual_text: { headline: '第一幕' },
+            visual_base: {
+              type: 'image_sequence',
+              sequence_mode: 'fullscreen_relay',
+              shots: [{
+                id: 'shot_01',
+                asset_id: 'asset_01',
+                role: 'showcase',
+                requirement: 'required',
+                caption_ids: ['caption_01'],
+                minimum_visible_duration_sec: 2,
+                active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 2 },
+                camera: {
+                  focus_cues: [{
+                    id: 'cue_01',
+                    effect: 'camera_zoom',
+                    region_id: 'region_01',
+                    zoom: 'normal',
+                    caption_ids: ['caption_01'],
+                  }],
+                },
+              }],
+            },
+          },
+        },
+      };
+      const sequenceContext = {
+        asset_context: {
+          assets: [{
+            id: 'asset_01',
+            media_type: 'image',
+            status: 'ready',
+            path: 'assets/asset-01.png',
+            focus_regions: [{
+              id: 'region_01',
+              trust_level: 'A',
+              region: { x: 0.2, y: 0.2, width: 0.2, height: 0.2 },
+            }],
+          }],
+        },
+      };
+      const materialized = materializeSceneImageSequenceDom({
+        html: validHtml('scene_01'),
+        node: sequenceNode,
+        creativeContext: sequenceContext,
+      });
+      assert.equal(materialized.success, true);
+      assert.match(materialized.html, /data-camera-cues=/);
+      assert.match(materialized.html, /__hvResolvedCameraCues/);
+
+      const currentPath = 'frames/current-managed.html';
+      await writeFile(path.join(projectDir, currentPath), materialized.html);
+      assert.equal(workflow.shouldReuseFrameHtml({
+        ...baseArgs,
+        node: sequenceNode,
+        creativeContext: sequenceContext,
+        checkpointFrame: { status: 'done', html_path: currentPath, input_fingerprint: fingerprint },
+        inputFingerprint: fingerprint,
+      }).reuse, true, '当前受管 Image Sequence runtime 应继续复用');
+
+      const oldRuntimePath = 'frames/old-managed.html';
+      await writeFile(
+        path.join(projectDir, oldRuntimePath),
+        materialized.html.replace('shot.figure.__hvResolvedCameraCues = acceptedCues;', ''),
+      );
+      assert.equal(workflow.shouldReuseFrameHtml({
+        ...baseArgs,
+        node: sequenceNode,
+        creativeContext: sequenceContext,
+        checkpointFrame: { status: 'done', html_path: oldRuntimePath, input_fingerprint: fingerprint },
+        inputFingerprint: fingerprint,
+      }).reuse, false, '指纹相同的旧受管 runtime 也不得复用');
+
+      assert.equal(workflow.shouldReuseFrameHtml({
+        ...baseArgs,
+        checkpointFrame: { ...doneFrame, input_fingerprint: fingerprint },
+        inputFingerprint: fingerprint,
+      }).reuse, true, '无 Image Sequence 的普通 Frame HTML 应继续复用');
     }
 
     // 旧链路识别：template_id / 旧策略字段 / 模板帧 任一命中即 legacy
@@ -773,7 +860,7 @@ async function main() {
       assert.match(await fs.readFile(path.join(projectDir, secondCheckpoint.html_path), 'utf8'), /第二幕新 HTML/);
     }
 
-    // Review：resume 不传 creativeContext 时，从 project.assets 恢复全部正式字段并保持 Frame 指纹可复用。
+    // Review：resume 不传 creativeContext 时，从 project.assets 恢复全部正式字段；旧受管 DOM 即使指纹相同也重建。
     {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-registry-resume-'));
       const workflowId = '202606260000000001_registry_resume';
@@ -880,7 +967,7 @@ async function main() {
         aiTextModel: { async callTextModel() { throw new Error('canonical graph 应直接复用。'); } },
       });
       assert.equal(result.success, true);
-      assert.deepEqual(calls, ['scene_03'], '正式 registry 水合后已完成 Frame 必须保持复用');
+      assert.deepEqual(calls, ['scene_01', 'scene_03'], '恢复路径必须同时重建旧受管 DOM 和原失败 Frame');
       const shot = result.project.visual_plan.beats.find(beat => beat.scene_id === 'scene_01').visual_base.shots[0];
       assert.equal(shot.requirement, 'required');
       assert.equal(shot.fit, 'contain');

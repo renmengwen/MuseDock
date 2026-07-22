@@ -518,6 +518,7 @@ async function runFrameHtmlPhase(ctx) {
       scene,
       node,
       target: templateRenderTarget,
+      creativeContext,
       resumeAllowed: resumeAllowed && !regenerateFrameHtmlRequested,
       // P1-2：真实输入指纹比较——checkpoint 有指纹且不匹配则重新生成；无指纹的旧工程不复用
       inputFingerprint: computeFrameInputFingerprint({
