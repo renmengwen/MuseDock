@@ -57,24 +57,6 @@ function hasUsableContentGraph(graph = {}) {
   return Array.isArray(graph.nodes) && graph.nodes.length > 0;
 }
 
-function contentGraphMatchesSceneSpec(graph = {}, sceneSpec = null) {  if (!sceneSpec) return true;
-  const direct = validateGraphMatchesSceneSpec(graph, sceneSpec);
-  if (direct.ok) return true;
-  const expected = (Array.isArray(sceneSpec.scenes) ? sceneSpec.scenes : [])
-    .map(scene => String(scene?.id || '').trim())
-    .filter(Boolean);
-  if (!expected.length || !Array.isArray(graph?.nodes)) return false;
-  const actual = [];
-  for (const nodeId of (() => {
-    try { return topoSort(graph); } catch { return graph.nodes.map(node => node.id); }
-  })()) {
-    const node = (graph.nodes || []).find(item => item?.id === nodeId) || {};
-    const sceneId = resolveNodeSceneId(node);
-    if (sceneId && actual[actual.length - 1] !== sceneId) actual.push(sceneId);
-  }
-  return expected.length === actual.length && expected.every((sceneId, index) => sceneId === actual[index]);
-}
-
 function loadCheckpointContentGraph(projectDir, project = {}, expectedInputHash = '') {
   const checkpoint = project.generation_checkpoint?.stages?.content_graph || {};
   if (checkpoint.status !== 'done') return null;
@@ -87,7 +69,9 @@ function loadCheckpointContentGraph(projectDir, project = {}, expectedInputHash 
     if (!fs.existsSync(absolutePath)) return null;
     const graph = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
     const savedOutputHash = String(checkpoint.output_hash || '').trim();
-    if (!savedOutputHash || savedOutputHash !== hashContentGraph(graph)) return null;
+    // 兼容 8fc9858 前唯一已落盘的 JSON.stringify hash；成功复用后会写回 stable hash。
+    const compatibleOutputHashes = [hashContentGraph(graph), sha256(JSON.stringify(graph))];
+    if (!savedOutputHash || !compatibleOutputHashes.includes(savedOutputHash)) return null;
     return hasUsableContentGraph(graph) ? graph : null;
   } catch {
     return null;
@@ -620,7 +604,6 @@ module.exports = {
   report,
   callTextModel,
   hasUsableContentGraph,
-  contentGraphMatchesSceneSpec,
   loadCheckpointContentGraph,
   CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
   contentGraphSceneSpecMismatchDiagnostic,

@@ -801,7 +801,14 @@ async function main() {
       const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-frame-resume-'));
       const workflowId = '202606260000000001_frame_resume';
       const runId = 'run_resume';
-      await setupProject(rootDir, workflowId, runId);
+      const { projectDir } = await setupProject(rootDir, workflowId, runId);
+      const canonicalGraph = JSON.parse(await fs.readFile(path.join(projectDir, 'content-graph.json'), 'utf8'));
+      const oldOutputHash = crypto.createHash('sha256').update(JSON.stringify(canonicalGraph)).digest('hex');
+      const stableOutputHash = contentGraphPhase.hashContentGraph(canonicalGraph);
+      assert.notEqual(oldOutputHash, stableOutputHash, '旧 JSON.stringify hash fixture 必须与 stable hash 有区别');
+      const legacyHashProject = await projectStore.loadProject(projectDir);
+      markCheckpointStage(legacyHashProject, 'content_graph', { output_hash: oldOutputHash });
+      await projectStore.saveProject(projectDir, legacyHashProject);
       const calls = [];
       frameHtmlAgent.generateFrameHtml = async (args) => {
         calls.push(args);
@@ -826,7 +833,10 @@ async function main() {
       assert.equal(result.success, true);
       assert.equal(calls.length, 1);
       assert.equal(calls[0].node.id, 'scene_03');
-      const project = await projectStore.loadProject(path.join(rootDir, workflowId, 'agent_runs', `${runId}-html-video`));
+      const project = await projectStore.loadProject(projectDir);
+      assert.equal(project.generation_checkpoint.stages.content_graph.output_hash, stableOutputHash,
+        '成功复用旧完整 hash 后必须迁移写回 stable hash');
+      assert.notEqual(project.generation_checkpoint.stages.content_graph.output_hash, oldOutputHash);
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_01.html_path, 'frames/01-scene_01.html');
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_02.html_path, 'frames/02-scene_02.html');
       assert.equal(project.generation_checkpoint.stages.frame_html.frames.scene_03.status, 'done');
