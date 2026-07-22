@@ -1,4 +1,5 @@
 const MAX_JSON_CHARS = 12000;
+const requiredNarration = require('./requiredNarrationLiterals');
 
 function stripCodeFence(text = '') {
   let value = String(text || '').trim();
@@ -31,6 +32,7 @@ function buildFreeformBriefMessages({ run = {}, skillContext = '', options = {} 
   const optionSummary = getOptionSummary(options);
   const creativeInput = options.creative_context?.input || {};
   const userRequirements = creativeInput.raw_text || creativeInput.source_hint || '';
+  const requiredNarrationLiterals = requiredNarration.extractRequiredNarrationLiterals(userRequirements);
   return [
     {
       role: 'system',
@@ -53,6 +55,16 @@ function buildFreeformBriefMessages({ run = {}, skillContext = '', options = {} 
         '',
         '用户原始要求（优先于运行摘要，必须遵守其中的 Scene 数量、素材绑定和指定原文）：',
         String(userRequirements || '未提供').slice(0, MAX_JSON_CHARS),
+        ...(requiredNarrationLiterals.length ? [
+          '',
+          '必须逐字保留的分 Scene 旁白原句（机器校验；不得同义改写、删减或移到其他 Scene）：',
+          safeJson(requiredNarrationLiterals),
+        ] : []),
+        ...(Array.isArray(options.requiredLiteralRetryMissing) && options.requiredLiteralRetryMissing.length ? [
+          '',
+          '上一次结果未通过原句校验，请修正以下缺失项后重新返回完整 JSON：',
+          safeJson(options.requiredLiteralRetryMissing),
+        ] : []),
         '',
         '技能上下文：',
         String(skillContext || '未提供'),
@@ -155,4 +167,6 @@ function parseFreeformBriefResponse(text = '') {
 module.exports = {
   buildFreeformBriefMessages,
   parseFreeformBriefResponse,
+  extractRequiredNarrationLiterals: requiredNarration.extractRequiredNarrationLiterals,
+  validateRequiredNarrationLiterals: requiredNarration.validateRequiredNarrationLiterals,
 };

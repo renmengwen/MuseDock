@@ -18,6 +18,7 @@ const narrationBudget = require('../storyboard/storyboardNarrationBudget');
 const narrationQuality = require('../creative-video/narrationQuality');
 const defaultHyperframesSkillContext = require('../hyperframes/hyperframesSkillContext');
 const defaultHyperframesFreeformAgent = require('../hyperframes/hyperframesFreeformAgent');
+const requiredNarration = require('../hyperframes/requiredNarrationLiterals');
 const defaultCreativeVideoWorkflowFacade = require('../creative-video/workflowFacade');
 const { createAgentRunsFreeformWorkflow } = require('./agentRunsFreeformWorkflow');
 const { normalizeFreeformNarrationScenes, resolveFreeformTargetDurationSec, replaceFreeformBriefScenes, fitFreeformNarrationToBudget, compressFreeformNarrationWithModel, repairFreeformNarrationWithModel, mapFreeformProjectFilesToDir } = require('./agentRunsFreeformHelpers');
@@ -1034,6 +1035,18 @@ async function compressDouyinRunSceneNarration(awemeId, runId, options = {}) {
       narration_text: trimNarrationToBudget(scene.narration_text, sceneBudget.max_recommended_chars || fallbackMaxChars),
     };
   });
+  const requiredLiteralValidation = requiredNarration.validateRequiredNarrationLiterals(
+    scenes,
+    storyboardPlan.required_narration_literals,
+  );
+  if (!requiredLiteralValidation.ok) {
+    return {
+      success: false,
+      code: requiredLiteralValidation.code,
+      message: `${requiredLiteralValidation.message} 已拒绝可能破坏原句的确定性截断，请使用模型重新压缩。`,
+      missing: requiredLiteralValidation.missing,
+    };
+  }
   const updatedPlanBase = {
     ...storyboardPlan,
     scenes,

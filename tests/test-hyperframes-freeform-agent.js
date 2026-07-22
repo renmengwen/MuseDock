@@ -27,6 +27,24 @@ async function run() {
   assert.match(briefMessages[1].content, /"keywords"/);
   assert.match(briefMessages[1].content, /"cards"/);
 
+  const requiredRaw = [
+    '普通说明“这不是旁白合同”。',
+    'S01 使用首页。旁白必须包含“这里是 MuseDock 仓库首页。”；继续。',
+    'S02 使用截图。旁白必须完整包含“镜头聚焦文本输入框。”；继续。',
+    'S03 旁白必须包含“任务信息卡片展示当前进度。”。',
+    'S04 旁白必须包含“主视频画布承载编辑预览。”。',
+    'S05 旁白必须包含“顶部橙色过山车轨道保持完整可见。”。',
+    'S06 旁白必须包含“站在界面前的人物保持完整。”。',
+  ].join(' ');
+  const required = agent.extractRequiredNarrationLiterals(requiredRaw);
+  assert.equal(required.length, 6);
+  assert.deepEqual(required[0], { scene_id: 'S01', literal: '这里是 MuseDock 仓库首页。' });
+  assert.equal(required.some(item => item.literal === '这不是旁白合同'), false);
+  assert.equal(agent.extractRequiredNarrationLiterals('S01 标题是“普通引号”，旁白自由发挥。').length, 0);
+  assert.equal(agent.validateRequiredNarrationLiterals([
+    { id: 'scene_01', narration_text: `开场，${required[0].literal}继续介绍。` },
+  ], [required[0]]).ok, true);
+
   const parsed = agent.parseFreeformBriefResponse(JSON.stringify({ title: '测试短片' }));
   assert.equal(parsed.success, true);
   assert.equal(parsed.brief.title, '测试短片');

@@ -3,6 +3,7 @@ const path = require('path');
 const mediaPipeline = require('../mediaPipeline');
 const narrationBudget = require('../storyboard/storyboardNarrationBudget');
 const narrationQuality = require('../creative-video/narrationQuality');
+const requiredNarration = require('../hyperframes/requiredNarrationLiterals');
 
 // ponytail: 两个纯小助手与 agentRuns 各持一份，避免为它们改全局调用点
 function firstPositiveNumber(...values) {
@@ -162,7 +163,7 @@ function fitFreeformNarrationToBudget(brief = {}, scenes = [], targetDurationSec
   };
 }
 
-function buildFreeformNarrationCompressionMessages({ scenes = [], budget = {}, transcriptText = '', targetDurationSec = 60 } = {}) {
+function buildFreeformNarrationCompressionMessages({ scenes = [], budget = {}, transcriptText = '', targetDurationSec = 60, requiredNarrationLiterals = [] } = {}) {
   const maxChars = budget.max_recommended_chars || Math.floor(Number(targetDurationSec || 60) * narrationBudget.DEFAULT_CHARS_PER_SECOND);
   return [
     {
@@ -191,6 +192,11 @@ function buildFreeformNarrationCompressionMessages({ scenes = [], budget = {}, t
           duration_sec: scene.duration_sec || scene.target_duration_sec || '',
           narration_text: scene.narration_text || '',
         })), null, 2),
+        ...(requiredNarrationLiterals.length ? [
+          '',
+          '必须逐字保留在对应 Scene 的旁白原句：',
+          JSON.stringify(requiredNarrationLiterals, null, 2),
+        ] : []),
         '',
         '来源材料 transcript：',
         String(transcriptText || '').slice(0, 12000) || '（无）',
@@ -201,12 +207,13 @@ function buildFreeformNarrationCompressionMessages({ scenes = [], budget = {}, t
         '3. 不要只按字符截断；必须改写压缩，保留主要信息和观点。',
         '4. 不要写镜头说明、音效、停顿或语速指令。',
         `5. 最终返回的所有 narration_text 总字数必须不超过 ${maxChars} 字。`,
+        ...(requiredNarrationLiterals.length ? ['6. 上述必须保留原句不得同义改写、删减或移到其他 Scene。'] : []),
       ].join('\n'),
     },
   ];
 }
 
-function buildFreeformNarrationRepairMessages({ scenes = [], issues = [], transcriptText = '', targetDurationSec = 60 } = {}) {
+function buildFreeformNarrationRepairMessages({ scenes = [], issues = [], transcriptText = '', targetDurationSec = 60, requiredNarrationLiterals = [] } = {}) {
   return [
     {
       role: 'system',
@@ -232,6 +239,11 @@ function buildFreeformNarrationRepairMessages({ scenes = [], issues = [], transc
           headline: scene.headline || '',
           narration_text: scene.narration_text || '',
         })), null, 2),
+        ...(requiredNarrationLiterals.length ? [
+          '',
+          '必须逐字保留在对应 Scene 的旁白原句：',
+          JSON.stringify(requiredNarrationLiterals, null, 2),
+        ] : []),
         '',
         '来源材料 transcript：',
         String(transcriptText || '').slice(0, 12000) || '（无）',
@@ -241,6 +253,7 @@ function buildFreeformNarrationRepairMessages({ scenes = [], issues = [], transc
         '2. 不要删除信息，不要写镜头说明，不要写语气/停顿指令。',
         '3. 修复后的 narration_text 必须是完整、可直接配音的中文口播。',
         '4. 优先根据 transcript 补齐语义落点；如果原句是对照铺垫，必须补出“今天/现在/未来”的后半句。',
+        ...(requiredNarrationLiterals.length ? ['5. 上述必须保留原句不得同义改写、删减或移到其他 Scene。'] : []),
       ].join('\n'),
     },
   ];
@@ -252,14 +265,12 @@ function extractRepairScenes(parsed = {}) {
   return [];
 }
 
-function applyFreeformNarrationRepairs(scenes = [], repairs = []) {
+function applyFreeformNarrationRepairs(scenes = [], repairs = [], requiredNarrationLiterals = []) {
   const byIndex = new Map((Array.isArray(repairs) ? repairs : [])
     .map(scene => [Number(scene?.index), String(scene?.narration_text || '').trim()])
     .filter(([index, text]) => Number.isFinite(index) && index > 0 && text));
   if (!byIndex.size) return { scenes, changed: false };
-  return {
-    changed: true,
-    scenes: scenes.map((scene, index) => {
+  const nextScenes = scenes.map((scene, index) => {
       const sceneIndex = Number(scene.index || index + 1);
       const narrationText = byIndex.get(sceneIndex);
       if (!narrationText) return scene;
@@ -270,11 +281,19 @@ function applyFreeformNarrationRepairs(scenes = [], repairs = []) {
           ? scene.captions.map((caption, captionIndex) => (captionIndex === 0 ? { ...caption, text: narrationText } : caption))
           : scene.captions,
       };
-    }),
+    });
+  const requiredLiteralValidation = requiredNarration.validateRequiredNarrationLiterals(nextScenes, requiredNarrationLiterals);
+  if (!requiredLiteralValidation.ok) {
+    return { scenes, changed: false, requiredLiteralValidation };
+  }
+  return {
+    changed: true,
+    scenes: nextScenes,
+    ...(requiredNarrationLiterals.length ? { requiredLiteralValidation } : {}),
   };
 }
 
-async function compressFreeformNarrationWithModel({ modelService, freeformAgent, scenes, budget, transcriptText, targetDurationSec } = {}) {
+async function compressFreeformNarrationWithModel({ modelService, freeformAgent, scenes, budget, transcriptText, targetDurationSec, requiredNarrationLiterals = [] } = {}) {
   let currentScenes = scenes;
   let currentBudget = budget;
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -283,6 +302,7 @@ async function compressFreeformNarrationWithModel({ modelService, freeformAgent,
       budget: currentBudget,
       transcriptText,
       targetDurationSec,
+      requiredNarrationLiterals,
     });
     const response = await modelService.callTextModel({ messages });
     if (!response || response.success === false) {
@@ -290,8 +310,13 @@ async function compressFreeformNarrationWithModel({ modelService, freeformAgent,
     }
     const parsed = freeformAgent.parseFreeformBriefResponse(response.text || response.content || '');
     if (!parsed.success) return parsed;
-    const applied = applyFreeformNarrationRepairs(currentScenes, extractRepairScenes(parsed.brief));
-    if (!applied.changed) return { success: false, message: '旁白压缩结果缺少可用 scenes。' };
+    const applied = applyFreeformNarrationRepairs(currentScenes, extractRepairScenes(parsed.brief), requiredNarrationLiterals);
+    if (!applied.changed) return {
+      success: false,
+      code: applied.requiredLiteralValidation?.code || '',
+      message: applied.requiredLiteralValidation?.message || '旁白压缩结果缺少可用 scenes。',
+      missing: applied.requiredLiteralValidation?.missing || [],
+    };
     const validation = narrationQuality.validateNarrationScenes(applied.scenes);
     if (!validation.ok) return { success: false, message: validation.message, issues: validation.issues };
     const nextPlan = freeformStoryboardPlanForBudget({}, applied.scenes, targetDurationSec);
@@ -309,16 +334,21 @@ async function compressFreeformNarrationWithModel({ modelService, freeformAgent,
   };
 }
 
-async function repairFreeformNarrationWithModel({ modelService, freeformAgent, scenes, issues, transcriptText, targetDurationSec } = {}) {
-  const messages = buildFreeformNarrationRepairMessages({ scenes, issues, transcriptText, targetDurationSec });
+async function repairFreeformNarrationWithModel({ modelService, freeformAgent, scenes, issues, transcriptText, targetDurationSec, requiredNarrationLiterals = [] } = {}) {
+  const messages = buildFreeformNarrationRepairMessages({ scenes, issues, transcriptText, targetDurationSec, requiredNarrationLiterals });
   const response = await modelService.callTextModel({ messages });
   if (!response || response.success === false) {
     return { success: false, message: response?.message || '旁白修复失败。' };
   }
   const parsed = freeformAgent.parseFreeformBriefResponse(response.text || response.content || '');
   if (!parsed.success) return parsed;
-  const applied = applyFreeformNarrationRepairs(scenes, extractRepairScenes(parsed.brief));
-  if (!applied.changed) return { success: false, message: '旁白修复结果缺少可用 scenes。' };
+  const applied = applyFreeformNarrationRepairs(scenes, extractRepairScenes(parsed.brief), requiredNarrationLiterals);
+  if (!applied.changed) return {
+    success: false,
+    code: applied.requiredLiteralValidation?.code || '',
+    message: applied.requiredLiteralValidation?.message || '旁白修复结果缺少可用 scenes。',
+    missing: applied.requiredLiteralValidation?.missing || [],
+  };
   const validation = narrationQuality.validateNarrationScenes(applied.scenes);
   if (!validation.ok) return { success: false, message: validation.message, issues: validation.issues };
   return { success: true, scenes: applied.scenes };

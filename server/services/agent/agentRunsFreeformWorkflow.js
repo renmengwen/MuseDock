@@ -462,6 +462,8 @@
 
         status: 'failed',
 
+        ...(logMeta.code ? { code: logMeta.code } : {}),
+
         message,
 
       },
@@ -495,6 +497,8 @@
       updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
 
       updated.message || message,
+
+      logMeta.code ? { code: logMeta.code } : {},
 
     );
 
@@ -665,6 +669,21 @@
     if (!scenes.length) {
       return failHyperframesFreeformSection(awemeId, runId, 'audio', '导演策划中没有可用于配音的旁白。', options);
     }
+    const requiredNarrationLiterals = Array.isArray(currentState.brief.data.required_narration_literals)
+      ? currentState.brief.data.required_narration_literals
+      : [];
+    const requiredLiteralValidation = (options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent)
+      .validateRequiredNarrationLiterals(scenes, requiredNarrationLiterals);
+    if (!requiredLiteralValidation.ok) {
+      return failHyperframesFreeformSection(
+        awemeId,
+        runId,
+        'audio',
+        requiredLiteralValidation.message,
+        options,
+        { code: requiredLiteralValidation.code, missing: requiredLiteralValidation.missing },
+      );
+    }
     const targetDurationSec = resolveFreeformTargetDurationSec(currentState.brief.data, detail.data, options);
     let narrationFit = fitFreeformNarrationToBudget(currentState.brief.data, scenes, targetDurationSec);
     scenes = narrationFit.scenes;
@@ -678,6 +697,7 @@
         budget: narrationFit.budget,
         transcriptText: transcript?.text || '',
         targetDurationSec,
+        requiredNarrationLiterals,
       });
       if (!compression.success) {
         return failHyperframesFreeformSection(
@@ -707,6 +727,7 @@
         issues: narrationValidation.issues,
         transcriptText: transcript?.text || '',
         targetDurationSec,
+        requiredNarrationLiterals,
       });
       if (repair.success) {
         scenes = repair.scenes;
@@ -1188,6 +1209,64 @@
 
       return markFreeformBriefFailed(awemeId, runId, message, options, operationId, elapsedMeta());
 
+    }
+
+    const requiredNarrationLiterals = freeformAgent.extractRequiredNarrationLiterals(
+      options.briefOptions?.creative_context?.input?.raw_text || '',
+    );
+    let requiredLiteralValidation = freeformAgent.validateRequiredNarrationLiterals(
+      normalizeFreeformNarrationScenes(parsed.brief),
+      requiredNarrationLiterals,
+    );
+    if (!requiredLiteralValidation.ok) {
+      const retryMessages = freeformAgent.buildFreeformBriefMessages({
+        run: detail.data,
+        skillContext: context.prompt_context,
+        options: {
+          ...(options.briefOptions || {}),
+          requiredLiteralRetryMissing: requiredLiteralValidation.missing,
+        },
+      });
+      let retryResult;
+      try {
+        retryResult = await modelService.callTextModel({
+          messages: retryMessages,
+          temperature: 0.35,
+          stream: true,
+          fallbackToNonStreamOnGatewayTimeout: true,
+          configPath: options.configPath,
+          textConfig: options.textConfig,
+          fetchImpl: options.fetchImpl,
+          maxRetries: options.maxRetries,
+          requestTimeoutMs: 300000,
+          streamChunkTimeoutMs: 120000,
+          logger,
+        });
+      } catch (error) {
+        retryResult = { success: false, message: error.message || '模型调用失败' };
+      }
+      if (retryResult?.success) {
+        parsed = freeformAgent.parseFreeformBriefResponse(retryResult.text || retryResult.raw_output || '');
+        if (parsed.success) {
+          requiredLiteralValidation = freeformAgent.validateRequiredNarrationLiterals(
+            normalizeFreeformNarrationScenes(parsed.brief),
+            requiredNarrationLiterals,
+          );
+        }
+      }
+      if (!retryResult?.success || !parsed.success || !requiredLiteralValidation.ok) {
+        const message = !retryResult?.success
+          ? `导演策划原句修复重试失败：${retryResult?.message || '模型调用失败。'}`
+          : (!parsed.success ? parsed.message : requiredLiteralValidation.message);
+        return markFreeformBriefFailed(awemeId, runId, message, options, operationId, {
+          ...elapsedMeta(),
+          code: 'brief_required_literal_missing',
+          missing: requiredLiteralValidation.missing || [],
+        });
+      }
+    }
+    if (requiredNarrationLiterals.length) {
+      parsed.brief.required_narration_literals = requiredNarrationLiterals;
     }
 
     logEvent(logger, 'info', {

@@ -184,6 +184,9 @@ function createSceneSpecFromVoicedStoryboard(creativeContext = {}, target = {}) 
       brief.targetDurationSec,
       scenes.reduce((total, scene) => total + (Number(scene.duration) || 0), 0),
     ),
+    ...(Array.isArray(brief.required_narration_literals) && brief.required_narration_literals.length
+      ? { required_narration_literals: brief.required_narration_literals }
+      : {}),
     scenes,
   });
 
