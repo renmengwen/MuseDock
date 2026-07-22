@@ -275,10 +275,10 @@ function previewHtml(
     return `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay" style="--fixture:yes;transform:translateZ(0)"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="visibility-${requirement}" data-shot-requirement="${requirement}"><img data-shot-layer="background" style="${style}" src="${source}"><img data-shot-layer="foreground" data-layout-qa-required-layer-probe="fixture-original" style="${style}" src="${source}" srcset="${source}"></figure></section>`;
   };
 
-  const shortRequiredRuntime = (activeAtMidpoint, covered = false) => `
+  const shortRequiredRuntime = (activation = 'window', covered = false, window = { start: 0.1, end: 1.1 }) => `
     <section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay">
       <figure id="short-required" data-hv-shot="true" data-shot-id="short-required" data-asset-id="asset-short"
-        data-shot-requirement="required" data-window-start-sec="0.1" data-window-end-sec="1.1">
+        data-shot-requirement="required" data-window-start-sec="${window.start}" data-window-end-sec="${window.end}">
         <img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}">
       </figure>
       <figure id="short-fallback" data-hv-shot="true" data-shot-id="short-fallback" data-shot-requirement="optional">
@@ -287,13 +287,15 @@ function previewHtml(
     </section>
     ${covered ? '<div aria-hidden="true" style="position:absolute;inset:0;z-index:9;background:#eee"></div>' : ''}
     <script>window.__mpSetTimelineTime=function(time){const shot=document.getElementById('short-required');
-      const fallback=document.getElementById('short-fallback');const active=${activeAtMidpoint ? 'time>=.1&&time<1.1' : 'false'};
+      const fallback=document.getElementById('short-fallback');const active=${activation === 'window'
+    ? `time>=${window.start}&&time<${window.end}`
+    : activation === 'outside' ? `time>=${window.end}` : 'false'};
       shot.style.display=active?'block':'none';fallback.style.display=active?'none':'block';
       if(active){shot.setAttribute('data-shot-active','true');fallback.removeAttribute('data-shot-active')}
       else{shot.removeAttribute('data-shot-active');fallback.setAttribute('data-shot-active','true')}};window.__mpSetTimelineTime(0)</script>`;
 
   const shortOccluded = await inspectInline(
-    'required-short-window-occluded.html', shortRequiredRuntime(true, true), [1.8],
+    'required-short-window-occluded.html', shortRequiredRuntime('window', true), [1.8],
   );
   assert.deepEqual(shortOccluded.metrics.expected_required_shot_ids, ['short-required']);
   assert.ok(shortOccluded.metrics.samples.some(sample => sample.sample_time_sec === 0.6),
@@ -305,7 +307,7 @@ function previewHtml(
   )), `短窗口 required Shot 被遮挡时必须在中点执行真实像素探针：${JSON.stringify(shortOccluded)}`);
 
   const shortVisible = await inspectInline(
-    'required-short-window-visible.html', shortRequiredRuntime(true), [1.8],
+    'required-short-window-visible.html', shortRequiredRuntime('window'), [1.8],
   );
   assert.equal(shortVisible.success, true, JSON.stringify(shortVisible.issues));
   assert.ok(shortVisible.metrics.image_sequence_visibility_samples.some(sample => (
@@ -313,7 +315,7 @@ function previewHtml(
   )), '短窗口 required Shot 可见时必须留下中点通过证据');
 
   const shortNeverActive = await inspectInline(
-    'required-short-window-never-active.html', shortRequiredRuntime(false), [1.8],
+    'required-short-window-never-active.html', shortRequiredRuntime('never'), [1.8],
   );
   const missingEvidence = shortNeverActive.issues.find(issue => issue.code === 'required_asset_visibility_evidence_missing');
   assert.equal(shortNeverActive.success, false, 'Runtime 未激活 required Shot 时不得以零证据通过');
@@ -321,19 +323,52 @@ function previewHtml(
     expected: ['short-required'], evidenced: [], missing: ['short-required'], sample_times: [0.6, 1.8],
   });
 
+  const shortOutsideOnly = await inspectInline(
+    'required-short-window-outside-only.html', shortRequiredRuntime('outside'), [1.8],
+  );
+  assert.ok(shortOutsideOnly.metrics.image_sequence_visibility_samples.some(sample => (
+    sample.shot_id === 'short-required' && sample.sample_time_sec === 1.8
+  )), '窗口外错误激活的原始像素证据必须保留在 metrics');
+  assert.ok(shortOutsideOnly.issues.some(issue => (
+    issue.code === 'required_asset_visibility_evidence_missing'
+    && issue.details.missing.includes('short-required')
+  )), '窗口外错误激活不得满足 required Shot 证据合同');
+
+  const tinyWindow = { start: 0.6, end: 0.62 };
+  const tinyRequired = await inspectInline(
+    'required-tiny-window.html', shortRequiredRuntime('window', false, tinyWindow), [0.58],
+  );
+  assert.deepEqual(tinyRequired.metrics.samples.map(sample => sample.sample_time_sec), [0.58, 0.61],
+    'mandatory 中点不得被相距不足 0.05 秒的普通样本吞掉');
+  assert.ok(tinyRequired.metrics.image_sequence_visibility_samples.some(sample => (
+    sample.shot_id === 'short-required' && sample.sample_time_sec === 0.61 && sample.passed
+  )));
+
   const invalidManifestPath = path.join(tempDir, 'required-invalid-manifest.html');
   await fs.writeFile(invalidManifestPath, `<!doctype html><html><body><section data-hv-image-sequence="true">
     <figure data-hv-shot="true" data-shot-requirement="required" data-window-start-sec="0" data-window-end-sec="1"></figure>
     <figure data-hv-shot="true" data-shot-id="duplicate" data-shot-requirement="required" data-window-start-sec="x" data-window-end-sec="1"></figure>
     <figure data-hv-shot="true" data-shot-id="duplicate" data-shot-requirement="required" data-window-start-sec="1" data-window-end-sec="1"></figure>
+    <figure data-hv-shot="true" data-shot-id="past-scene" data-shot-requirement="required" data-window-start-sec="1.5" data-window-end-sec="2.5"></figure>
   </section></body></html>`, 'utf8');
   const invalidManifest = await inspectFrameHtmlLayout({
     htmlPath: invalidManifestPath, frame: { id: 'invalid-manifest', duration_sec: 2 }, resolution,
   });
   const manifestIssue = invalidManifest.issues.find(issue => issue.code === 'required_asset_visibility_manifest_invalid');
   assert.equal(invalidManifest.success, false, '缺ID、重复ID及无效窗口必须在采样前阻断');
-  assert.equal(manifestIssue?.details.errors.length, 3);
+  assert.equal(manifestIssue?.details.errors.length, 4);
   assert.deepEqual(invalidManifest.metrics.samples, []);
+
+  const invalidDurationPath = path.join(tempDir, 'required-invalid-duration.html');
+  await fs.writeFile(invalidDurationPath, `<!doctype html><html><body><section data-hv-image-sequence="true">
+    <figure data-hv-shot="true" data-shot-id="valid-window" data-shot-requirement="required"
+      data-window-start-sec="0" data-window-end-sec="1"></figure>
+  </section></body></html>`, 'utf8');
+  const invalidDuration = await inspectFrameHtmlLayout({ htmlPath: invalidDurationPath, resolution });
+  assert.ok(invalidDuration.issues.some(issue => (
+    issue.code === 'required_asset_visibility_manifest_invalid'
+    && issue.details.errors.some(error => error.invalid_fields.includes('duration_sec'))
+  )), 'required Shot 存在时缺失 Scene duration 必须按 manifest 无效阻断');
   const pauseOpacityTransitionsAtMidpoint = (...ids) => `<script>(()=>{for(const id of ${JSON.stringify(ids)}){const shot=document.getElementById(id);void shot.offsetWidth;shot.style.opacity='1';const transition=shot.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='opacity');if(!transition)throw new Error('fixture opacity transition missing: '+id);transition.pause();transition.playbackRate=.75;transition.currentTime=175}})()</script>`;
   const pauseFilterTransitionsAtMidpoint = () => `<script>(()=>{for(const image of document.querySelectorAll('[data-shot-layer]')){void image.offsetWidth;image.style.filter='sepia(.8)';const transition=image.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='filter');if(!transition)throw new Error('fixture filter transition missing');transition.pause();transition.playbackRate=.6;transition.currentTime=5000}})()</script>`;
 
@@ -416,6 +451,8 @@ function previewHtml(
   );
   assert.equal(unreadableFileRequired.success, false, '不可读的受管 file 图片必须结构化阻断');
   assert.ok(unreadableFileRequired.issues.some(issue => issue.code === 'required_asset_visibility_probe_failed'));
+  assert.equal(unreadableFileRequired.issues.some(issue => issue.code === 'required_asset_visibility_evidence_missing'), false,
+    '探针自身失败已经阻断时不得再派生缺证据问题');
   const visibleRequired = await inspectInline('required-visible.html', requiredFigure('required'));
   const visibleMetric = visibleRequired.metrics.image_sequence_visibility_samples[0];
   assert.equal(visibleRequired.success, true, JSON.stringify(visibleRequired.issues));

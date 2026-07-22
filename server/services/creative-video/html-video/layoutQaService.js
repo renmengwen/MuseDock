@@ -671,7 +671,7 @@ async function cameraCueSampleTimes(page, durationSec) {
   return normalizeSampleTimes(times, durationSec);
 }
 
-async function requiredShotManifest(page) {
+async function requiredShotManifest(page, durationSec) {
   const rawShots = await page.evaluate(() => Array.from(document.querySelectorAll(
     '[data-hv-shot][data-shot-requirement="required"]',
   )).map((shot, index) => ({
@@ -683,6 +683,10 @@ async function requiredShotManifest(page) {
   const seen = new Set();
   const shots = [];
   const errors = [];
+  const duration = Number(durationSec);
+  if (rawShots.length && (!Number.isFinite(duration) || duration <= 0)) {
+    errors.push({ index: null, shot_id: '', invalid_fields: ['duration_sec'] });
+  }
   for (const raw of rawShots) {
     const shotId = String(raw.shot_id || '').trim();
     const startText = String(raw.window_start_sec ?? '').trim();
@@ -693,7 +697,8 @@ async function requiredShotManifest(page) {
     if (!shotId) invalidFields.push('data-shot-id');
     else if (seen.has(shotId)) invalidFields.push('data-shot-id:duplicate');
     if (!startText || !Number.isFinite(startSec) || startSec < 0) invalidFields.push('data-window-start-sec');
-    if (!endText || !Number.isFinite(endSec) || endSec <= startSec) invalidFields.push('data-window-end-sec');
+    if (!endText || !Number.isFinite(endSec) || endSec <= startSec
+      || (Number.isFinite(duration) && endSec > duration + 1e-6)) invalidFields.push('data-window-end-sec');
     if (invalidFields.length) {
       errors.push({ index: raw.index, shot_id: shotId, invalid_fields: invalidFields });
     } else {
@@ -1431,7 +1436,7 @@ async function inspectFrameHtmlLayout(options = {}) {
     }
     let continuousPlayback = playbackStartup.continuous;
 
-    const requiredManifest = await requiredShotManifest(page);
+    const requiredManifest = await requiredShotManifest(page, durationSec);
     metrics.expected_required_shot_ids = requiredManifest.shots.map(shot => shot.shot_id);
     if (requiredManifest.errors.length) {
       const issue = makeIssue({
@@ -1449,14 +1454,16 @@ async function inspectFrameHtmlLayout(options = {}) {
     const requiredShotMidpoints = requiredManifest.shots
       .map(shot => shot.start_sec + (shot.end_sec - shot.start_sec) / 2);
     // ponytail: sorting is O(n log n); dedupe and browser samples grow linearly with cues. Tier only after measured cost; never truncate later cues.
-    const samples = normalizeSampleTimes([
-      ...(Array.isArray(sampleTimesSec) && sampleTimesSec.length
+    const baseSamples = normalizeSampleTimes(
+      Array.isArray(sampleTimesSec) && sampleTimesSec.length
         ? sampleTimesSec
-        : [...defaultSampleTimes(durationSec), ...cueSamples]),
-      ...requiredShotMidpoints,
-    ], durationSec);
+        : [...defaultSampleTimes(durationSec), ...cueSamples],
+      durationSec,
+    );
+    const samples = [...new Set([...baseSamples, ...requiredShotMidpoints])].sort((a, b) => a - b);
 
     let elapsedSec = 0;
+    let requiredAssetProbeFailed = false;
     for (const sampleTimeSec of samples) {
       if (continuousPlayback) {
         const currentTime = await page.evaluate(() => Number(window.__hvPlaybackClock.timeSec())).catch(() => NaN);
@@ -1598,6 +1605,7 @@ async function inspectFrameHtmlLayout(options = {}) {
           injectedSourceKeys,
         });
       } catch (error) {
+        requiredAssetProbeFailed = true;
         issues.push(makeIssue({
           code: 'required_asset_visibility_probe_failed',
           frameId,
@@ -1625,12 +1633,16 @@ async function inspectFrameHtmlLayout(options = {}) {
       }
     }
     issues.push(...cameraJitterIssues(metrics.camera_samples, frameId));
-    const evidenced = [...new Set(metrics.image_sequence_visibility_samples
-      .map(sample => sample.shot_id)
-      .filter(Boolean))];
+    const evidenced = requiredManifest.shots.filter(shot => (
+      metrics.image_sequence_visibility_samples.some(sample => (
+        sample.shot_id === shot.shot_id
+        && sample.sample_time_sec >= shot.start_sec
+        && sample.sample_time_sec < shot.end_sec
+      ))
+    )).map(shot => shot.shot_id);
     const evidencedSet = new Set(evidenced);
     const missing = metrics.expected_required_shot_ids.filter(shotId => !evidencedSet.has(shotId));
-    if (missing.length) {
+    if (missing.length && !requiredAssetProbeFailed) {
       issues.push(makeIssue({
         code: 'required_asset_visibility_evidence_missing',
         frameId,
