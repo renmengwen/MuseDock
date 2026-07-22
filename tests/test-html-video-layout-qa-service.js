@@ -94,7 +94,13 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
   assert.equal(
     decoratedInline.issues.some(issue => issue.code === 'text_out_of_container'),
     false,
-    '父标题内联文字的 padding/background 装饰盒不得冒充字形越界',
+    '父标题内联文字的 padding/background 装饰盒不得冒充文本内容盒越界',
+  );
+
+  const scaledInline = await inspectFixture('scaled-decorated-inline-text.html', { id: 'scene_scaled_text', duration_sec: 1 });
+  assert.ok(
+    scaledInline.issues.some(issue => issue.code === 'text_out_of_container'),
+    '缩放后的装饰文字必须回退元素盒并保守阻断越界',
   );
 
   const playAllOverlap = await inspectFixture('playall-overlap.html', { id: 'scene_07', duration_sec: 1 });

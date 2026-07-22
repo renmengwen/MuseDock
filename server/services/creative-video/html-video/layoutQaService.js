@@ -348,23 +348,6 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
       };
     }
 
-    function textBoxFor(element) {
-      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-      const rects = [];
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        if (!(node.textContent || '').trim()) continue;
-        const range = document.createRange();
-        range.selectNodeContents(node);
-        rects.push(...Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0));
-      }
-      if (!rects.length) return null;
-      const left = Math.min(...rects.map(rect => rect.left));
-      const top = Math.min(...rects.map(rect => rect.top));
-      const right = Math.max(...rects.map(rect => rect.right));
-      const bottom = Math.max(...rects.map(rect => rect.bottom));
-      return { left, top, right, bottom, width: right - left, height: bottom - top };
-    }
-
     function selectorFor(element) {
       if (element.dataset && element.dataset.textKey) return `[data-text-key="${element.dataset.textKey}"]`;
       if (element.classList && element.classList.length) {
@@ -401,6 +384,28 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
       } catch (_) {
         return null;
       }
+    }
+
+    function contentBoxFor(element, rect) {
+      for (let current = element; current; current = current.parentElement) {
+        const style = window.getComputedStyle(current);
+        const zoom = Number(style.zoom || 1);
+        if (!translationFor(style.transform) || !Number.isFinite(zoom) || Math.abs(zoom - 1) >= 1e-6
+          || !['none', '1'].includes(style.scale) || style.rotate !== 'none') return null;
+      }
+      const style = window.getComputedStyle(element);
+      const inset = [
+        style.borderLeftWidth, style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth,
+        style.paddingLeft, style.paddingTop, style.paddingRight, style.paddingBottom,
+      ].map(value => Number.parseFloat(value));
+      if (inset.some(value => !Number.isFinite(value))) return null;
+      const [borderLeft, borderTop, borderRight, borderBottom, paddingLeft, paddingTop, paddingRight, paddingBottom] = inset;
+      const left = rect.left + borderLeft + paddingLeft;
+      const top = rect.top + borderTop + paddingTop;
+      const right = rect.right - borderRight - paddingRight;
+      const bottom = rect.bottom - borderBottom - paddingBottom;
+      if (right <= left || bottom <= top) return null;
+      return { left, top, right, bottom, width: right - left, height: bottom - top };
     }
 
     function transientTransformDeltaFor(element, container) {
@@ -482,7 +487,7 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
             ))),
             transientTransformDelta: transientTransformDeltaFor(element, container),
             text,
-            box: isExplicitText ? (textBoxFor(element) || serializeBox(rect)) : serializeBox(rect),
+            box: isExplicitText ? (contentBoxFor(element, rect) || serializeBox(rect)) : serializeBox(rect),
             container: containerFor(element),
             allowOverflow: hasLayoutFlag(element, '[data-layout-allow-overflow]'),
           },
