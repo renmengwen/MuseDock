@@ -102,11 +102,15 @@ function dedupeIssues(issues) {
   const seen = new Set();
   return issues.filter((issue) => {
     const details = issue.details || {};
+    const shotIds = Array.isArray(details.shot_ids)
+      ? [...new Set(details.shot_ids.map(value => String(value || '').trim()).filter(Boolean))].sort().join(',')
+      : '';
     const key = [
       issue.code,
       details.selector, details.text,
       details.first?.selector, details.first?.text,
       details.second?.selector, details.second?.text,
+      shotIds,
     ].join('|');
     if (seen.has(key)) return false;
     seen.add(key);
@@ -981,6 +985,13 @@ async function inspectRequiredAssetVisibility(page, resolution, {
   }, { viewport: resolution, safeBottomPx: CAMERA_SAFE_BOTTOM_PX });
   if (!prepared) return null;
 
+  const preparedShotIds = prepared.targets.map(target => String(target.shot_id || '').trim()).filter(Boolean);
+  function attachPreparedShotIds(error) {
+    const attached = error && typeof error === 'object' ? error : new Error(String(error));
+    attached.required_asset_shot_ids = preparedShotIds;
+    return attached;
+  }
+  try {
   const blackProbeScreenshots = [];
   const whiteProbeScreenshots = [];
   let restored = false;
@@ -1274,6 +1285,9 @@ async function inspectRequiredAssetVisibility(page, resolution, {
     new_running_transition_count: restorationDetails.newRunningTransitionCount ?? null,
     passed: comparisons[index].changed_pixel_ratio >= REQUIRED_ASSET_MIN_CHANGED_PIXEL_RATIO,
   }));
+  } catch (error) {
+    throw attachPreparedShotIds(error);
+  }
 }
 
 async function inspectFrameHtmlLayout(options = {}) {
@@ -1606,10 +1620,10 @@ async function inspectFrameHtmlLayout(options = {}) {
           injectedSourceKeys,
         });
       } catch (error) {
-        const failedShotIds = await page.evaluate(() => Array.from(document.querySelectorAll(
-          '[data-hv-shot][data-shot-active="true"][data-shot-requirement="required"]',
-        )).map(shot => String(shot.dataset.shotId || '').trim()).filter(Boolean)).catch(() => null);
-        if (Array.isArray(failedShotIds) && failedShotIds.length) {
+        const failedShotIds = Array.isArray(error?.required_asset_shot_ids)
+          ? [...new Set(error.required_asset_shot_ids.map(value => String(value || '').trim()).filter(Boolean))]
+          : [];
+        if (failedShotIds.length) {
           for (const shotId of failedShotIds) failedRequiredShotIds.add(shotId);
         } else {
           unscopedRequiredAssetProbeFailed = true;
