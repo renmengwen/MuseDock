@@ -408,6 +408,7 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
           && Math.abs(later.translation.y - terminal.y) <= 0.01
         )));
         const settleTime = Number(timing.delay) + Number(computedTiming.duration) * frames[settleIndex].offset;
+        if (settleTime > computedTiming.endTime + 1e-6) continue;
         const msUntilSettled = Math.max(0, settleTime - Number(animation.currentTime)) / animation.playbackRate;
         if (!Number.isFinite(msUntilSettled) || msUntilSettled > sceneRemainingMs + 1) continue;
 

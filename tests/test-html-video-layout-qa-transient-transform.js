@@ -14,6 +14,12 @@ function html({ overflow = 'visible', animation = 'self', overlap = false, viewp
       : animation === 'infinite' ? 'animation:safeRise 4s linear infinite alternate both'
         : animation === 'long' ? 'animation:longRise 10s linear both' : '';
   const outerAnimation = animation === 'outer' ? 'animation:safeRise 11.95s linear both' : '';
+  const script = animation === 'negative-end-delay' ? `<script>
+    document.querySelector('.wrapper').animate(
+      [{transform:'translateY(30px)'},{transform:'translateY(0)'}],
+      {duration:2000,endDelay:-40,fill:'both',easing:'steps(1,end)'}
+    );
+  </script>` : '';
   return `<!doctype html><html><head><style>
     html,body{width:640px;height:360px;margin:0;overflow:hidden}
     .card{position:absolute;left:100px;top:${top}px;width:300px;height:40px;overflow:${overflow}}
@@ -27,7 +33,7 @@ function html({ overflow = 'visible', animation = 'self', overlap = false, viewp
   </style></head><body><div class="outer"><div class="card" data-role="copy">
     <div class="wrapper"><p class="moving">运行中的关键词</p></div>
     ${overlap ? '<p class="overlap">真实重叠文字</p>' : ''}
-  </div></div></body></html>`;
+  </div></div>${script}</body></html>`;
 }
 
 async function inspect(dir, name, source, durationSec = 1) {
@@ -81,6 +87,10 @@ async function inspect(dir, name, source, durationSec = 1) {
       assert.equal(unsafe.success, false, `${animation} 动画不得豁免容器越界`);
       assert.ok(unsafe.issues.some(issue => issue.code === 'text_out_of_container'));
     }
+
+    const truncated = await inspect(dir, 'negative-end-delay', html({ animation: 'negative-end-delay' }), 2);
+    assert.equal(truncated.success, false, '负 endDelay 在安全终态前截断的动画不得豁免容器越界');
+    assert.ok(truncated.issues.some(issue => issue.code === 'text_out_of_container'));
 
     const overlapping = await inspect(dir, 'visible-overlap', html({ overlap: true }));
     assert.equal(overlapping.success, false, '真实文字重叠必须继续阻断');
