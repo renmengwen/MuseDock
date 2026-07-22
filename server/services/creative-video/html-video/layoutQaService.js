@@ -900,8 +900,7 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           item.animation.playbackRate = item.playbackRate;
           if (item.currentTime !== null) {
             item.animation.currentTime = item.currentTime;
-            item.currentTimeRestored = Math.abs(Number(item.animation.currentTime) - Number(item.currentTime)) <= 1;
-          } else item.currentTimeRestored = item.animation.currentTime === null;
+          }
           if (item.playState === 'running' || item.playState === 'pending') item.animation.play();
           else if (item.playState === 'paused') item.animation.pause();
           else if (item.playState === 'finished') item.animation.finish();
