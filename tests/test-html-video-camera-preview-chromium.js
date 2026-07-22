@@ -291,7 +291,7 @@ function previewHtml(
     <script>window.__mpSetTimelineTime=function(time){const shot=document.getElementById('short-required');
       const fallback=document.getElementById('short-fallback');const active=${activation === 'window'
     ? `time>=${window.start}&&time<${window.end}`
-    : activation === 'outside' ? `time>=${window.end}` : 'false'};
+    : activation === 'outside' ? `time>=${window.end}` : activation === 'always' ? 'true' : 'false'};
       shot.style.display=active?'block':'none';fallback.style.display=active?'none':'block';
       if(active){shot.setAttribute('data-shot-active','true');fallback.removeAttribute('data-shot-active')}
       else{shot.removeAttribute('data-shot-active');fallback.setAttribute('data-shot-active','true')}};window.__mpSetTimelineTime(0)</script>`;
@@ -345,11 +345,28 @@ function previewHtml(
     issue.code === 'required_asset_visibility_probe_failed'
     && issue.sample_time_sec === 1.8
     && issue.details.shot_ids?.includes('short-required')
+    && issue.details.in_window_shot_ids?.length === 0
   )), '窗口外错误激活的坏图探针失败仍必须完整记录');
   assert.ok(shortOutsideBroken.issues.some(issue => (
     issue.code === 'required_asset_visibility_evidence_missing'
     && issue.details.missing.includes('short-required')
   )), '窗口外 probe_failed 不得抑制 required Shot 的窗口内缺证据问题');
+
+  const outsideThenInsideBroken = await inspectInline(
+    'required-window-outside-then-inside-broken.html',
+    shortRequiredRuntime('always', false, { start: 1, end: 2 }, 'missing.png'),
+    [0.5],
+  );
+  const outsideThenInsideProbeIssues = outsideThenInsideBroken.issues
+    .filter(issue => issue.code === 'required_asset_visibility_probe_failed');
+  assert.deepEqual(outsideThenInsideProbeIssues.map(issue => ({
+    time: issue.sample_time_sec, in_window_shot_ids: issue.details.in_window_shot_ids,
+  })), [
+    { time: 0.5, in_window_shot_ids: [] },
+    { time: 1.5, in_window_shot_ids: ['short-required'] },
+  ], '同一 Shot 的窗口外与窗口内失败必须按 in_window_shot_ids 保留为两条诊断');
+  assert.equal(outsideThenInsideBroken.issues.some(issue => issue.code === 'required_asset_visibility_evidence_missing'), false,
+    '窗口内已有归因 probe_failed 时不应再派生同 Shot missing');
 
   const tinyWindow = { start: 0.6, end: 0.62 };
   const tinyRequired = await inspectInline(

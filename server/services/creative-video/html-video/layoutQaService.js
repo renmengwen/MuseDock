@@ -98,19 +98,24 @@ function isBlockingIssue(issue) {
   return issue.severity !== 'warning' && issue.severity !== 'info';
 }
 
+function normalizeShotIds(values) {
+  return Array.isArray(values)
+    ? [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))].sort()
+    : [];
+}
+
 function dedupeIssues(issues) {
   const seen = new Set();
   return issues.filter((issue) => {
     const details = issue.details || {};
-    const shotIds = Array.isArray(details.shot_ids)
-      ? [...new Set(details.shot_ids.map(value => String(value || '').trim()).filter(Boolean))].sort().join(',')
-      : '';
+    const shotIds = normalizeShotIds(details.shot_ids).join(',');
+    const inWindowShotIds = normalizeShotIds(details.in_window_shot_ids).join(',');
     const key = [
       issue.code,
       details.selector, details.text,
       details.first?.selector, details.first?.text,
       details.second?.selector, details.second?.text,
-      shotIds,
+      shotIds, inWindowShotIds,
     ].join('|');
     if (seen.has(key)) return false;
     seen.add(key);
@@ -1621,16 +1626,13 @@ async function inspectFrameHtmlLayout(options = {}) {
           injectedSourceKeys,
         });
       } catch (error) {
-        const failedShotIds = Array.isArray(error?.required_asset_shot_ids)
-          ? [...new Set(error.required_asset_shot_ids.map(value => String(value || '').trim()).filter(Boolean))]
-          : [];
+        const failedShotIds = normalizeShotIds(error?.required_asset_shot_ids);
+        const inWindowShotIds = failedShotIds.filter((shotId) => {
+          const shot = requiredManifestById.get(shotId);
+          return shot && sampleTimeSec >= shot.start_sec && sampleTimeSec < shot.end_sec;
+        });
         if (failedShotIds.length) {
-          for (const shotId of failedShotIds) {
-            const shot = requiredManifestById.get(shotId);
-            if (shot && sampleTimeSec >= shot.start_sec && sampleTimeSec < shot.end_sec) {
-              failedInWindowRequiredShotIds.add(shotId);
-            }
-          }
+          for (const shotId of inWindowShotIds) failedInWindowRequiredShotIds.add(shotId);
         } else {
           unscopedRequiredAssetProbeFailed = true;
         }
@@ -1642,6 +1644,7 @@ async function inspectFrameHtmlLayout(options = {}) {
           details: {
             error: error?.message || String(error),
             ...(failedShotIds?.length ? { shot_ids: failedShotIds } : {}),
+            in_window_shot_ids: inWindowShotIds,
           },
         }));
         continue;
