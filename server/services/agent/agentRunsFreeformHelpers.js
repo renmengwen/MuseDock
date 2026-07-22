@@ -163,8 +163,10 @@ function fitFreeformNarrationToBudget(brief = {}, scenes = [], targetDurationSec
   };
 }
 
-function buildFreeformNarrationCompressionMessages({ scenes = [], budget = {}, transcriptText = '', targetDurationSec = 60, requiredNarrationLiterals = [] } = {}) {
-  const maxChars = budget.max_recommended_chars || Math.floor(Number(targetDurationSec || 60) * narrationBudget.DEFAULT_CHARS_PER_SECOND);
+function buildFreeformNarrationCompressionMessages({ scenes = [], budget = {}, transcriptText = '', targetDurationSec = 60, requiredNarrationLiterals = [], hardMaxChars = 0 } = {}) {
+  const maxChars = Number(hardMaxChars) > 0
+    ? Math.floor(Number(hardMaxChars))
+    : (budget.max_recommended_chars || Math.floor(Number(targetDurationSec || 60) * narrationBudget.DEFAULT_CHARS_PER_SECOND));
   return [
     {
       role: 'system',
@@ -293,7 +295,7 @@ function applyFreeformNarrationRepairs(scenes = [], repairs = [], requiredNarrat
   };
 }
 
-async function compressFreeformNarrationWithModel({ modelService, freeformAgent, scenes, budget, transcriptText, targetDurationSec, requiredNarrationLiterals = [] } = {}) {
+async function compressFreeformNarrationWithModel({ modelService, freeformAgent, scenes, budget, transcriptText, targetDurationSec, requiredNarrationLiterals = [], hardMaxChars = 0 } = {}) {
   let currentScenes = scenes;
   let currentBudget = budget;
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -303,6 +305,7 @@ async function compressFreeformNarrationWithModel({ modelService, freeformAgent,
       transcriptText,
       targetDurationSec,
       requiredNarrationLiterals,
+      hardMaxChars,
     });
     const response = await modelService.callTextModel({ messages });
     if (!response || response.success === false) {
@@ -319,6 +322,18 @@ async function compressFreeformNarrationWithModel({ modelService, freeformAgent,
     };
     const validation = narrationQuality.validateNarrationScenes(applied.scenes);
     if (!validation.ok) return { success: false, message: validation.message, issues: validation.issues };
+    const actualChars = applied.scenes.reduce((sum, scene) => (
+      sum + narrationBudget.countNarrationChars(scene?.narration_text || '')
+    ), 0);
+    if (Number(hardMaxChars) > 0 && actualChars > Math.floor(Number(hardMaxChars))) {
+      return {
+        success: false,
+        code: 'narration_compression_over_hard_max',
+        message: `旁白压缩结果仍有 ${actualChars} 字，超过硬性上限 ${Math.floor(Number(hardMaxChars))} 字。`,
+        actual_chars: actualChars,
+        max_chars: Math.floor(Number(hardMaxChars)),
+      };
+    }
     const nextPlan = freeformStoryboardPlanForBudget({}, applied.scenes, targetDurationSec);
     const nextBudget = narrationBudget.buildNarrationBudget(nextPlan);
     if (nextBudget.status !== 'too_long') {

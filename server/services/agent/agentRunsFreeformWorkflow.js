@@ -556,6 +556,17 @@
 
   }
 
+  function getSceneTtsDuration(result = {}) {
+    const sceneTts = result.scene_tts || {};
+    for (const value of [sceneTts.duration, result.duration]) {
+      const duration = Number(value);
+      if (Number.isFinite(duration) && duration > 0) return duration;
+    }
+    return (Array.isArray(sceneTts.scenes) ? sceneTts.scenes : []).reduce((sum, scene) => (
+      sum + (Number(scene?.speech_duration_sec || scene?.duration || 0) || 0)
+    ), 0);
+  }
+
 
 
   function createFreeformAudioValue({ sceneTtsValue = {}, timedPlan = {}, awemeId, runId, voice = '', stylePrompt = '', fallbackMessage = '' }) {
@@ -669,6 +680,9 @@
     const currentState = normalizeHyperframesFreeformState(claimed.data?.hyperframes_freeform);
     let scenes;
     let targetDurationSec;
+    let narrationFit;
+    let transcript = null;
+    let requiredNarrationLiterals = [];
     let sceneTtsService;
     let resolvedVoice;
     let resolvedStylePrompt;
@@ -696,7 +710,7 @@
     if (!scenes.length) {
       return failHyperframesFreeformSection(awemeId, runId, 'audio', '导演策划中没有可用于配音的旁白。', options, {}, operationId);
     }
-    const requiredNarrationLiterals = Array.isArray(currentState.brief.data.required_narration_literals)
+    requiredNarrationLiterals = Array.isArray(currentState.brief.data.required_narration_literals)
       ? currentState.brief.data.required_narration_literals
       : [];
     const requiredLiteralValidation = (options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent)
@@ -713,9 +727,8 @@
       );
     }
     targetDurationSec = resolveFreeformTargetDurationSec(currentState.brief.data, detail.data, options);
-    let narrationFit = fitFreeformNarrationToBudget(currentState.brief.data, scenes, targetDurationSec);
+    narrationFit = fitFreeformNarrationToBudget(currentState.brief.data, scenes, targetDurationSec);
     scenes = narrationFit.scenes;
-    let transcript = null;
     if (narrationFit.needsCompression) {
       transcript = await readJsonIfExists(mediaPipeline.getMediaPaths(awemeId, options.rootDir).transcript);
       const compression = await compressFreeformNarrationWithModel({
@@ -802,13 +815,12 @@
       },
     }), options);
     if (!prepared.success) {
-      return createHyperframesFreeformOperationResponse(
+      return createFreeformFailureResponse(
         awemeId,
         runId,
-        'audio',
-        prepared,
-        false,
+        prepared.hyperframes_freeform || null,
         prepared.message || '音频任务已被更新的操作取代。',
+        { superseded: true },
       );
     }
     sceneTtsService = options.sceneTtsService || defaultSceneTts;
@@ -829,11 +841,7 @@
     }
 
 
-    let result;
-
-    try {
-
-      result = await sceneTtsService.synthesizeSceneTts({
+    const synthesize = () => sceneTtsService.synthesizeSceneTts({
 
         scenes,
 
@@ -869,7 +877,11 @@
         ttsQueueIntervalMs: options.ttsQueueIntervalMs,
 
       });
-
+    let result;
+    let ttsAttemptCount = 0;
+    try {
+      ttsAttemptCount += 1;
+      result = await synthesize();
     } catch (error) {
 
       result = {
@@ -903,6 +915,125 @@
 
       );
 
+    }
+
+    const maxAllowedDurationSec = targetDurationSec * 1.15;
+    let actualDurationSec = getSceneTtsDuration(result);
+    if (actualDurationSec > maxAllowedDurationSec) {
+      const latest = await getCurrentHyperframesFreeformState(awemeId, runId, options);
+      if (!latest.success || latest.hyperframes_freeform?.audio?.operation_id !== operationId) {
+        return createFreeformFailureResponse(
+          awemeId,
+          runId,
+          latest.hyperframes_freeform || null,
+          latest.message || '音频任务已被更新的操作取代，已跳过真实时长压缩重试。',
+          { superseded: true },
+        );
+      }
+      const currentChars = scenes.reduce((sum, scene) => (
+        sum + Array.from(String(scene?.narration_text || '').replace(/\s+/g, '').trim()).length
+      ), 0);
+      const measuredMaxChars = Math.max(1, Math.floor(currentChars * targetDurationSec / actualDurationSec));
+      let measuredCompression;
+      try {
+        measuredCompression = await compressFreeformNarrationWithModel({
+          modelService: options.aiTextModel || defaultAiTextModel,
+          freeformAgent: options.hyperframesFreeformAgent || defaultHyperframesFreeformAgent,
+          scenes,
+          budget: { ...(narrationFit.budget || {}), max_recommended_chars: measuredMaxChars },
+          transcriptText: transcript?.text || '',
+          targetDurationSec,
+          requiredNarrationLiterals,
+          hardMaxChars: measuredMaxChars,
+        });
+      } catch (error) {
+        measuredCompression = { success: false, code: 'audio_prepare_failed', message: error.message || '模型压缩失败。' };
+      }
+      if (!measuredCompression.success) {
+        const message = `真实 TTS 时长超出预算，自动压缩失败：${measuredCompression.message || '未知错误'}`;
+        return failHyperframesFreeformSection(
+          awemeId,
+          runId,
+          'audio',
+          message,
+          options,
+          {
+            code: measuredCompression.code || 'tts_actual_duration_compression_failed',
+            missing: measuredCompression.missing || [],
+            error: message,
+            details: {
+              target: targetDurationSec,
+              actual: actualDurationSec,
+              max_allowed: maxAllowedDurationSec,
+              measured_max_chars: measuredMaxChars,
+              attempt_count: 1,
+            },
+          },
+          operationId,
+        );
+      }
+      scenes = measuredCompression.scenes;
+      narrationFit = {
+        scenes,
+        brief: replaceFreeformBriefScenes(narrationFit.brief || currentState.brief.data, scenes, measuredCompression.budget),
+        budget: measuredCompression.budget,
+        changed: true,
+      };
+      const persistedCompression = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'audio', operationId, current => ({
+        brief: { ...current.brief, data: narrationFit.brief },
+        audio: {
+          ...withoutFailureMeta(current.audio),
+          operation_id: operationId,
+          status: 'generating',
+          message: `真实旁白时长 ${actualDurationSec.toFixed(3)} 秒超出上限，已压缩至 ${measuredMaxChars} 字并重新生成音频...`,
+        },
+      }), options);
+      if (!persistedCompression.success) {
+        return createFreeformFailureResponse(
+          awemeId,
+          runId,
+          persistedCompression.hyperframes_freeform || null,
+          persistedCompression.message || '音频任务已被更新的操作取代。',
+          { superseded: true },
+        );
+      }
+      try {
+        ttsAttemptCount += 1;
+        result = await synthesize();
+      } catch (error) {
+        result = { success: false, message: `高级成片音频重试失败：${error.message || '未知错误'}` };
+      }
+      if (!result?.success) {
+        return failHyperframesFreeformSection(
+          awemeId,
+          runId,
+          'audio',
+          result?.message || '高级成片音频重试失败。',
+          options,
+          {},
+          operationId,
+        );
+      }
+      actualDurationSec = getSceneTtsDuration(result);
+      if (actualDurationSec > maxAllowedDurationSec) {
+        const details = {
+          target: targetDurationSec,
+          actual: actualDurationSec,
+          max_allowed: maxAllowedDurationSec,
+          attempt_count: ttsAttemptCount,
+          ...(actualDurationSec > targetDurationSec * 1.25 ? { hard_limit_exceeded: true } : {}),
+        };
+        const message = `真实 TTS 时长仍超出预算：目标 ${targetDurationSec} 秒，实际 ${actualDurationSec.toFixed(3)} 秒，允许上限 ${maxAllowedDurationSec.toFixed(3)} 秒。`;
+        return failHyperframesFreeformSection(
+          awemeId,
+          runId,
+          'audio',
+          message,
+          options,
+          { code: 'tts_actual_duration_over_budget', missing: [], details, error: message },
+          operationId,
+        );
+      }
     }
 
 
@@ -1755,7 +1886,9 @@
       runId,
       updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
       updated.message || message,
-      !updated.stale && extraPatch.code ? { code: extraPatch.code, missing: extraPatch.missing || [] } : {},
+      !updated.stale && extraPatch.code
+        ? { code: extraPatch.code, missing: extraPatch.missing || [], ...(extraPatch.details ? { details: extraPatch.details } : {}) }
+        : {},
     );
   }
 
