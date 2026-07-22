@@ -135,6 +135,49 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
     assert.equal(stableSecondBeat.metrics.skipped, false);
     assert.equal(stableSecondBeat.success, true, '连续播放到第二 Beat 稳定点时只能看到活动文本');
 
+    const fragmentPath = path.join(timelineDir, 'fragment-overlap.html');
+    await fs.writeFile(fragmentPath, `<!doctype html><html><head><style>
+      html,body{width:1920px;height:1080px;margin:0}
+      p{position:absolute;left:100px;width:400px;height:60px;margin:0}
+      .right{text-align:right}.false-a,.false-b{top:50px}
+      .true-a,.true-b{top:180px}
+      .hidden-a,.hidden-b{top:310px}.hidden-a span{visibility:hidden;position:absolute;left:0}.hidden-a{text-align:right}
+      .complex-a,.complex-b{top:440px}.complex-a{transform:scale(1.01);transform-origin:left top}
+    </style></head><body>
+      <p class="false-a">片段左端</p><p class="false-b right">片段右端</p>
+      <p class="true-a">真实重叠甲</p><p class="true-b">真实重叠乙</p>
+      <p class="hidden-a">可见右端<span>隐藏重叠</span></p><p class="hidden-b">隐藏对照</p>
+      <p class="complex-a">复杂左端</p><p class="complex-b right">复杂右端</p>
+    </body></html>`, 'utf8');
+    const fragmentOverlap = await inspectFrameHtmlLayout({
+      htmlPath: fragmentPath,
+      frame: { id: 'scene_fragment_overlap', duration_sec: 1 },
+      resolution,
+      sampleTimesSec: [0.1],
+    });
+    const overlapPairs = fragmentOverlap.issues
+      .filter(issue => /overlap/.test(issue.code))
+      .map(issue => [issue.details?.first?.text, issue.details?.second?.text]);
+    const hasPair = (first, second) => overlapPairs.some(pair => pair.includes(first) && pair.includes(second));
+    assert.equal(hasPair('片段左端', '片段右端'), false, '候选盒相交但可见文字片段分离时不得误报');
+    assert.equal(hasPair('真实重叠甲', '真实重叠乙'), true, '真实文字片段重叠必须继续阻断');
+    assert.equal(
+      overlapPairs.some(pair => pair.some(text => text?.includes('隐藏'))),
+      false,
+      '隐藏文字 run 不得参与互叠判断',
+    );
+    const complexOverlap = fragmentOverlap.issues.find(issue => (
+      [issue.details?.first?.text, issue.details?.second?.text].includes('复杂左端')
+      && [issue.details?.first?.text, issue.details?.second?.text].includes('复杂右端')
+    ));
+    assert.ok(complexOverlap, '复杂 transform 必须回退候选盒并保守报告');
+    assert.deepEqual(complexOverlap.details.first.overlap_box, complexOverlap.details.first.box);
+    const realOverlap = fragmentOverlap.issues.find(issue => (
+      [issue.details?.first?.text, issue.details?.second?.text].includes('真实重叠甲')
+      && [issue.details?.first?.text, issue.details?.second?.text].includes('真实重叠乙')
+    ));
+    assert.notDeepEqual(realOverlap.details.first.overlap_box, realOverlap.details.first.box, '普通文字诊断应记录触发的 Range 片段');
+
     const crossfadingBeats = await inspectFrameHtmlLayout({
       htmlPath: timelinePath,
       frame: { id: 'scene_crossfading_beats', duration_sec: 1.5 },

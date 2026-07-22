@@ -151,6 +151,7 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
   const issues = [];
   const tolerance = 12;
   const blockingOverlapIndexes = new Set();
+  const overlaps = [];
 
   for (let i = 0; i < candidates.length; i += 1) {
     for (let j = i + 1; j < candidates.length; j += 1) {
@@ -164,11 +165,22 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
         continue;
       }
 
-      const intersection = intersects(a.box, b.box);
-      if (intersection.area <= 0) continue;
-
-      const smallerArea = Math.min(a.box.width * a.box.height, b.box.width * b.box.height);
-      if (smallerArea <= 0 || intersection.area / smallerArea <= 0.25) continue;
+      let overlap = null;
+      for (const firstBox of a.overlapBoxes || []) {
+        for (const secondBox of b.overlapBoxes || []) {
+          const intersection = intersects(firstBox, secondBox);
+          const smallerArea = Math.min(
+            firstBox.width * firstBox.height,
+            secondBox.width * secondBox.height,
+          );
+          if (smallerArea > 0 && intersection.area / smallerArea > 0.25) {
+            overlap = { firstBox, secondBox, intersection, smallerArea };
+            break;
+          }
+        }
+        if (overlap) break;
+      }
+      if (!overlap) continue;
 
       const crossfadingBeats = a.beatScope && b.beatScope && a.beatScope !== b.beatScope
         && [a, b].some(candidate => (
@@ -179,6 +191,7 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
         blockingOverlapIndexes.add(a.index);
         blockingOverlapIndexes.add(b.index);
       }
+      overlaps.push({ a, b, crossfadingBeats, ...overlap });
     }
   }
 
@@ -245,58 +258,37 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
     }
   }
 
-  for (let i = 0; i < candidates.length; i += 1) {
-    for (let j = i + 1; j < candidates.length; j += 1) {
-      const a = candidates[i];
-      const b = candidates[j];
-      if (a.text === b.text) continue;
-      if (
-        (Array.isArray(a.ancestorIndexes) && a.ancestorIndexes.includes(b.index))
-        || (Array.isArray(b.ancestorIndexes) && b.ancestorIndexes.includes(a.index))
-      ) {
-        continue;
-      }
-
-      const intersection = intersects(a.box, b.box);
-      if (intersection.area <= 0) continue;
-
-      const smallerArea = Math.min(a.box.width * a.box.height, b.box.width * b.box.height);
-      if (smallerArea <= 0 || intersection.area / smallerArea <= 0.25) continue;
-
-      const code = isPrimaryText(a) || isPrimaryText(b)
-        ? 'decorative_overlay_text'
-        : 'text_overlap';
-      const crossfadingBeats = a.beatScope && b.beatScope && a.beatScope !== b.beatScope
-        && [a, b].some(candidate => (
-          candidate.scopeEffectiveOpacity > 0.001 && candidate.scopeEffectiveOpacity < 0.999
-          && candidate.opacityTransitionRunning
-        ));
-      issues.push(makeIssue({
-        code,
-        severity: crossfadingBeats ? 'warning' : 'error',
-        frameId,
-        sampleTimeSec,
-        message: '检测到文本元素互相重叠。',
-        details: {
-          first: {
-            text: a.text, selector: a.selector, beat_scope: a.beatScope || null,
-            effective_opacity: a.effectiveOpacity,
-            scope_effective_opacity: a.scopeEffectiveOpacity,
-            opacity_transition_running: a.opacityTransitionRunning,
-            box: a.box,
-          },
-          second: {
-            text: b.text, selector: b.selector, beat_scope: b.beatScope || null,
-            effective_opacity: b.effectiveOpacity,
-            scope_effective_opacity: b.scopeEffectiveOpacity,
-            opacity_transition_running: b.opacityTransitionRunning,
-            box: b.box,
-          },
-          intersection_area: Math.round(intersection.area),
-          smaller_area: Math.round(smallerArea),
+  for (const { a, b, crossfadingBeats, firstBox, secondBox, intersection, smallerArea } of overlaps) {
+    const code = isPrimaryText(a) || isPrimaryText(b)
+      ? 'decorative_overlay_text'
+      : 'text_overlap';
+    issues.push(makeIssue({
+      code,
+      severity: crossfadingBeats ? 'warning' : 'error',
+      frameId,
+      sampleTimeSec,
+      message: '检测到文本元素互相重叠。',
+      details: {
+        first: {
+          text: a.text, selector: a.selector, beat_scope: a.beatScope || null,
+          effective_opacity: a.effectiveOpacity,
+          scope_effective_opacity: a.scopeEffectiveOpacity,
+          opacity_transition_running: a.opacityTransitionRunning,
+          box: a.box,
+          overlap_box: firstBox,
         },
-      }));
-    }
+        second: {
+          text: b.text, selector: b.selector, beat_scope: b.beatScope || null,
+          effective_opacity: b.effectiveOpacity,
+          scope_effective_opacity: b.scopeEffectiveOpacity,
+          opacity_transition_running: b.opacityTransitionRunning,
+          box: b.box,
+          overlap_box: secondBox,
+        },
+        intersection_area: Math.round(intersection.area),
+        smaller_area: Math.round(smallerArea),
+      },
+    }));
   }
 
   return issues;
@@ -387,12 +379,59 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
     function translationFor(value) {
       try {
         const matrix = !value || value === 'none' ? new DOMMatrixReadOnly() : new DOMMatrixReadOnly(value);
-        if (Math.abs(matrix.a - 1) >= 1e-6 || Math.abs(matrix.b) >= 1e-6
+        if (!matrix.is2D || Math.abs(matrix.a - 1) >= 1e-6 || Math.abs(matrix.b) >= 1e-6
           || Math.abs(matrix.c) >= 1e-6 || Math.abs(matrix.d - 1) >= 1e-6) return null;
         return { x: matrix.e, y: matrix.f };
       } catch (_) {
         return null;
       }
+    }
+
+    function overlapBoxesFor(element, candidateBox) {
+      let hasVisibleRun = false;
+      let complexGeometry = false;
+      const boxes = [];
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const parent = node.parentElement;
+        if (!parent || parent.closest('[data-layout-ignore]')) continue;
+        const parentStyle = window.getComputedStyle(parent);
+        if (!parentStyle || ['hidden', 'collapse'].includes(parentStyle.visibility)) continue;
+
+        let effectiveOpacity = 1;
+        let hidden = false;
+        let nodeHasComplexGeometry = false;
+        for (let current = parent; current; current = current.parentElement) {
+          const style = window.getComputedStyle(current);
+          if (!style || style.display === 'none' || style.contentVisibility === 'hidden') {
+            hidden = true;
+            break;
+          }
+          const opacity = Number(style.opacity);
+          if (Number.isFinite(opacity)) effectiveOpacity *= opacity;
+          const zoom = Number(style.zoom || 1);
+          if (!translationFor(style.transform) || !Number.isFinite(zoom) || Math.abs(zoom - 1) >= 1e-6
+            || !['none', '1'].includes(style.scale) || style.rotate !== 'none'
+            || style.perspective !== 'none' || style.transformStyle === 'preserve-3d') {
+            nodeHasComplexGeometry = true;
+          }
+        }
+        if (hidden || effectiveOpacity <= 0.001) continue;
+
+        const text = node.textContent || '';
+        for (const match of text.matchAll(/\S+/g)) {
+          hasVisibleRun = true;
+          complexGeometry = complexGeometry || nodeHasComplexGeometry;
+          const range = document.createRange();
+          range.setStart(node, match.index);
+          range.setEnd(node, match.index + match[0].length);
+          for (const rect of range.getClientRects()) {
+            if (rect.width > 0 && rect.height > 0) boxes.push(serializeBox(rect));
+          }
+        }
+      }
+      if (!hasVisibleRun) return [];
+      return complexGeometry ? [candidateBox] : boxes;
     }
 
     function contentBoxFor(element, rect) {
@@ -477,6 +516,7 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
         const container = element.parentElement ? element.parentElement.closest(semanticSelector) : null;
         if (!text || (!direct && !isExplicitText)) return null;
         if (!isVisible(element, rect, effectiveOpacity)) return null;
+        const box = isExplicitText ? (contentBoxFor(element, rect) || serializeBox(rect)) : serializeBox(rect);
         return {
           element,
           hasDirectText: Boolean(direct),
@@ -496,7 +536,8 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
             ))),
             transientTransformDelta: transientTransformDeltaFor(element, container),
             text,
-            box: isExplicitText ? (contentBoxFor(element, rect) || serializeBox(rect)) : serializeBox(rect),
+            box,
+            overlapBoxes: overlapBoxesFor(element, box),
             container: containerFor(element),
             allowOverflow: hasLayoutFlag(element, '[data-layout-allow-overflow]'),
           },
