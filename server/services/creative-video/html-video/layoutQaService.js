@@ -2,6 +2,8 @@ const { pathToFileURL } = require('url');
 
 const DEFAULT_RESOLUTION = { width: 1920, height: 1080 };
 const CAMERA_SAFE_BOTTOM_PX = 140;
+const REQUIRED_ASSET_PIXEL_DIFF_THRESHOLD = 8;
+const REQUIRED_ASSET_MIN_CHANGED_PIXEL_RATIO = 0.05;
 const CANDIDATE_SELECTOR = [
   '[data-text-key]',
   '.headline',
@@ -770,6 +772,123 @@ async function waitForLayout(page) {
   });
 }
 
+async function inspectRequiredAssetVisibility(page, resolution) {
+  const prepared = await page.evaluate(({ viewport, safeBottomPx }) => {
+    const sequence = document.querySelector('[data-hv-image-sequence]');
+    if (!sequence) return null;
+    const requiredShots = Array.from(sequence.querySelectorAll(
+      '[data-hv-shot][data-shot-active="true"][data-shot-requirement="required"]',
+    )).filter((shot) => {
+      const style = getComputedStyle(shot);
+      const rect = shot.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden'
+        && Number(style.opacity) > 0 && rect.width > 0 && rect.height > 0;
+    });
+    if (!requiredShots.length) return null;
+
+    const rects = requiredShots.map(shot => shot.getBoundingClientRect());
+    const left = Math.max(0, Math.min(...rects.map(rect => rect.left)));
+    const top = Math.max(0, Math.min(...rects.map(rect => rect.top)));
+    const right = Math.min(viewport.width, Math.max(...rects.map(rect => rect.right)));
+    const bottom = Math.min(viewport.height - safeBottomPx, Math.max(...rects.map(rect => rect.bottom)));
+    const clock = window.__hvPlaybackClock;
+    const trustedClock = clock?.__hvOwner === 'musedock-playback-clock-v1'
+      && typeof clock.pause === 'function' && typeof clock.play === 'function' && typeof clock.paused === 'function';
+    const clockWasPaused = trustedClock ? clock.paused() : true;
+    if (trustedClock) clock.pause();
+    window.__layoutQaRequiredAssetRestore = {
+      sequence,
+      originalStyle: sequence.getAttribute('style'),
+      trustedClock,
+      clockWasPaused,
+    };
+    return {
+      required_shot_ids: requiredShots.map(shot => shot.dataset.shotId || ''),
+      subject_region: {
+        left: Math.floor(left),
+        top: Math.floor(top),
+        width: Math.max(0, Math.ceil(right) - Math.floor(left)),
+        height: Math.max(0, Math.ceil(bottom) - Math.floor(top)),
+      },
+    };
+  }, { viewport: resolution, safeBottomPx: CAMERA_SAFE_BOTTOM_PX });
+  if (!prepared) return null;
+
+  let normalScreenshot;
+  let hiddenScreenshot;
+  let restored = false;
+  try {
+    normalScreenshot = await page.screenshot({ type: 'png' });
+    await page.evaluate(() => {
+      const state = window.__layoutQaRequiredAssetRestore;
+      if (!state?.sequence) throw new Error('required asset visibility state missing');
+      const probeStyle = document.createElement('style');
+      probeStyle.dataset.layoutQaRequiredAssetProbe = 'true';
+      probeStyle.textContent = '[data-hv-image-sequence]{opacity:0!important;transition:none!important;animation:none!important}';
+      document.head.appendChild(probeStyle);
+      state.probeStyle = probeStyle;
+    });
+    hiddenScreenshot = await page.screenshot({ type: 'png' });
+  } finally {
+    const restoration = await page.evaluate(() => {
+      const state = window.__layoutQaRequiredAssetRestore;
+      if (!state?.sequence) return { restored: false, error: 'state missing' };
+      state.probeStyle?.remove();
+      const currentStyle = state.sequence.getAttribute('style');
+      const restoredStyle = currentStyle === state.originalStyle;
+      if (state.trustedClock && !state.clockWasPaused) window.__hvPlaybackClock.play();
+      delete window.__layoutQaRequiredAssetRestore;
+      return { restored: restoredStyle, originalStyle: state.originalStyle, currentStyle };
+    }).catch(error => ({ restored: false, error: error?.message || String(error) }));
+    restored = restoration.restored;
+    await waitForLayout(page);
+    if (!restored) throw new Error(`required asset visibility style restore failed: ${JSON.stringify(restoration)}`);
+  }
+
+  const comparison = await page.evaluate(async ({ normalBase64, hiddenBase64, region, pixelThreshold }) => {
+    async function pixels(base64) {
+      const image = new Image();
+      image.src = `data:image/png;base64,${base64}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      context.drawImage(image, 0, 0);
+      return context.getImageData(region.left, region.top, region.width, region.height).data;
+    }
+    if (region.width <= 0 || region.height <= 0) return { compared_pixel_count: 0, changed_pixel_count: 0, changed_pixel_ratio: 0 };
+    const [normal, hidden] = await Promise.all([pixels(normalBase64), pixels(hiddenBase64)]);
+    let changed = 0;
+    for (let index = 0; index < normal.length; index += 4) {
+      const average = (Math.abs(normal[index] - hidden[index])
+        + Math.abs(normal[index + 1] - hidden[index + 1])
+        + Math.abs(normal[index + 2] - hidden[index + 2])) / 3;
+      if (average >= pixelThreshold) changed += 1;
+    }
+    const compared = normal.length / 4;
+    return {
+      compared_pixel_count: compared,
+      changed_pixel_count: changed,
+      changed_pixel_ratio: compared ? changed / compared : 0,
+    };
+  }, {
+    normalBase64: normalScreenshot.toString('base64'),
+    hiddenBase64: hiddenScreenshot.toString('base64'),
+    region: prepared.subject_region,
+    pixelThreshold: REQUIRED_ASSET_PIXEL_DIFF_THRESHOLD,
+  });
+
+  return {
+    ...prepared,
+    ...comparison,
+    minimum_changed_pixel_ratio: REQUIRED_ASSET_MIN_CHANGED_PIXEL_RATIO,
+    pixel_diff_threshold: REQUIRED_ASSET_PIXEL_DIFF_THRESHOLD,
+    style_restored: restored,
+    passed: comparison.changed_pixel_ratio >= REQUIRED_ASSET_MIN_CHANGED_PIXEL_RATIO,
+  };
+}
+
 async function inspectFrameHtmlLayout(options = {}) {
   const {
     frame = {},
@@ -792,6 +911,7 @@ async function inspectFrameHtmlLayout(options = {}) {
     samples: [],
     candidate_count: 0,
     camera_samples: [],
+    image_sequence_visibility_samples: [],
   };
 
   const playwright = await loadPlaywright(options);
@@ -1018,6 +1138,26 @@ async function inspectFrameHtmlLayout(options = {}) {
         const cameraSample = { sample_time_sec: sampleTimeSec, ...camera };
         metrics.camera_samples.push(cameraSample);
         issues.push(...cameraIssuesForSample(camera, { frameId, sampleTimeSec }));
+      }
+      const requiredAssetVisibility = await inspectRequiredAssetVisibility(page, {
+        width: resolution.width || DEFAULT_RESOLUTION.width,
+        height: resolution.height || DEFAULT_RESOLUTION.height,
+      });
+      if (requiredAssetVisibility) {
+        const visibilitySample = { sample_time_sec: sampleTimeSec, ...requiredAssetVisibility };
+        metrics.image_sequence_visibility_samples.push(visibilitySample);
+        if (!requiredAssetVisibility.passed) {
+          issues.push(makeIssue({
+            code: 'required_asset_occluded',
+            frameId,
+            sampleTimeSec,
+            message: '必需图片没有对最终画面产生足够的可见像素贡献。',
+            details: {
+              selector: requiredAssetVisibility.required_shot_ids.join(','),
+              ...visibilitySample,
+            },
+          }));
+        }
       }
     }
     issues.push(...cameraJitterIssues(metrics.camera_samples, frameId));

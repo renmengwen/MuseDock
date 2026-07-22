@@ -219,6 +219,35 @@ function previewHtml(
     });
   }
 
+  const requiredFigure = requirement => `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay" style="--fixture:yes;transform:translateZ(0)"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="visibility-${requirement}" data-shot-requirement="${requirement}"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section>`;
+  const visibleRequired = await inspectInline('required-visible.html', requiredFigure('required'));
+  const visibleMetric = visibleRequired.metrics.image_sequence_visibility_samples[0];
+  assert.equal(visibleRequired.success, true, JSON.stringify(visibleRequired.issues));
+  assert.ok(visibleMetric.changed_pixel_ratio >= 0.05, `required 素材必须贡献大面积真实像素：${JSON.stringify(visibleMetric)}`);
+  assert.equal(visibleMetric.style_restored, true, '截图探针必须精确恢复 Image Sequence inline style');
+
+  const occludedRequired = await inspectInline(
+    'required-occluded.html',
+    `${requiredFigure('required')}<div aria-hidden="true" style="position:absolute;inset:0;z-index:9;background:#f4f1e8"></div>`,
+  );
+  assert.equal(occludedRequired.success, false, 'required 素材被全画布不透明壳遮住时必须阻断');
+  assert.ok(occludedRequired.issues.some(issue => issue.code === 'required_asset_occluded'));
+  assert.ok(occludedRequired.metrics.image_sequence_visibility_samples[0].changed_pixel_ratio < 0.05);
+
+  const localOverlay = await inspectInline(
+    'required-local-overlay.html',
+    `${requiredFigure('required')}<div aria-hidden="true" style="position:absolute;right:0;top:0;width:20%;height:100%;z-index:9;background:linear-gradient(#fff,#ddd)"></div>`,
+  );
+  assert.equal(localOverlay.success, true, JSON.stringify(localOverlay.issues));
+  assert.equal(localOverlay.issues.some(issue => issue.code === 'required_asset_occluded'), false, '局部 overlay 不得误判为素材总遮挡');
+
+  const optionalOccluded = await inspectInline(
+    'optional-occluded.html',
+    `${requiredFigure('optional')}<div aria-hidden="true" style="position:absolute;inset:0;z-index:9;background:#f4f1e8"></div>`,
+  );
+  assert.equal(optionalOccluded.issues.some(issue => issue.code === 'required_asset_occluded'), false, 'optional 素材不适用 required 可见性阻断');
+  assert.equal(optionalOccluded.metrics.image_sequence_visibility_samples.length, 0);
+
   const blank = await inspectInline('blank.html', '<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"></section>');
   assert.ok(blank.issues.some(issue => issue.code === 'camera_scene_blank'));
 

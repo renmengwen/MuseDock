@@ -645,6 +645,16 @@ async function renderHtmlVideoProject({
       ignoreFrameIds: ignoreLayoutQaFrameIds,
     });
     diagnostics.push(...layoutQa.diagnostics);
+    nextProject.layout_qa_reports = Array.isArray(nextProject.layout_qa_reports) ? nextProject.layout_qa_reports : [];
+    nextProject.layout_qa_reports.push({
+      id: `layout_qa_${String(nextProject.layout_qa_reports.length + 1).padStart(4, '0')}`,
+      created_at: new Date().toISOString(),
+      frame_id: null,
+      success: layoutQa.success,
+      issues: layoutQa.reports.flatMap(item => item.issues || []),
+      reports: layoutQa.reports,
+    });
+    await saveProject(resolvedProjectDir, nextProject);
     if (!layoutQa.success) {
       return {
         success: false,
