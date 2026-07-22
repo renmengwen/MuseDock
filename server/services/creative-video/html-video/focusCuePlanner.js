@@ -126,9 +126,31 @@ function mainCanvasOccurrence(captionText, regions) {
   const canvasRegions = regions.filter(region => (
     [region.label, ...(Array.isArray(region.aliases) ? region.aliases : [])]
       .map(text)
-      .some(term => /^(?:主(?:视频|预览|编辑)画布|视频画面|编辑预览区|编辑画面|主预览区)$/u.test(term))
+      .some(term => /^(?:主(?:视频|预览|编辑)画布|视频预览画布|视频画面|编辑预览区|编辑画面|主预览区)$/u.test(term))
   ));
   return canvasRegions.length === 1 ? { region: canvasRegions[0], keyword: occurrence[0] } : null;
+}
+
+function mainContentInputOccurrence(captionText, regions) {
+  const occurrence = String(captionText || '').match(/(?:文本输入框|内容输入区(?:域)?)/u);
+  if (!occurrence) return null;
+  const inputRegions = regions.filter(region => {
+    const terms = [region.label, ...(Array.isArray(region.aliases) ? region.aliases : [])].map(text);
+    return !terms.some(term => /(?:输入框正文|搜索|密码|按钮)/u.test(term))
+      && terms.some(term => /^(?:主输入框|文本输入框|提示词输入框|文本编辑区|内容输入区(?:域)?)$/u.test(term));
+  });
+  return inputRegions.length === 1 ? { region: inputRegions[0], keyword: occurrence[0] } : null;
+}
+
+function fullPersonOccurrence(captionText, regions) {
+  const occurrence = String(captionText || '').match(/(?:人物保持完整|完整人物|人物全身|人物整体)/u);
+  if (!occurrence) return null;
+  const personRegions = regions.filter(region => {
+    const terms = [region.label, ...(Array.isArray(region.aliases) ? region.aliases : [])].map(text);
+    return !terms.some(term => /(?:人物头部|头像|图标)/u.test(term))
+      && terms.some(term => /^(?:背对镜头的人物|完整人物|全身人物|人物背影)$/u.test(term));
+  });
+  return personRegions.length === 1 ? { region: personRegions[0], keyword: occurrence[0] } : null;
 }
 
 function taskInfoCardOccurrence(captionText, regions) {
@@ -160,6 +182,8 @@ function resolveCaptionFocus(caption, regions) {
   const fallbackHits = [
     mainCanvasOccurrence(captionText, regions),
     taskInfoCardOccurrence(captionText, regions),
+    mainContentInputOccurrence(captionText, regions),
+    fullPersonOccurrence(captionText, regions),
   ].filter(Boolean);
   return fallbackHits.length === 1 ? fallbackHits[0] : null;
 }

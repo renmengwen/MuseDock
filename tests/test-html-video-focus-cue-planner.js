@@ -558,7 +558,7 @@ function firstShot(visualPlan) {
 {
   const mainCanvas = fixture({
     captions: [{ id: 'cap_01', start: 0, end: 2, text: '主视频画布承载编辑预览' }],
-    regions: [canonicalRegion({ id: 'r_canvas', label: '主预览画布', aliases: ['视频画面', '编辑预览区'], trust: 'C' })],
+    regions: [canonicalRegion({ id: 'r_canvas', label: '视频预览画布', aliases: ['主画面', '预览区', '当前镜头'], trust: 'C' })],
     duration: 2,
   });
   planFocusCues(mainCanvas);
@@ -684,6 +684,109 @@ function firstShot(visualPlan) {
     });
     planFocusCues(input);
     assert.equal('camera' in firstShot(input.visualPlan), false, `${label} 不是受限单一位置前缀，不得被任务信息卡 fallback 误绑定`);
+  }
+}
+
+// 字面匹配失败后，只允许唯一主内容输入容器承接明确的文本输入区域描述。
+{
+  const formalInput = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '文本输入框承载主要内容' }],
+    regions: [canonicalRegion({
+      id: 'r_main_input',
+      label: '主输入框',
+      aliases: ['文本编辑区', '提示词输入框', '内容输入区域'],
+      trust: 'C',
+    })],
+    duration: 2,
+  });
+  planFocusCues(formalInput);
+  const cue = firstShot(formalInput.visualPlan).camera.focus_cues[0];
+  assert.equal(cue.region_id, 'r_main_input');
+  assert.equal(cue.keyword, '文本输入框');
+
+  const ambiguous = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '内容输入区承载主要内容' }],
+    regions: [
+      canonicalRegion({ id: 'r_input_a', label: '主输入框', trust: 'C' }),
+      canonicalRegion({ id: 'r_input_b', label: '文本编辑区', trust: 'C' }),
+    ],
+    duration: 2,
+  });
+  planFocusCues(ambiguous);
+  assert.equal('camera' in firstShot(ambiguous.visualPlan), false, '多个主内容输入候选必须 no-op');
+
+  const competingFallbacks = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '主视频画布旁是文本输入框' }],
+    regions: [
+      canonicalRegion({ id: 'r_canvas', label: '视频预览画布', trust: 'C' }),
+      canonicalRegion({ id: 'r_input', label: '主输入框', trust: 'C' }),
+    ],
+    duration: 2,
+  });
+  planFocusCues(competingFallbacks);
+  assert.equal('camera' in firstShot(competingFallbacks.visualPlan), false, '多个 fallback 同时成立时必须 no-op');
+
+  for (const [caption, label] of [
+    ['输入区展示正文', '主输入框'],
+    ['文本输入框承载主要内容', '搜索输入框'],
+    ['文本输入框承载主要内容', '密码输入框'],
+    ['文本输入框承载主要内容', '输入框正文'],
+    ['文本输入框承载主要内容', '提交按钮'],
+  ]) {
+    const input = fixture({
+      captions: [{ id: 'cap_01', start: 0, end: 2, text: caption }],
+      regions: [canonicalRegion({ id: 'r_input', label, aliases: ['主输入框'], trust: 'C' })],
+      duration: 2,
+    });
+    planFocusCues(input);
+    assert.equal('camera' in firstShot(input.visualPlan), false, `${caption}/${label} 不得触发主输入容器 fallback`);
+  }
+}
+
+// 字面匹配失败后，只允许唯一完整人物区域承接明确的全身人物描述。
+{
+  const formalPerson = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '站在界面前的人物保持完整' }],
+    regions: [
+      canonicalRegion({
+        id: 'r_full_person',
+        label: '背对镜头的人物',
+        aliases: ['男子', '人物背影', '观察者'],
+        trust: 'C',
+      }),
+      canonicalRegion({ id: 'r_head', label: '人物头部', trust: 'C' }),
+    ],
+    duration: 2,
+  });
+  planFocusCues(formalPerson);
+  const cue = firstShot(formalPerson.visualPlan).camera.focus_cues[0];
+  assert.equal(cue.region_id, 'r_full_person');
+  assert.equal(cue.keyword, '人物保持完整');
+
+  const ambiguous = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '人物整体保持在画面中' }],
+    regions: [
+      canonicalRegion({ id: 'r_person_a', label: '完整人物', trust: 'C' }),
+      canonicalRegion({ id: 'r_person_b', label: '全身人物', trust: 'C' }),
+    ],
+    duration: 2,
+  });
+  planFocusCues(ambiguous);
+  assert.equal('camera' in firstShot(ambiguous.visualPlan), false, '多个完整人物候选必须 no-op');
+
+  for (const [caption, label] of [
+    ['人物站在界面前', '背对镜头的人物'],
+    ['人物保持完整', '人物头部'],
+    ['人物保持完整', '人物头像'],
+    ['人物保持完整', '人物图标'],
+  ]) {
+    const input = fixture({
+      captions: [{ id: 'cap_01', start: 0, end: 2, text: caption }],
+      regions: [canonicalRegion({ id: 'r_person', label, aliases: ['完整人物'], trust: 'C' })],
+      duration: 2,
+    });
+    planFocusCues(input);
+    assert.equal('camera' in firstShot(input.visualPlan), false, `${caption}/${label} 不得触发完整人物 fallback`);
   }
 }
 
