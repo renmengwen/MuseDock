@@ -297,6 +297,30 @@ function previewHtml(
     'pause() 触发 A→B 后只能保存并探测冻结后的 active required Shot B',
   );
 
+  const freezeToEmpty = await inspectInline(
+    'required-freeze-empty.html',
+    `<section data-hv-image-sequence="true"><figure id="empty-shot-a" data-hv-shot="true" data-shot-active="true" data-shot-id="empty-a" data-shot-requirement="required"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><i id="empty-animation"></i><span data-text-key="restore-sentinel" id="restore-sentinel" style="display:none">恢复完成</span><script>(()=>{let restored=0;const mark=bit=>{restored|=bit;if(restored===7)document.getElementById('restore-sentinel').style.display='block'};const animation=document.getElementById('empty-animation').animate([{opacity:1},{opacity:.5}],{duration:10000,iterations:Infinity});const play=animation.play.bind(animation);animation.play=()=>{mark(4);return play()};window.__hvPlaybackClock={__hvOwner:'musedock-playback-clock-v1',_paused:false,pause(){this._paused=true;document.getElementById('empty-shot-a').removeAttribute('data-shot-active');requestAnimationFrame(()=>mark(2))},play(){this._paused=false;mark(1)},paused(){return this._paused}}})()</script>`,
+    [0.1, 0.2],
+  );
+  assert.equal(freezeToEmpty.success, false, '冻结后没有 active 图片时 Camera QA 仍应报告 scene blank');
+  assert.ok(freezeToEmpty.issues.some(issue => issue.code === 'camera_scene_blank'));
+  assert.equal(freezeToEmpty.issues.some(issue => issue.code === 'required_asset_visibility_probe_failed'), false,
+    JSON.stringify(freezeToEmpty.issues));
+  assert.equal(freezeToEmpty.metrics.image_sequence_visibility_samples.length, 0,
+    '冻结后 active required 为空时不得生成 visibility sample');
+  assert.equal(freezeToEmpty.metrics.samples[0].candidate_count, 0);
+  assert.ok(freezeToEmpty.metrics.samples[1].candidate_count >= 1,
+    '空 targets 也必须经统一 finally 恢复 clock、RAF 与 animation 后才进入下一采样');
+
+  const emptyRestoreFailure = await inspectInline(
+    'required-freeze-empty-restore-failure.html',
+    `<section data-hv-image-sequence="true"><figure id="failed-empty-shot" data-hv-shot="true" data-shot-active="true" data-shot-id="failed-empty" data-shot-requirement="required"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><i id="failed-empty-animation"></i><script>(()=>{const animation=document.getElementById('failed-empty-animation').animate([{opacity:1},{opacity:.5}],{duration:10000,iterations:Infinity});animation.play=()=>{throw new Error('fixture restore failure')};window.__hvPlaybackClock={__hvOwner:'musedock-playback-clock-v1',_paused:false,pause(){this._paused=true;document.getElementById('failed-empty-shot').removeAttribute('data-shot-active')},play(){this._paused=false},paused(){return this._paused}}})()</script>`,
+  );
+  assert.equal(emptyRestoreFailure.success, false, '空 targets 恢复失败必须 fail-closed');
+  assert.equal(emptyRestoreFailure.metrics.image_sequence_visibility_samples.length, 0);
+  assert.ok(emptyRestoreFailure.issues.some(issue => issue.code === 'required_asset_visibility_probe_failed'),
+    '空 targets 恢复失败必须进入既有结构化 failure');
+
   await fs.writeFile(path.join(tempDir, 'outside.png'), Buffer.from(opaquePngBase64, 'base64'));
   const escapedFileRequired = await inspectProjectFrame(
     'required-file-escape.html',

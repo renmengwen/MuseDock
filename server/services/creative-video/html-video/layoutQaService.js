@@ -861,22 +861,6 @@ async function inspectRequiredAssetVisibility(page, resolution, {
       return style.display !== 'none' && style.visibility !== 'hidden'
         && Number(style.opacity) > 0 && rect.width > 0 && rect.height > 0;
     });
-    if (!requiredShots.length) {
-      for (const item of animations) {
-        try {
-          item.animation.playbackRate = item.playbackRate;
-          if (item.currentTime !== null) item.animation.currentTime = item.currentTime;
-          if (item.playState === 'running' || item.playState === 'pending') item.animation.play();
-          else if (item.playState === 'paused') item.animation.pause();
-          else if (item.playState === 'finished') item.animation.finish();
-          else if (item.playState === 'idle') item.animation.cancel();
-        } catch (_) {}
-      }
-      if (trustedClock && !clockWasPaused) clock.play();
-      if (!rafWasPaused && typeof rafController?.resume === 'function') rafController.resume();
-      return null;
-    }
-
     const shotStates = requiredShots.map(shot => ({
       shot,
       layers: Array.from(shot.querySelectorAll('[data-shot-layer]')).map((layer) => {
