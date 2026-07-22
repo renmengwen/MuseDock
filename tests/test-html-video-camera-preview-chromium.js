@@ -20,6 +20,8 @@ const lowAlphaCoverageSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"
 const lowAlphaCoverageImageUrl = `data:image/svg+xml;base64,${lowAlphaCoverageSvg}`;
 const translucentSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#123" fill-opacity=".5"/></svg>').toString('base64');
 const translucentImageUrl = `data:image/svg+xml;base64,${translucentSvg}`;
+const opaquePngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+const opaqueJpegBase64 = '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EH//2Q==';
 
 function previewHtml(
   twoCues = false,
@@ -229,12 +231,56 @@ function previewHtml(
     });
   }
 
+  async function inspectProjectFrame(name, body) {
+    const projectDir = path.join(tempDir, 'managed-project');
+    const framesDir = path.join(projectDir, 'frames');
+    const assetsDir = path.join(projectDir, 'assets');
+    await fs.mkdir(framesDir, { recursive: true });
+    await fs.mkdir(assetsDir, { recursive: true });
+    await fs.writeFile(path.join(assetsDir, 'opaque.png'), Buffer.from(opaquePngBase64, 'base64'));
+    await fs.writeFile(path.join(assetsDir, 'opaque.jpg'), Buffer.from(opaqueJpegBase64, 'base64'));
+    const framePath = path.join(framesDir, name);
+    await fs.writeFile(framePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}</style></head><body>${body}</body></html>`, 'utf8');
+    return inspectFrameHtmlLayout({
+      htmlPath: framePath,
+      frame: { id: name, duration_sec: 2 },
+      resolution,
+      sampleTimesSec: [0.1],
+    });
+  }
+
   const requiredFigure = (requirement, source = imageUrl, transitionProperty = '') => {
     const style = `filter:sepia(.2)${transitionProperty ? `;transition:${transitionProperty} 10s linear` : ''}`;
     return `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay" style="--fixture:yes;transform:translateZ(0)"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="visibility-${requirement}" data-shot-requirement="${requirement}"><img data-shot-layer="background" style="${style}" src="${source}"><img data-shot-layer="foreground" data-layout-qa-required-layer-probe="fixture-original" style="${style}" src="${source}" srcset="${source}"></figure></section>`;
   };
   const pauseOpacityTransitionsAtMidpoint = (...ids) => `<script>(()=>{for(const id of ${JSON.stringify(ids)}){const shot=document.getElementById(id);void shot.offsetWidth;shot.style.opacity='1';const transition=shot.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='opacity');if(!transition)throw new Error('fixture opacity transition missing: '+id);transition.pause();transition.playbackRate=.75;transition.currentTime=175}})()</script>`;
   const pauseFilterTransitionsAtMidpoint = () => `<script>(()=>{for(const image of document.querySelectorAll('[data-shot-layer]')){void image.offsetWidth;image.style.filter='sepia(.8)';const transition=image.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='filter');if(!transition)throw new Error('fixture filter transition missing');transition.pause();transition.playbackRate=.6;transition.currentTime=5000}})()</script>`;
+
+  const fileAssetRequired = await inspectProjectFrame(
+    'required-file-assets.html',
+    '<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="file-assets" data-shot-requirement="required"><img data-shot-layer="background" src="../assets/opaque.png"><img data-shot-layer="foreground" src="../assets/opaque.jpg" srcset="../assets/opaque.jpg 1x"></figure></section>',
+  );
+  const fileAssetMetric = fileAssetRequired.metrics.image_sequence_visibility_samples[0];
+  assert.equal(fileAssetRequired.success, true, JSON.stringify(fileAssetRequired.issues));
+  assert.ok(fileAssetMetric.changed_pixel_ratio >= 0.05,
+    `真实 project/frames → project/assets PNG/JPG 必须通过受管字节探针：${JSON.stringify(fileAssetMetric)}`);
+  assert.ok(fileAssetMetric.layer_state_restored && fileAssetMetric.style_restored,
+    '真实 file 图片探针前后 src/srcset/currentSrc/style 必须保持不变');
+
+  await fs.writeFile(path.join(tempDir, 'outside.png'), Buffer.from(opaquePngBase64, 'base64'));
+  const escapedFileRequired = await inspectProjectFrame(
+    'required-file-escape.html',
+    '<section data-hv-image-sequence="true"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="file-escape" data-shot-requirement="required"><img data-shot-layer="background" src="../../outside.png"><img data-shot-layer="foreground" src="../../outside.png"></figure></section>',
+  );
+  assert.equal(escapedFileRequired.success, false, 'assets 根之外的 file 图片必须结构化阻断');
+  assert.ok(escapedFileRequired.issues.some(issue => issue.code === 'required_asset_visibility_probe_failed'));
+
+  const unreadableFileRequired = await inspectProjectFrame(
+    'required-file-missing.html',
+    '<section data-hv-image-sequence="true"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="file-missing" data-shot-requirement="required"><img data-shot-layer="background" src="../assets/missing.png"><img data-shot-layer="foreground" src="../assets/missing.png"></figure></section>',
+  );
+  assert.equal(unreadableFileRequired.success, false, '不可读的受管 file 图片必须结构化阻断');
+  assert.ok(unreadableFileRequired.issues.some(issue => issue.code === 'required_asset_visibility_probe_failed'));
   const visibleRequired = await inspectInline('required-visible.html', requiredFigure('required'));
   const visibleMetric = visibleRequired.metrics.image_sequence_visibility_samples[0];
   assert.equal(visibleRequired.success, true, JSON.stringify(visibleRequired.issues));

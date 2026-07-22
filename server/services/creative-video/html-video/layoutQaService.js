@@ -1,9 +1,21 @@
-const { pathToFileURL } = require('url');
+const fs = require('fs/promises');
+const path = require('path');
+const { fileURLToPath, pathToFileURL } = require('url');
 
 const DEFAULT_RESOLUTION = { width: 1920, height: 1080 };
 const CAMERA_SAFE_BOTTOM_PX = 140;
 const REQUIRED_ASSET_PIXEL_DIFF_THRESHOLD = 8;
 const REQUIRED_ASSET_MIN_CHANGED_PIXEL_RATIO = 0.05;
+const REQUIRED_ASSET_PROBE_MAX_PIXELS = 4_000_000;
+const IMAGE_MIME_BY_EXTENSION = Object.freeze({
+  '.avif': 'image/avif',
+  '.gif': 'image/gif',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
+});
 const CANDIDATE_SELECTOR = [
   '[data-text-key]',
   '.headline',
@@ -772,7 +784,46 @@ async function waitForLayout(page) {
   });
 }
 
-async function inspectRequiredAssetVisibility(page, resolution) {
+async function projectAssetsRootForHtml(htmlPath, explicitAssetsRoot) {
+  if (explicitAssetsRoot) return fs.realpath(explicitAssetsRoot);
+  let current = path.dirname(await fs.realpath(htmlPath));
+  while (true) {
+    if (path.basename(current).toLowerCase() === 'frames') {
+      return fs.realpath(path.join(path.dirname(current), 'assets')).catch(() => null);
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
+async function controlledImageDataUrl(source, assetsRoot) {
+  if (typeof source !== 'string' || !source) {
+    throw new Error('required asset visibility source missing');
+  }
+  if (/^data:image\//i.test(source)) return source;
+
+  let parsed;
+  try { parsed = new URL(source); } catch (_) {
+    throw new Error('required asset visibility source URL invalid');
+  }
+  if (parsed.protocol !== 'file:') {
+    throw new Error(`required asset visibility source scheme denied: ${parsed.protocol || 'unknown'}`);
+  }
+  if (!assetsRoot) throw new Error('required asset visibility project assets root missing');
+
+  const realSourcePath = await fs.realpath(fileURLToPath(parsed));
+  const relative = path.relative(assetsRoot, realSourcePath);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error('required asset visibility source escaped project assets');
+  }
+  const mime = IMAGE_MIME_BY_EXTENSION[path.extname(realSourcePath).toLowerCase()];
+  if (!mime) throw new Error('required asset visibility source image type unsupported');
+  const bytes = await fs.readFile(realSourcePath);
+  return `data:${mime};base64,${bytes.toString('base64')}`;
+}
+
+async function inspectRequiredAssetVisibility(page, resolution, { assetsRoot = null } = {}) {
   const prepared = await page.evaluate(({ viewport, safeBottomPx }) => {
     const sequence = document.querySelector('[data-hv-image-sequence]');
     if (!sequence) return null;
@@ -785,49 +836,6 @@ async function inspectRequiredAssetVisibility(page, resolution) {
         && Number(style.opacity) > 0 && rect.width > 0 && rect.height > 0;
     });
     if (!requiredShots.length) return null;
-
-    function alphaProbeDataUrl(image, color, width, height) {
-      if (!(image instanceof HTMLImageElement)
-        || !Number.isFinite(width) || width <= 0
-        || !Number.isFinite(height) || height <= 0) {
-        throw new Error('required asset visibility image state invalid');
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('required asset visibility canvas unavailable');
-      context.drawImage(image, 0, 0, width, height);
-      context.globalCompositeOperation = 'source-in';
-      context.fillStyle = color;
-      context.fillRect(0, 0, width, height);
-      const dataUrl = canvas.toDataURL('image/png');
-      if (!dataUrl.startsWith('data:image/png')) {
-        throw new Error('required asset visibility alpha probe serialization failed');
-      }
-      return dataUrl;
-    }
-
-    const shotStates = requiredShots.map(shot => ({
-      shot,
-      layers: Array.from(shot.querySelectorAll('[data-shot-layer]')).map((layer) => {
-        const naturalWidth = Number(layer.naturalWidth);
-        const naturalHeight = Number(layer.naturalHeight);
-        return {
-          layer,
-          originalSrc: layer.getAttribute('src'),
-          originalSrcset: layer.getAttribute('srcset'),
-          originalCurrentSrc: layer.currentSrc,
-          originalProbe: layer.getAttribute('data-layout-qa-required-layer-probe'),
-          originalStyle: layer.getAttribute('style'),
-          naturalWidth,
-          naturalHeight,
-          blackProbeSrc: alphaProbeDataUrl(layer, 'black', naturalWidth, naturalHeight),
-          whiteProbeSrc: alphaProbeDataUrl(layer, 'white', naturalWidth, naturalHeight),
-        };
-      }),
-      layerStateRestored: true,
-    }));
 
     const clock = window.__hvPlaybackClock;
     const trustedClock = clock?.__hvOwner === 'musedock-playback-clock-v1'
@@ -846,6 +854,29 @@ async function inspectRequiredAssetVisibility(page, resolution) {
     for (const item of animations) {
       try { item.animation.pause(); } catch (_) {}
     }
+
+    const shotStates = requiredShots.map(shot => ({
+      shot,
+      layers: Array.from(shot.querySelectorAll('[data-shot-layer]')).map((layer) => {
+        const naturalWidth = Number(layer.naturalWidth);
+        const naturalHeight = Number(layer.naturalHeight);
+        const rect = layer.getBoundingClientRect();
+        return {
+          layer,
+          originalSrc: layer.getAttribute('src'),
+          originalSrcset: layer.getAttribute('srcset'),
+          originalCurrentSrc: layer.currentSrc,
+          originalProbe: layer.getAttribute('data-layout-qa-required-layer-probe'),
+          originalStyle: layer.getAttribute('style'),
+          naturalWidth,
+          naturalHeight,
+          displayWidth: Number(rect.width),
+          displayHeight: Number(rect.height),
+        };
+      }),
+      layerStateRestored: true,
+    }));
+
     window.__layoutQaRequiredAssetRestore = {
       trustedClock,
       clockWasPaused,
@@ -865,6 +896,13 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           index,
           shot_id: shot.dataset.shotId || '',
           asset_id: shot.dataset.assetId || '',
+          layers: shotStates[index].layers.map(layer => ({
+            current_src: layer.originalCurrentSrc,
+            natural_width: layer.naturalWidth,
+            natural_height: layer.naturalHeight,
+            display_width: layer.displayWidth,
+            display_height: layer.displayHeight,
+          })),
           subject_region: {
             left: Math.floor(left),
             top: Math.floor(top),
@@ -882,6 +920,76 @@ async function inspectRequiredAssetVisibility(page, resolution) {
   let restored = false;
   let restorationDetails = {};
   try {
+    const controlledSources = await Promise.all(prepared.targets.map(target => Promise.all(
+      target.layers.map(layer => controlledImageDataUrl(layer.current_src, assetsRoot)),
+    )));
+    await page.evaluate(async ({ sourcesByTarget, maxProbePixels }) => {
+      const state = window.__layoutQaRequiredAssetRestore;
+      if (!state) throw new Error('required asset visibility state missing');
+
+      async function alphaProbeDataUrl(source, color, layer) {
+        const { naturalWidth: width, naturalHeight: height, displayWidth, displayHeight } = layer;
+        if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+          throw new Error('required asset visibility image state invalid');
+        }
+        const image = new Image();
+        image.src = source;
+        await image.decode();
+        if (image.naturalWidth !== width || image.naturalHeight !== height) {
+          throw new Error('required asset visibility controlled source dimensions changed');
+        }
+        const displayPixels = Math.max(1, Math.ceil(displayWidth) * Math.ceil(displayHeight));
+        const pixelBudget = Math.max(1, Math.min(maxProbePixels, displayPixels * 4));
+        const scale = Math.min(1, Math.sqrt(pixelBudget / (width * height)));
+        const probeWidth = Math.max(1, Math.round(width * scale));
+        const probeHeight = Math.max(1, Math.round(height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = probeWidth;
+        canvas.height = probeHeight;
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('required asset visibility canvas unavailable');
+        context.drawImage(image, 0, 0, probeWidth, probeHeight);
+        context.globalCompositeOperation = 'source-in';
+        context.fillStyle = color;
+        context.fillRect(0, 0, probeWidth, probeHeight);
+        const dataUrl = canvas.toDataURL('image/png');
+        if (!dataUrl.startsWith('data:image/png')) {
+          throw new Error('required asset visibility alpha probe serialization failed');
+        }
+        const decodedProbe = new Image();
+        decodedProbe.src = dataUrl;
+        await decodedProbe.decode();
+        return dataUrl;
+      }
+
+      for (let shotIndex = 0; shotIndex < state.shots.length; shotIndex += 1) {
+        const item = state.shots[shotIndex];
+        const sources = sourcesByTarget[shotIndex];
+        if (!Array.isArray(sources) || sources.length !== item.layers.length) {
+          throw new Error('required asset visibility controlled source state mismatch');
+        }
+        for (let layerIndex = 0; layerIndex < item.layers.length; layerIndex += 1) {
+          const layer = item.layers[layerIndex];
+          layer.blackProbeToken = `probe-${shotIndex}-${layerIndex}-black`;
+          layer.whiteProbeToken = `probe-${shotIndex}-${layerIndex}-white`;
+          layer.blackProbeSrc = await alphaProbeDataUrl(
+            sources[layerIndex], 'black', layer,
+          );
+          layer.whiteProbeSrc = await alphaProbeDataUrl(
+            sources[layerIndex], 'white', layer,
+          );
+        }
+      }
+      const probeStyle = document.createElement('style');
+      probeStyle.dataset.layoutQaRequiredAssetProbe = 'true';
+      probeStyle.textContent = state.shots.flatMap(item => item.layers.flatMap(layer => [
+        `[data-layout-qa-required-layer-probe="${layer.blackProbeToken}"]{content:url("${layer.blackProbeSrc}")!important}`,
+        `[data-layout-qa-required-layer-probe="${layer.whiteProbeToken}"]{content:url("${layer.whiteProbeSrc}")!important}`,
+      ])).join('');
+      document.head.appendChild(probeStyle);
+      state.probeStyle = probeStyle;
+    }, { sourcesByTarget: controlledSources, maxProbePixels: REQUIRED_ASSET_PROBE_MAX_PIXELS });
+
     for (const target of prepared.targets) {
       try {
         await page.evaluate(async ({ index, probe }) => {
@@ -890,15 +998,14 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           if (!item?.shot) throw new Error('required asset visibility shot state missing');
           for (const layer of item.layers) {
             const image = layer.layer;
-            image.removeAttribute('srcset');
-            image.setAttribute('data-layout-qa-required-layer-probe', probe);
-            image.setAttribute('src', probe === 'black' ? layer.blackProbeSrc : layer.whiteProbeSrc);
+            image.setAttribute(
+              'data-layout-qa-required-layer-probe',
+              probe === 'black' ? layer.blackProbeToken : layer.whiteProbeToken,
+            );
           }
-          await Promise.all(item.layers.map(layer => layer.layer.decode()));
-          if (item.layers.some(layer => (
-            layer.layer.naturalWidth !== layer.naturalWidth
-            || layer.layer.naturalHeight !== layer.naturalHeight
-          ))) throw new Error('required asset visibility probe dimensions changed');
+          if (item.layers.some(layer => ['none', 'normal'].includes(getComputedStyle(layer.layer).content))) {
+            throw new Error('required asset visibility probe content not applied');
+          }
           void item.shot.offsetWidth;
         }, { index: target.index, probe: 'black' });
         blackProbeScreenshots.push(await page.screenshot({ type: 'png' }));
@@ -907,14 +1014,14 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           if (!item?.shot) throw new Error('required asset visibility shot state missing');
           for (const layer of item.layers) {
             const image = layer.layer;
-            image.setAttribute('data-layout-qa-required-layer-probe', probe);
-            image.setAttribute('src', probe === 'black' ? layer.blackProbeSrc : layer.whiteProbeSrc);
+            image.setAttribute(
+              'data-layout-qa-required-layer-probe',
+              probe === 'black' ? layer.blackProbeToken : layer.whiteProbeToken,
+            );
           }
-          await Promise.all(item.layers.map(layer => layer.layer.decode()));
-          if (item.layers.some(layer => (
-            layer.layer.naturalWidth !== layer.naturalWidth
-            || layer.layer.naturalHeight !== layer.naturalHeight
-          ))) throw new Error('required asset visibility probe dimensions changed');
+          if (item.layers.some(layer => ['none', 'normal'].includes(getComputedStyle(layer.layer).content))) {
+            throw new Error('required asset visibility probe content not applied');
+          }
           void item.shot.offsetWidth;
         }, { index: target.index, probe: 'white' });
         whiteProbeScreenshots.push(await page.screenshot({ type: 'png' }));
@@ -924,17 +1031,8 @@ async function inspectRequiredAssetVisibility(page, resolution) {
           if (!item?.shot) return;
           for (const layer of item.layers) {
             const image = layer.layer;
-            image.removeAttribute('srcset');
-            if (layer.originalSrc === null) image.removeAttribute('src');
-            else image.setAttribute('src', layer.originalSrc);
-            if (layer.originalSrcset !== null) image.setAttribute('srcset', layer.originalSrcset);
             if (layer.originalProbe === null) image.removeAttribute('data-layout-qa-required-layer-probe');
             else image.setAttribute('data-layout-qa-required-layer-probe', layer.originalProbe);
-          }
-          await Promise.all(item.layers.map(layer => layer.layer.decode()));
-          for (const layer of item.layers) {
-            if (layer.originalStyle === null) layer.layer.removeAttribute('style');
-            else layer.layer.setAttribute('style', layer.originalStyle);
             item.layerStateRestored = item.layerStateRestored
               && layer.layer.getAttribute('src') === layer.originalSrc
               && layer.layer.getAttribute('srcset') === layer.originalSrcset
@@ -952,30 +1050,23 @@ async function inspectRequiredAssetVisibility(page, resolution) {
     const restoration = await page.evaluate(async () => {
       const state = window.__layoutQaRequiredAssetRestore;
       if (!state) return { restored: false, error: 'state missing' };
-      let restoredStyles = true;
+      state.probeStyle?.remove();
+      let restoredStyles = !state.probeStyle?.isConnected;
       for (const item of state.shots || []) {
         for (const layer of item.layers) {
           const image = layer.layer;
-          image.removeAttribute('srcset');
-          if (layer.originalSrc === null) image.removeAttribute('src');
-          else image.setAttribute('src', layer.originalSrc);
-          if (layer.originalSrcset !== null) image.setAttribute('srcset', layer.originalSrcset);
           if (layer.originalProbe === null) image.removeAttribute('data-layout-qa-required-layer-probe');
           else image.setAttribute('data-layout-qa-required-layer-probe', layer.originalProbe);
         }
-        await Promise.all(item.layers.map(layer => layer.layer.decode()));
-        for (const layer of item.layers) {
-          if (layer.originalStyle === null) layer.layer.removeAttribute('style');
-          else layer.layer.setAttribute('style', layer.originalStyle);
-          item.layerStateRestored = item.layerStateRestored
-            && layer.layer.getAttribute('src') === layer.originalSrc
+        item.layerStateRestored = item.layers.every(layer => (
+          layer.layer.getAttribute('src') === layer.originalSrc
             && layer.layer.getAttribute('srcset') === layer.originalSrcset
             && layer.layer.currentSrc === layer.originalCurrentSrc
             && layer.layer.getAttribute('data-layout-qa-required-layer-probe') === layer.originalProbe
             && layer.layer.getAttribute('style') === layer.originalStyle
             && layer.layer.naturalWidth === layer.naturalWidth
-            && layer.layer.naturalHeight === layer.naturalHeight;
-        }
+            && layer.layer.naturalHeight === layer.naturalHeight
+        ));
         void item.shot.offsetWidth;
       }
       for (const item of state.shots || []) {
@@ -1216,6 +1307,7 @@ async function inspectFrameHtmlLayout(options = {}) {
 
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load' });
     await waitForLayout(page);
+    const assetsRoot = await projectAssetsRootForHtml(htmlPath, options.projectAssetsRoot).catch(() => null);
     const playbackStartup = await page.evaluate(() => {
       const clock = window.__hvPlaybackClock;
       const trusted = clock?.__hvOwner === 'musedock-playback-clock-v1'
@@ -1386,10 +1478,22 @@ async function inspectFrameHtmlLayout(options = {}) {
         metrics.camera_samples.push(cameraSample);
         issues.push(...cameraIssuesForSample(camera, { frameId, sampleTimeSec }));
       }
-      const requiredAssetVisibility = await inspectRequiredAssetVisibility(page, {
-        width: resolution.width || DEFAULT_RESOLUTION.width,
-        height: resolution.height || DEFAULT_RESOLUTION.height,
-      });
+      let requiredAssetVisibility;
+      try {
+        requiredAssetVisibility = await inspectRequiredAssetVisibility(page, {
+          width: resolution.width || DEFAULT_RESOLUTION.width,
+          height: resolution.height || DEFAULT_RESOLUTION.height,
+        }, { assetsRoot });
+      } catch (error) {
+        issues.push(makeIssue({
+          code: 'required_asset_visibility_probe_failed',
+          frameId,
+          sampleTimeSec,
+          message: '必需图片可见性探针执行失败。',
+          details: { error: error?.message || String(error) },
+        }));
+        continue;
+      }
       for (const visibility of requiredAssetVisibility || []) {
         const visibilitySample = { sample_time_sec: sampleTimeSec, ...visibility };
         metrics.image_sequence_visibility_samples.push(visibilitySample);
