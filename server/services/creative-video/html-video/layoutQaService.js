@@ -127,6 +127,37 @@ function isDecorativeText(candidate) {
 function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
   const issues = [];
   const tolerance = 12;
+  const blockingOverlapIndexes = new Set();
+
+  for (let i = 0; i < candidates.length; i += 1) {
+    for (let j = i + 1; j < candidates.length; j += 1) {
+      const a = candidates[i];
+      const b = candidates[j];
+      if (a.text === b.text) continue;
+      if (
+        (Array.isArray(a.ancestorIndexes) && a.ancestorIndexes.includes(b.index))
+        || (Array.isArray(b.ancestorIndexes) && b.ancestorIndexes.includes(a.index))
+      ) {
+        continue;
+      }
+
+      const intersection = intersects(a.box, b.box);
+      if (intersection.area <= 0) continue;
+
+      const smallerArea = Math.min(a.box.width * a.box.height, b.box.width * b.box.height);
+      if (smallerArea <= 0 || intersection.area / smallerArea <= 0.25) continue;
+
+      const crossfadingBeats = a.beatScope && b.beatScope && a.beatScope !== b.beatScope
+        && [a, b].some(candidate => (
+          candidate.scopeEffectiveOpacity > 0.001 && candidate.scopeEffectiveOpacity < 0.999
+          && candidate.opacityTransitionRunning
+        ));
+      if (!crossfadingBeats) {
+        blockingOverlapIndexes.add(a.index);
+        blockingOverlapIndexes.add(b.index);
+      }
+    }
+  }
 
   for (const candidate of candidates) {
     const box = candidate.box;
@@ -155,12 +186,24 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
     const container = candidate.container;
     if (!candidate.allowOverflow && container && container.box) {
       const cbox = container.box;
-      if (
-        box.left < cbox.left - tolerance
-        || box.top < cbox.top - tolerance
-        || box.right > cbox.right + tolerance
-        || box.bottom > cbox.bottom + tolerance
-      ) {
+      const horizontalOverflow = box.left < cbox.left - tolerance || box.right > cbox.right + tolerance;
+      const verticalOverflow = box.top < cbox.top - tolerance || box.bottom > cbox.bottom + tolerance;
+      const settledBox = candidate.transformTranslation && {
+        left: box.left - candidate.transformTranslation.x,
+        right: box.right - candidate.transformTranslation.x,
+        top: box.top - candidate.transformTranslation.y,
+        bottom: box.bottom - candidate.transformTranslation.y,
+      };
+      const transformCausesOverflow = settledBox
+        && settledBox.left >= cbox.left - tolerance && settledBox.right <= cbox.right + tolerance
+        && settledBox.top >= cbox.top - tolerance && settledBox.bottom <= cbox.bottom + tolerance;
+      const transientVisibleOverflow = candidate.transformAnimationRunning && transformCausesOverflow
+        && (!horizontalOverflow || container.overflowX === 'visible')
+        && (!verticalOverflow || container.overflowY === 'visible')
+        && box.left >= 0 && box.top >= 0
+        && box.right <= resolution.width && box.bottom <= resolution.height
+        && !blockingOverlapIndexes.has(candidate.index);
+      if ((horizontalOverflow || verticalOverflow) && !transientVisibleOverflow) {
         issues.push(makeIssue({
           code: 'text_out_of_container',
           severity: decorative ? 'warning' : 'error',
@@ -304,10 +347,13 @@ async function collectCandidates(page) {
       const container = element.parentElement ? element.parentElement.closest(semanticSelector) : null;
       if (!container) return null;
       const rect = container.getBoundingClientRect();
+      const style = window.getComputedStyle(container);
       return {
         selector: selectorFor(container),
         role: container.getAttribute('data-role') || null,
         box: serializeBox(rect),
+        overflowX: style.overflowX,
+        overflowY: style.overflowY,
       };
     }
 
@@ -324,6 +370,11 @@ async function collectCandidates(page) {
         const isExplicitText = element.matches(explicitTextSelector);
         const effectiveOpacity = effectiveOpacityFor(element);
         const beatScopeElement = element.closest('[data-mp-beat-scope]');
+        const runningAnimations = Array.from(element.getAnimations()).filter(animation => animation.playState === 'running');
+        const computedTransform = window.getComputedStyle(element).transform;
+        const transformMatrix = computedTransform && computedTransform !== 'none'
+          ? new DOMMatrixReadOnly(computedTransform)
+          : null;
         if (!text || (!direct && !isExplicitText)) return null;
         if (!isVisible(element, rect, effectiveOpacity)) return null;
         return {
@@ -343,6 +394,15 @@ async function collectCandidates(page) {
               && animation.playState === 'running'
               && animation.transitionProperty === 'opacity'
             ))),
+            transformAnimationRunning: runningAnimations.some(animation => (
+              typeof animation.effect?.getKeyframes === 'function'
+              && animation.effect.getKeyframes().some(keyframe => Object.prototype.hasOwnProperty.call(keyframe, 'transform'))
+            )),
+            transformTranslation: transformMatrix
+              && Math.abs(transformMatrix.a - 1) < 1e-6 && Math.abs(transformMatrix.b) < 1e-6
+              && Math.abs(transformMatrix.c) < 1e-6 && Math.abs(transformMatrix.d - 1) < 1e-6
+              ? { x: transformMatrix.e, y: transformMatrix.f }
+              : null,
             text,
             box: serializeBox(rect),
             container: containerFor(element),
