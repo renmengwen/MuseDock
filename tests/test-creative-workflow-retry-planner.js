@@ -68,6 +68,46 @@ function project(overrides = {}) {
   assert.equal(framePlan.mode, 'repair_and_resume');
   assert.equal(framePlan.repair_action, 'retry_frame_html');
   assert.equal(framePlan.retry_from, 'frame_html');
+  assert.match(framePlan.plan_fingerprint, /^[a-f0-9]{64}$/);
+
+  const policyPlan = frameIds => createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        code: 'runtime_asset_policy_revalidation_required',
+        sub_stage: 'render',
+        diagnostics: [{
+          code: 'runtime_asset_policy_revalidation_required',
+          details: { frame_ids: frameIds },
+        }],
+      },
+    }),
+    project: project(),
+  });
+  assert.equal(
+    policyPlan(['scene_02', 'scene_01']).plan_fingerprint,
+    policyPlan(['scene_01', 'scene_02']).plan_fingerprint,
+    'frame_ids 与 discard 换序不应改变恢复计划指纹',
+  );
+  assert.notEqual(
+    policyPlan(['scene_01', 'scene_02']).plan_fingerprint,
+    policyPlan(['scene_01', 'scene_03']).plan_fingerprint,
+    '同一 code 的执行目标变化必须改变恢复计划指纹',
+  );
+  const anotherFramePlan = createCreativeWorkflowRetryPlan({
+    workflow: workflow({
+      last_failure: {
+        code: 'provider_missing_text',
+        sub_stage: 'frame_html',
+        frame_id: 'scene_06',
+      },
+    }),
+    project: project(),
+  });
+  assert.notEqual(
+    framePlan.plan_fingerprint,
+    anotherFramePlan.plan_fingerprint,
+    '同一 code 的 discard 变化必须改变恢复计划指纹',
+  );
 
   const shotContractPlan = createCreativeWorkflowRetryPlan({
     workflow: workflow({

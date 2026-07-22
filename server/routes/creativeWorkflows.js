@@ -1059,6 +1059,7 @@ router.post('/:workflow_id/retry', async (req, res) => {
   const payload = req.body || {};
   const mode = safeString(payload.mode);
   const confirmPlanCode = safeString(payload.confirm_plan_code);
+  const confirmPlanFingerprint = safeString(payload.confirm_plan_fingerprint);
   const ignoreLayoutQaOnce = payload.ignore_layout_qa_once === true;
 
   if (mode !== 'repair_and_resume') {
@@ -1082,10 +1083,17 @@ router.post('/:workflow_id/retry', async (req, res) => {
     }
 
     const plan = refreshed.plan || {};
-    if (confirmPlanCode !== safeString(plan.code)) {
+    const planFingerprint = safeString(plan.plan_fingerprint);
+    if (
+      !confirmPlanFingerprint
+      || !planFingerprint
+      || confirmPlanCode !== safeString(plan.code)
+      || confirmPlanFingerprint !== planFingerprint
+    ) {
       return res.status(400).json({
         success: false,
         workflow_id: workflowId,
+        code: 'RETRY_PLAN_CODE_CHANGED',
         plan,
         message: '恢复计划已变化，请确认最新建议后再重试。',
       });
@@ -1112,6 +1120,7 @@ router.post('/:workflow_id/retry', async (req, res) => {
       payload: {
         mode: 'repair_and_resume',
         confirm_plan_code: confirmPlanCode,
+        confirm_plan_fingerprint: confirmPlanFingerprint,
         ...(ignoreLayoutQaOnce ? { ignore_layout_qa_once: true } : {}),
       },
       services: { creativeWorkflows: service },

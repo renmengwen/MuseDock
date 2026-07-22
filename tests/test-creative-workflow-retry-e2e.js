@@ -572,7 +572,7 @@ function plannerProject(overrides = {}) {
       rootDir,
       registry,
       retryAttemptId: 'retry_attempt_e2e_done',
-      payload: { mode: 'repair_and_resume', confirm_plan_code: plan.plan.code },
+      payload: { mode: 'repair_and_resume', confirm_plan_code: plan.plan.code, confirm_plan_fingerprint: plan.plan.plan_fingerprint },
       workflowOptions: {
         rootDir,
         services: {
@@ -819,6 +819,7 @@ function plannerProject(overrides = {}) {
     const retried = await workflows.retryCreativeWorkflow(workflowId, {
       mode: 'repair_and_resume',
       confirm_plan_code: refreshed.plan.code,
+      confirm_plan_fingerprint: refreshed.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_shot_contract',
@@ -928,6 +929,7 @@ function plannerProject(overrides = {}) {
     const retried = await workflows.retryCreativeWorkflow(workflowId, {
       mode: 'repair_and_resume',
       confirm_plan_code: refreshed.plan.code,
+      confirm_plan_fingerprint: refreshed.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_layout_qa_failed',
@@ -1057,6 +1059,7 @@ function plannerProject(overrides = {}) {
     const retried = await workflows.retryCreativeWorkflow(workflowId, {
       mode: 'repair_and_resume',
       confirm_plan_code: refreshed.plan.code,
+      confirm_plan_fingerprint: refreshed.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_layout_qa_full_regenerate',
@@ -1165,6 +1168,7 @@ function plannerProject(overrides = {}) {
     const retried = await workflows.retryCreativeWorkflow(workflowId, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_render_timeout',
@@ -1189,6 +1193,7 @@ function plannerProject(overrides = {}) {
     const retried = await workflows.retryCreativeWorkflow(workflowId, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_recompose',
@@ -1216,7 +1221,7 @@ function plannerProject(overrides = {}) {
     const plan = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
     const calls = {};
     const retried = await workflows.retryCreativeWorkflow(workflowId, {
-      mode: 'repair_and_resume', confirm_plan_code: plan.plan.code,
+      mode: 'repair_and_resume', confirm_plan_code: plan.plan.code, confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, { rootDir, retryAttemptId: 'retry_attempt_render_asset_gate', services: { ...fakeHtmlVideoServices(calls) } });
     assert.equal(retried.success, true, '静态引用扫描只做早诊断，最终裁决属于真实 renderer');
     assert.equal(calls.renderFrame, 1);
@@ -1232,7 +1237,7 @@ function plannerProject(overrides = {}) {
     const plan = await workflows.refreshCreativeWorkflowRetryPlan(workflowId, { rootDir });
     const calls = {};
     const retried = await workflows.retryCreativeWorkflow(workflowId, {
-      mode: 'repair_and_resume', confirm_plan_code: plan.plan.code,
+      mode: 'repair_and_resume', confirm_plan_code: plan.plan.code, confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, { rootDir, retryAttemptId: 'retry_attempt_compose_asset_gate', services: { ...fakeHtmlVideoServices(calls) } });
     assert.equal(retried.success, false, 'compose-only 发现 HTML 漂移必须回到 runtime render');
     assert.equal(calls.compose || 0, 0);

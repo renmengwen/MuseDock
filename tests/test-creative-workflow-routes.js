@@ -14,6 +14,7 @@ const { createEmptyProject } = require('../server/services/creative-video/html-v
 
 const SSE_HELPER_TIMEOUT_MS = 1000;
 const MINIMAL_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+const RETRY_PLAN_FINGERPRINT = 'a'.repeat(64);
 
 function normalizeTimeoutMs(value) {
   const number = Number(value);
@@ -937,7 +938,12 @@ async function runRetryRouteTests() {
   {
     const app = express();
     const workflowId = '202606250800000003';
-    const plan = { can_retry: true, code: 'provider_missing_text', mode: 'repair_and_resume' };
+    const plan = {
+      can_retry: true,
+      code: 'provider_missing_text',
+      mode: 'repair_and_resume',
+      plan_fingerprint: RETRY_PLAN_FINGERPRINT,
+    };
     const startCalls = [];
     app.use(express.json());
     app.locals.creativeTaskRegistry = createCreativeTaskRegistry({
@@ -965,6 +971,7 @@ async function runRetryRouteTests() {
       const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/retry`, {
         mode: 'repair_and_resume',
         confirm_plan_code: 'provider_missing_text',
+        confirm_plan_fingerprint: RETRY_PLAN_FINGERPRINT,
       });
       assert.strictEqual(response.statusCode, 202);
       assert.strictEqual(response.body.success, true);
@@ -976,7 +983,48 @@ async function runRetryRouteTests() {
       assert.deepStrictEqual(startCalls[0].options.payload, {
         mode: 'repair_and_resume',
         confirm_plan_code: 'provider_missing_text',
+        confirm_plan_fingerprint: RETRY_PLAN_FINGERPRINT,
       });
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  }
+
+  {
+    const app = express();
+    const workflowId = '202606250800000008';
+    const plan = {
+      can_retry: true,
+      code: 'provider_missing_text',
+      mode: 'repair_and_resume',
+      plan_fingerprint: RETRY_PLAN_FINGERPRINT,
+    };
+    let retryTaskCalls = 0;
+    app.use(express.json());
+    app.locals.creativeWorkflows = {
+      refreshCreativeWorkflowRetryPlan: async id => ({ success: true, workflow_id: id, plan }),
+    };
+    app.locals.creativeWorkflowTasks = {
+      startCreativeWorkflowRetryTask: async () => {
+        retryTaskCalls += 1;
+        return { success: true, workflow_id: workflowId, task_id: 'should-not-start' };
+      },
+    };
+    app.use('/api/creative-workflows', creativeWorkflowsRouter);
+
+    const server = await listen(app);
+    try {
+      for (const confirmPlanFingerprint of [undefined, 'b'.repeat(64)]) {
+        const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/retry`, {
+          mode: 'repair_and_resume',
+          confirm_plan_code: plan.code,
+          ...(confirmPlanFingerprint ? { confirm_plan_fingerprint: confirmPlanFingerprint } : {}),
+        });
+        assert.strictEqual(response.statusCode, 400);
+        assert.strictEqual(response.body.code, 'RETRY_PLAN_CODE_CHANGED');
+        assert.deepStrictEqual(response.body.plan, plan);
+      }
+      assert.strictEqual(retryTaskCalls, 0);
     } finally {
       await new Promise(resolve => server.close(resolve));
     }
@@ -1014,7 +1062,7 @@ async function runRetryRouteTests() {
       refreshCreativeWorkflowRetryPlan: async id => ({
         success: true,
         workflow_id: id,
-        plan: { can_retry: true, code: 'frame_layout_qa_unresolved', mode: 'repair_and_resume' },
+        plan: { can_retry: true, code: 'frame_layout_qa_unresolved', mode: 'repair_and_resume', plan_fingerprint: RETRY_PLAN_FINGERPRINT },
       }),
     };
     app.locals.creativeWorkflowTasks = {
@@ -1030,6 +1078,7 @@ async function runRetryRouteTests() {
       const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/retry`, {
         mode: 'repair_and_resume',
         confirm_plan_code: 'frame_layout_qa_unresolved',
+        confirm_plan_fingerprint: RETRY_PLAN_FINGERPRINT,
         ignore_layout_qa_once: true,
       });
       assert.strictEqual(response.statusCode, 202);
@@ -1048,7 +1097,7 @@ async function runRetryRouteTests() {
       refreshCreativeWorkflowRetryPlan: async id => ({
         success: true,
         workflow_id: id,
-        plan: { can_retry: true, code: 'provider_missing_text', mode: 'repair_and_resume' },
+        plan: { can_retry: true, code: 'provider_missing_text', mode: 'repair_and_resume', plan_fingerprint: RETRY_PLAN_FINGERPRINT },
       }),
     };
     app.locals.creativeWorkflowTasks = {
@@ -1064,6 +1113,7 @@ async function runRetryRouteTests() {
       const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/retry`, {
         mode: 'repair_and_resume',
         confirm_plan_code: 'provider_missing_text',
+        confirm_plan_fingerprint: RETRY_PLAN_FINGERPRINT,
         ignore_layout_qa_once: true,
       });
       assert.strictEqual(response.statusCode, 400);
@@ -1083,7 +1133,7 @@ async function runRetryRouteTests() {
       refreshCreativeWorkflowRetryPlan: async id => ({
         success: true,
         workflow_id: id,
-        plan: { can_retry: true, code: 'provider_missing_text', mode: 'repair_and_resume' },
+        plan: { can_retry: true, code: 'provider_missing_text', mode: 'repair_and_resume', plan_fingerprint: RETRY_PLAN_FINGERPRINT },
       }),
     };
     app.locals.creativeWorkflowTasks = {
@@ -1101,6 +1151,7 @@ async function runRetryRouteTests() {
       const response = await requestJson(server, 'POST', `/api/creative-workflows/${workflowId}/retry`, {
         mode: 'repair_and_resume',
         confirm_plan_code: 'provider_missing_text',
+        confirm_plan_fingerprint: RETRY_PLAN_FINGERPRINT,
       });
       assert.strictEqual(response.statusCode, 409);
       assert.strictEqual(response.body.success, false);

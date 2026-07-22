@@ -229,6 +229,7 @@ assert.match(
 );
 assert.match(taskDetailUnit, /onContinueEdit\?\.\(editableWorkflowId\)/, 'Creative task detail should continue editing with the editable workflow ID');
 assert.match(page, /getCreativeWorkflow/, 'OneClickCreativePage should poll creative workflows');
+assert.match(page, /confirm_plan_fingerprint:\s*retryPlan\.plan_fingerprint/, 'Retry requests should confirm the exact refreshed plan fingerprint');
 // 停止并删除已改为"确认弹窗（request）+ 执行（perform）"两段式
 assert.match(page, /requestStopAndDeleteTask/, 'OneClickCreativePage should expose a stop-and-delete action for the current task');
 assert.match(page, /performStopAndDeleteTask/, 'OneClickCreativePage should perform stop-and-delete after confirmation');

@@ -527,7 +527,7 @@ function fakeHtmlVideoServices(calls = {}) {
       rootDir,
       registry,
       retryAttemptId: 'retry_attempt_success',
-      payload: { mode: 'repair_and_resume', confirm_plan_code: plan.plan.code },
+      payload: { mode: 'repair_and_resume', confirm_plan_code: plan.plan.code, confirm_plan_fingerprint: plan.plan.plan_fingerprint },
       workflowOptions: {
         rootDir,
         services: {
@@ -566,11 +566,39 @@ function fakeHtmlVideoServices(calls = {}) {
 
   {
     const rootDir = await tempRoot();
+    await createFailedWorkflowFixture(rootDir);
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
+    let resumeCalls = 0;
+    const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
+      mode: 'repair_and_resume',
+      confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: 'f'.repeat(64),
+    }, {
+      rootDir,
+      services: {
+        resumeActions: {
+          retryFrameHtml: async () => {
+            resumeCalls += 1;
+            return { success: true };
+          },
+        },
+      },
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.code, 'RETRY_PLAN_CODE_CHANGED');
+    assert.equal(result.plan.plan_fingerprint, plan.plan.plan_fingerprint);
+    assert.equal(resumeCalls, 0, '执行前计划指纹变化时不得调用 resumeExecutor');
+  }
+
+  {
+    const rootDir = await tempRoot();
     const { projectDir } = await createFailedWorkflowFixture(rootDir);
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
     const calls = {};
     const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
-      confirm_plan_code: 'provider_missing_text',
+      confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       services: {
@@ -662,6 +690,7 @@ function fakeHtmlVideoServices(calls = {}) {
     const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_restart_project',
@@ -696,10 +725,12 @@ function fakeHtmlVideoServices(calls = {}) {
   {
     const rootDir = await tempRoot();
     const { projectDir } = await createLayoutQaFailureFixture(rootDir);
+    const plan = await workflows.refreshCreativeWorkflowRetryPlan(WORKFLOW_ID, { rootDir });
     const calls = {};
     const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
-      confirm_plan_code: 'frame_layout_qa_unresolved',
+      confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
       ignore_layout_qa_once: true,
     }, {
       rootDir,
@@ -763,6 +794,7 @@ function fakeHtmlVideoServices(calls = {}) {
     const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_visual_inspect',
@@ -792,6 +824,7 @@ function fakeHtmlVideoServices(calls = {}) {
     const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_visual_qa_warning',
@@ -851,7 +884,7 @@ function fakeHtmlVideoServices(calls = {}) {
       rootDir,
       registry,
       retryAttemptId: 'retry_attempt_business_failed',
-      payload: { mode: 'repair_and_resume', confirm_plan_code: plan.plan.code },
+      payload: { mode: 'repair_and_resume', confirm_plan_code: plan.plan.code, confirm_plan_fingerprint: plan.plan.plan_fingerprint },
       workflowOptions: {
         rootDir,
         services: {
@@ -892,6 +925,7 @@ function fakeHtmlVideoServices(calls = {}) {
     const failed = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       services: {
@@ -979,6 +1013,7 @@ function fakeHtmlVideoServices(calls = {}) {
     const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_visual_report_warnings',
@@ -1038,6 +1073,7 @@ function fakeHtmlVideoServices(calls = {}) {
     const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_required_graph',
@@ -1101,6 +1137,7 @@ function fakeHtmlVideoServices(calls = {}) {
     const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_blocking_inspect',
@@ -1143,6 +1180,7 @@ function fakeHtmlVideoServices(calls = {}) {
     const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_blocking_compose',
@@ -1176,6 +1214,7 @@ function fakeHtmlVideoServices(calls = {}) {
     const result = await workflows.retryCreativeWorkflow(WORKFLOW_ID, {
       mode: 'repair_and_resume',
       confirm_plan_code: plan.plan.code,
+      confirm_plan_fingerprint: plan.plan.plan_fingerprint,
     }, {
       rootDir,
       retryAttemptId: 'retry_attempt_nonblocking_inspect',

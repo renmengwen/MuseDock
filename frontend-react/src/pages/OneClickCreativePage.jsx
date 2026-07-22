@@ -813,6 +813,7 @@ export function OneClickCreativePage() {
       const json = await api.retryCreativeWorkflow(targetWorkflowId, {
         mode: 'repair_and_resume',
         confirm_plan_code: retryPlan.code,
+        confirm_plan_fingerprint: retryPlan.plan_fingerprint,
         ignore_layout_qa_once: ignoreLayoutQaOnce,
       });
       const nextWorkflowId = json?.workflow_id || targetWorkflowId;

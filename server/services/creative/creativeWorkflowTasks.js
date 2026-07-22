@@ -505,6 +505,7 @@ async function startCreativeWorkflowRetryTask(workflowId, options = {}) {
       const payload = options.payload || {
         mode: 'repair_and_resume',
         confirm_plan_code: options.confirm_plan_code || options.confirmPlanCode || options.plan_code,
+        confirm_plan_fingerprint: options.confirm_plan_fingerprint || options.confirmPlanFingerprint || options.plan_fingerprint,
       };
       const result = await creativeWorkflows.retryCreativeWorkflow(workflowId, payload, workflowOptions);
       if (result && result.success === false) {

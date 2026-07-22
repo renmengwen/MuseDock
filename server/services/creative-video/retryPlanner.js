@@ -1,5 +1,7 @@
+const crypto = require('crypto');
 const { parseContentGraphResponse } = require('./html-video/contentGraphAgent');
 const { analyzeTimelineMismatch } = require('./html-video/timelineRepair');
+const { stableStringify } = require('./sceneSpecHash');
 
 const MODE = 'repair_and_resume';
 const ENVIRONMENT_CODES = new Set(['ffmpeg_not_configured', 'playwright_not_configured']);
@@ -414,7 +416,7 @@ function visualQaIssueFrameIds(project = {}, classification = {}) {  const frame
 }
 
 function basePlan(classification, patch = {}) {
-  return {
+  const plan = {
     version: 1,
     can_retry: false,
     fallback_allowed: true,
@@ -428,6 +430,14 @@ function basePlan(classification, patch = {}) {
     executor_options: {},
     ...patch,
   };
+  plan.plan_fingerprint = crypto.createHash('sha256').update(stableStringify({
+    code: plan.code,
+    repair_action: plan.repair_action,
+    retry_from: plan.retry_from,
+    frame_ids: uniqueStrings(plan.executor_options?.frame_ids).sort(),
+    discard: uniqueStrings(plan.discard).sort(),
+  })).digest('hex');
+  return plan;
 }
 
 function retryPlan(classification, repairAction, retryFrom, patch = {}) {

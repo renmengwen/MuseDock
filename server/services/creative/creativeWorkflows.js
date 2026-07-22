@@ -1537,7 +1537,14 @@ async function retryCreativeWorkflow(workflowId, payload = {}, options = {}) {
   const refreshed = await refreshCreativeWorkflowRetryPlan(workflowId, { rootDir, services });
   if (!refreshed.success) return refreshed;
   const plan = refreshed.plan;
-  if (safeString(payload.confirm_plan_code) !== safeString(plan.code)) {
+  const confirmPlanFingerprint = safeString(payload.confirm_plan_fingerprint);
+  const planFingerprint = safeString(plan.plan_fingerprint);
+  if (
+    !confirmPlanFingerprint
+    || !planFingerprint
+    || safeString(payload.confirm_plan_code) !== safeString(plan.code)
+    || confirmPlanFingerprint !== planFingerprint
+  ) {
     return {
       success: false,
       workflow_id: safeString(workflowId),
