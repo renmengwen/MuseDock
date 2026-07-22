@@ -607,6 +607,45 @@ function firstShot(visualPlan) {
   assert.equal('camera' in firstShot(ambiguousModel.visualPlan), false, '多个同名模型区域必须按既有歧义规则 no-op');
 }
 
+// 字面匹配失败后，仅允许唯一任务信息卡区域承接“任务信息卡（片）”这一组明确 UI 同义名。
+{
+  const formalTaskCard = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '任务信息卡片展示当前进度' }],
+    regions: [canonicalRegion({
+      id: 'r_task_card',
+      label: '页面任务信息卡',
+      aliases: ['任务详情', '视频标题信息'],
+      trust: 'C',
+    })],
+    duration: 2,
+  });
+  planFocusCues(formalTaskCard);
+  const cue = firstShot(formalTaskCard.visualPlan).camera.focus_cues[0];
+  assert.equal(cue.region_id, 'r_task_card');
+  assert.equal(cue.keyword, '任务信息卡片', '任务信息卡 fallback 必须返回 caption 原文关键词');
+
+  const ambiguous = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '任务信息卡片展示当前进度' }],
+    regions: [
+      canonicalRegion({ id: 'r_task_card_a', label: '页面任务信息卡', trust: 'C' }),
+      canonicalRegion({ id: 'r_task_card_b', label: '页面任务信息卡', trust: 'C' }),
+    ],
+    duration: 2,
+  });
+  planFocusCues(ambiguous);
+  assert.equal('camera' in firstShot(ambiguous.visualPlan), false, '多个任务信息卡候选无法消歧时必须 no-op');
+
+  for (const caption of ['主播看任务信息', '卡片动画轻微推进', '任务列表展示当前进度']) {
+    const input = fixture({
+      captions: [{ id: 'cap_01', start: 0, end: 2, text: caption }],
+      regions: [canonicalRegion({ id: 'r_task_card', label: '页面任务信息卡', trust: 'C' })],
+      duration: 2,
+    });
+    planFocusCues(input);
+    assert.equal('camera' in firstShot(input.visualPlan), false, `${caption} 不得被任务信息卡 fallback 误绑定`);
+  }
+}
+
 // 纵深 2：一个 beat 含多个 shot 时按 shot 独立 enrich——各用自己的 asset regions 与 caption_ids，
 // 互不串扰；无命中的 shot 不写 camera。
 {

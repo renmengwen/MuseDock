@@ -131,6 +131,17 @@ function mainCanvasOccurrence(captionText, regions) {
   return canvasRegions.length === 1 ? { region: canvasRegions[0], keyword: occurrence[0] } : null;
 }
 
+function taskInfoCardOccurrence(captionText, regions) {
+  const occurrence = String(captionText || '').match(/任务信息卡(?:片)?/u);
+  if (!occurrence) return null;
+  const cardRegions = regions.filter(region => (
+    [region.label, ...(Array.isArray(region.aliases) ? region.aliases : [])]
+      .map(text)
+      .some(term => /^(?:页面任务信息卡|任务信息卡(?:片)?)$/u.test(term))
+  ));
+  return cardRegions.length === 1 ? { region: cardRegions[0], keyword: occurrence[0] } : null;
+}
+
 function resolveCaptionFocus(caption, regions) {
   const captionText = typeof caption.text === 'string' ? caption.text : '';
   const hits = [];
@@ -145,7 +156,12 @@ function resolveCaptionFocus(caption, regions) {
   }
   // 同一 caption 命中多个 region 时无法消歧，放弃聚焦。
   if (hits.length === 1) return hits[0];
-  return hits.length === 0 ? mainCanvasOccurrence(captionText, regions) : null;
+  if (hits.length > 0) return null;
+  const fallbackHits = [
+    mainCanvasOccurrence(captionText, regions),
+    taskInfoCardOccurrence(captionText, regions),
+  ].filter(Boolean);
+  return fallbackHits.length === 1 ? fallbackHits[0] : null;
 }
 
 function cueId(shot, regionIdValue, captionIds) {
