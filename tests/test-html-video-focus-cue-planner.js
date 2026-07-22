@@ -2,6 +2,7 @@ const assert = require('assert/strict');
 
 const {
   FOCUS_TRANSITION_BUDGET_SEC,
+  keywordOccurrence,
   planFocusCues,
 } = require('../server/services/creative-video/html-video/focusCuePlanner');
 const { computeFrameInputFingerprint } = require('../server/services/creative-video/html-video/frameHtmlPhaseSupport');
@@ -489,6 +490,28 @@ function firstShot(visualPlan) {
   });
   planFocusCues(cjk);
   assert.equal(firstShot(cjk.visualPlan).camera.focus_cues[0].keyword, '价格');
+}
+
+// 单汉字 alias 必须是独立汉字，避免“头”把镜头或头部误判为完整人物焦点。
+{
+  assert.equal(keywordOccurrence('镜头展示人物', '头'), '');
+  assert.equal(keywordOccurrence('人物头部特写', '头'), '');
+  assert.equal(keywordOccurrence('镜头之后，头，保持', '头'), '头', '拒绝首个词中位置后必须继续扫描独立汉字');
+
+  const input = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '这个镜头缓慢推进' }],
+    regions: [canonicalRegion({ id: 'r_person', label: '完整人物', aliases: ['头'], trust: 'C' })],
+    duration: 2,
+  });
+  planFocusCues(input);
+  assert.equal('camera' in firstShot(input.visualPlan), false, '人物头部单字 alias 不得因“镜头”生成 Camera cue');
+
+  for (const [caption, term, expected] of [
+    ['看价格面板', '价格', '价格'],
+    ['打开 MuseDock 项目', 'MuseDock', 'MuseDock'],
+    ['聚焦文本输入框', '文本输入框', '文本输入框'],
+    ['顶部橙色过山车轨道', '过山车轨道', '过山车轨道'],
+  ]) assert.equal(keywordOccurrence(caption, term), expected);
 }
 
 // 纵深 1：trust D 的 region 被命中时不生成 cue，但同样打断同 region 合并链

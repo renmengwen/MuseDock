@@ -312,6 +312,8 @@ const { keywordOccurrence } = require('../server/services/creative-video/html-vi
   assert.equal(typeof keywordOccurrence, 'function', 'focusCuePlanner 必须导出 keywordOccurrence');
   assert.equal(keywordOccurrence('重启用 restart，请点 star', 'star'), 'star');
   assert.equal(keywordOccurrence('请 restart 服务', 'star'), '');
+  assert.equal(keywordOccurrence('镜头展示人物头部', '头'), '');
+  assert.equal(keywordOccurrence('镜头之后，头，保持', '头'), '头');
 }
 
 // 无 cue（无注记）时输出与现状字节级一致：不出现 hv-caption-kw，样式块与 item 结构保持原样
@@ -383,6 +385,20 @@ const { keywordOccurrence } = require('../server/services/creative-video/html-vi
   ));
   assert.doesNotMatch(rejected, /hv-caption-kw/, '整条无词边界合法命中时不得高亮');
   assert.ok(rejected.includes('>请 restart 服务</span>'), '找不到时文本必须原样保留');
+}
+
+// 单汉字高亮与 Camera matcher 同语义：词中位置拒绝，独立汉字接受。
+{
+  const rejected = renderCaptionLayer(applyFocusKeywords(
+    [{ id: 'c1', start: 0, end: 2, text: '镜头展示人物头部' }],
+    new Map([['c1', '头']]),
+  ));
+  assert.doesNotMatch(rejected, /hv-caption-kw/);
+  const accepted = renderCaptionLayer(applyFocusKeywords(
+    [{ id: 'c1', start: 0, end: 2, text: '镜头之后，头，保持' }],
+    new Map([['c1', '头']]),
+  ));
+  assert.ok(accepted.includes('镜头之后，<span class="hv-caption-kw">头</span>，保持'));
 }
 
 // 找不到关键词：绝不插入旁白中不存在的词、不改动文本内容

@@ -8,6 +8,7 @@ const TIME_EPSILON_SEC = 0.001;
 const ZOOM_TRUST_LEVELS = new Set(['A', 'B', 'C']);
 const CUE_TRUST_LEVELS = new Set(['A', 'B', 'C']);
 const LATIN_ALNUM_RE = /[A-Za-z0-9]/;
+const HAN_RE = /\p{Script=Han}/u;
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -65,21 +66,24 @@ function usableRegions(asset = {}) {
 
 // 通用匹配器：label/aliases 对 caption 原文做大小写不敏感包含匹配，返回原文中的实际出现片段。
 // 拉丁词边界：term 端点是 [A-Za-z0-9] 时，该侧相邻字符不得也是 [A-Za-z0-9]（防 "star" 误命中 "restart"）；
-// CJK 无词边界概念，term 端点为非拉丁字符的一侧保持子串匹配。被拒绝的位置继续向后扫描。
+// 单汉字 term 若紧邻其他汉字则拒绝（防“头”误命中“镜头/头部”）；多字 CJK 保持子串匹配。
+// 被拒绝的位置继续向后扫描。
 function keywordOccurrence(captionText, term) {
   const needle = term.toLowerCase();
   if (!needle) return '';
   const haystack = captionText.toLowerCase();
   const boundaryBefore = LATIN_ALNUM_RE.test(needle[0]);
   const boundaryAfter = LATIN_ALNUM_RE.test(needle[needle.length - 1]);
+  const singleHan = Array.from(needle).length === 1 && HAN_RE.test(needle);
   let from = 0;
   while (from + needle.length <= haystack.length) {
     const index = haystack.indexOf(needle, from);
     if (index < 0) return '';
-    const before = index > 0 ? haystack[index - 1] : '';
-    const after = haystack[index + needle.length] || '';
+    const before = Array.from(haystack.slice(0, index)).at(-1) || '';
+    const after = Array.from(haystack.slice(index + needle.length))[0] || '';
     if ((!boundaryBefore || !LATIN_ALNUM_RE.test(before))
-      && (!boundaryAfter || !LATIN_ALNUM_RE.test(after))) {
+      && (!boundaryAfter || !LATIN_ALNUM_RE.test(after))
+      && (!singleHan || (!HAN_RE.test(before) && !HAN_RE.test(after)))) {
       return captionText.slice(index, index + term.length);
     }
     from = index + 1;
