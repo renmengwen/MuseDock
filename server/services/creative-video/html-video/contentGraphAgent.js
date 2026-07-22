@@ -324,7 +324,7 @@ function isSourceEvidenceUsage(value = '') {
 function normalizeAssetRefs(value, creativeContext = {}, nodeId = '') {
   const allowedAssets = allowedAssetById(creativeContext);
   const seen = new Set();
-  return (Array.isArray(value) ? value : [])
+  const refs = (Array.isArray(value) ? value : [])
     .map(ref => {
       const object = objectOrEmpty(ref);
       const assetId = compactText(object.asset_id || object.assetId || object.id, 80);
@@ -354,8 +354,11 @@ function normalizeAssetRefs(value, creativeContext = {}, nodeId = '') {
       if (seen.has(ref.asset_id)) return false;
       seen.add(ref.asset_id);
       return true;
-    })
-    .slice(0, 4);
+    });
+  const requiredRefs = refs.filter(ref => allowedAssets.get(ref.asset_id)?.requirement === 'required');
+  if (requiredRefs.length > 4) return requiredRefs;
+  const optionalRefs = refs.filter(ref => allowedAssets.get(ref.asset_id)?.requirement !== 'required');
+  return [...requiredRefs, ...optionalRefs.slice(0, 4 - requiredRefs.length)];
 }
 
 function normalizeContentGraph(graph, sceneSpec = {}, creativeContext = {}) {

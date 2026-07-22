@@ -228,7 +228,8 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
   }
   const capacityDiagnostics = [];
   const mergedRefsByNode = new Map();
-  for (const [node, assetIds] of additions) {
+  for (const node of nodes) {
+    const assetIds = additions.get(node) || [];
     const currentRefs = Array.isArray(node.asset_refs) ? node.asset_refs : [];
     const seen = new Set();
     const requiredRefs = currentRefs.filter(ref => {

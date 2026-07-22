@@ -368,6 +368,33 @@ assert.deepEqual(multiAssetResult.graph.nodes[2].asset_refs, [
   { asset_id: 'asset_1', usage: 'evidence', reason: 'direct 可作证据' },
 ]);
 
+const requiredLastAssets = [
+  ...Array.from({ length: 4 }, (_, index) => ({ id: `optional_${index + 1}` })),
+  { id: 'required_last', requirement: 'required' },
+];
+const requiredLast = agent.normalizeContentGraph({
+  synopsis: '必用素材优先',
+  nodes: [{
+    id: 'scene_01',
+    kind: 'text',
+    label: '必用素材优先',
+    durationSec: 2,
+    text: '必用素材优先',
+    asset_refs: requiredLastAssets.map(asset => ({
+      asset_id: asset.id,
+      usage: 'subject',
+      reason: asset.id,
+    })),
+  }],
+  edges: [],
+}, { scenes: [{ id: 'scene_01' }] }, { asset_context: { assets: requiredLastAssets } });
+assert.deepEqual(requiredLast.graph.nodes[0].asset_refs.map(ref => ref.asset_id), [
+  'required_last',
+  'optional_1',
+  'optional_2',
+  'optional_3',
+], 'required 必须优先，optional 保持模型顺序补位');
+
 for (const creativeContextWithoutRegistry of [{}, { asset_context: {} }, { asset_context: { assets: [] } }]) {
   const failClosed = agent.normalizeContentGraph({
     synopsis: '空注册表拒绝引用',

@@ -259,6 +259,56 @@ async function main() {
   assert.equal(modelCapacityDiagnostic.retryable, false);
   assert.equal(modelCapacityDiagnostic.fallback_allowed, false);
 
+  const modelOnlyCapacity = await workflow.generateContentGraphWithRetry({
+    sceneSpec: sceneSpec(),
+    creativeContext: { asset_context: { assets: capacityAssets } },
+    model: {
+      async callTextModel() {
+        return {
+          success: true,
+          text: graphTextFor(sceneSpec(), {
+            scene_01: capacityAssets.map(asset => ({
+              asset_id: asset.id, usage: 'subject', reason: '模型直接引用',
+            })),
+          }),
+        };
+      },
+    },
+  });
+  assert.equal(modelOnlyCapacity.success, false, '没有 raw_text 时也不得静默截断 5 张 required');
+  assert.deepEqual(modelOnlyCapacity.diagnostics[0].details, {
+    scene_id: 'scene_01',
+    asset_ids: capacityAssets.map(asset => asset.id),
+    max_assets: 4,
+  });
+
+  const allNodeSpec = bindingSceneSpec();
+  const allNodeAssets = [
+    ...capacityAssets,
+    { id: 'upload_scene_02', file_name: 'scene-02.png', requirement: 'required' },
+  ];
+  const allNodeCapacity = await workflow.generateContentGraphWithRetry({
+    sceneSpec: allNodeSpec,
+    creativeContext: {
+      input: { raw_text: 'S02 使用 scene-02.png。' },
+      asset_context: { assets: allNodeAssets },
+    },
+    model: {
+      async callTextModel() {
+        return {
+          success: true,
+          text: graphTextFor(allNodeSpec, {
+            scene_01: capacityAssets.map(asset => ({
+              asset_id: asset.id, usage: 'subject', reason: '模型直接引用',
+            })),
+          }),
+        };
+      },
+    },
+  });
+  assert.equal(allNodeCapacity.success, false, '最终化必须校验所有节点，不能只检查自动补绑节点');
+  assert.deepEqual(allNodeCapacity.diagnostics[0].details.asset_ids, capacityAssets.map(asset => asset.id));
+
   let capacityFallbackCalls = 0;
   const fallbackCapacity = await workflow.generateContentGraphWithRetry({
     sceneSpec: sceneSpec(),
