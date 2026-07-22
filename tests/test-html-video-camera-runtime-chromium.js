@@ -21,6 +21,13 @@ const asset = {
       focus_point: { x: 0.755, y: 0.21 },
     },
     {
+      id: 'target_2',
+      label: '次要目标',
+      trust_level: 'A',
+      region: { x: 0.08, y: 0.12, width: 0.15, height: 0.18 },
+      focus_point: { x: 0.155, y: 0.21 },
+    },
+    {
       id: 'target_c',
       label: '目标',
       trust_level: 'C',
@@ -58,13 +65,16 @@ const asset = {
   ],
 };
 
-function node(withCue, { regionId = 'target', zoom } = {}) {
+function node(withCue, { regionId = 'target', zoom, twoCues = false } = {}) {
+  const captions = twoCues
+    ? [{ id: 'cap_1', start: 1, end: 1.5, text: '聚焦目标' }, { id: 'cap_2', start: 3, end: 3.8, text: '转向次要目标' }]
+    : [{ id: 'cap_1', start: 1, end: 3, text: '聚焦目标' }];
   const shot = {
     id: 'shot_1',
     asset_id: 'a',
     role: 'showcase',
     requirement: 'required',
-    caption_ids: ['cap_1'],
+    caption_ids: captions.map(caption => caption.id),
     minimum_visible_duration_sec: 1,
     active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 4 },
   };
@@ -79,7 +89,14 @@ function node(withCue, { regionId = 'target', zoom } = {}) {
         region_id: regionId,
         effect: 'camera_zoom',
         ...(zoom ? { zoom } : {}),
-      }],
+      }, ...(twoCues ? [{
+        id: 'cue_2',
+        caption_ids: ['cap_2'],
+        keyword: '次要目标',
+        keywords_by_caption_id: { cap_2: '次要目标' },
+        region_id: 'target_2',
+        effect: 'camera_zoom',
+      }] : [])],
     };
   }
   const visualBase = { type: 'image_sequence', sequence_mode: 'fullscreen_relay', shots: [shot] };
@@ -87,7 +104,7 @@ function node(withCue, { regionId = 'target', zoom } = {}) {
     id: 'scene:scene_01',
     duration_sec: 4,
     metadata: {
-      captions: [{ id: 'cap_1', start: 1, end: 3, text: '聚焦目标' }],
+      captions,
       visual_beats: [{ id: 'beat_1', visual_base: visualBase }],
     },
   };
@@ -109,6 +126,17 @@ async function transformAt(page, timeSec) {
   return page.evaluate((time) => {
     window.__mpSetTimelineTime(time);
     return document.querySelector('img[data-shot-layer="foreground"]').style.transform;
+  }, timeSec);
+}
+
+async function cameraStateAt(page, timeSec) {
+  return page.evaluate((time) => {
+    window.__mpSetTimelineTime(time);
+    const figure = document.querySelector('[data-hv-shot]');
+    const image = figure.querySelector('img[data-shot-layer="foreground"]');
+    const cue = [...figure.__hvResolvedCameraCues].reverse().find(candidate => time >= candidate.start_sec);
+    const matrix = new DOMMatrixReadOnly(getComputedStyle(image).transform);
+    return { cueId: cue?.id || null, tx: matrix.m41, ty: matrix.m42, scale: Math.hypot(matrix.m11, matrix.m12) };
   }, timeSec);
 }
 
@@ -139,6 +167,21 @@ async function transformAt(page, timeSec) {
     assert.notEqual(heldA, '', 'cue 保持期必须维持聚焦 transform');
     assert.equal(heldB, heldA, 'cue 保持期 transform 必须稳定');
     assert.equal(returned, '', '末尾时间足够时 cue 外必须回到全景基线');
+
+    await page.setContent(html(true, { twoCues: true }));
+    await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
+    for (let round = 1; round <= 10; round += 1) {
+      const beforeSecond = await cameraStateAt(page, 2.95);
+      const afterSecond = await cameraStateAt(page, 3.05);
+      assert.equal(beforeSecond.cueId, 'cue_1');
+      assert.equal(afterSecond.cueId, 'cue_2');
+      const handoffDelta = Math.hypot(
+        afterSecond.tx - beforeSecond.tx,
+        afterSecond.ty - beforeSecond.ty,
+        (afterSecond.scale - beforeSecond.scale) * 100,
+      );
+      assert.ok(handoffDelta > 0 && handoffDelta < 40, `第 ${round} 轮精确 seek 的双 cue 交接必须连续变化且无瞬跳，实际 delta=${handoffDelta}`);
+    }
 
     await page.setContent(html(true, { regionId: 'target_bottom' }));
     await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);

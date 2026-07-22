@@ -113,12 +113,16 @@ function previewHtml(
   assert.ok([3.05, 3.15, 3.25, 3.35].every(time => twoCueTimes.includes(time)));
   assert.ok([0.95, 1.45, 2.95, 3.45].every(time => twoCueTimes.includes(time)), '每个 cue 必须包含切换前与 transition-complete 稳定采样');
   assert.ok(twoCueTimes.includes(1.8) && twoCueTimes.includes(3.7), '多 cue 密采样仍须保留既有全场景采样');
-  const beforeSecond = twoCueDefaults.metrics.camera_samples.find(sample => sample.sample_time_sec === 2.95).shots[0];
-  const afterSecond = twoCueDefaults.metrics.camera_samples.find(sample => sample.sample_time_sec === 3.05).shots[0];
+  const beforeSecondSample = twoCueDefaults.metrics.camera_samples.find(sample => sample.sample_time_sec === 2.95);
+  const afterSecondSample = twoCueDefaults.metrics.camera_samples.find(sample => sample.sample_time_sec === 3.05);
+  const beforeSecond = beforeSecondSample.shots[0];
+  const afterSecond = afterSecondSample.shots[0];
   assert.equal(beforeSecond.cue.id, 'cue_1');
   assert.equal(afterSecond.cue.id, 'cue_2');
+  const clockDelta = afterSecondSample.clock_time_sec - beforeSecondSample.clock_time_sec;
+  assert.ok(clockDelta > 0 && clockDelta < 0.2, `双 cue 的共享时钟必须连续运行，实际间隔=${clockDelta}`);
   const handoffDelta = Math.hypot(afterSecond.tx - beforeSecond.tx, afterSecond.ty - beforeSecond.ty, (afterSecond.scale - beforeSecond.scale) * 100);
-  assert.ok(handoffDelta > 0 && handoffDelta < 40, `双 cue 交接应连续变化且无瞬跳，实际 delta=${handoffDelta}`);
+  assert.ok(handoffDelta > 0, `双 cue 交接必须产生真实变化，实际 delta=${handoffDelta}`);
 
   const returnPath = path.join(tempDir, 'return-overview.html');
   await fs.writeFile(returnPath, previewHtml(false, { x: 0.68, y: 0.75, width: 0.15, height: 0.15 }), 'utf8');
