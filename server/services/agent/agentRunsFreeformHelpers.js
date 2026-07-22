@@ -326,6 +326,11 @@ async function compressFreeformNarrationWithModel({ modelService, freeformAgent,
       sum + narrationBudget.countNarrationChars(scene?.narration_text || '')
     ), 0);
     if (Number(hardMaxChars) > 0 && actualChars > Math.floor(Number(hardMaxChars))) {
+      if (attempt === 0) {
+        currentScenes = applied.scenes;
+        currentBudget = { ...currentBudget, max_recommended_chars: Math.floor(Number(hardMaxChars)) };
+        continue;
+      }
       return {
         success: false,
         code: 'narration_compression_over_hard_max',

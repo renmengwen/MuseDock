@@ -28,7 +28,7 @@ function compressedScenes(extraChars = 30) {
   }));
 }
 
-function writeRun(rootDir, awemeId, runId) {
+function writeRun(rootDir, awemeId, runId, targetDurationSec = 80) {
   const runDir = path.join(rootDir, awemeId, 'agent_runs');
   fs.mkdirSync(runDir, { recursive: true });
   const runPath = path.join(runDir, `${runId}.json`);
@@ -37,14 +37,14 @@ function writeRun(rootDir, awemeId, runId) {
     run_id: runId,
     aweme_id: awemeId,
     status: 'ready',
-    result: { video_brief: { target_duration_sec: 80 } },
+    result: { video_brief: { target_duration_sec: targetDurationSec } },
     hyperframes_freeform: {
       status: 'ready',
       brief: {
         status: 'ready',
         data: {
           title: '真实 TTS 时长测试',
-          target_duration_sec: 80,
+          target_duration_sec: targetDurationSec,
           required_narration_literals: requirements,
           storyboard: { scenes: originalScenes() },
         },
@@ -55,6 +55,7 @@ function writeRun(rootDir, awemeId, runId) {
 }
 
 function ttsResult(duration, scenes, label) {
+  const baseDuration = Math.floor((duration / scenes.length) * 1000) / 1000;
   return {
     success: true,
     message: label,
@@ -62,24 +63,30 @@ function ttsResult(duration, scenes, label) {
       status: 'done',
       path: `${label}.wav`,
       duration,
-      scenes: scenes.map(scene => ({
+      scenes: scenes.map((scene, index) => {
+        const sceneDuration = index === scenes.length - 1
+          ? Math.round((duration - baseDuration * (scenes.length - 1)) * 1000) / 1000
+          : baseDuration;
+        return {
         ...scene,
-        duration: duration / scenes.length,
-        speech_duration_sec: duration / scenes.length,
-        captions: [{ start: 0, end: duration / scenes.length, text: scene.narration_text }],
-      })),
+        duration: sceneDuration,
+        speech_duration_sec: sceneDuration,
+        captions: [{ start: 0, end: sceneDuration, text: scene.narration_text }],
+        };
+      }),
     },
   };
 }
 
-async function runDurationCase({ suffix, durations, modelScenes = compressedScenes(), staleModel = null }) {
+async function runDurationCase({ suffix, durations, modelScenes = compressedScenes(), staleModel = null, targetDurationSec = 80, aggregateDurations = [] }) {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), `actual-tts-${suffix}-`));
   const awemeId = `20260722${suffix.padStart(12, '0')}`;
   const runId = `actual-tts-${suffix}`;
-  const runPath = writeRun(rootDir, awemeId, runId);
+  const runPath = writeRun(rootDir, awemeId, runId, targetDurationSec);
   let ttsCalls = 0;
   let modelCalls = 0;
   let compressionPrompt = '';
+  const ttsRunIds = [];
   const resultPromise = agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(awemeId, runId, {
     rootDir,
     aiTextModel: {
@@ -91,14 +98,17 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
       },
     },
     sceneTtsService: {
-      synthesizeSceneTts: async ({ scenes }) => {
+      synthesizeSceneTts: async ({ scenes, runId: ttsRunId }) => {
         const duration = durations[ttsCalls];
+        ttsRunIds.push(ttsRunId);
         ttsCalls += 1;
-        return ttsResult(duration, scenes, `attempt-${ttsCalls}`);
+        const value = ttsResult(duration, scenes, `attempt-${ttsCalls}`);
+        if (aggregateDurations[ttsCalls - 1] != null) value.scene_tts.duration = aggregateDurations[ttsCalls - 1];
+        return value;
       },
     },
   });
-  return { result: await resultPromise, runPath, rootDir, awemeId, runId, ttsCalls, modelCalls, compressionPrompt };
+  return { result: await resultPromise, runPath, rootDir, awemeId, runId, ttsCalls, modelCalls, compressionPrompt, ttsRunIds };
 }
 
 (async () => {
@@ -106,6 +116,8 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
   assert.equal(success.result.success, true);
   assert.equal(success.ttsCalls, 2);
   assert.equal(success.modelCalls, 1);
+  assert.equal(new Set(success.ttsRunIds).size, 2);
+  assert.notEqual(success.ttsRunIds[0], success.ttsRunIds[1]);
   const hardMax = Number(success.compressionPrompt.match(/硬性总字数上限：(\d+) 字/)?.[1]);
   assert.ok(hardMax > 0 && hardMax <= 334);
   const successState = JSON.parse(fs.readFileSync(success.runPath, 'utf8')).hyperframes_freeform;
@@ -137,11 +149,25 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
   assert.equal(boundary.ttsCalls, 1);
   assert.equal(boundary.modelCalls, 0);
 
+  const target90Boundary = await runDurationCase({ suffix: '16', durations: [103.5], targetDurationSec: 90 });
+  assert.equal(target90Boundary.result.success, true);
+  assert.equal(target90Boundary.ttsCalls, 1);
+  assert.equal(target90Boundary.modelCalls, 0);
+
+  const aggregateConflict = await runDurationCase({
+    suffix: '17',
+    durations: [93.622, 91.9],
+    aggregateDurations: [80, 80],
+  });
+  assert.equal(aggregateConflict.result.success, true);
+  assert.equal(aggregateConflict.ttsCalls, 2);
+  assert.equal(aggregateConflict.modelCalls, 1);
+
   const overMax = await runDurationCase({ suffix: '14', durations: [93.622], modelScenes: compressedScenes(80) });
   assert.equal(overMax.result.success, false);
   assert.equal(overMax.result.code, 'narration_compression_over_hard_max');
   assert.equal(overMax.ttsCalls, 1);
-  assert.equal(overMax.modelCalls, 1);
+  assert.equal(overMax.modelCalls, 2);
 
   const staleRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'actual-tts-stale-'));
   const staleAwemeId = '20260722000000000015';
@@ -150,6 +176,7 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
   let releaseACompression;
   let markACompressionStarted;
   let aTtsCalls = 0;
+  let staleATtsRunId = '';
   const aCompressionStarted = new Promise(resolve => { markACompressionStarted = resolve; });
   const staleA = agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(staleAwemeId, staleRunId, {
     rootDir: staleRoot,
@@ -160,22 +187,29 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
       },
     },
     sceneTtsService: {
-      synthesizeSceneTts: async ({ scenes }) => {
+      synthesizeSceneTts: async ({ scenes, runId: ttsRunId }) => {
         aTtsCalls += 1;
+        assert.match(ttsRunId, /-audio-/);
+        staleATtsRunId = ttsRunId;
         return ttsResult(93.622, scenes, 'stale-A');
       },
     },
   });
   await aCompressionStarted;
+  let freshBTtsRunId = '';
   const freshB = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(staleAwemeId, staleRunId, {
     rootDir: staleRoot,
-    sceneTtsService: { synthesizeSceneTts: async ({ scenes }) => ttsResult(90, scenes, 'fresh-B') },
+    sceneTtsService: { synthesizeSceneTts: async ({ scenes, runId: ttsRunId }) => {
+      freshBTtsRunId = ttsRunId;
+      return ttsResult(90, scenes, 'fresh-B');
+    } },
   });
   assert.equal(freshB.success, true);
   releaseACompression({ success: true, text: JSON.stringify({ scenes: compressedScenes() }) });
   const staleResult = await staleA;
   assert.equal(staleResult.success, false);
   assert.equal(aTtsCalls, 1);
+  assert.notEqual(staleATtsRunId, freshBTtsRunId);
   const staleState = JSON.parse(fs.readFileSync(staleRunPath, 'utf8')).hyperframes_freeform;
   assert.equal(staleState.status, 'ready');
   assert.equal(staleState.audio.path, 'fresh-B.wav');

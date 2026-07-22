@@ -556,19 +556,6 @@
 
   }
 
-  function getSceneTtsDuration(result = {}) {
-    const sceneTts = result.scene_tts || {};
-    for (const value of [sceneTts.duration, result.duration]) {
-      const duration = Number(value);
-      if (Number.isFinite(duration) && duration > 0) return duration;
-    }
-    return (Array.isArray(sceneTts.scenes) ? sceneTts.scenes : []).reduce((sum, scene) => (
-      sum + (Number(scene?.speech_duration_sec || scene?.duration || 0) || 0)
-    ), 0);
-  }
-
-
-
   function createFreeformAudioValue({ sceneTtsValue = {}, timedPlan = {}, awemeId, runId, voice = '', stylePrompt = '', fallbackMessage = '' }) {
 
     const fileName = sceneTtsValue.file_name || (sceneTtsValue.path ? path.basename(sceneTtsValue.path) : getTtsFileName(runId, sceneTtsValue.format || 'wav'));
@@ -841,13 +828,13 @@
     }
 
 
-    const synthesize = () => sceneTtsService.synthesizeSceneTts({
+    const synthesize = attempt => sceneTtsService.synthesizeSceneTts({
 
         scenes,
 
         outputDir: getAgentRunsDir(awemeId, options.rootDir),
 
-        runId,
+        runId: `${runId}-audio-${operationId}-${attempt}`,
 
         voice: resolvedVoice,
 
@@ -877,49 +864,58 @@
         ttsQueueIntervalMs: options.ttsQueueIntervalMs,
 
       });
+    const maxAllowedDurationSec = storyboardTiming.roundTime(targetDurationSec * 1.15);
     let result;
-    let ttsAttemptCount = 0;
-    try {
-      ttsAttemptCount += 1;
-      result = await synthesize();
-    } catch (error) {
-
-      result = {
-
-        success: false,
-
-        message: `高级成片音频生成失败：${error.message || '未知错误'}`,
-
+    let sceneTtsValue;
+    let timedPlan;
+    for (let ttsAttemptCount = 1; ttsAttemptCount <= 2; ttsAttemptCount += 1) {
+      try {
+        result = await synthesize(ttsAttemptCount);
+      } catch (error) {
+        result = { success: false, message: `高级成片音频生成失败：${error.message || '未知错误'}` };
+      }
+      if (!result?.success) {
+        return failHyperframesFreeformSection(
+          awemeId,
+          runId,
+          'audio',
+          result?.message || '高级成片音频生成失败。',
+          options,
+          {},
+          operationId,
+        );
+      }
+      sceneTtsValue = {
+        ...(result.scene_tts || {}),
+        status: result.scene_tts?.status || 'done',
+        message: result.message || result.scene_tts?.message || '高级成片音频已生成。',
+        updated_at: result.scene_tts?.updated_at || new Date().toISOString(),
       };
-
-    }
-
-
-
-    if (!result?.success) {
-
-      return failHyperframesFreeformSection(
-
-        awemeId,
-
-        runId,
-
-        'audio',
-
-        result?.message || '高级成片音频生成失败。',
-
-        options,
-
-        {},
-        operationId,
-
-      );
-
-    }
-
-    const maxAllowedDurationSec = targetDurationSec * 1.15;
-    let actualDurationSec = getSceneTtsDuration(result);
-    if (actualDurationSec > maxAllowedDurationSec) {
+      timedPlan = storyboardTiming.buildTimedStoryboardPlan({
+        storyboardPlan: { target_duration_sec: targetDurationSec, scenes },
+        sceneTts: sceneTtsValue,
+      });
+      const actualDurationSec = storyboardTiming.roundTime(timedPlan.duration);
+      if (actualDurationSec <= maxAllowedDurationSec) break;
+      if (ttsAttemptCount === 2) {
+        const details = {
+          target: targetDurationSec,
+          actual: actualDurationSec,
+          max_allowed: maxAllowedDurationSec,
+          attempt_count: ttsAttemptCount,
+          ...(actualDurationSec > storyboardTiming.roundTime(targetDurationSec * 1.25) ? { hard_limit_exceeded: true } : {}),
+        };
+        const message = `真实 TTS 时长仍超出预算：目标 ${targetDurationSec} 秒，实际 ${actualDurationSec.toFixed(3)} 秒，允许上限 ${maxAllowedDurationSec.toFixed(3)} 秒。`;
+        return failHyperframesFreeformSection(
+          awemeId,
+          runId,
+          'audio',
+          message,
+          options,
+          { code: 'tts_actual_duration_over_budget', missing: [], details, error: message },
+          operationId,
+        );
+      }
       const latest = await getCurrentHyperframesFreeformState(awemeId, runId, options);
       if (!latest.success || latest.hyperframes_freeform?.audio?.operation_id !== operationId) {
         return createFreeformFailureResponse(
@@ -966,7 +962,7 @@
               actual: actualDurationSec,
               max_allowed: maxAllowedDurationSec,
               measured_max_chars: measuredMaxChars,
-              attempt_count: 1,
+              attempt_count: ttsAttemptCount,
             },
           },
           operationId,
@@ -997,66 +993,7 @@
           { superseded: true },
         );
       }
-      try {
-        ttsAttemptCount += 1;
-        result = await synthesize();
-      } catch (error) {
-        result = { success: false, message: `高级成片音频重试失败：${error.message || '未知错误'}` };
-      }
-      if (!result?.success) {
-        return failHyperframesFreeformSection(
-          awemeId,
-          runId,
-          'audio',
-          result?.message || '高级成片音频重试失败。',
-          options,
-          {},
-          operationId,
-        );
-      }
-      actualDurationSec = getSceneTtsDuration(result);
-      if (actualDurationSec > maxAllowedDurationSec) {
-        const details = {
-          target: targetDurationSec,
-          actual: actualDurationSec,
-          max_allowed: maxAllowedDurationSec,
-          attempt_count: ttsAttemptCount,
-          ...(actualDurationSec > targetDurationSec * 1.25 ? { hard_limit_exceeded: true } : {}),
-        };
-        const message = `真实 TTS 时长仍超出预算：目标 ${targetDurationSec} 秒，实际 ${actualDurationSec.toFixed(3)} 秒，允许上限 ${maxAllowedDurationSec.toFixed(3)} 秒。`;
-        return failHyperframesFreeformSection(
-          awemeId,
-          runId,
-          'audio',
-          message,
-          options,
-          { code: 'tts_actual_duration_over_budget', missing: [], details, error: message },
-          operationId,
-        );
-      }
     }
-
-
-
-    const sceneTtsValue = {
-
-      ...(result.scene_tts || {}),
-
-      status: result.scene_tts?.status || 'done',
-
-      message: result.message || result.scene_tts?.message || '高级成片音频已生成。',
-
-      updated_at: result.scene_tts?.updated_at || new Date().toISOString(),
-
-    };
-
-    const timedPlan = storyboardTiming.buildTimedStoryboardPlan({
-      storyboardPlan: {
-        target_duration_sec: targetDurationSec,
-        scenes,
-      },
-      sceneTts: sceneTtsValue,
-    });
     const audio = createFreeformAudioValue({
 
       sceneTtsValue,
