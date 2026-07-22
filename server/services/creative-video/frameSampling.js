@@ -583,7 +583,9 @@ function measureRgbFrameMotion(previous, current, width, height) {
 }
 
 async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runCommand, width = 160, height = 90, fps = 2, maxFrames = 24, duration = 0 }) {
-  const sampleFps = positiveNumber(duration) ? Math.min(fps, maxFrames / duration) : fps;
+  const durationValue = positiveNumber(duration);
+  const capped = Boolean(durationValue && maxFrames > 1 && durationValue * fps > maxFrames);
+  const sampleFps = capped ? (maxFrames - 1) / durationValue : fps;
   const rawPath = path.join(workDir, 'frames.rgb');
   await fsp.mkdir(workDir, { recursive: true });
   await fsp.rm(rawPath, { force: true });
@@ -592,7 +594,7 @@ async function extractRawFrameMetrics({ projectDir, workDir, videoPath, runComma
     '-i',
     videoPath,
     '-vf',
-    `fps=${sampleFps},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
+    `${capped ? 'tpad=stop_mode=clone:stop=-1,' : ''}fps=${sampleFps},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
     '-frames:v',
     String(maxFrames),
     '-f',
