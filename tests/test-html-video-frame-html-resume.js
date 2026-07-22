@@ -14,6 +14,7 @@ aiImageModel.isConfigured = async () => false;
 
 const frameHtmlAgent = require('../server/services/creative-video/html-video/frameHtmlAgent');
 const frameHtmlPhase = require('../server/services/creative-video/html-video/frameHtmlPhase');
+const contentGraphPhase = require('../server/services/creative-video/html-video/contentGraphPhase');
 const { materializeSceneImageSequenceDom } = require('../server/services/creative-video/html-video/sceneImageSequenceDom');
 const visualPlanService = require('../server/services/creative-video/html-video/visualPlanService');
 const { planFocusCues } = require('../server/services/creative-video/html-video/focusCuePlanner');
@@ -177,7 +178,7 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
   markCheckpointStage(project, 'content_graph', {
     status: 'done',
     path: 'content-graph.json',
-    output_hash: 'graph-out',
+    output_hash: contentGraphPhase.hashContentGraph(graph),
   });
   // P1-2 语义：checkpoint 无指纹一律不复用——fixture 按生产展开路径（visualPlan 编排 + beat 展开）
   // 现算各 scene 的输入指纹，与 resume 时 frameHtmlPhase 现算值逐字节一致
@@ -270,7 +271,7 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
   return { projectDir };
 }
 
-async function runWorkflow({ rootDir, workflowId, runId, aiTextModel, target = {}, services = {}, sceneSpecOverride = null, creativeContextOverride = null }) {
+async function runWorkflow({ rootDir, workflowId, runId, aiTextModel, target = {}, services = {}, sceneSpecOverride = null, creativeContextOverride = null, reuseContentGraph = false }) {
   return workflow.generateHtmlVideo({
     workflowId,
     runId,
@@ -278,6 +279,7 @@ async function runWorkflow({ rootDir, workflowId, runId, aiTextModel, target = {
     sceneSpec: sceneSpecOverride || sceneSpec(),
     creativeContext: creativeContextOverride || { input: { raw_text: '三帧恢复测试' } },
     target: { generate_audio: false, ...target },
+    reuseContentGraph,
     skipValidation: true,
     services: {
       aiTextModel,
@@ -805,6 +807,143 @@ async function main() {
       );
     }
 
+    // Content Graph resume：legacy 缺 hash 允许一次兼容，随后补齐 required、canonical 与 checkpoint。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-content-graph-finalize-resume-'));
+      const workflowId = '202606260000000022_graph_finalize_resume';
+      const runId = 'run_graph_finalize_resume';
+      const asset = {
+        id: 'upload_resume_required',
+        file_name: 'resume-required.png',
+        requirement: 'required',
+        media_type: 'image',
+        status: 'ready',
+        path: 'assets/resume-required.png',
+      };
+      const creativeContext = {
+        input: { raw_text: 'S01 使用 resume-required.png。' },
+        asset_context: { assets: [asset] },
+      };
+      const { projectDir } = await setupProject(rootDir, workflowId, runId, {
+        projectAssets: [asset],
+        assetContext: creativeContext,
+      });
+      const legacyProject = await projectStore.loadProject(projectDir);
+      markCheckpointStage(legacyProject, 'content_graph', { input_hash: '', output_hash: '' });
+      await projectStore.saveProject(projectDir, legacyProject);
+
+      let graphModelCalls = 0;
+      frameHtmlAgent.generateFrameHtml = async args => ({ success: true, html: validHtml(args.node.id, args.node.id) });
+      const run = () => runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        creativeContextOverride: creativeContext,
+        aiTextModel: {
+          async callTextModel() {
+            graphModelCalls += 1;
+            throw new Error('合法 canonical graph 不应重新调用模型。');
+          },
+        },
+      });
+      const first = await run();
+      assert.equal(first.success, true);
+      assert.equal(graphModelCalls, 0);
+      const canonicalPath = path.join(projectDir, 'content-graph.json');
+      const firstCanonicalText = await fs.readFile(canonicalPath, 'utf8');
+      const firstCanonical = JSON.parse(firstCanonicalText);
+      assert.deepEqual(firstCanonical.nodes[0].asset_refs.map(ref => ref.asset_id), ['upload_resume_required']);
+      const firstProject = await projectStore.loadProject(projectDir);
+      const firstCheckpoint = firstProject.generation_checkpoint.stages.content_graph;
+      assert.match(firstCheckpoint.input_hash, /^[a-f0-9]{64}$/);
+      assert.equal(firstCheckpoint.output_hash, contentGraphPhase.hashContentGraph(firstCanonical));
+      assert.equal(firstCheckpoint.path, 'content-graph.json');
+      assert.equal(firstCheckpoint.reused, true);
+      assert.ok(firstProject.content_graph.nodes.some(node => (
+        (node.asset_refs || []).some(ref => ref.asset_id === 'upload_resume_required')
+      )), '展开后的 project Graph 必须保留修复后的 required 引用');
+
+      const second = await run();
+      assert.equal(second.success, true, '素材水合后的同输入 hash 必须稳定并继续复用');
+      assert.equal(graphModelCalls, 0);
+      assert.equal(await fs.readFile(canonicalPath, 'utf8'), firstCanonicalText, '二次 resume 不得重复改写 canonical Graph');
+      const secondCanonical = JSON.parse(firstCanonicalText);
+      assert.deepEqual(secondCanonical.nodes[0].asset_refs.map(ref => ref.asset_id), ['upload_resume_required']);
+    }
+
+    // Content Graph resume：已记录的 output/input hash 不匹配时拒绝复用。
+    for (const mismatch of ['output', 'input', 'status']) {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), `html-video-content-graph-${mismatch}-mismatch-`));
+      const workflowId = `202606260000000023_graph_${mismatch}_mismatch`;
+      const runId = `run_graph_${mismatch}_mismatch`;
+      const { projectDir } = await setupProject(rootDir, workflowId, runId);
+      if (mismatch === 'output') {
+        await writeFile(path.join(projectDir, 'content-graph.json'), `${JSON.stringify(contentGraph('漂移内容图'), null, 2)}\n`);
+      } else {
+        const project = await projectStore.loadProject(projectDir);
+        markCheckpointStage(project, 'content_graph', mismatch === 'input'
+          ? { input_hash: 'f'.repeat(64) }
+          : { status: 'pending' });
+        await projectStore.saveProject(projectDir, project);
+      }
+      frameHtmlAgent.generateFrameHtml = async () => { throw new Error('hash 不匹配时不得进入 Frame HTML。'); };
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        reuseContentGraph: true,
+        aiTextModel: { async callTextModel() { throw new Error('显式复用失败时不得调用模型。'); } },
+      });
+      assert.equal(result.success, false);
+      assert.ok((result.diagnostics || []).some(item => item.code === 'content_graph_reuse_missing'));
+    }
+
+    // Content Graph resume：任一旧节点已有 5 张 required 时结构化阻断，原 canonical/checkpoint 保持不变。
+    {
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-content-graph-capacity-resume-'));
+      const workflowId = '202606260000000024_graph_capacity_resume';
+      const runId = 'run_graph_capacity_resume';
+      const assets = Array.from({ length: 5 }, (_, index) => ({
+        id: `upload_resume_capacity_${index + 1}`,
+        file_name: `resume-capacity-${index + 1}.png`,
+        requirement: 'required',
+        media_type: 'image',
+        status: 'ready',
+        path: `assets/resume-capacity-${index + 1}.png`,
+      }));
+      const graph = contentGraph('resume required 容量');
+      graph.nodes[0].asset_refs = assets.map(asset => ({
+        asset_id: asset.id, usage: 'subject', reason: '旧 canonical 引用',
+      }));
+      const { projectDir } = await setupProject(rootDir, workflowId, runId, {
+        contentGraph: graph,
+        projectAssets: assets,
+        assetContext: { asset_context: { assets } },
+      });
+      const beforeCanonical = await fs.readFile(path.join(projectDir, 'content-graph.json'), 'utf8');
+      const beforeStage = (await projectStore.loadProject(projectDir)).generation_checkpoint.stages.content_graph;
+      frameHtmlAgent.generateFrameHtml = async () => { throw new Error('容量失败不得进入 Frame HTML。'); };
+      const result = await runWorkflow({
+        rootDir,
+        workflowId,
+        runId,
+        reuseContentGraph: true,
+        creativeContextOverride: { asset_context: { assets } },
+        aiTextModel: { async callTextModel() { throw new Error('容量失败不得调用模型。'); } },
+      });
+      assert.equal(result.success, false);
+      const diagnostic = (result.diagnostics || []).find(item => item.code === 'required_asset_scene_capacity_exceeded');
+      assert.deepEqual(diagnostic.details, {
+        scene_id: 'scene_01',
+        asset_ids: assets.map(asset => asset.id),
+        max_assets: 4,
+      });
+      assert.equal(diagnostic.retryable, false);
+      assert.equal(diagnostic.fallback_allowed, false);
+      assert.equal(await fs.readFile(path.join(projectDir, 'content-graph.json'), 'utf8'), beforeCanonical);
+      assert.deepEqual((await projectStore.loadProject(projectDir)).generation_checkpoint.stages.content_graph, beforeStage);
+    }
+
     // C-04 retry E2E：必须走生产 defaultRetryFrameHtmlAction → generateHtmlVideo →
     // shouldReuseFrameHtml；scene_html checkpoint 使用 scene:<scene_id> 键，定向重建目标 Scene。
     {
@@ -850,7 +989,9 @@ async function main() {
       project.target = { duration_sec: 4, aspect_ratio: '9:16', generate_audio: false, autoSfxEnabled: false };
       project.visual_plan = { ...visualPlan, beats: visualPlan.beats.map(({ source_scene, ...beat }) => beat) };
       project.generation_checkpoint.scene_spec_hash = computeSceneSpecCheckpointHash(retrySceneSpec);
-      markCheckpointStage(project, 'content_graph', { status: 'done', path: 'content-graph.json', output_hash: 'graph-hash' });
+      markCheckpointStage(project, 'content_graph', {
+        status: 'done', path: 'content-graph.json', output_hash: contentGraphPhase.hashContentGraph(graph),
+      });
       markCheckpointFrame(project, 'frame_html', 'scene:scene_01', {
         status: 'done', html_path: firstHtmlPath, input_fingerprint: fingerprints.get('scene:scene_01'), output_hash: 'first-old-hash',
       });

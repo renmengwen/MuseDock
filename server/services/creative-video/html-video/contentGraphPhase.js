@@ -19,6 +19,15 @@ function sha256(value) {
   return crypto.createHash('sha256').update(String(value || '')).digest('hex');
 }
 
+function buildContentGraphInput({ sceneSpec = {}, creativeContext = {}, target = {} } = {}) {
+  const prompt = contentGraphAgent.buildContentGraphPrompt({ sceneSpec, creativeContext, target });
+  return { prompt, inputHash: sha256(prompt) };
+}
+
+function hashContentGraph(graph = {}) {
+  return sha256(JSON.stringify(graph));
+}
+
 async function report(onProgress, event) {
   if (typeof onProgress !== 'function') return;
   try {
@@ -65,13 +74,19 @@ function contentGraphMatchesSceneSpec(graph = {}, sceneSpec = null) {  if (!scen
   return expected.length === actual.length && expected.every((sceneId, index) => sceneId === actual[index]);
 }
 
-function loadCheckpointContentGraph(projectDir, project = {}) {
-  const graphPath = String(project.generation_checkpoint?.stages?.content_graph?.path || '').trim();
+function loadCheckpointContentGraph(projectDir, project = {}, expectedInputHash = '') {
+  const checkpoint = project.generation_checkpoint?.stages?.content_graph || {};
+  if (checkpoint.status !== 'done') return null;
+  const graphPath = String(checkpoint.path || '').trim();
   if (!graphPath) return null;
+  const savedInputHash = String(checkpoint.input_hash || '').trim();
+  if (savedInputHash && expectedInputHash && savedInputHash !== expectedInputHash) return null;
   try {
     const absolutePath = projectStore.resolveProjectPath(projectDir, graphPath);
     if (!fs.existsSync(absolutePath)) return null;
     const graph = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+    const savedOutputHash = String(checkpoint.output_hash || '').trim();
+    if (savedOutputHash && savedOutputHash !== hashContentGraph(graph)) return null;
     return hasUsableContentGraph(graph) ? graph : null;
   } catch {
     return null;
@@ -275,6 +290,20 @@ function bindExplicitRequiredUploads(graph = {}, sceneSpec = {}, creativeContext
   return { success: true, graph };
 }
 
+function finalizeContentGraph(graph = {}, sceneSpec = {}, creativeContext = {}) {
+  const finalized = bindExplicitRequiredUploads(graph, sceneSpec, creativeContext);
+  if (!finalized.success) return finalized;
+  const graphBinding = validateGraphMatchesSceneSpec(finalized.graph, sceneSpec);
+  if (!graphBinding.ok) {
+    return {
+      success: false,
+      message: CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
+      diagnostics: [contentGraphSceneSpecMismatchDiagnostic(graphBinding)],
+    };
+  }
+  return finalized;
+}
+
 async function retryContentGraphAfterMismatch({
   model,
   sceneSpec,
@@ -309,11 +338,7 @@ async function retryContentGraphAfterMismatch({
 }
 
 async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext, target, onProgress, project, projectDir } = {}) {
-  const originalPrompt = contentGraphAgent.buildContentGraphPrompt({
-    sceneSpec,
-    creativeContext,
-    target,
-  });
+  const { prompt: originalPrompt, inputHash } = buildContentGraphInput({ sceneSpec, creativeContext, target });
   let graphAi = ensureGraphAiHasText(await callTextModel(model, originalPrompt, {
     audit: {
       agent: AGENTS.contentGraph,
@@ -324,10 +349,10 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
   }));
   const diagnostics = [];
   const finalizeGraph = graph => {
-    const finalized = bindExplicitRequiredUploads(graph, sceneSpec, creativeContext);
+    const finalized = finalizeContentGraph(graph, sceneSpec, creativeContext);
     return finalized.success
-      ? { success: true, contentGraph: finalized.graph, diagnostics, inputHash: sha256(originalPrompt) }
-      : { ...finalized, diagnostics: [...finalized.diagnostics, ...diagnostics], inputHash: sha256(originalPrompt) };
+      ? { success: true, contentGraph: finalized.graph, diagnostics, inputHash }
+      : { ...finalized, diagnostics: [...finalized.diagnostics, ...diagnostics], inputHash };
   };
   let retriedForProviderMissing = false;
 
@@ -368,7 +393,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
       success: false,
       message: graphAi.message || 'content graph 生成失败。',
       diagnostics: [graphAiFailureDiagnostic(graphAi)],
-      inputHash: sha256(originalPrompt),
+      inputHash,
     };
   }
 
@@ -395,7 +420,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
         retryable: true,
         repair_action: 'retry_content_graph',
       }),
-      inputHash: sha256(originalPrompt),
+      inputHash,
     };
   }
   if (sceneSpec) {
@@ -419,7 +444,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
             ...diagnostics,
             contentGraphSceneSpecMismatchDiagnostic(graphBinding),
           ],
-          inputHash: sha256(originalPrompt),
+          inputHash,
         };
       }
       graphParsed = contentGraphAgent.parseContentGraphResponse(graphAi.text, sceneSpec, { creativeContext });
@@ -435,7 +460,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
             retryable: true,
             repair_action: 'retry_content_graph',
           }),
-          inputHash: sha256(originalPrompt),
+          inputHash,
         };
       }
       const retryBinding = validateGraphMatchesSceneSpec(graphParsed.graph, sceneSpec);
@@ -447,7 +472,7 @@ async function generateContentGraphWithRetry({ model, sceneSpec, creativeContext
             ...diagnostics,
             contentGraphSceneSpecMismatchDiagnostic(retryBinding),
           ],
-          inputHash: sha256(originalPrompt),
+          inputHash,
         };
       }
     }
@@ -589,6 +614,8 @@ function expandContentGraphToSceneEntries(graph = {}, visualPlan = {}) {
 
 module.exports = {
   sha256,
+  buildContentGraphInput,
+  hashContentGraph,
   report,
   callTextModel,
   hasUsableContentGraph,
@@ -596,6 +623,7 @@ module.exports = {
   loadCheckpointContentGraph,
   CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
   contentGraphSceneSpecMismatchDiagnostic,
+  finalizeContentGraph,
   generateContentGraphWithRetry,
   expandContentGraphToVisualBeats,
   expandContentGraphToSceneEntries,

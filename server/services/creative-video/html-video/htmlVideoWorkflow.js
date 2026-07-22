@@ -39,11 +39,13 @@ const {
   callTextModel,
   report,
   sha256,
+  buildContentGraphInput,
+  hashContentGraph,
   hasUsableContentGraph,
-  contentGraphMatchesSceneSpec,
   loadCheckpointContentGraph,
   CONTENT_GRAPH_SCENE_SPEC_MISMATCH_MESSAGE,
   contentGraphSceneSpecMismatchDiagnostic,
+  finalizeContentGraph,
   generateContentGraphWithRetry,
   expandContentGraphToVisualBeats,
   expandContentGraphToSceneEntries,
@@ -415,14 +417,31 @@ function mergeFrameStatsIntoDecisions({ visualDecisions, renderDecisions, statsB
   if (Array.isArray(renderDecisions)) for (const decision of renderDecisions) applyTo(decision);
 }
 
-function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null) {
-  if (!project) return null;
-  if (!resumeArtifactsMatch(project, sceneSpec)) return null;
-  const checkpointGraph = loadCheckpointContentGraph(projectDir, project);
-  if (checkpointGraph && checkpointGraph.expanded_from_scene_graph !== true && contentGraphMatchesSceneSpec(checkpointGraph, sceneSpec)) {
-    return checkpointGraph;
+function resolveResumeContentGraph(projectDir, project = {}, sceneSpec = null, creativeContext = {}, target = {}) {
+  if (!project || !resumeArtifactsMatch(project, sceneSpec)) return { success: true, reused: false };
+  const { inputHash } = buildContentGraphInput({ sceneSpec, creativeContext, target });
+  const checkpointGraph = loadCheckpointContentGraph(projectDir, project, inputHash);
+  if (!checkpointGraph || checkpointGraph.expanded_from_scene_graph === true) {
+    return { success: true, reused: false };
   }
-  return null;
+  const originalOutputHash = hashContentGraph(checkpointGraph);
+  const finalized = finalizeContentGraph(checkpointGraph, sceneSpec, creativeContext);
+  if (!finalized.success) {
+    if (finalized.diagnostics?.some(item => item.code === 'required_asset_scene_capacity_exceeded')) {
+      return { ...finalized, reused: false, inputHash };
+    }
+    return { success: true, reused: false };
+  }
+  const outputHash = hashContentGraph(finalized.graph);
+  return {
+    success: true,
+    reused: true,
+    contentGraph: finalized.graph,
+    inputHash,
+    outputHash,
+    path: String(project.generation_checkpoint?.stages?.content_graph?.path || '').trim(),
+    changed: outputHash !== originalOutputHash,
+  };
 }
 
 function hydrateProjectAssetsIntoCreativeContext(creativeContext = {}, project = {}) {
@@ -730,15 +749,42 @@ async function generateHtmlVideo(options = {}) {
   let project = resumeProject || undefined;
 
   const resumeAllowed = resumeArtifactsMatch(resumeProject || {}, sceneSpec);
-  let contentGraph = resolveResumeContentGraph(projectDir, resumeProject, sceneSpec);
-  const reusedContentGraph = Boolean(contentGraph);
+  const resumeGraphResult = resolveResumeContentGraph(
+    projectDir,
+    resumeProject,
+    sceneSpec,
+    creativeContext,
+    templateRenderTarget,
+  );
+  if (!resumeGraphResult.success) {
+    const graphDiagnostics = normalizeDiagnostics(resumeGraphResult.diagnostics, {
+      code: 'content_graph_failed',
+      stage: 'ai-content-graph',
+      sub_stage: 'content_graph',
+      user_message: resumeGraphResult.message || 'content graph 恢复校验失败。',
+    });
+    return failure(resumeGraphResult.message || 'content graph 恢复校验失败。', [...diagnostics, ...graphDiagnostics], {
+      html_video_project_path: projectDir,
+      project_dir: projectDir,
+      project: resumeProject,
+    });
+  }
+  let contentGraph = resumeGraphResult.contentGraph || null;
+  const reusedContentGraph = resumeGraphResult.reused === true;
   if (contentGraph) {
+    let contentGraphPath = resumeGraphResult.path;
+    if (resumeGraphResult.changed) {
+      contentGraphPath = await projectStore.saveContentGraph(projectDir, contentGraph);
+    }
     project = await projectStore.writeProjectJson(projectDir, current => {
       attachVisualRouting(current);
       current.generation_checkpoint.scene_spec_hash = currentSceneSpecHash;
       current.content_graph = contentGraph;
       markCheckpointStage(current, 'content_graph', {
         status: 'done',
+        path: contentGraphPath,
+        input_hash: resumeGraphResult.inputHash,
+        output_hash: resumeGraphResult.outputHash,
         reused: true,
         diagnostic_code: '',
       });
@@ -857,7 +903,7 @@ async function generateHtmlVideo(options = {}) {
         status: 'done',
         path: contentGraphPath,
         input_hash: graphResult.inputHash || '',
-        output_hash: sha256(JSON.stringify(contentGraph)),
+        output_hash: hashContentGraph(contentGraph),
         diagnostic_code: '',
         reused: false,
       });
