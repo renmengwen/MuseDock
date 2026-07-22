@@ -110,8 +110,13 @@ function cameraRegionGeometry(region, trustLevel) {
   if (trustLevel === 'C') {
     const centerX = x + width / 2;
     const centerY = y + height / 2;
-    const expandedWidth = Math.min(1, width * CAMERA_SOFT_REGION_EXPANSION);
-    const expandedHeight = Math.min(1, height * CAMERA_SOFT_REGION_EXPANSION);
+    const softRegionCap = CAMERA_FILL_FACTOR / CAMERA_SOFT_MIN_ZOOM;
+    const expandedWidth = width <= softRegionCap
+      ? Math.min(width * CAMERA_SOFT_REGION_EXPANSION, softRegionCap)
+      : width;
+    const expandedHeight = height <= softRegionCap
+      ? Math.min(height * CAMERA_SOFT_REGION_EXPANSION, softRegionCap)
+      : height;
     return {
       region: {
         x: Math.min(1 - expandedWidth, Math.max(0, centerX - expandedWidth / 2)),
@@ -323,6 +328,27 @@ function buildShotTimelineSource() {
 })();`;
 }
 
+function buildCanvasShellRuntimeSource() {
+  return `(function () {
+  var canvases = document.querySelectorAll('[data-hv-canvas]');
+  for (var i = 0; i < canvases.length; i++) {
+    var canvas = canvases[i];
+    var canvasRect = canvas.getBoundingClientRect();
+    if (canvasRect.width <= 0 || canvasRect.height <= 0) continue;
+    for (var j = 0; j < canvas.children.length; j++) {
+      var layer = canvas.children[j];
+      if (layer.getAttribute('aria-hidden') !== 'true'
+        || layer.matches('[data-hv-image-sequence],[data-hv-layer="captions"]')
+        || layer.querySelector('[data-hv-image-sequence],[data-hv-layer="captions"]')) continue;
+      var rect = layer.getBoundingClientRect();
+      if (rect.width + 0.5 < canvasRect.width * 0.95
+        || rect.height + 0.5 < canvasRect.height * 0.95) continue;
+      layer.style.setProperty('background-color', 'transparent', 'important');
+    }
+  }
+})();`;
+}
+
 let cameraMathModuleSource = '';
 // cameraMath 复用 playbackClock 的"Node 源码字符串注入浏览器"模式：整文件读入 + module shim，
 // 包在运行时 IIFE 内不落任何新全局；cameraMath.js 本身只读不改。
@@ -409,7 +435,8 @@ ${cameraMathSource()}
         max_zoom: cue.max_zoom
       });
       if (!result || !result.applied || !result.image_rect
-        || (Number.isFinite(cue.min_zoom) && result.zoom < cue.min_zoom)) continue;
+        || (Number.isFinite(cue.min_zoom)
+          && Number(result.zoom.toFixed(3)) < Number(cue.min_zoom.toFixed(3)))) continue;
       var baseScale = Math.min(width / imageWidth, height / imageHeight);
       var baseLeft = (width - imageWidth * baseScale) / 2;
       var baseTop = (height - imageHeight * baseScale) / 2;
@@ -503,7 +530,7 @@ function renderDom(contract) {
     `<section data-hv-image-sequence="true" data-sequence-mode="${escapeHtml(contract.mode)}" data-scene-id="${escapeHtml(contract.scene_id)}">`,
     figures,
     '</section>',
-    `<script data-hv-shot-clock="true">${buildPlaybackClockSource()}${buildShotTimelineSource()}${cameraRuntime}<\/script>`,
+    `<script data-hv-shot-clock="true">${buildPlaybackClockSource()}${buildShotTimelineSource()}${buildCanvasShellRuntimeSource()}${cameraRuntime}<\/script>`,
     END_MARKER,
   ].join('');
 }

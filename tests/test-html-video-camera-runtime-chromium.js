@@ -31,8 +31,15 @@ const asset = {
       id: 'target_c_wide',
       label: '目标',
       trust_level: 'C',
-      region: { x: 0.2, y: 0.1, width: 0.6, height: 0.3 },
+      region: { x: 0.2, y: 0.1, width: 0.6, height: 0.2 },
       focus_point: { x: 0.21, y: 0.11 },
+    },
+    {
+      id: 'target_c_full',
+      label: '目标',
+      trust_level: 'C',
+      region: { x: 0.05, y: 0.05, width: 0.9, height: 0.9 },
+      focus_point: { x: 0.5, y: 0.5 },
     },
     {
       id: 'target_bottom',
@@ -182,7 +189,15 @@ async function transformAt(page, timeSec) {
 
     await page.setContent(html(true, { regionId: 'target_c_wide', zoom: 'soft' }));
     await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
-    assert.equal(await transformAt(page, 2), '', '不足 1.15 倍的宽 C 区域必须保持全景，不得只做平移');
+    const cappedSoft = await transformAt(page, 2);
+    const cappedSoftScale = Number(cappedSoft.match(/scale\(([^)]+)\)/)?.[1]);
+    assert.ok(cappedSoftScale >= 1.15, `原本可达 1.15 倍的 C 区域扩张后仍必须执行聚焦，实际 ${cappedSoft}`);
+    const cappedCue = await page.locator('[data-hv-shot]').evaluate(figure => JSON.parse(figure.dataset.cameraCues)[0]);
+    assert.equal(Number(cappedCue.region.width.toFixed(6)), Number((0.72 / 1.15).toFixed(6)), 'C 区域每轴扩张必须封顶在 fillFactor/minZoom');
+
+    await page.setContent(html(true, { regionId: 'target_c_full', zoom: 'soft' }));
+    await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
+    assert.equal(await transformAt(page, 2), '', '原本超过扩张 cap 的全幅 C 区域不得缩小后制造聚焦');
     assert.equal(
       await page.locator('[data-caption-id="cap_1"]').getAttribute('data-hv-active'),
       'true',
@@ -199,6 +214,25 @@ async function transformAt(page, timeSec) {
     await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
     assert.equal(await transformAt(page, 2), '', '无 camera_zoom cue 的 Shot 不得改变 foreground transform');
     assert.ok(!html(false).includes('computeCameraTransform'), '无 cue 输出不得注入摄影机运行时');
+
+    const obscuringShell = shell.replace(
+      '<body data-hv-canvas>',
+      '<body data-hv-canvas><div aria-hidden="true" class="任意视觉底壳"></div><style>.任意视觉底壳{position:absolute;inset:0;background-color:#f00!important;background-image:linear-gradient(90deg,transparent 0 80%,rgba(0,255,0,.7))}</style>',
+    );
+    const revealed = materializeSceneImageSequenceDom({
+      html: obscuringShell,
+      node: node(false),
+      creativeContext: { asset_context: { assets: [asset] } },
+    });
+    assert.equal(revealed.success, true, revealed.message);
+    await page.setContent(revealed.html.replaceAll('../assets/a.svg', imageUrl));
+    await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
+    const shellStyle = await page.locator('.任意视觉底壳').evaluate(element => ({
+      color: getComputedStyle(element).backgroundColor,
+      image: getComputedStyle(element).backgroundImage,
+    }));
+    assert.equal(shellStyle.color, 'rgba(0, 0, 0, 0)', '任意类名的全画布 aria-hidden 实色壳必须只清除背景色');
+    assert.match(shellStyle.image, /linear-gradient/, '局部渐变 overlay 必须保留');
   } finally {
     await browser.close();
   }

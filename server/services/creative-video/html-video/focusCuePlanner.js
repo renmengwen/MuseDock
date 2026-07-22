@@ -9,6 +9,7 @@ const ZOOM_TRUST_LEVELS = new Set(['A', 'B', 'C']);
 const CUE_TRUST_LEVELS = new Set(['A', 'B', 'C']);
 const LATIN_ALNUM_RE = /[A-Za-z0-9]/;
 const HAN_RE = /\p{Script=Han}/u;
+const MODEL_VERSION_RE = /^[A-Za-z]+-\d+(?:\.\d+)+$/;
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -120,12 +121,24 @@ function keywordOccurrence(captionText, term) {
   return keywordOccurrenceMatch(captionText, term)?.keyword || '';
 }
 
+function mainCanvasOccurrence(captionText, regions) {
+  const occurrence = String(captionText || '').match(/主[\p{Script=Han}]{0,6}画布/u);
+  if (!occurrence) return null;
+  const canvasRegions = regions.filter(region => (
+    [region.label, ...(Array.isArray(region.aliases) ? region.aliases : [])]
+      .map(text)
+      .some(term => /(?:主|视频|编辑|预览).*(?:画布|画面|预览区)/u.test(term))
+  ));
+  return canvasRegions.length === 1 ? { region: canvasRegions[0], keyword: occurrence[0] } : null;
+}
+
 function resolveCaptionFocus(caption, regions) {
   const captionText = typeof caption.text === 'string' ? caption.text : '';
   const hits = [];
   for (const region of regions) {
     const terms = [region.label, ...(Array.isArray(region.aliases) ? region.aliases : [])];
     for (const term of terms) {
+      if (MODEL_VERSION_RE.test(text(term))) continue;
       const keyword = keywordOccurrence(captionText, text(term));
       if (!keyword) continue;
       hits.push({ region, keyword });
@@ -133,7 +146,8 @@ function resolveCaptionFocus(caption, regions) {
     }
   }
   // 同一 caption 命中多个 region 时无法消歧，放弃聚焦。
-  return hits.length === 1 ? hits[0] : null;
+  if (hits.length === 1) return hits[0];
+  return hits.length === 0 ? mainCanvasOccurrence(captionText, regions) : null;
 }
 
 function cueId(shot, regionIdValue, captionIds) {

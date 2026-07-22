@@ -554,6 +554,40 @@ function firstShot(visualPlan) {
   assert.notEqual(cues[0].id, cues[1].id);
 }
 
+// 字面匹配失败后，仅允许唯一“主…画布”复合区域承接同义 CJK 画布描述。
+{
+  const mainCanvas = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '主视频画布承载编辑预览' }],
+    regions: [canonicalRegion({ id: 'r_canvas', label: '主预览画布', aliases: ['视频画面', '编辑预览区'], trust: 'C' })],
+    duration: 2,
+  });
+  planFocusCues(mainCanvas);
+  const cue = firstShot(mainCanvas.visualPlan).camera.focus_cues[0];
+  assert.equal(cue.region_id, 'r_canvas');
+  assert.equal(cue.keyword, '主视频画布', '同义画布 fallback 仍必须返回 caption 原文关键词');
+
+  const ambiguous = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: '主视频画布承载编辑预览' }],
+    regions: [
+      canonicalRegion({ id: 'r_canvas_a', label: '主预览画布', trust: 'C' }),
+      canonicalRegion({ id: 'r_canvas_b', label: '编辑画面', trust: 'C' }),
+    ],
+    duration: 2,
+  });
+  planFocusCues(ambiguous);
+  assert.equal('camera' in firstShot(ambiguous.visualPlan), false, '多个画布候选无法消歧时必须 no-op');
+
+  for (const [caption, region] of [
+    ['站在界面前的人物保持完整', canonicalRegion({ id: 'r_head', label: '人物头部', trust: 'C' })],
+    ['查看小按钮', canonicalRegion({ id: 'r_help', label: '帮助按钮', trust: 'C' })],
+    ['GPT-5.5 模型可用', canonicalRegion({ id: 'r_gpt', label: 'GPT-5.5', trust: 'C' })],
+  ]) {
+    const input = fixture({ captions: [{ id: 'cap_01', start: 0, end: 2, text: caption }], regions: [region], duration: 2 });
+    planFocusCues(input);
+    assert.equal('camera' in firstShot(input.visualPlan), false, `${caption} 不得被主画布 fallback 误绑定`);
+  }
+}
+
 // 纵深 2：一个 beat 含多个 shot 时按 shot 独立 enrich——各用自己的 asset regions 与 caption_ids，
 // 互不串扰；无命中的 shot 不写 camera。
 {
