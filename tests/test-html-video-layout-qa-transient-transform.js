@@ -7,7 +7,8 @@ const { inspectFrameHtmlLayout } = require('../server/services/creative-video/ht
 const resolution = { width: 640, height: 360 };
 
 function html({ overflow = 'visible', animation = 'self', overlap = false, viewport = false, baseOffset = 0 }) {
-  const top = viewport ? 330 : 100;
+  const top = viewport ? 345 : 100;
+  const cardHeight = overlap ? 19 : 40;
   const selfAnimation = animation === 'self' ? 'animation:safeRise 4s linear both' : animation === 'none' ? 'transform:translateY(30px)' : '';
   const wrapperAnimation = animation === 'ancestor' ? 'animation:safeRise 11.95s linear both'
     : animation === 'constant' ? 'animation:constantRise 4s linear both'
@@ -22,11 +23,11 @@ function html({ overflow = 'visible', animation = 'self', overlap = false, viewp
   </script>` : '';
   return `<!doctype html><html><head><style>
     html,body{width:640px;height:360px;margin:0;overflow:hidden}
-    .card{position:absolute;left:100px;top:${top}px;width:300px;height:40px;overflow:${overflow}}
+    .card{position:absolute;left:100px;top:${top}px;width:300px;height:${cardHeight}px;overflow:${overflow}}
     .outer{${outerAnimation}}
     .wrapper{${wrapperAnimation}}
     .moving{position:relative;top:${baseOffset}px;margin:0;width:280px;height:32px;${selfAnimation}}
-    .overlap{position:absolute;left:0;top:28px;margin:0;width:280px;height:32px}
+    .overlap{position:absolute;left:0;top:15px;margin:0;width:280px;height:32px}
     @keyframes safeRise{0%{transform:translateY(30px)}20%,100%{transform:translateY(0)}}
     @keyframes constantRise{from{transform:translateY(30px)}to{transform:translateY(30px)}}
     @keyframes longRise{from{transform:translateY(30px)}to{transform:translateY(0)}}
@@ -69,7 +70,8 @@ async function inspect(dir, name, source, durationSec = 1) {
     assert.ok(outsideContainer.issues.some(issue => issue.code === 'text_out_of_container'));
 
     for (const overflow of ['hidden', 'clip']) {
-      const clipped = await inspect(dir, `${overflow}-running`, html({ overflow }));
+      // 夹具在动画全生命周期内都越界，不能因墙钟采样相位偶然进入 12px 容差。
+      const clipped = await inspect(dir, `${overflow}-running`, html({ overflow, baseOffset: 30 }));
       assert.equal(clipped.success, false, `${overflow} 容器不得豁免动画瞬态越界：${JSON.stringify(clipped)}`);
       assert.ok(clipped.issues.some(issue => issue.code === 'text_out_of_container'));
     }
@@ -83,15 +85,24 @@ async function inspect(dir, name, source, durationSec = 1) {
     assert.ok(unrelatedAnimation.issues.some(issue => issue.code === 'text_out_of_container'));
 
     for (const animation of ['constant', 'infinite', 'long']) {
-      const unsafe = await inspect(dir, `visible-${animation}`, html({ animation }));
+      const unsafe = await inspect(dir, `visible-${animation}`, html({
+        animation,
+        baseOffset: animation === 'constant' ? 0 : 30,
+      }));
       assert.equal(unsafe.success, false, `${animation} 动画不得豁免容器越界`);
       assert.ok(unsafe.issues.some(issue => issue.code === 'text_out_of_container'));
     }
 
-    const truncated = await inspect(dir, 'negative-end-delay', html({ animation: 'negative-end-delay' }), 2);
+    const truncated = await inspect(
+      dir,
+      'negative-end-delay',
+      html({ animation: 'negative-end-delay', baseOffset: 30 }),
+      2,
+    );
     assert.equal(truncated.success, false, '负 endDelay 在安全终态前截断的动画不得豁免容器越界');
     assert.ok(truncated.issues.some(issue => issue.code === 'text_out_of_container'));
 
+    // 两段文字在 translateY(0..30px) 的任意相位均重叠超过 25%，且均稳定越出容器容差。
     const overlapping = await inspect(dir, 'visible-overlap', html({ overlap: true }));
     assert.equal(overlapping.success, false, '真实文字重叠必须继续阻断');
     assert.ok(overlapping.issues.some(issue => /overlap/.test(issue.code)));
