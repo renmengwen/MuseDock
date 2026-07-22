@@ -3,6 +3,7 @@ const assert = require('assert/strict');
 const {
   FOCUS_TRANSITION_BUDGET_SEC,
   keywordOccurrence,
+  keywordOccurrenceMatch,
   planFocusCues,
 } = require('../server/services/creative-video/html-video/focusCuePlanner');
 const { computeFrameInputFingerprint } = require('../server/services/creative-video/html-video/frameHtmlPhaseSupport');
@@ -497,6 +498,11 @@ function firstShot(visualPlan) {
   assert.equal(keywordOccurrence('镜头展示人物', '头'), '');
   assert.equal(keywordOccurrence('人物头部特写', '头'), '');
   assert.equal(keywordOccurrence('镜头之后，头，保持', '头'), '头', '拒绝首个词中位置后必须继续扫描独立汉字');
+  assert.equal(keywordOccurrence('𠀀头与头𠀀', '头'), '', 'Supplementary Han 相邻同样必须拒绝');
+  assert.equal(keywordOccurrence('𠀀，头，保持', '头'), '头', 'Supplementary Han 经标点分隔后允许独立汉字');
+  assert.deepEqual(keywordOccurrenceMatch('İSTAR star', 'star'), { index: 1, end: 5, keyword: 'STAR' });
+  assert.deepEqual(keywordOccurrenceMatch('İSTART Star', 'star'), { index: 7, end: 11, keyword: 'Star' });
+  assert.equal(keywordOccurrence('选择 a+b 方案', 'a+b'), 'a+b', 'term 必须按字面量匹配');
 
   const input = fixture({
     captions: [{ id: 'cap_01', start: 0, end: 2, text: '这个镜头缓慢推进' }],
@@ -512,6 +518,14 @@ function firstShot(visualPlan) {
     ['聚焦文本输入框', '文本输入框', '文本输入框'],
     ['顶部橙色过山车轨道', '过山车轨道', '过山车轨道'],
   ]) assert.equal(keywordOccurrence(caption, term), expected);
+
+  const folded = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: 'İSTAR 指向收藏入口' }],
+    regions: [canonicalRegion({ id: 'r_star', label: '收藏按钮', aliases: ['star'], trust: 'A' })],
+    duration: 2,
+  });
+  planFocusCues(folded);
+  assert.equal(firstShot(folded.visualPlan).camera.focus_cues[0].keyword, 'STAR');
 }
 
 // 纵深 1：trust D 的 region 被命中时不生成 cue，但同样打断同 region 合并链

@@ -64,31 +64,46 @@ function usableRegions(asset = {}) {
   ));
 }
 
-// 通用匹配器：label/aliases 对 caption 原文做大小写不敏感包含匹配，返回原文中的实际出现片段。
+// 通用匹配器：在原文 code point 边界上做大小写不敏感扫描，返回原文 UTF-16 索引与实际片段。
 // 拉丁词边界：term 端点是 [A-Za-z0-9] 时，该侧相邻字符不得也是 [A-Za-z0-9]（防 "star" 误命中 "restart"）；
 // 单汉字 term 若紧邻其他汉字则拒绝（防“头”误命中“镜头/头部”）；多字 CJK 保持子串匹配。
 // 被拒绝的位置继续向后扫描。
-function keywordOccurrence(captionText, term) {
-  const needle = term.toLowerCase();
-  if (!needle) return '';
-  const haystack = captionText.toLowerCase();
+function keywordOccurrenceMatch(captionText, term) {
+  const source = String(captionText || '');
+  const query = String(term || '');
+  const needle = query.toLowerCase();
+  if (!needle) return null;
   const boundaryBefore = LATIN_ALNUM_RE.test(needle[0]);
   const boundaryAfter = LATIN_ALNUM_RE.test(needle[needle.length - 1]);
   const singleHan = Array.from(needle).length === 1 && HAN_RE.test(needle);
-  let from = 0;
-  while (from + needle.length <= haystack.length) {
-    const index = haystack.indexOf(needle, from);
-    if (index < 0) return '';
-    const before = Array.from(haystack.slice(0, index)).at(-1) || '';
-    const after = Array.from(haystack.slice(index + needle.length))[0] || '';
-    if ((!boundaryBefore || !LATIN_ALNUM_RE.test(before))
-      && (!boundaryAfter || !LATIN_ALNUM_RE.test(after))
-      && (!singleHan || (!HAN_RE.test(before) && !HAN_RE.test(after)))) {
-      return captionText.slice(index, index + term.length);
-    }
-    from = index + 1;
+  const points = [];
+  let offset = 0;
+  for (const value of source) {
+    points.push({ value, start: offset, end: offset + value.length });
+    offset += value.length;
   }
-  return '';
+  for (let start = 0; start < points.length; start += 1) {
+    let candidate = '';
+    for (let end = start; end < points.length; end += 1) {
+      candidate += points[end].value;
+      const folded = candidate.toLowerCase();
+      if (folded === needle) {
+        const before = points[start - 1]?.value || '';
+        const after = points[end + 1]?.value || '';
+        if ((!boundaryBefore || !LATIN_ALNUM_RE.test(before))
+          && (!boundaryAfter || !LATIN_ALNUM_RE.test(after))
+          && (!singleHan || (!HAN_RE.test(before) && !HAN_RE.test(after)))) {
+          return { index: points[start].start, end: points[end].end, keyword: candidate };
+        }
+      }
+      if (folded.length >= needle.length) break;
+    }
+  }
+  return null;
+}
+
+function keywordOccurrence(captionText, term) {
+  return keywordOccurrenceMatch(captionText, term)?.keyword || '';
 }
 
 function resolveCaptionFocus(caption, regions) {
@@ -190,5 +205,6 @@ function planFocusCues({ visualPlan = {}, creativeContext = {}, sceneSpec = {}, 
 module.exports = {
   FOCUS_TRANSITION_BUDGET_SEC,
   keywordOccurrence,
+  keywordOccurrenceMatch,
   planFocusCues,
 };

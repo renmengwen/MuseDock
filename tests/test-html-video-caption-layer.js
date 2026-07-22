@@ -314,6 +314,8 @@ const { keywordOccurrence } = require('../server/services/creative-video/html-vi
   assert.equal(keywordOccurrence('请 restart 服务', 'star'), '');
   assert.equal(keywordOccurrence('镜头展示人物头部', '头'), '');
   assert.equal(keywordOccurrence('镜头之后，头，保持', '头'), '头');
+  assert.equal(keywordOccurrence('𠀀头与头𠀀', '头'), '');
+  assert.equal(keywordOccurrence('𠀀，头，保持', '头'), '头');
 }
 
 // 无 cue（无注记）时输出与现状字节级一致：不出现 hv-caption-kw，样式块与 item 结构保持原样
@@ -399,6 +401,23 @@ const { keywordOccurrence } = require('../server/services/creative-video/html-vi
     new Map([['c1', '头']]),
   ));
   assert.ok(accepted.includes('镜头之后，<span class="hv-caption-kw">头</span>，保持'));
+
+  const supplementary = renderCaptionLayer(applyFocusKeywords(
+    [{ id: 'c1', start: 0, end: 2, text: '𠀀头，随后，头，保持' }],
+    new Map([['c1', '头']]),
+  ));
+  assert.ok(supplementary.includes('𠀀头，随后，<span class="hv-caption-kw">头</span>，保持'));
+
+  const folded = renderCaptionLayer(applyFocusKeywords(
+    [{ id: 'c1', start: 0, end: 2, text: 'İSTAR Star' }],
+    new Map([['c1', 'star']]),
+  ));
+  assert.ok(folded.includes('İ<span class="hv-caption-kw">STAR</span> Star'), '大小写折叠扩长不得错切原文 STAR');
+  const foldedAfterRejected = renderCaptionLayer(applyFocusKeywords(
+    [{ id: 'c1', start: 0, end: 2, text: 'İSTART Star' }],
+    new Map([['c1', 'star']]),
+  ));
+  assert.ok(foldedAfterRejected.includes('İSTART <span class="hv-caption-kw">Star</span>'), '拒绝词中 STAR 后必须高亮后续独立 Star');
 }
 
 // 找不到关键词：绝不插入旁白中不存在的词、不改动文本内容

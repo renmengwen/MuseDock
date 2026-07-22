@@ -33,29 +33,15 @@ function htmlEscape(value) {
 
 // 懒加载破环：focusCuePlanner → visualPlanService → captionLayer 存在 require 环，
 // 顶层 require 会让 visualPlanService 拿到尚未初始化完成的 captionLayer 导出。
-function plannerKeywordOccurrence(text, term) {
-  return require('./focusCuePlanner').keywordOccurrence(text, term);
+function plannerKeywordOccurrenceMatch(text, term) {
+  return require('./focusCuePlanner').keywordOccurrenceMatch(text, term);
 }
 
-// 在 caption 原文中定位 cue keyword 的首个可接受出现位置（找不到返回 -1）。
-// 候选位置按大小写不敏感顺序枚举，逐个用 planner 的 keywordOccurrence 做唯一边界语义判定：
-// 判定窗口取「候选位置左右各保留一个真实字符」，窗口内该位置的邻接字符（或真实端点）与全文
-// 完全一致，因此接受/拒绝结果与 planner 全文扫描逐位一致（防 "star" 误定位进 "restart"）。
+// 直接复用 planner 返回的原文 UTF-16 区间，避免代理对或大小写折叠长度变化造成二次定位漂移。
 function locateFocusKeyword(captionText, keyword) {
   const text = String(captionText || '');
   const term = String(keyword || '');
-  if (!term) return -1;
-  const haystack = text.toLowerCase();
-  const needle = term.toLowerCase();
-  let from = 0;
-  while (from + needle.length <= haystack.length) {
-    const index = haystack.indexOf(needle, from);
-    if (index < 0) return -1;
-    const window = text.slice(Math.max(0, index - 1), index + needle.length + 1);
-    if (plannerKeywordOccurrence(window, term)) return index;
-    from = index + 1;
-  }
-  return -1;
+  return term ? plannerKeywordOccurrenceMatch(text, term) : null;
 }
 
 // 收集 node（或与其同构的 { metadata } 对象）上全部 focus_cues 的 caption_id → keyword 映射。
@@ -311,14 +297,14 @@ function captionItemHtml(caption) {
   const text = String(caption.text || '').trim();
   const keyword = typeof caption.focus_keyword === 'string' ? caption.focus_keyword.trim() : '';
   if (keyword) {
-    const index = locateFocusKeyword(text, keyword);
-    if (index >= 0) {
+    const match = locateFocusKeyword(text, keyword);
+    if (match) {
       return {
         highlighted: true,
         html: [
-          htmlEscape(text.slice(0, index)),
-          `<span class="hv-caption-kw">${htmlEscape(text.slice(index, index + keyword.length))}</span>`,
-          htmlEscape(text.slice(index + keyword.length)),
+          htmlEscape(text.slice(0, match.index)),
+          `<span class="hv-caption-kw">${htmlEscape(match.keyword)}</span>`,
+          htmlEscape(text.slice(match.end)),
         ].join(''),
       };
     }
