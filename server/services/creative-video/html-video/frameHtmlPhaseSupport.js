@@ -6,7 +6,6 @@ const frameHtmlAgent = require('./frameHtmlAgent');
 const frameFallbackBuilder = require('./frameFallbackBuilder');
 const { ensureMotionOverlay, isSceneHtmlNode } = require('./motionOverlayPhase');
 const { buildPlaybackClockSource } = require('./playbackClock');
-const { focusKeywordsByCaptionId } = require('./captionLayer');
 const { validateOverlayHtml, hasRealOverlayElement } = require('./motionPrimitiveCatalog');
 const { normalizeContract } = require('./sceneImageSequenceDom');
 const { stableStringify } = require('../sceneSpecHash');
@@ -37,12 +36,12 @@ function computeFrameInputFingerprint({
   diagramSkeleton,
   previousBeatSummary,
   hasCaptions,
+  captions,
   sceneBeatsBrief,
   continuityMode,
 } = {}) {
   const managedContract = normalizeContract(node, creativeContext);
   const fallbackHtml = frameFallbackBuilder.buildFallbackFrameHtml({ scene, node, target });
-  const focusKeywords = Object.fromEntries(focusKeywordsByCaptionId(node));
   const overlayHtml = beat && !isSceneHtmlNode(node)
     ? ensureMotionOverlay('<!doctype html><html><body></body></html>', beat).html
     : '';
@@ -67,7 +66,7 @@ function computeFrameInputFingerprint({
       sceneBeatsBrief,
     }),
     fallback_html: fallbackHtml,
-    ...(Object.keys(focusKeywords).length ? { focus_keywords_by_caption_id: focusKeywords } : {}),
+    final_captions: Array.isArray(captions) ? captions : [],
     ...(managedContract.contract ? { managed_dom_contract: managedContract.contract } : {}),
     ...(overlayHtml ? { overlay_fallback_html: overlayHtml } : {}),
     prompt_version: FRAME_PROMPT_VERSION,

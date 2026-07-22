@@ -8,6 +8,8 @@ const {
 } = require('../server/services/creative-video/html-video/focusCuePlanner');
 const { computeFrameInputFingerprint } = require('../server/services/creative-video/html-video/frameHtmlPhaseSupport');
 const { buildVisualPlan } = require('../server/services/creative-video/html-video/visualPlanService');
+const { normalizeCaptions } = require('../server/services/creative-video/html-video/rawHtmlFrameBuilder');
+const { applyFocusKeywords, focusKeywordsByCaptionId } = require('../server/services/creative-video/html-video/captionLayer');
 
 function canonicalRegion({ id, label, aliases = [], trust = 'A', x = 0.05, y = 0.05 }) {
   return {
@@ -259,12 +261,15 @@ function firstShot(visualPlan) {
   assert.deepEqual(cues[0].keywords_by_caption_id, { cap_01: 'Stars', cap_02: '星标' });
 
   const node = { metadata: { visual_beat: input.visualPlan.beats[0] } };
-  const fingerprint = computeFrameInputFingerprint({ node, beat: node.metadata.visual_beat, continuityMode: 'beat_mp4', target: {} });
+  const scene = input.sceneSpec.scenes[0];
+  const captions = applyFocusKeywords(normalizeCaptions(scene, 4), focusKeywordsByCaptionId(node));
+  const fingerprint = computeFrameInputFingerprint({ node, beat: node.metadata.visual_beat, captions, continuityMode: 'beat_mp4', target: {} });
   const changedNode = JSON.parse(JSON.stringify(node));
   changedNode.metadata.visual_beat.visual_base.shots[0].camera.focus_cues[0]
     .keywords_by_caption_id.cap_02 = 'Stars';
+  const changedCaptions = applyFocusKeywords(normalizeCaptions(scene, 4), focusKeywordsByCaptionId(changedNode));
   assert.notEqual(
-    computeFrameInputFingerprint({ node: changedNode, beat: changedNode.metadata.visual_beat, continuityMode: 'beat_mp4', target: {} }),
+    computeFrameInputFingerprint({ node: changedNode, beat: changedNode.metadata.visual_beat, captions: changedCaptions, continuityMode: 'beat_mp4', target: {} }),
     fingerprint,
     '字幕关键词变化必须使 Frame checkpoint 指纹失配',
   );

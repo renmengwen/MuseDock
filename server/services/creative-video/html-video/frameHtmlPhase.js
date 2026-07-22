@@ -224,6 +224,11 @@ async function runFrameHtmlPhase(ctx) {
   const frameHtmlRunsInParallel = concurrency > 1;
   const framePromptArgs = (job, styleReferenceHtml = '', previousBeatSummary = '') => {
     const jobBeatId = String(job.node.beat_id || job.node.beatId || '').trim();
+    const durationSec = trustedSceneDuration(job.scene || {}, job.node);
+    // 扫描指纹、生成结果与最终写盘共用同一份字幕；只签真正命中的 focus keyword。
+    const captions = mediaOptions.generateCaptions !== false && job.scene
+      ? applyFocusKeywords(normalizeCaptions(job.scene, durationSec), focusKeywordsByCaptionId(job.node))
+      : [];
     return {
       graph: contentGraph,
       node: job.node,
@@ -236,6 +241,7 @@ async function runFrameHtmlPhase(ctx) {
       styleProfile,
       visualStyleReferenceHtml: styleReferenceHtml || '',
       previousFrameHtml: '',
+      captions,
       ...resolveAssetFirstMotionArgs(job.node, {
         scene: job.scene,
         beats: project.visual_plan?.beats || [],
@@ -478,7 +484,7 @@ async function runFrameHtmlPhase(ctx) {
           })],
         };
     }
-    return { ...job, htmlResult, inputFingerprint };
+    return { ...job, htmlResult, inputFingerprint, captions: promptArgs.captions };
   };
 
   let rebuildTail = false;
@@ -614,7 +620,7 @@ async function runFrameHtmlPhase(ctx) {
   }
 
   for (const frameResult of frameResults.sort((a, b) => a.index - b.index)) {
-    const { index, node, sceneId, scene, inputFingerprint } = frameResult;
+    const { index, node, sceneId, scene, inputFingerprint, captions } = frameResult;
     let { htmlResult } = frameResult;
     const frameKey = String(node.beat_id || node.beatId || node.id || sceneId || '').trim();
     if (!htmlResult.success) {
@@ -688,11 +694,6 @@ async function runFrameHtmlPhase(ctx) {
     }
     statsByBeatId[frameKey || node.id || sceneId] = frameHtmlStatsEntry(htmlResult.html, frameHeight);
     const durationSec = trustedSceneDuration(scene || {}, node);
-    // D-05：收集本 node 全部 focus_cues 的 caption_id → keyword 映射并注记字幕，
-    // 写盘帧的字幕层据此高亮关键词；无 cue 时映射为空，captions 与输出保持原样。
-    const captions = mediaOptions.generateCaptions !== false && scene
-      ? applyFocusKeywords(normalizeCaptions(scene, durationSec), focusKeywordsByCaptionId(node))
-      : [];
     let written;
     try {
       written = await projectStore.writeRawFrameHtml({

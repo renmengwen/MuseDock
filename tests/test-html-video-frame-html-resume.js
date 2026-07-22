@@ -14,6 +14,8 @@ aiImageModel.isConfigured = async () => false;
 
 const frameHtmlAgent = require('../server/services/creative-video/html-video/frameHtmlAgent');
 const frameHtmlPhase = require('../server/services/creative-video/html-video/frameHtmlPhase');
+const { normalizeCaptions, trustedSceneDuration } = require('../server/services/creative-video/html-video/rawHtmlFrameBuilder');
+const { applyFocusKeywords, focusKeywordsByCaptionId } = require('../server/services/creative-video/html-video/captionLayer');
 const { resolveAssetFirstMotionArgs } = require('../server/services/creative-video/html-video/motionOverlayPhase');
 const contentGraphPhase = require('../server/services/creative-video/html-video/contentGraphPhase');
 const { materializeCreativeContextAssets } = require('../server/services/creative-video/html-video/assetUsagePhase');
@@ -252,6 +254,10 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
           styleProfile: visualPlan.style_profile || null,
           visualStyleReferenceHtml,
           previousFrameHtml: '',
+          captions: applyFocusKeywords(
+            normalizeCaptions(scene, trustedSceneDuration(scene, node)),
+            focusKeywordsByCaptionId(node),
+          ),
           ...motionArgs,
           ...(previousBeatSummary ? { previousBeatSummary } : {}),
           ...(beatId && node?.metadata?.visual_beat
@@ -433,6 +439,10 @@ async function main() {
     {
       const { computeFrameInputFingerprint, FRAME_PROMPT_VERSION } = frameHtmlPhase;
       assert.equal(FRAME_PROMPT_VERSION, 5, 'overlay-only Frame Prompt 合同变化必须使旧 checkpoint 失效');
+      const materializedCaptions = (scene, node) => applyFocusKeywords(
+        normalizeCaptions(scene, trustedSceneDuration(scene, node)),
+        focusKeywordsByCaptionId(node),
+      );
       const args = () => {
         const node = {
           id: 'scene_01',
@@ -463,6 +473,8 @@ async function main() {
                       region_id: 'region_01',
                       zoom: 'normal',
                       caption_ids: ['caption_01'],
+                      keyword: '聚焦',
+                      keywords_by_caption_id: { caption_01: '聚焦' },
                     }],
                   },
                 }],
@@ -475,6 +487,12 @@ async function main() {
           },
         };
         const beat = node.metadata.visual_beat;
+        const scene = {
+          id: 'scene_01',
+          title: '当前场景',
+          narration_text: '当前旁白',
+          captions: [{ id: 'caption_01', start: 0.2, end: 1.5, text: '聚焦第一幕' }],
+        };
         return {
           graph: {
             synopsis: '完整视频摘要',
@@ -498,7 +516,7 @@ async function main() {
               { id: 'next', title: '下一场景' },
             ],
           },
-          scene: { id: 'scene_01', title: '当前场景', narration_text: '当前旁白' },
+          scene,
           creativeContext: {
             source_context: { summary: '来源摘要' },
             asset_context: {
@@ -529,6 +547,7 @@ async function main() {
           diagramSkeleton: '',
           previousBeatSummary: '上一 beat 布局 A',
           hasCaptions: true,
+          captions: materializedCaptions(scene, node),
           sceneBeatsBrief: '场景 beat brief A',
           continuityMode: 'beat_mp4',
         };
@@ -579,6 +598,32 @@ async function main() {
       const rawShotDebugChanged = args();
       rawShotDebugChanged.node.metadata.visual_beat.visual_base.shots[0].debug_note = '未被物化消费';
       assert.equal(computeFrameInputFingerprint(rawShotDebugChanged), base, 'raw Shot 未消费字段不得扩大失效');
+
+      const disabledCaptionBase = args();
+      disabledCaptionBase.captions = [];
+      const disabledCaptionChanged = args();
+      disabledCaptionChanged.captions = [];
+      disabledCaptionChanged.beat.visual_base.shots[0].camera.focus_cues[0].keywords_by_caption_id.caption_01 = '第一幕';
+      assert.equal(computeFrameInputFingerprint(disabledCaptionChanged), computeFrameInputFingerprint(disabledCaptionBase), '禁用字幕时 keyword 变化不得扩大失效');
+
+      const ghostCaptionBase = args();
+      ghostCaptionBase.beat.visual_base.shots[0].camera.focus_cues.push({
+        id: 'ghost', effect: 'highlight_only', caption_ids: ['ghost_caption'], keyword: '幽灵 A',
+      });
+      ghostCaptionBase.captions = materializedCaptions(ghostCaptionBase.scene, ghostCaptionBase.node);
+      const ghostCaptionChanged = args();
+      ghostCaptionChanged.beat.visual_base.shots[0].camera.focus_cues.push({
+        id: 'ghost', effect: 'highlight_only', caption_ids: ['ghost_caption'], keyword: '幽灵 B',
+      });
+      ghostCaptionChanged.captions = materializedCaptions(ghostCaptionChanged.scene, ghostCaptionChanged.node);
+      assert.deepEqual(ghostCaptionChanged.captions, ghostCaptionBase.captions, 'ghost caption keyword 不得改变最终字幕');
+      assert.equal(computeFrameInputFingerprint(ghostCaptionChanged), computeFrameInputFingerprint(ghostCaptionBase), 'ghost caption keyword 不得扩大失效');
+
+      const realCaptionChanged = args();
+      realCaptionChanged.beat.visual_base.shots[0].camera.focus_cues[0].keywords_by_caption_id.caption_01 = '第一幕';
+      realCaptionChanged.captions = materializedCaptions(realCaptionChanged.scene, realCaptionChanged.node);
+      assert.notDeepEqual(realCaptionChanged.captions, args().captions, '真实 caption keyword 变化必须改变最终字幕');
+      assert.notEqual(computeFrameInputFingerprint(realCaptionChanged), base, '真实 caption keyword 变化必须改变指纹');
 
       for (const [label, change] of [
         ['Overlay headline', value => { value.beat.visual_text.headline = '第二幕'; }],
