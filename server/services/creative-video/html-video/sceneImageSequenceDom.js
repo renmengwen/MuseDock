@@ -110,20 +110,8 @@ function cameraRegionGeometry(region, trustLevel) {
   if (trustLevel === 'C') {
     const centerX = x + width / 2;
     const centerY = y + height / 2;
-    const softRegionCap = CAMERA_FILL_FACTOR / CAMERA_SOFT_MIN_ZOOM;
-    const expandedWidth = width <= softRegionCap
-      ? Math.min(width * CAMERA_SOFT_REGION_EXPANSION, softRegionCap)
-      : width;
-    const expandedHeight = height <= softRegionCap
-      ? Math.min(height * CAMERA_SOFT_REGION_EXPANSION, softRegionCap)
-      : height;
     return {
-      region: {
-        x: Math.min(1 - expandedWidth, Math.max(0, centerX - expandedWidth / 2)),
-        y: Math.min(1 - expandedHeight, Math.max(0, centerY - expandedHeight / 2)),
-        width: expandedWidth,
-        height: expandedHeight,
-      },
+      region: { x, y, width, height },
       focus_point: { x: centerX, y: centerY },
     };
   }
@@ -371,6 +359,7 @@ ${cameraMathSource()}
   if (typeof computeCameraTransform !== 'function') return;
   var SAFE_BOTTOM_PX = ${CAPTION_SAFE_BOTTOM_PX};
   var FILL_FACTOR = ${CAMERA_FILL_FACTOR};
+  var SOFT_REGION_EXPANSION = ${CAMERA_SOFT_REGION_EXPANSION};
   var TRANSITION_MIN_SEC = 0.45;
   var TRANSITION_MAX_SEC = 0.8;
   var TRANSITION_WINDOW_RATIO = 0.4;
@@ -412,6 +401,14 @@ ${cameraMathSource()}
       && state.tx > -0.01 && state.tx < 0.01
       && state.ty > -0.01 && state.ty < 0.01;
   }
+  function expandAxis(start, size, center, cap) {
+    if (!Number.isFinite(cap) || size > cap) return { start: start, size: size };
+    var expanded = Math.min(size * SOFT_REGION_EXPANSION, cap);
+    return {
+      start: Math.min(1 - expanded, Math.max(0, center - expanded / 2)),
+      size: expanded
+    };
+  }
   function resolveMetrics(shot) {
     var imageWidth = shot.image.naturalWidth;
     var imageHeight = shot.image.naturalHeight;
@@ -420,15 +417,33 @@ ${cameraMathSource()}
     if (!imageWidth || !imageHeight || !width || !height) return null;
     var active = [];
     var acceptedCues = [];
+    var baseScale = Math.min(width / imageWidth, height / imageHeight);
+    var safeWidth = width;
+    var safeHeight = height - SAFE_BOTTOM_PX;
     for (var i = 0; i < shot.cues.length; i++) {
       var cue = shot.cues[i];
+      var effectiveRegion = cue.region;
+      if (Number.isFinite(cue.min_zoom)) {
+        var centerX = cue.focus_point.x;
+        var centerY = cue.focus_point.y;
+        var capX = Math.min(1, safeWidth * FILL_FACTOR / (imageWidth * baseScale * cue.min_zoom));
+        var capY = Math.min(1, safeHeight * FILL_FACTOR / (imageHeight * baseScale * cue.min_zoom));
+        var horizontal = expandAxis(cue.region.x, cue.region.width, centerX, capX);
+        var vertical = expandAxis(cue.region.y, cue.region.height, centerY, capY);
+        effectiveRegion = {
+          x: horizontal.start,
+          y: vertical.start,
+          width: horizontal.size,
+          height: vertical.size
+        };
+      }
       var result = computeCameraTransform({
         image_width: imageWidth,
         image_height: imageHeight,
         canvas_width: width,
         canvas_height: height,
         fit: 'contain',
-        region: cue.region,
+        region: effectiveRegion,
         focus_point: cue.focus_point,
         safe_rect: { left: 0, top: 0, right: width, bottom: height - SAFE_BOTTOM_PX },
         fill_factor: FILL_FACTOR,
@@ -437,7 +452,6 @@ ${cameraMathSource()}
       if (!result || !result.applied || !result.image_rect
         || (Number.isFinite(cue.min_zoom)
           && Number(result.zoom.toFixed(3)) < Number(cue.min_zoom.toFixed(3)))) continue;
-      var baseScale = Math.min(width / imageWidth, height / imageHeight);
       var baseLeft = (width - imageWidth * baseScale) / 2;
       var baseTop = (height - imageHeight * baseScale) / 2;
       var target = {
@@ -446,7 +460,7 @@ ${cameraMathSource()}
         ty: result.image_rect.top - baseTop * result.zoom
       };
       if (isIdentity(target)) continue;
-      acceptedCues.push(cue);
+      acceptedCues.push(Object.assign({}, cue, { effective_region: effectiveRegion }));
       active.push({
         begin: cue.start_sec,
         end: cue.end_sec,

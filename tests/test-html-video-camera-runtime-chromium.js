@@ -5,6 +5,8 @@ const { applyCaptionLayer, applyFocusKeywords, focusKeywordsByCaptionId } = requ
 
 const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#123"/><circle cx="1200" cy="220" r="100" fill="#fff"/></svg>').toString('base64');
 const imageUrl = `data:image/svg+xml;base64,${svg}`;
+const portraitSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920"><rect width="1080" height="1920" fill="#123"/></svg>').toString('base64');
+const portraitImageUrl = `data:image/svg+xml;base64,${portraitSvg}`;
 const shell = '<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}</style></head><body data-hv-canvas><script>window.__mpAdapterControlled=true</script></body></html>';
 const asset = {
   id: 'a',
@@ -46,6 +48,13 @@ const asset = {
       label: '目标',
       trust_level: 'C',
       region: { x: 0.05, y: 0.05, width: 0.9, height: 0.9 },
+      focus_point: { x: 0.5, y: 0.5 },
+    },
+    {
+      id: 'target_c_tall',
+      label: '纵向目标',
+      trust_level: 'C',
+      region: { x: 0.4, y: 0.21, width: 0.2, height: 0.58 },
       focus_point: { x: 0.5, y: 0.5 },
     },
     {
@@ -235,8 +244,49 @@ async function cameraStateAt(page, timeSec) {
     const cappedSoft = await transformAt(page, 2);
     const cappedSoftScale = Number(cappedSoft.match(/scale\(([^)]+)\)/)?.[1]);
     assert.ok(cappedSoftScale >= 1.15, `原本可达 1.15 倍的 C 区域扩张后仍必须执行聚焦，实际 ${cappedSoft}`);
-    const cappedCue = await page.locator('[data-hv-shot]').evaluate(figure => JSON.parse(figure.dataset.cameraCues)[0]);
-    assert.equal(Number(cappedCue.region.width.toFixed(6)), Number((0.72 / 1.15).toFixed(6)), 'C 区域每轴扩张必须封顶在 fillFactor/minZoom');
+    const cappedCue = await page.locator('[data-hv-shot]').evaluate(figure => ({
+      planned: JSON.parse(figure.dataset.cameraCues)[0],
+      resolved: figure.__hvResolvedCameraCues[0],
+    }));
+    assert.equal(cappedCue.planned.region.width, 0.6, 'C 区域构建期必须保留原始宽度');
+    assert.equal(Number(cappedCue.resolved.effective_region.width.toFixed(6)), Number((0.72 / 1.15).toFixed(6)), 'C 区域横轴运行时扩张必须封顶在 fillFactor/minZoom');
+
+    await page.setViewportSize({ width: 1080, height: 1920 });
+    const portraitHtml = html(true, { regionId: 'target_c_tall', zoom: 'soft' })
+      .replace('width:640px;height:360px', 'width:1080px;height:1920px')
+      .replaceAll(imageUrl, portraitImageUrl);
+    await page.setContent(portraitHtml);
+    await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalHeight === 1920);
+    await page.evaluate(() => window.__mpSetTimelineTime(2));
+    const portrait = await page.locator('[data-hv-shot]').evaluate((figure) => {
+      const image = figure.querySelector('img[data-shot-layer="foreground"]');
+      const cue = figure.__hvResolvedCameraCues[0];
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(image).transform);
+      const baseScale = Math.min(image.clientWidth / image.naturalWidth, image.clientHeight / image.naturalHeight);
+      const baseLeft = (image.clientWidth - image.naturalWidth * baseScale) / 2;
+      const baseTop = (image.clientHeight - image.naturalHeight * baseScale) / 2;
+      const map = (x, y) => matrix.transformPoint(new DOMPoint(
+        baseLeft + x * image.naturalWidth * baseScale,
+        baseTop + y * image.naturalHeight * baseScale,
+      ));
+      const region = cue.effective_region;
+      const topLeft = map(region.x, region.y);
+      const bottomRight = map(region.x + region.width, region.y + region.height);
+      return {
+        scale: Math.hypot(matrix.m11, matrix.m12),
+        region,
+        mapped: { left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y },
+        safe: { left: 0, top: 0, right: image.clientWidth, bottom: image.clientHeight - 140 },
+      };
+    });
+    const portraitCapY = (1920 - 140) * 0.72 / (1920 * 1.15);
+    assert.ok(portrait.scale >= 1.15, `9:16 C 区域必须达到 1.15 倍，实际 ${portrait.scale}`);
+    assert.ok(Math.abs(portrait.region.height - portraitCapY) < 1e-6, `纵轴 effective region 必须按字幕安全区动态封顶，实际 ${portrait.region.height}`);
+    assert.ok(portrait.region.height >= 0.58, '动态封顶不得缩小原始 C 区域');
+    assert.ok(portrait.mapped.left >= portrait.safe.left && portrait.mapped.top >= portrait.safe.top, `effective region 左上角必须在安全区：${JSON.stringify(portrait)}`);
+    assert.ok(portrait.mapped.right <= portrait.safe.right && portrait.mapped.bottom <= portrait.safe.bottom, `effective region 右下角必须在安全区：${JSON.stringify(portrait)}`);
+
+    await page.setViewportSize({ width: 640, height: 360 });
 
     await page.setContent(html(true, { regionId: 'target_c_full', zoom: 'soft' }));
     await page.waitForFunction(() => document.querySelector('img[data-shot-layer="foreground"]')?.naturalWidth === 1600);
