@@ -161,11 +161,28 @@ function previewHtml(
   assert.ok(legalShot.scale >= 1.15 && legalShot.scale <= 1.5, `合法 C soft scale 越界：${legalShot.scale}`);
   assert.equal(legalShot.caption_boxes.length, 1, '合法 C soft 聚焦时字幕必须同步激活');
 
+  const identityNoOpPath = path.join(tempDir, 'materialized-identity-noop.html');
+  await fs.writeFile(identityNoOpPath, previewHtml(false, {
+    x: 0.1, y: 1 / 18, width: 0.8, height: 0.5,
+  }), 'utf8');
+  const identityNoOp = await inspectFrameHtmlLayout({
+    htmlPath: identityNoOpPath,
+    frame: { id: 'scene_identity_noop', duration_sec: 4 },
+    resolution,
+    sampleTimesSec: [2],
+  });
+  const identityNoOpShot = identityNoOp.metrics.camera_samples[0].shots[0];
+  assert.equal(identityNoOp.success, true, JSON.stringify(identityNoOp.issues));
+  assert.equal(identityNoOpShot.camera_runtime_resolved, true, '真实 Runtime 必须完成 identity cue 解析');
+  assert.equal(identityNoOpShot.cue, null, '最终 target 为 identity 的 cue 必须解析为空接受集');
+  assert.equal(identityNoOpShot.has_transform, false, 'identity cue 必须保持安全全景');
+
   const issueReport = await inspectFrameHtmlLayout({
     htmlPath: path.join(__dirname, 'fixtures', 'html-video-layout-qa', 'camera-issues.html'),
     frame: { id: 'scene_bad', duration_sec: 2 },
     resolution,
     sampleTimesSec: [1],
+    allowStaticCameraCues: true,
   });
   assert.equal(issueReport.success, false);
   const codes = new Set(issueReport.issues.map(issue => issue.code));
@@ -174,13 +191,14 @@ function previewHtml(
   assert.ok(codes.has('camera_wrong_focus'), 'wrong_focus 只能由 fixture 人工 expected region 触发');
   assert.equal(codes.has('camera_runtime_unresolved'), false, '显式静态 QA fixture 不得伪报生产 Runtime 缺失');
 
-  async function inspectInline(name, body, sampleTimesSec = [0.1]) {
+  async function inspectInline(name, body, sampleTimesSec = [0.1], layoutOptions = {}) {
     const inlinePath = path.join(tempDir, name);
     await fs.writeFile(inlinePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:0 0}</style></head><body>${body}</body></html>`, 'utf8');
     return inspectFrameHtmlLayout({
       htmlPath: inlinePath,
       frame: { id: name, duration_sec: 2 },
       resolution,
+      ...layoutOptions,
       ...(sampleTimesSec ? { sampleTimesSec } : {}),
     });
   }
@@ -200,15 +218,15 @@ function previewHtml(
     id: 'cue_planned', start_sec: 0, end_sec: 2, max_zoom: 1.5,
     region: { x: 0.2, y: 0.1, width: 0.2, height: 0.2 },
   }]);
-  const missingRuntime = await inspectInline('missing-camera-runtime.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="missing-runtime" data-camera-cues='${plannedCue}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section>`, [1]);
+  const missingRuntime = await inspectInline('missing-camera-runtime.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="missing-runtime" data-layout-qa-static-camera-cues="true" data-camera-cues='${plannedCue}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section>`, [1]);
   assert.equal(missingRuntime.success, false, '存在合法 cue 但 Camera runtime 缺失时必须阻断');
-  assert.ok(missingRuntime.issues.some(issue => issue.code === 'camera_runtime_unresolved'));
+  assert.ok(missingRuntime.issues.some(issue => issue.code === 'camera_runtime_unresolved'), '页面属性不得伪造静态 fixture 豁免');
 
   const identityRuntime = await inspectInline('identity-camera-runtime.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="identity-runtime" data-camera-cues='${plannedCue}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>document.querySelector('[data-hv-shot]').__hvResolvedCameraCues=${plannedCue}</script>`, [1]);
   assert.equal(identityRuntime.success, false, 'Runtime 接受 cue 后稳定窗仍为 identity 时必须阻断');
   assert.ok(identityRuntime.issues.some(issue => issue.code === 'camera_transform_missing'));
 
-  const jitter = await inspectInline('jitter.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="jitter" data-layout-qa-static-camera-cues="true" data-camera-cues='[{"start_sec":0,"end_sec":2,"max_zoom":1.5}]'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>window.__mpSetTimelineTime=function(t){var values=[0,10,-10,10];document.querySelector('[data-shot-layer="foreground"]').style.transform='translateX('+(values[Math.round((t-.05)*10)]||0)+'px)'}</script>`, null);
+  const jitter = await inspectInline('jitter.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="jitter" data-camera-cues='[{"start_sec":0,"end_sec":2,"max_zoom":1.5}]'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>window.__mpSetTimelineTime=function(t){var values=[0,10,-10,10];document.querySelector('[data-shot-layer="foreground"]').style.transform='translateX('+(values[Math.round((t-.05)*10)]||0)+'px)'}</script>`, null, { allowStaticCameraCues: true });
   const jitterTimes = jitter.metrics.camera_samples.map(sample => sample.sample_time_sec);
   assert.deepEqual(jitterTimes.slice(0, 4), [0.05, 0.15, 0.25, 0.35], '默认 Camera 路径必须从 cue 过渡窗派生密集采样');
   assert.ok(jitterTimes.includes(1.2) && jitterTimes.includes(1.8), 'Camera 密采样不得替换既有全场景默认采样');
@@ -221,11 +239,12 @@ function previewHtml(
     max_zoom: 1.5,
   }));
   const manyCuePath = path.join(tempDir, 'six-cues.html');
-  await fs.writeFile(manyCuePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:0 0}</style></head><body><section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="many" data-window-end-sec="14" data-layout-qa-static-camera-cues="true" data-camera-cues='${JSON.stringify(sixCues)}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>window.__mpSetTimelineTime=function(){}</script></body></html>`, 'utf8');
+  await fs.writeFile(manyCuePath, `<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;overflow:hidden}[data-hv-image-sequence],[data-hv-shot]{position:absolute;inset:0;margin:0}img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform-origin:0 0}</style></head><body><section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="many" data-window-end-sec="14" data-camera-cues='${JSON.stringify(sixCues)}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>window.__mpSetTimelineTime=function(){}</script></body></html>`, 'utf8');
   const manyCueReport = await inspectFrameHtmlLayout({
     htmlPath: manyCuePath,
     frame: { id: 'six_cues', duration_sec: 14 },
     resolution,
+    allowStaticCameraCues: true,
   });
   const manyCueTimes = manyCueReport.metrics.camera_samples.map(sample => sample.sample_time_sec);
   assert.ok(manyCueTimes.includes(11.45), '6 个 cue 时不得截断最后 cue 的稳定采样点');

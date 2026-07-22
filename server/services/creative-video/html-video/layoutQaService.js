@@ -369,8 +369,8 @@ async function collectCandidates(page) {
   }, CANDIDATE_SELECTOR);
 }
 
-async function collectCameraSample(page, resolution, sampleTimeSec) {
-  return page.evaluate(({ viewport, timeSec, safeBottomPx }) => {
+async function collectCameraSample(page, resolution, sampleTimeSec, allowStaticCameraCues = false) {
+  return page.evaluate(({ viewport, timeSec, safeBottomPx, staticPlanAllowed }) => {
     const sequence = document.querySelector('[data-hv-image-sequence]');
     if (!sequence) return null;
 
@@ -409,10 +409,9 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
       const plannedCues = parseJson(shot.dataset.cameraCues) || [];
       const runtimeResolved = Object.prototype.hasOwnProperty.call(shot, '__hvResolvedCameraCues')
         && Array.isArray(shot.__hvResolvedCameraCues);
-      const staticFixture = shot.dataset.layoutQaStaticCameraCues === 'true';
       const cues = runtimeResolved
         ? shot.__hvResolvedCameraCues
-        : staticFixture ? plannedCues : [];
+        : staticPlanAllowed ? plannedCues : [];
       let cue = null;
       let cueIndex = -1;
       let returningToOverview = false;
@@ -470,7 +469,7 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
         has_transform: Math.abs(scale - 1) > 1e-4 || Math.abs(matrix.e) > 0.01 || Math.abs(matrix.f) > 0.01,
         camera_plan_present: plannedCues.length > 0,
         camera_runtime_resolved: runtimeResolved,
-        camera_static_fixture: staticFixture,
+        camera_static_plan_allowed: staticPlanAllowed,
         cue,
         returning_to_overview: returningToOverview,
         focus_stable: focusStable,
@@ -494,7 +493,12 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
       visible_shot_count: shots.filter(shot => shot.visible).length,
       shots,
     };
-  }, { viewport: resolution, timeSec: sampleTimeSec, safeBottomPx: CAMERA_SAFE_BOTTOM_PX });
+  }, {
+    viewport: resolution,
+    timeSec: sampleTimeSec,
+    safeBottomPx: CAMERA_SAFE_BOTTOM_PX,
+    staticPlanAllowed: allowStaticCameraCues === true,
+  });
 }
 
 async function cameraCueSampleTimes(page, durationSec) {
@@ -533,7 +537,7 @@ function cameraIssuesForSample(sample, { frameId, sampleTimeSec }) {
   }
   for (const shot of sample.shots) {
     const details = { selector: shot.shot_id, shot_id: shot.shot_id };
-    if (shot.camera_plan_present && !shot.camera_runtime_resolved && !shot.camera_static_fixture) {
+    if (shot.camera_plan_present && !shot.camera_runtime_resolved && !shot.camera_static_plan_allowed) {
       issues.push(makeIssue({
         code: 'camera_runtime_unresolved', frameId, sampleTimeSec,
         message: '摄影机运行时未解析当前焦点计划。', details,
@@ -663,6 +667,7 @@ async function inspectFrameHtmlLayout(options = {}) {
     htmlPath,
     resolution = DEFAULT_RESOLUTION,
     sampleTimesSec,
+    allowStaticCameraCues = false,
   } = options;
   const frameId = options.frameId
     || frame.id
@@ -899,7 +904,7 @@ async function inspectFrameHtmlLayout(options = {}) {
       const camera = await collectCameraSample(page, {
         width: resolution.width || DEFAULT_RESOLUTION.width,
         height: resolution.height || DEFAULT_RESOLUTION.height,
-      }, sampleTimeSec);
+      }, sampleTimeSec, allowStaticCameraCues);
       if (camera) {
         const cameraSample = { sample_time_sec: sampleTimeSec, ...camera };
         metrics.camera_samples.push(cameraSample);

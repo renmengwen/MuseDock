@@ -405,19 +405,21 @@ ${cameraMathSource()}
       });
       if (!result || !result.applied || !result.image_rect
         || (Number.isFinite(cue.min_zoom) && result.zoom < cue.min_zoom)) continue;
-      acceptedCues.push(cue);
       var baseScale = Math.min(width / imageWidth, height / imageHeight);
       var baseLeft = (width - imageWidth * baseScale) / 2;
       var baseTop = (height - imageHeight * baseScale) / 2;
+      var target = {
+        scale: result.zoom,
+        tx: result.image_rect.left - baseLeft * result.zoom,
+        ty: result.image_rect.top - baseTop * result.zoom
+      };
+      if (Math.abs(target.scale - 1) < 1e-4 && Math.abs(target.tx) < 1e-2 && Math.abs(target.ty) < 1e-2) continue;
+      acceptedCues.push(cue);
       active.push({
         begin: cue.start_sec,
         end: cue.end_sec,
         duration: Math.min(TRANSITION_MAX_SEC, Math.max(TRANSITION_MIN_SEC, (cue.end_sec - cue.start_sec) * TRANSITION_WINDOW_RATIO)),
-        target: {
-          scale: result.zoom,
-          tx: result.image_rect.left - baseLeft * result.zoom,
-          ty: result.image_rect.top - baseTop * result.zoom
-        }
+        target: target
       });
     }
     var from = IDENTITY;
