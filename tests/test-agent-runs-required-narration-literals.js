@@ -121,6 +121,10 @@ async function generateBrief({ alwaysWrong = false, parserThrows = false } = {})
   });
   assert.equal(audio.success, false);
   assert.equal(ttsCalls, 0);
+  const missingBriefState = JSON.parse(fs.readFileSync(failed.runPath, 'utf8')).hyperframes_freeform;
+  assert.equal(missingBriefState.status, 'failed');
+  assert.equal(missingBriefState.audio.status, 'failed');
+  assert.match(missingBriefState.audio.message, /请先生成导演策划/);
 
   const thrown = await generateBrief({ parserThrows: true });
   assert.equal(thrown.result.success, false);
@@ -320,6 +324,102 @@ async function generateBrief({ alwaysWrong = false, parserThrows = false } = {})
   const concurrentBriefState = JSON.parse(fs.readFileSync(concurrentBriefRunPath, 'utf8')).hyperframes_freeform.brief;
   assert.equal(concurrentBriefState.status, 'ready');
   assert.equal(concurrentBriefState.data.title, 'B 新策划');
+
+  const prepareFailureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'required-literal-prepare-failure-'));
+  const compressionThrowAwemeId = '20260722000000000007';
+  const compressionThrowRunId = 'compression-throw';
+  const compressionThrowPath = writeRun(prepareFailureRoot, compressionThrowAwemeId, compressionThrowRunId);
+  const compressionThrowRun = JSON.parse(fs.readFileSync(compressionThrowPath, 'utf8'));
+  compressionThrowRun.hyperframes_freeform = {
+    status: 'ready',
+    brief: { status: 'ready', data: brief('很长的压缩旁白。'.repeat(80), '第二段很长的压缩旁白。'.repeat(80)) },
+  };
+  fs.writeFileSync(compressionThrowPath, JSON.stringify(compressionThrowRun, null, 2));
+  const compressionThrow = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(compressionThrowAwemeId, compressionThrowRunId, {
+    rootDir: prepareFailureRoot,
+    aiTextModel: { callTextModel: async () => { throw new Error('compression model exploded'); } },
+  });
+  assert.equal(compressionThrow.success, false);
+  assert.equal(compressionThrow.code, 'audio_prepare_failed');
+  const compressionThrowState = JSON.parse(fs.readFileSync(compressionThrowPath, 'utf8')).hyperframes_freeform;
+  assert.equal(compressionThrowState.status, 'failed');
+  assert.equal(compressionThrowState.audio.status, 'failed');
+  assert.equal(compressionThrowState.audio.code, 'audio_prepare_failed');
+  assert.match(compressionThrowState.audio.message, /compression model exploded/);
+
+  const repairThrowAwemeId = '20260722000000000008';
+  const repairThrowRunId = 'repair-throw';
+  const repairThrowPath = writeRun(prepareFailureRoot, repairThrowAwemeId, repairThrowRunId);
+  const repairThrowRun = JSON.parse(fs.readFileSync(repairThrowPath, 'utf8'));
+  repairThrowRun.hyperframes_freeform = {
+    status: 'ready',
+    brief: { status: 'ready', data: brief('如果未来。', '完整收尾。') },
+  };
+  fs.writeFileSync(repairThrowPath, JSON.stringify(repairThrowRun, null, 2));
+  const repairThrow = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(repairThrowAwemeId, repairThrowRunId, {
+    rootDir: prepareFailureRoot,
+    aiTextModel: { callTextModel: async () => { throw new Error('repair model exploded'); } },
+  });
+  assert.equal(repairThrow.success, false);
+  assert.equal(repairThrow.code, 'audio_prepare_failed');
+  const repairThrowState = JSON.parse(fs.readFileSync(repairThrowPath, 'utf8')).hyperframes_freeform;
+  assert.equal(repairThrowState.status, 'failed');
+  assert.equal(repairThrowState.audio.status, 'failed');
+  assert.equal(repairThrowState.audio.code, 'audio_prepare_failed');
+  assert.match(repairThrowState.audio.message, /repair model exploded/);
+
+  const prepareRaceAwemeId = '20260722000000000009';
+  const prepareRaceRunId = 'prepare-race';
+  const prepareRacePath = writeRun(prepareFailureRoot, prepareRaceAwemeId, prepareRaceRunId);
+  const prepareRaceRun = JSON.parse(fs.readFileSync(prepareRacePath, 'utf8'));
+  prepareRaceRun.hyperframes_freeform = {
+    status: 'ready',
+    brief: { status: 'ready', data: brief('A/B 共用的长旁白。'.repeat(80), '第二段 A/B 共用长旁白。'.repeat(80)) },
+  };
+  fs.writeFileSync(prepareRacePath, JSON.stringify(prepareRaceRun, null, 2));
+  let rejectPrepareA;
+  let markPrepareAStarted;
+  const prepareAStarted = new Promise(resolve => { markPrepareAStarted = resolve; });
+  const prepareA = agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(prepareRaceAwemeId, prepareRaceRunId, {
+    rootDir: prepareFailureRoot,
+    aiTextModel: {
+      callTextModel: async () => {
+        markPrepareAStarted();
+        return new Promise((_resolve, reject) => { rejectPrepareA = reject; });
+      },
+    },
+  });
+  await prepareAStarted;
+  const prepareB = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(prepareRaceAwemeId, prepareRaceRunId, {
+    rootDir: prepareFailureRoot,
+    aiTextModel: {
+      callTextModel: async () => ({ success: true, text: JSON.stringify({ scenes: [
+        { index: 1, narration_text: 'B 压缩第一段。' },
+        { index: 2, narration_text: 'B 压缩第二段。' },
+      ] }) }),
+    },
+    sceneTtsService: {
+      synthesizeSceneTts: async ({ scenes }) => ({
+        success: true,
+        message: 'prepare B 完成。',
+        scene_tts: {
+          status: 'done',
+          path: 'prepare-B.wav',
+          duration: 2,
+          scenes: scenes.map(scene => ({ ...scene, duration: 1, speech_duration_sec: 1, captions: [{ start: 0, end: 1, text: scene.narration_text }] })),
+        },
+      }),
+    },
+  });
+  assert.equal(prepareB.success, true);
+  rejectPrepareA(new Error('A stale prepare exploded'));
+  const stalePrepareA = await prepareA;
+  assert.equal(stalePrepareA.success, false);
+  const prepareRaceState = JSON.parse(fs.readFileSync(prepareRacePath, 'utf8')).hyperframes_freeform;
+  assert.equal(prepareRaceState.status, 'ready');
+  assert.equal(prepareRaceState.audio.status, 'ready');
+  assert.equal(prepareRaceState.audio.path, 'prepare-B.wav');
+  assert.equal(prepareRaceState.audio.message, 'prepare B 完成。');
 
   const legacyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'required-literal-truncate-'));
   const legacyAwemeId = '20260722000000000003';

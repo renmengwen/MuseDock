@@ -667,6 +667,12 @@
 
 
     const currentState = normalizeHyperframesFreeformState(claimed.data?.hyperframes_freeform);
+    let scenes;
+    let targetDurationSec;
+    let sceneTtsService;
+    let resolvedVoice;
+    let resolvedStylePrompt;
+    try {
 
     if (
 
@@ -686,7 +692,7 @@
 
 
 
-    let scenes = normalizeFreeformNarrationScenes(currentState.brief.data);
+    scenes = normalizeFreeformNarrationScenes(currentState.brief.data);
     if (!scenes.length) {
       return failHyperframesFreeformSection(awemeId, runId, 'audio', '导演策划中没有可用于配音的旁白。', options, {}, operationId);
     }
@@ -706,7 +712,7 @@
         operationId,
       );
     }
-    const targetDurationSec = resolveFreeformTargetDurationSec(currentState.brief.data, detail.data, options);
+    targetDurationSec = resolveFreeformTargetDurationSec(currentState.brief.data, detail.data, options);
     let narrationFit = fitFreeformNarrationToBudget(currentState.brief.data, scenes, targetDurationSec);
     scenes = narrationFit.scenes;
     let transcript = null;
@@ -805,15 +811,23 @@
         prepared.message || '音频任务已被更新的操作取代。',
       );
     }
-
-
-    const sceneTtsService = options.sceneTtsService || defaultSceneTts;
-
+    sceneTtsService = options.sceneTtsService || defaultSceneTts;
     const audioDirection = getFreeformBriefAudioDirection(currentState.brief.data);
+    resolvedVoice = options.voice || audioDirection.voice || undefined;
+    resolvedStylePrompt = options.stylePrompt || options.style_prompt || audioDirection.stylePrompt || undefined;
+    } catch (error) {
+      const message = `高级成片音频准备失败：${error.message || '未知错误'}`;
+      return failHyperframesFreeformSection(
+        awemeId,
+        runId,
+        'audio',
+        message,
+        options,
+        { code: 'audio_prepare_failed', missing: [], error: message },
+        operationId,
+      );
+    }
 
-    const resolvedVoice = options.voice || audioDirection.voice || undefined;
-
-    const resolvedStylePrompt = options.stylePrompt || options.style_prompt || audioDirection.stylePrompt || undefined;
 
     let result;
 
@@ -1728,8 +1742,9 @@
       ? updater => updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, section, operationId, updater, options)
       : updater => updateRunHyperframesFreeform(awemeId, runId, updater, options);
     const updated = await update(current => ({
+      status: 'failed',
       [section]: {
-        ...current[section],
+        ...withoutFailureMeta(current[section]),
         ...extraPatch,
         status: 'failed',
         message,
