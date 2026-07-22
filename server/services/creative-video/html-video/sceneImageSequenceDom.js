@@ -381,6 +381,11 @@ ${cameraMathSource()}
       ty: from.ty + (to.ty - from.ty) * progress
     };
   }
+  function isIdentity(state) {
+    return state.scale > 0.9999 && state.scale < 1.0001
+      && state.tx > -0.01 && state.tx < 0.01
+      && state.ty > -0.01 && state.ty < 0.01;
+  }
   function resolveMetrics(shot) {
     var imageWidth = shot.image.naturalWidth;
     var imageHeight = shot.image.naturalHeight;
@@ -413,7 +418,7 @@ ${cameraMathSource()}
         tx: result.image_rect.left - baseLeft * result.zoom,
         ty: result.image_rect.top - baseTop * result.zoom
       };
-      if (Math.abs(target.scale - 1) < 1e-4 && Math.abs(target.tx) < 1e-2 && Math.abs(target.ty) < 1e-2) continue;
+      if (isIdentity(target)) continue;
       acceptedCues.push(cue);
       active.push({
         begin: cue.start_sec,
@@ -447,7 +452,7 @@ ${cameraMathSource()}
     return IDENTITY;
   }
   function formatTransform(state) {
-    if (Math.abs(state.scale - 1) < 1e-4 && Math.abs(state.tx) < 1e-2 && Math.abs(state.ty) < 1e-2) return '';
+    if (isIdentity(state)) return '';
     return 'translate(' + state.tx.toFixed(2) + 'px, ' + state.ty.toFixed(2) + 'px) scale(' + state.scale.toFixed(4) + ')';
   }
   function render(timeSec) {

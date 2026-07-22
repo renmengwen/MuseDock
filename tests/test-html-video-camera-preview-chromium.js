@@ -244,7 +244,7 @@ function previewHtml(
 
   for (const [name, transform] of [
     ['tx-threshold', 'translateX(0.01px)'],
-    ['scale-threshold', 'matrix(1.0001,0.00001,0,1,0,0)'],
+    ['scale-threshold', 'scale(1.0001)'],
   ]) {
     const boundary = await inspectInline(`${name}.html`, `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="${name}" data-camera-cues='${plannedCue}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" style="transform:${transform}" src="${imageUrl}"></figure></section><script>document.querySelector('[data-hv-shot]').__hvResolvedCameraCues=${plannedCue}</script>`, [1]);
     const boundaryShot = boundary.metrics.camera_samples[0].shots[0];
