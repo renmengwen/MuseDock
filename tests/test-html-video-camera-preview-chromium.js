@@ -182,6 +182,8 @@ function previewHtml(
   assert.equal(legalSoft.success, true, JSON.stringify(legalSoft.issues));
   assert.equal(legalShot.cue.id, 'cue_1', '合法 C soft cue 必须保留运行时焦点身份');
   assert.ok(legalShot.scale >= 1.15 && legalShot.scale <= 1.5, `合法 C soft scale 越界：${legalShot.scale}`);
+  assert.ok(legalShot.cue.effective_region.width > legalShot.cue.region.width, 'C soft resolved cue 必须暴露扩张后的 effective region');
+  assert.ok(Math.abs(legalShot.target_box.width - legalShot.cue.effective_region.width * resolution.width * legalShot.scale) < 1e-6, 'Layout QA target box 必须按 runtime effective region 计算');
   assert.equal(legalShot.caption_boxes.length, 1, '合法 C soft 聚焦时字幕必须同步激活');
 
   const identityNoOpPath = path.join(tempDir, 'materialized-identity-noop.html');

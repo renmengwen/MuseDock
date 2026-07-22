@@ -577,7 +577,7 @@ async function collectCameraSample(page, resolution, sampleTimeSec, allowStaticC
         ? Math.min(0.8, Math.max(0.45, (cueEnd - cueStart) * 0.4))
         : 0;
       const focusStable = Boolean(cue && !returningToOverview && timeSec >= cueStart + transitionDuration - 1e-6);
-      const region = cue?.region;
+      const region = cue?.effective_region || cue?.region;
       let targetBox = null;
       if (ready(foreground) && region && [region.x, region.y, region.width, region.height].every(Number.isFinite)) {
         const baseScale = Math.min(shotRect.width / foreground.naturalWidth, shotRect.height / foreground.naturalHeight);
