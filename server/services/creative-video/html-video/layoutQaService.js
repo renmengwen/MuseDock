@@ -188,16 +188,16 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
       const cbox = container.box;
       const horizontalOverflow = box.left < cbox.left - tolerance || box.right > cbox.right + tolerance;
       const verticalOverflow = box.top < cbox.top - tolerance || box.bottom > cbox.bottom + tolerance;
-      const settledBox = candidate.transformTranslation && {
-        left: box.left - candidate.transformTranslation.x,
-        right: box.right - candidate.transformTranslation.x,
-        top: box.top - candidate.transformTranslation.y,
-        bottom: box.bottom - candidate.transformTranslation.y,
+      const settledBox = candidate.transientTransformDelta && {
+        left: box.left - candidate.transientTransformDelta.x,
+        right: box.right - candidate.transientTransformDelta.x,
+        top: box.top - candidate.transientTransformDelta.y,
+        bottom: box.bottom - candidate.transientTransformDelta.y,
       };
       const transformCausesOverflow = settledBox
         && settledBox.left >= cbox.left - tolerance && settledBox.right <= cbox.right + tolerance
         && settledBox.top >= cbox.top - tolerance && settledBox.bottom <= cbox.bottom + tolerance;
-      const transientVisibleOverflow = candidate.transformAnimationRunning && transformCausesOverflow
+      const transientVisibleOverflow = transformCausesOverflow
         && (!horizontalOverflow || container.overflowX === 'visible')
         && (!verticalOverflow || container.overflowY === 'visible')
         && box.left >= 0 && box.top >= 0
@@ -279,8 +279,8 @@ function inspectCandidates({ candidates, resolution, frameId, sampleTimeSec }) {
   return issues;
 }
 
-async function collectCandidates(page) {
-  return page.evaluate((selector) => {
+async function collectCandidates(page, { sampleTimeSec, durationSec }) {
+  return page.evaluate(({ selector, sampleTimeSec: sampleTime, durationSec: sceneDuration }) => {
     const semanticSelector = '[data-role]:not(section), .card, .panel, .tile, .module, article, main, section[data-role], section';
     const explicitTextSelector = [
       '[data-text-key]',
@@ -361,6 +361,64 @@ async function collectCandidates(page) {
       return Boolean(element.closest(selector));
     }
 
+    function translationFor(value) {
+      try {
+        const matrix = !value || value === 'none' ? new DOMMatrixReadOnly() : new DOMMatrixReadOnly(value);
+        if (Math.abs(matrix.a - 1) >= 1e-6 || Math.abs(matrix.b) >= 1e-6
+          || Math.abs(matrix.c) >= 1e-6 || Math.abs(matrix.d - 1) >= 1e-6) return null;
+        return { x: matrix.e, y: matrix.f };
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function transientTransformDeltaFor(element, container) {
+      const sceneRemainingMs = (Number(sceneDuration) - Number(sampleTime)) * 1000;
+      if (!Number.isFinite(sceneRemainingMs) || sceneRemainingMs < 0) return null;
+      for (let current = element; current && current !== container; current = current.parentElement) {
+        const animations = Array.from(current.getAnimations()).filter(animation => (
+          animation.playState === 'running'
+          && typeof animation.effect?.getKeyframes === 'function'
+          && animation.effect.getKeyframes().some(frame => Object.prototype.hasOwnProperty.call(frame, 'transform'))
+        ));
+        if (animations.length !== 1) continue;
+
+        const animation = animations[0];
+        const timing = animation.effect.getTiming();
+        const computedTiming = animation.effect.getComputedTiming();
+        const frames = animation.effect.getKeyframes()
+          .filter(frame => Object.prototype.hasOwnProperty.call(frame, 'transform'))
+          .map(frame => ({ offset: Number(frame.computedOffset), translation: translationFor(frame.transform) }));
+        const currentTranslation = translationFor(window.getComputedStyle(current).transform);
+        if (frames.length < 2 || frames.some(frame => !Number.isFinite(frame.offset) || !frame.translation)
+          || !currentTranslation || timing.iterations !== 1 || timing.direction !== 'normal'
+          || !['forwards', 'both'].includes(timing.fill)
+          || animation.playbackRate <= 0 || !Number.isFinite(computedTiming.endTime)
+          || !Number.isFinite(Number(animation.currentTime)) || !Number.isFinite(Number(computedTiming.duration))) continue;
+
+        const terminal = frames.at(-1).translation;
+        const changesTranslation = frames.some(frame => (
+          Math.abs(frame.translation.x - frames[0].translation.x) > 0.01
+          || Math.abs(frame.translation.y - frames[0].translation.y) > 0.01
+        ));
+        if (!changesTranslation) continue;
+
+        const settleIndex = frames.findIndex((frame, index) => frames.slice(index).every(later => (
+          Math.abs(later.translation.x - terminal.x) <= 0.01
+          && Math.abs(later.translation.y - terminal.y) <= 0.01
+        )));
+        const settleTime = Number(timing.delay) + Number(computedTiming.duration) * frames[settleIndex].offset;
+        const msUntilSettled = Math.max(0, settleTime - Number(animation.currentTime)) / animation.playbackRate;
+        if (!Number.isFinite(msUntilSettled) || msUntilSettled > sceneRemainingMs + 1) continue;
+
+        return {
+          x: currentTranslation.x - terminal.x,
+          y: currentTranslation.y - terminal.y,
+        };
+      }
+      return null;
+    }
+
     const records = Array.from(document.querySelectorAll(selector))
       .map((element) => {
         if (hasLayoutFlag(element, '[data-layout-ignore]')) return null;
@@ -370,11 +428,7 @@ async function collectCandidates(page) {
         const isExplicitText = element.matches(explicitTextSelector);
         const effectiveOpacity = effectiveOpacityFor(element);
         const beatScopeElement = element.closest('[data-mp-beat-scope]');
-        const runningAnimations = Array.from(element.getAnimations()).filter(animation => animation.playState === 'running');
-        const computedTransform = window.getComputedStyle(element).transform;
-        const transformMatrix = computedTransform && computedTransform !== 'none'
-          ? new DOMMatrixReadOnly(computedTransform)
-          : null;
+        const container = element.parentElement ? element.parentElement.closest(semanticSelector) : null;
         if (!text || (!direct && !isExplicitText)) return null;
         if (!isVisible(element, rect, effectiveOpacity)) return null;
         return {
@@ -394,15 +448,7 @@ async function collectCandidates(page) {
               && animation.playState === 'running'
               && animation.transitionProperty === 'opacity'
             ))),
-            transformAnimationRunning: runningAnimations.some(animation => (
-              typeof animation.effect?.getKeyframes === 'function'
-              && animation.effect.getKeyframes().some(keyframe => Object.prototype.hasOwnProperty.call(keyframe, 'transform'))
-            )),
-            transformTranslation: transformMatrix
-              && Math.abs(transformMatrix.a - 1) < 1e-6 && Math.abs(transformMatrix.b) < 1e-6
-              && Math.abs(transformMatrix.c) < 1e-6 && Math.abs(transformMatrix.d - 1) < 1e-6
-              ? { x: transformMatrix.e, y: transformMatrix.f }
-              : null,
+            transientTransformDelta: transientTransformDeltaFor(element, container),
             text,
             box: serializeBox(rect),
             container: containerFor(element),
@@ -426,7 +472,7 @@ async function collectCandidates(page) {
         ))
         .filter(otherIndex => otherIndex !== null),
     }));
-  }, CANDIDATE_SELECTOR);
+  }, { selector: CANDIDATE_SELECTOR, sampleTimeSec, durationSec });
 }
 
 async function collectCameraSample(page, resolution, sampleTimeSec, allowStaticCameraCues = false) {
@@ -948,7 +994,7 @@ async function inspectFrameHtmlLayout(options = {}) {
         }
       }
       await waitForLayout(page);
-      const candidates = await collectCandidates(page);
+      const candidates = await collectCandidates(page, { sampleTimeSec, durationSec });
       metrics.samples.push({
         sample_time_sec: sampleTimeSec,
         candidate_count: candidates.length,
