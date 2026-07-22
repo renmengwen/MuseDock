@@ -11,16 +11,21 @@ const resolution = { width: 640, height: 360 };
 const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#123"/><circle cx="1200" cy="180" r="80" fill="#fff"/></svg>').toString('base64');
 const imageUrl = `data:image/svg+xml;base64,${svg}`;
 
-function previewHtml(twoCues = false, targetRegion = { x: 0.68, y: 0.08, width: 0.15, height: 0.18 }) {
+function previewHtml(
+  twoCues = false,
+  targetRegion = { x: 0.68, y: 0.08, width: 0.15, height: 0.18 },
+  { trustLevel = 'A', zoom } = {},
+) {
   const captions = twoCues
-    ? [{ id: 'cap_1', start: 1, end: 1.5, text: '聚焦目标' }, { id: 'cap_2', start: 3, end: 3.8, text: '转向次要目标' }]
-    : [{ id: 'cap_1', start: 1, end: 3, text: '聚焦目标' }];
+    ? [{ id: 'cap_1', start: 1, end: 1.5, text: '聚焦目标', focus_keyword: '聚焦目标' }, { id: 'cap_2', start: 3, end: 3.8, text: '转向次要目标' }]
+    : [{ id: 'cap_1', start: 1, end: 3, text: '聚焦目标', focus_keyword: '聚焦目标' }];
   const shot = {
     id: 'shot_1', asset_id: 'asset_1', role: 'showcase', requirement: 'required',
     caption_ids: captions.map(caption => caption.id), minimum_visible_duration_sec: 1,
     active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 4 },
     camera: { focus_cues: [{
       id: 'cue_1', caption_ids: ['cap_1'], region_id: 'target', effect: 'camera_zoom',
+      ...(zoom ? { zoom } : {}),
     }, ...(twoCues ? [{
       id: 'cue_2', caption_ids: ['cap_2'], region_id: 'target_2', effect: 'camera_zoom',
     }] : [])] },
@@ -36,7 +41,7 @@ function previewHtml(twoCues = false, targetRegion = { x: 0.68, y: 0.08, width: 
     creativeContext: { asset_context: { assets: [{
       id: 'asset_1', media_type: 'image', status: 'ready', path: 'assets/a.svg', frame_src: '../assets/a.svg',
       focus_regions: [{
-        id: 'target', trust_level: 'A',
+        id: 'target', trust_level: trustLevel,
         region: targetRegion,
         focus_point: { x: targetRegion.x + targetRegion.width / 2, y: targetRegion.y + targetRegion.height / 2 },
       }, {
@@ -115,6 +120,46 @@ function previewHtml(twoCues = false, targetRegion = { x: 0.68, y: 0.08, width: 
   assert.ok(returnSamples.every(sample => sample.shots[0].returning_to_overview));
   assert.notEqual(returnSamples[0].shots[0].scale, returnSamples[1].shots[0].scale, '回全景过程必须可观测到连续变化');
   assert.equal(returning.issues.some(issue => issue.code === 'camera_target_out_of_safe_area'), false, '合法回全景阶段不得继续套用聚焦目标安全区');
+
+  const rejectedSoftPath = path.join(tempDir, 'rejected-soft-overview.html');
+  const rejectedSoftHtml = previewHtml(false, {
+    x: 0.1, y: 0.1, width: 0.8, height: 0.8,
+  }, { trustLevel: 'C', zoom: 'soft' });
+  assert.match(rejectedSoftHtml, /<span class="hv-caption-kw">聚焦目标<\/span>/, 'Camera no-op 不得移除字幕关键词高亮');
+  await fs.writeFile(rejectedSoftPath, rejectedSoftHtml, 'utf8');
+  const rejectedSoft = await inspectFrameHtmlLayout({
+    htmlPath: rejectedSoftPath,
+    frame: { id: 'scene_rejected_soft', duration_sec: 4 },
+    resolution,
+    sampleTimesSec: [2],
+  });
+  const rejectedShot = rejectedSoft.metrics.camera_samples[0].shots[0];
+  assert.equal(rejectedSoft.success, true, JSON.stringify(rejectedSoft.issues));
+  assert.equal(rejectedShot.cue, null, 'Runtime 拒绝的 C soft cue 必须按全景采样');
+  assert.equal(rejectedShot.has_transform, false, 'Runtime 拒绝的 C soft cue 不得产生 transform');
+  assert.equal(rejectedShot.target_box, null, 'Runtime 拒绝的 cue 不得继续生成静态目标框');
+  assert.equal(rejectedShot.caption_boxes.length, 1, '摄影机降级不得影响同时间窗字幕激活');
+  assert.equal(
+    rejectedSoft.issues.some(issue => ['camera_target_out_of_safe_area', 'camera_caption_target_overlap', 'camera_wrong_focus'].includes(issue.code)),
+    false,
+    '已降级全景不得产生焦点安全区、字幕遮挡或错误聚焦问题',
+  );
+
+  const legalSoftPath = path.join(tempDir, 'legal-soft-focus.html');
+  await fs.writeFile(legalSoftPath, previewHtml(false, {
+    x: 0.68, y: 0.08, width: 0.15, height: 0.18,
+  }, { trustLevel: 'C', zoom: 'soft' }), 'utf8');
+  const legalSoft = await inspectFrameHtmlLayout({
+    htmlPath: legalSoftPath,
+    frame: { id: 'scene_legal_soft', duration_sec: 4 },
+    resolution,
+    sampleTimesSec: [2],
+  });
+  const legalShot = legalSoft.metrics.camera_samples[0].shots[0];
+  assert.equal(legalSoft.success, true, JSON.stringify(legalSoft.issues));
+  assert.equal(legalShot.cue.id, 'cue_1', '合法 C soft cue 必须保留运行时焦点身份');
+  assert.ok(legalShot.scale >= 1.15 && legalShot.scale <= 1.5, `合法 C soft scale 越界：${legalShot.scale}`);
+  assert.equal(legalShot.caption_boxes.length, 1, '合法 C soft 聚焦时字幕必须同步激活');
 
   const issueReport = await inspectFrameHtmlLayout({
     htmlPath: path.join(__dirname, 'fixtures', 'html-video-layout-qa', 'camera-issues.html'),

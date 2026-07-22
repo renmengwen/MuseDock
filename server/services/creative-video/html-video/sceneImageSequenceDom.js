@@ -360,6 +360,7 @@ ${cameraMathSource()}
     if (!cues || !cues.length || !image) continue;
     image.style.transformOrigin = '0 0';
     shots.push({
+      figure: figures[i],
       image: image,
       cues: cues,
       windowStart: Number(figures[i].dataset.windowStartSec),
@@ -387,6 +388,7 @@ ${cameraMathSource()}
     var height = shot.image.clientHeight;
     if (!imageWidth || !imageHeight || !width || !height) return null;
     var active = [];
+    var acceptedCues = [];
     for (var i = 0; i < shot.cues.length; i++) {
       var cue = shot.cues[i];
       var result = computeCameraTransform({
@@ -403,6 +405,7 @@ ${cameraMathSource()}
       });
       if (!result || !result.applied || !result.image_rect
         || (Number.isFinite(cue.min_zoom) && result.zoom < cue.min_zoom)) continue;
+      acceptedCues.push(cue);
       var baseScale = Math.min(width / imageWidth, height / imageHeight);
       var baseLeft = (width - imageWidth * baseScale) / 2;
       var baseTop = (height - imageHeight * baseScale) / 2;
@@ -429,6 +432,7 @@ ${cameraMathSource()}
         active.push({ begin: last.end, end: last.end, duration: RETURN_TRANSITION_SEC, from: from, target: IDENTITY });
       }
     }
+    shot.figure.__hvResolvedCameraCues = acceptedCues;
     return { active: active };
   }
   function stateAt(shot, timeSec) {

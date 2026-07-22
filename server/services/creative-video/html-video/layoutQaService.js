@@ -406,7 +406,10 @@ async function collectCameraSample(page, resolution, sampleTimeSec) {
         ? new DOMMatrixReadOnly(style.transform)
         : new DOMMatrixReadOnly();
       const scale = Math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b);
-      const cues = parseJson(shot.dataset.cameraCues) || [];
+      const cues = Object.prototype.hasOwnProperty.call(shot, '__hvResolvedCameraCues')
+        && Array.isArray(shot.__hvResolvedCameraCues)
+        ? shot.__hvResolvedCameraCues
+        : parseJson(shot.dataset.cameraCues) || [];
       let cue = null;
       let cueIndex = -1;
       let returningToOverview = false;
