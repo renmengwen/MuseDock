@@ -444,8 +444,8 @@
   }
 
   function withoutFailureMeta(section = {}) {
-    const { code, missing, ...rest } = section;
-    return { ...rest, code: undefined, missing: undefined };
+    const { code, missing, error, ...rest } = section;
+    return { ...rest, code: undefined, missing: undefined, error: undefined };
   }
 
 
@@ -650,9 +650,23 @@
 
     if (!detail.success) return detail;
 
+    const operationId = createFreeformOperationId('audio');
+    const claimed = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+      status: 'generating',
+      audio: {
+        ...withoutFailureMeta(current.audio),
+        operation_id: operationId,
+        status: 'generating',
+        voice: options.voice || current.audio.voice || '',
+        style_prompt: options.stylePrompt || options.style_prompt || current.audio.style_prompt || '',
+        message: '正在准备高级成片音频...',
+      },
+    }), options);
+    if (!claimed.success) return claimed;
 
 
-    const currentState = normalizeHyperframesFreeformState(detail.data.hyperframes_freeform);
+
+    const currentState = normalizeHyperframesFreeformState(claimed.data?.hyperframes_freeform);
 
     if (
 
@@ -666,7 +680,7 @@
 
     ) {
 
-      return failHyperframesFreeformSection(awemeId, runId, 'audio', '请先生成导演策划。', options);
+      return failHyperframesFreeformSection(awemeId, runId, 'audio', '请先生成导演策划。', options, {}, operationId);
 
     }
 
@@ -674,7 +688,7 @@
 
     let scenes = normalizeFreeformNarrationScenes(currentState.brief.data);
     if (!scenes.length) {
-      return failHyperframesFreeformSection(awemeId, runId, 'audio', '导演策划中没有可用于配音的旁白。', options);
+      return failHyperframesFreeformSection(awemeId, runId, 'audio', '导演策划中没有可用于配音的旁白。', options, {}, operationId);
     }
     const requiredNarrationLiterals = Array.isArray(currentState.brief.data.required_narration_literals)
       ? currentState.brief.data.required_narration_literals
@@ -689,6 +703,7 @@
         requiredLiteralValidation.message,
         options,
         { code: requiredLiteralValidation.code, missing: requiredLiteralValidation.missing },
+        operationId,
       );
     }
     const targetDurationSec = resolveFreeformTargetDurationSec(currentState.brief.data, detail.data, options);
@@ -717,6 +732,7 @@
             narration_budget: compression.budget || narrationFit.budget,
             ...(compression.code ? { code: compression.code, missing: compression.missing || [] } : {}),
           },
+          operationId,
         );
       }
       scenes = compression.scenes;
@@ -758,18 +774,18 @@
         narrationValidation.message,
         options,
         { narration_issues: narrationValidation.issues },
+        operationId,
       );
     }
 
-    const operationId = createFreeformOperationId('audio');
-    await updateRunHyperframesFreeform(awemeId, runId, current => ({
+    const prepared = await updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, 'audio', operationId, current => ({
       status: 'generating',
       brief: {
         ...current.brief,
         data: narrationFit.brief,
       },
       audio: {
-        ...current.audio,
+        ...withoutFailureMeta(current.audio),
         operation_id: operationId,
         status: 'generating',
         voice: options.voice || current.audio.voice || '',
@@ -779,6 +795,16 @@
           : '正在生成高级成片音频...',
       },
     }), options);
+    if (!prepared.success) {
+      return createHyperframesFreeformOperationResponse(
+        awemeId,
+        runId,
+        'audio',
+        prepared,
+        false,
+        prepared.message || '音频任务已被更新的操作取代。',
+      );
+    }
 
 
     const sceneTtsService = options.sceneTtsService || defaultSceneTts;
@@ -858,7 +884,8 @@
 
         options,
 
-        { operation_id: operationId },
+        {},
+        operationId,
 
       );
 
@@ -911,7 +938,7 @@
 
       audio: {
 
-        ...current.audio,
+        ...withoutFailureMeta(current.audio),
 
         ...audio,
 
@@ -1237,6 +1264,16 @@
           requiredLiteralRetryMissing: requiredLiteralValidation.missing,
         },
       });
+      const latest = await getCurrentHyperframesFreeformState(awemeId, runId, options);
+      if (!latest.success || latest.hyperframes_freeform?.brief?.operation_id !== operationId) {
+        return createFreeformFailureResponse(
+          awemeId,
+          runId,
+          latest.hyperframes_freeform || null,
+          latest.message || '导演策划任务已被更新的操作取代，已跳过原句修复重试。',
+          { superseded: true },
+        );
+      }
       let retryResult;
       try {
         retryResult = await modelService.callTextModel({
@@ -1686,21 +1723,24 @@
 
   }
 
-  async function failHyperframesFreeformSection(awemeId, runId, section, message, options = {}, extraPatch = {}) {
-    const updated = await updateRunHyperframesFreeform(awemeId, runId, current => ({
+  async function failHyperframesFreeformSection(awemeId, runId, section, message, options = {}, extraPatch = {}, operationId = '') {
+    const update = operationId
+      ? updater => updateRunHyperframesFreeformIfOperationCurrent(awemeId, runId, section, operationId, updater, options)
+      : updater => updateRunHyperframesFreeform(awemeId, runId, updater, options);
+    const updated = await update(current => ({
       [section]: {
         ...current[section],
         ...extraPatch,
         status: 'failed',
         message,
       },
-    }), options);
+    }));
     return createFreeformFailureResponse(
       awemeId,
       runId,
       updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
       updated.message || message,
-      extraPatch.code ? { code: extraPatch.code, missing: extraPatch.missing || [] } : {},
+      !updated.stale && extraPatch.code ? { code: extraPatch.code, missing: extraPatch.missing || [] } : {},
     );
   }
 

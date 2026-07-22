@@ -193,6 +193,134 @@ async function generateBrief({ alwaysWrong = false, parserThrows = false } = {})
   assert.equal(persistedAudioFailure.code, 'brief_required_literal_missing');
   assert.ok(persistedAudioFailure.missing.length > 0);
 
+  const audioRecovered = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(audioAwemeId, audioRunId, {
+    rootDir: audioRoot,
+    aiTextModel: {
+      callTextModel: async () => ({
+        success: true,
+        text: JSON.stringify({ scenes: [
+          { index: 1, narration_text: required[0].literal },
+          { index: 2, narration_text: required[1].literal },
+        ] }),
+      }),
+    },
+    sceneTtsService: {
+      synthesizeSceneTts: async ({ scenes }) => ({
+        success: true,
+        message: '恢复后的 B 音频。',
+        scene_tts: {
+          status: 'done',
+          path: 'recovered-B.wav',
+          duration: 2,
+          scenes: scenes.map(scene => ({ ...scene, duration: 1, speech_duration_sec: 1, captions: [{ start: 0, end: 1, text: scene.narration_text }] })),
+        },
+      }),
+    },
+  });
+  assert.equal(audioRecovered.success, true);
+  const recoveredAudioState = JSON.parse(fs.readFileSync(audioRunPath, 'utf8')).hyperframes_freeform.audio;
+  assert.equal(recoveredAudioState.status, 'ready');
+  assert.equal(recoveredAudioState.path, 'recovered-B.wav');
+  assert.equal(Object.prototype.hasOwnProperty.call(recoveredAudioState, 'code'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(recoveredAudioState, 'missing'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(recoveredAudioState, 'error'), false);
+
+  const concurrentAudioRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'required-literal-audio-race-'));
+  const concurrentAudioAwemeId = '20260722000000000005';
+  const concurrentAudioRunId = 'required-literal-audio-race';
+  const concurrentAudioRunPath = writeRun(concurrentAudioRoot, concurrentAudioAwemeId, concurrentAudioRunId);
+  const concurrentAudioRun = JSON.parse(fs.readFileSync(concurrentAudioRunPath, 'utf8'));
+  concurrentAudioRun.hyperframes_freeform = {
+    status: 'ready',
+    brief: { status: 'ready', data: brief('第一段短旁白。', '第二段短旁白。') },
+    audio: { status: 'failed', code: 'old_code', missing: [{ literal: 'old' }], error: 'old_error' },
+  };
+  fs.writeFileSync(concurrentAudioRunPath, JSON.stringify(concurrentAudioRun, null, 2));
+  let releaseAudioA;
+  let markAudioAStarted;
+  const audioAStarted = new Promise(resolve => { markAudioAStarted = resolve; });
+  const audioA = agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(concurrentAudioAwemeId, concurrentAudioRunId, {
+    rootDir: concurrentAudioRoot,
+    sceneTtsService: {
+      synthesizeSceneTts: async () => {
+        markAudioAStarted();
+        return new Promise(resolve => { releaseAudioA = resolve; });
+      },
+    },
+  });
+  await audioAStarted;
+  const audioB = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(concurrentAudioAwemeId, concurrentAudioRunId, {
+    rootDir: concurrentAudioRoot,
+    sceneTtsService: {
+      synthesizeSceneTts: async ({ scenes }) => ({
+        success: true,
+        message: 'B 新音频完成。',
+        scene_tts: {
+          status: 'done',
+          path: 'audio-B.wav',
+          duration: 2,
+          scenes: scenes.map(scene => ({ ...scene, duration: 1, speech_duration_sec: 1, captions: [{ start: 0, end: 1, text: scene.narration_text }] })),
+        },
+      }),
+    },
+  });
+  assert.equal(audioB.success, true);
+  releaseAudioA({ success: false, message: 'A 旧音频后失败。' });
+  const staleAudioA = await audioA;
+  assert.equal(staleAudioA.success, false);
+  const concurrentAudioState = JSON.parse(fs.readFileSync(concurrentAudioRunPath, 'utf8')).hyperframes_freeform.audio;
+  assert.equal(concurrentAudioState.status, 'ready');
+  assert.equal(concurrentAudioState.path, 'audio-B.wav');
+  assert.equal(concurrentAudioState.message, 'B 新音频完成。');
+  assert.equal(Object.prototype.hasOwnProperty.call(concurrentAudioState, 'code'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(concurrentAudioState, 'missing'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(concurrentAudioState, 'error'), false);
+
+  const concurrentBriefRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'required-literal-brief-race-'));
+  const concurrentBriefAwemeId = '20260722000000000006';
+  const concurrentBriefRunId = 'required-literal-brief-race';
+  const concurrentBriefRunPath = writeRun(concurrentBriefRoot, concurrentBriefAwemeId, concurrentBriefRunId);
+  let releaseBriefA;
+  let markBriefAStarted;
+  let briefAModelCalls = 0;
+  const briefAStarted = new Promise(resolve => { markBriefAStarted = resolve; });
+  const sharedBriefOptions = {
+    rootDir: concurrentBriefRoot,
+    briefOptions: { creative_context: { input: { raw_text: rawText } } },
+    skillContext: { loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'test' }) },
+  };
+  const briefA = agentRuns.generateDouyinRunHyperframesFreeformBrief(concurrentBriefAwemeId, concurrentBriefRunId, {
+    ...sharedBriefOptions,
+    aiTextModel: {
+      callTextModel: async () => {
+        briefAModelCalls += 1;
+        markBriefAStarted();
+        return new Promise(resolve => { releaseBriefA = resolve; });
+      },
+    },
+  });
+  await briefAStarted;
+  let briefBModelCalls = 0;
+  const briefB = await agentRuns.generateDouyinRunHyperframesFreeformBrief(concurrentBriefAwemeId, concurrentBriefRunId, {
+    ...sharedBriefOptions,
+    aiTextModel: {
+      callTextModel: async () => {
+        briefBModelCalls += 1;
+        return { success: true, text: JSON.stringify({ ...brief(required[0].literal, required[1].literal), title: 'B 新策划' }) };
+      },
+    },
+  });
+  assert.equal(briefB.success, true);
+  releaseBriefA({ success: true, text: JSON.stringify(brief('A 改写了原句。', 'A 也改写了原句。')) });
+  const staleBriefA = await briefA;
+  assert.equal(staleBriefA.success, false);
+  assert.equal(staleBriefA.superseded, true);
+  assert.equal(briefAModelCalls, 1);
+  assert.equal(briefBModelCalls, 1);
+  const concurrentBriefState = JSON.parse(fs.readFileSync(concurrentBriefRunPath, 'utf8')).hyperframes_freeform.brief;
+  assert.equal(concurrentBriefState.status, 'ready');
+  assert.equal(concurrentBriefState.data.title, 'B 新策划');
+
   const legacyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'required-literal-truncate-'));
   const legacyAwemeId = '20260722000000000003';
   const legacyRunId = 'required-literal-truncate';
