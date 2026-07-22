@@ -477,7 +477,7 @@ function renderDom(contract) {
     '<style data-hv-image-sequence-style="true">',
     '[data-hv-image-sequence]{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none}',
     ':where(body>:not([data-hv-image-sequence]):not([data-hv-layer="captions"]):not(style):not(script)){position:relative;z-index:1}',
-    ':where(body>[data-hv-canvas],body>#root){background-color:transparent!important}',
+    ':where(body>[data-hv-canvas],body>#root,[data-hv-canvas]>[data-role="main-visual"]){background-color:transparent!important}',
     '[data-hv-shot]{position:absolute;inset:0;margin:0;opacity:0;visibility:hidden;transition:opacity .35s ease,transform .35s ease,visibility 0s linear .35s;transform:translate3d(0,8px,0)}',
     '[data-hv-shot][data-shot-active="true"]{opacity:1;visibility:visible;transform:none;transition-delay:0s}',
     '[data-hv-shot] img{position:absolute;inset:0;width:100%;height:100%}',

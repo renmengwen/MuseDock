@@ -96,7 +96,7 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
         ],
       },
     };
-    const shell = '<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;background:#111}main,#root{position:absolute;inset:0}#root{background-color:rgb(247,244,234)}[data-test-overlay]{position:absolute;z-index:5;left:250px;top:150px;width:140px;height:60px;background:#fff;color:#000}</style><script>(()=>{const sheet=new CSSStyleSheet();const index=sheet.insertRule(".plain{color:#fff}");sheet.deleteRule(index)})()</script></head><body data-hv-canvas data-width="640" data-height="360"><div id="root"></div><main><div data-test-overlay="overlay">模型文字 Overlay</div></main></body></html>';
+    const shell = '<!doctype html><html><head><style>html,body{margin:0;width:640px;height:360px;background:#111}#root{position:absolute;inset:0;background-color:rgb(247,244,234)}[data-role="main-visual"]{position:absolute;left:0;top:0;width:640px;height:320px;z-index:1;background:linear-gradient(180deg,rgba(247,244,234,.4),rgba(247,244,234,0) 80px),linear-gradient(0deg,rgba(247,244,234,.3),rgba(247,244,234,0) 80px),rgb(247,244,234)}[data-test-overlay]{position:absolute;z-index:5;left:250px;top:150px;width:140px;height:60px;background:#fff;color:#000}</style><script>(()=>{const sheet=new CSSStyleSheet();const index=sheet.insertRule(".plain{color:#fff}");sheet.deleteRule(index)})()</script></head><body data-hv-canvas data-width="640" data-height="360"><div id="root" data-hv-canvas data-width="640" data-height="360"><div data-role="main-visual"></div><main><div data-test-overlay="overlay">模型文字 Overlay</div></main></div></body></html>';
     const materialized = materializeSceneImageSequenceDom({
       html: shell,
       node: shotNode,
@@ -182,6 +182,9 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
             return {
               top: elements[0]?.getAttribute('data-test-overlay') || elements[0]?.getAttribute('data-shot-layer') || elements[0]?.tagName,
               shellBackground: getComputedStyle(document.querySelector('#root')).backgroundColor,
+              mainVisualBackground: getComputedStyle(document.querySelector('[data-role="main-visual"]')).backgroundColor,
+              mainVisualBackgroundImage: getComputedStyle(document.querySelector('[data-role="main-visual"]')).backgroundImage,
+              overlayBackground: getComputedStyle(overlay).backgroundColor,
               shotVisible: shotStyle.visibility === 'visible' && Number(shotStyle.opacity) > 0,
               sequenceZ: getComputedStyle(document.querySelector('[data-hv-image-sequence]')).zIndex,
               overlayZ: getComputedStyle(overlay).zIndex,
@@ -192,16 +195,12 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
             };
           });
           const basePixel = await page.screenshot({ clip: { x: 320, y: 20, width: 1, height: 1 } });
-          await page.locator('main').evaluate(element => { element.style.visibility = 'hidden'; });
-          const withoutShellPixel = await page.screenshot({ clip: { x: 320, y: 20, width: 1, height: 1 } });
-          await page.locator('main').evaluate(element => { element.style.visibility = ''; });
           await page.locator('[data-hv-image-sequence]').evaluate(element => { element.style.display = 'none'; });
           const withoutShotPixel = await page.screenshot({ clip: { x: 320, y: 20, width: 1, height: 1 } });
           await page.locator('[data-hv-image-sequence]').evaluate(element => { element.style.display = ''; });
           throwIfPolicyViolated(collector);
           return {
             preloaded, overlap, boundary, afterBoundary, tail, pausedBefore, pausedAfter, images, stacking,
-            basePixelMatchesWithoutShell: basePixel.equals(withoutShellPixel),
             basePixelChangesWithoutShot: !basePixel.equals(withoutShotPixel),
           };
         },
@@ -224,8 +223,10 @@ async function runCase(browser, projectDir, name, body, assets = [], sourceHtml 
     assert.deepEqual(shotResult.images.map(image => image.fit), ['cover', 'contain', 'cover', 'contain']);
     assert.equal(shotResult.stacking.top, 'overlay');
     assert.equal(shotResult.stacking.shellBackground, 'rgba(0, 0, 0, 0)', '全画布模型壳的不透明纯背景必须被清除');
+    assert.equal(shotResult.stacking.mainVisualBackground, 'rgba(0, 0, 0, 0)', '嵌套主视觉平面的不透明底色必须被清除');
+    assert.match(shotResult.stacking.mainVisualBackgroundImage, /linear-gradient/, '主视觉平面的可读性渐变必须保留');
+    assert.equal(shotResult.stacking.overlayBackground, 'rgb(255, 255, 255)', '局部 Overlay 背景不得被透明化');
     assert.equal(shotResult.stacking.shotVisible, true);
-    assert.equal(shotResult.basePixelMatchesWithoutShell, true, '模型壳存在时必须透出与移除模型壳相同的 required 素材像素');
     assert.equal(shotResult.basePixelChangesWithoutShot, true, '移除受管 Shot 后像素必须变化，证明最终像素来自 required 素材');
     assert.ok(Number(shotResult.stacking.overlayZ) > Number(shotResult.stacking.sequenceZ));
     assert.equal(shotResult.stacking.captionPosition, 'absolute');
