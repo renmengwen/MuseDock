@@ -502,6 +502,8 @@ function firstShot(visualPlan) {
   assert.equal(keywordOccurrence('𠀀，头，保持', '头'), '头', 'Supplementary Han 经标点分隔后允许独立汉字');
   assert.deepEqual(keywordOccurrenceMatch('İSTAR star', 'star'), { index: 1, end: 5, keyword: 'STAR' });
   assert.deepEqual(keywordOccurrenceMatch('İSTART Star', 'star'), { index: 7, end: 11, keyword: 'Star' });
+  assert.deepEqual(keywordOccurrenceMatch('ΟΣ', 'ς'), { index: 1, end: 2, keyword: 'Σ' });
+  assert.equal(keywordOccurrence('ΟΣ', 'σ'), '', '整条 lowercase 的 final sigma 语义不得被逐候选折叠破坏');
   assert.equal(keywordOccurrence('选择 a+b 方案', 'a+b'), 'a+b', 'term 必须按字面量匹配');
 
   const input = fixture({

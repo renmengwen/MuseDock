@@ -73,6 +73,7 @@ function keywordOccurrenceMatch(captionText, term) {
   const query = String(term || '');
   const needle = query.toLowerCase();
   if (!needle) return null;
+  const foldedSource = source.toLowerCase();
   const boundaryBefore = LATIN_ALNUM_RE.test(needle[0]);
   const boundaryAfter = LATIN_ALNUM_RE.test(needle[needle.length - 1]);
   const singleHan = Array.from(needle).length === 1 && HAN_RE.test(needle);
@@ -82,22 +83,35 @@ function keywordOccurrenceMatch(captionText, term) {
     points.push({ value, start: offset, end: offset + value.length });
     offset += value.length;
   }
-  for (let start = 0; start < points.length; start += 1) {
-    let candidate = '';
-    for (let end = start; end < points.length; end += 1) {
-      candidate += points[end].value;
-      const folded = candidate.toLowerCase();
-      if (folded === needle) {
-        const before = points[start - 1]?.value || '';
-        const after = points[end + 1]?.value || '';
-        if ((!boundaryBefore || !LATIN_ALNUM_RE.test(before))
-          && (!boundaryAfter || !LATIN_ALNUM_RE.test(after))
-          && (!singleHan || (!HAN_RE.test(before) && !HAN_RE.test(after)))) {
-          return { index: points[start].start, end: points[end].end, keyword: candidate };
-        }
+  // ponytail: 前缀折叠是 O(n²)，但 canonical caption 有 34 字上限；上限放开后再引入专用 case-fold offset 映射。
+  const boundaryByFoldedOffset = new Map([[0, { sourceOffset: 0, pointIndex: 0 }]]);
+  for (let index = 0; index < points.length; index += 1) {
+    const sourceOffset = points[index].end;
+    boundaryByFoldedOffset.set(source.slice(0, sourceOffset).toLowerCase().length, {
+      sourceOffset,
+      pointIndex: index + 1,
+    });
+  }
+  let from = 0;
+  while (from + needle.length <= foldedSource.length) {
+    const index = foldedSource.indexOf(needle, from);
+    if (index < 0) return null;
+    const start = boundaryByFoldedOffset.get(index);
+    const end = boundaryByFoldedOffset.get(index + needle.length);
+    if (start && end) {
+      const before = points[start.pointIndex - 1]?.value || '';
+      const after = points[end.pointIndex]?.value || '';
+      if ((!boundaryBefore || !LATIN_ALNUM_RE.test(before))
+        && (!boundaryAfter || !LATIN_ALNUM_RE.test(after))
+        && (!singleHan || (!HAN_RE.test(before) && !HAN_RE.test(after)))) {
+        return {
+          index: start.sourceOffset,
+          end: end.sourceOffset,
+          keyword: source.slice(start.sourceOffset, end.sourceOffset),
+        };
       }
-      if (folded.length >= needle.length) break;
     }
+    from = index + 1;
   }
   return null;
 }

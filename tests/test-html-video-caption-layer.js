@@ -316,6 +316,8 @@ const { keywordOccurrence } = require('../server/services/creative-video/html-vi
   assert.equal(keywordOccurrence('镜头之后，头，保持', '头'), '头');
   assert.equal(keywordOccurrence('𠀀头与头𠀀', '头'), '');
   assert.equal(keywordOccurrence('𠀀，头，保持', '头'), '头');
+  assert.equal(keywordOccurrence('ΟΣ', 'ς'), 'Σ');
+  assert.equal(keywordOccurrence('ΟΣ', 'σ'), '');
 }
 
 // 无 cue（无注记）时输出与现状字节级一致：不出现 hv-caption-kw，样式块与 item 结构保持原样
@@ -418,6 +420,17 @@ const { keywordOccurrence } = require('../server/services/creative-video/html-vi
     new Map([['c1', 'star']]),
   ));
   assert.ok(foldedAfterRejected.includes('İSTART <span class="hv-caption-kw">Star</span>'), '拒绝词中 STAR 后必须高亮后续独立 Star');
+
+  const finalSigma = renderCaptionLayer(applyFocusKeywords(
+    [{ id: 'c1', start: 0, end: 2, text: 'ΟΣ' }],
+    new Map([['c1', 'ς']]),
+  ));
+  assert.ok(finalSigma.includes('Ο<span class="hv-caption-kw">Σ</span>'));
+  const nonFinalSigma = renderCaptionLayer(applyFocusKeywords(
+    [{ id: 'c1', start: 0, end: 2, text: 'ΟΣ' }],
+    new Map([['c1', 'σ']]),
+  ));
+  assert.doesNotMatch(nonFinalSigma, /hv-caption-kw/);
 }
 
 // 找不到关键词：绝不插入旁白中不存在的词、不改动文本内容
