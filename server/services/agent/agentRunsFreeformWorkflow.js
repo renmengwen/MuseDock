@@ -895,6 +895,18 @@
         storyboardPlan: { target_duration_sec: targetDurationSec, scenes },
         sceneTts: sceneTtsValue,
       });
+      if (timedPlan.status !== 'timed') {
+        const message = `高级成片音频时间轴生成失败：${timedPlan.message || '分段配音结果不完整。'}`;
+        return failHyperframesFreeformSection(
+          awemeId,
+          runId,
+          'audio',
+          message,
+          options,
+          { code: 'scene_tts_timed_plan_failed', missing: [], error: message },
+          operationId,
+        );
+      }
       const actualDurationSec = storyboardTiming.roundTime(timedPlan.duration);
       if (actualDurationSec <= maxAllowedDurationSec) break;
       if (ttsAttemptCount === 2) {

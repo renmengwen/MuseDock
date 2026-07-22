@@ -78,7 +78,7 @@ function ttsResult(duration, scenes, label) {
   };
 }
 
-async function runDurationCase({ suffix, durations, modelScenes = compressedScenes(), staleModel = null, targetDurationSec = 80, aggregateDurations = [] }) {
+async function runDurationCase({ suffix, durations, modelScenes = compressedScenes(), staleModel = null, targetDurationSec = 80, aggregateDurations = [], omitLastScene = false }) {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), `actual-tts-${suffix}-`));
   const awemeId = `20260722${suffix.padStart(12, '0')}`;
   const runId = `actual-tts-${suffix}`;
@@ -103,7 +103,9 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
         ttsRunIds.push(ttsRunId);
         ttsCalls += 1;
         const value = ttsResult(duration, scenes, `attempt-${ttsCalls}`);
+        value.scene_tts.path = `${ttsRunId}-tts.wav`;
         if (aggregateDurations[ttsCalls - 1] != null) value.scene_tts.duration = aggregateDurations[ttsCalls - 1];
+        if (omitLastScene) value.scene_tts.scenes.pop();
         return value;
       },
     },
@@ -129,6 +131,11 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
   }
   assert.equal(successState.audio.status, 'ready');
   assert.ok(Math.abs(successState.audio.duration - 91.9) < 0.01);
+  assert.equal(path.basename(agentRuns.resolveDouyinRunTtsFile(success.awemeId, success.runId, successState.audio.file_name, { rootDir: success.rootDir })), successState.audio.file_name);
+  assert.throws(
+    () => agentRuns.resolveDouyinRunTtsFile(success.awemeId, success.runId, `${success.runId}-audio-foreign-1-tts.wav`, { rootDir: success.rootDir }),
+    /Invalid Agent TTS file request/,
+  );
 
   const over = await runDurationCase({ suffix: '11', durations: [93.622, 92.001] });
   assert.equal(over.result.success, false);
@@ -163,6 +170,18 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
   assert.equal(aggregateConflict.ttsCalls, 2);
   assert.equal(aggregateConflict.modelCalls, 1);
 
+  const missingScene = await runDurationCase({
+    suffix: '18',
+    durations: [93.622],
+    aggregateDurations: [120],
+    omitLastScene: true,
+  });
+  assert.equal(missingScene.result.success, false);
+  assert.equal(missingScene.result.code, 'scene_tts_timed_plan_failed');
+  const missingSceneState = JSON.parse(fs.readFileSync(missingScene.runPath, 'utf8')).hyperframes_freeform;
+  assert.equal(missingSceneState.status, 'failed');
+  assert.equal(missingSceneState.audio.status, 'failed');
+
   const overMax = await runDurationCase({ suffix: '14', durations: [93.622], modelScenes: compressedScenes(80) });
   assert.equal(overMax.result.success, false);
   assert.equal(overMax.result.code, 'narration_compression_over_hard_max');
@@ -191,7 +210,9 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
         aTtsCalls += 1;
         assert.match(ttsRunId, /-audio-/);
         staleATtsRunId = ttsRunId;
-        return ttsResult(93.622, scenes, 'stale-A');
+        const value = ttsResult(93.622, scenes, 'stale-A');
+        value.scene_tts.path = `${ttsRunId}-tts.wav`;
+        return value;
       },
     },
   });
@@ -201,7 +222,9 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
     rootDir: staleRoot,
     sceneTtsService: { synthesizeSceneTts: async ({ scenes, runId: ttsRunId }) => {
       freshBTtsRunId = ttsRunId;
-      return ttsResult(90, scenes, 'fresh-B');
+      const value = ttsResult(90, scenes, 'fresh-B');
+      value.scene_tts.path = `${ttsRunId}-tts.wav`;
+      return value;
     } },
   });
   assert.equal(freshB.success, true);
@@ -212,7 +235,7 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
   assert.notEqual(staleATtsRunId, freshBTtsRunId);
   const staleState = JSON.parse(fs.readFileSync(staleRunPath, 'utf8')).hyperframes_freeform;
   assert.equal(staleState.status, 'ready');
-  assert.equal(staleState.audio.path, 'fresh-B.wav');
+  assert.equal(staleState.audio.path, `${freshBTtsRunId}-tts.wav`);
 
   console.log('agent runs actual TTS budget tests passed');
 })().catch(error => {

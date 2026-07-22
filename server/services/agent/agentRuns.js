@@ -1,4 +1,5 @@
 const fsp = require('fs/promises');
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const mediaPipeline = require('../mediaPipeline');
@@ -1299,7 +1300,19 @@ function resolveDouyinRunTtsFile(awemeId, runId, fileName, options = {}) {
   }
 
   const name = String(fileName || '');
-  if (!name || path.basename(name) !== name || !name.startsWith(`${runId}-tts.`)) {
+  const isolatedPrefix = `${runId}-audio-`;
+  let publishedIsolatedName = '';
+  if (name.startsWith(isolatedPrefix) && /-[12]-tts\.[A-Za-z0-9]+$/.test(name)) {
+    try {
+      const run = JSON.parse(fs.readFileSync(getRunPath(awemeId, runId, options.rootDir), 'utf8'));
+      publishedIsolatedName = String(run?.hyperframes_freeform?.audio?.file_name || '');
+    } catch {
+      publishedIsolatedName = '';
+    }
+  }
+  const isLegacyName = name.startsWith(`${runId}-tts.`);
+  const isPublishedIsolatedName = name === publishedIsolatedName && name.startsWith(isolatedPrefix);
+  if (!name || path.basename(name) !== name || (!isLegacyName && !isPublishedIsolatedName)) {
     throw new Error('Invalid Agent TTS file request');
   }
 
