@@ -90,6 +90,13 @@ async function inspectFixture(fileName, frame, extraOptions = {}) {
   const overflowFixed = await inspectFixture('overflow-card-title-fixed.html', { id: 'scene_04', duration_sec: 1 });
   assert.equal(overflowFixed.success, true);
 
+  const decoratedInline = await inspectFixture('decorated-inline-text.html', { id: 'scene_05', duration_sec: 1 });
+  assert.equal(
+    decoratedInline.issues.some(issue => issue.code === 'text_out_of_container'),
+    false,
+    '父标题内联文字的 padding/background 装饰盒不得冒充字形越界',
+  );
+
   const playAllOverlap = await inspectFixture('playall-overlap.html', { id: 'scene_07', duration_sec: 1 });
   assert.equal(playAllOverlap.success, false);
   assert.ok(

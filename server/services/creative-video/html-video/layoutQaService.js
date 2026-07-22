@@ -348,6 +348,23 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
       };
     }
 
+    function textBoxFor(element) {
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+      const rects = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!(node.textContent || '').trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        rects.push(...Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0));
+      }
+      if (!rects.length) return null;
+      const left = Math.min(...rects.map(rect => rect.left));
+      const top = Math.min(...rects.map(rect => rect.top));
+      const right = Math.max(...rects.map(rect => rect.right));
+      const bottom = Math.max(...rects.map(rect => rect.bottom));
+      return { left, top, right, bottom, width: right - left, height: bottom - top };
+    }
+
     function selectorFor(element) {
       if (element.dataset && element.dataset.textKey) return `[data-text-key="${element.dataset.textKey}"]`;
       if (element.classList && element.classList.length) {
@@ -465,7 +482,7 @@ async function collectCandidates(page, { sampleTimeSec, durationSec }) {
             ))),
             transientTransformDelta: transientTransformDeltaFor(element, container),
             text,
-            box: serializeBox(rect),
+            box: isExplicitText ? (textBoxFor(element) || serializeBox(rect)) : serializeBox(rect),
             container: containerFor(element),
             allowOverflow: hasLayoutFlag(element, '[data-layout-allow-overflow]'),
           },
