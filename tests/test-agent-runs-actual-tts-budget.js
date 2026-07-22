@@ -136,6 +136,23 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
     () => agentRuns.resolveDouyinRunTtsFile(success.awemeId, success.runId, `${success.runId}-audio-foreign-1-tts.wav`, { rootDir: success.rootDir }),
     /Invalid Agent TTS file request/,
   );
+  const publishedRun = JSON.parse(fs.readFileSync(success.runPath, 'utf8'));
+  publishedRun.hyperframes_freeform.audio.status = 'generating';
+  fs.writeFileSync(success.runPath, JSON.stringify(publishedRun, null, 2));
+  assert.throws(
+    () => agentRuns.resolveDouyinRunTtsFile(success.awemeId, success.runId, successState.audio.file_name, { rootDir: success.rootDir }),
+    /Invalid Agent TTS file request/,
+  );
+  publishedRun.hyperframes_freeform.audio.status = 'ready';
+  publishedRun.hyperframes_freeform.audio.operation_id = 'audio-old-operation';
+  fs.writeFileSync(success.runPath, JSON.stringify(publishedRun, null, 2));
+  assert.throws(
+    () => agentRuns.resolveDouyinRunTtsFile(success.awemeId, success.runId, successState.audio.file_name, { rootDir: success.rootDir }),
+    /Invalid Agent TTS file request/,
+  );
+  publishedRun.hyperframes_freeform.audio.operation_id = successState.audio.operation_id;
+  fs.writeFileSync(success.runPath, JSON.stringify(publishedRun, null, 2));
+  assert.equal(path.basename(agentRuns.resolveDouyinRunTtsFile(success.awemeId, success.runId, successState.audio.file_name, { rootDir: success.rootDir })), successState.audio.file_name);
 
   const over = await runDurationCase({ suffix: '11', durations: [93.622, 92.001] });
   assert.equal(over.result.success, false);
@@ -181,6 +198,18 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
   const missingSceneState = JSON.parse(fs.readFileSync(missingScene.runPath, 'utf8')).hyperframes_freeform;
   assert.equal(missingSceneState.status, 'failed');
   assert.equal(missingSceneState.audio.status, 'failed');
+
+  const zeroDuration = await runDurationCase({
+    suffix: '19',
+    durations: [0],
+    aggregateDurations: [120],
+  });
+  assert.equal(zeroDuration.result.success, false);
+  assert.equal(zeroDuration.result.code, 'scene_tts_timed_plan_failed');
+  const zeroDurationState = JSON.parse(fs.readFileSync(zeroDuration.runPath, 'utf8')).hyperframes_freeform;
+  assert.equal(zeroDurationState.status, 'failed');
+  assert.equal(zeroDurationState.audio.status, 'failed');
+  assert.equal(zeroDurationState.audio.duration, 0);
 
   const overMax = await runDurationCase({ suffix: '14', durations: [93.622], modelScenes: compressedScenes(80) });
   assert.equal(overMax.result.success, false);

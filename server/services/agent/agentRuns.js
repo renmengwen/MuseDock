@@ -1301,17 +1301,21 @@ function resolveDouyinRunTtsFile(awemeId, runId, fileName, options = {}) {
 
   const name = String(fileName || '');
   const isolatedPrefix = `${runId}-audio-`;
-  let publishedIsolatedName = '';
+  let publishedAudio = {};
   if (name.startsWith(isolatedPrefix) && /-[12]-tts\.[A-Za-z0-9]+$/.test(name)) {
     try {
       const run = JSON.parse(fs.readFileSync(getRunPath(awemeId, runId, options.rootDir), 'utf8'));
-      publishedIsolatedName = String(run?.hyperframes_freeform?.audio?.file_name || '');
+      publishedAudio = run?.hyperframes_freeform?.audio || {};
     } catch {
-      publishedIsolatedName = '';
+      publishedAudio = {};
     }
   }
   const isLegacyName = name.startsWith(`${runId}-tts.`);
-  const isPublishedIsolatedName = name === publishedIsolatedName && name.startsWith(isolatedPrefix);
+  const publishedOperationId = String(publishedAudio.operation_id || '');
+  const isPublishedIsolatedName = publishedAudio.status === 'ready'
+    && name === String(publishedAudio.file_name || '')
+    && publishedOperationId
+    && name.startsWith(`${isolatedPrefix}${publishedOperationId}-`);
   if (!name || path.basename(name) !== name || (!isLegacyName && !isPublishedIsolatedName)) {
     throw new Error('Invalid Agent TTS file request');
   }

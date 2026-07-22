@@ -551,11 +551,6 @@
 
 
 
-  function getCaptionDuration(captions = []) {
-    return captions.reduce((max, caption) => Math.max(max, Number(caption?.end || 0)), 0);
-
-  }
-
   function createFreeformAudioValue({ sceneTtsValue = {}, timedPlan = {}, awemeId, runId, voice = '', stylePrompt = '', fallbackMessage = '' }) {
 
     const fileName = sceneTtsValue.file_name || (sceneTtsValue.path ? path.basename(sceneTtsValue.path) : getTtsFileName(runId, sceneTtsValue.format || 'wav'));
@@ -564,7 +559,7 @@
 
     const phraseCaptions = Array.isArray(timedPlan.phrase_captions) ? timedPlan.phrase_captions : [];
 
-    const duration = Number(timedPlan.duration || sceneTtsValue.duration || getCaptionDuration(captions) || 0);
+    const duration = Number(timedPlan.duration);
 
     return {
 
@@ -895,8 +890,12 @@
         storyboardPlan: { target_duration_sec: targetDurationSec, scenes },
         sceneTts: sceneTtsValue,
       });
-      if (timedPlan.status !== 'timed') {
-        const message = `高级成片音频时间轴生成失败：${timedPlan.message || '分段配音结果不完整。'}`;
+      const actualDurationSec = storyboardTiming.roundTime(timedPlan.duration);
+      if (timedPlan.status !== 'timed' || actualDurationSec <= 0) {
+        const reason = timedPlan.status !== 'timed'
+          ? (timedPlan.message || '分段配音结果不完整。')
+          : '分段配音总时长为 0，无法生成有效时间轴。';
+        const message = `高级成片音频时间轴生成失败：${reason}`;
         return failHyperframesFreeformSection(
           awemeId,
           runId,
@@ -907,7 +906,6 @@
           operationId,
         );
       }
-      const actualDurationSec = storyboardTiming.roundTime(timedPlan.duration);
       if (actualDurationSec <= maxAllowedDurationSec) break;
       if (ttsAttemptCount === 2) {
         const details = {
