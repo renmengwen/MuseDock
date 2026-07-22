@@ -231,7 +231,7 @@ function previewHtml(
     });
   }
 
-  async function inspectProjectFrame(name, body) {
+  async function inspectProjectFrame(name, body, sampleTimes = [0.1]) {
     const projectDir = path.join(tempDir, 'managed-project');
     const framesDir = path.join(projectDir, 'frames');
     const assetsDir = path.join(projectDir, 'assets');
@@ -245,7 +245,7 @@ function previewHtml(
       htmlPath: framePath,
       frame: { id: name, duration_sec: 2 },
       resolution,
-      sampleTimesSec: [0.1],
+      sampleTimesSec: sampleTimes,
     });
   }
 
@@ -256,16 +256,46 @@ function previewHtml(
   const pauseOpacityTransitionsAtMidpoint = (...ids) => `<script>(()=>{for(const id of ${JSON.stringify(ids)}){const shot=document.getElementById(id);void shot.offsetWidth;shot.style.opacity='1';const transition=shot.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='opacity');if(!transition)throw new Error('fixture opacity transition missing: '+id);transition.pause();transition.playbackRate=.75;transition.currentTime=175}})()</script>`;
   const pauseFilterTransitionsAtMidpoint = () => `<script>(()=>{for(const image of document.querySelectorAll('[data-shot-layer]')){void image.offsetWidth;image.style.filter='sepia(.8)';const transition=image.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='filter');if(!transition)throw new Error('fixture filter transition missing');transition.pause();transition.playbackRate=.6;transition.currentTime=5000}})()</script>`;
 
-  const fileAssetRequired = await inspectProjectFrame(
-    'required-file-assets.html',
-    '<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="file-assets" data-shot-requirement="required"><img data-shot-layer="background" src="../assets/opaque.png"><img data-shot-layer="foreground" src="../assets/opaque.jpg" srcset="../assets/opaque.jpg 1x"></figure></section>',
-  );
+  const originalReadFile = fs.readFile;
+  let managedAssetReadCount = 0;
+  fs.readFile = async (...args) => {
+    if (String(args[0]).includes(`${path.sep}managed-project${path.sep}assets${path.sep}`)) {
+      managedAssetReadCount += 1;
+    }
+    return originalReadFile(...args);
+  };
+  let fileAssetRequired;
+  try {
+    fileAssetRequired = await inspectProjectFrame(
+      'required-file-assets.html',
+      '<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="file-assets" data-shot-requirement="required"><img data-shot-layer="background" src="../assets/opaque.png"><img data-shot-layer="foreground" src="../assets/opaque.png" srcset="../assets/opaque.png 1x"><img data-shot-layer="accent" src="../assets/opaque.jpg"></figure></section>',
+      [0.1, 0.2],
+    );
+  } finally {
+    fs.readFile = originalReadFile;
+  }
   const fileAssetMetric = fileAssetRequired.metrics.image_sequence_visibility_samples[0];
   assert.equal(fileAssetRequired.success, true, JSON.stringify(fileAssetRequired.issues));
   assert.ok(fileAssetMetric.changed_pixel_ratio >= 0.05,
     `真实 project/frames → project/assets PNG/JPG 必须通过受管字节探针：${JSON.stringify(fileAssetMetric)}`);
   assert.ok(fileAssetMetric.layer_state_restored && fileAssetMetric.style_restored,
     '真实 file 图片探针前后 src/srcset/currentSrc/style 必须保持不变');
+  assert.equal(managedAssetReadCount, 2,
+    '同一 Frame 内重复 currentSrc 和跨 sample 必须复用 Node 受管字节，只读取唯一 PNG/JPG 各一次');
+
+  const freezeSwitch = await inspectInline(
+    'required-freeze-switch.html',
+    `<section data-hv-image-sequence="true" data-sequence-mode="semantic_compare">
+      <figure id="freeze-shot-a" data-hv-shot="true" data-shot-active="true" data-shot-id="freeze-a" data-shot-requirement="required"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure>
+      <figure id="freeze-shot-b" data-hv-shot="true" data-shot-id="freeze-b" data-shot-requirement="required"><img data-shot-layer="background" src="${secondImageUrl}"><img data-shot-layer="foreground" src="${secondImageUrl}"></figure>
+    </section><script>window.__hvPlaybackClock={__hvOwner:'musedock-playback-clock-v1',_paused:false,pause(){this._paused=true;document.getElementById('freeze-shot-a').removeAttribute('data-shot-active');document.getElementById('freeze-shot-b').setAttribute('data-shot-active','true')},play(){this._paused=false},paused(){return this._paused}}</script>`,
+  );
+  assert.equal(freezeSwitch.success, true, JSON.stringify(freezeSwitch.issues));
+  assert.deepEqual(
+    freezeSwitch.metrics.image_sequence_visibility_samples.map(metric => metric.shot_id),
+    ['freeze-b'],
+    'pause() 触发 A→B 后只能保存并探测冻结后的 active required Shot B',
+  );
 
   await fs.writeFile(path.join(tempDir, 'outside.png'), Buffer.from(opaquePngBase64, 'base64'));
   const escapedFileRequired = await inspectProjectFrame(

@@ -823,19 +823,17 @@ async function controlledImageDataUrl(source, assetsRoot) {
   return `data:${mime};base64,${bytes.toString('base64')}`;
 }
 
-async function inspectRequiredAssetVisibility(page, resolution, { assetsRoot = null } = {}) {
+async function inspectRequiredAssetVisibility(page, resolution, {
+  assetsRoot = null,
+  controlledSourceCache = new Map(),
+  sourceIdentityCache = new Map(),
+  injectedSourceKeys = new Set(),
+} = {}) {
   const prepared = await page.evaluate(({ viewport, safeBottomPx }) => {
     const sequence = document.querySelector('[data-hv-image-sequence]');
     if (!sequence) return null;
-    const requiredShots = Array.from(sequence.querySelectorAll(
-      '[data-hv-shot][data-shot-active="true"][data-shot-requirement="required"]',
-    )).filter((shot) => {
-      const style = getComputedStyle(shot);
-      const rect = shot.getBoundingClientRect();
-      return style.display !== 'none' && style.visibility !== 'hidden'
-        && Number(style.opacity) > 0 && rect.width > 0 && rect.height > 0;
-    });
-    if (!requiredShots.length) return null;
+    const requiredSelector = '[data-hv-shot][data-shot-requirement="required"]';
+    if (!sequence.querySelector(requiredSelector)) return null;
 
     const clock = window.__hvPlaybackClock;
     const trustedClock = clock?.__hvOwner === 'musedock-playback-clock-v1'
@@ -853,6 +851,30 @@ async function inspectRequiredAssetVisibility(page, resolution, { assetsRoot = n
     }));
     for (const item of animations) {
       try { item.animation.pause(); } catch (_) {}
+    }
+
+    const requiredShots = Array.from(sequence.querySelectorAll(
+      '[data-hv-shot][data-shot-active="true"][data-shot-requirement="required"]',
+    )).filter((shot) => {
+      const style = getComputedStyle(shot);
+      const rect = shot.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden'
+        && Number(style.opacity) > 0 && rect.width > 0 && rect.height > 0;
+    });
+    if (!requiredShots.length) {
+      for (const item of animations) {
+        try {
+          item.animation.playbackRate = item.playbackRate;
+          if (item.currentTime !== null) item.animation.currentTime = item.currentTime;
+          if (item.playState === 'running' || item.playState === 'pending') item.animation.play();
+          else if (item.playState === 'paused') item.animation.pause();
+          else if (item.playState === 'finished') item.animation.finish();
+          else if (item.playState === 'idle') item.animation.cancel();
+        } catch (_) {}
+      }
+      if (trustedClock && !clockWasPaused) clock.play();
+      if (!rafWasPaused && typeof rafController?.resume === 'function') rafController.resume();
+      return null;
     }
 
     const shotStates = requiredShots.map(shot => ({
@@ -920,12 +942,31 @@ async function inspectRequiredAssetVisibility(page, resolution, { assetsRoot = n
   let restored = false;
   let restorationDetails = {};
   try {
-    const controlledSources = await Promise.all(prepared.targets.map(target => Promise.all(
-      target.layers.map(layer => controlledImageDataUrl(layer.current_src, assetsRoot)),
-    )));
-    await page.evaluate(async ({ sourcesByTarget, maxProbePixels }) => {
+    const sourceByKey = new Map();
+    const sourceKeysByTarget = prepared.targets.map(target => target.layers.map((layer) => {
+      if (!sourceIdentityCache.has(layer.current_src)) {
+        sourceIdentityCache.set(layer.current_src, `source-${sourceIdentityCache.size}`);
+      }
+      const sourceKey = sourceIdentityCache.get(layer.current_src);
+      sourceByKey.set(sourceKey, layer.current_src);
+      return sourceKey;
+    }));
+    const uniqueSourceKeys = [...new Set(sourceKeysByTarget.flat())];
+    const sourceEntries = await Promise.all(uniqueSourceKeys
+      .filter(sourceKey => !injectedSourceKeys.has(sourceKey))
+      .map(async (sourceKey) => {
+        const source = sourceByKey.get(sourceKey);
+        if (!controlledSourceCache.has(source)) {
+          controlledSourceCache.set(source, controlledImageDataUrl(source, assetsRoot));
+        }
+        return [sourceKey, await controlledSourceCache.get(source)];
+      }));
+    await page.evaluate(async ({ sourceKeysByTarget: sourceKeys, sourceEntries: entries, maxProbePixels }) => {
       const state = window.__layoutQaRequiredAssetRestore;
       if (!state) throw new Error('required asset visibility state missing');
+      const sourceCache = window.__layoutQaRequiredAssetSourceCache || new Map();
+      window.__layoutQaRequiredAssetSourceCache = sourceCache;
+      for (const [key, source] of entries) sourceCache.set(key, source);
 
       async function alphaProbeDataUrl(source, color, layer) {
         const { naturalWidth: width, naturalHeight: height, displayWidth, displayHeight } = layer;
@@ -964,19 +1005,21 @@ async function inspectRequiredAssetVisibility(page, resolution, { assetsRoot = n
 
       for (let shotIndex = 0; shotIndex < state.shots.length; shotIndex += 1) {
         const item = state.shots[shotIndex];
-        const sources = sourcesByTarget[shotIndex];
-        if (!Array.isArray(sources) || sources.length !== item.layers.length) {
+        const keys = sourceKeys[shotIndex];
+        if (!Array.isArray(keys) || keys.length !== item.layers.length) {
           throw new Error('required asset visibility controlled source state mismatch');
         }
         for (let layerIndex = 0; layerIndex < item.layers.length; layerIndex += 1) {
           const layer = item.layers[layerIndex];
+          const source = sourceCache.get(keys[layerIndex]);
+          if (!source) throw new Error('required asset visibility controlled source cache missing');
           layer.blackProbeToken = `probe-${shotIndex}-${layerIndex}-black`;
           layer.whiteProbeToken = `probe-${shotIndex}-${layerIndex}-white`;
           layer.blackProbeSrc = await alphaProbeDataUrl(
-            sources[layerIndex], 'black', layer,
+            source, 'black', layer,
           );
           layer.whiteProbeSrc = await alphaProbeDataUrl(
-            sources[layerIndex], 'white', layer,
+            source, 'white', layer,
           );
         }
       }
@@ -988,7 +1031,12 @@ async function inspectRequiredAssetVisibility(page, resolution, { assetsRoot = n
       ])).join('');
       document.head.appendChild(probeStyle);
       state.probeStyle = probeStyle;
-    }, { sourcesByTarget: controlledSources, maxProbePixels: REQUIRED_ASSET_PROBE_MAX_PIXELS });
+    }, {
+      sourceKeysByTarget,
+      sourceEntries,
+      maxProbePixels: REQUIRED_ASSET_PROBE_MAX_PIXELS,
+    });
+    for (const [sourceKey] of sourceEntries) injectedSourceKeys.add(sourceKey);
 
     for (const target of prepared.targets) {
       try {
@@ -1308,6 +1356,9 @@ async function inspectFrameHtmlLayout(options = {}) {
     await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load' });
     await waitForLayout(page);
     const assetsRoot = await projectAssetsRootForHtml(htmlPath, options.projectAssetsRoot).catch(() => null);
+    const controlledSourceCache = new Map();
+    const sourceIdentityCache = new Map();
+    const injectedSourceKeys = new Set();
     const playbackStartup = await page.evaluate(() => {
       const clock = window.__hvPlaybackClock;
       const trusted = clock?.__hvOwner === 'musedock-playback-clock-v1'
@@ -1483,7 +1534,12 @@ async function inspectFrameHtmlLayout(options = {}) {
         requiredAssetVisibility = await inspectRequiredAssetVisibility(page, {
           width: resolution.width || DEFAULT_RESOLUTION.width,
           height: resolution.height || DEFAULT_RESOLUTION.height,
-        }, { assetsRoot });
+        }, {
+          assetsRoot,
+          controlledSourceCache,
+          sourceIdentityCache,
+          injectedSourceKeys,
+        });
       } catch (error) {
         issues.push(makeIssue({
           code: 'required_asset_visibility_probe_failed',
