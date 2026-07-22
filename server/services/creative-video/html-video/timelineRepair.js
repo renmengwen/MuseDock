@@ -1,3 +1,5 @@
+const requiredNarration = require('../../hyperframes/requiredNarrationLiterals');
+
 function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
@@ -147,6 +149,18 @@ function compressNarrationForTarget(sceneSpec, targetDurationSec) {
     }
     return nextScene;
   });
+  const requiredLiteralValidation = requiredNarration.validateRequiredNarrationLiterals(
+    nextSceneSpec.scenes,
+    nextSceneSpec.required_narration_literals,
+  );
+  if (!requiredLiteralValidation.ok) {
+    return {
+      success: false,
+      code: requiredLiteralValidation.code,
+      message: `${requiredLiteralValidation.message} 已拒绝可能破坏原句的恢复截断，请重新生成压缩旁白。`,
+      missing: requiredLiteralValidation.missing,
+    };
+  }
   return nextSceneSpec;
 }
 

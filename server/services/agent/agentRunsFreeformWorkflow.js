@@ -443,6 +443,11 @@
     };
   }
 
+  function withoutFailureMeta(section = {}) {
+    const { code, missing, ...rest } = section;
+    return { ...rest, code: undefined, missing: undefined };
+  }
+
 
   async function markFreeformBriefFailed(awemeId, runId, message, options = {}, operationId = '', logMeta = {}) {
 
@@ -463,6 +468,8 @@
         status: 'failed',
 
         ...(logMeta.code ? { code: logMeta.code } : {}),
+
+        ...(Array.isArray(logMeta.missing) ? { missing: logMeta.missing } : {}),
 
         message,
 
@@ -498,7 +505,7 @@
 
       updated.message || message,
 
-      logMeta.code ? { code: logMeta.code } : {},
+      logMeta.code ? { code: logMeta.code, missing: logMeta.missing || [] } : {},
 
     );
 
@@ -706,7 +713,10 @@
           'audio',
           `口播超过目标时长，自动压缩失败：${compression.message || '未知错误'}`,
           options,
-          { narration_budget: compression.budget || narrationFit.budget },
+          {
+            narration_budget: compression.budget || narrationFit.budget,
+            ...(compression.code ? { code: compression.code, missing: compression.missing || [] } : {}),
+          },
         );
       }
       scenes = compression.scenes;
@@ -955,7 +965,7 @@
 
       brief: {
 
-        ...current.brief,
+        ...withoutFailureMeta(current.brief),
 
         status: 'generating',
 
@@ -1246,12 +1256,16 @@
         retryResult = { success: false, message: error.message || '模型调用失败' };
       }
       if (retryResult?.success) {
-        parsed = freeformAgent.parseFreeformBriefResponse(retryResult.text || retryResult.raw_output || '');
-        if (parsed.success) {
-          requiredLiteralValidation = freeformAgent.validateRequiredNarrationLiterals(
-            normalizeFreeformNarrationScenes(parsed.brief),
-            requiredNarrationLiterals,
-          );
+        try {
+          parsed = freeformAgent.parseFreeformBriefResponse(retryResult.text || retryResult.raw_output || '');
+          if (parsed.success) {
+            requiredLiteralValidation = freeformAgent.validateRequiredNarrationLiterals(
+              normalizeFreeformNarrationScenes(parsed.brief),
+              requiredNarrationLiterals,
+            );
+          }
+        } catch (error) {
+          parsed = { success: false, message: `导演策划解析失败：${error.message || '解析失败'}` };
         }
       }
       if (!retryResult?.success || !parsed.success || !requiredLiteralValidation.ok) {
@@ -1293,7 +1307,7 @@
 
       brief: {
 
-        ...current.brief,
+        ...withoutFailureMeta(current.brief),
 
         status: 'ready',
 
@@ -1686,6 +1700,7 @@
       runId,
       updated.success ? updated.data.hyperframes_freeform : updated.hyperframes_freeform || null,
       updated.message || message,
+      extraPatch.code ? { code: extraPatch.code, missing: extraPatch.missing || [] } : {},
     );
   }
 

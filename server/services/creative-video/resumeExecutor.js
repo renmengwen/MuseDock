@@ -493,6 +493,18 @@ async function repairScriptAndTimeline(context) {
     })]);
   }
   const sceneSpec = compressNarrationForTarget(context.project.scene_spec, targetDurationSec(context.project));
+  if (sceneSpec?.success === false) {
+    return actionFailure(sceneSpec.message, [createDiagnostic({
+      code: sceneSpec.code,
+      sub_stage: 'timeline_check',
+      user_message: sceneSpec.message,
+      details: { missing: sceneSpec.missing },
+      retryable: false,
+    })], {
+      code: sceneSpec.code,
+      missing: sceneSpec.missing,
+    });
+  }
   let project = {
     ...context.project,
     scene_spec: sceneSpec,

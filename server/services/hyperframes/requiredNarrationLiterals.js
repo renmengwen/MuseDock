@@ -7,33 +7,64 @@ function sceneNumber(value) {
 function extractRequiredNarrationLiterals(rawText = '') {
   const text = String(rawText || '');
   const requirements = [];
-  const pattern = /\b(S\d{2,3})\b(?:(?!\bS\d{2,3}\b)[\s\S])*?旁白必须(?:完整)?包含\s*“([^”\r\n]+)”/gi;
-  for (const match of text.matchAll(pattern)) {
-    const literal = String(match[2] || '').trim();
-    if (literal) requirements.push({ scene_id: match[1].toUpperCase(), literal });
+  const seen = new Set();
+  const scenePattern = /\b(S\d{2,3})\b/gi;
+  const sceneMatches = [...text.matchAll(scenePattern)];
+  for (const [index, sceneMatch] of sceneMatches.entries()) {
+    const sceneId = sceneMatch[1].toUpperCase();
+    const segmentStart = sceneMatch.index + sceneMatch[0].length;
+    const segmentEnd = sceneMatches[index + 1]?.index ?? text.length;
+    const segment = text.slice(segmentStart, segmentEnd);
+    const literalPattern = /旁白必须(?:完整)?包含\s*(?:“([^”\r\n]+)”|"([^"\r\n]+)")/g;
+    for (const literalMatch of segment.matchAll(literalPattern)) {
+      const literal = String(literalMatch[1] || literalMatch[2] || '').trim();
+      const key = `${sceneId}\u0000${literal}`;
+      if (!literal || seen.has(key)) continue;
+      seen.add(key);
+      requirements.push({ scene_id: sceneId, literal });
+    }
   }
   return requirements;
 }
 
+function parseSceneId(scene) {
+  for (const value of [scene?.id, scene?.scene_id, scene?.sceneId]) {
+    const number = sceneNumber(value);
+    if (number) return number;
+  }
+  return 0;
+}
+
 function findScene(scenes, requirement) {
+  const list = Array.isArray(scenes) ? scenes : [];
   const requiredNumber = sceneNumber(requirement?.scene_id);
-  return (Array.isArray(scenes) ? scenes : []).find((scene, index) => {
-    const idNumber = sceneNumber(scene?.id || scene?.scene_id || scene?.sceneId);
-    const order = Number(scene?.index || scene?.order || index + 1);
-    return (idNumber && idNumber === requiredNumber) || order === requiredNumber;
-  });
+  const explicitlyIdentified = list.map(scene => ({ scene, number: parseSceneId(scene) })).filter(item => item.number);
+  if (explicitlyIdentified.length) {
+    const matches = explicitlyIdentified.filter(item => item.number === requiredNumber);
+    if (matches.length !== 1) {
+      return { scene: null, reason: matches.length > 1 ? 'duplicate_scene_id' : 'scene_id_not_found' };
+    }
+    return { scene: matches[0].scene, reason: '' };
+  }
+  const matches = list.filter((scene, index) => Number(scene?.index || scene?.order || index + 1) === requiredNumber);
+  return {
+    scene: matches.length === 1 ? matches[0] : null,
+    reason: matches.length > 1 ? 'duplicate_scene_order' : (matches.length ? '' : 'scene_order_not_found'),
+  };
 }
 
 function validateRequiredNarrationLiterals(scenes = [], requirements = []) {
   const missing = [];
   for (const requirement of Array.isArray(requirements) ? requirements : []) {
-    const scene = findScene(scenes, requirement);
+    const resolved = findScene(scenes, requirement);
+    const scene = resolved.scene;
     const narrationText = String(scene?.narration_text || scene?.narration || scene?.voiceover || scene?.script || '');
     if (!scene || !narrationText.includes(requirement.literal)) {
       missing.push({
         scene_id: requirement.scene_id,
         literal: requirement.literal,
         actual: narrationText,
+        reason: resolved.reason || 'literal_missing',
       });
     }
   }

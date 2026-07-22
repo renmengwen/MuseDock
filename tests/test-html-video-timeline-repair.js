@@ -160,6 +160,16 @@ function buildProject() {
 }
 
 {
+  const protectedSpec = buildSceneSpec();
+  protectedSpec.required_narration_literals = [{ scene_id: 'S01', literal: '必须保留的结尾原句。' }];
+  protectedSpec.scenes[0].narration_text += '必须保留的结尾原句。';
+  const rejected = compressNarrationForTarget(protectedSpec, 1);
+  assert.equal(rejected.success, false);
+  assert.equal(rejected.code, 'brief_required_literal_missing');
+  assert.equal(rejected.missing[0].literal, '必须保留的结尾原句。');
+}
+
+{
   const project = buildProject();
   const result = repairProjectTimeline({
     project,

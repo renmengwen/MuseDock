@@ -7,6 +7,8 @@ const agentRuns = require('../server/services/agent/agentRuns');
 const helpers = require('../server/services/agent/agentRunsFreeformHelpers');
 const freeformAgent = require('../server/services/hyperframes/hyperframesFreeformAgent');
 const workflowFacade = require('../server/services/creative-video/workflowFacade');
+const { executeCreativeWorkflowRetryPlan } = require('../server/services/creative-video/resumeExecutor');
+const { createEmptyProject } = require('../server/services/creative-video/html-video/projectSchema');
 
 const rawText = 'S01 使用首页。旁白必须包含“必须保留的首页原句。”；S02 使用截图。旁白必须完整包含“必须保留的截图原句。”。';
 const required = freeformAgent.extractRequiredNarrationLiterals(rawText);
@@ -37,13 +39,14 @@ function writeRun(rootDir, awemeId, runId) {
   return path.join(runDir, `${runId}.json`);
 }
 
-async function generateBrief({ alwaysWrong = false } = {}) {
+async function generateBrief({ alwaysWrong = false, parserThrows = false } = {}) {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'required-literal-'));
   const awemeId = alwaysWrong ? '20260722000000000002' : '20260722000000000001';
   const runId = alwaysWrong ? 'required-literal-fail' : 'required-literal-retry';
   const runPath = writeRun(rootDir, awemeId, runId);
   let calls = 0;
   let retryPrompt = '';
+  let parseCalls = 0;
   const result = await agentRuns.generateDouyinRunHyperframesFreeformBrief(awemeId, runId, {
     rootDir,
     briefOptions: { creative_context: { input: { raw_text: rawText } } },
@@ -60,6 +63,16 @@ async function generateBrief({ alwaysWrong = false } = {}) {
         };
       },
     },
+    ...(parserThrows ? {
+      hyperframesFreeformAgent: {
+        ...freeformAgent,
+        parseFreeformBriefResponse: (...args) => {
+          parseCalls += 1;
+          if (parseCalls === 2) throw new Error('second parse exploded');
+          return freeformAgent.parseFreeformBriefResponse(...args);
+        },
+      },
+    } : {}),
   });
   return { result, calls, retryPrompt, runPath, rootDir, awemeId, runId };
 }
@@ -109,6 +122,22 @@ async function generateBrief({ alwaysWrong = false } = {}) {
   assert.equal(audio.success, false);
   assert.equal(ttsCalls, 0);
 
+  const thrown = await generateBrief({ parserThrows: true });
+  assert.equal(thrown.result.success, false);
+  assert.equal(thrown.result.code, 'brief_required_literal_missing');
+  assert.match(thrown.result.message, /second parse exploded/);
+
+  const recovered = await agentRuns.generateDouyinRunHyperframesFreeformBrief(failed.awemeId, failed.runId, {
+    rootDir: failed.rootDir,
+    briefOptions: { creative_context: { input: { raw_text: rawText } } },
+    skillContext: { loadHyperframesSkillContext: async () => ({ success: true, prompt_context: 'test' }) },
+    aiTextModel: { callTextModel: async () => ({ success: true, text: JSON.stringify(brief(required[0].literal, required[1].literal)) }) },
+  });
+  assert.equal(recovered.success, true);
+  const recoveredState = JSON.parse(fs.readFileSync(failed.runPath, 'utf8')).hyperframes_freeform.brief;
+  assert.equal(Object.prototype.hasOwnProperty.call(recoveredState, 'code'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(recoveredState, 'missing'), false);
+
   const scenes = [
     { index: 1, narration_text: `开场。${required[0].literal}` },
     { index: 2, narration_text: required[1].literal },
@@ -134,6 +163,36 @@ async function generateBrief({ alwaysWrong = false } = {}) {
   assert.equal(compressed.code, 'brief_required_literal_missing');
   assert.equal(ttsAfterCompression, 0);
 
+  const audioRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'required-literal-audio-'));
+  const audioAwemeId = '20260722000000000004';
+  const audioRunId = 'required-literal-audio';
+  const audioRunPath = writeRun(audioRoot, audioAwemeId, audioRunId);
+  const audioRun = JSON.parse(fs.readFileSync(audioRunPath, 'utf8'));
+  audioRun.hyperframes_freeform = {
+    status: 'ready',
+    brief: {
+      status: 'ready',
+      data: {
+        ...brief(`${required[0].literal}${'很长的旁白内容'.repeat(80)}`, `${required[1].literal}${'很长的旁白内容'.repeat(80)}`),
+        required_narration_literals: required,
+      },
+    },
+  };
+  fs.writeFileSync(audioRunPath, JSON.stringify(audioRun, null, 2));
+  let audioTtsCalls = 0;
+  const audioFailure = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(audioAwemeId, audioRunId, {
+    rootDir: audioRoot,
+    aiTextModel: { callTextModel: async () => ({ success: true, text: JSON.stringify({ scenes: [{ index: 1, narration_text: '丢失原句。' }] }) }) },
+    sceneTtsService: { synthesizeSceneTts: async () => { audioTtsCalls += 1; return { success: true }; } },
+  });
+  assert.equal(audioFailure.success, false);
+  assert.equal(audioFailure.code, 'brief_required_literal_missing');
+  assert.ok(audioFailure.missing.length > 0);
+  assert.equal(audioTtsCalls, 0);
+  const persistedAudioFailure = JSON.parse(fs.readFileSync(audioRunPath, 'utf8')).hyperframes_freeform.audio;
+  assert.equal(persistedAudioFailure.code, 'brief_required_literal_missing');
+  assert.ok(persistedAudioFailure.missing.length > 0);
+
   const legacyRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'required-literal-truncate-'));
   const legacyAwemeId = '20260722000000000003';
   const legacyRunId = 'required-literal-truncate';
@@ -149,6 +208,29 @@ async function generateBrief({ alwaysWrong = false } = {}) {
   assert.equal(truncate.success, false);
   assert.equal(truncate.code, 'brief_required_literal_missing');
   assert.equal(JSON.parse(fs.readFileSync(legacyRunPath, 'utf8')).storyboard_plan.scenes[0].narration_text, legacyRun.storyboard_plan.scenes[0].narration_text);
+
+  const resumeProjectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'required-literal-resume-'));
+  const resumeProject = createEmptyProject({ workflowId: 'required-literal-resume', runId: 'run' });
+  resumeProject.target = { duration_sec: 1 };
+  resumeProject.output = { ...resumeProject.output, duration: 1 };
+  resumeProject.scene_spec = {
+    required_narration_literals: [{ scene_id: 'S01', literal: '必须保留的恢复原句。' }],
+    scenes: [{ id: 'scene_01', duration: 20, narration_text: '很长的开场内容放在前面。必须保留的恢复原句。', captions: [] }],
+  };
+  resumeProject.frames = [{ id: 'scene_01', scene_id: 'scene_01', engine: 'hyperframes-playwright', source_mode: 'raw_html', html_path: 'frames/scene_01.html', duration_sec: 20 }];
+  resumeProject.audio = { duration_sec: 20 };
+  fs.writeFileSync(path.join(resumeProjectDir, 'project.json'), JSON.stringify(resumeProject, null, 2));
+  let resumeTtsCalls = 0;
+  const resumeFailure = await executeCreativeWorkflowRetryPlan({
+    workflowId: 'required-literal-resume',
+    projectDir: resumeProjectDir,
+    plan: { mode: 'repair_and_resume', can_retry: true, repair_action: 'repair_script_and_timeline' },
+    services: { ttsService: { synthesizeSceneNarration: async () => { resumeTtsCalls += 1; return { success: true }; } } },
+  });
+  assert.equal(resumeFailure.success, false);
+  assert.equal(resumeFailure.code, 'brief_required_literal_missing');
+  assert.ok(resumeFailure.missing.length > 0);
+  assert.equal(resumeTtsCalls, 0);
 
   const unchanged = helpers.applyFreeformNarrationRepairs([{ index: 1, narration_text: '旧流程。' }], [{ index: 1, narration_text: '新流程。' }]);
   assert.equal(unchanged.changed, true);

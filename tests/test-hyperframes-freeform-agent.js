@@ -35,15 +35,28 @@ async function run() {
     'S04 旁白必须包含“主视频画布承载编辑预览。”。',
     'S05 旁白必须包含“顶部橙色过山车轨道保持完整可见。”。',
     'S06 旁白必须包含“站在界面前的人物保持完整。”。',
+    'S06 旁白必须包含"第二条直引号原句。"，旁白必须完整包含“第三条弯引号原句。”，旁白必须包含“第三条弯引号原句。”。',
   ].join(' ');
   const required = agent.extractRequiredNarrationLiterals(requiredRaw);
-  assert.equal(required.length, 6);
+  assert.equal(required.length, 8);
   assert.deepEqual(required[0], { scene_id: 'S01', literal: '这里是 MuseDock 仓库首页。' });
   assert.equal(required.some(item => item.literal === '这不是旁白合同'), false);
   assert.equal(agent.extractRequiredNarrationLiterals('S01 标题是“普通引号”，旁白自由发挥。').length, 0);
   assert.equal(agent.validateRequiredNarrationLiterals([
     { id: 'scene_01', narration_text: `开场，${required[0].literal}继续介绍。` },
   ], [required[0]]).ok, true);
+  const conflictingIds = agent.validateRequiredNarrationLiterals([
+    { id: 'scene_02', index: 1, narration_text: required[0].literal },
+    { id: 'scene_01', index: 2, narration_text: '真正的 S01 没有原句。' },
+  ], [required[0]]);
+  assert.equal(conflictingIds.ok, false);
+  assert.equal(conflictingIds.missing[0].reason, 'literal_missing');
+  const duplicateIds = agent.validateRequiredNarrationLiterals([
+    { id: 'scene_01', narration_text: required[0].literal },
+    { scene_id: 'S01', narration_text: required[0].literal },
+  ], [required[0]]);
+  assert.equal(duplicateIds.ok, false);
+  assert.equal(duplicateIds.missing[0].reason, 'duplicate_scene_id');
 
   const parsed = agent.parseFreeformBriefResponse(JSON.stringify({ title: '测试短片' }));
   assert.equal(parsed.success, true);
