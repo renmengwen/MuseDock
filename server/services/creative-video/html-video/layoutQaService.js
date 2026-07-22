@@ -1462,6 +1462,7 @@ async function inspectFrameHtmlLayout(options = {}) {
       });
       return { success: false, issues: [issue], metrics };
     }
+    const requiredManifestById = new Map(requiredManifest.shots.map(shot => [shot.shot_id, shot]));
     const cueSamples = Array.isArray(sampleTimesSec) && sampleTimesSec.length
       ? []
       : await cameraCueSampleTimes(page, durationSec);
@@ -1477,7 +1478,7 @@ async function inspectFrameHtmlLayout(options = {}) {
     const samples = [...new Set([...baseSamples, ...requiredShotMidpoints])].sort((a, b) => a - b);
 
     let elapsedSec = 0;
-    const failedRequiredShotIds = new Set();
+    const failedInWindowRequiredShotIds = new Set();
     let unscopedRequiredAssetProbeFailed = false;
     for (const sampleTimeSec of samples) {
       if (continuousPlayback) {
@@ -1624,7 +1625,12 @@ async function inspectFrameHtmlLayout(options = {}) {
           ? [...new Set(error.required_asset_shot_ids.map(value => String(value || '').trim()).filter(Boolean))]
           : [];
         if (failedShotIds.length) {
-          for (const shotId of failedShotIds) failedRequiredShotIds.add(shotId);
+          for (const shotId of failedShotIds) {
+            const shot = requiredManifestById.get(shotId);
+            if (shot && sampleTimeSec >= shot.start_sec && sampleTimeSec < shot.end_sec) {
+              failedInWindowRequiredShotIds.add(shotId);
+            }
+          }
         } else {
           unscopedRequiredAssetProbeFailed = true;
         }
@@ -1667,7 +1673,7 @@ async function inspectFrameHtmlLayout(options = {}) {
     )).map(shot => shot.shot_id);
     const evidencedSet = new Set(evidenced);
     const missing = metrics.expected_required_shot_ids.filter(shotId => (
-      !evidencedSet.has(shotId) && !failedRequiredShotIds.has(shotId)
+      !evidencedSet.has(shotId) && !failedInWindowRequiredShotIds.has(shotId)
     ));
     if (missing.length && !unscopedRequiredAssetProbeFailed) {
       issues.push(makeIssue({

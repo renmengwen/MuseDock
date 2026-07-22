@@ -275,11 +275,13 @@ function previewHtml(
     return `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay" style="--fixture:yes;transform:translateZ(0)"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="visibility-${requirement}" data-shot-requirement="${requirement}"><img data-shot-layer="background" style="${style}" src="${source}"><img data-shot-layer="foreground" data-layout-qa-required-layer-probe="fixture-original" style="${style}" src="${source}" srcset="${source}"></figure></section>`;
   };
 
-  const shortRequiredRuntime = (activation = 'window', covered = false, window = { start: 0.1, end: 1.1 }) => `
+  const shortRequiredRuntime = (
+    activation = 'window', covered = false, window = { start: 0.1, end: 1.1 }, source = imageUrl,
+  ) => `
     <section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay">
       <figure id="short-required" data-hv-shot="true" data-shot-id="short-required" data-asset-id="asset-short"
         data-shot-requirement="required" data-window-start-sec="${window.start}" data-window-end-sec="${window.end}">
-        <img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}">
+        <img data-shot-layer="background" src="${source}"><img data-shot-layer="foreground" src="${source}">
       </figure>
       <figure id="short-fallback" data-hv-shot="true" data-shot-id="short-fallback" data-shot-requirement="optional">
         <img data-shot-layer="background" src="${secondImageUrl}"><img data-shot-layer="foreground" src="${secondImageUrl}">
@@ -333,6 +335,21 @@ function previewHtml(
     issue.code === 'required_asset_visibility_evidence_missing'
     && issue.details.missing.includes('short-required')
   )), '窗口外错误激活不得满足 required Shot 证据合同');
+
+  const shortOutsideBroken = await inspectInline(
+    'required-short-window-outside-broken.html',
+    shortRequiredRuntime('outside', false, { start: 0.1, end: 1.1 }, 'missing.png'),
+    [1.8],
+  );
+  assert.ok(shortOutsideBroken.issues.some(issue => (
+    issue.code === 'required_asset_visibility_probe_failed'
+    && issue.sample_time_sec === 1.8
+    && issue.details.shot_ids?.includes('short-required')
+  )), '窗口外错误激活的坏图探针失败仍必须完整记录');
+  assert.ok(shortOutsideBroken.issues.some(issue => (
+    issue.code === 'required_asset_visibility_evidence_missing'
+    && issue.details.missing.includes('short-required')
+  )), '窗口外 probe_failed 不得抑制 required Shot 的窗口内缺证据问题');
 
   const tinyWindow = { start: 0.6, end: 0.62 };
   const tinyRequired = await inspectInline(
