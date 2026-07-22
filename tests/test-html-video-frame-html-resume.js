@@ -509,7 +509,8 @@ async function main() {
       const runId = 'run_overlay_v4';
       const { projectDir } = await setupProject(rootDir, workflowId, runId);
       const project = await projectStore.loadProject(projectDir);
-      const oldV4Fingerprint = 'dc32294019ad8803c65b1c69e24cc6b206a1f05482515b8a9c505d3bb25fc136';
+      // 由父提交 d1401259 的 v4 实现按本 fixture 同输入计算并固化。
+      const oldV4Fingerprint = '869323c94d0da892e56029745e431c6c747af0457557c13c9ab2947581ea5494';
       const currentFingerprint = project.generation_checkpoint.stages.frame_html.frames.scene_01.input_fingerprint;
       assert.notEqual(currentFingerprint, oldV4Fingerprint, 'v5 Frame Prompt 指纹必须与已记录的真实 v4 指纹不同');
       project.generation_checkpoint.stages.frame_html.frames.scene_01.input_fingerprint = oldV4Fingerprint;
