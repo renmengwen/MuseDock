@@ -1300,9 +1300,8 @@ function resolveDouyinRunTtsFile(awemeId, runId, fileName, options = {}) {
   }
 
   const name = String(fileName || '');
-  const isolatedPrefix = `${runId}-audio-`;
   let publishedAudio = {};
-  if (name.startsWith(isolatedPrefix) && /-[12]-tts\.[A-Za-z0-9]+$/.test(name)) {
+  if (path.basename(name) === name && /-[12]-tts\.[A-Za-z0-9]+$/.test(name)) {
     try {
       const run = JSON.parse(fs.readFileSync(getRunPath(awemeId, runId, options.rootDir), 'utf8'));
       publishedAudio = run?.hyperframes_freeform?.audio || {};

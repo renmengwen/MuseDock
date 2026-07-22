@@ -79,10 +79,9 @@ function ttsResult(duration, scenes, label) {
   };
 }
 
-async function runDurationCase({ suffix, durations, modelScenes = compressedScenes(), staleModel = null, targetDurationSec = 80, aggregateDurations = [], omitLastScene = false }) {
+async function runDurationCase({ suffix, durations, runId = `actual-tts-${suffix}`, modelScenes = compressedScenes(), staleModel = null, targetDurationSec = 80, aggregateDurations = [], omitLastScene = false }) {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), `actual-tts-${suffix}-`));
   const awemeId = `20260722${suffix.padStart(12, '0')}`;
-  const runId = `actual-tts-${suffix}`;
   const runPath = writeRun(rootDir, awemeId, runId, targetDurationSec);
   let ttsCalls = 0;
   let modelCalls = 0;
@@ -160,6 +159,14 @@ async function runDurationCase({ suffix, durations, modelScenes = compressedScen
   publishedRun.hyperframes_freeform.audio.operation_id = successState.audio.operation_id;
   fs.writeFileSync(success.runPath, JSON.stringify(publishedRun, null, 2));
   assert.equal(path.basename(agentRuns.resolveDouyinRunTtsFile(success.awemeId, success.runId, successState.audio.file_name, { rootDir: success.rootDir })), successState.audio.file_name);
+
+  const dottedRun = await runDurationCase({ suffix: '20', runId: 'actual.tts-20', durations: [90] });
+  assert.equal(dottedRun.result.success, true);
+  const dottedState = JSON.parse(fs.readFileSync(dottedRun.runPath, 'utf8')).hyperframes_freeform;
+  assert.equal(
+    path.basename(agentRuns.resolveDouyinRunTtsFile(dottedRun.awemeId, dottedRun.runId, dottedState.audio.file_name, { rootDir: dottedRun.rootDir })),
+    dottedState.audio.file_name,
+  );
 
   const over = await runDurationCase({ suffix: '11', durations: [93.622, 92.001] });
   assert.equal(over.result.success, false);
