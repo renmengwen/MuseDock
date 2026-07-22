@@ -6,7 +6,14 @@ async function run() {
   const briefMessages = agent.buildFreeformBriefMessages({
     run: { result: { rewrite_script: '测试口播' } },
     skillContext: 'Use HyperFrames.',
+    options: {
+      creative_context: {
+        input: { raw_text: '严格 8 个 Scene，S02 旁白必须包含“文本输入框”。' },
+      },
+    },
   });
+  assert.match(briefMessages[1].content, /严格 8 个 Scene，S02 旁白必须包含“文本输入框”/);
+  assert.match(briefMessages[1].content, /用户原始要求.*优先于运行摘要/);
   assert.match(briefMessages[1].content, /audio_direction/);
   assert.match(briefMessages[1].content, /voice/);
   assert.match(briefMessages[1].content, /style_prompt/);

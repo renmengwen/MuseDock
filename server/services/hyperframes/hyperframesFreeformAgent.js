@@ -29,6 +29,8 @@ function getOptionSummary(options = {}) {
 
 function buildFreeformBriefMessages({ run = {}, skillContext = '', options = {} } = {}) {
   const optionSummary = getOptionSummary(options);
+  const creativeInput = options.creative_context?.input || {};
+  const userRequirements = creativeInput.raw_text || creativeInput.source_hint || '';
   return [
     {
       role: 'system',
@@ -48,6 +50,9 @@ function buildFreeformBriefMessages({ run = {}, skillContext = '', options = {} 
         '',
         '风格要求：',
         optionSummary.style_prompt || '未指定',
+        '',
+        '用户原始要求（优先于运行摘要，必须遵守其中的 Scene 数量、素材绑定和指定原文）：',
+        String(userRequirements || '未提供').slice(0, MAX_JSON_CHARS),
         '',
         '技能上下文：',
         String(skillContext || '未提供'),
