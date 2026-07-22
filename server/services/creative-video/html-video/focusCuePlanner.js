@@ -9,7 +9,6 @@ const ZOOM_TRUST_LEVELS = new Set(['A', 'B', 'C']);
 const CUE_TRUST_LEVELS = new Set(['A', 'B', 'C']);
 const LATIN_ALNUM_RE = /[A-Za-z0-9]/;
 const HAN_RE = /\p{Script=Han}/u;
-const MODEL_VERSION_RE = /^[A-Za-z]+-\d+(?:\.\d+)+$/;
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -122,12 +121,12 @@ function keywordOccurrence(captionText, term) {
 }
 
 function mainCanvasOccurrence(captionText, regions) {
-  const occurrence = String(captionText || '').match(/主[\p{Script=Han}]{0,6}画布/u);
+  const occurrence = String(captionText || '').match(/主(?:视频|预览|编辑)画布/u);
   if (!occurrence) return null;
   const canvasRegions = regions.filter(region => (
     [region.label, ...(Array.isArray(region.aliases) ? region.aliases : [])]
       .map(text)
-      .some(term => /(?:主|视频|编辑|预览).*(?:画布|画面|预览区)/u.test(term))
+      .some(term => /^(?:主(?:视频|预览|编辑)画布|视频画面|编辑预览区|编辑画面|主预览区)$/u.test(term))
   ));
   return canvasRegions.length === 1 ? { region: canvasRegions[0], keyword: occurrence[0] } : null;
 }
@@ -138,7 +137,6 @@ function resolveCaptionFocus(caption, regions) {
   for (const region of regions) {
     const terms = [region.label, ...(Array.isArray(region.aliases) ? region.aliases : [])];
     for (const term of terms) {
-      if (MODEL_VERSION_RE.test(text(term))) continue;
       const keyword = keywordOccurrence(captionText, text(term));
       if (!keyword) continue;
       hits.push({ region, keyword });

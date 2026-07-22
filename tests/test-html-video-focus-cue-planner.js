@@ -580,12 +580,31 @@ function firstShot(visualPlan) {
   for (const [caption, region] of [
     ['站在界面前的人物保持完整', canonicalRegion({ id: 'r_head', label: '人物头部', trust: 'C' })],
     ['查看小按钮', canonicalRegion({ id: 'r_help', label: '帮助按钮', trust: 'C' })],
-    ['GPT-5.5 模型可用', canonicalRegion({ id: 'r_gpt', label: 'GPT-5.5', trust: 'C' })],
+    ['主播看画布', canonicalRegion({ id: 'r_canvas', label: '主预览画布', trust: 'C' })],
   ]) {
     const input = fixture({ captions: [{ id: 'cap_01', start: 0, end: 2, text: caption }], regions: [region], duration: 2 });
     planFocusCues(input);
     assert.equal('camera' in firstShot(input.visualPlan), false, `${caption} 不得被主画布 fallback 误绑定`);
   }
+
+  const exactModel = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: 'GPT-5.5 模型可用' }],
+    regions: [canonicalRegion({ id: 'r_gpt', label: 'GPT-5.5', trust: 'C' })],
+    duration: 2,
+  });
+  planFocusCues(exactModel);
+  assert.equal(firstShot(exactModel.visualPlan).camera.focus_cues[0].region_id, 'r_gpt', '唯一模型版本 exact match 必须保留既有 cue 语义');
+
+  const ambiguousModel = fixture({
+    captions: [{ id: 'cap_01', start: 0, end: 2, text: 'GPT-5.5 模型可用' }],
+    regions: [
+      canonicalRegion({ id: 'r_gpt_a', label: 'GPT-5.5', trust: 'C' }),
+      canonicalRegion({ id: 'r_gpt_b', label: 'GPT-5.5', trust: 'C' }),
+    ],
+    duration: 2,
+  });
+  planFocusCues(ambiguousModel);
+  assert.equal('camera' in firstShot(ambiguousModel.visualPlan), false, '多个同名模型区域必须按既有歧义规则 no-op');
 }
 
 // 纵深 2：一个 beat 含多个 shot 时按 shot 独立 enrich——各用自己的 asset regions 与 caption_ids，

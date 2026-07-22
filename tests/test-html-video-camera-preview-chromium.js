@@ -10,6 +10,8 @@ const { materializeSceneImageSequenceDom } = require('../server/services/creativ
 const resolution = { width: 640, height: 360 };
 const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#123"/><circle cx="1200" cy="180" r="80" fill="#fff"/></svg>').toString('base64');
 const imageUrl = `data:image/svg+xml;base64,${svg}`;
+const secondSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900"><rect width="1600" height="900" fill="#841"/><circle cx="300" cy="500" r="120" fill="#ff0"/></svg>').toString('base64');
+const secondImageUrl = `data:image/svg+xml;base64,${secondSvg}`;
 
 function previewHtml(
   twoCues = false,
@@ -247,6 +249,29 @@ function previewHtml(
   );
   assert.equal(optionalOccluded.issues.some(issue => issue.code === 'required_asset_occluded'), false, 'optional 素材不适用 required 可见性阻断');
   assert.equal(optionalOccluded.metrics.image_sequence_visibility_samples.length, 0);
+
+  const twoRequired = await inspectInline(
+    'two-required-one-occluded.html',
+    `<section data-hv-image-sequence="true" data-sequence-mode="semantic_compare">
+      <figure data-hv-shot="true" data-shot-active="true" data-shot-id="required-visible" data-asset-id="asset-visible" data-shot-requirement="required" style="left:0;right:auto;width:50%"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure>
+      <figure data-hv-shot="true" data-shot-active="true" data-shot-id="required-hidden" data-asset-id="asset-hidden" data-shot-requirement="required" style="left:50%;right:auto;width:50%"><img data-shot-layer="background" src="${secondImageUrl}"><img data-shot-layer="foreground" src="${secondImageUrl}"></figure>
+    </section><div aria-hidden="true" style="position:absolute;left:50%;right:0;top:0;bottom:0;z-index:9;background:#eee"></div>`,
+  );
+  const twoRequiredMetrics = new Map(twoRequired.metrics.image_sequence_visibility_samples.map(metric => [metric.shot_id, metric]));
+  assert.ok(twoRequiredMetrics.get('required-visible').changed_pixel_ratio >= 0.05, '可见 required Shot 必须独立通过像素贡献门');
+  assert.ok(twoRequiredMetrics.get('required-hidden').changed_pixel_ratio < 0.05, '被遮挡 required Shot 不得借另一素材的像素贡献通过');
+  assert.equal(twoRequired.issues.some(issue => issue.code === 'required_asset_occluded' && issue.details.shot_id === 'required-visible'), false);
+  assert.ok(twoRequired.issues.some(issue => issue.code === 'required_asset_occluded' && issue.details.shot_id === 'required-hidden' && issue.details.asset_id === 'asset-hidden'));
+
+  const movingShell = await inspectInline(
+    'required-moving-shell.html',
+    `${requiredFigure('required')}<div id="moving-shell" aria-hidden="true" style="position:absolute;inset:0;z-index:9;background:#123;animation:shell-pulse .02s infinite alternate"></div><style>@keyframes shell-pulse{from{filter:hue-rotate(0deg)}to{filter:hue-rotate(180deg)}}</style><script>(()=>{const shell=document.getElementById('moving-shell');function tick(time){shell.style.backgroundColor='rgb('+Math.floor(time%255)+',40,160)';requestAnimationFrame(tick)}requestAnimationFrame(tick)})()</script>`,
+  );
+  const movingMetric = movingShell.metrics.image_sequence_visibility_samples[0];
+  assert.ok(movingShell.issues.some(issue => issue.code === 'required_asset_occluded'), '动态全画布壳完全遮挡素材时仍必须阻断');
+  assert.ok(movingMetric.changed_pixel_ratio < 0.05, `冻结后的动态壳不得制造假像素贡献：${JSON.stringify(movingMetric)}`);
+  assert.ok(movingMetric.style_restored && movingMetric.animation_state_restored
+    && movingMetric.clock_state_restored && movingMetric.raf_state_restored, '像素探针必须精确恢复 style、CSS 动画、共享时钟与 RAF 状态');
 
   const blank = await inspectInline('blank.html', '<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"></section>');
   assert.ok(blank.issues.some(issue => issue.code === 'camera_scene_blank'));
