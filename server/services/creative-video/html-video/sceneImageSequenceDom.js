@@ -644,6 +644,7 @@ function materializeSceneImageSequenceDom({ html = '', node = {}, creativeContex
 
 module.exports = {
   buildShotTimelineSource,
+  normalizeContract,
   materializeSceneImageSequenceDom,
   validateSceneImageSequenceDom,
 };

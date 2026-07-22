@@ -244,6 +244,7 @@ async function setupProject(rootDir, workflowId, runId, options = {}) {
         map.set(sceneId, frameHtmlPhase.computeFrameInputFingerprint({
           graph: expanded,
           node,
+          scene,
           index,
           total: expanded.nodes.length,
           sceneSpec: spec,
@@ -435,19 +436,41 @@ async function main() {
       const args = () => {
         const node = {
           id: 'scene_01',
+          durationSec: 2,
           label: '当前标签',
           text: '当前正文',
           data: { value: '当前数据' },
           asset_refs: [{ asset_id: 'gen_02', usage: 'subject' }, { asset_id: 'gen_01', usage: 'background' }],
           metadata: {
+            narration_text: '聚焦第一幕',
+            captions: [{ id: 'caption_01', start: 0.2, end: 1.5, text: '聚焦第一幕' }],
             visual_beat: {
               visual_base: {
                 type: 'image_sequence',
-                shots: [{ id: 'shot_01', asset_id: 'gen_01' }],
+                sequence_mode: 'fullscreen_relay',
+                shots: [{
+                  id: 'shot_01',
+                  asset_id: 'gen_01',
+                  role: 'showcase',
+                  requirement: 'required',
+                  caption_ids: ['caption_01'],
+                  minimum_visible_duration_sec: 2,
+                  active_window: { time_base: 'scene_local', start_sec: 0, end_sec: 2 },
+                  camera: {
+                    focus_cues: [{
+                      id: 'cue_01',
+                      effect: 'camera_zoom',
+                      region_id: 'region_01',
+                      zoom: 'normal',
+                      caption_ids: ['caption_01'],
+                    }],
+                  },
+                }],
               },
-              motion_overlay: { preset: 'count_up', theme_tokens: { accent: '#ff5a00' } },
+              motion_overlay: { preset: 'key_marker', theme_tokens: { accent: '#ff5a00' } },
               continuity: { group_id: 'g1', beat_index: 2 },
-              visual_text: { headline: '第一幕' },
+              visual_text: { headline: '第一幕', keywords: ['重点'], cards: ['卡片'] },
+              narration_text: 'Overlay 旁白',
             },
           },
         };
@@ -475,11 +498,24 @@ async function main() {
               { id: 'next', title: '下一场景' },
             ],
           },
+          scene: { id: 'scene_01', title: '当前场景', narration_text: '当前旁白' },
           creativeContext: {
             source_context: { summary: '来源摘要' },
             asset_context: {
               assets: [
-                { id: 'gen_01', media_type: 'image', status: 'ready', path: 'assets/gen-01.png', frame_src: '../assets/gen-01.png', provider: 'local' },
+                {
+                  id: 'gen_01',
+                  media_type: 'image',
+                  status: 'ready',
+                  path: 'assets/gen-01.png',
+                  frame_src: '../assets/gen-01.png',
+                  provider: 'local',
+                  focus_regions: [{
+                    id: 'region_01',
+                    trust_level: 'A',
+                    region: { x: 0.2, y: 0.2, width: 0.2, height: 0.2 },
+                  }],
+                },
                 { id: 'gen_02', media_type: 'image', status: 'ready', path: 'assets/gen-02.png', frame_src: '../assets/gen-02.png' },
               ],
             },
@@ -536,6 +572,57 @@ async function main() {
         registryChanged.creativeContext.asset_context.assets[0][field] = value;
         assert.notEqual(computeFrameInputFingerprint(registryChanged), base, `Shot registry ${field} 变化应改变指纹`);
       }
+      const focusChanged = args();
+      focusChanged.creativeContext.asset_context.assets[0].focus_regions[0].region.x = 0.5;
+      assert.notEqual(computeFrameInputFingerprint(focusChanged), base, 'Camera focus region 几何变化应改变受管 DOM 指纹');
+
+      const rawShotDebugChanged = args();
+      rawShotDebugChanged.node.metadata.visual_beat.visual_base.shots[0].debug_note = '未被物化消费';
+      assert.equal(computeFrameInputFingerprint(rawShotDebugChanged), base, 'raw Shot 未消费字段不得扩大失效');
+
+      for (const [label, change] of [
+        ['Overlay headline', value => { value.beat.visual_text.headline = '第二幕'; }],
+        ['Overlay keywords', value => { value.beat.visual_text.keywords = ['新重点']; }],
+        ['Overlay theme', value => { value.beat.motion_overlay.theme_tokens.accent = '#00ff00'; }],
+      ]) {
+        const changed = args();
+        change(changed);
+        assert.notEqual(computeFrameInputFingerprint(changed), base, `${label} 变化应改变确定性注入指纹`);
+      }
+      const narrationBaseArgs = args();
+      narrationBaseArgs.beat.visual_text.headline = '';
+      const narrationBase = computeFrameInputFingerprint(narrationBaseArgs);
+      const narrationChanged = args();
+      narrationChanged.beat.visual_text.headline = '';
+      narrationChanged.beat.narration_text = '新的 Overlay 旁白';
+      assert.notEqual(computeFrameInputFingerprint(narrationChanged), narrationBase, 'Overlay narration 被实际槽位消费时应改变指纹');
+      const cardsBaseArgs = args();
+      cardsBaseArgs.beat.motion_overlay.preset = 'three_step_flow';
+      const cardsBase = computeFrameInputFingerprint(cardsBaseArgs);
+      const cardsChanged = args();
+      cardsChanged.beat.motion_overlay.preset = 'three_step_flow';
+      cardsChanged.beat.visual_text.cards = ['第一步', '第二步', '第三步'];
+      assert.notEqual(computeFrameInputFingerprint(cardsChanged), cardsBase, 'Overlay cards 被实际槽位消费时应改变指纹');
+
+      const fallbackArgs = args();
+      delete fallbackArgs.node.label;
+      delete fallbackArgs.node.text;
+      fallbackArgs.node.title = '兜底标题 A';
+      fallbackArgs.node.summary = '兜底摘要 A';
+      const fallbackBase = computeFrameInputFingerprint(fallbackArgs);
+      const fallbackTitleChanged = args();
+      delete fallbackTitleChanged.node.label;
+      delete fallbackTitleChanged.node.text;
+      fallbackTitleChanged.node.title = '兜底标题 B';
+      fallbackTitleChanged.node.summary = '兜底摘要 A';
+      assert.notEqual(computeFrameInputFingerprint(fallbackTitleChanged), fallbackBase, 'fallback node.title 变化应改变指纹');
+      const fallbackSummaryChanged = args();
+      delete fallbackSummaryChanged.node.label;
+      delete fallbackSummaryChanged.node.text;
+      fallbackSummaryChanged.node.title = '兜底标题 A';
+      fallbackSummaryChanged.node.summary = '兜底摘要 B';
+      assert.notEqual(computeFrameInputFingerprint(fallbackSummaryChanged), fallbackBase, 'fallback node.summary 变化应改变指纹');
+
       for (const [label, change] of [
         ['远端节点', value => { value.graph.nodes[0].label = '远端节点变化'; }],
         ['graph edges', value => { value.graph.edges.push({ from: 'x', to: 'y' }); }],
@@ -2041,8 +2128,8 @@ async function main() {
         },
       });
       assert.equal(calls[1].shortPrompt, true);
-      assert.equal(fallbackCalls.length, 1);
-      assert.equal(fallbackCalls[0].scene.id, 'scene_03');
+      assert.equal(fallbackCalls.filter(call => call.scene.id === 'scene_03').length, 3, '扫描、生成和真实 fallback 应复用同一构建器');
+      assert.equal(fallbackCalls.at(-1).scene.id, 'scene_03');
 
       const project = await projectStore.loadProject(projectDir);
       const frame = project.generation_checkpoint.stages.frame_html.frames.scene_03;

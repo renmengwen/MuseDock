@@ -3,33 +3,22 @@
 const crypto = require('crypto');
 
 const frameHtmlAgent = require('./frameHtmlAgent');
+const frameFallbackBuilder = require('./frameFallbackBuilder');
+const { ensureMotionOverlay, isSceneHtmlNode } = require('./motionOverlayPhase');
 const { buildPlaybackClockSource } = require('./playbackClock');
+const { focusKeywordsByCaptionId } = require('./captionLayer');
 const { validateOverlayHtml, hasRealOverlayElement } = require('./motionPrimitiveCatalog');
+const { normalizeContract } = require('./sceneImageSequenceDom');
+const { stableStringify } = require('../sceneSpecHash');
 
 // Frame HTML 生成提示词/primitive 结构版本号：当 frameHtmlAgent 的 prompt 结构、primitive
 // 参考片段语义或帧 HTML 约定发生会影响产物的变化时手动 +1，使旧 checkpoint 指纹失配、
 // resume 时强制重新生成，避免代码升级后静默复用旧版产物。
 const FRAME_PROMPT_VERSION = 5;
 
-// 确定性 JSON 序列化（对象键递归排序），保证同一输入结构得到稳定字符串
-function stableJsonValue(value) {
-  if (Array.isArray(value)) return value.map(stableJsonValue);
-  if (value && typeof value === 'object') {
-    return Object.keys(value).sort().reduce((result, key) => {
-      result[key] = stableJsonValue(value[key]);
-      return result;
-    }, {});
-  }
-  return value;
-}
-
-function stableJsonStringify(value) {
-  return JSON.stringify(stableJsonValue(value));
-}
-
 /**
  * 单帧 HTML 的真实模型输入指纹：直接签完整 canonical prompt，避免在这里维护第二份字段清单。
- * 受管 Shot registry 不进入模型提示词、却会改变写盘 HTML，因此保留最小物化签名。
+ * 模型调用后的确定性物化结果也直接复用各自构建器，避免在这里维护第二份字段清单。
  */
 function computeFrameInputFingerprint({
   graph,
@@ -37,6 +26,7 @@ function computeFrameInputFingerprint({
   index,
   total,
   sceneSpec,
+  scene,
   creativeContext,
   target,
   styleProfile,
@@ -50,32 +40,12 @@ function computeFrameInputFingerprint({
   sceneBeatsBrief,
   continuityMode,
 } = {}) {
-  const managedShots = (Array.isArray(node?.metadata?.visual_beats)
-    ? node.metadata.visual_beats
-    : [node?.metadata?.visual_beat].filter(Boolean))
-    .flatMap(beat => beat?.visual_base?.type === 'image_sequence' && Array.isArray(beat.visual_base.shots)
-      ? beat.visual_base.shots
-      : []);
-  const shotAssetIds = new Set(managedShots
-    .map(shot => String(shot?.asset_id || '').trim())
-    .filter(Boolean));
-  const shotAssets = (Array.isArray(creativeContext?.asset_context?.assets)
-    ? creativeContext.asset_context.assets
-    : [])
-    .map((asset) => {
-      const id = String(asset?.id || asset?.asset_id || '').trim();
-      if (!shotAssetIds.has(id)) return null;
-      const assetPath = String(asset?.path || '').trim().replace(/\\/g, '/');
-      return {
-        id,
-        media_type: String(asset?.media_type || asset?.type || '').toLowerCase(),
-        status: String(asset?.status || '').trim() || 'ready',
-        path: assetPath,
-        frame_src: String(asset?.frame_src || (assetPath ? `../${assetPath}` : '')).trim().replace(/\\/g, '/'),
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  const managedContract = normalizeContract(node, creativeContext);
+  const fallbackHtml = frameFallbackBuilder.buildFallbackFrameHtml({ scene, node, target });
+  const focusKeywords = Object.fromEntries(focusKeywordsByCaptionId(node));
+  const overlayHtml = beat && !isSceneHtmlNode(node)
+    ? ensureMotionOverlay('<!doctype html><html><body></body></html>', beat).html
+    : '';
   const signature = {
     continuity_mode: continuityMode || 'beat_mp4',
     prompt: frameHtmlAgent.buildFrameHtmlPrompt({
@@ -96,11 +66,13 @@ function computeFrameInputFingerprint({
       hasCaptions,
       sceneBeatsBrief,
     }),
-    ...(managedShots.length ? { managed_shots: managedShots.map(stableJsonValue) } : {}),
-    ...(shotAssetIds.size ? { shot_assets: shotAssets } : {}),
+    fallback_html: fallbackHtml,
+    ...(Object.keys(focusKeywords).length ? { focus_keywords_by_caption_id: focusKeywords } : {}),
+    ...(managedContract.contract ? { managed_dom_contract: managedContract.contract } : {}),
+    ...(overlayHtml ? { overlay_fallback_html: overlayHtml } : {}),
     prompt_version: FRAME_PROMPT_VERSION,
   };
-  return crypto.createHash('sha256').update(stableJsonStringify(signature)).digest('hex');
+  return crypto.createHash('sha256').update(stableStringify(signature)).digest('hex');
 }
 
 // asset_first 帧 HTML 的静态结构统计（简单启发式，供 QA/路由决策观测用）

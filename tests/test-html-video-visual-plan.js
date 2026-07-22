@@ -235,12 +235,16 @@ assert.equal(noDurationPlan.beats[0].duration_sec, 6);
   assert.equal(newPlan.beats[0].visual_base.shots[0].src, '../assets/new.png');
   assert.notEqual(oldPlan.input_fingerprint, newPlan.input_fingerprint);
   assert.equal(oldPlan.input_fingerprint, unrelatedPlan.input_fingerprint);
-  const frameFingerprint = plan => computeFrameInputFingerprint({
-    node: { id: 'path', asset_refs: graph.nodes[0].asset_refs, metadata: { visual_beat: plan.beats[0] } },
-    beat: plan.beats[0],
-    continuityMode: 'beat_mp4',
-    target: { width: 1080, height: 1920 },
-  });
+  const frameFingerprint = (plan) => {
+    const src = plan.beats[0].visual_base.shots[0].src;
+    return computeFrameInputFingerprint({
+      node: { id: 'path', durationSec: 6, asset_refs: graph.nodes[0].asset_refs, metadata: { visual_beat: plan.beats[0] } },
+      beat: plan.beats[0],
+      creativeContext: { asset_context: { assets: [{ id: 'a', media_type: 'image', status: 'ready', path: src.replace(/^\.\.\//, ''), frame_src: src }] } },
+      continuityMode: 'beat_mp4',
+      target: { width: 1080, height: 1920 },
+    });
+  };
   assert.notEqual(frameFingerprint(oldPlan), frameFingerprint(newPlan));
 }
 

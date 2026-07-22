@@ -227,6 +227,7 @@ async function runFrameHtmlPhase(ctx) {
     return {
       graph: contentGraph,
       node: job.node,
+      scene: job.scene,
       index: job.index,
       total: nodes.length,
       sceneSpec,
