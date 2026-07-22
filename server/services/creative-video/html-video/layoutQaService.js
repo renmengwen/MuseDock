@@ -803,26 +803,22 @@ async function inspectRequiredAssetVisibility(page, resolution) {
     for (const item of animations) {
       try { item.animation.pause(); } catch (_) {}
     }
-    const probeStyle = document.createElement('style');
-    probeStyle.dataset.layoutQaRequiredAssetProbe = 'true';
-    probeStyle.textContent = [
-      '[data-layout-qa-required-layer-probe="black"]{filter:brightness(0)!important}',
-      '[data-layout-qa-required-layer-probe="white"]{filter:brightness(0) invert(1)!important}',
-    ].join('');
-    document.head.appendChild(probeStyle);
     window.__layoutQaRequiredAssetRestore = {
       trustedClock,
       clockWasPaused,
       rafController,
       rafWasPaused,
       animations,
-      probeStyle,
       shots: requiredShots.map(shot => ({
         shot,
         layers: Array.from(shot.querySelectorAll('[data-shot-layer]')).map(layer => ({
           layer,
+          originalSrc: layer.getAttribute('src'),
+          originalSrcset: layer.getAttribute('srcset'),
           originalProbe: layer.getAttribute('data-layout-qa-required-layer-probe'),
           originalStyle: layer.getAttribute('style'),
+          naturalWidth: Number(layer.naturalWidth),
+          naturalHeight: Number(layer.naturalHeight),
         })),
         layerStateRestored: true,
       })),
@@ -857,55 +853,104 @@ async function inspectRequiredAssetVisibility(page, resolution) {
   try {
     for (const target of prepared.targets) {
       try {
-        await page.evaluate(({ index, probe }) => {
+        await page.evaluate(async ({ index, probe }) => {
           const state = window.__layoutQaRequiredAssetRestore;
           const item = state?.shots?.[index];
           if (!item?.shot) throw new Error('required asset visibility shot state missing');
-          for (const layer of item.layers) layer.layer.setAttribute('data-layout-qa-required-layer-probe', probe);
+          for (const layer of item.layers) {
+            const image = layer.layer;
+            if (!(image instanceof HTMLImageElement)
+              || !Number.isFinite(layer.naturalWidth) || layer.naturalWidth <= 0
+              || !Number.isFinite(layer.naturalHeight) || layer.naturalHeight <= 0) {
+              throw new Error('required asset visibility image state invalid');
+            }
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layer.naturalWidth}" height="${layer.naturalHeight}" viewBox="0 0 ${layer.naturalWidth} ${layer.naturalHeight}"><rect width="100%" height="100%" fill="${probe}"/></svg>`;
+            image.removeAttribute('srcset');
+            image.setAttribute('data-layout-qa-required-layer-probe', probe);
+            image.setAttribute('src', `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+          }
+          await Promise.all(item.layers.map(layer => layer.layer.decode()));
+          if (item.layers.some(layer => (
+            layer.layer.naturalWidth !== layer.naturalWidth
+            || layer.layer.naturalHeight !== layer.naturalHeight
+          ))) throw new Error('required asset visibility probe dimensions changed');
           void item.shot.offsetWidth;
         }, { index: target.index, probe: 'black' });
         blackProbeScreenshots.push(await page.screenshot({ type: 'png' }));
-        await page.evaluate(({ index, probe }) => {
+        await page.evaluate(async ({ index, probe }) => {
           const item = window.__layoutQaRequiredAssetRestore?.shots?.[index];
           if (!item?.shot) throw new Error('required asset visibility shot state missing');
-          for (const layer of item.layers) layer.layer.setAttribute('data-layout-qa-required-layer-probe', probe);
+          for (const layer of item.layers) {
+            const image = layer.layer;
+            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${layer.naturalWidth}" height="${layer.naturalHeight}" viewBox="0 0 ${layer.naturalWidth} ${layer.naturalHeight}"><rect width="100%" height="100%" fill="${probe}"/></svg>`;
+            image.setAttribute('data-layout-qa-required-layer-probe', probe);
+            image.setAttribute('src', `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
+          }
+          await Promise.all(item.layers.map(layer => layer.layer.decode()));
+          if (item.layers.some(layer => (
+            layer.layer.naturalWidth !== layer.naturalWidth
+            || layer.layer.naturalHeight !== layer.naturalHeight
+          ))) throw new Error('required asset visibility probe dimensions changed');
           void item.shot.offsetWidth;
         }, { index: target.index, probe: 'white' });
         whiteProbeScreenshots.push(await page.screenshot({ type: 'png' }));
       } finally {
-        await page.evaluate((index) => {
+        await page.evaluate(async (index) => {
           const item = window.__layoutQaRequiredAssetRestore?.shots?.[index];
           if (!item?.shot) return;
           for (const layer of item.layers) {
-            if (layer.originalProbe === null) layer.layer.removeAttribute('data-layout-qa-required-layer-probe');
-            else layer.layer.setAttribute('data-layout-qa-required-layer-probe', layer.originalProbe);
+            const image = layer.layer;
+            image.removeAttribute('srcset');
+            if (layer.originalSrc === null) image.removeAttribute('src');
+            else image.setAttribute('src', layer.originalSrc);
+            if (layer.originalSrcset !== null) image.setAttribute('srcset', layer.originalSrcset);
+            if (layer.originalProbe === null) image.removeAttribute('data-layout-qa-required-layer-probe');
+            else image.setAttribute('data-layout-qa-required-layer-probe', layer.originalProbe);
+          }
+          await Promise.all(item.layers.map(layer => layer.layer.decode()));
+          for (const layer of item.layers) {
             item.layerStateRestored = item.layerStateRestored
+              && layer.layer.getAttribute('src') === layer.originalSrc
+              && layer.layer.getAttribute('srcset') === layer.originalSrcset
               && layer.layer.getAttribute('data-layout-qa-required-layer-probe') === layer.originalProbe
-              && layer.layer.getAttribute('style') === layer.originalStyle;
+              && layer.layer.getAttribute('style') === layer.originalStyle
+              && layer.layer.naturalWidth === layer.naturalWidth
+              && layer.layer.naturalHeight === layer.naturalHeight;
           }
           void item.shot.offsetWidth;
-        }, target.index).catch(() => {});
+        }, target.index);
       }
     }
   } finally {
-    const restoration = await page.evaluate(() => {
+    const restoration = await page.evaluate(async () => {
       const state = window.__layoutQaRequiredAssetRestore;
       if (!state) return { restored: false, error: 'state missing' };
       let restoredStyles = true;
       for (const item of state.shots || []) {
         for (const layer of item.layers) {
-          if (layer.originalProbe === null) layer.layer.removeAttribute('data-layout-qa-required-layer-probe');
-          else layer.layer.setAttribute('data-layout-qa-required-layer-probe', layer.originalProbe);
+          const image = layer.layer;
+          image.removeAttribute('srcset');
+          if (layer.originalSrc === null) image.removeAttribute('src');
+          else image.setAttribute('src', layer.originalSrc);
+          if (layer.originalSrcset !== null) image.setAttribute('srcset', layer.originalSrcset);
+          if (layer.originalProbe === null) image.removeAttribute('data-layout-qa-required-layer-probe');
+          else image.setAttribute('data-layout-qa-required-layer-probe', layer.originalProbe);
+        }
+        await Promise.all(item.layers.map(layer => layer.layer.decode()));
+        for (const layer of item.layers) {
           item.layerStateRestored = item.layerStateRestored
+            && layer.layer.getAttribute('src') === layer.originalSrc
+            && layer.layer.getAttribute('srcset') === layer.originalSrcset
             && layer.layer.getAttribute('data-layout-qa-required-layer-probe') === layer.originalProbe
-            && layer.layer.getAttribute('style') === layer.originalStyle;
+            && layer.layer.getAttribute('style') === layer.originalStyle
+            && layer.layer.naturalWidth === layer.naturalWidth
+            && layer.layer.naturalHeight === layer.naturalHeight;
         }
         void item.shot.offsetWidth;
       }
       for (const item of state.shots || []) {
         restoredStyles = restoredStyles && item.layerStateRestored;
       }
-      state.probeStyle?.remove();
       let restoredAnimations = true;
       for (const item of state.animations || []) {
         try {

@@ -223,8 +223,12 @@ function previewHtml(
     });
   }
 
-  const requiredFigure = (requirement, source = imageUrl) => `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay" style="--fixture:yes;transform:translateZ(0)"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="visibility-${requirement}" data-shot-requirement="${requirement}"><img data-shot-layer="background" src="${source}"><img data-shot-layer="foreground" data-layout-qa-required-layer-probe="fixture-original" style="filter:sepia(.2)" src="${source}"></figure></section>`;
+  const requiredFigure = (requirement, source = imageUrl, transitionProperty = '') => {
+    const style = `filter:sepia(.2)${transitionProperty ? `;transition:${transitionProperty} 10s linear` : ''}`;
+    return `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay" style="--fixture:yes;transform:translateZ(0)"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="visibility-${requirement}" data-shot-requirement="${requirement}"><img data-shot-layer="background" style="${style}" src="${source}"><img data-shot-layer="foreground" data-layout-qa-required-layer-probe="fixture-original" style="${style}" src="${source}" srcset="${source}"></figure></section>`;
+  };
   const pauseOpacityTransitionsAtMidpoint = (...ids) => `<script>(()=>{for(const id of ${JSON.stringify(ids)}){const shot=document.getElementById(id);void shot.offsetWidth;shot.style.opacity='1';const transition=shot.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='opacity');if(!transition)throw new Error('fixture opacity transition missing: '+id);transition.pause();transition.playbackRate=.75;transition.currentTime=175}})()</script>`;
+  const pauseFilterTransitionsAtMidpoint = () => `<script>(()=>{for(const image of document.querySelectorAll('[data-shot-layer]')){void image.offsetWidth;image.style.filter='sepia(.8)';const transition=image.getAnimations().find(animation=>typeof CSSTransition!=='undefined'&&animation instanceof CSSTransition&&animation.transitionProperty==='filter');if(!transition)throw new Error('fixture filter transition missing');transition.pause();transition.playbackRate=.6;transition.currentTime=5000}})()</script>`;
   const visibleRequired = await inspectInline('required-visible.html', requiredFigure('required'));
   const visibleMetric = visibleRequired.metrics.image_sequence_visibility_samples[0];
   assert.equal(visibleRequired.success, true, JSON.stringify(visibleRequired.issues));
@@ -241,6 +245,21 @@ function previewHtml(
     `近白 required 素材不得因与页面底色接近而误报遮挡：${JSON.stringify(nearWhiteMetric)}`);
   assert.ok(nearWhiteMetric.style_restored && nearWhiteMetric.layer_state_restored,
     '黑白探针必须精确恢复原 data 属性和 inline style');
+
+  for (const transitionProperty of ['filter', 'all']) {
+    const filterTransition = await inspectInline(
+      `required-${transitionProperty}-transition-visible.html`,
+      `${requiredFigure('required', nearWhiteImageUrl, transitionProperty)}${pauseFilterTransitionsAtMidpoint()}`,
+    );
+    const filterTransitionMetric = filterTransition.metrics.image_sequence_visibility_samples[0];
+    assert.equal(filterTransition.success, true, JSON.stringify(filterTransition.issues));
+    assert.ok(filterTransitionMetric.changed_pixel_ratio >= 0.05,
+      `10s transition:${transitionProperty} 不得吞掉可见素材探针对比：${JSON.stringify(filterTransitionMetric)}`);
+    assert.ok(filterTransitionMetric.style_restored && filterTransitionMetric.layer_state_restored
+      && filterTransitionMetric.animation_state_restored
+      && filterTransitionMetric.new_running_transition_count === 0,
+    `10s transition:${transitionProperty} 的原样式与动画状态必须精确恢复`);
+  }
 
   const occludedRequired = await inspectInline(
     'required-occluded.html',
