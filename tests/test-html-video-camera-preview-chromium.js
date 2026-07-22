@@ -177,6 +177,22 @@ function previewHtml(
   assert.equal(identityNoOpShot.cue, null, '最终 target 为 identity 的 cue 必须解析为空接受集');
   assert.equal(identityNoOpShot.has_transform, false, 'identity cue 必须保持安全全景');
 
+  const zoomOnePanPath = path.join(tempDir, 'materialized-zoom-one-pan.html');
+  await fs.writeFile(zoomOnePanPath, previewHtml(false, {
+    x: 0.1, y: 0, width: 0.8, height: 0.5,
+  }), 'utf8');
+  const zoomOnePan = await inspectFrameHtmlLayout({
+    htmlPath: zoomOnePanPath,
+    frame: { id: 'scene_zoom_one_pan', duration_sec: 4 },
+    resolution,
+    sampleTimesSec: [2],
+  });
+  const zoomOnePanShot = zoomOnePan.metrics.camera_samples[0].shots[0];
+  assert.equal(zoomOnePan.success, true, JSON.stringify(zoomOnePan.issues));
+  assert.equal(zoomOnePanShot.cue.id, 'cue_1', 'zoom=1 但存在真实 pan 的 cue 必须保留');
+  assert.ok(Math.abs(zoomOnePanShot.scale - 1) < 1e-4 && Math.abs(zoomOnePanShot.ty) >= 0.01);
+  assert.equal(zoomOnePanShot.has_transform, true, 'zoom=1 的真实 pan 必须被 QA 识别为 transform');
+
   const issueReport = await inspectFrameHtmlLayout({
     htmlPath: path.join(__dirname, 'fixtures', 'html-video-layout-qa', 'camera-issues.html'),
     frame: { id: 'scene_bad', duration_sec: 2 },
@@ -225,6 +241,16 @@ function previewHtml(
   const identityRuntime = await inspectInline('identity-camera-runtime.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="identity-runtime" data-camera-cues='${plannedCue}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>document.querySelector('[data-hv-shot]').__hvResolvedCameraCues=${plannedCue}</script>`, [1]);
   assert.equal(identityRuntime.success, false, 'Runtime 接受 cue 后稳定窗仍为 identity 时必须阻断');
   assert.ok(identityRuntime.issues.some(issue => issue.code === 'camera_transform_missing'));
+
+  for (const [name, transform] of [
+    ['tx-threshold', 'translateX(0.01px)'],
+    ['scale-threshold', 'matrix(1.0001,0.00001,0,1,0,0)'],
+  ]) {
+    const boundary = await inspectInline(`${name}.html`, `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="${name}" data-camera-cues='${plannedCue}'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" style="transform:${transform}" src="${imageUrl}"></figure></section><script>document.querySelector('[data-hv-shot]').__hvResolvedCameraCues=${plannedCue}</script>`, [1]);
+    const boundaryShot = boundary.metrics.camera_samples[0].shots[0];
+    assert.equal(boundaryShot.has_transform, true, `${name} 必须落在与 Runtime/formatTransform 互补的非 identity 边界`);
+    assert.equal(boundary.issues.some(issue => issue.code === 'camera_transform_missing'), false);
+  }
 
   const jitter = await inspectInline('jitter.html', `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay"><figure data-hv-shot="true" data-shot-active="true" data-shot-id="jitter" data-camera-cues='[{"start_sec":0,"end_sec":2,"max_zoom":1.5}]'><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure></section><script>window.__mpSetTimelineTime=function(t){var values=[0,10,-10,10];document.querySelector('[data-shot-layer="foreground"]').style.transform='translateX('+(values[Math.round((t-.05)*10)]||0)+'px)'}</script>`, null, { allowStaticCameraCues: true });
   const jitterTimes = jitter.metrics.camera_samples.map(sample => sample.sample_time_sec);

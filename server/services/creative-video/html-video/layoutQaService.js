@@ -466,7 +466,7 @@ async function collectCameraSample(page, resolution, sampleTimeSec, allowStaticC
         scale,
         tx: matrix.e,
         ty: matrix.f,
-        has_transform: Math.abs(scale - 1) > 1e-4 || Math.abs(matrix.e) > 0.01 || Math.abs(matrix.f) > 0.01,
+        has_transform: !(Math.abs(scale - 1) < 1e-4 && Math.abs(matrix.e) < 0.01 && Math.abs(matrix.f) < 0.01),
         camera_plan_present: plannedCues.length > 0,
         camera_runtime_resolved: runtimeResolved,
         camera_static_plan_allowed: staticPlanAllowed,
