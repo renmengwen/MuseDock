@@ -1,6 +1,5 @@
 const assert = require('assert');
 const fs = require('fs/promises');
-const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 
@@ -11,6 +10,7 @@ const { validateHtmlVideoProject } = require('../server/services/creative-video/
 const { buildVisualPlan } = require('../server/services/creative-video/html-video/visualPlanService');
 const { matchVisualBeatsToRenderers } = require('../server/services/creative-video/html-video/visualRouteMatcher');
 const { normalizeCaptions } = require('../server/services/creative-video/html-video/rawHtmlFrameBuilder');
+const { hashContentGraph } = require('../server/services/creative-video/html-video/contentGraphPhase');
 
 // 测试隔离：本机若配置了 image 模型，生图链路会混入本测试的 mock 计数，
 // 通过 services 注入未配置的 aiImageModel（generatedImagePhase 优先取 services.aiImageModel）。
@@ -364,7 +364,7 @@ const stubAiImageModel = { isConfigured: async () => false };
   assert.equal(assetFirstResult.project.content_graph.expanded_from_scene_graph, true, 'project.content_graph 可保存展开图');
   assert.equal(
     assetFirstResult.project.generation_checkpoint.stages.content_graph.output_hash,
-    crypto.createHash('sha256').update(JSON.stringify(canonicalGraph)).digest('hex'),
+    hashContentGraph(canonicalGraph),
     'content graph checkpoint hash 必须绑定 canonical graph',
   );
   const assetFirstBeats = assetFirstResult.project.visual_plan.beats.filter(beat => beat.scene_id === 'scene_data');
