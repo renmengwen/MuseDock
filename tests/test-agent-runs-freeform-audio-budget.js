@@ -40,8 +40,25 @@ const narrationBudget = require('../server/services/storyboard/storyboardNarrati
   }, null, 2));
 
   let capturedScenes = null;
+  let compressionModelCalls = 0;
+  let compressionPrompt = '';
   const result = await agentRuns.synthesizeDouyinRunHyperframesFreeformAudio(awemeId, runId, {
     rootDir,
+    aiTextModel: {
+      callTextModel: async ({ messages }) => {
+        compressionModelCalls += 1;
+        compressionPrompt = messages.map(message => message.content).join('\n');
+        return {
+          success: true,
+          text: JSON.stringify({
+            scenes: scenes.map(scene => ({
+              index: scene.index,
+              narration_text: `第${scene.index}幕介绍核心内容。`,
+            })),
+          }),
+        };
+      },
+    },
     sceneTtsService: {
       synthesizeSceneTts: async ({ scenes }) => {
         capturedScenes = scenes;
@@ -65,6 +82,8 @@ const narrationBudget = require('../server/services/storyboard/storyboardNarrati
   });
 
   assert.equal(result.success, true);
+  assert.equal(compressionModelCalls, 1);
+  assert.match(compressionPrompt, /硬性总字数上限：270 字/);
   assert.ok(capturedScenes);
   const fittedChars = capturedScenes.reduce((sum, scene) => sum + narrationBudget.countNarrationChars(scene.narration_text), 0);
   assert.ok(fittedChars < originalChars);
