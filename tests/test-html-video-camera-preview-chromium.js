@@ -453,6 +453,31 @@ function previewHtml(
   assert.ok(unreadableFileRequired.issues.some(issue => issue.code === 'required_asset_visibility_probe_failed'));
   assert.equal(unreadableFileRequired.issues.some(issue => issue.code === 'required_asset_visibility_evidence_missing'), false,
     '探针自身失败已经阻断时不得再派生缺证据问题');
+  assert.deepEqual(
+    unreadableFileRequired.issues.find(issue => issue.code === 'required_asset_visibility_probe_failed')?.details.shot_ids,
+    ['file-missing'],
+    '单 Shot 探针失败必须归因到当前 active required Shot',
+  );
+
+  const mixedProbeFailure = await inspectInline(
+    'required-mixed-probe-failure.html',
+    `<section data-hv-image-sequence="true" data-sequence-mode="fullscreen_relay">
+      <figure id="probe-a" data-hv-shot="true" data-shot-id="probe-a" data-shot-requirement="required"
+        data-window-start-sec="0.1" data-window-end-sec="0.9"><img data-shot-layer="background" src="missing.png"><img data-shot-layer="foreground" src="missing.png"></figure>
+      <figure id="probe-b" data-hv-shot="true" data-shot-id="probe-b" data-shot-requirement="required"
+        data-window-start-sec="1.1" data-window-end-sec="1.9"><img data-shot-layer="background" src="${imageUrl}"><img data-shot-layer="foreground" src="${imageUrl}"></figure>
+      <figure id="probe-fallback" data-hv-shot="true" data-shot-id="probe-fallback" data-shot-requirement="optional"><img data-shot-layer="background" src="${secondImageUrl}"><img data-shot-layer="foreground" src="${secondImageUrl}"></figure>
+    </section><script>window.__mpSetTimelineTime=function(time){const a=document.getElementById('probe-a');const b=document.getElementById('probe-b');const fallback=document.getElementById('probe-fallback');const activeA=time>=.1&&time<.9;
+      a.style.display=activeA?'block':'none';b.style.display='none';fallback.style.display=activeA?'none':'block';
+      if(activeA)a.setAttribute('data-shot-active','true');else a.removeAttribute('data-shot-active');b.removeAttribute('data-shot-active');
+      if(activeA)fallback.removeAttribute('data-shot-active');else fallback.setAttribute('data-shot-active','true')};window.__mpSetTimelineTime(0)</script>`,
+    [0],
+  );
+  const mixedProbeIssue = mixedProbeFailure.issues.find(issue => issue.code === 'required_asset_visibility_probe_failed');
+  const mixedMissingIssue = mixedProbeFailure.issues.find(issue => issue.code === 'required_asset_visibility_evidence_missing');
+  assert.deepEqual(mixedProbeIssue?.details.shot_ids, ['probe-a']);
+  assert.deepEqual(mixedMissingIssue?.details.missing, ['probe-b'],
+    'A 探针失败只能抑制 A 的派生 missing，B 从未在窗口内激活仍必须报告缺证据');
   const visibleRequired = await inspectInline('required-visible.html', requiredFigure('required'));
   const visibleMetric = visibleRequired.metrics.image_sequence_visibility_samples[0];
   assert.equal(visibleRequired.success, true, JSON.stringify(visibleRequired.issues));

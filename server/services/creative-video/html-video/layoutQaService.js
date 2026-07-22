@@ -1463,7 +1463,8 @@ async function inspectFrameHtmlLayout(options = {}) {
     const samples = [...new Set([...baseSamples, ...requiredShotMidpoints])].sort((a, b) => a - b);
 
     let elapsedSec = 0;
-    let requiredAssetProbeFailed = false;
+    const failedRequiredShotIds = new Set();
+    let unscopedRequiredAssetProbeFailed = false;
     for (const sampleTimeSec of samples) {
       if (continuousPlayback) {
         const currentTime = await page.evaluate(() => Number(window.__hvPlaybackClock.timeSec())).catch(() => NaN);
@@ -1605,13 +1606,23 @@ async function inspectFrameHtmlLayout(options = {}) {
           injectedSourceKeys,
         });
       } catch (error) {
-        requiredAssetProbeFailed = true;
+        const failedShotIds = await page.evaluate(() => Array.from(document.querySelectorAll(
+          '[data-hv-shot][data-shot-active="true"][data-shot-requirement="required"]',
+        )).map(shot => String(shot.dataset.shotId || '').trim()).filter(Boolean)).catch(() => null);
+        if (Array.isArray(failedShotIds) && failedShotIds.length) {
+          for (const shotId of failedShotIds) failedRequiredShotIds.add(shotId);
+        } else {
+          unscopedRequiredAssetProbeFailed = true;
+        }
         issues.push(makeIssue({
           code: 'required_asset_visibility_probe_failed',
           frameId,
           sampleTimeSec,
           message: '必需图片可见性探针执行失败。',
-          details: { error: error?.message || String(error) },
+          details: {
+            error: error?.message || String(error),
+            ...(failedShotIds?.length ? { shot_ids: failedShotIds } : {}),
+          },
         }));
         continue;
       }
@@ -1641,8 +1652,10 @@ async function inspectFrameHtmlLayout(options = {}) {
       ))
     )).map(shot => shot.shot_id);
     const evidencedSet = new Set(evidenced);
-    const missing = metrics.expected_required_shot_ids.filter(shotId => !evidencedSet.has(shotId));
-    if (missing.length && !requiredAssetProbeFailed) {
+    const missing = metrics.expected_required_shot_ids.filter(shotId => (
+      !evidencedSet.has(shotId) && !failedRequiredShotIds.has(shotId)
+    ));
+    if (missing.length && !unscopedRequiredAssetProbeFailed) {
       issues.push(makeIssue({
         code: 'required_asset_visibility_evidence_missing',
         frameId,
