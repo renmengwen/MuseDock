@@ -119,8 +119,15 @@ function previewHtml(
   const afterSecond = afterSecondSample.shots[0];
   assert.equal(beforeSecond.cue.id, 'cue_1');
   assert.equal(afterSecond.cue.id, 'cue_2');
-  const clockDelta = afterSecondSample.clock_time_sec - beforeSecondSample.clock_time_sec;
-  assert.ok(clockDelta > 0 && clockDelta < 0.2, `双 cue 的共享时钟必须连续运行，实际间隔=${clockDelta}`);
+  for (const sample of [beforeSecondSample, afterSecondSample]) {
+    assert.equal(sample.adapter_controlled, true);
+    assert.equal(sample.clock_paused, false);
+    assert.ok(
+      sample.clock_time_sec >= sample.sample_time_sec
+      && sample.clock_time_sec - sample.sample_time_sec < 0.2,
+      `双 cue 样本必须由共享时钟连续运行到请求采样点附近：${JSON.stringify(sample)}`,
+    );
+  }
   const handoffDelta = Math.hypot(afterSecond.tx - beforeSecond.tx, afterSecond.ty - beforeSecond.ty, (afterSecond.scale - beforeSecond.scale) * 100);
   assert.ok(handoffDelta > 0, `双 cue 交接必须产生真实变化，实际 delta=${handoffDelta}`);
 
