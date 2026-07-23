@@ -574,17 +574,6 @@ async function renderHtmlVideoProject({
       diagnostics,
     };
   }
-  const revalidationFrameIds = await runtimePolicyRevalidationFrameIds(resolvedProjectDir, nextProject);
-  if (revalidationFrameIds.length) {
-    const diagnostic = createDiagnostic({
-      code: 'runtime_asset_policy_revalidation_required', stage: 'compose', sub_stage: 'render',
-      retryable: true, repair_action: 'rerender_frames',
-      user_message: '已有渲染帧的运行时素材安全证明缺失或已过期，需要重新渲染后再合成。',
-      details: { frame_ids: revalidationFrameIds },
-    });
-    return { success: false, code: diagnostic.code, message: diagnostic.user_message, project: nextProject,
-      project_dir: resolvedProjectDir, html_video_project_path: resolvedProjectDir, rendered_frames: [], diagnostics: [diagnostic] };
-  }
   const timingFit = fitFrameDurationsToCaptions(nextProject);
   diagnostics.push(...timingFit.diagnostics);
   if (!timingFit.ok) {

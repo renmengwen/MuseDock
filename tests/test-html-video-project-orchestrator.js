@@ -524,6 +524,32 @@ const { runtimeAssetPolicyAttestation } = require('../server/services/creative-v
     assert.equal(drifted.code, 'runtime_asset_policy_revalidation_required');
     assert.deepEqual(drifted.diagnostics[0].details.frame_ids, ['frame_01']);
     assert.equal(driftComposeCalls, 0);
+    let exportRenderCalls = 0;
+    let exportComposeCalls = 0;
+    const repairedExport = await projectOrchestrator.exportHtmlVideoProject({
+      projectDir,
+      project: rendered.project,
+      services: {
+        materializer: { materializeProject: async ({ project: current }) => ({ project: current, diagnostics: [] }) },
+        frameRenderer: { renderFrame: async (_frame, { outputPath }) => {
+          exportRenderCalls += 1;
+          await fs.writeFile(outputPath, 'rerendered-frame-video');
+          return { success: true, output_path: outputPath, diagnostics: [] };
+        } },
+        ffmpegComposer: {
+          concatFramesWithFfmpeg: async (_frames, outputPath) => {
+            exportComposeCalls += 1;
+            await fs.mkdir(path.dirname(outputPath), { recursive: true });
+            await fs.writeFile(outputPath, 'mp4');
+            return { success: true, output_path: outputPath };
+          },
+          verifyDurationWithFfprobe: async () => ({ success: true, duration_sec: 2, expected_duration_sec: 2 }),
+        },
+      },
+    });
+    assert.equal(repairedExport.success, true, '完整导出应自动修复失效的渲染证明');
+    assert.equal(exportRenderCalls, 1, '完整导出只重渲染证明失效的帧');
+    assert.equal(exportComposeCalls, 1, '失效帧重渲染后应继续合成');
     await fs.writeFile(path.join(projectDir, 'frames', 'scene_01.html'), '<html><head></head><body>frame</body></html>');
     const registryDrifted = await projectOrchestrator.composeHtmlVideoProject({
       projectDir, project: { ...rendered.project, assets: [{ id: 'new', type: 'image', path: 'assets/new.png', status: 'ready' }] },
