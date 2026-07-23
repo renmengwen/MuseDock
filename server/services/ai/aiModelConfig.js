@@ -15,6 +15,7 @@ const MODEL_TYPE_LABELS = {
 
 const MODEL_PROTOCOLS = ['openai-responses', 'anthropic-messages'];
 const DEFAULT_MODEL_PROTOCOL = 'openai-responses';
+const DEFAULT_MINIMAX_VOICE_ID = 'Chinese_deep_voiced_male_nv1';
 
 function normalizeString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -61,6 +62,7 @@ function normalizeProvider(id, input = {}) {
       entry.supportsMultimodal = raw.supportsMultimodal === true;
     }
     if (type === 'tts') {
+      entry.voiceId = normalizeString(raw.voiceId) || DEFAULT_MINIMAX_VOICE_ID;
       entry.ttsConcurrency = normalizeInteger(raw.ttsConcurrency, 1, 1, 5);
       entry.ttsQueueIntervalMs = normalizeInteger(raw.ttsQueueIntervalMs, 1800, 0, 10000);
     }
@@ -124,6 +126,7 @@ function migrateOldConfig(old) {
         note: normalizeString(m.note),
       };
       if (type === 'tts') {
+        firstProvider.models[type].voiceId = normalizeString(m.voiceId) || DEFAULT_MINIMAX_VOICE_ID;
         firstProvider.models[type].ttsConcurrency = normalizeInteger(m.ttsConcurrency, 1, 1, 5);
         firstProvider.models[type].ttsQueueIntervalMs = normalizeInteger(m.ttsQueueIntervalMs, 1800, 0, 10000);
       }
@@ -156,6 +159,7 @@ function toPublicConfig(stored) {
         entry.supportsMultimodal = m.supportsMultimodal === true;
       }
       if (type === 'tts') {
+        entry.voiceId = m.voiceId;
         entry.ttsConcurrency = m.ttsConcurrency;
         entry.ttsQueueIntervalMs = m.ttsQueueIntervalMs;
       }
@@ -228,6 +232,7 @@ function resolveActiveConfig(type, stored) {
     result.supportsMultimodal = model.supportsMultimodal === true;
   }
   if (modelType === 'tts') {
+    result.voiceId = model.voiceId;
     result.ttsConcurrency = model.ttsConcurrency;
     result.ttsQueueIntervalMs = model.ttsQueueIntervalMs;
   }
@@ -282,6 +287,7 @@ module.exports = {
   MODEL_TYPE_LABELS,
   MODEL_PROTOCOLS,
   DEFAULT_MODEL_PROTOCOL,
+  DEFAULT_MINIMAX_VOICE_ID,
   getPublicConfig,
   saveConfig,
   getRuntimeConfig,

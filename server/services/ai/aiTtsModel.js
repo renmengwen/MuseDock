@@ -5,7 +5,7 @@ const DEFAULT_MIMO_TTS_MODEL = 'mimo-v2.5-tts';
 const DEFAULT_MIMO_VOICE = 'mimo_default';
 const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimaxi.com/v1';
 const DEFAULT_MINIMAX_TTS_MODEL = 'speech-2.8-hd';
-const DEFAULT_MINIMAX_VOICE = 'male-qn-qingse';
+const DEFAULT_MINIMAX_VOICE = 'Chinese_deep_voiced_male_nv1';
 const DEFAULT_AUDIO_FORMAT = 'wav';
 const DEFAULT_TTS_CONCURRENCY = 1;
 const DEFAULT_TTS_QUEUE_INTERVAL_MS = 1800;
@@ -130,6 +130,7 @@ async function resolveTtsRuntime(options = {}) {
       || (resolvedProvider === 'minimax' ? DEFAULT_MINIMAX_BASE_URL : DEFAULT_MIMO_BASE_URL)
     ),
     modelId: requestedModelId || (resolvedProvider === 'minimax' ? DEFAULT_MINIMAX_TTS_MODEL : DEFAULT_MIMO_TTS_MODEL),
+    voiceId: normalizeString(storedConfig?.voiceId) || DEFAULT_MINIMAX_VOICE,
     ttsConcurrency: storedConfig?.ttsConcurrency,
     ttsQueueIntervalMs: storedConfig?.ttsQueueIntervalMs,
   };
@@ -142,7 +143,7 @@ async function callTtsModel(options = {}) {
   const runtime = await resolveTtsRuntime(options);
   const requestedVoice = normalizeString(options.voice);
   const voice = runtime.provider === 'minimax'
-    ? (requestedVoice && requestedVoice !== DEFAULT_MIMO_VOICE ? requestedVoice : DEFAULT_MINIMAX_VOICE)
+    ? (requestedVoice && requestedVoice !== DEFAULT_MIMO_VOICE ? requestedVoice : runtime.voiceId)
     : (requestedVoice || DEFAULT_MIMO_VOICE);
   const model = toModelInfo(runtime.provider, runtime.modelId);
 

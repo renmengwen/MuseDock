@@ -21,6 +21,7 @@ function emptyProvider(id, modelTypes) {
     models[type] = { enabled: false, modelId: '', note: '' };
     if (type === 'text') models[type].supportsMultimodal = false;
     if (type === 'tts') {
+      models[type].voiceId = 'Chinese_deep_voiced_male_nv1';
       models[type].ttsConcurrency = 1;
       models[type].ttsQueueIntervalMs = 1800;
     }

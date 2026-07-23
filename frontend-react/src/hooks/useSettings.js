@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
 
 const MODEL_TYPES = ['asr', 'text', 'image', 'video', 'tts'];
+const DEFAULT_MINIMAX_VOICE_ID = 'Chinese_deep_voiced_male_nv1';
 
 const MODEL_TYPE_INFO = {
   asr:        { title: 'ASR 转写',   placeholder: 'whisper-1 / gpt-4o-transcribe' },
@@ -28,6 +29,7 @@ function normalizeServerData(json) {
         models[type].supportsMultimodal = m.supportsMultimodal === true;
       }
       if (type === 'tts') {
+        models[type].voiceId = m.voiceId || DEFAULT_MINIMAX_VOICE_ID;
         models[type].ttsConcurrency = m.ttsConcurrency ?? 1;
         models[type].ttsQueueIntervalMs = m.ttsQueueIntervalMs ?? 1800;
       }
@@ -61,6 +63,7 @@ function toServerPayload(state) {
         models[type].supportsMultimodal = m.supportsMultimodal === true;
       }
       if (type === 'tts') {
+        models[type].voiceId = m.voiceId || DEFAULT_MINIMAX_VOICE_ID;
         models[type].ttsConcurrency = m.ttsConcurrency ?? 1;
         models[type].ttsQueueIntervalMs = m.ttsQueueIntervalMs ?? 1800;
       }

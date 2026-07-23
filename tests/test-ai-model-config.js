@@ -37,7 +37,7 @@ async function run() {
         apiKey: 'mimo-secret',
         baseUrl: 'https://api.xiaomimimo.com/v1',
         models: {
-          tts: { enabled: true, modelId: 'mimo-v2.5-tts', ttsConcurrency: 2, ttsQueueIntervalMs: 3000 },
+          tts: { enabled: true, modelId: 'mimo-v2.5-tts', voiceId: 'Chinese_deep_voiced_male_nv1', ttsConcurrency: 2, ttsQueueIntervalMs: 3000 },
           text: { enabled: true, modelId: 'mimo-v2.5-pro' },
         },
       },
@@ -83,6 +83,7 @@ async function run() {
   const ttsRuntime = await aiModelConfig.getRuntimeConfig('tts', { configPath });
   assert.strictEqual(ttsRuntime.provider, 'mimo');
   assert.strictEqual(ttsRuntime.modelId, 'mimo-v2.5-tts');
+  assert.strictEqual(ttsRuntime.voiceId, 'Chinese_deep_voiced_male_nv1');
   assert.strictEqual(ttsRuntime.ttsConcurrency, 2);
   assert.strictEqual(ttsRuntime.ttsQueueIntervalMs, 3000);
 
@@ -137,6 +138,7 @@ async function run() {
   assert.strictEqual(migProvider.models.text.enabled, true);
   assert.strictEqual(migProvider.protocol, 'openai-responses');
   assert.strictEqual(migProvider.models.text.modelId, 'mimo-v2.5-pro');
+  assert.strictEqual(migProvider.models.tts.voiceId, 'Chinese_deep_voiced_male_nv1');
   assert.strictEqual(migrated.active.text?.includes('/text'), true);
 }
 

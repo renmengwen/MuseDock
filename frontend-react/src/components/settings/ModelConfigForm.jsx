@@ -17,6 +17,15 @@ export function ModelConfigForm({ type, info, model, onChange }) {
       />
       {type === 'tts' && m.enabled ? (
         <div className="mt-2 grid grid-cols-2 gap-2">
+          <label className="col-span-2 grid gap-1">
+            <span className="text-[11px] text-[#69717e]">voice_id（仅 MiniMax 支持，其他供应商会忽略）</span>
+            <input
+              value={m.voiceId ?? ''}
+              className="h-[30px] w-full rounded-md border border-[#d9dde5] px-1.5 text-xs"
+              onChange={e => onChange('voiceId', e.target.value)}
+              placeholder="Chinese_deep_voiced_male_nv1"
+            />
+          </label>
           <label className="grid gap-1">
             <span className="text-[11px] text-[#69717e]">并发</span>
             <input
