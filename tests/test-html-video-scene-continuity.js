@@ -443,6 +443,8 @@ const { buildSceneBeatsBrief } = require('../server/services/creative-video/html
   assert.ok(brief.includes('0s - 6.33s') && brief.includes('6.33s - 12.66s'), 'brief 必须含各 beat 时间窗口');
   assert.ok(brief.includes('data-mp-beat-scope="<beat_id>"'), 'brief 必须声明 data-mp-beat-scope 约定');
   assert.ok(brief.includes('[data-mp-beat-scope]{opacity:0'), 'brief 必须给出隐藏态 CSS 规则示例');
+  assert.ok(!brief.includes('[data-mp-beat-scope]{opacity:0;pointer-events:none'), 'brief 不应继续诱导模型禁用编辑器点选');
+  assert.ok(brief.includes('不要在任何元素上写 pointer-events:none'), 'brief 必须明确禁止禁用点选');
   assert.ok(/body\[data-mp-beat=.*\] \[data-mp-beat-scope=.*\]\{opacity:1\}/.test(brief), 'brief 必须给出按 beat 显示的 CSS 规则示例');
   assert.ok(brief.includes('本体不得使用会覆盖 opacity 的 animation/fill-mode'), 'brief 必须禁止 Scope 本体动画覆盖显隐');
   assert.ok(brief.includes('Beat overlay 不得压住 base 层可读文字'), 'brief 必须约束 overlay 与 base 文本避让');

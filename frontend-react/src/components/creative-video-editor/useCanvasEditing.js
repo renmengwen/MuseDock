@@ -73,6 +73,8 @@ export function useCanvasEditing(editor, { onDirtyChange } = {}) {
   const selectedElementRef = useRef(null);
   const editingReadyRef = useRef(false);
   const frameLoadRequestRef = useRef(0);
+  const iframeLoadedRef = useRef(false);
+  const pendingJumpToEndRef = useRef(false);
   const dragRef = useRef(null);
   const undoStackRef = useRef([]);
   const hoverThrottleRef = useRef(0);
@@ -362,6 +364,8 @@ export function useCanvasEditing(editor, { onDirtyChange } = {}) {
     let cancelled = false;
     frameLoadRequestRef.current = requestId;
     clearPlaybackTimer();
+    iframeLoadedRef.current = false;
+    pendingJumpToEndRef.current = false;
     setHtml('');
     setLoadedFrameId('');
     setHtmlLoadError('');
@@ -441,16 +445,19 @@ export function useCanvasEditing(editor, { onDirtyChange } = {}) {
   function finishPlayback(targetTimeMs = null) {
     clearPlaybackTimer();
     const win = iframeRef.current?.contentWindow;
+    if (!iframeLoadedRef.current || !win?.document?.body) return false;
     if (win?.document) {
       freezeFrame(win, targetTimeMs);
       refreshLayerItems(win.document);
     }
     setPlaybackState('ended');
     setEditingReady(true);
+    return true;
   }
 
   function jumpToEnd() {
-    finishPlayback(frameDurationMs(frame));
+    pendingJumpToEndRef.current = true;
+    if (finishPlayback(frameDurationMs(frame))) pendingJumpToEndRef.current = false;
   }
 
   function pauseAndEdit() {
@@ -466,6 +473,7 @@ export function useCanvasEditing(editor, { onDirtyChange } = {}) {
     setElementCandidates([]);
     setLayerItems([]);
     selectedElementRef.current = null;
+    iframeLoadedRef.current = false;
     setIframeKey(key => key + 1);
   }
 
@@ -473,12 +481,26 @@ export function useCanvasEditing(editor, { onDirtyChange } = {}) {
     setHtmlReloadKey(key => key + 1);
   }
 
+  // 恢复命中测试后，未激活 beat 的 overlay（opacity:0 但仍参与 hit-test）会盖在可见元素上，
+  // 点击候选必须排除整条祖先链上任何 opacity:0 的元素，避免选中看不见的内容
+  function isEffectivelyHidden(element) {
+    const win = element?.ownerDocument?.defaultView;
+    if (!win) return false;
+    let current = element;
+    while (current && current.nodeType === 1) {
+      const style = win.getComputedStyle(current);
+      if (Number(style.opacity) === 0 || style.visibility === 'hidden') return true;
+      current = current.parentElement;
+    }
+    return false;
+  }
+
   function candidatesFromPoint(doc, x, y) {
     return uniqueElements((doc.elementsFromPoint?.(x, y) || []).flatMap(node => {
       const matches = [];
       let current = node?.nodeType === 1 ? node : node?.parentElement;
       while (current && current !== doc.documentElement) {
-        if (isEditableElement(current)) matches.push(current);
+        if (isEditableElement(current) && !isEffectivelyHidden(current)) matches.push(current);
         current = current.parentElement;
       }
       return matches;
@@ -514,6 +536,7 @@ export function useCanvasEditing(editor, { onDirtyChange } = {}) {
     if (!doc || !rawHtml || !htmlReady) return;
     if (iframeLoadTimerRef.current) clearTimeout(iframeLoadTimerRef.current);
     setPreviewError('');
+    iframeLoadedRef.current = true;
     installCanvasViewport(doc);
     doc.defaultView.addEventListener('resize', () => installCanvasViewport(doc));
     // HV-CANVAS-INJECT-STYLE-HERE
@@ -530,6 +553,19 @@ export function useCanvasEditing(editor, { onDirtyChange } = {}) {
     outline: 1px dashed rgba(37, 244, 238, .6) !important;
     outline-offset: 2px !important;
     cursor: pointer !important;
+  }
+  /* 图片优先帧是"图片底层 + HTML overlay"结构，根容器与 beat 元素常带 pointer-events:none，
+     会让 elementsFromPoint 全部落空。编辑器内强制恢复命中测试；字幕层、受管图片序列层
+     与编辑器覆盖层保持透传（覆盖层内的缩放 handle 不受影响，仍可交互）。 */
+  body, body * {
+    pointer-events: auto !important;
+  }
+  body .hv-caption-layer,
+  body .hv-caption-layer *,
+  body [data-hv-image-sequence],
+  body [data-hv-image-sequence] *,
+  body [data-hv-editor-overlay] {
+    pointer-events: none !important;
   }
 `;
     doc.head.appendChild(editorStyle);
@@ -639,8 +675,9 @@ export function useCanvasEditing(editor, { onDirtyChange } = {}) {
     doc.addEventListener('pointercancel', endDrag, true);
     beginPlayback();
     // 「切帧后直接编辑」：动画启动后立即冻结到结尾帧，省去等整段播放
-    if (autoEditRef.current) {
+    if (autoEditRef.current || pendingJumpToEndRef.current) {
       finishPlayback(frameDurationMs(frame));
+      pendingJumpToEndRef.current = false;
     }
   }
 
