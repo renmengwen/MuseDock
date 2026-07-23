@@ -1,6 +1,8 @@
 # MuseDock
 
-MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台：把选题输入、公开来源整理、联网研究、来源图片素材、脚本与分镜、TTS 配音、自动短音效、HTML 帧工程、布局质检和导出放在同一个 Web GUI 里。当前阶段成片统一基于 **HyperFrames**（HTML/CSS/GSAP 帧工程）生成——不是一次性黑盒 MP4，而是可检查、可重试、可二次编辑的 HTML 视频工程。
+MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台。输入一个选题，粘贴文章、GitHub 或抖音链接，也可以直接上传图片；MuseDock 会整理来源、补充研究、规划脚本与镜头，生成配音和 HTML 动画帧，最后在本机渲染成视频。
+
+它的重点不是调用一次“文生视频”接口，而是产出一个**素材可追踪、过程可恢复、画面可编辑**的视频工程。当前成片统一使用 **HyperFrames**：以图片素材为画面主体，以 HTML/CSS/GSAP 完成排版、标注、镜头运动和动效，再由系统 Chrome 与 `ffmpeg` 完成渲染和合成。
 
 <p align="center">
   <img src=".github/assets/musedock-creative-home.png" width="100%" alt="MuseDock 一键创作首页">
@@ -15,14 +17,16 @@ MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台：把选�
 
 ## 快速开始
 
-需要 Node.js `>=22 <23`、Google Chrome（采集与渲染都复用系统 Chrome，无需下载 Playwright 浏览器）、`ffmpeg`、`ffprobe`。
+需要 Node.js `>=22 <23`、Google Chrome 和 `ffprobe`。采集与渲染直接复用系统 Chrome，无需下载 Playwright 浏览器；`npm install` 会安装项目使用的 `ffmpeg`，也可以通过环境变量改用本机版本。
 
 ```powershell
 npm install
 npm run dev                        # 打开 http://localhost:5173
 ```
 
-切换过 Node 版本时 `better-sqlite3` 可能需要 `npm rebuild better-sqlite3`。`ffmpeg` 查找顺序为 `FFMPEG_PATH` → 项目内置 → 系统 `PATH`；`ffprobe` 建议装进 `PATH` 或用 `FFPROBE_PATH` 指定。
+首次使用先打开设置中心，至少配置一个分析模型；需要配音、图片生成或联网补图时，再分别配置 TTS、图片模型和 Pexels。切换过 Node 版本时，`better-sqlite3` 可能需要执行 `npm rebuild better-sqlite3`。
+
+`ffmpeg` 查找顺序为 `FFMPEG_PATH` → 项目内置 → 系统 `PATH`；`ffprobe` 建议装进 `PATH` 或用 `FFPROBE_PATH` 指定。
 
 ## 桌面版（Electron）
 
@@ -47,31 +51,38 @@ npm run dist   # 产物：dist-electron/MuseDock Setup <version>.exe
 
 ## 核心能力
 
-- **一键创作闭环**：用创作方向、文本、抖音/文章/公众号/GitHub 链接创建本地任务，后台依次准备来源、研究、素材、脚本分镜、TTS、HTML 工程、渲染和巡检，全程 SSE 跟踪进度。
-- **来源可追踪**：链接来源整理成 `source_context`，文章/GitHub 图片下载成 `asset_context` 并追踪是否被镜头引用；抖音来源复用本地视频、音频和关键帧。Pexels 只作视觉补充，不当来源证据。
-- **图片/视频优先 v1**：一键创作可开启 `asset_first`，在 html-video 工程内按配置的 image 模型为关键场景生成 Seedream 主视觉，并让 HTML 负责标注、拆解和强调。
-- **HTML 视频工程优先**：成片由 `scene_spec`、内容图、HTML 帧、音频、时间轴、质检和导出版本组成，可在 `/editor` 改文案、拖位置、跑布局质检、AI 改帧并重新导出。
+- **从材料开始创作**：支持选题文本、文章/公众号/GitHub/抖音链接，以及 PNG、JPEG、WebP 图片上传；上传图片可以标记为“必须使用”。
+- **来源与研究分开管理**：原始来源负责事实依据，联网研究负责补充最新信息；文章和 GitHub 图片可进入素材池，Pexels 只作视觉补充，不冒充来源证据。
+- **素材主导的画面规划**：统一走 `asset_first` 链路，按“来源图 → 生成图 → 补充图”的语义选择素材；支持单图主视觉、多图接力镜头、主体焦点分析，以及平移、缩放等确定性镜头运动。
+- **可编辑的 HTML 视频工程**：每个镜头保留视觉计划、HTML 帧、旁白、字幕、音效、时间轴和质检结果；可在 `/editor` 修改文案与位置、运行布局质检、让 AI 改帧并重新导出。
 - **自动音效增强**：生成时可按分镜、字幕和画面语义从本地 `assets/sfx` 白名单自动编排短音效，导出时由 ffmpeg 混入最终音轨；编辑器里可查看并删除单条音效，编排或混音失败会降级为无音效成片。
-- **失败可恢复**：工程阶段写入 `generation_checkpoint`，失败后复用已完成的来源/研究/素材/音频产物，从失败子阶段继续。
-- **本地优先**：任务、配置、素材、TTS、工程和导出默认存本地目录。
+- **长任务可观察、可恢复**：前端实时显示来源、研究、素材、策划、音频、工程、渲染和巡检进度；失败后可复用已经完成的产物，从可恢复阶段继续。
+- **数据默认留在本地**：任务、模型配置、Cookie、素材、音频、工程和导出文件默认写入本地目录；仅在调用已配置的模型、研究、素材或来源服务时发送相应请求。
 
 ## HTML 视频工程（HyperFrames）
 
-当前阶段创作链路已收敛为 HyperFrames 单引擎：分镜 DSL 驱动 AI 生成 HTML/CSS/GSAP 帧，Playwright 驱动系统 Chrome 录制，ffmpeg 合成音视频。
+当前创作链路已收敛为 HyperFrames 单引擎。AI 负责内容结构与 HTML/CSS/GSAP 画面，确定性代码负责素材绑定、图片接力、焦点镜头、字幕时间窗、画布校验、渲染和合成。
 
 ```text
-输入/来源 -> scene_spec -> content graph -> raw HTML frames
--> TTS / 自动音效 -> frame canvas contract -> Playwright render -> ffmpeg compose
--> duration / visual QA -> exports
+选题 / 链接 / 图片
+  -> 来源准备与联网研究
+  -> 素材提取、分析与可选生图
+  -> 成片策划、旁白与分镜
+  -> 视觉计划、素材绑定与焦点镜头
+  -> HTML/CSS/GSAP 帧 + TTS / 字幕 / 自动音效
+  -> 系统 Chrome 渲染 -> ffmpeg 合成
+  -> 时长、素材使用与画面质检 -> 导出
 ```
 
 `project.output.resolution` 是输出画幅的权威来源，生成 HTML 必须带 `data-hv-canvas`、`data-width`、`data-height` 画布契约。
 
 ## 当前边界
 
-- 不是通用爬虫控制台，采集只服务本地短视频创作；专家模式仍在建设，稳定入口是 `/creative`。
+- 项目仍处于早期开发阶段，当前稳定主线是一键创作 `/creative` 与工程编辑器 `/editor/:workflowId`。
+- 不是通用爬虫控制台，采集只服务短视频创作任务。
 - 文章/GitHub 来源只处理正文和图片，不做任意网页截图，也不提取网页里的视频。
-- 真实渲染依赖本机 Chrome、`ffmpeg`、`ffprobe`，缺失时相关烟测或导出会跳过或失败。
+- 视频不是纯离线生成：调用分析模型、图片模型、TTS、联网研究、Pexels 或来源平台时，仍受对应服务配置、网络和配额限制。
+- 真实渲染依赖本机 Chrome、`ffmpeg` 和 `ffprobe`，缺失时相关烟测或导出会跳过或失败。
 
 ## 技术栈
 

@@ -984,9 +984,7 @@ async function generateHtmlVideo(options = {}) {
     frameHtmlConcurrency,
     resumeAllowed,
     regenerateFrameHtmlRequested,
-    // 帧生成阶段的布局自检不跟随 skipValidation：skipValidation 只跳过阻断式校验，
-    // 而这里是生成质量自修复，关掉它就会重现“元素互相遮挡”的成片。
-    runLayoutQa: runLayoutQa === true,
+    runLayoutQa: runLayoutQa === true && !skipValidation,
     ignoreLayoutQaFrameIds,
     layoutQaService: services.layoutQaService || defaultLayoutQaService,
     onProgress,

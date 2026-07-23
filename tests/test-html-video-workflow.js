@@ -147,6 +147,7 @@ function fullSceneCaption(sceneId, text, duration) {
       }],
     };
     let visionCalls = 0;
+    let layoutQaCalls = 0;
     const durableModel = {
       provider: 'mock-ai',
       modelId: 'vision-mock-1',
@@ -196,10 +197,17 @@ function fullSceneCaption(sceneId, text, duration) {
       },
       target: { sourceImageAnalysisEnabled: true, generateAudio: false },
       skipValidation: true,
+      runLayoutQa: true,
       services: {
         aiTextModel: durableModel,
         aiImageModel: { isConfigured: async () => false },
         environmentDoctor: async () => ({ ok: true, diagnostics: [] }),
+        layoutQaService: {
+          async inspectFrameHtmlLayout() {
+            layoutQaCalls += 1;
+            return { success: false, issues: [{ code: 'text_overlap', severity: 'error' }] };
+          },
+        },
       },
     };
     const originalRenderForDurable = projectOrchestrator.renderHtmlVideoProject;
@@ -243,6 +251,7 @@ function fullSceneCaption(sceneId, text, duration) {
         diagnostics: secondDurable.diagnostics,
       }, null, 2));
       assert.equal(visionCalls, 1, '第二次 run 必须命中 durable 缓存，零 vision 调用');
+      assert.equal(layoutQaCalls, 0, '已开启跳过质检时不应调用布局 QA');
       const secondPersisted = await projectStore.loadProject(secondDurable.project_dir);
       assert.deepEqual(
         secondPersisted.assets.find(item => item.id === 'hero_empty')?.focus_analysis,
