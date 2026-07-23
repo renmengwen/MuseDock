@@ -121,6 +121,8 @@ function buildProjectAssetUsageReport(project, projectDir, record) {
     && Array.isArray(project.asset_usage_report.required_asset_ids)) {
     return project.asset_usage_report;
   }
+  const frameHtmlStatus = safeString(project?.generation_checkpoint?.stages?.frame_html?.status);
+  if (frameHtmlStatus && frameHtmlStatus !== 'done') return null;
   if (htmlVideoWorkflow && typeof htmlVideoWorkflow.buildAssetUsageReport === 'function') {
     return htmlVideoWorkflow.buildAssetUsageReport({
       project,
@@ -158,6 +160,12 @@ async function syncProjectStageSummariesFromProjectDir(record, projectDir, optio
     syncProjectStageSummariesFromCheckpoint(record, project.generation_checkpoint);
     applyProjectVisualAssetsToRecord(record, project, trustedProjectDir);
     const assetUsageReport = buildProjectAssetUsageReport(project, trustedProjectDir, record);
+    const frameHtmlStatus = safeString(project?.generation_checkpoint?.stages?.frame_html?.status);
+    if (!assetUsageReport && frameHtmlStatus && frameHtmlStatus !== 'done') {
+      delete record.asset_context?.asset_usage_report;
+      delete record.creative_context?.asset_context?.asset_usage_report;
+      delete record.result?.hyperframes_freeform?.project?.asset_usage_report;
+    }
     applyAssetUsageReportToRecord(record, assetUsageReport);
   } catch {
     // checkpoint 只是辅助恢复状态，读取失败不能覆盖主阶段错误。
