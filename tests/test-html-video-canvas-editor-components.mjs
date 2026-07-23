@@ -90,6 +90,12 @@ assert.match(canvasUnit, /function clearPlaybackTimer\(\)\s*\{\s*if \(playbackTi
 assert.match(canvasUnit, /function playFrame/);
 assert.match(canvasUnit, /__hvPlayAll/);
 assert.match(canvasUnit, /__hvPlayed = true/);
+assert.match(canvasUnit, /__hvPlaybackClock\.play/, '播放应启动共享时钟');
+assert.match(canvasUnit, /__hvPlaybackClock/, '跳到结尾应支持共享时钟');
+assert.match(canvasUnit, /clock\.setTime\(targetSec\)/, '跳到结尾应 seek 共享时钟');
+assert.match(canvasUnit, /\[data-hv-canvas-base\]/, '保存时应剥离画布预览 base');
+assert.match(canvasUnit, /data-hv-canvas-base="true"/, 'srcDoc 应注入临时 base 以加载项目图片');
+assert.match(canvasUnit, /framePreviewBaseUrl/, '画布应根据帧 html_path 构造项目文件 base');
 assert.match(canvasUnit, /useEffect\(\(\) => \{\s*const requestId = frameLoadRequestRef\.current \+ 1;[^]*?clearPlaybackTimer\(\);[^]*?setEditingReady\(false\);[^]*?\}, \[frameId, rawHtml, htmlReloadKey\]\);/);
 assert.match(canvasUnit, /function beginPlayback\(\)\s*\{\s*clearPlaybackTimer\(\);/);
 assert.match(canvasUnit, /function finishPlayback/);

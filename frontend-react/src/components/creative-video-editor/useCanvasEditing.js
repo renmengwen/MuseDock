@@ -64,6 +64,43 @@ function readAutoEditPreference() {
   }
 }
 
+function escapeAttr(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
+}
+
+function encodePath(pathname) {
+  return String(pathname || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join('/');
+}
+
+function framePreviewBaseUrl(result, workflowId) {
+  const existing = String(result?.preview_base_url || '').trim();
+  if (existing) return existing;
+  const id = String(result?.workflow_id || workflowId || '').trim();
+  const htmlPath = String(result?.html_path || '').replace(/\\/g, '/');
+  if (!id || !htmlPath) return '';
+  const dir = htmlPath.split('/').slice(0, -1).join('/');
+  return `/api/creative-workflows/${encodeURIComponent(id)}/html-video-project/files/${encodePath(dir)}/`;
+}
+
+function withPreviewBase(html, baseUrl) {
+  const source = String(html || '');
+  const base = String(baseUrl || '').trim();
+  if (!source || !base) return source;
+  const tag = `<base data-hv-canvas-base="true" href="${escapeAttr(base)}">`;
+  if (/<base\b[^>]*data-hv-canvas-base=/i.test(source)) return source;
+  if (/<head\b[^>]*>/i.test(source)) return source.replace(/<head\b[^>]*>/i, match => `${match}${tag}`);
+  if (/<html\b[^>]*>/i.test(source)) return source.replace(/<html\b[^>]*>/i, match => `${match}<head>${tag}</head>`);
+  return `${tag}${source}`;
+}
+
 // HtmlVideoCanvasEditor 的交互核心：iframe 加载与播放控制、画布点选/拖拽/撤销、
 // 元素编辑回调与保存。从组件里整体搬出，逻辑与搬出前保持一致。
 export function useCanvasEditing(editor, { onDirtyChange } = {}) {
@@ -393,7 +430,7 @@ export function useCanvasEditing(editor, { onDirtyChange } = {}) {
             setHtmlLoadError('当前镜头暂无可加载 HTML。');
             return;
           }
-          setHtml(loadedHtml);
+          setHtml(withPreviewBase(loadedHtml, framePreviewBaseUrl(result, editor.workflowId)));
           setLoadedFrameId(frameId);
         })
         .catch(() => {

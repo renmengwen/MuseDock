@@ -1972,6 +1972,25 @@ async function getHtmlVideoProjectFrameHtml(workflowId, frameId, payload = {}, o
   return frameHtmlEditService.readFrameHtml({ projectDir, project, frameId, format: payload.format });
 }
 
+async function getHtmlVideoProjectFile(workflowId, relativePath, options = {}) {
+  const rootDir = options.rootDir || DEFAULT_ROOT;
+  const { projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
+  if (error) return error;
+  try {
+    const filePath = frameHtmlEditService.resolveProjectPath(projectDir, relativePath);
+    const stat = await fsp.stat(filePath);
+    if (!stat.isFile()) throw new Error('not file');
+    return { success: true, workflow_id: workflowId, file_path: filePath };
+  } catch {
+    return {
+      success: false,
+      code: 'PROJECT_FILE_NOT_FOUND',
+      workflow_id: workflowId,
+      message: '工程文件不存在或路径无效。',
+    };
+  }
+}
+
 async function saveHtmlVideoProjectFrameHtml(workflowId, frameId, payload = {}, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const { project, projectDir, error } = await loadWorkflowWithHtmlVideoProject(workflowId, rootDir);
@@ -2473,8 +2492,9 @@ module.exports = {
   runHtmlVideoProjectEditPlan,
   acceptHtmlVideoProjectEditPlan,
   discardHtmlVideoProjectEditPlan,
-  getHtmlVideoProjectFrameHtml,
-  saveHtmlVideoProjectFrameHtml,
+    getHtmlVideoProjectFrameHtml,
+    getHtmlVideoProjectFile,
+    saveHtmlVideoProjectFrameHtml,
   iterateHtmlVideoProjectFrame,
   acceptHtmlVideoProjectFrameDraft,
   discardHtmlVideoProjectFrameDraft,

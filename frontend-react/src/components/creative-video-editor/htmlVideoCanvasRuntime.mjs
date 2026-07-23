@@ -19,7 +19,7 @@ export function frameDurationMs(frame) {
 
 export function serializeDocument(doc) {
   const root = doc.documentElement.cloneNode(true);
-  root.querySelectorAll('[data-hv-canvas-freeze],[data-hv-canvas-editor-style],[data-hv-canvas-viewport-style],[data-hv-editor-overlay]').forEach(node => node.remove());
+  root.querySelectorAll('[data-hv-canvas-freeze],[data-hv-canvas-editor-style],[data-hv-canvas-viewport-style],[data-hv-editor-overlay],[data-hv-canvas-base]').forEach(node => node.remove());
   root.querySelectorAll('[data-hv-canvas-selected],[data-hv-edit-id],[data-hv-canvas-hover]').forEach(node => {
     node.removeAttribute('data-hv-canvas-selected');
     node.removeAttribute('data-hv-edit-id');
@@ -89,7 +89,17 @@ export function isEditableElement(element) {
 export function freezeFrame(win, targetTimeMs) {
   const doc = win.document;
   const targetMs = Number.isFinite(targetTimeMs) && targetTimeMs >= 0 ? targetTimeMs : null;
+  const targetSec = targetMs === null ? null : targetMs / 1000;
   doc.querySelectorAll('[data-hv-canvas-freeze]').forEach(node => node.remove());
+  try {
+    const clock = win.__hvPlaybackClock;
+    if (clock && typeof clock.pause === 'function' && typeof clock.setTime === 'function') {
+      if (targetSec !== null) clock.setTime(targetSec);
+      clock.pause();
+    } else if (targetSec !== null && typeof win.__mpSetTimelineTime === 'function') {
+      win.__mpSetTimelineTime(targetSec);
+    }
+  } catch (_) {}
   for (const animation of doc.getAnimations()) {
     try {
       const timing = animation.effect?.getTiming?.();
@@ -133,6 +143,13 @@ export function playFrame(win) {
   } catch (_) {}
   try {
     if (typeof win.__hvUnfreeze === 'function') win.__hvUnfreeze();
+  } catch (_) {}
+  try {
+    if (win.__hvPlaybackClock && typeof win.__hvPlaybackClock.play === 'function') {
+      win.__hvPlaybackClock.play();
+    } else if (typeof win.__mpStartBeatClock === 'function') {
+      win.__mpStartBeatClock();
+    }
   } catch (_) {}
 }
 

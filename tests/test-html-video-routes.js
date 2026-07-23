@@ -63,7 +63,9 @@ async function listen(app) {
   const calls = [];
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'html-video-export-route-'));
   const exportFilePath = path.join(tmpDir, 'output.mp4');
+  const projectAssetPath = path.join(tmpDir, 'source.png');
   await fs.writeFile(exportFilePath, 'fake mp4');
+  await fs.writeFile(projectAssetPath, 'fake image');
   const fakeService = {
     getCreativeWorkflowHtmlVideoProject: async id => {
       calls.push(['get', id]);
@@ -104,6 +106,10 @@ async function listen(app) {
     getHtmlVideoProjectFrameHtml: async (id, frameId, payload) => {
       calls.push(['get-frame-html', id, frameId, payload?.format || 'json']);
       return { success: true, workflow_id: id, frame_id: frameId, resolved_frame_id: 'frame_01', html: '<!doctype html><html></html>', html_path: 'frames/frame_01.html' };
+    },
+    getHtmlVideoProjectFile: async (id, relativePath) => {
+      calls.push(['project-file', id, relativePath]);
+      return { success: true, workflow_id: id, file_path: projectAssetPath };
     },
     saveHtmlVideoProjectFrameHtml: async (id, frameId, payload) => {
       calls.push(['put-frame-html', id, frameId, payload.mode || 'draft']);
@@ -313,6 +319,9 @@ async function listen(app) {
     assert.match(frameHtmlText.contentType, /text\/plain/);
     assert.equal(frameHtmlText.body, '<!doctype html><html></html>');
     assert.equal(calls.filter(item => item[0] === 'get-frame-html')[1][3], 'text');
+    const projectFile = await requestText(server, 'GET', `/api/creative-workflows/${workflowId}/html-video-project/files/assets/source.png`);
+    assert.equal(projectFile.statusCode, 200);
+    assert.equal(projectFile.body, 'fake image');
 
     const savedDraft = await requestJson(server, 'PUT', `/api/creative-workflows/${workflowId}/html-video-project/frames/frame_01/html`, {
       html: '<!doctype html><html></html>',
@@ -375,7 +384,7 @@ async function listen(app) {
     assert.equal(invalidDiscardPlanId.statusCode, 400);
     assert.match(invalidDiscardPlanId.body.message, /编辑计划 ID 无效/);
 
-    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-frame', 'sfx', 'edit', 'create-edit-plan', 'run-edit-plan', 'accept-edit-plan', 'discard-edit-plan', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
+    assert.deepEqual(calls.map(item => item[0]), ['get', 'patch', 'post', 'patch-frame', 'sfx', 'edit', 'create-edit-plan', 'run-edit-plan', 'accept-edit-plan', 'discard-edit-plan', 'render', 'render', 'render', 'layout-qa', 'layout-qa', 'get-frame-html', 'get-frame-html', 'project-file', 'put-frame-html', 'iterate-frame', 'accept-draft', 'discard-draft', 'export', 'exports', 'export-file', 'export-file']);
     assert.deepEqual(calls.find(item => item[0] === 'create-edit-plan'), ['create-edit-plan', workflowId, '全片改成财经杂志风']);
     assert.deepEqual(calls.find(item => item[0] === 'run-edit-plan'), ['run-edit-plan', workflowId, 'edit_plan_0001', true]);
     assert.deepEqual(calls.find(item => item[0] === 'accept-edit-plan'), ['accept-edit-plan', workflowId, 'edit_plan_0001']);

@@ -369,6 +369,37 @@ router.get('/:workflow_id/html-video-project/frames/:frame_id/html', async (req,
   }
 });
 
+router.get('/:workflow_id/html-video-project/files/*', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) {
+    return res.status(400).json(validation);
+  }
+  const workflowId = validation.workflow_id;
+  const relativePath = String(req.params[0] || '').trim();
+  if (!relativePath) {
+    return res.status(400).json({ success: false, workflow_id: workflowId, message: '工程文件路径无效。' });
+  }
+
+  try {
+    const service = getService(req);
+    if (typeof service.getHtmlVideoProjectFile !== 'function') {
+      return res.status(501).json({ success: false, workflow_id: workflowId, message: '当前服务暂不支持读取工程文件。' });
+    }
+    const result = await service.getHtmlVideoProjectFile(workflowId, relativePath);
+    if (!result || result.success === false) {
+      const message = getMessage(result, '读取工程文件失败。');
+      return res.status(result?.code === 'PROJECT_FILE_NOT_FOUND' ? 404 : getStatusCode(result)).json({ success: false, workflow_id: workflowId, message });
+    }
+    return res.sendFile(result.file_path);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      workflow_id: workflowId,
+      message: `读取工程文件失败：${error.message}`,
+    });
+  }
+});
+
 router.put('/:workflow_id/html-video-project/frames/:frame_id/html', async (req, res) => {
   const validation = validateWorkflowId(req.params.workflow_id);
   if (!validation.success) {
