@@ -406,6 +406,7 @@ async function prepareSourceAssets({
     .map(image => ({ ...image, origin_detail: articleOriginDetail, provider: articleProvider }));
   let candidates = [...articleImages];
   let searchResult = null;
+  const pexelsBackfillEnabled = deps.pexelsBackfillEnabled === true;
   const runSearch = async () => {
     const result = await (deps.searchImages || searchPexelsImages)(sourceMaterial, deps).catch(error => ({
       success: false,
@@ -418,7 +419,7 @@ async function prepareSourceAssets({
     }
     return result;
   };
-  if (!candidates.length && maxSearchImages > 0) {
+  if (pexelsBackfillEnabled && maxSearchImages > 0) {
     searchResult = await runSearch();
     const searchImages = Array.isArray(searchResult?.images) ? searchResult.images.slice(0, maxSearchImages) : [];
     candidates.push(...searchImages.map(image => ({ ...image, source: 'search' })));
@@ -452,7 +453,7 @@ async function prepareSourceAssets({
     }
   };
   await downloadCandidates(candidates);
-  if (!assets.length && articleImages.length && !searchResult && maxSearchImages > 0) {
+  if (pexelsBackfillEnabled && !assets.length && articleImages.length && !searchResult && maxSearchImages > 0) {
     searchResult = await runSearch();
     const searchImages = Array.isArray(searchResult?.images) ? searchResult.images.slice(0, maxSearchImages) : [];
     await downloadCandidates(searchImages.map(image => ({ ...image, source: 'search' })));

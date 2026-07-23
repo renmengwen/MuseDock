@@ -55,6 +55,7 @@ async function testPrepareDownloadsArticleImageWithoutPexelsBackfill() {
     maxSearchImages: 1,
     deps: {
       pexelsApiKey: 'pexels-key',
+      pexelsBackfillEnabled: false,
       fetchImpl: async (url) => {
         requested.push(url);
         if (String(url).startsWith('https://api.pexels.com/')) {
@@ -102,6 +103,7 @@ async function testPrepareDownloadsPexelsWhenNoArticleImages() {
     maxSearchImages: 1,
     deps: {
       pexelsApiKey: 'pexels-key',
+      pexelsBackfillEnabled: true,
       fetchImpl: async (url) => {
         requested.push(url);
         if (String(url).startsWith('https://api.pexels.com/')) {
@@ -133,6 +135,37 @@ async function testPrepareDownloadsPexelsWhenNoArticleImages() {
   assert.ok(requested.some(url => String(url).startsWith('https://api.pexels.com/')));
 }
 
+async function testEnabledPexelsBackfillRunsWithArticleImages() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'source-assets-pexels-enabled-test-'));
+  let searchCalled = false;
+  const result = await sourceAssets.prepareSourceAssets({
+    sourceMaterial: {
+      title: '已有来源图也需要补图',
+      markdown: '![来源图](https://example.com/article.png)',
+    },
+    assetDir: path.join(dir, 'assets'),
+    maxArticleImages: 1,
+    maxSearchImages: 1,
+    deps: {
+      pexelsBackfillEnabled: true,
+      searchImages: async () => {
+        searchCalled = true;
+        return {
+          success: true,
+          images: [{ url: 'https://images.example.com/pexels.png', alt: 'Pexels 补图' }],
+          queries: ['已有来源图也需要补图'],
+        };
+      },
+      fetchImpl: async url => makeImageResponse(`bytes:${url}`),
+      lookupHost: publicLookup,
+    },
+  });
+
+  assert.equal(searchCalled, true);
+  assert.deepEqual(result.assets.map(asset => asset.source), ['article', 'search']);
+  assert.equal(result.search.success, true);
+}
+
 async function testMissingPexelsKeyDoesNotFail() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'source-assets-empty-test-'));
   const result = await sourceAssets.prepareSourceAssets({
@@ -144,6 +177,7 @@ async function testMissingPexelsKeyDoesNotFail() {
     now: '2026-06-27T00:00:00.000Z',
     deps: {
       pexelsApiKey: '',
+      pexelsBackfillEnabled: true,
       fetchImpl: async () => {
         throw new Error('不应该请求网络');
       },
@@ -166,6 +200,7 @@ async function testPexelsHttpFailureAddsDiagnostic() {
     now: '2026-06-27T00:00:00.000Z',
     deps: {
       pexelsApiKey: 'bad-key',
+      pexelsBackfillEnabled: true,
       fetchImpl: async (url) => {
         assert.ok(String(url).startsWith('https://api.pexels.com/'));
         return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
@@ -190,6 +225,7 @@ async function testRejectsPrivateImageUrlBeforeFetch() {
     assetDir: path.join(dir, 'assets'),
     maxSearchImages: 1,
     deps: {
+      pexelsBackfillEnabled: true,
       searchImages: async () => ({
         success: true,
         images: [{ url: 'https://private.example/a.png', alt: '内网' }],
@@ -349,6 +385,7 @@ async function testSearchFallbackWhenArticleImagesAllFail() {
     maxArticleImages: 6,
     maxSearchImages: 1,
     deps: {
+      pexelsBackfillEnabled: true,
       searchImages: async () => ({
         success: true,
         images: [{ url: 'https://images.example.com/fallback.png', alt: '补图' }],
@@ -375,6 +412,7 @@ async function testSearchFallbackWhenArticleImagesAllFail() {
   await testExtractMarkdownImagesIncludesHtmlImgTags();
   await testPrepareDownloadsArticleImageWithoutPexelsBackfill();
   await testPrepareDownloadsPexelsWhenNoArticleImages();
+  await testEnabledPexelsBackfillRunsWithArticleImages();
   await testMissingPexelsKeyDoesNotFail();
   await testPexelsHttpFailureAddsDiagnostic();
   await testRejectsPrivateImageUrlBeforeFetch();

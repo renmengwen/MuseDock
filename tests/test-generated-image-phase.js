@@ -57,8 +57,9 @@ async function run() {
   const capturedMaxScenes = [];
   const noOpPlanner = { planGeneratedImages: async ({ maxScenes }) => { capturedMaxScenes.push(maxScenes); return { success: true, plans: [] }; } };
   const stubModelNoCheck = { generateImages: async () => ({ success: false, images: [] }), downloadGeneratedImages: async () => ({ success: false, files: [], failures: [] }) };
+  await phase.runGeneratedImagePhase({ sceneSpec, creativeContext: baseContext(), projectDir, maxGeneratedImages: 9, services: { generatedImagePlanner: noOpPlanner, aiImageModel: stubModelNoCheck } });
   await phase.runGeneratedImagePhase({ sceneSpec, creativeContext: baseContext(), projectDir, services: { generatedImagePlanner: noOpPlanner, aiImageModel: stubModelNoCheck } });
-  assert.deepStrictEqual(capturedMaxScenes, [4]);
+  assert.deepStrictEqual(capturedMaxScenes, [9, 6]);
 
   let generateCalled = false;
   const rerun = await phase.runGeneratedImagePhase({

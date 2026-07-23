@@ -112,6 +112,7 @@ function createFakeServices(overrides = {}) {
         getCreativeDefaults: async () => ({
           aspectRatio: '9:16',
           targetDurationSec: 60,
+          pexelsBackfillEnabled: true,
           useResearch: true,
           generateAudio: true,
           generateCaptions: true,
@@ -353,6 +354,7 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
         getCreativeDefaults: async () => ({
           aspectRatio: '9:16',
           targetDurationSec: 60,
+          pexelsBackfillEnabled: true,
           useResearch: true,
           generateAudio: true,
           generateCaptions: true,
@@ -376,6 +378,7 @@ async function testCreatesAndRunsSourceUrlWorkflow() {
       sourceAssets: {
         prepareSourceAssets: async ({ sourceMaterial, now, deps }) => {
           assert.equal(deps.pexelsApiKey, pexelsApiKey);
+          assert.equal(deps.pexelsBackfillEnabled, true);
           return {
           status: 'ready',
           updated_at: now,

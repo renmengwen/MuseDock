@@ -1,7 +1,8 @@
 const defaultAiTextModel = require('../ai/aiTextModel');
 const { isGeneratedVisualAsset } = require('./visualAssetContract');
 
-const DEFAULT_MAX_SCENES = 4;
+const DEFAULT_MAX_SCENES = 6;
+const MAX_SCENES = 20;
 
 function safeString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -30,7 +31,7 @@ function buildPlannerPrompt({ sceneSpec = {}, assetContext = {}, maxScenes = DEF
   const describeAsset = asset => `- ${safeString(asset.id)}：${safeString(asset.alt || asset.title).slice(0, 80)}`;
   const articleAssets = assets.filter(asset => !isStockSearchVisualAsset(asset) && !isGeneratedVisualAsset(asset));
   const searchAssets = assets.filter(isStockSearchVisualAsset);
-  const quota = Math.min(DEFAULT_MAX_SCENES, Math.max(0, Math.round(Number(maxScenes) || DEFAULT_MAX_SCENES)));
+  const quota = Math.min(MAX_SCENES, Math.max(0, Math.round(Number(maxScenes) || DEFAULT_MAX_SCENES)));
   return [
     '你是短视频主视觉规划器。请只输出严格 JSON，不要输出 Markdown、解释或额外文本。',
     '',
@@ -71,7 +72,7 @@ function parsePlannerResponse(text, sceneSpec = {}, { maxScenes = DEFAULT_MAX_SC
   }
   const validSceneIds = sceneIdSet(sceneSpec);
   const seen = new Set();
-  const quota = Math.min(DEFAULT_MAX_SCENES, Math.max(0, Math.round(Number(maxScenes) || DEFAULT_MAX_SCENES)));
+  const quota = Math.min(MAX_SCENES, Math.max(0, Math.round(Number(maxScenes) || DEFAULT_MAX_SCENES)));
   const plans = (Array.isArray(data?.plans) ? data.plans : [])
     .map(plan => ({
       scene_id: safeString(plan?.scene_id),

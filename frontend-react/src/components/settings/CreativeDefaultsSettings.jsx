@@ -7,6 +7,8 @@ export const ASPECT_RATIOS = ['9:16', '16:9', '1:1', '4:5'];
 const DEFAULT_CREATIVE_DEFAULTS = {
   aspectRatio: '9:16',
   targetDurationSec: 60,
+  maxAiGeneratedImages: 6,
+  pexelsBackfillEnabled: false,
   useResearch: true,
   generateAudio: true,
   autoSfxEnabled: true,
@@ -84,7 +86,7 @@ export function CreativeDefaultsSettings({
       <div className="mb-4 flex items-start justify-between gap-3 max-[520px]:flex-col">
         <div>
           <h3 className="m-0 text-lg font-bold">创作默认值</h3>
-          <p className="mt-1 text-[13px] text-[#69717e]">设置一键创作默认使用的画面比例、目标时长和联网研究开关。</p>
+          <p className="mt-1 text-[13px] text-[#69717e]">设置一键创作默认使用的画面比例、目标时长、AI 生图数量和联网研究开关。</p>
         </div>
         <button
           type="button"
@@ -116,13 +118,29 @@ export function CreativeDefaultsSettings({
           <input
             type="number"
             min="15"
-            max="180"
+            max="600"
             step="1"
             value={creativeDefaults.targetDurationSec}
             disabled={disabled}
             className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:cursor-not-allowed disabled:opacity-60"
             onChange={event => updateCreativeDefaults({
               targetDurationSec: event.target.value === '' ? '' : Number(event.target.value),
+            })}
+          />
+        </label>
+
+        <label className="grid gap-1.5">
+          <span className="text-xs font-semibold text-[#5f6876]">单个视频最多 AI 生图数量</span>
+          <input
+            type="number"
+            min="1"
+            max="20"
+            step="1"
+            value={creativeDefaults.maxAiGeneratedImages}
+            disabled={disabled}
+            className="h-[38px] w-full rounded-lg border border-[#d9dde5] bg-white px-2.5 text-[13px] text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:cursor-not-allowed disabled:opacity-60"
+            onChange={event => updateCreativeDefaults({
+              maxAiGeneratedImages: event.target.value === '' ? '' : Number(event.target.value),
             })}
           />
         </label>
@@ -141,6 +159,16 @@ export function CreativeDefaultsSettings({
               frameHtmlConcurrency: event.target.value === '' ? '' : Number(event.target.value),
             })}
           />
+        </label>
+
+        <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">
+          <Switch
+            checked={creativeDefaults.pexelsBackfillEnabled === true}
+            disabled={disabled}
+            onChange={event => updateCreativeDefaults({ pexelsBackfillEnabled: event.target.checked })}
+          />
+          <span className={cn('min-w-[42px]', creativeDefaults.pexelsBackfillEnabled ? 'text-[#111827]' : 'text-[#69717e]')}>{creativeDefaults.pexelsBackfillEnabled ? '已开启' : '已关闭'}</span>
+          <span>Pexels 补图</span>
         </label>
 
         <label className="inline-flex min-h-7 cursor-pointer select-none items-center gap-2 rounded-lg border border-[#edf0f4] bg-[#fafbfc] p-3 text-[13px] font-semibold text-[#30343b]">

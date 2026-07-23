@@ -512,10 +512,19 @@ function buildCreativeDefaultsSnapshot(defaults = {}, creativeDefaultsOverride =
   const frameHtmlConcurrency = Number.isFinite(Number(overrideSource.frameHtmlConcurrency))
     ? Number(overrideSource.frameHtmlConcurrency)
     : Number(defaultsSource.frameHtmlConcurrency);
+  const maxAiGeneratedImages = Number.isFinite(Number(overrideSource.maxAiGeneratedImages))
+    ? Number(overrideSource.maxAiGeneratedImages)
+    : Number(defaultsSource.maxAiGeneratedImages);
 
   return {
     aspectRatio,
     targetDurationSec,
+    maxAiGeneratedImages: Number.isFinite(maxAiGeneratedImages)
+      ? Math.min(20, Math.max(1, Math.round(maxAiGeneratedImages)))
+      : 6,
+    pexelsBackfillEnabled: typeof overrideSource.pexelsBackfillEnabled === 'boolean'
+      ? overrideSource.pexelsBackfillEnabled
+      : defaultsSource.pexelsBackfillEnabled === true,
     useResearch,
     generateAudio: typeof overrideSource.generateAudio === 'boolean'
       ? overrideSource.generateAudio
@@ -569,6 +578,7 @@ function buildWorkflowTarget(snapshot = {}) {
   return {
     aspect_ratio: safeString(snapshot.aspectRatio),
     duration_sec: Number(snapshot.targetDurationSec),
+    maxAiGeneratedImages: Number(snapshot.maxAiGeneratedImages),
     generateAudio: snapshot.generateAudio !== false,
     autoSfxEnabled: snapshot.autoSfxEnabled !== false,
     generateCaptions: snapshot.generateCaptions !== false,

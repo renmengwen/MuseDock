@@ -920,7 +920,9 @@ async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, 
   }
 
   if (typeof reportStage === 'function') {
-    await reportStage('正在提取文章图片并补充搜索素材...', 25);
+    await reportStage(record.creative_defaults_snapshot?.pexelsBackfillEnabled === true
+      ? '正在提取来源图片并补充 Pexels 素材...'
+      : '正在提取来源图片...', 25);
   }
 
   const paths = mediaPipeline.getMediaPaths(record.aweme_id, mediaRoot);
@@ -934,6 +936,7 @@ async function prepareSourceAssetContext(record, mediaRoot, now, services = {}, 
     deps: {
       fetchImpl: services.fetchImpl,
       pexelsApiKey,
+      pexelsBackfillEnabled: record.creative_defaults_snapshot?.pexelsBackfillEnabled === true,
     },
   });
   const captureService = services.pageCaptureAssets || defaultPageCaptureAssets;

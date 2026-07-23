@@ -695,6 +695,7 @@ async function generateHtmlVideo(options = {}) {
       creativeContext,
       projectDir,
       aspectRatio: renderTarget.aspect_ratio || renderTarget.aspectRatio || '',
+      maxGeneratedImages: renderTarget.maxAiGeneratedImages,
       requiredSceneIds,
       services: { ...services, aiTextModel: model },
       onProgress,

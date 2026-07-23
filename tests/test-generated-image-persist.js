@@ -20,14 +20,17 @@ async function runWithRoot(rootDir) {
     rootDir,
     sceneSpec,
     creativeContext: { asset_context: { assets: [] } },
-    target: { aspect_ratio: '9:16' },
+    target: { aspect_ratio: '9:16', maxAiGeneratedImages: 9 },
     skipValidation: true,
     services: {
       generatedImagePlanner: {
-        planGeneratedImages: async () => ({
-          success: true,
-          plans: [{ scene_id: 'scene_01', generation_prompt: '深夜骑手主视觉' }],
-        }),
+        planGeneratedImages: async ({ maxScenes }) => {
+          assert.strictEqual(maxScenes, 9, '工作流 target 中的生图上限必须传给生图规划器');
+          return {
+            success: true,
+            plans: [{ scene_id: 'scene_01', generation_prompt: '深夜骑手主视觉' }],
+          };
+        },
       },
       aiImageModel: {
         generateImages: async () => ({

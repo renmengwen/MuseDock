@@ -82,6 +82,7 @@ async function runGeneratedImagePhase({
   creativeContext = {},
   projectDir,
   aspectRatio = '',
+  maxGeneratedImages = defaultPlanner.DEFAULT_MAX_SCENES,
   requiredSceneIds = [],
   services = {},
   onProgress = null,
@@ -132,7 +133,7 @@ async function runGeneratedImagePhase({
     plan = await planner.planGeneratedImages({
       sceneSpec,
       assetContext,
-      maxScenes: 4,
+      maxScenes: maxGeneratedImages,
       services,
     });
   } catch (error) {

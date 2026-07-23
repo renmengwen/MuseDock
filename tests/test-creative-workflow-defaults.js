@@ -24,6 +24,8 @@ function createDefaults(overrides = {}) {
   return {
     aspectRatio: '16:9',
     targetDurationSec: 90,
+    maxAiGeneratedImages: 6,
+    pexelsBackfillEnabled: false,
     useResearch: false,
     generateAudio: true,
     generateCaptions: true,
@@ -114,6 +116,8 @@ function createServices({
 function assertSnapshotRecord(record, {
   aspectRatio = '16:9',
   durationSec = 90,
+  maxAiGeneratedImages = 6,
+  pexelsBackfillEnabled = false,
   useResearch = false,
   generateAudio = true,
   generateCaptions = true,
@@ -126,6 +130,8 @@ function assertSnapshotRecord(record, {
   assert.ok(record.creative_defaults_snapshot, 'snapshot fields missing');
   assert.equal(record.creative_defaults_snapshot.aspectRatio, aspectRatio);
   assert.equal(record.creative_defaults_snapshot.targetDurationSec, durationSec);
+  assert.equal(record.creative_defaults_snapshot.maxAiGeneratedImages, maxAiGeneratedImages);
+  assert.equal(record.creative_defaults_snapshot.pexelsBackfillEnabled, pexelsBackfillEnabled);
   assert.equal(record.creative_defaults_snapshot.useResearch, useResearch);
   assert.equal(record.creative_defaults_snapshot.generateAudio, generateAudio);
   assert.equal(record.creative_defaults_snapshot.generateCaptions, generateCaptions);
@@ -137,6 +143,7 @@ function assertSnapshotRecord(record, {
   assert.ok(record.target, 'target fields missing');
   assert.equal(record.target.aspect_ratio, aspectRatio);
   assert.equal(record.target.duration_sec, durationSec);
+  assert.equal(record.target.maxAiGeneratedImages, maxAiGeneratedImages);
   assert.equal(record.target.generateAudio, generateAudio);
   assert.equal(record.target.generateCaptions, generateCaptions);
   assert.equal(record.target.autoSfxEnabled, autoSfxEnabled);
@@ -205,9 +212,11 @@ async function testCreativeDefaultsOverrideSourceImageAnalysisWins() {
       sourceImageAnalysisEnabled: true,
       extractDouyinFrames: true,
       frameHtmlConcurrency: 3,
+      maxAiGeneratedImages: 9,
+      pexelsBackfillEnabled: true,
     },
   });
-  assertSnapshotRecord(record, { sourceImageAnalysisEnabled: true, extractDouyinFrames: true, frameHtmlConcurrency: 3 });
+  assertSnapshotRecord(record, { sourceImageAnalysisEnabled: true, extractDouyinFrames: true, frameHtmlConcurrency: 3, maxAiGeneratedImages: 9, pexelsBackfillEnabled: true });
 }
 
 async function testMissingDefaultUseResearchDefaultsToTrue() {
@@ -364,6 +373,7 @@ async function testSkipValidationUsesAppSettingsAndRunUsesRecordTarget() {
   assert.equal(projectCall.options.projectOptions.aspect_ratio, 'runtime_aspect');
   assert.equal(projectCall.options.projectOptions.duration_sec, 90);
   assert.equal(projectCall.options.projectOptions.frameHtmlConcurrency, 1);
+  assert.equal(projectCall.options.projectOptions.maxAiGeneratedImages, 6);
   assert.equal(projectCall.options.projectOptions.runtimeFlag, 'kept');
   assert.equal(projectCall.options.projectOptions.creative_context.input.raw_text, '运行期默认值快照测试');
 }

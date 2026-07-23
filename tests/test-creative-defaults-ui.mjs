@@ -14,6 +14,8 @@ const [componentSource, settingsPageSource] = await Promise.all([
 for (const text of [
   '默认画面比例',
   '默认目标时长',
+  '单个视频最多 AI 生图数量',
+  'Pexels 补图',
   '帧 HTML 并发上限',
   '联网研究默认开启',
   '抖音视频抽帧',
@@ -25,6 +27,9 @@ for (const text of [
 
 assert.doesNotMatch(componentSource, /captionMode|showCaptionBar|renderQuality/);
 assert.match(componentSource, /frameHtmlConcurrency/);
+assert.match(componentSource, /maxAiGeneratedImages/);
+assert.match(componentSource, /pexelsBackfillEnabled/);
+assert.match(componentSource, /max="600"/);
 assert.match(settingsPageSource, /CreativeDefaultsSettings/);
 
 console.log('creative defaults ui tests passed');

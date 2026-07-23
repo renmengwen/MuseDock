@@ -19,6 +19,8 @@ async function run() {
   assert.deepStrictEqual(defaults.creativeDefaults, {
     aspectRatio: '9:16',
     targetDurationSec: 60,
+    maxAiGeneratedImages: 6,
+    pexelsBackfillEnabled: false,
     useResearch: true,
     generateAudio: true,
     autoSfxEnabled: true,
@@ -36,7 +38,9 @@ async function run() {
     version: 99,
     creativeDefaults: {
       aspectRatio: '3:2',
-      targetDurationSec: 999,
+      targetDurationSec: 300,
+      maxAiGeneratedImages: 9,
+      pexelsBackfillEnabled: true,
       useResearch: false,
       generateAudio: false,
       autoSfxEnabled: false,
@@ -55,7 +59,9 @@ async function run() {
   assert.strictEqual(saved.version, 1);
   assert.deepStrictEqual(saved.creativeDefaults, {
     aspectRatio: '9:16',
-    targetDurationSec: 180,
+    targetDurationSec: 300,
+    maxAiGeneratedImages: 9,
+    pexelsBackfillEnabled: true,
     useResearch: false,
     generateAudio: false,
     autoSfxEnabled: false,
@@ -115,6 +121,14 @@ async function run() {
   assert.equal(appSettings.normalizeCreativeDefaults({}).sourceImageAnalysisEnabled, false);
   assert.equal(appSettings.normalizeCreativeDefaults({}).extractDouyinFrames, false);
   assert.equal(appSettings.normalizeCreativeDefaults({}).frameHtmlConcurrency, 1);
+  assert.equal(appSettings.normalizeCreativeDefaults({}).maxAiGeneratedImages, 6);
+  assert.equal(appSettings.normalizeCreativeDefaults({}).pexelsBackfillEnabled, false);
+  assert.equal(appSettings.normalizeCreativeDefaults({ pexelsBackfillEnabled: true }).pexelsBackfillEnabled, true);
+  assert.equal(appSettings.normalizeCreativeDefaults({ maxAiGeneratedImages: 0 }).maxAiGeneratedImages, 1);
+  assert.equal(appSettings.normalizeCreativeDefaults({ maxAiGeneratedImages: 9.6 }).maxAiGeneratedImages, 10);
+  assert.equal(appSettings.normalizeCreativeDefaults({ maxAiGeneratedImages: 99 }).maxAiGeneratedImages, 20);
+  assert.equal(appSettings.normalizeCreativeDefaults({ targetDurationSec: 300 }).targetDurationSec, 300);
+  assert.equal(appSettings.normalizeCreativeDefaults({ targetDurationSec: 999 }).targetDurationSec, 600);
   assert.equal(appSettings.normalizeCreativeDefaults({ generateAudio: false }).generateAudio, false);
   assert.equal(appSettings.normalizeCreativeDefaults({ generateCaptions: false }).generateCaptions, false);
   assert.equal(appSettings.normalizeCreativeDefaults({ emotionalVoice: true }).emotionalVoice, true);

@@ -99,7 +99,7 @@ function normalizeVideoBrief(value = {}) {
     : [];
 
   return {
-    target_duration_sec: normalizeNumber(source.target_duration_sec, 60, 15, 180),
+    target_duration_sec: normalizeNumber(source.target_duration_sec, 60, 15, 600),
     target_word_count: normalizeNumber(source.target_word_count, 220, 60, 900),
     tone: sanitizeOptionText(source.tone, 120),
     hook: sanitizeOptionText(source.hook, 160),

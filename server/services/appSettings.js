@@ -14,6 +14,8 @@ const DEFAULT_CONFIG = {
   creativeDefaults: {
     aspectRatio: '9:16',
     targetDurationSec: 60,
+    maxAiGeneratedImages: 6,
+    pexelsBackfillEnabled: false,
     useResearch: true,
     generateAudio: true,
     autoSfxEnabled: true,
@@ -36,7 +38,7 @@ function cloneConfig(config) {
 function normalizeDurationSec(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return DEFAULT_CONFIG.creativeDefaults.targetDurationSec;
-  return Math.min(180, Math.max(15, Math.round(number)));
+  return Math.min(600, Math.max(15, Math.round(number)));
 }
 
 function normalizeSmallInteger(value, defaultValue, min, max) {
@@ -53,6 +55,13 @@ function normalizeCreativeDefaults(input = {}) {
       ? source.aspectRatio
       : DEFAULT_CONFIG.creativeDefaults.aspectRatio,
     targetDurationSec: normalizeDurationSec(source.targetDurationSec),
+    maxAiGeneratedImages: normalizeSmallInteger(
+      source.maxAiGeneratedImages,
+      DEFAULT_CONFIG.creativeDefaults.maxAiGeneratedImages,
+      1,
+      20,
+    ),
+    pexelsBackfillEnabled: source.pexelsBackfillEnabled === true,
     useResearch: typeof source.useResearch === 'boolean'
       ? source.useResearch
       : DEFAULT_CONFIG.creativeDefaults.useResearch,

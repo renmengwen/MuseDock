@@ -125,6 +125,11 @@ assert.equal(normalizedViral.video_brief.target_duration_sec, 90);
 assert.equal(normalizedViral.video_brief.target_word_count, 400);
 assert.equal(normalizedViral.video_brief.beats[0].purpose, 'hook');
 
+const normalizedFiveMinuteVideo = viral.normalizeResult({
+  video_brief: { target_duration_sec: 300 },
+});
+assert.equal(normalizedFiveMinuteVideo.video_brief.target_duration_sec, 300);
+
 const normalizedLongVideoBrief = viral.normalizeResult({
   video_brief: {
     tone: 'x'.repeat(500),
