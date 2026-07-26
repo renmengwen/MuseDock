@@ -438,7 +438,7 @@ async function main() {
     // Frame HTML 输入指纹直接覆盖完整 canonical prompt；只忽略 prompt/materializer 都不消费的字段。
     {
       const { computeFrameInputFingerprint, FRAME_PROMPT_VERSION } = frameHtmlPhase;
-      assert.equal(FRAME_PROMPT_VERSION, 5, 'overlay-only Frame Prompt 合同变化必须使旧 checkpoint 失效');
+      assert.equal(FRAME_PROMPT_VERSION, 6, '布局生成规则变化必须使旧 checkpoint 失效');
       const materializedCaptions = (scene, node) => applyFocusKeywords(
         normalizeCaptions(scene, trustedSceneDuration(scene, node)),
         focusKeywordsByCaptionId(node),

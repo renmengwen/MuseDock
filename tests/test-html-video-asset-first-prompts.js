@@ -86,6 +86,11 @@ async function run() {
   assert.ok(!framePrompt.includes('没有表达层的帧不合格'), '不得再判无表达层不合格');
   assert.ok(!framePrompt.includes('不要做纯图片轮播'), '不得保留要求混排框选/高亮的旧约束');
   assert.ok(/禁止.*(方框|focus-box)/.test(framePrompt), '必须禁止无坐标画框');
+  assert.match(framePrompt, /只选一种，不要把多套布局叠在同一帧/, '主提示词必须要求先收敛为单一布局');
+  assert.match(framePrompt, /文字容器内.*grid\/flex 正常流/, '文字内容必须在同一容器内使用正常流排版');
+  assert.match(framePrompt, /只改变 transform 与 opacity/, '动画不得修改排版几何属性');
+  assert.match(framePrompt, /首帧必须立即显示背景或主视觉/, '首帧不得等待整屏入场后才出现内容');
+  assert.match(framePrompt, /文字容器不得用固定高度配合 overflow:hidden/, '文字溢出不得通过裁切掩盖');
 
   // C-02 Review：真实 Visual Plan 的 image_sequence 必须完整进入 Frame Prompt。
   {

@@ -13,7 +13,7 @@ const { stableStringify } = require('../sceneSpecHash');
 // Frame HTML 生成提示词/primitive 结构版本号：当 frameHtmlAgent 的 prompt 结构、primitive
 // 参考片段语义或帧 HTML 约定发生会影响产物的变化时手动 +1，使旧 checkpoint 指纹失配、
 // resume 时强制重新生成，避免代码升级后静默复用旧版产物。
-const FRAME_PROMPT_VERSION = 5;
+const FRAME_PROMPT_VERSION = 6;
 
 /**
  * 单帧 HTML 的真实模型输入指纹：直接签完整 canonical prompt，避免在这里维护第二份字段清单。
