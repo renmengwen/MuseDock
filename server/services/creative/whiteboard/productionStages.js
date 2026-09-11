@@ -5,6 +5,7 @@ const store = require('./mediaStore');
 const models = require('./mediaModels');
 const { buildNarrationTiming, buildSilentTiming, srtText } = require('./narrationTiming');
 const aiTtsModel = require('../../ai/aiTtsModel');
+const { sceneRenderPool } = require('./sceneRenderPool');
 
 async function complete(ctx, item, stage, binding) {
   await ctx.change((record, now) => {
@@ -174,11 +175,13 @@ async function annotationStage(ctx, artifact, timing) {
     scenes: timing.scenes.map(scene => record.whiteboard.media.annotations[scene.id]) }));
 }
 
-async function sceneStage(ctx, artifact, timing) {
-  for (const scene of timing.scenes) {
+async function renderSceneCandidate(ctx, artifact, scene) {
+  let item;
+  try {
     const record = await ctx.read();
     if (record.whiteboard.media.scenes[scene.id]) {
-      await store.validateBinding(record, record.whiteboard.media.scenes[scene.id], ctx.rootDir); continue;
+      await store.validateBinding(record, record.whiteboard.media.scenes[scene.id], ctx.rootDir);
+      return { reused: true };
     }
     const lineart = await store.validateBinding(record, record.whiteboard.media.lineart[scene.id], ctx.rootDir);
     const annotationBinding = await store.validateBinding(record, record.whiteboard.media.annotations[scene.id], ctx.rootDir);
@@ -186,8 +189,8 @@ async function sceneStage(ctx, artifact, timing) {
     const image = await ctx.filePath(record, lineart.image);
     const inputIdentity = sha256({ lineart: lineart.identity, annotation: annotationBinding.identity, scene,
       showHand: artifact.productionPlan.handDisplayMode === 'show', recipe: record.whiteboard.media.recipe });
-    if (await reuseHistory(ctx, 'scenes', scene.id, inputIdentity)) continue;
-    const item = await ctx.attempt('scene_render', scene.id, false, inputIdentity);
+    if (await reuseHistory(ctx, 'scenes', scene.id, inputIdentity)) return { reused: true };
+    item = await ctx.attempt('scene_render', scene.id, false, inputIdentity);
     const directory = store.workDirectory(ctx.workflowId, item.id, ctx.rootDir);
     const output = path.join(directory, 'scene.mp4');
     const validation = await ctx.tools.renderScene({ image, annotation, output, scene, showHand: artifact.productionPlan.handDisplayMode === 'show' }, ctx.runtime, ctx.processOptions);
@@ -201,7 +204,63 @@ async function sceneStage(ctx, artifact, timing) {
       current.whiteboard.media.scenes[scene.id] = store.bind({ kind: 'scene_video', sceneId: scene.id, inputIdentity,
         video: published.video, frames: [published.frame0, published.frame1, published.frame2], validation });
       Object.assign(current.whiteboard.media.attempts.find(row => row.id === item.id), { status: 'validated', completedAt: now });
+      if (current.whiteboard.media.activeAttemptId === item.id) current.whiteboard.media.activeAttemptId = '';
     });
+    return { reused: false };
+  } catch (error) {
+    if (item) {
+      try {
+        await ctx.change((record, now) => {
+          const attempt = record.whiteboard.media.attempts.find(row => row.id === item.id);
+          if (attempt && attempt.status !== 'validated') Object.assign(attempt, { status: 'failed', errorCode: error.code || 'MEDIA_FAILED', completedAt: now });
+          if (record.whiteboard.media.activeAttemptId === item.id) record.whiteboard.media.activeAttemptId = '';
+        });
+      } catch { /* Deleted or superseded tasks must never be recreated. */ }
+    }
+    throw error;
+  }
+}
+
+async function sceneStage(ctx, artifact, timing) {
+  if (!timing.scenes.length) throw new WhiteboardError('TIMELINE_INVALID', '没有可渲染的分镜。');
+  const pool = ctx.sceneRenderPool || sceneRenderPool;
+  const signal = ctx.processOptions.signal;
+  const state = { total: timing.scenes.length, concurrency: pool.concurrency, completed: 0, failed: 0, reused: 0, active: 0, peakActive: 0 };
+  const report = async () => {
+    const progress = { ...state, queued: Math.max(0, state.total - state.completed - state.failed - state.active) };
+    const message = `正在并发渲染单幕：已完成 ${progress.completed}/${progress.total}，处理中 ${progress.active}，等待 ${progress.queued}${progress.failed ? `，失败 ${progress.failed}` : ''}（并发上限 ${progress.concurrency}）。`;
+    const updated = await ctx.change((record, now) => {
+      record.whiteboard.media.sceneRenderProgress = progress;
+      record.message = message;
+      record.current_stage_message = message;
+      record.updated_at = now;
+      const stage = record.whiteboard.media.stages.find(item => item.id === 'scene_render');
+      if (stage) Object.assign(stage, { message, updated_at: now });
+    });
+    await ctx.emitProgress?.({ type: 'stage_progress', stage: 'scene_render', progress: updated?.record?.current_progress || 68, message });
+  };
+  await report();
+  const results = await pool.mapSettled(timing.scenes, async scene => {
+    state.active += 1;
+    state.peakActive = Math.max(state.peakActive, state.active);
+    try {
+      await report();
+      const result = await renderSceneCandidate(ctx, artifact, scene);
+      state.completed += 1;
+      if (result.reused) state.reused += 1;
+      return result;
+    } catch (error) { state.failed += 1; throw error; }
+    finally { state.active -= 1; await report(); }
+  }, { signal });
+  const failures = results.map((result, index) => ({ ...result, scene: timing.scenes[index] })).filter(result => result.status === 'rejected');
+  state.failed = failures.length;
+  await report();
+  if (signal?.aborted) throw new WhiteboardError('MEDIA_CANCELLED', '单幕渲染已取消。');
+  const stopped = failures.find(result => ['ENOENT', 'STALE_IDENTITY', 'MEDIA_CANCELLED'].includes(result.reason?.code));
+  if (stopped) throw stopped.reason;
+  if (failures.length) {
+    const names = failures.slice(0, 3).map(result => result.scene.title || result.scene.id).join('、');
+    throw new WhiteboardError('SCENE_RENDER_FAILED', `${failures.length} 幕渲染未完成（${names}${failures.length > 3 ? '等' : ''}）。已完成单幕已保留，继续制作时会复用有效产物。`);
   }
   const record = await ctx.read();
   await complete(ctx, null, 'scene_render', store.bind({ kind: 'scene_bundle', scenes: timing.scenes.map(scene => record.whiteboard.media.scenes[scene.id]) }));

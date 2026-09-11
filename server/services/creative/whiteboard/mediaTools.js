@@ -10,6 +10,7 @@ const RESOURCE_ROOT = path.join(__dirname, '../../../resources/whiteboard');
 const RENDER_PROFILE = Object.freeze({ width: 1920, height: 1080, fps: 60, codec: 'h264', pixelFormat: 'yuv420p', preset: 'fast', crf: 18 });
 
 function execute(command, args, { input, cwd, signal, timeoutMs = 300000 } = {}) {
+  if (signal?.aborted) return Promise.reject(new WhiteboardError('MEDIA_CANCELLED', '本地媒体处理已取消。'));
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONDONTWRITEBYTECODE: '1' } });

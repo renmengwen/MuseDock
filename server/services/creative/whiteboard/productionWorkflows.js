@@ -173,11 +173,17 @@ async function act(record, payload, options, now) {
   return true;
 }
 
+function unfinishedAttempts(media) {
+  return media.attempts.filter(item => !['validated', 'failed', 'unknown_external_outcome'].includes(item.status)
+    && (item.id === media.activeAttemptId || (media.stage === 'scene_render' && item.stage === 'scene_render'
+      && (!item.executionId || item.executionId === media.executionId))));
+}
+
 function fail(record, error, now) {
   const media = record.whiteboard.media;
   const unknown = error.code === 'UNKNOWN_EXTERNAL_OUTCOME';
-  const attempt = media.attempts.find(item => item.id === media.activeAttemptId);
-  if (attempt) Object.assign(attempt, { status: unknown ? 'unknown_external_outcome' : 'failed', errorCode: error.code, completedAt: now });
+  for (const attempt of unfinishedAttempts(media)) Object.assign(attempt, { status: unknown ? 'unknown_external_outcome' : 'failed', errorCode: error.code, completedAt: now });
+  if (media.sceneRenderProgress) media.sceneRenderProgress.active = 0;
   media.activeAttemptId = '';
   media.executionId = '';
   record.error = { code: error.code || 'MEDIA_FAILED', message: error.message };
@@ -187,8 +193,7 @@ function fail(record, error, now) {
 
 function recover(record, now) {
   const media = record.whiteboard.media;
-  const active = media.attempts.find(item => item.id === media.activeAttemptId);
-  const unknown = active?.status === 'requesting';
+  const unknown = unfinishedAttempts(media).some(item => item.status === 'requesting');
   fail(record, new WhiteboardError(unknown ? 'UNKNOWN_EXTERNAL_OUTCOME' : 'MEDIA_INTERRUPTED', unknown
     ? '服务重启时存在尚未取得完整证据的外部请求，请核实后授权新请求。'
     : '媒体制作被中断，可以继续未完成阶段；有效的音频和图片会复用。'), now);
@@ -233,7 +238,7 @@ async function run(workflowId, options, hooks) {
     const voice = await voiceSnapshot(services);
 
     const attempt = async (stage, sceneId = '', external = false, inputIdentity = '') => {
-      const item = { id: crypto.randomUUID(), stage, sceneId, external, inputIdentity, status: 'prepared' };
+      const item = { id: crypto.randomUUID(), stage, sceneId, external, inputIdentity, executionId, status: 'prepared' };
       await change(async (record, now) => {
         item.createdAt = now;
         record.whiteboard.media.attempts.push(item);
@@ -259,8 +264,11 @@ async function run(workflowId, options, hooks) {
       await fsp.writeFile(file, canonicalJson(value), { flag: 'wx' }); return file;
     };
     const filePath = async (record, file) => (await store.mediaFile(record, file, rootDir)).path;
+    const emitProgress = async event => {
+      try { await options.taskContext?.emit?.(event); } catch { /* Persisted progress remains available after SSE reconnect. */ }
+    };
     const ctx = { workflowId, rootDir, services, tools, runtime, config, voice, processOptions,
-      read, change, attempt, requesting, publish, jsonFile, filePath };
+      read, change, attempt, requesting, publish, jsonFile, filePath, emitProgress };
 
     while (true) {
       const record = await read();
@@ -303,7 +311,7 @@ async function run(workflowId, options, hooks) {
     const safe = error instanceof WhiteboardError ? error : new WhiteboardError('MEDIA_FAILED', '媒体处理失败，请检查本地运行环境与当前产物后重试。');
     if (claimed) { try { await change((record, now) => fail(record, safe, now)); } catch { /* Never recreate a deleted task. */ } }
     return { success: false, workflow_id: workflowId, code: safe.code, status: safe.code === 'UNKNOWN_EXTERNAL_OUTCOME' ? 'unknown_external_outcome' : 'failed', message: safe.message };
-  } finally { clearInterval(watchdog); clearInterval(heartbeat); }
+  } finally { controller.abort(); clearInterval(watchdog); clearInterval(heartbeat); }
 }
 
 // Stage implementations below only create candidates. Every formal publication runs through change().
