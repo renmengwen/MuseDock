@@ -40,14 +40,19 @@ function shutdown(code = 0) {
   process.exit(code);
 }
 
+const isRestart = process.env.MUSEDOCK_RESTART === '1';
+
 startProcess('api', nodeCommand, ['server/index.js']);
 startProcess('web', frontendCommand, frontendArgs);
 
 console.log('开发服务已启动：');
 console.log('- 前端热更新：http://localhost:5173');
 console.log('- 后端 API：http://localhost:3000');
-console.log('提示：为避免中断长任务，后端不会自动重启；修改后端代码后请手动重启 npm run dev。');
-console.log('提示：npm start 仍用于读取 frontend-dist 的构建产物。');
+if (isRestart) {
+  console.log('提示：前后端均已重新加载最新代码；日常开发修改后端代码后，请再次运行 npm run restart。');
+} else {
+  console.log('提示：为避免中断长任务，修改后端代码后不会自动生效，请运行 npm run restart 重新加载。');
+}
 
 process.on('SIGTERM', () => shutdown(0));
 process.on('SIGINT', () => shutdown(0));

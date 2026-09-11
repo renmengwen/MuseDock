@@ -72,7 +72,8 @@ async function stopDevelopmentServers(ports = DEVELOPMENT_PORTS) {
 if (require.main === module) {
   console.log('正在检查并停止旧开发服务...');
   stopDevelopmentServers().then(count => {
-    console.log(count ? '旧服务已停止，端口已释放，正在启动开发服务...' : '未发现旧开发服务，正在启动开发服务...');
+    console.log(count ? '旧服务已停止，端口已释放，正在以最新代码启动开发服务...' : '未发现旧开发服务，正在以最新代码启动开发服务...');
+    process.env.MUSEDOCK_RESTART = '1';
     require('../start-server.js');
   }).catch(error => {
     console.error(`重启开发服务失败：${error.message}`);
