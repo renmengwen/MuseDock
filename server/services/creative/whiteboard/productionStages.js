@@ -1,6 +1,6 @@
 const fsp = require('fs/promises');
 const path = require('path');
-const { WhiteboardError, sha256 } = require('./contracts');
+const { WhiteboardError, sha256, canvasFor } = require('./contracts');
 const store = require('./mediaStore');
 const models = require('./mediaModels');
 const { buildNarrationTiming, buildSilentTiming, srtText } = require('./narrationTiming');
@@ -41,6 +41,7 @@ async function narrationStage(ctx, artifact) {
   const silent = artifact.productionPlan.narrationMode === 'disabled';
   if (!silent && ctx.voice.service.contractHash !== media.voiceService.contractHash) throw new WhiteboardError('VOICE_CONFIG_CHANGED', '旁白服务或声音参数已变化，请重新确认制作设置后生成新版本。', 409);
   const inputIdentity = sha256({ text: artifact.narrationText, language: artifact.narrationLanguage, cues: artifact.cues,
+    ...(artifact.aspectRatio === '9:16' ? { captionLayout: '9:16' } : {}),
     scenes: artifact.scenes.map(({ id, cueIds, startMs, endMs }) => ({ id, cueIds, startMs, endMs })),
     voice: media.voiceService.contractHash, silent, take: media.narrationTake || 0 });
   if (await reuseHistory(ctx, 'current', 'full_narration', inputIdentity)) return;
@@ -124,7 +125,7 @@ async function lineartStage(ctx, artifact, timing) {
       await ctx.publish(item, { rawImage: { path: raw, kind: 'provider_image', name: `${scene.title}原始图`, sceneId: scene.id, mime: 'application/octet-stream' } });
     }
     const output = path.join(directory, 'lineart.png');
-    await ctx.tools.python('normalize-image', { input: raw, output }, ctx.processOptions);
+    await ctx.tools.python('normalize-image', { input: raw, output, canvas: canvasFor(artifact.aspectRatio) }, ctx.processOptions);
     await ctx.publish(item, { image: { path: output, kind: 'lineart', name: scene.title, sceneId: scene.id, mime: 'image/png' } }, (current, files, now) => {
       current.whiteboard.media.lineart[scene.id] = store.bind({ kind: 'lineart', sceneId: scene.id, inputIdentity, image: files.image });
       Object.assign(current.whiteboard.media.attempts.find(row => row.id === item.id), { status: 'validated', completedAt: now });
@@ -136,6 +137,7 @@ async function lineartStage(ctx, artifact, timing) {
 }
 
 async function annotationStage(ctx, artifact, timing) {
+  const canvas = canvasFor(artifact.aspectRatio);
   for (const scene of timing.scenes) {
     const record = await ctx.read();
     if (record.whiteboard.media.annotations[scene.id]) {
@@ -144,14 +146,15 @@ async function annotationStage(ctx, artifact, timing) {
     const lineart = await store.validateBinding(record, record.whiteboard.media.lineart[scene.id], ctx.rootDir);
     const image = await ctx.filePath(record, lineart.image);
     const revision = record.whiteboard.media.overrides[`annotation_drafting:${scene.id}`] || '';
-    const inputIdentity = sha256({ image: lineart.image.sha256, timing: record.whiteboard.media.current.full_narration.identity, scene, revision });
+    const prompt = models.annotationPrompt({ scene, cues: timing.cues.filter(cue => scene.cueIds.includes(cue.id)), revision, canvas });
+    const inputIdentity = sha256({ contract: models.ANNOTATION_PLANNING_CONTRACT, prompt,
+      image: lineart.image.sha256, timing: record.whiteboard.media.current.full_narration.identity, scene, revision });
     if (await reuseHistory(ctx, 'annotations', scene.id, inputIdentity)) continue;
     const item = await ctx.attempt('annotation_drafting', scene.id, true, inputIdentity);
     const candidate = await models.structuredVision({ textConfig: ctx.config, images: [image], services: ctx.services,
-      onRequest: () => ctx.requesting(item.id), validate: models.validateAnnotation,
-      prompt: `实际查看这张 1920×1080 线稿，按旁白叙事顺序把可独立揭示的内容分成 1 至 3 个连续墨迹簇。连续不可分割的图形必须同组，矩形覆盖所有墨迹，可用整幅画布作一个区域。后面的区域会从前面扣除。protectedRegions 只保护确有必要的局部，不能用来掩盖错误分组，通常为空。不要切断人物、字、箭头。weight 决定本幕内分配的相对绘制时长，不输出时间或审批。\n旁白与真实时间：${JSON.stringify({ scene, cues: timing.cues.filter(cue => scene.cueIds.includes(cue.id)) })}\n修订：${revision}\n只返回 {"schemaVersion":1,"elements":[{"label":"主体","region":{"x":0,"y":0,"width":1920,"height":1080},"direction":"left-to-right","weight":1,"protectedRegions":[]}]}。`,
+      onRequest: () => ctx.requesting(item.id), validate: candidate => models.validateAnnotation(candidate, canvas), reasoningEffort: 'medium', prompt,
     });
-    const annotation = models.materializeAnnotation(candidate, scene, lineart.image.sha256, record.whiteboard.media.current.full_narration.identity);
+    const annotation = models.materializeAnnotation(candidate, scene, lineart.image.sha256, record.whiteboard.media.current.full_narration.identity, canvas);
     const candidateFile = await ctx.jsonFile(item, 'candidate.json', candidate);
     const annotationFile = await ctx.jsonFile(item, 'annotation.json', annotation);
     await ctx.publish(item, { candidate: { path: candidateFile, kind: 'annotation_candidate', name: '区域候选', sceneId: scene.id, mime: 'application/json' } });
@@ -161,7 +164,8 @@ async function annotationStage(ctx, artifact, timing) {
       annotation: { path: annotationFile, kind: 'annotation', name: `${scene.title}落墨编排`, sceneId: scene.id, mime: 'application/json' },
       preview: { path: preview, kind: 'annotation_preview', name: `${scene.title}区域预览`, sceneId: scene.id, mime: 'image/png' },
     }, (current, files, now) => {
-      current.whiteboard.media.annotations[scene.id] = store.bind({ kind: 'annotation', sceneId: scene.id, inputIdentity, ...files, coverage });
+      current.whiteboard.media.annotations[scene.id] = store.bind({ kind: 'annotation', sceneId: scene.id, inputIdentity,
+        planningContract: models.ANNOTATION_PLANNING_CONTRACT, visualGrouping: candidate.visualGrouping, ...files, coverage });
       Object.assign(current.whiteboard.media.attempts.find(row => row.id === item.id), { status: 'validated', completedAt: now });
     });
   }
@@ -242,31 +246,50 @@ async function reviewGate(ctx, artifact) {
   if (['full_narration', 'final_delivery'].includes(media.stage)) return true;
   const binding = await store.validateBinding(record, media.current[media.stage], ctx.rootDir);
   const images = [];
+  const sceneContexts = [];
   for (const scene of binding.scenes) {
     const files = media.stage === 'lineart_generation' ? [scene.image] : media.stage === 'annotation_drafting' ? [scene.preview] : scene.frames;
-    for (const file of files) images.push(await ctx.filePath(record, file));
+    const plan = artifact.scenes.find(item => item.id === scene.sceneId);
+    const context = { sceneId: scene.sceneId, title: plan?.title,
+      narration: artifact.cues.filter(cue => plan?.cueIds.includes(cue.id)).map(cue => cue.text).join('\n') };
+    if (media.stage === 'annotation_drafting') {
+      const annotation = await store.readData(record, scene.annotation, ctx.rootDir);
+      context.visualGrouping = scene.visualGrouping || null;
+      context.canvas = annotation.canvas;
+      context.elements = annotation.elements;
+    }
+    for (const file of files) {
+      images.push(await ctx.filePath(record, file));
+      sceneContexts.push(context);
+    }
   }
   // Bound the image context per call while keeping every scene/frame in the review.
   for (let offset = 0; offset < images.length; offset += 6) {
     const subset = images.slice(offset, offset + 6);
+    const contexts = sceneContexts.slice(offset, offset + 6);
+    const annotationSceneIds = media.stage === 'annotation_drafting' ? contexts.map(scene => scene.sceneId) : [];
+    const annotationInstructions = annotationSceneIds.length
+      ? '逐幕独立检查实际图像，候选 visualGrouping 仅是待核实说明。多个可独立揭示的视觉簇被一个大框合并时，groupsMatchImage=false；切断连续主体、边界横穿有效墨迹或遗漏主体也必须为 false。真正不可分割的构图允许单区域，不能强制拆成 2–3 个。核对 elements 的顺序与该幕旁白事件，错序时 orderMatchesNarration=false。覆盖率高不代表分组正确。sceneReviews 必须逐幕返回 {sceneId,groupsMatchImage,orderMatchesNarration,reason}，reason 需用 8–600 字说明具体视觉依据。'
+      : '';
     const item = await ctx.attempt(`review_${media.stage}`, '', true, binding.identity);
     const findings = await models.structuredVision({ textConfig: ctx.config, images: subset, services: ctx.services,
       onRequest: () => ctx.requesting(item.id),
-      validate: candidate => typeof candidate?.passed === 'boolean' && typeof candidate.summary === 'string' && Array.isArray(candidate.issues)
-        && candidate.issues.every(issue => typeof issue === 'string') && candidate.imageCount === subset.length ? [] : ['返回 passed 布尔值、中文 summary、issues 字符串数组、实际 imageCount。'],
-      prompt: `检查全部 ${subset.length} 张当前白板图像。阶段 ${media.stage}。${media.stage === 'scene_render' ? '这里是各幕按早、中、晚顺序抽取的真实渲染帧，不是完整视频；结合逐帧解码已通过的事实检查可见遮挡、逐步揭示与结尾画面，不声称完整观看或试听。' : '检查内容是否符合方案、字形是否清晰、构图与区域边界是否合理。'}\n内容方案：${artifact.summary}\n返回 {"passed":true,"summary":"具体观察","issues":[],"imageCount":${subset.length}}。存在严重问题时 passed=false 并具体说明，不能给出批准或修改状态。`,
+      validate: candidate => models.validateVisualReview(candidate, { imageCount: subset.length, annotationSceneIds }),
+      reasoningEffort: annotationSceneIds.length ? 'medium' : 'low',
+      prompt: `检查全部 ${subset.length} 张当前白板图像。阶段 ${media.stage}。${media.stage === 'scene_render' ? '这里是各幕按早、中、晚顺序抽取的真实渲染帧，不是完整视频；结合逐帧解码已通过的事实检查可见遮挡、逐步揭示与结尾画面，不声称完整观看或试听。' : '检查内容是否符合方案、字形是否清晰、构图与区域边界是否合理。'}\n${annotationInstructions}\n内容方案：${artifact.summary}\n按图像输入顺序的逐幕上下文：${JSON.stringify(contexts)}\n返回 JSON，包含 passed 布尔值、具体中文 summary、issues 字符串数组、imageCount=${subset.length}${annotationSceneIds.length ? '，以及 sceneReviews 数组' : ''}。按实际观察决定是否通过，存在严重问题时 passed=false 并具体说明，不能给出批准或修改状态。`,
     });
+    const issues = annotationSceneIds.length ? models.annotationReviewIssues(findings) : findings.issues;
     const resultFile = await ctx.jsonFile(item, 'findings.json', findings);
     await ctx.publish(item, { findings: { path: resultFile, kind: 'visual_findings', name: '视觉检查记录', mime: 'application/json' } }, (current, files, now) => {
       Object.assign(current.whiteboard.media.attempts.find(row => row.id === item.id), { status: 'validated', completedAt: now });
       current.whiteboard.media.activeAttemptId = '';
-      if (!findings.passed || findings.issues.length) {
-        current.message = `视觉检查建议你确认或修改：${findings.issues.join('；') || findings.summary}`;
+      if (!findings.passed || issues.length) {
+        current.message = `视觉检查建议你确认或修改：${issues.join('；') || findings.summary}`;
         current.current_stage_message = current.message;
         current.whiteboard.messages.push({ id: require('crypto').randomUUID(), role: 'assistant', text: current.message, createdAt: now });
       }
     });
-    if (!findings.passed || findings.issues.length) return false;
+    if (!findings.passed || issues.length) return false;
   }
   return true;
 }

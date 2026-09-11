@@ -113,7 +113,7 @@ async function act(record, payload, options, now) {
   const artifact = await requirePlan(record, options);
   if (action === 'start_production') {
     const tools = options.services?.whiteboardMediaTools || mediaTools;
-    const runtime = await tools.preflight(options.mediaOptions);
+    const runtime = await tools.preflight({ ...options.mediaOptions, aspectRatio: artifact.aspectRatio || '16:9' });
     const { service, runtime: voice, legacyContractHash } = await voiceSnapshot(options.services);
     if (artifact.productionPlan.narrationMode !== 'disabled') {
       if (!service.configured || !['doubao', 'minimax'].includes(voice.provider)) throw new WhiteboardError('TTS_NOT_CONFIGURED', '完整白板旁白需要豆包 Seed Audio 或 MiniMax 原生字幕。请在设置中配置 TTS，再调整制作设置并重新确认方案。');
@@ -227,7 +227,8 @@ async function run(workflowId, options, hooks) {
           progress: state.current_progress, message: state.message });
       } catch { /* The next guarded write handles deletion. */ }
     }, 15000);
-    const runtime = await tools.preflight(processOptions);
+    const initialArtifact = await requirePlan(await read(), options);
+    const runtime = await tools.preflight({ ...processOptions, aspectRatio: initialArtifact.aspectRatio || '16:9' });
     const config = await services.aiModelConfig.getRuntimeConfig('text');
     const voice = await voiceSnapshot(services);
 

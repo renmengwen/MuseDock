@@ -1,8 +1,8 @@
 const { WhiteboardError, sha256 } = require('./contracts');
 
 function letters(text) { return Array.from(String(text).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')); }
-function splitCaption(text, language = 'zh-CN') {
-  const limit = language === 'zh-CN' ? 48 : 96;
+function splitCaption(text, language = 'zh-CN', aspectRatio = '16:9') {
+  const limit = language === 'zh-CN' ? (aspectRatio === '9:16' ? 32 : 48) : (aspectRatio === '9:16' ? 64 : 96);
   const parts = [];
   let rest = text;
   while (Array.from(rest).length > limit) {
@@ -55,7 +55,7 @@ function buildNarrationTiming(artifact, evidence, durationMs) {
     if (!count) throw new WhiteboardError('NARRATION_TEXT_MISMATCH', '旁白中存在没有可朗读文字的字幕。');
     const startMs = characters[offset].startMs;
     const endMs = characters[offset + count - 1].endMs;
-    for (const [index, text] of splitCaption(cue.text, artifact.narrationLanguage).entries()) {
+    for (const [index, text] of splitCaption(cue.text, artifact.narrationLanguage, artifact.aspectRatio).entries()) {
       const length = letters(text).length;
       if (!length) continue;
       captions.push({ id: `${cue.id}_${index + 1}`, sourceCueId: cue.id, text: text.trim(),
@@ -86,7 +86,7 @@ function buildSilentTiming(artifact) {
   if (artifact.timingKind !== 'source_srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '静音白板需要输入带真实时间的 SRT 字幕。');
   const captions = artifact.cues.flatMap(cue => {
     let cursor = 0;
-    return splitCaption(cue.text, artifact.narrationLanguage).map((text, index) => {
+    return splitCaption(cue.text, artifact.narrationLanguage, artifact.aspectRatio).map((text, index) => {
       const startMs = cue.startMs + Math.round((cue.endMs - cue.startMs) * cursor / cue.text.length);
       cursor += text.length;
       return { id: `${cue.id}_${index + 1}`, sourceCueId: cue.id, text: text.trim(), startMs,

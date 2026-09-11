@@ -92,11 +92,25 @@ const cases = [
       { ...TOPIC, rewritePolicy: 'preserve' }, { ...TOPIC, inputMode: 'text' },
       { ...TOPIC, targetDurationSeconds: 14 }, { ...TOPIC, targetDurationSeconds: 601 },
       { ...TOPIC, visualStylePreset: 'auto' }, { ...TOPIC, narrationLanguage: 'ja-JP' },
+      { ...TOPIC, aspectRatio: '1:1' },
       { ...TOPIC, approval: true }, { inputMode: 'srt', content: SRT, rewritePolicy: 'preserve' },
       { inputMode: 'srt', content: SRT.replace('00:00:04,500', '00:00:03,000') },
     ]) assert.throws(() => normalizeInput(input));
     assert.equal(normalizeInput({ ...TOPIC }).rewritePolicy, 'generate');
+    assert.equal(normalizeInput({ ...TOPIC }).aspectRatio, '16:9');
   }],
+  ['竖屏画幅随方案冻结且旧输入默认横屏', () => fixture(async ctx => {
+    const id = await ctx.create({ ...TOPIC, aspectRatio: '9:16' });
+    await workflows.runCreativeWorkflow(id, ctx.options);
+    const view = await ctx.read(id);
+    assert.equal(view.input.aspectRatio, '9:16');
+    assert.equal(view.whiteboard.current.artifact.aspectRatio, '9:16');
+    assert.deepEqual(view.whiteboard.current.artifact.canvas, { width: 1080, height: 1920 });
+    assert.match(ctx.modelCalls[0].messages[0].content, /1080×1920/);
+    const switched = await ctx.action(id, 'revise', { message: '改为横屏', input: { aspectRatio: '16:9' } });
+    assert.equal(switched.code, 'ASPECT_RATIO_LOCKED');
+    assert.equal((await ctx.read(id)).whiteboard.current.identity, view.whiteboard.current.identity);
+  })],
   ['候选不能自行批准，正文和字幕必须完整覆盖', async () => {
     const input = normalizeInput({ ...TOPIC, inputMode: 'text', rewritePolicy: 'preserve', content: 'Keep every word. 保留每个字。' });
     const candidate = candidateFor({ messages: [{}, { content: JSON.stringify({ input }) }] });

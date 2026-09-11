@@ -7,11 +7,18 @@
 1. 首次在项目根目录执行 `npm run setup:whiteboard`。它使用 Python 3.10+，在应用数据目录的 `data/runtime/whiteboard/` 安装独立环境，依赖版本固定在本目录 `requirements.txt`。
 2. 确认 ffmpeg、ffprobe 和中文字体可用。Windows 默认使用微软雅黑；可通过 `FFMPEG_PATH`、`FFPROBE_PATH`、`MUSEDOCK_WHITEBOARD_FONT` 指定本机资源。可用 `MUSEDOCK_WHITEBOARD_PYTHON` 指向已有、具备相同依赖的解释器。
 3. 在设置中选择图片生成模型、支持多模态输入的分析模型，以及豆包或 MiniMax TTS。
-4. 首页选择“线稿白板动画”，输入主题、正文或 SRT，设置具体视觉模板、画笔、字幕及后续确认方式。
+4. 首页选择“线稿白板动画”，输入主题、正文或 SRT，选择视频画幅，再设置具体视觉模板、画笔、字幕及后续确认方式。
 5. 在对话卡片中修改或确认当前方案，点击“开始制作视频”。顺序为完整旁白 → 线稿 → 落墨编排 → 单幕动画 → 最终成片。
 6. 在产物区试听、查看图像、播放单幕和最终视频，下载 MP4、WAV、SRT 或标注 JSON。
 
 设置改变后重新确认方案。只改字幕、画笔等设置时，服务端按输入身份重验并复用仍有效的上游产物，避免重复生成语音、图片或编排。修改指定幕时，仅使该幕的相关下游失效。
+
+## 横屏与竖屏
+
+- 横屏 `16:9`：1920×1080，默认选项；旧任务缺少画幅字段时也按横屏读取。
+- 竖屏 `9:16`：1080×1920，从分镜构图、生图、标注坐标到渲染与预览均采用纵向画布。
+- 画幅通过 `input.aspectRatio` 在创建任务时确定，随方案及媒体身份保存；需要其他画幅时开启新创作，不在原任务中途切换。
+- 竖屏字幕按较窄画布分段，仍保留同次语音的原生字级时间；字幕最多两行，底部预留约十分之一画面。图片规范化保留原始比例，合成拒绝混用横竖单幕。
 
 ## 豆包语音设置
 
@@ -49,7 +56,7 @@ MiniMax 使用整轨 T2A、`subtitle_enable=true` 和 `subtitle_type=word`；不
 
 明确的 400/401/403/404/422/429 返回作为可操作失败；超时、连接中断、无法绑定的响应或缺少同请求证据停为 `unknown_external_outcome`。普通重试不会重发结果不明的请求，用户需要明确同意可能的重复费用。已取得的原始音频、原生字幕和图片会保留，后处理失败优先本地恢复。若生成音频与正文不匹配，可明确选择重新生成整轨，旧版本仍保留。
 
-合并时使用每幕帧数派生精确 concat 时长，避免 MP4 容器毫秒取整累积误差。最终产物检查 H.264、1920×1080、60 fps、yuv420p、累计帧数、音画时长、AAC/24 kHz/单声道以及完整解码，不用补帧或 `-shortest` 掩盖时钟错误。
+合并时使用每幕帧数派生精确 concat 时长，避免 MP4 容器毫秒取整累积误差。最终产物检查 H.264、所选画幅（1920×1080 或 1080×1920）、60 fps、yuv420p、累计帧数、音画时长、AAC/24 kHz/单声道以及完整解码，不用补帧或 `-shortest` 掩盖时钟错误。
 
 ## 本地验证
 
@@ -57,11 +64,15 @@ MiniMax 使用整轨 T2A、`subtitle_enable=true` 和 `subtitle_type=word`；不
 node tests/test-whiteboard-phase0.js
 node tests/test-doubao-tts.js
 node tests/test-whiteboard-model-contracts.js
+node tests/test-whiteboard-canvas.js
+node tests/test-whiteboard-annotation-planning.js
 data/runtime/whiteboard/Scripts/python.exe -X utf8 tests/test-whiteboard-render-core.py
 node tests/test-whiteboard-media.js
+node tests/test-whiteboard-media.js --portrait
 npm run build:frontend
 node scripts/debug/whiteboard-ui-smoke.cjs
 node scripts/debug/whiteboard-media-ui-smoke.cjs
+node scripts/debug/whiteboard-media-ui-smoke.cjs --portrait
 ```
 
 这些自动验证使用隔离存储与模型替身，真实执行绘制、ffmpeg、播放器和下载。`scripts/debug/whiteboard-live-verify.cjs --live` 是独立的真实调用验收入口，可能计费，不属于 `npm test`；结果和去敏请求记录保存在 `.codex-runtime/whiteboard-live-verification/`，真实 provider 证据与本地 fixture 分开报告。

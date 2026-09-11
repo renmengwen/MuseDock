@@ -233,6 +233,9 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
     const revisionMessage = payload.action === 'revise' ? String(payload.message || '').trim() : latest.revisionMessage;
     if (payload.action === 'revise' && (!revisionMessage || revisionMessage.length > 6000)) throw new WhiteboardError('INVALID_INPUT', '请输入修改意见，长度不能超过 6000 个字符。');
     const input = payload.input ? normalizeInput({ ...latest.input, ...payload.input }) : latest.input;
+    if ((input.aspectRatio || '16:9') !== (latest.input.aspectRatio || '16:9')) {
+      throw new WhiteboardError('ASPECT_RATIO_LOCKED', '画幅已随当前任务冻结，需要其他画幅时请开启新创作。', 409);
+    }
     const productionPlan = payload.action === 'update_plan'
       ? normalizeProductionPlan({ ...latest.productionPlan, ...(payload.productionPlan || {}) }) : latest.productionPlan;
     if (productionPlan.narrationMode === 'disabled' && input.inputMode !== 'srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '静音白板需要输入带真实时间的 SRT 字幕。');

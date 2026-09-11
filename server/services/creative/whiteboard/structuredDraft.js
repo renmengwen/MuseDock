@@ -1,6 +1,6 @@
 const defaultTextModel = require('../../ai/aiTextModel');
 const defaultModelConfig = require('../../ai/aiModelConfig');
-const { CANDIDATE_SKELETON, WhiteboardError, parseSrt, validateCandidate, VISUAL_PRESETS } = require('./contracts');
+const { CANDIDATE_SKELETON, WhiteboardError, parseSrt, validateCandidate, VISUAL_PRESETS, canvasFor } = require('./contracts');
 
 function classifyFailure(response, httpStatus, sent) {
   if (response?.configured === false) return new WhiteboardError('MODEL_NOT_CONFIGURED', '分析模型未配置，请在设置中选择并配置分析模型后重试。');
@@ -14,6 +14,7 @@ function classifyFailure(response, httpStatus, sent) {
 
 function buildMessages(task, previousArtifact) {
   const input = task.input;
+  const canvas = canvasFor(input.aspectRatio);
   const preset = VISUAL_PRESETS.find(item => item.id === input.visualStylePreset);
   const frozenCues = input.inputMode === 'srt' ? parseSrt(input.content).map(({ id, text }) => ({ id, text })) : null;
   return [
@@ -24,7 +25,8 @@ function buildMessages(task, previousArtifact) {
       'title、summary、场景标题和画面描述使用中文。字幕只使用冻结的 narrationLanguage，不能自动翻译保留原文或 SRT。',
       'topic：围绕主题撰写自然口播；text/polish：保留事实并润色口播；text/preserve：保留每个词和标点，只分段；srt：严格原样返回冻结的 cues。',
       '按叙事顺序把每条 cue 恰好分配给一幕。每幕描述自包含的主体、动作、空间关系和构图，1–3 个互相分离的清晰墨迹簇。',
-      '画面为暖米黄纸张 1920×1080，留白充分；遵循所选模板，少量必要画内文字，不能复刻整句字幕，不出现水印。',
+      `画面为暖米黄纸张 ${canvas.width}×${canvas.height}，留白充分；遵循所选模板，少量必要画内文字，不能复刻整句字幕，不出现水印。`,
+      ...(canvas.height > canvas.width ? ['这是手机竖屏 9:16 构图。主体在纵向画布中保持清晰，独立视觉簇可按叙事安排在上、中、下部，不能照搬横屏三列布局；底部约十分之一保留给字幕，不把尺寸或画幅文字画进图片。'] : []),
       '目标时长只用于内容预算，中文约每秒 4 个字、英文约每秒 2.5 个词。字幕时间由服务端确定性派生。',
       `候选 skeleton：${JSON.stringify(CANDIDATE_SKELETON)}`,
       `候选 schema：${JSON.stringify(task.candidateSchema)}`,

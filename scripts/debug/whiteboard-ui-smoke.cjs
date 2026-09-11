@@ -103,11 +103,14 @@ async function main() {
     const wbTab = page.getByRole('tab', { name: /线稿白板动画/ });
     await page.getByLabel('输入视频方向、抖音链接、微信公众号文章或 GitHub 仓库链接').fill('一场有关咖啡的动态视频');
     await wbTab.click();
+    assert.equal(await page.getByRole('button', { name: '横屏 16:9', exact: true }).getAttribute('aria-pressed'), 'true');
+    await page.getByRole('button', { name: '竖屏 9:16', exact: true }).click();
     await page.getByLabel('白板主题内容').fill('用一分钟解释为什么会拖延，以及如何开始行动');
     await hfTab.click();
     assert.equal(await page.locator('#creative-input').inputValue(), '一场有关咖啡的动态视频');
     await wbTab.click();
     assert.match(await page.getByLabel('白板主题内容').inputValue(), /拖延/);
+    assert.equal(await page.getByRole('button', { name: '竖屏 9:16', exact: true }).getAttribute('aria-pressed'), 'true');
     await page.getByRole('tab', { name: '正文', exact: true }).click();
     await page.getByLabel('白板正文内容').fill('这里保留原文内容。');
     await page.getByRole('tab', { name: 'SRT 字幕', exact: true }).click();
@@ -123,11 +126,13 @@ async function main() {
     await page.getByRole('button', { name: '启动白板创作 Agent', exact: true }).click();
     assert.equal(await wbTab.isDisabled(), true);
     assert.equal(await hfTab.isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '横屏 16:9', exact: true }).isDisabled(), true);
     releaseCreation();
     await page.waitForURL(/\/creative\/\d+/);
     await page.getByRole('button', { name: '确认内容与制作方案', exact: true }).waitFor();
     assert.equal(creationCalls, 1);
     assert.equal(requests[0].input.visualStylePreset, 'comic-ink-v1');
+    assert.equal(requests[0].input.aspectRatio, '9:16');
     assert.equal(requests[0].assetIds, undefined);
     const taskUrl = page.url();
     await page.screenshot({ path: path.join(screenshots, 'agent-review-desktop.png'), fullPage: true });
@@ -155,11 +160,14 @@ async function main() {
     assert.equal(await page.locator('main .animate-spin').count(), 0);
     await page.getByRole('tab', { name: '制作方案', exact: true }).click();
     await page.getByText('隐藏画笔', { exact: true }).waitFor();
+    await page.getByText('1080 × 1920 · 9:16', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(screenshots, 'approved-desktop.png'), fullPage: true });
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole('button', { name: '开启新创作', exact: true }).click();
     await wbTab.click();
+    assert.equal(await page.getByRole('button', { name: '横屏 16:9', exact: true }).getAttribute('aria-pressed'), 'true');
+    await page.getByRole('button', { name: '竖屏 9:16', exact: true }).click();
     await page.getByLabel('白板主题内容').fill('解释一个生活中的科学现象');
     await page.locator('button[type="submit"]:enabled').waitFor();
     for (const tab of [hfTab, wbTab]) {

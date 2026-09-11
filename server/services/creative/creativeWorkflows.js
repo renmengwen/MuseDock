@@ -2,7 +2,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { HYPERFRAMES_MODE, WHITEBOARD_MODE, MODES, getCreationMode, createModeSnapshot, readModeSnapshot } = require('./creationModes');
 const whiteboardWorkflows = require('./whiteboard/whiteboardWorkflows');
-const { VISUAL_PRESETS, LANGUAGES, WhiteboardError } = require('./whiteboard/contracts');
+const { VISUAL_PRESETS, LANGUAGES, CANVAS_FORMATS, WhiteboardError } = require('./whiteboard/contracts');
 const { getArtifactRoot, readArtifact: readWhiteboardArtifact } = require('./whiteboard/artifactStore');
 const whiteboardMediaStore = require('./whiteboard/mediaStore');
 
@@ -659,7 +659,7 @@ function createWorkflowSummary(record) {
 }
 
 function listCreationModes() {
-  return { success: true, modes: structuredClone(MODES), whiteboard: { visualPresets: structuredClone(VISUAL_PRESETS), languages: structuredClone(LANGUAGES) } };
+  return { success: true, modes: structuredClone(MODES), whiteboard: { visualPresets: structuredClone(VISUAL_PRESETS), languages: structuredClone(LANGUAGES), canvasFormats: structuredClone(CANVAS_FORMATS) } };
 }
 
 async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {

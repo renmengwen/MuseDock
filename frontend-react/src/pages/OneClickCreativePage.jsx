@@ -1183,7 +1183,7 @@ export function OneClickCreativePage() {
 
       <section className="min-h-0 min-w-0 overflow-auto bg-white">
         <div className={selectedWorkflowId
-          ? 'mx-auto grid min-h-screen w-full max-w-[1120px] content-start justify-stretch gap-[22px] px-8 py-[42px]'
+          ? `mx-auto grid min-h-screen w-full content-start justify-stretch gap-[22px] ${workflow?.creationModeId === WHITEBOARD_MODE ? 'max-w-[1440px] px-8 py-8 min-[1180px]:h-dvh min-[1180px]:min-h-[800px] min-[1180px]:grid-rows-[minmax(0,1fr)] max-[760px]:px-4 max-[760px]:py-6' : 'max-w-[1120px] px-8 py-[42px]'}`
           : 'mx-auto grid min-h-screen w-full max-w-[920px] content-center justify-items-center gap-[22px] px-8 py-14'}
         >
           {!isDetailRoute && (

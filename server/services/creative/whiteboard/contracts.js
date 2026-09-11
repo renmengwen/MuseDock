@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const CANVAS_FORMATS = require('../../../resources/whiteboard/canvas-formats.json');
 
 const CONTRACT_VERSION = 'musedock-whiteboard-phase0-v1';
 // 上游路由规则的来源指纹；运行时只消费本仓库合同，不读取 Codex Skill 路径。
@@ -25,6 +26,12 @@ class WhiteboardError extends Error {
     this.code = code;
     this.statusCode = statusCode;
   }
+}
+
+function canvasFor(aspectRatio = '16:9') {
+  const format = CANVAS_FORMATS.find(item => item.id === aspectRatio);
+  if (!format) throw new WhiteboardError('INVALID_INPUT', '白板画幅仅支持横屏 16:9 或竖屏 9:16。');
+  return { width: format.width, height: format.height };
 }
 
 function canonicalJson(value) {
@@ -79,7 +86,7 @@ function normalizeProductionPlan(value = {}) {
 
 function normalizeInput(value) {
   assertObject(value, '白板输入');
-  rejectExtraKeys(value, ['inputMode', 'content', 'rewritePolicy', 'targetDurationSeconds', 'narrationLanguage', 'visualStylePreset'], '白板输入');
+  rejectExtraKeys(value, ['inputMode', 'content', 'rewritePolicy', 'targetDurationSeconds', 'narrationLanguage', 'visualStylePreset', 'aspectRatio'], '白板输入');
   const inputMode = value.inputMode;
   if (!['topic', 'text', 'srt'].includes(inputMode)) throw new WhiteboardError('INVALID_INPUT', '请选择主题、正文或 SRT 字幕。');
   if (typeof value.content !== 'string' || !value.content.trim() || value.content.length > 50000) throw new WhiteboardError('INVALID_INPUT', '请输入创作内容，长度不能超过 50000 个字符。');
@@ -88,7 +95,9 @@ function normalizeInput(value) {
   const visualStylePreset = value.visualStylePreset || DEFAULT_PRESET;
   if (!LANGUAGES.some(item => item.id === narrationLanguage)) throw new WhiteboardError('INVALID_INPUT', '旁白语言仅支持简体中文、美国英语和英国英语。');
   if (!VISUAL_PRESETS.some(item => item.id === visualStylePreset)) throw new WhiteboardError('INVALID_INPUT', '请选择具体视觉模板，不能使用自动或未知模板。');
-  const normalized = { inputMode, content, narrationLanguage, visualStylePreset };
+  const aspectRatio = value.aspectRatio ?? '16:9';
+  canvasFor(aspectRatio);
+  const normalized = { inputMode, content, narrationLanguage, visualStylePreset, aspectRatio };
   if (inputMode === 'srt') {
     if (value.rewritePolicy != null || value.targetDurationSeconds != null) throw new WhiteboardError('INVALID_INPUT', 'SRT 使用原有字幕和时间轴，不接受改写策略或目标时长。');
     parseSrt(content);
@@ -197,6 +206,7 @@ function materializeCandidate(candidate, input, productionPlan, narrationService
   const byId = new Map(cues.map(cue => [cue.id, cue]));
   return {
     schemaVersion: 1, contractVersion: CONTRACT_VERSION,
+    aspectRatio: input.aspectRatio || '16:9', canvas: canvasFor(input.aspectRatio),
     title: candidate.title.trim(), summary: candidate.summary.trim(),
     narrationText: cues.map(cue => cue.text).join('\n'), narrationLanguage: input.narrationLanguage,
     sourceTextSha256: sha256(input.content), timingKind: sourceCues ? 'source_srt' : 'provisional', durationMs,
@@ -210,7 +220,7 @@ function materializeCandidate(candidate, input, productionPlan, narrationService
 }
 
 module.exports = {
-  CONTRACT_VERSION, SKILL_SOURCE_REVISION, VISUAL_PRESETS, DEFAULT_PRESET, LANGUAGES,
+  CONTRACT_VERSION, SKILL_SOURCE_REVISION, VISUAL_PRESETS, DEFAULT_PRESET, LANGUAGES, CANVAS_FORMATS, canvasFor,
   DEFAULT_PRODUCTION_PLAN, CANDIDATE_SKELETON, CANDIDATE_SCHEMA, WhiteboardError, canonicalJson, sha256,
   normalizeInput, normalizeProductionPlan, parseSrt, validateCandidate, materializeCandidate,
 };

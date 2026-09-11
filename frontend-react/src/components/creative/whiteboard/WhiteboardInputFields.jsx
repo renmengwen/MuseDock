@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Settings2 } from 'lucide-react';
+import { Monitor, Settings2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
 import { Textarea } from '@/components/ui/textarea.jsx';
@@ -7,6 +7,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.j
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select.jsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog.jsx';
 import { validateWhiteboardDraft } from './whiteboardForm.js';
+import { cn } from '@/lib/utils.js';
 
 export function LabeledSelect({ label, value, onChange, options, disabled = false }) {
   return (
@@ -49,6 +50,10 @@ export function WhiteboardInputFields({ draft, onChange, catalog, disabled }) {
   const active = INPUTS.find(item => item.id === draft.inputMode);
   const value = draft.contents[draft.inputMode];
   const validation = value.trim() ? validateWhiteboardDraft(draft) : '';
+  const canvasFormats = catalog?.canvasFormats || [
+    { id: '16:9', label: '横屏 16:9', width: 1920, height: 1080 },
+    { id: '9:16', label: '竖屏 9:16', width: 1080, height: 1920 },
+  ];
   const change = patch => onChange({ ...draft, ...patch });
   return (
     <div className="grid gap-4">
@@ -65,6 +70,21 @@ export function WhiteboardInputFields({ draft, onChange, catalog, disabled }) {
         </TabsContent>
       </Tabs>
       {validation ? <p id="whiteboard-input-error" className="m-0 text-xs text-danger" role="alert">{validation}</p> : null}
+      <div className="grid gap-2" role="group" aria-label="白板视频画幅">
+        <span className="text-xs font-semibold text-fg-2">视频画幅</span>
+        <div className="grid grid-cols-2 gap-2">
+          {canvasFormats.map(format => {
+            const selected = (draft.aspectRatio || '16:9') === format.id;
+            const Icon = format.height > format.width ? Smartphone : Monitor;
+            return <Button key={format.id} type="button" variant="outline" disabled={disabled} aria-pressed={selected} aria-label={format.label}
+              className={cn('h-auto min-w-0 justify-start gap-2 px-3 py-3 text-left shadow-none', selected ? 'border-ink bg-surface-2 text-ink' : 'border-line-1 text-fg-2')}
+              onClick={() => change({ aspectRatio: format.id })}>
+              <Icon size={20} className="shrink-0 max-[420px]:hidden" />
+              <span className="grid min-w-0 gap-1"><span className="text-sm font-semibold">{format.label}</span><span className="text-xs font-normal text-fg-3">{format.width} × {format.height}</span></span>
+            </Button>;
+          })}
+        </div>
+      </div>
       {draft.inputMode === 'text' ? <LabeledSelect label="正文处理" value={draft.rewritePolicy} disabled={disabled} onChange={rewritePolicy => change({ rewritePolicy })} options={[{ id: 'preserve', label: '保留原文，仅安排分镜' }, { id: 'polish', label: '保留事实，润色口播' }]} /> : null}
       <div className="grid grid-cols-[0.8fr_1fr_1.5fr] gap-3 max-[560px]:grid-cols-1">
         {draft.inputMode === 'srt' ? <div className="grid content-start gap-1.5 text-xs"><span className="font-semibold text-fg-2">时长</span><span className="flex h-9 items-center text-fg-3">使用 SRT 时间轴</span></div> : (

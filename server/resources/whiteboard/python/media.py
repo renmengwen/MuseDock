@@ -18,6 +18,29 @@ from region_renderer import RegionStreamRenderer
 from ffmpeg_frame_sink import FFmpegFrameSink
 
 
+# 画幅白名单与 server/services/creative/whiteboard/contracts.js 共用同一份 canvas-formats.json。
+@functools.lru_cache(maxsize=1)
+def supported_canvases():
+    path = Path(__file__).resolve().parent.parent / 'canvas-formats.json'
+    with path.open(encoding='utf-8') as stream:
+        formats = json.load(stream)
+    if not isinstance(formats, list) or not formats:
+        raise ValueError('canvas-formats.json 缺少可用画幅。')
+    names = '、'.join(f"{item['width']}×{item['height']}" for item in formats)
+    return formats, {(item['width'], item['height']) for item in formats}, names
+
+
+def canvas_size(canvas=None):
+    formats, allowed, names = supported_canvases()
+    if canvas is None:
+        default = next((item for item in formats if item['id'] == '16:9'), formats[0])
+        return default['width'], default['height']
+    if not isinstance(canvas, dict) or not isinstance(canvas.get('width'), int) or not isinstance(canvas.get('height'), int) \
+            or (canvas['width'], canvas['height']) not in allowed:
+        raise ValueError(f'白板画幅仅支持 {names}。')
+    return canvas['width'], canvas['height']
+
+
 def save_image(destination, image):
     ok, encoded = cv2.imencode('.png', image)
     if not ok:
@@ -31,25 +54,29 @@ def normalize_image(data):
     if source is None or min(source.shape[:2]) < 128 or source.size > 80_000_000:
         raise ValueError('图片无法解码、尺寸过小或超过像素限制。')
     height, width = source.shape[:2]
-    scale = min(1920 / width, 1080 / height)
-    target = np.full((1080, 1920, 3), (215, 235, 245), dtype=np.uint8)
+    out_w, out_h = canvas_size(data.get('canvas'))
+    scale = min(out_w / width, out_h / height)
+    target = np.full((out_h, out_w, 3), (215, 235, 245), dtype=np.uint8)
     resized = cv2.resize(source, (round(width * scale), round(height * scale)), interpolation=cv2.INTER_AREA)
     h, w = resized.shape[:2]
-    x, y = (1920 - w) // 2, (1080 - h) // 2
+    x, y = (out_w - w) // 2, (out_h - h) // 2
     target[y:y+h, x:x+w] = resized
     target = sr.normalize_paper_background(target, sr._hex_to_bgr('#F5EBD7'), sr.Config())
     if np.count_nonzero(cv2.cvtColor(target, cv2.COLOR_BGR2GRAY) < 150) < 100:
         raise ValueError('生成图片缺少可绘制的有效线稿。')
     save_image(data['output'], target)
-    return {'width': 1920, 'height': 1080, 'sourceWidth': width, 'sourceHeight': height}
+    return {'width': out_w, 'height': out_h, 'sourceWidth': width, 'sourceHeight': height}
 
 
 def annotation_preview(data):
     image = sr._imread_any(data['image'])
     annotation = data['annotation']
-    renderer = RegionStreamRenderer(image, annotation, sr.Config(), None, True, output_size=(1920, 1080))
+    out_w, out_h = canvas_size(annotation.get('canvas'))
+    if image is None or image.shape[:2] != (out_h, out_w):
+        raise ValueError('线稿尺寸与落墨标注画幅不一致，请重新检查当前线稿。')
+    renderer = RegionStreamRenderer(image, annotation, sr.Config(), None, True, output_size=(out_w, out_h))
     elements = annotation['elements']
-    covered = np.zeros((1080, 1920), dtype=bool)
+    covered = np.zeros((out_h, out_w), dtype=bool)
     for index, element in enumerate(elements):
         allowed = renderer._allowed_mask(element, elements[index+1:])
         if np.count_nonzero(renderer.ink_pixels & allowed) < 10:
@@ -89,23 +116,26 @@ def render(data):
     if image is None:
         raise ValueError('当前线稿无法读取。')
     annotation = data['annotation']
+    out_w, out_h = canvas_size(annotation.get('canvas'))
+    if image.shape[:2] != (out_h, out_w):
+        raise ValueError('线稿尺寸与当前落墨画幅不一致，不能拉伸或裁切后继续渲染。')
     hand = Path(__file__).resolve().parent.parent / 'assets/drawing-hand.png'
     if data['showHand'] and not hand.is_file():
         raise ValueError('画笔素材缺失。')
     config = sr.Config(fps=60, cap_long_edge=1920, ink_path_mode='skeleton', pause_mode='off')
     renderer = RegionStreamRenderer(image, annotation, config, hand if data['showHand'] else None,
-                                    not data['showHand'], output_size=(1920, 1080))
+                                    not data['showHand'], output_size=(out_w, out_h))
     sink = functools.partial(FFmpegFrameSink, ffmpeg_executable=data['ffmpeg'], preset='fast',
                              encoder_threads=2, popen_factory=hidden_popen)
     renderer.render_to(Path(data['output']), data['durationMs'], target_frame_count=data['frameCount'],
                        scene_start_ms=data['startMs'], scene_start_frame=data['startFrame'], sink_factory=sink)
-    return {'width': 1920, 'height': 1080, 'fps': 60, 'frameCount': data['frameCount']}
+    return {'width': out_w, 'height': out_h, 'fps': 60, 'frameCount': data['frameCount']}
 
 
-def caption_lines(text, font):
+def caption_lines(text, font, max_width=1728):
     text = text.replace('\r', '').strip()
     explicit = text.split('\n')
-    if len(explicit) <= 2 and all(font.getlength(line) <= 1728 for line in explicit):
+    if len(explicit) <= 2 and all(font.getlength(line) <= max_width for line in explicit):
         return explicit
     text = ' '.join(explicit)
     candidates = []
@@ -115,7 +145,7 @@ def caption_lines(text, font):
             continue
         left, right = text[:index].rstrip(), text[index:].lstrip()
         a, b = font.getlength(left), font.getlength(right)
-        if max(a, b) <= 1728:
+        if max(a, b) <= max_width:
             candidates.append((abs(a-b), left, right))
     if not candidates:
         raise ValueError('单条字幕无法放入两行，请缩短字幕分段。')
@@ -129,19 +159,23 @@ def ass_time(ms, ceil=False):
 
 
 def compile_subtitles(data):
-    font = ImageFont.truetype(data['font'], 48)
-    header = '[Script Info]\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n'
+    width, height = canvas_size(data.get('canvas'))
+    font_size = 52 if height > width else 48
+    side_margin = round(width * 0.05)
+    bottom_margin = round(height * (0.10 if height > width else 0.05))
+    font = ImageFont.truetype(data['font'], font_size)
+    header = f'[Script Info]\nScriptType: v4.00+\nPlayResX: {width}\nPlayResY: {height}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n'
     header += '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'
-    header += f'Style: Default,{font.getname()[0]},48,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,96,96,54,1\n\n'
+    header += f'Style: Default,{font.getname()[0]},{font_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,{side_margin},{side_margin},{bottom_margin},1\n\n'
     header += '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'
     for cue in data['cues']:
         # Source text cannot introduce ASS override commands. Line breaks belong to this compiler.
-        lines = [line.replace('\\', '＼').replace('{', '｛').replace('}', '｝') for line in caption_lines(cue['text'], font)]
+        lines = [line.replace('\\', '＼').replace('{', '｛').replace('}', '｝') for line in caption_lines(cue['text'], font, width - 2 * side_margin)]
         text = '\\N'.join(lines)
         header += f"Dialogue: 0,{ass_time(cue['startMs'])},{ass_time(cue['endMs'], True)},Default,,0,0,0,,{text}\n"
     with Path(data['output']).open('x', encoding='utf-8') as stream:
         stream.write(header)
-    return {'cueCount': len(data['cues']), 'fontFamily': font.getname()[0]}
+    return {'cueCount': len(data['cues']), 'fontFamily': font.getname()[0], 'width': width, 'height': height, 'fontSize': font_size, 'marginV': bottom_margin}
 
 
 def main():
