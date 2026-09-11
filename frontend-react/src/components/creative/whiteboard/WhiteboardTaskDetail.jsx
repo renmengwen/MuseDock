@@ -55,6 +55,12 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
     if (element && followConversation.current) element.scrollTop = element.scrollHeight;
   }, [whiteboard.messages.length, pendingInteraction?.id]);
 
+  function sendAction(action, extras = {}) {
+    return onAction({ action, expectedIdentity: current?.identity || '', expectedAttemptId: latest?.id,
+      expectedMediaIdentity: media?.identity, interactionId: pendingInteraction?.id,
+      requestId: crypto.randomUUID(), ...extras });
+  }
+
   async function act(action, extras = {}) {
     if (actionLock.current || locked || (!allowed.has(action) && !(action === 'message' && canMessage))) return;
     actionLock.current = true;
@@ -62,12 +68,33 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
     setBusy(action);
     setError('');
     try {
-      await onAction({ action, expectedIdentity: current?.identity || '', expectedAttemptId: latest?.id,
-        expectedMediaIdentity: media?.identity, interactionId: pendingInteraction?.id,
-        requestId: crypto.randomUUID(), ...extras });
+      await sendAction(action, extras);
       if (['revise', 'revise_media', 'message'].includes(action)) setRevision('');
       setConfirm('');
       setPlanOpen(false);
+    } catch (failure) {
+      setError(failure?.data?.message || failure?.message || '操作失败，请刷新当前任务后重试。');
+    } finally {
+      actionLock.current = false;
+      setBusy('');
+    }
+  }
+
+  // 方案确认与开始制作在服务端仍是两个动作：先 approve_initial 冻结方案，再 start_production 触发执行，
+  // 这里合并为一次点击；制作启动失败时方案保持已确认状态，可稍后用“开始制作视频”重试。
+  async function approveInitial({ startProduction }) {
+    if (actionLock.current || locked) return;
+    actionLock.current = true;
+    followConversation.current = true;
+    setBusy('approve_initial');
+    setError('');
+    try {
+      await sendAction('approve_initial', { confirmed: true });
+      setConfirm('');
+      if (startProduction) {
+        setBusy('start_production');
+        await sendAction('start_production', { interactionId: undefined, expectedMediaIdentity: undefined });
+      }
     } catch (failure) {
       setError(failure?.data?.message || failure?.message || '操作失败，请刷新当前任务后重试。');
     } finally {
@@ -127,7 +154,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
                 {item.interactionId && interactions.find(interaction => interaction.id === item.interactionId) ? <WhiteboardConversationCard
                   interaction={interactions.find(interaction => interaction.id === item.interactionId)}
                   active={pendingInteraction?.id === item.interactionId} artifact={artifact} disabled={locked}
-                  allowed={allowed} onConfirm={setConfirm} onUpdatePlan={productionPlan => act('update_plan', { productionPlan })} /> : null}
+                  allowed={allowed} onConfirm={confirmId => { setError(''); setConfirm(confirmId); }} onUpdatePlan={productionPlan => act('update_plan', { productionPlan })} /> : null}
               </article>
             ))}
             {progressEvents.length ? <details className="text-xs text-fg-3"><summary className="cursor-pointer">最近制作进度</summary><ol className="grid gap-2 pl-4">{progressEvents.slice(-8).map((event, index) => <li key={event.seq || index}>{event.message || event.type}</li>)}</ol></details> : null}
@@ -181,10 +208,30 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
         </section>
       </div>
 
-      <ConfirmDialog open={Boolean(confirm)} onOpenChange={open => { if (!open) setConfirm(''); }}
-        title={confirm === 'approve_initial' ? `确认第 ${activeVersion?.number || 1} 版内容与制作方案` : confirm === 'approve_media' ? pendingInteraction?.title || '确认当前媒体产物' : '同意发起一次新的外部请求'}
-        description={confirm === 'approve_initial' ? '请确认已检查当前旁白正文、全部分镜和制作设置。确认后可以开始制作视频，首次语音动作直接生成完整旁白。' : confirm === 'approve_media' ? '请实际检查产物区的完整音频、图像或视频。确认将绑定当前版本，并进入下一步制作。' : '上次请求是否已经完成或计费尚不确定。再次请求可能产生重复费用；新请求将保留原版本及记录。'}
-        confirmText={confirm === 'approve_initial' ? '确认当前方案' : confirm === 'approve_media' ? '确认当前产物' : '同意新请求与可能的重复费用'} loading={Boolean(busy)}
+      <Dialog open={confirm === 'approve_initial'} onOpenChange={open => { if (!open && !busy) setConfirm(''); }}>
+        <DialogContent className="w-[min(480px,calc(100vw-32px))]" showCloseButton={!busy}>
+          <DialogHeader>
+            <DialogTitle>确认第 {activeVersion?.number || 1} 版内容与制作方案</DialogTitle>
+            <DialogDescription>请确认已检查当前旁白正文、全部分镜和制作设置。确认后立即开始制作视频，将发起语音与图像生成的外部请求；也可以仅确认方案，稍后再开始制作。</DialogDescription>
+          </DialogHeader>
+          {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
+          <div className="grid gap-2">
+            <Button type="button" disabled={locked} onClick={() => approveInitial({ startProduction: true })}>
+              {busy ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+              {busy === 'approve_initial' ? '正在确认方案...' : busy === 'start_production' ? '正在启动制作...' : '确认并开始制作视频'}
+            </Button>
+            <div className="grid grid-cols-2 gap-2">
+              <Button type="button" variant="outline" disabled={locked} onClick={() => approveInitial({ startProduction: false })}>仅确认，稍后制作</Button>
+              <Button type="button" variant="ghost" disabled={locked} onClick={() => setConfirm('')}>取消</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog open={Boolean(confirm) && confirm !== 'approve_initial'} onOpenChange={open => { if (!open) setConfirm(''); }}
+        title={confirm === 'approve_media' ? pendingInteraction?.title || '确认当前媒体产物' : '同意发起一次新的外部请求'}
+        description={confirm === 'approve_media' ? '请实际检查产物区的完整音频、图像或视频。确认将绑定当前版本，并进入下一步制作。' : '上次请求是否已经完成或计费尚不确定。再次请求可能产生重复费用；新请求将保留原版本及记录。'}
+        confirmText={confirm === 'approve_media' ? '确认当前产物' : '同意新请求与可能的重复费用'} loading={Boolean(busy)}
         onConfirm={() => act(confirm, { confirmed: true })}>
         {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
       </ConfirmDialog>
