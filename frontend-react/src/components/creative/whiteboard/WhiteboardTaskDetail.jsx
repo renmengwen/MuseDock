@@ -67,7 +67,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
     // 弹窗和确认请求使用同一份版本快照，后台更新不能悄悄换掉用户正在检查的图。
     setCoverageReview(structuredClone({ identity: media.identity, recipe: media.recipe,
       lowCoverage: media.lowCoverage, artifacts: media.artifacts,
-      planIdentity: current.identity, planAttemptId: latest.id }));
+      planIdentity: current.identity, planAttemptId: latest.id, interactionId: media.interactionId }));
     setError('');
     setConfirm('accept_low_coverage');
   }
@@ -177,7 +177,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
                         {item.interactionId && interactions.find(interaction => interaction.id === item.interactionId) ? <WhiteboardConversationCard
                           interaction={interactions.find(interaction => interaction.id === item.interactionId)}
                           active={pendingInteraction?.id === item.interactionId} artifact={artifact} disabled={locked}
-                          allowed={allowed} onConfirm={confirmId => { setError(''); setConfirm(confirmId); }} onUpdatePlan={productionPlan => act('update_plan', { productionPlan })} /> : null}
+                          allowed={allowed} onConfirm={confirmId => { if (confirmId === 'accept_low_coverage') openCoverageReview(); else { setError(''); setConfirm(confirmId); } }} onUpdatePlan={productionPlan => act('update_plan', { productionPlan })} /> : null}
                       </MessageContent>
                     </Message>
                   </MessageScrollerItem>
@@ -206,7 +206,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
           <div className="grid shrink-0 gap-3 border-t border-line-2 bg-surface-2 p-4">
             <div className={cn('flex items-start gap-2 text-xs leading-6', needsAttention ? 'text-danger' : 'text-fg-2')} role="status" aria-live="polite">
               {running || busy ? <Loader2 size={15} className="mt-1 shrink-0 animate-spin" /> : null}
-              <span>{busy ? ({ approve_initial: '正在确认当前内容与制作方案...', update_plan: '正在保存新的制作方案...', revise: '正在创建修改版本...', retry: '正在重新启动方案任务...', authorize_new_attempt: '正在创建新的模型请求...', start_production: '正在检查环境并启动视频制作...', approve_media: '正在确认当前产物并准备下一步...', retry_media: '正在恢复未完成的媒体制作...', accept_low_coverage: '正在接受当前落墨并继续制作...', authorize_media_retry: '正在登记授权并继续制作...', revise_media: '正在创建本幕修改版本...', message: '正在理解并处理你的消息...' })[busy] || '正在处理当前操作...' : statusMessage}</span>
+              <span>{busy ? ({ approve_initial: '正在确认当前内容与制作方案...', update_plan: '正在保存新的制作方案...', revise: '正在创建修改版本...', retry: '正在重新启动方案任务...', authorize_new_attempt: '正在创建新的模型请求...', start_production: '正在检查环境并启动视频制作...', approve_media: '正在确认当前产物并准备下一步...', retry_media: '正在恢复未完成的媒体制作...', recover_annotation_preview: '正在使用已保存的编排恢复落墨预览...', accept_low_coverage: '正在接受当前落墨并继续制作...', authorize_media_retry: '正在登记授权并继续制作...', revise_media: '正在创建本幕修改版本...', message: '正在理解并处理你的消息...' })[busy] || '正在处理当前操作...' : statusMessage}</span>
             </div>
             {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
             {error || workflow.error ? <Link to="/settings" state={{ from: `/creative/${workflow.workflow_id}` }} className="text-sm font-semibold text-ink underline underline-offset-4">打开模型与声音设置</Link> : null}
@@ -222,7 +222,8 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
               {allowed.has('approve_initial') && !pendingInteraction ? <Button type="button" disabled={locked} onClick={() => { setError(''); setConfirm('approve_initial'); }}><Check size={15} />确认内容与制作方案</Button> : null}
               {allowed.has('update_plan') && artifact && (!pendingInteraction || media) ? <Button type="button" variant="outline" disabled={locked} onClick={() => { setEditedPlan({ ...artifact.productionPlan }); setPlanOpen(true); setError(''); }}><Settings2 size={14} />制作设置</Button> : null}
               {allowed.has('start_production') ? <Button type="button" disabled={locked} onClick={() => act('start_production')}>开始制作视频</Button> : null}
-              {allowed.has('retry_media') ? <Button type="button" disabled={locked} onClick={() => act('retry_media')}>继续未完成的制作</Button> : null}
+              {allowed.has('recover_annotation_preview') ? <Button type="button" disabled={locked} onClick={() => act('recover_annotation_preview')}>恢复落墨预览</Button> : null}
+              {allowed.has('retry_media') ? <Button type="button" variant={allowed.has('accept_low_coverage') ? 'outline' : 'default'} disabled={locked} onClick={() => act('retry_media')}>{allowed.has('accept_low_coverage') ? '重新编排未通过的幕' : '继续未完成的制作'}</Button> : null}
               {allowed.has('accept_low_coverage') ? <Button type="button" variant="outline" disabled={locked} onClick={openCoverageReview}>查看预览后接受当前落墨</Button> : null}
               {allowed.has('authorize_media_retry') ? <Button type="button" variant="outline" disabled={locked} onClick={() => setConfirm('authorize_media_retry')}>核实后授权新请求</Button> : null}
               {allowed.has('regenerate_narration') ? <Button type="button" variant="outline" disabled={locked} onClick={() => setConfirm('regenerate_narration')}>重新生成完整旁白</Button> : null}
@@ -241,7 +242,9 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
             {whiteboard.artifactError ? <p className="text-sm text-danger" role="alert">{whiteboard.artifactError}</p> : artifact ? <div className="grid min-w-0 content-start gap-5">
               {current?.stale ? <p className="m-0 text-xs leading-6 text-fg-3">此版本已因修改而失效，保留供对照。新方案需要重新确认。</p> : null}
               {media ? <>
-                <WhiteboardMediaPanel media={media} scenes={artifact.scenes} onReviewLowCoverage={!locked && allowed.has('accept_low_coverage') ? openCoverageReview : undefined} /><details className="border-t border-line-1 pt-3 text-sm"><summary className="mb-4 cursor-pointer text-fg-3">查看已确认内容与制作方案</summary><WhiteboardArtifact artifact={artifact} /></details>
+                <WhiteboardMediaPanel media={media} scenes={artifact.scenes} onReviewLowCoverage={allowed.has('accept_low_coverage') ? openCoverageReview : undefined}
+                  onRecoverAnnotationPreview={allowed.has('recover_annotation_preview') ? sceneId => act('recover_annotation_preview', { sceneId }) : undefined}
+                  recoveringPreview={busy === 'recover_annotation_preview'} actionsDisabled={locked} /><details className="border-t border-line-1 pt-3 text-sm"><summary className="mb-4 cursor-pointer text-fg-3">查看已确认内容与制作方案</summary><WhiteboardArtifact artifact={artifact} /></details>
               </> : <WhiteboardArtifact artifact={artifact} />}
             </div> : <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center gap-3 text-center" role="status" aria-live="polite">
               {running ? <Loader2 size={24} className="animate-spin text-fg-3" /> : <FileText size={26} className="text-fg-3" />}
@@ -276,9 +279,9 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
         current={coverageReview.identity === media?.identity && allowed.has('accept_low_coverage')}
         busy={busy} error={error} onClose={() => setConfirm('')}
         onAccept={() => act('accept_low_coverage', { confirmed: true, expectedMediaIdentity: coverageReview.identity,
-          expectedIdentity: coverageReview.planIdentity, expectedAttemptId: coverageReview.planAttemptId })}
+          expectedIdentity: coverageReview.planIdentity, expectedAttemptId: coverageReview.planAttemptId, interactionId: coverageReview.interactionId })}
         onRetry={() => act('retry_media', { expectedMediaIdentity: coverageReview.identity,
-          expectedIdentity: coverageReview.planIdentity, expectedAttemptId: coverageReview.planAttemptId })} /> : null}
+          expectedIdentity: coverageReview.planIdentity, expectedAttemptId: coverageReview.planAttemptId, interactionId: coverageReview.interactionId })} /> : null}
 
       <ConfirmDialog open={Boolean(confirm) && !['approve_initial', 'accept_low_coverage'].includes(confirm)} onOpenChange={open => { if (!open) setConfirm(''); }}
         title={confirm === 'approve_media' ? pendingInteraction?.title || '确认当前媒体产物' : '同意发起一次新的外部请求'}

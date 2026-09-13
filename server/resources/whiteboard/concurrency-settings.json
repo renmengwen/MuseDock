@@ -1,0 +1,5 @@
+{
+  "imageConcurrency": { "default": 3, "min": 1, "max": 10 },
+  "annotationConcurrency": { "default": 10, "min": 1, "max": 10 },
+  "renderConcurrency": { "default": 3, "min": 1, "max": 10 }
+}

@@ -10,7 +10,9 @@ const production = require('../server/services/creative/whiteboard/productionWor
 const { srtText } = require('../server/services/creative/whiteboard/narrationTiming');
 const { WhiteboardError } = require('../server/services/creative/whiteboard/contracts');
 const { createAnnotationPool, annotationPool } = require('../server/services/creative/whiteboard/annotationPool');
-const { createSceneRenderPool } = require('../server/services/creative/whiteboard/sceneRenderPool');
+const { createSceneRenderPool, sceneRenderPool } = require('../server/services/creative/whiteboard/sceneRenderPool');
+const { imagePool } = require('../server/services/creative/whiteboard/imagePool');
+const { configureWhiteboardConcurrency } = require('../server/services/creative/whiteboard/concurrency');
 
 // Media bytes are fixtures; all model and network dependencies are replaced.
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jF3sAAAAASUVORK5CYII=', 'base64');
@@ -26,7 +28,7 @@ async function deadline(promise) {
   finally { clearTimeout(timer); }
 }
 
-async function fixture(count = 3) {
+async function fixture(count = 3, { startStage = 'annotation_drafting' } = {}) {
   const parent = path.resolve(__dirname, '../.codex-runtime');
   await fs.mkdir(parent, { recursive: true });
   const root = await fs.mkdtemp(path.join(parent, 'whiteboard-annotation-test-'));
@@ -34,17 +36,26 @@ async function fixture(count = 3) {
   const cues = Array.from({ length: count }, (_, index) => ({ id: `cue_${index + 1}`, text: `展示第${index + 1}个图形。`, startMs: index * 3000, endMs: (index + 1) * 3000 }));
   const candidate = { schemaVersion: 1, title: '落墨并发与人工接受测试', summary: '按顺序展示多个独立图形，检查落墨编排与失败恢复。',
     cues: cues.map(({ id, text }) => ({ id, text })),
-    scenes: cues.map((cue, index) => ({ id: `scene_${index + 1}`, title: `图形 ${index + 1}`, cueIds: [cue.id], imagePrompt: '暖米黄纸张上的单个完整图形，清晰轮廓，充分留白。' })) };
+    scenes: cues.map((cue, index) => ({ id: `scene_${index + 1}`, title: `图形 ${index + 1}`, cueIds: [cue.id], imagePrompt: `暖米黄纸张上的单个完整图形，清晰轮廓，充分留白。测试编号 scene_${index + 1}` })) };
   const faults = new Map();
   const calls = new Map();
   const events = [];
-  const ctx = { root, rootDir, faults, calls, events, beforeVision: () => pause(15) };
+  const ctx = { root, rootDir, faults, calls, events, beforeVision: () => pause(15),
+    beforeImage: () => pause(15), beforeRender: () => pause(15),
+    imageFaults: new Map(), imageCalls: new Map(), renderCalls: new Map(), allowRender: false };
   const config = { enabled: true, provider: 'fixture', apiKey: 'fixture-only', baseUrl: 'https://example.invalid',
     modelId: 'fixture-text', supportsMultimodal: true };
   const options = { rootDir, taskContext: { emit: async event => events.push(event) }, services: {
     aiModelConfig: { getRuntimeConfig: async type => type === 'tts' ? { enabled: false } : config },
     fetchImpl: async () => { throw new Error('测试禁止真实网络请求'); },
-    aiImageModel: { generateImages: async () => ({ success: true, images: [{ b64_json: png.toString('base64') }] }) },
+    aiImageModel: { generateImages: async request => {
+      const sceneId = request.prompt.match(/测试编号 (scene_\d+)/)[1];
+      ctx.imageCalls.set(sceneId, (ctx.imageCalls.get(sceneId) || 0) + 1);
+      await ctx.beforeImage(sceneId);
+      if (ctx.imageFaults.get(sceneId) === 'unknown') throw new Error('fixture image connection lost');
+      if (ctx.imageFaults.get(sceneId) === 'rejected') throw new WhiteboardError('IMAGE_REQUEST_REJECTED', '测试注入：图片服务限流（HTTP 429）。');
+      return { success: true, images: [{ b64_json: Buffer.concat([png, Buffer.from(sceneId)]).toString('base64') }] };
+    } },
     aiTextModel: { callTextModel: async request => {
       if (typeof request.messages[1].content === 'string') return { success: true, text: JSON.stringify(candidate) };
       const prompt = request.messages[1].content[0].text;
@@ -58,7 +69,12 @@ async function fixture(count = 3) {
       preflight: async () => ({ font: 'fixture-font', recipe: { width: 1920, height: 1080, fixture: true } }),
       python: async (command, input) => {
         assert.ok(['normalize-image', 'annotation-preview'].includes(command));
-        if (command === 'normalize-image') { await fs.writeFile(input.output, png, { flag: 'wx' }); return { width: 1920, height: 1080 }; }
+        if (command === 'normalize-image') {
+          const raw = await fs.readFile(input.input);
+          const sceneId = raw.toString('utf8').match(/scene_\d+$/)[0];
+          if (ctx.imageFaults.get(sceneId) === 'normalize_failure') throw new WhiteboardError('MEDIA_FAILED', '测试注入：图片处理失败。');
+          await fs.writeFile(input.output, png, { flag: 'wx' }); return { width: 1920, height: 1080 };
+        }
         const mode = faults.get(input.annotation.sceneId);
         if (mode === 'local_failure') throw new WhiteboardError('MEDIA_FAILED', '测试注入：预览生成失败。');
         await fs.writeFile(input.output, png, { flag: 'wx' });
@@ -71,7 +87,15 @@ async function fixture(count = 3) {
         }
         return { coverageRatio: 1, regions: 1, coveredInkPixels: 100, totalInkPixels: 100 };
       },
-      renderScene: async () => { throw new Error('此测试不能越过人工 Gate 渲染视频'); },
+      renderScene: async ({ scene, output }) => {
+        assert.equal(ctx.allowRender, true, '此测试不能越过人工 Gate 渲染视频');
+        ctx.renderCalls.set(scene.id, (ctx.renderCalls.get(scene.id) || 0) + 1);
+        await ctx.beforeRender(scene.id);
+        await fs.writeFile(output, `fixture video ${scene.id}`, { flag: 'wx' });
+        return { ...tools.RENDER_PROFILE, frameCount: (scene.endMs - scene.startMs) * 60 / 1000,
+          durationMs: scene.endMs - scene.startMs, audio: false, decoded: true };
+      },
+      extractFrame: async (_video, output) => fs.writeFile(output, png, { flag: 'wx' }),
     },
   } };
   const created = await workflows.createCreativeWorkflow({ creationModeId: 'whiteboard-stream-v1',
@@ -90,7 +114,7 @@ async function fixture(count = 3) {
   assert.equal((await action('approve_initial', { confirmed: true })).success, true);
   const started = await action('start_production');
   assert.equal(started.success, true, started.message);
-  for (const stage of ['full_narration', 'lineart_generation']) {
+  for (const stage of startStage === 'lineart_generation' ? ['full_narration'] : ['full_narration', 'lineart_generation']) {
     const result = await run();
     assert.equal(result.status, 'waiting_approval', result.message);
     assert.equal((await read()).whiteboard.media.stage, stage);
@@ -99,19 +123,49 @@ async function fixture(count = 3) {
   return Object.assign(ctx, { id, read, action, payload, run, options });
 }
 
+async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
+  const release = deferred(); const saturated = deferred();
+  let started = 0; let active = 0; let peak = 0;
+  ctx[hook] = async () => {
+    active += 1; started += 1; peak = Math.max(peak, active);
+    if (started === 10) saturated.resolve();
+    try { await release.promise; } finally { active -= 1; }
+  };
+  const result = ctx.run();
+  try {
+    await deadline(saturated.promise);
+    assert.equal(pool.active, 10);
+    assert.equal(started, 10, `${stage} 的第 11 幕必须排队`);
+  } finally { release.resolve(); }
+  const finished = await deadline(result);
+  assert.equal(finished.status, 'waiting_approval', finished.message);
+  assert.equal(peak, 10); assert.equal(started, 12);
+  const record = await ctx.read();
+  assert.equal(record.whiteboard.media.stage, stage);
+  assert.equal(record.whiteboard.media[progressKey].completed, 12);
+  assert.equal(record.whiteboard.media[progressKey].concurrency, 10);
+  assert.deepEqual(record.whiteboard.media.current[stage].scenes.map(scene => scene.sceneId),
+    Array.from({ length: 12 }, (_, index) => `scene_${index + 1}`));
+}
+
 (async () => {
   assert.equal(createAnnotationPool().concurrency, 10);
   assert.equal(createAnnotationPool(100).concurrency, 10);
   assert.equal(createAnnotationPool(2).concurrency, 2);
   assert.equal(createSceneRenderPool().concurrency, 3);
-  assert.equal(createSceneRenderPool(100).concurrency, 8);
+  assert.equal(createSceneRenderPool(100).concurrency, 10);
+  configureWhiteboardConcurrency({ imageConcurrency: 3, annotationConcurrency: 10, renderConcurrency: 3 });
 
   const ctx = await fixture();
   ctx.faults.set('scene_2', 'low');
   assert.equal((await ctx.run()).code, 'ANNOTATION_COVERAGE_LOW');
   let record = await ctx.read();
   let media = record.whiteboard.media;
-  assert.equal(record.status, 'failed');
+  assert.equal(record.status, 'waiting_approval');
+  assert.equal(media.gate, 'annotation_coverage_review');
+  assert.equal(record.error, null);
+  assert.equal(record.whiteboard.interactions.at(-1).kind, 'annotation_coverage_review');
+  assert.ok(!production.actionsFor(record).some(action => action.id === 'approve_media'), '低覆盖率不能通过普通产物确认跳过检查');
   assert.equal(media.lowCoverage.length, 1);
   assert.equal(media.current.annotation_drafting, undefined);
   assert.equal(media.annotationProgress.completed, 2);
@@ -130,6 +184,19 @@ async function fixture(count = 3) {
   await fs.writeFile(path.join(ctx.root, 'review-fixture.json'), JSON.stringify({ rootDir: ctx.rootDir, view: view.data }));
   assert.equal((await ctx.action('accept_low_coverage', { confirmed: false })).code, 'APPROVAL_REQUIRED');
   assert.equal((await ctx.read()).whiteboard.media.annotations.scene_2, undefined);
+
+  const interruptedReview = structuredClone(record);
+  interruptedReview.status = 'running';
+  interruptedReview.whiteboard.media.executionId = 'review-published-before-restart';
+  production.recover(interruptedReview, new Date().toISOString());
+  assert.equal(interruptedReview.status, 'waiting_approval');
+  assert.equal(interruptedReview.task_status, 'waiting_approval');
+  assert.equal(interruptedReview.whiteboard.media.lowCoverage[0].identity, first.identity);
+  assert.ok(production.actionsFor(interruptedReview).some(action => action.id === 'accept_low_coverage'));
+  const oldError = structuredClone(record);
+  oldError.status = 'failed';
+  oldError.error = { code: 'MEDIA_INTERRUPTED', message: '旧版本中断记录' };
+  assert.ok(production.actionsFor(oldError).some(action => action.id === 'accept_low_coverage'), '已保存的有效预览不能因顶层错误码改变而失去入口');
 
   const stalePayload = ctx.payload(record, 'accept_low_coverage', { confirmed: true });
   const successful = media.annotations.scene_1.identity;
@@ -174,6 +241,61 @@ async function fixture(count = 3) {
   assert.equal(record.whiteboard.media.annotationProgress.reused, 3);
   assert.equal(record.whiteboard.media.current.scene_render, undefined);
   console.log('PASS 失败预览可访问、明确确认、成功幕复用、旧版本/篡改拒绝、人工接受记录与 Gate');
+
+  const legacy = await fixture();
+  legacy.faults.set('scene_2', 'low');
+  await legacy.run();
+  const legacyRecord = await legacy.read();
+  const legacyMedia = legacyRecord.whiteboard.media;
+  const legacyEntry = legacyMedia.lowCoverage[0];
+  const legacyAttempt = legacyMedia.attempts.find(item => item.id === legacyEntry.attemptId);
+  const orphaned = new Set([legacyEntry.annotation.id, legacyEntry.preview.id, legacyEntry.resultPreview.id]);
+  legacyMedia.artifacts = legacyMedia.artifacts.filter(file => !orphaned.has(file.id));
+  legacyAttempt.received = { candidate: legacyAttempt.received.candidate };
+  legacyAttempt.errorCode = 'MEDIA_FAILED';
+  delete legacyMedia.lowCoverage;
+  legacyMedia.gate = ''; legacyMedia.interactionId = '';
+  legacyRecord.status = 'failed'; legacyRecord.success = false;
+  legacyRecord.error = { code: 'MEDIA_FAILED', message: '标注未完整覆盖线稿（覆盖率 65.0%）。预览图已生成。' };
+  legacyRecord.whiteboard.interactions = legacyRecord.whiteboard.interactions.filter(item => item.kind !== 'annotation_coverage_review');
+  await workflowStore.persistWorkflow(legacyRecord, legacy.rootDir);
+  assert.ok(production.actionsFor(legacyRecord).some(action => action.id === 'recover_annotation_preview'));
+  assert.ok(!production.actionsFor(legacyRecord).some(action => action.id === 'accept_low_coverage'));
+
+  const staleRecovery = structuredClone(legacyRecord);
+  staleRecovery.whiteboard.media.overrides['annotation_drafting:scene_2'] = '新的分区要求';
+  await workflowStore.persistWorkflow(staleRecovery, legacy.rootDir);
+  assert.equal((await legacy.action('recover_annotation_preview', { sceneId: 'scene_2' })).code, 'STALE_IDENTITY');
+  await workflowStore.persistWorkflow(legacyRecord, legacy.rootDir);
+  const candidatePath = (await store.mediaFile(legacyRecord, legacyAttempt.received.candidate, legacy.rootDir)).path;
+  const candidateBytes = await fs.readFile(candidatePath);
+  await fs.writeFile(candidatePath, Buffer.concat([candidateBytes, Buffer.from('changed')]));
+  assert.equal((await legacy.action('recover_annotation_preview', { sceneId: 'scene_2' })).code, 'ARTIFACT_INVALID');
+  await fs.writeFile(candidatePath, candidateBytes);
+  const callsBeforeRecovery = [...legacy.calls.entries()];
+  const recoveredPreview = await legacy.action('recover_annotation_preview', { sceneId: 'scene_2' });
+  assert.equal(recoveredPreview.success, true, recoveredPreview.message);
+  assert.equal(recoveredPreview.startTask, false, '恢复预览不得启动模型请求或后续制作');
+  const restoredRecord = await legacy.read();
+  const restored = restoredRecord.whiteboard.media;
+  assert.equal(restoredRecord.status, 'waiting_approval');
+  assert.equal(restored.gate, 'annotation_coverage_review');
+  assert.equal(restored.lowCoverage.length, 1);
+  assert.equal(restored.lowCoverage[0].sceneId, 'scene_2');
+  assert.equal(restored.annotations.scene_2, undefined, '恢复预览不能代替用户接受');
+  assert.equal(restored.annotations.scene_1.identity, legacyMedia.annotations.scene_1.identity);
+  assert.equal(restored.annotations.scene_3.identity, legacyMedia.annotations.scene_3.identity);
+  assert.equal(restored.attempts.at(-1).external, false);
+  assert.equal(restored.attempts.at(-1).recoveredFromAttemptId, legacyAttempt.id);
+  assert.equal(restored.attempts.find(item => item.id === legacyAttempt.id).errorCode, 'MEDIA_FAILED', '原失败证据保持不变');
+  for (const file of [restored.lowCoverage[0].annotation, restored.lowCoverage[0].preview, restored.lowCoverage[0].resultPreview]) {
+    assert.equal((await workflows.getWhiteboardMediaFile(legacy.id, file.id, legacy.options)).success, true);
+  }
+  assert.deepEqual([...legacy.calls.entries()], callsBeforeRecovery);
+  assert.equal((await legacy.action('accept_low_coverage', { confirmed: true })).success, true);
+  assert.equal((await legacy.run()).status, 'waiting_approval');
+  assert.deepEqual([...legacy.calls.entries()], callsBeforeRecovery, '恢复的候选在明确接受后仍应直接复用');
+  console.log('PASS 旧失败记录本地恢复双预览、保留成功幕与失败证据、过期/篡改拒绝、零新增模型请求');
 
   const mixed = await fixture();
   mixed.faults.set('scene_1', 'low'); mixed.faults.set('scene_2', 'unknown');
@@ -266,7 +388,73 @@ async function fixture(count = 3) {
   assert.equal(invoked, 2);
   assert.equal(cancelledResults.filter(result => result.status === 'rejected' && result.reason.code === 'MEDIA_CANCELLED').length, 2);
   assert.equal(pool.active, 0); assert.equal(pool.queued, 0);
-  console.log('PASS 两个制作任务共享最多 10 幕并发、排队/顺序/进度与取消，单幕渲染原有限制保留');
+  console.log('PASS 两个制作任务共享最多 10 幕并发、排队/顺序/进度与取消');
+
+  const images = await fixture(3, { startStage: 'lineart_generation' });
+  images.imageFaults.set('scene_1', 'normalize_failure');
+  images.imageFaults.set('scene_2', 'rejected');
+  const imageFailure = await images.run();
+  assert.equal(imageFailure.code, 'LINEART_GENERATION_FAILED');
+  assert.match(imageFailure.message, /图片处理失败/);
+  assert.match(imageFailure.message, /HTTP 429/);
+  let imageRecord = await images.read();
+  assert.equal(imageRecord.whiteboard.media.lineartProgress.completed, 1);
+  assert.equal(imageRecord.whiteboard.media.lineartProgress.failed, 2);
+  const successfulImage = imageRecord.whiteboard.media.lineart.scene_3.identity;
+  images.imageFaults.clear();
+  assert.equal((await images.action('retry_media')).success, true);
+  assert.equal((await images.run()).status, 'waiting_approval');
+  imageRecord = await images.read();
+  assert.equal(imageRecord.whiteboard.media.lineart.scene_3.identity, successfulImage);
+  assert.equal(imageRecord.whiteboard.media.lineartProgress.reused, 2);
+  assert.equal(images.imageCalls.get('scene_1'), 1, '已收到原图但本地处理失败时不得重新生图');
+  assert.equal(images.imageCalls.get('scene_2'), 2, '明确拒绝的幕只在手动继续后重新请求');
+  assert.equal(images.imageCalls.get('scene_3'), 1, '已完成线稿应直接复用');
+
+  const unknownImages = await fixture(3, { startStage: 'lineart_generation' });
+  unknownImages.imageFaults.set('scene_1', 'unknown');
+  assert.equal((await unknownImages.run()).code, 'UNKNOWN_EXTERNAL_OUTCOME');
+  assert.equal((await unknownImages.action('retry_media')).success, false);
+  const recovery = structuredClone(await unknownImages.read());
+  recovery.status = 'running';
+  recovery.whiteboard.media.executionId = 'image-crash';
+  recovery.whiteboard.media.activeAttemptId = 'completed-image';
+  recovery.whiteboard.media.attempts.push({ id: 'requesting-image', stage: 'lineart_generation', executionId: 'image-crash', status: 'requesting' },
+    { id: 'completed-image', stage: 'lineart_generation', executionId: 'image-crash', status: 'validated' });
+  production.recover(recovery, new Date().toISOString());
+  assert.equal(recovery.status, 'unknown_external_outcome');
+  assert.equal(recovery.whiteboard.media.lineartProgress.active, 0);
+  unknownImages.imageFaults.clear();
+  assert.equal((await unknownImages.action('authorize_media_retry', { confirmed: true })).success, true);
+  assert.equal((await unknownImages.run()).status, 'waiting_approval');
+  assert.equal(unknownImages.imageCalls.get('scene_1'), 2);
+  assert.equal(unknownImages.imageCalls.get('scene_2'), 1);
+  assert.equal(unknownImages.imageCalls.get('scene_3'), 1);
+  console.log('PASS 并发生图保留成功幕与原图、限流重试、未知结果授权和重启恢复');
+
+  configureWhiteboardConcurrency({ imageConcurrency: 10, annotationConcurrency: 10, renderConcurrency: 10 });
+  const allStages = await fixture(12, { startStage: 'lineart_generation' });
+  await assertTenConcurrent(allStages, 'beforeImage', imagePool, 'lineart_generation', 'lineartProgress');
+  assert.equal((await allStages.action('approve_media', { confirmed: true })).success, true);
+  await assertTenConcurrent(allStages, 'beforeVision', annotationPool, 'annotation_drafting', 'annotationProgress');
+  assert.equal((await allStages.action('approve_media', { confirmed: true })).success, true);
+  allStages.allowRender = true;
+  await assertTenConcurrent(allStages, 'beforeRender', sceneRenderPool, 'scene_render', 'sceneRenderProgress');
+  console.log('PASS 同一个十二幕任务：生图、落墨和单幕渲染分别达到 10 并发，始终按分镜顺序发布');
+
+  const deletedImages = await fixture(3, { startStage: 'lineart_generation' });
+  const imagesStarted = deferred(); const releaseImages = deferred();
+  let imageRequests = 0;
+  deletedImages.beforeImage = async () => { if (++imageRequests === 3) imagesStarted.resolve(); await releaseImages.promise; };
+  const deletingRun = deletedImages.run();
+  try {
+    await deadline(imagesStarted.promise);
+    assert.equal((await workflows.deleteCreativeWorkflow(deletedImages.id, deletedImages.options)).success, true);
+  } finally { releaseImages.resolve(); }
+  assert.equal((await deadline(deletingRun)).status, 'deleted');
+  await assert.rejects(fs.stat(path.join(deletedImages.rootDir, 'whiteboard-artifacts', deletedImages.id)), { code: 'ENOENT' });
+  await assert.rejects(fs.stat(path.join(deletedImages.rootDir, '.whiteboard-work', deletedImages.id)), { code: 'ENOENT' });
+  console.log('PASS 删除并发生图任务后，晚到图片不会复活任务或产物目录');
 
   await assert.rejects(tools.execute(process.execPath, ['-e',
     "console.log(JSON.stringify({message:'覆盖率不足',errorCode:'ANNOTATION_COVERAGE_LOW',coverageRatio:0.65,coverage:{coverageRatio:0.65,regions:1,coveredInkPixels:65,totalInkPixels:100}}));process.exit(1)"]),

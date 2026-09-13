@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
 import { Status } from '../components/Status.jsx';
@@ -7,11 +7,13 @@ import { CreativeDefaultsSettings } from '../components/settings/CreativeDefault
 import { ModelSettings } from '../components/settings/ModelSettings.jsx';
 import { SettingsOverview } from '../components/settings/SettingsOverview.jsx';
 import { SystemSettings } from '../components/settings/SystemSettings.jsx';
+import { WhiteboardSettings } from '../components/settings/WhiteboardSettings.jsx';
 import { useSettings } from '../hooks/useSettings.js';
 
 const SECTIONS = [
   { id: 'overview', label: '总览' },
-  { id: 'creative', label: '创作默认值' },
+  { id: 'creative', label: 'HyperFrames' },
+  { id: 'whiteboard', label: '白板动画' },
   { id: 'models', label: '模型配置' },
   { id: 'system', label: '系统' },
 ];
@@ -37,6 +39,7 @@ export function SettingsPage() {
   const [savingApp, setSavingApp] = useState(false);
   const [status, setStatus] = useState(null);
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
+  const saveAppLock = useRef(false);
   const modelSettings = useSettings();
 
   // 从编辑器等页面进入时（Link state.from），返回按钮回到来路而不是固定回创作台
@@ -129,21 +132,24 @@ export function SettingsPage() {
   }, []);
 
   const saveAppSettings = useCallback(async (nextSettings) => {
+    if (saveAppLock.current) return;
+    saveAppLock.current = true;
     const isCreativeSection = activeSection === 'creative';
     const isSystemSection = activeSection === 'system';
+    const isWhiteboardSection = activeSection === 'whiteboard';
     const savingMessage = isCreativeSection
       ? '正在保存创作默认值...'
-      : isSystemSection
+      : isWhiteboardSection ? '正在保存白板设置...' : isSystemSection
         ? '正在保存系统设置...'
         : '正在保存应用配置...';
     const successMessage = isCreativeSection
       ? '创作默认值已保存'
-      : isSystemSection
+      : isWhiteboardSection ? '白板设置已保存' : isSystemSection
         ? '系统设置已保存'
         : '应用配置已保存';
     const failurePrefix = isCreativeSection
       ? '创作默认值保存失败'
-      : isSystemSection
+      : isWhiteboardSection ? '白板设置保存失败' : isSystemSection
         ? '系统设置保存失败'
         : '应用配置保存失败';
 
@@ -156,6 +162,7 @@ export function SettingsPage() {
     } catch (error) {
       setStatus({ type: 'error', message: `${failurePrefix}：${error.message || '未知错误'}` });
     } finally {
+      saveAppLock.current = false;
       setSavingApp(false);
     }
   }, [activeSection]);
@@ -186,6 +193,11 @@ export function SettingsPage() {
       );
     }
 
+    if (activeSection === 'whiteboard') {
+      return <WhiteboardSettings appSettings={appSettings} disabled={loadingApp || savingApp}
+        saving={savingApp} onChange={setAppSettings} onSave={saveAppSettings} />;
+    }
+
     if (activeSection === 'models') {
       return <ModelSettings modelSettings={modelSettings} />;
     }
@@ -208,7 +220,7 @@ export function SettingsPage() {
       <div className="mb-5 flex items-start justify-between gap-4 max-[720px]:flex-col">
         <div>
           <h2 className="m-0 text-xl font-bold text-[#20242a]">设置中心</h2>
-          <p className="mt-1 text-[13px] text-[#69717e]">管理创作默认值、模型配置和本地系统状态。</p>
+          <p className="mt-1 text-[13px] text-[#69717e]">分别管理 HyperFrames 与白板动画设置、共享模型和本地系统状态。</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="min-w-[92px] rounded-lg border border-[#e7e9ee] bg-white px-3.5 py-2.5 text-center">

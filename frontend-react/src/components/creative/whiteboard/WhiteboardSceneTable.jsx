@@ -23,6 +23,16 @@ function sceneSummary(stage, scene) {
   return 'PNG 图像';
 }
 
+function missingSceneSummary(stage, scene) {
+  if (stage === 'annotation_drafting' && !scene.preview) {
+    if (scene.attempt?.status === 'failed') return '编排失败';
+    if (scene.attempt?.status === 'unknown_external_outcome') return '结果待核实';
+    if (scene.attempt) return '正在编排...';
+    return '等待编排';
+  }
+  return stage === 'lineart_generation' && !scene.image ? '等待生成' : '文件不可用';
+}
+
 function previewStyle(canvas) {
   return { aspectRatio: `${canvas.width} / ${canvas.height}`,
     ...(canvas.height > canvas.width ? { maxWidth: `${60 * canvas.width / canvas.height}dvh` } : {}) };
@@ -52,7 +62,8 @@ function SceneVideo({ src, canvas }) {
   );
 }
 
-export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas = { width: 1920, height: 1080 }, getUrl, renderDownload }) {
+export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas = { width: 1920, height: 1080 }, getUrl, renderDownload,
+  onReviewLowCoverage, onRecoverAnnotationPreview, recoveringPreview = false, actionsDisabled = false }) {
   const [selectedSceneId, setSelectedSceneId] = useState('');
   const triggerRef = useRef(null);
   const settings = STAGES[stage];
@@ -62,6 +73,10 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
 
   function openScene(scene, event) {
     if (!getUrl(scene[settings.file])) return;
+    if (scene.kind === 'annotation_coverage_review' && onReviewLowCoverage) {
+      if (!actionsDisabled) onReviewLowCoverage();
+      return;
+    }
     triggerRef.current = event.currentTarget.querySelector('button');
     setSelectedSceneId(scene.sceneId);
   }
@@ -86,14 +101,19 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
             <TableBody>
               {scenes.map((scene, index) => {
                 const available = Boolean(getUrl(scene[settings.file]));
+                const needsReview = stage === 'annotation_drafting' && scene.coverage?.coverageRatio < 0.97 && !scene.coverageAcceptance;
+                const failed = stage === 'annotation_drafting' && !available && scene.attempt?.status === 'failed';
+                const canRecover = failed && scene.attempt.received?.candidate && onRecoverAnnotationPreview;
                 return (
-                  <TableRow key={scene.sceneId} onClick={event => openScene(scene, event)} className={cn('border-line-1 focus-within:bg-surface-2', available && 'cursor-pointer hover:bg-surface-2')}>
+                  <TableRow key={scene.sceneId} onClick={event => openScene(scene, event)} className={cn('border-line-1 focus-within:bg-surface-2', available && 'cursor-pointer hover:bg-surface-2', (needsReview || failed) && 'bg-danger/5')}>
                     <TableCell className="whitespace-normal py-4 pl-4">
                       <div className="flex items-start gap-3"><span className="shrink-0 pt-0.5 font-mono text-xs text-fg-3">{String(index + 1).padStart(2, '0')}</span><span className="min-w-0 break-words font-medium leading-6 text-fg-1">{titleFor(scene, index)}</span></div>
                     </TableCell>
-                    <TableCell className="whitespace-normal text-xs leading-6 text-fg-3">{available ? <>{sceneSummary(stage, scene)}{scene.coverage?.coverageRatio < 0.97 ? <span className="block text-danger">{scene.coverageAcceptance ? '已人工接受' : '待检查覆盖情况'}</span> : null}</> : stage === 'annotation_drafting' && !scene.preview ? '等待编排' : '文件不可用'}</TableCell>
+                    <TableCell className={cn('whitespace-normal text-xs leading-6 text-fg-3', failed && 'text-danger')}>{available ? <>{sceneSummary(stage, scene)}{scene.coverage?.coverageRatio < 0.97 ? <span className="block text-danger">{scene.coverageAcceptance ? '已人工接受' : '覆盖不足 · 待确认'}</span> : null}</> : missingSceneSummary(stage, scene)}</TableCell>
                     <TableCell className="pr-3 text-right">
-                      <Button variant="ghost" size="sm" disabled={!available} aria-haspopup="dialog" aria-label={`查看第 ${index + 1} 幕${settings.label}详情`} className="gap-1 px-2 text-xs max-[760px]:min-h-11">查看详情<ArrowUpRight size={14} /></Button>
+                      {canRecover ? <Button variant="outline" size="sm" disabled={actionsDisabled} onClick={event => { event.stopPropagation(); onRecoverAnnotationPreview(scene.sceneId); }}
+                        aria-label={`恢复第 ${index + 1} 幕落墨预览`} className="gap-1 px-2 text-xs max-[760px]:min-h-11">{recoveringPreview ? <Loader2 size={14} className="animate-spin" /> : null}{recoveringPreview ? '正在恢复...' : '恢复预览'}</Button>
+                        : <Button variant="ghost" size="sm" disabled={!available || (needsReview && actionsDisabled)} aria-haspopup="dialog" aria-label={`查看第 ${index + 1} 幕${settings.label}详情`} className="gap-1 px-2 text-xs max-[760px]:min-h-11">{needsReview && onReviewLowCoverage ? '检查并处理' : '查看详情'}<ArrowUpRight size={14} /></Button>}
                     </TableCell>
                   </TableRow>
                 );

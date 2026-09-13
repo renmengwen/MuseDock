@@ -12,6 +12,7 @@ export function WhiteboardConversationCard({ interaction, active, artifact, disa
   const [form, setForm] = useState(null);
   const pending = active && interaction.status === 'pending';
   const plan = interaction.kind === 'plan_review';
+  const coverage = interaction.kind === 'annotation_coverage_review';
   return (
     <div className="grid gap-3 rounded-lg border border-line-2 bg-surface-1 p-4" data-interaction-id={interaction.id}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -31,10 +32,11 @@ export function WhiteboardConversationCard({ interaction, active, artifact, disa
         <div className="flex flex-wrap gap-2"><Button type="submit" size="sm" disabled={disabled}>保存为新的待确认版本</Button><Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => setEditing(false)}>取消调整</Button></div>
       </form> : null}
       {pending && !editing ? <div className="flex flex-wrap gap-2">
+        {coverage && allowed.has('accept_low_coverage') ? <Button type="button" size="sm" disabled={disabled} onClick={() => onConfirm('accept_low_coverage')}>查看预览并处理</Button> : null}
         {allowed.has(plan ? 'approve_initial' : 'approve_media') ? <Button type="button" size="sm" disabled={disabled} onClick={() => onConfirm(plan ? 'approve_initial' : 'approve_media')}><Check size={14} />{plan ? '确认内容与制作方案' : interaction.stage === 'final_approval' ? '确认最终成片' : '确认当前产物并继续'}</Button> : null}
         {plan && allowed.has('update_plan') ? <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => { setForm({ ...artifact.productionPlan }); setEditing(true); }}><Settings2 size={14} />调整制作设置</Button> : null}
       </div> : null}
-      {pending && !plan ? <p className="m-0 text-xs leading-6 text-fg-3">在产物区检查当前文件。确认会绑定本次产物；重新生成后，旧卡片自动失效。</p> : null}
+      {pending && !plan ? <p className="m-0 text-xs leading-6 text-fg-3">{coverage ? '打开预览，对照当前落墨效果与红色遗漏标记，再选择接受、重新编排或暂不决定。' : '在产物区检查当前文件。确认会绑定本次产物；重新生成后，旧卡片自动失效。'}</p> : null}
     </div>
   );
 }

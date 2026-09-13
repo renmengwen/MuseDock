@@ -7,6 +7,7 @@ const { buildNarrationTiming, buildSilentTiming, srtText } = require('./narratio
 const aiTtsModel = require('../../ai/aiTtsModel');
 const { sceneRenderPool } = require('./sceneRenderPool');
 const { annotationPool } = require('./annotationPool');
+const { imagePool } = require('./imagePool');
 
 async function fspExists(file) { try { await fsp.access(file); return true; } catch { return false; } }
 
@@ -105,25 +106,76 @@ async function narrationStage(ctx, artifact) {
   await complete(ctx, item, 'full_narration', binding);
 }
 
-async function lineartStage(ctx, artifact, timing) {
-  for (const scene of artifact.scenes) {
+async function runSceneCandidates(ctx, { stage, label, progressKey, scenes, pool, job }) {
+  const signal = ctx.processOptions.signal;
+  const state = { total: scenes.length, completed: 0, failed: 0, reused: 0, active: 0, peakActive: 0 };
+  const report = async () => {
+    const progress = { ...state, concurrency: pool.concurrency,
+      queued: Math.max(0, state.total - state.completed - state.failed - state.active) };
+    const message = `正在并发${label}：已完成 ${progress.completed}/${progress.total}，处理中 ${progress.active}，等待 ${progress.queued}${progress.failed ? `，失败 ${progress.failed}` : ''}（并发上限 ${progress.concurrency}）。`;
+    const updated = await ctx.change((record, now) => {
+      record.whiteboard.media[progressKey] = progress;
+      record.message = message;
+      record.current_stage_message = message;
+      record.updated_at = now;
+      const currentStage = record.whiteboard.media.stages.find(item => item.id === stage);
+      if (currentStage) Object.assign(currentStage, { message, updated_at: now });
+    });
+    await ctx.emitProgress?.({ type: 'stage_progress', stage,
+      progress: updated?.record?.current_progress || 20 + store.STAGES.findIndex(item => item.id === stage) * 16, message });
+  };
+  await report();
+  const results = await pool.mapSettled(scenes, async scene => {
+    state.active += 1;
+    state.peakActive = Math.max(state.peakActive, state.active);
+    try {
+      await report();
+      const result = await job(scene);
+      state.completed += 1;
+      if (result.reused) state.reused += 1;
+      return result;
+    } catch (error) { state.failed += 1; throw error; }
+    finally { state.active -= 1; await report(); }
+  }, { signal });
+  const failures = results.map((result, index) => ({ ...result, scene: scenes[index] })).filter(result => result.status === 'rejected');
+  state.failed = failures.length;
+  await report();
+  // 完整的外部结果缺失时必须优先保留未知状态，不能被其他幕的普通失败覆盖。
+  const unknown = failures.find(result => result.reason?.code === 'UNKNOWN_EXTERNAL_OUTCOME');
+  if (unknown) throw unknown.reason;
+  if (signal?.aborted) throw new WhiteboardError('MEDIA_CANCELLED', `${label}已取消。`);
+  const stopped = failures.find(result => ['ENOENT', 'STALE_IDENTITY', 'MEDIA_CANCELLED'].includes(result.reason?.code));
+  if (stopped) throw stopped.reason;
+  return failures;
+}
+
+async function generateLineartCandidate(ctx, artifact, scene) {
+  let item;
+  try {
     const record = await ctx.read();
     if (record.whiteboard.media.lineart[scene.id]) {
-      await store.validateBinding(record, record.whiteboard.media.lineart[scene.id], ctx.rootDir); continue;
+      await store.validateBinding(record, record.whiteboard.media.lineart[scene.id], ctx.rootDir);
+      return { reused: true };
     }
     const revision = record.whiteboard.media.overrides[`lineart_generation:${scene.id}`] || '';
     const imageConfig = await ctx.services.aiModelConfig.getRuntimeConfig('image');
     const inputIdentity = sha256({ prompt: models.lineartPrompt(artifact, scene, revision), style: artifact.visualStyle, revision,
       model: imageConfig.modelId, provider: imageConfig.provider, endpoint: imageConfig.baseUrl });
-    if (await reuseHistory(ctx, 'lineart', scene.id, inputIdentity)) continue;
+    if (await reuseHistory(ctx, 'lineart', scene.id, inputIdentity)) return { reused: true };
     const reusable = [...record.whiteboard.media.attempts].reverse().find(attempt => attempt.stage === 'lineart_generation'
       && attempt.sceneId === scene.id && attempt.inputIdentity === inputIdentity && attempt.received?.rawImage);
-    const item = await ctx.attempt('lineart_generation', scene.id, !reusable, inputIdentity);
+    item = await ctx.attempt('lineart_generation', scene.id, !reusable, inputIdentity);
     const directory = store.workDirectory(ctx.workflowId, item.id, ctx.rootDir);
     let raw;
     if (reusable) raw = await ctx.filePath(record, reusable.received.rawImage);
     else {
-      const bytes = await models.generateLineart({ artifact, scene, revision, imageConfig, services: ctx.services, onRequest: () => ctx.requesting(item.id) });
+      let bytes;
+      try {
+        bytes = await models.generateLineart({ artifact, scene, revision, imageConfig, services: ctx.services, onRequest: () => ctx.requesting(item.id) });
+      } catch (error) {
+        if (error instanceof WhiteboardError) throw error;
+        throw new WhiteboardError('UNKNOWN_EXTERNAL_OUTCOME', '生图请求中断，无法确认外部结果；请核实后授权新请求。', 409);
+      }
       raw = path.join(directory, 'provider-image.bin');
       await fsp.writeFile(raw, bytes, { flag: 'wx' });
       await ctx.publish(item, { rawImage: { path: raw, kind: 'provider_image', name: `${scene.title}原始图`, sceneId: scene.id, mime: 'application/octet-stream' } });
@@ -133,7 +185,35 @@ async function lineartStage(ctx, artifact, timing) {
     await ctx.publish(item, { image: { path: output, kind: 'lineart', name: scene.title, sceneId: scene.id, mime: 'image/png' } }, (current, files, now) => {
       current.whiteboard.media.lineart[scene.id] = store.bind({ kind: 'lineart', sceneId: scene.id, inputIdentity, image: files.image });
       Object.assign(current.whiteboard.media.attempts.find(row => row.id === item.id), { status: 'validated', completedAt: now });
+      if (current.whiteboard.media.activeAttemptId === item.id) current.whiteboard.media.activeAttemptId = '';
     });
+    return { reused: Boolean(reusable) };
+  } catch (error) {
+    if (item) {
+      try {
+        await ctx.change((record, now) => {
+          const attempt = record.whiteboard.media.attempts.find(row => row.id === item.id);
+          if (attempt && attempt.status !== 'validated') Object.assign(attempt, {
+            status: error.code === 'UNKNOWN_EXTERNAL_OUTCOME' ? 'unknown_external_outcome' : 'failed',
+            errorCode: error.code || 'MEDIA_FAILED', completedAt: now,
+          });
+          if (record.whiteboard.media.activeAttemptId === item.id) record.whiteboard.media.activeAttemptId = '';
+        });
+      } catch { /* Deleted or superseded tasks must never be recreated. */ }
+    }
+    throw error;
+  }
+}
+
+async function lineartStage(ctx, artifact, timing) {
+  if (!artifact.scenes.length) throw new WhiteboardError('TIMELINE_INVALID', '没有可生成线稿的分镜。');
+  const failures = await runSceneCandidates(ctx, { stage: 'lineart_generation', label: '生成线稿',
+    progressKey: 'lineartProgress', scenes: artifact.scenes, pool: ctx.imagePool || imagePool,
+    job: scene => generateLineartCandidate(ctx, artifact, scene) });
+  if (failures.length) {
+    const details = failures.slice(0, 3).map(result => `${result.scene.title || result.scene.id}：${result.reason instanceof WhiteboardError
+      ? result.reason.message : '本地图片处理失败，请检查文件和运行环境。'}`).join('；');
+    throw new WhiteboardError('LINEART_GENERATION_FAILED', `${failures.length} 幕线稿生成未完成。${details}${failures.length > 3 ? '；其余失败幕可在继续制作时重试。' : ''} 已完成幕及收到的原始图片已保留，继续制作时会复用有效产物。`);
   }
   const record = await ctx.read();
   await complete(ctx, null, 'lineart_generation', store.bind({ kind: 'lineart_bundle',
@@ -227,45 +307,9 @@ async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
 async function annotationStage(ctx, artifact, timing) {
   if (!timing.scenes.length) throw new WhiteboardError('TIMELINE_INVALID', '没有可编排的分镜。');
   const canvas = canvasFor(artifact.aspectRatio);
-  const pool = ctx.annotationPool || annotationPool;
-  const signal = ctx.processOptions.signal;
-  const state = { total: timing.scenes.length, concurrency: pool.concurrency, completed: 0, failed: 0, reused: 0, active: 0, peakActive: 0 };
-  const report = async () => {
-    const progress = { ...state, queued: Math.max(0, state.total - state.completed - state.failed - state.active) };
-    const message = `正在并发编排落墨：已完成 ${progress.completed}/${progress.total}，处理中 ${progress.active}，等待 ${progress.queued}${progress.failed ? `，失败 ${progress.failed}` : ''}（并发上限 ${progress.concurrency}）。`;
-    const updated = await ctx.change((record, now) => {
-      record.whiteboard.media.annotationProgress = progress;
-      record.message = message;
-      record.current_stage_message = message;
-      record.updated_at = now;
-      const stage = record.whiteboard.media.stages.find(item => item.id === 'annotation_drafting');
-      if (stage) Object.assign(stage, { message, updated_at: now });
-    });
-    await ctx.emitProgress?.({ type: 'stage_progress', stage: 'annotation_drafting', progress: updated?.record?.current_progress || 52, message });
-  };
-  await report();
-  const results = await pool.mapSettled(timing.scenes, async scene => {
-    state.active += 1;
-    state.peakActive = Math.max(state.peakActive, state.active);
-    try {
-      await report();
-      const result = await annotateSceneCandidate(ctx, artifact, timing, scene, canvas);
-      state.completed += 1;
-      if (result.reused) state.reused += 1;
-      return result;
-    } catch (error) { state.failed += 1; throw error; }
-    finally { state.active -= 1; await report(); }
-  }, { signal });
-  const failures = results.map((result, index) => ({ ...result, scene: timing.scenes[index] })).filter(result => result.status === 'rejected');
-  state.failed = failures.length;
-  await report();
-  // UNKNOWN_EXTERNAL_OUTCOME 必须原样上抛：语音与视觉请求是否已计费无法确认时，
-  // 任务须进入 unknown_external_outcome 状态等待用户核实，不能被聚合成普通失败。
-  const unknown = failures.find(result => result.reason?.code === 'UNKNOWN_EXTERNAL_OUTCOME');
-  if (unknown) throw unknown.reason;
-  if (signal?.aborted) throw new WhiteboardError('MEDIA_CANCELLED', '落墨编排已取消。');
-  const stopped = failures.find(result => ['ENOENT', 'STALE_IDENTITY', 'MEDIA_CANCELLED'].includes(result.reason?.code));
-  if (stopped) throw stopped.reason;
+  const failures = await runSceneCandidates(ctx, { stage: 'annotation_drafting', label: '编排落墨',
+    progressKey: 'annotationProgress', scenes: timing.scenes, pool: ctx.annotationPool || annotationPool,
+    job: scene => annotateSceneCandidate(ctx, artifact, timing, scene, canvas) });
   const coverageFailures = failures.filter(result => result.reason?.code === 'ANNOTATION_COVERAGE_LOW');
   if (failures.length) {
     const names = failures.slice(0, 3).map(result => result.scene.title || result.scene.id).join('、');
@@ -332,41 +376,9 @@ async function renderSceneCandidate(ctx, artifact, scene) {
 
 async function sceneStage(ctx, artifact, timing) {
   if (!timing.scenes.length) throw new WhiteboardError('TIMELINE_INVALID', '没有可渲染的分镜。');
-  const pool = ctx.sceneRenderPool || sceneRenderPool;
-  const signal = ctx.processOptions.signal;
-  const state = { total: timing.scenes.length, concurrency: pool.concurrency, completed: 0, failed: 0, reused: 0, active: 0, peakActive: 0 };
-  const report = async () => {
-    const progress = { ...state, queued: Math.max(0, state.total - state.completed - state.failed - state.active) };
-    const message = `正在并发渲染单幕：已完成 ${progress.completed}/${progress.total}，处理中 ${progress.active}，等待 ${progress.queued}${progress.failed ? `，失败 ${progress.failed}` : ''}（并发上限 ${progress.concurrency}）。`;
-    const updated = await ctx.change((record, now) => {
-      record.whiteboard.media.sceneRenderProgress = progress;
-      record.message = message;
-      record.current_stage_message = message;
-      record.updated_at = now;
-      const stage = record.whiteboard.media.stages.find(item => item.id === 'scene_render');
-      if (stage) Object.assign(stage, { message, updated_at: now });
-    });
-    await ctx.emitProgress?.({ type: 'stage_progress', stage: 'scene_render', progress: updated?.record?.current_progress || 68, message });
-  };
-  await report();
-  const results = await pool.mapSettled(timing.scenes, async scene => {
-    state.active += 1;
-    state.peakActive = Math.max(state.peakActive, state.active);
-    try {
-      await report();
-      const result = await renderSceneCandidate(ctx, artifact, scene);
-      state.completed += 1;
-      if (result.reused) state.reused += 1;
-      return result;
-    } catch (error) { state.failed += 1; throw error; }
-    finally { state.active -= 1; await report(); }
-  }, { signal });
-  const failures = results.map((result, index) => ({ ...result, scene: timing.scenes[index] })).filter(result => result.status === 'rejected');
-  state.failed = failures.length;
-  await report();
-  if (signal?.aborted) throw new WhiteboardError('MEDIA_CANCELLED', '单幕渲染已取消。');
-  const stopped = failures.find(result => ['ENOENT', 'STALE_IDENTITY', 'MEDIA_CANCELLED'].includes(result.reason?.code));
-  if (stopped) throw stopped.reason;
+  const failures = await runSceneCandidates(ctx, { stage: 'scene_render', label: '渲染单幕',
+    progressKey: 'sceneRenderProgress', scenes: timing.scenes, pool: ctx.sceneRenderPool || sceneRenderPool,
+    job: scene => renderSceneCandidate(ctx, artifact, scene) });
   if (failures.length) {
     const names = failures.slice(0, 3).map(result => result.scene.title || result.scene.id).join('、');
     throw new WhiteboardError('SCENE_RENDER_FAILED', `${failures.length} 幕渲染未完成（${names}${failures.length > 3 ? '等' : ''}）。已完成单幕已保留，继续制作时会复用有效产物。`);

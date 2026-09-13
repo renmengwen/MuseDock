@@ -1,9 +1,10 @@
 const { createSceneRenderPool } = require('./sceneRenderPool');
+const { annotationConcurrency } = require('../../../resources/whiteboard/concurrency-settings.json');
 
-const MAX_CONCURRENCY = 10;
+const MAX_CONCURRENCY = annotationConcurrency.max;
 
 function createAnnotationPool(value) {
-  return createSceneRenderPool(value, { defaultConcurrency: MAX_CONCURRENCY,
+  return createSceneRenderPool(value, { defaultConcurrency: annotationConcurrency.default,
     maxConcurrency: MAX_CONCURRENCY, cancelMessage: '落墨编排已取消。' });
 }
 

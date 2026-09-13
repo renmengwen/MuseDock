@@ -8,6 +8,15 @@ const store = require('./mediaStore');
 const mediaTools = require('./mediaTools');
 const { narrationStage, lineartStage, annotationStage, sceneStage, finalStage, reviewGate } = require('./productionStages');
 const aiTtsModel = require('../../ai/aiTtsModel');
+const appSettings = require('../../appSettings');
+const { ensureWhiteboardConcurrency } = require('./concurrency');
+const { recoverableAnnotationAttempts, recoverAnnotationPreviews } = require('./annotationRecovery');
+
+const COVERAGE_GATE = 'annotation_coverage_review';
+
+function hasCoverageReview(media) {
+  return media.stage === 'annotation_drafting' && !media.current.annotation_drafting && media.lowCoverage?.length > 0;
+}
 
 function assertMediaContract(media) {
   if (!media || media.stale) return;
@@ -34,10 +43,14 @@ function actionsFor(record) {
   if (['queued', 'running'].includes(record.status) || media?.executionId) return [];
   if (!media || media.stale) return record.status === 'phase0_complete' ? [{ id: 'start_production', label: '开始制作视频' }] : null;
   if (record.status === 'unknown_external_outcome') return [{ id: 'authorize_media_retry', label: '核实后授权新请求', requiresConfirmation: true }];
+  if (['failed', 'waiting_approval'].includes(record.status) && hasCoverageReview(media)) return [
+    { id: 'accept_low_coverage', label: '查看预览后接受当前落墨', requiresConfirmation: true },
+    { id: 'retry_media', label: '重新编排未通过的幕' },
+  ];
   if (record.status === 'failed') return [
+    ...(recoverableAnnotationAttempts(media).length
+      ? [{ id: 'recover_annotation_preview', label: '恢复落墨预览' }] : []),
     { id: 'retry_media', label: '继续未完成的制作' },
-    ...(record.error?.code === 'ANNOTATION_COVERAGE_LOW' && media.lowCoverage?.length
-      ? [{ id: 'accept_low_coverage', label: '查看预览后接受当前落墨', requiresConfirmation: true }] : []),
     ...(media.stage === 'full_narration' && /^(NARRATION_|AUDIO_)/.test(record.error?.code || '')
       ? [{ id: 'regenerate_narration', label: '重新生成完整旁白', requiresConfirmation: true }] : [])];
   if (record.status === 'waiting_approval' && media.gate) return [
@@ -68,6 +81,23 @@ function message(record, role, text, now, interactionId = '') {
 function expireInteraction(record, status, now, response = '') {
   const interaction = record.whiteboard.interactions?.find(item => item.id === record.whiteboard.media?.interactionId);
   if (interaction?.status === 'pending') Object.assign(interaction, { status, answeredAt: now, response });
+}
+
+function waitForCoverageReview(record, now) {
+  const media = record.whiteboard.media;
+  expireInteraction(record, 'superseded', now);
+  media.gate = COVERAGE_GATE;
+  const details = media.lowCoverage.map(entry => `${entry.title || entry.sceneId}（覆盖率 ${(entry.coverage.coverageRatio * 100).toFixed(1)}%）`).join('、');
+  const interaction = { id: crypto.randomUUID(), kind: COVERAGE_GATE, stage: COVERAGE_GATE,
+    title: '请检查覆盖不足的分镜并决定是否接受',
+    summary: `${details}。接受后遗漏部分保持空白；也可以重新编排未通过的幕。`,
+    status: 'pending', createdAt: now, expectedAttemptId: record.whiteboard.attempts.at(-1).id,
+    expectedIdentity: record.whiteboard.current.identity,
+    artifactIdentity: sha256(media.lowCoverage.map(entry => entry.identity)) };
+  (record.whiteboard.interactions ||= []).push(interaction);
+  media.interactionId = interaction.id;
+  setState(record, 'waiting_approval', `${details} 的落墨覆盖不足，请在落墨列表查看预览并选择接受或重新编排。`, now);
+  message(record, 'assistant', record.message, now, interaction.id);
 }
 
 async function requirePlan(record, options) {
@@ -138,6 +168,18 @@ async function act(record, payload, options, now) {
   const media = record.whiteboard.media;
   if (payload.expectedMediaIdentity !== store.mediaIdentity(media)
     || (media.interactionId && payload.interactionId !== media.interactionId)) throw new WhiteboardError('STALE_IDENTITY', '媒体版本或待确认卡片已变化，请刷新后检查当前产物。', 409);
+  if (action === 'recover_annotation_preview') {
+    const count = await recoverAnnotationPreviews(record, artifact, options, now, payload.sceneId);
+    message(record, 'user', '使用已保存的编排恢复落墨预览，保留当前接受决定。', now);
+    if (hasCoverageReview(media)) waitForCoverageReview(record, now);
+    else {
+      const text = `已在本地恢复 ${count} 幕落墨预览，可继续未完成的制作。`;
+      record.error = { code: 'ANNOTATION_DRAFT_INCOMPLETE', message: text };
+      setState(record, 'failed', text, now);
+    }
+    record.task_status = record.status;
+    return false;
+  }
   if (action === 'approve_media') {
     if (payload.confirmed !== true) throw new WhiteboardError('APPROVAL_REQUIRED', '请实际检查当前产物后明确确认。', 409);
     await validateCurrent(record, media.stage, options);
@@ -190,6 +232,7 @@ async function act(record, payload, options, now) {
     }
     media.lowCoverage = [];
   }
+  const retryingCoverage = action === 'retry_media' && hasCoverageReview(media);
   if (action === 'retry_media' && media.stage === 'annotation_drafting') media.lowCoverage = [];
   if (action === 'regenerate_narration') {
     if (payload.confirmed !== true) throw new WhiteboardError('EXTERNAL_AUTH_REQUIRED', '重新生成完整旁白会发起新的语音请求，请明确确认。', 409);
@@ -220,19 +263,21 @@ async function act(record, payload, options, now) {
     record.result = null;
     media.revision += 1;
   }
-  expireInteraction(record, action === 'revise_media' ? 'superseded' : 'answered', now, payload.message || '继续本阶段');
+  expireInteraction(record, action === 'revise_media' || retryingCoverage ? 'superseded' : 'answered', now,
+    retryingCoverage ? '已选择重新编排未通过的幕' : payload.message || '继续本阶段');
   media.gate = ''; media.interactionId = ''; media.activeAttemptId = '';
   setState(record, 'queued', '正在继续当前媒体阶段，已完成且有效的产物将复用...', now);
   record.last_event_seq = 0;
   message(record, 'user', action === 'authorize_media_retry' ? '已核实外部结果，同意可能的重复费用并授权新的请求。'
     : action === 'accept_low_coverage' ? '已查看低覆盖率落墨预览，接受当前已标注内容并继续；遗漏内容保持空白。'
+    : retryingCoverage ? '重新编排未通过的幕，保留已完成的落墨。'
     : payload.message || '继续未完成的制作。', now);
   return true;
 }
 
 function unfinishedAttempts(media) {
   return media.attempts.filter(item => !['validated', 'accepted', 'failed', 'unknown_external_outcome'].includes(item.status)
-    && (item.id === media.activeAttemptId || (['scene_render', 'annotation_drafting'].includes(media.stage) && item.stage === media.stage
+    && (item.id === media.activeAttemptId || (['lineart_generation', 'scene_render', 'annotation_drafting'].includes(media.stage) && item.stage === media.stage
       && (!item.executionId || item.executionId === media.executionId))));
 }
 
@@ -242,8 +287,13 @@ function fail(record, error, now) {
   for (const attempt of unfinishedAttempts(media)) Object.assign(attempt, { status: unknown ? 'unknown_external_outcome' : 'failed', errorCode: error.code, completedAt: now });
   if (media.sceneRenderProgress) media.sceneRenderProgress.active = 0;
   if (media.annotationProgress) media.annotationProgress.active = 0;
+  if (media.lineartProgress) media.lineartProgress.active = 0;
   media.activeAttemptId = '';
   media.executionId = '';
+  if (!unknown && hasCoverageReview(media)) {
+    waitForCoverageReview(record, now);
+    return;
+  }
   record.error = { code: error.code || 'MEDIA_FAILED', message: error.message };
   setState(record, unknown ? 'unknown_external_outcome' : 'failed', error.message, now);
   message(record, 'assistant', error.message, now);
@@ -257,7 +307,7 @@ function recover(record, now) {
   fail(record, new WhiteboardError(unknown ? 'UNKNOWN_EXTERNAL_OUTCOME' : 'MEDIA_INTERRUPTED', unknown
     ? '服务重启时存在尚未取得完整证据的外部请求，请核实后授权新请求。'
     : '媒体制作被中断，可以继续未完成阶段；有效的音频和图片会复用。'), now);
-  record.active_task_id = ''; record.active_operation_id = ''; record.task_status = 'failed';
+  record.active_task_id = ''; record.active_operation_id = ''; record.task_status = record.status === 'waiting_approval' ? 'waiting_approval' : 'failed';
 }
 
 async function run(workflowId, options, hooks) {
@@ -296,6 +346,8 @@ async function run(workflowId, options, hooks) {
     const runtime = await tools.preflight({ ...processOptions, aspectRatio: initialArtifact.aspectRatio || '16:9' });
     const config = await services.aiModelConfig.getRuntimeConfig('text');
     const voice = await voiceSnapshot(services);
+    await ensureWhiteboardConcurrency(() => (services.appSettings?.getWhiteboardSettings ? services.appSettings : appSettings)
+      .getWhiteboardSettings(options.appSettingsOptions));
 
     const attempt = async (stage, sceneId = '', external = false, inputIdentity = '') => {
       const item = { id: crypto.randomUUID(), stage, sceneId, external, inputIdentity, executionId, status: 'prepared' };
@@ -369,7 +421,12 @@ async function run(workflowId, options, hooks) {
   } catch (error) {
     if (error.code === 'ENOENT' || !await workflowFileExists(workflowId, rootDir)) return { success: false, workflow_id: workflowId, status: 'deleted', message: '制作任务已停止并删除。' };
     const safe = error instanceof WhiteboardError ? error : new WhiteboardError('MEDIA_FAILED', '媒体处理失败，请检查本地运行环境与当前产物后重试。');
-    if (claimed) { try { await change((record, now) => fail(record, safe, now)); } catch { /* Never recreate a deleted task. */ } }
+    if (claimed) {
+      try {
+        const stopped = await change((record, now) => fail(record, safe, now));
+        if (stopped.record.status === 'waiting_approval') return { ...await getView(stopped.record, options), success: true, code: safe.code };
+      } catch { /* Never recreate a deleted task. */ }
+    }
     return { success: false, workflow_id: workflowId, code: safe.code, status: safe.code === 'UNKNOWN_EXTERNAL_OUTCOME' ? 'unknown_external_outcome' : 'failed', message: safe.message };
   } finally { controller.abort(); clearInterval(watchdog); clearInterval(heartbeat); }
 }

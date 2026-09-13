@@ -201,7 +201,7 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
     const remember = () => {
       if (payload.requestId) (record.whiteboard.actionReceipts ||= []).push({ requestId: payload.requestId, requestHash, action: payload.action, acceptedAt: now });
     };
-    if (['start_production', 'approve_media', 'revise_media', 'retry_media', 'accept_low_coverage', 'authorize_media_retry', 'regenerate_narration'].includes(payload.action)) {
+    if (['start_production', 'approve_media', 'revise_media', 'retry_media', 'recover_annotation_preview', 'accept_low_coverage', 'authorize_media_retry', 'regenerate_narration'].includes(payload.action)) {
       const start = await production.act(record, payload, options, now); remember(); return start;
     }
     const current = record.whiteboard.current;

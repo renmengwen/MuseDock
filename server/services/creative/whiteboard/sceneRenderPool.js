@@ -1,7 +1,8 @@
 const { WhiteboardError } = require('./contracts');
+const { renderConcurrency } = require('../../../resources/whiteboard/concurrency-settings.json');
 
-const DEFAULT_CONCURRENCY = 3;
-const MAX_CONCURRENCY = 8;
+const DEFAULT_CONCURRENCY = renderConcurrency.default;
+const MAX_CONCURRENCY = renderConcurrency.max;
 
 function normalizeConcurrency(value, defaultConcurrency = DEFAULT_CONCURRENCY, maxConcurrency = MAX_CONCURRENCY) {
   const number = Number(value);
@@ -11,7 +12,7 @@ function normalizeConcurrency(value, defaultConcurrency = DEFAULT_CONCURRENCY, m
 
 function createSceneRenderPool(value, { defaultConcurrency = DEFAULT_CONCURRENCY,
   maxConcurrency = MAX_CONCURRENCY, cancelMessage = '单幕渲染已取消。' } = {}) {
-  const concurrency = normalizeConcurrency(value, defaultConcurrency, maxConcurrency);
+  let concurrency = normalizeConcurrency(value, defaultConcurrency, maxConcurrency);
   const cancelled = () => new WhiteboardError('MEDIA_CANCELLED', cancelMessage);
   const queue = [];
   let active = 0;
@@ -51,6 +52,13 @@ function createSceneRenderPool(value, { defaultConcurrency = DEFAULT_CONCURRENCY
     });
   }
 
+  function setConcurrency(value) {
+    concurrency = normalizeConcurrency(value, defaultConcurrency, maxConcurrency);
+    // 降低上限不会中断已启动的工作；排队项等到有空位才启动。
+    drain();
+    return concurrency;
+  }
+
   async function mapSettled(items, job, options = {}) {
     const results = new Array(items.length);
     let next = 0;
@@ -62,11 +70,13 @@ function createSceneRenderPool(value, { defaultConcurrency = DEFAULT_CONCURRENCY
         catch (reason) { results[index] = { status: 'rejected', reason }; }
       }
     }
-    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+    // 只预排一个有界窗口；设置调高后，已有阶段也能立即补足新的空位。
+    await Promise.all(Array.from({ length: Math.min(maxConcurrency, items.length) }, worker));
     return results;
   }
 
-  return Object.freeze({ concurrency, run, mapSettled, get active() { return active; }, get queued() { return queue.length; } });
+  return Object.freeze({ get concurrency() { return concurrency; }, setConcurrency, run, mapSettled,
+    get active() { return active; }, get queued() { return queue.length; } });
 }
 
 // One pool per service process; starting another workflow does not multiply the render limit.

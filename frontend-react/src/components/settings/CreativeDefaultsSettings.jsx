@@ -85,8 +85,8 @@ export function CreativeDefaultsSettings({
     <section>
       <div className="mb-4 flex items-start justify-between gap-3 max-[520px]:flex-col">
         <div>
-          <h3 className="m-0 text-lg font-bold">创作默认值</h3>
-          <p className="mt-1 text-[13px] text-[#69717e]">设置一键创作默认使用的画面比例、目标时长、AI 生图数量和联网研究开关。</p>
+          <h3 className="m-0 text-lg font-bold">HyperFrames 创作默认值</h3>
+          <p className="mt-1 text-[13px] text-[#69717e]">设置 HyperFrames 动态视频默认使用的画面比例、目标时长、AI 生图数量和联网研究开关。</p>
         </div>
         <button
           type="button"

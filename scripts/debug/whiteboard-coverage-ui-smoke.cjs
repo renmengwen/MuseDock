@@ -34,6 +34,7 @@ async function main() {
   let missingImage = false;
   let staleAction = false;
   let portrait = false;
+  let recoveryView;
   let view;
   async function reset(vertical = false) {
     portrait = vertical;
@@ -68,6 +69,7 @@ async function main() {
         view.whiteboard.media.identity = 'fixture-newer-version';
         return { success: false, code: 'STALE_IDENTITY', message: '预览版本已变化，请检查当前产物。' };
       }
+      if (payload.action === 'recover_annotation_preview' && recoveryView) view = structuredClone(recoveryView);
       return { success: true, startTask: false, data: structuredClone(view) };
     },
   };
@@ -102,6 +104,8 @@ async function main() {
     await page.goto(url);
     await page.getByRole('table', { name: '落墨分镜列表', exact: true }).waitFor();
     assert.equal(await page.getByRole('table').getByRole('row').count(), 4, '应按方案顺序保留成功与失败三幕');
+    await page.getByText('覆盖不足 · 待确认', { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(output, 'coverage-list.png'), fullPage: true });
     imageGate = deferred();
     await open();
     assert.equal(await accept.isDisabled(), true, '图像加载前不能确认');
@@ -118,7 +122,7 @@ async function main() {
     await page.getByRole('button', { name: '查看第 2 幕落墨详情', exact: true }).click();
     await ready();
     assert.equal(await dialog.locator('img').count(), 2, '失败幕详情也必须显示两张对照图');
-    await dialog.getByRole('button', { name: '关闭详情', exact: true }).click();
+    await dialog.getByRole('button', { name: '暂不决定', exact: true }).click();
 
     await open(); await ready();
     actionGate = deferred();
@@ -160,9 +164,43 @@ async function main() {
     assert.equal(await accept.isDisabled(), true);
     assert.equal(await dialog.getByRole('button', { name: '重新编排未通过的幕', exact: true }).isDisabled(), true);
     await page.screenshot({ path: path.join(output, 'coverage-stale.png'), fullPage: true });
+
+    staleAction = false;
+    await reset();
+    recoveryView = structuredClone(view);
+    const legacyMedia = view.whiteboard.media;
+    const legacyEntry = legacyMedia.lowCoverage[0];
+    legacyMedia.lowCoverage = [];
+    legacyMedia.gate = ''; legacyMedia.interactionId = '';
+    view.status = 'failed';
+    view.whiteboard.interactions = [];
+    view.whiteboard.allowedActions = [{ id: 'recover_annotation_preview' }, { id: 'retry_media' }];
+    const legacyAttempt = legacyMedia.attempts.find(item => item.id === legacyEntry.attemptId);
+    legacyAttempt.errorCode = 'MEDIA_FAILED';
+    legacyAttempt.received = { candidate: legacyAttempt.received.candidate };
+    await page.reload();
+    const recoveryButton = page.getByRole('button', { name: '恢复第 2 幕落墨预览', exact: true });
+    await recoveryButton.waitFor();
+    await page.getByText('编排失败', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('table').getByText('等待编排', { exact: true }).count(), 0, '已失败的幕不能显示为等待编排');
+    const countBeforeRecovery = requests.length;
+    actionGate = deferred();
+    await recoveryButton.click();
+    await page.getByRole('status').filter({ hasText: '正在使用已保存的编排恢复落墨预览' }).waitFor();
+    assert.equal(await recoveryButton.isDisabled(), true);
+    assert.equal(requests.length, countBeforeRecovery + 1);
+    assert.equal(requests.at(-1).action, 'recover_annotation_preview');
+    assert.equal(requests.at(-1).sceneId, 'scene_2');
+    actionGate.resolve(); actionGate = null;
+    await page.getByText('覆盖不足 · 待确认', { exact: true }).waitFor();
+    await page.getByRole('button', { name: '查看第 2 幕落墨详情', exact: true }).click();
+    await ready();
+    assert.equal(await accept.isEnabled(), true);
+    await dialog.getByRole('button', { name: '暂不决定', exact: true }).click();
+    assert.equal(requests.length, countBeforeRecovery + 1, '恢复和预览不得自动接受或重新请求模型');
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ success: true, providerCalls: 0,
-      checks: ['失败幕与成功幕并存', '双图与覆盖率', '加载完成前禁止确认', '关闭无副作用', '确认版本与重复点击保护', '竖屏和390px布局', '重新编排', '缺图禁用', '过期确认拒绝', '无运行时异常'], screenshots: output }));
+      checks: ['失败幕与成功幕并存', '待确认行直接进入处理', '旧失败任务恢复预览', '双图与覆盖率', '加载完成前禁止确认', '关闭无副作用', '确认版本与重复点击保护', '竖屏和390px布局', '重新编排', '缺图禁用', '过期确认拒绝', '无运行时异常'], screenshots: output }));
   } finally {
     imageGate?.resolve(); actionGate?.resolve();
     await browser?.close();

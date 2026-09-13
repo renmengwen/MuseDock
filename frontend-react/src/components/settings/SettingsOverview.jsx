@@ -37,6 +37,13 @@ export function SettingsOverview({ appSettings, modelSettings, systemHealth, onN
       action: 'creative',
     },
     {
+      title: '白板并发',
+      value: appSettings?.whiteboard
+        ? `生图 ${appSettings.whiteboard.imageConcurrency} · 落墨 ${appSettings.whiteboard.annotationConcurrency} · 渲染 ${appSettings.whiteboard.renderConcurrency}`
+        : '未加载',
+      action: 'whiteboard',
+    },
+    {
       title: '质检状态',
       value: appSettings?.system?.skipValidation ? '已跳过' : '已启用',
       action: 'system',
@@ -63,7 +70,7 @@ export function SettingsOverview({ appSettings, modelSettings, systemHealth, onN
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h3 className="m-0 text-lg font-bold">设置中心总览</h3>
-          <p className="mt-1 text-[13px] text-[#69717e]">查看创作默认值、模型能力和本地系统状态。</p>
+          <p className="mt-1 text-[13px] text-[#69717e]">查看 HyperFrames 与白板动画配置、模型能力和本地系统状态。</p>
         </div>
       </div>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
