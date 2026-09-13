@@ -4,6 +4,7 @@ const defaultCreativeWorkflows = require('../services/creative/creativeWorkflows
 const defaultCreativeWorkflowTasks = require('../services/creative/creativeWorkflowTasks');
 const defaultVisualAssetUploads = require('../services/creative/visualAssetUploads');
 const { formatSseEvent, normalizeSinceSeq } = require('../services/creative/creativeTaskEvents');
+const { WhiteboardError } = require('../services/creative/whiteboard/contracts');
 const {
   normalizeCreativeWorkflowDto,
   normalizeCreativeWorkflowSummary,
@@ -204,6 +205,53 @@ router.post('/:workflow_id/whiteboard/actions', async (req, res) => {
     return res.status(202).json({ ...result, task_id: started.task_id, active_task: started.active_task });
   } catch {
     return res.status(500).json({ success: false, workflow_id: workflowId, message: '白板操作失败，请检查服务连接和本地存储后重试。' });
+  }
+});
+
+router.post('/:workflow_id/whiteboard/chat', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) return res.status(400).json(validation);
+  const workflowId = validation.workflow_id;
+  const service = getService(req);
+  if (typeof service.chatOnWhiteboardWorkflow !== 'function') return res.status(501).json({ success: false, message: '当前服务尚未支持白板自然语言对话，请更新服务端。' });
+  const registry = getTaskRegistry(req);
+  if (registry?.activeTaskForWorkflow(workflowId)?.status === 'running') {
+    return res.status(409).json({ success: false, message: '当前方案仍在处理中，请等待本轮执行结束后再操作。' });
+  }
+  // 意图分类与回答生成耗时较长，用 SSE 把意图判定与回答增量实时推给前端。
+  res.status(200).set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  });
+  res.flushHeaders?.();
+  let started = null;
+  try {
+    const result = await service.chatOnWhiteboardWorkflow(workflowId, req.body || {}, {
+      onEvent: event => res.write(formatSseEvent({ seq: 0, ...event })),
+    });
+    if (result?.startTask) {
+      started = await getTaskService(req).startCreativeWorkflowTask(workflowId, {
+        registry, services: { creativeWorkflows: service },
+      });
+      if (!started?.success) {
+        await service.patchCreativeWorkflowTaskSummary?.(workflowId, { task_status: 'failed', fail_running_stages: true });
+        res.write(formatSseEvent({ seq: 0, type: 'chat_error', message: started?.message || '意图已理解并保存，但后台启动失败，请刷新任务后重试。' }));
+        return res.end();
+      }
+    }
+    res.write(formatSseEvent({
+      seq: 0, type: 'chat_result', success: true, workflow: result?.workflow,
+      startTask: Boolean(started), task_id: started?.task_id, active_task: started?.active_task,
+    }));
+    res.end();
+  } catch (error) {
+    const code = error.code === 'ENOENT' ? 'NOT_FOUND' : (error.code || 'WHITEBOARD_CHAT_FAILED');
+    const message = error instanceof WhiteboardError ? error.message
+      : (error.code === 'ENOENT' ? '未找到创作任务。' : '白板消息处理失败，请检查服务连接后重试。');
+    const statusCode = error.code === 'ENOENT' ? 404 : (error.statusCode || 500);
+    res.write(formatSseEvent({ seq: 0, type: 'chat_error', code, message, statusCode }));
+    res.end();
   }
 });
 

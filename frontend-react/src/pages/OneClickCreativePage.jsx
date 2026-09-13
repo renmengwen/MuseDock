@@ -971,25 +971,53 @@ export function OneClickCreativePage() {
     }
   }
 
-  async function handleWhiteboardAction(payload) {
+  function applyWhiteboardResult(json, targetWorkflowId) {
+    const activeId = currentWorkflowRef.current.routeWorkflowId || currentWorkflowRef.current.selectedWorkflowId;
+    if (activeId !== targetWorkflowId) return;
+    const nextWorkflow = getWorkflowPayload(json);
+    finalWorkflowRefreshRef.current = null;
+    setWorkflow(nextWorkflow);
+    setMessage(nextWorkflow.message || '白板方案已更新。');
+    setStatus(json.task_id ? 'polling' : nextWorkflow.status);
+    persistTasks(prev => updateTask(prev, {
+      workflow_id: targetWorkflowId, creationModeId: WHITEBOARD_MODE,
+      title: getTaskDisplayTitle(nextWorkflow, nextWorkflow.input?.content), workflow: nextWorkflow,
+      status: nextWorkflow.status, message: nextWorkflow.message, updated_at: nextWorkflow.updated_at,
+    }));
+    if (json.task_id) subscribeTaskEvents({ workflow_id: targetWorkflowId, task_id: json.task_id }, { sinceSeq: 0 });
+  }
+
+  async function handleWhiteboardAction(payload, { onEvent } = {}) {
     if (whiteboardActionRef.current) return;
     const targetWorkflowId = selectedWorkflowId || workflowId;
     whiteboardActionRef.current = true;
     try {
+      if (payload.action === 'message' && typeof onEvent === 'function') {
+        // 自然语言消息走流式对话端点：意图判定与回答增量通过 SSE 实时返回。
+        await new Promise((resolve, reject) => {
+          api.chatOnWhiteboardWorkflow(targetWorkflowId, payload, {
+            onEvent: event => {
+              if (event.type === 'chat_error') {
+                reject(new Error(event.message || '白板消息处理失败。'));
+                return;
+              }
+              if (event.type === 'chat_result') {
+                if (event.success === false) {
+                  reject(new Error(event.message || '白板消息处理失败。'));
+                  return;
+                }
+                applyWhiteboardResult(event, targetWorkflowId);
+              }
+              try { onEvent(event); } catch { /* 展示层回调异常不应打断事件流。 */ }
+            },
+            onClose: resolve,
+            onError: reject,
+          });
+        });
+        return;
+      }
       const json = await api.actOnWhiteboardWorkflow(targetWorkflowId, payload);
-      const activeId = currentWorkflowRef.current.routeWorkflowId || currentWorkflowRef.current.selectedWorkflowId;
-      if (activeId !== targetWorkflowId) return;
-      const nextWorkflow = getWorkflowPayload(json);
-      finalWorkflowRefreshRef.current = null;
-      setWorkflow(nextWorkflow);
-      setMessage(nextWorkflow.message || '白板方案已更新。');
-      setStatus(json.task_id ? 'polling' : nextWorkflow.status);
-      persistTasks(prev => updateTask(prev, {
-        workflow_id: targetWorkflowId, creationModeId: WHITEBOARD_MODE,
-        title: getTaskDisplayTitle(nextWorkflow, nextWorkflow.input?.content), workflow: nextWorkflow,
-        status: nextWorkflow.status, message: nextWorkflow.message, updated_at: nextWorkflow.updated_at,
-      }));
-      if (json.task_id) subscribeTaskEvents({ workflow_id: targetWorkflowId, task_id: json.task_id }, { sinceSeq: 0 });
+      applyWhiteboardResult(json, targetWorkflowId);
     } catch (error) {
       await refreshWorkflowSnapshot({ workflowId: targetWorkflowId });
       throw error;

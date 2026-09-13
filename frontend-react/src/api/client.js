@@ -78,7 +78,9 @@ function streamJsonSse(url, payload, handlers = {}) {
         signal: controller.signal,
       });
       if (!response.ok || !response.body) {
-        throw new Error(`任务事件流连接失败：HTTP ${response.status}`);
+        // 服务端在进入流式前失败的响应是 JSON，尽量透出其中的中文原因。
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || `任务事件流连接失败：HTTP ${response.status}`);
       }
       reader = response.body.getReader();
       while (true) {
@@ -126,6 +128,10 @@ export const api = {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/whiteboard/actions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     });
+  },
+  // 白板自然语言对话：SSE 流式返回 chat_intent / chat_message_delta / chat_result 事件。
+  chatOnWhiteboardWorkflow(workflowId, payload, handlers = {}) {
+    return streamJsonSse(`/api/creative-workflows/${encodeURIComponent(workflowId)}/whiteboard/chat`, payload, handlers);
   },
   getWhiteboardArtifact(workflowId, attemptId) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/whiteboard/attempts/${encodeURIComponent(attemptId)}`);

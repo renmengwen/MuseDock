@@ -6,9 +6,15 @@ import { Button } from '@/components/ui/button.jsx';
 import { Textarea } from '@/components/ui/textarea.jsx';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog.jsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog.jsx';
+import { Message, MessageContent, MessageHeader } from '@/components/ui/message.jsx';
+import { Bubble, BubbleContent } from '@/components/ui/bubble.jsx';
+import {
+  MessageScroller, MessageScrollerButton, MessageScrollerContent,
+  MessageScrollerItem, MessageScrollerProvider, MessageScrollerViewport,
+} from '@/components/ui/message-scroller.jsx';
 import { cn } from '@/lib/utils.js';
 import { STATUS_TEXT } from '../creativeDisplay.js';
-import { LabeledSelect, ProductionPlanFields } from './WhiteboardInputFields.jsx';
+import { ProductionPlanFields } from './WhiteboardInputFields.jsx';
 import { WhiteboardArtifact } from './WhiteboardArtifact.jsx';
 import { WhiteboardConversationCard } from './WhiteboardConversationCard.jsx';
 import { WhiteboardMediaPanel } from './WhiteboardMediaPanel.jsx';
@@ -24,10 +30,8 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
   const [historyArtifact, setHistoryArtifact] = useState(null);
   const [historyBusy, setHistoryBusy] = useState('');
   const [historyError, setHistoryError] = useState('');
-  const [sceneId, setSceneId] = useState('');
+  const [streamReply, setStreamReply] = useState({ phase: '', text: '' });
   const actionLock = useRef(false);
-  const conversationRef = useRef(null);
-  const followConversation = useRef(true);
   const historyRequest = useRef(0);
   const whiteboard = workflow.whiteboard;
   const media = whiteboard.media && !whiteboard.media.stale ? whiteboard.media : null;
@@ -45,30 +49,30 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
   const title = artifact?.title || workflow.title || '白板创作';
   const statusMessage = whiteboard.artifactError || workflow.current_stage_message || workflow.message || message;
   const canMessage = Boolean(artifact) && !['unknown_external_outcome', 'failed'].includes(workflow.status);
-  const selectedScene = sceneId || artifact?.scenes[0]?.id || '';
   const needsAttention = Boolean(whiteboard.artifactError) || ['failed', 'unknown_external_outcome'].includes(workflow.status);
   const emptyTitle = running ? '正在整理正文与分镜' : workflow.status === 'unknown_external_outcome' ? '方案结果待核实' : workflow.status === 'failed' ? '方案生成未完成' : '等待生成方案';
 
   useEffect(() => () => { historyRequest.current += 1; }, []);
-  useEffect(() => {
-    const element = conversationRef.current;
-    if (element && followConversation.current) element.scrollTop = element.scrollHeight;
-  }, [whiteboard.messages.length, pendingInteraction?.id]);
 
-  function sendAction(action, extras = {}) {
+  function sendAction(action, extras = {}, handlers = {}) {
     return onAction({ action, expectedIdentity: current?.identity || '', expectedAttemptId: latest?.id,
       expectedMediaIdentity: media?.identity, interactionId: pendingInteraction?.id,
-      requestId: crypto.randomUUID(), ...extras });
+      requestId: crypto.randomUUID(), ...extras }, handlers);
   }
 
   async function act(action, extras = {}) {
     if (actionLock.current || locked || (!allowed.has(action) && !(action === 'message' && canMessage))) return;
     actionLock.current = true;
-    followConversation.current = true;
     setBusy(action);
     setError('');
+    if (action === 'message') setStreamReply({ phase: 'intent', text: '' });
     try {
-      await sendAction(action, extras);
+      await sendAction(action, extras, action === 'message' ? {
+        onEvent: event => {
+          if (event.type === 'chat_intent') setStreamReply({ phase: event.action, text: '' });
+          if (event.type === 'chat_message_delta') setStreamReply(prev => ({ phase: 'answer', text: prev.text + (event.delta || '') }));
+        },
+      } : undefined);
       if (['revise', 'revise_media', 'message'].includes(action)) setRevision('');
       setConfirm('');
       setPlanOpen(false);
@@ -77,6 +81,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
     } finally {
       actionLock.current = false;
       setBusy('');
+      setStreamReply({ phase: '', text: '' });
     }
   }
 
@@ -85,7 +90,6 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
   async function approveInitial({ startProduction }) {
     if (actionLock.current || locked) return;
     actionLock.current = true;
-    followConversation.current = true;
     setBusy('approve_initial');
     setError('');
     try {
@@ -146,33 +150,60 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
           <div className="flex h-16 shrink-0 items-center gap-2 border-b border-line-2 px-5">
             <PenLine size={17} /><h2 className="m-0 text-base font-semibold">创作对话</h2><span className="rounded border border-line-2 bg-surface-1 px-1.5 py-0.5 text-xs text-fg-3">Agent</span>
           </div>
-          <div ref={conversationRef} onScroll={event => { const element = event.currentTarget; followConversation.current = element.scrollHeight - element.clientHeight - element.scrollTop < 90; }} className="grid min-h-0 flex-1 content-start gap-5 overflow-y-auto overscroll-contain p-5 max-[1179px]:max-h-[420px] max-[560px]:p-4" aria-label="创作对话">
-            {whiteboard.messages.map(item => (
-              <article key={item.id} className={cn('grid min-w-0 gap-2', item.role === 'user' && 'rounded-md border border-line-1 bg-surface-1 p-3')}>
-                <div className="text-xs font-semibold text-fg-3">{item.role === 'user' ? '你' : '白板创作 Agent'}</div>
-                <p className="m-0 whitespace-pre-wrap break-words text-sm leading-7 text-fg-2">{item.text}</p>
-                {item.interactionId && interactions.find(interaction => interaction.id === item.interactionId) ? <WhiteboardConversationCard
-                  interaction={interactions.find(interaction => interaction.id === item.interactionId)}
-                  active={pendingInteraction?.id === item.interactionId} artifact={artifact} disabled={locked}
-                  allowed={allowed} onConfirm={confirmId => { setError(''); setConfirm(confirmId); }} onUpdatePlan={productionPlan => act('update_plan', { productionPlan })} /> : null}
-              </article>
-            ))}
-            {progressEvents.length ? <details className="text-xs text-fg-3"><summary className="cursor-pointer">最近制作进度</summary><ol className="grid gap-2 pl-4">{progressEvents.slice(-8).map((event, index) => <li key={event.seq || index}>{event.message || event.type}</li>)}</ol></details> : null}
-          </div>
+          <MessageScrollerProvider>
+            <MessageScroller className="min-h-0 flex-1 max-[1179px]:max-h-[420px]">
+            <MessageScrollerViewport className="p-5 max-[560px]:p-4">
+              <MessageScrollerContent className="gap-5">
+                {whiteboard.messages.map(item => (
+                  <MessageScrollerItem key={item.id}>
+                    <Message align={item.role === 'user' ? 'end' : 'start'}>
+                      <MessageContent>
+                        <MessageHeader className="px-0 text-fg-3">{item.role === 'user' ? '你' : '白板创作 Agent'}</MessageHeader>
+                        <Bubble variant={item.role === 'user' ? 'outline' : 'ghost'} className={item.role === 'user' ? 'border-line-1 bg-surface-1' : undefined}>
+                          <BubbleContent className="max-w-full whitespace-pre-wrap break-words text-sm leading-7 text-fg-2">{item.text}</BubbleContent>
+                        </Bubble>
+                        {item.interactionId && interactions.find(interaction => interaction.id === item.interactionId) ? <WhiteboardConversationCard
+                          interaction={interactions.find(interaction => interaction.id === item.interactionId)}
+                          active={pendingInteraction?.id === item.interactionId} artifact={artifact} disabled={locked}
+                          allowed={allowed} onConfirm={confirmId => { setError(''); setConfirm(confirmId); }} onUpdatePlan={productionPlan => act('update_plan', { productionPlan })} /> : null}
+                      </MessageContent>
+                    </Message>
+                  </MessageScrollerItem>
+                ))}
+                {busy === 'message' ? (
+                  <MessageScrollerItem>
+                    <Message>
+                      <MessageContent>
+                        <MessageHeader className="px-0 text-fg-3">白板创作 Agent</MessageHeader>
+                        <Bubble>
+                          <BubbleContent className="max-w-full whitespace-pre-wrap break-words text-sm leading-7 text-fg-2">
+                            {streamReply.text || (streamReply.phase === 'revise_scenes' ? '已识别修改意图，正在创建幕修改版本...' : streamReply.phase === 'revise_plan' ? '已识别方案修改意图，正在创建新版本...' : '正在理解你的消息...')}
+                            <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-fg-3 align-middle" aria-hidden />
+                          </BubbleContent>
+                        </Bubble>
+                      </MessageContent>
+                    </Message>
+                  </MessageScrollerItem>
+                ) : null}
+                {progressEvents.length ? <MessageScrollerItem><details className="text-xs text-fg-3"><summary className="cursor-pointer">最近制作进度</summary><ol className="grid gap-2 pl-4">{progressEvents.slice(-8).map((event, index) => <li key={event.seq || index}>{event.message || event.type}</li>)}</ol></details></MessageScrollerItem> : null}
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+            <MessageScrollerButton direction="end" variant="outline" />
+            </MessageScroller>
+          </MessageScrollerProvider>
           <div className="grid shrink-0 gap-3 border-t border-line-2 bg-surface-2 p-4">
             <div className={cn('flex items-start gap-2 text-xs leading-6', needsAttention ? 'text-danger' : 'text-fg-2')} role="status" aria-live="polite">
               {running || busy ? <Loader2 size={15} className="mt-1 shrink-0 animate-spin" /> : null}
-              <span>{busy ? ({ approve_initial: '正在确认当前内容与制作方案...', update_plan: '正在保存新的制作方案...', revise: '正在创建修改版本...', retry: '正在重新启动方案任务...', authorize_new_attempt: '正在创建新的模型请求...', start_production: '正在检查环境并启动视频制作...', approve_media: '正在确认当前产物并准备下一步...', retry_media: '正在恢复未完成的媒体制作...', authorize_media_retry: '正在登记授权并继续制作...', revise_media: '正在创建本幕修改版本...', message: '正在处理你的消息...' })[busy] || '正在处理当前操作...' : statusMessage}</span>
+              <span>{busy ? ({ approve_initial: '正在确认当前内容与制作方案...', update_plan: '正在保存新的制作方案...', revise: '正在创建修改版本...', retry: '正在重新启动方案任务...', authorize_new_attempt: '正在创建新的模型请求...', start_production: '正在检查环境并启动视频制作...', approve_media: '正在确认当前产物并准备下一步...', retry_media: '正在恢复未完成的媒体制作...', authorize_media_retry: '正在登记授权并继续制作...', revise_media: '正在创建本幕修改版本...', message: '正在理解并处理你的消息...' })[busy] || '正在处理当前操作...' : statusMessage}</span>
             </div>
             {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
             {error || workflow.error ? <Link to="/settings" state={{ from: `/creative/${workflow.workflow_id}` }} className="text-sm font-semibold text-ink underline underline-offset-4">打开模型与声音设置</Link> : null}
 
-            {canMessage || allowed.has('revise_media') ? (
-              <form className="grid gap-2" onSubmit={event => { event.preventDefault(); if (revision.trim()) act('message', { message: revision.trim(), ...(allowed.has('revise_media') ? { sceneId: selectedScene } : {}) }); }}>
-                {allowed.has('revise_media') ? <LabeledSelect label="需要修改的分镜" value={selectedScene} disabled={locked} onChange={setSceneId} options={artifact.scenes.map((scene, index) => ({ id: scene.id, label: `${index + 1}. ${scene.title}` }))} /> : null}
+            {canMessage ? (
+              <form className="grid gap-2" onSubmit={event => { event.preventDefault(); if (revision.trim()) act('message', { message: revision.trim() }); }}>
                 <label htmlFor="whiteboard-revision" className="sr-only">与白板创作 Agent 对话</label>
-                <Textarea id="whiteboard-revision" value={revision} onChange={event => setRevision(event.target.value)} rows={3} maxLength={6000} disabled={locked} placeholder={media ? '检查产物后，提出本幕修改意见或询问当前安排。' : '提出修改意见，或询问当前方案与分镜安排...'} className="min-h-[88px] resize-none bg-surface-1" />
-                <div className="flex items-center justify-between gap-3"><span className="text-xs leading-relaxed text-fg-3">讨论保留当前版本，修改生成新版本。</span><Button type="submit" size="sm" disabled={locked || !revision.trim()}>{busy === 'message' ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} />}{busy === 'message' ? '发送中...' : '发送'}</Button></div>
+                <Textarea id="whiteboard-revision" value={revision} onChange={event => setRevision(event.target.value)} rows={3} maxLength={6000} disabled={locked} placeholder={media ? '用自然语言描述，例如：1、2、6、7生成的图片为什么有手机边框？重新生成' : '用自然语言提出修改意见，或询问当前方案与分镜安排...'} className="min-h-[88px] resize-none bg-surface-1" />
+                <div className="flex items-center justify-between gap-3"><span className="text-xs leading-relaxed text-fg-3">直接描述要改哪些幕、怎么改，Agent 会理解并执行；讨论保留当前版本。</span><Button type="submit" size="sm" disabled={locked || !revision.trim()}>{busy === 'message' ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} />}{busy === 'message' ? '发送中...' : '发送'}</Button></div>
               </form>
             ) : null}
             <div className="flex flex-wrap gap-2">

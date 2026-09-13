@@ -147,15 +147,21 @@ async function act(record, payload, options, now) {
     media.narrationTake = (media.narrationTake || 0) + 1;
   }
   if (action === 'revise_media') {
-    const sceneId = payload.sceneId;
-    if (!artifact.scenes.some(scene => scene.id === sceneId)) throw new WhiteboardError('INVALID_INPUT', '请选择需要修改的分镜。');
+    // 支持一次修订多幕：自然语言意图路由会从"1、2、6、7重新生成"这类消息中抽取幕列表。
+    const requested = Array.isArray(payload.sceneIds) && payload.sceneIds.length ? payload.sceneIds : [payload.sceneId];
+    const sceneIds = [...new Set(requested.filter(Boolean))];
+    if (!sceneIds.length || sceneIds.some(id => !artifact.scenes.some(scene => scene.id === id))) {
+      throw new WhiteboardError('INVALID_INPUT', '请选择需要修改的分镜。');
+    }
     const revision = String(payload.message || '').trim();
     if (media.stage !== 'scene_render' && (!revision || revision.length > 3000)) throw new WhiteboardError('INVALID_INPUT', '请输入本幕修改意见，最多 3000 个字符。');
     const index = store.STAGES.findIndex(stage => stage.id === media.stage);
-    media.overrides[`${media.stage}:${sceneId}`] = revision;
-    if (index <= 1) delete media.lineart[sceneId];
-    if (index <= 2) delete media.annotations[sceneId];
-    delete media.scenes[sceneId];
+    for (const sceneId of sceneIds) {
+      media.overrides[`${media.stage}:${sceneId}`] = revision;
+      if (index <= 1) delete media.lineart[sceneId];
+      if (index <= 2) delete media.annotations[sceneId];
+      delete media.scenes[sceneId];
+    }
     for (const stage of store.STAGES.slice(index)) {
       delete media.current[stage.id];
       Object.assign(media.stages.find(item => item.id === stage.id), { status: 'pending', message: '' });

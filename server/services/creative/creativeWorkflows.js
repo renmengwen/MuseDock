@@ -675,6 +675,12 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
   }
 }
 
+// 自然语言对话入口：onEvent 回调用于把意图、流式回答增量推给 SSE 响应。
+// 与 actOnWhiteboardWorkflow 不同，本函数把业务错误抛给路由层（SSE 已开始后以事件形式返回）。
+async function chatOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
+  return whiteboardWorkflows.chatOnWhiteboardWorkflow(workflowId, payload, { ...options, services: resolveServices(options) });
+}
+
 async function getWhiteboardArtifact(workflowId, attemptId, options = {}) {
   try {
     const record = await readWorkflow(workflowId, options.rootDir);
@@ -2596,6 +2602,7 @@ async function getCreativeWorkflowAssetFile(workflowId, assetId, options = {}) {
 module.exports = {
   listCreationModes,
   actOnWhiteboardWorkflow,
+  chatOnWhiteboardWorkflow,
   getWhiteboardArtifact,
   getWhiteboardMediaFile,
   STAGE_IDS,

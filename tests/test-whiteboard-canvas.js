@@ -31,7 +31,13 @@ const mediaTools = require('../server/services/creative/whiteboard/mediaTools');
   const formal = models.materializeAnnotation(annotation, { id: 'scene_1', startMs: 0, endMs: 2000 }, 'image', 'timing', portrait);
   assert.deepEqual(formal.canvas, portrait);
   assert.ok(models.annotationPrompt({ scene: {}, cues: [], canvas: portrait }).includes('1080×1920'));
-  assert.ok(models.lineartPrompt(artifact, artifact.scenes[0]).includes('手机竖屏 9:16'));
+  const portraitLineartPrompt = models.lineartPrompt(artifact, artifact.scenes[0]);
+  // “手机竖屏 9:16”会被生图模型实体化（画出手机外壳与锁屏时间），构图指令只允许比例描述，
+  // 引用画面描述中的设备词时必须带“只理解为画幅比例”的防御条款。
+  assert.ok(portraitLineartPrompt.includes('画面高度明显大于宽度'));
+  assert.ok(!portraitLineartPrompt.includes('手机竖屏 9:16'));
+  assert.ok(portraitLineartPrompt.includes('不要画手机、平板、屏幕'), '必须显式禁止设备与界面元素');
+  assert.ok(portraitLineartPrompt.includes('只理解为画幅比例'));
   assert.ok(!models.lineartPrompt(artifact, artifact.scenes[0]).includes('横向宽幅'));
   for (const [modelId, expectedSize] of [['gpt-image-1', '1024x1536'], ['seedream-test', '1440x2560']]) {
     let requested;

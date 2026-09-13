@@ -187,8 +187,11 @@ async function renderSceneCandidate(ctx, artifact, scene) {
     const annotationBinding = await store.validateBinding(record, record.whiteboard.media.annotations[scene.id], ctx.rootDir);
     const annotation = await store.readData(record, annotationBinding.annotation, ctx.rootDir);
     const image = await ctx.filePath(record, lineart.image);
+    // 单幕渲染的修订意见不进入模型提示词，但必须参与输入身份：
+    // 否则修订后输入身份不变，会被媒体历史复用旧视频，"重新渲染指定幕"形同虚设。
     const inputIdentity = sha256({ lineart: lineart.identity, annotation: annotationBinding.identity, scene,
-      showHand: artifact.productionPlan.handDisplayMode === 'show', recipe: record.whiteboard.media.recipe });
+      showHand: artifact.productionPlan.handDisplayMode === 'show', recipe: record.whiteboard.media.recipe,
+      sceneRevision: record.whiteboard.media.overrides[`scene_render:${scene.id}`] || '', revision: record.whiteboard.media.revision });
     if (await reuseHistory(ctx, 'scenes', scene.id, inputIdentity)) return { reused: true };
     item = await ctx.attempt('scene_render', scene.id, false, inputIdentity);
     const directory = store.workDirectory(ctx.workflowId, item.id, ctx.rootDir);

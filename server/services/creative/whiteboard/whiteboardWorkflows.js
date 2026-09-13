@@ -12,6 +12,7 @@ const artifactStore = require('./artifactStore');
 const { generateDraft } = require('./structuredDraft');
 const production = require('./productionWorkflows');
 const mediaStore = require('./mediaStore');
+const agentRouter = require('./agentRouter');
 
 function assertContract(record) {
   if (record.creationModeId !== WHITEBOARD_MODE) throw new WhiteboardError('MODE_ACTION_UNSUPPORTED', '该操作仅适用于线稿白板动画。', 409);
@@ -253,6 +254,94 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
   return { success: true, workflow_id: workflowId, workflow: await getView(record, options), startTask: result };
 }
 
+// ── 自然语言对话入口 ──
+// 意图理解在文件锁之外执行，只有结果应用进入 mutate，避免模型请求阻塞其他操作。
+async function buildDialogContext(record, options) {
+  const media = record.whiteboard.media && !record.whiteboard.media.stale ? record.whiteboard.media : null;
+  let artifact = null;
+  try {
+    artifact = record.whiteboard.current ? await artifactStore.readArtifact(record, record.whiteboard.current, options.rootDir) : null;
+  } catch { artifact = null; }
+  const stageInfo = media ? mediaStore.STAGES.find(item => item.id === media.stage) : null;
+  const busy = ['queued', 'running'].includes(record.status);
+  const allowed = busy ? [] : actionsFor(record, true);
+  return {
+    phase: media ? 'production' : 'plan',
+    status: record.status,
+    stageLabel: stageInfo?.label || '',
+    gateTitle: media?.gate ? (mediaStore.TITLES[media.gate] || '') : '',
+    progressMessage: record.message || '',
+    lastError: record.error?.message || '',
+    scenes: (artifact?.scenes || []).map((scene, index) => ({
+      index: index + 1, id: scene.id, title: scene.title,
+      hasLineart: Boolean(media?.lineart?.[scene.id]),
+      hasAnnotation: Boolean(media?.annotations?.[scene.id]),
+      hasVideo: Boolean(media?.scenes?.[scene.id]),
+    })),
+    canReviseScenes: allowed.some(item => item.id === 'revise_media'),
+    canRevisePlan: allowed.some(item => item.id === 'revise'),
+  };
+}
+
+async function chatOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
+  const onEvent = typeof options.onEvent === 'function' ? options.onEvent : () => {};
+  const record = await readWorkflow(workflowId, options.rootDir || DEFAULT_ROOT);
+  assertContract(record);
+  const text = String(payload.message || '').trim();
+  if (!text || text.length > 6000) throw new WhiteboardError('INVALID_INPUT', '请输入有效消息，最多 6000 个字符。');
+
+  // 精确确认语与按钮语义等价，无需模型判断，直接走既有消息分支。
+  if (/^(确认|通过)(当前|本版|这版)?(方案|内容与制作方案|旁白|线稿|标注|当前产物|成片|视频)[。！!\s]*$/u.test(text)) {
+    return actOnWhiteboardWorkflow(workflowId, { ...payload, action: 'message', message: text }, options);
+  }
+
+  let context = null;
+  let intent = null;
+  try {
+    context = await buildDialogContext(record, options);
+    intent = await agentRouter.classifyIntent({
+      message: text, context, services: options.services,
+      onRequest: () => onEvent({ type: 'chat_phase', phase: 'intent' }),
+    });
+  } catch { intent = null; }
+  onEvent({ type: 'chat_intent', action: intent?.action || 'legacy', sceneIds: intent?.sceneIds || [] });
+
+  if (intent?.action === 'answer') {
+    let answerText = '';
+    try {
+      answerText = await agentRouter.streamAnswer({
+        message: text, context, services: options.services,
+        onDelta: delta => onEvent({ type: 'chat_message_delta', delta }),
+        onRequest: () => onEvent({ type: 'chat_phase', phase: 'answer' }),
+      });
+    } catch (error) {
+      answerText = `抱歉，这次没能生成回答：${error.message || '未知错误'}。你可以稍后重试，或使用界面按钮继续操作。`;
+    }
+    const { record: persisted } = await mutate(workflowId, options, (current, now) => {
+      addMessage(current, 'user', text, now);
+      addMessage(current, 'assistant', answerText, now);
+      current.updated_at = now;
+    });
+    onEvent({ type: 'chat_done', handled: 'answer' });
+    return { success: true, workflow_id: workflowId, workflow: await getView(persisted, options), startTask: false };
+  }
+
+  if (intent?.action === 'revise_scenes' || intent?.action === 'revise_plan') {
+    const result = await actOnWhiteboardWorkflow(workflowId, {
+      ...payload,
+      action: intent.action === 'revise_scenes' ? 'revise_media' : 'revise',
+      message: intent.instruction,
+      sceneId: intent.sceneIds?.[0] || payload.sceneId,
+      sceneIds: intent.sceneIds,
+    }, options);
+    onEvent({ type: 'chat_done', handled: intent.action, startTask: result.startTask });
+    return result;
+  }
+
+  // 意图理解不可用（模型未配置或请求失败）：降级到既有正则路由，保证功能可用。
+  return actOnWhiteboardWorkflow(workflowId, { ...payload, action: 'message', message: text }, options);
+}
+
 async function runWhiteboardWorkflow(workflowId, options = {}) {
   const rootDir = options.rootDir || DEFAULT_ROOT;
   const initial = await readWorkflow(workflowId, rootDir);
@@ -381,4 +470,4 @@ function recoverInterruptedRecord(record, now) {
   return record;
 }
 
-module.exports = { assertContract, getView, createWhiteboardWorkflow, actOnWhiteboardWorkflow, runWhiteboardWorkflow, recoverInterruptedRecord };
+module.exports = { assertContract, getView, createWhiteboardWorkflow, actOnWhiteboardWorkflow, chatOnWhiteboardWorkflow, runWhiteboardWorkflow, recoverInterruptedRecord };

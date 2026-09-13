@@ -79,6 +79,7 @@ async function readStreamResponse(response, apiKey, options = {}) {
   let text = '';
   const events = [];
   const chunkTimeoutMs = Number(options.chunkTimeoutMs) || 0;
+  const onDelta = typeof options.onDelta === 'function' ? options.onDelta : null;
 
   while (true) {
     const { done, value } = await readWithChunkTimeout(reader, chunkTimeoutMs);
@@ -108,8 +109,17 @@ async function readStreamResponse(response, apiKey, options = {}) {
           };
         }
         events.push(sanitizeRawResponse(parsed, apiKey));
-        const delta = extractContentText(parsed?.choices?.[0]?.delta?.content);
-        if (typeof delta === 'string') text += delta;
+        // 兼容三种流事件：chat-completions（choices.delta.content）、
+        // OpenAI Responses（response.output_text.delta）、Anthropic（content_block_delta）。
+        let delta;
+        if (parsed?.choices) delta = extractContentText(parsed.choices[0]?.delta?.content);
+        else if (parsed?.type === 'response.output_text.delta' && typeof parsed.delta === 'string') delta = parsed.delta;
+        else if (parsed?.type === 'response.completed' && parsed.response?.usage) events.push({ usage: parsed.response.usage });
+        else if (parsed?.type === 'content_block_delta' && typeof parsed.delta?.text === 'string') delta = parsed.delta.text;
+        if (typeof delta === 'string') {
+          text += delta;
+          if (delta && onDelta) onDelta(delta);
+        }
       }
     }
   }
@@ -442,7 +452,7 @@ function toAnthropicMessages(messages = [], response_format) {
   return { messages: result, system: system.join('\n\n') };
 }
 
-function buildOpenAiResponsesBody({ modelId, messages, temperature, tools, tool_choice, response_format, reasoningEffort, maxOutputTokens }) {
+function buildOpenAiResponsesBody({ modelId, messages, temperature, tools, tool_choice, response_format, reasoningEffort, maxOutputTokens, stream }) {
   const { input, instructions } = toOpenAiInput(messages);
   return JSON.stringify({
     model: modelId,
@@ -454,10 +464,11 @@ function buildOpenAiResponsesBody({ modelId, messages, temperature, tools, tool_
     ...(response_format ? { text: { format: response_format } } : {}),
     ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
     ...(Number.isInteger(maxOutputTokens) && maxOutputTokens > 0 ? { max_output_tokens: maxOutputTokens } : {}),
+    ...(stream ? { stream: true } : {}),
   });
 }
 
-function buildAnthropicMessagesBody({ modelId, messages, temperature, tools, response_format, maxTokens }) {
+function buildAnthropicMessagesBody({ modelId, messages, temperature, tools, response_format, maxTokens, stream }) {
   const mapped = toAnthropicMessages(messages, response_format);
   return JSON.stringify({
     model: modelId,
@@ -466,6 +477,7 @@ function buildAnthropicMessagesBody({ modelId, messages, temperature, tools, res
     ...(mapped.system ? { system: mapped.system } : {}),
     ...(Number.isFinite(Number(temperature)) ? { temperature } : {}),
     ...(tools ? { tools: normalizeToolsForAnthropic(tools) } : {}),
+    ...(stream ? { stream: true } : {}),
   });
 }
 
@@ -494,7 +506,7 @@ function getAbortErrorMessage(error, timeoutMs) {
   return `分析模型请求超时：${Math.round(Number(timeoutMs) / 1000)} 秒内未返回结果。`;
 }
 
-async function postModelRequest({ protocol, baseUrl, apiKey, modelId, messages, temperature, fetchImpl, timeoutMs, tools, tool_choice, response_format, maxTokens, reasoningEffort, maxOutputTokens }) {
+async function postModelRequest({ protocol, baseUrl, apiKey, modelId, messages, temperature, fetchImpl, timeoutMs, tools, tool_choice, response_format, maxTokens, reasoningEffort, maxOutputTokens, stream }) {
   const timeout = createTimeoutSignal(timeoutMs);
   const resolvedProtocol = normalizeProtocol(protocol);
   const isAnthropic = resolvedProtocol === 'anthropic-messages';
@@ -504,14 +516,14 @@ async function postModelRequest({ protocol, baseUrl, apiKey, modelId, messages, 
       headers: isAnthropic ? {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        'anthropic-version': '2023-06-06',
       } : {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
       body: isAnthropic
-        ? buildAnthropicMessagesBody({ modelId, messages, temperature, tools, response_format, maxTokens })
-        : buildOpenAiResponsesBody({ modelId, messages, temperature, tools, tool_choice, response_format, reasoningEffort, maxOutputTokens }),
+        ? buildAnthropicMessagesBody({ modelId, messages, temperature, tools, response_format, maxTokens, stream })
+        : buildOpenAiResponsesBody({ modelId, messages, temperature, tools, tool_choice, response_format, reasoningEffort, maxOutputTokens, stream }),
       signal: timeout.signal,
     });
     if (response && typeof response === 'object') {
@@ -575,6 +587,7 @@ async function callTextModel(options = {}) {
     fallbackToNonStreamOnGatewayTimeout = false,
     requestTimeoutMs = 180000,
     streamChunkTimeoutMs,
+    onDelta,
     logger,
     tools,
     tool_choice,
@@ -611,7 +624,9 @@ async function callTextModel(options = {}) {
   }
 
   const totalMessageChars = messages.reduce((sum, m) => sum + (typeof m.content === 'string' ? m.content.length : 0), 0);
-  const effectiveStream = false;
+  // 仅在调用方同时要求流式并提供 onDelta 回调、且不涉及工具调用时才走流式读取；
+  // 历史上 stream 选项一直被忽略为非流式，保持既有调用方行为完全不变。
+  const effectiveStream = stream === true && typeof onDelta === 'function' && !tools && !tool_choice;
   const requestLabel = `[AI] ${provider}/${modelId} protocol=${protocol} stream=${effectiveStream} msgs=${messages.length} chars=${totalMessageChars} timeout=${Math.round(requestTimeoutMs / 1000)}s`;
   if (log) log.info(`${requestLabel} — 开始请求`);
 
@@ -637,6 +652,7 @@ async function callTextModel(options = {}) {
         maxTokens,
         reasoningEffort,
         maxOutputTokens,
+        stream: effectiveStream,
       });
       lastFetchError = null;
     } catch (error) {
@@ -769,6 +785,7 @@ async function callTextModel(options = {}) {
     try {
       streamResult = await readStreamResponse(response, apiKey, {
         chunkTimeoutMs: streamChunkTimeoutMs,
+        onDelta,
       });
     } catch (error) {
       cleanupResponseTimeout(response);
