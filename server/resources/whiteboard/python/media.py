@@ -41,6 +41,16 @@ def canvas_size(canvas=None):
     return canvas['width'], canvas['height']
 
 
+class CoverageError(ValueError):
+    """覆盖率不足仍会先产出预览图，交由上层人工确认是否接受。"""
+    code = 'ANNOTATION_COVERAGE_LOW'
+
+    def __init__(self, message, coverage):
+        super().__init__(message)
+        self.coverage = coverage
+        self.coverage_ratio = coverage['coverageRatio']
+
+
 def save_image(destination, image):
     ok, encoded = cv2.imencode('.png', image)
     if not ok:
@@ -75,18 +85,32 @@ def annotation_preview(data):
     if image is None or image.shape[:2] != (out_h, out_w):
         raise ValueError('线稿尺寸与落墨标注画幅不一致，请重新检查当前线稿。')
     renderer = RegionStreamRenderer(image, annotation, sr.Config(), None, True, output_size=(out_w, out_h))
-    elements = annotation['elements']
+    elements = sorted(annotation['elements'], key=lambda element: element['reveal']['startMs'])
     covered = np.zeros((out_h, out_w), dtype=bool)
     for index, element in enumerate(elements):
         allowed = renderer._allowed_mask(element, elements[index+1:])
         if np.count_nonzero(renderer.ink_pixels & allowed) < 10:
             raise ValueError('标注中存在没有有效墨迹的区域，请重新规划区域。')
         covered |= allowed
-    total = np.count_nonzero(renderer.ink_pixels)
-    coverage = np.count_nonzero(renderer.ink_pixels & covered) / max(total, 1)
-    if coverage < 0.97:
-        raise ValueError('标注未完整覆盖线稿，不能在末尾突然显示遗漏内容。')
-    canvas = Image.fromarray(cv2.cvtColor(renderer.color_img, cv2.COLOR_BGR2RGB))
+    total = int(np.count_nonzero(renderer.ink_pixels))
+    covered_ink = int(np.count_nonzero(renderer.ink_pixels & covered))
+    coverage = covered_ink / max(total, 1)
+    # 保留原始比值，避免将略低于 97% 的失败结果四舍五入成 0.97。
+    details = {'coverageRatio': coverage, 'regions': len(elements),
+               'coveredInkPixels': covered_ink, 'totalInkPixels': total}
+    # 与渲染器使用同一 allowed mask，展示仅保留已标注部分的最终画面。
+    if data.get('resultOutput'):
+        result = np.full_like(renderer.color_img, renderer.canvas_bgr)
+        result[covered] = renderer.color_img[covered]
+        save_image(data['resultOutput'], result)
+    preview = renderer.color_img.copy()
+    missing = renderer.ink_pixels & ~covered
+    if missing.any():
+        halo = cv2.dilate(missing.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(bool)
+        red = sr._hex_to_bgr('#DC2626')
+        preview[halo] = (preview[halo].astype(np.float32) * 0.35 + red * 0.65).astype(np.uint8)
+        preview[missing] = red
+    canvas = Image.fromarray(cv2.cvtColor(preview, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(canvas)
     font = ImageFont.truetype(data['font'], 28)
     colors = ['#D94A35', '#167D9A', '#74713B']
@@ -102,7 +126,9 @@ def annotation_preview(data):
             draw.rectangle([px, py, px+pw-1, py+ph-1], outline='#6B7280', width=3)
     with Path(data['output']).open('xb') as stream:
         canvas.save(stream, format='PNG')
-    return {'coverageRatio': round(coverage, 5), 'regions': len(elements)}
+    if coverage < 0.97:
+        raise CoverageError(f'标注未完整覆盖线稿（覆盖率 {coverage:.1%}）。预览图已生成，请查看后决定接受当前已标注内容或重新编排；遗漏内容不会在末尾突然显示。', details)
+    return details
 
 
 def hidden_popen(*args, **kwargs):
@@ -194,5 +220,8 @@ if __name__ == '__main__':
         main()
     except Exception as exc:
         message = str(exc) if isinstance(exc, ValueError) else '白板本地媒体处理失败，请检查运行环境与当前产物。'
-        print(json.dumps({'success': False, 'message': message, 'errorType': type(exc).__name__}, ensure_ascii=False))
+        print(json.dumps({'success': False, 'message': message, 'errorType': type(exc).__name__,
+                          'errorCode': getattr(exc, 'code', ''), 'coverageRatio': getattr(exc, 'coverage_ratio', None),
+                          'coverage': getattr(exc, 'coverage', None)},
+                         ensure_ascii=False))
         sys.exit(1)

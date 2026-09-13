@@ -431,8 +431,8 @@ class RegionStreamRenderer:
                     self._wash_brush(writer, color_frames, centers, allowed)
                 cur_frame += color_frames
 
-            # 凝视严格只占权威剩余帧；标注层必须预留至少 0.5 秒。
-            self.drawn[...] = self.color_img.astype(np.float32)
+            # 凝视只保留已经落墨的画布，未标注或被保护的内容不能在片尾补显。
+            # 标注层仍须预留至少 0.5 秒，不改变权威帧数。
             fill_static(target_frame_count)
             if cur_frame != target_frame_count:
                 raise RuntimeError("实际写入帧数与权威 frameCount 不一致")

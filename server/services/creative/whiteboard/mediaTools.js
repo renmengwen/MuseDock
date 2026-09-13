@@ -37,8 +37,23 @@ function execute(command, args, { input, cwd, signal, timeoutMs = 300000 } = {})
     child.on('close', code => {
       if (code === 0) return finish();
       let message = '本地媒体处理失败，请检查当前产物、磁盘空间和媒体运行环境。';
-      try { const result = JSON.parse(stdout.trim().split('\n').at(-1)); if (result.message) message = result.message; } catch { /* No raw process output in task records. */ }
-      finish(new WhiteboardError(signal?.aborted ? 'MEDIA_CANCELLED' : 'MEDIA_FAILED', message));
+      let errorCode = '';
+      let coverageRatio;
+      let coverage;
+      try {
+        const result = JSON.parse(stdout.trim().split('\n').at(-1));
+        if (result.message) message = result.message;
+        if (typeof result.errorCode === 'string') errorCode = result.errorCode;
+        if (Number.isFinite(result.coverageRatio)) coverageRatio = result.coverageRatio;
+        if (result.coverage && typeof result.coverage === 'object') {
+          coverage = Object.fromEntries(['coverageRatio', 'regions', 'coveredInkPixels', 'totalInkPixels']
+            .filter(key => Number.isFinite(result.coverage[key])).map(key => [key, result.coverage[key]]));
+        }
+      } catch { /* No raw process output in task records. */ }
+      const error = new WhiteboardError(signal?.aborted ? 'MEDIA_CANCELLED' : errorCode || 'MEDIA_FAILED', message);
+      if (Number.isFinite(coverageRatio)) error.coverageRatio = coverageRatio;
+      if (coverage) error.coverage = coverage;
+      finish(error);
     });
     child.stdin.on('error', () => {});
     child.stdin.end(input == null ? undefined : JSON.stringify(input));

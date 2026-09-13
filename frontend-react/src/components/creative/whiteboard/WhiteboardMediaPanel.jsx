@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Download, FileText } from 'lucide-react';
+import { Download, FileText, TriangleAlert } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.jsx';
 import { Button } from '@/components/ui/button.jsx';
 import { CreativeVideoPreview } from '../CreativeVideoPreview.jsx';
 import { WhiteboardSceneTable } from './WhiteboardSceneTable.jsx';
 
 const PANELS = [ ['full_narration', '旁白'], ['lineart_generation', '线稿'], ['annotation_drafting', '落墨'], ['scene_render', '单幕'], ['final_delivery', '成片'] ];
-export function WhiteboardMediaPanel({ media, scenes = [] }) {
+export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage }) {
   const [tab, setTab] = useState(media.stage);
   useEffect(() => setTab(media.stage), [media.stage]);
   const files = new Map(media.artifacts.map(file => [file.id, file]));
@@ -18,6 +18,12 @@ export function WhiteboardMediaPanel({ media, scenes = [] }) {
   const final = current.final_delivery;
   const download = (file, label) => url(file) && <Button asChild variant="outline" size="sm" className="max-[760px]:min-h-11"><a href={`${url(file)}?download=1`} download><Download size={14} />{label}</a></Button>;
   const empty = <p className="py-6 text-center text-sm text-fg-3">完成前面的步骤后，此处会显示当前产物。</p>;
+  const lowCoverageScenes = media.lowCoverage || [];
+  const lowCoverageByScene = new Map(lowCoverageScenes.map(entry => [entry.sceneId, entry]));
+  const pendingLowCoverage = !current.annotation_drafting && lowCoverageScenes.length > 0;
+  // 按方案顺序展示已完成、待确认和未完成幕，并发完成顺序不影响分镜编号。
+  const annotationScenes = current.annotation_drafting?.scenes || scenes.map(scene =>
+    media.annotations?.[scene.id] || lowCoverageByScene.get(scene.id) || { sceneId: scene.id });
   return (
     <div className="grid min-w-0 gap-4" aria-label="白板媒体产物">
       <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-4">
@@ -31,7 +37,14 @@ export function WhiteboardMediaPanel({ media, scenes = [] }) {
           </div> : empty}
         </TabsContent>
         {PANELS.slice(1, 4).map(([stage]) => <TabsContent key={stage} value={stage} className="min-w-0">
-          <WhiteboardSceneTable key={current[stage]?.identity || stage} stage={stage} scenes={current[stage]?.scenes} sceneTitles={sceneTitles} canvas={canvas} getUrl={url} renderDownload={download} />
+          {stage === 'annotation_drafting' && pendingLowCoverage ? <div className="mb-3 flex items-start gap-2 rounded-md border border-danger/25 p-3 text-xs leading-6 text-danger" role="alert">
+            <TriangleAlert size={15} className="mt-0.5 shrink-0" />
+            <div className="grid gap-2"><span>有 {lowCoverageScenes.length} 幕的落墨标注未完整覆盖线稿（不足 97%）。预览会展示当前落墨效果，并用红色标出遗漏墨迹。接受后遗漏部分保持空白，不会在片尾补显。</span>
+              {onReviewLowCoverage ? <Button variant="outline" size="sm" className="justify-self-start" onClick={onReviewLowCoverage}>查看预览并决定是否接受</Button> : null}</div>
+          </div> : null}
+          <WhiteboardSceneTable key={current[stage]?.identity || (stage === 'annotation_drafting' && pendingLowCoverage ? 'low-coverage' : stage)}
+            stage={stage} scenes={stage === 'annotation_drafting' ? annotationScenes : current[stage]?.scenes}
+            sceneTitles={sceneTitles} canvas={canvas} getUrl={url} renderDownload={download} />
         </TabsContent>)}
         <TabsContent value="final_delivery" className="min-w-0">
           {final ? <div className="grid gap-4"><CreativeVideoPreview videoUrl={url(final.video)} posterUrl={url(final.poster)} width={final.validation.width} height={final.validation.height} /><div className="flex flex-wrap gap-2">{download(final.video, '下载最终视频')}{download(narration?.subtitles, '下载字幕')}</div>

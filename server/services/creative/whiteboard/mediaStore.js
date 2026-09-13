@@ -20,6 +20,7 @@ function mediaIdentity(media) {
   return sha256({ contract: MEDIA_CONTRACT, planIdentity: media.planIdentity, runId: media.id,
     stage: media.stage, gate: media.gate || '', revision: media.revision,
     latestAttemptId: media.attempts.at(-1)?.id || '',
+    ...(media.lowCoverage?.length ? { lowCoverage: media.lowCoverage.map(entry => entry.identity || sha256(entry)) } : {}),
     current: Object.fromEntries(Object.entries(media.current || {}).map(([key, value]) => [key, value?.identity || ''])) });
 }
 
@@ -27,7 +28,7 @@ function makeMedia(planIdentity, recipe) {
   return { contractVersion: MEDIA_CONTRACT, id: crypto.randomUUID(), planIdentity, recipe,
     stageSchemaSnapshot: structuredClone(STAGES), stages: structuredClone(STAGES), revision: 1,
     stage: STAGES[0].id, gate: '', current: {}, attempts: [], artifacts: [], approvals: [],
-    lineart: {}, annotations: {}, scenes: {}, overrides: {}, stale: false, activeAttemptId: '' };
+    lineart: {}, annotations: {}, lowCoverage: [], scenes: {}, overrides: {}, stale: false, activeAttemptId: '' };
 }
 
 function workDirectory(workflowId, attemptId, rootDir = DEFAULT_ROOT) {

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button.jsx';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog.jsx';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table.jsx';
 import { cn } from '@/lib/utils.js';
+import { WhiteboardCoverageImages } from './WhiteboardCoverageReview.jsx';
 
 const STAGES = {
   lineart_generation: { label: '线稿', file: 'image', summary: '文件类型', description: '查看本幕完整线稿，检查画面与内容。' },
@@ -90,7 +91,7 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
                     <TableCell className="whitespace-normal py-4 pl-4">
                       <div className="flex items-start gap-3"><span className="shrink-0 pt-0.5 font-mono text-xs text-fg-3">{String(index + 1).padStart(2, '0')}</span><span className="min-w-0 break-words font-medium leading-6 text-fg-1">{titleFor(scene, index)}</span></div>
                     </TableCell>
-                    <TableCell className="whitespace-normal text-xs leading-6 text-fg-3">{available ? sceneSummary(stage, scene) : '文件不可用'}</TableCell>
+                    <TableCell className="whitespace-normal text-xs leading-6 text-fg-3">{available ? <>{sceneSummary(stage, scene)}{scene.coverage?.coverageRatio < 0.97 ? <span className="block text-danger">{scene.coverageAcceptance ? '已人工接受' : '待检查覆盖情况'}</span> : null}</> : stage === 'annotation_drafting' && !scene.preview ? '等待编排' : '文件不可用'}</TableCell>
                     <TableCell className="pr-3 text-right">
                       <Button variant="ghost" size="sm" disabled={!available} aria-haspopup="dialog" aria-label={`查看第 ${index + 1} 幕${settings.label}详情`} className="gap-1 px-2 text-xs max-[760px]:min-h-11">查看详情<ArrowUpRight size={14} /></Button>
                     </TableCell>
@@ -114,9 +115,12 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
           <div className="grid min-h-0 gap-4 overflow-y-auto overscroll-contain p-5 max-[560px]:p-3">
             {stage === 'scene_render'
               ? <SceneVideo key={getUrl(selected.video)} src={getUrl(selected.video)} canvas={canvas} />
+              : stage === 'annotation_drafting' && selected.resultPreview && selected.coverage?.coverageRatio < 0.97
+              ? <WhiteboardCoverageImages scene={selected} canvas={canvas} getUrl={getUrl} />
               : <SceneImage key={getUrl(selected[settings.file])} src={getUrl(selected[settings.file])} alt={`${titleFor(selected, selectedIndex)}${settings.label}`} label={settings.label} canvas={canvas} />}
             {stage === 'annotation_drafting' ? <div className="grid gap-2 text-xs leading-6 text-fg-3">
               <p className="m-0">{sceneSummary(stage, selected)}。区域按编号依次完成描线与添彩，末尾保留至少半秒。</p>
+              {selected.coverage?.coverageRatio < 0.97 ? <p className="m-0 text-danger">{selected.coverageAcceptance ? '已人工接受当前覆盖情况。' : '当前覆盖情况需要你决定是否接受。'}未覆盖部分保持空白，不会在片尾补显。</p> : null}
               {selected.visualGrouping?.reason ? <p className="m-0"><span className="font-semibold text-fg-2">分组依据：</span>{selected.visualGrouping.reason}</p> : null}
             </div> : null}
             {stage === 'scene_render' ? <p className="m-0 text-xs leading-6 text-fg-3">本幕时长 {sceneSummary(stage, selected)}，可播放或拖动进度条检查细节。</p> : null}
@@ -124,7 +128,7 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
           <DialogFooter className="shrink-0 border-t border-line-1 p-4 sm:justify-between">
             <div className="flex flex-wrap gap-2">
               {stage === 'lineart_generation' ? renderDownload(selected.image, '下载线稿') : null}
-              {stage === 'annotation_drafting' ? <>{renderDownload(selected.preview, '下载落墨预览')}{renderDownload(selected.annotation, '下载区域编排')}</> : null}
+              {stage === 'annotation_drafting' ? <>{renderDownload(selected.preview, '下载落墨预览')}{renderDownload(selected.resultPreview, '下载当前落墨效果')}{renderDownload(selected.annotation, '下载区域编排')}</> : null}
               {stage === 'scene_render' ? renderDownload(selected.video, '下载单幕视频') : null}
             </div>
             <DialogClose asChild><Button variant="outline">关闭详情</Button></DialogClose>

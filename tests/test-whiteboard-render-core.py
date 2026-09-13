@@ -76,3 +76,29 @@ assert np.array_equal(frames[19][:100], portrait_renderer.color_img[:100]), 'por
 assert np.array_equal(frames[-1], portrait_renderer.color_img), 'portrait final image was stretched or incomplete'
 assert all(np.array_equal(frame, frames[-1]) for frame in frames[-10:]), 'portrait ending lost its hold'
 print('竖屏纵向三分区逐帧检查通过：上下区域依次揭示、画幅正确、末尾完整停留。')
+
+# A user may accept only the annotated content. Uncovered ink and protected holes
+# must remain paper through the final hold, rather than popping in with the source.
+partial = {'canvas': {'width': 200, 'height': 100}, 'elements': [
+    {'region': {'x': 0, 'y': 0, 'width': 100, 'height': 100},
+     'reveal': {'startMs': 0, 'durationMs': 1500, 'protectedRegions': [], 'direction': 'left-to-right'}},
+]}
+frames.clear()
+partial_renderer = RegionStreamRenderer(source, partial,
+    Config(fps=20, ink_path_mode='skeleton', pause_mode='off'), None, True, output_size=(200, 100))
+partial_renderer.render_to(Path('unused-partial.mp4'), 2000, target_frame_count=40, sink_factory=Sink)
+assert all(np.all(frame[:, 100:] == paper) for frame in frames), 'uncovered content popped in during the final hold'
+assert np.array_equal(frames[-1][:, :100], partial_renderer.color_img[:, :100]), 'accepted region was not fully revealed'
+assert all(np.array_equal(frame, frames[-1]) for frame in frames[-10:]), 'partial coverage did not preserve the ending hold'
+
+protected = {'canvas': {'width': 200, 'height': 100}, 'elements': [
+    {'region': {'x': 0, 'y': 0, 'width': 200, 'height': 100},
+     'reveal': {'startMs': 0, 'durationMs': 1500, 'direction': 'left-to-right',
+                'protectedRegions': [{'x': 100, 'y': 0, 'width': 100, 'height': 100}]}},
+]}
+frames.clear()
+protected_renderer = RegionStreamRenderer(source, protected,
+    Config(fps=20, ink_path_mode='skeleton', pause_mode='off'), None, True, output_size=(200, 100))
+protected_renderer.render_to(Path('unused-protected.mp4'), 2000, target_frame_count=40, sink_factory=Sink)
+assert all(np.all(frame[:, 100:] == paper) for frame in frames), 'protected content appeared at the end'
+print('低覆盖率逐帧检查通过：已标注部分完整呈现，遗漏墨迹及保护区始终隐藏，末尾停留稳定。')

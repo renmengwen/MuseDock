@@ -3,18 +3,16 @@ const { WhiteboardError } = require('./contracts');
 const DEFAULT_CONCURRENCY = 3;
 const MAX_CONCURRENCY = 8;
 
-function normalizeConcurrency(value) {
+function normalizeConcurrency(value, defaultConcurrency = DEFAULT_CONCURRENCY, maxConcurrency = MAX_CONCURRENCY) {
   const number = Number(value);
   return value == null || value === '' || !Number.isInteger(number)
-    ? DEFAULT_CONCURRENCY : Math.max(1, Math.min(MAX_CONCURRENCY, number));
+    ? defaultConcurrency : Math.max(1, Math.min(maxConcurrency, number));
 }
 
-function cancelled() {
-  return new WhiteboardError('MEDIA_CANCELLED', '单幕渲染已取消。');
-}
-
-function createSceneRenderPool(value = DEFAULT_CONCURRENCY) {
-  const concurrency = normalizeConcurrency(value);
+function createSceneRenderPool(value, { defaultConcurrency = DEFAULT_CONCURRENCY,
+  maxConcurrency = MAX_CONCURRENCY, cancelMessage = '单幕渲染已取消。' } = {}) {
+  const concurrency = normalizeConcurrency(value, defaultConcurrency, maxConcurrency);
+  const cancelled = () => new WhiteboardError('MEDIA_CANCELLED', cancelMessage);
   const queue = [];
   let active = 0;
 

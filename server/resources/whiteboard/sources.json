@@ -14,7 +14,7 @@
       "file": "python/region_renderer.py",
       "sourceFile": "scripts/render_stream_whiteboard.py",
       "sourceSha256": "820e82a6fc5767c6202beaeb731f8235c806c12db81dbdff97c735b7de0a81bb",
-      "sha256": "9ad1c7ff865cc6fc473777d90555d02961309a79b43d8c6de94769314e04e57a"
+      "sha256": "8c470f1f21a363ec8bf56f011e04fdf8156fc1ab36d75f51b0a38f972c38ea08"
     },
     {
       "file": "python/ffmpeg_frame_sink.py",

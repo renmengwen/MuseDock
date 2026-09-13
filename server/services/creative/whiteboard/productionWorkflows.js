@@ -3,7 +3,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { readWorkflow, workflowFileExists } = require('../workflowStore');
 const artifactStore = require('./artifactStore');
-const { WhiteboardError, sha256, canonicalJson } = require('./contracts');
+const { WhiteboardError, sha256, canonicalJson, canvasFor } = require('./contracts');
 const store = require('./mediaStore');
 const mediaTools = require('./mediaTools');
 const { narrationStage, lineartStage, annotationStage, sceneStage, finalStage, reviewGate } = require('./productionStages');
@@ -34,7 +34,10 @@ function actionsFor(record) {
   if (['queued', 'running'].includes(record.status) || media?.executionId) return [];
   if (!media || media.stale) return record.status === 'phase0_complete' ? [{ id: 'start_production', label: '开始制作视频' }] : null;
   if (record.status === 'unknown_external_outcome') return [{ id: 'authorize_media_retry', label: '核实后授权新请求', requiresConfirmation: true }];
-  if (record.status === 'failed') return [{ id: 'retry_media', label: '继续未完成的制作' },
+  if (record.status === 'failed') return [
+    { id: 'retry_media', label: '继续未完成的制作' },
+    ...(record.error?.code === 'ANNOTATION_COVERAGE_LOW' && media.lowCoverage?.length
+      ? [{ id: 'accept_low_coverage', label: '查看预览后接受当前落墨', requiresConfirmation: true }] : []),
     ...(media.stage === 'full_narration' && /^(NARRATION_|AUDIO_)/.test(record.error?.code || '')
       ? [{ id: 'regenerate_narration', label: '重新生成完整旁白', requiresConfirmation: true }] : [])];
   if (record.status === 'waiting_approval' && media.gate) return [
@@ -142,6 +145,52 @@ async function act(record, payload, options, now) {
     return approve(record, 'user', 'user_review_current_artifact', now);
   }
   if (action === 'authorize_media_retry' && payload.confirmed !== true) throw new WhiteboardError('EXTERNAL_AUTH_REQUIRED', '需要明确同意新请求及可能的重复费用。', 409);
+  if (action === 'accept_low_coverage') {
+    if (payload.confirmed !== true) throw new WhiteboardError('APPROVAL_REQUIRED', '请实际查看低覆盖率预览图后明确确认接受。', 409);
+    const entries = media.lowCoverage || [];
+    if (!entries.length) throw new WhiteboardError('ACTION_NOT_ALLOWED', '没有可接受的低覆盖率落墨记录，请重新编排对应幕。', 409);
+    if (new Set(entries.map(entry => entry.sceneId)).size !== entries.length) throw new WhiteboardError('ARTIFACT_INVALID', '低覆盖率记录包含重复分镜，请重新编排对应幕。', 409);
+    const narration = await validateCurrent(record, 'full_narration', options);
+    const timing = await store.readData(record, narration.timeline, options.rootDir);
+    const accepted = [];
+    for (const entry of entries) {
+      const attempt = media.attempts.findLast(row => row.stage === 'annotation_drafting' && row.sceneId === entry.sceneId);
+      const scene = timing.scenes.find(item => item.id === entry.sceneId);
+      if (!entry.annotation || !entry.preview || !entry.resultPreview || entry.kind !== 'annotation_coverage_review'
+        || !Number.isFinite(entry.coverage?.coverageRatio) || entry.coverage.coverageRatio < 0 || entry.coverage.coverageRatio >= 0.97
+        || !attempt?.received?.annotation || !attempt.received.preview || !attempt.received.resultPreview) {
+        throw new WhiteboardError('ARTIFACT_INVALID', `${entry.title || entry.sceneId} 的低覆盖率预览或标注文件缺失，请重新编排该幕。`, 409);
+      }
+      await store.validateBinding(record, entry, options.rootDir);
+      const lineart = await store.validateBinding(record, media.lineart[entry.sceneId], options.rootDir);
+      const annotation = await store.readData(record, entry.annotation, options.rootDir);
+      if (!scene || attempt.id !== entry.attemptId || attempt.status !== 'failed' || attempt.errorCode !== 'ANNOTATION_COVERAGE_LOW'
+        || attempt.inputIdentity !== entry.inputIdentity || media.annotations[entry.sceneId]
+        || ['annotation', 'preview', 'resultPreview'].some(key => entry[key].id !== attempt.received[key].id)
+        || entry.lineartIdentity !== lineart.identity || entry.narrationIdentity !== narration.identity
+        || entry.revision !== (media.overrides[`annotation_drafting:${entry.sceneId}`] || '')
+        || annotation.sceneId !== scene.id || annotation.imageSha256 !== lineart.image.sha256
+        || annotation.timingIdentity !== narration.identity || annotation.sceneDurationMs !== scene.endMs - scene.startMs
+        || canonicalJson(annotation.canvas) !== canonicalJson(canvasFor(artifact.aspectRatio))) {
+        throw new WhiteboardError('STALE_IDENTITY', '低覆盖率预览所对应的线稿、时间线或落墨版本已变化，请重新检查当前产物。', 409);
+      }
+      const approval = { sceneId: entry.sceneId, attemptId: entry.attemptId, reviewIdentity: entry.identity,
+        actor: 'user', basis: 'user_review_low_coverage', acceptedAt: now,
+        coverageRatio: entry.coverage.coverageRatio, missingContentPolicy: 'keep_hidden' };
+      accepted.push({ attempt, approval, binding: store.bind({ kind: 'annotation', sceneId: entry.sceneId,
+        inputIdentity: entry.inputIdentity, planningContract: entry.planningContract, visualGrouping: entry.visualGrouping,
+        annotation: entry.annotation, preview: entry.preview, resultPreview: entry.resultPreview,
+        coverage: entry.coverage, coverageAcceptance: approval }) });
+    }
+    // 先验证全部预览，再一起登记用户决定，避免部分接受。
+    for (const { attempt, approval, binding } of accepted) {
+      media.annotations[binding.sceneId] = binding;
+      (media.coverageAcceptances ||= []).push({ ...approval, annotationIdentity: binding.identity });
+      Object.assign(attempt, { status: 'accepted', acceptedAt: now });
+    }
+    media.lowCoverage = [];
+  }
+  if (action === 'retry_media' && media.stage === 'annotation_drafting') media.lowCoverage = [];
   if (action === 'regenerate_narration') {
     if (payload.confirmed !== true) throw new WhiteboardError('EXTERNAL_AUTH_REQUIRED', '重新生成完整旁白会发起新的语音请求，请明确确认。', 409);
     media.narrationTake = (media.narrationTake || 0) + 1;
@@ -160,6 +209,7 @@ async function act(record, payload, options, now) {
       media.overrides[`${media.stage}:${sceneId}`] = revision;
       if (index <= 1) delete media.lineart[sceneId];
       if (index <= 2) delete media.annotations[sceneId];
+      if (index <= 2) media.lowCoverage = (media.lowCoverage || []).filter(entry => entry.sceneId !== sceneId);
       delete media.scenes[sceneId];
     }
     for (const stage of store.STAGES.slice(index)) {
@@ -175,13 +225,14 @@ async function act(record, payload, options, now) {
   setState(record, 'queued', '正在继续当前媒体阶段，已完成且有效的产物将复用...', now);
   record.last_event_seq = 0;
   message(record, 'user', action === 'authorize_media_retry' ? '已核实外部结果，同意可能的重复费用并授权新的请求。'
+    : action === 'accept_low_coverage' ? '已查看低覆盖率落墨预览，接受当前已标注内容并继续；遗漏内容保持空白。'
     : payload.message || '继续未完成的制作。', now);
   return true;
 }
 
 function unfinishedAttempts(media) {
-  return media.attempts.filter(item => !['validated', 'failed', 'unknown_external_outcome'].includes(item.status)
-    && (item.id === media.activeAttemptId || (media.stage === 'scene_render' && item.stage === 'scene_render'
+  return media.attempts.filter(item => !['validated', 'accepted', 'failed', 'unknown_external_outcome'].includes(item.status)
+    && (item.id === media.activeAttemptId || (['scene_render', 'annotation_drafting'].includes(media.stage) && item.stage === media.stage
       && (!item.executionId || item.executionId === media.executionId))));
 }
 
@@ -190,6 +241,7 @@ function fail(record, error, now) {
   const unknown = error.code === 'UNKNOWN_EXTERNAL_OUTCOME';
   for (const attempt of unfinishedAttempts(media)) Object.assign(attempt, { status: unknown ? 'unknown_external_outcome' : 'failed', errorCode: error.code, completedAt: now });
   if (media.sceneRenderProgress) media.sceneRenderProgress.active = 0;
+  if (media.annotationProgress) media.annotationProgress.active = 0;
   media.activeAttemptId = '';
   media.executionId = '';
   record.error = { code: error.code || 'MEDIA_FAILED', message: error.message };
@@ -199,7 +251,9 @@ function fail(record, error, now) {
 
 function recover(record, now) {
   const media = record.whiteboard.media;
-  const unknown = unfinishedAttempts(media).some(item => item.status === 'requesting');
+  const unknown = unfinishedAttempts(media).some(item => item.status === 'requesting')
+    || media.attempts.some(item => item.status === 'unknown_external_outcome'
+      && (item.id === media.activeAttemptId || (media.executionId && item.executionId === media.executionId)));
   fail(record, new WhiteboardError(unknown ? 'UNKNOWN_EXTERNAL_OUTCOME' : 'MEDIA_INTERRUPTED', unknown
     ? '服务重启时存在尚未取得完整证据的外部请求，请核实后授权新请求。'
     : '媒体制作被中断，可以继续未完成阶段；有效的音频和图片会复用。'), now);

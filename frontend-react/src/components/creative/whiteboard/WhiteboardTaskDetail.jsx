@@ -18,12 +18,14 @@ import { ProductionPlanFields } from './WhiteboardInputFields.jsx';
 import { WhiteboardArtifact } from './WhiteboardArtifact.jsx';
 import { WhiteboardConversationCard } from './WhiteboardConversationCard.jsx';
 import { WhiteboardMediaPanel } from './WhiteboardMediaPanel.jsx';
+import { WhiteboardCoverageReview } from './WhiteboardCoverageReview.jsx';
 
 export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, onAction, onStopAndDelete, progressEvents = [] }) {
   const [revision, setRevision] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [coverageReview, setCoverageReview] = useState(null);
   const [planOpen, setPlanOpen] = useState(false);
   const [editedPlan, setEditedPlan] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -58,6 +60,16 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
     return onAction({ action, expectedIdentity: current?.identity || '', expectedAttemptId: latest?.id,
       expectedMediaIdentity: media?.identity, interactionId: pendingInteraction?.id,
       requestId: crypto.randomUUID(), ...extras }, handlers);
+  }
+
+  function openCoverageReview() {
+    if (locked || !allowed.has('accept_low_coverage')) return;
+    // 弹窗和确认请求使用同一份版本快照，后台更新不能悄悄换掉用户正在检查的图。
+    setCoverageReview(structuredClone({ identity: media.identity, recipe: media.recipe,
+      lowCoverage: media.lowCoverage, artifacts: media.artifacts,
+      planIdentity: current.identity, planAttemptId: latest.id }));
+    setError('');
+    setConfirm('accept_low_coverage');
   }
 
   async function act(action, extras = {}) {
@@ -194,7 +206,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
           <div className="grid shrink-0 gap-3 border-t border-line-2 bg-surface-2 p-4">
             <div className={cn('flex items-start gap-2 text-xs leading-6', needsAttention ? 'text-danger' : 'text-fg-2')} role="status" aria-live="polite">
               {running || busy ? <Loader2 size={15} className="mt-1 shrink-0 animate-spin" /> : null}
-              <span>{busy ? ({ approve_initial: '正在确认当前内容与制作方案...', update_plan: '正在保存新的制作方案...', revise: '正在创建修改版本...', retry: '正在重新启动方案任务...', authorize_new_attempt: '正在创建新的模型请求...', start_production: '正在检查环境并启动视频制作...', approve_media: '正在确认当前产物并准备下一步...', retry_media: '正在恢复未完成的媒体制作...', authorize_media_retry: '正在登记授权并继续制作...', revise_media: '正在创建本幕修改版本...', message: '正在理解并处理你的消息...' })[busy] || '正在处理当前操作...' : statusMessage}</span>
+              <span>{busy ? ({ approve_initial: '正在确认当前内容与制作方案...', update_plan: '正在保存新的制作方案...', revise: '正在创建修改版本...', retry: '正在重新启动方案任务...', authorize_new_attempt: '正在创建新的模型请求...', start_production: '正在检查环境并启动视频制作...', approve_media: '正在确认当前产物并准备下一步...', retry_media: '正在恢复未完成的媒体制作...', accept_low_coverage: '正在接受当前落墨并继续制作...', authorize_media_retry: '正在登记授权并继续制作...', revise_media: '正在创建本幕修改版本...', message: '正在理解并处理你的消息...' })[busy] || '正在处理当前操作...' : statusMessage}</span>
             </div>
             {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
             {error || workflow.error ? <Link to="/settings" state={{ from: `/creative/${workflow.workflow_id}` }} className="text-sm font-semibold text-ink underline underline-offset-4">打开模型与声音设置</Link> : null}
@@ -211,6 +223,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
               {allowed.has('update_plan') && artifact && (!pendingInteraction || media) ? <Button type="button" variant="outline" disabled={locked} onClick={() => { setEditedPlan({ ...artifact.productionPlan }); setPlanOpen(true); setError(''); }}><Settings2 size={14} />制作设置</Button> : null}
               {allowed.has('start_production') ? <Button type="button" disabled={locked} onClick={() => act('start_production')}>开始制作视频</Button> : null}
               {allowed.has('retry_media') ? <Button type="button" disabled={locked} onClick={() => act('retry_media')}>继续未完成的制作</Button> : null}
+              {allowed.has('accept_low_coverage') ? <Button type="button" variant="outline" disabled={locked} onClick={openCoverageReview}>查看预览后接受当前落墨</Button> : null}
               {allowed.has('authorize_media_retry') ? <Button type="button" variant="outline" disabled={locked} onClick={() => setConfirm('authorize_media_retry')}>核实后授权新请求</Button> : null}
               {allowed.has('regenerate_narration') ? <Button type="button" variant="outline" disabled={locked} onClick={() => setConfirm('regenerate_narration')}>重新生成完整旁白</Button> : null}
               {allowed.has('retry') ? <Button type="button" disabled={locked} onClick={() => act('retry')}>重新生成方案</Button> : null}
@@ -228,7 +241,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
             {whiteboard.artifactError ? <p className="text-sm text-danger" role="alert">{whiteboard.artifactError}</p> : artifact ? <div className="grid min-w-0 content-start gap-5">
               {current?.stale ? <p className="m-0 text-xs leading-6 text-fg-3">此版本已因修改而失效，保留供对照。新方案需要重新确认。</p> : null}
               {media ? <>
-                <WhiteboardMediaPanel media={media} scenes={artifact.scenes} /><details className="border-t border-line-1 pt-3 text-sm"><summary className="mb-4 cursor-pointer text-fg-3">查看已确认内容与制作方案</summary><WhiteboardArtifact artifact={artifact} /></details>
+                <WhiteboardMediaPanel media={media} scenes={artifact.scenes} onReviewLowCoverage={!locked && allowed.has('accept_low_coverage') ? openCoverageReview : undefined} /><details className="border-t border-line-1 pt-3 text-sm"><summary className="mb-4 cursor-pointer text-fg-3">查看已确认内容与制作方案</summary><WhiteboardArtifact artifact={artifact} /></details>
               </> : <WhiteboardArtifact artifact={artifact} />}
             </div> : <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center gap-3 text-center" role="status" aria-live="polite">
               {running ? <Loader2 size={24} className="animate-spin text-fg-3" /> : <FileText size={26} className="text-fg-3" />}
@@ -259,9 +272,18 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
         </DialogContent>
       </Dialog>
 
-      <ConfirmDialog open={Boolean(confirm) && confirm !== 'approve_initial'} onOpenChange={open => { if (!open) setConfirm(''); }}
+      {confirm === 'accept_low_coverage' && coverageReview ? <WhiteboardCoverageReview review={coverageReview} scenes={artifact?.scenes}
+        current={coverageReview.identity === media?.identity && allowed.has('accept_low_coverage')}
+        busy={busy} error={error} onClose={() => setConfirm('')}
+        onAccept={() => act('accept_low_coverage', { confirmed: true, expectedMediaIdentity: coverageReview.identity,
+          expectedIdentity: coverageReview.planIdentity, expectedAttemptId: coverageReview.planAttemptId })}
+        onRetry={() => act('retry_media', { expectedMediaIdentity: coverageReview.identity,
+          expectedIdentity: coverageReview.planIdentity, expectedAttemptId: coverageReview.planAttemptId })} /> : null}
+
+      <ConfirmDialog open={Boolean(confirm) && !['approve_initial', 'accept_low_coverage'].includes(confirm)} onOpenChange={open => { if (!open) setConfirm(''); }}
         title={confirm === 'approve_media' ? pendingInteraction?.title || '确认当前媒体产物' : '同意发起一次新的外部请求'}
-        description={confirm === 'approve_media' ? '请实际检查产物区的完整音频、图像或视频。确认将绑定当前版本，并进入下一步制作。' : '上次请求是否已经完成或计费尚不确定。再次请求可能产生重复费用；新请求将保留原版本及记录。'}
+        description={confirm === 'approve_media' ? '请实际检查产物区的完整音频、图像或视频。确认将绑定当前版本，并进入下一步制作。'
+          : '上次请求是否已经完成或计费尚不确定。再次请求可能产生重复费用；新请求将保留原版本及记录。'}
         confirmText={confirm === 'approve_media' ? '确认当前产物' : '同意新请求与可能的重复费用'} loading={Boolean(busy)}
         onConfirm={() => act(confirm, { confirmed: true })}>
         {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}

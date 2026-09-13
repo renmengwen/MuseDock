@@ -6,6 +6,9 @@ const models = require('./mediaModels');
 const { buildNarrationTiming, buildSilentTiming, srtText } = require('./narrationTiming');
 const aiTtsModel = require('../../ai/aiTtsModel');
 const { sceneRenderPool } = require('./sceneRenderPool');
+const { annotationPool } = require('./annotationPool');
+
+async function fspExists(file) { try { await fsp.access(file); return true; } catch { return false; } }
 
 async function complete(ctx, item, stage, binding) {
   await ctx.change((record, now) => {
@@ -137,12 +140,13 @@ async function lineartStage(ctx, artifact, timing) {
     scenes: timing.scenes.map(scene => record.whiteboard.media.lineart[scene.id]) }));
 }
 
-async function annotationStage(ctx, artifact, timing) {
-  const canvas = canvasFor(artifact.aspectRatio);
-  for (const scene of timing.scenes) {
+async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
+  let item;
+  try {
     const record = await ctx.read();
     if (record.whiteboard.media.annotations[scene.id]) {
-      await store.validateBinding(record, record.whiteboard.media.annotations[scene.id], ctx.rootDir); continue;
+      await store.validateBinding(record, record.whiteboard.media.annotations[scene.id], ctx.rootDir);
+      return { reused: true };
     }
     const lineart = await store.validateBinding(record, record.whiteboard.media.lineart[scene.id], ctx.rootDir);
     const image = await ctx.filePath(record, lineart.image);
@@ -150,8 +154,13 @@ async function annotationStage(ctx, artifact, timing) {
     const prompt = models.annotationPrompt({ scene, cues: timing.cues.filter(cue => scene.cueIds.includes(cue.id)), revision, canvas });
     const inputIdentity = sha256({ contract: models.ANNOTATION_PLANNING_CONTRACT, prompt,
       image: lineart.image.sha256, timing: record.whiteboard.media.current.full_narration.identity, scene, revision });
-    if (await reuseHistory(ctx, 'annotations', scene.id, inputIdentity)) continue;
-    const item = await ctx.attempt('annotation_drafting', scene.id, true, inputIdentity);
+    const pending = record.whiteboard.media.lowCoverage?.find(entry => entry.sceneId === scene.id && entry.inputIdentity === inputIdentity);
+    if (pending) {
+      await store.validateBinding(record, pending, ctx.rootDir);
+      throw new WhiteboardError('ANNOTATION_COVERAGE_LOW', '本幕的低覆盖率预览已保留，请查看后决定接受或重新编排。');
+    }
+    if (await reuseHistory(ctx, 'annotations', scene.id, inputIdentity)) return { reused: true };
+    item = await ctx.attempt('annotation_drafting', scene.id, true, inputIdentity);
     const candidate = await models.structuredVision({ textConfig: ctx.config, images: [image], services: ctx.services,
       onRequest: () => ctx.requesting(item.id), validate: candidate => models.validateAnnotation(candidate, canvas), reasoningEffort: 'medium', prompt,
     });
@@ -160,15 +169,112 @@ async function annotationStage(ctx, artifact, timing) {
     const annotationFile = await ctx.jsonFile(item, 'annotation.json', annotation);
     await ctx.publish(item, { candidate: { path: candidateFile, kind: 'annotation_candidate', name: '区域候选', sceneId: scene.id, mime: 'application/json' } });
     const preview = path.join(store.workDirectory(ctx.workflowId, item.id, ctx.rootDir), 'annotation-preview.png');
-    const coverage = await ctx.tools.python('annotation-preview', { image, annotation, font: ctx.runtime.font, output: preview }, ctx.processOptions);
+    const resultPreview = path.join(store.workDirectory(ctx.workflowId, item.id, ctx.rootDir), 'annotation-result.png');
+    let coverage;
+    let coverageError;
+    try {
+      coverage = await ctx.tools.python('annotation-preview', { image, annotation, font: ctx.runtime.font,
+        output: preview, resultOutput: resultPreview }, ctx.processOptions);
+    } catch (error) {
+      if (error.code !== 'ANNOTATION_COVERAGE_LOW') throw error;
+      if (!await fspExists(preview) || !await fspExists(resultPreview) || !Number.isFinite(error.coverageRatio)
+        || error.coverageRatio < 0 || error.coverageRatio >= 0.97) {
+        throw new WhiteboardError('ANNOTATION_PREVIEW_FAILED', '低覆盖率落墨缺少完整预览或覆盖数据，请继续制作以重新编排本幕。');
+      }
+      coverage = { ...error.coverage, coverageRatio: error.coverageRatio, regions: annotation.elements.length };
+      coverageError = error;
+    }
+    // 文件和低覆盖率记录必须在同一次受锁保护的发布中保存。
     await ctx.publish(item, {
       annotation: { path: annotationFile, kind: 'annotation', name: `${scene.title}落墨编排`, sceneId: scene.id, mime: 'application/json' },
       preview: { path: preview, kind: 'annotation_preview', name: `${scene.title}区域预览`, sceneId: scene.id, mime: 'image/png' },
+      resultPreview: { path: resultPreview, kind: 'annotation_result', name: `${scene.title}当前落墨效果`, sceneId: scene.id, mime: 'image/png' },
     }, (current, files, now) => {
-      current.whiteboard.media.annotations[scene.id] = store.bind({ kind: 'annotation', sceneId: scene.id, inputIdentity,
-        planningContract: models.ANNOTATION_PLANNING_CONTRACT, visualGrouping: candidate.visualGrouping, ...files, coverage });
-      Object.assign(current.whiteboard.media.attempts.find(row => row.id === item.id), { status: 'validated', completedAt: now });
+      const media = current.whiteboard.media;
+      media.lowCoverage = (media.lowCoverage || []).filter(entry => entry.sceneId !== scene.id);
+      const binding = { sceneId: scene.id, inputIdentity, planningContract: models.ANNOTATION_PLANNING_CONTRACT,
+        visualGrouping: candidate.visualGrouping, ...files, coverage };
+      if (coverageError) {
+        media.lowCoverage.push(store.bind({ kind: 'annotation_coverage_review', ...binding,
+          title: scene.title, attemptId: item.id, lineartIdentity: lineart.identity,
+          narrationIdentity: record.whiteboard.media.current.full_narration.identity, revision }));
+      } else media.annotations[scene.id] = store.bind({ kind: 'annotation', ...binding });
+      Object.assign(media.attempts.find(row => row.id === item.id), {
+        status: coverageError ? 'failed' : 'validated', completedAt: now,
+        ...(coverageError ? { errorCode: 'ANNOTATION_COVERAGE_LOW' } : {}),
+      });
+      if (media.activeAttemptId === item.id) media.activeAttemptId = '';
     });
+    if (coverageError) throw coverageError;
+    return { reused: false };
+  } catch (error) {
+    if (item) {
+      try {
+        await ctx.change((record, now) => {
+          const attempt = record.whiteboard.media.attempts.find(row => row.id === item.id);
+          if (attempt && attempt.status !== 'validated') Object.assign(attempt, {
+            status: error.code === 'UNKNOWN_EXTERNAL_OUTCOME' ? 'unknown_external_outcome' : 'failed',
+            errorCode: error.code || 'MEDIA_FAILED', completedAt: now,
+          });
+          if (record.whiteboard.media.activeAttemptId === item.id) record.whiteboard.media.activeAttemptId = '';
+        });
+      } catch { /* Deleted or superseded tasks must never be recreated. */ }
+    }
+    throw error;
+  }
+}
+
+async function annotationStage(ctx, artifact, timing) {
+  if (!timing.scenes.length) throw new WhiteboardError('TIMELINE_INVALID', '没有可编排的分镜。');
+  const canvas = canvasFor(artifact.aspectRatio);
+  const pool = ctx.annotationPool || annotationPool;
+  const signal = ctx.processOptions.signal;
+  const state = { total: timing.scenes.length, concurrency: pool.concurrency, completed: 0, failed: 0, reused: 0, active: 0, peakActive: 0 };
+  const report = async () => {
+    const progress = { ...state, queued: Math.max(0, state.total - state.completed - state.failed - state.active) };
+    const message = `正在并发编排落墨：已完成 ${progress.completed}/${progress.total}，处理中 ${progress.active}，等待 ${progress.queued}${progress.failed ? `，失败 ${progress.failed}` : ''}（并发上限 ${progress.concurrency}）。`;
+    const updated = await ctx.change((record, now) => {
+      record.whiteboard.media.annotationProgress = progress;
+      record.message = message;
+      record.current_stage_message = message;
+      record.updated_at = now;
+      const stage = record.whiteboard.media.stages.find(item => item.id === 'annotation_drafting');
+      if (stage) Object.assign(stage, { message, updated_at: now });
+    });
+    await ctx.emitProgress?.({ type: 'stage_progress', stage: 'annotation_drafting', progress: updated?.record?.current_progress || 52, message });
+  };
+  await report();
+  const results = await pool.mapSettled(timing.scenes, async scene => {
+    state.active += 1;
+    state.peakActive = Math.max(state.peakActive, state.active);
+    try {
+      await report();
+      const result = await annotateSceneCandidate(ctx, artifact, timing, scene, canvas);
+      state.completed += 1;
+      if (result.reused) state.reused += 1;
+      return result;
+    } catch (error) { state.failed += 1; throw error; }
+    finally { state.active -= 1; await report(); }
+  }, { signal });
+  const failures = results.map((result, index) => ({ ...result, scene: timing.scenes[index] })).filter(result => result.status === 'rejected');
+  state.failed = failures.length;
+  await report();
+  // UNKNOWN_EXTERNAL_OUTCOME 必须原样上抛：语音与视觉请求是否已计费无法确认时，
+  // 任务须进入 unknown_external_outcome 状态等待用户核实，不能被聚合成普通失败。
+  const unknown = failures.find(result => result.reason?.code === 'UNKNOWN_EXTERNAL_OUTCOME');
+  if (unknown) throw unknown.reason;
+  if (signal?.aborted) throw new WhiteboardError('MEDIA_CANCELLED', '落墨编排已取消。');
+  const stopped = failures.find(result => ['ENOENT', 'STALE_IDENTITY', 'MEDIA_CANCELLED'].includes(result.reason?.code));
+  if (stopped) throw stopped.reason;
+  const coverageFailures = failures.filter(result => result.reason?.code === 'ANNOTATION_COVERAGE_LOW');
+  if (failures.length) {
+    const names = failures.slice(0, 3).map(result => result.scene.title || result.scene.id).join('、');
+    if (coverageFailures.length) {
+      const coverageNames = coverageFailures.map(result => result.scene.title || result.scene.id).join('、');
+      throw new WhiteboardError('ANNOTATION_COVERAGE_LOW', `${coverageNames} 的落墨标注未完整覆盖线稿。`
+        + `预览图已在落墨面板生成，请查看后选择接受当前已标注内容或重新编排；遗漏内容不会在末尾突然显示${failures.length > coverageFailures.length ? `。另有 ${failures.length - coverageFailures.length} 幕因其他原因失败` : ''}。`);
+    }
+    throw new WhiteboardError('ANNOTATION_DRAFT_FAILED', `${failures.length} 幕落墨编排未完成（${names}${failures.length > 3 ? '等' : ''}）。已完成幕已保留，继续制作时会复用有效产物。`);
   }
   const record = await ctx.read();
   await complete(ctx, null, 'annotation_drafting', store.bind({ kind: 'annotation_bundle',
