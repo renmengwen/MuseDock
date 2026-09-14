@@ -45,8 +45,8 @@ async function fixture(run) {
       ttsService: new Proxy({}, { get: () => forbidden }),
     },
   };
-  ctx.create = async (input = TOPIC) => {
-    const result = await workflows.createCreativeWorkflow({ creationModeId: 'whiteboard-stream-v1', input }, ctx.options);
+  ctx.create = async (input = TOPIC, productionPlan = {}) => {
+    const result = await workflows.createCreativeWorkflow({ creationModeId: 'whiteboard-stream-v1', input, productionPlan }, ctx.options);
     assert.equal(result.success, true, result.message);
     return result.workflow_id;
   };
@@ -195,6 +195,23 @@ const cases = [
     assert.equal(next.whiteboard.current.artifact.narrationText, first.whiteboard.current.artifact.narrationText);
     assert.equal(next.whiteboard.initialApproval, null);
     assert.equal(ctx.modelCalls.length, 1);
+  })],
+  ['BGM 选择随方案保存，切换使旧批准失效且不调用媒体或额外内容模型', () => fixture(async ctx => {
+    const id = await ctx.create(TOPIC, { bgmMode: 'enabled' });
+    await workflows.runCreativeWorkflow(id, ctx.options);
+    const first = await ctx.read(id);
+    assert.equal(first.whiteboard.current.artifact.productionPlan.bgmMode, 'enabled');
+    await ctx.action(id, 'approve_initial', { confirmed: true });
+    await ctx.action(id, 'update_plan', { productionPlan: { bgmMode: 'disabled' } });
+    const next = await workflows.runCreativeWorkflow(id, ctx.options);
+    assert.equal(next.status, 'waiting_approval');
+    assert.equal(next.whiteboard.current.artifact.productionPlan.bgmMode, 'disabled');
+    assert.notEqual(next.whiteboard.current.identity, first.whiteboard.current.identity);
+    assert.equal(next.whiteboard.initialApproval, null);
+    assert.equal(next.whiteboard.approvals[0].stale, true);
+    assert.equal(next.whiteboard.current.artifact.narrationText, first.whiteboard.current.artifact.narrationText);
+    assert.equal(ctx.modelCalls.length, 1);
+    assert.equal((await ctx.action(id, 'approve_initial', { confirmed: true }, first)).code, 'STALE_IDENTITY');
   })],
   ['SRT 使用原始字幕与真实输入时间，不接受模型改写', () => fixture(async ctx => {
     const id = await ctx.create({ inputMode: 'srt', content: SRT, narrationLanguage: 'zh-CN', visualStylePreset: 'warm-pencil-v1' });

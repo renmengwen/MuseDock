@@ -11,6 +11,7 @@ const aiTtsModel = require('../../ai/aiTtsModel');
 const appSettings = require('../../appSettings');
 const { ensureWhiteboardConcurrency } = require('./concurrency');
 const { recoverableAnnotationAttempts, recoverAnnotationPreviews } = require('./annotationRecovery');
+const { safeVisionDiagnostics } = require('./visionDiagnostics');
 
 const COVERAGE_GATE = 'annotation_coverage_review';
 
@@ -158,14 +159,14 @@ async function act(record, payload, options, now) {
   const artifact = await requirePlan(record, options);
   if (action === 'start_production') {
     const tools = options.services?.whiteboardMediaTools || mediaTools;
-    const runtime = await tools.preflight({ ...options.mediaOptions, aspectRatio: artifact.aspectRatio || '16:9' });
+    const runtime = await tools.preflight({ ...options.mediaOptions, aspectRatio: artifact.aspectRatio || '16:9', bgmMode: artifact.productionPlan.bgmMode });
     const { service, runtime: voice, legacyContractHash } = await voiceSnapshot(options.services);
     if (artifact.productionPlan.narrationMode !== 'disabled') {
       if (!service.configured || !['doubao', 'minimax'].includes(voice.provider)) throw new WhiteboardError('TTS_NOT_CONFIGURED', '完整白板旁白需要豆包 Seed Audio 或 MiniMax 原生字幕。请在设置中配置 TTS，再调整制作设置并重新确认方案。');
       if (artifact.narrationService.contractVersion === 2 && service.contractHash !== artifact.narrationService.contractHash) throw new WhiteboardError('VOICE_CONFIG_CHANGED', '旁白设置已变化，请更新制作设置并重新确认当前方案。', 409);
       if (artifact.narrationService.contractVersion !== 2 && artifact.narrationService.contractHash !== legacyContractHash) throw new WhiteboardError('VOICE_CONFIG_CHANGED', '旧方案的旁白设置已变化，请更新制作设置并重新确认。', 409);
       if (voice.provider === 'doubao' && artifact.durationMs > 120000) throw new WhiteboardError('TTS_INPUT_INVALID', '豆包整轨旁白最多支持 120 秒，请调整方案时长。');
-    } else if (artifact.timingKind !== 'source_srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '静音白板需要输入带真实时间的 SRT 字幕。');
+    } else if (artifact.timingKind !== 'source_srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '不使用旁白时，需要输入带真实时间的 SRT 字幕。');
     const config = await options.services.aiModelConfig.getRuntimeConfig('text');
     const image = await options.services.aiModelConfig.getRuntimeConfig('image');
     if (!config?.enabled || !config.apiKey || !config.baseUrl || !config.modelId || config.supportsMultimodal !== true) throw new WhiteboardError('VISION_NOT_CONFIGURED', '请在设置中配置支持多模态输入的分析模型，用于区域编排和视觉检查。');
@@ -173,6 +174,7 @@ async function act(record, payload, options, now) {
     if (record.whiteboard.media) (record.whiteboard.mediaHistory ||= []).push(record.whiteboard.media);
     record.whiteboard.media = store.makeMedia(record.whiteboard.current.identity, runtime.recipe);
     record.whiteboard.media.voiceService = service;
+    if (runtime.bgm) record.whiteboard.media.bgm = runtime.bgm.recipe;
     setState(record, 'queued', '正在准备完整旁白与真实时间线...', now);
     message(record, 'user', '按当前已确认方案开始制作视频。', now);
     return true;
@@ -301,7 +303,8 @@ function unfinishedAttempts(media) {
 function fail(record, error, now) {
   const media = record.whiteboard.media;
   const unknown = error.code === 'UNKNOWN_EXTERNAL_OUTCOME';
-  for (const attempt of unfinishedAttempts(media)) Object.assign(attempt, { status: unknown ? 'unknown_external_outcome' : 'failed', errorCode: error.code, completedAt: now });
+  const diagnosticFields = error.diagnostics ? { diagnostics: safeVisionDiagnostics(error.diagnostics) } : {};
+  for (const attempt of unfinishedAttempts(media)) Object.assign(attempt, { status: unknown ? 'unknown_external_outcome' : 'failed', errorCode: error.code, completedAt: now, ...diagnosticFields });
   if (media.sceneRenderProgress) media.sceneRenderProgress.active = 0;
   if (media.annotationProgress) media.annotationProgress.active = 0;
   if (media.lineartProgress) media.lineartProgress.active = 0;
@@ -311,7 +314,7 @@ function fail(record, error, now) {
     waitForCoverageReview(record, now);
     return;
   }
-  record.error = { code: error.code || 'MEDIA_FAILED', message: error.message };
+  record.error = { code: error.code || 'MEDIA_FAILED', message: error.message, ...diagnosticFields };
   setState(record, unknown ? 'unknown_external_outcome' : 'failed', error.message, now);
   message(record, 'assistant', error.message, now);
 }
@@ -360,7 +363,7 @@ async function run(workflowId, options, hooks) {
       } catch { /* The next guarded write handles deletion. */ }
     }, 15000);
     const initialArtifact = await requirePlan(await read(), options);
-    const runtime = await tools.preflight({ ...processOptions, aspectRatio: initialArtifact.aspectRatio || '16:9' });
+    const runtime = await tools.preflight({ ...processOptions, aspectRatio: initialArtifact.aspectRatio || '16:9', bgmMode: initialArtifact.productionPlan.bgmMode });
     const config = await services.aiModelConfig.getRuntimeConfig('text');
     const voice = await voiceSnapshot(services);
     await ensureWhiteboardConcurrency(() => (services.appSettings?.getWhiteboardSettings ? services.appSettings : appSettings)
@@ -405,6 +408,7 @@ async function run(workflowId, options, hooks) {
       const artifact = await requirePlan(record, options);
       const media = record.whiteboard.media;
       if (sha256(media.recipe) !== sha256(runtime.recipe)) throw new WhiteboardError('RENDER_CONFIG_CHANGED', '渲染器或字体已变化，请重新确认制作设置后生成新版本。', 409);
+      if (sha256(media.bgm || null) !== sha256(runtime.bgm?.recipe || null)) throw new WhiteboardError('BGM_CONFIG_CHANGED', '背景音乐素材或混音设置已变化，请重新确认制作设置后生成新版本。', 409);
       await change((current, now) => setState(current, 'running', `正在${store.STAGES.find(item => item.id === media.stage).label}...`, now));
       await options.taskContext?.emit?.({ type: 'stage_started', stage: media.stage, progress: record.current_progress, message: `正在${store.STAGES.find(item => item.id === media.stage).label}...` });
       await executeStage(ctx, artifact, media.stage);

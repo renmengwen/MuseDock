@@ -5,6 +5,7 @@ const { getArtifactRoot } = require('./artifactStore');
 const { DEFAULT_ROOT } = require('../workflowStore');
 const { WhiteboardError, sha256 } = require('./contracts');
 const { hashFile } = require('./mediaTools');
+const { safeVisionDiagnostics } = require('./visionDiagnostics');
 
 const MEDIA_CONTRACT = 'musedock-whiteboard-media-v1';
 const STAGES = [
@@ -99,7 +100,8 @@ function publicMedia(record) {
   media.identity = mediaIdentity(media);
   media.artifacts = media.artifacts.map(artifact => ({ ...artifact,
     url: `/api/creative-workflows/${record.workflow_id}/whiteboard/media/${artifact.id}` }));
-  media.attempts = media.attempts.map(({ input, ...attempt }) => attempt);
+  media.attempts = media.attempts.map(({ input, diagnostics, ...attempt }) => ({ ...attempt,
+    ...(diagnostics ? { diagnostics: safeVisionDiagnostics(diagnostics) } : {}) }));
   return media;
 }
 

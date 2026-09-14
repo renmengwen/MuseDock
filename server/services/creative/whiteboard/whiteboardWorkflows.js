@@ -117,7 +117,7 @@ async function getView(record, options = {}) {
 async function createWhiteboardWorkflow(payload, options = {}) {
   const input = normalizeInput(payload.input);
   const productionPlan = normalizeProductionPlan(payload.productionPlan || {});
-  if (productionPlan.narrationMode === 'disabled' && input.inputMode !== 'srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '静音白板需要输入带真实时间的 SRT 字幕。');
+  if (productionPlan.narrationMode === 'disabled' && input.inputMode !== 'srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '不使用旁白时，需要输入带真实时间的 SRT 字幕。');
   if ((payload.assetIds?.length || payload.asset_ids?.length) || payload.skipValidation === true) throw new WhiteboardError('INVALID_INPUT', '白板阶段 0 不接受上传素材或跳过校验，请使用白板输入表单。');
   const now = getNow(options.services);
   const workflowId = String(options.services?.idFactory?.() || makeId(now));
@@ -239,7 +239,7 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
     }
     const productionPlan = payload.action === 'update_plan'
       ? normalizeProductionPlan({ ...latest.productionPlan, ...(payload.productionPlan || {}) }) : latest.productionPlan;
-    if (productionPlan.narrationMode === 'disabled' && input.inputMode !== 'srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '静音白板需要输入带真实时间的 SRT 字幕。');
+    if (productionPlan.narrationMode === 'disabled' && input.inputMode !== 'srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '不使用旁白时，需要输入带真实时间的 SRT 字幕。');
     if (payload.action === 'update_plan') await artifactStore.readArtifact(record, current, options.rootDir);
     if (payload.action === 'update_plan') record.whiteboard.narrationService = (await production.voiceSnapshot(options.services)).service;
     const kind = payload.action === 'update_plan' ? 'settings' : (payload.action === 'retry' || payload.action === 'authorize_new_attempt' ? latest.kind : 'model');

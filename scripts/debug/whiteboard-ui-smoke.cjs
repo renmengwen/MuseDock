@@ -1,5 +1,6 @@
 // 离线浏览器验收：真实 React 构建 + 真实业务路由 + 隔离磁盘 + 模型替身。
 // 先运行 npm run build:frontend，再运行 node scripts/debug/whiteboard-ui-smoke.cjs。
+// --bgm 只验证制作设置流程，不经过需要独立对话模型替身的自然语言改稿。
 const assert = require('assert/strict');
 const fs = require('fs/promises');
 const os = require('os');
@@ -12,6 +13,7 @@ const { createCreativeTaskRegistry } = require('../../server/services/creative/c
 const { parseSrt } = require('../../server/services/creative/whiteboard/contracts');
 
 async function main() {
+  const bgmOnly = process.argv.includes('--bgm');
   const projectRoot = path.resolve(__dirname, '../..');
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'musedock-whiteboard-browser-'));
   const screenshots = path.join(projectRoot, '.codex-runtime', 'whiteboard-phase0-qa');
@@ -122,6 +124,15 @@ async function main() {
     await page.getByRole('tab', { name: '主题', exact: true }).click();
     await page.getByRole('combobox', { name: '视觉模板' }).click();
     await page.getByRole('option', { name: '漫画墨线解释', exact: true }).click();
+    await page.getByRole('button', { name: '制作设置', exact: true }).click();
+    assert.equal(await page.getByRole('combobox', { name: '背景音乐' }).innerText(), '不使用 BGM');
+    await page.getByRole('combobox', { name: '背景音乐' }).click();
+    await page.getByRole('option', { name: '使用 BGM', exact: true }).click();
+    await page.screenshot({ path: path.join(screenshots, 'production-settings-bgm-desktop.png'), fullPage: true });
+    await page.getByRole('button', { name: '完成设置', exact: true }).click();
+    await page.getByRole('button', { name: '制作设置', exact: true }).click();
+    assert.equal(await page.getByRole('combobox', { name: '背景音乐' }).innerText(), '使用 BGM');
+    await page.getByRole('button', { name: '完成设置', exact: true }).click();
     await page.screenshot({ path: path.join(screenshots, 'homepage-desktop.png'), fullPage: true });
     await page.getByRole('button', { name: '启动白板创作 Agent', exact: true }).click();
     assert.equal(await wbTab.isDisabled(), true);
@@ -133,33 +144,41 @@ async function main() {
     assert.equal(creationCalls, 1);
     assert.equal(requests[0].input.visualStylePreset, 'comic-ink-v1');
     assert.equal(requests[0].input.aspectRatio, '9:16');
+    assert.equal(requests[0].productionPlan.bgmMode, 'enabled');
     assert.equal(requests[0].assetIds, undefined);
     const taskUrl = page.url();
     await page.screenshot({ path: path.join(screenshots, 'agent-review-desktop.png'), fullPage: true });
 
-    await page.getByLabel('与白板创作 Agent 对话').fill('开头更直接，把第一段压缩成一句话。');
-    await page.getByRole('button', { name: '发送', exact: true }).click();
-    await page.getByRole('heading', { name: '从两分钟的小动作开始', exact: true }).waitFor();
-    await page.getByRole('button', { name: '确认内容与制作方案', exact: true }).waitFor();
+    if (!bgmOnly) {
+      await page.getByLabel('与白板创作 Agent 对话').fill('开头更直接，把第一段压缩成一句话。');
+      await page.getByRole('button', { name: '发送', exact: true }).click();
+      await page.getByRole('heading', { name: '从两分钟的小动作开始', exact: true }).waitFor();
+      await page.getByRole('button', { name: '确认内容与制作方案', exact: true }).waitFor();
+    }
+    await page.getByText('使用 BGM（内置轻钢琴）', { exact: true }).waitFor();
     await page.getByRole('button', { name: '调整制作设置', exact: true }).click();
+    assert.equal(await page.getByRole('combobox', { name: '背景音乐' }).innerText(), '使用 BGM');
+    await page.getByRole('combobox', { name: '背景音乐' }).click();
+    await page.getByRole('option', { name: '不使用 BGM', exact: true }).click();
     await page.getByRole('combobox', { name: '画笔显示' }).click();
     await page.getByRole('option', { name: '隐藏画笔', exact: true }).click();
     await page.getByRole('button', { name: '保存为新的待确认版本', exact: true }).click();
-    await page.getByText('v3', { exact: true }).waitFor();
-    assert.equal(modelCalls, 2);
+    await page.getByText(bgmOnly ? 'v2' : 'v3', { exact: true }).waitFor();
+    assert.equal(modelCalls, bgmOnly ? 1 : 2);
     await page.getByRole('button', { name: '版本记录', exact: true }).click();
     await page.getByRole('button', { name: '查看方案', exact: true }).last().click();
     await page.getByRole('heading', { name: '第 1 版方案', exact: true }).waitFor();
     assert.equal(await page.getByRole('dialog').getByRole('button', { name: '确认当前方案', exact: true }).count(), 0);
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: '确认内容与制作方案', exact: true }).click();
-    await page.getByRole('button', { name: '确认当前方案', exact: true }).click();
+    await page.getByRole('button', { name: '仅确认，稍后制作', exact: true }).click();
     await page.locator('header').getByText('方案已确认', { exact: true }).waitFor();
     await page.reload();
     await page.locator('header').getByText('方案已确认', { exact: true }).waitFor();
     assert.equal(await page.locator('main .animate-spin').count(), 0);
     await page.getByRole('tab', { name: '制作方案', exact: true }).click();
     await page.getByText('隐藏画笔', { exact: true }).waitFor();
+    await page.getByText('不使用 BGM', { exact: true }).waitFor();
     await page.getByText('1080 × 1920 · 9:16', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(screenshots, 'approved-desktop.png'), fullPage: true });
 
@@ -178,13 +197,21 @@ async function main() {
     const overflow = await page.evaluate(() => ({ width: window.innerWidth, scrollWidth: document.documentElement.scrollWidth }));
     assert.ok(overflow.scrollWidth <= overflow.width, `移动端出现横向溢出：${JSON.stringify(overflow)}`);
     await page.screenshot({ path: path.join(screenshots, 'homepage-mobile.png'), fullPage: true });
+    await page.getByRole('button', { name: '制作设置', exact: true }).click();
+    assert.equal(await page.getByRole('combobox', { name: '背景音乐' }).innerText(), '不使用 BGM');
+    await page.getByRole('combobox', { name: '背景音乐' }).click();
+    await page.getByRole('option', { name: '使用 BGM', exact: true }).click();
+    const dialogBounds = await page.getByRole('dialog').boundingBox();
+    assert.ok(dialogBounds.y >= 0 && dialogBounds.y + dialogBounds.height <= 845, '制作设置弹框应限制在移动端视口内');
+    await page.screenshot({ path: path.join(screenshots, 'production-settings-bgm-mobile.png'), fullPage: true });
+    await page.getByRole('button', { name: '完成设置', exact: true }).click();
     await page.goto(taskUrl);
     await page.locator('header').getByText('方案已确认', { exact: true }).waitFor();
     const detailOverflow = await page.evaluate(() => ({ width: window.innerWidth, scrollWidth: document.documentElement.scrollWidth }));
     assert.ok(detailOverflow.scrollWidth <= detailOverflow.width, '移动端任务详情出现横向溢出');
     await page.screenshot({ path: path.join(screenshots, 'agent-mobile.png'), fullPage: true });
     assert.deepEqual(runtimeErrors, []);
-    console.log(JSON.stringify({ success: true, modelCalls, creationCalls, realProviderCalls: 0, checks: ['模式与输入草稿隔离', 'SRT 校验', '创建中禁用切换', '真实后台待确认', '修改生成新版本', '制作设置无额外模型请求', '历史只读', '联合批准与刷新恢复', '桌面及390px布局', '无运行时异常'], screenshots }, null, 2));
+    console.log(JSON.stringify({ success: true, modelCalls, creationCalls, realProviderCalls: 0, checks: ['模式与输入草稿隔离', 'SRT 校验', 'BGM 默认关闭及开启保存', 'BGM 方案展示与关闭后重新确认', '创建中禁用切换', '真实后台待确认', '修改生成新版本', '制作设置无额外模型请求', '历史只读', '联合批准与刷新恢复', '桌面及390px弹框布局', '无运行时异常'], screenshots }, null, 2));
   } finally {
     releaseCreation();
     await browser?.close();

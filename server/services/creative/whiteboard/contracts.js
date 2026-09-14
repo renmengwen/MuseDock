@@ -75,7 +75,8 @@ function normalizeProductionPlan(value = {}) {
   assertObject(value, '制作设置');
   rejectExtraKeys(value, Object.keys(DEFAULT_PRODUCTION_PLAN), '制作设置');
   const plan = { ...DEFAULT_PRODUCTION_PLAN, ...value };
-  if (plan.bgmMode !== 'disabled' || !['show', 'hide'].includes(plan.handDisplayMode)
+  if (!['disabled', 'enabled'].includes(plan.bgmMode)) throw new WhiteboardError('INVALID_INPUT', '请选择使用 BGM 或不使用 BGM。');
+  if (!['show', 'hide'].includes(plan.handDisplayMode)
     || typeof plan.agentApprovalEnabled !== 'boolean' || plan.imageGenerationMode !== 'per_scene'
     || !['enabled', 'disabled'].includes(plan.narrationMode)
     || typeof plan.burnSubtitles !== 'boolean') {

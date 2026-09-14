@@ -557,7 +557,8 @@ export function OneClickCreativePage() {
     if (event.type === 'stage_progress' || event.type?.startsWith('html_video_')) {
       setStatus('polling');
     }
-    if (event.type === 'stage_done' && ['assets', 'project'].includes(event.stage)) {
+    if ((event.type === 'stage_done' && ['assets', 'project'].includes(event.stage))
+      || (event.type === 'stage_progress' && event.stage === 'scene_render' && event.data?.refreshMedia === true)) {
       refreshWorkflowSnapshot({
         workflowId: event.workflow_id,
         taskId: event.task_id,

@@ -2,6 +2,7 @@ const fsp = require('fs/promises');
 const defaultTextModel = require('../../ai/aiTextModel');
 const defaultImageModel = require('../../ai/aiImageModel');
 const { WhiteboardError, canvasFor, sha256 } = require('./contracts');
+const { transportCategory, visionDiagnostics, visionRequestError } = require('./visionDiagnostics');
 const { presets } = require('../../../resources/whiteboard/visual-presets.json');
 
 const LEGACY_ANNOTATION_PLANNING_CONTRACT = 'narrative-visual-clusters-v2';
@@ -76,18 +77,32 @@ async function structuredVision({ textConfig, prompt, images = [], validate, ass
     await onRequest?.(repair);
     let httpStatus;
     let response;
+    let transport;
     try {
       response = await (services.aiTextModel || defaultTextModel).callTextModel({ textConfig, messages, maxRetries: 0,
         maxTokens: 10000, requestTimeoutMs: 180000,
         maxOutputTokens: 10000,
         reasoningEffort: /^(gpt-(5|6)([.-]|$)|o[134])/i.test(textConfig.modelId) ? reasoningEffort : undefined,
         fallbackToNonStreamOnGatewayTimeout: false,
-        fetchImpl: async (...args) => { const result = await (services.fetchImpl || fetch)(...args); httpStatus = result.status; return result; },
+        fetchImpl: async (...args) => {
+          try {
+            const result = await (services.fetchImpl || fetch)(...args);
+            httpStatus = result.status;
+            return result;
+          } catch (error) {
+            transport = transportCategory(error, args[1]?.signal);
+            throw error;
+          }
+        },
       });
-    } catch { throw new WhiteboardError('UNKNOWN_EXTERNAL_OUTCOME', '视觉模型请求中断，无法确认外部结果；请核实后授权新请求。', 409); }
-    if (!response?.success) {
-      if ([400, 401, 403, 404, 422, 429].includes(httpStatus)) throw new WhiteboardError('VISION_REQUEST_REJECTED', `视觉模型拒绝请求（HTTP ${httpStatus}），请检查设置或限流。`);
-      throw new WhiteboardError('UNKNOWN_EXTERNAL_OUTCOME', '视觉模型没有返回完整结果，请核实后授权新请求。', 409);
+    } catch (error) {
+      throw visionRequestError(visionDiagnostics({ httpStatus, transport: transport
+        || (['AbortError', 'TimeoutError'].includes(error?.name) ? 'timeout' : 'request_interrupted') }));
+    }
+    const diagnostics = visionDiagnostics({ response, httpStatus, transport });
+    if (!response?.success || !diagnostics.hasExtractedText
+      || ['output_limit', 'response_incomplete', 'refusal', 'http_rejected', 'http_error'].includes(diagnostics.category)) {
+      throw visionRequestError(diagnostics);
     }
     let candidate;
     let errors;

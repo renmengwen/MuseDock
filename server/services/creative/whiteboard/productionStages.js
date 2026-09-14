@@ -3,6 +3,8 @@ const path = require('path');
 const { WhiteboardError, sha256, canvasFor } = require('./contracts');
 const store = require('./mediaStore');
 const models = require('./mediaModels');
+const { safeVisionDiagnostics } = require('./visionDiagnostics');
+const { normalizeRenderProgress, sceneFrameCount } = require('./renderProgress');
 const { buildNarrationTiming, buildSilentTiming, srtText } = require('./narrationTiming');
 const aiTtsModel = require('../../ai/aiTtsModel');
 const { sceneRenderPool } = require('./sceneRenderPool');
@@ -109,10 +111,17 @@ async function narrationStage(ctx, artifact) {
 async function runSceneCandidates(ctx, { stage, label, progressKey, scenes, pool, job }) {
   const signal = ctx.processOptions.signal;
   const state = { total: scenes.length, completed: 0, failed: 0, reused: 0, active: 0, peakActive: 0 };
-  const report = async () => {
+  const frameProgress = stage === 'scene_render' ? new Map(scenes.map(scene => [scene.id, {
+    sceneId: scene.id, phase: 'queued', writtenFrames: 0, totalFrames: sceneFrameCount(scene), elapsedMs: 0,
+  }])) : null;
+  const report = async ({ refreshMedia = false } = {}) => {
     const progress = { ...state, concurrency: pool.concurrency,
-      queued: Math.max(0, state.total - state.completed - state.failed - state.active) };
-    const message = `正在并发${label}：已完成 ${progress.completed}/${progress.total}，处理中 ${progress.active}，等待 ${progress.queued}${progress.failed ? `，失败 ${progress.failed}` : ''}（并发上限 ${progress.concurrency}）。`;
+      queued: Math.max(0, state.total - state.completed - state.failed - state.active),
+      ...(frameProgress ? { scenes: [...frameProgress.values()].map(row => ({ ...row })) } : {}) };
+    const frameText = frameProgress ? ` 帧进度 ${progress.scenes.reduce((sum, row) => sum + row.writtenFrames, 0)}/${progress.scenes.reduce((sum, row) => sum + row.totalFrames, 0)}；${progress.scenes
+      .map((row, index) => !['queued', 'complete', 'failed'].includes(row.phase) ? `第 ${index + 1} 幕 ${row.writtenFrames}/${row.totalFrames} 帧` : '')
+      .filter(Boolean).join('，')}`.replace(/；$/, '。') : '';
+    const message = `正在并发${label}：已完成 ${progress.completed}/${progress.total}，处理中 ${progress.active}，等待 ${progress.queued}${progress.failed ? `，失败 ${progress.failed}` : ''}（并发上限 ${progress.concurrency}）。${frameText}`;
     const updated = await ctx.change((record, now) => {
       record.whiteboard.media[progressKey] = progress;
       record.message = message;
@@ -122,20 +131,33 @@ async function runSceneCandidates(ctx, { stage, label, progressKey, scenes, pool
       if (currentStage) Object.assign(currentStage, { message, updated_at: now });
     });
     await ctx.emitProgress?.({ type: 'stage_progress', stage,
-      progress: updated?.record?.current_progress || 20 + store.STAGES.findIndex(item => item.id === stage) * 16, message });
+      progress: updated?.record?.current_progress || 20 + store.STAGES.findIndex(item => item.id === stage) * 16, message,
+      ...(frameProgress ? { data: { sceneRenderProgress: progress, mediaId: updated?.record?.whiteboard?.media?.id, refreshMedia } } : {}) });
   };
   await report();
   const results = await pool.mapSettled(scenes, async scene => {
     state.active += 1;
     state.peakActive = Math.max(state.peakActive, state.active);
+    const frames = frameProgress?.get(scene.id);
+    if (frames) frames.phase = 'preparing';
     try {
       await report();
-      const result = await job(scene);
+      const result = await job(scene, async value => {
+        const next = normalizeRenderProgress(value);
+        if (!frames || !next || next.totalFrames !== frames.totalFrames || next.writtenFrames < frames.writtenFrames) return;
+        Object.assign(frames, next);
+        await report();
+      });
       state.completed += 1;
+      if (frames) Object.assign(frames, { phase: 'complete', writtenFrames: frames.totalFrames });
       if (result.reused) state.reused += 1;
       return result;
-    } catch (error) { state.failed += 1; throw error; }
-    finally { state.active -= 1; await report(); }
+    } catch (error) {
+      state.failed += 1;
+      if (frames) Object.assign(frames, { phase: 'failed', errorCode: error.code || 'MEDIA_FAILED' });
+      throw error;
+    }
+    finally { state.active -= 1; await report({ refreshMedia: true }); }
   }, { signal });
   const failures = results.map((result, index) => ({ ...result, scene: scenes[index] })).filter(result => result.status === 'rejected');
   state.failed = failures.length;
@@ -327,6 +349,7 @@ async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
           if (attempt && attempt.status !== 'validated') Object.assign(attempt, {
             status: error.code === 'UNKNOWN_EXTERNAL_OUTCOME' ? 'unknown_external_outcome' : 'failed',
             errorCode: error.code || 'MEDIA_FAILED', completedAt: now,
+            ...(error.diagnostics ? { diagnostics: safeVisionDiagnostics(error.diagnostics) } : {}),
           });
           if (record.whiteboard.media.activeAttemptId === item.id) record.whiteboard.media.activeAttemptId = '';
         });
@@ -361,7 +384,7 @@ async function annotationStage(ctx, artifact, timing) {
     scenes: timing.scenes.map(scene => record.whiteboard.media.annotations[scene.id]) }));
 }
 
-async function renderSceneCandidate(ctx, artifact, scene) {
+async function renderSceneCandidate(ctx, artifact, scene, onProgress) {
   let item;
   try {
     const record = await ctx.read();
@@ -382,7 +405,9 @@ async function renderSceneCandidate(ctx, artifact, scene) {
     item = await ctx.attempt('scene_render', scene.id, false, inputIdentity);
     const directory = store.workDirectory(ctx.workflowId, item.id, ctx.rootDir);
     const output = path.join(directory, 'scene.mp4');
-    const validation = await ctx.tools.renderScene({ image, annotation, output, scene, showHand: artifact.productionPlan.handDisplayMode === 'show' }, ctx.runtime, ctx.processOptions);
+    const validation = await ctx.tools.renderScene({ image, annotation, output, scene, showHand: artifact.productionPlan.handDisplayMode === 'show' }, ctx.runtime, { ...ctx.processOptions, onProgress });
+    await onProgress?.({ type: 'render_progress', phase: 'previews', writtenFrames: validation.frameCount,
+      totalFrames: validation.frameCount, elapsedMs: Math.max(0, Date.now() - Date.parse(item.createdAt)) });
     const files = { video: { path: output, kind: 'scene_video', name: scene.title, sceneId: scene.id, mime: 'video/mp4' } };
     for (const [index, fraction] of [0.15, 0.55, 0.95].entries()) {
       const preview = path.join(directory, `frame-${index}.png`);
@@ -414,10 +439,11 @@ async function sceneStage(ctx, artifact, timing) {
   if (!timing.scenes.length) throw new WhiteboardError('TIMELINE_INVALID', '没有可渲染的分镜。');
   const failures = await runSceneCandidates(ctx, { stage: 'scene_render', label: '渲染单幕',
     progressKey: 'sceneRenderProgress', scenes: timing.scenes, pool: ctx.sceneRenderPool || sceneRenderPool,
-    job: scene => renderSceneCandidate(ctx, artifact, scene) });
+    job: (scene, onProgress) => renderSceneCandidate(ctx, artifact, scene, onProgress) });
   if (failures.length) {
     const names = failures.slice(0, 3).map(result => result.scene.title || result.scene.id).join('、');
-    throw new WhiteboardError('SCENE_RENDER_FAILED', `${failures.length} 幕渲染未完成（${names}${failures.length > 3 ? '等' : ''}）。已完成单幕已保留，继续制作时会复用有效产物。`);
+    const timedOut = failures.filter(result => result.reason?.code === 'MEDIA_TIMEOUT').length;
+    throw new WhiteboardError('SCENE_RENDER_FAILED', `${failures.length} 幕渲染未完成（${names}${failures.length > 3 ? '等' : ''}）。${timedOut ? `其中 ${timedOut} 幕超过处理时限，已停止。` : ''}已完成单幕已保留，继续制作时会复用有效产物。`);
   }
   const record = await ctx.read();
   await complete(ctx, null, 'scene_render', store.bind({ kind: 'scene_bundle', scenes: timing.scenes.map(scene => record.whiteboard.media.scenes[scene.id]) }));
@@ -426,22 +452,24 @@ async function sceneStage(ctx, artifact, timing) {
 async function finalStage(ctx, artifact, timing) {
   const record = await ctx.read();
   const media = record.whiteboard.media;
+  const bgm = ctx.runtime.bgm || null;
+  const bgmBinding = bgm ? { bgm: bgm.recipe } : {};
   for (const stage of store.STAGES.slice(0, -1)) {
     await store.validateBinding(record, media.current[stage.id], ctx.rootDir);
     if (!media.approvals.some(approval => !approval.stale && approval.gate === store.GATES[stage.id]
       && approval.identity === media.current[stage.id].identity)) throw new WhiteboardError('APPROVAL_REQUIRED', '缺少当前上游产物的有效批准，不能合成最终视频。', 409);
   }
   const item = await ctx.attempt('final_delivery', '', false, sha256({ scenes: media.current.scene_render.identity,
-    narration: media.current.full_narration.identity, recipe: media.recipe, burnSubtitles: artifact.productionPlan.burnSubtitles }));
+    narration: media.current.full_narration.identity, recipe: media.recipe, burnSubtitles: artifact.productionPlan.burnSubtitles, ...bgmBinding }));
   const directory = store.workDirectory(ctx.workflowId, item.id, ctx.rootDir);
   const sceneFiles = [];
   for (const scene of timing.scenes) sceneFiles.push(await ctx.filePath(record, media.scenes[scene.id].video));
   const audioFile = media.current.full_narration.audio ? await ctx.filePath(record, media.current.full_narration.audio) : null;
-  const validation = await ctx.tools.finalVideo({ sceneFiles, audioFile, cues: timing.captions,
+  const validation = await ctx.tools.finalVideo({ sceneFiles, audioFile, bgm, cues: timing.captions,
     durationMs: timing.durationMs, directory, burnSubtitles: artifact.productionPlan.burnSubtitles }, ctx.runtime, ctx.processOptions);
   const poster = path.join(directory, 'poster.png');
   await ctx.tools.extractFrame(path.join(directory, 'final.mp4'), poster, Math.min(timing.durationMs - 100, timing.captions[0].endMs - 50), ctx.runtime, ctx.processOptions);
-  const receipt = await ctx.jsonFile(item, 'technical-validation.json', { ...validation, recipe: media.recipe,
+  const receipt = await ctx.jsonFile(item, 'technical-validation.json', { ...validation, recipe: media.recipe, ...bgmBinding,
     narrationIdentity: media.current.full_narration.identity, sceneBundleIdentity: media.current.scene_render.identity });
   await ctx.publish(item, {
     video: { path: path.join(directory, 'final.mp4'), kind: 'final_video', name: '最终白板视频', mime: 'video/mp4' },
@@ -449,7 +477,7 @@ async function finalStage(ctx, artifact, timing) {
     receipt: { path: receipt, kind: 'technical_validation', name: '技术验证记录', mime: 'application/json' },
   }, (current, published) => {
     current.whiteboard.media.current.final_delivery = store.bind({ kind: 'final_video', inputIdentity: item.inputIdentity,
-      ...published, validation, narrationIdentity: media.current.full_narration.identity, sceneBundleIdentity: media.current.scene_render.identity });
+      ...published, validation, ...bgmBinding, narrationIdentity: media.current.full_narration.identity, sceneBundleIdentity: media.current.scene_render.identity });
     current.result = { render: { output_url: `/api/creative-workflows/${ctx.workflowId}/whiteboard/media/${published.video.id}` } };
   });
   const updated = await ctx.read();

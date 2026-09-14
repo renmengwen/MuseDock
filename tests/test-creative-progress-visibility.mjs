@@ -160,4 +160,17 @@ assert.equal(
   '第 1/8 项',
 );
 
+const whiteboardWorkflow = {
+  status: 'running', stages: [{ id: 'scene_render', status: 'running' }],
+  whiteboard: { media: { id: 'media-current', sceneRenderProgress: { scenes: [] }, annotations: { scene_1: { identity: 'keep' } } } },
+};
+const frameEvent = { type: 'stage_progress', stage: 'scene_render', data: { mediaId: 'media-current',
+  sceneRenderProgress: { total: 4, completed: 0, scenes: [{ sceneId: 'scene_1', phase: 'drawing', writtenFrames: 60, totalFrames: 120 }] } } };
+const frameUpdated = applyWorkflowStageEvent(whiteboardWorkflow, frameEvent);
+assert.equal(frameUpdated.whiteboard.media.sceneRenderProgress.scenes[0].writtenFrames, 60);
+assert.equal(frameUpdated.whiteboard.media.annotations.scene_1.identity, 'keep');
+assert.equal(whiteboardWorkflow.whiteboard.media.sceneRenderProgress.scenes.length, 0);
+assert.equal(applyWorkflowStageEvent(whiteboardWorkflow, { ...frameEvent, data: { ...frameEvent.data, mediaId: 'old-media' } }).whiteboard,
+  whiteboardWorkflow.whiteboard, '过期媒体执行的进度不能替换当前任务');
+
 console.log('creative progress visibility tests passed');

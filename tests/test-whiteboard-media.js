@@ -174,6 +174,36 @@ async function setup() {
   assert.equal(record.whiteboard.media.approvals.every(approval => approval.actor === 'automation'), true);
   console.log('PASS 自动推进及字幕设置变更复用全部有效上游');
 
+  // BGM is a final mix decision: each toggle reuses all approved source media.
+  for (const bgmMode of ['enabled', 'disabled']) {
+    const previous = await ctx.read(id);
+    const previousFinal = previous.whiteboard.media.current.final_delivery;
+    const previousNarration = previous.whiteboard.media.current.full_narration;
+    const beforeBgm = { ...ctx.calls };
+    assert.equal((await ctx.action(id, 'update_plan', { productionPlan: { bgmMode } })).success, true);
+    assert.equal((await ctx.read(id)).whiteboard.media.stale, true);
+    assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+    assert.equal((await ctx.action(id, 'approve_initial', { confirmed: true })).success, true);
+    assert.equal((await ctx.action(id, 'start_production')).success, true);
+    const result = await workflows.runCreativeWorkflow(id, ctx.options);
+    assert.equal(result.status, 'done', result.message);
+    const updated = await ctx.read(id);
+    const mixedFinal = updated.whiteboard.media.current.final_delivery;
+    assert.equal(Boolean(mixedFinal.bgm), bgmMode === 'enabled');
+    assert.notEqual(mixedFinal.inputIdentity, previousFinal.inputIdentity);
+    assert.equal(updated.whiteboard.media.current.full_narration.identity, previousNarration.identity);
+    assert.equal(updated.whiteboard.media.current.full_narration.audio.sha256, previousNarration.audio.sha256);
+    assert.equal(updated.whiteboard.media.reused.length, 7);
+    for (const kind of ['tts', 'image', 'draft']) assert.equal(ctx.calls[kind], beforeBgm[kind]);
+    const receipt = await mediaStore.readData(updated, mixedFinal.receipt, ctx.rootDir);
+    assert.deepEqual(receipt.bgm, mixedFinal.bgm);
+    if (bgmMode === 'enabled') {
+      assert.equal(mixedFinal.bgm.license, 'CC0-1.0');
+      assert.equal(mixedFinal.bgm.assetSha256, (await mediaTools.prepareBackgroundMusic()).recipe.assetSha256);
+    }
+  }
+  console.log('PASS BGM 开启和关闭均更新成片身份与记录，并复用旁白、线稿、标注、单幕视频');
+
   // A fresh annotation attempt must not reuse bindings from the former whole-image policy.
   assert.equal((await ctx.action(id, 'update_plan', { productionPlan: { agentApprovalEnabled: false } })).success, true);
   await workflows.runCreativeWorkflow(id, ctx.options);

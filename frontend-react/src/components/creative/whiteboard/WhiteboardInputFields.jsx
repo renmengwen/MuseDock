@@ -25,12 +25,15 @@ export function ProductionPlanFields({ value, onChange, disabled = false }) {
   const change = (key, next) => onChange({ ...value, [key]: next });
   return (
     <div className="grid gap-4">
-      <LabeledSelect label="旁白方式" value={value.narrationMode || 'enabled'} disabled={disabled} onChange={next => change('narrationMode', next)} options={[{ id: 'enabled', label: '使用设置中的完整旁白服务' }, { id: 'disabled', label: '静音（仅 SRT 输入）' }]} />
+      <LabeledSelect label="旁白方式" value={value.narrationMode || 'enabled'} disabled={disabled} onChange={next => change('narrationMode', next)} options={[{ id: 'enabled', label: '使用设置中的完整旁白服务' }, { id: 'disabled', label: '不使用旁白（仅 SRT 输入）' }]} />
+      <div className="grid gap-1.5">
+        <LabeledSelect label="背景音乐" value={value.bgmMode || 'disabled'} disabled={disabled} onChange={next => change('bgmMode', next)} options={[{ id: 'disabled', label: '不使用 BGM' }, { id: 'enabled', label: '使用 BGM' }]} />
+        <p className="m-0 text-xs leading-relaxed text-fg-3">开启后，成片加入内置轻钢琴音乐，低音量播放并首尾淡入淡出。完整旁白试听不含背景音乐。</p>
+      </div>
       <LabeledSelect label="画笔显示" value={value.handDisplayMode} disabled={disabled} onChange={next => change('handDisplayMode', next)} options={[{ id: 'show', label: '显示画笔' }, { id: 'hide', label: '隐藏画笔' }]} />
       <LabeledSelect label="成片字幕" value={String(value.burnSubtitles)} disabled={disabled} onChange={next => change('burnSubtitles', next === 'true')} options={[{ id: 'true', label: '烧录字幕' }, { id: 'false', label: '不烧录字幕' }]} />
       <LabeledSelect label="后续确认方式" value={String(value.agentApprovalEnabled)} disabled={disabled} onChange={next => change('agentApprovalEnabled', next === 'true')} options={[{ id: 'false', label: '由我逐阶段确认' }, { id: 'true', label: '授权 AI 在允许范围内推进' }]} />
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t border-line-1 pt-3 text-xs text-fg-2">
-        <dt>背景音乐</dt><dd>不使用 BGM</dd>
         <dt>生图方式</dt><dd>逐幕独立生成</dd>
         <dt>旁白服务</dt><dd>后续使用设置中启用的服务</dd>
       </dl>
@@ -101,7 +104,7 @@ export function WhiteboardInputFields({ draft, onChange, catalog, disabled }) {
         <Button type="button" variant="ghost" size="sm" disabled={disabled} className="max-[760px]:min-h-11" onClick={() => setSettingsOpen(true)}><Settings2 size={14} />制作设置</Button>
       </div>
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-        <DialogContent className="w-[min(480px,calc(100vw-32px))]" showCloseButton>
+        <DialogContent className="max-h-[calc(100dvh-32px)] w-[min(480px,calc(100vw-32px))] overflow-y-auto" showCloseButton>
           <DialogHeader><DialogTitle>白板制作设置</DialogTitle><DialogDescription>先保存为方案选项，在内容与制作方案中一起确认。</DialogDescription></DialogHeader>
           <ProductionPlanFields value={draft.productionPlan} disabled={disabled} onChange={productionPlan => change({ productionPlan })} />
           <Button type="button" className="max-[760px]:min-h-11" onClick={() => setSettingsOpen(false)}>完成设置</Button>

@@ -31,9 +31,14 @@ export function applyWorkflowStageEvent(workflow, event) {
 
   const targetIndex = stages.findIndex(stage => stage?.id === stageId);
   if (targetIndex < 0) return workflow;
+  const media = workflow.whiteboard?.media;
+  const renderProgress = stageId === 'scene_render' && event.data?.mediaId === media?.id
+    && Array.isArray(event.data?.sceneRenderProgress?.scenes) ? event.data.sceneRenderProgress : null;
 
   return {
     ...workflow,
+    ...(media && renderProgress ? { whiteboard: { ...workflow.whiteboard,
+      media: { ...media, sceneRenderProgress: renderProgress } } } : {}),
     stages: stages.map((stage, index) => {
       if (!stage || typeof stage !== 'object') return stage;
       if (index === targetIndex) {

@@ -25,6 +25,7 @@ async function main() {
   const buildArg = process.argv.indexOf('--build-dir');
   const build = path.resolve(buildArg >= 0 ? process.argv[buildArg + 1] : 'frontend-dist');
   const fixture = JSON.parse(await fs.readFile(await latestFixture(root, 'whiteboard-annotation-test-', 'review-fixture.json'), 'utf8'));
+  const diagnosticFixture = JSON.parse(await fs.readFile(await latestFixture(root, 'whiteboard-annotation-test-', 'diagnostic-fixture.json'), 'utf8'));
   const images = path.dirname(await latestFixture(root, 'whiteboard-coverage-preview-', 'landscape-coverage.json'));
   const output = await fs.mkdtemp(path.join(root, 'whiteboard-coverage-ui-qa-'));
   const requests = [];
@@ -198,9 +199,75 @@ async function main() {
     assert.equal(await accept.isEnabled(), true);
     await dialog.getByRole('button', { name: '暂不决定', exact: true }).click();
     assert.equal(requests.length, countBeforeRecovery + 1, '恢复和预览不得自动接受或重新请求模型');
+
+    view = structuredClone(diagnosticFixture.view);
+    const beforeDetails = requests.length;
+    await page.goto(`${origin}/creative/${view.workflow_id}`);
+    const failedDetails = page.getByRole('button', { name: '查看第 2 幕落墨详情', exact: true });
+    await failedDetails.waitFor();
+    assert.equal(await failedDetails.isEnabled(), true, '没有预览的未知请求也必须能查看详情');
+    await failedDetails.focus(); await page.keyboard.press('Enter');
+    await dialog.getByText('当前没有可显示的落墨预览', { exact: true }).waitFor();
+    await dialog.getByText('视觉模型达到输出上限，未返回完整的编排结果。', { exact: true }).waitFor();
+    assert.equal(await dialog.locator('img, video').count(), 0, '没有预览时不能加载空媒体地址');
+    assert.equal(await dialog.getByRole('status').count(), 0, '未知结果不能显示为正在加载预览');
+    assert.equal(await dialog.getByRole('list', { name: '本幕请求记录' }).getByRole('listitem').count(), 1);
+    await page.screenshot({ path: path.join(output, 'request-diagnostics-desktop.png'), fullPage: true });
+    await dialog.getByRole('button', { name: '关闭详情', exact: true }).click();
+    assert.equal(await failedDetails.evaluate(button => document.activeElement === button), true, '关闭详情后恢复键盘焦点');
+
+    // 模拟截图中的旧任务：同一幕两次未知请求，历史没有详细诊断。
+    const history = view.whiteboard.media.attempts;
+    const currentAttempt = history.findLast(attempt => attempt.stage === 'annotation_drafting' && attempt.sceneId === 'scene_2');
+    delete currentAttempt.diagnostics;
+    Object.assign(currentAttempt, { createdAt: '2026-09-14T06:23:34.155Z', completedAt: '2026-09-14T06:25:41.452Z' });
+    history.splice(history.indexOf(currentAttempt), 0, { ...currentAttempt, id: 'fixture-old-unknown-request',
+      createdAt: '2026-09-14T06:13:23.911Z', completedAt: '2026-09-14T06:15:31.029Z' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload(); await failedDetails.click();
+    await dialog.getByText('旧记录未保存具体原因，无法判断是超时、输出截断还是其他响应问题。', { exact: true }).first().waitFor();
+    assert.equal(await dialog.getByRole('list', { name: '本幕请求记录' }).getByRole('listitem').count(), 2);
+    assert.equal(await dialog.locator('img, video').count(), 0);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    const requestBounds = await dialog.boundingBox();
+    assert.ok(requestBounds.x >= 0 && requestBounds.y >= 0 && requestBounds.x + requestBounds.width <= 391 && requestBounds.y + requestBounds.height <= 845);
+    await page.screenshot({ path: path.join(output, 'request-history-mobile.png'), fullPage: true });
+    await dialog.getByRole('button', { name: '关闭详情', exact: true }).click();
+    assert.equal(requests.length, beforeDetails, '查看新旧请求详情不能触发重试、恢复或授权');
+
+    portrait = true;
+    Object.assign(view.whiteboard.media.recipe, { width: 1080, height: 1920 });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.reload();
+    await page.getByRole('button', { name: '查看第 1 幕落墨详情', exact: true }).click();
+    await dialog.getByText('查看本幕请求记录', { exact: true }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="dialog"] img')].every(image => image.complete && image.naturalWidth > 0));
+    const portraitImage = await dialog.locator('img').boundingBox();
+    const portraitHistory = await dialog.getByRole('list', { name: '本幕请求记录' }).boundingBox();
+    assert.ok(portraitHistory.y >= portraitImage.y + portraitImage.height, '竖屏预览展开历史后，图片不能覆盖请求记录');
+    await page.screenshot({ path: path.join(output, 'portrait-preview-request-history.png'), fullPage: true });
+    await dialog.getByRole('button', { name: '关闭详情', exact: true }).click();
+    assert.equal(requests.length, beforeDetails);
+    view.whiteboard.media.stage = 'scene_render';
+    view.whiteboard.media.sceneRenderProgress = { scenes: [
+      { sceneId: 'scene_1', phase: 'drawing', writtenFrames: 30, totalFrames: 60 },
+      { sceneId: 'scene_2', phase: 'encoding', writtenFrames: 60, totalFrames: 60 },
+      { sceneId: 'scene_3', phase: 'failed', writtenFrames: 10, totalFrames: 60, errorCode: 'MEDIA_TIMEOUT' },
+    ] };
+    view.whiteboard.media.attempts.push({ id: 'fixture-render-timeout', stage: 'scene_render', sceneId: 'scene_3', status: 'failed', errorCode: 'MEDIA_TIMEOUT' });
+    await page.reload();
+    const renderTable = page.getByRole('table', { name: '单幕分镜列表', exact: true });
+    await renderTable.getByText('正在绘制 · 30/60 帧', { exact: true }).waitFor();
+    await renderTable.getByText('正在编码 · 60/60 帧', { exact: true }).waitFor();
+    await renderTable.getByText('渲染超时 · 可重试', { exact: true }).waitFor();
+    assert.equal(await renderTable.getByRole('row').count(), 4, '单幕未全部完成时也要显示每幕进度');
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.screenshot({ path: path.join(output, 'scene-render-progress-mobile.png'), fullPage: true });
+    assert.equal(requests.length, beforeDetails);
     assert.deepEqual(errors, []);
     console.log(JSON.stringify({ success: true, providerCalls: 0,
-      checks: ['失败幕与成功幕并存', '待确认行直接进入处理', '旧失败任务恢复预览', '双图与覆盖率', '加载完成前禁止确认', '关闭无副作用', '确认版本与重复点击保护', '竖屏和390px布局', '重新编排', '缺图禁用', '过期确认拒绝', '无运行时异常'], screenshots: output }));
+      checks: ['失败幕与成功幕并存', '待确认行直接进入处理', '旧失败任务恢复预览', '双图与覆盖率', '加载完成前禁止确认', '关闭无副作用', '确认版本与重复点击保护', '竖屏和390px布局', '重新编排', '缺图禁用', '过期确认拒绝', '无预览仍可查看原因', '旧请求历史与移动端布局', '竖屏预览与请求历史不重叠', '详情键盘操作与零模型请求', '无运行时异常'], screenshots: output }));
   } finally {
     imageGate?.resolve(); actionGate?.resolve();
     await browser?.close();

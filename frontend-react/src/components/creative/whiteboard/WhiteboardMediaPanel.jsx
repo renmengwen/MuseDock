@@ -21,22 +21,37 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
   const lowCoverageScenes = media.lowCoverage || [];
   const lowCoverageByScene = new Map(lowCoverageScenes.map(entry => [entry.sceneId, entry]));
   const pendingLowCoverage = !current.annotation_drafting && lowCoverageScenes.length > 0;
-  const annotationAttempts = new Map((media.attempts || []).filter(attempt => attempt.stage === 'annotation_drafting').map(attempt => [attempt.sceneId, attempt]));
+  const annotationAttempts = new Map();
+  for (const attempt of media.attempts || []) {
+    if (attempt.stage !== 'annotation_drafting') continue;
+    if (!annotationAttempts.has(attempt.sceneId)) annotationAttempts.set(attempt.sceneId, []);
+    annotationAttempts.get(attempt.sceneId).push(attempt);
+  }
   // 按方案顺序展示已完成、待确认和未完成幕，并发完成顺序不影响分镜编号。
-  const annotationScenes = current.annotation_drafting?.scenes || scenes.map(scene =>
-    media.annotations?.[scene.id] || lowCoverageByScene.get(scene.id) || { sceneId: scene.id, attempt: annotationAttempts.get(scene.id) });
+  const annotationScenes = (current.annotation_drafting?.scenes || scenes.map(scene =>
+    media.annotations?.[scene.id] || lowCoverageByScene.get(scene.id) || { sceneId: scene.id })).map(scene => {
+    const attempts = annotationAttempts.get(scene.sceneId) || [];
+    return { ...scene, attempts, attempt: attempts.at(-1) };
+  });
   const lineartScenes = current.lineart_generation?.scenes || scenes.map(scene =>
     media.lineart?.[scene.id] || { sceneId: scene.id });
+  const renderProgress = new Map((media.sceneRenderProgress?.scenes || []).map(row => [row.sceneId, row]));
+  const renderAttempts = new Map((media.attempts || []).filter(attempt => attempt.stage === 'scene_render').map(attempt => [attempt.sceneId, attempt]));
+  const renderedScenes = current.scene_render?.scenes || scenes.map(scene => ({
+    ...(media.scenes?.[scene.id] || { sceneId: scene.id }),
+    progress: renderProgress.get(scene.id), attempt: renderAttempts.get(scene.id),
+  }));
   return (
     <div className="grid min-w-0 gap-4" aria-label="白板媒体产物">
       <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-4">
         <TabsList className="grid h-auto w-full grid-cols-5" aria-label="媒体阶段">{PANELS.map(([id, label]) => <TabsTrigger key={id} value={id} className="min-h-10 px-1 text-xs">{label}</TabsTrigger>)}</TabsList>
         <TabsContent value="full_narration" className="min-w-0">
           {narration ? <div className="grid gap-4">
-            <p className="m-0 text-sm">真实时长 <strong>{(narration.durationMs / 1000).toFixed(2)} 秒</strong>{narration.audio ? ' · 24 kHz 单声道' : ' · 静音 SRT'}</p>
+            <p className="m-0 text-sm">真实时长 <strong>{(narration.durationMs / 1000).toFixed(2)} 秒</strong>{narration.audio ? ' · 24 kHz 单声道' : ' · 无旁白，使用 SRT 时间轴'}</p>
             {narration.audio ? <audio controls preload="metadata" src={url(narration.audio)} className="w-full" aria-label="完整白板旁白" /> : null}
             <div className="flex flex-wrap gap-2">{download(narration.audio, '下载完整旁白')}{download(narration.subtitles, '下载字幕 SRT')}</div>
             <p className="m-0 text-xs leading-6 text-fg-3">{narration.audio ? '字幕文字来自已确认正文，时间来自同一次语音响应的原生字级证据。' : '使用输入 SRT 的真实时钟。'}</p>
+            {media.bgm ? <p className="m-0 text-xs leading-6 text-fg-3">已开启背景音乐，将在最终成片中混入；此处仅检查旁白和字幕。</p> : null}
           </div> : empty}
         </TabsContent>
         {PANELS.slice(1, 4).map(([stage]) => <TabsContent key={stage} value={stage} className="min-w-0">
@@ -46,7 +61,7 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
               {onReviewLowCoverage ? <Button variant="outline" size="sm" disabled={actionsDisabled} className="justify-self-start" onClick={onReviewLowCoverage}>查看预览并决定是否接受</Button> : null}</div>
           </div> : null}
           <WhiteboardSceneTable key={current[stage]?.identity || (stage === 'annotation_drafting' && pendingLowCoverage ? 'low-coverage' : stage)}
-            stage={stage} scenes={stage === 'annotation_drafting' ? annotationScenes : stage === 'lineart_generation' ? lineartScenes : current[stage]?.scenes}
+            stage={stage} scenes={stage === 'annotation_drafting' ? annotationScenes : stage === 'lineart_generation' ? lineartScenes : renderedScenes}
             sceneTitles={sceneTitles} canvas={canvas} getUrl={url} renderDownload={download}
             onReviewLowCoverage={onReviewLowCoverage} onRecoverAnnotationPreview={onRecoverAnnotationPreview}
             recoveringPreview={recoveringPreview} actionsDisabled={actionsDisabled} />
@@ -54,6 +69,7 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
         <TabsContent value="final_delivery" className="min-w-0">
           {final ? <div className="grid gap-4"><CreativeVideoPreview videoUrl={url(final.video)} posterUrl={url(final.poster)} width={final.validation.width} height={final.validation.height} /><div className="flex flex-wrap gap-2">{download(final.video, '下载最终视频')}{download(narration?.subtitles, '下载字幕')}</div>
             <p className="m-0 text-xs leading-6 text-fg-3">{final.validation.width} × {final.validation.height} · 60 fps · H.264{final.validation.audio ? ' / AAC' : ' · 静音'} · {(final.validation.durationMs / 1000).toFixed(2)} 秒</p>
+            <p className="m-0 text-xs leading-6 text-fg-3">背景音乐：{final.bgm ? `已加入 ${final.bgm.title}（轻钢琴）` : '不使用 BGM'}</p>
             <details className="rounded-md border border-line-1 p-3 text-xs"><summary className="cursor-pointer text-fg-2">技术验证与版本身份</summary><p className="break-all font-mono leading-6 text-fg-3">{final.identity}</p><p className="text-fg-3">已检查编码、帧数、时长、音轨并完整解码。</p><a href={url(final.receipt)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-ink underline"><FileText size={13} />查看验证记录</a></details>
           </div> : empty}
         </TabsContent>

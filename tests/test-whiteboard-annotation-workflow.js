@@ -68,6 +68,8 @@ async function fixture(count = 3, { startStage = 'annotation_drafting' } = {}) {
       const feedback = request.messages.at(-1).content;
       const correction = Array.isArray(feedback) && feedback.some(part => part.text?.includes('当前候选的墨迹覆盖率'));
       if (mode === 'unknown' || (correction && mode === 'repair_unknown')) throw new Error('fixture connection lost');
+      if (mode === 'output_limit') return { success: true, text: JSON.stringify(annotationCandidate),
+        raw_response: { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, id: 'private-response-canary' } };
       if ((mode === 'schema_then_low' && calls.get(sceneId) === 1) || (mode === 'repair_invalid' && correction)) {
         return { success: true, text: JSON.stringify({ schemaVersion: 1 }) };
       }
@@ -98,9 +100,11 @@ async function fixture(count = 3, { startStage = 'annotation_drafting' } = {}) {
         }
         return { coverageRatio: 1, regions: 1, coveredInkPixels: 100, totalInkPixels: 100 };
       },
-      renderScene: async ({ scene, output }) => {
+      renderScene: async ({ scene, output }, _runtime, renderOptions = {}) => {
         assert.equal(ctx.allowRender, true, '此测试不能越过人工 Gate 渲染视频');
         ctx.renderCalls.set(scene.id, (ctx.renderCalls.get(scene.id) || 0) + 1);
+        const totalFrames = (scene.endMs - scene.startMs) * 60 / 1000;
+        await renderOptions.onProgress?.({ type: 'render_progress', phase: 'drawing', writtenFrames: Math.floor(totalFrames / 2), totalFrames, elapsedMs: 10 });
         await ctx.beforeRender(scene.id);
         await fs.writeFile(output, `fixture video ${scene.id}`, { flag: 'wx' });
         return { ...tools.RENDER_PROFILE, frameCount: (scene.endMs - scene.startMs) * 60 / 1000,
@@ -317,6 +321,37 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   assert.equal((await legacy.run()).status, 'waiting_approval');
   assert.deepEqual([...legacy.calls.entries()], callsBeforeRecovery, '恢复的候选在明确接受后仍应直接复用');
   console.log('PASS 旧失败记录本地恢复双预览、保留成功幕与失败证据、过期/篡改拒绝、零新增模型请求');
+
+  const diagnosed = await fixture();
+  diagnosed.faults.set('scene_2', 'output_limit');
+  assert.equal((await diagnosed.run()).code, 'UNKNOWN_EXTERNAL_OUTCOME');
+  const diagnosedRecord = await diagnosed.read();
+  const diagnosedMedia = diagnosedRecord.whiteboard.media;
+  const diagnosedAttempt = diagnosedMedia.attempts.findLast(attempt => attempt.stage === 'annotation_drafting' && attempt.sceneId === 'scene_2');
+  assert.equal(diagnosedAttempt.diagnostics.category, 'output_limit');
+  assert.equal(diagnosedAttempt.diagnostics.providerStatus, 'incomplete');
+  assert.equal(diagnosedAttempt.received, undefined, '带截断标记的有效 JSON 也不能发布为候选');
+  assert.equal(diagnosedRecord.error.diagnostics.category, 'output_limit');
+  assert.ok(diagnosedRecord.current_stage_message.includes('输出上限'));
+  assert.equal(JSON.stringify(diagnosedRecord).includes('private-response-canary'), false);
+  const diagnosedView = await workflows.getCreativeWorkflow(diagnosed.id, diagnosed.options);
+  assert.equal(diagnosedView.data.whiteboard.media.attempts.find(attempt => attempt.id === diagnosedAttempt.id).diagnostics.stopReason, 'max_output_tokens');
+  assert.deepEqual(diagnosedView.data.whiteboard.allowedActions.map(action => action.id), ['authorize_media_retry']);
+  assert.equal((await diagnosed.action('retry_media')).success, false);
+  assert.equal((await diagnosed.action('recover_annotation_preview', { sceneId: 'scene_2' })).success, false);
+  assert.equal(diagnosed.calls.get('scene_2'), 1, '读取诊断与被拒绝的普通重试不能发送新请求');
+  await fs.writeFile(path.join(diagnosed.root, 'diagnostic-fixture.json'), JSON.stringify({ rootDir: diagnosed.rootDir, view: diagnosedView.data }));
+  assert.equal((await diagnosed.action('authorize_media_retry', { confirmed: true })).success, true);
+  diagnosed.faults.delete('scene_2');
+  assert.equal((await diagnosed.run()).status, 'waiting_approval');
+  const diagnosedAfter = (await diagnosed.read()).whiteboard.media;
+  for (const sceneId of ['scene_1', 'scene_3']) {
+    assert.equal(diagnosedAfter.annotations[sceneId].identity, diagnosedMedia.annotations[sceneId].identity);
+    assert.equal(diagnosed.calls.get(sceneId), 1);
+  }
+  assert.equal(diagnosed.calls.get('scene_2'), 2);
+  assert.equal(diagnosedAfter.attempts.find(attempt => attempt.id === diagnosedAttempt.id).diagnostics.category, 'output_limit');
+  console.log('PASS 具体诊断持久化与读取、未知状态禁止普通重试、授权后仅重试失败幕、保留成功幕与历史证据');
 
   const mixed = await fixture();
   mixed.faults.set('scene_1', 'low'); mixed.faults.set('scene_2', 'unknown');
@@ -538,6 +573,12 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   assert.equal((await allStages.action('approve_media', { confirmed: true })).success, true);
   allStages.allowRender = true;
   await assertTenConcurrent(allStages, 'beforeRender', sceneRenderPool, 'scene_render', 'sceneRenderProgress');
+  const renderedProgress = (await allStages.read()).whiteboard.media.sceneRenderProgress;
+  assert.equal(renderedProgress.scenes.length, 12);
+  assert.ok(renderedProgress.scenes.every(scene => scene.phase === 'complete' && scene.writtenFrames === scene.totalFrames));
+  assert.ok(allStages.events.some(event => event.message?.includes('帧进度') && event.message?.includes('第 1 幕')));
+  assert.ok(allStages.events.some(event => event.data?.sceneRenderProgress?.scenes?.some(scene => scene.phase === 'drawing')));
+  assert.ok(allStages.events.some(event => event.data?.refreshMedia === true && event.data?.mediaId));
   console.log('PASS 同一个十二幕任务：生图、落墨和单幕渲染分别达到 10 并发，始终按分镜顺序发布');
 
   const deletedImages = await fixture(3, { startStage: 'lineart_generation' });

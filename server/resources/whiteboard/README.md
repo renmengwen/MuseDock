@@ -7,11 +7,19 @@
 1. 首次在项目根目录执行 `npm run setup:whiteboard`。它使用 Python 3.10+，在应用数据目录的 `data/runtime/whiteboard/` 安装独立环境，依赖版本固定在本目录 `requirements.txt`。
 2. 确认 ffmpeg、ffprobe 和中文字体可用。Windows 默认使用微软雅黑；可通过 `FFMPEG_PATH`、`FFPROBE_PATH`、`MUSEDOCK_WHITEBOARD_FONT` 指定本机资源。可用 `MUSEDOCK_WHITEBOARD_PYTHON` 指向已有、具备相同依赖的解释器。
 3. 在设置中选择图片生成模型、支持多模态输入的分析模型，以及豆包或 MiniMax TTS。
-4. 首页选择“线稿白板动画”，输入主题、正文或 SRT，选择视频画幅，再设置具体视觉模板、画笔、字幕及后续确认方式。
+4. 首页选择“线稿白板动画”，输入主题、正文或 SRT，选择视频画幅，再设置具体视觉模板、背景音乐、画笔、字幕及后续确认方式。
 5. 在对话卡片中修改或确认当前方案，点击“开始制作视频”。顺序为完整旁白 → 线稿 → 落墨编排 → 单幕动画 → 最终成片。
 6. 在产物区试听、查看图像、播放单幕和最终视频，下载 MP4、WAV、SRT 或标注 JSON。
 
 设置改变后重新确认方案。只改字幕、画笔等设置时，服务端按输入身份重验并复用仍有效的上游产物，避免重复生成语音、图片或编排。修改指定幕时，仅使该幕的相关下游失效。
+
+## 背景音乐
+
+“制作设置 → 背景音乐”支持“不使用 BGM”和“使用 BGM”，默认关闭。开启后，最终成片混入内置轻钢琴曲 **First Light Particles**（Yoiyami，CC0），旁白试听和下载的完整 WAV 仍保留纯旁白。豆包与 MiniMax 共用本地混音流程，不向供应商额外请求音乐；已有真实时间轴的 SRT 也可以只配背景音乐、不生成旁白。
+
+音乐以 -18 dB 混入，旁白在混音时预留 -1.5 dB 峰值余量；首尾分别淡入 1.2 秒、淡出 1.8 秒，短视频自动缩短淡化区间，长视频循环音乐并按真实时长结束。素材、许可与来源记录一起放在 `assets/bgm/`，运行时不依赖外部技能目录或在线下载。
+
+BGM 选择随内容与制作方案一起确认；修改后需重新确认，仍有效的旁白、字幕时间线、线稿、落墨标注和单幕动画可复用，最终成片重新合成。音乐素材 SHA 与混音参数绑定本次制作及成片验证记录；恢复期间若发生变化，会要求重新确认。旧任务仍默认关闭 BGM，原有渲染配方与上游产物身份不变。
 
 ## 横屏与竖屏
 
@@ -34,7 +42,7 @@
 
 请求固定使用 `X-Api-Key`、`/api/v3/tts/create`、`audio_config.enable_subtitle=true`，只接收同次响应的 Base64 WAV 与 `subtitle.sentences[].words[]`。正式音频规范化为 24 kHz 单声道 WAV；字幕文字始终取自已确认正文，时间由原生词级证据对齐。
 
-MiniMax 使用整轨 T2A、`subtitle_enable=true` 和 `subtitle_type=word`；不使用第二次 ASR。MiMo 现有调用继续兼容，但白板完整旁白需要原生时间证据，因此白板使用豆包或 MiniMax。静音路径仅接受已有真实时间轴的 SRT。
+MiniMax 使用整轨 T2A、`subtitle_enable=true` 和 `subtitle_type=word`；不使用第二次 ASR。MiMo 现有调用继续兼容，但白板完整旁白需要原生时间证据，因此白板使用豆包或 MiniMax。无旁白路径仅接受已有真实时间轴的 SRT，可独立选择是否使用 BGM。
 
 ## 完整吸收的绘制核心
 
@@ -58,14 +66,22 @@ MiniMax 使用整轨 T2A、`subtitle_enable=true` 和 `subtitle_type=word`；不
 
 明确的 400/401/403/404/422/429 返回作为可操作失败；超时、连接中断、无法绑定的响应或缺少同请求证据停为 `unknown_external_outcome`。普通重试不会重发结果不明的请求，用户需要明确同意可能的重复费用。已取得的原始音频、原生字幕和图片会保留，后处理失败优先本地恢复。若生成音频与正文不匹配，可明确选择重新生成整轨，旧版本仍保留。
 
+落墨分镜即使没有生成预览，也可打开详情，查看本幕历次请求的状态、起止时间、耗时、候选保存情况与处理建议。新视觉请求仅记录固定类别、HTTP 状态和是否收到响应等脱敏诊断，不保存供应商原文、标识或地址；旧记录缺失的原因明确显示为未记录。达到输出上限或带有未完成标记的响应即使包含可解析 JSON，也保持结果待核实，不发布为完整候选。查看详情不触发恢复、授权或新的模型请求。
+
+单幕执行通过 `render_worker.py` 封装原绘制核心，约每秒上报实际写入帧数，并区分准备、绘制、编码、校验与预览阶段；已完成单幕可立即查看。Windows 的旧版 FFmpeg（libavcodec 58 及更早版本，包括内置 2018 构建）使用单编码线程，避开已复现的多线程长时间等待；现代编码器保持两线程，单幕与字幕编码使用同一兼容设置。该执行策略不改变绘制核心、画幅、帧率、CRF 和原有产物身份，仍复用已完成且有效的单幕。达到单次处理时限时记录 `MEDIA_TIMEOUT`，取消则记录 `MEDIA_CANCELLED`。
+
 合并时使用每幕帧数派生精确 concat 时长，避免 MP4 容器毫秒取整累积误差。最终产物检查 H.264、所选画幅（1920×1080 或 1080×1920）、60 fps、yuv420p、累计帧数、音画时长、AAC/24 kHz/单声道以及完整解码，不用补帧或 `-shortest` 掩盖时钟错误。
 
 ## 本地验证
 
 ```powershell
 node tests/test-whiteboard-phase0.js
+node tests/test-whiteboard-bgm.js
 node tests/test-doubao-tts.js
 node tests/test-whiteboard-model-contracts.js
+node tests/test-whiteboard-vision-diagnostics.js
+node tests/test-whiteboard-render-progress.js
+data/runtime/whiteboard/Scripts/python.exe -X utf8 tests/test-whiteboard-render-worker.py
 node tests/test-whiteboard-canvas.js
 node tests/test-whiteboard-annotation-planning.js
 data/runtime/whiteboard/Scripts/python.exe -X utf8 tests/test-whiteboard-render-core.py
@@ -73,6 +89,7 @@ node tests/test-whiteboard-media.js
 node tests/test-whiteboard-media.js --portrait
 npm run build:frontend
 node scripts/debug/whiteboard-ui-smoke.cjs
+node scripts/debug/whiteboard-ui-smoke.cjs --bgm
 node scripts/debug/whiteboard-media-ui-smoke.cjs
 node scripts/debug/whiteboard-media-ui-smoke.cjs --portrait
 ```

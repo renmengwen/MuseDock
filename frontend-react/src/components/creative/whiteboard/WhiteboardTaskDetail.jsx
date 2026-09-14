@@ -323,7 +323,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
       </ConfirmDialog>
 
       <Dialog open={planOpen} onOpenChange={open => { if (!busy) setPlanOpen(open); }}>
-        <DialogContent className="w-[min(480px,calc(100vw-32px))] max-[760px]:[&_button]:min-h-11" showCloseButton={!busy}>
+        <DialogContent className="max-h-[calc(100dvh-32px)] w-[min(480px,calc(100vw-32px))] overflow-y-auto max-[760px]:[&_button]:min-h-11" showCloseButton={!busy}>
           <DialogHeader><DialogTitle>调整制作方案</DialogTitle><DialogDescription>保留旁白和分镜，生成新的待确认版本。</DialogDescription></DialogHeader>
           {editedPlan ? <ProductionPlanFields value={editedPlan} onChange={setEditedPlan} disabled={locked} /> : null}
           {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
