@@ -117,7 +117,6 @@ async function getView(record, options = {}) {
 async function createWhiteboardWorkflow(payload, options = {}) {
   const input = normalizeInput(payload.input);
   const productionPlan = normalizeProductionPlan(payload.productionPlan || {});
-  if (productionPlan.narrationMode === 'disabled' && input.inputMode !== 'srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '不使用旁白时，需要输入带真实时间的 SRT 字幕。');
   if ((payload.assetIds?.length || payload.asset_ids?.length) || payload.skipValidation === true) throw new WhiteboardError('INVALID_INPUT', '白板阶段 0 不接受上传素材或跳过校验，请使用白板输入表单。');
   const now = getNow(options.services);
   const workflowId = String(options.services?.idFactory?.() || makeId(now));
@@ -187,7 +186,7 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
       } else if (/为什么|为何|怎么安排|如何安排|当前状态|进度|[？?]$/u.test(text)) {
         const artifact = await artifactStore.readArtifact(record, record.whiteboard.current, options.rootDir);
         addMessage(record, 'user', text, now);
-        addMessage(record, 'assistant', `${artifact.summary}\n当前共 ${artifact.scenes.length} 幕，按旁白顺序安排为：${artifact.scenes.map((scene, index) => `${index + 1}. ${scene.title}`).join('；')}。${record.message}。本次讨论保留当前版本和待确认状态。`, now);
+        addMessage(record, 'assistant', `${artifact.summary}\n当前共 ${artifact.scenes.length} 幕，按内容顺序安排为：${artifact.scenes.map((scene, index) => `${index + 1}. ${scene.title}`).join('；')}。${record.message}。本次讨论保留当前版本和待确认状态。`, now);
         if (payload.requestId) (record.whiteboard.actionReceipts ||= []).push({ requestId: payload.requestId, requestHash, action: 'message', acceptedAt: now });
         return false;
       } else payload = { ...payload, action: record.whiteboard.media?.gate && payload.sceneId ? 'revise_media' : 'revise' };
@@ -219,7 +218,9 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
       record.status = 'phase0_complete';
       record.success = true;
       record.current_progress = 100;
-      record.message = '内容与制作方案已确认，可以开始生成完整旁白、线稿和最终视频。';
+      record.message = artifact.productionPlan.narrationMode === 'disabled'
+        ? '内容与制作方案已确认，可以开始准备字幕与时间轴、生成线稿和最终视频。'
+        : '内容与制作方案已确认，可以开始生成完整旁白、线稿和最终视频。';
       record.current_stage_message = record.message;
       record.updated_at = now;
       setStage(record, 'initial_approval', 'done', record.message, now);
@@ -239,7 +240,6 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
     }
     const productionPlan = payload.action === 'update_plan'
       ? normalizeProductionPlan({ ...latest.productionPlan, ...(payload.productionPlan || {}) }) : latest.productionPlan;
-    if (productionPlan.narrationMode === 'disabled' && input.inputMode !== 'srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '不使用旁白时，需要输入带真实时间的 SRT 字幕。');
     if (payload.action === 'update_plan') await artifactStore.readArtifact(record, current, options.rootDir);
     if (payload.action === 'update_plan') record.whiteboard.narrationService = (await production.voiceSnapshot(options.services)).service;
     const kind = payload.action === 'update_plan' ? 'settings' : (payload.action === 'retry' || payload.action === 'authorize_new_attempt' ? latest.kind : 'model');
@@ -262,14 +262,13 @@ async function buildDialogContext(record, options) {
   try {
     artifact = record.whiteboard.current ? await artifactStore.readArtifact(record, record.whiteboard.current, options.rootDir) : null;
   } catch { artifact = null; }
-  const stageInfo = media ? mediaStore.STAGES.find(item => item.id === media.stage) : null;
   const busy = ['queued', 'running'].includes(record.status);
   const allowed = busy ? [] : actionsFor(record, true);
   return {
     phase: media ? 'production' : 'plan',
     status: record.status,
-    stageLabel: stageInfo?.label || '',
-    gateTitle: media?.gate ? (mediaStore.TITLES[media.gate] || '') : '',
+    stageLabel: media ? mediaStore.stageLabel(media, media.stage) : '',
+    gateTitle: mediaStore.gateTitle(media),
     progressMessage: record.message || '',
     lastError: record.error?.message || '',
     scenes: (artifact?.scenes || []).map((scene, index) => ({
@@ -417,7 +416,7 @@ async function runWhiteboardWorkflow(workflowId, options = {}) {
       record.updated_at = now;
       setStage(record, 'content_plan', 'done', '当前方案已通过结构与输入校验。', now);
       setStage(record, 'initial_approval', 'waiting_approval', '等待你确认当前内容与制作方案。', now);
-      addMessage(record, 'assistant', `第 ${active.number} 版内容与制作方案已整理完成。${artifact.summary}\n请检查方案中的旁白、分镜与制作设置；你可以提出修改意见，或确认当前方案。`, now, attempt.id);
+      addMessage(record, 'assistant', `第 ${active.number} 版内容与制作方案已整理完成。${artifact.summary}\n请检查方案中的正文、分镜与制作设置；你可以提出修改意见，或确认当前方案。`, now, attempt.id);
       const interaction = { id: crypto.randomUUID(), kind: 'plan_review', stage: 'initial_approval', status: 'pending',
         title: `请确认第 ${active.number} 版内容与制作方案`, expectedAttemptId: attempt.id, expectedIdentity: binding.identity,
         createdAt: now, summary: artifact.summary };

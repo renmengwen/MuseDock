@@ -16,7 +16,6 @@ export function validateWhiteboardDraft(draft) {
   if (!text) return '请输入创作内容。';
   if (text.length > 50000) return '创作内容不能超过 50000 个字符。';
   if (draft.inputMode !== 'srt') {
-    if (draft.productionPlan?.narrationMode === 'disabled') return '不使用旁白时，需要输入带真实时间的 SRT 字幕。';
     const seconds = Number(draft.targetDurationSeconds);
     if (!Number.isInteger(seconds) || seconds < 15 || seconds > 600) return '目标时长需为 15–600 秒的整数。';
     return '';

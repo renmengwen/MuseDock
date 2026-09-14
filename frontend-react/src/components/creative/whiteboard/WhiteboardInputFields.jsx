@@ -25,7 +25,8 @@ export function ProductionPlanFields({ value, onChange, disabled = false }) {
   const change = (key, next) => onChange({ ...value, [key]: next });
   return (
     <div className="grid gap-4">
-      <LabeledSelect label="旁白方式" value={value.narrationMode || 'enabled'} disabled={disabled} onChange={next => change('narrationMode', next)} options={[{ id: 'enabled', label: '使用设置中的完整旁白服务' }, { id: 'disabled', label: '不使用旁白（仅 SRT 输入）' }]} />
+      <LabeledSelect label="旁白方式" value={value.narrationMode || 'enabled'} disabled={disabled} onChange={next => change('narrationMode', next)} options={[{ id: 'enabled', label: '使用设置中的完整旁白服务' }, { id: 'disabled', label: '不使用旁白' }]} />
+      {value.narrationMode === 'disabled' ? <p className="m-0 text-xs leading-relaxed text-fg-3">主题和正文按目标时长安排字幕与分镜；SRT 保留输入时间轴。关闭背景音乐可制作完全静音的视频。</p> : null}
       <div className="grid gap-1.5">
         <LabeledSelect label="背景音乐" value={value.bgmMode || 'disabled'} disabled={disabled} onChange={next => change('bgmMode', next)} options={[{ id: 'disabled', label: '不使用 BGM' }, { id: 'enabled', label: '使用 BGM' }]} />
         <p className="m-0 text-xs leading-relaxed text-fg-3">开启后，成片加入内置轻钢琴音乐，低音量播放并首尾淡入淡出。完整旁白试听不含背景音乐。</p>
@@ -35,9 +36,9 @@ export function ProductionPlanFields({ value, onChange, disabled = false }) {
       <LabeledSelect label="后续确认方式" value={String(value.agentApprovalEnabled)} disabled={disabled} onChange={next => change('agentApprovalEnabled', next === 'true')} options={[{ id: 'false', label: '由我逐阶段确认' }, { id: 'true', label: '授权 AI 在允许范围内推进' }]} />
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t border-line-1 pt-3 text-xs text-fg-2">
         <dt>生图方式</dt><dd>逐幕独立生成</dd>
-        <dt>旁白服务</dt><dd>后续使用设置中启用的服务</dd>
+        <dt>旁白服务</dt><dd>{value.narrationMode === 'disabled' ? '无需配置旁白服务' : '后续使用设置中启用的服务'}</dd>
       </dl>
-      <p className="m-0 text-xs leading-relaxed text-fg-3">这些选项会随制作方案一起确认。确认后可制作完整旁白、连续落墨动画与成片；豆包完整旁白支持 120 秒以内方案。</p>
+      <p className="m-0 text-xs leading-relaxed text-fg-3">{value.narrationMode === 'disabled' ? '这些选项会随制作方案一起确认。确认后先检查字幕与分镜时长，再制作连续落墨动画与成片。' : '这些选项会随制作方案一起确认。确认后可制作完整旁白、连续落墨动画与成片；豆包完整旁白支持 120 秒以内方案。'}</p>
     </div>
   );
 }
@@ -96,7 +97,7 @@ export function WhiteboardInputFields({ draft, onChange, catalog, disabled }) {
             <Input id="whiteboard-duration" type="number" min={15} max={600} step={1} value={draft.targetDurationSeconds} disabled={disabled} className="max-[760px]:min-h-11" onChange={event => change({ targetDurationSeconds: event.target.value })} />
           </label>
         )}
-        <LabeledSelect label="旁白语言" value={draft.narrationLanguage} disabled={disabled} onChange={narrationLanguage => change({ narrationLanguage })} options={catalog?.languages || []} />
+        <LabeledSelect label={draft.productionPlan.narrationMode === 'disabled' ? '正文与字幕语言' : '旁白语言'} value={draft.narrationLanguage} disabled={disabled} onChange={narrationLanguage => change({ narrationLanguage })} options={catalog?.languages || []} />
         <LabeledSelect label="视觉模板" value={draft.visualStylePreset} disabled={disabled} onChange={visualStylePreset => change({ visualStylePreset })} options={catalog?.visualPresets || []} />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-1 pt-3">

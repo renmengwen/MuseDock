@@ -46,11 +46,13 @@ async function narrationStage(ctx, artifact) {
   let record = await ctx.read();
   const media = record.whiteboard.media;
   const silent = artifact.productionPlan.narrationMode === 'disabled';
+  const planned = silent && artifact.timingKind === 'provisional';
   if (!silent && ctx.voice.service.contractHash !== media.voiceService.contractHash) throw new WhiteboardError('VOICE_CONFIG_CHANGED', '旁白服务或声音参数已变化，请重新确认制作设置后生成新版本。', 409);
   const inputIdentity = sha256({ text: artifact.narrationText, language: artifact.narrationLanguage, cues: artifact.cues,
     ...(artifact.aspectRatio === '9:16' ? { captionLayout: '9:16' } : {}),
     scenes: artifact.scenes.map(({ id, cueIds, startMs, endMs }) => ({ id, cueIds, startMs, endMs })),
-    voice: media.voiceService.contractHash, silent, take: media.narrationTake || 0 });
+    ...(planned ? { timingKind: 'planned' } : {}),
+    voice: planned ? '' : media.voiceService.contractHash, silent, take: media.narrationTake || 0 });
   if (await reuseHistory(ctx, 'current', 'full_narration', inputIdentity)) return;
   const reusable = [...media.attempts].reverse().find(item => item.stage === 'full_narration' && item.inputIdentity === inputIdentity && item.received?.raw && item.received?.native);
   const item = await ctx.attempt('full_narration', '', !silent && !reusable, inputIdentity);
@@ -99,7 +101,7 @@ async function narrationStage(ctx, artifact) {
   const srtPath = path.join(directory, 'narration.srt');
   await fsp.writeFile(srtPath, srtText(timing.captions), { flag: 'wx' });
   const files = (await ctx.publish(item, {
-    timeline: { path: timelinePath, kind: 'timeline', name: '真实时间线', mime: 'application/json' },
+    timeline: { path: timelinePath, kind: 'timeline', name: planned ? '计划时间轴' : '真实时间线', mime: 'application/json' },
     subtitles: { path: srtPath, kind: 'subtitles', name: '权威字幕', mime: 'application/x-subrip' },
   })).result;
   const binding = store.bind({ kind: 'full_narration', inputIdentity, ...files, audio: audio || null, native: native || null,

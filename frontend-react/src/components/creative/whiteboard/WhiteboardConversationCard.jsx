@@ -24,7 +24,7 @@ export function WhiteboardConversationCard({ interaction, active, artifact, disa
         <dt className="text-fg-3">制作规模</dt><dd className="m-0">{artifact.scenes.length} 幕 · 约 {Math.round(artifact.durationMs / 1000)} 秒</dd>
         <dt className="text-fg-3">视频画幅</dt><dd className="m-0">{artifact.aspectRatio === '9:16' ? '竖屏 9:16' : '横屏 16:9'} · {artifact.canvas?.width || 1920} × {artifact.canvas?.height || 1080}</dd>
         <dt className="text-fg-3">视觉模板</dt><dd className="m-0">{artifact.visualStyle.displayName}</dd>
-        <dt className="text-fg-3">旁白</dt><dd className="m-0">{artifact.productionPlan.narrationMode === 'disabled' ? '无旁白，使用 SRT 时间轴' : artifact.narrationService?.displayName || '未配置'}</dd>
+        <dt className="text-fg-3">旁白</dt><dd className="m-0">{artifact.productionPlan.narrationMode === 'disabled' ? (artifact.timingKind === 'source_srt' ? '无旁白，使用 SRT 时间轴' : '无旁白，使用计划时间轴') : artifact.narrationService?.displayName || '未配置'}</dd>
         <dt className="text-fg-3">背景音乐</dt><dd className="m-0">{artifact.productionPlan.bgmMode === 'enabled' ? '使用 BGM（内置轻钢琴）' : '不使用 BGM'}</dd>
         <dt className="text-fg-3">后续流程</dt><dd className="m-0">{artifact.productionPlan.agentApprovalEnabled ? '按授权自动推进，异常时暂停' : '逐阶段确认产物'}</dd>
       </dl> : null}

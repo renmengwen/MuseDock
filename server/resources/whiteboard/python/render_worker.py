@@ -1,4 +1,4 @@
-"""MuseDock 执行包装：编码线程兼容与进度，不改动已绑定的绘制核心。"""
+"""保持绘制语义的执行优化：局部落墨、编码线程兼容与进度。"""
 from __future__ import annotations
 
 import json

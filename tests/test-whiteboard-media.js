@@ -88,20 +88,133 @@ async function setup() {
       interactionId: record.whiteboard.interactions?.findLast(item => item.status === 'pending')?.id,
       requestId: crypto.randomUUID(), ...extra }, options);
   }
-  async function create(auto = false) {
+  async function create(auto = false, { input, productionPlan = {} } = {}) {
     const created = await workflows.createCreativeWorkflow({ creationModeId: 'whiteboard-stream-v1',
-      input: { inputMode: 'srt', content: sourceSrt, aspectRatio }, productionPlan: { agentApprovalEnabled: auto, handDisplayMode: 'hide' } }, options);
+      input: { inputMode: 'srt', content: sourceSrt, aspectRatio, ...input },
+      productionPlan: { agentApprovalEnabled: auto, handDisplayMode: 'hide', ...productionPlan } }, options);
     assert.equal(created.success, true, created.message);
     const drafted = await workflows.runCreativeWorkflow(created.workflow_id, options);
     assert.equal(drafted.status, 'waiting_approval', drafted.message);
     assert.equal((await action(created.workflow_id, 'approve_initial', { confirmed: true })).success, true);
     return created.workflow_id;
   }
-  return { root, rootDir, runtime, calls, options, read, action, create, setTts: fn => { ttsOverride = fn; } };
+  return { root, rootDir, runtime, calls, options, read, action, create, setTts: fn => { ttsOverride = fn; },
+    setVoiceConfigured: enabled => { configs.tts.enabled = enabled; } };
+}
+
+async function testSilentMedia(ctx) {
+  const deliveries = [];
+  ctx.setVoiceConfigured(false);
+  const act = async (id, name, extra) => {
+    const result = await ctx.action(id, name, extra);
+    assert.equal(result.success, true, result.message);
+    return result;
+  };
+  async function finish(id) {
+    for (let index = 0; index < mediaStore.STAGES.length; index += 1) {
+      const result = await workflows.runCreativeWorkflow(id, ctx.options);
+      assert.equal(result.success, true, result.message);
+      const record = await ctx.read(id);
+      if (record.status === 'done') return record;
+      assert.equal(record.status, 'waiting_approval');
+      if (record.whiteboard.media.stage === 'full_narration') {
+        assert.match(record.message, /检查字幕与分镜时长/);
+        assert.equal(record.whiteboard.media.stages[0].label, '准备字幕与时间轴');
+        assert.equal((await ctx.action(id, 'approve_media', { confirmed: false })).code, 'APPROVAL_REQUIRED');
+      }
+      await act(id, 'approve_media', { confirmed: true });
+    }
+    const record = await ctx.read(id);
+    assert.equal(record.status, 'done');
+    return record;
+  }
+  for (const mode of ['topic', 'text', 'srt']) {
+    const withMusic = mode === 'text';
+    const input = mode === 'srt' ? {} : { inputMode: mode, targetDurationSeconds: 15,
+      content: mode === 'topic' ? '先画圆形，再画方形' : candidate.cues.map(cue => cue.text).join('\n') };
+    const id = await ctx.create(withMusic, { input, productionPlan: { narrationMode: 'disabled', bgmMode: withMusic ? 'enabled' : 'disabled' } });
+    await act(id, 'start_production');
+    if (mode === 'topic') {
+      const interrupted = await ctx.read(id);
+      production.recover(interrupted, new Date().toISOString());
+      assert.equal(interrupted.status, 'failed');
+      assert.equal(interrupted.error.code, 'MEDIA_INTERRUPTED');
+      await workflowStore.persistWorkflow(interrupted, ctx.rootDir);
+      await act(id, 'retry_media');
+    }
+    const record = await finish(id);
+    const media = record.whiteboard.media;
+    const narration = media.current.full_narration;
+    const timing = await mediaStore.readData(record, narration.timeline, ctx.rootDir);
+    assert.equal(narration.audio, null);
+    assert.equal(narration.native, null);
+    assert.equal(narration.timingKind, mode === 'srt' ? 'source_srt' : 'planned');
+    assert.equal(timing.durationMs, mode === 'srt' ? 6000 : 15000);
+    assert.equal(timing.provider, 'disabled');
+    assert.equal(ctx.calls.tts, 0, '无旁白的完整制作不能调用 TTS');
+    assert.equal(media.artifacts.some(file => ['narration', 'provider_audio', 'provider_subtitles'].includes(file.kind)), false);
+    assert.equal(media.attempts.find(attempt => attempt.stage === 'full_narration').external, false);
+    assert.equal(media.approvals.length, 5);
+    const final = media.current.final_delivery;
+    assert.equal(final.validation.frameCount, timing.durationMs * 60 / 1000);
+    assert.equal(final.validation.audio, withMusic);
+    const video = await workflows.getWhiteboardMediaFile(id, final.video.id, ctx.options);
+    assert.equal(video.success, true);
+    const info = await mediaTools.probe(video.file_path, ctx.runtime);
+    assert.equal(info.streams.some(stream => stream.codec_type === 'audio'), withMusic);
+    deliveries.push({ mode, workflowId: id, video: video.file_path, durationMs: timing.durationMs, bgm: withMusic });
+    console.log(`PASS ${mode} 无旁白全链路：${timing.durationMs / 1000} 秒，${withMusic ? '仅 BGM 音轨' : '无音轨'}，TTS 请求 0`);
+
+    if (mode === 'topic') {
+      const before = { ...ctx.calls };
+      ctx.setVoiceConfigured(true);
+      await act(id, 'update_plan', { productionPlan: { burnSubtitles: false, agentApprovalEnabled: true } });
+      assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+      await act(id, 'approve_initial', { confirmed: true });
+      await act(id, 'start_production');
+      const reused = await finish(id);
+      assert.equal(reused.whiteboard.media.current.full_narration.identity, narration.identity);
+      assert.equal(reused.whiteboard.media.reused.length, 7);
+      for (const kind of ['tts', 'image', 'draft']) assert.equal(ctx.calls[kind], before[kind]);
+      ctx.setVoiceConfigured(false);
+      console.log('PASS 计划时间轴在中断后恢复；字幕开关和旁白服务配置变化仍复用有效上游');
+    }
+  }
+
+  const id = deliveries[0].workflowId;
+  const oldTiming = (await ctx.read(id)).whiteboard.media.current.full_narration.identity;
+  await act(id, 'update_plan', { input: { targetDurationSeconds: 30 }, productionPlan: { agentApprovalEnabled: false } });
+  assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+  await act(id, 'approve_initial', { confirmed: true });
+  await act(id, 'start_production');
+  assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+  const retimed = (await ctx.read(id)).whiteboard.media.current.full_narration;
+  assert.notEqual(retimed.identity, oldTiming);
+  assert.equal(retimed.durationMs, 30000);
+  assert.equal(ctx.calls.tts, 0);
+  await act(id, 'update_plan', { productionPlan: { narrationMode: 'enabled' } });
+  assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+  await act(id, 'approve_initial', { confirmed: true });
+  assert.equal((await ctx.action(id, 'start_production')).code, 'TTS_NOT_CONFIGURED');
+  ctx.setVoiceConfigured(true);
+  await act(id, 'update_plan', { productionPlan: { narrationMode: 'enabled' } });
+  assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+  await act(id, 'approve_initial', { confirmed: true });
+  await act(id, 'start_production');
+  assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+  const voiced = (await ctx.read(id)).whiteboard.media.current.full_narration;
+  assert.equal(voiced.timingKind, 'provider_native_words');
+  assert.ok(voiced.audio);
+  assert.equal(voiced.durationMs, 6000, '切回旁白后应使用实际音频时长');
+  assert.equal(ctx.calls.tts, 1, '仅显式切回旁白后的测试替身请求允许调用 TTS');
+  console.log('PASS 修改目标时长生成新时间轴，切回旁白恢复配置校验及同次原生时间');
+  await fs.writeFile(path.join(ctx.root, 'silent-result.json'), JSON.stringify({ evidence: 'local_fixture_real_ffmpeg', deliveries, calls: ctx.calls }, null, 2));
+  console.log(`无旁白媒体验证通过，真实 provider 调用 0。产物目录：${ctx.root}`);
 }
 
 (async () => {
   const ctx = await setup();
+  if (process.argv.includes('--silent')) return testSilentMedia(ctx);
   const id = await ctx.create();
   const start = await ctx.action(id, 'start_production');
   assert.equal(start.success, true, start.message);

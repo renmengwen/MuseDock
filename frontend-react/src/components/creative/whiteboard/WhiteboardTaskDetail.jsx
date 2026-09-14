@@ -47,6 +47,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
   const attempts = whiteboard.attempts || [];
   const activeVersion = attempts.find(attempt => attempt.id === current?.attemptId);
   const artifact = current?.artifact;
+  const silent = artifact?.productionPlan?.narrationMode === 'disabled';
   const aspectRatio = artifact?.aspectRatio || workflow.input?.aspectRatio || '16:9';
   const allowed = new Set((whiteboard.allowedActions || []).map(action => action.id));
   const running = ['queued', 'running'].includes(workflow.status);
@@ -169,7 +170,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
         <div className="grid min-w-0 gap-2">
           <div className="flex flex-wrap items-center gap-2 text-xs text-fg-3"><PenLine size={14} /><span>{workflow.creationModeDisplayNameSnapshot || '线稿白板动画'}</span><span>· {media ? '视频制作' : '内容与制作方案'}</span><span className="rounded border border-line-1 px-1.5 py-0.5">{aspectRatio === '9:16' ? '竖屏 9:16' : '横屏 16:9'}</span></div>
           <h1 className="m-0 break-words text-2xl font-bold leading-snug text-fg-1">{title}</h1>
-          <p className="m-0 text-xs text-fg-3">{media ? '完整旁白 · 区域编排 · 连续落墨 · 成片' : '先确认内容，再进入媒体制作'}</p>
+          <p className="m-0 text-xs text-fg-3">{media ? (silent ? '字幕与时间轴 · 区域编排 · 连续落墨 · 成片' : '完整旁白 · 区域编排 · 连续落墨 · 成片') : '先确认内容，再进入媒体制作'}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className={cn('rounded-full border px-2.5 py-1 text-xs font-semibold', workflow.status === 'phase0_complete' ? 'border-success/30 text-success' : ['failed', 'unknown_external_outcome'].includes(workflow.status) ? 'border-danger/25 text-danger' : 'border-line-2 text-fg-2')}>{STATUS_TEXT[workflow.status] || '处理中'}</span>
@@ -279,7 +280,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
             </div> : <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center gap-3 text-center" role="status" aria-live="polite">
               {running ? <Loader2 size={24} className="animate-spin text-fg-3" /> : <FileText size={26} className="text-fg-3" />}
               <h3 className="m-0 text-sm font-semibold text-fg-2">{emptyTitle}</h3>
-              <p className="m-0 max-w-[320px] text-sm leading-7 text-fg-3">{needsAttention ? '请在左侧查看原因，并按提示继续处理。' : '方案准备好后，在这里查看旁白正文、分镜与制作设置。'}</p>
+              <p className="m-0 max-w-[320px] text-sm leading-7 text-fg-3">{needsAttention ? '请在左侧查看原因，并按提示继续处理。' : '方案准备好后，在这里查看正文、分镜与制作设置。'}</p>
             </div>}
           </div>
         </section>
@@ -289,7 +290,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
         <DialogContent className="w-[min(480px,calc(100vw-32px))]" showCloseButton={!busy}>
           <DialogHeader>
             <DialogTitle>确认第 {activeVersion?.number || 1} 版内容与制作方案</DialogTitle>
-            <DialogDescription>请确认已检查当前旁白正文、全部分镜和制作设置。确认后立即开始制作视频，将发起语音与图像生成的外部请求；也可以仅确认方案，稍后再开始制作。</DialogDescription>
+            <DialogDescription>{silent ? '请确认已检查当前字幕正文、全部分镜时长和制作设置。确认后按当前时间轴开始制作视频，将发起图像生成与视觉分析请求；也可以仅确认方案，稍后再开始制作。' : '请确认已检查当前旁白正文、全部分镜和制作设置。确认后立即开始制作视频，将发起语音与图像生成的外部请求；也可以仅确认方案，稍后再开始制作。'}</DialogDescription>
           </DialogHeader>
           {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
           <div className="grid gap-2">
@@ -315,7 +316,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
 
       <ConfirmDialog open={Boolean(confirm) && !['approve_initial', 'accept_low_coverage'].includes(confirm)} onOpenChange={open => { if (!open) setConfirm(''); }}
         title={confirm === 'approve_media' ? pendingInteraction?.title || '确认当前媒体产物' : '同意发起一次新的外部请求'}
-        description={confirm === 'approve_media' ? '请实际检查产物区的完整音频、图像或视频。确认将绑定当前版本，并进入下一步制作。'
+        description={confirm === 'approve_media' ? (silent ? '请检查产物区的字幕、分镜时长、图像或视频。确认将绑定当前版本，并进入下一步制作。' : '请实际检查产物区的完整音频、图像或视频。确认将绑定当前版本，并进入下一步制作。')
           : '上次请求是否已经完成或计费尚不确定。再次请求可能产生重复费用；新请求将保留原版本及记录。'}
         confirmText={confirm === 'approve_media' ? '确认当前产物' : '同意新请求与可能的重复费用'} loading={Boolean(busy)}
         onConfirm={() => act(confirm, { confirmed: true })}>
@@ -324,7 +325,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
 
       <Dialog open={planOpen} onOpenChange={open => { if (!busy) setPlanOpen(open); }}>
         <DialogContent className="max-h-[calc(100dvh-32px)] w-[min(480px,calc(100vw-32px))] overflow-y-auto max-[760px]:[&_button]:min-h-11" showCloseButton={!busy}>
-          <DialogHeader><DialogTitle>调整制作方案</DialogTitle><DialogDescription>保留旁白和分镜，生成新的待确认版本。</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>调整制作方案</DialogTitle><DialogDescription>保留正文和分镜，生成新的待确认版本。</DialogDescription></DialogHeader>
           {editedPlan ? <ProductionPlanFields value={editedPlan} onChange={setEditedPlan} disabled={locked} /> : null}
           {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
           <Button type="button" disabled={locked} onClick={() => act('update_plan', { productionPlan: editedPlan })}>{busy ? <Loader2 size={15} className="animate-spin" /> : null}{busy ? '正在保存制作方案...' : '保存为新的待确认版本'}</Button>

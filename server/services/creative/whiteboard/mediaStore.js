@@ -25,9 +25,21 @@ function mediaIdentity(media) {
     current: Object.fromEntries(Object.entries(media.current || {}).map(([key, value]) => [key, value?.identity || ''])) });
 }
 
-function makeMedia(planIdentity, recipe) {
+function stageLabel(media, stageId) {
+  return media?.narrationMode === 'disabled' && stageId === 'full_narration'
+    ? '准备字幕与时间轴' : STAGES.find(stage => stage.id === stageId)?.label || '';
+}
+
+function gateTitle(media) {
+  return media?.narrationMode === 'disabled' && media.gate === 'full_narration'
+    ? '请检查字幕与分镜时长' : TITLES[media?.gate] || '';
+}
+
+function makeMedia(planIdentity, recipe, narrationMode = 'enabled') {
   return { contractVersion: MEDIA_CONTRACT, id: crypto.randomUUID(), planIdentity, recipe,
-    stageSchemaSnapshot: structuredClone(STAGES), stages: structuredClone(STAGES), revision: 1,
+    // 保留合同快照，展示标签随本次已确认的旁白选项变化。
+    stageSchemaSnapshot: structuredClone(STAGES), narrationMode,
+    stages: STAGES.map(stage => ({ ...stage, label: stageLabel({ narrationMode }, stage.id) })), revision: 1,
     stage: STAGES[0].id, gate: '', current: {}, attempts: [], artifacts: [], approvals: [],
     lineart: {}, annotations: {}, lowCoverage: [], scenes: {}, overrides: {}, stale: false, activeAttemptId: '' };
 }
@@ -105,5 +117,5 @@ function publicMedia(record) {
   return media;
 }
 
-module.exports = { MEDIA_CONTRACT, STAGES, GATES, TITLES, makeMedia, mediaIdentity, workDirectory,
+module.exports = { MEDIA_CONTRACT, STAGES, GATES, TITLES, stageLabel, gateTitle, makeMedia, mediaIdentity, workDirectory,
   publishFile, mediaFile, readData, validateBinding, bind, publicMedia, fileIds };

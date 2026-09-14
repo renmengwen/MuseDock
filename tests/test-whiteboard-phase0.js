@@ -196,6 +196,33 @@ const cases = [
     assert.equal(next.whiteboard.initialApproval, null);
     assert.equal(ctx.modelCalls.length, 1);
   })],
+  ['主题、正文和 SRT 均可关闭旁白，切换设置保持正文且重新确认', () => fixture(async ctx => {
+    for (const input of [TOPIC, { ...TOPIC, inputMode: 'text', content: '保留每个字。', rewritePolicy: 'preserve' },
+      { ...TOPIC, inputMode: 'text', content: '保留事实并润色。', rewritePolicy: 'polish' }, { inputMode: 'srt', content: SRT }]) {
+      const before = ctx.modelCalls.length;
+      const id = await ctx.create(input, { narrationMode: 'disabled' });
+      const first = await workflows.runCreativeWorkflow(id, ctx.options);
+      assert.equal(first.status, 'waiting_approval', first.message);
+      const artifact = first.whiteboard.current.artifact;
+      assert.equal(artifact.productionPlan.narrationMode, 'disabled');
+      assert.equal(artifact.timingKind, input.inputMode === 'srt' ? 'source_srt' : 'provisional');
+      assert.match(ctx.modelCalls.at(-1).messages[0].content, /本方案不使用旁白/);
+      assert.equal((await ctx.action(id, 'approve_initial', { confirmed: true })).success, true);
+      assert.match((await ctx.read(id)).message, /字幕与时间轴/);
+      for (const narrationMode of ['enabled', 'disabled']) {
+        assert.equal((await ctx.action(id, 'update_plan', { productionPlan: { narrationMode } })).success, true);
+        const next = await workflows.runCreativeWorkflow(id, ctx.options);
+        assert.equal(next.status, 'waiting_approval');
+        assert.equal(next.whiteboard.initialApproval, null);
+        assert.equal(next.whiteboard.current.artifact.productionPlan.narrationMode, narrationMode);
+        assert.equal(next.whiteboard.current.artifact.narrationText, artifact.narrationText);
+        assert.deepEqual(next.whiteboard.current.artifact.cues, artifact.cues);
+        assert.equal((await ctx.action(id, 'approve_initial', { confirmed: true }, first)).code, 'STALE_IDENTITY');
+        assert.equal((await ctx.action(id, 'approve_initial', { confirmed: true })).success, true);
+      }
+      assert.equal(ctx.modelCalls.length, before + 1);
+    }
+  })],
   ['BGM 选择随方案保存，切换使旧批准失效且不调用媒体或额外内容模型', () => fixture(async ctx => {
     const id = await ctx.create(TOPIC, { bgmMode: 'enabled' });
     await workflows.runCreativeWorkflow(id, ctx.options);

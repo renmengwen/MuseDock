@@ -1,6 +1,7 @@
 // 离线浏览器验收：真实 React 构建 + 真实业务路由 + 隔离磁盘 + 模型替身。
 // 先运行 npm run build:frontend，再运行 node scripts/debug/whiteboard-ui-smoke.cjs。
 // --bgm 只验证制作设置流程，不经过需要独立对话模型替身的自然语言改稿。
+// --silent 验证三种输入的无旁白表单、方案确认与刷新恢复，不调用媒体生产。
 const assert = require('assert/strict');
 const fs = require('fs/promises');
 const os = require('os');
@@ -13,7 +14,8 @@ const { createCreativeTaskRegistry } = require('../../server/services/creative/c
 const { parseSrt } = require('../../server/services/creative/whiteboard/contracts');
 
 async function main() {
-  const bgmOnly = process.argv.includes('--bgm');
+  const silent = process.argv.includes('--silent');
+  const bgmOnly = process.argv.includes('--bgm') || silent;
   const projectRoot = path.resolve(__dirname, '../..');
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'musedock-whiteboard-browser-'));
   const screenshots = path.join(projectRoot, '.codex-runtime', 'whiteboard-phase0-qa');
@@ -125,11 +127,26 @@ async function main() {
     await page.getByRole('combobox', { name: '视觉模板' }).click();
     await page.getByRole('option', { name: '漫画墨线解释', exact: true }).click();
     await page.getByRole('button', { name: '制作设置', exact: true }).click();
+    if (silent) {
+      await page.getByRole('combobox', { name: '旁白方式' }).click();
+      await page.getByRole('option', { name: '不使用旁白', exact: true }).click();
+      await page.getByText('无需配置旁白服务', { exact: true }).waitFor();
+    }
     assert.equal(await page.getByRole('combobox', { name: '背景音乐' }).innerText(), '不使用 BGM');
     await page.getByRole('combobox', { name: '背景音乐' }).click();
     await page.getByRole('option', { name: '使用 BGM', exact: true }).click();
     await page.screenshot({ path: path.join(screenshots, 'production-settings-bgm-desktop.png'), fullPage: true });
     await page.getByRole('button', { name: '完成设置', exact: true }).click();
+    if (silent) {
+      await page.getByRole('tab', { name: '正文', exact: true }).click();
+      assert.equal(await page.getByRole('button', { name: '启动白板创作 Agent', exact: true }).isEnabled(), true);
+      await page.getByRole('tab', { name: 'SRT 字幕', exact: true }).click();
+      assert.equal(await page.getByRole('button', { name: '启动白板创作 Agent', exact: true }).isDisabled(), true);
+      await page.getByLabel('白板SRT 字幕内容').fill('1\n00:00:00,000 --> 00:00:06,000\n按原有时间绘制。');
+      assert.equal(await page.getByRole('button', { name: '启动白板创作 Agent', exact: true }).isEnabled(), true);
+      await page.getByRole('tab', { name: '主题', exact: true }).click();
+      await page.getByRole('combobox', { name: '正文与字幕语言' }).waitFor();
+    }
     await page.getByRole('button', { name: '制作设置', exact: true }).click();
     assert.equal(await page.getByRole('combobox', { name: '背景音乐' }).innerText(), '使用 BGM');
     await page.getByRole('button', { name: '完成设置', exact: true }).click();
@@ -145,6 +162,11 @@ async function main() {
     assert.equal(requests[0].input.visualStylePreset, 'comic-ink-v1');
     assert.equal(requests[0].input.aspectRatio, '9:16');
     assert.equal(requests[0].productionPlan.bgmMode, 'enabled');
+    if (silent) {
+      assert.equal(requests[0].productionPlan.narrationMode, 'disabled');
+      await page.getByRole('tab', { name: '字幕正文', exact: true }).waitFor();
+      await page.getByText('无旁白，使用计划时间轴', { exact: true }).waitFor();
+    }
     assert.equal(requests[0].assetIds, undefined);
     const taskUrl = page.url();
     await page.screenshot({ path: path.join(screenshots, 'agent-review-desktop.png'), fullPage: true });
@@ -171,6 +193,11 @@ async function main() {
     assert.equal(await page.getByRole('dialog').getByRole('button', { name: '确认当前方案', exact: true }).count(), 0);
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: '确认内容与制作方案', exact: true }).click();
+    if (silent) {
+      const confirmation = await page.getByRole('dialog').innerText();
+      assert.match(confirmation, /字幕正文.*分镜时长/);
+      assert.doesNotMatch(confirmation, /语音与图像生成/);
+    }
     await page.getByRole('button', { name: '仅确认，稍后制作', exact: true }).click();
     await page.locator('header').getByText('方案已确认', { exact: true }).waitFor();
     await page.reload();
@@ -210,8 +237,39 @@ async function main() {
     const detailOverflow = await page.evaluate(() => ({ width: window.innerWidth, scrollWidth: document.documentElement.scrollWidth }));
     assert.ok(detailOverflow.scrollWidth <= detailOverflow.width, '移动端任务详情出现横向溢出');
     await page.screenshot({ path: path.join(screenshots, 'agent-mobile.png'), fullPage: true });
+    if (silent) {
+      for (const [mode, label, content] of [
+        ['text', '正文', '保留原文，只安排字幕与画面。'],
+        ['srt', 'SRT 字幕', '1\n00:00:00,000 --> 00:00:06,000\n保留字幕输入的原有时间。'],
+      ]) {
+        await page.getByRole('button', { name: '开启新创作', exact: true }).click();
+        await wbTab.click();
+        await page.getByRole('tab', { name: label, exact: true }).click();
+        await page.getByLabel(`白板${label}内容`).fill(content);
+        await page.getByRole('button', { name: '制作设置', exact: true }).click();
+        await page.getByRole('combobox', { name: '旁白方式' }).click();
+        await page.getByRole('option', { name: '不使用旁白', exact: true }).click();
+        await page.getByRole('button', { name: '完成设置', exact: true }).click();
+        await page.getByRole('button', { name: '启动白板创作 Agent', exact: true }).click();
+        await page.waitForURL(/\/creative\/\d+/);
+        await page.getByRole('button', { name: '确认内容与制作方案', exact: true }).waitFor();
+        assert.equal(requests.at(-1).input.inputMode, mode);
+        assert.equal(requests.at(-1).productionPlan.narrationMode, 'disabled');
+        const timingText = mode === 'srt' ? '无旁白，使用 SRT 时间轴' : '无旁白，使用计划时间轴';
+        await page.getByText(timingText, { exact: true }).waitFor();
+        await page.getByRole('button', { name: '确认内容与制作方案', exact: true }).click();
+        await page.getByRole('button', { name: '仅确认，稍后制作', exact: true }).click();
+        await page.locator('header').getByText('方案已确认', { exact: true }).waitFor();
+        await page.reload();
+        await page.locator('header').getByText('方案已确认', { exact: true }).waitFor();
+        await page.getByRole('tab', { name: '字幕正文', exact: true }).waitFor();
+        await page.screenshot({ path: path.join(screenshots, `silent-${mode}-approved-mobile.png`), fullPage: true });
+      }
+      assert.equal(creationCalls, 3);
+      assert.equal(modelCalls, 3);
+    }
     assert.deepEqual(runtimeErrors, []);
-    console.log(JSON.stringify({ success: true, modelCalls, creationCalls, realProviderCalls: 0, checks: ['模式与输入草稿隔离', 'SRT 校验', 'BGM 默认关闭及开启保存', 'BGM 方案展示与关闭后重新确认', '创建中禁用切换', '真实后台待确认', '修改生成新版本', '制作设置无额外模型请求', '历史只读', '联合批准与刷新恢复', '桌面及390px弹框布局', '无运行时异常'], screenshots }, null, 2));
+    console.log(JSON.stringify({ success: true, modelCalls, creationCalls, realProviderCalls: 0, checks: ['模式与输入草稿隔离', 'SRT 校验', 'BGM 默认关闭及开启保存', 'BGM 方案展示与关闭后重新确认', '创建中禁用切换', '真实后台待确认', '修改生成新版本', '制作设置无额外模型请求', '历史只读', '联合批准与刷新恢复', '桌面及390px弹框布局', ...(silent ? ['主题/正文/SRT 无旁白创建', '计划时间轴与原始 SRT 分别展示', '无旁白确认提示', '无 TTS 配置完成方案确认'] : []), '无运行时异常'], screenshots }, null, 2));
   } finally {
     releaseCreation();
     await browser?.close();

@@ -73,7 +73,7 @@ function materializeTiming(artifact, cueTimings, captions, durationMs, provider)
   const scenes = artifact.scenes.map((scene, index) => {
     const nextScene = artifact.scenes[index + 1];
     const endMs = nextScene ? Math.round((byId.get(scene.cueIds.at(-1)).endMs + byId.get(nextScene.cueIds[0]).startMs) / 2) : durationMs;
-    if (endMs - startMs < 800) throw new WhiteboardError('TIMELINE_INVALID', '某幕真实时长不足以完成落墨与至少半秒停留，请调整分镜后重新确认。');
+    if (endMs - startMs < 800) throw new WhiteboardError('TIMELINE_INVALID', '某幕时长不足以完成落墨与至少半秒停留，请减少分镜或增加目标时长后重新确认。');
     const result = { id: scene.id, title: scene.title, cueIds: scene.cueIds, startMs, endMs };
     startMs = endMs;
     return result;
@@ -83,7 +83,29 @@ function materializeTiming(artifact, cueTimings, captions, durationMs, provider)
 }
 
 function buildSilentTiming(artifact) {
-  if (artifact.timingKind !== 'source_srt') throw new WhiteboardError('SILENT_SRT_REQUIRED', '静音白板需要输入带真实时间的 SRT 字幕。');
+  if (!['source_srt', 'provisional'].includes(artifact.timingKind)) {
+    throw new WhiteboardError('TIMELINE_INVALID', '无旁白制作需要已确认的计划时间轴或输入 SRT 时间轴，请重新确认内容与制作方案。');
+  }
+  const planned = artifact.timingKind === 'provisional';
+  if (!Number.isSafeInteger(artifact.durationMs) || artifact.durationMs <= 0
+    || !Array.isArray(artifact.cues) || !artifact.cues.length || !Array.isArray(artifact.scenes) || !artifact.scenes.length) {
+    throw new WhiteboardError('TIMELINE_INVALID', '字幕或分镜时间缺失，请重新整理并确认方案。');
+  }
+  let previousEnd = 0;
+  const ids = new Set();
+  for (const cue of artifact.cues) {
+    if (!cue || typeof cue.id !== 'string' || ids.has(cue.id) || typeof cue.text !== 'string' || !cue.text.trim()
+      || !Number.isSafeInteger(cue.startMs) || !Number.isSafeInteger(cue.endMs)
+      || cue.startMs < previousEnd || cue.endMs <= cue.startMs || cue.endMs > artifact.durationMs) {
+      throw new WhiteboardError('TIMELINE_INVALID', '字幕时间存在重叠、越界或空片段，请重新整理并确认方案。');
+    }
+    ids.add(cue.id);
+    previousEnd = cue.endMs;
+  }
+  if (artifact.scenes.some(scene => !scene || !Array.isArray(scene.cueIds) || !scene.cueIds.length)
+    || JSON.stringify(artifact.scenes.flatMap(scene => scene.cueIds)) !== JSON.stringify([...ids])) {
+    throw new WhiteboardError('TIMELINE_INVALID', '分镜必须按顺序完整覆盖字幕，请重新整理并确认方案。');
+  }
   const captions = artifact.cues.flatMap(cue => {
     let cursor = 0;
     return splitCaption(cue.text, artifact.narrationLanguage, artifact.aspectRatio).map((text, index) => {
@@ -93,7 +115,19 @@ function buildSilentTiming(artifact) {
         endMs: cue.startMs + Math.round((cue.endMs - cue.startMs) * cursor / cue.text.length) };
     });
   });
-  return materializeTiming(artifact, artifact.cues, captions, artifact.durationMs, 'disabled');
+  if (captions.some(caption => caption.endMs <= caption.startMs)) {
+    throw new WhiteboardError('TIMELINE_INVALID', '拆分后的字幕显示时间不足，请合并短句或增加时长后重新确认。');
+  }
+  if (planned && artifact.productionPlan?.burnSubtitles !== false) {
+    // 只校验新计划的阅读预算，不改写用户提供的 SRT 或语音原生时间。
+    const charactersPerSecond = artifact.narrationLanguage === 'zh-CN' ? 10 : 20;
+    if (captions.some(caption => caption.endMs - caption.startMs < Math.max(500, Math.ceil(letters(caption.text).length * 1000 / charactersPerSecond)))) {
+      throw new WhiteboardError('TIMELINE_INVALID', '计划字幕显示过快，请增加目标时长、合并短句或减少正文后重新确认。');
+    }
+  }
+  const timing = materializeTiming(artifact, artifact.cues, captions, artifact.durationMs, 'disabled');
+  if (planned) timing.timingKind = 'planned';
+  return timing;
 }
 
 function srtText(captions) {

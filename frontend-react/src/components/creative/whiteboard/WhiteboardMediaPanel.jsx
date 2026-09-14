@@ -15,6 +15,7 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
   const current = media.current;
   const canvas = { width: media.recipe?.width || 1920, height: media.recipe?.height || 1080 };
   const narration = current.full_narration;
+  const silent = media.narrationMode === 'disabled' || (narration && !narration.audio);
   const final = current.final_delivery;
   const download = (file, label) => url(file) && <Button asChild variant="outline" size="sm" className="max-[760px]:min-h-11"><a href={`${url(file)}?download=1`} download><Download size={14} />{label}</a></Button>;
   const empty = <p className="py-6 text-center text-sm text-fg-3">完成前面的步骤后，此处会显示当前产物。</p>;
@@ -44,13 +45,13 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
   return (
     <div className="grid min-w-0 gap-4" aria-label="白板媒体产物">
       <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-4">
-        <TabsList className="grid h-auto w-full grid-cols-5" aria-label="媒体阶段">{PANELS.map(([id, label]) => <TabsTrigger key={id} value={id} className="min-h-10 px-1 text-xs">{label}</TabsTrigger>)}</TabsList>
+        <TabsList className="grid h-auto w-full grid-cols-5" aria-label="媒体阶段">{PANELS.map(([id, label]) => <TabsTrigger key={id} value={id} className="min-h-10 px-1 text-xs">{silent && id === 'full_narration' ? '字幕' : label}</TabsTrigger>)}</TabsList>
         <TabsContent value="full_narration" className="min-w-0">
           {narration ? <div className="grid gap-4">
-            <p className="m-0 text-sm">真实时长 <strong>{(narration.durationMs / 1000).toFixed(2)} 秒</strong>{narration.audio ? ' · 24 kHz 单声道' : ' · 无旁白，使用 SRT 时间轴'}</p>
+            <p className="m-0 text-sm">{narration.timingKind === 'planned' ? '计划时长' : '时间轴时长'} <strong>{(narration.durationMs / 1000).toFixed(2)} 秒</strong>{narration.audio ? ' · 24 kHz 单声道' : narration.timingKind === 'planned' ? ' · 无旁白，使用计划时间轴' : ' · 无旁白，使用 SRT 时间轴'}</p>
             {narration.audio ? <audio controls preload="metadata" src={url(narration.audio)} className="w-full" aria-label="完整白板旁白" /> : null}
             <div className="flex flex-wrap gap-2">{download(narration.audio, '下载完整旁白')}{download(narration.subtitles, '下载字幕 SRT')}</div>
-            <p className="m-0 text-xs leading-6 text-fg-3">{narration.audio ? '字幕文字来自已确认正文，时间来自同一次语音响应的原生字级证据。' : '使用输入 SRT 的真实时钟。'}</p>
+            <p className="m-0 text-xs leading-6 text-fg-3">{narration.audio ? '字幕文字来自已确认正文，时间来自同一次语音响应的原生字级证据。' : narration.timingKind === 'planned' ? '按已确认的目标时长与文本长度安排字幕和动画，未生成旁白。请检查字幕阅读节奏和分镜时长。' : '使用输入 SRT 的时间轴，未生成旁白。'}</p>
             {media.bgm ? <p className="m-0 text-xs leading-6 text-fg-3">已开启背景音乐，将在最终成片中混入；此处仅检查旁白和字幕。</p> : null}
           </div> : empty}
         </TabsContent>
