@@ -222,6 +222,8 @@ async function lineartStage(ctx, artifact, timing) {
 
 async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
   let item;
+  let lastCoverage;
+  let repairSource;
   try {
     const record = await ctx.read();
     if (record.whiteboard.media.annotations[scene.id]) {
@@ -231,61 +233,91 @@ async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
     const lineart = await store.validateBinding(record, record.whiteboard.media.lineart[scene.id], ctx.rootDir);
     const image = await ctx.filePath(record, lineart.image);
     const revision = record.whiteboard.media.overrides[`annotation_drafting:${scene.id}`] || '';
-    const prompt = models.annotationPrompt({ scene, cues: timing.cues.filter(cue => scene.cueIds.includes(cue.id)), revision, canvas });
-    const inputIdentity = sha256({ contract: models.ANNOTATION_PLANNING_CONTRACT, prompt,
-      image: lineart.image.sha256, timing: record.whiteboard.media.current.full_narration.identity, scene, revision });
-    const pending = record.whiteboard.media.lowCoverage?.find(entry => entry.sceneId === scene.id && entry.inputIdentity === inputIdentity);
+    const input = { scene, cues: timing.cues.filter(cue => scene.cueIds.includes(cue.id)), revision, canvas,
+      imageSha256: lineart.image.sha256, timingIdentity: record.whiteboard.media.current.full_narration.identity };
+    const { prompt, inputIdentity } = models.annotationInput(input);
+    const pending = record.whiteboard.media.lowCoverage?.find(entry => entry.sceneId === scene.id);
     if (pending) {
       await store.validateBinding(record, pending, ctx.rootDir);
+      if (models.annotationInput(input, pending.planningContract).inputIdentity !== pending.inputIdentity
+        || pending.lineartIdentity !== lineart.identity || pending.narrationIdentity !== input.timingIdentity || pending.revision !== revision) {
+        throw new WhiteboardError('STALE_IDENTITY', '已保存的落墨预览与当前线稿、时间线或修改要求不一致，请重新检查本幕。', 409);
+      }
       throw new WhiteboardError('ANNOTATION_COVERAGE_LOW', '本幕的低覆盖率预览已保留，请查看后决定接受或重新编排。');
     }
     if (await reuseHistory(ctx, 'annotations', scene.id, inputIdentity)) return { reused: true };
     item = await ctx.attempt('annotation_drafting', scene.id, true, inputIdentity);
-    const candidate = await models.structuredVision({ textConfig: ctx.config, images: [image], services: ctx.services,
-      onRequest: () => ctx.requesting(item.id), validate: candidate => models.validateAnnotation(candidate, canvas), reasoningEffort: 'medium', prompt,
+    await models.structuredVision({ textConfig: ctx.config, images: [image], services: ctx.services,
+      validate: candidate => models.validateAnnotation(candidate, canvas), reasoningEffort: 'medium', prompt,
+      onRequest: async repair => {
+        if (repair) {
+          // 每次实际请求单独登记；格式补正与覆盖率修正共用一次补正预算。
+          if (!lastCoverage) await ctx.change((current, now) => {
+            Object.assign(current.whiteboard.media.attempts.find(row => row.id === item.id), {
+              status: 'failed', errorCode: 'CANDIDATE_INVALID', completedAt: now,
+            });
+          });
+          repairSource = lastCoverage;
+          item = await ctx.attempt('annotation_drafting', scene.id, true, inputIdentity, repairSource);
+          const message = repairSource
+            ? `正在根据遗漏预览修正“${scene.title}”的落墨区域（当前覆盖率 ${(repairSource.coverage.coverageRatio * 100).toFixed(1)}%，最多修正一次）...`
+            : `正在修正“${scene.title}”的落墨候选格式（最多修正一次）...`;
+          await ctx.change((current, now) => {
+            current.message = message; current.current_stage_message = message; current.updated_at = now;
+          });
+          await ctx.emitProgress?.({ type: 'stage_progress', stage: 'annotation_drafting', message });
+        }
+        await ctx.requesting(item.id);
+      },
+      assessCandidate: async candidate => {
+        const annotation = models.materializeAnnotation(candidate, scene, lineart.image.sha256, record.whiteboard.media.current.full_narration.identity, canvas);
+        const candidateFile = await ctx.jsonFile(item, 'candidate.json', candidate);
+        const annotationFile = await ctx.jsonFile(item, 'annotation.json', annotation);
+        await ctx.publish(item, { candidate: { path: candidateFile, kind: 'annotation_candidate', name: '区域候选', sceneId: scene.id, mime: 'application/json' } });
+        const preview = path.join(store.workDirectory(ctx.workflowId, item.id, ctx.rootDir), 'annotation-preview.png');
+        const resultPreview = path.join(store.workDirectory(ctx.workflowId, item.id, ctx.rootDir), 'annotation-result.png');
+        let coverage;
+        let coverageError;
+        try {
+          coverage = await ctx.tools.python('annotation-preview', { image, annotation, font: ctx.runtime.font,
+            output: preview, resultOutput: resultPreview }, ctx.processOptions);
+        } catch (error) {
+          if (error.code !== 'ANNOTATION_COVERAGE_LOW') throw error;
+          if (!await fspExists(preview) || !await fspExists(resultPreview) || !Number.isFinite(error.coverageRatio)
+            || error.coverageRatio < 0 || error.coverageRatio >= 0.97) {
+            throw new WhiteboardError('ANNOTATION_PREVIEW_FAILED', '低覆盖率落墨缺少完整预览或覆盖数据，请继续制作以重新编排本幕。');
+          }
+          coverage = { ...error.coverage, coverageRatio: error.coverageRatio, regions: annotation.elements.length };
+          coverageError = error;
+        }
+        // 文件和低覆盖率记录必须在同一次受锁保护的发布中保存。
+        await ctx.publish(item, {
+          annotation: { path: annotationFile, kind: 'annotation', name: `${scene.title}落墨编排`, sceneId: scene.id, mime: 'application/json' },
+          preview: { path: preview, kind: 'annotation_preview', name: `${scene.title}区域预览`, sceneId: scene.id, mime: 'image/png' },
+          resultPreview: { path: resultPreview, kind: 'annotation_result', name: `${scene.title}当前落墨效果`, sceneId: scene.id, mime: 'image/png' },
+        }, (current, files, now) => {
+          const media = current.whiteboard.media;
+          media.lowCoverage = (media.lowCoverage || []).filter(entry => entry.sceneId !== scene.id);
+          const binding = { sceneId: scene.id, inputIdentity, planningContract: models.ANNOTATION_PLANNING_CONTRACT,
+            visualGrouping: candidate.visualGrouping, ...files, coverage,
+            ...(repairSource ? { coverageRepair: { sourceAttemptId: repairSource.attemptId, sourceIdentity: repairSource.identity } } : {}) };
+          if (coverageError) {
+            lastCoverage = store.bind({ kind: 'annotation_coverage_review', ...binding,
+              title: scene.title, attemptId: item.id, lineartIdentity: lineart.identity,
+              narrationIdentity: record.whiteboard.media.current.full_narration.identity, revision });
+            media.lowCoverage.push(lastCoverage);
+          } else media.annotations[scene.id] = store.bind({ kind: 'annotation', ...binding });
+          Object.assign(media.attempts.find(row => row.id === item.id), {
+            status: coverageError ? 'failed' : 'validated', completedAt: now,
+            ...(coverageError ? { errorCode: 'ANNOTATION_COVERAGE_LOW' } : {}),
+          });
+          if (media.activeAttemptId === item.id) media.activeAttemptId = '';
+        });
+        return coverageError ? { error: coverageError, feedback: {
+          text: models.annotationCoverageFeedback(candidate, coverage), images: [preview],
+        } } : null;
+      },
     });
-    const annotation = models.materializeAnnotation(candidate, scene, lineart.image.sha256, record.whiteboard.media.current.full_narration.identity, canvas);
-    const candidateFile = await ctx.jsonFile(item, 'candidate.json', candidate);
-    const annotationFile = await ctx.jsonFile(item, 'annotation.json', annotation);
-    await ctx.publish(item, { candidate: { path: candidateFile, kind: 'annotation_candidate', name: '区域候选', sceneId: scene.id, mime: 'application/json' } });
-    const preview = path.join(store.workDirectory(ctx.workflowId, item.id, ctx.rootDir), 'annotation-preview.png');
-    const resultPreview = path.join(store.workDirectory(ctx.workflowId, item.id, ctx.rootDir), 'annotation-result.png');
-    let coverage;
-    let coverageError;
-    try {
-      coverage = await ctx.tools.python('annotation-preview', { image, annotation, font: ctx.runtime.font,
-        output: preview, resultOutput: resultPreview }, ctx.processOptions);
-    } catch (error) {
-      if (error.code !== 'ANNOTATION_COVERAGE_LOW') throw error;
-      if (!await fspExists(preview) || !await fspExists(resultPreview) || !Number.isFinite(error.coverageRatio)
-        || error.coverageRatio < 0 || error.coverageRatio >= 0.97) {
-        throw new WhiteboardError('ANNOTATION_PREVIEW_FAILED', '低覆盖率落墨缺少完整预览或覆盖数据，请继续制作以重新编排本幕。');
-      }
-      coverage = { ...error.coverage, coverageRatio: error.coverageRatio, regions: annotation.elements.length };
-      coverageError = error;
-    }
-    // 文件和低覆盖率记录必须在同一次受锁保护的发布中保存。
-    await ctx.publish(item, {
-      annotation: { path: annotationFile, kind: 'annotation', name: `${scene.title}落墨编排`, sceneId: scene.id, mime: 'application/json' },
-      preview: { path: preview, kind: 'annotation_preview', name: `${scene.title}区域预览`, sceneId: scene.id, mime: 'image/png' },
-      resultPreview: { path: resultPreview, kind: 'annotation_result', name: `${scene.title}当前落墨效果`, sceneId: scene.id, mime: 'image/png' },
-    }, (current, files, now) => {
-      const media = current.whiteboard.media;
-      media.lowCoverage = (media.lowCoverage || []).filter(entry => entry.sceneId !== scene.id);
-      const binding = { sceneId: scene.id, inputIdentity, planningContract: models.ANNOTATION_PLANNING_CONTRACT,
-        visualGrouping: candidate.visualGrouping, ...files, coverage };
-      if (coverageError) {
-        media.lowCoverage.push(store.bind({ kind: 'annotation_coverage_review', ...binding,
-          title: scene.title, attemptId: item.id, lineartIdentity: lineart.identity,
-          narrationIdentity: record.whiteboard.media.current.full_narration.identity, revision }));
-      } else media.annotations[scene.id] = store.bind({ kind: 'annotation', ...binding });
-      Object.assign(media.attempts.find(row => row.id === item.id), {
-        status: coverageError ? 'failed' : 'validated', completedAt: now,
-        ...(coverageError ? { errorCode: 'ANNOTATION_COVERAGE_LOW' } : {}),
-      });
-      if (media.activeAttemptId === item.id) media.activeAttemptId = '';
-    });
-    if (coverageError) throw coverageError;
     return { reused: false };
   } catch (error) {
     if (item) {
@@ -299,6 +331,10 @@ async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
           if (record.whiteboard.media.activeAttemptId === item.id) record.whiteboard.media.activeAttemptId = '';
         });
       } catch { /* Deleted or superseded tasks must never be recreated. */ }
+    }
+    if (repairSource && lastCoverage?.attemptId === repairSource.attemptId && error.code !== 'UNKNOWN_EXTERNAL_OUTCOME') {
+      await ctx.emitProgress?.({ type: 'stage_progress', stage: 'annotation_drafting',
+        message: `“${scene.title}”本次修正未能生成可用预览，已保留原落墨预览，等待你检查后决定。` });
     }
     throw error;
   }

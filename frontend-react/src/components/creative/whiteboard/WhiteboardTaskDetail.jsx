@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowUp, Check, FileClock, FileText, Loader2, PenLine, Settings2, Trash2 } from 'lucide-react';
+import { ArrowUp, Check, FileClock, FileText, ListOrdered, Loader2, PenLine, Settings2, Trash2 } from 'lucide-react';
 import { api } from '@/api/client.js';
 import { Button } from '@/components/ui/button.jsx';
 import { Textarea } from '@/components/ui/textarea.jsx';
@@ -29,12 +29,16 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
   const [planOpen, setPlanOpen] = useState(false);
   const [editedPlan, setEditedPlan] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySource, setHistorySource] = useState('history');
   const [historyArtifact, setHistoryArtifact] = useState(null);
   const [historyBusy, setHistoryBusy] = useState('');
   const [historyError, setHistoryError] = useState('');
+  const [progressOpen, setProgressOpen] = useState(false);
   const [streamReply, setStreamReply] = useState({ phase: '', text: '' });
   const actionLock = useRef(false);
   const historyRequest = useRef(0);
+  const historyTrigger = useRef(null);
+  const progressTrigger = useRef(null);
   const whiteboard = workflow.whiteboard;
   const media = whiteboard.media && !whiteboard.media.stale ? whiteboard.media : null;
   const interactions = whiteboard.interactions || [];
@@ -53,6 +57,11 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
   const canMessage = Boolean(artifact) && !['unknown_external_outcome', 'failed'].includes(workflow.status);
   const needsAttention = Boolean(whiteboard.artifactError) || ['failed', 'unknown_external_outcome'].includes(workflow.status);
   const emptyTitle = running ? '正在整理正文与分镜' : workflow.status === 'unknown_external_outcome' ? '方案结果待核实' : workflow.status === 'failed' ? '方案生成未完成' : '等待生成方案';
+  const recentProgress = progressEvents.slice(-8);
+  const viewedPlanIsCurrent = Boolean(historyArtifact) && !current?.stale
+    && historyArtifact.attemptId === current?.attemptId && historyArtifact.identity === current?.identity;
+  const viewedPlanIsApproved = viewedPlanIsCurrent && Boolean(whiteboard.initialApproval)
+    && !whiteboard.initialApproval.stale && whiteboard.initialApproval.identity === historyArtifact.identity;
 
   useEffect(() => () => { historyRequest.current += 1; }, []);
 
@@ -117,6 +126,26 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
       actionLock.current = false;
       setBusy('');
     }
+  }
+
+  function openPlanViewer(source, trigger) {
+    historyRequest.current += 1;
+    historyTrigger.current = trigger;
+    setHistorySource(source);
+    setHistoryBusy('');
+    setHistoryError('');
+    setHistoryArtifact(source === 'current' ? structuredClone({
+      artifact, number: activeVersion?.number || 1, attemptId: current.attemptId, identity: current.identity,
+    }) : null);
+    setHistoryOpen(true);
+  }
+
+  function changeHistoryOpen(open) {
+    if (!open) {
+      historyRequest.current += 1;
+      setHistoryBusy('');
+    }
+    setHistoryOpen(open);
   }
 
   async function viewVersion(attempt) {
@@ -197,7 +226,6 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
                     </Message>
                   </MessageScrollerItem>
                 ) : null}
-                {progressEvents.length ? <MessageScrollerItem><details className="text-xs text-fg-3"><summary className="cursor-pointer">最近制作进度</summary><ol className="grid gap-2 pl-4">{progressEvents.slice(-8).map((event, index) => <li key={event.seq || index}>{event.message || event.type}</li>)}</ol></details></MessageScrollerItem> : null}
               </MessageScrollerContent>
             </MessageScrollerViewport>
             <MessageScrollerButton direction="end" variant="outline" />
@@ -234,18 +262,20 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
         </section>
 
         <section className="flex min-h-[400px] min-w-0 flex-col bg-surface-1 min-[1180px]:min-h-0" aria-label="当前白板方案">
-          <div className="flex h-16 shrink-0 items-center justify-between gap-2 border-b border-line-2 px-5 max-[560px]:px-4">
+          <div className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-line-2 px-5 py-3 max-[560px]:px-4">
             <div className="flex flex-wrap items-center gap-2"><h2 className="m-0 text-base font-semibold">{current?.stale ? '上一版方案' : media ? '当前制作产物' : '当前方案'}</h2>{activeVersion ? <span className="rounded border border-line-1 px-1.5 py-0.5 font-mono text-xs text-fg-3">v{activeVersion.number}</span> : null}</div>
-            <Button variant="ghost" type="button" size="sm" onClick={() => { setHistoryOpen(true); setHistoryArtifact(null); }}><FileClock size={14} />版本记录</Button>
+            <div className="flex flex-wrap items-center gap-1" aria-label="方案与制作记录">
+              {media && artifact ? <Button variant="ghost" type="button" size="sm" onClick={event => openPlanViewer('current', event.currentTarget)}><FileText size={14} />查看方案</Button> : null}
+              <Button variant="ghost" type="button" size="sm" onClick={event => openPlanViewer('history', event.currentTarget)}><FileClock size={14} />版本记录</Button>
+              <Button ref={progressTrigger} variant="ghost" type="button" size="sm" onClick={() => setProgressOpen(true)}><ListOrdered size={14} />制作记录</Button>
+            </div>
           </div>
           <div className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 max-[560px]:p-4', !artifact && !whiteboard.artifactError && 'flex')}>
             {whiteboard.artifactError ? <p className="text-sm text-danger" role="alert">{whiteboard.artifactError}</p> : artifact ? <div className="grid min-w-0 content-start gap-5">
               {current?.stale ? <p className="m-0 text-xs leading-6 text-fg-3">此版本已因修改而失效，保留供对照。新方案需要重新确认。</p> : null}
-              {media ? <>
-                <WhiteboardMediaPanel media={media} scenes={artifact.scenes} onReviewLowCoverage={allowed.has('accept_low_coverage') ? openCoverageReview : undefined}
-                  onRecoverAnnotationPreview={allowed.has('recover_annotation_preview') ? sceneId => act('recover_annotation_preview', { sceneId }) : undefined}
-                  recoveringPreview={busy === 'recover_annotation_preview'} actionsDisabled={locked} /><details className="border-t border-line-1 pt-3 text-sm"><summary className="mb-4 cursor-pointer text-fg-3">查看已确认内容与制作方案</summary><WhiteboardArtifact artifact={artifact} /></details>
-              </> : <WhiteboardArtifact artifact={artifact} />}
+              {media ? <WhiteboardMediaPanel media={media} scenes={artifact.scenes} onReviewLowCoverage={allowed.has('accept_low_coverage') ? openCoverageReview : undefined}
+                onRecoverAnnotationPreview={allowed.has('recover_annotation_preview') ? sceneId => act('recover_annotation_preview', { sceneId }) : undefined}
+                recoveringPreview={busy === 'recover_annotation_preview'} actionsDisabled={locked} /> : <WhiteboardArtifact artifact={artifact} />}
             </div> : <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center gap-3 text-center" role="status" aria-live="polite">
               {running ? <Loader2 size={24} className="animate-spin text-fg-3" /> : <FileText size={26} className="text-fg-3" />}
               <h3 className="m-0 text-sm font-semibold text-fg-2">{emptyTitle}</h3>
@@ -301,15 +331,39 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
         </DialogContent>
       </Dialog>
 
-      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="max-h-[85vh] w-[min(760px,calc(100vw-32px))] max-w-none overflow-auto max-[760px]:[&_button]:min-h-11" showCloseButton>
-          <DialogHeader><DialogTitle>{historyArtifact ? `第 ${historyArtifact.number} 版方案` : '方案版本记录'}</DialogTitle><DialogDescription>{historyArtifact ? (historyArtifact.current ? '这是当前方案，批准操作请返回任务页完成。' : '历史方案仅供查看，不能作为当前版本批准。') : '每次修改单独保存；历史版本不会覆盖当前方案。'}</DialogDescription></DialogHeader>
-          {historyArtifact ? <><Button variant="ghost" className="justify-self-start" onClick={() => setHistoryArtifact(null)}>返回版本记录</Button><WhiteboardArtifact artifact={historyArtifact.artifact} /></> : (
-            <div className="divide-y divide-line-1">
-              {[...attempts].reverse().map(attempt => <div key={attempt.id} className="flex items-center justify-between gap-3 py-3"><div className="grid gap-1"><span className="text-sm font-semibold">第 {attempt.number} 版{current?.attemptId === attempt.id && !current.stale ? ' · 当前版本' : ''}</span><span className="text-xs text-fg-3">{({ prepared: '等待执行', preparing: '准备中', requesting: '请求模型中', validated: '方案已校验', failed: '生成失败', unknown_external_outcome: '外部结果待核实' })[attempt.status] || '处理中'}{attempt.stale ? ' · 已失效' : ''}</span></div><Button size="sm" variant="outline" disabled={!attempt.binding || Boolean(historyBusy)} onClick={() => viewVersion(attempt)}>{historyBusy === attempt.id ? '正在读取...' : '查看方案'}</Button></div>)}
-            </div>
-          )}
-          {historyError ? <p className="text-sm text-danger" role="alert">{historyError}</p> : null}
+      <Dialog open={historyOpen} onOpenChange={changeHistoryOpen}>
+        <DialogContent className="flex max-h-[85dvh] w-[min(760px,calc(100vw-32px))] max-w-none flex-col overflow-hidden sm:max-w-none max-[760px]:[&_button]:min-h-11" showCloseButton
+          onCloseAutoFocus={event => { event.preventDefault(); historyTrigger.current?.focus(); }}>
+          <DialogHeader className="shrink-0 pr-6 text-left">
+            <DialogTitle>{historyArtifact ? `第 ${historyArtifact.number} 版方案${viewedPlanIsApproved ? ' · 已确认' : ''}` : '方案版本记录'}</DialogTitle>
+            <DialogDescription>{historyArtifact ? (viewedPlanIsApproved ? '这是当前制作使用的已确认内容与制作方案。' : viewedPlanIsCurrent ? '这是当前方案，确认操作请返回任务页完成。' : '历史方案仅供查看，不能作为当前版本批准。') : '每次修改单独保存；历史版本不会覆盖当前方案。'}</DialogDescription>
+          </DialogHeader>
+          <div className="grid min-h-0 gap-4 overflow-y-auto overscroll-contain">
+            {historyArtifact ? <>
+              {historySource === 'history' ? <Button variant="ghost" className="justify-self-start" onClick={() => setHistoryArtifact(null)}>返回版本记录</Button> : null}
+              <WhiteboardArtifact artifact={historyArtifact.artifact} />
+            </> : (
+              <div className="divide-y divide-line-1">
+                {[...attempts].reverse().map(attempt => <div key={attempt.id} className="flex items-center justify-between gap-3 py-3"><div className="grid gap-1"><span className="text-sm font-semibold">第 {attempt.number} 版{current?.attemptId === attempt.id && !current.stale ? ' · 当前版本' : ''}</span><span className="text-xs text-fg-3">{({ prepared: '等待执行', preparing: '准备中', requesting: '请求模型中', validated: '方案已校验', failed: '生成失败', unknown_external_outcome: '外部结果待核实' })[attempt.status] || '处理中'}{attempt.stale ? ' · 已失效' : ''}</span></div><Button size="sm" variant="outline" disabled={!attempt.binding || Boolean(historyBusy)} onClick={() => viewVersion(attempt)}>{historyBusy === attempt.id ? '正在读取...' : '查看方案'}</Button></div>)}
+              </div>
+            )}
+            {historyError ? <p className="text-sm text-danger" role="alert">{historyError}</p> : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={progressOpen} onOpenChange={setProgressOpen}>
+        <DialogContent className="flex max-h-[85dvh] w-[min(640px,calc(100vw-32px))] max-w-none flex-col overflow-hidden sm:max-w-none max-[760px]:[&_button]:min-h-11" showCloseButton
+          onCloseAutoFocus={event => { event.preventDefault(); progressTrigger.current?.focus(); }}>
+          <DialogHeader className="shrink-0 pr-6 text-left">
+            <DialogTitle>最近制作记录</DialogTitle>
+            <DialogDescription>显示当前任务最近 8 条制作事件，制作期间会自动更新。</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 overflow-y-auto overscroll-contain" role="log" aria-label="最近制作记录" aria-live="polite">
+            {recentProgress.length ? <ol className="m-0 list-none divide-y divide-line-1 p-0">
+              {recentProgress.map((event, index) => <li key={event.seq || index} className="whitespace-pre-wrap break-words py-3 text-sm leading-7 text-fg-2">{event.message || '制作状态已更新。'}</li>)}
+            </ol> : <p className="m-0 py-8 text-center text-sm leading-7 text-fg-3">暂无最近制作记录。制作过程中收到的进度会显示在这里。</p>}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

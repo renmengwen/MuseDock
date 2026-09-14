@@ -7,6 +7,7 @@ const workflowStore = require('../server/services/creative/workflowStore');
 const store = require('../server/services/creative/whiteboard/mediaStore');
 const tools = require('../server/services/creative/whiteboard/mediaTools');
 const production = require('../server/services/creative/whiteboard/productionWorkflows');
+const models = require('../server/services/creative/whiteboard/mediaModels');
 const { srtText } = require('../server/services/creative/whiteboard/narrationTiming');
 const { WhiteboardError } = require('../server/services/creative/whiteboard/contracts');
 const { createAnnotationPool, annotationPool } = require('../server/services/creative/whiteboard/annotationPool');
@@ -40,7 +41,7 @@ async function fixture(count = 3, { startStage = 'annotation_drafting' } = {}) {
   const faults = new Map();
   const calls = new Map();
   const events = [];
-  const ctx = { root, rootDir, faults, calls, events, beforeVision: () => pause(15),
+  const ctx = { root, rootDir, faults, calls, events, visionRequests: [], beforeVision: () => pause(15),
     beforeImage: () => pause(15), beforeRender: () => pause(15),
     imageFaults: new Map(), imageCalls: new Map(), renderCalls: new Map(), allowRender: false };
   const config = { enabled: true, provider: 'fixture', apiKey: 'fixture-only', baseUrl: 'https://example.invalid',
@@ -61,9 +62,18 @@ async function fixture(count = 3, { startStage = 'annotation_drafting' } = {}) {
       const prompt = request.messages[1].content[0].text;
       const sceneId = JSON.parse(prompt.split('本幕与真实字幕时间：')[1].split('\n')[0]).scene.id;
       calls.set(sceneId, (calls.get(sceneId) || 0) + 1);
+      ctx.visionRequests.push({ sceneId, messages: structuredClone(request.messages) });
       await ctx.beforeVision(sceneId);
-      if (faults.get(sceneId) === 'unknown') throw new Error('fixture connection lost');
-      return { success: true, text: JSON.stringify(annotationCandidate) };
+      const mode = faults.get(sceneId);
+      const feedback = request.messages.at(-1).content;
+      const correction = Array.isArray(feedback) && feedback.some(part => part.text?.includes('当前候选的墨迹覆盖率'));
+      if (mode === 'unknown' || (correction && mode === 'repair_unknown')) throw new Error('fixture connection lost');
+      if ((mode === 'schema_then_low' && calls.get(sceneId) === 1) || (mode === 'repair_invalid' && correction)) {
+        return { success: true, text: JSON.stringify({ schemaVersion: 1 }) };
+      }
+      const next = structuredClone(annotationCandidate);
+      if (correction && mode === 'repair_success') next.elements[0].region.width = 600;
+      return { success: true, text: JSON.stringify(next) };
     } },
     whiteboardMediaTools: { ...tools,
       preflight: async () => ({ font: 'fixture-font', recipe: { width: 1920, height: 1080, fixture: true } }),
@@ -79,7 +89,8 @@ async function fixture(count = 3, { startStage = 'annotation_drafting' } = {}) {
         if (mode === 'local_failure') throw new WhiteboardError('MEDIA_FAILED', '测试注入：预览生成失败。');
         await fs.writeFile(input.output, png, { flag: 'wx' });
         if (mode !== 'missing_preview') await fs.writeFile(input.resultOutput, png, { flag: 'wx' });
-        if (['low', 'missing_preview'].includes(mode)) {
+        if (['low', 'missing_preview', 'repair_invalid', 'repair_unknown', 'schema_then_low'].includes(mode)
+          || (mode === 'repair_success' && input.annotation.elements[0].region.width === 300)) {
           const error = new WhiteboardError('ANNOTATION_COVERAGE_LOW', '测试注入：标注覆盖不足。');
           error.coverageRatio = 0.65;
           error.coverage = { coverageRatio: 0.65, regions: 1, coveredInkPixels: 65, totalInkPixels: 100 };
@@ -174,6 +185,8 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   assert.equal(media.annotationProgress.concurrency, 10);
   const first = media.lowCoverage[0];
   assert.equal(first.sceneId, 'scene_2');
+  assert.equal(ctx.calls.get('scene_2'), 2, '持续覆盖不足时只能修正一次');
+  assert.ok(first.coverageRepair?.sourceIdentity, '低覆盖率修正必须绑定原预览');
   await store.validateBinding(record, first, ctx.rootDir);
   for (const file of [first.annotation, first.preview, first.resultPreview]) {
     assert.equal((await workflows.getWhiteboardMediaFile(ctx.id, file.id, ctx.options)).success, true);
@@ -208,7 +221,7 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   assert.notEqual(media.lowCoverage[0].attemptId, first.attemptId);
   assert.equal(media.annotations.scene_1.identity, successful);
   assert.equal(ctx.calls.get('scene_1'), 1);
-  assert.equal(ctx.calls.get('scene_2'), 2);
+  assert.equal(ctx.calls.get('scene_2'), 4);
   assert.equal(ctx.calls.get('scene_3'), 1);
   assert.equal((await workflows.actOnWhiteboardWorkflow(ctx.id, stalePayload, ctx.options)).code, 'STALE_IDENTITY');
 
@@ -253,6 +266,13 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   legacyMedia.artifacts = legacyMedia.artifacts.filter(file => !orphaned.has(file.id));
   legacyAttempt.received = { candidate: legacyAttempt.received.candidate };
   legacyAttempt.errorCode = 'MEDIA_FAILED';
+  const legacyTiming = await store.readData(legacyRecord, legacyMedia.current.full_narration.timeline, legacy.rootDir);
+  const legacyScene = legacyTiming.scenes.find(scene => scene.id === 'scene_2');
+  legacyAttempt.inputIdentity = models.annotationInput({ scene: legacyScene,
+    cues: legacyTiming.cues.filter(cue => legacyScene.cueIds.includes(cue.id)),
+    imageSha256: legacyMedia.lineart.scene_2.image.sha256, timingIdentity: legacyMedia.current.full_narration.identity,
+  }, models.LEGACY_ANNOTATION_PLANNING_CONTRACT).inputIdentity;
+  delete legacyAttempt.repairOfAttemptId; delete legacyAttempt.repairSourceIdentity;
   delete legacyMedia.lowCoverage;
   legacyMedia.gate = ''; legacyMedia.interactionId = '';
   legacyRecord.status = 'failed'; legacyRecord.success = false;
@@ -282,6 +302,7 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   assert.equal(restored.gate, 'annotation_coverage_review');
   assert.equal(restored.lowCoverage.length, 1);
   assert.equal(restored.lowCoverage[0].sceneId, 'scene_2');
+  assert.equal(restored.lowCoverage[0].planningContract, models.LEGACY_ANNOTATION_PLANNING_CONTRACT, '旧候选恢复不能静默改用新提示词身份');
   assert.equal(restored.annotations.scene_2, undefined, '恢复预览不能代替用户接受');
   assert.equal(restored.annotations.scene_1.identity, legacyMedia.annotations.scene_1.identity);
   assert.equal(restored.annotations.scene_3.identity, legacyMedia.annotations.scene_3.identity);
@@ -301,6 +322,20 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   mixed.faults.set('scene_1', 'low'); mixed.faults.set('scene_2', 'unknown');
   assert.equal((await mixed.run()).code, 'UNKNOWN_EXTERNAL_OUTCOME');
   record = await mixed.read(); media = record.whiteboard.media;
+  // 模拟升级前已保存的 v2 待审预览，与另一幕未知请求并存。
+  const mixedTiming = await store.readData(record, media.current.full_narration.timeline, mixed.rootDir);
+  const oldScene = mixedTiming.scenes.find(scene => scene.id === 'scene_1');
+  const oldInput = models.annotationInput({ scene: oldScene,
+    cues: mixedTiming.cues.filter(cue => oldScene.cueIds.includes(cue.id)),
+    imageSha256: media.lineart.scene_1.image.sha256, timingIdentity: media.current.full_narration.identity,
+  }, models.LEGACY_ANNOTATION_PLANNING_CONTRACT);
+  const { identity: _oldIdentity, coverageRepair: _oldRepair, ...oldEntry } = media.lowCoverage[0];
+  media.lowCoverage[0] = store.bind({ ...oldEntry, inputIdentity: oldInput.inputIdentity, planningContract: oldInput.planningContract });
+  const oldAttempt = media.attempts.find(attempt => attempt.id === oldEntry.attemptId);
+  oldAttempt.inputIdentity = oldInput.inputIdentity;
+  delete oldAttempt.repairOfAttemptId; delete oldAttempt.repairSourceIdentity;
+  const retainedIdentity = media.lowCoverage[0].identity;
+  await workflowStore.persistWorkflow(record, mixed.rootDir);
   assert.equal(record.status, 'unknown_external_outcome');
   assert.equal(media.attempts.findLast(item => item.sceneId === 'scene_2').status, 'unknown_external_outcome');
   assert.deepEqual(production.actionsFor(record).map(action => action.id), ['authorize_media_retry']);
@@ -309,7 +344,8 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   assert.equal((await mixed.action('authorize_media_retry', { confirmed: true })).success, true);
   mixed.faults.delete('scene_2');
   assert.equal((await mixed.run()).code, 'ANNOTATION_COVERAGE_LOW');
-  assert.equal(mixed.calls.get('scene_1'), 1, '授权未知请求重试不应重新生成已经返回的低覆盖候选');
+  assert.equal(mixed.calls.get('scene_1'), 2, '授权未知请求重试不应重新生成已经返回的低覆盖候选');
+  assert.equal((await mixed.read()).whiteboard.media.lowCoverage[0].identity, retainedIdentity, '升级后继续制作应保留 v2 预览及身份');
   assert.equal(mixed.calls.get('scene_2'), 2);
   assert.equal(mixed.calls.get('scene_3'), 1);
   assert.equal((await mixed.action('retry_media')).success, true);
@@ -349,6 +385,68 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   assert.equal(settledUnknown.status, 'unknown_external_outcome');
   assert.deepEqual(production.actionsFor(settledUnknown).map(action => action.id), ['authorize_media_retry']);
   console.log('PASS 缺图时禁止接受，并发请求重启恢复不遗漏较早的在途幕');
+
+  const repaired = await fixture(2);
+  repaired.faults.set('scene_1', 'repair_success');
+  assert.equal((await repaired.run()).status, 'waiting_approval');
+  const repairedRecord = await repaired.read();
+  assert.equal(repairedRecord.whiteboard.media.lowCoverage.length, 0);
+  assert.equal(repairedRecord.whiteboard.media.annotations.scene_1.coverage.coverageRatio, 1);
+  assert.equal(repaired.calls.get('scene_1'), 2);
+  assert.equal(repaired.calls.get('scene_2'), 1, '成功幕不能被另一幕的修正重复请求');
+  assert.equal(repairedRecord.whiteboard.media.gate, 'annotation_approval');
+  assert.equal(repairedRecord.whiteboard.media.current.scene_render, undefined);
+  const repairRequests = repaired.visionRequests.filter(request => request.sceneId === 'scene_1');
+  const correction = repairRequests[1].messages.at(-1).content;
+  assert.match(correction.find(part => part.type === 'text').text, /65\.0%[\s\S]*35\.0%[\s\S]*待修正候选/);
+  assert.equal(correction.filter(part => part.type === 'image_url').length, 1, '修正必须附上真实遗漏预览');
+  assert.equal(repairRequests[1].messages[1].content.filter(part => part.type === 'image_url').length, 1, '原始线稿必须继续可见');
+  assert.ok(repaired.events.some(event => /根据遗漏预览修正/.test(event.message)));
+
+  const budget = await fixture(1);
+  budget.faults.set('scene_1', 'schema_then_low');
+  assert.equal((await budget.run()).status, 'waiting_approval');
+  assert.equal(budget.calls.get('scene_1'), 2, '格式补正后不得额外启动第三次覆盖率修正');
+  assert.equal((await budget.read()).whiteboard.media.lowCoverage.length, 1);
+
+  const failedRepair = await fixture(1);
+  failedRepair.faults.set('scene_1', 'repair_invalid');
+  assert.equal((await failedRepair.run()).status, 'waiting_approval');
+  const beforeRepairAcceptance = await failedRepair.read();
+  const keptPreview = beforeRepairAcceptance.whiteboard.media.lowCoverage[0];
+  const failedAttempt = beforeRepairAcceptance.whiteboard.media.attempts.at(-1);
+  assert.equal(failedRepair.calls.get('scene_1'), 2);
+  assert.equal(failedAttempt.errorCode, 'CANDIDATE_INVALID');
+  assert.equal(failedAttempt.repairOfAttemptId, keptPreview.attemptId);
+  const wrongSource = structuredClone(beforeRepairAcceptance);
+  wrongSource.whiteboard.media.attempts.at(-1).repairSourceIdentity = 'not-the-reviewed-preview';
+  await workflowStore.persistWorkflow(wrongSource, failedRepair.rootDir);
+  assert.equal((await failedRepair.action('accept_low_coverage', { confirmed: true })).success, false);
+  // 模拟在修正请求准备好、尚未发送时重启：原预览仍然可以明确接受。
+  beforeRepairAcceptance.status = 'running';
+  beforeRepairAcceptance.whiteboard.media.executionId = failedAttempt.executionId;
+  beforeRepairAcceptance.whiteboard.media.activeAttemptId = failedAttempt.id;
+  beforeRepairAcceptance.whiteboard.media.attempts.at(-1).status = 'prepared';
+  production.recover(beforeRepairAcceptance, new Date().toISOString());
+  await workflowStore.persistWorkflow(beforeRepairAcceptance, failedRepair.rootDir);
+  assert.equal((await failedRepair.action('accept_low_coverage', { confirmed: true })).success, true, '明确失败的修正不能使已保存预览不可接受');
+  assert.equal((await failedRepair.run()).status, 'waiting_approval');
+  assert.equal(failedRepair.calls.get('scene_1'), 2);
+
+  const unknownRepair = await fixture(2);
+  unknownRepair.faults.set('scene_1', 'repair_unknown');
+  unknownRepair.faults.set('scene_2', 'low');
+  assert.equal((await unknownRepair.run()).status, 'unknown_external_outcome');
+  assert.equal((await unknownRepair.read()).whiteboard.media.lowCoverage.length, 2, '未知修正结果必须保留已取得的预览证据');
+  assert.equal((await unknownRepair.action('retry_media')).success, false);
+  assert.equal((await unknownRepair.action('accept_low_coverage', { confirmed: true })).success, false);
+  assert.equal((await unknownRepair.action('authorize_media_retry', { confirmed: true })).success, true);
+  assert.deepEqual((await unknownRepair.read()).whiteboard.media.lowCoverage.map(entry => entry.sceneId), ['scene_2']);
+  unknownRepair.faults.delete('scene_1');
+  assert.equal((await unknownRepair.run()).status, 'waiting_approval');
+  assert.equal(unknownRepair.calls.get('scene_1'), 3, '明确授权后只重试未知的幕');
+  assert.equal(unknownRepair.calls.get('scene_2'), 2, '其他已保存预览不得重复请求');
+  console.log('PASS 遗漏图反馈修正、总请求预算、明确失败回用原预览、准备中重启和未知结果授权');
 
   const a = await fixture(6); const b = await fixture(6);
   const release = deferred(); const saturated = deferred();

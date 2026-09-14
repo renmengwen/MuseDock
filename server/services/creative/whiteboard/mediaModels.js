@@ -1,17 +1,27 @@
 const fsp = require('fs/promises');
 const defaultTextModel = require('../../ai/aiTextModel');
 const defaultImageModel = require('../../ai/aiImageModel');
-const { WhiteboardError, canvasFor } = require('./contracts');
+const { WhiteboardError, canvasFor, sha256 } = require('./contracts');
 const { presets } = require('../../../resources/whiteboard/visual-presets.json');
 
-const ANNOTATION_PLANNING_CONTRACT = 'narrative-visual-clusters-v2';
+const LEGACY_ANNOTATION_PLANNING_CONTRACT = 'narrative-visual-clusters-v2';
+const ANNOTATION_PLANNING_CONTRACT = 'narrative-visual-clusters-v3';
 
-function annotationPrompt({ scene, cues, revision = '', canvas = canvasFor() }) {
+function annotationPrompt({ scene, cues, revision = '', canvas = canvasFor(), planningContract = ANNOTATION_PLANNING_CONTRACT }) {
+  if (![ANNOTATION_PLANNING_CONTRACT, LEGACY_ANNOTATION_PLANNING_CONTRACT].includes(planningContract)) {
+    throw new WhiteboardError('CONTRACT_UNSUPPORTED', '不支持的落墨编排提示词版本。', 409);
+  }
   return [
     `实际查看这张 ${canvas.width}×${canvas.height} 线稿，先识别可见的连续墨迹簇，再将本幕旁白事件映射到这些视觉簇，按叙事先后排列 elements。不要按名词数量、横坐标或对象清单机械拆分和排序。`,
     '图中有多个能独立呈现、之间有干净纸面留白的视觉簇时，优先分别标注为 2–3 个区域。不得用一个大框把多个独立簇重新合并，也不能为了覆盖率而包住整幅画布。局部接近、少量装饰或同属一张图都不是合并理由。',
     '只有实际不可分割的主体、共享背景或贯穿性连接结构才允许一个区域；不能为了凑数量切断连续图形。visualGrouping 必须说明你实际看到的分组依据，单区域时具体说明为何不能独立揭示。',
     '每个 region 应完整包住对应视觉簇，边界不得横穿其他簇的有效墨迹。后续 region 会从先前区域扣除；protectedRegions 只保护正确分区后确有必要的局部，通常为 []，不能补救错误大框或错误分组。',
+    // 保留 v2 提示词的精确内容，仅用于核对并恢复旧候选，不能静默升级旧产物。
+    ...(planningContract === LEGACY_ANNOTATION_PLANNING_CONTRACT ? [] : [
+      '先清点整张实际图片的全部有效墨迹，再确定区域。背景、地面、水面、云线、阴影和装饰墨迹也必须归属某个完整视觉簇，不能只框旁白提到的人物或物件，更不能把共同环境当作可以忽略的内容。',
+      '实际图片中的共享背景或贯穿结构把主体组成不可分割构图时，必须连同相关主体完整标注为一个视觉簇，并在 visualGrouping.reason 中说明连接关系；局部背景可归入对应主体。只有确实被连续干净纸面分开的视觉簇才分别标注，不为满足数量硬拆，也不用整图大框合并本可独立揭示的内容。',
+      '提交前逐项检查：每处有效墨迹都有区域归属；每个区域包含完整主体及其所属背景；扣除后续区域与保护区后仍能完整揭示。系统要求有效墨迹覆盖率至少 97%，未标注部分不会在片尾补显；覆盖率是标注完整性，不是原图质量评分。',
+    ]),
     '渲染器对一个区域完成描线和添彩后才开始下一区域；未开始的区域完全隐藏。weight 按该区域对应旁白的真实时长分配相对绘制时间，末尾半秒停留由程序保留；不要输出时间、批准或文件路径。',
     '只返回一个 JSON 对象实例，字段合同如下，不要返回示例、占位符或 schema 描述：',
     'schemaVersion 固定为 2。visualGrouping 为 {mode, reason}：mode 只能为 independent_clusters（2–3 个独立簇）或 single_continuous（1 个不可分割簇）；reason 为 8–600 字的具体中文视觉依据。',
@@ -19,6 +29,23 @@ function annotationPrompt({ scene, cues, revision = '', canvas = canvasFor() }) 
     `本幕与真实字幕时间：${JSON.stringify({ scene, cues })}`,
     revision ? `用户对本幕的明确修订：${revision}` : '',
   ].filter(Boolean).join('\n');
+}
+
+function annotationInput({ scene, cues, imageSha256, timingIdentity, revision = '', canvas = canvasFor() }, planningContract = ANNOTATION_PLANNING_CONTRACT) {
+  const prompt = annotationPrompt({ scene, cues, revision, canvas, planningContract });
+  return { prompt, planningContract, inputIdentity: sha256({ contract: planningContract, prompt,
+    image: imageSha256, timing: timingIdentity, scene, revision }) };
+}
+
+function annotationCoverageFeedback(candidate, coverage) {
+  const ratio = coverage.coverageRatio;
+  return [
+    `当前候选的墨迹覆盖率只有 ${(ratio * 100).toFixed(1)}%，未覆盖 ${((1 - ratio) * 100).toFixed(1)}%，需要修正区域归属。这是本轮最后一次修正机会。`,
+    '最初提供的图像是原始线稿；本条附图是当前标注预览，红色标出了遗漏墨迹，红色诊断标记不是原图内容。请对照两图重新检查所有背景与主体，纠正遗漏或错误分组，不要原样返回同一组框。',
+    '保持当前线稿、画幅、分镜和旁白不变，只返回符合原 schemaVersion=2 合同的完整候选 JSON。先解释真实的连续结构与纸面分隔，再调整完整区域及其顺序；共享背景属于不可分割构图时合并，不用整图框掩盖独立簇分组错误。',
+    `像素检查：${JSON.stringify(Object.fromEntries(['coverageRatio', 'regions', 'coveredInkPixels', 'totalInkPixels'].filter(key => Number.isFinite(coverage[key])).map(key => [key, coverage[key]])))}`,
+    `待修正候选：${JSON.stringify(candidate)}`,
+  ].join('\n');
 }
 
 function lineartPrompt(artifact, scene, revision = '') {
@@ -34,10 +61,11 @@ function lineartPrompt(artifact, scene, revision = '') {
     '色号、尺寸、制作术语和提示词都是创作说明，不能写在图里。只保留本幕明确要求的少量短标签，必须逐字正确；没有要求就不添加任何文字、字幕或对话气泡。',
     '画面下方保留字幕安全留白，主体不要贴到画幅边缘。避免大块纯黑填充压住主体细节，使用模板规定的克制配色。',
     `本幕画面：${scene.imagePrompt}`, revision ? `用户对本幕的明确修订：${revision}` : '',
+    '按本幕核心语义统一构图与背景归属：若是多个独立视觉簇，每簇只保留自己的局部背景和阴影，簇间必须是连续干净纸面，不用海平线、浪线、地面或远景连接它们；若共享背景或贯穿结构本身承载核心语义，就把相关主体与背景画成一个完整连续簇，不再同时声称它们彼此分离。不要在簇外添加游离装饰墨迹。',
   ].filter(Boolean).join('\n');
 }
 
-async function structuredVision({ textConfig, prompt, images = [], validate, onRequest, services = {}, reasoningEffort = 'low' }) {
+async function structuredVision({ textConfig, prompt, images = [], validate, assessCandidate, onRequest, services = {}, reasoningEffort = 'low' }) {
   if (!textConfig?.enabled || !textConfig.apiKey || !textConfig.modelId || !textConfig.baseUrl || textConfig.supportsMultimodal !== true) {
     throw new WhiteboardError('VISION_NOT_CONFIGURED', '请在设置中配置分析模型并勾选“支持多模态输入”，用于检查线稿和编排落墨区域。');
   }
@@ -67,7 +95,18 @@ async function structuredVision({ textConfig, prompt, images = [], validate, onR
       candidate = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, ''));
       errors = validate(candidate);
     } catch { errors = ['必须返回完整有效的 JSON 对象。']; }
-    if (!errors.length) return candidate;
+    if (!errors.length) {
+      const assessment = await assessCandidate?.(candidate, { repair });
+      if (!assessment?.error) return candidate;
+      if (repair) throw assessment.error;
+      const feedback = [{ type: 'text', text: assessment.feedback.text }];
+      try {
+        for (const file of assessment.feedback.images || []) feedback.push({ type: 'image_url',
+          image_url: { url: `data:image/png;base64,${(await fsp.readFile(file)).toString('base64')}` } });
+      } catch { throw new WhiteboardError('ANNOTATION_PREVIEW_FAILED', '遗漏预览读取失败，当前候选已保留，请检查本地文件后重试。'); }
+      messages.push({ role: 'assistant', content: response.text }, { role: 'user', content: feedback });
+      continue;
+    }
     if (repair) throw new WhiteboardError('CANDIDATE_INVALID', `视觉候选一次补正后仍无效：${errors.join(' ')}`);
     messages.push({ role: 'assistant', content: response.text }, { role: 'user', content: `请一次性修复全部问题，返回完整 JSON：${errors.join('；')}` });
   }
@@ -183,5 +222,6 @@ async function generateLineart({ artifact, scene, revision, imageConfig, service
   return bytes;
 }
 
-module.exports = { ANNOTATION_PLANNING_CONTRACT, annotationPrompt, structuredVision, validateAnnotation, validateVisualReview,
+module.exports = { ANNOTATION_PLANNING_CONTRACT, LEGACY_ANNOTATION_PLANNING_CONTRACT, annotationPrompt, annotationInput,
+  annotationCoverageFeedback, structuredVision, validateAnnotation, validateVisualReview,
   annotationReviewIssues, materializeAnnotation, generateLineart, lineartPrompt };

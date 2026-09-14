@@ -36,10 +36,11 @@ async function recoverAnnotationPreviews(record, artifact, options, now, sceneId
     if (!scene) throw new WhiteboardError('STALE_IDENTITY', '原落墨候选对应的分镜已变化，请重新编排。', 409);
     const lineart = await store.validateBinding(record, media.lineart[scene.id], options.rootDir);
     const revision = media.overrides[`annotation_drafting:${scene.id}`] || '';
-    const prompt = models.annotationPrompt({ scene, cues: timing.cues.filter(cue => scene.cueIds.includes(cue.id)), revision, canvas });
-    const inputIdentity = sha256({ contract: models.ANNOTATION_PLANNING_CONTRACT, prompt,
-      image: lineart.image.sha256, timing: narration.identity, scene, revision });
-    if (inputIdentity !== previous.inputIdentity) {
+    const input = { scene, cues: timing.cues.filter(cue => scene.cueIds.includes(cue.id)), revision, canvas,
+      imageSha256: lineart.image.sha256, timingIdentity: narration.identity };
+    const matching = [models.ANNOTATION_PLANNING_CONTRACT, models.LEGACY_ANNOTATION_PLANNING_CONTRACT]
+      .map(contract => models.annotationInput(input, contract)).find(value => value.inputIdentity === previous.inputIdentity);
+    if (!matching) {
       throw new WhiteboardError('STALE_IDENTITY', `${scene.title} 的线稿、时间线或编排要求已变化，请重新编排该幕。`, 409);
     }
     const saved = await store.mediaFile(record, previous.received.candidate, options.rootDir);
@@ -48,10 +49,10 @@ async function recoverAnnotationPreviews(record, artifact, options, now, sceneId
     }
     const candidate = await store.readData(record, previous.received.candidate, options.rootDir);
     const annotation = models.materializeAnnotation(candidate, scene, lineart.image.sha256, narration.identity, canvas);
-    prepared.push({ previous, scene, lineart, revision, inputIdentity, candidate, candidateFile: saved.path, annotation });
+    prepared.push({ previous, scene, lineart, revision, ...matching, candidate, candidateFile: saved.path, annotation });
   }
   for (const entry of prepared) {
-    const { previous, scene, lineart, revision, inputIdentity, candidate, candidateFile, annotation } = entry;
+    const { previous, scene, lineart, revision, inputIdentity, planningContract, candidate, candidateFile, annotation } = entry;
     const attempt = { id: crypto.randomUUID(), stage: 'annotation_drafting', sceneId: scene.id,
       external: false, inputIdentity, recoveredFromAttemptId: previous.id, createdAt: now };
     const directory = store.workDirectory(record.workflow_id, attempt.id, options.rootDir);
@@ -87,7 +88,7 @@ async function recoverAnnotationPreviews(record, artifact, options, now, sceneId
     }
     const low = coverage.coverageRatio < 0.97;
     const { candidate: _candidateFile, ...previews } = files;
-    const binding = { sceneId: scene.id, inputIdentity, planningContract: models.ANNOTATION_PLANNING_CONTRACT,
+    const binding = { sceneId: scene.id, inputIdentity, planningContract,
       visualGrouping: candidate.visualGrouping, ...previews, coverage };
     if (low) (media.lowCoverage ||= []).push(store.bind({ kind: 'annotation_coverage_review', ...binding,
       title: scene.title, attemptId: attempt.id, lineartIdentity: lineart.identity, narrationIdentity: narration.identity, revision }));

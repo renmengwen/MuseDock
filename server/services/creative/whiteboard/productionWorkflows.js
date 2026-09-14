@@ -18,6 +18,18 @@ function hasCoverageReview(media) {
   return media.stage === 'annotation_drafting' && !media.current.annotation_drafting && media.lowCoverage?.length > 0;
 }
 
+function coverageReviewAttempt(media, entry) {
+  const attempts = media.attempts.filter(row => row.stage === 'annotation_drafting' && row.sceneId === entry.sceneId);
+  const index = attempts.findIndex(row => row.id === entry.attemptId);
+  if (index < 0) return null;
+  // 有界修正明确失败且没有新预览时，原预览仍可供用户接受；未知结果或其他版本不能越过。
+  const superseded = attempts.slice(index + 1).some(row => row.status !== 'failed'
+    || row.errorCode === 'UNKNOWN_EXTERNAL_OUTCOME' || row.repairOfAttemptId !== entry.attemptId
+    || row.repairSourceIdentity !== entry.identity || row.inputIdentity !== entry.inputIdentity
+    || row.received?.annotation || row.received?.preview || row.received?.resultPreview);
+  return superseded ? null : attempts[index];
+}
+
 function assertMediaContract(media) {
   if (!media || media.stale) return;
   if (media.contractVersion !== store.MEDIA_CONTRACT || canonicalJson(media.stageSchemaSnapshot) !== canonicalJson(store.STAGES)) {
@@ -187,6 +199,11 @@ async function act(record, payload, options, now) {
     return approve(record, 'user', 'user_review_current_artifact', now);
   }
   if (action === 'authorize_media_retry' && payload.confirmed !== true) throw new WhiteboardError('EXTERNAL_AUTH_REQUIRED', '需要明确同意新请求及可能的重复费用。', 409);
+  if (action === 'authorize_media_retry' && media.stage === 'annotation_drafting') {
+    // 修正结果未知的幕在授权后退出待审列表；其余已保存预览继续复用。
+    media.lowCoverage = (media.lowCoverage || []).filter(entry => media.attempts
+      .findLast(row => row.stage === 'annotation_drafting' && row.sceneId === entry.sceneId)?.status !== 'unknown_external_outcome');
+  }
   if (action === 'accept_low_coverage') {
     if (payload.confirmed !== true) throw new WhiteboardError('APPROVAL_REQUIRED', '请实际查看低覆盖率预览图后明确确认接受。', 409);
     const entries = media.lowCoverage || [];
@@ -196,7 +213,7 @@ async function act(record, payload, options, now) {
     const timing = await store.readData(record, narration.timeline, options.rootDir);
     const accepted = [];
     for (const entry of entries) {
-      const attempt = media.attempts.findLast(row => row.stage === 'annotation_drafting' && row.sceneId === entry.sceneId);
+      const attempt = coverageReviewAttempt(media, entry);
       const scene = timing.scenes.find(item => item.id === entry.sceneId);
       if (!entry.annotation || !entry.preview || !entry.resultPreview || entry.kind !== 'annotation_coverage_review'
         || !Number.isFinite(entry.coverage?.coverageRatio) || entry.coverage.coverageRatio < 0 || entry.coverage.coverageRatio >= 0.97
@@ -349,8 +366,9 @@ async function run(workflowId, options, hooks) {
     await ensureWhiteboardConcurrency(() => (services.appSettings?.getWhiteboardSettings ? services.appSettings : appSettings)
       .getWhiteboardSettings(options.appSettingsOptions));
 
-    const attempt = async (stage, sceneId = '', external = false, inputIdentity = '') => {
-      const item = { id: crypto.randomUUID(), stage, sceneId, external, inputIdentity, executionId, status: 'prepared' };
+    const attempt = async (stage, sceneId = '', external = false, inputIdentity = '', repairSource = null) => {
+      const item = { id: crypto.randomUUID(), stage, sceneId, external, inputIdentity, executionId, status: 'prepared',
+        ...(repairSource ? { repairOfAttemptId: repairSource.attemptId, repairSourceIdentity: repairSource.identity } : {}) };
       await change(async (record, now) => {
         item.createdAt = now;
         record.whiteboard.media.attempts.push(item);

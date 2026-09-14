@@ -40,6 +40,12 @@ const cues = [{ id: 'cue_1', text: '先说童年的承诺，再说朋友的约�
   assert.ok(prompt.includes('三组按旁白逐一呈现'));
   assert.ok(!prompt.includes('可用整幅画布作一个区域'));
   assert.ok(!prompt.includes('"width":1920'), '不向模型提供可照抄的整图区域实例');
+  assert.match(prompt, /背景[\s\S]*必须归属/);
+  assert.match(prompt, /97%/);
+  const input = { scene, cues, imageSha256: 'image-sha', timingIdentity: 'timeline-identity' };
+  assert.notEqual(models.annotationInput(input).inputIdentity,
+    models.annotationInput(input, models.LEGACY_ANNOTATION_PLANNING_CONTRACT).inputIdentity, '新提示词必须产生新的输入身份');
+  assert.ok(!models.annotationPrompt({ scene, cues, planningContract: models.LEGACY_ANNOTATION_PLANNING_CONTRACT }).includes('97%'), '旧提示词保持可重验');
 
   let calls = 0;
   const textConfig = { enabled: true, apiKey: 'fixture-only', baseUrl: 'https://example.invalid', modelId: 'gpt-6-astra', supportsMultimodal: true };
