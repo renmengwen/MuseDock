@@ -9,8 +9,10 @@ import math
 import os
 import re
 import secrets
+import sys
 import tempfile
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -20,6 +22,30 @@ from starlette.concurrency import run_in_threadpool
 
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
+
+
+def exit_when_parent_closes():
+    """The managed service exits even when Windows forcibly stops its Node parent."""
+    try:
+        if os.name == "nt":
+            import ctypes
+            import msvcrt
+            from ctypes import wintypes
+
+            # 阻塞读取 stdin 会持有 Windows CRT 文件锁，导致 NumPy/SciPy DLL
+            # 初始化卡住。父管道只用于存活检测，不接收数据，使用非阻塞检查。
+            handle = msvcrt.get_osfhandle(sys.stdin.fileno())
+            peek = ctypes.WinDLL("kernel32", use_last_error=True).PeekNamedPipe
+            peek.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                             wintypes.LPDWORD, wintypes.LPDWORD, wintypes.LPDWORD]
+            peek.restype = wintypes.BOOL
+            while peek(handle, None, 0, None, None, None):
+                time.sleep(0.25)
+        else:
+            while sys.stdin.buffer.read(1):
+                pass
+    finally:
+        os._exit(0)
 
 
 def native_sentences(result, duration):
@@ -120,7 +146,10 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--model-cache", default=None, help="已有 ModelScope 缓存目录；省略时使用默认缓存")
+    parser.add_argument("--parent-stdin", action="store_true", help="由 MuseDock 托管时，父进程关闭输入管道后退出")
     args = parser.parse_args()
+    if args.parent_stdin:
+        threading.Thread(target=exit_when_parent_closes, daemon=True).start()
     import uvicorn
 
     uvicorn.run(create_app(args.device, args.model_cache), host=args.host, port=args.port)

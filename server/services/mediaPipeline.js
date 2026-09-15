@@ -145,6 +145,8 @@ async function resolveAsrRuntime(options = {}) {
     return {
       configured: true, provider: 'funasr', builtin: true,
       baseUrl: env.FUNASR_BASE_URL || storedConfig.baseUrl,
+      pythonPath: env.FUNASR_PYTHON || storedConfig.pythonPath || '',
+      modelCache: env.MODELSCOPE_CACHE || storedConfig.modelCache || '',
       apiKey: '', modelId: 'paraformer', language: env.ASR_LANGUAGE || 'auto',
     };
   }

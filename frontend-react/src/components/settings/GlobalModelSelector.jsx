@@ -8,7 +8,7 @@ const MODEL_SELECTOR_HELP_TEXT = {
 };
 
 export function GlobalModelSelector({ modelTypes, modelTypeInfo, providerList, activeModels, onChange,
-  localAsr, onLocalAsrBaseUrlChange, disabled = false }) {
+  localAsr, onLocalAsrBaseUrlChange, onLocalAsrPythonPathChange, onLocalAsrModelCacheChange, disabled = false }) {
   return (
     <section className="mb-4 rounded-lg border border-[#e7e9ee] bg-white p-4">
       <div className="mb-4 flex items-start justify-between gap-3">
@@ -73,7 +73,21 @@ export function GlobalModelSelector({ modelTypes, modelTypeInfo, providerList, a
                       placeholder={DEFAULT_FUNASR_BASE_URL} disabled={disabled}
                       onChange={event => onLocalAsrBaseUrlChange?.(event.target.value)} />
                   </label>
-                  <span className="text-[11px] leading-5 text-[#69717e]">使用前需启动本地 FunASR 服务；默认地址可直接使用，端口不同时在这里修改。</span>
+                  <span className="text-[11px] leading-5 text-[#69717e]">开始抖音转写时会检查服务，本机服务未运行则自动启动并等待模型就绪。</span>
+                  <label className="grid gap-1.5 text-xs text-[#5f6876]" htmlFor="local-funasr-python-path">
+                    FunASR Python 路径（可选）
+                    <Input id="local-funasr-python-path" value={localAsr?.pythonPath || ''}
+                      placeholder="留空自动查找，或填写已有环境的 Python 路径" disabled={disabled}
+                      onChange={event => onLocalAsrPythonPathChange?.(event.target.value)} />
+                  </label>
+                  <span className="text-[11px] leading-5 text-[#69717e]">需先安装 FunASR 依赖；已有独立环境时填写其中的 python.exe，保存后重启电脑也无需手动启动服务。</span>
+                  <label className="grid gap-1.5 text-xs text-[#5f6876]" htmlFor="local-funasr-model-cache">
+                    FunASR 模型缓存目录（可选）
+                    <Input id="local-funasr-model-cache" value={localAsr?.modelCache || ''}
+                      placeholder="已有模型时填写缓存目录，避免重新下载" disabled={disabled}
+                      onChange={event => onLocalAsrModelCacheChange?.(event.target.value)} />
+                  </label>
+                  <span className="text-[11px] leading-5 text-[#69717e]">留空使用 ModelScope 默认缓存；远程地址及供应商服务由其部署环境负责启动。</span>
                 </div>
               ) : null}
               {current ? (

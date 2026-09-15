@@ -52,7 +52,8 @@ function normalizeServerData(json) {
     providers,
     active: { ...json.active, asr: json.active?.asr || BUILTIN_FUNASR_REF },
     skipValidation: !!json.skipValidation,
-    localAsr: { baseUrl: json.localAsr?.baseUrl || DEFAULT_FUNASR_BASE_URL },
+    localAsr: { baseUrl: json.localAsr?.baseUrl || DEFAULT_FUNASR_BASE_URL,
+      pythonPath: json.localAsr?.pythonPath || '', modelCache: json.localAsr?.modelCache || '' },
   };
 }
 
@@ -87,7 +88,7 @@ function toServerPayload(state) {
 
 export function useSettings() {
   const [state, setState] = useState({ providers: {}, active: { asr: BUILTIN_FUNASR_REF }, skipValidation: false,
-    localAsr: { baseUrl: DEFAULT_FUNASR_BASE_URL } });
+    localAsr: { baseUrl: DEFAULT_FUNASR_BASE_URL, pythonPath: '', modelCache: '' } });
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -204,6 +205,16 @@ export function useSettings() {
     setState(prev => ({ ...prev, localAsr: { ...prev.localAsr, baseUrl } }));
   }, []);
 
+  const setLocalAsrPythonPath = useCallback((pythonPath) => {
+    setDirty(true);
+    setState(prev => ({ ...prev, localAsr: { ...prev.localAsr, pythonPath } }));
+  }, []);
+
+  const setLocalAsrModelCache = useCallback((modelCache) => {
+    setDirty(true);
+    setState(prev => ({ ...prev, localAsr: { ...prev.localAsr, modelCache } }));
+  }, []);
+
   useEffect(() => { load(); }, [load]);
 
   return {
@@ -211,7 +222,7 @@ export function useSettings() {
     status, loading, saving, dirty,
     load, save,
     saveProvider, removeProvider,
-    setActive, setSkipValidation, setLocalAsrBaseUrl,
+    setActive, setSkipValidation, setLocalAsrBaseUrl, setLocalAsrPythonPath, setLocalAsrModelCache,
     MODEL_TYPES, MODEL_TYPE_INFO,
     MODEL_PROTOCOLS,
   };

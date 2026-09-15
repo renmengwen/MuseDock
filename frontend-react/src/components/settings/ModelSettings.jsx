@@ -40,6 +40,8 @@ export function ModelSettings({ modelSettings }) {
         onChange={modelSettings.setActive}
         localAsr={modelSettings.state.localAsr}
         onLocalAsrBaseUrlChange={modelSettings.setLocalAsrBaseUrl}
+        onLocalAsrPythonPathChange={modelSettings.setLocalAsrPythonPath}
+        onLocalAsrModelCacheChange={modelSettings.setLocalAsrModelCache}
         disabled={modelSettings.loading || modelSettings.saving}
       />
 

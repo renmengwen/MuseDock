@@ -7,6 +7,7 @@ const express = require('express');
 const { createTranscriptionService } = require('../server/services/transcription/transcriptionTasks');
 const { createTranscriptionRouter } = require('../server/routes/transcriptions');
 const mediaPipeline = require('../server/services/mediaPipeline');
+const { TranscriptionError } = require('../server/services/transcription/funasr');
 
 async function run() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'musedock-transcription-tasks-'));
@@ -139,6 +140,42 @@ async function run() {
     await assert.rejects(missingConfig.create({ source }), error => error.code === 'ASR_NOT_CONFIGURED');
     const missingText = createTranscriptionService({ ...fixture, getTextConfig: async () => null });
     await assert.rejects(missingText.create({ source, autoCorrect: true }), error => error.code === 'TEXT_NOT_CONFIGURED');
+
+    needsLogin = false;
+    let releaseStartup;
+    let notifyStartup;
+    const startupGate = new Promise(resolve => { releaseStartup = resolve; });
+    const startupEntered = new Promise(resolve => { notifyStartup = resolve; });
+    const startupService = createTranscriptionService({ ...fixture,
+      ensureFunasrService: async (_config, { onProgress }) => {
+        onProgress({ message: '正在启动 FunASR 并加载模型...' });
+        notifyStartup();
+        await startupGate;
+      },
+    });
+    const beforeStartupDownloads = downloads;
+    const startingJob = await startupService.create({ source });
+    await startupEntered;
+    const startingState = await startupService.get(startingJob.id);
+    assert.equal(startingState.status, 'running');
+    assert.equal(startingState.stage, 'starting_asr');
+    assert.match(startingState.message, /正在启动 FunASR/);
+    assert.equal(downloads, beforeStartupDownloads, '服务就绪前不下载媒体或请求转写');
+    assert.equal((await startupService.create({ source })).id, startingJob.id);
+    releaseStartup();
+    await startupService.waitForIdle();
+    assert.equal((await startupService.get(startingJob.id)).status, 'succeeded');
+
+    const startupFailedService = createTranscriptionService({ ...fixture,
+      ensureFunasrService: async () => { throw new TranscriptionError('ASR_START_TIMEOUT', '等待 FunASR 启动超时。', 504); },
+    });
+    const beforeFailureDownloads = downloads;
+    const startupFailed = await startupFailedService.create({ source });
+    await startupFailedService.waitForIdle();
+    const startupFailure = await startupFailedService.get(startupFailed.id);
+    assert.equal(startupFailure.status, 'failed', '启动失败后必须结束 loading');
+    assert.equal(startupFailure.error.code, 'ASR_START_TIMEOUT');
+    assert.equal(downloads, beforeFailureDownloads);
   } finally {
     await service.waitForIdle();
     await new Promise(resolve => server.close(resolve));

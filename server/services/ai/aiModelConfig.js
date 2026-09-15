@@ -110,7 +110,11 @@ function normalizeStoredConfig(input = {}, previous = {}) {
   const active = normalizeActive(input.active);
   const skipValidation = input.skipValidation === true;
   const localAsrInput = input.localAsr ?? previous.localAsr;
-  const localAsr = { baseUrl: normalizeBaseUrl(localAsrInput?.baseUrl) || DEFAULT_FUNASR_BASE_URL };
+  const localAsr = {
+    baseUrl: normalizeBaseUrl(localAsrInput?.baseUrl) || DEFAULT_FUNASR_BASE_URL,
+    pythonPath: normalizeString(localAsrInput?.pythonPath ?? previous.localAsr?.pythonPath),
+    modelCache: normalizeString(localAsrInput?.modelCache ?? previous.localAsr?.modelCache),
+  };
   return { providers, active, skipValidation, localAsr };
 }
 
@@ -221,7 +225,9 @@ function resolveActiveConfig(type, stored) {
     return {
       enabled: true, builtin: true, provider: 'funasr', providerName: 'FunASR（本地）',
       backend: 'funasr', protocol: 'openai-transcription', modelId: 'paraformer',
-      baseUrl: config.localAsr.baseUrl, apiKey: '', note: '内置本地 ASR，无需 API Key。',
+      baseUrl: config.localAsr.baseUrl, pythonPath: config.localAsr.pythonPath,
+      modelCache: config.localAsr.modelCache,
+      apiKey: '', note: '内置本地 ASR，无需 API Key。',
     };
   }
 

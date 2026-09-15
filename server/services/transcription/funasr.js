@@ -136,7 +136,7 @@ async function transcribeFunasrAudio(audioPath, config, options = {}) {
       if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
         throw new TranscriptionError('ASR_TIMEOUT', 'FunASR 请求超时，请检查服务状态；已保存的媒体和转写片段仍保留。', 504);
       }
-      throw new TranscriptionError('ASR_UNAVAILABLE', '无法连接 FunASR 或响应不是有效 JSON，请启动服务并检查 Base URL。', 503);
+      throw new TranscriptionError('ASR_UNAVAILABLE', '无法连接 FunASR 或响应不是有效 JSON，请检查服务地址和运行状态后重新开始转写。', 503);
     }
     const evidence = { index: index + 1, offsetMs: segment.offsetMs, durationMs: segment.durationMs,
       response: sanitizeResponse(payload, config.apiKey) };

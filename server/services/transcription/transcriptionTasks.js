@@ -7,6 +7,7 @@ const aiModelConfig = require('../ai/aiModelConfig');
 const { readAudioDuration } = require('../tts/ttsTimeline');
 const { normalizeCreativeInputWithDouyinShortLink } = require('../creative/creativeContext');
 const { TranscriptionError, transcriptionEndpoint, transcribeFunasrAudio } = require('./funasr');
+const { ensureFunasrService } = require('./funasrRuntime');
 const { toSrt, proofreadTranscript } = require('./corrections');
 
 const DEFAULT_ROOT = path.join(require('../../dataRoot'), 'data/transcriptions');
@@ -174,6 +175,10 @@ function createTranscriptionService(options = {}) {
   }
 
   async function run(job, runtime) {
+    await setStage(job, 'starting_asr', 2, '正在检查 FunASR 转写服务...');
+    await (options.ensureFunasrService || ensureFunasrService)(runtime.asr, {
+      onProgress: ({ message }) => { job.message = message; },
+    });
     await setStage(job, 'resolving', 5, '正在解析抖音链接...');
     const source = await (options.resolveSource || resolveSource)(job.input);
     const id = source.aweme_id;

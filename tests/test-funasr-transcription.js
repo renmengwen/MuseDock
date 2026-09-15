@@ -98,6 +98,15 @@ async function run() {
     assert.equal(builtinRuntime.modelId, 'paraformer');
     assert.equal(builtinRuntime.baseUrl, 'http://127.0.0.1:8000/v1');
     assert.equal(builtinRuntime.apiKey, '');
+    const localPaths = await mediaPipeline.resolveAsrRuntime({ asrConfig: {
+      ...builtinConfig, pythonPath: 'local-python', modelCache: 'local-cache',
+    }, env: {} });
+    assert.equal(localPaths.pythonPath, 'local-python');
+    assert.equal(localPaths.modelCache, 'local-cache');
+    const environmentPaths = await mediaPipeline.resolveAsrRuntime({ asrConfig: builtinConfig,
+      env: { FUNASR_PYTHON: 'override-python', MODELSCOPE_CACHE: 'override-cache' } });
+    assert.equal(environmentPaths.pythonPath, 'override-python');
+    assert.equal(environmentPaths.modelCache, 'override-cache');
     const explicitMimo = await mediaPipeline.resolveAsrRuntime({ asrConfig: builtinConfig, env: {
       ASR_PROVIDER: 'mimo', MIMO_API_KEY: 'explicit-mimo-secret',
     } });

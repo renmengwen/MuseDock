@@ -79,7 +79,7 @@ npm run dev
 
 点击左侧栏的 **抖音转写**，粘贴公开视频链接或分享文案，即可提取完整文字和句级字幕。启用自动校订后，应用会调用已配置的分析模型，并分别保留原始版、校订版和修改记录；结果可下载为 TXT 或 SRT。
 
-默认使用本地 FunASR 服务，无需添加供应商或填写 API Key。安装与使用方法见[抖音转写与 FunASR 说明](./server/resources/funasr/README.md)。
+默认使用本地 FunASR 服务，无需添加供应商或填写 API Key。安装一次 Python 依赖后，开始转写时会检测服务并按需在后台启动；已有环境和模型缓存可在全局 ASR 设置中指定，电脑重启后也无需手动拉起服务。安装与使用方法见[抖音转写与 FunASR 说明](./server/resources/funasr/README.md)。
 
 ## 使用边界
 
