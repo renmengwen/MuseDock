@@ -19,6 +19,7 @@ function createTranscriptionRouter({ service = createTranscriptionService(), dou
   };
 
   router.get('/capabilities', route(async (_req, res) => res.json({ success: true, data: await service.capabilities() })));
+  router.get('/', route(async (_req, res) => res.json({ success: true, data: await service.list() })));
   router.post('/', route(async (req, res) => res.status(202).json({ success: true, data: await service.create(req.body) })));
   router.post('/douyin/login', route(async (_req, res) => {
     if (loginBusy) throw new TranscriptionError('LOGIN_BUSY', '正在打开抖音登录，请稍候。', 409);

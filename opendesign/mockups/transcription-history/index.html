@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MuseDock · 转写历史</title>
+  <link rel="stylesheet" href="../../design-systems/tech-minimal-product/tokens/colors_and_type.css">
+  <style>
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; padding: 30px 20px; background: var(--page-bg); color: var(--text-primary); font: var(--body); }
+    button, input, textarea, select { font: inherit; }
+    button, select { cursor: pointer; }
+    button { min-height: 36px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 8px 12px; background: var(--surface-primary); color: var(--text-primary); font-weight: 600; transition: background 150ms; }
+    button:hover { background: var(--surface-hover); }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+    input, select, textarea { width: 100%; min-width: 0; border: 1px solid var(--line-2); border-radius: var(--radius-md); padding: 9px 11px; background: var(--surface-primary); color: var(--text-primary); }
+    input::placeholder, textarea::placeholder { color: var(--text-muted); }
+    textarea { resize: vertical; min-height: 110px; }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 18px; line-height: 1.4; }
+    h2 { font-size: 18px; line-height: 1.6; overflow-wrap: anywhere; }
+    h3 { font-size: 14px; }
+    .preview-note { max-width: 1040px; margin: 0 auto 14px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-muted); }
+    .preview-note strong { color: var(--text-secondary); font-weight: 600; }
+    .dialog { max-width: 1040px; margin: 0 auto; height: min(790px, calc(100dvh - 100px)); min-height: 540px; display: flex; flex-direction: column; background: var(--surface-primary); border: 1px solid var(--line-2); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); overflow: hidden; }
+    .header { padding: 20px 24px; border-bottom: 1px solid var(--border-subtle); }
+    .header p { color: var(--text-muted); margin-top: 6px; font-size: 13px; }
+    .workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 0; flex: 1; }
+    aside { padding: 16px; background: var(--surface-secondary); border-right: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+    .primary { background: var(--accent-primary); color: var(--fg-inverse-1); border-color: var(--accent-primary); }
+    .primary:hover { background: var(--accent-primary-strong); }
+    .aside-title, .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .aside-title span { color: var(--text-muted); font-weight: 400; }
+    .ghost { border-color: transparent; background: transparent; }
+    .small { font-size: 12px; }
+    .muted { color: var(--text-muted); }
+    .records { display: grid; align-content: start; gap: 4px; overflow-y: auto; flex: 1; margin: 0; padding: 0; list-style: none; }
+    .record { display: grid; gap: 9px; width: 100%; text-align: left; border-color: transparent; font-weight: 400; background: transparent; padding: 12px; }
+    .record[aria-pressed="true"] { background: var(--surface-hover); border-color: var(--line-2); }
+    .record strong { font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+    .record .row, .record time { font-size: 12px; color: var(--text-muted); }
+    .record time { font-variant-numeric: tabular-nums; }
+    .empty { text-align: center; padding: 22px 0; }
+    .content { min-width: 0; overflow-y: auto; padding: 24px; }
+    .content-header { border-bottom: 1px solid var(--border-subtle); padding-bottom: 14px; margin-bottom: 18px; }
+    .content-header .row { margin-top: 8px; flex-wrap: wrap; }
+    .status { display: flex; gap: 9px; align-items: baseline; font-size: 13px; margin-bottom: 20px; }
+    .dot { display: inline-block; width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--status-success); }
+    .status.partial .dot { background: var(--status-warning); }
+    .tabs { display: inline-flex; gap: 3px; border-radius: var(--radius-md); background: var(--surface-hover); padding: 3px; margin: 14px 0 10px; }
+    .tab { border: 0; min-height: 32px; background: transparent; font-size: 13px; font-weight: 500; padding: 6px 14px; }
+    .tab[aria-selected="true"] { background: var(--surface-primary); box-shadow: 0 1px 3px color-mix(in srgb, var(--text-primary) 10%, transparent); }
+    .transcript { white-space: pre-wrap; overflow-wrap: anywhere; padding: 18px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-secondary); font-family: var(--font-sans); font-size: 14px; line-height: 2.05; min-height: 230px; margin: 0; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .actions button { font-size: 13px; }
+    .login { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .notice { margin-top: 12px; min-height: 20px; font-size: 12px; color: var(--text-secondary); }
+    .form { display: grid; gap: 20px; }
+    .form h2 + p { margin-top: 6px; }
+    label { display: grid; gap: 8px; font-size: 14px; font-weight: 600; }
+    .correction { padding: 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-secondary); flex-wrap: wrap; }
+    .correction p { margin-top: 4px; }
+    .correction select { width: 170px; }
+    @media (max-width: 720px) {
+      body { padding: 16px 12px; }
+      .preview-note { font-size: 11px; }
+      .dialog { height: auto; min-height: 0; }
+      .header, .content { padding: 18px; }
+      .workspace { grid-template-columns: minmax(0, 1fr); }
+      aside { border-right: 0; border-bottom: 1px solid var(--border-subtle); }
+      .records { max-height: 190px; }
+      button { min-height: 44px; }
+      .transcript { min-height: 180px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-note"><strong>MuseDock / 转写历史</strong><span>示例内容 · 可切换历史、搜索和查看版本</span></div>
+  <main class="dialog" aria-label="抖音转写界面预览">
+    <header class="header"><h1>抖音转写</h1><p>每次转写单独保存，随时查看历史文字与字幕。</p></header>
+    <div class="workspace">
+      <aside aria-label="转写历史">
+        <button type="button" class="primary" id="new">＋ 新建转写</button>
+        <div class="aside-title"><h3>转写历史 <span id="count"></span></h3><button type="button" class="ghost small" id="refresh">刷新</button></div>
+        <input id="search" aria-label="搜索转写历史" placeholder="搜索视频标题或链接">
+        <select id="filter" aria-label="筛选转写状态"><option value="all">全部状态</option><option value="succeeded">已完成</option><option value="active">进行中</option><option value="partial">需处理</option></select>
+        <ul class="records" id="records" aria-label="转写历史记录"></ul>
+        <div class="empty" id="empty" hidden><p class="muted small">没有找到匹配的转写</p><button type="button" class="ghost small" id="clear">清除筛选</button></div>
+        <p class="muted small">记录保存在本机，按转写时间倒序排列。</p>
+      </aside>
+      <section class="content" aria-label="转写工作区">
+        <div id="detail">
+          <div class="content-header"><h2 id="title"></h2><div class="row"><time class="muted small" id="date"></time><button type="button" class="ghost small" id="source">查看原视频 ↗</button></div></div>
+          <div class="status" id="status"><span class="dot"></span><p id="message"></p></div>
+          <div class="row muted small"><span id="metadata"></span><span id="corrected-count"></span></div>
+          <div class="tabs" role="tablist" aria-label="转写版本"><button type="button" class="tab" id="raw-tab" role="tab" aria-controls="transcript">原始转写</button><button type="button" class="tab" id="corrected-tab" role="tab" aria-controls="transcript">校订版</button></div>
+          <pre class="transcript" role="tabpanel" id="transcript" tabindex="0"></pre>
+          <div class="actions"><button type="button" id="copy">复制文本</button><button type="button" id="txt">下载 TXT</button><button type="button" id="srt">下载 SRT</button><button type="button" id="retry" hidden>仅重试校订</button></div>
+        </div>
+        <form class="form" id="form" hidden>
+          <div><h2>新建转写</h2><p class="muted">粘贴公开视频链接，提取完整文字和句级字幕。</p></div>
+          <label>抖音链接或分享文案<textarea id="input" maxlength="4096" required placeholder="粘贴 https://v.douyin.com/... 或完整视频链接"></textarea></label>
+          <div class="row correction"><div><strong>自动校订</strong><p class="muted small">纠正错字和标点，保留原始转写与字幕时间。</p></div><select aria-label="自动校订"><option>否，仅转写</option><option>是，调用分析模型</option></select></div>
+          <p class="muted small">界面预览不会发起转写请求。</p>
+          <button type="submit" class="primary">开始转写</button>
+        </form>
+        <p class="notice" id="notice" role="status" aria-live="polite"></p>
+        <div class="login"><button type="button" class="ghost small" id="login">登录抖音</button><span class="muted small">使用本机 Chrome 登录后，可读取你有权访问的公开视频。</span></div>
+      </section>
+    </div>
+  </main>
+  <script>
+    const records = [
+      { id: 'window', title: '窗前的月光', date: '2026/09/16 10:42', status: 'succeeded', duration: '18.6', url: 'https://www.douyin.com/video/2345678901',
+        raw: '窗钱的月光，轻轻落在书桌上。\n街道慢慢安静下来，晚归的人走过巷口。\n一天里最普通的片刻，也值得被认真记住。',
+        corrected: '窗前的月光，轻轻落在书桌上。\n街道慢慢安静下来，晚归的人走过巷口。\n一天里最普通的片刻，也值得被认真记住。' },
+      { id: 'hometown', title: '家乡的月光', date: '2026/09/15 21:08', status: 'succeeded', duration: '16.1', url: 'https://www.douyin.com/video/1234567890',
+        raw: '家向的月光，照着那条熟悉的小路。\n我记得门前的树，也记得窗边等我的灯。\n离开很久以后，才明白那些平凡日子的分量。' },
+      { id: 'city', title: '城市慢行的另一种节奏', date: '2026/09/14 16:35', status: 'partial', duration: '21.2', url: 'https://www.douyin.com/video/3456789012',
+        raw: '今天没有赶路，只沿着河边走了一段。\n树影落在步道上，自行车从身旁经过。\n慢下来以后，熟悉的城市也有了新的样子。' },
+    ];
+    const $ = id => document.getElementById(id);
+    let selected = records[0];
+    let version = 'corrected';
+    const notice = text => { $('notice').textContent = text; };
+    function renderList() {
+      const query = $('search').value.trim().toLowerCase();
+      const status = $('filter').value;
+      const filtered = records.filter(item => (status === 'all' || item.status === status) && `${item.title} ${item.url}`.toLowerCase().includes(query));
+      $('records').replaceChildren();
+      $('count').textContent = records.length;
+      $('empty').hidden = filtered.length > 0;
+      for (const item of filtered) {
+        const li = document.createElement('li');
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'record'; button.setAttribute('aria-pressed', String(selected?.id === item.id));
+        const title = document.createElement('strong'); title.textContent = item.title;
+        const row = document.createElement('span'); row.className = 'row';
+        const state = document.createElement('span'); state.textContent = item.status === 'succeeded' ? '已完成' : '部分完成';
+        const kind = document.createElement('span'); kind.textContent = item.corrected ? '已校订' : '原始版';
+        row.append(state, kind);
+        const time = document.createElement('time'); time.textContent = item.date;
+        button.append(title, row, time); button.addEventListener('click', () => { selected = item; version = item.corrected ? 'corrected' : 'raw'; renderDetail(); });
+        li.append(button); $('records').append(li);
+      }
+    }
+    function renderDetail() {
+      notice(''); renderList();
+      $('detail').hidden = !selected; $('form').hidden = !!selected;
+      if (!selected) return;
+      $('title').textContent = selected.title; $('date').textContent = selected.date;
+      $('status').classList.toggle('partial', selected.status === 'partial');
+      $('message').textContent = selected.status === 'partial' ? '原始转写已保存，自动校订暂未完成。' : selected.corrected ? '转写和校订完成，共校订 1 条字幕。' : '转写完成，原始文本和字幕已保存。';
+      $('metadata').textContent = `${selected.duration} 秒 · 3 条字幕`;
+      $('corrected-count').textContent = selected.corrected ? '已校订 1 条' : '';
+      $('corrected-tab').disabled = !selected.corrected;
+      $('raw-tab').setAttribute('aria-selected', String(version === 'raw'));
+      $('corrected-tab').setAttribute('aria-selected', String(version === 'corrected'));
+      $('raw-tab').tabIndex = version === 'raw' ? 0 : -1;
+      $('corrected-tab').tabIndex = version === 'corrected' ? 0 : -1;
+      $('transcript').setAttribute('aria-labelledby', `${version}-tab`);
+      $('transcript').textContent = version === 'corrected' ? selected.corrected : selected.raw;
+      $('retry').hidden = selected.status !== 'partial';
+    }
+    $('search').addEventListener('input', renderList); $('filter').addEventListener('change', renderList);
+    $('clear').addEventListener('click', () => { $('search').value = ''; $('filter').value = 'all'; renderList(); });
+    $('refresh').addEventListener('click', () => { renderList(); notice('示例历史已刷新。'); });
+    $('new').addEventListener('click', () => { selected = null; $('input').value = ''; renderDetail(); $('input').focus(); });
+    for (const name of ['raw', 'corrected']) {
+      $(`${name}-tab`).addEventListener('click', () => { version = name; renderDetail(); });
+      $(`${name}-tab`).addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || !selected.corrected) return;
+        event.preventDefault(); version = version === 'raw' ? 'corrected' : 'raw'; renderDetail(); $(`${version}-tab`).focus();
+      });
+    }
+    $('copy').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText($('transcript').textContent); notice('示例文本已复制。'); }
+      catch { notice('请选中文本复制，或下载 TXT。'); }
+    });
+    function download(extension) {
+      let text = $('transcript').textContent;
+      if (extension === 'srt') text = text.split('\n').map((line, index) => `${index + 1}\n00:00:${String(index * 5).padStart(2, '0')},000 --> 00:00:${String(index * 5 + 5).padStart(2, '0')},000\n${line}\n`).join('\n');
+      const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = `示例-${selected.title}.${extension}`;
+      document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); notice('示例文件已准备好。');
+    }
+    $('txt').addEventListener('click', () => download('txt')); $('srt').addEventListener('click', () => download('srt'));
+    for (const id of ['source', 'login', 'retry']) $(id).addEventListener('click', () => notice('这是示例预览；请在 MuseDock 中使用该操作。'));
+    $('form').addEventListener('submit', event => { event.preventDefault(); notice('请在 MuseDock 的“抖音转写”中开始真实转写。'); });
+    renderDetail();
+  </script>
+</body>
+</html>

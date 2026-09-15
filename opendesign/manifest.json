@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-28T10:40:28.5196840+08:00",
+  "generated": "2026-09-15T21:33:39.700Z",
   "sections": [
     {
       "id": "mockups",
@@ -40,6 +40,15 @@
               "path": "mockups/tech-minimal-product-pages/index.html"
             }
           ]
+        },
+        {
+          "slug": "transcription-history",
+          "files": [
+            {
+              "label": "index.html",
+              "path": "mockups/transcription-history/index.html"
+            }
+          ]
         }
       ]
     },
@@ -51,20 +60,20 @@
           "slug": "tech-minimal-product",
           "files": [
             {
-              "label": "README.md",
-              "path": "design-systems/tech-minimal-product/README.md"
-            },
-            {
-              "label": "SKILL.md",
-              "path": "design-systems/tech-minimal-product/SKILL.md"
-            },
-            {
               "label": "style-notes.md",
               "path": "design-systems/tech-minimal-product/brand/style-notes.md"
             },
             {
               "label": "voice-and-tone.md",
               "path": "design-systems/tech-minimal-product/brand/voice-and-tone.md"
+            },
+            {
+              "label": "README.md",
+              "path": "design-systems/tech-minimal-product/README.md"
+            },
+            {
+              "label": "SKILL.md",
+              "path": "design-systems/tech-minimal-product/SKILL.md"
             },
             {
               "label": "colors_and_type.css",

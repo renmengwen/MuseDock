@@ -124,6 +124,9 @@ export const api = {
   getTranscriptionCapabilities() {
     return requestJson('/api/transcriptions/capabilities', { signal: AbortSignal.timeout(15000) });
   },
+  listTranscriptions() {
+    return requestJson('/api/transcriptions', { signal: AbortSignal.timeout(15000) });
+  },
   createTranscription(payload) {
     return requestJson('/api/transcriptions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),

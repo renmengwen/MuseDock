@@ -74,6 +74,7 @@ function createTranscriptionService(options = {}) {
   function present(job) {
     return {
       id: job.id, status: job.status, stage: job.stage, progress: job.progress, message: job.message,
+      title: jobTitle(job),
       source: job.source || null, autoCorrect: job.autoCorrect, correctionCount: job.correctionCount,
       createdAt: job.createdAt, updatedAt: job.updatedAt, error: job.error || null,
       result: job.result || null, canRetryCorrection: job.status === 'partial' && job.stage === 'correcting',
@@ -84,13 +85,61 @@ function createTranscriptionService(options = {}) {
     };
   }
 
+  function jobTitle(job) {
+    return String(job.source?.title || job.source?.url || job.input || '抖音转写').replace(/\s+/g, ' ').slice(0, 160);
+  }
+
+  function summarize(job) {
+    return {
+      id: job.id, title: jobTitle(job), status: job.status, stage: job.stage,
+      createdAt: job.createdAt || null, updatedAt: job.updatedAt || null,
+      source: job.source ? { title: job.source.title, url: job.source.url, awemeId: job.source.awemeId } : null,
+      autoCorrect: job.autoCorrect === true,
+      durationMs: job.result?.durationMs ?? job.source?.durationMs ?? null,
+      sentenceCount: job.result?.sentenceCount ?? null,
+      hasResult: !!job.result, hasCorrectedText: !!job.result?.correctedText,
+    };
+  }
+
+  async function list() {
+    let entries;
+    try { entries = await fsp.readdir(rootDir, { withFileTypes: true }); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw new TranscriptionError('HISTORY_UNAVAILABLE', '无法读取转写历史，请检查数据目录权限后重试。', 500);
+      entries = [];
+    }
+    const ids = [...new Set([
+      ...entries.filter(entry => entry.isDirectory() && ID_PATTERN.test(entry.name)).map(entry => entry.name),
+      ...jobs.keys(),
+    ])];
+    const items = [];
+    let skippedCount = 0;
+    // 兼容已有任务目录；按批读取，避免大量历史同时打开文件。
+    for (let offset = 0; offset < ids.length; offset += 20) {
+      const batch = await Promise.all(ids.slice(offset, offset + 20).map(async id => {
+        try { return summarize(await load(id)); }
+        catch (error) {
+          if (error instanceof TranscriptionError && ['TASK_NOT_FOUND', 'TASK_INVALID'].includes(error.code)) {
+            skippedCount += 1;
+            return null;
+          }
+          throw error;
+        }
+      }));
+      items.push(...batch.filter(Boolean));
+    }
+    items.sort((left, right) => (Date.parse(right.createdAt) || 0) - (Date.parse(left.createdAt) || 0)
+      || right.id.localeCompare(left.id));
+    return { items, skippedCount };
+  }
+
   async function load(id) {
     directory(id);
     if (jobs.has(id)) return jobs.get(id);
     let job;
     try { job = JSON.parse(await fsp.readFile(path.join(directory(id), 'task.json'), 'utf8')); }
     catch { throw new TranscriptionError('TASK_NOT_FOUND', '转写任务不存在或已被清理。', 404); }
-    if (job.id !== id) throw new TranscriptionError('TASK_INVALID', '转写任务数据无效。');
+    if (!job || typeof job !== 'object' || Array.isArray(job) || job.id !== id) throw new TranscriptionError('TASK_INVALID', '转写任务数据无效。');
     if (jobs.has(id)) return jobs.get(id);
     jobs.set(id, job);
     if (ACTIVE_STATUSES.has(job.status) && !running.has(id)) {
@@ -152,14 +201,21 @@ function createTranscriptionService(options = {}) {
     await verifiedFile(job, 'rawText');
     await verifiedFile(job, 'rawSrt');
     const raw = JSON.parse(await fsp.readFile(rawJson.path, 'utf8'));
+    const attemptDir = `corrections/${randomUUID()}`;
     const corrected = await proofreadTranscript(raw.sentences, {
       title: job.source.title, textConfig, configPath: options.configPath,
       callModel: options.callTextModel,
+      onModelResponse: async response => {
+        const responseDir = path.join(directory(job.id), attemptDir);
+        await fsp.mkdir(responseDir, { recursive: true });
+        await fsp.writeFile(path.join(responseDir, `response-${response.batchNumber}.json`), JSON.stringify({
+          rawJsonSha256: job.files.rawJson.sha256, receivedAt: new Date().toISOString(), ...response,
+        }, null, 2), { encoding: 'utf8', flag: 'wx' });
+      },
       onProgress: ({ progress, message }) => {
         job.progress = 80 + Math.floor(progress * 0.18); job.message = message;
       },
     });
-    const attemptDir = `corrections/${randomUUID()}`;
     const text = corrected.sentences.map(cue => cue.text).join('\n');
     await writeArtifact(job, 'correctedText', `${attemptDir}/transcript.corrected.txt`, `${text}\n`);
     await writeArtifact(job, 'correctedSrt', `${attemptDir}/transcript.corrected.srt`, toSrt(corrected.sentences));
@@ -256,6 +312,7 @@ function createTranscriptionService(options = {}) {
   }
 
   return {
+    list,
     async capabilities() {
       const asr = await (options.resolveAsrRuntime || mediaPipeline.resolveAsrRuntime)(options);
       const text = await (options.getTextConfig || aiModelConfig.getRuntimeConfig)('text', options);
