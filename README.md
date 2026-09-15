@@ -9,10 +9,11 @@ MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台。它将�
 ### 环境要求
 
 - Node.js `>=22 <23`
+- Python 3.10+
 - Google Chrome
 - `ffprobe`
 
-采集和渲染会复用系统安装的 Chrome。项目依赖中已包含 `ffmpeg`，也可以使用系统中的版本。
+采集和渲染会复用系统安装的 Chrome。项目依赖中已包含 `ffmpeg`，也可以使用系统中的版本。Python 用于线稿白板动画的媒体处理，但统一初始化时会一并准备它的环境。
 
 ### 安装并启动
 
@@ -21,13 +22,7 @@ npm install
 npm run dev
 ```
 
-打开 <http://localhost:5173>，即可在同一个创作首页选择 HyperFrames 动态视频或线稿白板动画。
-
-首次使用线稿白板动画前，还需要安装 Python 3.10+，并执行一次媒体环境初始化：
-
-```powershell
-npm run setup:whiteboard
-```
+`npm install` 会安装 Node.js 依赖，并自动创建线稿白板动画所需的独立 Python 媒体环境。无论计划使用哪种模式，首次安装都完成这两部分初始化。之后打开 <http://localhost:5173>，即可在同一个创作首页选择 HyperFrames 动态视频或线稿白板动画。
 
 首次进入应用后，请在设置中心至少配置一个分析模型。配音、图片生成和联网补图功能还需要按需配置 TTS、图片模型和 Pexels。
 
@@ -94,6 +89,8 @@ npm run setup:whiteboard
 <p align="center">
   <img src=".github/assets/musedock-wechat-group-qr.png" width="440" alt="MuseDock 微信交流群二维码">
 </p>
+
+如果二维码过期或无法识别，可添加作者微信 `RikS-July20`，备注“MuseDock 交流群”以便加入。
 
 ## 使用须知
 

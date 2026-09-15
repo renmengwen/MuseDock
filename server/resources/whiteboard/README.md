@@ -4,7 +4,7 @@
 
 ## 使用步骤
 
-1. 首次在项目根目录执行 `npm run setup:whiteboard`。它使用 Python 3.10+，在应用数据目录的 `data/runtime/whiteboard/` 安装独立环境，依赖版本固定在本目录 `requirements.txt`。
+1. 首次在项目根目录执行 `npm install`，会自动使用 Python 3.10+ 在应用数据目录的 `data/runtime/whiteboard/` 安装独立媒体环境，依赖版本固定在本目录 `requirements.txt`。如果媒体环境需要单独修复，可再次执行 `npm run setup:whiteboard`。
 2. 确认 ffmpeg、ffprobe 和中文字体可用。Windows 默认使用微软雅黑；可通过 `FFMPEG_PATH`、`FFPROBE_PATH`、`MUSEDOCK_WHITEBOARD_FONT` 指定本机资源。可用 `MUSEDOCK_WHITEBOARD_PYTHON` 指向已有、具备相同依赖的解释器。
 3. 在设置中选择图片生成模型、支持多模态输入的分析模型；使用旁白时再配置豆包或 MiniMax TTS。
 4. 首页选择“线稿白板动画”，输入主题、正文或 SRT，选择视频画幅，再设置具体视觉模板、背景音乐、画笔、字幕及后续确认方式。

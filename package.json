@@ -16,6 +16,7 @@
   },
   "homepage": "https://github.com/renmengwen/MuseDock#readme",
   "scripts": {
+    "postinstall": "node scripts/setup-whiteboard.cjs",
     "start": "node server/index.js",
     "dev": "node start-server.js",
     "restart": "node scripts/restart-dev.cjs",
