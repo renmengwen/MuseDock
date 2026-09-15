@@ -1,6 +1,7 @@
 import { Switch } from './Switch.jsx';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export function ModelConfigForm({ type, info, model, onChange }) {
   const m = model || { enabled: false, modelId: '', note: '' };
@@ -18,6 +19,23 @@ export function ModelConfigForm({ type, info, model, onChange }) {
         placeholder={info.placeholder}
         disabled={!m.enabled}
       />
+      {type === 'asr' && m.enabled ? (
+        <div className="mt-2 grid gap-2">
+          <label className="grid gap-1.5">
+            <span className="text-xs text-[#5f6876]">ASR 接口</span>
+            <Select value={m.backend || 'mimo'} onValueChange={value => onChange('backend', value)}>
+              <SelectTrigger aria-label="ASR 接口"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="mimo">MiMo ASR</SelectItem>
+                <SelectItem value="funasr">FunASR（本地或自部署）</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          {m.backend === 'funasr' ? (
+            <p className="m-0 text-xs leading-5 text-[#69717e]">普通本地使用可直接在全局 ASR 中选择内置 FunASR。这里用于配置自部署或需要鉴权的 FunASR 服务：模型 ID 填 paraformer，Base URL 填服务地址，API Key 按该服务要求填写。</p>
+          ) : null}
+        </div>
+      ) : null}
       {type === 'tts' && m.enabled ? (
         <div className="mt-2 grid grid-cols-2 gap-2">
           {isDoubao ? <div className="col-span-2 grid gap-2">

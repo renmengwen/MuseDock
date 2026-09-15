@@ -38,6 +38,9 @@ export function ModelSettings({ modelSettings }) {
         providerList={modelSettings.providerList}
         activeModels={modelSettings.activeModels}
         onChange={modelSettings.setActive}
+        localAsr={modelSettings.state.localAsr}
+        onLocalAsrBaseUrlChange={modelSettings.setLocalAsrBaseUrl}
+        disabled={modelSettings.loading || modelSettings.saving}
       />
 
       <ProviderList

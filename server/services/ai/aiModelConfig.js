@@ -17,6 +17,8 @@ const MODEL_TYPE_LABELS = {
 const MODEL_PROTOCOLS = ['openai-responses', 'anthropic-messages'];
 const DEFAULT_MODEL_PROTOCOL = 'openai-responses';
 const DEFAULT_MINIMAX_VOICE_ID = 'Chinese_deep_voiced_male_nv1';
+const BUILTIN_FUNASR_REF = 'builtin/funasr';
+const DEFAULT_FUNASR_BASE_URL = 'http://127.0.0.1:8000/v1';
 
 function normalizeString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -59,6 +61,9 @@ function normalizeProvider(id, input = {}) {
       modelId: normalizeString(raw.modelId),
       note: normalizeString(raw.note),
     };
+    if (type === 'asr') {
+      entry.backend = raw.backend === 'funasr' ? 'funasr' : 'mimo';
+    }
     if (type === 'text') {
       entry.supportsMultimodal = raw.supportsMultimodal === true;
     }
@@ -84,7 +89,7 @@ function normalizeActive(input = {}) {
   const active = {};
   for (const type of MODEL_TYPES) {
     const raw = normalizeString(input[type]);
-    active[type] = raw;
+    active[type] = raw || (type === 'asr' ? BUILTIN_FUNASR_REF : '');
   }
   return active;
 }
@@ -104,7 +109,9 @@ function normalizeStoredConfig(input = {}, previous = {}) {
   }
   const active = normalizeActive(input.active);
   const skipValidation = input.skipValidation === true;
-  return { providers, active, skipValidation };
+  const localAsrInput = input.localAsr ?? previous.localAsr;
+  const localAsr = { baseUrl: normalizeBaseUrl(localAsrInput?.baseUrl) || DEFAULT_FUNASR_BASE_URL };
+  return { providers, active, skipValidation, localAsr };
 }
 
 function migrateOldConfig(old) {
@@ -158,6 +165,7 @@ function toPublicConfig(stored) {
     for (const type of MODEL_TYPES) {
       const m = provider.models[type] || emptyModelEntry();
       const entry = { enabled: m.enabled, modelId: m.modelId, note: m.note };
+      if (type === 'asr') entry.backend = m.backend;
       if (type === 'text') {
         entry.supportsMultimodal = m.supportsMultimodal === true;
       }
@@ -183,6 +191,7 @@ function toPublicConfig(stored) {
     providers: publicProviders,
     active: config.active,
     skipValidation: config.skipValidation,
+    localAsr: config.localAsr,
   };
 }
 
@@ -208,6 +217,13 @@ function resolveActiveConfig(type, stored) {
   const config = normalizeStoredConfig(stored);
   const activeRef = config.active[type];
   if (!activeRef) return null;
+  if (type === 'asr' && activeRef === BUILTIN_FUNASR_REF) {
+    return {
+      enabled: true, builtin: true, provider: 'funasr', providerName: 'FunASR（本地）',
+      backend: 'funasr', protocol: 'openai-transcription', modelId: 'paraformer',
+      baseUrl: config.localAsr.baseUrl, apiKey: '', note: '内置本地 ASR，无需 API Key。',
+    };
+  }
 
   const parts = activeRef.split('/');
   if (parts.length !== 2) return null;
@@ -219,8 +235,13 @@ function resolveActiveConfig(type, stored) {
   const model = provider.models[modelType];
   if (!model || !model.enabled || !model.modelId) return null;
 
-  const apiKey = provider.apiKey || envFallback(type, 'api_key', providerId);
-  const baseUrl = provider.baseUrl || envFallback(type, 'base_url', providerId);
+  const isFunasr = modelType === 'asr' && model.backend === 'funasr';
+  const apiKey = provider.apiKey || (isFunasr
+    ? normalizeString(process.env.FUNASR_API_KEY || process.env.ASR_API_KEY)
+    : envFallback(type, 'api_key', providerId));
+  const baseUrl = provider.baseUrl || (isFunasr
+    ? normalizeBaseUrl(process.env.FUNASR_BASE_URL || process.env.ASR_BASE_URL)
+    : envFallback(type, 'base_url', providerId));
 
   const result = {
     enabled: true,
@@ -232,6 +253,7 @@ function resolveActiveConfig(type, stored) {
     modelId: model.modelId,
     note: model.note,
   };
+  if (modelType === 'asr') result.backend = model.backend;
   if (modelType === 'text') {
     result.supportsMultimodal = model.supportsMultimodal === true;
   }
@@ -293,6 +315,8 @@ module.exports = {
   MODEL_PROTOCOLS,
   DEFAULT_MODEL_PROTOCOL,
   DEFAULT_MINIMAX_VOICE_ID,
+  BUILTIN_FUNASR_REF,
+  DEFAULT_FUNASR_BASE_URL,
   getPublicConfig,
   saveConfig,
   getRuntimeConfig,

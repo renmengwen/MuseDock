@@ -121,6 +121,29 @@ function streamJsonSse(url, payload, handlers = {}) {
 }
 
 export const api = {
+  getTranscriptionCapabilities() {
+    return requestJson('/api/transcriptions/capabilities', { signal: AbortSignal.timeout(15000) });
+  },
+  createTranscription(payload) {
+    return requestJson('/api/transcriptions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(20000),
+    });
+  },
+  getTranscription(id) {
+    return requestJson(`/api/transcriptions/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(15000) });
+  },
+  retryTranscriptionCorrection(id) {
+    return requestJson(`/api/transcriptions/${encodeURIComponent(id)}/corrections/retry`, {
+      method: 'POST', signal: AbortSignal.timeout(20000),
+    });
+  },
+  startTranscriptionLogin() {
+    return requestJson('/api/transcriptions/douyin/login', { method: 'POST', signal: AbortSignal.timeout(90000) });
+  },
+  checkTranscriptionLogin() {
+    return requestJson('/api/transcriptions/douyin/login/status', { method: 'POST', signal: AbortSignal.timeout(30000) });
+  },
   getCreationModes() {
     return requestJson('/api/creative-workflows/modes');
   },

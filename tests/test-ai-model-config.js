@@ -10,12 +10,18 @@ async function run() {
 
   // Test 1: empty config returns default structure
   const initial = await aiModelConfig.getPublicConfig({ configPath });
-  assert.deepStrictEqual(Object.keys(initial), ['providers', 'active', 'skipValidation']);
+  assert.deepStrictEqual(Object.keys(initial), ['providers', 'active', 'skipValidation', 'localAsr']);
   assert.deepStrictEqual(initial.providers, {});
   assert.strictEqual(initial.skipValidation, false);
   for (const type of aiModelConfig.MODEL_TYPES) {
-    assert.strictEqual(initial.active[type], '');
+    assert.strictEqual(initial.active[type], type === 'asr' ? aiModelConfig.BUILTIN_FUNASR_REF : '');
   }
+  assert.deepStrictEqual(initial.localAsr, { baseUrl: 'http://127.0.0.1:8000/v1' });
+  const defaultAsr = await aiModelConfig.getRuntimeConfig('asr', { configPath });
+  assert.strictEqual(defaultAsr.builtin, true);
+  assert.strictEqual(defaultAsr.provider, 'funasr');
+  assert.strictEqual(defaultAsr.modelId, 'paraformer');
+  assert.strictEqual(defaultAsr.apiKey, '');
 
   // Test 2: save new multi-provider config
   const saved = await aiModelConfig.saveConfig({
@@ -140,6 +146,20 @@ async function run() {
   assert.strictEqual(migProvider.models.text.modelId, 'mimo-v2.5-pro');
   assert.strictEqual(migProvider.models.tts.voiceId, 'Chinese_deep_voiced_male_nv1');
   assert.strictEqual(migrated.active.text?.includes('/text'), true);
+
+  // 内置 ASR 独立于供应商保存；旧客户端省略本地地址时也应保留已保存的地址。
+  const builtinConfigPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'builtin-asr-config-')), 'ai-models.json');
+  const builtinSaved = await aiModelConfig.saveConfig({
+    providers: {}, active: { asr: aiModelConfig.BUILTIN_FUNASR_REF },
+    localAsr: { baseUrl: 'http://127.0.0.1:18000/v1/' },
+  }, { configPath: builtinConfigPath });
+  assert.deepStrictEqual(builtinSaved.providers, {});
+  assert.strictEqual(builtinSaved.localAsr.baseUrl, 'http://127.0.0.1:18000/v1');
+  await aiModelConfig.saveConfig({ providers: {}, active: {} }, { configPath: builtinConfigPath });
+  const rereadAsr = await aiModelConfig.getRuntimeConfig('asr', { configPath: builtinConfigPath });
+  assert.strictEqual(rereadAsr.builtin, true);
+  assert.strictEqual(rereadAsr.baseUrl, 'http://127.0.0.1:18000/v1');
+  assert.strictEqual(rereadAsr.apiKey, '');
 }
 
 run().then(() => {

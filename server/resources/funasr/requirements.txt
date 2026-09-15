@@ -1,0 +1,5 @@
+funasr==1.4.1
+fastapi==0.141.1
+uvicorn==0.52.1
+python-multipart==0.0.32
+soundfile==0.14.0

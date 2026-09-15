@@ -1315,7 +1315,7 @@ async function checkLoginResult() {
       for (const name of keyNames) {
         const found = allCookies.find(c => c.name === name);
         if (found) {
-          console.log(`  ✅ ${name}: ${found.value.substring(0, 20)}...`);
+          console.log(`  ✅ ${name}: 已保存`);
         } else {
           console.log(`  ❌ ${name}: 未找到`);
         }

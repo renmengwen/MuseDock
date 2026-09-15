@@ -135,9 +135,29 @@ async function resolveFfmpegPath(options = {}) {
 
 async function resolveAsrRuntime(options = {}) {
   const env = options.env || process.env;
-  const storedConfig = options.asrConfig || await aiModelConfig.getRuntimeConfig('asr', {
+  const selectedConfig = options.asrConfig || await aiModelConfig.getRuntimeConfig('asr', {
     configPath: options.configPath,
   });
+  const explicitProvider = normalizeProvider(env.ASR_PROVIDER);
+  const storedConfig = selectedConfig?.builtin && explicitProvider && explicitProvider !== 'funasr'
+    ? null : selectedConfig;
+  if (storedConfig?.builtin && storedConfig.backend === 'funasr' && !env.ASR_PROVIDER) {
+    return {
+      configured: true, provider: 'funasr', builtin: true,
+      baseUrl: env.FUNASR_BASE_URL || storedConfig.baseUrl,
+      apiKey: '', modelId: 'paraformer', language: env.ASR_LANGUAGE || 'auto',
+    };
+  }
+  const storedFunasr = storedConfig?.enabled && storedConfig.backend === 'funasr' ? storedConfig : null;
+  if (normalizeProvider(env.ASR_PROVIDER) === 'funasr' || (!env.ASR_PROVIDER && storedFunasr)) {
+    const baseUrl = env.FUNASR_BASE_URL || env.ASR_BASE_URL || storedFunasr?.baseUrl || '';
+    return {
+      configured: !!baseUrl, provider: 'funasr', baseUrl,
+      apiKey: env.FUNASR_API_KEY || env.ASR_API_KEY || storedFunasr?.apiKey || '',
+      modelId: env.ASR_MODEL || storedFunasr?.modelId || 'paraformer',
+      language: env.ASR_LANGUAGE || 'auto',
+    };
+  }
   const storedEnabled = storedConfig?.enabled === true && !!storedConfig.apiKey;
   const provider = normalizeProvider(env.ASR_PROVIDER || env.MIMO_PROVIDER || (storedEnabled ? storedConfig.provider : ''));
   const asrModelId = env.MIMO_ASR_MODEL || env.ASR_MODEL || storedConfig?.modelId || '';
@@ -472,11 +492,29 @@ async function downloadFile(url, targetPath, options = {}) {
       Referer: options.referer || 'https://www.douyin.com/',
     },
     redirect: 'follow',
+    signal: options.downloadTimeoutMs ? AbortSignal.timeout(options.downloadTimeoutMs) : undefined,
   });
   if (!response.ok) {
     throw new Error(`Download failed with HTTP ${response.status}`);
   }
-  const buffer = Buffer.from(await response.arrayBuffer());
+  let buffer;
+  if (options.maxDownloadBytes) {
+    const limit = options.maxDownloadBytes;
+    const chunks = [];
+    let bytes = 0;
+    if (Number(response.headers.get('content-length')) > limit) {
+      await response.body?.cancel();
+      throw new Error('视频文件超过小工具的下载大小上限。');
+    }
+    for await (const chunk of response.body) {
+      bytes += chunk.length;
+      if (bytes > limit) throw new Error('视频文件超过小工具的下载大小上限。');
+      chunks.push(chunk);
+    }
+    buffer = Buffer.concat(chunks);
+  } else {
+    buffer = Buffer.from(await response.arrayBuffer());
+  }
   await fsp.mkdir(path.dirname(targetPath), { recursive: true });
   await fsp.writeFile(targetPath, buffer);
   return { status: 'done', path: targetPath, bytes: buffer.length };
@@ -491,7 +529,7 @@ async function extractAudio(videoPath, audioPath, options = {}) {
     '-acodec', 'libmp3lame',
     '-q:a', '4',
     audioPath,
-  ]);
+  ], options.mediaTimeoutMs ? { timeout: options.mediaTimeoutMs } : {});
   if (!result.ok) {
     return { status: 'failed', error: result.error || result.stderr || `ffmpeg exited ${result.code}` };
   }
@@ -606,6 +644,8 @@ async function prepareDouyinMedia(awemeId, metadata, options = {}) {
       referer: metadata.aweme_url,
       userAgent: options.userAgent,
       force,
+      downloadTimeoutMs: options.downloadTimeoutMs,
+      maxDownloadBytes: options.maxDownloadBytes,
     });
   } catch (error) {
     steps.video = { status: 'failed', error: error.message };
@@ -830,7 +870,7 @@ async function transcribeAudio(awemeId, options = {}) {
       configured: false,
       status: 'not_configured',
       aweme_id: String(awemeId),
-      message: '音频转写未配置。请设置 OPENAI_API_KEY 或 ASR_API_KEY 后再启用 ASR。',
+      message: '音频转写未配置，请在设置中启用并选择 ASR 转写模型，填写相应的服务地址。',
       transcript_path: paths.transcript,
     };
     await writeJson(paths.transcript, {
@@ -851,6 +891,23 @@ async function transcribeAudio(awemeId, options = {}) {
       message: 'audio.mp3 不存在，请先准备素材。',
       transcript_path: paths.transcript,
     };
+    await updateAnalysisInputTranscript(paths, result);
+    return result;
+  }
+
+  if (asrConfig.provider === 'funasr') {
+    const { transcribeFunasrAudio, TranscriptionError } = require('./transcription/funasr');
+    let providerResult;
+    try {
+      providerResult = await transcribeFunasrAudio(paths.audio, asrConfig, options);
+    } catch (error) {
+      providerResult = { success: false, status: 'failed',
+        code: error instanceof TranscriptionError ? error.code : 'ASR_FAILED',
+        message: error instanceof TranscriptionError ? error.message : 'FunASR 转写失败，请检查服务与音频文件。' };
+    }
+    const result = { ...providerResult, configured: true, provider: 'funasr', model: asrConfig.modelId,
+      aweme_id: String(awemeId), transcript_path: paths.transcript };
+    await writeJson(paths.transcript, { ...result, audio_path: paths.audio, updated_at: new Date().toISOString() });
     await updateAnalysisInputTranscript(paths, result);
     return result;
   }
@@ -885,7 +942,7 @@ async function transcribeAudio(awemeId, options = {}) {
     configured: true,
     status: 'provider_not_implemented',
     aweme_id: String(awemeId),
-    message: 'ASR 服务已配置，但当前只实现了 MiMo ASR。请将 ASR_PROVIDER 设置为 mimo，或在设置页将供应商配置为 mimo。',
+    message: '当前 ASR 接口不受支持，请在设置中选择 MiMo ASR 或 FunASR。',
     transcript_path: paths.transcript,
   };
   await writeJson(paths.transcript, {
@@ -908,5 +965,6 @@ module.exports = {
   prepareDouyinMedia,
   getStatus,
   transcribeAudio,
+  resolveAsrRuntime,
   checkFfmpeg,
 };

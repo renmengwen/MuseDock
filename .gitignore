@@ -60,3 +60,7 @@ bash.exe.stackdump
 
 # 白板 Python 执行时产生的缓存
 /server/resources/whiteboard/python/__pycache__/
+
+# 可选 FunASR 本地环境与 Python 缓存
+/.venv-funasr/
+/server/resources/funasr/__pycache__/

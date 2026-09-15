@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog.jsx';
 import { cn } from '@/lib/utils.js';
 import { STATUS_TEXT } from './creativeDisplay.js';
+import { TranscriptionTool } from '../transcription/TranscriptionTool.jsx';
 
 export function CreativeSidebar({
   tasks,
@@ -55,6 +56,7 @@ export function CreativeSidebar({
       >
         <PanelLeft size={17} aria-hidden="true" />
       </Button>
+      <TranscriptionTool compact />
       <Link
         className="inline-flex size-[34px] items-center justify-center rounded-lg bg-white text-[#4b5563] shadow-[0_8px_20px_rgba(15,23,42,.08)] transition hover:bg-[#f3f4f6] hover:text-[#111827]"
         to="/settings"
@@ -193,6 +195,7 @@ export function CreativeSidebar({
         )}
       </div>
       <div className="border-t border-[#e7e9ee] pt-3">
+        <TranscriptionTool />
         <Link
           className="grid min-h-11 grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-lg px-2.5 py-2 text-[#30343b] transition hover:bg-white hover:text-[#111827]"
           to="/settings"

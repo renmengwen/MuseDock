@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api/client.js';
+import { BUILTIN_FUNASR_REF, DEFAULT_FUNASR_BASE_URL } from '../components/settings/modelDefaults.js';
 
 const MODEL_TYPES = ['asr', 'text', 'image', 'video', 'tts'];
 const DEFAULT_MINIMAX_VOICE_ID = 'Chinese_deep_voiced_male_nv1';
 
 const MODEL_TYPE_INFO = {
-  asr:        { title: 'ASR 转写',   placeholder: 'whisper-1 / gpt-4o-transcribe' },
+  asr:        { title: 'ASR 转写',   placeholder: 'paraformer / mimo-v2.5-asr' },
   text:       { title: '分析模型',   placeholder: 'gpt-4o-mini / deepseek-chat' },
   image:      { title: '图片生成',   placeholder: 'seedream-4-0 / gpt-image-2' },
   video:      { title: '视频生成',   placeholder: 'video-model-id' },
@@ -25,6 +26,7 @@ function normalizeServerData(json) {
     for (const type of MODEL_TYPES) {
       const m = p.models?.[type] || {};
       models[type] = { enabled: !!m.enabled, modelId: m.modelId || '', note: m.note || '' };
+      if (type === 'asr') models[type].backend = m.backend || 'mimo';
       if (type === 'text') {
         models[type].supportsMultimodal = m.supportsMultimodal === true;
       }
@@ -48,8 +50,9 @@ function normalizeServerData(json) {
   }
   return {
     providers,
-    active: json.active || {},
+    active: { ...json.active, asr: json.active?.asr || BUILTIN_FUNASR_REF },
     skipValidation: !!json.skipValidation,
+    localAsr: { baseUrl: json.localAsr?.baseUrl || DEFAULT_FUNASR_BASE_URL },
   };
 }
 
@@ -60,6 +63,7 @@ function toServerPayload(state) {
     for (const type of MODEL_TYPES) {
       const m = p.models[type] || {};
       models[type] = { enabled: !!m.enabled, modelId: m.modelId || '', note: m.note || '' };
+      if (type === 'asr') models[type].backend = m.backend || 'mimo';
       if (type === 'text') {
         models[type].supportsMultimodal = m.supportsMultimodal === true;
       }
@@ -78,11 +82,12 @@ function toServerPayload(state) {
       models,
     };
   }
-  return { providers, active: state.active, skipValidation: state.skipValidation };
+  return { providers, active: state.active, skipValidation: state.skipValidation, localAsr: state.localAsr };
 }
 
 export function useSettings() {
-  const [state, setState] = useState({ providers: {}, active: {}, skipValidation: false });
+  const [state, setState] = useState({ providers: {}, active: { asr: BUILTIN_FUNASR_REF }, skipValidation: false,
+    localAsr: { baseUrl: DEFAULT_FUNASR_BASE_URL } });
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -104,12 +109,17 @@ export function useSettings() {
     const result = {};
     for (const type of MODEL_TYPES) {
       const ref = state.active[type];
+      if (type === 'asr' && ref === BUILTIN_FUNASR_REF) {
+        result[type] = { ref, builtin: true, providerId: 'builtin', providerName: 'FunASR（本地）',
+          enabled: true, modelId: 'paraformer', backend: 'funasr' };
+        continue;
+      }
       if (!ref) { result[type] = null; continue; }
       const [pid, mtype] = ref.split('/');
       const provider = state.providers[pid];
       if (!provider) { result[type] = null; continue; }
       const model = provider.models[mtype];
-      result[type] = { providerId: pid, providerName: provider.name, ...model };
+      result[type] = { ref, providerId: pid, providerName: provider.name, ...model };
     }
     return result;
   }, [state]);
@@ -166,7 +176,7 @@ export function useSettings() {
       const newActive = { ...prev.active };
       for (const type of MODEL_TYPES) {
         if (newActive[type]?.startsWith(providerId + '/')) {
-          newActive[type] = '';
+          newActive[type] = type === 'asr' ? BUILTIN_FUNASR_REF : '';
         }
       }
       return { ...prev, providers: newProviders, active: newActive };
@@ -179,7 +189,7 @@ export function useSettings() {
       ...prev,
       active: {
         ...prev.active,
-        [modelType]: providerId && modelTypeKey ? `${providerId}/${modelTypeKey}` : '',
+        [modelType]: providerId && modelTypeKey ? `${providerId}/${modelTypeKey}` : modelType === 'asr' ? BUILTIN_FUNASR_REF : '',
       },
     }));
   }, []);
@@ -189,6 +199,11 @@ export function useSettings() {
     setState(prev => ({ ...prev, skipValidation: !!value }));
   }, []);
 
+  const setLocalAsrBaseUrl = useCallback((baseUrl) => {
+    setDirty(true);
+    setState(prev => ({ ...prev, localAsr: { ...prev.localAsr, baseUrl } }));
+  }, []);
+
   useEffect(() => { load(); }, [load]);
 
   return {
@@ -196,7 +211,7 @@ export function useSettings() {
     status, loading, saving, dirty,
     load, save,
     saveProvider, removeProvider,
-    setActive, setSkipValidation,
+    setActive, setSkipValidation, setLocalAsrBaseUrl,
     MODEL_TYPES, MODEL_TYPE_INFO,
     MODEL_PROTOCOLS,
   };
