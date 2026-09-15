@@ -1,5 +1,11 @@
 # MuseDock
 
+> **交流与反馈**：扫描下方二维码或添加作者微信 `RikS-July20`。如需加入 MuseDock 微信交流群，请备注「MuseDock 交流群」，作者会邀请你入群。
+
+<p align="center">
+  <img src=".github/assets/musedock-author-wechat-qr.jpg" width="240" alt="MuseDock 作者微信二维码">
+</p>
+
 MuseDock 是一个本地优先的 AI 短视频创作与编辑工作台。它将素材整理、脚本与分镜、配音字幕、画面生成、视频渲染和后续修改集中在同一个创作流程中，目前支持 **HyperFrames 动态视频** 与 **线稿白板动画** 两种创作模式。
 
 项目会保留素材来源、制作过程和阶段产物，方便查看进度、修改内容、失败恢复和继续编辑。任务、模型配置、素材、音频、工程和导出文件默认保存在本地；只有在调用已配置的模型、联网研究、素材或来源服务时，才会发送相应请求。
@@ -81,16 +87,6 @@ npm run dev
 - 采集能力只服务于短视频创作，不是通用爬虫工具；文章和 GitHub 来源只处理正文和图片，不提取网页中的视频。
 - 分析模型、图片模型、TTS、联网研究、Pexels 和来源平台均受各自服务配置、网络和配额限制。
 - HyperFrames 渲染依赖 Chrome；视频合成依赖 `ffmpeg` 和 `ffprobe`；白板模式还依赖独立的 Python 媒体环境和可用字体。缺少相关依赖时，对应的渲染或导出功能将不可用。
-
-## 交流群
-
-欢迎加入 MuseDock 微信交流群，交流使用体验、创作方法和问题反馈。二维码会定期更新；如果二维码已经失效，请关注仓库中的最新版本。
-
-<p align="center">
-  <img src=".github/assets/musedock-wechat-group-qr.png" width="440" alt="MuseDock 微信交流群二维码">
-</p>
-
-如果二维码过期或无法识别，可添加作者微信 `RikS-July20`，备注“MuseDock 交流群”以便加入。
 
 ## 使用须知
 
