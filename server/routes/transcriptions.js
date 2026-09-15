@@ -1,6 +1,7 @@
 const express = require('express');
 const { createTranscriptionService } = require('../services/transcription/transcriptionTasks');
 const { TranscriptionError } = require('../services/transcription/funasr');
+const { createLocalFileOpenHandler, assertLocalClient, LocalFileError } = require('../services/localFiles');
 
 function createTranscriptionRouter({ service = createTranscriptionService(), douyin } = {}) {
   const router = express.Router();
@@ -11,9 +12,10 @@ function createTranscriptionRouter({ service = createTranscriptionService(), dou
     try { await handler(req, res); }
     catch (error) {
       if (res.headersSent) return;
-      res.status(error instanceof TranscriptionError ? error.status : 500).json({
-        success: false, code: error instanceof TranscriptionError ? error.code : 'TRANSCRIPTION_FAILED',
-        message: error instanceof TranscriptionError ? error.message : '转写工具请求失败，请检查服务状态后重试。',
+      const known = error instanceof TranscriptionError || error instanceof LocalFileError;
+      res.status(known ? error.status : 500).json({
+        success: false, code: known ? error.code : 'TRANSCRIPTION_FAILED',
+        message: known ? error.message : '转写工具请求失败，请检查服务状态后重试。',
       });
     }
   };
@@ -42,12 +44,21 @@ function createTranscriptionRouter({ service = createTranscriptionService(), dou
     } });
   }));
   router.get('/:id', route(async (req, res) => res.json({ success: true, data: await service.get(req.params.id) })));
+  router.delete('/:id', route(async (req, res) => {
+    assertLocalClient(req, '请在运行 MuseDock 的电脑上删除转写记录。');
+    if (!req.is('application/json') || req.body?.confirmed !== true || Object.keys(req.body).some(key => key !== 'confirmed')) {
+      throw new TranscriptionError('DELETE_NOT_CONFIRMED', '请先确认删除这条转写及其全部本地文件。');
+    }
+    res.json({ success: true, data: await service.remove(req.params.id) });
+  }));
   router.post('/:id/corrections/retry', route(async (req, res) => res.status(202).json({ success: true, data: await service.retryCorrection(req.params.id) })));
   router.get('/:id/files/:kind', route(async (req, res) => {
     const file = await service.file(req.params.id, req.params.kind);
     res.set('X-Content-Type-Options', 'nosniff');
     res.download(file.path, file.name);
   }));
+  router.post('/:id/files/:kind', createLocalFileOpenHandler(async req =>
+    (await service.file(req.params.id, req.params.kind)).path));
   return router;
 }
 

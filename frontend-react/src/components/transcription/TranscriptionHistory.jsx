@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { History, LoaderCircle, Plus, RotateCw, Search } from 'lucide-react';
+import { History, LoaderCircle, Plus, RotateCw, Search, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
@@ -18,7 +18,7 @@ export function formatTranscriptionDate(value) {
     : '时间未记录';
 }
 
-export function TranscriptionHistory({ items, selectedId, loading, error, skippedCount, disabled, newDisabled, onSelect, onNew, onRefresh }) {
+export function TranscriptionHistory({ items, selectedId, loading, error, skippedCount, disabled, newDisabled, onSelect, onNew, onRefresh, onDelete, deletingId, deleteNotice }) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('all');
   const search = query.trim().toLowerCase();
@@ -59,11 +59,12 @@ export function TranscriptionHistory({ items, selectedId, loading, error, skippe
         <Button variant="outline" size="sm" onClick={onRefresh} disabled={loading}>重新加载历史</Button>
       </div>}
       {skippedCount > 0 && <p role="status" className="m-0 text-xs text-fg-3">有 {skippedCount} 条记录文件缺失或损坏，其余历史仍可查看。</p>}
+      {deleteNotice && <p role="status" className="m-0 text-xs leading-5 text-fg-3">{deleteNotice}</p>}
       <ul aria-label="转写历史记录" className="m-0 grid max-h-48 list-none content-start gap-1 overflow-y-auto p-0 md:max-h-none md:flex-1">
-        {filtered.map(item => <li key={item.id} className="min-w-0">
+        {filtered.map(item => <li key={item.id} className="relative min-w-0">
           <Button variant="ghost" onClick={() => onSelect(item.id)} disabled={disabled} aria-pressed={selectedId === item.id}
             data-transcription-id={item.id}
-            className={cn('h-auto min-h-20 w-full flex-col items-stretch gap-2 whitespace-normal rounded-md border px-3 py-2.5 text-left font-normal',
+            className={cn('h-auto min-h-20 w-full flex-col items-stretch gap-2 whitespace-normal rounded-md border py-2.5 pl-3 pr-10 text-left font-normal',
               selectedId === item.id ? 'border-line-2 bg-surface-hover text-fg-1' : 'border-transparent text-fg-2 hover:bg-surface-hover')}>
             <span className="line-clamp-2 break-words text-sm font-medium leading-5">{item.title || '抖音转写'}</span>
             <span className="flex flex-wrap items-center justify-between gap-1 text-xs">
@@ -74,6 +75,12 @@ export function TranscriptionHistory({ items, selectedId, loading, error, skippe
               <span className="text-fg-3">{item.hasCorrectedText ? '已校订' : item.hasResult ? '原始版' : ''}</span>
             </span>
             <time dateTime={item.createdAt || undefined} className="text-xs tabular-nums text-fg-3">{formatTranscriptionDate(item.createdAt)}</time>
+          </Button>
+          <Button variant="ghost" size="icon-sm" className="absolute right-1 top-1 text-fg-3 hover:text-danger"
+            aria-label={`删除转写：${item.title || '抖音转写'}`} data-delete-transcription-id={item.id}
+            title={isTranscriptionRunning(item) ? '转写或校订进行中，完成后可删除' : '删除这条转写及其全部本地文件'}
+            disabled={disabled || !!deletingId || isTranscriptionRunning(item)} onClick={event => onDelete(item, event.currentTarget)}>
+            {deletingId === item.id ? <LoaderCircle className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
           </Button>
         </li>)}
       </ul>

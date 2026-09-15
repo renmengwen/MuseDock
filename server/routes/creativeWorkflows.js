@@ -5,6 +5,7 @@ const defaultCreativeWorkflowTasks = require('../services/creative/creativeWorkf
 const defaultVisualAssetUploads = require('../services/creative/visualAssetUploads');
 const { formatSseEvent, normalizeSinceSeq } = require('../services/creative/creativeTaskEvents');
 const { WhiteboardError } = require('../services/creative/whiteboard/contracts');
+const { createLocalFileOpenHandler } = require('../services/localFiles');
 const {
   normalizeCreativeWorkflowDto,
   normalizeCreativeWorkflowSummary,
@@ -92,6 +93,30 @@ function validateWorkflowId(workflowId) {
 function safeString(value) {
   return String(value || '').trim();
 }
+
+function openWorkflowFile(method, getReference) {
+  return createLocalFileOpenHandler(async (req, res) => {
+    const validation = validateWorkflowId(req.params.workflow_id);
+    if (!validation.success) { res.status(400).json(validation); return; }
+    const reference = safeString(getReference(req));
+    if (!reference) { res.status(400).json({ success: false, message: '本地文件标识无效。' }); return; }
+    const service = getService(req);
+    if (typeof service[method] !== 'function') {
+      res.status(501).json({ success: false, message: '当前服务暂不支持打开此类本地文件。' }); return;
+    }
+    const result = await service[method](validation.workflow_id, reference);
+    if (!result || result.success === false) {
+      res.status(result?.code === 'PROJECT_FILE_NOT_FOUND' ? 404 : getStatusCode(result))
+        .json({ success: false, code: result?.code, message: getMessage(result, '本地文件不存在或无法读取。') });
+      return;
+    }
+    return result.file_path;
+  });
+}
+
+router.post('/:workflow_id/whiteboard/media/:artifact_id', openWorkflowFile('getWhiteboardMediaFile', req => req.params.artifact_id));
+router.post('/:workflow_id/html-video-project/exports/:export_id/file', openWorkflowFile('getHtmlVideoProjectExportFile', req => req.params.export_id));
+router.post('/:workflow_id/html-video-project/files/*', openWorkflowFile('getHtmlVideoProjectFile', req => req.params[0]));
 
 function decodeFileNameHeader(value) {
   const fileName = safeString(value);

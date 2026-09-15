@@ -52,6 +52,8 @@ async function run() {
   };
   const service = createTranscriptionService(fixture);
   const app = express();
+  const openedFiles = [];
+  app.locals.localFileOpener = async (filePath, options) => { openedFiles.push({ filePath, ...options }); };
   app.use(express.json());
   app.use('/api/transcriptions', createTranscriptionRouter({ service, douyin: {
     startQrcodeLogin: async () => ({ alreadyLoggedIn: false, needVerify: true, qrcode: 'must-not-leak' }),
@@ -86,6 +88,11 @@ async function run() {
     assert.match(await rawDownload.text(), /00:00:00,100 --> 00:00:00,800/);
     assert.equal((await fetch(`${base}/${raw.id}/files/task`)).status, 404);
     assert.equal((await fetch(`${base}/invalid-id`)).status, 404);
+    assert.equal((await post(`/${raw.id}/files/rawSrt`, { target: 'file' })).status, 200);
+    assert.deepEqual(openedFiles.at(-1), { filePath: (await service.file(raw.id, 'rawSrt')).path, target: 'file' });
+    assert.equal((await post(`/${raw.id}/files/rawSrt`, { target: 'folder' })).status, 200);
+    assert.equal(openedFiles.at(-1).target, 'folder');
+    assert.equal((await post(`/${raw.id}/files/task`, { target: 'file' })).status, 404);
 
     correctionFails = true;
     const start = await post('', { source, autoCorrect: true });
@@ -155,6 +162,9 @@ async function run() {
 
     const original = await service.file(created.id, 'rawSrt');
     await fsp.appendFile(original.path, 'tampered');
+    const openedBeforeTamper = openedFiles.length;
+    assert.equal((await post(`/${created.id}/files/rawSrt`, { target: 'file' })).status, 409);
+    assert.equal(openedFiles.length, openedBeforeTamper, '本地打开仍须检查原始产物 SHA-256');
     assert.equal((await fetch(`${base}/${created.id}/files/rawSrt`)).status, 409);
     assert.equal((await post(`/${created.id}/corrections/retry`)).status, 409);
 

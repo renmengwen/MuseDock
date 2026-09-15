@@ -52,13 +52,16 @@ export function useTranscriptionHistory(open) {
   const selectedIdRef = useRef('');
   const selectionVersion = useRef(0);
   const historyVersion = useRef(0);
+  const deletedIds = useRef(new Set());
   openRef.current = open;
 
   const updateHistory = useCallback(nextJob => {
+    if (deletedIds.current.has(nextJob.id)) return;
     setHistory(items => mergeItem(items, summary(nextJob)));
   }, []);
 
   const selectJob = useCallback(async id => {
+    if (deletedIds.current.has(id)) return;
     const request = ++selectionVersion.current;
     selectedIdRef.current = id;
     setSelectedId(id);
@@ -67,7 +70,7 @@ export function useTranscriptionHistory(open) {
     setDetailLoading(true);
     try {
       const response = await api.getTranscription(id);
-      if (!openRef.current || request !== selectionVersion.current) return;
+      if (!openRef.current || request !== selectionVersion.current || deletedIds.current.has(id)) return;
       if (response.data?.id !== id) throw new Error('这条转写记录暂时无法读取，请刷新历史后重试。');
       setJob(current => mostRecent(current, response.data));
       updateHistory(response.data);
@@ -80,6 +83,7 @@ export function useTranscriptionHistory(open) {
   }, [updateHistory]);
 
   const rememberJob = useCallback(nextJob => {
+    if (deletedIds.current.has(nextJob.id)) return;
     selectionVersion.current += 1;
     selectedIdRef.current = nextJob.id;
     setSelectedId(nextJob.id);
@@ -101,6 +105,20 @@ export function useTranscriptionHistory(open) {
     rememberId('');
   }, []);
 
+  const deleteJob = useCallback(async id => {
+    const response = await api.deleteTranscription(id);
+    if (response.success !== true || response.data?.id !== id || response.data?.deleted !== true) {
+      throw new Error('删除结果未确认，请刷新历史后检查。');
+    }
+    deletedIds.current.add(id);
+    historyVersion.current += 1;
+    setHistoryLoading(false);
+    setHistoryError('');
+    setHistory(items => items.filter(item => item.id !== id));
+    if (selectedIdRef.current === id) clearJob();
+    else if (lastTaskId() === id) rememberId(selectedIdRef.current);
+  }, [clearJob]);
+
   const refreshHistory = useCallback(async (restoreSelection = false) => {
     const request = ++historyVersion.current;
     const selection = selectionVersion.current;
@@ -110,7 +128,7 @@ export function useTranscriptionHistory(open) {
       const response = await api.listTranscriptions();
       if (!openRef.current || request !== historyVersion.current) return;
       if (!Array.isArray(response.data?.items)) throw new Error('转写历史响应无效，请重启 MuseDock 服务后重试。');
-      const items = response.data.items;
+      const items = response.data.items.filter(item => !deletedIds.current.has(item.id));
       setHistory(current => {
         const previous = new Map(current.map(item => [item.id, item]));
         return items.map(item => mostRecent(previous.get(item.id), item));
@@ -165,6 +183,7 @@ export function useTranscriptionHistory(open) {
           continue;
         }
         const nextJob = result.value.data;
+        if (deletedIds.current.has(nextJob.id)) continue;
         updateHistory(nextJob);
         if (selection === selectionVersion.current && selectedIdRef.current === nextJob.id) {
           setJob(current => mostRecent(current, nextJob));
@@ -183,7 +202,7 @@ export function useTranscriptionHistory(open) {
   return {
     history, historyLoading, historyError, skippedCount, job, selectedId, detailLoading, detailError, pollError,
     activeJob: history.find(isTranscriptionRunning),
-    selectJob, rememberJob, clearJob, refreshHistory,
+    selectJob, rememberJob, clearJob, deleteJob, refreshHistory,
     refreshStatus: () => setPollVersion(value => value + 1),
   };
 }

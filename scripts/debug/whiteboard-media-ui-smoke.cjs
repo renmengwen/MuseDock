@@ -9,12 +9,28 @@ const config = require('../../server/services/ai/aiModelConfig');
 const router = require('../../server/routes/creativeWorkflows');
 const { createCreativeTaskRegistry } = require('../../server/services/creative/creativeTaskRegistry');
 
-async function verifySceneTables(page, screenshots, media) {
+async function openArtifact(page, scope, label, expectedUrl, expectedName, openedFiles, target = 'file') {
+  const count = openedFiles.length;
+  const responseWait = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname === expectedUrl);
+  const button = scope.getByRole('button', { name: label, exact: true });
+  await button.click();
+  assert.equal(await button.isDisabled(), true, '打开期间应禁止重复点击');
+  const response = await responseWait;
+  assert.equal(response.status(), 200);
+  assert.equal((await response.json()).success, true);
+  await scope.getByRole('status').filter({ hasText: '已请求系统打开' }).waitFor();
+  assert.equal(openedFiles.length, count + 1);
+  assert.equal(path.basename(openedFiles.at(-1).filePath), expectedName);
+  assert.equal(openedFiles.at(-1).target, target);
+}
+
+async function verifySceneTables(page, screenshots, media, openedFiles) {
   const canvas = { width: media.recipe.width, height: media.recipe.height };
   const stages = [
-    { id: 'lineart_generation', file: 'image', label: '线稿', slug: 'lineart', download: '下载线稿', filename: 'lineart.png' },
-    { id: 'annotation_drafting', file: 'preview', label: '落墨', slug: 'annotation', download: '下载区域编排', filename: 'annotation.json' },
-    { id: 'scene_render', file: 'video', label: '单幕', slug: 'scene', download: '下载单幕视频', filename: 'scene.mp4' },
+    { id: 'lineart_generation', file: 'image', label: '线稿', slug: 'lineart', actions: [['image', '打开线稿']] },
+    { id: 'annotation_drafting', file: 'preview', label: '落墨', slug: 'annotation', actions: [['preview', '打开落墨预览'], ['resultPreview', '打开当前落墨效果'], ['annotation', '打开区域编排']] },
+    { id: 'scene_render', file: 'video', label: '单幕', slug: 'scene', actions: [['video', '打开单幕视频']] },
   ];
   const fileUrl = file => {
     const artifact = media.artifacts.find(item => item.id === file?.id);
@@ -52,11 +68,14 @@ async function verifySceneTables(page, screenshots, media) {
       }, canvas);
       assert.equal(await dialog.getByRole('status').count(), 0, '图片加载后必须结束 loading');
     }
-    const downloadWait = page.waitForEvent('download');
-    await dialog.getByRole('link', { name: stage.download, exact: true }).click();
-    const downloaded = await downloadWait;
-    assert.equal(downloaded.suggestedFilename(), stage.filename);
-    assert.ok((await fs.stat(await downloaded.path())).size > 0);
+    for (const [key, label] of stage.actions) {
+      const descriptor = expected[0][key];
+      if (!descriptor) continue;
+      const artifact = media.artifacts.find(item => item.id === descriptor.id);
+      await openArtifact(page, dialog, label, fileUrl(descriptor), artifact.fileName, openedFiles);
+    }
+    const primary = media.artifacts.find(item => item.id === expected[0][stage.file].id);
+    await openArtifact(page, dialog, '打开所在文件夹', primary.url, primary.fileName, openedFiles, 'folder');
     await page.screenshot({ path: path.join(screenshots, `${stage.slug}-detail-desktop.png`), fullPage: true });
     await page.keyboard.press('Escape');
     await dialog.waitFor({ state: 'hidden' });
@@ -127,6 +146,12 @@ async function main() {
   const options = { rootDir: fixture.rootDir };
   let emptyScenes = false;
   const app = express(); app.use(express.json());
+  const openedFiles = [];
+  app.locals.localFileOpener = async (filePath, { target }) => {
+    assert.ok((await fs.stat(filePath)).size > 0);
+    openedFiles.push({ filePath, target });
+    await new Promise(resolve => setTimeout(resolve, 300));
+  };
   app.locals.creativeTaskRegistry = createCreativeTaskRegistry();
   app.locals.creativeWorkflows = {
     listCreationModes: workflows.listCreationModes,
@@ -163,10 +188,16 @@ async function main() {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN', acceptDownloads: true });
     page.setDefaultTimeout(10000);
     const errors = [];
+    const browserDownloads = [];
+    page.on('download', download => browserDownloads.push(download.suggestedFilename()));
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     await page.goto(`${origin}/creative/${fixture.workflowId}`);
-    await page.getByRole('link', { name: '下载最终视频', exact: true }).waitFor();
+    await page.getByRole('button', { name: '打开最终视频', exact: true }).waitFor();
+    const fixtureView = await workflows.getCreativeWorkflow(fixture.workflowId, options);
+    assert.equal(fixtureView.success, true);
+    const media = fixtureView.data.whiteboard.media;
+    const artifact = descriptor => media.artifacts.find(item => item.id === descriptor.id);
     const agentBox = await page.getByRole('region', { name: '白板创作 Agent', exact: true }).boundingBox();
     const resultBox = await page.getByRole('region', { name: '当前白板方案', exact: true }).boundingBox();
     assert.ok(Math.abs(agentBox.height - resultBox.height) < 1 && Math.abs(agentBox.y - resultBox.y) < 1, '桌面双栏必须等高并对齐');
@@ -185,18 +216,24 @@ async function main() {
     const videoBox = await page.locator('video').boundingBox();
     assert.ok(Math.abs(videoBox.width / videoBox.height - canvas.width / canvas.height) < 0.02, '成片播放器不能把竖屏拉成横屏');
     assert.ok(video.pixel[0] > 180 && video.pixel[1] > 170 && video.pixel[2] > 150, '浏览器必须实际解码出暖纸画面，不能仅加载黑色播放器元数据');
-    const downloadWait = page.waitForEvent('download');
-    await page.getByRole('link', { name: '下载最终视频', exact: true }).click();
-    const download = await downloadWait;
-    assert.equal(download.suggestedFilename(), 'final.mp4');
-    assert.ok((await fs.stat(await download.path())).size > 1000);
+    const finalVideo = artifact(media.current.final_delivery.video);
+    await openArtifact(page, page, '打开最终视频', finalVideo.url, finalVideo.fileName, openedFiles);
+    await openArtifact(page, page, '打开所在文件夹', finalVideo.url, finalVideo.fileName, openedFiles, 'folder');
+    const subtitles = artifact(media.current.full_narration.subtitles);
+    await openArtifact(page, page, '打开字幕', subtitles.url, subtitles.fileName, openedFiles);
+    await page.getByText('技术验证与版本身份', { exact: true }).click();
+    const receipt = artifact(media.current.final_delivery.receipt);
+    await openArtifact(page, page, '打开验证记录', receipt.url, receipt.fileName, openedFiles);
+    assert.equal(await page.locator('video').getAttribute('controlsList'), 'nodownload');
     await page.screenshot({ path: path.join(screenshots, 'final-desktop.png'), fullPage: true });
     await page.getByRole('tab', { name: '旁白', exact: true }).click();
     await page.waitForFunction(() => document.querySelector('audio')?.readyState >= 1);
     assert.ok(Math.abs(await page.locator('audio').evaluate(element => element.duration) - 6) < 0.1);
-    const fixtureView = await workflows.getCreativeWorkflow(fixture.workflowId, options);
-    assert.equal(fixtureView.success, true);
-    await verifySceneTables(page, screenshots, fixtureView.data.whiteboard.media);
+    const narration = artifact(media.current.full_narration.audio);
+    await openArtifact(page, page, '打开完整旁白', narration.url, narration.fileName, openedFiles);
+    await openArtifact(page, page, '打开字幕 SRT', subtitles.url, subtitles.fileName, openedFiles);
+    assert.equal(await page.locator('audio').getAttribute('controlsList'), 'nodownload');
+    await verifySceneTables(page, screenshots, media, openedFiles);
     await page.getByRole('tab', { name: '成片', exact: true }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: path.join(screenshots, 'final-mobile.png'), fullPage: true });
@@ -226,7 +263,8 @@ async function main() {
       assert.equal(await page.getByRole('button', { name: /查看第 .* 幕.*详情/ }).count(), 0, '空数组必须有空态且不能打开旧详情');
     }
     assert.deepEqual(errors, []);
-    console.log(JSON.stringify({ success: true, providerCalls: 0, checks: ['双栏等高与宽度', '最终视频播放及下载', '完整旁白播放', '三类分镜表格及按需加载', '详情预览与对应文件下载', '键盘打开关闭与焦点恢复', '关闭卸载媒体', '图片及视频失败状态', '空分镜列表', '390px表格及弹窗', '豆包参数保存及刷新', '无运行时异常'], screenshots }));
+    assert.deepEqual(browserDownloads, [], '文件打开不能产生浏览器下载副本');
+    console.log(JSON.stringify({ success: true, providerCalls: 0, fileOpenRequests: openedFiles.length, checks: ['双栏等高与宽度', '视频/音频/字幕/记录本地打开', '文件夹定位', '三类分镜表格及按需加载', '详情预览与对应文件打开', '键盘打开关闭与焦点恢复', '关闭卸载媒体', '图片及视频失败状态', '空分镜列表', '390px表格及弹窗', '豆包参数保存及刷新', '无浏览器下载及运行时异常'], screenshots }));
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

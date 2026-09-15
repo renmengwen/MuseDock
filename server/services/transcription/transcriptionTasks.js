@@ -57,6 +57,9 @@ function createTranscriptionService(options = {}) {
   const pipeline = options.mediaPipeline || mediaPipeline;
   const jobs = new Map();
   const running = new Map();
+  const loading = new Map();
+  const deleting = new Set();
+  const deleted = new Set();
   let creating = false;
 
   function directory(id) {
@@ -64,7 +67,14 @@ function createTranscriptionService(options = {}) {
     return path.join(rootDir, id);
   }
 
+  function assertAvailable(id) {
+    directory(id);
+    if (deleted.has(id)) throw new TranscriptionError('TASK_NOT_FOUND', '转写记录已删除。', 404);
+    if (deleting.has(id)) throw new TranscriptionError('TASK_DELETING', '这条转写正在删除，请稍后刷新。', 409);
+  }
+
   async function save(job) {
+    assertAvailable(job.id);
     job.updatedAt = new Date().toISOString();
     const file = path.join(directory(job.id), 'task.json');
     await fsp.writeFile(`${file}.tmp`, JSON.stringify(job, null, 2), 'utf8');
@@ -119,6 +129,7 @@ function createTranscriptionService(options = {}) {
       const batch = await Promise.all(ids.slice(offset, offset + 20).map(async id => {
         try { return summarize(await load(id)); }
         catch (error) {
+          if (deleted.has(id) || deleting.has(id)) return null;
           if (error instanceof TranscriptionError && ['TASK_NOT_FOUND', 'TASK_INVALID'].includes(error.code)) {
             skippedCount += 1;
             return null;
@@ -130,25 +141,88 @@ function createTranscriptionService(options = {}) {
     }
     items.sort((left, right) => (Date.parse(right.createdAt) || 0) - (Date.parse(left.createdAt) || 0)
       || right.id.localeCompare(left.id));
-    return { items, skippedCount };
+    return { items: items.filter(item => !deleted.has(item.id) && !deleting.has(item.id)), skippedCount };
   }
 
   async function load(id) {
-    directory(id);
+    assertAvailable(id);
+    if (loading.has(id)) return loading.get(id);
     if (jobs.has(id)) return jobs.get(id);
-    let job;
-    try { job = JSON.parse(await fsp.readFile(path.join(directory(id), 'task.json'), 'utf8')); }
-    catch { throw new TranscriptionError('TASK_NOT_FOUND', '转写任务不存在或已被清理。', 404); }
-    if (!job || typeof job !== 'object' || Array.isArray(job) || job.id !== id) throw new TranscriptionError('TASK_INVALID', '转写任务数据无效。');
-    if (jobs.has(id)) return jobs.get(id);
-    jobs.set(id, job);
-    if (ACTIVE_STATUSES.has(job.status) && !running.has(id)) {
-      job.status = job.files?.rawJson ? 'partial' : 'interrupted';
-      if (job.files?.rawJson && job.autoCorrect) job.stage = 'correcting';
-      job.message = job.files?.rawJson ? '服务重启中断了任务，原始转写已保留。' : '服务重启中断了任务，请重新开始转写。';
-      await save(job);
+    // 合并冷读和中断恢复，删除必须等待恢复写盘结束。
+    const pending = (async () => {
+      let job;
+      try { job = JSON.parse(await fsp.readFile(path.join(directory(id), 'task.json'), 'utf8')); }
+      catch { throw new TranscriptionError('TASK_NOT_FOUND', '转写任务不存在或已被清理。', 404); }
+      assertAvailable(id);
+      if (!job || typeof job !== 'object' || Array.isArray(job) || job.id !== id) throw new TranscriptionError('TASK_INVALID', '转写任务数据无效。');
+      jobs.set(id, job);
+      if (ACTIVE_STATUSES.has(job.status) && !running.has(id)) {
+        job.status = job.files?.rawJson ? 'partial' : 'interrupted';
+        if (job.files?.rawJson && job.autoCorrect) job.stage = 'correcting';
+        job.message = job.files?.rawJson ? '服务重启中断了任务，原始转写已保留。' : '服务重启中断了任务，请重新开始转写。';
+        await save(job);
+      }
+      assertAvailable(id);
+      return job;
+    })();
+    loading.set(id, pending);
+    try { return await pending; }
+    finally { loading.delete(id); }
+  }
+
+  async function deletionDirectory(id) {
+    const target = directory(id);
+    try {
+      const stat = await fsp.lstat(target);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new TranscriptionError('DELETE_PATH_INVALID', '转写目录位置异常，已停止删除。', 409);
+      }
+      const [realRoot, realTarget] = await Promise.all([fsp.realpath(rootDir), fsp.realpath(target)]);
+      if (path.relative(realRoot, realTarget) !== id) {
+        throw new TranscriptionError('DELETE_PATH_INVALID', '转写目录位置异常，已停止删除。', 409);
+      }
+      return realTarget;
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      if (error instanceof TranscriptionError) throw error;
+      throw new TranscriptionError('DELETE_FAILED', '无法访问转写目录，请检查目录权限后重试。', 500);
     }
-    return job;
+  }
+
+  async function remove(id) {
+    directory(id);
+    if (creating || running.has(id) || deleting.has(id)) {
+      throw new TranscriptionError('TASK_BUSY', '转写或校订正在进行，请等待完成后再删除。', 409);
+    }
+    if (deleted.has(id) || !await deletionDirectory(id)) {
+      jobs.delete(id); deleted.add(id);
+      return { id, deleted: true };
+    }
+    const job = await load(id);
+    if (creating || running.has(id) || deleting.has(id) || ACTIVE_STATUSES.has(job.status)) {
+      throw new TranscriptionError('TASK_BUSY', '转写或校订正在进行，请等待完成后再删除。', 409);
+    }
+    deleting.add(id);
+    try {
+      // 只删除已解析到转写根目录正下方的任务目录，不跟随记录中的文件路径。
+      const target = await deletionDirectory(id);
+      if (target) {
+        try {
+          await (options.removeDirectory || fsp.rm)(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        } catch {
+          const message = '删除未完成，部分文件可能被占用，请关闭相关文件或检查目录权限后重试删除。';
+          Object.assign(job, { status: 'partial', stage: 'deleting', message, error: { code: 'DELETE_FAILED', message }, updatedAt: new Date().toISOString() });
+          // 部分删除失败时保留可重试的历史记录；不重建目录，也不写入异常路径。
+          try {
+            const remaining = await deletionDirectory(id);
+            if (remaining) await fsp.writeFile(path.join(remaining, 'task.json'), JSON.stringify(job, null, 2), 'utf8');
+          } catch {}
+          throw new TranscriptionError('DELETE_FAILED', message, 500);
+        }
+      }
+      jobs.delete(id); deleted.add(id);
+      return { id, deleted: true };
+    } finally { deleting.delete(id); }
   }
 
   async function configs(autoCorrect) {
@@ -313,6 +387,7 @@ function createTranscriptionService(options = {}) {
 
   return {
     list,
+    remove,
     async capabilities() {
       const asr = await (options.resolveAsrRuntime || mediaPipeline.resolveAsrRuntime)(options);
       const text = await (options.getTextConfig || aiModelConfig.getRuntimeConfig)('text', options);
@@ -344,7 +419,7 @@ function createTranscriptionService(options = {}) {
     async file(id, kind) { return verifiedFile(await load(id), kind); },
     async retryCorrection(id) {
       const job = await load(id);
-      if (creating || running.size || job.status !== 'partial' || job.stage !== 'correcting') {
+      if (creating || running.size || deleting.has(id) || deleted.has(id) || job.status !== 'partial' || job.stage !== 'correcting') {
         throw new TranscriptionError('CORRECTION_NOT_RETRYABLE', '该任务当前不能重试校订，请等待运行结束。', 409);
       }
       creating = true;

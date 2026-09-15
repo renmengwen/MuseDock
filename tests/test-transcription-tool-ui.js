@@ -26,7 +26,10 @@ async function run() {
   const app = express();
   const jobs = new Map();
   const submissions = [];
-  const downloadRequests = [];
+  const openRequests = [];
+  const deleteRequests = [];
+  let deleteFailure = false;
+  let fileOpenFailure = false;
   const detailDelays = new Map();
   const detailFailures = new Set();
   let historyFailure = false;
@@ -64,10 +67,15 @@ async function run() {
     }, number === 2 ? 1400 : 600);
   });
   app.get('/api/transcriptions/:id/files/:kind', (req, res) => {
-    downloadRequests.push({ id: req.params.id, kind: req.params.kind });
     const job = jobs.get(req.params.id);
     const text = req.params.kind.startsWith('corrected') ? job.result.correctedText : job.result.rawText;
     res.type('text/plain').send(req.params.kind.endsWith('Srt') ? `1\n00:00:00,100 --> 00:00:00,800\n${text}\n` : text);
+  });
+  app.post('/api/transcriptions/:id/files/:kind', (req, res) => {
+    openRequests.push({ id: req.params.id, kind: req.params.kind, target: req.body.target });
+    setTimeout(() => fileOpenFailure
+      ? res.status(500).json({ success: false, message: '测试：无法打开本地文件，请打开所在文件夹。' })
+      : res.json({ success: true }), 350);
   });
   app.get('/api/transcriptions/:id', (req, res) => {
     if (detailFailures.has(req.params.id)) return res.status(503).json({ message: '这条转写暂时无法读取，请重试。' });
@@ -76,6 +84,15 @@ async function run() {
     const snapshot = JSON.parse(JSON.stringify(job));
     const delays = detailDelays.get(req.params.id);
     setTimeout(() => res.json({ success: true, data: snapshot }), (Array.isArray(delays) ? delays.shift() : delays) || 0);
+  });
+  app.delete('/api/transcriptions/:id', (req, res) => {
+    if (req.body?.confirmed !== true) return res.status(400).json({ success: false, message: '请先确认删除。' });
+    deleteRequests.push(req.params.id);
+    setTimeout(() => {
+      if (deleteFailure) return res.status(500).json({ success: false, message: '测试：文件被占用，请关闭后重试删除。' });
+      jobs.delete(req.params.id);
+      res.json({ success: true, data: { id: req.params.id, deleted: true } });
+    }, 500);
   });
   app.get('/api/creative-workflows/modes', (_req, res) => res.json({ success: true, whiteboard: { visualPresets: [{ id: 'warm-paper-minimal-v1', name: '暖纸极简' }] } }));
   app.get('/api/creative-workflows', (_req, res) => res.json({ success: true, data: [] }));
@@ -92,6 +109,8 @@ async function run() {
     const context = await browser.newContext({ viewport: { width: 1360, height: 960 }, acceptDownloads: true });
     const page = await context.newPage();
     const errors = [];
+    const browserDownloads = [];
+    page.on('download', download => browserDownloads.push(download.suggestedFilename()));
     page.on('pageerror', error => errors.push(error.message));
     const appUrl = `http://127.0.0.1:${server.address().port}`;
     await page.goto(`${appUrl}/settings?section=models`);
@@ -145,21 +164,37 @@ async function run() {
 
     await page.goto(`${appUrl}/creative`);
     await page.getByRole('button', { name: '打开抖音转写工具' }).click();
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByRole('dialog', { name: '抖音转写', exact: true });
     const historyItem = id => dialog.locator(`[data-transcription-id="${id}"]`);
+    const deleteButton = id => dialog.locator(`[data-delete-transcription-id="${id}"]`);
+    async function openResultFile(label, id, kind, target = 'file') {
+      const responseWait = page.waitForResponse(response => response.request().method() === 'POST'
+        && response.url().endsWith(`/api/transcriptions/${id}/files/${kind}`));
+      await dialog.getByRole('button', { name: label, exact: true }).click();
+      assert.equal(await dialog.getByRole('button', { name: label, exact: true }).isDisabled(), true, '打开期间应禁止重复点击');
+      assert.equal(await dialog.getByRole('button', { name: '新建转写', exact: true }).isDisabled(), true);
+      const response = await responseWait;
+      assert.equal(response.status(), 200);
+      assert.equal((await response.json()).success, true);
+      await dialog.getByRole('status').filter({ hasText: '已请求系统打开' }).waitFor();
+      assert.deepEqual(openRequests.at(-1), { id, kind, target });
+    }
     await dialog.getByText('还没有转写记录', { exact: true }).waitFor();
     await dialog.getByRole('textbox', { name: '抖音链接或分享文案' }).fill('https://www.douyin.com/video/1234567890');
     await dialog.getByRole('button', { name: '开始转写', exact: true }).click();
     await dialog.getByText('正在启动 FunASR 并加载模型...', { exact: true }).waitFor();
     assert.equal(await dialog.getByRole('button', { name: '新建转写', exact: true }).isDisabled(), true);
+    assert.equal(await deleteButton('fixture-1').isDisabled(), true, '运行中的转写不能删除');
     await dialog.getByText('转写完成，原始文本和字幕已保存。', { exact: true }).waitFor();
     assert.deepEqual(submissions.map(item => item.autoCorrect), [false]);
     assert.equal(await dialog.getByRole('tab', { name: '校订版' }).isDisabled(), true);
-    const downloadEvent = page.waitForEvent('download');
-    await dialog.getByRole('button', { name: '下载 SRT' }).click();
-    const download = await downloadEvent;
-    assert.equal(download.suggestedFilename(), 'rawSrt.srt');
-    assert.match(fs.readFileSync(await download.path(), 'utf8'), /00:00:00,100 --> 00:00:00,800/);
+    await openResultFile('打开 SRT', 'fixture-1', 'rawSrt');
+    fileOpenFailure = true;
+    await dialog.getByRole('button', { name: '打开 TXT', exact: true }).click();
+    await dialog.getByRole('alert').filter({ hasText: '测试：无法打开本地文件' }).waitFor();
+    assert.equal(await dialog.getByRole('button', { name: '打开 TXT', exact: true }).isEnabled(), true, '失败后应结束 loading');
+    fileOpenFailure = false;
+    await openResultFile('打开所在文件夹', 'fixture-1', 'rawSrt', 'folder');
 
     await dialog.getByRole('button', { name: '新建转写', exact: true }).click();
     assert.equal(await dialog.getByRole('textbox', { name: '抖音链接或分享文案' }).inputValue(), '');
@@ -178,8 +213,12 @@ async function run() {
     assert.deepEqual(submissions.map(item => item.autoCorrect), [false, true]);
     assert.equal(await dialog.getByRole('tab', { name: '校订版' }).getAttribute('aria-selected'), 'true');
     assert.equal(await dialog.getByRole('tabpanel').innerText(), '窗前的月光。');
+    await openResultFile('打开 SRT', 'fixture-2', 'correctedSrt');
+    await openResultFile('打开 TXT', 'fixture-2', 'correctedText');
+    await openResultFile('打开校订记录', 'fixture-2', 'corrections');
     await dialog.getByRole('tab', { name: '原始转写' }).click();
     assert.equal(await dialog.getByRole('tabpanel').innerText(), '窗钱的月光。');
+    await openResultFile('打开 SRT', 'fixture-2', 'rawSrt');
 
     const search = dialog.getByRole('textbox', { name: '搜索转写历史' });
     await search.fill('家乡');
@@ -211,11 +250,7 @@ async function run() {
     detailFailures.clear();
     await dialog.getByRole('button', { name: '重新加载这条转写', exact: true }).click();
     await dialog.getByRole('tabpanel').getByText('家向的月光。', { exact: true }).waitFor();
-    const oldDownloadEvent = page.waitForEvent('download');
-    await dialog.getByRole('button', { name: '下载 SRT' }).click();
-    const oldDownload = await oldDownloadEvent;
-    assert.deepEqual(downloadRequests.at(-1), { id: 'fixture-1', kind: 'rawSrt' });
-    assert.match(fs.readFileSync(await oldDownload.path(), 'utf8'), /家向的月光/);
+    await openResultFile('打开 SRT', 'fixture-1', 'rawSrt');
 
     historyFailure = true;
     await dialog.getByRole('button', { name: '刷新转写历史', exact: true }).click();
@@ -282,8 +317,72 @@ async function run() {
       })));
     }
     assert.ok(box.x >= 0 && box.x + box.width <= 391, '窄屏弹框不应溢出视口');
+
+    // 取消和 Escape 只关闭确认框，主弹框、当前记录及焦点都必须保留。
+    const confirmation = page.getByRole('dialog', { name: '删除这条转写？', exact: true });
+    await deleteButton('fixture-1').click();
+    await confirmation.getByText(/此操作无法恢复/).waitFor();
+    assert.equal(deleteRequests.length, 0, '打开确认框不能发起删除');
+    await page.screenshot({ path: path.join(os.tmpdir(), 'musedock-transcription-delete-confirm.png'), fullPage: true });
+    await confirmation.getByRole('button', { name: '取消', exact: true }).click();
+    await confirmation.waitFor({ state: 'hidden' });
+    await dialog.waitFor();
+    assert.equal(await historyItem('fixture-2').getAttribute('aria-pressed'), 'true', '取消不能改变当前查看的记录');
+    assert.equal(await deleteButton('fixture-1').evaluate(element => element === document.activeElement), true, '取消后焦点回到原删除按钮');
+    assert.equal(deleteRequests.length, 0);
+    await deleteButton('fixture-1').click();
+    await confirmation.waitFor();
+    await page.keyboard.press('Escape');
+    await confirmation.waitFor({ state: 'hidden' });
+    await dialog.waitFor();
+    assert.equal(await dialog.getByRole('tabpanel').innerText(), '窗前的月光。');
+    assert.equal(deleteRequests.length, 0);
+
+    deleteFailure = true;
+    await deleteButton('fixture-1').click();
+    await confirmation.getByRole('button', { name: '确认删除', exact: true }).click();
+    assert.equal(await confirmation.getByRole('button', { name: '正在删除...', exact: true }).isDisabled(), true);
+    assert.equal(await confirmation.getByRole('button', { name: '取消', exact: true }).isDisabled(), true);
+    await page.keyboard.press('Escape');
+    assert.equal(await confirmation.isVisible(), true, '删除期间不能关闭确认框');
+    await confirmation.getByRole('alert').filter({ hasText: '测试：文件被占用' }).waitFor();
+    assert.equal(await confirmation.getByRole('button', { name: '确认删除', exact: true }).isEnabled(), true);
+    assert.equal(jobs.size, 2, '删除失败不能从历史移除记录');
+    await confirmation.getByRole('button', { name: '取消', exact: true }).click();
+    await confirmation.waitFor({ state: 'hidden' });
+    deleteFailure = false;
+
+    // 先发出的历史快照晚于删除返回，不能把已删记录加回来。
+    historyDelay = 1600;
+    const historyBeforeDelete = page.waitForResponse(response => response.request().method() === 'GET'
+      && response.url().endsWith('/api/transcriptions'));
+    await dialog.getByRole('button', { name: '刷新转写历史', exact: true }).click();
+    await deleteButton('fixture-1').click();
+    await confirmation.getByRole('button', { name: '确认删除', exact: true }).click();
+    await confirmation.waitFor({ state: 'hidden' });
+    await dialog.getByText('已删除这条转写及其全部本地文件。', { exact: true }).waitFor();
+    await historyBeforeDelete;
+    historyDelay = 0;
+    assert.equal(await historyItem('fixture-1').count(), 0);
+    assert.equal(await historyItem('fixture-2').getAttribute('aria-pressed'), 'true', '删除其他记录不能打断当前查看');
+    assert.equal(await dialog.getByRole('tabpanel').innerText(), '窗前的月光。');
+    await page.screenshot({ path: path.join(os.tmpdir(), 'musedock-transcription-after-delete.png'), fullPage: true });
+
+    await deleteButton('fixture-2').click();
+    await confirmation.getByRole('button', { name: '确认删除', exact: true }).click();
+    await confirmation.waitFor({ state: 'hidden' });
+    await dialog.getByText('还没有转写记录', { exact: true }).waitFor();
+    assert.equal(await dialog.getByRole('tabpanel').count(), 0);
+    assert.equal(await dialog.getByRole('textbox', { name: '抖音链接或分享文案' }).inputValue(), '');
+    assert.equal(await page.evaluate(() => localStorage.getItem('musedock.transcription.last-task')), null);
+    assert.deepEqual(deleteRequests, ['fixture-1', 'fixture-1', 'fixture-2']);
+    await page.reload();
+    await page.getByRole('button', { name: '打开抖音转写工具' }).click();
+    await dialog.getByText('还没有转写记录', { exact: true }).waitFor();
+    assert.equal(submissions.length, 2, '删除和刷新不能重新提交转写');
     assert.deepEqual(errors, [], '页面不应发生 JavaScript 异常');
-    console.log('浏览器烟测通过：历史检索与切换、并行查看、响应乱序保护、失败重试、旧记录下载、刷新恢复、默认 FunASR 与窄屏布局。');
+    assert.deepEqual(browserDownloads, [], '打开本地文件不能产生浏览器下载副本');
+    console.log('浏览器烟测通过：历史与本地文件打开、删除确认/取消/Escape、失败重试、删除后的状态与缓存清理、迟到响应保护、刷新恢复及窄屏布局。');
     console.log(`截图：${path.join(os.tmpdir(), 'musedock-transcription-desktop.png')}`);
     console.log(`截图：${path.join(os.tmpdir(), 'musedock-transcription-mobile.png')}`);
   } finally {

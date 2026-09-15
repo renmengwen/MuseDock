@@ -1,4 +1,7 @@
-import { Play } from 'lucide-react';
+import { FileVideo, FolderOpen, LoaderCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button.jsx';
+import { resolveLocalFileUrl } from '@/api/client.js';
+import { useLocalFileActions } from '@/hooks/useLocalFileActions.js';
 import { EditorInlineActions, EditorPanel, EditorPanelHeader } from './editorUi.jsx';
 
 function getExportLabel(item, index) {
@@ -25,11 +28,6 @@ export function getExportPlaybackUrl(item, resolver) {
   return item?.url || item?.output_url || item?.playback_url || '';
 }
 
-function openPlaybackUrl(url) {
-  if (!url || typeof window === 'undefined') return;
-  window.open(url, '_blank', 'noopener,noreferrer');
-}
-
 export function ExportsPanel({
   exportsList = [],
   disabled,
@@ -37,41 +35,43 @@ export function ExportsPanel({
   onExport,
   onRefresh,
   getExportPlaybackUrl: resolveExportPlaybackUrl,
-  onPlay = openPlaybackUrl,
 }) {
+  const fileActions = useLocalFileActions();
   return (
     <EditorPanel>
       <EditorPanelHeader>
         <h3>导出记录</h3>
         <EditorInlineActions>
-          <button type="button" disabled={disabled} onClick={onRefresh}>刷新</button>
-          <button type="button" disabled={disabled} onClick={() => onExport({})}>
+          <Button variant="outline" size="sm" disabled={disabled || fileActions.opening} onClick={onRefresh}>刷新</Button>
+          <Button variant="outline" size="sm" disabled={disabled || fileActions.opening} onClick={() => onExport({})}>
             {exporting ? '正在导出成片...' : '导出成片'}
-          </button>
+          </Button>
         </EditorInlineActions>
       </EditorPanelHeader>
       {exportsList.length ? exportsList.map((item, index) => {
         const playbackUrl = getExportPlaybackUrl(item, resolveExportPlaybackUrl);
+        const fileUrl = resolveLocalFileUrl(playbackUrl);
         return (
-          <div className="flex items-center justify-between gap-2 border-t border-[#e5e7eb] pt-2 text-xs text-[#4b5563] [&_strong]:break-all [&_strong]:text-[#111827]" key={item.id || item.path || index}>
+          <div className="grid gap-2 border-t border-[#e5e7eb] pt-2 text-xs text-[#4b5563] [&_strong]:break-all [&_strong]:text-[#111827]" key={item.id || item.path || index}>
             <div className="grid min-w-0 gap-[3px]">
               <strong>{getExportLabel(item, index)}</strong>
               <span>{formatExportTime(item.created_at) || item.status || '已生成'}</span>
             </div>
-            <button
-              type="button"
-              className="inline-flex flex-none items-center gap-1"
-              disabled={disabled || !playbackUrl}
-              title={playbackUrl ? '播放导出成片' : '暂无可播放文件'}
-              aria-label={`播放导出成片：${getExportLabel(item, index)}`}
-              onClick={() => onPlay(playbackUrl, item)}
-            >
-              <Play size={14} aria-hidden="true" />
-              播放
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" disabled={disabled || fileActions.opening || !fileUrl}
+                title={fileUrl ? '用系统默认程序打开导出成片' : '暂无可打开的本地文件'}
+                aria-label={`打开本地视频：${getExportLabel(item, index)}`}
+                onClick={() => void fileActions.openFile(fileUrl, '导出成片')}><FileVideo size={14} />打开本地视频</Button>
+              <Button variant="outline" size="sm" disabled={disabled || fileActions.opening || !fileUrl}
+                aria-label={`打开所在文件夹：${getExportLabel(item, index)}`}
+                onClick={() => void fileActions.openFile(fileUrl, '导出成片', 'folder')}><FolderOpen size={14} />打开所在文件夹</Button>
+            </div>
           </div>
         );
       }) : <p>暂无导出记录</p>}
+      {fileActions.message && <p role={fileActions.error ? 'alert' : 'status'} className={`m-0 flex items-center gap-2 text-xs ${fileActions.error ? 'text-danger' : 'text-fg-3'}`}>
+        {fileActions.opening && <LoaderCircle size={14} className="animate-spin" />}{fileActions.message}
+      </p>}
     </EditorPanel>
   );
 }

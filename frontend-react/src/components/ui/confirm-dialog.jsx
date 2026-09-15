@@ -22,6 +22,7 @@ export function ConfirmDialog({
   destructive = false,
   loading = false,
   onConfirm,
+  onCloseAutoFocus,
 }) {
   return (
     <Dialog
@@ -31,7 +32,7 @@ export function ConfirmDialog({
         onOpenChange(value);
       }}
     >
-      <DialogContent className="w-[min(480px,calc(100vw-32px))]" showCloseButton={false}>
+      <DialogContent className="w-[min(480px,calc(100vw-32px))]" showCloseButton={false} onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}

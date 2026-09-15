@@ -65,7 +65,7 @@ function SceneVideo({ src, canvas }) {
   const [status, setStatus] = useState('loading');
   return (
     <div className="relative mx-auto w-full overflow-hidden rounded-md border border-line-1 bg-ink" style={previewStyle(canvas)}>
-      <video src={src} controls playsInline preload="metadata" onLoadedMetadata={() => setStatus('ready')} onError={() => setStatus('failed')} className="block h-full w-full object-contain" aria-label="当前单幕视频">
+      <video src={src} controls controlsList="nodownload" playsInline preload="metadata" onLoadedMetadata={() => setStatus('ready')} onError={() => setStatus('failed')} className="block h-full w-full object-contain" aria-label="当前单幕视频">
         当前浏览器不支持直接播放视频。
       </video>
       {status === 'loading' ? <div role="status" className="absolute inset-0 flex items-center justify-center gap-2 bg-page text-sm text-fg-3"><Loader2 size={16} className="animate-spin" />正在加载单幕视频...</div> : null}
@@ -74,7 +74,7 @@ function SceneVideo({ src, canvas }) {
   );
 }
 
-export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas = { width: 1920, height: 1080 }, getUrl, renderDownload,
+export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas = { width: 1920, height: 1080 }, getUrl, renderOpenFile, fileStatus, onFileContextChange,
   onReviewLowCoverage, onRecoverAnnotationPreview, recoveringPreview = false, actionsDisabled = false }) {
   const [selectedSceneId, setSelectedSceneId] = useState('');
   const triggerRef = useRef(null);
@@ -92,6 +92,7 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
       return;
     }
     triggerRef.current = event.target.closest('button') || event.currentTarget.querySelector('button');
+    onFileContextChange?.();
     setSelectedSceneId(scene.sceneId);
   }
 
@@ -164,10 +165,14 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
               : <WhiteboardRequestDetails scene={selected} canRecover={selected.attempt.status === 'failed' && Boolean(selected.attempt.received?.candidate && onRecoverAnnotationPreview)} /> : null}
           </div>
           <DialogFooter className="shrink-0 border-t border-line-1 p-4 sm:justify-between">
-            <div className="flex flex-wrap gap-2">
-              {stage === 'lineart_generation' ? renderDownload(selected.image, '下载线稿') : null}
-              {stage === 'annotation_drafting' ? <>{renderDownload(selected.preview, '下载落墨预览')}{renderDownload(selected.resultPreview, '下载当前落墨效果')}{renderDownload(selected.annotation, '下载区域编排')}</> : null}
-              {stage === 'scene_render' ? renderDownload(selected.video, '下载单幕视频') : null}
+            <div className="grid gap-2">
+              <div className="flex flex-wrap gap-2">
+                {stage === 'lineart_generation' ? renderOpenFile(selected.image, '打开线稿') : null}
+                {stage === 'annotation_drafting' ? <>{renderOpenFile(selected.preview, '打开落墨预览')}{renderOpenFile(selected.resultPreview, '打开当前落墨效果')}{renderOpenFile(selected.annotation, '打开区域编排')}</> : null}
+                {stage === 'scene_render' ? renderOpenFile(selected.video, '打开单幕视频') : null}
+                {renderOpenFile(selected[settings.file], '打开所在文件夹', 'folder')}
+              </div>
+              {fileStatus}
             </div>
             <DialogClose asChild><Button variant="outline">关闭详情</Button></DialogClose>
           </DialogFooter>

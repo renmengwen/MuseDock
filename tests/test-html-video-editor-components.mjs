@@ -179,7 +179,7 @@ assert.ok(naturalEdit.includes('编辑已应用，需要重新渲染'), 'natural
 const exportsPanel = fs.readFileSync('frontend-react/src/components/creative-video-editor/ExportsPanel.jsx', 'utf-8');
 assert.ok(exportsPanel.includes('正在导出成片'), 'exports panel should show export loading text');
 assert.ok(exportsPanel.includes('导出成片'), 'exports panel should provide export action');
-assert.ok(exportsPanel.includes('播放'), 'exports panel should provide a playback action for each export record');
+assert.ok(exportsPanel.includes('打开本地视频'), 'exports panel should open the saved local video for each export record');
 assert.ok(exportsPanel.includes('formatExportTime'), 'exports panel should format export timestamps before rendering');
 assert.match(exportsPanel, /toLocaleString\('zh-CN'/, 'exports panel should render export timestamps in local Chinese format');
 assert.ok(exportsPanel.includes('getExportPlaybackUrl'), 'exports panel should resolve a safe playback URL for exported videos');

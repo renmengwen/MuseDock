@@ -120,7 +120,24 @@ function streamJsonSse(url, payload, handlers = {}) {
   };
 }
 
+export function resolveLocalFileUrl(value, origin = globalThis.location?.origin || 'http://localhost') {
+  try {
+    const url = new URL(value, origin);
+    if (url.origin !== origin || url.username || url.password) return '';
+    return /^\/api\/(?:transcriptions\/[^/]+\/files\/[^/]+|creative-workflows\/[^/]+\/(?:whiteboard\/media\/[^/]+|html-video-project\/(?:files\/.+|exports\/[^/]+\/file)))$/.test(url.pathname)
+      ? url.pathname : '';
+  } catch { return ''; }
+}
+
 export const api = {
+  openLocalFile(fileUrl, target = 'file') {
+    const url = resolveLocalFileUrl(fileUrl);
+    if (!url) return Promise.reject(new Error('没有可打开的本地文件，请重新加载这条记录。'));
+    return requestJson(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target }),
+      signal: AbortSignal.timeout(20000),
+    });
+  },
   getTranscriptionCapabilities() {
     return requestJson('/api/transcriptions/capabilities', { signal: AbortSignal.timeout(15000) });
   },
@@ -135,6 +152,12 @@ export const api = {
   },
   getTranscription(id) {
     return requestJson(`/api/transcriptions/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(15000) });
+  },
+  deleteTranscription(id) {
+    return requestJson(`/api/transcriptions/${encodeURIComponent(id)}`, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmed: true }),
+      signal: AbortSignal.timeout(60000),
+    });
   },
   retryTranscriptionCorrection(id) {
     return requestJson(`/api/transcriptions/${encodeURIComponent(id)}/corrections/retry`, {
