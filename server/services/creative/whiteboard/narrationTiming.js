@@ -2,7 +2,8 @@ const { WhiteboardError, sha256 } = require('./contracts');
 
 function letters(text) { return Array.from(String(text).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')); }
 function splitCaption(text, language = 'zh-CN', aspectRatio = '16:9') {
-  const limit = language === 'zh-CN' ? (aspectRatio === '9:16' ? 32 : 48) : (aspectRatio === '9:16' ? 64 : 96);
+  const chineseLimit = aspectRatio === '9:16' ? 32 : aspectRatio === '4:3' ? 36 : 48;
+  const limit = language === 'zh-CN' ? chineseLimit : chineseLimit * 2;
   const parts = [];
   let rest = text;
   while (Array.from(rest).length > limit) {

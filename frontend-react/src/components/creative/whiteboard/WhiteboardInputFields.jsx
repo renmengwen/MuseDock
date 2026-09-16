@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea.jsx';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.jsx';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select.jsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog.jsx';
-import { validateWhiteboardDraft } from './whiteboardForm.js';
+import { validateWhiteboardDraft, WHITEBOARD_CANVAS_FORMATS } from './whiteboardForm.js';
 import { cn } from '@/lib/utils.js';
 
 export function LabeledSelect({ label, value, onChange, options, disabled = false }) {
@@ -54,10 +54,8 @@ export function WhiteboardInputFields({ draft, onChange, catalog, disabled }) {
   const active = INPUTS.find(item => item.id === draft.inputMode);
   const value = draft.contents[draft.inputMode];
   const validation = value.trim() ? validateWhiteboardDraft(draft) : '';
-  const canvasFormats = catalog?.canvasFormats || [
-    { id: '16:9', label: '横屏 16:9', width: 1920, height: 1080 },
-    { id: '9:16', label: '竖屏 9:16', width: 1080, height: 1920 },
-  ];
+  const canvasFormats = catalog?.canvasFormats || WHITEBOARD_CANVAS_FORMATS;
+  const selectedPreset = catalog?.visualPresets?.find(preset => preset.id === draft.visualStylePreset);
   const change = patch => onChange({ ...draft, ...patch });
   return (
     <div className="grid gap-4">
@@ -76,7 +74,7 @@ export function WhiteboardInputFields({ draft, onChange, catalog, disabled }) {
       {validation ? <p id="whiteboard-input-error" className="m-0 text-xs text-danger" role="alert">{validation}</p> : null}
       <div className="grid gap-2" role="group" aria-label="白板视频画幅">
         <span className="text-xs font-semibold text-fg-2">视频画幅</span>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2 max-[440px]:grid-cols-1">
           {canvasFormats.map(format => {
             const selected = (draft.aspectRatio || '16:9') === format.id;
             const Icon = format.height > format.width ? Smartphone : Monitor;
@@ -100,6 +98,7 @@ export function WhiteboardInputFields({ draft, onChange, catalog, disabled }) {
         <LabeledSelect label={draft.productionPlan.narrationMode === 'disabled' ? '正文与字幕语言' : '旁白语言'} value={draft.narrationLanguage} disabled={disabled} onChange={narrationLanguage => change({ narrationLanguage })} options={catalog?.languages || []} />
         <LabeledSelect label="视觉模板" value={draft.visualStylePreset} disabled={disabled} onChange={visualStylePreset => change({ visualStylePreset })} options={catalog?.visualPresets || []} />
       </div>
+      {selectedPreset?.description ? <p className="m-0 text-xs leading-6 text-fg-3">{selectedPreset.description}</p> : null}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-1 pt-3">
         <p className="m-0 text-xs text-fg-3">先确认方案，再进入制作。两种模式的草稿分别保留。</p>
         <Button type="button" variant="ghost" size="sm" disabled={disabled} className="max-[760px]:min-h-11" onClick={() => setSettingsOpen(true)}><Settings2 size={14} />制作设置</Button>

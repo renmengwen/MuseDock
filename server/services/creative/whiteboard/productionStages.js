@@ -1,6 +1,6 @@
 const fsp = require('fs/promises');
 const path = require('path');
-const { WhiteboardError, sha256, canvasFor } = require('./contracts');
+const { WhiteboardError, sha256, canvasFor, renderingFor, HANDWRITTEN_PRESET_ID } = require('./contracts');
 const store = require('./mediaStore');
 const models = require('./mediaModels');
 const { safeVisionDiagnostics } = require('./visionDiagnostics');
@@ -49,7 +49,7 @@ async function narrationStage(ctx, artifact) {
   const planned = silent && artifact.timingKind === 'provisional';
   if (!silent && ctx.voice.service.contractHash !== media.voiceService.contractHash) throw new WhiteboardError('VOICE_CONFIG_CHANGED', '旁白服务或声音参数已变化，请重新确认制作设置后生成新版本。', 409);
   const inputIdentity = sha256({ text: artifact.narrationText, language: artifact.narrationLanguage, cues: artifact.cues,
-    ...(artifact.aspectRatio === '9:16' ? { captionLayout: '9:16' } : {}),
+    ...(['9:16', '4:3'].includes(artifact.aspectRatio) ? { captionLayout: artifact.aspectRatio } : {}),
     scenes: artifact.scenes.map(({ id, cueIds, startMs, endMs }) => ({ id, cueIds, startMs, endMs })),
     ...(planned ? { timingKind: 'planned' } : {}),
     voice: planned ? '' : media.voiceService.contractHash, silent, take: media.narrationTake || 0 });
@@ -205,9 +205,12 @@ async function generateLineartCandidate(ctx, artifact, scene) {
       await ctx.publish(item, { rawImage: { path: raw, kind: 'provider_image', name: `${scene.title}原始图`, sceneId: scene.id, mime: 'application/octet-stream' } });
     }
     const output = path.join(directory, 'lineart.png');
-    await ctx.tools.python('normalize-image', { input: raw, output, canvas: canvasFor(artifact.aspectRatio) }, ctx.processOptions);
+    const rendering = renderingFor(artifact.visualStyle);
+    await ctx.tools.python('normalize-image', { input: raw, output, canvas: canvasFor(artifact.aspectRatio),
+      ...(rendering ? { rendering } : {}) }, ctx.processOptions);
     await ctx.publish(item, { image: { path: output, kind: 'lineart', name: scene.title, sceneId: scene.id, mime: 'image/png' } }, (current, files, now) => {
-      current.whiteboard.media.lineart[scene.id] = store.bind({ kind: 'lineart', sceneId: scene.id, inputIdentity, image: files.image });
+      current.whiteboard.media.lineart[scene.id] = store.bind({ kind: 'lineart', sceneId: scene.id, inputIdentity, image: files.image,
+        ...(scene.imageTexts ? { imageTexts: scene.imageTexts } : {}) });
       Object.assign(current.whiteboard.media.attempts.find(row => row.id === item.id), { status: 'validated', completedAt: now });
       if (current.whiteboard.media.activeAttemptId === item.id) current.whiteboard.media.activeAttemptId = '';
     });
@@ -259,7 +262,9 @@ async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
     const revision = record.whiteboard.media.overrides[`annotation_drafting:${scene.id}`] || '';
     const input = { scene, cues: timing.cues.filter(cue => scene.cueIds.includes(cue.id)), revision, canvas,
       imageSha256: lineart.image.sha256, timingIdentity: record.whiteboard.media.current.full_narration.identity };
-    const { prompt, inputIdentity } = models.annotationInput(input);
+    input.visualStyle = artifact.visualStyle;
+    input.imageTexts = artifact.scenes.find(item => item.id === scene.id)?.imageTexts;
+    const { prompt, inputIdentity, planningContract } = models.annotationInput(input);
     const pending = record.whiteboard.media.lowCoverage?.find(entry => entry.sceneId === scene.id);
     if (pending) {
       await store.validateBinding(record, pending, ctx.rootDir);
@@ -272,7 +277,7 @@ async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
     if (await reuseHistory(ctx, 'annotations', scene.id, inputIdentity)) return { reused: true };
     item = await ctx.attempt('annotation_drafting', scene.id, true, inputIdentity);
     await models.structuredVision({ textConfig: ctx.config, images: [image], services: ctx.services,
-      validate: candidate => models.validateAnnotation(candidate, canvas), reasoningEffort: 'medium', prompt,
+      validate: candidate => models.validateAnnotation(candidate, canvas, artifact.visualStyle, scene), reasoningEffort: 'medium', prompt,
       onRequest: async repair => {
         if (repair) {
           // 每次实际请求单独登记；格式补正与覆盖率修正共用一次补正预算。
@@ -294,7 +299,7 @@ async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
         await ctx.requesting(item.id);
       },
       assessCandidate: async candidate => {
-        const annotation = models.materializeAnnotation(candidate, scene, lineart.image.sha256, record.whiteboard.media.current.full_narration.identity, canvas);
+        const annotation = models.materializeAnnotation(candidate, scene, lineart.image.sha256, record.whiteboard.media.current.full_narration.identity, canvas, artifact.visualStyle);
         const candidateFile = await ctx.jsonFile(item, 'candidate.json', candidate);
         const annotationFile = await ctx.jsonFile(item, 'annotation.json', annotation);
         await ctx.publish(item, { candidate: { path: candidateFile, kind: 'annotation_candidate', name: '区域候选', sceneId: scene.id, mime: 'application/json' } });
@@ -322,7 +327,7 @@ async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
         }, (current, files, now) => {
           const media = current.whiteboard.media;
           media.lowCoverage = (media.lowCoverage || []).filter(entry => entry.sceneId !== scene.id);
-          const binding = { sceneId: scene.id, inputIdentity, planningContract: models.ANNOTATION_PLANNING_CONTRACT,
+          const binding = { sceneId: scene.id, inputIdentity, planningContract,
             visualGrouping: candidate.visualGrouping, ...files, coverage,
             ...(repairSource ? { coverageRepair: { sourceAttemptId: repairSource.attemptId, sourceIdentity: repairSource.identity } } : {}) };
           if (coverageError) {
@@ -497,7 +502,8 @@ async function reviewGate(ctx, artifact) {
     const files = media.stage === 'lineart_generation' ? [scene.image] : media.stage === 'annotation_drafting' ? [scene.preview] : scene.frames;
     const plan = artifact.scenes.find(item => item.id === scene.sceneId);
     const context = { sceneId: scene.sceneId, title: plan?.title,
-      narration: artifact.cues.filter(cue => plan?.cueIds.includes(cue.id)).map(cue => cue.text).join('\n') };
+      narration: artifact.cues.filter(cue => plan?.cueIds.includes(cue.id)).map(cue => cue.text).join('\n'),
+      ...(plan?.imageTexts ? { imageTexts: plan.imageTexts } : {}) };
     if (media.stage === 'annotation_drafting') {
       const annotation = await store.readData(record, scene.annotation, ctx.rootDir);
       context.visualGrouping = scene.visualGrouping || null;
@@ -514,17 +520,21 @@ async function reviewGate(ctx, artifact) {
     const subset = images.slice(offset, offset + 6);
     const contexts = sceneContexts.slice(offset, offset + 6);
     const annotationSceneIds = media.stage === 'annotation_drafting' ? contexts.map(scene => scene.sceneId) : [];
-    const annotationInstructions = annotationSceneIds.length
+    const imageTextScenes = media.stage === 'lineart_generation' && artifact.visualStyle.id === HANDWRITTEN_PRESET_ID ? contexts : [];
+    const annotationInstructions = annotationSceneIds.length && artifact.visualStyle.id === HANDWRITTEN_PRESET_ID
+      ? '按语义逐幕核对标题、人物、完整词组、气泡、关系线与结论，矩形或 polygon 不得切断笔迹；顺序应符合叙事，不按真实汉字笔顺判断。允许最多 24 个区域，不能要求合并成 1–3 区。sceneReviews 逐幕返回 {sceneId,groupsMatchImage,orderMatchesNarration,reason}，reason 为 8–600 字具体依据；错误分区或遗漏时 groupsMatchImage=false，错序时 orderMatchesNarration=false。'
+      : annotationSceneIds.length
       ? '逐幕独立检查实际图像，候选 visualGrouping 仅是待核实说明。多个可独立揭示的视觉簇被一个大框合并时，groupsMatchImage=false；切断连续主体、边界横穿有效墨迹或遗漏主体也必须为 false。真正不可分割的构图允许单区域，不能强制拆成 2–3 个。核对 elements 的顺序与该幕旁白事件，错序时 orderMatchesNarration=false。覆盖率高不代表分组正确。sceneReviews 必须逐幕返回 {sceneId,groupsMatchImage,orderMatchesNarration,reason}，reason 需用 8–600 字说明具体视觉依据。'
       : '';
     const item = await ctx.attempt(`review_${media.stage}`, '', true, binding.identity);
     const findings = await models.structuredVision({ textConfig: ctx.config, images: subset, services: ctx.services,
       onRequest: () => ctx.requesting(item.id),
-      validate: candidate => models.validateVisualReview(candidate, { imageCount: subset.length, annotationSceneIds }),
+      validate: candidate => models.validateVisualReview(candidate, { imageCount: subset.length, annotationSceneIds, imageTextScenes }),
       reasoningEffort: annotationSceneIds.length ? 'medium' : 'low',
-      prompt: `检查全部 ${subset.length} 张当前白板图像。阶段 ${media.stage}。${media.stage === 'scene_render' ? '这里是各幕按早、中、晚顺序抽取的真实渲染帧，不是完整视频；结合逐帧解码已通过的事实检查可见遮挡、逐步揭示与结尾画面，不声称完整观看或试听。' : '检查内容是否符合方案、字形是否清晰、构图与区域边界是否合理。'}\n${annotationInstructions}\n内容方案：${artifact.summary}\n按图像输入顺序的逐幕上下文：${JSON.stringify(contexts)}\n返回 JSON，包含 passed 布尔值、具体中文 summary、issues 字符串数组、imageCount=${subset.length}${annotationSceneIds.length ? '，以及 sceneReviews 数组' : ''}。按实际观察决定是否通过，存在严重问题时 passed=false 并具体说明，不能给出批准或修改状态。`,
+      prompt: `检查全部 ${subset.length} 张当前白板图像。阶段 ${media.stage}。${media.stage === 'scene_render' ? '这里是各幕按早、中、晚顺序抽取的真实渲染帧，不是完整视频；结合逐帧解码已通过的事实检查可见遮挡、逐步揭示与结尾画面，不声称完整观看或试听。' : '检查内容是否符合方案、字形是否清晰、构图与区域边界是否合理。'}\n${annotationInstructions}\n${imageTextScenes.length ? '从每张实图读取全部文字，再与 imageTexts 原文逐字比对。textReviews 逐幕返回 {sceneId,observedTexts,reason}，observedTexts 按完整词组列出，包括额外文字和标点，不照抄清单；不可辨认处明确记录。reason 为 8–600 字。错字、漏字或多余文字均为问题；检查纯白纸面、红蓝文字原色和底部字幕安全留白。' : ''}\n内容方案：${artifact.summary}\n按图像输入顺序的逐幕上下文：${JSON.stringify(contexts)}\n返回 JSON，包含 passed 布尔值、具体中文 summary、issues 字符串数组、imageCount=${subset.length}${annotationSceneIds.length ? '，以及 sceneReviews 数组' : ''}${imageTextScenes.length ? '，以及 textReviews 数组' : ''}。按实际观察决定是否通过，存在严重问题时 passed=false 并具体说明，不能给出批准或修改状态。`,
     });
-    const issues = annotationSceneIds.length ? models.annotationReviewIssues(findings) : findings.issues;
+    const issues = [...(annotationSceneIds.length ? models.annotationReviewIssues(findings) : findings.issues),
+      ...(imageTextScenes.length ? models.imageTextReviewIssues(findings, imageTextScenes) : [])];
     const resultFile = await ctx.jsonFile(item, 'findings.json', findings);
     await ctx.publish(item, { findings: { path: resultFile, kind: 'visual_findings', name: '视觉检查记录', mime: 'application/json' } }, (current, files, now) => {
       Object.assign(current.whiteboard.media.attempts.find(row => row.id === item.id), { status: 'validated', completedAt: now });

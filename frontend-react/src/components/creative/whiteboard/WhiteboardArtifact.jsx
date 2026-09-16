@@ -37,6 +37,7 @@ export function WhiteboardArtifact({ artifact }) {
               </div>
               <p className="mb-3 mt-2 whitespace-pre-wrap break-words text-sm leading-7 text-fg-2">{scene.cueIds.map(id => cueById.get(id)?.text).join('\n')}</p>
               <div className="grid gap-1.5 text-xs leading-6 text-fg-3"><span className="font-semibold text-fg-2">画面构思</span><p className="m-0 whitespace-pre-wrap break-words">{scene.imagePrompt}</p></div>
+              {scene.imageTexts ? <div className="mt-3 grid gap-1.5 text-xs leading-6 text-fg-3"><span className="font-semibold text-fg-2">画内原文</span><p className="m-0 whitespace-pre-wrap break-words">{scene.imageTexts.length ? scene.imageTexts.map(text => `「${text}」`).join('、') : '本幕不添加文字'}</p><p className="m-0">生成线稿后按此清单核对文字，保留图片中的手写字形。</p></div> : null}
             </article>
           ))}
         </div>

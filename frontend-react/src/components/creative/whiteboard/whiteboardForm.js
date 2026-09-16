@@ -1,5 +1,14 @@
 export const WHITEBOARD_MODE = 'whiteboard-stream-v1';
 export const HYPERFRAMES_MODE = 'hyperframes-v1';
+export const WHITEBOARD_CANVAS_FORMATS = [
+  { id: '16:9', label: '横屏 16:9', width: 1920, height: 1080 },
+  { id: '9:16', label: '竖屏 9:16', width: 1080, height: 1920 },
+  { id: '4:3', label: '横屏 4:3', width: 1440, height: 1080 },
+];
+
+export function whiteboardCanvasLabel(aspectRatio = '16:9') {
+  return WHITEBOARD_CANVAS_FORMATS.find(format => format.id === aspectRatio)?.label || aspectRatio;
+}
 
 export function createWhiteboardDraft() {
   return {
@@ -11,7 +20,7 @@ export function createWhiteboardDraft() {
 }
 
 export function validateWhiteboardDraft(draft) {
-  if (!['16:9', '9:16'].includes(draft.aspectRatio || '16:9')) return '请选择横屏 16:9 或竖屏 9:16。';
+  if (!WHITEBOARD_CANVAS_FORMATS.some(format => format.id === (draft.aspectRatio || '16:9'))) return '请选择横屏 16:9、竖屏 9:16 或横屏 4:3。';
   const text = (draft.contents[draft.inputMode] || '').trim();
   if (!text) return '请输入创作内容。';
   if (text.length > 50000) return '创作内容不能超过 50000 个字符。';

@@ -154,6 +154,7 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
               : stage === 'annotation_drafting' && selected.resultPreview && selected.coverage?.coverageRatio < 0.97
               ? <WhiteboardCoverageImages scene={selected} canvas={canvas} getUrl={getUrl} />
               : <SceneImage key={getUrl(selected[settings.file])} src={getUrl(selected[settings.file])} alt={`${titleFor(selected, selectedIndex)}${settings.label}`} label={settings.label} canvas={canvas} />}
+            {stage === 'lineart_generation' && selected.imageTexts ? <div className="grid gap-1 text-xs leading-6 text-fg-3"><strong className="text-fg-2">画内原文核对</strong><p className="m-0 break-words">{selected.imageTexts.length ? selected.imageTexts.map(text => `「${text}」`).join('、') : '本幕不添加文字'}</p><p className="m-0">请核对错字、漏字和额外文字，确认后继续落墨编排。</p></div> : null}
             {stage === 'annotation_drafting' ? <div className="grid gap-2 text-xs leading-6 text-fg-3">
               <p className="m-0">{sceneSummary(stage, selected)}。区域按编号依次完成描线与添彩，末尾保留至少半秒。</p>
               {selected.coverage?.coverageRatio < 0.97 ? <p className="m-0 text-danger">{selected.coverageAcceptance ? '已人工接受当前覆盖情况。' : '当前覆盖情况需要你决定是否接受。'}未覆盖部分保持空白，不会在片尾补显。</p> : null}

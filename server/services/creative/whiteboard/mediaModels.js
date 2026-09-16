@@ -1,14 +1,20 @@
 const fsp = require('fs/promises');
 const defaultTextModel = require('../../ai/aiTextModel');
 const defaultImageModel = require('../../ai/aiImageModel');
-const { WhiteboardError, canvasFor, sha256 } = require('./contracts');
+const { WhiteboardError, canvasFor, sha256, HANDWRITTEN_PRESET_ID, renderingFor } = require('./contracts');
+const handwritten = require('./handwrittenPlanning');
 const { transportCategory, visionDiagnostics, visionRequestError } = require('./visionDiagnostics');
 const { presets } = require('../../../resources/whiteboard/visual-presets.json');
 
 const LEGACY_ANNOTATION_PLANNING_CONTRACT = 'narrative-visual-clusters-v2';
 const ANNOTATION_PLANNING_CONTRACT = 'narrative-visual-clusters-v3';
 
-function annotationPrompt({ scene, cues, revision = '', canvas = canvasFor(), planningContract = ANNOTATION_PLANNING_CONTRACT }) {
+function annotationPrompt({ scene, cues, revision = '', canvas = canvasFor(), visualStyle, imageTexts,
+  planningContract = visualStyle?.id === HANDWRITTEN_PRESET_ID ? handwritten.CONTRACT : ANNOTATION_PLANNING_CONTRACT }) {
+  if (planningContract === handwritten.CONTRACT) {
+    if (!renderingFor(visualStyle)) throw new WhiteboardError('CONTRACT_UNSUPPORTED', '语义分区需要白底手写图解的冻结模板。', 409);
+    return handwritten.prompt({ scene, cues, revision, canvas, imageTexts });
+  }
   if (![ANNOTATION_PLANNING_CONTRACT, LEGACY_ANNOTATION_PLANNING_CONTRACT].includes(planningContract)) {
     throw new WhiteboardError('CONTRACT_UNSUPPORTED', '不支持的落墨编排提示词版本。', 409);
   }
@@ -32,10 +38,12 @@ function annotationPrompt({ scene, cues, revision = '', canvas = canvasFor(), pl
   ].filter(Boolean).join('\n');
 }
 
-function annotationInput({ scene, cues, imageSha256, timingIdentity, revision = '', canvas = canvasFor() }, planningContract = ANNOTATION_PLANNING_CONTRACT) {
-  const prompt = annotationPrompt({ scene, cues, revision, canvas, planningContract });
+function annotationInput({ scene, cues, imageSha256, timingIdentity, revision = '', canvas = canvasFor(), visualStyle, imageTexts },
+  planningContract = visualStyle?.id === HANDWRITTEN_PRESET_ID ? handwritten.CONTRACT : ANNOTATION_PLANNING_CONTRACT) {
+  const prompt = annotationPrompt({ scene, cues, revision, canvas, planningContract, visualStyle, imageTexts });
   return { prompt, planningContract, inputIdentity: sha256({ contract: planningContract, prompt,
-    image: imageSha256, timing: timingIdentity, scene, revision }) };
+    image: imageSha256, timing: timingIdentity, scene, revision,
+    ...(planningContract === handwritten.CONTRACT ? { rendering: renderingFor(visualStyle) } : {}) }) };
 }
 
 function annotationCoverageFeedback(candidate, coverage) {
@@ -43,16 +51,18 @@ function annotationCoverageFeedback(candidate, coverage) {
   return [
     `当前候选的墨迹覆盖率只有 ${(ratio * 100).toFixed(1)}%，未覆盖 ${((1 - ratio) * 100).toFixed(1)}%，需要修正区域归属。这是本轮最后一次修正机会。`,
     '最初提供的图像是原始线稿；本条附图是当前标注预览，红色标出了遗漏墨迹，红色诊断标记不是原图内容。请对照两图重新检查所有背景与主体，纠正遗漏或错误分组，不要原样返回同一组框。',
-    '保持当前线稿、画幅、分镜和旁白不变，只返回符合原 schemaVersion=2 合同的完整候选 JSON。先解释真实的连续结构与纸面分隔，再调整完整区域及其顺序；共享背景属于不可分割构图时合并，不用整图框掩盖独立簇分组错误。',
+    `保持当前线稿、画幅、分镜和旁白不变，只返回符合原 schemaVersion=${candidate.schemaVersion} 合同的完整候选 JSON。先解释真实的连续结构与纸面分隔，再调整完整区域及其顺序；共享背景属于不可分割构图时合并，不用整图框掩盖独立簇分组错误。`,
     `像素检查：${JSON.stringify(Object.fromEntries(['coverageRatio', 'regions', 'coveredInkPixels', 'totalInkPixels'].filter(key => Number.isFinite(coverage[key])).map(key => [key, coverage[key]])))}`,
     `待修正候选：${JSON.stringify(candidate)}`,
   ].join('\n');
 }
 
 function lineartPrompt(artifact, scene, revision = '') {
+  if (artifact.visualStyle.id === HANDWRITTEN_PRESET_ID) return handwritten.lineartPrompt(artifact, scene, canvasFor(artifact.aspectRatio), revision);
   const preset = presets.find(item => item.id === artifact.visualStyle.id) || presets[0];
   const portrait = canvasFor(artifact.aspectRatio).height > canvasFor(artifact.aspectRatio).width;
-  const recipe = preset.promptRecipe.replace(/#F5EBD7\s*/g, '').replace(/1920×1080/g, portrait ? '纵向竖幅' : '横向宽幅');
+  const recipe = preset.promptRecipe.replace(/#F5EBD7\s*/g, '').replace(/1920×1080/g,
+    portrait ? '纵向竖幅' : artifact.aspectRatio === '4:3' ? '横向 4:3 画幅（1440×1080）' : '横向宽幅');
   return [
     portrait ? '绘制一张清爽的竖幅手绘说明插画（画面高度明显大于宽度），直接画在暖米黄纸底上。' : '绘制一张清爽的横向手绘说明插画，直接画在暖米黄纸底上。', recipe,
     // “手机竖屏 9:16”这类设备词会被生图模型实体化（画出手机外壳、状态栏甚至把 9:16 画成锁屏时间），
@@ -127,7 +137,8 @@ async function structuredVision({ textConfig, prompt, images = [], validate, ass
   }
 }
 
-function validateAnnotation(candidate, canvas = canvasFor()) {
+function validateAnnotation(candidate, canvas = canvasFor(), visualStyle, scene) {
+  if (visualStyle?.id === HANDWRITTEN_PRESET_ID) return handwritten.validate(candidate, canvas, scene);
   const errors = [];
   if (!candidate || candidate.schemaVersion !== 2 || !Array.isArray(candidate.elements) || !candidate.elements.length || candidate.elements.length > 3) return ['schemaVersion=2，必须返回 visualGrouping 分组依据，elements 包含 1 至 3 个区域。'];
   if (Object.keys(candidate).some(key => !['schemaVersion', 'visualGrouping', 'elements'].includes(key))) errors.push('候选包含合同外字段，不能写入批准、文件路径或状态字段。');
@@ -154,7 +165,7 @@ function validateAnnotation(candidate, canvas = canvasFor()) {
   return errors;
 }
 
-function validateVisualReview(candidate, { imageCount, annotationSceneIds = [] }) {
+function validateVisualReview(candidate, { imageCount, annotationSceneIds = [], imageTextScenes = [] }) {
   const errors = [];
   if (typeof candidate?.passed !== 'boolean' || typeof candidate.summary !== 'string' || !candidate.summary.trim()
     || !Array.isArray(candidate.issues) || candidate.issues.some(issue => typeof issue !== 'string') || candidate.imageCount !== imageCount) {
@@ -175,7 +186,22 @@ function validateVisualReview(candidate, { imageCount, annotationSceneIds = [] }
       }
     }
   }
+  if (imageTextScenes.length && (!Array.isArray(candidate?.textReviews) || candidate.textReviews.length !== imageTextScenes.length
+    || new Set(candidate.textReviews.map(item => item?.sceneId)).size !== imageTextScenes.length
+    || candidate.textReviews.some(item => !item || !imageTextScenes.some(scene => scene.sceneId === item.sceneId)
+      || !Array.isArray(item.observedTexts) || item.observedTexts.some(text => typeof text !== 'string' || !text.trim())
+      || typeof item.reason !== 'string' || item.reason.trim().length < 8 || item.reason.length > 600))) {
+    errors.push('textReviews 必须逐幕返回 sceneId、从实图读出的全部 observedTexts 字符串数组及 8–600 字中文 reason；不能仅复述原文清单。');
+  }
   return errors;
+}
+
+function imageTextReviewIssues(findings, imageTextScenes) {
+  const normalize = values => JSON.stringify(values.map(value => value.trim()).sort());
+  return imageTextScenes.flatMap(scene => {
+    const review = findings.textReviews.find(item => item.sceneId === scene.sceneId);
+    return normalize(review.observedTexts) === normalize(scene.imageTexts) ? [] : [`${scene.title || scene.sceneId} 的画内文字与原文清单不一致，请核对错字、漏字或多余文字：${review.reason}`];
+  });
 }
 
 function annotationReviewIssues(findings) {
@@ -185,7 +211,8 @@ function annotationReviewIssues(findings) {
   ])];
 }
 
-function materializeAnnotation(candidate, scene, imageSha256, timingIdentity, canvas = canvasFor()) {
+function materializeAnnotation(candidate, scene, imageSha256, timingIdentity, canvas = canvasFor(), visualStyle) {
+  if (visualStyle?.id === HANDWRITTEN_PRESET_ID) return handwritten.materialize(candidate, scene, imageSha256, timingIdentity, canvas, visualStyle);
   const errors = validateAnnotation(candidate, canvas);
   if (errors.length) throw new WhiteboardError('CANDIDATE_INVALID', errors.join(' '));
   const duration = scene.endMs - scene.startMs;
@@ -212,7 +239,9 @@ async function generateLineart({ artifact, scene, revision, imageConfig, service
   const portrait = artifact.aspectRatio === '9:16';
   const response = await (services.aiImageModel || defaultImageModel).generateImages({
     prompt: lineartPrompt(artifact, scene, revision),
-    imageConfig, maxImages: 1, size: isGptImage ? (portrait ? '1024x1536' : '1536x1024') : (portrait ? '1440x2560' : '2560x1440'),
+    // GPT 图片接口继续使用已有尺寸合同；4:3 输出在本地等比补白，禁止拉伸或裁字。
+    imageConfig, maxImages: 1, size: isGptImage ? (portrait ? '1024x1536' : '1536x1024')
+      : artifact.aspectRatio === '4:3' ? '2304x1728' : (portrait ? '1440x2560' : '2560x1440'),
     ...(isGptImage ? { outputFormat: 'png' } : {}), timeoutMs: 180000,
     fetchImpl: async (...args) => { const result = await (services.fetchImpl || fetch)(...args); httpStatus = result.status; return result; },
   });
@@ -237,6 +266,6 @@ async function generateLineart({ artifact, scene, revision, imageConfig, service
   return bytes;
 }
 
-module.exports = { ANNOTATION_PLANNING_CONTRACT, LEGACY_ANNOTATION_PLANNING_CONTRACT, annotationPrompt, annotationInput,
+module.exports = { ANNOTATION_PLANNING_CONTRACT, LEGACY_ANNOTATION_PLANNING_CONTRACT, HANDWRITTEN_ANNOTATION_CONTRACT: handwritten.CONTRACT, annotationPrompt, annotationInput,
   annotationCoverageFeedback, structuredVision, validateAnnotation, validateVisualReview,
-  annotationReviewIssues, materializeAnnotation, generateLineart, lineartPrompt };
+  annotationReviewIssues, imageTextReviewIssues, materializeAnnotation, generateLineart, lineartPrompt };

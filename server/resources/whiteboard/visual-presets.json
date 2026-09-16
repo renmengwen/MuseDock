@@ -86,6 +86,27 @@
       ],
       "previewAsset": "assets/visual-style-previews/comic-ink-v1.svg",
       "rendererCompatibility": "warm-paper-stream-v1"
+    },
+    {
+      "id": "whiteboard-handwritten-explainer-v1",
+      "displayName": "白底手写图解",
+      "description": "纯白底、黑色人物线条，红蓝手写关键词与少量橙色结论，按语义分区保留原色逐步绘出。推荐横屏 4:3。",
+      "origin": "MuseDock",
+      "recommendedAspectRatio": "4:3",
+      "recommendedFor": ["关系图解", "人物对比", "观点解释", "知识短句"],
+      "promptRecipe": "纯白纸面，使用精致、亲切的手绘漫画人物与黑色线条；人物表情和动作服务于本幕语义。红色与蓝色手写关键词、圈线和箭头解释关系，少量橙色只强调最后结论。文字保留自然手写字形，逐字采用本幕 imageTexts 原文；不擅自改字、加字，不用整段字幕铺满画面。不添加纸纹、灰底、渐变、摄影质感、设备边框、水印或 Logo。按标题、人物、标签、关系线、结论的实际叙事组织可依次揭示的语义区域，区域之间留白；保持每个人物、词组和气泡完整，邻接气泡可用多边形边界，不能为了固定区域数量合并整图或拆断文字。只画本幕明确需要的元素，不添加游离装饰。",
+      "rendererCompatibility": "whiteboard-handwritten-stream-v1",
+      "rendering": {
+        "contractVersion": "whiteboard-handwritten-render-v1",
+        "canvasHex": "#FFFFFF",
+        "matchBackground": false,
+        "inkMode": "source-color",
+        "inkWeight": 4,
+        "colorWeight": 1,
+        "inkRevealRadius": 3,
+        "skeletonMinPoints": 4,
+        "skeletonResampleSpacing": 2.5
+      }
     }
   ]
 }

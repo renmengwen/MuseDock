@@ -1,6 +1,6 @@
 const defaultTextModel = require('../../ai/aiTextModel');
 const defaultModelConfig = require('../../ai/aiModelConfig');
-const { CANDIDATE_SKELETON, WhiteboardError, parseSrt, validateCandidate, VISUAL_PRESETS, canvasFor } = require('./contracts');
+const { candidateContractFor, HANDWRITTEN_PRESET_ID, WhiteboardError, parseSrt, validateCandidate, VISUAL_PRESETS, canvasFor } = require('./contracts');
 
 function classifyFailure(response, httpStatus, sent) {
   if (response?.configured === false) return new WhiteboardError('MODEL_NOT_CONFIGURED', '分析模型未配置，请在设置中选择并配置分析模型后重试。');
@@ -16,6 +16,7 @@ function buildMessages(task, previousArtifact) {
   const input = task.input;
   const canvas = canvasFor(input.aspectRatio);
   const preset = VISUAL_PRESETS.find(item => item.id === input.visualStylePreset);
+  const handwritten = input.visualStylePreset === HANDWRITTEN_PRESET_ID;
   const frozenCues = input.inputMode === 'srt' ? parseSrt(input.content).map(({ id, text }) => ({ id, text })) : null;
   return [
     { role: 'system', content: [
@@ -25,14 +26,21 @@ function buildMessages(task, previousArtifact) {
       'title、summary、场景标题和画面描述使用中文。字幕只使用冻结的 narrationLanguage，不能自动翻译保留原文或 SRT。',
       'topic：围绕主题撰写自然口播；text/polish：保留事实并润色口播；text/preserve：保留每个词和标点，只分段；srt：严格原样返回冻结的 cues。',
       ...(task.productionPlan.narrationMode === 'disabled' ? ['本方案不使用旁白。正文用于字幕和画面叙事，措辞适合阅读；主题和正文按目标总时长及文本长度安排字幕与分镜，不等待语音时间戳。保留原文与 SRT 的文字约束仍须遵守。避免极短碎句或过多分镜，给阅读、绘制与停留留足时间。'] : []),
+      ...(handwritten ? [
+        '按叙事顺序把每条 cue 恰好分配给一幕，每幕一个核心命题。采用纯白底、精致手绘人物和黑色线条、红蓝手写关键词、少量橙色结论。按标题、人物、完整词组、气泡、关系线、结论的叙事顺序组织区域，不按单字拆分，不固定为三组。',
+        '每幕必须给出 imageTexts 数组，单独列出画面内需要逐字呈现的原文，每条最多 80 字、总数最多 24 条；无文字时为 []。imagePrompt 与清单一致，不把整段字幕抄入图内，不擅自添加清单外文字。文字由图片模型直接生成并保留手写字形。',
+        '描述每个主体与文字的空间关系，区域之间充分留白，人物、词组和气泡均应完整，关系线单独归属；用明确画面描述支持随后按语义分区落墨。',
+        ...(task.productionPlan.burnSubtitles ? ['每幕底部约 18% 完全空白，留给两行字幕；结论和人物不得进入字幕安全区。'] : []),
+      ] : [
       '按叙事顺序把每条 cue 恰好分配给一幕，每幕只表达一个核心视觉命题。先决定是一个不可分割的连续构图，还是 2–3 个可独立揭示的视觉簇，再自包含地描述主体、动作、空间关系和构图，不按名词数量强行拆分。',
       '每幕 imagePrompt 必须明确背景归属：独立簇各自包含必要的局部背景、底面和阴影，簇间保留连续干净纸面；不要用海平线、河流、道路、共同底面或连续远景连接独立簇。若共享背景或贯穿结构本身就是核心语义，应把相关主体和背景描述为一个完整连续簇，不再同时要求它们互相分离。',
       '提交前检查具体画面描述是否与分区方式一致，不能一边要求海边纵深或贯穿背景，一边只追加“独立视觉簇”而不说明如何分开。所有将被画出的有效墨迹都应能归入完整的局部区域，背景与装饰不能游离在区域之外。',
-      `画面为暖米黄纸张 ${canvas.width}×${canvas.height}，留白充分；遵循所选模板，少量必要画内文字，不能复刻整句字幕，不出现水印。`,
+      ]),
+      `画面为${handwritten ? '纯白纸面' : '暖米黄纸张'} ${canvas.width}×${canvas.height}，留白充分；遵循所选模板，少量必要画内文字，不能复刻整句字幕，不出现水印。`,
       // 不写“手机竖屏 9:16”：方案模型会把它照抄进每幕 imagePrompt，生图模型再把设备词实体化成手机边框。
       ...(canvas.height > canvas.width ? ['这是竖幅构图（画面高度明显大于宽度），写画面描述时不要出现手机、屏幕等设备词。主体在纵向画布中保持清晰，独立视觉簇可按叙事安排在上、中、下部，不能照搬横屏三列布局；底部约十分之一保留给字幕，每幕画面描述要写明底部完全空白，不把尺寸或画幅文字画进图片。'] : []),
       '目标时长只用于内容预算，中文约每秒 4 个字、英文约每秒 2.5 个词。字幕时间由服务端确定性派生。',
-      `候选 skeleton：${JSON.stringify(CANDIDATE_SKELETON)}`,
+      `候选 skeleton：${JSON.stringify(candidateContractFor(input).skeleton)}`,
       `候选 schema：${JSON.stringify(task.candidateSchema)}`,
     ].join('\n') },
     { role: 'user', content: JSON.stringify({

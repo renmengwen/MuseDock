@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const fsp = require('fs/promises');
 const path = require('path');
-const { WhiteboardError, sha256, canonicalJson, canvasFor } = require('./contracts');
+const { WhiteboardError, sha256, canonicalJson, canvasFor, HANDWRITTEN_PRESET_ID } = require('./contracts');
 const store = require('./mediaStore');
 const mediaTools = require('./mediaTools');
 const models = require('./mediaModels');
@@ -22,7 +22,7 @@ async function recoverAnnotationPreviews(record, artifact, options, now, sceneId
   const attempts = recoverableAnnotationAttempts(media).filter(attempt => !sceneId || attempt.sceneId === sceneId);
   if (!attempts.length) throw new WhiteboardError('ACTION_NOT_ALLOWED', '没有可恢复的落墨预览，请刷新任务后检查当前分镜。', 409);
   const tools = options.services?.whiteboardMediaTools || mediaTools;
-  const runtime = await tools.preflight({ ...options.mediaOptions, aspectRatio: artifact.aspectRatio || '16:9' });
+  const runtime = await tools.preflight({ ...options.mediaOptions, aspectRatio: artifact.aspectRatio || '16:9', visualStyle: artifact.visualStyle });
   if (sha256(runtime.recipe) !== sha256(media.recipe)) {
     throw new WhiteboardError('RENDER_CONFIG_CHANGED', '绘制环境已变化，无法按原版本恢复预览，请重新确认制作设置。', 409);
   }
@@ -37,8 +37,11 @@ async function recoverAnnotationPreviews(record, artifact, options, now, sceneId
     const lineart = await store.validateBinding(record, media.lineart[scene.id], options.rootDir);
     const revision = media.overrides[`annotation_drafting:${scene.id}`] || '';
     const input = { scene, cues: timing.cues.filter(cue => scene.cueIds.includes(cue.id)), revision, canvas,
-      imageSha256: lineart.image.sha256, timingIdentity: narration.identity };
-    const matching = [models.ANNOTATION_PLANNING_CONTRACT, models.LEGACY_ANNOTATION_PLANNING_CONTRACT]
+      imageSha256: lineart.image.sha256, timingIdentity: narration.identity, visualStyle: artifact.visualStyle,
+      imageTexts: artifact.scenes.find(item => item.id === scene.id)?.imageTexts };
+    const contracts = artifact.visualStyle.id === HANDWRITTEN_PRESET_ID ? [models.HANDWRITTEN_ANNOTATION_CONTRACT]
+      : [models.ANNOTATION_PLANNING_CONTRACT, models.LEGACY_ANNOTATION_PLANNING_CONTRACT];
+    const matching = contracts
       .map(contract => models.annotationInput(input, contract)).find(value => value.inputIdentity === previous.inputIdentity);
     if (!matching) {
       throw new WhiteboardError('STALE_IDENTITY', `${scene.title} 的线稿、时间线或编排要求已变化，请重新编排该幕。`, 409);
@@ -48,7 +51,7 @@ async function recoverAnnotationPreviews(record, artifact, options, now, sceneId
       throw new WhiteboardError('ARTIFACT_INVALID', '已保存的编排候选与当前分镜不匹配，无法恢复预览。', 409);
     }
     const candidate = await store.readData(record, previous.received.candidate, options.rootDir);
-    const annotation = models.materializeAnnotation(candidate, scene, lineart.image.sha256, narration.identity, canvas);
+    const annotation = models.materializeAnnotation(candidate, scene, lineart.image.sha256, narration.identity, canvas, artifact.visualStyle);
     prepared.push({ previous, scene, lineart, revision, ...matching, candidate, candidateFile: saved.path, annotation });
   }
   for (const entry of prepared) {

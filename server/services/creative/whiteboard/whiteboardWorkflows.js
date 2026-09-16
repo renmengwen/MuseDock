@@ -5,7 +5,7 @@ const {
 } = require('../workflowStore');
 const { WHITEBOARD_MODE, createModeSnapshot } = require('../creationModes');
 const {
-  CONTRACT_VERSION, SKILL_SOURCE_REVISION, CANDIDATE_SKELETON, CANDIDATE_SCHEMA, WhiteboardError,
+  CONTRACT_VERSION, SKILL_SOURCE_REVISION, candidateContractFor, WhiteboardError,
   normalizeInput, normalizeProductionPlan, canonicalJson, sha256, materializeCandidate,
 } = require('./contracts');
 const artifactStore = require('./artifactStore');
@@ -358,13 +358,14 @@ async function runWhiteboardWorkflow(workflowId, options = {}) {
     });
     claimed = true;
     const frozen = started.record;
+    const candidateContract = candidateContractFor(attempt.input);
     const task = {
       schemaVersion: 1, role: attempt.role, contractVersion: CONTRACT_VERSION,
       inputIdentity: attempt.inputIdentity, input: attempt.input, productionPlan: attempt.productionPlan,
       revisionMessage: attempt.revisionMessage, parentIdentity: attempt.parentIdentity,
       narrationService: frozen.whiteboard.narrationService,
       formalWritesAllowed: false, approvalWritesAllowed: false, allowedTools: [],
-      allowedOutputs: ['candidate.json'], candidateSkeleton: CANDIDATE_SKELETON, candidateSchema: CANDIDATE_SCHEMA,
+      allowedOutputs: ['candidate.json'], candidateSkeleton: candidateContract.skeleton, candidateSchema: candidateContract.schema,
     };
     const { result: taskSha256 } = await mutate(workflowId, options, async record => {
       const active = assertActiveAttempt(record, attempt);
@@ -377,7 +378,8 @@ async function runWhiteboardWorkflow(workflowId, options = {}) {
     const candidate = attempt.kind === 'settings' ? {
       schemaVersion: 1, title: previousArtifact.title, summary: previousArtifact.summary,
       cues: previousArtifact.cues.map(({ id, text }) => ({ id, text })),
-      scenes: previousArtifact.scenes.map(({ id, title, cueIds, imagePrompt }) => ({ id, title, cueIds, imagePrompt })),
+      scenes: previousArtifact.scenes.map(({ id, title, cueIds, imagePrompt, imageTexts }) => ({ id, title, cueIds, imagePrompt,
+        ...(imageTexts ? { imageTexts } : {}) })),
     } : await generateDraft(task, {
       services: options.services, previousArtifact,
       onRequest: async repair => {

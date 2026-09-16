@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { StringDecoder } = require('string_decoder');
 const { resolveFfmpegPath, resolveFfprobePath } = require('../../tts/ttsTimeline');
-const { WhiteboardError, sha256, canvasFor } = require('./contracts');
+const { WhiteboardError, sha256, canvasFor, renderingFor } = require('./contracts');
 const { normalizeRenderProgress, encoderThreadsFor } = require('./renderProgress');
 
 const RESOURCE_ROOT = path.join(__dirname, '../../../resources/whiteboard');
@@ -114,7 +114,8 @@ function pythonPath(options = {}) {
 }
 
 async function python(command, input, options = {}) {
-  const entry = command === 'render' ? 'python/render_worker.py' : 'python/media.py';
+  const rendering = input.rendering || input.annotation?.rendering;
+  const entry = rendering ? 'python/handwritten_media.py' : command === 'render' ? 'python/render_worker.py' : 'python/media.py';
   const output = await execute(pythonPath(options), [path.join(RESOURCE_ROOT, entry)], {
     ...options, input: { command, ...input }, timeoutMs: options.timeoutMs || 1800000,
   });
@@ -146,10 +147,12 @@ async function preflight(options = {}) {
     hashFile(path.join(RESOURCE_ROOT, 'sources.json')), hashFile(path.join(RESOURCE_ROOT, 'python/media.py')),
   ]);
   const coreSha256 = await Promise.all(['stream_primitives.py', 'region_renderer.py', 'ffmpeg_frame_sink.py'].map(file => hashFile(path.join(RESOURCE_ROOT, 'python', file))));
+  const rendering = renderingFor(options.visualStyle);
+  const styleRecipe = rendering ? { rendering, styleAdapterSha256: await hashFile(path.join(RESOURCE_ROOT, 'python/handwritten_media.py')) } : {};
   const sources = JSON.parse(await fsp.readFile(path.join(RESOURCE_ROOT, 'sources.json'), 'utf8'));
   if (sources.files.find(file => file.file === 'assets/drawing-hand.png')?.sha256 !== handSha256) throw new WhiteboardError('DRAWING_HAND_INVALID', '固定画笔素材缺失或已变化，请恢复配套素材后重试。');
   return { ffmpeg, ffprobe, font, bgm, encoderThreads: encoderThreadsFor(results[4].value.stdout),
-    recipe: { ...RENDER_PROFILE, ...canvasFor(options.aspectRatio), fontSha256, handSha256, sourceSha256, adapterSha256, coreSha256 } };
+    recipe: { ...RENDER_PROFILE, ...canvasFor(options.aspectRatio), fontSha256, handSha256, sourceSha256, adapterSha256, coreSha256, ...styleRecipe } };
 }
 
 async function probe(file, runtime, options = {}) {
@@ -192,6 +195,7 @@ async function renderScene({ image, annotation, output, scene, showHand }, runti
   const started = Date.now();
   const canvas = runtime.recipe || RENDER_PROFILE;
   if (annotation.canvas.width !== canvas.width || annotation.canvas.height !== canvas.height) throw new WhiteboardError('CANVAS_MISMATCH', '落墨标注画幅与当前制作方案不一致，请重新生成对应标注。');
+  if (sha256(annotation.rendering || null) !== sha256(runtime.recipe?.rendering || null)) throw new WhiteboardError('RENDER_CONFIG_CHANGED', '落墨标注的模板参数与当前冻结方案不一致，请重新编排。');
   const startFrame = Math.ceil(scene.startMs * 60 / 1000);
   const frameCount = Math.ceil(scene.endMs * 60 / 1000) - startFrame;
   const rendered = await python('render', { image, annotation, output, durationMs: scene.endMs - scene.startMs,
@@ -213,7 +217,7 @@ async function finalVideo({ sceneFiles, audioFile, cues, durationMs, directory, 
     const video = info.streams?.find(stream => stream.codec_type === 'video');
     const count = Number(video?.nb_frames);
     if (!Number.isInteger(count) || count < 1) throw new WhiteboardError('VIDEO_INVALID', '单幕视频缺少有效帧数，不能合并。');
-    if (video.width !== canvas.width || video.height !== canvas.height) throw new WhiteboardError('CANVAS_MISMATCH', '单幕视频画幅不一致，不能混合横屏与竖屏合成。');
+    if (video.width !== canvas.width || video.height !== canvas.height) throw new WhiteboardError('CANVAS_MISMATCH', '单幕视频画幅不一致，不能混合不同比例合成。');
     // MP4 container duration is millisecond-rounded. Explicit frame-derived
     // durations prevent concat from inserting a fractional frame at each seam.
     concat.push(`file '${name}'\nduration ${(count / 60).toFixed(12)}`);

@@ -19,6 +19,7 @@ import { WhiteboardArtifact } from './WhiteboardArtifact.jsx';
 import { WhiteboardConversationCard } from './WhiteboardConversationCard.jsx';
 import { WhiteboardMediaPanel } from './WhiteboardMediaPanel.jsx';
 import { WhiteboardCoverageReview } from './WhiteboardCoverageReview.jsx';
+import { whiteboardCanvasLabel } from './whiteboardForm.js';
 
 export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, onAction, onStopAndDelete, progressEvents = [] }) {
   const [revision, setRevision] = useState('');
@@ -168,7 +169,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
     <div className="grid w-full min-w-0 gap-6 min-[1180px]:h-full min-[1180px]:min-h-0 min-[1180px]:grid-rows-[auto_auto_minmax(0,1fr)] max-[760px]:[&_button]:min-h-11">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="grid min-w-0 gap-2">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-fg-3"><PenLine size={14} /><span>{workflow.creationModeDisplayNameSnapshot || '线稿白板动画'}</span><span>· {media ? '视频制作' : '内容与制作方案'}</span><span className="rounded border border-line-1 px-1.5 py-0.5">{aspectRatio === '9:16' ? '竖屏 9:16' : '横屏 16:9'}</span></div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-fg-3"><PenLine size={14} /><span>{workflow.creationModeDisplayNameSnapshot || '线稿白板动画'}</span><span>· {media ? '视频制作' : '内容与制作方案'}</span><span className="rounded border border-line-1 px-1.5 py-0.5">{whiteboardCanvasLabel(aspectRatio)}</span></div>
           <h1 className="m-0 break-words text-2xl font-bold leading-snug text-fg-1">{title}</h1>
           <p className="m-0 text-xs text-fg-3">{media ? (silent ? '字幕与时间轴 · 区域编排 · 连续落墨 · 成片' : '完整旁白 · 区域编排 · 连续落墨 · 成片') : '先确认内容，再进入媒体制作'}</p>
         </div>

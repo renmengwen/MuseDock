@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 const CANVAS_FORMATS = require('../../../resources/whiteboard/canvas-formats.json');
+const HANDWRITTEN_PRESET_ID = 'whiteboard-handwritten-explainer-v1';
+const handwrittenPreset = require('../../../resources/whiteboard/visual-presets.json').presets.find(item => item.id === HANDWRITTEN_PRESET_ID);
 
 const CONTRACT_VERSION = 'musedock-whiteboard-phase0-v1';
 // 上游路由规则的来源指纹；运行时只消费本仓库合同，不读取 Codex Skill 路径。
@@ -11,6 +13,7 @@ const VISUAL_PRESETS = [
   { id: 'healing-journal-v1', displayName: '清新治愈手账', description: '柔和手绘与低饱和色彩，适合生活和成长叙事。' },
   { id: 'retro-newspaper-v1', displayName: '复古报纸拼贴', description: '油墨轮廓和局部拼贴，适合社会观察与人物纪实。' },
   { id: 'comic-ink-v1', displayName: '漫画墨线解释', description: '有变化的漫画墨线，适合机制解释与科技科普。' },
+  { ...handwrittenPreset, promptRecipeSha256: sha256(handwrittenPreset.promptRecipe) },
 ];
 const DEFAULT_PRESET = VISUAL_PRESETS[0].id;
 const LANGUAGES = [{ id: 'zh-CN', label: '简体中文' }, { id: 'en-US', label: '英语（美国）' }, { id: 'en-GB', label: '英语（英国）' }];
@@ -30,7 +33,7 @@ class WhiteboardError extends Error {
 
 function canvasFor(aspectRatio = '16:9') {
   const format = CANVAS_FORMATS.find(item => item.id === aspectRatio);
-  if (!format) throw new WhiteboardError('INVALID_INPUT', '白板画幅仅支持横屏 16:9 或竖屏 9:16。');
+  if (!format) throw new WhiteboardError('INVALID_INPUT', `白板画幅仅支持${CANVAS_FORMATS.map(item => item.label).join('、')}。`);
   return { width: format.width, height: format.height };
 }
 
@@ -139,6 +142,27 @@ const CANDIDATE_SCHEMA = {
   },
 };
 
+function candidateContractFor(input) {
+  if (input.visualStylePreset !== HANDWRITTEN_PRESET_ID) return { skeleton: CANDIDATE_SKELETON, schema: CANDIDATE_SCHEMA };
+  const skeleton = structuredClone(CANDIDATE_SKELETON);
+  skeleton.scenes[0].imageTexts = ['画面中需要逐字呈现的短句'];
+  const schema = structuredClone(CANDIDATE_SCHEMA);
+  const scene = schema.properties.scenes.items;
+  scene.required.push('imageTexts');
+  scene.properties.imageTexts = { type: 'array', maxItems: 24, items: { type: 'string', minLength: 1, maxLength: 80 } };
+  return { skeleton, schema };
+}
+
+function renderingFor(visualStyle) {
+  if (visualStyle?.id !== HANDWRITTEN_PRESET_ID) return null;
+  if (visualStyle.rendererCompatibility !== handwrittenPreset.rendererCompatibility
+    || canonicalJson(visualStyle.rendering) !== canonicalJson(handwrittenPreset.rendering)
+    || typeof visualStyle.promptRecipe !== 'string' || sha256(visualStyle.promptRecipe) !== visualStyle.promptRecipeSha256) {
+    throw new WhiteboardError('CONTRACT_UNSUPPORTED', '白底手写图解缺少有效的冻结模板参数，请重新确认制作方案。', 409);
+  }
+  return structuredClone(visualStyle.rendering);
+}
+
 function textTokens(text) {
   return String(text).match(/[\p{Script=Han}]|[\p{L}\p{N}]+|[^\s]/gu) || [];
 }
@@ -171,13 +195,18 @@ function validateCandidate(candidate, input) {
   const covered = [];
   scenes.forEach((scene, index) => {
     if (!scene || typeof scene !== 'object' || Array.isArray(scene)) { errors.push(`分镜 ${index + 1} 必须为对象。`); return; }
-    keys(scene, ['id', 'title', 'cueIds', 'imagePrompt'], `分镜 ${index + 1}`);
+    const handwritten = input.visualStylePreset === HANDWRITTEN_PRESET_ID;
+    keys(scene, ['id', 'title', 'cueIds', 'imagePrompt', ...(handwritten ? ['imageTexts'] : [])], `分镜 ${index + 1}`);
     if (!validId(scene.id) || sceneIds.has(scene.id)) errors.push(`分镜 ${index + 1} 的 id 无效或重复。`);
     sceneIds.add(scene.id);
     if (typeof scene.title !== 'string' || !scene.title.trim() || scene.title.length > 120) errors.push(`分镜 ${index + 1} 缺少有效标题。`);
     if (!Array.isArray(scene.cueIds) || !scene.cueIds.length) errors.push(`分镜 ${index + 1} 必须引用字幕。`);
     else covered.push(...scene.cueIds);
     if (typeof scene.imagePrompt !== 'string' || scene.imagePrompt.trim().length < 8 || scene.imagePrompt.length > 6000 || /同上|沿用上一幕|参见上一幕/.test(scene.imagePrompt)) errors.push(`分镜 ${index + 1} 需要独立、完整的画面描述。`);
+    if (handwritten && (!Array.isArray(scene.imageTexts) || scene.imageTexts.length > 24
+      || scene.imageTexts.some(text => typeof text !== 'string' || !text.trim() || text.length > 80))) {
+      errors.push(`分镜 ${index + 1} 的 imageTexts 必须列出需要逐字呈现的画内原文，最多 24 条、每条 1–80 字；无文字时用空数组。`);
+    }
   });
   if (JSON.stringify(covered) !== JSON.stringify(cues.map(cue => cue?.id))) errors.push('分镜必须按顺序完整覆盖每条字幕，不能遗漏、重复或重排。');
   const narration = cues.map(cue => cue?.text || '').join('\n');
@@ -211,7 +240,7 @@ function materializeCandidate(candidate, input, productionPlan, narrationService
     title: candidate.title.trim(), summary: candidate.summary.trim(),
     narrationText: cues.map(cue => cue.text).join('\n'), narrationLanguage: input.narrationLanguage,
     sourceTextSha256: sha256(input.content), timingKind: sourceCues ? 'source_srt' : 'provisional', durationMs,
-    visualStyle: { ...VISUAL_PRESETS.find(preset => preset.id === input.visualStylePreset), rendererCompatibility: 'warm-paper-stream-v1' },
+    visualStyle: { rendererCompatibility: 'warm-paper-stream-v1', ...structuredClone(VISUAL_PRESETS.find(preset => preset.id === input.visualStylePreset)) },
     productionPlan: normalizeProductionPlan(productionPlan),
     narrationService,
     cues, scenes: candidate.scenes.map(scene => ({
@@ -222,6 +251,7 @@ function materializeCandidate(candidate, input, productionPlan, narrationService
 
 module.exports = {
   CONTRACT_VERSION, SKILL_SOURCE_REVISION, VISUAL_PRESETS, DEFAULT_PRESET, LANGUAGES, CANVAS_FORMATS, canvasFor,
+  HANDWRITTEN_PRESET_ID, candidateContractFor, renderingFor,
   DEFAULT_PRODUCTION_PLAN, CANDIDATE_SKELETON, CANDIDATE_SCHEMA, WhiteboardError, canonicalJson, sha256,
   normalizeInput, normalizeProductionPlan, parseSrt, validateCandidate, materializeCandidate,
 };
