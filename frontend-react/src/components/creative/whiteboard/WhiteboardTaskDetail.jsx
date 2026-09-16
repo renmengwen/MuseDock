@@ -20,6 +20,7 @@ import { WhiteboardConversationCard } from './WhiteboardConversationCard.jsx';
 import { WhiteboardMediaPanel } from './WhiteboardMediaPanel.jsx';
 import { WhiteboardCoverageReview } from './WhiteboardCoverageReview.jsx';
 import { whiteboardCanvasLabel } from './whiteboardForm.js';
+import { ApiCallLogLink } from '@/components/diagnostics/ApiCallLogLink.jsx';
 
 export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, onAction, onStopAndDelete, progressEvents = [] }) {
   const [revision, setRevision] = useState('');
@@ -174,6 +175,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
           <p className="m-0 text-xs text-fg-3">{media ? (silent ? '字幕与时间轴 · 区域编排 · 连续落墨 · 成片' : '完整旁白 · 区域编排 · 连续落墨 · 成片') : '先确认内容，再进入媒体制作'}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <ApiCallLogLink workflowId={workflow.workflow_id} />
           <span className={cn('rounded-full border px-2.5 py-1 text-xs font-semibold', workflow.status === 'phase0_complete' ? 'border-success/30 text-success' : ['failed', 'unknown_external_outcome'].includes(workflow.status) ? 'border-danger/25 text-danger' : 'border-line-2 text-fg-2')}>{STATUS_TEXT[workflow.status] || '处理中'}</span>
           <Button variant="ghost" size="icon" type="button" aria-label="停止并删除白板任务" className="max-[760px]:min-w-11" disabled={Boolean(deletingWorkflowId) || Boolean(busy)} onClick={() => onStopAndDelete(workflow.workflow_id)}><Trash2 size={16} /></Button>
         </div>
@@ -239,6 +241,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
               <span>{busy ? ({ approve_initial: '正在确认当前内容与制作方案...', update_plan: '正在保存新的制作方案...', revise: '正在创建修改版本...', retry: '正在重新启动方案任务...', authorize_new_attempt: '正在创建新的模型请求...', start_production: '正在检查环境并启动视频制作...', approve_media: '正在确认当前产物并准备下一步...', retry_media: '正在恢复未完成的媒体制作...', recover_annotation_preview: '正在使用已保存的编排恢复落墨预览...', accept_low_coverage: '正在接受当前落墨并继续制作...', authorize_media_retry: '正在登记授权并继续制作...', revise_media: '正在创建本幕修改版本...', message: '正在理解并处理你的消息...' })[busy] || '正在处理当前操作...' : statusMessage}</span>
             </div>
             {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
+            {needsAttention || error ? <div><ApiCallLogLink workflowId={workflow.workflow_id} label="查看 API 返回结果" /></div> : null}
             {error || workflow.error ? <Link to="/settings" state={{ from: `/creative/${workflow.workflow_id}` }} className="text-sm font-semibold text-ink underline underline-offset-4">打开模型与声音设置</Link> : null}
 
             {canMessage ? (

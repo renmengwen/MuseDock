@@ -1,5 +1,6 @@
 const aiModelConfig = require('./aiModelConfig');
 const { callDoubaoTts, DOUBAO_MODEL, normalizeDoubaoSettings } = require('./doubaoTts');
+const { recordedFetch, recordModelCall } = require('../diagnostics/apiCallRecorder');
 const { callMiniMaxNativeTts } = require('./minimaxNativeTts');
 
 const DEFAULT_MIMO_BASE_URL = 'https://api.xiaomimimo.com/v1';
@@ -182,7 +183,7 @@ async function callTtsModel(options = {}) {
     };
   }
 
-  const fetchImpl = options.fetchImpl || fetch;
+  const fetchImpl = recordedFetch(options.fetchImpl || fetch, { category: 'tts' });
   const waitImpl = typeof options.waitImpl === 'function' ? options.waitImpl : wait;
   const retryLimit = Math.max(0, Number(options.maxRetries ?? 2) || 0);
   const retryDelayMs = Math.max(0, Number(options.retryDelayMs ?? 1500) || 0);
@@ -360,7 +361,7 @@ module.exports = {
   DEFAULT_TTS_CONCURRENCY,
   DEFAULT_TTS_QUEUE_INTERVAL_MS,
   DEFAULT_TTS_REQUEST_TIMEOUT_MS,
-  callTtsModel,
+  callTtsModel: options => recordModelCall(() => callTtsModel(options), { category: 'tts' }),
   enqueueTtsRequest,
   resolveTtsRuntime,
   shouldRetryStatus,

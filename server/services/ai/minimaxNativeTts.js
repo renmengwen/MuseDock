@@ -1,5 +1,6 @@
 // Adapted from the skill's minimax_adapter.py and native word subtitle reader.
 // This full-track path never falls back to ASR or to sentence-by-sentence synthesis.
+const { recordedFetch, recordModelCall } = require('../diagnostics/apiCallRecorder');
 function miniMaxWords(value, depth = 0) {
   if (depth > 8) return [];
   if (Array.isArray(value)) {
@@ -28,7 +29,7 @@ async function callMiniMaxNativeTts({ runtime, text, fetchImpl = fetch, signal, 
   const activeSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(requestTimeoutMs)]) : AbortSignal.timeout(requestTimeoutMs);
   let audioBuffer;
   try {
-    const response = await fetchImpl(`${runtime.baseUrl.replace(/\/$/, '')}/t2a_v2`, {
+    const response = await recordedFetch(fetchImpl, { category: 'tts' })(`${runtime.baseUrl.replace(/\/$/, '')}/t2a_v2`, {
       method: 'POST', signal: activeSignal,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${runtime.apiKey}` },
       body: JSON.stringify({ model: runtime.modelId, text, stream: false, output_format: 'hex',
@@ -47,7 +48,7 @@ async function callMiniMaxNativeTts({ runtime, text, fetchImpl = fetch, signal, 
     audioBuffer = Buffer.from(hex, 'hex');
     const url = new URL(payload?.data?.subtitle_file || payload?.subtitle_file);
     if (url.protocol !== 'https:') throw new Error();
-    const subtitles = await fetchImpl(url.href, { signal: activeSignal, headers: { Accept: 'application/json' } });
+    const subtitles = await recordedFetch(fetchImpl, { category: 'tts' })(url.href, { signal: activeSignal, headers: { Accept: 'application/json' } });
     if (!subtitles.ok) throw new Error();
     const words = miniMaxWords(await subtitles.json());
     if (!words.length) throw new Error();
@@ -61,4 +62,4 @@ async function callMiniMaxNativeTts({ runtime, text, fetchImpl = fetch, signal, 
   }
 }
 
-module.exports = { callMiniMaxNativeTts, miniMaxWords };
+module.exports = { callMiniMaxNativeTts: options => recordModelCall(() => callMiniMaxNativeTts(options), { category: 'tts' }), miniMaxWords };

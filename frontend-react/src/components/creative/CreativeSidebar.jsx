@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CirclePlus, FileText, PanelLeft, Search, Settings2, Trash2 } from 'lucide-react';
+import { CirclePlus, FileClock, FileText, PanelLeft, Search, Settings2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import {
   Dialog,
@@ -57,6 +57,9 @@ export function CreativeSidebar({
         <PanelLeft size={17} aria-hidden="true" />
       </Button>
       <TranscriptionTool compact />
+      <Button asChild variant="ghost" size="icon" className="size-[34px]">
+        <Link to="/api-calls" state={{ from: window.location.pathname }} aria-label="打开 API 调用记录"><FileClock size={16} /></Link>
+      </Button>
       <Link
         className="inline-flex size-[34px] items-center justify-center rounded-lg bg-white text-[#4b5563] shadow-[0_8px_20px_rgba(15,23,42,.08)] transition hover:bg-[#f3f4f6] hover:text-[#111827]"
         to="/settings"
@@ -196,6 +199,9 @@ export function CreativeSidebar({
       </div>
       <div className="border-t border-[#e7e9ee] pt-3">
         <TranscriptionTool />
+        <Button asChild variant="ghost" className="h-auto min-h-11 w-full justify-start px-2.5 py-2">
+          <Link to="/api-calls" state={{ from: window.location.pathname }}><FileClock size={16} aria-hidden="true" /><span>API 调用记录</span></Link>
+        </Button>
         <Link
           className="grid min-h-11 grid-cols-[18px_minmax(0,1fr)] items-center gap-2 rounded-lg px-2.5 py-2 text-[#30343b] transition hover:bg-white hover:text-[#111827]"
           to="/settings"

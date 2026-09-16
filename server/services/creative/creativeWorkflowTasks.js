@@ -1,5 +1,6 @@
 const defaultCreativeWorkflows = require('./creativeWorkflows');
 const { defaultRegistry } = require('./creativeTaskRegistry');
+const { runWithApiCallContext } = require('../diagnostics/apiCallRecorder');
 const { calculateProjectProgress, calculateWorkflowProgress, isTerminalEvent } = require('./creativeTaskEvents');
 
 function createOperationId(workflowId) {
@@ -408,7 +409,7 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
   }
 
   setImmediate(() => {
-    runBackgroundTask().catch(error => {
+    runWithApiCallContext({ workflowId, taskId }, runBackgroundTask).catch(error => {
       const message = `创作任务终态写入失败：${error.message || '后台创作任务执行异常。'}`;
       emitWorkflowPersistFailed(registry, taskId, operationId, message, 0);
       markTaskFailedAfterTerminalPersistenceFailure(registry, taskId, error);
@@ -582,7 +583,7 @@ async function startCreativeWorkflowRetryTask(workflowId, options = {}) {
   }
 
   setImmediate(() => {
-    runBackgroundTask().catch(error => {
+    runWithApiCallContext({ workflowId, taskId }, runBackgroundTask).catch(error => {
       const message = `创作任务终态写入失败：${error.message || '后台创作任务执行异常。'}`;
       emitWorkflowPersistFailed(registry, taskId, operationId, message, 0);
       markTaskFailedAfterTerminalPersistenceFailure(registry, taskId, error);

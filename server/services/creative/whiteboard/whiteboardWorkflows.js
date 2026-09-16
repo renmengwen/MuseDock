@@ -382,6 +382,7 @@ async function runWhiteboardWorkflow(workflowId, options = {}) {
         ...(imageTexts ? { imageTexts } : {}) })),
     } : await generateDraft(task, {
       services: options.services, previousArtifact,
+      apiContext: { workflowId, attemptId: attempt.id, attemptNumber: attempt.number },
       onRequest: async repair => {
         await mutate(workflowId, options, (record, now) => {
           const active = assertActiveAttempt(record, attempt);
