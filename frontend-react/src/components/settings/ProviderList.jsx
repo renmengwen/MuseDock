@@ -3,6 +3,7 @@ import { Edit3, Plus, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog.jsx';
 import { ModelConfigForm } from './ModelConfigForm.jsx';
+import { ProviderDiagnostics } from './ProviderDiagnostics.jsx';
 
 function enabledModelSummary(provider, modelTypes, modelTypeInfo) {
   const enabled = modelTypes
@@ -87,6 +88,8 @@ function ProviderDetail({ provider, modelTypes, modelTypeInfo, modelProtocols = 
         </label>
       </div>
       <p className="m-0 text-xs font-semibold text-[#69717e]">协议仅影响分析模型；ASR、TTS 等语音接口仍按各自供应商配置调用。</p>
+
+      <ProviderDiagnostics provider={p} />
 
       <div className="grid grid-cols-2 gap-3 max-[1100px]:grid-cols-1">
         {modelTypes.map(type => (

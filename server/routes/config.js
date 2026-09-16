@@ -1,6 +1,7 @@
 const express = require('express');
 const storedCookies = require('../state/cookies');
 const aiModelConfig = require('../services/ai/aiModelConfig');
+const aiProviderDiagnostics = require('../services/ai/aiProviderDiagnostics');
 const appSettings = require('../services/appSettings');
 const { cleanupTargets, getSystemHealth } = require('../services/systemMaintenance');
 
@@ -79,6 +80,23 @@ router.post('/ai-models', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+function providerDiagnosticRoute(mode) {
+  return async (req, res) => {
+    const controller = new AbortController();
+    const cancel = () => { if (!res.writableEnded) controller.abort(); };
+    res.on('close', cancel);
+    try {
+      const result = await aiProviderDiagnostics.diagnoseProvider(req.body?.provider, { mode, signal: controller.signal });
+      if (!res.destroyed) res.status(result.success ? 200 : result.status || 502).json(result);
+    } catch {
+      if (!res.destroyed) res.status(500).json({ success: false, code: 'DIAGNOSTIC_FAILED', message: '供应商检测失败，请稍后重试。' });
+    } finally { res.off('close', cancel); }
+  };
+}
+
+router.post('/ai-models/probe', providerDiagnosticRoute('probe'));
+router.post('/ai-models/models', providerDiagnosticRoute('models'));
 
 module.exports = router;
 module.exports.cleanupConfigDataRoute = cleanupConfigDataRoute;

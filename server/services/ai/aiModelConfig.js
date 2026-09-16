@@ -294,6 +294,23 @@ async function getPublicConfig(options = {}) {
   return toPublicConfig(stored);
 }
 
+// 仅用于服务端诊断；沿用已保存密钥时绑定原供应商地址，草稿不会写入配置。
+async function resolveProviderDraft(input = {}, options = {}) {
+  const id = normalizeString(input.id);
+  const stored = await readStoredConfig(options);
+  const previous = Object.hasOwn(stored.providers || {}, id) ? stored.providers[id] : null;
+  const apiKey = normalizeString(input.apiKey);
+  const provider = normalizeProvider(id || 'draft', {
+    ...previous,
+    ...input,
+    apiKey: apiKey || previous?.apiKey,
+  });
+  return {
+    ...provider,
+    savedKeyBaseUrl: !apiKey && previous?.apiKey ? normalizeBaseUrl(previous.baseUrl) : null,
+  };
+}
+
 async function saveConfig(input, options = {}) {
   const previous = await readStoredConfig(options);
   const stored = input && input.providers
@@ -324,6 +341,7 @@ module.exports = {
   BUILTIN_FUNASR_REF,
   DEFAULT_FUNASR_BASE_URL,
   getPublicConfig,
+  resolveProviderDraft,
   saveConfig,
   getRuntimeConfig,
   getSkipValidation,

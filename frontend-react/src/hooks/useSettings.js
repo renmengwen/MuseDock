@@ -6,11 +6,11 @@ const MODEL_TYPES = ['asr', 'text', 'image', 'video', 'tts'];
 const DEFAULT_MINIMAX_VOICE_ID = 'Chinese_deep_voiced_male_nv1';
 
 const MODEL_TYPE_INFO = {
-  asr:        { title: 'ASR 转写',   placeholder: 'paraformer / mimo-v2.5-asr' },
-  text:       { title: '分析模型',   placeholder: 'gpt-4o-mini / deepseek-chat' },
-  image:      { title: '图片生成',   placeholder: 'seedream-4-0 / gpt-image-2' },
-  video:      { title: '视频生成',   placeholder: 'video-model-id' },
-  tts:        { title: 'TTS 语音合成', placeholder: 'seed-audio-1.0 / speech-2.8-hd / mimo-v2.5-tts' },
+  asr:        { title: 'ASR 转写' },
+  text:       { title: '分析模型' },
+  image:      { title: '图片生成' },
+  video:      { title: '视频生成' },
+  tts:        { title: 'TTS 语音合成' },
 };
 
 const MODEL_PROTOCOLS = [

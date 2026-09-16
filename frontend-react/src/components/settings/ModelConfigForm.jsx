@@ -12,11 +12,12 @@ export function ModelConfigForm({ type, info, model, onChange }) {
         <Switch small checked={!!m.enabled} onChange={e => onChange('enabled', e.target.checked)} />
         <span className="text-[13px] font-semibold text-[#30343b]">{info.title}</span>
       </div>
-      <input
+      <Input
         className="h-[34px] w-full rounded-md border border-[#d9dde5] bg-[#fafbfc] px-2 text-xs text-[#30343b] outline-none transition focus:border-[#25f4ee] focus:ring-2 focus:ring-[#25f4ee]/15 disabled:opacity-50"
         value={m.modelId}
         onChange={e => onChange('modelId', e.target.value)}
-        placeholder={info.placeholder}
+        aria-label={`${info.title} ID`}
+        placeholder="请输入模型id"
         disabled={!m.enabled}
       />
       {type === 'asr' && m.enabled ? (

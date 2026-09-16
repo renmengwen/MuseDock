@@ -205,6 +205,18 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+  probeAiProvider(provider, signal) {
+    return requestJson('/api/config/ai-models/probe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider }),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
+    });
+  },
+  getAiProviderModels(provider, signal) {
+    return requestJson('/api/config/ai-models/models', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider }),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
+    });
+  },
   getAppSettings() {
     return requestJson('/api/config/app-settings');
   },
