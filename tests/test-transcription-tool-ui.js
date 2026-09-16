@@ -50,7 +50,8 @@ async function run() {
     const number = submissions.length;
     const id = `fixture-${number}`;
     const timestamp = new Date().toISOString();
-    const job = { id, autoCorrect: req.body.autoCorrect, status: 'running', stage: 'starting_asr', progress: 2,
+    const job = { id, autoCorrect: req.body.autoCorrect, extractFrames: req.body.extractFrames,
+      frameCount: req.body.frameCount, frames: [], status: 'running', stage: 'starting_asr', progress: 2,
       createdAt: timestamp, updatedAt: timestamp,
       message: '正在启动 FunASR 并加载模型...', source: { title: number === 1 ? '家乡的月光' : '窗前的月光', url: req.body.source }, files: {} };
     jobs.set(id, job);
@@ -64,10 +65,22 @@ async function run() {
       for (const kind of ['rawText', 'rawSrt', ...(req.body.autoCorrect ? ['correctedText', 'correctedSrt', 'corrections'] : [])]) {
         job.files[kind] = { name: `${kind}.${kind.endsWith('Srt') ? 'srt' : 'txt'}`, url: `/api/transcriptions/${id}/files/${kind}` };
       }
+      if (req.body.extractFrames) {
+        job.result.durationMs = 60000;
+        for (let index = 0; index < req.body.frameCount; index += 1) {
+          const kind = `frame-${String(index + 1).padStart(4, '0')}`;
+          job.files[kind] = { name: `${kind}.jpg`, url: `/api/transcriptions/${id}/files/${kind}` };
+          job.frames.push({ kind, index: index + 1, timestampMs: index * 60000 / req.body.frameCount, ...job.files[kind] });
+        }
+      }
     }, number === 2 ? 1400 : 600);
   });
   app.get('/api/transcriptions/:id/files/:kind', (req, res) => {
     const job = jobs.get(req.params.id);
+    if (req.params.kind.startsWith('frame-')) {
+      const frame = job.frames.find(item => item.kind === req.params.kind);
+      return res.type('image/svg+xml').send(`<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="#365d73"/><text x="160" y="98" text-anchor="middle" font-size="28" fill="white">${frame.timestampMs / 1000} 秒</text></svg>`);
+    }
     const text = req.params.kind.startsWith('corrected') ? job.result.correctedText : job.result.rawText;
     res.type('text/plain').send(req.params.kind.endsWith('Srt') ? `1\n00:00:00,100 --> 00:00:00,800\n${text}\n` : text);
   });
@@ -180,6 +193,8 @@ async function run() {
       assert.deepEqual(openRequests.at(-1), { id, kind, target });
     }
     await dialog.getByText('还没有转写记录', { exact: true }).waitFor();
+    assert.match(await dialog.getByRole('combobox', { name: '是否抽帧' }).innerText(), /否/);
+    assert.equal(await dialog.getByRole('spinbutton', { name: '抽帧数量' }).count(), 0);
     await dialog.getByRole('textbox', { name: '抖音链接或分享文案' }).fill('https://www.douyin.com/video/1234567890');
     await dialog.getByRole('button', { name: '开始转写', exact: true }).click();
     await dialog.getByText('正在启动 FunASR 并加载模型...', { exact: true }).waitFor();
@@ -187,6 +202,9 @@ async function run() {
     assert.equal(await deleteButton('fixture-1').isDisabled(), true, '运行中的转写不能删除');
     await dialog.getByText('转写完成，原始文本和字幕已保存。', { exact: true }).waitFor();
     assert.deepEqual(submissions.map(item => item.autoCorrect), [false]);
+    assert.equal(submissions[0].extractFrames, false);
+    assert.equal(submissions[0].frameCount, null);
+    assert.equal(await dialog.getByRole('region', { name: '视频截图', exact: true }).count(), 0);
     assert.equal(await dialog.getByRole('tab', { name: '校订版' }).isDisabled(), true);
     await openResultFile('打开 SRT', 'fixture-1', 'rawSrt');
     fileOpenFailure = true;
@@ -201,6 +219,28 @@ async function run() {
     await dialog.getByRole('textbox', { name: '抖音链接或分享文案' }).fill('https://www.douyin.com/video/2345678901');
     await dialog.getByRole('combobox', { name: '自动校订' }).click();
     await page.getByRole('option', { name: '是，调用分析模型' }).click();
+    await dialog.getByRole('combobox', { name: '是否抽帧' }).click();
+    await page.getByRole('option', { name: '是，按数量抽帧' }).click();
+    const frameCountInput = dialog.getByRole('spinbutton', { name: '抽帧数量' });
+    for (const invalid of ['', '0', '-1', '1.5', '101']) {
+      await frameCountInput.fill(invalid);
+      assert.equal(await dialog.getByRole('button', { name: '开始转写', exact: true }).isDisabled(), true);
+      await dialog.getByText('请输入 1 到 100 之间的整数。', { exact: true }).waitFor();
+    }
+    await dialog.getByRole('combobox', { name: '是否抽帧' }).click();
+    await page.getByRole('option', { name: '否，不抽帧' }).click();
+    assert.equal(await frameCountInput.count(), 0);
+    assert.equal(await dialog.getByRole('button', { name: '开始转写', exact: true }).isEnabled(), true);
+    await dialog.getByRole('combobox', { name: '是否抽帧' }).click();
+    await page.getByRole('option', { name: '是，按数量抽帧' }).click();
+    await frameCountInput.fill('3');
+    await dialog.getByText('从视频中按数量均匀截图，第一帧固定为 0 秒。', { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(os.tmpdir(), 'musedock-transcription-frames-form.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await frameCountInput.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(os.tmpdir(), 'musedock-transcription-frames-form-mobile.png'), fullPage: true });
+    assert.equal(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth), true, '窄屏抽帧表单不应横向溢出');
+    await page.setViewportSize({ width: 1360, height: 960 });
     await dialog.getByRole('button', { name: '开始转写', exact: true }).click();
     await dialog.getByText('正在启动 FunASR 并加载模型...', { exact: true }).waitFor();
     await historyItem('fixture-1').click();
@@ -211,6 +251,17 @@ async function run() {
     await historyItem('fixture-2').click();
     await dialog.getByText('转写和校订完成，共校订 1 条字幕。', { exact: true }).waitFor();
     assert.deepEqual(submissions.map(item => item.autoCorrect), [false, true]);
+    assert.equal(submissions[1].extractFrames, true);
+    assert.equal(submissions[1].frameCount, 3);
+    const gallery = dialog.getByRole('region', { name: '视频截图', exact: true });
+    assert.equal(await gallery.getByRole('img').count(), 3);
+    assert.match(await gallery.innerText(), /第 1 张 · 0.00 秒/);
+    assert.match(await gallery.innerText(), /第 3 张 · 40.00 秒/);
+    await gallery.scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => [...document.querySelectorAll('[aria-label="视频截图"] img')].every(img => img.complete && img.naturalWidth > 0));
+    await page.screenshot({ path: path.join(os.tmpdir(), 'musedock-transcription-frames-gallery.png'), fullPage: true });
+    await openResultFile('打开第 1 张截图', 'fixture-2', 'frame-0001');
+    await openResultFile('打开截图文件夹', 'fixture-2', 'frame-0001', 'folder');
     assert.equal(await dialog.getByRole('tab', { name: '校订版' }).getAttribute('aria-selected'), 'true');
     assert.equal(await dialog.getByRole('tabpanel').innerText(), '窗前的月光。');
     await openResultFile('打开 SRT', 'fixture-2', 'correctedSrt');
@@ -285,6 +336,7 @@ async function run() {
     await dialog.getByRole('tabpanel').getByText('窗前的月光。', { exact: true }).waitFor();
     assert.equal(await dialog.locator('[data-transcription-id]').count(), 2, '没有有效浏览器记录也应从后端找回全部历史');
     assert.equal(submissions.length, 2);
+    assert.equal(await gallery.getByRole('img').count(), 3, '刷新恢复历史后应保留截图');
 
     // 详情慢请求先读到 running，后台轮询随后读到 succeeded；慢响应不能把已完成状态回退。
     const retrying = jobs.get('fixture-2');
@@ -382,7 +434,7 @@ async function run() {
     assert.equal(submissions.length, 2, '删除和刷新不能重新提交转写');
     assert.deepEqual(errors, [], '页面不应发生 JavaScript 异常');
     assert.deepEqual(browserDownloads, [], '打开本地文件不能产生浏览器下载副本');
-    console.log('浏览器烟测通过：历史与本地文件打开、删除确认/取消/Escape、失败重试、删除后的状态与缓存清理、迟到响应保护、刷新恢复及窄屏布局。');
+    console.log('浏览器烟测通过：抽帧开关与数量校验、从 0 秒截图预览与本地打开、历史恢复、删除与迟到响应保护、窄屏布局。');
     console.log(`截图：${path.join(os.tmpdir(), 'musedock-transcription-desktop.png')}`);
     console.log(`截图：${path.join(os.tmpdir(), 'musedock-transcription-mobile.png')}`);
   } finally {

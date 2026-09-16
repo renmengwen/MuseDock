@@ -9,11 +9,12 @@ const { normalizeCreativeInputWithDouyinShortLink } = require('../creative/creat
 const { TranscriptionError, transcriptionEndpoint, transcribeFunasrAudio } = require('./funasr');
 const { ensureFunasrService } = require('./funasrRuntime');
 const { toSrt, proofreadTranscript } = require('./corrections');
+const { extractVideoFrames, MAX_FRAME_COUNT } = require('./videoFrames');
 
 const DEFAULT_ROOT = path.join(require('../../dataRoot'), 'data/transcriptions');
 const ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
-const FILE_KINDS = new Set(['rawText', 'rawSrt', 'rawJson', 'correctedText', 'correctedSrt', 'corrections', 'metadata', 'audio']);
+const FILE_KINDS = new Set(['rawText', 'rawSrt', 'rawJson', 'correctedText', 'correctedSrt', 'corrections', 'metadata', 'audio', 'framesManifest']);
 
 async function hashFile(file) {
   const hash = createHash('sha256');
@@ -82,16 +83,20 @@ function createTranscriptionService(options = {}) {
   }
 
   function present(job) {
+    const files = Object.fromEntries(Object.entries(job.files || {}).map(([kind, file]) => [kind, {
+      name: file.name, bytes: file.bytes, sha256: file.sha256,
+      url: `/api/transcriptions/${job.id}/files/${kind}`,
+    }]));
     return {
       id: job.id, status: job.status, stage: job.stage, progress: job.progress, message: job.message,
       title: jobTitle(job),
       source: job.source || null, autoCorrect: job.autoCorrect, correctionCount: job.correctionCount,
+      extractFrames: job.extractFrames === true, frameCount: job.frameCount ?? null,
+      frames: (job.frames || []).map(frame => ({ ...frame, ...files[frame.kind] })),
+      frameSampling: job.frameSampling || null,
       createdAt: job.createdAt, updatedAt: job.updatedAt, error: job.error || null,
       result: job.result || null, canRetryCorrection: job.status === 'partial' && job.stage === 'correcting',
-      files: Object.fromEntries(Object.entries(job.files || {}).map(([kind, file]) => [kind, {
-        name: file.name, bytes: file.bytes, sha256: file.sha256,
-        url: `/api/transcriptions/${job.id}/files/${kind}`,
-      }])),
+      files,
     };
   }
 
@@ -158,7 +163,7 @@ function createTranscriptionService(options = {}) {
       jobs.set(id, job);
       if (ACTIVE_STATUSES.has(job.status) && !running.has(id)) {
         job.status = job.files?.rawJson ? 'partial' : 'interrupted';
-        if (job.files?.rawJson && job.autoCorrect) job.stage = 'correcting';
+        if (job.files?.rawJson && job.autoCorrect && job.stage !== 'extracting_frames') job.stage = 'correcting';
         job.message = job.files?.rawJson ? '服务重启中断了任务，原始转写已保留。' : '服务重启中断了任务，请重新开始转写。';
         await save(job);
       }
@@ -258,7 +263,8 @@ function createTranscriptionService(options = {}) {
   }
 
   async function verifiedFile(job, kind) {
-    if (!FILE_KINDS.has(kind) || !job.files?.[kind]) throw new TranscriptionError('FILE_NOT_FOUND', '该转写文件尚未生成。', 404);
+    const isFrame = /^frame-\d{4}$/.test(kind) && job.frames?.some(frame => frame.kind === kind);
+    if ((!FILE_KINDS.has(kind) && !isFrame) || !job.files?.[kind]) throw new TranscriptionError('FILE_NOT_FOUND', '该转写文件尚未生成。', 404);
     const artifact = job.files[kind];
     const fullPath = path.resolve(directory(job.id), artifact.path);
     const relative = path.relative(directory(job.id), fullPath);
@@ -266,7 +272,7 @@ function createTranscriptionService(options = {}) {
     let digest;
     try { digest = await hashFile(fullPath); } catch { throw new TranscriptionError('FILE_NOT_FOUND', '转写文件不存在或已被清理。', 404); }
     if (digest !== artifact.sha256) throw new TranscriptionError('ARTIFACT_CHANGED', '转写文件已被修改，校验未通过，请保留原始产物。', 409);
-    return { path: fullPath, name: artifact.name };
+    return { path: fullPath, name: artifact.name, ...(isFrame ? { contentType: 'image/jpeg' } : {}) };
   }
 
   async function correct(job, textConfig) {
@@ -287,7 +293,7 @@ function createTranscriptionService(options = {}) {
         }, null, 2), { encoding: 'utf8', flag: 'wx' });
       },
       onProgress: ({ progress, message }) => {
-        job.progress = 80 + Math.floor(progress * 0.18); job.message = message;
+        job.progress = 80 + Math.floor(progress * (job.extractFrames ? 0.12 : 0.18)); job.message = message;
       },
     });
     const text = corrected.sentences.map(cue => cue.text).join('\n');
@@ -302,6 +308,43 @@ function createTranscriptionService(options = {}) {
     job.correctionCount = corrected.changes.length;
     job.result.correctedText = text;
     job.result.correctedSentences = corrected.sentences;
+  }
+
+  async function finish(job) {
+    if (job.extractFrames && job.frames.length !== job.frameCount) {
+      await setStage(job, 'extracting_frames', 94, `正在读取视频时长并抽取 ${job.frameCount} 张截图...`);
+      const media = pipeline.getMediaPaths(job.source.awemeId, path.join(directory(job.id), 'media'));
+      try {
+        const sampled = await (options.extractVideoFrames || extractVideoFrames)(media.video, media.framesDir, {
+          frameCount: job.frameCount, ffmpegPath: options.ffmpegPath, ffprobePath: options.ffprobePath,
+          mediaTimeoutMs: 180000,
+          onFrame: async frame => {
+            const kind = `frame-${String(frame.index).padStart(4, '0')}`;
+            await recordFile(job, kind, path.relative(directory(job.id), frame.path));
+            job.frames.push({ kind, index: frame.index, timestampMs: frame.timestampMs });
+            job.progress = 94 + Math.floor(job.frames.length / job.frameCount * 5);
+            job.message = `正在抽帧，已保存 ${job.frames.length}/${job.frameCount} 张截图...`;
+            await save(job);
+          },
+        });
+        if (sampled.frames.length !== job.frameCount || job.frames.length !== job.frameCount) {
+          throw new TranscriptionError('FRAME_EXTRACTION_FAILED', '截图数量与设置不一致，请重新开始转写。');
+        }
+        job.frameSampling = { method: 'uniform_from_zero', durationMs: sampled.durationMs, intervalMs: sampled.intervalMs };
+        await writeArtifact(job, 'framesManifest', path.relative(directory(job.id), path.join(media.framesDir, 'frames.json')),
+          JSON.stringify({ source: job.source, frameCount: job.frameCount, ...job.frameSampling,
+            frames: job.frames.map(frame => ({ ...frame, ...job.files[frame.kind] })),
+          }, null, 2));
+      } catch (error) {
+        const known = error instanceof TranscriptionError;
+        throw new TranscriptionError(known ? error.code : 'FRAME_EXTRACTION_FAILED',
+          `转写结果已保存，抽帧未完成：${known ? error.message : '请检查视频文件、ffmpeg 配置与磁盘空间。'}`);
+      }
+    }
+    const message = job.autoCorrect ? `转写和校订完成，共校订 ${job.correctionCount} 条字幕。` : '转写完成，原始文本和字幕已保存。';
+    Object.assign(job, { status: 'succeeded', stage: 'done', progress: 100,
+      message: `${message}${job.extractFrames ? ` 已保存 ${job.frames.length} 张截图。` : ''}` });
+    await save(job);
   }
 
   async function run(job, runtime) {
@@ -360,6 +403,7 @@ function createTranscriptionService(options = {}) {
     await writeArtifact(job, 'rawJson', 'transcript.raw.json', JSON.stringify(result, null, 2));
     await writeArtifact(job, 'metadata', 'metadata.json', JSON.stringify({
       source: job.source, model: { provider: 'funasr', modelId: runtime.asr.modelId },
+      extractFrames: job.extractFrames, frameCount: job.frameCount,
       durationMs, timingSource: result.timingSource, sentenceCount: result.sentences.length,
       requestCount: result.requestCount, missingRanges: result.missingRanges, files: job.files,
     }, null, 2));
@@ -367,9 +411,7 @@ function createTranscriptionService(options = {}) {
       sentenceCount: result.sentences.length, timingSource: result.timingSource, requestCount: result.requestCount };
     await save(job);
     if (job.autoCorrect) await correct(job, runtime.text);
-    Object.assign(job, { status: 'succeeded', stage: 'done', progress: 100,
-      message: job.autoCorrect ? `转写和校订完成，共校订 ${job.correctionCount} 条字幕。` : '转写完成，原始文本和字幕已保存。' });
-    await save(job);
+    await finish(job);
   }
 
   function launch(job, operation) {
@@ -395,18 +437,25 @@ function createTranscriptionService(options = {}) {
       try { if (asrReady) transcriptionEndpoint(asr.baseUrl); } catch { asrReady = false; }
       return { asrReady, asrModel: asrReady ? asr.modelId : '', textReady: textConfigured(text), textModel: textConfigured(text) ? text.modelId : '' };
     },
-    async create({ source, autoCorrect = false } = {}) {
+    async create({ source, autoCorrect = false, extractFrames = false, frameCount } = {}) {
       if (typeof source !== 'string' || !source.trim() || source.length > 4096 || typeof autoCorrect !== 'boolean') {
         throw new TranscriptionError('INVALID_INPUT', '请输入有效的抖音链接或分享文案（不超过 4096 字符）。');
       }
+      if (typeof extractFrames !== 'boolean') throw new TranscriptionError('INVALID_INPUT', '请选择是否抽帧。');
+      if (extractFrames && (!Number.isInteger(frameCount) || frameCount < 1 || frameCount > MAX_FRAME_COUNT)) {
+        throw new TranscriptionError('INVALID_FRAME_COUNT', `抽帧数量必须是 1 到 ${MAX_FRAME_COUNT} 之间的整数。`);
+      }
+      const requestedFrameCount = extractFrames ? frameCount : null;
       const input = source.trim();
-      const existing = [...jobs.values()].find(job => running.has(job.id) && job.input === input && job.autoCorrect === autoCorrect);
+      const existing = [...jobs.values()].find(job => running.has(job.id) && job.input === input && job.autoCorrect === autoCorrect
+        && job.extractFrames === extractFrames && job.frameCount === requestedFrameCount);
       if (existing) return present(existing);
       if (creating || running.size) throw new TranscriptionError('TASK_BUSY', '已有转写任务正在执行，请等待完成后再开始。', 409);
       creating = true;
       try {
         const runtime = await configs(autoCorrect);
-        const job = { id: randomUUID(), input, autoCorrect, status: 'queued', stage: 'queued', progress: 0,
+        const job = { id: randomUUID(), input, autoCorrect, extractFrames, frameCount: requestedFrameCount, frames: [],
+          status: 'queued', stage: 'queued', progress: 0,
           message: '正在准备转写任务...', files: {}, createdAt: new Date().toISOString() };
         await fsp.mkdir(directory(job.id), { recursive: true });
         await save(job);
@@ -429,8 +478,7 @@ function createTranscriptionService(options = {}) {
         await setStage(job, 'correcting', 80, '正在重新校订已保存的原始转写...');
         launch(job, async () => {
           await correct(job, text);
-          Object.assign(job, { status: 'succeeded', stage: 'done', progress: 100, message: `校订完成，共校订 ${job.correctionCount} 条字幕。` });
-          await save(job);
+          await finish(job);
         });
         return present(job);
       } finally { creating = false; }

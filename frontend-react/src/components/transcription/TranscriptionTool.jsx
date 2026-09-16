@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button.jsx';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog.jsx';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog.jsx';
 import { Textarea } from '@/components/ui/textarea.jsx';
+import { Input } from '@/components/ui/input.jsx';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs.jsx';
 import { useTranscriptionHistory, isTranscriptionRunning as isRunning } from '@/hooks/useTranscriptionHistory.js';
@@ -16,6 +17,8 @@ export function TranscriptionTool({ compact = false }) {
   const [open, setOpen] = useState(false);
   const [source, setSource] = useState('');
   const [autoCorrect, setAutoCorrect] = useState(false);
+  const [extractFrames, setExtractFrames] = useState(false);
+  const [frameCount, setFrameCount] = useState('6');
   const [capabilities, setCapabilities] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -41,6 +44,7 @@ export function TranscriptionTool({ compact = false }) {
   selectedIdRef.current = selectedId;
   const busy = submitting || !!activeJob || !!deletingId;
   const navigationDisabled = submitting || fileActions.opening || !!loginAction || !!deletingId;
+  const validFrameCount = Number.isInteger(Number(frameCount)) && Number(frameCount) >= 1 && Number(frameCount) <= 100;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -98,11 +102,13 @@ export function TranscriptionTool({ compact = false }) {
   async function start(event) {
     event.preventDefault();
     if (submittingRef.current || busy || !source.trim()) return;
+    if (extractFrames && !validFrameCount) { setError('抽帧数量必须是 1 到 100 之间的整数。'); return; }
     submittingRef.current = true;
     setSubmitting(true);
     setError(''); setNotice('');
     try {
-      const result = await api.createTranscription({ source: source.trim(), autoCorrect });
+      const result = await api.createTranscription({ source: source.trim(), autoCorrect,
+        extractFrames, frameCount: extractFrames ? Number(frameCount) : null });
       rememberJob(result.data);
     } catch (cause) { setError(cause.message); }
     finally { submittingRef.current = false; setSubmitting(false); }
@@ -128,7 +134,8 @@ export function TranscriptionTool({ compact = false }) {
   function openFile(kind, target = 'file') {
     setError(''); setNotice('');
     const prefix = kind.startsWith('corrected') ? '校订版' : kind.startsWith('raw') ? '原始版' : '';
-    const label = kind === 'corrections' ? '校订记录' : `${prefix}${kind.endsWith('Srt') ? ' SRT 字幕' : ' TXT 文本'}`;
+    const frame = job?.frames?.find(item => item.kind === kind);
+    const label = frame ? `第 ${frame.index} 张截图` : kind === 'corrections' ? '校订记录' : `${prefix}${kind.endsWith('Srt') ? ' SRT 字幕' : ' TXT 文本'}`;
     void fileActions.openFile(job?.files?.[kind]?.url, label, target);
   }
 
@@ -202,6 +209,33 @@ export function TranscriptionTool({ compact = false }) {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="grid gap-3 rounded-lg border bg-muted/30 px-3 py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="grid gap-1">
+                    <label id="transcription-frames-label" className="text-sm font-medium">是否抽帧</label>
+                    <span className="text-xs text-muted-foreground">从视频中按数量均匀截图，第一帧固定为 0 秒。</span>
+                  </div>
+                  <Select value={extractFrames ? 'on' : 'off'} onValueChange={value => setExtractFrames(value === 'on')} disabled={busy}>
+                    <SelectTrigger className="w-40 bg-background" aria-labelledby="transcription-frames-label"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="off">否，不抽帧</SelectItem>
+                      <SelectItem value="on">是，按数量抽帧</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {extractFrames && <div className="grid gap-2 border-t pt-3">
+                  <label className="flex items-center gap-3 text-sm font-medium" htmlFor="transcription-frame-count">
+                    抽帧数量
+                    <Input id="transcription-frame-count" type="number" inputMode="numeric" min={1} max={100} step={1} required
+                      className="w-24 bg-background" value={frameCount} onChange={event => setFrameCount(event.target.value)} disabled={busy}
+                      aria-invalid={!validFrameCount} aria-describedby="transcription-frames-help" />
+                    <span className="text-xs font-normal text-muted-foreground">张</span>
+                  </label>
+                  <p id="transcription-frames-help" className={`m-0 text-xs ${validFrameCount ? 'text-muted-foreground' : 'text-danger'}`}>
+                    {validFrameCount ? '可抽 1–100 张。间隔 = 视频总时长 ÷ 抽帧数量，从 0 秒起依次截图。' : '请输入 1 到 100 之间的整数。'}
+                  </p>
+                </div>}
+              </div>
               {loading ? <p className="m-0 flex items-center gap-2 text-sm text-muted-foreground" role="status"><LoaderCircle className="size-4 animate-spin" />正在读取转写配置...</p> : (
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>{capabilities?.asrReady ? `FunASR · ${capabilities.asrModel}` : '尚未配置 FunASR'}
@@ -209,7 +243,7 @@ export function TranscriptionTool({ compact = false }) {
                   <Link to="/settings?section=models" state={{ from: window.location.pathname }} onClick={() => setOpen(false)} className="underline underline-offset-4">配置模型</Link>
                 </div>
               )}
-              <Button type="submit" className="min-h-11 md:min-h-9" disabled={busy || loading || historyLoading || !!loginAction || !source.trim() || !capabilities?.asrReady || (autoCorrect && !capabilities?.textReady)}>
+              <Button type="submit" className="min-h-11 md:min-h-9" disabled={busy || loading || historyLoading || !!loginAction || !source.trim() || !capabilities?.asrReady || (autoCorrect && !capabilities?.textReady) || (extractFrames && !validFrameCount)}>
                 {busy && !pollError ? <LoaderCircle className="size-4 animate-spin" /> : <AudioLines className="size-4" />}
                 {submitting ? '正在提交...' : busy ? '等待当前转写完成' : '开始转写'}
               </Button>
@@ -227,6 +261,7 @@ export function TranscriptionTool({ compact = false }) {
                 <h3 className="m-0 break-words text-base font-semibold text-fg-1">{job.title || job.source?.title || '正在准备转写'}</h3>
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-fg-3">
                   <time dateTime={job.createdAt}>{formatTranscriptionDate(job.createdAt)}</time>
+                  {job.extractFrames && <span>抽帧：{job.frameCount} 张 · 从 0 秒开始</span>}
                   {job.source?.url && <Button variant="ghost" size="sm" asChild className="px-0 text-xs text-fg-2">
                     <a href={job.source.url} target="_blank" rel="noopener noreferrer">查看原视频<ExternalLink className="size-3.5" /></a>
                   </Button>}
@@ -270,6 +305,23 @@ export function TranscriptionTool({ compact = false }) {
               </p>}
             </section>}
 
+            {!!job?.frames?.length && <section className="grid gap-3" aria-label="视频截图">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="m-0 text-sm font-semibold">视频截图（{job.frames.length}/{job.frameCount}）</h3>
+                <Button variant="outline" size="sm" onClick={() => openFile(job.frames[0].kind, 'folder')} disabled={fileActions.opening}>
+                  <FolderOpen />打开截图文件夹
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+                {job.frames.map(frame => <Button key={frame.kind} variant="outline" className="grid h-auto min-w-0 gap-2 p-2"
+                  aria-label={`打开第 ${frame.index} 张截图`} disabled={fileActions.opening} onClick={() => openFile(frame.kind)}>
+                  <img src={frame.url} alt={`第 ${frame.index} 张截图，${(frame.timestampMs / 1000).toFixed(2)} 秒`}
+                    loading="lazy" decoding="async" className="aspect-video w-full rounded bg-muted object-contain" />
+                  <span className="text-xs text-muted-foreground">第 {frame.index} 张 · {(frame.timestampMs / 1000).toFixed(2)} 秒</span>
+                </Button>)}
+              </div>
+            </section>}
+
             <div className="flex flex-wrap items-center gap-2 border-t pt-3">
               <Button variant="ghost" size="sm" disabled={!!loginAction || busy} onClick={() => loginToDouyin(false)}>
                 {loginAction === 'opening' && <LoaderCircle className="size-4 animate-spin" />}{loginAction === 'opening' ? '正在打开登录...' : '登录抖音'}
@@ -289,7 +341,7 @@ export function TranscriptionTool({ compact = false }) {
           if (deleteTriggerRef.current?.isConnected) deleteTriggerRef.current.focus();
           else dialogContentRef.current?.focus();
         }}
-        description="将永久删除这条记录及其任务目录中的全部内容，包括原始文字和字幕、所有校订版本、视频、音频与中间文件。此操作无法恢复。"
+        description="将永久删除这条记录及其任务目录中的全部内容，包括原始文字和字幕、所有校订版本、视频、音频、截图与中间文件。此操作无法恢复。"
         destructive loading={Boolean(deletingId)} confirmText={deletingId ? '正在删除...' : '确认删除'} onConfirm={confirmDelete}>
         <p className="m-0 break-words text-sm font-medium text-fg-1">{deleteTarget?.title || '抖音转写'}</p>
         <p className="m-0 text-xs text-fg-3">{formatTranscriptionDate(deleteTarget?.createdAt)}</p>

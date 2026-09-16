@@ -55,7 +55,8 @@ function createTranscriptionRouter({ service = createTranscriptionService(), dou
   router.get('/:id/files/:kind', route(async (req, res) => {
     const file = await service.file(req.params.id, req.params.kind);
     res.set('X-Content-Type-Options', 'nosniff');
-    res.download(file.path, file.name);
+    if (file.contentType) res.type(file.contentType).sendFile(file.path);
+    else res.download(file.path, file.name);
   }));
   router.post('/:id/files/:kind', createLocalFileOpenHandler(async req =>
     (await service.file(req.params.id, req.params.kind)).path));
