@@ -1,5 +1,6 @@
 const fsp = require('fs/promises');
 const defaultTextModel = require('../../ai/aiTextModel');
+const { recordedFetch } = require('../../diagnostics/apiCallRecorder');
 const defaultImageModel = require('../../ai/aiImageModel');
 const { WhiteboardError, canvasFor, sha256 } = require('./contracts');
 const { transportCategory, visionDiagnostics, visionRequestError } = require('./visionDiagnostics');
@@ -228,7 +229,7 @@ async function generateLineart({ artifact, scene, revision, imageConfig, service
     else {
       const url = new URL(item.url);
       if (!['http:', 'https:'].includes(url.protocol)) throw new Error();
-      const fetched = await (services.fetchImpl || fetch)(url.href, { signal: AbortSignal.timeout(60000) });
+      const fetched = await recordedFetch(services.fetchImpl || fetch, { category: 'download' })(url.href, { signal: AbortSignal.timeout(60000) });
       if (!fetched.ok) throw new Error();
       bytes = await defaultImageModel.readLimitedImageBuffer(fetched, 30 * 1024 * 1024);
     }

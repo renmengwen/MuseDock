@@ -2,6 +2,7 @@ const AWEME_ID_PATTERN = /^\d{5,32}$/;
 const SOURCE_URL_PATTERN = /https?:\/\/[^\s<>"'`()\[\]{}，。；;、（）《》【】「」『』“”‘’]+/gi;
 const SOURCE_URL_TRAILING_PUNCTUATION_PATTERN = /[.,;:!?，。；：！？、)\]}）】》」』”’]+$/;
 const DOUYIN_SHORT_LINK_TIMEOUT_MS = 8000;
+const { recordedFetch } = require('../diagnostics/apiCallRecorder');
 const DOUYIN_SHORT_LINK_MAX_REDIRECTS = 5;
 const DOUYIN_SHORT_LINK_RESOLVE_FAILED_MESSAGE = '暂时无法解析抖音短链，请稍后重试，或粘贴跳转后的完整视频链接。';
 const sourceFetch = require('../source/sourceFetch');
@@ -186,7 +187,7 @@ async function resolveDouyinShortLink(shortUrl, {
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
     try {
-      const response = await fetchImpl(currentUrl, {
+      const response = await recordedFetch(fetchImpl, { category: 'source' })(currentUrl, {
         method: 'GET',
         redirect: 'manual',
         signal: controller?.signal,

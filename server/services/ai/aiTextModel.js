@@ -1,5 +1,7 @@
 ﻿const aiModelConfig = require('./aiModelConfig');
 
+const { recordedFetch, recordModelCall } = require('../diagnostics/apiCallRecorder');
+
 function normalizeBaseUrl(value) {
   return typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
 }
@@ -511,7 +513,7 @@ async function postModelRequest({ protocol, baseUrl, apiKey, modelId, messages, 
   const resolvedProtocol = normalizeProtocol(protocol);
   const isAnthropic = resolvedProtocol === 'anthropic-messages';
   try {
-    const response = await fetchImpl(`${baseUrl}${isAnthropic ? '/messages' : '/responses'}`, {
+    const response = await recordedFetch(fetchImpl, { category: 'text' })(`${baseUrl}${isAnthropic ? '/messages' : '/responses'}`, {
       method: 'POST',
       headers: isAnthropic ? {
         'Content-Type': 'application/json',
@@ -966,5 +968,5 @@ async function callTextModel(options = {}) {
 }
 
 module.exports = {
-  callTextModel,
+  callTextModel: options => recordModelCall(() => callTextModel(options), { category: 'text' }),
 };

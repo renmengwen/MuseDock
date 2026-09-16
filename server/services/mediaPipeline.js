@@ -1,5 +1,6 @@
 const fsp = require('fs/promises');
 const fs = require('fs');
+const { recordedFetch } = require('./diagnostics/apiCallRecorder');
 const path = require('path');
 const { spawn } = require('child_process');
 const aiModelConfig = require('./ai/aiModelConfig');
@@ -189,7 +190,7 @@ async function resolveAsrRuntime(options = {}) {
 }
 
 async function sendMimoAudio(audioPath, config, options = {}) {
-  const fetchImpl = options.fetchImpl || fetch;
+  const fetchImpl = recordedFetch(options.fetchImpl || fetch, { category: 'transcription' });
   const { audioBase64 } = await getBase64AudioBytes(audioPath);
   const response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
     method: 'POST',
@@ -488,7 +489,7 @@ async function downloadFile(url, targetPath, options = {}) {
     return { status: 'skipped', message: 'No download URL available' };
   }
 
-  const response = await fetch(url, {
+  const response = await recordedFetch(fetch, { category: 'download' })(url, {
     headers: {
       'User-Agent': options.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36',
       Referer: options.referer || 'https://www.douyin.com/',

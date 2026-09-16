@@ -2,6 +2,7 @@
 // Seed Audio prompt-only request and same-response native subtitle contract.
 // MuseDock owns configuration, attempts, publication and approvals.
 const crypto = require('crypto');
+const { recordedFetch, recordModelCall } = require('../diagnostics/apiCallRecorder');
 
 const DOUBAO_ENDPOINT = 'https://openspeech.bytedance.com/api/v3/tts/create';
 const DOUBAO_MODEL = 'seed-audio-1.0';
@@ -106,7 +107,7 @@ async function callDoubaoTts(options) {
   let response;
   let payload;
   try {
-    response = await (options.fetchImpl || fetch)(DOUBAO_ENDPOINT, {
+    response = await recordedFetch(options.fetchImpl || fetch, { category: 'tts' })(DOUBAO_ENDPOINT, {
       method: 'POST', signal,
       headers: { 'Content-Type': 'application/json', 'X-Api-Key': runtime.apiKey, 'X-Api-Request-Id': crypto.randomUUID() },
       body: JSON.stringify({ model: DOUBAO_MODEL, text_prompt: textPrompt, audio_config: {
@@ -146,4 +147,5 @@ async function callDoubaoTts(options) {
   }
 }
 
-module.exports = { DOUBAO_ENDPOINT, DOUBAO_MODEL, DEFAULT_VOICE_DIRECTION, normalizeDoubaoSettings, createTextPrompt, nativeSubtitleEvidence, callDoubaoTts };
+module.exports = { DOUBAO_ENDPOINT, DOUBAO_MODEL, DEFAULT_VOICE_DIRECTION, normalizeDoubaoSettings, createTextPrompt, nativeSubtitleEvidence,
+  callDoubaoTts: options => recordModelCall(() => callDoubaoTts(options), { category: 'tts' }) };

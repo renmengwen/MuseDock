@@ -1,5 +1,6 @@
 const ARTICLE_MAX = 8000;
 const README_MAX = 10000;
+const { recordedFetch } = require('../diagnostics/apiCallRecorder');
 // GitHub API/README 等结构化响应继续使用较小上限；网页文章允许更大的页面壳，
 // 再由正文提取和 ARTICLE_MAX 控制最终进入创作链路的内容体量。
 const DEFAULT_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
@@ -356,7 +357,7 @@ async function fetchTopLevelTree(api, headers, options) {
 
 async function fetchText(url, headers, options = {}) {
   let currentUrl = assertPublicHttpUrl(url).href;
-  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const fetchImpl = recordedFetch(options.fetchImpl || globalThis.fetch, { category: 'source' });
   if (typeof fetchImpl !== 'function') {
     throw new Error('当前运行环境不支持 fetch，无法读取外部来源。');
   }

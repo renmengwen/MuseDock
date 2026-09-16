@@ -1,5 +1,6 @@
 const fsp = require('fs/promises');
 const path = require('path');
+const { recordedFetch } = require('../diagnostics/apiCallRecorder');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const { resolveFfmpegPath, readAudioDuration } = require('../tts/ttsTimeline');
@@ -124,7 +125,7 @@ async function transcribeFunasrAudio(audioPath, config, options = {}) {
     let response;
     let payload;
     try {
-      response = await (options.fetchImpl || globalThis.fetch)(endpoint, {
+      response = await recordedFetch(options.fetchImpl || globalThis.fetch, { category: 'transcription' })(endpoint, {
         method: 'POST', body, redirect: 'error',
         headers: config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {},
         signal: AbortSignal.timeout(options.requestTimeoutMs || 300000),

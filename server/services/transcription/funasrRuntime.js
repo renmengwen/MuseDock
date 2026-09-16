@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { recordedFetch } = require('../diagnostics/apiCallRecorder');
 const { spawn, execFile } = require('child_process');
 const { promisify } = require('util');
 const { setTimeout: delay } = require('timers/promises');
@@ -42,7 +43,7 @@ function startupError(diagnostic = '') {
 
 function createFunasrRuntime(options = {}) {
   const env = options.env || process.env;
-  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const fetchImpl = recordedFetch(options.fetchImpl || globalThis.fetch, { category: 'transcription' });
   const spawnImpl = options.spawnImpl || spawn;
   const runPython = options.execute || execute;
   const starts = new Map();

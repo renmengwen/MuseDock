@@ -130,6 +130,16 @@ export function resolveLocalFileUrl(value, origin = globalThis.location?.origin 
 }
 
 export const api = {
+  listApiCallLogs({ workflowId = '', state = '', before, signal } = {}) {
+    const query = new URLSearchParams();
+    if (workflowId) query.set('workflow_id', workflowId);
+    if (state) query.set('state', state);
+    if (before) query.set('before', String(before));
+    return requestJson(`/api/api-call-logs?${query}`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000) });
+  },
+  getApiCallLog(id, signal) {
+    return requestJson(`/api/api-call-logs/${encodeURIComponent(id)}`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30000)]) : AbortSignal.timeout(30000) });
+  },
   openLocalFile(fileUrl, target = 'file') {
     const url = resolveLocalFileUrl(fileUrl);
     if (!url) return Promise.reject(new Error('没有可打开的本地文件，请重新加载这条记录。'));

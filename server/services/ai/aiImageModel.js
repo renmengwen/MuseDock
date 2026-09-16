@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const fsp = require('fs/promises');
 const path = require('path');
 const aiModelConfig = require('./aiModelConfig');
+const { recordedFetch, recordModelCall } = require('../diagnostics/apiCallRecorder');
 
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 
@@ -80,7 +81,7 @@ async function generateImages(request = {}) {
   if (!runtime || runtime.enabled !== true || !runtime.apiKey || !runtime.baseUrl || !runtime.modelId) {
     return { success: false, configured: false, images: [], message: '生图模型未配置，已跳过图片生成。' };
   }
-  const fetchImpl = request.fetchImpl || globalThis.fetch;
+  const fetchImpl = recordedFetch(request.fetchImpl || globalThis.fetch, { category: 'image' });
   if (typeof fetchImpl !== 'function') {
     return { success: false, configured: true, images: [], message: '当前运行环境不支持 fetch。' };
   }
@@ -176,7 +177,7 @@ async function generateImages(request = {}) {
 }
 
 async function downloadGeneratedImages({ images = [], assetDir, fetchImpl, startIndex = 0 } = {}) {
-  const impl = fetchImpl || globalThis.fetch;
+  const impl = recordedFetch(fetchImpl || globalThis.fetch, { category: 'download' });
   if (typeof impl !== 'function') {
     return { success: false, files: [], failures: [{ message: '当前运行环境不支持 fetch。' }] };
   }
@@ -248,7 +249,7 @@ async function isConfigured({ configPath } = {}) {
 }
 
 module.exports = {
-  generateImages,
+  generateImages: request => recordModelCall(() => generateImages(request), { category: 'image' }),
   downloadGeneratedImages,
   isConfigured,
   readLimitedImageBuffer,

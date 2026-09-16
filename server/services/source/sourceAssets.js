@@ -1,5 +1,6 @@
 const fsp = require('fs/promises');
 const path = require('path');
+const { recordedFetch } = require('../diagnostics/apiCallRecorder');
 const crypto = require('crypto');
 const dns = require('dns/promises');
 const net = require('net');
@@ -182,7 +183,7 @@ async function readImageBuffer(response) {
 }
 
 async function downloadImageAsset(image, index, assetDir, deps = {}) {
-  const fetchImpl = deps.fetchImpl || globalThis.fetch;
+  const fetchImpl = recordedFetch(deps.fetchImpl || globalThis.fetch, { category: 'download' });
   if (typeof fetchImpl !== 'function') {
     return { success: false, message: '当前运行环境不支持 fetch，无法下载图片素材。' };
   }
@@ -327,7 +328,7 @@ async function searchPexelsImages(sourceMaterial = {}, deps = {}) {
   if (!apiKey) {
     return { success: false, skipped: true, code: 'pexels_key_missing', message: '未配置 PEXELS_API_KEY，已跳过 AI 搜图补图。', images: [] };
   }
-  const fetchImpl = deps.fetchImpl || globalThis.fetch;
+  const fetchImpl = recordedFetch(deps.fetchImpl || globalThis.fetch, { category: 'research' });
   if (typeof fetchImpl !== 'function') {
     return { success: false, skipped: true, code: 'fetch_missing', message: '当前运行环境不支持 fetch，已跳过 AI 搜图补图。', images: [] };
   }

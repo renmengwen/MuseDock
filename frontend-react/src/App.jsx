@@ -3,6 +3,7 @@ import { AppShell } from './components/AppShell.jsx';
 import { CreativeEditorPage } from './pages/CreativeEditorPage.jsx';
 import { OneClickCreativePage } from './pages/OneClickCreativePage.jsx';
 import { SettingsPage } from './pages/SettingsPage.jsx';
+import { ApiCallLogsPage } from './pages/ApiCallLogsPage.jsx';
 
 export function App() {
   return (
@@ -13,6 +14,7 @@ export function App() {
         <Route path="creative/:workflowId" element={<OneClickCreativePage />} />
         <Route path="editor/:workflowId" element={<CreativeEditorPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="api-calls" element={<ApiCallLogsPage />} />
         <Route path="*" element={<Navigate to="/creative" replace />} />
       </Route>
     </Routes>

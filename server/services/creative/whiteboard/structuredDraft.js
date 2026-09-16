@@ -1,5 +1,6 @@
 const defaultTextModel = require('../../ai/aiTextModel');
 const defaultModelConfig = require('../../ai/aiModelConfig');
+const { runWithApiCallContext, annotateApiCallResult } = require('../../diagnostics/apiCallRecorder');
 const { CANDIDATE_SKELETON, WhiteboardError, parseSrt, validateCandidate, VISUAL_PRESETS, canvasFor } = require('./contracts');
 
 function classifyFailure(response, httpStatus, sent) {
@@ -44,7 +45,7 @@ function buildMessages(task, previousArtifact) {
   ];
 }
 
-async function generateDraft(task, { services = {}, previousArtifact, onRequest, onCandidate } = {}) {
+async function generateDraft(task, { services = {}, previousArtifact, onRequest, onCandidate, apiContext = {} } = {}) {
   const textModel = services.aiTextModel || defaultTextModel;
   const modelConfig = services.aiModelConfig || defaultModelConfig;
   const textConfig = await modelConfig.getRuntimeConfig('text');
@@ -58,7 +59,7 @@ async function generateDraft(task, { services = {}, previousArtifact, onRequest,
     let sent = false;
     let response;
     try {
-      response = await textModel.callTextModel({
+      response = await runWithApiCallContext({ ...apiContext, stage: 'content_plan', repair }, () => textModel.callTextModel({
         textConfig, messages, temperature: 0.3, maxTokens: 14000,
         maxOutputTokens: 14000,
         reasoningEffort: /^(gpt-(5|6)([.-]|$)|o[134])/i.test(textConfig.modelId) ? 'low' : undefined,
@@ -72,14 +73,20 @@ async function generateDraft(task, { services = {}, previousArtifact, onRequest,
           httpStatus = result.status;
           return result;
         },
-      });
+      }));
     } catch {
       throw classifyFailure(null, httpStatus, true);
     }
     if (!response?.success) throw classifyFailure(response, response?.httpStatus || httpStatus, sent);
     const rawText = typeof response.text === 'string' ? response.text.trim() : '';
-    if (!rawText) throw classifyFailure(response, httpStatus, true);
-    if (rawText.length > 160000) throw new WhiteboardError('CANDIDATE_INVALID', '模型返回的方案过长，请缩短输入后重新生成。');
+    if (!rawText) {
+      annotateApiCallResult(response, { status: 'invalid', validation: ['模型返回中没有可用的文本内容。'] });
+      throw classifyFailure(response, httpStatus, true);
+    }
+    if (rawText.length > 160000) {
+      annotateApiCallResult(response, { status: 'invalid', validation: ['模型返回的方案超过 160000 字符。'] });
+      throw new WhiteboardError('CANDIDATE_INVALID', '模型返回的方案过长，请缩短输入后重新生成。');
+    }
     let candidate;
     let errors;
     try {
@@ -88,6 +95,7 @@ async function generateDraft(task, { services = {}, previousArtifact, onRequest,
     } catch {
       errors = ['响应必须是一个完整且有效的 JSON 对象。'];
     }
+    annotateApiCallResult(response, { status: errors.length ? 'invalid' : 'success', validation: errors });
     await onCandidate?.({ repair, candidate: candidate ?? { invalidJson: rawText }, errors });
     if (!errors.length) return candidate;
     if (repair === 1) throw new WhiteboardError('CANDIDATE_INVALID', `候选在一次补正后仍未通过校验：${errors.join(' ')}`);

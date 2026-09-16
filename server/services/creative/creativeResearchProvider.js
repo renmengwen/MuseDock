@@ -1,5 +1,6 @@
 const aiModelConfig = require('../ai/aiModelConfig');
 const aiTextModel = require('../ai/aiTextModel');
+const { recordedFetch } = require('../diagnostics/apiCallRecorder');
 const { AGENTS, STAGES } = require('../creative-video/agentStages');
 
 // ponytail: 3 行纯函数，与 creativeWorkflows 各持一份，避免为它把 166 处调用迁去共享 util
@@ -152,7 +153,7 @@ async function defaultWebSearchProvider({ query, limit = 5, fetchImpl = global.f
   const errors = [];
   for (const endpoint of endpoints) {
     try {
-      const response = await fetchImpl(endpoint.url, {
+      const response = await recordedFetch(fetchImpl, { category: 'research' })(endpoint.url, {
         headers,
         signal: typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
           ? AbortSignal.timeout(20000)
