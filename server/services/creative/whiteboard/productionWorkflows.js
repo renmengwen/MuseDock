@@ -13,6 +13,7 @@ const appSettings = require('../../appSettings');
 const { ensureWhiteboardConcurrency } = require('./concurrency');
 const { recoverableAnnotationAttempts, recoverAnnotationPreviews } = require('./annotationRecovery');
 const { safeVisionDiagnostics } = require('./visionDiagnostics');
+const { scenePrompt, validatePrompt } = require('./lineartPrompts');
 
 const COVERAGE_GATE = 'annotation_coverage_review';
 
@@ -54,9 +55,21 @@ async function voiceSnapshot(services = {}) {
 
 function actionsFor(record) {
   const media = record.whiteboard.media;
+  const canSavePrompt = media && !media.stale && !record.whiteboard.current?.stale
+    && record.whiteboard.current?.identity === media.planIdentity && !record.whiteboard.initialApproval?.stale
+    && !record.whiteboard.pendingInitialApproval && record.whiteboard.initialApproval?.identity === media.planIdentity;
+  const actions = stageActionsFor(record);
+  return canSavePrompt ? [{ id: 'save_lineart_prompt', label: '保存线稿提示词' }, ...(actions || [])] : actions;
+}
+
+function stageActionsFor(record) {
+  const media = record.whiteboard.media;
   if (['queued', 'running'].includes(record.status) || media?.executionId) return [];
   if (!media || media.stale) return record.status === 'phase0_complete' ? [{ id: 'start_production', label: '开始制作视频' }] : null;
   if (record.status === 'unknown_external_outcome') return [{ id: 'authorize_media_retry', label: '核实后授权新请求', requiresConfirmation: true }];
+  if (record.status === 'waiting_approval' && media.stage === 'lineart_generation' && !media.gate) {
+    return [{ id: 'retry_media', label: '使用已保存提示词继续制作' }];
+  }
   if (['failed', 'waiting_approval'].includes(record.status) && hasCoverageReview(media)) return [
     { id: 'accept_low_coverage', label: '查看预览后接受当前落墨', requiresConfirmation: true },
     { id: 'retry_media', label: '重新编排未通过的幕' },
@@ -95,6 +108,66 @@ function message(record, role, text, now, interactionId = '') {
 function expireInteraction(record, status, now, response = '') {
   const interaction = record.whiteboard.interactions?.find(item => item.id === record.whiteboard.media?.interactionId);
   if (interaction?.status === 'pending') Object.assign(interaction, { status, answeredAt: now, response });
+}
+
+// 在执行边界应用编辑：在途请求始终使用原输入，并先保存完整结果，再使受影响产物失效。
+function applyPendingLineartPrompts(record, now, { keepQueued = false } = {}) {
+  const media = record.whiteboard.media;
+  const edits = Object.entries(media.pendingLineartPrompts || {});
+  if (!edits.length) return false;
+  const needsLineart = store.STAGES.findIndex(stage => stage.id === media.stage) >= 1;
+  for (const [sceneId, edit] of edits) {
+    (media.lineartPrompts ||= {})[sceneId] = edit.imagePrompt;
+    media.overrides[`lineart_generation:${sceneId}`] = edit.revision;
+    delete media.lineart[sceneId];
+    delete media.annotations[sceneId];
+    delete media.scenes[sceneId];
+    media.lowCoverage = (media.lowCoverage || []).filter(entry => entry.sceneId !== sceneId);
+  }
+  media.pendingLineartPrompts = {};
+  for (const stage of store.STAGES.slice(1)) {
+    delete media.current[stage.id];
+    Object.assign(media.stages.find(item => item.id === stage.id), { status: 'pending', message: '' });
+    media.approvals.filter(item => item.gate === store.GATES[stage.id]).forEach(item => { item.stale = true; });
+  }
+  delete media.lineartProgress;
+  delete media.annotationProgress;
+  delete media.sceneRenderProgress;
+  record.result = null;
+  if (!needsLineart) return false;
+  expireInteraction(record, 'superseded', now);
+  media.stage = 'lineart_generation';
+  media.gate = ''; media.interactionId = ''; media.activeAttemptId = '';
+  if (record.status === 'unknown_external_outcome') {
+    setState(record, 'unknown_external_outcome', `${record.error?.message || record.message} 提示词已保存，仍需核实外部结果后授权新请求。`, now);
+  } else {
+    setState(record, keepQueued && record.status === 'queued' ? 'queued' : 'waiting_approval',
+      '线稿提示词已保存，继续制作时将使用新内容。其他分镜和已完成的旁白会复用。', now);
+  }
+  record.task_status = record.status;
+  return true;
+}
+
+function saveLineartPrompt(record, artifact, payload, now) {
+  const media = record.whiteboard.media;
+  const scene = artifact.scenes.find(item => item.id === payload.sceneId);
+  if (!scene) throw new WhiteboardError('INVALID_INPUT', '请选择需要编辑提示词的分镜。');
+  const previous = scenePrompt(media, scene);
+  if (payload.expectedPromptIdentity !== previous.identity) {
+    throw new WhiteboardError('STALE_IDENTITY', '本幕提示词已变化，请重新载入已保存内容后再修改。', 409);
+  }
+  const edit = validatePrompt(payload);
+  if (edit.imagePrompt === previous.imagePrompt && edit.revision === previous.revision) return false;
+  const active = scenePrompt(media, scene, { includePending: false });
+  media.pendingLineartPrompts ||= {};
+  if (edit.imagePrompt === active.imagePrompt && edit.revision === active.revision) delete media.pendingLineartPrompts[scene.id];
+  else media.pendingLineartPrompts[scene.id] = { ...edit, savedAt: now };
+  (media.lineartPromptHistory ||= []).push({ sceneId: scene.id, ...edit, previousIdentity: previous.identity, savedAt: now });
+  media.revision += 1;
+  record.updated_at = now;
+  message(record, 'user', `已保存「${scene.title}」的线稿提示词。`, now);
+  if (!media.executionId) applyPendingLineartPrompts(record, now, { keepQueued: true });
+  return false;
 }
 
 function waitForCoverageReview(record, now) {
@@ -183,6 +256,7 @@ async function act(record, payload, options, now) {
     return true;
   }
   const media = record.whiteboard.media;
+  if (action === 'save_lineart_prompt') return saveLineartPrompt(record, artifact, payload, now);
   if (payload.expectedMediaIdentity !== store.mediaIdentity(media)
     || (media.interactionId && payload.interactionId !== media.interactionId)) throw new WhiteboardError('STALE_IDENTITY', '媒体版本或待确认卡片已变化，请刷新后检查当前产物。', 409);
   if (action === 'recover_annotation_preview') {
@@ -330,6 +404,7 @@ function recover(record, now) {
   fail(record, new WhiteboardError(unknown ? 'UNKNOWN_EXTERNAL_OUTCOME' : 'MEDIA_INTERRUPTED', unknown
     ? '服务重启时存在尚未取得完整证据的外部请求，请核实后授权新请求。'
     : '媒体制作被中断，可以继续未完成阶段；有效的音频和图片会复用。'), now);
+  applyPendingLineartPrompts(record, now);
   record.active_task_id = ''; record.active_operation_id = ''; record.task_status = record.status === 'waiting_approval' ? 'waiting_approval' : 'failed';
 }
 
@@ -412,10 +487,16 @@ async function run(workflowId, options, hooks) {
       const media = record.whiteboard.media;
       if (sha256(media.recipe) !== sha256(runtime.recipe)) throw new WhiteboardError('RENDER_CONFIG_CHANGED', '渲染器或字体已变化，请重新确认制作设置后生成新版本。', 409);
       if (sha256(media.bgm || null) !== sha256(runtime.bgm?.recipe || null)) throw new WhiteboardError('BGM_CONFIG_CHANGED', '背景音乐素材或混音设置已变化，请重新确认制作设置后生成新版本。', 409);
-      await change((current, now) => setState(current, 'running', `正在${store.stageLabel(media, media.stage)}...`, now));
+      const pendingEdits = await change((current, now) => {
+        if (applyPendingLineartPrompts(current, now)) return true;
+        setState(current, 'running', `正在${store.stageLabel(media, media.stage)}...`, now);
+        return false;
+      });
+      if (pendingEdits.result) break;
       await options.taskContext?.emit?.({ type: 'stage_started', stage: media.stage, progress: record.current_progress, message: `正在${store.stageLabel(media, media.stage)}...` });
       await executeStage(ctx, artifact, media.stage);
-      await change((current, now) => {
+      const gate = await change((current, now) => {
+        if (applyPendingLineartPrompts(current, now)) return false;
         const currentMedia = current.whiteboard.media;
         currentMedia.gate = store.GATES[currentMedia.stage];
         const interaction = { id: crypto.randomUUID(), kind: 'media_review', stage: currentMedia.gate,
@@ -427,7 +508,9 @@ async function run(workflowId, options, hooks) {
         setState(current, artifact.productionPlan.agentApprovalEnabled ? 'running' : 'waiting_approval',
           artifact.productionPlan.agentApprovalEnabled ? `正在检查：${interaction.title.replace(/^请/, '')}...` : interaction.title, now);
         message(current, 'assistant', interaction.title, now, interaction.id);
+        return true;
       });
+      if (!gate.result) break;
       if (artifact.productionPlan.agentApprovalEnabled !== true) break;
       const reviewed = await reviewGate(ctx, artifact);
       if (!reviewed) {
@@ -435,20 +518,27 @@ async function run(workflowId, options, hooks) {
         break;
       }
       const next = await change(async (current, now) => {
+        if (applyPendingLineartPrompts(current, now)) return false;
         await validateCurrent(current, current.whiteboard.media.stage, options);
         return approve(current, 'automation', ['full_narration', 'final_delivery'].includes(current.whiteboard.media.stage)
           ? 'technical_after_initial_approval' : 'current_images_and_sampled_frames_review', now);
       });
       if (!next.result) break;
     }
-    const finished = await change(record => { record.whiteboard.media.executionId = ''; record.whiteboard.media.activeAttemptId = ''; });
+    const finished = await change((record, now) => {
+      applyPendingLineartPrompts(record, now);
+      record.whiteboard.media.executionId = ''; record.whiteboard.media.activeAttemptId = '';
+    });
     return { success: true, ...await getView(finished.record, options) };
   } catch (error) {
     if (error.code === 'ENOENT' || !await workflowFileExists(workflowId, rootDir)) return { success: false, workflow_id: workflowId, status: 'deleted', message: '制作任务已停止并删除。' };
     const safe = error instanceof WhiteboardError ? error : new WhiteboardError('MEDIA_FAILED', '媒体处理失败，请检查本地运行环境与当前产物后重试。');
     if (claimed) {
       try {
-        const stopped = await change((record, now) => fail(record, safe, now));
+        const stopped = await change((record, now) => {
+          fail(record, safe, now);
+          applyPendingLineartPrompts(record, now);
+        });
         if (stopped.record.status === 'waiting_approval') return { ...await getView(stopped.record, options), success: true, code: safe.code };
       } catch { /* Never recreate a deleted task. */ }
     }

@@ -39,7 +39,7 @@ async function recoverAnnotationPreviews(record, artifact, options, now, sceneId
     const input = { scene, cues: timing.cues.filter(cue => scene.cueIds.includes(cue.id)), revision, canvas,
       imageSha256: lineart.image.sha256, timingIdentity: narration.identity, visualStyle: artifact.visualStyle,
       imageTexts: artifact.scenes.find(item => item.id === scene.id)?.imageTexts };
-    const contracts = artifact.visualStyle.id === HANDWRITTEN_PRESET_ID ? [models.HANDWRITTEN_ANNOTATION_CONTRACT]
+    const contracts = artifact.visualStyle.id === HANDWRITTEN_PRESET_ID ? [models.HANDWRITTEN_ANNOTATION_CONTRACT, models.LEGACY_HANDWRITTEN_ANNOTATION_CONTRACT]
       : [models.ANNOTATION_PLANNING_CONTRACT, models.LEGACY_ANNOTATION_PLANNING_CONTRACT];
     const matching = contracts
       .map(contract => models.annotationInput(input, contract)).find(value => value.inputIdentity === previous.inputIdentity);

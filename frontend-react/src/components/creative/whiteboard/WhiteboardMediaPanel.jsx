@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, FolderOpen, LoaderCircle, TriangleAlert } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.jsx';
 import { Button } from '@/components/ui/button.jsx';
@@ -7,10 +7,15 @@ import { CreativeVideoPreview } from '../CreativeVideoPreview.jsx';
 import { WhiteboardSceneTable } from './WhiteboardSceneTable.jsx';
 
 const PANELS = [ ['full_narration', '旁白'], ['lineart_generation', '线稿'], ['annotation_drafting', '落墨'], ['scene_render', '单幕'], ['final_delivery', '成片'] ];
-export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, onRecoverAnnotationPreview, recoveringPreview = false, actionsDisabled = false }) {
+export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, onRecoverAnnotationPreview, recoveringPreview = false, actionsDisabled = false,
+  onSaveLineartPrompt, promptSavingDisabled = false }) {
   const [tab, setTab] = useState(media.stage);
+  const detailsOpen = useRef(false);
+  const onDetailsOpenChange = useCallback(open => { detailsOpen.current = open; }, []);
   const fileActions = useLocalFileActions();
-  useEffect(() => { setTab(media.stage); fileActions.clearMessage(); }, [media.stage]);
+  useEffect(() => {
+    if (!detailsOpen.current) { setTab(media.stage); fileActions.clearMessage(); }
+  }, [media.stage]);
   const files = new Map(media.artifacts.map(file => [file.id, file]));
   const sceneTitles = new Map(scenes.map(scene => [scene.id, scene.title]));
   const url = file => files.get(file?.id)?.url || '';
@@ -42,8 +47,13 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
     const attempts = annotationAttempts.get(scene.sceneId) || [];
     return { ...scene, attempts, attempt: attempts.at(-1) };
   });
-  const lineartScenes = current.lineart_generation?.scenes || scenes.map(scene =>
-    media.lineart?.[scene.id] || { sceneId: scene.id });
+  const lineartAttempts = new Map((media.attempts || []).filter(attempt => attempt.stage === 'lineart_generation').map(attempt => [attempt.sceneId, attempt]));
+  const lineartBindings = new Map((current.lineart_generation?.scenes || Object.values(media.lineart || {})).map(scene => [scene.sceneId, scene]));
+  const lineartScenes = scenes.map(scene => ({
+    ...(lineartBindings.get(scene.id) || { sceneId: scene.id }), imageTexts: scene.imageTexts,
+    prompt: media.lineartPromptDetails?.[scene.id] || { imagePrompt: scene.imagePrompt, revision: media.overrides?.[`lineart_generation:${scene.id}`] || '' },
+    attempt: lineartAttempts.get(scene.id),
+  }));
   const renderProgress = new Map((media.sceneRenderProgress?.scenes || []).map(row => [row.sceneId, row]));
   const renderAttempts = new Map((media.attempts || []).filter(attempt => attempt.stage === 'scene_render').map(attempt => [attempt.sceneId, attempt]));
   const renderedScenes = current.scene_render?.scenes || scenes.map(scene => ({
@@ -69,11 +79,12 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
             <div className="grid gap-2"><span>有 {lowCoverageScenes.length} 幕的落墨标注未完整覆盖线稿（不足 97%）。预览会展示当前落墨效果，并用红色标出遗漏墨迹。接受后遗漏部分保持空白，不会在片尾补显。</span>
               {onReviewLowCoverage ? <Button variant="outline" size="sm" disabled={actionsDisabled} className="justify-self-start" onClick={onReviewLowCoverage}>查看预览并决定是否接受</Button> : null}</div>
           </div> : null}
-          <WhiteboardSceneTable key={current[stage]?.identity || (stage === 'annotation_drafting' && pendingLowCoverage ? 'low-coverage' : stage)}
+          <WhiteboardSceneTable key={stage === 'lineart_generation' ? `${media.id}:${stage}` : current[stage]?.identity || (stage === 'annotation_drafting' && pendingLowCoverage ? 'low-coverage' : stage)}
             stage={stage} scenes={stage === 'annotation_drafting' ? annotationScenes : stage === 'lineart_generation' ? lineartScenes : renderedScenes}
             sceneTitles={sceneTitles} canvas={canvas} getUrl={url} renderOpenFile={openFile} fileStatus={fileStatus} onFileContextChange={fileActions.clearMessage}
             onReviewLowCoverage={onReviewLowCoverage} onRecoverAnnotationPreview={onRecoverAnnotationPreview}
-            recoveringPreview={recoveringPreview} actionsDisabled={actionsDisabled} />
+            recoveringPreview={recoveringPreview} actionsDisabled={actionsDisabled}
+            onSaveLineartPrompt={onSaveLineartPrompt} promptSavingDisabled={promptSavingDisabled} onDetailsOpenChange={onDetailsOpenChange} />
         </TabsContent>)}
         <TabsContent value="final_delivery" className="min-w-0">
           {final ? <div className="grid gap-4"><CreativeVideoPreview videoUrl={url(final.video)} posterUrl={url(final.poster)} width={final.validation.width} height={final.validation.height} showFileActions={false} /><div className="flex flex-wrap gap-2">{openFile(final.video, '打开最终视频')}{openFile(narration?.subtitles, '打开字幕')}{openFile(final.video, '打开所在文件夹', 'folder')}</div>

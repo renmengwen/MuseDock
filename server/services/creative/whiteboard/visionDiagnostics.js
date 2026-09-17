@@ -1,4 +1,5 @@
 const { WhiteboardError } = require('./contracts');
+const { redactText } = require('../../diagnostics/apiCallRedaction');
 
 const REJECTED_HTTP = [400, 401, 403, 404, 422, 429];
 const PROVIDER_STATUSES = ['completed', 'incomplete', 'failed', 'cancelled', 'queued', 'in_progress'];
@@ -8,6 +9,7 @@ const DESCRIPTIONS = {
   response_incomplete: '视觉模型返回的响应尚未完成，无法作为完整编排使用。',
   missing_text: '已收到视觉服务响应，但没有可用的正文内容。',
   invalid_response: '已收到视觉服务响应，但响应格式无法解析。',
+  candidate_invalid: '模型返回的编排未通过校验，具体问题如下。',
   timeout: '等待视觉模型响应超时，未取得完整结果。',
   network_error: '视觉模型请求发生网络连接异常，未取得完整结果。',
   request_interrupted: '视觉模型请求中断，无法确认完整结果。',
@@ -27,8 +29,8 @@ const HTTP_GUIDANCE = {
 
 function validHttpStatus(value) { return Number.isInteger(value) && value >= 100 && value <= 599; }
 
-// 仅保存固定枚举、布尔值与 HTTP 状态，不复制供应商正文、ID、URL 或异常消息。
-function safeVisionDiagnostics(value) {
+// 元数据仅接受固定枚举。校验问题由本地校验器生成，脱敏并限制长度；不复制供应商正文或异常消息。
+function safeVisionDiagnostics(value, secrets = []) {
   if (!value || typeof value !== 'object') return undefined;
   const category = Object.hasOwn(DESCRIPTIONS, value.category) ? value.category : 'unknown';
   const result = { category, message: DESCRIPTIONS[category] };
@@ -37,6 +39,11 @@ function safeVisionDiagnostics(value) {
   if (STOP_REASONS.includes(value.stopReason)) result.stopReason = value.stopReason;
   for (const key of ['responseReceived', 'hasExtractedText']) {
     if (typeof value[key] === 'boolean') result[key] = value[key];
+  }
+  if (category === 'candidate_invalid' && Array.isArray(value.validationErrors)) {
+    const errors = value.validationErrors.filter(error => typeof error === 'string' && error.trim());
+    result.validationErrors = errors.slice(0, 64).map(error => redactText(error, secrets).slice(0, 2048));
+    if (value.validationTruncated === true || errors.length > 64 || errors.some(error => error.length > 2048)) result.validationTruncated = true;
   }
   return result;
 }

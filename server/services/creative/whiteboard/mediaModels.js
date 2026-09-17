@@ -1,20 +1,21 @@
 const fsp = require('fs/promises');
 const defaultTextModel = require('../../ai/aiTextModel');
-const { recordedFetch } = require('../../diagnostics/apiCallRecorder');
+const { recordedFetch, annotateApiCallResult } = require('../../diagnostics/apiCallRecorder');
 const defaultImageModel = require('../../ai/aiImageModel');
 const { WhiteboardError, canvasFor, sha256, HANDWRITTEN_PRESET_ID, renderingFor } = require('./contracts');
 const handwritten = require('./handwrittenPlanning');
-const { transportCategory, visionDiagnostics, visionRequestError } = require('./visionDiagnostics');
+const { transportCategory, visionDiagnostics, visionRequestError, safeVisionDiagnostics } = require('./visionDiagnostics');
 const { presets } = require('../../../resources/whiteboard/visual-presets.json');
 
 const LEGACY_ANNOTATION_PLANNING_CONTRACT = 'narrative-visual-clusters-v2';
 const ANNOTATION_PLANNING_CONTRACT = 'narrative-visual-clusters-v3';
+const HANDWRITTEN_PLANNING_CONTRACTS = [handwritten.CONTRACT, handwritten.LEGACY_CONTRACT];
 
 function annotationPrompt({ scene, cues, revision = '', canvas = canvasFor(), visualStyle, imageTexts,
   planningContract = visualStyle?.id === HANDWRITTEN_PRESET_ID ? handwritten.CONTRACT : ANNOTATION_PLANNING_CONTRACT }) {
-  if (planningContract === handwritten.CONTRACT) {
+  if (HANDWRITTEN_PLANNING_CONTRACTS.includes(planningContract)) {
     if (!renderingFor(visualStyle)) throw new WhiteboardError('CONTRACT_UNSUPPORTED', '语义分区需要白底手写图解的冻结模板。', 409);
-    return handwritten.prompt({ scene, cues, revision, canvas, imageTexts });
+    return handwritten.prompt({ scene, cues, revision, canvas, imageTexts, planningContract });
   }
   if (![ANNOTATION_PLANNING_CONTRACT, LEGACY_ANNOTATION_PLANNING_CONTRACT].includes(planningContract)) {
     throw new WhiteboardError('CONTRACT_UNSUPPORTED', '不支持的落墨编排提示词版本。', 409);
@@ -44,7 +45,7 @@ function annotationInput({ scene, cues, imageSha256, timingIdentity, revision = 
   const prompt = annotationPrompt({ scene, cues, revision, canvas, planningContract, visualStyle, imageTexts });
   return { prompt, planningContract, inputIdentity: sha256({ contract: planningContract, prompt,
     image: imageSha256, timing: timingIdentity, scene, revision,
-    ...(planningContract === handwritten.CONTRACT ? { rendering: renderingFor(visualStyle) } : {}) }) };
+    ...(HANDWRITTEN_PLANNING_CONTRACTS.includes(planningContract) ? { rendering: renderingFor(visualStyle) } : {}) }) };
 }
 
 function annotationCoverageFeedback(candidate, coverage) {
@@ -77,7 +78,7 @@ function lineartPrompt(artifact, scene, revision = '') {
   ].filter(Boolean).join('\n');
 }
 
-async function structuredVision({ textConfig, prompt, images = [], validate, assessCandidate, onRequest, services = {}, reasoningEffort = 'low' }) {
+async function structuredVision({ textConfig, prompt, images = [], validate, assessCandidate, onRequest, onValidation, services = {}, reasoningEffort = 'low' }) {
   if (!textConfig?.enabled || !textConfig.apiKey || !textConfig.modelId || !textConfig.baseUrl || textConfig.supportsMultimodal !== true) {
     throw new WhiteboardError('VISION_NOT_CONFIGURED', '请在设置中配置分析模型并勾选“支持多模态输入”，用于检查线稿和编排落墨区域。');
   }
@@ -121,6 +122,7 @@ async function structuredVision({ textConfig, prompt, images = [], validate, ass
       candidate = JSON.parse(response.text.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, ''));
       errors = validate(candidate);
     } catch { errors = ['必须返回完整有效的 JSON 对象。']; }
+    annotateApiCallResult(response, { status: errors.length ? 'invalid' : 'success', validation: errors });
     if (!errors.length) {
       const assessment = await assessCandidate?.(candidate, { repair });
       if (!assessment?.error) return candidate;
@@ -133,8 +135,13 @@ async function structuredVision({ textConfig, prompt, images = [], validate, ass
       messages.push({ role: 'assistant', content: response.text }, { role: 'user', content: feedback });
       continue;
     }
-    if (repair) throw new WhiteboardError('CANDIDATE_INVALID', `视觉候选一次补正后仍无效：${errors.join(' ')}`);
-    messages.push({ role: 'assistant', content: response.text }, { role: 'user', content: `请一次性修复全部问题，返回完整 JSON：${errors.join('；')}` });
+    const validationDiagnostics = safeVisionDiagnostics({ ...diagnostics, category: 'candidate_invalid', validationErrors: errors }, [textConfig.apiKey]);
+    await onValidation?.(validationDiagnostics);
+    if (repair) throw Object.assign(new WhiteboardError('CANDIDATE_INVALID', `视觉候选一次补正后仍无效：${validationDiagnostics.validationErrors.join(' ')}`), { diagnostics: validationDiagnostics });
+    messages.push({ role: 'assistant', content: response.text }, { role: 'user', content: [
+      '请根据下列具体校验问题逐项修正上一份候选，返回完整 JSON。保留已正确的分区、叙事顺序和墨迹归属，只调整违反规则的字段；不要原样重发错误坐标，也不要通过删除必要的多边形或合并正确分区回避问题。',
+      ...errors,
+    ].join('\n') });
   }
 }
 
@@ -267,6 +274,7 @@ async function generateLineart({ artifact, scene, revision, imageConfig, service
   return bytes;
 }
 
-module.exports = { ANNOTATION_PLANNING_CONTRACT, LEGACY_ANNOTATION_PLANNING_CONTRACT, HANDWRITTEN_ANNOTATION_CONTRACT: handwritten.CONTRACT, annotationPrompt, annotationInput,
+module.exports = { ANNOTATION_PLANNING_CONTRACT, LEGACY_ANNOTATION_PLANNING_CONTRACT, HANDWRITTEN_ANNOTATION_CONTRACT: handwritten.CONTRACT,
+  LEGACY_HANDWRITTEN_ANNOTATION_CONTRACT: handwritten.LEGACY_CONTRACT, annotationPrompt, annotationInput,
   annotationCoverageFeedback, structuredVision, validateAnnotation, validateVisualReview,
   annotationReviewIssues, imageTextReviewIssues, materializeAnnotation, generateLineart, lineartPrompt };

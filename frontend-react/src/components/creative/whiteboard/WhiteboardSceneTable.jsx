@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog.jsx';
@@ -6,9 +6,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn } from '@/lib/utils.js';
 import { WhiteboardCoverageImages } from './WhiteboardCoverageReview.jsx';
 import { WhiteboardRequestDetails } from './WhiteboardRequestDetails.jsx';
+import { WhiteboardLineartPromptEditor } from './WhiteboardLineartPromptEditor.jsx';
 
 const STAGES = {
-  lineart_generation: { label: '线稿', file: 'image', summary: '文件类型', description: '查看本幕完整线稿，检查画面与内容。' },
+  lineart_generation: { label: '线稿', file: 'image', summary: '状态 / 文件', description: '查看、编辑并保存本幕线稿提示词，生成后可在这里检查画面。' },
   annotation_drafting: { label: '落墨', file: 'preview', summary: '分区 / 覆盖率', description: '查看区域编号与落墨顺序，检查独立画面是否分别揭示。' },
   scene_render: { label: '单幕', file: 'video', summary: '时长 / 进度', description: '播放本幕视频，检查绘制节奏与画面停留。' },
 };
@@ -42,7 +43,13 @@ function missingSceneSummary(stage, scene) {
     if (scene.attempt) return '正在编排...';
     return '等待编排';
   }
-  return stage === 'lineart_generation' && !scene.image ? '等待生成' : '文件不可用';
+  if (stage === 'lineart_generation' && !scene.image) {
+    if (scene.attempt?.status === 'failed') return '生成失败';
+    if (scene.attempt?.status === 'unknown_external_outcome') return '结果待核实';
+    if (['prepared', 'requesting', 'candidate_ready'].includes(scene.attempt?.status)) return '正在生成...';
+    return '等待生成';
+  }
+  return '文件不可用';
 }
 
 function previewStyle(canvas) {
@@ -75,8 +82,10 @@ function SceneVideo({ src, canvas }) {
 }
 
 export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas = { width: 1920, height: 1080 }, getUrl, renderOpenFile, fileStatus, onFileContextChange,
-  onReviewLowCoverage, onRecoverAnnotationPreview, recoveringPreview = false, actionsDisabled = false }) {
+  onReviewLowCoverage, onRecoverAnnotationPreview, recoveringPreview = false, actionsDisabled = false,
+  onSaveLineartPrompt, promptSavingDisabled = false, onDetailsOpenChange }) {
   const [selectedSceneId, setSelectedSceneId] = useState('');
+  const [promptSaving, setPromptSaving] = useState(false);
   const triggerRef = useRef(null);
   const settings = STAGES[stage];
   const selectedIndex = scenes.findIndex(scene => scene.sceneId === selectedSceneId);
@@ -84,9 +93,11 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
   const selectedHasPreview = Boolean(selected && getUrl(selected[settings.file]));
   const titleFor = (scene, index) => sceneTitles.get(scene.sceneId) || scene[settings.file]?.name || `分镜 ${index + 1}`;
   const hasRequestDetails = scene => stage === 'annotation_drafting' && Boolean(scene.attempt);
+  const hasPrompt = scene => stage === 'lineart_generation' && Boolean(scene.prompt?.imagePrompt);
+  useEffect(() => () => onDetailsOpenChange?.(false), [onDetailsOpenChange]);
 
   function openScene(scene, event) {
-    if (!getUrl(scene[settings.file]) && !hasRequestDetails(scene)) return;
+    if (!getUrl(scene[settings.file]) && !hasRequestDetails(scene) && !hasPrompt(scene)) return;
     if (scene.kind === 'annotation_coverage_review' && onReviewLowCoverage) {
       if (!actionsDisabled) onReviewLowCoverage();
       return;
@@ -94,12 +105,15 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
     triggerRef.current = event.target.closest('button') || event.currentTarget.querySelector('button');
     onFileContextChange?.();
     setSelectedSceneId(scene.sceneId);
+    onDetailsOpenChange?.(true);
   }
 
   if (!scenes.length) return <p className="m-0 py-12 text-center text-sm leading-6 text-fg-3">暂无{settings.label}产物，完成前面的步骤后会显示在这里。</p>;
 
   return (
-    <Dialog open={Boolean(selected)} onOpenChange={open => { if (!open) setSelectedSceneId(''); }}>
+    <Dialog open={Boolean(selected)} onOpenChange={open => {
+      if (!open && !promptSaving) { setSelectedSceneId(''); onDetailsOpenChange?.(false); }
+    }}>
       <div className="grid min-w-0 gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-fg-3">
           <span>共 {scenes.length} 幕</span><span>点击分镜查看{settings.label}详情</span>
@@ -116,10 +130,10 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
             <TableBody>
               {scenes.map((scene, index) => {
                 const available = Boolean(getUrl(scene[settings.file]));
-                const inspectable = available || hasRequestDetails(scene);
+                const inspectable = available || hasRequestDetails(scene) || hasPrompt(scene);
                 const needsReview = stage === 'annotation_drafting' && scene.coverage?.coverageRatio < 0.97 && !scene.coverageAcceptance;
-                const failed = stage === 'annotation_drafting' && !available && scene.attempt?.status === 'failed';
-                const canRecover = failed && scene.attempt.received?.candidate && onRecoverAnnotationPreview;
+                const failed = ['annotation_drafting', 'lineart_generation'].includes(stage) && !available && scene.attempt?.status === 'failed';
+                const canRecover = stage === 'annotation_drafting' && failed && scene.attempt.received?.candidate && onRecoverAnnotationPreview;
                 return (
                   <TableRow key={scene.sceneId} onClick={event => openScene(scene, event)} className={cn('border-line-1 focus-within:bg-surface-2', inspectable && 'cursor-pointer hover:bg-surface-2', (needsReview || failed) && 'bg-danger/5')}>
                     <TableCell className="whitespace-normal py-4 pl-4">
@@ -140,15 +154,23 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
       </div>
 
       <DialogContent
+        showCloseButton={!promptSaving}
         className="flex max-h-[90dvh] w-[min(1040px,calc(100vw-32px))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[1040px] [&>[data-slot=dialog-close]]:grid [&>[data-slot=dialog-close]]:size-11 [&>[data-slot=dialog-close]]:place-items-center max-[760px]:[&_button]:min-h-11"
         onCloseAutoFocus={event => { if (triggerRef.current?.isConnected) { event.preventDefault(); triggerRef.current.focus(); } }}
       >
         <DialogHeader className="shrink-0 border-b border-line-1 p-5 pr-16 text-left">
-          <DialogTitle className="break-words leading-7">{settings.label}{selected && !selectedHasPreview ? '请求' : ''}详情{selected ? ` · ${selectedIndex + 1}. ${titleFor(selected, selectedIndex)}` : ''}</DialogTitle>
-          <DialogDescription>{selected && !selectedHasPreview ? '查看本幕的请求结果、时间和处理建议。' : settings.description}</DialogDescription>
+          <DialogTitle className="break-words leading-7">{settings.label}{stage === 'annotation_drafting' && selected && !selectedHasPreview ? '请求' : ''}详情{selected ? ` · ${selectedIndex + 1}. ${titleFor(selected, selectedIndex)}` : ''}</DialogTitle>
+          <DialogDescription>{stage === 'annotation_drafting' && selected && !selectedHasPreview ? '查看本幕的请求结果、时间和处理建议。' : settings.description}</DialogDescription>
         </DialogHeader>
         {selected ? <>
           <div className="flex min-h-0 flex-col gap-4 overflow-y-auto overscroll-contain p-5 max-[560px]:p-3 [&>*]:shrink-0">
+            {hasPrompt(selected) ? <WhiteboardLineartPromptEditor key={selected.sceneId} scene={selected} onSave={onSaveLineartPrompt}
+              disabled={promptSavingDisabled} onSavingChange={setPromptSaving} /> : null}
+            {stage === 'lineart_generation' && !selectedHasPreview ? <p className="m-0 rounded-md border border-line-1 bg-surface-2 p-3 text-sm leading-6 text-fg-3">
+              {missingSceneSummary(stage, selected)}，当前没有可显示的线稿图片。{selected.attempt?.status === 'unknown_external_outcome'
+                ? '可以先保存提示词，仍需核实外部结果后授权新请求。'
+                : selected.attempt?.status === 'failed' ? '可以调整并保存提示词，再继续制作。' : '提示词已可查看和编辑。'}
+            </p> : null}
             {selectedHasPreview ? <>{stage === 'scene_render'
               ? <SceneVideo key={getUrl(selected.video)} src={getUrl(selected.video)} canvas={canvas} />
               : stage === 'annotation_drafting' && selected.resultPreview && selected.coverage?.coverageRatio < 0.97
@@ -175,7 +197,7 @@ export function WhiteboardSceneTable({ stage, scenes = [], sceneTitles, canvas =
               </div>
               {fileStatus}
             </div>
-            <DialogClose asChild><Button variant="outline">关闭详情</Button></DialogClose>
+            <DialogClose asChild><Button variant="outline" disabled={promptSaving}>关闭详情</Button></DialogClose>
           </DialogFooter>
         </> : null}
       </DialogContent>

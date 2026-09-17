@@ -53,6 +53,18 @@ const timing = require('../server/services/creative/whiteboard/narrationTiming')
   assert.ok(models.validateAnnotation(invalid, canvas, artifact.visualStyle).some(error => error.includes('polygon')));
   invalid.elements[0].polygon = [[35, 35], [1441, 35], [300, 190]];
   assert.ok(models.validateAnnotation(invalid, canvas, artifact.visualStyle).length);
+  invalid.elements[0].polygon = [[30, 30], [310, 30], [310, 200], [30, 200]];
+  const beforeValidation = structuredClone(invalid);
+  const boundaryErrors = models.validateAnnotation(invalid, canvas, artifact.visualStyle);
+  assert.equal(boundaryErrors.length, 1);
+  assert.match(boundaryErrors[0], /区域 1.*第 2 个点 \[310,30\].*x=30\.\.309.*y=30\.\.199/);
+  assert.deepEqual(invalid, beforeValidation, '校验不得静默改写多边形或放宽边界');
+  invalid.elements[0].polygon = [[30, 30], [309, 30], [309, 199], [30, 199]];
+  assert.deepEqual(models.validateAnnotation(invalid, canvas, artifact.visualStyle), []);
+  invalid.elements[0].polygon.push([30, 30]);
+  assert.match(models.validateAnnotation(invalid, canvas, artifact.visualStyle)[0], /第 5 个点与第 1 个点重复/);
+  invalid.elements[0].polygon = [[30, 30], [31, 31], [32, 32]];
+  assert.match(models.validateAnnotation(invalid, canvas, artifact.visualStyle)[0], /面积为零/);
   assert.ok(models.validateAnnotation({ ...annotation, elements: Array(25).fill(annotation.elements[0]) }, canvas, artifact.visualStyle).length);
   assert.ok(models.validateAnnotation(annotation, canvas, artifact.visualStyle, { startMs: 0, endMs: 2000 }).length);
   const formal = models.materializeAnnotation(annotation, scene, 'image', 'timing', canvas, artifact.visualStyle);
@@ -71,6 +83,13 @@ const timing = require('../server/services/creative/whiteboard/narrationTiming')
   assert.match(plan.prompt, /schemaVersion=3/);
   assert.notEqual(plan.inputIdentity, models.annotationInput({ ...annotationInput, imageTexts: ['不同原文'] }).inputIdentity);
   assert.equal(models.annotationInput(annotationInput, plan.planningContract).inputIdentity, plan.inputIdentity, '恢复重建同一冻结输入身份');
+  assert.match(plan.prompt, /region\.x\+region\.width-1/);
+  const legacyPlan = models.annotationInput(annotationInput, models.LEGACY_HANDWRITTEN_ANNOTATION_CONTRACT);
+  assert.doesNotMatch(legacyPlan.prompt, /region\.x\+region\.width-1/);
+  assert.notEqual(plan.inputIdentity, legacyPlan.inputIdentity, '新请求显式使用新的边界提示词版本');
+  assert.equal(models.annotationInput({ ...annotationInput, visualStyle: VISUAL_PRESETS.find(item => item.id === HANDWRITTEN_PRESET_ID) },
+    models.LEGACY_HANDWRITTEN_ANNOTATION_CONTRACT).inputIdentity,
+  '24195721b3b40ee45dc8833382a222a48f8448b9a80576a1b2ecd1bf760d2b62', '旧版提示词和输入身份必须保持原字节语义，供旧候选恢复');
 
   for (const [modelId, expected] of [['gpt-image-2', '1536x1024'], ['fixture-image', '2304x1728']]) {
     let request;

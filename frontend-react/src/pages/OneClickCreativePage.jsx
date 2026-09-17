@@ -1019,6 +1019,7 @@ export function OneClickCreativePage() {
       }
       const json = await api.actOnWhiteboardWorkflow(targetWorkflowId, payload);
       applyWhiteboardResult(json, targetWorkflowId);
+      return json;
     } catch (error) {
       await refreshWorkflowSnapshot({ workflowId: targetWorkflowId });
       throw error;

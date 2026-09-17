@@ -1,11 +1,12 @@
 const { WhiteboardError, renderingFor } = require('./contracts');
 
-const CONTRACT = 'handwritten-semantic-regions-v1';
+const LEGACY_CONTRACT = 'handwritten-semantic-regions-v1';
+const CONTRACT = 'handwritten-semantic-regions-v2';
 const MAX_REGIONS = 24;
 const MIN_REVEAL_MS = 100;
 const HOLD_MS = 500;
 
-function prompt({ scene, cues, revision, canvas, imageTexts = [] }) {
+function prompt({ scene, cues, revision, canvas, imageTexts = [], planningContract = CONTRACT }) {
   const duration = scene.endMs - scene.startMs;
   const budget = Number.isFinite(duration) ? Math.min(MAX_REGIONS, Math.max(1, Math.floor((duration - HOLD_MS) / MIN_REVEAL_MS))) : MAX_REGIONS;
   return [
@@ -15,6 +16,9 @@ function prompt({ scene, cues, revision, canvas, imageTexts = [] }) {
     '全部有效墨迹包括强调线、箭头、装饰线都要有归属，覆盖率至少 97%；未标注内容不会在片尾补显。逐区以原色起笔，沿图像笔迹渐显，不是真实汉字笔顺。',
     `只返回 schemaVersion=3 的 JSON 对象。visualGrouping={mode,reason}，mode 为 semantic_regions（多个语义区域）或 single_continuous（一个不可拆分的完整图形），reason 为 8–600 字的具体中文分组依据。elements 为 1–${budget} 项数组，硬上限 ${MAX_REGIONS}；短幕合并相关元素以保证每区至少 ${MIN_REVEAL_MS} 毫秒，末尾保留 ${HOLD_MS} 毫秒。`,
     'elements 每项包含 label、region、direction、weight、protectedRegions，可选 polygon。label 为 1–80 字中文名称；region={x,y,width,height} 是画布内的整数矩形；polygon 是 3–32 个 [x,y] 整数点组成的简单多边形，所有点均位于本区域矩形内，不自交；省略时使用矩形。direction 只能为 left-to-right、right-to-left、top-to-bottom、bottom-to-top；weight 是大于 0 且不超过 100 的相对绘制权重；protectedRegions 最多 8 个矩形。',
+    ...(planningContract === LEGACY_CONTRACT ? [] : [
+      '坐标按整数像素计数，region 的右边界和下边界不包含在内。每个 polygon 顶点必须满足 region.x <= x <= region.x+region.width-1、region.y <= y <= region.y+region.height-1；例如 x=10、width=100 时，最大横坐标是 109，不能填 110。按轮廓顺序列出顶点，末尾不要重复首点。返回前逐点核对边界与自交，保持人物、词组和箭头完整，不通过删除必要的 polygon 或合并正确分区回避错误。',
+    ]),
     '程序根据实际幕长与权重分配时间，不输出时间、路径、批准或状态。',
     `画内原文核对清单：${JSON.stringify(imageTexts)}。先检查实图文字，不擅自补写或改字；无法辨认的区域在 label 中说明，不能声称已经核对通过。`,
     `本幕与真实字幕时间：${JSON.stringify({ scene, cues })}`,
@@ -30,11 +34,23 @@ function validRect(rect, canvas) {
     && rect.x + rect.width <= canvas.width && rect.y + rect.height <= canvas.height;
 }
 
-function validPolygon(points, rect) {
-  if (!Array.isArray(points) || points.length < 3 || points.length > 32 || !rect
-    || points.some(point => !Array.isArray(point) || point.length !== 2 || !point.every(Number.isInteger)
-      || point[0] < rect.x || point[1] < rect.y || point[0] >= rect.x + rect.width || point[1] >= rect.y + rect.height)
-    || new Set(points.map(point => point.join(','))).size !== points.length) return false;
+function polygonErrors(points, rect, label) {
+  if (!Array.isArray(points) || points.length < 3 || points.length > 32) return [`${label} 必须包含 3–32 个 [x,y] 整数顶点。`];
+  const invalidPoints = points.flatMap((point, index) => !Array.isArray(point) || point.length !== 2 || !point.every(Number.isInteger)
+    ? [`${label} 第 ${index + 1} 个点必须是 [x,y] 两个整数。`] : []);
+  if (invalidPoints.length) return invalidPoints;
+  if (!rect) return [`${label} 需要先修正 region 为画布内的整数矩形。`];
+  const maxX = rect.x + rect.width - 1;
+  const maxY = rect.y + rect.height - 1;
+  const outside = points.flatMap(([x, y], index) => x < rect.x || y < rect.y || x > maxX || y > maxY
+    ? [`第 ${index + 1} 个点 [${x},${y}]`] : []);
+  if (outside.length) return [`${label} 顶点越界：${outside.join('、')}。允许的整数范围为 x=${rect.x}..${maxX}、y=${rect.y}..${maxY}；右、下边界不包含在内，最大值是 x+width-1、y+height-1。请修正顶点或区域矩形，保持原分区完整。`];
+  const seen = new Map();
+  for (const [index, point] of points.entries()) {
+    const key = point.join(',');
+    if (seen.has(key)) return [`${label} 第 ${index + 1} 个点与第 ${seen.get(key) + 1} 个点重复；顶点必须互不相同，末尾不要重复首点。`];
+    seen.set(key, index);
+  }
   const cross = (a, b, c) => (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
   const on = (a, b, p) => cross(a, b, p) === 0 && p[0] >= Math.min(a[0], b[0]) && p[0] <= Math.max(a[0], b[0])
     && p[1] >= Math.min(a[1], b[1]) && p[1] <= Math.max(a[1], b[1]);
@@ -46,10 +62,10 @@ function validPolygon(points, rect) {
     area += a[0] * b[1] - b[0] * a[1];
     for (let j = i + 2; j < points.length; j += 1) {
       if (i === 0 && j === points.length - 1) continue;
-      if (intersects(a, b, points[j], points[(j + 1) % points.length])) return false;
+      if (intersects(a, b, points[j], points[(j + 1) % points.length])) return [`${label} 第 ${i + 1}–${(i + 1) % points.length + 1} 点组成的边与第 ${j + 1}–${(j + 1) % points.length + 1} 点组成的边相交或接触；请沿轮廓顺序排列顶点，保持边界不交叉。`];
     }
   }
-  return Math.abs(area) > 0;
+  return Math.abs(area) > 0 ? [] : [`${label} 的面积为零；顶点不能全部共线，请给出能包围有效墨迹的多边形。`];
 }
 
 function validate(candidate, canvas, scene) {
@@ -68,8 +84,9 @@ function validate(candidate, canvas, scene) {
     if (!element || typeof element !== 'object' || Array.isArray(element)) { errors.push(`区域 ${index + 1} 必须为对象。`); continue; }
     if (Object.keys(element).some(key => !['label', 'region', 'polygon', 'direction', 'weight', 'protectedRegions'].includes(key))) errors.push(`区域 ${index + 1} 包含合同外字段。`);
     if (typeof element.label !== 'string' || !element.label.trim() || element.label.length > 80) errors.push('label 必须是简短中文名称。');
-    if (!validRect(element.region, canvas)) errors.push(`区域 ${index + 1} 超出画布或不是整数矩形。`);
-    if (element.polygon !== undefined && !validPolygon(element.polygon, element.region)) errors.push(`区域 ${index + 1} 的 polygon 必须是矩形内不自交的 3–32 个不同整数点。`);
+    const rectValid = validRect(element.region, canvas);
+    if (!rectValid) errors.push(`区域 ${index + 1} 超出画布或不是整数矩形。`);
+    if (element.polygon !== undefined) errors.push(...polygonErrors(element.polygon, rectValid ? element.region : null, `区域 ${index + 1} 的 polygon`));
     if (!['left-to-right', 'right-to-left', 'top-to-bottom', 'bottom-to-top'].includes(element.direction)) errors.push('direction 不受支持。');
     if (!Number.isFinite(element.weight) || element.weight <= 0 || element.weight > 100) errors.push('weight 必须是 0 至 100 的正数。');
     if (!Array.isArray(element.protectedRegions) || element.protectedRegions.length > 8 || element.protectedRegions.some(rect => !validRect(rect, canvas))) errors.push('protectedRegions 必须是最多 8 个画布内矩形。');
@@ -108,4 +125,4 @@ function lineartPrompt(artifact, scene, canvas, revision) {
   ].filter(Boolean).join('\n');
 }
 
-module.exports = { CONTRACT, prompt, validate, materialize, lineartPrompt };
+module.exports = { CONTRACT, LEGACY_CONTRACT, prompt, validate, materialize, lineartPrompt };

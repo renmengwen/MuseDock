@@ -43,7 +43,7 @@ async function fixture(count = 3, { startStage = 'annotation_drafting' } = {}) {
   const events = [];
   const ctx = { root, rootDir, faults, calls, events, visionRequests: [], beforeVision: () => pause(15),
     beforeImage: () => pause(15), beforeRender: () => pause(15),
-    imageFaults: new Map(), imageCalls: new Map(), renderCalls: new Map(), allowRender: false };
+    imageFaults: new Map(), imageCalls: new Map(), imageRequests: [], renderCalls: new Map(), allowRender: false };
   const config = { enabled: true, provider: 'fixture', apiKey: 'fixture-only', baseUrl: 'https://example.invalid',
     modelId: 'fixture-text', supportsMultimodal: true };
   const options = { rootDir, taskContext: { emit: async event => events.push(event) }, services: {
@@ -51,6 +51,7 @@ async function fixture(count = 3, { startStage = 'annotation_drafting' } = {}) {
     fetchImpl: async () => { throw new Error('测试禁止真实网络请求'); },
     aiImageModel: { generateImages: async request => {
       const sceneId = request.prompt.match(/测试编号 (scene_\d+)/)[1];
+      ctx.imageRequests.push({ sceneId, prompt: request.prompt });
       ctx.imageCalls.set(sceneId, (ctx.imageCalls.get(sceneId) || 0) + 1);
       await ctx.beforeImage(sceneId);
       if (ctx.imageFaults.get(sceneId) === 'unknown') throw new Error('fixture image connection lost');
@@ -163,7 +164,7 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
     Array.from({ length: 12 }, (_, index) => `scene_${index + 1}`));
 }
 
-(async () => {
+if (require.main === module) (async () => {
   assert.equal(createAnnotationPool().concurrency, 10);
   assert.equal(createAnnotationPool(100).concurrency, 10);
   assert.equal(createAnnotationPool(2).concurrency, 2);
@@ -336,7 +337,7 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   assert.equal(JSON.stringify(diagnosedRecord).includes('private-response-canary'), false);
   const diagnosedView = await workflows.getCreativeWorkflow(diagnosed.id, diagnosed.options);
   assert.equal(diagnosedView.data.whiteboard.media.attempts.find(attempt => attempt.id === diagnosedAttempt.id).diagnostics.stopReason, 'max_output_tokens');
-  assert.deepEqual(diagnosedView.data.whiteboard.allowedActions.map(action => action.id), ['authorize_media_retry']);
+  assert.deepEqual(diagnosedView.data.whiteboard.allowedActions.map(action => action.id), ['save_lineart_prompt', 'authorize_media_retry']);
   assert.equal((await diagnosed.action('retry_media')).success, false);
   assert.equal((await diagnosed.action('recover_annotation_preview', { sceneId: 'scene_2' })).success, false);
   assert.equal(diagnosed.calls.get('scene_2'), 1, '读取诊断与被拒绝的普通重试不能发送新请求');
@@ -373,7 +374,7 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   await workflowStore.persistWorkflow(record, mixed.rootDir);
   assert.equal(record.status, 'unknown_external_outcome');
   assert.equal(media.attempts.findLast(item => item.sceneId === 'scene_2').status, 'unknown_external_outcome');
-  assert.deepEqual(production.actionsFor(record).map(action => action.id), ['authorize_media_retry']);
+  assert.deepEqual(production.actionsFor(record).map(action => action.id), ['save_lineart_prompt', 'authorize_media_retry']);
   assert.equal((await mixed.action('retry_media')).success, false);
   assert.equal((await mixed.action('accept_low_coverage', { confirmed: true })).success, false);
   assert.equal((await mixed.action('authorize_media_retry', { confirmed: true })).success, true);
@@ -418,7 +419,7 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
     sceneId: 'scene_2', executionId: 'interrupted-after-worker-failure', status: 'unknown_external_outcome' });
   production.recover(settledUnknown, new Date().toISOString());
   assert.equal(settledUnknown.status, 'unknown_external_outcome');
-  assert.deepEqual(production.actionsFor(settledUnknown).map(action => action.id), ['authorize_media_retry']);
+  assert.deepEqual(production.actionsFor(settledUnknown).map(action => action.id), ['save_lineart_prompt', 'authorize_media_retry']);
   console.log('PASS 缺图时禁止接受，并发请求重启恢复不遗漏较早的在途幕');
 
   const repaired = await fixture(2);
@@ -442,7 +443,13 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   budget.faults.set('scene_1', 'schema_then_low');
   assert.equal((await budget.run()).status, 'waiting_approval');
   assert.equal(budget.calls.get('scene_1'), 2, '格式补正后不得额外启动第三次覆盖率修正');
-  assert.equal((await budget.read()).whiteboard.media.lowCoverage.length, 1);
+  const budgetRecord = await budget.read();
+  assert.equal(budgetRecord.whiteboard.media.lowCoverage.length, 1);
+  const schemaFailure = budgetRecord.whiteboard.media.attempts.find(attempt => attempt.errorCode === 'CANDIDATE_INVALID');
+  assert.equal(schemaFailure.diagnostics.category, 'candidate_invalid');
+  assert.match(schemaFailure.diagnostics.validationErrors.join(' '), /schemaVersion=2/);
+  assert.deepEqual(store.publicMedia(budgetRecord).attempts.find(attempt => attempt.id === schemaFailure.id).diagnostics,
+    schemaFailure.diagnostics, '第一次失败的具体原因必须随公开分镜记录保留');
 
   const failedRepair = await fixture(1);
   failedRepair.faults.set('scene_1', 'repair_invalid');
@@ -452,6 +459,8 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   const failedAttempt = beforeRepairAcceptance.whiteboard.media.attempts.at(-1);
   assert.equal(failedRepair.calls.get('scene_1'), 2);
   assert.equal(failedAttempt.errorCode, 'CANDIDATE_INVALID');
+  assert.equal(failedAttempt.diagnostics.category, 'candidate_invalid');
+  assert.match(failedAttempt.diagnostics.validationErrors.join(' '), /schemaVersion=2/);
   assert.equal(failedAttempt.repairOfAttemptId, keptPreview.attemptId);
   const wrongSource = structuredClone(beforeRepairAcceptance);
   wrongSource.whiteboard.media.attempts.at(-1).repairSourceIdentity = 'not-the-reviewed-preview';
@@ -600,3 +609,5 @@ async function assertTenConcurrent(ctx, hook, pool, stage, progressKey) {
   error => error.code === 'ANNOTATION_COVERAGE_LOW' && error.coverage.coveredInkPixels === 65 && error.coverageRatio === 0.65);
   console.log(`落墨回归通过；真实 provider 调用 0。界面测试数据：${path.join(ctx.root, 'review-fixture.json')}`);
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
+module.exports = { fixture, deferred, deadline };

@@ -10,6 +10,7 @@ const aiTtsModel = require('../../ai/aiTtsModel');
 const { sceneRenderPool } = require('./sceneRenderPool');
 const { annotationPool } = require('./annotationPool');
 const { imagePool } = require('./imagePool');
+const { scenePrompt } = require('./lineartPrompts');
 
 async function fspExists(file) { try { await fsp.access(file); return true; } catch { return false; } }
 
@@ -181,7 +182,9 @@ async function generateLineartCandidate(ctx, artifact, scene) {
       await store.validateBinding(record, record.whiteboard.media.lineart[scene.id], ctx.rootDir);
       return { reused: true };
     }
-    const revision = record.whiteboard.media.overrides[`lineart_generation:${scene.id}`] || '';
+    const prompt = scenePrompt(record.whiteboard.media, scene, { includePending: false });
+    scene = { ...scene, imagePrompt: prompt.imagePrompt };
+    const revision = prompt.revision;
     const imageConfig = await ctx.services.aiModelConfig.getRuntimeConfig('image');
     const inputIdentity = sha256({ prompt: models.lineartPrompt(artifact, scene, revision), style: artifact.visualStyle, revision,
       model: imageConfig.modelId, provider: imageConfig.provider, endpoint: imageConfig.baseUrl });
@@ -278,6 +281,9 @@ async function annotateSceneCandidate(ctx, artifact, timing, scene, canvas) {
     item = await ctx.attempt('annotation_drafting', scene.id, true, inputIdentity);
     await models.structuredVision({ textConfig: ctx.config, images: [image], services: ctx.services,
       validate: candidate => models.validateAnnotation(candidate, canvas, artifact.visualStyle, scene), reasoningEffort: 'medium', prompt,
+      onValidation: diagnostics => ctx.change(current => {
+        current.whiteboard.media.attempts.find(row => row.id === item.id).diagnostics = safeVisionDiagnostics(diagnostics);
+      }),
       onRequest: async repair => {
         if (repair) {
           // 每次实际请求单独登记；格式补正与覆盖率修正共用一次补正预算。

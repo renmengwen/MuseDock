@@ -213,7 +213,7 @@ router.post('/:workflow_id/whiteboard/actions', async (req, res) => {
   if (typeof service.actOnWhiteboardWorkflow !== 'function') return res.status(501).json({ success: false, message: '当前服务尚未支持白板创作，请更新服务端。' });
   const registry = getTaskRegistry(req);
   const action = req.body?.action;
-  if (action !== 'ask_status' && registry?.activeTaskForWorkflow(workflowId)?.status === 'running') {
+  if (!['ask_status', 'save_lineart_prompt'].includes(action) && registry?.activeTaskForWorkflow(workflowId)?.status === 'running') {
     return res.status(409).json({ success: false, message: '当前方案仍在处理中，请等待本轮执行结束后再操作。' });
   }
   try {

@@ -39,6 +39,8 @@ export function WhiteboardRequestDetails({ scene, hasPreview = false, canRecover
     ? '本次编排候选已保存，可使用“恢复预览”先尝试本地恢复。'
     : failed && savedCandidate
     ? '本次编排候选已保存。请先处理左侧的当前任务提示，再按可用操作恢复或继续制作。'
+    : failed && latest.errorCode === 'CANDIDATE_INVALID'
+    ? '本幕编排未通过校验，请查看下方具体问题。可使用左侧操作继续编排，已完成的分镜会复用。'
     : failed ? '请根据原因检查模型设置或本地运行环境，再使用左侧的可用操作继续制作。' : '';
 
   return <section aria-label="本幕请求详情" className="grid min-w-0 gap-4 text-sm leading-6">
@@ -68,6 +70,10 @@ export function WhiteboardRequestDetails({ scene, hasPreview = false, canRecover
             {Number.isInteger(attempt.diagnostics?.httpStatus) ? <span>服务状态：HTTP {attempt.diagnostics.httpStatus}</span> : null}
           </div>
           {reason ? <p className="mb-0 mt-2 break-words text-sm text-fg-2">{reason}</p> : null}
+          {attempt.diagnostics?.validationErrors?.length ? <ul aria-label="编排校验问题" className="mb-0 mt-2 list-disc space-y-1 break-words pl-5 text-sm text-fg-2">
+            {attempt.diagnostics.validationErrors.map((error, errorIndex) => <li key={errorIndex}>{error}</li>)}
+          </ul> : null}
+          {attempt.diagnostics?.validationTruncated ? <p className="mb-0 mt-2 text-xs text-fg-3">校验详情较长，完整原因可在“API 返回记录”中查看。</p> : null}
         </li>;
       })}
     </ol>

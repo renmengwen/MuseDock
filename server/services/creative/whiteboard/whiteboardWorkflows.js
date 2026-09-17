@@ -13,6 +13,7 @@ const { generateDraft } = require('./structuredDraft');
 const production = require('./productionWorkflows');
 const mediaStore = require('./mediaStore');
 const agentRouter = require('./agentRouter');
+const { scenePrompt } = require('./lineartPrompts');
 
 function assertContract(record) {
   if (record.creationModeId !== WHITEBOARD_MODE) throw new WhiteboardError('MODE_ACTION_UNSUPPORTED', '该操作仅适用于线稿白板动画。', 409);
@@ -80,8 +81,9 @@ async function mutate(workflowId, options, handler) {
 }
 
 function actionsFor(record, artifactValid = true) {
-  if (!artifactValid || ['queued', 'running'].includes(record.status)) return [];
+  if (!artifactValid) return [];
   const mediaActions = production.actionsFor(record);
+  if (['queued', 'running'].includes(record.status)) return mediaActions || [];
   if (record.whiteboard.media && !record.whiteboard.media.stale && mediaActions) return [
     ...mediaActions,
     ...(!record.whiteboard.media.executionId && ['waiting_approval', 'failed', 'done'].includes(record.status)
@@ -108,6 +110,10 @@ async function getView(record, options = {}) {
   }
   view.whiteboard.allowedActions = actionsFor(record, valid);
   view.whiteboard.media = mediaStore.publicMedia(record);
+  if (valid && view.whiteboard.media && !view.whiteboard.media.stale && view.whiteboard.current?.artifact) {
+    view.whiteboard.media.lineartPromptDetails = Object.fromEntries(view.whiteboard.current.artifact.scenes
+      .map(scene => [scene.id, scenePrompt(record.whiteboard.media, scene)]));
+  }
   if (record.whiteboard.media && !record.whiteboard.media.stale) view.stages.push(...structuredClone(record.whiteboard.media.stages));
   // 候选执行输入保存在磁盘审计中；页面历史只需要版本、状态和绑定，不回灌全部正文。
   view.whiteboard.attempts = record.whiteboard.attempts.map(({ input, productionPlan, revisionMessage, ...attempt }) => attempt);
@@ -174,7 +180,7 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
       }
     }
     assertExpectedVersion(record, payload);
-    if (payload.interactionId && !record.whiteboard.media?.interactionId) {
+    if (payload.action !== 'save_lineart_prompt' && payload.interactionId && !record.whiteboard.media?.interactionId) {
       const interaction = record.whiteboard.interactions?.find(item => item.id === payload.interactionId);
       if (!interaction || interaction.status !== 'pending' || interaction.expectedIdentity !== record.whiteboard.current?.identity) throw new WhiteboardError('STALE_IDENTITY', '这张卡片已被新版本替代，请使用当前卡片。', 409);
     }
@@ -200,7 +206,7 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
     const remember = () => {
       if (payload.requestId) (record.whiteboard.actionReceipts ||= []).push({ requestId: payload.requestId, requestHash, action: payload.action, acceptedAt: now });
     };
-    if (['start_production', 'approve_media', 'revise_media', 'retry_media', 'recover_annotation_preview', 'accept_low_coverage', 'authorize_media_retry', 'regenerate_narration'].includes(payload.action)) {
+    if (['start_production', 'save_lineart_prompt', 'approve_media', 'revise_media', 'retry_media', 'recover_annotation_preview', 'accept_low_coverage', 'authorize_media_retry', 'regenerate_narration'].includes(payload.action)) {
       const start = await production.act(record, payload, options, now); remember(); return start;
     }
     const current = record.whiteboard.current;

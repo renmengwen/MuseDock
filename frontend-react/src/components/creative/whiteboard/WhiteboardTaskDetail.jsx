@@ -109,6 +109,23 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
     }
   }
 
+  async function saveLineartPrompt(sceneId, prompt) {
+    if (actionLock.current || busy || deletingWorkflowId || !allowed.has('save_lineart_prompt')) {
+      throw new Error('当前无法保存提示词，请等待正在提交的操作结束后重试。');
+    }
+    actionLock.current = true;
+    setBusy('save_lineart_prompt');
+    try {
+      const result = await sendAction('save_lineart_prompt', { sceneId, ...prompt, expectedMediaIdentity: undefined, interactionId: undefined });
+      const saved = result?.workflow?.whiteboard?.media?.lineartPromptDetails?.[sceneId];
+      if (!saved) throw new Error('尚未取得保存结果，请重新打开详情核对提示词。');
+      return saved;
+    } finally {
+      actionLock.current = false;
+      setBusy('');
+    }
+  }
+
   // 方案确认与开始制作在服务端仍是两个动作：先 approve_initial 冻结方案，再 start_production 触发执行，
   // 这里合并为一次点击；制作启动失败时方案保持已确认状态，可稍后用“开始制作视频”重试。
   async function approveInitial({ startProduction }) {
@@ -256,7 +273,7 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
               {allowed.has('update_plan') && artifact && (!pendingInteraction || media) ? <Button type="button" variant="outline" disabled={locked} onClick={() => { setEditedPlan({ ...artifact.productionPlan }); setPlanOpen(true); setError(''); }}><Settings2 size={14} />制作设置</Button> : null}
               {allowed.has('start_production') ? <Button type="button" disabled={locked} onClick={() => act('start_production')}>开始制作视频</Button> : null}
               {allowed.has('recover_annotation_preview') ? <Button type="button" disabled={locked} onClick={() => act('recover_annotation_preview')}>恢复落墨预览</Button> : null}
-              {allowed.has('retry_media') ? <Button type="button" variant={allowed.has('accept_low_coverage') ? 'outline' : 'default'} disabled={locked} onClick={() => act('retry_media')}>{allowed.has('accept_low_coverage') ? '重新编排未通过的幕' : '继续未完成的制作'}</Button> : null}
+              {allowed.has('retry_media') ? <Button type="button" variant={allowed.has('accept_low_coverage') ? 'outline' : 'default'} disabled={locked} onClick={() => act('retry_media')}>{whiteboard.allowedActions.find(action => action.id === 'retry_media').label}</Button> : null}
               {allowed.has('accept_low_coverage') ? <Button type="button" variant="outline" disabled={locked} onClick={openCoverageReview}>查看预览后接受当前落墨</Button> : null}
               {allowed.has('authorize_media_retry') ? <Button type="button" variant="outline" disabled={locked} onClick={() => setConfirm('authorize_media_retry')}>核实后授权新请求</Button> : null}
               {allowed.has('regenerate_narration') ? <Button type="button" variant="outline" disabled={locked} onClick={() => setConfirm('regenerate_narration')}>重新生成完整旁白</Button> : null}
@@ -280,7 +297,8 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
               {current?.stale ? <p className="m-0 text-xs leading-6 text-fg-3">此版本已因修改而失效，保留供对照。新方案需要重新确认。</p> : null}
               {media ? <WhiteboardMediaPanel media={media} scenes={artifact.scenes} onReviewLowCoverage={allowed.has('accept_low_coverage') ? openCoverageReview : undefined}
                 onRecoverAnnotationPreview={allowed.has('recover_annotation_preview') ? sceneId => act('recover_annotation_preview', { sceneId }) : undefined}
-                recoveringPreview={busy === 'recover_annotation_preview'} actionsDisabled={locked} /> : <WhiteboardArtifact artifact={artifact} />}
+                recoveringPreview={busy === 'recover_annotation_preview'} actionsDisabled={locked}
+                onSaveLineartPrompt={saveLineartPrompt} promptSavingDisabled={Boolean(busy) || Boolean(deletingWorkflowId) || !allowed.has('save_lineart_prompt')} /> : <WhiteboardArtifact artifact={artifact} />}
             </div> : <div className="flex min-h-[320px] flex-1 flex-col items-center justify-center gap-3 text-center" role="status" aria-live="polite">
               {running ? <Loader2 size={24} className="animate-spin text-fg-3" /> : <FileText size={26} className="text-fg-3" />}
               <h3 className="m-0 text-sm font-semibold text-fg-2">{emptyTitle}</h3>

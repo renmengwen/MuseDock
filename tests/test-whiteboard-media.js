@@ -388,7 +388,7 @@ async function testSilentMedia(ctx) {
   queued.whiteboard.media.attempts.push({ id: 'fixture-request', stage: 'full_narration', status: 'requesting' });
   production.recover(queued, new Date().toISOString());
   assert.equal(queued.status, 'unknown_external_outcome');
-  assert.deepEqual(production.actionsFor(queued).map(action => action.id), ['authorize_media_retry']);
+  assert.deepEqual(production.actionsFor(queued).map(action => action.id), ['save_lineart_prompt', 'authorize_media_retry']);
   const second = await ctx.create();
   await ctx.action(second, 'start_production');
   ctx.setTts(async () => ({ ok: true, json: async () => ({ audio: (await fs.readFile(path.join(ctx.root, 'fixture.wav'))).toString('base64'), duration: 6, original_duration: 6 }) }));
