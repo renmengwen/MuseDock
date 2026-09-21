@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { Check, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { ProductionPlanFields } from './WhiteboardInputFields.jsx';
-import { whiteboardCanvasLabel } from './whiteboardForm.js';
+import { whiteboardCanvasLabel, subtitleStyleLabel, validateSubtitleSettings } from './whiteboardForm.js';
 
 export function WhiteboardConversationCard({ interaction, active, artifact, disabled, allowed, onConfirm, onUpdatePlan }) {
   const [editing, setEditing] = useState(false);
@@ -27,11 +27,12 @@ export function WhiteboardConversationCard({ interaction, active, artifact, disa
         <dt className="text-fg-3">视觉模板</dt><dd className="m-0">{artifact.visualStyle.displayName}</dd>
         <dt className="text-fg-3">旁白</dt><dd className="m-0">{artifact.productionPlan.narrationMode === 'disabled' ? (artifact.timingKind === 'source_srt' ? '无旁白，使用 SRT 时间轴' : '无旁白，使用计划时间轴') : artifact.narrationService?.displayName || '未配置'}</dd>
         <dt className="text-fg-3">背景音乐</dt><dd className="m-0">{artifact.productionPlan.bgmMode === 'enabled' ? '使用 BGM（内置轻钢琴）' : '不使用 BGM'}</dd>
+        <dt className="text-fg-3">成片字幕</dt><dd className="m-0">{artifact.productionPlan.burnSubtitles ? `单行短句 · ${subtitleStyleLabel(artifact.productionPlan, artifact.aspectRatio)}` : '不烧录字幕'}</dd>
         <dt className="text-fg-3">后续流程</dt><dd className="m-0">{artifact.productionPlan.agentApprovalEnabled ? '按授权自动推进，异常时暂停' : '逐阶段确认产物'}</dd>
       </dl> : null}
-      {pending && editing && form ? <form className="grid gap-3 border-t border-line-1 pt-3" onSubmit={event => { event.preventDefault(); onUpdatePlan(form); }}>
-        <ProductionPlanFields value={form} onChange={setForm} disabled={disabled} />
-        <div className="flex flex-wrap gap-2"><Button type="submit" size="sm" disabled={disabled}>保存为新的待确认版本</Button><Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => setEditing(false)}>取消调整</Button></div>
+      {pending && editing && form ? <form className="grid gap-3 border-t border-line-1 pt-3" onSubmit={event => { event.preventDefault(); if (!validateSubtitleSettings(form)) onUpdatePlan(form); }}>
+        <ProductionPlanFields value={form} aspectRatio={artifact.aspectRatio} onChange={setForm} disabled={disabled} />
+        <div className="flex flex-wrap gap-2"><Button type="submit" size="sm" disabled={disabled || Boolean(validateSubtitleSettings(form))}>{disabled ? '正在保存制作方案...' : '保存为新的待确认版本'}</Button><Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => setEditing(false)}>取消调整</Button></div>
       </form> : null}
       {pending && !editing ? <div className="flex flex-wrap gap-2">
         {coverage && allowed.has('accept_low_coverage') ? <Button type="button" size="sm" disabled={disabled} onClick={() => onConfirm('accept_low_coverage')}>查看预览并处理</Button> : null}

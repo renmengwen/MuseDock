@@ -2,6 +2,7 @@ const express = require('express');
 const { createTranscriptionService } = require('../services/transcription/transcriptionTasks');
 const { TranscriptionError } = require('../services/transcription/funasr');
 const { createLocalFileOpenHandler, assertLocalClient, LocalFileError } = require('../services/localFiles');
+const { DouyinBrowserError } = require('../scraper/douyinBrowser');
 
 function createTranscriptionRouter({ service = createTranscriptionService(), douyin } = {}) {
   const router = express.Router();
@@ -12,7 +13,7 @@ function createTranscriptionRouter({ service = createTranscriptionService(), dou
     try { await handler(req, res); }
     catch (error) {
       if (res.headersSent) return;
-      const known = error instanceof TranscriptionError || error instanceof LocalFileError;
+      const known = error instanceof TranscriptionError || error instanceof LocalFileError || error instanceof DouyinBrowserError;
       res.status(known ? error.status : 500).json({
         success: false, code: known ? error.code : 'TRANSCRIPTION_FAILED',
         message: known ? error.message : '转写工具请求失败，请检查服务状态后重试。',
@@ -33,6 +34,9 @@ function createTranscriptionRouter({ service = createTranscriptionService(), dou
         message: result.alreadyLoggedIn ? '抖音已登录，可以开始转写。'
           : result.needVerify ? '请在打开的 Chrome 中完成抖音验证，再检查登录状态。' : '请在打开的 Chrome 中登录抖音，完成后点击“检查登录状态”。',
       } });
+    } catch (error) {
+      if (error instanceof DouyinBrowserError || error instanceof TranscriptionError) throw error;
+      throw new TranscriptionError('DOUYIN_LOGIN_FAILED', '未能打开抖音登录页，请确认 Chrome 可正常访问抖音后重新点击“登录抖音”。', 502);
     } finally { loginBusy = false; }
   }));
   router.post('/douyin/login/status', route(async (_req, res) => {

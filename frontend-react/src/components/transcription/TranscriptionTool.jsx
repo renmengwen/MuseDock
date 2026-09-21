@@ -329,7 +329,7 @@ export function TranscriptionTool({ compact = false }) {
               {login && !login.loggedIn && <Button variant="ghost" size="sm" disabled={!!loginAction || busy} onClick={() => loginToDouyin(true)}>
                 {loginAction === 'checking' && <LoaderCircle className="size-4 animate-spin" />}{loginAction === 'checking' ? '正在检查登录...' : '检查登录状态'}
               </Button>}
-              <span className="text-xs text-muted-foreground" role="status">{login?.message || '使用本机 Chrome 登录后，可读取你有权访问的公开视频。'}</span>
+              <span className="text-xs text-muted-foreground" role="status">{login?.message || '请点击“登录抖音”，在 MuseDock 打开的独立 Chrome 窗口中登录，再点击“检查登录状态”。'}</span>
             </div>
           </div>
         </div>

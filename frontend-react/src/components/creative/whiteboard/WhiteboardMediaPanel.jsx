@@ -68,7 +68,7 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
           {narration ? <div className="grid gap-4">
             <p className="m-0 text-sm">{narration.timingKind === 'planned' ? '计划时长' : '时间轴时长'} <strong>{(narration.durationMs / 1000).toFixed(2)} 秒</strong>{narration.audio ? ' · 24 kHz 单声道' : narration.timingKind === 'planned' ? ' · 无旁白，使用计划时间轴' : ' · 无旁白，使用 SRT 时间轴'}</p>
             {narration.audio ? <audio controls controlsList="nodownload" preload="metadata" src={url(narration.audio)} className="w-full" aria-label="完整白板旁白" /> : null}
-            <div className="flex flex-wrap gap-2">{openFile(narration.audio, '打开完整旁白')}{openFile(narration.subtitles, '打开字幕 SRT')}{openFile(narration.audio || narration.subtitles, '打开所在文件夹', 'folder')}</div>
+            <div className="flex flex-wrap gap-2">{openFile(narration.audio, '打开完整旁白')}{openFile(final?.subtitles || narration.subtitles, '打开字幕 SRT')}{openFile(narration.audio || final?.subtitles || narration.subtitles, '打开所在文件夹', 'folder')}</div>
             <p className="m-0 text-xs leading-6 text-fg-3">{narration.audio ? '字幕文字来自已确认正文，时间来自同一次语音响应的原生字级证据。' : narration.timingKind === 'planned' ? '按已确认的目标时长与文本长度安排字幕和动画，未生成旁白。请检查字幕阅读节奏和分镜时长。' : '使用输入 SRT 的时间轴，未生成旁白。'}</p>
             {media.bgm ? <p className="m-0 text-xs leading-6 text-fg-3">已开启背景音乐，将在最终成片中混入；此处仅检查旁白和字幕。</p> : null}
           </div> : empty}
@@ -87,7 +87,7 @@ export function WhiteboardMediaPanel({ media, scenes = [], onReviewLowCoverage, 
             onSaveLineartPrompt={onSaveLineartPrompt} promptSavingDisabled={promptSavingDisabled} onDetailsOpenChange={onDetailsOpenChange} />
         </TabsContent>)}
         <TabsContent value="final_delivery" className="min-w-0">
-          {final ? <div className="grid gap-4"><CreativeVideoPreview videoUrl={url(final.video)} posterUrl={url(final.poster)} width={final.validation.width} height={final.validation.height} showFileActions={false} /><div className="flex flex-wrap gap-2">{openFile(final.video, '打开最终视频')}{openFile(narration?.subtitles, '打开字幕')}{openFile(final.video, '打开所在文件夹', 'folder')}</div>
+          {final ? <div className="grid gap-4"><CreativeVideoPreview videoUrl={url(final.video)} posterUrl={url(final.poster)} width={final.validation.width} height={final.validation.height} showFileActions={false} /><div className="flex flex-wrap gap-2">{openFile(final.video, '打开最终视频')}{openFile(final.subtitles || narration?.subtitles, '打开字幕')}{openFile(final.video, '打开所在文件夹', 'folder')}</div>
             <p className="m-0 text-xs leading-6 text-fg-3">{final.validation.width} × {final.validation.height} · 60 fps · H.264{final.validation.audio ? ' / AAC' : ' · 静音'} · {(final.validation.durationMs / 1000).toFixed(2)} 秒</p>
             <p className="m-0 text-xs leading-6 text-fg-3">背景音乐：{final.bgm ? `已加入 ${final.bgm.title}（轻钢琴）` : '不使用 BGM'}</p>
             <details className="rounded-md border border-line-1 p-3 text-xs"><summary className="cursor-pointer text-fg-2">技术验证与版本身份</summary><p className="break-all font-mono leading-6 text-fg-3">{final.identity}</p><p className="text-fg-3">已检查编码、帧数、时长、音轨并完整解码。</p>{openFile(final.receipt, '打开验证记录')}</details>

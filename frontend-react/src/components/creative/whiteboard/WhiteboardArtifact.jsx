@@ -1,4 +1,5 @@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.jsx';
+import { subtitleStyleLabel } from './whiteboardForm.js';
 
 function timeLabel(ms) {
   const totalSeconds = Math.round(ms / 1000);
@@ -47,7 +48,7 @@ export function WhiteboardArtifact({ artifact }) {
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-5 gap-y-4 text-sm">
           <dt className="text-fg-3">视觉模板</dt><dd className="m-0 text-fg-1">{artifact.visualStyle.displayName}<p className="mb-0 mt-1 text-xs leading-6 text-fg-3">{artifact.visualStyle.description}</p></dd>
           <dt className="text-fg-3">画笔</dt><dd className="m-0">{plan.handDisplayMode === 'show' ? '显示画笔' : '隐藏画笔'}</dd>
-          <dt className="text-fg-3">成片字幕</dt><dd className="m-0">{plan.burnSubtitles ? '烧录字幕' : '不烧录字幕'}</dd>
+          <dt className="text-fg-3">成片字幕</dt><dd className="m-0">{plan.burnSubtitles ? `单行短句 · ${subtitleStyleLabel(plan, artifact.aspectRatio)}` : '不烧录字幕'}</dd>
           <dt className="text-fg-3">背景音乐</dt><dd className="m-0">{plan.bgmMode === 'enabled' ? '使用 BGM（内置轻钢琴）' : '不使用 BGM'}</dd>
           <dt className="text-fg-3">生图方式</dt><dd className="m-0">逐幕独立生成</dd>
           <dt className="text-fg-3">旁白服务</dt><dd className="m-0">{silent ? `无旁白，使用${timingLabel}` : artifact.narrationService?.displayName || '未配置'}{!silent && !artifact.narrationService?.configured ? <p className="mb-0 mt-1 text-xs leading-relaxed text-fg-3">开始旁白制作前需配置服务，并重新确认调用合同。</p> : null}</dd>

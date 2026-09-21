@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Monitor, Settings2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea.jsx';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.jsx';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select.jsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog.jsx';
-import { validateWhiteboardDraft, WHITEBOARD_CANVAS_FORMATS } from './whiteboardForm.js';
+import { validateWhiteboardDraft, validateSubtitleSettings, whiteboardSubtitleStyle, WHITEBOARD_CANVAS_FORMATS } from './whiteboardForm.js';
 import { cn } from '@/lib/utils.js';
 
 export function LabeledSelect({ label, value, onChange, options, disabled = false }) {
@@ -21,8 +21,13 @@ export function LabeledSelect({ label, value, onChange, options, disabled = fals
   );
 }
 
-export function ProductionPlanFields({ value, onChange, disabled = false }) {
+export function ProductionPlanFields({ value, onChange, disabled = false, aspectRatio = '16:9' }) {
+  const id = useId();
   const change = (key, next) => onChange({ ...value, [key]: next });
+  const subtitleStyle = whiteboardSubtitleStyle(value, aspectRatio);
+  const defaultSize = whiteboardSubtitleStyle({}, aspectRatio).fontSize;
+  const subtitleError = validateSubtitleSettings(value);
+  const subtitlesDisabled = disabled || value.burnSubtitles === false;
   return (
     <div className="grid gap-4">
       <LabeledSelect label="旁白方式" value={value.narrationMode || 'enabled'} disabled={disabled} onChange={next => change('narrationMode', next)} options={[{ id: 'enabled', label: '使用设置中的完整旁白服务' }, { id: 'disabled', label: '不使用旁白' }]} />
@@ -33,6 +38,33 @@ export function ProductionPlanFields({ value, onChange, disabled = false }) {
       </div>
       <LabeledSelect label="画笔显示" value={value.handDisplayMode} disabled={disabled} onChange={next => change('handDisplayMode', next)} options={[{ id: 'show', label: '显示画笔' }, { id: 'hide', label: '隐藏画笔' }]} />
       <LabeledSelect label="成片字幕" value={String(value.burnSubtitles)} disabled={disabled} onChange={next => change('burnSubtitles', next === 'true')} options={[{ id: 'true', label: '烧录字幕' }, { id: 'false', label: '不烧录字幕' }]} />
+      <div className="grid gap-3 rounded-lg border border-line-1 p-3" role="group" aria-label="字幕样式">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="grid content-start gap-1.5">
+            <label htmlFor={`${id}-subtitle-color`} className="text-xs font-semibold text-fg-2">字幕颜色</label>
+            <div className="flex min-w-0 items-center gap-2">
+              <Input id={`${id}-subtitle-color`} aria-label="字幕颜色" type="color" value={subtitleStyle.color} disabled={subtitlesDisabled}
+                className="w-12 shrink-0 cursor-pointer p-1 max-[760px]:min-h-11" onChange={event => change('subtitleColor', event.target.value.toUpperCase())} />
+              <span className="min-w-0 font-mono text-xs text-fg-3">{subtitleStyle.color}</span>
+            </div>
+          </div>
+          <div className="grid content-start gap-1.5">
+            <label htmlFor={`${id}-subtitle-size`} className="text-xs font-semibold text-fg-2">字幕字号（px）</label>
+            <Input id={`${id}-subtitle-size`} aria-label="字幕字号" type="number" min={24} max={96} step={1} inputMode="numeric"
+              value={value.subtitleFontSize ?? ''} placeholder={`默认 ${defaultSize}`} disabled={subtitlesDisabled}
+              aria-invalid={Boolean(subtitleError)} aria-describedby={subtitleError ? `${id}-subtitle-error` : `${id}-subtitle-help`}
+              className="max-[760px]:min-h-11" onChange={event => change('subtitleFontSize', event.target.value === '' ? null : Number(event.target.value))} />
+          </div>
+        </div>
+        <p id={`${id}-subtitle-help`} className="m-0 text-xs leading-relaxed text-fg-3">{value.burnSubtitles === false
+          ? '开启成片字幕后可调整样式，已选颜色和字号会保留。'
+          : `字号可填 24–96，留空使用默认 ${defaultSize} px。字幕始终按短句单行显示。`}</p>
+        {subtitleError ? <p id={`${id}-subtitle-error`} className="m-0 text-xs text-danger" role="alert">{subtitleError}</p> : null}
+        <div className={cn('flex min-h-20 items-center justify-center rounded-md bg-[#F5EBD7] px-3 py-3', value.burnSubtitles === false && 'opacity-40')} aria-label="字幕样式预览">
+          <span className="whitespace-nowrap leading-tight" style={{ color: subtitleStyle.color, fontSize: `${subtitleStyle.fontSize / 2}px`,
+            WebkitTextStroke: '1px #000000', paintOrder: 'stroke fill' }}>单行字幕</span>
+        </div>
+      </div>
       <LabeledSelect label="后续确认方式" value={String(value.agentApprovalEnabled)} disabled={disabled} onChange={next => change('agentApprovalEnabled', next === 'true')} options={[{ id: 'false', label: '由我逐阶段确认' }, { id: 'true', label: '授权 AI 在允许范围内推进' }]} />
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t border-line-1 pt-3 text-xs text-fg-2">
         <dt>生图方式</dt><dd>逐幕独立生成</dd>
@@ -106,8 +138,8 @@ export function WhiteboardInputFields({ draft, onChange, catalog, disabled }) {
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="max-h-[calc(100dvh-32px)] w-[min(480px,calc(100vw-32px))] overflow-y-auto" showCloseButton>
           <DialogHeader><DialogTitle>白板制作设置</DialogTitle><DialogDescription>先保存为方案选项，在内容与制作方案中一起确认。</DialogDescription></DialogHeader>
-          <ProductionPlanFields value={draft.productionPlan} disabled={disabled} onChange={productionPlan => change({ productionPlan })} />
-          <Button type="button" className="max-[760px]:min-h-11" onClick={() => setSettingsOpen(false)}>完成设置</Button>
+          <ProductionPlanFields value={draft.productionPlan} aspectRatio={draft.aspectRatio} disabled={disabled} onChange={productionPlan => change({ productionPlan })} />
+          <Button type="button" disabled={disabled || Boolean(validateSubtitleSettings(draft.productionPlan))} className="max-[760px]:min-h-11" onClick={() => setSettingsOpen(false)}>完成设置</Button>
         </DialogContent>
       </Dialog>
     </div>

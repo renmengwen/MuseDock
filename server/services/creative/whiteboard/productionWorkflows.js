@@ -3,7 +3,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { readWorkflow, workflowFileExists } = require('../workflowStore');
 const artifactStore = require('./artifactStore');
-const { WhiteboardError, sha256, canonicalJson, canvasFor } = require('./contracts');
+const { WhiteboardError, sha256, canonicalJson, canvasFor, subtitleStyleFor } = require('./contracts');
 const store = require('./mediaStore');
 const mediaTools = require('./mediaTools');
 const { buildSilentTiming } = require('./narrationTiming');
@@ -233,7 +233,7 @@ async function act(record, payload, options, now) {
   const artifact = await requirePlan(record, options);
   if (action === 'start_production') {
     const silent = artifact.productionPlan.narrationMode === 'disabled';
-    if (silent) buildSilentTiming(artifact);
+    if (silent) buildSilentTiming(artifact, { fontSize: subtitleStyleFor(artifact.productionPlan, artifact.aspectRatio).fontSize });
     const tools = options.services?.whiteboardMediaTools || mediaTools;
     const runtime = await tools.preflight({ ...options.mediaOptions, aspectRatio: artifact.aspectRatio || '16:9', bgmMode: artifact.productionPlan.bgmMode, visualStyle: artifact.visualStyle });
     const { service, runtime: voice, legacyContractHash } = await voiceSnapshot(options.services);

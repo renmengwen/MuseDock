@@ -8,6 +8,7 @@ const { createTranscriptionService } = require('../server/services/transcription
 const { createTranscriptionRouter } = require('../server/routes/transcriptions');
 const mediaPipeline = require('../server/services/mediaPipeline');
 const { TranscriptionError } = require('../server/services/transcription/funasr');
+const { DouyinBrowserError } = require('../server/scraper/douyinBrowser');
 
 async function run() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'musedock-transcription-tasks-'));
@@ -17,6 +18,9 @@ async function run() {
   let correctionFails = false;
   let returnWrongId = false;
   let needsLogin = false;
+  let loginFailure = null;
+  let detailFailure = null;
+  let missingDownload = false;
   const rawSentences = [{ index: 1, startMs: 100, endMs: 800, text: '家向的月光。' }, { index: 2, startMs: 950, endMs: 1500, text: '照着小路。' }];
   const fixture = {
     rootDir: root,
@@ -24,8 +28,8 @@ async function run() {
     resolveAsrRuntime: async () => ({ configured: true, provider: 'funasr', baseUrl: 'http://localhost:8000/v1', modelId: 'paraformer' }),
     getTextConfig: async () => ({ enabled: true, apiKey: 'test-only-key', baseUrl: 'https://example.invalid/v1', modelId: 'fixture-model' }),
     resolveSource: async () => ({ aweme_id: '1234567890' }),
-    getVideoDetail: async () => needsLogin ? { success: true, needLogin: true } : ({ success: true,
-      data: { aweme_id: returnWrongId ? '9999999999' : '1234567890', title: '家乡', video_download_url: 'https://example.invalid/video' } }),
+    getVideoDetail: async () => detailFailure || (needsLogin ? { success: true, needLogin: true } : ({ success: true,
+      data: { aweme_id: returnWrongId ? '9999999999' : '1234567890', title: '家乡', video_download_url: missingDownload ? '' : 'https://example.invalid/video' } })),
     mediaPipeline: {
       getMediaPaths: mediaPipeline.getMediaPaths,
       prepareDouyinMedia: async (id, metadata, options) => {
@@ -56,7 +60,10 @@ async function run() {
   app.locals.localFileOpener = async (filePath, options) => { openedFiles.push({ filePath, ...options }); };
   app.use(express.json());
   app.use('/api/transcriptions', createTranscriptionRouter({ service, douyin: {
-    startQrcodeLogin: async () => ({ alreadyLoggedIn: false, needVerify: true, qrcode: 'must-not-leak' }),
+    startQrcodeLogin: async () => {
+      if (loginFailure) throw loginFailure;
+      return { alreadyLoggedIn: false, needVerify: true, qrcode: 'must-not-leak' };
+    },
     checkLoginResult: async () => ({ loggedIn: true, url: 'must-not-leak', cookies: ['must-not-leak'] }),
   } }));
   const server = await new Promise(resolve => { const listener = app.listen(0, '127.0.0.1', () => resolve(listener)); });
@@ -174,6 +181,25 @@ async function run() {
     assert.equal((await service.get(mismatch.id)).error.code, 'SOURCE_MISMATCH');
     assert.equal(transcriptions, asrCount);
     returnWrongId = false;
+
+    const beforeSourceFailure = { downloads, transcriptions };
+    for (const code of ['DOUYIN_ACCESS_DENIED', 'DOUYIN_RATE_LIMITED']) {
+      detailFailure = { success: false, code, message: 'must-not-leak', error: 'must-not-leak' };
+      const failedSource = await service.create({ source });
+      await service.waitForIdle();
+      const failure = await service.get(failedSource.id);
+      assert.equal(failure.error.code, code);
+      assert.ok(!failure.error.message.includes('must-not-leak'));
+      assert.doesNotMatch(failure.error.message, /未登录|完成登录/);
+    }
+    detailFailure = null;
+    missingDownload = true;
+    const missingVideo = await service.create({ source });
+    await service.waitForIdle();
+    assert.equal((await service.get(missingVideo.id)).error.code, 'DOUYIN_VIDEO_URL_MISSING');
+    assert.deepEqual({ downloads, transcriptions }, beforeSourceFailure, '来源失败时不能下载媒体或请求转写');
+    missingDownload = false;
+
     needsLogin = true;
     const loginTask = await service.create({ source });
     await service.waitForIdle();
@@ -184,6 +210,20 @@ async function run() {
     const loggedIn = await post('/douyin/login/status').then(response => response.json());
     assert.equal(loggedIn.data.loggedIn, true);
     assert.ok(!JSON.stringify(loggedIn).includes('must-not-leak'));
+
+    loginFailure = new DouyinBrowserError('DOUYIN_CHROME_CONNECT_TIMEOUT', '等待 Chrome 登录窗口连接超时，请稍候重试。', 504);
+    const chromeFailure = await post('/douyin/login');
+    assert.equal(chromeFailure.status, 504);
+    assert.deepEqual(await chromeFailure.json(), { success: false, code: loginFailure.code, message: loginFailure.message });
+    loginFailure = new Error('private browser endpoint: must-not-leak');
+    const unknownLoginFailure = await post('/douyin/login');
+    assert.equal(unknownLoginFailure.status, 502);
+    const safeLoginError = await unknownLoginFailure.json();
+    assert.equal(safeLoginError.code, 'DOUYIN_LOGIN_FAILED');
+    assert.match(safeLoginError.message, /抖音登录页/);
+    assert.ok(!JSON.stringify(safeLoginError).includes('must-not-leak'));
+    loginFailure = null;
+    assert.equal((await post('/douyin/login')).status, 200, '登录失败后应解除忙碌状态，允许重试');
 
     const missingConfig = createTranscriptionService({ ...fixture, resolveAsrRuntime: async () => ({ configured: false }) });
     await assert.rejects(missingConfig.create({ source }), error => error.code === 'ASR_NOT_CONFIGURED');

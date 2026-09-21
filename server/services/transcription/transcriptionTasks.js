@@ -10,6 +10,7 @@ const { TranscriptionError, transcriptionEndpoint, transcribeFunasrAudio } = req
 const { ensureFunasrService } = require('./funasrRuntime');
 const { toSrt, proofreadTranscript } = require('./corrections');
 const { extractVideoFrames, MAX_FRAME_COUNT } = require('./videoFrames');
+const { DOUYIN_VIDEO_PAGE_MESSAGES } = require('../../scraper/douyinVideoPage');
 
 const DEFAULT_ROOT = path.join(require('../../dataRoot'), 'data/transcriptions');
 const ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -359,8 +360,13 @@ function createTranscriptionService(options = {}) {
     const detail = await (options.getVideoDetail || require('../../scraper/douyin').getVideoDetail)(id);
     if (detail.needVerify) throw new TranscriptionError('DOUYIN_NEEDS_VERIFY', '抖音需要验证，请点击“登录抖音”，在浏览器完成验证后重试。');
     if (detail.needLogin) throw new TranscriptionError('DOUYIN_NEEDS_LOGIN', '请先点击“登录抖音”并完成登录，再开始转写。');
-    if (!detail.success || !detail.data?.video_download_url) {
-      throw new TranscriptionError('DOUYIN_SOURCE_FAILED', '无法读取该抖音视频，请确认视频公开且未删除，或完成登录后重试。');
+    if (!detail.success) {
+      const message = Object.hasOwn(DOUYIN_VIDEO_PAGE_MESSAGES, detail.code) ? DOUYIN_VIDEO_PAGE_MESSAGES[detail.code] : '';
+      throw new TranscriptionError(message ? detail.code : 'DOUYIN_SOURCE_FAILED',
+        message || '读取抖音视频信息失败，请检查浏览器和网络后重试。');
+    }
+    if (!detail.data?.video_download_url) {
+      throw new TranscriptionError('DOUYIN_VIDEO_URL_MISSING', '抖音已返回作品信息，但没有可用的视频播放地址，请确认链接为可播放的视频。');
     }
     if (String(detail.data.aweme_id) !== id) throw new TranscriptionError('SOURCE_MISMATCH', '解析结果与输入的视频 ID 不一致，已停止转写。');
     job.source = { awemeId: id, url: `https://www.douyin.com/video/${id}`, title: detail.data.title || '' };

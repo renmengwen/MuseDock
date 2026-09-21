@@ -20,7 +20,7 @@ const LANGUAGES = [{ id: 'zh-CN', label: '简体中文' }, { id: 'en-US', label:
 const DEFAULT_PRODUCTION_PLAN = {
   bgmMode: 'disabled', handDisplayMode: 'show', agentApprovalEnabled: false,
   imageGenerationMode: 'per_scene', burnSubtitles: true,
-  narrationMode: 'enabled',
+  narrationMode: 'enabled', subtitleColor: '#FFFFFF', subtitleFontSize: null,
 };
 
 class WhiteboardError extends Error {
@@ -74,6 +74,18 @@ function parseSrt(content) {
   });
 }
 
+function subtitleStyleFor(plan = {}, aspectRatio = '16:9') {
+  const color = plan.subtitleColor === undefined ? '#FFFFFF' : plan.subtitleColor;
+  const fontSize = plan.subtitleFontSize ?? (aspectRatio === '9:16' ? 52 : 48);
+  if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) {
+    throw new WhiteboardError('INVALID_INPUT', '字幕颜色需为六位十六进制颜色，例如 #FFFFFF。');
+  }
+  if (!Number.isInteger(fontSize) || fontSize < 24 || fontSize > 96) {
+    throw new WhiteboardError('INVALID_INPUT', '字幕字号需为 24–96 像素的整数，留空使用默认字号。');
+  }
+  return { color: color.toUpperCase(), fontSize };
+}
+
 function normalizeProductionPlan(value = {}) {
   assertObject(value, '制作设置');
   rejectExtraKeys(value, Object.keys(DEFAULT_PRODUCTION_PLAN), '制作设置');
@@ -85,6 +97,8 @@ function normalizeProductionPlan(value = {}) {
     || typeof plan.burnSubtitles !== 'boolean') {
     throw new WhiteboardError('INVALID_INPUT', '制作设置无效，请检查画笔、字幕和后续确认方式。');
   }
+  plan.subtitleColor = subtitleStyleFor(plan).color;
+  plan.subtitleFontSize ??= null;
   return plan;
 }
 
@@ -251,7 +265,7 @@ function materializeCandidate(candidate, input, productionPlan, narrationService
 
 module.exports = {
   CONTRACT_VERSION, SKILL_SOURCE_REVISION, VISUAL_PRESETS, DEFAULT_PRESET, LANGUAGES, CANVAS_FORMATS, canvasFor,
-  HANDWRITTEN_PRESET_ID, candidateContractFor, renderingFor,
+  HANDWRITTEN_PRESET_ID, candidateContractFor, renderingFor, subtitleStyleFor,
   DEFAULT_PRODUCTION_PLAN, CANDIDATE_SKELETON, CANDIDATE_SCHEMA, WhiteboardError, canonicalJson, sha256,
   normalizeInput, normalizeProductionPlan, parseSrt, validateCandidate, materializeCandidate,
 };

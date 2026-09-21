@@ -8,7 +8,7 @@ const mediaStore = require('../server/services/creative/whiteboard/mediaStore');
 const mediaTools = require('../server/services/creative/whiteboard/mediaTools');
 const production = require('../server/services/creative/whiteboard/productionWorkflows');
 const models = require('../server/services/creative/whiteboard/mediaModels');
-const { sha256, canvasFor } = require('../server/services/creative/whiteboard/contracts');
+const { sha256, canvasFor, subtitleStyleFor } = require('../server/services/creative/whiteboard/contracts');
 
 const portrait = process.argv.includes('--portrait');
 const aspectRatio = portrait ? '9:16' : '16:9';
@@ -47,7 +47,7 @@ async function setup() {
     '-t', '6', '-ac', '1', '-c:a', 'pcm_s16le', path.join(root, 'fixture.wav')]);
   const png = await fs.readFile(path.join(root, 'fixture.png'));
   const audio = await fs.readFile(path.join(root, 'fixture.wav'));
-  const calls = { tts: 0, image: 0, draft: 0, vision: 0, realProviderCalls: 0 };
+  const calls = { tts: 0, image: 0, draft: 0, vision: 0, annotation: 0, realProviderCalls: 0 };
   const configs = {
     tts: { enabled: true, provider: 'doubao', providerName: '豆包测试替身', apiKey: 'fixture-only', baseUrl: 'https://openspeech.bytedance.com', modelId: 'seed-audio-1.0', ttsQueueIntervalMs: 0 },
     text: { enabled: true, provider: 'fixture', apiKey: 'fixture-only', baseUrl: 'https://example.invalid', modelId: 'fixture-text', supportsMultimodal: true },
@@ -71,6 +71,7 @@ async function setup() {
       if (prompt.includes('imageCount')) return { success: true, text: JSON.stringify({ passed: true, summary: '测试替身确认已接收全部图像。', issues: [], imageCount: count,
         ...(prompt.includes('阶段 annotation_drafting') ? { sceneReviews: candidate.scenes.map(scene => ({ sceneId: scene.id,
           groupsMatchImage: true, orderMatchesNarration: true, reason: '圆形与方形之间有明显留白，各区域完整覆盖对应图形且顺序一致。' })) } : {}) }) };
+      calls.annotation += 1;
       return { success: true, text: JSON.stringify({ schemaVersion: 2,
         visualGrouping: { mode: 'independent_clusters', reason: '圆形与方形之间有连续纸面留白，没有贯穿连接，可以逐一独立揭示。' },
         elements: [
@@ -212,8 +213,83 @@ async function testSilentMedia(ctx) {
   console.log(`无旁白媒体验证通过，真实 provider 调用 0。产物目录：${ctx.root}`);
 }
 
+async function testSubtitleTiming(ctx) {
+  const short = 'a'.repeat(24) + ' ' + 'b'.repeat(4);
+  const long = 'c'.repeat(260) + ' ' + 'd'.repeat(10);
+  const original = ctx.options.services.aiTextModel.callTextModel;
+  const beforeTts = ctx.calls.tts;
+  ctx.options.services.aiTextModel.callTextModel = async () => {
+    ctx.calls.draft += 1;
+    return { success: true, text: JSON.stringify({ schemaVersion: 1, title: '小字号字幕测试', summary: '保留原文与时间。',
+      cues: [{ id: 'cue_1', text: short }, { id: 'cue_2', text: long }],
+      scenes: [{ id: 'scene_1', title: '阅读', cueIds: ['cue_1', 'cue_2'], imagePrompt: '纸面上的图形清晰分开，底部留白。' }] }) };
+  };
+  try {
+    const id = await ctx.create(false, { input: { inputMode: 'text', content: `${short}\n${long}`, narrationLanguage: 'en-US', aspectRatio: '9:16', targetDurationSeconds: 15 },
+      productionPlan: { narrationMode: 'disabled', subtitleFontSize: 24 } });
+    const started = await ctx.action(id, 'start_production');
+    assert.equal(started.success, true, started.message);
+    const prepared = await workflows.runCreativeWorkflow(id, ctx.options);
+    assert.equal(prepared.success, true, prepared.message);
+    assert.equal(prepared.status, 'waiting_approval');
+    const record = await ctx.read(id);
+    assert.equal(record.whiteboard.media.stage, 'full_narration');
+    assert.equal(record.whiteboard.media.current.full_narration.timingKind, 'planned');
+    assert.equal(ctx.calls.tts, beforeTts);
+    console.log('PASS 24 px 英文无旁白方案通过预检并完成时间轴阶段，不受默认字号误拦截');
+  } finally { ctx.options.services.aiTextModel.callTextModel = original; }
+}
+
+async function testSubtitleStyles(ctx) {
+  const id = await ctx.create(true);
+  assert.equal((await ctx.action(id, 'start_production')).success, true);
+  let result = await workflows.runCreativeWorkflow(id, ctx.options);
+  assert.equal(result.status, 'done', result.message);
+  const deliveries = [];
+  for (const productionPlan of [{ subtitleColor: '#FFCC00' }, { subtitleFontSize: 96 }, { subtitleColor: '#1E90FF', subtitleFontSize: 24 }]) {
+    const before = await ctx.read(id);
+    const calls = { ...ctx.calls };
+    assert.equal((await ctx.action(id, 'update_plan', { productionPlan })).success, true);
+    assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+    assert.equal((await ctx.action(id, 'approve_initial', { confirmed: true })).success, true);
+    assert.equal((await ctx.action(id, 'start_production')).success, true);
+    result = await workflows.runCreativeWorkflow(id, ctx.options);
+    assert.equal(result.status, 'done', result.message);
+    const after = await ctx.read(id);
+    const oldMedia = before.whiteboard.media;
+    const current = after.whiteboard.media;
+    for (const stage of mediaStore.STAGES.slice(0, -1)) assert.equal(current.current[stage.id].identity, oldMedia.current[stage.id].identity, `${stage.id} 不得因字幕样式改变而重建`);
+    for (const kind of ['tts', 'image', 'draft', 'annotation']) assert.equal(ctx.calls[kind], calls[kind], `字幕样式调整不得重复请求 ${kind}`);
+    assert.equal(current.reused.length, 7);
+    const final = current.current.final_delivery;
+    assert.notEqual(final.inputIdentity, oldMedia.current.final_delivery.inputIdentity);
+    const plan = after.whiteboard.attempts.at(-1).productionPlan;
+    assert.deepEqual(final.subtitleStyle, subtitleStyleFor(plan, aspectRatio));
+    const receipt = await mediaStore.readData(after, final.receipt, ctx.rootDir);
+    assert.deepEqual(receipt.subtitleStyle, final.subtitleStyle);
+    assert.equal(receipt.captionsSha256, final.captionsSha256);
+    const directory = mediaStore.workDirectory(id, final.video.attemptId, ctx.rootDir);
+    const ass = await fs.readFile(path.join(directory, 'captions.ass'), 'utf8');
+    const style = ass.split(/\r?\n/u).find(line => line.startsWith('Style: Default,')).split(',');
+    assert.equal(Number(style[2]), final.subtitleStyle.fontSize);
+    const color = final.subtitleStyle.color;
+    assert.equal(style[3], `&H00${color.slice(5, 7)}${color.slice(3, 5)}${color.slice(1, 3)}`);
+    assert.ok(!ass.includes('\\N'));
+    const srt = await mediaStore.mediaFile(after, final.subtitles, ctx.rootDir);
+    assert.match(await fs.readFile(srt.path, 'utf8'), /先画圆形。/u);
+    const poster = (await mediaStore.mediaFile(after, final.poster, ctx.rootDir)).path;
+    deliveries.push({ style: final.subtitleStyle, poster, video: (await mediaStore.mediaFile(after, final.video, ctx.rootDir)).path });
+    console.log(`PASS ${color} / ${final.subtitleStyle.fontSize} px：字幕更新，旁白、线稿、编排和单幕全部复用`);
+  }
+  await fs.writeFile(path.join(ctx.root, 'subtitle-styles-result.json'), JSON.stringify({ evidence: 'local_fixture_real_ffmpeg', deliveries, calls: ctx.calls }, null, 2));
+  console.log(`字幕样式集成验证通过，真实 provider 调用 0。产物目录：${ctx.root}`);
+  await testSubtitleTiming(ctx);
+}
+
 (async () => {
   const ctx = await setup();
+  if (process.argv.includes('--subtitle-timing')) return testSubtitleTiming(ctx);
+  if (process.argv.includes('--subtitles')) return testSubtitleStyles(ctx);
   if (process.argv.includes('--silent')) return testSilentMedia(ctx);
   const id = await ctx.create();
   const start = await ctx.action(id, 'start_production');

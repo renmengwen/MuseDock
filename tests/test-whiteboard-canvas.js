@@ -49,12 +49,12 @@ const mediaTools = require('../server/services/creative/whiteboard/mediaTools');
   }
 
   const parts = timing.splitCaption(text, 'zh-CN', '9:16');
-  assert.ok(parts.every(part => Array.from(part).length <= 32));
+  assert.ok(parts.every(part => Array.from(part).length <= 16));
   assert.equal(parts.join(''), text);
   const evidence = { provider: 'fixture', words: Array.from(text).map((character, index) => ({ text: character, start_time: index * 100, end_time: index * 100 + 99 })) };
   const aligned = timing.buildNarrationTiming(artifact, evidence, 5000);
-  assert.equal(aligned.captions.length, 2);
-  assert.equal(aligned.captions[1].startMs, 3200, '竖屏重新分段仍须使用原生字级时间');
+  assert.equal(aligned.captions.length, 3);
+  assert.equal(aligned.captions[1].startMs, 1600, '竖屏重新分段仍须使用原生字级时间');
   assert.equal(aligned.captions.map(cue => cue.text).join(''), text);
 
   const runtime = await mediaTools.preflight({ aspectRatio: '9:16' });
@@ -63,11 +63,12 @@ const mediaTools = require('../server/services/creative/whiteboard/mediaTools');
   const root = await fs.mkdtemp(path.resolve('.codex-runtime/whiteboard-canvas-test-'));
   const output = path.join(root, 'portrait.ass');
   const subtitle = await mediaTools.python('subtitles', { font: runtime.font, canvas: portrait,
-    cues: [{ text: '字'.repeat(32), startMs: 0, endMs: 2000 }], output });
+    cues: aligned.captions, output });
   assert.equal(subtitle.fontSize, 52);
   assert.equal(subtitle.marginV, 192);
   const ass = await fs.readFile(output, 'utf8');
   assert.match(ass, /PlayResX: 1080\r?\nPlayResY: 1920/);
-  assert.ok(ass.includes('\\N'), '竖屏字幕应按实际可用宽度换为两行');
+  assert.ok(!ass.includes('\\N'), '竖屏字幕必须逐条单行显示');
+  assert.equal(ass.split('\n').filter(line => line.startsWith('Dialogue:')).length, aligned.captions.length);
   console.log('横竖画幅合同通过：旧输入兼容、坐标边界、生图尺寸、原生字幕重分段、竖屏字幕画布与安全留白；真实 provider 调用 0。');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -111,9 +111,11 @@ const timing = require('../server/services/creative/whiteboard/narrationTiming')
   assert.equal(models.imageTextReviewIssues(findings, textScenes).length, 1, '错字必须覆盖 passed=true 的矛盾结论');
   assert.ok(models.validateVisualReview({ ...findings, textReviews: [] }, { imageCount: 1, imageTextScenes: textScenes }).length);
 
-  assert.equal(timing.splitCaption('字'.repeat(73), 'zh-CN', '4:3')[0].length, 36);
-  assert.equal(timing.splitCaption('字'.repeat(73), 'zh-CN', '16:9')[0].length, 48);
-  assert.equal(timing.splitCaption('字'.repeat(73), 'zh-CN', '9:16')[0].length, 32);
+  for (const [aspectRatio, limit] of [['4:3', 24], ['16:9', 28], ['9:16', 16]]) {
+    const parts = timing.splitCaption('字'.repeat(73), 'zh-CN', aspectRatio);
+    assert.ok(parts.every(part => part.length > 0 && part.length <= limit));
+    assert.equal(parts.join(''), '字'.repeat(73));
+  }
   const formSource = await fs.readFile(require.resolve('../frontend-react/src/components/creative/whiteboard/whiteboardForm.js'), 'utf8');
   const form = await import(`data:text/javascript;base64,${Buffer.from(formSource).toString('base64')}`);
   assert.deepEqual(form.WHITEBOARD_CANVAS_FORMATS, contracts.CANVAS_FORMATS);

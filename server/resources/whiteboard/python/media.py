@@ -5,6 +5,7 @@ import functools
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -158,25 +159,12 @@ def render(data):
     return {'width': out_w, 'height': out_h, 'fps': 60, 'frameCount': data['frameCount']}
 
 
-def caption_lines(text, font, max_width=1728):
-    text = text.replace('\r', '').strip()
-    explicit = text.split('\n')
-    if len(explicit) <= 2 and all(font.getlength(line) <= max_width for line in explicit):
-        return explicit
-    text = ' '.join(explicit)
-    candidates = []
-    for index in range(1, len(text)):
-        # Keep English words intact; Chinese can break between characters.
-        if text[index-1].isascii() and text[index].isascii() and text[index-1].isalnum() and text[index].isalnum():
-            continue
-        left, right = text[:index].rstrip(), text[index:].lstrip()
-        a, b = font.getlength(left), font.getlength(right)
-        if max(a, b) <= max_width:
-            candidates.append((abs(a-b), left, right))
-    if not candidates:
-        raise ValueError('单条字幕无法放入两行，请缩短字幕分段。')
-    _, left, right = min(candidates)
-    return [left, right]
+def caption_line(text, font, max_width=1728):
+    # 显示层只允许一行；先清理 ASS 特殊字符，再测量实际显示宽度。
+    text = ' '.join(text.split()).replace('\\', '＼').replace('{', '｛').replace('}', '｝')
+    if not text or font.getlength(text) > max_width:
+        raise ValueError('单条字幕超出单行宽度或内容为空，请重新生成短句字幕。')
+    return text
 
 
 def ass_time(ms, ceil=False):
@@ -186,22 +174,41 @@ def ass_time(ms, ceil=False):
 
 def compile_subtitles(data):
     width, height = canvas_size(data.get('canvas'))
-    font_size = 52 if height > width else 48
+    style = data.get('subtitleStyle')
+    if style is None:
+        style = {}
+    if not isinstance(style, dict):
+        raise ValueError('字幕样式格式无效。')
+    font_size = style.get('fontSize', 52 if height > width else 48)
+    color = style.get('color', '#FFFFFF')
+    if type(font_size) is not int or not 24 <= font_size <= 96:
+        raise ValueError('字幕字号需为 24–96 像素的整数。')
+    if not isinstance(color, str) or not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        raise ValueError('字幕颜色需为六位十六进制颜色，例如 #FFFFFF。')
+    color = color.upper()
+    ass_color = f'&H00{color[5:7]}{color[3:5]}{color[1:3]}'
     side_margin = round(width * 0.05)
     bottom_margin = round(height * (0.10 if height > width else 0.05))
     font = ImageFont.truetype(data['font'], font_size)
     header = f'[Script Info]\nScriptType: v4.00+\nPlayResX: {width}\nPlayResY: {height}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n'
     header += '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'
-    header += f'Style: Default,{font.getname()[0]},{font_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,{side_margin},{side_margin},{bottom_margin},1\n\n'
+    header += f'Style: Default,{font.getname()[0]},{font_size},{ass_color},{ass_color},&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,3,0,2,{side_margin},{side_margin},{bottom_margin},1\n\n'
     header += '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n'
+    previous_end = 0
     for cue in data['cues']:
-        # Source text cannot introduce ASS override commands. Line breaks belong to this compiler.
-        lines = [line.replace('\\', '＼').replace('{', '｛').replace('}', '｝') for line in caption_lines(cue['text'], font, width - 2 * side_margin)]
-        text = '\\N'.join(lines)
-        header += f"Dialogue: 0,{ass_time(cue['startMs'])},{ass_time(cue['endMs'], True)},Default,,0,0,0,,{text}\n"
+        start, end = cue['startMs'], cue['endMs']
+        if not isinstance(start, int) or not isinstance(end, int) or start < previous_end or end <= start:
+            raise ValueError('字幕时间存在重叠或无效片段，请重新检查字幕时间轴。')
+        if math.ceil(end / 10) <= math.ceil(start / 10):
+            raise ValueError('单条字幕显示时间不足，请合并短句或增加时长。')
+        previous_end = end
+        text = caption_line(cue['text'], font, width - 2 * side_margin - 6)
+        # 起止边界使用相同的百分之一秒量化，避免相邻两句短暂同时出现。
+        header += f"Dialogue: 0,{ass_time(start, True)},{ass_time(end, True)},Default,,0,0,0,,{text}\n"
     with Path(data['output']).open('x', encoding='utf-8') as stream:
         stream.write(header)
-    return {'cueCount': len(data['cues']), 'fontFamily': font.getname()[0], 'width': width, 'height': height, 'fontSize': font_size, 'marginV': bottom_margin}
+    return {'cueCount': len(data['cues']), 'fontFamily': font.getname()[0], 'width': width, 'height': height,
+            'fontSize': font_size, 'color': color, 'marginV': bottom_margin}
 
 
 def main():

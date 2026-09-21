@@ -7,11 +7,11 @@
  * 3. 完全避免 Playwright.launch() 的参数冲突问题
  */
 
-const { chromium } = require('playwright-core');
-const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { createDouyinBrowserLauncher, DouyinBrowserError } = require('./douyinBrowser');
+const { readDouyinVideoPage, DouyinVideoPageError } = require('./douyinVideoPage');
 
 // 内存存储登录 Cookie
 let storedDouyinCookies = [];
@@ -45,9 +45,6 @@ function saveCookiesToDisk(cookies) {
 // 启动时尝试加载
 loadCookiesFromDisk();
 
-// 全局 Chrome 进程引用
-let chromeProcess = null;
-let cdpPort = 9222;
 let douyinSignContext = null;
 
 // ==================== Chrome 路径检测 ====================
@@ -72,110 +69,12 @@ function findChromePath() {
 
 // ==================== CDP 模式启动 Chrome ====================
 
-async function startChromeWithCDP(headless = true) {
-  const chromePath = findChromePath();
-  if (!chromePath) {
-    throw new Error('未找到 Chrome，请安装 Chrome 或手动指定路径');
-  }
+const douyinBrowser = createDouyinBrowserLauncher({
+  userDataDir: path.join(require('../dataRoot'), 'chrome-user-data'),
+  findChromePath,
+});
 
-  console.log(`[抖音] Chrome 路径: ${chromePath}`);
-
-  // 检查端口是否已被占用（Chrome 已启动）
-  const net = require('net');
-  const isPortAvailable = () => {
-    return new Promise((resolve) => {
-      const server = net.createServer();
-      server.once('error', () => resolve(false));
-      server.once('listening', () => {
-        server.close();
-        resolve(true);
-      });
-      server.listen(cdpPort, '127.0.0.1');
-    });
-  };
-
-  const available = await isPortAvailable();
-
-  if (!available) {
-    console.log(`[抖音] CDP 端口 ${cdpPort} 已被占用，尝试连接已有 Chrome...`);
-    try {
-      const browser = await chromium.connectOverCDP(`http://localhost:${cdpPort}`);
-      console.log('[抖音] 成功连接到已有 Chrome 实例');
-      return { browser, isNew: false };
-    } catch (e) {
-      throw new Error(`CDP 端口被占用但无法连接，请关闭已有 Chrome 或更改端口: ${e.message}`);
-    }
-  }
-
-  // 启动新的 Chrome 实例
-  const userDataDir = path.join(require('../dataRoot'), 'chrome-user-data');
-  if (!fs.existsSync(userDataDir)) {
-    fs.mkdirSync(userDataDir, { recursive: true });
-  }
-
-  const chromeArgs = [
-    `--remote-debugging-port=${cdpPort}`,
-    `--user-data-dir=${userDataDir}`,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-background-networking',
-    '--disable-background-timer-throttling',
-    '--disable-backgrounding-occluded-windows',
-    '--disable-breakpad',
-    '--disable-client-side-phishing-detection',
-    '--disable-component-extensions-with-background-pages',
-    '--disable-default-apps',
-    '--disable-features=TranslateUI',
-    '--disable-extensions',
-    '--disable-hang-monitor',
-    '--disable-ipc-flooding-protection',
-    '--disable-popup-blocking',
-    '--disable-prompt-on-repost',
-    '--disable-renderer-backgrounding',
-    '--disable-sync',
-    '--force-color-profile=srgb',
-    '--metrics-recording-only',
-    '--password-store=basic',
-    '--use-mock-keychain',
-  ];
-
-  if (headless) {
-    chromeArgs.push('--headless=new');
-    chromeArgs.push('--disable-gpu');
-  }
-
-  console.log(`[抖音] 启动 Chrome: ${chromePath}`);
-  console.log(`[抖音] Chrome 参数: ${chromeArgs.join(' ')}`);
-
-  chromeProcess = spawn(chromePath, chromeArgs, {
-    detached: true,
-    stdio: 'ignore',
-  });
-
-  // 等待 Chrome 启动
-  await new Promise(resolve => setTimeout(resolve, 3000));
-
-  // 连接 CDP
-  try {
-    const browser = await chromium.connectOverCDP(`http://localhost:${cdpPort}`);
-    console.log('[抖音] Chrome CDP 连接成功！');
-    return { browser, isNew: true };
-  } catch (e) {
-    throw new Error(`Chrome 启动后 CDP 连接失败: ${e.message}`);
-  }
-}
-
-async function stopChromeWithCDP() {
-  if (chromeProcess) {
-    try {
-      chromeProcess.kill('SIGTERM');
-      console.log('[抖音] Chrome 进程已终止');
-    } catch (e) {
-      console.log('[抖音] 终止 Chrome 进程失败:', e.message);
-    }
-    chromeProcess = null;
-  }
-}
+const startChromeWithCDP = headless => douyinBrowser.start(headless);
 
 // ==================== Cookie 解析 ====================
 
@@ -812,6 +711,9 @@ async function createDouyinApiPage(diagnostic) {
 async function getVideoDetail(awemeId) {
   const diagnostic = {};
   const startTime = Date.now();
+  let browser;
+  let context;
+  let page;
 
   try {
     if (!awemeId) return { success: false, error: 'Missing aweme_id', diagnostic };
@@ -825,53 +727,24 @@ async function getVideoDetail(awemeId) {
       };
     }
 
-    const { browser } = await startChromeWithCDP(false);
-    const context = browser.contexts()[0] || await browser.newContext({ viewport: { width: 1920, height: 1080 } });
-    const page = await context.newPage();
-    await page.goto('https://www.douyin.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    ({ browser } = await startChromeWithCDP(false));
+    context = browser.contexts()[0] || await browser.newContext({ viewport: { width: 1920, height: 1080 } });
+    page = await context.newPage();
+    const json = await readDouyinVideoPage(page, awemeId, { diagnostic });
 
     const loginStatus = await isLoggedIn(page, context);
     diagnostic.loginStatus = loginStatus;
-    if (!canUseDouyinLoginStatus(loginStatus)) {
-      await page.close().catch(() => {});
+    if (isDouyinCaptchaTitle(loginStatus.title)) {
       return {
         success: true,
-        needVerify: isDouyinCaptchaTitle(loginStatus.title),
-        needLogin: !loginStatus.loggedIn,
-        message: isDouyinCaptchaTitle(loginStatus.title)
-          ? 'Douyin captcha page detected. Complete verification in Chrome, then retry.'
-          : 'Not logged in. Please scan QR code first.',
+        needVerify: true,
+        message: '请在 MuseDock 打开的 Chrome 中完成抖音验证后重试。',
         diagnostic,
         elapsed: `${Date.now() - startTime}ms`,
       };
     }
 
-    const env = await getDouyinRequestEnv(page, context);
-    const params = {
-      ...buildDouyinSearchParams('', 1, '', 0, env),
-      aweme_id: awemeId,
-    };
-    delete params.keyword;
-    delete params.search_channel;
-    delete params.search_source;
-    delete params.query_correct_type;
-    delete params.is_filter_search;
-    delete params.from_group_id;
-    delete params.need_filter_settings;
-    delete params.list_type;
-    delete params.search_id;
-
-    const json = await fetchJsonWithDouyinEnv(
-      context,
-      page,
-      '/aweme/v1/web/aweme/detail/',
-      params,
-      `https://www.douyin.com/video/${awemeId}`,
-      'detailApi',
-      diagnostic,
-    );
     const data = parseDouyinVideoDetail(json);
-    await page.close().catch(() => {});
     return {
       success: true,
       data,
@@ -879,14 +752,24 @@ async function getVideoDetail(awemeId) {
       elapsed: `${Date.now() - startTime}ms`,
     };
   } catch (e) {
-    console.error('[Douyin] video detail error:', e.message);
+    if (page && !page.isClosed()) diagnostic.loginStatus = await isLoggedIn(page, context);
+    const known = e instanceof DouyinVideoPageError || e instanceof DouyinBrowserError;
+    const code = known ? e.code : 'DOUYIN_SOURCE_FAILED';
+    const message = known ? e.message : '读取抖音视频信息失败，请检查浏览器和网络后重试。';
+    console.error('[Douyin] video detail error:', code);
     return {
       success: false,
-      error: e.message,
-      needVerify: !!e.needVerify,
+      code,
+      error: message,
+      message,
+      needLogin: code === 'DOUYIN_NEEDS_LOGIN',
+      needVerify: isDouyinCaptchaTitle(diagnostic.loginStatus?.title),
       diagnostic,
       elapsed: `${Date.now() - startTime}ms`,
     };
+  } finally {
+    await page?.close().catch(() => {});
+    await browser?.close().catch(() => {});
   }
 }
 

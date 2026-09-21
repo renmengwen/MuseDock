@@ -19,7 +19,7 @@ import { WhiteboardArtifact } from './WhiteboardArtifact.jsx';
 import { WhiteboardConversationCard } from './WhiteboardConversationCard.jsx';
 import { WhiteboardMediaPanel } from './WhiteboardMediaPanel.jsx';
 import { WhiteboardCoverageReview } from './WhiteboardCoverageReview.jsx';
-import { whiteboardCanvasLabel } from './whiteboardForm.js';
+import { whiteboardCanvasLabel, validateSubtitleSettings } from './whiteboardForm.js';
 import { ApiCallLogLink } from '@/components/diagnostics/ApiCallLogLink.jsx';
 
 export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, onAction, onStopAndDelete, progressEvents = [] }) {
@@ -86,6 +86,9 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
 
   async function act(action, extras = {}) {
     if (actionLock.current || locked || (!allowed.has(action) && !(action === 'message' && canMessage))) return;
+    if (action === 'update_plan' && validateSubtitleSettings(extras.productionPlan)) {
+      setError(validateSubtitleSettings(extras.productionPlan)); return;
+    }
     actionLock.current = true;
     setBusy(action);
     setError('');
@@ -348,9 +351,9 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
       <Dialog open={planOpen} onOpenChange={open => { if (!busy) setPlanOpen(open); }}>
         <DialogContent className="max-h-[calc(100dvh-32px)] w-[min(480px,calc(100vw-32px))] overflow-y-auto max-[760px]:[&_button]:min-h-11" showCloseButton={!busy}>
           <DialogHeader><DialogTitle>调整制作方案</DialogTitle><DialogDescription>保留正文和分镜，生成新的待确认版本。</DialogDescription></DialogHeader>
-          {editedPlan ? <ProductionPlanFields value={editedPlan} onChange={setEditedPlan} disabled={locked} /> : null}
+          {editedPlan ? <ProductionPlanFields value={editedPlan} aspectRatio={aspectRatio} onChange={setEditedPlan} disabled={locked} /> : null}
           {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
-          <Button type="button" disabled={locked} onClick={() => act('update_plan', { productionPlan: editedPlan })}>{busy ? <Loader2 size={15} className="animate-spin" /> : null}{busy ? '正在保存制作方案...' : '保存为新的待确认版本'}</Button>
+          <Button type="button" disabled={locked || !editedPlan || Boolean(validateSubtitleSettings(editedPlan))} onClick={() => act('update_plan', { productionPlan: editedPlan })}>{busy ? <Loader2 size={15} className="animate-spin" /> : null}{busy ? '正在保存制作方案...' : '保存为新的待确认版本'}</Button>
         </DialogContent>
       </Dialog>
 

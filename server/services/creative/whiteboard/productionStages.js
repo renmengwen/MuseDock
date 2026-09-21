@@ -1,11 +1,11 @@
 const fsp = require('fs/promises');
 const path = require('path');
-const { WhiteboardError, sha256, canvasFor, renderingFor, HANDWRITTEN_PRESET_ID } = require('./contracts');
+const { WhiteboardError, sha256, canvasFor, renderingFor, subtitleStyleFor, HANDWRITTEN_PRESET_ID } = require('./contracts');
 const store = require('./mediaStore');
 const models = require('./mediaModels');
 const { safeVisionDiagnostics } = require('./visionDiagnostics');
 const { normalizeRenderProgress, sceneFrameCount } = require('./renderProgress');
-const { buildNarrationTiming, buildSilentTiming, srtText } = require('./narrationTiming');
+const { CAPTION_LAYOUT_VERSION, buildNarrationTiming, buildSilentTiming, buildDisplayCaptions, srtText } = require('./narrationTiming');
 const aiTtsModel = require('../../ai/aiTtsModel');
 const { sceneRenderPool } = require('./sceneRenderPool');
 const { annotationPool } = require('./annotationPool');
@@ -22,13 +22,13 @@ async function complete(ctx, item, stage, binding) {
   });
 }
 
-async function reuseHistory(ctx, collection, key, inputIdentity) {
+async function reuseHistory(ctx, collection, key, inputIdentity, accepts = () => true) {
   const record = await ctx.read();
   const histories = [...(record.whiteboard.mediaHistory || [])].reverse();
   for (const history of histories) {
     if (history.contractVersion !== store.MEDIA_CONTRACT) continue;
     const binding = history[collection]?.[key];
-    if (!binding || binding.inputIdentity !== inputIdentity) continue;
+    if (!binding || binding.inputIdentity !== inputIdentity || !accepts(binding)) continue;
     try { await store.validateBinding(record, binding, ctx.rootDir); } catch { continue; }
     const ids = new Set(store.fileIds(binding));
     const sources = [history, ...histories].flatMap(media => media.artifacts).filter(file => ids.has(file.id));
@@ -54,18 +54,27 @@ async function narrationStage(ctx, artifact) {
     scenes: artifact.scenes.map(({ id, cueIds, startMs, endMs }) => ({ id, cueIds, startMs, endMs })),
     ...(planned ? { timingKind: 'planned' } : {}),
     voice: planned ? '' : media.voiceService.contractHash, silent, take: media.narrationTake || 0 });
-  if (await reuseHistory(ctx, 'current', 'full_narration', inputIdentity)) return;
-  const reusable = [...media.attempts].reverse().find(item => item.stage === 'full_narration' && item.inputIdentity === inputIdentity && item.received?.raw && item.received?.native);
-  const item = await ctx.attempt('full_narration', '', !silent && !reusable, inputIdentity);
+  if (await reuseHistory(ctx, 'current', 'full_narration', inputIdentity,
+    binding => binding.captionLayoutVersion === CAPTION_LAYOUT_VERSION)) return;
+  // 显示规则升级只在本地重建字幕，语音请求身份保持不变，继续使用同次原始证据。
+  const sources = [media, ...[...(record.whiteboard.mediaHistory || [])].reverse().filter(history => history.contractVersion === store.MEDIA_CONTRACT)];
+  const reusable = sources.flatMap(source => [...source.attempts].reverse())
+    .find(attempt => attempt.stage === 'full_narration' && attempt.inputIdentity === inputIdentity && attempt.received?.raw && attempt.received?.native);
+  const previous = !reusable && sources.map(source => source.current.full_narration)
+    .find(binding => binding?.inputIdentity === inputIdentity && binding.audio && binding.native);
+  if (previous) await store.validateBinding(record, previous, ctx.rootDir);
+  const saved = reusable ? { raw: reusable.received.raw, native: reusable.received.native }
+    : previous ? { raw: previous.audio, native: previous.native } : null;
+  const item = await ctx.attempt('full_narration', '', !silent && !saved, inputIdentity);
   const directory = store.workDirectory(ctx.workflowId, item.id, ctx.rootDir);
   let timing;
   let audio;
   let native;
   let audioInfo;
-  if (silent) timing = buildSilentTiming(artifact);
+  if (silent) timing = buildSilentTiming(artifact, { referenceOnly: true });
   else {
     let received;
-    if (reusable) received = reusable.received;
+    if (saved) received = saved;
     else {
       await ctx.requesting(item.id);
       const cueMap = new Map(artifact.cues.map(cue => [cue.id, cue.text]));
@@ -89,6 +98,13 @@ async function narrationStage(ctx, artifact) {
     record = await ctx.read();
     const rawPath = await ctx.filePath(record, received.raw);
     const evidence = await store.readData(record, received.native, ctx.rootDir);
+    if (saved) await ctx.change(current => {
+      const existing = new Set(current.whiteboard.media.artifacts.map(file => file.id));
+      for (const file of [received.raw, received.native]) if (!existing.has(file.id)) {
+        current.whiteboard.media.artifacts.push(structuredClone(file)); existing.add(file.id);
+      }
+      current.whiteboard.media.attempts.find(attempt => attempt.id === item.id).received = received;
+    });
     const output = path.join(directory, 'narration.wav');
     audioInfo = await ctx.tools.normalizeAudio(rawPath, output, ctx.runtime, ctx.processOptions);
     if (evidence.durationMs && Math.abs(evidence.durationMs - audioInfo.durationMs) > 120) throw new WhiteboardError('NARRATION_EVIDENCE_INVALID', '语音响应声明的时长与实际音频不一致。音频已保留，请核实。');
@@ -105,7 +121,8 @@ async function narrationStage(ctx, artifact) {
     timeline: { path: timelinePath, kind: 'timeline', name: planned ? '计划时间轴' : '真实时间线', mime: 'application/json' },
     subtitles: { path: srtPath, kind: 'subtitles', name: '权威字幕', mime: 'application/x-subrip' },
   })).result;
-  const binding = store.bind({ kind: 'full_narration', inputIdentity, ...files, audio: audio || null, native: native || null,
+  const binding = store.bind({ kind: 'full_narration', inputIdentity, captionLayoutVersion: CAPTION_LAYOUT_VERSION,
+    ...files, audio: audio || null, native: native || null,
     durationMs: timing.durationMs, audioInfo: audioInfo || null, timingKind: timing.timingKind,
     sourceTextSha256: timing.sourceTextSha256, language: artifact.narrationLanguage });
   await complete(ctx, item, 'full_narration', binding);
@@ -472,25 +489,33 @@ async function finalStage(ctx, artifact, timing) {
     if (!media.approvals.some(approval => !approval.stale && approval.gate === store.GATES[stage.id]
       && approval.identity === media.current[stage.id].identity)) throw new WhiteboardError('APPROVAL_REQUIRED', '缺少当前上游产物的有效批准，不能合成最终视频。', 409);
   }
+  const subtitleStyle = subtitleStyleFor(artifact.productionPlan, artifact.aspectRatio);
+  const native = media.current.full_narration.native;
+  const evidence = artifact.productionPlan.burnSubtitles && native ? await store.readData(record, native, ctx.rootDir) : null;
+  const captions = buildDisplayCaptions(artifact, timing, subtitleStyle.fontSize, evidence);
+  const subtitleBinding = { subtitleStyle, captionLayoutVersion: CAPTION_LAYOUT_VERSION, captionsSha256: sha256(captions) };
   const item = await ctx.attempt('final_delivery', '', false, sha256({ scenes: media.current.scene_render.identity,
-    narration: media.current.full_narration.identity, recipe: media.recipe, burnSubtitles: artifact.productionPlan.burnSubtitles, ...bgmBinding }));
+    narration: media.current.full_narration.identity, recipe: media.recipe, burnSubtitles: artifact.productionPlan.burnSubtitles, ...subtitleBinding, ...bgmBinding }));
   const directory = store.workDirectory(ctx.workflowId, item.id, ctx.rootDir);
   const sceneFiles = [];
   for (const scene of timing.scenes) sceneFiles.push(await ctx.filePath(record, media.scenes[scene.id].video));
   const audioFile = media.current.full_narration.audio ? await ctx.filePath(record, media.current.full_narration.audio) : null;
-  const validation = await ctx.tools.finalVideo({ sceneFiles, audioFile, bgm, cues: timing.captions,
+  const validation = await ctx.tools.finalVideo({ sceneFiles, audioFile, bgm, cues: captions, subtitleStyle,
     durationMs: timing.durationMs, directory, burnSubtitles: artifact.productionPlan.burnSubtitles }, ctx.runtime, ctx.processOptions);
+  const subtitles = path.join(directory, 'final.srt');
+  await fsp.writeFile(subtitles, srtText(captions), { flag: 'wx' });
   const poster = path.join(directory, 'poster.png');
-  await ctx.tools.extractFrame(path.join(directory, 'final.mp4'), poster, Math.min(timing.durationMs - 100, timing.captions[0].endMs - 50), ctx.runtime, ctx.processOptions);
-  const receipt = await ctx.jsonFile(item, 'technical-validation.json', { ...validation, recipe: media.recipe, ...bgmBinding,
+  await ctx.tools.extractFrame(path.join(directory, 'final.mp4'), poster, Math.min(timing.durationMs - 100, captions[0].endMs - 50), ctx.runtime, ctx.processOptions);
+  const receipt = await ctx.jsonFile(item, 'technical-validation.json', { ...validation, recipe: media.recipe, ...subtitleBinding, ...bgmBinding,
     narrationIdentity: media.current.full_narration.identity, sceneBundleIdentity: media.current.scene_render.identity });
   await ctx.publish(item, {
     video: { path: path.join(directory, 'final.mp4'), kind: 'final_video', name: '最终白板视频', mime: 'video/mp4' },
     poster: { path: poster, kind: 'final_poster', name: '成片预览', mime: 'image/png' },
+    subtitles: { path: subtitles, kind: 'final_subtitles', name: '成片字幕', mime: 'application/x-subrip' },
     receipt: { path: receipt, kind: 'technical_validation', name: '技术验证记录', mime: 'application/json' },
   }, (current, published) => {
     current.whiteboard.media.current.final_delivery = store.bind({ kind: 'final_video', inputIdentity: item.inputIdentity,
-      ...published, validation, ...bgmBinding, narrationIdentity: media.current.full_narration.identity, sceneBundleIdentity: media.current.scene_render.identity });
+      ...published, validation, ...subtitleBinding, ...bgmBinding, narrationIdentity: media.current.full_narration.identity, sceneBundleIdentity: media.current.scene_render.identity });
     current.result = { render: { output_url: `/api/creative-workflows/${ctx.workflowId}/whiteboard/media/${published.video.id}` } };
   });
   const updated = await ctx.read();

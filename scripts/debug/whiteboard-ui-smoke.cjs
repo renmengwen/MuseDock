@@ -15,10 +15,11 @@ const { parseSrt } = require('../../server/services/creative/whiteboard/contract
 
 async function main() {
   const silent = process.argv.includes('--silent');
-  const bgmOnly = process.argv.includes('--bgm') || silent;
+  const subtitles = process.argv.includes('--subtitles');
+  const bgmOnly = process.argv.includes('--bgm') || silent || subtitles;
   const projectRoot = path.resolve(__dirname, '../..');
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'musedock-whiteboard-browser-'));
-  const screenshots = path.join(projectRoot, '.codex-runtime', 'whiteboard-phase0-qa');
+  const screenshots = path.join(projectRoot, '.codex-runtime', subtitles ? 'whiteboard-subtitle-style-qa' : 'whiteboard-phase0-qa');
   await fs.mkdir(screenshots, { recursive: true });
   let sequence = 0;
   let modelCalls = 0;
@@ -101,6 +102,11 @@ async function main() {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN' });
     page.setDefaultTimeout(10000);
     page.on('pageerror', error => runtimeErrors.push(error.message));
+    const setSubtitleColor = async color => page.getByLabel('字幕颜色', { exact: true }).evaluate((input, value) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }, color);
     await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     await page.goto(`${origin}/creative`);
     const hfTab = page.getByRole('tab', { name: 'HyperFrames 动态视频' });
@@ -135,6 +141,24 @@ async function main() {
     assert.equal(await page.getByRole('combobox', { name: '背景音乐' }).innerText(), '不使用 BGM');
     await page.getByRole('combobox', { name: '背景音乐' }).click();
     await page.getByRole('option', { name: '使用 BGM', exact: true }).click();
+    if (subtitles) {
+      assert.equal(await page.getByLabel('字幕字号', { exact: true }).getAttribute('placeholder'), '默认 52');
+      await page.getByLabel('字幕字号', { exact: true }).fill('23');
+      assert.equal(await page.getByRole('button', { name: '完成设置', exact: true }).isDisabled(), true);
+      await page.getByLabel('字幕字号', { exact: true }).fill('72');
+      await setSubtitleColor('#ffcc00');
+      const preview = page.getByLabel('字幕样式预览', { exact: true }).locator('span');
+      assert.equal(await preview.evaluate(element => getComputedStyle(element).color), 'rgb(255, 204, 0)');
+      assert.equal(await preview.evaluate(element => getComputedStyle(element).fontSize), '36px');
+      await page.getByRole('combobox', { name: '成片字幕' }).click();
+      await page.getByRole('option', { name: '不烧录字幕', exact: true }).click();
+      assert.equal(await page.getByLabel('字幕颜色', { exact: true }).isDisabled(), true);
+      assert.equal(await page.getByLabel('字幕字号', { exact: true }).isDisabled(), true);
+      await page.getByRole('combobox', { name: '成片字幕' }).click();
+      await page.getByRole('option', { name: '烧录字幕', exact: true }).click();
+      assert.equal(await page.getByLabel('字幕字号', { exact: true }).inputValue(), '72');
+      await page.getByRole('group', { name: '字幕样式', exact: true }).screenshot({ path: path.join(screenshots, 'subtitle-settings-desktop.png') });
+    }
     await page.screenshot({ path: path.join(screenshots, 'production-settings-bgm-desktop.png'), fullPage: true });
     await page.getByRole('button', { name: '完成设置', exact: true }).click();
     if (silent) {
@@ -162,6 +186,10 @@ async function main() {
     assert.equal(requests[0].input.visualStylePreset, 'comic-ink-v1');
     assert.equal(requests[0].input.aspectRatio, '9:16');
     assert.equal(requests[0].productionPlan.bgmMode, 'enabled');
+    if (subtitles) {
+      assert.equal(requests[0].productionPlan.subtitleColor, '#FFCC00');
+      assert.equal(requests[0].productionPlan.subtitleFontSize, 72);
+    }
     if (silent) {
       assert.equal(requests[0].productionPlan.narrationMode, 'disabled');
       await page.getByRole('tab', { name: '字幕正文', exact: true }).waitFor();
@@ -184,6 +212,11 @@ async function main() {
     await page.getByRole('option', { name: '不使用 BGM', exact: true }).click();
     await page.getByRole('combobox', { name: '画笔显示' }).click();
     await page.getByRole('option', { name: '隐藏画笔', exact: true }).click();
+    if (subtitles) {
+      assert.equal(await page.getByLabel('字幕字号', { exact: true }).inputValue(), '72');
+      await page.getByLabel('字幕字号', { exact: true }).fill('64');
+      await setSubtitleColor('#1e90ff');
+    }
     await page.getByRole('button', { name: '保存为新的待确认版本', exact: true }).click();
     await page.getByText(bgmOnly ? 'v2' : 'v3', { exact: true }).waitFor();
     assert.equal(modelCalls, bgmOnly ? 1 : 2);
@@ -207,6 +240,7 @@ async function main() {
     await page.getByText('隐藏画笔', { exact: true }).waitFor();
     await page.getByText('不使用 BGM', { exact: true }).waitFor();
     await page.getByText('1080 × 1920 · 9:16', { exact: true }).waitFor();
+    if (subtitles) await page.getByText('单行短句 · #1E90FF · 64 px', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(screenshots, 'approved-desktop.png'), fullPage: true });
 
     await page.setViewportSize({ width: 390, height: 844 });
@@ -230,6 +264,13 @@ async function main() {
     await page.getByRole('option', { name: '使用 BGM', exact: true }).click();
     const dialogBounds = await page.getByRole('dialog').boundingBox();
     assert.ok(dialogBounds.y >= 0 && dialogBounds.y + dialogBounds.height <= 845, '制作设置弹框应限制在移动端视口内');
+    if (subtitles) {
+      await page.getByLabel('字幕字号', { exact: true }).fill('96');
+      await setSubtitleColor('#ffcc00');
+      await page.getByRole('group', { name: '字幕样式', exact: true }).screenshot({ path: path.join(screenshots, 'subtitle-settings-mobile.png') });
+      const width = await page.getByRole('dialog').evaluate(element => ({ client: element.clientWidth, scroll: element.scrollWidth }));
+      assert.ok(width.scroll <= width.client, '移动端字幕样式不能横向溢出');
+    }
     await page.screenshot({ path: path.join(screenshots, 'production-settings-bgm-mobile.png'), fullPage: true });
     await page.getByRole('button', { name: '完成设置', exact: true }).click();
     await page.goto(taskUrl);
@@ -269,7 +310,7 @@ async function main() {
       assert.equal(modelCalls, 3);
     }
     assert.deepEqual(runtimeErrors, []);
-    console.log(JSON.stringify({ success: true, modelCalls, creationCalls, realProviderCalls: 0, checks: ['模式与输入草稿隔离', 'SRT 校验', 'BGM 默认关闭及开启保存', 'BGM 方案展示与关闭后重新确认', '创建中禁用切换', '真实后台待确认', '修改生成新版本', '制作设置无额外模型请求', '历史只读', '联合批准与刷新恢复', '桌面及390px弹框布局', ...(silent ? ['主题/正文/SRT 无旁白创建', '计划时间轴与原始 SRT 分别展示', '无旁白确认提示', '无 TTS 配置完成方案确认'] : []), '无运行时异常'], screenshots }, null, 2));
+    console.log(JSON.stringify({ success: true, modelCalls, creationCalls, realProviderCalls: 0, checks: ['模式与输入草稿隔离', 'SRT 校验', 'BGM 默认关闭及开启保存', 'BGM 方案展示与关闭后重新确认', '创建中禁用切换', '真实后台待确认', '修改生成新版本', '制作设置无额外模型请求', '历史只读', '联合批准与刷新恢复', '桌面及390px弹框布局', ...(subtitles ? ['字幕颜色和字号输入', '即时样式预览', '字号范围校验', '关闭字幕保留样式并禁用控件', '新建和已有任务保存及刷新恢复'] : []), ...(silent ? ['主题/正文/SRT 无旁白创建', '计划时间轴与原始 SRT 分别展示', '无旁白确认提示', '无 TTS 配置完成方案确认'] : []), '无运行时异常'], screenshots }, null, 2));
   } finally {
     releaseCreation();
     await browser?.close();

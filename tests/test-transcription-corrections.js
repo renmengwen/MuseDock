@@ -1,5 +1,6 @@
 const assert = require('assert/strict');
 const { validateChanges, proofreadTranscript } = require('../server/services/transcription/corrections');
+const { callTextModel } = require('../server/services/ai/aiTextModel');
 
 async function run() {
   const cues = [
@@ -60,7 +61,36 @@ async function run() {
   assert.equal(responses[1].totalBatches, 3);
   assert.ok(!JSON.stringify(responses).includes('must-not-persist'));
 
-  for (const text of ['{"changes":', JSON.stringify({ changes: [{ ...changed, startMs: 0 }] })]) {
+  // 即使兼容服务忽略顶层 instructions，Responses input 仍应包含完整的校订任务与格式约束。
+  let wireRequests = 0;
+  const compatible = await proofreadTranscript(cues, {
+    callModel: request => callTextModel({ ...request,
+      textConfig: { enabled: true, provider: 'fixture', protocol: 'openai-responses',
+        apiKey: 'fixture-only-key', baseUrl: 'https://example.invalid/v1', modelId: 'fixture-model' },
+      fetchImpl: async (_url, options) => {
+        wireRequests += 1;
+        const body = JSON.parse(options.body);
+        const userMessages = body.input.filter(message => message.role === 'user');
+        const texts = userMessages.map(message => message.content.map(part => part.text || '').join(''));
+        assert.deepEqual(JSON.parse(texts[0]).sentences, cues.map(({ index, text }) => ({ index, text })));
+        const task = texts.slice(1).join('\n');
+        assert.match(task, /请现在校订/);
+        assert.match(task, /不要询问处理方式/);
+        assert.ok(task.includes(body.instructions), '用户消息保留全部规则，而不只依赖被代理替换的 instructions');
+        assert.match(task, /54 到 55/);
+        assert.match(task, /不得增删字幕、修改编号或生成时间戳/);
+        assert.equal(body.text?.format, undefined, '不强制使用兼容服务可能不支持的 JSON 模式');
+        return new Response(JSON.stringify({ status: 'completed', output: [{ type: 'message', role: 'assistant',
+          content: [{ type: 'output_text', text: JSON.stringify({ changes: [changed] }) }] }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } });
+      },
+    }),
+  });
+  assert.equal(wireRequests, 1);
+  assert.equal(compatible.sentences[0].text, changed.text);
+  assert.deepEqual(cues, original);
+
+  for (const text of ['收到。你希望我怎么处理？回复序号即可。', '{"changes":', JSON.stringify({ changes: [{ ...changed, startMs: 0 }] })]) {
     let savedResponse;
     let calls = 0;
     await assert.rejects(proofreadTranscript(cues, {
@@ -73,5 +103,5 @@ async function run() {
   }
 }
 
-run().then(() => console.log('校订回归测试通过：无变化项、严格校验、跨批时间轴及失败响应留存。'))
+run().then(() => console.log('校订回归测试通过：Responses 输入保留任务要求、无变化项、严格校验、跨批时间轴及失败响应留存。'))
   .catch(error => { console.error(error); process.exitCode = 1; });

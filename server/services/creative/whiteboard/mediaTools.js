@@ -205,7 +205,7 @@ async function renderScene({ image, annotation, output, scene, showHand }, runti
   return { ...validation, encoderThreads: rendered.encoderThreads, renderElapsedMs: rendered.renderElapsedMs };
 }
 
-async function finalVideo({ sceneFiles, audioFile, cues, durationMs, directory, burnSubtitles, bgm = null }, runtime, options = {}) {
+async function finalVideo({ sceneFiles, audioFile, cues, durationMs, directory, burnSubtitles, subtitleStyle, bgm = null }, runtime, options = {}) {
   const frameCount = Math.ceil(durationMs * 60 / 1000);
   const canvas = runtime.recipe ? { width: runtime.recipe.width, height: runtime.recipe.height } : canvasFor();
   // Copy to controlled ASCII names so concat/filter inputs never contain user path syntax.
@@ -230,7 +230,7 @@ async function finalVideo({ sceneFiles, audioFile, cues, durationMs, directory, 
   if (burnSubtitles) {
     await fsp.mkdir(path.join(directory, 'fonts'));
     await fsp.copyFile(runtime.font, path.join(directory, 'fonts/caption.ttc'), fs.constants.COPYFILE_EXCL);
-    await python('subtitles', { font: runtime.font, cues, canvas, output: path.join(directory, 'captions.ass') }, options);
+    await python('subtitles', { font: runtime.font, cues, canvas, subtitleStyle, output: path.join(directory, 'captions.ass') }, options);
     await execute(runtime.ffmpeg, ['-v', 'error', '-n', '-i', 'clean.mp4', '-map', '0:v:0', '-an', '-vf', 'ass=captions.ass:fontsdir=fonts',
       '-c:v', 'libx264', '-preset', 'fast', '-threads', String(runtime.encoderThreads || 2), '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', 'captioned.mp4'], cwdOptions);
     videoName = 'captioned.mp4';
