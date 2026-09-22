@@ -6,7 +6,8 @@ const DATA_ROOT = require('../../dataRoot');
 const DEFAULT_DIRECTORY = path.join(DATA_ROOT, 'data', 'api-call-logs');
 const SUMMARY_FIELDS = `sequence, id, created_at, completed_at, workflow_id, category, operation,
   model, endpoint, method, http_status, transport_status, result_status, duration_ms,
-  response_bytes, body_encoding, body_truncated, content_type, error, context_json, validation_json`;
+  response_bytes, body_encoding, body_truncated, content_type, error, context_json, validation_json,
+  request_bytes, request_body_truncated, request_body_status`;
 const STATE_SQL = `CASE WHEN result_status = 'invalid' THEN 'invalid'
   WHEN transport_status IN ('error', 'incomplete') OR http_status >= 400 OR result_status = 'error' THEN 'error'
   WHEN transport_status IN ('pending', 'receiving') THEN 'pending' ELSE 'success' END`;
@@ -36,6 +37,15 @@ function createApiCallStore({ directory = DEFAULT_DIRECTORY } = {}) {
     body_text TEXT NOT NULL DEFAULT '', headers_json TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '',
     context_json TEXT NOT NULL DEFAULT '{}', validation_json TEXT NOT NULL DEFAULT '[]'
   ); CREATE INDEX IF NOT EXISTS api_calls_workflow_sequence ON api_calls(workflow_id, sequence DESC);`);
+  const columns = new Set(db.pragma('table_info(api_calls)').map(column => column.name));
+  for (const [name, definition] of Object.entries({
+    request_bytes: 'INTEGER NOT NULL DEFAULT 0',
+    request_body_text: "TEXT NOT NULL DEFAULT ''",
+    request_body_truncated: 'INTEGER NOT NULL DEFAULT 0',
+    request_body_status: "TEXT NOT NULL DEFAULT 'unavailable'",
+  })) {
+    if (!columns.has(name)) db.exec(`ALTER TABLE api_calls ADD COLUMN ${name} ${definition}`);
+  }
   // 本进程第一次打开存储时，上次退出前未写完的记录明确显示为不完整。
   db.prepare(`UPDATE api_calls SET transport_status = 'incomplete', error = ?
     WHERE transport_status IN ('pending', 'receiving')`).run('服务中断，未能保存完整返回；不能据此判断供应商是否已完成请求。');
@@ -44,10 +54,13 @@ function createApiCallStore({ directory = DEFAULT_DIRECTORY } = {}) {
   return {
     start(record) {
       const id = crypto.randomUUID();
-      db.prepare(`INSERT INTO api_calls (id, created_at, workflow_id, category, operation, model, endpoint, method, context_json)
-        VALUES (@id, @created_at, @workflow_id, @category, @operation, @model, @endpoint, @method, @context_json)`)
+      db.prepare(`INSERT INTO api_calls (id, created_at, workflow_id, category, operation, model, endpoint, method, context_json,
+        request_bytes, request_body_text, request_body_truncated, request_body_status)
+        VALUES (@id, @created_at, @workflow_id, @category, @operation, @model, @endpoint, @method, @context_json,
+          @request_bytes, @request_body_text, @request_body_truncated, @request_body_status)`)
         .run({ id, created_at: new Date().toISOString(), workflow_id: '', category: '', operation: '', model: '',
-          endpoint: '', method: 'GET', context_json: '{}', ...record });
+          endpoint: '', method: 'GET', context_json: '{}', request_bytes: 0, request_body_text: '',
+          request_body_truncated: 0, request_body_status: 'none', ...record });
       return id;
     },
     update(id, patch) {

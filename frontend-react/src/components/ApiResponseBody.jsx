@@ -45,7 +45,7 @@ function JsonNode({ node, index, path, depth, treeId, expansion, onToggle, comma
   </li>;
 }
 
-function JsonTree({ preview }) {
+function JsonTree({ preview, label }) {
   const treeId = useId();
   const [expansion, setExpansion] = useState({ all: null, nodes: {} });
   const onToggle = (path, open) => setExpansion(previous => ({ ...previous, nodes: { ...previous.nodes, [path]: open } }));
@@ -59,19 +59,19 @@ function JsonTree({ preview }) {
       </div>
     </div> : null}
     {preview.truncated ? <p className="m-0 text-xs text-fg-3">{PREVIEW_NOTICE}</p> : null}
-    <div tabIndex={0} className="max-h-[42vh] min-w-0 overflow-auto rounded-lg bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100 whitespace-pre-wrap [overflow-wrap:anywhere]" aria-label="API 返回正文">
+    <div tabIndex={0} className="max-h-[42vh] min-w-0 overflow-auto rounded-lg bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100 whitespace-pre-wrap [overflow-wrap:anywhere]" aria-label={label}>
       <ul className="m-0 list-none p-0"><JsonNode node={preview.root} path="root" depth={0}
         treeId={treeId} expansion={expansion} onToggle={onToggle} /></ul>
     </div>
   </>;
 }
 
-export function ApiResponseBody({ bodyText, encoding, emptyMessage }) {
+export function ApiResponseBody({ bodyText, encoding, emptyMessage, label = 'API 返回正文' }) {
   const preview = useMemo(() => encoding === 'base64' ? null : createJsonPreview(bodyText), [bodyText, encoding]);
-  if (preview) return <JsonTree preview={preview} />;
+  if (preview) return <JsonTree preview={preview} label={label} />;
 
   return <>
     {bodyText.length > PREVIEW_CHARACTERS ? <p className="m-0 text-xs text-fg-3">{PREVIEW_NOTICE}</p> : null}
-    <pre tabIndex={0} className="m-0 max-h-[42vh] overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100 [overflow-wrap:anywhere]" aria-label="API 返回正文">{bodyText.slice(0, PREVIEW_CHARACTERS) || emptyMessage}</pre>
+    <pre tabIndex={0} className="m-0 max-h-[42vh] overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100 [overflow-wrap:anywhere]" aria-label={label}>{bodyText.slice(0, PREVIEW_CHARACTERS) || emptyMessage}</pre>
   </>;
 }

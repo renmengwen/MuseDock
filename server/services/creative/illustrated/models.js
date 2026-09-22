@@ -8,6 +8,25 @@ const { defaultWebSearchProvider } = require('../creativeResearchProvider');
 const { runWithApiCallContext, annotateApiCallResult } = require('../../diagnostics/apiCallRecorder');
 const { hash, ErrorType, PLAN_SKELETON, normalizePlan, canvasFor, imagePrompt } = require('./contracts');
 
+const PLAN_RESPONSE_FORMAT = {
+  type: 'json_schema', name: 'illustrated_plan', strict: true,
+  schema: {
+    type: 'object', additionalProperties: false, required: ['title', 'summary', 'scenes'],
+    properties: {
+      title: { type: 'string' }, summary: { type: 'string' },
+      scenes: { type: 'array', items: {
+        type: 'object', additionalProperties: false,
+        required: ['id', 'title', 'text', 'visualIntent', 'imagePrompt', 'negativePrompt', 'weight'],
+        properties: {
+          id: { type: 'string' }, title: { type: 'string' }, text: { type: 'string' },
+          visualIntent: { type: 'string' }, imagePrompt: { type: 'string' },
+          negativePrompt: { type: 'string' }, weight: { type: 'number' },
+        },
+      } },
+    },
+  },
+};
+
 async function runtime(type, options = {}) {
   const config = await (options.services?.aiModelConfig || configService).getRuntimeConfig(type, { configPath: options.aiConfigPath });
   if (type !== 'tts') return config || {};
@@ -47,6 +66,12 @@ function classify(response, status, sent, label) {
     return new ErrorType(response.code, '配音配置或输入不符合当前服务要求，请检查模型、音色说明和正文后重试。');
   }
   if (response?.configured === false || response?.status === 'not_configured') return new ErrorType('MODEL_NOT_CONFIGURED', label + '服务未配置，请检查当前设置。');
+  if (response?.raw_response?.error?.code === 'content_policy_violation') {
+    return new ErrorType('MODEL_CONTENT_POLICY_VIOLATION', label + '请求内容被服务商审核拦截。请检查正文、参考文本和提示词是否符合服务商内容政策，修改后再重试；详情见 API 返回记录。', status || 400);
+  }
+  if ([400, 422].includes(status) && /(?:text\.format|json_schema|response_format)/i.test(response?.raw_response?.error?.message || '')) {
+    return new ErrorType('MODEL_FORMAT_REJECTED', label + '服务商拒绝结构化 JSON 参数，请查看 API 返回记录中的具体原因；此请求不会自动取消约束重发。', status);
+  }
   const known = { 400:'请求参数被拒绝，请检查模型能力和输入。', 401:'凭据无效，请在设置中更新密钥。',
     403:'访问权限不足，请检查模型权限与额度。', 404:'接口或模型不存在，请检查模型配置。',
     413:'输入过大，请缩短内容或降低图片尺寸。', 422:'输入不符合当前模型要求，请检查参数。', 429:'请求被限流，请稍后手动重试。' };
@@ -96,12 +121,15 @@ async function draft(record, config, attempt, options = {}) {
       '修改方案时保留未修改分镜的 id、正文、画面意图和提示词；仅为新增画面分配新 id，不为了排序重新编号已有分镜。',
       '输出字段严格参照：' + JSON.stringify(PLAN_SKELETON),
     ].join('\n') },
-    { role: 'user', content: JSON.stringify({ input: record.input, settings: state.settings, research: state.research,
+    { role: 'user', content: JSON.stringify({ responseFormat: 'JSON',
+      instructions: '只返回符合 planSkeleton 的完整 JSON 方案，不要评述正文、提问或只返回润色文稿；保留原文模式只分段，不改写正文。',
+      planSkeleton: PLAN_SKELETON, input: record.input, settings: state.settings, research: state.research,
       previousPlan: state.plan, revisionRequest: state.operation?.revisionRequest || '' }) },
   ];
   let response;
   try { response = await context(record, attempt, options, () => (options.services?.aiTextModel || textService).callTextModel({
     textConfig: config, messages, temperature:0.3, maxTokens:16000, maxOutputTokens:16000,
+    ...(config.protocol !== 'anthropic-messages' ? { response_format: PLAN_RESPONSE_FORMAT } : {}),
     reasoningEffort: /^(gpt-(5|6)([.-]|$)|o[134])/i.test(config.modelId) ? 'low' : undefined,
     maxRetries:0, fallbackToNonStreamOnGatewayTimeout:false, requestTimeoutMs:180000, fetchImpl,
   })); } catch { throw classify(null, observed.status, true, '分析模型'); }
@@ -114,8 +142,10 @@ async function draft(record, config, attempt, options = {}) {
     if (record.input.title) candidate.title = record.input.title;
     plan = normalizePlan(candidate, record.input, { generated:true });
   } catch (error) {
-    annotateApiCallResult(response, { status:'invalid', validation:[error instanceof ErrorType ? error.message : '返回不是有效的方案 JSON。'] });
-    throw new ErrorType('PLAN_INVALID', error instanceof ErrorType ? error.message : '模型返回不是有效方案 JSON，请检查 API 返回记录后手动重试。');
+    const message = error instanceof ErrorType ? error.message
+      : '模型返回了普通文本而非方案 JSON。服务商可能未执行结构化输出约束，请检查 API 返回记录中的入参和响应后手动重试。';
+    annotateApiCallResult(response, { status:'invalid', validation:[message] });
+    throw new ErrorType('PLAN_INVALID', message);
   }
   annotateApiCallResult(response, { status:'success' });
   return { plan, usage:response.usage };

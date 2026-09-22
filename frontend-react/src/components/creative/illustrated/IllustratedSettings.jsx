@@ -1,6 +1,7 @@
 import {Button} from '@/components/ui/button.jsx';
 import {Input} from '@/components/ui/input.jsx';
 import {Textarea} from '@/components/ui/textarea.jsx';
+import {Tabs,TabsList,TabsTrigger,TabsContent} from '@/components/ui/tabs.jsx';
 import {LabeledSelect,ProductionSettingsFields,FormatDurationFields} from '../shared/ProductionSettingsFields.jsx';
 import {STYLES,TRACKS,MOTION_DEFAULTS} from './illustratedForm.js';
 import {cn} from '@/lib/utils.js';
@@ -58,12 +59,32 @@ export function MotionFields({value,onChange,disabled=false,single=false}) {
   </div>;
 }
 export function IllustratedSettings({value,onChange,disabled=false}) {
-  return <div className="grid gap-6">
-    <FormatDurationFields value={value} onChange={onChange} disabled={disabled}/>
-    <ProductionSettingsFields value={value} onChange={onChange} disabled={disabled} includeLanguage/>
-    <div className="border-t border-line-1 pt-4"><StyleFields value={value} onChange={onChange} disabled={disabled}/></div>
-    <LabeledSelect label="画面密度" value={value.density} disabled={disabled} onChange={density=>onChange({...value,density})}
-      options={[{id:'relaxed',label:'舒缓 · 较少画面，充分停留'},{id:'standard',label:'标准 · 按叙事自然换图'},{id:'compact',label:'紧凑 · 更多画面，信息密集'}]}/>
-    <div className="border-t border-line-1 pt-4"><MotionFields value={value.motion} onChange={motion=>onChange({...value,motion})} disabled={disabled}/></div>
-  </div>;
+  return <Tabs defaultValue="video" className="min-w-0 gap-5">
+    <TabsList aria-label="制作设置分类" className="grid h-11 w-full grid-cols-2 bg-surface-2 p-1">
+      <TabsTrigger value="video" className="min-w-0">视频与声音</TabsTrigger>
+      <TabsTrigger value="images" className="min-w-0">图片与运动</TabsTrigger>
+    </TabsList>
+    <TabsContent value="video" className="grid min-w-0 items-start gap-8 min-[820px]:grid-cols-2">
+      <section className="grid min-w-0 content-start gap-4" aria-label="画幅与时长">
+        <h3 className="m-0 text-sm font-semibold text-fg-1">画幅与时长</h3>
+        <FormatDurationFields value={value} onChange={onChange} disabled={disabled}/>
+      </section>
+      <section className="grid min-w-0 content-start gap-4" aria-label="声音与字幕">
+        <h3 className="m-0 text-sm font-semibold text-fg-1">声音与字幕</h3>
+        <ProductionSettingsFields value={value} onChange={onChange} disabled={disabled} includeLanguage/>
+      </section>
+    </TabsContent>
+    <TabsContent value="images" className="grid min-w-0 items-start gap-8 min-[820px]:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
+      <section className="grid min-w-0 content-start gap-5" aria-label="画面风格与密度">
+        <h3 className="m-0 text-sm font-semibold text-fg-1">画面风格与密度</h3>
+        <StyleFields value={value} onChange={onChange} disabled={disabled}/>
+        <LabeledSelect label="画面密度" value={value.density} disabled={disabled} onChange={density=>onChange({...value,density})}
+          options={[{id:'relaxed',label:'舒缓 · 较少画面，充分停留'},{id:'standard',label:'标准 · 按叙事自然换图'},{id:'compact',label:'紧凑 · 更多画面，信息密集'}]}/>
+      </section>
+      <section className="grid min-w-0 content-start gap-4" aria-label="图片运动">
+        <h3 className="m-0 text-sm font-semibold text-fg-1">图片运动</h3>
+        <MotionFields value={value.motion} onChange={motion=>onChange({...value,motion})} disabled={disabled}/>
+      </section>
+    </TabsContent>
+  </Tabs>;
 }

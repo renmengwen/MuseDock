@@ -1,3 +1,6 @@
+import { Settings2 } from 'lucide-react';
+import { Button } from '@/components/ui/button.jsx';
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog.jsx';
 import { Input } from '@/components/ui/input.jsx';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
 import { BUILTIN_FUNASR_REF, DEFAULT_FUNASR_BASE_URL } from './modelDefaults.js';
@@ -65,29 +68,47 @@ export function GlobalModelSelector({ modelTypes, modelTypeInfo, providerList, a
                 })}
               </select>}
               {type === 'asr' && value === BUILTIN_FUNASR_REF ? (
-                <div className="mt-1 grid gap-2">
-                  <span className="text-xs leading-5 text-[#69717e]">使用本地 Paraformer 转写，无需添加供应商或填写 API Key。</span>
-                  <label className="grid gap-1.5 text-xs text-[#5f6876]" htmlFor="local-funasr-base-url">
-                    FunASR 服务地址
-                    <Input id="local-funasr-base-url" type="url" value={localAsr?.baseUrl ?? DEFAULT_FUNASR_BASE_URL}
-                      placeholder={DEFAULT_FUNASR_BASE_URL} disabled={disabled}
-                      onChange={event => onLocalAsrBaseUrlChange?.(event.target.value)} />
-                  </label>
-                  <span className="text-[11px] leading-5 text-[#69717e]">开始抖音转写时会检查服务，本机服务未运行则自动启动并等待模型就绪。</span>
-                  <label className="grid gap-1.5 text-xs text-[#5f6876]" htmlFor="local-funasr-python-path">
-                    FunASR Python 路径（可选）
-                    <Input id="local-funasr-python-path" value={localAsr?.pythonPath || ''}
-                      placeholder="留空自动查找，或填写已有环境的 Python 路径" disabled={disabled}
-                      onChange={event => onLocalAsrPythonPathChange?.(event.target.value)} />
-                  </label>
-                  <span className="text-[11px] leading-5 text-[#69717e]">需先安装 FunASR 依赖；已有独立环境时填写其中的 python.exe，保存后重启电脑也无需手动启动服务。</span>
-                  <label className="grid gap-1.5 text-xs text-[#5f6876]" htmlFor="local-funasr-model-cache">
-                    FunASR 模型缓存目录（可选）
-                    <Input id="local-funasr-model-cache" value={localAsr?.modelCache || ''}
-                      placeholder="已有模型时填写缓存目录，避免重新下载" disabled={disabled}
-                      onChange={event => onLocalAsrModelCacheChange?.(event.target.value)} />
-                  </label>
-                  <span className="text-[11px] leading-5 text-[#69717e]">留空使用 ModelScope 默认缓存；远程地址及供应商服务由其部署环境负责启动。</span>
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs leading-5 text-[#69717e]">本地 Paraformer 转写，无需 API Key。</span>
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="sm" disabled={disabled}>
+                        <Settings2 />本地服务设置
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-h-[85vh] overflow-y-auto">
+                      <DialogHeader>
+                        <DialogTitle>FunASR 本地服务设置</DialogTitle>
+                        <DialogDescription>按需调整服务参数。修改后请点击页面上方的“保存模型配置”。</DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4">
+                        <div className="grid gap-1.5">
+                          <label className="text-sm font-medium" htmlFor="local-funasr-base-url">FunASR 服务地址</label>
+                          <Input id="local-funasr-base-url" type="url" value={localAsr?.baseUrl ?? DEFAULT_FUNASR_BASE_URL}
+                            placeholder={DEFAULT_FUNASR_BASE_URL} disabled={disabled}
+                            onChange={event => onLocalAsrBaseUrlChange?.(event.target.value)} />
+                          <p className="m-0 text-xs leading-5 text-muted-foreground">开始抖音转写时会检查服务，本机服务未运行则自动启动并等待模型就绪。</p>
+                        </div>
+                        <div className="grid gap-1.5">
+                          <label className="text-sm font-medium" htmlFor="local-funasr-python-path">FunASR Python 路径（可选）</label>
+                          <Input id="local-funasr-python-path" value={localAsr?.pythonPath || ''}
+                            placeholder="留空自动查找，或填写已有环境的 Python 路径" disabled={disabled}
+                            onChange={event => onLocalAsrPythonPathChange?.(event.target.value)} />
+                          <p className="m-0 text-xs leading-5 text-muted-foreground">需先安装 FunASR 依赖；已有独立环境时填写其中的 python.exe，保存后重启电脑也无需手动启动服务。</p>
+                        </div>
+                        <div className="grid gap-1.5">
+                          <label className="text-sm font-medium" htmlFor="local-funasr-model-cache">FunASR 模型缓存目录（可选）</label>
+                          <Input id="local-funasr-model-cache" value={localAsr?.modelCache || ''}
+                            placeholder="已有模型时填写缓存目录，避免重新下载" disabled={disabled}
+                            onChange={event => onLocalAsrModelCacheChange?.(event.target.value)} />
+                          <p className="m-0 text-xs leading-5 text-muted-foreground">留空使用 ModelScope 默认缓存；远程地址及供应商服务由其部署环境负责启动。</p>
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <DialogClose asChild><Button variant="outline">关闭</Button></DialogClose>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               ) : null}
               {current ? (

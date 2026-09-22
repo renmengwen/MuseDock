@@ -119,10 +119,10 @@ export function ApiCallLogsPage() {
     setCopying(kind);
     setCopyMessage('');
     try {
-      await copyText(kind === 'body' ? detail.body_text : JSON.stringify({
+      await copyText(kind === 'body' ? detail.body_text : kind === 'request' ? detail.request_body_text : JSON.stringify({
         应用: 'MuseDock', 说明: 'API 返回诊断（已脱敏）', ...detail,
       }, null, 2));
-      setCopyMessage(kind === 'body' ? '已复制返回正文。' : '已复制完整诊断信息。');
+      setCopyMessage(kind === 'body' ? '已复制返回正文。' : kind === 'request' ? '已复制请求入参。' : '已复制完整诊断信息。');
     } catch { setCopyMessage('复制失败，请选中下方正文手动复制。'); }
     finally { copyLock.current = false; setCopying(''); }
   }
@@ -191,7 +191,7 @@ export function ApiCallLogsPage() {
 
       <Dialog open={Boolean(selectedId)} onOpenChange={open => { if (!open) setSelectedId(''); }}>
         <DialogContent className="flex max-h-[90dvh] w-[calc(100%-2rem)] flex-col overflow-hidden sm:max-w-5xl">
-          <DialogHeader className="shrink-0 pr-6"><DialogTitle>API 返回详情</DialogTitle><DialogDescription>凭据与链接签名已脱敏。正文可能包含创作内容，请按需选择要反馈的信息。</DialogDescription></DialogHeader>
+          <DialogHeader className="shrink-0 pr-6"><DialogTitle>API 返回详情</DialogTitle><DialogDescription>常见凭据与链接签名已脱敏。请求和返回可能包含创作内容，分享前请再次检查。</DialogDescription></DialogHeader>
           {detailLoading ? <p className="flex items-center gap-2 py-8 text-sm" role="status"><Loader2 size={16} className="animate-spin" />正在读取 API 返回正文...</p> : null}
           {detailError ? <div className="grid gap-3 text-sm text-danger" role="alert">{detailError}<Button className="w-fit" variant="outline" onClick={() => setDetailVersion(value => value + 1)}>重试读取详情</Button></div> : null}
           {detail ? <>
@@ -211,6 +211,14 @@ export function ApiCallLogsPage() {
               </div> : null}
               {detail.transport_status === 'incomplete' ? <p className="m-0 text-sm text-amber-800">这条记录不完整，正文仅包含已取得的部分；没有正文时不能推断供应商未执行请求。</p> : null}
               {detail.body_truncated ? <p className="m-0 text-sm text-amber-800">响应超过单条记录的 64 MiB 上限，已保存前 64 MiB；复制的正文也只包含已保存部分。</p> : null}
+              <details className="min-w-0 rounded-md border border-line-1 p-3 text-sm">
+                <summary className="cursor-pointer font-medium">请求入参（已脱敏）</summary>
+                <div className="mt-3 grid min-w-0 gap-2">
+                  {detail.request_body_truncated ? <p className="m-0 text-xs text-amber-800">请求体超过 2 MiB，仅保存脱敏后的前 2 MiB。</p> : null}
+                  {detail.request_body_status === 'captured' ? <ApiResponseBody bodyText={detail.request_body_text} encoding="utf8" label="API 请求入参" emptyMessage="请求体为空。" />
+                    : <p className="m-0 text-xs text-fg-3">{{ omitted: '此请求使用非文本或流式请求体，未记录入参。', none: '此请求没有请求体。', unavailable: '旧记录未保存请求入参，无法补录。' }[detail.request_body_status] || '旧记录未保存请求入参，无法补录。'}</p>}
+                </div>
+              </details>
               <div className="grid min-w-0 gap-2"><h2 className="m-0 text-sm font-semibold">返回正文（已脱敏{detail.body_encoding === 'base64' ? '，二进制以 Base64 保存' : ''}）</h2>
                 <ApiResponseBody key={detail.id} bodyText={detail.body_text} encoding={detail.body_encoding}
                   emptyMessage={detail.state === 'pending' ? '正在接收返回，可稍后刷新详情。' : detail.http_status == null ? '未收到 HTTP 响应。' : '未取得返回正文。'} />
@@ -218,6 +226,7 @@ export function ApiCallLogsPage() {
               <details className="rounded-lg border border-line-1 p-3 text-xs"><summary className="cursor-pointer font-medium">响应头（已脱敏）</summary><pre className="mb-0 overflow-auto whitespace-pre-wrap leading-6 [overflow-wrap:anywhere]">{JSON.stringify(detail.response_headers, null, 2)}</pre></details>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-line-1 pt-3">
+              <Button variant="outline" disabled={!detail.request_body_text || Boolean(copying)} onClick={() => copyRecord('request')}>{copying === 'request' ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}复制请求入参</Button>
               <Button disabled={!detail.body_text || Boolean(copying)} onClick={() => copyRecord('body')}>{copying === 'body' ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}复制返回正文</Button>
               <Button variant="outline" disabled={Boolean(copying)} onClick={() => copyRecord('diagnostic')}>{copying === 'diagnostic' ? <Loader2 size={14} className="animate-spin" /> : <Copy size={14} />}复制完整诊断</Button>
               {detail.state === 'pending' ? <Button variant="ghost" disabled={detailLoading} onClick={() => setDetailVersion(value => value + 1)}><RefreshCw size={14} />刷新详情</Button> : null}

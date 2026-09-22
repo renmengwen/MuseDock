@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { ArrowUp, Clapperboard, Globe2, ImagePlus, Loader2, PenLine, Trash2 } from 'lucide-react';
+import { ArrowUp, Clapperboard, Globe2, ImagePlay, ImagePlus, Loader2, PenLine, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Textarea } from '@/components/ui/textarea.jsx';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.jsx';
@@ -50,7 +50,7 @@ function CreativePromptComposer({
         <TabsList className="grid h-12 w-full grid-cols-3 bg-surface-2 p-1 max-[760px]:h-14" aria-label="创作模式">
           <TabsTrigger value="hyperframes-v1" disabled={isBusy} className="min-w-0 gap-2 px-2 text-[13px] max-[760px]:min-h-11 max-[420px]:whitespace-normal max-[420px]:text-xs max-[420px]:leading-4 max-[420px]:[&_svg]:hidden"><Clapperboard size={16} /><span>HyperFrames <span className="max-[420px]:block">动态视频</span></span></TabsTrigger>
           <TabsTrigger value="whiteboard-stream-v1" disabled={isBusy || modeCatalog?.status !== 'ready'} className="min-w-0 gap-2 px-2 text-[13px] max-[760px]:min-h-11 max-[420px]:whitespace-normal max-[420px]:text-xs max-[420px]:leading-4 max-[420px]:[&_svg]:hidden"><PenLine size={16} /><span>线稿白板动画</span><span className="hidden rounded border border-line-2 px-1 py-0.5 font-mono text-[10px] text-fg-3 sm:inline">Agent</span></TabsTrigger>
-          <TabsTrigger value="illustrated-narration-v1" disabled={isBusy || !modeCatalog?.illustrated} className="min-w-0 gap-2 px-2 text-[13px] max-[760px]:min-h-11 max-[420px]:whitespace-normal max-[420px]:text-xs max-[420px]:leading-4"><span>旁白配图视频</span></TabsTrigger>
+          <TabsTrigger value="illustrated-narration-v1" disabled={isBusy || !modeCatalog?.illustrated} className="min-w-0 gap-2 px-2 text-[13px] max-[760px]:min-h-11 max-[420px]:whitespace-normal max-[420px]:text-xs max-[420px]:leading-4 max-[420px]:[&_svg]:hidden"><ImagePlay size={16} /><span>旁白配图视频</span></TabsTrigger>
         </TabsList>
         <TabsContent value="hyperframes-v1" className="grid gap-3">
           <p className="m-0 px-1 text-xs leading-6 text-fg-3">自动研究和组织素材，生成可继续编辑的动态视频工程。</p>

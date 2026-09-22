@@ -13,7 +13,7 @@ import {productionError} from '../shared/productionForm.js';
 export function IllustratedInputFields({draft,onChange,disabled=false}) {
   const [open,setOpen]=useState(false),trigger=useRef(null);
   const change=patch=>onChange({...draft,...patch});
-  const settings=draft.settings,error=draft.contents[draft.inputMode].trim()?validateIllustratedDraft(draft):'';
+  const settings=draft.settings,settingsError=productionError(settings),error=draft.contents[draft.inputMode].trim()?validateIllustratedDraft(draft):'';
   return <div className="grid min-w-0 gap-4">
     <p className="m-0 text-sm leading-relaxed text-fg-2">先把故事讲清楚，再让图片动起来。确认文稿后制作完整配音，也可以关闭配音。</p>
     <Tabs value={draft.inputMode} onValueChange={inputMode=>change({inputMode})}>
@@ -48,10 +48,10 @@ export function IllustratedInputFields({draft,onChange,disabled=false}) {
     <p className="m-0 text-xs text-fg-3">{settings.narrationMode==='disabled'?'无需 TTS 配置，按目标时长分配字幕与画面。':'实际配音时长会单独展示，确认后再生图。'}当前设置仅用于本次任务。</p>
     {error?<p className="m-0 text-xs text-danger" role="alert">{error}</p>:null}
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="grid h-[min(840px,calc(100dvh-32px))] w-[min(600px,calc(100vw-32px))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0" onCloseAutoFocus={e=>{e.preventDefault();trigger.current?.focus();}}>
-        <DialogHeader className="border-b border-line-1 px-6 pb-4 pt-5 pr-12"><DialogTitle>旁白配图制作设置</DialogTitle><DialogDescription>共用字幕、画幅与声音规则。新任务冻结这些选项，以后的全局修改不会改变本任务。</DialogDescription></DialogHeader>
+      <DialogContent className="grid h-[min(840px,calc(100dvh-32px))] w-[min(960px,calc(100vw-32px))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-[960px]" onCloseAutoFocus={e=>{e.preventDefault();trigger.current?.focus();}}>
+        <DialogHeader className="border-b border-line-1 px-6 pb-4 pt-5 pr-12"><DialogTitle>旁白配图制作设置</DialogTitle><DialogDescription>调整画幅、声音、字幕、画风和运动。新任务冻结这些选项，以后的全局修改不会改变本任务。</DialogDescription></DialogHeader>
         <div className="min-h-0 overflow-y-auto p-6"><IllustratedSettings value={settings} onChange={settings=>change({settings})} disabled={disabled}/></div>
-        <div className="border-t border-line-1 px-6 py-4"><Button disabled={disabled||!!productionError(settings)} className="min-h-11 w-full" onClick={()=>setOpen(false)}>完成设置</Button></div>
+        <div className="border-t border-line-1 px-6 py-4">{settingsError?<p role="alert" className="mb-2 mt-0 text-sm text-danger">{settingsError}</p>:null}<Button disabled={disabled||!!settingsError} className="min-h-11 w-full" onClick={()=>setOpen(false)}>完成设置</Button></div>
       </DialogContent>
     </Dialog>
   </div>;

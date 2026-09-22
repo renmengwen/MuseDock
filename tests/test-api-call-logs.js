@@ -2,6 +2,8 @@ const assert = require('assert/strict');
 const fs = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const { randomUUID } = require('crypto');
+const Database = require('better-sqlite3');
 const express = require('express');
 const { createApiCallStore } = require('../server/services/diagnostics/apiCallStore');
 const { recordedFetch, runWithApiCallContext, apiCallContextMiddleware, flushApiCallRecords, getApiCallStorageWarning } = require('../server/services/diagnostics/apiCallRecorder');
@@ -61,7 +63,10 @@ async function run() {
       callCount += 1;
       return jsonResponse(payload, 200, { 'set-cookie': 'session=header-secret', 'x-request-id': 'fixture-request-id' });
     }, { category: 'text' })('https://api.example.invalid/v1/responses?api_key=url-secret', {
-      method: 'POST', headers: { Authorization: `Bearer ${TEXT_CONFIG.apiKey}` }, body: JSON.stringify({ model: 'fixture-model' }),
+      method: 'POST', headers: { Authorization: `Bearer ${TEXT_CONFIG.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'fixture-model', instructions: `只返回 JSON。${TEXT_CONFIG.apiKey}`,
+        input: [{ role: 'user', content: '请生成方案' }], api_key: 'request-body-secret',
+        link: 'https://example.invalid/a?signature=request-signature' }),
     }));
     assert.deepEqual(await original.json(), payload, '日志不能改变交给业务代码的原始 Response');
     await flushApiCallRecords();
@@ -69,11 +74,33 @@ async function run() {
     const first = store.get(store.list({ workflowId: 'success-task' }).records[0].id);
     assert.equal(first.state, 'success');
     assert.equal(first.model, 'fixture-model');
+    assert.equal(first.request_body_status, 'captured');
+    assert.equal(JSON.parse(first.request_body_text).input[0].content, '请生成方案');
+    assert.equal(JSON.parse(first.request_body_text).api_key, '[已隐藏]');
+    assert.equal(store.list({ workflowId: 'success-task' }).records[0].request_body_text, undefined, '列表不加载请求体');
     assert.match(first.body_text, /成功返回，保留全部正文/);
-    assert.doesNotMatch(JSON.stringify(first), /fixture-secret-key-only|another-secret|provider-session|download-secret|header-secret|url-secret|user:password/);
+    assert.doesNotMatch(JSON.stringify(first), /fixture-secret-key-only|request-body-secret|request-signature|another-secret|provider-session|download-secret|header-secret|url-secret|user:password/);
     assert.equal(first.response_headers['x-request-id'], 'fixture-request-id');
     assert.equal(first.response_headers['set-cookie'], '[已隐藏]');
-    pass('成功返回完整保存，业务响应不变，正文/响应头/签名链接脱敏');
+    pass('成功返回和请求入参保存，业务响应不变，正文/响应头/签名链接脱敏');
+
+    const longRequest = JSON.stringify({ model: 'fixture-model', input: '长'.repeat(750000) });
+    const longResult = await runWithApiCallContext({ store, workflowId: 'long-request' }, () => recordedFetch(async () => jsonResponse({ ok: true }))(
+      'https://example.invalid/responses', { method: 'POST', headers: { 'content-type': 'application/json' }, body: longRequest }));
+    await longResult.text();
+    await flushApiCallRecords();
+    const longLog = store.get(store.list({ workflowId: 'long-request' }).records[0].id);
+    assert.equal(longLog.request_bytes, Buffer.byteLength(longRequest));
+    assert.equal(longLog.request_body_truncated, 1);
+    assert.ok(Buffer.byteLength(longLog.request_body_text) <= 2 * 1024 * 1024);
+    const binaryRequest = Buffer.from([0, 1, 2, 3]);
+    await runWithApiCallContext({ store, workflowId: 'binary-request' }, () => recordedFetch(async () => jsonResponse({ ok: true }))(
+      'https://example.invalid/audio', { method: 'POST', body: binaryRequest }));
+    await flushApiCallRecords();
+    const binaryRequestLog = store.get(store.list({ workflowId: 'binary-request' }).records[0].id);
+    assert.equal(binaryRequestLog.request_body_status, 'omitted');
+    assert.equal(binaryRequestLog.request_body_text, '');
+    pass('请求体限额与二进制请求体跳过');
 
     const longHtml = `<!doctype html><pre>${'错误详情。'.repeat(2000)}\nAPI_KEY=${TEXT_CONFIG.apiKey}\n尾部定位信息</pre>`;
     const denied = await runWithApiCallContext({ store, workflowId: 'http-error' }, () => callTextModel({ textConfig: TEXT_CONFIG,
@@ -236,6 +263,8 @@ async function run() {
     assert.equal(next.nextCursor, null);
     const detail = await (await fetch(`${origin}/api/api-call-logs/${list.records[0].id}`)).json();
     assert.match(detail.record.body_text, /末尾诊断内容/);
+    assert.equal(detail.record.request_body_status, 'captured');
+    assert.match(detail.record.request_body_text, /instructions/);
     assert.equal((await fetch(`${origin}/api/api-call-logs/not-a-valid-id`)).status, 400);
     assert.equal((await fetch(`${origin}/api/api-call-logs/00000000-0000-0000-0000-000000000000`)).status, 404);
     const invalidOnly = await (await fetch(`${origin}/api/api-call-logs?state=invalid&workflow_id=${seeded.failedId}`)).json();
@@ -252,6 +281,27 @@ async function run() {
     assert.equal(store.get(first.id).body_text, first.body_text);
     assert.equal(store.get(unfinishedId).transport_status, 'incomplete');
     pass('重开存储仍可查看旧返回，上次进程未完成的记录明确标记中断');
+
+    const legacyDirectory = path.join(root, 'legacy');
+    await fs.mkdir(legacyDirectory);
+    const legacyDb = new Database(path.join(legacyDirectory, 'records.sqlite'));
+    legacyDb.exec(`CREATE TABLE api_calls (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL,
+      completed_at TEXT NOT NULL DEFAULT '', workflow_id TEXT NOT NULL DEFAULT '', category TEXT NOT NULL DEFAULT '',
+      operation TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', endpoint TEXT NOT NULL DEFAULT '',
+      method TEXT NOT NULL DEFAULT 'GET', http_status INTEGER, transport_status TEXT NOT NULL DEFAULT 'complete',
+      result_status TEXT NOT NULL DEFAULT '', duration_ms INTEGER NOT NULL DEFAULT 0, response_bytes INTEGER NOT NULL DEFAULT 0,
+      body_encoding TEXT NOT NULL DEFAULT 'utf8', body_truncated INTEGER NOT NULL DEFAULT 0,
+      content_type TEXT NOT NULL DEFAULT '', body_text TEXT NOT NULL DEFAULT '', headers_json TEXT NOT NULL DEFAULT '{}',
+      error TEXT NOT NULL DEFAULT '', context_json TEXT NOT NULL DEFAULT '{}', validation_json TEXT NOT NULL DEFAULT '[]');`);
+    legacyDb.prepare('INSERT INTO api_calls (id, created_at, body_text) VALUES (?, ?, ?)').run(randomUUID(), new Date().toISOString(), '旧返回');
+    legacyDb.close();
+    const migrated = createApiCallStore({ directory: legacyDirectory });
+    const oldRecord = migrated.list().records[0];
+    assert.equal(migrated.get(oldRecord.id).body_text, '旧返回');
+    assert.equal(migrated.get(oldRecord.id).request_body_status, 'unavailable');
+    migrated.close();
+    pass('已有返回记录原样保留，旧版入参明确不可补录');
 
     let requestsWithBrokenStorage = 0;
     const unaffected = await runWithApiCallContext({ store: { start() { throw new Error('fixture disk full'); } } }, () => recordedFetch(async () => {

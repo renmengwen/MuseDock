@@ -9,8 +9,11 @@ const store=require('../server/services/creative/illustrated/storage');
 const state=require('../server/services/creative/illustrated/state');
 const timing=require('../server/services/creative/illustrated/timing');
 const modelGateway=require('../server/services/creative/illustrated/models');
+const {runWithApiCallContext}=require('../server/services/diagnostics/apiCallRecorder');
 const tts=require('../server/services/ai/aiTtsModel');
 const facade=require('../server/services/creative/creativeWorkflows');
+const noLogTextService={callTextModel:request=>runWithApiCallContext({store:{start:()=>null}},
+  ()=>require('../server/services/ai/aiTextModel').callTextModel(request))};
 
 const plan={title:'清晨的城市',summary:'以三个画面介绍清晨。',scenes:[
   {id:'scene_1',title:'窗边',text:'清晨，阳光照进窗边。',visualIntent:'安静的清晨',imagePrompt:'窗边植物与一束金色阳光，干净室内空间',negativePrompt:'水印',weight:1},
@@ -72,6 +75,78 @@ const tests=[
    await ctx.act(id,'apply_models');await ctx.act(id,'generate_plan');result=await workflow.run(id,ctx.options);
    assert.equal(result.status,'waiting_approval');assert.equal(ctx.counters.text,1);
    const stored=JSON.stringify(await ctx.read(id));assert(!stored.includes('fixture-only-not-a-secret'));assert(!stored.includes('127.0.0.1:1'));
+ })],
+ ['内容审核拒绝与普通 400 分开提示',()=>fixture(async ctx=>{
+   ctx.options.services.aiTextModel.callTextModel=async({fetchImpl})=>{
+     ctx.counters.text++;
+     await fetchImpl('https://example.invalid/responses',{});
+     return {success:false,configured:true,raw_response:{error:{code:'content_policy_violation',flagged_categories:['sexual']}}};
+   };
+   ctx.options.services.fetchImpl=async()=>({status:400});
+   const id=await ctx.create();const result=await workflow.run(id,ctx.options);
+   assert.equal(result.status,'failed');assert.equal(result.current_stage,'content_plan');
+   const record=await ctx.read(id);
+   assert.equal(record.illustrated.lastError.code,'MODEL_CONTENT_POLICY_VIOLATION');
+   assert.match(record.message,/审核拦截.*修改后再重试/);
+   assert.equal(record.illustrated.attempts.at(-1).status,'failed');
+   const other=modelGateway.classify({raw_response:{error:{code:'invalid_value'}}},400,true,'分析模型');
+   assert.equal(other.code,'MODEL_REQUEST_REJECTED');
+   assert.match(other.message,/请求参数被拒绝/);
+ })],
+ ['Responses 方案请求传入严格结构并保留本地校验',()=>fixture(async ctx=>{
+   ctx.current.text.protocol='openai-responses';
+   ctx.current.text.modelId='gpt-6-sol';
+   ctx.options.services.aiTextModel=noLogTextService;
+   let requests=0;
+   ctx.options.services.fetchImpl=async(_url,init)=>{
+     requests++;
+     const body=JSON.parse(init.body);
+     assert.equal(body.text.format.type,'json_schema');
+     assert.equal(body.text.format.name,'illustrated_plan');
+     assert.equal(body.text.format.strict,true);
+     assert.deepEqual(body.text.format.schema.required,['title','summary','scenes']);
+     assert.equal(body.text.format.schema.properties.scenes.items.additionalProperties,false);
+     assert.ok(body.text.format.schema.properties.scenes.items.required.includes('imagePrompt'));
+     assert.deepEqual(body.reasoning,{effort:'low'});
+     const input=JSON.parse(body.input[0].content[0].text);
+     assert.equal(input.responseFormat,'JSON');
+     assert.match(input.instructions,/完整 JSON 方案/);
+     assert.equal(input.planSkeleton.scenes[0].id,'scene_1');
+     return new Response(JSON.stringify({output_text:JSON.stringify(plan)}),{status:200,headers:{'content-type':'application/json'}});
+   };
+   const id=await ctx.create();const result=await workflow.run(id,ctx.options);
+   assert.equal(result.status,'waiting_approval');
+   assert.equal(requests,1);
+   assert.equal((await ctx.read(id)).illustrated.plan.scenes.length,3);
+ })],
+ ['不支持结构化参数时保留拒绝，不降级重复请求',()=>fixture(async ctx=>{
+   ctx.current.text.protocol='openai-responses';
+   ctx.options.services.aiTextModel=noLogTextService;
+   let requests=0;
+   ctx.options.services.fetchImpl=async()=>{
+     requests++;
+     return new Response(JSON.stringify({error:{message:'unsupported text.format'}}),{status:400,headers:{'content-type':'application/json'}});
+   };
+   const id=await ctx.create();const result=await workflow.run(id,ctx.options);
+   assert.equal(result.status,'failed');
+   assert.equal((await ctx.read(id)).illustrated.lastError.code,'MODEL_FORMAT_REJECTED');
+   assert.match(result.message,/结构化 JSON 参数/);
+   assert.equal(requests,1);
+ })],
+ ['代理忽略格式参数时明确提示而不将散文当方案',()=>fixture(async ctx=>{
+   ctx.current.text.protocol='openai-responses';
+   ctx.options.services.aiTextModel=noLogTextService;
+   let requests=0;
+   ctx.options.services.fetchImpl=async()=>{
+     requests++;
+     return new Response(JSON.stringify({output_text:'这是一段普通文案，不是分镜 JSON。'}),{status:200,
+       headers:{'content-type':'application/json'}});
+   };
+   const id=await ctx.create();const result=await workflow.run(id,ctx.options);
+   assert.equal(result.status,'failed');
+   assert.equal((await ctx.read(id)).illustrated.lastError.code,'PLAN_INVALID');
+   assert.match(result.message,/可能未执行结构化输出约束/);
+   assert.equal(requests,1);
  })],
  ['幂等操作、版本冲突与 A→B→A 运镜回读',()=>fixture(async ctx=>{
    const id=await ctx.create();await workflow.run(id,ctx.options);

@@ -27,12 +27,14 @@ async function run() {
     model: '本地测试模型', workflow_id: '', operation: '本地页面验证', http_status: 200, duration_ms: 1000,
     response_bytes: Buffer.byteLength(body), response_headers: {}, validation: [], body_text: body,
     body_encoding: index === 4 ? 'base64' : 'utf8', body_truncated: false, transport_status: index === 2 ? 'incomplete' : 'complete',
+    request_body_status: index === 0 ? 'captured' : 'unavailable',
+    request_body_text: index === 0 ? '{"model":"fixture","instructions":"只返回 JSON","input":[{"role":"user","content":"本地测试输入"}]}' : '',
   }));
   let apiRequests = 0;
   const app = express();
   app.get('/api/api-call-logs', (_request, response) => {
     apiRequests += 1;
-    response.json({ records: records.map(({ body_text, ...record }) => record), nextCursor: null });
+    response.json({ records: records.map(({ body_text, request_body_text, ...record }) => record), nextCursor: null });
   });
   app.get('/api/api-call-logs/:id', (request, response) => {
     apiRequests += 1;
@@ -95,6 +97,14 @@ async function run() {
     await dialog.getByRole('button', { name: '复制完整诊断', exact: true }).click();
     await dialog.getByText('已复制完整诊断信息。', { exact: true }).waitFor();
     assert.equal(JSON.parse(await page.evaluate(() => window.__apiTestClipboard)).body_text, jsonBody);
+    await dialog.getByText('请求入参（已脱敏）', { exact: true }).click();
+    const requestBody = dialog.getByLabel('API 请求入参', { exact: true });
+    await requestBody.waitFor({ state: 'visible' });
+    assert.match(await requestBody.textContent(), /只返回 JSON/);
+    await dialog.getByRole('button', { name: '复制请求入参', exact: true }).click();
+    await dialog.getByText('已复制请求入参。', { exact: true }).waitFor();
+    assert.equal(JSON.parse(await page.evaluate(() => window.__apiTestClipboard)).input[0].content, '本地测试输入');
+    await dialog.getByText('请求入参（已脱敏）', { exact: true }).click();
     assert.equal(apiRequests, requestsBeforeToggle, '展开、折叠和复制不应发起额外 API 请求。');
     await page.screenshot({ path: path.join(screenshots, 'desktop.png'), fullPage: true });
 

@@ -50,6 +50,7 @@ function requireScene(record,id) {
 }
 async function act(workflowId,payload={},options={}) {
   const action=payload.action;
+  if(action==='save_input') throw new contract.ErrorType('INPUT_IMMUTABLE','任务创建后不能修改原始输入或参考文本，请创建新任务。',409);
   // 运行时配置只读；只有明确的任务操作才采用新的非秘密模型快照。
   const latestModels=action==='apply_models'?await models.freezeModels(options):null;
   const result=await store.mutate(workflowId,options,async record=>{
@@ -69,11 +70,6 @@ async function act(workflowId,payload={},options={}) {
     } else if(action==='save_plan') {
       state.replacePlan(record,contract.normalizePlan(payload.plan,record.input));
       s.lastError=null;
-    } else if(action==='save_input') {
-      record.input=contract.normalizeInput({...record.input,...payload.input});
-      s.approvals.plan=''; s.lastError=null;
-      // 输入变化需要新方案，保留当前版本供比较。
-      if(s.plan) { s.planHistory.push({...s.plan,savedAt:new Date().toISOString()});s.plan=null; }
     } else if(action==='save_settings') {
       const previous=s.settings;
       s.settings=contract.normalizeSettings({...previous,...payload.settings,

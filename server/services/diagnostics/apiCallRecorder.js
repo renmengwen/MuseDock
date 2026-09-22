@@ -7,6 +7,7 @@ const contextStorage = new AsyncLocalStorage();
 const RECORD_REFS = Symbol('apiCallRecords');
 const pendingCaptures = new Set();
 const MAX_CAPTURE_BYTES = 64 * 1024 * 1024;
+const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
 let storageWarning = '';
 
 function safelyRecord(callback) {
@@ -44,7 +45,23 @@ function requestInfo(input, options, context, details, secrets) {
       taskId: context.taskId || '', attemptId: context.attemptId || '', stage: context.stage || '',
       attemptNumber: context.attemptNumber ?? null, repair: context.repair ?? null,
     }, secrets)),
+    ...captureRequestBody(input, options, secrets),
   };
+}
+
+function captureRequestBody(input, options, secrets) {
+  const body = options.body ?? input?.body;
+  if (body == null) return { request_bytes: 0, request_body_text: '', request_body_truncated: 0, request_body_status: 'none' };
+  if (typeof body !== 'string') return { request_bytes: 0, request_body_text: '', request_body_truncated: 0, request_body_status: 'omitted' };
+  const contentType = new Headers(options.headers || input?.headers).get('content-type') || '';
+  if (/multipart|octet-stream|image\/|audio\/|video\//i.test(contentType)) {
+    return { request_bytes: Buffer.byteLength(body), request_body_text: '', request_body_truncated: 0, request_body_status: 'omitted' };
+  }
+  const redacted = Buffer.from(redactBody(body, contentType, secrets));
+  let end = Math.min(redacted.length, MAX_REQUEST_BYTES);
+  if (end < redacted.length) while (end > 0 && (redacted[end] & 0xc0) === 0x80) end -= 1;
+  return { request_bytes: Buffer.byteLength(body), request_body_text: redacted.subarray(0, end).toString('utf8'),
+    request_body_truncated: Number(redacted.length > MAX_REQUEST_BYTES), request_body_status: 'captured' };
 }
 
 async function captureResponse(response, reference, startedAt, control) {

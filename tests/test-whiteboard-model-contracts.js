@@ -20,6 +20,20 @@ async function verifyDraftRequest(protocol) {
         baseUrl: 'https://example.invalid/v1', modelId: 'gpt-5.6-sol', protocol, stream: false }) },
       fetchImpl: async (_url, init) => {
         const body = JSON.parse(init.body);
+        if (protocol === 'openai-responses') {
+          assert.equal(body.text.format.type, 'json_schema');
+          assert.equal(body.text.format.name, 'whiteboard_candidate');
+          assert.equal(body.text.format.strict, true);
+          const schema = body.text.format.schema;
+          assert.deepEqual(schema.required, Object.keys(contract.schema.properties));
+          assert.equal(schema.additionalProperties, false);
+          assert.deepEqual(schema.properties.schemaVersion, { type: 'integer', enum: [1] });
+          assert.equal(schema.properties.scenes.items.additionalProperties, false);
+          assert.ok(schema.properties.scenes.items.required.includes('imageTexts'));
+          assert.equal(schema.properties.scenes.items.properties.imageTexts.items.type, 'string');
+          assert.equal(schema.properties.scenes.maxItems, undefined);
+          assert.equal(schema.properties.cues.items.properties.id.pattern, undefined);
+        } else assert.equal(body.text, undefined);
         const messages = protocol === 'anthropic-messages' ? body.messages : body.input;
         const payload = JSON.parse(messages[0].content[0].text);
         // 仅消费用户消息，模拟兼容网关忽略或覆盖 system/instructions。
@@ -53,6 +67,19 @@ async function verifyDraftRequest(protocol) {
   assert.equal(requests, 2);
   assert.deepEqual(validateCandidate(result, input), []);
   assert.equal(result.cues[0].text, input.content);
+  if (protocol === 'openai-responses') {
+    let rejectedCalls = 0;
+    await assert.rejects(generateDraft(task, { apiContext: { store: { start: () => null } }, services: {
+      aiModelConfig: { getRuntimeConfig: async () => ({ enabled: true, apiKey: 'fixture-key',
+        baseUrl: 'https://example.invalid/v1', modelId: 'gpt-5.6-sol', protocol }) },
+      fetchImpl: async () => {
+        rejectedCalls++;
+        return new Response(JSON.stringify({ error: { message: 'unsupported text.format' } }), { status: 400,
+          headers: { 'content-type': 'application/json' } });
+      },
+    } }), error => error.code === 'MODEL_FORMAT_REJECTED');
+    assert.equal(rejectedCalls, 1);
+  }
 }
 
 (async () => {

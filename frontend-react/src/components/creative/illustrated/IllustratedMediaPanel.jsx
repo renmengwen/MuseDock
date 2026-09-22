@@ -58,6 +58,8 @@ export function IllustratedMediaPanel({workflow,busy,onAct,onUpload,onConfirm,on
   const allowed=action=>s.allowedActions.includes(action);
   useEffect(()=>{onDirtyChange(dirty);return()=>onDirtyChange(false);},[dirty,onDirtyChange]);
   useEffect(()=>{if(active&&!dirty){setMotion(active.motion);setSavedMotion(active.motion);motionRevision.current=s.revision;}},[active?.motion,s.revision,dirty]);
+  useEffect(()=>{setPage(current=>Math.min(current,Math.max(1,Math.ceil(s.scenes.length/6))));},[s.scenes.length]);
+  useEffect(()=>{setCandidatePage(current=>Math.min(current,Math.max(1,Math.ceil((active?.candidates.length||0)/4))));},[active?.candidates.length]);
   const open=scene=>{focusRef.current=document.activeElement;setActiveId(scene.id);setMotion(scene.motion);setSavedMotion(scene.motion);motionRevision.current=s.revision;setCandidatePage(1);setLocalError('');};
   const close=()=>{
     if(dirty){onConfirm('放弃未保存的运动修改','当前轨迹修改尚未保存，离开详情会放弃这些修改。',async()=>{setMotion(savedMotion);setActiveId('');});}
@@ -85,7 +87,7 @@ export function IllustratedMediaPanel({workflow,busy,onAct,onUpload,onConfirm,on
         const image=scene.selected&&s.artifacts[scene.selected.artifactId];
         return <div key={scene.id} className="overflow-hidden rounded-md border border-line-1 bg-surface-1">
           <button type="button" className="block w-full bg-surface-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink" aria-label={'查看画面 '+scene.title} onClick={()=>open(scene)}>
-            {image?<img src={image.url} alt={scene.title+'配图缩略图'} className="aspect-video w-full object-cover"/>:<div className="flex aspect-video items-center justify-center text-sm text-fg-3">等待配图</div>}
+            {image?<img src={image.url} alt={scene.title+'配图缩略图'} className="aspect-video w-full bg-surface-2 object-contain"/>:<div className="flex aspect-video items-center justify-center text-sm text-fg-3">等待配图</div>}
           </button>
           <div className="grid gap-2 p-3"><div className="flex justify-between gap-2"><h3 className="m-0 min-w-0 truncate text-sm font-semibold">{String((page-1)*6+index+1).padStart(2,'0')} {scene.title}</h3>{scene.motion.locked?<Lock size={14} aria-label="已锁定"/>:null}</div>
             <p className="m-0 text-xs text-fg-3">{s.settings.motion.mode==='off'?'运动已关闭':TRACKS.find(item=>item.id===scene.motion.track)?.label} · {scene.motion.amount}% · {scene.timing?durationLabel(scene.timing.endMs-scene.timing.startMs):'时间待定'}</p>
@@ -116,8 +118,8 @@ export function IllustratedMediaPanel({workflow,busy,onAct,onUpload,onConfirm,on
             </div>
             {localError?<p role="alert" className="text-sm text-danger">{localError}</p>:null}
             <h3 className="mb-0 text-sm font-semibold">图片候选（静态浏览）</h3>
-            <div className="grid grid-cols-2 gap-2">{active.candidates.slice((candidatePage-1)*4,candidatePage*4).map(candidate=><div key={candidate.id} className={cn('grid gap-2 rounded-md border p-2',candidate.id===active.selected?.id?'border-ink':'border-line-1')}>
-              <img src={s.artifacts[candidate.artifactId]?.url} alt={candidate.current?'可用图片候选':'旧版本图片候选'} className="aspect-video w-full rounded object-cover"/>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{active.candidates.slice((candidatePage-1)*4,candidatePage*4).map(candidate=><div key={candidate.id} className={cn('grid gap-2 rounded-md border p-2',candidate.id===active.selected?.id?'border-ink':'border-line-1')}>
+              <img src={s.artifacts[candidate.artifactId]?.url} alt={candidate.current?'可用图片候选':'旧版本图片候选'} className="aspect-video w-full rounded bg-surface-2 object-contain"/>
               <p className="m-0 text-xs text-fg-3">{candidate.source==='upload'?'本地上传':'模型生成'} · {candidate.current?'适用当前内容':'内容或风格已失效'}</p>
               <Button size="sm" variant={candidate.id===active.selected?.id?'default':'outline'} disabled={busy||dirty||!candidate.current||candidate.id===active.selected?.id}
                 onClick={()=>onAct('select_image',{sceneId:active.id,candidateId:candidate.id})}>{candidate.id===active.selected?.id?'已选择':'选择这张'}</Button>

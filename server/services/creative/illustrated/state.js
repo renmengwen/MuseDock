@@ -122,8 +122,8 @@ function refresh(record, message) {
 function actionsFor(record) {
   const state = record.illustrated;
   if (state.operation && ['running','queued'].includes(state.operation.status)) return ['cancel'];
-  if (pendingUnknown(state).length) return ['authorize_retry','apply_models','save_plan','save_settings','save_input','upload_image'];
-  const result = ['save_plan','save_settings','save_input','apply_models','generate_plan','save_motion','rerandomize','upload_image','select_image'];
+  if (pendingUnknown(state).length) return ['authorize_retry','apply_models','save_plan','save_settings','upload_image'];
+  const result = ['save_plan','save_settings','apply_models','generate_plan','save_motion','rerandomize','upload_image','select_image'];
   if (state.plan) result.push('approve_plan');
   if (state.plan && state.approvals.plan===planGate(state)) result.push('prepare_narration');
   if (state.plan && state.approvals.plan===planGate(state) && state.settings.narrationMode==='enabled'

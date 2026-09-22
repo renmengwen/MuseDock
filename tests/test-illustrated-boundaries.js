@@ -19,6 +19,15 @@ function setTts(ctx) {
   ctx.options.services.aiTtsModel.callTtsModel=async request=>{ctx.counters.tts++;return {success:true,format:'wav',audioBuffer:wav(2000),nativeSubtitles:nativeFixture(request.text,2000)};};
 }
 const tests=[
+ ['创建后原始输入与参考文本不可修改',()=>fixture(async ctx=>{
+   const id=await ctx.create();await workflow.run(id,ctx.options);
+   const before=await ctx.read(id);
+   assert(!state.actionsFor(before).includes('save_input'));
+   await assert.rejects(ctx.act(id,'save_input',{input:{content:'新正文',referenceText:'新参考资料'}}),
+     error=>error.code==='INPUT_IMMUTABLE'&&/请创建新任务/.test(error.message));
+   const after=await ctx.read(id);
+   assert.deepEqual(after.input,before.input);assert.equal(after.illustrated.revision,before.illustrated.revision);
+ })],
  ['豆包慢语速缩短分段，为 120 秒单次上限留出余量',async()=>{
    const text='这是用于验证慢速旁白预算的完整正文。'.repeat(40);
    const parts=require('../server/services/creative/illustrated/timing').chunkText({id:'scene_1',text},'zh-CN',{provider:'doubao',doubao:{speechRate:-50}});

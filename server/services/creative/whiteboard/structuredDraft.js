@@ -5,6 +5,9 @@ const { runWithApiCallContext, annotateApiCallResult } = require('../../diagnost
 
 function classifyFailure(response, httpStatus, sent) {
   if (response?.configured === false) return new WhiteboardError('MODEL_NOT_CONFIGURED', '分析模型未配置，请在设置中选择并配置分析模型后重试。');
+  if ([400, 422].includes(httpStatus) && /(?:text\.format|json_schema|response_format)/i.test(response?.raw_response?.error?.message || '')) {
+    return new WhiteboardError('MODEL_FORMAT_REJECTED', '服务商拒绝结构化 JSON 参数，请查看 API 返回记录中的具体原因；此请求不会自动取消约束重发。', httpStatus);
+  }
   if (httpStatus === 401) return new WhiteboardError('MODEL_UNAUTHORIZED', '分析模型凭据无效，请在设置中更新 API Key 后重试。');
   if (httpStatus === 403) return new WhiteboardError('MODEL_FORBIDDEN', '当前分析模型没有访问权限，请检查模型或账号权限。');
   if (httpStatus === 429) return new WhiteboardError('MODEL_RATE_LIMITED', '分析模型请求已被限流，请稍后手动重试。', 429);
@@ -19,6 +22,16 @@ function candidateFormat(task) {
     candidateSkeleton: task.candidateSkeleton || contract.skeleton,
     candidateSchema: task.candidateSchema || contract.schema,
   };
+}
+
+function responseSchema(schema) {
+  if (Object.hasOwn(schema, 'const')) return { type: 'integer', enum: [schema.const] };
+  if (schema.type === 'object') {
+    const properties = Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [key, responseSchema(value)]));
+    return { type: 'object', additionalProperties: false, required: Object.keys(properties), properties };
+  }
+  if (schema.type === 'array') return { type: 'array', items: responseSchema(schema.items) };
+  return { type: schema.type };
 }
 
 function repairMessage(task, validationErrors) {
@@ -92,9 +105,12 @@ async function generateDraft(task, { services = {}, previousArtifact, onRequest,
       response = await runWithApiCallContext({ ...apiContext, stage: 'content_plan', repair }, () => textModel.callTextModel({
         textConfig, messages, temperature: 0.3, maxTokens: 14000,
         maxOutputTokens: 14000,
+        ...(textConfig.protocol !== 'anthropic-messages' ? { response_format: {
+          type: 'json_schema', name: 'whiteboard_candidate', strict: true,
+          schema: responseSchema(candidateFormat(task).candidateSchema),
+        } } : {}),
         reasoningEffort: /^(gpt-(5|6)([.-]|$)|o[134])/i.test(textConfig.modelId) ? 'low' : undefined,
-        // Some Responses-compatible reasoning endpoints reject json_object.
-        // The frozen schema and complete local validator remain authoritative.
+        // 不自动降级重试：供应商拒绝格式参数时，由用户检查返回记录后决定下一步。
         maxRetries: 0,
         fallbackToNonStreamOnGatewayTimeout: false, requestTimeoutMs: 180000,
         fetchImpl: async (...args) => {

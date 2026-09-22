@@ -3,11 +3,9 @@ import {Link,useNavigate} from 'react-router-dom';
 import {Download,Loader2,Settings2,Play,FileText} from 'lucide-react';
 import {Button} from '@/components/ui/button.jsx';
 import {Textarea} from '@/components/ui/textarea.jsx';
-import {Input} from '@/components/ui/input.jsx';
 import {Tabs,TabsList,TabsTrigger} from '@/components/ui/tabs.jsx';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog.jsx';
 import {ConfirmDialog} from '@/components/ui/confirm-dialog.jsx';
-import {LabeledSelect} from '../shared/ProductionSettingsFields.jsx';
 import {productionError} from '../shared/productionForm.js';
 import {IllustratedSettings} from './IllustratedSettings.jsx';
 import {IllustratedPlanEditor,Pager} from './IllustratedPlanEditor.jsx';
@@ -16,28 +14,27 @@ import {durationLabel,STYLES} from './illustratedForm.js';
 import {cn} from '@/lib/utils.js';
 
 const areaFor=stage=>['content_plan','plan_review'].includes(stage)?'plan':['narration','audio_review','images'].includes(stage)?'media':'preview';
-const loadingText={save_plan:'正在保存并回读文稿与分镜...',save_settings:'正在保存并回读制作设置...',save_input:'正在保存输入...',
+const loadingText={save_plan:'正在保存并回读文稿与分镜...',save_settings:'正在保存并回读制作设置...',
   refresh:'正在重新读取服务器中的任务版本...',
   approve_plan:'正在确认当前方案...',prepare_narration:'正在启动配音与时间轴制作...',regenerate_narration:'正在准备新的配音版本...',
   approve_audio:'正在确认实际配音时长...',generate_images:'正在提交配图任务...',upload_image:'正在上传和检查图片...',
   select_image:'正在保存选图...',approve_images:'正在确认当前图片...',save_motion:'正在保存并回读运动参数...',
   rerandomize:'正在重新分配运动轨迹...',preview_scene:'正在启动运动片段渲染...',render_preview:'正在启动动态预览渲染...',
-  export:'正在验证并导出当前视频...',apply_models:'正在读取并应用当前模型配置...',authorize_retry:'正在登记新的请求授权...',
+  export:'正在验证并导出当前视频...',authorize_retry:'正在登记新的请求授权...',
   generate_plan:'正在准备文稿与分镜...',cancel:'正在停止后续请求派发...'};
 
 export function IllustratedTaskDetail({workflow,onAction,onDirtyChange=()=>{}}) {
   const s=workflow.illustrated,navigate=useNavigate(),lock=useRef(false),focusRef=useRef(null),revisionRef=useRef(s.revision);
-  const [area,setArea]=useState(()=>{try{return localStorage.getItem('illustrated:'+workflow.workflow_id+':area')||areaFor(workflow.current_stage);}catch{return areaFor(workflow.current_stage);}});
+  const [area,setArea]=useState(()=>{try{const saved=localStorage.getItem('illustrated:'+workflow.workflow_id+':area');return ['plan','media','preview'].includes(saved)?saved:areaFor(workflow.current_stage);}catch{return areaFor(workflow.current_stage);}});
   const [working,setWorking]=useState(''),[feedback,setFeedback]=useState(null),[confirmation,setConfirmation]=useState(null);
   const [readbackRequired,setReadbackRequired]=useState(false),[viewGeneration,setViewGeneration]=useState(0);
-  const [settingsOpen,setSettingsOpen]=useState(false),[settingsDraft,setSettingsDraft]=useState(s.settings);
-  const [inputOpen,setInputOpen]=useState(false),[inputDraft,setInputDraft]=useState(workflow.input);
+  const [settingsOpen,setSettingsOpen]=useState(false),[discardSettings,setDiscardSettings]=useState(false),[settingsDraft,setSettingsDraft]=useState(s.settings);
   const [revisionRequest,setRevisionRequest]=useState(''),[historyPage,setHistoryPage]=useState(1);
   const [planDirty,setPlanDirty]=useState(false),[motionDirty,setMotionDirty]=useState(false);
   const markPlanDirty=useCallback(value=>setPlanDirty(value),[]),markMotionDirty=useCallback(value=>setMotionDirty(value),[]);
   const settingsDirty=settingsOpen&&JSON.stringify(settingsDraft)!==JSON.stringify(s.settings);
-  const inputDirty=inputOpen&&JSON.stringify(inputDraft)!==JSON.stringify(workflow.input);
-  const dirty=planDirty||motionDirty||settingsDirty||inputDirty;
+  const settingsError=productionError(settingsDraft);
+  const dirty=planDirty||motionDirty||settingsDirty;
   const running=['queued','running'].includes(workflow.status),busy=!!working||running||readbackRequired;
   const allowed=action=>s.allowedActions.includes(action);
   useEffect(()=>{
@@ -77,7 +74,7 @@ export function IllustratedTaskDetail({workflow,onAction,onDirtyChange=()=>{}}) 
   async function refreshReadback(){
     const response=await send('refresh');
     if(!response)return;
-    setReadbackRequired(false);setSettingsOpen(false);setInputOpen(false);
+    setReadbackRequired(false);setDiscardSettings(false);setSettingsOpen(false);
     setViewGeneration(value=>value+1);
   }
   async function upload(sceneId,file){
@@ -86,11 +83,14 @@ export function IllustratedTaskDetail({workflow,onAction,onDirtyChange=()=>{}}) 
     });
     return send('upload_image',{sceneId,data},true);
   }
-  const openSettings=()=>{focusRef.current=document.activeElement;revisionRef.current=s.revision;setSettingsDraft(s.settings);setSettingsOpen(true);};
-  const openInput=()=>{focusRef.current=document.activeElement;revisionRef.current=s.revision;setInputDraft(workflow.input);setInputOpen(true);};
-  const closeEditor=(which,hasChanges)=>{
-    const close=()=>which==='settings'?setSettingsOpen(false):setInputOpen(false);
-    if(hasChanges)confirm('放弃未保存修改','关闭会放弃这次尚未保存的修改。',async()=>close());else close();
+  const openSettings=()=>{
+    focusRef.current=document.activeElement;revisionRef.current=s.revision;
+    setSettingsDraft(s.settings);setDiscardSettings(false);setSettingsOpen(true);
+  };
+  const closeSettings=()=>{
+    if(discardSettings)return;
+    if(settingsDirty)setDiscardSettings(true);
+    else setSettingsOpen(false);
   };
   const changeArea=next=>{
     // 分镜草稿在切换区域时保留组件状态。
@@ -100,7 +100,7 @@ export function IllustratedTaskDetail({workflow,onAction,onDirtyChange=()=>{}}) 
   return <div className="grid min-w-0 gap-5 text-fg-1 max-[760px]:[&_button]:min-h-11">
     <header className="grid gap-4 border-b border-line-1 pb-5">
       <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="mb-2 mt-0 text-xs font-semibold tracking-wide text-fg-3">旁白配图视频 · {s.settings.aspectRatio} · 25 fps</p><h1 className="m-0 break-words text-2xl font-semibold leading-tight">{workflow.title}</h1></div>
-        <Button variant="outline" disabled={busy||dirty} onClick={openSettings}><Settings2 size={16}/>制作设置</Button></div>
+        <Button variant="outline" disabled={busy||dirty} onClick={openSettings}><Settings2 size={16}/>本地任务参数</Button></div>
       <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-fg-2"><span>目标 {durationLabel(s.settings.targetDurationSeconds*1000)}</span>
         <span>{s.settings.narrationMode==='enabled'?'使用配音':'无配音'}</span><span>{s.settings.burnSubtitles?'烧录字幕':'不烧录字幕'}</span><span>{STYLES.find(style=>style.id===s.settings.stylePreset)?.label}</span>
         <span>制作版本 {s.revision}{dirty?' · 有未保存修改':''}</span></div>
@@ -119,22 +119,10 @@ export function IllustratedTaskDetail({workflow,onAction,onDirtyChange=()=>{}}) 
         <Button variant="outline" disabled={busy} onClick={()=>confirm('核实后授权一个新请求','原请求可能已经执行或计费。确认后只解除这一项的保护；下一步仍由你明确开始制作。',()=>send('authorize_retry',{attemptId:attempt.id,authorizeNewRequest:true}))}>核实后允许重新请求</Button></div>)}
     </div>:null}
     <Tabs value={area} onValueChange={changeArea}>
-      <TabsList className="grid h-auto w-full grid-cols-4 bg-surface-2 p-1" aria-label="旁白配图工作区域">
-        {[['input','输入与设置'],['plan','文稿与分镜'],['media','媒体与审核'],['preview','预览与导出']].map(([id,label])=><TabsTrigger key={id} value={id} className="min-h-11 whitespace-normal px-1 text-xs">{label}</TabsTrigger>)}
+      <TabsList className="grid h-auto w-full grid-cols-3 bg-surface-2 p-1" aria-label="旁白配图工作区域">
+        {[['plan','文稿与分镜'],['media','媒体与审核'],['preview','预览与导出']].map(([id,label])=><TabsTrigger key={id} value={id} className="min-h-11 whitespace-normal px-1 text-xs">{label}</TabsTrigger>)}
       </TabsList>
     </Tabs>
-    <section style={{display:area==='input'?'grid':'none'}} aria-label="输入与制作设置" className="grid gap-5">
-      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="m-0 text-lg font-semibold">输入与制作设置</h2><Button variant="outline" disabled={busy||dirty} onClick={openInput}>修改输入与参考文本</Button></div>
-      <p className="m-0 whitespace-pre-wrap break-words rounded-md border border-line-1 p-4 text-sm leading-relaxed">{workflow.input.content}</p>
-      <p className="m-0 text-xs text-fg-3">{workflow.input.inputMode==='topic'?'主题扩展':workflow.input.rewritePolicy==='preserve'?'保留原文':'润色口播'} · {workflow.input.useResearch?'联网资料开启':'联网资料关闭'}</p>
-      {workflow.input.referenceText?<details><summary className="cursor-pointer text-sm">参考文本 · {workflow.input.referenceRole==='facts'?'内容资料':'表达方式参考'}</summary><p className="whitespace-pre-wrap break-words text-sm text-fg-2">{workflow.input.referenceText}</p></details>:null}
-      {s.research.sources.length?<details><summary className="cursor-pointer text-sm">本次使用的联网资料</summary><ul className="grid gap-2 pl-5 text-sm">{s.research.sources.map((item,index)=><li key={index}><a href={item.url} target="_blank" rel="noreferrer" className="underline">{item.title||item.url}</a><p className="text-xs text-fg-3">{item.summary}</p></li>)}</ul></details>:null}
-      <div className="grid gap-3 border-t border-line-1 pt-4"><h3 className="m-0 text-sm font-semibold">任务冻结的模型选择</h3>
-        {['text','image','tts','asr'].map(type=><div key={type} className="flex flex-wrap justify-between gap-2 text-xs"><span>{{text:'文稿',image:'图片',tts:'配音',asr:'非原生字幕转写'}[type]}</span><span className="break-all text-fg-3">{s.models[type].configured?s.models[type].modelId:'未配置'}{type==='tts'&&s.settings.narrationMode==='disabled'?'（本任务不使用）':''}</span></div>)}
-        <p className="m-0 text-xs leading-relaxed text-fg-3">设置中心的后续改动不会替换排队请求或旧任务输入。声音参数变化会让相关配音与时间轴失效，适用图片继续保留。</p>
-        <Button variant="outline" className="justify-self-start" disabled={busy||dirty||!allowed('apply_models')} onClick={()=>confirm('应用设置中心的当前模型','将当前文本、图片、配音和转写选择保存为本任务的新快照。不会自动发送生成请求。',()=>send('apply_models'))}>应用当前模型设置到本任务</Button>
-      </div>
-    </section>
     <section style={{display:area==='plan'?'grid':'none'}} aria-label="文稿与分镜方案" className="grid gap-5">
       {s.plan?<IllustratedPlanEditor key={workflow.workflow_id+':'+viewGeneration} plan={s.plan} revision={s.revision} workflowId={workflow.workflow_id} busy={busy} onSave={extra=>send('save_plan',extra,true)} onDirtyChange={markPlanDirty}/>:null}
       <details><summary className="cursor-pointer py-2 text-sm font-semibold">{s.plan?'让模型生成修改版':'生成文稿与分镜'}</summary>
@@ -165,30 +153,23 @@ export function IllustratedTaskDetail({workflow,onAction,onDirtyChange=()=>{}}) 
       </div>:null}
     </section>
     <footer className="flex flex-wrap justify-between gap-3 border-t border-line-1 pt-4 text-xs text-fg-3"><span>任务保存在 MuseDock 本地 · 失败时保留已成功的媒体</span><Link to={'/api-calls?workflow='+encodeURIComponent(workflow.workflow_id)} className="text-ink underline">API 返回记录</Link></footer>
-    <Dialog open={settingsOpen} onOpenChange={value=>{if(!value&&!working&&!running)closeEditor('settings',settingsDirty&&!readbackRequired);}}>
-      <DialogContent className="grid h-[min(840px,calc(100dvh-32px))] w-[min(620px,calc(100vw-32px))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 max-[760px]:[&_button]:min-h-11" onCloseAutoFocus={e=>{e.preventDefault();focusRef.current?.focus();}}>
-        <DialogHeader className="border-b border-line-1 px-6 pb-4 pt-5 pr-12"><DialogTitle>本任务制作设置</DialogTitle><DialogDescription>字幕只更新显示与输出；配音与画风按影响范围更新。本次修改不会写入全局默认值。</DialogDescription></DialogHeader>
-        <div className="min-h-0 overflow-y-auto p-6" aria-label="制作设置滚动内容"><IllustratedSettings value={settingsDraft} onChange={setSettingsDraft} disabled={busy}/></div>
+    <Dialog open={settingsOpen} onOpenChange={value=>{if(!value&&!working&&!running)closeSettings();}}>
+      <DialogContent className="grid h-[min(840px,calc(100dvh-32px))] w-[min(960px,calc(100vw-32px))] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-[960px] max-[760px]:[&_button]:min-h-11" showCloseButton={!discardSettings} onCloseAutoFocus={e=>{e.preventDefault();focusRef.current?.focus();}}>
+        <DialogHeader className="border-b border-line-1 px-6 pb-4 pt-5 pr-12"><DialogTitle>本地任务参数</DialogTitle><DialogDescription>这里只调整本任务的制作设置，不修改创建时的输入与参考文本，也不会写回全局默认值。</DialogDescription></DialogHeader>
+        <div className="min-h-0 overflow-y-auto p-6" aria-label="本地任务参数滚动内容"><IllustratedSettings value={settingsDraft} onChange={setSettingsDraft} disabled={busy||discardSettings}/></div>
         <div className="flex flex-wrap justify-end gap-2 border-t border-line-1 bg-surface-1 px-6 py-4">
           {feedback?.error?<p role="alert" className="m-0 w-full text-sm text-danger">{feedback.text}</p>:null}
+          {settingsError?<p role="alert" className="m-0 w-full text-sm text-danger">{settingsError}</p>:null}
           {readbackRequired?<Button variant="outline" disabled={!!working} onClick={refreshReadback}>{working==='refresh'?'正在重新读取...':'刷新检查已保存版本'}</Button>:null}
-          <Button variant="outline" disabled={!!working||running} onClick={()=>closeEditor('settings',settingsDirty&&!readbackRequired)}>关闭设置</Button>
-          <Button disabled={busy||!settingsDirty||!!productionError(settingsDraft)} onClick={async()=>{const result=await send('save_settings',{settings:settingsDraft,expectedRevision:revisionRef.current});if(result)setSettingsOpen(false);}}>保存并回读制作设置</Button>
+          {discardSettings?<>
+            <p className="m-0 w-full text-sm text-warn" role="alert">制作设置尚未保存，关闭后会放弃修改。</p>
+            <Button variant="outline" onClick={()=>setDiscardSettings(false)}>继续编辑</Button>
+            <Button variant="destructive" onClick={()=>{setDiscardSettings(false);setSettingsOpen(false);}}>放弃修改</Button>
+          </>:<>
+            <Button variant="outline" disabled={!!working||running} onClick={closeSettings}>关闭</Button>
+            <Button disabled={busy||!settingsDirty||!!settingsError} onClick={async()=>{const result=await send('save_settings',{settings:settingsDraft,expectedRevision:revisionRef.current});if(result)setSettingsOpen(false);}}>保存并回读制作设置</Button>
+          </>}
         </div>
-      </DialogContent>
-    </Dialog>
-    <Dialog open={inputOpen} onOpenChange={value=>{if(!value&&!working&&!running)closeEditor('input',inputDirty&&!readbackRequired);}}>
-      <DialogContent className="max-h-[calc(100dvh-32px)] w-[min(620px,calc(100vw-32px))] overflow-y-auto" onCloseAutoFocus={e=>{e.preventDefault();focusRef.current?.focus();}}>
-        <DialogHeader><DialogTitle>修改输入与参考文本</DialogTitle><DialogDescription>保存后需要生成并确认新文稿；成功媒体历史会保留。</DialogDescription></DialogHeader>
-        <LabeledSelect label="输入类型" value={inputDraft.inputMode} disabled={busy} options={[{id:'topic',label:'主题'},{id:'text',label:'正文'}]} onChange={inputMode=>setInputDraft({...inputDraft,inputMode,rewritePolicy:inputMode==='topic'?'generate':'preserve'})}/>
-        <Textarea aria-label="修改创作输入" value={inputDraft.content} rows={6} maxLength={50000} disabled={busy} onChange={e=>setInputDraft({...inputDraft,content:e.target.value})}/>
-        {inputDraft.inputMode==='text'?<LabeledSelect label="正文处理" value={inputDraft.rewritePolicy} disabled={busy} options={[{id:'preserve',label:'保留原文'},{id:'polish',label:'润色口播'}]} onChange={rewritePolicy=>setInputDraft({...inputDraft,rewritePolicy})}/>:null}
-        <LabeledSelect label="参考文本用途" value={inputDraft.referenceRole} disabled={busy} options={[{id:'facts',label:'内容资料'},{id:'expression',label:'表达参考'}]} onChange={referenceRole=>setInputDraft({...inputDraft,referenceRole})}/>
-        <Textarea aria-label="修改参考文本" value={inputDraft.referenceText} rows={3} maxLength={40000} disabled={busy} onChange={e=>setInputDraft({...inputDraft,referenceText:e.target.value})}/>
-        <Button variant="outline" disabled={busy} aria-pressed={inputDraft.useResearch} onClick={()=>setInputDraft({...inputDraft,useResearch:!inputDraft.useResearch})}>{inputDraft.useResearch?'联网资料：开启':'联网资料：关闭'}</Button>
-        <Button disabled={busy||!inputDirty||!inputDraft.content.trim()} onClick={async()=>{const result=await send('save_input',{input:inputDraft,expectedRevision:revisionRef.current});if(result)setInputOpen(false);}}>保存输入为新版本</Button>
-        {feedback?.error?<p role="alert" className="text-sm text-danger">{feedback.text}</p>:null}
-        {readbackRequired?<Button disabled={!!working} variant="outline" onClick={refreshReadback}>{working==='refresh'?'正在重新读取...':'刷新检查已保存版本'}</Button>:null}
       </DialogContent>
     </Dialog>
     <ConfirmDialog open={!!confirmation} onOpenChange={value=>{if(!value)setConfirmation(null);}} title={confirmation?.title||'确认操作'} description={confirmation?.description}
