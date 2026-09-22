@@ -35,13 +35,14 @@ function setStage(record, id, status, message, now) {
     : stage);
 }
 
-function prepareAttempt(record, { input, productionPlan, revisionMessage = '', kind = 'model' }, now) {
+function prepareAttempt(record, { input, productionPlan, revisionMessage = '', kind = 'model', retryOfAttemptId = '' }, now) {
   const attempt = {
     id: crypto.randomUUID(), number: record.whiteboard.attempts.length + 1,
     role: input.inputMode === 'srt' ? 'storyboardPlanning' : 'contentDrafting',
     kind, status: 'prepared', createdAt: now, input, productionPlan, revisionMessage,
     parentIdentity: record.whiteboard.current?.identity || '',
     inputIdentity: sha256({ contractVersion: CONTRACT_VERSION, input, productionPlan, narrationService: record.whiteboard.narrationService }),
+    ...(retryOfAttemptId ? { retryOfAttemptId } : {}),
   };
   record.whiteboard.attempts.push(attempt);
   record.whiteboard.activeAttemptId = attempt.id;
@@ -249,7 +250,8 @@ async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
     if (payload.action === 'update_plan') await artifactStore.readArtifact(record, current, options.rootDir);
     if (payload.action === 'update_plan') record.whiteboard.narrationService = (await production.voiceSnapshot(options.services)).service;
     const kind = payload.action === 'update_plan' ? 'settings' : (payload.action === 'retry' || payload.action === 'authorize_new_attempt' ? latest.kind : 'model');
-    const attempt = prepareAttempt(record, { input, productionPlan, revisionMessage, kind }, now);
+    const retryOfAttemptId = payload.action === 'retry' && kind === 'model' ? latest.id : '';
+    const attempt = prepareAttempt(record, { input, productionPlan, revisionMessage, kind, retryOfAttemptId }, now);
     addMessage(record, 'user', payload.action === 'revise' ? revisionMessage : ({
       update_plan: '调整制作设置，并生成新的待确认版本。', retry: '重新生成内容与制作方案。',
       authorize_new_attempt: '我已确认可能产生重复费用，同意发起一次新的模型请求。',
@@ -365,6 +367,10 @@ async function runWhiteboardWorkflow(workflowId, options = {}) {
     claimed = true;
     const frozen = started.record;
     const candidateContract = candidateContractFor(attempt.input);
+    const retrySource = frozen.whiteboard.attempts.find(item => item.id === attempt.retryOfAttemptId);
+    const previousFailure = retrySource && retrySource.inputIdentity === attempt.inputIdentity
+      && retrySource.parentIdentity === attempt.parentIdentity
+      ? await artifactStore.readAttemptFailure(frozen, retrySource, rootDir) : null;
     const task = {
       schemaVersion: 1, role: attempt.role, contractVersion: CONTRACT_VERSION,
       inputIdentity: attempt.inputIdentity, input: attempt.input, productionPlan: attempt.productionPlan,
@@ -372,6 +378,7 @@ async function runWhiteboardWorkflow(workflowId, options = {}) {
       narrationService: frozen.whiteboard.narrationService,
       formalWritesAllowed: false, approvalWritesAllowed: false, allowedTools: [],
       allowedOutputs: ['candidate.json'], candidateSkeleton: candidateContract.skeleton, candidateSchema: candidateContract.schema,
+      ...(previousFailure ? { previousFailure } : {}),
     };
     const { result: taskSha256 } = await mutate(workflowId, options, async record => {
       const active = assertActiveAttempt(record, attempt);

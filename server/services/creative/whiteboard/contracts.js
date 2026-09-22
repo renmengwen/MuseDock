@@ -184,13 +184,16 @@ function textTokens(text) {
 function validateCandidate(candidate, input) {
   const errors = [];
   if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return ['候选必须是 JSON 对象。'];
-  const keys = (value, allowed, label) => {
-    if (Object.keys(value).some(key => !allowed.includes(key))) errors.push(`${label}包含合同外字段。`);
+  const keys = (value, allowed, label, fieldPath = '') => {
+    const extras = Object.keys(value).filter(key => !allowed.includes(key));
+    if (extras.length) errors.push(`${label}包含合同外字段：${extras.map(key => fieldPath ? `${fieldPath}.${key}` : key).join('、')}。只允许字段：${allowed.join('、')}。`);
   };
   keys(candidate, Object.keys(CANDIDATE_SKELETON), '候选');
   if (candidate.schemaVersion !== 1) errors.push('schemaVersion 必须为 1。');
   for (const key of ['title', 'summary']) {
-    if (typeof candidate[key] !== 'string' || !candidate[key].trim() || candidate[key].length > (key === 'title' ? 120 : 2000)) errors.push(`${key} 必须是有效文本且不能过长。`);
+    const maxLength = key === 'title' ? 120 : 2000;
+    if (!Object.hasOwn(candidate, key)) errors.push(`${key} 缺失，必须提供 1–${maxLength} 字符的非空文本。`);
+    else if (typeof candidate[key] !== 'string' || !candidate[key].trim() || candidate[key].length > maxLength) errors.push(`${key} 必须是 1–${maxLength} 字符的非空文本。`);
   }
   const cues = Array.isArray(candidate.cues) ? candidate.cues : [];
   const scenes = Array.isArray(candidate.scenes) ? candidate.scenes : [];
@@ -200,7 +203,7 @@ function validateCandidate(candidate, input) {
   const cueIds = new Set();
   cues.forEach((cue, index) => {
     if (!cue || typeof cue !== 'object' || Array.isArray(cue)) { errors.push(`字幕 ${index + 1} 必须为对象。`); return; }
-    keys(cue, ['id', 'text'], `字幕 ${index + 1}`);
+    keys(cue, ['id', 'text'], `字幕 ${index + 1}`, `cues[${index}]`);
     if (!validId(cue.id) || cueIds.has(cue.id)) errors.push(`字幕 ${index + 1} 的 id 无效或重复。`);
     cueIds.add(cue.id);
     if (typeof cue.text !== 'string' || !cue.text.trim() || cue.text.length > 3000) errors.push(`字幕 ${index + 1} 文本无效或过长。`);
@@ -210,16 +213,18 @@ function validateCandidate(candidate, input) {
   scenes.forEach((scene, index) => {
     if (!scene || typeof scene !== 'object' || Array.isArray(scene)) { errors.push(`分镜 ${index + 1} 必须为对象。`); return; }
     const handwritten = input.visualStylePreset === HANDWRITTEN_PRESET_ID;
-    keys(scene, ['id', 'title', 'cueIds', 'imagePrompt', ...(handwritten ? ['imageTexts'] : [])], `分镜 ${index + 1}`);
+    const fieldPath = `scenes[${index}]`;
+    keys(scene, ['id', 'title', 'cueIds', 'imagePrompt', ...(handwritten ? ['imageTexts'] : [])], `分镜 ${index + 1}`, fieldPath);
     if (!validId(scene.id) || sceneIds.has(scene.id)) errors.push(`分镜 ${index + 1} 的 id 无效或重复。`);
     sceneIds.add(scene.id);
-    if (typeof scene.title !== 'string' || !scene.title.trim() || scene.title.length > 120) errors.push(`分镜 ${index + 1} 缺少有效标题。`);
-    if (!Array.isArray(scene.cueIds) || !scene.cueIds.length) errors.push(`分镜 ${index + 1} 必须引用字幕。`);
+    if (typeof scene.title !== 'string' || !scene.title.trim() || scene.title.length > 120) errors.push(`分镜 ${index + 1} 的 ${fieldPath}.title 必须是 1–120 字符的非空标题。`);
+    if (!Array.isArray(scene.cueIds) || !scene.cueIds.length) errors.push(`分镜 ${index + 1} 的 ${fieldPath}.cueIds 必须是非空数组，按顺序引用 cues 中的字幕 id。`);
     else covered.push(...scene.cueIds);
-    if (typeof scene.imagePrompt !== 'string' || scene.imagePrompt.trim().length < 8 || scene.imagePrompt.length > 6000 || /同上|沿用上一幕|参见上一幕/.test(scene.imagePrompt)) errors.push(`分镜 ${index + 1} 需要独立、完整的画面描述。`);
+    if (!Object.hasOwn(scene, 'imagePrompt')) errors.push(`${fieldPath}.imagePrompt 缺失，必须使用此字段提供独立、完整的画面描述，不能改用 visualDescription 或 visualPrompt。`);
+    else if (typeof scene.imagePrompt !== 'string' || scene.imagePrompt.trim().length < 8 || scene.imagePrompt.length > 6000 || /同上|沿用上一幕|参见上一幕/.test(scene.imagePrompt)) errors.push(`${fieldPath}.imagePrompt 必须是 8–6000 字符的独立、完整画面描述，不能使用“同上”或引用上一幕。`);
     if (handwritten && (!Array.isArray(scene.imageTexts) || scene.imageTexts.length > 24
       || scene.imageTexts.some(text => typeof text !== 'string' || !text.trim() || text.length > 80))) {
-      errors.push(`分镜 ${index + 1} 的 imageTexts 必须列出需要逐字呈现的画内原文，最多 24 条、每条 1–80 字；无文字时用空数组。`);
+      errors.push(`${fieldPath}.imageTexts${Object.hasOwn(scene, 'imageTexts') ? ' 格式无效' : ' 缺失'}，必须用数组列出需要逐字呈现的画内原文，最多 24 条、每条 1–80 字；无文字时用空数组。`);
     }
   });
   if (JSON.stringify(covered) !== JSON.stringify(cues.map(cue => cue?.id))) errors.push('分镜必须按顺序完整覆盖每条字幕，不能遗漏、重复或重排。');

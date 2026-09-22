@@ -259,6 +259,124 @@ const cases = [
     assert.match(ctx.modelCalls[1].messages.at(-1).content, /scenes/);
     assert.equal((await ctx.read(id)).whiteboard.current, null);
   })],
+  ['字段诊断区分缺失与超长，并指出画面描述的错误字段名', () => {
+    const input = normalizeInput({ ...TOPIC, visualStylePreset: 'whiteboard-handwritten-explainer-v1' });
+    const candidate = candidateFor({ messages: [{}, { content: JSON.stringify({ input }) }] });
+    delete candidate.title;
+    candidate.scenes[0].visualDescription = candidate.scenes[0].imagePrompt;
+    delete candidate.scenes[0].imagePrompt;
+    const errors = validateCandidate(candidate, input);
+    assert.ok(errors.some(error => /^title 缺失/.test(error)));
+    assert.ok(errors.some(error => /scenes\[0\]\.visualDescription/.test(error) && /只允许字段/.test(error)));
+    assert.ok(errors.some(error => /^scenes\[0\]\.imagePrompt 缺失/.test(error)));
+    assert.ok(errors.some(error => /^scenes\[0\]\.imageTexts 缺失/.test(error)));
+    candidate.title = '长'.repeat(121);
+    assert.ok(validateCandidate(candidate, input).some(error => /^title 必须是 1–120/.test(error)));
+  }],
+  ['手动重试读取最近失败候选、冻结反馈且保留旧文件，每轮仍最多补正一次', () => fixture(async ctx => {
+    ctx.response = request => {
+      const candidate = candidateFor(request);
+      delete candidate.title;
+      candidate.scenes.forEach(scene => {
+        scene.visualDescription = `${scene.imagePrompt} 失败请求 ${ctx.modelCalls.length}`;
+        delete scene.imagePrompt;
+      });
+      return { success: true, text: JSON.stringify(candidate) };
+    };
+    const id = await ctx.create({ ...TOPIC, visualStylePreset: 'whiteboard-handwritten-explainer-v1', aspectRatio: '4:3' });
+    const snapshots = [];
+    for (let round = 0; round < 2; round += 1) {
+      if (round) assert.equal((await ctx.action(id, 'retry')).startTask, true);
+      assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).code, 'CANDIDATE_INVALID');
+      assert.equal(ctx.modelCalls.length, (round + 1) * 2);
+      const record = await store.readWorkflow(id, ctx.rootDir);
+      const attempt = record.whiteboard.attempts.at(-1);
+      const directory = path.join(ctx.rootDir, 'whiteboard-artifacts', id, attempt.id);
+      const files = await Promise.all(['task.json', 'candidate-response-0.json', 'candidate-response-1.json'].map(async name => {
+        const file = path.join(directory, name);
+        return { file, bytes: await fs.readFile(file, 'utf8') };
+      }));
+      snapshots.push({ attempt, files, candidate: JSON.parse(files[2].bytes).candidate });
+      const payload = JSON.parse(ctx.modelCalls[round * 2].messages[1].content);
+      if (!round) assert.equal(payload.previousFailure, undefined);
+      else {
+        assert.equal(payload.previousFailure.attemptId, snapshots[0].attempt.id);
+        assert.deepEqual(payload.previousFailure.candidate, snapshots[0].candidate);
+        assert.ok(payload.previousFailure.validationErrors.some(error => /^scenes\[0\]\.imagePrompt 缺失/.test(error)));
+      }
+    }
+    assert.equal((await ctx.action(id, 'retry')).startTask, true);
+    ctx.response = request => {
+      const candidate = candidateFor(request);
+      candidate.scenes.forEach(scene => { scene.imageTexts = []; });
+      return { success: true, text: JSON.stringify(candidate) };
+    };
+    const completed = await workflows.runCreativeWorkflow(id, ctx.options);
+    assert.equal(completed.status, 'waiting_approval', completed.message);
+    assert.equal(completed.whiteboard.initialApproval, null);
+    assert.equal(ctx.modelCalls.length, 5);
+    const payload = JSON.parse(ctx.modelCalls[4].messages[1].content);
+    assert.equal(payload.previousFailure.attemptId, snapshots[1].attempt.id);
+    assert.deepEqual(payload.previousFailure.candidate, snapshots[1].candidate);
+    assert.equal(payload.previousFailure.errorCode, 'CANDIDATE_INVALID');
+    assert.equal(payload.previousFailure.candidate.previousFailure, undefined);
+    const taskFile = path.join(ctx.rootDir, 'whiteboard-artifacts', id, completed.whiteboard.current.attemptId, 'task.json');
+    const task = JSON.parse(await fs.readFile(taskFile, 'utf8'));
+    assert.deepEqual(task.previousFailure, payload.previousFailure);
+    assert.equal(task.previousFailure.candidateSha256, sha256(snapshots[1].files[2].bytes));
+    for (const snapshot of snapshots) for (const file of snapshot.files) assert.equal(await fs.readFile(file.file, 'utf8'), file.bytes);
+  })],
+  ['旧候选缺失时重试仍携带已保存的失败原因', () => fixture(async ctx => {
+    ctx.response = () => ({ success: true, text: '{}' });
+    const id = await ctx.create();
+    await workflows.runCreativeWorkflow(id, ctx.options);
+    const failed = (await store.readWorkflow(id, ctx.rootDir)).whiteboard.attempts.at(-1);
+    const candidatePath = path.join(ctx.rootDir, 'whiteboard-artifacts', id, failed.id, 'candidate-response-1.json');
+    await fs.unlink(candidatePath);
+    await ctx.action(id, 'retry');
+    ctx.response = null;
+    assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+    const previousFailure = JSON.parse(ctx.modelCalls.at(-1).messages[1].content).previousFailure;
+    assert.equal(previousFailure.message, failed.message);
+    assert.equal(previousFailure.errorCode, 'CANDIDATE_INVALID');
+    assert.equal(previousFailure.candidate, undefined);
+    assert.equal(ctx.modelCalls.length, 3);
+  })],
+  ['无法解析的 JSON 也能作为失败资料带入下一轮', () => fixture(async ctx => {
+    const rawText = '{"scenes":';
+    ctx.response = () => ({ success: true, text: rawText });
+    const id = await ctx.create();
+    assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).code, 'CANDIDATE_INVALID');
+    await ctx.action(id, 'retry');
+    ctx.response = null;
+    assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+    const previousFailure = JSON.parse(ctx.modelCalls.at(-1).messages[1].content).previousFailure;
+    assert.equal(previousFailure.candidate.invalidJson, rawText);
+    assert.deepEqual(previousFailure.validationErrors, ['响应必须是一个完整且有效的 JSON 对象。']);
+  })],
+  ['输入改变后的重试不混入旧候选与旧失败反馈', () => fixture(async ctx => {
+    ctx.response = () => ({ success: true, text: '{}' });
+    const id = await ctx.create();
+    await workflows.runCreativeWorkflow(id, ctx.options);
+    const content = '如何形成长期阅读习惯';
+    await ctx.action(id, 'retry', { input: { content } });
+    ctx.response = null;
+    assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+    const payload = JSON.parse(ctx.modelCalls.at(-1).messages[1].content);
+    assert.equal(payload.input.content, content);
+    assert.equal(payload.previousFailure, undefined);
+  })],
+  ['失败来源的冻结输入文件变化时在新请求前停止', () => fixture(async ctx => {
+    ctx.response = () => ({ success: true, text: '{}' });
+    const id = await ctx.create();
+    await workflows.runCreativeWorkflow(id, ctx.options);
+    const failed = (await store.readWorkflow(id, ctx.rootDir)).whiteboard.attempts.at(-1);
+    await fs.appendFile(path.join(ctx.rootDir, 'whiteboard-artifacts', id, failed.id, 'task.json'), ' ');
+    await ctx.action(id, 'retry');
+    ctx.response = null;
+    assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).code, 'ARTIFACT_INVALID');
+    assert.equal(ctx.modelCalls.length, 2);
+  })],
   ['文件变化时拒绝批准与历史读取', () => fixture(async ctx => {
     const id = await ctx.create();
     await workflows.runCreativeWorkflow(id, ctx.options);
@@ -282,6 +400,7 @@ const cases = [
     await ctx.action(id, 'authorize_new_attempt', { confirmed: true });
     assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
     assert.equal(ctx.modelCalls.length, 2);
+    assert.equal(JSON.parse(ctx.modelCalls.at(-1).messages[1].content).previousFailure, undefined);
   })],
   ['服务重启保留待确认，处理中请求恢复为未知结果', () => fixture(async ctx => {
     const id = await ctx.create();

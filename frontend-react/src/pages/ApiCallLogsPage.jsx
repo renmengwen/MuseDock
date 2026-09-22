@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Check, Copy, FileClock, Loader2, RefreshCw } from 'lucide-react';
 import { api } from '@/api/client.js';
+import { ApiResponseBody } from '@/components/ApiResponseBody.jsx';
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select.jsx';
@@ -12,7 +13,6 @@ import { cn } from '@/lib/utils.js';
 const STATES = { all: '全部状态', success: '成功', error: '失败或中断', invalid: '返回不规范', pending: '接收中' };
 const CATEGORIES = { text: '文本 / 视觉模型', image: '图片生成', tts: '语音合成', transcription: '音频转写',
   research: '搜索 / 素材查询', source: '来源读取', download: '文件下载', api: 'API 请求' };
-const PREVIEW_CHARACTERS = 100000;
 const timeLabel = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '尚未完成';
 const durationLabel = value => value < 1000 ? `${value || 0} 毫秒` : `${(value / 1000).toFixed(1)} 秒`;
 
@@ -212,8 +212,8 @@ export function ApiCallLogsPage() {
               {detail.transport_status === 'incomplete' ? <p className="m-0 text-sm text-amber-800">这条记录不完整，正文仅包含已取得的部分；没有正文时不能推断供应商未执行请求。</p> : null}
               {detail.body_truncated ? <p className="m-0 text-sm text-amber-800">响应超过单条记录的 64 MiB 上限，已保存前 64 MiB；复制的正文也只包含已保存部分。</p> : null}
               <div className="grid min-w-0 gap-2"><h2 className="m-0 text-sm font-semibold">返回正文（已脱敏{detail.body_encoding === 'base64' ? '，二进制以 Base64 保存' : ''}）</h2>
-                {detail.body_text.length > PREVIEW_CHARACTERS ? <p className="m-0 text-xs text-fg-3">当前预览前 10 万字符，复制按钮会复制这条记录中保存的全部正文。</p> : null}
-                <pre tabIndex={0} className="m-0 max-h-[42vh] overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-4 font-mono text-xs leading-6 text-slate-100 [overflow-wrap:anywhere]" aria-label="API 返回正文">{detail.body_text.slice(0, PREVIEW_CHARACTERS) || (detail.state === 'pending' ? '正在接收返回，可稍后刷新详情。' : detail.http_status == null ? '未收到 HTTP 响应。' : '未取得返回正文。')}</pre>
+                <ApiResponseBody key={detail.id} bodyText={detail.body_text} encoding={detail.body_encoding}
+                  emptyMessage={detail.state === 'pending' ? '正在接收返回，可稍后刷新详情。' : detail.http_status == null ? '未收到 HTTP 响应。' : '未取得返回正文。'} />
               </div>
               <details className="rounded-lg border border-line-1 p-3 text-xs"><summary className="cursor-pointer font-medium">响应头（已脱敏）</summary><pre className="mb-0 overflow-auto whitespace-pre-wrap leading-6 [overflow-wrap:anywhere]">{JSON.stringify(detail.response_headers, null, 2)}</pre></details>
             </div>
