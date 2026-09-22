@@ -1,3 +1,4 @@
+import { ProductionDefaultsSettings } from '../components/settings/ProductionDefaultsSettings.jsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -14,6 +15,7 @@ const SECTIONS = [
   { id: 'overview', label: '总览' },
   { id: 'creative', label: 'HyperFrames' },
   { id: 'whiteboard', label: '白板动画' },
+  { id: 'production', label: '共用制作默认值' },
   { id: 'models', label: '模型配置' },
   { id: 'system', label: '系统' },
 ];
@@ -41,6 +43,10 @@ export function SettingsPage() {
   const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
   const saveAppLock = useRef(false);
   const modelSettings = useSettings();
+  const [productionDirty, setProductionDirty] = useState(false);
+  const productionDirtyRef = useRef(false);
+  const pendingSectionRef = useRef('');
+  const markProductionDirty = useCallback(value => { productionDirtyRef.current = value; setProductionDirty(value); }, []);
 
   // 从编辑器等页面进入时（Link state.from），返回按钮回到来路而不是固定回创作台
   const backTarget = typeof location.state?.from === 'string' && location.state.from ? location.state.from : '/creative';
@@ -48,6 +54,7 @@ export function SettingsPage() {
 
   // 分区切换写回 ?section=，刷新/分享不丢当前位置
   const selectSection = useCallback((sectionId) => {
+    if (productionDirtyRef.current) { pendingSectionRef.current = sectionId; setConfirmLeaveOpen(true); return; }
     setActiveSection(sectionId);
     const url = new URL(window.location.href);
     url.searchParams.set('section', sectionId);
@@ -65,17 +72,17 @@ export function SettingsPage() {
 
   // 模型配置有未保存草稿时，关闭/刷新页面前提醒
   useEffect(() => {
-    if (!modelSettings.dirty) return undefined;
+    if (!modelSettings.dirty && !productionDirty) return undefined;
     const handler = (event) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [modelSettings.dirty]);
+  }, [modelSettings.dirty, productionDirty]);
 
   function requestLeave() {
-    if (modelSettings.dirty) {
+    if (modelSettings.dirty || productionDirty) {
       setConfirmLeaveOpen(true);
       return;
     }
@@ -159,6 +166,7 @@ export function SettingsPage() {
       const response = await api.saveAppSettings(nextSettings);
       setAppSettings(unwrapData(response));
       setStatus({ type: 'success', message: successMessage });
+      return unwrapData(response);
     } catch (error) {
       setStatus({ type: 'error', message: `${failurePrefix}：${error.message || '未知错误'}` });
     } finally {
@@ -198,6 +206,8 @@ export function SettingsPage() {
         saving={savingApp} onChange={setAppSettings} onSave={saveAppSettings} />;
     }
 
+    if (activeSection === 'production') return <ProductionDefaultsSettings appSettings={appSettings} disabled={loadingApp || savingApp} saving={savingApp} onSave={saveAppSettings} onDirtyChange={markProductionDirty}/>;
+
     if (activeSection === 'models') {
       return <ModelSettings modelSettings={modelSettings} />;
     }
@@ -220,7 +230,7 @@ export function SettingsPage() {
       <div className="mb-5 flex items-start justify-between gap-4 max-[720px]:flex-col">
         <div>
           <h2 className="m-0 text-xl font-bold text-[#20242a]">设置中心</h2>
-          <p className="mt-1 text-[13px] text-[#69717e]">分别管理 HyperFrames 与白板动画设置、共享模型和本地系统状态。</p>
+          <p className="mt-1 text-[13px] text-[#69717e]">管理三种创作模式、共用制作默认值、模型与本地系统状态。</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="min-w-[92px] rounded-lg border border-[#e7e9ee] bg-white px-3.5 py-2.5 text-center">
@@ -261,8 +271,8 @@ export function SettingsPage() {
       <ConfirmDialog
         open={confirmLeaveOpen}
         onOpenChange={setConfirmLeaveOpen}
-        title="模型配置有未保存的修改"
-        description="离开设置中心将丢失这些修改。可先点击「保存模型配置」写入配置文件。"
+        title="设置有未保存的修改"
+        description="离开会丢失尚未保存的模型或制作默认值修改，请先保存或明确放弃。"
         destructive
         confirmText="放弃修改并离开"
         cancelText="留在设置中心"

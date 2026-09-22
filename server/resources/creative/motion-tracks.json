@@ -1,0 +1,13 @@
+[
+  { "id": "still", "label": "保持静止", "dx": 0, "dy": 0, "kind": "still" },
+  { "id": "zoom_in", "label": "缓慢推近", "dx": 0, "dy": 0, "kind": "zoom" },
+  { "id": "zoom_out", "label": "缓慢拉远", "dx": 0, "dy": 0, "kind": "zoom" },
+  { "id": "pan_left", "label": "向左平移", "dx": -1, "dy": 0, "kind": "pan" },
+  { "id": "pan_right", "label": "向右平移", "dx": 1, "dy": 0, "kind": "pan" },
+  { "id": "pan_up", "label": "向上平移", "dx": 0, "dy": -1, "kind": "pan" },
+  { "id": "pan_down", "label": "向下平移", "dx": 0, "dy": 1, "kind": "pan" },
+  { "id": "pan_up_left", "label": "左上斜向平移", "dx": -1, "dy": -1, "kind": "pan" },
+  { "id": "pan_up_right", "label": "右上斜向平移", "dx": 1, "dy": -1, "kind": "pan" },
+  { "id": "pan_down_left", "label": "左下斜向平移", "dx": -1, "dy": 1, "kind": "pan" },
+  { "id": "pan_down_right", "label": "右下斜向平移", "dx": 1, "dy": 1, "kind": "pan" }
+]

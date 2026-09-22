@@ -1,5 +1,6 @@
 const HYPERFRAMES_MODE = 'hyperframes-v1';
 const WHITEBOARD_MODE = 'whiteboard-stream-v1';
+const ILLUSTRATED_MODE = 'illustrated-narration-v1';
 
 const HYPERFRAMES_STAGES = [
   ['source', '准备来源资料'], ['research', '联网研究'], ['assets', '素材分析'],
@@ -26,6 +27,13 @@ const MODES = [
     stageSchema: WHITEBOARD_STAGES, detailView: 'whiteboard-agent',
     capabilities: { videoProduction: true, phase0Approval: true },
   },
+  {
+    id: ILLUSTRATED_MODE, displayName: '旁白配图视频', contractVersion: 1,
+    description: '先确认文稿与配音，再选择配图、调整轻运镜，预览并导出视频；也支持无配音制作。',
+    stageSchema: require('./illustrated/contracts').STAGES, detailView: 'illustrated-narration',
+    capabilities: { videoProduction: true, phase0Approval: true, optionalNarration: true },
+  },
+
 ];
 
 function getCreationMode(id = HYPERFRAMES_MODE) {
@@ -56,4 +64,4 @@ function readModeSnapshot(record = {}) {
   };
 }
 
-module.exports = { HYPERFRAMES_MODE, WHITEBOARD_MODE, HYPERFRAMES_STAGES, MODES, getCreationMode, createModeSnapshot, readModeSnapshot };
+module.exports = { HYPERFRAMES_MODE, WHITEBOARD_MODE, ILLUSTRATED_MODE, HYPERFRAMES_STAGES, MODES, getCreationMode, createModeSnapshot, readModeSnapshot };

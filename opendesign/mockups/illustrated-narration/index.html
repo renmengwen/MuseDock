@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MuseDock · 旁白配图视频</title>
+  <link rel="stylesheet" href="../../design-systems/tech-minimal-product/tokens/colors_and_type.css">
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:var(--page-bg);color:var(--text-primary);font:var(--body)}
+    main{max-width:1300px;margin:auto;padding:32px}header{display:flex;align-items:start;justify-content:space-between;gap:20px}
+    h1{font:var(--h2);margin:4px 0 10px}p{margin:0;line-height:1.65;color:var(--text-secondary)}.eyebrow{font:var(--caption);color:var(--text-muted)}
+    button,a{font:inherit}button{min-height:44px;border:1px solid var(--border-subtle);border-radius:6px;background:var(--surface-primary);padding:8px 16px;cursor:pointer;color:var(--text-primary)}
+    button[aria-pressed="true"]{background:var(--accent-primary);border-color:var(--accent-primary);color:var(--fg-inverse-1)}
+    button:focus-visible,a:focus-visible{outline:2px solid var(--accent-primary);outline-offset:3px}
+    nav,.actions{display:flex;flex-wrap:wrap;gap:8px}nav{margin:28px 0 16px}.toolbar{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:12px}
+    .screen{max-height:78vh;overflow:auto;border:1px solid var(--border-subtle);border-radius:8px;background:var(--surface-primary);margin:0 auto}
+    .screen.mobile{max-width:390px}.screen img{display:block;width:100%;height:auto}.caption{font-size:12px;color:var(--text-muted);margin:12px 0 28px}
+    .media{margin-top:28px;border-top:1px solid var(--border-subtle);padding-top:24px;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:24px}
+    h2{font:var(--h3);margin:0 0 12px}video{display:block;max-height:65vh;width:100%;background:var(--surface-dark-1);border-radius:6px}
+    aside{display:grid;align-content:start;gap:16px}dl{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;margin:0;font-size:13px}dt{color:var(--text-muted)}dd{margin:0}
+    footer{border-top:1px solid var(--border-subtle);margin-top:32px;padding-top:16px;font-size:12px;color:var(--text-muted)}a{color:var(--accent-primary)}
+    @media(max-width:700px){main{padding:20px 16px}header{display:block}.media{grid-template-columns:1fr}.toolbar{align-items:start;flex-direction:column}nav button{flex:1;min-width:40%}}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><div class="eyebrow">MuseDock · OpenDesign / tech-minimal-product</div><h1>旁白配图视频</h1><p>从文稿到图片、运动和成片，在同一条任务中完成。保留现有侧栏，按制作阶段逐步确认。</p></div>
+      <div class="eyebrow">真实 React 界面<br>桌面与 390px</div>
+    </header>
+    <nav aria-label="已实现的工作区域">
+      <button type="button" data-scene="create" aria-pressed="true">01 输入与设置</button>
+      <button type="button" data-scene="plan" aria-pressed="false">02 文稿与分镜</button>
+      <button type="button" data-scene="media" aria-pressed="false">03 媒体与审核</button>
+      <button type="button" data-scene="preview" aria-pressed="false">04 预览与导出</button>
+    </nav>
+    <div class="toolbar"><p id="description">目标时长、配音和画风在创建时明确；字幕、BGM 与运动在同一份制作设置中。</p>
+      <div class="actions" aria-label="界面宽度"><button type="button" data-width="desktop" aria-pressed="true">桌面</button><button type="button" data-width="mobile" aria-pressed="false">390px</button></div>
+    </div>
+    <div class="screen"><img id="screen" src="01-create-desktop.png" alt="旁白配图视频创建界面"></div>
+    <p class="caption">以上为已实现应用的浏览器截图，可在画面内部滚动。图片候选使用静态浏览；实际运动在下方可播放的视频中核对。</p>
+    <details>
+      <summary>查看有声流程：完整配音试听与实际时长确认</summary>
+      <p class="caption">这是实际界面的浏览器验收截图，音频数据为测试夹具。真实供应商音色仍待联调与人工试听。</p>
+      <div class="screen"><img src="08-voice-review.png" alt="完整配音试听、时长偏差与先配音后生图的真实界面"></div>
+    </details>
+    <section class="media">
+      <div><h2>实际渲染片段</h2><video id="motion-video" src="real-photo-16x9.mp4" controls preload="metadata" aria-label="真实照片运镜与字幕验证片段"></video></div>
+      <aside>
+        <div class="actions" aria-label="样片画幅"><button type="button" data-video="16x9" aria-pressed="true">16:9</button><button type="button" data-video="9x16" aria-pressed="false">9:16</button><button type="button" data-video="4x3" aria-pressed="false">4:3</button></div>
+        <p>轻微运动 6%，缓入缓出，统一短淡化。字幕固定在画面坐标中。预览与导出使用同一渲染器。</p>
+        <dl><dt>画幅</dt><dd>1920×1080 / 1080×1920 / 1440×1080</dd><dt>运动</dt><dd>关闭、统一、每张随机；单张覆盖与锁定</dd><dt>声音</dt><dd>配音、BGM、字幕分别控制</dd><dt>恢复</dt><dd>成功媒体保留，当前与历史版本分开展示</dd></dl>
+        <p class="caption">样片是本地渲染验证：公开 OpenCV 照片 + Windows SAPI 中文语音，字幕使用明确标记的计划显示时间。未调用真实文本、图片或配音供应商，真实模型画风和音色仍需联调与人工验收。</p>
+      </aside>
+    </section>
+    <footer>此设计说明对应本次实际实现，不替代真实模型或人工验收。<a href="../../design-systems/tech-minimal-product/SKILL.md">设计系统</a></footer>
+  </main>
+  <script>
+    const screens={
+      create:{desktop:"01-create-desktop.png",mobile:"01-create-mobile.png",description:"目标时长、配音和画风在创建时明确；字幕、BGM 与运动在同一份制作设置中。"},
+      plan:{desktop:"02-plan-desktop.png",mobile:"05-plan-mobile.png",description:"文稿与画面按稳定身份对应，支持详情编辑、拆分、合并和排序；保存与批准分别操作。"},
+      media:{desktop:"03-media-desktop.png",mobile:"03-media-mobile.png",description:"先确认配音实际时长或无配音时间轴，再准备图片。保留候选，单图轨迹可覆盖和锁定。"},
+      preview:{desktop:"04-preview-desktop.png",mobile:"04-preview-mobile.png",description:"播放真正的 MP4，检查声音、字幕、运动与裁切；明确确认后导出同一版本。"}
+    };
+    let stage="create",width="desktop";
+    function render(){document.getElementById("screen").src=screens[stage][width];document.getElementById("description").textContent=screens[stage].description;document.querySelector(".screen").classList.toggle("mobile",width==="mobile");}
+    document.querySelectorAll("[data-scene]").forEach(button=>button.addEventListener("click",()=>{stage=button.dataset.scene;document.querySelectorAll("[data-scene]").forEach(item=>item.setAttribute("aria-pressed",String(item===button)));render();}));
+    document.querySelectorAll("[data-width]").forEach(button=>button.addEventListener("click",()=>{width=button.dataset.width;document.querySelectorAll("[data-width]").forEach(item=>item.setAttribute("aria-pressed",String(item===button)));render();}));
+    document.querySelectorAll("[data-video]").forEach(button=>button.addEventListener("click",()=>{document.getElementById("motion-video").src="real-photo-"+button.dataset.video+".mp4";document.querySelectorAll("[data-video]").forEach(item=>item.setAttribute("aria-pressed",String(item===button)));}));
+  </script>
+</body>
+</html>

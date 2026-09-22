@@ -1,4 +1,5 @@
-import { useId, useState } from 'react';
+import { ProductionSettingsFields, LabeledSelect } from '../shared/ProductionSettingsFields.jsx';
+import { useState } from 'react';
 import { Monitor, Settings2, Smartphone } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { Input } from '@/components/ui/input.jsx';
@@ -9,70 +10,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { validateWhiteboardDraft, validateSubtitleSettings, whiteboardSubtitleStyle, WHITEBOARD_CANVAS_FORMATS } from './whiteboardForm.js';
 import { cn } from '@/lib/utils.js';
 
-export function LabeledSelect({ label, value, onChange, options, disabled = false }) {
-  return (
-    <div className="grid min-w-0 gap-1.5">
-      <span className="text-xs font-semibold text-fg-2">{label}</span>
-      <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger aria-label={label} className="bg-surface-1 max-[760px]:min-h-11"><SelectValue /></SelectTrigger>
-        <SelectContent>{options.map(option => <SelectItem key={option.id} value={option.id} className="max-[760px]:min-h-11">{option.label || option.displayName}</SelectItem>)}</SelectContent>
-      </Select>
-    </div>
-  );
-}
+export { LabeledSelect } from '../shared/ProductionSettingsFields.jsx';
 
 export function ProductionPlanFields({ value, onChange, disabled = false, aspectRatio = '16:9' }) {
-  const id = useId();
   const change = (key, next) => onChange({ ...value, [key]: next });
-  const subtitleStyle = whiteboardSubtitleStyle(value, aspectRatio);
-  const defaultSize = whiteboardSubtitleStyle({}, aspectRatio).fontSize;
-  const subtitleError = validateSubtitleSettings(value);
-  const subtitlesDisabled = disabled || value.burnSubtitles === false;
-  return (
-    <div className="grid gap-4">
-      <LabeledSelect label="旁白方式" value={value.narrationMode || 'enabled'} disabled={disabled} onChange={next => change('narrationMode', next)} options={[{ id: 'enabled', label: '使用设置中的完整旁白服务' }, { id: 'disabled', label: '不使用旁白' }]} />
-      {value.narrationMode === 'disabled' ? <p className="m-0 text-xs leading-relaxed text-fg-3">主题和正文按目标时长安排字幕与分镜；SRT 保留输入时间轴。关闭背景音乐可制作完全静音的视频。</p> : null}
-      <div className="grid gap-1.5">
-        <LabeledSelect label="背景音乐" value={value.bgmMode || 'disabled'} disabled={disabled} onChange={next => change('bgmMode', next)} options={[{ id: 'disabled', label: '不使用 BGM' }, { id: 'enabled', label: '使用 BGM' }]} />
-        <p className="m-0 text-xs leading-relaxed text-fg-3">开启后，成片加入内置轻钢琴音乐，低音量播放并首尾淡入淡出。完整旁白试听不含背景音乐。</p>
-      </div>
-      <LabeledSelect label="画笔显示" value={value.handDisplayMode} disabled={disabled} onChange={next => change('handDisplayMode', next)} options={[{ id: 'show', label: '显示画笔' }, { id: 'hide', label: '隐藏画笔' }]} />
-      <LabeledSelect label="成片字幕" value={String(value.burnSubtitles)} disabled={disabled} onChange={next => change('burnSubtitles', next === 'true')} options={[{ id: 'true', label: '烧录字幕' }, { id: 'false', label: '不烧录字幕' }]} />
-      <div className="grid gap-3 rounded-lg border border-line-1 p-3" role="group" aria-label="字幕样式">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="grid content-start gap-1.5">
-            <label htmlFor={`${id}-subtitle-color`} className="text-xs font-semibold text-fg-2">字幕颜色</label>
-            <div className="flex min-w-0 items-center gap-2">
-              <Input id={`${id}-subtitle-color`} aria-label="字幕颜色" type="color" value={subtitleStyle.color} disabled={subtitlesDisabled}
-                className="w-12 shrink-0 cursor-pointer p-1 max-[760px]:min-h-11" onChange={event => change('subtitleColor', event.target.value.toUpperCase())} />
-              <span className="min-w-0 font-mono text-xs text-fg-3">{subtitleStyle.color}</span>
-            </div>
-          </div>
-          <div className="grid content-start gap-1.5">
-            <label htmlFor={`${id}-subtitle-size`} className="text-xs font-semibold text-fg-2">字幕字号（px）</label>
-            <Input id={`${id}-subtitle-size`} aria-label="字幕字号" type="number" min={24} max={96} step={1} inputMode="numeric"
-              value={value.subtitleFontSize ?? ''} placeholder={`默认 ${defaultSize}`} disabled={subtitlesDisabled}
-              aria-invalid={Boolean(subtitleError)} aria-describedby={subtitleError ? `${id}-subtitle-error` : `${id}-subtitle-help`}
-              className="max-[760px]:min-h-11" onChange={event => change('subtitleFontSize', event.target.value === '' ? null : Number(event.target.value))} />
-          </div>
-        </div>
-        <p id={`${id}-subtitle-help`} className="m-0 text-xs leading-relaxed text-fg-3">{value.burnSubtitles === false
-          ? '开启成片字幕后可调整样式，已选颜色和字号会保留。'
-          : `字号可填 24–96，留空使用默认 ${defaultSize} px。字幕始终按短句单行显示。`}</p>
-        {subtitleError ? <p id={`${id}-subtitle-error`} className="m-0 text-xs text-danger" role="alert">{subtitleError}</p> : null}
-        <div className={cn('flex min-h-20 items-center justify-center rounded-md bg-[#F5EBD7] px-3 py-3', value.burnSubtitles === false && 'opacity-40')} aria-label="字幕样式预览">
-          <span className="whitespace-nowrap leading-tight" style={{ color: subtitleStyle.color, fontSize: `${subtitleStyle.fontSize / 2}px`,
-            WebkitTextStroke: '1px #000000', paintOrder: 'stroke fill' }}>单行字幕</span>
-        </div>
-      </div>
-      <LabeledSelect label="后续确认方式" value={String(value.agentApprovalEnabled)} disabled={disabled} onChange={next => change('agentApprovalEnabled', next === 'true')} options={[{ id: 'false', label: '由我逐阶段确认' }, { id: 'true', label: '授权 AI 在允许范围内推进' }]} />
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 border-t border-line-1 pt-3 text-xs text-fg-2">
-        <dt>生图方式</dt><dd>逐幕独立生成</dd>
-        <dt>旁白服务</dt><dd>{value.narrationMode === 'disabled' ? '无需配置旁白服务' : '后续使用设置中启用的服务'}</dd>
-      </dl>
-      <p className="m-0 text-xs leading-relaxed text-fg-3">{value.narrationMode === 'disabled' ? '这些选项会随制作方案一起确认。确认后先检查字幕与分镜时长，再制作连续落墨动画与成片。' : '这些选项会随制作方案一起确认。确认后可制作完整旁白、连续落墨动画与成片；豆包完整旁白支持 120 秒以内方案。'}</p>
-    </div>
-  );
+  return <div className="grid gap-4">
+    <ProductionSettingsFields value={value} onChange={onChange} disabled={disabled} aspectRatio={aspectRatio}/>
+    <LabeledSelect label="画笔显示" value={value.handDisplayMode} disabled={disabled} onChange={next => change('handDisplayMode', next)} options={[{ id: 'show', label: '显示画笔' }, { id: 'hide', label: '隐藏画笔' }]}/>
+    <LabeledSelect label="后续确认方式" value={String(value.agentApprovalEnabled)} disabled={disabled} onChange={next => change('agentApprovalEnabled', next === 'true')} options={[{ id: 'false', label: '由我逐阶段确认' }, { id: 'true', label: '授权 AI 在允许范围内推进' }]}/>
+    <p className="m-0 text-xs leading-relaxed text-fg-3">逐幕独立生图。SRT 保留输入时间轴；确认方案后制作完整旁白或无旁白时间轴、连续落墨动画与成片。白板豆包完整旁白支持 120 秒以内方案。</p>
+  </div>;
 }
 
 const INPUTS = [

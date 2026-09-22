@@ -205,6 +205,51 @@ router.get('/modes', async (req, res) => {
   return res.json(await (service.listCreationModes || defaultCreativeWorkflows.listCreationModes)());
 });
 
+router.post('/:workflow_id/illustrated/actions', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) return res.status(400).json(validation);
+  const workflowId = validation.workflow_id, service = getService(req), registry = getTaskRegistry(req);
+  if (req.body?.action !== 'cancel' && registry?.activeTaskForWorkflow(workflowId)?.status === 'running') {
+    return res.status(409).json({ success: false, message: '当前操作仍在执行，请等待结果后再修改。' });
+  }
+  try {
+    const result = await service.actOnIllustratedWorkflow(workflowId, req.body || {});
+    if (!result?.success) return res.status(getStatusCode(result)).json(result);
+    if (!result.startTask) return res.json(result);
+    const started = await getTaskService(req).startCreativeWorkflowTask(workflowId, { registry, services: { creativeWorkflows: service } });
+    if (!started?.success) {
+      await service.patchCreativeWorkflowTaskSummary(workflowId, { task_status: 'failed', fail_running_stages: true });
+      return res.status(500).json({ success: false, message: '版本已保存，但后台任务启动失败，请刷新后继续。' });
+    }
+    return res.status(202).json({ ...result, task_id: started.task_id, active_task: started.active_task });
+  } catch {
+    return res.status(500).json({ success: false, message: '旁白配图操作失败，请检查服务与本地存储后重试。' });
+  }
+});
+
+router.post('/:workflow_id/illustrated/images', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) return res.status(400).json(validation);
+  try {
+    const result = await getService(req).uploadIllustratedImage(validation.workflow_id, req.body || {});
+    return res.status(result.success ? 200 : getStatusCode(result)).json(result);
+  } catch {
+    return res.status(500).json({ success: false, message: '图片上传失败，请检查文件和本地存储后重试。' });
+  }
+});
+
+router.get('/:workflow_id/illustrated/media/:artifact_id', async (req, res) => {
+  const validation = validateWorkflowId(req.params.workflow_id);
+  if (!validation.success) return res.status(400).json(validation);
+  const result = await getService(req).getIllustratedMediaFile(validation.workflow_id, req.params.artifact_id);
+  if (!result.success) return res.status(getStatusCode(result)).json(result);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+  res.type(result.artifact.mime || 'application/octet-stream');
+  if (req.query.download === '1') return res.download(result.file_path, result.artifact.fileName);
+  return res.sendFile(result.file_path);
+});
+
 router.post('/:workflow_id/whiteboard/actions', async (req, res) => {
   const validation = validateWorkflowId(req.params.workflow_id);
   if (!validation.success) return res.status(400).json(validation);

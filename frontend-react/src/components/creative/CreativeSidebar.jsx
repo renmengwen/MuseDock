@@ -172,6 +172,7 @@ export function CreativeSidebar({
                 {STATUS_TEXT[task.status] || task.status || '等待中'}
               </span>
             </div>
+            {task.creationModeId === 'illustrated-narration-v1' ? <div className="text-[11px] text-fg-3">旁白配图视频{task.production_summary ? ' · ' + task.production_summary : ''}</div> : null}
             <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
               <small className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-[#8a93a2]">{task.workflow_id}</small>
               <div className="inline-flex items-center gap-1.5">

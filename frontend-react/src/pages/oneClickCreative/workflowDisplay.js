@@ -74,7 +74,7 @@ export function getWorkflowGeneratedTitle(workflow) {
     || null;
   return firstText(
     workflow?.whiteboard?.current?.artifact?.title,
-    workflow?.creationModeId === 'whiteboard-stream-v1' ? workflow?.title : '',
+    ['whiteboard-stream-v1', 'illustrated-narration-v1'].includes(workflow?.creationModeId) ? workflow?.title : '',
     sceneSpec?.title,
     workflow?.result?.hyperframes_freeform?.project?.title,
     workflow?.result?.hyperframes_freeform?.title,

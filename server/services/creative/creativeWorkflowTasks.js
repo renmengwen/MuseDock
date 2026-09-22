@@ -353,7 +353,7 @@ async function startCreativeWorkflowTask(workflowId, options = {}) {
       }
 
       await Promise.allSettled([...pendingEventWrites]);
-      const isWhiteboard = result?.creationModeId === 'whiteboard-stream-v1';
+      const isWhiteboard = ['whiteboard-stream-v1', 'illustrated-narration-v1'].includes(result?.creationModeId);
       const completionMessage = isWhiteboard ? (result.message || '本轮白板方案已处理完成。') : '创作任务已完成。';
       await registry.markDoneAfter(taskId, completionMessage, terminalEvent => patchTerminalTaskSummaryOrThrow({
         registry,

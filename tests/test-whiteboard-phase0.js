@@ -507,7 +507,7 @@ const cases = [
     const base = `http://127.0.0.1:${server.address().port}/api/creative-workflows`;
     const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     try {
-      assert.equal((await (await fetch(`${base}/modes`)).json()).modes.length, 2);
+      assert.equal((await (await fetch(`${base}/modes`)).json()).modes.length, 3);
       const response = await post(base, { creationModeId: 'whiteboard-stream-v1', input: TOPIC });
       assert.equal(response.status, 202);
       const created = await response.json();

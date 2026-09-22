@@ -422,13 +422,13 @@ assert.match(page, /<section className="min-h-0 min-w-0 overflow-auto bg-white">
 assert.doesNotMatch(page, /<Bot\s+size=\{15\}/, 'Prompt quick actions should remove the smart video pill in every mode');
 assert.ok(!page.includes('智能成片'), 'Prompt quick actions should not render smart video copy');
 assert.match(page, /const hasPendingAssetRequest = uploadedAssets\.some\(asset => \['uploading', 'updating_requirement', 'deleting'\]\.includes\(asset\.status\)\)/, 'Upload, PATCH, and DELETE requests should participate in submit gating');
-assert.match(page, /const submitDisabled = isBusy \|\| \(isWhiteboard \? Boolean\(validateWhiteboardDraft\(whiteboardDraft\)\) \|\| modeCatalog\.status !== 'ready' : !input\.trim\(\) \|\| hasPendingAssetRequest\)/, 'Submit should validate the selected mode and keep HyperFrames asset requests guarded');
+assert.match(page, /const submitDisabled = isBusy \|\| \(isIllustrated \? Boolean\(validateIllustratedDraft\(illustratedDraft\)\) \|\| !modeCatalog\.illustrated : isWhiteboard \? Boolean\(validateWhiteboardDraft\(whiteboardDraft\)\) \|\| modeCatalog\.status !== 'ready' : !input\.trim\(\) \|\| hasPendingAssetRequest\)/, '三个模式分别校验，同时保留 HyperFrames 素材请求保护');
 assert.match(creativeComposer, /disabled=\{submitDisabled\}/, 'Submit button should use the combined disabled state');
 assert.ok(!page.includes(zh.assetNotice), 'Expert mode should not show the future asset-context notice copy');
 assert.doesNotMatch(page, /AssetContextNotice/, 'Expert mode should not render a second asset-context notice below the developing hint');
 // 未激活态样式已迁移到 opendesign token（border-line-1 / text-fg-3），不再用 hex
 assert.match(creativeComposer, /useResearch[\s\S]*?border-line-1 bg-white text-fg-3/, 'Research button should have an explicit inactive state');
-assert.match(page, /if \(isBusy \|\| !trimmed \|\| \(!isWhiteboard && uploadedAssetsRef\.current\.some\(asset => \['uploading', 'updating_requirement', 'deleting'\]\.includes\(asset\.status\)\)\)\) \{/, 'Submit handler should independently reject busy, empty, and HyperFrames pending-asset races');
+assert.match(page, /if \(isBusy \|\| !trimmed \|\| \(!isWhiteboard && !isIllustrated && uploadedAssetsRef\.current\.some\(asset => \['uploading', 'updating_requirement', 'deleting'\]\.includes\(asset\.status\)\)\)\) \{/, 'Submit handler should independently reject busy, empty, and HyperFrames pending-asset races');
 assert.match(page, /assetIds: uploadedAssetsRef\.current[\s\S]*filter\(asset => asset\.status === 'ready' && asset\.upload_id\)[\s\S]*map\(asset => asset\.upload_id\)/, 'Create payload should include only ready staged upload ids');
 assert.match(creativeComposer, /disabled=\{isBusy\}/, 'CreativeComposer should disable controls while busy');
 assert.match(page, /grid h-screen min-h-screen overflow-hidden bg-white/, 'OneClickCreativePage should use a dedicated chat shell');
@@ -484,9 +484,9 @@ assert.ok(videoPreviewBlock.includes('videoUrl={videoUrl}'), 'CreativeVideoPrevi
 assert.doesNotMatch(videoPreviewBlock, /onEdit|disabled|title=/, 'CreativeVideoPreview should not own the completed edit action');
 assert.match(taskDetailUnit, /<PencilLine size=\{14\} \/>[\s\S]*<span>二次编辑<\/span>/, 'Completed task detail should show the secondary edit action in the top summary card');
 assert.match(taskDetailUnit, /disabled=\{!editableWorkflowId\}[\s\S]*title=\{editableWorkflowId \? '二次编辑视频' : '缺少创作任务 ID，无法进入编辑器。'\}[\s\S]*onClick=\{continueEdit\}/, 'Top secondary edit action should keep the existing edit navigation guard');
-assert.match(creativeVideoPreview, /CreativeVideoPreview\(\{ videoUrl(?:, posterUrl)? \}\)/, '播放器应接收成片地址和可选封面，不承担编辑操作');
-assert.match(creativeVideoPreview, /<video className="[^"]*" src=\{videoUrl\}(?: poster=\{posterUrl \|\| undefined\})? controls/, '视频预览应使用原生播放控件');
-assert.doesNotMatch(creativeVideoPreview, /<Button|继续编辑|二次编辑/, 'Creative video preview should stay focused on playback only');
+assert.match(creativeVideoPreview, /CreativeVideoPreview\(\{ videoUrl, posterUrl, width, height, showFileActions = true \}\)/, '沿用当前基线的画幅和本地文件操作参数，播放器不承担编辑操作');
+assert.match(creativeVideoPreview, /<video\b[^>]*\bsrc=\{videoUrl\}[^>]*\bcontrols\b/, '视频预览应使用原生播放控件，允许已有的画幅样式参数');
+assert.doesNotMatch(creativeVideoPreview, /继续编辑|二次编辑|onEdit/, '播放器不负责编辑入口，允许既有的本地文件操作');
 assert.match(taskDetailUnit, /workflow\?\.status === 'done' && videoUrl/, 'Creative video preview should render after workflow is done');
 assert.match(taskDetailUnit, /!\s*isDone\s*\? \([\s\S]*<CreativeWorkflowStepper workflow=\{workflow\} \/>[\s\S]*<CreativeProgressPanel/, 'Creative detail should hide stepper and current progress after a task is done');
 assert.match(taskDetailUnit, /<SourceImageAssetsPanel workflow=\{workflow\} \/>/, 'Creative detail should keep visual assets visible after workflow completion');

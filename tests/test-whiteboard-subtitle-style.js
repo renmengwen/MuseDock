@@ -1,3 +1,4 @@
+const { importBrowserModule } = require('./helpers/import-browser-module.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -17,7 +18,7 @@ function fixture(aspectRatio) {
 
 (async () => {
   const source = await fs.readFile(path.resolve('frontend-react/src/components/creative/whiteboard/whiteboardForm.js'), 'utf8');
-  const form = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+  const form = await importBrowserModule('frontend-react/src/components/creative/whiteboard/whiteboardForm.js');
   assert.equal(normalizeProductionPlan({}).subtitleColor, '#FFFFFF');
   assert.equal(normalizeProductionPlan({}).subtitleFontSize, null);
   for (const aspectRatio of ['16:9', '4:3', '9:16']) {

@@ -4,6 +4,7 @@ const { randomUUID } = require('crypto');
 
 const aiModelConfig = require('./ai/aiModelConfig');
 const WHITEBOARD_CONCURRENCY = require('../resources/whiteboard/concurrency-settings.json');
+const { DEFAULT_PRODUCTION_SETTINGS, normalizeProductionSettings } = require('./creative/shared/productionSettings');
 const configWrites = new Map();
 
 const DEFAULT_CONFIG_PATH = path.join(require('../dataRoot'), 'data/config/app-settings.json');
@@ -14,6 +15,7 @@ const ALLOWED_ASPECT_RATIOS = ['9:16', '16:9', '1:1', '4:5'];
 
 const DEFAULT_CONFIG = {
   version: 1,
+  productionDefaults: { ...DEFAULT_PRODUCTION_SETTINGS },
   creativeDefaults: {
     aspectRatio: '9:16',
     targetDurationSec: 60,
@@ -119,6 +121,7 @@ function normalizeConfig(input = {}) {
   const source = input && typeof input === 'object' ? input : {};
   return {
     version: 1,
+    productionDefaults: normalizeProductionSettings(source.productionDefaults),
     creativeDefaults: normalizeCreativeDefaults(source.creativeDefaults),
     whiteboard: normalizeWhiteboardSettings(source.whiteboard),
     system: normalizeSystemSettings(source.system),
@@ -207,6 +210,7 @@ async function saveConfigNow(input = {}, options = {}) {
     ? { ...inputSystem, skipValidation: effectiveSystem.skipValidation }
     : inputSystem;
   const config = normalizeConfig({ ...source, system,
+    productionDefaults: { ...previous.productionDefaults, ...source.productionDefaults },
     creativeDefaults: source.creativeDefaults ?? previous.creativeDefaults,
     whiteboard: { ...previous.whiteboard, ...source.whiteboard },
   });
@@ -229,6 +233,10 @@ async function saveConfig(input = {}, options = {}) {
   finally { if (configWrites.get(key) === write) configWrites.delete(key); }
 }
 
+async function getProductionDefaults(options = {}) {
+  return (await readConfig(options)).productionDefaults;
+}
+
 module.exports = {
   DEFAULT_CONFIG_PATH,
   DEFAULT_CONFIG,
@@ -241,6 +249,7 @@ module.exports = {
   getPublicConfig,
   saveConfig,
   getCreativeDefaults,
+  getProductionDefaults,
   getWhiteboardSettings,
   getSystemSettings,
   getPexelsApiKey,

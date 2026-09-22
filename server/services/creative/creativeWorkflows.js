@@ -2,6 +2,9 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { HYPERFRAMES_MODE, WHITEBOARD_MODE, MODES, getCreationMode, createModeSnapshot, readModeSnapshot } = require('./creationModes');
 const whiteboardWorkflows = require('./whiteboard/whiteboardWorkflows');
+const illustratedWorkflows = require('./illustrated/workflows');
+const illustratedContracts = require('./illustrated/contracts');
+const illustratedStore = require('./illustrated/storage');
 const { VISUAL_PRESETS, LANGUAGES, CANVAS_FORMATS, WhiteboardError } = require('./whiteboard/contracts');
 const { getArtifactRoot, readArtifact: readWhiteboardArtifact } = require('./whiteboard/artifactStore');
 const whiteboardMediaStore = require('./whiteboard/mediaStore');
@@ -659,7 +662,24 @@ function createWorkflowSummary(record) {
 }
 
 function listCreationModes() {
-  return { success: true, modes: structuredClone(MODES), whiteboard: { visualPresets: structuredClone(VISUAL_PRESETS), languages: structuredClone(LANGUAGES), canvasFormats: structuredClone(CANVAS_FORMATS) } };
+  return { success: true, modes: structuredClone(MODES), illustrated: illustratedContracts.catalog(),
+    whiteboard: { visualPresets: structuredClone(VISUAL_PRESETS), languages: structuredClone(LANGUAGES), canvasFormats: structuredClone(CANVAS_FORMATS) } };
+}
+
+async function actOnIllustratedWorkflow(workflowId, payload = {}, options = {}) {
+  try { return await illustratedWorkflows.act(workflowId, payload, { ...options, services: resolveServices(options) }); }
+  catch (error) { return { success: false, workflow_id: workflowId, ...illustratedStore.safeError(error) }; }
+}
+async function uploadIllustratedImage(workflowId, payload = {}, options = {}) {
+  try { return await illustratedWorkflows.upload(workflowId, payload, { ...options, services: resolveServices(options) }); }
+  catch (error) { return { success: false, workflow_id: workflowId, ...illustratedStore.safeError(error) }; }
+}
+async function getIllustratedMediaFile(workflowId, artifactId, options = {}) {
+  try {
+    const record = await readWorkflow(workflowId, options.rootDir);
+    const media = await illustratedWorkflows.mediaFile(record, artifactId, options.rootDir, { checkHash: true });
+    return { success: true, file_path: media.path, artifact: media.artifact };
+  } catch (error) { return { success: false, workflow_id: workflowId, ...illustratedStore.safeError(error) }; }
 }
 
 async function actOnWhiteboardWorkflow(workflowId, payload = {}, options = {}) {
@@ -712,6 +732,10 @@ async function createCreativeWorkflow(payload = {}, options = {}) {
   const services = resolveServices(options);
   const creationModeId = payload.creationModeId || HYPERFRAMES_MODE;
   if (!getCreationMode(creationModeId)) return { success: false, code: 'CREATION_MODE_UNSUPPORTED', message: '不支持的创作模式，请重新选择。' };
+  if (creationModeId === illustratedContracts.MODE) {
+    try { return await illustratedWorkflows.create(payload, { ...options, services }); }
+    catch (error) { return { success: false, ...illustratedStore.safeError(error) }; }
+  }
   if (creationModeId === WHITEBOARD_MODE) {
     try {
       return await whiteboardWorkflows.createWhiteboardWorkflow(payload, { ...options, services });
@@ -1013,6 +1037,7 @@ async function runCreativeWorkflow(workflowId, options = {}) {
     };
   }
 
+  if (record.creationModeId === illustratedContracts.MODE) return illustratedWorkflows.run(workflowId, { ...options, services });
   if (record.creationModeId === WHITEBOARD_MODE) {
     return whiteboardWorkflows.runWhiteboardWorkflow(workflowId, { ...options, services });
   }
@@ -1229,7 +1254,13 @@ async function getCreativeWorkflow(workflowId, options = {}) {
   const services = resolveServices(options);
   try {
     const record = await readWorkflow(workflowId, rootDir);
+    const mode = getCreationMode(record.creationModeId);
+    if (!mode || record.creationModeContractVersion !== mode.contractVersion) {
+      return { success: false, workflow_id: workflowId, code: 'CONTRACT_UNSUPPORTED', statusCode: 409,
+        message: '当前任务的创作模式或合同版本不受支持，请检查应用版本；不会执行或改写旧任务。' };
+    }
     const nextRecord = await markStaleRunningStageFailed(record, rootDir, services, options);
+    if (nextRecord.creationModeId === illustratedContracts.MODE) return { success: true, data: await illustratedWorkflows.getView(nextRecord) };
     if (nextRecord.creationModeId === WHITEBOARD_MODE) {
       return { success: true, data: await whiteboardWorkflows.getView(nextRecord, { ...options, rootDir }) };
     }
@@ -1282,6 +1313,14 @@ async function markStaleRunningStageFailed(record, rootDir, services = {}, optio
   }
   const stage = findStaleRunningStage(record, nowMs, timeoutMs);
   if (!stage) return record;
+  if (record.creationModeId === illustratedContracts.MODE) {
+    return withWorkflowFileQueue(getWorkflowPath(record.workflow_id, rootDir), async () => {
+      const latest = await readWorkflow(record.workflow_id, rootDir);
+      if (!findStaleRunningStage(latest, nowMs, timeoutMs) || taskRegistry?.activeTaskForWorkflow?.(latest.workflow_id)?.status === 'running') return latest;
+      illustratedWorkflows.recoverInterruptedRecord(latest, now);
+      return persistWorkflowUnlocked(latest, rootDir);
+    });
+  }
   if (record.creationModeId === WHITEBOARD_MODE) {
     return withWorkflowFileQueue(getWorkflowPath(record.workflow_id, rootDir), async () => {
       const latest = await readWorkflow(record.workflow_id, rootDir);
@@ -1323,10 +1362,28 @@ async function patchCreativeWorkflowTaskSummary(workflowId, patch = {}, options 
 async function patchCreativeWorkflowTaskSummaryUnlocked(workflowId, patch = {}, options = {}, rootDir = DEFAULT_ROOT, workflowPath = getWorkflowPath(workflowId, rootDir)) {
   try {
     const record = await readWorkflow(workflowId, rootDir);
+    const supportedMode = getCreationMode(record.creationModeId);
+    if (!supportedMode || record.creationModeContractVersion !== supportedMode.contractVersion) {
+      return { success: false, code: 'CONTRACT_UNSUPPORTED', statusCode: 409, message: '当前模式合同版本不兼容，不能修改其任务状态。' };
+    }
     const now = safeString(patch.updated_at) || getNow(resolveServices(options)) || new Date().toISOString();
     const seq = Number(patch.last_event_seq ?? record.last_event_seq);
     if (Number.isFinite(seq) && seq > 0 && Number(record.last_event_seq) > seq) {
       return { success: true, workflow_id: record.workflow_id, data: record };
+    }
+    if (record.creationModeId === illustratedContracts.MODE) {
+      if (record.creationModeContractVersion !== 1 || record.illustrated?.schemaVersion !== 1) {
+        return { success: false, code: 'CONTRACT_UNSUPPORTED', statusCode: 409, message: '当前模式合同版本不兼容，不能修改其任务状态。' };
+      }
+      if (patch.fail_running_stages === true || (patch.task_status === 'failed' && ['queued', 'running'].includes(record.status))) {
+        illustratedWorkflows.recoverInterruptedRecord(record, now);
+      }
+      record.active_task_id = safeString(patch.active_task_id ?? record.active_task_id);
+      record.active_operation_id = safeString(patch.active_operation_id ?? record.active_operation_id);
+      record.task_status = safeString(patch.task_status ?? record.task_status);
+      record.last_event_seq = Number.isFinite(seq) && seq > 0 ? Math.floor(seq) : 0;
+      record.updated_at = now;
+      return { success: true, workflow_id: record.workflow_id, data: await persistWorkflowUnlocked(record, rootDir, workflowPath) };
     }
     if (record.creationModeId === WHITEBOARD_MODE) {
       // 后台 task 的 done 只表示这一轮执行结束，不能替代业务 Gate 或覆盖用户批准。
@@ -1439,6 +1496,8 @@ async function deleteCreativeWorkflowUnlocked(id, rootDir, workflowPath, mediaDi
   const deleted = { workflow: false, media: false };
   const workRoot = path.resolve(rootDir, '.whiteboard-work');
   const workDirectory = path.resolve(workRoot, id);
+  const illustratedDirectory = illustratedStore.mediaRoot(id, rootDir);
+  if (!isPathInside(illustratedDirectory, path.resolve(rootDir, '.illustrated-media'))) return { success: false, message: '旁白配图媒体目录路径越界。' };
   if (!isPathInside(workDirectory, workRoot)) return { success: false, workflow_id: id, message: '白板临时目录路径越界。' };
 
   try {
@@ -1452,6 +1511,7 @@ async function deleteCreativeWorkflowUnlocked(id, rootDir, workflowPath, mediaDi
 
   try {
     await fsp.rm(mediaDir, { recursive: true, force: true });
+    await fsp.rm(illustratedDirectory, { recursive: true, force: true, maxRetries: 8, retryDelay: 300 });
     await fsp.rm(getArtifactRoot(id, rootDir), { recursive: true, force: true });
     await fsp.rm(workDirectory, { recursive: true, force: true, maxRetries: 8, retryDelay: 300 });
     deleted.media = true;
@@ -1483,6 +1543,19 @@ async function recoverStaleWorkflowsOnStartup(services = {}) {
     let record;
     try { record = await readJson(filePath); } catch { continue; }
     if (!record) continue;
+    if (record.creationModeId) {
+      const supportedMode = getCreationMode(record.creationModeId);
+      if (!supportedMode || record.creationModeContractVersion !== supportedMode.contractVersion) continue;
+    }
+    if (record.creationModeId === illustratedContracts.MODE) {
+      if (record.creationModeContractVersion !== 1 || record.illustrated?.schemaVersion !== 1) continue;
+      if (['queued', 'running'].includes(record.status)) {
+        illustratedWorkflows.recoverInterruptedRecord(record, now);
+        await persistWorkflow(record, rootDir);
+        recovered++;
+      }
+      continue;
+    }
     if (record.creationModeId === WHITEBOARD_MODE) {
       if (['queued', 'running'].includes(record.status)) {
         whiteboardWorkflows.recoverInterruptedRecord(record, now);
@@ -2600,6 +2673,9 @@ async function getCreativeWorkflowAssetFile(workflowId, assetId, options = {}) {
 }
 
 module.exports = {
+  actOnIllustratedWorkflow,
+  uploadIllustratedImage,
+  getIllustratedMediaFile,
   listCreationModes,
   actOnWhiteboardWorkflow,
   chatOnWhiteboardWorkflow,
