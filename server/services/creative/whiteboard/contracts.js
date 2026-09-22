@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const sharedProduction = require('../shared/productionSettings');
 const CANVAS_FORMATS = require('../../../resources/whiteboard/canvas-formats.json');
 const HANDWRITTEN_PRESET_ID = 'whiteboard-handwritten-explainer-v1';
 const handwrittenPreset = require('../../../resources/whiteboard/visual-presets.json').presets.find(item => item.id === HANDWRITTEN_PRESET_ID);
@@ -32,9 +33,8 @@ class WhiteboardError extends Error {
 }
 
 function canvasFor(aspectRatio = '16:9') {
-  const format = CANVAS_FORMATS.find(item => item.id === aspectRatio);
-  if (!format) throw new WhiteboardError('INVALID_INPUT', `白板画幅仅支持${CANVAS_FORMATS.map(item => item.label).join('、')}。`);
-  return { width: format.width, height: format.height };
+  try { return sharedProduction.canvasFor(aspectRatio); }
+  catch (error) { throw new WhiteboardError(error.code, error.message, error.statusCode); }
 }
 
 function canonicalJson(value) {
@@ -75,15 +75,8 @@ function parseSrt(content) {
 }
 
 function subtitleStyleFor(plan = {}, aspectRatio = '16:9') {
-  const color = plan.subtitleColor === undefined ? '#FFFFFF' : plan.subtitleColor;
-  const fontSize = plan.subtitleFontSize ?? (aspectRatio === '9:16' ? 52 : 48);
-  if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) {
-    throw new WhiteboardError('INVALID_INPUT', '字幕颜色需为六位十六进制颜色，例如 #FFFFFF。');
-  }
-  if (!Number.isInteger(fontSize) || fontSize < 24 || fontSize > 96) {
-    throw new WhiteboardError('INVALID_INPUT', '字幕字号需为 24–96 像素的整数，留空使用默认字号。');
-  }
-  return { color: color.toUpperCase(), fontSize };
+  try { return sharedProduction.subtitleStyleFor(plan, aspectRatio); }
+  catch (error) { throw new WhiteboardError(error.code, error.message, error.statusCode); }
 }
 
 function normalizeProductionPlan(value = {}) {

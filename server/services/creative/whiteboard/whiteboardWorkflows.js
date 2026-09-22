@@ -121,8 +121,17 @@ async function getView(record, options = {}) {
 }
 
 async function createWhiteboardWorkflow(payload, options = {}) {
-  const input = normalizeInput(payload.input);
-  const productionPlan = normalizeProductionPlan(payload.productionPlan || {});
+  const sharedDefaults = await options.services?.appSettings?.getProductionDefaults?.(options) || {};
+  const input = normalizeInput({
+    ...Object.fromEntries(['aspectRatio', 'narrationLanguage', ...(payload.input?.inputMode === 'srt' ? [] : ['targetDurationSeconds'])]
+      .filter(key => sharedDefaults[key] !== undefined).map(key => [key, sharedDefaults[key]])),
+    ...payload.input,
+  });
+  const productionPlan = normalizeProductionPlan({
+    ...Object.fromEntries(['narrationMode', 'bgmMode', 'burnSubtitles', 'subtitleColor', 'subtitleFontSize']
+      .filter(key => sharedDefaults[key] !== undefined).map(key => [key, sharedDefaults[key]])),
+    ...payload.productionPlan,
+  });
   if ((payload.assetIds?.length || payload.asset_ids?.length) || payload.skipValidation === true) throw new WhiteboardError('INVALID_INPUT', '白板阶段 0 不接受上传素材或跳过校验，请使用白板输入表单。');
   const now = getNow(options.services);
   const workflowId = String(options.services?.idFactory?.() || makeId(now));

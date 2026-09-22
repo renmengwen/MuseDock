@@ -1,0 +1,11 @@
+[
+  { "id": "none", "label": "不使用预设", "description": "", "version": 1 },
+  { "id": "realistic", "label": "写实摄影", "description": "真实材质与自然光，画面可信，保持摄影质感。", "version": 1 },
+  { "id": "cinematic", "label": "电影纪实", "description": "电影级光影与克制调色，真实环境细节，中等景深。", "version": 1 },
+  { "id": "anime", "label": "日系动漫", "description": "精致二维赛璐璐，清晰线条与层次光影，避免真人质感。", "version": 1 },
+  { "id": "chinese", "label": "国风插画", "description": "当代国风插画，含蓄色彩与水墨肌理，主体清晰。", "version": 1 },
+  { "id": "vector", "label": "扁平矢量", "description": "简洁几何造型、纯色色块、清晰轮廓与信息图式构图。", "version": 1 },
+  { "id": "line-art", "label": "手绘线稿", "description": "黑白手绘线稿，结构准确、疏密有序，辅以少量灰度阴影。", "version": 1 },
+  { "id": "3d-cartoon", "label": "3D 卡通", "description": "风格化三维角色与场景，柔和布光，圆润材质，空间层次清楚。", "version": 1 },
+  { "id": "retro-collage", "label": "复古拼贴", "description": "复古印刷色、颗粒肌理与拼贴构图，保留清楚的视觉焦点。", "version": 1 }
+]

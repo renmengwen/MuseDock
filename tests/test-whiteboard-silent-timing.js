@@ -1,3 +1,4 @@
+const { importBrowserModule } = require('./helpers/import-browser-module.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
@@ -109,7 +110,7 @@ const cases = [
   }],
   ['三种输入的表单均允许无旁白且保留时间与改写设置', async () => {
     const source = await fs.readFile(path.join(__dirname, '../frontend-react/src/components/creative/whiteboard/whiteboardForm.js'), 'utf8');
-    const { createWhiteboardDraft, validateWhiteboardDraft, buildWhiteboardPayload } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+    const { createWhiteboardDraft, validateWhiteboardDraft, buildWhiteboardPayload } = await importBrowserModule('frontend-react/src/components/creative/whiteboard/whiteboardForm.js');
     for (const mode of ['topic', 'text', 'srt']) {
       const draft = createWhiteboardDraft();
       draft.inputMode = mode;

@@ -79,7 +79,7 @@ function streamJsonSse(url, payload, handlers = {}) {
       });
       if (!response.ok || !response.body) {
         // 服务端在进入流式前失败的响应是 JSON，尽量透出其中的中文原因。
-        const data = await response.json().catch(() => ({}));
+        const data = typeof response.json === 'function' ? await response.json().catch(() => ({})) : {};
         throw new Error(data.message || `任务事件流连接失败：HTTP ${response.status}`);
       }
       reader = response.body.getReader();
@@ -185,6 +185,16 @@ export const api = {
   },
   actOnWhiteboardWorkflow(workflowId, payload) {
     return requestJson(`/api/creative-workflows/${encodeURIComponent(workflowId)}/whiteboard/actions`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+  },
+  actOnIllustratedWorkflow(workflowId, payload) {
+    return requestJson('/api/creative-workflows/' + encodeURIComponent(workflowId) + '/illustrated/actions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+  },
+  uploadIllustratedImage(workflowId, payload) {
+    return requestJson('/api/creative-workflows/' + encodeURIComponent(workflowId) + '/illustrated/images', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     });
   },

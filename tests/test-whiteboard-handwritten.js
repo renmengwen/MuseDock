@@ -1,3 +1,4 @@
+const { importBrowserModule } = require('./helpers/import-browser-module.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const contracts = require('../server/services/creative/whiteboard/contracts');
@@ -117,7 +118,7 @@ const timing = require('../server/services/creative/whiteboard/narrationTiming')
     assert.equal(parts.join(''), '字'.repeat(73));
   }
   const formSource = await fs.readFile(require.resolve('../frontend-react/src/components/creative/whiteboard/whiteboardForm.js'), 'utf8');
-  const form = await import(`data:text/javascript;base64,${Buffer.from(formSource).toString('base64')}`);
+  const form = await importBrowserModule('frontend-react/src/components/creative/whiteboard/whiteboardForm.js');
   assert.deepEqual(form.WHITEBOARD_CANVAS_FORMATS, contracts.CANVAS_FORMATS);
   const draft = { ...form.createWhiteboardDraft(), aspectRatio: '4:3', visualStylePreset: HANDWRITTEN_PRESET_ID };
   draft.contents.topic = '关系图解';

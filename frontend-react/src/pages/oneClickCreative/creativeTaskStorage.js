@@ -17,6 +17,11 @@ export function compactStoredTask(task) {
   return {
     workflow_id: String(task?.workflow_id || '').trim(),
     creationModeId: task?.creationModeId || task?.workflow?.creationModeId || 'hyperframes-v1',
+    ...((task?.production_summary || task?.workflow?.illustrated) ? { production_summary: task?.workflow?.illustrated ? [
+      task.workflow.illustrated.settings.narrationMode === 'disabled' ? '无配音' : '有配音',
+      task.workflow.illustrated.settings.burnSubtitles ? '烧录字幕' : '不烧录字幕',
+      task.workflow.illustrated.settings.motion.mode === 'off' ? '静止画面' : '图片微动',
+    ].join(' · ') : task.production_summary } : {}),
     title: String(task?.title || ''),
     input: String(task?.input || ''),
     status: String(task?.status || 'queued'),

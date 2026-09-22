@@ -1,0 +1,10 @@
+{
+  "aspectRatio": "16:9",
+  "targetDurationSeconds": 60,
+  "narrationLanguage": "zh-CN",
+  "narrationMode": "enabled",
+  "bgmMode": "disabled",
+  "burnSubtitles": true,
+  "subtitleColor": "#FFFFFF",
+  "subtitleFontSize": null
+}

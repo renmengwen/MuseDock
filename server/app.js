@@ -6,6 +6,7 @@ const { apiCallContextMiddleware } = require('./services/diagnostics/apiCallReco
 const app = express();
 
 app.use(cors());
+app.use('/api/creative-workflows/:workflow_id/illustrated/images', express.json({ limit: '42mb' }));
 app.use(express.json({ limit: '2mb' }));
 app.use('/api', apiCallContextMiddleware);
 app.use(express.static(path.join(__dirname, '../frontend-dist')));

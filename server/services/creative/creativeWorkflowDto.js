@@ -109,6 +109,10 @@ function normalizeCreativeWorkflowDto(workflow) {
 }
 
 function normalizeCreativeWorkflowSummary(workflow) {
+  if (workflow?.creationModeId === 'illustrated-narration-v1' && workflow.creationModeContractVersion === 1
+    && workflow.illustrated?.schemaVersion === 1) {
+    workflow = require('./illustrated/state').currentRecord(workflow);
+  }
   const dto = normalizeCreativeWorkflowDto(workflow);
 
   return {
@@ -121,6 +125,11 @@ function normalizeCreativeWorkflowSummary(workflow) {
     created_at: dto.created_at || safeString(workflow?.created_at),
     updated_at: dto.updated_at || safeString(workflow?.updated_at),
     output_url: dto.result?.render?.output_url || '',
+    ...(workflow?.illustrated ? { production_summary: [
+      workflow.illustrated.settings.narrationMode === 'disabled' ? '无配音' : '有配音',
+      workflow.illustrated.settings.burnSubtitles ? '烧录字幕' : '不烧录字幕',
+      workflow.illustrated.settings.motion.mode === 'off' ? '静止画面' : '图片微动',
+    ].join(' · ') } : {}),
     active_task: dto.active_task ?? workflow?.active_task ?? null,
   };
 }

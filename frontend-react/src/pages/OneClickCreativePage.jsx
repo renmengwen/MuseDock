@@ -1,3 +1,4 @@
+import { ILLUSTRATED_MODE, createIllustratedDraft, validateIllustratedDraft, illustratedPayload, rememberStyle } from '../components/creative/illustrated/illustratedForm.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../api/client.js';
@@ -59,6 +60,11 @@ export function OneClickCreativePage() {
   const [input, setInput] = useState('');
   const [creationModeId, setCreationModeId] = useState(HYPERFRAMES_MODE);
   const [whiteboardDraft, setWhiteboardDraft] = useState(createWhiteboardDraft);
+  const [illustratedDraft, setIllustratedDraft] = useState(createIllustratedDraft);
+  const productionDefaultsRef = useRef({});
+  const draftTouchedRef = useRef({ whiteboard: false, illustrated: false });
+  const illustratedDirtyRef = useRef(false);
+  const markIllustratedDirty = useCallback(value => { illustratedDirtyRef.current = value; }, []);
   const modeCatalog = useCreationModes();
   const whiteboardActionRef = useRef(false);
   const [useResearch, setUseResearch] = useState(true);
@@ -86,9 +92,15 @@ export function OneClickCreativePage() {
   const isBusy = status === 'creating' || status === 'polling' || status === 'deleting';
   const hasPendingAssetRequest = uploadedAssets.some(asset => ['uploading', 'updating_requirement', 'deleting'].includes(asset.status));
   const isWhiteboard = creationModeId === WHITEBOARD_MODE;
-  const submitDisabled = isBusy || (isWhiteboard ? Boolean(validateWhiteboardDraft(whiteboardDraft)) || modeCatalog.status !== 'ready' : !input.trim() || hasPendingAssetRequest);
+  const isIllustrated = creationModeId === ILLUSTRATED_MODE;
+  const submitDisabled = isBusy || (isIllustrated ? Boolean(validateIllustratedDraft(illustratedDraft)) || !modeCatalog.illustrated : isWhiteboard ? Boolean(validateWhiteboardDraft(whiteboardDraft)) || modeCatalog.status !== 'ready' : !input.trim() || hasPendingAssetRequest);
   const sidebarTasks = useMemo(() => tasks.map(task => ({
     ...task,
+    production_summary: task.workflow?.illustrated ? [
+      task.workflow.illustrated.settings.narrationMode === 'disabled' ? '无配音' : '有配音',
+      task.workflow.illustrated.settings.burnSubtitles ? '烧录字幕' : '不烧录字幕',
+      task.workflow.illustrated.settings.motion.mode === 'off' ? '静止画面' : '图片微动',
+    ].join(' · ') : task.production_summary,
     timeLabel: getTaskTimeLabel(getSidebarTaskTimeSource(task)),
   })), [tasks]);
 
@@ -98,6 +110,12 @@ export function OneClickCreativePage() {
       try {
         const json = await api.getAppSettings();
         const config = json?.data || json;
+        if (!cancelled) {
+          productionDefaultsRef.current = config?.productionDefaults || {};
+          const defaults = productionDefaultsRef.current;
+          if (!draftTouchedRef.current.illustrated) setIllustratedDraft(previous => ({ ...previous, useResearch: config?.creativeDefaults?.useResearch !== false, settings: { ...previous.settings, ...defaults } }));
+          if (!draftTouchedRef.current.whiteboard) setWhiteboardDraft(previous => applySharedDefaults(previous, defaults));
+        }
         if (!cancelled && !useResearchTouchedRef.current) {
           setUseResearch(config?.creativeDefaults?.useResearch !== false);
         }
@@ -688,6 +706,17 @@ export function OneClickCreativePage() {
     });
   }, [applyTaskEvent, stopTaskStream]);
 
+  function applySharedDefaults(draft, defaults) {
+    const { aspectRatio, targetDurationSeconds, narrationLanguage, ...productionPlan } = defaults;
+    return { ...draft, ...(aspectRatio ? { aspectRatio } : {}), ...(targetDurationSeconds ? { targetDurationSeconds } : {}),
+      ...(narrationLanguage ? { narrationLanguage } : {}), productionPlan: { ...draft.productionPlan, ...productionPlan } };
+  }
+
+  function guardIllustratedNavigation(proceed) {
+    if (illustratedDirtyRef.current || (!isDetailRoute && isIllustrated && Object.values(illustratedDraft.contents).some(value => value.trim()))) { setPendingConfirm({ kind: 'leave', proceed }); return; }
+    proceed();
+  }
+
   function startNewTask() {
     finalWorkflowRefreshRef.current = null;
     clearUploadedAssets({ deleteStaged: true });
@@ -696,7 +725,9 @@ export function OneClickCreativePage() {
     stopTaskStream({ clearStorage: true });
     setInput('');
     setCreationModeId(HYPERFRAMES_MODE);
-    setWhiteboardDraft(createWhiteboardDraft());
+    setWhiteboardDraft(applySharedDefaults(createWhiteboardDraft(), productionDefaultsRef.current));
+    setIllustratedDraft(createIllustratedDraft(productionDefaultsRef.current));
+    draftTouchedRef.current = { whiteboard: false, illustrated: false };
     setUseResearch(true);
     useResearchTouchedRef.current = false;
     setUseResearchTouched(false);
@@ -885,13 +916,16 @@ export function OneClickCreativePage() {
 
   async function submitCreativeWorkflow(event) {
     event.preventDefault();
-    const trimmed = isWhiteboard ? whiteboardDraft.contents[whiteboardDraft.inputMode].trim() : input.trim();
+    const trimmed = isIllustrated ? illustratedDraft.contents[illustratedDraft.inputMode].trim() : isWhiteboard ? whiteboardDraft.contents[whiteboardDraft.inputMode].trim() : input.trim();
+    if (isIllustrated && (validateIllustratedDraft(illustratedDraft) || !modeCatalog.illustrated)) {
+      setStatus('failed'); setMessage(validateIllustratedDraft(illustratedDraft) || '请等待创作模式加载完成。'); return;
+    }
     if (isWhiteboard && (validateWhiteboardDraft(whiteboardDraft) || modeCatalog.status !== 'ready')) {
       setStatus('failed');
       setMessage(validateWhiteboardDraft(whiteboardDraft) || '请等待创作模式加载完成后重试。');
       return;
     }
-    if (isBusy || !trimmed || (!isWhiteboard && uploadedAssetsRef.current.some(asset => ['uploading', 'updating_requirement', 'deleting'].includes(asset.status)))) {
+    if (isBusy || !trimmed || (!isWhiteboard && !isIllustrated && uploadedAssetsRef.current.some(asset => ['uploading', 'updating_requirement', 'deleting'].includes(asset.status)))) {
       if (!isBusy && !trimmed) {
         setStatus('failed');
         setMessage('请输入视频方向、抖音链接、文章链接或 GitHub 仓库链接');
@@ -902,7 +936,7 @@ export function OneClickCreativePage() {
     assetMutationLockedRef.current = true;
 
     setStatus('creating');
-    setMessage(isWhiteboard ? '正在启动白板创作 Agent，准备内容与制作方案...' : '正在创建创作任务...');
+    setMessage(isIllustrated ? '正在创建旁白配图任务，准备文稿与分镜...' : isWhiteboard ? '正在启动白板创作 Agent，准备内容与制作方案...' : '正在创建创作任务...');
     setWorkflow(null);
     setWorkflowId('');
     finalWorkflowRefreshRef.current = null;
@@ -911,7 +945,7 @@ export function OneClickCreativePage() {
       const overrideEntries = {
         ...(useResearchTouched ? { useResearch } : {}),
       };
-      const requestPayload = isWhiteboard ? buildWhiteboardPayload(whiteboardDraft) : {
+      const requestPayload = isWhiteboard ? buildWhiteboardPayload(whiteboardDraft) : isIllustrated ? illustratedPayload(illustratedDraft) : {
         creationModeId: HYPERFRAMES_MODE,
         input: trimmed,
         assetIds: uploadedAssetsRef.current
@@ -932,7 +966,7 @@ export function OneClickCreativePage() {
         return;
       }
 
-      if (!isWhiteboard) clearUploadedAssets({ deleteStaged: false });
+      if (!isWhiteboard && !isIllustrated) clearUploadedAssets({ deleteStaged: false });
       assetMutationLockedRef.current = false;
 
       const task = {
@@ -960,7 +994,7 @@ export function OneClickCreativePage() {
     } catch (error) {
       const persistedWorkflowId = String(error?.data?.workflow_id || '').trim();
       if (persistedWorkflowId) {
-        if (!isWhiteboard) clearUploadedAssets({ deleteStaged: false });
+        if (!isWhiteboard && !isIllustrated) clearUploadedAssets({ deleteStaged: false });
         assetMutationLockedRef.current = false;
         setStatus('failed');
         setMessage(`任务已创建，但后台启动失败（任务 ID：${persistedWorkflowId}）。请稍后打开任务详情。`);
@@ -981,11 +1015,33 @@ export function OneClickCreativePage() {
     setMessage(nextWorkflow.message || '白板方案已更新。');
     setStatus(json.task_id ? 'polling' : nextWorkflow.status);
     persistTasks(prev => updateTask(prev, {
-      workflow_id: targetWorkflowId, creationModeId: WHITEBOARD_MODE,
+      workflow_id: targetWorkflowId, creationModeId: nextWorkflow.creationModeId || WHITEBOARD_MODE,
       title: getTaskDisplayTitle(nextWorkflow, nextWorkflow.input?.content), workflow: nextWorkflow,
       status: nextWorkflow.status, message: nextWorkflow.message, updated_at: nextWorkflow.updated_at,
     }));
     if (json.task_id) subscribeTaskEvents({ workflow_id: targetWorkflowId, task_id: json.task_id }, { sinceSeq: 0 });
+  }
+
+  async function handleIllustratedAction(payload) {
+    if (whiteboardActionRef.current) throw new Error('当前操作正在保存，请稍后再试。');
+    const targetWorkflowId = selectedWorkflowId || workflowId;
+    whiteboardActionRef.current = true;
+    try {
+      if (payload.action === 'refresh') {
+        const verified = getWorkflowPayload(await api.getCreativeWorkflow(targetWorkflowId));
+        const response = { success: true, workflow: verified };
+        applyWhiteboardResult(response, targetWorkflowId); return response;
+      }
+      const result = await (payload.action === 'upload_image' ? api.uploadIllustratedImage(targetWorkflowId, payload) : api.actOnIllustratedWorkflow(targetWorkflowId, payload));
+      let readback;
+      try { readback = await api.getCreativeWorkflow(targetWorkflowId); }
+      catch { const error = new Error('服务器已接收操作，但回读失败。请刷新检查当前版本，避免重复提交。'); error.code = 'READBACK_FAILED'; throw error; }
+      const verified = getWorkflowPayload(readback);
+      if (!verified?.illustrated || verified.illustrated.revision < result.workflow.illustrated.revision) { const error = new Error('保存结果尚未回读到当前版本，请刷新后检查。'); error.code = 'READBACK_FAILED'; throw error; }
+      const response = { ...result, workflow: verified };
+      applyWhiteboardResult(response, targetWorkflowId);
+      return response;
+    } finally { whiteboardActionRef.current = false; }
   }
 
   async function handleWhiteboardAction(payload, { onEvent } = {}) {
@@ -1163,7 +1219,7 @@ export function OneClickCreativePage() {
 
   useEffect(() => {
     const targetWorkflowId = String(workflow?.workflow_id || selectedWorkflowId || workflowId || '').trim();
-    if (workflow?.creationModeId === WHITEBOARD_MODE || workflow?.status !== 'failed' || !targetWorkflowId) {
+    if ([WHITEBOARD_MODE, ILLUSTRATED_MODE].includes(workflow?.creationModeId) || workflow?.status !== 'failed' || !targetWorkflowId) {
       resetRetryPlan();
       return undefined;
     }
@@ -1205,16 +1261,16 @@ export function OneClickCreativePage() {
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebar={() => setSidebarCollapsed(value => !value)}
         onNewTask={() => {
-          if (!assetMutationLockedRef.current && !hasPendingAssetRequest) startNewTask();
+          if (!assetMutationLockedRef.current && !hasPendingAssetRequest) guardIllustratedNavigation(startNewTask);
         }}
-        onSelectTask={selectTask}
+        onSelectTask={task => guardIllustratedNavigation(() => selectTask(task))}
         onDeleteTask={requestDeleteTask}
       />
 
       <section className="min-h-0 min-w-0 overflow-auto bg-white">
         <div className={selectedWorkflowId
-          ? `mx-auto grid min-h-screen w-full content-start justify-stretch gap-[22px] ${workflow?.creationModeId === WHITEBOARD_MODE ? 'max-w-[1440px] px-8 py-8 min-[1180px]:h-dvh min-[1180px]:min-h-[800px] min-[1180px]:grid-rows-[minmax(0,1fr)] max-[760px]:px-4 max-[760px]:py-6' : 'max-w-[1120px] px-8 py-[42px]'}`
-          : 'mx-auto grid min-h-screen w-full max-w-[920px] content-center justify-items-center gap-[22px] px-8 py-14'}
+          ? `mx-auto grid min-h-screen w-full content-start justify-stretch gap-[22px] ${workflow?.creationModeId === ILLUSTRATED_MODE ? 'max-w-[1440px] px-8 py-8 max-[760px]:px-4 max-[760px]:py-6' : workflow?.creationModeId === WHITEBOARD_MODE ? 'max-w-[1440px] px-8 py-8 min-[1180px]:h-dvh min-[1180px]:min-h-[800px] min-[1180px]:grid-rows-[minmax(0,1fr)] max-[760px]:px-4 max-[760px]:py-6' : 'max-w-[1120px] px-8 py-[42px]'}`
+          : 'mx-auto grid min-h-screen w-full max-w-[920px] content-center justify-items-center gap-[22px] px-8 py-14 max-[760px]:px-4'}
         >
           {!isDetailRoute && (
             <>
@@ -1224,7 +1280,9 @@ export function OneClickCreativePage() {
                 creationModeId={creationModeId}
                 onCreationModeChange={value => { if (!isBusy && !hasPendingAssetRequest) setCreationModeId(value); }}
                 whiteboardDraft={whiteboardDraft}
-                onWhiteboardDraftChange={setWhiteboardDraft}
+                onWhiteboardDraftChange={value => { draftTouchedRef.current.whiteboard = true; setWhiteboardDraft(value); }}
+                illustratedDraft={illustratedDraft}
+                onIllustratedDraftChange={value => { draftTouchedRef.current.illustrated = true; setIllustratedDraft(value); rememberStyle(value); }}
                 modeCatalog={modeCatalog}
                 status={status}
                 message={message}
@@ -1260,6 +1318,8 @@ export function OneClickCreativePage() {
             onContinueEdit={continueEdit}
             onRetryWorkflow={handleRetryWorkflow}
             onWhiteboardAction={handleWhiteboardAction}
+            onIllustratedAction={handleIllustratedAction}
+            onIllustratedDirtyChange={markIllustratedDirty}
             getWorkflowVideoUrl={getWorkflowVideoUrl}
           />
         </div>
@@ -1273,17 +1333,18 @@ export function OneClickCreativePage() {
             setConfirmError('');
           }
         }}
-        title={pendingConfirm?.kind === 'stop-delete'
+        title={pendingConfirm?.kind === 'leave' ? '放弃未保存修改并离开' : pendingConfirm?.kind === 'stop-delete'
           ? '停止并删除当前任务'
           : `删除任务「${pendingConfirm?.task?.title || ''}」`}
-        description={pendingConfirm?.kind === 'stop-delete'
+        description={pendingConfirm?.kind === 'leave' ? '当前任务有尚未保存的修改，离开后将丢失。' : pendingConfirm?.kind === 'stop-delete'
           ? '任务记录和已生成资源都会被删除，此操作不可恢复。'
           : '此操作不可恢复。'}
         destructive
         loading={Boolean(deletingWorkflowId)}
-        confirmText={pendingConfirm?.kind === 'stop-delete' ? '停止并删除' : '删除任务'}
+        confirmText={pendingConfirm?.kind === 'leave' ? '放弃修改并离开' : pendingConfirm?.kind === 'stop-delete' ? '停止并删除' : '删除任务'}
         onConfirm={() => {
           if (!pendingConfirm) return;
+          if (pendingConfirm.kind === 'leave') { const proceed = pendingConfirm.proceed; setPendingConfirm(null); illustratedDirtyRef.current = false; proceed(); return; }
           if (pendingConfirm.kind === 'stop-delete') performStopAndDeleteTask(pendingConfirm.id);
           else performDeleteTask(pendingConfirm.task);
         }}

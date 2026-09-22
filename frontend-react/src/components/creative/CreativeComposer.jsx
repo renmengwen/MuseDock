@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button.jsx';
 import { Textarea } from '@/components/ui/textarea.jsx';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.jsx';
 import { WhiteboardInputFields } from './whiteboard/WhiteboardInputFields.jsx';
+import { IllustratedInputFields } from './illustrated/IllustratedInputFields.jsx';
 import { cn } from '@/lib/utils.js';
 
 function CreativeHeroHeader() {
@@ -23,6 +24,8 @@ function CreativePromptComposer({
   onCreationModeChange,
   whiteboardDraft,
   onWhiteboardDraftChange,
+  illustratedDraft,
+  onIllustratedDraftChange,
   modeCatalog,
   status,
   message,
@@ -44,9 +47,10 @@ function CreativePromptComposer({
       onSubmit={onSubmit}
     >
       <Tabs value={creationModeId} onValueChange={onCreationModeChange} className="gap-4">
-        <TabsList className="grid h-12 w-full grid-cols-2 bg-surface-2 p-1 max-[760px]:h-14" aria-label="创作模式">
+        <TabsList className="grid h-12 w-full grid-cols-3 bg-surface-2 p-1 max-[760px]:h-14" aria-label="创作模式">
           <TabsTrigger value="hyperframes-v1" disabled={isBusy} className="min-w-0 gap-2 px-2 text-[13px] max-[760px]:min-h-11 max-[420px]:whitespace-normal max-[420px]:text-xs max-[420px]:leading-4 max-[420px]:[&_svg]:hidden"><Clapperboard size={16} /><span>HyperFrames <span className="max-[420px]:block">动态视频</span></span></TabsTrigger>
           <TabsTrigger value="whiteboard-stream-v1" disabled={isBusy || modeCatalog?.status !== 'ready'} className="min-w-0 gap-2 px-2 text-[13px] max-[760px]:min-h-11 max-[420px]:whitespace-normal max-[420px]:text-xs max-[420px]:leading-4 max-[420px]:[&_svg]:hidden"><PenLine size={16} /><span>线稿白板动画</span><span className="hidden rounded border border-line-2 px-1 py-0.5 font-mono text-[10px] text-fg-3 sm:inline">Agent</span></TabsTrigger>
+          <TabsTrigger value="illustrated-narration-v1" disabled={isBusy || !modeCatalog?.illustrated} className="min-w-0 gap-2 px-2 text-[13px] max-[760px]:min-h-11 max-[420px]:whitespace-normal max-[420px]:text-xs max-[420px]:leading-4"><span>旁白配图视频</span></TabsTrigger>
         </TabsList>
         <TabsContent value="hyperframes-v1" className="grid gap-3">
           <p className="m-0 px-1 text-xs leading-6 text-fg-3">自动研究和组织素材，生成可继续编辑的动态视频工程。</p>
@@ -165,6 +169,10 @@ function CreativePromptComposer({
           <p className="m-0 px-1 text-xs leading-6 text-fg-3">白板创作 Agent 先整理内容、分镜和制作方案，由你确认后完成本阶段。</p>
           {whiteboardDraft ? <WhiteboardInputFields draft={whiteboardDraft} onChange={onWhiteboardDraftChange} catalog={modeCatalog?.whiteboard} disabled={isBusy} /> : null}
           <Button type="submit" className="justify-self-end max-[760px]:min-h-11" disabled={submitDisabled}>{isBusy ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={16} />}{isBusy ? '正在启动白板创作 Agent...' : '启动白板创作 Agent'}</Button>
+        </TabsContent>
+        <TabsContent value="illustrated-narration-v1" className="grid gap-4">
+          {illustratedDraft ? <IllustratedInputFields draft={illustratedDraft} onChange={onIllustratedDraftChange} disabled={isBusy}/> : null}
+          <Button type="submit" className="min-h-11 justify-self-end" disabled={submitDisabled}>{isBusy ? <Loader2 size={16} className="animate-spin"/> : <ArrowUp size={16}/>} {isBusy ? '正在准备文稿与分镜...' : '创建旁白配图任务'}</Button>
         </TabsContent>
       </Tabs>
       {modeCatalog?.status === 'loading' ? <p className="m-0 text-xs text-fg-3" role="status">正在加载创作模式...</p> : null}
