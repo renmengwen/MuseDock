@@ -1,10 +1,11 @@
 import {useEffect,useRef,useState} from 'react';
-import {Play,Upload,Shuffle,ImagePlus,Lock,Save} from 'lucide-react';
+import {Play,Upload,Shuffle,ImagePlus,Lock,Save,Loader2} from 'lucide-react';
 import {Button} from '@/components/ui/button.jsx';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog.jsx';
 import {MotionFields} from './IllustratedSettings.jsx';
 import {Pager} from './IllustratedPlanEditor.jsx';
 import {durationLabel,TRACKS} from './illustratedForm.js';
+import {sceneImageGenerationStatus} from './illustratedImageProgress.mjs';
 import {cn} from '@/lib/utils.js';
 
 const requestStatus={prepared:'排队中',requesting:'正在请求',done:'已完成',failed:'请求失败',local_failed:'本地处理失败',cancelled:'已取消',unknown_external_outcome:'结果待核实'};
@@ -85,13 +86,15 @@ export function IllustratedMediaPanel({workflow,busy,onAct,onUpload,onConfirm,on
     <div className="grid grid-cols-3 gap-3 max-[1100px]:grid-cols-2 max-[480px]:grid-cols-1">
       {s.scenes.slice((page-1)*6,page*6).map((scene,index)=>{
         const image=scene.selected&&s.artifacts[scene.selected.artifactId];
+        const generation=sceneImageGenerationStatus(scene,s);
         return <div key={scene.id} className="overflow-hidden rounded-md border border-line-1 bg-surface-1">
-          <button type="button" className="block w-full bg-surface-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink" aria-label={'查看画面 '+scene.title} onClick={()=>open(scene)}>
-            {image?<img src={image.url} alt={scene.title+'配图缩略图'} className="aspect-video w-full bg-surface-2 object-contain"/>:<div className="flex aspect-video items-center justify-center text-sm text-fg-3">等待配图</div>}
+          <button type="button" className="relative block w-full bg-surface-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink" aria-label={'查看画面 '+scene.title} onClick={()=>open(scene)}>
+            {image?<img src={image.url} alt={scene.title+'配图缩略图'} className="aspect-video w-full bg-surface-2 object-contain"/>:<div className="flex aspect-video items-center justify-center text-sm text-fg-3">{generation==='queued'?'排队等待生成':'等待配图'}</div>}
+            {generation==='running'?<span role="status" className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-surface-2 text-sm text-fg-2"><Loader2 size={20} className="animate-spin motion-reduce:animate-none"/><span>正在生成这张配图...</span></span>:null}
           </button>
           <div className="grid gap-2 p-3"><div className="flex justify-between gap-2"><h3 className="m-0 min-w-0 truncate text-sm font-semibold">{String((page-1)*6+index+1).padStart(2,'0')} {scene.title}</h3>{scene.motion.locked?<Lock size={14} aria-label="已锁定"/>:null}</div>
             <p className="m-0 text-xs text-fg-3">{s.settings.motion.mode==='off'?'运动已关闭':TRACKS.find(item=>item.id===scene.motion.track)?.label} · {scene.motion.amount}% · {scene.timing?durationLabel(scene.timing.endMs-scene.timing.startMs):'时间待定'}</p>
-            <p className={cn('m-0 text-xs',scene.imageStatus.includes('failed')?'text-danger':'text-fg-3')}>{requestStatus[scene.imageStatus]|| (image?'已选图片':'缺少当前图片')} · {scene.candidates.length} 个候选</p>
+            <p className={cn('m-0 text-xs',scene.imageStatus.includes('failed')&&!generation?'text-danger':'text-fg-3')}>{generation==='running'?'正在生成配图':generation==='queued'?'排队中':requestStatus[scene.imageStatus]|| (image?'已选图片':'缺少当前图片')} · {scene.candidates.length} 个候选</p>
             <Button variant="outline" size="sm" onClick={()=>open(scene)}>候选与运动详情</Button>
           </div>
         </div>;

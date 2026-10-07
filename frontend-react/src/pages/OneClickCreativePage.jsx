@@ -1142,10 +1142,15 @@ export function OneClickCreativePage() {
   useEffect(() => {
     if (status !== 'polling' || !workflowId) return undefined;
     let cancelled = false;
+    let inFlight = false;
 
     async function pollWorkflow() {
-      // SSE 已连接时由事件流驱动状态；轮询仅作为断线兜底，避免与 SSE 双写打架。
-      if (activeStreamRef.current && workflow?.workflow_id === workflowId) return;
+      // 图片事件只包含汇总进度；生成期间回读逐幕状态和新图片。
+      const imageOperation = workflow?.illustrated?.operation;
+      const isGeneratingIllustratedImages = workflow?.creationModeId === ILLUSTRATED_MODE
+        && imageOperation?.type === 'images' && ['queued', 'running'].includes(imageOperation.status);
+      if (inFlight || (activeStreamRef.current && workflow?.workflow_id === workflowId && !isGeneratingIllustratedImages)) return;
+      inFlight = true;
       try {
         const json = await api.getCreativeWorkflow(workflowId);
         if (cancelled) return;
@@ -1206,6 +1211,8 @@ export function OneClickCreativePage() {
         }
         // 网络抖动/服务临时不可用：后台任务可能仍在运行，保持轮询，不误判为失败。
         setMessage('任务状态刷新失败，正在重试...');
+      } finally {
+        inFlight = false;
       }
     }
 
@@ -1215,7 +1222,8 @@ export function OneClickCreativePage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [status, workflowId, workflow?.workflow_id, persistTasks, stopTaskStream, subscribeTaskEvents]);
+  }, [status, workflowId, workflow?.workflow_id, workflow?.creationModeId, workflow?.illustrated?.operation?.type,
+    workflow?.illustrated?.operation?.status, persistTasks, stopTaskStream, subscribeTaskEvents]);
 
   useEffect(() => {
     const targetWorkflowId = String(workflow?.workflow_id || selectedWorkflowId || workflowId || '').trim();
