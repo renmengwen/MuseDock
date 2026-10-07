@@ -380,7 +380,10 @@ function unfinishedAttempts(media) {
 function fail(record, error, now) {
   const media = record.whiteboard.media;
   const unknown = error.code === 'UNKNOWN_EXTERNAL_OUTCOME';
-  const diagnosticFields = error.diagnostics ? { diagnostics: safeVisionDiagnostics(error.diagnostics) } : {};
+  const diagnosticFields = {
+    ...(error.diagnostics ? { diagnostics: safeVisionDiagnostics(error.diagnostics) } : {}),
+    ...(typeof error.evidenceCode === 'string' && /^[a-z_]{1,80}$/.test(error.evidenceCode) ? { evidenceCode: error.evidenceCode } : {}),
+  };
   for (const attempt of unfinishedAttempts(media)) Object.assign(attempt, { status: unknown ? 'unknown_external_outcome' : 'failed', errorCode: error.code, completedAt: now, ...diagnosticFields });
   if (media.sceneRenderProgress) media.sceneRenderProgress.active = 0;
   if (media.annotationProgress) media.annotationProgress.active = 0;

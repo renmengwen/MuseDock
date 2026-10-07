@@ -93,7 +93,11 @@ async function narrationStage(ctx, artifact) {
           kind: 'provider_subtitles', name: '同请求原生字级字幕', mime: 'application/json' };
         received = (await ctx.publish(item, files)).result;
       }
-      if (!result.success || !received?.raw || !received?.native) throw new WhiteboardError(result.code || 'UNKNOWN_EXTERNAL_OUTCOME', result.message || '语音没有返回完整的同请求音频与原生字幕证据。');
+      if (!result.success || !received?.raw || !received?.native) {
+        const error = new WhiteboardError(result.code || 'UNKNOWN_EXTERNAL_OUTCOME', result.message || '语音没有返回完整的同请求音频与原生字幕证据。');
+        if (result.evidenceCode) error.evidenceCode = result.evidenceCode;
+        throw error;
+      }
     }
     record = await ctx.read();
     const rawPath = await ctx.filePath(record, received.raw);

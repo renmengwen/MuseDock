@@ -2,7 +2,7 @@
 // Seed Audio prompt-only request and same-response native subtitle contract.
 // MuseDock owns configuration, attempts, publication and approvals.
 const crypto = require('crypto');
-const { recordedFetch, recordModelCall } = require('../diagnostics/apiCallRecorder');
+const { recordedFetch, recordModelCall, annotateApiCallResult } = require('../diagnostics/apiCallRecorder');
 
 const DOUBAO_ENDPOINT = 'https://openspeech.bytedance.com/api/v3/tts/create';
 const DOUBAO_MODEL = 'seed-audio-1.0';
@@ -65,7 +65,8 @@ function nativeSubtitleEvidence(payload, textPrompt) {
     if (!Array.isArray(sentence.words) || !sentence.words.length) fail('empty_words');
     previousSentence = start;
     const words = sentence.words.map(word => {
-      if (!word || typeof word !== 'object' || typeof word.text !== 'string' || !word.text.trim()) fail('invalid_word');
+      // 豆包会为英文间隔返回独立空格词条；保留原文与时间戳，仍拒绝空字符串。
+      if (!word || typeof word !== 'object' || typeof word.text !== 'string' || !word.text.length) fail('invalid_word');
       const wordStart = timestamp(word.start_time, 'invalid_word_timing');
       const wordEnd = timestamp(word.end_time, 'invalid_word_timing');
       if (wordEnd < wordStart || wordEnd > durationMs + 100 || wordStart < previousWord
@@ -142,10 +143,15 @@ async function callDoubaoTts(options) {
     return { success: true, status: 'done', message: '豆包完整旁白与原生字幕已生成。',
       audioBuffer, format: 'wav', voice: 'text-prompt-authored', model, nativeSubtitles };
   } catch (error) {
-    return failure('UNKNOWN_EXTERNAL_OUTCOME', '豆包已返回音频，但同请求字幕或时长证据无效。音频已保留，不能自动重新生成。',
-      { audioBuffer, evidenceCode: error.evidenceCode || 'native_evidence_invalid' });
+    const evidenceCode = error.evidenceCode || 'native_evidence_invalid';
+    return failure('UNKNOWN_EXTERNAL_OUTCOME', `豆包已返回音频，但同请求字幕或时长证据无效（校验原因：${evidenceCode}）。音频已保留，不能自动重新生成。`,
+      { audioBuffer, evidenceCode });
   }
 }
 
 module.exports = { DOUBAO_ENDPOINT, DOUBAO_MODEL, DEFAULT_VOICE_DIRECTION, normalizeDoubaoSettings, createTextPrompt, nativeSubtitleEvidence,
-  callDoubaoTts: options => recordModelCall(() => callDoubaoTts(options), { category: 'tts' }) };
+  callDoubaoTts: async options => {
+    const result = await recordModelCall(() => callDoubaoTts(options), { category: 'tts' });
+    if (result.evidenceCode) annotateApiCallResult(result, { validation: [`原生字幕校验失败：${result.evidenceCode}`] });
+    return result;
+  } };

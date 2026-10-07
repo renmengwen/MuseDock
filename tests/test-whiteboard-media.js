@@ -472,6 +472,8 @@ async function testSubtitleStyles(ctx) {
   assert.equal(unknown.code, 'UNKNOWN_EXTERNAL_OUTCOME');
   record = await ctx.read(second);
   assert.equal(record.status, 'unknown_external_outcome');
+  assert.equal(record.error.evidenceCode, 'missing_subtitle');
+  assert.equal(record.whiteboard.media.attempts.at(-1).evidenceCode, 'missing_subtitle');
   assert.ok(record.whiteboard.media.artifacts.some(item => item.kind === 'provider_audio'));
   const count = ctx.calls.tts;
   assert.equal((await ctx.action(second, 'retry_media')).success, false);
