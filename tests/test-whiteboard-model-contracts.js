@@ -5,6 +5,8 @@ const { generateDraft } = require('../server/services/creative/whiteboard/struct
 const { normalizeInput, normalizeProductionPlan, candidateContractFor, validateCandidate } = require('../server/services/creative/whiteboard/contracts');
 
 async function verifyDraftRequest(protocol) {
+  const isChat = protocol === 'openai-chat-completions';
+  const messageText = message => typeof message.content === 'string' ? message.content : message.content[0].text;
   const input = normalizeInput({ inputMode: 'text', rewritePolicy: 'preserve', content: '从一个具体的小动作开始。',
     visualStylePreset: 'whiteboard-handwritten-explainer-v1' });
   const contract = candidateContractFor(input);
@@ -17,9 +19,15 @@ async function verifyDraftRequest(protocol) {
     apiContext: { store: { start: () => null } },
     services: {
       aiModelConfig: { getRuntimeConfig: async () => ({ enabled: true, apiKey: 'fixture-key',
-        baseUrl: 'https://example.invalid/v1', modelId: 'gpt-5.6-sol', protocol, stream: false }) },
+        baseUrl: 'https://example.invalid/v1', modelId: isChat ? 'deepseek-flash' : 'gpt-5.6-sol', protocol, stream: false }) },
       fetchImpl: async (_url, init) => {
         const body = JSON.parse(init.body);
+        if (isChat) {
+          assert.equal(_url, 'https://example.invalid/v1/chat/completions');
+          assert.deepEqual(body.response_format, { type: 'json_object' });
+          assert.equal(body.max_tokens, 14000);
+          assert.equal(body.input, undefined);
+        }
         if (protocol === 'openai-responses') {
           assert.equal(body.text.format.type, 'json_schema');
           assert.equal(body.text.format.name, 'whiteboard_candidate');
@@ -34,8 +42,8 @@ async function verifyDraftRequest(protocol) {
           assert.equal(schema.properties.scenes.maxItems, undefined);
           assert.equal(schema.properties.cues.items.properties.id.pattern, undefined);
         } else assert.equal(body.text, undefined);
-        const messages = protocol === 'anthropic-messages' ? body.messages : body.input;
-        const payload = JSON.parse(messages[0].content[0].text);
+        const messages = protocol === 'openai-responses' ? body.input : body.messages;
+        const payload = JSON.parse(messageText(messages.find(message => message.role === 'user')));
         // 仅消费用户消息，模拟兼容网关忽略或覆盖 system/instructions。
         assert.deepEqual(payload.candidateSchema, contract.schema);
         assert.deepEqual(payload.candidateSkeleton, contract.skeleton);
@@ -45,13 +53,13 @@ async function verifyDraftRequest(protocol) {
         assert.equal(payload.input.content, input.content);
         let candidate = invalid;
         if (requests++) {
-          const repair = JSON.parse(messages.at(-1).content[0].text);
+          const repair = JSON.parse(messageText(messages.at(-1)));
           assert.deepEqual(repair.candidateSchema, contract.schema);
           assert.deepEqual(repair.candidateSkeleton, contract.skeleton);
           assert.deepEqual(repair.validationErrors, validateCandidate(invalid, input));
           assert.match(repair.instructions, /保留已经正确/);
           assert.match(repair.instructions, /完整 JSON 对象/);
-          assert.deepEqual(JSON.parse(messages.at(-2).content[0].text), invalid);
+          assert.deepEqual(JSON.parse(messageText(messages.at(-2))), invalid);
           candidate = { ...payload.candidateSkeleton, title: '从小动作开始',
             cues: [{ id: 'cue_1', text: payload.input.content }],
             scenes: [{ ...payload.candidateSkeleton.scenes[0], imageTexts: [] }] };
@@ -60,21 +68,23 @@ async function verifyDraftRequest(protocol) {
         const text = JSON.stringify(candidate);
         return new Response(JSON.stringify(protocol === 'anthropic-messages'
           ? { content: [{ type: 'text', text }], stop_reason: 'end_turn' }
-          : { output_text: text, status: 'completed', instructions: '通用助手提示词替身' }), { status: 200 });
+          : isChat ? { choices: [{ message: { role: 'assistant', content: text }, finish_reason: 'stop' }] }
+            : { output: [{ type: 'reasoning', content: [{ type: 'reasoning_text', text: '这是内部分析，不是方案。' }] },
+              { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] }], status: 'completed' }), { status: 200 });
       },
     },
   });
   assert.equal(requests, 2);
   assert.deepEqual(validateCandidate(result, input), []);
   assert.equal(result.cues[0].text, input.content);
-  if (protocol === 'openai-responses') {
+  if (protocol !== 'anthropic-messages') {
     let rejectedCalls = 0;
     await assert.rejects(generateDraft(task, { apiContext: { store: { start: () => null } }, services: {
       aiModelConfig: { getRuntimeConfig: async () => ({ enabled: true, apiKey: 'fixture-key',
         baseUrl: 'https://example.invalid/v1', modelId: 'gpt-5.6-sol', protocol }) },
       fetchImpl: async () => {
         rejectedCalls++;
-        return new Response(JSON.stringify({ error: { message: 'unsupported text.format' } }), { status: 400,
+        return new Response(JSON.stringify({ error: { message: isChat ? 'unsupported response_format' : 'unsupported text.format' } }), { status: 400,
           headers: { 'content-type': 'application/json' } });
       },
     } }), error => error.code === 'MODEL_FORMAT_REJECTED');
@@ -92,6 +102,7 @@ async function verifyDraftRequest(protocol) {
   assert.equal(body.temperature, undefined);
   assert.equal(body.text, undefined);
   await verifyDraftRequest('openai-responses');
+  await verifyDraftRequest('openai-chat-completions');
   await verifyDraftRequest('anthropic-messages');
   const imageConfig = { enabled: true, apiKey: 'fixture-key', baseUrl: 'https://example.invalid/v1', modelId: 'seedream-test' };
   const input = { artifact: { visualStyle: { displayName: '测试', description: '测试线稿' } }, scene: { imagePrompt: '两个独立图形' }, imageConfig };
@@ -104,5 +115,5 @@ async function verifyDraftRequest(protocol) {
   } } }), error => error.code === 'IMAGE_REQUEST_REJECTED');
   assert.equal(body.output_format, undefined); assert.equal(body.size, '2560x1440');
   await assert.rejects(generateLineart({ ...input, services: { fetchImpl: async () => { throw new Error('fixture timeout'); } } }), error => error.code === 'UNKNOWN_EXTERNAL_OUTCOME');
-  console.log('白板模型合同：两种协议的自包含方案请求与补正、Responses 推理预算、Seedream 参数与明确拒绝/未知结果区分通过。');
+  console.log('白板模型合同：三种协议的方案请求与补正、思考正文分离、格式拒绝不重发、Responses 推理预算及图片参数通过。');
 })().catch(error => { console.error(error); process.exitCode = 1; });

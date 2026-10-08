@@ -14,7 +14,7 @@ const MODEL_TYPE_LABELS = {
   tts: 'TTS 语音合成',
 };
 
-const MODEL_PROTOCOLS = ['openai-responses', 'anthropic-messages'];
+const MODEL_PROTOCOLS = ['openai-responses', 'openai-chat-completions', 'anthropic-messages'];
 const DEFAULT_MODEL_PROTOCOL = 'openai-responses';
 const DEFAULT_MINIMAX_VOICE_ID = 'Chinese_deep_voiced_male_nv1';
 const BUILTIN_FUNASR_REF = 'builtin/funasr';

@@ -129,7 +129,8 @@ async function draft(record, config, attempt, options = {}) {
   let response;
   try { response = await context(record, attempt, options, () => (options.services?.aiTextModel || textService).callTextModel({
     textConfig: config, messages, temperature:0.3, maxTokens:16000, maxOutputTokens:16000,
-    ...(config.protocol !== 'anthropic-messages' ? { response_format: PLAN_RESPONSE_FORMAT } : {}),
+    ...(config.protocol !== 'anthropic-messages' ? { response_format: config.protocol === 'openai-chat-completions'
+      ? { type: 'json_object' } : PLAN_RESPONSE_FORMAT } : {}),
     reasoningEffort: /^(gpt-(5|6)([.-]|$)|o[134])/i.test(config.modelId) ? 'low' : undefined,
     maxRetries:0, fallbackToNonStreamOnGatewayTimeout:false, requestTimeoutMs:180000, fetchImpl,
   })); } catch { throw classify(null, observed.status, true, '分析模型'); }

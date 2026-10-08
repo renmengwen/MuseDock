@@ -38,7 +38,7 @@ function ProviderDetail({ provider, modelTypes, modelTypeInfo, modelProtocols = 
   const p = provider;
   const setProtocol = (protocol) => {
     onUpdate('protocol', protocol);
-    if (!p.baseUrl) {
+    if (!p.baseUrl && protocol !== 'openai-chat-completions') {
       onUpdate('baseUrl', protocol === 'anthropic-messages' ? 'https://api.anthropic.com/v1' : 'https://api.openai.com/v1');
     }
   };
@@ -88,6 +88,11 @@ function ProviderDetail({ provider, modelTypes, modelTypeInfo, modelProtocols = 
         </label>
       </div>
       <p className="m-0 text-xs font-semibold text-[#69717e]">协议仅影响分析模型；ASR、TTS 等语音接口仍按各自供应商配置调用。</p>
+      {p.protocol === 'openai-chat-completions' && (
+        <p className="m-0 text-xs text-[#69717e]">
+          适用于 DeepSeek 等 Chat Completions 兼容服务。请填写服务商的 Base URL；白板与旁白配图方案使用 JSON 模式，并由应用校验方案内容。
+        </p>
+      )}
 
       <ProviderDiagnostics provider={p} />
 

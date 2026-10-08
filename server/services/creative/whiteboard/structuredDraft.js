@@ -105,7 +105,7 @@ async function generateDraft(task, { services = {}, previousArtifact, onRequest,
       response = await runWithApiCallContext({ ...apiContext, stage: 'content_plan', repair }, () => textModel.callTextModel({
         textConfig, messages, temperature: 0.3, maxTokens: 14000,
         maxOutputTokens: 14000,
-        ...(textConfig.protocol !== 'anthropic-messages' ? { response_format: {
+        ...(textConfig.protocol !== 'anthropic-messages' ? { response_format: textConfig.protocol === 'openai-chat-completions' ? { type: 'json_object' } : {
           type: 'json_schema', name: 'whiteboard_candidate', strict: true,
           schema: responseSchema(candidateFormat(task).candidateSchema),
         } } : {}),

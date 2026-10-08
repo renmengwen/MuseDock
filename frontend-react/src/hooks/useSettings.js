@@ -15,6 +15,7 @@ const MODEL_TYPE_INFO = {
 
 const MODEL_PROTOCOLS = [
   { id: 'openai-responses', label: 'OpenAI Responses（/v1/responses）' },
+  { id: 'openai-chat-completions', label: 'OpenAI Chat Completions（/v1/chat/completions）' },
   { id: 'anthropic-messages', label: 'Anthropic Messages（/v1/messages）' },
 ];
 

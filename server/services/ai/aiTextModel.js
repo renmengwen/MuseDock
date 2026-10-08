@@ -206,7 +206,13 @@ function extractOutputArrayText(output) {
   const parts = [];
   for (const item of output) {
     if (!item || typeof item !== 'object') continue;
-    const text = extractContentText(item.content);
+    // 思考块和工具结果不是正式答案；兼容未标注外层 type 的服务商。
+    if (item.type && item.type !== 'message') continue;
+    if (item.role && item.role !== 'assistant') continue;
+    const content = Array.isArray(item.content)
+      ? item.content.filter(block => typeof block === 'string' || (block && (!block.type || ['output_text', 'text'].includes(block.type))))
+      : item.content;
+    const text = extractContentText(content);
     if (typeof text === 'string') parts.push(text);
   }
   return parts.length ? parts.join('') : undefined;
@@ -215,6 +221,8 @@ function extractOutputArrayText(output) {
 function extractResponseText(rawResponse) {
   const chatText = extractContentText(rawResponse?.choices?.[0]?.message?.content);
   if (typeof chatText === 'string') return chatText;
+  const chatCalls = rawResponse?.choices?.[0]?.message?.tool_calls;
+  if (Array.isArray(chatCalls) && chatCalls.some(call => call?.function?.name)) return '';
   const outputText = extractContentText(rawResponse?.output_text);
   if (typeof outputText === 'string') return outputText;
   const contentText = extractContentText(rawResponse?.content);
@@ -470,6 +478,24 @@ function buildOpenAiResponsesBody({ modelId, messages, temperature, tools, tool_
   });
 }
 
+function buildChatCompletionsBody({ modelId, messages, temperature, tools, tool_choice, response_format, maxTokens, maxOutputTokens, reasoningEffort, stream }) {
+  const tokenLimit = Math.max(1, Number(maxOutputTokens ?? maxTokens) || 4096);
+  const format = response_format?.type === 'json_schema' && !response_format.json_schema
+    ? { type: 'json_schema', json_schema: { name: response_format.name, schema: response_format.schema, strict: response_format.strict } }
+    : response_format;
+  return JSON.stringify({
+    model: modelId,
+    messages,
+    ...(reasoningEffort
+      ? { reasoning_effort: reasoningEffort, max_completion_tokens: tokenLimit }
+      : { temperature, max_tokens: tokenLimit }),
+    ...(tools ? { tools } : {}),
+    ...(tool_choice ? { tool_choice } : {}),
+    ...(format ? { response_format: format } : {}),
+    ...(stream ? { stream: true } : {}),
+  });
+}
+
 function buildAnthropicMessagesBody({ modelId, messages, temperature, tools, response_format, maxTokens, stream }) {
   const mapped = toAnthropicMessages(messages, response_format);
   return JSON.stringify({
@@ -512,8 +538,10 @@ async function postModelRequest({ protocol, baseUrl, apiKey, modelId, messages, 
   const timeout = createTimeoutSignal(timeoutMs);
   const resolvedProtocol = normalizeProtocol(protocol);
   const isAnthropic = resolvedProtocol === 'anthropic-messages';
+  const isChat = resolvedProtocol === 'openai-chat-completions';
+  const endpoint = isAnthropic ? '/messages' : isChat ? '/chat/completions' : '/responses';
   try {
-    const response = await recordedFetch(fetchImpl, { category: 'text' })(`${baseUrl}${isAnthropic ? '/messages' : '/responses'}`, {
+    const response = await recordedFetch(fetchImpl, { category: 'text' })(`${baseUrl}${endpoint}`, {
       method: 'POST',
       headers: isAnthropic ? {
         'Content-Type': 'application/json',
@@ -525,7 +553,9 @@ async function postModelRequest({ protocol, baseUrl, apiKey, modelId, messages, 
       },
       body: isAnthropic
         ? buildAnthropicMessagesBody({ modelId, messages, temperature, tools, response_format, maxTokens, stream })
-        : buildOpenAiResponsesBody({ modelId, messages, temperature, tools, tool_choice, response_format, reasoningEffort, maxOutputTokens, stream }),
+        : isChat
+          ? buildChatCompletionsBody({ modelId, messages, temperature, tools, tool_choice, response_format, maxTokens, maxOutputTokens, reasoningEffort, stream })
+          : buildOpenAiResponsesBody({ modelId, messages, temperature, tools, tool_choice, response_format, reasoningEffort, maxOutputTokens, stream }),
       signal: timeout.signal,
     });
     if (response && typeof response === 'object') {
@@ -718,6 +748,8 @@ async function callTextModel(options = {}) {
         tool_choice,
         response_format,
         maxTokens,
+        reasoningEffort,
+        maxOutputTokens,
       });
     } catch (error) {
       const detail = sanitizeErrorDetail(error && error.message, apiKey) || '网络请求异常';
@@ -807,6 +839,8 @@ async function callTextModel(options = {}) {
             tool_choice,
             response_format,
             maxTokens,
+            reasoningEffort,
+            maxOutputTokens,
           });
           if (fallbackResponse.ok) {
             const parsedResponse = await readJsonResponse(fallbackResponse, apiKey);
@@ -923,6 +957,8 @@ async function callTextModel(options = {}) {
         tool_choice,
         response_format,
         maxTokens,
+        reasoningEffort,
+        maxOutputTokens,
       });
     } catch (error) {
       const detail = getFetchErrorDetail(error, apiKey) || '网络请求异常';

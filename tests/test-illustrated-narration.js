@@ -119,6 +119,31 @@ const tests=[
    assert.equal(requests,1);
    assert.equal((await ctx.read(id)).illustrated.plan.scenes.length,3);
  })],
+ ['Chat 方案使用 JSON 模式并保留本地方案校验',()=>fixture(async ctx=>{
+   ctx.current.text.protocol='openai-chat-completions';
+   ctx.current.text.modelId='deepseek-flash';
+   ctx.options.services.aiTextModel=noLogTextService;
+   let requests=0;
+   ctx.options.services.fetchImpl=async(url,init)=>{
+     requests++;
+     assert.equal(new URL(url).pathname,'/chat/completions');
+     const body=JSON.parse(init.body);
+     assert.deepEqual(body.response_format,{type:'json_object'});
+     assert.equal(body.max_tokens,16000);
+     assert.equal(body.text,undefined);
+     const input=JSON.parse(body.messages.find(item=>item.role==='user').content);
+     assert.equal(input.responseFormat,'JSON');
+     assert.equal(input.planSkeleton.scenes[0].id,'scene_1');
+     const candidate=requests===1?plan:{...plan,scenes:[]};
+     return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(candidate),reasoning_content:'内部分析'}}]}),{status:200});
+   };
+   const goodId=await ctx.create();
+   assert.equal((await workflow.run(goodId,ctx.options)).status,'waiting_approval');
+   const badId=await ctx.create();
+   assert.equal((await workflow.run(badId,ctx.options)).status,'failed');
+   assert.equal((await ctx.read(badId)).illustrated.lastError.code,'PLAN_INVALID');
+   assert.equal(requests,2);
+ })],
  ['不支持结构化参数时保留拒绝，不降级重复请求',()=>fixture(async ctx=>{
    ctx.current.text.protocol='openai-responses';
    ctx.options.services.aiTextModel=noLogTextService;

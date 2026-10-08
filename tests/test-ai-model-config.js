@@ -147,6 +147,19 @@ async function run() {
   assert.strictEqual(migProvider.models.tts.voiceId, 'Chinese_deep_voiced_male_nv1');
   assert.strictEqual(migrated.active.text?.includes('/text'), true);
 
+  const chatSaved = await aiModelConfig.saveConfig({
+    providers: { deepseek: { name: 'DeepSeek', protocol: 'openai-chat-completions',
+      apiKey: 'fixture-chat-key', baseUrl: 'https://api.example.invalid/v1',
+      models: { text: { enabled: true, modelId: 'deepseek-flash' } } } },
+    active: { text: 'deepseek/text' },
+  }, { configPath });
+  assert.strictEqual(chatSaved.providers.deepseek.protocol, 'openai-chat-completions');
+  const chatReloaded = await aiModelConfig.getPublicConfig({ configPath });
+  assert.strictEqual(chatReloaded.providers.deepseek.protocol, 'openai-chat-completions');
+  const chatRuntime = await aiModelConfig.getRuntimeConfig('text', { configPath });
+  assert.strictEqual(chatRuntime.protocol, 'openai-chat-completions');
+  assert.strictEqual(chatRuntime.modelId, 'deepseek-flash');
+
   // 内置 ASR 独立于供应商保存；旧客户端省略本地地址时也应保留已保存的地址。
   const builtinConfigPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'builtin-asr-config-')), 'ai-models.json');
   const builtinSaved = await aiModelConfig.saveConfig({

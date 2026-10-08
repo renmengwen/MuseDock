@@ -116,6 +116,11 @@ async function run() {
     const imageInput = () => dialog.getByRole('textbox', { name: '图片生成 ID', exact: true });
     const textInput = () => dialog.getByRole('textbox', { name: '分析模型 ID', exact: true });
     const copyButton = id => dialog.getByRole('button', { name: `复制模型ID ${id}`, exact: true });
+    const protocol = () => dialog.getByRole('combobox', { name: '分析模型协议', exact: true });
+    assert.equal(await protocol().inputValue(), 'openai-responses');
+    await protocol().selectOption('openai-chat-completions');
+    assert.equal(await dialog.getByText(/适用于 DeepSeek 等 Chat Completions/).count(), 1);
+    assert.equal(await dialog.getByLabel('Base URL', { exact: true }).inputValue(), 'https://api.example.invalid/v1');
     assert.equal(await dialog.getByLabel('API Key', { exact: true }).inputValue(), '');
     await probe().click();
     const busyProbe = dialog.getByRole('button', { name: '正在检测连通性...', exact: true });
@@ -218,6 +223,8 @@ async function run() {
     console.log('PASS 编辑连接配置与关闭弹窗取消请求，重新打开不显示过期结果');
 
     delayMs = 100;
+    assert.equal(await protocol().inputValue(), 'openai-responses', '取消编辑不应保存协议变化');
+    await protocol().selectOption('openai-chat-completions');
     await page.setViewportSize({ width: 390, height: 844 });
     await getModels().click(); await status('已获取 3 个模型').waitFor();
     await copyButton('fixture-text').click();
@@ -238,10 +245,19 @@ async function run() {
     assert.equal(saved.providers.fixture.models.image.modelId, '');
     assert.equal(saved.providers.fixture.models.image.enabled, false);
     assert.equal(saved.providers.fixture.apiKey, 'fixture-saved-key');
+    assert.equal(saved.providers.fixture.protocol, 'openai-chat-completions');
     assert.equal(saves, 1);
     console.log('PASS 窄屏复制布局，手动填写并显式保存，密钥及其他配置保留');
 
+    await page.reload();
+    await page.getByRole('button', { name: '编辑', exact: true }).click();
+    assert.equal(await protocol().inputValue(), 'openai-chat-completions', '刷新后必须回显已保存的 Chat 协议');
+    await dialog.getByRole('button', { name: '取消', exact: true }).click();
+    console.log('PASS Chat 协议可选择、检测、取消编辑、保存及刷新回显');
+
     await page.getByRole('button', { name: '添加供应商', exact: true }).click();
+    await protocol().selectOption('openai-chat-completions');
+    assert.equal(await dialog.getByLabel('Base URL', { exact: true }).inputValue(), '', 'Chat 服务需用户填写自己的 Base URL');
     await dialog.getByLabel('供应商名称', { exact: true }).fill('新增测试供应商');
     await dialog.getByLabel('Base URL', { exact: true }).fill('https://new.example.invalid/v1');
     await probe().click(); await status('请先填写 API Key').waitFor();
