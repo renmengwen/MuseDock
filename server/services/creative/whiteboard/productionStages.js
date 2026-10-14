@@ -498,15 +498,23 @@ async function finalStage(ctx, artifact, timing) {
   const subtitleStyle = subtitleStyleFor(artifact.productionPlan, artifact.aspectRatio);
   const native = media.current.full_narration.native;
   const evidence = artifact.productionPlan.burnSubtitles && native ? await store.readData(record, native, ctx.rootDir) : null;
-  const captions = buildDisplayCaptions(artifact, timing, subtitleStyle.fontSize, evidence);
+  // Keep the canonical narration/scene timeline unchanged so playback changes reuse source media.
+  const overlayOpening = timing.opening?.mode === 'image-montage' && artifact.productionPlan.openingPlaybackMode === 'overlay-body';
+  const presentationOffsetMs = overlayOpening ? timing.opening.endMs : 0;
+  const durationMs = timing.durationMs - presentationOffsetMs;
+  const captions = buildDisplayCaptions(artifact, timing, subtitleStyle.fontSize, evidence)
+    .map(cue => presentationOffsetMs ? { ...cue, startMs: cue.startMs - presentationOffsetMs, endMs: cue.endMs - presentationOffsetMs } : cue);
   const subtitleBinding = { subtitleStyle, captionLayoutVersion: CAPTION_LAYOUT_VERSION, captionsSha256: sha256(captions) };
   const openingImages = timing.opening ? timing.scenes.map(scene => ({ sceneId: scene.id, image: media.lineart[scene.id].image })) : [];
-  const openingIdentity = timing.opening ? { opening: { ...timing.opening, images: openingImages.map(({ sceneId, image }) => ({ sceneId, sha256: image.sha256 })) } } : {};
+  const openingIdentity = timing.opening ? { opening: { ...timing.opening,
+    ...(overlayOpening ? { playbackMode: 'overlay-body', overlayEndMs: Math.min(timing.opening.endMs, durationMs) } : {}),
+    images: openingImages.map(({ sceneId, image }) => ({ sceneId, sha256: image.sha256 })) } } : {};
   const item = await ctx.attempt('final_delivery', '', false, sha256({ scenes: media.current.scene_render.identity,
     narration: media.current.full_narration.identity, recipe: media.recipe, burnSubtitles: artifact.productionPlan.burnSubtitles, ...subtitleBinding, ...bgmBinding, ...openingIdentity }));
   const directory = store.workDirectory(ctx.workflowId, item.id, ctx.rootDir);
   const sceneFiles = [];
   let openingReceipt;
+  let openingOverlay;
   if (timing.opening) {
     await ctx.emitProgress?.({ type: 'stage_progress', stage: 'final_delivery', message: timing.opening.mode === 'image-montage'
       ? '正在制作图片汇总开头，快速切图并汇成图片墙...' : '正在制作提问开场，依次叠放全部成品图片...' });
@@ -514,17 +522,18 @@ async function finalStage(ctx, artifact, timing) {
     for (const entry of openingImages) images.push(await ctx.filePath(record, entry.image));
     const output = path.join(directory, 'opening.mp4');
     openingReceipt = await ctx.tools.renderOpening({ images, output, mode: timing.opening.mode, question: timing.opening.question, endMs: timing.opening.endMs }, ctx.runtime, ctx.processOptions);
-    sceneFiles.push(output);
+    if (overlayOpening) openingOverlay = { file: output, durationMs: Math.min(timing.opening.endMs, durationMs) };
+    else sceneFiles.push(output);
   }
   for (const scene of timing.scenes) sceneFiles.push(await ctx.filePath(record, media.scenes[scene.id].video));
   const audioFile = media.current.full_narration.audio ? await ctx.filePath(record, media.current.full_narration.audio) : null;
-  const validation = await ctx.tools.finalVideo({ sceneFiles, audioFile, audioOffsetMs: timing.audioOffsetMs || 0, bgm,
+  const validation = await ctx.tools.finalVideo({ sceneFiles, openingOverlay, audioFile, audioOffsetMs: overlayOpening ? 0 : timing.audioOffsetMs || 0, bgm,
     cues: timing.opening?.cueId ? captions.filter(cue => cue.sourceCueId !== timing.opening.cueId) : captions, subtitleStyle,
-    durationMs: timing.durationMs, directory, burnSubtitles: artifact.productionPlan.burnSubtitles }, ctx.runtime, ctx.processOptions);
+    durationMs, directory, burnSubtitles: artifact.productionPlan.burnSubtitles }, ctx.runtime, ctx.processOptions);
   const subtitles = path.join(directory, 'final.srt');
   await fsp.writeFile(subtitles, srtText(captions), { flag: 'wx' });
   const poster = path.join(directory, 'poster.png');
-  await ctx.tools.extractFrame(path.join(directory, 'final.mp4'), poster, Math.min(timing.durationMs - 100, captions[0].endMs - 50), ctx.runtime, ctx.processOptions);
+  await ctx.tools.extractFrame(path.join(directory, 'final.mp4'), poster, Math.min(durationMs - 100, captions[0].endMs - 50), ctx.runtime, ctx.processOptions);
   const receipt = await ctx.jsonFile(item, 'technical-validation.json', { ...validation, recipe: media.recipe, ...subtitleBinding, ...bgmBinding, ...openingIdentity,
     ...(openingReceipt ? { openingReceipt } : {}),
     narrationIdentity: media.current.full_narration.identity, sceneBundleIdentity: media.current.scene_render.identity });

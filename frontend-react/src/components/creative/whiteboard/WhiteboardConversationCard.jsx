@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { Check, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/button.jsx';
 import { ProductionPlanFields } from './WhiteboardInputFields.jsx';
-import { whiteboardCanvasLabel, subtitleStyleLabel, validateSubtitleSettings } from './whiteboardForm.js';
+import { whiteboardCanvasLabel, subtitleStyleLabel, validateSubtitleSettings, imageOpeningOverlaysBody, openingPlaybackLabel } from './whiteboardForm.js';
 import { QuestionOpeningFields } from '../shared/QuestionOpeningFields.jsx';
 import { openingFormValue, validateOpening, openingLabel } from '../shared/openingForm.js';
 
@@ -25,8 +25,9 @@ export function WhiteboardConversationCard({ interaction, active, artifact, disa
       </div>
       {interaction.summary ? <p className="m-0 text-xs leading-6 text-fg-3">{interaction.summary}</p> : null}
       {pending && plan && artifact ? <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-        <dt className="text-fg-3">制作规模</dt><dd className="m-0">{artifact.scenes.length} 幕正文 · 约 {Math.round(artifact.durationMs / 1000)} 秒{artifact.opening ? `，另加约 ${Math.ceil(artifact.opening.estimatedDurationMs / 1000)} 秒开场` : ''}</dd>
+        <dt className="text-fg-3">制作规模</dt><dd className="m-0">{artifact.scenes.length} 幕正文 · 约 {Math.round(artifact.durationMs / 1000)} 秒{artifact.opening ? imageOpeningOverlaysBody(artifact) ? '，开头最多覆盖正文前 3 秒，不额外增加时长' : `，另加约 ${Math.ceil(artifact.opening.estimatedDurationMs / 1000)} 秒开场` : ''}</dd>
         {artifact.opening ? <><dt className="text-fg-3">视频开头</dt><dd className="m-0 break-words">{openingLabel(artifact.opening)}{artifact.opening.question ? <span className="mt-1 block text-fg-3">{artifact.opening.question}</span> : null}</dd></> : null}
+        {artifact.opening?.mode === 'image-montage' ? <><dt className="text-fg-3">正文开始方式</dt><dd className="m-0">{openingPlaybackLabel(artifact)}</dd></> : null}
         <dt className="text-fg-3">视频画幅</dt><dd className="m-0">{whiteboardCanvasLabel(artifact.aspectRatio)} · {artifact.canvas?.width || 1920} × {artifact.canvas?.height || 1080}</dd>
         <dt className="text-fg-3">视觉模板</dt><dd className="m-0">{artifact.visualStyle.displayName}</dd>
         <dt className="text-fg-3">旁白</dt><dd className="m-0">{artifact.productionPlan.narrationMode === 'disabled' ? (artifact.timingKind === 'source_srt' ? '无旁白，使用 SRT 时间轴' : '无旁白，使用计划时间轴') : artifact.narrationService?.displayName || '未配置'}</dd>
@@ -35,7 +36,8 @@ export function WhiteboardConversationCard({ interaction, active, artifact, disa
         <dt className="text-fg-3">后续流程</dt><dd className="m-0">{artifact.productionPlan.agentApprovalEnabled ? '按授权自动推进，异常时暂停' : '逐阶段确认产物'}</dd>
       </dl> : null}
       {pending && editing && form ? <form className="grid gap-3 border-t border-line-1 pt-3" onSubmit={event => { event.preventDefault(); if (!validateSubtitleSettings(form) && !validateOpening(opening, { allowEmpty: false })) onUpdatePlan(form, opening); }}>
-        <QuestionOpeningFields value={opening} onChange={setOpening} disabled={disabled} allowEmpty={false} silent={form.narrationMode === 'disabled'} />
+        <QuestionOpeningFields value={opening} onChange={setOpening} disabled={disabled} allowEmpty={false} silent={form.narrationMode === 'disabled'}
+          playbackMode={form.openingPlaybackMode} onPlaybackModeChange={openingPlaybackMode => setForm({ ...form, openingPlaybackMode })} />
         <ProductionPlanFields value={form} aspectRatio={artifact.aspectRatio} onChange={setForm} disabled={disabled} />
         <div className="flex flex-wrap gap-2"><Button type="submit" size="sm" disabled={disabled || Boolean(validateSubtitleSettings(form)) || Boolean(validateOpening(opening, { allowEmpty: false }))}>{disabled ? '正在保存制作方案...' : '保存为新的待确认版本'}</Button><Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => setEditing(false)}>取消调整</Button></div>
       </form> : null}

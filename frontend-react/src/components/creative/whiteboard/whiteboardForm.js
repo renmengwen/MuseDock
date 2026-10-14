@@ -16,13 +16,21 @@ export function subtitleStyleLabel(plan, aspectRatio) {
   return `${style.color === '#FFFFFF' ? '白色' : style.color} · ${style.fontSize} px${plan?.subtitleFontSize == null ? '（默认）' : ''}`;
 }
 
+export function imageOpeningOverlaysBody(artifact) {
+  return artifact.opening?.mode === 'image-montage' && artifact.productionPlan?.openingPlaybackMode === 'overlay-body';
+}
+
+export function openingPlaybackLabel(artifact) {
+  return imageOpeningOverlaysBody(artifact) ? '从一开始绘制，开头覆盖在上层' : '开头结束后开始绘制';
+}
+
 export function createWhiteboardDraft() {
   return {
     inputMode: 'topic', contents: { topic: '', text: '', srt: '' }, rewritePolicy: 'preserve',
     targetDurationSeconds: 60, narrationLanguage: 'zh-CN', visualStylePreset: 'warm-paper-minimal-v1',
     aspectRatio: '16:9', opening: { mode: 'disabled', question: '' },
     productionPlan: { bgmMode: 'disabled', handDisplayMode: 'show', agentApprovalEnabled: false, imageGenerationMode: 'per_scene',
-      burnSubtitles: true, narrationMode: 'enabled', subtitleColor: '#FFFFFF', subtitleFontSize: null },
+      burnSubtitles: true, narrationMode: 'enabled', subtitleColor: '#FFFFFF', subtitleFontSize: null, openingPlaybackMode: 'before-body' },
   };
 }
 
@@ -35,6 +43,7 @@ export function validateWhiteboardDraft(draft) {
   if (subtitleError) return subtitleError;
   const openingError = validateOpening(draft.opening);
   if (openingError) return openingError;
+  if (!['before-body', 'overlay-body'].includes(draft.productionPlan.openingPlaybackMode ?? 'before-body')) return '请选择正文开始方式。';
   if (draft.inputMode !== 'srt') {
     const seconds = Number(draft.targetDurationSeconds);
     if (!Number.isInteger(seconds) || seconds < 15 || seconds > 600) return '目标时长需为 15–600 秒的整数。';

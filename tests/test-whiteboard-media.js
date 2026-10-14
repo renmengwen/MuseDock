@@ -12,7 +12,8 @@ const { sha256, canvasFor, subtitleStyleFor } = require('../server/services/crea
 
 const portrait = process.argv.includes('--portrait');
 const openingTest = process.argv.includes('--opening');
-const imageOpeningTest = process.argv.includes('--image-opening');
+const imageOverlayTest = process.argv.includes('--image-overlay');
+const imageOpeningTest = process.argv.includes('--image-opening') || imageOverlayTest;
 const aspectRatio = portrait ? '9:16' : '16:9';
 const canvas = canvasFor(aspectRatio);
 
@@ -303,7 +304,7 @@ async function testSubtitleStyles(ctx) {
   if (process.argv.includes('--subtitles')) return testSubtitleStyles(ctx);
   if (process.argv.includes('--silent')) return testSilentMedia(ctx);
   const id = await ctx.create(false, openingTest ? { input: { opening: { mode: 'question', question: '' } } }
-    : imageOpeningTest ? { input: { opening: { mode: 'image-montage' } } } : {});
+    : imageOpeningTest ? { input: { opening: { mode: 'image-montage' } }, productionPlan: { openingPlaybackMode: imageOverlayTest ? 'overlay-body' : 'before-body' } } : {});
   const start = await ctx.action(id, 'start_production');
   assert.equal(start.success, true, start.message);
   let oldPayload;
@@ -340,7 +341,7 @@ async function testSubtitleStyles(ctx) {
   assert.equal(record.status, 'done');
   assert.equal(ctx.calls.tts, 1); assert.equal(ctx.calls.image, 2);
   const final = record.whiteboard.media.current.final_delivery;
-  assert.equal(final.validation.frameCount, openingTest || imageOpeningTest ? 540 : 360); assert.equal(final.validation.audio, true);
+  assert.equal(final.validation.frameCount, (openingTest || imageOpeningTest) && !imageOverlayTest ? 540 : 360); assert.equal(final.validation.audio, true);
   assert.equal(record.whiteboard.media.approvals.length, 5);
   const file = await workflows.getWhiteboardMediaFile(id, final.video.id, ctx.options);
   assert.equal(file.success, true);
@@ -363,7 +364,34 @@ async function testSubtitleStyles(ctx) {
     assert.equal(receipt.openingReceipt.frameCount, 180);
     const openingFile = (await mediaStore.mediaFile(record, final.openingVideo, ctx.rootDir)).path;
     assert.equal((await mediaTools.probe(openingFile, ctx.runtime)).streams.length, 1);
-    console.log('PASS 图片汇总完整制作链路：180 帧无文字开头、全部图哈希、正文 TTS 一次、字幕顺延、540 帧成片；外部服务调用 0');
+    const narration = record.whiteboard.media.current.full_narration;
+    const timelineHash = narration.timeline.sha256;
+    for (const openingPlaybackMode of imageOverlayTest ? ['before-body', 'overlay-body'] : ['overlay-body', 'before-body']) {
+      const previousMedia = record.whiteboard.media;
+      const before = { ...ctx.calls };
+      assert.equal((await ctx.action(id, 'update_plan', { productionPlan: { openingPlaybackMode, agentApprovalEnabled: true } })).success, true);
+      assert.equal((await workflows.runCreativeWorkflow(id, ctx.options)).status, 'waiting_approval');
+      assert.equal((await ctx.action(id, 'approve_initial', { confirmed: true })).success, true);
+      assert.equal((await ctx.action(id, 'start_production')).success, true);
+      const result = await workflows.runCreativeWorkflow(id, ctx.options);
+      assert.equal(result.status, 'done', result.message);
+      record = await ctx.read(id);
+      const media = record.whiteboard.media;
+      const delivery = media.current.final_delivery;
+      const overlay = openingPlaybackMode === 'overlay-body';
+      assert.equal(delivery.validation.frameCount, overlay ? 360 : 540);
+      assert.equal(delivery.validation.durationMs, overlay ? 6000 : 9000);
+      assert.notEqual(delivery.inputIdentity, previousMedia.current.final_delivery.inputIdentity);
+      assert.equal(delivery.opening.playbackMode, overlay ? 'overlay-body' : undefined);
+      assert.equal(media.current.full_narration.audio.sha256, narration.audio.sha256);
+      assert.equal(media.current.full_narration.timeline.sha256, timelineHash);
+      for (const stage of mediaStore.STAGES.slice(0, -1)) assert.equal(media.current[stage.id].identity, previousMedia.current[stage.id].identity, `${stage.id} 应复用`);
+      for (const kind of ['tts', 'image', 'draft', 'annotation']) assert.equal(ctx.calls[kind], before[kind], `切换开始方式不能重复请求 ${kind}`);
+      assert.equal(media.reused.length, 7);
+      const srt = await mediaStore.mediaFile(record, delivery.subtitles, ctx.rootDir);
+      assert.match(await fs.readFile(srt.path, 'utf8'), overlay ? /00:00:00,100 -->/ : /00:00:03,100 -->/);
+    }
+    console.log(`PASS 图片汇总前置/叠加往返切换：540/360 帧、字幕时间正确、旁白/图片/编排/单幕全部复用；真实 provider 调用 0。产物目录：${ctx.root}`);
     return;
   }
   if (openingTest) {

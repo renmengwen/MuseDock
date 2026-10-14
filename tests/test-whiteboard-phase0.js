@@ -220,6 +220,15 @@ const cases = [
     assert.equal(original.opening.mode, 'image-montage');
     assert.equal(original.opening.question, undefined);
     assert.doesNotMatch(ctx.modelCalls[0].messages[0].content, /启用提问开场/);
+    assert.equal(original.productionPlan.openingPlaybackMode, 'before-body');
+    for (const openingPlaybackMode of ['overlay-body', 'before-body']) {
+      assert.equal((await ctx.action(id, 'update_plan', { productionPlan: { openingPlaybackMode } })).success, true);
+      const changed = await workflows.runCreativeWorkflow(id, ctx.options);
+      assert.equal(changed.whiteboard.current.artifact.productionPlan.openingPlaybackMode, openingPlaybackMode);
+      assert.deepEqual(changed.whiteboard.current.artifact.cues, original.cues);
+      assert.deepEqual(changed.whiteboard.current.artifact.opening, original.opening);
+    }
+    assert.equal((await ctx.action(id, 'update_plan', { productionPlan: { openingPlaybackMode: 'invalid' } })).code, 'INVALID_INPUT');
     await ctx.action(id, 'update_plan', { input: { opening: { mode: 'question', question: '怎样开始？' } } });
     let next = await workflows.runCreativeWorkflow(id, ctx.options);
     assert.equal(next.whiteboard.current.artifact.opening.question, '怎样开始？');

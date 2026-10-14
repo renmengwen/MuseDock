@@ -1,5 +1,5 @@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs.jsx';
-import { subtitleStyleLabel } from './whiteboardForm.js';
+import { subtitleStyleLabel, imageOpeningOverlaysBody, openingPlaybackLabel } from './whiteboardForm.js';
 import { openingLabel } from '../shared/openingForm.js';
 
 function timeLabel(ms) {
@@ -26,7 +26,7 @@ export function WhiteboardArtifact({ artifact }) {
           <span>{timingLabel}{artifact.opening ? '（正文）' : ''} · {timeLabel(artifact.durationMs)}</span>
           <span>· {artifact.narrationLanguage === 'zh-CN' ? '简体中文' : artifact.narrationLanguage === 'en-US' ? '英语（美国）' : '英语（英国）'}</span>
         </div>
-        {artifact.opening ? <div className="mb-5 rounded-md border border-line-1 bg-surface-2 p-4"><strong className="text-xs text-fg-2">{openingLabel(artifact.opening)} · 约 {Math.ceil(artifact.opening.estimatedDurationMs / 1000)} 秒</strong>{artifact.opening.question ? <p className="mb-0 mt-2 whitespace-pre-wrap break-words text-sm leading-7">{artifact.opening.question}</p> : null}<p className="mb-0 mt-2 text-xs text-fg-3">{artifact.opening.mode === 'image-montage' ? '全部成品图快速切换后汇成图片墙，不新增文字或开场配音，再进入下方正文。' : '依次展示全部成品图，提问完成后进入下方正文。'}</p></div> : null}
+        {artifact.opening ? <div className="mb-5 rounded-md border border-line-1 bg-surface-2 p-4"><strong className="text-xs text-fg-2">{openingLabel(artifact.opening)} · 约 {Math.ceil(artifact.opening.estimatedDurationMs / 1000)} 秒</strong>{artifact.opening.question ? <p className="mb-0 mt-2 whitespace-pre-wrap break-words text-sm leading-7">{artifact.opening.question}</p> : null}<p className="mb-0 mt-2 text-xs text-fg-3">{artifact.opening.mode === 'image-montage' ? imageOpeningOverlaysBody(artifact) ? `全部成品图快速切换后汇成图片墙。正文绘制${silent ? '' : '与旁白'}从第 0 秒开始，开头结束后露出当时进度；开启的正文字幕显示在开头上方。` : '全部成品图快速切换后汇成图片墙，不新增文字或开场配音，再进入下方正文。' : '依次展示全部成品图，提问完成后进入下方正文。'}</p></div> : null}
         <div className="whitespace-pre-wrap break-words text-sm leading-8 text-fg-1">{artifact.opening ? artifact.cues.map(cue => cue.text).join('\n') : artifact.narrationText}</div>
         <p className="mt-5 border-t border-line-1 pt-3 text-xs leading-relaxed text-fg-3">{silent ? '这里的正文用于字幕与画面叙事。制作时跳过语音生成，请在产物区检查字幕与分镜时长。' : '这里保留已确认的旁白正文。首次音频制作直接生成完整旁白，实际时长与字幕请在产物区检查。'}</p>
       </TabsContent>
@@ -49,6 +49,7 @@ export function WhiteboardArtifact({ artifact }) {
       <TabsContent value="production">
         <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-5 gap-y-4 text-sm">
           <dt className="text-fg-3">视频开头</dt><dd className="m-0">{openingLabel(artifact.opening)}</dd>
+          {artifact.opening?.mode === 'image-montage' ? <><dt className="text-fg-3">正文开始方式</dt><dd className="m-0">{openingPlaybackLabel(artifact)}</dd></> : null}
           <dt className="text-fg-3">视觉模板</dt><dd className="m-0 text-fg-1">{artifact.visualStyle.displayName}<p className="mb-0 mt-1 text-xs leading-6 text-fg-3">{artifact.visualStyle.description}</p></dd>
           <dt className="text-fg-3">画笔</dt><dd className="m-0">{plan.handDisplayMode === 'show' ? '显示画笔' : '隐藏画笔'}</dd>
           <dt className="text-fg-3">成片字幕</dt><dd className="m-0">{plan.burnSubtitles ? `单行短句 · ${subtitleStyleLabel(plan, artifact.aspectRatio)}` : '不烧录字幕'}</dd>

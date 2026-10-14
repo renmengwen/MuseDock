@@ -237,7 +237,7 @@ async function act(record, payload, options, now) {
     const silent = artifact.productionPlan.narrationMode === 'disabled';
     if (silent) buildSilentTiming(artifact, { fontSize: subtitleStyleFor(artifact.productionPlan, artifact.aspectRatio).fontSize });
     const tools = options.services?.whiteboardMediaTools || mediaTools;
-    const runtime = await tools.preflight({ ...options.mediaOptions, opening: artifact.opening, aspectRatio: artifact.aspectRatio || '16:9', bgmMode: artifact.productionPlan.bgmMode, visualStyle: artifact.visualStyle });
+    const runtime = await tools.preflight({ ...options.mediaOptions, opening: artifact.opening, openingPlaybackMode: artifact.productionPlan.openingPlaybackMode, aspectRatio: artifact.aspectRatio || '16:9', bgmMode: artifact.productionPlan.bgmMode, visualStyle: artifact.visualStyle });
     const { service, runtime: voice, legacyContractHash } = await voiceSnapshot(options.services);
     if (!silent) {
       if (!service.configured || !['doubao', 'minimax'].includes(voice.provider)) throw new WhiteboardError('TTS_NOT_CONFIGURED', '完整白板旁白需要豆包 Seed Audio 或 MiniMax 原生字幕。请在设置中配置 TTS，再调整制作设置并重新确认方案。');
@@ -448,7 +448,7 @@ async function run(workflowId, options, hooks) {
       } catch { /* The next guarded write handles deletion. */ }
     }, 15000);
     const initialArtifact = await requirePlan(await read(), options);
-    const runtime = await tools.preflight({ ...processOptions, opening: initialArtifact.opening, aspectRatio: initialArtifact.aspectRatio || '16:9', bgmMode: initialArtifact.productionPlan.bgmMode, visualStyle: initialArtifact.visualStyle });
+    const runtime = await tools.preflight({ ...processOptions, opening: initialArtifact.opening, openingPlaybackMode: initialArtifact.productionPlan.openingPlaybackMode, aspectRatio: initialArtifact.aspectRatio || '16:9', bgmMode: initialArtifact.productionPlan.bgmMode, visualStyle: initialArtifact.visualStyle });
     const config = await services.aiModelConfig.getRuntimeConfig('text');
     const voice = await voiceSnapshot(services);
     await ensureWhiteboardConcurrency(() => (services.appSettings?.getWhiteboardSettings ? services.appSettings : appSettings)

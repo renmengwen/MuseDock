@@ -360,7 +360,8 @@ export function WhiteboardTaskDetail({ workflow, message, deletingWorkflowId, on
       <Dialog open={planOpen} onOpenChange={open => { if (!busy) setPlanOpen(open); }}>
         <DialogContent className="max-h-[calc(100dvh-32px)] w-[min(480px,calc(100vw-32px))] overflow-y-auto max-[760px]:[&_button]:min-h-11" showCloseButton={!busy}>
           <DialogHeader><DialogTitle>调整制作方案</DialogTitle><DialogDescription>保留正文和分镜，生成新的待确认版本。</DialogDescription></DialogHeader>
-          <QuestionOpeningFields value={editedOpening} onChange={setEditedOpening} disabled={locked} allowEmpty={false} silent={editedPlan?.narrationMode === 'disabled'} />
+          <QuestionOpeningFields value={editedOpening} onChange={setEditedOpening} disabled={locked} allowEmpty={false} silent={editedPlan?.narrationMode === 'disabled'}
+            playbackMode={editedPlan?.openingPlaybackMode} onPlaybackModeChange={openingPlaybackMode => setEditedPlan({ ...editedPlan, openingPlaybackMode })} />
           {editedPlan ? <ProductionPlanFields value={editedPlan} aspectRatio={aspectRatio} onChange={setEditedPlan} disabled={locked} /> : null}
           {error ? <p className="m-0 text-sm text-danger" role="alert">{error}</p> : null}
           <Button type="button" disabled={locked || !editedPlan || Boolean(validateSubtitleSettings(editedPlan)) || Boolean(validateOpening(editedOpening, { allowEmpty: false }))} onClick={() => act('update_plan', { productionPlan: editedPlan, input: { opening: editedOpening } })}>{busy ? <Loader2 size={15} className="animate-spin" /> : null}{busy ? '正在保存制作方案...' : '保存为新的待确认版本'}</Button>

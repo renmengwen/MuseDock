@@ -159,6 +159,9 @@ async function preflight(options = {}) {
   if (results[3].status === 'rejected') throw new WhiteboardError('MEDIA_FONT_MISSING', '字幕字体不可用，请配置 MUSEDOCK_WHITEBOARD_FONT 为可用的中文字体文件。');
   for (const result of results) if (result.status === 'rejected') throw result.reason;
   if (options.opening?.mode === 'image-montage') {
+    if (options.openingPlaybackMode === 'overlay-body' && !/\boverlay\s/.test(results[1].value.stdout)) {
+      throw new WhiteboardError('MEDIA_RUNTIME_MISSING', '当前 ffmpeg 缺少开头叠加滤镜，请安装完整版 ffmpeg 后重试。');
+    }
     if (['adelay', 'apad', 'atrim'].some(filter => !new RegExp(`\\b${filter}\\s`).test(results[1].value.stdout))) {
       throw new WhiteboardError('MEDIA_RUNTIME_MISSING', '当前 ffmpeg 缺少正文音频延迟滤镜，请安装完整版 ffmpeg 后重试。');
     }
@@ -236,7 +239,7 @@ async function renderScene({ image, annotation, output, scene, showHand }, runti
   return { ...validation, encoderThreads: rendered.encoderThreads, renderElapsedMs: rendered.renderElapsedMs };
 }
 
-async function finalVideo({ sceneFiles, audioFile, audioOffsetMs = 0, cues, durationMs, directory, burnSubtitles, subtitleStyle, bgm = null }, runtime, options = {}) {
+async function finalVideo({ sceneFiles, openingOverlay = null, audioFile, audioOffsetMs = 0, cues, durationMs, directory, burnSubtitles, subtitleStyle, bgm = null }, runtime, options = {}) {
   if (!Number.isSafeInteger(audioOffsetMs) || audioOffsetMs < 0 || audioOffsetMs >= durationMs) throw new WhiteboardError('TIMELINE_INVALID', '正文音频起始时间无效。');
   const voiceDelay = audioOffsetMs ? `,adelay=${audioOffsetMs},apad,atrim=duration=${durationMs / 1000}` : '';
   const frameCount = Math.ceil(durationMs * 60 / 1000);
@@ -260,11 +263,25 @@ async function finalVideo({ sceneFiles, audioFile, audioOffsetMs = 0, cues, dura
   await execute(runtime.ffmpeg, ['-v', 'error', '-n', '-f', 'concat', '-safe', '1', '-i', 'concat.txt', '-map', '0:v:0', '-an', '-c:v', 'copy', '-movflags', '+faststart', 'clean.mp4'], cwdOptions);
   await validateVideo(path.join(directory, 'clean.mp4'), { frameCount, canvas }, runtime, options);
   let videoName = 'clean.mp4';
+  if (openingOverlay) {
+    if (!Number.isSafeInteger(openingOverlay.durationMs) || openingOverlay.durationMs <= 0 || openingOverlay.durationMs > durationMs) {
+      throw new WhiteboardError('TIMELINE_INVALID', '开头覆盖时长无效，请重新确认制作设置。');
+    }
+    await fsp.copyFile(openingOverlay.file, path.join(directory, 'overlay-source.mp4'), fs.constants.COPYFILE_EXCL);
+    const overlayFrames = Math.ceil(openingOverlay.durationMs * 60 / 1000);
+    // Frame gating and eof_action prevent the final opening frame from hiding the body forever.
+    await execute(runtime.ffmpeg, ['-v', 'error', '-n', '-i', 'clean.mp4', '-i', 'overlay-source.mp4',
+      '-filter_complex', `[0:v]setpts=PTS-STARTPTS[body];[1:v]setpts=PTS-STARTPTS[opening];[body][opening]overlay=eof_action=pass:repeatlast=0:enable='lt(n,${overlayFrames})'[video]`,
+      '-map', '[video]', '-an', '-frames:v', String(frameCount), '-c:v', 'libx264', '-preset', 'fast',
+      '-threads', String(runtime.encoderThreads || 2), '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', 'overlaid.mp4'], cwdOptions);
+    videoName = 'overlaid.mp4';
+    await validateVideo(path.join(directory, videoName), { frameCount, canvas }, runtime, options);
+  }
   if (burnSubtitles) {
     await fsp.mkdir(path.join(directory, 'fonts'));
     await fsp.copyFile(runtime.font, path.join(directory, 'fonts/caption.ttc'), fs.constants.COPYFILE_EXCL);
     await python('subtitles', { font: runtime.font, cues, canvas, subtitleStyle, output: path.join(directory, 'captions.ass') }, options);
-    await execute(runtime.ffmpeg, ['-v', 'error', '-n', '-i', 'clean.mp4', '-map', '0:v:0', '-an', '-vf', 'ass=captions.ass:fontsdir=fonts',
+    await execute(runtime.ffmpeg, ['-v', 'error', '-n', '-i', videoName, '-map', '0:v:0', '-an', '-vf', 'ass=captions.ass:fontsdir=fonts',
       '-c:v', 'libx264', '-preset', 'fast', '-threads', String(runtime.encoderThreads || 2), '-crf', '18', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', 'captioned.mp4'], cwdOptions);
     videoName = 'captioned.mp4';
     await validateVideo(path.join(directory, videoName), { frameCount, canvas }, runtime, options);
